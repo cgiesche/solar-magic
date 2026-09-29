@@ -163,7 +163,20 @@ export class LevelView {
         ctx.fillText(`Exit → ${ex.secondary ? 'Sek. ' : ''}${hex3(ex.dest)}`, x + 20 / app.zoom, y + 12 / app.zoom);
       }
     }
-    // entrance marker
+    // entrance marker (Mario's start position after the emulated level load)
+    {
+      const w = app.render.wram;
+      const mx = w[0x94] | (w[0x95] << 8), my = w[0x96] | (w[0x97] << 8);
+      if (mx < im.width && my < im.height + 32) {
+        ctx.fillStyle = 'rgba(255,40,40,0.85)';
+        ctx.beginPath();
+        ctx.arc(mx + 8, my + 16, 6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.font = `bold 9px sans-serif`;
+        ctx.fillText('M', mx + 4.5, my + 19.5);
+      }
+    }
     // sprites
     if (app.show.sprites) this.paintSprites(ctx, z);
     // selection

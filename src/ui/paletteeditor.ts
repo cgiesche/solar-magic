@@ -6,6 +6,7 @@ import { h, modal, clear, toast, downloadBytes, pickFile } from './dom.ts';
 import { snesColorToRGBA } from '../core/gfx.ts';
 import { pcToSnes } from '../core/rom.ts';
 import { hex } from '../core/names.ts';
+import { customPalette, setCustomPalette } from '../core/patches.ts';
 
 function rgbOf(c: number): [number, number, number] {
   return [c & 31, (c >> 5) & 31, (c >> 10) & 31];
@@ -18,13 +19,15 @@ function cssOf(c: number): string {
 export function openPaletteEditor(app: App): void {
   let r = app.emu.load(app.level.number, { ...app.buildOverrides(), trackSources: true });
   const backAreaAddr = 0x00b0a0 + app.level.header.backAreaColor * 2;
+  let custom = customPalette(app.rom, app.level.number);
   const src = (i: number): number => {
+    if (custom) return custom + i * 2;
     if (i === 0) return backAreaAddr;
     const a = r.cgramSrc[i * 2], b = r.cgramSrc[i * 2 + 1];
     if (a >= 0 && b === a + 1) return pcToSnes(a);
     return -1;
   };
-  const color = (i: number) => (i === 0 ? app.rom.r16(backAreaAddr) : r.cgram[i * 2] | (r.cgram[i * 2 + 1] << 8));
+  const color = (i: number) => (custom ? app.rom.r16(custom + i * 2) : i === 0 ? app.rom.r16(backAreaAddr) : r.cgram[i * 2] | (r.cgram[i * 2 + 1] << 8));
   let sel = 1;
   const grid = h('div', { class: 'pal-edit-grid' });
   const detail = h('div', { class: 'pal-detail' });
@@ -69,7 +72,28 @@ export function openPaletteEditor(app: App): void {
       h('div', { class: 'prop' }, h('label', null, 'SNES-Wert'), h('span', { class: 'mono' }, `$${hex(c, 4)}`)),
       h('div', { class: 'prop' }, h('label', null, 'ROM-Adresse'), h('span', { class: 'mono' }, addr >= 0 ? `$${hex(addr, 6)}` : '– (nicht editierbar)')),
       ...(addr >= 0 ? [...sliders, h('div', { class: 'prop' }, h('label', null, 'Farbwähler'), picker)] : []),
-      h('p', { class: 'hint' }, 'Paletten sind in SMW zwischen Levels geteilt (über FG-/BG-/Sprite-Palettennummer im Header). Änderungen wirken auf alle Levels, die diese Palette benutzen. Graue Kästchen: Farben ohne feste ROM-Quelle (z. B. Statusleiste, dynamisch).'),
+      (() => {
+        const cb = h('input', { type: 'checkbox', checked: custom !== 0 });
+        cb.addEventListener('change', () => {
+          try {
+            if (cb.checked) {
+              const pal = new Uint8Array(512);
+              for (let i = 0; i < 256; i++) { const v = color(i); pal[i * 2] = v & 0xff; pal[i * 2 + 1] = v >> 8; }
+              custom = setCustomPalette(app.rom, app.level.number, pal);
+            } else {
+              setCustomPalette(app.rom, app.level.number, null);
+              custom = 0;
+            }
+            app.emu.syncRom();
+            r = app.emu.load(app.level.number, { ...app.buildOverrides(), trackSources: true });
+            app.refresh();
+            app.palettesChanged();
+            build();
+          } catch (e) { toast(String(e), 'error'); }
+        });
+        return h('label', { class: 'toggle' }, cb, ' Eigene Palette für dieses Level (alle 256 Farben editierbar)');
+      })(),
+      h('p', { class: 'hint' }, custom ? 'Dieses Level nutzt eine eigene Palette (Editor-Patch). Mario-Farben (Zeile 8, 6–F) und animierte Farben überschreibt das Spiel laufend.' : 'Paletten sind in SMW zwischen Levels geteilt (über FG-/BG-/Sprite-Palettennummer im Header). Änderungen wirken auf alle Levels, die diese Palette benutzen. Graue Kästchen: Farben ohne feste ROM-Quelle (z. B. Statusleiste, dynamisch).'),
     );
   };
 

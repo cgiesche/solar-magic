@@ -17,7 +17,7 @@ input.hex { font-family: ui-monospace, monospace; width: 5.5em; text-transform: 
 input:focus, select:focus { outline: 1px solid var(--accent); }
 .hint { color: var(--muted); font-size: 12px; }
 .welcome { max-width: 560px; margin: 12vh auto; text-align: center; padding: 30px; border: 2px dashed var(--border); border-radius: 12px; }
-.layout { display: grid; height: 100%; grid-template-columns: 150px 1fr 330px; grid-template-rows: auto 1fr; }
+.layout { display: grid; height: 100%; grid-template-columns: 190px 1fr 330px; grid-template-rows: auto 1fr; }
 .toolbar { grid-column: 1 / 4; display: flex; align-items: center; gap: 6px; padding: 6px 8px; background: var(--panel); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
 .toolbar .brand { font-weight: 700; color: var(--accent); margin-right: 6px; }
 .toolbar .sep { width: 1px; height: 22px; background: var(--border); margin: 0 4px; }
@@ -121,3 +121,6 @@ kbd { background: #181a1f; border: 1px solid var(--border); border-radius: 3px; 
 .ow-pal-scroll { max-height: 55vh; overflow-y: auto; }
 .ow-info { border: 1px solid var(--border); border-radius: 6px; padding: 6px; display: flex; flex-direction: column; gap: 5px; }
 .ow-info select { max-width: 190px; }
+.level-item { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.level-item .lname { font-family: system-ui, sans-serif; font-size: 11px; color: var(--muted); }
+.level-item.current .lname { color: #dfefff; }

@@ -5,10 +5,16 @@ import { h, clear, hexInput } from './dom.ts';
 import { objectName, spriteName, hex2, hex3 } from '../core/names.ts';
 import { renderObjectThumbs, objKey, type ObjSpec } from './thumbs.ts';
 import { newUid } from '../core/level.ts';
+import { levelName } from '../core/overworld.ts';
 import { DM16_EXT } from '../core/patches.ts';
 import { TileCache, map16Source, drawMap16 } from '../core/render.ts';
 
 // ---------------- level list ----------------
+function nameOf(app: App, i: number): string {
+  const tl = i < 0x25 ? i : i >= 0x101 && i < 0x13c ? i - 0xdc : -1;
+  return tl > 0 ? levelName(app.rom, tl) : '';
+}
+
 export class LevelList {
   app: App;
   root: HTMLDivElement;
@@ -42,9 +48,10 @@ export class LevelList {
     for (let i = 0; i < 0x200; i++) {
       if (this.onlyUsed.checked && !used.has(i)) continue;
       const label = hex3(i);
-      if (f && !label.toLowerCase().includes(f)) continue;
+      if (f && !label.toLowerCase().includes(f) && !nameOf(this.app, i).toLowerCase().includes(f)) continue;
       const cur = this.app.level?.number === i;
-      const el = h('div', { class: `level-item${cur ? ' current' : ''}${used.has(i) ? '' : ' unused'}`, onclick: () => this.app.openLevel(i) }, label);
+      const name = nameOf(this.app, i);
+      const el = h('div', { class: `level-item${cur ? ' current' : ''}${used.has(i) ? '' : ' unused'}`, title: name, onclick: () => this.app.openLevel(i) }, label, name ? h('span', { class: 'lname' }, ' ' + name) : '');
       this.list.appendChild(el);
       if (cur) setTimeout(() => el.scrollIntoView({ block: 'nearest' }), 0);
     }

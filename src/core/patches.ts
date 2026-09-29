@@ -289,3 +289,75 @@ export function defaultGfx(rom: Rom, tileset: number, spriteSet: number): number
   for (let x = 0; x < 4; x++) out.push(rom.r8(0x00a92b + tileset * 4 + (3 - x)));
   return out;
 }
+
+// ---------------------------------------------------------------------------
+// Custom palettes per level ("SMWP"): hook at $00922F (palette upload during level
+// load, GM $12). If the level has a palette pointer, colors 1-255 are copied to the
+// palette buffer $0703 and color 0 becomes the back area color ($0701).
+const PAL_HOOK = 0x00922f;
+const PAL_MAGIC = [0x53, 0x4d, 0x57, 0x50]; // "SMWP"
+
+export function customPalettePatch(rom: Rom): { base: number; table: number } | null {
+  if (rom.r8(PAL_HOOK) !== 0x22) return null;
+  const base = rom.r24(PAL_HOOK + 1) - 8;
+  for (let i = 0; i < 4; i++) if (rom.r8(base + i) !== PAL_MAGIC[i]) return null;
+  return { base, table: rom.r24(base + 4) };
+}
+
+export function installCustomPalettePatch(rom: Rom): { base: number; table: number } {
+  const ex = customPalettePatch(rom);
+  if (ex) return ex;
+  installEditorPatch(rom); // needs the level number in $010B
+  if (rom.r8(PAL_HOOK) !== 0x9c || rom.r16(PAL_HOOK + 1) !== 0x0703) throw new Error('Unerwarteter Code bei $00922F – Paletten-Patch nicht möglich');
+  const a = new Asm();
+  a.b(...PAL_MAGIC); a.fill(4); // +4: table pointer
+  a.label('Pal');
+  a.b(0x08, 0xc2, 0x30, 0x48, 0xda, 0x5a); // PHP REP#$30 PHA PHX PHY
+  a.b(0xaf, 0x00, 0x01, 0x7e, 0x29, 0xff, 0x00, 0xc9, 0x12, 0x00); // LDA.l $7E0100 AND #$FF CMP #$12
+  a.br(0xd0, 'out');
+  a.b(0xaf, 0x0b, 0x01, 0x7e, 0x0a, 0x18, 0x6f, 0x0b, 0x01, 0x7e, 0xaa); // LDA.l $7E010B ASL CLC ADC.l $7E010B TAX (X = level*3)
+  a.b(0xe2, 0x20); // SEP #$20
+  a.long(0xbf, 'PalTblBank'); // LDA.l bank,x
+  a.br(0xf0, 'out');
+  a.b(0x48); // PHA (bank)
+  a.b(0xc2, 0x20, 0xa4, 0x00, 0x5a, 0xa4, 0x02, 0x5a); // REP#$20 LDY $00 PHY LDY $02 PHY
+  a.long(0xbf, 'PalTbl'); a.b(0x85, 0x00); // LDA.l tbl,x STA $00
+  a.b(0xe2, 0x20, 0xa3, 0x05, 0x85, 0x02, 0xc2, 0x20); // SEP#$20 LDA 5,S STA $02 REP#$20
+  a.b(0xa0, 0x02, 0x00); // LDY #$0002
+  a.label('lp');
+  a.b(0xb7, 0x00, 0xbb, 0x9f, 0x03, 0x07, 0x7e); // LDA [$00],y TYX STA.l $7E0703,x
+  a.b(0xc8, 0xc8, 0xc0, 0x00, 0x02); // INY INY CPY #$0200
+  a.br(0xd0, 'lp');
+  a.b(0xa7, 0x00, 0x8f, 0x01, 0x07, 0x7e); // LDA [$00] STA.l $7E0701
+  a.b(0x7a, 0x84, 0x02, 0x7a, 0x84, 0x00); // PLY STY $02 PLY STY $00
+  a.b(0xe2, 0x20, 0x68); // SEP#$20 PLA
+  a.label('out');
+  a.b(0xc2, 0x30, 0xa9, 0x00, 0x00, 0x8f, 0x03, 0x07, 0x7e); // REP#$30 LDA #0 STA.l $7E0703 (original STZ $0703/$0704)
+  a.b(0x7a, 0xfa, 0x68, 0x28, 0x6b); // PLY PLX PLA PLP RTL
+  a.label('PalTbl');
+  a.fill(2);
+  a.label('PalTblBank');
+  a.fill(512 * 3 - 2);
+  const addr = rom.allocWrite(new Uint8Array(a.bytes.length));
+  // PalTblBank is PalTbl+2 so that LDA.l PalTblBank,x reads the bank byte of entry x/3
+  const code = a.link(addr);
+  rom.writeBytes(addr, code);
+  rom.w24(addr + 4, a.addrOf('PalTbl', addr));
+  rom.writeBytes(PAL_HOOK, Uint8Array.from([0x22, ...[0, 8, 16].map((s) => ((a.addrOf('Pal', addr)) >> s) & 0xff), 0xea, 0xea]));
+  return customPalettePatch(rom)!;
+}
+
+export function customPalette(rom: Rom, level: number): number {
+  const p = customPalettePatch(rom);
+  if (!p) return 0;
+  return rom.r24(p.table + level * 3);
+}
+export function setCustomPalette(rom: Rom, level: number, colors: Uint8Array | null): number {
+  const p = installCustomPalettePatch(rom);
+  const old = rom.r24(p.table + level * 3);
+  if (old) rom.freeAt(old);
+  if (!colors) { rom.w24(p.table + level * 3, 0); return 0; }
+  const addr = rom.allocWrite(colors);
+  rom.w24(p.table + level * 3, addr);
+  return addr;
+}
