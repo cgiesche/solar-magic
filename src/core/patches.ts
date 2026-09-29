@@ -364,3 +364,54 @@ export function setCustomPalette(rom: Rom, level: number, colors: Uint8Array | n
   rom.w24(p.table + level * 3, addr);
   return addr;
 }
+
+// ---------------------------------------------------------------------------
+// Level BG tilemaps in any bank ("SMWB"): hook at $058060 (LDA #$0C : STA $6A, the bank of
+// BG tilemap data) reads the bank from a per-level table, 0 = vanilla bank $0C.
+// Edited tilemaps are stored as RLE of 0x800 bytes (low bytes $7EB900-$7EBCFF, high bytes
+// $7EBD00-$7EC0FF) so each tile may use either BG Map16 page.
+export const BG_HOOK = 0x058060;
+const BG_MAGIC = [0x53, 0x4d, 0x57, 0x42]; // "SMWB"
+
+export function bgPatch(rom: Rom): { table: number } | null {
+  if (rom.r8(BG_HOOK) !== 0x22) return null;
+  const base = rom.r24(BG_HOOK + 1) - 8;
+  for (let i = 0; i < 4; i++) if (rom.r8(base + i) !== BG_MAGIC[i]) return null;
+  return { table: rom.r24(base + 4) };
+}
+
+export function installBgPatch(rom: Rom): { table: number } {
+  const ex = bgPatch(rom);
+  if (ex) return ex;
+  installEditorPatch(rom); // needs the level number in $010B
+  if (rom.r8(BG_HOOK) !== 0xa9 || rom.r8(BG_HOOK + 1) !== 0x0c || rom.r16(BG_HOOK + 2) !== 0x6a85) {
+    throw new Error('Unerwarteter Code bei $058060 – BG-Patch nicht möglich');
+  }
+  const a = new Asm();
+  a.b(...BG_MAGIC); a.fill(4); // +4: table pointer
+  a.label('Bg');
+  a.b(0xc2, 0x30); // REP #$30 (X stays 16 bit as in the caller)
+  a.b(0xaf, 0x0b, 0x01, 0x7e, 0x29, 0xff, 0x01, 0xaa); // LDA.l $7E010B AND #$01FF TAX
+  a.b(0xe2, 0x20); // SEP #$20
+  a.long(0xbf, 'Tbl'); // LDA.l Tbl,x
+  a.br(0xd0, 'set');
+  a.b(0xa9, 0x0c); // LDA #$0C
+  a.label('set');
+  a.b(0x85, 0x6a, 0x6b); // STA $6A : RTL
+  a.label('Tbl');
+  a.fill(512);
+  const addr = rom.allocWrite(new Uint8Array(a.bytes.length));
+  rom.writeBytes(addr, a.link(addr));
+  rom.w24(addr + 4, a.addrOf('Tbl', addr));
+  rom.writeBytes(BG_HOOK, Uint8Array.from([0x22, ...[0, 8, 16].map((s) => (a.addrOf('Bg', addr) >> s) & 0xff)]));
+  return bgPatch(rom)!;
+}
+
+// bank of the level's BG tilemap data if it was stored by the editor, else 0
+export function bgBank(rom: Rom, level: number): number {
+  const p = bgPatch(rom);
+  return p ? rom.r8(p.table + level) : 0;
+}
+export function setBgBank(rom: Rom, level: number, bank: number): void {
+  rom.w8(installBgPatch(rom).table + level, bank);
+}

@@ -2,6 +2,7 @@
 
 import { Rom, snesToPc } from './rom.ts';
 import { Snes, type SnesState } from './snes.ts';
+import { rleDecode, rleEncode } from './rle.ts';
 
 export const OW_L1 = 0x0cf7df; // 0x800 bytes: 2 maps × 32×32 16x16 tiles (quadrant layout)
 const L2_TILE_PTR = 0x04dc72; // LDA #$A533 operand
@@ -28,47 +29,6 @@ export function readL1(rom: Rom): Uint8Array {
 }
 export function writeL1(rom: Rom, d: Uint8Array): void {
   rom.writeBytes(OW_L1, d);
-}
-
-function rleDecode(src: Uint8Array, off: number, out: Uint16Array, shift: number, count: number): number {
-  let p = off, n = 0;
-  while (n < count) {
-    const c = src[p++];
-    if (c & 0x80) {
-      const v = src[p++];
-      for (let i = 0; i <= (c & 0x7f) && n < count; i++) out[n++] |= v << shift;
-    } else {
-      for (let i = 0; i <= c && n < count; i++) out[n++] |= src[p++] << shift;
-    }
-  }
-  return p - off;
-}
-
-// optimal RLE (dynamic programming over literal/repeat runs of up to 128)
-function rleEncode(vals: number[]): number[] {
-  const n = vals.length;
-  const cost = new Float64Array(n + 1).fill(Infinity);
-  const how = new Int16Array(n + 1); // >0 literal length, <0 repeat length
-  cost[n] = 0;
-  for (let i = n - 1; i >= 0; i--) {
-    let r = 1;
-    while (i + r < n && r < 128 && vals[i + r] === vals[i]) r++;
-    for (let k = 2; k <= r; k++) {
-      const c = 2 + cost[i + k];
-      if (c < cost[i]) { cost[i] = c; how[i] = -k; }
-    }
-    for (let L = 1; L <= 128 && i + L <= n; L++) {
-      const c = 1 + L + cost[i + L];
-      if (c < cost[i]) { cost[i] = c; how[i] = L; }
-    }
-  }
-  const out: number[] = [];
-  for (let i = 0; i < n;) {
-    const k = how[i];
-    if (k < 0) { out.push(0x80 | (-k - 1), vals[i]); i += -k; }
-    else { out.push(k - 1); for (let j = 0; j < k; j++) out.push(vals[i + j]); i += k; }
-  }
-  return out;
 }
 
 export function l2Pointers(rom: Rom): { tiles: number; attrs: number } {

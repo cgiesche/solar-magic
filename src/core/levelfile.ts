@@ -6,6 +6,7 @@ import {
   encodeSecondaryHeader, decodeSecondaryHeader,
 } from './level.ts';
 import { editorPatch, levelGfx, customPalette } from './patches.ts';
+import { encodeBg, decodeBg } from './bg.ts';
 
 export const LEVEL_FILE_EXT = '.smwlevel';
 
@@ -20,6 +21,7 @@ interface LevelFileJson {
   secondary: number[]; // 4 secondary header bytes
   gfx?: number[]; // GFX bypass slots (editor patch), $FF = default
   palette?: string; // hex, 512 bytes custom level palette
+  bg?: string; // hex, edited BG tilemap (editor format of bg.ts, RLE)
 }
 
 export interface LevelFileData {
@@ -34,7 +36,8 @@ function fromHex(s: string): Uint8Array {
   return Uint8Array.from(s.match(/../g) ?? [], (x) => parseInt(x, 16));
 }
 
-export function exportLevelFile(rom: Rom, lv: Level): string {
+// bg: the level's BG tiles when they are edited (not a vanilla tilemap in bank $0C)
+export function exportLevelFile(rom: Rom, lv: Level, bg: Uint16Array | null = lv.bg ?? null): string {
   const l2 = serializeLayer2(rom, lv);
   const out: LevelFileJson = {
     format: 'smwe-level',
@@ -52,6 +55,7 @@ export function exportLevelFile(rom: Rom, lv: Level): string {
   }
   const pal = customPalette(rom, lv.number);
   if (pal) out.palette = toHex(rom.bytes(pal, 512));
+  if (bg && !l2) out.bg = toHex(encodeBg(bg));
   return JSON.stringify(out, null, 1);
 }
 
@@ -64,6 +68,7 @@ export function importLevelFile(rom: Rom, text: string, into: Level): LevelFileD
   if (!Array.isArray(j.secondary) || j.secondary.length !== 4) throw new Error('Sekundärer Header fehlt');
   const level = parseLevelData(rom, into.number, fromHex(j.layer1), j.layer2 ? fromHex(j.layer2) : null,
     j.layer2 ? into.layer2Pointer : j.layer2Pointer, fromHex(j.sprites), decodeSecondaryHeader(j.secondary));
+  if (j.bg && !level.layer2Objects) level.bg = decodeBg(fromHex(j.bg));
   level.l1Addr = into.l1Addr; level.l1Size = into.l1Size; level.l2Size = into.l2Size;
   level.sprAddr = into.sprAddr; level.sprSize = into.sprSize;
   const palette = j.palette ? fromHex(j.palette) : null;

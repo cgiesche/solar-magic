@@ -4,7 +4,7 @@ import type { App } from './app.ts';
 import { h, select, hexInput, modal } from './dom.ts';
 import { TILESETS, levelModeName, MUSIC, TIME_SETTINGS, VERTICAL_SCROLL, ENTRANCE_ACTIONS, hex2, hex } from '../core/names.ts';
 import { hasLayer2Objects, type PrimaryHeader, type SecondaryHeader, L2_PTRS } from '../core/level.ts';
-import { levelGfx, setLevelGfx, defaultGfx, GFX_SLOT_NAMES } from '../core/patches.ts';
+import { levelGfx, setLevelGfx, defaultGfx, GFX_SLOT_NAMES, bgBank } from '../core/patches.ts';
 
 function range(n: number, fmt: (i: number) => string = (i) => String(i)): [number, string][] {
   return Array.from({ length: n }, (_, i) => [i, fmt(i)]);
@@ -34,16 +34,18 @@ export function openHeaderDialog(app: App): void {
     });
     return h('div', { class: 'prop' }, h('label', null, name), inp);
   });
-  // BG tilemaps used by vanilla levels
+  // BG tilemaps in the vanilla bank ($0C) used by levels; edited ones (own bank) only count for their level
   const bgs = new Map<number, number[]>();
   for (let i = 0; i < 512; i++) {
     const p = app.rom.r24(L2_PTRS + i * 3);
-    if (p >> 16 !== 0xff) continue;
+    if (p >> 16 !== 0xff || bgBank(app.rom, i)) continue;
     if (!bgs.has(p)) bgs.set(p, []);
     bgs.get(p)!.push(i);
   }
   const bgOpts: [number, string][] = [...bgs.entries()].map(([p, ls]) => [p, `$${hex(p & 0xffff, 4)} (z.B. Level ${ls.slice(0, 3).map((l) => hex(l, 3)).join(', ')})`]);
-  if (!bgs.has(l2ptr) && l2ptr >> 16 === 0xff) bgOpts.push([l2ptr, `$${hex(l2ptr & 0xffff, 4)}`]);
+  const CUSTOM_BG = -1;
+  if (lv.bg || bgBank(app.rom, lv.number)) { l2ptr = CUSTOM_BG; bgOpts.unshift([CUSTOM_BG, 'Eigene (im BG-Modus bearbeitet)']); }
+  else if (!bgs.has(l2ptr) && l2ptr >> 16 === 0xff) bgOpts.push([l2ptr, `$${hex(l2ptr & 0xffff, 4)}`]);
 
   const body = h('div', { class: 'header-dialog' },
     h('h3', null, 'Primärer Header'),
@@ -96,7 +98,7 @@ export function openHeaderDialog(app: App): void {
         lv.header = hd;
         lv.secondary = sd;
         lv.spriteHeader = spriteHeader;
-        lv.layer2Pointer = l2ptr;
+        if (l2ptr !== CUSTOM_BG) { lv.bg = null; lv.layer2Pointer = l2ptr; }
         if (modeChangedL2) {
           if (hasLayer2Objects(hd.mode) && !lv.layer2Objects) { lv.layer2Objects = []; lv.layer2Header = new Uint8Array(5); }
           if (!hasLayer2Objects(hd.mode) && lv.layer2Objects) {
@@ -105,6 +107,7 @@ export function openHeaderDialog(app: App): void {
           }
         }
         if (app.mode === 'l2' && !lv.layer2Objects) app.mode = 'l1';
+        if (app.mode === 'bg' && lv.layer2Objects) app.mode = 'l1';
         if (gfxSlots.some((v, k) => v !== gfxOrig[k])) {
           try { setLevelGfx(app.rom, lv.number, gfxSlots); app.emu.syncRom(); app.persist(); } catch (e) { console.error(e); }
         }

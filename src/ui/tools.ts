@@ -6,7 +6,8 @@ import { readSecondaryEntrance, writeSecondaryEntrance, type SecondaryEntrance, 
 import { exportLevelFile, importLevelFile, LEVEL_FILE_EXT } from '../core/levelfile.ts';
 import { ENTRANCE_ACTIONS, hex, objectName, spriteName } from '../core/names.ts';
 import { saveLevel } from '../core/save.ts';
-import { hasEditorPatch, installEditorPatch, DM16_EXT, editorPatch, setLevelGfx, customPalette, setCustomPalette } from '../core/patches.ts';
+import { hasEditorPatch, installEditorPatch, DM16_EXT, editorPatch, setLevelGfx, customPalette, setCustomPalette, bgBank } from '../core/patches.ts';
+import { bgFromWram } from '../core/bg.ts';
 
 export function openEntrancesDialog(app: App): void {
   const rom = app.rom;
@@ -106,7 +107,10 @@ export function openLevelTools(app: App): void {
     h('h3', null, 'Datei'),
     h('p', { class: 'hint' }, `Level als ${LEVEL_FILE_EXT}-Datei (Objekte, Sprites, Exits, Header, Grafik-Bypass, eigene Palette). Beim Import wird das aktuelle Level ersetzt (rückgängig machbar; Palette/Grafik-Bypass werden direkt in die ROM geschrieben).`),
     h('div', { class: 'row' },
-      h('button', { onclick: () => downloadBytes(`level-${hex(lv.number, 3)}${LEVEL_FILE_EXT}`, new TextEncoder().encode(exportLevelFile(app.rom, lv)), 'application/json') }, 'Exportieren …'),
+      h('button', { onclick: () => {
+        const bg = lv.bg ?? (!lv.layer2Objects && bgBank(app.rom, lv.number) ? bgFromWram(app.render.wram) : null);
+        downloadBytes(`level-${hex(lv.number, 3)}${LEVEL_FILE_EXT}`, new TextEncoder().encode(exportLevelFile(app.rom, lv, bg)), 'application/json');
+      } }, 'Exportieren …'),
       h('button', { onclick: () => importLevel(app).then((ok) => { if (ok) dlg.close(); }) }, 'Importieren …')),
     h('h3', null, 'Screens'),
     h('p', { class: 'hint' }, `Alles ab dem gewählten Screen wird um einen Screen ${vert ? 'nach unten' : 'nach rechts'} bzw. zurück verschoben (Objekte, Sprites, Exits, Eingang, Zwischenziel). Sekundäre Eingänge bleiben unverändert.`),
@@ -122,6 +126,8 @@ export function openLevelTools(app: App): void {
 function saveAs(app: App, target: number): void {
   const copy = cloneLevel(app.level);
   const dst = loadLevel(app.rom, target);
+  // an edited BG belongs to its level (bank table entry): the copy gets its own data
+  if (!copy.layer2Objects && !copy.bg && bgBank(app.rom, app.level.number)) copy.bg = bgFromWram(app.render.wram);
   copy.number = target;
   // write into fresh space: pretend old data of target is the destination
   copy.l1Addr = dst.l1Addr; copy.l1Size = 0; copy.l2Size = 0; copy.sprAddr = dst.sprAddr; copy.sprSize = 0;

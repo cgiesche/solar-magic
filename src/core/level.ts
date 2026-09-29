@@ -75,6 +75,7 @@ export interface Level {
   layer2Objects: LevelObject[] | null;
   layer2Header: Uint8Array | null; // 5 raw header bytes of L2 object data
   layer2Pointer: number; // original 24-bit pointer
+  bg?: Uint16Array | null; // edited BG tilemap (bg.ts layout), saved on the next save
   sprites: LevelSprite[];
   spriteHeader: number;
   // original locations (for in-place saving)

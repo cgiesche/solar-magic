@@ -59,7 +59,7 @@ function buildUi(app: App): void {
 
   const modeBtn = (m: EditMode, label: string, key: string) => h('button', { class: 'mode', 'data-mode': m, title: `${label} (${key})`, onclick: () => app.setMode(m) }, label);
   const modes = h('div', { class: 'btn-group' },
-    modeBtn('l1', 'Layer 1', '1'), modeBtn('l2', 'Layer 2', '2'), modeBtn('spr', 'Sprites', '3'), modeBtn('exit', 'Exits', '4'));
+    modeBtn('l1', 'Layer 1', '1'), modeBtn('l2', 'Layer 2', '2'), modeBtn('spr', 'Sprites', '3'), modeBtn('exit', 'Exits', '4'), modeBtn('bg', 'BG', '5'));
   const toggle = (k: keyof App['show'], label: string) => {
     const cb = h('input', { type: 'checkbox', checked: app.show[k] });
     cb.addEventListener('change', () => {
@@ -116,6 +116,7 @@ function buildUi(app: App): void {
     for (const b of modes.querySelectorAll('button')) b.classList.toggle('active', b.dataset.mode === app.mode);
     const btnL2 = modes.querySelector('[data-mode="l2"]') as HTMLButtonElement;
     btnL2.disabled = !app.level?.layer2Objects;
+    (modes.querySelector('[data-mode="bg"]') as HTMLButtonElement).disabled = !app.level || !app.canEditBg();
     if (app.level) levelTitle.textContent = `Level ${hex(app.level.number, 3)}${app.dirty ? ' *' : ''}`;
     zoomLabel.textContent = `${Math.round(app.zoom * 100)}%`;
   };
@@ -179,6 +180,7 @@ function buildUi(app: App): void {
     else if (k === '2') app.setMode('l2');
     else if (k === '3') app.setMode('spr');
     else if (k === '4') app.setMode('exit');
+    else if (k === '5') app.setMode('bg');
     else if (k === 'h' || k === 'H') openHeaderDialog(app);
     else if (k === 't' || k === 'T') openTestPlay(app);
     else if (k === 'Insert' || k === 'i' || k === 'I') {
@@ -235,7 +237,7 @@ function showHelp(): void {
     ['Entf', 'Auswahl löschen'],
     ['Strg+C / Strg+V / Strg+D', 'Kopieren / Einfügen an Maus / Duplizieren'],
     ['Bild↑ / Bild↓', 'Nach vorne / hinten (Zeichenreihenfolge)'],
-    ['1 / 2 / 3 / 4', 'Modus Layer 1 / Layer 2 / Sprites / Exits'],
+    ['1 / 2 / 3 / 4 / 5', 'Modus Layer 1 / Layer 2 / Sprites / Exits / BG (Hintergrund malen)'],
     ['H', 'Level-Header'],
     ['T', 'Level testen (eingebauter Emulator)'],
     ['O', 'Overworld-Editor ein/aus'],

@@ -5,7 +5,8 @@ import {
   type Level, L1_PTRS, L2_PTRS, SPR_PTRS, serializeLayer1, serializeLayer2, serializeSprites, isL1Vertical,
   writeSecondaryHeader, spriteBank,
 } from './level.ts';
-import { installEditorPatch, setSpriteBank, editorPatch } from './patches.ts';
+import { installEditorPatch, setSpriteBank, editorPatch, bgBank, setBgBank } from './patches.ts';
+import { encodeBg } from './bg.ts';
 
 function countRefs(rom: Rom, table: number, stride: number, addr: number, bankFn?: (i: number) => number): number {
   let n = 0;
@@ -43,7 +44,20 @@ export function saveLevel(rom: Rom, lv: Level): string[] {
     rom.w24(L2_PTRS + n * 3, a2);
     log.push(`Layer 2: ${l2.length} Bytes @ $${a2.toString(16).toUpperCase()}`);
   } else {
-    rom.w24(L2_PTRS + n * 3, lv.layer2Pointer);
+    // BG tilemap: edited data goes to free space (bank via BG patch); a changed pointer drops old custom data
+    const old = rom.r24(L2_PTRS + n * 3), oldBank = bgBank(rom, n);
+    if (oldBank && (lv.bg || lv.layer2Pointer !== old)) {
+      const users = Array.from({ length: 512 }, (_, i) => i).filter((i) => bgBank(rom, i) === oldBank && rom.r24(L2_PTRS + i * 3) === old);
+      if (users.length <= 1) rom.freeAt((oldBank << 16) | (old & 0xffff));
+      setBgBank(rom, n, 0);
+    }
+    if (lv.bg) {
+      const data = encodeBg(lv.bg);
+      const a = rom.allocWrite(data);
+      setBgBank(rom, n, a >> 16);
+      rom.w24(L2_PTRS + n * 3, 0xff0000 | (a & 0xffff));
+      log.push(`BG: ${data.length} Bytes @ $${a.toString(16).toUpperCase()}`);
+    } else rom.w24(L2_PTRS + n * 3, lv.layer2Pointer);
   }
   // sprites
   const spr = serializeSprites(lv.sprites, lv.spriteHeader, isL1Vertical(rom, lv.header.mode));

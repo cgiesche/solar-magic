@@ -79,6 +79,8 @@ export class Palette {
     app.on('level', () => { this.ensureThumbs(); this.build(); });
     let t = 0;
     app.on('sprites', () => { if (this.tab === 'spr' && !t) t = window.setTimeout(() => { t = 0; this.build(); }, 300); });
+    app.on('bgtile', () => { if (app.mode === 'bg') this.build(); });
+    app.on('render', () => { if (app.mode === 'bg') this.build(); });
     app.on('mode', () => {
       if (app.mode === 'spr') this.tab = 'spr';
       else if (this.tab === 'spr') this.tab = 'obj';
@@ -108,6 +110,26 @@ export class Palette {
       this.build();
     });
     this.body.append(label, c);
+  }
+
+  // BG Map16 tiles 000-1FF for painting the level background (BG mode)
+  buildBg(): void {
+    const app = this.app;
+    const sheet = renderMap16Sheet(app, true);
+    const sel = app.bgTile;
+    const c = h('canvas', { width: 256 * 1.2, height: 512 * 1.2, class: 'm16-pick' });
+    const ctx = c.getContext('2d')!;
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(sheet, 0, 0, c.width, c.height);
+    ctx.strokeStyle = '#4cc2ff'; ctx.lineWidth = 2;
+    ctx.strokeRect((sel & 15) * 16 * 1.2, ((sel >> 4) & 31) * 16 * 1.2, 16 * 1.2, 16 * 1.2);
+    c.addEventListener('mousedown', (e) => {
+      const rc = c.getBoundingClientRect();
+      const x = Math.floor((e.clientX - rc.left) / (rc.width / 16)), y = Math.floor((e.clientY - rc.top) / (rc.height / 32));
+      app.bgTile = y * 16 + x;
+      this.build();
+    });
+    this.body.append(h('div', { class: 'hint' }, `BG-Tile ${hex3(sel)} – Klicken/Ziehen in der Levelansicht malt, Rechtsklick nimmt ein Tile auf. Die BG-Tilemap (32×27) wiederholt sich.`), c);
   }
 
   specs(): ObjSpec[] {
@@ -140,6 +162,7 @@ export class Palette {
   build(): void {
     const app = this.app;
     clear(this.tabs);
+    if (app.mode === 'bg') { clear(this.body); this.buildBg(); return; }
     const tabDefs: [typeof this.tab, string][] = [['obj', 'Objekte'], ['ext', 'Erweitert'], ['m16', 'Map16'], ['spr', 'Sprites']];
     for (const [t, l] of tabDefs) this.tabs.appendChild(h('button', { class: this.tab === t ? 'active' : '', onclick: () => { this.tab = t; this.build(); } }, l));
     clear(this.body);
@@ -181,9 +204,9 @@ export class Palette {
   }
 }
 
-export function renderMap16Sheet(app: App): HTMLCanvasElement {
+export function renderMap16Sheet(app: App, bg = false): HTMLCanvasElement {
   const r = app.render;
-  const tc = new TileCache(r.vram, r.cgram, (r.ppuRegs[0x0b] & 0x0f) << 13);
+  const tc = new TileCache(r.vram, r.cgram, (bg ? r.ppuRegs[0x0b] >> 4 : r.ppuRegs[0x0b] & 0x0f) << 13);
   const src = map16Source(app.rom, r);
   const c = document.createElement('canvas');
   c.width = 256; c.height = 512;
@@ -191,7 +214,7 @@ export function renderMap16Sheet(app: App): HTMLCanvasElement {
   const img = ctx.createImageData(256, 512);
   const px = new Uint32Array(img.data.buffer);
   px.fill(0xff181818);
-  for (let t = 0; t < 512; t++) drawMap16(px, 256, 512, tc, src.fg(t), (t & 15) * 16, (t >> 4) * 16);
+  for (let t = 0; t < 512; t++) drawMap16(px, 256, 512, tc, bg ? src.bg(t) : src.fg(t), (t & 15) * 16, (t >> 4) * 16);
   ctx.putImageData(img, 0, 0);
   return c;
 }
@@ -225,6 +248,10 @@ export class Properties {
     clear(this.body);
     if (!app.level) return;
     if (app.mode === 'exit') return this.buildExit();
+    if (app.mode === 'bg') {
+      this.body.appendChild(h('div', { class: 'hint' }, `Hintergrund (BG-Tilemap) bearbeiten. ${app.level.bg ? 'Geändert – wird beim Speichern in freien ROM-Speicher geschrieben (BG-Patch).' : 'Unverändert.'}`));
+      return;
+    }
     if (app.mode === 'spr') {
       const sel = app.selectedSprites();
       if (!sel.length) { this.body.appendChild(h('div', { class: 'hint' }, `${app.level.sprites.length} Sprites. Klicken zum Auswählen, Ziehen zum Verschieben.`)); return; }

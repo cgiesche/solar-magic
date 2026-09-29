@@ -5,11 +5,13 @@
 import { Snes, type SnesState } from './snes.ts';
 import { Rom } from './rom.ts';
 import { L1_PTRS, L2_PTRS, SPR_PTRS } from './level.ts';
-import { editorPatch } from './patches.ts';
+import { editorPatch, BG_HOOK } from './patches.ts';
 
 export const OV_L1 = 0x0000; // overlay offsets
 export const OV_L2 = 0x4000;
 export const OV_SPR = 0x8000;
+export const OV_BG = 0xa000; // edited BG tilemap (editor format, see bg.ts)
+const OV_BG_HOOK = 0xb000; // LDA #$FF : STA $6A : RTL (BG data bank = overlay)
 export const OV_BASE_SNES = 0xfe8000;
 
 export function overlaySnes(off: number): number {
@@ -20,6 +22,7 @@ export interface LevelOverride {
   layer1?: Uint8Array; // full layer 1 data incl. 5 byte header
   layer2?: Uint8Array; // layer 2 object data incl. header
   layer2Pointer?: number; // override pointer (BG tilemap) when layer2 not given
+  bgData?: Uint8Array; // edited BG tilemap (bg.ts encodeBg), replaces layer2Pointer
   sprites?: Uint8Array;
   // objIndexOfByte maps overlay byte offset → object index (layer1: idx, layer2: 0x8000|idx)
   byteOwner?: Int32Array;
@@ -112,6 +115,13 @@ export class LevelEmulator {
       patch24(L2_PTRS + level * 3, overlaySnes(OV_L2));
     } else if (ov.layer2Pointer !== undefined) {
       patch24(L2_PTRS + level * 3, ov.layer2Pointer);
+    }
+    if (ov.bgData && !ov.layer2) {
+      this.overlay.set(ov.bgData, OV_BG);
+      this.overlay.set([0xa9, 0xff, 0x85, 0x6a, 0x6b], OV_BG_HOOK);
+      patch24(L2_PTRS + level * 3, 0xff0000 | (overlaySnes(OV_BG) & 0xffff));
+      patch(BG_HOOK, 0x22);
+      patch24(BG_HOOK + 1, overlaySnes(OV_BG_HOOK));
     }
     if (ov.sprites) {
       this.overlay.set(ov.sprites, OV_SPR);

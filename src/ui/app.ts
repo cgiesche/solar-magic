@@ -4,7 +4,7 @@ import { Rom, snesToPc } from '../core/rom.ts';
 import { LevelEmulator, OV_L1, OV_L2, type LevelRender, type LevelOverride, MAP_BASE, MAP_SIZE } from '../core/levelemu.ts';
 import {
   type Level, type LevelObject, type LevelSprite, loadLevel, serializeLayer1, serializeLayer2, serializeSprites,
-  isL1Vertical, cloneLevel, newUid, hasLayer2Objects, L1_PTRS, SEC_HDR,
+  isL1Vertical, cloneLevel, newUid, hasLayer2Objects, hasObjects, L1_PTRS, SEC_HDR,
   readSecondaryEntrance, writeSecondaryEntrance, entrancePos, nearestEntrance, encodeSecondaryHeader,
 } from '../core/level.ts';
 import { renderLevel, type LevelImages, composite } from '../core/render.ts';
@@ -12,9 +12,10 @@ import { saveLevel } from '../core/save.ts';
 import { captureSprites } from '../core/spritegfx.ts';
 import { DM16_EXT, hasEditorPatch, installEditorPatch } from '../core/patches.ts';
 import { kvSet } from './storage.ts';
+import { bgFromWram, bgIndex, encodeBg } from '../core/bg.ts';
 import { toast } from './dom.ts';
 
-export type EditMode = 'l1' | 'l2' | 'spr' | 'exit';
+export type EditMode = 'l1' | 'l2' | 'spr' | 'exit' | 'bg';
 export type PaletteItem =
   | { kind: 'obj'; num: number; ext: number; size: number; tile?: number }
   | { kind: 'spr'; num: number; extra: number };
@@ -35,6 +36,7 @@ export class App {
   mode: EditMode = 'l1';
   selection = new Set<number>();
   paletteItem: PaletteItem | null = null;
+  bgTile = 0; // BG Map16 tile painted in BG mode
   zoom = 2;
   show = { layer1: true, layer2: true, layer3: true, sprites: true, grid: false, screens: true, exits: true, ghost: true, anim: false };
   // view-only game state applied before the emulated level load
@@ -76,6 +78,7 @@ export class App {
     if (this.level && this.dirty) this.saveLevel(true);
     this.level = loadLevel(this.rom, n);
     this.selection.clear();
+    if ((this.mode === 'l2' && !this.level.layer2Objects) || (this.mode === 'bg' && !this.canEditBg())) this.mode = 'l1';
     this.undoStack = [];
     this.redoStack = [];
     this.dirty = false;
@@ -101,6 +104,7 @@ export class App {
       layer1: l1,
       layer2: l2 ?? undefined,
       layer2Pointer: l2 ? undefined : lv.layer2Pointer,
+      bgData: !l2 && lv.bg ? encodeBg(lv.bg) : undefined,
       sprites: serializeSprites(lv.sprites, lv.spriteHeader, this.vertical),
       byteOwner,
       switchPalaces: this.switches.palaces,
@@ -131,7 +135,7 @@ export class App {
 
   // the object layer not being edited is ghosted (only in levels with two object layers)
   compose(images = this.images): Uint32Array {
-    const ghost = this.show.ghost && this.level.layer2Objects ? (this.mode === 'l1' ? 2 : this.mode === 'l2' ? 1 : 0) : 0;
+    const ghost = !this.show.ghost ? 0 : this.mode === 'bg' ? 1 : this.level.layer2Objects ? (this.mode === 'l1' ? 2 : this.mode === 'l2' ? 1 : 0) : 0;
     return composite(images, this.show.layer1, this.show.layer2, ghost, this.show.layer3);
   }
 
@@ -404,15 +408,35 @@ export class App {
 
   setMode(m: EditMode, selection: Iterable<number> = []): void {
     if (m === 'l2' && !this.level.layer2Objects) {
-      toast('Dieses Level hat keine Layer-2-Objekte (Layer 2 ist Hintergrund).');
+      toast('Dieses Level hat keine Layer-2-Objekte (Layer 2 ist Hintergrund, Modus BG).');
       return;
     }
-    const recompose = this.level.layer2Objects && this.show.ghost && m !== this.mode;
+    if (m === 'bg' && !this.canEditBg()) {
+      toast('Dieses Level hat Layer-2-Objekte statt einer BG-Tilemap.');
+      return;
+    }
+    const recompose = (this.level.layer2Objects || m === 'bg' || this.mode === 'bg') && this.show.ghost && m !== this.mode;
     this.mode = m;
     this.selection = new Set(selection);
     if (recompose) this.recomposite();
     this.emit('mode');
     this.emit('change');
+  }
+
+  // ------------- BG tilemap -------------
+  canEditBg(): boolean {
+    return !this.level.layer2Objects && hasObjects(this.level.header.mode);
+  }
+  bgAt(tx: number, ty: number): number {
+    const o = bgIndex(tx, ty);
+    return this.level.bg ? this.level.bg[o] : this.render.wram[0xb900 + o] | (this.render.wram[0xbd00 + o] << 8);
+  }
+  // sets one BG tile (the map repeats, so all copies change); caller handles checkpoint/refresh
+  paintBg(tx: number, ty: number, tile: number): boolean {
+    if (this.bgAt(tx, ty) === tile) return false;
+    this.level.bg ??= bgFromWram(this.render.wram);
+    this.level.bg[bgIndex(tx, ty)] = tile;
+    return true;
   }
 
   clampObject(o: { x: number; y: number }): void {
