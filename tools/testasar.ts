@@ -74,6 +74,16 @@ check(diff === 0 && listPatches(rom).length === 0 && rom.scanRats().length === 0
   check(!f.ok && f.errors[0].includes('main.asm:2'), 'Asar errors are reported: ' + f.errors[0]);
 }
 
+// 3b. smwe.asm describes the ROM's editor patches
+{
+  const rom = new Rom(file.slice());
+  const e = installEditorPatch(rom);
+  const r = applyPatch(rom, src('UsesSmwe', 'lorom\nincsrc "smwe.asm"\n%smwe_require(PATCH)\nprint hex(!SMWE_SPRITE_BANKS)\nprint dec(!SMWE_MAP16X)\n'));
+  check(r.ok && r.prints[0] === e.sprBank.toString(16).toUpperCase().padStart(6, '0') && r.prints[1] === '0', 'smwe.asm has the editor tables ' + r.prints.join(' ') + r.errors.join(' '));
+  const f = applyPatch(rom, src('NeedsX', 'lorom\nincsrc "smwe.asm"\n%smwe_require(MAP16X)\n'));
+  check(!f.ok && f.errors[0].includes('MAP16X'), '%smwe_require fails for missing features');
+}
+
 // 4. untagged patch data in expanded space is never taken as free space
 {
   const rom = new Rom(file.slice());

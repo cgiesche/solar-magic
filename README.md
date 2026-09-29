@@ -106,6 +106,16 @@ assembliert und ändert nur wenige, verifizierte Stellen:
 
 Die Tests prüfen, dass alle Vanilla-Level mit installiertem Patch identisch geladen werden.
 
+## ASM-Patches, UberASM, Custom Blocks
+
+Der Editor enthält Asar (als WebAssembly) und wendet damit ASM-Code direkt im Browser an:
+- **Patches** (`.asm`/`.zip`, z. B. von SMWCentral), mit Einstellungen und Konfliktprüfung;
+- **UberASM**-Code pro Level, Overworld-Karte und Game Mode (Format von UberASM Tool 2.x);
+- **Custom Blocks** im GPS-Format.
+
+Jeder Patch wird mit Originalbytes und Quellen in der ROM verzeichnet und lässt sich jederzeit wieder
+entfernen. Details, `patch.json` und die Schnittstellen für eigene Patches: [docs/patches.md](docs/patches.md).
+
 ## Grenzen / nicht enthalten
 
 * **Musik:** Es gibt keinen Musik-Import (AddmusicK-artig). Die ROM-Erweiterung schafft Platz; das Einfügen
@@ -114,7 +124,8 @@ Die Tests prüfen, dass alle Vanilla-Level mit installiertem Patch identisch gel
 * **Overworld:** Events, Overworld-Sprites und Pfad-Einstellungen sind nicht editierbar (Ansicht „alle Events“
   ist nur lesend). Translevel-Nummern folgen wie in Vanilla der Scan-Reihenfolge – neue Level-Tiles
   verschieben die Nummern nachfolgender Level.
-* Titelbild, Abspann, Custom-Blocks/-Sprites (ASM) sind nicht enthalten.
+* Titelbild, Abspann und Custom Sprites (PIXI) sind nicht enthalten.
+* ASM-Patches: nur LoROM, kein SA-1; Patches, die Lunar Magic voraussetzen, funktionieren nicht.
 * Getestet mit der US-ROM (`Super Mario World (U) [!]`, MD5 `cdd3c8c37322978ca8669b34bc89c804`). Mit
   Lunar Magic bearbeitete ROMs nutzen andere Hooks/Formate und werden nicht gezielt unterstützt.
 
@@ -128,6 +139,9 @@ src/core/levelemu.ts     Level laden per Emulation, Tile-Besitz pro Objekt
 src/core/level.ts        Levelformat: Header, Objekte, Exits, Sprites, sek. Header/Eingänge
 src/core/render.ts       Level-Layer aus Emulationsergebnis rendern
 src/core/save.ts         Level in die ROM schreiben
+src/core/asar.ts         Asar (WebAssembly, LGPL-3.0; gebaut mit tools/build-asar.sh)
+src/core/patchapply.ts   ASM-Patches anwenden/entfernen, Konfliktprüfung; patchreg.ts: Verzeichnis in der ROM
+src/core/uberasm.ts      UberASM-Generator; blocks.ts: Custom Blocks (GPS-Format)
 src/core/rom.ts          LoROM-Adressen, Erweiterung, Prüfsumme, RATS
 src/core/lz2.ts          LZ2 (de)kompression
 src/core/patches.ts      Editor-Patch (assembliert mit asm.ts)
