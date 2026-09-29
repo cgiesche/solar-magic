@@ -11,6 +11,7 @@ import { openPaletteEditor } from './ui/paletteeditor.ts';
 import { openMap16Editor } from './ui/map16editor.ts';
 import { openGfxEditor } from './ui/gfxeditor.ts';
 import { openEntrancesDialog, openRomInfo, openCopyLevel } from './ui/tools.ts';
+import { OverworldView } from './ui/overworld.ts';
 
 const root = document.getElementById('app')!;
 
@@ -85,6 +86,7 @@ function buildUi(app: App): void {
     h('span', { class: 'sep' }),
     h('button', { onclick: () => view.setZoom(app.zoom / 2) }, '−'), zoomLabel, h('button', { onclick: () => view.setZoom(app.zoom * 2) }, '+'),
     h('span', { class: 'spacer' }),
+    h('button', { class: 'ow-toggle', onclick: () => toggleOw(), title: 'Zwischen Level- und Overworld-Editor wechseln (O)' }, 'Overworld'),
     h('button', { onclick: () => openMap16Editor(app, view.hover ? hoverTile(app, view.hover.tx, view.hover.ty) : 0), title: 'Map16-Editor (M)' }, 'Map16'),
     h('button', { onclick: () => openPaletteEditor(app), title: 'Paletten-Editor (P)' }, 'Paletten'),
     h('button', { onclick: () => openGfxEditor(app), title: 'Grafiken' }, 'Grafiken'),
@@ -107,12 +109,33 @@ function buildUi(app: App): void {
   app.on('level-header', () => { palette.invalidate(); app.ensureSpriteImages(); });
   app.on('palettes', () => palette.invalidate());
 
-  root.append(h('div', { class: 'layout' },
-    toolbar,
-    h('div', { class: 'left' }, levels.root),
-    h('div', { class: 'center' }, view.root, status),
-    h('div', { class: 'right' }, palette.root, props.root),
-  ));
+  const left = h('div', { class: 'left' }, levels.root);
+  const center = h('div', { class: 'center' }, view.root, status);
+  const right = h('div', { class: 'right' }, palette.root, props.root);
+  const layout = h('div', { class: 'layout' }, toolbar, left, center, right);
+  root.append(layout);
+  let ow: OverworldView | null = null;
+  let owActive = false;
+  const owRight = h('div', { class: 'right' });
+  const toggleOw = () => {
+    owActive = !owActive;
+    if (owActive) {
+      if (app.dirty) app.saveLevel(true);
+      if (!ow) ow = new OverworldView(app);
+      owRight.replaceChildren(ow.side);
+      layout.replaceChildren(toolbar, left, ow.root, owRight);
+      layout.classList.add('ow-mode');
+      ow.show();
+    } else {
+      if (ow?.dirty && confirm('Overworld-Änderungen speichern?')) ow.save();
+      layout.replaceChildren(toolbar, left, center, right);
+      layout.classList.remove('ow-mode');
+      app.refresh();
+      view.layout();
+    }
+    (toolbar.querySelector('.ow-toggle') as HTMLButtonElement).textContent = owActive ? 'Level-Editor' : 'Overworld';
+  };
+  app.on('show-level-view', () => { if (owActive) toggleOw(); });
 
   window.onkeydown = (e: KeyboardEvent) => {
     const t = e.target as HTMLElement;
@@ -120,6 +143,12 @@ function buildUi(app: App): void {
     if (document.querySelector('.modal-back')) return;
     const k = e.key;
     const ctrl = e.ctrlKey || e.metaKey;
+    if (k === 'o' || k === 'O') { toggleOw(); return; }
+    if (owActive) {
+      if (ctrl && k.toLowerCase() === 'z') { e.preventDefault(); ow?.undoOnce(); }
+      if (ctrl && k.toLowerCase() === 's') { e.preventDefault(); ow?.save(); }
+      return;
+    }
     if (ctrl && k.toLowerCase() === 's') { e.preventDefault(); app.saveLevel(); return; }
     if (ctrl && k.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) app.redo(); else app.undo(); return; }
     if (ctrl && k.toLowerCase() === 'y') { e.preventDefault(); app.redo(); return; }

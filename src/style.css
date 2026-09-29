@@ -115,3 +115,9 @@ kbd { background: #181a1f; border: 1px solid var(--border); border-radius: 3px; 
 .modal-body h3 { margin: 12px 0 6px; font-size: 12px; text-transform: uppercase; color: var(--muted); }
 .m16-pick { image-rendering: pixelated; cursor: crosshair; display: block; }
 .grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px 14px; } .grid4 .prop label { width: 36px; }
+.ow-side { overflow-y: auto; flex: 1; }
+.ow-pal { width: 288px; image-rendering: pixelated; cursor: crosshair; }
+.ow-pal8 { width: 256px; image-rendering: pixelated; cursor: crosshair; display: block; }
+.ow-pal-scroll { max-height: 55vh; overflow-y: auto; }
+.ow-info { border: 1px solid var(--border); border-radius: 6px; padding: 6px; display: flex; flex-direction: column; gap: 5px; }
+.ow-info select { max-width: 190px; }
