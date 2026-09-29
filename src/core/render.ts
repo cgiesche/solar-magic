@@ -183,11 +183,23 @@ export function renderLevel(rom: Rom, r: LevelRender, mode: number, screens: num
   return { width, height, backdrop: backdropColor(r), layer1, layer2, geom1, geom2, tiles1, tiles2 };
 }
 
-export function composite(li: LevelImages, show1 = true, show2 = true): Uint32Array {
+// ghost: 1 or 2 draws that layer at 35 % opacity
+export function composite(li: LevelImages, show1 = true, show2 = true, ghost = 0): Uint32Array {
   const out = new Uint32Array(li.width * li.height).fill(li.backdrop);
-  if (show2) for (let i = 0; i < out.length; i++) if (li.layer2[i]) out[i] = li.layer2[i];
-  if (show1) for (let i = 0; i < out.length; i++) if (li.layer1[i]) out[i] = li.layer1[i];
+  const put = (src: Uint32Array, faint: boolean) => {
+    for (let i = 0; i < out.length; i++) {
+      const c = src[i];
+      if (c) out[i] = faint ? blend(c, out[i], 0.35) : c;
+    }
+  };
+  if (show2) put(li.layer2, ghost === 2);
+  if (show1) put(li.layer1, ghost === 1);
   return out;
+}
+
+function blend(a: number, b: number, t: number): number {
+  const ch = (s: number) => Math.round(((a >> s) & 0xff) * t + ((b >> s) & 0xff) * (1 - t));
+  return (0xff000000 | (ch(16) << 16) | (ch(8) << 8) | ch(0)) >>> 0;
 }
 
 export { MAP_BASE };

@@ -1,14 +1,22 @@
 // Scrollable, zoomable level canvas with editing interactions.
 
-import { App } from './app.ts';
-import { h, attachPanZoom } from './dom.ts';
+import { App, type Marker } from './app.ts';
+import { h, attachPanZoom, downloadBytes } from './dom.ts';
 import { spriteName, objectName, hex2, hex3 } from '../core/names.ts';
-import type { LevelObject, LevelSprite } from '../core/level.ts';
+import { type LevelObject, type LevelSprite, serializeLayer1, serializeLayer2, serializeSprites } from '../core/level.ts';
+import { composite } from '../core/render.ts';
 
 type Drag =
   | { kind: 'move'; startTx: number; startTy: number; lastDx: number; lastDy: number; orig: Map<number, { x: number; y: number }> }
   | { kind: 'resize'; startTx: number; startTy: number; origSize: Map<number, number>; lastDw: number; lastDh: number }
-  | { kind: 'band'; x0: number; y0: number; x1: number; y1: number; add: boolean };
+  | { kind: 'band'; x0: number; y0: number; x1: number; y1: number; add: boolean }
+  | { kind: 'marker'; marker: Marker; offX: number; offY: number; moved: boolean };
+
+const MARKER_STYLE: Record<Marker['kind'], { color: string; label: string; title: string }> = {
+  main: { color: 'rgba(255,40,40,0.9)', label: 'M', title: 'Haupteingang' },
+  midway: { color: 'rgba(255,150,0,0.9)', label: 'Z', title: 'Zwischenziel (Screen)' },
+  sec: { color: 'rgba(40,120,255,0.9)', label: 'S', title: 'Sekundärer Eingang' },
+};
 
 export class LevelView {
   app: App;
@@ -20,12 +28,15 @@ export class LevelView {
   levelCanvas: HTMLCanvasElement;
   hover: { tx: number; ty: number; px: number; py: number; top: number } | null = null;
   drag: Drag | null = null;
-  status: HTMLDivElement;
+  status: HTMLSpanElement;
+  stats: HTMLSpanElement;
   pendingFrame = 0;
 
-  constructor(app: App, status: HTMLDivElement) {
+  constructor(app: App, statusBar: HTMLDivElement) {
     this.app = app;
-    this.status = status;
+    this.status = h('span', { class: 'status-text' });
+    this.stats = h('span', { class: 'status-stats' });
+    statusBar.append(this.status, this.stats);
     this.canvas = h('canvas', { class: 'level-canvas' });
     this.sizer = h('div', { class: 'level-sizer' });
     this.scroller = h('div', { class: 'level-scroller', tabIndex: 0 }, this.canvas, this.sizer);
@@ -40,8 +51,8 @@ export class LevelView {
     this.scroller.addEventListener('contextmenu', (e) => e.preventDefault());
     attachPanZoom(this.scroller, () => this.app.zoom, (z, ax, ay) => this.setZoom(z, { ax, ay }));
     this.scroller.addEventListener('mouseleave', () => { this.hover = null; this.paint(); });
-    app.on('render', () => this.updateLevelImage());
-    app.on('change', () => this.paint());
+    app.on('render', () => { this.updateLevelImage(); this.updateStats(); });
+    app.on('change', () => { this.paint(); this.updateStats(); });
     app.on('sprites', () => this.requestPaint());
   }
 
@@ -158,19 +169,19 @@ export class LevelView {
         ctx.fillText(`Exit → ${ex.secondary ? 'Sek. ' : ''}${hex3(ex.dest)}`, x + 20 / app.zoom, y + 12 / app.zoom);
       }
     }
-    // entrance marker (Mario's start position after the emulated level load)
-    {
-      const w = app.render.wram;
-      const mx = w[0x94] | (w[0x95] << 8), my = w[0x96] | (w[0x97] << 8);
-      if (mx < im.width && my < im.height + 32) {
-        ctx.fillStyle = 'rgba(255,40,40,0.85)';
-        ctx.beginPath();
-        ctx.arc(mx + 8, my + 16, 6, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = '#fff';
-        ctx.font = `bold 9px sans-serif`;
-        ctx.fillText('M', mx + 4.5, my + 19.5);
-      }
+    // entrance markers (Mario's start position, drawn at his lower 16x16 half)
+    ctx.font = `bold 9px sans-serif`;
+    for (const m of app.markers()) {
+      if (m.x >= im.width || m.y >= im.height + 32) continue;
+      const st = MARKER_STYLE[m.kind];
+      const dragged = this.drag?.kind === 'marker' && this.drag.marker.kind === m.kind && this.drag.marker.index === m.index;
+      ctx.fillStyle = st.color;
+      ctx.beginPath();
+      ctx.arc(m.x + 8, m.y + 24, dragged ? 8 : 6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.fillText(st.label, m.x + 5, m.y + 27.5);
+      if (m.kind === 'sec') ctx.fillText(hex3(m.index), m.x + 15, m.y + 27.5);
     }
     // sprites
     if (app.show.sprites) this.paintSprites(ctx, z);
@@ -284,6 +295,13 @@ export class LevelView {
       return;
     }
     if (e.button !== 0) return;
+    const mk = this.markerAt(px, py);
+    if (mk && !e.ctrlKey) {
+      if (mk.kind !== 'sec') app.checkpoint();
+      this.drag = { kind: 'marker', marker: mk, offX: px - mk.x, offY: py - mk.y, moved: false };
+      this.paint();
+      return;
+    }
     if (app.mode === 'exit') {
       const scr = app.vertical ? ty >> 4 : tx >> 4;
       const ex = app.level.exits.find((x) => x.screen === scr);
@@ -354,6 +372,12 @@ export class LevelView {
     if (d.kind === 'band') {
       d.x1 = px; d.y1 = py;
       this.requestPaint();
+    } else if (d.kind === 'marker') {
+      if (app.moveMarker(d.marker, px - d.offX, py - d.offY)) {
+        d.moved = true;
+        if (d.marker.kind !== 'sec') app.dirty = true;
+        app.emit('change');
+      }
     } else if (d.kind === 'move') {
       const dx = tx - d.startTx, dy = ty - d.startTy;
       if (dx === d.lastDx && dy === d.lastDy) return;
@@ -398,6 +422,12 @@ export class LevelView {
     const d = this.drag;
     if (!d) return;
     this.drag = null;
+    if (d.kind === 'marker') {
+      if (d.marker.kind === 'sec') { if (d.moved) app.persist(); this.paint(); return; }
+      if (!d.moved) { app.undoStack.pop(); this.paint(); return; }
+      app.changed();
+      return;
+    }
     if (d.kind === 'band') {
       const x0 = Math.floor(Math.min(d.x0, d.x1) / 16), x1 = Math.floor(Math.max(d.x0, d.x1) / 16);
       const y0 = Math.floor(Math.min(d.y0, d.y1) / 16), y1 = Math.floor(Math.max(d.y0, d.y1) / 16);
@@ -436,6 +466,8 @@ export class LevelView {
       const t = app.render.wram[a] | (app.render.wram[a + 0x10000] << 8);
       txt += `  Map16 ${hex3(t)}`;
     }
+    const mk = this.hover ? this.markerAt(this.hover.px, this.hover.py) : null;
+    if (mk) txt += `  · ${MARKER_STYLE[mk.kind].title}${mk.kind === 'sec' ? ' ' + hex3(mk.index) : ''} (ziehen zum Verschieben)`;
     const hits = app.hitsAt(this.hover?.px ?? tx * 16, this.hover?.py ?? ty * 16);
     for (const { mode, item } of hits) {
       const tag = hits.length > 1 ? (mode === 'spr' ? '' : mode === 'l1' ? ' [L1]' : ' [L2]') : '';
@@ -443,6 +475,55 @@ export class LevelView {
       else { const o = item as LevelObject; txt += `  · Objekt${tag} ${o.num ? hex2(o.num) : 'Ext ' + hex2(o.ext)} ${objectName(o.num, o.ext)}${o.num ? ' Größe ' + hex2(o.size) : ''}`; }
     }
     this.status.textContent = txt;
+  }
+
+  // topmost marker whose circle contains the pixel
+  markerAt(px: number, py: number): Marker | null {
+    const ms = this.app.markers();
+    for (let i = ms.length - 1; i >= 0; i--) {
+      const m = ms[i];
+      if ((px - m.x - 8) ** 2 + (py - m.y - 24) ** 2 <= 49) return m;
+    }
+    return null;
+  }
+
+  // object/sprite counts and data sizes; the sprite load table ($1938) holds 128 entries
+  updateStats(): void {
+    const app = this.app, lv = app.level;
+    if (!lv) return;
+    const l1 = serializeLayer1(app.rom, lv).length, l2 = serializeLayer2(app.rom, lv)?.length;
+    const spr = serializeSprites(lv.sprites, lv.spriteHeader, app.vertical).length;
+    const parts = [`Objekte ${lv.objects.length}${lv.layer2Objects ? ' / L2 ' + lv.layer2Objects.length : ''}`, `Sprites ${lv.sprites.length}`,
+      `L1 ${l1} B${l2 !== undefined ? ` · L2 ${l2} B` : ''} · Spr ${spr} B`];
+    this.stats.textContent = parts.join('  ·  ');
+    const over = lv.sprites.length > 128;
+    this.stats.classList.toggle('warn', over);
+    this.stats.title = over ? 'Mehr als 128 Sprites: das Spiel lädt nur die ersten 128.' : '';
+  }
+
+  // visible layers + sprites at 1:1 as PNG
+  exportPng(): void {
+    const app = this.app, im = app.images;
+    const c = document.createElement('canvas');
+    c.width = im.width; c.height = im.height;
+    const ctx = c.getContext('2d')!;
+    const px = composite(im, app.show.layer1, app.show.layer2); // without ghosting
+    ctx.putImageData(new ImageData(new Uint8ClampedArray(px.buffer as ArrayBuffer), im.width, im.height), 0, 0);
+    if (app.show.sprites) for (const s of app.level.sprites) {
+      const img = app.spriteThumbs?.get(s.num);
+      if (img) ctx.drawImage(img, s.x * 16 + Number(img.dataset.ox), s.y * 16 + Number(img.dataset.oy));
+    }
+    c.toBlob(async (b) => {
+      if (b) downloadBytes(`level-${hex3(app.level.number)}.png`, new Uint8Array(await b.arrayBuffer()), 'image/png');
+    }, 'image/png');
+  }
+
+  centerTile(): { tx: number; ty: number } {
+    const z = this.app.zoom;
+    return {
+      tx: Math.floor((this.scroller.scrollLeft + this.scroller.clientWidth / 2) / z / 16),
+      ty: Math.floor((this.scroller.scrollTop + this.scroller.clientHeight / 2) / z / 16),
+    };
   }
 
   scrollToTile(tx: number, ty: number): void {

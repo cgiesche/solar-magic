@@ -392,3 +392,24 @@ export function writeSecondaryEntrance(rom: Rom, i: number, e: SecondaryEntrance
   rom.w8(SEC_ENT[2] + i, (e.entranceX << 5) | (e.screen & 0x1f));
   rom.w8(SEC_ENT[3] + i, (e.raw3 & 0xf8) | (e.action & 7));
 }
+
+// ---- entrance positions (tables at $05D730/$05D740: Y, $05D750/$05D758: X; see $05D951) ----
+// The screen number replaces the high byte of the scroll axis: X in horizontal, Y in vertical levels.
+// Result is Mario's pixel position before the entrance action (pipe/water offsets) is applied.
+export function entrancePos(rom: Rom, screen: number, ex: number, ey: number, vertical: boolean): { x: number; y: number } {
+  const xt = rom.r8(0x05d750 + (ex & 7)) | (rom.r8(0x05d758 + (ex & 7)) << 8);
+  const yt = rom.r8(0x05d730 + (ey & 15)) | (rom.r8(0x05d740 + (ey & 15)) << 8);
+  return vertical ? { x: xt, y: ((screen & 0x1f) << 8) | (yt & 0xff) } : { x: ((screen & 0x1f) << 8) | (xt & 0xff), y: yt };
+}
+
+// entrance settings whose position is closest to pixel (px, py)
+export function nearestEntrance(rom: Rom, px: number, py: number, vertical: boolean, maxScreen: number): { screen: number; ex: number; ey: number } {
+  const screen = Math.max(0, Math.min(maxScreen, Math.floor((vertical ? py : px) / 256)));
+  let best = { screen, ex: 0, ey: 0 }, bestD = Infinity;
+  for (let ex = 0; ex < 8; ex++) for (let ey = 0; ey < 16; ey++) {
+    const p = entrancePos(rom, screen, ex, ey, vertical);
+    const d = (p.x - px) ** 2 + (p.y - py) ** 2;
+    if (d < bestD) { bestD = d; best = { screen, ex, ey }; }
+  }
+  return best;
+}

@@ -3,9 +3,9 @@
 import type { App } from './app.ts';
 import { h, modal, clear, hexInput, select, toast } from './dom.ts';
 import { readSecondaryEntrance, writeSecondaryEntrance, type SecondaryEntrance, loadLevel, cloneLevel } from '../core/level.ts';
-import { ENTRANCE_ACTIONS, hex } from '../core/names.ts';
+import { ENTRANCE_ACTIONS, hex, objectName, spriteName } from '../core/names.ts';
 import { saveLevel } from '../core/save.ts';
-import { hasEditorPatch, installEditorPatch } from '../core/patches.ts';
+import { hasEditorPatch, installEditorPatch, DM16_EXT } from '../core/patches.ts';
 
 export function openEntrancesDialog(app: App): void {
   const rom = app.rom;
@@ -109,4 +109,50 @@ export function openCopyLevel(app: App): void {
       },
     },
   ]);
+}
+
+// Insert by number (like Lunar Magic's manual insert): object, extended object or sprite at tile (tx, ty)
+export function openInsertDialog(app: App, tx: number, ty: number): void {
+  const p = app.paletteItem;
+  let kind: 0 | 1 | 2 = app.mode === 'spr' ? 2 : p?.kind === 'obj' && p.num === 0 ? 1 : 0;
+  let num = p?.kind === 'spr' ? (kind === 2 ? p.num : 1) : p ? (p.num || p.ext) : 1;
+  let size = p?.kind === 'obj' ? p.size : 0;
+  let extra = p?.kind === 'spr' ? p.extra : 0;
+  const name = h('div', { class: 'hint' });
+  const fields = h('div');
+  const showName = () => (name.textContent = kind === 2 ? spriteName(num) : kind === 1 ? objectName(0, num) : objectName(num, 0));
+  const build = () => {
+    clear(fields);
+    if (kind === 0) num = Math.max(1, Math.min(0x3f, num));
+    showName();
+    fields.append(
+      h('div', { class: 'prop' }, h('label', null, 'Nummer'), hexInput(num, 2, (v) => { num = v; showName(); }, kind === 0 ? 0x3f : 0xff)),
+      kind === 0 ? h('div', { class: 'prop' }, h('label', null, 'Größe/Einstellung'), hexInput(size, 2, (v) => (size = v))) : '',
+      kind === 2 ? h('div', { class: 'prop' }, h('label', null, 'Extra-Bits'), hexInput(extra, 1, (v) => (extra = v), 3)) : '',
+      name,
+    );
+  };
+  const body = h('div', null,
+    h('div', { class: 'prop' }, h('label', null, 'Typ'), select([[0, 'Objekt'], [1, 'Erweitertes Objekt'], [2, 'Sprite']], kind, (v) => { kind = v as 0 | 1 | 2; build(); })),
+    fields,
+    h('div', { class: 'hint' }, `Position X ${hex(tx, 2)} · Y ${hex(ty, 2)}`),
+  );
+  build();
+  const insert = () => {
+    if (kind === 2) {
+      app.insertAt(tx, ty, { kind: 'spr', num, extra });
+    } else {
+      if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1');
+      if (kind === 0 && num === 0) { toast('Objekt 00 gibt es nicht – erweiterte Objekte über „Erweitertes Objekt“.', 'error'); return false; }
+      if (kind === 1 && num === DM16_EXT) { toast('Direct-Map16 bitte über den Map16-Reiter der Palette platzieren.', 'error'); return false; }
+      app.insertAt(tx, ty, kind === 0 ? { kind: 'obj', num, ext: 0, size } : { kind: 'obj', num: 0, ext: num, size: 0 });
+    }
+  };
+  const dlg = modal('Einfügen nach Nummer', body, [{ label: 'Abbrechen' }, { label: 'Einfügen', primary: true, onClick: insert }]);
+  body.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    (e.target as HTMLElement).dispatchEvent(new Event('change')); // commit the field being edited
+    if (insert() !== false) dlg.close();
+  });
+  setTimeout(() => (fields.querySelector('input') as HTMLInputElement | null)?.select(), 0);
 }

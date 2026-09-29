@@ -44,7 +44,12 @@ Beim Anzeigen eines Levels führt er die **originalen Laderoutinen** des ROMs au
   sekundärer Header (Eingang, Midway, Layer-2/3-Einstellungen), Sprite-Header, BG-Tilemap-Auswahl,
   **Grafik-Bypass (ExGFX pro Level)**.
 * Screen-Exits pro Screen (Ziel, sekundär), **sekundäre Eingänge** (Dialog), Level kopieren/„speichern unter“.
-* Startposition von Mario wird angezeigt; Raster, Screen-Grenzen, Layer ein-/ausblendbar; Zoom 50–400 %.
+* **Eingangsmarkierungen** für Haupteingang (M), Zwischenziel-Screen (Z) und sekundäre Eingänge (S) – per Ziehen
+  verschiebbar (rastet auf die möglichen Eingangspositionen ein).
+* **Einfügen nach Nummer** (Einfg/I): Objekt, erweitertes Objekt oder Sprite mit Größe/Extra-Bits.
+* Raster, Screen-Grenzen, Layer ein-/ausblendbar; **Ghost** (nicht bearbeitete Objektebene halbtransparent);
+  Ansicht mit gedrückten Switch-Palästen bzw. ON/OFF auf OFF; Zoom 50–400 %.
+* Statuszeile mit Objekt-/Sprite-Anzahl und Datengröße (Warnung ab 128 Sprites); **Level als PNG** exportieren.
 * **Level testen (T):** das Level (inkl. ungespeicherter Änderungen) im eingebauten Emulator spielen.
 
 ### Grafik, Paletten, Map16

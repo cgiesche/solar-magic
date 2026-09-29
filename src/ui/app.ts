@@ -5,6 +5,7 @@ import { LevelEmulator, OV_L1, OV_L2, type LevelRender, type LevelOverride, MAP_
 import {
   type Level, type LevelObject, type LevelSprite, loadLevel, serializeLayer1, serializeLayer2, serializeSprites,
   isL1Vertical, cloneLevel, newUid, hasLayer2Objects, L1_PTRS, SEC_HDR,
+  readSecondaryEntrance, writeSecondaryEntrance, entrancePos, nearestEntrance,
 } from '../core/level.ts';
 import { renderLevel, type LevelImages, composite } from '../core/render.ts';
 import { saveLevel } from '../core/save.ts';
@@ -20,6 +21,9 @@ export type PaletteItem =
 
 type Listener = () => void;
 
+// entrance markers: main entrance, midway point, secondary entrances leading into this level
+export interface Marker { kind: 'main' | 'midway' | 'sec'; index: number; x: number; y: number }
+
 export class App {
   rom: Rom;
   romName: string;
@@ -32,7 +36,9 @@ export class App {
   selection = new Set<number>();
   paletteItem: PaletteItem | null = null;
   zoom = 2;
-  show = { layer1: true, layer2: true, sprites: true, grid: false, screens: true, exits: true };
+  show = { layer1: true, layer2: true, sprites: true, grid: false, screens: true, exits: true, ghost: true };
+  // view-only game state applied before the emulated level load
+  switches = { palaces: false, onOff: false };
   dirty = false;
   undoStack: Level[] = [];
   redoStack: Level[] = [];
@@ -44,6 +50,7 @@ export class App {
   renderError: string | null = null;
   exitScreen = 0;
   spriteThumbs: Map<number, HTMLCanvasElement> | null = null;
+  secEntrances: number[] = []; // secondary entrance indices leading into the current level
 
   constructor(rom: Rom, name: string) {
     this.rom = rom;
@@ -94,6 +101,8 @@ export class App {
       layer2Pointer: l2 ? undefined : lv.layer2Pointer,
       sprites: serializeSprites(lv.sprites, lv.spriteHeader, this.vertical),
       byteOwner,
+      switchPalaces: this.switches.palaces,
+      onOffSwitch: this.switches.onOff,
       secondaryHeader: [
         (s.layer2Scroll << 4) | s.entranceY, (s.layer3 << 6) | (s.entranceAction << 3) | s.entranceX,
         (s.midwayScreen << 4) | (s.fgInitY << 2) | s.bgInitY, (s.noYoshiIntro << 7) | (s.verticalPositioning << 5) | s.entranceScreen,
@@ -107,14 +116,66 @@ export class App {
     this.renderError = r.ok ? null : r.error ?? 'Fehler';
     this.render = r;
     this.images = renderLevel(this.rom, r, lv.header.mode, lv.header.screens);
-    this.compositeImg = composite(this.images, this.show.layer1, this.show.layer2);
+    this.compositeImg = this.compose();
     this.buildOffsetMaps();
+    this.findSecondaryEntrances();
     this.emit('render');
   }
 
   recomposite(): void {
-    this.compositeImg = composite(this.images, this.show.layer1, this.show.layer2);
+    this.compositeImg = this.compose();
     this.emit('render');
+  }
+
+  // the object layer not being edited is ghosted (only in levels with two object layers)
+  compose(): Uint32Array {
+    const ghost = this.show.ghost && this.level.layer2Objects ? (this.mode === 'l1' ? 2 : this.mode === 'l2' ? 1 : 0) : 0;
+    return composite(this.images, this.show.layer1, this.show.layer2, ghost);
+  }
+
+  // ------------- entrances -------------
+  // vanilla: entrance i leads to level F800[i] | (i & $100) (the high bit comes from the map, like the exit's)
+  findSecondaryEntrances(): void {
+    const n = this.level.number;
+    this.secEntrances = [];
+    for (let i = n & 0x100; i < (n & 0x100) + 0x100; i++) if (readSecondaryEntrance(this.rom, i).destLevel === (n & 0xff)) this.secEntrances.push(i);
+  }
+
+  markers(): Marker[] {
+    const s = this.level.secondary;
+    const vert = (s.verticalPositioning & 1) !== 0;
+    const main = entrancePos(this.rom, s.entranceScreen, s.entranceX, s.entranceY, vert);
+    const mid = entrancePos(this.rom, s.midwayScreen, s.entranceX, s.entranceY, vert);
+    const out: Marker[] = [{ kind: 'midway', index: 0, ...mid }, { kind: 'main', index: 0, ...main }];
+    for (const i of this.secEntrances) {
+      const e = readSecondaryEntrance(this.rom, i);
+      out.push({ kind: 'sec', index: i, ...entrancePos(this.rom, e.screen, e.entranceX, e.entranceY, vert) });
+    }
+    return out;
+  }
+
+  // snaps a marker to the entrance setting nearest to Mario's top-left pixel (px, py);
+  // main/midway change the level (undoable), secondary entrances are written to the ROM directly.
+  // The midway point shares X/Y with the main entrance, only its screen can change.
+  moveMarker(m: Marker, px: number, py: number): boolean {
+    const s = this.level.secondary;
+    const vert = (s.verticalPositioning & 1) !== 0;
+    const maxScreen = this.level.header.screens - 1;
+    const p = nearestEntrance(this.rom, px, py, vert, m.kind === 'midway' ? Math.min(15, maxScreen) : maxScreen);
+    if (m.kind === 'main') {
+      if (s.entranceScreen === p.screen && s.entranceX === p.ex && s.entranceY === p.ey) return false;
+      s.entranceScreen = p.screen; s.entranceX = p.ex; s.entranceY = p.ey;
+    } else if (m.kind === 'midway') {
+      if (s.midwayScreen === p.screen) return false;
+      s.midwayScreen = p.screen;
+    } else {
+      const e = readSecondaryEntrance(this.rom, m.index);
+      if (e.screen === p.screen && e.entranceX === p.ex && e.entranceY === p.ey) return false;
+      e.screen = p.screen; e.entranceX = p.ex; e.entranceY = p.ey;
+      writeSecondaryEntrance(this.rom, m.index, e);
+      this.emu.syncRom();
+    }
+    return true;
   }
 
   buildOffsetMaps(): void {
@@ -306,8 +367,10 @@ export class App {
       toast('Dieses Level hat keine Layer-2-Objekte (Layer 2 ist Hintergrund).');
       return;
     }
+    const recompose = this.level.layer2Objects && this.show.ghost && m !== this.mode;
     this.mode = m;
     this.selection = new Set(selection);
+    if (recompose) this.recomposite();
     this.emit('mode');
     this.emit('change');
   }
@@ -319,8 +382,7 @@ export class App {
     o.y = Math.max(0, Math.min(Math.min(hgt, this.vertical ? 0x1ff : 0x1f + 1) - 1, o.y));
   }
 
-  insertAt(tx: number, ty: number): void {
-    const p = this.paletteItem;
+  insertAt(tx: number, ty: number, p: PaletteItem | null = this.paletteItem): void {
     if (!p) { toast('Zuerst ein Objekt/Sprite in der Palette wählen.'); return; }
     this.checkpoint();
     if (p.kind === 'obj' && (this.mode === 'l1' || this.mode === 'l2')) {

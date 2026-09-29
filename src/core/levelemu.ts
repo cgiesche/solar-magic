@@ -25,6 +25,7 @@ export interface LevelOverride {
   byteOwner?: Int32Array;
   secondaryHeader?: number[]; // 4 bytes
   switchPalaces?: boolean; // treat all switch palaces as pressed
+  onOffSwitch?: boolean; // ON/OFF switch in the OFF state ($14AF)
   trackSources?: boolean; // record ROM provenance of CGRAM (slower)
 }
 
@@ -91,6 +92,7 @@ export class LevelEmulator {
     w[0x1b93] = 0;
     w[0x0109] = 0;
     if (ov.switchPalaces) for (let i = 0; i < 4; i++) w[0x1f27 + i] = 1;
+    if (ov.onOffSwitch) w[0x14af] = 1;
     w[0x100] = 0x11;
 
     // temporary pointer patches in the ROM image

@@ -10,7 +10,7 @@ import { hex } from './core/names.ts';
 import { openPaletteEditor } from './ui/paletteeditor.ts';
 import { openMap16Editor } from './ui/map16editor.ts';
 import { openGfxEditor } from './ui/gfxeditor.ts';
-import { openEntrancesDialog, openRomInfo, openCopyLevel } from './ui/tools.ts';
+import { openEntrancesDialog, openRomInfo, openCopyLevel, openInsertDialog } from './ui/tools.ts';
 import { OverworldView } from './ui/overworld.ts';
 import { openTestPlay } from './ui/testplay.ts';
 
@@ -64,9 +64,15 @@ function buildUi(app: App): void {
     const cb = h('input', { type: 'checkbox', checked: app.show[k] });
     cb.addEventListener('change', () => {
       app.show[k] = cb.checked;
-      if (k === 'layer1' || k === 'layer2') app.recomposite(); else view.paint();
+      if (k === 'layer1' || k === 'layer2' || k === 'ghost') app.recomposite(); else view.paint();
     });
     return h('label', { class: 'toggle' }, cb, label);
+  };
+  // view-only game state (re-runs the level load)
+  const switchToggle = (k: keyof App['switches'], label: string, title: string) => {
+    const cb = h('input', { type: 'checkbox', checked: app.switches[k] });
+    cb.addEventListener('change', () => { app.switches[k] = cb.checked; app.refresh(); });
+    return h('label', { class: 'toggle', title }, cb, label);
   };
   const levelTitle = h('span', { class: 'level-title' });
   const zoomLabel = h('span', { class: 'zoom' });
@@ -85,6 +91,9 @@ function buildUi(app: App): void {
     modes,
     h('span', { class: 'sep' }),
     toggle('layer1', 'L1'), toggle('layer2', 'L2/BG'), toggle('sprites', 'Sprites'), toggle('exits', 'Exits'), toggle('screens', 'Screens'), toggle('grid', 'Raster'),
+    h('span', { title: 'Nicht bearbeitete Objektebene halbtransparent (nur Level mit Layer-2-Objekten)' }, toggle('ghost', 'Ghost')),
+    switchToggle('palaces', '!-Blöcke', 'Ansicht: alle Switch-Paläste gedrückt'),
+    switchToggle('onOff', 'OFF', 'Ansicht: ON/OFF-Schalter auf OFF'),
     h('span', { class: 'sep' }),
     h('button', { onclick: () => view.setZoom(app.zoom / 2) }, '−'), zoomLabel, h('button', { onclick: () => view.setZoom(app.zoom * 2) }, '+'),
     h('span', { class: 'spacer' }),
@@ -94,6 +103,7 @@ function buildUi(app: App): void {
     h('button', { onclick: () => openGfxEditor(app), title: 'Grafiken' }, 'Grafiken'),
     h('button', { onclick: () => openEntrancesDialog(app), title: 'Sekundäre Eingänge' }, 'Eingänge'),
     h('button', { onclick: () => openCopyLevel(app), title: 'Level unter anderer Nummer speichern' }, 'Kopieren'),
+    h('button', { onclick: () => view.exportPng(), title: 'Level (sichtbare Ebenen) als PNG exportieren' }, 'PNG'),
     h('button', { onclick: () => openRomInfo(app), title: 'ROM-Info, Erweiterung, Patches' }, 'ROM'),
     h('button', { onclick: () => showHelp(), title: 'Tastenkürzel' }, '?'),
   );
@@ -166,6 +176,12 @@ function buildUi(app: App): void {
     else if (k === '4') app.setMode('exit');
     else if (k === 'h' || k === 'H') openHeaderDialog(app);
     else if (k === 't' || k === 'T') openTestPlay(app);
+    else if (k === 'Insert' || k === 'i' || k === 'I') {
+      e.preventDefault();
+      const hv = view.hover;
+      const c = view.centerTile();
+      openInsertDialog(app, hv ? hv.tx : c.tx, hv ? hv.ty : c.ty);
+    }
     else if (k === 'ArrowLeft' || k === 'ArrowRight' || k === 'ArrowUp' || k === 'ArrowDown') {
       if (!app.selection.size) return;
       e.preventDefault();
@@ -206,6 +222,8 @@ function showHelp(): void {
     ['Ziehen', 'Auswahl verschieben / Rahmen aufziehen'],
     ['Griff unten rechts', 'Objektgröße ändern'],
     ['Rechtsklick / Shift+Klick', 'Palettenelement einfügen'],
+    ['Einfg / I', 'Objekt/Sprite nach Nummer einfügen (an Mausposition)'],
+    ['M / Z / S-Markierung ziehen', 'Haupteingang / Zwischenziel-Screen / sekundären Eingang verschieben'],
     ['Pfeiltasten', 'Auswahl um 1 Tile verschieben'],
     ['+ / − · * / ÷', 'Breite ändern · Höhe ändern'],
     ['Alt+Pfeiltasten', 'Größe ändern'],
