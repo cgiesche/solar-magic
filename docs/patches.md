@@ -234,12 +234,33 @@ Einzeln geht das auch:
 - *Grafiken* → *.bin importieren* (4 KB = 4bpp unkomprimiert, 3 KB = 3bpp, sonst LZ2-gepackt);
 - *Map16* → *.map16 importieren* (ab dem gewählten Tile).
 
-**BG2/BG3:** Lunar Magic hat pro Level zwei zusätzliche Grafik-Slots für die Map16-Tiles 200–27F (BG2)
-und 280–2FF (BG3). Im Original-Spiel liegt an dieser Stelle im VRAM die Layer-1-Tilemap. LM verlegt die
-Tilemaps deshalb mit einem eigenen VRAM-Patch. Solange der Editor diesen Patch noch nicht hat, sind die
-Slots abgeschaltet. Block-Pakete speichern die Grafik trotzdem als ExGFX, sie wird aber noch nicht
-geladen. Eine frühere Installation (Editor-Patch „SMWG“, Hook `$00AA50`) wird beim Öffnen der ROM
-abgeschaltet; ihre Zuordnungen bleiben erhalten.
+**BG2/BG3:** Wie Lunar Magic hat der Editor pro Level zwei zusätzliche Grafik-Slots für die Map16-Tiles
+200–27F (BG2) und 280–2FF (BG3), im Level-Header unter „Grafik-Bypass“. Im Original-Spiel liegt an
+dieser Stelle im VRAM (`$2000–$2FFF`) die Layer-1-Tilemap. Die Slots brauchen deshalb den **VRAM-Patch**
+(„SMWV“), der die Tilemaps wie bei LM verlegt, siehe unten. Er wird mit „BG2/BG3 aktivieren“ im
+Level-Header installiert, bei Block-Paketen mit BG2/BG3-Grafik automatisch.
+
+Eine frühere Installation der Slots ohne VRAM-Patch (bis zu dieser Version) hat die Layer-1-Tilemap
+überschrieben. Sie wird beim Öffnen der ROM abgeschaltet; ihre Zuordnungen bleiben erhalten und gelten
+wieder, sobald der VRAM-Patch installiert ist.
+
+### VRAM-Patch (SMWV)
+
+In Leveln liegen die Layer-1/2-Tilemaps mit dem Patch als 64×32 bei `$3000`/`$3800` statt 64×64 bei
+`$2000`/`$3000`.
+- **Horizontale Level:** Eine 64×32-Tilemap fasst 32 der 54 Tile-Zeilen. Alle Zeilen beider Layer stehen
+  in einem RAM-Schatten bei `$7F0000–$7F3653`; die Tilemap hält ein Fenster um die Kamera, und beim
+  vertikalen Scrollen werden Zeilen aus dem Schatten nachgeladen.
+- **Vertikale Level:** Sie laden ohnehin zeilenweise; dort baut das Spiel nur 1 Block über und 15 Blöcke
+  unter der Kamera vor statt 8 und 23.
+- **Einzelne Tile-Änderungen** (Münzen, Blöcke …) gehen in den Schatten und, falls sichtbar, ins VRAM.
+- **Overworld, Titelbild und Abspann** bleiben unverändert.
+
+Geprüft wird das, indem jedes Level mit und ohne Patch mit denselben Eingaben gespielt wird: Bei gleichem
+Spielzustand muss der sichtbare Inhalt beider Tilemaps exakt übereinstimmen (`tools/testvram.ts`). Der
+Patch kostet etwas Rechenzeit. In Frames, die schon im Original am Limit sind, entsteht deshalb selten
+ein Lag-Frame mehr, im Test rund 0,1 % der Frames. Patches, die ebenfalls den `$7F0000`-Bereich als
+Free RAM nutzen oder die Tilemap-Uploads selbst verändern, vertragen sich nicht damit.
 
 ## Hooks des Editors
 
@@ -252,6 +273,7 @@ mit der jeweiligen Funktion nicht kompatibel.
 | `$00922F` | Level-Paletten (SMWP) |
 | `$058060` | BG-Tilemaps (SMWB) |
 | `$00AA50` | BG2/BG3-Grafik-Slots (SMWG) |
+| `$008A7F`, `$0087AD`, `$0085E3`, `$0580B0`, `$0580B4`, `$0580BF`, `$0580C3`, `$058730`, `$058770`, `$0587D4`, `$0587DB`, `$05880B`, `$058812` | VRAM-Patch (SMWV): Tilemaps verlegt; RAM `$7F0000–$7F3653` |
 | `$05B20F` | Nachrichten in freiem Speicher (SMWM), nur wenn die Texte nicht mehr passen |
 | `$00F545`, `$029328`, `$058A66`, `$058B46`, `$058C34`, `$058D2B`, `$00C096`, `$00C0E7` | Map16-Erweiterung und Custom Blocks (SMWX) |
 | `$05808C`, `$00A5EE`, `$00A242`, `$00A295`, `$00A2EE` | UberASM: Level `load`/`init`/`main`/`end` |

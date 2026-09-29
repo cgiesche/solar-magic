@@ -11,6 +11,9 @@ import { parseMap16File } from '../src/core/map16file.ts';
 import { blockOf, actsLike, extTileWords } from '../src/core/map16ext.ts';
 import { levelExtGfx, gfxEntry, installEditorPatch } from '../src/core/patches.ts';
 import { map16Source } from '../src/core/render.ts';
+import { installVramPatch } from '../src/core/vrampatch.ts';
+import { loadLevel, serializeLayer1, newUid } from '../src/core/level.ts';
+import { DM16_EXT } from '../src/core/patches.ts';
 
 await loadAsar();
 let bad = 0;
@@ -57,6 +60,24 @@ check(!!blockOf(rom, 0x500) && !!blockOf(rom, 0x501) && actsLike(rom, 0x500) ===
 check(extTileWords(rom, 0x501)?.join() === words[1].join(), 'Map16 graphics of 501');
 // (the BG2 slot needs the VRAM patch; until then the file is only stored)
 check(gfxEntry(rom, 0x80)?.raw === true && levelExtGfx(rom, 0x105)[0] === 0xff && r.notes.some((n) => n.includes('VRAM-Patch')), 'ExGFX 80 stored, BG2 slot left alone with a note');
+
+// with the VRAM patch the BG2 slot is used: a placed tile 500 shows the package's graphics in the level
+{
+  const rom = new Rom(new Uint8Array(readFileSync('Super Mario World (U) [!].smc')));
+  installEditorPatch(rom);
+  check(installVramPatch(rom).ok, 'VRAM patch installed');
+  const r = applyBlockPack(rom, pkg, plan, { blank, level: 0x105 });
+  check(r.ok && levelExtGfx(rom, 0x105)[0] === 0x80, 'with the VRAM patch: ExGFX 80 set as BG2 of level 105');
+  const e = new LevelEmulator(rom); e.boot();
+  const lv = loadLevel(rom, 0x105);
+  lv.objects.push({ uid: newUid(), num: 0, ext: DM16_EXT, x: 4, y: 20, size: 0x00, tile: 0x500 });
+  const l = e.load(0x105, { layer1: serializeLayer1(rom, lv) });
+  let eq = 0; for (let i = 0; i < 0x1000; i++) if (l.vram[0x4000 + i] === gfx[i]) eq++;
+  // block (4, 20) → tile column 8/9, tile row 40/41; the patched tilemap is 64x32 at $3000 (row 40 → 8)
+  const at = (x: number, y: number) => { const a = 0x3000 + (y & 31) * 32 + x; return l.vram[a * 2] | (l.vram[a * 2 + 1] << 8); };
+  const got = [at(8, 40), at(8, 41), at(9, 40), at(9, 41)];
+  check(l.ok && eq === 0x1000 && got.join() === words[0].join(), `tile 500 in the level: words ${got.map((v) => v.toString(16)).join(' ')}, BG2 graphics ${eq}/4096`);
+}
 
 // the real package, if present locally
 try {

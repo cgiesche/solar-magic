@@ -1,6 +1,8 @@
 // Level header / secondary header editor.
 
 import type { App } from './app.ts';
+import { loadAsar } from '../core/asar.ts';
+import { installVramPatch } from '../core/vrampatch.ts';
 import { h, select, hexInput, modal, toast } from './dom.ts';
 import { TILESETS, levelModeName, MUSIC, TIME_SETTINGS, VERTICAL_SCROLL, ENTRANCE_ACTIONS, hex2, hex } from '../core/names.ts';
 import { hasLayer2Objects, type PrimaryHeader, type SecondaryHeader, L2_PTRS } from '../core/level.ts';
@@ -93,8 +95,19 @@ export function openHeaderDialog(app: App): void {
     h('h3', null, 'Grafik-Bypass (ExGFX pro Level)'),
     h('p', { class: 'hint' }, 'Leer = Standard aus Tileset/Sprite-Set (grau angezeigt). Eigene Nummern (00–FF) laden die jeweilige GFX/ExGFX-Datei in diesen Slot. Installiert bei Bedarf den Editor-Patch.'),
     h('div', { class: 'grid4' }, gfxInputs, extInputs),
-    h('p', { class: 'hint' }, extGfxAvailable(app.rom) ? 'BG2/BG3 (wie in Lunar Magic): zusätzliche Grafik für die Map16-Tiles 200–27F bzw. 280–2FF, z. B. aus Block-Paketen.'
-      : 'BG2/BG3 (Tiles 200–2FF) sind noch nicht verfügbar: im Original liegt dort die Layer-1-Tilemap; dafür fehlt noch der VRAM-Patch.'),
+    extGfxAvailable(app.rom) ? h('p', { class: 'hint' }, 'BG2/BG3 (wie in Lunar Magic): zusätzliche Grafik für die Map16-Tiles 200–27F bzw. 280–2FF, z. B. aus Block-Paketen.')
+      : h('p', { class: 'hint' }, 'BG2/BG3 (Tiles 200–2FF): im Original liegt dort die Layer-1-Tilemap. ',
+        h('button', { onclick: async () => {
+          try {
+            await loadAsar();
+            const r = installVramPatch(app.rom);
+            if (!r.ok) { toast(r.errors.join(' '), 'error'); return; }
+            app.emu.syncRom(); app.persist(); app.refresh();
+            toast('VRAM-Patch installiert: BG2/BG3 sind jetzt verfügbar.');
+            dlg.close();
+            openHeaderDialog(app);
+          } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
+        } }, 'BG2/BG3 aktivieren (verlegt die Tilemaps wie Lunar Magic)')),
     h('h3', null, 'Sprites & Hintergrund'),
     h('div', { class: 'grid2' },
       f('Sprite-Speicher', hexInput(spriteHeader & 0x3f, 2, (v) => (spriteHeader = (spriteHeader & 0xc0) | v), 0x3f), '$1692-Index'),
@@ -103,7 +116,7 @@ export function openHeaderDialog(app: App): void {
         f('BG-Tilemap', select(bgOpts, l2ptr, (v) => (l2ptr = v))),
     ),
   );
-  modal(`Level ${hex(lv.number, 3)} – Header`, body, [
+  const dlg = modal(`Level ${hex(lv.number, 3)} – Header`, body, [
     { label: 'Abbrechen' },
     {
       label: 'Übernehmen', primary: true, onClick: () => {

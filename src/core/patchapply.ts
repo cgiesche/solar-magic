@@ -63,7 +63,7 @@ export interface PatchSource {
   files: Map<string, Uint8Array | string>;
   defines?: Record<string, string>; // passed to Asar
   settings?: Record<string, string>; // all settings chosen by the user (stored in the registry)
-  kind?: 'patch' | 'uberasm' | 'blocks';
+  kind?: 'patch' | 'uberasm' | 'blocks' | 'vram';
   archive?: Uint8Array; // sources to keep in the ROM (zip)
 }
 

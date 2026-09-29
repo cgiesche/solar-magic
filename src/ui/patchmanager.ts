@@ -11,6 +11,8 @@ import { zipSync, unzipSync } from 'fflate';
 import { openUberDialog } from './uberdialog.ts';
 import { openBlockDialog } from './blockdialog.ts';
 import { removeBlocks, loadBlockProject, saveBlockProject } from '../core/blocks.ts';
+import { installVramPatch, uninstallVramPatch } from '../core/vrampatch.ts';
+import { extGfxAvailable } from '../core/patches.ts';
 import { loadProject, emptyProject, saveProject } from '../core/uberproject.ts';
 import { ALL, type UberContext } from '../core/uberasm.ts';
 import { hex } from '../core/names.ts';
@@ -310,6 +312,11 @@ function openBlockPackDialog(app: App, pkg: PatchPackage, info: PackageInfo, onD
     { label: 'Abbrechen' },
     { label: 'Einrichten', primary: true, onClick: () => {
       if (app.dirty) app.saveLevel(true);
+      // BG2/BG3 need the tilemaps moved out of VRAM $2000 first
+      if (useLevel && plan.gfx.some((g) => g.slot === 'BG2' || g.slot === 'BG3') && !extGfxAvailable(app.rom)) {
+        const v = installVramPatch(app.rom);
+        if (!v.ok) { resultLog(log, v); return false; }
+      }
       const r = applyBlockPack(app.rom, pkg, plan, { blank: map16Source(app.rom, app.render).fg(0x025), level: useLevel ? app.level.number : null, map16At });
       if (!r.ok) { resultLog(log, r); return false; }
       romChanged(app);
@@ -335,7 +342,8 @@ export async function openPatchManager(app: App): Promise<void> {
             h('div', { class: 'patch-name' }, p.name, p.version ? h('span', { class: 'hint' }, ` v${p.version}`) : null),
             h('div', { class: 'hint' }, `${new Date(p.applied).toLocaleString()} · ${bytes} Bytes geändert · ${own < 1024 ? `${own} Bytes` : `${(own / 1024).toFixed(1)} KB`} Code/Daten${Object.keys(p.defines).length ? ` · ${Object.entries(p.defines).map(([k, v]) => `!${k}=${v}`).join(' ')}` : ''}`)),
           h('div', { class: 'row' },
-            h('button', { onclick: () => (p.kind === 'uberasm' ? openUberDialog(app, build) : p.kind === 'blocks' ? openBlockDialog(app, 0x200, build) : configure(p)) }, p.kind && p.kind !== 'patch' ? 'Bearbeiten …' : 'Einstellungen …'),
+            p.kind === 'vram' ? h('span', { class: 'hint' }, 'Editor-Patch: Tilemaps für BG2/BG3 verlegt') :
+              h('button', { onclick: () => (p.kind === 'uberasm' ? openUberDialog(app, build) : p.kind === 'blocks' ? openBlockDialog(app, 0x200, build) : configure(p)) }, p.kind && p.kind !== 'patch' ? 'Bearbeiten …' : 'Einstellungen …'),
             h('button', { onclick: () => remove(p) }, 'Entfernen')));
       })) : h('p', null, 'Keine Patches installiert.'),
       h('div', { class: 'row' }, h('button', { class: 'primary', onclick: add }, 'Hinzufügen …'),
@@ -364,7 +372,7 @@ export async function openPatchManager(app: App): Promise<void> {
   const remove = (p: PatchEntry) => {
     if (app.dirty) app.saveLevel(true);
     try {
-      const w = p.kind === 'blocks' ? removeBlocks(app.rom) : uninstallPatch(app.rom, p.id);
+      const w = p.kind === 'blocks' ? removeBlocks(app.rom) : p.kind === 'vram' ? uninstallVramPatch(app.rom) : uninstallPatch(app.rom, p.id);
       kvDel(srcKey(p.id)).catch(() => {});
       romChanged(app);
       toast(`Patch „${p.name}“ entfernt${w.length ? ': ' + w.join(' ') : ''}`);
