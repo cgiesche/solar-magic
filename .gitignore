@@ -2,3 +2,4 @@ node_modules
 dist
 *.smc
 *.sfc
+resources_local
