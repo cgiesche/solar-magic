@@ -53,7 +53,7 @@ export function hasEditorPatch(rom: Rom): boolean {
 
 function build(): Asm {
   const a = new Asm();
-  a.b(...MAGIC, 1);
+  a.b(...MAGIC, 2);
   // data pointers (patched after link, see install)
   a.fill(HEADER - 5);
 
@@ -112,7 +112,9 @@ function build(): Asm {
   a.b(0x6b);
 
   a.label('ApplyOvr');
-  a.b(0x85, 0x0b); // STA $0B
+  a.b(0x48); // PHA (slot base offset)
+  a.b(0xa5, 0x08, 0x48, 0xa5, 0x09, 0x48, 0xa5, 0x0a, 0x48, 0xa5, 0x0b, 0x48); // save scratch $08-$0B
+  a.b(0xa3, 0x05, 0x85, 0x0b); // LDA 5,S STA $0B
   a.b(0xaf, 0x00, 0x01, 0x7e, 0xc9, 0x0b); // LDA.l $7E0100 CMP #$0B
   a.br(0x90, 'ovok');
   a.b(0xc9, 0x0f);
@@ -132,6 +134,7 @@ function build(): Asm {
   a.b(0xc8, 0xe8, 0xe0, 0x04); // INY INX CPX #$04
   a.br(0xd0, 'lp3');
   a.label('ovout');
+  a.b(0x68, 0x85, 0x0b, 0x68, 0x85, 0x0a, 0x68, 0x85, 0x09, 0x68, 0x85, 0x08, 0x68); // restore scratch, drop base
   a.b(0x60);
 
   // ---- extended object $02: Direct Map16 (M=8, X=8) ----

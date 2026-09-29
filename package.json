@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node tools/testlevels.ts && node tools/testpatch.ts && node tools/testsave.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.3",

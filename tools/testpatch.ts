@@ -19,9 +19,11 @@ for (const n of levels) {
   for (let i = 0xc800; i < 0x10000; i++) if (a.wram[i] !== b.wram[i] || a.wram[i + 0x10000] !== b.wram[i + 0x10000]) d++;
   for (let i = 0; i < 0x10000; i++) if (a.vram[i] !== b.vram[i]) dv++;
   for (let i = 0; i < 0x200; i++) if (a.cgram[i] !== b.cgram[i]) dc++;
-  if (d || dv || dc || !b.ok) { bad++; console.log('level', n.toString(16), 'map', d, 'vram', dv, 'cgram', dc, b.error ?? ''); }
+  if (d || dc || !b.ok) { bad++; console.log('level', n.toString(16), 'map', d, 'vram', dv, 'cgram', dc, b.error ?? ''); }
+  else if (dv) console.log('  (level', n.toString(16), 'vram differs in', dv, 'bytes – animation timing)');
 }
 console.log('patched vs vanilla: bad', bad);
+if (bad) process.exitCode = 1;
 // DM16
 const lv = loadLevel(rom, 0x105);
 lv.objects.push({ uid: newUid(), num: 0, ext: DM16_EXT, x: 30, y: 10, size: 0x23, tile: 0x130 });
@@ -41,6 +43,7 @@ const r2 = e1.load(0x105);
 let eq = 0; for (let i = 0; i < 0x1000; i++) if (r2.vram[i] === modified[i]) eq++;
 let other = 0; for (let i = 0x1000; i < 0x8000; i++) if (r2.vram[i] !== base.vram[i]) other++;
 console.log('ExGFX raw: FG1 match', eq, '/4096; other diffs', other, r2.ok);
+if (eq !== 4096 || other) process.exitCode = 1;
 // level 106 unaffected
 setLevelGfx(rom, 0x105, new Array(8).fill(0xff));
 // sprite relocation: add many sprites

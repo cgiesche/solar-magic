@@ -30,6 +30,7 @@ for (const n of levels) {
   if (d || !r.ok) { bad++; console.log('level', n.toString(16), 'diff', d, r.error ?? ''); }
   if (lv.sprites.length < 6) { bad++; console.log('sprites lost', n.toString(16)); }
 }
+if (bad) process.exitCode = 1;
 console.log('levels bad:', bad, 'rom size', (rom.size / 1024) + 'KB', 'rats blocks', rom.scanRats().length);
 // overworld roundtrip
 const l1 = readL1(rom), l2 = readL2(rom);

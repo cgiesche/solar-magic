@@ -33,3 +33,4 @@ for (const n of list) {
   }
 }
 console.log('bad', bad);
+if (bad) process.exitCode = 1;
