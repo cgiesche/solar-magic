@@ -1,11 +1,12 @@
 // Map16 editor: 16x16 tile definitions (four 8x8 tiles each) for the current tileset.
 
 import type { App } from './app.ts';
-import { h, modal, clear, hexInput, toast } from './dom.ts';
+import { h, modal, clear, hexInput, toast, pickFile } from './dom.ts';
 import { TileCache, map16Source } from '../core/render.ts';
 import { hex } from '../core/names.ts';
 import { EXT_FIRST, EXT_TILES, map16Ext, actsLike, setActsLike, setExtTileWords } from '../core/map16ext.ts';
 import { blockFileOf, openBlockDialog } from './blockdialog.ts';
+import { parseMap16File, map16Targets } from '../core/map16file.ts';
 
 // sheets of 512 tiles: FG pages 0-1 (vanilla), 2-3 … E-F (extended, patch), BG
 export function openMap16Editor(app: App, initialTile = 0): void {
@@ -188,10 +189,32 @@ export function openMap16Editor(app: App, initialTile = 0): void {
     writeWord(quad, (v & 0xe000) | (pickPal << 10) | t);
   });
 
+  // Lunar Magic .map16 export: its tiles (and acts like) from the selected tile on
+  const importMap16 = async () => {
+    const f = await pickFile('.map16');
+    if (!f) return;
+    try {
+      const m = parseMap16File(new Uint8Array(await f.arrayBuffer()));
+      const targets = map16Targets(m, sel);
+      if (targets.some((t) => t >= EXT_TILES)) throw new Error('Die Tiles passen ab hier nicht mehr auf die Map16-Seiten');
+      page = 'fg';
+      targets.forEach((t, i) => {
+        setWords(t, m.tiles[i]);
+        if (m.acts) setActsLike(app.rom, t, m.acts[i], blank());
+      });
+      app.emu.syncRom();
+      toast(`${m.tiles.length} Tile(s) aus ${f.name} ab ${hex(sel, 3)} importiert`);
+    } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
+    redraw();
+  };
+
   redraw();
   modal(`Map16 – Tileset ${hex(app.level.header.tileset, 1)}`, h('div', { class: 'm16-editor' },
     h('div', { class: 'm16-col' }, pageSel, h('div', { class: 'm16-scroll' }, tilesCanvas)),
     h('div', { class: 'm16-col' }, h('div', { class: 'hint' }, 'Grafik (VRAM)'), h('div', { class: 'm16-scroll' }, gfxCanvas)),
     detail,
-  ), [{ label: 'Schließen', primary: true, onClick: () => { app.refresh(); app.palettesChanged(); app.persist(); } }]);
+  ), [
+    { label: '.map16 importieren (ab gewähltem Tile)', onClick: () => { void importMap16(); return false; } },
+    { label: 'Schließen', primary: true, onClick: () => { app.refresh(); app.palettesChanged(); app.persist(); } },
+  ]);
 }

@@ -8,6 +8,7 @@ import { snesToPc } from '../core/rom.ts';
 import { hex } from '../core/names.ts';
 
 import { gfxEntry, setGfxEntry, hasEditorPatch, VANILLA_GFX } from '../core/patches.ts';
+import { importGfxFile, exgfxName } from '../core/map16file.ts';
 
 function defaultBpp(i: number, size: number): number {
   if ((i >= 0x28 && i <= 0x2b) || i === 0x2f) return 2;
@@ -144,11 +145,29 @@ export function openGfxEditor(app: App): void {
     toast(`GFX${hex(cur, 2)} importiert: ${out.length} Bytes → ${comp.length} Bytes @ $${hex(addr, 6)}${importRaw ? ' (unkomprimiert)' : ''}`);
   };
 
+  // ExGFX file as Lunar Magic stores them (.bin: 4 KB 4bpp, 3 KB 3bpp or LZ2)
+  const importBin = async () => {
+    const f = await pickFile('.bin');
+    if (!f) return;
+    const n = exgfxName(f.name).num;
+    if (n !== null && n !== cur && n <= 0xff) { cur = n; }
+    try {
+      const what = importGfxFile(app.rom, cur, new Uint8Array(await f.arrayBuffer()));
+      app.emu.syncRom();
+      app.palettesChanged();
+      app.persist();
+      buildList();
+      draw();
+      toast(`${f.name} → ${cur < VANILLA_GFX ? 'GFX' : 'ExGFX'}${hex(cur, 2)} (${what}). Zuweisen: Level-Header → Grafik-Bypass.`);
+    } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
+  };
+
   buildList();
   draw();
   modal('Grafiken (GFX-Dateien)', h('div', { class: 'gfx-editor' }, list, h('div', { class: 'gfx-view' }, canvas), info), [
     { label: 'PNG exportieren', onClick: () => { exportPng(); return false; } },
     { label: 'PNG importieren', onClick: () => { void importPng(); return false; } },
+    { label: '.bin importieren', onClick: () => { void importBin(); return false; } },
     { label: 'Schließen', primary: true },
   ]);
 }

@@ -32,6 +32,7 @@ Viele Downloads auf SMWCentral sind keine eigenständigen Patches, sondern Resso
 |---|---|---|
 | `init:`/`main:`/…-Labels ohne `org` | UberASM-Ressource | Abfrage, wo der Code läuft (ein Level, alle Level, Game Mode, Overworld-Karte), dann Aufnahme ins UberASM-Projekt |
 | beginnt mit `db $42`/`db $37` | Custom Block (GPS) | Abfrage von Map16-Tile, „acts like“ (aus der Beschreibung übernommen, z. B. „Act like 130“) und Grafik |
+| `list.txt` mit Blöcken, oft `.map16` und `ExGFX…bin` | Block-Paket | alles in einem Schritt, siehe [Block-Pakete](#block-pakete) |
 | `print "INIT ",pc` | Custom Sprite (PIXI) | Hinweis: noch nicht unterstützt |
 | alles andere | Patch | wie unten beschrieben |
 
@@ -131,6 +132,7 @@ Patch hat Vorrang. Adressen sind 0, wenn der jeweilige Editor-Patch nicht instal
 | `!SMWE_LEVEL_GFX` | 512 × 8 Bytes: Grafik-Bypass pro Level (SP4…SP1, FG3, BG1, FG2, FG1; `$FF` = Standard) |
 | `!SMWE_PALETTES` | 512 × 3 Bytes: Zeiger auf die 256-Farben-Palette eines Levels (0 = keine) |
 | `!SMWE_BG_BANKS` | 512 Bytes: Bank der BG-Tilemap eines Levels (0 = Original) |
+| `!SMWE_EXT_GFX` | 512 × 2 Bytes: BG2/BG3-Grafikdatei eines Levels (Tiles 200–27F/280–2FF), `$FF` = keine |
 | `!SMWE_MAP16X` | 1, wenn die Map16-Erweiterung (SMWX) installiert ist |
 | `!SMWE_ACTS_LIKE` | `$1000` × 2 Bytes: „acts like“ der Map16-Tiles 000–FFF |
 | `!SMWE_MAP16_GFX` | 8 Bytes (4 Tile-Wörter) je Tile 200–FFF |
@@ -213,6 +215,29 @@ Diese Zuordnung ist aus dem Original-Code abgeleitet und nicht aus Lunar Magic �
 sich auf LM-spezifische Feinheiten verlassen (z. B. genau wann `TopCorner` kommt), können sich leicht
 anders verhalten.
 
+## Block-Pakete
+
+Viele Blöcke auf SMWCentral kommen als Paket, z. B.:
+- `list.txt`: GPS-Liste, etwa `500:025 LeftWallLedge.asm`;
+- die Block-Dateien;
+- `Tiles.map16`: die Grafik der Map16-Tiles, als Lunar-Magic-Export;
+- `ExGFX80_BG2.bin`: die 8×8-Grafik, auf die die Map16-Tiles verweisen, hier für den BG2-Slot.
+
+*Hinzufügen …* richtet das zusammen ein:
+1. Die Blöcke kommen auf die Tiles aus der `list.txt`.
+2. Die `.map16`-Tiles kommen ab dem ersten Tile der Liste (änderbar) in die Map16-Tabelle, mit ihrem
+   „acts like“, sofern die Liste keines angibt.
+3. Die ExGFX-Datei wird unter ihrer Nummer aus dem Dateinamen gespeichert und im aktuellen Level in den
+   Slot aus dem Dateinamen gelegt (`_BG2`, `_FG1` …). Für andere Level: Level-Header → Grafik-Bypass.
+
+Einzeln geht das auch:
+- *Grafiken* → *.bin importieren* (4 KB = 4bpp unkomprimiert, 3 KB = 3bpp, sonst LZ2-gepackt);
+- *Map16* → *.map16 importieren* (ab dem gewählten Tile).
+
+**BG2/BG3:** Wie in Lunar Magic gibt es pro Level zwei zusätzliche Grafik-Slots für die Map16-Tiles
+200–27F (BG2) und 280–2FF (BG3). Sie liegen in einem VRAM-Bereich, den das Spiel sonst nicht nutzt, und
+werden im Level-Header unter „Grafik-Bypass“ gesetzt (Editor-Patch „SMWG“, Hook `$00AA50`).
+
 ## Hooks des Editors
 
 Stellen im Original-Code, die der Editor selbst verändert. Ein Patch, der dieselben Stellen ändert, ist
@@ -223,6 +248,7 @@ mit der jeweiligen Funktion nicht kompatibel.
 | `$05D8F5`, `$00BA2C`, `$00AA6B`, `$00A9E1`, `$00AA22`, Ext.-Objekt-Tabelle `$0DA115` | Editor-Patch (SMWE) |
 | `$00922F` | Level-Paletten (SMWP) |
 | `$058060` | BG-Tilemaps (SMWB) |
+| `$00AA50` | BG2/BG3-Grafik-Slots (SMWG) |
 | `$05B20F` | Nachrichten in freiem Speicher (SMWM), nur wenn die Texte nicht mehr passen |
 | `$00F545`, `$029328`, `$058A66`, `$058B46`, `$058C34`, `$058D2B`, `$00C096`, `$00C0E7` | Map16-Erweiterung und Custom Blocks (SMWX) |
 | `$05808C`, `$00A5EE`, `$00A242`, `$00A295`, `$00A2EE` | UberASM: Level `load`/`init`/`main`/`end` |

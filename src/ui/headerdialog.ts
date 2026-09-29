@@ -1,10 +1,10 @@
 // Level header / secondary header editor.
 
 import type { App } from './app.ts';
-import { h, select, hexInput, modal } from './dom.ts';
+import { h, select, hexInput, modal, toast } from './dom.ts';
 import { TILESETS, levelModeName, MUSIC, TIME_SETTINGS, VERTICAL_SCROLL, ENTRANCE_ACTIONS, hex2, hex } from '../core/names.ts';
 import { hasLayer2Objects, type PrimaryHeader, type SecondaryHeader, L2_PTRS } from '../core/level.ts';
-import { levelGfx, setLevelGfx, defaultGfx, GFX_SLOT_NAMES, bgBank } from '../core/patches.ts';
+import { levelGfx, setLevelGfx, defaultGfx, GFX_SLOT_NAMES, bgBank, levelExtGfx, setLevelExtGfx, EXT_GFX_SLOT_NAMES } from '../core/patches.ts';
 
 function range(n: number, fmt: (i: number) => string = (i) => String(i)): [number, string][] {
   return Array.from({ length: n }, (_, i) => [i, fmt(i)]);
@@ -33,6 +33,18 @@ export function openHeaderDialog(app: App): void {
       inp.value = gfxSlots[k] === 0xff ? '' : hex2(gfxSlots[k]);
     });
     return h('div', { class: 'prop' }, h('label', null, name), inp);
+  });
+  // BG2/BG3 (tiles 200-2FF, SMWG): empty = none
+  const extSlots = levelExtGfx(app.rom, lv.number);
+  const extOrig = extSlots.slice();
+  const extInputs = EXT_GFX_SLOT_NAMES.map((name, k) => {
+    const inp = h('input', { class: 'hex', value: extSlots[k] === 0xff ? '' : hex2(extSlots[k]), placeholder: '–', size: 3, maxLength: 2, spellcheck: false });
+    inp.addEventListener('change', () => {
+      const v = parseInt(inp.value, 16);
+      extSlots[k] = inp.value.trim() === '' || Number.isNaN(v) ? 0xff : v & 0xff;
+      inp.value = extSlots[k] === 0xff ? '' : hex2(extSlots[k]);
+    });
+    return h('div', { class: 'prop' }, h('label', { title: k ? 'Tiles 280–2FF' : 'Tiles 200–27F' }, name), inp);
   });
   // BG tilemaps in the vanilla bank ($0C) used by levels; edited ones (own bank) only count for their level
   const bgs = new Map<number, number[]>();
@@ -80,7 +92,8 @@ export function openHeaderDialog(app: App): void {
     ),
     h('h3', null, 'Grafik-Bypass (ExGFX pro Level)'),
     h('p', { class: 'hint' }, 'Leer = Standard aus Tileset/Sprite-Set (grau angezeigt). Eigene Nummern (00–FF) laden die jeweilige GFX/ExGFX-Datei in diesen Slot. Installiert bei Bedarf den Editor-Patch.'),
-    h('div', { class: 'grid4' }, gfxInputs),
+    h('div', { class: 'grid4' }, gfxInputs, extInputs),
+    h('p', { class: 'hint' }, 'BG2/BG3 (wie in Lunar Magic): zusätzliche Grafik für die Map16-Tiles 200–27F bzw. 280–2FF, z. B. aus Block-Paketen.'),
     h('h3', null, 'Sprites & Hintergrund'),
     h('div', { class: 'grid2' },
       f('Sprite-Speicher', hexInput(spriteHeader & 0x3f, 2, (v) => (spriteHeader = (spriteHeader & 0xc0) | v), 0x3f), '$1692-Index'),
@@ -110,6 +123,9 @@ export function openHeaderDialog(app: App): void {
         if (app.mode === 'bg' && lv.layer2Objects) app.mode = 'l1';
         if (gfxSlots.some((v, k) => v !== gfxOrig[k])) {
           try { setLevelGfx(app.rom, lv.number, gfxSlots); app.emu.syncRom(); app.persist(); } catch (e) { console.error(e); }
+        }
+        if (extSlots.some((v, k) => v !== extOrig[k])) {
+          try { setLevelExtGfx(app.rom, lv.number, extSlots); app.emu.syncRom(); app.persist(); } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
         }
         app.changed();
         app.emit('level-header');

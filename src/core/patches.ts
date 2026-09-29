@@ -417,3 +417,75 @@ export function bgBank(rom: Rom, level: number): number {
 export function setBgBank(rom: Rom, level: number, bank: number): void {
   rom.w8(installBgPatch(rom).table + level, bank);
 }
+
+// ---------------------------------------------------------------------------
+// BG2/BG3 GFX slots per level ("SMWG"): after the FG/BG1 files are uploaded ($00AA50, end of the
+// tileset GFX routine), GFX/ExGFX files are uploaded to VRAM $2000 (BG2, tiles 200-27F) and $2800
+// (BG3, tiles 280-2FF), which the game leaves unused - like Lunar Magic's BG2/BG3 slots. The upload
+// uses the game's own routine $00AA6B, so both LZ2 (3bpp) and raw 4bpp files work.
+export const EXT_GFX_HOOK = 0x00aa50;
+const EXT_GFX_MAGIC = [0x53, 0x4d, 0x57, 0x47]; // "SMWG"
+export const EXT_GFX_SLOT_NAMES = ['BG2', 'BG3'];
+
+export function extGfxPatch(rom: Rom): { table: number } | null {
+  if (rom.r8(EXT_GFX_HOOK) !== 0x22) return null;
+  const base = rom.r24(EXT_GFX_HOOK + 1) - 8;
+  for (let i = 0; i < 4; i++) if (rom.r8(base + i) !== EXT_GFX_MAGIC[i]) return null;
+  return { table: rom.r24(base + 4) };
+}
+
+export function installExtGfxPatch(rom: Rom): { table: number } {
+  const ex = extGfxPatch(rom);
+  if (ex) return ex;
+  installEditorPatch(rom); // level number in $010B, ExGFX pointers
+  const orig = [0xa2, 0x03, 0xb5, 0x04, 0x9d, 0x05, 0x01, 0xca, 0x10, 0xf8, 0x60];
+  for (let i = 0; i < orig.length; i++) if (rom.r8(EXT_GFX_HOOK + i) !== orig[i]) throw new Error(`Unerwarteter Code bei $00AA50${ownerNote(rom, EXT_GFX_HOOK, 5)} – BG2/BG3-Grafik nicht möglich`);
+  const a = new Asm();
+  a.b(...EXT_GFX_MAGIC); a.fill(4); // +4: table pointer
+  a.label('Ext');
+  a.b(0xa2, 0x03); // LDX #$03 (replaced: remember the uploaded files)
+  a.label('cp');
+  a.b(0xb5, 0x04, 0x9d, 0x05, 0x01, 0xca); // LDA $04,x : STA $0105,x : DEX
+  a.br(0x10, 'cp');
+  // only in levels (like the GFX bypass): skip game modes $0B-$0E (overworld)
+  a.b(0xaf, 0x00, 0x01, 0x7e, 0xc9, 0x0b); a.br(0x90, 'lv'); // LDA.l $7E0100 : CMP #$0B : BCC
+  a.b(0xc9, 0x0f); a.br(0x90, 'out'); // CMP #$0F : BCC out
+  a.label('lv');
+  a.b(0xc2, 0x30, 0xaf, 0x0b, 0x01, 0x7e, 0x29, 0xff, 0x01, 0x0a, 0xaa); // REP #$30 : LDA.l $7E010B : AND #$01FF : ASL : TAX
+  a.long(0xbf, 'Tbl'); // LDA.l Tbl,x (BG2 | BG3 << 8)
+  a.b(0xe2, 0x30, 0xeb, 0x48, 0xeb); // SEP #$30 : XBA : PHA (BG3) : XBA
+  a.b(0xa0, 0x20); a.abs(0x20, 'Up'); // LDY #$20 : JSR Up (BG2 → VRAM $2000)
+  a.b(0x68, 0xa0, 0x28); a.abs(0x20, 'Up'); // PLA : LDY #$28 : JSR Up (BG3 → VRAM $2800)
+  a.label('out');
+  a.b(0xe2, 0x30, 0x6b); // SEP #$30 : RTL
+  // Up (M=8 X=8): A = file ($FF = none), Y = VRAM address high byte
+  a.label('Up');
+  a.b(0xc9, 0xff); a.br(0xf0, 'upx'); // CMP #$FF : BEQ
+  a.b(0x9c, 0x16, 0x21, 0x8c, 0x17, 0x21, 0xa8); // STZ $2116 : STY $2117 : TAY (file)
+  a.b(0x4b); a.abs(0xf4, 'upr', -1); a.b(0xf4, 0xce, 0x84); // PHK : PEA.w upr-1 : PEA.w $84CF-1
+  a.b(0x5c, 0x6b, 0xaa, 0x00); // JML $00AA6B (ends with RTS → $0084CF RTL → upr)
+  a.label('upr');
+  a.b(0xe2, 0x30); // SEP #$30
+  a.label('upx');
+  a.b(0x60); // RTS
+  a.label('Tbl');
+  a.fill(512 * 2, 0xff);
+  const addr = rom.allocWrite(new Uint8Array(a.bytes.length));
+  rom.writeBytes(addr, a.link(addr));
+  rom.w24(addr + 4, a.addrOf('Tbl', addr));
+  const t = a.addrOf('Ext', addr);
+  rom.writeBytes(EXT_GFX_HOOK, Uint8Array.from([0x22, t & 0xff, (t >> 8) & 0xff, t >> 16, 0x60]));
+  return extGfxPatch(rom)!;
+}
+
+// BG2/BG3 files of a level ($FF = none)
+export function levelExtGfx(rom: Rom, n: number): number[] {
+  const p = extGfxPatch(rom);
+  return p ? [rom.r8(p.table + n * 2), rom.r8(p.table + n * 2 + 1)] : [0xff, 0xff];
+}
+export function setLevelExtGfx(rom: Rom, n: number, slots: number[]): void {
+  if (!extGfxPatch(rom) && slots.every((s) => s === 0xff)) return;
+  const p = installExtGfxPatch(rom);
+  rom.w8(p.table + n * 2, slots[0]);
+  rom.w8(p.table + n * 2 + 1, slots[1]);
+}

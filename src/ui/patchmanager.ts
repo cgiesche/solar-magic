@@ -14,6 +14,7 @@ import { removeBlocks, loadBlockProject, saveBlockProject } from '../core/blocks
 import { loadProject, emptyProject, saveProject } from '../core/uberproject.ts';
 import { ALL, type UberContext } from '../core/uberasm.ts';
 import { hex } from '../core/names.ts';
+import { planBlockPack, applyBlockPack } from '../core/blockpack.ts';
 import { readPackage, packageFromFiles, detectKind, type PackageInfo, scanDefines, effectiveDefines, packageSource, optionDefault, type PatchPackage, type PatchOption } from '../core/patchpkg.ts';
 import { installEditorPatch } from '../core/patches.ts';
 import { installMap16Ext, map16Ext, setExtTileWords, EXT_FIRST, EXT_TILES } from '../core/map16ext.ts';
@@ -284,6 +285,41 @@ function openBlockResourceDialog(app: App, pkg: PatchPackage, info: PackageInfo,
   ]);
 }
 
+// a block package (list.txt + blocks, often .map16 and ExGFX): everything in one step
+function openBlockPackDialog(app: App, pkg: PatchPackage, info: PackageInfo, onDone: () => void): void {
+  const plan = planBlockPack(pkg, info.file);
+  let map16At = plan.map16?.at ?? 0x200;
+  let useLevel = true;
+  const log = h('div');
+  const body = h('div', { class: 'patch-apply' },
+    h('p', null, `„${pkg.name}“ ist ein Block-Paket: Custom Blocks mit Tile-Liste${plan.map16 ? ', Map16-Grafik' : ''}${plan.gfx.length ? ' und Grafikdatei(en)' : ''}. Alles wird zusammen eingerichtet:`),
+    h('table', { class: 'uber-table' }, h('tr', null, h('th', null, 'Tile'), h('th', null, 'Block'), h('th', null, 'acts like')),
+      plan.blocks.map((b) => h('tr', null, h('td', { class: 'mono' }, hex(b.tile, 3)), h('td', null, b.file.split('/').pop()), h('td', { class: 'mono' }, b.acts !== undefined ? hex(b.acts, 3) : '–')))),
+    plan.missing.length ? h('p', { class: 'hint error' }, `Fehlt im Paket: ${plan.missing.join(', ')}`) : '',
+    plan.map16 ? h('div', { class: 'prop' }, h('label', null, `Map16-Grafik (${plan.map16.file.split('/').pop()})`),
+      h('span', null, `${plan.map16.data.tiles.length} Tile(s) ab `), hexInput(map16At, 3, (v) => (map16At = v), EXT_TILES - 1)) : '',
+    ...plan.gfx.map((g) => h('div', { class: 'prop' }, h('label', null, `Grafik (${g.file.split('/').pop()})`),
+      h('span', null, 'als ExGFX '), hexInput(g.num, 2, (v) => (g.num = v), 0xff),
+      g.slot ? h('span', { class: 'hint' }, ` für den ${g.slot}-Slot`) : '')),
+    plan.gfx.some((g) => g.slot) ? h('label', { class: 'row small' },
+      h('input', { type: 'checkbox', checked: true, onchange: (e: Event) => (useLevel = (e.target as HTMLInputElement).checked) }),
+      ` Grafik in Level ${hex(app.level.number, 3)} laden (für andere Level: Header → Grafik-Bypass)`) : '',
+    h('p', { class: 'hint' }, 'Platzieren: Palette → Map16 bzw. Direct-Map16-Objekt mit dem jeweiligen Tile.'),
+    log);
+  modal(`Block-Paket: ${pkg.name}`, body, [
+    { label: 'Abbrechen' },
+    { label: 'Einrichten', primary: true, onClick: () => {
+      if (app.dirty) app.saveLevel(true);
+      const r = applyBlockPack(app.rom, pkg, plan, { blank: map16Source(app.rom, app.render).fg(0x025), level: useLevel ? app.level.number : null, map16At });
+      if (!r.ok) { resultLog(log, r); return false; }
+      romChanged(app);
+      toast(`„${pkg.name}“ eingerichtet: ${r.notes.join(' · ')}`);
+      onDone();
+      return true;
+    } },
+  ]);
+}
+
 export async function openPatchManager(app: App): Promise<void> {
   const body = h('div', { class: 'patch-manager' });
   const build = () => {
@@ -315,6 +351,7 @@ export async function openPatchManager(app: App): Promise<void> {
       const info = detectKind(pkg);
       if (info.kind === 'uberasm') openUberResourceDialog(app, pkg, info, build);
       else if (info.kind === 'block') openBlockResourceDialog(app, pkg, info, build);
+      else if (info.kind === 'blockpack') openBlockPackDialog(app, pkg, info, build);
       else if (info.kind === 'pixi') modal(`Custom Sprite: ${pkg.name}`, h('p', null, `„${pkg.name}“ ist ein Custom Sprite für PIXI (${info.file}). Custom Sprites werden vom Editor noch nicht unterstützt.`), [{ label: 'OK', primary: true }]);
       else openApplyDialog(app, pkg, f.name, null, build);
     } catch (e) { toast(e instanceof Error ? e.message : String(e), 'error'); }

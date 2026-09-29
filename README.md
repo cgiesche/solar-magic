@@ -103,6 +103,7 @@ assembliert und ändert nur wenige, verifizierte Stellen:
 | `$058A66`, `$058B46`, `$058C34`, `$058D2B` | Tilemap-Aufbau: Tiles ab 200 aus der erweiterten Map16-Grafiktabelle |
 | `$00C096`, `$00C0E7` | Tile ersetzen setzt die Seite auf 0/1 statt nur Bit 0 (für Tiles auf Seite ≥ 2) |
 | `$05B20F` („SMWM“) | Nachrichtentexte aus freiem Speicher lesen (nur wenn sie nicht mehr an Ort und Stelle passen) |
+| `$00AA50` („SMWG“) | BG2/BG3-Grafik-Slots pro Level für die Map16-Tiles 200–2FF (wie in Lunar Magic) |
 
 Die Tests prüfen, dass alle Vanilla-Level mit installiertem Patch identisch geladen werden.
 
