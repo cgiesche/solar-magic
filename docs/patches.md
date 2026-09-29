@@ -234,9 +234,12 @@ Einzeln geht das auch:
 - *Grafiken* → *.bin importieren* (4 KB = 4bpp unkomprimiert, 3 KB = 3bpp, sonst LZ2-gepackt);
 - *Map16* → *.map16 importieren* (ab dem gewählten Tile).
 
-**BG2/BG3:** Wie in Lunar Magic gibt es pro Level zwei zusätzliche Grafik-Slots für die Map16-Tiles
-200–27F (BG2) und 280–2FF (BG3). Sie liegen in einem VRAM-Bereich, den das Spiel sonst nicht nutzt, und
-werden im Level-Header unter „Grafik-Bypass“ gesetzt (Editor-Patch „SMWG“, Hook `$00AA50`).
+**BG2/BG3:** Lunar Magic hat pro Level zwei zusätzliche Grafik-Slots für die Map16-Tiles 200–27F (BG2)
+und 280–2FF (BG3). Im Original-Spiel liegt an dieser Stelle im VRAM die Layer-1-Tilemap. LM verlegt die
+Tilemaps deshalb mit einem eigenen VRAM-Patch. Solange der Editor diesen Patch noch nicht hat, sind die
+Slots abgeschaltet. Block-Pakete speichern die Grafik trotzdem als ExGFX, sie wird aber noch nicht
+geladen. Eine frühere Installation (Editor-Patch „SMWG“, Hook `$00AA50`) wird beim Öffnen der ROM
+abgeschaltet; ihre Zuordnungen bleiben erhalten.
 
 ## Hooks des Editors
 

@@ -1,5 +1,6 @@
 import './style.css';
 import { Rom } from './core/rom.ts';
+import { disableUnsafeExtGfx } from './core/patches.ts';
 import { App, type EditMode } from './ui/app.ts';
 import { h, clear, toast, downloadBytes, pickFile, modal } from './ui/dom.ts';
 import { kvGet, kvSet } from './ui/storage.ts';
@@ -36,6 +37,10 @@ async function openFile(f: File): Promise<void> {
 }
 
 function startWith(rom: Rom, name: string): void {
+  if (disableUnsafeExtGfx(rom)) {
+    kvSet('rom', { name, data: rom.output(false), header: rom.smcHeader }).catch(() => {});
+    toast('BG2/BG3-Grafik wurde abgeschaltet: sie überschrieb die Layer-1-Tilemap (kaputter Hintergrund). Die Zuordnungen bleiben gespeichert und gelten wieder, sobald der VRAM-Patch verfügbar ist.', 'error');
+  }
   if (!rom.title().startsWith('SUPER MARIOWORLD')) {
     toast(`Unerwarteter ROM-Titel "${rom.title()}" – versuche es trotzdem.`, 'error');
   }

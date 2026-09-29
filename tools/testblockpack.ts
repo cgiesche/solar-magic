@@ -55,11 +55,8 @@ const r = applyBlockPack(rom, pkg, plan, { blank, level: 0x105 });
 check(r.ok, 'package applied: ' + [...r.errors, ...r.notes].join(' | '));
 check(!!blockOf(rom, 0x500) && !!blockOf(rom, 0x501) && actsLike(rom, 0x500) === 0x25, 'blocks and acts like on 500/501');
 check(extTileWords(rom, 0x501)?.join() === words[1].join(), 'Map16 graphics of 501');
-check(gfxEntry(rom, 0x80)?.raw === true && levelExtGfx(rom, 0x105)[0] === 0x80, 'ExGFX 80 stored and set as BG2 of level 105');
-emu.syncRom();
-const l = emu.load(0x105);
-let eq = 0; for (let i = 0; i < 0x1000; i++) if (l.vram[0x4000 + i] === gfx[i]) eq++;
-check(l.ok && eq === 0x1000, `ExGFX in VRAM for the tiles 200+ (${eq}/4096)`);
+// (the BG2 slot needs the VRAM patch; until then the file is only stored)
+check(gfxEntry(rom, 0x80)?.raw === true && levelExtGfx(rom, 0x105)[0] === 0xff && r.notes.some((n) => n.includes('VRAM-Patch')), 'ExGFX 80 stored, BG2 slot left alone with a note');
 
 // the real package, if present locally
 try {

@@ -6,7 +6,7 @@
 //  - per-level GFX bypass: 8 slots (SP4..SP1, FG3, BG1, FG2, FG1), $FF = tileset default
 //  - extended object $02 "Direct Map16": 6 bytes, places any Map16 tile as a rectangle
 
-import { Rom } from './rom.ts';
+import { Rom, pcToSnes } from './rom.ts';
 import { Asm } from './asm.ts';
 import { ownerNote } from './patchreg.ts';
 
@@ -421,24 +421,55 @@ export function setBgBank(rom: Rom, level: number, bank: number): void {
 // ---------------------------------------------------------------------------
 // BG2/BG3 GFX slots per level ("SMWG"): after the FG/BG1 files are uploaded ($00AA50, end of the
 // tileset GFX routine), GFX/ExGFX files are uploaded to VRAM $2000 (BG2, tiles 200-27F) and $2800
-// (BG3, tiles 280-2FF), which the game leaves unused - like Lunar Magic's BG2/BG3 slots. The upload
-// uses the game's own routine $00AA6B, so both LZ2 (3bpp) and raw 4bpp files work.
+// (BG3, tiles 280-2FF) - like Lunar Magic's BG2/BG3 slots. The upload uses the game's own routine
+// $00AA6B, so both LZ2 (3bpp) and raw 4bpp files work.
+// In the original game the layer 1 tilemap lives at VRAM $2000-$2FFF, so the slots need the tilemaps
+// moved out of the way first (VRAM patch, like LM's). Without it the hook stays off; the table is kept.
 export const EXT_GFX_HOOK = 0x00aa50;
 const EXT_GFX_MAGIC = [0x53, 0x4d, 0x57, 0x47]; // "SMWG"
 export const EXT_GFX_SLOT_NAMES = ['BG2', 'BG3'];
+const EXT_GFX_ORIG = [0xa2, 0x03, 0xb5, 0x04, 0x9d, 0x05, 0x01, 0xca, 0x10, 0xf8, 0x60];
 
-export function extGfxPatch(rom: Rom): { table: number } | null {
-  if (rom.r8(EXT_GFX_HOOK) !== 0x22) return null;
-  const base = rom.r24(EXT_GFX_HOOK + 1) - 8;
-  for (let i = 0; i < 4; i++) if (rom.r8(base + i) !== EXT_GFX_MAGIC[i]) return null;
-  return { table: rom.r24(base + 4) };
+// set by the VRAM patch (vram.ts) once it exists: whether VRAM $2000-$2FFF is free for graphics
+export let vramPatchInstalled: (rom: Rom) => boolean = () => false;
+export function setVramPatchCheck(f: (rom: Rom) => boolean): void { vramPatchInstalled = f; }
+
+function extGfxBlock(rom: Rom): number {
+  if (rom.r8(EXT_GFX_HOOK) === 0x22) {
+    const base = rom.r24(EXT_GFX_HOOK + 1) - 8;
+    if (EXT_GFX_MAGIC.every((m, i) => rom.r8(base + i) === m)) return base;
+  }
+  for (const b of rom.scanRats()) if (EXT_GFX_MAGIC.every((m, i) => rom.data[b.start + 8 + i] === m)) return pcToSnes(b.start + 8);
+  return -1;
 }
 
-export function installExtGfxPatch(rom: Rom): { table: number } {
+// the patch with its table; active = the hook at $00AA50 is in place
+export function extGfxPatch(rom: Rom): { table: number; active: boolean } | null {
+  const base = extGfxBlock(rom);
+  if (base < 0) return null;
+  return { table: rom.r24(base + 4), active: rom.r8(EXT_GFX_HOOK) === 0x22 && rom.r24(EXT_GFX_HOOK + 1) === base + 8 };
+}
+
+// turns the BG2/BG3 upload off where it would overwrite the layer 1 tilemap; true if it was on
+export function disableUnsafeExtGfx(rom: Rom): boolean {
+  const p = extGfxPatch(rom);
+  if (!p?.active || vramPatchInstalled(rom)) return false;
+  rom.writeBytes(EXT_GFX_HOOK, Uint8Array.from(EXT_GFX_ORIG.slice(0, 5)));
+  return true;
+}
+
+export function installExtGfxPatch(rom: Rom): { table: number; active: boolean } {
+  if (!vramPatchInstalled(rom)) throw new Error('BG2/BG3-Grafik ist noch nicht verfügbar: dafür müssen erst die Layer-Tilemaps im VRAM verlegt werden (VRAM-Patch).');
   const ex = extGfxPatch(rom);
-  if (ex) return ex;
+  if (ex?.active) return ex;
+  if (ex) {
+    // switched off earlier: the code block and its table are still there, just hook it in again
+    const base = extGfxBlock(rom) + 8;
+    rom.writeBytes(EXT_GFX_HOOK, Uint8Array.from([0x22, base & 0xff, (base >> 8) & 0xff, base >> 16, 0x60]));
+    return extGfxPatch(rom)!;
+  }
   installEditorPatch(rom); // level number in $010B, ExGFX pointers
-  const orig = [0xa2, 0x03, 0xb5, 0x04, 0x9d, 0x05, 0x01, 0xca, 0x10, 0xf8, 0x60];
+  const orig = EXT_GFX_ORIG;
   for (let i = 0; i < orig.length; i++) if (rom.r8(EXT_GFX_HOOK + i) !== orig[i]) throw new Error(`Unerwarteter Code bei $00AA50${ownerNote(rom, EXT_GFX_HOOK, 5)} – BG2/BG3-Grafik nicht möglich`);
   const a = new Asm();
   a.b(...EXT_GFX_MAGIC); a.fill(4); // +4: table pointer
@@ -481,7 +512,10 @@ export function installExtGfxPatch(rom: Rom): { table: number } {
 // BG2/BG3 files of a level ($FF = none)
 export function levelExtGfx(rom: Rom, n: number): number[] {
   const p = extGfxPatch(rom);
-  return p ? [rom.r8(p.table + n * 2), rom.r8(p.table + n * 2 + 1)] : [0xff, 0xff];
+  return p?.active ? [rom.r8(p.table + n * 2), rom.r8(p.table + n * 2 + 1)] : [0xff, 0xff];
+}
+export function extGfxAvailable(rom: Rom): boolean {
+  return vramPatchInstalled(rom);
 }
 export function setLevelExtGfx(rom: Rom, n: number, slots: number[]): void {
   if (!extGfxPatch(rom) && slots.every((s) => s === 0xff)) return;

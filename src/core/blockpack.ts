@@ -8,7 +8,7 @@ import type { ApplyResult } from './patchapply.ts';
 import { parseBlockList, loadBlockProject, saveBlockProject, type BlockAssign } from './blocks.ts';
 import { parseMap16File, map16Targets, exgfxName, importGfxFile, type Map16File } from './map16file.ts';
 import { setExtTileWords, setActsLike, EXT_FIRST } from './map16ext.ts';
-import { levelGfx, setLevelGfx, levelExtGfx, setLevelExtGfx, GFX_SLOT_NAMES, EXT_GFX_SLOT_NAMES } from './patches.ts';
+import { levelGfx, setLevelGfx, levelExtGfx, setLevelExtGfx, GFX_SLOT_NAMES, EXT_GFX_SLOT_NAMES, extGfxAvailable } from './patches.ts';
 
 export interface BlockPackPlan {
   blocks: BlockAssign[]; // file = path inside the package
@@ -91,9 +91,10 @@ export function applyBlockPack(rom: Rom, pkg: PatchPackage, plan: BlockPackPlan,
       if (opt.level !== null && g.slot) {
         const ext = EXT_GFX_SLOT_NAMES.indexOf(g.slot);
         const std = GFX_SLOT_NAMES.indexOf(g.slot);
-        if (ext >= 0) { const s = levelExtGfx(rom, opt.level); s[ext] = g.num; setLevelExtGfx(rom, opt.level, s); }
+        if (ext >= 0 && !extGfxAvailable(rom)) notes.push(`${g.slot}-Slot noch nicht verfügbar (VRAM-Patch fehlt) – die Grafik ist gespeichert, wird aber noch nicht geladen`);
+        else if (ext >= 0) { const s = levelExtGfx(rom, opt.level); s[ext] = g.num; setLevelExtGfx(rom, opt.level, s); }
         else if (std >= 0) { const s = levelGfx(rom, opt.level); s[std] = g.num; setLevelGfx(rom, opt.level, s); }
-        if (ext >= 0 || std >= 0) where = ` als ${g.slot} von Level ${opt.level.toString(16).toUpperCase().padStart(3, '0')}`;
+        if ((ext >= 0 && extGfxAvailable(rom)) || std >= 0) where = ` als ${g.slot} von Level ${opt.level.toString(16).toUpperCase().padStart(3, '0')}`;
       }
       notes.push(`ExGFX ${g.num.toString(16).toUpperCase()} (${what})${where}`);
     }

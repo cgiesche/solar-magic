@@ -4,7 +4,7 @@ import type { App } from './app.ts';
 import { h, select, hexInput, modal, toast } from './dom.ts';
 import { TILESETS, levelModeName, MUSIC, TIME_SETTINGS, VERTICAL_SCROLL, ENTRANCE_ACTIONS, hex2, hex } from '../core/names.ts';
 import { hasLayer2Objects, type PrimaryHeader, type SecondaryHeader, L2_PTRS } from '../core/level.ts';
-import { levelGfx, setLevelGfx, defaultGfx, GFX_SLOT_NAMES, bgBank, levelExtGfx, setLevelExtGfx, EXT_GFX_SLOT_NAMES } from '../core/patches.ts';
+import { levelGfx, setLevelGfx, defaultGfx, GFX_SLOT_NAMES, bgBank, levelExtGfx, setLevelExtGfx, EXT_GFX_SLOT_NAMES, extGfxAvailable } from '../core/patches.ts';
 
 function range(n: number, fmt: (i: number) => string = (i) => String(i)): [number, string][] {
   return Array.from({ length: n }, (_, i) => [i, fmt(i)]);
@@ -38,7 +38,7 @@ export function openHeaderDialog(app: App): void {
   const extSlots = levelExtGfx(app.rom, lv.number);
   const extOrig = extSlots.slice();
   const extInputs = EXT_GFX_SLOT_NAMES.map((name, k) => {
-    const inp = h('input', { class: 'hex', value: extSlots[k] === 0xff ? '' : hex2(extSlots[k]), placeholder: '–', size: 3, maxLength: 2, spellcheck: false });
+    const inp = h('input', { class: 'hex', value: extSlots[k] === 0xff ? '' : hex2(extSlots[k]), placeholder: '–', size: 3, maxLength: 2, spellcheck: false, disabled: !extGfxAvailable(app.rom) });
     inp.addEventListener('change', () => {
       const v = parseInt(inp.value, 16);
       extSlots[k] = inp.value.trim() === '' || Number.isNaN(v) ? 0xff : v & 0xff;
@@ -93,7 +93,8 @@ export function openHeaderDialog(app: App): void {
     h('h3', null, 'Grafik-Bypass (ExGFX pro Level)'),
     h('p', { class: 'hint' }, 'Leer = Standard aus Tileset/Sprite-Set (grau angezeigt). Eigene Nummern (00–FF) laden die jeweilige GFX/ExGFX-Datei in diesen Slot. Installiert bei Bedarf den Editor-Patch.'),
     h('div', { class: 'grid4' }, gfxInputs, extInputs),
-    h('p', { class: 'hint' }, 'BG2/BG3 (wie in Lunar Magic): zusätzliche Grafik für die Map16-Tiles 200–27F bzw. 280–2FF, z. B. aus Block-Paketen.'),
+    h('p', { class: 'hint' }, extGfxAvailable(app.rom) ? 'BG2/BG3 (wie in Lunar Magic): zusätzliche Grafik für die Map16-Tiles 200–27F bzw. 280–2FF, z. B. aus Block-Paketen.'
+      : 'BG2/BG3 (Tiles 200–2FF) sind noch nicht verfügbar: im Original liegt dort die Layer-1-Tilemap; dafür fehlt noch der VRAM-Patch.'),
     h('h3', null, 'Sprites & Hintergrund'),
     h('div', { class: 'grid2' },
       f('Sprite-Speicher', hexInput(spriteHeader & 0x3f, 2, (v) => (spriteHeader = (spriteHeader & 0xc0) | v), 0x3f), '$1692-Index'),
