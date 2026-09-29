@@ -183,4 +183,19 @@ export class LevelEmulator {
       frames,
     };
   }
+
+  // Continues the live state left by load() into gameplay (GM $14) and snapshots VRAM/CGRAM
+  // every `step` frames (tile and palette animation). Must directly follow load().
+  animationFrames(count = 8, step = 8): { vram: Uint8Array; cgram: Uint8Array }[] {
+    const s = this.snes, out: { vram: Uint8Array; cgram: Uint8Array }[] = [];
+    try {
+      let guard = 0;
+      while (s.wram[0x100] !== 0x14 && guard++ < 80) s.runFrame();
+      for (let i = 0; i < count; i++) {
+        for (let f = 0; f < step; f++) s.runFrame();
+        out.push({ vram: s.vram.slice(), cgram: s.cgram.slice() });
+      }
+    } catch { /* keep the frames we have */ }
+    return out;
+  }
 }

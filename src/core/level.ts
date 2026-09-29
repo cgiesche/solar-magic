@@ -136,8 +136,7 @@ export function encodePrimaryHeader(h: PrimaryHeader): Uint8Array {
   ]);
 }
 
-export function readSecondaryHeader(rom: Rom, n: number): SecondaryHeader {
-  const [a, b, c, d] = SEC_HDR.map((t) => rom.r8(t + n));
+export function decodeSecondaryHeader([a, b, c, d]: Iterable<number> & ArrayLike<number>): SecondaryHeader {
   return {
     layer2Scroll: a >> 4,
     entranceY: a & 0x0f,
@@ -152,11 +151,19 @@ export function readSecondaryHeader(rom: Rom, n: number): SecondaryHeader {
     entranceScreen: d & 0x1f,
   };
 }
+export function encodeSecondaryHeader(s: SecondaryHeader): number[] {
+  return [
+    (s.layer2Scroll << 4) | (s.entranceY & 0x0f),
+    (s.layer3 << 6) | ((s.entranceAction & 7) << 3) | (s.entranceX & 7),
+    (s.midwayScreen << 4) | ((s.fgInitY & 3) << 2) | (s.bgInitY & 3),
+    (s.noYoshiIntro << 7) | ((s.verticalPositioning & 3) << 5) | (s.entranceScreen & 0x1f),
+  ];
+}
+export function readSecondaryHeader(rom: Rom, n: number): SecondaryHeader {
+  return decodeSecondaryHeader(SEC_HDR.map((t) => rom.r8(t + n)));
+}
 export function writeSecondaryHeader(rom: Rom, n: number, s: SecondaryHeader): void {
-  rom.w8(SEC_HDR[0] + n, (s.layer2Scroll << 4) | (s.entranceY & 0x0f));
-  rom.w8(SEC_HDR[1] + n, (s.layer3 << 6) | ((s.entranceAction & 7) << 3) | (s.entranceX & 7));
-  rom.w8(SEC_HDR[2] + n, (s.midwayScreen << 4) | ((s.fgInitY & 3) << 2) | (s.bgInitY & 3));
-  rom.w8(SEC_HDR[3] + n, (s.noYoshiIntro << 7) | ((s.verticalPositioning & 3) << 5) | (s.entranceScreen & 0x1f));
+  encodeSecondaryHeader(s).forEach((v, i) => rom.w8(SEC_HDR[i] + n, v));
 }
 
 // ----- objects -----
@@ -296,41 +303,47 @@ export function loadLevel(rom: Rom, n: number): Level {
   const l1 = rom.r24(L1_PTRS + n * 3);
   const l2 = rom.r24(L2_PTRS + n * 3);
   const spr = (spriteBank(rom, n) << 16) | rom.r16(SPR_PTRS + n * 2);
-  const hdrBytes = rom.bytes(l1, 5);
-  const header = parsePrimaryHeader(hdrBytes);
+  // read generous windows of data (up to the end of the bank)
+  const win = (a: number) => rom.bytes(a, 0x8000 - (a & 0x7fff));
+  const lv = parseLevelData(rom, n, win(l1), (l2 >> 16) !== 0xff ? win(l2) : null, l2, win(spr), readSecondaryHeader(rom, n));
+  lv.l1Addr = l1;
+  lv.sprAddr = spr;
+  return lv;
+}
+
+// builds a level from raw data: layer 1 (with 5 byte header), layer 2 object data (with header) or null,
+// the layer 2 pointer (BG tilemap when l2 is null) and sprite data (with header byte)
+export function parseLevelData(rom: Rom, n: number, l1: Uint8Array, l2: Uint8Array | null, l2Pointer: number, spr: Uint8Array, secondary: SecondaryHeader): Level {
+  const header = parsePrimaryHeader(l1.subarray(0, 5));
   const vert1 = isL1Vertical(rom, header.mode);
-  // read a generous window of data
-  const l1win = rom.bytes(l1, 0x8000 - (l1 & 0x7fff));
-  const p1 = hasObjects(header.mode) ? parseObjects(l1win, 5, vert1) : { objects: [], exits: [], size: 1 };
+  const p1 = hasObjects(header.mode) ? parseObjects(l1, 5, vert1) : { objects: [], exits: [], size: 1 };
   let layer2Objects: LevelObject[] | null = null;
   let layer2Header: Uint8Array | null = null;
   let l2Size = 0;
-  if ((l2 >> 16) !== 0xff && hasLayer2Objects(header.mode)) {
-    const l2win = rom.bytes(l2, 0x8000 - (l2 & 0x7fff));
-    layer2Header = l2win.slice(0, 5);
-    const p2 = parseObjects(l2win, 5, isL2Vertical(rom, header.mode));
+  if (l2 && hasLayer2Objects(header.mode)) {
+    layer2Header = l2.slice(0, 5);
+    const p2 = parseObjects(l2, 5, isL2Vertical(rom, header.mode));
     layer2Objects = p2.objects;
     l2Size = 5 + p2.size;
     // exits in layer 2 data are unusual; keep them with layer 1
     p1.exits.push(...p2.exits);
   }
-  const sprWin = rom.bytes(spr, 0x8000 - (spr & 0x7fff));
-  const ps = parseSprites(sprWin, 0, vert1);
+  const ps = parseSprites(spr, 0, vert1);
   return {
     number: n,
     header,
-    secondary: readSecondaryHeader(rom, n),
+    secondary,
     objects: p1.objects,
     exits: p1.exits,
     layer2Objects,
     layer2Header,
-    layer2Pointer: l2,
+    layer2Pointer: l2Pointer,
     sprites: ps.sprites,
     spriteHeader: ps.header,
-    l1Addr: l1,
+    l1Addr: 0,
     l1Size: 5 + p1.size,
     l2Size,
-    sprAddr: spr,
+    sprAddr: 0,
     sprSize: ps.size,
   };
 }
@@ -412,4 +425,46 @@ export function nearestEntrance(rom: Rom, px: number, py: number, vertical: bool
     if (d < bestD) { bestD = d; best = { screen, ex, ey }; }
   }
   return best;
+}
+
+// ---- screen operations ----
+// Everything whose origin lies on screen >= s moves by one screen (items keep their position
+// within the screen). Objects that start on an earlier screen and reach into s are not cut.
+function shiftScreens(rom: Rom, lv: Level, from: number, delta: number): void {
+  const v1 = isL1Vertical(rom, lv.header.mode), v2 = isL2Vertical(rom, lv.header.mode);
+  const move = (o: { x: number; y: number }, vertical: boolean) => {
+    if (vertical) { if (o.y >> 4 >= from) o.y += delta * 16; } else if (o.x >> 4 >= from) o.x += delta * 16;
+  };
+  for (const o of lv.objects) move(o, v1);
+  for (const o of lv.layer2Objects ?? []) move(o, v2);
+  for (const sp of lv.sprites) move(sp, v1);
+  for (const e of lv.exits) if (e.screen >= from) e.screen += delta;
+  const sec = lv.secondary;
+  if (sec.entranceScreen >= from) sec.entranceScreen = Math.max(0, sec.entranceScreen + delta);
+  if (sec.midwayScreen >= from) sec.midwayScreen = Math.max(0, Math.min(15, sec.midwayScreen + delta));
+}
+
+export function insertScreen(rom: Rom, lv: Level, s: number): void {
+  if (lv.header.screens >= 32) throw new Error('Das Level hat bereits 32 Screens.');
+  shiftScreens(rom, lv, s, 1);
+  lv.header.screens++;
+}
+
+export function deleteScreen(rom: Rom, lv: Level, s: number): void {
+  if (lv.header.screens <= 1) throw new Error('Das Level braucht mindestens einen Screen.');
+  const v1 = isL1Vertical(rom, lv.header.mode), v2 = isL2Vertical(rom, lv.header.mode);
+  const on = (o: { x: number; y: number }, vertical: boolean) => (vertical ? o.y : o.x) >> 4 === s;
+  lv.objects = lv.objects.filter((o) => !on(o, v1));
+  if (lv.layer2Objects) lv.layer2Objects = lv.layer2Objects.filter((o) => !on(o, v2));
+  lv.sprites = lv.sprites.filter((sp) => !on(sp, v1));
+  lv.exits = lv.exits.filter((e) => e.screen !== s);
+  shiftScreens(rom, lv, s + 1, -1);
+  lv.header.screens--;
+}
+
+export function clearLevel(lv: Level): void {
+  lv.objects = [];
+  if (lv.layer2Objects) lv.layer2Objects = [];
+  lv.sprites = [];
+  lv.exits = [];
 }

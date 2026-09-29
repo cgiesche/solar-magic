@@ -1,11 +1,12 @@
 // Misc. dialogs: secondary entrances, ROM info/expansion, level copy.
 
 import type { App } from './app.ts';
-import { h, modal, clear, hexInput, select, toast } from './dom.ts';
-import { readSecondaryEntrance, writeSecondaryEntrance, type SecondaryEntrance, loadLevel, cloneLevel } from '../core/level.ts';
+import { h, modal, clear, hexInput, select, toast, downloadBytes, pickFile } from './dom.ts';
+import { readSecondaryEntrance, writeSecondaryEntrance, type SecondaryEntrance, loadLevel, cloneLevel, insertScreen, deleteScreen, clearLevel } from '../core/level.ts';
+import { exportLevelFile, importLevelFile, LEVEL_FILE_EXT } from '../core/levelfile.ts';
 import { ENTRANCE_ACTIONS, hex, objectName, spriteName } from '../core/names.ts';
 import { saveLevel } from '../core/save.ts';
-import { hasEditorPatch, installEditorPatch, DM16_EXT } from '../core/patches.ts';
+import { hasEditorPatch, installEditorPatch, DM16_EXT, editorPatch, setLevelGfx, customPalette, setCustomPalette } from '../core/patches.ts';
 
 export function openEntrancesDialog(app: App): void {
   const rom = app.rom;
@@ -82,33 +83,81 @@ export function openRomInfo(app: App): void {
   modal('ROM-Informationen', body, [{ label: 'Schließen', primary: true }]);
 }
 
-export function openCopyLevel(app: App): void {
-  let target = app.level.number;
-  const body = h('div', null,
-    h('p', null, `Level ${hex(app.level.number, 3)} (mit allen aktuellen Änderungen) unter einer anderen Nummer speichern. Das Ziel wird überschrieben.`),
-    h('div', { class: 'prop' }, h('label', null, 'Ziel-Level'), hexInput(target, 3, (v) => (target = v), 0x1ff)),
+// Level tools: save as, export/import file, insert/delete screens, clear
+export function openLevelTools(app: App): void {
+  const lv = app.level;
+  let target = lv.number;
+  let screen = 0;
+  const vert = app.vertical;
+  const screenOpts: [number, string][] = Array.from({ length: lv.header.screens }, (_, i) => [i, hex(i, 2)]);
+  const edit = (f: () => void) => {
+    app.checkpoint();
+    try { f(); } catch (e) { app.undoStack.pop(); toast(String(e instanceof Error ? e.message : e), 'error'); return false; }
+    app.selection.clear();
+    app.changed();
+    app.emit('level-header');
+    dlg.close();
+  };
+  const body = h('div', { class: 'level-tools' },
+    h('h3', null, 'Speichern unter'),
+    h('p', { class: 'hint' }, `Level ${hex(lv.number, 3)} (mit allen aktuellen Änderungen) unter einer anderen Nummer speichern. Das Ziel wird überschrieben.`),
+    h('div', { class: 'row' }, h('label', null, 'Ziel-Level '), hexInput(target, 3, (v) => (target = v), 0x1ff),
+      h('button', { onclick: () => { saveAs(app, target); } }, 'Speichern')),
+    h('h3', null, 'Datei'),
+    h('p', { class: 'hint' }, `Level als ${LEVEL_FILE_EXT}-Datei (Objekte, Sprites, Exits, Header, Grafik-Bypass, eigene Palette). Beim Import wird das aktuelle Level ersetzt (rückgängig machbar; Palette/Grafik-Bypass werden direkt in die ROM geschrieben).`),
+    h('div', { class: 'row' },
+      h('button', { onclick: () => downloadBytes(`level-${hex(lv.number, 3)}${LEVEL_FILE_EXT}`, new TextEncoder().encode(exportLevelFile(app.rom, lv)), 'application/json') }, 'Exportieren …'),
+      h('button', { onclick: () => importLevel(app).then((ok) => { if (ok) dlg.close(); }) }, 'Importieren …')),
+    h('h3', null, 'Screens'),
+    h('p', { class: 'hint' }, `Alles ab dem gewählten Screen wird um einen Screen ${vert ? 'nach unten' : 'nach rechts'} bzw. zurück verschoben (Objekte, Sprites, Exits, Eingang, Zwischenziel). Sekundäre Eingänge bleiben unverändert.`),
+    h('div', { class: 'row' }, h('label', null, 'Screen '), select(screenOpts, screen, (v) => (screen = v)),
+      h('button', { disabled: lv.header.screens >= 32, onclick: () => edit(() => insertScreen(app.rom, app.level, screen)) }, 'Leeren Screen davor einfügen'),
+      h('button', { disabled: lv.header.screens <= 1, onclick: () => edit(() => deleteScreen(app.rom, app.level, screen)) }, 'Screen löschen')),
+    h('h3', null, 'Leeren'),
+    h('div', { class: 'row' }, h('button', { onclick: () => edit(() => clearLevel(app.level)) }, 'Alle Objekte, Sprites und Exits entfernen')),
   );
-  modal('Level kopieren / speichern unter', body, [
-    { label: 'Abbrechen' },
-    {
-      label: 'Speichern', primary: true, onClick: () => {
-        const copy = cloneLevel(app.level);
-        const dst = loadLevel(app.rom, target);
-        copy.number = target;
-        // write into fresh space: pretend old data of target is the destination
-        copy.l1Addr = dst.l1Addr; copy.l1Size = 0; copy.l2Size = 0; copy.sprAddr = dst.sprAddr; copy.sprSize = 0;
-        try {
-          const log = saveLevel(app.rom, copy);
-          app.emu.syncRom();
-          app.persist();
-          toast(`Gespeichert als Level ${hex(target, 3)}: ${log.join(' · ')}`);
-          app.emit('level');
-        } catch (e) {
-          toast(String(e), 'error');
-        }
-      },
-    },
-  ]);
+  const dlg = modal(`Level ${hex(lv.number, 3)} – Werkzeuge`, body, [{ label: 'Schließen', primary: true }]);
+}
+
+function saveAs(app: App, target: number): void {
+  const copy = cloneLevel(app.level);
+  const dst = loadLevel(app.rom, target);
+  copy.number = target;
+  // write into fresh space: pretend old data of target is the destination
+  copy.l1Addr = dst.l1Addr; copy.l1Size = 0; copy.l2Size = 0; copy.sprAddr = dst.sprAddr; copy.sprSize = 0;
+  try {
+    const log = saveLevel(app.rom, copy);
+    app.emu.syncRom();
+    app.persist();
+    toast(`Gespeichert als Level ${hex(target, 3)}: ${log.join(' · ')}`);
+    app.emit('level');
+  } catch (e) {
+    toast(String(e), 'error');
+  }
+}
+
+async function importLevel(app: App): Promise<boolean> {
+  const f = await pickFile(`${LEVEL_FILE_EXT},.json`);
+  if (!f) return false;
+  try {
+    const rom = app.rom, n = app.level.number;
+    const data = importLevelFile(rom, await f.text(), app.level);
+    app.checkpoint();
+    app.level = data.level;
+    if (data.gfx || editorPatch(rom)) setLevelGfx(rom, n, data.gfx ?? new Array(8).fill(0xff));
+    if (data.palette || customPalette(rom, n)) setCustomPalette(rom, n, data.palette);
+    app.emu.syncRom();
+    app.persist();
+    app.selection.clear();
+    app.changed();
+    app.emit('level-header');
+    app.palettesChanged();
+    toast(`${f.name} als Level ${hex(n, 3)} importiert (noch nicht gespeichert).`);
+    return true;
+  } catch (e) {
+    toast(String(e instanceof Error ? e.message : e), 'error');
+    return false;
+  }
 }
 
 // Insert by number (like Lunar Magic's manual insert): object, extended object or sprite at tile (tx, ty)

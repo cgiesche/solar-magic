@@ -10,7 +10,7 @@ import { hex } from './core/names.ts';
 import { openPaletteEditor } from './ui/paletteeditor.ts';
 import { openMap16Editor } from './ui/map16editor.ts';
 import { openGfxEditor } from './ui/gfxeditor.ts';
-import { openEntrancesDialog, openRomInfo, openCopyLevel, openInsertDialog } from './ui/tools.ts';
+import { openEntrancesDialog, openRomInfo, openLevelTools, openInsertDialog } from './ui/tools.ts';
 import { OverworldView } from './ui/overworld.ts';
 import { openTestPlay } from './ui/testplay.ts';
 
@@ -64,7 +64,7 @@ function buildUi(app: App): void {
     const cb = h('input', { type: 'checkbox', checked: app.show[k] });
     cb.addEventListener('change', () => {
       app.show[k] = cb.checked;
-      if (k === 'layer1' || k === 'layer2' || k === 'ghost') app.recomposite(); else view.paint();
+      if (k === 'layer1' || k === 'layer2' || k === 'layer3' || k === 'ghost') app.recomposite(); else view.paint();
     });
     return h('label', { class: 'toggle' }, cb, label);
   };
@@ -90,8 +90,13 @@ function buildUi(app: App): void {
     h('span', { class: 'sep' }),
     modes,
     h('span', { class: 'sep' }),
-    toggle('layer1', 'L1'), toggle('layer2', 'L2/BG'), toggle('sprites', 'Sprites'), toggle('exits', 'Exits'), toggle('screens', 'Screens'), toggle('grid', 'Raster'),
+    toggle('layer1', 'L1'), toggle('layer2', 'L2/BG'), h('span', { title: 'Layer 3 (Flut, Layer-3-Bilder) – Vorschau, Scrollen angenähert' }, toggle('layer3', 'L3')), toggle('sprites', 'Sprites'), toggle('exits', 'Exits'), toggle('screens', 'Screens'), toggle('grid', 'Raster'),
     h('span', { title: 'Nicht bearbeitete Objektebene halbtransparent (nur Level mit Layer-2-Objekten)' }, toggle('ghost', 'Ghost')),
+    (() => {
+      const cb = h('input', { type: 'checkbox', checked: app.show.anim });
+      cb.addEventListener('change', () => { app.show.anim = cb.checked; app.refresh(); });
+      return h('label', { class: 'toggle', title: 'Animierte Tiles und Paletten abspielen' }, cb, 'Anim.');
+    })(),
     switchToggle('palaces', '!-Blöcke', 'Ansicht: alle Switch-Paläste gedrückt'),
     switchToggle('onOff', 'OFF', 'Ansicht: ON/OFF-Schalter auf OFF'),
     h('span', { class: 'sep' }),
@@ -102,7 +107,7 @@ function buildUi(app: App): void {
     h('button', { onclick: () => openPaletteEditor(app), title: 'Paletten-Editor (P)' }, 'Paletten'),
     h('button', { onclick: () => openGfxEditor(app), title: 'Grafiken' }, 'Grafiken'),
     h('button', { onclick: () => openEntrancesDialog(app), title: 'Sekundäre Eingänge' }, 'Eingänge'),
-    h('button', { onclick: () => openCopyLevel(app), title: 'Level unter anderer Nummer speichern' }, 'Kopieren'),
+    h('button', { onclick: () => openLevelTools(app), title: 'Speichern unter, Export/Import, Screens einfügen/löschen, Level leeren' }, 'Level …'),
     h('button', { onclick: () => view.exportPng(), title: 'Level (sichtbare Ebenen) als PNG exportieren' }, 'PNG'),
     h('button', { onclick: () => openRomInfo(app), title: 'ROM-Info, Erweiterung, Patches' }, 'ROM'),
     h('button', { onclick: () => showHelp(), title: 'Tastenkürzel' }, '?'),

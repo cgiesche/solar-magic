@@ -43,12 +43,15 @@ Beim Anzeigen eines Levels führt er die **originalen Laderoutinen** des ROMs au
 * Header-Dialog (H): Primärer Header (Modus, Screens, Tileset, Paletten, Musik, Zeit, Sprite-GFX, …),
   sekundärer Header (Eingang, Midway, Layer-2/3-Einstellungen), Sprite-Header, BG-Tilemap-Auswahl,
   **Grafik-Bypass (ExGFX pro Level)**.
-* Screen-Exits pro Screen (Ziel, sekundär), **sekundäre Eingänge** (Dialog), Level kopieren/„speichern unter“.
+* Screen-Exits pro Screen (Ziel, sekundär), **sekundäre Eingänge** (Dialog).
+* **Level-Werkzeuge** („Level …“): speichern unter, **Export/Import als `.smwlevel`-Datei** (Objekte, Sprites, Exits,
+  Header, Grafik-Bypass, eigene Palette), **Screen einfügen/löschen** (verschiebt alles dahinter), Level leeren.
 * **Eingangsmarkierungen** für Haupteingang (M), Zwischenziel-Screen (Z) und sekundäre Eingänge (S) – per Ziehen
   verschiebbar (rastet auf die möglichen Eingangspositionen ein).
 * **Einfügen nach Nummer** (Einfg/I): Objekt, erweitertes Objekt oder Sprite mit Größe/Extra-Bits.
 * Raster, Screen-Grenzen, Layer ein-/ausblendbar; **Ghost** (nicht bearbeitete Objektebene halbtransparent);
   Ansicht mit gedrückten Switch-Palästen bzw. ON/OFF auf OFF; Zoom 50–400 %.
+* **Layer 3** (Flut, Layer-3-Bilder) als Vorschau (Scrollen angenähert), **animierte Tiles/Paletten** (Anim.).
 * Statuszeile mit Objekt-/Sprite-Anzahl und Datengröße (Warnung ab 128 Sprites); **Level als PNG** exportieren.
 * **Level testen (T):** das Level (inkl. ungespeicherter Änderungen) im eingebauten Emulator spielen.
 

@@ -124,6 +124,9 @@ export interface LevelImages {
   backdrop: number; // RGBA
   layer1: Uint32Array;
   layer2: Uint32Array; // BG or layer 2 level
+  // BG3 (tides, layer 3 images): low priority tiles behind everything, high priority ones in front
+  // (BG mode 1 with BG3 priority), translucent when color math is enabled for BG3
+  layer3: { back: Uint32Array; front: Uint32Array; blend: boolean } | null;
   geom1: LayerGeom;
   geom2: LayerGeom | null;
   tiles1: Uint16Array; // map16 numbers per tile (layer 1)
@@ -180,11 +183,43 @@ export function renderLevel(rom: Rom, r: LevelRender, mode: number, screens: num
       drawMap16(layer2, width, height, tc2, src.bg(t), x * 16, y * 16);
     }
   }
-  return { width, height, backdrop: backdropColor(r), layer1, layer2, geom1, geom2, tiles1, tiles2 };
+  const layer3 = renderLayer3(r, width, height);
+  return { width, height, backdrop: backdropColor(r), layer1, layer2, layer3, geom1, geom2, tiles1, tiles2 };
 }
 
-// ghost: 1 or 2 draws that layer at 35 % opacity
-export function composite(li: LevelImages, show1 = true, show2 = true, ghost = 0): Uint32Array {
+// BG3 tilemap (2bpp) placed like on screen at the end of the level load: layer 3 scroll ($22/$24)
+// relative to the camera ($1A/$1C), repeated horizontally. Approximation: layer 3 is assumed to
+// scroll along with the camera. The top 5 tile rows hold the status bar (incl. item box) and are skipped.
+export function renderLayer3(r: LevelRender, width: number, height: number): LevelImages['layer3'] {
+  const w = r.wram, p = r.ppuRegs;
+  if (!(p[0x2c] & 0x04) && !(p[0x2d] & 0x04)) return null;
+  const sc = p[0x09], base = (sc & 0xfc) << 9, wide = sc & 1, tall = (sc >> 1) & 1;
+  const mw = 256 << wide, mh = 256 << tall;
+  const dx = (w[0x22] | (w[0x23] << 8)) - (w[0x1a] | (w[0x1b] << 8));
+  const dy = (w[0x24] | (w[0x25] << 8)) - (w[0x1c] | (w[0x1d] << 8));
+  const tc = new TileCache(r.vram, r.cgram, (p[0x0c] & 0x0f) << 13);
+  const back = new Uint32Array(width * height), front = new Uint32Array(width * height);
+  const prioFront = (p[0x05] & 0x0f) === 0x09;
+  let any = false;
+  for (let ty = 5; ty < mh / 8; ty++) {
+    const py = ty * 8 - dy;
+    if (py + 8 <= 0 || py >= height) continue;
+    for (let tx = 0; tx < mw / 8; tx++) {
+      const scr = (tx >> 5) + (ty >> 5) * (wide ? 2 : 1);
+      const a = (base + scr * 0x800 + ((ty & 31) * 32 + (tx & 31)) * 2) & 0xffff;
+      const word = r.vram[a] | (r.vram[a + 1] << 8);
+      const t = tc.get(word, 2);
+      if (!t.some((c) => c)) continue;
+      any = true;
+      const out = prioFront && word & 0x2000 ? front : back;
+      for (let px = ((((tx * 8 - dx) % mw) + mw) % mw) - mw; px < width; px += mw) if (px + 8 > 0) blit8(out, width, height, t, px, py);
+    }
+  }
+  return any ? { back, front, blend: (p[0x31] & 0x04) !== 0 } : null;
+}
+
+// ghost: 1 or 2 draws that layer at 35 % opacity; layer 3 in front is drawn half transparent
+export function composite(li: LevelImages, show1 = true, show2 = true, ghost = 0, show3 = true): Uint32Array {
   const out = new Uint32Array(li.width * li.height).fill(li.backdrop);
   const put = (src: Uint32Array, faint: boolean) => {
     for (let i = 0; i < out.length; i++) {
@@ -192,8 +227,14 @@ export function composite(li: LevelImages, show1 = true, show2 = true, ghost = 0
       if (c) out[i] = faint ? blend(c, out[i], 0.35) : c;
     }
   };
+  const l3 = show3 ? li.layer3 : null;
+  if (l3) put(l3.back, false);
   if (show2) put(li.layer2, ghost === 2);
   if (show1) put(li.layer1, ghost === 1);
+  if (l3) {
+    const f = l3.front;
+    for (let i = 0; i < out.length; i++) if (f[i]) out[i] = l3.blend ? blend(f[i], out[i], 0.5) : f[i];
+  }
   return out;
 }
 

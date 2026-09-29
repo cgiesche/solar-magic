@@ -5,7 +5,7 @@ import { LevelEmulator, OV_L1, OV_L2, type LevelRender, type LevelOverride, MAP_
 import {
   type Level, type LevelObject, type LevelSprite, loadLevel, serializeLayer1, serializeLayer2, serializeSprites,
   isL1Vertical, cloneLevel, newUid, hasLayer2Objects, L1_PTRS, SEC_HDR,
-  readSecondaryEntrance, writeSecondaryEntrance, entrancePos, nearestEntrance,
+  readSecondaryEntrance, writeSecondaryEntrance, entrancePos, nearestEntrance, encodeSecondaryHeader,
 } from '../core/level.ts';
 import { renderLevel, type LevelImages, composite } from '../core/render.ts';
 import { saveLevel } from '../core/save.ts';
@@ -36,7 +36,7 @@ export class App {
   selection = new Set<number>();
   paletteItem: PaletteItem | null = null;
   zoom = 2;
-  show = { layer1: true, layer2: true, sprites: true, grid: false, screens: true, exits: true, ghost: true };
+  show = { layer1: true, layer2: true, layer3: true, sprites: true, grid: false, screens: true, exits: true, ghost: true, anim: false };
   // view-only game state applied before the emulated level load
   switches = { palaces: false, onOff: false };
   dirty = false;
@@ -51,6 +51,9 @@ export class App {
   exitScreen = 0;
   spriteThumbs: Map<number, HTMLCanvasElement> | null = null;
   secEntrances: number[] = []; // secondary entrance indices leading into the current level
+  // tile/palette animation: frames stored as pixel diffs against the static composite
+  anim = { gen: 0, snaps: [] as { vram: Uint8Array; cgram: Uint8Array }[], base: null as Uint32Array | null,
+    frames: [] as { idx: Uint32Array; val: Uint32Array }[], phase: -1, timer: 0 };
 
   constructor(rom: Rom, name: string) {
     this.rom = rom;
@@ -94,7 +97,6 @@ export class App {
     const byteOwner = new Int32Array(0x10000).fill(-1);
     owners1.forEach((o, i) => (byteOwner[OV_L1 + i] = o));
     owners2.forEach((o, i) => (byteOwner[OV_L2 + i] = o < 0 ? -1 : 0x8000 | o));
-    const s = lv.secondary;
     return {
       layer1: l1,
       layer2: l2 ?? undefined,
@@ -103,10 +105,7 @@ export class App {
       byteOwner,
       switchPalaces: this.switches.palaces,
       onOffSwitch: this.switches.onOff,
-      secondaryHeader: [
-        (s.layer2Scroll << 4) | s.entranceY, (s.layer3 << 6) | (s.entranceAction << 3) | s.entranceX,
-        (s.midwayScreen << 4) | (s.fgInitY << 2) | s.bgInitY, (s.noYoshiIntro << 7) | (s.verticalPositioning << 5) | s.entranceScreen,
-      ],
+      secondaryHeader: encodeSecondaryHeader(lv.secondary),
     };
   }
 
@@ -114,23 +113,64 @@ export class App {
     const lv = this.level;
     const r = this.emu.load(lv.number, this.buildOverrides());
     this.renderError = r.ok ? null : r.error ?? 'Fehler';
+    this.anim.snaps = this.show.anim && r.ok ? this.emu.animationFrames() : [];
     this.render = r;
     this.images = renderLevel(this.rom, r, lv.header.mode, lv.header.screens);
     this.compositeImg = this.compose();
     this.buildOffsetMaps();
     this.findSecondaryEntrances();
+    this.startAnimation();
     this.emit('render');
   }
 
   recomposite(): void {
     this.compositeImg = this.compose();
+    this.startAnimation();
     this.emit('render');
   }
 
   // the object layer not being edited is ghosted (only in levels with two object layers)
-  compose(): Uint32Array {
+  compose(images = this.images): Uint32Array {
     const ghost = this.show.ghost && this.level.layer2Objects ? (this.mode === 'l1' ? 2 : this.mode === 'l2' ? 1 : 0) : 0;
-    return composite(this.images, this.show.layer1, this.show.layer2, ghost);
+    return composite(images, this.show.layer1, this.show.layer2, ghost, this.show.layer3);
+  }
+
+  // renders the animation snapshots in the background, then cycles them (8 game frames each)
+  startAnimation(): void {
+    const a = this.anim;
+    const gen = ++a.gen;
+    a.frames = [];
+    a.phase = -1;
+    a.base = this.compositeImg;
+    if (!a.snaps.length) { clearInterval(a.timer); a.timer = 0; return; }
+    const base = a.base, snaps = a.snaps, lv = this.level;
+    let i = 0;
+    const step = () => {
+      if (gen !== a.gen) return;
+      const li = renderLevel(this.rom, { ...this.render, vram: snaps[i].vram, cgram: snaps[i].cgram }, lv.header.mode, lv.header.screens);
+      const img = this.compose(li);
+      const idx: number[] = [];
+      for (let k = 0; k < img.length; k++) if (img[k] !== base[k]) idx.push(k);
+      const ix = Uint32Array.from(idx);
+      a.frames.push({ idx: ix, val: ix.map((k) => img[k]) });
+      if (++i < snaps.length) setTimeout(step, 0);
+      else if (!a.timer) a.timer = window.setInterval(() => this.animTick(), 1000 / 7.5);
+    };
+    setTimeout(step, 0);
+  }
+
+  animTick(): void {
+    const a = this.anim;
+    if (!a.frames.length || !a.base) return;
+    if (!this.show.anim) { clearInterval(a.timer); a.timer = 0; return; }
+    const img = this.compositeImg === a.base ? a.base.slice() : this.compositeImg;
+    const prev = a.frames[a.phase];
+    if (prev) for (const k of prev.idx) img[k] = a.base[k];
+    a.phase = (a.phase + 1) % a.frames.length;
+    const f = a.frames[a.phase];
+    for (let j = 0; j < f.idx.length; j++) img[f.idx[j]] = f.val[j];
+    this.compositeImg = img;
+    this.emit('anim-frame');
   }
 
   // ------------- entrances -------------

@@ -52,6 +52,7 @@ export class LevelView {
     attachPanZoom(this.scroller, () => this.app.zoom, (z, ax, ay) => this.setZoom(z, { ax, ay }));
     this.scroller.addEventListener('mouseleave', () => { this.hover = null; this.paint(); });
     app.on('render', () => { this.updateLevelImage(); this.updateStats(); });
+    app.on('anim-frame', () => { this.updateLevelImage(false); });
     app.on('change', () => { this.paint(); this.updateStats(); });
     app.on('sprites', () => this.requestPaint());
   }
@@ -72,7 +73,7 @@ export class LevelView {
     this.app.emit('zoom');
   }
 
-  updateLevelImage(): void {
+  updateLevelImage(relayout = true): void {
     const im = this.app.images;
     if (this.levelCanvas.width !== im.width || this.levelCanvas.height !== im.height) {
       this.levelCanvas.width = im.width;
@@ -81,7 +82,7 @@ export class LevelView {
     const lctx = this.levelCanvas.getContext('2d')!;
     const id = new ImageData(new Uint8ClampedArray(this.app.compositeImg.buffer.slice(0) as ArrayBuffer), im.width, im.height);
     lctx.putImageData(id, 0, 0);
-    this.layout();
+    if (relayout) this.layout(); else this.requestPaint();
   }
 
   layout(): void {
@@ -507,7 +508,7 @@ export class LevelView {
     const c = document.createElement('canvas');
     c.width = im.width; c.height = im.height;
     const ctx = c.getContext('2d')!;
-    const px = composite(im, app.show.layer1, app.show.layer2); // without ghosting
+    const px = composite(im, app.show.layer1, app.show.layer2, 0, app.show.layer3); // without ghosting
     ctx.putImageData(new ImageData(new Uint8ClampedArray(px.buffer as ArrayBuffer), im.width, im.height), 0, 0);
     if (app.show.sprites) for (const s of app.level.sprites) {
       const img = app.spriteThumbs?.get(s.num);
