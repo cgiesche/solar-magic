@@ -1,7 +1,7 @@
 // Scrollable, zoomable level canvas with editing interactions.
 
 import { App } from './app.ts';
-import { h } from './dom.ts';
+import { h, attachPanZoom } from './dom.ts';
 import { spriteName, objectName, hex2, hex3 } from '../core/names.ts';
 import type { LevelObject, LevelSprite } from '../core/level.ts';
 
@@ -38,25 +38,20 @@ export class LevelView {
     window.addEventListener('mousemove', (e) => this.onMove(e));
     window.addEventListener('mouseup', (e) => this.onUp(e));
     this.scroller.addEventListener('contextmenu', (e) => e.preventDefault());
-    this.scroller.addEventListener('wheel', (e) => {
-      if (e.ctrlKey) {
-        e.preventDefault();
-        this.setZoom(this.app.zoom * (e.deltaY < 0 ? 2 : 0.5), e);
-      }
-    }, { passive: false });
+    attachPanZoom(this.scroller, () => this.app.zoom, (z, ax, ay) => this.setZoom(z, { ax, ay }));
     this.scroller.addEventListener('mouseleave', () => { this.hover = null; this.paint(); });
     app.on('render', () => this.updateLevelImage());
     app.on('change', () => this.paint());
     app.on('sprites', () => this.requestPaint());
   }
 
-  setZoom(z: number, anchor?: MouseEvent): void {
+  setZoom(z: number, anchor?: { ax: number; ay: number }): void {
     z = Math.max(0.5, Math.min(4, z));
     const old = this.app.zoom;
     if (z === old) return;
     const rect = this.scroller.getBoundingClientRect();
-    const ax = anchor ? anchor.clientX - rect.left : rect.width / 2;
-    const ay = anchor ? anchor.clientY - rect.top : rect.height / 2;
+    const ax = anchor ? anchor.ax : rect.width / 2;
+    const ay = anchor ? anchor.ay : rect.height / 2;
     const lx = (this.scroller.scrollLeft + ax) / old, ly = (this.scroller.scrollTop + ay) / old;
     this.app.zoom = z;
     this.layout();

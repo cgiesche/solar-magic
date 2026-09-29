@@ -102,3 +102,43 @@ export function pickFile(accept: string): Promise<File | null> {
     inp.click();
   });
 }
+
+const ZOOM_STEPS = [0.5, 0.75, 1, 1.5, 2, 3, 4];
+
+// Middle-button drag pans a scroll container; Ctrl+wheel zooms in steps around the cursor.
+export function attachPanZoom(scroller: HTMLElement, zoom: () => number, setZoom: (z: number, anchorX: number, anchorY: number) => void, min = 0.5, max = 4): void {
+  let pan: { x: number; y: number; sl: number; st: number } | null = null;
+  scroller.addEventListener('mousedown', (e) => {
+    if (e.button !== 1) return;
+    e.preventDefault(); // no autoscroll / primary-selection paste
+    pan = { x: e.clientX, y: e.clientY, sl: scroller.scrollLeft, st: scroller.scrollTop };
+    scroller.style.cursor = 'grabbing';
+  });
+  window.addEventListener('mousemove', (e) => {
+    if (!pan) return;
+    scroller.scrollLeft = pan.sl - (e.clientX - pan.x);
+    scroller.scrollTop = pan.st - (e.clientY - pan.y);
+  });
+  window.addEventListener('mouseup', (e) => {
+    if (e.button !== 1 || !pan) return;
+    pan = null;
+    scroller.style.cursor = '';
+  });
+  scroller.addEventListener('auxclick', (e) => { if (e.button === 1) e.preventDefault(); });
+  // touchpads send many small deltas: accumulate to one step per ~mouse-wheel notch
+  let acc = 0;
+  scroller.addEventListener('wheel', (e) => {
+    if (!e.ctrlKey) return;
+    e.preventDefault();
+    acc += e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
+    if (Math.abs(acc) < 50) return;
+    const dir = acc < 0 ? 1 : -1;
+    acc = 0;
+    const steps = ZOOM_STEPS.filter((s) => s >= min && s <= max);
+    const cur = zoom();
+    const next = dir > 0 ? steps.find((s) => s > cur + 1e-6) : [...steps].reverse().find((s) => s < cur - 1e-6);
+    if (next === undefined) return;
+    const rc = scroller.getBoundingClientRect();
+    setZoom(next, e.clientX - rc.left, e.clientY - rc.top);
+  }, { passive: false });
+}

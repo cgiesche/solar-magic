@@ -13,17 +13,19 @@ export interface SpriteImage {
   rgba: Uint32Array;
 }
 
-interface OamTile { x: number; y: number; tile: number; attr: number; big: boolean }
+interface OamTile { i: number; x: number; y: number; tile: number; attr: number; big: boolean }
 
-function readOam(oam: Uint8Array): OamTile[] {
+// the game's OAM buffer (copy of $0200-$049F): $0200-$03FF (4 bytes per tile), $0420+i (size/x-high)
+function readOamBuffer(buf: Uint8Array): OamTile[] {
+  const w = (a: number) => buf[a - 0x200];
   const out: OamTile[] = [];
   for (let i = 0; i < 128; i++) {
-    const hi = (oam[0x200 + (i >> 2)] >> ((i & 3) * 2)) & 3;
-    let x = oam[i * 4] | ((hi & 1) << 8);
+    const hi = w(0x420 + i) & 3;
+    let x = w(0x200 + i * 4) | ((hi & 1) << 8);
     if (x >= 256) x -= 512;
-    const y = oam[i * 4 + 1];
+    const y = w(0x201 + i * 4);
     if (y >= 0xe0 && y < 0xf8) continue; // hidden
-    out.push({ x, y: y >= 0xf8 ? y - 256 : y, tile: oam[i * 4 + 2], attr: oam[i * 4 + 3], big: (hi & 2) !== 0 });
+    out.push({ i, x, y: y >= 0xf8 ? y - 256 : y, tile: w(0x202 + i * 4), attr: w(0x203 + i * 4), big: (hi & 2) !== 0 });
   }
   return out;
 }
@@ -62,54 +64,76 @@ export function captureSprites(
     data.push(0xff);
     const r = emu.load(level, { layer1: l1, sprites: new Uint8Array(data), secondaryHeader: secondary, layer2Pointer: bgPointer });
     if (!r.ok) continue;
-    // continue running the (still live) emulator state for a few frames
+    // continue running the (still live) emulator state for a few frames, recording which
+    // sprite slot writes each OAM buffer entry ($0200-$03FF): the sprite loop stores the slot
+    // in $15E9 ($0180A9) before each sprite runs, Yoshi is drawn later with $15E9 set at $01EA83;
+    // writes from shallower stack depth end the attribution.
+    // (score/extended sprite loops in bank 2 reuse $15E9, hence the bank check)
+    const owner = new Int8Array(128).fill(-1);
+    let snapOwner = owner.slice(), snapOam = s.wram.slice(0x200, 0x4a0);
+    // slots whose OAM entries were overwritten by another sprite in the same frame
+    let conflicts = new Set<number>(), snapConflicts = conflicts;
+    let cur = -1, s0 = 0;
+    s.hook = {
+      onWramWrite(a: number, v: number) {
+        if (a === 0x15e9) {
+          if (s.cpu.pbr === 1) { cur = v; s0 = s.cpu.s; }
+          else if (cur >= 0 && s.cpu.s < s0) cur = v; // sprite code switching slots
+          else cur = -1;
+          return;
+        }
+        if (cur >= 0 && s.cpu.s > s0) {
+          cur = -1;
+          snapOwner = owner.slice();
+          snapOam = s.wram.slice(0x200, 0x4a0);
+          snapConflicts = conflicts;
+          conflicts = new Set();
+        }
+        if (a >= 0x200 && a < 0x400) {
+          const e = (a - 0x200) >> 2, prev = owner[e];
+          if (cur >= 0 && prev >= 0 && prev !== cur) { conflicts.add(prev); conflicts.add(cur); }
+          owner[e] = cur;
+        }
+      },
+    };
     try {
       let guard = 0;
       while (s.wram[0x100] !== 0x14 && guard++ < 80) s.runFrame();
       for (let f = 0; f < 3; f++) s.runFrame();
-    } catch { continue; }
+    } catch { continue; } finally { s.hook = null; }
     const w = s.wram;
     const cx = w[0x1a] | (w[0x1b] << 8), cy = w[0x1c] | (w[0x1d] << 8);
-    const tiles = readOam(s.oam);
     const obsel = s.ppuRegs[0x01];
     const base = (obsel & 7) << 14;
     const gap = (((obsel >> 3) & 3) + 1) << 13;
     const pal = cgramToRGBA(s.cgram);
     // live sprite slots
-    const live: { n: number; x: number; y: number; spawnX: number; spawnY: number }[] = [];
+    const live = new Map<number, { n: number; x: number; y: number }>();
     for (let i = 0; i < 12; i++) {
-      if (w[0x14c8 + i] === 0) continue;
-      const n = w[0x9e + i];
-      const idx = w[0x161a + i];
-      const p = order[idx];
-      if (!p) continue;
-      live.push({ n, x: w[0xe4 + i] | (w[0x14e0 + i] << 8), y: w[0xd8 + i] | (w[0x14d4 + i] << 8), spawnX: p.tx * 16, spawnY: p.ty * 16 });
+      if (w[0x14c8 + i] === 0 || !order[w[0x161a + i]]) continue;
+      live.set(i, { n: w[0x9e + i], x: w[0xe4 + i] | (w[0x14e0 + i] << 8), y: w[0xd8 + i] | (w[0x14d4 + i] << 8) });
     }
     const groups = new Map<number, OamTile[]>();
-    for (const t of tiles) {
-      const wx = t.x + cx, wy = t.y + cy;
-      const size = t.big ? 16 : 8;
-      let best = -1, bd = 1e9;
-      live.forEach((l, i) => {
-        const dx = wx + size / 2 - (l.x + 8), dy = wy + size / 2 - (l.y + 8);
-        const d = dx * dx + dy * dy;
-        if (d < bd) { bd = d; best = i; }
-      });
-      if (best < 0 || bd > 44 * 44) continue;
-      let g = groups.get(best);
-      if (!g) { g = []; groups.set(best, g); }
+    for (const t of readOamBuffer(snapOam)) {
+      const slot = snapOwner[t.i];
+      if (!live.has(slot)) continue;
+      let g = groups.get(slot);
+      if (!g) { g = []; groups.set(slot, g); }
       g.push(t);
     }
     groups.forEach((g, i) => {
-      const l = live[i];
+      const l = live.get(i)!;
       if (result.has(l.n)) return;
+      // partly off screen or sharing OAM entries with another sprite: retry alone in the first slot
+      if (batch.length > 1 && (snapConflicts.has(i) || w[0x15a0 + i] || w[0x186c + i]
+        || g.some(t => t.x < 0 || t.x + (t.big ? 16 : 8) > 256 || t.y + (t.big ? 16 : 8) > 224))) return;
       let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
       for (const t of g) {
         const sz = t.big ? 16 : 8;
         x0 = Math.min(x0, t.x); y0 = Math.min(y0, t.y); x1 = Math.max(x1, t.x + sz); y1 = Math.max(y1, t.y + sz);
       }
       const W = x1 - x0, H = y1 - y0;
-      if (W <= 0 || H <= 0 || W > 128 || H > 128) return;
+      if (W <= 0 || H <= 0 || W > 256 || H > 256) return;
       const rgba = new Uint32Array(W * H);
       const idx = new Uint8Array(64);
       // OAM draw order: lower index has priority → draw in reverse

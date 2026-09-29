@@ -1,7 +1,7 @@
 // Overworld editor view.
 
 import type { App } from './app.ts';
-import { h, clear, toast, select } from './dom.ts';
+import { h, clear, toast, select, attachPanZoom } from './dom.ts';
 import {
   OverworldEmulator, type OwRender, readL1, writeL1, readL2, writeL2, l1Index, l2Index, translevels, isLevelTile,
   translevelToLevel, levelName, nameCode, setNameCode, splitNameCode, joinNameCode, nameWord, NAME_PART_COUNTS, MAP_NAMES,
@@ -56,7 +56,13 @@ export class OverworldView {
     this.scroller.addEventListener('mousedown', (e) => this.onDown(e));
     window.addEventListener('mousemove', (e) => this.onMove(e));
     window.addEventListener('mouseup', () => { if (this.painting) { this.painting = false; } });
-    this.scroller.addEventListener('wheel', (e) => { if (e.ctrlKey) { e.preventDefault(); this.zoom = Math.max(1, Math.min(4, this.zoom * (e.deltaY < 0 ? 2 : 0.5))); this.layout(); } }, { passive: false });
+    attachPanZoom(this.scroller, () => this.zoom, (z, ax, ay) => {
+      const lx = (this.scroller.scrollLeft + ax) / this.zoom, ly = (this.scroller.scrollTop + ay) / this.zoom;
+      this.zoom = z;
+      this.layout();
+      this.scroller.scrollLeft = lx * z - ax;
+      this.scroller.scrollTop = ly * z - ay;
+    }, 1, 4);
   }
 
   get region(): number {
