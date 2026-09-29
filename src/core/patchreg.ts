@@ -20,6 +20,9 @@ export interface PatchEntry {
   backup: number[]; // SNES addresses of the RATS blocks holding the original bytes of segs
   own: number[]; // pc of the RATS tags of the patch's free space blocks
   check: number; // hash of the patched bytes of segs, to notice later edits
+  kind?: 'patch' | 'uberasm';
+  src?: number[]; // SNES addresses of RATS blocks holding the sources (zip), if stored in the ROM
+  srcSize?: number;
 }
 
 interface Registry { v: number; patches: PatchEntry[] }
@@ -84,25 +87,15 @@ export function ownerNote(rom: Rom, snes: number, len: number): string {
   return p ? ` (belegt durch Patch „${p.name}“)` : '';
 }
 
-// adds an entry; original[i] holds the bytes of segs[i] before the patch
-export function addPatch(rom: Rom, entry: Omit<PatchEntry, 'backup'>, original: Uint8Array[]): PatchEntry {
-  const reg = read(rom);
-  const all = new Uint8Array(original.reduce((n, o) => n + o.length, 0));
-  let o = 0;
-  for (const b of original) { all.set(b, o); o += b.length; }
-  const backup: number[] = [];
-  for (let i = 0; i < all.length; i += CHUNK) backup.push(rom.allocWrite(all.subarray(i, i + CHUNK)));
-  const full: PatchEntry = { ...entry, backup };
-  reg.patches.push(full);
-  write(rom, reg);
-  return full;
+function writeChunks(rom: Rom, data: Uint8Array): number[] {
+  const out: number[] = [];
+  for (let i = 0; i < data.length; i += CHUNK) out.push(rom.allocWrite(data.subarray(i, i + CHUNK)));
+  return out;
 }
-
-export function backupBytes(rom: Rom, p: PatchEntry): Uint8Array {
-  const total = p.segs.reduce((n, s) => n + s[1], 0);
+function readChunks(rom: Rom, addrs: number[], total: number): Uint8Array {
   const out = new Uint8Array(total);
   let o = 0;
-  for (const addr of p.backup) {
+  for (const addr of addrs) {
     const n = Math.min(CHUNK, total - o);
     out.set(rom.bytes(addr, n), o);
     o += n;
@@ -110,11 +103,33 @@ export function backupBytes(rom: Rom, p: PatchEntry): Uint8Array {
   return out;
 }
 
+// adds an entry; original[i] holds the bytes of segs[i] before the patch; archive: sources to keep in the ROM
+export function addPatch(rom: Rom, entry: Omit<PatchEntry, 'backup' | 'src' | 'srcSize'>, original: Uint8Array[], archive?: Uint8Array): PatchEntry {
+  const reg = read(rom);
+  const all = new Uint8Array(original.reduce((n, o) => n + o.length, 0));
+  let o = 0;
+  for (const b of original) { all.set(b, o); o += b.length; }
+  const full: PatchEntry = { ...entry, backup: writeChunks(rom, all) };
+  if (archive) { full.src = writeChunks(rom, archive); full.srcSize = archive.length; }
+  reg.patches.push(full);
+  write(rom, reg);
+  return full;
+}
+
+export function backupBytes(rom: Rom, p: PatchEntry): Uint8Array {
+  return readChunks(rom, p.backup, p.segs.reduce((n, s) => n + s[1], 0));
+}
+
+// the sources stored with the patch, null if they were not kept in the ROM
+export function patchArchive(rom: Rom, p: PatchEntry): Uint8Array | null {
+  return p.src && p.srcSize ? readChunks(rom, p.src, p.srcSize) : null;
+}
+
 export function removeEntry(rom: Rom, id: string): void {
   const reg = read(rom);
   const p = reg.patches.find((e) => e.id === id);
   if (!p) return;
-  for (const addr of p.backup) rom.freeAt(addr);
+  for (const addr of [...p.backup, ...(p.src ?? [])]) rom.freeAt(addr);
   reg.patches = reg.patches.filter((e) => e.id !== id);
   write(rom, reg);
 }

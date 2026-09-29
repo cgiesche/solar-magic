@@ -31,6 +31,8 @@ export interface PatchSource {
   files: Map<string, Uint8Array | string>;
   defines?: Record<string, string>; // passed to Asar
   settings?: Record<string, string>; // all settings chosen by the user (stored in the registry)
+  kind?: 'patch' | 'uberasm';
+  archive?: Uint8Array; // sources to keep in the ROM (zip)
 }
 
 export interface ApplyResult {
@@ -153,7 +155,8 @@ export function applyPatch(rom: Rom, src: PatchSource): ApplyResult {
     segs,
     own: own.map((b) => b.start),
     check: patchedHash(after, segs),
-  }, original);
+    kind: src.kind,
+  }, original, src.archive);
   return { ok: true, errors: [], warnings, prints: r.prints, entry, asar: { errors: [], warnings: r.warnings } };
 }
 

@@ -148,3 +148,12 @@ kbd { background: #181a1f; border: 1px solid var(--border); border-radius: 3px; 
 .patch-log { font-family: monospace; font-size: 12px; white-space: pre-wrap; max-height: 240px; overflow: auto; margin-top: 8px; }
 .patch-log .err { color: var(--danger); }
 .patch-log .warn { color: #e0b050; }
+.uber-dialog { width: 680px; max-width: 100%; }
+.uber-dialog .tabs { display: flex; gap: 4px; margin: 10px 0 6px; }
+.uber-table { border-collapse: collapse; width: 100%; font-size: 12px; margin-bottom: 6px; }
+.uber-table th { text-align: left; color: var(--muted); font-weight: 500; }
+.uber-table td, .uber-table th { padding: 2px 6px; border-bottom: 1px solid var(--border); }
+.uber-table td.err { color: var(--danger); }
+.uber-add { flex-wrap: wrap; margin: 6px 0; }
+.uber-files { max-height: 160px; overflow: auto; margin-bottom: 6px; }
+.mono { font-family: monospace; font-size: 12px; }

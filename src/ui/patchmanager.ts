@@ -6,13 +6,34 @@ import { h, modal, clear, toast, pickFile } from './dom.ts';
 import { kvGet, kvSet, kvDel } from './storage.ts';
 import { loadAsar } from '../core/asar.ts';
 import { applyPatch, uninstallPatch, reapplyPatch, type ApplyResult } from '../core/patchapply.ts';
-import { listPatches, type PatchEntry } from '../core/patchreg.ts';
+import { listPatches, patchArchive, type PatchEntry } from '../core/patchreg.ts';
+import { zipSync, unzipSync } from 'fflate';
+import { openUberDialog } from './uberdialog.ts';
 import { readPackage, packageFromFiles, scanDefines, effectiveDefines, packageSource, optionDefault, type PatchPackage, type PatchOption } from '../core/patchpkg.ts';
 import { installEditorPatch } from '../core/patches.ts';
 import { installMap16Ext, map16Ext } from '../core/map16ext.ts';
 import { map16Source } from '../core/render.ts';
 
 interface StoredPackage { fileName: string; files: [string, Uint8Array][]; main: string }
+// sources up to this size (compressed) are kept in the ROM, larger ones only in the browser
+const MAX_ROM_ARCHIVE = 256 << 10;
+const META = '.smwe-package.json';
+
+function packArchive(s: StoredPackage): Uint8Array {
+  const files: Record<string, Uint8Array> = Object.fromEntries(s.files);
+  files[META] = new TextEncoder().encode(JSON.stringify({ fileName: s.fileName, main: s.main }));
+  return zipSync(files, { level: 9 });
+}
+function unpackArchive(a: Uint8Array): StoredPackage {
+  const all = unzipSync(a);
+  const meta = JSON.parse(new TextDecoder().decode(all[META])) as { fileName: string; main: string };
+  delete all[META];
+  return { ...meta, files: Object.entries(all) };
+}
+async function storedPackage(app: App, p: PatchEntry): Promise<StoredPackage | undefined> {
+  const a = patchArchive(app.rom, p);
+  return a ? unpackArchive(a) : kvGet<StoredPackage>(srcKey(p.id));
+}
 const srcKey = (id: string) => `patch:${id}`;
 
 function toPackage(s: StoredPackage): PatchPackage {
@@ -122,6 +143,9 @@ function openApplyDialog(app: App, pkg: PatchPackage, fileName: string, entry: P
     const values = form.read();
     const src = packageSource(pkg, main, effectiveDefines(pkg, values));
     src.settings = values;
+    const stored: StoredPackage = { fileName, files: [...pkg.files], main };
+    const archive = packArchive(stored);
+    if (archive.length <= MAX_ROM_ARCHIVE) src.archive = archive;
     if (app.dirty) app.saveLevel(true);
     let r: ApplyResult;
     try {
@@ -132,9 +156,8 @@ function openApplyDialog(app: App, pkg: PatchPackage, fileName: string, entry: P
       return false;
     }
     if (!r.ok) { clear(log).appendChild(logView(r)); return false; }
-    const stored: StoredPackage = { fileName, files: [...pkg.files], main };
     if (entry) kvDel(srcKey(entry.id)).catch(() => {});
-    kvSet(srcKey(r.entry!.id), stored).catch(() => {});
+    if (!src.archive) kvSet(srcKey(r.entry!.id), stored).catch(() => {});
     romChanged(app);
     toast(`Patch „${pkg.name}“ ${entry ? 'neu angewendet' : 'angewendet'}${r.warnings.length ? ` (${r.warnings.length} Warnung(en))` : ''}`);
     if (r.warnings.length || r.prints.length) modal(`Ausgabe: ${pkg.name}`, logView(r), [{ label: 'OK', primary: true }]);
@@ -162,10 +185,11 @@ export async function openPatchManager(app: App): Promise<void> {
             h('div', { class: 'patch-name' }, p.name, p.version ? h('span', { class: 'hint' }, ` v${p.version}`) : null),
             h('div', { class: 'hint' }, `${new Date(p.applied).toLocaleString()} · ${bytes} Bytes geändert · ${(own / 1024).toFixed(1)} KB Code/Daten${Object.keys(p.defines).length ? ` · ${Object.entries(p.defines).map(([k, v]) => `!${k}=${v}`).join(' ')}` : ''}`)),
           h('div', { class: 'row' },
-            h('button', { onclick: () => configure(p) }, 'Einstellungen …'),
+            h('button', { onclick: () => (p.kind === 'uberasm' ? openUberDialog(app, build) : configure(p)) }, p.kind === 'uberasm' ? 'Bearbeiten …' : 'Einstellungen …'),
             h('button', { onclick: () => remove(p) }, 'Entfernen')));
       })) : h('p', null, 'Keine Patches installiert.'),
-      h('div', { class: 'row' }, h('button', { class: 'primary', onclick: add }, 'Patch hinzufügen …')),
+      h('div', { class: 'row' }, h('button', { class: 'primary', onclick: add }, 'Patch hinzufügen …'),
+        list.some((p) => p.kind === 'uberasm') ? null : h('button', { onclick: () => openUberDialog(app, build) }, 'UberASM …')),
     );
   };
   const add = async () => {
@@ -177,7 +201,7 @@ export async function openPatchManager(app: App): Promise<void> {
     } catch (e) { toast(e instanceof Error ? e.message : String(e), 'error'); }
   };
   const configure = async (p: PatchEntry) => {
-    const s = await kvGet<StoredPackage>(srcKey(p.id));
+    const s = await storedPackage(app, p);
     if (!s) { toast('Die Quelldateien dieses Patches sind nicht gespeichert – zum Ändern den Patch entfernen und neu hinzufügen.', 'error'); return; }
     openApplyDialog(app, toPackage(s), s.fileName, p, build);
   };
