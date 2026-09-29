@@ -35,6 +35,13 @@ export class Snes implements Bus {
   oam = new Uint8Array(0x220);
   cpu: CPU;
   hook: MemHook | null = null;
+  // data provenance tracking (ROM offset each WRAM/CGRAM byte was copied from)
+  taintOn = false;
+  taint = new Int32Array(0x20000).fill(-1);
+  cgTaint = new Int32Array(0x200).fill(-1);
+  fifoSrc = new Int32Array(8);
+  fifoVal = new Int32Array(8);
+  fifoLen = 0;
   // 64 KB overlay visible at $FE8000-$FEFFFF / $FF8000-$FFFFFF (editor scratch data)
   overlay: Uint8Array | null = null;
 
@@ -94,6 +101,7 @@ export class Snes implements Bus {
     let v: number;
     if (bank === 0x7e || bank === 0x7f) {
       v = this.wram[addr - 0x7e0000];
+      if (this.taintOn) this.tpush(this.taint[addr - 0x7e0000], v);
     } else {
       const b = bank & 0x7f;
       if (off >= 0x8000) {
@@ -106,11 +114,14 @@ export class Snes implements Bus {
         const ro = this.romOffset(addr);
         if (this.hook?.onRomRead) this.hook.onRomRead(ro);
         v = this.rom[ro];
+        if (this.taintOn) this.tpush(ro, v);
       } else if (b >= 0x70 && b < 0x7e) {
         v = this.sram[off & 0x7fff];
       } else if (b < 0x40) {
-        if (off < 0x2000) v = this.wram[off];
-        else v = this.readIO(off);
+        if (off < 0x2000) {
+          v = this.wram[off];
+          if (this.taintOn) this.tpush(this.taint[off], v);
+        } else v = this.readIO(off);
       } else {
         v = this.openBus;
       }
@@ -125,6 +136,7 @@ export class Snes implements Bus {
     if (bank === 0x7e || bank === 0x7f) {
       const a = addr - 0x7e0000;
       this.wram[a] = v;
+      if (this.taintOn) this.taint[a] = this.tpop(v);
       if (this.hook?.onWramWrite) this.hook.onWramWrite(a, v);
       return;
     }
@@ -137,12 +149,33 @@ export class Snes implements Bus {
     if (b < 0x40) {
       if (off < 0x2000) {
         this.wram[off] = v;
+        if (this.taintOn) this.taint[off] = this.tpop(v);
         if (this.hook?.onWramWrite) this.hook.onWramWrite(off, v);
       } else this.writeIO(off, v);
     }
   }
 
   // ---------------- I/O ----------------
+  cgLatchTaint = -1;
+  tpush(src: number, v: number): void {
+    if (this.fifoLen === 8) {
+      this.fifoSrc.copyWithin(0, 1); this.fifoVal.copyWithin(0, 1); this.fifoLen--;
+    }
+    this.fifoSrc[this.fifoLen] = src; this.fifoVal[this.fifoLen] = v; this.fifoLen++;
+  }
+  tpop(v: number): number {
+    for (let i = 0; i < this.fifoLen; i++) {
+      if (this.fifoVal[i] === v) {
+        const src = this.fifoSrc[i];
+        const rest = this.fifoLen - i - 1;
+        this.fifoSrc.copyWithin(0, i + 1, this.fifoLen); this.fifoVal.copyWithin(0, i + 1, this.fifoLen);
+        this.fifoLen = rest;
+        return src;
+      }
+    }
+    return -1;
+  }
+
   vramStep(): number {
     switch (this.vmain & 3) {
       case 0: return 1;
@@ -251,8 +284,9 @@ export class Snes implements Bus {
       case 0x211c: this.m7b = v; this.m7latch = v; return;
       case 0x2121: this.cgaddr = v; this.cgLatch = -1; this.cgReadHigh = false; return;
       case 0x2122:
-        if (this.cgLatch < 0) this.cgLatch = v;
+        if (this.cgLatch < 0) { this.cgLatch = v; if (this.taintOn) this.cgLatchTaint = this.tpop(v); }
         else {
+          if (this.taintOn) { this.cgTaint[this.cgaddr * 2] = this.cgLatchTaint; this.cgTaint[this.cgaddr * 2 + 1] = this.tpop(v); }
           this.cgram[this.cgaddr * 2] = this.cgLatch;
           this.cgram[this.cgaddr * 2 + 1] = v & 0x7f;
           this.cgaddr = (this.cgaddr + 1) & 0xff;

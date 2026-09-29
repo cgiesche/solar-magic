@@ -7,6 +7,10 @@ import { LevelView } from './ui/levelview.ts';
 import { LevelList, Palette, Properties } from './ui/panels.ts';
 import { openHeaderDialog } from './ui/headerdialog.ts';
 import { hex } from './core/names.ts';
+import { openPaletteEditor } from './ui/paletteeditor.ts';
+import { openMap16Editor } from './ui/map16editor.ts';
+import { openGfxEditor } from './ui/gfxeditor.ts';
+import { openEntrancesDialog, openRomInfo, openCopyLevel } from './ui/tools.ts';
 
 const root = document.getElementById('app')!;
 
@@ -81,6 +85,12 @@ function buildUi(app: App): void {
     h('span', { class: 'sep' }),
     h('button', { onclick: () => view.setZoom(app.zoom / 2) }, '−'), zoomLabel, h('button', { onclick: () => view.setZoom(app.zoom * 2) }, '+'),
     h('span', { class: 'spacer' }),
+    h('button', { onclick: () => openMap16Editor(app, view.hover ? hoverTile(app, view.hover.tx, view.hover.ty) : 0), title: 'Map16-Editor (M)' }, 'Map16'),
+    h('button', { onclick: () => openPaletteEditor(app), title: 'Paletten-Editor (P)' }, 'Paletten'),
+    h('button', { onclick: () => openGfxEditor(app), title: 'Grafiken' }, 'Grafiken'),
+    h('button', { onclick: () => openEntrancesDialog(app), title: 'Sekundäre Eingänge' }, 'Eingänge'),
+    h('button', { onclick: () => openCopyLevel(app), title: 'Level unter anderer Nummer speichern' }, 'Kopieren'),
+    h('button', { onclick: () => openRomInfo(app), title: 'ROM-Info, Erweiterung, Patches' }, 'ROM'),
     h('button', { onclick: () => showHelp(), title: 'Tastenkürzel' }, '?'),
   );
   const updateToolbar = () => {
@@ -94,7 +104,8 @@ function buildUi(app: App): void {
   app.on('change', updateToolbar);
   app.on('level', updateToolbar);
   app.on('zoom', updateToolbar);
-  app.on('level-header', () => palette.invalidate());
+  app.on('level-header', () => { palette.invalidate(); app.ensureSpriteImages(); });
+  app.on('palettes', () => palette.invalidate());
 
   root.append(h('div', { class: 'layout' },
     toolbar,
@@ -135,9 +146,16 @@ function buildUi(app: App): void {
     else if (k === 'PageUp') app.reorderSelection('front');
     else if (k === 'PageDown') app.reorderSelection('back');
     else if (k === 'g' || k === 'G') { app.show.grid = !app.show.grid; view.paint(); }
+    else if (k === 'm' || k === 'M') openMap16Editor(app, view.hover ? hoverTile(app, view.hover.tx, view.hover.ty) : 0);
+    else if (k === 'p' || k === 'P') openPaletteEditor(app);
   };
   window.onbeforeunload = (e) => { if (app.dirty) { e.preventDefault(); } };
   levels.build();
+}
+
+function hoverTile(app: App, tx: number, ty: number): number {
+  const a = app.images.geom1.addr(tx, ty);
+  return a < 0 ? 0 : app.render.wram[a] | (app.render.wram[a + 0x10000] << 8);
 }
 
 function exportRom(app: App): void {

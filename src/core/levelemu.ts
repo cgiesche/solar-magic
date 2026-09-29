@@ -24,12 +24,14 @@ export interface LevelOverride {
   byteOwner?: Int32Array;
   secondaryHeader?: number[]; // 4 bytes
   switchPalaces?: boolean; // treat all switch palaces as pressed
+  trackSources?: boolean; // record ROM provenance of CGRAM (slower)
 }
 
 export interface LevelRender {
   wram: Uint8Array;
   vram: Uint8Array;
   cgram: Uint8Array;
+  cgramSrc: Int32Array; // ROM offset each CGRAM byte came from (-1 unknown)
   ppuRegs: Uint8Array;
   owner: Int32Array; // per low-byte map address ($C800-$FFFF), -1 = none
   touched: Map<number, Set<number>>; // object key → map offsets written
@@ -144,6 +146,10 @@ export class LevelEmulator {
         else if (a >= 0x10000 + MAP_BASE && a < 0x10000 + MAP_BASE + MAP_SIZE) touch(current, a - 0x10000 - MAP_BASE);
       },
     };
+    s.taintOn = !!ov.trackSources;
+    s.taint.fill(-1);
+    s.cgTaint.fill(-1);
+    s.fifoLen = 0;
     let frames = 0;
     let ok = true;
     let error: string | undefined;
@@ -159,12 +165,14 @@ export class LevelEmulator {
       error = String(e);
     } finally {
       s.hook = null;
+      s.taintOn = false;
       for (let i = saved.length - 1; i >= 0; i--) rom.w8(saved[i][0], saved[i][1]);
     }
     return {
       wram: s.wram.slice(),
       vram: s.vram.slice(),
       cgram: s.cgram.slice(),
+      cgramSrc: s.cgTaint.slice(),
       ppuRegs: s.ppuRegs.slice(),
       owner,
       touched,

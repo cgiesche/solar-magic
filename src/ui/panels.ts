@@ -68,6 +68,8 @@ export class Palette {
     this.tabs = h('div', { class: 'tabs' });
     this.root = h('div', { class: 'panel palette' }, h('div', { class: 'panel-title' }, 'Einfügen', h('span', { class: 'hint' }, 'Rechtsklick/Shift+Klick platziert')), this.tabs, h('div', { class: 'row' }, this.search), this.body);
     app.on('level', () => { this.ensureThumbs(); this.build(); });
+    let t = 0;
+    app.on('sprites', () => { if (this.tab === 'spr' && !t) t = window.setTimeout(() => { t = 0; this.build(); }, 300); });
     app.on('mode', () => {
       if (app.mode === 'spr') this.tab = 'spr';
       else if (this.tab === 'spr') this.tab = 'obj';

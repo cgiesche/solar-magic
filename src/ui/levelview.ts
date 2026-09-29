@@ -22,7 +22,6 @@ export class LevelView {
   drag: Drag | null = null;
   status: HTMLDivElement;
   pendingFrame = 0;
-  spriteImages: Map<number, HTMLCanvasElement> | null = null;
 
   constructor(app: App, status: HTMLDivElement) {
     this.app = app;
@@ -48,6 +47,7 @@ export class LevelView {
     this.scroller.addEventListener('mouseleave', () => { this.hover = null; this.paint(); });
     app.on('render', () => this.updateLevelImage());
     app.on('change', () => this.paint());
+    app.on('sprites', () => this.requestPaint());
   }
 
   setZoom(z: number, anchor?: MouseEvent): void {
@@ -234,10 +234,10 @@ export class LevelView {
     for (const s of app.level.sprites) {
       const x = s.x * 16, y = s.y * 16;
       const sel = app.selection.has(s.uid) && active;
-      const img = this.spriteImages?.get(s.num);
+      const img = app.spriteThumbs?.get(s.num);
       if (img) {
-        ctx.globalAlpha = active ? 1 : 0.8;
-        ctx.drawImage(img, x + 8 - img.width / 2 + (img.dataset.ox ? Number(img.dataset.ox) : 0), y + 16 - img.height + (img.dataset.oy ? Number(img.dataset.oy) : 0));
+        ctx.globalAlpha = active ? 1 : 0.85;
+        ctx.drawImage(img, x + Number(img.dataset.ox), y + Number(img.dataset.oy));
         ctx.globalAlpha = 1;
       }
       ctx.fillStyle = sel ? 'rgba(255,80,200,0.45)' : active ? 'rgba(255,80,200,0.22)' : 'rgba(255,80,200,0.12)';

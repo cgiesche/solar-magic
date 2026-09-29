@@ -1,13 +1,14 @@
 // Application state and editing actions.
 
-import { Rom } from '../core/rom.ts';
-import { LevelEmulator, OV_L1, OV_L2, type LevelRender, MAP_BASE, MAP_SIZE } from '../core/levelemu.ts';
+import { Rom, snesToPc } from '../core/rom.ts';
+import { LevelEmulator, OV_L1, OV_L2, type LevelRender, type LevelOverride, MAP_BASE, MAP_SIZE } from '../core/levelemu.ts';
 import {
   type Level, type LevelObject, type LevelSprite, loadLevel, serializeLayer1, serializeLayer2, serializeSprites,
   isL1Vertical, cloneLevel, newUid, hasLayer2Objects, L1_PTRS, SEC_HDR,
 } from '../core/level.ts';
 import { renderLevel, type LevelImages, composite } from '../core/render.ts';
 import { saveLevel } from '../core/save.ts';
+import { captureSprites } from '../core/spritegfx.ts';
 import { kvSet } from './storage.ts';
 import { toast } from './dom.ts';
 
@@ -69,13 +70,14 @@ export class App {
     this.dirty = false;
     this.refresh();
     this.emit('level');
+    this.ensureSpriteImages();
   }
 
   get vertical(): boolean {
     return isL1Vertical(this.rom, this.level.header.mode);
   }
 
-  refresh(): void {
+  buildOverrides(): LevelOverride {
     const lv = this.level;
     const owners1: number[] = [];
     const l1 = serializeLayer1(this.rom, lv, owners1);
@@ -85,7 +87,7 @@ export class App {
     owners1.forEach((o, i) => (byteOwner[OV_L1 + i] = o));
     owners2.forEach((o, i) => (byteOwner[OV_L2 + i] = o < 0 ? -1 : 0x8000 | o));
     const s = lv.secondary;
-    const r = this.emu.load(lv.number, {
+    return {
       layer1: l1,
       layer2: l2 ?? undefined,
       layer2Pointer: l2 ? undefined : lv.layer2Pointer,
@@ -95,7 +97,12 @@ export class App {
         (s.layer2Scroll << 4) | s.entranceY, (s.layer3 << 6) | (s.entranceAction << 3) | s.entranceX,
         (s.midwayScreen << 4) | (s.fgInitY << 2) | s.bgInitY, (s.noYoshiIntro << 7) | (s.verticalPositioning << 5) | s.entranceScreen,
       ],
-    });
+    };
+  }
+
+  refresh(): void {
+    const lv = this.level;
+    const r = this.emu.load(lv.number, this.buildOverrides());
     this.renderError = r.ok ? null : r.error ?? 'Fehler';
     this.render = r;
     this.images = renderLevel(this.rom, r, lv.header.mode, lv.header.screens);
@@ -122,6 +129,49 @@ export class App {
       const a = g2.addr(x, y) - MAP_BASE;
       if (a >= 0 && a < MAP_SIZE) this.offsetToTile2[a] = (y << 16) | x;
     }
+  }
+
+  // ------------- sprite images (captured from the running game) -------------
+  spriteKey = '';
+  ensureSpriteImages(): void {
+    const hd = this.level.header;
+    const key = `${hd.spriteGfx}-${hd.spritePalette}`;
+    if (key === this.spriteKey) return;
+    this.spriteKey = key;
+    const map = new Map<number, HTMLCanvasElement>();
+    this.spriteThumbs = map;
+    const all = Array.from({ length: 0xc9 }, (_, i) => i);
+    const lvNum = this.level.number;
+    const bg = this.level.layer2Pointer >> 16 === 0xff ? this.level.layer2Pointer : 0xffd900;
+    const header = { ...hd };
+    const sh = this.level.spriteHeader;
+    let i = 0;
+    const step = () => {
+      if (this.spriteKey !== key) return;
+      const chunk = all.slice(i, i + 12);
+      i += 12;
+      const res = captureSprites(this.emu, lvNum, header, sh, bg, chunk);
+      for (const [n, img] of res) {
+        const c = document.createElement('canvas');
+        c.width = img.w; c.height = img.h;
+        const ctx = c.getContext('2d')!;
+        const id = ctx.createImageData(img.w, img.h);
+        new Uint32Array(id.data.buffer).set(img.rgba);
+        ctx.putImageData(id, 0, 0);
+        c.dataset.ox = String(img.ox);
+        c.dataset.oy = String(img.oy);
+        map.set(n, c);
+      }
+      this.emit('sprites');
+      if (i < all.length) setTimeout(step, 0);
+    };
+    setTimeout(step, 50);
+  }
+
+  palettesChanged(): void {
+    this.spriteKey = '';
+    this.ensureSpriteImages();
+    this.emit('palettes');
   }
 
   // ------------- queries -------------
@@ -348,17 +398,12 @@ export class App {
     kvSet('rom', { name: this.romName, data: this.rom.output(false), header: this.rom.smcHeader }).catch(() => {});
   }
 
-  // levels with data distinct from the unused default
+  // vanilla levels plus anything relocated into expanded ROM space
   usedLevels(): Set<number> {
-    const counts = new Map<number, number>();
-    for (let i = 0; i < 512; i++) {
-      const a = this.rom.r24(L1_PTRS + i * 3);
-      counts.set(a, (counts.get(a) ?? 0) + 1);
-    }
-    let common = 0, max = 0;
-    for (const [a, c] of counts) if (c > max) { max = c; common = a; }
     const used = new Set<number>();
-    for (let i = 0; i < 512; i++) if (this.rom.r24(L1_PTRS + i * 3) !== common) used.add(i);
+    for (let i = 0; i <= 0x24; i++) used.add(i);
+    for (let i = 0x101; i <= 0x13b; i++) used.add(i);
+    for (let i = 0; i < 512; i++) if (snesToPc(this.rom.r24(L1_PTRS + i * 3)) >= 0x80000) used.add(i);
     return used;
   }
 }
