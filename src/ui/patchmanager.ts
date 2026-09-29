@@ -2,7 +2,7 @@
 // Sources are kept in IndexedDB per registry entry; the ROM's registry alone suffices to remove a patch.
 
 import type { App } from './app.ts';
-import { h, modal, clear, toast, pickFile } from './dom.ts';
+import { h, modal, clear, toast, pickFile, hexInput, select } from './dom.ts';
 import { kvGet, kvSet, kvDel } from './storage.ts';
 import { loadAsar } from '../core/asar.ts';
 import { applyPatch, uninstallPatch, reapplyPatch, type ApplyResult } from '../core/patchapply.ts';
@@ -10,10 +10,13 @@ import { listPatches, patchArchive, type PatchEntry } from '../core/patchreg.ts'
 import { zipSync, unzipSync } from 'fflate';
 import { openUberDialog } from './uberdialog.ts';
 import { openBlockDialog } from './blockdialog.ts';
-import { removeBlocks } from '../core/blocks.ts';
-import { readPackage, packageFromFiles, scanDefines, effectiveDefines, packageSource, optionDefault, type PatchPackage, type PatchOption } from '../core/patchpkg.ts';
+import { removeBlocks, loadBlockProject, saveBlockProject } from '../core/blocks.ts';
+import { loadProject, emptyProject, saveProject } from '../core/uberproject.ts';
+import { ALL, type UberContext } from '../core/uberasm.ts';
+import { hex } from '../core/names.ts';
+import { readPackage, packageFromFiles, detectKind, type PackageInfo, scanDefines, effectiveDefines, packageSource, optionDefault, type PatchPackage, type PatchOption } from '../core/patchpkg.ts';
 import { installEditorPatch } from '../core/patches.ts';
-import { installMap16Ext, map16Ext } from '../core/map16ext.ts';
+import { installMap16Ext, map16Ext, setExtTileWords, EXT_FIRST, EXT_TILES } from '../core/map16ext.ts';
 import { map16Source } from '../core/render.ts';
 
 interface StoredPackage { fileName: string; files: [string, Uint8Array][]; main: string }
@@ -172,13 +175,122 @@ function openApplyDialog(app: App, pkg: PatchPackage, fileName: string, entry: P
   ]);
 }
 
+// files of a resource package for a tool folder: shared folders stay at the root, the rest goes into `folder`
+function placeFiles(pkg: PatchPackage, main: string, mainText: string, folder: string): Map<string, Uint8Array> {
+  const out = new Map<string, Uint8Array>();
+  for (const [f, c] of pkg.files) {
+    if (!/\.(asm|bin)$/i.test(f)) continue;
+    const dest = /^(routines|library|other)\//.test(f) ? f : folder + f;
+    out.set(dest, f === main ? new TextEncoder().encode(mainText) : c);
+  }
+  return out;
+}
+
+function resultLog(log: HTMLElement, r: ApplyResult): void {
+  clear(log).appendChild(logView(r));
+}
+
+// an UberASM resource: choose where it runs, then add it to the ROM's UberASM project
+function openUberResourceDialog(app: App, pkg: PatchPackage, info: PackageInfo, onDone: () => void): void {
+  type Where = 'level' | 'all' | 'gamemode' | 'overworld';
+  let where: Where = 'level';
+  let num = app.level.number;
+  const numBox = h('span');
+  const buildNum = () => {
+    const max = where === 'level' ? 0x1ff : where === 'gamemode' ? 0xff : 6;
+    const digits = where === 'level' ? 3 : where === 'gamemode' ? 2 : 1;
+    if (where === 'gamemode' && num > 0xff) num = 0x14;
+    if (where === 'overworld') num = Math.min(num, 6);
+    clear(numBox).append(where === 'all' ? '' : hexInput(Math.min(num, max), digits, (v) => (num = v), max));
+  };
+  const opts: [number, string][] = [[0, 'nur in Level'], [1, 'in allen Leveln'], [2, 'in Game Mode'], [3, 'auf Overworld-Karte']];
+  const kinds: Where[] = ['level', 'all', 'gamemode', 'overworld'];
+  const form = settingsForm(pkg, info.file, {});
+  const log = h('div');
+  buildNum();
+  const body = h('div', { class: 'patch-apply' },
+    h('p', null, `„${pkg.name}“ ist eine UberASM-Ressource – Code, der jedes Frame läuft (Labels init/main/…), kein eigenständiger Patch. Wo soll er laufen?`),
+    h('div', { class: 'row' }, select(opts, 0, (i) => { where = kinds[i]; buildNum(); }), numBox),
+    h('p', { class: 'hint' }, '„In allen Leveln“ nutzt UberASMs Level-Eintrag „*“. Zuordnungen lassen sich später unter Patches → UberASM → Bearbeiten ändern.'),
+    h('h3', null, 'Einstellungen'), form.el, log);
+  modal(`UberASM-Code hinzufügen: ${pkg.name}`, body, [
+    { label: 'Abbrechen' },
+    { label: 'Hinzufügen', primary: true, onClick: () => {
+      if (app.dirty) app.saveLevel(true);
+      const ctx: UberContext = where === 'all' ? 'level' : where;
+      const folder = `${ctx}/`;
+      const text = packageSource(pkg, info.file, form.read()).files.get(info.file) as string;
+      let r: ApplyResult;
+      try {
+        const proj = loadProject(app.rom) ?? emptyProject();
+        for (const [f, c] of placeFiles(pkg, info.file, text, folder)) proj.files.set(f, c);
+        const file = folder + info.file;
+        const key = where === 'all' ? ALL : num;
+        const calls = proj.list[ctx].get(key) ?? [];
+        if (!calls.some((c) => c.file === file)) calls.push({ file, bytes: [] });
+        proj.list[ctx].set(key, calls);
+        r = saveProject(app.rom, proj);
+      } catch (e) { r = { ok: false, errors: [e instanceof Error ? e.message : String(e)], warnings: [], prints: [] }; }
+      if (!r.ok) { resultLog(log, r); return false; }
+      romChanged(app);
+      const place = where === 'all' ? 'allen Leveln' : where === 'level' ? `Level ${hex(num, 3)}` : where === 'gamemode' ? `Game Mode ${hex(num, 2)}` : `Overworld-Karte ${num}`;
+      toast(`„${pkg.name}“ läuft jetzt in ${place} (UberASM).`);
+      onDone();
+      return true;
+    } },
+  ]);
+}
+
+// a GPS block: choose the Map16 tile, its acts like and graphics, then add it to the ROM's blocks
+function openBlockResourceDialog(app: App, pkg: PatchPackage, info: PackageInfo, onDone: () => void): void {
+  const proj = loadBlockProject(app.rom) ?? { files: new Map(), list: [] };
+  const used = new Set(proj.list.map((b) => b.tile));
+  let tile = EXT_FIRST;
+  while (used.has(tile) && tile < EXT_TILES - 1) tile++;
+  let acts = info.acts ?? 0x130;
+  let gfxFrom = acts;
+  const form = settingsForm(pkg, info.file, {});
+  const log = h('div');
+  const body = h('div', { class: 'patch-apply' },
+    h('p', null, `„${pkg.name}“ ist ein Custom Block (GPS-Format). Er wird einem Map16-Tile zugeordnet; im Level platziert man ihn wie jedes Map16-Tile (Palette → Map16 bzw. Direct-Map16-Objekt).`),
+    h('div', { class: 'prop' }, h('label', null, 'Map16-Tile'), hexInput(tile, 3, (v) => (tile = v), EXT_TILES - 1),
+      h('span', { class: 'hint' }, 'Tiles ab 200 sind frei (erweiterte Map16-Seiten).')),
+    h('div', { class: 'prop' }, h('label', null, 'Verhalten (acts like)'), hexInput(acts, 3, (v) => (acts = v), 0x1ff),
+      h('span', { class: 'hint' }, info.acts !== undefined ? 'aus der Beschreibung des Blocks' : '130 = fester Block, 025 = Luft')),
+    h('div', { class: 'prop' }, h('label', null, 'Grafik von Tile'), hexInput(gfxFrom, 3, (v) => (gfxFrom = v), EXT_TILES - 1),
+      h('span', { class: 'hint' }, 'nur für neue Tiles ab 200; später im Map16-Editor änderbar')),
+    h('h3', null, 'Einstellungen'), form.el, log);
+  modal(`Custom Block hinzufügen: ${pkg.name}`, body, [
+    { label: 'Abbrechen' },
+    { label: 'Hinzufügen', primary: true, onClick: () => {
+      if (app.dirty) app.saveLevel(true);
+      const text = packageSource(pkg, info.file, form.read()).files.get(info.file) as string;
+      const blank = map16Source(app.rom, app.render).fg(0x025);
+      const words = map16Source(app.rom, app.render).fg(gfxFrom);
+      let r: ApplyResult;
+      try {
+        for (const [f, c] of placeFiles(pkg, info.file, text, 'blocks/')) proj.files.set(f, c);
+        proj.list = proj.list.filter((b) => b.tile !== tile);
+        proj.list.push({ tile, file: 'blocks/' + info.file, acts });
+        r = saveBlockProject(app.rom, proj, blank);
+        if (r.ok && tile >= EXT_FIRST) setExtTileWords(app.rom, tile, words, blank);
+      } catch (e) { r = { ok: false, errors: [e instanceof Error ? e.message : String(e)], warnings: [], prints: [] }; }
+      if (!r.ok) { resultLog(log, r); return false; }
+      romChanged(app);
+      toast(`„${pkg.name}“ liegt auf Map16-Tile ${hex(tile, 3)}.`);
+      onDone();
+      return true;
+    } },
+  ]);
+}
+
 export async function openPatchManager(app: App): Promise<void> {
   const body = h('div', { class: 'patch-manager' });
   const build = () => {
     clear(body);
     const list = listPatches(app.rom);
     body.append(
-      h('p', { class: 'hint' }, 'ASM-Patches (Asar-Format, z. B. von SMWCentral) als .asm oder .zip anwenden. Konflikte mit anderen Patches und den Editor-eigenen Patches werden erkannt; jeder Patch lässt sich wieder vollständig entfernen.'),
+      h('p', { class: 'hint' }, '„Hinzufügen“ nimmt eine .asm- oder .zip-Datei (z. B. von SMWCentral) und erkennt, was sie ist: ein Patch wird direkt angewendet, UberASM-Code wird einem Level/Game Mode zugeordnet, ein Custom Block einem Map16-Tile. Konflikte werden geprüft; alles lässt sich wieder entfernen.'),
       list.length ? h('div', { class: 'patch-list' }, list.map((p) => {
         const bytes = p.segs.reduce((n, s) => n + s[1], 0);
         const own = p.own.reduce((n, o) => n + Math.max(0, app.rom.isRatsAt(o)), 0);
@@ -190,7 +302,7 @@ export async function openPatchManager(app: App): Promise<void> {
             h('button', { onclick: () => (p.kind === 'uberasm' ? openUberDialog(app, build) : p.kind === 'blocks' ? openBlockDialog(app, 0x200, build) : configure(p)) }, p.kind && p.kind !== 'patch' ? 'Bearbeiten …' : 'Einstellungen …'),
             h('button', { onclick: () => remove(p) }, 'Entfernen')));
       })) : h('p', null, 'Keine Patches installiert.'),
-      h('div', { class: 'row' }, h('button', { class: 'primary', onclick: add }, 'Patch hinzufügen …'),
+      h('div', { class: 'row' }, h('button', { class: 'primary', onclick: add }, 'Hinzufügen …'),
         list.some((p) => p.kind === 'uberasm') ? null : h('button', { onclick: () => openUberDialog(app, build) }, 'UberASM …'),
         list.some((p) => p.kind === 'blocks') ? null : h('button', { onclick: () => openBlockDialog(app, 0x200, build) }, 'Custom Blocks …')),
     );
@@ -200,7 +312,11 @@ export async function openPatchManager(app: App): Promise<void> {
     if (!f) return;
     try {
       const pkg = readPackage(f.name, new Uint8Array(await f.arrayBuffer()));
-      openApplyDialog(app, pkg, f.name, null, build);
+      const info = detectKind(pkg);
+      if (info.kind === 'uberasm') openUberResourceDialog(app, pkg, info, build);
+      else if (info.kind === 'block') openBlockResourceDialog(app, pkg, info, build);
+      else if (info.kind === 'pixi') modal(`Custom Sprite: ${pkg.name}`, h('p', null, `„${pkg.name}“ ist ein Custom Sprite für PIXI (${info.file}). Custom Sprites werden vom Editor noch nicht unterstützt.`), [{ label: 'OK', primary: true }]);
+      else openApplyDialog(app, pkg, f.name, null, build);
     } catch (e) { toast(e instanceof Error ? e.message : String(e), 'error'); }
   };
   const configure = async (p: PatchEntry) => {

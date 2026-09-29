@@ -136,3 +136,32 @@ export function packageSource(pkg: PatchPackage, main: string, defines: Record<s
   files.set(main, lines.join('\n'));
   return { name: pkg.name, version: pkg.manifest?.version, main, files, defines: rest, settings: defines };
 }
+
+// What a package is: an ordinary patch, an UberASM resource, a GPS block or a PIXI sprite. Many
+// SMWCentral downloads are resources for other tools, which cannot be applied as a patch by themselves.
+export type PackageKind = 'patch' | 'uberasm' | 'block' | 'pixi';
+export interface PackageInfo { kind: PackageKind; file: string; acts?: number }
+
+function statements(text: string): string[] {
+  return text.split(/\r?\n/).map((l) => l.replace(/;.*$/, '').trim()).filter(Boolean);
+}
+
+export function detectKind(pkg: PatchPackage, main = pkg.main ?? pkg.asmFiles[0]): PackageInfo {
+  if (pkg.manifest) return { kind: 'patch', file: main };
+  const text = (f: string) => new TextDecoder().decode(pkg.files.get(f)!);
+  // PIXI sprites: "print "INIT ",pc" / "print "MAIN ",pc", usually with a .json/.cfg next to them
+  for (const f of pkg.asmFiles) if (/print\s+"(INIT|MAIN) ?"\s*,\s*pc/i.test(text(f))) return { kind: 'pixi', file: f };
+  const src = text(main);
+  const st = statements(src);
+  // GPS block: first real statement is db $42 / db $37
+  const first = st.find((l) => !/^(print|!|incsrc|incbin|if|endif|else|macro|endmacro|%)/i.test(l) && !/^[A-Za-z_.][A-Za-z0-9_.]*:$/.test(l));
+  if (first && /^db\s+\$(42|37)\b/i.test(first)) {
+    const al = /act(?:s)?\s*like[:\s]*\$?([0-9a-f]{1,3})\b/i.exec(src);
+    return { kind: 'block', file: main, acts: al ? parseInt(al[1], 16) : undefined };
+  }
+  // UberASM resource: entry labels and no hijack/free space of its own
+  const hasLabel = st.some((l) => /^(init|main|load|end|nmi)\s*:/i.test(l));
+  const hijacks = st.some((l) => /^(org|freecode|freedata|autoclean|pushpc|lorom|sa1rom|hirom)\b/i.test(l));
+  if (hasLabel && !hijacks) return { kind: 'uberasm', file: main };
+  return { kind: 'patch', file: main };
+}
