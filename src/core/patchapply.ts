@@ -31,7 +31,7 @@ export interface PatchSource {
   files: Map<string, Uint8Array | string>;
   defines?: Record<string, string>; // passed to Asar
   settings?: Record<string, string>; // all settings chosen by the user (stored in the registry)
-  kind?: 'patch' | 'uberasm';
+  kind?: 'patch' | 'uberasm' | 'blocks';
   archive?: Uint8Array; // sources to keep in the ROM (zip)
 }
 
@@ -41,6 +41,7 @@ export interface ApplyResult {
   warnings: string[];
   prints: string[];
   entry?: PatchEntry;
+  labels?: Record<string, number>;
   asar?: { errors: AsarMessage[]; warnings: AsarMessage[] };
 }
 
@@ -157,7 +158,7 @@ export function applyPatch(rom: Rom, src: PatchSource): ApplyResult {
     check: patchedHash(after, segs),
     kind: src.kind,
   }, original, src.archive);
-  return { ok: true, errors: [], warnings, prints: r.prints, entry, asar: { errors: [], warnings: r.warnings } };
+  return { ok: true, errors: [], warnings, prints: r.prints, entry, labels: r.labels, asar: { errors: [], warnings: r.warnings } };
 }
 
 // Restores the original bytes and frees the patch's free space. Returns warnings; throws if a patch

@@ -1,6 +1,6 @@
 // Minimal 65816 "assembler": raw bytes plus labels for branches and long addresses.
 
-type Fix = { at: number; label: string; kind: 'rel8' | 'long' | 'abs' | 'bank' };
+type Fix = { at: number; label: string; kind: 'rel8' | 'long' | 'abs' | 'bank'; add?: number };
 
 export class Asm {
   bytes: number[] = [];
@@ -36,10 +36,10 @@ export class Asm {
     this.fixes.push({ at: this.pc - 3, label, kind: 'long' });
     return this;
   }
-  // opcode followed by 16-bit address of a label
-  abs(op: number, label: string): this {
+  // opcode followed by 16-bit address of a label (+ add)
+  abs(op: number, label: string, add = 0): this {
     this.b(op, 0, 0);
-    this.fixes.push({ at: this.pc - 2, label, kind: 'abs' });
+    this.fixes.push({ at: this.pc - 2, label, kind: 'abs', add });
     return this;
   }
   // immediate 8-bit bank byte of a label
@@ -62,7 +62,7 @@ export class Asm {
     for (const f of this.fixes) {
       const t = this.labels.get(f.label);
       if (t === undefined) throw new Error(`asm: unknown label ${f.label}`);
-      const a = base + t;
+      const a = base + t + (f.add ?? 0);
       if (f.kind === 'rel8') {
         const d = t - (f.at + 1);
         if (d < -128 || d > 127) throw new Error(`asm: branch to ${f.label} out of range`);

@@ -9,6 +9,8 @@ import { applyPatch, uninstallPatch, reapplyPatch, type ApplyResult } from '../c
 import { listPatches, patchArchive, type PatchEntry } from '../core/patchreg.ts';
 import { zipSync, unzipSync } from 'fflate';
 import { openUberDialog } from './uberdialog.ts';
+import { openBlockDialog } from './blockdialog.ts';
+import { removeBlocks } from '../core/blocks.ts';
 import { readPackage, packageFromFiles, scanDefines, effectiveDefines, packageSource, optionDefault, type PatchPackage, type PatchOption } from '../core/patchpkg.ts';
 import { installEditorPatch } from '../core/patches.ts';
 import { installMap16Ext, map16Ext } from '../core/map16ext.ts';
@@ -183,13 +185,14 @@ export async function openPatchManager(app: App): Promise<void> {
         return h('div', { class: 'patch-item' },
           h('div', null,
             h('div', { class: 'patch-name' }, p.name, p.version ? h('span', { class: 'hint' }, ` v${p.version}`) : null),
-            h('div', { class: 'hint' }, `${new Date(p.applied).toLocaleString()} · ${bytes} Bytes geändert · ${(own / 1024).toFixed(1)} KB Code/Daten${Object.keys(p.defines).length ? ` · ${Object.entries(p.defines).map(([k, v]) => `!${k}=${v}`).join(' ')}` : ''}`)),
+            h('div', { class: 'hint' }, `${new Date(p.applied).toLocaleString()} · ${bytes} Bytes geändert · ${own < 1024 ? `${own} Bytes` : `${(own / 1024).toFixed(1)} KB`} Code/Daten${Object.keys(p.defines).length ? ` · ${Object.entries(p.defines).map(([k, v]) => `!${k}=${v}`).join(' ')}` : ''}`)),
           h('div', { class: 'row' },
-            h('button', { onclick: () => (p.kind === 'uberasm' ? openUberDialog(app, build) : configure(p)) }, p.kind === 'uberasm' ? 'Bearbeiten …' : 'Einstellungen …'),
+            h('button', { onclick: () => (p.kind === 'uberasm' ? openUberDialog(app, build) : p.kind === 'blocks' ? openBlockDialog(app, 0x200, build) : configure(p)) }, p.kind && p.kind !== 'patch' ? 'Bearbeiten …' : 'Einstellungen …'),
             h('button', { onclick: () => remove(p) }, 'Entfernen')));
       })) : h('p', null, 'Keine Patches installiert.'),
       h('div', { class: 'row' }, h('button', { class: 'primary', onclick: add }, 'Patch hinzufügen …'),
-        list.some((p) => p.kind === 'uberasm') ? null : h('button', { onclick: () => openUberDialog(app, build) }, 'UberASM …')),
+        list.some((p) => p.kind === 'uberasm') ? null : h('button', { onclick: () => openUberDialog(app, build) }, 'UberASM …'),
+        list.some((p) => p.kind === 'blocks') ? null : h('button', { onclick: () => openBlockDialog(app, 0x200, build) }, 'Custom Blocks …')),
     );
   };
   const add = async () => {
@@ -208,7 +211,7 @@ export async function openPatchManager(app: App): Promise<void> {
   const remove = (p: PatchEntry) => {
     if (app.dirty) app.saveLevel(true);
     try {
-      const w = uninstallPatch(app.rom, p.id);
+      const w = p.kind === 'blocks' ? removeBlocks(app.rom) : uninstallPatch(app.rom, p.id);
       kvDel(srcKey(p.id)).catch(() => {});
       romChanged(app);
       toast(`Patch „${p.name}“ entfernt${w.length ? ': ' + w.join(' ') : ''}`);

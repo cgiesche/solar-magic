@@ -5,6 +5,7 @@ import { h, modal, clear, hexInput, toast } from './dom.ts';
 import { TileCache, map16Source } from '../core/render.ts';
 import { hex } from '../core/names.ts';
 import { EXT_FIRST, EXT_TILES, map16Ext, actsLike, setActsLike, setExtTileWords } from '../core/map16ext.ts';
+import { blockFileOf, openBlockDialog } from './blockdialog.ts';
 
 // sheets of 512 tiles: FG pages 0-1 (vanilla), 2-3 … E-F (extended, patch), BG
 export function openMap16Editor(app: App, initialTile = 0): void {
@@ -107,6 +108,8 @@ export function openMap16Editor(app: App, initialTile = 0): void {
         redraw();
       }, 0x1ff)),
       h('div', { class: 'hint' }, cur === sel ? 'Verhält sich wie es selbst (Vanilla).' : `Verhält sich wie Tile ${hex(cur, 3)}.`),
+      h('div', { class: 'prop' }, h('label', null, 'Custom Block'), h('span', null, blockFileOf(app.rom, sel) ?? '–'),
+        h('button', { onclick: () => openBlockDialog(app, sel, redraw) }, 'Custom Blocks …')),
       h('div', { class: 'row' }, h('label', null, 'Von Tile '), hexInput(copyFrom, 3, (n) => (copyFrom = n), EXT_TILES - 1),
         h('button', { onclick: () => {
           try {
