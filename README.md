@@ -54,7 +54,9 @@ Beim Anzeigen eines Levels führt er die **originalen Laderoutinen** des ROMs au
 * Raster, Screen-Grenzen, Layer ein-/ausblendbar; **Ghost** (nicht bearbeitete Objektebene halbtransparent);
   Ansicht mit gedrückten Switch-Palästen bzw. ON/OFF auf OFF; Zoom 50–400 %.
 * **Layer 3** (Flut, Layer-3-Bilder) als Vorschau (Scrollen angenähert), **animierte Tiles/Paletten** (Anim.).
-* Statuszeile mit Objekt-/Sprite-Anzahl und Datengröße (Warnung ab 128 Sprites); **Level als PNG** exportieren.
+* Statuszeile mit Objekt-/Sprite-Anzahl und Datengröße (Warnung ab 128 Sprites); **Level als PNG** exportieren (Level …).
+* **Nachrichten (Texte):** alle 25 Nachrichtenboxen mit Vorschau in der Spielschrift bearbeiten; passen die Texte
+  nicht mehr an ihren Platz, werden sie in freien Speicher verlegt.
 * **Level testen (T):** das Level (inkl. ungespeicherter Änderungen) im eingebauten Emulator spielen.
 
 ### Grafik, Paletten, Map16
@@ -94,6 +96,7 @@ assembliert und ändert nur wenige, verifizierte Stellen:
 | Ext.-Objekt `$02` | „Direct Map16“: platziert ein beliebiges Map16-Tile als Rechteck (6 Byte) |
 | `$00922F` („SMWP“) | eigene 256-Farben-Palette pro Level |
 | `$058060` („SMWB“) | BG-Tilemap-Daten pro Level in beliebiger Bank (bearbeitete Hintergründe) |
+| `$05B20F` („SMWM“) | Nachrichtentexte aus freiem Speicher lesen (nur wenn sie nicht mehr an Ort und Stelle passen) |
 
 Die Tests prüfen, dass alle Vanilla-Level mit installiertem Patch identisch geladen werden.
 

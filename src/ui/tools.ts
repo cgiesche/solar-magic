@@ -85,7 +85,7 @@ export function openRomInfo(app: App): void {
 }
 
 // Level tools: save as, export/import file, insert/delete screens, clear
-export function openLevelTools(app: App): void {
+export function openLevelTools(app: App, exportPng: () => void): void {
   const lv = app.level;
   let target = lv.number;
   let screen = 0;
@@ -111,7 +111,8 @@ export function openLevelTools(app: App): void {
         const bg = lv.bg ?? (!lv.layer2Objects && bgBank(app.rom, lv.number) ? bgFromWram(app.render.wram) : null);
         downloadBytes(`level-${hex(lv.number, 3)}${LEVEL_FILE_EXT}`, new TextEncoder().encode(exportLevelFile(app.rom, lv, bg)), 'application/json');
       } }, 'Exportieren …'),
-      h('button', { onclick: () => importLevel(app).then((ok) => { if (ok) dlg.close(); }) }, 'Importieren …')),
+      h('button', { onclick: () => importLevel(app).then((ok) => { if (ok) dlg.close(); }) }, 'Importieren …'),
+      h('button', { onclick: exportPng, title: 'Sichtbare Ebenen und Sprites in Originalgröße' }, 'Als PNG …')),
     h('h3', null, 'Screens'),
     h('p', { class: 'hint' }, `Alles ab dem gewählten Screen wird um einen Screen ${vert ? 'nach unten' : 'nach rechts'} bzw. zurück verschoben (Objekte, Sprites, Exits, Eingang, Zwischenziel). Sekundäre Eingänge bleiben unverändert.`),
     h('div', { class: 'row' }, h('label', null, 'Screen '), select(screenOpts, screen, (v) => (screen = v)),

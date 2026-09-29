@@ -129,3 +129,13 @@ kbd { background: #181a1f; border: 1px solid var(--border); border-radius: 3px; 
 .level-item.current .lname { color: #dfefff; }
 .play { display: flex; flex-direction: column; gap: 6px; align-items: center; }
 .play-canvas { width: 768px; height: 672px; image-rendering: pixelated; background: #000; outline: none; max-width: 85vw; max-height: 70vh; object-fit: contain; }
+.msg-editor { display: flex; gap: 14px; }
+.msg-list { width: 300px; height: 60vh; overflow-y: auto; border: 1px solid var(--border); font-size: 12px; }
+.msg-list .level-item { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.msg-list .level-item.used { color: var(--accent); }
+.msg-detail { display: flex; flex-direction: column; gap: 8px; width: 330px; }
+.msg-preview { width: 328px; image-rendering: pixelated; border: 1px solid var(--border); }
+.msg-lines { display: flex; flex-direction: column; gap: 3px; }
+.msg-line { font-family: ui-monospace, monospace; }
+.msg-line.invalid { outline: 1px solid var(--danger); }
+.hint.error { color: var(--danger); min-height: 1em; }

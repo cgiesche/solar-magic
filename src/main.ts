@@ -13,6 +13,7 @@ import { openGfxEditor } from './ui/gfxeditor.ts';
 import { openEntrancesDialog, openRomInfo, openLevelTools, openInsertDialog } from './ui/tools.ts';
 import { OverworldView } from './ui/overworld.ts';
 import { openTestPlay } from './ui/testplay.ts';
+import { openMessagesDialog } from './ui/messagedialog.ts';
 
 const root = document.getElementById('app')!;
 
@@ -107,8 +108,8 @@ function buildUi(app: App): void {
     h('button', { onclick: () => openPaletteEditor(app), title: 'Paletten-Editor (P)' }, 'Paletten'),
     h('button', { onclick: () => openGfxEditor(app), title: 'Grafiken' }, 'Grafiken'),
     h('button', { onclick: () => openEntrancesDialog(app), title: 'Sekundäre Eingänge' }, 'Eingänge'),
-    h('button', { onclick: () => openLevelTools(app), title: 'Speichern unter, Export/Import, Screens einfügen/löschen, Level leeren' }, 'Level …'),
-    h('button', { onclick: () => view.exportPng(), title: 'Level (sichtbare Ebenen) als PNG exportieren' }, 'PNG'),
+    h('button', { onclick: () => openMessagesDialog(app), title: 'Nachrichtenboxen bearbeiten' }, 'Texte'),
+    h('button', { onclick: () => openLevelTools(app, () => view.exportPng()), title: 'Speichern unter, Export/Import, PNG, Screens einfügen/löschen, Level leeren' }, 'Level …'),
     h('button', { onclick: () => openRomInfo(app), title: 'ROM-Info, Erweiterung, Patches' }, 'ROM'),
     h('button', { onclick: () => showHelp(), title: 'Tastenkürzel' }, '?'),
   );
