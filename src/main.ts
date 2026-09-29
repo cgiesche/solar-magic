@@ -12,6 +12,7 @@ import { openMap16Editor } from './ui/map16editor.ts';
 import { openGfxEditor } from './ui/gfxeditor.ts';
 import { openEntrancesDialog, openRomInfo, openCopyLevel } from './ui/tools.ts';
 import { OverworldView } from './ui/overworld.ts';
+import { openTestPlay } from './ui/testplay.ts';
 
 const root = document.getElementById('app')!;
 
@@ -77,6 +78,7 @@ function buildUi(app: App): void {
     levelTitle,
     h('button', { class: 'primary', onclick: () => app.saveLevel(), title: 'Level in ROM schreiben (Strg+S)' }, 'Level speichern'),
     h('button', { onclick: () => openHeaderDialog(app), title: 'Level-Header (H)' }, 'Header …'),
+    h('button', { onclick: () => openTestPlay(app), title: 'Level im eingebauten Emulator testen (T)' }, '▶ Testen'),
     h('button', { onclick: () => app.undo(), title: 'Rückgängig (Strg+Z)' }, '↶'),
     h('button', { onclick: () => app.redo(), title: 'Wiederholen (Strg+Y)' }, '↷'),
     h('span', { class: 'sep' }),
@@ -163,6 +165,7 @@ function buildUi(app: App): void {
     else if (k === '3') app.setMode('spr');
     else if (k === '4') app.setMode('exit');
     else if (k === 'h' || k === 'H') openHeaderDialog(app);
+    else if (k === 't' || k === 'T') openTestPlay(app);
     else if (k === 'ArrowLeft' || k === 'ArrowRight' || k === 'ArrowUp' || k === 'ArrowDown') {
       if (!app.selection.size) return;
       e.preventDefault();
@@ -211,6 +214,9 @@ function showHelp(): void {
     ['Bild↑ / Bild↓', 'Nach vorne / hinten (Zeichenreihenfolge)'],
     ['1 / 2 / 3 / 4', 'Modus Layer 1 / Layer 2 / Sprites / Exits'],
     ['H', 'Level-Header'],
+    ['T', 'Level testen (eingebauter Emulator)'],
+    ['O', 'Overworld-Editor ein/aus'],
+    ['M / P', 'Map16- / Paletten-Editor'],
     ['G', 'Raster ein/aus'],
     ['Strg+Mausrad', 'Zoom'],
     ['Strg+S', 'Level in ROM speichern'],

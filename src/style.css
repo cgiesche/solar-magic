@@ -124,3 +124,5 @@ kbd { background: #181a1f; border: 1px solid var(--border); border-radius: 3px; 
 .level-item { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .level-item .lname { font-family: system-ui, sans-serif; font-size: 11px; color: var(--muted); }
 .level-item.current .lname { color: #dfefff; }
+.play { display: flex; flex-direction: column; gap: 6px; align-items: center; }
+.play-canvas { width: 768px; height: 672px; image-rendering: pixelated; background: #000; outline: none; max-width: 85vw; max-height: 70vh; object-fit: contain; }

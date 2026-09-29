@@ -68,9 +68,10 @@ export function toast(msg: string, kind: 'info' | 'error' = 'info'): void {
   setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 300); }, kind === 'error' ? 6000 : 2500);
 }
 
-export function modal(title: string, body: HTMLElement, buttons: { label: string; primary?: boolean; onClick?: () => boolean | void }[]): { close: () => void } {
+export function modal(title: string, body: HTMLElement, buttons: { label: string; primary?: boolean; onClick?: () => boolean | void }[], onClose?: () => void): { close: () => void } {
   const back = h('div', { class: 'modal-back' });
-  const close = () => back.remove();
+  let closed = false;
+  const close = () => { if (closed) return; closed = true; back.remove(); onClose?.(); };
   const box = h('div', { class: 'modal' },
     h('div', { class: 'modal-title' }, title, h('button', { class: 'icon-btn', onclick: close, title: 'Schließen' }, '✕')),
     h('div', { class: 'modal-body' }, body),

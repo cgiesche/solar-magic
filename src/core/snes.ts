@@ -4,6 +4,7 @@
 // VRAM/CGRAM/WRAM contents itself.
 
 import { CPU, type Bus } from './cpu.ts';
+import type { PPU } from './ppu.ts';
 
 export const CYCLES_PER_LINE = 170; // approximate CPU cycles (bus accesses) per scanline
 export const LINES_PER_FRAME = 262;
@@ -46,6 +47,8 @@ export class Snes implements Bus {
   overlay: Uint8Array | null = null;
 
   // PPU state
+  ppu: PPU | null = null;
+  fixedColor = 0;
   ppuRegs = new Uint8Array(0x100);
   vmain = 0;
   vaddr = 0;
@@ -253,7 +256,16 @@ export class Snes implements Bus {
 
   writeIO(off: number, v: number): void {
     if (off >= 0x2140 && off < 0x2180) { this.apuWrite(off & 3, v); return; }
-    if (off >= 0x2100 && off < 0x2200) this.ppuRegs[off - 0x2100] = v;
+    if (off >= 0x2100 && off < 0x2200) {
+      this.ppuRegs[off - 0x2100] = v;
+      if (this.ppu && off >= 0x210d && off <= 0x2114) this.ppu.write(off - 0x2100, v);
+      if (off === 0x2132) {
+        const c = v & 0x1f;
+        if (v & 0x20) this.fixedColor = (this.fixedColor & ~0x1f) | c;
+        if (v & 0x40) this.fixedColor = (this.fixedColor & ~0x3e0) | (c << 5);
+        if (v & 0x80) this.fixedColor = (this.fixedColor & ~0x7c00) | (c << 10);
+      }
+    }
     switch (off) {
       case 0x2102: this.oamaddr = (v | ((this.ppuRegs[3] & 1) << 8)) << 1; return;
       case 0x2103: this.oamaddr = (this.ppuRegs[2] | ((v & 1) << 8)) << 1; return;
@@ -415,6 +427,7 @@ export class Snes implements Bus {
         this.irqFlag = true;
         cpu.irqLine = true;
       }
+      if (this.ppu && this.line < 224) this.ppu.renderLine(this.line);
       const target = cpu.cycles + CYCLES_PER_LINE;
       const start = cpu.cycles;
       while (cpu.cycles < target) {
