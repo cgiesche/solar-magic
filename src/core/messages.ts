@@ -5,6 +5,7 @@
 
 import { Rom } from './rom.ts';
 import { Asm } from './asm.ts';
+import { ownerNote } from './patchreg.ts';
 
 export const MSG_COUNT = 25;
 export const MSG_LINES = 8;
@@ -34,7 +35,7 @@ export function textBase(rom: Rom): number {
   return p ? p.text : MSG_TEXT;
 }
 
-function messagePatch(rom: Rom): { base: number; text: number } | null {
+export function messagePatch(rom: Rom): { base: number; text: number } | null {
   if (rom.r8(MSG_HOOK) !== 0x22) return null;
   const base = rom.r24(MSG_HOOK + 1) - 8;
   for (let i = 0; i < 4; i++) if (rom.r8(base + i) !== MSG_MAGIC[i]) return null;
@@ -127,7 +128,7 @@ export function writeMessages(rom: Rom, msgs: Message[]): string {
 
 function installMessagePatch(rom: Rom): { base: number; text: number } {
   if (rom.r8(MSG_HOOK) !== 0xb9 || rom.r16(MSG_HOOK + 1) !== 0xa5d9 || rom.r8(MSG_HOOK + 3) !== 0x8d) {
-    throw new Error('Unerwarteter Code bei $05B20F – Nachrichten können nicht verlegt werden');
+    throw new Error(`Unerwarteter Code bei $05B20F${ownerNote(rom, MSG_HOOK, 6)} – Nachrichten können nicht verlegt werden`);
   }
   const a = new Asm();
   a.b(...MSG_MAGIC); a.fill(4); // +4: text address

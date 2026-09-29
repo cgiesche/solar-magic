@@ -11,6 +11,7 @@ import { openPaletteEditor } from './ui/paletteeditor.ts';
 import { openMap16Editor } from './ui/map16editor.ts';
 import { openGfxEditor } from './ui/gfxeditor.ts';
 import { openEntrancesDialog, openRomInfo, openLevelTools, openInsertDialog } from './ui/tools.ts';
+import { openPatchManager } from './ui/patchmanager.ts';
 import { OverworldView } from './ui/overworld.ts';
 import { openTestPlay } from './ui/testplay.ts';
 import { openMessagesDialog } from './ui/messagedialog.ts';
@@ -111,6 +112,7 @@ function buildUi(app: App): void {
     h('button', { onclick: () => openMessagesDialog(app), title: 'Nachrichtenboxen bearbeiten' }, 'Texte'),
     h('button', { onclick: () => openLevelTools(app, () => view.exportPng()), title: 'Speichern unter, Export/Import, PNG, Screens einfügen/löschen, Level leeren' }, 'Level …'),
     h('button', { onclick: () => openRomInfo(app), title: 'ROM-Info, Erweiterung, Patches' }, 'ROM'),
+    h('button', { onclick: () => openPatchManager(app), title: 'ASM-Patches (Asar) anwenden und verwalten' }, 'Patches'),
     h('button', { onclick: () => showHelp(), title: 'Tastenkürzel' }, '?'),
   );
   const updateToolbar = () => {

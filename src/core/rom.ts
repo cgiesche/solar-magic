@@ -140,22 +140,28 @@ export class Rom {
 
   // Find free space of `len` bytes (+8 for RATS) not crossing a bank boundary,
   // in expanded area (>= 0x80000). Free = not covered by a RATS block and all bytes
-  // are 0x00 or 0xFF-filled region that was never claimed.
+  // are 0x00 (like Asar's free space search, so untagged patch data is never overwritten).
   findFree(len: number, used?: RatsBlock[]): number {
     const total = len + 8;
     if (total > 0x8000) throw new Error('block larger than one bank');
     const blocks = used ?? this.scanRats();
-    const occupied = new Uint8Array(Math.ceil(this.data.length / 16));
+    const d = this.data;
+    const occupied = new Uint8Array(Math.ceil(d.length / 16));
     for (const b of blocks) {
       for (let o = b.start; o < b.start + 8 + b.size; o += 16) occupied[o >> 4] = 1;
       occupied[(b.start + 8 + b.size - 1) >> 4] = 1;
     }
-    const limit = Math.min(this.data.length, RESERVED_TOP);
+    const used16 = (o: number) => {
+      if (occupied[o >> 4]) return true;
+      for (let i = o; i < o + 16; i++) if (d[i] !== 0) return true;
+      return false;
+    };
+    const limit = Math.min(d.length, RESERVED_TOP);
     for (let bank = 0x10; bank * 0x8000 < limit; bank++) {
       let run = 0;
       let runStart = bank * 0x8000;
       for (let o = bank * 0x8000; o < (bank + 1) * 0x8000 && o < limit; o += 16) {
-        if (occupied[o >> 4]) { run = 0; runStart = o + 16; continue; }
+        if (used16(o)) { run = 0; runStart = o + 16; continue; }
         run += 16;
         if (run >= total + 16) return runStart;
       }

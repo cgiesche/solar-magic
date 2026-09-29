@@ -139,3 +139,12 @@ kbd { background: #181a1f; border: 1px solid var(--border); border-radius: 3px; 
 .msg-line { font-family: ui-monospace, monospace; }
 .msg-line.invalid { outline: 1px solid var(--danger); }
 .hint.error { color: var(--danger); min-height: 1em; }
+.patch-manager { width: 640px; max-width: 100%; }
+.patch-list { display: flex; flex-direction: column; gap: 6px; margin: 8px 0 12px; }
+.patch-item { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; }
+.patch-name { font-weight: 600; }
+.patch-apply { width: 560px; max-width: 100%; }
+.patch-settings .prop label { font-family: monospace; }
+.patch-log { font-family: monospace; font-size: 12px; white-space: pre-wrap; max-height: 240px; overflow: auto; margin-top: 8px; }
+.patch-log .err { color: var(--danger); }
+.patch-log .warn { color: #e0b050; }

@@ -7,11 +7,14 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
-    "test": "node tools/testlevels.ts && node tools/testpatch.ts && node tools/testsave.ts && node tools/testlevelfile.ts && node tools/testbg.ts && node tools/testmessages.ts && node tools/testmap16ext.ts"
+    "test": "node tools/testlevels.ts && node tools/testpatch.ts && node tools/testsave.ts && node tools/testlevelfile.ts && node tools/testbg.ts && node tools/testmessages.ts && node tools/testmap16ext.ts && node tools/testasar.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.3",
     "typescript": "^7.0.2",
     "vite": "^8.3.1"
+  },
+  "dependencies": {
+    "fflate": "^0.8.3"
   }
 }

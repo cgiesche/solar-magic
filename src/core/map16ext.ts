@@ -13,6 +13,7 @@
 
 import { Rom } from './rom.ts';
 import { Asm } from './asm.ts';
+import { ownerNote } from './patchreg.ts';
 
 export const EXT_FIRST = 0x200;
 export const EXT_TILES = 0x1000; // tiles $000-$FFF
@@ -104,7 +105,7 @@ export function installMap16Ext(rom: Rom, blank: number[]): Map16Ext {
   const ex = map16Ext(rom);
   if (ex) return ex;
   const expect = (at: number, bytes: number[], what: string) => {
-    for (let i = 0; i < bytes.length; i++) if (rom.r8(at + i) !== bytes[i]) throw new Error(`Unerwarteter Code bei $${at.toString(16).toUpperCase()} (${what}) – Map16-Erweiterung nicht möglich`);
+    for (let i = 0; i < bytes.length; i++) if (rom.r8(at + i) !== bytes[i]) throw new Error(`Unerwarteter Code bei $${at.toString(16).toUpperCase()} (${what})${ownerNote(rom, at, bytes.length)} – Map16-Erweiterung nicht möglich`);
   };
   expect(F545, [0xa8, 0xd0, 0x2f, 0xac], 'Block-Interaktion');
   expect(HIT_HOOK, [0xa7, 0x05, 0xd0, 0x29], 'Block von unten');

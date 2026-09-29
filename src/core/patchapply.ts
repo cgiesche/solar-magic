@@ -1,0 +1,194 @@
+// Applying and removing Asar patches. A patch is assembled against a copy of the ROM; its writes
+// are split into free space it claimed (new RATS blocks) and changed bytes elsewhere ("segments").
+// Segments must not touch other patches, the hooks of the editor's own patches, existing RATS data
+// or the banks reserved for the emulation overlay. On success the ROM is replaced by the result and
+// the patch is recorded in the registry (patchreg.ts) with the original bytes of its segments.
+
+import { Rom, snesToPc, pcToSnes, RESERVED_TOP, type RatsBlock } from './rom.ts';
+import { assemble, type AsarMessage } from './asar.ts';
+import { editorPatch, customPalettePatch, bgPatch, SPR_BANK_HOOK, BG_HOOK } from './patches.ts';
+import { messagePatch } from './messages.ts';
+import { map16Ext } from './map16ext.ts';
+import { listPatches, addPatch, removeEntry, backupBytes, patchedHash, hashBytes, overlaps, type PatchEntry } from './patchreg.ts';
+
+// hook sites of the editor's own patches (SNES address, length)
+interface Builtin { name: string; installed: (rom: Rom) => boolean; hooks: [number, number][] }
+export const BUILTINS: Builtin[] = [
+  { name: 'Editor-Patch (SMWE)', installed: (r) => !!editorPatch(r), hooks: [[SPR_BANK_HOOK, 4], [0x00ba2c, 15], [0x00aa6b, 4], [0x00a9e1, 15], [0x00aa22, 15], [0x0da10f + 2 * 3, 3]] },
+  { name: 'Level-Paletten (SMWP)', installed: (r) => !!customPalettePatch(r), hooks: [[0x00922f, 6]] },
+  { name: 'BG-Tilemaps (SMWB)', installed: (r) => !!bgPatch(r), hooks: [[BG_HOOK, 4]] },
+  { name: 'Nachrichten (SMWM)', installed: (r) => !!messagePatch(r), hooks: [[0x05b20f, 6]] },
+  { name: 'Map16-Erweiterung (SMWX)', installed: (r) => !!map16Ext(r), hooks: [[0x00f545, 4], [0x029328, 4], [0x058a66, 5], [0x058b46, 5], [0x058c34, 5], [0x058d2b, 5], [0x00c096, 2], [0x00c0e7, 2]] },
+];
+
+// header bytes that change with any expansion / checksum and are not part of a patch
+const IGNORE: [number, number][] = [[0x7fd7, 1], [0x7fdc, 4]];
+
+export interface PatchSource {
+  name: string;
+  version?: string;
+  main: string;
+  files: Map<string, Uint8Array | string>;
+  defines?: Record<string, string>; // passed to Asar
+  settings?: Record<string, string>; // all settings chosen by the user (stored in the registry)
+}
+
+export interface ApplyResult {
+  ok: boolean;
+  errors: string[]; // German, ready to show
+  warnings: string[];
+  prints: string[];
+  entry?: PatchEntry;
+  asar?: { errors: AsarMessage[]; warnings: AsarMessage[] };
+}
+
+const hex = (n: number, w = 6) => '$' + n.toString(16).toUpperCase().padStart(w, '0');
+const pcHex = (pc: number) => hex(pcToSnes(pc));
+
+export function sourceHash(src: PatchSource): string {
+  const enc = new TextEncoder();
+  const parts: Uint8Array[] = [];
+  for (const k of [...src.files.keys()].sort()) {
+    const v = src.files.get(k)!;
+    parts.push(enc.encode(k), typeof v === 'string' ? enc.encode(v) : v);
+  }
+  parts.push(enc.encode(JSON.stringify(Object.entries(src.defines ?? {}).sort())));
+  return hashBytes(parts).toString(16).padStart(8, '0');
+}
+
+// splits [pc, size) into the parts not covered by any of `cover`
+function subtract(seg: [number, number], cover: [number, number][]): [number, number][] {
+  let parts: [number, number][] = [seg];
+  for (const [cs, cn] of cover) {
+    const next: [number, number][] = [];
+    for (const [s, n] of parts) {
+      const e = s + n, ce = cs + cn;
+      if (ce <= s || cs >= e) { next.push([s, n]); continue; }
+      if (cs > s) next.push([s, cs - s]);
+      if (ce < e) next.push([ce, e - ce]);
+    }
+    parts = next;
+  }
+  return parts;
+}
+
+const key = (b: RatsBlock) => `${b.start}:${b.size}`;
+
+// Temporary RATS tags over the reserved banks keep Asar's free space search out of them.
+function reserveTop(data: Uint8Array): Uint8Array | null {
+  if (data.length <= RESERVED_TOP) return null;
+  const saved = data.slice(RESERVED_TOP, data.length);
+  for (let o = RESERVED_TOP; o + 0x8000 <= data.length; o += 0x8000) {
+    const s = 0x8000 - 8 - 1;
+    data.set([0x53, 0x54, 0x41, 0x52, s & 0xff, s >> 8, ~s & 0xff, (~s >> 8) & 0xff], o);
+  }
+  return saved;
+}
+
+export function applyPatch(rom: Rom, src: PatchSource): ApplyResult {
+  const defines = { sa1: '0', smwe: '1', ...(src.defines ?? {}) };
+  const before = rom.data;
+  const beforeRats = rom.scanRats();
+  let input = before.slice();
+  let saved = reserveTop(input);
+  let r = assemble(input, src.files, src.main, defines);
+  // Asar expanded the ROM to 4 MB and used the reserved banks: run again with them blocked
+  if (r.ok && !saved && r.rom.length > RESERVED_TOP && r.blocks.some((b) => b.pc + b.size > RESERVED_TOP)) {
+    input = new Uint8Array(0x400000);
+    input.set(before);
+    input[0x7fd7] = 0x0c;
+    saved = reserveTop(input);
+    r = assemble(input, src.files, src.main, defines);
+  }
+  const fail = (errors: string[], warnings: string[] = []): ApplyResult => ({
+    ok: false, errors, warnings, prints: r.prints, asar: { errors: r.errors, warnings: r.warnings },
+  });
+  if (!r.ok) return fail(r.errors.map((e) => e.full));
+  const out = r.rom;
+  if (saved) out.set(saved, RESERVED_TOP);
+
+  const after = new Rom(out);
+  const known = new Set(beforeRats.map(key));
+  const own = after.scanRats().filter((b) => !known.has(key(b)) && b.start < RESERVED_TOP);
+  const ownRanges: [number, number][] = own.map((b) => [b.start, b.size + 8]);
+
+  const segs: [number, number][] = [];
+  for (const b of r.blocks) {
+    for (const s of subtract([b.pc, b.size], [...ownRanges, ...IGNORE])) segs.push(s);
+  }
+  segs.sort((a, b) => a[0] - b[0]);
+
+  const errors: string[] = [];
+  const warnings = r.warnings.map((w) => w.full);
+  const others = listPatches(rom);
+  for (const s of segs) {
+    const where = `${pcHex(s[0])} (${s[1]} Bytes)`;
+    if (s[0] + s[1] > RESERVED_TOP) { errors.push(`Der Patch schreibt bei ${where} in die für den Editor reservierten Banks $7E/$7F.`); continue; }
+    const p = others.find((o) => o.segs.some((t) => overlaps(t, s)) || o.own.some((t) => overlaps([t, (rom.isRatsAt(t) + 8)], s)));
+    if (p) { errors.push(`Konflikt mit Patch „${p.name}“ bei ${where}.`); continue; }
+    const hit = beforeRats.find((b) => overlaps([b.start, b.size + 8], s));
+    if (hit) { errors.push(`Der Patch überschreibt geschützte Daten (RATS-Block bei ${pcHex(hit.start)}) bei ${where}.`); continue; }
+    for (const bi of BUILTINS) {
+      const h = bi.hooks.find(([a, n]) => overlaps([snesToPc(a), n], s));
+      if (!h) continue;
+      if (bi.installed(rom)) errors.push(`Konflikt mit ${bi.name}: der Patch ändert dessen Einsprungstelle ${hex(h[0])}.`);
+      else warnings.push(`Der Patch belegt ${hex(h[0])}; ${bi.name} kann danach nicht mehr installiert werden.`);
+    }
+  }
+  if (errors.length) return fail(errors, warnings);
+
+  const original = segs.map(([pc, n]) => {
+    const o = new Uint8Array(n);
+    if (pc < before.length) o.set(before.subarray(pc, Math.min(pc + n, before.length)));
+    return o;
+  });
+  rom.data = out;
+  const entry = addPatch(rom, {
+    id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+    name: src.name,
+    version: src.version,
+    hash: sourceHash(src),
+    defines: src.settings ?? src.defines ?? {},
+    applied: new Date().toISOString(),
+    segs,
+    own: own.map((b) => b.start),
+    check: patchedHash(after, segs),
+  }, original);
+  return { ok: true, errors: [], warnings, prints: r.prints, entry, asar: { errors: [], warnings: r.warnings } };
+}
+
+// Restores the original bytes and frees the patch's free space. Returns warnings; throws if a patch
+// applied later depends on this one.
+export function uninstallPatch(rom: Rom, id: string): string[] {
+  const all = listPatches(rom);
+  const i = all.findIndex((p) => p.id === id);
+  if (i < 0) throw new Error('Patch ist nicht installiert');
+  const p = all[i];
+  const mine: [number, number][] = [...p.segs, ...p.own.map((o): [number, number] => [o, rom.isRatsAt(o) + 8])];
+  for (const later of all.slice(i + 1)) {
+    if (later.segs.some((s) => mine.some((m) => overlaps(m, s)))) {
+      throw new Error(`„${later.name}“ verändert Code dieses Patches – zuerst „${later.name}“ entfernen.`);
+    }
+  }
+  const warnings: string[] = [];
+  if (patchedHash(rom, p.segs) !== p.check) warnings.push('Vom Patch geänderte Bytes wurden seitdem verändert; sie werden trotzdem auf den Originalzustand zurückgesetzt.');
+  const orig = backupBytes(rom, p);
+  let o = 0;
+  for (const [pc, n] of p.segs) { rom.data.set(orig.subarray(o, o + n), pc); o += n; }
+  for (const t of p.own) {
+    const n = rom.isRatsAt(t);
+    if (n > 0) rom.data.fill(0, t, t + n + 8);
+  }
+  removeEntry(rom, id);
+  return warnings;
+}
+
+// uninstall + apply with new sources/defines; on failure the ROM is left as it was
+export function reapplyPatch(rom: Rom, id: string, src: PatchSource): ApplyResult {
+  const snapshot = rom.data.slice();
+  const warnings = uninstallPatch(rom, id);
+  const r = applyPatch(rom, src);
+  if (!r.ok) rom.data = snapshot;
+  r.warnings.unshift(...warnings);
+  return r;
+}

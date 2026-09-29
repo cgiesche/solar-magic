@@ -27,3 +27,12 @@ export async function kvGet<T>(key: string): Promise<T | undefined> {
     r.onerror = () => rej(r.error);
   });
 }
+export async function kvDel(key: string): Promise<void> {
+  const db = await open();
+  await new Promise<void>((res, rej) => {
+    const tx = db.transaction('kv', 'readwrite');
+    tx.objectStore('kv').delete(key);
+    tx.oncomplete = () => res();
+    tx.onerror = () => rej(tx.error);
+  });
+}

@@ -8,6 +8,7 @@
 
 import { Rom } from './rom.ts';
 import { Asm } from './asm.ts';
+import { ownerNote } from './patchreg.ts';
 
 export const SPR_BANK_HOOK = 0x05d8f5;
 const HOOK_GFXPTR = 0x00ba2c;
@@ -203,9 +204,10 @@ function hook(rom: Rom, at: number, target: number, len: number, braTo?: number)
 export function installEditorPatch(rom: Rom): PatchInfo {
   const existing = editorPatch(rom);
   if (existing) return existing;
-  if (rom.r8(SPR_BANK_HOOK) !== 0xa9 || rom.r8(SPR_BANK_HOOK + 1) !== 0x07) throw new Error('Unerwarteter Code bei $05D8F5 – Patch nicht möglich (ROM bereits anderweitig verändert?)');
+  if (rom.r8(SPR_BANK_HOOK) !== 0xa9 || rom.r8(SPR_BANK_HOOK + 1) !== 0x07) throw new Error(`Unerwarteter Code bei $05D8F5${ownerNote(rom, SPR_BANK_HOOK, 4)} – Patch nicht möglich (ROM bereits anderweitig verändert?)`);
   if (rom.r8(HOOK_GFXPTR) !== 0xb9 || rom.r8(HOOK_UPLOAD) !== 0x22 || rom.r8(HOOK_SPRGFX) !== 0xad || rom.r8(HOOK_FGGFX) !== 0xad) {
-    throw new Error('Unerwarteter Code in der Grafik-Laderoutine – Patch nicht möglich');
+    const note = ownerNote(rom, HOOK_GFXPTR, 15) || ownerNote(rom, HOOK_UPLOAD, 4) || ownerNote(rom, HOOK_SPRGFX, 15) || ownerNote(rom, HOOK_FGGFX, 15);
+    throw new Error(`Unerwarteter Code in der Grafik-Laderoutine${note} – Patch nicht möglich`);
   }
   const a = build();
   // allocate first to know the base address, then link
@@ -311,7 +313,7 @@ export function installCustomPalettePatch(rom: Rom): { base: number; table: numb
   const ex = customPalettePatch(rom);
   if (ex) return ex;
   installEditorPatch(rom); // needs the level number in $010B
-  if (rom.r8(PAL_HOOK) !== 0x9c || rom.r16(PAL_HOOK + 1) !== 0x0703) throw new Error('Unerwarteter Code bei $00922F – Paletten-Patch nicht möglich');
+  if (rom.r8(PAL_HOOK) !== 0x9c || rom.r16(PAL_HOOK + 1) !== 0x0703) throw new Error(`Unerwarteter Code bei $00922F${ownerNote(rom, PAL_HOOK, 6)} – Paletten-Patch nicht möglich`);
   const a = new Asm();
   a.b(...PAL_MAGIC); a.fill(4); // +4: table pointer
   a.label('Pal');
@@ -385,7 +387,7 @@ export function installBgPatch(rom: Rom): { table: number } {
   if (ex) return ex;
   installEditorPatch(rom); // needs the level number in $010B
   if (rom.r8(BG_HOOK) !== 0xa9 || rom.r8(BG_HOOK + 1) !== 0x0c || rom.r16(BG_HOOK + 2) !== 0x6a85) {
-    throw new Error('Unerwarteter Code bei $058060 – BG-Patch nicht möglich');
+    throw new Error(`Unerwarteter Code bei $058060${ownerNote(rom, BG_HOOK, 4)} – BG-Patch nicht möglich`);
   }
   const a = new Asm();
   a.b(...BG_MAGIC); a.fill(4); // +4: table pointer
