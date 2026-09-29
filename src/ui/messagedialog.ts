@@ -6,6 +6,7 @@ import { hex } from '../core/names.ts';
 import { translevelToLevel, levelName } from '../core/overworld.ts';
 import { readMessage, writeMessages, lineToText, textToLine, messageUsers, MSG_COUNT, MSG_LINES, MSG_COLS, type Message } from '../core/messages.ts';
 import { TileCache, blit8 } from '../core/render.ts';
+import { levelTranslevel } from '../core/level.ts';
 
 function label(app: App, i: number, users: { translevel: number; msg: number }[]): string {
   if (i < 4) return `Switch-Palast ${i + 1}`;
@@ -18,8 +19,7 @@ export function openMessagesDialog(app: App): void {
   const rom = app.rom;
   const msgs: Message[] = Array.from({ length: MSG_COUNT }, (_, i) => readMessage(rom, i));
   const users = messageUsers(rom);
-  const n = app.level.number;
-  const tl = n < 0x25 ? n : n >= 0x101 && n < 0x101 + 0x3b ? n - 0xdc : -1;
+  const tl = levelTranslevel(rom, app.level.number) || -1;
   let sel = Math.max(0, users.findIndex((u) => u.some((x) => x.translevel === tl)));
   let changed = false;
   const list = h('div', { class: 'msg-list' });

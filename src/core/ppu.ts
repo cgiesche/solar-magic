@@ -1,6 +1,6 @@
 // Scanline renderer for the SNES PPU, sufficient for SMW gameplay: BG modes 0/1
 // (8x8 tiles), sprites, priorities, brightness, simple color math (add/half on
-// main+sub screen). No mosaic, no mode 7, windows are ignored.
+// main+sub screen), windows (per-layer masks, clip to black / prevent color math). No mosaic, no mode 7.
 
 import type { Snes } from './snes.ts';
 
@@ -18,6 +18,9 @@ export class PPU {
   private lineSub = new Uint16Array(256);
   private subPrio = new Uint8Array(256);
   private mainMathOk = new Uint8Array(256); // layer id of the main pixel (for color math enable)
+  // window masks of this line (1 = inside the layer's window): BG1-4, OBJ, color
+  private win = Array.from({ length: 6 }, () => new Uint8Array(256));
+  private winOn = [false, false, false, false, false, false];
 
   constructor(snes: Snes) {
     this.snes = snes;
@@ -66,6 +69,9 @@ export class PPU {
     main.fill(0x100); prio.fill(0); sub.fill(0x100); sprio.fill(0);
     const layerOf = this.mainMathOk;
     layerOf.fill(5); // 5 = backdrop
+    this.updateWindows();
+    const tmw = r[0x2e], tsw = r[0x2f];
+    const mask = (l: number, on: number) => (on >> l) & 1 && this.winOn[l] ? this.win[l] : null;
     // priority values (higher = in front) for mode 1 / mode 0
     const bgPrio = (bg: number, hi: boolean): number => {
       if (mode === 1) {
@@ -83,19 +89,24 @@ export class PPU {
       if (!bpp) continue;
       const onMain = (tm >> bg) & 1, onSub = (ts >> bg) & 1;
       if (!onMain && !onSub) continue;
-      this.drawBgLine(bg, bpp, y, mode === 0 ? bg * 32 : 0, (hi) => bgPrio(bg, hi), onMain !== 0, onSub !== 0);
+      this.drawBgLine(bg, bpp, y, mode === 0 ? bg * 32 : 0, (hi) => bgPrio(bg, hi), onMain !== 0, onSub !== 0, mask(bg, tmw), mask(bg, tsw));
     }
-    if ((tm | ts) & 0x10) this.drawObjLine(y, objPrio, (tm & 0x10) !== 0, (ts & 0x10) !== 0);
+    if ((tm | ts) & 0x10) this.drawObjLine(y, objPrio, (tm & 0x10) !== 0, (ts & 0x10) !== 0, mask(4, tmw), mask(4, tsw));
     // color math
     const cgwsel = r[0x30], cgadsub = r[0x31];
     const useSub = (cgwsel & 0x02) !== 0;
     const fixed = s.fixedColor;
     const bright = inidisp & 0x0f;
     const backdrop = this.pal[0];
+    // color window regions: 0 never, 1 outside, 2 inside, 3 always
+    const cw = this.win[5], cwOn = this.winOn[5];
+    const region = (sel: number, x: number) => sel === 3 || (sel === 1 && !(cwOn && cw[x])) || (sel === 2 && cwOn && cw[x] === 1);
+    const clipSel = cgwsel >> 6, noMathSel = (cgwsel >> 4) & 3;
     for (let x = 0; x < 256; x++) {
       let c = main[x] === 0x100 ? backdrop : this.pal[main[x]];
+      if (clipSel && region(clipSel, x)) c = 0;
       const lid = layerOf[x];
-      if (lid !== 6 && ((cgadsub >> lid) & 1)) {
+      if (lid !== 6 && ((cgadsub >> lid) & 1) && !(noMathSel && region(noMathSel, x))) {
         const other = useSub ? (sub[x] === 0x100 ? fixed : this.pal[sub[x]]) : fixed;
         const half = (cgadsub & 0x40) !== 0 && !(useSub && sub[x] === 0x100);
         c = mathColor(c, other, (cgadsub & 0x80) !== 0, half);
@@ -104,7 +115,30 @@ export class PPU {
     }
   }
 
-  private drawBgLine(bg: number, bpp: number, y: number, palOff: number, pr: (hi: boolean) => number, onMain: boolean, onSub: boolean): void {
+  // $2123-$2125: per layer a nibble (bit 0/2 invert window 1/2, bit 1/3 enable); $2126-$2129 window
+  // edges; $212A/$212B combine both windows (OR, AND, XOR, XNOR)
+  private updateWindows(): void {
+    const r = this.snes.ppuRegs;
+    const l1 = r[0x26], r1 = r[0x27], l2 = r[0x28], r2 = r[0x29];
+    for (let l = 0; l < 6; l++) {
+      const sel = (r[0x23 + (l >> 1)] >> ((l & 1) * 4)) & 0x0f;
+      const e1 = (sel & 2) !== 0, e2 = (sel & 8) !== 0;
+      this.winOn[l] = e1 || e2;
+      if (!e1 && !e2) continue;
+      const i1 = (sel & 1) !== 0, i2 = (sel & 4) !== 0;
+      const logic = l < 4 ? (r[0x2a] >> (l * 2)) & 3 : (r[0x2b] >> ((l - 4) * 2)) & 3;
+      const m = this.win[l];
+      for (let x = 0; x < 256; x++) {
+        const a = (x >= l1 && x <= r1) !== i1, b = (x >= l2 && x <= r2) !== i2;
+        let v: boolean;
+        if (e1 && e2) v = logic === 0 ? a || b : logic === 1 ? a && b : logic === 2 ? a !== b : a === b;
+        else v = e1 ? a : b;
+        m[x] = v ? 1 : 0;
+      }
+    }
+  }
+
+  private drawBgLine(bg: number, bpp: number, y: number, palOff: number, pr: (hi: boolean) => number, onMain: boolean, onSub: boolean, mm: Uint8Array | null, ms: Uint8Array | null): void {
     const s = this.snes, r = s.ppuRegs, vram = s.vram;
     const sc = r[0x07 + bg];
     const mapBase = (sc & 0xfc) << 9; // bytes
@@ -135,13 +169,13 @@ export class PPU {
         const c = ((p0 >> bit) & 1) | (((p1 >> bit) & 1) << 1) | (((p2 >> bit) & 1) << 2) | (((p3 >> bit) & 1) << 3);
         if (!c) continue;
         const ci = palOff + pal * (1 << bpp) + c;
-        if (onMain && P > prio[x]) { prio[x] = P; main[x] = ci; layerOf[x] = bg; }
-        if (onSub && P > sprio[x]) { sprio[x] = P; sub[x] = ci; }
+        if (onMain && P > prio[x] && !(mm && mm[x])) { prio[x] = P; main[x] = ci; layerOf[x] = bg; }
+        if (onSub && P > sprio[x] && !(ms && ms[x])) { sprio[x] = P; sub[x] = ci; }
       }
     }
   }
 
-  private drawObjLine(y: number, objPrio: number[], onMain: boolean, onSub: boolean): void {
+  private drawObjLine(y: number, objPrio: number[], onMain: boolean, onSub: boolean, mm: Uint8Array | null, ms: Uint8Array | null): void {
     const s = this.snes, oam = s.oam, vram = s.vram;
     const obsel = s.ppuRegs[0x01];
     const base = (obsel & 7) << 14;
@@ -175,8 +209,8 @@ export class PPU {
         if (!c) continue;
         drawn[x] = 1; // lower OAM index wins among sprites
         const ci = 128 + pal * 16 + c;
-        if (onMain && P > prio[x]) { prio[x] = P; main[x] = ci; layerOf[x] = pal >= 4 ? 4 : 6; }
-        if (onSub && P > sprio[x]) { sprio[x] = P; sub[x] = ci; }
+        if (onMain && P > prio[x] && !(mm && mm[x])) { prio[x] = P; main[x] = ci; layerOf[x] = pal >= 4 ? 4 : 6; }
+        if (onSub && P > sprio[x] && !(ms && ms[x])) { sprio[x] = P; sub[x] = ci; }
       }
     }
   }

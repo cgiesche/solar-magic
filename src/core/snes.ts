@@ -25,7 +25,7 @@ export interface SnesState {
 const STATE_ARRAYS = ['wram', 'sram', 'vram', 'cgram', 'oam', 'ppuRegs', 'dma', 'apuIn', 'apuOut'] as const;
 const STATE_SCALARS = ['vmain', 'vaddr', 'vreadLatch', 'cgaddr', 'cgLatch', 'cgReadHigh', 'oamaddr', 'oamLatch', 'm7a', 'm7b',
   'm7latch', 'wmaddr', 'nmitimen', 'wrmpya', 'wrdiv', 'rddiv', 'rdmpy', 'htime', 'vtime', 'nmiFlag', 'irqFlag', 'joy1',
-  'apuLastReadAddr', 'apuSpin', 'frame', 'line', 'lineCycle', 'openBus'] as const;
+  'apuLastReadAddr', 'apuSpin', 'frame', 'line', 'lineCycle', 'openBus', 'hdmaen', 'hdmaDo', 'hdmaOn'] as const;
 const CPU_SCALARS = ['a', 'x', 'y', 's', 'd', 'dbr', 'pbr', 'pc', 'p', 'e', 'cycles', 'stopped', 'waiting', 'nmiPending', 'irqLine'] as const;
 
 export class Snes implements Bus {
@@ -75,6 +75,9 @@ export class Snes implements Bus {
   nmiFlag = false;
   irqFlag = false;
   dma = new Uint8Array(0x80);
+  hdmaen = 0; // $420C
+  hdmaDo = 0; // per channel: transfer on the next line
+  hdmaOn = 0; // per channel: table not yet terminated this frame
   joy1 = 0;
 
   // APU
@@ -325,6 +328,7 @@ export class Snes implements Bus {
       case 0x4209: this.vtime = (this.vtime & 0x100) | v; return;
       case 0x420a: this.vtime = (this.vtime & 0xff) | ((v & 1) << 8); return;
       case 0x420b: this.runDma(v); return;
+      case 0x420c: this.hdmaen = v; return;
     }
     if (off >= 0x4300 && off < 0x4380) this.dma[off - 0x4300] = v;
   }
@@ -364,6 +368,63 @@ export class Snes implements Bus {
       this.dma[base + 3] = aAddr >> 8;
       this.dma[base + 5] = 0;
       this.dma[base + 6] = 0;
+    }
+  }
+
+  // HDMA (only while a PPU renders; the level loader doesn't need it). Uses the real channel registers:
+  // $43x8/9 table address, $43xA line counter, $43x5/6 (+ bank $43x7) indirect address.
+  hdmaInit(): void {
+    this.hdmaOn = this.hdmaen;
+    this.hdmaDo = 0;
+    for (let ch = 0; ch < 8; ch++) {
+      if (!(this.hdmaen & (1 << ch))) continue;
+      const d = this.dma, b = ch * 16;
+      d[b + 8] = d[b + 2]; d[b + 9] = d[b + 3];
+      this.hdmaNextEntry(ch);
+    }
+  }
+
+  private hdmaTableByte(ch: number): number {
+    const d = this.dma, b = ch * 16;
+    const a = d[b + 8] | (d[b + 9] << 8);
+    const v = this.read((d[b + 4] << 16) | a);
+    const n = (a + 1) & 0xffff;
+    d[b + 8] = n & 0xff; d[b + 9] = n >> 8;
+    return v;
+  }
+
+  private hdmaNextEntry(ch: number): void {
+    const d = this.dma, b = ch * 16, bit = 1 << ch;
+    const c = this.hdmaTableByte(ch);
+    d[b + 10] = c;
+    if (!c) { this.hdmaOn &= ~bit; return; }
+    if (d[b] & 0x40) { d[b + 5] = this.hdmaTableByte(ch); d[b + 6] = this.hdmaTableByte(ch); }
+    this.hdmaDo |= bit;
+  }
+
+  hdmaLine(): void {
+    for (let ch = 0; ch < 8; ch++) {
+      const bit = 1 << ch;
+      if (!(this.hdmaOn & bit)) continue;
+      const d = this.dma, b = ch * 16, ctrl = d[b];
+      if (this.hdmaDo & bit) {
+        const pattern = DMA_PATTERNS[ctrl & 7];
+        const n = HDMA_LENGTHS[ctrl & 7];
+        for (let i = 0; i < n; i++) {
+          let v: number;
+          if (ctrl & 0x40) {
+            const a = d[b + 5] | (d[b + 6] << 8);
+            v = this.read((d[b + 7] << 16) | a);
+            const na = (a + 1) & 0xffff;
+            d[b + 5] = na & 0xff; d[b + 6] = na >> 8;
+          } else v = this.hdmaTableByte(ch);
+          this.writeIO(0x2100 | ((d[b + 1] + pattern[i]) & 0xff), v);
+        }
+      }
+      const c = (d[b + 10] - 1) & 0xff;
+      d[b + 10] = c;
+      if (c & 0x80) this.hdmaDo |= bit; else this.hdmaDo &= ~bit;
+      if (!(c & 0x7f)) this.hdmaNextEntry(ch);
     }
   }
 
@@ -429,7 +490,11 @@ export class Snes implements Bus {
         this.irqFlag = true;
         cpu.irqLine = true;
       }
-      if (this.ppu && this.line < 224) this.ppu.renderLine(this.line);
+      if (this.ppu && this.line < 224) {
+        if (this.line === 0) this.hdmaInit();
+        this.hdmaLine();
+        this.ppu.renderLine(this.line);
+      }
       const target = cpu.cycles + CYCLES_PER_LINE;
       const start = cpu.cycles;
       while (cpu.cycles < target) {
@@ -446,6 +511,7 @@ export class Snes implements Bus {
   }
 }
 
+const HDMA_LENGTHS = [1, 2, 2, 4, 4, 4, 2, 4];
 const DMA_PATTERNS: number[][] = [
   [0, 0, 0, 0],
   [0, 1, 0, 1],

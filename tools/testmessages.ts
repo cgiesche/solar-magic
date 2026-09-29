@@ -2,19 +2,21 @@
 import { readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
+import { translevelToLevel } from '../src/core/overworld.ts';
 import { readMessage, writeMessages, lineToText, textToLine, messageUsers, MSG_COUNT, MSG_COLS, type Message } from '../src/core/messages.ts';
 
 const file = new Uint8Array(readFileSync('Super Mario World (U) [!].smc'));
 let bad = 0;
 const pad = (m: Message) => m.map((l) => [...l, ...Array(MSG_COLS - l.length).fill(0x1f)].join(',')).join('|');
 
-// characters the game writes to the stripe buffer ($7F837D) when showing message x (the box opens first)
+// characters the game writes to the stripe buffer ($7F837D) when showing message x in its level (the box
+// opens first); the emulator has to set the translevel $13BF itself
 function shown(rom: Rom, x: number): string | null {
   const u = messageUsers(rom)[x][0];
   if (!u) return null;
   const emu = new LevelEmulator(rom);
   emu.boot();
-  const r = emu.load(0x105);
+  const r = emu.load(translevelToLevel(u.translevel));
   if (!r.ok) return 'load failed';
   const s = emu.snes, w = s.wram;
   let guard = 0;
@@ -22,7 +24,7 @@ function shown(rom: Rom, x: number): string | null {
   const chars: number[] = [];
   // stripe rows: 4 byte header + 18 × (character, attribute)
   s.hook = { onWramWrite(a: number, v: number) { const rel = (a - 0x18381) % 40; if (a >= 0x18381 && a < 0x18381 + 8 * 40 && rel < 36 && !(rel & 1)) chars.push(v); } } as never;
-  w[0x13bf] = u.translevel; w[0x1426] = u.msg;
+  w[0x1426] = u.msg;
   for (let f = 0; f < 300 && chars.length < 8 * 18; f++) s.runFrame();
   s.hook = null;
   return chars.slice(0, 8 * 18).join(',');

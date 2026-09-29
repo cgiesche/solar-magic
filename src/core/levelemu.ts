@@ -4,7 +4,7 @@
 
 import { Snes, type SnesState } from './snes.ts';
 import { Rom } from './rom.ts';
-import { L1_PTRS, L2_PTRS, SPR_PTRS } from './level.ts';
+import { L1_PTRS, L2_PTRS, SPR_PTRS, mainTranslevel } from './level.ts';
 import { editorPatch, BG_HOOK } from './patches.ts';
 
 export const OV_L1 = 0x0000; // overlay offsets
@@ -30,6 +30,7 @@ export interface LevelOverride {
   switchPalaces?: boolean; // treat all switch palaces as pressed
   onOffSwitch?: boolean; // ON/OFF switch in the OFF state ($14AF)
   trackSources?: boolean; // record ROM provenance of CGRAM (slower)
+  translevel?: number; // $13BF (messages, Yoshi coins); default: the level itself if it is a main level
 }
 
 export interface LevelRender {
@@ -94,6 +95,9 @@ export class LevelEmulator {
     w[0x1f11] = (level >> 8) & 1;
     w[0x1b93] = 0;
     w[0x0109] = 0;
+    // translevel $24 (Chocolate Island 2) makes the exit-based load pick a room by time/coins instead
+    const tl = ov.translevel ?? mainTranslevel(level) ?? 0;
+    w[0x13bf] = tl === 0x24 ? 0 : tl;
     if (ov.switchPalaces) for (let i = 0; i < 4; i++) w[0x1f27 + i] = 1;
     if (ov.onOffSwitch) w[0x14af] = 1;
     w[0x100] = 0x11;

@@ -5,6 +5,7 @@ import { h, modal } from './dom.ts';
 import { LevelEmulator } from '../core/levelemu.ts';
 import { PPU } from '../core/ppu.ts';
 import { hex } from '../core/names.ts';
+import { levelTranslevel } from '../core/level.ts';
 
 const KEYMAP: Record<string, number> = {
   ArrowUp: 0x0800, ArrowDown: 0x0400, ArrowLeft: 0x0200, ArrowRight: 0x0100,
@@ -25,7 +26,7 @@ export function openTestPlay(app: App): void {
   const emu = testEmu;
   emu.syncRom();
   const lv = app.level;
-  const r = emu.load(lv.number, app.buildOverrides());
+  const r = emu.load(lv.number, { ...app.buildOverrides(), translevel: levelTranslevel(app.rom, lv.number) });
   const s = emu.snes;
   // sub-level loads keep the old timer; give the level its header time
   const hundreds = app.rom.r8(0x0584d7 + lv.header.time);

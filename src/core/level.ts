@@ -469,3 +469,38 @@ export function clearLevel(lv: Level): void {
   lv.sprites = [];
   lv.exits = [];
 }
+
+// ---- translevel ($13BF): overworld level number the game uses for messages, Yoshi coins, moons ----
+// levels $000-$024 are translevels $00-$24, $101-$13B are $25-$5F; everything else is a sub-level
+export function mainTranslevel(n: number): number | null {
+  if (n < 0x25) return n;
+  if (n >= 0x101 && n < 0x13c) return n - 0xdc;
+  return null;
+}
+
+// sub-levels inherit the translevel of the main level whose exits lead to them (breadth first)
+export function levelTranslevel(rom: Rom, n: number): number {
+  const direct = mainTranslevel(n);
+  if (direct !== null) return direct;
+  const seen = new Map<number, number>();
+  const queue: number[] = [];
+  for (let m = 1; m < 0x13c; m++) {
+    const t = mainTranslevel(m);
+    if (t) { seen.set(m, t); queue.push(m); }
+  }
+  while (queue.length) {
+    const m = queue.shift()!;
+    let exits: ScreenExit[];
+    try { exits = loadLevel(rom, m).exits; } catch { continue; }
+    for (const e of exits) {
+      // the high bit of the destination (and of the secondary entrance number) comes from the level side
+      const idx = e.dest | (m & 0x100);
+      const d = e.secondary ? readSecondaryEntrance(rom, idx).destLevel | (m & 0x100) : idx;
+      if (seen.has(d)) continue;
+      seen.set(d, seen.get(m)!);
+      if (d === n) return seen.get(m)!;
+      queue.push(d);
+    }
+  }
+  return 0;
+}
