@@ -5,6 +5,8 @@ import { h, clear, hexInput } from './dom.ts';
 import { objectName, spriteName, hex2, hex3 } from '../core/names.ts';
 import { renderObjectThumbs, objKey, type ObjSpec } from './thumbs.ts';
 import { newUid } from '../core/level.ts';
+import { DM16_EXT } from '../core/patches.ts';
+import { TileCache, map16Source, drawMap16 } from '../core/render.ts';
 
 // ---------------- level list ----------------
 export class LevelList {
@@ -54,7 +56,7 @@ export class Palette {
   app: App;
   root: HTMLDivElement;
   body: HTMLDivElement;
-  tab: 'obj' | 'ext' | 'spr' = 'obj';
+  tab: 'obj' | 'ext' | 'm16' | 'spr' = 'obj';
   thumbs = new Map<string, HTMLCanvasElement>();
   thumbsFor = '';
   tabs: HTMLDivElement;
@@ -75,6 +77,30 @@ export class Palette {
       else if (this.tab === 'spr') this.tab = 'obj';
       this.build();
     });
+  }
+
+  buildMap16(): void {
+    const app = this.app;
+    const sheet = renderMap16Sheet(app);
+    const cur = app.paletteItem;
+    const selTile = cur?.kind === 'obj' && cur.num === 0 && cur.ext === DM16_EXT ? cur.tile ?? -1 : -1;
+    const c = h('canvas', { width: 256 * 1.2, height: 512 * 1.2, class: 'm16-pick' });
+    const ctx = c.getContext('2d')!;
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(sheet, 0, 0, c.width, c.height);
+    if (selTile >= 0) {
+      ctx.strokeStyle = '#4cc2ff'; ctx.lineWidth = 2;
+      ctx.strokeRect((selTile & 15) * 16 * 1.2, (selTile >> 4) * 16 * 1.2, 16 * 1.2, 16 * 1.2);
+    }
+    const label = h('div', { class: 'hint' }, selTile >= 0 ? `Tile ${hex3(selTile)} gewählt – Rechtsklick in der Levelansicht platziert es (Direct-Map16-Objekt).` : 'Tile anklicken, dann per Rechtsklick im Level platzieren. Erfordert den Editor-Patch (wird automatisch installiert).');
+    c.addEventListener('mousedown', (e) => {
+      const rc = c.getBoundingClientRect();
+      const x = Math.floor((e.clientX - rc.left) / (rc.width / 16)), y = Math.floor((e.clientY - rc.top) / (rc.height / 32));
+      app.paletteItem = { kind: 'obj', num: 0, ext: DM16_EXT, size: 0, tile: y * 16 + x };
+      if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1');
+      this.build();
+    });
+    this.body.append(label, c);
   }
 
   specs(): ObjSpec[] {
@@ -107,7 +133,7 @@ export class Palette {
   build(): void {
     const app = this.app;
     clear(this.tabs);
-    const tabDefs: [typeof this.tab, string][] = [['obj', 'Objekte'], ['ext', 'Erweitert'], ['spr', 'Sprites']];
+    const tabDefs: [typeof this.tab, string][] = [['obj', 'Objekte'], ['ext', 'Erweitert'], ['m16', 'Map16'], ['spr', 'Sprites']];
     for (const [t, l] of tabDefs) this.tabs.appendChild(h('button', { class: this.tab === t ? 'active' : '', onclick: () => { this.tab = t; this.build(); } }, l));
     clear(this.body);
     const f = this.search.value.trim().toLowerCase();
@@ -125,6 +151,7 @@ export class Palette {
       }
       return;
     }
+    if (this.tab === 'm16') { this.buildMap16(); return; }
     const grid = h('div', { class: 'pal-grid' });
     for (const s of this.specs()) {
       if ((this.tab === 'obj') !== (s.num !== 0)) continue;
@@ -145,6 +172,21 @@ export class Palette {
     }
     this.body.appendChild(grid);
   }
+}
+
+export function renderMap16Sheet(app: App): HTMLCanvasElement {
+  const r = app.render;
+  const tc = new TileCache(r.vram, r.cgram, (r.ppuRegs[0x0b] & 0x0f) << 13);
+  const src = map16Source(app.rom, r);
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 512;
+  const ctx = c.getContext('2d')!;
+  const img = ctx.createImageData(256, 512);
+  const px = new Uint32Array(img.data.buffer);
+  px.fill(0xff181818);
+  for (let t = 0; t < 512; t++) drawMap16(px, 256, 512, tc, src.fg(t), (t & 15) * 16, (t >> 4) * 16);
+  ctx.putImageData(img, 0, 0);
+  return c;
 }
 
 export function cloneCanvas(c: HTMLCanvasElement): HTMLCanvasElement {
@@ -205,10 +247,12 @@ export class Properties {
       h('div', { class: 'hint' }, `Index ${idx} von ${app.currentObjects().length}`),
       this.field('Objekt', hexInput(o.num, 2, (v) => upd(() => (o.num = v)), 0x3f)),
       o.num === 0 ? this.field('Erw. Nr.', hexInput(o.ext, 2, (v) => upd(() => (o.ext = v)), 0xff)) : '',
+      o.num === 0 && o.ext === DM16_EXT ? this.field('Map16-Tile', hexInput(o.tile ?? 0, 3, (v) => upd(() => (o.tile = v)), 0x1ff)) : '',
+      o.num === 0 && o.ext === DM16_EXT ? this.field('Größe (hw)', hexInput(o.size, 2, (v) => upd(() => (o.size = v)))) : '',
       this.field('X', hexInput(o.x, 3, (v) => upd(() => (o.x = v)), app.levelWidthTiles() - 1)),
       this.field('Y', hexInput(o.y, 3, (v) => upd(() => (o.y = v)), app.levelHeightTiles() - 1)),
       o.num !== 0 ? this.field('Größe (Byte)', hexInput(o.size, 2, (v) => upd(() => (o.size = v)))) : '',
-      o.num !== 0 ? h('div', { class: 'hint' }, `Breite-Nibble ${o.size & 15}, Höhe-Nibble ${o.size >> 4}. Tasten: +/- Breite, Shift +/- Höhe`) : '',
+      o.num !== 0 ? h('div', { class: 'hint' }, `Breite-Nibble ${o.size & 15}, Höhe-Nibble ${o.size >> 4}. Tasten: +/− Breite, * und / Höhe, Alt+Pfeile`) : '',
     );
   }
 

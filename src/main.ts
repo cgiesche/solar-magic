@@ -138,9 +138,10 @@ function buildUi(app: App): void {
       if (!app.selection.size) return;
       e.preventDefault();
       const dx = k === 'ArrowLeft' ? -1 : k === 'ArrowRight' ? 1 : 0, dy = k === 'ArrowUp' ? -1 : k === 'ArrowDown' ? 1 : 0;
-      app.moveSelection(dx, dy);
-    } else if (k === '+' || k === '=') { if (e.shiftKey && k === '+') app.resizeSelection(0, 1); else app.resizeSelection(1, 0); }
-    else if (k === '-' || k === '_') { if (e.shiftKey) app.resizeSelection(0, -1); else app.resizeSelection(-1, 0); }
+      if (e.altKey) app.resizeSelection(dx, dy);
+      else app.moveSelection(dx, dy);
+    } else if (k === '+' || k === '=') app.resizeSelection(1, 0);
+    else if (k === '-' || k === '_') app.resizeSelection(-1, 0);
     else if (k === '*') app.resizeSelection(0, 1);
     else if (k === '/') app.resizeSelection(0, -1);
     else if (k === 'PageUp') app.reorderSelection('front');
@@ -174,7 +175,8 @@ function showHelp(): void {
     ['Griff unten rechts', 'Objektgröße ändern'],
     ['Rechtsklick / Shift+Klick', 'Palettenelement einfügen'],
     ['Pfeiltasten', 'Auswahl um 1 Tile verschieben'],
-    ['+ / −', 'Breite ändern (Shift bzw. * und / : Höhe)'],
+    ['+ / − · * / ÷', 'Breite ändern · Höhe ändern'],
+    ['Alt+Pfeiltasten', 'Größe ändern'],
     ['Entf', 'Auswahl löschen'],
     ['Strg+C / Strg+V / Strg+D', 'Kopieren / Einfügen an Maus / Duplizieren'],
     ['Bild↑ / Bild↓', 'Nach vorne / hinten (Zeichenreihenfolge)'],

@@ -1,14 +1,13 @@
 // Super Mario World level data: parsing and serialization.
 
 import { Rom } from './rom.ts';
+import { spriteBankOf, DM16_EXT } from './patches.ts';
 
 export const L1_PTRS = 0x05e000;
 export const L2_PTRS = 0x05e600;
 export const SPR_PTRS = 0x05ec00;
 export const SEC_HDR = [0x05f000, 0x05f200, 0x05f400, 0x05f600];
 export const SEC_ENT = [0x05f800, 0x05fa00, 0x05fc00, 0x05fe00];
-// Our own patch: bank byte of sprite data per level (see patches.ts)
-export const SPR_BANK_TABLE_PTR = 0x05d8f5;
 
 export interface LevelObject {
   uid: number;
@@ -16,7 +15,8 @@ export interface LevelObject {
   ext: number; // extended object number (num === 0)
   x: number; // absolute tile position
   y: number;
-  size: number; // settings byte for standard objects
+  size: number; // settings byte for standard objects (and Direct Map16)
+  tile?: number; // Direct Map16 tile number (extended object $02, editor patch)
 }
 
 export interface ScreenExit {
@@ -192,6 +192,7 @@ export function parseObjects(data: Uint8Array, start: number, vertical: boolean)
       continue;
     }
     const f5 = b0 & 0x1f, f4 = b1 & 0x0f;
+    const dm16 = num === 0 && b2 === DM16_EXT;
     let x: number, y: number;
     if (vertical) {
       x = f5;
@@ -199,6 +200,11 @@ export function parseObjects(data: Uint8Array, start: number, vertical: boolean)
     } else {
       x = screen * 16 + f4;
       y = f5;
+    }
+    if (dm16) {
+      objects.push({ uid: newUid(), num, ext: b2, x, y, size: data[p + 5], tile: data[p + 3] | (data[p + 4] << 8) });
+      p += 6;
+      continue;
     }
     objects.push({ uid: newUid(), num, ext: num === 0 ? b2 : 0, x, y, size: num === 0 ? 0 : b2 });
     p += 3;
@@ -230,7 +236,11 @@ export function serializeObjects(objects: LevelObject[], exits: ScreenExit[], ve
     const f5 = vertical ? o.x & 0x1f : o.y & 0x1f;
     const f4 = vertical ? o.y & 0x0f : o.x & 0x0f;
     out.push(nflag | ((o.num & 0x30) << 1) | f5, ((o.num & 0x0f) << 4) | f4, o.num === 0 ? o.ext : o.size);
-    own(3, objects.indexOf(o));
+    if (o.num === 0 && o.ext === DM16_EXT) {
+      const t = o.tile ?? 0;
+      out.push(t & 0xff, (t >> 8) & 0xff, o.size & 0xff);
+      own(6, objects.indexOf(o));
+    } else own(3, objects.indexOf(o));
   }
   out.push(0xff);
   own(1, -1);
@@ -279,12 +289,7 @@ export function serializeSprites(sprites: LevelSprite[], header: number, vertica
 }
 
 export function spriteBank(rom: Rom, n: number): number {
-  // Patched ROMs carry a JSL at $05D8F5 to our bank-table routine.
-  if (rom.r8(SPR_BANK_TABLE_PTR) === 0x22) {
-    const table = rom.r24(rom.r24(SPR_BANK_TABLE_PTR + 1) - 3); // table pointer stored before routine
-    return rom.r8(table + n);
-  }
-  return 0x07;
+  return spriteBankOf(rom, n);
 }
 
 export function loadLevel(rom: Rom, n: number): Level {

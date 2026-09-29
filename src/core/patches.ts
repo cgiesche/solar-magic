@@ -1,48 +1,291 @@
-// ROM patches applied by the editor (hand-assembled 65816).
+// The editor's ROM patch ("SMWE"), assembled on install:
+//  - sprite data of each level may live in any bank (bank table, 512 entries)
+//  - the current level number is kept in $7E010B (as Lunar Magic does)
+//  - GFX pointer table with 256 entries (GFX 00-31 vanilla, 32-FF = ExGFX)
+//  - per-file format flag: 0 = LZ2 3bpp (vanilla), 1 = raw uncompressed 4bpp (DMA'd directly)
+//  - per-level GFX bypass: 8 slots (SP4..SP1, FG3, BG1, FG2, FG1), $FF = tileset default
+//  - extended object $02 "Direct Map16": 6 bytes, places any Map16 tile as a rectangle
 
 import { Rom } from './rom.ts';
-import { SPR_BANK_TABLE_PTR } from './level.ts';
+import { Asm } from './asm.ts';
 
-export function hasSpriteBankPatch(rom: Rom): boolean {
-  return rom.r8(SPR_BANK_TABLE_PTR) === 0x22;
+export const SPR_BANK_HOOK = 0x05d8f5;
+const HOOK_GFXPTR = 0x00ba2c;
+const HOOK_UPLOAD = 0x00aa6b;
+const HOOK_SPRGFX = 0x00a9e1;
+const HOOK_FGGFX = 0x00aa22;
+const EXT_OBJ_TABLE = 0x0da10f;
+export const DM16_EXT = 0x02;
+const MAGIC = [0x53, 0x4d, 0x57, 0x45]; // "SMWE"
+const HEADER = 32;
+
+export interface PatchInfo {
+  base: number;
+  version: number;
+  sprBank: number;
+  gfxLo: number;
+  gfxHi: number;
+  gfxBank: number;
+  gfxFlags: number;
+  levelGfx: number;
 }
 
-// Replaces `LDA #$07 : STA $D0` at $05D8F5 with a JSL to a routine that reads the
-// sprite data bank from a 512-entry table, so sprite data can live in any bank.
-export function applySpriteBankPatch(rom: Rom): void {
-  if (hasSpriteBankPatch(rom)) return;
-  if (rom.r8(SPR_BANK_TABLE_PTR) !== 0xa9 || rom.r8(SPR_BANK_TABLE_PTR + 1) !== 0x07) {
-    throw new Error('Unerwarteter Code bei $05D8F5 – Sprite-Bank-Patch nicht möglich');
+export function editorPatch(rom: Rom): PatchInfo | null {
+  if (rom.r8(SPR_BANK_HOOK) !== 0x22) return null;
+  const routine = rom.r24(SPR_BANK_HOOK + 1);
+  const base = routine - HEADER;
+  for (let i = 0; i < 4; i++) if (rom.r8(base + i) !== MAGIC[i]) return null;
+  return {
+    base,
+    version: rom.r8(base + 4),
+    sprBank: rom.r24(base + 5),
+    gfxLo: rom.r24(base + 8),
+    gfxHi: rom.r24(base + 11),
+    gfxBank: rom.r24(base + 14),
+    gfxFlags: rom.r24(base + 17),
+    levelGfx: rom.r24(base + 20),
+  };
+}
+
+export function hasEditorPatch(rom: Rom): boolean {
+  return editorPatch(rom) !== null;
+}
+
+function build(): Asm {
+  const a = new Asm();
+  a.b(...MAGIC, 1);
+  // data pointers (patched after link, see install)
+  a.fill(HEADER - 5);
+
+  // ---- sprite bank + level number (M=8, X=16, Y=level*2) ----
+  a.label('SprBank');
+  a.b(0x08, 0xc2, 0x30, 0x48, 0xda, 0x98, 0x4a); // PHP REP#$30 PHA PHX TYA LSR
+  a.b(0x8f, 0x0b, 0x01, 0x7e); // STA.l $7E010B
+  a.b(0xaa, 0xe2, 0x20); // TAX SEP #$20
+  a.long(0xbf, 'SprBankTbl'); // LDA.l tbl,x
+  a.b(0x85, 0xd0, 0xc2, 0x20, 0xfa, 0x68, 0x28, 0x6b); // STA $D0 REP#$20 PLX PLA PLP RTL
+
+  // ---- GFX pointer lookup (Y = file) ----
+  a.label('GfxPtr');
+  a.b(0xda, 0xbb); // PHX TYX
+  a.long(0xbf, 'GfxLo'); a.b(0x85, 0x8a);
+  a.long(0xbf, 'GfxHi'); a.b(0x85, 0x8b);
+  a.long(0xbf, 'GfxBk'); a.b(0x85, 0x8c);
+  a.b(0xfa, 0x6b); // PLX RTL
+
+  // ---- GFX upload: raw 4bpp files are DMA'd straight from ROM ----
+  a.label('GfxUpload');
+  a.b(0xda, 0xbb); // PHX TYX
+  a.long(0xbf, 'GfxFlags');
+  a.br(0xd0, 'raw');
+  a.b(0xfa); // PLX
+  a.b(0x5c, 0x28, 0xba, 0x00); // JML $00BA28
+  a.label('raw');
+  a.long(0xbf, 'GfxLo'); a.b(0x8f, 0x02, 0x43, 0x00);
+  a.long(0xbf, 'GfxHi'); a.b(0x8f, 0x03, 0x43, 0x00);
+  a.long(0xbf, 'GfxBk'); a.b(0x8f, 0x04, 0x43, 0x00);
+  a.b(0xa9, 0x01, 0x8f, 0x00, 0x43, 0x00); // DMA mode 1
+  a.b(0xa9, 0x18, 0x8f, 0x01, 0x43, 0x00); // → $2118
+  a.b(0xa9, 0x00, 0x8f, 0x05, 0x43, 0x00);
+  a.b(0xa9, 0x10, 0x8f, 0x06, 0x43, 0x00); // $1000 bytes
+  a.b(0xa9, 0x01, 0x8f, 0x0b, 0x42, 0x00); // start
+  a.b(0xfa, 0x68, 0x68, 0x68); // PLX, drop JSL return
+  a.b(0x5c, 0xd1, 0xa9, 0x00); // JML $00A9D1 (an RTS in bank 0)
+
+  // ---- GFX slot selection with per-level bypass ----
+  a.label('SprGfxSel');
+  a.b(0xad, 0x2b, 0x19, 0x0a, 0x0a, 0xa8); // LDA $192B ASL ASL TAY
+  a.label('lp1');
+  a.b(0xb9, 0xc3, 0xa8, 0x95, 0x04, 0xc8, 0xca); // LDA $A8C3,y STA $04,x INY DEX (DB = $00 here)
+  a.br(0x10, 'lp1');
+  a.b(0xa9, 0x00);
+  a.abs(0x20, 'ApplyOvr');
+  a.b(0x6b);
+
+  a.label('FgGfxSel');
+  a.b(0xad, 0x31, 0x19, 0x0a, 0x0a, 0xa8); // LDA $1931 ASL ASL TAY
+  a.label('lp2');
+  a.b(0xb9, 0x2b, 0xa9, 0x95, 0x04, 0xc8, 0xca); // LDA $A92B,y STA $04,x INY DEX
+  a.br(0x10, 'lp2');
+  a.b(0xa9, 0x04);
+  a.abs(0x20, 'ApplyOvr');
+  a.b(0x6b);
+
+  a.label('ApplyOvr');
+  a.b(0x85, 0x0b); // STA $0B
+  a.b(0xaf, 0x00, 0x01, 0x7e, 0xc9, 0x0b); // LDA.l $7E0100 CMP #$0B
+  a.br(0x90, 'ovok');
+  a.b(0xc9, 0x0f);
+  a.br(0x90, 'ovout');
+  a.label('ovok');
+  a.b(0xc2, 0x20); // REP #$20
+  a.b(0xaf, 0x0b, 0x01, 0x7e, 0x29, 0xff, 0x01, 0x0a, 0x0a, 0x0a, 0x18); // LDA.l $7E010B AND #$01FF ASL*3 CLC
+  a.abs(0x69, 'LevelGfx'); // ADC #LevelGfx
+  a.b(0x85, 0x08, 0xe2, 0x20); // STA $08 SEP #$20
+  a.bankImm(0xa9, 'LevelGfx'); a.b(0x85, 0x0a); // LDA #bank STA $0A
+  a.b(0xa4, 0x0b, 0xa2, 0x00); // LDY $0B LDX #$00
+  a.label('lp3');
+  a.b(0xb7, 0x08, 0xc9, 0xff); // LDA [$08],y CMP #$FF
+  a.br(0xf0, 'ovnx');
+  a.b(0x95, 0x04); // STA $04,x
+  a.label('ovnx');
+  a.b(0xc8, 0xe8, 0xe0, 0x04); // INY INX CPX #$04
+  a.br(0xd0, 'lp3');
+  a.label('ovout');
+  a.b(0x60);
+
+  // ---- extended object $02: Direct Map16 (M=8, X=8) ----
+  a.label('DM16');
+  a.b(0xa0, 0x00, 0xb7, 0x65, 0x85, 0x0c); // LDY #0 LDA [$65],y STA $0C
+  a.b(0xc8, 0xb7, 0x65, 0x85, 0x0d); // INY LDA [$65],y STA $0D
+  a.b(0xc8, 0xb7, 0x65, 0x85, 0x0e); // INY LDA [$65],y STA $0E
+  a.b(0xa5, 0x65, 0x18, 0x69, 0x03, 0x85, 0x65, 0xa5, 0x66, 0x69, 0x00, 0x85, 0x66); // $65 += 3
+  a.b(0xa5, 0x5b, 0xac, 0x33, 0x19); // LDA $5B LDY $1933
+  a.br(0xf0, 'dmv1');
+  a.b(0x4a); // LSR
+  a.label('dmv1');
+  a.b(0x29, 0x01, 0x85, 0x0f); // AND #1 STA $0F (vertical layer)
+  a.b(0xa5, 0x0e, 0x4a, 0x4a, 0x4a, 0x4a, 0x85, 0x01); // rows-1
+  a.label('dmrow');
+  a.b(0xa5, 0x6b, 0x85, 0x04, 0xa5, 0x6c, 0x85, 0x05); // save row start
+  a.b(0xa5, 0x0e, 0x29, 0x0f, 0x85, 0x00); // cols-1
+  a.b(0xa4, 0x57); // LDY $57
+  a.label('dmcol');
+  a.b(0xa5, 0x0c, 0x97, 0x6b, 0xa5, 0x0d, 0x97, 0x6e); // store low/high byte
+  a.b(0xc6, 0x00); // DEC $00
+  a.br(0x30, 'dmcoldone');
+  a.b(0xc8, 0x98, 0x29, 0x0f); // INY TYA AND #$0F
+  a.br(0xd0, 'dmcol');
+  a.b(0xa5, 0x0f);
+  a.br(0xd0, 'dmvcross');
+  a.b(0xa5, 0x6b, 0x18, 0x69, 0xb0, 0x85, 0x6b, 0x85, 0x6e, 0xa5, 0x6c, 0x69, 0x01, 0x85, 0x6c, 0x85, 0x6f); // += $1B0
+  a.br(0x80, 'dmcrossed');
+  a.label('dmvcross');
+  a.b(0xe6, 0x6c, 0xe6, 0x6f); // += $100
+  a.label('dmcrossed');
+  a.b(0xa5, 0x57, 0x29, 0xf0, 0xa8); // LDA $57 AND #$F0 TAY
+  a.br(0x80, 'dmcol');
+  a.label('dmcoldone');
+  a.b(0xa5, 0x04, 0x85, 0x6b, 0x85, 0x6e, 0xa5, 0x05, 0x85, 0x6c, 0x85, 0x6f); // restore row start
+  a.b(0xa5, 0x57, 0x18, 0x69, 0x10, 0x85, 0x57); // $57 += $10
+  a.br(0x90, 'dmnorow');
+  a.b(0xa5, 0x0f);
+  a.br(0xd0, 'dmvrow');
+  a.b(0xe6, 0x6c, 0xe6, 0x6f);
+  a.br(0x80, 'dmnorow');
+  a.label('dmvrow');
+  a.b(0xa5, 0x6c, 0x18, 0x69, 0x02, 0x85, 0x6c, 0x85, 0x6f);
+  a.label('dmnorow');
+  a.b(0xc6, 0x01); // DEC $01
+  a.br(0x10, 'dmrow');
+  a.b(0x68, 0x68, 0x6b); // drop JSR return, RTL
+
+  // ---- tables ----
+  a.label('SprBankTbl'); a.fill(512, 0x07);
+  a.label('GfxLo'); a.fill(256);
+  a.label('GfxHi'); a.fill(256);
+  a.label('GfxBk'); a.fill(256);
+  a.label('GfxFlags'); a.fill(256);
+  a.label('LevelGfx'); a.fill(512 * 8, 0xff);
+  return a;
+}
+
+function hook(rom: Rom, at: number, target: number, len: number, braTo?: number): void {
+  const bytes = [0x22, target & 0xff, (target >> 8) & 0xff, (target >> 16) & 0xff];
+  if (braTo !== undefined) bytes.push(0x80, braTo - (at + 6));
+  while (bytes.length < len) bytes.push(0xea);
+  rom.writeBytes(at, Uint8Array.from(bytes));
+}
+
+export function installEditorPatch(rom: Rom): PatchInfo {
+  const existing = editorPatch(rom);
+  if (existing) return existing;
+  if (rom.r8(SPR_BANK_HOOK) !== 0xa9 || rom.r8(SPR_BANK_HOOK + 1) !== 0x07) throw new Error('Unerwarteter Code bei $05D8F5 – Patch nicht möglich (ROM bereits anderweitig verändert?)');
+  if (rom.r8(HOOK_GFXPTR) !== 0xb9 || rom.r8(HOOK_UPLOAD) !== 0x22 || rom.r8(HOOK_SPRGFX) !== 0xad || rom.r8(HOOK_FGGFX) !== 0xad) {
+    throw new Error('Unerwarteter Code in der Grafik-Laderoutine – Patch nicht möglich');
   }
-  const code = [
-    0x08, // PHP
-    0xc2, 0x30, // REP #$30
-    0x48, // PHA
-    0xda, // PHX
-    0x98, // TYA
-    0x4a, // LSR
-    0xaa, // TAX
-    0xe2, 0x20, // SEP #$20
-    0xbf, 0, 0, 0, // LDA.l table,x (patched below)
-    0x85, 0xd0, // STA $D0
-    0xc2, 0x20, // REP #$20
-    0xfa, // PLX
-    0x68, // PLA
-    0x28, // PLP
-    0x6b, // RTL
-  ];
-  const payload = new Uint8Array(3 + code.length + 512);
-  payload.set(code, 3);
-  payload.fill(0x07, 3 + code.length);
-  const addr = rom.allocWrite(payload);
-  const table = addr + 3 + code.length;
-  const routine = addr + 3;
-  rom.w24(addr, table);
-  rom.w24(routine + 11, table);
-  rom.w8(SPR_BANK_TABLE_PTR, 0x22);
-  rom.w24(SPR_BANK_TABLE_PTR + 1, routine);
+  const a = build();
+  // allocate first to know the base address, then link
+  const size = a.bytes.length;
+  const addr = rom.allocWrite(new Uint8Array(size));
+  const code = a.link(addr);
+  rom.writeBytes(addr, code);
+  const L = (n: string) => a.addrOf(n, addr);
+  // header pointers
+  rom.w24(addr + 5, L('SprBankTbl'));
+  rom.w24(addr + 8, L('GfxLo'));
+  rom.w24(addr + 11, L('GfxHi'));
+  rom.w24(addr + 14, L('GfxBk'));
+  rom.w24(addr + 17, L('GfxFlags'));
+  rom.w24(addr + 20, L('LevelGfx'));
+  // copy vanilla GFX pointers
+  for (let i = 0; i < 0x32; i++) {
+    rom.w8(L('GfxLo') + i, rom.r8(0x00b992 + i));
+    rom.w8(L('GfxHi') + i, rom.r8(0x00b9c4 + i));
+    rom.w8(L('GfxBk') + i, rom.r8(0x00b9f6 + i));
+  }
+  // hooks
+  hook(rom, SPR_BANK_HOOK, L('SprBank'), 4);
+  hook(rom, HOOK_GFXPTR, L('GfxPtr'), 15, 0x00ba3b);
+  hook(rom, HOOK_UPLOAD, L('GfxUpload'), 4);
+  hook(rom, HOOK_SPRGFX, L('SprGfxSel'), 15, 0x00a9f0);
+  hook(rom, HOOK_FGGFX, L('FgGfxSel'), 15, 0x00aa31);
+  rom.w24(EXT_OBJ_TABLE + DM16_EXT * 3, L('DM16'));
+  return editorPatch(rom)!;
 }
 
-export function spriteBankTable(rom: Rom): number {
-  return rom.r24(rom.r24(SPR_BANK_TABLE_PTR + 1) - 3);
+export function spriteBankOf(rom: Rom, n: number): number {
+  const p = editorPatch(rom);
+  return p ? rom.r8(p.sprBank + n) : 0x07;
+}
+export function setSpriteBank(rom: Rom, n: number, bank: number): void {
+  const p = installEditorPatch(rom);
+  rom.w8(p.sprBank + n, bank);
+}
+
+// ---- GFX files ----
+export const VANILLA_GFX = 0x32;
+export interface GfxEntry { addr: number; raw: boolean }
+export function gfxEntry(rom: Rom, i: number): GfxEntry | null {
+  const p = editorPatch(rom);
+  if (!p) {
+    if (i >= VANILLA_GFX) return null;
+    return { addr: rom.r8(0x00b992 + i) | (rom.r8(0x00b9c4 + i) << 8) | (rom.r8(0x00b9f6 + i) << 16), raw: false };
+  }
+  const addr = rom.r8(p.gfxLo + i) | (rom.r8(p.gfxHi + i) << 8) | (rom.r8(p.gfxBank + i) << 16);
+  if (addr === 0) return null;
+  return { addr, raw: rom.r8(p.gfxFlags + i) !== 0 };
+}
+export function setGfxEntry(rom: Rom, i: number, addr: number, raw: boolean): void {
+  const p = i >= VANILLA_GFX || raw ? installEditorPatch(rom) : editorPatch(rom);
+  if (i < VANILLA_GFX) {
+    rom.w8(0x00b992 + i, addr & 0xff);
+    rom.w8(0x00b9c4 + i, (addr >> 8) & 0xff);
+    rom.w8(0x00b9f6 + i, (addr >> 16) & 0xff);
+  }
+  if (p) {
+    rom.w8(p.gfxLo + i, addr & 0xff);
+    rom.w8(p.gfxHi + i, (addr >> 8) & 0xff);
+    rom.w8(p.gfxBank + i, (addr >> 16) & 0xff);
+    rom.w8(p.gfxFlags + i, raw ? 1 : 0);
+  }
+}
+
+// ---- per-level GFX bypass ----
+export const GFX_SLOT_NAMES = ['SP4', 'SP3', 'SP2', 'SP1', 'FG3', 'BG1', 'FG2', 'FG1'];
+export function levelGfx(rom: Rom, n: number): number[] {
+  const p = editorPatch(rom);
+  if (!p) return new Array(8).fill(0xff);
+  return Array.from({ length: 8 }, (_, k) => rom.r8(p.levelGfx + n * 8 + k));
+}
+export function setLevelGfx(rom: Rom, n: number, slots: number[]): void {
+  const p = installEditorPatch(rom);
+  slots.forEach((v, k) => rom.w8(p.levelGfx + n * 8 + k, v));
+}
+// defaults from the tileset / sprite set tables, in slot order
+export function defaultGfx(rom: Rom, tileset: number, spriteSet: number): number[] {
+  const out: number[] = [];
+  for (let x = 0; x < 4; x++) out.push(rom.r8(0x00a8c3 + spriteSet * 4 + (3 - x)));
+  for (let x = 0; x < 4; x++) out.push(rom.r8(0x00a92b + tileset * 4 + (3 - x)));
+  return out;
 }

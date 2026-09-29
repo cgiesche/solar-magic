@@ -9,12 +9,13 @@ import {
 import { renderLevel, type LevelImages, composite } from '../core/render.ts';
 import { saveLevel } from '../core/save.ts';
 import { captureSprites } from '../core/spritegfx.ts';
+import { DM16_EXT, hasEditorPatch, installEditorPatch } from '../core/patches.ts';
 import { kvSet } from './storage.ts';
 import { toast } from './dom.ts';
 
 export type EditMode = 'l1' | 'l2' | 'spr' | 'exit';
 export type PaletteItem =
-  | { kind: 'obj'; num: number; ext: number; size: number }
+  | { kind: 'obj'; num: number; ext: number; size: number; tile?: number }
   | { kind: 'spr'; num: number; extra: number };
 
 type Listener = () => void;
@@ -293,7 +294,16 @@ export class App {
     if (!p) { toast('Zuerst ein Objekt/Sprite in der Palette wählen.'); return; }
     this.checkpoint();
     if (p.kind === 'obj' && (this.mode === 'l1' || this.mode === 'l2')) {
+      if (p.num === 0 && p.ext === DM16_EXT && !hasEditorPatch(this.rom)) {
+        try {
+          installEditorPatch(this.rom);
+          this.emu.syncRom();
+          this.persist();
+          toast('Editor-Patch installiert (für Direct-Map16-Objekte).');
+        } catch (e) { toast(String(e), 'error'); this.undoStack.pop(); return; }
+      }
       const o: LevelObject = { uid: newUid(), num: p.num, ext: p.ext, x: tx, y: ty, size: p.size };
+      if (p.tile !== undefined) o.tile = p.tile;
       this.clampObject(o);
       this.currentObjects().push(o);
       this.selection = new Set([o.uid]);
@@ -329,7 +339,7 @@ export class App {
 
   // resize: width/height nibbles of settings byte
   resizeSelection(dw: number, dh: number): void {
-    const objs = this.selectedObjects().filter((o) => o.num !== 0);
+    const objs = this.selectedObjects().filter((o) => o.num !== 0 || o.ext === DM16_EXT);
     if (!objs.length) return;
     this.checkpoint();
     for (const o of objs) {

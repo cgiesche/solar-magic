@@ -5,7 +5,7 @@ import {
   type Level, L1_PTRS, L2_PTRS, SPR_PTRS, serializeLayer1, serializeLayer2, serializeSprites, isL1Vertical,
   writeSecondaryHeader, spriteBank,
 } from './level.ts';
-import { applySpriteBankPatch, spriteBankTable } from './patches.ts';
+import { installEditorPatch, setSpriteBank, editorPatch } from './patches.ts';
 
 function countRefs(rom: Rom, table: number, stride: number, addr: number, bankFn?: (i: number) => number): number {
   let n = 0;
@@ -54,15 +54,12 @@ export function saveLevel(rom: Rom, lv: Level): string[] {
     rom.data.set(spr, snesToPc(lv.sprAddr));
     as = lv.sprAddr;
   } else {
-    applySpriteBankPatch(rom);
+    installEditorPatch(rom);
     if (!sprShared) rom.freeAt(lv.sprAddr);
     as = rom.allocWrite(spr);
   }
   rom.w16(SPR_PTRS + n * 2, as & 0xffff);
-  if ((as >> 16) !== 0x07 || rom.r8(0x05d8f5) === 0x22) {
-    applySpriteBankPatch(rom);
-    rom.w8(spriteBankTable(rom) + n, as >> 16);
-  }
+  if ((as >> 16) !== 0x07 || editorPatch(rom)) setSpriteBank(rom, n, as >> 16);
   log.push(`Sprites: ${spr.length} Bytes @ $${as.toString(16).toUpperCase()}`);
   writeSecondaryHeader(rom, n, lv.secondary);
   return log;

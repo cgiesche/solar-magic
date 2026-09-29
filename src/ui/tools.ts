@@ -5,7 +5,7 @@ import { h, modal, clear, hexInput, select, toast } from './dom.ts';
 import { readSecondaryEntrance, writeSecondaryEntrance, type SecondaryEntrance, loadLevel, cloneLevel } from '../core/level.ts';
 import { ENTRANCE_ACTIONS, hex } from '../core/names.ts';
 import { saveLevel } from '../core/save.ts';
-import { hasSpriteBankPatch, applySpriteBankPatch } from '../core/patches.ts';
+import { hasEditorPatch, installEditorPatch } from '../core/patches.ts';
 
 export function openEntrancesDialog(app: App): void {
   const rom = app.rom;
@@ -63,7 +63,7 @@ export function openRomInfo(app: App): void {
       h('div', { class: 'prop' }, h('label', null, 'Titel'), h('span', null, rom.title())),
       h('div', { class: 'prop' }, h('label', null, 'Größe'), h('span', null, `${rom.size / 1024} KB${rom.smcHeader ? ' (+512 Byte Copier-Header)' : ''}`)),
       h('div', { class: 'prop' }, h('label', null, 'Erweiterter Bereich'), h('span', null, `${expanded / 1024} KB, davon ${(used / 1024).toFixed(1)} KB belegt (${rats.length} RATS-Blöcke)`)),
-      h('div', { class: 'prop' }, h('label', null, 'Sprite-Bank-Patch'), h('span', null, hasSpriteBankPatch(rom) ? 'installiert' : 'nicht installiert')),
+      h('div', { class: 'prop' }, h('label', null, 'Editor-Patch'), h('span', null, hasEditorPatch(rom) ? 'installiert' : 'nicht installiert')),
       h('h3', null, 'ROM erweitern'),
       h('p', { class: 'hint' }, 'Mehr Platz für Levels, Grafiken, Musik usw. Beim Speichern wird automatisch erweitert, wenn nötig. Maximal 4 MB (LoROM).'),
       h('div', { class: 'row' }, [0x100000, 0x200000, 0x400000].map((sz) => h('button', {
@@ -71,10 +71,11 @@ export function openRomInfo(app: App): void {
         onclick: () => { rom.expand(sz); app.emu.syncRom(); app.persist(); toast(`ROM auf ${sz / 1048576} MB erweitert`); build(); },
       }, `${sz / 1048576} MB`))),
       h('h3', null, 'Patches'),
+      h('p', { class: 'hint' }, 'Der Editor-Patch erlaubt Sprite-Daten in beliebigen Banks, 256 Grafikdateien (ExGFX, auch unkomprimiert als 4bpp), Grafik-Zuordnung pro Level und das "Direct Map16"-Objekt (beliebige Map16-Tiles platzieren). Er wird bei Bedarf automatisch installiert.'),
       h('div', { class: 'row' }, h('button', {
-        disabled: hasSpriteBankPatch(rom),
-        onclick: () => { try { applySpriteBankPatch(rom); app.emu.syncRom(); app.persist(); toast('Sprite-Bank-Patch installiert'); } catch (e) { toast(String(e), 'error'); } build(); },
-      }, 'Sprite-Daten in beliebigen Banks erlauben')),
+        disabled: hasEditorPatch(rom),
+        onclick: () => { try { installEditorPatch(rom); app.emu.syncRom(); app.persist(); toast('Editor-Patch installiert'); app.refresh(); app.emit('patch'); } catch (e) { toast(String(e), 'error'); } build(); },
+      }, 'Editor-Patch installieren')),
     );
   };
   build();

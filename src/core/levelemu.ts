@@ -5,6 +5,7 @@
 import { Snes, type SnesState } from './snes.ts';
 import { Rom } from './rom.ts';
 import { L1_PTRS, L2_PTRS, SPR_PTRS } from './level.ts';
+import { editorPatch } from './patches.ts';
 
 export const OV_L1 = 0x0000; // overlay offsets
 export const OV_L2 = 0x4000;
@@ -115,12 +116,11 @@ export class LevelEmulator {
       const a = overlaySnes(OV_SPR);
       patch(SPR_PTRS + level * 2, a & 0xff);
       patch(SPR_PTRS + level * 2 + 1, (a >> 8) & 0xff);
-      // force sprite data bank: vanilla code is LDA #$07 : STA $D0 at $05D8F5
-      if (rom.r8(0x05d8f5) === 0xa9) patch(0x05d8f6, a >> 16);
-      else {
-        // patched ROM: JSL → replace by LDA #bank : STA $D0
-        patch(0x05d8f5, 0xa9); patch(0x05d8f6, a >> 16); patch(0x05d8f7, 0x85); patch(0x05d8f8, 0xd0);
-      }
+      // force sprite data bank: vanilla code is LDA #$07 : STA $D0 at $05D8F5,
+      // patched ROMs have a bank table
+      const p = editorPatch(rom);
+      if (p) patch(p.sprBank + level, a >> 16);
+      else patch(0x05d8f6, a >> 16);
     }
     if (ov.secondaryHeader) {
       for (let i = 0; i < 4; i++) patch(0x05f000 + i * 0x200 + level, ov.secondaryHeader[i]);

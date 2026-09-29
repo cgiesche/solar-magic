@@ -220,7 +220,7 @@ export class LevelView {
     // origin marker
     ctx.fillStyle = color;
     ctx.fillRect(o.x * 16, o.y * 16, 4, 4);
-    if (this.app.selection.size === 1 && this.app.selection.has(o.uid) && o.num !== 0) {
+    if (this.app.selection.size === 1 && this.app.selection.has(o.uid) && (o.num !== 0 || o.ext === 2)) {
       const b = this.app.objectBounds(o);
       ctx.fillStyle = '#4cc2ff';
       ctx.fillRect(b.x1 * 16 + 11, b.y1 * 16 + 11, 5, 5);
@@ -281,7 +281,7 @@ export class LevelView {
     // resize handle?
     if ((app.mode === 'l1' || app.mode === 'l2') && app.selection.size === 1) {
       const o = app.selectedObjects()[0];
-      if (o && o.num !== 0) {
+      if (o && (o.num !== 0 || o.ext === 2)) {
         const b = app.objectBounds(o);
         const hx = b.x1 * 16 + 11, hy = b.y1 * 16 + 11;
         if (px >= hx - 2 && px <= hx + 7 && py >= hy - 2 && py <= hy + 7) {

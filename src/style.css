@@ -113,3 +113,5 @@ kbd { background: #181a1f; border: 1px solid var(--border); border-radius: 3px; 
 .ent-editor { display: flex; gap: 14px; }
 .ent-detail { width: 360px; display: flex; flex-direction: column; gap: 6px; }
 .modal-body h3 { margin: 12px 0 6px; font-size: 12px; text-transform: uppercase; color: var(--muted); }
+.m16-pick { image-rendering: pixelated; cursor: crosshair; display: block; }
+.grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px 14px; } .grid4 .prop label { width: 36px; }

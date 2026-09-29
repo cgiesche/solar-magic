@@ -7,18 +7,8 @@ import { decodeTile, encodeTile, cgramToRGBA } from '../core/gfx.ts';
 import { snesToPc } from '../core/rom.ts';
 import { hex } from '../core/names.ts';
 
-export const GFX_COUNT = 0x32;
+import { gfxEntry, setGfxEntry, hasEditorPatch, VANILLA_GFX } from '../core/patches.ts';
 
-export function gfxPointer(app: App, i: number): number {
-  const r = app.rom;
-  return r.r8(0x00b992 + i) | (r.r8(0x00b9c4 + i) << 8) | (r.r8(0x00b9f6 + i) << 16);
-}
-function setGfxPointer(app: App, i: number, p: number): void {
-  const r = app.rom;
-  r.w8(0x00b992 + i, p & 0xff);
-  r.w8(0x00b9c4 + i, (p >> 8) & 0xff);
-  r.w8(0x00b9f6 + i, (p >> 16) & 0xff);
-}
 function defaultBpp(i: number, size: number): number {
   if ((i >= 0x28 && i <= 0x2b) || i === 0x2f) return 2;
   if (size % 24 === 0 && size % 32 !== 0) return 3;
@@ -30,16 +20,22 @@ export function openGfxEditor(app: App): void {
   let cur = 0;
   let palRow = 0;
   let bppOverride: number | null = null;
+  let importRaw = false;
   const Z = 3;
   const list = h('div', { class: 'gfx-list' });
   const canvas = h('canvas', { class: 'gfx-canvas' });
   const info = h('div', { class: 'gfx-info' });
 
   const load = (i: number) => {
-    const p = gfxPointer(app, i);
-    const { data, size } = lz2Decompress(app.rom.data, snesToPc(p));
+    const e = gfxEntry(app.rom, i);
+    if (!e) return { p: 0, data: new Uint8Array(0x1000), size: 0, bpp: 4, tiles: 128, raw: true, empty: true };
+    if (e.raw) {
+      const data = app.rom.bytes(e.addr, 0x1000);
+      return { p: e.addr, data, size: 0x1000, bpp: 4, tiles: 128, raw: true, empty: false };
+    }
+    const { data, size } = lz2Decompress(app.rom.data, snesToPc(e.addr));
     const bpp = bppOverride ?? defaultBpp(i, data.length);
-    return { p, data, size, bpp, tiles: Math.floor(data.length / (bpp * 8)) };
+    return { p: e.addr, data, size, bpp, tiles: Math.floor(data.length / (bpp * 8)), raw: false, empty: false };
   };
 
   const palette = (bpp: number): Uint32Array => {
@@ -72,22 +68,29 @@ export function openGfxEditor(app: App): void {
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(off, 0, 0, W * Z, H * Z);
     clear(info);
+    const fmt = h('select', null, h('option', { value: '0', selected: !importRaw }, 'LZ2-komprimiert (Originalformat)'), h('option', { value: '1', selected: importRaw }, '4bpp unkomprimiert (ExGFX, direkt per DMA)'));
+    fmt.addEventListener('change', () => (importRaw = fmt.value === '1'));
     info.append(
-      h('div', { class: 'prop-title' }, `GFX${hex(cur, 2)}`),
-      h('div', { class: 'prop' }, h('label', null, 'Adresse'), h('span', { class: 'mono' }, `$${hex(g.p, 6)}`)),
-      h('div', { class: 'prop' }, h('label', null, 'Größe'), h('span', null, `${g.data.length} Bytes entpackt, ${g.size} gepackt, ${g.tiles} Tiles`)),
-      h('div', { class: 'prop' }, h('label', null, 'Format'), select([[2, '2bpp'], [3, '3bpp'], [4, '4bpp']], g.bpp, (v) => { bppOverride = v; draw(); })),
+      h('div', { class: 'prop-title' }, `${cur < VANILLA_GFX ? 'GFX' : 'ExGFX'}${hex(cur, 2)}${g.empty ? ' (leer)' : ''}`),
+      h('div', { class: 'prop' }, h('label', null, 'Adresse'), h('span', { class: 'mono' }, g.empty ? '–' : `$${hex(g.p, 6)}`)),
+      h('div', { class: 'prop' }, h('label', null, 'Größe'), h('span', null, g.raw ? `${g.data.length} Bytes, unkomprimiert 4bpp` : `${g.data.length} Bytes entpackt, ${g.size} gepackt, ${g.tiles} Tiles`)),
+      g.raw ? h('div', { class: 'prop' }, h('label', null, 'Format'), h('span', null, '4bpp roh')) :
+        h('div', { class: 'prop' }, h('label', null, 'Format'), select([[2, '2bpp'], [3, '3bpp'], [4, '4bpp']], g.bpp, (v) => { bppOverride = v; draw(); })),
+      h('div', { class: 'prop' }, h('label', null, 'Import-Format'), fmt),
       h('div', { class: 'prop' }, h('label', null, 'Anzeige-Palette'), select(Array.from({ length: 16 }, (_, k) => [k, `Zeile ${hex(k, 1)}`] as [number, string]), palRow, (v) => { palRow = v; draw(); })),
-      h('p', { class: 'hint' }, 'Export/Import als PNG (128 Pixel breit, 16 Tiles pro Zeile). Beim Import werden Farben auf die gewählte Palettenzeile abgebildet; transparente Pixel = Farbe 0. Die Datei wird neu LZ2-komprimiert und in freien ROM-Speicher geschrieben.'),
+      h('p', { class: 'hint' }, 'Export/Import als PNG (128 Pixel breit, 16 Tiles pro Zeile). Beim Import werden Farben auf die gewählte Palettenzeile abgebildet; transparente Pixel = Farbe 0. Einheitliches Format: "4bpp unkomprimiert" gilt für alle FG/BG/Sprite-Slots und nutzt 16 Farben statt 8. ExGFX werden einem Level über den Header ("Grafik-Bypass") zugewiesen.'),
     );
     return { g, off };
   };
 
   const buildList = () => {
     clear(list);
-    for (let i = 0; i < GFX_COUNT; i++) {
-      list.appendChild(h('div', { class: `level-item${i === cur ? ' current' : ''}`, onclick: () => { cur = i; bppOverride = null; buildList(); draw(); } }, `GFX${hex(i, 2)}`));
+    const n = hasEditorPatch(app.rom) ? 0x100 : VANILLA_GFX;
+    for (let i = 0; i < n; i++) {
+      const e = gfxEntry(app.rom, i);
+      list.appendChild(h('div', { class: `level-item${i === cur ? ' current' : ''}${e ? '' : ' unused'}`, onclick: () => { cur = i; bppOverride = null; importRaw = i >= VANILLA_GFX; buildList(); draw(); } }, `${i < VANILLA_GFX ? 'GFX' : 'ExGFX'}${hex(i, 2)}${e?.raw ? ' ·4' : ''}`));
     }
+    if (!hasEditorPatch(app.rom)) list.appendChild(h('button', { style: 'margin:4px', onclick: () => { importRaw = true; cur = 0x80; void importPng(); } }, '+ ExGFX'));
   };
 
   const exportPng = () => {
@@ -99,9 +102,10 @@ export function openGfxEditor(app: App): void {
     const f = await pickFile('.png,image/png');
     if (!f) return;
     const bmp = await createImageBitmap(f);
-    const g = load(cur);
+    const g0 = load(cur);
+    const g = importRaw ? { ...g0, bpp: 4 } : g0;
     if (bmp.width !== 128) { toast('Bild muss 128 Pixel breit sein', 'error'); return; }
-    const tiles = Math.floor(bmp.height / 8) * 16;
+    const tiles = importRaw ? 128 : Math.floor(bmp.height / 8) * 16;
     const c = document.createElement('canvas');
     c.width = bmp.width; c.height = bmp.height;
     const ctx = c.getContext('2d')!;
@@ -123,19 +127,21 @@ export function openGfxEditor(app: App): void {
     const tile = new Uint8Array(64);
     for (let t = 0; t < tiles; t++) {
       const bx = (t & 15) * 8, by = (t >> 4) * 8;
-      for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) tile[y * 8 + x] = nearest(px[(by + y) * 128 + bx + x]);
+      for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) tile[y * 8 + x] = by + y < bmp.height ? nearest(px[(by + y) * 128 + bx + x]) : 0;
       encodeTile(tile, 0, g.bpp, out, t * g.bpp * 8);
     }
-    const comp = lz2Compress(out);
-    app.rom.freeAt(g.p);
-    const addr = app.rom.allocWrite(comp);
-    setGfxPointer(app, cur, addr);
+    const payload = importRaw ? out : lz2Compress(out);
+    if (!g0.empty) app.rom.freeAt(g0.p);
+    const addr = app.rom.allocWrite(payload);
+    setGfxEntry(app.rom, cur, addr, importRaw);
+    const comp = payload;
     app.emu.syncRom();
     app.refresh();
     app.palettesChanged();
     app.persist();
     draw();
-    toast(`GFX${hex(cur, 2)} importiert: ${out.length} Bytes → ${comp.length} Bytes @ $${hex(addr, 6)}`);
+    buildList();
+    toast(`GFX${hex(cur, 2)} importiert: ${out.length} Bytes → ${comp.length} Bytes @ $${hex(addr, 6)}${importRaw ? ' (unkomprimiert)' : ''}`);
   };
 
   buildList();
