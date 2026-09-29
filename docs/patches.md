@@ -23,6 +23,18 @@ Da der Editor Levels durch Emulation des Spiels lädt, sieht man die Wirkung ein
 für geänderte Level-Lade-Routinen, Level-`init`/`load`-Code aus UberASM, Paletten usw. Im Testmodus (▶)
 läuft der gesamte Code.
 
+## Was „Hinzufügen“ erkennt
+
+Viele Downloads auf SMWCentral sind keine eigenständigen Patches, sondern Ressourcen für andere Werkzeuge.
+*Patches* → *Hinzufügen …* erkennt das am Code und führt jeweils weiter:
+
+| Erkannt an | Art | Was passiert |
+|---|---|---|
+| `init:`/`main:`/…-Labels ohne `org` | UberASM-Ressource | Abfrage, wo der Code läuft (ein Level, alle Level, Game Mode, Overworld-Karte), dann Aufnahme ins UberASM-Projekt |
+| beginnt mit `db $42`/`db $37` | Custom Block (GPS) | Abfrage von Map16-Tile, „acts like“ (aus der Beschreibung übernommen, z. B. „Act like 130“) und Grafik |
+| `print "INIT ",pc` | Custom Sprite (PIXI) | Hinweis: noch nicht unterstützt |
+| alles andere | Patch | wie unten beschrieben |
+
 ## Patches anwenden
 
 1. *Patches* → *Patch hinzufügen …* und eine `.asm`- oder `.zip`-Datei wählen. Aus einem Archiv wird ein
