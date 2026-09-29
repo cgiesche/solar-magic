@@ -18,7 +18,7 @@ export class LevelView {
   canvas: HTMLCanvasElement;
   ctx: CanvasRenderingContext2D;
   levelCanvas: HTMLCanvasElement;
-  hover: { tx: number; ty: number } | null = null;
+  hover: { tx: number; ty: number; px: number; py: number; top: number } | null = null;
   drag: Drag | null = null;
   status: HTMLDivElement;
   pendingFrame = 0;
@@ -187,9 +187,15 @@ export class LevelView {
     // hover
     if (this.hover && !this.drag) {
       const { tx, ty } = this.hover;
-      if (app.mode === 'l1' || app.mode === 'l2') {
-        const o = app.objectAt(tx, ty);
-        if (o && !app.selection.has(o.uid)) this.outlineObject(ctx, o, 'rgba(255,255,255,0.7)', lw);
+      const hits = app.hitsAt(this.hover.px, this.hover.py);
+      const hit = hits.find((h) => h.mode === app.mode && app.selection.has(h.item.uid)) ?? hits[0];
+      if (hit && !app.selection.has(hit.item.uid)) {
+        if (hit.mode === 'spr') {
+          const b = app.spriteBox(hit.item as LevelSprite);
+          ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+          ctx.lineWidth = 2 * lw;
+          ctx.strokeRect(b.x0, b.y0, b.x1 - b.x0, b.y1 - b.y0);
+        } else this.outlineObject(ctx, hit.item as LevelObject, 'rgba(255,255,255,0.7)', lw);
       }
       ctx.strokeStyle = 'rgba(255,255,0,0.9)';
       ctx.lineWidth = lw;
@@ -304,16 +310,24 @@ export class LevelView {
         }
       }
     }
-    let hit: LevelObject | LevelSprite | null = null;
-    if (app.mode === 'spr') hit = app.spriteAt(tx, ty);
-    else hit = app.objectAt(tx, ty);
-    if (hit) {
-      if (e.ctrlKey) {
-        if (app.selection.has(hit.uid)) app.selection.delete(hit.uid); else app.selection.add(hit.uid);
+    const hits = app.hitsAt(px, py);
+    if (e.ctrlKey) {
+      // multi-select stays within the current layer
+      const own = hits.find((h) => h.mode === app.mode);
+      if (own) {
+        const uid = own.item.uid;
+        if (app.selection.has(uid)) app.selection.delete(uid); else app.selection.add(uid);
         app.emit('change');
         return;
       }
-      if (!app.selection.has(hit.uid)) app.selection = new Set([hit.uid]);
+    }
+    // plain click: an already selected item keeps priority (so selections can be dragged), else the topmost.
+    // Alt+click: the next item below the selected one (wrapping around)
+    const selIdx = hits.findIndex((h) => h.mode === app.mode && app.selection.has(h.item.uid));
+    const hit = e.altKey ? hits[(selIdx + 1) % hits.length] : hits[Math.max(0, selIdx)];
+    if (hit && !e.ctrlKey) {
+      if (hit.mode !== app.mode) app.setMode(hit.mode, [hit.item.uid]);
+      else if (!app.selection.has(hit.item.uid)) app.selection = new Set([hit.item.uid]);
       app.emit('change');
       const items = app.mode === 'spr' ? app.selectedSprites() : app.selectedObjects();
       app.checkpoint();
@@ -331,8 +345,11 @@ export class LevelView {
     const { tx, ty, px, py } = this.tileFromEvent(e);
     const inside = e.target === this.scroller || e.target === this.canvas;
     if (inside || this.drag) {
-      if (!this.hover || this.hover.tx !== tx || this.hover.ty !== ty) {
-        this.hover = { tx, ty };
+      // sprite bodies are pixel-sized, so also repaint when the item under the cursor changes
+      const top = app.hitsAt(px, py)[0]?.item.uid ?? -1;
+      const moved = !this.hover || this.hover.tx !== tx || this.hover.ty !== ty || this.hover.top !== top;
+      this.hover = { tx, ty, px, py, top };
+      if (moved) {
         this.updateStatus(tx, ty);
         this.requestPaint();
       }
@@ -390,7 +407,11 @@ export class LevelView {
       const x0 = Math.floor(Math.min(d.x0, d.x1) / 16), x1 = Math.floor(Math.max(d.x0, d.x1) / 16);
       const y0 = Math.floor(Math.min(d.y0, d.y1) / 16), y1 = Math.floor(Math.max(d.y0, d.y1) / 16);
       if (app.mode === 'spr') {
-        for (const s of app.level.sprites) if (s.x >= x0 && s.x <= x1 && s.y >= y0 && s.y <= y1) app.selection.add(s.uid);
+        const bx0 = Math.min(d.x0, d.x1), bx1 = Math.max(d.x0, d.x1), by0 = Math.min(d.y0, d.y1), by1 = Math.max(d.y0, d.y1);
+        for (const s of app.level.sprites) {
+          const b = app.spriteBox(s);
+          if (b.x0 <= bx1 && b.x1 > bx0 && b.y0 <= by1 && b.y1 > by0) app.selection.add(s.uid);
+        }
       } else if (Math.abs(d.x1 - d.x0) > 3 || Math.abs(d.y1 - d.y0) > 3) {
         for (const o of app.currentObjects()) {
           const b = app.objectBounds(o);
@@ -420,12 +441,11 @@ export class LevelView {
       const t = app.render.wram[a] | (app.render.wram[a + 0x10000] << 8);
       txt += `  Map16 ${hex3(t)}`;
     }
-    if (app.mode === 'spr') {
-      const s = app.spriteAt(tx, ty);
-      if (s) txt += `  · Sprite ${hex2(s.num)} ${spriteName(s.num)}`;
-    } else {
-      const o = app.objectAt(tx, ty);
-      if (o) txt += `  · Objekt ${o.num ? hex2(o.num) : 'Ext ' + hex2(o.ext)} ${objectName(o.num, o.ext)}${o.num ? ' Größe ' + hex2(o.size) : ''}`;
+    const hits = app.hitsAt(this.hover?.px ?? tx * 16, this.hover?.py ?? ty * 16);
+    for (const { mode, item } of hits) {
+      const tag = hits.length > 1 ? (mode === 'spr' ? '' : mode === 'l1' ? ' [L1]' : ' [L2]') : '';
+      if (mode === 'spr') { const s = item as LevelSprite; txt += `  · Sprite ${hex2(s.num)} ${spriteName(s.num)}`; }
+      else { const o = item as LevelObject; txt += `  · Objekt${tag} ${o.num ? hex2(o.num) : 'Ext ' + hex2(o.ext)} ${objectName(o.num, o.ext)}${o.num ? ' Größe ' + hex2(o.size) : ''}`; }
     }
     this.status.textContent = txt;
   }

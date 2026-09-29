@@ -185,18 +185,21 @@ export class App {
     return layer2 ? 0x8000 | idx : idx;
   }
 
-  objectAt(tx: number, ty: number): LevelObject | null {
-    const l2 = this.mode === 'l2';
+  // grab area = every tile the object wrote (same as its outline), topmost first
+  objectAt(tx: number, ty: number, l2 = this.mode === 'l2'): LevelObject | null {
     const g = l2 ? this.images.geom2 : this.images.geom1;
-    const objs = this.currentObjects();
-    if (!g) return null;
+    const objs = l2 ? this.level.layer2Objects : this.level.objects;
+    if (!g || !objs) return null;
     const a = g.addr(tx, ty);
     if (a >= 0) {
-      const k = this.render.owner[a - MAP_BASE];
+      const off = a - MAP_BASE;
+      const k = this.render.owner[off];
       if (k >= 0 && ((k & 0x8000) !== 0) === l2) {
         const o = objs[k & 0x7fff];
         if (o) return o;
       }
+      // tiles later overwritten by another object still belong to this one
+      for (let i = objs.length - 1; i >= 0; i--) if (this.render.touched.get(this.objectKey(l2, i))?.has(off)) return objs[i];
     }
     // fall back to object origins (objects that produce no visible tiles)
     for (let i = objs.length - 1; i >= 0; i--) if (objs[i].x === tx && objs[i].y === ty) return objs[i];
@@ -225,10 +228,37 @@ export class App {
     return { x0, y0, x1, y1 };
   }
 
-  spriteAt(tx: number, ty: number): LevelSprite | null {
+  // sprite pixel box: its 16x16 tile united with the bounds of its captured image
+  spriteBox(s: LevelSprite): { x0: number; y0: number; x1: number; y1: number } {
+    const x = s.x * 16, y = s.y * 16;
+    const img = this.spriteThumbs?.get(s.num);
+    if (!img) return { x0: x, y0: y, x1: x + 16, y1: y + 16 };
+    const ix = x + Number(img.dataset.ox), iy = y + Number(img.dataset.oy);
+    return { x0: Math.min(x, ix), y0: Math.min(y, iy), x1: Math.max(x + 16, ix + img.width), y1: Math.max(y + 16, iy + img.height) };
+  }
+
+  spriteAt(px: number, py: number): LevelSprite | null {
     const sp = this.level.sprites;
+    const tx = Math.floor(px / 16), ty = Math.floor(py / 16);
     for (let i = sp.length - 1; i >= 0; i--) if (sp[i].x === tx && sp[i].y === ty) return sp[i];
+    for (let i = sp.length - 1; i >= 0; i--) {
+      const b = this.spriteBox(sp[i]);
+      if (px >= b.x0 && px < b.x1 && py >= b.y0 && py < b.y1) return sp[i];
+    }
     return null;
+  }
+
+  // everything under a pixel across visible layers, top-down: sprites, L1, L2
+  hitsAt(px: number, py: number): { mode: EditMode; item: LevelObject | LevelSprite }[] {
+    const tx = Math.floor(px / 16), ty = Math.floor(py / 16);
+    const out: { mode: EditMode; item: LevelObject | LevelSprite }[] = [];
+    const s = this.show.sprites ? this.spriteAt(px, py) : null;
+    if (s) out.push({ mode: 'spr', item: s });
+    const o1 = this.show.layer1 ? this.objectAt(tx, ty, false) : null;
+    if (o1) out.push({ mode: 'l1', item: o1 });
+    const o2 = this.show.layer2 && this.level.layer2Objects ? this.objectAt(tx, ty, true) : null;
+    if (o2) out.push({ mode: 'l2', item: o2 });
+    return out;
   }
 
   selectedObjects(): LevelObject[] {
@@ -271,13 +301,13 @@ export class App {
     this.changed();
   }
 
-  setMode(m: EditMode): void {
+  setMode(m: EditMode, selection: Iterable<number> = []): void {
     if (m === 'l2' && !this.level.layer2Objects) {
       toast('Dieses Level hat keine Layer-2-Objekte (Layer 2 ist Hintergrund).');
       return;
     }
     this.mode = m;
-    this.selection.clear();
+    this.selection = new Set(selection);
     this.emit('mode');
     this.emit('change');
   }
