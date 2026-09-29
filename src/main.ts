@@ -1,0 +1,203 @@
+import './style.css';
+import { Rom } from './core/rom.ts';
+import { App, type EditMode } from './ui/app.ts';
+import { h, clear, toast, downloadBytes, pickFile, modal } from './ui/dom.ts';
+import { kvGet, kvSet } from './ui/storage.ts';
+import { LevelView } from './ui/levelview.ts';
+import { LevelList, Palette, Properties } from './ui/panels.ts';
+import { openHeaderDialog } from './ui/headerdialog.ts';
+import { hex } from './core/names.ts';
+
+const root = document.getElementById('app')!;
+
+function welcome(): void {
+  clear(root);
+  const drop = h('div', { class: 'welcome' },
+    h('h1', null, 'SMW Level Editor'),
+    h('p', null, 'Super-Mario-World-ROM (US, .smc/.sfc, mit oder ohne Header) öffnen oder hierher ziehen.'),
+    h('button', { class: 'primary big', onclick: async () => { const f = await pickFile('.smc,.sfc,.bin'); if (f) openFile(f); } }, 'ROM öffnen …'),
+    h('p', { class: 'hint' }, 'Die ROM bleibt lokal im Browser (IndexedDB). Nichts wird hochgeladen.'),
+  );
+  root.appendChild(drop);
+}
+
+async function openFile(f: File): Promise<void> {
+  const data = new Uint8Array(await f.arrayBuffer());
+  startWith(new Rom(data), f.name);
+  kvSet('rom', { name: f.name, data: new Rom(data).data, header: new Rom(data).smcHeader }).catch(() => {});
+}
+
+function startWith(rom: Rom, name: string): void {
+  if (!rom.title().startsWith('SUPER MARIOWORLD')) {
+    toast(`Unerwarteter ROM-Titel "${rom.title()}" – versuche es trotzdem.`, 'error');
+  }
+  let app: App;
+  try {
+    app = new App(rom, name);
+  } catch (e) {
+    toast(`Emulator-Start fehlgeschlagen: ${e}`, 'error');
+    return;
+  }
+  (window as unknown as { app: App }).app = app;
+  buildUi(app);
+  app.openLevel(0x105);
+}
+
+function buildUi(app: App): void {
+  clear(root);
+  const status = h('div', { class: 'statusbar' });
+  const view = new LevelView(app, status);
+  const levels = new LevelList(app);
+  const palette = new Palette(app);
+  const props = new Properties(app);
+
+  const modeBtn = (m: EditMode, label: string, key: string) => h('button', { class: 'mode', 'data-mode': m, title: `${label} (${key})`, onclick: () => app.setMode(m) }, label);
+  const modes = h('div', { class: 'btn-group' },
+    modeBtn('l1', 'Layer 1', '1'), modeBtn('l2', 'Layer 2', '2'), modeBtn('spr', 'Sprites', '3'), modeBtn('exit', 'Exits', '4'));
+  const toggle = (k: keyof App['show'], label: string) => {
+    const cb = h('input', { type: 'checkbox', checked: app.show[k] });
+    cb.addEventListener('change', () => {
+      app.show[k] = cb.checked;
+      if (k === 'layer1' || k === 'layer2') app.recomposite(); else view.paint();
+    });
+    return h('label', { class: 'toggle' }, cb, label);
+  };
+  const levelTitle = h('span', { class: 'level-title' });
+  const zoomLabel = h('span', { class: 'zoom' });
+  const toolbar = h('div', { class: 'toolbar' },
+    h('span', { class: 'brand' }, 'SMW Editor'),
+    h('button', { onclick: async () => { const f = await pickFile('.smc,.sfc,.bin'); if (f) openFile(f); }, title: 'Andere ROM öffnen' }, 'Öffnen'),
+    h('button', { onclick: () => exportRom(app), title: 'ROM herunterladen' }, 'ROM exportieren'),
+    h('span', { class: 'sep' }),
+    levelTitle,
+    h('button', { class: 'primary', onclick: () => app.saveLevel(), title: 'Level in ROM schreiben (Strg+S)' }, 'Level speichern'),
+    h('button', { onclick: () => openHeaderDialog(app), title: 'Level-Header (H)' }, 'Header …'),
+    h('button', { onclick: () => app.undo(), title: 'Rückgängig (Strg+Z)' }, '↶'),
+    h('button', { onclick: () => app.redo(), title: 'Wiederholen (Strg+Y)' }, '↷'),
+    h('span', { class: 'sep' }),
+    modes,
+    h('span', { class: 'sep' }),
+    toggle('layer1', 'L1'), toggle('layer2', 'L2/BG'), toggle('sprites', 'Sprites'), toggle('exits', 'Exits'), toggle('screens', 'Screens'), toggle('grid', 'Raster'),
+    h('span', { class: 'sep' }),
+    h('button', { onclick: () => view.setZoom(app.zoom / 2) }, '−'), zoomLabel, h('button', { onclick: () => view.setZoom(app.zoom * 2) }, '+'),
+    h('span', { class: 'spacer' }),
+    h('button', { onclick: () => showHelp(), title: 'Tastenkürzel' }, '?'),
+  );
+  const updateToolbar = () => {
+    for (const b of modes.querySelectorAll('button')) b.classList.toggle('active', b.dataset.mode === app.mode);
+    const btnL2 = modes.querySelector('[data-mode="l2"]') as HTMLButtonElement;
+    btnL2.disabled = !app.level?.layer2Objects;
+    if (app.level) levelTitle.textContent = `Level ${hex(app.level.number, 3)}${app.dirty ? ' *' : ''}`;
+    zoomLabel.textContent = `${Math.round(app.zoom * 100)}%`;
+  };
+  app.on('mode', updateToolbar);
+  app.on('change', updateToolbar);
+  app.on('level', updateToolbar);
+  app.on('zoom', updateToolbar);
+  app.on('level-header', () => palette.invalidate());
+
+  root.append(h('div', { class: 'layout' },
+    toolbar,
+    h('div', { class: 'left' }, levels.root),
+    h('div', { class: 'center' }, view.root, status),
+    h('div', { class: 'right' }, palette.root, props.root),
+  ));
+
+  window.onkeydown = (e: KeyboardEvent) => {
+    const t = e.target as HTMLElement;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
+    if (document.querySelector('.modal-back')) return;
+    const k = e.key;
+    const ctrl = e.ctrlKey || e.metaKey;
+    if (ctrl && k.toLowerCase() === 's') { e.preventDefault(); app.saveLevel(); return; }
+    if (ctrl && k.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) app.redo(); else app.undo(); return; }
+    if (ctrl && k.toLowerCase() === 'y') { e.preventDefault(); app.redo(); return; }
+    if (ctrl && k.toLowerCase() === 'c') { app.copy(); return; }
+    if (ctrl && k.toLowerCase() === 'v') { const hv = view.hover; if (hv) app.paste(hv.tx, hv.ty); return; }
+    if (ctrl && k.toLowerCase() === 'd') { e.preventDefault(); app.copy(); const s = app.mode === 'spr' ? app.selectedSprites() : app.selectedObjects(); if (s[0]) app.paste(s[0].x + 1, s[0].y + 1); return; }
+    if (ctrl && k.toLowerCase() === 'a') { e.preventDefault(); const items = app.mode === 'spr' ? app.level.sprites : app.currentObjects(); app.selection = new Set(items.map((o) => o.uid)); app.emit('change'); return; }
+    if (k === 'Delete' || k === 'Backspace') { app.deleteSelection(); return; }
+    if (k === 'Escape') { app.selection.clear(); app.emit('change'); return; }
+    if (k === '1') app.setMode('l1');
+    else if (k === '2') app.setMode('l2');
+    else if (k === '3') app.setMode('spr');
+    else if (k === '4') app.setMode('exit');
+    else if (k === 'h' || k === 'H') openHeaderDialog(app);
+    else if (k === 'ArrowLeft' || k === 'ArrowRight' || k === 'ArrowUp' || k === 'ArrowDown') {
+      if (!app.selection.size) return;
+      e.preventDefault();
+      const dx = k === 'ArrowLeft' ? -1 : k === 'ArrowRight' ? 1 : 0, dy = k === 'ArrowUp' ? -1 : k === 'ArrowDown' ? 1 : 0;
+      app.moveSelection(dx, dy);
+    } else if (k === '+' || k === '=') { if (e.shiftKey && k === '+') app.resizeSelection(0, 1); else app.resizeSelection(1, 0); }
+    else if (k === '-' || k === '_') { if (e.shiftKey) app.resizeSelection(0, -1); else app.resizeSelection(-1, 0); }
+    else if (k === '*') app.resizeSelection(0, 1);
+    else if (k === '/') app.resizeSelection(0, -1);
+    else if (k === 'PageUp') app.reorderSelection('front');
+    else if (k === 'PageDown') app.reorderSelection('back');
+    else if (k === 'g' || k === 'G') { app.show.grid = !app.show.grid; view.paint(); }
+  };
+  window.onbeforeunload = (e) => { if (app.dirty) { e.preventDefault(); } };
+  levels.build();
+}
+
+function exportRom(app: App): void {
+  if (app.dirty) app.saveLevel(true);
+  const withHeader = app.rom.smcHeader !== null;
+  const out = app.rom.output(withHeader);
+  const base = app.romName.replace(/\.(smc|sfc|bin)$/i, '');
+  downloadBytes(`${base}.${withHeader ? 'smc' : 'sfc'}`, out);
+  app.persist();
+}
+
+function showHelp(): void {
+  const rows: [string, string][] = [
+    ['Klick', 'Objekt/Sprite auswählen (Strg: zur Auswahl hinzufügen)'],
+    ['Ziehen', 'Auswahl verschieben / Rahmen aufziehen'],
+    ['Griff unten rechts', 'Objektgröße ändern'],
+    ['Rechtsklick / Shift+Klick', 'Palettenelement einfügen'],
+    ['Pfeiltasten', 'Auswahl um 1 Tile verschieben'],
+    ['+ / −', 'Breite ändern (Shift bzw. * und / : Höhe)'],
+    ['Entf', 'Auswahl löschen'],
+    ['Strg+C / Strg+V / Strg+D', 'Kopieren / Einfügen an Maus / Duplizieren'],
+    ['Bild↑ / Bild↓', 'Nach vorne / hinten (Zeichenreihenfolge)'],
+    ['1 / 2 / 3 / 4', 'Modus Layer 1 / Layer 2 / Sprites / Exits'],
+    ['H', 'Level-Header'],
+    ['G', 'Raster ein/aus'],
+    ['Strg+Mausrad', 'Zoom'],
+    ['Strg+S', 'Level in ROM speichern'],
+    ['Strg+Z / Strg+Y', 'Rückgängig / Wiederholen'],
+  ];
+  modal('Tastenkürzel', h('table', { class: 'help' }, rows.map(([a, b]) => h('tr', null, h('td', null, h('kbd', null, a)), h('td', null, b)))), [{ label: 'OK', primary: true }]);
+}
+
+// drag & drop
+window.addEventListener('dragover', (e) => e.preventDefault());
+window.addEventListener('drop', (e) => {
+  e.preventDefault();
+  const f = e.dataTransfer?.files?.[0];
+  if (f) openFile(f);
+});
+
+(async () => {
+  const q = new URLSearchParams(location.search).get('rom');
+  if (q) {
+    const res = await fetch(q);
+    if (res.ok) {
+      const data = new Uint8Array(await res.arrayBuffer());
+      startWith(new Rom(data), q.split('/').pop() ?? 'rom.smc');
+      return;
+    }
+  }
+  try {
+    const saved = await kvGet<{ name: string; data: Uint8Array; header: Uint8Array | null }>('rom');
+    if (saved?.data) {
+      let full = saved.data;
+      if (saved.header) { full = new Uint8Array(saved.header.length + saved.data.length); full.set(saved.header); full.set(saved.data, saved.header.length); }
+      startWith(new Rom(full), saved.name);
+      return;
+    }
+  } catch (e) {
+    console.warn(e);
+  }
+  welcome();
+})();

@@ -1,0 +1,238 @@
+// Sidebar panels: level list, palette (objects / sprites), properties.
+
+import type { App } from './app.ts';
+import { h, clear, hexInput } from './dom.ts';
+import { objectName, spriteName, hex2, hex3 } from '../core/names.ts';
+import { renderObjectThumbs, objKey, type ObjSpec } from './thumbs.ts';
+import { newUid } from '../core/level.ts';
+
+// ---------------- level list ----------------
+export class LevelList {
+  app: App;
+  root: HTMLDivElement;
+  list: HTMLDivElement;
+  filter: HTMLInputElement;
+  onlyUsed: HTMLInputElement;
+  constructor(app: App) {
+    this.app = app;
+    this.filter = h('input', { placeholder: 'Level (hex) …', class: 'filter', spellcheck: false });
+    this.onlyUsed = h('input', { type: 'checkbox', checked: true });
+    this.list = h('div', { class: 'level-list' });
+    this.root = h('div', { class: 'panel levels' },
+      h('div', { class: 'panel-title' }, 'Levels'),
+      h('div', { class: 'row' }, this.filter),
+      h('label', { class: 'row small' }, this.onlyUsed, ' nur benutzte'),
+      this.list);
+    this.filter.addEventListener('input', () => this.build());
+    this.filter.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        const n = parseInt(this.filter.value, 16);
+        if (n >= 0 && n < 0x200) app.openLevel(n);
+      }
+    });
+    this.onlyUsed.addEventListener('change', () => this.build());
+    app.on('level', () => this.build());
+  }
+  build(): void {
+    const used = this.app.usedLevels();
+    const f = this.filter.value.trim().toLowerCase();
+    clear(this.list);
+    for (let i = 0; i < 0x200; i++) {
+      if (this.onlyUsed.checked && !used.has(i)) continue;
+      const label = hex3(i);
+      if (f && !label.toLowerCase().includes(f)) continue;
+      const cur = this.app.level?.number === i;
+      const el = h('div', { class: `level-item${cur ? ' current' : ''}${used.has(i) ? '' : ' unused'}`, onclick: () => this.app.openLevel(i) }, label);
+      this.list.appendChild(el);
+      if (cur) setTimeout(() => el.scrollIntoView({ block: 'nearest' }), 0);
+    }
+  }
+}
+
+// ---------------- palette ----------------
+export class Palette {
+  app: App;
+  root: HTMLDivElement;
+  body: HTMLDivElement;
+  tab: 'obj' | 'ext' | 'spr' = 'obj';
+  thumbs = new Map<string, HTMLCanvasElement>();
+  thumbsFor = '';
+  tabs: HTMLDivElement;
+  search: HTMLInputElement;
+
+  constructor(app: App) {
+    this.app = app;
+    this.body = h('div', { class: 'palette-body' });
+    this.search = h('input', { class: 'filter', placeholder: 'Suchen …', spellcheck: false });
+    this.search.addEventListener('input', () => this.build());
+    this.tabs = h('div', { class: 'tabs' });
+    this.root = h('div', { class: 'panel palette' }, h('div', { class: 'panel-title' }, 'Einfügen', h('span', { class: 'hint' }, 'Rechtsklick/Shift+Klick platziert')), this.tabs, h('div', { class: 'row' }, this.search), this.body);
+    app.on('level', () => { this.ensureThumbs(); this.build(); });
+    app.on('mode', () => {
+      if (app.mode === 'spr') this.tab = 'spr';
+      else if (this.tab === 'spr') this.tab = 'obj';
+      this.build();
+    });
+  }
+
+  specs(): ObjSpec[] {
+    const s: ObjSpec[] = [];
+    for (let n = 1; n < 0x40; n++) s.push({ num: n, ext: 0, size: 0x11 });
+    for (let e = 0x10; e < 0x100; e++) s.push({ num: 0, ext: e, size: 0 });
+    return s;
+  }
+
+  ensureThumbs(): void {
+    const h0 = this.app.level.header;
+    const key = `${h0.tileset}-${h0.fgPalette}-${h0.bgPalette}-${h0.spriteGfx}-${this.app.level.number}`;
+    const tsKey = `${h0.tileset}-${h0.fgPalette}-${h0.bgPalette}`;
+    if (this.thumbsFor === tsKey) return;
+    this.thumbsFor = tsKey;
+    void key;
+    try {
+      this.thumbs = renderObjectThumbs(this.app, this.specs());
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  invalidate(): void {
+    this.thumbsFor = '';
+    this.ensureThumbs();
+    this.build();
+  }
+
+  build(): void {
+    const app = this.app;
+    clear(this.tabs);
+    const tabDefs: [typeof this.tab, string][] = [['obj', 'Objekte'], ['ext', 'Erweitert'], ['spr', 'Sprites']];
+    for (const [t, l] of tabDefs) this.tabs.appendChild(h('button', { class: this.tab === t ? 'active' : '', onclick: () => { this.tab = t; this.build(); } }, l));
+    clear(this.body);
+    const f = this.search.value.trim().toLowerCase();
+    const cur = app.paletteItem;
+    if (this.tab === 'spr') {
+      for (let n = 0; n < 0xe7; n++) {
+        const name = spriteName(n);
+        if (f && !(`${hex2(n)} ${name}`.toLowerCase().includes(f))) continue;
+        const sel = cur?.kind === 'spr' && cur.num === n;
+        const img = app.spriteThumbs?.get(n);
+        this.body.appendChild(h('div', {
+          class: `pal-row${sel ? ' selected' : ''}`,
+          onclick: () => { app.paletteItem = { kind: 'spr', num: n, extra: 0 }; if (app.mode !== 'spr') app.setMode('spr'); this.build(); },
+        }, h('span', { class: 'pal-thumb-s' }, img ? cloneCanvas(img) : ''), h('span', { class: 'num' }, hex2(n)), name));
+      }
+      return;
+    }
+    const grid = h('div', { class: 'pal-grid' });
+    for (const s of this.specs()) {
+      if ((this.tab === 'obj') !== (s.num !== 0)) continue;
+      const name = objectName(s.num, s.ext);
+      const label = s.num ? hex2(s.num) : hex2(s.ext);
+      if (f && !(`${label} ${name}`.toLowerCase().includes(f))) continue;
+      const th = this.thumbs.get(objKey(s));
+      if (!th && this.tab === 'ext') continue; // invalid ext objects produce nothing
+      const sel = cur?.kind === 'obj' && cur.num === s.num && (s.num !== 0 || cur.ext === s.ext);
+      grid.appendChild(h('div', {
+        class: `pal-cell${sel ? ' selected' : ''}`, title: `${label}: ${name}`,
+        onclick: () => {
+          app.paletteItem = { kind: 'obj', num: s.num, ext: s.ext, size: s.size };
+          if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1');
+          this.build();
+        },
+      }, h('div', { class: 'pal-img' }, th ? cloneCanvas(th) : h('span', { class: 'none' }, '–')), h('div', { class: 'pal-label' }, label)));
+    }
+    this.body.appendChild(grid);
+  }
+}
+
+export function cloneCanvas(c: HTMLCanvasElement): HTMLCanvasElement {
+  const n = document.createElement('canvas');
+  n.width = c.width; n.height = c.height;
+  n.getContext('2d')!.drawImage(c, 0, 0);
+  return n;
+}
+
+// ---------------- properties ----------------
+export class Properties {
+  app: App;
+  root: HTMLDivElement;
+  body: HTMLDivElement;
+  constructor(app: App) {
+    this.app = app;
+    this.body = h('div', { class: 'props-body' });
+    this.root = h('div', { class: 'panel props' }, h('div', { class: 'panel-title' }, 'Eigenschaften'), this.body);
+    app.on('change', () => this.build());
+    app.on('level', () => this.build());
+  }
+
+  field(label: string, input: HTMLElement): HTMLElement {
+    return h('div', { class: 'prop' }, h('label', null, label), input);
+  }
+
+  build(): void {
+    const app = this.app;
+    clear(this.body);
+    if (!app.level) return;
+    if (app.mode === 'exit') return this.buildExit();
+    if (app.mode === 'spr') {
+      const sel = app.selectedSprites();
+      if (!sel.length) { this.body.appendChild(h('div', { class: 'hint' }, `${app.level.sprites.length} Sprites. Klicken zum Auswählen, Ziehen zum Verschieben.`)); return; }
+      if (sel.length > 1) { this.body.appendChild(h('div', null, `${sel.length} Sprites ausgewählt`)); return; }
+      const s = sel[0];
+      const upd = (f: () => void) => { app.checkpoint(); f(); app.changed(false); };
+      this.body.append(
+        h('div', { class: 'prop-title' }, `Sprite ${hex2(s.num)}: ${spriteName(s.num)}`),
+        this.field('Nummer', hexInput(s.num, 2, (v) => upd(() => (s.num = v)))),
+        this.field('X', hexInput(s.x, 3, (v) => upd(() => (s.x = v)), app.levelWidthTiles() - 1)),
+        this.field('Y', hexInput(s.y, 3, (v) => upd(() => (s.y = v)), app.levelHeightTiles() - 1)),
+        this.field('Extra-Bits', hexInput(s.extra, 1, (v) => upd(() => (s.extra = v)), 3)),
+      );
+      return;
+    }
+    const sel = app.selectedObjects();
+    if (!sel.length) {
+      this.body.appendChild(h('div', { class: 'hint' }, `${app.currentObjects().length} Objekte auf ${app.mode === 'l2' ? 'Layer 2' : 'Layer 1'}. Klicken zum Auswählen, Ziehen zum Verschieben, Griff unten rechts zum Skalieren.`));
+      return;
+    }
+    if (sel.length > 1) { this.body.appendChild(h('div', null, `${sel.length} Objekte ausgewählt`)); return; }
+    const o = sel[0];
+    const upd = (f: () => void) => { app.checkpoint(); f(); app.changed(); };
+    const idx = app.currentObjects().indexOf(o);
+    this.body.append(
+      h('div', { class: 'prop-title' }, `${o.num ? 'Objekt ' + hex2(o.num) : 'Erw. Objekt ' + hex2(o.ext)}: ${objectName(o.num, o.ext)}`),
+      h('div', { class: 'hint' }, `Index ${idx} von ${app.currentObjects().length}`),
+      this.field('Objekt', hexInput(o.num, 2, (v) => upd(() => (o.num = v)), 0x3f)),
+      o.num === 0 ? this.field('Erw. Nr.', hexInput(o.ext, 2, (v) => upd(() => (o.ext = v)), 0xff)) : '',
+      this.field('X', hexInput(o.x, 3, (v) => upd(() => (o.x = v)), app.levelWidthTiles() - 1)),
+      this.field('Y', hexInput(o.y, 3, (v) => upd(() => (o.y = v)), app.levelHeightTiles() - 1)),
+      o.num !== 0 ? this.field('Größe (Byte)', hexInput(o.size, 2, (v) => upd(() => (o.size = v)))) : '',
+      o.num !== 0 ? h('div', { class: 'hint' }, `Breite-Nibble ${o.size & 15}, Höhe-Nibble ${o.size >> 4}. Tasten: +/- Breite, Shift +/- Höhe`) : '',
+    );
+  }
+
+  buildExit(): void {
+    const app = this.app;
+    const lv = app.level;
+    const scr = app.exitScreen;
+    let ex = lv.exits.find((e) => e.screen === scr);
+    this.body.appendChild(h('div', { class: 'prop-title' }, `Screen ${hex2(scr)}`));
+    if (!ex) {
+      this.body.appendChild(h('button', {
+        onclick: () => { app.checkpoint(); lv.exits.push({ uid: newUid(), screen: scr, dest: 0, secondary: false, flags: 0 }); app.changed(); },
+      }, 'Screen-Exit anlegen'));
+    } else {
+      const e = ex;
+      const upd = (f: () => void) => { app.checkpoint(); f(); app.changed(false); };
+      const sec = h('input', { type: 'checkbox', checked: e.secondary });
+      sec.addEventListener('change', () => upd(() => (e.secondary = sec.checked)));
+      this.body.append(
+        this.field('Ziel', hexInput(e.dest, 3, (v) => upd(() => (e.dest = v)), 0x1ff)),
+        this.field('Sekundär', sec),
+        h('div', { class: 'hint' }, e.secondary ? 'Ziel = Nummer des sekundären Eingangs' : 'Ziel = Levelnummer (Haupteingang)'),
+        h('button', { onclick: () => { app.checkpoint(); lv.exits = lv.exits.filter((x) => x !== e); app.changed(); } }, 'Exit löschen'),
+      );
+      ex = e;
+    }
+    this.body.appendChild(h('div', { class: 'hint' }, 'Screen per Klick in der Levelansicht wählen. Exits gelten für Türen, Rohre usw. auf diesem Screen.'));
+  }
+}
