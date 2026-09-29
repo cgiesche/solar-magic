@@ -7,7 +7,8 @@ import {
   isL1Vertical, cloneLevel, newUid, hasLayer2Objects, hasObjects, L1_PTRS, SEC_HDR,
   readSecondaryEntrance, writeSecondaryEntrance, entrancePos, nearestEntrance, encodeSecondaryHeader,
 } from '../core/level.ts';
-import { renderLevel, type LevelImages, composite } from '../core/render.ts';
+import { renderLevel, type LevelImages, composite, map16Source } from '../core/render.ts';
+import { EXT_FIRST, map16Ext, installMap16Ext } from '../core/map16ext.ts';
 import { saveLevel } from '../core/save.ts';
 import { captureSprites } from '../core/spritegfx.ts';
 import { DM16_EXT, hasEditorPatch, installEditorPatch } from '../core/patches.ts';
@@ -457,6 +458,12 @@ export class App {
           this.persist();
           toast('Editor-Patch installiert (für Direct-Map16-Objekte).');
         } catch (e) { toast(String(e), 'error'); this.undoStack.pop(); return; }
+      }
+      if (p.num === 0 && p.ext === DM16_EXT && (p.tile ?? 0) >= EXT_FIRST && !map16Ext(this.rom)) {
+        installMap16Ext(this.rom, map16Source(this.rom, this.render).fg(0x025));
+        this.emu.syncRom();
+        this.persist();
+        toast('Map16-Erweiterung installiert (Tiles 200–FFF).');
       }
       const o: LevelObject = { uid: newUid(), num: p.num, ext: p.ext, x: tx, y: ty, size: p.size };
       if (p.tile !== undefined) o.tile = p.tile;

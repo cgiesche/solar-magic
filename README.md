@@ -61,6 +61,9 @@ Beim Anzeigen eines Levels führt er die **originalen Laderoutinen** des ROMs au
 
 ### Grafik, Paletten, Map16
 * **Map16-Editor** (M): FG- und BG-Tiles des aktuellen Tilesets, pro Viertel 8x8-Tile, Palette, Flip, Priorität.
+* **Erweiterte Map16-Seiten 2–F** (Tiles 200–FFF, für alle Tilesets) und **„Acts like“ pro Tile** – auch für
+  Vanilla-Tiles (z. B. Boden, der sich wie Luft verhält). „Grafik + Verhalten kopieren“ legt neue Tiles schnell an;
+  platziert werden sie per Direct-Map16-Objekt (Palette → Map16 → Seitenwahl).
 * **Paletten-Editor** (P): Farben direkt an ihrer ROM-Quelle bearbeiten, `.pal` Import/Export,
   optional **eigene Palette pro Level** (alle 256 Farben).
 * **Grafiken:** GFX00–31 und ExGFX 32–FF anzeigen, als PNG exportieren/importieren.
@@ -96,6 +99,9 @@ assembliert und ändert nur wenige, verifizierte Stellen:
 | Ext.-Objekt `$02` | „Direct Map16“: platziert ein beliebiges Map16-Tile als Rechteck (6 Byte) |
 | `$00922F` („SMWP“) | eigene 256-Farben-Palette pro Level |
 | `$058060` („SMWB“) | BG-Tilemap-Daten pro Level in beliebiger Bank (bearbeitete Hintergründe) |
+| `$00F545`, `$029328` („SMWX“) | Map16 „acts like“-Tabelle für Tiles 000–FFF (Mario, Sprites, Feuerbälle, Blöcke von unten) |
+| `$058A66`, `$058B46`, `$058C34`, `$058D2B` | Tilemap-Aufbau: Tiles ab 200 aus der erweiterten Map16-Grafiktabelle |
+| `$00C096`, `$00C0E7` | Tile ersetzen setzt die Seite auf 0/1 statt nur Bit 0 (für Tiles auf Seite ≥ 2) |
 | `$05B20F` („SMWM“) | Nachrichtentexte aus freiem Speicher lesen (nur wenn sie nicht mehr an Ort und Stelle passen) |
 
 Die Tests prüfen, dass alle Vanilla-Level mit installiertem Patch identisch geladen werden.
@@ -108,7 +114,6 @@ Die Tests prüfen, dass alle Vanilla-Level mit installiertem Patch identisch gel
 * **Overworld:** Events, Overworld-Sprites und Pfad-Einstellungen sind nicht editierbar (Ansicht „alle Events“
   ist nur lesend). Translevel-Nummern folgen wie in Vanilla der Scan-Reihenfolge – neue Level-Tiles
   verschieben die Nummern nachfolgender Level.
-* **Map16:** „Acts like“ (Tile-Verhalten) ist in Vanilla-SMW fest an die Tilenummer gebunden und nicht editierbar.
 * Titelbild, Abspann, Custom-Blocks/-Sprites (ASM) sind nicht enthalten.
 * Getestet mit der US-ROM (`Super Mario World (U) [!]`, MD5 `cdd3c8c37322978ca8669b34bc89c804`). Mit
   Lunar Magic bearbeitete ROMs nutzen andere Hooks/Formate und werden nicht gezielt unterstützt.

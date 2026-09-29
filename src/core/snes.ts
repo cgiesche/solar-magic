@@ -14,6 +14,7 @@ export interface MemHook {
   // called for every read of a ROM byte (after mapping): pc offset in rom
   onRomRead?(offset: number): void;
   onWramWrite?(addr: number, value: number): void;
+  onWramRead?(addr: number): void; // analysis tools only
   onOverlayRead?(offset: number): void;
 }
 
@@ -105,6 +106,7 @@ export class Snes implements Bus {
     if (bank === 0x7e || bank === 0x7f) {
       v = this.wram[addr - 0x7e0000];
       if (this.taintOn) this.tpush(this.taint[addr - 0x7e0000], v);
+      if (this.hook?.onWramRead) this.hook.onWramRead(addr - 0x7e0000);
     } else {
       const b = bank & 0x7f;
       if (off >= 0x8000) {

@@ -7,6 +7,7 @@ import { renderObjectThumbs, objKey, type ObjSpec } from './thumbs.ts';
 import { newUid } from '../core/level.ts';
 import { levelName } from '../core/overworld.ts';
 import { DM16_EXT } from '../core/patches.ts';
+import { EXT_TILES, map16Ext } from '../core/map16ext.ts';
 import { TileCache, map16Source, drawMap16 } from '../core/render.ts';
 
 // ---------------- level list ----------------
@@ -88,11 +89,16 @@ export class Palette {
     });
   }
 
+  m16Base = 0; // first tile of the shown sheet (pages 0-1, 2-3, …)
   buildMap16(): void {
     const app = this.app;
-    const sheet = renderMap16Sheet(app);
+    const sheet = renderMap16Sheet(app, false, this.m16Base);
     const cur = app.paletteItem;
-    const selTile = cur?.kind === 'obj' && cur.num === 0 && cur.ext === DM16_EXT ? cur.tile ?? -1 : -1;
+    const curTile = cur?.kind === 'obj' && cur.num === 0 && cur.ext === DM16_EXT ? cur.tile ?? -1 : -1;
+    const selTile = curTile >= 0 && (curTile & ~0x1ff) === this.m16Base ? curTile & 0x1ff : -1;
+    const pages = h('select', null, Array.from({ length: EXT_TILES / 512 }, (_, i) => h('option', { value: String(i * 512), selected: i * 512 === this.m16Base },
+      i === 0 ? 'Seiten 0–1' : `Seiten ${(2 * i).toString(16).toUpperCase()}–${(2 * i + 1).toString(16).toUpperCase()}${map16Ext(app.rom) ? '' : ' (leer)'}`)));
+    pages.addEventListener('change', () => { this.m16Base = Number(pages.value); this.build(); });
     const c = h('canvas', { width: 256 * 1.2, height: 512 * 1.2, class: 'm16-pick' });
     const ctx = c.getContext('2d')!;
     ctx.imageSmoothingEnabled = false;
@@ -101,15 +107,15 @@ export class Palette {
       ctx.strokeStyle = '#4cc2ff'; ctx.lineWidth = 2;
       ctx.strokeRect((selTile & 15) * 16 * 1.2, (selTile >> 4) * 16 * 1.2, 16 * 1.2, 16 * 1.2);
     }
-    const label = h('div', { class: 'hint' }, selTile >= 0 ? `Tile ${hex3(selTile)} gewählt – Rechtsklick in der Levelansicht platziert es (Direct-Map16-Objekt).` : 'Tile anklicken, dann per Rechtsklick im Level platzieren. Erfordert den Editor-Patch (wird automatisch installiert).');
+    const label = h('div', { class: 'hint' }, curTile >= 0 ? `Tile ${hex3(curTile)} gewählt – Rechtsklick in der Levelansicht platziert es (Direct-Map16-Objekt).` : 'Tile anklicken, dann per Rechtsklick im Level platzieren. Erfordert den Editor-Patch (wird automatisch installiert). Tiles ab 200 legt der Map16-Editor (M) an.');
     c.addEventListener('mousedown', (e) => {
       const rc = c.getBoundingClientRect();
       const x = Math.floor((e.clientX - rc.left) / (rc.width / 16)), y = Math.floor((e.clientY - rc.top) / (rc.height / 32));
-      app.paletteItem = { kind: 'obj', num: 0, ext: DM16_EXT, size: 0, tile: y * 16 + x };
+      app.paletteItem = { kind: 'obj', num: 0, ext: DM16_EXT, size: 0, tile: this.m16Base + y * 16 + x };
       if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1');
       this.build();
     });
-    this.body.append(label, c);
+    this.body.append(h('div', { class: 'row' }, pages), label, c);
   }
 
   // BG Map16 tiles 000-1FF for painting the level background (BG mode)
@@ -204,7 +210,7 @@ export class Palette {
   }
 }
 
-export function renderMap16Sheet(app: App, bg = false): HTMLCanvasElement {
+export function renderMap16Sheet(app: App, bg = false, base = 0): HTMLCanvasElement {
   const r = app.render;
   const tc = new TileCache(r.vram, r.cgram, (bg ? r.ppuRegs[0x0b] >> 4 : r.ppuRegs[0x0b] & 0x0f) << 13);
   const src = map16Source(app.rom, r);
@@ -214,7 +220,7 @@ export function renderMap16Sheet(app: App, bg = false): HTMLCanvasElement {
   const img = ctx.createImageData(256, 512);
   const px = new Uint32Array(img.data.buffer);
   px.fill(0xff181818);
-  for (let t = 0; t < 512; t++) drawMap16(px, 256, 512, tc, bg ? src.bg(t) : src.fg(t), (t & 15) * 16, (t >> 4) * 16);
+  for (let t = 0; t < 512; t++) drawMap16(px, 256, 512, tc, bg ? src.bg(t) : src.fg(base + t), (t & 15) * 16, (t >> 4) * 16);
   ctx.putImageData(img, 0, 0);
   return c;
 }
@@ -281,7 +287,7 @@ export class Properties {
       h('div', { class: 'hint' }, `Index ${idx} von ${app.currentObjects().length}`),
       this.field('Objekt', hexInput(o.num, 2, (v) => upd(() => (o.num = v)), 0x3f)),
       o.num === 0 ? this.field('Erw. Nr.', hexInput(o.ext, 2, (v) => upd(() => (o.ext = v)), 0xff)) : '',
-      o.num === 0 && o.ext === DM16_EXT ? this.field('Map16-Tile', hexInput(o.tile ?? 0, 3, (v) => upd(() => (o.tile = v)), 0x1ff)) : '',
+      o.num === 0 && o.ext === DM16_EXT ? this.field('Map16-Tile', hexInput(o.tile ?? 0, 3, (v) => upd(() => (o.tile = v)), EXT_TILES - 1)) : '',
       o.num === 0 && o.ext === DM16_EXT ? this.field('Größe (hw)', hexInput(o.size, 2, (v) => upd(() => (o.size = v)))) : '',
       this.field('X', hexInput(o.x, 3, (v) => upd(() => (o.x = v)), app.levelWidthTiles() - 1)),
       this.field('Y', hexInput(o.y, 3, (v) => upd(() => (o.y = v)), app.levelHeightTiles() - 1)),
