@@ -16,7 +16,8 @@ export function objKey(s: { num: number; ext: number; size: number }): string {
   return v < 0 ? `s${s.num}` : `s${s.num}.${v}`;
 }
 
-export function renderObjectThumbs(app: App, specs: ObjSpec[]): Map<string, HTMLCanvasElement> {
+// tilesOut receives the distinct Map16 tiles each object produced
+export function renderObjectThumbs(app: App, specs: ObjSpec[], tilesOut?: Map<string, number[]>): Map<string, HTMLCanvasElement> {
   const out = new Map<string, HTMLCanvasElement>();
   const PER = 32;
   const rom = app.rom;
@@ -67,6 +68,11 @@ export function renderObjectThumbs(app: App, specs: ObjSpec[]): Map<string, HTML
       ctx.putImageData(id, 0, 0);
       c.dataset.tiles = String(tiles.length);
       out.set(objKey(s), c);
+      if (tilesOut) {
+        const m16 = new Set<number>();
+        for (const off of set!) m16.add(r.wram[MAP_BASE + off] | (r.wram[0x10000 + MAP_BASE + off] << 8));
+        tilesOut.set(objKey(s), [...m16].sort((a, b) => a - b));
+      }
     });
   }
   return out;

@@ -3,6 +3,7 @@
 import { App, type Marker } from './app.ts';
 import { h, attachPanZoom, downloadBytes } from './dom.ts';
 import { spriteName, objectName, hex2, hex3, resizeObjectSize } from '../core/names.ts';
+import { probeAt, type PosProbe } from '../core/blockprobe.ts';
 import { type LevelObject, type LevelSprite, serializeLayer1, serializeLayer2, serializeSprites } from '../core/level.ts';
 import { composite } from '../core/render.ts';
 
@@ -56,6 +57,7 @@ export class LevelView {
     app.on('anim-frame', () => { this.updateLevelImage(false); });
     app.on('change', () => { this.paint(); this.updateStats(); });
     app.on('sprites', () => this.requestPaint());
+    app.on('blockinfo', () => { if (this.hover && !this.drag) this.updateStatus(this.hover.tx, this.hover.ty); if (app.show.items) this.requestPaint(); });
   }
 
   setZoom(z: number, anchor?: { ax: number; ay: number }): void {
@@ -185,8 +187,10 @@ export class LevelView {
       ctx.fillText(st.label, m.x + 5, m.y + 27.5);
       if (m.kind === 'sec') ctx.fillText(hex3(m.index), m.x + 15, m.y + 27.5);
     }
+    if (app.show.items) this.paintItems(ctx);
     // sprites
     if (app.show.sprites) this.paintSprites(ctx, z);
+    if (app.show.sprites && app.show.items) this.paintSpriteItems(ctx);
     // selection
     if (app.mode === 'l1' || app.mode === 'l2') {
       const sel = app.selectedObjects();
@@ -252,6 +256,47 @@ export class LevelView {
       ctx.fillStyle = '#4cc2ff';
       ctx.fillRect(b.x1 * 16 + 11, b.y1 * 16 + 11, 5, 5);
     }
+  }
+
+  // translucent image of the item a block (visible part of layer 1) or sprite gives, drawn over it
+  paintItems(ctx: CanvasRenderingContext2D): void {
+    const app = this.app, g = app.images.geom1, w = app.render.wram, z = app.zoom;
+    if (!app.show.layer1) return;
+    const x0 = Math.max(0, Math.floor(this.scroller.scrollLeft / z / 16)), y0 = Math.max(0, Math.floor(this.scroller.scrollTop / z / 16));
+    const x1 = Math.min(g.width, x0 + Math.ceil(this.scroller.clientWidth / z / 16) + 1);
+    const y1 = Math.min(g.height, y0 + Math.ceil(this.scroller.clientHeight / z / 16) + 1);
+    ctx.globalAlpha = 0.65;
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+      const a = g.addr(x, y);
+      if (a < 0) continue;
+      const p = app.blockInfo(w[a] | (w[a + 0x10000] << 8));
+      if (!p || p.summary === null) continue;
+      this.drawItem(ctx, probeAt(p, x), x * 16, y * 16);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // the same for sprites that give items (flying ? blocks …), drawn over the sprite images
+  paintSpriteItems(ctx: CanvasRenderingContext2D): void {
+    const app = this.app;
+    ctx.globalAlpha = 0.65;
+    for (const s of app.level.sprites) {
+      const p = app.spriteInfo(s.num);
+      if (p?.summary) this.drawItem(ctx, probeAt(p, s.x), s.x * 16, s.y * 16);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // item of a probe result at pixel (x, y); a different item for big Mario at half size, upper right
+  drawItem(ctx: CanvasRenderingContext2D, r: PosProbe, x: number, y: number): void {
+    const thumbs = this.app.spriteThumbs;
+    const small = r.small.sprites[0], big = r.big.sprites[0];
+    const main = small ?? big;
+    const img = main !== undefined ? thumbs?.get(main) : undefined;
+    if (!img) return;
+    ctx.drawImage(img, x + Number(img.dataset.ox), y + Number(img.dataset.oy));
+    const alt = big !== undefined && big !== main ? thumbs?.get(big) : undefined;
+    if (alt) ctx.drawImage(alt, x + 8 + Number(alt.dataset.ox) / 2, y + Number(alt.dataset.oy) / 2, alt.width / 2, alt.height / 2);
   }
 
   paintSprites(ctx: CanvasRenderingContext2D, z: number): void {
@@ -484,6 +529,9 @@ export class LevelView {
     if (a >= 0) {
       const t = app.render.wram[a] | (app.render.wram[a + 0x10000] << 8);
       txt += `  Map16 ${hex3(t)}`;
+      const p = app.mode === 'bg' ? undefined : app.blockInfo(t); // result arrives via 'blockinfo'
+      const sum = p && probeAt(p, tx).summary;
+      if (sum) txt += ` (${sum})`;
     }
     if (app.mode === 'bg') {
       txt += `  BG-Tile ${hex3(app.bgAt(tx, ty))}  ·  Pinsel ${hex3(app.bgTile)} (Klick/Ziehen malt, Rechtsklick nimmt auf)`;
@@ -495,7 +543,12 @@ export class LevelView {
     const hits = app.hitsAt(this.hover?.px ?? tx * 16, this.hover?.py ?? ty * 16);
     for (const { mode, item } of hits) {
       const tag = hits.length > 1 ? (mode === 'spr' ? '' : mode === 'l1' ? ' [L1]' : ' [L2]') : '';
-      if (mode === 'spr') { const s = item as LevelSprite; txt += `  · Sprite ${hex2(s.num)} ${spriteName(s.num)}`; }
+      if (mode === 'spr') {
+        const s = item as LevelSprite;
+        const p = app.spriteInfo(s.num);
+        const sum = p && probeAt(p, s.x).summary;
+        txt += `  · Sprite ${hex2(s.num)} ${spriteName(s.num)}${sum ? ` (von unten: ${sum})` : ''}`;
+      }
       else { const o = item as LevelObject; txt += `  · Objekt${tag} ${o.num ? hex2(o.num) : 'Ext ' + hex2(o.ext)} ${objectName(o.num, o.ext)}${o.num ? ' Größe ' + hex2(o.size) : ''}`; }
     }
     this.status.textContent = txt;

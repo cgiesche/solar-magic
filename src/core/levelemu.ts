@@ -53,6 +53,7 @@ export class LevelEmulator {
   rom: Rom;
   snes: Snes;
   baseState: SnesState | null = null;
+  romGen = 0; // counts syncRom() calls: the ROM may have changed
   overlay = new Uint8Array(0x10000);
 
   constructor(rom: Rom) {
@@ -77,6 +78,7 @@ export class LevelEmulator {
   // ROM data array may be replaced (expansion); keep emulator in sync.
   syncRom(): void {
     this.snes.rom = this.rom.data;
+    this.romGen++;
   }
 
   load(level: number, ov: LevelOverride = {}): LevelRender {

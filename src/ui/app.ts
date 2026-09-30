@@ -16,6 +16,7 @@ import { kvSet } from './storage.ts';
 import { bgFromWram, bgIndex, encodeBg } from '../core/bg.ts';
 import { toast } from './dom.ts';
 import { resizeObjectSize } from '../core/names.ts';
+import { BlockProber, type BlockProbe, type SpriteProbe } from '../core/blockprobe.ts';
 
 export type EditMode = 'l1' | 'l2' | 'spr' | 'exit' | 'bg';
 export type PaletteItem =
@@ -23,6 +24,9 @@ export type PaletteItem =
   | { kind: 'spr'; num: number; extra: number };
 
 type Listener = () => void;
+
+const PROBE_SPRITE = 0x10000; // probe queue key flag: sprite number instead of Map16 tile
+const SPRITE_PROBE_END = 0xc9; // sprites from $C9 on are shooters, generators and run-once sprites
 
 // entrance markers: main entrance, midway point, secondary entrances leading into this level
 export interface Marker { kind: 'main' | 'midway' | 'sec'; index: number; x: number; y: number }
@@ -40,7 +44,7 @@ export class App {
   paletteItem: PaletteItem | null = null;
   bgTile = 0; // BG Map16 tile painted in BG mode
   zoom = 2;
-  show = { layer1: true, layer2: true, layer3: true, sprites: true, grid: false, screens: true, exits: true, ghost: true, anim: false };
+  show = { layer1: true, layer2: true, layer3: true, sprites: true, grid: false, screens: true, exits: true, ghost: true, anim: false, items: true };
   // view-only game state applied before the emulated level load
   switches = { palaces: false, onOff: false };
   dirty = false;
@@ -52,6 +56,13 @@ export class App {
   offsetToTile2 = new Int32Array(MAP_SIZE);
   listeners = new Map<string, Set<Listener>>();
   renderError: string | null = null;
+  // block behaviour probes (emulated hits), run in the background
+  prober: BlockProber | null = null;
+  proberGen = -1;
+  probeQueue: number[] = []; // Map16 tiles; sprites as PROBE_SPRITE | num
+  probeFailed = new Set<number>();
+  probeScheduled = false;
+  probeChannel: MessageChannel | null = null; // yields between probe slices (setTimeout is throttled in hidden tabs)
   exitScreen = 0;
   spriteThumbs: Map<number, HTMLCanvasElement> | null = null;
   secEntrances: number[] = []; // secondary entrance indices leading into the current level
@@ -324,6 +335,80 @@ export class App {
     if (set) for (const off of set) { const t = map[off]; if (t >= 0) out.push(t); }
     if (!out.length) out.push((o.y << 16) | o.x);
     return out;
+  }
+
+  // Map16 tile numbers an object left in the level (tiles overwritten by later objects excluded)
+  objectMap16(o: LevelObject): number[] {
+    const l2 = this.mode === 'l2';
+    const key = this.objectKey(l2, this.currentObjects().indexOf(o));
+    const set = this.render.touched.get(key);
+    const out = new Set<number>();
+    if (set) for (const off of set) {
+      if (this.render.owner[off] !== key) continue;
+      const a = MAP_BASE + off;
+      out.add(this.render.wram[a] | (this.render.wram[a + 0x10000] << 8));
+    }
+    return [...out].sort((a, b) => a - b);
+  }
+
+  // What a Map16 tile does when hit from below. Unknown tiles are probed in the background;
+  // 'blockinfo' is emitted once queued probes are done.
+  blockInfo(tile: number): BlockProbe | undefined {
+    const pr = this.blockProber();
+    const p = pr.cached(tile);
+    if (!p) this.queueProbe(tile);
+    return p;
+  }
+
+  // the same for a sprite hit from below (normal sprites only, not shooters/generators)
+  spriteInfo(num: number): SpriteProbe | undefined {
+    if (num >= SPRITE_PROBE_END) return undefined;
+    const pr = this.blockProber();
+    const p = pr.cachedSprite(num);
+    if (!p) this.queueProbe(PROBE_SPRITE | num);
+    return p;
+  }
+
+  private blockProber(): BlockProber {
+    if (!this.prober || this.prober.rom !== this.rom) {
+      this.prober = new BlockProber(this.rom, this.emu.baseState);
+      this.proberGen = this.emu.romGen;
+    }
+    if (this.proberGen !== this.emu.romGen) {
+      this.prober.reset();
+      this.probeFailed.clear();
+      this.proberGen = this.emu.romGen;
+    }
+    return this.prober;
+  }
+
+  private queueProbe(k: number): void {
+    if (this.probeFailed.has(k)) return;
+    if (!this.probeQueue.includes(k)) this.probeQueue.push(k);
+    this.scheduleProbes();
+  }
+
+  private scheduleProbes(): void {
+    if (this.probeScheduled) return;
+    this.probeScheduled = true;
+    if (!this.probeChannel) {
+      this.probeChannel = new MessageChannel();
+      this.probeChannel.port1.onmessage = () => this.runProbes();
+    }
+    this.probeChannel.port2.postMessage(0);
+  }
+
+  private runProbes(): void {
+    this.probeScheduled = false;
+    const t0 = performance.now();
+    while (this.probeQueue.length && performance.now() - t0 < 30) {
+      const t = this.probeQueue.shift()!;
+      try {
+        if (t & PROBE_SPRITE) this.prober?.probeSprite(t & 0xff); else this.prober?.probe(t);
+      } catch (e) { console.error(e); this.probeFailed.add(t); }
+    }
+    if (this.probeQueue.length) this.scheduleProbes();
+    else this.emit('blockinfo');
   }
 
   objectBounds(o: LevelObject): { x0: number; y0: number; x1: number; y1: number } {

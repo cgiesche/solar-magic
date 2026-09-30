@@ -99,6 +99,7 @@ function buildUi(app: App): void {
     h('span', { class: 'sep' }),
     toggle('layer1', 'L1'), toggle('layer2', 'L2/BG'), h('span', { title: 'Layer 3 (Flut, Layer-3-Bilder) – Vorschau, Scrollen angenähert' }, toggle('layer3', 'L3')), toggle('sprites', 'Sprites'), toggle('exits', 'Exits'), toggle('screens', 'Screens'), toggle('grid', 'Raster'),
     h('span', { title: 'Nicht bearbeitete Objektebene halbtransparent (nur Level mit Layer-2-Objekten)' }, toggle('ghost', 'Ghost')),
+    h('span', { title: 'Inhalt von Blöcken (per Emulation ermittelt) halbtransparent über den Blöcken' }, toggle('items', 'Items')),
     (() => {
       const cb = h('input', { type: 'checkbox', checked: app.show.anim });
       cb.addEventListener('change', () => { app.show.anim = cb.checked; app.refresh(); });

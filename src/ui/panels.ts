@@ -9,6 +9,30 @@ import { levelName } from '../core/overworld.ts';
 import { DM16_EXT } from '../core/patches.ts';
 import { EXT_TILES, map16Ext } from '../core/map16ext.ts';
 import { TileCache, map16Source, drawMap16 } from '../core/render.ts';
+import { probeText, spritesOf, probeAt } from '../core/blockprobe.ts';
+
+// behaviour of the given Map16 tiles when hit from below (only tiles with an effect);
+// undefined while probes are still pending
+export function blockSummary(app: App, tiles: number[], all = false): string[] | undefined {
+  const out: string[] = [];
+  let pending = false;
+  for (const t of tiles.slice(0, 16)) {
+    const p = app.blockInfo(t);
+    if (!p) { pending = true; continue; }
+    if (p.summary || all) out.push(tiles.length > 1 || all ? `${hex3(t)}: ${probeText(p)}` : p.summary!);
+  }
+  return pending ? undefined : out;
+}
+
+// sprites the given tiles spawn when hit (all X positions, small Mario first), from finished probes only
+export function blockSprites(app: App, tiles: number[]): number[] {
+  const out = new Set<number>();
+  for (const t of tiles.slice(0, 16)) {
+    const p = app.prober?.cached(t);
+    if (p) for (const q of p.pos) for (const n of spritesOf(q)) out.add(n);
+  }
+  return [...out];
+}
 
 // ---------------- level list ----------------
 function nameOf(app: App, i: number): string {
@@ -66,6 +90,7 @@ export class Palette {
   body: HTMLDivElement;
   tab: 'obj' | 'ext' | 'm16' | 'spr' = 'obj';
   thumbs = new Map<string, HTMLCanvasElement>();
+  thumbTiles = new Map<string, number[]>(); // Map16 tiles per object key
   thumbsFor = '';
   tabs: HTMLDivElement;
   search: HTMLInputElement;
@@ -79,8 +104,9 @@ export class Palette {
     this.root = h('div', { class: 'panel palette' }, h('div', { class: 'panel-title' }, 'Einfügen', h('span', { class: 'hint' }, 'Rechtsklick/Shift+Klick platziert')), this.tabs, h('div', { class: 'row' }, this.search), this.body);
     app.on('level', () => { this.ensureThumbs(); this.build(); });
     let t = 0;
-    app.on('sprites', () => { if (this.tab === 'spr' && !t) t = window.setTimeout(() => { t = 0; this.build(); }, 300); });
+    app.on('sprites', () => { if ((this.tab === 'spr' || this.tab === 'ext') && !t) t = window.setTimeout(() => { t = 0; this.build(); }, 300); });
     app.on('bgtile', () => { if (app.mode === 'bg') this.build(); });
+    app.on('blockinfo', () => { if (this.tab === 'ext' || this.tab === 'spr') this.build(); else if (this.tab === 'm16') this.m16Tip(); });
     app.on('render', () => { if (app.mode === 'bg') this.build(); });
     app.on('mode', () => {
       if (app.mode === 'spr') this.tab = 'spr';
@@ -90,6 +116,7 @@ export class Palette {
   }
 
   m16Base = 0; // first tile of the shown sheet (pages 0-1, 2-3, …)
+  m16Tip: () => void = () => {};
   buildMap16(): void {
     const app = this.app;
     const sheet = renderMap16Sheet(app, false, this.m16Base);
@@ -115,6 +142,19 @@ export class Palette {
       if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1');
       this.build();
     });
+    // tooltip: tile number and behaviour when hit from below
+    let hoverTile = -1;
+    const tip = () => {
+      const p = app.blockInfo(hoverTile);
+      c.title = `Tile ${hex3(hoverTile)}: ${p ? probeText(p) : 'Verhalten wird ermittelt …'}`;
+    };
+    c.addEventListener('mousemove', (e) => {
+      const rc = c.getBoundingClientRect();
+      const x = Math.floor((e.clientX - rc.left) / (rc.width / 16)), y = Math.floor((e.clientY - rc.top) / (rc.height / 32));
+      const t = this.m16Base + Math.min(31, y) * 16 + Math.min(15, x);
+      if (t !== hoverTile) { hoverTile = t; tip(); }
+    });
+    this.m16Tip = () => { if (hoverTile >= 0 && c.isConnected) tip(); };
     this.body.append(h('div', { class: 'row' }, pages), label, c);
   }
 
@@ -157,7 +197,8 @@ export class Palette {
     this.thumbsFor = tsKey;
     void key;
     try {
-      this.thumbs = renderObjectThumbs(this.app, this.specs());
+      this.thumbTiles = new Map();
+      this.thumbs = renderObjectThumbs(this.app, this.specs(), this.thumbTiles);
     } catch (e) {
       console.error(e);
     }
@@ -181,13 +222,17 @@ export class Palette {
     if (this.tab === 'spr') {
       for (let n = 0; n < 0xe7; n++) {
         const name = spriteName(n);
-        if (f && !(`${hex2(n)} ${name}`.toLowerCase().includes(f))) continue;
+        // what the sprite gives when hit from below (emulated, see blockprobe.ts)
+        const p = app.spriteInfo(n);
+        const info = p?.summary ?? '';
+        if (f && !(`${hex2(n)} ${name} ${info}`.toLowerCase().includes(f))) continue;
         const sel = cur?.kind === 'spr' && cur.num === n;
         const img = app.spriteThumbs?.get(n);
+        const items = p ? [...new Set(p.pos.flatMap(spritesOf))] : [];
         this.body.appendChild(h('div', {
-          class: `pal-row${sel ? ' selected' : ''}`,
+          class: `pal-row${sel ? ' selected' : ''}`, title: info ? `${hex2(n)}: ${name}\nVon unten: ${info}` : '',
           onclick: () => { app.paletteItem = { kind: 'spr', num: n, extra: 0 }; if (app.mode !== 'spr') app.setMode('spr'); this.build(); },
-        }, h('span', { class: 'pal-thumb-s' }, img ? cloneCanvas(img) : ''), h('span', { class: 'num' }, hex2(n)), name));
+        }, h('span', { class: 'pal-thumb-s' }, img ? cloneCanvas(img) : ''), h('span', { class: 'num' }, hex2(n)), name, itemBadge(app, items, 'pal-items-row')));
       }
       return;
     }
@@ -198,21 +243,38 @@ export class Palette {
       const vt = objectVariant(s.num, s.size);
       const name = objectName(s.num, s.ext) + (vt >= 0 ? ` – Typ ${vt.toString(16).toUpperCase()}` : '');
       const label = s.num ? hex2(s.num) + (vt >= 0 ? `.${vt.toString(16).toUpperCase()}` : '') : hex2(s.ext);
-      if (f && !(`${label} ${name}`.toLowerCase().includes(f))) continue;
+      // extended objects: Map16 tiles and what they do when hit (emulated, see blockprobe.ts)
+      let info = '';
+      let items: number[] = [];
+      if (this.tab === 'ext') {
+        const tiles = this.thumbTiles.get(objKey(s)) ?? [];
+        items = blockSprites(app, tiles);
+        const sum = tiles.length ? blockSummary(app, tiles) : [];
+        info = (tiles.length ? `\nMap16 ${tiles.slice(0, 8).map(hex3).join(' ')}${tiles.length > 8 ? ' …' : ''}` : '')
+          + (sum === undefined ? '\n(Verhalten wird ermittelt …)' : sum.map((x) => '\n' + x).join(''));
+      }
+      if (f && !(`${label} ${name} ${info}`.toLowerCase().includes(f))) continue;
       const th = this.thumbs.get(objKey(s));
       if (!th && this.tab === 'ext') continue; // invalid ext objects produce nothing
       const sel = cur?.kind === 'obj' && cur.num === s.num && (s.num !== 0 || cur.ext === s.ext) && objectVariant(cur.num, cur.size) === vt;
       grid.appendChild(h('div', {
-        class: `pal-cell${sel ? ' selected' : ''}`, title: `${label}: ${name}`,
+        class: `pal-cell${sel ? ' selected' : ''}`, title: `${label}: ${name}${info}`,
         onclick: () => {
           app.paletteItem = { kind: 'obj', num: s.num, ext: s.ext, size: s.size };
           if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1');
           this.build();
         },
-      }, h('div', { class: 'pal-img' }, th ? cloneCanvas(th) : h('span', { class: 'none' }, '–')), h('div', { class: 'pal-label' }, label)));
+      }, h('div', { class: 'pal-img' }, th ? cloneCanvas(th) : h('span', { class: 'none' }, '–'), itemBadge(app, items)), h('div', { class: 'pal-label' }, label)));
     }
     this.body.appendChild(grid);
   }
+}
+
+// small images of the sprites a block spawns, shown in the corner of a palette cell
+function itemBadge(app: App, items: number[], cls = 'pal-items'): HTMLElement | '' {
+  const imgs = items.slice(0, 4).map((n) => app.spriteThumbs?.get(n)).filter((c): c is HTMLCanvasElement => !!c);
+  if (!imgs.length) return '';
+  return h('div', { class: cls }, ...imgs.map(cloneCanvas));
 }
 
 export function renderMap16Sheet(app: App, bg = false, base = 0): HTMLCanvasElement {
@@ -248,7 +310,10 @@ export class Properties {
     this.root = h('div', { class: 'panel props' }, h('div', { class: 'panel-title' }, 'Eigenschaften'), this.body);
     app.on('change', () => this.build());
     app.on('level', () => this.build());
+    app.on('blockinfo', () => { if (this.probePending) this.build(); });
   }
+
+  probePending = false; // the shown object's block behaviour is still being probed
 
   field(label: string, input: HTMLElement): HTMLElement {
     return h('div', { class: 'prop' }, h('label', null, label), input);
@@ -257,6 +322,7 @@ export class Properties {
   build(): void {
     const app = this.app;
     clear(this.body);
+    this.probePending = false;
     if (!app.level) return;
     if (app.mode === 'exit') return this.buildExit();
     if (app.mode === 'bg') {
@@ -276,6 +342,14 @@ export class Properties {
         this.field('Y', hexInput(s.y, 3, (v) => upd(() => (s.y = v)), app.levelHeightTiles() - 1)),
         this.field('Extra-Bits', hexInput(s.extra, 1, (v) => upd(() => (s.extra = v)), 3)),
       );
+      // behaviour when hit from below, at this position and in general (emulated)
+      const p = app.spriteInfo(s.num);
+      this.probePending = !p && s.num < 0xc9;
+      if (p?.summary) {
+        const here = probeAt(p, s.x).summary;
+        this.body.append(h('div', { class: 'hint' }, `Von unten an dieser Stelle: ${here ?? 'nichts'}`,
+          p.summary !== here ? [h('br'), `Allgemein: ${p.summary}`] : ''));
+      } else if (this.probePending) this.body.append(h('div', { class: 'hint' }, 'Verhalten wird ermittelt …'));
       return;
     }
     const sel = app.selectedObjects();
@@ -303,6 +377,15 @@ export class Properties {
         ? `Unterobjekt: ${ov.nibble === 'lo' ? 'unteres Nibble = Typ, oberes = Höhe' : 'oberes Nibble = Typ, unteres = Breite'}. Skalieren ändert nur die ${ov.nibble === 'lo' ? 'Höhe' : 'Breite'}.`
         : `Breite-Nibble ${o.size & 15}, Höhe-Nibble ${o.size >> 4}. Tasten: +/− Breite, * und / Höhe, Alt+Pfeile`) : '',
     );
+    // Map16 tiles of the object and their behaviour when hit from below (emulated)
+    const tiles = app.objectMap16(o);
+    if (tiles.length) {
+      const sum = blockSummary(app, tiles, tiles.length === 1);
+      this.probePending = sum === undefined;
+      this.body.append(h('div', { class: 'hint' },
+        `Map16: ${tiles.slice(0, 12).map(hex3).join(' ')}${tiles.length > 12 ? ' …' : ''}`,
+        ...(sum === undefined ? [h('br'), 'Verhalten wird ermittelt …'] : sum.flatMap((x) => [h('br'), x]))));
+    }
   }
 
   buildExit(): void {
