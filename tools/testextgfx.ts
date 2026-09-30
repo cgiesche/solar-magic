@@ -63,5 +63,25 @@ check(tmBad === 0, `visible tilemaps unchanged (${tmBad} tiles differ)`);
 uninstallVramPatch(rom);
 check(!extGfxPatch(rom)!.active, 'removing the VRAM patch switches the slots off again');
 
+// another patch already hooked $00AA50 with JSL : RTS (Lunar Magic's ExGFX code does this; its routine
+// ends with the original copy loop): the slot code calls it first, switching off restores that hook
+const lm = new Rom(vanilla.data.slice());
+const foreign = lm.allocWrite(Uint8Array.from([
+  0xa2, 0x03, 0xb5, 0x04, 0x9d, 0x05, 0x01, 0xca, 0x10, 0xf8, // original loop
+  0xa9, 0x5a, 0x8f, 0xfe, 0xff, 0x7f, 0x6b, // LDA #$5A : STA.l $7FFFFE : RTL
+]));
+const fhook = Uint8Array.from([0x22, foreign & 0xff, (foreign >> 8) & 0xff, foreign >> 16, 0x60]);
+lm.writeBytes(EXT_GFX_HOOK, fhook);
+check(installVramPatch(lm).ok, 'VRAM patch on a ROM with a foreign hook at $00AA50');
+let err = '';
+try { setGfxEntry(lm, 0x80, lm.allocWrite(raw), true); setLevelExtGfx(lm, 0x105, [0x80, 0xff]); } catch (e) { err = (e as Error).message; }
+check(err === '' && extGfxPatch(lm)!.active, `slots installed behind the foreign hook ${err}`);
+const el = new LevelEmulator(lm); el.boot();
+const lr = el.load(0x105);
+let g3 = 0; for (let i = 0; i < 0x1000; i++) if (lr.vram[0x4000 + i] === raw[i]) g3++;
+check(lr.ok && g3 === 0x1000 && lr.wram[0x1fffe] === 0x5a, `BG2 file uploaded (${g3}/4096) and the foreign routine still runs`);
+check(disableUnsafeExtGfx(lm) === false && uninstallVramPatch(lm) !== undefined && [...fhook].every((b, i) => lm.r8(EXT_GFX_HOOK + i) === b), 'switching off restores the foreign hook');
+check(installVramPatch(lm).ok && extGfxPatch(lm)!.active && levelExtGfx(lm, 0x105)[0] === 0x80, 'and hooking in again keeps the table');
+
 console.log(bad ? `${bad} failures` : 'all ok');
 if (bad) process.exitCode = 1;
