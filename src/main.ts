@@ -56,6 +56,21 @@ function startWith(rom: Rom, name: string): void {
   app.openLevel(0x105);
 }
 
+// spinner pill for background analyses; shown after a short delay so quick jobs don't flicker,
+// ignores the mouse so the editor stays usable underneath
+function busyIndicator(app: App): HTMLElement {
+  const label = h('span');
+  const el = h('div', { class: 'busy' }, h('span', { class: 'busy-spin' }), label);
+  let timer = 0;
+  app.on('busy', () => {
+    label.textContent = [...app.busy.values()].join(' · ') + ' …';
+    el.title = label.textContent;
+    if (!app.busy.size) { clearTimeout(timer); timer = 0; el.classList.remove('show'); }
+    else if (!timer && !el.classList.contains('show')) timer = window.setTimeout(() => { timer = 0; if (app.busy.size) el.classList.add('show'); }, 200);
+  });
+  return el;
+}
+
 function buildUi(app: App): void {
   clear(root);
   const status = h('div', { class: 'statusbar' });
@@ -139,7 +154,7 @@ function buildUi(app: App): void {
   const left = h('div', { class: 'left' }, levels.root);
   const center = h('div', { class: 'center' }, view.root, status);
   const right = h('div', { class: 'right' }, palette.root, props.root);
-  const layout = h('div', { class: 'layout' }, toolbar, left, center, right);
+  const layout = h('div', { class: 'layout' }, toolbar, left, center, right, busyIndicator(app));
   root.append(layout);
   let ow: OverworldView | null = null;
   let owActive = false;

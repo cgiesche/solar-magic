@@ -90,6 +90,14 @@ export class App {
     this.listeners.get(ev)?.forEach((f) => f());
   }
 
+  // background jobs currently running (key -> label), shown by the busy indicator
+  busy = new Map<string, string>();
+  setBusy(key: string, label: string | null): void {
+    if (label === null ? !this.busy.delete(key) : this.busy.get(key) === label) return;
+    if (label !== null) this.busy.set(key, label);
+    this.emit('busy');
+  }
+
   // ------------- level loading / rendering -------------
   openLevel(n: number): void {
     if (this.level && this.dirty) this.saveLevel(true);
@@ -164,11 +172,12 @@ export class App {
     a.frames = [];
     a.phase = -1;
     a.base = this.compositeImg;
-    if (!a.snaps.length) { clearInterval(a.timer); a.timer = 0; return; }
+    if (!a.snaps.length) { clearInterval(a.timer); a.timer = 0; this.setBusy('anim', null); return; }
     const base = a.base, snaps = a.snaps, lv = this.level;
     let i = 0;
     const step = () => {
       if (gen !== a.gen) return;
+      this.setBusy('anim', `Animationen ${i + 1}/${snaps.length}`);
       const li = renderLevel(this.rom, { ...this.render, vram: snaps[i].vram, cgram: snaps[i].cgram }, lv.header.mode, lv.header.screens);
       const img = this.compose(li);
       const idx: number[] = [];
@@ -176,7 +185,8 @@ export class App {
       const ix = Uint32Array.from(idx);
       a.frames.push({ idx: ix, val: ix.map((k) => img[k]) });
       if (++i < snaps.length) setTimeout(step, 0);
-      else if (!a.timer) a.timer = window.setInterval(() => this.animTick(), 1000 / 7.5);
+      else this.setBusy('anim', null);
+      if (i === snaps.length && !a.timer) a.timer = window.setInterval(() => this.animTick(), 1000 / 7.5);
     };
     setTimeout(step, 0);
   }
@@ -272,6 +282,7 @@ export class App {
     let i = 0;
     const step = () => {
       if (this.spriteKey !== key) return;
+      this.setBusy('sprites', `Sprite-Grafiken ${Math.min(100, Math.round(i / all.length * 100))} %`);
       const chunk = all.slice(i, i + 12);
       i += 12;
       const res = captureSprites(this.emu, lvNum, header, sh, bg, chunk);
@@ -288,7 +299,9 @@ export class App {
       }
       this.emit('sprites');
       if (i < all.length) setTimeout(step, 0);
+      else this.setBusy('sprites', null);
     };
+    this.setBusy('sprites', 'Sprite-Grafiken');
     setTimeout(step, 50);
   }
 
@@ -400,6 +413,7 @@ export class App {
     kvGet<StoredObjKinds>(`objkinds-${ts}`).catch(() => undefined).then((st) => {
       const k = st && loadKinds(st);
       if (k && kindsStillValid(k, this.rom.data)) { this.setKinds(ts, k); return; }
+      this.setBusy('kinds', 'Objektarten');
       const emu = new LevelEmulator(this.rom);
       emu.baseState = this.emu.baseState;
       const lv = { ...this.level, header: { ...this.level.header, tileset: ts } };
@@ -431,6 +445,7 @@ export class App {
   private setKinds(ts: number, k: ObjKinds): void {
     this.kinds.set(ts, { k, gen: this.emu.romGen });
     this.kindJob = null;
+    this.setBusy('kinds', null);
     this.emit('objkinds');
   }
 
@@ -451,6 +466,7 @@ export class App {
   private queueProbe(k: number): void {
     if (this.probeFailed.has(k)) return;
     if (!this.probeQueue.includes(k)) this.probeQueue.push(k);
+    this.setBusy('probe', `Blockverhalten (${this.probeQueue.length})`);
     this.scheduleProbes();
   }
 
@@ -473,6 +489,7 @@ export class App {
         if (t & PROBE_SPRITE) this.prober?.probeSprite(t & 0xff); else this.prober?.probe(t);
       } catch (e) { console.error(e); this.probeFailed.add(t); }
     }
+    this.setBusy('probe', this.probeQueue.length ? `Blockverhalten (${this.probeQueue.length})` : null);
     if (this.probeQueue.length) this.scheduleProbes();
     else this.emit('blockinfo');
   }
