@@ -454,18 +454,8 @@ export function extGfxPatch(rom: Rom): { table: number; active: boolean } | null
 export function disableUnsafeExtGfx(rom: Rom): boolean {
   const p = extGfxPatch(rom);
   if (!p?.active || vramPatchInstalled(rom)) return false;
-  rom.writeBytes(EXT_GFX_HOOK, extGfxReplaced(rom, extGfxBlock(rom)));
+  rom.writeBytes(EXT_GFX_HOOK, Uint8Array.from(EXT_GFX_ORIG.slice(0, 5)));
   return true;
-}
-
-// the 5 bytes the hook replaced: the original code, or another patch's JSL (e.g. Lunar Magic's ExGFX
-// code at $0FF780), which the slot code then calls first - it ends with the original copy loop
-function extGfxReplaced(rom: Rom, base: number): Uint8Array {
-  if (rom.r8(base + 8) === 0x22) return Uint8Array.from([0x22, rom.r8(base + 9), rom.r8(base + 10), rom.r8(base + 11), 0x60]);
-  return Uint8Array.from(EXT_GFX_ORIG.slice(0, 5));
-}
-function foreignHook(rom: Rom): number {
-  return rom.r8(EXT_GFX_HOOK) === 0x22 && rom.r8(EXT_GFX_HOOK + 4) === 0x60 ? rom.r24(EXT_GFX_HOOK + 1) : -1;
 }
 
 export function installExtGfxPatch(rom: Rom): { table: number; active: boolean } {
@@ -474,31 +464,20 @@ export function installExtGfxPatch(rom: Rom): { table: number; active: boolean }
   if (ex?.active) return ex;
   if (ex) {
     // switched off earlier: the code block and its table are still there, just hook it in again
-    // (if the code at $00AA50 is still what it replaced; otherwise build it anew and keep the table)
-    const base = extGfxBlock(rom);
-    if (extGfxReplaced(rom, base).every((b, i) => rom.r8(EXT_GFX_HOOK + i) === b)) {
-      rom.writeBytes(EXT_GFX_HOOK, Uint8Array.from([0x22, (base + 8) & 0xff, ((base + 8) >> 8) & 0xff, (base + 8) >> 16, 0x60]));
-      return extGfxPatch(rom)!;
-    }
+    const base = extGfxBlock(rom) + 8;
+    rom.writeBytes(EXT_GFX_HOOK, Uint8Array.from([0x22, base & 0xff, (base >> 8) & 0xff, base >> 16, 0x60]));
+    return extGfxPatch(rom)!;
   }
   installEditorPatch(rom); // level number in $010B, ExGFX pointers
-  const oldBase = ex ? extGfxBlock(rom) : -1;
-  const chain = foreignHook(rom);
-  if (chain < 0 || chain === oldBase + 8) {
-    const orig = EXT_GFX_ORIG;
-    for (let i = 0; i < orig.length; i++) if (rom.r8(EXT_GFX_HOOK + i) !== orig[i]) throw new Error(`Unerwarteter Code bei $00AA50${ownerNote(rom, EXT_GFX_HOOK, 5)} – BG2/BG3-Grafik nicht möglich`);
-  }
+  const orig = EXT_GFX_ORIG;
+  for (let i = 0; i < orig.length; i++) if (rom.r8(EXT_GFX_HOOK + i) !== orig[i]) throw new Error(`Unerwarteter Code bei $00AA50${ownerNote(rom, EXT_GFX_HOOK, 5)} – BG2/BG3-Grafik nicht möglich`);
   const a = new Asm();
   a.b(...EXT_GFX_MAGIC); a.fill(4); // +4: table pointer
   a.label('Ext');
-  if (chain >= 0) {
-    a.b(0x22, chain & 0xff, (chain >> 8) & 0xff, chain >> 16); // JSL (the other patch's code, ends with the replaced loop)
-  } else {
-    a.b(0xa2, 0x03); // LDX #$03 (replaced: remember the uploaded files)
-    a.label('cp');
-    a.b(0xb5, 0x04, 0x9d, 0x05, 0x01, 0xca); // LDA $04,x : STA $0105,x : DEX
-    a.br(0x10, 'cp');
-  }
+  a.b(0xa2, 0x03); // LDX #$03 (replaced: remember the uploaded files)
+  a.label('cp');
+  a.b(0xb5, 0x04, 0x9d, 0x05, 0x01, 0xca); // LDA $04,x : STA $0105,x : DEX
+  a.br(0x10, 'cp');
   // only in levels (like the GFX bypass): skip game modes $0B-$0E (overworld)
   a.b(0xaf, 0x00, 0x01, 0x7e, 0xc9, 0x0b); a.br(0x90, 'lv'); // LDA.l $7E0100 : CMP #$0B : BCC
   a.b(0xc9, 0x0f); a.br(0x90, 'out'); // CMP #$0F : BCC out
@@ -526,11 +505,6 @@ export function installExtGfxPatch(rom: Rom): { table: number; active: boolean }
   const addr = rom.allocWrite(new Uint8Array(a.bytes.length));
   rom.writeBytes(addr, a.link(addr));
   rom.w24(addr + 4, a.addrOf('Tbl', addr));
-  if (ex) {
-    const old = ex.table;
-    for (let i = 0; i < 512 * 2; i++) rom.w8(a.addrOf('Tbl', addr) + i, rom.r8(old + i));
-    rom.freeAt(oldBase);
-  }
   const t = a.addrOf('Ext', addr);
   rom.writeBytes(EXT_GFX_HOOK, Uint8Array.from([0x22, t & 0xff, (t >> 8) & 0xff, t >> 16, 0x60]));
   return extGfxPatch(rom)!;
