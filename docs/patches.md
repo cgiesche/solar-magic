@@ -274,6 +274,7 @@ mit der jeweiligen Funktion nicht kompatibel.
 | `$058060` | BG-Tilemaps (SMWB) |
 | `$00AA50` | BG2/BG3-Grafik-Slots (SMWG) |
 | `$008A7F`, `$0087AD`, `$0085E3`, `$0580B0`, `$0580B4`, `$0580BF`, `$0580C3`, `$058730`, `$058770`, `$0587D4`, `$0587DB`, `$05880B`, `$058812` | VRAM-Patch (SMWV): Tilemaps verlegt; RAM `$7F0000–$7F3653` |
+| Ext.-Objekt-Tabelle `$0DA118` (Eintrag `$03`) | Strukturen (SMWS); im Original leer, kein Code-Hook |
 | `$05B20F` | Nachrichten in freiem Speicher (SMWM), nur wenn die Texte nicht mehr passen |
 | `$00F545`, `$029328`, `$058A66`, `$058B46`, `$058C34`, `$058D2B`, `$00C096`, `$00C0E7` | Map16-Erweiterung und Custom Blocks (SMWX) |
 | `$05808C`, `$00A5EE`, `$00A242`, `$00A295`, `$00A2EE` | UberASM: Level `load`/`init`/`main`/`end` |
@@ -308,4 +309,7 @@ rückgängig zu machen.
 * `src/core/patchpkg.ts`: `.zip`, `patch.json`, Defines.
 * `src/core/uberasm.ts`, `src/core/uberproject.ts`: UberASM-Generator und -Projekt.
 * `src/core/blocks.ts`, `src/core/map16ext.ts`: Custom Blocks.
-* Tests: `tools/testasar.ts`, `tools/testuberasm.ts`, `tools/testblocks.ts` (Teil von `npm test`).
+* `src/core/structs.ts`: Strukturen (erweitertes Objekt `$03`). Level-Daten: `00`-Objekt-Bytes wie bei jedem
+  erweiterten Objekt mit `$03`, dann 1 Byte Strukturnummer. Ohne SMWS gilt `$03` als gewöhnliches
+  3-Byte-Objekt, damit Patches, die `$03` selbst belegen, weiter funktionieren.
+* Tests: `tools/testasar.ts`, `tools/testuberasm.ts`, `tools/testblocks.ts`, `tools/teststructs.ts` (Teil von `npm test`).

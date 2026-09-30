@@ -43,6 +43,11 @@ Beim Anzeigen eines Levels führt er die **originalen Laderoutinen** des ROMs au
   Zeichenreihenfolge (Bild↑/↓), Undo/Redo.
 * Palette: Standardobjekte 01–3F, erweiterte Objekte, **Map16-Direktplatzierung** (beliebiges Tile, s. Patch),
   Sprites mit Namen und echter Grafik.
+* **Strukturen:** ausgewählte Objekte (z. B. ein Aufbau aus Direct-Map16-Blöcken) als Struktur speichern
+  (Palette → Strukturen → „Auswahl als Struktur“). Im Level ist sie dann ein einziges Objekt mit 4 Byte;
+  Zellen, die zu keinem ausgewählten Objekt gehören, sind durchsichtig. Wird eine Struktur geändert, gilt das
+  in allen Leveln. „Auflösen“ macht eine platzierte Struktur wieder zu einzelnen Direct-Map16-Objekten.
+  `.smwlevel`-Dateien nehmen die benutzten Strukturen mit.
 * Header-Dialog (H): Primärer Header (Modus, Screens, Tileset, Paletten, Musik, Zeit, Sprite-GFX, …),
   sekundärer Header (Eingang, Midway, Layer-2/3-Einstellungen), Sprite-Header, BG-Tilemap-Auswahl,
   **Grafik-Bypass (ExGFX pro Level)**.
@@ -99,6 +104,7 @@ assembliert und ändert nur wenige, verifizierte Stellen:
 | `$00AA6B` | pro Datei wählbares Format: LZ2/3bpp (Original) oder 4bpp unkomprimiert per DMA |
 | `$00A9E1`, `$00AA22` | Grafik-Bypass: 8 GFX-Slots pro Level (SP1–4, FG1–3, BG1) |
 | Ext.-Objekt `$02` | „Direct Map16“: platziert ein beliebiges Map16-Tile als Rechteck (6 Byte) |
+| Ext.-Objekt `$03` („SMWS“) | Strukturen: platziert einen gespeicherten Block von Map16-Tiles (4 Byte, 4. Byte = Strukturnummer 00–FF); belegt nur den im Original leeren Eintrag `$03` der Tabelle der erweiterten Objekte, unabhängig vom Editor-Patch |
 | `$00922F` („SMWP“) | eigene 256-Farben-Palette pro Level |
 | `$058060` („SMWB“) | BG-Tilemap-Daten pro Level in beliebiger Bank (bearbeitete Hintergründe) |
 | `$00F545`, `$029328` („SMWX“) | Map16 „acts like“-Tabelle für Tiles 000–FFF (Mario, Sprites, Feuerbälle, Blöcke von unten) |

@@ -1,13 +1,14 @@
 // Sidebar panels: level list, palette (objects / sprites), properties.
 
 import type { App, PaletteItem } from './app.ts';
-import { h, clear, hexInput, attachRectPick } from './dom.ts';
+import { h, clear, hexInput, attachRectPick, modal, toast } from './dom.ts';
 import { objectName, spriteName, hex2, hex3 } from '../core/names.ts';
 import { objectVariant, withObjectVariant, type ObjKind } from '../core/objkinds.ts';
 import { objectThumbs, thumbCanvas, objKey, type ObjSpec } from './thumbs.ts';
-import { newUid } from '../core/level.ts';
+import { newUid, type LevelObject } from '../core/level.ts';
 import { levelName } from '../core/overworld.ts';
 import { DM16_EXT } from '../core/patches.ts';
+import { STRUCT_EXT, TRANSPARENT, hasStructs, freeStructureNumber, readStructure, writeStructure, STRUCT_COUNT, type Structure } from '../core/structs.ts';
 import { EXT_TILES, map16Ext } from '../core/map16ext.ts';
 import { TileCache, map16Source, drawMap16 } from '../core/render.ts';
 import { probeText, spritesOf, spriteProbeAt, enterText, enterSuffix } from '../core/blockprobe.ts';
@@ -96,7 +97,7 @@ export class Palette {
   app: App;
   root: HTMLDivElement;
   body: HTMLDivElement;
-  tab: 'obj' | 'ext' | 'm16' | 'spr' = 'obj';
+  tab: 'obj' | 'ext' | 'm16' | 'str' | 'spr' = 'obj';
   thumbs = new Map<string, HTMLCanvasElement>();
   thumbTiles = new Map<string, number[]>(); // Map16 tiles per object key
   thumbsFor = '';
@@ -118,7 +119,8 @@ export class Palette {
     app.on('bgtile', () => { if (app.mode === 'bg') this.build(); });
     app.on('blockinfo', () => { if (this.tab === 'm16') this.m16Tip(); else this.build(); });
     app.on('render', () => { if (app.mode === 'bg') this.build(); });
-    app.on('change', () => this.followSelection());
+    app.on('change', () => { this.followSelection(); if (this.tab === 'str') this.build(); });
+    app.on('structs', () => { if (this.tab === 'str') this.build(); });
     app.on('mode', () => {
       if (app.mode === 'spr') this.tab = 'spr';
       else if (this.tab === 'spr') this.tab = 'obj';
@@ -147,6 +149,9 @@ export class Palette {
         item = { kind: 'obj', num: 0, ext: DM16_EXT, size: 0, tile: o.tile ?? 0 };
         this.tab = 'm16';
         this.m16Base = (o.tile ?? 0) & ~0x1ff;
+      } else if (o.num === 0 && o.ext === STRUCT_EXT && o.struct !== undefined) {
+        item = { kind: 'obj', num: 0, ext: STRUCT_EXT, size: 0, struct: o.struct };
+        this.tab = 'str';
       } else if (o.num === 0) {
         item = { kind: 'obj', num: 0, ext: o.ext, size: 0 };
         this.tab = 'ext';
@@ -230,6 +235,34 @@ export class Palette {
     this.body.append(h('div', { class: 'row' }, pages), label, c);
   }
 
+  // structures: blocks of Map16 tiles stored in the ROM, placed as one object each (structs.ts)
+  buildStructs(): void {
+    const app = this.app;
+    const cur = app.paletteItem;
+    const curN = cur?.kind === 'obj' && cur.num === 0 && cur.ext === STRUCT_EXT ? cur.struct ?? -1 : -1;
+    const sel = (app.mode === 'l1' || app.mode === 'l2') ? app.selectedObjects().length : 0;
+    const f = this.search.value.trim().toLowerCase();
+    this.body.append(
+      h('div', { class: 'row' },
+        h('button', { disabled: !sel, title: 'Die Tiles der ausgewählten Objekte als Struktur speichern', onclick: () => openSaveStructure(app) }, 'Auswahl als Struktur …')),
+      h('div', { class: 'hint' }, sel ? `${sel} Objekt${sel > 1 ? 'e' : ''} ausgewählt.` : 'Objekte im Level auswählen (auch Direct-Map16-Blöcke), dann „Auswahl als Struktur“. Eine Struktur ist im Level ein einziges Objekt; Änderungen an ihr gelten in allen Leveln.'),
+    );
+    const all = app.structures();
+    if (!all.size) return;
+    const sheet = structTileSource(app);
+    for (const [n, st] of all) {
+      if (f && !`${hex2(n)} ${st.name}`.toLowerCase().includes(f)) continue;
+      const row = h('div', {
+        class: `pal-row${n === curN ? ' selected' : ''}`, title: `Struktur ${hex2(n)}: ${st.name || '(ohne Namen)'}, ${st.w}×${st.h}`,
+        onclick: () => { app.paletteItem = { kind: 'obj', num: 0, ext: STRUCT_EXT, size: 0, struct: n }; if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1'); this.build(); },
+      }, h('span', { class: 'pal-thumb-s struct' }, structCanvas(sheet, st)), h('span', { class: 'num' }, hex2(n)),
+        h('span', { class: 'grow' }, st.name || '(ohne Namen)', h('span', { class: 'hint' }, ` ${st.w}×${st.h}`)),
+        h('button', { class: 'icon-btn', title: 'Umbenennen', onclick: (e: Event) => { e.stopPropagation(); renameStructure(app, n, st); } }, '✎'),
+        h('button', { class: 'icon-btn', title: 'Löschen', onclick: (e: Event) => { e.stopPropagation(); deleteStructure(app, n, st); } }, '✕'));
+      this.body.appendChild(row);
+    }
+  }
+
   // BG Map16 tiles 000-1FF for painting the level background (BG mode)
   buildBg(): void {
     const app = this.app;
@@ -309,7 +342,7 @@ export class Palette {
     const app = this.app;
     clear(this.tabs);
     if (app.mode === 'bg') { clear(this.body); this.buildBg(); return; }
-    const tabDefs: [typeof this.tab, string][] = [['obj', 'Objekte'], ['ext', 'Erweitert'], ['m16', 'Map16'], ['spr', 'Sprites']];
+    const tabDefs: [typeof this.tab, string][] = [['obj', 'Objekte'], ['ext', 'Erweitert'], ['m16', 'Map16'], ['str', 'Strukturen'], ['spr', 'Sprites']];
     for (const [t, l] of tabDefs) this.tabs.appendChild(h('button', { class: this.tab === t ? 'active' : '', onclick: () => { this.tab = t; this.build(); } }, l));
     clear(this.body);
     const f = this.search.value.trim().toLowerCase();
@@ -332,6 +365,7 @@ export class Palette {
       return;
     }
     if (this.tab === 'm16') { this.buildMap16(); return; }
+    if (this.tab === 'str') { this.buildStructs(); return; }
     const grid = h('div', { class: 'pal-grid' });
     for (const s of this.specs()) {
       if ((this.tab === 'obj') !== (s.num !== 0)) continue;
@@ -369,6 +403,96 @@ export class Palette {
     }
     this.body.appendChild(grid);
   }
+}
+
+// ---------------- structures ----------------
+function structTileSource(app: App): (t: number) => HTMLCanvasElement | null {
+  const r = app.render;
+  const tc = new TileCache(r.vram, r.cgram, (r.ppuRegs[0x0b] & 0x0f) << 13);
+  const src = map16Source(app.rom, r);
+  const cache = new Map<number, HTMLCanvasElement>();
+  return (t) => {
+    let c = cache.get(t);
+    if (!c) {
+      c = document.createElement('canvas');
+      c.width = 16; c.height = 16;
+      const ctx = c.getContext('2d')!;
+      const img = ctx.createImageData(16, 16);
+      drawMap16(new Uint32Array(img.data.buffer), 16, 16, tc, src.fg(t), 0, 0);
+      ctx.putImageData(img, 0, 0);
+      cache.set(t, c);
+    }
+    return c;
+  };
+}
+
+// image of a structure in the current level's graphics; transparent cells stay empty
+export function structCanvas(tile: (t: number) => HTMLCanvasElement | null, st: Structure): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = st.w * 16; c.height = st.h * 16;
+  const ctx = c.getContext('2d')!;
+  st.tiles.forEach((t, i) => { const img = t === TRANSPARENT ? null : tile(t); if (img) ctx.drawImage(img, (i % st.w) * 16, Math.floor(i / st.w) * 16); });
+  return c;
+}
+
+// the selected objects as a new structure, or over an existing one
+function openSaveStructure(app: App): void {
+  const r = app.structureFromSelection();
+  if (typeof r === 'string') { toast(r, 'error'); return; }
+  const free = freeStructureNumber(app.rom);
+  const all = app.structures();
+  const name = h('input', { value: '', placeholder: 'Name', spellcheck: false });
+  const target = h('select', null,
+    free >= 0 ? h('option', { value: String(free) }, `Neue Struktur ${hex2(free)}`) : '',
+    ...[...all].map(([n, st]) => h('option', { value: String(n) }, `${hex2(n)} ersetzen: ${st.name || '(ohne Namen)'}`)));
+  const replace = h('input', { type: 'checkbox', checked: true });
+  const preview = structCanvas(structTileSource(app), { ...r, name: '' });
+  preview.style.cssText = `width:${Math.min(r.w * 32, 320)}px;image-rendering:pixelated;background:repeating-conic-gradient(#333 0 25%,#222 0 50%) 0 0/16px 16px`;
+  const note = h('div', { class: 'hint' });
+  const upd = () => {
+    const n = Number(target.value);
+    const users = all.has(n) ? app.structureUsers(n) : [];
+    note.textContent = all.has(n) ? `Die Struktur ändert sich überall, wo sie benutzt wird${users.length ? ` (Level ${users.map(hex3).join(', ')})` : ''}.` : '';
+    if (all.has(n) && !name.value) name.value = all.get(n)!.name;
+  };
+  target.addEventListener('change', upd);
+  if (free < 0 && !all.size) { toast(`Alle ${STRUCT_COUNT} Strukturen belegt.`, 'error'); return; }
+  upd();
+  const save = () => app.saveSelectionAsStructure(Number(target.value), name.value.trim(), replace.checked);
+  const body = h('div', null,
+    h('div', { class: 'row' }, preview),
+    h('div', { class: 'hint' }, `${r.w}×${r.h} Tiles, ${r.tiles.filter((t) => t === TRANSPARENT).length} davon durchsichtig (Tiles anderer Objekte bleiben dort erhalten).`),
+    h('div', { class: 'prop' }, h('label', null, 'Name'), name),
+    h('div', { class: 'prop' }, h('label', null, 'Speichern als'), target),
+    h('label', { class: 'row small' }, replace, ' Auswahl im Level durch die Struktur ersetzen'),
+    note,
+    h('div', { class: 'hint' }, 'Beim ersten Mal wird der Strukturen-Patch (SMWS) installiert. Er belegt nur das erweiterte Objekt 03 und ändert keinen Code des Spiels.'));
+  const dlg = modal('Auswahl als Struktur', body, [{ label: 'Abbrechen' }, { label: 'Speichern', primary: true, onClick: save }]);
+  name.addEventListener('keydown', (e) => { if (e.key === 'Enter' && save()) dlg.close(); });
+  setTimeout(() => name.focus(), 0);
+}
+
+function renameStructure(app: App, n: number, st: Structure): void {
+  const name = h('input', { value: st.name, spellcheck: false });
+  const save = () => {
+    const cur = readStructure(app.rom, n);
+    if (!cur) return;
+    writeStructure(app.rom, n, { ...cur, name: name.value.trim() });
+    app.structuresChanged();
+  };
+  const dlg = modal(`Struktur ${hex2(n)} umbenennen`, h('div', null, h('div', { class: 'prop' }, h('label', null, 'Name'), name)),
+    [{ label: 'Abbrechen' }, { label: 'OK', primary: true, onClick: save }]);
+  name.addEventListener('keydown', (e) => { if (e.key === 'Enter') { save(); dlg.close(); } });
+  setTimeout(() => name.select(), 0);
+}
+
+function deleteStructure(app: App, n: number, st: Structure): void {
+  const users = app.structureUsers(n);
+  const body = h('div', null, h('div', null, `Struktur ${hex2(n)} „${st.name || '(ohne Namen)'}“ löschen?`),
+    h('div', { class: 'hint' }, users.length
+      ? `Sie wird in Level ${users.map(hex3).join(', ')} benutzt. Die Objekte bleiben dort, zeigen aber nichts mehr, bis wieder eine Struktur ${hex2(n)} angelegt wird.`
+      : 'Sie wird in keinem Level benutzt.'));
+  modal('Struktur löschen', body, [{ label: 'Abbrechen' }, { label: 'Löschen', primary: true, onClick: () => { writeStructure(app.rom, n, null); app.structuresChanged(); } }]);
 }
 
 // small images of the sprites a block spawns, shown in the corner of a palette cell
@@ -467,8 +591,11 @@ export class Properties {
     this.body.append(
       h('div', { class: 'prop-title' }, `${o.num ? 'Objekt ' + hex2(o.num) : 'Erw. Objekt ' + hex2(o.ext)}: ${objectName(o.num, o.ext)}`),
       h('div', { class: 'hint' }, `Index ${idx} von ${app.currentObjects().length}`),
-      this.field('Objekt', hexInput(o.num, 2, (v) => upd(() => (o.num = v)), 0x3f)),
-      o.num === 0 ? this.field('Erw. Nr.', hexInput(o.ext, 2, (v) => upd(() => (o.ext = v)), 0xff)) : '',
+      this.field('Objekt', hexInput(o.num, 2, (v) => upd(() => { o.num = v; fixStruct(app, o); }), 0x3f)),
+      o.num === 0 ? this.field('Erw. Nr.', hexInput(o.ext, 2, (v) => upd(() => { o.ext = v; fixStruct(app, o); }), 0xff)) : '',
+      o.num === 0 && o.ext === STRUCT_EXT && o.struct !== undefined ? this.field('Struktur', hexInput(o.struct, 2, (v) => upd(() => (o.struct = v)), 0xff)) : '',
+      o.num === 0 && o.ext === STRUCT_EXT && o.struct !== undefined ? h('div', { class: 'hint' }, structInfo(app, o.struct), ' ',
+        h('button', { title: 'Die Struktur hier durch einzelne Direct-Map16-Objekte ersetzen (zum Bearbeiten, danach wieder „Auswahl als Struktur“)', onclick: () => app.explodeStructure(o) }, 'Auflösen')) : '',
       o.num === 0 && o.ext === DM16_EXT ? this.field('Map16-Tile', hexInput(o.tile ?? 0, 3, (v) => upd(() => (o.tile = v)), EXT_TILES - 1)) : '',
       o.num === 0 && o.ext === DM16_EXT ? this.field('Größe (hw)', hexInput(o.size, 2, (v) => upd(() => (o.size = v)))) : '',
       this.field('X', hexInput(o.x, 3, (v) => upd(() => (o.x = v)), app.levelWidthTiles() - 1)),
@@ -513,6 +640,17 @@ export class Properties {
     }
     this.body.appendChild(h('div', { class: 'hint' }, 'Screen per Klick in der Levelansicht wählen. Exits gelten für Türen, Rohre usw. auf diesem Screen.'));
   }
+}
+
+// with the structure patch, extended object $03 always carries a structure number (its 4th byte)
+function fixStruct(app: App, o: LevelObject): void {
+  if (o.num === 0 && o.ext === STRUCT_EXT && hasStructs(app.rom)) o.struct ??= 0;
+  else delete o.struct;
+}
+
+function structInfo(app: App, n: number): string {
+  const st = readStructure(app.rom, n);
+  return st ? `${st.name || '(ohne Namen)'}, ${st.w}×${st.h}` : 'Diese Struktur gibt es nicht – das Objekt platziert nichts.';
 }
 
 // what the nibbles of a standard object's settings byte do (emulated, see objkinds.ts)

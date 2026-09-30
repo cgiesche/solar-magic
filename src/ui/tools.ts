@@ -8,6 +8,7 @@ import { ENTRANCE_ACTIONS, hex, objectName, spriteName } from '../core/names.ts'
 import { saveLevel } from '../core/save.ts';
 import { hasEditorPatch, installEditorPatch, DM16_EXT, editorPatch, setLevelGfx, customPalette, setCustomPalette, bgBank } from '../core/patches.ts';
 import { bgFromWram } from '../core/bg.ts';
+import { STRUCT_EXT, hasStructs } from '../core/structs.ts';
 
 export function openEntrancesDialog(app: App): void {
   const rom = app.rom;
@@ -201,6 +202,7 @@ export function openInsertDialog(app: App, tx: number, ty: number): void {
       if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1');
       if (kind === 0 && num === 0) { toast('Objekt 00 gibt es nicht – erweiterte Objekte über „Erweitertes Objekt“.', 'error'); return false; }
       if (kind === 1 && num === DM16_EXT) { toast('Direct-Map16 bitte über den Map16-Reiter der Palette platzieren.', 'error'); return false; }
+      if (kind === 1 && num === STRUCT_EXT && hasStructs(app.rom)) { toast('Strukturen bitte über den Strukturen-Reiter der Palette platzieren.', 'error'); return false; }
       app.insertAt(tx, ty, kind === 0 ? { kind: 'obj', num, ext: 0, size } : { kind: 'obj', num: 0, ext: num, size: 0 });
     }
   };

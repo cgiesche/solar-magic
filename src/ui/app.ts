@@ -12,6 +12,7 @@ import { EXT_FIRST, map16Ext, installMap16Ext } from '../core/map16ext.ts';
 import { saveLevel } from '../core/save.ts';
 import { captureSprites, captureSpriteAt, type SpriteImage } from '../core/spritegfx.ts';
 import { DM16_EXT, hasEditorPatch, installEditorPatch } from '../core/patches.ts';
+import { STRUCT_EXT, STRUCT_MAX, TRANSPARENT, listStructures, readStructure, writeStructure, type Structure } from '../core/structs.ts';
 import { kvSet, kvGet, kvEntries, kvKeys, kvWrite } from './storage.ts';
 import { ResultCache, RomFingerprint, RomReads, type CacheEntry } from '../core/romdeps.ts';
 import { bgFromWram, bgIndex, encodeBg } from '../core/bg.ts';
@@ -22,7 +23,8 @@ import { BlockProber, variantOf, type BlockProbe, type SpriteProbe } from '../co
 export type EditMode = 'l1' | 'l2' | 'spr' | 'exit' | 'bg';
 export type PaletteItem =
   // block: a rectangle of Map16 tiles from the palette sheet (tile + row * 16 + col), one Direct-Map16 object each
-  | { kind: 'obj'; num: number; ext: number; size: number; tile?: number; block?: { w: number; h: number } }
+  // struct: structure number (extended object $03, see structs.ts)
+  | { kind: 'obj'; num: number; ext: number; size: number; tile?: number; block?: { w: number; h: number }; struct?: number }
   | { kind: 'spr'; num: number; extra: number };
 
 type Listener = () => void;
@@ -746,14 +748,7 @@ export class App {
     if (!p) { toast('Zuerst ein Objekt/Sprite in der Palette wählen.'); return; }
     this.checkpoint();
     if (p.kind === 'obj' && (this.mode === 'l1' || this.mode === 'l2')) {
-      if (p.num === 0 && p.ext === DM16_EXT && !hasEditorPatch(this.rom)) {
-        try {
-          installEditorPatch(this.rom);
-          this.emu.syncRom();
-          this.persist();
-          toast('Editor-Patch installiert (für Direct-Map16-Objekte).');
-        } catch (e) { toast(String(e), 'error'); this.undoStack.pop(); return; }
-      }
+      if (p.num === 0 && p.ext === DM16_EXT && !this.ensureEditorPatch()) { this.undoStack.pop(); return; }
       const cells = p.block ? Array.from({ length: p.block.w * p.block.h }, (_, i) => ({ dx: i % p.block!.w, dy: Math.floor(i / p.block!.w) })) : [{ dx: 0, dy: 0 }];
       const lastTile = (p.tile ?? 0) + (p.block ? (p.block.h - 1) * 16 + p.block.w - 1 : 0);
       if (p.num === 0 && p.ext === DM16_EXT && lastTile >= EXT_FIRST && !map16Ext(this.rom)) {
@@ -766,6 +761,7 @@ export class App {
       for (const { dx, dy } of cells) {
         const o: LevelObject = { uid: newUid(), num: p.num, ext: p.ext, x: tx + dx, y: ty + dy, size: p.size };
         if (p.tile !== undefined) o.tile = p.tile + dy * 16 + dx;
+        if (p.struct !== undefined) o.struct = p.struct;
         this.clampObject(o);
         this.currentObjects().push(o);
         this.selection.add(o.uid);
@@ -779,6 +775,109 @@ export class App {
       this.undoStack.pop();
       return;
     }
+    this.changed();
+  }
+
+  // Direct-Map16 objects need the editor patch; installs it, false if that is not possible
+  ensureEditorPatch(): boolean {
+    if (hasEditorPatch(this.rom)) return true;
+    try {
+      installEditorPatch(this.rom);
+      this.emu.syncRom();
+      this.persist();
+      toast('Editor-Patch installiert (für Direct-Map16-Objekte).');
+      return true;
+    } catch (e) { toast(String(e), 'error'); return false; }
+  }
+
+  // ------------- structures (structs.ts) -------------
+  structures(): Map<number, Structure> {
+    return listStructures(this.rom);
+  }
+
+  // what the selected objects left in the level as a block of tiles; cells of other objects are
+  // transparent, empty rows and columns at the border are cut off
+  structureFromSelection(): { x: number; y: number; w: number; h: number; tiles: number[] } | string {
+    const objs = this.selectedObjects();
+    if (!objs.length || (this.mode !== 'l1' && this.mode !== 'l2')) return 'Zuerst Objekte im Level auswählen (Layer 1 oder 2).';
+    const l2 = this.mode === 'l2';
+    const g = l2 ? this.images.geom2 : this.images.geom1;
+    if (!g) return 'Layer ohne Objekte';
+    const all = this.currentObjects();
+    const keys = new Set(objs.map((o) => this.objectKey(l2, all.indexOf(o))));
+    let x0 = Infinity, y0 = Infinity, x1 = -1, y1 = -1;
+    const cells = new Map<number, number>();
+    for (const o of objs) for (const t of this.objectTiles(o)) {
+      const x = t & 0xffff, y = t >> 16;
+      const a = g.addr(x, y);
+      if (a < 0 || !keys.has(this.render.owner[a - MAP_BASE])) continue;
+      cells.set(t, this.render.wram[a] | (this.render.wram[a + 0x10000] << 8));
+      x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y);
+    }
+    if (x1 < 0) return 'Die ausgewählten Objekte haben keine sichtbaren Tiles.';
+    const w = x1 - x0 + 1, h = y1 - y0 + 1;
+    if (w > STRUCT_MAX || h > STRUCT_MAX) return `Auswahl ist ${w}×${h} Tiles groß, eine Struktur höchstens ${STRUCT_MAX}×${STRUCT_MAX}.`;
+    const tiles = Array.from({ length: w * h }, (_, i) => cells.get(((y0 + Math.floor(i / w)) << 16) | (x0 + (i % w))) ?? TRANSPARENT);
+    return { x: x0, y: y0, w, h, tiles };
+  }
+
+  // after the structure table changed: the emulator sees the new ROM, the level is drawn again
+  structuresChanged(): void {
+    this.emu.syncRom();
+    this.persist();
+    this.refresh();
+    this.emit('structs');
+    this.emit('change');
+  }
+
+  // stores the selection as structure n; replace: the selected objects become one structure object
+  // (at the place of the last of them in the object list, so objects in between still cover it)
+  saveSelectionAsStructure(n: number, name: string, replace: boolean): boolean {
+    const r = this.structureFromSelection();
+    if (typeof r === 'string') { toast(r, 'error'); return false; }
+    try {
+      writeStructure(this.rom, n, { w: r.w, h: r.h, tiles: r.tiles, name });
+    } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); return false; }
+    if (replace) {
+      this.checkpoint();
+      const all = this.currentObjects();
+      const at = Math.max(...this.selectedObjects().map((o) => all.indexOf(o)));
+      const o: LevelObject = { uid: newUid(), num: 0, ext: STRUCT_EXT, x: r.x, y: r.y, size: 0, struct: n };
+      const res = [...all.slice(0, at + 1).filter((x) => !this.selection.has(x.uid)), o, ...all.slice(at + 1)];
+      if (this.mode === 'l2') this.level.layer2Objects = res; else this.level.objects = res;
+      this.selection = new Set([o.uid]);
+      this.dirty = true;
+    }
+    this.paletteItem = { kind: 'obj', num: 0, ext: STRUCT_EXT, size: 0, struct: n };
+    this.structuresChanged();
+    return true;
+  }
+
+  // levels whose saved data uses structure n (plus the open level with its unsaved changes)
+  structureUsers(n: number): number[] {
+    const out: number[] = [];
+    const uses = (lv: { objects: LevelObject[]; layer2Objects: LevelObject[] | null }) =>
+      [...lv.objects, ...(lv.layer2Objects ?? [])].some((o) => o.num === 0 && o.ext === STRUCT_EXT && o.struct === n);
+    for (const i of this.usedLevels()) {
+      try { if (uses(i === this.level.number ? this.level : loadLevel(this.rom, i))) out.push(i); } catch { /* unreadable level */ }
+    }
+    return out;
+  }
+
+  // a structure object becomes one Direct-Map16 object per tile, at its place in the object list
+  explodeStructure(o: LevelObject): void {
+    const s = o.struct !== undefined ? readStructure(this.rom, o.struct) : null;
+    if (!s) { toast('Die Struktur gibt es nicht (mehr).', 'error'); return; }
+    if (!this.ensureEditorPatch()) return;
+    if (s.tiles.some((t) => t >= EXT_FIRST) && !map16Ext(this.rom)) { toast('Die Struktur nutzt Tiles ab 200, die Map16-Erweiterung fehlt.', 'error'); return; }
+    this.checkpoint();
+    const parts: LevelObject[] = [];
+    s.tiles.forEach((t, i) => { if (t !== TRANSPARENT) parts.push({ uid: newUid(), num: 0, ext: DM16_EXT, x: o.x + (i % s.w), y: o.y + Math.floor(i / s.w), size: 0, tile: t }); });
+    const all = this.currentObjects();
+    const at = all.indexOf(o);
+    const res = [...all.slice(0, at), ...parts, ...all.slice(at + 1)];
+    if (this.mode === 'l2') this.level.layer2Objects = res; else this.level.objects = res;
+    this.selection = new Set(parts.map((p) => p.uid));
     this.changed();
   }
 
