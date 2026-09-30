@@ -62,6 +62,7 @@ export class App {
   prober: BlockProber | null = null;
   proberGen = -1;
   probeQueue: number[] = []; // Map16 tiles; sprites as PROBE_SPRITE | num
+  prefetchQueue = new Set<number>(); // the same, probed when probeQueue is empty
   probeFailed = new Set<number>();
   probeScheduled = false;
   probeChannel: MessageChannel | null = null; // yields between probe slices (setTimeout is throttled in hidden tabs)
@@ -136,6 +137,7 @@ export class App {
     this.refresh();
     this.emit('level');
     this.ensureSpriteImages();
+    this.prefetchProbes();
   }
 
   get vertical(): boolean {
@@ -539,6 +541,7 @@ export class App {
       this.prober.reset();
       this.probeFailed.clear();
       this.proberGen = this.emu.romGen;
+      setTimeout(() => this.prefetchProbes(), 0); // results that read changed ROM data are redone
     }
     this.prober.use(this.level.header.tileset);
     return this.prober;
@@ -547,8 +550,30 @@ export class App {
   private queueProbe(k: number): void {
     if (this.probeFailed.has(k)) return;
     if (!this.probeQueue.includes(k)) this.probeQueue.push(k);
-    this.setBusy('probe', `Blockverhalten (${this.probeQueue.length})`);
+    this.prefetchQueue.delete(k);
+    this.probeBusy();
     this.scheduleProbes();
+  }
+
+  // Probes everything the palette tabs can show (Map16 tiles 000-1FF, the objects' tiles, all
+  // sprites) in the background, after what is asked for directly; results go to the cache, so
+  // this runs once per tileset and ROM state.
+  prefetchProbes(tiles: Iterable<number> = []): void {
+    this.cacheReady.then(() => {
+      const pr = this.blockProber();
+      const add = (k: number, known: unknown) => { if (!known && !this.probeFailed.has(k) && !this.probeQueue.includes(k)) this.prefetchQueue.add(k); };
+      for (const t of tiles) add(t, pr.cached(t));
+      for (let t = 0; t < 0x200; t++) add(t, pr.cached(t));
+      for (let n = 0; n < SPRITE_PROBE_END; n++) add(PROBE_SPRITE | n, pr.cachedSprite(n));
+      if (!this.prefetchQueue.size) return;
+      this.probeBusy();
+      this.scheduleProbes();
+    });
+  }
+
+  private probeBusy(): void {
+    const n = this.probeQueue.length + this.prefetchQueue.size;
+    this.setBusy('probe', n ? `Blockverhalten (${n})` : null);
   }
 
   private scheduleProbes(): void {
@@ -561,18 +586,22 @@ export class App {
     this.cacheReady.then(() => this.probeChannel!.port2.postMessage(0));
   }
 
+  // requested probes first, then prefetched ones; 'blockinfo' when either queue runs empty
   private runProbes(): void {
     this.probeScheduled = false;
     const t0 = performance.now();
-    while (this.probeQueue.length && performance.now() - t0 < 30) {
-      const t = this.probeQueue.shift()!;
+    const hadAsked = this.probeQueue.length > 0, hadPrefetch = this.prefetchQueue.size > 0;
+    while ((this.probeQueue.length || this.prefetchQueue.size) && performance.now() - t0 < 30) {
+      let t: number;
+      if (this.probeQueue.length) t = this.probeQueue.shift()!;
+      else { t = this.prefetchQueue.values().next().value!; this.prefetchQueue.delete(t); }
       try {
         if (t & PROBE_SPRITE) this.prober?.probeSprite(t & 0xff); else this.prober?.probe(t);
       } catch (e) { console.error(e); this.probeFailed.add(t); }
     }
-    this.setBusy('probe', this.probeQueue.length ? `Blockverhalten (${this.probeQueue.length})` : null);
-    if (this.probeQueue.length) this.scheduleProbes();
-    else this.emit('blockinfo');
+    this.probeBusy();
+    if (this.probeQueue.length || this.prefetchQueue.size) this.scheduleProbes();
+    if ((hadAsked && !this.probeQueue.length) || (hadPrefetch && !this.prefetchQueue.size)) this.emit('blockinfo');
   }
 
   objectBounds(o: LevelObject): { x0: number; y0: number; x1: number; y1: number } {
