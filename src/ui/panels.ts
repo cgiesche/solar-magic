@@ -1,6 +1,6 @@
 // Sidebar panels: level list, palette (objects / sprites), properties.
 
-import type { App } from './app.ts';
+import type { App, PaletteItem } from './app.ts';
 import { h, clear, hexInput } from './dom.ts';
 import { objectName, spriteName, hex2, hex3 } from '../core/names.ts';
 import { objectVariant, withObjectVariant, type ObjKind } from '../core/objkinds.ts';
@@ -118,11 +118,66 @@ export class Palette {
     app.on('bgtile', () => { if (app.mode === 'bg') this.build(); });
     app.on('blockinfo', () => { if (this.tab === 'm16') this.m16Tip(); else this.build(); });
     app.on('render', () => { if (app.mode === 'bg') this.build(); });
+    app.on('change', () => this.followSelection());
     app.on('mode', () => {
       if (app.mode === 'spr') this.tab = 'spr';
       else if (this.tab === 'spr') this.tab = 'obj';
       this.build();
     });
+  }
+
+  // an item selected in the level becomes the palette item, shown in its tab and scrolled into view
+  followed = -1;
+  followSelection(): void {
+    const app = this.app;
+    const uid = app.selection.size === 1 ? [...app.selection][0] : -1;
+    if (uid === this.followed) return;
+    this.followed = uid;
+    if (uid < 0 || app.mode === 'bg' || app.mode === 'exit') return;
+    let item: PaletteItem;
+    if (app.mode === 'spr') {
+      const s = app.selectedSprites()[0];
+      if (!s) return;
+      item = { kind: 'spr', num: s.num, extra: s.extra };
+      this.tab = 'spr';
+    } else {
+      const o = app.selectedObjects()[0];
+      if (!o) return;
+      if (o.num === 0 && o.ext === DM16_EXT) {
+        item = { kind: 'obj', num: 0, ext: DM16_EXT, size: 0, tile: o.tile ?? 0 };
+        this.tab = 'm16';
+        this.m16Base = (o.tile ?? 0) & ~0x1ff;
+      } else if (o.num === 0) {
+        item = { kind: 'obj', num: 0, ext: o.ext, size: 0 };
+        this.tab = 'ext';
+      } else {
+        const kind = app.objectKind(o.num);
+        item = { kind: 'obj', num: o.num, ext: 0, size: withObjectVariant(kind, 0x11, Math.max(0, objectVariant(kind, o.size))) };
+        this.tab = 'obj';
+      }
+    }
+    const cur = app.paletteItem;
+    if (cur && JSON.stringify(cur) === JSON.stringify(item) && this.body.querySelector('.selected')) return; // e.g. just inserted
+    app.paletteItem = item;
+    this.build();
+    if (this.tab !== 'm16' && !this.body.querySelector('.selected') && this.search.value) {
+      this.search.value = ''; // the filter hides it
+      this.build();
+    }
+    requestAnimationFrame(() => this.scrollToSelected()); // after the properties panel below has updated
+  }
+
+  scrollToSelected(): void {
+    const el = this.body.querySelector<HTMLElement>('.selected');
+    if (el) { el.scrollIntoView({ block: 'nearest' }); return; }
+    const cur = this.app.paletteItem;
+    const c = this.body.querySelector<HTMLCanvasElement>('canvas.m16-pick');
+    if (!c || cur?.kind !== 'obj' || cur.tile === undefined) return;
+    // the canvas row of the tile
+    const y = (((cur.tile & 0x1ff) >> 4) / 32) * c.clientHeight;
+    const body = this.body.getBoundingClientRect(), rc = c.getBoundingClientRect();
+    const top = rc.top - body.top + this.body.scrollTop + y;
+    if (top < this.body.scrollTop || top + 20 > this.body.scrollTop + this.body.clientHeight) this.body.scrollTop = top - this.body.clientHeight / 2;
   }
 
   m16Base = 0; // first tile of the shown sheet (pages 0-1, 2-3, …)
@@ -133,24 +188,55 @@ export class Palette {
     const cur = app.paletteItem;
     const curTile = cur?.kind === 'obj' && cur.num === 0 && cur.ext === DM16_EXT ? cur.tile ?? -1 : -1;
     const selTile = curTile >= 0 && (curTile & ~0x1ff) === this.m16Base ? curTile & 0x1ff : -1;
+    const bw = cur?.kind === 'obj' && cur.block ? cur.block.w : 1, bh = cur?.kind === 'obj' && cur.block ? cur.block.h : 1;
     const pages = h('select', null, Array.from({ length: EXT_TILES / 512 }, (_, i) => h('option', { value: String(i * 512), selected: i * 512 === this.m16Base },
       i === 0 ? 'Seiten 0–1' : `Seiten ${(2 * i).toString(16).toUpperCase()}–${(2 * i + 1).toString(16).toUpperCase()}${map16Ext(app.rom) ? '' : ' (leer)'}`)));
     pages.addEventListener('change', () => { this.m16Base = Number(pages.value); this.build(); });
+    const S = 16 * 1.2;
     const c = h('canvas', { width: 256 * 1.2, height: 512 * 1.2, class: 'm16-pick' });
     const ctx = c.getContext('2d')!;
     ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(sheet, 0, 0, c.width, c.height);
-    if (selTile >= 0) {
+    // sheet plus the chosen rectangle of tiles (x, y, w, h in cells)
+    const draw = (x: number, y: number, w: number, hh: number) => {
+      ctx.drawImage(sheet, 0, 0, c.width, c.height);
+      if (x < 0) return;
       ctx.strokeStyle = '#4cc2ff'; ctx.lineWidth = 2;
-      ctx.strokeRect((selTile & 15) * 16 * 1.2, (selTile >> 4) * 16 * 1.2, 16 * 1.2, 16 * 1.2);
-    }
-    const label = h('div', { class: 'hint' }, curTile >= 0 ? `Tile ${hex3(curTile)} gewählt – Rechtsklick in der Levelansicht platziert es (Direct-Map16-Objekt).` : 'Tile anklicken, dann per Rechtsklick im Level platzieren. Erfordert den Editor-Patch (wird automatisch installiert). Tiles ab 200 legt der Map16-Editor (M) an.');
-    c.addEventListener('mousedown', (e) => {
+      ctx.strokeRect(x * S, y * S, w * S, hh * S);
+    };
+    draw(selTile & 15, selTile >> 4, bw, bh);
+    const label = h('div', { class: 'hint' }, curTile >= 0
+      ? (bw * bh > 1 ? `Block ${bw}×${bh} ab Tile ${hex3(curTile)} gewählt – Rechtsklick in der Levelansicht platziert ihn (je Tile ein Direct-Map16-Objekt).`
+        : `Tile ${hex3(curTile)} gewählt – Rechtsklick in der Levelansicht platziert es (Direct-Map16-Objekt).`)
+      : 'Tile anklicken (oder mehrere per Ziehen), dann per Rechtsklick im Level platzieren. Erfordert den Editor-Patch (wird automatisch installiert). Tiles ab 200 legt der Map16-Editor (M) an.');
+    const cellAt = (e: MouseEvent) => {
       const rc = c.getBoundingClientRect();
-      const x = Math.floor((e.clientX - rc.left) / (rc.width / 16)), y = Math.floor((e.clientY - rc.top) / (rc.height / 32));
-      app.paletteItem = { kind: 'obj', num: 0, ext: DM16_EXT, size: 0, tile: this.m16Base + y * 16 + x };
-      if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1');
-      this.build();
+      return { x: Math.max(0, Math.min(15, Math.floor((e.clientX - rc.left) / (rc.width / 16)))), y: Math.max(0, Math.min(31, Math.floor((e.clientY - rc.top) / (rc.height / 32)))) };
+    };
+    // click picks a tile, dragging picks a rectangle of tiles
+    c.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      const a = cellAt(e);
+      let b = a;
+      const rect = () => ({ x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(a.x - b.x) + 1, h: Math.abs(a.y - b.y) + 1 });
+      const move = (ev: MouseEvent) => {
+        const n = cellAt(ev);
+        if (n.x === b.x && n.y === b.y) return;
+        b = n;
+        const r = rect();
+        draw(r.x, r.y, r.w, r.h);
+      };
+      const up = () => {
+        window.removeEventListener('mousemove', move);
+        window.removeEventListener('mouseup', up);
+        const r = rect();
+        app.paletteItem = { kind: 'obj', num: 0, ext: DM16_EXT, size: 0, tile: this.m16Base + r.y * 16 + r.x, ...(r.w * r.h > 1 ? { block: { w: r.w, h: r.h } } : {}) };
+        if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1');
+        this.build();
+      };
+      window.addEventListener('mousemove', move);
+      window.addEventListener('mouseup', up);
+      draw(a.x, a.y, 1, 1);
     });
     // tooltip: tile number and behaviour when hit from below
     let hoverTile = -1;

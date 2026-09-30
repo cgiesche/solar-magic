@@ -21,7 +21,8 @@ import { BlockProber, variantOf, type BlockProbe, type SpriteProbe } from '../co
 
 export type EditMode = 'l1' | 'l2' | 'spr' | 'exit' | 'bg';
 export type PaletteItem =
-  | { kind: 'obj'; num: number; ext: number; size: number; tile?: number }
+  // block: a rectangle of Map16 tiles from the palette sheet (tile + row * 16 + col), one Direct-Map16 object each
+  | { kind: 'obj'; num: number; ext: number; size: number; tile?: number; block?: { w: number; h: number } }
   | { kind: 'spr'; num: number; extra: number };
 
 type Listener = () => void;
@@ -738,17 +739,22 @@ export class App {
           toast('Editor-Patch installiert (für Direct-Map16-Objekte).');
         } catch (e) { toast(String(e), 'error'); this.undoStack.pop(); return; }
       }
-      if (p.num === 0 && p.ext === DM16_EXT && (p.tile ?? 0) >= EXT_FIRST && !map16Ext(this.rom)) {
+      const cells = p.block ? Array.from({ length: p.block.w * p.block.h }, (_, i) => ({ dx: i % p.block!.w, dy: Math.floor(i / p.block!.w) })) : [{ dx: 0, dy: 0 }];
+      const lastTile = (p.tile ?? 0) + (p.block ? (p.block.h - 1) * 16 + p.block.w - 1 : 0);
+      if (p.num === 0 && p.ext === DM16_EXT && lastTile >= EXT_FIRST && !map16Ext(this.rom)) {
         installMap16Ext(this.rom, map16Source(this.rom, this.render).fg(0x025));
         this.emu.syncRom();
         this.persist();
         toast('Map16-Erweiterung installiert (Tiles 200–FFF).');
       }
-      const o: LevelObject = { uid: newUid(), num: p.num, ext: p.ext, x: tx, y: ty, size: p.size };
-      if (p.tile !== undefined) o.tile = p.tile;
-      this.clampObject(o);
-      this.currentObjects().push(o);
-      this.selection = new Set([o.uid]);
+      this.selection = new Set();
+      for (const { dx, dy } of cells) {
+        const o: LevelObject = { uid: newUid(), num: p.num, ext: p.ext, x: tx + dx, y: ty + dy, size: p.size };
+        if (p.tile !== undefined) o.tile = p.tile + dy * 16 + dx;
+        this.clampObject(o);
+        this.currentObjects().push(o);
+        this.selection.add(o.uid);
+      }
     } else if (p.kind === 'spr') {
       if (this.mode !== 'spr') this.setMode('spr');
       const s: LevelSprite = { uid: newUid(), num: p.num, x: tx, y: ty, extra: p.extra };
