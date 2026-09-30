@@ -1,7 +1,7 @@
 // Overworld editor view.
 
 import type { App } from './app.ts';
-import { h, clear, toast, select, attachPanZoom } from './dom.ts';
+import { h, clear, toast, select, attachPanZoom, attachRectPick } from './dom.ts';
 import {
   OverworldEmulator, type OwRender, readL1, writeL1, readL2, writeL2, l1Index, l2Index, translevels, isLevelTile,
   translevelToLevel, levelName, nameCode, setNameCode, splitNameCode, joinNameCode, nameWord, NAME_PART_COUNTS, MAP_NAMES,
@@ -9,7 +9,11 @@ import {
 import { TileCache, blit8 } from '../core/render.ts';
 import { hex } from '../core/names.ts';
 
-type Brush = { kind: 'l1'; tile: number } | { kind: 'l2'; w: number; h: number; entries: number[] };
+// a w×h block of L1 tiles (16x16) or L2 tilemap entries (8x8), row-major
+type Brush = { kind: 'l1' | 'l2'; w: number; h: number; entries: number[] };
+type Drag =
+  | { kind: 'paint'; x0: number; y0: number; lastX: number; lastY: number } // brush stamped on a grid from (x0, y0)
+  | { kind: 'pick'; x0: number; y0: number; x1: number; y1: number }; // map cells taken into the brush
 
 export class OverworldView {
   app: App;
@@ -31,10 +35,10 @@ export class OverworldView {
   showEvents = false;
   showGrid = false;
   zoom = 2;
-  brush: Brush = { kind: 'l1', tile: 0x56 };
+  brush: Brush = { kind: 'l1', w: 1, h: 1, entries: [0x56] };
   l2Pal = 0;
   hover: { x: number; y: number } | null = null;
-  painting = false;
+  drag: Drag | null = null;
   selectedTl = -1;
   mapCanvas = document.createElement('canvas');
   undo: { l1: Uint8Array; l2: Uint16Array }[] = [];
@@ -55,7 +59,7 @@ export class OverworldView {
     this.scroller.addEventListener('contextmenu', (e) => e.preventDefault());
     this.scroller.addEventListener('mousedown', (e) => this.onDown(e));
     window.addEventListener('mousemove', (e) => this.onMove(e));
-    window.addEventListener('mouseup', () => { if (this.painting) { this.painting = false; } });
+    window.addEventListener('mouseup', () => this.onUp());
     attachPanZoom(this.scroller, () => this.zoom, (z, ax, ay) => {
       const lx = (this.scroller.scrollLeft + ax) / this.zoom, ly = (this.scroller.scrollTop + ay) / this.zoom;
       this.zoom = z;
@@ -163,14 +167,19 @@ export class OverworldView {
       ctx.fillStyle = '#fff';
       ctx.fillText(hex(translevelToLevel(tl[i]), 3), x * 16 + 1, y * 16 + 16);
     }
-    if (this.hover) {
+    const s = this.mode === 'l1' ? 16 : 8;
+    if (this.drag?.kind === 'pick') {
+      const r = this.pickRect(this.drag);
+      ctx.strokeStyle = '#4cc2ff';
+      ctx.fillStyle = 'rgba(76,194,255,0.15)';
+      ctx.lineWidth = lw;
+      ctx.fillRect(r.x * s, r.y * s, r.w * s, r.h * s);
+      ctx.strokeRect(r.x * s, r.y * s, r.w * s, r.h * s);
+    } else if (this.hover) {
+      // the area the brush would paint
       ctx.strokeStyle = 'rgba(255,255,0,0.9)';
       ctx.lineWidth = lw;
-      if (this.mode === 'l1') ctx.strokeRect(this.hover.x * 16, this.hover.y * 16, 16, 16);
-      else {
-        const b = this.brush.kind === 'l2' ? this.brush : { w: 1, h: 1 };
-        ctx.strokeRect(this.hover.x * 8, this.hover.y * 8, b.w * 8, b.h * 8);
-      }
+      ctx.strokeRect(this.hover.x * s, this.hover.y * s, this.brush.w * s, this.brush.h * s);
     }
   }
 
@@ -183,30 +192,53 @@ export class OverworldView {
     return { x: Math.floor(px / s), y: Math.floor(py / s) };
   }
 
+  // same buttons as in the level editor: click/drag takes tiles into the brush, right-click/Shift+click paints
   onDown(e: MouseEvent): void {
     if (e.target !== this.scroller && e.target !== this.canvas) return;
     const rc = this.scroller.getBoundingClientRect();
     if (e.clientX - rc.left > this.scroller.clientWidth || e.clientY - rc.top > this.scroller.clientHeight) return;
     const c = this.cell(e);
-    if (e.button === 2) { this.pick(c.x, c.y); return; }
+    if (e.button === 2 || (e.button === 0 && e.shiftKey && !e.ctrlKey)) {
+      if (this.showEvents && this.mode === 'l1') { toast('Im Event-Modus ist Layer 1 schreibgeschützt (zeigt den Zustand nach allen Events).'); return; }
+      this.pushUndo();
+      this.drag = { kind: 'paint', x0: c.x, y0: c.y, lastX: c.x, lastY: c.y };
+      this.paintAt(c.x, c.y);
+      return;
+    }
     if (e.button !== 0) return;
     if (e.altKey || (this.mode === 'l1' && e.ctrlKey)) { this.info(c.x, c.y); return; }
-    if (this.showEvents && this.mode === 'l1') { toast('Im Event-Modus ist Layer 1 schreibgeschützt (zeigt den Zustand nach allen Events).'); return; }
-    this.pushUndo();
-    this.painting = true;
-    this.paintAt(c.x, c.y);
+    this.drag = { kind: 'pick', x0: c.x, y0: c.y, x1: c.x, y1: c.y };
+    this.paint();
   }
 
   onMove(e: MouseEvent): void {
     const inside = e.target === this.scroller || e.target === this.canvas;
-    if (!inside && !this.painting) return;
+    const d = this.drag;
+    if (!inside && !d) return;
     const c = this.cell(e);
-    if (!this.hover || this.hover.x !== c.x || this.hover.y !== c.y) {
-      this.hover = c;
-      this.updateStatus();
-      if (this.painting) this.paintAt(c.x, c.y);
-      else this.paint();
-    }
+    if (this.hover && this.hover.x === c.x && this.hover.y === c.y) return;
+    this.hover = c;
+    this.updateStatus();
+    if (d?.kind === 'paint') {
+      const x = d.x0 + Math.floor((c.x - d.x0) / this.brush.w) * this.brush.w, y = d.y0 + Math.floor((c.y - d.y0) / this.brush.h) * this.brush.h;
+      if (x !== d.lastX || y !== d.lastY) { d.lastX = x; d.lastY = y; this.paintAt(x, y); return; }
+    } else if (d?.kind === 'pick') { d.x1 = c.x; d.y1 = c.y; }
+    this.paint();
+  }
+
+  onUp(): void {
+    const d = this.drag;
+    if (!d) return;
+    this.drag = null;
+    if (d.kind === 'pick') this.pick(this.pickRect(d));
+  }
+
+  // the picked rectangle, clamped to the map (32x32 L1 tiles, 64x64 L2 tiles)
+  pickRect(d: { x0: number; y0: number; x1: number; y1: number }): { x: number; y: number; w: number; h: number } {
+    const n = this.mode === 'l1' ? 32 : 64;
+    const cl = (v: number) => Math.max(0, Math.min(n - 1, v));
+    const x0 = cl(Math.min(d.x0, d.x1)), x1 = cl(Math.max(d.x0, d.x1)), y0 = cl(Math.min(d.y0, d.y1)), y1 = cl(Math.max(d.y0, d.y1));
+    return { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
   }
 
   pushUndo(): void {
@@ -223,34 +255,31 @@ export class OverworldView {
 
   paintAt(x: number, y: number): void {
     const b = this.brush;
-    if (this.mode === 'l1' && b.kind === 'l1') {
-      if (x < 0 || y < 0 || x >= 32 || y >= 32) return;
-      const i = l1Index(this.region, x, y);
-      if (this.l1[i] === b.tile) return;
-      this.l1[i] = b.tile;
-    } else if (this.mode === 'l2' && b.kind === 'l2') {
-      for (let dy = 0; dy < b.h; dy++) for (let dx = 0; dx < b.w; dx++) {
-        const xx = x + dx, yy = y + dy;
-        if (xx < 0 || yy < 0 || xx >= 64 || yy >= 64) continue;
-        this.l2[l2Index(this.region, xx, yy)] = b.entries[dy * b.w + dx];
+    if (b.kind !== this.mode) return;
+    const n = this.mode === 'l1' ? 32 : 64;
+    let changed = false;
+    for (let dy = 0; dy < b.h; dy++) for (let dx = 0; dx < b.w; dx++) {
+      const xx = x + dx, yy = y + dy;
+      if (xx < 0 || yy < 0 || xx >= n || yy >= n) continue;
+      const v = b.entries[dy * b.w + dx];
+      if (this.mode === 'l1') {
+        const i = l1Index(this.region, xx, yy);
+        if (this.l1[i] !== v) { this.l1[i] = v; changed = true; }
+      } else {
+        const i = l2Index(this.region, xx, yy);
+        if (this.l2[i] !== v) { this.l2[i] = v; changed = true; }
       }
-    } else return;
+    }
+    if (!changed) return;
     this.dirty = true;
     this.redrawMap();
   }
 
-  pick(x: number, y: number): void {
-    if (this.mode === 'l1') {
-      if (x < 0 || y < 0 || x >= 32 || y >= 32) return;
-      const src = this.showEvents ? this.render().wram.subarray(0xc800, 0xd000) : this.l1;
-      this.brush = { kind: 'l1', tile: src[l1Index(this.region, x, y)] };
-    } else {
-      // pick the aligned 2x2 block (16x16)
-      const bx = x & ~1, by = y & ~1;
-      const entries: number[] = [];
-      for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++) entries.push(this.l2[l2Index(this.region, bx + dx, by + dy)]);
-      this.brush = { kind: 'l2', w: 2, h: 2, entries };
-    }
+  pick(r: { x: number; y: number; w: number; h: number }): void {
+    const src = this.mode === 'l2' ? this.l2 : this.showEvents ? this.render().wram.subarray(0xc800, 0xd000) : this.l1;
+    const idx = this.mode === 'l2' ? l2Index : l1Index;
+    const entries = Array.from({ length: r.w * r.h }, (_, i) => src[idx(this.region, r.x + (i % r.w), r.y + Math.floor(i / r.w))]);
+    this.brush = { kind: this.mode, w: r.w, h: r.h, entries };
     this.buildSide();
     this.paint();
   }
@@ -292,7 +321,7 @@ export class OverworldView {
       h('div', { class: 'panel-title' }, 'Overworld'),
       h('div', { class: 'prop' }, h('label', null, 'Karte'), select(MAP_NAMES.map((n, i) => [i, n] as [number, string]), this.map, (v) => { this.map = v; this.selectedTl = -1; this.redrawMap(); this.buildSide(); })),
       h('div', { class: 'tabs' },
-        h('button', { class: this.mode === 'l1' ? 'active' : '', onclick: () => { this.mode = 'l1'; if (this.brush.kind !== 'l1') this.brush = { kind: 'l1', tile: 0x56 }; this.buildSide(); this.paint(); } }, 'Layer 1 (Wege/Level)'),
+        h('button', { class: this.mode === 'l1' ? 'active' : '', onclick: () => { this.mode = 'l1'; if (this.brush.kind !== 'l1') this.brush = { kind: 'l1', w: 1, h: 1, entries: [0x56] }; this.buildSide(); this.paint(); } }, 'Layer 1 (Wege/Level)'),
         h('button', { class: this.mode === 'l2' ? 'active' : '', onclick: () => { this.mode = 'l2'; if (this.brush.kind !== 'l2') this.brush = { kind: 'l2', w: 1, h: 1, entries: [0] }; this.buildSide(); this.paint(); } }, 'Layer 2 (Gelände)'),
       ),
       h('div', { class: 'row' }, tog('L1', () => this.showL1, (v) => (this.showL1 = v)), tog('L2', () => this.showL2, (v) => (this.showL2 = v)),
@@ -301,7 +330,7 @@ export class OverworldView {
         h('button', { class: 'primary', onclick: () => this.save() }, 'Overworld speichern'),
         h('button', { onclick: () => this.undoOnce(), title: 'Rückgängig (Strg+Z)' }, '↶'),
         h('button', { onclick: () => { this.invalidate(); this.redrawMap(); this.buildSide(); } }, 'Neu laden')),
-      h('div', { class: 'hint' }, 'Linksklick/Ziehen: malen · Rechtsklick: Pipette · Alt+Klick (Layer 1): Level-Info. "Events" zeigt den Zustand nach allen Events (nur Ansicht).'),
+      h('div', { class: 'hint' }, 'Wie im Level-Editor: Klick nimmt ein Tile auf, Ziehen einen Block (auch in der Palette) · Rechtsklick/Shift+Klick malt, Ziehen malt weiter · Alt+Klick (Layer 1): Level-Info. "Events" zeigt den Zustand nach allen Events (nur Ansicht).'),
     );
     if (this.selectedTl > 0) side.append(this.levelInfo(this.selectedTl));
     side.append(this.mode === 'l1' ? this.l1Palette() : this.l2Palette());
@@ -328,60 +357,102 @@ export class OverworldView {
     );
   }
 
+  // palette sheet with the brush outlined (when it is a rectangle of the sheet) and rectangle picking;
+  // any other brush (taken from the map, flipped) is shown as a preview instead
+  sheetPalette(sheet: HTMLCanvasElement, cls: string, cols: number, rows: number, cell: number, sheetValue: (x: number, y: number) => number,
+    preview: (ctx: CanvasRenderingContext2D) => void): HTMLElement {
+    const b = this.brush;
+    const c = h('canvas', { width: sheet.width, height: sheet.height, class: cls });
+    const ctx = c.getContext('2d')!;
+    const draw = (r: { x: number; y: number; w: number; h: number } | null) => {
+      ctx.drawImage(sheet, 0, 0);
+      if (!r) return;
+      ctx.strokeStyle = '#4cc2ff'; ctx.lineWidth = cell / 8;
+      ctx.strokeRect(r.x * cell + ctx.lineWidth / 2, r.y * cell + ctx.lineWidth / 2, r.w * cell - ctx.lineWidth, r.h * cell - ctx.lineWidth);
+    };
+    let at: { x: number; y: number; w: number; h: number } | null = null;
+    if (b.kind === this.mode) {
+      for (let i = 0; i < cols * rows && !at; i++) {
+        const x = i % cols, y = Math.floor(i / cols);
+        if (x + b.w <= cols && y + b.h <= rows && b.entries.every((v, j) => v === sheetValue(x + (j % b.w), y + Math.floor(j / b.w)))) at = { x, y, w: b.w, h: b.h };
+      }
+    }
+    draw(at);
+    attachRectPick(c, cols, rows, draw, (r) => {
+      this.brush = { kind: this.mode, w: r.w, h: r.h, entries: Array.from({ length: r.w * r.h }, (_, j) => sheetValue(r.x + (j % r.w), r.y + Math.floor(j / r.w))) };
+      this.buildSide();
+    });
+    const out = h('div', null);
+    if (!at && b.kind === this.mode) {
+      const p = h('canvas', { width: b.w * cell, height: b.h * cell, class: 'ow-brush' });
+      preview(p.getContext('2d')!);
+      p.style.width = `${Math.min(b.w * cell * 2, 256)}px`;
+      p.style.imageRendering = 'pixelated';
+      out.append(h('div', { class: 'hint' }, `Pinsel ${b.w}×${b.h}:`), h('div', { class: 'row' }, p));
+    }
+    out.append(c);
+    return out;
+  }
+
   l1Palette(): HTMLElement {
     const r = this.render();
     const tc = new TileCache(r.vram, r.cgram, 0);
-    const c = document.createElement('canvas');
-    c.width = 256; c.height = 256;
-    const ctx = c.getContext('2d')!;
-    const id = ctx.createImageData(256, 256);
-    const px = new Uint32Array(id.data.buffer);
-    px.fill(0xff181818);
-    for (let t = 0; t < 256; t++) this.drawL1Tile(px, tc, r, t, (t & 15) * 16, (t >> 4) * 16, 256, 256);
-    ctx.putImageData(id, 0, 0);
+    const tiles = (list: number[], w: number, W: number, H: number) => {
+      const c = document.createElement('canvas');
+      c.width = W; c.height = H;
+      const ctx = c.getContext('2d')!;
+      const id = ctx.createImageData(W, H);
+      const px = new Uint32Array(id.data.buffer);
+      px.fill(0xff181818);
+      list.forEach((t, i) => this.drawL1Tile(px, tc, r, t, (i % w) * 16, Math.floor(i / w) * 16, W, H));
+      ctx.putImageData(id, 0, 0);
+      return c;
+    };
+    const sheet = tiles(Array.from({ length: 256 }, (_, t) => t), 16, 256, 256);
     const b = this.brush;
-    if (b.kind === 'l1') {
-      ctx.strokeStyle = '#4cc2ff'; ctx.lineWidth = 2;
-      ctx.strokeRect((b.tile & 15) * 16 + 1, (b.tile >> 4) * 16 + 1, 14, 14);
-    }
-    c.className = 'ow-pal';
-    c.addEventListener('mousedown', (e) => {
-      const rc = c.getBoundingClientRect();
-      const x = Math.floor((e.clientX - rc.left) / (rc.width / 16)), y = Math.floor((e.clientY - rc.top) / (rc.height / 16));
-      this.brush = { kind: 'l1', tile: y * 16 + x };
-      this.buildSide();
-    });
-    return h('div', null, h('div', { class: 'hint' }, `Tile ${b.kind === 'l1' ? hex(b.tile, 2) : ''} · Level-Tiles: 56–80`), c);
+    const one = b.kind === 'l1' && b.entries.length === 1;
+    return h('div', null,
+      h('div', { class: 'hint' }, `${one ? `Tile ${hex(b.entries[0], 2)}` : b.kind === 'l1' ? `Block ${b.w}×${b.h}` : ''} · Level-Tiles: 56–80`),
+      this.sheetPalette(sheet, 'ow-pal', 16, 16, 16, (x, y) => y * 16 + x,
+        (ctx) => ctx.drawImage(tiles(b.entries, b.w, b.w * 16, b.h * 16), 0, 0)));
   }
 
   l2Palette(): HTMLElement {
     const r = this.render();
     const tc = new TileCache(r.vram, r.cgram, 0);
-    const c = document.createElement('canvas');
-    c.width = 128; c.height = 512;
-    const ctx = c.getContext('2d')!;
-    const id = ctx.createImageData(128, 512);
-    const px = new Uint32Array(id.data.buffer);
-    px.fill(0xff181818);
-    for (let t = 0; t < 1024; t++) blit8(px, 128, 512, tc.get(t | (this.l2Pal << 10)), (t & 15) * 8, (t >> 4) * 8);
-    ctx.putImageData(id, 0, 0);
-    c.className = 'ow-pal8';
-    c.addEventListener('mousedown', (e) => {
-      const rc = c.getBoundingClientRect();
-      const x = Math.floor((e.clientX - rc.left) / (rc.width / 16)), y = Math.floor((e.clientY - rc.top) / (rc.height / 64));
-      this.brush = { kind: 'l2', w: 1, h: 1, entries: [(y * 16 + x) | (this.l2Pal << 10)] };
-      this.buildSide();
-    });
+    const entries = (list: number[], w: number, W: number, H: number) => {
+      const c = document.createElement('canvas');
+      c.width = W; c.height = H;
+      const ctx = c.getContext('2d')!;
+      const id = ctx.createImageData(W, H);
+      const px = new Uint32Array(id.data.buffer);
+      px.fill(0xff181818);
+      list.forEach((v, i) => blit8(px, W, H, tc.get(v), (i % w) * 8, Math.floor(i / w) * 8));
+      ctx.putImageData(id, 0, 0);
+      return c;
+    };
+    const sheet = entries(Array.from({ length: 1024 }, (_, t) => t | (this.l2Pal << 10)), 16, 128, 512);
     const b = this.brush;
-    const brushInfo = b.kind === 'l2' ? `Pinsel ${b.w}×${b.h}: ${b.entries.map((v) => hex(v, 4)).join(' ')}` : '';
+    const brushInfo = b.kind === 'l2' ? `Pinsel ${b.w}×${b.h}: ${b.entries.slice(0, 16).map((v) => hex(v, 4)).join(' ')}${b.entries.length > 16 ? ' …' : ''}` : '';
+    // X-flip mirrors every row of the block, Y-flip the order of the rows
     const flip = (bit: number, label: string) => h('button', {
-      onclick: () => { if (this.brush.kind === 'l2') { this.brush.entries = this.brush.entries.map((v) => v ^ bit); if (this.brush.w === 2 && bit === 0x4000) { const e = this.brush.entries; this.brush.entries = [e[1], e[0], e[3], e[2]]; } if (this.brush.h === 2 && bit === 0x8000) { const e = this.brush.entries; this.brush.entries = [e[2], e[3], e[0], e[1]]; } this.buildSide(); } },
+      onclick: () => {
+        const br = this.brush;
+        if (br.kind !== 'l2') return;
+        const rows = Array.from({ length: br.h }, (_, y) => br.entries.slice(y * br.w, (y + 1) * br.w).map((v) => v ^ bit));
+        if (bit === 0x4000) rows.forEach((row) => row.reverse());
+        if (bit === 0x8000) rows.reverse();
+        br.entries = rows.flat();
+        this.buildSide();
+      },
     }, label);
+    const pal = h('div', { class: 'ow-pal-scroll' }, this.sheetPalette(sheet, 'ow-pal8', 16, 64, 8, (x, y) => (y * 16 + x) | (this.l2Pal << 10),
+      (ctx) => ctx.drawImage(entries(b.entries, b.w, b.w * 8, b.h * 8), 0, 0)));
     return h('div', null,
       h('div', { class: 'prop' }, h('label', null, 'Palette'), select(Array.from({ length: 8 }, (_, i) => [i, String(i)] as [number, string]), this.l2Pal, (v) => { this.l2Pal = v; this.buildSide(); })),
       h('div', { class: 'row' }, flip(0x4000, 'X-Flip'), flip(0x8000, 'Y-Flip'), flip(0x2000, 'Priorität')),
       h('div', { class: 'hint mono' }, brushInfo),
-      h('div', { class: 'ow-pal-scroll' }, c));
+      pal);
   }
 
   save(): void {

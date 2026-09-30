@@ -73,8 +73,9 @@ Beim Anzeigen eines Levels führt er die **originalen Laderoutinen** des ROMs au
   Der eigene LZ2-Kompressor erzeugt kleinere Daten als das Original.
 
 ### Overworld-Editor (O)
-* Hauptkarte und alle Submaps, Layer 1 (Wege/Level-Tiles) und Layer 2 (Gelände, 8x8) malen, Pipette,
-  optionale Ansicht „alle Events freigeschaltet“.
+* Hauptkarte und alle Submaps, Layer 1 (Wege/Level-Tiles) und Layer 2 (Gelände, 8x8) malen – Maustasten wie
+  im Level-Editor: Klick/Ziehen nimmt ein Tile oder einen Block als Pinsel auf (Karte oder Palette),
+  Rechtsklick/Shift+Klick malt; X-/Y-Flip für Layer-2-Blöcke; optionale Ansicht „alle Events freigeschaltet“.
 * Level-Tiles zeigen Translevel → Levelnummer; Levelnamen aus den drei Namensbausteinen wählbar;
   Sprung zum Level-Editor.
 * Speichern: Layer 1 an Ort und Stelle, Layer 2 mit optimalem RLE-Encoder in freien Speicher.

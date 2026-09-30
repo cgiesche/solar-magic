@@ -1,7 +1,7 @@
 // Sidebar panels: level list, palette (objects / sprites), properties.
 
 import type { App, PaletteItem } from './app.ts';
-import { h, clear, hexInput } from './dom.ts';
+import { h, clear, hexInput, attachRectPick } from './dom.ts';
 import { objectName, spriteName, hex2, hex3 } from '../core/names.ts';
 import { objectVariant, withObjectVariant, type ObjKind } from '../core/objkinds.ts';
 import { objectThumbs, thumbCanvas, objKey, type ObjSpec } from './thumbs.ts';
@@ -208,35 +208,11 @@ export class Palette {
       ? (bw * bh > 1 ? `Block ${bw}×${bh} ab Tile ${hex3(curTile)} gewählt – Rechtsklick in der Levelansicht platziert ihn (je Tile ein Direct-Map16-Objekt).`
         : `Tile ${hex3(curTile)} gewählt – Rechtsklick in der Levelansicht platziert es (Direct-Map16-Objekt).`)
       : 'Tile anklicken (oder mehrere per Ziehen), dann per Rechtsklick im Level platzieren. Erfordert den Editor-Patch (wird automatisch installiert). Tiles ab 200 legt der Map16-Editor (M) an.');
-    const cellAt = (e: MouseEvent) => {
-      const rc = c.getBoundingClientRect();
-      return { x: Math.max(0, Math.min(15, Math.floor((e.clientX - rc.left) / (rc.width / 16)))), y: Math.max(0, Math.min(31, Math.floor((e.clientY - rc.top) / (rc.height / 32)))) };
-    };
     // click picks a tile, dragging picks a rectangle of tiles
-    c.addEventListener('mousedown', (e) => {
-      if (e.button !== 0) return;
-      e.preventDefault();
-      const a = cellAt(e);
-      let b = a;
-      const rect = () => ({ x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(a.x - b.x) + 1, h: Math.abs(a.y - b.y) + 1 });
-      const move = (ev: MouseEvent) => {
-        const n = cellAt(ev);
-        if (n.x === b.x && n.y === b.y) return;
-        b = n;
-        const r = rect();
-        draw(r.x, r.y, r.w, r.h);
-      };
-      const up = () => {
-        window.removeEventListener('mousemove', move);
-        window.removeEventListener('mouseup', up);
-        const r = rect();
-        app.paletteItem = { kind: 'obj', num: 0, ext: DM16_EXT, size: 0, tile: this.m16Base + r.y * 16 + r.x, ...(r.w * r.h > 1 ? { block: { w: r.w, h: r.h } } : {}) };
-        if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1');
-        this.build();
-      };
-      window.addEventListener('mousemove', move);
-      window.addEventListener('mouseup', up);
-      draw(a.x, a.y, 1, 1);
+    attachRectPick(c, 16, 32, (r) => draw(r.x, r.y, r.w, r.h), (r) => {
+      app.paletteItem = { kind: 'obj', num: 0, ext: DM16_EXT, size: 0, tile: this.m16Base + r.y * 16 + r.x, ...(r.w * r.h > 1 ? { block: { w: r.w, h: r.h } } : {}) };
+      if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1');
+      this.build();
     });
     // tooltip: tile number and behaviour when hit from below
     let hoverTile = -1;
@@ -274,34 +250,10 @@ export class Palette {
       ctx.strokeRect(x * S, y * S, w * S, hh * S);
     };
     if (onSheet) draw(t0 & 15, t0 >> 4, brush.w, brush.h); else draw(-1, 0, 0, 0);
-    const cellAt = (e: MouseEvent) => {
-      const rc = c.getBoundingClientRect();
-      return { x: Math.max(0, Math.min(15, Math.floor((e.clientX - rc.left) / (rc.width / 16)))), y: Math.max(0, Math.min(31, Math.floor((e.clientY - rc.top) / (rc.height / 32)))) };
-    };
     // click picks a tile, dragging picks a rectangle of tiles (as in the Map16 tab)
-    c.addEventListener('mousedown', (e) => {
-      if (e.button !== 0) return;
-      e.preventDefault();
-      const a = cellAt(e);
-      let b = a;
-      const rect = () => ({ x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(a.x - b.x) + 1, h: Math.abs(a.y - b.y) + 1 });
-      const move = (ev: MouseEvent) => {
-        const n = cellAt(ev);
-        if (n.x === b.x && n.y === b.y) return;
-        b = n;
-        const r = rect();
-        draw(r.x, r.y, r.w, r.h);
-      };
-      const up = () => {
-        window.removeEventListener('mousemove', move);
-        window.removeEventListener('mouseup', up);
-        const r = rect();
-        app.bgBrush = { w: r.w, h: r.h, tiles: Array.from({ length: r.w * r.h }, (_, i) => (r.y + Math.floor(i / r.w)) * 16 + r.x + (i % r.w)) };
-        this.build();
-      };
-      window.addEventListener('mousemove', move);
-      window.addEventListener('mouseup', up);
-      draw(a.x, a.y, 1, 1);
+    attachRectPick(c, 16, 32, (r) => draw(r.x, r.y, r.w, r.h), (r) => {
+      app.bgBrush = { w: r.w, h: r.h, tiles: Array.from({ length: r.w * r.h }, (_, i) => (r.y + Math.floor(i / r.w)) * 16 + r.x + (i % r.w)) };
+      this.build();
     });
     const what = brush.tiles.length > 1 ? `Block ${brush.w}×${brush.h}${onSheet ? ` ab BG-Tile ${hex3(brush.tiles[0])}` : ' aus dem Level'}` : `BG-Tile ${hex3(brush.tiles[0])}`;
     this.body.append(h('div', { class: 'hint' }, `${what} – Rechtsklick/Shift+Klick in der Levelansicht malt (Ziehen malt weiter), Klicken nimmt ein Tile auf, Ziehen einen Block. Tiles hier anklicken oder mehrere per Ziehen wählen. Die BG-Tilemap (32×27) wiederholt sich.`));

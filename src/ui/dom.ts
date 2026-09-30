@@ -142,3 +142,36 @@ export function attachPanZoom(scroller: HTMLElement, zoom: () => number, setZoom
     setZoom(next, e.clientX - rc.left, e.clientY - rc.top);
   }, { passive: false });
 }
+
+export type CellRect = { x: number; y: number; w: number; h: number };
+// palette sheets: a click picks a cell, dragging a rectangle of cells; show() previews the rectangle while dragging
+export function attachRectPick(c: HTMLElement, cols: number, rows: number, show: (r: CellRect) => void, done: (r: CellRect) => void): void {
+  const cellAt = (e: MouseEvent) => {
+    const rc = c.getBoundingClientRect();
+    return {
+      x: Math.max(0, Math.min(cols - 1, Math.floor((e.clientX - rc.left) / (rc.width / cols)))),
+      y: Math.max(0, Math.min(rows - 1, Math.floor((e.clientY - rc.top) / (rc.height / rows)))),
+    };
+  };
+  c.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const a = cellAt(e);
+    let b = a;
+    const rect = (): CellRect => ({ x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(a.x - b.x) + 1, h: Math.abs(a.y - b.y) + 1 });
+    const move = (ev: MouseEvent) => {
+      const n = cellAt(ev);
+      if (n.x === b.x && n.y === b.y) return;
+      b = n;
+      show(rect());
+    };
+    const up = () => {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+      done(rect());
+    };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+    show(rect());
+  });
+}
