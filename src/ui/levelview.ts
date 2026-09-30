@@ -480,7 +480,7 @@ export class LevelView {
       for (const o of app.selectedObjects()) {
         const s0 = d.origSize.get(o.uid);
         if (s0 === undefined) continue;
-        o.size = resizeObjectSize(o.num, s0, dw, dh);
+        o.size = resizeObjectSize(o.num, s0, dw, dh, app.level.header.tileset);
       }
       this.scheduleRefresh();
     }

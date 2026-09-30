@@ -10,9 +10,9 @@ import { objectVariant } from '../core/names.ts';
 export interface ObjSpec { num: number; ext: number; size: number }
 
 // sub-objects (see objectVariants) get a key per type
-export function objKey(s: { num: number; ext: number; size: number }): string {
+export function objKey(s: { num: number; ext: number; size: number }, tileset: number): string {
   if (s.num === 0) return `e${s.ext}`;
-  const v = objectVariant(s.num, s.size);
+  const v = objectVariant(s.num, s.size, tileset);
   return v < 0 ? `s${s.num}` : `s${s.num}.${v}`;
 }
 
@@ -67,11 +67,11 @@ export function renderObjectThumbs(app: App, specs: ObjSpec[], tilesOut?: Map<st
       }
       ctx.putImageData(id, 0, 0);
       c.dataset.tiles = String(tiles.length);
-      out.set(objKey(s), c);
+      out.set(objKey(s, hdr.tileset), c);
       if (tilesOut) {
         const m16 = new Set<number>();
         for (const off of set!) m16.add(r.wram[MAP_BASE + off] | (r.wram[0x10000 + MAP_BASE + off] << 8));
-        tilesOut.set(objKey(s), [...m16].sort((a, b) => a - b));
+        tilesOut.set(objKey(s, hdr.tileset), [...m16].sort((a, b) => a - b));
       }
     });
   }

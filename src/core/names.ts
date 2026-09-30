@@ -47,7 +47,8 @@ export function hex(n: number, d: number): string {
 // Standard objects whose settings byte uses one nibble as a type (sub-object) instead of a size,
 // taken from the object routines in bank $0D. 'lo': type = low nibble, only the height is sizable;
 // 'hi': type = high nibble, only the width is sizable.
-const OBJ_VARIANTS: Record<number, { nibble: 'lo' | 'hi'; count: number }> = {
+type ObjVariants = { nibble: 'lo' | 'hi'; count: number };
+const OBJ_VARIANTS: Record<number, ObjVariants> = {
   0x0f: { nibble: 'lo', count: 6 }, // vertical pipes
   0x10: { nibble: 'hi', count: 4 }, // horizontal pipes
   0x12: { nibble: 'lo', count: 10 }, // slopes
@@ -57,26 +58,51 @@ const OBJ_VARIANTS: Record<number, { nibble: 'lo' | 'hi'; count: number }> = {
   0x1e: { nibble: 'lo', count: 2 }, // net vertical edge (left/right)
 };
 
-export function objectVariants(num: number): { nibble: 'lo' | 'hi'; count: number } | null {
+// Tileset specific objects (22-3F) per object set; tilesets map to five sets ($0DA41E).
+const TILESET_OBJ_SET = [0, 1, 2, 3, 4, 4, 2, 0, 2, 3, 3, 3, 0, 4, 3, 0];
+const TILESET_OBJ_VARIANTS: Record<number, ObjVariants>[] = [
+  { // normal 1/2, cloud/forest
+    0x34: { nibble: 'lo', count: 4 }, 0x37: { nibble: 'lo', count: 2 }, 0x3d: { nibble: 'hi', count: 2 },
+    0x3e: { nibble: 'lo', count: 8 }, 0x3f: { nibble: 'hi', count: 5 },
+  },
+  { // castle 1
+    0x37: { nibble: 'hi', count: 2 }, 0x38: { nibble: 'lo', count: 3 }, 0x3d: { nibble: 'lo', count: 4 },
+    0x3e: { nibble: 'hi', count: 2 }, 0x3f: { nibble: 'lo', count: 3 },
+  },
+  { // rope 1-3
+    0x35: { nibble: 'lo', count: 4 }, 0x36: { nibble: 'hi', count: 2 }, 0x37: { nibble: 'lo', count: 4 },
+    0x38: { nibble: 'hi', count: 2 }, 0x39: { nibble: 'lo', count: 3 }, 0x3a: { nibble: 'lo', count: 6 },
+  },
+  { // underground 1-3, switch palace 2, castle 2
+    0x38: { nibble: 'lo', count: 2 }, 0x39: { nibble: 'lo', count: 4 }, 0x3c: { nibble: 'hi', count: 2 },
+    0x3e: { nibble: 'lo', count: 4 },
+  },
+  { // switch palace 1, ghost house 1/2
+    0x37: { nibble: 'hi', count: 3 }, 0x39: { nibble: 'lo', count: 3 }, 0x3a: { nibble: 'lo', count: 4 },
+  },
+];
+
+export function objectVariants(num: number, tileset: number): ObjVariants | null {
+  if (num >= 0x22) return TILESET_OBJ_VARIANTS[TILESET_OBJ_SET[tileset & 15]][num] ?? null;
   return OBJ_VARIANTS[num] ?? null;
 }
 
 // type of a sub-object, -1 for objects without types
-export function objectVariant(num: number, size: number): number {
-  const v = OBJ_VARIANTS[num];
+export function objectVariant(num: number, size: number, tileset: number): number {
+  const v = objectVariants(num, tileset);
   return !v ? -1 : v.nibble === 'lo' ? size & 15 : size >> 4;
 }
 
-export function withObjectVariant(num: number, size: number, t: number): number {
-  const v = OBJ_VARIANTS[num];
+export function withObjectVariant(num: number, size: number, t: number, tileset: number): number {
+  const v = objectVariants(num, tileset);
   if (!v) return size;
   return v.nibble === 'lo' ? (size & 0xf0) | (t & 15) : ((t & 15) << 4) | (size & 15);
 }
 
 // settings byte of an object resized by dw/dh tiles; the type nibble of sub-objects stays untouched
-export function resizeObjectSize(num: number, size: number, dw: number, dh: number): number {
+export function resizeObjectSize(num: number, size: number, dw: number, dh: number, tileset: number): number {
   if (num === 0x21) return Math.max(0, Math.min(255, size + dw)); // long ground ledge: whole byte is the width
-  const v = OBJ_VARIANTS[num];
+  const v = objectVariants(num, tileset);
   const w = v?.nibble === 'lo' ? size & 15 : Math.max(0, Math.min(15, (size & 15) + dw));
   const hh = v?.nibble === 'hi' ? size >> 4 : Math.max(0, Math.min(15, (size >> 4) + dh));
   return (hh << 4) | w;

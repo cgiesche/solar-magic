@@ -591,7 +591,7 @@ export class App {
     const objs = this.selectedObjects().filter((o) => o.num !== 0 || o.ext === DM16_EXT);
     if (!objs.length) return;
     this.checkpoint();
-    for (const o of objs) o.size = resizeObjectSize(o.num, o.size, dw, dh);
+    for (const o of objs) o.size = resizeObjectSize(o.num, o.size, dw, dh, this.level.header.tileset);
     this.changed();
   }
 
