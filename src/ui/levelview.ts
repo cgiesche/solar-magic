@@ -277,17 +277,22 @@ export class LevelView {
     ctx.globalAlpha = 1;
   }
 
-  // arrows for the directions a tile can be entered in (pipes, doors)
+  // arrows for the directions a tile can be entered in (pipes, doors), white in the upper right
+  // corner like the items; drawn as shapes, text glyphs blur at 16 px tiles
   drawEnter(ctx: CanvasRenderingContext2D, dirs: string, x: number, y: number): void {
-    const a = ctx.globalAlpha;
-    ctx.globalAlpha = 0.9;
-    ctx.fillStyle = 'rgba(0,0,0,0.6)';
-    ctx.fillRect(x, y + 10, dirs.length * 6 + 1, 6);
-    ctx.fillStyle = '#7fe08a';
-    ctx.font = 'bold 7px sans-serif';
-    ctx.textBaseline = 'top';
-    [...dirs].forEach((d, i) => ctx.fillText(d, x + 1 + i * 6, y + 9.5));
-    ctx.textBaseline = 'alphabetic';
+    const a = ctx.globalAlpha, n = dirs.length, bx = x + 16 - n * 5 - 1;
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(bx, y, n * 5 + 1, 6);
+    ctx.fillStyle = '#fff';
+    [...dirs].forEach((d, i) => {
+      const cx = bx + 3 + i * 5, cy = y + 3; // 4x4 triangle around (cx, cy)
+      const pts = d === '↓' ? [[-2, -2], [2, -2], [0, 2]] : d === '↑' ? [[-2, 2], [2, 2], [0, -2]]
+        : d === '←' ? [[2, -2], [2, 2], [-2, 0]] : [[-2, -2], [-2, 2], [2, 0]];
+      ctx.beginPath();
+      pts.forEach(([px, py], k) => (k ? ctx.lineTo(cx + px, cy + py) : ctx.moveTo(cx + px, cy + py)));
+      ctx.fill();
+    });
     ctx.globalAlpha = a;
   }
 

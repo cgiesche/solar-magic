@@ -274,8 +274,9 @@ export class Palette {
           if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1');
           this.build();
         },
-      }, h('div', { class: 'pal-img' }, th ? cloneCanvas(th) : h('span', { class: 'none' }, '–'), itemBadge(app, items),
-        enter ? h('div', { class: 'pal-enter', title: enterText(enter) }, enter) : ''), h('div', { class: 'pal-label' }, label)));
+      }, h('div', { class: 'pal-img' }, th ? cloneCanvas(th) : h('span', { class: 'none' }, '–'),
+        h('div', { class: 'pal-corner' }, itemBadge(app, items), enter ? h('div', { class: 'pal-enter', title: enterText(enter) }, enter) : '')),
+        h('div', { class: 'pal-label' }, label)));
     }
     this.body.appendChild(grid);
   }
