@@ -258,20 +258,62 @@ export class Palette {
   buildBg(): void {
     const app = this.app;
     const sheet = renderMap16Sheet(app, true);
-    const sel = app.bgTile;
+    const brush = app.bgBrush;
+    const t0 = brush.tiles[0] & 0x1ff;
+    // a brush that is a rectangle of the sheet is outlined there, one picked from the level is shown separately
+    const onSheet = (t0 & 15) + brush.w <= 16 && (t0 >> 4) + brush.h <= 32
+      && brush.tiles.every((t, i) => t === brush.tiles[0] + Math.floor(i / brush.w) * 16 + (i % brush.w));
+    const S = 16 * 1.2;
     const c = h('canvas', { width: 256 * 1.2, height: 512 * 1.2, class: 'm16-pick' });
     const ctx = c.getContext('2d')!;
     ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(sheet, 0, 0, c.width, c.height);
-    ctx.strokeStyle = '#4cc2ff'; ctx.lineWidth = 2;
-    ctx.strokeRect((sel & 15) * 16 * 1.2, ((sel >> 4) & 31) * 16 * 1.2, 16 * 1.2, 16 * 1.2);
-    c.addEventListener('mousedown', (e) => {
+    const draw = (x: number, y: number, w: number, hh: number) => {
+      ctx.drawImage(sheet, 0, 0, c.width, c.height);
+      if (x < 0) return;
+      ctx.strokeStyle = '#4cc2ff'; ctx.lineWidth = 2;
+      ctx.strokeRect(x * S, y * S, w * S, hh * S);
+    };
+    if (onSheet) draw(t0 & 15, t0 >> 4, brush.w, brush.h); else draw(-1, 0, 0, 0);
+    const cellAt = (e: MouseEvent) => {
       const rc = c.getBoundingClientRect();
-      const x = Math.floor((e.clientX - rc.left) / (rc.width / 16)), y = Math.floor((e.clientY - rc.top) / (rc.height / 32));
-      app.bgTile = y * 16 + x;
-      this.build();
+      return { x: Math.max(0, Math.min(15, Math.floor((e.clientX - rc.left) / (rc.width / 16)))), y: Math.max(0, Math.min(31, Math.floor((e.clientY - rc.top) / (rc.height / 32)))) };
+    };
+    // click picks a tile, dragging picks a rectangle of tiles (as in the Map16 tab)
+    c.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      const a = cellAt(e);
+      let b = a;
+      const rect = () => ({ x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(a.x - b.x) + 1, h: Math.abs(a.y - b.y) + 1 });
+      const move = (ev: MouseEvent) => {
+        const n = cellAt(ev);
+        if (n.x === b.x && n.y === b.y) return;
+        b = n;
+        const r = rect();
+        draw(r.x, r.y, r.w, r.h);
+      };
+      const up = () => {
+        window.removeEventListener('mousemove', move);
+        window.removeEventListener('mouseup', up);
+        const r = rect();
+        app.bgBrush = { w: r.w, h: r.h, tiles: Array.from({ length: r.w * r.h }, (_, i) => (r.y + Math.floor(i / r.w)) * 16 + r.x + (i % r.w)) };
+        this.build();
+      };
+      window.addEventListener('mousemove', move);
+      window.addEventListener('mouseup', up);
+      draw(a.x, a.y, 1, 1);
     });
-    this.body.append(h('div', { class: 'hint' }, `BG-Tile ${hex3(sel)} – Klicken/Ziehen in der Levelansicht malt, Rechtsklick nimmt ein Tile auf. Die BG-Tilemap (32×27) wiederholt sich.`), c);
+    const what = brush.tiles.length > 1 ? `Block ${brush.w}×${brush.h}${onSheet ? ` ab BG-Tile ${hex3(brush.tiles[0])}` : ' aus dem Level'}` : `BG-Tile ${hex3(brush.tiles[0])}`;
+    this.body.append(h('div', { class: 'hint' }, `${what} – Rechtsklick/Shift+Klick in der Levelansicht malt (Ziehen malt weiter), Klicken nimmt ein Tile auf, Ziehen einen Block. Tiles hier anklicken oder mehrere per Ziehen wählen. Die BG-Tilemap (32×27) wiederholt sich.`));
+    if (!onSheet) {
+      const p = h('canvas', { width: brush.w * 16, height: brush.h * 16, class: 'bg-brush' });
+      const pc = p.getContext('2d')!;
+      brush.tiles.forEach((t, i) => pc.drawImage(sheet, (t & 15) * 16, ((t >> 4) & 31) * 16, 16, 16, (i % brush.w) * 16, Math.floor(i / brush.w) * 16, 16, 16));
+      p.style.width = `${Math.min(brush.w * S, 256 * 1.2)}px`;
+      p.style.imageRendering = 'pixelated';
+      this.body.append(h('div', { class: 'row' }, p));
+    }
+    this.body.append(c);
   }
 
   specs(): ObjSpec[] {

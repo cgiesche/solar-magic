@@ -253,6 +253,8 @@ function showHelp(): void {
     ['Ziehen', 'Auswahl verschieben / Rahmen aufziehen'],
     ['Griff unten rechts', 'Objektgröße ändern'],
     ['Rechtsklick / Shift+Klick', 'Palettenelement einfügen'],
+    ['BG: Klick / Ziehen', 'Tile bzw. Tile-Block als Pinsel aufnehmen'],
+    ['BG: Rechtsklick / Shift+Klick (Ziehen)', 'mit dem Pinsel malen'],
     ['Einfg / I', 'Objekt/Sprite nach Nummer einfügen (an Mausposition)'],
     ['M / Z / S-Markierung ziehen', 'Haupteingang / Zwischenziel-Screen / sekundären Eingang verschieben'],
     ['Pfeiltasten', 'Auswahl um 1 Tile verschieben'],

@@ -36,7 +36,8 @@ Beim Anzeigen eines Levels führt er die **originalen Laderoutinen** des ROMs au
 * Alle 512 Level; Liste mit Levelnamen (aus der Overworld), Filter nach Nummer/Name.
 * **Layer 1 / Layer 2 (bei L2-Levels) / Sprites / Screen-Exits / BG** als Bearbeitungsmodi (Tasten 1–5).
 * **Hintergrund malen (BG-Modus):** die BG-Tilemap (32×27 BG-Map16-Tiles, beide Seiten 000–1FF) mit Pinsel
-  bearbeiten, Rechtsklick nimmt ein Tile auf; gespeichert wird sie in freiem Speicher (BG-Patch).
+  bearbeiten – wie in den anderen Modi: Klick/Ziehen nimmt ein Tile oder einen Block als Pinsel auf (im Level
+  oder in der Palette), Rechtsklick/Shift+Klick malt (Ziehen malt weiter); gespeichert wird sie in freiem Speicher (BG-Patch).
 * Objekte: auswählen (auch Rahmen, Strg+Klick), verschieben (Maus/Pfeile), Größe per Griff/Tasten,
   einfügen (Rechtsklick/Shift+Klick mit Paletteneintrag), löschen, kopieren/einfügen/duplizieren,
   Zeichenreihenfolge (Bild↑/↓), Undo/Redo.

@@ -13,7 +13,8 @@ type Drag =
   | { kind: 'resize'; startTx: number; startTy: number; origSize: Map<number, number>; lastDw: number; lastDh: number }
   | { kind: 'band'; x0: number; y0: number; x1: number; y1: number; add: boolean }
   | { kind: 'marker'; marker: Marker; offX: number; offY: number; moved: boolean }
-  | { kind: 'paint'; changed: boolean };
+  | { kind: 'paint'; changed: boolean; x0: number; y0: number; lastX: number; lastY: number } // BG brush, stamped on a grid from (x0, y0)
+  | { kind: 'pick'; x0: number; y0: number; x1: number; y1: number }; // BG tiles taken into the brush
 
 const MARKER_STYLE: Record<Marker['kind'], { color: string; label: string; title: string }> = {
   main: { color: 'rgba(255,40,40,0.9)', label: 'M', title: 'Haupteingang' },
@@ -210,9 +211,21 @@ export class LevelView {
           ctx.strokeRect(b.x0, b.y0, b.x1 - b.x0, b.y1 - b.y0);
         } else this.outlineObject(ctx, hit.item as LevelObject, 'rgba(255,255,255,0.7)', lw);
       }
+      // BG mode: the area the brush would paint
+      const bw = app.mode === 'bg' ? app.bgBrush.w : 1, bh = app.mode === 'bg' ? app.bgBrush.h : 1;
       ctx.strokeStyle = 'rgba(255,255,0,0.9)';
       ctx.lineWidth = lw;
-      ctx.strokeRect(tx * 16, ty * 16, 16, 16);
+      ctx.strokeRect(tx * 16, ty * 16, bw * 16, bh * 16);
+    }
+    if (this.drag?.kind === 'pick') {
+      const d = this.drag;
+      const x = Math.min(d.x0, d.x1), y = Math.min(d.y0, d.y1);
+      const w = Math.min(Math.abs(d.x1 - d.x0) + 1, 32), hh = Math.min(Math.abs(d.y1 - d.y0) + 1, 27);
+      ctx.strokeStyle = '#4cc2ff';
+      ctx.fillStyle = 'rgba(76,194,255,0.15)';
+      ctx.lineWidth = lw;
+      ctx.fillRect(x * 16, y * 16, w * 16, hh * 16);
+      ctx.strokeRect(x * 16, y * 16, w * 16, hh * 16);
     }
     if (this.drag?.kind === 'band') {
       const d = this.drag;
@@ -356,16 +369,15 @@ export class LevelView {
     this.scroller.focus();
     const { tx, ty, px, py } = this.tileFromEvent(e);
     if (e.button === 1) return;
-    if (app.mode === 'bg' && e.button === 2) {
-      // pick up the BG tile under the cursor
-      app.bgTile = app.bgAt(tx, ty);
-      app.emit('bgtile');
-      this.updateStatus(tx, ty);
-      return;
-    }
-    if (app.mode !== 'bg' && (e.button === 2 || (e.button === 0 && e.shiftKey && !e.ctrlKey))) {
-      // insert palette item
+    if (e.button === 2 || (e.button === 0 && e.shiftKey && !e.ctrlKey)) {
+      // insert palette item (BG: paint with the brush, dragging keeps painting)
       if (app.mode === 'exit') return;
+      if (app.mode === 'bg') {
+        app.checkpoint();
+        this.drag = { kind: 'paint', changed: app.paintBrush(tx, ty), x0: tx, y0: ty, lastX: tx, lastY: ty };
+        if (this.drag.changed) this.scheduleRefresh();
+        return;
+      }
       app.insertAt(tx, ty);
       return;
     }
@@ -378,9 +390,9 @@ export class LevelView {
       return;
     }
     if (app.mode === 'bg') {
-      app.checkpoint();
-      this.drag = { kind: 'paint', changed: app.paintBg(tx, ty, app.bgTile) };
-      if (this.drag.changed) this.scheduleRefresh();
+      // click takes the tile into the brush, dragging a rectangle of tiles
+      this.drag = { kind: 'pick', x0: tx, y0: ty, x1: tx, y1: ty };
+      this.paint();
       return;
     }
     if (app.mode === 'exit') {
@@ -454,7 +466,13 @@ export class LevelView {
       d.x1 = px; d.y1 = py;
       this.requestPaint();
     } else if (d.kind === 'paint') {
-      if (app.paintBg(tx, ty, app.bgTile)) { d.changed = true; this.scheduleRefresh(); }
+      const b = app.bgBrush;
+      const x = d.x0 + Math.floor((tx - d.x0) / b.w) * b.w, y = d.y0 + Math.floor((ty - d.y0) / b.h) * b.h;
+      if (x === d.lastX && y === d.lastY) return;
+      d.lastX = x; d.lastY = y;
+      if (app.paintBrush(x, y)) { d.changed = true; this.scheduleRefresh(); }
+    } else if (d.kind === 'pick') {
+      if (d.x1 !== tx || d.y1 !== ty) { d.x1 = tx; d.y1 = ty; this.requestPaint(); }
     } else if (d.kind === 'marker') {
       if (app.moveMarker(d.marker, px - d.offX, py - d.offY)) {
         d.moved = true;
@@ -507,6 +525,12 @@ export class LevelView {
       if (!d.changed) app.undoStack.pop(); else app.changed();
       return;
     }
+    if (d.kind === 'pick') {
+      app.pickBg(d.x0, d.y0, d.x1, d.y1);
+      this.updateStatus(d.x1, d.y1);
+      this.paint();
+      return;
+    }
     if (d.kind === 'marker') {
       if (d.marker.kind === 'sec') { if (d.moved) app.persist(); this.paint(); return; }
       if (!d.moved) { app.undoStack.pop(); this.paint(); return; }
@@ -555,7 +579,8 @@ export class LevelView {
       if (sum) txt += ` (${sum})`;
     }
     if (app.mode === 'bg') {
-      txt += `  BG-Tile ${hex3(app.bgAt(tx, ty))}  ·  Pinsel ${hex3(app.bgTile)} (Klick/Ziehen malt, Rechtsklick nimmt auf)`;
+      const b = app.bgBrush;
+      txt += `  BG-Tile ${hex3(app.bgAt(tx, ty))}  ·  Pinsel ${b.tiles.length > 1 ? `${b.w}×${b.h}` : hex3(b.tiles[0])} (Klick/Ziehen nimmt auf, Rechtsklick/Shift+Klick malt)`;
       this.status.textContent = txt;
       return;
     }

@@ -45,7 +45,8 @@ export class App {
   mode: EditMode = 'l1';
   selection = new Set<number>();
   paletteItem: PaletteItem | null = null;
-  bgTile = 0; // BG Map16 tile painted in BG mode
+  // BG mode brush: a w×h block of BG Map16 tiles (row-major), picked from the palette sheet or the level
+  bgBrush: { w: number; h: number; tiles: number[] } = { w: 1, h: 1, tiles: [0] };
   zoom = 2;
   show = { layer1: true, layer2: true, layer3: true, sprites: true, grid: false, screens: true, exits: true, ghost: true, anim: false, items: true };
   // view-only game state applied before the emulated level load
@@ -718,6 +719,20 @@ export class App {
     this.level.bg ??= bgFromWram(this.render.wram);
     this.level.bg[bgIndex(tx, ty)] = tile;
     return true;
+  }
+  // stamps the brush with its top-left tile at (tx, ty)
+  paintBrush(tx: number, ty: number): boolean {
+    const b = this.bgBrush;
+    let changed = false;
+    for (let i = 0; i < b.tiles.length; i++) if (this.paintBg(tx + (i % b.w), ty + Math.floor(i / b.w), b.tiles[i])) changed = true;
+    return changed;
+  }
+  // the level's BG tiles in a rectangle become the brush
+  pickBg(x0: number, y0: number, x1: number, y1: number): void {
+    const w = Math.min(Math.abs(x1 - x0) + 1, 32), h = Math.min(Math.abs(y1 - y0) + 1, 27);
+    const x = Math.min(x0, x1), y = Math.min(y0, y1);
+    this.bgBrush = { w, h, tiles: Array.from({ length: w * h }, (_, i) => this.bgAt(x + (i % w), y + Math.floor(i / w))) };
+    this.emit('bgtile');
   }
 
   clampObject(o: { x: number; y: number }): void {
