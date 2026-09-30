@@ -64,49 +64,11 @@ export function captureSprites(
     data.push(0xff);
     const r = emu.load(level, { layer1: l1, sprites: new Uint8Array(data), secondaryHeader: secondary, layer2Pointer: bgPointer });
     if (!r.ok) continue;
-    // continue running the (still live) emulator state for a few frames, recording which
-    // sprite slot writes each OAM buffer entry ($0200-$03FF): the sprite loop stores the slot
-    // in $15E9 ($0180A9) before each sprite runs, Yoshi is drawn later with $15E9 set at $01EA83;
-    // writes from shallower stack depth end the attribution.
-    // (score/extended sprite loops in bank 2 reuse $15E9, hence the bank check)
-    const owner = new Int8Array(128).fill(-1);
-    let snapOwner = owner.slice(), snapOam = s.wram.slice(0x200, 0x4a0);
-    // slots whose OAM entries were overwritten by another sprite in the same frame
-    let conflicts = new Set<number>(), snapConflicts = conflicts;
-    let cur = -1, s0 = 0;
-    s.hook = {
-      onWramWrite(a: number, v: number) {
-        if (a === 0x15e9) {
-          if (s.cpu.pbr === 1) { cur = v; s0 = s.cpu.s; }
-          else if (cur >= 0 && s.cpu.s < s0) cur = v; // sprite code switching slots
-          else cur = -1;
-          return;
-        }
-        if (cur >= 0 && s.cpu.s > s0) {
-          cur = -1;
-          snapOwner = owner.slice();
-          snapOam = s.wram.slice(0x200, 0x4a0);
-          snapConflicts = conflicts;
-          conflicts = new Set();
-        }
-        if (a >= 0x200 && a < 0x400) {
-          const e = (a - 0x200) >> 2, prev = owner[e];
-          if (cur >= 0 && prev >= 0 && prev !== cur) { conflicts.add(prev); conflicts.add(cur); }
-          owner[e] = cur;
-        }
-      },
-    };
-    try {
-      let guard = 0;
-      while (s.wram[0x100] !== 0x14 && guard++ < 80) s.runFrame();
-      for (let f = 0; f < 3; f++) s.runFrame();
-    } catch { continue; } finally { s.hook = null; }
+    const rec = record(emu, 3);
+    if (!rec) continue;
+    const { snapOwner, snapOam, snapConflicts } = rec;
     const w = s.wram;
     const cx = w[0x1a] | (w[0x1b] << 8), cy = w[0x1c] | (w[0x1d] << 8);
-    const obsel = s.ppuRegs[0x01];
-    const base = (obsel & 7) << 14;
-    const gap = (((obsel >> 3) & 3) + 1) << 13;
-    const pal = cgramToRGBA(s.cgram);
     // live sprite slots
     const live = new Map<number, { n: number; x: number; y: number }>();
     for (let i = 0; i < 12; i++) {
@@ -127,36 +89,9 @@ export function captureSprites(
       // partly off screen or sharing OAM entries with another sprite: retry alone in the first slot
       if (batch.length > 1 && (snapConflicts.has(i) || w[0x15a0 + i] || w[0x186c + i]
         || g.some(t => t.x < 0 || t.x + (t.big ? 16 : 8) > 256 || t.y + (t.big ? 16 : 8) > 224))) return;
-      let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
-      for (const t of g) {
-        const sz = t.big ? 16 : 8;
-        x0 = Math.min(x0, t.x); y0 = Math.min(y0, t.y); x1 = Math.max(x1, t.x + sz); y1 = Math.max(y1, t.y + sz);
-      }
-      const W = x1 - x0, H = y1 - y0;
-      if (W <= 0 || H <= 0 || W > 256 || H > 256) return;
-      const rgba = new Uint32Array(W * H);
-      const idx = new Uint8Array(64);
-      // OAM draw order: lower index has priority → draw in reverse
-      for (let k = g.length - 1; k >= 0; k--) {
-        const t = g[k];
-        const sz = t.big ? 2 : 1;
-        const xf = (t.attr & 0x40) !== 0, yf = (t.attr & 0x80) !== 0;
-        const pp = (t.attr >> 1) & 7;
-        for (let ty = 0; ty < sz; ty++) for (let tx = 0; tx < sz; tx++) {
-          const sub = ((t.tile & 0xf0) + (((t.tile & 0x0f) + tx) & 0x0f) + ty * 16) & 0xff;
-          const addr = (base + (t.attr & 1 ? gap : 0) + sub * 32) & 0xffff;
-          decodeTile(s.vram, addr, 4, idx);
-          const dx0 = (xf ? sz - 1 - tx : tx) * 8, dy0 = (yf ? sz - 1 - ty : ty) * 8;
-          for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) {
-            const c = idx[(yf ? 7 - y : y) * 8 + (xf ? 7 - x : x)];
-            if (!c) continue;
-            const px = t.x - x0 + dx0 + x, py = t.y - y0 + dy0 + y;
-            rgba[py * W + px] = pal[128 + pp * 16 + c];
-          }
-        }
-      }
+      const img = drawTiles(emu, g);
       // offset relative to the spawn tile, compensating for movement since spawn
-      result.set(l.n, { w: W, h: H, ox: x0 + cx - l.x, oy: y0 + cy - l.y, rgba });
+      if (img) result.set(l.n, { ...img, ox: img.ox + cx - l.x, oy: img.oy + cy - l.y });
     });
     done += batch.length;
     onProgress?.(Math.min(nums.length, done));
@@ -166,4 +101,119 @@ export function captureSprites(
     }
   }
   return result;
+}
+
+// Continues the live emulator state for a few frames (first into gameplay), recording which
+// sprite slot writes each OAM buffer entry ($0200-$03FF): the sprite loop stores the slot
+// in $15E9 ($0180A9) before each sprite runs, Yoshi is drawn later with $15E9 set at $01EA83;
+// writes from shallower stack depth end the attribution.
+// (score/extended sprite loops in bank 2 reuse $15E9, hence the bank check)
+function record(emu: LevelEmulator, frames: number): { snapOwner: Int8Array; snapOam: Uint8Array; snapConflicts: Set<number> } | null {
+  const s = emu.snes;
+  const owner = new Int8Array(128).fill(-1);
+  let snapOwner = owner.slice(), snapOam = s.wram.slice(0x200, 0x4a0);
+  // slots whose OAM entries were overwritten by another sprite in the same frame
+  let conflicts = new Set<number>(), snapConflicts = conflicts;
+  let cur = -1, s0 = 0;
+  s.hook = {
+    onWramWrite(a: number, v: number) {
+      if (a === 0x15e9) {
+        if (s.cpu.pbr === 1) { cur = v; s0 = s.cpu.s; }
+        else if (cur >= 0 && s.cpu.s < s0) cur = v; // sprite code switching slots
+        else cur = -1;
+        return;
+      }
+      if (cur >= 0 && s.cpu.s > s0) {
+        cur = -1;
+        snapOwner = owner.slice();
+        snapOam = s.wram.slice(0x200, 0x4a0);
+        snapConflicts = conflicts;
+        conflicts = new Set();
+      }
+      if (a >= 0x200 && a < 0x400) {
+        const e = (a - 0x200) >> 2, prev = owner[e];
+        if (cur >= 0 && prev >= 0 && prev !== cur) { conflicts.add(prev); conflicts.add(cur); }
+        owner[e] = cur;
+      }
+    },
+  };
+  try {
+    let guard = 0;
+    while (s.wram[0x100] !== 0x14 && guard++ < 80) s.runFrame();
+    for (let f = 0; f < frames; f++) s.runFrame();
+  } catch { return null; } finally { s.hook = null; }
+  return { snapOwner, snapOam, snapConflicts };
+}
+
+// image of OAM tiles; ox/oy: its top-left on the screen
+function drawTiles(emu: LevelEmulator, g: OamTile[]): SpriteImage | null {
+  const s = emu.snes;
+  const obsel = s.ppuRegs[0x01];
+  const base = (obsel & 7) << 14;
+  const gap = (((obsel >> 3) & 3) + 1) << 13;
+  const pal = cgramToRGBA(s.cgram);
+  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+  for (const t of g) {
+    const sz = t.big ? 16 : 8;
+    x0 = Math.min(x0, t.x); y0 = Math.min(y0, t.y); x1 = Math.max(x1, t.x + sz); y1 = Math.max(y1, t.y + sz);
+  }
+  const W = x1 - x0, H = y1 - y0;
+  if (W <= 0 || H <= 0 || W > 256 || H > 256) return null;
+  const rgba = new Uint32Array(W * H);
+  const idx = new Uint8Array(64);
+  // OAM draw order: lower index has priority → draw in reverse
+  for (let k = g.length - 1; k >= 0; k--) {
+    const t = g[k];
+    const sz = t.big ? 2 : 1;
+    const xf = (t.attr & 0x40) !== 0, yf = (t.attr & 0x80) !== 0;
+    const pp = (t.attr >> 1) & 7;
+    for (let ty = 0; ty < sz; ty++) for (let tx = 0; tx < sz; tx++) {
+      const sub = ((t.tile & 0xf0) + (((t.tile & 0x0f) + tx) & 0x0f) + ty * 16) & 0xff;
+      const addr = (base + (t.attr & 1 ? gap : 0) + sub * 32) & 0xffff;
+      decodeTile(s.vram, addr, 4, idx);
+      const dx0 = (xf ? sz - 1 - tx : tx) * 8, dy0 = (yf ? sz - 1 - ty : ty) * 8;
+      for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) {
+        const c = idx[(yf ? 7 - y : y) * 8 + (xf ? 7 - x : x)];
+        if (!c) continue;
+        const px = t.x - x0 + dx0 + x, py = t.y - y0 + dy0 + y;
+        rgba[py * W + px] = pal[128 + pp * 16 + c];
+      }
+    }
+  }
+  return { w: W, h: H, ox: x0, oy: y0, rgba };
+}
+
+// Sprite num as it looks at tile X & 15 = x, Y & 15 = y (sprites that start differently depending
+// on their position, see SpriteVariants): spawned alone into the empty level with the camera
+// centered on it, so every position is fully on screen.
+export function captureSpriteAt(
+  emu: LevelEmulator, level: number, header: PrimaryHeader, spriteHeader: number, bgPointer: number, num: number, x: number, y: number,
+): SpriteImage | null {
+  const hdr = encodePrimaryHeader({ ...header, mode: 0, screens: 4, time: 2 });
+  const r = emu.load(level, { layer1: new Uint8Array([...hdr, 0xff]), sprites: new Uint8Array([spriteHeader & 0x3f, 0xff]), secondaryHeader: [0, 0, 0, 0], layer2Pointer: bgPointer });
+  if (!r.ok) return null;
+  const s = emu.snes, w = s.wram;
+  try {
+    let guard = 0;
+    while (w[0x100] !== 0x14 && guard++ < 80) s.runFrame();
+  } catch { return null; }
+  const tx = 32 + x, ty = 6 + ((y - 6) & 15), px = tx * 16, py = ty * 16;
+  const cx = px - 0x70, cy = Math.max(0, Math.min(0x1b * 16 - 224, py - 0x70));
+  w[0x1a] = w[0x1462] = cx & 0xff; w[0x1b] = w[0x1463] = cx >> 8;
+  w[0x1c] = w[0x1464] = cy & 0xff; w[0x1d] = w[0x1465] = cy >> 8;
+  // Mario out of the way, left of the sprite
+  const mx = px - 0x40;
+  w[0x94] = w[0xd1] = mx & 0xff; w[0x95] = w[0xd2] = mx >> 8;
+  w[0x96] = w[0xd3] = py & 0xff; w[0x97] = w[0xd4] = py >> 8;
+  const slot = 11;
+  emu.spawnSprite(slot, num, px, py);
+  const rec = record(emu, 3);
+  if (!rec || !w[0x14c8 + slot] || w[0x9e + slot] !== num) return null;
+  const g = readOamBuffer(rec.snapOam).filter((t) => rec.snapOwner[t.i] === slot);
+  const img = g.length ? drawTiles(emu, g) : null;
+  if (!img) return null;
+  // offset relative to the sprite's position (it may have moved), the camera may have scrolled
+  const sx = w[0xe4 + slot] | (w[0x14e0 + slot] << 8), sy = w[0xd8 + slot] | (w[0x14d4 + slot] << 8);
+  const ncx = w[0x1a] | (w[0x1b] << 8), ncy = w[0x1c] | (w[0x1d] << 8);
+  return { ...img, ox: img.ox + ncx - sx, oy: img.oy + ncy - sy };
 }

@@ -10,13 +10,13 @@ import {
 import { renderLevel, type LevelImages, composite, map16Source } from '../core/render.ts';
 import { EXT_FIRST, map16Ext, installMap16Ext } from '../core/map16ext.ts';
 import { saveLevel } from '../core/save.ts';
-import { captureSprites } from '../core/spritegfx.ts';
+import { captureSprites, captureSpriteAt, type SpriteImage } from '../core/spritegfx.ts';
 import { DM16_EXT, hasEditorPatch, installEditorPatch } from '../core/patches.ts';
 import { kvSet, kvGet } from './storage.ts';
 import { bgFromWram, bgIndex, encodeBg } from '../core/bg.ts';
 import { toast } from './dom.ts';
 import { ObjKindProbe, kindsStillValid, storeKinds, loadKinds, resizeObjectSize, type ObjKind, type ObjKinds, type StoredObjKinds } from '../core/objkinds.ts';
-import { BlockProber, type BlockProbe, type SpriteProbe } from '../core/blockprobe.ts';
+import { BlockProber, variantOf, type BlockProbe, type SpriteProbe } from '../core/blockprobe.ts';
 
 export type EditMode = 'l1' | 'l2' | 'spr' | 'exit' | 'bg';
 export type PaletteItem =
@@ -65,6 +65,9 @@ export class App {
   probeChannel: MessageChannel | null = null; // yields between probe slices (setTimeout is throttled in hidden tabs)
   exitScreen = 0;
   spriteThumbs: Map<number, HTMLCanvasElement> | null = null;
+  // images of sprites that look different depending on their position: num | variant << 8 (null: none)
+  variantThumbs = new Map<number, HTMLCanvasElement | null>();
+  variantQueue: number[] = [];
   // what the settings byte nibbles of standard objects mean, per tileset (emulated, see objkinds.ts)
   kinds = new Map<number, { k: ObjKinds; gen: number }>();
   kindJob: { ts: number; probe: ObjKindProbe | null } | null = null;
@@ -272,6 +275,7 @@ export class App {
     const key = `${hd.spriteGfx}-${hd.spritePalette}`;
     if (key === this.spriteKey) return;
     this.spriteKey = key;
+    this.dropVariantImages();
     const map = new Map<number, HTMLCanvasElement>();
     this.spriteThumbs = map;
     const all = Array.from({ length: 0xc9 }, (_, i) => i);
@@ -286,23 +290,53 @@ export class App {
       const chunk = all.slice(i, i + 12);
       i += 12;
       const res = captureSprites(this.emu, lvNum, header, sh, bg, chunk);
-      for (const [n, img] of res) {
-        const c = document.createElement('canvas');
-        c.width = img.w; c.height = img.h;
-        const ctx = c.getContext('2d')!;
-        const id = ctx.createImageData(img.w, img.h);
-        new Uint32Array(id.data.buffer).set(img.rgba);
-        ctx.putImageData(id, 0, 0);
-        c.dataset.ox = String(img.ox);
-        c.dataset.oy = String(img.oy);
-        map.set(n, c);
-      }
+      for (const [n, img] of res) map.set(n, spriteCanvas(img));
       this.emit('sprites');
       if (i < all.length) setTimeout(step, 0);
       else this.setBusy('sprites', null);
     };
     this.setBusy('sprites', 'Sprite-Grafiken');
     setTimeout(step, 50);
+  }
+
+  // image of sprite num at tile (x, y): sprites that start differently depending on their position
+  // (see SpriteVariants) get an own image per variant, captured in the background once known
+  spriteImage(num: number, x: number, y: number): HTMLCanvasElement | undefined {
+    const base = this.spriteThumbs?.get(num);
+    const p = this.spriteInfo(num);
+    if (!p || p.variants.reps.length < 2) return base;
+    const c = this.variantThumbs.get(num | (variantOf(p.variants, x, y) << 8));
+    if (c === undefined) this.queueVariantImages(num);
+    return c ?? base;
+  }
+
+  private dropVariantImages(): void {
+    this.variantThumbs = new Map();
+    this.variantQueue = [];
+  }
+
+  private queueVariantImages(num: number): void {
+    if (this.variantQueue.includes(num)) return;
+    this.variantQueue.push(num);
+    if (this.variantQueue.length > 1) return;
+    const thumbs = this.variantThumbs, key = this.spriteKey;
+    const step = () => {
+      if (thumbs !== this.variantThumbs || key !== this.spriteKey) return;
+      const n = this.variantQueue[0];
+      this.setBusy('variants', `Sprite-Varianten (${this.variantQueue.length})`);
+      const p = this.prober?.cachedSprite(n);
+      const lv = this.level, bg = lv.layer2Pointer >> 16 === 0xff ? lv.layer2Pointer : 0xffd900;
+      p?.variants.reps.forEach(({ x, y }, v) => {
+        let img: SpriteImage | null = null;
+        try { img = captureSpriteAt(this.emu, lv.number, lv.header, lv.spriteHeader, bg, n, x, y); } catch (e) { console.error(e); }
+        thumbs.set(n | (v << 8), img && spriteCanvas(img));
+      });
+      this.variantQueue.shift();
+      this.emit('sprites');
+      if (this.variantQueue.length) setTimeout(step, 0);
+      else this.setBusy('variants', null);
+    };
+    setTimeout(step, 0);
   }
 
   palettesChanged(): void {
@@ -457,6 +491,7 @@ export class App {
     if (this.proberGen !== this.emu.romGen) {
       this.prober.reset();
       this.probeFailed.clear();
+      this.dropVariantImages();
       this.proberGen = this.emu.romGen;
     }
     this.prober.use(this.level.header.tileset);
@@ -506,7 +541,7 @@ export class App {
   // sprite pixel box: its 16x16 tile united with the bounds of its captured image
   spriteBox(s: LevelSprite): { x0: number; y0: number; x1: number; y1: number } {
     const x = s.x * 16, y = s.y * 16;
-    const img = this.spriteThumbs?.get(s.num);
+    const img = this.spriteImage(s.num, s.x, s.y);
     if (!img) return { x0: x, y0: y, x1: x + 16, y1: y + 16 };
     const ix = x + Number(img.dataset.ox), iy = y + Number(img.dataset.oy);
     return { x0: Math.min(x, ix), y0: Math.min(y, iy), x1: Math.max(x + 16, ix + img.width), y1: Math.max(y + 16, iy + img.height) };
@@ -747,3 +782,15 @@ export class App {
 }
 
 export { hasLayer2Objects, SEC_HDR };
+
+function spriteCanvas(img: SpriteImage): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = img.w; c.height = img.h;
+  const ctx = c.getContext('2d')!;
+  const id = ctx.createImageData(img.w, img.h);
+  new Uint32Array(id.data.buffer).set(img.rgba);
+  ctx.putImageData(id, 0, 0);
+  c.dataset.ox = String(img.ox);
+  c.dataset.oy = String(img.oy);
+  return c;
+}

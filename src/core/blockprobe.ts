@@ -6,7 +6,11 @@
 // Spawned sprites, coins, lives, damage and the tile left behind make up the result, so hacked
 // ROMs and custom blocks are described correctly as well.
 // Sprites (flying ? blocks and the like) are probed the same way: the sprite is spawned through
-// the game's own table setup, Mario jumps against it, and a run without the jump is subtracted.
+// the game's own table setup, Mario jumps against it from below and onto it from above, and a run
+// without Mario is subtracted. Many sprites start differently depending on their position (vanilla:
+// the Super Koopa 73 drops a feather only at even X, flying ? blocks give items by X & 3), so the
+// sprite is first spawned at all 16 X and Y positions within a 16 px step, and every position whose
+// sprite tables differ after the init makes an own variant that is probed (and drawn) by itself.
 // Whether a tile can be entered (pipes, doors) is found out the same way: Mario stands on, below,
 // beside or in front of it and holds a direction; entering shows as a change of his animation
 // state or the game mode that a run without the button doesn't show.
@@ -23,8 +27,13 @@ import { spriteName, hex3 } from './names.ts';
 const PROBE_LEVEL = 0x105; // horizontal level; only its header (with the tileset replaced) is used, objects and sprites are removed
 const PROBE_FRAMES = 24;
 const SPRITE_SLOT = 11; // slot of a probed sprite (items it spawns take lower free slots)
-const INIT_TABLES = 0x07f7d2; // game routine that sets up a new sprite's tables (tweakers), X = slot
-const OV_STUB = 0xc000; // overlay offset of a JSL stub used to call game routines
+// sprite tables compared between positions (everything but position, subpixel and off-screen flags)
+const SPRITE_TABLES = [0x9e, 0xaa, 0xb6, 0xc2, 0x14c8, 0x1504, 0x1510, 0x151c, 0x1528, 0x1534, 0x1540, 0x154c, 0x1558, 0x1564,
+  0x1570, 0x157c, 0x1594, 0x15ac, 0x15c4, 0x15d0, 0x15dc, 0x15f6, 0x1602, 0x160e, 0x1626, 0x1632, 0x163e, 0x164a, 0x1656,
+  0x1662, 0x166e, 0x167a, 0x1686, 0x187b, 0x190f, 0x1fd6, 0x1fe2];
+const SPRITE_ROW = 6; // probed sprites go to rows 6-21 (Mario fits below them, the level has $1B rows)
+const PROBE_CAM_Y_MAX = 0x1b * 16 - 224;
+const MAX_VARIANTS = 16; // more X × Y combinations: Y is ignored
 const ENTER_FRAMES = 24;
 // joypad bits ($4218) and Mario's offset to the tile for each enter direction
 const PAD = { up: 0x0800, down: 0x0400, left: 0x0200, right: 0x0100 };
@@ -43,7 +52,8 @@ export interface HitResult {
 export interface PosProbe {
   small: HitResult;
   big: HitResult;
-  summary: string | null; // null: no effect when hit from below
+  stomp?: HitResult; // sprites: small Mario jumping onto it
+  summary: string | null; // null: no effect when hit from below (sprites: or jumped on)
 }
 
 export interface ColumnProbe {
@@ -56,7 +66,29 @@ export interface BlockProbe extends ColumnProbe {
   tile: number;
   enter: string; // directions to hold to enter it (pipes, doors) as arrows ↓↑←→, '' = none
 }
-export interface SpriteProbe extends ColumnProbe { num: number }
+// positions (low nibbles of the tile X and Y) a sprite behaves differently at
+export interface SpriteVariants {
+  xs: number[]; // X class by X & 15
+  ys: number[]; // Y class by Y & 15
+  nx: number; // number of X classes
+  reps: { x: number; y: number }[]; // a position for each variant (xs class + nx * ys class)
+}
+export interface SpriteProbe {
+  num: number;
+  variants: SpriteVariants;
+  pos: PosProbe[]; // by variant
+  summary: string | null; // all variants; null: no effect
+  solid: boolean;
+}
+
+export function variantOf(v: SpriteVariants, x: number, y: number): number {
+  return v.xs[x & 15] + v.nx * v.ys[y & 15];
+}
+
+// result for a sprite at tile (x, y)
+export function spriteProbeAt(p: SpriteProbe, x: number, y: number): PosProbe {
+  return p.pos[variantOf(p.variants, x, y)];
+}
 
 // result for a block or sprite at tile column x
 export function probeAt(p: ColumnProbe, x: number): PosProbe {
@@ -65,7 +97,7 @@ export function probeAt(p: ColumnProbe, x: number): PosProbe {
 
 // sprites spawned, small Mario's first
 export function spritesOf(r: PosProbe): number[] {
-  return [...new Set([...r.small.sprites, ...r.big.sprites])];
+  return [...new Set([...r.small.sprites, ...r.big.sprites, ...r.stomp?.sprites ?? []])];
 }
 
 // probe state of one tileset
@@ -132,15 +164,40 @@ export class BlockProber {
   probeSprite(num: number): SpriteProbe {
     let p = this.spriteCache.get(num);
     if (!p) {
-      p = { num, ...columns((col, big) => this.spriteEffect(num, big, col), -1) };
+      const variants = this.spriteVariants(num);
+      const pos = variants.reps.map(({ x, y }): PosProbe => {
+        const base0 = this.hitSprite(num, 0, x, y, 'none');
+        const small = this.spriteEffect(num, 0, x, y, 'below', base0), big = this.spriteEffect(num, 1, x, y, 'below');
+        const stomp = this.spriteEffect(num, 0, x, y, 'stomp', base0);
+        return { small, big, stomp, summary: summarizeSprite(small, big, stomp) };
+      });
+      p = { num, variants, pos, summary: byVariant(variants, pos), solid: pos.some((q) => q.small.solid || q.big.solid) };
       this.spriteCache.set(num, p);
     }
     return p;
   }
 
-  // what jumping against the sprite adds to what it does anyway
-  private spriteEffect(num: number, big: number, col: number): HitResult {
-    const base = this.hitSprite(num, big, col, false), r = this.hitSprite(num, big, col, true);
+  // Positions within a 16 px step whose sprite tables differ after the init (X at a fixed Y, Y at
+  // a fixed X; combined when there are not too many)
+  private spriteVariants(num: number): SpriteVariants {
+    const state = (x: number, y: number) => {
+      const w = this.spawn(num, 0, x, y);
+      this.placeMario(w[0xe4 + SPRITE_SLOT] + (w[0x14e0 + SPRITE_SLOT] << 8) - 64, w[0xd8 + SPRITE_SLOT] | (w[0x14d4 + SPRITE_SLOT] << 8), 0, 0);
+      try { for (let f = 0; f < 2; f++) this.emu.snes.runFrame(); } catch { return 'x'; }
+      return SPRITE_TABLES.map((t) => w[t + SPRITE_SLOT]).join(',');
+    };
+    const classes = (a: string[]) => { const u = [...new Set(a)]; return { c: a.map((v) => u.indexOf(v)), n: u.length }; };
+    const cx = classes(Array.from({ length: 16 }, (_, x) => state(x, 0)));
+    let cy = classes(Array.from({ length: 16 }, (_, y) => state(0, y)));
+    if (cx.n * cy.n > MAX_VARIANTS) cy = { c: new Array(16).fill(0), n: 1 };
+    const reps: { x: number; y: number }[] = [];
+    for (let j = 0; j < cy.n; j++) for (let i = 0; i < cx.n; i++) reps.push({ x: cx.c.indexOf(i), y: cy.c.indexOf(j) });
+    return { xs: cx.c, ys: cy.c, nx: cx.n, reps };
+  }
+
+  // what jumping against / onto the sprite adds to what it does without Mario
+  private spriteEffect(num: number, big: number, x: number, y: number, how: 'below' | 'stomp', base = this.hitSprite(num, big, x, y, 'none')): HitResult {
+    const r = this.hitSprite(num, big, x, y, how);
     return {
       sprites: r.sprites.filter((n) => !base.sprites.includes(n)),
       coins: Math.max(0, r.coins - base.coins),
@@ -171,14 +228,28 @@ export class BlockProber {
     this.cur.ready = s.saveState();
   }
 
-  // fresh probe state with the camera centered on tile column bx (so nothing spawns off-screen)
-  private start(bx: number, big: number): Uint8Array {
+  // fresh probe state with the camera centered on tile column bx (so nothing spawns off-screen);
+  // with by also on that row
+  private start(bx: number, big: number, by = -1): Uint8Array {
     if (!this.cur.ready) this.prepare();
     const s = this.emu.snes, w = s.wram;
     s.loadState(this.cur.ready!);
     const cam = bx * 16 - 0x70;
     w[0x1a] = w[0x1462] = cam & 0xff; w[0x1b] = w[0x1463] = cam >> 8;
+    if (by >= 0) {
+      const cy = Math.max(0, Math.min(PROBE_CAM_Y_MAX, by * 16 - 0x70));
+      w[0x1c] = w[0x1464] = cy & 0xff; w[0x1d] = w[0x1465] = cy >> 8;
+    }
     w[0x19] = big;
+    return w;
+  }
+
+  // fresh state with sprite num in the probe slot at tile X & 15 = x, Y & 15 = y (rows chosen so
+  // that Mario fits below it inside the level)
+  private spawn(num: number, big: number, x: number, y: number): Uint8Array {
+    const bx = 16 + x, by = SPRITE_ROW + ((y - SPRITE_ROW) & 15);
+    const w = this.start(bx, big, by);
+    this.emu.spawnSprite(SPRITE_SLOT, num, bx * 16, by * 16);
     return w;
   }
 
@@ -295,41 +366,20 @@ export class BlockProber {
     return this.observe(big, off);
   }
 
-  // runs a game routine (JSL addr, RTL) with X = x in 8-bit mode, then restores the CPU registers
-  private call(addr: number, x: number): void {
-    const cpu = this.emu.snes.cpu;
-    const saved = { a: cpu.a, x: cpu.x, y: cpu.y, s: cpu.s, d: cpu.d, dbr: cpu.dbr, pbr: cpu.pbr, pc: cpu.pc, p: cpu.p, e: cpu.e, waiting: cpu.waiting };
-    const stub = overlaySnes(OV_STUB);
-    this.emu.overlay.set([0x22, addr & 0xff, (addr >> 8) & 0xff, addr >> 16], OV_STUB);
-    cpu.pbr = stub >> 16; cpu.pc = stub & 0xffff;
-    cpu.e = false; cpu.p |= 0x30; cpu.d = 0; cpu.x = x; cpu.waiting = false;
-    const end = (stub + 4) & 0xffff;
-    try {
-      for (let n = 0; n < 200000 && !(cpu.pbr === stub >> 16 && cpu.pc === end); n++) cpu.step();
-    } finally {
-      Object.assign(cpu, saved);
-    }
-  }
-
-  // Sprite num spawned at tile column 16 + col (init runs like for a sprite from level data), then
-  // Mario jumps against it from below; without jump he stays below it (baseline).
-  private hitSprite(num: number, big: number, col: number, jump: boolean): HitResult {
-    const bx = 16 + col, by = this.by;
-    const w = this.start(bx, big), s = this.emu.snes;
-    const slot = SPRITE_SLOT, x = bx * 16, y = by * 16;
-    w[0x9e + slot] = num;
-    w[0x14c8 + slot] = 1; // init
-    w[0xe4 + slot] = x & 0xff; w[0x14e0 + slot] = x >> 8;
-    w[0xd8 + slot] = y & 0xff; w[0x14d4 + slot] = y >> 8;
-    w[0x161a + slot] = 0xff; // not from level data
-    this.call(INIT_TABLES, slot);
-    this.placeMario(x, y, 64, 0);
+  // Sprite num spawned at tile X & 15 = x, Y & 15 = y, then Mario jumps against it from below or
+  // falls onto it from above; 'none': he stays below it (baseline).
+  private hitSprite(num: number, big: number, x: number, y: number, how: 'none' | 'below' | 'stomp'): HitResult {
+    const w = this.spawn(num, big, x, y), s = this.emu.snes, slot = SPRITE_SLOT;
+    const px = w[0xe4 + slot] | (w[0x14e0 + slot] << 8), py = w[0xd8 + slot] | (w[0x14d4 + slot] << 8);
+    this.placeMario(px, py, 64, 0);
     try { for (let f = 0; f < 2; f++) s.runFrame(); } catch { /* observed below */ }
     // the sprite may move sideways: aim at where it is a few frames later
     const sx = w[0xe4 + slot] | (w[0x14e0 + slot] << 8), sy = w[0xd8 + slot] | (w[0x14d4 + slot] << 8);
     const vx = (w[0xb6 + slot] << 24) >> 24;
-    const ax = sx + Math.round((vx / 16) * 4);
-    if (jump) this.placeMario(ax, sy, 24, -0x60); else this.placeMario(ax, sy, 64, 0);
+    const ax = sx + Math.round((vx / 16) * (how === 'stomp' ? 6 : 4));
+    if (how === 'below') this.placeMario(ax, sy, 24, -0x60);
+    else if (how === 'stomp') this.placeMario(ax, sy, -28, 0x30);
+    else this.placeMario(ax, sy, 64, 0);
     return this.observe(big, -1, slot);
   }
 }
@@ -377,6 +427,41 @@ function byColumn(pos: PosProbe[]): string | null {
   return 'je nach Spalte (X & F): ' + [...groups].map(([k, l]) => `${cols(l)}: ${k}`).join(' | ');
 }
 const hex1 = (n: number) => n.toString(16).toUpperCase();
+
+function summarizeSprite(small: HitResult, big: HitResult, stomp: HitResult): string | null {
+  const below = summarize(-1, small, big), on = describe(-1, stomp);
+  const p = [below && `von unten: ${below}`, on && `draufspringen: ${on}`].filter(Boolean);
+  return p.length ? p.join(' · ') : null;
+}
+
+// one text for all variants, grouped by the positions they apply to ("X gerade: …")
+function byVariant(v: SpriteVariants, pos: PosProbe[]): string | null {
+  if (pos.every((q) => q.summary === pos[0].summary)) return pos[0].summary;
+  const groups = new Map<string, number[]>();
+  pos.forEach((q, i) => { const k = q.summary ?? '–'; groups.set(k, [...(groups.get(k) ?? []), i]); });
+  const where = (l: number[]) => {
+    const xs = new Set(l.map((i) => i % v.nx)), ys = new Set(l.map((i) => Math.floor(i / v.nx)));
+    const ny = v.reps.length / v.nx;
+    const p: string[] = [];
+    if (xs.size < v.nx) p.push(residues('X', v.xs.flatMap((c, i) => (xs.has(c) ? [i] : []))));
+    if (ys.size < ny) p.push(residues('Y', v.ys.flatMap((c, i) => (ys.has(c) ? [i] : []))));
+    return p.join(', ');
+  };
+  return 'je nach Position: ' + [...groups].map(([k, l]) => `${where(l)}: ${k}`).join(' | ');
+}
+
+// set of tile position low nibbles as the fewest low bits that tell it ("X gerade", "X & 3: 1,2",
+// "Y & F ≠ F")
+function residues(axis: string, l: number[]): string {
+  for (const m of [1, 3, 7, 15]) {
+    const s = new Set(l.map((r) => r & m));
+    if (l.length !== s.size * (16 / (m + 1))) continue;
+    if (m === 1) return `${axis} ${s.has(0) ? 'gerade' : 'ungerade'}`;
+    const all = Array.from({ length: m + 1 }, (_, i) => i), not = all.filter((r) => !s.has(r));
+    return not.length < s.size ? `${axis} & ${hex1(m)} ≠ ${not.map(hex1).join(',')}` : `${axis} & ${hex1(m)}: ${[...s].sort((a, b) => a - b).map(hex1).join(',')}`;
+  }
+  return '';
+}
 
 function summarize(tile: number, small: HitResult, big: HitResult): string | null {
   const a = describe(tile, small), b = describe(tile, big);

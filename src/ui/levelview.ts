@@ -4,7 +4,7 @@ import { App, type Marker } from './app.ts';
 import { h, attachPanZoom, downloadBytes } from './dom.ts';
 import { spriteName, objectName, hex2, hex3 } from '../core/names.ts';
 import { resizeObjectSize } from '../core/objkinds.ts';
-import { probeAt, enterText, type PosProbe } from '../core/blockprobe.ts';
+import { probeAt, spriteProbeAt, enterText, type PosProbe } from '../core/blockprobe.ts';
 import { type LevelObject, type LevelSprite, serializeLayer1, serializeLayer2, serializeSprites } from '../core/level.ts';
 import { composite } from '../core/render.ts';
 
@@ -58,7 +58,7 @@ export class LevelView {
     app.on('anim-frame', () => { this.updateLevelImage(false); });
     app.on('change', () => { this.paint(); this.updateStats(); });
     app.on('sprites', () => this.requestPaint());
-    app.on('blockinfo', () => { if (this.hover && !this.drag) this.updateStatus(this.hover.tx, this.hover.ty); if (app.show.items) this.requestPaint(); });
+    app.on('blockinfo', () => { if (this.hover && !this.drag) this.updateStatus(this.hover.tx, this.hover.ty); this.requestPaint(); });
   }
 
   setZoom(z: number, anchor?: { ax: number; ay: number }): void {
@@ -303,7 +303,7 @@ export class LevelView {
     ctx.globalAlpha = 0.65;
     for (const s of app.level.sprites) {
       const p = app.spriteInfo(s.num);
-      if (p?.summary) this.drawItem(ctx, probeAt(p, s.x), s.x * 16, s.y * 16);
+      if (p?.summary) this.drawItem(ctx, spriteProbeAt(p, s.x, s.y), s.x * 16, s.y * 16);
     }
     ctx.globalAlpha = 1;
   }
@@ -312,7 +312,7 @@ export class LevelView {
   drawItem(ctx: CanvasRenderingContext2D, r: PosProbe, x: number, y: number): void {
     const thumbs = this.app.spriteThumbs;
     const small = r.small.sprites[0], big = r.big.sprites[0];
-    const main = small ?? big;
+    const main = small ?? big ?? r.stomp?.sprites[0];
     const img = main !== undefined ? thumbs?.get(main) : undefined;
     if (!img) return;
     ctx.drawImage(img, x + Number(img.dataset.ox), y + Number(img.dataset.oy));
@@ -327,7 +327,7 @@ export class LevelView {
     for (const s of app.level.sprites) {
       const x = s.x * 16, y = s.y * 16;
       const sel = app.selection.has(s.uid) && active;
-      const img = app.spriteThumbs?.get(s.num);
+      const img = app.spriteImage(s.num, s.x, s.y);
       if (img) {
         ctx.globalAlpha = active ? 1 : 0.85;
         ctx.drawImage(img, x + Number(img.dataset.ox), y + Number(img.dataset.oy));
@@ -567,8 +567,8 @@ export class LevelView {
       if (mode === 'spr') {
         const s = item as LevelSprite;
         const p = app.spriteInfo(s.num);
-        const sum = p && probeAt(p, s.x).summary;
-        txt += `  · Sprite ${hex2(s.num)} ${spriteName(s.num)}${sum ? ` (von unten: ${sum})` : ''}`;
+        const sum = p && spriteProbeAt(p, s.x, s.y).summary;
+        txt += `  · Sprite ${hex2(s.num)} ${spriteName(s.num)}${sum ? ` (${sum})` : ''}`;
       }
       else { const o = item as LevelObject; txt += `  · Objekt${tag} ${o.num ? hex2(o.num) : 'Ext ' + hex2(o.ext)} ${objectName(o.num, o.ext)}${o.num ? ' Größe ' + hex2(o.size) : ''}`; }
     }
@@ -608,7 +608,7 @@ export class LevelView {
     const px = composite(im, app.show.layer1, app.show.layer2, 0, app.show.layer3); // without ghosting
     ctx.putImageData(new ImageData(new Uint8ClampedArray(px.buffer as ArrayBuffer), im.width, im.height), 0, 0);
     if (app.show.sprites) for (const s of app.level.sprites) {
-      const img = app.spriteThumbs?.get(s.num);
+      const img = app.spriteImage(s.num, s.x, s.y);
       if (img) ctx.drawImage(img, s.x * 16 + Number(img.dataset.ox), s.y * 16 + Number(img.dataset.oy));
     }
     c.toBlob(async (b) => {

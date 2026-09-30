@@ -12,6 +12,8 @@ export const OV_L2 = 0x4000;
 export const OV_SPR = 0x8000;
 export const OV_BG = 0xa000; // edited BG tilemap (editor format, see bg.ts)
 const OV_BG_HOOK = 0xb000; // LDA #$FF : STA $6A : RTL (BG data bank = overlay)
+const OV_STUB = 0xc000; // JSL stub used to call game routines
+const INIT_TABLES = 0x07f7d2; // game routine that sets up a new sprite's tables (tweakers), X = slot
 export const OV_BASE_SNES = 0xfe8000;
 
 export function overlaySnes(off: number): number {
@@ -225,6 +227,34 @@ export class LevelEmulator {
       error,
       frames,
     };
+  }
+
+  // runs a game routine (JSL addr, RTL) with X = x in 8-bit mode, then restores the CPU registers
+  call(addr: number, x: number): void {
+    const cpu = this.snes.cpu;
+    const saved = { a: cpu.a, x: cpu.x, y: cpu.y, s: cpu.s, d: cpu.d, dbr: cpu.dbr, pbr: cpu.pbr, pc: cpu.pc, p: cpu.p, e: cpu.e, waiting: cpu.waiting };
+    const stub = overlaySnes(OV_STUB);
+    this.overlay.set([0x22, addr & 0xff, (addr >> 8) & 0xff, addr >> 16], OV_STUB);
+    cpu.pbr = stub >> 16; cpu.pc = stub & 0xffff;
+    cpu.e = false; cpu.p |= 0x30; cpu.d = 0; cpu.x = x; cpu.waiting = false;
+    const end = (stub + 4) & 0xffff;
+    try {
+      for (let n = 0; n < 200000 && !(cpu.pbr === stub >> 16 && cpu.pc === end); n++) cpu.step();
+    } finally {
+      Object.assign(cpu, saved);
+    }
+  }
+
+  // puts sprite num into slot at pixel (x, y) in gameplay; its init runs in the next frame like
+  // for a sprite from level data (which it is not: $161A = $FF)
+  spawnSprite(slot: number, num: number, x: number, y: number): void {
+    const w = this.snes.wram;
+    w[0x9e + slot] = num;
+    w[0x14c8 + slot] = 1;
+    w[0xe4 + slot] = x & 0xff; w[0x14e0 + slot] = x >> 8;
+    w[0xd8 + slot] = y & 0xff; w[0x14d4 + slot] = y >> 8;
+    w[0x161a + slot] = 0xff;
+    this.call(INIT_TABLES, slot);
   }
 
   // Continues the live state left by load() into gameplay (GM $14) and snapshots VRAM/CGRAM

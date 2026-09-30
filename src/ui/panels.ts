@@ -10,7 +10,7 @@ import { levelName } from '../core/overworld.ts';
 import { DM16_EXT } from '../core/patches.ts';
 import { EXT_TILES, map16Ext } from '../core/map16ext.ts';
 import { TileCache, map16Source, drawMap16 } from '../core/render.ts';
-import { probeText, spritesOf, probeAt, enterText, enterSuffix } from '../core/blockprobe.ts';
+import { probeText, spritesOf, spriteProbeAt, enterText, enterSuffix } from '../core/blockprobe.ts';
 
 // behaviour of the given Map16 tiles when hit from below or entered (only tiles with an effect);
 // undefined while probes are still pending
@@ -232,7 +232,7 @@ export class Palette {
     if (this.tab === 'spr') {
       for (let n = 0; n < 0xe7; n++) {
         const name = spriteName(n);
-        // what the sprite gives when hit from below (emulated, see blockprobe.ts)
+        // what the sprite gives when hit from below or jumped on (emulated, see blockprobe.ts)
         const p = app.spriteInfo(n);
         const info = p?.summary ?? '';
         if (f && !(`${hex2(n)} ${name} ${info}`.toLowerCase().includes(f))) continue;
@@ -240,7 +240,7 @@ export class Palette {
         const img = app.spriteThumbs?.get(n);
         const items = p ? [...new Set(p.pos.flatMap(spritesOf))] : [];
         this.body.appendChild(h('div', {
-          class: `pal-row${sel ? ' selected' : ''}`, title: info ? `${hex2(n)}: ${name}\nVon unten: ${info}` : '',
+          class: `pal-row${sel ? ' selected' : ''}`, title: info ? `${hex2(n)}: ${name}\n${info}` : '',
           onclick: () => { app.paletteItem = { kind: 'spr', num: n, extra: 0 }; if (app.mode !== 'spr') app.setMode('spr'); this.build(); },
         }, h('span', { class: 'pal-thumb-s' }, img ? cloneCanvas(img) : ''), h('span', { class: 'num' }, hex2(n)), name, itemBadge(app, items, 'pal-items-row')));
       }
@@ -359,12 +359,12 @@ export class Properties {
         this.field('Y', hexInput(s.y, 3, (v) => upd(() => (s.y = v)), app.levelHeightTiles() - 1)),
         this.field('Extra-Bits', hexInput(s.extra, 1, (v) => upd(() => (s.extra = v)), 3)),
       );
-      // behaviour when hit from below, at this position and in general (emulated)
+      // behaviour when hit from below or jumped on, at this position and in general (emulated)
       const p = app.spriteInfo(s.num);
       this.probePending = !p && s.num < 0xc9;
       if (p?.summary) {
-        const here = probeAt(p, s.x).summary;
-        this.body.append(h('div', { class: 'hint' }, `Von unten an dieser Stelle: ${here ?? 'nichts'}`,
+        const here = spriteProbeAt(p, s.x, s.y).summary;
+        this.body.append(h('div', { class: 'hint' }, `An dieser Stelle: ${here ?? 'nichts'}`,
           p.summary !== here ? [h('br'), `Allgemein: ${p.summary}`] : ''));
       } else if (this.probePending) this.body.append(h('div', { class: 'hint' }, 'Verhalten wird ermittelt …'));
       return;
