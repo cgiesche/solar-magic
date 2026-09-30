@@ -1,6 +1,7 @@
 // ROM container: LoROM address mapping, header handling, expansion, checksum
 // and RATS-tag based free space management.
 
+import type { RomReads } from './romdeps.ts';
 export const MAX_ROM_SIZE = 0x400000;
 // Offsets reachable only through banks $FE/$FF are reserved for the editor's
 // emulation overlay, so we never allocate data there.
@@ -25,6 +26,7 @@ export interface RatsBlock {
 export class Rom {
   data: Uint8Array;
   smcHeader: Uint8Array | null;
+  reads: RomReads | null = null; // records reads through r8/r16/r24/bytes (see romdeps.ts)
 
   constructor(file: Uint8Array) {
     const hdr = file.length % 0x8000;
@@ -37,14 +39,18 @@ export class Rom {
   }
 
   r8(snes: number): number {
-    return this.data[snesToPc(snes)];
+    const o = snesToPc(snes);
+    this.reads?.read(o, 1);
+    return this.data[o];
   }
   r16(snes: number): number {
     const o = snesToPc(snes);
+    this.reads?.read(o, 2);
     return this.data[o] | (this.data[o + 1] << 8);
   }
   r24(snes: number): number {
     const o = snesToPc(snes);
+    this.reads?.read(o, 3);
     return this.data[o] | (this.data[o + 1] << 8) | (this.data[o + 2] << 16);
   }
   w8(snes: number, v: number): void {
@@ -63,6 +69,7 @@ export class Rom {
   }
   bytes(snes: number, len: number): Uint8Array {
     const o = snesToPc(snes);
+    this.reads?.read(o, len);
     return this.data.slice(o, o + len);
   }
   writeBytes(snes: number, b: Uint8Array): void {

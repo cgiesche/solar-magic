@@ -17,14 +17,17 @@
 // Some tiles behave differently per tileset (vanilla: the boss door tile 9C can only be entered in
 // castle tilesets), so the probe level gets the tileset of the edited level and results are kept
 // per tileset.
+// Results are kept in a ResultCache (see romdeps.ts) with the ROM pages they read, including those
+// read by booting and by preparing the probe level, so they survive ROM changes elsewhere.
 
-import { LevelEmulator, MAP_BASE, overlaySnes } from './levelemu.ts';
+import { LevelEmulator, MAP_BASE } from './levelemu.ts';
 import { Rom } from './rom.ts';
-import { L1_PTRS } from './level.ts';
 import type { SnesState } from './snes.ts';
+import { ResultCache, RomFingerprint, type RomDeps, type RomReads } from './romdeps.ts';
 import { spriteName, hex3 } from './names.ts';
 
-const PROBE_LEVEL = 0x105; // horizontal level; only its header (with the tileset replaced) is used, objects and sprites are removed
+const PROBE_LEVEL = 0x105; // horizontal level, loaded with PROBE_HEADER, without objects and sprites
+const PROBE_HEADER = [0x33, 0x40, 0x08, 0x80, 0x27]; // primary header; the tileset is replaced
 const PROBE_FRAMES = 24;
 const SPRITE_SLOT = 11; // slot of a probed sprite (items it spawns take lower free slots)
 // sprite tables compared between positions (everything but position, subpixel and off-screen flags)
@@ -100,70 +103,77 @@ export function spritesOf(r: PosProbe): number[] {
   return [...new Set([...r.small.sprites, ...r.big.sprites, ...r.stomp?.sprites ?? []])];
 }
 
-// probe state of one tileset
+// probe level state of one tileset
 interface TilesetProbes {
   ready: SnesState | null;
+  reads: RomReads | null; // ROM read by booting, preparing the level and searching the floor
+  deps: RomDeps | null; // of marks, to notice when ready is outdated
   by: number; // block row in the probe level; the block goes to screen 1, column 0-15
   floorTile: number; // a tile Mario can stand on (found by trying), -1 = not searched yet, -2 = none found
-  cache: Map<number, BlockProbe>;
-  spriteCache: Map<number, SpriteProbe>;
 }
 
 export class BlockProber {
   rom: Rom;
   emu: LevelEmulator;
   tileset = 0; // tileset the probes run in (use())
+  results: ResultCache;
   private sets = new Map<number, TilesetProbes>();
   private cur!: TilesetProbes;
 
-  // bootState: title screen snapshot of another emulator on the same ROM (saves booting again)
-  constructor(rom: Rom, bootState?: SnesState | null) {
+  // boot: title screen snapshot of another emulator on the same ROM and the pages read to get
+  // there (saves booting again); results: where probe results are kept
+  constructor(rom: Rom, boot?: { state: SnesState | null; reads: RomReads | null }, results?: ResultCache) {
     this.rom = rom;
     this.emu = new LevelEmulator(rom);
-    if (bootState) this.emu.baseState = bootState;
+    if (boot?.state) { this.emu.baseState = boot.state; this.emu.bootReads = boot.reads; }
+    this.results = results ?? new ResultCache(new RomFingerprint(this.emu));
     this.use(0);
   }
 
   // probe (and look up cached results) in tileset ts from now on
   use(ts: number): void {
     let t = this.sets.get(ts);
-    if (!t) this.sets.set(ts, (t = { ready: null, by: 0, floorTile: -1, cache: new Map(), spriteCache: new Map() }));
+    if (!t) this.sets.set(ts, (t = { ready: null, reads: null, deps: null, by: 0, floorTile: -1 }));
     this.tileset = ts;
     this.cur = t;
   }
 
-  // the ROM changed (patches, acts-like, blocks): drop everything
+  // the ROM changed (patches, acts-like, blocks): probe levels that read changed pages are prepared
+  // again; results are checked when used
   reset(): void {
     this.emu.syncRom();
-    this.sets.clear();
-    this.use(this.tileset);
+    for (const t of this.sets.values()) {
+      if (t.deps && !this.results.fp.valid(t.deps)) Object.assign(t, { ready: null, reads: null, deps: null, by: 0, floorTile: -1 });
+    }
   }
 
-  private get cache(): Map<number, BlockProbe> { return this.cur.cache; }
-  private get spriteCache(): Map<number, SpriteProbe> { return this.cur.spriteCache; }
   private get by(): number { return this.cur.by; }
 
+  // runs a probe with the pages read counted from the probe level's; stores the result under key
+  private computed<T>(key: string, fn: () => T): T {
+    if (!this.cur.ready) this.prepare();
+    const { result, reads } = this.emu.tracked(fn, this.cur.reads);
+    this.results.set(key, result, this.results.fp.deps(reads));
+    return result;
+  }
+
   cached(tile: number): BlockProbe | undefined {
-    return this.cache.get(tile);
+    return this.results.get(`b${this.tileset}:${tile}`);
   }
 
   probe(tile: number): BlockProbe {
-    let p = this.cache.get(tile);
-    if (!p) {
+    return this.cached(tile) ?? this.computed(`b${this.tileset}:${tile}`, () => {
       const c = columns((col, big) => this.hit(tile, big, col), tile);
-      p = { tile, ...c, enter: this.enterDirs(tile, c.solid) };
-      this.cache.set(tile, p);
-    }
-    return p;
+      return { tile, ...c, enter: this.enterDirs(tile, c.solid) };
+    });
   }
 
   cachedSprite(num: number): SpriteProbe | undefined {
-    return this.spriteCache.get(num);
+    return this.results.get(`s${this.tileset}:${num}`);
   }
 
   probeSprite(num: number): SpriteProbe {
-    let p = this.spriteCache.get(num);
-    if (!p) {
+    return this.cachedSprite(num) ?? this.computed(`s${this.tileset}:${num}`, (): SpriteProbe => {
       const variants = this.spriteVariants(num);
       const pos = variants.reps.map(({ x, y }): PosProbe => {
         const base0 = this.hitSprite(num, 0, x, y, 'none');
@@ -171,10 +181,8 @@ export class BlockProber {
         const stomp = this.spriteEffect(num, 0, x, y, 'stomp', base0);
         return { small, big, stomp, summary: summarizeSprite(small, big, stomp) };
       });
-      p = { num, variants, pos, summary: byVariant(variants, pos), solid: pos.some((q) => q.small.solid || q.big.solid) };
-      this.spriteCache.set(num, p);
-    }
-    return p;
+      return { num, variants, pos, summary: byVariant(variants, pos), solid: pos.some((q) => q.small.solid || q.big.solid) };
+    });
   }
 
   // Positions within a 16 px step whose sprite tables differ after the init (X at a fixed Y, Y at
@@ -211,11 +219,15 @@ export class BlockProber {
 
   // snapshot of the empty probe level running in gameplay
   private prepare(): void {
-    const e = this.emu, rom = this.rom;
+    const { reads } = this.emu.tracked(() => this.prepareLevel());
+    Object.assign(this.cur, { reads, deps: this.results.fp.deps(reads) });
+  }
+
+  private prepareLevel(): void {
+    const e = this.emu;
     e.syncRom();
-    const hdr = rom.r24(L1_PTRS + PROBE_LEVEL * 3);
-    const header = new Uint8Array(6);
-    for (let i = 0; i < 5; i++) header[i] = rom.r8(hdr + i);
+    // a fixed header (vanilla level 105's): the probes don't depend on the level's saved state
+    const header = Uint8Array.from([...PROBE_HEADER, 0]);
     header[4] = (header[4] & 0xf0) | this.tileset;
     header[5] = 0xff; // no objects
     e.load(PROBE_LEVEL, { layer1: header, sprites: new Uint8Array([0, 0xff]) });
@@ -343,6 +355,17 @@ export class BlockProber {
   private floor(): number {
     const c = this.cur;
     if (c.floorTile !== -1) return c.floorTile;
+    // later probes use the result: its pages count for the probe level
+    const { reads } = this.emu.tracked(() => this.findFloor(), null);
+    if (c.reads) {
+      c.reads.add(reads);
+      c.deps = this.results.fp.deps(c.reads);
+    }
+    return c.floorTile;
+  }
+
+  private findFloor(): void {
+    const c = this.cur;
     c.floorTile = -2;
     for (let i = 0; i < 0x200; i++) {
       const t = (i + 0x100) & 0x1ff, bx = 16;
@@ -353,7 +376,6 @@ export class BlockProber {
       const off = MAP_BASE + (bx >> 4) * 0x1b0 + this.by * 16 + (bx & 15);
       if ((w[0x77] & 4) && w[0x19] === 0 && (w[off] | (w[off + 0x10000] << 8)) === t) { c.floorTile = t; break; }
     }
-    return c.floorTile;
   }
 
   private hit(tile: number, big: number, col: number): HitResult {

@@ -3,9 +3,10 @@
 // (which object produced which tile).
 
 import { Snes, type SnesState } from './snes.ts';
-import { Rom } from './rom.ts';
+import { Rom, snesToPc } from './rom.ts';
 import { L1_PTRS, L2_PTRS, SPR_PTRS, mainTranslevel } from './level.ts';
 import { editorPatch, BG_HOOK } from './patches.ts';
+import { RomReads } from './romdeps.ts';
 
 export const OV_L1 = 0x0000; // overlay offsets
 export const OV_L2 = 0x4000;
@@ -74,17 +75,37 @@ export class LevelEmulator {
     this.snes.overlay = this.overlay;
   }
 
+  bootReads: RomReads | null = null; // ROM read while booting (every load starts from that state)
+
   // Boot to the title screen once; all level loads start from this snapshot.
   boot(): void {
     const s = this.snes;
     s.rom = this.rom.data;
     s.reset();
-    let f = 0;
-    while (s.wram[0x100] !== 0x07) {
-      s.runFrame();
-      if (++f > 2000) throw new Error('boot did not reach title screen');
-    }
+    this.bootReads = this.tracked(() => {
+      let f = 0;
+      while (s.wram[0x100] !== 0x07) {
+        s.runFrame();
+        if (++f > 2000) throw new Error('boot did not reach title screen');
+      }
+    }).reads;
     this.baseState = s.saveState();
+  }
+
+  // runs fn recording the ROM it reads, on top of base (default: the boot's); the reads also
+  // count for an enclosing tracked() call
+  tracked<T>(fn: () => T, base: RomReads | null = this.bootReads): { result: T; reads: RomReads } {
+    const s = this.snes, outer = s.romReads, outerRom = this.rom.reads;
+    const reads = new RomReads(this.rom.data.length, base);
+    s.romReads = this.rom.reads = reads; // the emulated CPU's reads and the editor code's
+    try {
+      return { result: fn(), reads };
+    } finally {
+      s.romReads = outer;
+      this.rom.reads = outerRom;
+      outer?.add(reads);
+      if (outerRom && outerRom !== outer) outerRom.add(reads);
+    }
   }
 
   // ROM data array may be replaced (expansion); keep emulator in sync.
@@ -120,7 +141,8 @@ export class LevelEmulator {
     const rom = this.rom;
     const saved: [number, number][] = [];
     const patch = (snes: number, v: number) => {
-      saved.push([snes, rom.r8(snes)]);
+      saved.push([snes, rom.data[snesToPc(snes)]]);
+      s.romSkip.add(snesToPc(snes)); // their content doesn't matter: reads don't count for romPages
       rom.w8(snes, v);
     };
     const patch24 = (snes: number, v: number) => { patch(snes, v); patch(snes + 1, v >> 8); patch(snes + 2, v >> 16); };
@@ -213,6 +235,7 @@ export class LevelEmulator {
       s.hook = null;
       s.taintOn = false;
       for (let i = saved.length - 1; i >= 0; i--) rom.w8(saved[i][0], saved[i][1]);
+      s.romSkip.clear();
     }
     return {
       wram: s.wram.slice(),

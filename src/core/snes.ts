@@ -5,6 +5,7 @@
 
 import { CPU, type Bus } from './cpu.ts';
 import type { PPU } from './ppu.ts';
+import { BYTE_PAGES, type RomReads } from './romdeps.ts';
 
 export const CYCLES_PER_LINE = 170; // approximate CPU cycles (bus accesses) per scanline
 export const LINES_PER_FRAME = 262;
@@ -37,6 +38,8 @@ export class Snes implements Bus {
   oam = new Uint8Array(0x220);
   cpu: CPU;
   hook: MemHook | null = null;
+  romReads: RomReads | null = null; // records the ROM reads (see romdeps.ts)
+  romSkip = new Set<number>(); // ROM offsets whose reads aren't recorded
   // data provenance tracking (ROM offset each WRAM/CGRAM byte was copied from)
   taintOn = false;
   taint = new Int32Array(0x20000).fill(-1);
@@ -121,6 +124,10 @@ export class Snes implements Bus {
         }
         const ro = this.romOffset(addr);
         if (this.hook?.onRomRead) this.hook.onRomRead(ro);
+        const rr = this.romReads;
+        if (rr && !rr.pages[ro >> 8] && !this.romSkip.has(ro)) {
+          if (BYTE_PAGES[ro >> 8]) rr.bytes.add(ro); else rr.pages[ro >> 8] = 1;
+        }
         v = this.rom[ro];
         if (this.taintOn) this.tpush(ro, v);
       } else if (b >= 0x70 && b < 0x7e) {

@@ -12,7 +12,8 @@ import { EXT_FIRST, map16Ext, installMap16Ext } from '../core/map16ext.ts';
 import { saveLevel } from '../core/save.ts';
 import { captureSprites, captureSpriteAt, type SpriteImage } from '../core/spritegfx.ts';
 import { DM16_EXT, hasEditorPatch, installEditorPatch } from '../core/patches.ts';
-import { kvSet, kvGet } from './storage.ts';
+import { kvSet, kvGet, kvEntries, kvKeys, kvWrite } from './storage.ts';
+import { ResultCache, RomFingerprint, RomReads, type CacheEntry } from '../core/romdeps.ts';
 import { bgFromWram, bgIndex, encodeBg } from '../core/bg.ts';
 import { toast } from './dom.ts';
 import { ObjKindProbe, kindsStillValid, storeKinds, loadKinds, resizeObjectSize, type ObjKind, type ObjKinds, type StoredObjKinds } from '../core/objkinds.ts';
@@ -25,6 +26,7 @@ export type PaletteItem =
 
 type Listener = () => void;
 
+const CACHE_PREFIX = 'rc2:'; // IndexedDB keys of the result cache (bump when result formats change)
 const PROBE_SPRITE = 0x10000; // probe queue key flag: sprite number instead of Map16 tile
 const SPRITE_PROBE_END = 0xc9; // sprites from $C9 on are shooters, generators and run-once sprites
 
@@ -65,9 +67,13 @@ export class App {
   probeChannel: MessageChannel | null = null; // yields between probe slices (setTimeout is throttled in hidden tabs)
   exitScreen = 0;
   spriteThumbs: Map<number, HTMLCanvasElement> | null = null;
-  // images of sprites that look different depending on their position: num | variant << 8 (null: none)
-  variantThumbs = new Map<number, HTMLCanvasElement | null>();
-  variantQueue: number[] = [];
+  variantQueue: number[] = []; // sprites whose variant images are captured next
+  private canvases = new WeakMap<SpriteImage, HTMLCanvasElement>();
+  // results found out by emulation, valid while the ROM they read is unchanged (see romdeps.ts);
+  // stored in IndexedDB, loaded once at start (cacheReady)
+  results: ResultCache;
+  cacheReady: Promise<void>;
+  private cacheTimer = 0;
   // what the settings byte nibbles of standard objects mean, per tileset (emulated, see objkinds.ts)
   kinds = new Map<number, { k: ObjKinds; gen: number }>();
   kindJob: { ts: number; probe: ObjKindProbe | null } | null = null;
@@ -82,6 +88,22 @@ export class App {
     this.romName = name;
     this.emu = new LevelEmulator(rom);
     this.emu.boot();
+    this.results = new ResultCache(new RomFingerprint(this.emu));
+    this.cacheReady = kvEntries<CacheEntry>(CACHE_PREFIX)
+      .then((e) => this.results.load(e.map(([k, v]) => [k.slice(CACHE_PREFIX.length), v])))
+      .catch((e) => console.error(e));
+    // results of older formats
+    kvKeys('rc').then((k) => kvWrite([], k.filter((x) => !x.startsWith(CACHE_PREFIX)))).catch(() => {});
+    this.results.onChange = () => {
+      if (!this.cacheTimer) this.cacheTimer = window.setTimeout(() => this.storeResults(), 3000);
+    };
+    window.addEventListener('pagehide', () => { if (this.cacheTimer) { clearTimeout(this.cacheTimer); this.storeResults(); } });
+  }
+
+  private storeResults(): void {
+    this.cacheTimer = 0;
+    const { put, del } = this.results.flush();
+    kvWrite(put.map(([k, v]) => [CACHE_PREFIX + k, v]), del.map((k) => CACHE_PREFIX + k)).catch((e) => console.error(e));
   }
 
   on(ev: string, fn: Listener): void {
@@ -269,13 +291,15 @@ export class App {
   }
 
   // ------------- sprite images (captured from the running game) -------------
+  // kept in the result cache like the probes: all images of a sprite GFX/palette setting together,
+  // variant images by sprite and position
   spriteKey = '';
   ensureSpriteImages(): void {
     const hd = this.level.header;
     const key = `${hd.spriteGfx}-${hd.spritePalette}`;
     if (key === this.spriteKey) return;
     this.spriteKey = key;
-    this.dropVariantImages();
+    this.variantQueue = [];
     const map = new Map<number, HTMLCanvasElement>();
     this.spriteThumbs = map;
     const all = Array.from({ length: 0xc9 }, (_, i) => i);
@@ -283,20 +307,35 @@ export class App {
     const bg = this.level.layer2Pointer >> 16 === 0xff ? this.level.layer2Pointer : 0xffd900;
     const header = { ...hd };
     const sh = this.level.spriteHeader;
+    const images: [number, SpriteImage][] = [];
+    const reads = new RomReads(this.rom.data.length);
     let i = 0;
     const step = () => {
       if (this.spriteKey !== key) return;
+      if (i === 0) {
+        const stored = this.results.get<[number, SpriteImage][]>(`i${key}`);
+        if (stored) {
+          for (const [n, img] of stored) map.set(n, this.spriteCanvas(img));
+          this.setBusy('sprites', null);
+          this.emit('sprites');
+          return;
+        }
+      }
       this.setBusy('sprites', `Sprite-Grafiken ${Math.min(100, Math.round(i / all.length * 100))} %`);
       const chunk = all.slice(i, i + 12);
       i += 12;
-      const res = captureSprites(this.emu, lvNum, header, sh, bg, chunk);
-      for (const [n, img] of res) map.set(n, spriteCanvas(img));
+      const r = this.emu.tracked(() => captureSprites(this.emu, lvNum, header, sh, bg, chunk));
+      reads.add(r.reads);
+      for (const [n, img] of r.result) { map.set(n, this.spriteCanvas(img)); images.push([n, img]); }
       this.emit('sprites');
       if (i < all.length) setTimeout(step, 0);
-      else this.setBusy('sprites', null);
+      else {
+        this.results.set(`i${key}`, images, this.results.fp.deps(reads));
+        this.setBusy('sprites', null);
+      }
     };
     this.setBusy('sprites', 'Sprite-Grafiken');
-    setTimeout(step, 50);
+    this.cacheReady.then(() => setTimeout(step, 0));
   }
 
   // image of sprite num at tile (x, y): sprites that start differently depending on their position
@@ -305,35 +344,43 @@ export class App {
     const base = this.spriteThumbs?.get(num);
     const p = this.spriteInfo(num);
     if (!p || p.variants.reps.length < 2) return base;
-    const c = this.variantThumbs.get(num | (variantOf(p.variants, x, y) << 8));
-    if (c === undefined) this.queueVariantImages(num);
-    return c ?? base;
+    const img = this.results.get<SpriteImage | null>(this.variantKey(num, p.variants.reps[variantOf(p.variants, x, y)]));
+    if (img === undefined) this.queueVariantImages(num);
+    return img ? this.spriteCanvas(img) : base;
   }
 
-  private dropVariantImages(): void {
-    this.variantThumbs = new Map();
-    this.variantQueue = [];
+  private variantKey(num: number, at: { x: number; y: number }): string {
+    return `v${this.spriteKey}:${num}:${at.x}:${at.y}`;
+  }
+
+  private spriteCanvas(img: SpriteImage): HTMLCanvasElement {
+    let c = this.canvases.get(img);
+    if (!c) this.canvases.set(img, (c = spriteCanvas(img)));
+    return c;
   }
 
   private queueVariantImages(num: number): void {
     if (this.variantQueue.includes(num)) return;
     this.variantQueue.push(num);
     if (this.variantQueue.length > 1) return;
-    const thumbs = this.variantThumbs, key = this.spriteKey;
+    const queue = this.variantQueue, key = this.spriteKey;
     const step = () => {
-      if (thumbs !== this.variantThumbs || key !== this.spriteKey) return;
-      const n = this.variantQueue[0];
-      this.setBusy('variants', `Sprite-Varianten (${this.variantQueue.length})`);
+      if (queue !== this.variantQueue || key !== this.spriteKey) return;
+      const n = queue[0];
+      this.setBusy('variants', `Sprite-Varianten (${queue.length})`);
       const p = this.prober?.cachedSprite(n);
       const lv = this.level, bg = lv.layer2Pointer >> 16 === 0xff ? lv.layer2Pointer : 0xffd900;
-      p?.variants.reps.forEach(({ x, y }, v) => {
-        let img: SpriteImage | null = null;
-        try { img = captureSpriteAt(this.emu, lv.number, lv.header, lv.spriteHeader, bg, n, x, y); } catch (e) { console.error(e); }
-        thumbs.set(n | (v << 8), img && spriteCanvas(img));
-      });
-      this.variantQueue.shift();
+      for (const at of p?.variants.reps ?? []) {
+        const k = this.variantKey(n, at);
+        if (this.results.get(k) !== undefined) continue;
+        try {
+          const r = this.emu.tracked(() => captureSpriteAt(this.emu, lv.number, lv.header, lv.spriteHeader, bg, n, at.x, at.y));
+          this.results.set(k, r.result, this.results.fp.deps(r.reads));
+        } catch (e) { console.error(e); }
+      }
+      queue.shift();
       this.emit('sprites');
-      if (this.variantQueue.length) setTimeout(step, 0);
+      if (queue.length) setTimeout(step, 0);
       else this.setBusy('variants', null);
     };
     setTimeout(step, 0);
@@ -485,13 +532,12 @@ export class App {
 
   private blockProber(): BlockProber {
     if (!this.prober || this.prober.rom !== this.rom) {
-      this.prober = new BlockProber(this.rom, this.emu.baseState);
+      this.prober = new BlockProber(this.rom, { state: this.emu.baseState, reads: this.emu.bootReads }, this.results);
       this.proberGen = this.emu.romGen;
     }
     if (this.proberGen !== this.emu.romGen) {
       this.prober.reset();
       this.probeFailed.clear();
-      this.dropVariantImages();
       this.proberGen = this.emu.romGen;
     }
     this.prober.use(this.level.header.tileset);
@@ -512,7 +558,7 @@ export class App {
       this.probeChannel = new MessageChannel();
       this.probeChannel.port1.onmessage = () => this.runProbes();
     }
-    this.probeChannel.port2.postMessage(0);
+    this.cacheReady.then(() => this.probeChannel!.port2.postMessage(0));
   }
 
   private runProbes(): void {
