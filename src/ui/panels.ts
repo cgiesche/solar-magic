@@ -2,7 +2,7 @@
 
 import type { App } from './app.ts';
 import { h, clear, hexInput } from './dom.ts';
-import { objectName, spriteName, hex2, hex3 } from '../core/names.ts';
+import { objectName, spriteName, hex2, hex3, objectVariants, objectVariant, withObjectVariant } from '../core/names.ts';
 import { renderObjectThumbs, objKey, type ObjSpec } from './thumbs.ts';
 import { newUid } from '../core/level.ts';
 import { levelName } from '../core/overworld.ts';
@@ -140,7 +140,11 @@ export class Palette {
 
   specs(): ObjSpec[] {
     const s: ObjSpec[] = [];
-    for (let n = 1; n < 0x40; n++) s.push({ num: n, ext: 0, size: 0x11 });
+    for (let n = 1; n < 0x40; n++) {
+      const v = objectVariants(n);
+      if (!v) { s.push({ num: n, ext: 0, size: 0x11 }); continue; }
+      for (let t = 0; t < v.count; t++) s.push({ num: n, ext: 0, size: withObjectVariant(n, 0x11, t) });
+    }
     for (let e = 0x10; e < 0x100; e++) s.push({ num: 0, ext: e, size: 0 });
     return s;
   }
@@ -191,12 +195,13 @@ export class Palette {
     const grid = h('div', { class: 'pal-grid' });
     for (const s of this.specs()) {
       if ((this.tab === 'obj') !== (s.num !== 0)) continue;
-      const name = objectName(s.num, s.ext);
-      const label = s.num ? hex2(s.num) : hex2(s.ext);
+      const vt = objectVariant(s.num, s.size);
+      const name = objectName(s.num, s.ext) + (vt >= 0 ? ` – Typ ${vt.toString(16).toUpperCase()}` : '');
+      const label = s.num ? hex2(s.num) + (vt >= 0 ? `.${vt.toString(16).toUpperCase()}` : '') : hex2(s.ext);
       if (f && !(`${label} ${name}`.toLowerCase().includes(f))) continue;
       const th = this.thumbs.get(objKey(s));
       if (!th && this.tab === 'ext') continue; // invalid ext objects produce nothing
-      const sel = cur?.kind === 'obj' && cur.num === s.num && (s.num !== 0 || cur.ext === s.ext);
+      const sel = cur?.kind === 'obj' && cur.num === s.num && (s.num !== 0 || cur.ext === s.ext) && objectVariant(cur.num, cur.size) === vt;
       grid.appendChild(h('div', {
         class: `pal-cell${sel ? ' selected' : ''}`, title: `${label}: ${name}`,
         onclick: () => {
@@ -282,6 +287,7 @@ export class Properties {
     const o = sel[0];
     const upd = (f: () => void) => { app.checkpoint(); f(); app.changed(); };
     const idx = app.currentObjects().indexOf(o);
+    const ov = objectVariants(o.num);
     this.body.append(
       h('div', { class: 'prop-title' }, `${o.num ? 'Objekt ' + hex2(o.num) : 'Erw. Objekt ' + hex2(o.ext)}: ${objectName(o.num, o.ext)}`),
       h('div', { class: 'hint' }, `Index ${idx} von ${app.currentObjects().length}`),
@@ -291,8 +297,11 @@ export class Properties {
       o.num === 0 && o.ext === DM16_EXT ? this.field('Größe (hw)', hexInput(o.size, 2, (v) => upd(() => (o.size = v)))) : '',
       this.field('X', hexInput(o.x, 3, (v) => upd(() => (o.x = v)), app.levelWidthTiles() - 1)),
       this.field('Y', hexInput(o.y, 3, (v) => upd(() => (o.y = v)), app.levelHeightTiles() - 1)),
+      o.num !== 0 && ov ? this.field('Typ', hexInput(objectVariant(o.num, o.size), 1, (v) => upd(() => (o.size = withObjectVariant(o.num, o.size, v))), ov.count - 1)) : '',
       o.num !== 0 ? this.field('Größe (Byte)', hexInput(o.size, 2, (v) => upd(() => (o.size = v)))) : '',
-      o.num !== 0 ? h('div', { class: 'hint' }, `Breite-Nibble ${o.size & 15}, Höhe-Nibble ${o.size >> 4}. Tasten: +/− Breite, * und / Höhe, Alt+Pfeile`) : '',
+      o.num !== 0 ? h('div', { class: 'hint' }, ov
+        ? `Unterobjekt: ${ov.nibble === 'lo' ? 'unteres Nibble = Typ, oberes = Höhe' : 'oberes Nibble = Typ, unteres = Breite'}. Skalieren ändert nur die ${ov.nibble === 'lo' ? 'Höhe' : 'Breite'}.`
+        : `Breite-Nibble ${o.size & 15}, Höhe-Nibble ${o.size >> 4}. Tasten: +/− Breite, * und / Höhe, Alt+Pfeile`) : '',
     );
   }
 

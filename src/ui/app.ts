@@ -15,6 +15,7 @@ import { DM16_EXT, hasEditorPatch, installEditorPatch } from '../core/patches.ts
 import { kvSet } from './storage.ts';
 import { bgFromWram, bgIndex, encodeBg } from '../core/bg.ts';
 import { toast } from './dom.ts';
+import { resizeObjectSize } from '../core/names.ts';
 
 export type EditMode = 'l1' | 'l2' | 'spr' | 'exit' | 'bg';
 export type PaletteItem =
@@ -505,11 +506,7 @@ export class App {
     const objs = this.selectedObjects().filter((o) => o.num !== 0 || o.ext === DM16_EXT);
     if (!objs.length) return;
     this.checkpoint();
-    for (const o of objs) {
-      const w = Math.max(0, Math.min(15, (o.size & 15) + dw));
-      const hh = Math.max(0, Math.min(15, (o.size >> 4) + dh));
-      o.size = (hh << 4) | w;
-    }
+    for (const o of objs) o.size = resizeObjectSize(o.num, o.size, dw, dh);
     this.changed();
   }
 

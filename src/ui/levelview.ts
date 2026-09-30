@@ -2,7 +2,7 @@
 
 import { App, type Marker } from './app.ts';
 import { h, attachPanZoom, downloadBytes } from './dom.ts';
-import { spriteName, objectName, hex2, hex3 } from '../core/names.ts';
+import { spriteName, objectName, hex2, hex3, resizeObjectSize } from '../core/names.ts';
 import { type LevelObject, type LevelSprite, serializeLayer1, serializeLayer2, serializeSprites } from '../core/level.ts';
 import { composite } from '../core/render.ts';
 
@@ -415,9 +415,7 @@ export class LevelView {
       for (const o of app.selectedObjects()) {
         const s0 = d.origSize.get(o.uid);
         if (s0 === undefined) continue;
-        const w = Math.max(0, Math.min(15, (s0 & 15) + dw));
-        const hh = Math.max(0, Math.min(15, (s0 >> 4) + dh));
-        o.size = (hh << 4) | w;
+        o.size = resizeObjectSize(o.num, s0, dw, dh);
       }
       this.scheduleRefresh();
     }

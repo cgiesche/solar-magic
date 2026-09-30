@@ -5,11 +5,15 @@ import { OV_L1 } from '../core/levelemu.ts';
 import { encodePrimaryHeader, serializeObjects, type LevelObject, newUid, L2_PTRS } from '../core/level.ts';
 import { renderLevel, layerGeom } from '../core/render.ts';
 import { MAP_BASE } from '../core/levelemu.ts';
+import { objectVariant } from '../core/names.ts';
 
 export interface ObjSpec { num: number; ext: number; size: number }
 
-export function objKey(s: { num: number; ext: number }): string {
-  return s.num === 0 ? `e${s.ext}` : `s${s.num}`;
+// sub-objects (see objectVariants) get a key per type
+export function objKey(s: { num: number; ext: number; size: number }): string {
+  if (s.num === 0) return `e${s.ext}`;
+  const v = objectVariant(s.num, s.size);
+  return v < 0 ? `s${s.num}` : `s${s.num}.${v}`;
 }
 
 export function renderObjectThumbs(app: App, specs: ObjSpec[]): Map<string, HTMLCanvasElement> {
