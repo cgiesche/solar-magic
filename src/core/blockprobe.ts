@@ -7,6 +7,9 @@
 // ROMs and custom blocks are described correctly as well.
 // Sprites (flying ? blocks and the like) are probed the same way: the sprite is spawned through
 // the game's own table setup, Mario jumps against it, and a run without the jump is subtracted.
+// Whether a tile can be entered (pipes, doors) is found out the same way: Mario stands on, below,
+// beside or in front of it and holds a direction; entering shows as a change of his animation
+// state or the game mode that a run without the button doesn't show.
 
 import { LevelEmulator, MAP_BASE, overlaySnes } from './levelemu.ts';
 import { Rom } from './rom.ts';
@@ -19,6 +22,10 @@ const PROBE_FRAMES = 24;
 const SPRITE_SLOT = 11; // slot of a probed sprite (items it spawns take lower free slots)
 const INIT_TABLES = 0x07f7d2; // game routine that sets up a new sprite's tables (tweakers), X = slot
 const OV_STUB = 0xc000; // overlay offset of a JSL stub used to call game routines
+const ENTER_FRAMES = 24;
+// joypad bits ($4218) and Mario's offset to the tile for each enter direction
+const PAD = { up: 0x0800, down: 0x0400, left: 0x0200, right: 0x0100 };
+const ENTER_DX = [-8, -4, 0, 4, 8]; // pipes only let Mario in within a few pixels of their middle
 
 export interface HitResult {
   sprites: number[]; // sprite numbers that appeared
@@ -42,7 +49,10 @@ export interface ColumnProbe {
   solid: boolean;
 }
 
-export interface BlockProbe extends ColumnProbe { tile: number }
+export interface BlockProbe extends ColumnProbe {
+  tile: number;
+  enter: string; // directions to hold to enter it (pipes, doors) as arrows ↓↑←→, '' = none
+}
 export interface SpriteProbe extends ColumnProbe { num: number }
 
 // result for a block or sprite at tile column x
@@ -61,6 +71,7 @@ export class BlockProber {
   ready: SnesState | null = null;
   by = 0; // block row in the probe level; the block goes to screen 1, column 0-15
   cache = new Map<number, BlockProbe>();
+  floorTile = -1; // a tile Mario can stand on (found by trying), -2 = none found
   spriteCache = new Map<number, SpriteProbe>();
 
   // bootState: title screen snapshot of another emulator on the same ROM (saves booting again)
@@ -74,6 +85,7 @@ export class BlockProber {
   reset(): void {
     this.emu.syncRom();
     this.ready = null;
+    this.floorTile = -1;
     this.cache.clear();
     this.spriteCache.clear();
   }
@@ -85,7 +97,8 @@ export class BlockProber {
   probe(tile: number): BlockProbe {
     let p = this.cache.get(tile);
     if (!p) {
-      p = { tile, ...columns((col, big) => this.hit(tile, big, col), tile) };
+      const c = columns((col, big) => this.hit(tile, big, col), tile);
+      p = { tile, ...c, enter: this.enterDirs(tile, c.solid) };
       this.cache.set(tile, p);
     }
     return p;
@@ -178,6 +191,75 @@ export class BlockProber {
       after: off < 0 ? -1 : w[off] | (w[off + 0x10000] << 8),
       solid,
     };
+  }
+
+  private put(x: number, y: number, tile: number): void {
+    const w = this.emu.snes.wram, off = MAP_BASE + (x >> 4) * 0x1b0 + y * 16 + (x & 15);
+    w[off] = tile & 0xff;
+    w[off + 0x10000] = tile >> 8;
+  }
+
+  // runs frames holding pad; true when Mario's animation state ($71) or the game mode changed
+  private runHeld(pad: number, frames: number): boolean {
+    const s = this.emu.snes, w = s.wram;
+    let hit = false;
+    try {
+      for (let f = 0; f < frames && !hit; f++) {
+        s.joy1 = pad;
+        s.runFrame();
+        hit = w[0x71] !== 0 || w[0x100] !== 0x14;
+      }
+    } catch { /* counts as nothing */ }
+    s.joy1 = 0;
+    return hit;
+  }
+
+  // setup() places tile and Mario; entered when holding pad changes something that waiting doesn't
+  private enters(setup: () => void, pad: number, frames = ENTER_FRAMES): boolean {
+    setup();
+    if (!this.runHeld(pad, frames)) return false;
+    setup();
+    return !this.runHeld(0, frames);
+  }
+
+  // Directions to hold to enter the tile: standing on it (↓), jumping against it from below (↑),
+  // walking against it on a floor made of itself (← →); tiles Mario can pass: standing in front
+  // of it on a solid floor (↑, doors).
+  private enterDirs(tile: number, solid: boolean): string {
+    const bx = 16, by = () => this.by;
+    const at = (dx: number, dy: number, vy: number, floor = -1) => () => {
+      this.start(bx, 0);
+      if (floor >= 0) for (let x = bx - 4; x <= bx + 4; x++) this.put(x, by() + 1, floor);
+      this.put(bx, by(), tile);
+      this.placeMario(bx * 16 + dx, by() * 16, dy, vy);
+    };
+    let out = '';
+    if (solid) {
+      if (ENTER_DX.some((dx) => this.enters(at(dx, -40, 0), PAD.down))) out += '↓';
+      if (ENTER_DX.some((dx) => this.enters(at(dx, 20, -0x40), PAD.up))) out += '↑';
+      if (this.enters(at(20, -16, 0, tile), PAD.left)) out += '←';
+      if (this.enters(at(-20, -16, 0, tile), PAD.right)) out += '→';
+    } else {
+      const floor = this.floor();
+      if (floor >= 0 && this.enters(at(0, -16, 0, floor), PAD.up, ENTER_FRAMES + 8)) out += '↑';
+    }
+    return out;
+  }
+
+  // the first tile a dropped Mario comes to rest on without anything happening
+  private floor(): number {
+    if (this.floorTile !== -1) return this.floorTile;
+    this.floorTile = -2;
+    for (let i = 0; i < 0x200; i++) {
+      const t = (i + 0x100) & 0x1ff, bx = 16;
+      const w = this.start(bx, 0);
+      for (let x = bx - 4; x <= bx + 4; x++) this.put(x, this.by, t);
+      this.placeMario(bx * 16, this.by * 16, -40, 0); // feet 8 px above
+      if (this.runHeld(0, 16)) continue;
+      const off = MAP_BASE + (bx >> 4) * 0x1b0 + this.by * 16 + (bx & 15);
+      if ((w[0x77] & 4) && w[0x19] === 0 && (w[off] | (w[off + 0x10000] << 8)) === t) { this.floorTile = t; break; }
+    }
+    return this.floorTile;
   }
 
   private hit(tile: number, big: number, col: number): HitResult {
@@ -281,7 +363,16 @@ function summarize(tile: number, small: HitResult, big: HitResult): string | nul
 }
 
 // one line for tooltips and the status bar; with x: the result at that tile column
-export function probeText(p: ColumnProbe, x?: number): string {
+export function probeText(p: ColumnProbe | BlockProbe, x?: number): string {
   const s = x === undefined ? p.summary : probeAt(p, x).summary;
-  return s ?? (p.solid ? 'von unten: fest, ohne Effekt' : 'von unten: durchlässig');
+  return (s ?? (p.solid ? 'von unten: fest, ohne Effekt' : 'von unten: durchlässig')) + enterSuffix(p);
+}
+
+export function enterText(enter: string): string {
+  return enter ? `betretbar (${enter})` : '';
+}
+
+// ", betretbar (↓)" for tiles that can be entered, '' otherwise
+export function enterSuffix(p: ColumnProbe | BlockProbe): string {
+  return 'enter' in p && p.enter ? ', ' + enterText(p.enter) : '';
 }

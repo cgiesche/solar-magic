@@ -3,7 +3,7 @@
 import { App, type Marker } from './app.ts';
 import { h, attachPanZoom, downloadBytes } from './dom.ts';
 import { spriteName, objectName, hex2, hex3, resizeObjectSize } from '../core/names.ts';
-import { probeAt, type PosProbe } from '../core/blockprobe.ts';
+import { probeAt, enterText, type PosProbe } from '../core/blockprobe.ts';
 import { type LevelObject, type LevelSprite, serializeLayer1, serializeLayer2, serializeSprites } from '../core/level.ts';
 import { composite } from '../core/render.ts';
 
@@ -270,10 +270,25 @@ export class LevelView {
       const a = g.addr(x, y);
       if (a < 0) continue;
       const p = app.blockInfo(w[a] | (w[a + 0x10000] << 8));
-      if (!p || p.summary === null) continue;
-      this.drawItem(ctx, probeAt(p, x), x * 16, y * 16);
+      if (!p) continue;
+      if (p.summary !== null) this.drawItem(ctx, probeAt(p, x), x * 16, y * 16);
+      if (p.enter) this.drawEnter(ctx, p.enter, x * 16, y * 16);
     }
     ctx.globalAlpha = 1;
+  }
+
+  // arrows for the directions a tile can be entered in (pipes, doors)
+  drawEnter(ctx: CanvasRenderingContext2D, dirs: string, x: number, y: number): void {
+    const a = ctx.globalAlpha;
+    ctx.globalAlpha = 0.9;
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(x, y + 10, dirs.length * 6 + 1, 6);
+    ctx.fillStyle = '#7fe08a';
+    ctx.font = 'bold 7px sans-serif';
+    ctx.textBaseline = 'top';
+    [...dirs].forEach((d, i) => ctx.fillText(d, x + 1 + i * 6, y + 9.5));
+    ctx.textBaseline = 'alphabetic';
+    ctx.globalAlpha = a;
   }
 
   // the same for sprites that give items (flying ? blocks …), drawn over the sprite images
@@ -530,7 +545,7 @@ export class LevelView {
       const t = app.render.wram[a] | (app.render.wram[a + 0x10000] << 8);
       txt += `  Map16 ${hex3(t)}`;
       const p = app.mode === 'bg' ? undefined : app.blockInfo(t); // result arrives via 'blockinfo'
-      const sum = p && probeAt(p, tx).summary;
+      const sum = [p && probeAt(p, tx).summary, p && enterText(p.enter)].filter(Boolean).join(', ');
       if (sum) txt += ` (${sum})`;
     }
     if (app.mode === 'bg') {

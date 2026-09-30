@@ -9,9 +9,9 @@ import { levelName } from '../core/overworld.ts';
 import { DM16_EXT } from '../core/patches.ts';
 import { EXT_TILES, map16Ext } from '../core/map16ext.ts';
 import { TileCache, map16Source, drawMap16 } from '../core/render.ts';
-import { probeText, spritesOf, probeAt } from '../core/blockprobe.ts';
+import { probeText, spritesOf, probeAt, enterText, enterSuffix } from '../core/blockprobe.ts';
 
-// behaviour of the given Map16 tiles when hit from below (only tiles with an effect);
+// behaviour of the given Map16 tiles when hit from below or entered (only tiles with an effect);
 // undefined while probes are still pending
 export function blockSummary(app: App, tiles: number[], all = false): string[] | undefined {
   const out: string[] = [];
@@ -19,7 +19,7 @@ export function blockSummary(app: App, tiles: number[], all = false): string[] |
   for (const t of tiles.slice(0, 16)) {
     const p = app.blockInfo(t);
     if (!p) { pending = true; continue; }
-    if (p.summary || all) out.push(tiles.length > 1 || all ? `${hex3(t)}: ${probeText(p)}` : p.summary!);
+    if (p.summary || p.enter || all) out.push(tiles.length > 1 || all ? `${hex3(t)}: ${probeText(p)}` : p.summary ? p.summary + enterSuffix(p) : enterText(p.enter));
   }
   return pending ? undefined : out;
 }
@@ -32,6 +32,13 @@ export function blockSprites(app: App, tiles: number[]): number[] {
     if (p) for (const q of p.pos) for (const n of spritesOf(q)) out.add(n);
   }
   return [...out];
+}
+
+// directions (↓↑←→) in which any of the tiles can be entered, from finished probes only
+export function blockEnter(app: App, tiles: number[]): string {
+  const dirs = new Set<string>();
+  for (const t of tiles.slice(0, 16)) for (const d of app.prober?.cached(t)?.enter ?? '') dirs.add(d);
+  return [...'↓↑←→'].filter((d) => dirs.has(d)).join('');
 }
 
 // ---------------- level list ----------------
@@ -104,9 +111,9 @@ export class Palette {
     this.root = h('div', { class: 'panel palette' }, h('div', { class: 'panel-title' }, 'Einfügen', h('span', { class: 'hint' }, 'Rechtsklick/Shift+Klick platziert')), this.tabs, h('div', { class: 'row' }, this.search), this.body);
     app.on('level', () => { this.ensureThumbs(); this.build(); });
     let t = 0;
-    app.on('sprites', () => { if ((this.tab === 'spr' || this.tab === 'ext') && !t) t = window.setTimeout(() => { t = 0; this.build(); }, 300); });
+    app.on('sprites', () => { if (this.tab !== 'm16' && !t) t = window.setTimeout(() => { t = 0; this.build(); }, 300); });
     app.on('bgtile', () => { if (app.mode === 'bg') this.build(); });
-    app.on('blockinfo', () => { if (this.tab === 'ext' || this.tab === 'spr') this.build(); else if (this.tab === 'm16') this.m16Tip(); });
+    app.on('blockinfo', () => { if (this.tab === 'm16') this.m16Tip(); else this.build(); });
     app.on('render', () => { if (app.mode === 'bg') this.build(); });
     app.on('mode', () => {
       if (app.mode === 'spr') this.tab = 'spr';
@@ -243,12 +250,15 @@ export class Palette {
       const vt = objectVariant(s.num, s.size);
       const name = objectName(s.num, s.ext) + (vt >= 0 ? ` – Typ ${vt.toString(16).toUpperCase()}` : '');
       const label = s.num ? hex2(s.num) + (vt >= 0 ? `.${vt.toString(16).toUpperCase()}` : '') : hex2(s.ext);
-      // extended objects: Map16 tiles and what they do when hit (emulated, see blockprobe.ts)
+      // Map16 tiles and what they do when hit or entered (emulated, see blockprobe.ts); tells apart
+      // objects that look the same, like pipes with and without an entrance
       let info = '';
       let items: number[] = [];
-      if (this.tab === 'ext') {
+      let enter = '';
+      {
         const tiles = this.thumbTiles.get(objKey(s)) ?? [];
         items = blockSprites(app, tiles);
+        enter = blockEnter(app, tiles);
         const sum = tiles.length ? blockSummary(app, tiles) : [];
         info = (tiles.length ? `\nMap16 ${tiles.slice(0, 8).map(hex3).join(' ')}${tiles.length > 8 ? ' …' : ''}` : '')
           + (sum === undefined ? '\n(Verhalten wird ermittelt …)' : sum.map((x) => '\n' + x).join(''));
@@ -264,7 +274,8 @@ export class Palette {
           if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1');
           this.build();
         },
-      }, h('div', { class: 'pal-img' }, th ? cloneCanvas(th) : h('span', { class: 'none' }, '–'), itemBadge(app, items)), h('div', { class: 'pal-label' }, label)));
+      }, h('div', { class: 'pal-img' }, th ? cloneCanvas(th) : h('span', { class: 'none' }, '–'), itemBadge(app, items),
+        enter ? h('div', { class: 'pal-enter', title: enterText(enter) }, enter) : ''), h('div', { class: 'pal-label' }, label)));
     }
     this.body.appendChild(grid);
   }
