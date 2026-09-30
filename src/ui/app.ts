@@ -69,7 +69,6 @@ export class App {
   kinds = new Map<number, { k: ObjKinds; gen: number }>();
   kindJob: { ts: number; probe: ObjKindProbe | null } | null = null;
   kindChannel: MessageChannel | null = null;
-  usage: { gen: number; byTileset: Map<number, Map<number, Set<number>>> } | null = null;
   secEntrances: number[] = []; // secondary entrance indices leading into the current level
   // tile/palette animation: frames stored as pixel diffs against the static composite
   anim = { gen: 0, snaps: [] as { vram: Uint8Array; cgram: Uint8Array }[], base: null as Uint32Array | null,
@@ -432,32 +431,6 @@ export class App {
     this.kinds.set(ts, { k, gen: this.emu.romGen });
     this.kindJob = null;
     this.emit('objkinds');
-  }
-
-  // settings bytes of the standard objects the ROM's levels use, per tileset (tells which sub-object
-  // types fit a tileset's graphics)
-  objectUsage(ts = this.level.header.tileset): Map<number, Set<number>> {
-    return this.objectUsageAll().get(ts) ?? new Map();
-  }
-
-  objectUsageAll(): Map<number, Map<number, Set<number>>> {
-    if (!this.usage || this.usage.gen !== this.emu.romGen) {
-      const byTileset = new Map<number, Map<number, Set<number>>>();
-      for (const n of this.usedLevels()) {
-        let lv: Level;
-        try { lv = n === this.level.number ? this.level : loadLevel(this.rom, n); } catch { continue; }
-        let m = byTileset.get(lv.header.tileset);
-        if (!m) byTileset.set(lv.header.tileset, (m = new Map()));
-        for (const o of [...lv.objects, ...(lv.layer2Objects ?? [])]) {
-          if (o.num === 0) continue;
-          let s = m.get(o.num);
-          if (!s) m.set(o.num, (s = new Set()));
-          s.add(o.size);
-        }
-      }
-      this.usage = { gen: this.emu.romGen, byTileset };
-    }
-    return this.usage.byTileset;
   }
 
   private blockProber(): BlockProber {

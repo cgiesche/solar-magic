@@ -17,15 +17,14 @@ export function objKey(s: { num: number; ext: number; size: number }, kind: ObjK
 }
 
 // tilesOut receives the distinct Map16 tiles each object produced
-// tileset: render with another tileset than the level's (same palettes)
-export function renderObjectThumbs(app: App, specs: ObjSpec[], tilesOut?: Map<string, number[]>, tileset = app.level.header.tileset): Map<string, HTMLCanvasElement> {
+export function renderObjectThumbs(app: App, specs: ObjSpec[], tilesOut?: Map<string, number[]>): Map<string, HTMLCanvasElement> {
   const out = new Map<string, HTMLCanvasElement>();
   const PER = 32;
   const rom = app.rom;
   for (let b = 0; b < specs.length; b += PER) {
     const batch = specs.slice(b, b + PER);
     const objs: LevelObject[] = batch.map((s, i) => ({ uid: newUid(), num: s.num, ext: s.ext, size: s.size, x: i * 16 + 3, y: 12 }));
-    const hdr = { ...app.level.header, screens: 32, mode: 0, tileset };
+    const hdr = { ...app.level.header, screens: 32, mode: 0 };
     const owners: number[] = [-1, -1, -1, -1, -1];
     const body = serializeObjects(objs, [], false, owners);
     const l1 = new Uint8Array(5 + body.length);

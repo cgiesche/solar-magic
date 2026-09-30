@@ -102,17 +102,15 @@ export class Palette {
   thumbsFor = '';
   tabs: HTMLDivElement;
   search: HTMLInputElement;
-  allTypes: HTMLInputElement; // also list sub-object types no level of the tileset uses
 
   constructor(app: App) {
     this.app = app;
     this.body = h('div', { class: 'palette-body' });
     this.search = h('input', { class: 'filter', placeholder: 'Suchen …', spellcheck: false });
     this.search.addEventListener('input', () => this.build());
-    this.allTypes = h('input', { type: 'checkbox', onchange: () => this.build() });
     this.tabs = h('div', { class: 'tabs' });
     this.root = h('div', { class: 'panel palette' }, h('div', { class: 'panel-title' }, 'Einfügen', h('span', { class: 'hint' }, 'Rechtsklick/Shift+Klick platziert')), this.tabs,
-      h('div', { class: 'row' }, this.search, h('label', { class: 'pal-all', title: 'Auch Unterobjekt-Typen zeigen, die nicht zum Tileset passen (kein Level benutzt sie so, Grafik oft falsch)' }, this.allTypes, 'alle Typen')), this.body);
+      h('div', { class: 'row' }, this.search), this.body);
     app.on('objkinds', () => this.invalidate());
     app.on('level', () => { this.ensureThumbs(); this.build(); });
     let t = 0;
@@ -216,36 +214,6 @@ export class Palette {
     }
   }
 
-  // Sub-object types fit the tileset when a level of it uses them, or when they look exactly like
-  // in a tileset whose levels use them; others often draw with graphics meant for other tilesets.
-  fits = new Set<string>();
-  fitsFor = '';
-  ensureFits(): void {
-    const app = this.app;
-    const ts = app.level.header.tileset;
-    const key = `${this.thumbsFor}-${app.emu.romGen}`;
-    if (this.fitsFor === key) return;
-    this.fitsFor = key;
-    this.fits = new Set();
-    const usage = app.objectUsageAll();
-    const uses = (t: number, s: ObjSpec, k: ObjKind) => [...usage.get(t)?.get(s.num) ?? []].some((z) => objectVariant(k, z) === objectVariant(k, s.size));
-    const other = new Map<number, ObjSpec[]>(); // tileset → specs to compare
-    for (const s of this.specs()) {
-      const k = app.objectKind(s.num);
-      if (!k?.type) continue;
-      if (uses(ts, s, k)) { this.fits.add(objKey(s, k)); continue; }
-      for (const t of usage.keys()) if (t !== ts && uses(t, s, k)) { let l = other.get(t); if (!l) other.set(t, (l = [])); l.push(s); }
-    }
-    try {
-      for (const [t, specs] of other) {
-        const th = renderObjectThumbs(app, specs.filter((s) => !this.fits.has(objKey(s, app.objectKind(s.num)))), undefined, t);
-        for (const [k, c] of th) { const mine = this.thumbs.get(k); if (mine && sameImage(mine, c)) this.fits.add(k); }
-      }
-    } catch (e) {
-      console.error(e);
-    }
-  }
-
   invalidate(): void {
     this.thumbsFor = '';
     this.ensureThumbs();
@@ -280,14 +248,10 @@ export class Palette {
     }
     if (this.tab === 'm16') { this.buildMap16(); return; }
     const grid = h('div', { class: 'pal-grid' });
-    this.ensureFits();
     for (const s of this.specs()) {
       if ((this.tab === 'obj') !== (s.num !== 0)) continue;
       const kind = app.objectKind(s.num);
       const vt = objectVariant(kind, s.size);
-      // sub-object types no level of this tileset uses often draw with graphics of other tilesets
-      const unused = vt >= 0 && !this.fits.has(objKey(s, kind));
-      if (unused && !this.allTypes.checked) continue;
       const name = objectName(s.num, s.ext) + (vt >= 0 ? ` – Typ ${vt.toString(16).toUpperCase()}` : '');
       const label = s.num ? hex2(s.num) + (vt >= 0 ? `.${vt.toString(16).toUpperCase()}` : '') : hex2(s.ext);
       // Map16 tiles and what they do when hit or entered (emulated, see blockprobe.ts); tells apart
@@ -308,7 +272,7 @@ export class Palette {
       if (!th && this.tab === 'ext') continue; // invalid ext objects produce nothing
       const sel = cur?.kind === 'obj' && cur.num === s.num && (s.num !== 0 || cur.ext === s.ext) && objectVariant(kind, cur.size) === vt;
       grid.appendChild(h('div', {
-        class: `pal-cell${sel ? ' selected' : ''}${unused ? ' unused' : ''}`, title: `${label}: ${name}${unused ? '\n(passt nicht zum Tileset: kein Level benutzt es so)' : ''}${info}`,
+        class: `pal-cell${sel ? ' selected' : ''}`, title: `${label}: ${name}${info}`,
         onclick: () => {
           app.paletteItem = { kind: 'obj', num: s.num, ext: s.ext, size: s.size };
           if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1');
@@ -472,12 +436,4 @@ function nibbleText(k: ObjKind | null): string {
   if (k.lo === 'w' && k.hi === 'w') return 'Das ganze Byte ist die Breite';
   const part = (d: 'w' | 'h' | null, type: boolean) => (type ? 'Typ' : d === 'w' ? 'Breite' : d === 'h' ? 'Höhe' : 'ohne Wirkung');
   return `${k.type ? `Unterobjekt mit ${k.count} Typen: ` : ''}unteres Nibble = ${part(k.lo, k.type === 'lo')}, oberes = ${part(k.hi, k.type === 'hi')}`;
-}
-
-function sameImage(a: HTMLCanvasElement, b: HTMLCanvasElement): boolean {
-  if (a.width !== b.width || a.height !== b.height) return false;
-  const da = a.getContext('2d')!.getImageData(0, 0, a.width, a.height).data;
-  const db = b.getContext('2d')!.getImageData(0, 0, b.width, b.height).data;
-  for (let i = 0; i < da.length; i++) if (da[i] !== db[i]) return false;
-  return true;
 }
