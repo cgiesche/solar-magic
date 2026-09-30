@@ -31,6 +31,15 @@ export interface LevelOverride {
   onOffSwitch?: boolean; // ON/OFF switch in the OFF state ($14AF)
   trackSources?: boolean; // record ROM provenance of CGRAM (slower)
   translevel?: number; // $13BF (messages, Yoshi coins); default: the level itself if it is a main level
+  trace?: boolean; // record per object what its routine reads and writes (see ObjectTrace)
+}
+
+// What the object routines did while the level loaded (analysis, see objkinds.ts).
+export interface ObjectTrace {
+  code: Set<number>; // ROM offsets fetched as instructions
+  reads: Map<number, Set<number>>; // object key → data reads from ROM, as pc * 2^23 + ROM offset
+  writes: Map<number, Map<number, number>>; // object key → map offset → Map16 tile as written by the object
+  rom: Set<number>; // every ROM offset read (code and data)
 }
 
 export interface LevelRender {
@@ -41,6 +50,7 @@ export interface LevelRender {
   ppuRegs: Uint8Array;
   owner: Int32Array; // per low-byte map address ($C800-$FFFF), -1 = none
   touched: Map<number, Set<number>>; // object key → map offsets written
+  trace?: ObjectTrace;
   ok: boolean;
   error?: string;
   frames: number;
@@ -154,15 +164,31 @@ export class LevelEmulator {
     };
     let current = -1;
     const byteOwner = ov.byteOwner;
+    const trace: ObjectTrace | undefined = ov.trace ? { code: new Set(), reads: new Map(), writes: new Map(), rom: new Set() } : undefined;
+    const cpu = s.cpu;
+    const put = (o: number, v: number, hi: boolean) => {
+      let m = trace!.writes.get(current);
+      if (!m) { m = new Map(); trace!.writes.set(current, m); }
+      const old = m.get(o) ?? 0;
+      m.set(o, hi ? (old & 0xff) | (v << 8) : (old & 0xff00) | v);
+    };
     s.hook = {
       onOverlayRead(o: number) {
         if (byteOwner && o < byteOwner.length) current = byteOwner[o];
       },
-      onWramWrite(a: number) {
+      onWramWrite(a: number, v: number) {
         if (current < 0) return;
-        if (a >= MAP_BASE && a < MAP_BASE + MAP_SIZE) touch(current, a - MAP_BASE);
-        else if (a >= 0x10000 + MAP_BASE && a < 0x10000 + MAP_BASE + MAP_SIZE) touch(current, a - 0x10000 - MAP_BASE);
+        if (a >= MAP_BASE && a < MAP_BASE + MAP_SIZE) { touch(current, a - MAP_BASE); if (trace) put(a - MAP_BASE, v, false); }
+        else if (a >= 0x10000 + MAP_BASE && a < 0x10000 + MAP_BASE + MAP_SIZE) { touch(current, a - 0x10000 - MAP_BASE); if (trace) put(a - 0x10000 - MAP_BASE, v, true); }
       },
+      onRomRead: trace ? (ro: number) => {
+        trace.rom.add(ro);
+        if (cpu.inFetch) { trace.code.add(ro); return; }
+        if (current < 0) return;
+        let r = trace.reads.get(current);
+        if (!r) { r = new Set(); trace.reads.set(current, r); }
+        r.add(cpu.opPc * 0x800000 + ro);
+      } : undefined,
     };
     s.taintOn = !!ov.trackSources;
     s.taint.fill(-1);
@@ -194,6 +220,7 @@ export class LevelEmulator {
       ppuRegs: s.ppuRegs.slice(),
       owner,
       touched,
+      trace,
       ok,
       error,
       frames,

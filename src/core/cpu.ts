@@ -32,6 +32,9 @@ export class CPU {
   nmiPending = false;
   irqLine = false;
   bus: Bus;
+  // analysis: address of the current instruction, and whether the bus access is an instruction fetch
+  opPc = 0;
+  inFetch = false;
 
   constructor(bus: Bus) {
     this.bus = bus;
@@ -63,7 +66,9 @@ export class CPU {
   }
 
   fetch8(): number {
+    this.inFetch = true;
     const v = this.rd((this.pbr << 16) | this.pc);
+    this.inFetch = false;
     this.pc = (this.pc + 1) & 0xffff;
     return v;
   }
@@ -492,6 +497,7 @@ export class CPU {
       this.cycles += 4;
       return;
     }
+    this.opPc = (this.pbr << 16) | this.pc;
     const op = this.fetch8();
     this.exec(op);
   }

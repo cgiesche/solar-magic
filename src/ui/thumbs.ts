@@ -5,26 +5,27 @@ import { OV_L1 } from '../core/levelemu.ts';
 import { encodePrimaryHeader, serializeObjects, type LevelObject, newUid, L2_PTRS } from '../core/level.ts';
 import { renderLevel, layerGeom } from '../core/render.ts';
 import { MAP_BASE } from '../core/levelemu.ts';
-import { objectVariant } from '../core/names.ts';
+import { objectVariant, type ObjKind } from '../core/objkinds.ts';
 
 export interface ObjSpec { num: number; ext: number; size: number }
 
 // sub-objects (see objectVariants) get a key per type
-export function objKey(s: { num: number; ext: number; size: number }, tileset: number): string {
+export function objKey(s: { num: number; ext: number; size: number }, kind: ObjKind | null): string {
   if (s.num === 0) return `e${s.ext}`;
-  const v = objectVariant(s.num, s.size, tileset);
+  const v = objectVariant(kind, s.size);
   return v < 0 ? `s${s.num}` : `s${s.num}.${v}`;
 }
 
 // tilesOut receives the distinct Map16 tiles each object produced
-export function renderObjectThumbs(app: App, specs: ObjSpec[], tilesOut?: Map<string, number[]>): Map<string, HTMLCanvasElement> {
+// tileset: render with another tileset than the level's (same palettes)
+export function renderObjectThumbs(app: App, specs: ObjSpec[], tilesOut?: Map<string, number[]>, tileset = app.level.header.tileset): Map<string, HTMLCanvasElement> {
   const out = new Map<string, HTMLCanvasElement>();
   const PER = 32;
   const rom = app.rom;
   for (let b = 0; b < specs.length; b += PER) {
     const batch = specs.slice(b, b + PER);
     const objs: LevelObject[] = batch.map((s, i) => ({ uid: newUid(), num: s.num, ext: s.ext, size: s.size, x: i * 16 + 3, y: 12 }));
-    const hdr = { ...app.level.header, screens: 32, mode: 0 };
+    const hdr = { ...app.level.header, screens: 32, mode: 0, tileset };
     const owners: number[] = [-1, -1, -1, -1, -1];
     const body = serializeObjects(objs, [], false, owners);
     const l1 = new Uint8Array(5 + body.length);
@@ -67,11 +68,11 @@ export function renderObjectThumbs(app: App, specs: ObjSpec[], tilesOut?: Map<st
       }
       ctx.putImageData(id, 0, 0);
       c.dataset.tiles = String(tiles.length);
-      out.set(objKey(s, hdr.tileset), c);
+      out.set(objKey(s, app.objectKind(s.num)), c);
       if (tilesOut) {
         const m16 = new Set<number>();
         for (const off of set!) m16.add(r.wram[MAP_BASE + off] | (r.wram[0x10000 + MAP_BASE + off] << 8));
-        tilesOut.set(objKey(s, hdr.tileset), [...m16].sort((a, b) => a - b));
+        tilesOut.set(objKey(s, app.objectKind(s.num)), [...m16].sort((a, b) => a - b));
       }
     });
   }

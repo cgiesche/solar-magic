@@ -4,7 +4,7 @@ import { Rom, snesToPc } from '../core/rom.ts';
 import { LevelEmulator, OV_L1, OV_L2, type LevelRender, type LevelOverride, MAP_BASE, MAP_SIZE } from '../core/levelemu.ts';
 import {
   type Level, type LevelObject, type LevelSprite, loadLevel, serializeLayer1, serializeLayer2, serializeSprites,
-  isL1Vertical, cloneLevel, newUid, hasLayer2Objects, hasObjects, L1_PTRS, SEC_HDR,
+  isL1Vertical, cloneLevel, newUid, hasLayer2Objects, hasObjects, L1_PTRS, L2_PTRS, SEC_HDR,
   readSecondaryEntrance, writeSecondaryEntrance, entrancePos, nearestEntrance, encodeSecondaryHeader,
 } from '../core/level.ts';
 import { renderLevel, type LevelImages, composite, map16Source } from '../core/render.ts';
@@ -12,10 +12,10 @@ import { EXT_FIRST, map16Ext, installMap16Ext } from '../core/map16ext.ts';
 import { saveLevel } from '../core/save.ts';
 import { captureSprites } from '../core/spritegfx.ts';
 import { DM16_EXT, hasEditorPatch, installEditorPatch } from '../core/patches.ts';
-import { kvSet } from './storage.ts';
+import { kvSet, kvGet } from './storage.ts';
 import { bgFromWram, bgIndex, encodeBg } from '../core/bg.ts';
 import { toast } from './dom.ts';
-import { resizeObjectSize } from '../core/names.ts';
+import { ObjKindProbe, kindsStillValid, storeKinds, loadKinds, resizeObjectSize, type ObjKind, type ObjKinds, type StoredObjKinds } from '../core/objkinds.ts';
 import { BlockProber, type BlockProbe, type SpriteProbe } from '../core/blockprobe.ts';
 
 export type EditMode = 'l1' | 'l2' | 'spr' | 'exit' | 'bg';
@@ -65,6 +65,11 @@ export class App {
   probeChannel: MessageChannel | null = null; // yields between probe slices (setTimeout is throttled in hidden tabs)
   exitScreen = 0;
   spriteThumbs: Map<number, HTMLCanvasElement> | null = null;
+  // what the settings byte nibbles of standard objects mean, per tileset (emulated, see objkinds.ts)
+  kinds = new Map<number, { k: ObjKinds; gen: number }>();
+  kindJob: { ts: number; probe: ObjKindProbe | null } | null = null;
+  kindChannel: MessageChannel | null = null;
+  usage: { gen: number; byTileset: Map<number, Map<number, Set<number>>> } | null = null;
   secEntrances: number[] = []; // secondary entrance indices leading into the current level
   // tile/palette animation: frames stored as pixel diffs against the static composite
   anim = { gen: 0, snaps: [] as { vram: Uint8Array; cgram: Uint8Array }[], base: null as Uint32Array | null,
@@ -369,6 +374,92 @@ export class App {
     return p;
   }
 
+  // kind of a standard object in the current tileset; null while unknown (then treated as plain)
+  objectKind(num: number): ObjKind | null {
+    if (num === 0) return null;
+    return this.tilesetKinds()?.kinds.get(num) ?? null;
+  }
+
+  tilesetKinds(ts = this.level.header.tileset): ObjKinds | null {
+    const c = this.kinds.get(ts);
+    if (c && c.gen !== this.emu.romGen) {
+      if (kindsStillValid(c.k, this.rom.data)) c.gen = this.emu.romGen;
+      else this.kinds.delete(ts);
+    }
+    if (this.kinds.has(ts)) return c!.k;
+    this.startKindJob(ts);
+    return null;
+  }
+
+  // stored result first (valid while the ROM bytes it depends on are unchanged), otherwise emulate
+  // in slices between UI work, on an own emulator (the main one keeps the animation state)
+  private startKindJob(ts: number): void {
+    if (this.kindJob) return;
+    const job: { ts: number; probe: ObjKindProbe | null } = { ts, probe: null };
+    this.kindJob = job;
+    kvGet<StoredObjKinds>(`objkinds-${ts}`).catch(() => undefined).then((st) => {
+      const k = st && loadKinds(st);
+      if (k && kindsStillValid(k, this.rom.data)) { this.setKinds(ts, k); return; }
+      const emu = new LevelEmulator(this.rom);
+      emu.baseState = this.emu.baseState;
+      const lv = { ...this.level, header: { ...this.level.header, tileset: ts } };
+      job.probe = new ObjKindProbe(emu, lv, this.level.layer2Objects ? this.rom.r24(L2_PTRS + 0x105 * 3) : this.level.layer2Pointer);
+      if (!this.kindChannel) {
+        this.kindChannel = new MessageChannel();
+        this.kindChannel.port1.onmessage = () => this.runKindJob();
+      }
+      this.kindChannel.port2.postMessage(0);
+    });
+  }
+
+  private runKindJob(): void {
+    const j = this.kindJob;
+    if (!j?.probe) return;
+    const t0 = performance.now();
+    try {
+      while (!j.probe.done && performance.now() - t0 < 30) j.probe.step();
+      if (!j.probe.done) { this.kindChannel!.port2.postMessage(0); return; }
+      const k = j.probe.result();
+      kvSet(`objkinds-${j.ts}`, storeKinds(k)).catch(() => {});
+      this.setKinds(j.ts, k);
+    } catch (e) {
+      console.error(e);
+      this.setKinds(j.ts, { kinds: new Map(), deps: new Map() });
+    }
+  }
+
+  private setKinds(ts: number, k: ObjKinds): void {
+    this.kinds.set(ts, { k, gen: this.emu.romGen });
+    this.kindJob = null;
+    this.emit('objkinds');
+  }
+
+  // settings bytes of the standard objects the ROM's levels use, per tileset (tells which sub-object
+  // types fit a tileset's graphics)
+  objectUsage(ts = this.level.header.tileset): Map<number, Set<number>> {
+    return this.objectUsageAll().get(ts) ?? new Map();
+  }
+
+  objectUsageAll(): Map<number, Map<number, Set<number>>> {
+    if (!this.usage || this.usage.gen !== this.emu.romGen) {
+      const byTileset = new Map<number, Map<number, Set<number>>>();
+      for (const n of this.usedLevels()) {
+        let lv: Level;
+        try { lv = n === this.level.number ? this.level : loadLevel(this.rom, n); } catch { continue; }
+        let m = byTileset.get(lv.header.tileset);
+        if (!m) byTileset.set(lv.header.tileset, (m = new Map()));
+        for (const o of [...lv.objects, ...(lv.layer2Objects ?? [])]) {
+          if (o.num === 0) continue;
+          let s = m.get(o.num);
+          if (!s) m.set(o.num, (s = new Set()));
+          s.add(o.size);
+        }
+      }
+      this.usage = { gen: this.emu.romGen, byTileset };
+    }
+    return this.usage.byTileset;
+  }
+
   private blockProber(): BlockProber {
     if (!this.prober || this.prober.rom !== this.rom) {
       this.prober = new BlockProber(this.rom, this.emu.baseState);
@@ -591,7 +682,7 @@ export class App {
     const objs = this.selectedObjects().filter((o) => o.num !== 0 || o.ext === DM16_EXT);
     if (!objs.length) return;
     this.checkpoint();
-    for (const o of objs) o.size = resizeObjectSize(o.num, o.size, dw, dh, this.level.header.tileset);
+    for (const o of objs) o.size = resizeObjectSize(this.objectKind(o.num), o.size, dw, dh);
     this.changed();
   }
 

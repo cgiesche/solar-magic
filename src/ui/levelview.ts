@@ -2,7 +2,8 @@
 
 import { App, type Marker } from './app.ts';
 import { h, attachPanZoom, downloadBytes } from './dom.ts';
-import { spriteName, objectName, hex2, hex3, resizeObjectSize } from '../core/names.ts';
+import { spriteName, objectName, hex2, hex3 } from '../core/names.ts';
+import { resizeObjectSize } from '../core/objkinds.ts';
 import { probeAt, enterText, type PosProbe } from '../core/blockprobe.ts';
 import { type LevelObject, type LevelSprite, serializeLayer1, serializeLayer2, serializeSprites } from '../core/level.ts';
 import { composite } from '../core/render.ts';
@@ -480,7 +481,7 @@ export class LevelView {
       for (const o of app.selectedObjects()) {
         const s0 = d.origSize.get(o.uid);
         if (s0 === undefined) continue;
-        o.size = resizeObjectSize(o.num, s0, dw, dh, app.level.header.tileset);
+        o.size = resizeObjectSize(app.objectKind(o.num), s0, dw, dh);
       }
       this.scheduleRefresh();
     }
