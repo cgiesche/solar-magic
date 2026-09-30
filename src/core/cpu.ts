@@ -34,6 +34,10 @@ export class CPU {
   bus: Bus;
   // analysis: address of the current instruction, and whether the bus access is an instruction fetch
   opPc = 0;
+  op = 0; // opcode of the current instruction
+  lastOp = 0; // and of the one before
+  lastOpPc = 0;
+  idle = false; // in a wait loop (see branch()); the system may skip ahead to the next interrupt
   inFetch = false;
 
   constructor(bus: Bus) {
@@ -469,6 +473,9 @@ export class CPU {
     if (cond) {
       this.cycles++;
       this.pc = (this.pc + ((off << 24) >> 24)) & 0xffff;
+      // LDA dp : Bxx back to it (waiting for the NMI to change a WRAM byte): nothing can change
+      // until an interrupt
+      if (off === 0xfc && this.lastOp === 0xa5 && this.d === 0 && this.lastOpPc === ((this.pbr << 16) | this.pc)) this.idle = true;
     }
   }
 
@@ -497,8 +504,11 @@ export class CPU {
       this.cycles += 4;
       return;
     }
+    this.lastOpPc = this.opPc;
+    this.lastOp = this.op;
     this.opPc = (this.pbr << 16) | this.pc;
     const op = this.fetch8();
+    this.op = op;
     this.exec(op);
   }
 

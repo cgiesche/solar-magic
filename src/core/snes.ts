@@ -30,7 +30,13 @@ const STATE_SCALARS = ['vmain', 'vaddr', 'vreadLatch', 'cgaddr', 'cgLatch', 'cgR
 const CPU_SCALARS = ['a', 'x', 'y', 's', 'd', 'dbr', 'pbr', 'pc', 'p', 'e', 'cycles', 'stopped', 'waiting', 'nmiPending', 'irqLine'] as const;
 
 export class Snes implements Bus {
-  rom: Uint8Array;
+  private romData!: Uint8Array;
+  private romMask = 0; // size - 1 for power-of-two sizes (mirroring by masking), else 0
+  get rom(): Uint8Array { return this.romData; }
+  set rom(r: Uint8Array) {
+    this.romData = r;
+    this.romMask = r.length & (r.length - 1) ? 0 : r.length - 1;
+  }
   wram = new Uint8Array(0x20000);
   sram = new Uint8Array(0x8000);
   vram = new Uint8Array(0x10000);
@@ -101,36 +107,38 @@ export class Snes implements Bus {
   }
 
   romOffset(addr: number): number {
-    const bank = (addr >> 16) & 0x7f;
-    return (((bank << 15) | (addr & 0x7fff)) % this.rom.length);
+    const o = (((addr >> 16) & 0x7f) << 15) | (addr & 0x7fff);
+    return this.romMask ? o & this.romMask : o % this.romData.length;
   }
 
   read(addr: number): number {
     const bank = addr >> 16;
     const off = addr & 0xffff;
     let v: number;
-    if (bank === 0x7e || bank === 0x7f) {
+    // ROM first: every opcode fetch goes there
+    if (off >= 0x8000 && (bank & 0x7e) !== 0x7e) {
+      const ro = this.romOffset(addr);
+      if (this.romReads !== null && this.romReads.pages[ro >> 8] === 0) this.recordRead(ro);
+      if (this.hook !== null || this.taintOn) return this.readRomSlow(ro);
+      v = this.romData[ro];
+    } else if ((bank & 0xfe) === 0x7e) {
       v = this.wram[addr - 0x7e0000];
       if (this.taintOn) this.tpush(this.taint[addr - 0x7e0000], v);
       if (this.hook?.onWramRead) this.hook.onWramRead(addr - 0x7e0000);
+    } else if (off >= 0x8000) { // banks $FE/$FF
+      if (this.overlay) {
+        const oo = ((bank & 1) << 15) | (off & 0x7fff);
+        if (this.hook?.onOverlayRead) this.hook.onOverlayRead(oo);
+        this.openBus = this.overlay[oo];
+        return this.overlay[oo];
+      }
+      const ro = this.romOffset(addr);
+      if (this.romReads !== null && this.romReads.pages[ro >> 8] === 0) this.recordRead(ro);
+      if (this.hook !== null || this.taintOn) return this.readRomSlow(ro);
+      v = this.romData[ro];
     } else {
       const b = bank & 0x7f;
-      if (off >= 0x8000) {
-        if (bank >= 0xfe && this.overlay) {
-          const oo = ((bank & 1) << 15) | (off & 0x7fff);
-          if (this.hook?.onOverlayRead) this.hook.onOverlayRead(oo);
-          this.openBus = this.overlay[oo];
-          return this.overlay[oo];
-        }
-        const ro = this.romOffset(addr);
-        if (this.hook?.onRomRead) this.hook.onRomRead(ro);
-        const rr = this.romReads;
-        if (rr && !rr.pages[ro >> 8] && !this.romSkip.has(ro)) {
-          if (BYTE_PAGES[ro >> 8]) rr.bytes.add(ro); else rr.pages[ro >> 8] = 1;
-        }
-        v = this.rom[ro];
-        if (this.taintOn) this.tpush(ro, v);
-      } else if (b >= 0x70 && b < 0x7e) {
+      if (b >= 0x70 && b < 0x7e) {
         v = this.sram[off & 0x7fff];
       } else if (b < 0x40) {
         if (off < 0x2000) {
@@ -141,6 +149,21 @@ export class Snes implements Bus {
         v = this.openBus;
       }
     }
+    this.openBus = v;
+    return v;
+  }
+
+  // first read of a ROM page (or a read in a byte page) while reads are recorded
+  private recordRead(ro: number): void {
+    if (this.romSkip.has(ro)) return;
+    if (BYTE_PAGES[ro >> 8]) this.romReads!.bytes.add(ro); else this.romReads!.pages[ro >> 8] = 1;
+  }
+
+  // ROM read with hooks or data provenance tracking on
+  private readRomSlow(ro: number): number {
+    if (this.hook?.onRomRead) this.hook.onRomRead(ro);
+    const v = this.romData[ro];
+    if (this.taintOn) this.tpush(ro, v);
     this.openBus = v;
     return v;
   }
@@ -508,6 +531,11 @@ export class Snes implements Bus {
         this.lineCycle = cpu.cycles - start;
         cpu.step();
         if (++steps > maxSteps) throw new Error('frame step limit exceeded');
+        // wait loop: skip the rest of the line (interrupts are only raised at line starts)
+        if (cpu.idle) {
+          cpu.idle = false;
+          if (!cpu.nmiPending && !(cpu.irqLine && !(cpu.p & 0x04))) cpu.cycles = target;
+        }
       }
     }
     this.frame++;
