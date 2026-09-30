@@ -9,6 +9,7 @@ import { assemble, type AsarMessage } from './asar.ts';
 import { editorPatch, customPalettePatch, bgPatch, extGfxPatch, SPR_BANK_HOOK, BG_HOOK, EXT_GFX_HOOK } from './patches.ts';
 import { messagePatch } from './messages.ts';
 import { map16Ext } from './map16ext.ts';
+import { structPatch, STRUCT_SLOT } from './structs.ts';
 import { listPatches, addPatch, removeEntry, backupBytes, patchedHash, hashBytes, overlaps, type PatchEntry } from './patchreg.ts';
 
 // hook sites of the editor's own patches (SNES address, length)
@@ -19,6 +20,7 @@ export const BUILTINS: Builtin[] = [
   { name: 'BG-Tilemaps (SMWB)', installed: (r) => !!bgPatch(r), hooks: [[BG_HOOK, 4]] },
   { name: 'BG2/BG3-Grafik (SMWG)', installed: (r) => !!extGfxPatch(r), hooks: [[EXT_GFX_HOOK, 5]] },
   { name: 'Nachrichten (SMWM)', installed: (r) => !!messagePatch(r), hooks: [[0x05b20f, 6]] },
+  { name: 'Strukturen (SMWS)', installed: (r) => !!structPatch(r), hooks: [[STRUCT_SLOT, 3]] },
   { name: 'Map16-Erweiterung (SMWX)', installed: (r) => !!map16Ext(r), hooks: [[0x00f545, 4], [0x029328, 4], [0x058a66, 5], [0x058b46, 5], [0x058c34, 5], [0x058d2b, 5], [0x00c096, 2], [0x00c0e7, 2]] },
 ];
 
