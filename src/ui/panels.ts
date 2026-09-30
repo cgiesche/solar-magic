@@ -4,7 +4,7 @@ import type { App } from './app.ts';
 import { h, clear, hexInput } from './dom.ts';
 import { objectName, spriteName, hex2, hex3 } from '../core/names.ts';
 import { objectVariant, withObjectVariant, type ObjKind } from '../core/objkinds.ts';
-import { renderObjectThumbs, objKey, type ObjSpec } from './thumbs.ts';
+import { objectThumbs, thumbCanvas, objKey, type ObjSpec } from './thumbs.ts';
 import { newUid } from '../core/level.ts';
 import { levelName } from '../core/overworld.ts';
 import { DM16_EXT } from '../core/patches.ts';
@@ -208,7 +208,11 @@ export class Palette {
     void key;
     try {
       this.thumbTiles = new Map();
-      this.thumbs = renderObjectThumbs(this.app, this.specs(), this.thumbTiles);
+      this.thumbs = new Map();
+      for (const t of objectThumbs(this.app, this.specs())) {
+        this.thumbs.set(t.key, thumbCanvas(t));
+        this.thumbTiles.set(t.key, t.m16);
+      }
     } catch (e) {
       console.error(e);
     }

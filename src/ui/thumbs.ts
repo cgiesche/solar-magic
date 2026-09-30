@@ -16,9 +16,39 @@ export function objKey(s: { num: number; ext: number; size: number }, kind: ObjK
   return v < 0 ? `s${s.num}` : `s${s.num}.${v}`;
 }
 
-// tilesOut receives the distinct Map16 tiles each object produced
-export function renderObjectThumbs(app: App, specs: ObjSpec[], tilesOut?: Map<string, number[]>): Map<string, HTMLCanvasElement> {
-  const out = new Map<string, HTMLCanvasElement>();
+// a rendered object: its pixels and the distinct Map16 tiles it produced
+export interface ObjThumb { key: string; w: number; h: number; px: Uint32Array; m16: number[] }
+
+// the thumbnails from the result cache (see romdeps.ts) or rendered; keyed by the level header
+// settings they depend on and the objects
+export function objectThumbs(app: App, specs: ObjSpec[]): ObjThumb[] {
+  const h = app.level.header;
+  const key = `o${h.tileset}-${h.fgPalette}-${h.bgPalette}:${hashStr(specs.map((s) => `${s.num}.${s.ext}.${s.size}`).join())}`;
+  const stored = app.results.get<ObjThumb[]>(key);
+  if (stored) return stored;
+  const r = app.emu.tracked(() => renderObjectThumbs(app, specs));
+  app.results.set(key, r.result, app.results.fp.deps(r.reads));
+  return r.result;
+}
+
+export function thumbCanvas(t: ObjThumb): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = t.w; c.height = t.h;
+  const ctx = c.getContext('2d')!;
+  const id = ctx.createImageData(t.w, t.h);
+  new Uint32Array(id.data.buffer).set(t.px);
+  ctx.putImageData(id, 0, 0);
+  return c;
+}
+
+function hashStr(s: string): string {
+  let a = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) a = Math.imul(a ^ s.charCodeAt(i), 0x01000193);
+  return (a >>> 0).toString(36);
+}
+
+function renderObjectThumbs(app: App, specs: ObjSpec[]): ObjThumb[] {
+  const out: ObjThumb[] = [];
   const PER = 32;
   const rom = app.rom;
   for (let b = 0; b < specs.length; b += PER) {
@@ -53,11 +83,7 @@ export function renderObjectThumbs(app: App, specs: ObjSpec[], tilesOut?: Map<st
         x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y);
       }
       const w = (x1 - x0 + 1) * 16, hh = (y1 - y0 + 1) * 16;
-      const c = document.createElement('canvas');
-      c.width = w; c.height = hh;
-      const ctx = c.getContext('2d')!;
-      const id = ctx.createImageData(w, hh);
-      const px = new Uint32Array(id.data.buffer);
+      const px = new Uint32Array(w * hh);
       for (const t of tiles) {
         const tx = t & 0xffff, ty = t >> 16;
         for (let yy = 0; yy < 16; yy++) for (let xx = 0; xx < 16; xx++) {
@@ -65,14 +91,9 @@ export function renderObjectThumbs(app: App, specs: ObjSpec[], tilesOut?: Map<st
           px[((ty - y0) * 16 + yy) * w + (tx - x0) * 16 + xx] = v;
         }
       }
-      ctx.putImageData(id, 0, 0);
-      c.dataset.tiles = String(tiles.length);
-      out.set(objKey(s, app.objectKind(s.num)), c);
-      if (tilesOut) {
-        const m16 = new Set<number>();
-        for (const off of set!) m16.add(r.wram[MAP_BASE + off] | (r.wram[0x10000 + MAP_BASE + off] << 8));
-        tilesOut.set(objKey(s, app.objectKind(s.num)), [...m16].sort((a, b) => a - b));
-      }
+      const m16 = new Set<number>();
+      for (const off of set!) m16.add(r.wram[MAP_BASE + off] | (r.wram[0x10000 + MAP_BASE + off] << 8));
+      out.push({ key: objKey(s, app.objectKind(s.num)), w, h: hh, px, m16: [...m16].sort((a, b) => a - b) });
     });
   }
   return out;
