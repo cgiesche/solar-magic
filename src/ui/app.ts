@@ -94,6 +94,7 @@ export class App {
   openLevel(n: number): void {
     if (this.level && this.dirty) this.saveLevel(true);
     this.level = loadLevel(this.rom, n);
+    this.prober?.use(this.level.header.tileset);
     this.selection.clear();
     if ((this.mode === 'l2' && !this.level.layer2Objects) || (this.mode === 'bg' && !this.canEditBg())) this.mode = 'l1';
     this.undoStack = [];
@@ -443,6 +444,7 @@ export class App {
       this.probeFailed.clear();
       this.proberGen = this.emu.romGen;
     }
+    this.prober.use(this.level.header.tileset);
     return this.prober;
   }
 

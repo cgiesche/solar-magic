@@ -10,6 +10,9 @@
 // Whether a tile can be entered (pipes, doors) is found out the same way: Mario stands on, below,
 // beside or in front of it and holds a direction; entering shows as a change of his animation
 // state or the game mode that a run without the button doesn't show.
+// Some tiles behave differently per tileset (vanilla: the boss door tile 9C can only be entered in
+// castle tilesets), so the probe level gets the tileset of the edited level and results are kept
+// per tileset.
 
 import { LevelEmulator, MAP_BASE, overlaySnes } from './levelemu.ts';
 import { Rom } from './rom.ts';
@@ -17,7 +20,7 @@ import { L1_PTRS } from './level.ts';
 import type { SnesState } from './snes.ts';
 import { spriteName, hex3 } from './names.ts';
 
-const PROBE_LEVEL = 0x105; // horizontal level; only its header is used, objects and sprites are removed
+const PROBE_LEVEL = 0x105; // horizontal level; only its header (with the tileset replaced) is used, objects and sprites are removed
 const PROBE_FRAMES = 24;
 const SPRITE_SLOT = 11; // slot of a probed sprite (items it spawns take lower free slots)
 const INIT_TABLES = 0x07f7d2; // game routine that sets up a new sprite's tables (tweakers), X = slot
@@ -65,30 +68,48 @@ export function spritesOf(r: PosProbe): number[] {
   return [...new Set([...r.small.sprites, ...r.big.sprites])];
 }
 
+// probe state of one tileset
+interface TilesetProbes {
+  ready: SnesState | null;
+  by: number; // block row in the probe level; the block goes to screen 1, column 0-15
+  floorTile: number; // a tile Mario can stand on (found by trying), -1 = not searched yet, -2 = none found
+  cache: Map<number, BlockProbe>;
+  spriteCache: Map<number, SpriteProbe>;
+}
+
 export class BlockProber {
   rom: Rom;
   emu: LevelEmulator;
-  ready: SnesState | null = null;
-  by = 0; // block row in the probe level; the block goes to screen 1, column 0-15
-  cache = new Map<number, BlockProbe>();
-  floorTile = -1; // a tile Mario can stand on (found by trying), -2 = none found
-  spriteCache = new Map<number, SpriteProbe>();
+  tileset = 0; // tileset the probes run in (use())
+  private sets = new Map<number, TilesetProbes>();
+  private cur!: TilesetProbes;
 
   // bootState: title screen snapshot of another emulator on the same ROM (saves booting again)
   constructor(rom: Rom, bootState?: SnesState | null) {
     this.rom = rom;
     this.emu = new LevelEmulator(rom);
     if (bootState) this.emu.baseState = bootState;
+    this.use(0);
+  }
+
+  // probe (and look up cached results) in tileset ts from now on
+  use(ts: number): void {
+    let t = this.sets.get(ts);
+    if (!t) this.sets.set(ts, (t = { ready: null, by: 0, floorTile: -1, cache: new Map(), spriteCache: new Map() }));
+    this.tileset = ts;
+    this.cur = t;
   }
 
   // the ROM changed (patches, acts-like, blocks): drop everything
   reset(): void {
     this.emu.syncRom();
-    this.ready = null;
-    this.floorTile = -1;
-    this.cache.clear();
-    this.spriteCache.clear();
+    this.sets.clear();
+    this.use(this.tileset);
   }
+
+  private get cache(): Map<number, BlockProbe> { return this.cur.cache; }
+  private get spriteCache(): Map<number, SpriteProbe> { return this.cur.spriteCache; }
+  private get by(): number { return this.cur.by; }
 
   cached(tile: number): BlockProbe | undefined {
     return this.cache.get(tile);
@@ -138,6 +159,7 @@ export class BlockProber {
     const hdr = rom.r24(L1_PTRS + PROBE_LEVEL * 3);
     const header = new Uint8Array(6);
     for (let i = 0; i < 5; i++) header[i] = rom.r8(hdr + i);
+    header[4] = (header[4] & 0xf0) | this.tileset;
     header[5] = 0xff; // no objects
     e.load(PROBE_LEVEL, { layer1: header, sprites: new Uint8Array([0, 0xff]) });
     const s = e.snes, w = s.wram;
@@ -145,15 +167,15 @@ export class BlockProber {
     while (w[0x100] !== 0x14 && g++ < 200) s.runFrame();
     for (let i = 0; i < 4; i++) s.runFrame();
     const camY = w[0x1c] | (w[0x1d] << 8);
-    this.by = Math.min(0x18, (camY >> 4) + 6);
-    this.ready = s.saveState();
+    this.cur.by = Math.min(0x18, (camY >> 4) + 6);
+    this.cur.ready = s.saveState();
   }
 
   // fresh probe state with the camera centered on tile column bx (so nothing spawns off-screen)
   private start(bx: number, big: number): Uint8Array {
-    if (!this.ready) this.prepare();
+    if (!this.cur.ready) this.prepare();
     const s = this.emu.snes, w = s.wram;
-    s.loadState(this.ready!);
+    s.loadState(this.cur.ready!);
     const cam = bx * 16 - 0x70;
     w[0x1a] = w[0x1462] = cam & 0xff; w[0x1b] = w[0x1463] = cam >> 8;
     w[0x19] = big;
@@ -248,8 +270,9 @@ export class BlockProber {
 
   // the first tile a dropped Mario comes to rest on without anything happening
   private floor(): number {
-    if (this.floorTile !== -1) return this.floorTile;
-    this.floorTile = -2;
+    const c = this.cur;
+    if (c.floorTile !== -1) return c.floorTile;
+    c.floorTile = -2;
     for (let i = 0; i < 0x200; i++) {
       const t = (i + 0x100) & 0x1ff, bx = 16;
       const w = this.start(bx, 0);
@@ -257,9 +280,9 @@ export class BlockProber {
       this.placeMario(bx * 16, this.by * 16, -40, 0); // feet 8 px above
       if (this.runHeld(0, 16)) continue;
       const off = MAP_BASE + (bx >> 4) * 0x1b0 + this.by * 16 + (bx & 15);
-      if ((w[0x77] & 4) && w[0x19] === 0 && (w[off] | (w[off + 0x10000] << 8)) === t) { this.floorTile = t; break; }
+      if ((w[0x77] & 4) && w[0x19] === 0 && (w[off] | (w[off + 0x10000] << 8)) === t) { c.floorTile = t; break; }
     }
-    return this.floorTile;
+    return c.floorTile;
   }
 
   private hit(tile: number, big: number, col: number): HitResult {
