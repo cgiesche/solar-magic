@@ -1,5 +1,5 @@
 // ROM undo/redo: edits restore byte for byte, also across a ROM expansion; quick edits with the same
-// key merge; an edit whose bytes were changed elsewhere is not undone.
+// key merge; an edit whose bytes were changed elsewhere is not undone (the checksum does not count).
 import { readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
 import { RomHistory } from '../src/core/romhistory.ts';
@@ -48,6 +48,15 @@ rom.w16(0x00b0a0, 0x4321);
 let threw = false;
 try { h.undo(); } catch { threw = true; }
 check(threw && rom.r16(0x00b0a0) === 0x4321, 'conflicting undo refused');
+
+// writing the ROM out rewrites the checksum; that must not block undoing an edit (also a whole-ROM one)
+h.clear();
+const pre = rom.data.slice();
+h.edit('Erweitern', () => { rom.expand(rom.data.length * 2); rom.w8(0x00b0a0, 0x55); });
+rom.output(false);
+let ok = true;
+try { h.undo(); } catch { ok = false; }
+check(ok && same(rom.data.subarray(0, 0x7fdc), pre.subarray(0, 0x7fdc)) && rom.data.length === pre.length, 'undo after the checksum was rewritten');
 
 console.log(bad ? `${bad} failures` : 'romhistory ok');
 if (bad) process.exit(1);

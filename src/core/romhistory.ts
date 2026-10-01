@@ -43,9 +43,11 @@ function diff(a: Uint8Array, b: Uint8Array): Run[] {
   return runs;
 }
 
+// the checksum ($7FDC-$7FDF) is rewritten whenever the ROM is written out, so it does not count
+const isChecksum = (o: number) => o >= 0x7fdc && o <= 0x7fdf;
 function matches(data: Uint8Array, off: number, bytes: Uint8Array): boolean {
   if (off + bytes.length > data.length) return false;
-  for (let i = 0; i < bytes.length; i++) if (data[off + i] !== bytes[i]) return false;
+  for (let i = 0; i < bytes.length; i++) if (data[off + i] !== bytes[i] && !isChecksum(off + i)) return false;
   return true;
 }
 
