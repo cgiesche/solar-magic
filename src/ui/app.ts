@@ -17,6 +17,7 @@ import { kvSet, kvGet, kvEntries, kvKeys, kvWrite } from './storage.ts';
 import { ResultCache, RomFingerprint, RomReads, type CacheEntry } from '../core/romdeps.ts';
 import { bgFromWram, bgIndex, encodeBg } from '../core/bg.ts';
 import { toast } from './dom.ts';
+import { RomHistory, type RomEdit } from '../core/romhistory.ts';
 import { ObjKindProbe, kindsStillValid, storeKinds, loadKinds, resizeObjectSize, type ObjKind, type ObjKinds, type StoredObjKinds } from '../core/objkinds.ts';
 import { BlockProber, variantOf, type BlockProbe, type SpriteProbe } from '../core/blockprobe.ts';
 
@@ -56,6 +57,10 @@ export class App {
   dirty = false;
   undoStack: Level[] = [];
   redoStack: Level[] = [];
+  // undo for ROM edits of the graphics workspace (palettes, Map16, GFX, slot assignments)
+  romHistory: RomHistory;
+  private romTimer = 0;
+  private persistTimer = 0;
   clipboard: { objects?: LevelObject[]; sprites?: LevelSprite[] } = {};
   // tile (x,y) lookup from map offset
   offsetToTile1 = new Int32Array(MAP_SIZE);
@@ -93,6 +98,7 @@ export class App {
     this.romName = name;
     this.emu = new LevelEmulator(rom);
     this.emu.boot();
+    this.romHistory = new RomHistory(rom);
     this.results = new ResultCache(new RomFingerprint(this.emu));
     this.cacheReady = kvEntries<CacheEntry>(CACHE_PREFIX)
       .then((e) => this.results.load(e.map(([k, v]) => [k.slice(CACHE_PREFIX.length), v])))
@@ -960,6 +966,54 @@ export class App {
     } catch (e) {
       toast(`Speichern fehlgeschlagen: ${e}`, 'error');
     }
+  }
+
+  // ------------- ROM edits (graphics workspace) -------------
+  // runs an undoable ROM edit; the level is re-emulated shortly after the last one of a series
+  romEdit<T>(label: string, fn: () => T, key: string | null = null): T {
+    try {
+      return this.romHistory.edit(label, fn, key);
+    } finally {
+      if (!this.romHistory.open) this.romChanged();
+    }
+  }
+
+  // the ROM changed: editors redraw at once ('rom-change'), the level render follows debounced
+  romChanged(): void {
+    this.emu.syncRom();
+    this.emit('rom-change');
+    clearTimeout(this.romTimer);
+    this.romTimer = window.setTimeout(() => {
+      this.romTimer = 0;
+      this.refresh();
+      this.palettesChanged();
+    }, 150);
+    clearTimeout(this.persistTimer);
+    this.persistTimer = window.setTimeout(() => { this.persistTimer = 0; this.persist(); }, 1000);
+  }
+
+  // re-emulates now if a ROM change is still pending (before reading the render)
+  flushRomChange(): void {
+    if (!this.romTimer) return;
+    clearTimeout(this.romTimer);
+    this.romTimer = 0;
+    this.refresh();
+    this.palettesChanged();
+  }
+
+  romUndo(): void { this.romStep(true); }
+  romRedo(): void { this.romStep(false); }
+  private romStep(undo: boolean): void {
+    let e: RomEdit | null;
+    try {
+      e = undo ? this.romHistory.undo() : this.romHistory.redo();
+    } catch (err) {
+      toast(String(err instanceof Error ? err.message : err), 'error');
+      return;
+    }
+    if (!e) { toast(undo ? 'Nichts rückgängig zu machen' : 'Nichts zu wiederholen'); return; }
+    this.romChanged();
+    toast(`${undo ? 'Rückgängig' : 'Wiederholt'}: ${e.label}`);
   }
 
   persist(): void {
