@@ -10,6 +10,7 @@ import { h, clear, toast, pickFile, modal, downloadBytes } from '../dom.ts';
 import { TileCache, map16Source } from '../../core/render.ts';
 import { hex } from '../../core/names.ts';
 import { EXT_FIRST, EXT_TILES, map16Ext, actsLike, setActsLike, setExtTileWords } from '../../core/map16ext.ts';
+import { BG_EXT_FIRST, bgMap16Ext, bgTileAddr, bgTileWords, setBgExtTileWords } from '../../core/bgmap16.ts';
 import { blockFileOf, openBlockDialog } from '../blockdialog.ts';
 import { parseMap16File, map16Targets, writeMap16File } from '../../core/map16file.ts';
 import { renderMap16Sheet } from '../panels.ts';
@@ -95,7 +96,7 @@ export class Map16Tab implements WsPanel {
 
   select(tile: number, bg = false): void {
     this.bg = bg;
-    this.sel = tile & (bg ? 0x1ff : EXT_TILES - 1);
+    this.sel = tile & (EXT_TILES - 1);
     this.base = this.sel & ~0x1ff;
     this.selW = this.selH = 1;
     this.quad = 0;
@@ -107,17 +108,19 @@ export class Map16Tab implements WsPanel {
     return map16Source(this.app.rom, this.app.render).fg(0x025);
   }
   private tileAddr(t: number): number {
-    if (this.bg) return 0x0d9100 + t * 8;
+    if (this.bg) return bgTileAddr(this.app.rom, t) ?? -1;
     if (t >= EXT_FIRST) { const p = map16Ext(this.app.rom); return p ? p.gfx + (t - EXT_FIRST) * 8 : -1; }
     const w = this.app.render.wram;
     return 0x0d0000 | (w[0x0fbe + t * 2] | (w[0x0fbf + t * 2] << 8));
   }
   words(t: number): number[] {
     const a = this.tileAddr(t);
-    return a < 0 ? this.blank() : [0, 1, 2, 3].map((q) => this.app.rom.r16(a + q * 2));
+    if (a < 0) return this.bg ? bgTileWords(this.app.rom, t) : this.blank();
+    return [0, 1, 2, 3].map((q) => this.app.rom.r16(a + q * 2));
   }
   private setWords(t: number, ws: number[]): void {
-    if (!this.bg && t >= EXT_FIRST) setExtTileWords(this.app.rom, t, ws, this.blank());
+    if (this.bg && t >= BG_EXT_FIRST) setBgExtTileWords(this.app.rom, t, ws);
+    else if (!this.bg && t >= EXT_FIRST) setExtTileWords(this.app.rom, t, ws, this.blank());
     else { const a = this.tileAddr(t); ws.forEach((v, q) => this.app.rom.w16(a + q * 2, v)); }
   }
   private tc(): TileCache {
@@ -143,19 +146,22 @@ export class Map16Tab implements WsPanel {
   // ---------- UI ----------
   private buildBar(): void {
     clear(this.bar);
-    const page = (b: number, bg: boolean, label: string, title: string) => h('button', {
-      class: this.bg === bg && (bg || this.base === b) ? 'active' : '', title,
-      onclick: () => { this.bg = bg; this.base = b; this.sel = b + (this.sel & 0x1ff); this.selW = this.selH = 1; this.buildBar(); this.redraw(); },
+    const layer = (bg: boolean, label: string, title: string) => h('button', {
+      class: this.bg === bg ? 'active' : '', title,
+      onclick: () => { if (this.bg === bg) return; this.bg = bg; this.base = 0; this.sel = this.sel & 0x1ff; this.selW = this.selH = 1; this.buildBar(); this.redraw(); },
     }, label);
-    const ext = !!map16Ext(this.app.rom);
+    const ext = this.bg ? !!bgMap16Ext(this.app.rom) : !!map16Ext(this.app.rom);
+    const page = (b: number) => h('button', {
+      class: this.base === b ? 'active' : '',
+      title: b === 0 ? (this.bg ? 'BG-Tiles der Original-Hintergründe' : 'Standard-Tiles und Tileset-Tiles')
+        : `Erweiterte ${this.bg ? 'BG-' : ''}Tiles ${hex(b, 3)}–${hex(b + 511, 3)}${this.bg ? '' : ' (im Level per Direct-Map16-Objekt)'}${ext ? '' : ' – werden beim ersten Ändern angelegt'}`,
+      onclick: () => { this.base = b; this.sel = b + (this.sel & 0x1ff); this.selW = this.selH = 1; this.buildBar(); this.redraw(); },
+    }, b === 0 ? 'Seite 0–1' : `${hex(b >> 8, 1)}–${hex((b >> 8) + 1, 1)}`);
     this.bar.append(
       h('span', { class: 'btn-group' },
-        page(0, false, 'Seite 0–1', 'Vordergrund: Standard-Tiles und Tileset-Tiles'),
-        ...Array.from({ length: EXT_TILES / 512 - 1 }, (_, i) => {
-          const b = (i + 1) * 512;
-          return page(b, false, `${hex(b >> 8, 1)}–${hex((b >> 8) + 1, 1)}`, `Erweiterte Tiles ${hex(b, 3)}–${hex(b + 511, 3)} (im Level per Direct-Map16-Objekt)${ext ? '' : ' – werden beim ersten Ändern angelegt'}`);
-        }),
-        page(0, true, 'Hintergrund', 'BG-Tiles (Layer-2-Hintergründe)')),
+        layer(false, 'Vordergrund', 'FG-Tiles (Layer 1 und Layer-2-Objekte)'),
+        layer(true, 'Hintergrund', 'BG-Tiles (Layer-2-Hintergründe)')),
+      h('span', { class: 'btn-group' }, ...Array.from({ length: EXT_TILES / 512 }, (_, i) => page(i * 512))),
       h('span', { class: 'sep' }),
       h('button', { onclick: () => this.copy(), title: 'Gewählte Tiles kopieren, mit Verhalten (Strg+C)' }, 'Kopieren'),
       h('button', { onclick: () => this.paste(), title: 'Ab dem gewählten Tile einfügen (Strg+V)' }, 'Einfügen'),
@@ -206,7 +212,10 @@ export class Map16Tab implements WsPanel {
       ctx.fillText(label, 0, 0);
       ctx.restore();
     };
-    if (this.bg) band(0, 0x1ff, '#7d8bff', 'Hintergrund-Tiles');
+    if (this.bg) {
+      band(0, 0x1ff, '#7d8bff', 'Hintergrund-Tiles');
+      band(BG_EXT_FIRST, EXT_TILES - 1, '#4cc2ff', 'Erweitert');
+    }
     else {
       band(0x000, 0x072, '#8b93a3', 'Standard');
       band(0x073, 0x0ff, '#ffb000', `Tileset ${hex(this.app.level.header.tileset, 1)}`);
@@ -380,7 +389,7 @@ export class Map16Tab implements WsPanel {
   }
 
   private rangeText(t: number): string {
-    if (this.bg) return 'Hintergrund-Tile';
+    if (this.bg) return t >= BG_EXT_FIRST ? 'erweitertes Hintergrund-Tile' : 'Hintergrund-Tile';
     if (t >= EXT_FIRST) return 'erweitertes Tile (im Level per Direct-Map16-Objekt)';
     if (t >= 0x073 && t <= 0x0ff) return `Tileset-Tile (gilt nur für Tileset ${hex(this.app.level.header.tileset, 1)})`;
     return 'Standard-Tile (alle Tilesets)';
@@ -574,7 +583,7 @@ export class Map16Tab implements WsPanel {
   private paste(): void {
     const c = this.clip;
     if (!c) { toast('Erst Tiles kopieren (Strg+C)'); return; }
-    const max = this.bg ? 0x200 : EXT_TILES;
+    const max = EXT_TILES;
     const targets: number[] = [];
     for (let y = 0; y < c.h; y++) for (let x = 0; x < c.w; x++) targets.push(this.sel + y * 16 + x);
     if (targets.some((t) => t >= max) || (this.sel & 15) + c.w > 16) { toast('Die Tiles passen ab hier nicht auf die Seite', 'error'); return; }
@@ -595,10 +604,9 @@ export class Map16Tab implements WsPanel {
       const m = parseMap16File(new Uint8Array(await f.arrayBuffer()));
       const targets = map16Targets(m, this.sel);
       if (targets.some((t) => t >= EXT_TILES)) throw new Error('Die Tiles passen ab hier nicht mehr auf die Map16-Seiten');
-      this.bg = false;
       this.edit(`${f.name} importiert`, () => targets.forEach((t, i) => {
         this.setWords(t, m.tiles[i]);
-        if (m.acts) setActsLike(this.app.rom, t, m.acts[i], this.blank());
+        if (m.acts && !this.bg) setActsLike(this.app.rom, t, m.acts[i], this.blank());
       }));
       this.selW = Math.min(16, m.width); this.selH = m.height;
       toast(`${m.tiles.length} Tile(s) aus ${f.name} ab ${hex(this.sel, 3)} importiert`);
@@ -626,7 +634,7 @@ export class Map16Tab implements WsPanel {
     if (k === 'q' || k === 'Q') { this.quad = [2, 3, 1, 0][this.quad]; this.buildBuilder(); this.drawGfx(); return true; }
     if (k === 'ArrowLeft' || k === 'ArrowRight' || k === 'ArrowUp' || k === 'ArrowDown') {
       const d = k === 'ArrowLeft' ? -1 : k === 'ArrowRight' ? 1 : k === 'ArrowUp' ? -16 : 16;
-      const max = this.bg ? 0x200 : EXT_TILES;
+      const max = EXT_TILES;
       const n = this.sel + d;
       if (n < 0 || n >= max) return true;
       this.sel = n;

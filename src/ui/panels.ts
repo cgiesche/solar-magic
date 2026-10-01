@@ -10,6 +10,7 @@ import { levelName } from '../core/overworld.ts';
 import { DM16_EXT } from '../core/patches.ts';
 import { STRUCT_EXT, TRANSPARENT, hasStructs, freeStructureNumber, readStructure, writeStructure, STRUCT_COUNT, type Structure } from '../core/structs.ts';
 import { EXT_TILES, map16Ext } from '../core/map16ext.ts';
+import { bgMap16Ext, installBgMap16Ext } from '../core/bgmap16.ts';
 import { TileCache, map16Source, drawMap16 } from '../core/render.ts';
 import { probeText, spritesOf, spriteProbeAt, enterText, enterSuffix } from '../core/blockprobe.ts';
 
@@ -264,14 +265,15 @@ export class Palette {
     }
   }
 
-  // BG Map16 tiles 000-1FF for painting the level background (BG mode)
+  // BG Map16 tiles for painting the level background (BG mode); pages 2-F with the extended BG Map16
+  bgBase = 0;
   buildBg(): void {
     const app = this.app;
-    const sheet = renderMap16Sheet(app, true);
+    const sheet = renderMap16Sheet(app, true, this.bgBase);
     const brush = app.bgBrush;
-    const t0 = brush.tiles[0] & 0x1ff;
+    const t0 = brush.tiles[0] - this.bgBase;
     // a brush that is a rectangle of the sheet is outlined there, one picked from the level is shown separately
-    const onSheet = (t0 & 15) + brush.w <= 16 && (t0 >> 4) + brush.h <= 32
+    const onSheet = t0 >= 0 && t0 < 0x200 && (t0 & 15) + brush.w <= 16 && (t0 >> 4) + brush.h <= 32
       && brush.tiles.every((t, i) => t === brush.tiles[0] + Math.floor(i / brush.w) * 16 + (i % brush.w));
     const S = 16 * 1.2;
     const c = h('canvas', { width: 256 * 1.2, height: 512 * 1.2, class: 'm16-pick' });
@@ -286,7 +288,9 @@ export class Palette {
     if (onSheet) draw(t0 & 15, t0 >> 4, brush.w, brush.h); else draw(-1, 0, 0, 0);
     // click picks a tile, dragging picks a rectangle of tiles (as in the Map16 tab)
     attachRectPick(c, 16, 32, (r) => draw(r.x, r.y, r.w, r.h), (r) => {
-      app.bgBrush = { w: r.w, h: r.h, tiles: Array.from({ length: r.w * r.h }, (_, i) => (r.y + Math.floor(i / r.w)) * 16 + r.x + (i % r.w)) };
+      // tiles from pages 2-F need the extended BG Map16 in the game
+      if (this.bgBase && !bgMap16Ext(app.rom)) app.romEdit('BG-Map16-Erweiterung angelegt', () => { installBgMap16Ext(app.rom); });
+      app.bgBrush = { w: r.w, h: r.h, tiles: Array.from({ length: r.w * r.h }, (_, i) => this.bgBase + (r.y + Math.floor(i / r.w)) * 16 + r.x + (i % r.w)) };
       this.build();
     });
     const what = brush.tiles.length > 1 ? `Block ${brush.w}×${brush.h}${onSheet ? ` ab BG-Tile ${hex3(brush.tiles[0])}` : ' aus dem Level'}` : `BG-Tile ${hex3(brush.tiles[0])}`;
@@ -294,12 +298,20 @@ export class Palette {
     if (!onSheet) {
       const p = h('canvas', { width: brush.w * 16, height: brush.h * 16, class: 'bg-brush' });
       const pc = p.getContext('2d')!;
-      brush.tiles.forEach((t, i) => pc.drawImage(sheet, (t & 15) * 16, ((t >> 4) & 31) * 16, 16, 16, (i % brush.w) * 16, Math.floor(i / brush.w) * 16, 16, 16));
+      const tc = new TileCache(app.render.vram, app.render.cgram, (app.render.ppuRegs[0x0b] >> 4) << 13);
+      const img = pc.createImageData(brush.w * 16, brush.h * 16), px = new Uint32Array(img.data.buffer);
+      const src = map16Source(app.rom, app.render);
+      brush.tiles.forEach((t, i) => drawMap16(px, brush.w * 16, brush.h * 16, tc, src.bg(t), (i % brush.w) * 16, Math.floor(i / brush.w) * 16));
+      pc.putImageData(img, 0, 0);
       p.style.width = `${Math.min(brush.w * S, 256 * 1.2)}px`;
       p.style.imageRendering = 'pixelated';
       this.body.append(h('div', { class: 'row' }, p));
     }
-    this.body.append(c);
+    const pages = h('select', null, Array.from({ length: EXT_TILES / 512 }, (_, i) => h('option', { value: String(i * 512), selected: i * 512 === this.bgBase },
+      i === 0 ? 'Seiten 0–1' : `Seiten ${(2 * i).toString(16).toUpperCase()}–${(2 * i + 1).toString(16).toUpperCase()}${bgMap16Ext(app.rom) ? '' : ' (leer)'}`)));
+    pages.addEventListener('change', () => { this.bgBase = Number(pages.value); this.build(); });
+    this.body.append(h('div', { class: 'row' }, pages,
+      h('button', { title: 'BG-Tiles im Grafik-Bereich bearbeiten (auch Tiles ab 200 anlegen)', onclick: () => app.editMap16(onSheet ? brush.tiles[0] : this.bgBase, true) }, 'Bearbeiten …')), c);
   }
 
   specs(): ObjSpec[] {
@@ -513,7 +525,7 @@ export function renderMap16Sheet(app: App, bg = false, base = 0): HTMLCanvasElem
   const img = ctx.createImageData(256, 512);
   const px = new Uint32Array(img.data.buffer);
   px.fill(0xff181818);
-  for (let t = 0; t < 512; t++) drawMap16(px, 256, 512, tc, bg ? src.bg(t) : src.fg(base + t), (t & 15) * 16, (t >> 4) * 16);
+  for (let t = 0; t < 512; t++) drawMap16(px, 256, 512, tc, bg ? src.bg(base + t) : src.fg(base + t), (t & 15) * 16, (t >> 4) * 16);
   ctx.putImageData(img, 0, 0);
   return c;
 }

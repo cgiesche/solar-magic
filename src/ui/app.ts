@@ -61,6 +61,7 @@ export class App {
   // undo for ROM edits of the graphics workspace (palettes, Map16, GFX, slot assignments)
   romHistory: RomHistory;
   wsTile = 0; // Map16 tile for 'open-map16' (opens the graphics workspace there)
+  wsTileBg = false; // wsTile is a BG tile
   // order of level and ROM edits, so one undo/redo serves both (n: stack length after the push)
   undoOrder: { kind: 'level' | 'rom'; n: number }[] = [];
   redoOrder: ('level' | 'rom')[] = [];
@@ -1117,8 +1118,9 @@ export class App {
     return true;
   }
 
-  editMap16(tile: number): void {
+  editMap16(tile: number, bg = false): void {
     this.wsTile = tile;
+    this.wsTileBg = bg;
     this.emit('open-map16');
   }
 

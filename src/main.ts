@@ -178,7 +178,7 @@ function buildUi(app: App): void {
 
   // graphics workspace (palettes, Map16, GFX) in place of the level view
   let ws: GfxWorkspace | null = null;
-  const toggleGfx = (tab?: WsTab, tile?: number) => {
+  const toggleGfx = (tab?: WsTab, tile?: number, bg = false) => {
     if (!ws) ws = new GfxWorkspace(app);
     const btn = toolbar.querySelector('.gfx-toggle') as HTMLButtonElement;
     if (ws.active && tab === undefined) {
@@ -197,9 +197,9 @@ function buildUi(app: App): void {
       const hv = view.hover;
       ws.enter(tab ?? ws.tab, hv ? { tx: hv.tx, ty: hv.ty } : view.centerTile());
     } else if (tab) ws.open(tab);
-    if (tab === 'map16' && tile !== undefined) ws.showMap16(tile);
+    if (tab === 'map16' && tile !== undefined) ws.showMap16(tile, bg);
   };
-  app.on('open-map16', () => toggleGfx('map16', app.wsTile));
+  app.on('open-map16', () => toggleGfx('map16', app.wsTile, app.wsTileBg));
   app.on('open-gfx', () => toggleGfx('gfx'));
 
   window.onkeydown = (e: KeyboardEvent) => {

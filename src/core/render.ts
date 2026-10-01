@@ -5,6 +5,7 @@ import { decodeTile, cgramToRGBA, snesColorToRGBA } from './gfx.ts';
 import { isL1Vertical, isL2Vertical, hasLayer2Objects } from './level.ts';
 import { MAP_BASE, type LevelRender } from './levelemu.ts';
 import { EXT_FIRST, extTileWords } from './map16ext.ts';
+import { bgTileWords } from './bgmap16.ts';
 
 export interface LayerGeom {
   vertical: boolean;
@@ -107,8 +108,7 @@ export function map16Source(rom: Rom, r: LevelRender): Map16Source {
       return [rom.r16(base), rom.r16(base + 2), rom.r16(base + 4), rom.r16(base + 6)];
     },
     bg(t: number) {
-      const base = 0x0d9100 + (t & 0x1ff) * 8;
-      return [rom.r16(base), rom.r16(base + 2), rom.r16(base + 4), rom.r16(base + 6)];
+      return bgTileWords(rom, t);
     },
   };
 }

@@ -7,6 +7,7 @@ import {
 } from './level.ts';
 import { installEditorPatch, setSpriteBank, editorPatch, bgBank, setBgBank } from './patches.ts';
 import { encodeBg } from './bg.ts';
+import { BG_EXT_FIRST, installBgMap16Ext } from './bgmap16.ts';
 
 function countRefs(rom: Rom, table: number, stride: number, addr: number, bankFn?: (i: number) => number): number {
   let n = 0;
@@ -52,6 +53,7 @@ export function saveLevel(rom: Rom, lv: Level): string[] {
       setBgBank(rom, n, 0);
     }
     if (lv.bg) {
+      if (lv.bg.some((t) => t >= BG_EXT_FIRST)) installBgMap16Ext(rom); // tiles from BG pages 2-F
       const data = encodeBg(lv.bg);
       const a = rom.allocWrite(data);
       setBgBank(rom, n, a >> 16);

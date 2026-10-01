@@ -134,6 +134,7 @@ Patch hat Vorrang. Adressen sind 0, wenn der jeweilige Editor-Patch nicht instal
 | `!SMWE_BG_BANKS` | 512 Bytes: Bank der BG-Tilemap eines Levels (0 = Original) |
 | `!SMWE_EXT_GFX` | 512 × 2 Bytes: BG2/BG3-Grafikdatei eines Levels (Tiles 200–27F/280–2FF), `$FF` = keine |
 | `!SMWE_MAP16X` | 1, wenn die Map16-Erweiterung (SMWX) installiert ist |
+| `!SMWE_BG_MAP16_GFX` | 8 Bytes (4 Tile-Wörter) je BG-Tile 200–FFF (SMWH), 0 = nicht installiert |
 | `!SMWE_ACTS_LIKE` | `$1000` × 2 Bytes: „acts like“ der Map16-Tiles 000–FFF |
 | `!SMWE_MAP16_GFX` | 8 Bytes (4 Tile-Wörter) je Tile 200–FFF |
 | `!SMWE_BLOCKS` | `$1000` × 4 Bytes: Custom Block je Tile (Adresse der JMP-Tabelle, Flags) |
@@ -272,6 +273,7 @@ mit der jeweiligen Funktion nicht kompatibel.
 | `$05D8F5`, `$00BA2C`, `$00AA6B`, `$00A9E1`, `$00AA22`, Ext.-Objekt-Tabelle `$0DA115` | Editor-Patch (SMWE) |
 | `$00922F` | Level-Paletten (SMWP) |
 | `$058060` | BG-Tilemaps (SMWB) |
+| `$058DE6` | BG-Map16-Erweiterung, BG-Tiles 200–FFF (SMWH) |
 | `$00AA50` | BG2/BG3-Grafik-Slots (SMWG) |
 | `$008A7F`, `$0087AD`, `$0085E3`, `$0580B0`, `$0580B4`, `$0580BF`, `$0580C3`, `$058730`, `$058770`, `$0587D4`, `$0587DB`, `$05880B`, `$058812` | VRAM-Patch (SMWV): Tilemaps verlegt; RAM `$7F0000–$7F3653` |
 | Ext.-Objekt-Tabelle `$0DA118` (Eintrag `$03`) | Strukturen (SMWS); im Original leer, kein Code-Hook |

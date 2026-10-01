@@ -19,12 +19,12 @@ export function bgFromWram(wram: Uint8Array): Uint16Array {
 }
 
 // editor format: RLE of 0x800 bytes (low plane $B900-$BCFF, high plane $BD00-$C0FF) + FF FF;
-// unused entries keep the game's fill values ($25 / page 0)
+// pages 2-F need the extended BG Map16 (bgmap16.ts); unused entries keep the game's fill values ($25 / page 0)
 export function encodeBg(bg: Uint16Array): Uint8Array {
   const plane = new Array<number>(0x800);
   for (let o = 0; o < 0x400; o++) {
     plane[o] = o < BG_SIZE ? bg[o] & 0xff : 0x25;
-    plane[0x400 + o] = o < BG_SIZE ? (bg[o] >> 8) & 1 : 0;
+    plane[0x400 + o] = o < BG_SIZE ? (bg[o] >> 8) & 0x0f : 0;
   }
   return Uint8Array.from([...rleEncode(plane, true), 0xff, 0xff]);
 }
@@ -33,6 +33,6 @@ export function decodeBg(data: Uint8Array): Uint16Array {
   const plane = new Uint16Array(0x800);
   rleDecode(data, 0, plane, 0, 0x800);
   const bg = new Uint16Array(BG_SIZE);
-  for (let o = 0; o < BG_SIZE; o++) bg[o] = plane[o] | (plane[0x400 + o] << 8);
+  for (let o = 0; o < BG_SIZE; o++) bg[o] = plane[o] | ((plane[0x400 + o] & 0x0f) << 8);
   return bg;
 }

@@ -35,7 +35,7 @@ Beim Anzeigen eines Levels führt er die **originalen Laderoutinen** des ROMs au
 ### Level-Editor
 * Alle 512 Level; Liste mit Levelnamen (aus der Overworld), Filter nach Nummer/Name.
 * **Layer 1 / Layer 2 (bei L2-Levels) / Sprites / Screen-Exits / BG** als Bearbeitungsmodi (Tasten 1–5).
-* **Hintergrund malen (BG-Modus):** die BG-Tilemap (32×27 BG-Map16-Tiles, beide Seiten 000–1FF) mit Pinsel
+* **Hintergrund malen (BG-Modus):** die BG-Tilemap (32×27 BG-Map16-Tiles 000–1FF, mit der BG-Map16-Erweiterung bis FFF) mit Pinsel
   bearbeiten – wie in den anderen Modi: Klick/Ziehen nimmt ein Tile oder einen Block als Pinsel auf (im Level
   oder in der Palette), Rechtsklick/Shift+Klick malt (Ziehen malt weiter); gespeichert wird sie in freiem Speicher (BG-Patch).
 * Objekte: auswählen (auch Rahmen, Strg+Klick), verschieben (Maus/Pfeile), Größe per Griff/Tasten,
@@ -107,6 +107,7 @@ assembliert und ändert nur wenige, verifizierte Stellen:
 | Ext.-Objekt `$03` („SMWS“) | Strukturen: platziert einen gespeicherten Block von Map16-Tiles (4 Byte, 4. Byte = Strukturnummer 00–FF); belegt nur den im Original leeren Eintrag `$03` der Tabelle der erweiterten Objekte, unabhängig vom Editor-Patch |
 | `$00922F` („SMWP“) | eigene 256-Farben-Palette pro Level |
 | `$058060` („SMWB“) | BG-Tilemap-Daten pro Level in beliebiger Bank (bearbeitete Hintergründe) |
+| `$058DE6` („SMWH“) | BG-Map16-Erweiterung: BG-Tiles 200–FFF (Seiten 2–F) aus einer eigenen Tabelle, wie die BG-Map16-Seiten von Lunar Magic |
 | `$00F545`, `$029328` („SMWX“) | Map16 „acts like“-Tabelle für Tiles 000–FFF (Mario, Sprites, Feuerbälle, Blöcke von unten) |
 | `$058A66`, `$058B46`, `$058C34`, `$058D2B` | Tilemap-Aufbau: Tiles ab 200 aus der erweiterten Map16-Grafiktabelle |
 | `$00C096`, `$00C0E7` | Tile ersetzen setzt die Seite auf 0/1 statt nur Bit 0 (für Tiles auf Seite ≥ 2) |
