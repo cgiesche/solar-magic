@@ -16,15 +16,20 @@ function fileRange(rom: Rom, i: number): [number, number] | null {
   try { return [pc, Math.min(rom.data.length, pc + (e.raw ? 0x1000 : lz2Decompress(rom.data, pc).size))]; } catch { return null; }
 }
 
-// 1 for every byte of GFX file data
+// 1 for every byte of GFX file data. Often built lazily inside a tracked computation: reading the
+// pointer tables here isn't a dependency of its result (else a new ExGFX file would drop them all)
 export function gfxSkipMask(rom: Rom): Uint8Array {
-  const mask = new Uint8Array(rom.data.length);
-  const n = hasEditorPatch(rom) ? 0x100 : VANILLA_GFX;
-  for (let i = 0; i < n; i++) {
-    const r = fileRange(rom, i);
-    if (r) mask.fill(1, r[0], r[1]);
-  }
-  return mask;
+  const reads = rom.reads;
+  rom.reads = null;
+  try {
+    const mask = new Uint8Array(rom.data.length);
+    const n = hasEditorPatch(rom) ? 0x100 : VANILLA_GFX;
+    for (let i = 0; i < n; i++) {
+      const r = fileRange(rom, i);
+      if (r) mask.fill(1, r[0], r[1]);
+    }
+    return mask;
+  } finally { rom.reads = reads; }
 }
 
 // content hash of some GFX files (0xFF = none)

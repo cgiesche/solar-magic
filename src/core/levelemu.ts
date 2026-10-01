@@ -6,7 +6,7 @@ import { Snes, type SnesState } from './snes.ts';
 import { Rom, snesToPc } from './rom.ts';
 import { L1_PTRS, L2_PTRS, SPR_PTRS, mainTranslevel } from './level.ts';
 import { editorPatch, BG_HOOK } from './patches.ts';
-import { RomReads } from './romdeps.ts';
+import { RomReads, updateBytePages } from './romdeps.ts';
 
 export const OV_L1 = 0x0000; // overlay offsets
 export const OV_L2 = 0x4000;
@@ -75,6 +75,7 @@ export class LevelEmulator {
     this.rom = rom;
     this.snes = new Snes(rom.data);
     this.snes.overlay = this.overlay;
+    updateBytePages(rom);
   }
 
   bootReads: RomReads | null = null; // ROM read while booting (every load starts from that state)
@@ -116,6 +117,7 @@ export class LevelEmulator {
   syncRom(): void {
     this.snes.rom = this.rom.data;
     this.romGen++;
+    updateBytePages(this.rom);
   }
 
   load(level: number, ov: LevelOverride = {}): LevelRender {

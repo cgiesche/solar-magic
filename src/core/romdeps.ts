@@ -7,8 +7,13 @@
 // The level tables (pointers, secondary headers: $05E000-$05FFFF) hold a few bytes of every level
 // in each page, the ROM header page ($00FF00) the checksum next to the vectors; there single bytes
 // are recorded, so saving a level (another one, or fixing the checksum) doesn't drop anything.
+// The same for the editor patch's tables (GFX file pointers, per-level GFX and sprite bank): a new
+// ExGFX file or another level's GFX setting only drops what read that entry.
 
 import type { LevelEmulator } from './levelemu.ts';
+import type { Rom } from './rom.ts';
+import { snesToPc } from './rom.ts';
+import { editorPatch } from './patches.ts';
 
 export const PAGE_SHIFT = 8;
 
@@ -23,6 +28,21 @@ export interface RomDeps {
 export const BYTE_PAGES = new Uint8Array(0x10000);
 BYTE_PAGES.fill(1, 0x2e000 >> PAGE_SHIFT, 0x30000 >> PAGE_SHIFT);
 BYTE_PAGES[0x7f00 >> PAGE_SHIFT] = 1;
+const FIXED_BYTE_PAGES = BYTE_PAGES.slice();
+
+// adds the byte pages of this ROM's editor patch tables (call when the ROM may have changed)
+export function updateBytePages(rom: Rom): void {
+  BYTE_PAGES.set(FIXED_BYTE_PAGES);
+  const p = editorPatch(rom);
+  if (!p) return;
+  const mark = (snes: number, len: number) => {
+    const o = snesToPc(snes);
+    BYTE_PAGES.fill(1, o >> PAGE_SHIFT, ((o + len - 1) >> PAGE_SHIFT) + 1);
+  };
+  mark(p.gfxLo, 0x100); mark(p.gfxHi, 0x100); mark(p.gfxBank, 0x100); mark(p.gfxFlags, 0x100);
+  mark(p.levelGfx, 0x200 * 8);
+  mark(p.sprBank, 0x200);
+}
 
 // what a computation read (the emulated CPU and editor code, see Snes.romReads, Rom.reads)
 export class RomReads {
