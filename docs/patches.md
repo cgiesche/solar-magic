@@ -33,6 +33,7 @@ Viele Downloads auf SMWCentral sind keine eigenständigen Patches, sondern Resso
 | `init:`/`main:`/…-Labels ohne `org` | UberASM-Ressource | Abfrage, wo der Code läuft (ein Level, alle Level, Game Mode, Overworld-Karte), dann Aufnahme ins UberASM-Projekt |
 | beginnt mit `db $42`/`db $37` | Custom Block (GPS) | Abfrage von Map16-Tile, „acts like“ (aus der Beschreibung übernommen, z. B. „Act like 130“) und Grafik |
 | `list.txt` mit Blöcken, oft `.map16` und `ExGFX…bin` | Block-Paket | alles in einem Schritt, siehe [Block-Pakete](#block-pakete) |
+| `.mwl` (meist mit `.map16`, `ExGFX…bin`, `.pal`, `.palmask`) | Hintergrund (Lunar Magic) | der Hintergrund kommt ins aktuelle Level, siehe [Hintergrund-Pakete](#hintergrund-pakete) |
 | `print "INIT ",pc` | Custom Sprite (PIXI) | Hinweis: noch nicht unterstützt |
 | alles andere | Patch | wie unten beschrieben |
 
@@ -262,6 +263,36 @@ Spielzustand muss der sichtbare Inhalt beider Tilemaps exakt übereinstimmen (`t
 Patch kostet etwas Rechenzeit. In Frames, die schon im Original am Limit sind, entsteht deshalb selten
 ein Lag-Frame mehr, im Test rund 0,1 % der Frames. Patches, die ebenfalls den `$7F0000`-Bereich als
 Free RAM nutzen oder die Tilemap-Uploads selbst verändern, vertragen sich nicht damit.
+
+## Hintergrund-Pakete
+
+Hintergründe auf SMWCentral sind Lunar-Magic-Exporte: ein Level (`.mwl`), dessen Layer 2 eine
+BG-Tilemap ist, dazu eine `.map16` mit den BG-Map16-Tiles (meist ab 200), die ExGFX-Dateien der Slots
+und eine Palette `.pal` mit `.palmask`, die angibt, welche Farben zum Hintergrund gehören.
+*Hinzufügen …* übernimmt davon **nur den Hintergrund ins aktuelle Level**. Layer 1, Sprites und Header
+bleiben. Das Level muss einen BG-Hintergrund haben, also keine Layer-2-Objekte.
+
+1. Die BG-Tilemap kommt aus der `.mwl` und wird als Level-Änderung übernommen (noch nicht gespeichert).
+2. Die `.map16`-Tiles kommen auf die erweiterten BG-Map16-Seiten 2–F (BG-Map16-Erweiterung, SMWH).
+   Vorgeschlagen wird der Platz aus dem Paket. Ist der schon belegt, kommen sie auf die nächsten freien
+   Tiles; die Tilemap wird entsprechend verschoben.
+3. Die ExGFX-Dateien werden unter freien Nummern gespeichert (Lunar Magic zählt bis FFF, der Editor
+   bis FE) und in die Slots gelegt, die die `.mwl` nennt (BG1–BG3, ggf. FG1–FG3). Für BG2/BG3 wird
+   bei Bedarf der VRAM-Patch installiert.
+4. Die Farben laut `.palmask` (aus der `.pal`) und, falls markiert, die Hintergrundfarbe (aus der
+   `.mwl`) kommen in die eigene Palette des Levels. Sie wird bei Bedarf aus den aktuellen Farben angelegt.
+
+Das Ganze ist rückgängig zu machen: Strg+Z nimmt zuerst die Tilemap zurück, dann den Rest.
+
+### BG-Map16-Erweiterung (SMWH)
+
+Das Spiel zeichnet BG-Spalten in einer einzigen Routine (`$058D7A`, auch für den ersten Aufbau). Die
+Tile-Wörter eines BG-Tiles liegen dort bei `$0D9100 + Tile × 8`. Der Hook bei `$058DE6` nimmt für die
+Tiles 200–FFF eine eigene Tabelle (`!SMWE_BG_MAP16_GFX`); 000–1FF bleiben unverändert. Die High-Bytes
+der Tilemap (`$7EBD00`) schreibt der RLE-Decoder des Spiels schon vollständig, deshalb braucht es dafür
+keinen weiteren Hook. Im Grafik-Bereich zeigt *Map16-Tiles → Hintergrund* die Seiten 2–F. Der BG-Pinsel
+hat eine Seitenauswahl. Wird ein BG mit solchen Tiles gespeichert, installiert der Editor den Patch
+automatisch.
 
 ## Hooks des Editors
 

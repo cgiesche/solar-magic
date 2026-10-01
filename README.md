@@ -122,7 +122,8 @@ Die Tests prüfen, dass alle Vanilla-Level mit installiertem Patch identisch gel
 Der Editor enthält Asar (als WebAssembly) und wendet damit ASM-Code direkt im Browser an:
 - **Patches** (`.asm`/`.zip`, z. B. von SMWCentral), mit Einstellungen und Konfliktprüfung;
 - **UberASM**-Code pro Level, Overworld-Karte und Game Mode (Format von UberASM Tool 2.x);
-- **Custom Blocks** im GPS-Format.
+- **Custom Blocks** im GPS-Format;
+- **Hintergründe** aus Lunar Magic (`.zip` mit `.mwl`, `.map16`, ExGFX, `.pal`/`.palmask`) ins aktuelle Level.
 
 Jeder Patch wird mit Originalbytes und Quellen in der ROM verzeichnet und lässt sich jederzeit wieder
 entfernen. Details, `patch.json` und die Schnittstellen für eigene Patches: [docs/patches.md](docs/patches.md).

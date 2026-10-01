@@ -169,10 +169,17 @@ export function planBgPack(rom: Rom, name: string, files: Map<string, Uint8Array
   return { name, mwl, bg, map16, used, gfx, colors, back, pal, at, notes };
 }
 
+// the level's colors as a custom palette would hold them: CGRAM, color 0 = back area color ($0701)
+export function levelColors(r: { cgram: Uint8Array; wram: Uint8Array }): Uint8Array {
+  const pal = r.cgram.slice(0, 512);
+  pal[0] = r.wram[0x701]; pal[1] = r.wram[0x702] & 0x7f;
+  return pal;
+}
+
 export interface BgPackOptions {
   at?: number; // first BG tile for the .map16 tiles (default: the plan's)
   palette?: boolean; // take over the masked colors (default true)
-  cgram: Uint8Array; // the level's current colors (512 bytes), base for a new own palette
+  cgram: Uint8Array; // the level's current colors (levelColors), base for a new own palette
 }
 
 export interface BgPackResult { ok: boolean; errors: string[]; notes: string[]; bg: Uint16Array | null }

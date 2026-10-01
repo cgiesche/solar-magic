@@ -6,7 +6,7 @@ import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadAsar } from '../src/core/asar.ts';
 import { packageFiles } from '../src/core/patchpkg.ts';
-import { parseMwl, isBgPackage, planBgPack, applyBgPack } from '../src/core/bgpack.ts';
+import { parseMwl, isBgPackage, planBgPack, applyBgPack, levelColors } from '../src/core/bgpack.ts';
 import { bgTileWords, bgExtTileWords } from '../src/core/bgmap16.ts';
 import { parseMap16File } from '../src/core/map16file.ts';
 import { bgFromWram } from '../src/core/bg.ts';
@@ -52,7 +52,7 @@ const map16 = parseMap16File(files.get('ghostbustersghosttrapjavamanhattanBG.map
   const plan = planBgPack(rom, 'ghostbusters', files);
   check(plan.at === 0x200 && plan.gfx.length === 3 && plan.gfx.every((g) => g.num >= 0x80 && g.num < 0xff) && plan.colors?.join() === Array.from({ length: 14 }, (_, i) => 0x31 + i).join() && plan.back, 'plan: tiles at 200, ExGFX 8A1-8A3 renumbered, colors 31-3E + back area color');
   const lv = loadLevel(rom, LV);
-  const r = applyBgPack(rom, lv, files, plan, { cgram: before.cgram });
+  const r = applyBgPack(rom, lv, files, plan, { cgram: levelColors(before) });
   check(r.ok && !!r.bg, 'applied: ' + [...r.errors, ...r.notes].join(' | '));
   check(r.notes.some((n) => n.includes('BG2-Slot nicht verfügbar')), 'BG2/BG3 need the VRAM patch (noted)');
   check(map16.tiles.every((ws, i) => same(bgExtTileWords(rom, 0x200 + i)!, ws)), 'BG Map16 tiles 200-25F from the .map16');
@@ -84,7 +84,7 @@ const map16 = parseMap16File(files.get('ghostbustersghosttrapjavamanhattanBG.map
   const emu0 = new LevelEmulator(rom); emu0.boot();
   const plan = planBgPack(rom, 'ghostbusters', files);
   const lv = loadLevel(rom, LV);
-  const r = applyBgPack(rom, lv, files, plan, { cgram: emu0.load(LV).cgram });
+  const r = applyBgPack(rom, lv, files, plan, { cgram: levelColors(emu0.load(LV)) });
   check(r.ok, 'applied with VRAM patch: ' + [...r.errors, ...r.notes].join(' | '));
   const nums = ['BG2', 'BG3'].map((s) => plan.gfx.find((g) => g.slot === s)!.num);
   check(same(levelExtGfx(rom, LV), nums), 'BG2/BG3 slots set');
@@ -116,13 +116,13 @@ const map16 = parseMap16File(files.get('ghostbustersghosttrapjavamanhattanBG.map
   const plan = planBgPack(rom, 'syn', syn);
   check(plan.map16?.from === 0x300 && plan.at === 0x300 && !plan.colors, 'synthetic: tiles 300-31F, no palette');
   const lv = loadLevel(rom, LV);
-  const r = applyBgPack(rom, lv, syn, plan, { cgram: emu0.load(LV).cgram, at: 0x480 });
+  const r = applyBgPack(rom, lv, syn, plan, { cgram: levelColors(emu0.load(LV)), at: 0x480 });
   const src = parseMwl(mwlData).bg;
   check(r.ok && r.bg!.every((t, i) => t === (src[i] >= 0x300 ? src[i] - 0x300 + 0x480 : src[i])) && bgExtTileWords(rom, 0x491)?.[0] === 0x0545, 'other start tile moves the tilemap along');
   check(!customPalette(rom, LV), 'without .palmask the palette stays');
   const l2 = [...Array(0x200).keys()].find((n) => hasLayer2Objects(loadLevel(rom, n).header.mode))!;
   const lv2 = loadLevel(rom, l2);
-  const r2 = applyBgPack(rom, lv2, syn, plan, { cgram: emu0.load(LV).cgram });
+  const r2 = applyBgPack(rom, lv2, syn, plan, { cgram: levelColors(emu0.load(LV)) });
   check(!r2.ok && /Layer-2-Objekte/.test(r2.errors[0]), 'level with layer 2 objects is refused');
 }
 

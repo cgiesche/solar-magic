@@ -17,7 +17,8 @@ import { loadProject, emptyProject, saveProject } from '../core/uberproject.ts';
 import { ALL, type UberContext } from '../core/uberasm.ts';
 import { hex } from '../core/names.ts';
 import { planBlockPack, applyBlockPack } from '../core/blockpack.ts';
-import { readPackage, packageFromFiles, detectKind, type PackageInfo, scanDefines, effectiveDefines, packageSource, optionDefault, type PatchPackage, type PatchOption } from '../core/patchpkg.ts';
+import { isBgPackage, planBgPack, applyBgPack, levelColors, type BgPackResult } from '../core/bgpack.ts';
+import { packageFiles, packageFromFiles, detectKind, type PackageInfo, scanDefines, effectiveDefines, packageSource, optionDefault, type PatchPackage, type PatchOption } from '../core/patchpkg.ts';
 import { installEditorPatch } from '../core/patches.ts';
 import { installMap16Ext, map16Ext, setExtTileWords, EXT_FIRST, EXT_TILES } from '../core/map16ext.ts';
 import { map16Source } from '../core/render.ts';
@@ -327,6 +328,65 @@ function openBlockPackDialog(app: App, pkg: PatchPackage, info: PackageInfo, onD
   ]);
 }
 
+// a Lunar Magic background (.mwl with .map16, ExGFX, .pal/.palmask): the background into the current level
+function openBgPackDialog(app: App, fileName: string, files: Map<string, Uint8Array>, onDone: () => void): void {
+  const name = fileName.replace(/\.[^.]*$/, '').split(/[\\/]/).pop()!;
+  const lvl = hex(app.level.number, 3);
+  if (!app.canEditBg()) {
+    modal(`Hintergrund: ${name}`, h('p', null, `„${name}“ ist ein Hintergrund-Paket (BG-Tilemap). Level ${lvl} hat aber Layer-2-Objekte statt eines BG-Hintergrunds – erst ein Level mit BG öffnen.`), [{ label: 'OK', primary: true }]);
+    return;
+  }
+  const plan = planBgPack(app.rom, name, files);
+  let at = plan.at, usePalette = true;
+  const n16 = plan.map16 ? plan.map16.data.tiles.length : 0;
+  const ext = plan.gfx.some((g) => g.slot === 'BG2' || g.slot === 'BG3');
+  const log = h('div');
+  const body = h('div', { class: 'patch-apply' },
+    h('p', null, `„${name}“ ist ein Lunar-Magic-Hintergrund. Übernommen wird nur der Hintergrund, in Level ${lvl}: die BG-Tilemap aus ${plan.mwl.split('/').pop()}${n16 ? ', ihre BG-Map16-Tiles' : ''}${plan.gfx.length ? ', die Grafik-Slots' : ''}${plan.colors ? ' und die Farben laut .palmask' : ''}. Layer 1, Sprites und Header bleiben.`),
+    plan.map16 ? h('div', { class: 'prop' }, h('label', { title: plan.map16.file.split('/').pop() }, 'BG-Map16'),
+      h('span', null, `${n16} Tiles ab BG-Tile `), hexInput(at, 3, (v) => (at = v), 0xfff),
+      h('span', { class: 'hint' }, at !== plan.map16.from ? ` (im Paket ab ${hex(plan.map16.from, 3)}, dort schon belegt)` : '')) : '',
+    ...plan.gfx.map((g) => g.file
+      ? h('div', { class: 'prop' }, h('label', null, `${g.slot}: ${g.file.split('/').pop()}`),
+        h('span', null, 'als ExGFX '), hexInput(g.num, 2, (v) => (g.num = v), 0xfe),
+        g.lmNum > 0xff ? h('span', { class: 'hint' }, ` (Lunar Magic: ${hex(g.lmNum, 3)})`) : '')
+      : h('div', { class: 'prop' }, h('label', null, g.slot), h('span', { class: 'hint' }, `Grafikdatei ${hex(g.num, 2)} der ROM`))),
+    plan.colors ? h('label', { class: 'row small' },
+      h('input', { type: 'checkbox', checked: true, onchange: (e: Event) => (usePalette = (e.target as HTMLInputElement).checked) }),
+      ` ${plan.colors.length} Farbe(n)${plan.back ? ' und die Hintergrundfarbe' : ''} übernehmen (eigene Palette für Level ${lvl})`) : '',
+    ext && !extGfxAvailable(app.rom) ? h('p', { class: 'hint' }, 'Für die Slots BG2/BG3 wird der VRAM-Patch installiert.') : '',
+    plan.notes.length ? h('ul', { class: 'hint' }, plan.notes.map((t) => h('li', null, t))) : '',
+    log);
+  modal(`Hintergrund: ${name}`, body, [
+    { label: 'Abbrechen' },
+    { label: 'Einrichten', primary: true, onClick: () => {
+      let r: BgPackResult;
+      try {
+        r = app.romEdit(`Hintergrund „${name}“ in Level ${lvl}`, () => {
+          const before = app.rom.data.slice();
+          // BG2/BG3 need the tilemaps moved out of VRAM $2000 first
+          if (ext && !extGfxAvailable(app.rom)) {
+            const v = installVramPatch(app.rom);
+            if (!v.ok) return { ok: false, errors: v.errors, notes: [], bg: null };
+          }
+          const res = applyBgPack(app.rom, app.level, files, plan, { at, palette: usePalette, cgram: levelColors(app.render) });
+          if (!res.ok) app.rom.data = before;
+          return res;
+        });
+      } catch (e) { r = { ok: false, errors: [e instanceof Error ? e.message : String(e)], notes: [], bg: null }; }
+      if (!r.ok || !r.bg) { resultLog(log, { ok: false, errors: r.errors, warnings: [], prints: [] }); return false; }
+      app.checkpoint();
+      app.level.bg = r.bg;
+      app.changed();
+      app.emit('level-header');
+      app.emit('patch');
+      toast(`Hintergrund „${name}“ eingerichtet: ${r.notes.join(' · ')} – Level noch nicht gespeichert`);
+      onDone();
+      return true;
+    } },
+  ]);
+}
+
 export async function openPatchManager(app: App): Promise<void> {
   const body = h('div', { class: 'patch-manager' });
   const build = () => {
@@ -355,7 +415,9 @@ export async function openPatchManager(app: App): Promise<void> {
     const f = await pickFile('.asm,.asar,.zip');
     if (!f) return;
     try {
-      const pkg = readPackage(f.name, new Uint8Array(await f.arrayBuffer()));
+      const files = packageFiles(f.name, new Uint8Array(await f.arrayBuffer()));
+      if (isBgPackage(files)) { openBgPackDialog(app, f.name, files, build); return; }
+      const pkg = packageFromFiles(f.name, files);
       const info = detectKind(pkg);
       if (info.kind === 'uberasm') openUberResourceDialog(app, pkg, info, build);
       else if (info.kind === 'block') openBlockResourceDialog(app, pkg, info, build);
