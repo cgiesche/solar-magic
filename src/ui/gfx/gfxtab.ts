@@ -1,15 +1,757 @@
-// GFX tab (placeholder until the new editor is in place: opens the old dialog).
+// Graphics tab: the level's GFX slots as cards (swap a file from a gallery with previews and usage),
+// the list of GFX/ExGFX files and a pixel editor (pen, fill, pipette, selection with move, copy/paste,
+// flip/rotate) drawing with the colors of a palette row. Each stroke is one undoable ROM edit:
+// the file is encoded again and written in place when it fits, otherwise moved to free space.
 
 import type { App } from '../app.ts';
 import type { GfxWorkspace, WsPanel } from '../gfxworkspace.ts';
-import { h } from '../dom.ts';
-import { openGfxEditor } from '../gfxeditor.ts';
+import { h, clear, toast, downloadBytes, pickFile, modal, choose } from '../dom.ts';
+import { lz2Decompress, lz2Compress } from '../../core/lz2.ts';
+import { decodeTile, encodeTile, cgramToRGBA } from '../../core/gfx.ts';
+import { snesToPc, type Rom } from '../../core/rom.ts';
+import { hex } from '../../core/names.ts';
+import {
+  gfxEntry, setGfxEntry, hasEditorPatch, installEditorPatch, VANILLA_GFX, levelGfx, setLevelGfx, defaultGfx,
+  levelExtGfx, setLevelExtGfx, extGfxAvailable,
+} from '../../core/patches.ts';
+import { importGfxFile, exgfxName } from '../../core/map16file.ts';
+import { parsePrimaryHeader, L1_PTRS } from '../../core/level.ts';
+import { map16Source } from '../../core/render.ts';
+import { EXT_FIRST, EXT_TILES, map16Ext } from '../../core/map16ext.ts';
+import { gfxName } from './map16tab.ts';
+import { loadAsar } from '../../core/asar.ts';
+import { installVramPatch } from '../../core/vrampatch.ts';
+
+export function defaultBpp(i: number, size: number): number {
+  if ((i >= 0x28 && i <= 0x2b) || i === 0x2f) return 2;
+  if (size % 24 === 0 && size % 32 !== 0) return 3;
+  if (size === 0xc00 || size === 0x600) return 3;
+  return 4;
+}
+
+interface GfxFile { num: number; addr: number; raw: boolean; bpp: number; packed: number; pix: Uint8Array; tiles: number; empty: boolean }
+
+// decodes a file into pixel indices (64 per 8x8 tile)
+export function loadGfx(rom: Rom, num: number, bppOverride: number | null = null): GfxFile {
+  const e = gfxEntry(rom, num);
+  if (!e) return { num, addr: 0, raw: true, bpp: 4, packed: 0, pix: new Uint8Array(128 * 64), tiles: 128, empty: true };
+  let data: Uint8Array, packed: number;
+  if (e.raw) { data = rom.bytes(e.addr, 0x1000); packed = 0x1000; }
+  else ({ data, size: packed } = lz2Decompress(rom.data, snesToPc(e.addr)));
+  const bpp = e.raw ? 4 : bppOverride ?? defaultBpp(num, data.length);
+  const tiles = Math.max(1, Math.floor(data.length / (bpp * 8)));
+  const pix = new Uint8Array(tiles * 64);
+  for (let t = 0; t < tiles; t++) decodeTile(data, t * bpp * 8, bpp, pix, t * 64);
+  return { num, addr: e.addr, raw: e.raw, bpp, packed, pix, tiles, empty: false };
+}
+
+function encodeGfx(f: GfxFile): Uint8Array {
+  const out = new Uint8Array(f.tiles * f.bpp * 8);
+  for (let t = 0; t < f.tiles; t++) encodeTile(f.pix, t * 64, f.bpp, out, t * f.bpp * 8);
+  return out;
+}
+
+// writes the pixels back: raw files in place, LZ2 in place when the new data fits, else to free space
+function storeGfx(rom: Rom, f: GfxFile): void {
+  const data = encodeGfx(f);
+  if (f.raw) { rom.writeBytes(f.addr, data); return; }
+  const packed = lz2Compress(data);
+  if (packed.length <= f.packed) { rom.writeBytes(f.addr, packed); f.packed = packed.length; return; }
+  rom.freeAt(f.addr);
+  f.addr = rom.allocWrite(packed);
+  f.packed = packed.length;
+  setGfxEntry(rom, f.num, f.addr, false);
+}
+
+// slots of a level: name, storage index (levelGfx order) or BG2/BG3 index, file, default file
+interface Slot { name: string; k: number; ext: boolean; file: number; def: number; custom: boolean; first: number; sprite: boolean }
+function slotsOf(app: App, level: number, tileset: number, spriteSet: number): Slot[] {
+  const set = levelGfx(app.rom, level);
+  const def = defaultGfx(app.rom, tileset, spriteSet);
+  const order: [string, number, number][] = [['FG1', 7, 0], ['FG2', 6, 0x80], ['BG1', 5, 0x100], ['FG3', 4, 0x180], ['SP1', 3, -1], ['SP2', 2, -1], ['SP3', 1, -1], ['SP4', 0, -1]];
+  const out: Slot[] = order.map(([name, k, first]) => ({ name, k, ext: false, file: set[k] !== 0xff ? set[k] : def[k], def: def[k], custom: set[k] !== 0xff, first, sprite: first < 0 }));
+  if (extGfxAvailable(app.rom)) {
+    const ex = levelExtGfx(app.rom, level);
+    ['BG2', 'BG3'].forEach((name, k) => out.push({ name, k, ext: true, file: ex[k], def: 0xff, custom: ex[k] !== 0xff, first: 0x200 + k * 0x80, sprite: false }));
+  }
+  return out;
+}
+
+type Tool = 'pen' | 'fill' | 'pick' | 'select';
+interface Sel { x: number; y: number; w: number; h: number }
+interface Float { x: number; y: number; w: number; h: number; pix: Uint8Array } // pixels lifted out of the sheet
 
 export class GfxTab implements WsPanel {
   root: HTMLElement;
-  constructor(app: App, _ws: GfxWorkspace) {
-    this.root = h('div', { class: 'ws-placeholder' }, h('button', { onclick: () => openGfxEditor(app) }, 'Grafik-Editor öffnen'));
+  private app: App;
+  private ws: GfxWorkspace;
+  private cur = 0x14;
+  private file: GfxFile | null = null;
+  private bppOverride: number | null = null;
+  private palRow = -1; // -1: automatic for the file
+  private color = 1;
+  private tool: Tool = 'pen';
+  private zoom = 4;
+  private grid: 0 | 8 | 16 = 8;
+  private sel: Sel | null = null;
+  private float: Float | null = null;
+  private clip: { w: number; h: number; pix: Uint8Array } | null = null;
+  private focusTile = -1; // tile shown under "Verwendung"
+  private filter = '';
+  private onlyLevel = false;
+  private visible = false;
+  private stroke = false;
+  private cards = h('div', { class: 'gt-cards' });
+  private list = h('div', { class: 'gt-list' });
+  private canvas = h('canvas', { class: 'gt-canvas' });
+  private side = h('div', { class: 'gt-side' });
+  private tools = h('div', { class: 'ws-bar' });
+
+  constructor(app: App, ws: GfxWorkspace) {
+    this.app = app;
+    this.ws = ws;
+    const search = h('input', { placeholder: 'Suchen (z. B. 14, ExGFX80)', class: 'filter' });
+    search.addEventListener('input', () => { this.filter = search.value.trim().toLowerCase(); this.buildList(); });
+    const only = h('input', { type: 'checkbox' });
+    only.addEventListener('change', () => { this.onlyLevel = only.checked; this.buildList(); });
+    this.root = h('div', { class: 'gt' },
+      this.cards,
+      this.tools,
+      h('div', { class: 'gt-main' },
+        h('div', { class: 'gt-files' }, search, h('label', { class: 'toggle' }, only, 'nur vom Level benutzt'), this.list,
+          h('button', { onclick: () => this.newExGfx(), title: 'Leere 4bpp-Datei in der ersten freien ExGFX-Nummer anlegen' }, '+ Neue ExGFX')),
+        h('div', { class: 'gt-view' }, this.canvas),
+        this.side));
+    this.attachCanvas();
+    app.on('rom-change', () => { if (this.visible && !this.stroke) this.reload(); });
+    app.on('render', () => { this.autoRows = null; if (this.visible) { this.buildCards(); this.draw(); this.buildSide(); } });
+    app.on('level', () => (this.palRow = -1));
   }
-  show(): void {}
-  select(_file: number, _tile?: number): void {}
+
+  previewHint(): string {
+    return '';
+  }
+
+  show(): void {
+    this.visible = true;
+    this.reload();
+  }
+  hide(): void {
+    this.dropFloat();
+    this.visible = false;
+  }
+
+  select(file: number, tile?: number): void {
+    if (file !== this.cur) { this.dropFloat(); this.cur = file; this.bppOverride = null; this.palRow = -1; this.sel = null; }
+    if (tile !== undefined) this.focusTile = tile;
+    if (this.visible) this.reload();
+  }
+
+  private reload(): void {
+    this.autoRows = null;
+    this.file = loadGfx(this.app.rom, this.cur, this.bppOverride);
+    this.buildCards();
+    this.buildTools();
+    this.buildList();
+    this.draw();
+    this.buildSide();
+  }
+
+  // ---------- palette ----------
+  private levelSlots(): Slot[] {
+    const lv = this.app.level;
+    return slotsOf(this.app, lv.number, lv.header.tileset, lv.header.spriteGfx);
+  }
+
+  // palette row: the one the level's Map16 tiles use most with the file, sprites: row 9
+  private autoRows: Map<number, number> | null = null; // file -> row
+  private autoRow(file: number): number {
+    if (!this.autoRows) {
+      const slots = this.levelSlots().filter((x) => !x.sprite && x.file !== 0xff);
+      const count = slots.map(() => new Array(8).fill(0));
+      const src = map16Source(this.app.rom, this.app.render);
+      // tiles the level uses (else the standard pages)
+      const inLevel = new Set(this.app.images?.tiles1 ?? []);
+      const tiles = inLevel.size > 1 ? [...inLevel] : Array.from({ length: EXT_FIRST }, (_, i) => i);
+      for (const t of tiles) for (const w of src.fg(t)) {
+        const si = slots.findIndex((x) => (w & 0x3ff) >= x.first && (w & 0x3ff) < x.first + 0x80);
+        if (si >= 0) count[si][(w >> 10) & 7]++;
+      }
+      this.autoRows = new Map();
+      slots.forEach((x, i) => {
+        const best = count[i].indexOf(Math.max(...count[i]));
+        if (!this.autoRows!.has(x.file)) this.autoRows!.set(x.file, count[i][best] ? best : 2);
+      });
+      for (const x of this.levelSlots()) if (x.sprite && x.file !== 0xff && !this.autoRows.has(x.file)) this.autoRows.set(x.file, 9);
+    }
+    return this.autoRows.get(file) ?? 2;
+  }
+  private row(): number {
+    return this.palRow >= 0 ? this.palRow : this.autoRow(this.cur);
+  }
+  private colors(): Uint32Array {
+    const all = cgramToRGBA(this.app.render.cgram);
+    const n = 1 << (this.file?.bpp ?? 4);
+    const r = this.row();
+    return Uint32Array.from({ length: n }, (_, k) => all[(r * 16 + k) & 0xff]);
+  }
+
+  // ---------- slot cards ----------
+  private buildCards(): void {
+    const app = this.app;
+    const box = this.cards;
+    clear(box);
+    const slots = this.levelSlots();
+    box.append(h('div', { class: 'gt-cards-title' }, h('b', null, `Level ${hex(app.level.number, 3)}`), h('span', { class: 'hint' }, 'Grafik-Slots – Klick öffnet die Datei, „Tauschen“ wählt eine andere')));
+    for (const s of slots) {
+      const has = s.file !== 0xff;
+      const thumb = h('canvas', { class: 'gt-card-img', width: 64, height: 16 });
+      if (has) this.thumb(thumb, s.file, s.sprite ? 9 : this.rowForSlot(s), 64, 16);
+      box.append(h('div', { class: `gt-card${has && s.file === this.cur ? ' active' : ''}${has ? '' : ' empty'}`, title: s.sprite ? 'Sprite-Grafik' : `VRAM-Tiles ${hex(s.first, 3)}–${hex(s.first + 0x7f, 3)}` },
+        h('div', { class: 'gt-card-head' }, h('b', null, s.name), h('span', { class: 'hint' }, s.custom ? 'eigene' : has ? 'Standard' : 'leer')),
+        h('div', { class: 'gt-card-body', onclick: () => { if (has) this.select(s.file); } }, thumb, h('span', { class: 'mono' }, has ? gfxName(s.file) : '–')),
+        h('button', { class: 'gt-card-btn', onclick: () => void this.swap(s) }, 'Tauschen …')));
+    }
+    if (!extGfxAvailable(app.rom)) box.append(h('div', { class: 'gt-card empty' }, h('div', { class: 'gt-card-head' }, h('b', null, 'BG2/BG3')),
+      h('div', { class: 'hint' }, 'Zusätzliche Grafik für Tiles 200–2FF'),
+      h('button', { class: 'gt-card-btn', title: 'Verlegt die Layer-1-Tilemap wie Lunar Magic, damit VRAM für BG2/BG3 frei wird', onclick: () => void this.enableExt() }, 'Aktivieren …')));
+  }
+
+  private rowForSlot(s: Slot): number {
+    return s.sprite ? 9 : this.autoRow(s.file);
+  }
+
+  private thumb(c: HTMLCanvasElement, num: number, row: number, w: number, hh: number): void {
+    try {
+      const f = loadGfx(this.app.rom, num);
+      if (f.empty) return;
+      const all = cgramToRGBA(this.app.render.cgram);
+      const W = 128, rows = Math.min(Math.ceil(f.tiles / 16), (hh * 128) / (w * 8));
+      const off = document.createElement('canvas');
+      off.width = W; off.height = rows * 8;
+      const ctx = off.getContext('2d')!;
+      const img = ctx.createImageData(W, rows * 8);
+      const px = new Uint32Array(img.data.buffer);
+      for (let t = 0; t < Math.min(f.tiles, rows * 16); t++) for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) {
+        const v = f.pix[t * 64 + y * 8 + x];
+        px[((t >> 4) * 8 + y) * W + (t & 15) * 8 + x] = v ? all[(row * 16 + v) & 0xff] : 0xff1b1d22;
+      }
+      ctx.putImageData(img, 0, 0);
+      const cx = c.getContext('2d')!;
+      cx.imageSmoothingEnabled = false;
+      cx.drawImage(off, 0, 0, w, (w / W) * rows * 8);
+    } catch { /* broken file */ }
+  }
+
+  // which levels use which file (slots incl. defaults)
+  private usage(): Map<number, number[]> {
+    const m = new Map<number, number[]>();
+    for (const n of this.app.usedLevels()) {
+      let hd;
+      try { hd = n === this.app.level.number ? this.app.level.header : parsePrimaryHeader(this.app.rom.bytes(this.app.rom.r24(L1_PTRS + n * 3), 5)); } catch { continue; }
+      for (const s of slotsOf(this.app, n, hd.tileset, hd.spriteGfx)) {
+        if (s.file === 0xff) continue;
+        const l = m.get(s.file) ?? [];
+        if (!l.includes(n)) l.push(n);
+        m.set(s.file, l);
+      }
+    }
+    return m;
+  }
+
+  private async swap(s: Slot): Promise<void> {
+    const app = this.app;
+    const usage = this.usage();
+    const n = hasEditorPatch(app.rom) ? 0x100 : VANILLA_GFX;
+    const row = this.rowForSlot(s);
+    const grid = h('div', { class: 'gt-gallery' });
+    let done: (v: number | null) => void = () => {};
+    const result = new Promise<number | null>((r) => (done = r));
+    const item = (num: number, label: string, sub: string, img?: HTMLCanvasElement) => h('div', {
+      class: `gt-gal-item${num === (s.custom ? s.file : -1) ? ' active' : ''}`,
+      onclick: () => { done(num); dlg.close(); },
+    }, img ?? h('div', { class: 'gt-gal-none' }, '—'), h('b', { class: 'mono' }, label), h('span', { class: 'hint' }, sub));
+    grid.append(item(-1, s.ext ? 'keine' : `Standard (${gfxName(s.def)})`, s.ext ? 'Slot frei lassen' : 'aus Tileset/Sprite-Set'));
+    for (let i = 0; i < n; i++) {
+      if (!gfxEntry(app.rom, i)) continue;
+      const c = h('canvas', { width: 128, height: 32, class: 'gt-gal-img' });
+      this.thumb(c, i, row, 128, 32);
+      const users = usage.get(i) ?? [];
+      grid.append(item(i, gfxName(i), users.length ? `${users.length} Level${users.length > 1 ? 's' : ''}: ${users.slice(0, 4).map((l) => hex(l, 3)).join(' ')}${users.length > 4 ? ' …' : ''}` : 'unbenutzt'));
+      (grid.lastChild as HTMLElement).prepend(c);
+      (grid.lastChild as HTMLElement).querySelector('.gt-gal-none')?.remove();
+    }
+    const dlg = modal(`${s.name} von Level ${hex(app.level.number, 3)}: Grafik wählen`, h('div', { class: 'gt-gallery-wrap' }, grid), [{ label: 'Abbrechen' }], () => done(null));
+    const pick = await result;
+    if (pick === null) return;
+    const v = pick < 0 ? 0xff : pick;
+    if (v === (s.custom ? s.file : 0xff)) return;
+    if (!s.ext && !hasEditorPatch(app.rom)) {
+      const ok = await choose('Editor-Patch installieren?', 'Eigene Grafik pro Level braucht den Editor-Patch (wird einmalig installiert, wie bei Direct-Map16).', [{ label: 'Abbrechen' }, { label: 'Installieren', primary: true }]);
+      if (ok !== 1) return;
+    }
+    try {
+      app.romEdit(`${s.name} von Level ${hex(app.level.number, 3)} → ${v === 0xff ? 'Standard' : gfxName(v)}`, () => {
+        if (s.ext) { const ex = levelExtGfx(app.rom, app.level.number); ex[s.k] = v; setLevelExtGfx(app.rom, app.level.number, ex); }
+        else { const set = levelGfx(app.rom, app.level.number); set[s.k] = v; setLevelGfx(app.rom, app.level.number, set); }
+      });
+      app.flushRomChange();
+    } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
+  }
+
+  private async enableExt(): Promise<void> {
+    const app = this.app;
+    const ok = await choose('BG2/BG3 aktivieren?', 'Verlegt die Layer-1-Tilemap im VRAM (wie Lunar Magic), damit die Tiles 200–2FF eigene Grafik bekommen können. Dazu wird ein ASM-Patch angewendet.', [{ label: 'Abbrechen' }, { label: 'Aktivieren', primary: true }]);
+    if (ok !== 1) return;
+    try {
+      await loadAsar();
+      let err: string[] = [];
+      app.romEdit('BG2/BG3 aktiviert (VRAM-Patch)', () => { const r = installVramPatch(app.rom); if (!r.ok) err = r.errors; });
+      if (err.length) { toast(err.join(' '), 'error'); return; }
+      app.flushRomChange();
+      toast('VRAM-Patch installiert: BG2/BG3 sind jetzt verfügbar.');
+    } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
+  }
+
+  // ---------- file list ----------
+  private buildList(): void {
+    const app = this.app;
+    clear(this.list);
+    const n = hasEditorPatch(app.rom) ? 0x100 : VANILLA_GFX;
+    const used = new Map(this.levelSlots().filter((s) => s.file !== 0xff).map((s) => [s.file, s.name] as [number, string]));
+    for (let i = 0; i < n; i++) {
+      const e = gfxEntry(app.rom, i);
+      const name = gfxName(i);
+      if (this.filter && !name.toLowerCase().includes(this.filter) && !hex(i, 2).toLowerCase().includes(this.filter)) continue;
+      if (this.onlyLevel && !used.has(i)) continue;
+      if (!e && i >= VANILLA_GFX && !this.filter && !this.onlyLevel && i !== this.cur) continue; // empty ExGFX numbers: via "+ Neue ExGFX"
+      this.list.append(h('div', {
+        class: `level-item${i === this.cur ? ' current' : ''}${e ? '' : ' unused'}`,
+        onclick: () => this.select(i),
+      }, name, used.has(i) ? h('span', { class: 'gt-used' }, used.get(i)) : ''));
+    }
+    this.list.querySelector('.current')?.scrollIntoView({ block: 'nearest' });
+  }
+
+  private newExGfx(): void {
+    const app = this.app;
+    let n = -1;
+    for (let i = 0x80; i < 0x100 && n < 0; i++) if (!hasEditorPatch(app.rom) || !gfxEntry(app.rom, i)) n = i;
+    for (let i = VANILLA_GFX; i < 0x80 && n < 0; i++) if (!gfxEntry(app.rom, i)) n = i;
+    if (n < 0) { toast('Keine freie ExGFX-Nummer mehr', 'error'); return; }
+    try {
+      app.romEdit(`${gfxName(n)} angelegt`, () => { installEditorPatch(app.rom); setGfxEntry(app.rom, n, app.rom.allocWrite(new Uint8Array(0x1000)), true); });
+      this.select(n);
+      toast(`${gfxName(n)} angelegt (leer, 4bpp). Zuweisen: Slot-Karte oben → Tauschen.`);
+    } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
+  }
+
+  // ---------- tools bar ----------
+  private buildTools(): void {
+    const b = this.tools;
+    clear(b);
+    const tool = (t: Tool, label: string, key: string, title: string) => h('button', { class: this.tool === t ? 'active' : '', title: `${title} (${key})`, onclick: () => this.setTool(t) }, label);
+    const zoomBtn = (z: number) => h('button', { class: this.zoom === z ? 'active' : '', onclick: () => { this.zoom = z; this.buildTools(); this.draw(); } }, `${z}×`);
+    const gridBtn = (g: 0 | 8 | 16, label: string) => h('button', { class: this.grid === g ? 'active' : '', onclick: () => { this.grid = g; this.buildTools(); this.draw(); } }, label);
+    b.append(
+      h('span', { class: 'btn-group' },
+        tool('pen', '✎ Stift', 'B', 'Zeichnen; Rechtsklick zeichnet transparent'),
+        tool('fill', '▧ Füllen', 'F', 'Fläche gleicher Farbe füllen'),
+        tool('pick', '⌖ Pipette', 'I', 'Farbe aus dem Bild nehmen (auch Alt+Klick)'),
+        tool('select', '⬚ Auswahl', 'S', 'Bereich wählen; Ziehen innerhalb verschiebt ihn, Enter/Esc setzt ab')),
+      h('span', { class: 'btn-group' },
+        h('button', { onclick: () => this.transform('h'), title: 'Auswahl (oder Tile unter der letzten Auswahl) horizontal spiegeln' }, '↔'),
+        h('button', { onclick: () => this.transform('v'), title: 'Vertikal spiegeln' }, '↕'),
+        h('button', { onclick: () => this.transform('r'), title: 'Um 90° drehen (nur quadratische Auswahl)' }, '⟳')),
+      h('button', { onclick: () => this.copySel(), title: 'Strg+C' }, 'Kopieren'),
+      h('button', { onclick: () => this.pasteSel(), title: 'Strg+V – fügt an der Auswahl ein, danach verschiebbar' }, 'Einfügen'),
+      h('span', { class: 'sep' }),
+      h('span', { class: 'hint' }, 'Raster'), h('span', { class: 'btn-group' }, gridBtn(0, 'aus'), gridBtn(8, '8'), gridBtn(16, '16')),
+      h('span', { class: 'hint' }, 'Zoom'), h('span', { class: 'btn-group' }, zoomBtn(2), zoomBtn(3), zoomBtn(4), zoomBtn(6)),
+      h('span', { class: 'spacer' }),
+      h('button', { onclick: () => this.exportPng() }, 'PNG exportieren'),
+      h('button', { onclick: () => void this.importPng(), title: 'PNG (128 Pixel breit) in diese Datei; Farben werden auf die gewählte Palettenzeile abgebildet' }, 'PNG importieren'),
+      h('button', { onclick: () => void this.importBin(), title: 'Lunar-Magic-ExGFX (.bin)' }, '.bin importieren'),
+    );
+  }
+
+  private setTool(t: Tool): void {
+    if (t !== 'select') this.dropFloat();
+    this.tool = t;
+    this.buildTools();
+    this.canvas.dataset.tool = t;
+  }
+
+  // ---------- side panel ----------
+  private buildSide(): void {
+    const f = this.file;
+    const s = this.side;
+    clear(s);
+    if (!f) return;
+    const cols = this.colors();
+    const row = this.row();
+    const all = cgramToRGBA(this.app.render.cgram);
+    const css = (v: number) => `rgb(${v & 255},${(v >> 8) & 255},${(v >> 16) & 255})`;
+    const rowSel = h('div', { class: 'gt-rows' }, Array.from({ length: 16 }, (_, r) => h('button', {
+      class: `gt-row${r === row ? ' active' : ''}`, title: `Palettenzeile ${hex(r, 1)}`,
+      onclick: () => { this.palRow = r; this.draw(); this.buildSide(); },
+    }, h('span', { class: 'mono' }, hex(r, 1)), h('span', { class: 'gt-row-strip' }, Array.from({ length: 15 }, (_, k) => h('i', { style: { background: css(all[r * 16 + 1 + k]) } }))))));
+    const sw = h('div', { class: 'gt-colors' }, Array.from(cols, (v, k) => h('div', {
+      class: `gt-color${k === this.color ? ' sel' : ''}${k === 0 ? ' transp' : ''}`, title: k === 0 ? 'Farbe 0: transparent' : `Farbe ${k}`,
+      style: k ? { background: css(v) } : {},
+      onclick: () => { this.color = k; this.buildSide(); },
+    }, String(k))));
+    const used = this.levelSlots().filter((x) => x.file === f.num).map((x) => x.name);
+    s.append(
+      h('div', { class: 'prop-title' }, gfxName(f.num), f.empty ? h('span', { class: 'hint' }, ' (leer)') : ''),
+      h('div', { class: 'hint' }, f.empty ? 'Diese Nummer ist nicht belegt.' : `${f.bpp}bpp · ${f.tiles} Tiles · ${f.raw ? 'unkomprimiert' : `LZ2 (${f.packed} Bytes)`} · $${hex(f.addr, 6)}`),
+      used.length ? h('div', { class: 'hint' }, `Im Level als ${used.join(', ')}`) : h('div', { class: 'hint' }, 'Vom aktuellen Level nicht benutzt'),
+      f.raw || f.empty ? '' : h('div', { class: 'prop' }, h('label', null, 'Format'),
+        h('span', { class: 'btn-group' }, [2, 3, 4].map((b) => h('button', { class: f.bpp === b ? 'active' : '', title: 'Nur ändern, wenn die Grafik falsch aussieht', onclick: () => { this.bppOverride = b; this.reload(); } }, `${b}bpp`)))),
+      h('div', { class: 'panel-title' }, 'Farbe', h('span', { class: 'hint' }, 'Rechtsklick malt transparent')),
+      sw,
+      h('div', { class: 'panel-title' }, 'Palettenzeile', h('span', { class: 'hint' }, this.palRow < 0 ? 'automatisch' : h('a', { href: '#', onclick: (e: Event) => { e.preventDefault(); this.palRow = -1; this.draw(); this.buildSide(); } }, 'automatisch'))),
+      rowSel,
+      this.usageUi(),
+    );
+  }
+
+  // Map16 tiles that use the focused 8x8 tile (when the file is in one of the level's layer slots)
+  private usageUi(): HTMLElement | string {
+    const t = this.focusTile;
+    if (t < 0 || !this.file || t >= this.file.tiles) return h('p', { class: 'hint' }, 'Klick mit der Pipette (oder Alt+Klick) zeigt auch, welche Map16-Tiles das 8x8-Tile benutzen.');
+    const slot = this.levelSlots().find((s) => s.file === this.cur && !s.sprite);
+    const box = h('div', { class: 'gt-usage' }, h('div', { class: 'panel-title' }, `8x8-Tile ${hex(t, 2)} der Datei`));
+    if (!slot) { box.append(h('div', { class: 'hint' }, 'Die Datei liegt in keinem Layer-Slot dieses Levels.')); return box; }
+    const num = slot.first + t;
+    const src = map16Source(this.app.rom, this.app.render);
+    const users: number[] = [];
+    const max = map16Ext(this.app.rom) ? EXT_TILES : EXT_FIRST;
+    for (let m = 0; m < max && users.length < 64; m++) if (src.fg(m).some((w) => (w & 0x3ff) === num)) users.push(m);
+    box.append(h('div', { class: 'hint' }, `= VRAM-Tile ${hex(num, 3)} (${slot.name})`),
+      users.length ? h('div', { class: 'gt-users' }, users.map((m) => h('a', { href: '#', class: 'mono', title: 'Im Map16-Tab öffnen', onclick: (e: Event) => { e.preventDefault(); this.ws.showMap16(m); } }, hex(m, 3))))
+        : h('div', { class: 'hint' }, 'Kein Map16-Tile benutzt es.'));
+    return box;
+  }
+
+  // ---------- drawing ----------
+  private W(): number { return 128; }
+  private H(): number { return Math.ceil((this.file?.tiles ?? 128) / 16) * 8; }
+  private idx(x: number, y: number): number { return ((y >> 3) * 16 + (x >> 3)) * 64 + (y & 7) * 8 + (x & 7); }
+  private get(x: number, y: number): number {
+    const f = this.file!;
+    if (this.float && x >= this.float.x && y >= this.float.y && x < this.float.x + this.float.w && y < this.float.y + this.float.h) {
+      const v = this.float.pix[(y - this.float.y) * this.float.w + x - this.float.x];
+      if (v !== 255) return v;
+    }
+    const i = this.idx(x, y);
+    return i < f.pix.length ? f.pix[i] : 0;
+  }
+  private set(x: number, y: number, v: number): void {
+    if (x < 0 || y < 0 || x >= this.W() || y >= this.H()) return;
+    const i = this.idx(x, y);
+    if (i < this.file!.pix.length) this.file!.pix[i] = v;
+  }
+
+  draw(): void {
+    const f = this.file;
+    if (!f) return;
+    const W = this.W(), H = this.H(), z = this.zoom;
+    const c = this.canvas;
+    if (c.width !== W * z || c.height !== H * z) { c.width = W * z; c.height = H * z; }
+    const ctx = c.getContext('2d')!;
+    const off = document.createElement('canvas');
+    off.width = W; off.height = H;
+    const octx = off.getContext('2d')!;
+    const img = octx.createImageData(W, H);
+    const px = new Uint32Array(img.data.buffer);
+    const cols = this.colors();
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const v = this.get(x, y);
+      px[y * W + x] = v ? cols[v] ?? 0xffff00ff : ((x >> 2) + (y >> 2)) & 1 ? 0xff2b2e35 : 0xff23262c;
+    }
+    octx.putImageData(img, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(off, 0, 0, W * z, H * z);
+    if (this.grid) {
+      ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let x = this.grid; x < W; x += this.grid) { ctx.moveTo(x * z + 0.5, 0); ctx.lineTo(x * z + 0.5, H * z); }
+      for (let y = this.grid; y < H; y += this.grid) { ctx.moveTo(0, y * z + 0.5); ctx.lineTo(W * z, y * z + 0.5); }
+      ctx.stroke();
+    }
+    if (this.focusTile >= 0 && this.focusTile < f.tiles) {
+      ctx.strokeStyle = '#ffb000';
+      ctx.lineWidth = 2;
+      ctx.strokeRect((this.focusTile & 15) * 8 * z + 1, (this.focusTile >> 4) * 8 * z + 1, 8 * z - 2, 8 * z - 2);
+    }
+    const r = this.float ?? this.sel;
+    if (r) {
+      ctx.setLineDash([4, 3]);
+      ctx.strokeStyle = '#4cc2ff';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(r.x * z + 1, r.y * z + 1, r.w * z - 2, r.h * z - 2);
+      ctx.setLineDash([]);
+    }
+  }
+
+  private commit(label: string): void {
+    const f = this.file;
+    if (!f || f.empty) return;
+    try {
+      this.app.romEdit(`${gfxName(f.num)}: ${label}`, () => storeGfx(this.app.rom, f));
+    } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); this.reload(); }
+  }
+
+  private fill(x: number, y: number, v: number): void {
+    const from = this.get(x, y);
+    if (from === v) return;
+    const W = this.W(), H = this.H();
+    const st = [[x, y]];
+    while (st.length) {
+      const [cx, cy] = st.pop()!;
+      if (cx < 0 || cy < 0 || cx >= W || cy >= H || this.get(cx, cy) !== from) continue;
+      this.set(cx, cy, v);
+      st.push([cx + 1, cy], [cx - 1, cy], [cx, cy + 1], [cx, cy - 1]);
+    }
+  }
+
+  private line(x0: number, y0: number, x1: number, y1: number, v: number): void {
+    const dx = Math.abs(x1 - x0), dy = Math.abs(y1 - y0), n = Math.max(dx, dy, 1);
+    for (let i = 0; i <= n; i++) this.set(Math.round(x0 + ((x1 - x0) * i) / n), Math.round(y0 + ((y1 - y0) * i) / n), v);
+  }
+
+  private attachCanvas(): void {
+    const c = this.canvas;
+    c.addEventListener('contextmenu', (e) => e.preventDefault());
+    const pos = (e: MouseEvent) => {
+      const rc = c.getBoundingClientRect();
+      return { x: Math.floor(((e.clientX - rc.left) / rc.width) * this.W()), y: Math.floor(((e.clientY - rc.top) / rc.height) * this.H()) };
+    };
+    c.addEventListener('mousedown', (e) => {
+      const f = this.file;
+      if (!f || (e.button !== 0 && e.button !== 2)) return;
+      e.preventDefault();
+      const p = pos(e);
+      const tool: Tool = e.altKey ? 'pick' : this.tool;
+      if (tool === 'pick') {
+        this.color = this.get(p.x, p.y);
+        this.focusTile = (p.y >> 3) * 16 + (p.x >> 3);
+        this.draw(); this.buildSide();
+        return;
+      }
+      if (f.empty) { toast('Diese Nummer ist leer – „+ Neue ExGFX“ legt eine Datei an'); return; }
+      const v = e.button === 2 ? 0 : this.color;
+      if (tool === 'fill') { this.fill(p.x, p.y, v); this.draw(); this.commit('Füllen'); return; }
+      let last = p;
+      let move: (ev: MouseEvent) => void;
+      let label = 'Zeichnen';
+      if (tool === 'pen') {
+        this.stroke = true;
+        this.set(p.x, p.y, v);
+        move = (ev) => { const n = pos(ev); this.line(last.x, last.y, n.x, n.y, v); last = n; this.draw(); };
+      } else {
+        // selection: drag inside moves (lifting the pixels), outside starts a new rectangle
+        const r = this.float ?? this.sel;
+        if (r && p.x >= r.x && p.y >= r.y && p.x < r.x + r.w && p.y < r.y + r.h) {
+          if (!this.float) this.lift();
+          this.stroke = true;
+          label = 'Verschieben';
+          move = (ev) => {
+            const n = pos(ev);
+            this.float!.x += n.x - last.x; this.float!.y += n.y - last.y;
+            last = n; this.draw();
+          };
+        } else {
+          this.dropFloat();
+          this.sel = { x: p.x, y: p.y, w: 1, h: 1 };
+          move = (ev) => {
+            const n = pos(ev);
+            const x0 = Math.max(0, Math.min(p.x, n.x)), y0 = Math.max(0, Math.min(p.y, n.y));
+            const x1 = Math.min(this.W() - 1, Math.max(p.x, n.x)), y1 = Math.min(this.H() - 1, Math.max(p.y, n.y));
+            this.sel = { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
+            this.draw();
+          };
+          label = '';
+        }
+      }
+      this.draw();
+      const up = () => {
+        window.removeEventListener('mousemove', move);
+        window.removeEventListener('mouseup', up);
+        if (this.stroke) {
+          this.stroke = false;
+          if (label === 'Zeichnen') this.commit(label);
+        }
+      };
+      window.addEventListener('mousemove', move);
+      window.addEventListener('mouseup', up);
+    });
+    c.addEventListener('mousemove', (e) => {
+      const p = pos(e);
+      const t = (p.y >> 3) * 16 + (p.x >> 3);
+      c.title = `Tile ${hex(t, 2)} · Pixel ${p.x & 7},${p.y & 7} · Farbe ${this.file ? this.get(Math.max(0, p.x), Math.max(0, p.y)) : ''}`;
+    });
+  }
+
+  // lifts the selected pixels into a floating block (the place becomes transparent)
+  private lift(): void {
+    const s = this.sel;
+    if (!s) return;
+    const pix = new Uint8Array(s.w * s.h);
+    for (let y = 0; y < s.h; y++) for (let x = 0; x < s.w; x++) { pix[y * s.w + x] = this.get(s.x + x, s.y + y); this.set(s.x + x, s.y + y, 0); }
+    this.float = { ...s, pix };
+  }
+
+  // puts a floating block down and stores the file
+  private dropFloat(): void {
+    const fl = this.float;
+    if (!fl) return;
+    this.float = null;
+    for (let y = 0; y < fl.h; y++) for (let x = 0; x < fl.w; x++) {
+      const v = fl.pix[y * fl.w + x];
+      if (v !== 255) this.set(fl.x + x, fl.y + y, v);
+    }
+    this.sel = { x: Math.max(0, fl.x), y: Math.max(0, fl.y), w: fl.w, h: fl.h };
+    this.commit('Auswahl verschoben');
+    this.draw();
+  }
+
+  private copySel(): void {
+    const r = this.float ?? this.sel;
+    if (!r) { toast('Erst mit dem Auswahl-Werkzeug (M) einen Bereich wählen'); return; }
+    const pix = new Uint8Array(r.w * r.h);
+    for (let y = 0; y < r.h; y++) for (let x = 0; x < r.w; x++) pix[y * r.w + x] = this.get(r.x + x, r.y + y);
+    this.clip = { w: r.w, h: r.h, pix };
+    toast(`${r.w}×${r.h} Pixel kopiert`);
+  }
+  private pasteSel(): void {
+    const c = this.clip;
+    if (!c) { toast('Erst etwas kopieren'); return; }
+    this.dropFloat();
+    const at = this.sel ?? { x: 0, y: 0 };
+    this.float = { x: at.x, y: at.y, w: c.w, h: c.h, pix: c.pix.slice() };
+    this.tool = 'select';
+    this.buildTools();
+    this.draw();
+  }
+
+  private transform(kind: 'h' | 'v' | 'r'): void {
+    if (!this.float) { if (!this.sel) { toast('Erst einen Bereich wählen (M)'); return; } this.lift(); }
+    const fl = this.float!;
+    if (kind === 'r' && fl.w !== fl.h) { toast('Drehen geht nur bei quadratischer Auswahl'); return; }
+    const out = new Uint8Array(fl.pix.length);
+    for (let y = 0; y < fl.h; y++) for (let x = 0; x < fl.w; x++) {
+      const v = fl.pix[y * fl.w + x];
+      if (kind === 'h') out[y * fl.w + (fl.w - 1 - x)] = v;
+      else if (kind === 'v') out[(fl.h - 1 - y) * fl.w + x] = v;
+      else out[x * fl.w + (fl.w - 1 - y)] = v;
+    }
+    fl.pix = out;
+    this.dropFloat();
+  }
+
+  // ---------- files ----------
+  private exportPng(): void {
+    const f = this.file;
+    if (!f || f.empty) return;
+    const W = 128, H = this.H();
+    const c = document.createElement('canvas');
+    c.width = W; c.height = H;
+    const ctx = c.getContext('2d')!;
+    const img = ctx.createImageData(W, H);
+    const px = new Uint32Array(img.data.buffer);
+    const cols = this.colors();
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const v = this.get(x, y); px[y * W + x] = v ? cols[v] : 0; }
+    ctx.putImageData(img, 0, 0);
+    c.toBlob(async (b) => { if (b) downloadBytes(`${gfxName(f.num)}.png`, new Uint8Array(await b.arrayBuffer()), 'image/png'); }, 'image/png');
+  }
+
+  private async importPng(): Promise<void> {
+    const f = this.file;
+    if (!f) return;
+    const file = await pickFile('.png,image/png');
+    if (!file) return;
+    const bmp = await createImageBitmap(file);
+    if (bmp.width !== 128) { toast('Das Bild muss 128 Pixel breit sein (16 Tiles)', 'error'); return; }
+    let raw = f.raw;
+    if (f.empty) {
+      const c = await choose(`${gfxName(f.num)} anlegen`, 'In welchem Format speichern?', [{ label: 'Abbrechen' }, { label: 'LZ2 (wie Original, 3bpp/8 Farben)' }, { label: '4bpp unkomprimiert (16 Farben)', primary: true }]);
+      if (!c) return;
+      raw = c === 2;
+    } else if ((await choose(`${gfxName(f.num)} überschreiben?`, `Das Bild ersetzt den Inhalt von ${gfxName(f.num)}. Farben werden auf Palettenzeile ${hex(this.row(), 1)} abgebildet. (Rückgängig mit Strg+Z.)`, [{ label: 'Abbrechen' }, { label: 'Überschreiben', primary: true }])) !== 1) return;
+    const bpp = raw ? 4 : f.empty ? 3 : f.bpp;
+    const c = document.createElement('canvas');
+    c.width = bmp.width; c.height = bmp.height;
+    const ctx = c.getContext('2d')!;
+    ctx.drawImage(bmp, 0, 0);
+    const px = new Uint32Array(ctx.getImageData(0, 0, c.width, c.height).data.buffer);
+    const all = cgramToRGBA(this.app.render.cgram);
+    const row = this.row();
+    const pal = Array.from({ length: 1 << bpp }, (_, k) => all[(row * 16 + k) & 0xff]);
+    const nearest = (v: number) => {
+      if (((v >>> 24) & 255) < 128) return 0;
+      let best = 1, bd = 1e9;
+      for (let k = 1; k < pal.length; k++) {
+        const p = pal[k];
+        const dr = (p & 255) - (v & 255), dg = ((p >> 8) & 255) - ((v >> 8) & 255), db = ((p >> 16) & 255) - ((v >> 16) & 255);
+        const d = dr * dr + dg * dg + db * db;
+        if (d < bd) { bd = d; best = k; }
+      }
+      return best;
+    };
+    const tiles = raw ? 128 : Math.floor(bmp.height / 8) * 16;
+    const pix = new Uint8Array(tiles * 64);
+    for (let t = 0; t < tiles; t++) {
+      const bx = (t & 15) * 8, by = (t >> 4) * 8;
+      for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) pix[t * 64 + y * 8 + x] = by + y < bmp.height ? nearest(px[(by + y) * 128 + bx + x]) : 0;
+    }
+    const nf: GfxFile = { ...f, raw, bpp, tiles, pix, empty: false };
+    try {
+      this.app.romEdit(`${file.name} → ${gfxName(f.num)}`, () => {
+        const enc = encodeGfx(nf);
+        const payload = raw ? enc : lz2Compress(enc);
+        if (!f.empty) this.app.rom.freeAt(f.addr);
+        setGfxEntry(this.app.rom, f.num, this.app.rom.allocWrite(payload), raw);
+      });
+      this.bppOverride = f.empty || raw ? null : bpp;
+      this.reload();
+      toast(`${file.name} importiert`);
+    } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
+  }
+
+  private async importBin(): Promise<void> {
+    const file = await pickFile('.bin');
+    if (!file) return;
+    let target = this.cur;
+    const n = exgfxName(file.name).num;
+    if (n !== null && n !== this.cur && n <= 0xff) {
+      const c = await choose('Ziel wählen', `Der Dateiname nennt ${gfxName(n)}. Wohin soll die Grafik?`, [{ label: 'Abbrechen' }, { label: `In ${gfxName(this.cur)} (aktuelle Datei)` }, { label: `In ${gfxName(n)}`, primary: true }]);
+      if (!c) return;
+      if (c === 2) target = n;
+    } else if (gfxEntry(this.app.rom, target) && (await choose(`${gfxName(target)} überschreiben?`, `${file.name} ersetzt den Inhalt von ${gfxName(target)} (Rückgängig mit Strg+Z).`, [{ label: 'Abbrechen' }, { label: 'Überschreiben', primary: true }])) !== 1) return;
+    try {
+      const data = new Uint8Array(await file.arrayBuffer());
+      const what = this.app.romEdit(`${file.name} → ${gfxName(target)}`, () => importGfxFile(this.app.rom, target, data));
+      this.select(target);
+      toast(`${file.name} → ${gfxName(target)} (${what})`);
+    } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
+  }
+
+  key(e: KeyboardEvent): boolean {
+    const ctrl = e.ctrlKey || e.metaKey;
+    const k = e.key.toLowerCase();
+    if (ctrl && k === 'c') { this.copySel(); return true; }
+    if (ctrl && k === 'v') { this.pasteSel(); return true; }
+    if (ctrl || e.altKey) return false;
+    if (k === 'b') { this.setTool('pen'); return true; }
+    if (k === 'f') { this.setTool('fill'); return true; }
+    if (k === 'i') { this.setTool('pick'); return true; }
+    if (k === 's') { this.setTool('select'); return true; }
+    if (e.key === 'Escape' && (this.float || this.sel)) { this.dropFloat(); this.sel = null; this.draw(); return true; }
+    if (e.key === 'Enter' && this.float) { this.dropFloat(); return true; }
+    if (/^[0-9]$/.test(k) && this.file && Number(k) < (1 << this.file.bpp)) { this.color = Number(k); this.buildSide(); return true; }
+    return false;
+  }
 }
