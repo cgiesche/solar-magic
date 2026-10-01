@@ -421,6 +421,36 @@ export class App {
     setTimeout(step, 0);
   }
 
+  // 8x8 tiles (layer 1 tile numbers) and colors the game keeps rewriting in this level (tile and
+  // palette animation), found by emulating some frames; null until known ('animated' when done)
+  private animInfo: { render: LevelRender | null; level: number; res: { tiles: Set<number>; colors: Set<number> } | null; timer: number } = { render: null, level: -1, res: null, timer: 0 };
+  animated(): { tiles: Set<number>; colors: Set<number> } | null {
+    const a = this.animInfo;
+    if (a.render === this.render) return a.res;
+    if (!a.timer) a.timer = window.setTimeout(() => {
+      a.timer = 0;
+      const render = this.render;
+      try {
+        const r = this.emu.load(this.level.number, this.buildOverrides());
+        const frames = this.emu.animationFrames(16, 4);
+        const base = (r.ppuRegs[0x0b] & 0x0f) << 13;
+        const tiles = new Set<number>(), colors = new Set<number>();
+        for (const f of frames) {
+          for (let t = 0; t < 0x400; t++) {
+            const o = (base + t * 32) & 0xffff;
+            for (let b = 0; b < 32; b++) if (f.vram[o + b] !== r.vram[o + b]) { tiles.add(t); break; }
+          }
+          for (let c = 0; c < 256; c++) if (f.cgram[c * 2] !== r.cgram[c * 2] || f.cgram[c * 2 + 1] !== r.cgram[c * 2 + 1]) colors.add(c);
+        }
+        a.res = { tiles, colors };
+      } catch (e) { console.error(e); a.res = { tiles: new Set(), colors: new Set() }; }
+      a.render = render;
+      a.level = this.level.number;
+      this.emit('animated');
+    }, 50);
+    return a.level === this.level.number ? a.res : null; // same level: the previous result until known
+  }
+
   palettesChanged(): void {
     this.spriteKey = '';
     this.ensureSpriteImages();

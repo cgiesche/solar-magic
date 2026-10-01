@@ -137,6 +137,7 @@ export class GfxTab implements WsPanel {
     app.on('rom-change', () => { if (this.visible && !this.stroke && !this.ownEdit) this.reload(); });
     app.on('render', () => { this.autoRows = null; if (this.visible) { this.buildCards(); this.draw(); this.buildSide(); } });
     app.on('level', () => (this.palRow = -1));
+    app.on('animated', () => { if (this.visible) this.present(); });
   }
 
   previewHint(): string {
@@ -550,6 +551,16 @@ export class GfxTab implements WsPanel {
     }
     if (this.grid === 8) lines(8, 'rgba(0,0,0,0.7)', 'rgba(255,255,255,0.55)');
     if (this.grid) lines(16, 'rgba(0,0,0,0.85)', 'rgba(76,194,255,0.9)');
+    // tiles the game animates in this level: magenta corner
+    const anim = this.animatedTiles();
+    if (anim.size) {
+      ctx.fillStyle = '#ff4fd8';
+      const m = Math.max(5, z * 2);
+      for (const t of anim) {
+        const x = ((t & 15) + 1) * 8 * z, y = (t >> 4) * 8 * z;
+        ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y + m); ctx.lineTo(x - m, y); ctx.fill();
+      }
+    }
     if (this.focusTile >= 0 && this.focusTile < f.tiles) {
       ctx.strokeStyle = '#ffb000';
       ctx.lineWidth = 3;
@@ -589,6 +600,27 @@ export class GfxTab implements WsPanel {
   private syncZoomUi(): void {
     if (this.zoomSlider) this.zoomSlider.value = String(this.zoom);
     if (this.zoomLabel) this.zoomLabel.textContent = `${this.zoom}×`;
+  }
+
+  // tiles of this file the game overwrites with animation frames (when it is in a layer slot)
+  private animatedTiles(): Set<number> {
+    const out = new Set<number>();
+    const anim = this.app.animated();
+    if (!anim) return out;
+    for (const s of this.levelSlots()) {
+      if (s.file !== this.cur || s.sprite) continue;
+      for (let k = 0; k < 128; k++) if (anim.tiles.has(s.first + k)) out.add(k);
+    }
+    return out;
+  }
+  private warned = new Set<string>(); // file:tile already warned about
+
+  private warnAnimated(x: number, y: number): void {
+    const t = (y >> 3) * 16 + (x >> 3);
+    const key = `${this.cur}:${t}`;
+    if (this.warned.has(key) || !this.animatedTiles().has(t)) return;
+    this.warned.add(key);
+    toast(`Tile ${hex(t, 2)} wird im Spiel animiert: das Spiel überschreibt es laufend mit Animationsbildern, die Änderung sieht man dort nicht.`, 'error');
   }
 
   private commit(label: string): void {
@@ -640,6 +672,7 @@ export class GfxTab implements WsPanel {
       }
       if (f.empty) { toast('Diese Nummer ist leer – „+ Neue ExGFX“ legt eine Datei an'); return; }
       const v = e.button === 2 ? 0 : this.color;
+      if (tool === 'pen' || tool === 'fill') this.warnAnimated(p.x, p.y);
       if (tool === 'fill') { this.fill(p.x, p.y, v); this.draw(); this.commit('Füllen'); return; }
       let last = p;
       let move: (ev: MouseEvent) => void;
@@ -694,7 +727,7 @@ export class GfxTab implements WsPanel {
       const t = (p.y >> 3) * 16 + (p.x >> 3);
       if (p.y * 128 + p.x === lastHover) return;
       lastHover = p.y * 128 + p.x;
-      c.title = `Tile ${hex(t, 2)} · Pixel ${p.x & 7},${p.y & 7} · Farbe ${this.file ? this.get(Math.max(0, p.x), Math.max(0, p.y)) : ''}`;
+      c.title = `Tile ${hex(t, 2)}${this.animatedTiles().has(t) ? ' (animiert)' : ''} · Pixel ${p.x & 7},${p.y & 7} · Farbe ${this.file ? this.get(Math.max(0, p.x), Math.max(0, p.y)) : ''}`;
     });
   }
 

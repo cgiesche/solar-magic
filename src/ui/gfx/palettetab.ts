@@ -98,6 +98,7 @@ export class PaletteTab implements WsPanel {
       this.paint();
     });
     app.on('level', () => { this.trace = null; this.headers = null; });
+    app.on('animated', () => { if (this.visible) this.paint(); });
     app.on('level-header', () => { this.headers = null; if (this.visible) this.buildHeader(); });
     this.buildRows();
   }
@@ -297,8 +298,10 @@ export class PaletteTab implements WsPanel {
       sw.style.background = cssOf(this.color(i));
       sw.classList.toggle('sel', i === this.sel);
       sw.classList.toggle('range', i >= lo && i <= hi && lo !== hi);
+      const animated = !!this.app.animated()?.colors.has(i);
       sw.classList.toggle('locked', locked);
-      sw.title = `Farbe ${hex(i >> 4, 1)}·${hex(i & 15, 1)} – ${locked ? 'vom Spiel gesetzt, nicht bearbeitbar (nur mit eigener Palette)' : originName(this.origin(i))}`;
+      sw.classList.toggle('animated', animated);
+      sw.title = `Farbe ${hex(i >> 4, 1)}·${hex(i & 15, 1)} – ${locked ? 'vom Spiel gesetzt, nicht bearbeitbar (nur mit eigener Palette)' : originName(this.origin(i))}${animated ? ' · animiert: das Spiel schreibt sie laufend neu' : ''}`;
     }
     for (let row = 0; row < 16; row++) {
       const names: string[] = [];
@@ -327,6 +330,7 @@ export class PaletteTab implements WsPanel {
       h('div', { class: 'pt-big', style: { background: cssOf(c) } }),
       h('div', { class: 'prop-title' }, `Farbe ${hex(i >> 4, 1)}·${hex(i & 15, 1)}`, h('span', { class: 'hint' }, `  Zeile ${hex(i >> 4, 1)}, Index ${i & 15}`)),
       h('div', { class: 'hint' }, editable ? `${originName(o)} · ${o.kind === 'own' ? 'gilt nur für dieses Level' : others ? `auch in ${others} anderen Level${others === 1 ? '' : 's'}` : 'nur dieses Level'}` : ''),
+      this.app.animated()?.colors.has(i) ? h('div', { class: 'warn-box' }, 'Animiert: das Spiel schreibt diese Farbe laufend neu (Blinken von Münzen, ?-Blöcken o. ä.). Eine Änderung hier sieht man im Spiel kaum oder gar nicht.') : '',
     );
     if (!editable) {
       d.append(

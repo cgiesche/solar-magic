@@ -270,3 +270,5 @@ body.mt-dragging .mt-big { outline: 2px dashed var(--accent); }
 .gt-gal-none { width: 128px; height: 32px; display: flex; align-items: center; justify-content: center; color: var(--muted); background: #111; }
 .gt-zoom { width: 140px; }
 .gt-zoom-label { min-width: 2.6em; }
+.warn-box { padding: 6px 8px; border-radius: 4px; background: #3a2036; border: 1px solid #a0408f; font-size: 12px; }
+.pt-sw.animated::before { content: ''; position: absolute; right: -1px; top: -1px; border-style: solid; border-width: 0 8px 8px 0; border-color: transparent #ff4fd8 transparent transparent; z-index: 2; }

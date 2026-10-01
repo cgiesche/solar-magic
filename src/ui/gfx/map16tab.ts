@@ -76,6 +76,7 @@ export class Map16Tab implements WsPanel {
     app.on('rom-change', redraw);
     app.on('render', redraw);
     app.on('blockinfo', () => { if (this.visible) this.buildBuilder(); });
+    app.on('animated', redraw);
   }
 
   previewHint(): string {
@@ -293,6 +294,13 @@ export class Map16Tab implements WsPanel {
     ctx.strokeStyle = 'rgba(255,255,255,0.25)';
     ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(8 * BZ + 0.5, 0); ctx.lineTo(8 * BZ + 0.5, 16 * BZ); ctx.moveTo(0, 8 * BZ + 0.5); ctx.lineTo(16 * BZ, 8 * BZ + 0.5); ctx.stroke();
+    const anim = this.bg ? null : app.animated();
+    for (let q = 0; q < 4; q++) {
+      if (!anim?.tiles.has(ws[q] & 0x3ff)) continue;
+      const x = (q >> 1) * 8 * BZ, y = (q & 1) * 8 * BZ;
+      ctx.fillStyle = '#ff4fd8';
+      ctx.beginPath(); ctx.moveTo(x + 8 * BZ, y); ctx.lineTo(x + 8 * BZ, y + 16); ctx.lineTo(x + 8 * BZ - 16, y); ctx.fill();
+    }
     ctx.strokeStyle = '#ffb000';
     ctx.lineWidth = 3;
     ctx.strokeRect((this.quad >> 1) * 8 * BZ + 1.5, (this.quad & 1) * 8 * BZ + 1.5, 8 * BZ - 3, 8 * BZ - 3);
@@ -342,6 +350,8 @@ export class Map16Tab implements WsPanel {
       h('div', { class: 'hint' }, this.rangeText(t), !this.bg ? ` · im Level ${used}×` : ''),
       cv,
       h('div', { class: 'hint' }, `Viertel ${quarterNames[this.quad]}: 8x8-Tile ${hex(num8, 3)}${slot ? ` aus ${slot.name} (${gfxName(slot.file)})` : ''}`),
+      !this.bg && ws.some((w) => app.animated()?.tiles.has(w & 0x3ff)) ? h('div', { class: 'warn-box' },
+        `Animiert: das Spiel überschreibt ${ws.filter((w) => app.animated()?.tiles.has(w & 0x3ff)).length === 4 ? 'alle Viertel' : 'markierte Viertel'} laufend mit Animationsbildern (z. B. ?-Block, Münze, Wasser). Gezeichnete Änderungen an diesen 8x8-Tiles sieht man im Spiel nicht.`) : '',
       h('div', { class: 'mt-pals' }, Array.from({ length: 8 }, (_, p) => palDot(p))),
       h('div', { class: 'row' },
         toggle('↔ Spiegeln', FLIP_X, 'Horizontal spiegeln (X)'),
@@ -455,6 +465,18 @@ export class Map16Tab implements WsPanel {
       ctx.strokeStyle = '#ffb000'; ctx.lineWidth = 2;
       ctx.strokeRect((k & 15) * 8 * GZ + 1, (si * 64 + (k >> 4) * 8) * GZ + 1, 8 * GZ - 2, 8 * GZ - 2);
     }
+    // tiles the game animates: hatched corner
+    const anim = app.animated();
+    if (anim?.tiles.size) {
+      ctx.fillStyle = '#ff4fd8';
+      slots.forEach((s, si) => {
+        for (let k = 0; k < 128; k++) {
+          if (!anim.tiles.has(s.first + k)) continue;
+          const x = (k & 15) * 8 * GZ, y = (si * 64 + (k >> 4) * 8) * GZ;
+          ctx.beginPath(); ctx.moveTo(x + 8 * GZ, y); ctx.lineTo(x + 8 * GZ, y + 6); ctx.lineTo(x + 8 * GZ - 6, y); ctx.fill();
+        }
+      });
+    }
     if (this.drag) {
       const d = this.drag;
       ctx.strokeStyle = '#4cc2ff'; ctx.lineWidth = 2;
@@ -536,7 +558,7 @@ export class Map16Tab implements WsPanel {
     c.addEventListener('mousemove', (e) => {
       if (this.drag) return;
       const n = tileOf(cell(e));
-      c.title = n >= 0 ? `8x8-Tile ${hex(n, 3)}` : '';
+      c.title = n >= 0 ? `8x8-Tile ${hex(n, 3)}${this.app.animated()?.tiles.has(n) ? ' – animiert (das Spiel überschreibt es laufend)' : ''}` : '';
     });
   }
 
