@@ -115,7 +115,8 @@ function buildUi(app: App): void {
     h('span', { title: 'Inhalt von Blöcken (per Emulation ermittelt) halbtransparent über den Blöcken, Pfeile an betretbaren Blöcken (Pipes, Türen)' }, toggle('items', 'Items')),
     (() => {
       const cb = h('input', { type: 'checkbox', checked: app.show.anim });
-      cb.addEventListener('change', () => { app.show.anim = cb.checked; app.refresh(); });
+      cb.addEventListener('change', () => { app.show.anim = cb.checked; app.refresh(); app.emit('show-anim'); });
+      app.on('show-anim', () => (cb.checked = app.show.anim));
       return h('label', { class: 'toggle', title: 'Animierte Tiles und Paletten abspielen' }, cb, 'Anim.');
     })(),
     switchToggle('palaces', '!-Blöcke', 'Ansicht: alle Switch-Paläste gedrückt'),

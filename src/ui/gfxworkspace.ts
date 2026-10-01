@@ -7,8 +7,9 @@ import { hex } from '../core/names.ts';
 import { PaletteTab } from './gfx/palettetab.ts';
 import { Map16Tab } from './gfx/map16tab.ts';
 import { GfxTab } from './gfx/gfxtab.ts';
+import { AnimTab } from './gfx/animtab.ts';
 
-export type WsTab = 'pal' | 'map16' | 'gfx';
+export type WsTab = 'pal' | 'map16' | 'gfx' | 'anim';
 
 export interface WsPanel {
   root: HTMLElement;
@@ -43,8 +44,13 @@ export class LevelPreview {
       for (const b of (e.currentTarget as HTMLElement).parentElement!.children) b.classList.toggle('active', b === e.currentTarget);
       this.layout();
     } }, `${z}×`);
+    const anim = h('input', { type: 'checkbox', checked: app.show.anim });
+    anim.addEventListener('change', () => { app.show.anim = anim.checked; app.refresh(); app.emit('show-anim'); });
+    app.on('show-anim', () => (anim.checked = app.show.anim));
     this.root = h('div', { class: 'ws-prev' },
-      h('div', { class: 'panel-title' }, 'Level-Vorschau', h('span', { class: 'btn-group' }, zoomBtn(1), zoomBtn(2))),
+      h('div', { class: 'panel-title' }, 'Level-Vorschau',
+        h('label', { class: 'toggle', title: 'Animationen abspielen (wie im Spiel, auch eigene)' }, anim, 'Animation'),
+        h('span', { class: 'btn-group' }, zoomBtn(1), zoomBtn(2))),
       this.scroller, this.info);
     this.scroller.addEventListener('mousemove', (e) => {
       const p = this.pos(e);
@@ -144,6 +150,7 @@ export class GfxWorkspace {
   pal: PaletteTab;
   map16: Map16Tab;
   gfx: GfxTab;
+  anim: AnimTab;
   private body = h('div', { class: 'ws-body' });
   private tabBar: HTMLElement;
   active = false;
@@ -155,9 +162,10 @@ export class GfxWorkspace {
     this.pal = new PaletteTab(app, this);
     this.map16 = new Map16Tab(app, this);
     this.gfx = new GfxTab(app, this);
+    this.anim = new AnimTab(app, this);
     const tabBtn = (t: WsTab, label: string, key: string) => h('button', { 'data-tab': t, title: `${label} (${key})`, onclick: () => this.open(t) }, label);
     this.tabBar = h('div', { class: 'ws-tabs' },
-      tabBtn('pal', 'Paletten', 'P'), tabBtn('map16', 'Map16-Tiles', 'M'), tabBtn('gfx', 'Grafiken', 'G'),
+      tabBtn('pal', 'Paletten', 'P'), tabBtn('map16', 'Map16-Tiles', 'M'), tabBtn('gfx', 'Grafiken', 'G'), tabBtn('anim', 'Animationen', 'A'),
       h('span', { class: 'spacer' }),
       h('span', { class: 'hint' }, 'Änderungen wirken sofort · Strg+Z / Strg+Y'));
     this.root = h('div', { class: 'ws' }, this.tabBar, this.body);
@@ -166,7 +174,7 @@ export class GfxWorkspace {
   }
 
   panel(t = this.tab): WsPanel {
-    return t === 'pal' ? this.pal : t === 'map16' ? this.map16 : this.gfx;
+    return t === 'pal' ? this.pal : t === 'map16' ? this.map16 : t === 'gfx' ? this.gfx : this.anim;
   }
 
   open(t: WsTab): void {
@@ -216,6 +224,7 @@ export class GfxWorkspace {
       if (k === 'p') { this.open('pal'); return true; }
       if (k === 'm') { this.open('map16'); return true; }
       if (k === 'g') { this.open('gfx'); return true; }
+      if (k === 'a') { this.open('anim'); return true; }
     }
     return false;
   }
