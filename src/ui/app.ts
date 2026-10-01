@@ -66,6 +66,7 @@ export class App {
   redoOrder: ('level' | 'rom')[] = [];
   private romTimer = 0;
   holdRender = false; // while drawing: the debounced re-emulation waits (it would stall the stroke)
+  private quietUntil = 0; // and after a stroke until then (the next one often follows quickly)
   private persistTimer = 0;
   clipboard: { objects?: LevelObject[]; sprites?: LevelSprite[] } = {};
   // tile (x,y) lookup from map offset
@@ -1077,14 +1078,20 @@ export class App {
     this.emit('rom-change');
     clearTimeout(this.romTimer);
     const run = () => {
-      if (this.holdRender) { this.romTimer = window.setTimeout(run, 150); return; }
+      const wait = this.holdRender ? 150 : this.quietUntil - performance.now();
+      if (wait > 0) { this.romTimer = window.setTimeout(run, wait); return; }
       this.romTimer = 0;
       this.refresh();
-      this.palettesChanged();
+      setTimeout(() => this.palettesChanged(), 0); // separate task: input gets through in between
     };
     this.romTimer = window.setTimeout(run, 150);
     clearTimeout(this.persistTimer);
     this.persistTimer = window.setTimeout(() => { this.persistTimer = 0; this.persist(); }, 1000);
+  }
+
+  // a stroke ended: the re-emulation waits for a pause in drawing
+  renderPause(ms = 600): void {
+    this.quietUntil = performance.now() + ms;
   }
 
   // re-emulates now if a ROM change is still pending (before reading the render)

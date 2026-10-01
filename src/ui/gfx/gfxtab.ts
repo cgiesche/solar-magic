@@ -716,7 +716,7 @@ export class GfxTab implements WsPanel {
       if (f.empty) { toast(f.num >= ANIM_FILE ? 'Die Datei gibt es noch nicht – rechts „Anlegen“' : 'Diese Nummer ist leer – „+ Neue ExGFX“ legt eine Datei an'); return; }
       const v = e.button === 2 ? 0 : this.color;
       if (tool === 'pen' || tool === 'fill') this.warnAnimated(p.x, p.y);
-      if (tool === 'fill') { this.fill(p.x, p.y, v); this.draw(); this.commit('Füllen'); return; }
+      if (tool === 'fill') { this.fill(p.x, p.y, v); this.draw(); this.app.renderPause(); this.commit('Füllen'); return; }
       let last = p;
       let move: (ev: MouseEvent) => void;
       let label = 'Zeichnen';
@@ -755,6 +755,7 @@ export class GfxTab implements WsPanel {
         window.removeEventListener('mousemove', move);
         window.removeEventListener('mouseup', up);
         this.app.holdRender = false;
+        this.app.renderPause();
         if (this.stroke) {
           this.stroke = false;
           if (label === 'Zeichnen') this.commit(label);
