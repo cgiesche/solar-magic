@@ -199,6 +199,7 @@ function buildUi(app: App): void {
     if (tab === 'map16' && tile !== undefined) ws.showMap16(tile);
   };
   app.on('open-map16', () => toggleGfx('map16', app.wsTile));
+  app.on('open-gfx', () => toggleGfx('gfx'));
 
   window.onkeydown = (e: KeyboardEvent) => {
     const t = e.target as HTMLElement;
@@ -299,11 +300,14 @@ function showHelp(): void {
     ['Shift+T', 'Level testen, Mario startet an der Mausposition'],
     ['O', 'Overworld-Editor ein/aus'],
     ['M / P', 'Grafik-Bereich: Map16-Tiles (Tile unter der Maus) / Paletten'],
-    ['Esc (im Grafik-Bereich)', 'zurück zum Level'],
+    ['Grafik-Bereich: P / M / G', 'Tab Paletten / Map16-Tiles / Grafiken; Esc zurück zum Level'],
+    ['Map16: X / Y / 1–8 / Q', 'Viertel spiegeln / Palette / nächstes Viertel; Pfeile: anderes Tile'],
+    ['Grafiken: B / F / I / S / 0–9', 'Stift / Füllen / Pipette / Auswahl / Farbe; Rechtsklick malt transparent'],
+    ['Strg+C / Strg+V (Grafik-Bereich)', 'Palettenzeile, Map16-Tiles bzw. Pixel kopieren / einfügen'],
     ['G', 'Raster ein/aus'],
     ['Strg+Mausrad', 'Zoom'],
     ['Strg+S', 'Level in ROM speichern'],
-    ['Strg+Z / Strg+Y', 'Rückgängig / Wiederholen'],
+    ['Strg+Z / Strg+Y', 'Rückgängig / Wiederholen (Level und Grafik-Änderungen)'],
   ];
   modal('Tastenkürzel', h('table', { class: 'help' }, rows.map(([a, b]) => h('tr', null, h('td', null, h('kbd', null, a)), h('td', null, b)))), [{ label: 'OK', primary: true }]);
 }

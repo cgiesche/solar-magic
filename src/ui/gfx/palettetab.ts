@@ -70,7 +70,6 @@ function originName(o: Origin): string {
 export class PaletteTab implements WsPanel {
   root: HTMLElement;
   private app: App;
-  private ws: GfxWorkspace;
   private trace: LevelRender | null = null;
   private custom = 0;
   private sel = 0x21;
@@ -87,9 +86,8 @@ export class PaletteTab implements WsPanel {
   private rowLabels: HTMLElement[] = [];
   private visible = false;
 
-  constructor(app: App, ws: GfxWorkspace) {
+  constructor(app: App, _ws: GfxWorkspace) {
     this.app = app;
-    this.ws = ws;
     this.root = h('div', { class: 'pt' }, this.bar, h('div', { class: 'pt-main' }, h('div', { class: 'pt-left' }, this.rows, this.headerBox), this.detail));
     app.on('render', () => { if (this.visible) { this.retrace(); this.paint(); } });
     app.on('rom-change', () => {
