@@ -175,3 +175,12 @@ export function attachRectPick(c: HTMLElement, cols: number, rows: number, show:
     show(rect());
   });
 }
+
+// asks with a few buttons; resolves with the chosen index, null when closed
+export function choose(title: string, body: HTMLElement | string, options: { label: string; primary?: boolean }[]): Promise<number | null> {
+  return new Promise((resolve) => {
+    let done = false;
+    const b = typeof body === 'string' ? h('p', { style: 'max-width:460px' }, body) : body;
+    modal(title, b, options.map((o, i) => ({ label: o.label, primary: o.primary, onClick: () => { done = true; resolve(i); } })), () => { if (!done) resolve(null); });
+  });
+}

@@ -59,6 +59,10 @@ export class App {
   redoStack: Level[] = [];
   // undo for ROM edits of the graphics workspace (palettes, Map16, GFX, slot assignments)
   romHistory: RomHistory;
+  wsTile = 0; // Map16 tile for 'open-map16' (opens the graphics workspace there)
+  // order of level and ROM edits, so one undo/redo serves both (n: stack length after the push)
+  undoOrder: { kind: 'level' | 'rom'; n: number }[] = [];
+  redoOrder: ('level' | 'rom')[] = [];
   private romTimer = 0;
   private persistTimer = 0;
   clipboard: { objects?: LevelObject[]; sprites?: LevelSprite[] } = {};
@@ -675,20 +679,55 @@ export class App {
     this.undoStack.push(cloneLevel(this.level));
     if (this.undoStack.length > 200) this.undoStack.shift();
     this.redoStack = [];
+    this.pushOrder('level', this.undoStack.length);
+  }
+  private pushOrder(kind: 'level' | 'rom', n: number): void {
+    this.undoOrder.push({ kind, n });
+    if (this.undoOrder.length > 400) this.undoOrder.shift();
+    this.redoOrder = [];
   }
   changed(rerender = true): void {
     this.dirty = true;
     if (rerender) this.refresh();
     this.emit('change');
   }
+  // undoes the latest level or ROM edit
   undo(): void {
+    while (this.undoOrder.length) {
+      const o = this.undoOrder.pop()!;
+      const len = o.kind === 'level' ? this.undoStack.length : this.romHistory.undoStack.length;
+      if (o.n > len || len === 0) continue; // cancelled checkpoint or dropped history
+      if (o.kind === 'rom') { if (this.romStep(true)) this.redoOrder.push('rom'); return; }
+      this.levelUndo();
+      this.redoOrder.push('level');
+      return;
+    }
+    if (this.undoStack.length) this.levelUndo();
+    else toast('Nichts rückgängig zu machen');
+  }
+  redo(): void {
+    while (this.redoOrder.length) {
+      const k = this.redoOrder.pop()!;
+      if (k === 'rom') {
+        if (!this.romHistory.redoStack.length) continue;
+        if (this.romStep(false)) this.undoOrder.push({ kind: 'rom', n: this.romHistory.undoStack.length });
+        return;
+      }
+      if (!this.redoStack.length) continue;
+      this.levelRedo();
+      this.undoOrder.push({ kind: 'level', n: this.undoStack.length });
+      return;
+    }
+    if (this.redoStack.length) this.levelRedo();
+  }
+  private levelUndo(): void {
     const prev = this.undoStack.pop();
     if (!prev) return;
     this.redoStack.push(cloneLevel(this.level));
     this.level = prev;
     this.changed();
   }
-  redo(): void {
+  private levelRedo(): void {
     const next = this.redoStack.pop();
     if (!next) return;
     this.undoStack.push(cloneLevel(this.level));
@@ -971,10 +1010,14 @@ export class App {
   // ------------- ROM edits (graphics workspace) -------------
   // runs an undoable ROM edit; the level is re-emulated shortly after the last one of a series
   romEdit<T>(label: string, fn: () => T, key: string | null = null): T {
+    const h = this.romHistory, pushes = h.pushes;
     try {
-      return this.romHistory.edit(label, fn, key);
+      return h.edit(label, fn, key);
     } finally {
-      if (!this.romHistory.open) this.romChanged();
+      if (!h.open) {
+        if (h.pushes !== pushes) this.pushOrder('rom', h.undoStack.length);
+        this.romChanged();
+      }
     }
   }
 
@@ -1001,19 +1044,23 @@ export class App {
     this.palettesChanged();
   }
 
-  romUndo(): void { this.romStep(true); }
-  romRedo(): void { this.romStep(false); }
-  private romStep(undo: boolean): void {
+  private romStep(undo: boolean): boolean {
     let e: RomEdit | null;
     try {
       e = undo ? this.romHistory.undo() : this.romHistory.redo();
     } catch (err) {
       toast(String(err instanceof Error ? err.message : err), 'error');
-      return;
+      return false;
     }
-    if (!e) { toast(undo ? 'Nichts rückgängig zu machen' : 'Nichts zu wiederholen'); return; }
+    if (!e) return false;
     this.romChanged();
     toast(`${undo ? 'Rückgängig' : 'Wiederholt'}: ${e.label}`);
+    return true;
+  }
+
+  editMap16(tile: number): void {
+    this.wsTile = tile;
+    this.emit('open-map16');
   }
 
   persist(): void {

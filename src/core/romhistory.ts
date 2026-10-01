@@ -87,6 +87,7 @@ export class RomHistory {
   private depth = 0;
   private label = '';
   private key: string | null = null;
+  pushes = 0; // counts recorded (not merged) edits
   rom: Rom;
   limit: number;
 
@@ -127,6 +128,7 @@ export class RomHistory {
       this.undoStack[this.undoStack.length - 1] = merge(last, e);
     } else {
       this.undoStack.push(e);
+      this.pushes++;
       if (this.undoStack.length > this.limit) this.undoStack.shift();
     }
     this.redoStack = [];

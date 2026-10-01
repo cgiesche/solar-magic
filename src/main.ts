@@ -8,9 +8,7 @@ import { LevelView } from './ui/levelview.ts';
 import { LevelList, Palette, Properties } from './ui/panels.ts';
 import { openHeaderDialog } from './ui/headerdialog.ts';
 import { hex } from './core/names.ts';
-import { openPaletteEditor } from './ui/paletteeditor.ts';
-import { openMap16Editor } from './ui/map16editor.ts';
-import { openGfxEditor } from './ui/gfxeditor.ts';
+import { GfxWorkspace, type WsTab } from './ui/gfxworkspace.ts';
 import { openEntrancesDialog, openRomInfo, openLevelTools, openInsertDialog } from './ui/tools.ts';
 import { openPatchManager } from './ui/patchmanager.ts';
 import { OverworldView } from './ui/overworld.ts';
@@ -126,9 +124,7 @@ function buildUi(app: App): void {
     h('button', { onclick: () => view.setZoom(app.zoom / 2) }, '−'), zoomLabel, h('button', { onclick: () => view.setZoom(app.zoom * 2) }, '+'),
     h('span', { class: 'spacer' }),
     h('button', { class: 'ow-toggle', onclick: () => toggleOw(), title: 'Zwischen Level- und Overworld-Editor wechseln (O)' }, 'Overworld'),
-    h('button', { onclick: () => openMap16Editor(app, view.hover ? hoverTile(app, view.hover.tx, view.hover.ty) : 0), title: 'Map16-Editor (M)' }, 'Map16'),
-    h('button', { onclick: () => openPaletteEditor(app), title: 'Paletten-Editor (P)' }, 'Paletten'),
-    h('button', { onclick: () => openGfxEditor(app), title: 'Grafiken' }, 'Grafiken'),
+    h('button', { class: 'gfx-toggle', onclick: () => toggleGfx(), title: 'Grafik-Bereich: Paletten, Map16-Tiles, Grafiken (M / P, zurück mit Esc)' }, 'Grafik'),
     h('button', { onclick: () => openEntrancesDialog(app), title: 'Sekundäre Eingänge' }, 'Eingänge'),
     h('button', { onclick: () => openMessagesDialog(app), title: 'Nachrichtenboxen bearbeiten' }, 'Texte'),
     h('button', { onclick: () => openLevelTools(app, () => view.exportPng()), title: 'Speichern unter, Export/Import, PNG, Screens einfügen/löschen, Level leeren' }, 'Level …'),
@@ -177,7 +173,32 @@ function buildUi(app: App): void {
     }
     (toolbar.querySelector('.ow-toggle') as HTMLButtonElement).textContent = owActive ? 'Level-Editor' : 'Overworld';
   };
-  app.on('show-level-view', () => { if (owActive) toggleOw(); });
+  app.on('show-level-view', () => { if (owActive) toggleOw(); if (ws?.active) toggleGfx(); });
+
+  // graphics workspace (palettes, Map16, GFX) in place of the level view
+  let ws: GfxWorkspace | null = null;
+  const toggleGfx = (tab?: WsTab, tile?: number) => {
+    if (!ws) ws = new GfxWorkspace(app);
+    const btn = toolbar.querySelector('.gfx-toggle') as HTMLButtonElement;
+    if (ws.active && tab === undefined) {
+      ws.leave();
+      layout.replaceChildren(toolbar, left, center, right);
+      layout.classList.remove('gfx-mode');
+      btn.classList.remove('active');
+      view.layout();
+      return;
+    }
+    if (owActive) toggleOw();
+    if (!ws.active) {
+      layout.replaceChildren(toolbar, left, ws.root, ws.side);
+      layout.classList.add('gfx-mode');
+      btn.classList.add('active');
+      const hv = view.hover;
+      ws.enter(tab ?? ws.tab, hv ? { tx: hv.tx, ty: hv.ty } : view.centerTile());
+    } else if (tab) ws.open(tab);
+    if (tab === 'map16' && tile !== undefined) ws.showMap16(tile);
+  };
+  app.on('open-map16', () => toggleGfx('map16', app.wsTile));
 
   window.onkeydown = (e: KeyboardEvent) => {
     const t = e.target as HTMLElement;
@@ -186,6 +207,14 @@ function buildUi(app: App): void {
     const k = e.key;
     const ctrl = e.ctrlKey || e.metaKey;
     if (k === 'o' || k === 'O') { toggleOw(); return; }
+    if (ws?.active) {
+      if (ctrl && k.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) app.redo(); else app.undo(); return; }
+      if (ctrl && k.toLowerCase() === 'y') { e.preventDefault(); app.redo(); return; }
+      if (ctrl && k.toLowerCase() === 's') { e.preventDefault(); app.saveLevel(); return; }
+      if (ws.key(e)) { e.preventDefault(); return; }
+      if (k === 'Escape') toggleGfx();
+      return;
+    }
     if (owActive) {
       if (ctrl && k.toLowerCase() === 'z') { e.preventDefault(); ow?.undoOnce(); }
       if (ctrl && k.toLowerCase() === 's') { e.preventDefault(); ow?.save(); }
@@ -227,8 +256,8 @@ function buildUi(app: App): void {
     else if (k === 'PageUp') app.reorderSelection('front');
     else if (k === 'PageDown') app.reorderSelection('back');
     else if (k === 'g' || k === 'G') { app.show.grid = !app.show.grid; view.paint(); }
-    else if (k === 'm' || k === 'M') openMap16Editor(app, view.hover ? hoverTile(app, view.hover.tx, view.hover.ty) : 0);
-    else if (k === 'p' || k === 'P') openPaletteEditor(app);
+    else if (k === 'm' || k === 'M') toggleGfx('map16', view.hover ? hoverTile(app, view.hover.tx, view.hover.ty) : undefined);
+    else if (k === 'p' || k === 'P') toggleGfx('pal');
   };
   window.onbeforeunload = (e) => { if (app.dirty) { e.preventDefault(); } };
   levels.build();
@@ -269,7 +298,8 @@ function showHelp(): void {
     ['T', 'Level testen (eingebauter Emulator)'],
     ['Shift+T', 'Level testen, Mario startet an der Mausposition'],
     ['O', 'Overworld-Editor ein/aus'],
-    ['M / P', 'Map16- / Paletten-Editor'],
+    ['M / P', 'Grafik-Bereich: Map16-Tiles (Tile unter der Maus) / Paletten'],
+    ['Esc (im Grafik-Bereich)', 'zurück zum Level'],
     ['G', 'Raster ein/aus'],
     ['Strg+Mausrad', 'Zoom'],
     ['Strg+S', 'Level in ROM speichern'],
