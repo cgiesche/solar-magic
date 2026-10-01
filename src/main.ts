@@ -206,6 +206,7 @@ function buildUi(app: App): void {
     else if (k === '4') app.setMode('exit');
     else if (k === '5') app.setMode('bg');
     else if (k === 'h' || k === 'H') openHeaderDialog(app);
+    else if ((k === 't' || k === 'T') && e.shiftKey) { const hv = view.hover; openTestPlay(app, hv ? { tx: hv.tx, ty: hv.ty } : undefined); }
     else if (k === 't' || k === 'T') openTestPlay(app);
     else if (k === 'Insert' || k === 'i' || k === 'I') {
       e.preventDefault();
@@ -266,6 +267,7 @@ function showHelp(): void {
     ['1 / 2 / 3 / 4 / 5', 'Modus Layer 1 / Layer 2 / Sprites / Exits / BG (Hintergrund malen)'],
     ['H', 'Level-Header'],
     ['T', 'Level testen (eingebauter Emulator)'],
+    ['Shift+T', 'Level testen, Mario startet an der Mausposition'],
     ['O', 'Overworld-Editor ein/aus'],
     ['M / P', 'Map16- / Paletten-Editor'],
     ['G', 'Raster ein/aus'],

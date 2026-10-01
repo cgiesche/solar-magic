@@ -5,7 +5,7 @@ import { h, modal } from './dom.ts';
 import { LevelEmulator } from '../core/levelemu.ts';
 import { PPU } from '../core/ppu.ts';
 import { hex } from '../core/names.ts';
-import { levelTranslevel } from '../core/level.ts';
+import { levelTranslevel, nearestEntrance, encodeSecondaryHeader } from '../core/level.ts';
 
 const KEYMAP: Record<string, number> = {
   ArrowUp: 0x0800, ArrowDown: 0x0400, ArrowLeft: 0x0200, ArrowRight: 0x0100,
@@ -18,7 +18,8 @@ const KEYMAP: Record<string, number> = {
 
 let testEmu: LevelEmulator | null = null;
 
-export function openTestPlay(app: App): void {
+// at: Mario's start tile (his feet stand in it) instead of the main entrance
+export function openTestPlay(app: App, at?: { tx: number; ty: number }): void {
   if (!testEmu || testEmu.rom !== app.rom) {
     testEmu = new LevelEmulator(app.rom);
     testEmu.boot();
@@ -26,8 +27,25 @@ export function openTestPlay(app: App): void {
   const emu = testEmu;
   emu.syncRom();
   const lv = app.level;
-  const r = emu.load(lv.number, { ...app.buildOverrides(), translevel: levelTranslevel(app.rom, lv.number) });
+  const ov = app.buildOverrides();
+  // the start position: the nearest main entrance setting loads the level around it (camera, tilemap),
+  // in gameplay Mario is then moved to the exact pixel
+  const start = at && { x: at.tx * 16, y: at.ty * 16 - 16 };
+  if (start) {
+    const sec = { ...lv.secondary };
+    const p = nearestEntrance(app.rom, start.x, start.y, (sec.verticalPositioning & 1) !== 0, lv.header.screens - 1);
+    sec.entranceScreen = p.screen; sec.entranceX = p.ex; sec.entranceY = p.ey;
+    sec.entranceAction = 0;
+    ov.secondaryHeader = encodeSecondaryHeader(sec);
+  }
+  const r = emu.load(lv.number, { ...ov, translevel: levelTranslevel(app.rom, lv.number) });
   const s = emu.snes;
+  if (start && r.ok) {
+    try { for (let i = 0; i < 80 && s.wram[0x100] !== 0x14; i++) s.runFrame(); } catch { /* shown when playing */ }
+    const w = s.wram;
+    w[0x94] = start.x & 0xff; w[0x95] = start.x >> 8;
+    w[0x96] = start.y & 0xff; w[0x97] = (start.y >> 8) & 0xff;
+  }
   // sub-level loads keep the old timer; give the level its header time
   const hundreds = app.rom.r8(0x0584d7 + lv.header.time);
   s.wram[0x0f31] = hundreds; s.wram[0x0f32] = 0; s.wram[0x0f33] = 0;
@@ -83,11 +101,11 @@ export function openTestPlay(app: App): void {
     window.removeEventListener('keydown', kd, true);
     window.removeEventListener('keyup', ku, true);
   };
-  const m = modal(`Level testen – ${hex(lv.number, 3)}${r.ok ? '' : ' (Ladefehler)'}`, h('div', { class: 'play' },
+  const m = modal(`Level testen – ${hex(lv.number, 3)}${at ? ` ab ${hex(at.tx, 2)}/${hex(at.ty, 2)}` : ''}${r.ok ? '' : ' (Ladefehler)'}`, h('div', { class: 'play' },
     canvas,
     info,
     h('div', { class: 'hint' }, 'Steuerung: Pfeile · X = Springen (B) · Z/Y = Rennen/Feuer (Y) · A = Drehsprung · S = X-Taste · Enter = Start · Shift = Select · Q/W = L/R · P = Pause. Ohne Ton. Ungespeicherte Änderungen werden mitgetestet.'),
-  ), [{ label: 'Neu starten', onClick: () => { setTimeout(() => openTestPlay(app), 0); } }, { label: 'Beenden', primary: true }], stop);
+  ), [{ label: 'Neu starten', onClick: () => { setTimeout(() => openTestPlay(app, at), 0); } }, { label: 'Beenden', primary: true }], stop);
   void m;
   canvas.focus();
 }
