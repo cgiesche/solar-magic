@@ -212,7 +212,7 @@ export class Palette {
     const label = h('div', { class: 'hint' }, curTile >= 0
       ? (bw * bh > 1 ? `Block ${bw}×${bh} ab Tile ${hex3(curTile)} gewählt – Rechtsklick in der Levelansicht platziert ihn (je Tile ein Direct-Map16-Objekt).`
         : `Tile ${hex3(curTile)} gewählt – Rechtsklick in der Levelansicht platziert es (Direct-Map16-Objekt).`)
-      : 'Tile anklicken (oder mehrere per Ziehen), dann per Rechtsklick im Level platzieren. Erfordert den Editor-Patch (wird automatisch installiert). Tiles ab 200 legt der Map16-Editor (M) an.');
+      : 'Tile anklicken (oder mehrere per Ziehen), dann per Rechtsklick im Level platzieren. Erfordert den Editor-Patch (wird automatisch installiert).');
     // click picks a tile, dragging picks a rectangle of tiles
     attachRectPick(c, 16, 32, (r) => draw(r.x, r.y, r.w, r.h), (r) => {
       app.paletteItem = { kind: 'obj', num: 0, ext: DM16_EXT, size: 0, tile: this.m16Base + r.y * 16 + r.x, ...(r.w * r.h > 1 ? { block: { w: r.w, h: r.h } } : {}) };
@@ -232,7 +232,8 @@ export class Palette {
       if (t !== hoverTile) { hoverTile = t; tip(); }
     });
     this.m16Tip = () => { if (hoverTile >= 0 && c.isConnected) tip(); };
-    this.body.append(h('div', { class: 'row' }, pages), label, c);
+    this.body.append(h('div', { class: 'row' }, pages,
+      h('button', { title: 'Gewähltes Tile im Grafik-Bereich bearbeiten (auch Tiles ab 200 anlegen)', onclick: () => app.editMap16(curTile >= 0 ? curTile : this.m16Base) }, 'Bearbeiten …')), label, c);
   }
 
   // structures: blocks of Map16 tiles stored in the ROM, placed as one object each (structs.ts)
@@ -541,8 +542,8 @@ export class Properties {
 
   probePending = false; // the shown object's block behaviour is still being probed
 
-  field(label: string, input: HTMLElement): HTMLElement {
-    return h('div', { class: 'prop' }, h('label', null, label), input);
+  field(label: string, input: HTMLElement, extra?: HTMLElement): HTMLElement {
+    return h('div', { class: 'prop' }, h('label', null, label), input, extra);
   }
 
   build(): void {
@@ -596,7 +597,8 @@ export class Properties {
       o.num === 0 && o.ext === STRUCT_EXT && o.struct !== undefined ? this.field('Struktur', hexInput(o.struct, 2, (v) => upd(() => (o.struct = v)), 0xff)) : '',
       o.num === 0 && o.ext === STRUCT_EXT && o.struct !== undefined ? h('div', { class: 'hint' }, structInfo(app, o.struct), ' ',
         h('button', { title: 'Die Struktur hier durch einzelne Direct-Map16-Objekte ersetzen (zum Bearbeiten, danach wieder „Auswahl als Struktur“)', onclick: () => app.explodeStructure(o) }, 'Auflösen')) : '',
-      o.num === 0 && o.ext === DM16_EXT ? this.field('Map16-Tile', hexInput(o.tile ?? 0, 3, (v) => upd(() => (o.tile = v)), EXT_TILES - 1)) : '',
+      o.num === 0 && o.ext === DM16_EXT ? this.field('Map16-Tile', hexInput(o.tile ?? 0, 3, (v) => upd(() => (o.tile = v)), EXT_TILES - 1),
+        h('button', { title: 'Das Tile im Grafik-Bereich bearbeiten', onclick: () => app.editMap16(o.tile ?? 0) }, 'Bearbeiten …')) : '',
       o.num === 0 && o.ext === DM16_EXT ? this.field('Größe (hw)', hexInput(o.size, 2, (v) => upd(() => (o.size = v)))) : '',
       this.field('X', hexInput(o.x, 3, (v) => upd(() => (o.x = v)), app.levelWidthTiles() - 1)),
       this.field('Y', hexInput(o.y, 3, (v) => upd(() => (o.y = v)), app.levelHeightTiles() - 1)),

@@ -30,6 +30,24 @@ export function parseMap16File(d: Uint8Array): Map16File {
   return { width, height, tiles, acts };
 }
 
+// writes the same layout: header (magic, section table offset at 0x10, width/height at 0x18/0x1C),
+// section table (tiles, acts like), data
+export function writeMap16File(f: Map16File): Uint8Array {
+  const n = f.tiles.length;
+  const table = 0x20, tiles = table + 16, acts = tiles + n * 8;
+  const out = new Uint8Array(acts + (f.acts ? n * 2 : 0));
+  const u32 = (o: number, v: number) => { out[o] = v & 255; out[o + 1] = (v >> 8) & 255; out[o + 2] = (v >> 16) & 255; out[o + 3] = (v >>> 24) & 255; };
+  out.set([0x4c, 0x4d, 0x31, 0x36]); // "LM16"
+  u32(0x10, table);
+  u32(0x18, f.width);
+  u32(0x1c, f.height);
+  u32(table, tiles); u32(table + 4, n * 8);
+  if (f.acts) { u32(table + 8, acts); u32(table + 12, n * 2); }
+  f.tiles.forEach((ws, i) => ws.forEach((w, k) => { out[tiles + i * 8 + k * 2] = w & 255; out[tiles + i * 8 + k * 2 + 1] = w >> 8; }));
+  f.acts?.forEach((a, i) => { out[acts + i * 2] = a & 255; out[acts + i * 2 + 1] = a >> 8; });
+  return out;
+}
+
 // Map16 tile numbers of the file's tiles when its top-left tile goes to `at`
 export function map16Targets(f: Map16File, at: number): number[] {
   return f.tiles.map((_, i) => at + Math.floor(i / f.width) * 16 + (i % f.width));

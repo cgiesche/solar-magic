@@ -26,3 +26,12 @@ for (const n of list) {
 }
 console.log('levelfile/screens bad', bad);
 if (bad) process.exitCode = 1;
+
+// .map16 export reads back the same
+{
+  const { writeMap16File, parseMap16File } = await import('../src/core/map16file.ts');
+  const f = { width: 2, height: 2, tiles: [[1, 2, 3, 4], [5, 6, 7, 8], [0x1234, 0xffff, 0, 9], [10, 11, 12, 13]], acts: [0x25, 0x130, 0x1ff, 0] };
+  const g = parseMap16File(writeMap16File(f));
+  if (JSON.stringify(g) !== JSON.stringify(f)) { console.log('map16 export roundtrip differs', g); process.exit(1); }
+  console.log('map16 export ok');
+}

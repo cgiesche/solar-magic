@@ -221,3 +221,30 @@ kbd { background: #181a1f; border: 1px solid var(--border); border-radius: 3px; 
 .pt-hopts { display: flex; gap: 3px; }
 .pt-hopt { display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 3px; font-size: 11px; }
 .pt-hpal { width: 36px; height: 12px; image-rendering: pixelated; display: block; }
+/* Map16 tab */
+.mt { display: flex; flex-direction: column; }
+.mt-main { flex: 1; min-height: 0; display: flex; gap: 12px; padding: 8px; }
+.mt-col { display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+.mt-scroll, .mt-gfx-scroll { overflow-y: auto; border: 1px solid var(--border); flex: 1; min-height: 0; }
+.mt-sheet { display: block; image-rendering: pixelated; cursor: crosshair; }
+.mt-builder-col { width: 300px; flex-shrink: 0; overflow-y: auto; }
+.mt-builder { display: flex; flex-direction: column; gap: 8px; }
+.mt-big { width: 192px; height: 192px; image-rendering: pixelated; cursor: pointer; border: 1px solid var(--border); border-radius: 4px; align-self: center; }
+body.mt-dragging .mt-big { outline: 2px dashed var(--accent); }
+.mt-pals { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px; }
+.mt-pal { display: flex; align-items: center; gap: 4px; padding: 3px 5px; font-size: 11px; }
+.mt-paldot { width: 42px; height: 10px; image-rendering: pixelated; border-radius: 2px; }
+.mt-acts { display: flex; flex-direction: column; gap: 5px; padding-top: 6px; border-top: 1px solid var(--border); }
+.mt-acts .grow { flex: 1; min-width: 0; }
+.mt-acts-thumb { width: 32px; height: 32px; image-rendering: pixelated; border: 1px solid var(--border); }
+.mt-adv summary { cursor: pointer; color: var(--muted); }
+.mt-acts-dlg { display: flex; flex-direction: column; gap: 6px; }
+.mt-acts-scroll { max-height: 60vh; overflow-y: auto; border: 1px solid var(--border); }
+.mt-acts-pick { display: block; image-rendering: pixelated; cursor: pointer; }
+.mt-gfx-col { flex: 1; min-width: 0; }
+.mt-gfx-wrap { display: flex; }
+.mt-gfx-labels { width: 92px; flex-shrink: 0; }
+.mt-slot { display: flex; flex-direction: column; gap: 2px; padding: 4px 6px; border-bottom: 1px solid var(--border); box-sizing: border-box; }
+.mt-slot-name { font-weight: 700; }
+.mt-slot-file { color: var(--accent); font-family: ui-monospace, monospace; }
+.mt-gfx-canvas { display: block; image-rendering: pixelated; cursor: crosshair; }

@@ -110,7 +110,7 @@ export class LevelPreview {
     const g = im.geom1;
     ctx.strokeStyle = '#ffb000';
     ctx.lineWidth = 1;
-    ctx.fillStyle = 'rgba(255,176,0,0.18)';
+    ctx.fillStyle = 'rgba(255,176,0,0.4)';
     for (let y = 0; y < g.height; y++) for (let x = 0; x < g.width; x++) {
       if (!this.highlight.has(im.tiles1[y * g.width + x])) continue;
       ctx.fillRect(x * 16, y * 16, 16, 16);
