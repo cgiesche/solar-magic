@@ -5,7 +5,9 @@
 
 import type { App } from '../app.ts';
 import type { GfxWorkspace, WsPanel } from '../gfxworkspace.ts';
-import { h, clear, toast, downloadBytes, pickFile, modal, choose } from '../dom.ts';
+import { h, clear, toast, downloadBytes, pickFile, modal, choose, attachPanZoom } from '../dom.ts';
+
+const ZOOM_STEPS = [1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24, 32];
 import { lz2Decompress, lz2Compress } from '../../core/lz2.ts';
 import { decodeTile, encodeTile, cgramToRGBA } from '../../core/gfx.ts';
 import { snesToPc, type Rom } from '../../core/rom.ts';
@@ -92,6 +94,7 @@ export class GfxTab implements WsPanel {
   private color = 1;
   private tool: Tool = 'pen';
   private zoom = 4;
+  private fitted = false; // zoomed to fit once on first show
   private grid: 0 | 8 | 16 = 8;
   private sel: Sel | null = null;
   private float: Float | null = null;
@@ -101,9 +104,11 @@ export class GfxTab implements WsPanel {
   private onlyLevel = false;
   private visible = false;
   private stroke = false;
+  private ownEdit = false;
   private cards = h('div', { class: 'gt-cards' });
   private list = h('div', { class: 'gt-list' });
   private canvas = h('canvas', { class: 'gt-canvas' });
+  private view = h('div', { class: 'gt-view' }, this.canvas);
   private side = h('div', { class: 'gt-side' });
   private tools = h('div', { class: 'ws-bar' });
 
@@ -120,10 +125,15 @@ export class GfxTab implements WsPanel {
       h('div', { class: 'gt-main' },
         h('div', { class: 'gt-files' }, search, h('label', { class: 'toggle' }, only, 'nur vom Level benutzt'), this.list,
           h('button', { onclick: () => this.newExGfx(), title: 'Leere 4bpp-Datei in der ersten freien ExGFX-Nummer anlegen' }, '+ Neue ExGFX')),
-        h('div', { class: 'gt-view' }, this.canvas),
+        this.view,
         this.side));
     this.attachCanvas();
-    app.on('rom-change', () => { if (this.visible && !this.stroke) this.reload(); });
+    attachPanZoom(this.view, () => this.zoom, (z, ax, ay) => {
+      const rc = this.view.getBoundingClientRect();
+      this.setZoom(z, rc.left + ax, rc.top + ay);
+    }, 1, 32, ZOOM_STEPS);
+    // own strokes already are in this.file: no reload (it would stall the end of every stroke)
+    app.on('rom-change', () => { if (this.visible && !this.stroke && !this.ownEdit) this.reload(); });
     app.on('render', () => { this.autoRows = null; if (this.visible) { this.buildCards(); this.draw(); this.buildSide(); } });
     app.on('level', () => (this.palRow = -1));
   }
@@ -135,6 +145,7 @@ export class GfxTab implements WsPanel {
   show(): void {
     this.visible = true;
     this.reload();
+    if (!this.fitted) { this.fitted = true; requestAnimationFrame(() => this.fit()); }
   }
   hide(): void {
     this.dropFloat();
@@ -351,7 +362,10 @@ export class GfxTab implements WsPanel {
     const b = this.tools;
     clear(b);
     const tool = (t: Tool, label: string, key: string, title: string) => h('button', { class: this.tool === t ? 'active' : '', title: `${title} (${key})`, onclick: () => this.setTool(t) }, label);
-    const zoomBtn = (z: number) => h('button', { class: this.zoom === z ? 'active' : '', onclick: () => { this.zoom = z; this.buildTools(); this.draw(); } }, `${z}×`);
+    const slider = h('input', { type: 'range', min: 1, max: 32, value: String(this.zoom), class: 'gt-zoom', title: 'Zoom (Strg+Mausrad, mittlere Maustaste verschiebt)' });
+    slider.addEventListener('input', () => this.setZoom(Number(slider.value)));
+    this.zoomSlider = slider;
+    this.zoomLabel = h('span', { class: 'mono gt-zoom-label' }, `${this.zoom}×`);
     const gridBtn = (g: 0 | 8 | 16, label: string) => h('button', { class: this.grid === g ? 'active' : '', onclick: () => { this.grid = g; this.buildTools(); this.draw(); } }, label);
     b.append(
       h('span', { class: 'btn-group' },
@@ -367,7 +381,8 @@ export class GfxTab implements WsPanel {
       h('button', { onclick: () => this.pasteSel(), title: 'Strg+V – fügt an der Auswahl ein, danach verschiebbar' }, 'Einfügen'),
       h('span', { class: 'sep' }),
       h('span', { class: 'hint' }, 'Raster'), h('span', { class: 'btn-group' }, gridBtn(0, 'aus'), gridBtn(8, '8'), gridBtn(16, '16')),
-      h('span', { class: 'hint' }, 'Zoom'), h('span', { class: 'btn-group' }, zoomBtn(2), zoomBtn(3), zoomBtn(4), zoomBtn(6)),
+      h('span', { class: 'hint' }, 'Zoom'), slider, this.zoomLabel,
+      h('button', { title: 'Ganze Datei einpassen', onclick: () => this.fit() }, 'Einpassen'),
       h('span', { class: 'spacer' }),
       h('button', { onclick: () => this.exportPng() }, 'PNG exportieren'),
       h('button', { onclick: () => void this.importPng(), title: 'PNG (128 Pixel breit) in diese Datei; Farben werden auf die gewählte Palettenzeile abgebildet' }, 'PNG importieren'),
@@ -450,35 +465,66 @@ export class GfxTab implements WsPanel {
   private set(x: number, y: number, v: number): void {
     if (x < 0 || y < 0 || x >= this.W() || y >= this.H()) return;
     const i = this.idx(x, y);
-    if (i < this.file!.pix.length) this.file!.pix[i] = v;
+    if (i >= this.file!.pix.length) return;
+    this.file!.pix[i] = v;
+    if (this.px && !this.float) this.px[y * this.W() + x] = this.rgba(x, y, v);
   }
 
+  // persistent 1:1 image of the sheet; drawing updates single pixels and presents once per frame
+  private off = document.createElement('canvas');
+  private img: ImageData | null = null;
+  private px: Uint32Array | null = null;
+  private cols: Uint32Array = new Uint32Array(16);
+  private frame = 0;
+  private rgba(x: number, y: number, v: number): number {
+    return v ? this.cols[v] ?? 0xffff00ff : ((x >> 2) + (y >> 2)) & 1 ? 0xff2b2e35 : 0xff23262c;
+  }
+
+  // full redraw (file, palette or floating selection changed)
   draw(): void {
     const f = this.file;
     if (!f) return;
+    const W = this.W(), H = this.H();
+    if (!this.img || this.img.width !== W || this.img.height !== H) {
+      this.off.width = W; this.off.height = H;
+      this.img = new ImageData(W, H);
+      this.px = new Uint32Array(this.img.data.buffer);
+    }
+    this.cols = this.colors();
+    const px = this.px!;
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) px[y * W + x] = this.rgba(x, y, this.get(x, y));
+    this.present();
+  }
+
+  private requestPresent(): void {
+    if (this.frame) return;
+    this.frame = requestAnimationFrame(() => { this.frame = 0; this.present(); });
+  }
+
+  private present(): void {
+    const f = this.file;
+    if (!f || !this.img) return;
     const W = this.W(), H = this.H(), z = this.zoom;
     const c = this.canvas;
     if (c.width !== W * z || c.height !== H * z) { c.width = W * z; c.height = H * z; }
     const ctx = c.getContext('2d')!;
-    const off = document.createElement('canvas');
-    off.width = W; off.height = H;
-    const octx = off.getContext('2d')!;
-    const img = octx.createImageData(W, H);
-    const px = new Uint32Array(img.data.buffer);
-    const cols = this.colors();
-    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-      const v = this.get(x, y);
-      px[y * W + x] = v ? cols[v] ?? 0xffff00ff : ((x >> 2) + (y >> 2)) & 1 ? 0xff2b2e35 : 0xff23262c;
-    }
-    octx.putImageData(img, 0, 0);
+    this.off.getContext('2d')!.putImageData(this.img, 0, 0);
     ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(off, 0, 0, W * z, H * z);
+    ctx.drawImage(this.off, 0, 0, W * z, H * z);
     if (this.grid) {
       ctx.strokeStyle = 'rgba(255,255,255,0.12)';
       ctx.lineWidth = 1;
       ctx.beginPath();
       for (let x = this.grid; x < W; x += this.grid) { ctx.moveTo(x * z + 0.5, 0); ctx.lineTo(x * z + 0.5, H * z); }
       for (let y = this.grid; y < H; y += this.grid) { ctx.moveTo(0, y * z + 0.5); ctx.lineTo(W * z, y * z + 0.5); }
+      ctx.stroke();
+    }
+    if (z >= 12) {
+      // pixel grid at high zoom
+      ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+      ctx.beginPath();
+      for (let x = 1; x < W; x++) { ctx.moveTo(x * z + 0.5, 0); ctx.lineTo(x * z + 0.5, H * z); }
+      for (let y = 1; y < H; y++) { ctx.moveTo(0, y * z + 0.5); ctx.lineTo(W * z, y * z + 0.5); }
       ctx.stroke();
     }
     if (this.focusTile >= 0 && this.focusTile < f.tiles) {
@@ -496,12 +542,40 @@ export class GfxTab implements WsPanel {
     }
   }
 
+  // zoom around a point of the view (client coordinates; default: its center)
+  setZoom(z: number, ax?: number, ay?: number): void {
+    z = Math.max(1, Math.min(32, Math.round(z)));
+    const old = this.zoom;
+    if (z === old) return;
+    const v = this.view;
+    const rc = v.getBoundingClientRect();
+    const cx = ax === undefined ? v.clientWidth / 2 : ax - rc.left, cy = ay === undefined ? v.clientHeight / 2 : ay - rc.top;
+    const lx = (v.scrollLeft + cx) / old, ly = (v.scrollTop + cy) / old;
+    this.zoom = z;
+    this.present();
+    v.scrollLeft = lx * z - cx;
+    v.scrollTop = ly * z - cy;
+    this.syncZoomUi();
+  }
+  private fit(): void {
+    const v = this.view;
+    this.setZoom(Math.max(1, Math.floor(Math.min((v.clientWidth - 4) / this.W(), (v.clientHeight - 4) / this.H()))));
+  }
+  private zoomSlider: HTMLInputElement | null = null;
+  private zoomLabel: HTMLElement | null = null;
+  private syncZoomUi(): void {
+    if (this.zoomSlider) this.zoomSlider.value = String(this.zoom);
+    if (this.zoomLabel) this.zoomLabel.textContent = `${this.zoom}×`;
+  }
+
   private commit(label: string): void {
     const f = this.file;
     if (!f || f.empty) return;
+    this.ownEdit = true;
     try {
       this.app.romEdit(`${gfxName(f.num)}: ${label}`, () => storeGfx(this.app.rom, f));
-    } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); this.reload(); }
+    } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); this.ownEdit = false; this.reload(); }
+    this.ownEdit = false;
   }
 
   private fill(x: number, y: number, v: number): void {
@@ -550,7 +624,8 @@ export class GfxTab implements WsPanel {
       if (tool === 'pen') {
         this.stroke = true;
         this.set(p.x, p.y, v);
-        move = (ev) => { const n = pos(ev); this.line(last.x, last.y, n.x, n.y, v); last = n; this.draw(); };
+        this.app.holdRender = true;
+        move = (ev) => { const n = pos(ev); if (n.x === last.x && n.y === last.y) return; this.line(last.x, last.y, n.x, n.y, v); last = n; this.requestPresent(); };
       } else {
         // selection: drag inside moves (lifting the pixels), outside starts a new rectangle
         const r = this.float ?? this.sel;
@@ -571,15 +646,16 @@ export class GfxTab implements WsPanel {
             const x0 = Math.max(0, Math.min(p.x, n.x)), y0 = Math.max(0, Math.min(p.y, n.y));
             const x1 = Math.min(this.W() - 1, Math.max(p.x, n.x)), y1 = Math.min(this.H() - 1, Math.max(p.y, n.y));
             this.sel = { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
-            this.draw();
+            this.requestPresent();
           };
           label = '';
         }
       }
-      this.draw();
+      if (tool === 'pen') this.requestPresent(); else this.draw();
       const up = () => {
         window.removeEventListener('mousemove', move);
         window.removeEventListener('mouseup', up);
+        this.app.holdRender = false;
         if (this.stroke) {
           this.stroke = false;
           if (label === 'Zeichnen') this.commit(label);
@@ -588,9 +664,13 @@ export class GfxTab implements WsPanel {
       window.addEventListener('mousemove', move);
       window.addEventListener('mouseup', up);
     });
+    let lastHover = -1;
     c.addEventListener('mousemove', (e) => {
+      if (this.stroke) return;
       const p = pos(e);
       const t = (p.y >> 3) * 16 + (p.x >> 3);
+      if (p.y * 128 + p.x === lastHover) return;
+      lastHover = p.y * 128 + p.x;
       c.title = `Tile ${hex(t, 2)} · Pixel ${p.x & 7},${p.y & 7} · Farbe ${this.file ? this.get(Math.max(0, p.x), Math.max(0, p.y)) : ''}`;
     });
   }

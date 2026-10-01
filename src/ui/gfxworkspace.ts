@@ -90,7 +90,8 @@ export class LevelPreview {
       this.img.height = this.over.height = im.height;
       this.layout();
     }
-    const id = new ImageData(new Uint8ClampedArray(this.app.compositeImg.buffer.slice(0) as ArrayBuffer), im.width, im.height);
+    const ci = this.app.compositeImg;
+    const id = new ImageData(new Uint8ClampedArray(ci.buffer as ArrayBuffer, ci.byteOffset, im.width * im.height * 4), im.width, im.height);
     this.img.getContext('2d')!.putImageData(id, 0, 0);
     this.drawHighlight();
   }

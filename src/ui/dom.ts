@@ -106,7 +106,7 @@ export function pickFile(accept: string): Promise<File | null> {
 const ZOOM_STEPS = [0.5, 0.75, 1, 1.5, 2, 3, 4];
 
 // Middle-button drag pans a scroll container; Ctrl+wheel zooms in steps around the cursor.
-export function attachPanZoom(scroller: HTMLElement, zoom: () => number, setZoom: (z: number, anchorX: number, anchorY: number) => void, min = 0.5, max = 4): void {
+export function attachPanZoom(scroller: HTMLElement, zoom: () => number, setZoom: (z: number, anchorX: number, anchorY: number) => void, min = 0.5, max = 4, zoomSteps = ZOOM_STEPS): void {
   let pan: { x: number; y: number; sl: number; st: number } | null = null;
   scroller.addEventListener('mousedown', (e) => {
     if (e.button !== 1) return;
@@ -134,7 +134,7 @@ export function attachPanZoom(scroller: HTMLElement, zoom: () => number, setZoom
     if (Math.abs(acc) < 50) return;
     const dir = acc < 0 ? 1 : -1;
     acc = 0;
-    const steps = ZOOM_STEPS.filter((s) => s >= min && s <= max);
+    const steps = zoomSteps.filter((s) => s >= min && s <= max);
     const cur = zoom();
     const next = dir > 0 ? steps.find((s) => s > cur + 1e-6) : [...steps].reverse().find((s) => s < cur - 1e-6);
     if (next === undefined) return;

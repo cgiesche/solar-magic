@@ -11,7 +11,8 @@ import { renderLevel, type LevelImages, composite, map16Source } from '../core/r
 import { EXT_FIRST, map16Ext, installMap16Ext } from '../core/map16ext.ts';
 import { saveLevel } from '../core/save.ts';
 import { captureSprites, captureSpriteAt, type SpriteImage } from '../core/spritegfx.ts';
-import { DM16_EXT, hasEditorPatch, installEditorPatch } from '../core/patches.ts';
+import { DM16_EXT, hasEditorPatch, installEditorPatch, levelGfx, defaultGfx } from '../core/patches.ts';
+import { gfxSkipMask, gfxFilesHash } from '../core/gfxpages.ts';
 import { STRUCT_EXT, STRUCT_MAX, TRANSPARENT, listStructures, readStructure, writeStructure, type Structure } from '../core/structs.ts';
 import { kvSet, kvGet, kvEntries, kvKeys, kvWrite } from './storage.ts';
 import { ResultCache, RomFingerprint, RomReads, type CacheEntry } from '../core/romdeps.ts';
@@ -64,6 +65,7 @@ export class App {
   undoOrder: { kind: 'level' | 'rom'; n: number }[] = [];
   redoOrder: ('level' | 'rom')[] = [];
   private romTimer = 0;
+  holdRender = false; // while drawing: the debounced re-emulation waits (it would stall the stroke)
   private persistTimer = 0;
   clipboard: { objects?: LevelObject[]; sprites?: LevelSprite[] } = {};
   // tile (x,y) lookup from map offset
@@ -101,6 +103,7 @@ export class App {
     this.rom = rom;
     this.romName = name;
     this.emu = new LevelEmulator(rom);
+    this.emu.skipMask = () => this.gfxSkipMask();
     this.emu.boot();
     this.romHistory = new RomHistory(rom);
     this.results = new ResultCache(new RomFingerprint(this.emu));
@@ -312,7 +315,7 @@ export class App {
   spriteKey = '';
   ensureSpriteImages(): void {
     const hd = this.level.header;
-    const key = `${hd.spriteGfx}-${hd.spritePalette}`;
+    const key = `${hd.spriteGfx}-${hd.spritePalette}-${gfxFilesHash(this.rom, this.spriteGfxFiles()).toString(36)}`;
     if (key === this.spriteKey) return;
     this.spriteKey = key;
     this.variantQueue = [];
@@ -367,6 +370,22 @@ export class App {
 
   private variantKey(num: number, at: { x: number; y: number }): string {
     return `v${this.spriteKey}:${num}:${at.x}:${at.y}`;
+  }
+
+  // ROM bytes of GFX file data: emulated results don't depend on them (graphics only reach VRAM);
+  // sprite images name the sprite files' content in their key instead
+  private gfxMaskMemo: { gen: number; data: Uint8Array | null; mask: Uint8Array | null } = { gen: -1, data: null, mask: null };
+  gfxSkipMask(): Uint8Array | null {
+    const m = this.gfxMaskMemo;
+    if (m.gen !== this.emu.romGen || m.data !== this.rom.data) { m.gen = this.emu.romGen; m.data = this.rom.data; m.mask = gfxSkipMask(this.rom); }
+    return m.mask;
+  }
+
+  // GFX files in the level's sprite slots (sprite images depend on these only)
+  private spriteGfxFiles(): number[] {
+    const hd = this.level.header;
+    const set = levelGfx(this.rom, this.level.number), def = defaultGfx(this.rom, hd.tileset, hd.spriteGfx);
+    return [0, 1, 2, 3].map((k) => (set[k] !== 0xff ? set[k] : def[k]));
   }
 
   private spriteCanvas(img: SpriteImage): HTMLCanvasElement {
@@ -549,6 +568,7 @@ export class App {
   private blockProber(): BlockProber {
     if (!this.prober || this.prober.rom !== this.rom) {
       this.prober = new BlockProber(this.rom, { state: this.emu.baseState, reads: this.emu.bootReads }, this.results);
+      this.prober.emu.skipMask = () => this.gfxSkipMask();
       this.proberGen = this.emu.romGen;
     }
     if (this.proberGen !== this.emu.romGen) {
@@ -1026,11 +1046,13 @@ export class App {
     this.emu.syncRom();
     this.emit('rom-change');
     clearTimeout(this.romTimer);
-    this.romTimer = window.setTimeout(() => {
+    const run = () => {
+      if (this.holdRender) { this.romTimer = window.setTimeout(run, 150); return; }
       this.romTimer = 0;
       this.refresh();
       this.palettesChanged();
-    }, 150);
+    };
+    this.romTimer = window.setTimeout(run, 150);
     clearTimeout(this.persistTimer);
     this.persistTimer = window.setTimeout(() => { this.persistTimer = 0; this.persist(); }, 1000);
   }

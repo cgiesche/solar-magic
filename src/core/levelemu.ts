@@ -67,6 +67,8 @@ export class LevelEmulator {
   snes: Snes;
   baseState: SnesState | null = null;
   romGen = 0; // counts syncRom() calls: the ROM may have changed
+  // ROM bytes whose reads by the emulated CPU don't count for tracked() results (GFX file data)
+  skipMask: (() => Uint8Array | null) | null = null;
   overlay = new Uint8Array(0x10000);
 
   constructor(rom: Rom) {
@@ -95,13 +97,15 @@ export class LevelEmulator {
   // runs fn recording the ROM it reads, on top of base (default: the boot's); the reads also
   // count for an enclosing tracked() call
   tracked<T>(fn: () => T, base: RomReads | null = this.bootReads): { result: T; reads: RomReads } {
-    const s = this.snes, outer = s.romReads, outerRom = this.rom.reads;
+    const s = this.snes, outer = s.romReads, outerRom = this.rom.reads, outerMask = s.romSkipMask;
     const reads = new RomReads(this.rom.data.length, base);
     s.romReads = this.rom.reads = reads; // the emulated CPU's reads and the editor code's
+    if (!outer) s.romSkipMask = this.skipMask?.() ?? null;
     try {
       return { result: fn(), reads };
     } finally {
       s.romReads = outer;
+      s.romSkipMask = outerMask;
       this.rom.reads = outerRom;
       outer?.add(reads);
       if (outerRom && outerRom !== outer) outerRom.add(reads);

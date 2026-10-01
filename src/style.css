@@ -268,3 +268,5 @@ body.mt-dragging .mt-big { outline: 2px dashed var(--accent); }
 .gt-gal-item.active { border-color: var(--accent); background: #1c2a36; }
 .gt-gal-img { width: 128px; height: 32px; image-rendering: pixelated; background: #111; }
 .gt-gal-none { width: 128px; height: 32px; display: flex; align-items: center; justify-content: center; color: var(--muted); background: #111; }
+.gt-zoom { width: 140px; }
+.gt-zoom-label { min-width: 2.6em; }
