@@ -26,7 +26,10 @@ const quarterAt = (qx: number, qy: number) => qx * 2 + qy;
 
 interface Clip { w: number; h: number; words: number[][]; acts: number[] | null }
 
+// files 100-103: the ExAnimation alternative files (Lunar Magic's ExGFX 60-63)
+export const ANIM_FILE = 0x100;
 export function gfxName(n: number): string {
+  if (n >= ANIM_FILE) return `Anim-ExGFX${hex(n - ANIM_FILE + 0x60, 2)}`;
   return `${n < VANILLA_GFX ? 'GFX' : 'ExGFX'}${hex(n, 2)}`;
 }
 

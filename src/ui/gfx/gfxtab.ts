@@ -20,7 +20,17 @@ import { importGfxFile, exgfxName } from '../../core/map16file.ts';
 import { parsePrimaryHeader, L1_PTRS } from '../../core/level.ts';
 import { map16Source } from '../../core/render.ts';
 import { EXT_FIRST, EXT_TILES, map16Ext } from '../../core/map16ext.ts';
-import { gfxName } from './map16tab.ts';
+import { gfxName, ANIM_FILE } from './map16tab.ts';
+import { readAltFile, writeAltFile, altFileAddr, exanimInstalled } from '../../core/exanim.ts';
+
+// before the first ExAnimation data: the engine (Lunar Magic compatible) is installed with it
+export async function confirmExAnim(app: App): Promise<boolean> {
+  if (exanimInstalled(app.rom)) return true;
+  const c = await choose('ExAnimation einrichten?', 'Eigene Animationen brauchen die ExAnimation-Engine im Lunar-Magic-Format (ein ASM-Patch, dazu der Editor-Patch). Lunar Magic erkennt sie und kann die Animationen weiter bearbeiten.', [{ label: 'Abbrechen' }, { label: 'Einrichten', primary: true }]);
+  if (c !== 1) return false;
+  await loadAsar();
+  return true;
+}
 import { loadAsar } from '../../core/asar.ts';
 import { installVramPatch } from '../../core/vrampatch.ts';
 
@@ -35,6 +45,14 @@ interface GfxFile { num: number; addr: number; raw: boolean; bpp: number; packed
 
 // decodes a file into pixel indices (64 per 8x8 tile)
 export function loadGfx(rom: Rom, num: number, bppOverride: number | null = null): GfxFile {
+  if (num >= ANIM_FILE) {
+    const d = readAltFile(rom, num - ANIM_FILE);
+    if (!d) return { num, addr: 0, raw: true, bpp: 4, packed: 0, pix: new Uint8Array(128 * 64), tiles: 128, empty: true };
+    const tiles = Math.max(1, d.length >> 5);
+    const pix = new Uint8Array(tiles * 64);
+    for (let t = 0; t < tiles; t++) decodeTile(d, t * 32, 4, pix, t * 64);
+    return { num, addr: altFileAddr(rom, num - ANIM_FILE), raw: true, bpp: 4, packed: d.length, pix, tiles, empty: false };
+  }
   const e = gfxEntry(rom, num);
   if (!e) return { num, addr: 0, raw: true, bpp: 4, packed: 0, pix: new Uint8Array(128 * 64), tiles: 128, empty: true };
   let data: Uint8Array, packed: number;
@@ -56,6 +74,7 @@ function encodeGfx(f: GfxFile): Uint8Array {
 // writes the pixels back: raw files in place, LZ2 in place when the new data fits, else to free space
 function storeGfx(rom: Rom, f: GfxFile): void {
   const data = encodeGfx(f);
+  if (f.num >= ANIM_FILE) { writeAltFile(rom, f.num - ANIM_FILE, data); f.addr = altFileAddr(rom, f.num - ANIM_FILE); return; }
   if (f.raw) { rom.writeBytes(f.addr, data); return; }
   const packed = lz2Compress(data);
   if (packed.length <= f.packed) { rom.writeBytes(f.addr, packed); f.packed = packed.length; return; }
@@ -360,7 +379,29 @@ export class GfxTab implements WsPanel {
         onclick: () => this.select(i),
       }, name, used.has(i) ? h('span', { class: 'gt-used' }, used.get(i)) : ''));
     }
+    // ExAnimation sources (Lunar Magic's ExGFX 60-63)
+    if (!this.onlyLevel || this.cur >= ANIM_FILE) {
+      this.list.append(h('div', { class: 'gt-list-head', title: 'Quellgrafik für eigene Animationen (Lunar Magics ExGFX 60–63, unkomprimiert)' }, 'Animationen'));
+      for (let k = 0; k < 4; k++) {
+        const i = ANIM_FILE + k;
+        const name = gfxName(i);
+        if (this.filter && !name.toLowerCase().includes(this.filter)) continue;
+        this.list.append(h('div', {
+          class: `level-item${i === this.cur ? ' current' : ''}${altFileAddr(app.rom, k) ? '' : ' unused'}`,
+          onclick: () => this.select(i),
+        }, name));
+      }
+    }
     this.list.querySelector('.current')?.scrollIntoView({ block: 'nearest' });
+  }
+
+  // creates an empty animation source file (4 KB, 128 tiles)
+  private async newAnimFile(n: number): Promise<void> {
+    if (!(await confirmExAnim(this.app))) return;
+    try {
+      this.app.romEdit(`${gfxName(n)} angelegt`, () => writeAltFile(this.app.rom, n - ANIM_FILE, new Uint8Array(0x1000)));
+      this.reload();
+    } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
   }
 
   private newExGfx(): void {
@@ -439,6 +480,8 @@ export class GfxTab implements WsPanel {
     s.append(
       h('div', { class: 'prop-title' }, gfxName(f.num), f.empty ? h('span', { class: 'hint' }, ' (leer)') : ''),
       h('div', { class: 'hint' }, f.empty ? 'Diese Nummer ist nicht belegt.' : `${f.bpp}bpp · ${f.tiles} Tiles · ${f.raw ? 'unkomprimiert' : `LZ2 (${f.packed} Bytes)`} · $${hex(f.addr, 6)}`),
+      f.num >= ANIM_FILE ? h('div', { class: 'hint' }, 'Quellgrafik für eigene Animationen (Tab „Animationen“). Lunar Magic nennt sie ExGFX ' + hex(f.num - ANIM_FILE + 0x60, 2) + '.') : '',
+      f.num >= ANIM_FILE && f.empty ? h('button', { onclick: () => void this.newAnimFile(f.num) }, 'Anlegen (128 leere Tiles)') : '',
       used.length ? h('div', { class: 'hint' }, `Im Level als ${used.join(', ')}`) : h('div', { class: 'hint' }, 'Vom aktuellen Level nicht benutzt'),
       f.raw || f.empty ? '' : h('div', { class: 'prop' }, h('label', null, 'Format'),
         h('span', { class: 'btn-group' }, [2, 3, 4].map((b) => h('button', { class: f.bpp === b ? 'active' : '', title: 'Nur ändern, wenn die Grafik falsch aussieht', onclick: () => { this.bppOverride = b; this.reload(); } }, `${b}bpp`)))),
@@ -670,7 +713,7 @@ export class GfxTab implements WsPanel {
         this.draw(); this.buildSide();
         return;
       }
-      if (f.empty) { toast('Diese Nummer ist leer – „+ Neue ExGFX“ legt eine Datei an'); return; }
+      if (f.empty) { toast(f.num >= ANIM_FILE ? 'Die Datei gibt es noch nicht – rechts „Anlegen“' : 'Diese Nummer ist leer – „+ Neue ExGFX“ legt eine Datei an'); return; }
       const v = e.button === 2 ? 0 : this.color;
       if (tool === 'pen' || tool === 'fill') this.warnAnimated(p.x, p.y);
       if (tool === 'fill') { this.fill(p.x, p.y, v); this.draw(); this.commit('Füllen'); return; }
@@ -812,7 +855,9 @@ export class GfxTab implements WsPanel {
     const bmp = await createImageBitmap(file);
     if (bmp.width !== 128) { toast('Das Bild muss 128 Pixel breit sein (16 Tiles)', 'error'); return; }
     let raw = f.raw;
-    if (f.empty) {
+    if (f.num >= ANIM_FILE && !(await confirmExAnim(this.app))) return;
+    if (f.empty && f.num >= ANIM_FILE) raw = true;
+    else if (f.empty) {
       const c = await choose(`${gfxName(f.num)} anlegen`, 'In welchem Format speichern?', [{ label: 'Abbrechen' }, { label: 'LZ2 (wie Original, 3bpp/8 Farben)' }, { label: '4bpp unkomprimiert (16 Farben)', primary: true }]);
       if (!c) return;
       raw = c === 2;
@@ -837,7 +882,7 @@ export class GfxTab implements WsPanel {
       }
       return best;
     };
-    const tiles = raw ? 128 : Math.floor(bmp.height / 8) * 16;
+    const tiles = f.num >= ANIM_FILE ? Math.min(0x400, Math.floor(bmp.height / 8) * 16) : raw ? 128 : Math.floor(bmp.height / 8) * 16;
     const pix = new Uint8Array(tiles * 64);
     for (let t = 0; t < tiles; t++) {
       const bx = (t & 15) * 8, by = (t >> 4) * 8;
@@ -847,6 +892,7 @@ export class GfxTab implements WsPanel {
     try {
       this.app.romEdit(`${file.name} → ${gfxName(f.num)}`, () => {
         const enc = encodeGfx(nf);
+        if (f.num >= ANIM_FILE) { writeAltFile(this.app.rom, f.num - ANIM_FILE, enc); return; }
         const payload = raw ? enc : lz2Compress(enc);
         if (!f.empty) this.app.rom.freeAt(f.addr);
         setGfxEntry(this.app.rom, f.num, this.app.rom.allocWrite(payload), raw);
@@ -861,14 +907,24 @@ export class GfxTab implements WsPanel {
     const file = await pickFile('.bin');
     if (!file) return;
     let target = this.cur;
-    const n = exgfxName(file.name).num;
-    if (n !== null && n !== this.cur && n <= 0xff) {
+    const n0 = exgfxName(file.name).num;
+    // Lunar Magic's ExGFX 60-63 are the animation files
+    const n = n0 !== null && n0 >= 0x60 && n0 <= 0x63 ? ANIM_FILE + n0 - 0x60 : n0;
+    if (n !== null && n !== this.cur && (n <= 0xff || n >= ANIM_FILE)) {
       const c = await choose('Ziel wählen', `Der Dateiname nennt ${gfxName(n)}. Wohin soll die Grafik?`, [{ label: 'Abbrechen' }, { label: `In ${gfxName(this.cur)} (aktuelle Datei)` }, { label: `In ${gfxName(n)}`, primary: true }]);
       if (!c) return;
       if (c === 2) target = n;
-    } else if (gfxEntry(this.app.rom, target) && (await choose(`${gfxName(target)} überschreiben?`, `${file.name} ersetzt den Inhalt von ${gfxName(target)} (Rückgängig mit Strg+Z).`, [{ label: 'Abbrechen' }, { label: 'Überschreiben', primary: true }])) !== 1) return;
+    } else if ((target >= ANIM_FILE ? altFileAddr(this.app.rom, target - ANIM_FILE) : gfxEntry(this.app.rom, target)) && (await choose(`${gfxName(target)} überschreiben?`, `${file.name} ersetzt den Inhalt von ${gfxName(target)} (Rückgängig mit Strg+Z).`, [{ label: 'Abbrechen' }, { label: 'Überschreiben', primary: true }])) !== 1) return;
     try {
       const data = new Uint8Array(await file.arrayBuffer());
+      if (target >= ANIM_FILE) {
+        if (!(await confirmExAnim(this.app))) return;
+        if (data.length % 32 || data.length > 0x8000) throw new Error('Animationsgrafik: unkomprimierte 4bpp-Datei bis 32 KB erwartet');
+        this.app.romEdit(`${file.name} → ${gfxName(target)}`, () => writeAltFile(this.app.rom, target - ANIM_FILE, data));
+        this.select(target);
+        toast(`${file.name} → ${gfxName(target)}`);
+        return;
+      }
       const what = this.app.romEdit(`${file.name} → ${gfxName(target)}`, () => importGfxFile(this.app.rom, target, data));
       this.select(target);
       toast(`${file.name} → ${gfxName(target)} (${what})`);
