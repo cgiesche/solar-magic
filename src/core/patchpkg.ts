@@ -43,7 +43,9 @@ function isZip(d: Uint8Array): boolean {
   return d.length > 4 && d[0] === 0x50 && d[1] === 0x4b && d[2] === 0x03 && d[3] === 0x04;
 }
 
-export function readPackage(fileName: string, data: Uint8Array): PatchPackage {
+// the files of a .zip (or the single file), paths relative to the archive root; one common top-level
+// folder is stripped
+export function packageFiles(fileName: string, data: Uint8Array): Map<string, Uint8Array> {
   let files = new Map<string, Uint8Array>();
   if (isZip(data)) {
     const all = unzipSync(data);
@@ -63,7 +65,11 @@ export function readPackage(fileName: string, data: Uint8Array): PatchPackage {
   } else {
     files.set(fileName.split(/[\\/]/).pop()!, data);
   }
-  return packageFromFiles(fileName, files);
+  return files;
+}
+
+export function readPackage(fileName: string, data: Uint8Array): PatchPackage {
+  return packageFromFiles(fileName, packageFiles(fileName, data));
 }
 
 // package from already extracted files (paths relative to the package root)
