@@ -203,9 +203,9 @@ export class GfxWorkspace {
     this.map16.select(tile, bg);
   }
 
-  showGfx(file: number, tile?: number): void {
+  showGfx(file: number, tile?: number, palRow?: number): void {
     this.open('gfx');
-    this.gfx.select(file, tile);
+    this.gfx.select(file, tile, palRow);
   }
 
   key(e: KeyboardEvent): boolean {

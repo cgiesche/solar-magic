@@ -296,9 +296,16 @@ export class Map16Tab implements WsPanel {
     ctx.strokeStyle = '#ffb000';
     ctx.lineWidth = 3;
     ctx.strokeRect((this.quad >> 1) * 8 * BZ + 1.5, (this.quad & 1) * 8 * BZ + 1.5, 8 * BZ - 3, 8 * BZ - 3);
+    cv.title = 'Klick: Viertel wählen · Doppelklick: 8x8-Tile im Grafik-Tab bearbeiten';
     cv.addEventListener('mousedown', (e) => {
       const rc = cv.getBoundingClientRect();
-      this.quad = quarterAt(e.clientX - rc.left >= rc.width / 2 ? 1 : 0, e.clientY - rc.top >= rc.height / 2 ? 1 : 0);
+      const q = quarterAt(e.clientX - rc.left >= rc.width / 2 ? 1 : 0, e.clientY - rc.top >= rc.height / 2 ? 1 : 0);
+      // the canvas is rebuilt on every click, so a double click is two clicks on the same quarter
+      const now = performance.now();
+      const dbl = q === this.lastClick.q && now - this.lastClick.t < 400;
+      this.lastClick = { q, t: dbl ? 0 : now };
+      this.quad = q;
+      if (dbl) { this.editGfx(q); return; }
       this.buildBuilder();
       this.drawGfx();
     });
@@ -346,6 +353,17 @@ export class Map16Tab implements WsPanel {
         h('div', { class: 'hint' }, this.tileAddr(t) < 0 ? 'Erweitertes Tile – wird beim ersten Ändern angelegt.' : `ROM $${hex(this.tileAddr(t), 6)}`)),
       h('p', { class: 'hint' }, 'Viertel anklicken, dann rechts ein 8x8-Tile wählen. 2×2 Tiles ziehen füllt alle vier Viertel; ein Tile auf ein Viertel ziehen setzt genau dieses. Tasten: X/Y spiegeln, 1–8 Palette, Q nächstes Viertel, Pfeile anderes Tile.'),
     );
+  }
+
+  private lastClick = { q: -1, t: 0 };
+
+  // opens the quarter's 8x8 tile in the graphics tab, in the quarter's palette
+  private editGfx(q: number): void {
+    const w = this.words(this.sel)[q];
+    const num = w & 0x3ff;
+    const slot = levelSlots(this.app).find((s) => num >= s.first && num < s.first + 0x80);
+    if (!slot) { toast(`8x8-Tile ${hex(num, 3)} liegt in keinem Grafik-Slot dieses Levels`); return; }
+    this.ws.showGfx(slot.file, num - slot.first, (w >> 10) & 7);
   }
 
   private rangeText(t: number): string {

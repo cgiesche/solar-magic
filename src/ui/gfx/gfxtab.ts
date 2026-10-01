@@ -95,6 +95,7 @@ export class GfxTab implements WsPanel {
   private tool: Tool = 'pen';
   private zoom = 4;
   private fitted = false; // zoomed to fit once on first show
+  private zoomFixed = false; // opened at a tile: no fitting
   private grid: 0 | 8 | 16 = 8;
   private sel: Sel | null = null;
   private float: Float | null = null;
@@ -145,17 +146,34 @@ export class GfxTab implements WsPanel {
   show(): void {
     this.visible = true;
     this.reload();
-    if (!this.fitted) { this.fitted = true; requestAnimationFrame(() => this.fit()); }
+    if (!this.fitted) { this.fitted = true; requestAnimationFrame(() => { if (!this.zoomFixed) this.fit(); }); }
   }
   hide(): void {
     this.dropFloat();
     this.visible = false;
   }
 
-  select(file: number, tile?: number): void {
+  select(file: number, tile?: number, palRow?: number): void {
     if (file !== this.cur) { this.dropFloat(); this.cur = file; this.bppOverride = null; this.palRow = -1; this.sel = null; }
-    if (tile !== undefined) this.focusTile = tile;
+    if (palRow !== undefined) this.palRow = palRow;
+    if (tile !== undefined) {
+      this.focusTile = tile;
+      // zoom in on the tile (at least 12x), select it for flip/rotate
+      this.sel = { x: (tile & 15) * 8, y: (tile >> 4) * 8, w: 8, h: 8 };
+      this.fitted = this.zoomFixed = true;
+      if (this.zoom < 12) this.zoom = 12;
+    }
     if (this.visible) this.reload();
+    if (tile !== undefined) this.scrollToTile(tile);
+  }
+
+  private scrollToTile(t: number): void {
+    requestAnimationFrame(() => {
+      const v = this.view, z = this.zoom;
+      v.scrollLeft = ((t & 15) * 8 + 4) * z - v.clientWidth / 2;
+      v.scrollTop = ((t >> 4) * 8 + 4) * z - v.clientHeight / 2;
+      this.syncZoomUi();
+    });
   }
 
   private reload(): void {
@@ -511,26 +529,31 @@ export class GfxTab implements WsPanel {
     this.off.getContext('2d')!.putImageData(this.img, 0, 0);
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(this.off, 0, 0, W * z, H * z);
-    if (this.grid) {
-      ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+    // grids: a dark and a light line next to each other stay visible on any color
+    const lines = (step: number, dark: string, light: string) => {
       ctx.lineWidth = 1;
-      ctx.beginPath();
-      for (let x = this.grid; x < W; x += this.grid) { ctx.moveTo(x * z + 0.5, 0); ctx.lineTo(x * z + 0.5, H * z); }
-      for (let y = this.grid; y < H; y += this.grid) { ctx.moveTo(0, y * z + 0.5); ctx.lineTo(W * z, y * z + 0.5); }
-      ctx.stroke();
-    }
-    if (z >= 12) {
-      // pixel grid at high zoom
-      ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+      for (const [col, d] of [[dark, 0.5], [light, 1.5]] as [string, number][]) {
+        ctx.strokeStyle = col;
+        ctx.beginPath();
+        for (let x = step; x < W; x += step) { ctx.moveTo(x * z - 1 + d, 0); ctx.lineTo(x * z - 1 + d, H * z); }
+        for (let y = step; y < H; y += step) { ctx.moveTo(0, y * z - 1 + d); ctx.lineTo(W * z, y * z - 1 + d); }
+        ctx.stroke();
+      }
+    };
+    if (this.grid && z >= 8) {
+      ctx.strokeStyle = 'rgba(128,128,128,0.35)';
+      ctx.lineWidth = 1;
       ctx.beginPath();
       for (let x = 1; x < W; x++) { ctx.moveTo(x * z + 0.5, 0); ctx.lineTo(x * z + 0.5, H * z); }
       for (let y = 1; y < H; y++) { ctx.moveTo(0, y * z + 0.5); ctx.lineTo(W * z, y * z + 0.5); }
       ctx.stroke();
     }
+    if (this.grid === 8) lines(8, 'rgba(0,0,0,0.7)', 'rgba(255,255,255,0.55)');
+    if (this.grid) lines(16, 'rgba(0,0,0,0.85)', 'rgba(76,194,255,0.9)');
     if (this.focusTile >= 0 && this.focusTile < f.tiles) {
       ctx.strokeStyle = '#ffb000';
-      ctx.lineWidth = 2;
-      ctx.strokeRect((this.focusTile & 15) * 8 * z + 1, (this.focusTile >> 4) * 8 * z + 1, 8 * z - 2, 8 * z - 2);
+      ctx.lineWidth = 3;
+      ctx.strokeRect((this.focusTile & 15) * 8 * z - 1.5, (this.focusTile >> 4) * 8 * z - 1.5, 8 * z + 3, 8 * z + 3);
     }
     const r = this.float ?? this.sel;
     if (r) {
