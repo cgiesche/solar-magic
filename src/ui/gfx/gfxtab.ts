@@ -89,19 +89,24 @@ function storeGfx(rom: Rom, f: GfxFile): void {
   setGfxEntry(rom, f.num, f.addr, false);
 }
 
-// slots of a level: name, storage index (levelGfx order) or BG2/BG3 index, file, default file
+// slots of a level: name, storage index (levelGfx order) or BG2/BG3 index, file, default file; first: the
+// first 8x8 tile number (Map16 tiles, or for SP1-SP4 the sprite tile number in OAM: 100-1FF = page 1)
 interface Slot { name: string; k: number; ext: boolean; file: number; def: number; custom: boolean; first: number; sprite: boolean }
 function slotsOf(app: App, level: number, tileset: number, spriteSet: number): Slot[] {
   const set = levelGfx(app.rom, level);
   const def = defaultGfx(app.rom, tileset, spriteSet);
-  const order: [string, number, number][] = [['FG1', 7, 0], ['FG2', 6, 0x80], ['BG1', 5, 0x100], ['FG3', 4, 0x180], ['SP1', 3, -1], ['SP2', 2, -1], ['SP3', 1, -1], ['SP4', 0, -1]];
-  const out: Slot[] = order.map(([name, k, first]) => ({ name, k, ext: false, file: set[k] !== 0xff ? set[k] : def[k], def: def[k], custom: set[k] !== 0xff, first, sprite: first < 0 }));
+  const order: [string, number, number][] = [['FG1', 7, 0], ['FG2', 6, 0x80], ['BG1', 5, 0x100], ['FG3', 4, 0x180], ['SP1', 3, 0x00], ['SP2', 2, 0x80], ['SP3', 1, 0x100], ['SP4', 0, 0x180]];
+  const out: Slot[] = order.map(([name, k, first]) => ({ name, k, ext: false, file: set[k] !== 0xff ? set[k] : def[k], def: def[k], custom: set[k] !== 0xff, first, sprite: name.startsWith('SP') }));
   if (extGfxAvailable(app.rom)) {
     const ex = levelExtGfx(app.rom, level);
     ['BG2', 'BG3'].forEach((name, k) => out.push({ name, k, ext: true, file: ex[k], def: 0xff, custom: ex[k] !== 0xff, first: 0x200 + k * 0x80, sprite: false }));
   }
   return out;
 }
+
+const spriteRange = (first: number) => first < 0x100 ? `${hex(first, 2)}–${hex(first + 0x7f, 2)}` : `${hex(first, 3)}–${hex(first + 0x7f, 3)}`;
+// sprite tile number of tile t of a sprite slot, as patches write it
+const spriteTile = (first: number, t: number) => first + t < 0x100 ? hex(first + t, 2) : `${hex(first + t, 3)} (Seite 2: ${hex((first + t) & 0xff, 2)} mit T-Bit)`;
 
 type Tool = 'pen' | 'fill' | 'pick' | 'select';
 interface Sel { x: number; y: number; w: number; h: number }
@@ -282,7 +287,7 @@ export class GfxTab implements WsPanel {
       box.append(h('div', { class: `gt-card${has && s.file === this.cur ? ' active' : ''}${has ? '' : ' empty'}` },
         h('div', { class: 'gt-card-head' }, h('b', null, s.name), status),
         h('div', { class: 'gt-card-body', title: has ? `${gfxName(s.file)} öffnen` : '', onclick: () => { if (has) this.select(s.file); } }, thumb, h('span', { class: 'mono' }, has ? gfxName(s.file) : '–')),
-        h('div', { class: 'hint gt-card-range', title: s.sprite ? 'Grafik für Sprites (nicht für Map16-Tiles)' : 'Diese 8x8-Tile-Nummern benutzen die Map16-Tiles' }, s.sprite ? 'Sprites' : `Tiles ${hex(s.first, 3)}–${hex(s.first + 0x7f, 3)}`),
+        h('div', { class: 'hint gt-card-range', title: s.sprite ? 'Sprite-Tile-Nummern (wie in Patches und Sprites); ab 100 = zweite Seite (T-Bit), dort ohne die 1 angegeben' : 'Diese 8x8-Tile-Nummern benutzen die Map16-Tiles' }, s.sprite ? `Sprite-Tiles ${spriteRange(s.first)}` : `Tiles ${hex(s.first, 3)}–${hex(s.first + 0x7f, 3)}`),
         h('button', { class: 'gt-card-btn', onclick: () => void this.swap(s) }, 'Tauschen …')));
     }
     if (!extGfxAvailable(app.rom)) box.append(h('div', { class: 'gt-card empty' }, h('div', { class: 'gt-card-head' }, h('b', null, 'BG2/BG3')),
@@ -862,7 +867,8 @@ export class GfxTab implements WsPanel {
       const t = (p.y >> 3) * 16 + (p.x >> 3);
       if (p.y * 128 + p.x === lastHover) return;
       lastHover = p.y * 128 + p.x;
-      c.title = `Tile ${hex(t, 2)}${this.animatedTiles().has(t) ? ' (animiert)' : ''} · Pixel ${p.x & 7},${p.y & 7} · Farbe ${this.file ? this.get(Math.max(0, p.x), Math.max(0, p.y)) : ''}`;
+      const spr = t < 0x80 ? this.levelSlots().filter((s) => s.sprite && s.file === this.cur).map((s) => ` · Sprite-Tile ${spriteTile(s.first, t)}`).join('') : '';
+      c.title = `Tile ${hex(t, 2)}${spr}${this.animatedTiles().has(t) ? ' (animiert)' : ''} · Pixel ${p.x & 7},${p.y & 7} · Farbe ${this.file ? this.get(Math.max(0, p.x), Math.max(0, p.y)) : ''}`;
     });
   }
 
