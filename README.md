@@ -140,6 +140,7 @@ Der Editor enthält Asar (als WebAssembly) und wendet damit ASM-Code direkt im B
 
 Jeder Patch wird mit Originalbytes und Quellen in der ROM verzeichnet und lässt sich jederzeit wieder
 entfernen. Details, `patch.json` und die Schnittstellen für eigene Patches: [docs/patches.md](docs/patches.md).
+Wessen Formate und Schnittstellen der Editor nachbildet: [docs/credits.md](docs/credits.md).
 
 ## Grenzen / nicht enthalten
 

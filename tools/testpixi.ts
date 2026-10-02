@@ -5,6 +5,9 @@ import { Rom } from '../src/core/rom.ts';
 import { loadLevel, parseSprites, serializeSprites, spriteSizes, SPR_SIZE_PTR, newUid, type LevelSprite } from '../src/core/level.ts';
 import { exportLevelFile, importLevelFile } from '../src/core/levelfile.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
+import { serializeLayer1, isL1Vertical } from '../src/core/level.ts';
+import { installEditorPatch, DM16_EXT } from '../src/core/patches.ts';
+import { setActsLike } from '../src/core/map16ext.ts';
 import { captureSprites } from '../src/core/spritegfx.ts';
 import { loadAsar } from '../src/core/asar.ts';
 import { ROUTINES } from '../src/core/pixiroutines.ts';
@@ -328,6 +331,40 @@ print "MAIN ",pc
   const w7 = (a: number) => e7.snes.wram[a - 0x7e0000];
   const names = ['cluster', 'extended', 'minor extended', 'score', 'spinning coin', 'smoke', 'bounce'];
   names.forEach((n, i) => check(w7(0x7fb030 + i) > 0, `custom ${n} sprite runs (${w7(0x7fb030 + i)} frames)`));
+}
+
+// a package with a block that spawns its custom bounce sprite (Aftertouch Shatter, resources_local): the block
+// Mario stood on shatters once he has left it
+if (existsSync('resources_local/Aftertouch Shatter.zip')) {
+  const r8 = new Rom(new Uint8Array(readFileSync('Super Mario World (U) [!].smc')));
+  installEditorPatch(r8);
+  const f = 'resources_local/Aftertouch Shatter.zip';
+  const pkg = packageFromFiles('Aftertouch Shatter.zip', packageFiles('Aftertouch Shatter.zip', new Uint8Array(readFileSync(f))));
+  const plan = planPixiPackage(r8, pkg);
+  check(plan.sprites.length === 1 && plan.sprites[0].kind === 'bounce' && plan.blocks.length === 1 && plan.links.some((l) => l.define === 'bounce_sprite'),
+    'Shatter: a bounce sprite, a block and the block\'s !bounce_sprite');
+  const e8 = new LevelEmulator(r8); e8.boot();
+  const blank = [0x1f8, 0x1f8, 0x1f8, 0x1f8];
+  const res8 = applyPixiPackage(r8, pkg, plan, blank, () => [0x1f8, 0x1f8, 0x1f8, 0x1f8]);
+  if (!res8.ok) console.log(res8.errors.join('\n'));
+  check(res8.ok, 'Shatter applied (GPS routines spawn_bounce_sprite and change_map16 built in)');
+  setActsLike(r8, 0x601, 0x130, blank); // the package's cracked tile (!cracked_tile = $0601), solid
+  e8.syncRom();
+  const tile = plan.blocks[0].tile;
+  const l8 = loadLevel(r8, 0x105);
+  l8.objects.push({ uid: newUid(), num: 0, ext: DM16_EXT, x: 0, y: 24, size: 0x08, tile }); // floor of shatter blocks under Mario
+  e8.load(0x105, { layer1: serializeLayer1(r8, l8), sprites: serializeSprites(l8.sprites, l8.spriteHeader, isL1Vertical(r8, l8.header.mode), spriteSizes(r8)) });
+  const s8 = e8.snes, w8 = s8.wram;
+  let g = 0; while (w8[0x100] !== 0x14 && g++ < 100) s8.runFrame();
+  const at = (x: number, y: number) => w8[0xc800 + (x >> 4) * 0x1b0 + y * 16 + (x & 15)] | (w8[0x1c800 + (x >> 4) * 0x1b0 + y * 16 + (x & 15)] << 8);
+  const before = at(2, 24);
+  let bounced = false;
+  for (let i = 0; i < 160; i++) { s8.joy1 = 0x0100; s8.runFrame(); if (w8[0x1699] || w8[0x169a] || w8[0x169b] || w8[0x169c]) bounced = true; }
+  s8.joy1 = 0;
+  for (let i = 0; i < 20; i++) s8.runFrame();
+  const after = at(2, 24);
+  check(before === tile && bounced, `Shatter: the block spawns its bounce sprite (block ${before.toString(16)})`);
+  check(after !== tile, `Shatter: the block is gone after Mario left it (now ${after.toString(16)})`);
 }
 
 // removing restores the ROM

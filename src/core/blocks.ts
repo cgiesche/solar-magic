@@ -11,6 +11,7 @@ import { applyPatch, reapplyPatch, uninstallPatch, type ApplyResult, type PatchS
 import { listPatches, patchArchive, type PatchEntry } from './patchreg.ts';
 import { enableBlocks, map16Ext, setBlock, setActsLike, EXT_TILES } from './map16ext.ts';
 import { definesFile, DEFAULT_FREERAM } from './uberasm.ts';
+import { GPS_ROUTINES, GPS_DEFINES } from './gpsroutines.ts';
 
 export const BLOCKS_NAME = 'Custom Blocks';
 
@@ -51,10 +52,15 @@ export function buildBlockPatch(p: BlockProject): PatchSource {
     if (!p.files.has(f)) throw new Error(`Block-Datei „${f}“ fehlt`);
     out.push('', 'freecode cleaned', `namespace GpsB${i}`, 'GpsBlock:', `incsrc "${f}"`, 'namespace off');
   });
-  // shared routines as %name(), each assembled once when first used
-  const routines = [...p.files.keys()].filter((f) => /^routines\/[A-Za-z0-9_]+\.asm$/.test(f));
-  const macros = routines.map((f) => {
-    const n = f.slice(9, -4);
+  // shared routines as %name(), each assembled once when first used; the project's own, then GPS's standard ones
+  const files = new Map<string, Uint8Array | string>(p.files);
+  const routines = new Map([...p.files.keys()].filter((f) => /^routines\/[A-Za-z0-9_]+\.asm$/.test(f)).map((f) => [f.slice(9, -4), f]));
+  for (const [n, text] of Object.entries(GPS_ROUTINES)) {
+    if (routines.has(n)) continue;
+    files.set(`__gps_routines/${n}.asm`, text);
+    routines.set(n, `__gps_routines/${n}.asm`);
+  }
+  const macros = [...routines].map(([n, f]) => {
     return `macro ${n}()
   if not(defined("GpsRoutine_${n}"))
     pushpc
@@ -67,8 +73,7 @@ export function buildBlockPatch(p: BlockProject): PatchSource {
   JSL !GpsRoutine_${n}
 endmacro`;
   });
-  const files = new Map<string, Uint8Array | string>(p.files);
-  files.set('__gps_defines.asm', definesFile(DEFAULT_FREERAM) + '\n' + macros.join('\n') + '\n');
+  files.set('__gps_defines.asm', definesFile(DEFAULT_FREERAM) + GPS_DEFINES + '\n' + macros.join('\n') + '\n');
   files.set('__gps_main.asm', out.join('\n') + '\n');
   return { name: BLOCKS_NAME, main: '__gps_main.asm', files, kind: 'blocks', archive: projectToZip(p) };
 }

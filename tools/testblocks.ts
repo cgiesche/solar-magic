@@ -8,6 +8,7 @@ import { installEditorPatch, DM16_EXT } from '../src/core/patches.ts';
 import { setActsLike, setExtTileWords, map16Ext, blockOf } from '../src/core/map16ext.ts';
 import { map16Source } from '../src/core/render.ts';
 import { loadAsar } from '../src/core/asar.ts';
+import { GPS_ROUTINES } from '../src/core/gpsroutines.ts';
 import { saveBlockProject, loadBlockProject, removeBlocks, parseBlockList, writeBlockList, type BlockProject } from '../src/core/blocks.ts';
 
 await loadAsar();
@@ -89,6 +90,17 @@ check(blockOf(rom, WALL) === null && play(PASS, 120, REF, false).x === refRun.x,
   const up = saveBlockProject(old, { ...project, list: parseBlockList(`2B0 marker.asm\n`) }, blank);
   const nx = map16Ext(old)!;
   check(up.ok && nx.version === 2 && nx.base !== ex.base && nx.gfx === ex.gfx && old.r16(nx.acts + 0x2b0 * 2) === 0x130, 'SMWX v1 upgraded with its tables');
+}
+
+// GPS's standard routines are built in: every one assembles (called from code that never runs)
+{
+  const r2 = new Rom(new Uint8Array(readFileSync('Super Mario World (U) [!].smc')));
+  installEditorPatch(r2);
+  const names = Object.keys(GPS_ROUTINES).filter((n) => !/^[A-Z]/.test(n));
+  const all = ['db $42', ...OFFS.map((o) => `JMP ${o}`), ...OFFS.map((o) => `${o}:`), '  RTL', ...names.map((n) => `  %${n}()`), '  RTL'].join('\n');
+  const res = saveBlockProject(r2, { files: new Map([['blocks/all.asm', enc.encode(all)]]), list: parseBlockList('2C0 all.asm\n') }, blank);
+  if (!res.ok) console.log(res.errors.join('\n'));
+  check(res.ok, `all ${names.length} GPS routines assemble`);
 }
 
 console.log(bad ? `${bad} failures` : 'all ok');

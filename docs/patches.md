@@ -193,7 +193,11 @@ MarioSide:
   neue Verhalten. Beispiel: `LDY #$00 : LDA #$25 : STA $1693` macht den Block für diesen Kontakt zu Luft.
 * **X** ist das X des Aufrufers (Sprite-Index bei `SpriteV/H`, Feuerball-Index bei `MarioFireball`). Es
   wird danach wiederhergestellt.
-* Shared Routines aus `routines/` werden als `%name()` aufgerufen und nur einmal eingefügt.
+* Shared Routines aus `routines/` werden als `%name()` aufgerufen und nur einmal eingefügt. Die
+  Standard-Routinen von GPS 1.4.5 sind eingebaut (`change_map16`, `get_map16`, `spawn_bounce_sprite`,
+  `spawn_sprite`, `shatter_block`, `glitter`, `teleport` …, mit denselben Ein- und Ausgaben, nach den Routinen
+  des Spiels geschrieben); gleichnamige Dateien in `routines/` haben Vorrang. Ebenso die zusätzlichen Defines
+  von GPS (`!sprite_extra_bits`, `!bounce_map16_low` … für den Custom-Bounce-Block-Patch).
 * `list.txt` wie bei GPS: `200 block.asm` oder `200:130 block.asm` (Tile, optional „acts like“).
   Zuweisen lässt sich auch im Map16-Editor (*Custom Blocks …*).
 
