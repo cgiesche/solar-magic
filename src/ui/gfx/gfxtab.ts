@@ -45,28 +45,29 @@ export function defaultBpp(i: number, size: number): number {
   return 4;
 }
 
-interface GfxFile { num: number; addr: number; raw: boolean; bpp: number; packed: number; pix: Uint8Array; tiles: number; empty: boolean }
+interface GfxFile { num: number; addr: number; raw: boolean; bpp: number; auto: number; packed: number; pix: Uint8Array; tiles: number; empty: boolean } // auto: the detected bpp
 
 // decodes a file into pixel indices (64 per 8x8 tile)
 export function loadGfx(rom: Rom, num: number, bppOverride: number | null = null): GfxFile {
   if (num >= ANIM_FILE) {
     const d = readAltFile(rom, num - ANIM_FILE);
-    if (!d) return { num, addr: 0, raw: true, bpp: 4, packed: 0, pix: new Uint8Array(128 * 64), tiles: 128, empty: true };
+    if (!d) return { num, addr: 0, raw: true, bpp: 4, auto: 4, packed: 0, pix: new Uint8Array(128 * 64), tiles: 128, empty: true };
     const tiles = Math.max(1, d.length >> 5);
     const pix = new Uint8Array(tiles * 64);
     for (let t = 0; t < tiles; t++) decodeTile(d, t * 32, 4, pix, t * 64);
-    return { num, addr: altFileAddr(rom, num - ANIM_FILE), raw: true, bpp: 4, packed: d.length, pix, tiles, empty: false };
+    return { num, addr: altFileAddr(rom, num - ANIM_FILE), raw: true, bpp: 4, auto: 4, packed: d.length, pix, tiles, empty: false };
   }
   const e = gfxEntry(rom, num);
-  if (!e) return { num, addr: 0, raw: true, bpp: 4, packed: 0, pix: new Uint8Array(128 * 64), tiles: 128, empty: true };
+  if (!e) return { num, addr: 0, raw: true, bpp: 4, auto: 4, packed: 0, pix: new Uint8Array(128 * 64), tiles: 128, empty: true };
   let data: Uint8Array, packed: number;
   if (e.raw) { data = rom.bytes(e.addr, 0x1000); packed = 0x1000; }
   else ({ data, size: packed } = lz2Decompress(rom.data, snesToPc(e.addr)));
-  const bpp = e.raw ? 4 : bppOverride ?? defaultBpp(num, data.length);
+  const auto = e.raw ? 4 : defaultBpp(num, data.length);
+  const bpp = e.raw ? 4 : bppOverride ?? auto;
   const tiles = Math.max(1, Math.floor(data.length / (bpp * 8)));
   const pix = new Uint8Array(tiles * 64);
   for (let t = 0; t < tiles; t++) decodeTile(data, t * bpp * 8, bpp, pix, t * 64);
-  return { num, addr: e.addr, raw: e.raw, bpp, packed, pix, tiles, empty: false };
+  return { num, addr: e.addr, raw: e.raw, bpp, auto, packed, pix, tiles, empty: false };
 }
 
 function encodeGfx(f: GfxFile): Uint8Array {
@@ -113,6 +114,7 @@ export class GfxTab implements WsPanel {
   private cur = 0x14;
   private file: GfxFile | null = null;
   private bppOverride: number | null = null;
+  private bppOk = -1; // file confirmed to be edited in a format other than the detected one
   private palRow = -1; // -1: automatic for the file
   private color = 1;
   private tool: Tool = 'pen';
@@ -544,8 +546,9 @@ export class GfxTab implements WsPanel {
       f.num >= ANIM_FILE && f.empty ? h('button', { onclick: () => void this.newAnimFile(f.num) }, 'Anlegen (128 leere Tiles)') : '',
       used.length ? h('div', { class: 'hint' }, `Im Level als ${used.join(', ')}`) : h('div', { class: 'hint' }, 'Vom aktuellen Level nicht benutzt'),
       f.num < ANIM_FILE && !f.empty ? this.assignMenu(f.num, used.length > 0) : '',
-      f.raw || f.empty ? '' : h('div', { class: 'prop' }, h('label', null, 'Format'),
-        h('span', { class: 'btn-group' }, [2, 3, 4].map((b) => h('button', { class: f.bpp === b ? 'active' : '', title: 'Nur ändern, wenn die Grafik falsch aussieht', onclick: () => { this.bppOverride = b; this.reload(); } }, `${b}bpp`)))),
+      f.raw || f.empty ? '' : h('div', { class: 'prop' }, h('label', { title: 'Wie die Datei gelesen wird; Zeichnen speichert sie in diesem Format' }, 'Lesen als'),
+        h('span', { class: 'btn-group' }, [2, 3, 4].map((b) => h('button', { class: f.bpp === b ? 'active' : '', title: b === f.auto ? 'Erkanntes Format' : 'Nur wählen, wenn die Grafik falsch aussieht', onclick: () => { this.bppOverride = b === f.auto ? null : b; this.reload(); } }, `${b}bpp`)))),
+      !f.raw && !f.empty && f.bpp !== f.auto ? h('div', { class: 'warn-box' }, `Erkannt wurde ${f.auto}bpp. Wer hier malt, speichert die Datei als ${f.bpp}bpp – das Spiel liest sie dann so.`) : '',
       h('div', { class: 'panel-title' }, 'Farbe', h('span', { class: 'hint' }, 'Rechtsklick malt transparent')),
       sw,
       h('div', { class: 'panel-title' }, 'Palette', h('span', { class: 'hint' }, this.palRow < 0 ? 'automatisch' : h('a', { href: '#', onclick: (e: Event) => { e.preventDefault(); this.palRow = -1; this.draw(); this.buildSide(); } }, 'automatisch'))),
@@ -794,6 +797,14 @@ export class GfxTab implements WsPanel {
         return;
       }
       if (f.empty) { toast(f.num >= ANIM_FILE ? 'Die Datei gibt es noch nicht – rechts „Anlegen“' : 'Diese Nummer ist leer – „+ Neue ExGFX“ legt eine Datei an'); return; }
+      if (f.bpp !== f.auto && this.bppOk !== f.num) {
+        void choose(`${gfxName(f.num)} als ${f.bpp}bpp speichern?`, `Die Datei wurde als ${f.auto}bpp erkannt und wird gerade als ${f.bpp}bpp gelesen. Zeichnen speichert sie in diesem Format. Das ist nur richtig, wenn die Erkennung falsch lag.`,
+          [{ label: 'Abbrechen' }, { label: `Zurück zu ${f.auto}bpp` }, { label: `Als ${f.bpp}bpp bearbeiten`, primary: true }]).then((c) => {
+          if (c === 1) { this.bppOverride = null; this.reload(); }
+          if (c === 2) this.bppOk = f.num;
+        });
+        return;
+      }
       const v = e.button === 2 ? 0 : this.color;
       if (tool === 'pen' || tool === 'fill') this.warnAnimated(p.x, p.y);
       if (tool === 'fill') { this.fill(p.x, p.y, v); this.draw(); this.app.renderPause(); this.commit('Füllen'); return; }
