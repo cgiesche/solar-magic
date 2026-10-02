@@ -2,7 +2,8 @@ import './style.css';
 import { Rom } from './core/rom.ts';
 import { disableUnsafeExtGfx, hasEditorPatch } from './core/patches.ts';
 import { App, type EditMode } from './ui/app.ts';
-import { h, clear, toast, downloadBytes, pickFile, modal } from './ui/dom.ts';
+import { h, clear, toast, log, downloadBytes, pickFile, modal } from './ui/dom.ts';
+import { LogBar } from './ui/logbar.ts';
 import { kvGet, kvSet } from './ui/storage.ts';
 import { LevelView } from './ui/levelview.ts';
 import { LevelList, Palette, Properties } from './ui/panels.ts';
@@ -22,6 +23,10 @@ import { openMessagesDialog } from './ui/messagedialog.ts';
 
 const root = document.getElementById('app')!;
 
+// errors nobody caught would otherwise only show up in the dev console
+window.addEventListener('error', (e) => log(`Unerwarteter Fehler: ${e.message}`, 'error'));
+window.addEventListener('unhandledrejection', (e) => log(`Unerwarteter Fehler: ${e.reason instanceof Error ? e.reason.message : e.reason}`, 'error'));
+
 function welcome(): void {
   clear(root);
   const drop = h('div', { class: 'welcome' },
@@ -40,6 +45,7 @@ async function openFile(f: File): Promise<void> {
 }
 
 function startWith(rom: Rom, name: string): void {
+  log(`ROM „${name}“ geladen (${Math.round(rom.size / 1024)} KB${rom.smcHeader ? ', mit Header' : ''})`);
   if (disableUnsafeExtGfx(rom)) {
     kvSet('rom', { name, data: rom.output(false), header: rom.smcHeader }).catch(() => {});
     toast('BG2/BG3-Grafik wurde abgeschaltet: sie überschrieb die Layer-1-Tilemap (kaputter Hintergrund). Die Zuordnungen bleiben gespeichert und gelten wieder, sobald der VRAM-Patch verfügbar ist.', 'error');
@@ -144,6 +150,7 @@ function buildUi(app: App): void {
     ] },
     { label: 'Hilfe', items: [
       { label: 'Tastenkürzel …', shortcut: '?', onClick: () => showHelp() },
+      { label: 'Protokoll ein-/ausklappen', shortcut: 'L', onClick: () => logBar.toggle() },
     ] },
   ]);
   const wsBtn = (w: typeof workspace, label: string, key: string) => h('button', { 'data-ws': w, title: `${label} (${key})`, onclick: () => setWorkspace(w) }, label);
@@ -188,10 +195,12 @@ function buildUi(app: App): void {
   const left = h('div', { class: 'left' }, levels.root);
   const center = h('div', { class: 'center' }, view.root, status);
   const right = h('div', { class: 'right' }, palette.root, props.root);
-  const layout = h('div', { class: 'layout' }, appbar, levelBar, left, center, right, busyIndicator(app));
+  const logBar = new LogBar();
+  const busy = busyIndicator(app);
+  const layout = h('div', { class: 'layout' }, appbar, levelBar, left, center, right, logBar.root, busy);
   root.append(layout);
   const owRight = h('div', { class: 'right' });
-  const showLayout = (bar: HTMLElement, l: HTMLElement, main: HTMLElement, side: HTMLElement) => layout.replaceChildren(appbar, bar, l, main, side);
+  const showLayout = (bar: HTMLElement, l: HTMLElement, main: HTMLElement, side: HTMLElement) => layout.replaceChildren(appbar, bar, l, main, side, logBar.root, busy);
 
   // switches between the level editor, the overworld editor and the graphics workspace (palettes, Map16, GFX);
   // gfx: tab to open (default: the last one), Map16 tile to show
@@ -254,6 +263,7 @@ function buildUi(app: App): void {
     const ctrl = e.ctrlKey || e.metaKey;
     if (k === 'F1' || k === '?') { e.preventDefault(); showHelp(); return; }
     if (k === 'o' || k === 'O') { setWorkspace(workspace === 'ow' ? 'level' : 'ow'); return; }
+    if ((k === 'l' || k === 'L') && !ctrl && !e.altKey) { logBar.toggle(); return; }
     if (workspace === 'gfx' && ws) {
       if (ctrl && k.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) app.redo(); else app.undo(); return; }
       if (ctrl && k.toLowerCase() === 'y') { e.preventDefault(); app.redo(); return; }
@@ -318,6 +328,7 @@ function exportRom(app: App): void {
   const out = app.rom.output(withHeader);
   const base = app.romName.replace(/\.(smc|sfc|bin)$/i, '');
   downloadBytes(`${base}.${withHeader ? 'smc' : 'sfc'}`, out);
+  log(`ROM exportiert als „${base}.${withHeader ? 'smc' : 'sfc'}“ (${Math.round(out.length / 1024)} KB)`);
   app.persist();
 }
 
@@ -329,6 +340,7 @@ function showHelp(): void {
       ['Esc / O / M · P · A', 'Bereich Level / Overworld / Grafik (Map16, Paletten, Animationen)'],
       ['Strg+Mausrad · Mittlere Maustaste ziehen', 'Zoom · Ansicht verschieben'],
       ['? / F1', 'Diese Übersicht'],
+      ['L', 'Protokoll (alle Meldungen mit Uhrzeit) ein-/ausklappen'],
       ['Menüs: ↑ ↓ ← → / Enter / Esc', 'Eintrag wählen, Nachbarmenü / ausführen / schließen'],
     ]],
     ['Level', [

@@ -18,7 +18,7 @@ input:focus, select:focus { outline: 1px solid var(--accent); }
 input.invalid, input.invalid:focus { outline: 1px solid var(--danger); border-color: var(--danger); }
 .hint { color: var(--muted); font-size: 12px; }
 .welcome { max-width: 560px; margin: 12vh auto; text-align: center; padding: 30px; border: 2px dashed var(--border); border-radius: 12px; }
-.layout { display: grid; height: 100%; grid-template-columns: 190px 1fr 330px; grid-template-rows: auto auto 1fr; }
+.layout { display: grid; height: 100%; grid-template-columns: 190px 1fr 330px; grid-template-rows: auto auto 1fr auto; }
 /* app bar: menus, workspace switcher, main actions; context bar below it per workspace */
 .appbar { grid-column: 1 / 4; display: flex; align-items: center; gap: 6px; padding: 4px 8px; background: var(--bg); border-bottom: 1px solid var(--border); min-width: 0; }
 .appbar .brand { font-weight: 700; color: var(--accent); margin-right: 8px; white-space: nowrap; }
@@ -119,14 +119,36 @@ input.invalid, input.invalid:focus { outline: 1px solid var(--danger); border-co
 .statusbar .status-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .statusbar .status-stats { opacity: 0.75; }
 .statusbar .status-stats.warn { color: #ff6060; opacity: 1; }
-.toast { position: fixed; bottom: 36px; left: 50%; transform: translate(-50%, 20px); opacity: 0; background: #333842; border: 1px solid var(--border); padding: 8px 14px; border-radius: 6px; transition: all .25s; z-index: 1000; max-width: 80vw; }
+.toast { position: fixed; bottom: calc(var(--log-h, 0px) + 36px); left: 50%; transform: translate(-50%, 20px); opacity: 0; background: #333842; border: 1px solid var(--border); padding: 8px 14px; border-radius: 6px; transition: all .25s; z-index: 1000; max-width: 80vw; }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 .toast.error { border-color: var(--danger); background: #4a2626; }
-.busy { position: fixed; right: 342px; bottom: 34px; z-index: 900; display: flex; align-items: center; gap: 8px; padding: 6px 12px 6px 9px; background: var(--accent2); color: #fff; border: 1px solid var(--accent); border-radius: 16px; box-shadow: 0 2px 10px rgba(0,0,0,.45); font-size: 12px; pointer-events: none; opacity: 0; transform: translateY(8px); transition: opacity .2s, transform .2s; max-width: 45vw; white-space: nowrap; }
+.busy { position: fixed; right: 342px; bottom: calc(var(--log-h, 0px) + 34px); z-index: 900; display: flex; align-items: center; gap: 8px; padding: 6px 12px 6px 9px; background: var(--accent2); color: #fff; border: 1px solid var(--accent); border-radius: 16px; box-shadow: 0 2px 10px rgba(0,0,0,.45); font-size: 12px; pointer-events: none; opacity: 0; transform: translateY(8px); transition: opacity .2s, transform .2s; max-width: 45vw; white-space: nowrap; }
 .busy span:last-child { overflow: hidden; text-overflow: ellipsis; }
 .busy.show { opacity: 1; transform: none; }
 .busy-spin { flex: none; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,.35); border-top-color: #fff; border-radius: 50%; animation: busy-spin .8s linear infinite; }
 @keyframes busy-spin { to { transform: rotate(360deg); } }
+/* log bar: all toasts and notable events with times; collapsed it shows only the latest line */
+.logbar { grid-column: 1 / 4; display: flex; flex-direction: column; min-width: 0; background: var(--bg); border-top: 1px solid var(--border); font-size: 12px; }
+:root:has(.logbar) { --log-h: 27px; } /* toasts and the busy pill sit above the bar */
+:root:has(.logbar.open) { --log-h: 178px; }
+.log-head { display: flex; align-items: center; gap: 8px; padding: 2px 8px; height: 26px; cursor: pointer; min-width: 0; }
+.log-head:hover .log-toggle { border-color: var(--accent); }
+.log-toggle { padding: 1px 8px; font-size: 12px; flex: none; }
+.log-badge { flex: none; background: var(--danger); color: #fff; border-radius: 8px; padding: 0 7px; font-size: 11px; font-weight: 600; }
+.log-latest { flex: 1; min-width: 0; display: flex; gap: 10px; overflow: hidden; white-space: nowrap; }
+.log-latest .log-msg { overflow: hidden; text-overflow: ellipsis; }
+.log-actions { display: none; gap: 4px; flex: none; }
+.logbar.open .log-actions { display: flex; }
+.log-actions button { padding: 1px 8px; font-size: 12px; }
+.log-list { display: none; height: 150px; overflow-y: auto; padding: 2px 0 4px; border-top: 1px solid var(--border); font-family: ui-monospace, monospace; }
+.logbar.open .log-list { display: block; }
+.log-row { display: flex; gap: 10px; padding: 1px 8px; }
+.log-row:hover { background: var(--panel); }
+.log-time { flex: none; color: var(--muted); font-family: ui-monospace, monospace; }
+.log-msg { flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.log-msg.error, .log-row.error .log-msg { color: #ff8a8a; }
+.log-msg.event, .log-row.event .log-msg { color: var(--muted); }
+.log-count { flex: none; color: var(--muted); }
 .modal-back { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; z-index: 500; }
 .modal { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; min-width: 360px; max-width: 92vw; max-height: 90vh; display: flex; flex-direction: column; box-shadow: 0 10px 40px rgba(0,0,0,.5); }
 .modal-title { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; font-weight: 600; border-bottom: 1px solid var(--border); }

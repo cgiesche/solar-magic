@@ -65,7 +65,36 @@ export function select(options: [number, string][], value: number, onChange: (v:
   return s;
 }
 
+// message log: every toast plus events that are worth knowing afterwards (shown in the log bar)
+export type LogKind = 'info' | 'error' | 'event';
+export interface LogEntry { time: Date; msg: string; kind: LogKind; count: number }
+export const logEntries: LogEntry[] = [];
+// listener gets the new/updated entry, or null when the log was cleared
+const logListeners = new Set<(e: LogEntry | null, repeat: boolean) => void>();
+export function onLog(fn: (e: LogEntry | null, repeat: boolean) => void): () => void {
+  logListeners.add(fn);
+  return () => logListeners.delete(fn);
+}
+export function log(msg: string, kind: LogKind = 'event'): void {
+  const last = logEntries[logEntries.length - 1];
+  // the same message right again (e.g. repeated undo hint) counts up instead of adding a line
+  const repeat = !!last && last.msg === msg && last.kind === kind;
+  const e = repeat ? last : { time: new Date(), msg, kind, count: 0 };
+  e.count++;
+  e.time = new Date();
+  if (!repeat) {
+    logEntries.push(e);
+    if (logEntries.length > 500) logEntries.shift();
+  }
+  for (const fn of logListeners) fn(e, repeat);
+}
+export function clearLog(): void {
+  logEntries.length = 0;
+  for (const fn of logListeners) fn(null, false);
+}
+
 export function toast(msg: string, kind: 'info' | 'error' = 'info'): void {
+  log(msg, kind);
   const t = h('div', { class: `toast ${kind}` }, msg);
   document.body.appendChild(t);
   setTimeout(() => t.classList.add('show'), 10);

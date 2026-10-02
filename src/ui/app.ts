@@ -18,7 +18,7 @@ import { STRUCT_EXT, STRUCT_MAX, TRANSPARENT, listStructures, readStructure, wri
 import { kvSet, kvGet, kvEntries, kvKeys, kvWrite } from './storage.ts';
 import { ResultCache, RomFingerprint, RomReads, type CacheEntry } from '../core/romdeps.ts';
 import { bgFromWram, bgIndex, encodeBg } from '../core/bg.ts';
-import { toast } from './dom.ts';
+import { toast, log as logMsg } from './dom.ts';
 import { RomHistory, type RomEdit } from '../core/romhistory.ts';
 import { ObjKindProbe, kindsStillValid, storeKinds, loadKinds, resizeObjectSize, type ObjKind, type ObjKinds, type StoredObjKinds } from '../core/objkinds.ts';
 import { BlockProber, variantOf, type BlockProbe, type SpriteProbe } from '../core/blockprobe.ts';
@@ -156,6 +156,7 @@ export class App {
     this.dirty = false;
     this.refresh();
     this.emit('level');
+    logMsg(`Level ${hex(n, 3)} geöffnet`);
     this.ensureSpriteImages();
     this.prefetchProbes();
   }
@@ -1061,6 +1062,7 @@ export class App {
       this.selection = sel;
       this.persist();
       if (!silent) toast(`Level ${hex(n, 3)} gespeichert. ${log.join(' · ')}`);
+      else logMsg(`Level ${hex(n, 3)} automatisch gespeichert. ${log.join(' · ')}`);
       this.refresh();
       this.emit('change');
     } catch (e) {
