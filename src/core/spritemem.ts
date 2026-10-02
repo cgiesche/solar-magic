@@ -77,9 +77,19 @@ function runWindow(ctx: SpriteMemContext, m: number, win: LevelSprite[], cam: { 
 }
 
 export function checkSpriteMemory(ctx: SpriteMemContext, m: number, windows: LevelSprite[][]): SpriteMemCheck {
+  return runJob(checkJob(ctx, m, windows));
+}
+
+function runJob<T>(job: Generator<void, T>): T {
+  for (;;) { const r = job.next(); if (r.done) return r.value; }
+}
+
+// the check as steps (one window each) for running in the background
+function* checkJob(ctx: SpriteMemContext, m: number, windows: LevelSprite[][]): Generator<void, SpriteMemCheck> {
   const cam = testLevel(ctx.emu, ctx.level, ctx.header, m, ctx.bgPointer);
   const conflicts = new Set<number>(), live: number[] = [];
   for (const win of windows) {
+    yield;
     const r = runWindow(ctx, m, win, cam);
     live.push(r?.live ?? -1);
     r?.lost.forEach((u) => conflicts.add(u));
@@ -103,18 +113,33 @@ export function usedSpriteMemory(rom: Rom): number[] {
 // current one (base: its check), tried in the order given (most used first); null if none.
 // Windows with conflicts are tried first, so a candidate usually fails fast.
 export function suggestSpriteMemory(ctx: SpriteMemContext, current: number, candidates: number[], windows: LevelSprite[][], base: SpriteMemCheck): number | null {
+  return runJob(suggestJob(ctx, current, candidates, windows, base));
+}
+
+function* suggestJob(ctx: SpriteMemContext, current: number, candidates: number[], windows: LevelSprite[][], base: SpriteMemCheck): Generator<void, number | null> {
   const bad = windows.map((w, i) => i).filter((i) => windows[i].some((s) => base.conflicts.has(s.uid)));
   if (!bad.length) return null;
   const order = [...bad, ...windows.map((_, i) => i).filter((i) => !bad.includes(i))];
   for (const m of candidates) {
     if (m === current) continue;
+    yield;
     const cam = testLevel(ctx.emu, ctx.level, ctx.header, m, ctx.bgPointer);
     let ok = true;
     for (const i of order) {
+      yield;
       const r = runWindow(ctx, m, windows[i], cam);
       if (!r || r.lost.size || r.live < base.live[i]) { ok = false; break; }
     }
     if (ok) return m;
   }
   return null;
+}
+
+// Check of the level's sprites with sprite memory m and, when sprites are drawn incompletely, a
+// value that fixes it; as steps (each a level load or two) for running in the background
+export function* spriteMemJob(ctx: SpriteMemContext, m: number, candidates: number[], sprites: LevelSprite[]): Generator<void, { check: SpriteMemCheck; suggestion: number | null }> {
+  const windows = spriteWindows(sprites);
+  const check = yield* checkJob(ctx, m, windows);
+  const suggestion = check.conflicts.size ? yield* suggestJob(ctx, m, candidates, windows, check) : null;
+  return { check, suggestion };
 }

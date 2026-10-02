@@ -5,6 +5,7 @@ import { h, select, hexInput, modal } from './dom.ts';
 import { TILESETS, levelModeName, MUSIC, TIME_SETTINGS, VERTICAL_SCROLL, ENTRANCE_ACTIONS, hex2, hex } from '../core/names.ts';
 import { hasLayer2Objects, type PrimaryHeader, type SecondaryHeader, L2_PTRS } from '../core/level.ts';
 import { bgBank } from '../core/patches.ts';
+import { incompleteSprites, spriteMemText, SPRITE_MEM_HELP } from './spritemem.ts';
 
 function range(n: number, fmt: (i: number) => string = (i) => String(i)): [number, string][] {
   return Array.from({ length: n }, (_, i) => [i, fmt(i)]);
@@ -20,6 +21,17 @@ export function openHeaderDialog(app: App): void {
   const f = (label: string, el: HTMLElement, hint?: string) => h('div', { class: 'prop' }, h('label', null, label), el, hint ? h('span', { class: 'hint' }, hint) : null);
   const sel = <K extends keyof PrimaryHeader>(k: K, opts: [number, string][]) => select(opts, hd[k] as number, (v) => { (hd[k] as number) = v; });
   const sel2 = <K extends keyof SecondaryHeader>(k: K, opts: [number, string][]) => select(opts, sd[k] as number, (v) => { (sd[k] as number) = v; });
+
+  // sprite memory with the result of the background check (for the level's current value)
+  const memInput = hexInput(spriteHeader & 0x3f, 2, (v) => (spriteHeader = (spriteHeader & 0xc0) | v), 0x3f);
+  const incomplete = incompleteSprites(app).length, sm = app.spriteMem;
+  const checked = sm && sm.level === lv.number && sm.mem === (lv.spriteHeader & 0x3f);
+  const memStatus = !checked ? h('p', { class: 'hint' }, 'Sprite-Speicher wird noch geprüft …')
+    : !incomplete ? h('p', { class: 'hint' }, '✓ Alle Sprites werden vollständig gezeigt.')
+    : h('div', { class: 'warn-box', title: SPRITE_MEM_HELP }, `⚠ ${spriteMemText(incomplete)}: zu wenig Sprite-Speicher. `,
+      sm.suggestion !== null
+        ? h('button', { onclick: () => { memInput.value = hex2(sm.suggestion!); memInput.dispatchEvent(new Event('change')); } }, `Passend einstellen (${hex2(sm.suggestion)})`)
+        : 'Kein anderer Wert zeigt alle vollständig – Sprites weiter auseinander setzen.');
 
   const modes: [number, string][] = range(0x20, (i) => `${hex2(i)} – ${levelModeName(i)}`);
   // BG tilemaps in the vanilla bank ($0C) used by levels; edited ones (own bank) only count for their level
@@ -75,8 +87,9 @@ export function openHeaderDialog(app: App): void {
     h('p', { class: 'hint' }, 'Welche GFX-/ExGFX-Dateien das Level lädt (FG1–FG3, BG1–BG3, Sprites) und die Paletten wählt und bearbeitet man im Grafik-Bereich – mit Vorschau.'),
     h('div', { class: 'row' }, h('button', { onclick: () => { dlg.close(); app.emit('open-gfx'); } }, 'Grafik-Bereich öffnen')),
     h('h3', null, 'Sprites & Hintergrund'),
+    memStatus,
     h('div', { class: 'grid2' },
-      f('Sprite-Speicher', hexInput(spriteHeader & 0x3f, 2, (v) => (spriteHeader = (spriteHeader & 0xc0) | v), 0x3f), '$1692-Index'),
+      h('div', { class: 'prop', title: SPRITE_MEM_HELP }, h('label', null, 'Sprite-Speicher'), memInput, h('span', { class: 'hint' }, 'Platz für Sprite-Grafik ($1692)')),
       f('Auftrieb im Wasser', select([[0, 'Aus'], [0x80, 'An'], [0xc0, 'An + deaktiviert (Unterwasser)'], [0x40, 'Bit 6']], spriteHeader & 0xc0, (v) => (spriteHeader = (spriteHeader & 0x3f) | v))),
       lv.layer2Objects || hasLayer2Objects(hd.mode) ? f('Layer 2', lv.layer2Objects ? h('span', null, 'Layer-2-Objekte (Modus L2)') : h('span', { class: 'warn-box' }, 'Der Modus erwartet Layer-2-Objekte')) :
         f('BG-Tilemap', select(bgOpts, l2ptr, (v) => (l2ptr = v))),

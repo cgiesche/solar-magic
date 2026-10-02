@@ -119,6 +119,8 @@ input.invalid, input.invalid:focus { outline: 1px solid var(--danger); border-co
 .statusbar .status-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .statusbar .status-stats { opacity: 0.75; }
 .statusbar .status-stats.warn { color: #ff6060; opacity: 1; }
+.statusbar .status-warn { flex: none; padding: 0 6px; height: 18px; font: inherit; color: #ffa020; background: none; border: 1px solid #ffa020; border-radius: 3px; cursor: pointer; }
+.statusbar .status-warn:hover { background: #ffa02022; }
 .toast { position: fixed; bottom: calc(var(--log-h, 0px) + 36px); left: 50%; transform: translate(-50%, 20px); opacity: 0; background: #333842; border: 1px solid var(--border); padding: 8px 14px; border-radius: 6px; transition: all .25s; z-index: 1000; max-width: 80vw; }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 .toast.error { border-color: var(--danger); background: #4a2626; }

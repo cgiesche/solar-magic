@@ -62,6 +62,14 @@ Beim Anzeigen eines Levels führt er die **originalen Laderoutinen** des ROMs au
   Ansicht mit gedrückten Switch-Palästen bzw. ON/OFF auf OFF; Zoom 50–400 %.
 * **Layer 3** (Flut, Layer-3-Bilder) als Vorschau (Scrollen angenähert), **animierte Tiles/Paletten** (Ansicht → Animation).
 * Statuszeile mit Objekt-/Sprite-Anzahl und Datengröße (Warnung ab 128 Sprites); **Level als PNG** exportieren (*Datei → Level als PNG*).
+* **Sprite-Speicher-Prüfung:** Der Editor lässt die Sprites, die gleichzeitig im Bild sein können, im Spiel laufen und
+  erkennt, wenn ein Sprite wegen zu wenig Sprite-Speicher (Sprite-Header, `$1692`) Teile seiner Grafik verliert
+  (z. B. E0, drei Kettenplattformen, mit Wert 00). Betroffene Sprites bekommen einen orangen Rahmen, die Statuszeile
+  einen Hinweis mit Erklärung und einem passenden Wert. Ein Wert passt, wenn die Levels der ROM ihn benutzen, alle
+  Sprites vollständig zeigt und nicht weniger Sprites gleichzeitig erscheinen lässt.
+  **Autokorrektur:** Macht eine Sprite-Bearbeitung weitere Sprites unvollständig, stellt der Editor den Wert selbst um.
+  Das gehört zum selben Undo-Schritt. Ein im Header-Dialog von Hand gewählter Wert bleibt, solange keine neuen
+  Überschneidungen entstehen.
 * **Nachrichtenboxen** (*ROM → Nachrichtenboxen*): alle 25 Nachrichtenboxen mit Vorschau in der Spielschrift bearbeiten; passen die Texte
   nicht mehr an ihren Platz, werden sie in freien Speicher verlegt.
 * **Level testen (T):** das Level (inkl. ungespeicherter Änderungen) im eingebauten Emulator spielen, mit Tastatur oder Gamepad.
@@ -162,6 +170,7 @@ src/core/lz2.ts          LZ2 (de)kompression
 src/core/patches.ts      Editor-Patch (assembliert mit asm.ts)
 src/core/overworld.ts    Overworld-Formate, RLE, Namen, OW-Emulation
 src/core/spritegfx.ts    Sprite-Grafiken aus dem laufenden Spiel erfassen
+src/core/spritemem.ts    Sprite-Speicher prüfen: unvollständig gezeigte Sprites, passender Wert
 src/ui/*                 Oberfläche (ohne Framework)
 tools/*                  Tests und Analysewerkzeuge (Disassembler: node tools/dis.ts 05D796 40)
 ```

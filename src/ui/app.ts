@@ -12,6 +12,7 @@ import { renderLevel, type LevelImages, composite, map16Source } from '../core/r
 import { EXT_FIRST, map16Ext, installMap16Ext } from '../core/map16ext.ts';
 import { saveLevel } from '../core/save.ts';
 import { captureSprites, captureSpriteAt, type SpriteImage } from '../core/spritegfx.ts';
+import { spriteMemJob, usedSpriteMemory } from '../core/spritemem.ts';
 import { DM16_EXT, hasEditorPatch, installEditorPatch, levelGfx, defaultGfx } from '../core/patches.ts';
 import { gfxSkipMask, gfxFilesHash } from '../core/gfxpages.ts';
 import { STRUCT_EXT, STRUCT_MAX, TRANSPARENT, listStructures, readStructure, writeStructure, type Structure } from '../core/structs.ts';
@@ -35,6 +36,9 @@ type Listener = () => void;
 const CACHE_PREFIX = 'rc2:'; // IndexedDB keys of the result cache (bump when result formats change)
 const PROBE_SPRITE = 0x10000; // probe queue key flag: sprite number instead of Map16 tile
 const SPRITE_PROBE_END = 0xc9; // sprites from $C9 on are shooters, generators and run-once sprites
+
+// result of the sprite memory check (see App.checkSpriteMem); gen: App.editGen when it started
+export interface SpriteMemState { key: string; level: number; mem: number; gen: number; conflicts: Set<number>; suggestion: number | null }
 
 // entrance markers: main entrance, midway point, secondary entrances leading into this level
 export interface Marker { kind: 'main' | 'midway' | 'sec'; index: number; x: number; y: number }
@@ -154,10 +158,12 @@ export class App {
     this.undoStack = [];
     this.redoStack = [];
     this.dirty = false;
+    this.spriteMem = this.spriteMemBase = null;
     this.refresh();
     this.emit('level');
     logMsg(`Level ${hex(n, 3)} geöffnet`);
     this.ensureSpriteImages();
+    this.scheduleSpriteMem();
     this.prefetchProbes();
   }
 
@@ -319,7 +325,8 @@ export class App {
   spriteKey = '';
   ensureSpriteImages(): void {
     const hd = this.level.header;
-    const key = `${hd.spriteGfx}-${hd.spritePalette}-${gfxFilesHash(this.rom, this.spriteGfxFiles()).toString(36)}`;
+    // sprite memory: a sprite whose OAM range is too small is captured as the game shows it
+    const key = `${hd.spriteGfx}-${hd.spritePalette}-${this.level.spriteHeader & 0x3f}-${gfxFilesHash(this.rom, this.spriteGfxFiles()).toString(36)}`;
     if (key === this.spriteKey) return;
     this.spriteKey = key;
     this.variantQueue = [];
@@ -424,6 +431,90 @@ export class App {
       else this.setBusy('variants', null);
     };
     setTimeout(step, 0);
+  }
+
+  // ------------- sprite memory (see spritemem.ts) -------------
+  // sprites drawn incompletely because their OAM range is too small, and a sprite memory value
+  // that shows all; checked in the background after every change
+  spriteMem: SpriteMemState | null = null;
+  private spriteMemBase: SpriteMemState | null = null; // the latest check no edit came after (autocorrection compares with it)
+  private spriteMemTimer = 0;
+  private spriteMemRun = 0;
+  private editGen = 0; // counts checkpoints: edits (not undo/redo/loading)
+  private usedMem: { gen: number; list: number[] } = { gen: -1, list: [] };
+
+  private scheduleSpriteMem(): void {
+    clearTimeout(this.spriteMemTimer);
+    this.spriteMemTimer = window.setTimeout(() => this.cacheReady.then(() => this.checkSpriteMem()), 300);
+  }
+
+  private checkSpriteMem(): void {
+    const lv = this.level, mem = lv.spriteHeader & 0x3f, gen = this.editGen;
+    // canonical order: results are stored by index, uids differ between sessions
+    const sprites = [...lv.sprites].sort((a, b) => a.x - b.x || a.y - b.y || a.num - b.num || a.extra - b.extra);
+    if (this.usedMem.gen !== this.emu.romGen) this.usedMem = { gen: this.emu.romGen, list: usedSpriteMemory(this.rom) };
+    const candidates = this.usedMem.list;
+    const key = `sm${lv.number}:${mem}:${JSON.stringify(lv.header)}:${candidates.join(',')}:${sprites.map((q) => `${q.num}.${q.x}.${q.y}.${q.extra}`).join(' ')}`;
+    if (this.spriteMem?.key === key) return;
+    const run = ++this.spriteMemRun;
+    const done = (r: { lost: number[]; suggestion: number | null }) => {
+      if (run !== this.spriteMemRun || this.level !== lv) return;
+      this.setBusy('spritemem', null);
+      const cur = { key, level: lv.number, mem, gen, conflicts: new Set(r.lost.map((i) => sprites[i].uid)), suggestion: r.suggestion };
+      this.spriteMem = cur;
+      this.emit('sprite-mem');
+      if (gen !== this.editGen) return; // edited meanwhile: checked again
+      const base = this.spriteMemBase;
+      this.spriteMemBase = cur;
+      if (base) this.autoSpriteMem(base, cur);
+    };
+    const stored = this.results.get<{ lost: number[]; suggestion: number | null }>(key);
+    if (stored) { done(stored); return; }
+    const bg = lv.layer2Pointer >> 16 === 0xff ? lv.layer2Pointer : 0xffd900;
+    const job = spriteMemJob({ emu: this.emu, level: lv.number, header: { ...lv.header }, bgPointer: bg }, mem, candidates, sprites);
+    const reads = new RomReads(this.rom.data.length);
+    const step = () => {
+      if (run !== this.spriteMemRun || this.level !== lv) return;
+      const t0 = performance.now();
+      try {
+        for (;;) {
+          const r = this.emu.tracked(() => job.next());
+          reads.add(r.reads);
+          if (r.result.done) {
+            const res = { lost: [...r.result.value.check.conflicts].map((u) => sprites.findIndex((q) => q.uid === u)), suggestion: r.result.value.suggestion };
+            this.results.set(key, res, this.results.fp.deps(reads));
+            done(res);
+            return;
+          }
+          if (performance.now() - t0 > 30) break;
+        }
+      } catch (e) { console.error(e); this.setBusy('spritemem', null); return; }
+      setTimeout(step, 0);
+    };
+    this.setBusy('spritemem', 'Sprite-Speicher prüfen');
+    setTimeout(step, 0);
+  }
+
+  // An edit (checkpoint since the previous check, same sprite memory) that makes further sprites
+  // incomplete sets the suggested value, as part of that edit's undo step. A value chosen by hand
+  // stays as long as edits add no new conflicts.
+  private autoSpriteMem(prev: SpriteMemState, cur: SpriteMemState): void {
+    if (prev.level !== cur.level || prev.mem !== cur.mem || prev.gen === cur.gen || cur.suggestion === null) return;
+    if (![...cur.conflicts].some((u) => !prev.conflicts.has(u))) return;
+    if (this.undoOrder[this.undoOrder.length - 1]?.kind !== 'level') return;
+    this.level.spriteHeader = (this.level.spriteHeader & 0xc0) | cur.suggestion;
+    this.changed();
+    toast(`Sprite-Speicher auf ${hex(cur.suggestion, 2)} gestellt, damit alle Sprites vollständig angezeigt werden (Strg+Z macht es rückgängig).`);
+    this.emit('level-header');
+  }
+
+  // sets the sprite memory value as an own undo step
+  setSpriteMemory(m: number): void {
+    this.checkpoint();
+    this.level.spriteHeader = (this.level.spriteHeader & 0xc0) | (m & 0x3f);
+    this.changed();
+    this.emit('level-header');
+    logMsg(`Sprite-Speicher auf ${hex(m, 2)} gestellt`);
   }
 
   // 8x8 tiles (layer 1 tile numbers) and colors the game keeps rewriting in this level (tile and
@@ -732,6 +823,7 @@ export class App {
 
   // ------------- edit plumbing -------------
   checkpoint(): void {
+    this.editGen++;
     this.undoStack.push(cloneLevel(this.level));
     if (this.undoStack.length > 200) this.undoStack.shift();
     this.redoStack = [];
@@ -746,6 +838,8 @@ export class App {
     this.dirty = true;
     if (rerender) this.refresh();
     this.emit('change');
+    this.ensureSpriteImages(); // sprite memory may have changed
+    this.scheduleSpriteMem();
   }
   // undoes the latest level or ROM edit
   undo(): void {

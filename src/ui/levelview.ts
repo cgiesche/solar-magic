@@ -7,6 +7,7 @@ import { resizeObjectSize } from '../core/objkinds.ts';
 import { probeAt, spriteProbeAt, enterText, type PosProbe } from '../core/blockprobe.ts';
 import { type LevelObject, type LevelSprite, serializeLayer1, serializeLayer2, serializeSprites } from '../core/level.ts';
 import { composite } from '../core/render.ts';
+import { incompleteSprites, spriteMemDialog, spriteMemText, SPRITE_MEM_HELP } from './spritemem.ts';
 
 type Drag =
   | { kind: 'move'; startTx: number; startTy: number; lastDx: number; lastDy: number; orig: Map<number, { x: number; y: number }> }
@@ -34,6 +35,7 @@ export class LevelView {
   drag: Drag | null = null;
   status: HTMLSpanElement;
   stats: HTMLSpanElement;
+  memWarn: HTMLButtonElement;
   pos: HTMLSpanElement;
   pendingFrame = 0;
 
@@ -42,7 +44,8 @@ export class LevelView {
     this.pos = h('span', { class: 'status-pos' });
     this.status = h('span', { class: 'status-text' });
     this.stats = h('span', { class: 'status-stats' });
-    statusBar.append(this.pos, this.status, this.stats);
+    this.memWarn = h('button', { class: 'status-warn', hidden: true, title: SPRITE_MEM_HELP, onclick: () => spriteMemDialog(app, (u) => this.revealSprites(u)) });
+    statusBar.append(this.pos, this.status, this.stats, this.memWarn);
     this.canvas = h('canvas', { class: 'level-canvas' });
     this.sizer = h('div', { class: 'level-sizer' });
     this.scroller = h('div', { class: 'level-scroller', tabIndex: 0 }, this.canvas, this.sizer);
@@ -61,6 +64,7 @@ export class LevelView {
     app.on('anim-frame', () => { this.updateLevelImage(false); });
     app.on('change', () => { this.paint(); this.updateStats(); });
     app.on('sprites', () => this.requestPaint());
+    app.on('sprite-mem', () => { this.requestPaint(); this.updateStats(); });
     app.on('mode', () => { if (!this.hover) this.idleStatus(); });
     this.idleStatus();
     app.on('blockinfo', () => { if (this.hover && !this.drag) this.updateStatus(this.hover.tx, this.hover.ty); this.requestPaint(); });
@@ -348,6 +352,7 @@ export class LevelView {
     const app = this.app;
     const active = app.mode === 'spr';
     ctx.font = `bold ${9 / app.zoom * 1.2}px monospace`;
+    const incomplete = new Set(incompleteSprites(app));
     for (const s of app.level.sprites) {
       const x = s.x * 16, y = s.y * 16;
       const sel = app.selection.has(s.uid) && active;
@@ -362,6 +367,11 @@ export class LevelView {
       ctx.strokeStyle = sel ? '#ff50c8' : 'rgba(255,80,200,0.8)';
       ctx.lineWidth = (sel ? 2 : 1) / z;
       ctx.strokeRect(x, y, 16, 16);
+      if (incomplete.has(s.uid)) { // drawn incompletely (sprite memory)
+        ctx.strokeStyle = '#ffa020';
+        ctx.lineWidth = 2 / z;
+        ctx.strokeRect(x - 2 / z, y - 2 / z, 16 + 4 / z, 16 + 4 / z);
+      }
       if (!img || sel || active) {
         ctx.fillStyle = '#fff';
         ctx.fillText(hex2(s.num), x + 1, y + 8);
@@ -670,6 +680,18 @@ export class LevelView {
     const over = lv.sprites.length > 128;
     this.stats.classList.toggle('warn', over);
     this.stats.title = over ? 'Mehr als 128 Sprites: das Spiel lädt nur die ersten 128.' : '';
+    const n = incompleteSprites(app).length;
+    this.memWarn.hidden = !n;
+    this.memWarn.textContent = n ? `⚠ ${spriteMemText(n)}` : '';
+  }
+
+  // selects the sprites (sprite mode) and scrolls to the first
+  revealSprites(uids: number[]): void {
+    const app = this.app;
+    const first = app.level.sprites.find((s) => s.uid === uids[0]);
+    app.setMode('spr', uids);
+    if (first) this.scrollToTile(first.x, first.y);
+    this.paint();
   }
 
   // visible layers + sprites at 1:1 as PNG
