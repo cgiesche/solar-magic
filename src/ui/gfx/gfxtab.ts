@@ -23,6 +23,7 @@ import { map16Source } from '../../core/render.ts';
 import { EXT_FIRST, EXT_TILES, map16Ext } from '../../core/map16ext.ts';
 import { gfxName, ANIM_FILE, levelSlots as map16Slots } from './map16tab.ts';
 import { readAltFile, writeAltFile, altFileAddr, exanimInstalled } from '../../core/exanim.ts';
+import { openHeaderDialog } from '../headerdialog.ts';
 
 // before the first ExAnimation data: the engine (Lunar Magic compatible) is installed with it
 export async function confirmExAnim(app: App): Promise<boolean> {
@@ -262,14 +263,22 @@ export class GfxTab implements WsPanel {
     const box = this.cards;
     clear(box);
     const slots = this.levelSlots();
-    box.append(h('div', { class: 'gt-cards-title' }, h('b', null, `Level ${hex(app.level.number, 3)}`), h('span', { class: 'hint' }, 'Grafik-Slots – Klick öffnet die Datei, „Tauschen“ wählt eine andere')));
+    const hd = app.level.header;
+    box.append(h('div', { class: 'gt-cards-title' }, h('b', null, `Grafik-Slots von Level ${hex(app.level.number, 3)}`),
+      h('span', { class: 'hint' }, 'gelten nur für dieses Level · Klick öffnet die Datei, „Tauschen“ wählt eine andere')));
     for (const s of slots) {
       const has = s.file !== 0xff;
       const thumb = h('canvas', { class: 'gt-card-img', width: 64, height: 16 });
       if (has) this.thumb(thumb, s.file, s.sprite ? 9 : this.rowForSlot(s), 64, 16);
-      box.append(h('div', { class: `gt-card${has && s.file === this.cur ? ' active' : ''}${has ? '' : ' empty'}`, title: s.sprite ? 'Sprite-Grafik' : `VRAM-Tiles ${hex(s.first, 3)}–${hex(s.first + 0x7f, 3)}` },
-        h('div', { class: 'gt-card-head' }, h('b', null, s.name), h('span', { class: 'hint' }, s.custom ? 'eigene' : has ? 'Standard' : 'leer')),
-        h('div', { class: 'gt-card-body', onclick: () => { if (has) this.select(s.file); } }, thumb, h('span', { class: 'mono' }, has ? gfxName(s.file) : '–')),
+      // where a default comes from: the header's tileset (layers) or sprite set
+      const from = s.sprite ? `Sprite-Grafik ${hex(hd.spriteGfx, 2)}` : `Tileset ${hex(hd.tileset, 1)}`;
+      const status = s.custom ? h('span', { class: 'hint', title: 'Nur in diesem Level; „Tauschen“ → „Standard“ nimmt wieder die Grafik aus dem Header' }, 'eigene')
+        : has && !s.ext ? h('a', { href: '#', class: 'hint', title: `Kommt aus dem Level-Header (${from}); dort ändern ändert alle Standard-Slots dieses Levels`, onclick: (e: Event) => { e.preventDefault(); openHeaderDialog(app); } }, 'Standard')
+        : h('span', { class: 'hint' }, 'leer');
+      box.append(h('div', { class: `gt-card${has && s.file === this.cur ? ' active' : ''}${has ? '' : ' empty'}` },
+        h('div', { class: 'gt-card-head' }, h('b', null, s.name), status),
+        h('div', { class: 'gt-card-body', title: has ? `${gfxName(s.file)} öffnen` : '', onclick: () => { if (has) this.select(s.file); } }, thumb, h('span', { class: 'mono' }, has ? gfxName(s.file) : '–')),
+        h('div', { class: 'hint gt-card-range', title: s.sprite ? 'Grafik für Sprites (nicht für Map16-Tiles)' : 'Diese 8x8-Tile-Nummern benutzen die Map16-Tiles' }, s.sprite ? 'Sprites' : `Tiles ${hex(s.first, 3)}–${hex(s.first + 0x7f, 3)}`),
         h('button', { class: 'gt-card-btn', onclick: () => void this.swap(s) }, 'Tauschen …')));
     }
     if (!extGfxAvailable(app.rom)) box.append(h('div', { class: 'gt-card empty' }, h('div', { class: 'gt-card-head' }, h('b', null, 'BG2/BG3')),
