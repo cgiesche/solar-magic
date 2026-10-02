@@ -8,12 +8,14 @@
 // in each page, the ROM header page ($00FF00) the checksum next to the vectors; there single bytes
 // are recorded, so saving a level (another one, or fixing the checksum) doesn't drop anything.
 // The same for the editor patch's tables (GFX file pointers, per-level GFX and sprite bank): a new
-// ExGFX file or another level's GFX setting only drops what read that entry.
+// ExGFX file or another level's GFX setting only drops what read that entry. The same for the
+// pages holding ExAnimation data.
 
 import type { LevelEmulator } from './levelemu.ts';
 import type { Rom } from './rom.ts';
 import { snesToPc } from './rom.ts';
 import { editorPatch } from './patches.ts';
+import { exanimDataRanges } from './exanim.ts';
 
 export const PAGE_SHIFT = 8;
 
@@ -30,18 +32,23 @@ BYTE_PAGES.fill(1, 0x2e000 >> PAGE_SHIFT, 0x30000 >> PAGE_SHIFT);
 BYTE_PAGES[0x7f00 >> PAGE_SHIFT] = 1;
 const FIXED_BYTE_PAGES = BYTE_PAGES.slice();
 
-// adds the byte pages of this ROM's editor patch tables (call when the ROM may have changed)
+// adds the byte pages of this ROM's editor patch tables and ExAnimation data (call when the ROM
+// may have changed); the ExAnimation data isn't recorded at all (see gfxSkipMask), byte pages keep
+// the rest of their pages from counting it (an animation list next to code that is run)
 export function updateBytePages(rom: Rom): void {
   BYTE_PAGES.set(FIXED_BYTE_PAGES);
-  const p = editorPatch(rom);
-  if (!p) return;
-  const mark = (snes: number, len: number) => {
-    const o = snesToPc(snes);
-    BYTE_PAGES.fill(1, o >> PAGE_SHIFT, ((o + len - 1) >> PAGE_SHIFT) + 1);
-  };
-  mark(p.gfxLo, 0x100); mark(p.gfxHi, 0x100); mark(p.gfxBank, 0x100); mark(p.gfxFlags, 0x100);
-  mark(p.levelGfx, 0x200 * 8);
-  mark(p.sprBank, 0x200);
+  const reads = rom.reads;
+  rom.reads = null;
+  try {
+    const markPc = (o: number, end: number) => BYTE_PAGES.fill(1, o >> PAGE_SHIFT, ((end - 1) >> PAGE_SHIFT) + 1);
+    for (const [a, b] of exanimDataRanges(rom)) markPc(a, b);
+    const p = editorPatch(rom);
+    if (!p) return;
+    const mark = (snes: number, len: number) => { const o = snesToPc(snes); markPc(o, o + len); };
+    mark(p.gfxLo, 0x100); mark(p.gfxHi, 0x100); mark(p.gfxBank, 0x100); mark(p.gfxFlags, 0x100);
+    mark(p.levelGfx, 0x200 * 8);
+    mark(p.sprBank, 0x200);
+  } finally { rom.reads = reads; }
 }
 
 // what a computation read (the emulated CPU and editor code, see Snes.romReads, Rom.reads)

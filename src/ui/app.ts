@@ -564,6 +564,7 @@ export class App {
       this.setBusy('kinds', 'Objektarten');
       const emu = new LevelEmulator(this.rom);
       emu.baseState = this.emu.baseState;
+      emu.skipMask = () => this.gfxSkipMask();
       const lv = { ...this.level, header: { ...this.level.header, tileset: ts } };
       job.probe = new ObjKindProbe(emu, lv, this.level.layer2Objects ? this.rom.r24(L2_PTRS + 0x105 * 3) : this.level.layer2Pointer);
       if (!this.kindChannel) {

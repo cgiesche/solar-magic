@@ -283,3 +283,31 @@ export function writeAltFile(rom: Rom, n: number, data: Uint8Array | null): void
   rom.w24(ALT_FILES + n * 3, data ? rom.allocWrite(data) : 0);
 }
 
+
+// [start, end) ROM offsets of the data the engine reads (pointer table, settings, lists, alternative
+// files): it only reaches VRAM and CGRAM, so emulated results don't depend on it (see gfxpages.ts)
+export function exanimDataRanges(rom: Rom): [number, number][] {
+  const l = exanimLayout(rom);
+  if (!l || rom.r8(NMI_HOOK) !== 0x22) return [];
+  const out: [number, number][] = [];
+  const add = (snes: number, len: number) => {
+    const o = snesToPc(snes);
+    if (o >= 0 && o < rom.data.length) out.push([o, Math.min(rom.data.length, o + len)]);
+  };
+  add(l.table, 512 * 3);
+  add(SETTINGS, 0x200);
+  add(ALT_FILES, 4 * 3);
+  const lists = new Set<number>();
+  for (let i = 0; i < 512; i++) { const a = levelListAddr(rom, i); if (a) lists.add(a); }
+  const g = globalListAddr(rom);
+  if (g) lists.add(g);
+  for (const a of lists) {
+    try { add(a, parseList(rom.bytes(a, Math.min(0x8000 - (a & 0x7fff), 0x4000))).length); } catch { /* not a list */ }
+  }
+  for (let n = 0; n < 4; n++) {
+    const a = altFileAddr(rom, n);
+    const size = a ? rom.isRatsAt(snesToPc(a) - 8) : 0;
+    if (size > 0) add(a, size);
+  }
+  return out;
+}

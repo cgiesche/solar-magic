@@ -196,6 +196,7 @@ export class LevelEmulator {
     const byteOwner = ov.byteOwner;
     const trace: ObjectTrace | undefined = ov.trace ? { code: new Set(), reads: new Map(), writes: new Map(), rom: new Set() } : undefined;
     const cpu = s.cpu;
+    const skip = trace ? this.skipMask?.() ?? null : null; // not dependencies of the result (GFX, ExAnimation data)
     const put = (o: number, v: number, hi: boolean) => {
       let m = trace!.writes.get(current);
       if (!m) { m = new Map(); trace!.writes.set(current, m); }
@@ -212,7 +213,7 @@ export class LevelEmulator {
         else if (a >= 0x10000 + MAP_BASE && a < 0x10000 + MAP_BASE + MAP_SIZE) { touch(current, a - 0x10000 - MAP_BASE); if (trace) put(a - 0x10000 - MAP_BASE, v, true); }
       },
       onRomRead: trace ? (ro: number) => {
-        trace.rom.add(ro);
+        if (skip === null || skip[ro] !== 1) trace.rom.add(ro);
         if (cpu.inFetch) { trace.code.add(ro); return; }
         if (current < 0) return;
         let r = trace.reads.get(current);
