@@ -30,6 +30,21 @@ function readOamBuffer(buf: Uint8Array): OamTile[] {
   return out;
 }
 
+// tiles the PPU shows (OAM after the last frame's DMA)
+function readPpuOam(oam: Uint8Array): OamTile[] {
+  const out: OamTile[] = [];
+  for (let i = 0; i < 128; i++) {
+    const hi = (oam[0x200 + (i >> 2)] >> ((i & 3) * 2)) & 3;
+    let x = oam[i * 4] | ((hi & 1) << 8);
+    if (x >= 256) x -= 512;
+    const y = oam[i * 4 + 1];
+    if (y >= 0xe0 && y < 0xf8) continue; // hidden
+    out.push({ i, x, y: y >= 0xf8 ? y - 256 : y, tile: oam[i * 4 + 2], attr: oam[i * 4 + 3], big: (hi & 2) !== 0 });
+  }
+  return out;
+}
+const tileKey = (t: OamTile) => `${t.x},${t.y},${t.tile},${t.attr},${t.big}`;
+
 export function captureSprites(
   emu: LevelEmulator, level: number, header: PrimaryHeader, spriteHeader: number, bgPointer: number, nums: number[],
   onProgress?: (done: number) => void,
@@ -47,6 +62,10 @@ export function captureSprites(
   const slots: { tx: number; ty: number }[] = [];
   for (const r of rows) for (const c of cols) slots.push({ tx: (camX >> 4) + c, ty: (camY >> 4) + r });
   const s = emu.snes;
+  // what the empty level shows (Mario): sprites drawn outside the sprite slots (cluster sprites
+  // like Boo rings) are what a load with them shows in addition
+  let baseline: Set<string> | null = null;
+  if (nums.some((n) => n >= 0xc9) && record(emu, 3)) baseline = new Set(readPpuOam(s.oam).map(tileKey));
   // sprites from $C9 on load specially (shells as Koopas, groups spawn several slots): one per load,
   // everything that is alive then belongs to it
   const normal = nums.filter((n) => n < 0xc9), batches: number[][] = [];
@@ -95,6 +114,12 @@ export function captureSprites(
       const main = [...groups.keys()].find((i) => w[0x161a + i] === 0) ?? [...groups.keys()][0];
       groups.clear();
       groups.set(main, all);
+    }
+    if (solo && !groups.size && baseline) {
+      const extra = readPpuOam(s.oam).filter((t) => !baseline!.has(tileKey(t)));
+      const img = extra.length ? drawTiles(emu, extra) : null;
+      const p = placed[0];
+      if (img) result.set(p.n, { ...img, ox: img.ox + cx - p.tx * 16, oy: img.oy + cy - p.ty * 16 });
     }
     groups.forEach((g, i) => {
       const l = live.get(i)!;
