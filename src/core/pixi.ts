@@ -13,7 +13,7 @@ import { saveSprites } from './save.ts';
 import { applyPatch, reapplyPatch, uninstallPatch, type ApplyResult, type PatchSource } from './patchapply.ts';
 import type { AsarResult } from './asar.ts';
 import { listPatches, patchArchive, type PatchEntry } from './patchreg.ts';
-import { pixiDefines, HEADERS, runtimeAsm, STATUS_LABELS, MISC_OFFSET, type SpriteFolder, type SpriteRow } from './pixirt.ts';
+import { pixiDefines, HEADERS, runtimeAsm, STATUS_LABELS, MISC_MAX, type SpriteFolder, type SpriteRow } from './pixirt.ts';
 import { ROUTINES } from './pixiroutines.ts';
 
 export const PIXI_NAME = 'Custom Sprites';
@@ -38,7 +38,7 @@ export function numberRange(kind: SpriteFolder): [number, number] {
   if (kind === 'sprites') return [0x00, 0xbf];
   if (kind === 'shooters') return [0xc0, 0xcf];
   if (kind === 'generators') return [0xd0, 0xdf];
-  return [0x00, 0xff - MISC_OFFSET[kind]!];
+  return [0x00, MISC_MAX[kind]!];
 }
 const levelKind = (num: number): SpriteFolder => (num < 0xc0 ? 'sprites' : num < 0xd0 ? 'shooters' : 'generators');
 
@@ -296,6 +296,11 @@ endmacro`);
 
   const sizes = sizeTable(p);
   const rows: (SpriteRow | null)[] = new Array(256).fill(null);
+  const misc: Partial<Record<SpriteFolder, { main: number; cape: number }[]>> = {};
+  for (const b of built) {
+    if (!MISC_KINDS.includes(b.entry.kind)) continue;
+    misc[b.entry.kind] ??= Array.from({ length: MISC_MAX[b.entry.kind]! + 1 }, () => ({ main: 0, cape: 0 }));
+  }
   for (const b of built) {
     if (MISC_KINDS.includes(b.entry.kind)) continue;
     rows[b.entry.num] = { type: b.cfg.type ? 1 : 0, actlike: b.cfg.actlike, tweak: b.cfg.tweak, prop: b.cfg.prop, init: 0, main: 0, status: [0, 0, 0, 0, 0] };
@@ -332,7 +337,9 @@ endmacro`);
       } else {
         const b = code[step - 1];
         const ep = entryPoints(done[step], b);
-        const row = rows[b.entry.num];
+        const m = misc[b.entry.kind];
+        if (m) m[b.entry.num] = { main: ep.MAIN, cape: ep.CAPE ?? 0 };
+        const row = MISC_KINDS.includes(b.entry.kind) ? null : rows[b.entry.num];
         if (row) {
           row.init = ep.INIT ?? 0;
           row.main = ep.MAIN;
@@ -349,7 +356,7 @@ endmacro`);
       {
         step++;
         const main = `${BUILTIN_DIR}runtime.asm`;
-        out.set(main, 'incsrc "defines.asm"\n' + runtimeAsm({ sizes, sprites: rows }));
+        out.set(main, 'incsrc "defines.asm"\n' + runtimeAsm({ sizes, sprites: rows, misc }));
         return { main, files: out };
       }
     },

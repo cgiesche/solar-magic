@@ -73,6 +73,55 @@ const spawnSprite = `?.loop:
   RTL
 `;
 
+// position += speed / 16 with the low nibble in a fraction byte (the game's way); label: unique suffix
+const subpixel = (speed: string, frac: string, lo: string, hi: string, label: string) => `
+  LDA ${speed} : ASL #4 : CLC : ADC ${frac} : STA ${frac}
+  PHP
+  LDY #$00
+  LDA ${speed} : LSR #4 : CMP #$08 : BCC ?.${label}
+  ORA #$F0 : DEY
+?.${label}:
+  PLP
+  ADC ${lo} : STA ${lo}
+  TYA : ADC ${hi} : STA ${hi}`;
+
+// position += speed (whole pixels)
+const fullpixel = (speed: string, lo: string, hi: string, label: string) => `
+  LDY #$00
+  LDA ${speed} : BPL ?.${label}
+  DEY
+?.${label}:
+  CLC : ADC ${lo} : STA ${lo}
+  TYA : ADC ${hi} : STA ${hi}`;
+
+// cluster and minor extended sprites: on-screen position, killed far off screen; Y = OAM index from the game's table
+const miscDrawInfo = (p: string, oam: number, adc: string) => r(`
+  LDA !${p}_y_low,x : SEC : SBC $1C : STA $01
+  CMP #$E0 : BCC ?.x
+  ${adc} : BPL ?.x
+?.kill:
+  STZ !${p}_num,x
+  CLC
+  RTL
+?.x:
+  STZ $02
+  LDA !${p}_x_low,x : SEC : SBC $1A : STA $00
+  LDA !${p}_x_high,x : SBC $1B : BEQ ?.on
+  LDA $00 : CLC : ADC #$38 : CMP #$70 : BCS ?.kill
+  INC $02
+?.on:
+  LDA.l $${oam.toString(16).toUpperCase()},x : TAY
+  SEC
+  RTL
+`);
+
+// the game's subroutine at addr (bank 2, ends with RTS) called through the RTL at $02B889
+const callBank2 = (addr: string, label: string) => `
+  PHK : PEA.w ?.${label}-1
+  PEA.w $B888
+  JML ${addr}
+?.${label}:`;
+
 export const ROUTINES: Record<string, string> = {
   // off-screen flags and the sprite's position on screen ($00/$01), Y = OAM index ($15EA).
   // A sprite too far off screen: returns from the caller's graphics routine (its JSR becomes an RTL).
@@ -646,4 +695,469 @@ ${addOff('$01', '!D8,x', '!14D4,x', '!extended_y_low,y', '!extended_y_high,y')}
   SpawnMinorExtendedOverwriteGeneric: genericSpawn('minor_extended', '!MinorExtendedSize', '  LDA $02 : STA !minor_extended_x_speed,y\n  LDA $03 : STA !minor_extended_y_speed,y', '$185D'),
   SpawnScoreGeneric: genericSpawn('score', '!ScoreSize', '  LDA #$30 : STA !score_y_speed,y', '$18F7'),
   SpawnSpinningCoinGeneric: genericSpawn('spinning_coin', '!SpinningCoinSize', '  LDA $03 : STA !spinning_coin_y_speed,y'),
+  // ---- bounce sprites (slot X); tables of the game's bounce sprite code
+  // $00/$01 = position on screen (layer of !bounce_table bit 7), $03 = size/x high bit, Y = OAM index; carry clear: not on screen
+  BounceGetDrawInfo: r(`
+  LDA #$02 : STA $03
+  LDY #$00
+  LDA !bounce_table,x : BPL ?.l1
+  LDY #$04
+?.l1:
+  LDA !bounce_x_low,x : SEC : SBC.w $001A,y : STA $00
+  LDA !bounce_x_high,x : SBC.w $001B,y : BEQ ?.xon
+  INC $03
+?.xon:
+  LDA !bounce_y_low,x : SEC : SBC.w $001C,y : STA $01
+  LDA !bounce_y_high,x : SBC.w $001D,y : BEQ ?.yon
+  CLC
+  RTL
+?.yon:
+  LDA.l $0291ED,x : TAY
+  SEC
+  RTL
+`),
+  // A = tile: one 16x16 tile at the bounce sprite with its properties
+  BounceGenericDraw: r(`
+  STA $02
+  %BounceGetDrawInfo()
+  BCC ?.r
+  REP #$20 : LDA $00 : STA $0200,y : SEP #$20
+  LDA $02 : STA $0202,y
+  LDA !bounce_properties,x : ORA $64 : STA $0203,y
+  TYA : LSR #2 : TAY
+  LDA $03 : STA $0420,y
+?.r:
+  RTL
+`),
+  // speed change by direction (!bounce_table bits 0-1), as the original bounce sprites
+  BounceSetSpeed: r(`
+  TXY
+  LDA !bounce_table,y : AND #$03 : TAX
+  LDA !bounce_y_speed,y : CLC : ADC.l $0290CE,x : STA !bounce_y_speed,y
+  LDA !bounce_x_speed,y : CLC : ADC.l $0290D2,x : STA !bounce_x_speed,y
+  TYX
+  RTL
+`),
+  // Mario's speed by the bounce direction ($80: unchanged)
+  BounceSetMarioSpeed: r(`
+  TXY
+  LDA !bounce_table,y : AND #$03 : TAX
+  LDA.l $0290D6,x : CMP #$80 : BEQ ?.y
+  STA $7D
+?.y:
+  LDA.l $0290DA,x : CMP #$80 : BEQ ?.x
+  STA $7B
+?.x:
+  TYX
+  RTL
+`),
+  // the speed of the sprite in slot $0F by the bounce direction ($80: unchanged)
+  BounceSetSpriteSpeed: r(`
+  TXY
+  LDA !bounce_table,y : AND #$03 : TAX
+  LDA.l $0290D6,x : CMP #$80 : BEQ ?.y
+  PHX : LDX $0F : STA !AA,x : PLX
+?.y:
+  LDA.l $0290DA,x : CMP #$80 : BEQ ?.x
+  LDX $0F : STA !B6,x
+?.x:
+  TYX
+  RTL
+`),
+  // $98-$9B and $1933: the block the bounce sprite is on (for $00BEB0 / ChangeMap16)
+  BounceSetupMap16: r(`
+  LDA !bounce_y_low,x : CLC : ADC #$08 : AND #$F0 : STA $98
+  LDA !bounce_y_high,x : ADC #$00 : STA $99
+  LDA !bounce_x_low,x : CLC : ADC #$08 : AND #$F0 : STA $9A
+  LDA !bounce_x_high,x : ADC #$00 : STA $9B
+  LDA !bounce_table,x : ASL : ROL : AND #$01 : STA $1933
+  RTL
+`),
+  BounceUpdatePos: r(`
+${subpixel('!bounce_y_speed,x', '!bounce_y_bits,x', '!bounce_y_low,x', '!bounce_y_high,x', 'y')}
+${subpixel('!bounce_x_speed,x', '!bounce_x_bits,x', '!bounce_x_low,x', '!bounce_x_high,x', 'x')}
+  RTL
+`),
+
+  // ---- cluster sprites
+  ClusterGetDrawInfo: miscDrawInfo('cluster', 0x02ff50, 'CLC : ADC #$10'),
+  // A = kind: 0 x+y gravity 3, 1 x+y, 2 x, 3 y, 4-7 x+y gravity 1-4 (speeds: y $1E52, x $1E66, fractions $1E7A/$1E8E)
+  ClusterSpeed: r(`
+  CMP #$04 : BCS ?.grav
+  CMP #$00 : BEQ ?.xyg
+  DEC : BEQ ?.xy
+  DEC : BEQ ?.xonly
+  BRA ?.y
+?.grav:
+  SBC #$03
+  LDY !cluster_misc_1e52,x : BMI ?.add
+  CPY #$40 : BPL ?.xy
+?.add:
+  CLC : ADC !cluster_misc_1e52,x : STA !cluster_misc_1e52,x
+  BRA ?.xy
+?.xyg:
+  LDA !cluster_misc_1e52,x : BMI ?.g3
+  CMP #$40 : BPL ?.xy
+?.g3:
+  CLC : ADC #$03 : STA !cluster_misc_1e52,x
+?.xy:
+  JSR ?.x
+?.y:
+${subpixel('!cluster_misc_1e52,x', '!cluster_misc_1e7a,x', '!cluster_y_low,x', '!cluster_y_high,x', 'yp')}
+  RTL
+?.xonly:
+  JSR ?.x
+  RTL
+?.x: ; the x tables are the y tables + !ClusterSize
+  PHX
+  TXA : CLC : ADC.b #!ClusterSize : TAX
+${subpixel('!cluster_misc_1e52,x', '!cluster_misc_1e7a,x', '!cluster_y_low,x', '!cluster_y_high,x', 'xp')}
+  PLX
+  RTS
+`),
+
+  // ---- extended sprites
+  // Y = OAM index, $00 = x flip by speed, $01/$02 = position on screen; erased off screen ($02 = $F0 when hidden)
+  ExtendedGetDrawInfo: r(`
+  LDA.l $02A153,x : TAY
+  LDA !extended_x_speed,x : AND #$80 : EOR #$80 : LSR : STA $00
+  LDA !extended_x_low,x : SEC : SBC $1A : STA $01
+  LDA !extended_x_high,x : SBC $1B : BNE ?.erase
+  LDA !extended_y_low,x : SEC : SBC $1C : STA $02
+  LDA !extended_y_high,x : SBC $1D : BNE ?.above
+  LDA $02 : CMP #$F0 : BCS ?.erase
+  RTL
+?.above:
+  CMP #$FF : BNE ?.erase
+  LDA $02 : CMP #$C0 : BCC ?.erase
+  CMP #$E0 : BCC ?.hide
+  RTL
+?.erase:
+  STZ !extended_num,x
+?.hide:
+  LDA #$F0 : STA $02
+  RTL
+`),
+  // A = kind as ClusterSpeed; x/y movement by the game's routines at $02B554/$02B560
+  ExtendedSpeed: r(`
+  CMP #$04 : BCS ?.grav
+  CMP #$00 : BEQ ?.xyg
+  DEC : BEQ ?.xy
+  DEC : BEQ ?.x
+  BRA ?.y
+?.grav:
+  SBC #$03
+  LDY !extended_y_speed,x : BMI ?.add
+  CPY #$40 : BPL ?.xy
+?.add:
+  CLC : ADC !extended_y_speed,x : STA !extended_y_speed,x
+  BRA ?.xy
+?.xyg:
+  LDA !extended_y_speed,x : BMI ?.g3
+  CMP #$40 : BCS ?.xy
+?.g3:
+  CLC : ADC #$03 : STA !extended_y_speed,x
+?.xy:
+${callBank2('$02B560', 'yd')}
+?.x:
+${callBank2('$02B554', 'xd')}
+  RTL
+?.y:
+${callBank2('$02B560', 'yo')}
+  RTL
+`),
+  // Mario touching the extended sprite (box 3,3 10x10) is hurt (the game's routine at $02A469)
+  ExtendedHurt: r(`
+  LDA !extended_x_low,x : CLC : ADC #$03 : STA $04
+  LDA !extended_x_high,x : ADC #$00 : STA $0A
+  LDA #$0A : STA $06 : STA $07
+  LDA !extended_y_low,x : CLC : ADC #$03 : STA $05
+  LDA !extended_y_high,x : ADC #$00 : STA $0B
+  JSL $03B664 ; Mario's box
+  JSL $03B72B
+  BCC ?.r
+  PHB : LDA #$02 : PHA : PLB
+${callBank2('$02A469', 'h')}
+  PLB
+?.r:
+  RTL
+`),
+  // $00/$02 = x/y offset, $01/$03 = width/height of the extended sprite's box: carry set when the cape touches it
+  ExtendedCapeClipping: r(`
+  LDA !extended_x_low,x : CLC : ADC $00 : STA $04
+  LDA !extended_x_high,x : ADC #$00 : STA $0A
+  LDA $01 : STA $06
+  LDA !extended_y_low,x : CLC : ADC $02 : STA $05
+  LDA !extended_y_high,x : ADC #$00 : STA $0B
+  LDA $03 : STA $07
+  LDA $13E9 : SEC : SBC #$02 : STA $00
+  LDA $13EA : SBC #$00 : STA $08
+  LDA #$14 : STA $02
+  LDA $13EB : STA $01
+  LDA $13EC : STA $09
+  LDA #$10 : STA $03
+  JSL $03B72B
+  RTL
+`),
+
+  // ---- minor extended sprites
+  MinorExtendedGetDrawInfo: miscDrawInfo('minor_extended', 0x028b78, 'ADC #$0F'),
+  // A = kind: bit 0 fast (whole pixels) / slow (with fractions), bit 1 y / x
+  MinorExtendedSpeed: r(`
+  LSR : BCC ?.slow
+  LSR : BCS ?.fy
+${fullpixel('!minor_extended_x_speed,x', '!minor_extended_x_low,x', '!minor_extended_x_high,x', 'fx')}
+  RTL
+?.fy:
+${fullpixel('!minor_extended_y_speed,x', '!minor_extended_y_low,x', '!minor_extended_y_high,x', 'fyp')}
+  RTL
+?.slow:
+  LSR : BCS ?.sy
+${subpixel('!minor_extended_x_speed,x', '!minor_extended_x_fraction,x', '!minor_extended_x_low,x', '!minor_extended_x_high,x', 'sx')}
+  RTL
+?.sy:
+${subpixel('!minor_extended_y_speed,x', '!minor_extended_y_fraction,x', '!minor_extended_y_low,x', '!minor_extended_y_high,x', 'syp')}
+  RTL
+`),
+
+  // ---- score sprites
+  // $00/$01 = position on screen (layer !score_layer), Y = OAM index; carry clear: not on screen
+  ScoreGetDrawInfo: r(`
+  LDA !score_layer,x : ASL #2 : TAY
+  REP #$20
+  LDA.w $001C,y : STA $02
+  LDA.w $001A,y : STA $04
+  SEP #$21
+  LDA !score_x_low,x : ADC #$0B
+  PHP
+  SEC : SBC $04
+  LDA !score_x_high,x : SBC $05
+  PLP
+  ADC #$00 : BNE ?.no
+  LDA !score_x_low,x : CMP $04
+  LDA !score_x_high,x : SBC $05 : BNE ?.no
+  LDA !score_y_low,x : CMP $02
+  LDA !score_y_high,x : SBC $03 : BNE ?.no
+  LDA !score_x_low,x : SEC : SBC $04 : STA $00
+  LDA !score_y_low,x : SEC : SBC $02 : STA $01
+  LDA.l $02AD9E,x : TAY
+  SEC
+  RTL
+?.no:
+  CLC
+  RTL
+`),
+  // two 8x8 tiles $07/$08 with properties $09/$0A in front of everything; carry set when drawn
+  ScoreGenericDraw: r(`
+  %ScoreGetDrawInfo()
+  BCC ?.r
+  LDA $00 : STA $0200,y : ADC #$07 : STA $0204,y
+  LDA $01 : STA $0201,y : STA $0205,y
+  LDA $07 : STA $0202,y
+  LDA $08 : STA $0206,y
+  LDA $09 : ORA #$30 : STA $0203,y
+  LDA $0A : ORA #$30 : STA $0207,y
+  TYA : LSR #2 : TAY
+  LDA #$00 : STA $0420,y : STA $0421,y
+  SEC
+?.r:
+  RTL
+`),
+  // rises by its speed; carry set: A = highest position on screen, else the game's ($04)
+  ScoreUpdateYPos: r(`
+  BCS ?.set
+  LDA #$04
+?.set:
+  STA $00
+  PHX
+  LDA !score_y_speed,x : LSR #4 : TAX
+  LDA.l $02AD9A,x ; frames between steps by speed (the game's table)
+  PLX
+  AND $13
+  BNE ?.r
+  LDA !score_y_low,x : TAY
+  SEC : SBC $1C : CMP $00 : BCC ?.r
+  DEC !score_y_low,x
+  TYA : BNE ?.r
+  DEC !score_y_high,x
+?.r:
+  RTL
+`),
+
+  // ---- smoke sprites
+  // $00/$01 = position on screen, Y = OAM index; carry clear: off screen
+  SmokeGetDrawInfo: r(`
+  LDA !smoke_x_low,x : SEC : SBC $1A : CMP #$F0 : BCS ?.no
+  STA $00
+  LDA !smoke_y_low,x : SEC : SBC $1C : STA $01
+  LDA.l $0296B8,x : TAY
+  SEC
+  RTL
+?.no:
+  CLC
+  RTL
+`),
+  // one tile $02 with properties $03, size/x high bit $04; carry set when drawn
+  SmokeGenericDraw: r(`
+  %SmokeGetDrawInfo()
+  BCC ?.r
+  REP #$20
+  LDA $00 : STA $0200,y
+  LDA $02 : STA $0202,y
+  SEP #$20
+  TYA : LSR #2 : TAY
+  LDA $04 : STA $0420,y
+  SEC
+?.r:
+  RTL
+`),
+
+  // ---- spinning coins
+  SpinningCoinGetDrawInfo: r(`
+  LDA !spinning_coin_layer,x : ASL #2 : TAY
+  REP #$20
+  LDA.w $001C,y : STA $02
+  LDA.w $001A,y : STA $04
+  SEP #$20
+  LDA !spinning_coin_y_low,x : CMP $02
+  LDA !spinning_coin_y_high,x : SBC $03 : BNE ?.no
+  LDA !spinning_coin_x_low,x : SBC $04 : CMP #$F8 : BCS ?.kill
+  STA $00
+  LDA !spinning_coin_y_low,x : SEC : SBC $02 : STA $01
+  LDA.l $0299E9,x : TAY
+  SEC
+  RTL
+?.kill:
+  STZ !spinning_coin_num,x
+?.no:
+  CLC
+  RTL
+`),
+  SpinningCoinUpdateYPos: r(`
+${subpixel('!spinning_coin_y_speed,x', '!spinning_coin_y_bits,x', '!spinning_coin_y_low,x', '!spinning_coin_y_high,x', 'y')}
+  RTL
+`),
+  // internal: the block at $98-$9B on layer $1933 as the game's $00BEB0 sets it up: [$6B]/[$6E] = Map16
+  // low/high bytes of its screen, Y = index there, $06/$07 = VRAM address, $08/$0A = camera, $0C/$0E =
+  // position; carry set outside the level. Returns with A/X/Y 16 bit.
+  PixiMap16Pos: r(`
+  REP #$30
+  LDA $9A : STA $0C
+  LDA $98 : STA $0E
+  LDA #$0000
+  SEP #$20
+  LDA $5B : STA $09
+  LDA $1933 : BEQ ?.l1
+  LSR $09
+?.l1:
+  LDY $0E
+  LDA $09 : AND #$01 : BEQ ?.h
+  LDA $9B : STA $00 : LDA $99 : STA $9B : LDA $00 : STA $99 ; vertical: x and y screens swapped
+  LDY $0C
+?.h:
+  CPY #$0200 : BCC ?.in
+  REP #$30
+  SEC
+  RTL
+?.in:
+  LDA $1933 : ASL : TAX
+  LDA.l $00BEA8,x : STA $65
+  LDA.l $00BEA9,x : STA $66
+  STZ $67
+  LDA $1925 : ASL : TAY
+  LDA [$65],y : STA $04 : INY
+  LDA [$65],y : STA $05
+  STZ $06
+  LDA $9B : STA $07 : ASL : CLC : ADC $07 : TAY
+  LDA [$04],y : STA $6B : STA $6E : INY
+  LDA [$04],y : STA $6C : STA $6F
+  LDA #$7E : STA $6D : INC : STA $70
+  ; VRAM address of the 16x16 tile
+  LDA $09 : AND #$01 : BEQ ?.vh
+  LDA $99 : LSR
+  LDA $9B : AND #$01
+  BRA ?.vr
+?.vh:
+  LDA $9B : LSR
+  LDA $99
+?.vr:
+  ROL : ASL #2 : ORA #$20 : STA $04
+  CPX #$0000 : BEQ ?.l1v
+  CLC : ADC #$10 : STA $04
+?.l1v:
+  LDA $98 : AND #$F0 : CLC : ASL : ROL : STA $05
+  ROL : AND #$03 : ORA $04 : STA $06
+  LDA $9A : AND #$F0 : LSR #3 : STA $04
+  LDA $05 : AND #$C0 : ORA $04 : STA $07
+  ; camera of the layer
+  REP #$20
+  LDA $09 : AND #$0001 : BNE ?.cv
+  LDA $1A : SEC : SBC #$0080 : TAX
+  LDY $1C
+  LDA $1933 : BEQ ?.cs
+  LDX $1E
+  LDA $20 : SEC : SBC #$0080 : TAY
+  BRA ?.cs
+?.cv:
+  LDX $1A
+  LDA $1C : SEC : SBC #$0080 : TAY
+  LDA $1933 : BEQ ?.cs
+  LDA $1E : SEC : SBC #$0080 : TAX
+  LDY $20
+?.cs:
+  STX $08 : STY $0A
+  ; index in the screen's Map16 data
+  LDA $98 : AND #$01F0 : STA $04
+  LDA $9A : LSR #4 : AND #$000F : ORA $04 : TAY
+  CLC
+  RTL
+`),
+
+  // A (16 bit) = Map16 tile for the block at $98-$9B on layer $1933 ($1933): written to the level and shown
+  // (the game's $00C0FB); carry clear when done, set outside the level
+  ChangeMap16: r(`
+  PHP
+  REP #$30
+  PHX : PHY : PHB : PHA
+  %PixiMap16Pos()
+  BCS ?.out
+  PLA : PHA
+  SEP #$20 : STA [$6B],y : XBA : STA [$6E],y : REP #$20
+  PLA : ASL : TAY
+  PHK : PEA.w ?.shown-1
+  PEA $804C ; RTL at $00804D
+  JML $00C0FB
+?.shown:
+  REP #$30
+  PLB : PLY : PLX
+  PLP
+  CLC
+  RTL
+?.out:
+  PLA : PLB : PLY : PLX
+  PLP
+  SEC
+  RTL
+`),
+
+  // the Map16 tile of the block at $98-$9B on layer $1933: A = tile (low byte, all of it with 16-bit A),
+  // Y = high byte; $FFFF outside the level
+  GetMap16: r(`
+  PHP
+  REP #$30
+  PHX : PHB
+  %PixiMap16Pos()
+  BCS ?.out
+  SEP #$20 : LDA [$6E],y : XBA : LDA [$6B],y
+  REP #$20
+  PHA : XBA : AND #$00FF : TAY : PLA
+  PLB : PLX
+  PLP
+  RTL
+?.out:
+  LDA #$FFFF : TAY
+  PLB : PLX
+  PLP
+  RTL
+`),
 };

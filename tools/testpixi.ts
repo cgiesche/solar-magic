@@ -170,6 +170,16 @@ print "MAIN ",pc
   REP #$20 : LDA #$001E : STA $00 : LDA #$0028 : STA $02 : SEP #$20
   LDA #$20 : %Aiming()
   LDA $00 : STA $7FB018 : LDA $02 : STA $7FB019
+  ; GetMap16 / ChangeMap16 at block (3, $19): before → $7FB020, after → $7FB022, the block next to it → $7FB024
+  STZ $1933
+  REP #$20 : LDA #$0190 : STA $98 : LDA #$0030 : STA $9A
+  %GetMap16() : STA $7FB020
+  LDA #$0130 : %ChangeMap16()
+  LDA #$0190 : STA $98 : LDA #$0030 : STA $9A
+  %GetMap16() : STA $7FB022
+  LDA #$0190 : STA $98 : LDA #$0040 : STA $9A
+  %GetMap16() : STA $7FB024
+  SEP #$20
   ; Random: 64 numbers 0-5, largest → $7FB01A
   LDA #$00 : STA $7FB01A
   LDY #$40
@@ -196,6 +206,8 @@ print "MAIN ",pc
   check(s16(0x7fb014) === 0 && s16(0x7fb016) === -48, `CircleXY at 270°, radius 48: ${s16(0x7fb014)}, ${s16(0x7fb016)} (0, -48)`);
   check(Math.abs(s8(0x7fb018) + 19) <= 1 && Math.abs(s8(0x7fb019) + 26) <= 1, `Aiming towards the target: ${s8(0x7fb018)}, ${s8(0x7fb019)} (≈-19, -26)`);
   check(w3(0x7fb01a) === 5, `Random 0-5 reaches 5 and no more (${w3(0x7fb01a)})`);
+  const t16 = (a: number) => w3(a) | (w3(a + 1) << 8);
+  check(t16(0x7fb022) === 0x130 && t16(0x7fb020) !== 0x130 && t16(0x7fb024) === t16(0x7fb020), `GetMap16/ChangeMap16: ${t16(0x7fb020).toString(16)} → ${t16(0x7fb022).toString(16)}, next block ${t16(0x7fb024).toString(16)}`);
 }
 
 // every built-in routine assembles (called from code that never runs)
@@ -268,6 +280,54 @@ if (existsSync('resources_local/BrutalBill.zip')) {
     const x1 = w[0xe4 + bill] | (w[0x14e0 + bill] << 8);
     check(w[0x14c8 + bill] === 8 && x1 !== x0, `BrutalBill: the bill flies (x ${x0.toString(16)} → ${x1.toString(16)})`);
   }
+}
+
+// misc sprites: a sprite spawns one custom sprite of each type in INIT; each counts its MAIN calls
+{
+  const enc3 = new TextEncoder();
+  const counter = (a: number, extra = '') => `print "MAIN ",pc\n  LDA $${a.toString(16)} : INC : STA $${a.toString(16)}\n${extra}  RTL\n`;
+  const spawner = `print "INIT ",pc
+  STZ $00 : STZ $01 : STZ $02 : STZ $03
+  %SetupCoords()
+  LDA #!ClusterOffset : %SpawnClusterGeneric()
+  LDA #!ExtendedOffset : %SpawnExtendedGeneric()
+  LDA #!MinorExtendedOffset : %SpawnMinorExtendedGeneric()
+  LDA #!ScoreOffset : %SpawnScoreGeneric()
+  LDA #!SpinningCoinOffset : %SpawnSpinningCoinGeneric()
+  LDA #$20 : STA $02 : LDA #!SmokeOffset : %SpawnSmoke()
+  ; bounce sprite in slot 3 (no spawn routine for sprites)
+  LDA #!BounceOffset : STA !bounce_num+3
+  LDA #$00 : STA !bounce_init+3 : STA !bounce_table+3
+  LDA !E4,x : STA !bounce_x_low+3 : LDA !14E0,x : STA !bounce_x_high+3
+  LDA !D8,x : STA !bounce_y_low+3 : LDA !14D4,x : STA !bounce_y_high+3
+  LDA #$20 : STA !bounce_timer+3
+  RTL
+print "MAIN ",pc
+  RTL
+`;
+  const r7 = new Rom(new Uint8Array(readFileSync('Super Mario World (U) [!].smc')));
+  const files = new Map<string, Uint8Array>([
+    ['sprites/spawner.cfg', enc3.encode('01\n36\n00 00 3B 80 00 00\n00 00\nspawner.asm\n00:00\n')],
+    ['sprites/spawner.asm', enc3.encode(spawner)],
+    ['cluster/c.asm', enc3.encode(counter(0x7fb030))],
+    ['extended/e.asm', enc3.encode(counter(0x7fb031))],
+    ['misc_sprites/minorextended/m.asm', enc3.encode(counter(0x7fb032))],
+    ['misc_sprites/score/s.asm', enc3.encode(counter(0x7fb033))],
+    ['misc_sprites/spinningcoin/c.asm', enc3.encode(counter(0x7fb034))],
+    ['misc_sprites/smoke/s.asm', enc3.encode(counter(0x7fb035))],
+    ['misc_sprites/bounce/b.asm', enc3.encode(counter(0x7fb036))],
+  ]);
+  const res7 = savePixiProject(r7, { files, list: parsePixiList('00 spawner.cfg\nCLUSTER:\n00 c.asm\nEXTENDED:\n00 e.asm\nMINOREXTENDED:\n00 m.asm\nSCORE:\n00 s.asm\nSPINNINGCOIN:\n00 c.asm\nSMOKE:\n00 s.asm\nBOUNCE:\n00 b.asm\n') });
+  if (!res7.ok) console.log(res7.errors.join('\n'));
+  check(res7.ok, 'project with all misc types assembled');
+  const e7 = new LevelEmulator(r7); e7.boot();
+  const l7 = loadLevel(r7, 0x105);
+  l7.sprites = [{ uid: newUid(), num: 0x00, x: 6, y: 0x16, extra: 2 }];
+  e7.load(0x105, { sprites: serializeSprites(l7.sprites, l7.spriteHeader, false, spriteSizes(r7)) });
+  for (let i = 0; i < 34; i++) e7.snes.runFrame();
+  const w7 = (a: number) => e7.snes.wram[a - 0x7e0000];
+  const names = ['cluster', 'extended', 'minor extended', 'score', 'spinning coin', 'smoke', 'bounce'];
+  names.forEach((n, i) => check(w7(0x7fb030 + i) > 0, `custom ${n} sprite runs (${w7(0x7fb030 + i)} frames)`));
 }
 
 // removing restores the ROM
