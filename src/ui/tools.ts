@@ -1,7 +1,7 @@
-// Misc. dialogs: secondary entrances, ROM info/expansion, level copy.
+// Misc. dialogs and actions: secondary entrances, ROM info/expansion, level save as/file/screens.
 
 import type { App } from './app.ts';
-import { h, modal, clear, hexInput, select, toast, downloadBytes, pickFile } from './dom.ts';
+import { h, modal, clear, hexInput, select, toast, downloadBytes, pickFile, choose } from './dom.ts';
 import { readSecondaryEntrance, writeSecondaryEntrance, type SecondaryEntrance, loadLevel, cloneLevel, insertScreen, deleteScreen, clearLevel } from '../core/level.ts';
 import { exportLevelFile, importLevelFile, LEVEL_FILE_EXT } from '../core/levelfile.ts';
 import { ENTRANCE_ACTIONS, hex, objectName, spriteName } from '../core/names.ts';
@@ -56,73 +56,81 @@ export function openEntrancesDialog(app: App): void {
 
 export function openRomInfo(app: App): void {
   const rom = app.rom;
-  const body = h('div');
-  const build = () => {
-    clear(body);
-    const rats = rom.scanRats();
-    const used = rats.reduce((a, b) => a + b.size + 8, 0);
-    const expanded = Math.max(0, rom.size - 0x80000);
-    body.append(
-      h('div', { class: 'prop' }, h('label', null, 'Titel'), h('span', null, rom.title())),
-      h('div', { class: 'prop' }, h('label', null, 'Größe'), h('span', null, `${rom.size / 1024} KB${rom.smcHeader ? ' (+512 Byte Copier-Header)' : ''}`)),
-      h('div', { class: 'prop' }, h('label', null, 'Erweiterter Bereich'), h('span', null, `${expanded / 1024} KB, davon ${(used / 1024).toFixed(1)} KB belegt (${rats.length} RATS-Blöcke)`)),
-      h('div', { class: 'prop' }, h('label', null, 'Editor-Patch'), h('span', null, hasEditorPatch(rom) ? 'installiert' : 'nicht installiert')),
-      h('h3', null, 'ROM erweitern'),
-      h('p', { class: 'hint' }, 'Mehr Platz für Levels, Grafiken, Musik usw. Beim Speichern wird automatisch erweitert, wenn nötig. Maximal 4 MB (LoROM).'),
-      h('div', { class: 'row' }, [0x100000, 0x200000, 0x400000].map((sz) => h('button', {
-        disabled: rom.size >= sz,
-        onclick: () => { rom.expand(sz); app.emu.syncRom(); app.persist(); toast(`ROM auf ${sz / 1048576} MB erweitert`); build(); },
-      }, `${sz / 1048576} MB`))),
-      h('h3', null, 'Patches'),
-      h('p', { class: 'hint' }, 'Der Editor-Patch erlaubt Sprite-Daten in beliebigen Banks, 256 Grafikdateien (ExGFX, auch unkomprimiert als 4bpp), Grafik-Zuordnung pro Level und das "Direct Map16"-Objekt (beliebige Map16-Tiles platzieren). Er wird bei Bedarf automatisch installiert.'),
-      h('div', { class: 'row' }, h('button', {
-        disabled: hasEditorPatch(rom),
-        onclick: () => { try { installEditorPatch(rom); app.emu.syncRom(); app.persist(); toast('Editor-Patch installiert'); app.refresh(); app.emit('patch'); } catch (e) { toast(String(e), 'error'); } build(); },
-      }, 'Editor-Patch installieren')),
-    );
-  };
-  build();
+  const rats = rom.scanRats();
+  const used = rats.reduce((a, b) => a + b.size + 8, 0);
+  const expanded = Math.max(0, rom.size - 0x80000);
+  const body = h('div', null,
+    h('div', { class: 'prop' }, h('label', null, 'Titel'), h('span', null, rom.title())),
+    h('div', { class: 'prop' }, h('label', null, 'Größe'), h('span', null, `${rom.size / 1024} KB${rom.smcHeader ? ' (+512 Byte Copier-Header)' : ''}`)),
+    h('div', { class: 'prop' }, h('label', null, 'Erweiterter Bereich'), h('span', null, `${expanded / 1024} KB, davon ${(used / 1024).toFixed(1)} KB belegt (${rats.length} RATS-Blöcke)`)),
+    h('div', { class: 'prop' }, h('label', null, 'Editor-Patch'), h('span', null, hasEditorPatch(rom) ? 'installiert' : 'nicht installiert')),
+  );
   modal('ROM-Informationen', body, [{ label: 'Schließen', primary: true }]);
 }
 
-// Level tools: save as, export/import file, insert/delete screens, clear
-export function openLevelTools(app: App, exportPng: () => void): void {
+export function openExpandDialog(app: App): void {
+  const rom = app.rom;
+  const body = h('div', null,
+    h('p', { class: 'hint' }, `Aktuell ${rom.size / 1024} KB. Mehr Platz für Levels, Grafiken, Musik usw. Beim Speichern wird automatisch erweitert, wenn nötig. Maximal 4 MB (LoROM).`),
+    h('div', { class: 'row' }, [0x100000, 0x200000, 0x400000].map((sz) => h('button', {
+      disabled: rom.size >= sz,
+      onclick: () => { rom.expand(sz); app.emu.syncRom(); app.persist(); toast(`ROM auf ${sz / 1048576} MB erweitert`); dlg.close(); },
+    }, `${sz / 1048576} MB`))),
+  );
+  const dlg = modal('ROM erweitern', body, [{ label: 'Abbrechen' }]);
+}
+
+export async function installEditorPatchAction(app: App): Promise<void> {
+  const ok = await choose('Editor-Patch installieren', 'Der Editor-Patch erlaubt Sprite-Daten in beliebigen Banks, 256 Grafikdateien (ExGFX, auch unkomprimiert als 4bpp), Grafik-Zuordnung pro Level und das "Direct Map16"-Objekt (beliebige Map16-Tiles platzieren). Er wird bei Bedarf auch automatisch installiert.',
+    [{ label: 'Abbrechen' }, { label: 'Installieren', primary: true }]);
+  if (ok !== 1) return;
+  try { installEditorPatch(app.rom); app.emu.syncRom(); app.persist(); toast('Editor-Patch installiert'); app.refresh(); app.emit('patch'); } catch (e) { toast(String(e), 'error'); }
+}
+
+// one undoable structural edit of the current level
+function levelEdit(app: App, f: () => void): boolean {
+  app.checkpoint();
+  try { f(); } catch (e) { app.undoStack.pop(); toast(String(e instanceof Error ? e.message : e), 'error'); return false; }
+  app.selection.clear();
+  app.changed();
+  app.emit('level-header');
+  return true;
+}
+
+export function openSaveAsDialog(app: App): void {
   const lv = app.level;
   let target = lv.number;
+  const body = h('div', null,
+    h('p', { class: 'hint', style: 'max-width:420px' }, `Level ${hex(lv.number, 3)} (mit allen aktuellen Änderungen) unter einer anderen Nummer speichern. Das Ziel wird überschrieben.`),
+    h('div', { class: 'row' }, h('label', null, 'Ziel-Level '), hexInput(target, 3, (v) => (target = v), 0x1ff)));
+  modal(`Level ${hex(lv.number, 3)} speichern unter`, body, [{ label: 'Abbrechen' }, { label: 'Speichern', primary: true, onClick: () => saveAs(app, target) }]);
+}
+
+export function exportLevel(app: App): void {
+  const lv = app.level;
+  const bg = lv.bg ?? (!lv.layer2Objects && bgBank(app.rom, lv.number) ? bgFromWram(app.render.wram) : null);
+  downloadBytes(`level-${hex(lv.number, 3)}${LEVEL_FILE_EXT}`, new TextEncoder().encode(exportLevelFile(app.rom, lv, bg)), 'application/json');
+}
+
+export function openScreenDialog(app: App, op: 'insert' | 'delete'): void {
+  const lv = app.level;
   let screen = 0;
-  const vert = app.vertical;
   const screenOpts: [number, string][] = Array.from({ length: lv.header.screens }, (_, i) => [i, hex(i, 2)]);
-  const edit = (f: () => void) => {
-    app.checkpoint();
-    try { f(); } catch (e) { app.undoStack.pop(); toast(String(e instanceof Error ? e.message : e), 'error'); return false; }
-    app.selection.clear();
-    app.changed();
-    app.emit('level-header');
-    dlg.close();
-  };
-  const body = h('div', { class: 'level-tools' },
-    h('h3', null, 'Speichern unter'),
-    h('p', { class: 'hint' }, `Level ${hex(lv.number, 3)} (mit allen aktuellen Änderungen) unter einer anderen Nummer speichern. Das Ziel wird überschrieben.`),
-    h('div', { class: 'row' }, h('label', null, 'Ziel-Level '), hexInput(target, 3, (v) => (target = v), 0x1ff),
-      h('button', { onclick: () => { saveAs(app, target); } }, 'Speichern')),
-    h('h3', null, 'Datei'),
-    h('p', { class: 'hint' }, `Level als ${LEVEL_FILE_EXT}-Datei (Objekte, Sprites, Exits, Header, Grafik-Bypass, eigene Palette). Beim Import wird das aktuelle Level ersetzt (rückgängig machbar; Palette/Grafik-Bypass werden direkt in die ROM geschrieben).`),
-    h('div', { class: 'row' },
-      h('button', { onclick: () => {
-        const bg = lv.bg ?? (!lv.layer2Objects && bgBank(app.rom, lv.number) ? bgFromWram(app.render.wram) : null);
-        downloadBytes(`level-${hex(lv.number, 3)}${LEVEL_FILE_EXT}`, new TextEncoder().encode(exportLevelFile(app.rom, lv, bg)), 'application/json');
-      } }, 'Exportieren …'),
-      h('button', { onclick: () => importLevel(app).then((ok) => { if (ok) dlg.close(); }) }, 'Importieren …'),
-      h('button', { onclick: exportPng, title: 'Sichtbare Ebenen und Sprites in Originalgröße' }, 'Als PNG …')),
-    h('h3', null, 'Screens'),
-    h('p', { class: 'hint' }, `Alles ab dem gewählten Screen wird um einen Screen ${vert ? 'nach unten' : 'nach rechts'} bzw. zurück verschoben (Objekte, Sprites, Exits, Eingang, Zwischenziel). Sekundäre Eingänge bleiben unverändert.`),
-    h('div', { class: 'row' }, h('label', null, 'Screen '), select(screenOpts, screen, (v) => (screen = v)),
-      h('button', { disabled: lv.header.screens >= 32, onclick: () => edit(() => insertScreen(app.rom, app.level, screen)) }, 'Leeren Screen davor einfügen'),
-      h('button', { disabled: lv.header.screens <= 1, onclick: () => edit(() => deleteScreen(app.rom, app.level, screen)) }, 'Screen löschen')),
-    h('h3', null, 'Leeren'),
-    h('div', { class: 'row' }, h('button', { onclick: () => edit(() => clearLevel(app.level)) }, 'Alle Objekte, Sprites und Exits entfernen')),
-  );
-  const dlg = modal(`Level ${hex(lv.number, 3)} – Werkzeuge`, body, [{ label: 'Schließen', primary: true }]);
+  const dir = app.vertical ? 'nach unten' : 'nach rechts';
+  const body = h('div', null,
+    h('p', { class: 'hint', style: 'max-width:420px' }, op === 'insert'
+      ? `Alles ab dem gewählten Screen wird um einen Screen ${dir} verschoben (Objekte, Sprites, Exits, Eingang, Zwischenziel). Sekundäre Eingänge bleiben unverändert.`
+      : `Der gewählte Screen wird entfernt, alles dahinter rückt einen Screen zurück (Objekte, Sprites, Exits, Eingang, Zwischenziel). Sekundäre Eingänge bleiben unverändert.`),
+    h('div', { class: 'row' }, h('label', null, op === 'insert' ? 'Leeren Screen einfügen vor Screen ' : 'Screen '), select(screenOpts, screen, (v) => (screen = v))));
+  modal(op === 'insert' ? 'Screen einfügen' : 'Screen löschen', body, [
+    { label: 'Abbrechen' },
+    { label: op === 'insert' ? 'Einfügen' : 'Löschen', primary: true, onClick: () => levelEdit(app, () => (op === 'insert' ? insertScreen : deleteScreen)(app.rom, app.level, screen)) },
+  ]);
+}
+
+export async function clearLevelConfirm(app: App): Promise<void> {
+  const r = await choose(`Level ${hex(app.level.number, 3)} leeren`, 'Alle Objekte, Sprites und Exits entfernen? (rückgängig machbar)', [{ label: 'Abbrechen' }, { label: 'Leeren', primary: true }]);
+  if (r === 1) levelEdit(app, () => clearLevel(app.level));
 }
 
 function saveAs(app: App, target: number): void {
@@ -144,7 +152,7 @@ function saveAs(app: App, target: number): void {
   }
 }
 
-async function importLevel(app: App): Promise<boolean> {
+export async function importLevel(app: App): Promise<boolean> {
   const f = await pickFile(`${LEVEL_FILE_EXT},.json`);
   if (!f) return false;
   try {

@@ -5,7 +5,7 @@ sich drei Arten von ASM-Code direkt im Browser in die ROM bringen:
 
 | Art | Format | Wo |
 |---|---|---|
-| **Patches** | beliebige Asar-Patches (`.asm` oder `.zip`), z. B. von SMWCentral | Toolbar → *Patches* |
+| **Patches** | beliebige Asar-Patches (`.asm` oder `.zip`), z. B. von SMWCentral | Menü *ROM → Patches …* |
 | **UberASM** | Code pro Level, Overworld-Karte und Game Mode im Format von UberASM Tool 2.x | *Patches* → *UberASM …* |
 | **Custom Blocks** | Blöcke im GPS-Format | *Patches* → *Custom Blocks …* oder im Map16-Editor |
 

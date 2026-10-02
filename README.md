@@ -52,16 +52,16 @@ Beim Anzeigen eines Levels führt er die **originalen Laderoutinen** des ROMs au
   sekundärer Header (Eingang, Midway, Layer-2/3-Einstellungen), Sprite-Header, BG-Tilemap-Auswahl,
   **Grafik-Bypass (ExGFX pro Level)**.
 * Screen-Exits pro Screen (Ziel, sekundär), **sekundäre Eingänge** (Dialog).
-* **Level-Werkzeuge** („Level …“): speichern unter, **Export/Import als `.smwlevel`-Datei** (Objekte, Sprites, Exits,
-  Header, Grafik-Bypass, eigene Palette), **Screen einfügen/löschen** (verschiebt alles dahinter), Level leeren.
+* **Menü *Level*:** speichern unter, **Screen einfügen/löschen** (verschiebt alles dahinter), Level leeren;
+  **Menü *Datei*:** **Export/Import als `.smwlevel`-Datei** (Objekte, Sprites, Exits, Header, Grafik-Bypass, eigene Palette).
 * **Eingangsmarkierungen** für Haupteingang (M), Zwischenziel-Screen (Z) und sekundäre Eingänge (S) – per Ziehen
   verschiebbar (rastet auf die möglichen Eingangspositionen ein).
 * **Einfügen nach Nummer** (Einfg/I): Objekt, erweitertes Objekt oder Sprite mit Größe/Extra-Bits.
-* Raster, Screen-Grenzen, Layer ein-/ausblendbar; **Ghost** (nicht bearbeitete Objektebene halbtransparent);
+* Menü *Ansicht*: Raster, Screen-Grenzen, Layer ein-/ausblendbar; **inaktive Ebene durchscheinend** (nicht bearbeitete Objektebene halbtransparent);
   Ansicht mit gedrückten Switch-Palästen bzw. ON/OFF auf OFF; Zoom 50–400 %.
-* **Layer 3** (Flut, Layer-3-Bilder) als Vorschau (Scrollen angenähert), **animierte Tiles/Paletten** (Anim.).
-* Statuszeile mit Objekt-/Sprite-Anzahl und Datengröße (Warnung ab 128 Sprites); **Level als PNG** exportieren (Level …).
-* **Nachrichten (Texte):** alle 25 Nachrichtenboxen mit Vorschau in der Spielschrift bearbeiten; passen die Texte
+* **Layer 3** (Flut, Layer-3-Bilder) als Vorschau (Scrollen angenähert), **animierte Tiles/Paletten** (Ansicht → Animation).
+* Statuszeile mit Objekt-/Sprite-Anzahl und Datengröße (Warnung ab 128 Sprites); **Level als PNG** exportieren (*Datei → Level als PNG*).
+* **Nachrichtenboxen** (*ROM → Nachrichtenboxen*): alle 25 Nachrichtenboxen mit Vorschau in der Spielschrift bearbeiten; passen die Texte
   nicht mehr an ihren Platz, werden sie in freien Speicher verlegt.
 * **Level testen (T):** das Level (inkl. ungespeicherter Änderungen) im eingebauten Emulator spielen.
 
@@ -94,7 +94,7 @@ Beim Anzeigen eines Levels führt er die **originalen Laderoutinen** des ROMs au
 
 ## Eigener ROM-Patch („SMWE“)
 
-Wird bei Bedarf automatisch installiert (oder über *ROM → Editor-Patch installieren*). Er wird zur Laufzeit
+Wird bei Bedarf automatisch installiert (oder über *ROM → Editor-Patch installieren …*). Er wird zur Laufzeit
 assembliert und ändert nur wenige, verifizierte Stellen:
 
 | Stelle | Zweck |

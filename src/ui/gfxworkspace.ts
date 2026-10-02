@@ -152,7 +152,7 @@ export class GfxWorkspace {
   gfx: GfxTab;
   anim: AnimTab;
   private body = h('div', { class: 'ws-body' });
-  private tabBar: HTMLElement;
+  bar: HTMLElement;
   active = false;
   private app: App;
 
@@ -164,11 +164,11 @@ export class GfxWorkspace {
     this.gfx = new GfxTab(app, this);
     this.anim = new AnimTab(app, this);
     const tabBtn = (t: WsTab, label: string, key: string) => h('button', { 'data-tab': t, title: `${label} (${key})`, onclick: () => this.open(t) }, label);
-    this.tabBar = h('div', { class: 'ws-tabs' },
-      tabBtn('pal', 'Paletten', 'P'), tabBtn('map16', 'Map16-Tiles', 'M'), tabBtn('gfx', 'Grafiken', 'G'), tabBtn('anim', 'Animationen', 'A'),
+    this.bar = h('div', { class: 'ctxbar ws-tabs' },
+      h('div', { class: 'btn-group' }, tabBtn('pal', 'Paletten', 'P'), tabBtn('map16', 'Map16-Tiles', 'M'), tabBtn('gfx', 'Grafiken', 'G'), tabBtn('anim', 'Animationen', 'A')),
       h('span', { class: 'spacer' }),
       h('span', { class: 'hint' }, 'Änderungen wirken sofort · Strg+Z / Strg+Y'));
-    this.root = h('div', { class: 'ws' }, this.tabBar, this.body);
+    this.root = h('div', { class: 'ws' }, this.body);
     this.side = h('div', { class: 'right ws-side' }, this.preview.root);
     this.preview.onClick = (px, py, e) => this.panel().previewClick?.(px, py, e);
   }
@@ -180,7 +180,7 @@ export class GfxWorkspace {
   open(t: WsTab): void {
     if (this.active && this.tab !== t) this.panel().hide?.();
     this.tab = t;
-    for (const b of this.tabBar.querySelectorAll('button')) b.classList.toggle('active', (b as HTMLElement).dataset.tab === t);
+    for (const b of this.bar.querySelectorAll('button')) b.classList.toggle('active', (b as HTMLElement).dataset.tab === t);
     this.body.replaceChildren(this.panel().root);
     this.preview.highlight.clear();
     this.preview.setHint(this.panel().previewHint?.() ?? '');

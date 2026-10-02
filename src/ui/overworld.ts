@@ -8,6 +8,7 @@ import {
 } from '../core/overworld.ts';
 import { TileCache, blit8 } from '../core/render.ts';
 import { hex } from '../core/names.ts';
+import { menuButton } from './menu.ts';
 
 // a w×h block of L1 tiles (16x16) or L2 tilemap entries (8x8), row-major
 type Brush = { kind: 'l1' | 'l2'; w: number; h: number; entries: number[] };
@@ -19,6 +20,7 @@ export class OverworldView {
   app: App;
   root: HTMLDivElement;
   side: HTMLDivElement;
+  bar: HTMLDivElement;
   canvas: HTMLCanvasElement;
   scroller: HTMLDivElement;
   sizer: HTMLDivElement;
@@ -53,6 +55,7 @@ export class OverworldView {
     this.scroller = h('div', { class: 'level-scroller', tabIndex: 0 }, this.canvas, this.sizer);
     this.status = h('div', { class: 'statusbar' });
     this.side = h('div', { class: 'panel ow-side' });
+    this.bar = h('div', { class: 'ctxbar' });
     this.root = h('div', { class: 'center' }, h('div', { class: 'level-view' }, this.scroller), this.status);
     this.scroller.addEventListener('scroll', () => this.paint());
     new ResizeObserver(() => this.layout()).observe(this.scroller);
@@ -308,29 +311,45 @@ export class OverworldView {
     this.status.textContent = t;
   }
 
+  // ---------------- context bar (map, layer, view) ----------------
+  buildBar(): void {
+    const setMode = (m: 'l1' | 'l2') => {
+      this.mode = m;
+      if (this.brush.kind !== m) this.brush = { kind: m, w: 1, h: 1, entries: [m === 'l1' ? 0x56 : 0] };
+      this.buildSide();
+      this.paint();
+    };
+    const view = (label: string, get: () => boolean, set: (v: boolean) => void, title?: string) =>
+      ({ label, title, checked: get, onToggle: (v: boolean) => { set(v); this.redrawMap(); } });
+    this.bar.replaceChildren(
+      h('label', { class: 'row' }, 'Karte ', select(MAP_NAMES.map((n, i) => [i, n] as [number, string]), this.map, (v) => { this.map = v; this.selectedTl = -1; this.redrawMap(); this.buildSide(); })),
+      h('span', { class: 'sep' }),
+      h('div', { class: 'btn-group' },
+        h('button', { class: this.mode === 'l1' ? 'active' : '', onclick: () => setMode('l1') }, 'Layer 1 (Wege/Level)'),
+        h('button', { class: this.mode === 'l2' ? 'active' : '', onclick: () => setMode('l2') }, 'Layer 2 (Gelände)')),
+      h('span', { class: 'sep' }),
+      menuButton({ label: 'Ansicht', items: [
+        { heading: 'Ebenen' },
+        view('Layer 1', () => this.showL1, (v) => (this.showL1 = v)),
+        view('Layer 2', () => this.showL2, (v) => (this.showL2 = v)),
+        { heading: 'Hilfen' },
+        view('Raster', () => this.showGrid, (v) => (this.showGrid = v)),
+        { heading: 'Spielzustand' },
+        view('Nach allen Events', () => this.showEvents, (v) => (this.showEvents = v), 'Zustand nach allen Events (nur Ansicht)'),
+      ] }),
+      h('span', { class: 'sep' }),
+      h('button', { onclick: () => { this.invalidate(); this.redrawMap(); this.buildSide(); }, title: 'Overworld neu aus der ROM laden' }, 'Neu laden'),
+    );
+  }
+
   // ---------------- side panel ----------------
   buildSide(): void {
+    this.buildBar();
     const side = this.side;
     clear(side);
-    const tog = (label: string, get: () => boolean, set: (v: boolean) => void) => {
-      const cb = h('input', { type: 'checkbox', checked: get() });
-      cb.addEventListener('change', () => { set(cb.checked); this.redrawMap(); this.buildSide(); });
-      return h('label', { class: 'toggle' }, cb, label);
-    };
     side.append(
-      h('div', { class: 'panel-title' }, 'Overworld'),
-      h('div', { class: 'prop' }, h('label', null, 'Karte'), select(MAP_NAMES.map((n, i) => [i, n] as [number, string]), this.map, (v) => { this.map = v; this.selectedTl = -1; this.redrawMap(); this.buildSide(); })),
-      h('div', { class: 'tabs' },
-        h('button', { class: this.mode === 'l1' ? 'active' : '', onclick: () => { this.mode = 'l1'; if (this.brush.kind !== 'l1') this.brush = { kind: 'l1', w: 1, h: 1, entries: [0x56] }; this.buildSide(); this.paint(); } }, 'Layer 1 (Wege/Level)'),
-        h('button', { class: this.mode === 'l2' ? 'active' : '', onclick: () => { this.mode = 'l2'; if (this.brush.kind !== 'l2') this.brush = { kind: 'l2', w: 1, h: 1, entries: [0] }; this.buildSide(); this.paint(); } }, 'Layer 2 (Gelände)'),
-      ),
-      h('div', { class: 'row' }, tog('L1', () => this.showL1, (v) => (this.showL1 = v)), tog('L2', () => this.showL2, (v) => (this.showL2 = v)),
-        tog('Events', () => this.showEvents, (v) => (this.showEvents = v)), tog('Raster', () => this.showGrid, (v) => (this.showGrid = v))),
-      h('div', { class: 'row' },
-        h('button', { class: 'primary', onclick: () => this.save() }, 'Overworld speichern'),
-        h('button', { onclick: () => this.undoOnce(), title: 'Rückgängig (Strg+Z)' }, '↶'),
-        h('button', { onclick: () => { this.invalidate(); this.redrawMap(); this.buildSide(); } }, 'Neu laden')),
-      h('div', { class: 'hint' }, 'Wie im Level-Editor: Klick nimmt ein Tile auf, Ziehen einen Block (auch in der Palette) · Rechtsklick/Shift+Klick malt, Ziehen malt weiter · Alt+Klick (Layer 1): Level-Info. "Events" zeigt den Zustand nach allen Events (nur Ansicht).'),
+      h('div', { class: 'panel-title' }, this.mode === 'l1' ? 'Layer 1 (Wege/Level)' : 'Layer 2 (Gelände)'),
+      h('div', { class: 'hint' }, 'Wie im Level-Editor: Klick nimmt ein Tile auf, Ziehen einen Block (auch in der Palette) · Rechtsklick/Shift+Klick malt, Ziehen malt weiter · Alt+Klick (Layer 1): Level-Info.'),
     );
     if (this.selectedTl > 0) side.append(this.levelInfo(this.selectedTl));
     side.append(this.mode === 'l1' ? this.l1Palette() : this.l2Palette());
