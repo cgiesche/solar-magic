@@ -5,7 +5,7 @@
 
 import type { App } from '../app.ts';
 import type { GfxWorkspace, WsPanel } from '../gfxworkspace.ts';
-import { h, clear, toast } from '../dom.ts';
+import { h, clear, toast, pickerOpen } from '../dom.ts';
 import { hex } from '../../core/names.ts';
 import { cgramToRGBA, decodeTile, snesColorToRGBA } from '../../core/gfx.ts';
 import { map16Source } from '../../core/render.ts';
@@ -278,6 +278,8 @@ export class AnimTab implements WsPanel {
 
   private buildDetail(): void {
     const d = this.detail;
+    // an open native color picker closes when its input is replaced: rebuild once it is done (change)
+    if (pickerOpen(d)) return;
     clear(d);
     const s = this.slot();
     if (!s) { d.append(h('p', { class: 'hint' }, 'Links eine Animation wählen oder anlegen.')); return; }
@@ -387,7 +389,11 @@ export class AnimTab implements WsPanel {
           const v = (parseInt(m[1], 16) >> 3) | ((parseInt(m[2], 16) >> 3) << 5) | ((parseInt(m[3], 16) >> 3) << 10);
           void this.editSlot((x) => { const cs = this.columns(x); cs[i][set] = v; this.setColumns(x, cs); }, `Farbe von Bild ${i + 1}`, `anim-color:${this.sel}:${i}:${set}`);
         });
-        row.append(h('div', { class: `at-frame${i === this.frame && set === this.set ? ' sel' : ''}`, onclick: () => { this.frame = i; this.set = set; } }, pick, h('span', { class: 'hint mono' }, `$${hex(c[set], 4)}`)));
+        pick.addEventListener('change', () => { pick.blur(); this.buildDetail(); });
+        row.append(h('div', { class: `at-frame${i === this.frame && set === this.set ? ' sel' : ''}`, onclick: (e: MouseEvent) => {
+          this.frame = i; this.set = set;
+          for (const f of strip.querySelectorAll('.at-frame')) f.classList.toggle('sel', f === e.currentTarget);
+        } }, pick, h('span', { class: 'hint mono' }, `$${hex(c[set], 4)}`)));
       });
       strip.append(row);
     }

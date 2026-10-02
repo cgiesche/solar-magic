@@ -1,10 +1,10 @@
 // Overworld editor view.
 
 import type { App } from './app.ts';
-import { h, clear, toast, select, attachPanZoom, attachRectPick } from './dom.ts';
+import { h, toast, select, attachPanZoom, attachRectPick, choose, emptyState } from './dom.ts';
 import {
   OverworldEmulator, type OwRender, readL1, writeL1, readL2, writeL2, l1Index, l2Index, translevels, isLevelTile,
-  translevelToLevel, levelName, nameCode, setNameCode, splitNameCode, joinNameCode, nameWord, NAME_PART_COUNTS, MAP_NAMES,
+  translevelToLevel, nameCode, setNameCode, splitNameCode, joinNameCode, nameWord, NAME_PART_COUNTS, MAP_NAMES,
 } from '../core/overworld.ts';
 import { TileCache, blit8 } from '../core/render.ts';
 import { hex } from '../core/names.ts';
@@ -16,20 +16,33 @@ type Drag =
   | { kind: 'paint'; x0: number; y0: number; lastX: number; lastY: number } // brush stamped on a grid from (x0, y0)
   | { kind: 'pick'; x0: number; y0: number; x1: number; y1: number }; // map cells taken into the brush
 
+type Snapshot = { l1: Uint8Array; l2: Uint16Array; names: Map<number, number> };
+
 export class OverworldView {
   app: App;
   root: HTMLDivElement;
   side: HTMLDivElement;
   bar: HTMLDivElement;
+  left: HTMLDivElement;
   canvas: HTMLCanvasElement;
   scroller: HTMLDivElement;
   sizer: HTMLDivElement;
   status: HTMLDivElement;
+  private statusText = h('span', { class: 'status-text' });
+  private statusStats = h('span', { class: 'status-stats' });
+  private palPanel = h('div', { class: 'panel ow-pal-panel' });
+  private props = h('div', { class: 'panel props' });
+  private tlList = h('div', { class: 'level-list' });
+  private tlCount = h('span', { class: 'hint' });
+  private zoomLabel = h('span', { class: 'zoom' });
+  private roBadge = h('div', { class: 'ow-badge' }, 'Layer 1: nur Ansicht (Zustand nach allen Events)');
   emu: OverworldEmulator;
   map = 0;
   renders = new Map<string, OwRender>();
   l1: Uint8Array;
   l2: Uint16Array;
+  // level name codes edited here, written to the ROM on save
+  names = new Map<number, number>();
   dirty = false;
   mode: 'l1' | 'l2' = 'l1';
   showL1 = true;
@@ -43,7 +56,13 @@ export class OverworldView {
   drag: Drag | null = null;
   selectedTl = -1;
   mapCanvas = document.createElement('canvas');
-  undo: { l1: Uint8Array; l2: Uint16Array }[] = [];
+  undoStack: Snapshot[] = [];
+  redoStack: Snapshot[] = [];
+  private pending: Snapshot | null = null;
+  private warnedTl = false;
+  // set by the host: dirty/undo state changed, open a level in the level editor
+  onChange: () => void = () => {};
+  onOpenLevel: (n: number) => void = () => {};
 
   constructor(app: App) {
     this.app = app;
@@ -53,23 +72,30 @@ export class OverworldView {
     this.canvas = h('canvas', { class: 'level-canvas' });
     this.sizer = h('div', { class: 'level-sizer' });
     this.scroller = h('div', { class: 'level-scroller', tabIndex: 0 }, this.canvas, this.sizer);
-    this.status = h('div', { class: 'statusbar' });
-    this.side = h('div', { class: 'panel ow-side' });
+    this.status = h('div', { class: 'statusbar' }, this.statusText, this.statusStats);
+    this.side = h('div', { class: 'ow-side' }, this.palPanel, this.props);
     this.bar = h('div', { class: 'ctxbar' });
-    this.root = h('div', { class: 'center' }, h('div', { class: 'level-view' }, this.scroller), this.status);
+    this.left = h('div', { class: 'left' }, h('div', { class: 'panel levels' },
+      h('div', { class: 'panel-title' }, 'Level-Tiles', this.tlCount), this.tlList));
+    this.root = h('div', { class: 'center' }, h('div', { class: 'level-view' }, this.scroller, this.roBadge), this.status);
     this.scroller.addEventListener('scroll', () => this.paint());
     new ResizeObserver(() => this.layout()).observe(this.scroller);
     this.scroller.addEventListener('contextmenu', (e) => e.preventDefault());
     this.scroller.addEventListener('mousedown', (e) => this.onDown(e));
+    this.scroller.addEventListener('mouseleave', () => { if (!this.drag) { this.hover = null; this.updateStatus(); this.paint(); } });
     window.addEventListener('mousemove', (e) => this.onMove(e));
     window.addEventListener('mouseup', () => this.onUp());
-    attachPanZoom(this.scroller, () => this.zoom, (z, ax, ay) => {
-      const lx = (this.scroller.scrollLeft + ax) / this.zoom, ly = (this.scroller.scrollTop + ay) / this.zoom;
-      this.zoom = z;
-      this.layout();
-      this.scroller.scrollLeft = lx * z - ax;
-      this.scroller.scrollTop = ly * z - ay;
-    }, 1, 4);
+    attachPanZoom(this.scroller, () => this.zoom, (z, ax, ay) => this.setZoom(z, ax, ay), 1, 4);
+  }
+
+  setZoom(z: number, ax = this.scroller.clientWidth / 2, ay = this.scroller.clientHeight / 2): void {
+    z = Math.max(1, Math.min(4, z));
+    const lx = (this.scroller.scrollLeft + ax) / this.zoom, ly = (this.scroller.scrollTop + ay) / this.zoom;
+    this.zoom = z;
+    this.layout();
+    this.scroller.scrollLeft = lx * z - ax;
+    this.scroller.scrollTop = ly * z - ay;
+    this.zoomLabel.textContent = `${Math.round(z * 100)}%`;
   }
 
   get region(): number {
@@ -95,8 +121,6 @@ export class OverworldView {
     const r = this.render();
     const W = 512;
     const img = new Uint32Array(W * W);
-    const pal0 = r.cgram[0] | (r.cgram[1] << 8);
-    void pal0;
     const tc = new TileCache(r.vram, r.cgram, 0);
     if (this.showL2) {
       for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) blit8(img, W, W, tc.get(this.l2[l2Index(this.region, x, y)]), x * 8, y * 8);
@@ -202,8 +226,8 @@ export class OverworldView {
     if (e.clientX - rc.left > this.scroller.clientWidth || e.clientY - rc.top > this.scroller.clientHeight) return;
     const c = this.cell(e);
     if (e.button === 2 || (e.button === 0 && e.shiftKey && !e.ctrlKey)) {
-      if (this.showEvents && this.mode === 'l1') { toast('Im Event-Modus ist Layer 1 schreibgeschützt (zeigt den Zustand nach allen Events).'); return; }
-      this.pushUndo();
+      if (this.readOnly()) { toast('Layer 1 zeigt den Zustand nach allen Events und ist hier nur Ansicht – „Nach allen Events“ im Menü Ansicht ausschalten.'); return; }
+      this.begin();
       this.drag = { kind: 'paint', x0: c.x, y0: c.y, lastX: c.x, lastY: c.y };
       this.paintAt(c.x, c.y);
       return;
@@ -234,6 +258,7 @@ export class OverworldView {
     if (!d) return;
     this.drag = null;
     if (d.kind === 'pick') this.pick(this.pickRect(d));
+    else this.commit();
   }
 
   // the picked rectangle, clamped to the map (32x32 L1 tiles, 64x64 L2 tiles)
@@ -244,16 +269,48 @@ export class OverworldView {
     return { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
   }
 
-  pushUndo(): void {
-    this.undo.push({ l1: this.l1.slice(), l2: this.l2.slice() });
-    if (this.undo.length > 100) this.undo.shift();
+  // ---------------- history (L1, L2, level names) ----------------
+  private snapshot(): Snapshot {
+    return { l1: this.l1.slice(), l2: this.l2.slice(), names: new Map(this.names) };
   }
-  undoOnce(): void {
-    const u = this.undo.pop();
-    if (!u) return;
-    this.l1 = u.l1; this.l2 = u.l2; this.dirty = true;
+  private restore(sn: Snapshot): void {
+    this.l1 = sn.l1; this.l2 = sn.l2; this.names = sn.names;
+  }
+  // an edit starts: commit() records it when something changed
+  begin(): void {
+    this.pending = this.snapshot();
+  }
+  commit(): void {
+    const p = this.pending;
+    this.pending = null;
+    if (!p) return;
+    const same = p.l1.every((v, i) => v === this.l1[i]) && p.l2.every((v, i) => v === this.l2[i])
+      && p.names.size === this.names.size && [...p.names].every(([k, v]) => this.names.get(k) === v);
+    if (same) return;
+    this.undoStack.push(p);
+    if (this.undoStack.length > 200) this.undoStack.shift();
+    this.redoStack = [];
+    this.dirty = true;
+    this.onChange();
+  }
+  get canUndo(): boolean { return this.undoStack.length > 0; }
+  get canRedo(): boolean { return this.redoStack.length > 0; }
+  undo(): void { this.step(this.undoStack, this.redoStack); }
+  redo(): void { this.step(this.redoStack, this.undoStack); }
+  private step(from: Snapshot[], to: Snapshot[]): void {
+    const sn = from.pop();
+    if (!sn) return;
+    to.push(this.snapshot());
+    this.restore(sn);
+    this.dirty = true;
     this.redrawMap();
     this.buildSide();
+    this.buildLeft();
+    this.onChange();
+  }
+
+  readOnly(): boolean {
+    return this.showEvents && this.mode === 'l1';
   }
 
   paintAt(x: number, y: number): void {
@@ -267,15 +324,20 @@ export class OverworldView {
       const v = b.entries[dy * b.w + dx];
       if (this.mode === 'l1') {
         const i = l1Index(this.region, xx, yy);
-        if (this.l1[i] !== v) { this.l1[i] = v; changed = true; }
+        if (this.l1[i] === v) continue;
+        if (!this.warnedTl && (isLevelTile(this.l1[i]) || isLevelTile(v))) {
+          this.warnedTl = true;
+          toast('Hinweis: Level-Tiles (56–80) bekommen ihre Translevel-Nummer in Scan-Reihenfolge – neue oder entfernte Level-Tiles verschieben die Nummern aller folgenden.');
+        }
+        this.l1[i] = v; changed = true;
       } else {
         const i = l2Index(this.region, xx, yy);
         if (this.l2[i] !== v) { this.l2[i] = v; changed = true; }
       }
     }
     if (!changed) return;
-    this.dirty = true;
     this.redrawMap();
+    if (this.mode === 'l1') this.buildLeft();
   }
 
   pick(r: { x: number; y: number; w: number; h: number }): void {
@@ -288,91 +350,167 @@ export class OverworldView {
   }
 
   info(x: number, y: number): void {
-    if (this.mode !== 'l1') return;
+    if (this.mode !== 'l1') { toast('Level-Info gibt es auf Layer 1 (Wege/Level)'); return; }
     const tl = translevels(this.l1)[l1Index(this.region, x, y)];
-    this.selectedTl = tl || -1;
-    this.buildSide();
+    if (!tl) toast('Kein Level-Tile');
+    this.selectTl(tl || -1, false);
+  }
+
+  // selects a translevel (list, Alt/Strg+click); center: scroll the map to its tile
+  selectTl(tl: number, center: boolean): void {
+    this.selectedTl = tl;
+    if (center && tl > 0) {
+      const t = translevels(this.l1);
+      for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
+        if (t[l1Index(this.region, x, y)] !== tl) continue;
+        this.scroller.scrollLeft = (x * 16 + 8) * this.zoom - this.scroller.clientWidth / 2;
+        this.scroller.scrollTop = (y * 16 + 8) * this.zoom - this.scroller.clientHeight / 2;
+      }
+    }
+    this.buildProps();
+    this.buildLeft();
     this.paint();
+  }
+
+  nameCodeOf(tl: number): number {
+    return this.names.get(tl) ?? nameCode(this.app.rom, tl);
+  }
+  nameOf(tl: number): string {
+    const [a, b, c] = splitNameCode(this.nameCodeOf(tl));
+    const rom = this.app.rom;
+    return (nameWord(rom, 0, a) + nameWord(rom, 1, b) + nameWord(rom, 2, c)).replace(/\s+/g, ' ').trim();
   }
 
   updateStatus(): void {
     const c = this.hover;
-    if (!c) return;
-    let t = `${this.mode === 'l1' ? 'L1 16x16' : 'L2 8x8'}  X ${hex(c.x, 2)} Y ${hex(c.y, 2)}`;
-    const lx = this.mode === 'l1' ? c.x : c.x >> 1, ly = this.mode === 'l1' ? c.y : c.y >> 1;
-    if (lx >= 0 && ly >= 0 && lx < 32 && ly < 32) {
-      const i = l1Index(this.region, lx, ly);
-      const tile = this.l1[i];
-      t += `  L1-Tile ${hex(tile, 2)}`;
-      const tl = translevels(this.l1)[i];
-      if (tl) t += `  · Translevel ${hex(tl, 2)} → Level ${hex(translevelToLevel(tl), 3)} "${levelName(this.app.rom, tl)}"`;
+    const b = this.brush;
+    this.statusStats.textContent = b.kind === this.mode ? `Pinsel ${b.w}×${b.h}` : '';
+    if (!c) {
+      this.statusText.textContent = this.readOnly() ? 'Layer 1 nur Ansicht – „Nach allen Events“ ausschalten zum Bearbeiten'
+        : 'Klick/Ziehen nimmt Tiles auf · Rechtsklick/Shift+Klick malt · Alt/Strg+Klick: Level-Info';
+      return;
     }
-    if (this.mode === 'l2' && c.x >= 0 && c.y >= 0 && c.x < 64 && c.y < 64) t += `  L2 ${hex(this.l2[l2Index(this.region, c.x, c.y)], 4)}`;
-    this.status.textContent = t;
+    let t = `X ${hex(c.x, 2)}  Y ${hex(c.y, 2)}`;
+    if (this.mode === 'l1') {
+      if (c.x >= 0 && c.y >= 0 && c.x < 32 && c.y < 32) {
+        const i = l1Index(this.region, c.x, c.y);
+        t += `  ·  Tile ${hex(this.l1[i], 2)}`;
+        const tl = translevels(this.l1)[i];
+        if (tl) t += `  ·  Translevel ${hex(tl, 2)} → Level ${hex(translevelToLevel(tl), 3)} „${this.nameOf(tl)}“`;
+      }
+    } else if (c.x >= 0 && c.y >= 0 && c.x < 64 && c.y < 64) t += `  ·  Eintrag ${hex(this.l2[l2Index(this.region, c.x, c.y)], 4)}`;
+    this.statusText.textContent = t;
   }
 
-  // ---------------- context bar (map, layer, view) ----------------
+  // ---------------- context bar (map, layer, view, zoom) ----------------
   buildBar(): void {
     const setMode = (m: 'l1' | 'l2') => {
+      if (this.mode === m) return;
       this.mode = m;
       if (this.brush.kind !== m) this.brush = { kind: m, w: 1, h: 1, entries: [m === 'l1' ? 0x56 : 0] };
+      this.buildBar();
       this.buildSide();
+      this.updateStatus();
       this.paint();
     };
-    const view = (label: string, get: () => boolean, set: (v: boolean) => void, title?: string) =>
-      ({ label, title, checked: get, onToggle: (v: boolean) => { set(v); this.redrawMap(); } });
+    const view = (label: string, get: () => boolean, set: (v: boolean) => void, title?: string, shortcut?: string) =>
+      ({ label, title, shortcut, checked: get, onToggle: (v: boolean) => { set(v); this.redrawMap(); this.updateStatus(); } });
+    this.zoomLabel.textContent = `${Math.round(this.zoom * 100)}%`;
     this.bar.replaceChildren(
-      h('label', { class: 'row' }, 'Karte ', select(MAP_NAMES.map((n, i) => [i, n] as [number, string]), this.map, (v) => { this.map = v; this.selectedTl = -1; this.redrawMap(); this.buildSide(); })),
+      h('label', { class: 'row' }, 'Karte ', select(MAP_NAMES.map((n, i) => [i, n] as [number, string]), this.map, (v) => { this.map = v; this.selectedTl = -1; this.redrawMap(); this.buildSide(); this.buildLeft(); })),
       h('span', { class: 'sep' }),
       h('div', { class: 'btn-group' },
-        h('button', { class: this.mode === 'l1' ? 'active' : '', onclick: () => setMode('l1') }, 'Layer 1 (Wege/Level)'),
-        h('button', { class: this.mode === 'l2' ? 'active' : '', onclick: () => setMode('l2') }, 'Layer 2 (Gelände)')),
+        h('button', { class: this.mode === 'l1' ? 'active' : '', title: 'Layer 1 (1)', onclick: () => setMode('l1') }, 'Layer 1 (Wege/Level)'),
+        h('button', { class: this.mode === 'l2' ? 'active' : '', title: 'Layer 2 (2)', onclick: () => setMode('l2') }, 'Layer 2 (Gelände)')),
       h('span', { class: 'sep' }),
       menuButton({ label: 'Ansicht', items: [
         { heading: 'Ebenen' },
         view('Layer 1', () => this.showL1, (v) => (this.showL1 = v)),
         view('Layer 2', () => this.showL2, (v) => (this.showL2 = v)),
         { heading: 'Hilfen' },
-        view('Raster', () => this.showGrid, (v) => (this.showGrid = v)),
+        view('Raster', () => this.showGrid, (v) => (this.showGrid = v), undefined, 'G'),
         { heading: 'Spielzustand' },
-        view('Nach allen Events', () => this.showEvents, (v) => (this.showEvents = v), 'Zustand nach allen Events (nur Ansicht)'),
+        view('Nach allen Events', () => this.showEvents, (v) => (this.showEvents = v), 'Zustand nach allen Events (nur Ansicht, Layer 1 dann nicht bearbeitbar)'),
       ] }),
       h('span', { class: 'sep' }),
-      h('button', { onclick: () => { this.invalidate(); this.redrawMap(); this.buildSide(); }, title: 'Overworld neu aus der ROM laden' }, 'Neu laden'),
+      h('div', { class: 'row zoom-ctl' },
+        h('button', { onclick: () => this.setZoom(this.zoom / 2), title: 'Verkleinern (Strg+Mausrad)' }, '−'), this.zoomLabel,
+        h('button', { onclick: () => this.setZoom(this.zoom * 2), title: 'Vergrößern (Strg+Mausrad)' }, '+')),
+      h('span', { class: 'spacer' }),
+      h('button', { onclick: () => void this.reload(), title: 'Overworld neu aus der ROM laden (verwirft ungespeicherte Änderungen)' }, 'Neu laden'),
     );
   }
 
-  // ---------------- side panel ----------------
+  // keys while the overworld is shown; false: not handled
+  key(e: KeyboardEvent): boolean {
+    const k = e.key.toLowerCase(), ctrl = e.ctrlKey || e.metaKey;
+    if (ctrl && k === 'z') { if (e.shiftKey) this.redo(); else this.undo(); return true; }
+    if (ctrl && k === 'y') { this.redo(); return true; }
+    if (ctrl && k === 's') { this.save(); return true; }
+    if (ctrl || e.altKey) return false;
+    if (k === 'g') { this.showGrid = !this.showGrid; this.paint(); return true; }
+    if (k === '1' || k === '2') { (this.bar.querySelectorAll('.btn-group button')[k === '1' ? 0 : 1] as HTMLButtonElement).click(); return true; }
+    return false;
+  }
+
+  // ---------------- left: level tiles of the map ----------------
+  buildLeft(): void {
+    const t = translevels(this.l1);
+    const seen = new Set<number>();
+    const items: HTMLElement[] = [];
+    for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
+      const tl = t[l1Index(this.region, x, y)];
+      if (!tl || seen.has(tl)) continue;
+      seen.add(tl);
+      const lvl = translevelToLevel(tl), name = this.nameOf(tl);
+      const cur = tl === this.selectedTl;
+      const el = h('div', { class: `level-item${cur ? ' current' : ''}`, title: `${name}\nKlick: auswählen · Doppelklick: im Level-Editor öffnen`,
+        onclick: () => this.selectTl(tl, true), ondblclick: () => this.onOpenLevel(lvl) },
+        hex(lvl, 3), h('span', { class: 'lname' }, ` ${name}`));
+      items.push(el);
+      if (cur) setTimeout(() => el.scrollIntoView({ block: 'nearest' }), 0);
+    }
+    this.tlCount.textContent = String(items.length);
+    this.tlList.replaceChildren(...(items.length ? items : [emptyState('Auf dieser Karte gibt es keine Level-Tiles (56–80).')]));
+  }
+
+  // ---------------- right: palette, properties ----------------
   buildSide(): void {
-    this.buildBar();
-    const side = this.side;
-    clear(side);
-    side.append(
-      h('div', { class: 'panel-title' }, this.mode === 'l1' ? 'Layer 1 (Wege/Level)' : 'Layer 2 (Gelände)'),
-      h('div', { class: 'hint' }, 'Wie im Level-Editor: Klick nimmt ein Tile auf, Ziehen einen Block (auch in der Palette) · Rechtsklick/Shift+Klick malt, Ziehen malt weiter · Alt+Klick (Layer 1): Level-Info.'),
-    );
-    if (this.selectedTl > 0) side.append(this.levelInfo(this.selectedTl));
-    side.append(this.mode === 'l1' ? this.l1Palette() : this.l2Palette());
+    const scroll = this.palPanel.scrollTop;
+    this.palPanel.replaceChildren(
+      h('div', { class: 'panel-title' }, 'Malen', h('span', { class: 'hint' }, 'Rechtsklick/Shift+Klick malt')),
+      this.mode === 'l1' ? this.l1Palette() : this.l2Palette());
+    this.palPanel.scrollTop = scroll;
+    this.roBadge.classList.toggle('show', this.readOnly());
+    this.scroller.classList.toggle('readonly', this.readOnly());
+    this.buildProps();
+  }
+
+  buildProps(): void {
+    const tl = this.selectedTl;
+    this.props.replaceChildren(h('div', { class: 'panel-title' }, 'Eigenschaften'),
+      tl > 0 ? this.levelInfo(tl) : emptyState('Level-Tile links in der Liste oder per Alt/Strg+Klick auf der Karte wählen.'));
   }
 
   levelInfo(tl: number): HTMLElement {
     const rom = this.app.rom;
-    const parts = splitNameCode(nameCode(rom, tl));
+    const parts = splitNameCode(this.nameCodeOf(tl));
     const sel = (k: number) => select(Array.from({ length: NAME_PART_COUNTS[k] }, (_, i) => [i, `${hex(i, 2)}: ${nameWord(rom, k, i).trim() || '(leer)'}`] as [number, string]), parts[k], (v) => {
       parts[k] = v;
-      setNameCode(rom, tl, joinNameCode(parts));
-      this.dirty = true;
-      this.buildSide();
+      this.begin();
+      this.names.set(tl, joinNameCode(parts));
+      this.commit();
+      this.buildProps();
+      this.buildLeft();
     });
     const lvl = translevelToLevel(tl);
     return h('div', { class: 'ow-info' },
       h('div', { class: 'prop-title' }, `Translevel ${hex(tl, 2)} → Level ${hex(lvl, 3)}`),
-      h('div', null, `"${levelName(rom, tl)}"`),
+      h('div', null, `„${this.nameOf(tl)}“`),
       h('div', { class: 'prop' }, h('label', null, 'Name Teil 1'), sel(0)),
       h('div', { class: 'prop' }, h('label', null, 'Name Teil 2'), sel(1)),
       h('div', { class: 'prop' }, h('label', null, 'Name Teil 3'), sel(2)),
-      h('button', { onclick: () => { this.app.emit('open-level-from-ow'); this.app.openLevel(lvl); this.app.emit('show-level-view'); } }, `Level ${hex(lvl, 3)} bearbeiten`),
-      h('div', { class: 'hint' }, 'In Vanilla-SMW werden Translevel-Nummern in Scan-Reihenfolge der Level-Tiles vergeben – neue Level-Tiles verschieben die Nummern aller folgenden.'),
+      h('div', { class: 'row' }, h('button', { onclick: () => this.onOpenLevel(lvl), title: 'Im Level-Editor öffnen (auch per Doppelklick in der Liste)' }, `Level ${hex(lvl, 3)} bearbeiten`)),
     );
   }
 
@@ -475,28 +613,62 @@ export class OverworldView {
   }
 
   save(): void {
+    const rom = this.app.rom;
     try {
-      writeL1(this.app.rom, this.l1);
-      const n = writeL2(this.app.rom, this.l2);
+      // Layer 2 first: it is the only part that can fail (no free space)
+      const n = writeL2(rom, this.l2);
+      writeL1(rom, this.l1);
+      for (const [tl, code] of this.names) setNameCode(rom, tl, code);
+      this.names.clear();
       this.app.emu.syncRom();
       this.app.persist();
       this.dirty = false;
       this.invalidate();
       this.redrawMap();
+      this.onChange();
       toast(`Overworld gespeichert (Layer 2: ${n} Bytes RLE).`);
     } catch (e) {
-      toast(`Fehler: ${e}`, 'error');
+      toast(`Overworld nicht gespeichert: ${e instanceof Error ? e.message : e}`, 'error');
     }
   }
 
-  show(): void {
+  // drops unsaved changes (they are re-read from the ROM)
+  discard(): void {
     this.l1 = readL1(this.app.rom);
     this.l2 = readL2(this.app.rom);
+    this.names.clear();
+    this.undoStack = [];
+    this.redoStack = [];
+    this.dirty = false;
+    this.onChange();
+  }
+
+  async reload(): Promise<void> {
+    if (this.dirty && (await choose('Overworld neu laden', 'Ungespeicherte Änderungen an der Overworld verwerfen?', [{ label: 'Abbrechen' }, { label: 'Verwerfen', primary: true }])) !== 1) return;
+    this.show();
+    toast('Overworld neu geladen');
+  }
+
+  // leaving: save, discard or stay; false = stay
+  async confirmLeave(): Promise<boolean> {
+    if (!this.dirty) return true;
+    const r = await choose('Overworld verlassen', 'Die Overworld hat ungespeicherte Änderungen.', [{ label: 'Abbrechen' }, { label: 'Verwerfen' }, { label: 'Speichern', primary: true }]);
+    if (r === 2) { this.save(); return !this.dirty; }
+    if (r === 1) { this.discard(); return true; }
+    return false;
+  }
+
+  show(): void {
     this.emu.rom = this.app.rom;
+    this.discard();
     this.invalidate();
+    if (this.selectedTl > 0 && !translevels(this.l1).includes(this.selectedTl)) this.selectedTl = -1;
+    this.buildBar();
     this.buildSide();
+    this.buildLeft();
     this.redrawMap();
     this.layout();
+    this.updateStatus();
   }
 }
 

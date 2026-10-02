@@ -135,7 +135,7 @@ function buildUi(app: App): void {
   const menus = menuBar([
     { label: 'Datei', items: [
       { label: 'ROM öffnen …', onClick: async () => { const f = await pickFile('.smc,.sfc,.bin'); if (f) openFile(f); } },
-      { label: 'ROM exportieren', title: 'ROM mit allen gespeicherten Änderungen herunterladen', onClick: () => exportRom(app) },
+      { label: 'ROM exportieren', title: 'ROM mit allen gespeicherten Änderungen herunterladen', onClick: () => { if (ow?.dirty) ow.save(); exportRom(app); } },
       'sep',
       { label: 'Level-Datei importieren …', title: 'Ersetzt das aktuelle Level (rückgängig machbar; Palette/Grafik-Bypass werden direkt in die ROM geschrieben)', disabled: () => !inLevel(), onClick: () => importLevel(app) },
       { label: 'Level-Datei exportieren …', title: `Level als ${LEVEL_FILE_EXT}-Datei (Objekte, Sprites, Exits, Header, Grafik-Bypass, eigene Palette)`, disabled: () => !inLevel(), onClick: () => exportLevel(app) },
@@ -170,9 +170,9 @@ function buildUi(app: App): void {
     ] },
   ]);
   const wsBtn = (w: typeof workspace, label: string, key: string) => h('button', { 'data-ws': w, title: `${label} (${key})`, onclick: () => setWorkspace(w) }, label);
-  const wsSwitch = h('div', { class: 'btn-group ws-switch' }, wsBtn('level', 'Level', 'Esc'), wsBtn('ow', 'Overworld', 'O'), wsBtn('gfx', 'Grafik', 'M / P'));
-  const undoBtn = h('button', { onclick: () => (workspace === 'ow' ? ow?.undoOnce() : app.undo()), title: 'Rückgängig (Strg+Z)' }, '↶');
-  const redoBtn = h('button', { onclick: () => app.redo(), title: 'Wiederholen (Strg+Y)' }, '↷');
+  const wsSwitch = h('div', { class: 'btn-group ws-switch' }, wsBtn('level', 'Level', 'Esc'), wsBtn('ow', 'Overworld', 'O'), wsBtn('gfx', 'Grafik', 'M / P / A'));
+  const undoBtn = h('button', { onclick: () => (workspace === 'ow' ? ow?.undo() : app.undo()), title: 'Rückgängig (Strg+Z)' }, '↶');
+  const redoBtn = h('button', { onclick: () => (workspace === 'ow' ? ow?.redo() : app.redo()), title: 'Wiederholen (Strg+Y)' }, '↷');
   const saveBtn = h('button', { class: 'primary', onclick: () => (workspace === 'ow' ? ow?.save() : app.saveLevel()) });
   const testBtn = h('button', { onclick: () => openTestPlay(app), title: 'Level im eingebauten Emulator testen (T, Shift+T: ab Mausposition)' }, '▶ Testen');
   const appbar = h('header', { class: 'appbar' },
@@ -192,10 +192,13 @@ function buildUi(app: App): void {
     if (app.level) levelTitle.textContent = `Level ${hex(app.level.number, 3)}${app.dirty ? ' *' : ''}`;
     zoomLabel.textContent = `${Math.round(app.zoom * 100)}%`;
     for (const b of wsSwitch.querySelectorAll('button')) b.classList.toggle('active', b.dataset.ws === workspace);
-    saveBtn.textContent = workspace === 'ow' ? 'Overworld speichern' : `Level speichern${app.dirty ? ' *' : ''}`;
-    saveBtn.title = workspace === 'ow' ? 'Overworld in ROM schreiben (Strg+S)' : 'Level in ROM schreiben (Strg+S)';
-    redoBtn.disabled = workspace === 'ow';
+    const inOw = workspace === 'ow' && ow;
+    saveBtn.textContent = inOw ? `Overworld speichern${ow!.dirty ? ' *' : ''}` : `Level speichern${app.dirty ? ' *' : ''}`;
+    saveBtn.title = inOw ? 'Overworld in ROM schreiben (Strg+S)' : 'Level in ROM schreiben (Strg+S)';
+    undoBtn.disabled = inOw ? !ow!.canUndo : false;
+    redoBtn.disabled = inOw ? !ow!.canRedo : false;
     testBtn.disabled = workspace === 'ow';
+    testBtn.title = workspace === 'ow' ? 'Testen gibt es im Level-Editor' : 'Level im eingebauten Emulator testen (T, Shift+T: ab Mausposition)';
     menus.refresh();
   };
   app.on('mode', updateToolbar);
@@ -211,22 +214,23 @@ function buildUi(app: App): void {
   const layout = h('div', { class: 'layout' }, appbar, levelBar, left, center, right, busyIndicator(app));
   root.append(layout);
   const owRight = h('div', { class: 'right' });
-  const showLayout = (bar: HTMLElement, main: HTMLElement, side: HTMLElement) => layout.replaceChildren(appbar, bar, left, main, side);
+  const showLayout = (bar: HTMLElement, l: HTMLElement, main: HTMLElement, side: HTMLElement) => layout.replaceChildren(appbar, bar, l, main, side);
 
   // switches between the level editor, the overworld editor and the graphics workspace (palettes, Map16, GFX);
   // gfx: tab to open (default: the last one), Map16 tile to show
-  const setWorkspace = (w: typeof workspace, gfx?: { tab?: WsTab; tile?: number; bg?: boolean }) => {
+  // false: the user chose to stay (unsaved overworld)
+  const setWorkspace = async (w: typeof workspace, gfx?: { tab?: WsTab; tile?: number; bg?: boolean }): Promise<boolean> => {
     closeMenus();
     if (w === workspace) {
       if (w === 'gfx' && gfx?.tab) {
         ws!.open(gfx.tab);
         if (gfx.tab === 'map16' && gfx.tile !== undefined) ws!.showMap16(gfx.tile, gfx.bg);
       }
-      return;
+      return true;
     }
     // leave the current workspace
     if (workspace === 'ow') {
-      if (ow?.dirty && confirm('Overworld-Änderungen speichern?')) ow.save();
+      if (ow && !(await ow.confirmLeave())) return false;
       layout.classList.remove('ow-mode');
     } else if (workspace === 'gfx') {
       ws!.leave();
@@ -237,24 +241,29 @@ function buildUi(app: App): void {
     if (from === 'ow') app.refresh();
     if (w === 'ow') {
       if (app.dirty) app.saveLevel(true);
-      if (!ow) ow = new OverworldView(app);
+      if (!ow) {
+        ow = new OverworldView(app);
+        ow.onChange = updateToolbar;
+        ow.onOpenLevel = async (n) => { if (await setWorkspace('level')) app.openLevel(n); };
+      }
       owRight.replaceChildren(ow.side);
-      showLayout(ow.bar, ow.root, owRight);
+      showLayout(ow.bar, ow.left, ow.root, owRight);
       layout.classList.add('ow-mode');
       ow.show();
     } else if (w === 'gfx') {
       if (!ws) ws = new GfxWorkspace(app);
-      showLayout(ws.bar, ws.root, ws.side);
+      showLayout(ws.bar, left, ws.root, ws.side);
       layout.classList.add('gfx-mode');
       // the level view is only up to date when coming from it
       const hv = from === 'level' ? view.hover : null;
       ws.enter(gfx?.tab ?? ws.tab, hv ? { tx: hv.tx, ty: hv.ty } : view.centerTile());
       if (gfx?.tab === 'map16' && gfx.tile !== undefined) ws.showMap16(gfx.tile, gfx.bg);
     } else {
-      showLayout(levelBar, center, right);
+      showLayout(levelBar, left, center, right);
       view.layout();
     }
     updateToolbar();
+    return true;
   };
   app.on('show-level-view', () => setWorkspace('level'));
   app.on('open-map16', () => setWorkspace('gfx', { tab: 'map16', tile: app.wsTile, bg: app.wsTileBg }));
@@ -277,8 +286,8 @@ function buildUi(app: App): void {
       return;
     }
     if (workspace === 'ow') {
-      if (ctrl && k.toLowerCase() === 'z') { e.preventDefault(); ow?.undoOnce(); }
-      if (ctrl && k.toLowerCase() === 's') { e.preventDefault(); ow?.save(); }
+      if (ow?.key(e)) e.preventDefault();
+      else if (k === 'Escape') void setWorkspace('level');
       return;
     }
     if (ctrl && k.toLowerCase() === 's') { e.preventDefault(); app.saveLevel(); return; }
@@ -315,7 +324,7 @@ function buildUi(app: App): void {
     else if (k === 'm' || k === 'M') setWorkspace('gfx', { tab: 'map16', tile: view.hover ? hoverTile(app, view.hover.tx, view.hover.ty) : undefined });
     else if (k === 'p' || k === 'P') setWorkspace('gfx', { tab: 'pal' });
   };
-  window.onbeforeunload = (e) => { if (app.dirty) { e.preventDefault(); } };
+  window.onbeforeunload = (e) => { if (app.dirty || ow?.dirty) { e.preventDefault(); } };
   updateToolbar();
   levels.build();
 }
@@ -345,7 +354,7 @@ function showHelp(): void {
     ['Einfg / I', 'Objekt/Sprite nach Nummer einfügen (an Mausposition)'],
     ['M / Z / S-Markierung ziehen', 'Haupteingang / Zwischenziel-Screen / sekundären Eingang verschieben'],
     ['Pfeiltasten', 'Auswahl um 1 Tile verschieben'],
-    ['+ / − · * / ÷', 'Breite ändern · Höhe ändern'],
+    ['+ / - · * / /', 'Breite ändern · Höhe ändern'],
     ['Alt+Pfeiltasten', 'Größe ändern'],
     ['Entf', 'Auswahl löschen'],
     ['Strg+C / Strg+V / Strg+D', 'Kopieren / Einfügen an Maus / Duplizieren'],

@@ -800,7 +800,7 @@ export class GfxTab implements WsPanel {
 
   private copySel(): void {
     const r = this.float ?? this.sel;
-    if (!r) { toast('Erst mit dem Auswahl-Werkzeug (M) einen Bereich wählen'); return; }
+    if (!r) { toast('Erst mit dem Auswahl-Werkzeug (S) einen Bereich wählen'); return; }
     const pix = new Uint8Array(r.w * r.h);
     for (let y = 0; y < r.h; y++) for (let x = 0; x < r.w; x++) pix[y * r.w + x] = this.get(r.x + x, r.y + y);
     this.clip = { w: r.w, h: r.h, pix };
@@ -818,7 +818,7 @@ export class GfxTab implements WsPanel {
   }
 
   private transform(kind: 'h' | 'v' | 'r'): void {
-    if (!this.float) { if (!this.sel) { toast('Erst einen Bereich wählen (M)'); return; } this.lift(); }
+    if (!this.float) { if (!this.sel) { toast('Erst mit dem Auswahl-Werkzeug (S) einen Bereich wählen'); return; } this.lift(); }
     const fl = this.float!;
     if (kind === 'r' && fl.w !== fl.h) { toast('Drehen geht nur bei quadratischer Auswahl'); return; }
     const out = new Uint8Array(fl.pix.length);

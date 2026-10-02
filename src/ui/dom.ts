@@ -184,3 +184,14 @@ export function choose(title: string, body: HTMLElement | string, options: { lab
     modal(title, b, options.map((o, i) => ({ label: o.label, primary: o.primary, onClick: () => { done = true; resolve(i); } })), () => { if (!done) resolve(null); });
   });
 }
+
+// true while a native color picker inside `el` is in use (its input has focus)
+export function pickerOpen(el: HTMLElement): boolean {
+  const a = document.activeElement;
+  return a instanceof HTMLInputElement && a.type === 'color' && el.contains(a);
+}
+
+// placeholder for an empty list or panel
+export function emptyState(text: string): HTMLElement {
+  return h('div', { class: 'empty' }, text);
+}

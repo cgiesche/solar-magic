@@ -5,7 +5,7 @@
 
 import type { App } from '../app.ts';
 import type { GfxWorkspace, WsPanel } from '../gfxworkspace.ts';
-import { h, clear, toast, downloadBytes, pickFile, choose } from '../dom.ts';
+import { h, clear, toast, downloadBytes, pickFile, choose, pickerOpen } from '../dom.ts';
 import { snesColorToRGBA, cgramToRGBA } from '../../core/gfx.ts';
 import { pcToSnes } from '../../core/rom.ts';
 import { hex } from '../../core/names.ts';
@@ -319,6 +319,8 @@ export class PaletteTab implements WsPanel {
 
   private buildDetail(): void {
     const d = this.detail;
+    // an open native color picker closes when its input is replaced: rebuild once it is done (change)
+    if (pickerOpen(d)) return;
     clear(d);
     const i = this.sel;
     const c = this.color(i);
@@ -345,6 +347,7 @@ export class PaletteTab implements WsPanel {
     htmlIn.addEventListener('change', () => { const v = parseHtml(htmlIn.value); if (v === null) htmlIn.value = htmlOf(c); else this.setColor(v); });
     const picker = h('input', { type: 'color', value: htmlOf(c) });
     picker.addEventListener('input', () => { const v = parseHtml(picker.value); if (v !== null) this.setColor(v, `pal:${i}`); });
+    picker.addEventListener('change', () => { picker.blur(); this.buildDetail(); });
     const big = d.firstChild as HTMLElement;
     const sliders = ['Rot', 'Grün', 'Blau'].map((l, k) => {
       const inp = h('input', { type: 'range', min: 0, max: 31, value: String(vals[k]), class: `pt-slider pt-${'rgb'[k]}` });

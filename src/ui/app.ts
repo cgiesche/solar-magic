@@ -7,6 +7,7 @@ import {
   isL1Vertical, cloneLevel, newUid, hasLayer2Objects, hasObjects, L1_PTRS, L2_PTRS, SEC_HDR,
   readSecondaryEntrance, writeSecondaryEntrance, entrancePos, nearestEntrance, encodeSecondaryHeader,
 } from '../core/level.ts';
+import { hex } from '../core/names.ts';
 import { renderLevel, type LevelImages, composite, map16Source } from '../core/render.ts';
 import { EXT_FIRST, map16Ext, installMap16Ext } from '../core/map16ext.ts';
 import { saveLevel } from '../core/save.ts';
@@ -290,8 +291,8 @@ export class App {
       const e = readSecondaryEntrance(this.rom, m.index);
       if (e.screen === p.screen && e.entranceX === p.ex && e.entranceY === p.ey) return false;
       e.screen = p.screen; e.entranceX = p.ex; e.entranceY = p.ey;
-      writeSecondaryEntrance(this.rom, m.index, e);
-      this.emu.syncRom();
+      // ROM data: one undo step per marker (successive moves merge)
+      this.romEdit(`Sekundärer Eingang ${hex(m.index, 3)} verschoben`, () => writeSecondaryEntrance(this.rom, m.index, e), `sec-entrance:${m.index}`);
     }
     return true;
   }
@@ -1052,7 +1053,7 @@ export class App {
       this.mode = mode;
       this.selection = sel;
       this.persist();
-      if (!silent) toast(`Level ${n.toString(16).toUpperCase()} gespeichert. ${log.join(' · ')}`);
+      if (!silent) toast(`Level ${hex(n, 3)} gespeichert. ${log.join(' · ')}`);
       this.refresh();
       this.emit('change');
     } catch (e) {

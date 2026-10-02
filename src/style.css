@@ -137,12 +137,16 @@ kbd { background: #181a1f; border: 1px solid var(--border); border-radius: 3px; 
 .modal-body h3 { margin: 12px 0 6px; font-size: 12px; text-transform: uppercase; color: var(--muted); }
 .m16-pick { image-rendering: pixelated; cursor: crosshair; display: block; }
 .grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px 14px; } .grid4 .prop label { width: 36px; }
-.ow-side { overflow-y: auto; flex: 1; }
+.ow-side { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.ow-pal-panel { flex: 1; min-height: 0; overflow-y: auto; }
+.ow-badge { position: absolute; left: 10px; top: 10px; padding: 3px 9px; border-radius: 10px; background: rgba(0,0,0,.7); color: #ffd27a; font-size: 12px; pointer-events: none; display: none; }
+.ow-badge.show { display: block; }
+.level-scroller.readonly { cursor: not-allowed; }
+.empty { color: var(--muted); font-size: 12px; font-style: italic; padding: 10px 6px; text-align: center; }
 .ow-pal { width: 288px; image-rendering: pixelated; cursor: crosshair; }
 .ow-pal8 { width: 256px; image-rendering: pixelated; cursor: crosshair; display: block; }
-.ow-pal-scroll { max-height: 55vh; overflow-y: auto; }
 .ow-info { border: 1px solid var(--border); border-radius: 6px; padding: 6px; display: flex; flex-direction: column; gap: 5px; }
-.ow-info select { max-width: 190px; }
+.ow-info select { flex: 1; min-width: 0; max-width: none; }
 .level-item { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .level-item .lname { font-family: system-ui, sans-serif; font-size: 11px; color: var(--muted); }
 .level-item.current .lname { color: #dfefff; }
