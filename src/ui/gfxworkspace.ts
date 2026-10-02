@@ -214,6 +214,11 @@ export class GfxWorkspace {
     this.gfx.select(file, tile, palRow);
   }
 
+  showAnim(global: boolean, slot: number): void {
+    this.anim.select(global, slot);
+    this.open('anim');
+  }
+
   key(e: KeyboardEvent): boolean {
     const ctrl = e.ctrlKey || e.metaKey;
     if (this.panel().key?.(e)) return true;

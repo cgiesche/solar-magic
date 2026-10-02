@@ -33,6 +33,24 @@ function shapeOf(type: number): { w: number; h: number } {
   return { w: tilesOf(type), h: 1 };
 }
 
+// own tile animations of the current level (its list and the global one) that overwrite a VRAM tile
+export function animsAt(app: App, tile: number): { global: boolean; slot: number }[] {
+  const out: { global: boolean; slot: number }[] = [];
+  if (!exanimInstalled(app.rom)) return out;
+  const charWord = (app.render.ppuRegs[0x0b] & 0x0f) << 12;
+  const lists: [boolean, ExList | null][] = [[false, readLevelList(app.rom, app.level.number)], [true, readGlobalList(app.rom)]];
+  for (const [global, l] of lists) {
+    if (!l) continue;
+    for (const [slot, s] of l.slots) {
+      if (kindOf(s.type) !== 'tiles') continue;
+      const t0 = ((s.dest & 0x7fff) - charWord) >> 4, shape = shapeOf(s.type);
+      const d = tile - t0;
+      if (d >= 0 && (d & 15) < shape.w && d >> 4 < shape.h) out.push({ global, slot });
+    }
+  }
+  return out;
+}
+
 export class AnimTab implements WsPanel {
   root: HTMLElement;
   private app: App;
@@ -67,6 +85,16 @@ export class AnimTab implements WsPanel {
 
   previewHint(): string {
     return 'Klick: Map16-Tile unter der Maus als Ziel nehmen (Viertel oben links)';
+  }
+
+  // opens a slot of the level's or the global list
+  select(global: boolean, slot: number): void {
+    this.global = global;
+    this.sel = slot;
+    this.frame = 0;
+    this.set = 0;
+    this.picking = null;
+    if (this.visible) this.build();
   }
 
   show(): void {

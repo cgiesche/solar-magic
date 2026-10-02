@@ -25,6 +25,7 @@ import { EXT_FIRST, EXT_TILES, map16Ext } from '../../core/map16ext.ts';
 import { gfxName, lmAnimName, ANIM_FILE, levelSlots as map16Slots } from './map16tab.ts';
 import { readAltFile, writeAltFile, altFileAddr, exanimInstalled } from '../../core/exanim.ts';
 import { openHeaderDialog } from '../headerdialog.ts';
+import { animsAt } from './animtab.ts';
 
 // before the first ExAnimation data: the engine (Lunar Magic compatible) is installed with it
 export async function confirmExAnim(app: App): Promise<boolean> {
@@ -578,7 +579,13 @@ export class GfxTab implements WsPanel {
     const users: number[] = [];
     const max = map16Ext(this.app.rom) ? EXT_TILES : EXT_FIRST;
     for (let m = 0; m < max && users.length < 64; m++) if (src.fg(m).some((w) => (w & 0x3ff) === num)) users.push(m);
-    box.append(h('div', { class: 'hint' }, `= VRAM-Tile ${hex(num, 3)} (${slot.name})`),
+    // animated tiles: the game overwrites them, so drawing there does not show in the level
+    const own = animsAt(this.app, num);
+    const anim = own.length ? h('div', { class: 'warn-box' }, 'Animiert durch ',
+      own.map((a, i) => h('span', null, i ? ', ' : '', h('a', { href: '#', title: 'Im Tab Animationen öffnen', onclick: (e: Event) => { e.preventDefault(); this.ws.showAnim(a.global, a.slot); } }, `Animation ${hex(a.slot, 2)} (${a.global ? 'global' : 'Level'})`))),
+      ' – im Level sieht man deren Bilder statt dieses Tiles.')
+      : this.animatedTiles().has(t) ? h('div', { class: 'warn-box' }, 'Wird vom Spiel animiert (Original-Animation, z. B. ?-Block, Münze): im Level sieht man dessen Bilder statt dieses Tiles. Abschalten: Tab Animationen → „In Level … abspielen“.') : '';
+    box.append(h('div', { class: 'hint' }, `= VRAM-Tile ${hex(num, 3)} (${slot.name})`), anim,
       users.length ? h('div', { class: 'gt-users' }, users.map((m) => h('a', { href: '#', class: 'mono', title: 'Im Map16-Tab öffnen', onclick: (e: Event) => { e.preventDefault(); this.ws.showMap16(m); } }, hex(m, 3))))
         : h('div', { class: 'hint' }, 'Kein Map16-Tile benutzt es.'));
     return box;
