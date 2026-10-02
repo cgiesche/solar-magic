@@ -22,7 +22,7 @@ import { importGfxFile, exgfxName } from '../../core/map16file.ts';
 import { parsePrimaryHeader, L1_PTRS } from '../../core/level.ts';
 import { map16Source } from '../../core/render.ts';
 import { EXT_FIRST, EXT_TILES, map16Ext } from '../../core/map16ext.ts';
-import { gfxName, ANIM_FILE, levelSlots as map16Slots } from './map16tab.ts';
+import { gfxName, lmAnimName, ANIM_FILE, levelSlots as map16Slots } from './map16tab.ts';
 import { readAltFile, writeAltFile, altFileAddr, exanimInstalled } from '../../core/exanim.ts';
 import { openHeaderDialog } from '../headerdialog.ts';
 
@@ -417,13 +417,14 @@ export class GfxTab implements WsPanel {
     }
     // ExAnimation sources (Lunar Magic's ExGFX 60-63)
     if (!this.onlyLevel || this.cur >= ANIM_FILE) {
-      this.list.append(h('div', { class: 'gt-list-head', title: 'Quellgrafik für eigene Animationen (Lunar Magics ExGFX 60–63, unkomprimiert)' }, 'Animationen'));
+      this.list.append(h('div', { class: 'gt-list-head', title: 'Bilder für eigene Tile-Animationen (Tab „Animationen“); in Lunar Magic ExGFX60–63, unkomprimiert' }, 'Animationsgrafiken'));
       for (let k = 0; k < 4; k++) {
         const i = ANIM_FILE + k;
         const name = gfxName(i);
-        if (this.filter && !name.toLowerCase().includes(this.filter)) continue;
+        if (this.filter && !`${name} ${lmAnimName(i)}`.toLowerCase().includes(this.filter)) continue;
         this.list.append(h('div', {
           class: `level-item${i === this.cur ? ' current' : ''}${altFileAddr(app.rom, k) ? '' : ' unused'}`,
+          title: `Lunar Magic: ${lmAnimName(i)}`,
           onclick: () => this.select(i),
         }, name));
       }
@@ -538,7 +539,7 @@ export class GfxTab implements WsPanel {
     s.append(
       h('div', { class: 'prop-title' }, gfxName(f.num), f.empty ? h('span', { class: 'hint' }, ' (leer)') : ''),
       h('div', { class: 'hint' }, f.empty ? 'Diese Nummer ist nicht belegt.' : `${f.bpp}bpp · ${f.tiles} Tiles · ${f.raw ? 'unkomprimiert' : `LZ2 (${f.packed} Bytes)`} · $${hex(f.addr, 6)}`),
-      f.num >= ANIM_FILE ? h('div', { class: 'hint' }, 'Quellgrafik für eigene Animationen (Tab „Animationen“). Lunar Magic nennt sie ExGFX ' + hex(f.num - ANIM_FILE + 0x60, 2) + '.') : '',
+      f.num >= ANIM_FILE ? h('div', { class: 'hint' }, `Bilder für eigene Tile-Animationen (Tab „Animationen“). Lunar Magic: ${lmAnimName(f.num)}.`) : '',
       f.num >= ANIM_FILE && f.empty ? h('button', { onclick: () => void this.newAnimFile(f.num) }, 'Anlegen (128 leere Tiles)') : '',
       used.length ? h('div', { class: 'hint' }, `Im Level als ${used.join(', ')}`) : h('div', { class: 'hint' }, 'Vom aktuellen Level nicht benutzt'),
       f.num < ANIM_FILE && !f.empty ? this.assignMenu(f.num, used.length > 0) : '',
@@ -917,7 +918,7 @@ export class GfxTab implements WsPanel {
     const cols = this.colors();
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const v = this.get(x, y); px[y * W + x] = v ? cols[v] : 0; }
     ctx.putImageData(img, 0, 0);
-    c.toBlob(async (b) => { if (b) { downloadBytes(`${gfxName(f.num)}.png`, new Uint8Array(await b.arrayBuffer()), 'image/png'); toast(`${gfxName(f.num)}.png exportiert`); } }, 'image/png');
+    c.toBlob(async (b) => { if (b) { const name = `${f.num >= ANIM_FILE ? lmAnimName(f.num) : gfxName(f.num)}.png`; downloadBytes(name, new Uint8Array(await b.arrayBuffer()), 'image/png'); toast(`${name} exportiert`); } }, 'image/png');
   }
 
   // the number the image went to; null: cancelled or failed
@@ -990,7 +991,7 @@ export class GfxTab implements WsPanel {
     if (n !== null && n >= 0x60 && n <= 0x63 && ANIM_FILE + n - 0x60 !== this.cur) targets.push(ANIM_FILE + n - 0x60);
     const what = (t: number) => (t >= ANIM_FILE ? 'Animationsgrafik' : 'Layer-/Sprite-Grafik');
     if (targets.length) {
-      const c = await choose('Ziel wählen', `Der Dateiname nennt ${hex(n!, 2)}. Wohin soll die Grafik?${targets.length > 1 ? ' Lunar Magic benutzt ExGFX60–63 als Quelle für Animationen.' : ''}`,
+      const c = await choose('Ziel wählen', `Der Dateiname nennt ExGFX${hex(n!, 2)}. Wohin soll die Grafik?${targets.length > 1 ? ` Lunar Magic benutzt ExGFX60–63 als Bilder für Animationen (hier ${gfxName(ANIM_FILE)}–D).` : ''}`,
         [{ label: 'Abbrechen' }, { label: `In ${gfxName(this.cur)} (aktuelle Datei)` }, ...targets.map((t, i) => ({ label: `In ${gfxName(t)} (${what(t)})`, primary: i === targets.length - 1 }))]);
       if (!c) return null;
       if (c >= 2) target = targets[c - 2];

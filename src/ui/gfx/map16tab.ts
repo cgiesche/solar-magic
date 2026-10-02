@@ -31,8 +31,12 @@ interface Clip { w: number; h: number; words: number[][]; acts: number[] | null 
 // files 100-103: the ExAnimation alternative files (Lunar Magic's ExGFX 60-63)
 export const ANIM_FILE = 0x100;
 export function gfxName(n: number): string {
-  if (n >= ANIM_FILE) return `Anim-ExGFX${hex(n - ANIM_FILE + 0x60, 2)}`;
+  if (n >= ANIM_FILE) return `Anim-Grafik ${'ABCD'[n - ANIM_FILE]}`;
   return `${n < VANILLA_GFX ? 'GFX' : 'ExGFX'}${hex(n, 2)}`;
+}
+// Lunar Magic's name of an animation file (ExGFX60-63)
+export function lmAnimName(n: number): string {
+  return `ExGFX${hex(n - ANIM_FILE + 0x60, 2)}`;
 }
 
 // GFX files in the level's layer slots, in VRAM order (128 tiles each from tile 000)
