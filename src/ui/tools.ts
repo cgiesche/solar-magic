@@ -160,8 +160,11 @@ export async function importLevel(app: App): Promise<boolean> {
     const data = importLevelFile(rom, await f.text(), app.level);
     app.checkpoint();
     app.level = data.level;
-    if (data.gfx || editorPatch(rom)) setLevelGfx(rom, n, data.gfx ?? new Array(8).fill(0xff));
-    if (data.palette || customPalette(rom, n)) setCustomPalette(rom, n, data.palette);
+    // graphics slots and palette live in the ROM: an undoable ROM edit (Strg+Z takes them back first)
+    if (data.gfx || editorPatch(rom) || data.palette || customPalette(rom, n)) app.romEdit(`${f.name}: Grafik-Slots/Palette von Level ${hex(n, 3)}`, () => {
+      if (data.gfx || editorPatch(rom)) setLevelGfx(rom, n, data.gfx ?? new Array(8).fill(0xff));
+      if (data.palette || customPalette(rom, n)) setCustomPalette(rom, n, data.palette);
+    });
     app.emu.syncRom();
     app.persist();
     app.selection.clear();

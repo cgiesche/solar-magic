@@ -230,17 +230,17 @@ Viele Blöcke auf SMWCentral kommen als Paket, z. B.:
 2. Die `.map16`-Tiles kommen ab dem ersten Tile der Liste (änderbar) in die Map16-Tabelle, mit ihrem
    „acts like“, sofern die Liste keines angibt.
 3. Die ExGFX-Datei wird unter ihrer Nummer aus dem Dateinamen gespeichert und im aktuellen Level in den
-   Slot aus dem Dateinamen gelegt (`_BG2`, `_FG1` …). Für andere Level: Level-Header → Grafik-Bypass.
+   Slot aus dem Dateinamen gelegt (`_BG2`, `_FG1` …). Für andere Level: Grafik-Bereich → *Grafiken* → Slot-Karte → „Tauschen …“.
 
 Einzeln geht das auch:
 - *Grafiken* → *Import/Export → Importieren (.bin)* (4 KB = 4bpp unkomprimiert, 3 KB = 3bpp, sonst LZ2-gepackt);
 - *Map16-Tiles* → *Import/Export → Importieren (.map16)* (ab dem gewählten Tile).
 
 **BG2/BG3:** Wie Lunar Magic hat der Editor pro Level zwei zusätzliche Grafik-Slots für die Map16-Tiles
-200–27F (BG2) und 280–2FF (BG3), im Level-Header unter „Grafik-Bypass“. Im Original-Spiel liegt an
+200–27F (BG2) und 280–2FF (BG3), im Grafik-Bereich unter *Grafiken* als Slot-Karten BG2/BG3. Im Original-Spiel liegt an
 dieser Stelle im VRAM (`$2000–$2FFF`) die Layer-1-Tilemap. Die Slots brauchen deshalb den **VRAM-Patch**
-(„SMWV“), der die Tilemaps wie bei LM verlegt, siehe unten. Er wird mit „BG2/BG3 aktivieren“ im
-Level-Header installiert, bei Block-Paketen mit BG2/BG3-Grafik automatisch.
+(„SMWV“), der die Tilemaps wie bei LM verlegt, siehe unten. Er wird mit der Karte „BG2/BG3“ → „Aktivieren …“
+im Tab *Grafiken* installiert, bei Block-Paketen mit BG2/BG3-Grafik automatisch.
 
 Eine frühere Installation der Slots ohne VRAM-Patch (bis zu dieser Version) hat die Layer-1-Tilemap
 überschrieben. Sie wird beim Öffnen der ROM abgeschaltet; ihre Zuordnungen bleiben erhalten und gelten

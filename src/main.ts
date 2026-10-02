@@ -154,7 +154,7 @@ function buildUi(app: App): void {
     ] },
   ]);
   const wsBtn = (w: typeof workspace, label: string, key: string) => h('button', { 'data-ws': w, title: `${label} (${key})`, onclick: () => setWorkspace(w) }, label);
-  const wsSwitch = h('div', { class: 'btn-group ws-switch' }, wsBtn('level', 'Level', 'Esc'), wsBtn('ow', 'Overworld', 'O'), wsBtn('gfx', 'Grafik', 'M / P / A'));
+  const wsSwitch = h('div', { class: 'btn-group ws-switch' }, wsBtn('level', 'Level', 'Esc'), wsBtn('ow', 'Overworld', 'O'), wsBtn('gfx', 'Grafik', 'P / M / G / A'));
   const undoBtn = h('button', { onclick: () => (workspace === 'ow' ? ow?.undo() : app.undo()), title: 'Rückgängig (Strg+Z)' }, '↶');
   const redoBtn = h('button', { onclick: () => (workspace === 'ow' ? ow?.redo() : app.redo()), title: 'Wiederholen (Strg+Y)' }, '↷');
   const saveBtn = h('button', { class: 'primary', onclick: () => (workspace === 'ow' ? ow?.save() : app.saveLevel()) });

@@ -49,8 +49,9 @@ Beim Anzeigen eines Levels führt er die **originalen Laderoutinen** des ROMs au
   in allen Leveln. „Auflösen“ macht eine platzierte Struktur wieder zu einzelnen Direct-Map16-Objekten.
   `.smwlevel`-Dateien nehmen die benutzten Strukturen mit.
 * Header-Dialog (H): Primärer Header (Modus, Screens, Tileset, Paletten, Musik, Zeit, Sprite-GFX, …),
-  Eingang & Scrollen (Eingang, Zwischenziel, Layer-2/3-Einstellungen), Sprite-Header, BG-Tilemap-Auswahl,
-  **Grafik-Bypass (ExGFX pro Level)**.
+  Eingang & Scrollen (Eingang, Zwischenziel, Layer-2/3-Einstellungen), Sprite-Header, BG-Tilemap-Auswahl.
+  Welche GFX/ExGFX-Dateien ein Level lädt (Grafik-Bypass), stellt man im Grafik-Bereich ein:
+  *Grafiken* → Slot-Karten („Tauschen …“) oder rechts bei einer Datei „In Slot verwenden“.
 * Screen-Exits pro Screen (Ziel, sekundär), **sekundäre Eingänge** (Dialog).
 * **Menü *Level*:** speichern unter, **Screen einfügen/löschen** (verschiebt alles dahinter), Level leeren;
   **Menü *Datei*:** **Export/Import als `.smwlevel`-Datei** (Objekte, Sprites, Exits, Header, Grafik-Bypass, eigene Palette).
