@@ -42,7 +42,7 @@ Beim Anzeigen eines Levels führt er die **originalen Laderoutinen** des ROMs au
   einfügen (Rechtsklick/Shift+Klick mit Paletteneintrag), löschen, kopieren/einfügen/duplizieren,
   Zeichenreihenfolge (Bild↑/↓), Undo/Redo.
 * Palette: Standardobjekte 01–3F, erweiterte Objekte, **Map16-Direktplatzierung** (beliebiges Tile, s. Patch),
-  Sprites mit Namen und echter Grafik.
+  Sprites mit Namen und echter Grafik, auch Custom Sprites (PIXI) mit ihren Extra-Bytes in den Eigenschaften.
 * **Strukturen:** ausgewählte Objekte (z. B. ein Aufbau aus Direct-Map16-Blöcken) als Struktur speichern
   (Palette → Strukturen → „Auswahl als Struktur“). Im Level ist sie dann ein einziges Objekt mit 4 Byte;
   Zellen, die zu keinem ausgewählten Objekt gehören, sind durchsichtig. Wird eine Struktur geändert, gilt das
@@ -128,12 +128,14 @@ assembliert und ändert nur wenige, verifizierte Stellen:
 
 Die Tests prüfen, dass alle Vanilla-Level mit installiertem Patch identisch geladen werden.
 
-## ASM-Patches, UberASM, Custom Blocks
+## ASM-Patches, UberASM, Custom Blocks, Custom Sprites
 
 Der Editor enthält Asar (als WebAssembly) und wendet damit ASM-Code direkt im Browser an:
 - **Patches** (`.asm`/`.zip`, z. B. von SMWCentral), mit Einstellungen und Konfliktprüfung;
 - **UberASM**-Code pro Level, Overworld-Karte und Game Mode (Format von UberASM Tool 2.x);
 - **Custom Blocks** im GPS-Format;
+- **Custom Sprites** im PIXI-Format: Sprites, Shooter, Generatoren und alle Misc-Arten (cluster, extended,
+  bounce …), mit Extra-Bytes; in der Palette mit Namen und echter Grafik ([docs/pixi.md](docs/pixi.md));
 - **Hintergründe** aus Lunar Magic (`.zip` mit `.mwl`, `.map16`, ExGFX, `.pal`/`.palmask`) ins aktuelle Level.
 
 Jeder Patch wird mit Originalbytes und Quellen in der ROM verzeichnet und lässt sich jederzeit wieder
@@ -147,7 +149,7 @@ entfernen. Details, `patch.json` und die Schnittstellen für eigene Patches: [do
 * **Overworld:** Events, Overworld-Sprites und Pfad-Einstellungen sind nicht editierbar (Ansicht „alle Events“
   ist nur lesend). Translevel-Nummern folgen wie in Vanilla der Scan-Reihenfolge – neue Level-Tiles
   verschieben die Nummern nachfolgender Level.
-* Titelbild, Abspann und Custom Sprites (PIXI) sind nicht enthalten.
+* Titelbild und Abspann sind nicht enthalten.
 * ASM-Patches: nur LoROM, kein SA-1; Patches, die Lunar Magic voraussetzen, funktionieren nicht.
 * Getestet mit der US-ROM (`Super Mario World (U) [!]`, MD5 `cdd3c8c37322978ca8669b34bc89c804`). Mit
   Lunar Magic bearbeitete ROMs nutzen andere Hooks/Formate und werden nicht gezielt unterstützt.

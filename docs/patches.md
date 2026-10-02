@@ -34,7 +34,7 @@ Viele Downloads auf SMWCentral sind keine eigenständigen Patches, sondern Resso
 | beginnt mit `db $42`/`db $37` | Custom Block (GPS) | Abfrage von Map16-Tile, „acts like“ (aus der Beschreibung übernommen, z. B. „Act like 130“) und Grafik |
 | `list.txt` mit Blöcken, oft `.map16` und `ExGFX…bin` | Block-Paket | alles in einem Schritt, siehe [Block-Pakete](#block-pakete) |
 | `.mwl` (meist mit `.map16`, `ExGFX…bin`, `.pal`, `.palmask`) | Hintergrund (Lunar Magic) | der Hintergrund kommt ins aktuelle Level, siehe [Hintergrund-Pakete](#hintergrund-pakete) |
-| `print "INIT ",pc` | Custom Sprite (PIXI) | Hinweis: noch nicht unterstützt |
+| `print "INIT ",pc` / `print "MAIN ",pc` | Custom Sprite (PIXI) | die Sprites bekommen die nächsten freien Nummern, enthaltene Blöcke die nächsten freien Map16-Tiles, siehe [pixi.md](pixi.md) |
 | alles andere | Patch | wie unten beschrieben |
 
 ## Patches anwenden
