@@ -61,7 +61,14 @@ export function saveLevel(rom: Rom, lv: Level): string[] {
       log.push(`BG: ${data.length} Bytes @ $${a.toString(16).toUpperCase()}`);
     } else rom.w24(L2_PTRS + n * 3, lv.layer2Pointer);
   }
-  // sprites
+  log.push(saveSprites(rom, lv));
+  writeSecondaryHeader(rom, n, lv.secondary);
+  return log;
+}
+
+// writes a level's sprite data (in place when it fits and no other level uses it)
+export function saveSprites(rom: Rom, lv: Level): string {
+  const n = lv.number;
   const spr = serializeSprites(lv.sprites, lv.spriteHeader, isL1Vertical(rom, lv.header.mode), spriteSizes(rom));
   const bankOf = (i: number) => spriteBank(rom, i);
   const sprShared = countRefs(rom, SPR_PTRS, 2, lv.sprAddr, bankOf) > 1;
@@ -76,7 +83,7 @@ export function saveLevel(rom: Rom, lv: Level): string[] {
   }
   rom.w16(SPR_PTRS + n * 2, as & 0xffff);
   if ((as >> 16) !== 0x07 || editorPatch(rom)) setSpriteBank(rom, n, as >> 16);
-  log.push(`Sprites: ${spr.length} Bytes @ $${as.toString(16).toUpperCase()}`);
-  writeSecondaryHeader(rom, n, lv.secondary);
-  return log;
+  lv.sprAddr = as;
+  lv.sprSize = spr.length;
+  return `Sprites: ${spr.length} Bytes @ $${as.toString(16).toUpperCase()}`;
 }

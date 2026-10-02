@@ -127,11 +127,9 @@ export function effectiveDefines(pkg: PatchPackage, values: Record<string, strin
   return { ...out, ...values };
 }
 
-// the Asar input for a package: defines of the main file are rewritten, the rest are passed on
-export function packageSource(pkg: PatchPackage, main: string, defines: Record<string, string>): PatchSource {
-  const files = new Map<string, Uint8Array | string>(pkg.files);
+// sets top-level define assignments of a file to new values; returns the defines not found there
+export function rewriteDefines(text: string, defines: Record<string, string>): { text: string; rest: Record<string, string> } {
   const rest: Record<string, string> = {};
-  const text = new TextDecoder().decode(pkg.files.get(main)!);
   const lines = text.split(/\r?\n/);
   const found = new Map(scanDefines(text).map((d) => [d.name, d]));
   for (const [name, value] of Object.entries(defines)) {
@@ -139,7 +137,14 @@ export function packageSource(pkg: PatchPackage, main: string, defines: Record<s
     if (!d) { rest[name] = value; continue; }
     lines[d.line] = lines[d.line].replace(DEF_RE, (_all, ind, n, s1, op, s2, _v, cm) => `${ind}!${n}${s1}${op}${s2}${value}${cm ?? ''}`);
   }
-  files.set(main, lines.join('\n'));
+  return { text: lines.join('\n'), rest };
+}
+
+// the Asar input for a package: defines of the main file are rewritten, the rest are passed on
+export function packageSource(pkg: PatchPackage, main: string, defines: Record<string, string>): PatchSource {
+  const files = new Map<string, Uint8Array | string>(pkg.files);
+  const { text, rest } = rewriteDefines(new TextDecoder().decode(pkg.files.get(main)!), defines);
+  files.set(main, text);
   return { name: pkg.name, version: pkg.manifest?.version, main, files, defines: rest, settings: defines };
 }
 

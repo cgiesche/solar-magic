@@ -8,6 +8,8 @@
 
 import { zipSync, unzipSync } from 'fflate';
 import { Rom } from './rom.ts';
+import { loadLevel, spriteSizes, type Level } from './level.ts';
+import { saveSprites } from './save.ts';
 import { applyPatch, reapplyPatch, uninstallPatch, type ApplyResult, type PatchSource } from './patchapply.ts';
 import type { AsarResult } from './asar.ts';
 import { listPatches, patchArchive, type PatchEntry } from './patchreg.ts';
@@ -391,12 +393,42 @@ export function loadPixiProject(rom: Rom): PixiProject | null {
   return a ? projectFromZip(a) : null;
 }
 
-// assembles the project (replacing an installed one); an empty list removes it
+// levels holding custom sprites whose entries change size with the new size table, parsed as they are
+// now (written again afterwards, like PIXI's MeiMei does)
+function levelsToRewrite(rom: Rom, next: Uint8Array): Level[] {
+  const old = spriteSizes(rom);
+  const size = (t: Uint8Array | null, i: number) => Math.max(3, t ? t[i] : 3);
+  const changed = (i: number) => size(old, i) !== size(next, i);
+  if (!Array.from({ length: 0x200 }, (_, i) => 0x200 + i).some(changed)) return [];
+  const out: Level[] = [];
+  for (let n = 0; n < 0x200; n++) {
+    try {
+      const lv = loadLevel(rom, n);
+      if (lv.sprites.some((q) => q.extra >= 2 && changed(((q.extra & 3) << 8) | q.num))) out.push(lv);
+    } catch { /* no valid level */ }
+  }
+  return out;
+}
+
+// assembles the project (replacing an installed one); an empty list removes it. Levels whose custom
+// sprites change size are written again with the new sizes (extra bytes kept as far as they go).
 export function savePixiProject(rom: Rom, p: PixiProject): ApplyResult {
   const e = pixiEntry(rom);
+  let sizes: Uint8Array;
+  try { sizes = p.list.length ? sizeTable(p) : new Uint8Array(0x400).fill(3); } catch (err) {
+    return { ok: false, errors: [err instanceof Error ? err.message : String(err)], warnings: [], prints: [] };
+  }
+  const rewrite = levelsToRewrite(rom, sizes);
+  const after = (r: ApplyResult): ApplyResult => {
+    if (r.ok && rewrite.length) {
+      for (const lv of rewrite) saveSprites(rom, lv);
+      r.warnings.push(`Sprite-Daten von ${rewrite.length} Level(s) an die neue Anzahl Extra-Bytes angepasst.`);
+    }
+    return r;
+  };
   if (!p.list.length) {
     const warnings = e ? uninstallPatch(rom, e.id) : [];
-    return { ok: true, errors: [], warnings, prints: [] };
+    return after({ ok: true, errors: [], warnings, prints: [] });
   }
   let src: PatchSource;
   try {
@@ -406,14 +438,16 @@ export function savePixiProject(rom: Rom, p: PixiProject): ApplyResult {
   }
   const snapshot = rom.data.slice();
   try {
-    return e ? reapplyPatch(rom, e.id, src) : applyPatch(rom, src);
+    return after(e ? reapplyPatch(rom, e.id, src) : applyPatch(rom, src));
   } catch (err) {
     rom.data = snapshot;
     return { ok: false, errors: [err instanceof Error ? err.message : String(err)], warnings: [], prints: [] };
   }
 }
 
+// removes the custom sprites; levels with extra bytes are written again without them
 export function removePixi(rom: Rom): string[] {
-  const e = pixiEntry(rom);
-  return e ? uninstallPatch(rom, e.id) : [];
+  const r = savePixiProject(rom, { files: new Map(), list: [] });
+  if (!r.ok) throw new Error(r.errors.join(' '));
+  return r.warnings;
 }

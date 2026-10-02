@@ -8,6 +8,9 @@ import { LevelEmulator } from '../src/core/levelemu.ts';
 import { captureSprites } from '../src/core/spritegfx.ts';
 import { loadAsar } from '../src/core/asar.ts';
 import { ROUTINES } from '../src/core/pixiroutines.ts';
+import { existsSync } from 'node:fs';
+import { packageFiles, packageFromFiles } from '../src/core/patchpkg.ts';
+import { planPixiPackage, applyPixiPackage } from '../src/core/pixipkg.ts';
 import { savePixiProject, removePixi, loadPixiProject, parsePixiList, parseCfg, parseJsonCfg, type PixiProject } from '../src/core/pixi.ts';
 
 await loadAsar();
@@ -205,6 +208,22 @@ print "MAIN ",pc
   ]), list: parsePixiList('00 all.cfg\n') });
   if (!res2.ok) console.log(res2.errors.slice(0, 20).join('\n'));
   check(res2.ok, `all ${all.length} shared routines assemble`);
+}
+
+// a downloaded package (resources_local, not in the repository): numbers, linked defines, applied
+if (existsSync('resources_local/BrutalBill.zip')) {
+  const r4 = new Rom(new Uint8Array(readFileSync('Super Mario World (U) [!].smc')));
+  const pkg = packageFromFiles('BrutalBill.zip', packageFiles('BrutalBill.zip', new Uint8Array(readFileSync('resources_local/BrutalBill.zip'))));
+  const plan = planPixiPackage(r4, pkg);
+  const desc = plan.sprites.map((q) => `${q.kind}:${q.num.toString(16)}`).sort().join(' ');
+  check(desc === 'shooters:c0 sprites:0', `BrutalBill: sprite 00 and shooter C0 (${desc})`);
+  const link = plan.links.find((l) => l.define === 'Sprite');
+  check(!!link && plan.sprites[link.sprite].kind === 'sprites', 'BrutalBill: the shooter\'s !Sprite names the sprite');
+  const res4 = applyPixiPackage(r4, pkg, plan, [0, 0, 0, 0], () => [0, 0, 0, 0]);
+  if (!res4.ok) console.log(res4.errors.join('\n'));
+  check(res4.ok, 'BrutalBill applied');
+  const shooter = new TextDecoder().decode(loadPixiProject(r4)?.files.get('shooters/BrutalBillShooter.asm'));
+  check(/^!Sprite\s*=\s*\$00/m.test(shooter), 'BrutalBill: the shooter spawns sprite $00');
 }
 
 // removing restores the ROM

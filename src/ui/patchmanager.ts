@@ -10,6 +10,8 @@ import { listPatches, patchArchive, type PatchEntry } from '../core/patchreg.ts'
 import { zipSync, unzipSync } from 'fflate';
 import { openUberDialog } from './uberdialog.ts';
 import { openBlockDialog } from './blockdialog.ts';
+import { openPixiDialog, openPixiPackageDialog } from './pixidialog.ts';
+import { removePixi } from '../core/pixi.ts';
 import { removeBlocks, loadBlockProject, saveBlockProject } from '../core/blocks.ts';
 import { installVramPatch, uninstallVramPatch } from '../core/vrampatch.ts';
 import { extGfxAvailable } from '../core/patches.ts';
@@ -393,7 +395,7 @@ export async function openPatchManager(app: App): Promise<void> {
     clear(body);
     const list = listPatches(app.rom);
     body.append(
-      h('p', { class: 'hint' }, '„Hinzufügen“ nimmt eine .asm- oder .zip-Datei (z. B. von SMWCentral) und erkennt, was sie ist: ein Patch wird direkt angewendet, UberASM-Code wird einem Level/Game Mode zugeordnet, ein Custom Block einem Map16-Tile. Konflikte werden geprüft; alles lässt sich wieder entfernen.'),
+      h('p', { class: 'hint' }, '„Hinzufügen“ nimmt eine .asm- oder .zip-Datei (z. B. von SMWCentral) und erkennt, was sie ist: ein Patch wird direkt angewendet, UberASM-Code wird einem Level/Game Mode zugeordnet, ein Custom Block einem Map16-Tile, ein Custom Sprite (PIXI) einer Sprite-Nummer. Konflikte werden geprüft; alles lässt sich wieder entfernen.'),
       list.length ? h('div', { class: 'patch-list' }, list.map((p) => {
         const bytes = p.segs.reduce((n, s) => n + s[1], 0);
         const own = p.own.reduce((n, o) => n + Math.max(0, app.rom.isRatsAt(o)), 0);
@@ -403,12 +405,13 @@ export async function openPatchManager(app: App): Promise<void> {
             h('div', { class: 'hint' }, `${new Date(p.applied).toLocaleString()} · ${bytes} Bytes geändert · ${own < 1024 ? `${own} Bytes` : `${(own / 1024).toFixed(1)} KB`} Code/Daten${Object.keys(p.defines).length ? ` · ${Object.entries(p.defines).map(([k, v]) => `!${k}=${v}`).join(' ')}` : ''}`)),
           h('div', { class: 'row' },
             p.kind === 'vram' ? h('span', { class: 'hint' }, 'Editor-Patch: Tilemaps für BG2/BG3 verlegt') :
-              h('button', { onclick: () => (p.kind === 'uberasm' ? openUberDialog(app, build) : p.kind === 'blocks' ? openBlockDialog(app, 0x200, build) : configure(p)) }, p.kind && p.kind !== 'patch' ? 'Bearbeiten …' : 'Einstellungen …'),
+              h('button', { onclick: () => (p.kind === 'uberasm' ? openUberDialog(app, build) : p.kind === 'blocks' ? openBlockDialog(app, 0x200, build) : p.kind === 'pixi' ? openPixiDialog(app, build) : configure(p)) }, p.kind && p.kind !== 'patch' ? 'Bearbeiten …' : 'Einstellungen …'),
             h('button', { onclick: () => remove(p) }, 'Entfernen')));
       })) : h('p', null, 'Keine Patches installiert.'),
       h('div', { class: 'row' }, h('button', { class: 'primary', onclick: add }, 'Hinzufügen …'),
         list.some((p) => p.kind === 'uberasm') ? null : h('button', { onclick: () => openUberDialog(app, build) }, 'UberASM …'),
-        list.some((p) => p.kind === 'blocks') ? null : h('button', { onclick: () => openBlockDialog(app, 0x200, build) }, 'Custom Blocks …')),
+        list.some((p) => p.kind === 'blocks') ? null : h('button', { onclick: () => openBlockDialog(app, 0x200, build) }, 'Custom Blocks …'),
+        list.some((p) => p.kind === 'pixi') ? null : h('button', { onclick: () => openPixiDialog(app, build) }, 'Custom Sprites …')),
     );
   };
   const add = async () => {
@@ -422,7 +425,7 @@ export async function openPatchManager(app: App): Promise<void> {
       if (info.kind === 'uberasm') openUberResourceDialog(app, pkg, info, build);
       else if (info.kind === 'block') openBlockResourceDialog(app, pkg, info, build);
       else if (info.kind === 'blockpack') openBlockPackDialog(app, pkg, info, build);
-      else if (info.kind === 'pixi') modal(`Custom Sprite: ${pkg.name}`, h('p', null, `„${pkg.name}“ ist ein Custom Sprite für PIXI (${info.file}). Custom Sprites werden vom Editor noch nicht unterstützt.`), [{ label: 'OK', primary: true }]);
+      else if (info.kind === 'pixi') openPixiPackageDialog(app, pkg, build);
       else openApplyDialog(app, pkg, f.name, null, build);
     } catch (e) { toast(e instanceof Error ? e.message : String(e), 'error'); }
   };
@@ -434,7 +437,7 @@ export async function openPatchManager(app: App): Promise<void> {
   const remove = (p: PatchEntry) => {
     if (app.dirty) app.saveLevel(true);
     try {
-      const w = p.kind === 'blocks' ? removeBlocks(app.rom) : p.kind === 'vram' ? uninstallVramPatch(app.rom) : uninstallPatch(app.rom, p.id);
+      const w = p.kind === 'blocks' ? removeBlocks(app.rom) : p.kind === 'vram' ? uninstallVramPatch(app.rom) : p.kind === 'pixi' ? removePixi(app.rom) : uninstallPatch(app.rom, p.id);
       kvDel(srcKey(p.id)).catch(() => {});
       romChanged(app);
       toast(`Patch „${p.name}“ entfernt${w.length ? ': ' + w.join(' ') : ''}`);
