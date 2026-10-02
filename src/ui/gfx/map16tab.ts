@@ -6,6 +6,7 @@
 
 import type { App } from '../app.ts';
 import type { GfxWorkspace, WsPanel } from '../gfxworkspace.ts';
+import { menuButton } from '../menu.ts';
 import { h, clear, toast, pickFile, modal, downloadBytes } from '../dom.ts';
 import { TileCache, map16Source } from '../../core/render.ts';
 import { hex } from '../../core/names.ts';
@@ -165,12 +166,14 @@ export class Map16Tab implements WsPanel {
       h('span', { class: 'sep' }),
       h('button', { onclick: () => this.copy(), title: 'Gewählte Tiles kopieren, mit Verhalten (Strg+C)' }, 'Kopieren'),
       h('button', { onclick: () => this.paste(), title: 'Ab dem gewählten Tile einfügen (Strg+V)' }, 'Einfügen'),
-      h('label', { class: 'toggle', title: 'Alle Tiles markieren, die sich wie das gewählte verhalten' },
+      this.bg ? '' : h('label', { class: 'toggle', title: 'Alle Tiles markieren, die sich wie das gewählte verhalten' },
         (() => { const cb = h('input', { type: 'checkbox', checked: this.sameActs }); cb.addEventListener('change', () => { this.sameActs = cb.checked; this.drawSheet(); }); return cb; })(),
         'Gleiches Verhalten markieren'),
       h('span', { class: 'spacer' }),
-      h('button', { onclick: () => void this.importMap16(), title: 'Lunar-Magic-.map16 ab dem gewählten Tile einfügen' }, '.map16 importieren'),
-      h('button', { onclick: () => this.exportMap16(), title: 'Gewählte Tiles (mit Verhalten) als .map16 speichern' }, '.map16 exportieren'),
+      menuButton({ label: 'Import/Export', items: [
+        { label: 'Importieren (.map16) …', title: 'Lunar-Magic-.map16 ab dem gewählten Tile einfügen', onClick: () => void this.importMap16() },
+        { label: 'Exportieren (.map16)', title: 'Gewählte Tiles (mit Verhalten) als .map16 speichern', onClick: () => this.exportMap16() },
+      ] }),
     );
   }
 
@@ -360,20 +363,23 @@ export class Map16Tab implements WsPanel {
     b.append(
       h('div', { class: 'prop-title' }, this.tileName(t), this.selW * this.selH > 1 ? h('span', { class: 'hint' }, `  (${this.selW}×${this.selH} gewählt)`) : ''),
       h('div', { class: 'hint' }, this.rangeText(t), !this.bg ? ` · im Level ${used}×` : ''),
+      h('div', { class: 'mt-section' }, 'Viertel', h('span', { class: 'hint' }, 'Q: nächstes')),
       cv,
       h('div', { class: 'hint' }, `Viertel ${quarterNames[this.quad]}: 8x8-Tile ${hex(num8, 3)}${slot ? ` aus ${slot.name} (${gfxName(slot.file)})` : ''}`),
       !this.bg && ws.some((w) => app.animated()?.tiles.has(w & 0x3ff)) ? h('div', { class: 'warn-box' },
         `Animiert: das Spiel überschreibt ${ws.filter((w) => app.animated()?.tiles.has(w & 0x3ff)).length === 4 ? 'alle Viertel' : 'markierte Viertel'} laufend mit Animationsbildern (z. B. ?-Block, Münze, Wasser). Gezeichnete Änderungen an diesen 8x8-Tiles sieht man im Spiel nicht.`) : '',
+      h('div', { class: 'hint' }, 'Palette (Tasten 1–8)'),
       h('div', { class: 'mt-pals' }, Array.from({ length: 8 }, (_, p) => palDot(p))),
       h('div', { class: 'row' },
         toggle('↔ Spiegeln', FLIP_X, 'Horizontal spiegeln (X)'),
         toggle('↕ Spiegeln', FLIP_Y, 'Vertikal spiegeln (Y)'),
-        toggle('Vordergrund', PRIO, 'Priorität: vor Sprites/Mario gezeichnet')),
+        toggle('Priorität', PRIO, 'Vor Sprites/Mario gezeichnet')),
+      h('div', { class: 'mt-section' }, 'Tile'),
       this.bg ? '' : this.actsUi(t),
       h('details', { class: 'mt-adv' }, h('summary', null, 'Rohwerte'),
         h('div', { class: 'mono hint' }, ws.map((w, q) => `${['oben links', 'unten links', 'oben rechts', 'unten rechts'][q]} $${hex(w, 4)}`).join('  ')),
         h('div', { class: 'hint' }, this.tileAddr(t) < 0 ? 'Erweitertes Tile – wird beim ersten Ändern angelegt.' : `ROM $${hex(this.tileAddr(t), 6)}`)),
-      h('p', { class: 'hint' }, 'Viertel anklicken, dann rechts ein 8x8-Tile wählen. 2×2 Tiles ziehen füllt alle vier Viertel; ein Tile auf ein Viertel ziehen setzt genau dieses. Tasten: X/Y spiegeln, 1–8 Palette, Q nächstes Viertel, Pfeile anderes Tile.'),
+      h('p', { class: 'hint' }, 'Viertel anklicken, dann rechts ein 8x8-Tile wählen oder auf ein Viertel ziehen; 2×2 Tiles ziehen füllt alle vier.'),
     );
   }
 
@@ -618,7 +624,9 @@ export class Map16Tab implements WsPanel {
   private exportMap16(): void {
     const tiles = this.selection();
     const data = writeMap16File({ width: this.selW, height: this.selH, tiles: tiles.map((t) => this.words(t)), acts: this.bg ? null : tiles.map((t) => actsLike(this.app.rom, t)) });
-    downloadBytes(`${this.bg ? 'bg' : 'fg'}_${hex(this.sel, 3)}.map16`, data);
+    const name = `${this.bg ? 'bg' : 'fg'}_${hex(this.sel, 3)}.map16`;
+    downloadBytes(name, data);
+    toast(`${name} exportiert`);
   }
 
   key(e: KeyboardEvent): boolean {

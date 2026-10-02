@@ -233,8 +233,8 @@ Viele Blöcke auf SMWCentral kommen als Paket, z. B.:
    Slot aus dem Dateinamen gelegt (`_BG2`, `_FG1` …). Für andere Level: Level-Header → Grafik-Bypass.
 
 Einzeln geht das auch:
-- *Grafiken* → *.bin importieren* (4 KB = 4bpp unkomprimiert, 3 KB = 3bpp, sonst LZ2-gepackt);
-- *Map16* → *.map16 importieren* (ab dem gewählten Tile).
+- *Grafiken* → *Import/Export → Importieren (.bin)* (4 KB = 4bpp unkomprimiert, 3 KB = 3bpp, sonst LZ2-gepackt);
+- *Map16-Tiles* → *Import/Export → Importieren (.map16)* (ab dem gewählten Tile).
 
 **BG2/BG3:** Wie Lunar Magic hat der Editor pro Level zwei zusätzliche Grafik-Slots für die Map16-Tiles
 200–27F (BG2) und 280–2FF (BG3), im Level-Header unter „Grafik-Bypass“. Im Original-Spiel liegt an

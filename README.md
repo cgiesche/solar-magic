@@ -49,7 +49,7 @@ Beim Anzeigen eines Levels führt er die **originalen Laderoutinen** des ROMs au
   in allen Leveln. „Auflösen“ macht eine platzierte Struktur wieder zu einzelnen Direct-Map16-Objekten.
   `.smwlevel`-Dateien nehmen die benutzten Strukturen mit.
 * Header-Dialog (H): Primärer Header (Modus, Screens, Tileset, Paletten, Musik, Zeit, Sprite-GFX, …),
-  sekundärer Header (Eingang, Midway, Layer-2/3-Einstellungen), Sprite-Header, BG-Tilemap-Auswahl,
+  Eingang & Scrollen (Eingang, Zwischenziel, Layer-2/3-Einstellungen), Sprite-Header, BG-Tilemap-Auswahl,
   **Grafik-Bypass (ExGFX pro Level)**.
 * Screen-Exits pro Screen (Ziel, sekundär), **sekundäre Eingänge** (Dialog).
 * **Menü *Level*:** speichern unter, **Screen einfügen/löschen** (verschiebt alles dahinter), Level leeren;
@@ -81,8 +81,10 @@ Beim Anzeigen eines Levels führt er die **originalen Laderoutinen** des ROMs au
 * Hauptkarte und alle Submaps, Layer 1 (Wege/Level-Tiles) und Layer 2 (Gelände, 8x8) malen – Maustasten wie
   im Level-Editor: Klick/Ziehen nimmt ein Tile oder einen Block als Pinsel auf (Karte oder Palette),
   Rechtsklick/Shift+Klick malt; X-/Y-Flip für Layer-2-Blöcke; optionale Ansicht „alle Events freigeschaltet“.
-* Level-Tiles zeigen Translevel → Levelnummer; Levelnamen aus den drei Namensbausteinen wählbar;
-  Sprung zum Level-Editor.
+* Level-Tiles zeigen Translevel → Levelnummer; links die Liste der Level-Tiles der Karte (Klick wählt und
+  zentriert, Doppelklick öffnet das Level); Levelnamen aus den drei Namensbausteinen wählbar.
+* Rückgängig/Wiederholen wie im Level-Editor (auch für Namen); beim Verlassen mit ungespeicherten Änderungen:
+  Speichern, Verwerfen oder Abbrechen.
 * Speichern: Layer 1 an Ort und Stelle, Layer 2 mit optimalem RLE-Encoder in freien Speicher.
 
 ### ROM

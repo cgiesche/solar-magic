@@ -3,6 +3,7 @@
 
 import type { App } from './app.ts';
 import { h } from './dom.ts';
+import { viewMenu } from './viewmenu.ts';
 import { hex } from '../core/names.ts';
 import { PaletteTab } from './gfx/palettetab.ts';
 import { Map16Tab } from './gfx/map16tab.ts';
@@ -44,12 +45,8 @@ export class LevelPreview {
       for (const b of (e.currentTarget as HTMLElement).parentElement!.children) b.classList.toggle('active', b === e.currentTarget);
       this.layout();
     } }, `${z}×`);
-    const anim = h('input', { type: 'checkbox', checked: app.show.anim });
-    anim.addEventListener('change', () => { app.show.anim = anim.checked; app.refresh(); app.emit('show-anim'); });
-    app.on('show-anim', () => (anim.checked = app.show.anim));
     this.root = h('div', { class: 'ws-prev' },
       h('div', { class: 'panel-title' }, 'Level-Vorschau',
-        h('label', { class: 'toggle', title: 'Animationen abspielen (wie im Spiel, auch eigene)' }, anim, 'Animation'),
         h('span', { class: 'btn-group' }, zoomBtn(1), zoomBtn(2))),
       this.scroller, this.info);
     this.scroller.addEventListener('mousemove', (e) => {
@@ -167,7 +164,8 @@ export class GfxWorkspace {
     this.bar = h('div', { class: 'ctxbar ws-tabs' },
       h('div', { class: 'btn-group' }, tabBtn('pal', 'Paletten', 'P'), tabBtn('map16', 'Map16-Tiles', 'M'), tabBtn('gfx', 'Grafiken', 'G'), tabBtn('anim', 'Animationen', 'A')),
       h('span', { class: 'spacer' }),
-      h('span', { class: 'hint' }, 'Änderungen wirken sofort · Strg+Z / Strg+Y'));
+      h('span', { class: 'hint', title: 'Ausnahme: die Paletten-Auswahl im Header (Reiter Paletten, unten) gehört zum Level und wird mit „Level speichern“ geschrieben.' }, 'Änderungen gehen sofort in die ROM · Strg+Z / Strg+Y'),
+      viewMenu(app, () => this.preview.update(), false));
     this.root = h('div', { class: 'ws' }, this.body);
     this.side = h('div', { class: 'right ws-side' }, this.preview.root);
     this.preview.onClick = (px, py, e) => this.panel().previewClick?.(px, py, e);

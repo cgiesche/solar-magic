@@ -6,6 +6,7 @@
 import type { App } from '../app.ts';
 import type { GfxWorkspace, WsPanel } from '../gfxworkspace.ts';
 import { h, clear, toast, pickerOpen } from '../dom.ts';
+import { menuButton, type MenuItem } from '../menu.ts';
 import { hex } from '../../core/names.ts';
 import { cgramToRGBA, decodeTile, snesColorToRGBA } from '../../core/gfx.ts';
 import { map16Source } from '../../core/render.ts';
@@ -189,25 +190,35 @@ export class AnimTab implements WsPanel {
       b.append(h('span', { class: 'hint' }, 'Diese ROM hat ExAnimation in einem älteren Lunar-Magic-Format – nicht unterstützt.'));
       return;
     }
-    const st = levelSettings(app.rom, app.level.number);
-    const flag = (bit: number, label: string, title: string) => {
-      const cb = h('input', { type: 'checkbox', checked: !(st & bit) });
-      cb.addEventListener('change', async () => {
-        if (!(await confirmExAnim(app))) { cb.checked = !cb.checked; return; }
-        app.romEdit(`Level ${hex(app.level.number, 3)}: ${label} ${cb.checked ? 'an' : 'aus'}`, () => setLevelSettings(app.rom, app.level.number, cb.checked ? st & ~bit : st | bit));
-      });
-      return h('label', { class: 'toggle', title }, cb, label);
-    };
-    b.append(h('span', { class: 'sep' }), h('span', { class: 'hint' }, `In Level ${hex(app.level.number, 3)}:`),
-      flag(NO_GAME_TILES, 'Original-Tile-Animation', 'Die Animationen des Spiels (?-Block, Münze, Wasser …)'),
-      flag(NO_GAME_COLORS, 'Original-Farbblinken', 'Das Blinken von Farbe 6·4 (Münzen, Yoshi-Coins)'),
-      flag(NO_LEVEL_LIST, 'Level-Animationen', 'Die eigenen Animationen dieses Levels'),
-      flag(NO_GLOBAL_LIST, 'Globale Animationen', 'Die globalen Animationen'));
+    b.append(h('span', { class: 'sep' }), this.flagsMenu ??= this.levelFlagsMenu());
     const l = this.list();
     const alt = h('select', null, [0, 1, 2, 3].map((k) => h('option', { value: String(k), selected: l.altFile === k }, `${gfxName(ANIM_FILE + k)}${readAltFile(app.rom, k) ? '' : ' (leer)'}`)));
     alt.addEventListener('change', () => { const nl = this.list(); nl.altFile = Number(alt.value); void this.save(nl, `Quelle ${gfxName(ANIM_FILE + nl.altFile)}`); });
-    b.append(h('span', { class: 'spacer' }), h('span', { class: 'hint' }, 'Bilder aus'), alt,
-      h('button', { title: 'Die Animationsgrafik im Grafik-Tab bearbeiten', onclick: () => this.ws.showGfx(ANIM_FILE + l.altFile) }, 'Zeichnen …'));
+    b.append(h('span', { class: 'spacer' }), h('span', { class: 'hint' }, 'Bilder aus'), alt);
+  }
+
+  // which animations play in the current level (always the level's settings, also in "Global"); kept across
+  // rebuilds so the open menu stays open while toggling
+  private flagsMenu: HTMLElement | null = null;
+  private levelFlagsMenu(): HTMLElement {
+    const app = this.app;
+    const flag = (bit: number, label: string, title: string): MenuItem => ({
+      label, title,
+      checked: () => !(levelSettings(app.rom, app.level.number) & bit),
+      onToggle: async (on) => {
+        if (!(await confirmExAnim(app))) return;
+        const st = levelSettings(app.rom, app.level.number);
+        app.romEdit(`Level ${hex(app.level.number, 3)}: ${label} ${on ? 'an' : 'aus'}`, () => setLevelSettings(app.rom, app.level.number, on ? st & ~bit : st | bit));
+      },
+    });
+    return menuButton({ label: 'Im Level abspielen', title: 'Welche Animationen im aktuellen Level laufen', items: [
+      { heading: 'Spiel' },
+      flag(NO_GAME_TILES, 'Original-Tile-Animation', 'Die Animationen des Spiels (?-Block, Münze, Wasser …)'),
+      flag(NO_GAME_COLORS, 'Original-Farbblinken', 'Das Blinken von Farbe 6·4 (Münzen, Yoshi-Coins)'),
+      { heading: 'Eigene' },
+      flag(NO_LEVEL_LIST, 'Level-Animationen', 'Die eigenen Animationen dieses Levels'),
+      flag(NO_GLOBAL_LIST, 'Globale Animationen', 'Die globalen Animationen'),
+    ] });
   }
 
   private buildSlots(): void {
@@ -274,6 +285,7 @@ export class AnimTab implements WsPanel {
     if (!l.slots.delete(this.sel)) return;
     l.count = 0;
     await this.save(l, `Slot ${hex(this.sel, 2)} gelöscht`);
+    toast(`Animation ${hex(this.sel, 2)} gelöscht – Strg+Z holt sie zurück`);
   }
 
   private buildDetail(): void {

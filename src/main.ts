@@ -12,7 +12,8 @@ import { GfxWorkspace, type WsTab } from './ui/gfxworkspace.ts';
 import { openEntrancesDialog, openRomInfo, openInsertDialog, openExpandDialog, installEditorPatchAction, openSaveAsDialog, exportLevel, importLevel, openScreenDialog, clearLevelConfirm } from './ui/tools.ts';
 import { openUberDialog } from './ui/uberdialog.ts';
 import { openBlockDialog } from './ui/blockdialog.ts';
-import { menuBar, menuButton, closeMenus, type MenuItem } from './ui/menu.ts';
+import { menuBar, closeMenus } from './ui/menu.ts';
+import { viewMenu } from './ui/viewmenu.ts';
 import { LEVEL_FILE_EXT } from './core/levelfile.ts';
 import { openPatchManager } from './ui/patchmanager.ts';
 import { OverworldView } from './ui/overworld.ts';
@@ -90,18 +91,6 @@ function buildUi(app: App): void {
   const modeBtn = (m: EditMode, label: string, key: string) => h('button', { class: 'mode', 'data-mode': m, title: `${label} (${key})`, onclick: () => app.setMode(m) }, label);
   const modes = h('div', { class: 'btn-group' },
     modeBtn('l1', 'Layer 1', '1'), modeBtn('l2', 'Layer 2', '2'), modeBtn('spr', 'Sprites', '3'), modeBtn('exit', 'Exits', '4'), modeBtn('bg', 'BG', '5'));
-  const show = (k: keyof App['show'], label: string, title?: string, shortcut?: string): MenuItem => ({
-    label, title, shortcut, checked: () => app.show[k],
-    onToggle: (v) => {
-      app.show[k] = v;
-      if (k === 'anim') { app.refresh(); app.emit('show-anim'); }
-      else if (k === 'layer1' || k === 'layer2' || k === 'layer3' || k === 'ghost') app.recomposite(); else view.paint();
-    },
-  });
-  // view-only game state (re-runs the level load)
-  const gameState = (k: keyof App['switches'], label: string, title: string): MenuItem => ({
-    label, title, checked: () => app.switches[k], onToggle: (v) => { app.switches[k] = v; app.refresh(); },
-  });
   const levelTitle = h('span', { class: 'level-title' });
   const zoomLabel = h('span', { class: 'zoom' });
   const levelBar = h('div', { class: 'ctxbar' },
@@ -110,19 +99,7 @@ function buildUi(app: App): void {
     h('span', { class: 'sep' }),
     modes,
     h('span', { class: 'sep' }),
-    menuButton({ label: 'Ansicht', items: [
-      { heading: 'Ebenen' },
-      show('layer1', 'Layer 1'), show('layer2', 'Layer 2 / BG'), show('layer3', 'Layer 3', 'Layer 3 (Flut, Layer-3-Bilder) – Vorschau, Scrollen angenähert'),
-      show('sprites', 'Sprites'), show('exits', 'Exits'),
-      { heading: 'Hilfen' },
-      show('screens', 'Screen-Grenzen'), show('grid', 'Raster', undefined, 'G'),
-      show('ghost', 'Inaktive Ebene durchscheinend', 'Nicht bearbeitete Objektebene halbtransparent (nur Level mit Layer-2-Objekten)'),
-      show('items', 'Block-Inhalte', 'Inhalt von Blöcken (per Emulation ermittelt) halbtransparent über den Blöcken, Pfeile an betretbaren Blöcken (Pipes, Türen)'),
-      show('anim', 'Animation', 'Animierte Tiles und Paletten abspielen'),
-      { heading: 'Spielzustand' },
-      gameState('palaces', '!-Blöcke gedrückt', 'Ansicht: alle Switch-Paläste gedrückt'),
-      gameState('onOff', 'ON/OFF auf OFF', 'Ansicht: ON/OFF-Schalter auf OFF'),
-    ] }),
+    viewMenu(app, () => view.paint()),
     h('span', { class: 'sep' }),
     h('div', { class: 'row zoom-ctl' },
       h('button', { onclick: () => view.setZoom(app.zoom / 2), title: 'Verkleinern (Strg+Mausrad)' }, '−'), zoomLabel,

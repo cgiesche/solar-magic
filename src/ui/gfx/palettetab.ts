@@ -5,6 +5,7 @@
 
 import type { App } from '../app.ts';
 import type { GfxWorkspace, WsPanel } from '../gfxworkspace.ts';
+import { menuButton } from '../menu.ts';
 import { h, clear, toast, downloadBytes, pickFile, choose, pickerOpen } from '../dom.ts';
 import { snesColorToRGBA, cgramToRGBA } from '../../core/gfx.ts';
 import { pcToSnes } from '../../core/rom.ts';
@@ -235,6 +236,8 @@ export class PaletteTab implements WsPanel {
   // writes colors (index -> SNES value); key merges quick successive changes (slider drags)
   private async write(changes: [number, number][], label: string, key: string | null = null): Promise<void> {
     const ok = changes.filter(([i]) => this.src(i) >= 0);
+    const locked = changes.length - ok.length;
+    if (locked && changes.length > 1) toast(`${locked} vom Spiel gesetzte Farbe${locked > 1 ? 'n' : ''} übersprungen (nur mit eigener Palette bearbeitbar)`);
     if (!ok.length) return;
     if (!(await this.allowed(ok.map(([i]) => i)))) { this.paint(); return; }
     this.app.romEdit(label, () => { for (const [i, v] of ok) this.app.rom.w16(this.src(i), v & 0x7fff); }, key);
@@ -258,10 +261,12 @@ export class PaletteTab implements WsPanel {
       h('span', { class: 'sep' }),
       h('button', { onclick: () => this.copyRow(), title: 'Gewählte Palette (16 Farben) kopieren (Strg+C)' }, 'Palette kopieren'),
       h('button', { onclick: () => this.pasteRow(), title: 'Kopierte Palette in die gewählte einfügen (Strg+V)' }, 'Palette einfügen'),
-      h('button', { onclick: () => this.gradient(), title: 'Shift+Klick markiert einen Bereich in der Zeile; die Farben dazwischen werden ein Verlauf' }, 'Verlauf'),
+      h('button', { onclick: () => this.gradient(), title: 'Shift+Klick markiert einen Bereich in der Palette; die Farben dazwischen werden ein Verlauf' }, 'Verlauf'),
       h('span', { class: 'spacer' }),
-      h('button', { onclick: () => this.exportPal(), title: 'Alle 256 Farben als .pal (RGB, 768 Bytes)' }, '.pal exportieren'),
-      h('button', { onclick: () => void this.importPal() }, '.pal importieren'),
+      menuButton({ label: 'Import/Export', items: [
+        { label: 'Importieren (.pal) …', title: 'Farben aus einer .pal-Datei (RGB) übernehmen', onClick: () => void this.importPal() },
+        { label: 'Exportieren (.pal)', title: 'Alle 256 Farben als .pal (RGB, 768 Bytes)', onClick: () => this.exportPal() },
+      ] }),
     );
   }
 
@@ -445,6 +450,7 @@ export class PaletteTab implements WsPanel {
       out[i * 3] = v & 255; out[i * 3 + 1] = (v >> 8) & 255; out[i * 3 + 2] = (v >> 16) & 255;
     }
     downloadBytes(`level${hex(this.app.level.number, 3)}.pal`, out);
+    toast(`level${hex(this.app.level.number, 3)}.pal exportiert`);
   }
   private async importPal(): Promise<void> {
     const f = await pickFile('.pal');

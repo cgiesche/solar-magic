@@ -5,7 +5,7 @@ import { h } from './dom.ts';
 
 export type MenuItem =
   | { label: string; shortcut?: string; title?: string; onClick: () => void; disabled?: () => boolean }
-  | { label: string; shortcut?: string; title?: string; checked: () => boolean; onToggle: (v: boolean) => void; disabled?: () => boolean }
+  | { label: string; shortcut?: string; title?: string; checked: () => boolean; onToggle: (v: boolean) => void | Promise<void>; disabled?: () => boolean }
   | { heading: string }
   | 'sep';
 
@@ -42,11 +42,14 @@ function dropdown(menu: Menu, bar?: HTMLElement): HTMLElement {
       e.addEventListener('click', () => {
         if (isCheck) {
           // checkbox items keep the menu open
-          const v = !it.checked();
-          it.onToggle(v);
-          const now = it.checked();
-          e.setAttribute('aria-checked', String(now));
-          (e.firstChild as HTMLElement).textContent = now ? '✓' : '';
+          const show = () => {
+            const now = it.checked();
+            e.setAttribute('aria-checked', String(now));
+            (e.firstChild as HTMLElement).textContent = now ? '✓' : '';
+          };
+          // onToggle may ask first (async): show the state once it is settled
+          void Promise.resolve(it.onToggle(!it.checked())).then(show);
+          show();
         } else {
           closeMenus();
           it.onClick();
@@ -57,6 +60,8 @@ function dropdown(menu: Menu, bar?: HTMLElement): HTMLElement {
       list.append(e);
     }
     wrap.append(list);
+    // keep it on screen near the right edge
+    if (list.getBoundingClientRect().right > window.innerWidth - 4) { list.style.left = 'auto'; list.style.right = '0'; }
     btn.classList.add('open');
     btn.setAttribute('aria-expanded', 'true');
     const outside = (ev: MouseEvent) => { if (!wrap.contains(ev.target as Node)) closeMenus(); };

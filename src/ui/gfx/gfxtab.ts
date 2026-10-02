@@ -5,6 +5,7 @@
 
 import type { App } from '../app.ts';
 import type { GfxWorkspace, WsPanel } from '../gfxworkspace.ts';
+import { menuButton } from '../menu.ts';
 import { h, clear, toast, downloadBytes, pickFile, modal, choose, attachPanZoom } from '../dom.ts';
 
 const ZOOM_STEPS = [1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24, 32];
@@ -20,7 +21,7 @@ import { importGfxFile, exgfxName } from '../../core/map16file.ts';
 import { parsePrimaryHeader, L1_PTRS } from '../../core/level.ts';
 import { map16Source } from '../../core/render.ts';
 import { EXT_FIRST, EXT_TILES, map16Ext } from '../../core/map16ext.ts';
-import { gfxName, ANIM_FILE } from './map16tab.ts';
+import { gfxName, ANIM_FILE, levelSlots as map16Slots } from './map16tab.ts';
 import { readAltFile, writeAltFile, altFileAddr, exanimInstalled } from '../../core/exanim.ts';
 
 // before the first ExAnimation data: the engine (Lunar Magic compatible) is installed with it
@@ -140,8 +141,8 @@ export class GfxTab implements WsPanel {
     const only = h('input', { type: 'checkbox' });
     only.addEventListener('change', () => { this.onlyLevel = only.checked; this.buildList(); });
     this.root = h('div', { class: 'gt' },
-      this.cards,
       this.tools,
+      this.cards,
       h('div', { class: 'gt-main' },
         h('div', { class: 'gt-files' }, search, h('label', { class: 'toggle' }, only, 'nur vom Level benutzt'), this.list,
           h('button', { onclick: () => this.newExGfx(), title: 'Leere 4bpp-Datei in der ersten freien ExGFX-Nummer anlegen' }, '+ Neue ExGFX')),
@@ -160,7 +161,17 @@ export class GfxTab implements WsPanel {
   }
 
   previewHint(): string {
-    return '';
+    return 'Klick: 8x8-Grafik des Tiles unter der Maus (Viertel oben links) zeigen';
+  }
+
+  previewClick(px: number, py: number): void {
+    const m = this.ws.preview.tileAt(px, py);
+    if (m < 0) return;
+    const w = map16Source(this.app.rom, this.app.render).fg(m)[0];
+    const num = w & 0x3ff;
+    const slot = map16Slots(this.app).find((x) => num >= x.first && num < x.first + 0x80);
+    if (!slot) { toast(`8x8-Tile ${hex(num, 3)} liegt in keinem Grafik-Slot dieses Levels`); return; }
+    this.ws.showGfx(slot.file, num - slot.first, (w >> 10) & 7);
   }
 
   show(): void {
@@ -437,16 +448,20 @@ export class GfxTab implements WsPanel {
         h('button', { onclick: () => this.transform('h'), title: 'Auswahl (oder Tile unter der letzten Auswahl) horizontal spiegeln' }, '↔'),
         h('button', { onclick: () => this.transform('v'), title: 'Vertikal spiegeln' }, '↕'),
         h('button', { onclick: () => this.transform('r'), title: 'Um 90° drehen (nur quadratische Auswahl)' }, '⟳')),
-      h('button', { onclick: () => this.copySel(), title: 'Strg+C' }, 'Kopieren'),
-      h('button', { onclick: () => this.pasteSel(), title: 'Strg+V – fügt an der Auswahl ein, danach verschiebbar' }, 'Einfügen'),
       h('span', { class: 'sep' }),
-      h('span', { class: 'hint' }, 'Raster'), h('span', { class: 'btn-group' }, gridBtn(0, 'aus'), gridBtn(8, '8'), gridBtn(16, '16')),
-      h('span', { class: 'hint' }, 'Zoom'), slider, this.zoomLabel,
-      h('button', { title: 'Ganze Datei einpassen', onclick: () => this.fit() }, 'Einpassen'),
+      h('button', { onclick: () => this.copySel(), title: 'Auswahl kopieren (Strg+C)' }, 'Kopieren'),
+      h('button', { onclick: () => this.pasteSel(), title: 'An der Auswahl einfügen, danach verschiebbar (Strg+V)' }, 'Einfügen'),
+      h('span', { class: 'sep' }),
+      h('span', { class: 'gt-viewctl' },
+        h('span', { class: 'hint' }, 'Raster'), h('span', { class: 'btn-group' }, gridBtn(0, 'aus'), gridBtn(8, '8'), gridBtn(16, '16')),
+        h('span', { class: 'hint' }, 'Zoom'), slider, this.zoomLabel,
+        h('button', { title: 'Ganze Datei einpassen', onclick: () => this.fit() }, 'Einpassen')),
       h('span', { class: 'spacer' }),
-      h('button', { onclick: () => this.exportPng() }, 'PNG exportieren'),
-      h('button', { onclick: () => void this.importPng(), title: 'PNG (128 Pixel breit) in diese Datei; Farben werden auf die gewählte Palette abgebildet' }, 'PNG importieren'),
-      h('button', { onclick: () => void this.importBin(), title: 'Lunar-Magic-ExGFX (.bin)' }, '.bin importieren'),
+      menuButton({ label: 'Import/Export', items: [
+        { label: 'Importieren (.png) …', title: 'PNG (128 Pixel breit) in diese Datei; Farben werden auf die gewählte Palette abgebildet', onClick: () => void this.importPng() },
+        { label: 'Importieren (.bin) …', title: 'Lunar-Magic-ExGFX (.bin)', onClick: () => void this.importBin() },
+        { label: 'Exportieren (.png)', title: 'Datei als PNG in der gewählten Palette', onClick: () => this.exportPng() },
+      ] }),
     );
   }
 
@@ -668,7 +683,7 @@ export class GfxTab implements WsPanel {
 
   private commit(label: string): void {
     const f = this.file;
-    if (!f || f.empty) return;
+    if (!f || f.empty) { toast(f ? `${gfxName(f.num)} ist leer – nichts zu exportieren` : 'Erst links eine Datei wählen'); return; }
     this.ownEdit = true;
     try {
       this.app.romEdit(`${gfxName(f.num)}: ${label}`, () => storeGfx(this.app.rom, f));
@@ -835,7 +850,7 @@ export class GfxTab implements WsPanel {
   // ---------- files ----------
   private exportPng(): void {
     const f = this.file;
-    if (!f || f.empty) return;
+    if (!f || f.empty) { toast(f ? `${gfxName(f.num)} ist leer – nichts zu exportieren` : 'Erst links eine Datei wählen'); return; }
     const W = 128, H = this.H();
     const c = document.createElement('canvas');
     c.width = W; c.height = H;
@@ -845,7 +860,7 @@ export class GfxTab implements WsPanel {
     const cols = this.colors();
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const v = this.get(x, y); px[y * W + x] = v ? cols[v] : 0; }
     ctx.putImageData(img, 0, 0);
-    c.toBlob(async (b) => { if (b) downloadBytes(`${gfxName(f.num)}.png`, new Uint8Array(await b.arrayBuffer()), 'image/png'); }, 'image/png');
+    c.toBlob(async (b) => { if (b) { downloadBytes(`${gfxName(f.num)}.png`, new Uint8Array(await b.arrayBuffer()), 'image/png'); toast(`${gfxName(f.num)}.png exportiert`); } }, 'image/png');
   }
 
   private async importPng(): Promise<void> {
