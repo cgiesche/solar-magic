@@ -5,6 +5,7 @@ import { Rom } from '../src/core/rom.ts';
 import { loadLevel, parseSprites, serializeSprites, spriteSizes, SPR_SIZE_PTR, newUid, type LevelSprite } from '../src/core/level.ts';
 import { exportLevelFile, importLevelFile } from '../src/core/levelfile.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
+import { captureSprites } from '../src/core/spritegfx.ts';
 import { loadAsar } from '../src/core/asar.ts';
 import { ROUTINES } from '../src/core/pixiroutines.ts';
 import { savePixiProject, removePixi, loadPixiProject, parsePixiList, parseCfg, parseJsonCfg, type PixiProject } from '../src/core/pixi.ts';
@@ -78,7 +79,7 @@ Gfx:
   %GetDrawInfo()
   LDA $00 : STA $0300|!addr,y
   LDA $01 : STA $0301|!addr,y
-  LDA #$80 : STA $0302|!addr,y
+  LDA #$8C : STA $0302|!addr,y
   LDA #$21 : STA $0303|!addr,y
   TYA : LSR #2 : TAY
   LDA #$02 : STA $0460|!addr,y
@@ -114,6 +115,14 @@ check(ld.ok, 'level with the custom sprite loads');
 check(W(0x7fb000) === 0x11, 'INIT ran');
 check(W(0x7fb001) > 10, `MAIN runs (${W(0x7fb001)} frames)`);
 check(W(0x7fb002) === 0x5a && W(0x7fb003) === 0x10 && W(0x7fb004) === 0x36, 'extra byte, custom number and acts like seen by MAIN');
+
+// images of custom sprites, captured like the original ones (sprite ids $2xx/$3xx)
+{
+  const img = captureSprites(pemu, 0x105, plv.header, plv.spriteHeader, plv.layer2Pointer >> 16 === 0xff ? plv.layer2Pointer : 0xffd900, [0x00, 0x210, 0x310]);
+  check(img.has(0x00) && img.has(0x210) && img.has(0x310), `images of custom sprites captured (${[...img.keys()].map((k) => k.toString(16)).join(' ')})`);
+  const one = img.get(0x210);
+  check(!!one && one.w === 16 && one.h === 16 && one.ox === 0 && one.oy === 0, 'custom sprite image: its 16x16 tile at the sprite');
+}
 
 // many sprites with extra bytes: each frame the loader scans the sprite data from the start for the
 // column entering the screen; once Mario has run right, the sprite behind 30 entries of 6 bytes

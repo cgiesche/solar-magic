@@ -288,6 +288,13 @@ export function spriteBytes(sizes: SpriteSizes, s: { extra: number; num: number;
   return Array.from({ length: n }, (_, i) => (s.bytes?.[i] ?? 0) & 0xff);
 }
 
+// Sprite id for images, names and the palette: original sprites by number (their extra bits 0/1 don't
+// change what they are), custom sprites as extra bits << 8 | number ($2xx, with the extra bit $3xx)
+export function spriteId(s: { num: number; extra: number }): number {
+  return s.extra >= 2 ? ((s.extra & 3) << 8) | (s.num & 0xff) : s.num & 0xff;
+}
+export const isCustomId = (id: number) => id >= 0x200;
+
 export function parseSprites(data: Uint8Array, start: number, vertical: boolean, sizes: SpriteSizes = null): { sprites: LevelSprite[]; header: number; size: number } {
   const header = data[start];
   const sprites: LevelSprite[] = [];

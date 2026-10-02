@@ -275,16 +275,23 @@ export class LevelEmulator {
     }
   }
 
-  // puts sprite num into slot at pixel (x, y) in gameplay; its init runs in the next frame like
-  // for a sprite from level data (which it is not: $161A = $FF)
-  spawnSprite(slot: number, num: number, x: number, y: number): void {
+  // puts sprite id (see spriteId: custom sprites $2xx/$3xx) into slot at pixel (x, y) in gameplay; its
+  // init runs in the next frame like for a sprite from level data (which it is not: $161A = $FF)
+  spawnSprite(slot: number, id: number, x: number, y: number): void {
     const w = this.snes.wram;
+    const num = id & 0xff;
     w[0x9e + slot] = num;
     w[0x14c8 + slot] = 1;
     w[0xe4 + slot] = x & 0xff; w[0x14e0 + slot] = x >> 8;
     w[0xd8 + slot] = y & 0xff; w[0x14d4 + slot] = y >> 8;
     w[0x161a + slot] = 0xff;
     this.call(INIT_TABLES, slot);
+    if (id >= 0x200) {
+      // custom sprite (PIXI): number and extra bits; its INIT sets up the tables
+      w[0x1ab9e + slot] = num;
+      w[0x1ab10 + slot] = 0x08 | ((id >> 6) & 0x04);
+      for (const t of [0x1ab40, 0x1ab4c, 0x1ab58, 0x1ab64]) w[t + slot] = 0;
+    }
   }
 
   // Continues the live state left by load() into gameplay (GM $14) and snapshots VRAM/CGRAM

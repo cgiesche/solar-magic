@@ -2,9 +2,9 @@
 
 import type { App } from './app.ts';
 import { h, modal, clear, hexInput, select, toast, downloadBytes, pickFile, choose } from './dom.ts';
-import { readSecondaryEntrance, writeSecondaryEntrance, type SecondaryEntrance, loadLevel, cloneLevel, insertScreen, deleteScreen, clearLevel } from '../core/level.ts';
+import { readSecondaryEntrance, writeSecondaryEntrance, type SecondaryEntrance, loadLevel, cloneLevel, insertScreen, deleteScreen, clearLevel, spriteId } from '../core/level.ts';
 import { exportLevelFile, importLevelFile, LEVEL_FILE_EXT } from '../core/levelfile.ts';
-import { ENTRANCE_ACTIONS, hex, objectName, spriteName } from '../core/names.ts';
+import { ENTRANCE_ACTIONS, hex, objectName } from '../core/names.ts';
 import { saveLevel } from '../core/save.ts';
 import { hasEditorPatch, installEditorPatch, DM16_EXT, editorPatch, setLevelGfx, customPalette, setCustomPalette, bgBank } from '../core/patches.ts';
 import { bgFromWram } from '../core/bg.ts';
@@ -188,7 +188,7 @@ export function openInsertDialog(app: App, tx: number, ty: number): void {
   let extra = p?.kind === 'spr' ? p.extra : 0;
   const name = h('div', { class: 'hint' });
   const fields = h('div');
-  const showName = () => (name.textContent = kind === 2 ? spriteName(num) : kind === 1 ? objectName(0, num) : objectName(num, 0));
+  const showName = () => (name.textContent = kind === 2 ? app.spriteLabel(spriteId({ num, extra })) : kind === 1 ? objectName(0, num) : objectName(num, 0));
   const build = () => {
     clear(fields);
     if (kind === 0) num = Math.max(1, Math.min(0x3f, num));
@@ -196,7 +196,8 @@ export function openInsertDialog(app: App, tx: number, ty: number): void {
     fields.append(
       h('div', { class: 'prop' }, h('label', null, 'Nummer'), hexInput(num, 2, (v) => { num = v; showName(); }, kind === 0 ? 0x3f : 0xff)),
       kind === 0 ? h('div', { class: 'prop' }, h('label', null, 'Größe/Einstellung'), hexInput(size, 2, (v) => (size = v))) : '',
-      kind === 2 ? h('div', { class: 'prop' }, h('label', null, 'Extra-Bits'), hexInput(extra, 1, (v) => (extra = v), 3)) : '',
+      kind === 2 ? h('div', { class: 'prop' }, h('label', null, 'Extra-Bits'), hexInput(extra, 1, (v) => { extra = v; showName(); }, 3)) : '',
+      kind === 2 ? h('div', { class: 'hint' }, 'Extra-Bits 2/3: Custom Sprite (PIXI) ohne/mit Extra-Bit') : '',
       name,
     );
   };

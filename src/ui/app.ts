@@ -3,11 +3,12 @@
 import { Rom, snesToPc } from '../core/rom.ts';
 import { LevelEmulator, OV_L1, OV_L2, type LevelRender, type LevelOverride, MAP_BASE, MAP_SIZE } from '../core/levelemu.ts';
 import {
-  type Level, type LevelObject, type LevelSprite, loadLevel, serializeLayer1, serializeLayer2, serializeSprites, spriteSizes,
+  type Level, type LevelObject, type LevelSprite, loadLevel, serializeLayer1, serializeLayer2, serializeSprites, spriteSizes, spriteId, spriteBytes,
   isL1Vertical, cloneLevel, newUid, hasLayer2Objects, hasObjects, L1_PTRS, L2_PTRS, SEC_HDR,
   readSecondaryEntrance, writeSecondaryEntrance, entrancePos, nearestEntrance, encodeSecondaryHeader,
 } from '../core/level.ts';
-import { hex } from '../core/names.ts';
+import { hex, spriteName } from '../core/names.ts';
+import { loadPixiProject, customSpriteList, type CustomSprite } from '../core/pixi.ts';
 import { renderLevel, type LevelImages, composite, map16Source } from '../core/render.ts';
 import { EXT_FIRST, map16Ext, installMap16Ext } from '../core/map16ext.ts';
 import { saveLevel } from '../core/save.ts';
@@ -323,16 +324,38 @@ export class App {
   // kept in the result cache like the probes: all images of a sprite GFX/palette setting together,
   // variant images by sprite and position
   spriteKey = '';
+  // custom sprites of the ROM's PIXI project (see pixi.ts), by sprite id ($2xx / $3xx with the extra bit)
+  private customMemo: { gen: number; data: Uint8Array | null; list: CustomSprite[] } = { gen: -1, data: null, list: [] };
+  customSprites(): CustomSprite[] {
+    const m = this.customMemo;
+    if (m.gen === this.emu.romGen && m.data === this.rom.data) return m.list;
+    m.gen = this.emu.romGen; m.data = this.rom.data; m.list = [];
+    try {
+      const p = loadPixiProject(this.rom);
+      if (p) m.list = customSpriteList(p);
+    } catch (e) { console.error(e); }
+    return m.list;
+  }
+  customSprite(id: number): CustomSprite | undefined {
+    return id >= 0x200 ? this.customSprites().find((c) => c.id === id) : undefined;
+  }
+  // name of a sprite id
+  spriteLabel(id: number): string {
+    if (id < 0x200) return spriteName(id);
+    return this.customSprite(id)?.name ?? `Custom Sprite ${hex(id & 0xff, 2)}${id & 0x100 ? ' (Extra-Bit)' : ''} – nicht eingefügt`;
+  }
+
   ensureSpriteImages(): void {
     const hd = this.level.header;
     // sprite memory: a sprite whose OAM range is too small is captured as the game shows it
-    const key = `${hd.spriteGfx}-${hd.spritePalette}-${this.level.spriteHeader & 0x3f}-${gfxFilesHash(this.rom, this.spriteGfxFiles()).toString(36)}`;
+    const custom = this.customSprites().map((c) => c.id);
+    const key = `${hd.spriteGfx}-${hd.spritePalette}-${this.level.spriteHeader & 0x3f}-${gfxFilesHash(this.rom, this.spriteGfxFiles()).toString(36)}${custom.length ? '-' + custom.map((c) => c.toString(16)).join('.') : ''}`;
     if (key === this.spriteKey) return;
     this.spriteKey = key;
     this.variantQueue = [];
     const map = new Map<number, HTMLCanvasElement>();
     this.spriteThumbs = map;
-    const all = Array.from({ length: 0xe7 }, (_, i) => i); // as listed in the palette
+    const all = [...Array.from({ length: 0xe7 }, (_, i) => i), ...custom]; // as listed in the palette
     const lvNum = this.level.number;
     const bg = this.level.layer2Pointer >> 16 === 0xff ? this.level.layer2Pointer : 0xffd900;
     const header = { ...hd };
@@ -369,15 +392,50 @@ export class App {
     this.cacheReady.then(() => setTimeout(step, 0));
   }
 
-  // image of sprite num at tile (x, y): sprites that start differently depending on their position
-  // (see SpriteVariants) get an own image per variant, captured in the background once known
-  spriteImage(num: number, x: number, y: number): HTMLCanvasElement | undefined {
-    const base = this.spriteThumbs?.get(num);
-    const p = this.spriteInfo(num);
+  // image of sprite id (see spriteId) at tile (x, y): sprites that start differently depending on their
+  // position (see SpriteVariants) get an own image per variant, captured in the background once known;
+  // custom sprites with extra bytes other than 0 one per bytes
+  spriteImage(id: number, x: number, y: number, bytes?: number[]): HTMLCanvasElement | undefined {
+    const base = this.spriteThumbs?.get(id);
+    if (bytes?.some((b) => b)) {
+      const img = this.results.get<SpriteImage | null>(this.bytesKey(id, bytes));
+      if (img === undefined) this.queueBytesImage(id, bytes);
+      return img ? this.spriteCanvas(img) : base;
+    }
+    const p = this.spriteInfo(id);
     if (!p || p.variants.reps.length < 2) return base;
-    const img = this.results.get<SpriteImage | null>(this.variantKey(num, p.variants.reps[variantOf(p.variants, x, y)]));
-    if (img === undefined) this.queueVariantImages(num);
+    const img = this.results.get<SpriteImage | null>(this.variantKey(id, p.variants.reps[variantOf(p.variants, x, y)]));
+    if (img === undefined) this.queueVariantImages(id);
     return img ? this.spriteCanvas(img) : base;
+  }
+  // image of a placed sprite
+  spriteImageOf(s: LevelSprite): HTMLCanvasElement | undefined {
+    return this.spriteImage(spriteId(s), s.x, s.y, s.extra >= 2 ? s.bytes : undefined);
+  }
+
+  private bytesKey(id: number, bytes: number[]): string {
+    return `b${this.spriteKey}:${id}:${bytes.join(',')}`;
+  }
+  private bytesQueue: { id: number; bytes: number[] }[] = [];
+  private queueBytesImage(id: number, bytes: number[]): void {
+    const k = this.bytesKey(id, bytes);
+    if (this.bytesQueue.some((q) => this.bytesKey(q.id, q.bytes) === k)) return;
+    this.bytesQueue.push({ id, bytes: [...bytes] });
+    if (this.bytesQueue.length > 1) return;
+    const queue = this.bytesQueue, key = this.spriteKey;
+    const step = () => {
+      if (queue !== this.bytesQueue || key !== this.spriteKey) return;
+      const q = queue[0];
+      const lv = this.level, bg = lv.layer2Pointer >> 16 === 0xff ? lv.layer2Pointer : 0xffd900;
+      try {
+        const r = this.emu.tracked(() => captureSprites(this.emu, lv.number, lv.header, lv.spriteHeader, bg, [q.id], undefined, q.bytes));
+        this.results.set(this.bytesKey(q.id, q.bytes), r.result.get(q.id) ?? null, this.results.fp.deps(r.reads));
+      } catch (e) { console.error(e); }
+      queue.shift();
+      this.emit('sprites');
+      if (queue.length) setTimeout(step, 0);
+    };
+    setTimeout(step, 0);
   }
 
   private variantKey(num: number, at: { x: number; y: number }): string {
@@ -620,9 +678,9 @@ export class App {
     return p;
   }
 
-  // the same for a sprite hit from below (normal sprites only, not shooters/generators)
+  // the same for a sprite id hit from below (normal sprites only, not shooters/generators)
   spriteInfo(num: number): SpriteProbe | undefined {
-    if (num >= SPRITE_PROBE_END) return undefined;
+    if (num < 0x200 ? num >= SPRITE_PROBE_END : (num & 0xff) >= 0xc0) return undefined;
     const pr = this.blockProber();
     const p = pr.cachedSprite(num);
     if (!p) this.queueProbe(PROBE_SPRITE | num);
@@ -757,7 +815,7 @@ export class App {
       if (this.probeQueue.length) t = this.probeQueue.shift()!;
       else { t = this.prefetchQueue.values().next().value!; this.prefetchQueue.delete(t); }
       try {
-        if (t & PROBE_SPRITE) this.prober?.probeSprite(t & 0xff); else this.prober?.probe(t);
+        if (t & PROBE_SPRITE) this.prober?.probeSprite(t & 0x3ff); else this.prober?.probe(t);
       } catch (e) { console.error(e); this.probeFailed.add(t); }
     }
     this.probeBusy();
@@ -777,7 +835,7 @@ export class App {
   // sprite pixel box: its 16x16 tile united with the bounds of its captured image
   spriteBox(s: LevelSprite): { x0: number; y0: number; x1: number; y1: number } {
     const x = s.x * 16, y = s.y * 16;
-    const img = this.spriteImage(s.num, s.x, s.y);
+    const img = this.spriteImageOf(s);
     if (!img) return { x0: x, y0: y, x1: x + 16, y1: y + 16 };
     const ix = x + Number(img.dataset.ox), iy = y + Number(img.dataset.oy);
     return { x0: Math.min(x, ix), y0: Math.min(y, iy), x1: Math.max(x + 16, ix + img.width), y1: Math.max(y + 16, iy + img.height) };
@@ -964,6 +1022,7 @@ export class App {
     } else if (p.kind === 'spr') {
       if (this.mode !== 'spr') this.setMode('spr');
       const s: LevelSprite = { uid: newUid(), num: p.num, x: tx, y: ty, extra: p.extra };
+      if (s.extra >= 2) { const b = spriteBytes(spriteSizes(this.rom), s); if (b.length) s.bytes = b; }
       this.level.sprites.push(s);
       this.selection = new Set([s.uid]);
     } else {

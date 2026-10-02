@@ -45,9 +45,10 @@ function readPpuOam(oam: Uint8Array): OamTile[] {
 }
 const tileKey = (t: OamTile) => `${t.x},${t.y},${t.tile},${t.attr},${t.big}`;
 
+// nums: sprite ids (see spriteId; custom sprites $2xx/$3xx); bytes: extra bytes of custom sprites (else 0)
 export function captureSprites(
   emu: LevelEmulator, level: number, header: PrimaryHeader, spriteHeader: number, bgPointer: number, nums: number[],
-  onProgress?: (done: number) => void,
+  onProgress?: (done: number) => void, bytes?: number[],
 ): Map<number, SpriteImage> {
   const result = new Map<number, SpriteImage>();
   const { l1, secondary, camX, camY } = testLevel(emu, level, header, spriteHeader, bgPointer);
@@ -58,12 +59,12 @@ export function captureSprites(
   // what the empty level shows (Mario): sprites drawn outside the sprite slots (cluster sprites
   // like Boo rings) are what a load with them shows in addition
   let baseline: Set<string> | null = null;
-  if (nums.some((n) => n >= 0xc9) && record(emu, 3)) baseline = new Set(readPpuOam(s.oam).map(tileKey));
-  // sprites from $C9 on load specially (shells as Koopas, groups spawn several slots): one per load,
-  // everything that is alive then belongs to it
-  const normal = nums.filter((n) => n < 0xc9), batches: number[][] = [];
+  if (nums.some(alone) && record(emu, 3)) baseline = new Set(readPpuOam(s.oam).map(tileKey));
+  // sprites from $C9 on load specially (shells as Koopas, groups spawn several slots), custom shooters and
+  // generators don't take a slot: one per load, everything that is alive then belongs to it
+  const normal = nums.filter((n) => !alone(n)), batches: number[][] = [];
   for (let b = 0; b < normal.length; b += slots.length) batches.push(normal.slice(b, b + slots.length));
-  for (const n of nums) if (n >= 0xc9) batches.push([n]);
+  for (const n of nums) if (alone(n)) batches.push([n]);
   const firstPass = batches.length;
   let done = 0;
   for (let bi = 0; ; bi++) {
@@ -72,8 +73,8 @@ export function captureSprites(
     if (bi === firstPass) for (const n of normal) if (!result.has(n)) batches.push([n]);
     if (bi >= batches.length) break;
     const batch = batches[bi];
-    const solo = batch.length === 1 && batch[0] >= 0xc9;
-    const placed = batch.map((n, i) => ({ n, ...slots[i] }));
+    const solo = batch.length === 1 && alone(batch[0]);
+    const placed = batch.map((id, i) => ({ id, n: id & 0xff, extra: id >> 8, bytes, ...slots[i] }));
     const order = sortPlaced(placed);
     const r = emu.load(level, { layer1: l1, sprites: testSpriteData(spriteHeader, order, spriteSizes(emu.rom)), secondaryHeader: secondary, layer2Pointer: bgPointer });
     if (!r.ok) continue;
@@ -83,11 +84,12 @@ export function captureSprites(
     const w = s.wram;
     const cx = w[0x1a] | (w[0x1b] << 8), cy = w[0x1c] | (w[0x1d] << 8);
     // live sprite slots (alone, a sprite from $C9 on owns all: shells $DA-$DD load as a Koopa
-    // 04-07 in carryable state, so $9E is not the placed number)
+    // 04-07 in carryable state, so $9E is not the placed number; a custom sprite's $9E is what it acts like)
     const live = new Map<number, { n: number; x: number; y: number }>();
     for (let i = 0; i < 12; i++) {
-      if (w[0x14c8 + i] === 0 || !(solo || order[w[0x161a + i]])) continue;
-      live.set(i, { n: solo ? batch[0] : w[0x9e + i], x: w[0xe4 + i] | (w[0x14e0 + i] << 8), y: w[0xd8 + i] | (w[0x14d4 + i] << 8) });
+      const from = order[w[0x161a + i]];
+      if (w[0x14c8 + i] === 0 || !(solo || from)) continue;
+      live.set(i, { n: solo ? batch[0] : from.id >= 0x200 ? from.id : w[0x9e + i], x: w[0xe4 + i] | (w[0x14e0 + i] << 8), y: w[0xd8 + i] | (w[0x14d4 + i] << 8) });
     }
     const groups = new Map<number, OamTile[]>();
     for (const t of readOamBuffer(snapOam)) {
@@ -109,7 +111,7 @@ export function captureSprites(
       const extra = readPpuOam(s.oam).filter((t) => !baseline!.has(tileKey(t)));
       const img = extra.length ? drawTiles(emu, extra) : null;
       const p = placed[0];
-      if (img) result.set(p.n, { ...img, ox: img.ox + cx - p.tx * 16, oy: img.oy + cy - p.ty * 16 });
+      if (img) result.set(p.id, { ...img, ox: img.ox + cx - p.tx * 16, oy: img.oy + cy - p.ty * 16 });
     }
     groups.forEach((g, i) => {
       const l = live.get(i)!;
@@ -126,6 +128,9 @@ export function captureSprites(
   }
   return result;
 }
+
+// loaded one per test level: sprites from $C9 on, custom shooters and generators (C0-DF)
+const alone = (id: number) => (id >= 0x200 ? (id & 0xff) >= 0xc0 : id >= 0xc9);
 
 // The empty test level (horizontal, two screens, floor far below; Mario enters at the left)
 // and where its camera starts
@@ -273,7 +278,7 @@ export function captureSpriteAt(
   const slot = 11;
   emu.spawnSprite(slot, num, px, py);
   const rec = record(emu, 3);
-  if (!rec || !w[0x14c8 + slot] || w[0x9e + slot] !== num) return null;
+  if (!rec || !w[0x14c8 + slot] || (num >= 0x200 ? w[0x1ab9e + slot] !== (num & 0xff) : w[0x9e + slot] !== num)) return null;
   const g = readOamBuffer(rec.snapOam).filter((t) => rec.snapOwner[t.i] === slot);
   const img = g.length ? drawTiles(emu, g) : null;
   if (!img) return null;

@@ -5,7 +5,7 @@ import { h, clear, hexInput, attachRectPick, modal, toast, emptyState } from './
 import { objectName, spriteName, hex2, hex3 } from '../core/names.ts';
 import { objectVariant, withObjectVariant, type ObjKind } from '../core/objkinds.ts';
 import { objectThumbs, thumbCanvas, objKey, type ObjSpec } from './thumbs.ts';
-import { newUid, type LevelObject } from '../core/level.ts';
+import { newUid, spriteId, spriteBytes, spriteSizes, type LevelObject } from '../core/level.ts';
 import { levelName } from '../core/overworld.ts';
 import { DM16_EXT } from '../core/patches.ts';
 import { STRUCT_EXT, TRANSPARENT, hasStructs, freeStructureNumber, readStructure, writeStructure, STRUCT_COUNT, type Structure } from '../core/structs.ts';
@@ -380,19 +380,27 @@ export class Palette {
     const f = this.search.value.trim().toLowerCase();
     const cur = app.paletteItem;
     if (this.tab === 'spr') {
-      for (let n = 0; n < 0xe7; n++) {
-        const name = spriteName(n);
+      // original sprites 00-E6, then the custom sprites of the ROM (PIXI, ids $2xx/$3xx)
+      const custom = app.customSprites();
+      const ids = [...Array.from({ length: 0xe7 }, (_, i) => i), ...custom.map((c) => c.id)];
+      let head = false;
+      for (const id of ids) {
+        const n = id & 0xff, extra = id >> 8;
+        const name = app.spriteLabel(id);
         // what the sprite gives when hit from below or jumped on (emulated, see blockprobe.ts)
-        const p = app.spriteInfo(n);
+        const p = app.spriteInfo(id);
         const info = p?.summary ?? '';
-        if (f && !(`${hex2(n)} ${name} ${info}`.toLowerCase().includes(f))) continue;
-        const sel = cur?.kind === 'spr' && cur.num === n;
-        const img = app.spriteThumbs?.get(n);
+        const num = id >= 0x200 ? `C${hex2(n)}` : hex2(n);
+        if (f && !(`${hex2(n)} ${num} ${name} ${info}${id >= 0x200 ? ' custom' : ''}`.toLowerCase().includes(f))) continue;
+        if (id >= 0x200 && !head) { head = true; this.body.appendChild(h('div', { class: 'pal-head' }, 'Custom Sprites (PIXI)')); }
+        const sel = cur?.kind === 'spr' && spriteId(cur) === id;
+        const img = app.spriteThumbs?.get(id);
         const items = p ? [...new Set(p.pos.flatMap(spritesOf))] : [];
+        const desc = app.customSprite(id)?.description;
         this.body.appendChild(h('div', {
-          class: `pal-row${sel ? ' selected' : ''}`, title: info ? `${hex2(n)}: ${name}\n${info}` : '',
-          onclick: () => { app.paletteItem = { kind: 'spr', num: n, extra: 0 }; if (app.mode !== 'spr') app.setMode('spr'); this.build(); },
-        }, h('span', { class: 'pal-thumb-s' }, img ? cloneCanvas(img) : ''), h('span', { class: 'num' }, hex2(n)), name, itemBadge(app, items, 'pal-items-row')));
+          class: `pal-row${sel ? ' selected' : ''}`, title: [`${num}: ${name}`, info, desc].filter(Boolean).join('\n'),
+          onclick: () => { app.paletteItem = { kind: 'spr', num: n, extra }; if (app.mode !== 'spr') app.setMode('spr'); this.build(); },
+        }, h('span', { class: 'pal-thumb-s' }, img ? cloneCanvas(img) : ''), h('span', { class: 'num' }, num), name, itemBadge(app, items, 'pal-items-row')));
       }
       if (!this.body.firstChild) this.body.append(emptyState('Kein Sprite passt zur Suche.'));
       return;
@@ -605,17 +613,24 @@ export class Properties {
       if (sel.length > 1) { this.body.append(h('div', { class: 'prop-title' }, `${sel.length} Sprites ausgewählt`), this.actions(false)); return; }
       const s = sel[0];
       const upd = (f: () => void) => { app.checkpoint(); f(); app.changed(false); };
+      const id = spriteId(s), custom = app.customSprite(id);
+      // custom sprites: their extra bytes (as many as the size table says for number and extra bit)
+      const nBytes = s.extra >= 2 ? spriteBytes(spriteSizes(app.rom), s).length : 0;
+      const resize = () => { const b = spriteBytes(spriteSizes(app.rom), s); if (b.length) s.bytes = b; else delete s.bytes; };
       this.body.append(
-        h('div', { class: 'prop-title' }, `Sprite ${hex2(s.num)}: ${spriteName(s.num)}`),
-        this.field('Nummer', hexInput(s.num, 2, (v) => upd(() => (s.num = v)))),
+        h('div', { class: 'prop-title' }, `${s.extra >= 2 ? 'Custom Sprite' : 'Sprite'} ${hex2(s.num)}: ${app.spriteLabel(id)}`),
+        this.field('Nummer', hexInput(s.num, 2, (v) => upd(() => { s.num = v; resize(); }))),
         this.field('X', hexInput(s.x, 3, (v) => upd(() => (s.x = v)), app.levelWidthTiles() - 1)),
         this.field('Y', hexInput(s.y, 3, (v) => upd(() => (s.y = v)), app.levelHeightTiles() - 1)),
-        this.field('Extra-Bits', hexInput(s.extra, 1, (v) => upd(() => (s.extra = v)), 3)),
+        this.field('Extra-Bits', hexInput(s.extra, 1, (v) => upd(() => { s.extra = v; resize(); }), 3)),
+        ...Array.from({ length: nBytes }, (_, i) => this.field(`Extra-Byte ${i + 1}`, hexInput(s.bytes?.[i] ?? 0, 2, (v) => upd(() => { resize(); if (s.bytes) s.bytes[i] = v; })))),
+        s.extra >= 2 ? h('div', { class: 'hint' }, custom ? 'Extra-Bits 2/3: Custom Sprite ohne/mit Extra-Bit.' : 'Dieser Custom Sprite ist nicht eingefügt (Patches → Custom Sprites …); das Spiel behandelt ihn wie den Original-Sprite gleicher Nummer.') : '',
+        custom?.description ? h('div', { class: 'hint pre' }, custom.description) : '',
         this.actions(false),
       );
       // behaviour when hit from below or jumped on, at this position and in general (emulated)
-      const p = app.spriteInfo(s.num);
-      this.probePending = !p && s.num < 0xc9;
+      const p = app.spriteInfo(id);
+      this.probePending = !p && (s.extra >= 2 ? s.num < 0xc0 : s.num < 0xc9);
       if (p?.summary) {
         const here = spriteProbeAt(p, s.x, s.y).summary;
         this.body.append(h('div', { class: 'hint' }, `An dieser Stelle: ${here ?? 'nichts'}`,

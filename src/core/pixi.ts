@@ -195,6 +195,24 @@ export function spriteConfig(p: PixiProject, e: PixiEntry): SpriteConfig {
   return { type: 1, actlike: 0, tweak: [0, 0, 0, 0, 0, 0], prop: [0, 0], asm: e.file, bytes: 0, bytesExtra: 0, names: [{ name, extraBit: false }], description: '' };
 }
 
+// what the editor shows of the inserted sprites, shooters and generators, by sprite id (extra bits << 8 |
+// number: $2xx, with the extra bit $3xx)
+export interface CustomSprite { id: number; num: number; extraBit: boolean; kind: SpriteFolder; name: string; description: string; bytes: number; file: string }
+export function customSpriteList(p: PixiProject): CustomSprite[] {
+  const out: CustomSprite[] = [];
+  for (const e of [...p.list].sort((a, b) => a.num - b.num)) {
+    if (MISC_KINDS.includes(e.kind)) continue;
+    let c: SpriteConfig;
+    try { c = spriteConfig(p, e); } catch { continue; }
+    for (const eb of [false, true]) {
+      const named = c.names.find((n) => n.extraBit === eb);
+      const name = named?.name ?? (c.names[0]?.name ?? e.file) + (eb ? ' (Extra-Bit)' : '');
+      out.push({ id: ((eb ? 3 : 2) << 8) | e.num, num: e.num, extraBit: eb, kind: e.kind, name, description: c.description, bytes: eb ? c.bytesExtra : c.bytes, file: e.file });
+    }
+  }
+  return out;
+}
+
 // $400 byte size table (index = extra bits * $100 + number, value = 3 + extra bytes)
 export function sizeTable(p: PixiProject): Uint8Array {
   const t = new Uint8Array(0x400).fill(3);

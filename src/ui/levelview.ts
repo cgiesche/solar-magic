@@ -2,10 +2,10 @@
 
 import { App, type Marker } from './app.ts';
 import { h, attachPanZoom, downloadBytes, toast } from './dom.ts';
-import { spriteName, objectName, hex2, hex3 } from '../core/names.ts';
+import { objectName, hex2, hex3 } from '../core/names.ts';
 import { resizeObjectSize } from '../core/objkinds.ts';
 import { probeAt, spriteProbeAt, enterText, type PosProbe } from '../core/blockprobe.ts';
-import { type LevelObject, type LevelSprite, serializeLayer1, serializeLayer2, serializeSprites, spriteSizes } from '../core/level.ts';
+import { type LevelObject, type LevelSprite, serializeLayer1, serializeLayer2, serializeSprites, spriteSizes, spriteId } from '../core/level.ts';
 import { composite } from '../core/render.ts';
 import { incompleteSprites, spriteMemDialog, spriteMemText, SPRITE_MEM_HELP } from './spritemem.ts';
 
@@ -330,7 +330,7 @@ export class LevelView {
     const app = this.app;
     ctx.globalAlpha = 0.65;
     for (const s of app.level.sprites) {
-      const p = app.spriteInfo(s.num);
+      const p = app.spriteInfo(spriteId(s));
       if (p?.summary) this.drawItem(ctx, spriteProbeAt(p, s.x, s.y), s.x * 16, s.y * 16);
     }
     ctx.globalAlpha = 1;
@@ -356,7 +356,7 @@ export class LevelView {
     for (const s of app.level.sprites) {
       const x = s.x * 16, y = s.y * 16;
       const sel = app.selection.has(s.uid) && active;
-      const img = app.spriteImage(s.num, s.x, s.y);
+      const img = app.spriteImageOf(s);
       if (img) {
         ctx.globalAlpha = active ? 1 : 0.85;
         ctx.drawImage(img, x + Number(img.dataset.ox), y + Number(img.dataset.oy));
@@ -621,9 +621,9 @@ export class LevelView {
       const tag = hits.length > 1 ? (mode === 'spr' ? '' : mode === 'l1' ? ' (Layer 1)' : ' (Layer 2)') : '';
       if (mode === 'spr') {
         const s = item as LevelSprite;
-        const p = app.spriteInfo(s.num);
+        const p = app.spriteInfo(spriteId(s));
         const sum = p && spriteProbeAt(p, s.x, s.y).summary;
-        txt += `  · Sprite ${hex2(s.num)} ${spriteName(s.num)}${sum ? ` (${sum})` : ''}`;
+        txt += `  · ${s.extra >= 2 ? 'Custom Sprite' : 'Sprite'} ${hex2(s.num)} ${app.spriteLabel(spriteId(s))}${sum ? ` (${sum})` : ''}`;
       }
       else { const o = item as LevelObject; txt += `  · ${o.num ? 'Objekt ' + hex2(o.num) : 'Erw. Objekt ' + hex2(o.ext)}${tag} ${objectName(o.num, o.ext)}${o.num ? ' Größe ' + hex2(o.size) : ''}`; }
     }
@@ -703,7 +703,7 @@ export class LevelView {
     const px = composite(im, app.show.layer1, app.show.layer2, 0, app.show.layer3); // without ghosting
     ctx.putImageData(new ImageData(new Uint8ClampedArray(px.buffer as ArrayBuffer), im.width, im.height), 0, 0);
     if (app.show.sprites) for (const s of app.level.sprites) {
-      const img = app.spriteImage(s.num, s.x, s.y);
+      const img = app.spriteImageOf(s);
       if (img) ctx.drawImage(img, s.x * 16 + Number(img.dataset.ox), s.y * 16 + Number(img.dataset.oy));
     }
     c.toBlob(async (b) => {
