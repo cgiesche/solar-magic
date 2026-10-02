@@ -311,7 +311,7 @@ export class AnimTab implements WsPanel {
     d.append(
       h('div', { class: 'prop' }, h('label', null, 'Ziel'),
         h('span', { class: 'mono' }, `8x8-Tile ${hex(t, 3)}`), slot ? h('span', { class: 'hint' }, ` ${slot.name}`) : '',
-        h('button', { class: this.picking === 'target' ? 'active' : '', title: 'Rechts im VRAM-Raster oder in der Level-Vorschau anklicken', onclick: () => { this.picking = this.picking ? null : 'target'; this.buildSide(); this.buildDetail(); } }, 'Ziel wählen …')),
+        h('button', { class: this.picking === 'target' ? 'active' : '', title: 'Rechts im VRAM-Raster oder in der Level-Vorschau anklicken', onclick: () => { this.picking = this.picking ? null : 'target'; this.buildSide(); this.buildDetail(); } }, 'Ziel wählen')),
       h('div', { class: 'hint' }, `${shape.w}×${shape.h} Tiles · ${s.dest & ALT ? `Bilder aus ${gfxName(ANIM_FILE + this.list().altFile)}` : 'Bilder aus dem RAM ($7E, z. B. Original-Animationen)'}`),
     );
     // frames: big preview + columns
@@ -374,7 +374,7 @@ export class AnimTab implements WsPanel {
     if (!back) {
       const c = s.dest & 0xff;
       d.append(h('div', { class: 'prop' }, h('label', null, 'Farbe'), h('span', { class: 'mono' }, `${hex(c >> 4, 1)}·${hex(c & 15, 1)}`),
-        h('button', { class: this.picking === 'target' ? 'active' : '', onclick: () => { this.picking = this.picking ? null : 'target'; this.buildSide(); this.buildDetail(); } }, 'Farbe wählen …')));
+        h('button', { class: this.picking === 'target' ? 'active' : '', onclick: () => { this.picking = this.picking ? null : 'target'; this.buildSide(); this.buildDetail(); } }, 'Farbe wählen')));
     }
     if (count > 1) { d.append(h('p', { class: 'hint' }, `Diese Animation setzt ${count} Farben auf einmal (aus Daten) – hier noch nicht bearbeitbar.`)); return; }
     const cols = this.columns(s);
@@ -414,7 +414,7 @@ export class AnimTab implements WsPanel {
     if (!s) return;
     const kind = kindOf(s.type);
     if (kind === 'colors') {
-      if (this.picking !== 'target') { box.append(h('p', { class: 'hint' }, 'Mit „Farbe wählen …“ die Palettenfarbe bestimmen, die animiert wird.')); return; }
+      if (this.picking !== 'target') { box.append(h('p', { class: 'hint' }, 'Mit „Farbe wählen“ die Palettenfarbe bestimmen, die animiert wird.')); return; }
       const pal = cgramToRGBA(this.app.render.cgram);
       const grid = h('div', { class: 'at-palgrid' });
       for (let i = 0; i < 256; i++) {

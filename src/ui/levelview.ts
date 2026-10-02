@@ -34,13 +34,15 @@ export class LevelView {
   drag: Drag | null = null;
   status: HTMLSpanElement;
   stats: HTMLSpanElement;
+  pos: HTMLSpanElement;
   pendingFrame = 0;
 
   constructor(app: App, statusBar: HTMLDivElement) {
     this.app = app;
+    this.pos = h('span', { class: 'status-pos' });
     this.status = h('span', { class: 'status-text' });
     this.stats = h('span', { class: 'status-stats' });
-    statusBar.append(this.status, this.stats);
+    statusBar.append(this.pos, this.status, this.stats);
     this.canvas = h('canvas', { class: 'level-canvas' });
     this.sizer = h('div', { class: 'level-sizer' });
     this.scroller = h('div', { class: 'level-scroller', tabIndex: 0 }, this.canvas, this.sizer);
@@ -54,11 +56,13 @@ export class LevelView {
     window.addEventListener('mouseup', (e) => this.onUp(e));
     this.scroller.addEventListener('contextmenu', (e) => e.preventDefault());
     attachPanZoom(this.scroller, () => this.app.zoom, (z, ax, ay) => this.setZoom(z, { ax, ay }));
-    this.scroller.addEventListener('mouseleave', () => { this.hover = null; this.paint(); });
+    this.scroller.addEventListener('mouseleave', () => { this.hover = null; this.idleStatus(); this.paint(); });
     app.on('render', () => { this.updateLevelImage(); this.updateStats(); });
     app.on('anim-frame', () => { this.updateLevelImage(false); });
     app.on('change', () => { this.paint(); this.updateStats(); });
     app.on('sprites', () => this.requestPaint());
+    app.on('mode', () => { if (!this.hover) this.idleStatus(); });
+    this.idleStatus();
     app.on('blockinfo', () => { if (this.hover && !this.drag) this.updateStatus(this.hover.tx, this.hover.ty); this.requestPaint(); });
   }
 
@@ -566,38 +570,48 @@ export class LevelView {
     app.changed();
   }
 
+  // status bar without the mouse over the level: what the mouse does in this mode
+  idleStatus(): void {
+    const m = this.app.mode;
+    this.pos.textContent = '';
+    this.status.textContent = m === 'bg' ? 'Klick/Ziehen nimmt Tiles als Pinsel auf · Rechtsklick/Shift+Klick malt'
+      : m === 'exit' ? 'Klick wählt einen Screen – sein Exit steht rechts unter „Eigenschaften“'
+        : 'Klick wählt aus, Ziehen verschiebt · Rechtsklick/Shift+Klick fügt das gewählte Element aus „Einfügen“ ein · Alt+Klick: darunterliegendes Element';
+  }
+
   updateStatus(tx: number, ty: number): void {
     const app = this.app;
     const g = app.images.geom1;
-    let txt = `X ${hex2(tx)}  Y ${hex2(ty)}  Screen ${hex2(app.vertical ? ty >> 4 : tx >> 4)}`;
+    this.pos.textContent = `X ${hex3(tx)}  Y ${hex3(ty)}  Screen ${hex2(app.vertical ? ty >> 4 : tx >> 4)}`;
+    let txt = '';
     const a = g.addr(tx, ty);
     if (a >= 0) {
       const t = app.render.wram[a] | (app.render.wram[a + 0x10000] << 8);
-      txt += `  Map16 ${hex3(t)}`;
+      txt += `Map16 ${hex3(t)}`;
       const p = app.mode === 'bg' ? undefined : app.blockInfo(t); // result arrives via 'blockinfo'
       const sum = [p && probeAt(p, tx).summary, p && enterText(p.enter)].filter(Boolean).join(', ');
       if (sum) txt += ` (${sum})`;
     }
     if (app.mode === 'bg') {
       const b = app.bgBrush;
-      txt += `  BG-Tile ${hex3(app.bgAt(tx, ty))}  ·  Pinsel ${b.tiles.length > 1 ? `${b.w}×${b.h}` : hex3(b.tiles[0])} (Klick/Ziehen nimmt auf, Rechtsklick/Shift+Klick malt)`;
-      this.status.textContent = txt;
+      txt += `  ·  BG-Tile ${hex3(app.bgAt(tx, ty))}  ·  Pinsel ${b.tiles.length > 1 ? `${b.w}×${b.h}` : hex3(b.tiles[0])}`;
+      this.status.textContent = txt.replace(/^\s*·\s*/, '');
       return;
     }
     const mk = this.hover ? this.markerAt(this.hover.px, this.hover.py) : null;
     if (mk) txt += `  · ${MARKER_STYLE[mk.kind].title}${mk.kind === 'sec' ? ' ' + hex3(mk.index) : ''} (ziehen zum Verschieben)`;
     const hits = app.hitsAt(this.hover?.px ?? tx * 16, this.hover?.py ?? ty * 16);
     for (const { mode, item } of hits) {
-      const tag = hits.length > 1 ? (mode === 'spr' ? '' : mode === 'l1' ? ' [L1]' : ' [L2]') : '';
+      const tag = hits.length > 1 ? (mode === 'spr' ? '' : mode === 'l1' ? ' (Layer 1)' : ' (Layer 2)') : '';
       if (mode === 'spr') {
         const s = item as LevelSprite;
         const p = app.spriteInfo(s.num);
         const sum = p && spriteProbeAt(p, s.x, s.y).summary;
         txt += `  · Sprite ${hex2(s.num)} ${spriteName(s.num)}${sum ? ` (${sum})` : ''}`;
       }
-      else { const o = item as LevelObject; txt += `  · Objekt${tag} ${o.num ? hex2(o.num) : 'Ext ' + hex2(o.ext)} ${objectName(o.num, o.ext)}${o.num ? ' Größe ' + hex2(o.size) : ''}`; }
+      else { const o = item as LevelObject; txt += `  · ${o.num ? 'Objekt ' + hex2(o.num) : 'Erw. Objekt ' + hex2(o.ext)}${tag} ${objectName(o.num, o.ext)}${o.num ? ' Größe ' + hex2(o.size) : ''}`; }
     }
-    this.status.textContent = txt;
+    this.status.textContent = txt.replace(/^\s*·\s*/, '');
   }
 
   // topmost marker whose circle contains the pixel
@@ -617,7 +631,7 @@ export class LevelView {
     const l1 = serializeLayer1(app.rom, lv).length, l2 = serializeLayer2(app.rom, lv)?.length;
     const spr = serializeSprites(lv.sprites, lv.spriteHeader, app.vertical).length;
     const parts = [`Objekte ${lv.objects.length}${lv.layer2Objects ? ' / L2 ' + lv.layer2Objects.length : ''}`, `Sprites ${lv.sprites.length}`,
-      `L1 ${l1} B${l2 !== undefined ? ` · L2 ${l2} B` : ''} · Spr ${spr} B`];
+      `Daten: L1 ${l1}${l2 !== undefined ? ` · L2 ${l2}` : ''} · Sprites ${spr} Bytes`];
     this.stats.textContent = parts.join('  ·  ');
     const over = lv.sprites.length > 128;
     this.stats.classList.toggle('warn', over);

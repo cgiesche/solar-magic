@@ -644,7 +644,7 @@ export class OverworldView {
   }
 
   async reload(): Promise<void> {
-    if (this.dirty && (await choose('Overworld neu laden', 'Ungespeicherte Änderungen an der Overworld verwerfen?', [{ label: 'Abbrechen' }, { label: 'Verwerfen', primary: true }])) !== 1) return;
+    if (this.dirty && (await choose('Overworld neu laden', 'Ungespeicherte Änderungen an der Overworld verwerfen?', [{ label: 'Abbrechen' }, { label: 'Verwerfen', danger: true }])) !== 1) return;
     this.show();
     toast('Overworld neu geladen');
   }

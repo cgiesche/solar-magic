@@ -371,7 +371,7 @@ export class Map16Tab implements WsPanel {
         toggle('Vordergrund', PRIO, 'Priorität: vor Sprites/Mario gezeichnet')),
       this.bg ? '' : this.actsUi(t),
       h('details', { class: 'mt-adv' }, h('summary', null, 'Rohwerte'),
-        h('div', { class: 'mono hint' }, ws.map((w, q) => `${['TL', 'BL', 'TR', 'BR'][q]} $${hex(w, 4)}`).join('  ')),
+        h('div', { class: 'mono hint' }, ws.map((w, q) => `${['oben links', 'unten links', 'oben rechts', 'unten rechts'][q]} $${hex(w, 4)}`).join('  ')),
         h('div', { class: 'hint' }, this.tileAddr(t) < 0 ? 'Erweitertes Tile – wird beim ersten Ändern angelegt.' : `ROM $${hex(this.tileAddr(t), 6)}`)),
       h('p', { class: 'hint' }, 'Viertel anklicken, dann rechts ein 8x8-Tile wählen. 2×2 Tiles ziehen füllt alle vier Viertel; ein Tile auf ein Viertel ziehen setzt genau dieses. Tasten: X/Y spiegeln, 1–8 Palette, Q nächstes Viertel, Pfeile anderes Tile.'),
     );

@@ -323,6 +323,7 @@ function buildUi(app: App): void {
     else if (k === 'g' || k === 'G') { app.show.grid = !app.show.grid; view.paint(); }
     else if (k === 'm' || k === 'M') setWorkspace('gfx', { tab: 'map16', tile: view.hover ? hoverTile(app, view.hover.tx, view.hover.ty) : undefined });
     else if (k === 'p' || k === 'P') setWorkspace('gfx', { tab: 'pal' });
+    else if (k === 'a' || k === 'A') setWorkspace('gfx', { tab: 'anim' });
   };
   window.onbeforeunload = (e) => { if (app.dirty || ow?.dirty) { e.preventDefault(); } };
   updateToolbar();
@@ -344,39 +345,55 @@ function exportRom(app: App): void {
 }
 
 function showHelp(): void {
-  const rows: [string, string][] = [
-    ['Klick', 'Objekt/Sprite auswählen (Strg: zur Auswahl hinzufügen)'],
-    ['Ziehen', 'Auswahl verschieben / Rahmen aufziehen'],
-    ['Griff unten rechts', 'Objektgröße ändern'],
-    ['Rechtsklick / Shift+Klick', 'Palettenelement einfügen'],
-    ['BG: Klick / Ziehen', 'Tile bzw. Tile-Block als Pinsel aufnehmen'],
-    ['BG: Rechtsklick / Shift+Klick (Ziehen)', 'mit dem Pinsel malen'],
-    ['Einfg / I', 'Objekt/Sprite nach Nummer einfügen (an Mausposition)'],
-    ['M / Z / S-Markierung ziehen', 'Haupteingang / Zwischenziel-Screen / sekundären Eingang verschieben'],
-    ['Pfeiltasten', 'Auswahl um 1 Tile verschieben'],
-    ['+ / - · * / /', 'Breite ändern · Höhe ändern'],
-    ['Alt+Pfeiltasten', 'Größe ändern'],
-    ['Entf', 'Auswahl löschen'],
-    ['Strg+C / Strg+V / Strg+D', 'Kopieren / Einfügen an Maus / Duplizieren'],
-    ['Bild↑ / Bild↓', 'Nach vorne / hinten (Zeichenreihenfolge)'],
-    ['1 / 2 / 3 / 4 / 5', 'Modus Layer 1 / Layer 2 / Sprites / Exits / BG (Hintergrund malen)'],
-    ['H', 'Level-Header'],
-    ['T', 'Level testen (eingebauter Emulator)'],
-    ['Shift+T', 'Level testen, Mario startet an der Mausposition'],
-    ['O', 'Overworld-Editor ein/aus (Bereich oben: Level / Overworld / Grafik)'],
-    ['M / P', 'Grafik-Bereich: Map16-Tiles (Tile unter der Maus) / Paletten'],
-    ['Grafik-Bereich: P / M / G', 'Tab Paletten / Map16-Tiles / Grafiken; Esc zurück zum Level'],
-    ['Map16: X / Y / 1–8 / Q', 'Viertel spiegeln / Palette / nächstes Viertel; Pfeile: anderes Tile'],
-    ['Grafiken: B / F / I / S / 0–9', 'Stift / Füllen / Pipette / Auswahl / Farbe; Rechtsklick malt transparent'],
-    ['Strg+C / Strg+V (Grafik-Bereich)', 'Palettenzeile, Map16-Tiles bzw. Pixel kopieren / einfügen'],
-    ['G', 'Raster ein/aus'],
-    ['Strg+Mausrad', 'Zoom'],
-    ['Strg+S', 'Level in ROM speichern'],
-    ['Strg+Z / Strg+Y', 'Rückgängig / Wiederholen (Level und Grafik-Änderungen)'],
-    ['? / F1', 'Diese Übersicht'],
-    ['Menüs: ↑ / ↓ / ← / → / Enter / Esc', 'Eintrag wählen / Nachbarmenü / ausführen / schließen'],
+  const sections: [string, [string, string][]][] = [
+    ['Allgemein', [
+      ['Strg+S', 'Speichern (Level bzw. Overworld)'],
+      ['Strg+Z / Strg+Y', 'Rückgängig / Wiederholen'],
+      ['Esc / O / M · P · A', 'Bereich Level / Overworld / Grafik (Map16, Paletten, Animationen)'],
+      ['Strg+Mausrad · Mittlere Maustaste ziehen', 'Zoom · Ansicht verschieben'],
+      ['? / F1', 'Diese Übersicht'],
+      ['Menüs: ↑ ↓ ← → / Enter / Esc', 'Eintrag wählen, Nachbarmenü / ausführen / schließen'],
+    ]],
+    ['Level', [
+      ['1 / 2 / 3 / 4 / 5', 'Modus Layer 1 / Layer 2 / Sprites / Exits / BG'],
+      ['Klick · Strg+Klick · Alt+Klick', 'Auswählen · zur Auswahl hinzufügen · darunterliegendes Element'],
+      ['Ziehen', 'Auswahl verschieben / Rahmen aufziehen'],
+      ['Griff unten rechts', 'Objektgröße ändern'],
+      ['Rechtsklick / Shift+Klick', 'Gewähltes Element aus „Einfügen“ platzieren'],
+      ['BG: Klick/Ziehen · Rechtsklick/Shift+Klick', 'Tile(s) als Pinsel aufnehmen · malen'],
+      ['Einfg / I', 'Objekt/Sprite nach Nummer einfügen (an der Maus)'],
+      ['M / Z / S-Markierung ziehen', 'Haupteingang / Zwischenziel-Screen / sekundären Eingang verschieben'],
+      ['Pfeiltasten · Alt+Pfeiltasten', 'Auswahl um 1 Tile verschieben · Größe ändern'],
+      ['+ / - · * / /', 'Breite ändern · Höhe ändern'],
+      ['Entf / Rücktaste', 'Auswahl löschen'],
+      ['Strg+A · Esc', 'Alles auswählen · Auswahl aufheben'],
+      ['Strg+C / Strg+V / Strg+D', 'Kopieren / Einfügen an der Maus / Duplizieren'],
+      ['Bild↑ / Bild↓', 'Nach vorne / hinten (Zeichenreihenfolge)'],
+      ['H · G', 'Level-Header · Raster ein/aus'],
+      ['T · Shift+T', 'Level testen · Mario startet an der Maus'],
+    ]],
+    ['Overworld', [
+      ['1 / 2', 'Layer 1 (Wege/Level) / Layer 2 (Gelände)'],
+      ['Klick/Ziehen · Rechtsklick/Shift+Klick', 'Tile(s) als Pinsel aufnehmen · malen'],
+      ['Alt+Klick / Strg+Klick', 'Level-Info des Level-Tiles'],
+      ['G', 'Raster ein/aus'],
+    ]],
+    ['Grafik', [
+      ['P / M / G / A', 'Reiter Paletten / Map16-Tiles / Grafiken / Animationen; Esc zurück zum Level'],
+      ['Strg+C / Strg+V', 'Palette, Map16-Tiles bzw. Pixel kopieren / einfügen'],
+      ['Paletten: Pfeiltasten · Shift+Klick', 'Andere Farbe · Bereich markieren (für „Verlauf“)'],
+      ['Map16: X / Y / 1–8 / Q', 'Viertel spiegeln / Palette 0–7 / nächstes Viertel; Pfeile: anderes Tile'],
+      ['Map16: Doppelklick · Strg+Klick auf Palette', 'Viertel in „Grafiken“ bearbeiten · Palette in „Paletten“ öffnen'],
+      ['Grafiken: B / F / I / S / 0–9', 'Stift / Füllen / Pipette / Auswahl / Farbe'],
+      ['Grafiken: Rechtsklick · Alt+Klick', 'Transparent malen · Farbe aufnehmen'],
+      ['Grafiken: Enter / Esc', 'Schwebende Auswahl absetzen / Auswahl aufheben'],
+      ['Animationen: Entf / Esc', 'Animation löschen / Auswahl abbrechen'],
+    ]],
   ];
-  modal('Tastenkürzel', h('table', { class: 'help' }, rows.map(([a, b]) => h('tr', null, h('td', null, h('kbd', null, a)), h('td', null, b)))), [{ label: 'OK', primary: true }]);
+  modal('Tastenkürzel', h('div', { class: 'help-cols' }, sections.map(([title, rows]) => h('section', null,
+    h('h3', null, title),
+    h('table', { class: 'help' }, rows.map(([a, b]) => h('tr', null, h('td', null, h('kbd', null, a)), h('td', null, b))))))),
+  [{ label: 'Schließen', primary: true }]);
 }
 
 // drag & drop

@@ -1,7 +1,7 @@
 // Sidebar panels: level list, palette (objects / sprites), properties.
 
 import type { App, PaletteItem } from './app.ts';
-import { h, clear, hexInput, attachRectPick, modal, toast } from './dom.ts';
+import { h, clear, hexInput, attachRectPick, modal, toast, emptyState } from './dom.ts';
 import { objectName, spriteName, hex2, hex3 } from '../core/names.ts';
 import { objectVariant, withObjectVariant, type ObjKind } from '../core/objkinds.ts';
 import { objectThumbs, thumbCanvas, objKey, type ObjSpec } from './thumbs.ts';
@@ -56,22 +56,25 @@ export class LevelList {
   list: HTMLDivElement;
   filter: HTMLInputElement;
   onlyUsed: HTMLInputElement;
+  count = h('span', { class: 'hint' });
+  private first = -1;
   constructor(app: App) {
     this.app = app;
-    this.filter = h('input', { placeholder: 'Level (hex) …', class: 'filter', spellcheck: false });
+    this.filter = h('input', { placeholder: 'Nr. (hex) oder Name …', class: 'filter', spellcheck: false, title: 'Filtert nach Levelnummer (hex) oder Name; Enter öffnet den ersten Treffer' });
     this.onlyUsed = h('input', { type: 'checkbox', checked: true });
     this.list = h('div', { class: 'level-list' });
     this.root = h('div', { class: 'panel levels' },
-      h('div', { class: 'panel-title' }, 'Levels'),
+      h('div', { class: 'panel-title' }, 'Level', this.count),
       h('div', { class: 'row' }, this.filter),
       h('label', { class: 'row small' }, this.onlyUsed, ' nur benutzte'),
       this.list);
     this.filter.addEventListener('input', () => this.build());
     this.filter.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        const n = parseInt(this.filter.value, 16);
-        if (n >= 0 && n < 0x200) app.openLevel(n);
-      }
+      if (e.key !== 'Enter') return;
+      // an exact number first (also levels hidden by "nur benutzte"), else the first match
+      const v = this.filter.value.trim(), n = parseInt(v, 16);
+      if (/^[0-9a-f]{1,3}$/i.test(v) && n < 0x200) app.openLevel(n);
+      else if (this.first >= 0) app.openLevel(this.first);
     });
     this.onlyUsed.addEventListener('change', () => this.build());
     app.on('level', () => this.build());
@@ -80,6 +83,8 @@ export class LevelList {
     const used = this.app.usedLevels();
     const f = this.filter.value.trim().toLowerCase();
     clear(this.list);
+    this.first = -1;
+    let n = 0;
     for (let i = 0; i < 0x200; i++) {
       if (this.onlyUsed.checked && !used.has(i)) continue;
       const label = hex3(i);
@@ -88,8 +93,12 @@ export class LevelList {
       const name = nameOf(this.app, i);
       const el = h('div', { class: `level-item${cur ? ' current' : ''}${used.has(i) ? '' : ' unused'}`, title: name, onclick: () => this.app.openLevel(i) }, label, name ? h('span', { class: 'lname' }, ' ' + name) : '');
       this.list.appendChild(el);
+      if (this.first < 0) this.first = i;
+      n++;
       if (cur) setTimeout(() => el.scrollIntoView({ block: 'nearest' }), 0);
     }
+    this.count.textContent = String(n);
+    if (!n) this.list.append(emptyState(f ? 'Kein Level passt zum Filter.' : 'Keine Level.'));
   }
 }
 
@@ -259,8 +268,8 @@ export class Palette {
         onclick: () => { app.paletteItem = { kind: 'obj', num: 0, ext: STRUCT_EXT, size: 0, struct: n }; if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1'); this.build(); },
       }, h('span', { class: 'pal-thumb-s struct' }, structCanvas(sheet, st)), h('span', { class: 'num' }, hex2(n)),
         h('span', { class: 'grow' }, st.name || '(ohne Namen)', h('span', { class: 'hint' }, ` ${st.w}×${st.h}`)),
-        h('button', { class: 'icon-btn', title: 'Umbenennen', onclick: (e: Event) => { e.stopPropagation(); renameStructure(app, n, st); } }, '✎'),
-        h('button', { class: 'icon-btn', title: 'Löschen', onclick: (e: Event) => { e.stopPropagation(); deleteStructure(app, n, st); } }, '✕'));
+        h('button', { class: 'icon-btn', title: 'Umbenennen', 'aria-label': 'Umbenennen', onclick: (e: Event) => { e.stopPropagation(); renameStructure(app, n, st); } }, '✎'),
+        h('button', { class: 'icon-btn', title: 'Löschen', 'aria-label': 'Löschen', onclick: (e: Event) => { e.stopPropagation(); deleteStructure(app, n, st); } }, '✕'));
       this.body.appendChild(row);
     }
   }
@@ -505,7 +514,7 @@ function deleteStructure(app: App, n: number, st: Structure): void {
     h('div', { class: 'hint' }, users.length
       ? `Sie wird in Level ${users.map(hex3).join(', ')} benutzt. Die Objekte bleiben dort, zeigen aber nichts mehr, bis wieder eine Struktur ${hex2(n)} angelegt wird.`
       : 'Sie wird in keinem Level benutzt.'));
-  modal('Struktur löschen', body, [{ label: 'Abbrechen' }, { label: 'Löschen', primary: true, onClick: () => { writeStructure(app.rom, n, null); app.structuresChanged(); } }]);
+  modal('Struktur löschen', body, [{ label: 'Abbrechen' }, { label: 'Löschen', danger: true, onClick: () => { writeStructure(app.rom, n, null); app.structuresChanged(); } }]);
 }
 
 // small images of the sprites a block spawns, shown in the corner of a palette cell
@@ -603,9 +612,9 @@ export class Properties {
     const ov = app.objectKind(o.num);
     this.body.append(
       h('div', { class: 'prop-title' }, `${o.num ? 'Objekt ' + hex2(o.num) : 'Erw. Objekt ' + hex2(o.ext)}: ${objectName(o.num, o.ext)}`),
-      h('div', { class: 'hint' }, `Index ${idx} von ${app.currentObjects().length}`),
+      h('div', { class: 'hint' }, `Nr. ${idx + 1} von ${app.currentObjects().length} (Zeichenreihenfolge)`),
       this.field('Objekt', hexInput(o.num, 2, (v) => upd(() => { o.num = v; fixStruct(app, o); }), 0x3f)),
-      o.num === 0 ? this.field('Erw. Nr.', hexInput(o.ext, 2, (v) => upd(() => { o.ext = v; fixStruct(app, o); }), 0xff)) : '',
+      o.num === 0 ? this.field('Erw. Objekt', hexInput(o.ext, 2, (v) => upd(() => { o.ext = v; fixStruct(app, o); }), 0xff)) : '',
       o.num === 0 && o.ext === STRUCT_EXT && o.struct !== undefined ? this.field('Struktur', hexInput(o.struct, 2, (v) => upd(() => (o.struct = v)), 0xff)) : '',
       o.num === 0 && o.ext === STRUCT_EXT && o.struct !== undefined ? h('div', { class: 'hint' }, structInfo(app, o.struct), ' ',
         h('button', { title: 'Die Struktur hier durch einzelne Direct-Map16-Objekte ersetzen (zum Bearbeiten, danach wieder „Auswahl als Struktur“)', onclick: () => app.explodeStructure(o) }, 'Auflösen')) : '',
@@ -648,7 +657,7 @@ export class Properties {
         this.field('Ziel', hexInput(e.dest, 3, (v) => upd(() => (e.dest = v)), 0x1ff)),
         this.field('Sekundär', sec),
         h('div', { class: 'hint' }, e.secondary ? 'Ziel = Nummer des sekundären Eingangs' : 'Ziel = Levelnummer (Haupteingang)'),
-        h('button', { onclick: () => { app.checkpoint(); lv.exits = lv.exits.filter((x) => x !== e); app.changed(); } }, 'Exit löschen'),
+        h('button', { class: 'danger', onclick: () => { app.checkpoint(); lv.exits = lv.exits.filter((x) => x !== e); app.changed(); } }, 'Exit löschen'),
       );
       ex = e;
     }

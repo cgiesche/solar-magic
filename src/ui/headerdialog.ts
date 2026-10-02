@@ -35,11 +35,15 @@ export function openHeaderDialog(app: App): void {
   if (lv.bg || bgBank(app.rom, lv.number)) { l2ptr = CUSTOM_BG; bgOpts.unshift([CUSTOM_BG, 'Eigene (im BG-Modus bearbeitet)']); }
   else if (!bgs.has(l2ptr) && l2ptr >> 16 === 0xff) bgOpts.push([l2ptr, `$${hex(l2ptr & 0xffff, 4)}`]);
 
+  const screensWarn = h('div', { class: 'hint warn-text' });
   const body = h('div', { class: 'header-dialog' },
-    h('h3', null, 'Primärer Header'),
+    h('h3', null, 'Allgemein'),
     h('div', { class: 'grid2' },
       f('Level-Modus', sel('mode', modes)),
-      f('Screens', select(range(32, (i) => String(i + 1)).map(([v, l]) => [v + 1, l] as [number, string]), hd.screens, (v) => (hd.screens = v))),
+      f('Anzahl Screens', select(range(32, (i) => String(i + 1)).map(([v, l]) => [v + 1, l] as [number, string]), hd.screens, (v) => {
+        hd.screens = v;
+        screensWarn.textContent = v < lv.header.screens ? 'Weniger Screens: Objekte, Sprites und Exits dahinter bleiben erhalten, sind im Spiel aber nicht erreichbar.' : '';
+      })),
       f('FG/BG-Tileset', sel('tileset', range(16, (i) => `${hex2(i)} – ${TILESETS[i]}`))),
       f('FG-Palette', sel('fgPalette', range(8))),
       f('BG-Palette', sel('bgPalette', range(8))),
@@ -48,32 +52,33 @@ export function openHeaderDialog(app: App): void {
       f('Sprite-Grafik', sel('spriteGfx', range(16, (i) => hex2(i)))),
       f('Musik', sel('music', range(8, (i) => `${i} – ${MUSIC[i]} (Song ${hex2(app.rom.r8(0x0584db + i))})`))),
       f('Zeit', sel('time', range(4, (i) => TIME_SETTINGS[i]))),
-      f('Item-Memory', sel('itemMemory', range(4))),
+      f('Item-Speicher', sel('itemMemory', range(4))),
       f('Vertikales Scrollen', sel('verticalScroll', range(4, (i) => VERTICAL_SCROLL[i]))),
       f('Layer-3-Priorität', sel('layer3Priority', [[0, 'Aus'], [1, 'An']])),
     ),
-    h('h3', null, 'Sekundärer Header / Haupteingang'),
+    screensWarn,
+    h('h3', null, 'Eingang & Scrollen'),
     h('div', { class: 'grid2' },
-      f('Eingang X-Position', sel2('entranceX', range(8))),
-      f('Eingang Y-Position', sel2('entranceY', range(16))),
+      f('Eingang X-Position', sel2('entranceX', range(8, (i) => hex(i, 1)))),
+      f('Eingang Y-Position', sel2('entranceY', range(16, (i) => hex(i, 1)))),
       f('Eingang Screen', sel2('entranceScreen', range(32, hex2))),
       f('Eingangs-Aktion', sel2('entranceAction', range(8, (i) => `${i} – ${ENTRANCE_ACTIONS[i]}`))),
-      f('Midway-Screen', sel2('midwayScreen', range(16, hex2))),
-      f('Layer-2-Scrolling', sel2('layer2Scroll', range(16, hex2))),
-      f('Layer 3', sel2('layer3', [[0, 'Keins'], [1, 'Flut (Tide)'], [2, 'Flut, variabel'], [3, 'Mondlicht/Sonstiges']])),
+      f('Zwischenziel-Screen', sel2('midwayScreen', range(16, hex2))),
+      f('Layer-2-Scrollen', sel2('layer2Scroll', range(16, hex2))),
+      f('Layer 3', sel2('layer3', [[0, 'Keins'], [1, 'Flut'], [2, 'Flut, variabel'], [3, 'Mondlicht/Sonstiges']])),
       f('FG Start-Y', sel2('fgInitY', range(4))),
       f('BG Start-Y', sel2('bgInitY', range(4))),
       f('Vertikale Positionierung', sel2('verticalPositioning', range(4))),
-      f('Kein Yoshi-Intro', sel2('noYoshiIntro', [[0, 'Nein'], [1, 'Ja']])),
+      f('Yoshi-Intro', sel2('noYoshiIntro', [[0, 'An'], [1, 'Aus']])),
     ),
     h('h3', null, 'Grafik'),
-    h('p', { class: 'hint' }, 'Welche GFX-/ExGFX-Dateien das Level lädt (FG1–FG3, BG1–BG3, Sprites) und die Paletten wählt und bearbeitet man im Grafik-Bereich – mit Vorschau. ',
-      h('button', { onclick: () => { dlg.close(); app.emit('open-gfx'); } }, 'Grafik-Bereich öffnen')),
+    h('p', { class: 'hint' }, 'Welche GFX-/ExGFX-Dateien das Level lädt (FG1–FG3, BG1–BG3, Sprites) und die Paletten wählt und bearbeitet man im Grafik-Bereich – mit Vorschau.'),
+    h('div', { class: 'row' }, h('button', { onclick: () => { dlg.close(); app.emit('open-gfx'); } }, 'Grafik-Bereich öffnen')),
     h('h3', null, 'Sprites & Hintergrund'),
     h('div', { class: 'grid2' },
       f('Sprite-Speicher', hexInput(spriteHeader & 0x3f, 2, (v) => (spriteHeader = (spriteHeader & 0xc0) | v), 0x3f), '$1692-Index'),
-      f('Sprite-Buoyancy', select([[0, 'Aus'], [0x80, 'An'], [0xc0, 'An + deaktiviert (Unterwasser)'], [0x40, 'Bit 6']], spriteHeader & 0xc0, (v) => (spriteHeader = (spriteHeader & 0x3f) | v))),
-      lv.layer2Objects || hasLayer2Objects(hd.mode) ? f('Layer 2', h('span', null, lv.layer2Objects ? 'Layer-2-Objekte (Modus L2)' : 'Achtung: Modus erwartet Layer-2-Objekte')) :
+      f('Auftrieb im Wasser', select([[0, 'Aus'], [0x80, 'An'], [0xc0, 'An + deaktiviert (Unterwasser)'], [0x40, 'Bit 6']], spriteHeader & 0xc0, (v) => (spriteHeader = (spriteHeader & 0x3f) | v))),
+      lv.layer2Objects || hasLayer2Objects(hd.mode) ? f('Layer 2', lv.layer2Objects ? h('span', null, 'Layer-2-Objekte (Modus L2)') : h('span', { class: 'warn-box' }, 'Der Modus erwartet Layer-2-Objekte')) :
         f('BG-Tilemap', select(bgOpts, l2ptr, (v) => (l2ptr = v))),
     ),
   );

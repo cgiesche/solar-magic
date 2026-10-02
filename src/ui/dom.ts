@@ -45,12 +45,16 @@ export function clear(el: HTMLElement): HTMLElement {
 export function hexInput(value: number, digits: number, onChange: (v: number) => void, max = (1 << (digits * 4)) - 1): HTMLInputElement {
   const inp = h('input', {
     class: 'hex', value: value.toString(16).toUpperCase().padStart(digits, '0'), size: digits + 1, maxLength: digits,
-    spellcheck: false,
+    spellcheck: false, title: `hex 0–${max.toString(16).toUpperCase()}`,
   });
+  const valid = () => { const v = parseInt(inp.value, 16); return /^[0-9a-f]+$/i.test(inp.value.trim()) && v <= max ? v : -1; };
+  // invalid input is marked while typing and reset when leaving the field
+  inp.addEventListener('input', () => inp.classList.toggle('invalid', valid() < 0));
   inp.addEventListener('change', () => {
-    const v = parseInt(inp.value, 16);
-    if (!Number.isNaN(v) && v >= 0 && v <= max) onChange(v);
-    else inp.value = value.toString(16).toUpperCase().padStart(digits, '0');
+    const v = valid();
+    inp.classList.remove('invalid');
+    if (v >= 0) { value = v; onChange(v); }
+    else { inp.value = value.toString(16).toUpperCase().padStart(digits, '0'); toast(`Ungültig: hex 0–${max.toString(16).toUpperCase()} erwartet`, 'error'); }
   });
   return inp;
 }
@@ -68,15 +72,23 @@ export function toast(msg: string, kind: 'info' | 'error' = 'info'): void {
   setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 300); }, kind === 'error' ? 6000 : 2500);
 }
 
-export function modal(title: string, body: HTMLElement, buttons: { label: string; primary?: boolean; onClick?: () => boolean | void }[], onClose?: () => void): { close: () => void } {
+export function modal(title: string, body: HTMLElement, buttons: { label: string; primary?: boolean; danger?: boolean; onClick?: () => boolean | void }[], onClose?: () => void): { close: () => void } {
   const back = h('div', { class: 'modal-back' });
   let closed = false;
-  const close = () => { if (closed) return; closed = true; back.remove(); onClose?.(); };
+  // Esc closes the topmost dialog
+  const esc = (e: KeyboardEvent) => {
+    if (e.key !== 'Escape' || [...document.querySelectorAll('.modal-back')].pop() !== back) return;
+    e.preventDefault();
+    e.stopPropagation();
+    close();
+  };
+  const close = () => { if (closed) return; closed = true; back.remove(); window.removeEventListener('keydown', esc, true); onClose?.(); };
+  window.addEventListener('keydown', esc, true);
   const box = h('div', { class: 'modal' },
     h('div', { class: 'modal-title' }, title, h('button', { class: 'icon-btn', onclick: close, title: 'Schließen' }, '✕')),
     h('div', { class: 'modal-body' }, body),
     h('div', { class: 'modal-buttons' }, buttons.map((b) => h('button', {
-      class: b.primary ? 'primary' : '',
+      class: b.danger ? 'danger' : b.primary ? 'primary' : '',
       onclick: () => { if (b.onClick?.() !== false) close(); },
     }, b.label))),
   );
@@ -177,11 +189,11 @@ export function attachRectPick(c: HTMLElement, cols: number, rows: number, show:
 }
 
 // asks with a few buttons; resolves with the chosen index, null when closed
-export function choose(title: string, body: HTMLElement | string, options: { label: string; primary?: boolean }[]): Promise<number | null> {
+export function choose(title: string, body: HTMLElement | string, options: { label: string; primary?: boolean; danger?: boolean }[]): Promise<number | null> {
   return new Promise((resolve) => {
     let done = false;
     const b = typeof body === 'string' ? h('p', { style: 'max-width:460px' }, body) : body;
-    modal(title, b, options.map((o, i) => ({ label: o.label, primary: o.primary, onClick: () => { done = true; resolve(i); } })), () => { if (!done) resolve(null); });
+    modal(title, b, options.map((o, i) => ({ label: o.label, primary: o.primary, danger: o.danger, onClick: () => { done = true; resolve(i); } })), () => { if (!done) resolve(null); });
   });
 }
 

@@ -88,7 +88,7 @@ export function openTestPlay(app: App, at?: { tx: number; ty: number }): void {
     }
     new Uint32Array(img.data.buffer).set(ppu.frame);
     ctx.putImageData(img, 0, 0);
-    info.textContent = `Level ${hex(lv.number, 3)} · Frame ${frames}${paused ? ' · PAUSE' : ''} · Game Mode ${hex(s.wram[0x100], 2)}`;
+    info.textContent = `Level ${hex(lv.number, 3)} · Frame ${frames}${paused ? ' · Pause' : ''} · Spielmodus ${hex(s.wram[0x100], 2)}`;
     schedule();
   };
   // requestAnimationFrame pauses in hidden tabs; fall back to timers there

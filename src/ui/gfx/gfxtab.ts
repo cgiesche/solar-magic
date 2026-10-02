@@ -445,7 +445,7 @@ export class GfxTab implements WsPanel {
       h('button', { title: 'Ganze Datei einpassen', onclick: () => this.fit() }, 'Einpassen'),
       h('span', { class: 'spacer' }),
       h('button', { onclick: () => this.exportPng() }, 'PNG exportieren'),
-      h('button', { onclick: () => void this.importPng(), title: 'PNG (128 Pixel breit) in diese Datei; Farben werden auf die gewählte Palettenzeile abgebildet' }, 'PNG importieren'),
+      h('button', { onclick: () => void this.importPng(), title: 'PNG (128 Pixel breit) in diese Datei; Farben werden auf die gewählte Palette abgebildet' }, 'PNG importieren'),
       h('button', { onclick: () => void this.importBin(), title: 'Lunar-Magic-ExGFX (.bin)' }, '.bin importieren'),
     );
   }
@@ -468,7 +468,7 @@ export class GfxTab implements WsPanel {
     const all = cgramToRGBA(this.app.render.cgram);
     const css = (v: number) => `rgb(${v & 255},${(v >> 8) & 255},${(v >> 16) & 255})`;
     const rowSel = h('div', { class: 'gt-rows' }, Array.from({ length: 16 }, (_, r) => h('button', {
-      class: `gt-row${r === row ? ' active' : ''}`, title: `Palettenzeile ${hex(r, 1)}`,
+      class: `gt-row${r === row ? ' active' : ''}`, title: `Palette ${hex(r, 1)}`,
       onclick: () => { this.palRow = r; this.draw(); this.buildSide(); },
     }, h('span', { class: 'mono' }, hex(r, 1)), h('span', { class: 'gt-row-strip' }, Array.from({ length: 15 }, (_, k) => h('i', { style: { background: css(all[r * 16 + 1 + k]) } }))))));
     const sw = h('div', { class: 'gt-colors' }, Array.from(cols, (v, k) => h('div', {
@@ -487,7 +487,7 @@ export class GfxTab implements WsPanel {
         h('span', { class: 'btn-group' }, [2, 3, 4].map((b) => h('button', { class: f.bpp === b ? 'active' : '', title: 'Nur ändern, wenn die Grafik falsch aussieht', onclick: () => { this.bppOverride = b; this.reload(); } }, `${b}bpp`)))),
       h('div', { class: 'panel-title' }, 'Farbe', h('span', { class: 'hint' }, 'Rechtsklick malt transparent')),
       sw,
-      h('div', { class: 'panel-title' }, 'Palettenzeile', h('span', { class: 'hint' }, this.palRow < 0 ? 'automatisch' : h('a', { href: '#', onclick: (e: Event) => { e.preventDefault(); this.palRow = -1; this.draw(); this.buildSide(); } }, 'automatisch'))),
+      h('div', { class: 'panel-title' }, 'Palette', h('span', { class: 'hint' }, this.palRow < 0 ? 'automatisch' : h('a', { href: '#', onclick: (e: Event) => { e.preventDefault(); this.palRow = -1; this.draw(); this.buildSide(); } }, 'automatisch'))),
       rowSel,
       this.usageUi(),
     );
@@ -862,7 +862,7 @@ export class GfxTab implements WsPanel {
       const c = await choose(`${gfxName(f.num)} anlegen`, 'In welchem Format speichern?', [{ label: 'Abbrechen' }, { label: 'LZ2 (wie Original, 3bpp/8 Farben)' }, { label: '4bpp unkomprimiert (16 Farben)', primary: true }]);
       if (!c) return;
       raw = c === 2;
-    } else if ((await choose(`${gfxName(f.num)} überschreiben?`, `Das Bild ersetzt den Inhalt von ${gfxName(f.num)}. Farben werden auf Palettenzeile ${hex(this.row(), 1)} abgebildet. (Rückgängig mit Strg+Z.)`, [{ label: 'Abbrechen' }, { label: 'Überschreiben', primary: true }])) !== 1) return;
+    } else if ((await choose(`${gfxName(f.num)} überschreiben?`, `Das Bild ersetzt den Inhalt von ${gfxName(f.num)}. Farben werden auf Palette ${hex(this.row(), 1)} abgebildet. (Rückgängig mit Strg+Z.)`, [{ label: 'Abbrechen' }, { label: 'Überschreiben', primary: true }])) !== 1) return;
     const bpp = raw ? 4 : f.empty ? 3 : f.bpp;
     const c = document.createElement('canvas');
     c.width = bmp.width; c.height = bmp.height;

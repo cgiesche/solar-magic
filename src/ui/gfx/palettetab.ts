@@ -256,8 +256,8 @@ export class PaletteTab implements WsPanel {
       own ? h('button', { onclick: () => this.dropOwn(), title: 'Wieder die gemeinsamen Paletten des Headers benutzen' }, 'Eigene Palette entfernen')
         : h('button', { onclick: () => { if (this.makeOwn()) this.paint(); }, title: 'Alle 256 Farben nur für dieses Level (macht auch die grauen Farben bearbeitbar)' }, 'Eigene Palette anlegen'),
       h('span', { class: 'sep' }),
-      h('button', { onclick: () => this.copyRow(), title: 'Zeile kopieren (Strg+C)' }, 'Zeile kopieren'),
-      h('button', { onclick: () => this.pasteRow(), title: 'Kopierte Zeile in die gewählte Zeile einfügen (Strg+V)' }, 'Zeile einfügen'),
+      h('button', { onclick: () => this.copyRow(), title: 'Gewählte Palette (16 Farben) kopieren (Strg+C)' }, 'Palette kopieren'),
+      h('button', { onclick: () => this.pasteRow(), title: 'Kopierte Palette in die gewählte einfügen (Strg+V)' }, 'Palette einfügen'),
       h('button', { onclick: () => this.gradient(), title: 'Shift+Klick markiert einen Bereich in der Zeile; die Farben dazwischen werden ein Verlauf' }, 'Verlauf'),
       h('span', { class: 'spacer' }),
       h('button', { onclick: () => this.exportPal(), title: 'Alle 256 Farben als .pal (RGB, 768 Bytes)' }, '.pal exportieren'),
@@ -330,7 +330,7 @@ export class PaletteTab implements WsPanel {
     const others = users ? users.filter((n) => n !== this.app.level.number).length : 0;
     d.append(
       h('div', { class: 'pt-big', style: { background: cssOf(c) } }),
-      h('div', { class: 'prop-title' }, `Farbe ${hex(i >> 4, 1)}·${hex(i & 15, 1)}`, h('span', { class: 'hint' }, `  Zeile ${hex(i >> 4, 1)}, Index ${i & 15}`)),
+      h('div', { class: 'prop-title' }, `Farbe ${hex(i >> 4, 1)}·${hex(i & 15, 1)}`, h('span', { class: 'hint' }, `  Palette ${hex(i >> 4, 1)}, Farbe ${hex(i & 15, 1)}`)),
       h('div', { class: 'hint' }, editable ? `${originName(o)} · ${o.kind === 'own' ? 'gilt nur für dieses Level' : others ? `auch in ${others} anderen Level${others === 1 ? '' : 's'}` : 'nur dieses Level'}` : ''),
       this.app.animated()?.colors.has(i) ? h('div', { class: 'warn-box' }, 'Animiert: das Spiel schreibt diese Farbe laufend neu (Blinken von Münzen, ?-Blöcken o. ä.). Eine Änderung hier sieht man im Spiel kaum oder gar nicht.') : '',
     );
@@ -366,7 +366,7 @@ export class PaletteTab implements WsPanel {
       ...sliders,
       h('div', { class: 'prop' }, h('label', null, 'HTML-Farbe'), htmlIn, picker),
       h('div', { class: 'prop' }, h('label', null, 'SNES-Wert'), h('span', { class: 'mono' }, `$${hex(c, 4)}`), h('span', { class: 'hint mono' }, `@ $${hex(this.src(i), 6)}`)),
-      h('p', { class: 'hint' }, 'Shift+Klick markiert einen Bereich der Zeile (für „Verlauf“). Klick in die Level-Vorschau wählt die Farbe dort.'),
+      h('p', { class: 'hint' }, 'Shift+Klick markiert einen Bereich der Palette (für „Verlauf“). Klick in die Level-Vorschau wählt die Farbe dort.'),
     );
   }
 
@@ -417,13 +417,13 @@ export class PaletteTab implements WsPanel {
 
   private copyRow(): void {
     this.clip = this.rowIdx().map((i) => this.color(i));
-    toast(`Zeile ${hex(this.sel >> 4, 1)} kopiert`);
+    toast(`Palette ${hex(this.sel >> 4, 1)} kopiert`);
   }
   private pasteRow(): void {
     const clip = this.clip;
-    if (!clip) { toast('Erst eine Zeile kopieren'); return; }
+    if (!clip) { toast('Erst eine Palette kopieren'); return; }
     // color 0 is transparent (except the back area color in row 0) and stays
-    void this.write(this.rowIdx().map((i, c) => [i, clip[c]] as [number, number]).filter(([i]) => i & 15), `Zeile ${hex(this.sel >> 4, 1)} eingefügt`);
+    void this.write(this.rowIdx().map((i, c) => [i, clip[c]] as [number, number]).filter(([i]) => i & 15), `Palette ${hex(this.sel >> 4, 1)} eingefügt`);
   }
   private gradient(): void {
     const lo = Math.min(this.sel, this.selEnd), hi = Math.max(this.sel, this.selEnd);

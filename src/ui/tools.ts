@@ -33,7 +33,7 @@ export function openEntrancesDialog(app: App): void {
     const range = (n: number): [number, string][] => Array.from({ length: n }, (_, i) => [i, String(i)]);
     detail.append(
       h('div', { class: 'prop-title' }, `Sekundärer Eingang ${hex(sel, 3)}`),
-      h('div', { class: 'prop' }, h('label', null, 'Ziel-Level (low)'), hexInput(e.destLevel, 2, (v) => set((x) => (x.destLevel = v)))),
+      h('div', { class: 'prop' }, h('label', null, 'Ziel-Level (untere Stellen)'), hexInput(e.destLevel, 2, (v) => set((x) => (x.destLevel = v)))),
       h('div', { class: 'hint' }, 'Das High-Bit der Levelnummer (0xx/1xx) ergibt sich in Vanilla-SMW aus der Karte, auf der das Hauptlevel liegt.'),
       h('div', { class: 'prop' }, h('label', null, 'Screen'), hexInput(e.screen, 2, (v) => set((x) => (x.screen = v)), 0x1f)),
       h('div', { class: 'prop' }, h('label', null, 'X-Position'), select(range(8), e.entranceX, (v) => set((x) => (x.entranceX = v)))),
@@ -129,7 +129,7 @@ export function openScreenDialog(app: App, op: 'insert' | 'delete'): void {
 }
 
 export async function clearLevelConfirm(app: App): Promise<void> {
-  const r = await choose(`Level ${hex(app.level.number, 3)} leeren`, 'Alle Objekte, Sprites und Exits entfernen? (rückgängig machbar)', [{ label: 'Abbrechen' }, { label: 'Leeren', primary: true }]);
+  const r = await choose(`Level ${hex(app.level.number, 3)} leeren`, 'Alle Objekte, Sprites und Exits entfernen? (rückgängig machbar)', [{ label: 'Abbrechen' }, { label: 'Leeren', danger: true }]);
   if (r === 1) levelEdit(app, () => clearLevel(app.level));
 }
 
