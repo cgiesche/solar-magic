@@ -198,8 +198,9 @@ export function spriteConfig(p: PixiProject, e: PixiEntry): SpriteConfig {
 }
 
 // what the editor shows of the inserted sprites, shooters and generators, by sprite id (extra bits << 8 |
-// number: $2xx, with the extra bit $3xx)
-export interface CustomSprite { id: number; num: number; extraBit: boolean; kind: SpriteFolder; name: string; description: string; bytes: number; file: string }
+// number: $2xx, with the extra bit $3xx). Both variants are known (names of placed sprites), the palette
+// lists only those named in the Collection, like Lunar Magic (without a Collection: the one without extra bit)
+export interface CustomSprite { id: number; num: number; extraBit: boolean; listed: boolean; kind: SpriteFolder; name: string; description: string; bytes: number; file: string }
 export function customSpriteList(p: PixiProject): CustomSprite[] {
   const out: CustomSprite[] = [];
   for (const e of [...p.list].sort((a, b) => a.num - b.num)) {
@@ -209,7 +210,7 @@ export function customSpriteList(p: PixiProject): CustomSprite[] {
     for (const eb of [false, true]) {
       const named = c.names.find((n) => n.extraBit === eb);
       const name = named?.name ?? (c.names[0]?.name ?? e.file) + (eb ? ' (Extra-Bit)' : '');
-      out.push({ id: ((eb ? 3 : 2) << 8) | e.num, num: e.num, extraBit: eb, kind: e.kind, name, description: c.description, bytes: eb ? c.bytesExtra : c.bytes, file: e.file });
+      out.push({ id: ((eb ? 3 : 2) << 8) | e.num, num: e.num, extraBit: eb, listed: !!named, kind: e.kind, name, description: c.description, bytes: eb ? c.bytesExtra : c.bytes, file: e.file });
     }
   }
   return out;

@@ -381,7 +381,7 @@ export class Palette {
     const cur = app.paletteItem;
     if (this.tab === 'spr') {
       // original sprites 00-E6, then the custom sprites of the ROM (PIXI, ids $2xx/$3xx)
-      const custom = app.customSprites();
+      const custom = app.customSprites().filter((c) => c.listed);
       const ids = [...Array.from({ length: 0xe7 }, (_, i) => i), ...custom.map((c) => c.id)];
       let head = false;
       for (const id of ids) {

@@ -19,7 +19,8 @@ Diese Seite beschreibt die Schnittstelle, die Ressourcen sehen, und wie der Edit
   der `list.txt`, Projektdateien, Import und Export eines PIXI-Ordners als `.zip`. Alles wird als ein Patch
   mit den Quellen in der ROM verzeichnet und lässt sich wieder entfernen.
 - **Platzieren:** Die Palette zeigt unter *Sprites* einen Abschnitt „Custom Sprites (PIXI)“ mit den Namen aus
-  `Collection` und der Grafik, die das Spiel zeichnet, je mit gelöschtem und gesetztem Extra-Bit. In den
+  `Collection` und der Grafik, die das Spiel zeichnet – wie Lunar Magic nur die Varianten (Extra-Bit
+  gelöscht/gesetzt), die `Collection` nennt; ohne `Collection` (`.cfg`) die ohne Extra-Bit. In den
   Eigenschaften stehen die Extra-Bytes; Sprites mit anderen Extra-Bytes als 0 bekommen ein eigenes Bild. Beim
   Einfügen nach Nummer gelten die Extra-Bits 2/3 als Custom Sprite.
 
