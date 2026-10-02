@@ -465,7 +465,7 @@ export function buildUberPatch(files: Map<string, Uint8Array>, list: UberList): 
   const project = new Map(files);
   project.set('list.txt', new TextEncoder().encode(writeList(list)));
   const archive = zipSync(Object.fromEntries(project), { level: 9 });
-  return { source: { name: UBER_NAME, main: '__uber_main.asm', files: src, kind: 'uberasm', archive }, resources: res.size, warnings };
+  return { source: { name: UBER_NAME, main: '__uber_main.asm', files: src, kind: 'uberasm', archive, ram: [[list.freeram, 2]] }, resources: res.size, warnings };
 }
 
 // resource files of a context folder (for the UI)

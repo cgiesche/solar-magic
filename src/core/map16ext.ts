@@ -32,6 +32,7 @@ const HIT_HOOK = 0x029328;
 const RENDER_HOOKS = [0x058a66, 0x058b46, 0x058c34, 0x058d2b];
 const PAGE0_FIX = 0x00c096;
 const PAGE1_FIX = 0x00c0e7;
+export const MAP16X_HOOKS: [number, number][] = [[F545, 4], [HIT_HOOK, 4], ...RENDER_HOOKS.map((r): [number, number] => [r, 5]), [PAGE0_FIX, 2], [PAGE1_FIX, 2]];
 
 export interface Map16Ext { base: number; acts: number; gfx: number; blocks: number; version: number }
 

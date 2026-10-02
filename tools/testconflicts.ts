@@ -1,0 +1,146 @@
+// Conflicts between the kinds of patches: an external patch against the hooks of UberASM and the
+// custom sprites (both orders), free RAM claimed twice, long writes into RAM another patch claims,
+// the editor patch's extended object slot, and repeated re-applying leaves no RATS blocks behind.
+import { readFileSync } from 'node:fs';
+import { Rom } from '../src/core/rom.ts';
+import { loadAsar } from '../src/core/asar.ts';
+import { applyPatch, type PatchSource } from '../src/core/patchapply.ts';
+import { listPatches } from '../src/core/patchreg.ts';
+import { installEditorPatch } from '../src/core/patches.ts';
+import { packageSource, packageFromFiles } from '../src/core/patchpkg.ts';
+import { saveProject, emptyProject, type UberProject } from '../src/core/uberproject.ts';
+import { parseList } from '../src/core/uberasm.ts';
+import { savePixiProject, parsePixiList, type PixiProject } from '../src/core/pixi.ts';
+import { saveBlockProject, parseBlockList, type BlockProject } from '../src/core/blocks.ts';
+
+await loadAsar();
+let bad = 0;
+const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
+const enc = new TextEncoder();
+const file = new Uint8Array(readFileSync('Super Mario World (U) [!].smc'));
+const fresh = () => new Rom(file.slice());
+const src = (name: string, main: string): PatchSource => ({ name, main: 'main.asm', files: new Map([['main.asm', main]]) });
+// a patch hooking the level load palette upload whose code is `body`
+const hooked = (name: string, body: string) => src(name, `lorom\norg $00922F\n  autoclean JSL Code\n  NOP #2\nfreecode\nCode:\n  STZ $0703 : STZ $0704\n${body}\n  RTL\n`);
+const files = (o: Record<string, string>) => new Map(Object.entries(o).map(([k, v]) => [k, enc.encode(v)]));
+
+const uber = (freeram = '$7FAC80'): UberProject => {
+  const list = `level:\n105 marker.asm\nfreeram: ${freeram}\n`;
+  return { files: files({ 'list.txt': list, 'level/marker.asm': 'main:\n  LDA #$01 : STA $7FB100\n  RTL\n' }), list: parseList(list) };
+};
+const pixi: PixiProject = {
+  files: files({
+    'sprites/a.cfg': '01\n36\n00 00 3B 80 00 00\n00 00\na.asm\n',
+    'sprites/a.asm': 'print "INIT ",pc\n  RTL\nprint "MAIN ",pc\n  RTL\n',
+  }),
+  list: parsePixiList('10 a.cfg\n'),
+};
+const blocks: BlockProject = { files: files({ 'blocks/b.asm': 'db $42\nJMP A : JMP A : JMP A : JMP A : JMP A : JMP A : JMP A : JMP A : JMP A : JMP A\nA: RTL\n' }), list: parseBlockList('2A0 b.asm\n') };
+
+// 1. hooks of UberASM and the custom sprites against an external patch, both orders
+{
+  const rom = fresh();
+  const u = saveProject(rom, uber());
+  check(u.ok, 'UberASM applied ' + u.errors.join(' '));
+  const p = applyPatch(rom, src('HitsUber', 'lorom\norg $00A242\ndb $EA\n'));
+  check(!p.ok && p.errors[0].includes('UberASM'), 'patch on an UberASM hook rejected: ' + p.errors[0]);
+}
+{
+  const rom = fresh();
+  const p = applyPatch(rom, src('OnLevelInit', 'lorom\norg $00A5EE\ndb $EA\n'));
+  check(p.ok, 'patch at $00A5EE applied');
+  const u = saveProject(rom, uber());
+  check(!u.ok && u.errors.some((e) => e.includes('OnLevelInit')), 'UberASM on a patched hook rejected: ' + u.errors[0]);
+}
+{
+  const rom = fresh();
+  const s = savePixiProject(rom, pixi);
+  check(s.ok, 'custom sprites applied ' + s.errors.join(' '));
+  const p = applyPatch(rom, src('HitsPixi', 'lorom\norg $02A82A\ndb $EA\n'));
+  check(!p.ok && p.errors[0].includes('Custom Sprites'), 'patch on a sprite loader hook rejected: ' + p.errors[0]);
+}
+{
+  const rom = fresh();
+  check(applyPatch(rom, src('OnLoader', 'lorom\norg $02A82A\ndb $EA\n')).ok, 'patch at $02A82A applied');
+  const s = savePixiProject(rom, pixi);
+  check(!s.ok && s.errors.some((e) => e.includes('OnLoader')), 'custom sprites on a patched hook rejected: ' + s.errors[0]);
+}
+
+// 2. free RAM
+{
+  const rom = fresh();
+  check(saveProject(rom, uber()).ok && savePixiProject(rom, pixi).ok, 'UberASM and custom sprites side by side');
+  const e = listPatches(rom);
+  check(e.find((x) => x.kind === 'uberasm')?.ram?.[0][0] === 0x7fac80 && !!e.find((x) => x.kind === 'pixi')?.ram?.length, 'their RAM is in the registry');
+  // a manifest claiming UberASM's free RAM through a define
+  const pkg = packageFromFiles('claim.zip', files({
+    'patch.json': JSON.stringify({ name: 'Claim', main: 'claim.asm', ram: [{ define: 'freeram', size: 2 }] }),
+    'claim.asm': '!freeram = $7FAC81\nlorom\norg $00922F\n  autoclean JSL Code\n  NOP #2\nfreecode\nCode:\n  STZ $0703 : STZ $0704\n  RTL\n',
+  }));
+  const c = applyPatch(rom, packageSource(pkg, 'claim.asm', {}));
+  check(!c.ok && c.errors.some((x) => x.includes('RAM-Konflikt') && x.includes('UberASM') && x.includes('$7FAC81')), 'claim of UberASM\'s free RAM rejected: ' + c.errors.join(' '));
+  const moved = applyPatch(rom, packageSource(pkg, 'claim.asm', { freeram: '$7FB200' }));
+  check(moved.ok && moved.entry?.ram?.[0][0] === 0x7fb200 && !moved.warnings.some((x) => x.includes('RAM')), 'the same patch with its setting moved applies ' + moved.errors.join(' '));
+  // code without a claim: long writes into private RAM warn, into the sprite tables (shared) and vanilla RAM don't
+  const w = applyPatch(fresh(), hooked('x', 'RTL'));
+  check(w.ok && !w.entry?.ramSeen, 'no long writes, nothing recorded');
+}
+{
+  const rom = fresh();
+  savePixiProject(rom, pixi);
+  const priv = applyPatch(rom, hooked('Scratch', '  LDA #$01 : STA $7FAC18'));
+  check(priv.ok && priv.warnings.some((x) => x.includes('$7FAC18') && x.includes('Custom Sprites')), 'long write into the sprite loader\'s RAM warns: ' + priv.warnings.join(' '));
+}
+{
+  const rom = fresh();
+  savePixiProject(rom, pixi);
+  const shared = applyPatch(rom, hooked('Spawner', '  LDA #$08 : STA $7FAB10,x\n  LDA #$00 : STA $7F837B'));
+  check(shared.ok && !shared.warnings.some((x) => x.includes('RAM')) && shared.entry?.ramSeen?.length === 2, 'writes to the sprite tables and to vanilla RAM give no warning ' + shared.warnings.join(' '));
+}
+{
+  // the other way round: a patch writes $7FB000 without a claim, UberASM then claims it
+  const rom = fresh();
+  applyPatch(rom, hooked('Writer', '  LDA #$01 : STA $7FB000'));
+  const u = saveProject(rom, uber('$7FB000'));
+  check(u.ok && u.warnings.some((x) => x.includes('Writer') && x.includes('$7FB000')), 'claiming RAM another patch writes warns: ' + u.warnings.join(' '));
+}
+{
+  // claims in the low RAM mirror are compared as $7Exxxx
+  const rom = fresh();
+  saveProject(rom, uber('$0DC4'));
+  const pkg = packageFromFiles('low.zip', files({
+    'patch.json': JSON.stringify({ name: 'Low', main: 'main.asm', ram: [{ addr: '$7E0DC5', size: 1 }] }),
+    'main.asm': 'lorom\norg $00922F\n  autoclean JSL Code\n  NOP #2\nfreecode\nCode:\n  STZ $0703 : STZ $0704\n  RTL\n',
+  }));
+  const c = applyPatch(rom, packageSource(pkg, 'main.asm', {}));
+  check(!c.ok && c.errors.some((x) => x.includes('RAM-Konflikt')), 'low RAM claim $0DC4 vs $7E0DC5 rejected: ' + c.errors.join(' '));
+}
+
+// 3. the editor patch's extended object $02 slot
+{
+  const rom = fresh();
+  const p = applyPatch(rom, src('ExtObj', 'lorom\norg $0DA115\ndl $0DA000\n'));
+  check(p.ok && p.warnings.some((w) => w.includes('SMWE')), 'patch on extended object $02 warns that SMWE can\'t be installed');
+  let msg = '';
+  try { installEditorPatch(rom); } catch (e) { msg = (e as Error).message; }
+  check(msg.includes('ExtObj'), 'editor patch refuses the taken slot and names the patch: ' + msg);
+}
+
+// 4. re-applying again and again leaves the number of RATS blocks as it is
+{
+  const rom = fresh();
+  installEditorPatch(rom);
+  const counts: number[] = [];
+  for (let i = 0; i < 3; i++) {
+    const s = savePixiProject(rom, pixi);
+    const b = saveBlockProject(rom, blocks, [0, 0, 0, 0]);
+    const u = saveProject(rom, uber());
+    if (!s.ok || !b.ok || !u.ok) console.log([...s.errors, ...b.errors, ...u.errors].join('\n'));
+    counts.push(rom.scanRats().length);
+  }
+  check(counts[1] === counts[0] && counts[2] === counts[0], `RATS blocks after each round: ${counts.join(', ')}`);
+  check(saveProject(rom, emptyProject()).ok && !listPatches(rom).some((p) => p.kind === 'uberasm'), 'an empty UberASM project removes it');
+}
+
+console.log(bad ? `${bad} failures` : 'all ok');
+if (bad) process.exitCode = 1;

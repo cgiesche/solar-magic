@@ -14,6 +14,7 @@ import { ownerNote } from './patchreg.ts';
 export const EXT_OBJ_TABLE = 0x0da10f;
 export const STRUCT_EXT = 0x03;
 export const STRUCT_SLOT = EXT_OBJ_TABLE + STRUCT_EXT * 3;
+export const STRUCT_HOOKS: [number, number][] = [[STRUCT_SLOT, 3]];
 export const STRUCT_COUNT = 256;
 export const STRUCT_MAX = 64; // width/height limit (the row/column counters are signed bytes)
 export const TRANSPARENT = -1;

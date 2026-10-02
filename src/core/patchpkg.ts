@@ -5,6 +5,7 @@
 
 import { unzipSync } from 'fflate';
 import type { PatchSource } from './patchapply.ts';
+import type { RamClaim } from './patchreg.ts';
 
 export type OptionType = 'bool' | 'number' | 'hex' | 'enum' | 'text';
 export interface PatchOption {
@@ -26,7 +27,10 @@ export interface PatchManifest {
   options?: PatchOption[];
   requires?: string[]; // built-in editor patches: "smwe", "smwx"
   smwc?: string; // link to the SMWCentral page
+  ram?: PatchRam[]; // free RAM the patch uses
 }
+// a free RAM range: at a define's value (its setting, or its assignment in the main file) or a fixed address
+export interface PatchRam { define?: string; addr?: string | number; size: number; shared?: boolean }
 export interface PatchPackage {
   name: string;
   files: Map<string, Uint8Array>;
@@ -145,7 +149,27 @@ export function packageSource(pkg: PatchPackage, main: string, defines: Record<s
   const files = new Map<string, Uint8Array | string>(pkg.files);
   const { text, rest } = rewriteDefines(new TextDecoder().decode(pkg.files.get(main)!), defines);
   files.set(main, text);
-  return { name: pkg.name, version: pkg.manifest?.version, main, files, defines: rest, settings: defines };
+  const ram = manifestRam(pkg, text, defines);
+  return { name: pkg.name, version: pkg.manifest?.version, main, files, defines: rest, settings: defines, ...(ram.length ? { ram } : {}) };
+}
+
+// the manifest's RAM ranges as claims; an address that isn't a plain number ($7FB000, 0x7FB000, decimal) is an error
+export function manifestRam(pkg: PatchPackage, mainText: string, defines: Record<string, string>): RamClaim[] {
+  const out: RamClaim[] = [];
+  const own = new Map(scanDefines(mainText).map((d) => [d.name, d.value]));
+  for (const r of pkg.manifest?.ram ?? []) {
+    const v = r.define !== undefined ? defines[r.define] ?? own.get(r.define) : r.addr;
+    const a = typeof v === 'number' ? v : parseNum(String(v ?? '').trim());
+    if (a === null || !(r.size > 0)) throw new Error(`patch.json: RAM-Angabe ${JSON.stringify(r)} ist ungültig`);
+    out.push(r.shared ? [a, r.size, 1] : [a, r.size]);
+  }
+  return out;
+}
+
+function parseNum(s: string): number | null {
+  const m = /^(?:\$|0x)([0-9a-f]+)$/i.exec(s);
+  if (m) return parseInt(m[1], 16);
+  return /^\d+$/.test(s) ? parseInt(s, 10) : null;
 }
 
 // What a package is: an ordinary patch, an UberASM resource, a GPS block or a PIXI sprite. Many

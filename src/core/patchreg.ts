@@ -1,7 +1,8 @@
 // Registry of applied ASM patches ("SMWA"), kept in the ROM so a patch can be removed again
 // even without its sources: a RATS block holding "SMWA", a version byte and JSON. For each patch it
 // lists the bytes it changed outside its own free space (with the original bytes, stored in
-// separate RATS blocks) and the free space blocks it created.
+// separate RATS blocks) and the free space blocks it created, and the free RAM it uses: claimed
+// ranges (`ram`) and the RAM its code writes with long addressing (`ramSeen`, found in its code).
 
 import { Rom, pcToSnes, snesToPc } from './rom.ts';
 
@@ -23,7 +24,13 @@ export interface PatchEntry {
   kind?: 'patch' | 'uberasm' | 'blocks' | 'vram' | 'pixi';
   src?: number[]; // SNES addresses of RATS blocks holding the sources (zip), if stored in the ROM
   srcSize?: number;
+  ram?: RamClaim[]; // free RAM the patch claims
+  ramSeen?: [number, number][]; // [snes, size] written with long addressing by its code
 }
+
+// [snes, size, shared]: WRAM ($7E0000-$7FFFFF); shared = 1: an interface other code may write (e.g.
+// PIXI's sprite tables, set by blocks spawning sprites)
+export type RamClaim = [number, number, number?];
 
 interface Registry { v: number; patches: PatchEntry[] }
 

@@ -5,7 +5,7 @@ import type { App } from './app.ts';
 import { h, modal, clear, toast, pickFile, hexInput, select } from './dom.ts';
 import { kvGet, kvSet, kvDel } from './storage.ts';
 import { loadAsar } from '../core/asar.ts';
-import { applyPatch, uninstallPatch, reapplyPatch, type ApplyResult } from '../core/patchapply.ts';
+import { applyPatch, uninstallPatch, reapplyPatch, type ApplyResult, type PatchSource } from '../core/patchapply.ts';
 import { listPatches, patchArchive, type PatchEntry } from '../core/patchreg.ts';
 import { zipSync, unzipSync } from 'fflate';
 import { openUberDialog } from './uberdialog.ts';
@@ -152,7 +152,9 @@ function openApplyDialog(app: App, pkg: PatchPackage, fileName: string, entry: P
   );
   const run = (): boolean => {
     const values = form.read();
-    const src = packageSource(pkg, main, effectiveDefines(pkg, values));
+    const fail = (e: unknown) => { clear(log).appendChild(logView({ ok: false, errors: [e instanceof Error ? e.message : String(e)], warnings: [], prints: [] })); return false; };
+    let src: PatchSource;
+    try { src = packageSource(pkg, main, effectiveDefines(pkg, values)); } catch (e) { return fail(e); }
     src.settings = values;
     const stored: StoredPackage = { fileName, files: [...pkg.files], main };
     const archive = packArchive(stored);
@@ -163,8 +165,7 @@ function openApplyDialog(app: App, pkg: PatchPackage, fileName: string, entry: P
       ensureRequirements(app, pkg);
       r = entry ? reapplyPatch(app.rom, entry.id, src) : applyPatch(app.rom, src);
     } catch (e) {
-      clear(log).appendChild(logView({ ok: false, errors: [e instanceof Error ? e.message : String(e)], warnings: [], prints: [] }));
-      return false;
+      return fail(e);
     }
     if (!r.ok) { clear(log).appendChild(logView(r)); return false; }
     if (entry) kvDel(srcKey(entry.id)).catch(() => {});

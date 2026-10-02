@@ -15,6 +15,7 @@ const MSG_PTRS = 0x05a5a7;
 const MSG_TEXT = 0x05a5d9;
 const MSG_TEXT_END = 0x05b100; // code follows
 const MSG_HOOK = 0x05b20f; // LDA $A5D9,y : STA $0003
+export const MSG_HOOKS: [number, number][] = [[MSG_HOOK, 6]];
 const MSG_MAGIC = [0x53, 0x4d, 0x57, 0x4d]; // "SMWM"
 
 // character codes of the message font (tile $100 + code in the layer 3 GFX)

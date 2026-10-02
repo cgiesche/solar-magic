@@ -176,7 +176,7 @@ export function installExAnim(rom: Rom): ApplyResult {
     return { ok: false, errors: ['Die ROM hat bereits eine ExAnimation in einem älteren Lunar-Magic-Format (oder einen anderen Patch an $0583AD/$00A390) – nicht unterstützt.'], warnings: [], prints: [] };
   }
   installEditorPatch(rom); // keeps the level number in $010B, which the engine reads (as Lunar Magic's does)
-  return applyPatch(rom, { name: EXANIM_PATCH_NAME, main: 'exanimation.asm', files: new Map([['exanimation.asm', EXANIMATION_ASM], ['memory.asm', MEMORY_ASM]]) });
+  return applyPatch(rom, { name: EXANIM_PATCH_NAME, main: 'exanimation.asm', files: new Map([['exanimation.asm', EXANIMATION_ASM], ['memory.asm', MEMORY_ASM]]), ram: [[0x7fc003, 0xfd]] });
 }
 
 export function uninstallExAnim(rom: Rom): string[] {

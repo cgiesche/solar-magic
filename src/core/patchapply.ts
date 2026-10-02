@@ -1,29 +1,31 @@
 // Applying and removing Asar patches. A patch is assembled against a copy of the ROM; its writes
 // are split into free space it claimed (new RATS blocks) and changed bytes elsewhere ("segments").
 // Segments must not touch other patches, the hooks of the editor's own patches, existing RATS data
-// or the banks reserved for the emulation overlay. On success the ROM is replaced by the result and
+// or the banks reserved for the emulation overlay. Free RAM a patch claims must not be claimed by another
+// one; long writes of its code into RAM another patch claims (and the other way round) give a warning.
+// On success the ROM is replaced by the result and
 // the patch is recorded in the registry (patchreg.ts) with the original bytes of its segments.
 
 import { Rom, snesToPc, pcToSnes, RESERVED_TOP, type RatsBlock } from './rom.ts';
 import { assemble, type AsarMessage, type AsarResult } from './asar.ts';
-import { editorPatch, customPalettePatch, bgPatch, extGfxPatch, SPR_BANK_HOOK, BG_HOOK, EXT_GFX_HOOK } from './patches.ts';
-import { messagePatch } from './messages.ts';
-import { map16Ext } from './map16ext.ts';
-import { bgMap16Ext, BG_HOOK_TILE } from './bgmap16.ts';
-import { structPatch, STRUCT_SLOT } from './structs.ts';
-import { listPatches, addPatch, removeEntry, backupBytes, patchedHash, hashBytes, overlaps, type PatchEntry } from './patchreg.ts';
+import { editorPatch, customPalettePatch, bgPatch, extGfxPatch, EDITOR_HOOKS, PAL_HOOKS, BG_HOOKS, EXT_GFX_HOOKS } from './patches.ts';
+import { messagePatch, MSG_HOOKS } from './messages.ts';
+import { map16Ext, MAP16X_HOOKS } from './map16ext.ts';
+import { bgMap16Ext, BGMAP16_HOOKS } from './bgmap16.ts';
+import { structPatch, STRUCT_HOOKS } from './structs.ts';
+import { listPatches, addPatch, removeEntry, backupBytes, patchedHash, hashBytes, overlaps, type PatchEntry, type RamClaim } from './patchreg.ts';
 
 // hook sites of the editor's own patches (SNES address, length)
 interface Builtin { name: string; installed: (rom: Rom) => boolean; hooks: [number, number][] }
 export const BUILTINS: Builtin[] = [
-  { name: 'Editor-Patch (SMWE)', installed: (r) => !!editorPatch(r), hooks: [[SPR_BANK_HOOK, 4], [0x00ba2c, 15], [0x00aa6b, 4], [0x00a9e1, 15], [0x00aa22, 15], [0x0da10f + 2 * 3, 3]] },
-  { name: 'Level-Paletten (SMWP)', installed: (r) => !!customPalettePatch(r), hooks: [[0x00922f, 6]] },
-  { name: 'BG-Tilemaps (SMWB)', installed: (r) => !!bgPatch(r), hooks: [[BG_HOOK, 4]] },
-  { name: 'BG2/BG3-Grafik (SMWG)', installed: (r) => !!extGfxPatch(r), hooks: [[EXT_GFX_HOOK, 5]] },
-  { name: 'Nachrichten (SMWM)', installed: (r) => !!messagePatch(r), hooks: [[0x05b20f, 6]] },
-  { name: 'Strukturen (SMWS)', installed: (r) => !!structPatch(r), hooks: [[STRUCT_SLOT, 3]] },
-  { name: 'Map16-Erweiterung (SMWX)', installed: (r) => !!map16Ext(r), hooks: [[0x00f545, 4], [0x029328, 4], [0x058a66, 5], [0x058b46, 5], [0x058c34, 5], [0x058d2b, 5], [0x00c096, 2], [0x00c0e7, 2]] },
-  { name: 'BG-Map16-Erweiterung (SMWH)', installed: (r) => !!bgMap16Ext(r), hooks: [[BG_HOOK_TILE, 6]] },
+  { name: 'Editor-Patch (SMWE)', installed: (r) => !!editorPatch(r), hooks: EDITOR_HOOKS },
+  { name: 'Level-Paletten (SMWP)', installed: (r) => !!customPalettePatch(r), hooks: PAL_HOOKS },
+  { name: 'BG-Tilemaps (SMWB)', installed: (r) => !!bgPatch(r), hooks: BG_HOOKS },
+  { name: 'BG2/BG3-Grafik (SMWG)', installed: (r) => !!extGfxPatch(r), hooks: EXT_GFX_HOOKS },
+  { name: 'Nachrichten (SMWM)', installed: (r) => !!messagePatch(r), hooks: MSG_HOOKS },
+  { name: 'Strukturen (SMWS)', installed: (r) => !!structPatch(r), hooks: STRUCT_HOOKS },
+  { name: 'Map16-Erweiterung (SMWX)', installed: (r) => !!map16Ext(r), hooks: MAP16X_HOOKS },
+  { name: 'BG-Map16-Erweiterung (SMWH)', installed: (r) => !!bgMap16Ext(r), hooks: BGMAP16_HOOKS },
 ];
 
 // "smwe.asm", available to every patch (incsrc "smwe.asm"): the editor's RAM/ROM interfaces as defines
@@ -70,6 +72,7 @@ export interface PatchSource {
   settings?: Record<string, string>; // all settings chosen by the user (stored in the registry)
   kind?: 'patch' | 'uberasm' | 'blocks' | 'vram' | 'pixi';
   archive?: Uint8Array; // sources to keep in the ROM (zip)
+  ram?: RamClaim[]; // free RAM the patch uses
   // further Asar runs on the result of the previous ones, all recorded as this one patch (PIXI assembles
   // each sprite on its own); called with the results so far, null when done
   next?: (done: AsarResult[]) => { main: string; files?: Map<string, Uint8Array | string> } | null;
@@ -114,6 +117,57 @@ function subtract(seg: [number, number], cover: [number, number][]): [number, nu
     parts = next;
   }
   return parts;
+}
+
+// WRAM address ($7E0000-$7FFFFF) of a long address: banks $7E/$7F and the low RAM mirror; -1 if none
+export function wramAddr(a: number): number {
+  const bank = a >> 16, low = a & 0xffff;
+  if (bank === 0x7e || bank === 0x7f) return a;
+  if ((bank < 0x40 || (bank >= 0x80 && bank < 0xc0)) && low < 0x2000) return 0x7e0000 | low;
+  return -1;
+}
+
+// RAM written with long addressing (STA long, STA long,X) by the bytes in `ranges`, merged into
+// [snes, size]. A plain byte search: it finds the stores wherever they are in the code (also behind jump
+// tables); a data byte that looks like one only matters if it hits another patch's RAM, and then gives a
+// warning.
+export function longWrites(data: Uint8Array, ranges: [number, number][]): [number, number][] {
+  const found = new Set<number>();
+  for (const [pc, n] of ranges) {
+    for (let i = pc, e = Math.min(pc + n, data.length) - 3; i < e; i++) {
+      if (data[i] !== 0x8f && data[i] !== 0x9f) continue;
+      const w = wramAddr(data[i + 1] | (data[i + 2] << 8) | (data[i + 3] << 16));
+      if (w >= 0) found.add(w);
+    }
+  }
+  const out: [number, number][] = [];
+  for (const a of [...found].sort((x, y) => x - y)) {
+    const l = out[out.length - 1];
+    if (l && l[0] + l[1] === a) l[1]++;
+    else out.push([a, 1]);
+  }
+  return out;
+}
+
+const ramRange = (a: number, n: number) => n > 1 ? `${hex(a)}-${hex(a + n - 1)}` : hex(a);
+
+// conflicts of a patch's RAM (claims, long writes) with the registered patches
+export function ramConflicts(ram: RamClaim[], seen: [number, number][], others: PatchEntry[]): { errors: string[]; warnings: string[] } {
+  const errors: string[] = [], warnings: string[] = [];
+  for (const o of others) {
+    for (const c of ram) {
+      const d = o.ram?.find((x) => overlaps([x[0], x[1]], [c[0], c[1]]));
+      if (d) { errors.push(`RAM-Konflikt mit „${o.name}“: beide belegen ${ramRange(Math.max(c[0], d[0]), Math.min(c[0] + c[1], d[0] + d[1]) - Math.max(c[0], d[0]))}.`); continue; }
+      const w = o.ramSeen?.find((x) => overlaps(x, [c[0], c[1]]));
+      if (w && !c[2]) warnings.push(`„${o.name}“ schreibt bei ${hex(Math.max(w[0], c[0]))} in RAM, das der Patch belegt (${ramRange(c[0], c[1])}).`);
+    }
+    for (const d of o.ram ?? []) {
+      if (d[2] || ram.some((c) => overlaps([c[0], c[1]], [d[0], d[1]]))) continue;
+      const w = seen.find((x) => overlaps(x, [d[0], d[1]]));
+      if (w) warnings.push(`Der Patch schreibt bei ${hex(Math.max(w[0], d[0]))} in RAM von „${o.name}“ (${ramRange(d[0], d[1])}).`);
+    }
+  }
+  return { errors, warnings };
 }
 
 const key = (b: RatsBlock) => `${b.start}:${b.size}`;
@@ -203,6 +257,11 @@ export function applyPatch(rom: Rom, src: PatchSource): ApplyResult {
       else warnings.push(`Der Patch belegt ${hex(h[0])}; ${bi.name} kann danach nicht mehr installiert werden.`);
     }
   }
+  const ram = (src.ram ?? []).map(([a, n, sh]): RamClaim => { const w = wramAddr(a) < 0 ? a : wramAddr(a); return sh ? [w, n, sh] : [w, n]; });
+  const ramSeen = longWrites(out, [...own.map((b): [number, number] => [b.start + 8, b.size]), ...segs]);
+  const rc = ramConflicts(ram, ramSeen, others);
+  errors.push(...rc.errors);
+  warnings.push(...rc.warnings);
   if (errors.length) return fail(errors, warnings);
 
   const original = segs.map(([pc, n]) => {
@@ -222,6 +281,8 @@ export function applyPatch(rom: Rom, src: PatchSource): ApplyResult {
     own: own.map((b) => b.start),
     check: patchedHash(after, segs),
     kind: src.kind,
+    ...(ram.length ? { ram } : {}),
+    ...(ramSeen.length ? { ramSeen } : {}),
   }, original, src.archive);
   return { ok: true, errors: [], warnings, prints, entry, labels: Object.assign({}, ...steps.map((x) => x.labels)), steps, asar: { errors: [], warnings: r.warnings } };
 }

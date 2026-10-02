@@ -523,7 +523,7 @@ export function vramPatchEntry(rom: Rom) {
 export function installVramPatch(rom: Rom): ApplyResult {
   const e = vramPatchEntry(rom);
   if (e) return { ok: true, errors: [], warnings: [], prints: [], entry: e };
-  const r = applyPatch(rom, { name: VRAM_PATCH_NAME, main: 'vram.asm', files: new Map([['vram.asm', VRAM_ASM]]), kind: 'vram' });
+  const r = applyPatch(rom, { name: VRAM_PATCH_NAME, main: 'vram.asm', files: new Map([['vram.asm', VRAM_ASM]]), kind: 'vram', ram: [[0x7f0000, 0x3654]] });
   if (r.ok && extGfxPatch(rom) && !extGfxPatch(rom)!.active) installExtGfxPatch(rom);
   return r;
 }

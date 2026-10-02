@@ -17,6 +17,7 @@ export const BG_HOOK_TILE = 0x058de6;
 const MAGIC = [0x53, 0x4d, 0x57, 0x48]; // "SMWH"
 const HEADER = 8; // +4 tile table pointer
 const ORIG = [0xa5, 0x00, 0x0a, 0x0a, 0x0a, 0xa8];
+export const BGMAP16_HOOKS: [number, number][] = [[BG_HOOK_TILE, ORIG.length]];
 const VANILLA = 0x0d9100;
 
 export interface BgMap16Ext { base: number; gfx: number }

@@ -202,7 +202,8 @@ Ladeschleife `$02A82A`/`$02A846`/`$02A936`/`$02A9D7`/`$02ABE9`, Extra-Bits `$02A
 `$02A9C9`, Shooter/Generatoren `$02A866`/`$02ABA0`/`$02B395`/`$02AFFE`, Status `$018127`/`$018151`/
 `$018172`/`$0185C3`, Tabellen `$07F785`, öffentlich `$0187A7`/`$01D43E`; Misc-Verteiler `$029052` (Bounce),
 `$02F818`/`$00A686` (Cluster), `$029B1B`/`$029633` (Extended), `$028B6C` (Minor Extended), `$0296C0`
-(Smoke), `$0299D4`/`$028A7D` (Spinning Coin), `$02ADBA` (Score). Freies RAM: `$7FAF00-$7FAF02`.
+(Smoke), `$0299D4`/`$028A7D` (Spinning Coin), `$02ADBA` (Score). Freies RAM: die Sprite-Tabellen (oben) und `$7FAC18-$7FAC19`, im Patch-Verzeichnis belegt (siehe
+[Free RAM](patches.md#patches-anwenden)).
 
 Ändert sich die Anzahl der Extra-Bytes eines Sprites, der in Levels steht, schreibt der Editor diese Levels
 beim Übernehmen mit der neuen Größe neu (Extra-Bytes bleiben, soweit sie passen), wie PIXIs MeiMei. Beim

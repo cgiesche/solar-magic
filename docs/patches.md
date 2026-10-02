@@ -58,6 +58,30 @@ ein Patch, wenn er
 - die Banks `$7E/$7F` belegt (bei 4-MB-ROMs für die Emulation reserviert; Asars Freespace-Suche wird
   automatisch davon ferngehalten).
 
+Das gilt für alle Arten gleich: externe Patches, UberASM, Custom Sprites, Custom Blocks, VRAM-Layout und
+ExAnimation sind alle im Patch-Verzeichnis eingetragen und werden gegeneinander geprüft, gleich in welcher
+Reihenfolge sie angewendet werden (`tools/testconflicts.ts`).
+
+**Free RAM.** Jeder Eintrag im Verzeichnis kann RAM belegen. Die eigenen Komponenten tragen ihre Bereiche
+selbst ein, externe Patches über `ram` in der `patch.json` (siehe unten):
+
+| Komponente | RAM |
+|---|---|
+| UberASM | `freeram` aus der `list.txt` (2 Bytes, Standard `$7FAC80`) |
+| Custom Sprites | Sprite-Tabellen `$7FAB10-$7FAB6F`, `$7FAB9E-$7FABA9`, `$7FAC00-$7FAC17` (Schnittstelle, siehe unten), `$7FAC18-$7FAC19` |
+| VRAM-Layout | `$7F0000-$7F3653` |
+| ExAnimation | `$7FC003-$7FC0FF` |
+
+- Belegen zwei Einträge dasselbe RAM, wird der zweite abgelehnt („RAM-Konflikt mit …“).
+- Zusätzlich sucht der Editor im Code jedes Patches nach Long-Schreibzugriffen (`STA $7Fxxxx`,
+  `STA $7Fxxxx,x`) und merkt sich die Adressen. Schreibt ein Patch so in RAM, das ein anderer belegt hat (oder
+  belegt er RAM, in das ein anderer schreibt), gibt es eine **Warnung**. Die Suche findet nicht alles
+  (indirekte Zugriffe, `DB = $7F`), deshalb ist es kein Fehler.
+- Bereiche, die eine **Schnittstelle** sind, warnen nicht: In die Sprite-Tabellen schreiben auch Blocks und
+  UberASM-Code, etwa beim Erzeugen eines Custom Sprites.
+- RAM des Original-Spiels (z. B. `$7F837B`) gehört niemandem und wird nicht geprüft.
+- Adressen im Low-RAM-Spiegel (`$0DC4`) werden als `$7E0DC4` verglichen.
+
 Belegt ein Patch die Einsprungstelle eines Editor-Patches, der noch **nicht** installiert ist, gibt es nur
 eine Warnung. Die entsprechende Editor-Funktion (z. B. eigene Level-Paletten) lässt sich danach nicht mehr
 aktivieren, und ihre Fehlermeldung nennt den Patch.
@@ -108,7 +132,8 @@ Optional, im Wurzelverzeichnis des Archivs:
     { "define": "keep_yoshi", "label": "Yoshi behalten", "type": "bool", "default": true },
     { "define": "timer", "label": "Zeit", "type": "number", "default": 300, "hint": "dezimal" },
     { "define": "freeram", "label": "Free RAM", "type": "hex", "default": "$7FB000" }
-  ]
+  ],
+  "ram": [ { "define": "freeram", "size": 1 } ]
 }
 ```
 
@@ -116,6 +141,7 @@ Optional, im Wurzelverzeichnis des Archivs:
 |---|---|
 | `name`, `main` | Pflicht. `main` ist die Hauptdatei (Pfad im Archiv) |
 | `options[]` | Formularfelder; `define` ohne `!`. Typen: `bool` (1/0), `number`, `hex` (`$…`), `enum` (`values`), `text` |
+| `ram[]` | Free RAM, das der Patch benutzt: `{ "define": "freeram", "size": 4 }` (Adresse = Wert der Einstellung bzw. der Zuweisung in der Hauptdatei) oder `{ "addr": "$7FB000", "size": 4 }`; `"shared": true` für Bereiche, in die andere schreiben dürfen |
 | `requires` | Editor-Patches, die vorher installiert werden: `"smwe"` (Editor-Patch), `"smwx"` (Map16-Erweiterung) |
 | `author`, `version`, `description`, `smwc` | Anzeige im Dialog |
 
@@ -265,8 +291,10 @@ In Leveln liegen die Layer-1/2-Tilemaps mit dem Patch als 64×32 bei `$3000`/`$3
 Geprüft wird das, indem jedes Level mit und ohne Patch mit denselben Eingaben gespielt wird: Bei gleichem
 Spielzustand muss der sichtbare Inhalt beider Tilemaps exakt übereinstimmen (`tools/testvram.ts`). Der
 Patch kostet etwas Rechenzeit. In Frames, die schon im Original am Limit sind, entsteht deshalb selten
-ein Lag-Frame mehr, im Test rund 0,1 % der Frames. Patches, die ebenfalls den `$7F0000`-Bereich als
-Free RAM nutzen oder die Tilemap-Uploads selbst verändern, vertragen sich nicht damit.
+ein Lag-Frame mehr, im Test rund 0,1 % der Frames. Belegt ein anderer Patch RAM im `$7F0000`-Bereich (über
+`ram` in der `patch.json`), lehnt der Editor ihn ab; schreibt er nur dorthin, gibt es eine Warnung (siehe
+[Free RAM](#patches-anwenden)). Patches, die den Bereich trotzdem nutzen oder die Tilemap-Uploads selbst
+verändern, vertragen sich nicht damit.
 
 ## Hintergrund-Pakete
 
@@ -318,6 +346,7 @@ mit der jeweiligen Funktion nicht kompatibel.
 | `$00A18F`, `$00A1C3` | UberASM: Overworld |
 | `$009322` | UberASM: Game Modes |
 | `$00804E`, `$008176`, `$008E1A` | UberASM: globaler Init, NMI, Statusleiste |
+| Banks 01/02/07 (Liste in [pixi.md](pixi.md#umsetzung)) | Custom Sprites |
 
 Die UberASM-Hooks werden nur gesetzt, wenn es Code für den jeweiligen Bereich gibt (`$00804E` immer).
 

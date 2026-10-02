@@ -13,7 +13,7 @@ import { saveSprites } from './save.ts';
 import { applyPatch, reapplyPatch, uninstallPatch, type ApplyResult, type PatchSource } from './patchapply.ts';
 import type { AsarResult } from './asar.ts';
 import { listPatches, patchArchive, type PatchEntry } from './patchreg.ts';
-import { pixiDefines, HEADERS, runtimeAsm, STATUS_LABELS, MISC_MAX, type SpriteFolder, type SpriteRow } from './pixirt.ts';
+import { pixiDefines, HEADERS, runtimeAsm, STATUS_LABELS, MISC_MAX, PIXI_RAM, type SpriteFolder, type SpriteRow } from './pixirt.ts';
 import { ROUTINES } from './pixiroutines.ts';
 
 export const PIXI_NAME = 'Custom Sprites';
@@ -324,6 +324,7 @@ endmacro`);
     files,
     kind: 'pixi',
     archive: projectToZip(p),
+    ram: PIXI_RAM,
     next: (done) => {
       const out = new Map<string, string>();
       if (step > code.length) return null; // the runtime was the last run

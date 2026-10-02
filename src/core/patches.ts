@@ -17,6 +17,9 @@ const HOOK_SPRGFX = 0x00a9e1;
 const HOOK_FGGFX = 0x00aa22;
 const EXT_OBJ_TABLE = 0x0da10f;
 export const DM16_EXT = 0x02;
+const DM16_SLOT = EXT_OBJ_TABLE + DM16_EXT * 3; // empty in the original game
+// the bytes the editor patch changes in the game (SNES address, length), protected from other patches (patchapply.ts)
+export const EDITOR_HOOKS: [number, number][] = [[SPR_BANK_HOOK, 4], [HOOK_GFXPTR, 15], [HOOK_UPLOAD, 4], [HOOK_SPRGFX, 15], [HOOK_FGGFX, 15], [DM16_SLOT, 3]];
 const MAGIC = [0x53, 0x4d, 0x57, 0x45]; // "SMWE"
 const HEADER = 32;
 
@@ -209,6 +212,7 @@ export function installEditorPatch(rom: Rom): PatchInfo {
     const note = ownerNote(rom, HOOK_GFXPTR, 15) || ownerNote(rom, HOOK_UPLOAD, 4) || ownerNote(rom, HOOK_SPRGFX, 15) || ownerNote(rom, HOOK_FGGFX, 15);
     throw new Error(`Unerwarteter Code in der Grafik-Laderoutine${note} – Patch nicht möglich`);
   }
+  if (rom.r24(DM16_SLOT) !== 0) throw new Error(`Erweitertes Objekt $${DM16_EXT.toString(16).padStart(2, '0')} ist bereits belegt${ownerNote(rom, DM16_SLOT, 3)} – Patch nicht möglich`);
   const a = build();
   // allocate first to know the base address, then link
   const size = a.bytes.length;
@@ -235,7 +239,7 @@ export function installEditorPatch(rom: Rom): PatchInfo {
   hook(rom, HOOK_UPLOAD, L('GfxUpload'), 4);
   hook(rom, HOOK_SPRGFX, L('SprGfxSel'), 15, 0x00a9f0);
   hook(rom, HOOK_FGGFX, L('FgGfxSel'), 15, 0x00aa31);
-  rom.w24(EXT_OBJ_TABLE + DM16_EXT * 3, L('DM16'));
+  rom.w24(DM16_SLOT, L('DM16'));
   return editorPatch(rom)!;
 }
 
@@ -300,6 +304,7 @@ export function defaultGfx(rom: Rom, tileset: number, spriteSet: number): number
 // load, GM $12). If the level has a palette pointer, colors 1-255 are copied to the
 // palette buffer $0703 and color 0 becomes the back area color ($0701).
 const PAL_HOOK = 0x00922f;
+export const PAL_HOOKS: [number, number][] = [[PAL_HOOK, 6]];
 const PAL_MAGIC = [0x53, 0x4d, 0x57, 0x50]; // "SMWP"
 
 export function customPalettePatch(rom: Rom): { base: number; table: number } | null {
@@ -373,6 +378,7 @@ export function setCustomPalette(rom: Rom, level: number, colors: Uint8Array | n
 // Edited tilemaps are stored as RLE of 0x800 bytes (low bytes $7EB900-$7EBCFF, high bytes
 // $7EBD00-$7EC0FF) so each tile may use either BG Map16 page.
 export const BG_HOOK = 0x058060;
+export const BG_HOOKS: [number, number][] = [[BG_HOOK, 4]];
 const BG_MAGIC = [0x53, 0x4d, 0x57, 0x42]; // "SMWB"
 
 export function bgPatch(rom: Rom): { table: number } | null {
@@ -426,6 +432,7 @@ export function setBgBank(rom: Rom, level: number, bank: number): void {
 // In the original game the layer 1 tilemap lives at VRAM $2000-$2FFF, so the slots need the tilemaps
 // moved out of the way first (VRAM patch, like LM's). Without it the hook stays off; the table is kept.
 export const EXT_GFX_HOOK = 0x00aa50;
+export const EXT_GFX_HOOKS: [number, number][] = [[EXT_GFX_HOOK, 5]];
 const EXT_GFX_MAGIC = [0x53, 0x4d, 0x57, 0x47]; // "SMWG"
 export const EXT_GFX_SLOT_NAMES = ['BG2', 'BG3'];
 const EXT_GFX_ORIG = [0xa2, 0x03, 0xb5, 0x04, 0x9d, 0x05, 0x01, 0xca, 0x10, 0xf8, 0x60];
