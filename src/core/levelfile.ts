@@ -2,7 +2,7 @@
 
 import { Rom } from './rom.ts';
 import {
-  type Level, parseLevelData, serializeLayer1, serializeLayer2, serializeSprites, isL1Vertical,
+  type Level, parseLevelData, serializeLayer1, serializeLayer2, serializeSprites, isL1Vertical, spriteSizes,
   encodeSecondaryHeader, decodeSecondaryHeader,
 } from './level.ts';
 import { editorPatch, levelGfx, customPalette } from './patches.ts';
@@ -19,6 +19,7 @@ interface LevelFileJson {
   layer2: string | null; // hex layer 2 object data incl. header, or null (BG tilemap)
   layer2Pointer: number; // BG tilemap pointer (ROM address) when layer2 is null
   sprites: string; // hex, incl. header byte
+  spriteSizes?: string; // hex, $400 byte sprite size table the sprite data uses (custom sprites with extra bytes)
   secondary: number[]; // 4 secondary header bytes
   gfx?: number[]; // GFX bypass slots (editor patch), $FF = default
   palette?: string; // hex, 512 bytes custom level palette
@@ -48,9 +49,12 @@ export function exportLevelFile(rom: Rom, lv: Level, bg: Uint16Array | null = lv
     layer1: toHex(serializeLayer1(rom, lv)),
     layer2: l2 ? toHex(l2) : null,
     layer2Pointer: lv.layer2Pointer,
-    sprites: toHex(serializeSprites(lv.sprites, lv.spriteHeader, isL1Vertical(rom, lv.header.mode))),
+    sprites: toHex(serializeSprites(lv.sprites, lv.spriteHeader, isL1Vertical(rom, lv.header.mode), spriteSizes(rom))),
     secondary: encodeSecondaryHeader(lv.secondary),
   };
+  // custom sprites with extra bytes: the size table the sprite data was written with
+  const sizes = spriteSizes(rom);
+  if (sizes && lv.sprites.some((q) => q.bytes?.length)) out.spriteSizes = toHex(sizes);
   if (editorPatch(rom)) {
     const g = levelGfx(rom, lv.number);
     if (g.some((v) => v !== 0xff)) out.gfx = g;
@@ -91,7 +95,7 @@ export function importLevelFile(rom: Rom, text: string, into: Level): LevelFileD
     }
   }
   const level = parseLevelData(rom, into.number, fromHex(j.layer1), j.layer2 ? fromHex(j.layer2) : null,
-    j.layer2 ? into.layer2Pointer : j.layer2Pointer, fromHex(j.sprites), decodeSecondaryHeader(j.secondary));
+    j.layer2 ? into.layer2Pointer : j.layer2Pointer, fromHex(j.sprites), decodeSecondaryHeader(j.secondary), j.spriteSizes ? fromHex(j.spriteSizes) : null);
   if (j.bg && !level.layer2Objects) level.bg = decodeBg(fromHex(j.bg));
   for (const o of [...level.objects, ...(level.layer2Objects ?? [])]) if (o.struct !== undefined) o.struct = remap.get(o.struct) ?? o.struct;
   level.l1Addr = into.l1Addr; level.l1Size = into.l1Size; level.l2Size = into.l2Size;

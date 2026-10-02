@@ -2,7 +2,7 @@
 // the level runs a few frames, and the OAM tiles belonging to each sprite are collected.
 
 import { LevelEmulator } from './levelemu.ts';
-import { encodePrimaryHeader, type PrimaryHeader } from './level.ts';
+import { encodePrimaryHeader, spriteBytes, spriteSizes, type PrimaryHeader, type SpriteSizes } from './level.ts';
 import { decodeTile, cgramToRGBA } from './gfx.ts';
 
 export interface SpriteImage {
@@ -75,7 +75,7 @@ export function captureSprites(
     const solo = batch.length === 1 && batch[0] >= 0xc9;
     const placed = batch.map((n, i) => ({ n, ...slots[i] }));
     const order = sortPlaced(placed);
-    const r = emu.load(level, { layer1: l1, sprites: testSpriteData(spriteHeader, order), secondaryHeader: secondary, layer2Pointer: bgPointer });
+    const r = emu.load(level, { layer1: l1, sprites: testSpriteData(spriteHeader, order, spriteSizes(emu.rom)), secondaryHeader: secondary, layer2Pointer: bgPointer });
     if (!r.ok) continue;
     const rec = record(emu, 3);
     if (!rec) continue;
@@ -137,19 +137,21 @@ export function testLevel(emu: LevelEmulator, level: number, header: PrimaryHead
   return { l1, secondary, camX: probe.wram[0x1a] | (probe.wram[0x1b] << 8), camY: probe.wram[0x1c] | (probe.wram[0x1d] << 8) };
 }
 
-export interface PlacedSprite { n: number; tx: number; ty: number; extra?: number }
+export interface PlacedSprite { n: number; tx: number; ty: number; extra?: number; bytes?: number[] }
 
 // level sprite data must be sorted by x (screen); $161A of a live slot is the index in this order
 export function sortPlaced<T extends PlacedSprite>(placed: T[]): T[] {
   return [...placed].sort((a, b) => a.tx - b.tx || a.ty - b.ty);
 }
 
-// sprite data of the test level (horizontal format) for sprites sorted with sortPlaced
-export function testSpriteData(spriteHeader: number, order: PlacedSprite[]): Uint8Array {
+// sprite data of the test level (horizontal format) for sprites sorted with sortPlaced;
+// sizes: the ROM's sprite size table (custom sprites with extra bytes)
+export function testSpriteData(spriteHeader: number, order: PlacedSprite[], sizes: SpriteSizes): Uint8Array {
   const data: number[] = [spriteHeader & 0x3f];
   for (const p of order) {
-    const screen = p.tx >> 4;
-    data.push(((p.ty & 15) << 4) | (((p.extra ?? 0) & 3) << 2) | ((screen & 0x10) >> 3) | ((p.ty >> 4) & 1), ((p.tx & 15) << 4) | (screen & 15), p.n);
+    const screen = p.tx >> 4, extra = p.extra ?? 0;
+    data.push(((p.ty & 15) << 4) | ((extra & 3) << 2) | ((screen & 0x10) >> 3) | ((p.ty >> 4) & 1), ((p.tx & 15) << 4) | (screen & 15), p.n,
+      ...spriteBytes(sizes, { extra, num: p.n, bytes: p.bytes }));
   }
   data.push(0xff);
   return new Uint8Array(data);

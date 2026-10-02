@@ -5,7 +5,7 @@
 // show which slots lost visible tiles to another one.
 
 import { LevelEmulator } from './levelemu.ts';
-import { loadLevel, type LevelSprite, type PrimaryHeader } from './level.ts';
+import { loadLevel, spriteSizes, type LevelSprite, type PrimaryHeader } from './level.ts';
 import { record, sortPlaced, testLevel, testSpriteData } from './spritegfx.ts';
 import type { Rom } from './rom.ts';
 
@@ -50,9 +50,9 @@ function runWindow(ctx: SpriteMemContext, m: number, win: LevelSprite[], cam: { 
   const xs = win.map((s) => s.x), ys = win.map((s) => s.y);
   const x0 = Math.min(...xs) - ((SCREEN_W - 1 - Math.max(...xs) + Math.min(...xs)) >> 1);
   const y0 = Math.min(...ys) - ((SCREEN_H - 1 - Math.max(...ys) + Math.min(...ys)) >> 1);
-  const placed = win.map((s) => ({ n: s.num, extra: s.extra, uid: s.uid, tx: (cam.camX >> 4) + s.x - x0, ty: (cam.camY >> 4) + s.y - y0 }));
+  const placed = win.map((s) => ({ n: s.num, extra: s.extra, bytes: s.bytes, uid: s.uid, tx: (cam.camX >> 4) + s.x - x0, ty: (cam.camY >> 4) + s.y - y0 }));
   const order = sortPlaced(placed);
-  const r = emu.load(level, { layer1: cam.l1, sprites: testSpriteData(m, order), secondaryHeader: cam.secondary, layer2Pointer: bgPointer });
+  const r = emu.load(level, { layer1: cam.l1, sprites: testSpriteData(m, order, spriteSizes(emu.rom)), secondaryHeader: cam.secondary, layer2Pointer: bgPointer });
   if (!r.ok) return null;
   const rec = record(emu, 3);
   if (!rec) return null;

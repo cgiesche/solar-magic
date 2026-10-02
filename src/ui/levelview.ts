@@ -5,7 +5,7 @@ import { h, attachPanZoom, downloadBytes, toast } from './dom.ts';
 import { spriteName, objectName, hex2, hex3 } from '../core/names.ts';
 import { resizeObjectSize } from '../core/objkinds.ts';
 import { probeAt, spriteProbeAt, enterText, type PosProbe } from '../core/blockprobe.ts';
-import { type LevelObject, type LevelSprite, serializeLayer1, serializeLayer2, serializeSprites } from '../core/level.ts';
+import { type LevelObject, type LevelSprite, serializeLayer1, serializeLayer2, serializeSprites, spriteSizes } from '../core/level.ts';
 import { composite } from '../core/render.ts';
 import { incompleteSprites, spriteMemDialog, spriteMemText, SPRITE_MEM_HELP } from './spritemem.ts';
 
@@ -673,7 +673,7 @@ export class LevelView {
     const app = this.app, lv = app.level;
     if (!lv) return;
     const l1 = serializeLayer1(app.rom, lv).length, l2 = serializeLayer2(app.rom, lv)?.length;
-    const spr = serializeSprites(lv.sprites, lv.spriteHeader, app.vertical).length;
+    const spr = serializeSprites(lv.sprites, lv.spriteHeader, app.vertical, spriteSizes(app.rom)).length;
     const parts = [`Objekte ${lv.objects.length}${lv.layer2Objects ? ' / L2 ' + lv.layer2Objects.length : ''}`, `Sprites ${lv.sprites.length}`,
       `Daten: L1 ${l1}${l2 !== undefined ? ` · L2 ${l2}` : ''} · Sprites ${spr} Bytes`];
     this.stats.textContent = parts.join('  ·  ');

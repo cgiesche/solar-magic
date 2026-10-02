@@ -34,7 +34,8 @@ export interface LevelSprite {
   num: number;
   x: number;
   y: number;
-  extra: number; // 2 extra bits
+  extra: number; // 2 extra bits (bit 1 = custom sprite, bit 0 = extra bit with PIXI)
+  bytes?: number[]; // extra bytes of a custom sprite (PIXI), as many as the size table says
 }
 
 export interface PrimaryHeader {
@@ -267,7 +268,27 @@ export function serializeObjects(objects: LevelObject[], exits: ScreenExit[], ve
 }
 
 // ----- sprites -----
-export function parseSprites(data: Uint8Array, start: number, vertical: boolean): { sprites: LevelSprite[]; header: number; size: number } {
+// Sprite entries are 3 bytes plus extra bytes. The number of bytes per entry comes from a $400 byte size
+// table (index = extra bits * $100 + sprite number, value = 3 + extra bytes) whose address Lunar Magic and
+// PIXI keep at $0EF30C, enabled by $42 at $0EF30F. Without it every entry is 3 bytes.
+export const SPR_SIZE_PTR = 0x0ef30c;
+export type SpriteSizes = Uint8Array | null;
+
+export function spriteSizes(rom: Rom): SpriteSizes {
+  if (rom.r8(SPR_SIZE_PTR + 3) !== 0x42) return null;
+  return rom.bytes(rom.r24(SPR_SIZE_PTR), 0x400);
+}
+export function spriteEntrySize(sizes: SpriteSizes, extra: number, num: number): number {
+  const n = sizes ? sizes[((extra & 3) << 8) | (num & 0xff)] : 3;
+  return n >= 3 ? n : 3;
+}
+// the extra bytes of a sprite, resized to what its entry holds
+export function spriteBytes(sizes: SpriteSizes, s: { extra: number; num: number; bytes?: number[] }): number[] {
+  const n = spriteEntrySize(sizes, s.extra, s.num) - 3;
+  return Array.from({ length: n }, (_, i) => (s.bytes?.[i] ?? 0) & 0xff);
+}
+
+export function parseSprites(data: Uint8Array, start: number, vertical: boolean, sizes: SpriteSizes = null): { sprites: LevelSprite[]; header: number; size: number } {
   const header = data[start];
   const sprites: LevelSprite[] = [];
   let p = start + 1;
@@ -285,13 +306,17 @@ export function parseSprites(data: Uint8Array, start: number, vertical: boolean)
       x = screen * 16 + col;
       y = hi * 16 + lo;
     }
-    sprites.push({ uid: newUid(), num: b2, x, y, extra: (b0 >> 2) & 3 });
-    p += 3;
+    const extra = (b0 >> 2) & 3;
+    const len = spriteEntrySize(sizes, extra, b2);
+    const s: LevelSprite = { uid: newUid(), num: b2, x, y, extra };
+    if (len > 3) s.bytes = [...data.subarray(p + 3, p + len)];
+    sprites.push(s);
+    p += len;
   }
   return { sprites, header, size: p - start + 1 };
 }
 
-export function serializeSprites(sprites: LevelSprite[], header: number, vertical: boolean): Uint8Array {
+export function serializeSprites(sprites: LevelSprite[], header: number, vertical: boolean, sizes: SpriteSizes = null): Uint8Array {
   const sorted = [...sprites].sort((a, b) => (vertical ? a.y - b.y || a.x - b.x : a.x - b.x || a.y - b.y));
   const out: number[] = [header];
   for (const s of sorted) {
@@ -301,7 +326,7 @@ export function serializeSprites(sprites: LevelSprite[], header: number, vertica
     } else {
       screen = s.x >> 4; col = s.x & 15; hi = (s.y >> 4) & 1; lo = s.y & 15;
     }
-    out.push((lo << 4) | ((s.extra & 3) << 2) | ((screen & 0x10) >> 3) | hi, (col << 4) | (screen & 0x0f), s.num);
+    out.push((lo << 4) | ((s.extra & 3) << 2) | ((screen & 0x10) >> 3) | hi, (col << 4) | (screen & 0x0f), s.num, ...spriteBytes(sizes, s));
   }
   out.push(0xff);
   return new Uint8Array(out);
@@ -325,7 +350,7 @@ export function loadLevel(rom: Rom, n: number): Level {
 
 // builds a level from raw data: layer 1 (with 5 byte header), layer 2 object data (with header) or null,
 // the layer 2 pointer (BG tilemap when l2 is null) and sprite data (with header byte)
-export function parseLevelData(rom: Rom, n: number, l1: Uint8Array, l2: Uint8Array | null, l2Pointer: number, spr: Uint8Array, secondary: SecondaryHeader): Level {
+export function parseLevelData(rom: Rom, n: number, l1: Uint8Array, l2: Uint8Array | null, l2Pointer: number, spr: Uint8Array, secondary: SecondaryHeader, sizes: SpriteSizes = spriteSizes(rom)): Level {
   const header = parsePrimaryHeader(l1.subarray(0, 5));
   const vert1 = isL1Vertical(rom, header.mode);
   const p1 = hasObjects(header.mode) ? parseObjects(l1, 5, vert1, hasStructs(rom)) : { objects: [], exits: [], size: 1 };
@@ -340,7 +365,7 @@ export function parseLevelData(rom: Rom, n: number, l1: Uint8Array, l2: Uint8Arr
     // exits in layer 2 data are unusual; keep them with layer 1
     p1.exits.push(...p2.exits);
   }
-  const ps = parseSprites(spr, 0, vert1);
+  const ps = parseSprites(spr, 0, vert1, sizes);
   return {
     number: n,
     header,

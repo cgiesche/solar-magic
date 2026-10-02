@@ -3,7 +3,7 @@
 import { Rom, snesToPc } from '../core/rom.ts';
 import { LevelEmulator, OV_L1, OV_L2, type LevelRender, type LevelOverride, MAP_BASE, MAP_SIZE } from '../core/levelemu.ts';
 import {
-  type Level, type LevelObject, type LevelSprite, loadLevel, serializeLayer1, serializeLayer2, serializeSprites,
+  type Level, type LevelObject, type LevelSprite, loadLevel, serializeLayer1, serializeLayer2, serializeSprites, spriteSizes,
   isL1Vertical, cloneLevel, newUid, hasLayer2Objects, hasObjects, L1_PTRS, L2_PTRS, SEC_HDR,
   readSecondaryEntrance, writeSecondaryEntrance, entrancePos, nearestEntrance, encodeSecondaryHeader,
 } from '../core/level.ts';
@@ -185,7 +185,7 @@ export class App {
       layer2: l2 ?? undefined,
       layer2Pointer: l2 ? undefined : lv.layer2Pointer,
       bgData: !l2 && lv.bg ? encodeBg(lv.bg) : undefined,
-      sprites: serializeSprites(lv.sprites, lv.spriteHeader, this.vertical),
+      sprites: serializeSprites(lv.sprites, lv.spriteHeader, this.vertical, spriteSizes(this.rom)),
       byteOwner,
       switchPalaces: this.switches.palaces,
       onOffSwitch: this.switches.onOff,
@@ -454,7 +454,7 @@ export class App {
     const sprites = [...lv.sprites].sort((a, b) => a.x - b.x || a.y - b.y || a.num - b.num || a.extra - b.extra);
     if (this.usedMem.gen !== this.emu.romGen) this.usedMem = { gen: this.emu.romGen, list: usedSpriteMemory(this.rom) };
     const candidates = this.usedMem.list;
-    const key = `sm${lv.number}:${mem}:${JSON.stringify(lv.header)}:${candidates.join(',')}:${sprites.map((q) => `${q.num}.${q.x}.${q.y}.${q.extra}`).join(' ')}`;
+    const key = `sm${lv.number}:${mem}:${JSON.stringify(lv.header)}:${candidates.join(',')}:${sprites.map((q) => `${q.num}.${q.x}.${q.y}.${q.extra}${q.bytes?.length ? '.' + q.bytes.join('-') : ''}`).join(' ')}`;
     if (this.spriteMem?.key === key) return;
     const run = ++this.spriteMemRun;
     const done = (r: { lost: number[]; suggestion: number | null }) => {

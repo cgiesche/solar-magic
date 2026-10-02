@@ -2,7 +2,7 @@
 
 import { Rom, snesToPc } from './rom.ts';
 import {
-  type Level, L1_PTRS, L2_PTRS, SPR_PTRS, serializeLayer1, serializeLayer2, serializeSprites, isL1Vertical,
+  type Level, L1_PTRS, L2_PTRS, SPR_PTRS, serializeLayer1, serializeLayer2, serializeSprites, isL1Vertical, spriteSizes,
   writeSecondaryHeader, spriteBank,
 } from './level.ts';
 import { installEditorPatch, setSpriteBank, editorPatch, bgBank, setBgBank } from './patches.ts';
@@ -62,7 +62,7 @@ export function saveLevel(rom: Rom, lv: Level): string[] {
     } else rom.w24(L2_PTRS + n * 3, lv.layer2Pointer);
   }
   // sprites
-  const spr = serializeSprites(lv.sprites, lv.spriteHeader, isL1Vertical(rom, lv.header.mode));
+  const spr = serializeSprites(lv.sprites, lv.spriteHeader, isL1Vertical(rom, lv.header.mode), spriteSizes(rom));
   const bankOf = (i: number) => spriteBank(rom, i);
   const sprShared = countRefs(rom, SPR_PTRS, 2, lv.sprAddr, bankOf) > 1;
   let as: number;
