@@ -295,7 +295,7 @@ function buildUi(app: App): void {
     if (ctrl && k.toLowerCase() === 'y') { e.preventDefault(); app.redo(); return; }
     if (ctrl && k.toLowerCase() === 'c') { app.copy(); return; }
     if (ctrl && k.toLowerCase() === 'v') { const hv = view.hover; if (hv) app.paste(hv.tx, hv.ty); return; }
-    if (ctrl && k.toLowerCase() === 'd') { e.preventDefault(); app.copy(); const s = app.mode === 'spr' ? app.selectedSprites() : app.selectedObjects(); if (s[0]) app.paste(s[0].x + 1, s[0].y + 1); return; }
+    if (ctrl && k.toLowerCase() === 'd') { e.preventDefault(); app.duplicateSelection(); return; }
     if (ctrl && k.toLowerCase() === 'a') { e.preventDefault(); const items = app.mode === 'spr' ? app.level.sprites : app.currentObjects(); app.selection = new Set(items.map((o) => o.uid)); app.emit('change'); return; }
     if (k === 'Delete' || k === 'Backspace') { app.deleteSelection(); return; }
     if (k === 'Escape') { app.selection.clear(); app.emit('change'); return; }

@@ -1,7 +1,7 @@
 // Scrollable, zoomable level canvas with editing interactions.
 
 import { App, type Marker } from './app.ts';
-import { h, attachPanZoom, downloadBytes } from './dom.ts';
+import { h, attachPanZoom, downloadBytes, toast } from './dom.ts';
 import { spriteName, objectName, hex2, hex3 } from '../core/names.ts';
 import { resizeObjectSize } from '../core/objkinds.ts';
 import { probeAt, spriteProbeAt, enterText, type PosProbe } from '../core/blockprobe.ts';
@@ -167,8 +167,15 @@ export class LevelView {
       }
     }
     // exits
-    if (app.show.exits) {
+    if (app.show.exits || app.mode === 'exit') {
       const scrH = vertical ? 256 : im.height;
+      if (app.mode === 'exit') {
+        // the chosen screen, also without an exit
+        const x = vertical ? 0 : app.exitScreen * 256, y = vertical ? app.exitScreen * 256 : 0;
+        ctx.strokeStyle = 'rgba(255,200,0,0.9)';
+        ctx.lineWidth = 2 / app.zoom;
+        ctx.strokeRect(x + 1 / app.zoom, y + 1 / app.zoom, 256 - 2 / app.zoom, (vertical ? 256 : scrH) - 2 / app.zoom);
+      }
       for (const ex of app.level.exits) {
         const x = vertical ? 0 : ex.screen * 256, y = vertical ? ex.screen * 256 : 0;
         const sel = app.mode === 'exit' && app.selection.has(ex.uid);
@@ -270,9 +277,9 @@ export class LevelView {
     ctx.fillStyle = color;
     ctx.fillRect(o.x * 16, o.y * 16, 4, 4);
     if (this.app.selection.size === 1 && this.app.selection.has(o.uid) && (o.num !== 0 || o.ext === 2)) {
-      const b = this.app.objectBounds(o);
+      const b = this.app.objectBounds(o), hs = this.handleSize();
       ctx.fillStyle = '#4cc2ff';
-      ctx.fillRect(b.x1 * 16 + 11, b.y1 * 16 + 11, 5, 5);
+      ctx.fillRect(b.x1 * 16 + 11, b.y1 * 16 + 11, hs, hs);
     }
   }
 
@@ -408,17 +415,11 @@ export class LevelView {
       return;
     }
     // resize handle?
-    if ((app.mode === 'l1' || app.mode === 'l2') && app.selection.size === 1) {
-      const o = app.selectedObjects()[0];
-      if (o && (o.num !== 0 || o.ext === 2)) {
-        const b = app.objectBounds(o);
-        const hx = b.x1 * 16 + 11, hy = b.y1 * 16 + 11;
-        if (px >= hx - 2 && px <= hx + 7 && py >= hy - 2 && py <= hy + 7) {
-          app.checkpoint();
-          this.drag = { kind: 'resize', startTx: tx, startTy: ty, origSize: new Map([[o.uid, o.size]]), lastDw: 0, lastDh: 0 };
-          return;
-        }
-      }
+    const ho = this.handleAt(px, py);
+    if (ho) {
+      app.checkpoint();
+      this.drag = { kind: 'resize', startTx: tx, startTy: ty, origSize: new Map([[ho.uid, ho.size]]), lastDw: 0, lastDh: 0 };
+      return;
     }
     const hits = app.hitsAt(px, py);
     if (e.ctrlKey) {
@@ -436,7 +437,10 @@ export class LevelView {
     const selIdx = hits.findIndex((h) => h.mode === app.mode && app.selection.has(h.item.uid));
     const hit = e.altKey ? hits[(selIdx + 1) % hits.length] : hits[Math.max(0, selIdx)];
     if (hit && !e.ctrlKey) {
-      if (hit.mode !== app.mode) app.setMode(hit.mode, [hit.item.uid]);
+      if (hit.mode !== app.mode) {
+        app.setMode(hit.mode, [hit.item.uid]);
+        toast(`Modus: ${hit.mode === 'spr' ? 'Sprites' : hit.mode === 'l2' ? 'Layer 2' : 'Layer 1'}`);
+      }
       else if (!app.selection.has(hit.item.uid)) app.selection = new Set([hit.item.uid]);
       app.emit('change');
       const items = app.mode === 'spr' ? app.selectedSprites() : app.selectedObjects();
@@ -461,6 +465,7 @@ export class LevelView {
       this.hover = { tx, ty, px, py, top };
       if (moved) {
         this.updateStatus(tx, ty);
+        if (!(e.buttons & 4)) this.updateCursor(px, py, top); // middle button: panning sets its own cursor
         this.requestPaint();
       }
     }
@@ -525,6 +530,7 @@ export class LevelView {
     const d = this.drag;
     if (!d) return;
     this.drag = null;
+    if (this.hover) this.updateCursor(this.hover.px, this.hover.py, this.hover.top);
     if (d.kind === 'paint') {
       if (!d.changed) app.undoStack.pop(); else app.changed();
       return;
@@ -612,6 +618,34 @@ export class LevelView {
       else { const o = item as LevelObject; txt += `  · ${o.num ? 'Objekt ' + hex2(o.num) : 'Erw. Objekt ' + hex2(o.ext)}${tag} ${objectName(o.num, o.ext)}${o.num ? ' Größe ' + hex2(o.size) : ''}`; }
     }
     this.status.textContent = txt.replace(/^\s*·\s*/, '');
+  }
+
+  // the resize handle stays ~8 screen pixels at any zoom
+  handleSize(): number {
+    return Math.max(5, 8 / this.app.zoom);
+  }
+  // the selected object whose resize handle is at the pixel
+  handleAt(px: number, py: number): LevelObject | null {
+    const app = this.app;
+    if ((app.mode !== 'l1' && app.mode !== 'l2') || app.selection.size !== 1) return null;
+    const o = app.selectedObjects()[0];
+    if (!o || (o.num === 0 && o.ext !== 2)) return null;
+    const b = app.objectBounds(o), hs = this.handleSize();
+    const hx = b.x1 * 16 + 11, hy = b.y1 * 16 + 11;
+    return px >= hx - 2 && px <= hx + hs + 2 && py >= hy - 2 && py <= hy + hs + 2 ? o : null;
+  }
+  // what a click would do, shown by the cursor
+  updateCursor(px: number, py: number, top: number): void {
+    const app = this.app, d = this.drag;
+    let c = '';
+    if (d?.kind === 'resize') c = 'nwse-resize';
+    else if (d?.kind === 'marker' || d?.kind === 'move') c = 'grabbing';
+    else if (app.mode === 'bg') c = 'crosshair';
+    else if (app.mode === 'exit') c = 'pointer';
+    else if (this.handleAt(px, py)) c = 'nwse-resize';
+    else if (this.markerAt(px, py)) c = 'grab';
+    else if (top >= 0 && app.selection.has(top)) c = 'move';
+    this.scroller.style.cursor = c;
   }
 
   // topmost marker whose circle contains the pixel

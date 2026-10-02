@@ -1007,6 +1007,13 @@ export class App {
     this.changed();
   }
 
+  // copies the selection and pastes it one tile down-right (Strg+D)
+  duplicateSelection(): void {
+    this.copy();
+    const s = this.mode === 'spr' ? this.selectedSprites() : this.selectedObjects();
+    if (s[0]) this.paste(s[0].x + 1, s[0].y + 1);
+  }
+
   reorderSelection(dir: 'front' | 'back'): void {
     if (this.mode === 'spr' || !this.selection.size) return;
     this.checkpoint();

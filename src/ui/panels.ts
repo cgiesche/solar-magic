@@ -113,15 +113,17 @@ export class Palette {
   thumbsFor = '';
   tabs: HTMLDivElement;
   search: HTMLInputElement;
+  searchRow: HTMLDivElement;
 
   constructor(app: App) {
     this.app = app;
     this.body = h('div', { class: 'palette-body' });
     this.search = h('input', { class: 'filter', placeholder: 'Suchen …', spellcheck: false });
     this.search.addEventListener('input', () => this.build());
-    this.tabs = h('div', { class: 'tabs' });
+    this.tabs = h('div', { class: 'tabs seg' });
+    this.searchRow = h('div', { class: 'row' }, this.search);
     this.root = h('div', { class: 'panel palette' }, h('div', { class: 'panel-title' }, 'Einfügen', h('span', { class: 'hint' }, 'Rechtsklick/Shift+Klick platziert')), this.tabs,
-      h('div', { class: 'row' }, this.search), this.body);
+      this.searchRow, this.body);
     app.on('objkinds', () => this.invalidate());
     app.on('level', () => { this.ensureThumbs(); this.build(); });
     let t = 0;
@@ -259,8 +261,9 @@ export class Palette {
       h('div', { class: 'hint' }, sel ? `${sel} Objekt${sel > 1 ? 'e' : ''} ausgewählt.` : 'Objekte im Level auswählen (auch Direct-Map16-Blöcke), dann „Auswahl als Struktur“. Eine Struktur ist im Level ein einziges Objekt; Änderungen an ihr gelten in allen Leveln.'),
     );
     const all = app.structures();
-    if (!all.size) return;
+    if (!all.size) { this.body.append(emptyState('Noch keine Strukturen.')); return; }
     const sheet = structTileSource(app);
+    let shown = 0;
     for (const [n, st] of all) {
       if (f && !`${hex2(n)} ${st.name}`.toLowerCase().includes(f)) continue;
       const row = h('div', {
@@ -271,7 +274,9 @@ export class Palette {
         h('button', { class: 'icon-btn', title: 'Umbenennen', 'aria-label': 'Umbenennen', onclick: (e: Event) => { e.stopPropagation(); renameStructure(app, n, st); } }, '✎'),
         h('button', { class: 'icon-btn', title: 'Löschen', 'aria-label': 'Löschen', onclick: (e: Event) => { e.stopPropagation(); deleteStructure(app, n, st); } }, '✕'));
       this.body.appendChild(row);
+      shown++;
     }
+    if (!shown) this.body.append(emptyState('Keine Struktur passt zur Suche.'));
   }
 
   // BG Map16 tiles for painting the level background (BG mode); pages 2-F with the extended BG Map16
@@ -303,7 +308,13 @@ export class Palette {
       this.build();
     });
     const what = brush.tiles.length > 1 ? `Block ${brush.w}×${brush.h}${onSheet ? ` ab BG-Tile ${hex3(brush.tiles[0])}` : ' aus dem Level'}` : `BG-Tile ${hex3(brush.tiles[0])}`;
-    this.body.append(h('div', { class: 'hint' }, `${what} – Rechtsklick/Shift+Klick in der Levelansicht malt (Ziehen malt weiter), Klicken nimmt ein Tile auf, Ziehen einen Block. Tiles hier anklicken oder mehrere per Ziehen wählen. Die BG-Tilemap (32×27) wiederholt sich.`));
+    const pages = h('select', null, Array.from({ length: EXT_TILES / 512 }, (_, i) => h('option', { value: String(i * 512), selected: i * 512 === this.bgBase },
+      i === 0 ? 'Seiten 0–1' : `Seiten ${(2 * i).toString(16).toUpperCase()}–${(2 * i + 1).toString(16).toUpperCase()}${bgMap16Ext(app.rom) ? '' : ' (leer)'}`)));
+    pages.addEventListener('change', () => { this.bgBase = Number(pages.value); this.build(); });
+    // same order as the Map16 tab: pages, state, sheet
+    this.body.append(h('div', { class: 'row' }, pages,
+      h('button', { title: 'BG-Tiles im Grafik-Bereich bearbeiten (auch Tiles ab 200 anlegen)', onclick: () => app.editMap16(onSheet ? brush.tiles[0] : this.bgBase, true) }, 'Bearbeiten …')),
+    h('div', { class: 'hint' }, `Pinsel: ${what} – Tiles hier oder im Level anklicken (Ziehen: Block). Die BG-Tilemap (32×27) wiederholt sich.`));
     if (!onSheet) {
       const p = h('canvas', { width: brush.w * 16, height: brush.h * 16, class: 'bg-brush' });
       const pc = p.getContext('2d')!;
@@ -316,11 +327,7 @@ export class Palette {
       p.style.imageRendering = 'pixelated';
       this.body.append(h('div', { class: 'row' }, p));
     }
-    const pages = h('select', null, Array.from({ length: EXT_TILES / 512 }, (_, i) => h('option', { value: String(i * 512), selected: i * 512 === this.bgBase },
-      i === 0 ? 'Seiten 0–1' : `Seiten ${(2 * i).toString(16).toUpperCase()}–${(2 * i + 1).toString(16).toUpperCase()}${bgMap16Ext(app.rom) ? '' : ' (leer)'}`)));
-    pages.addEventListener('change', () => { this.bgBase = Number(pages.value); this.build(); });
-    this.body.append(h('div', { class: 'row' }, pages,
-      h('button', { title: 'BG-Tiles im Grafik-Bereich bearbeiten (auch Tiles ab 200 anlegen)', onclick: () => app.editMap16(onSheet ? brush.tiles[0] : this.bgBase, true) }, 'Bearbeiten …')), c);
+    this.body.append(c);
   }
 
   specs(): ObjSpec[] {
@@ -363,6 +370,9 @@ export class Palette {
   build(): void {
     const app = this.app;
     clear(this.tabs);
+    const searchable = app.mode !== 'bg' && this.tab !== 'm16';
+    this.searchRow.style.display = searchable ? '' : 'none';
+    this.search.placeholder = this.tab === 'spr' ? 'Sprites suchen (Nr., Name) …' : this.tab === 'str' ? 'Strukturen suchen …' : 'Suchen (Nr., Name, Verhalten) …';
     if (app.mode === 'bg') { clear(this.body); this.buildBg(); return; }
     const tabDefs: [typeof this.tab, string][] = [['obj', 'Objekte'], ['ext', 'Erweitert'], ['m16', 'Map16'], ['str', 'Strukturen'], ['spr', 'Sprites']];
     for (const [t, l] of tabDefs) this.tabs.appendChild(h('button', { class: this.tab === t ? 'active' : '', onclick: () => { this.tab = t; this.build(); } }, l));
@@ -384,6 +394,7 @@ export class Palette {
           onclick: () => { app.paletteItem = { kind: 'spr', num: n, extra: 0 }; if (app.mode !== 'spr') app.setMode('spr'); this.build(); },
         }, h('span', { class: 'pal-thumb-s' }, img ? cloneCanvas(img) : ''), h('span', { class: 'num' }, hex2(n)), name, itemBadge(app, items, 'pal-items-row')));
       }
+      if (!this.body.firstChild) this.body.append(emptyState('Kein Sprite passt zur Suche.'));
       return;
     }
     if (this.tab === 'm16') { this.buildMap16(); return; }
@@ -421,9 +432,9 @@ export class Palette {
         },
       }, h('div', { class: 'pal-img' }, th ? cloneCanvas(th) : h('span', { class: 'none' }, '–'),
         h('div', { class: 'pal-corner' }, itemBadge(app, items), enter ? h('div', { class: 'pal-enter', title: enterText(enter) }, enter) : '')),
-        h('div', { class: 'pal-label' }, label)));
+        h('div', { class: 'pal-label' }, label), h('div', { class: 'pal-name' }, objectName(s.num, s.ext))));
     }
-    this.body.appendChild(grid);
+    this.body.appendChild(grid.firstChild ? grid : emptyState('Kein Objekt passt zur Suche.'));
   }
 }
 
@@ -567,6 +578,17 @@ export class Properties {
     return h('div', { class: 'prop' }, h('label', null, label), input, extra);
   }
 
+  // what can be done with the selection (also reachable by keys)
+  actions(objects: boolean): HTMLElement {
+    const app = this.app;
+    return h('div', { class: 'row prop-actions' },
+      h('button', { title: 'Duplizieren (Strg+D)', onclick: () => app.duplicateSelection() }, 'Duplizieren'),
+      objects ? h('button', { title: 'Nach vorne – zuletzt gezeichnet (Bild↑)', onclick: () => app.reorderSelection('front') }, 'Nach vorne') : '',
+      objects ? h('button', { title: 'Nach hinten – zuerst gezeichnet (Bild↓)', onclick: () => app.reorderSelection('back') }, 'Nach hinten') : '',
+      objects ? h('button', { title: 'Die Tiles der Auswahl als Struktur speichern', onclick: () => openSaveStructure(app) }, 'Als Struktur …') : '',
+      h('button', { class: 'danger', title: 'Löschen (Entf)', onclick: () => app.deleteSelection() }, 'Löschen'));
+  }
+
   build(): void {
     const app = this.app;
     clear(this.body);
@@ -579,8 +601,8 @@ export class Properties {
     }
     if (app.mode === 'spr') {
       const sel = app.selectedSprites();
-      if (!sel.length) { this.body.appendChild(h('div', { class: 'hint' }, `${app.level.sprites.length} Sprites. Klicken zum Auswählen, Ziehen zum Verschieben.`)); return; }
-      if (sel.length > 1) { this.body.appendChild(h('div', null, `${sel.length} Sprites ausgewählt`)); return; }
+      if (!sel.length) { this.body.appendChild(emptyState(`${app.level.sprites.length} Sprites – keins ausgewählt.`)); return; }
+      if (sel.length > 1) { this.body.append(h('div', { class: 'prop-title' }, `${sel.length} Sprites ausgewählt`), this.actions(false)); return; }
       const s = sel[0];
       const upd = (f: () => void) => { app.checkpoint(); f(); app.changed(false); };
       this.body.append(
@@ -589,6 +611,7 @@ export class Properties {
         this.field('X', hexInput(s.x, 3, (v) => upd(() => (s.x = v)), app.levelWidthTiles() - 1)),
         this.field('Y', hexInput(s.y, 3, (v) => upd(() => (s.y = v)), app.levelHeightTiles() - 1)),
         this.field('Extra-Bits', hexInput(s.extra, 1, (v) => upd(() => (s.extra = v)), 3)),
+        this.actions(false),
       );
       // behaviour when hit from below or jumped on, at this position and in general (emulated)
       const p = app.spriteInfo(s.num);
@@ -602,10 +625,10 @@ export class Properties {
     }
     const sel = app.selectedObjects();
     if (!sel.length) {
-      this.body.appendChild(h('div', { class: 'hint' }, `${app.currentObjects().length} Objekte auf ${app.mode === 'l2' ? 'Layer 2' : 'Layer 1'}. Klicken zum Auswählen, Ziehen zum Verschieben, Griff unten rechts zum Skalieren.`));
+      this.body.appendChild(emptyState(`${app.currentObjects().length} Objekte auf ${app.mode === 'l2' ? 'Layer 2' : 'Layer 1'} – keins ausgewählt.`));
       return;
     }
-    if (sel.length > 1) { this.body.appendChild(h('div', null, `${sel.length} Objekte ausgewählt`)); return; }
+    if (sel.length > 1) { this.body.append(h('div', { class: 'prop-title' }, `${sel.length} Objekte ausgewählt`), this.actions(true)); return; }
     const o = sel[0];
     const upd = (f: () => void) => { app.checkpoint(); f(); app.changed(); };
     const idx = app.currentObjects().indexOf(o);
@@ -625,7 +648,8 @@ export class Properties {
       this.field('Y', hexInput(o.y, 3, (v) => upd(() => (o.y = v)), app.levelHeightTiles() - 1)),
       o.num !== 0 && ov?.type ? this.field('Typ', hexInput(objectVariant(ov, o.size), 1, (v) => upd(() => (o.size = withObjectVariant(ov, o.size, v))), ov.count - 1)) : '',
       o.num !== 0 ? this.field('Größe (Byte)', hexInput(o.size, 2, (v) => upd(() => (o.size = v)))) : '',
-      o.num !== 0 ? h('div', { class: 'hint' }, `${nibbleText(ov)}. Tasten: +/− Breite, * und / Höhe, Alt+Pfeile`) : '',
+      o.num !== 0 ? h('div', { class: 'hint' }, `${nibbleText(ov)} · Tasten: + / - Breite, * / / Höhe, Alt+Pfeile`) : '',
+      this.actions(true),
     );
     // Map16 tiles of the object and their behaviour when hit from below (emulated)
     const tiles = app.objectMap16(o);
@@ -661,7 +685,7 @@ export class Properties {
       );
       ex = e;
     }
-    this.body.appendChild(h('div', { class: 'hint' }, 'Screen per Klick in der Levelansicht wählen. Exits gelten für Türen, Rohre usw. auf diesem Screen.'));
+    this.body.appendChild(h('div', { class: 'hint' }, 'Exits gelten für Türen, Rohre usw. auf diesem Screen. Anderen Screen per Klick in der Levelansicht wählen.'));
   }
 }
 
