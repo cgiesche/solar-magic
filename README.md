@@ -64,7 +64,7 @@ Beim Anzeigen eines Levels führt er die **originalen Laderoutinen** des ROMs au
 * Statuszeile mit Objekt-/Sprite-Anzahl und Datengröße (Warnung ab 128 Sprites); **Level als PNG** exportieren (*Datei → Level als PNG*).
 * **Nachrichtenboxen** (*ROM → Nachrichtenboxen*): alle 25 Nachrichtenboxen mit Vorschau in der Spielschrift bearbeiten; passen die Texte
   nicht mehr an ihren Platz, werden sie in freien Speicher verlegt.
-* **Level testen (T):** das Level (inkl. ungespeicherter Änderungen) im eingebauten Emulator spielen.
+* **Level testen (T):** das Level (inkl. ungespeicherter Änderungen) im eingebauten Emulator spielen, mit Tastatur oder Gamepad.
 
 ### Grafik, Paletten, Map16
 * **Map16-Editor** (M): FG- und BG-Tiles des aktuellen Tilesets, pro Viertel 8x8-Tile, Palette, Flip, Priorität.

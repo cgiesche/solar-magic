@@ -16,6 +16,32 @@ const KEYMAP: Record<string, number> = {
   Enter: 0x1000, Shift: 0x2000, q: 0x0020, Q: 0x0020, w: 0x0010, W: 0x0010,
 };
 
+// Gamepad API "standard" layout, by position (an SNES-style pad lines up 1:1, an Xbox pad's bottom button is B)
+const PADMAP: [number, number][] = [
+  [0, 0x8000], [1, 0x0080], [2, 0x4000], [3, 0x0040], // bottom = B, right = A, left = Y, top = X
+  [4, 0x0020], [5, 0x0010], [6, 0x0020], [7, 0x0010], // shoulders and triggers = L / R
+  [8, 0x2000], [9, 0x1000], // Select, Start
+  [12, 0x0800], [13, 0x0400], [14, 0x0200], [15, 0x0100], // d-pad
+];
+const PAD_PAUSE = 16; // home / guide button
+
+// buttons of all connected gamepads; pause: the pause button is held on one of them
+function readPads(): { bits: number; pause: boolean; names: string[] } {
+  let bits = 0, pause = false;
+  const names: string[] = [];
+  for (const p of navigator.getGamepads?.() ?? []) {
+    if (!p || !p.connected) continue;
+    names.push(p.id.replace(/\s*\(.*$/, '') || `Gamepad ${p.index + 1}`);
+    const pressed = (i: number) => !!p.buttons[i]?.pressed;
+    for (const [i, bit] of PADMAP) if (pressed(i)) bits |= bit;
+    if (pressed(PAD_PAUSE)) pause = true;
+    const ax = p.axes[0] ?? 0, ay = p.axes[1] ?? 0;
+    if (ax < -0.5) bits |= 0x0200; else if (ax > 0.5) bits |= 0x0100;
+    if (ay < -0.5) bits |= 0x0800; else if (ay > 0.5) bits |= 0x0400;
+  }
+  return { bits, pause, names };
+}
+
 let testEmu: LevelEmulator | null = null;
 
 // at: Mario's start tile (his feet stand in it) instead of the main entrance
@@ -61,6 +87,8 @@ export function openTestPlay(app: App, at?: { tx: number; ty: number }): void {
   let last = performance.now();
   let acc = 0;
   let frames = 0;
+  let padPause = false;
+  let padNames: string[] = [];
   const onKey = (down: boolean) => (e: KeyboardEvent) => {
     const bit = KEYMAP[e.key];
     if (e.key === 'p' || e.key === 'P') { if (down) paused = !paused; e.preventDefault(); return; }
@@ -76,11 +104,15 @@ export function openTestPlay(app: App, at?: { tx: number; ty: number }): void {
     if (!running) return;
     acc += Math.min(100, t - last);
     last = t;
+    const pad = readPads();
+    if (pad.pause && !padPause) paused = !paused;
+    padPause = pad.pause;
+    padNames = pad.names;
     let n = 0;
     while (acc >= 1000 / 60 && n < 4) {
       acc -= 1000 / 60;
       if (!paused) {
-        s.joy1 = keys;
+        s.joy1 = keys | pad.bits;
         try { s.runFrame(); } catch (e) { info.textContent = `Emulationsfehler: ${e}`; paused = true; }
         frames++;
       }
@@ -88,7 +120,8 @@ export function openTestPlay(app: App, at?: { tx: number; ty: number }): void {
     }
     new Uint32Array(img.data.buffer).set(ppu.frame);
     ctx.putImageData(img, 0, 0);
-    info.textContent = `Level ${hex(lv.number, 3)} · Frame ${frames}${paused ? ' · Pause' : ''} · Spielmodus ${hex(s.wram[0x100], 2)}`;
+    info.textContent = `Level ${hex(lv.number, 3)} · Frame ${frames}${paused ? ' · Pause' : ''} · Spielmodus ${hex(s.wram[0x100], 2)}`
+      + (padNames.length ? ` · Gamepad: ${padNames.join(', ')}` : ' · Gamepad: keins erkannt (eine Taste drücken)');
     schedule();
   };
   // requestAnimationFrame pauses in hidden tabs; fall back to timers there
@@ -104,7 +137,7 @@ export function openTestPlay(app: App, at?: { tx: number; ty: number }): void {
   const m = modal(`Level testen – ${hex(lv.number, 3)}${at ? ` ab ${hex(at.tx, 2)}/${hex(at.ty, 2)}` : ''}${r.ok ? '' : ' (Ladefehler)'}`, h('div', { class: 'play' },
     canvas,
     info,
-    h('div', { class: 'hint' }, 'Steuerung: Pfeile · X = Springen (B) · Z/Y = Rennen/Feuer (Y) · A = Drehsprung · S = X-Taste · Enter = Start · Shift = Select · Q/W = L/R · P = Pause. Ohne Ton. Ungespeicherte Änderungen werden mitgetestet.'),
+    h('div', { class: 'hint' }, 'Steuerung: Pfeile · X = Springen (B) · Z/Y = Rennen/Feuer (Y) · A = Drehsprung · S = X-Taste · Enter = Start · Shift = Select · Q/W = L/R · P = Pause. Gamepad: Steuerkreuz/linker Stick, Tasten nach Position wie beim SNES-Pad (unten = B, rechts = A, links = Y, oben = X), Schultertasten/Trigger = L/R, Start/Select, Home = Pause. Ohne Ton. Ungespeicherte Änderungen werden mitgetestet.'),
   ), [{ label: 'Neu starten', onClick: () => { setTimeout(() => openTestPlay(app, at), 0); } }, { label: 'Beenden', primary: true }], stop);
   void m;
   canvas.focus();
