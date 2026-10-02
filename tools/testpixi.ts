@@ -4,7 +4,11 @@ import { readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
 import { loadLevel, parseSprites, serializeSprites, spriteSizes, SPR_SIZE_PTR, newUid, type LevelSprite } from '../src/core/level.ts';
 import { exportLevelFile, importLevelFile } from '../src/core/levelfile.ts';
+import { LevelEmulator } from '../src/core/levelemu.ts';
+import { loadAsar } from '../src/core/asar.ts';
+import { savePixiProject, removePixi, loadPixiProject, parsePixiList, parseCfg, parseJsonCfg, type PixiProject } from '../src/core/pixi.ts';
 
+await loadAsar();
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
 const same = (a: ArrayLike<number>, b: ArrayLike<number>) => a.length === b.length && Array.from(a).every((v, i) => v === b[i]);
@@ -44,6 +48,104 @@ const imp = importLevelFile(plain, file, loadLevel(plain, 0x105)).level;
 const custom = imp.sprites.filter((s) => s.extra >= 2);
 check(imp.sprites.length === lv.sprites.length && custom.length === 2 && same(custom[0].bytes ?? [], [0xaa]),
   'level file imported into a ROM without the table keeps sprites and bytes');
+
+// ---- cfg / json
+const cfg = parseCfg('01\n36\n00 00 3B 80 00 00\n12 34\nmarker.asm\n01:03\n', 'sprites/marker.cfg');
+check(cfg.type === 1 && cfg.actlike === 0x36 && cfg.tweak[2] === 0x3b && cfg.tweak[3] === 0x80 && cfg.prop[0] === 0x12 && cfg.asm === 'sprites/marker.asm' && cfg.bytes === 1 && cfg.bytesExtra === 3, 'cfg parsed');
+const old = parseCfg('01\n36\n00 00 3B 80 00 00\n00 00\nmarker.asm\n2\n', 'sprites/old.cfg');
+check(old.bytes === 0 && old.bytesExtra === 0, 'old cfg (assembler byte): no extra bytes');
+const js = parseJsonCfg(JSON.stringify({ $1656: { 'Object Clipping': 3, 'Can be jumped on': true }, $166E: { Palette: 4, 'Use second graphics page': true }, AsmFile: 'x.asm', ActLike: 28, Type: 1,
+  'Extra Property Byte 1': 5, 'Extra Property Byte 2': 0, 'Additional Byte Count (extra bit clear)': 1, 'Additional Byte Count (extra bit set)': 2,
+  Collection: [{ Name: 'Brutal Bill', ExtraBit: false }], Displays: [{ Description: 'A Brutal Bill.\\n\nhoming' }] }), 'sprites/b.json');
+check(js.tweak[0] === 0x13 && js.tweak[2] === 0x09 && js.actlike === 28 && js.bytes === 1 && js.bytesExtra === 2 && js.names[0].name === 'Brutal Bill' && js.asm === 'sprites/x.asm', 'json parsed (tweaker bits, collection)');
+
+// ---- a custom sprite running in the game
+// INIT: marker $7FB000 = $11, MAIN: counts $7FB001, copies extra byte 1 to $7FB002 and draws one tile
+const marker = `print "INIT ",pc
+  LDA #$11 : STA $7FB000
+  RTL
+print "MAIN ",pc
+  PHB : PHK : PLB
+  LDA $7FB001 : INC : STA $7FB001
+  LDA !extra_byte_1,x : STA $7FB002
+  LDA !new_sprite_num,x : STA $7FB003
+  LDA !9E,x : STA $7FB004
+  JSR Gfx
+  PLB
+  RTL
+Gfx:
+  %GetDrawInfo()
+  LDA $00 : STA $0300|!addr,y
+  LDA $01 : STA $0301|!addr,y
+  LDA #$80 : STA $0302|!addr,y
+  LDA #$21 : STA $0303|!addr,y
+  TYA : LSR #2 : TAY
+  LDA #$02 : STA $0460|!addr,y
+  RTS
+`;
+const project: PixiProject = {
+  files: new Map(Object.entries({
+    'sprites/marker.cfg': '01\n36\n00 00 3B 80 00 00\n12 34\nmarker.asm\n01:03\n',
+    'sprites/marker.asm': marker,
+    'sprites/kill.cfg': '01\n36\n00 00 3B 80 00 00\n00 00\nkill.asm\n03:03\n', // erases itself in INIT
+    'sprites/kill.asm': 'print "INIT ",pc\n  STZ !14C8,x\n  RTL\nprint "MAIN ",pc\n  RTL\n',
+  }).map(([k, v]) => [k, new TextEncoder().encode(v)])),
+  list: parsePixiList('10 marker.cfg\n11 kill.cfg\n'),
+};
+const prom = new Rom(new Uint8Array(readFileSync('Super Mario World (U) [!].smc')));
+const res = savePixiProject(prom, project);
+if (!res.ok) console.log(res.errors.join('\n'));
+check(res.ok, 'project assembled and applied');
+const psz = spriteSizes(prom);
+check(!!psz && psz[0x210] === 4 && psz[0x310] === 6 && psz[0x010] === 3, 'size table installed at $0EF30C');
+check(loadPixiProject(prom)?.list.length === 2, 'project stored in the ROM');
+const pemu = new LevelEmulator(prom); pemu.boot();
+const plv = loadLevel(prom, 0x105);
+const W = (a: number) => pemu.snes.wram[a - 0x7e0000];
+const runWith = (spr: LevelSprite[]) => {
+  plv.sprites = spr;
+  const r = pemu.load(0x105, { sprites: serializeSprites(plv.sprites, plv.spriteHeader, false, spriteSizes(prom)) });
+  for (let i = 0; i < 40; i++) pemu.snes.runFrame(); // past the fade-in
+  return r;
+};
+const ld = runWith([{ uid: newUid(), num: 0x10, x: 6, y: 0x16, extra: 2, bytes: [0x5a] }]);
+check(ld.ok, 'level with the custom sprite loads');
+check(W(0x7fb000) === 0x11, 'INIT ran');
+check(W(0x7fb001) > 10, `MAIN runs (${W(0x7fb001)} frames)`);
+check(W(0x7fb002) === 0x5a && W(0x7fb003) === 0x10 && W(0x7fb004) === 0x36, 'extra byte, custom number and acts like seen by MAIN');
+
+// many sprites with extra bytes: each frame the loader scans the sprite data from the start for the
+// column entering the screen; once Mario has run right, the sprite behind 30 entries of 6 bytes
+// (which erase themselves) is found past byte $80, the loader having moved its pointer
+const many: LevelSprite[] = [];
+for (let i = 0; i < 30; i++) many.push({ uid: newUid(), num: 0x11, x: 1 + (i >> 1), y: 0x10 + (i & 1), extra: 2, bytes: [i, 0, 0] });
+many.push({ uid: newUid(), num: 0x10, x: 40, y: 0x16, extra: 2, bytes: [0x77] });
+pemu.snes.wram.fill(0, 0x1b000, 0x1b010);
+runWith(many);
+check(W(0x7fb000) === 0, 'sprite behind the screen not loaded yet');
+for (let i = 0; i < 300 && !W(0x7fb000); i++) { pemu.snes.joy1 = 0x4100; pemu.snes.runFrame(); } // run right
+pemu.snes.joy1 = 0;
+for (let i = 0; i < 4; i++) pemu.snes.runFrame();
+check(W(0x7fb000) === 0x11 && W(0x7fb002) === 0x77, 'a sprite past byte $80 of the sprite data loads with its extra byte');
+// vanilla sprites still work next to custom ones
+const vrom = new Rom(new Uint8Array(readFileSync('Super Mario World (U) [!].smc')));
+const vemu = new LevelEmulator(vrom); vemu.boot();
+const vlv = loadLevel(vrom, 0x105);
+const a = vemu.load(0x105, { sprites: serializeSprites(vlv.sprites, vlv.spriteHeader, false) });
+for (let i = 0; i < 60; i++) vemu.snes.runFrame();
+plv.sprites = vlv.sprites;
+const b2 = pemu.load(0x105, { sprites: serializeSprites(plv.sprites, plv.spriteHeader, false, spriteSizes(prom)) });
+for (let i = 0; i < 60; i++) pemu.snes.runFrame();
+const live = (w: Uint8Array) => Array.from({ length: 12 }, (_, i) => [0x14c8, 0x9e, 0xe4, 0xd8, 0x14e0, 0x14d4, 0x161a].map((t) => w[t + i]).join(':')).join(' ') + ' ' + Array.from(w.subarray(0x1938, 0x1938 + 0x40)).join('');
+check(a.ok && b2.ok && live(vemu.snes.wram) === live(pemu.snes.wram), 'vanilla level 105 runs the same with the runtime installed');
+
+// removing restores the ROM
+const w = removePixi(prom);
+check(w.length === 0 && spriteSizes(prom) === null, 'removed: no size table');
+const orig = new Uint8Array(readFileSync('Super Mario World (U) [!].smc'));
+let diff = 0;
+for (let i = 0; i < Math.min(orig.length - 512, prom.data.length); i++) if (prom.data[i] !== orig[i + 512] && i !== 0x7fd7) diff++; // ROM size: stays expanded
+check(diff === 0, `removed: ROM as before (${diff} bytes differ)`);
 
 console.log(bad ? `${bad} FAILED` : 'all ok');
 if (bad) process.exit(1);

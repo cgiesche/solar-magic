@@ -5,7 +5,7 @@
 // the patch is recorded in the registry (patchreg.ts) with the original bytes of its segments.
 
 import { Rom, snesToPc, pcToSnes, RESERVED_TOP, type RatsBlock } from './rom.ts';
-import { assemble, type AsarMessage } from './asar.ts';
+import { assemble, type AsarMessage, type AsarResult } from './asar.ts';
 import { editorPatch, customPalettePatch, bgPatch, extGfxPatch, SPR_BANK_HOOK, BG_HOOK, EXT_GFX_HOOK } from './patches.ts';
 import { messagePatch } from './messages.ts';
 import { map16Ext } from './map16ext.ts';
@@ -68,8 +68,11 @@ export interface PatchSource {
   files: Map<string, Uint8Array | string>;
   defines?: Record<string, string>; // passed to Asar
   settings?: Record<string, string>; // all settings chosen by the user (stored in the registry)
-  kind?: 'patch' | 'uberasm' | 'blocks' | 'vram';
+  kind?: 'patch' | 'uberasm' | 'blocks' | 'vram' | 'pixi';
   archive?: Uint8Array; // sources to keep in the ROM (zip)
+  // further Asar runs on the result of the previous ones, all recorded as this one patch (PIXI assembles
+  // each sprite on its own); called with the results so far, null when done
+  next?: (done: AsarResult[]) => { main: string; files?: Map<string, Uint8Array | string> } | null;
 }
 
 export interface ApplyResult {
@@ -79,6 +82,7 @@ export interface ApplyResult {
   prints: string[];
   entry?: PatchEntry;
   labels?: Record<string, number>;
+  steps?: AsarResult[]; // each Asar run (one unless the source has `next`)
   asar?: { errors: AsarMessage[]; warnings: AsarMessage[] };
 }
 
@@ -129,23 +133,40 @@ export function applyPatch(rom: Rom, src: PatchSource): ApplyResult {
   const defines = { sa1: '0', smwe: '1', ...(src.defines ?? {}) };
   const before = rom.data;
   const beforeRats = rom.scanRats();
-  let input = before.slice();
-  let saved = reserveTop(input);
   const files = new Map(src.files);
   if (!files.has('smwe.asm')) files.set('smwe.asm', editorInclude(rom));
-  let r = assemble(input, files, src.main, defines);
+  // all runs on input; the last result, or the failed one
+  const runAll = (input: Uint8Array): { r: AsarResult; steps: AsarResult[] } => {
+    const steps: AsarResult[] = [];
+    const fs = new Map(files);
+    let main = src.main;
+    for (;;) {
+      const r = assemble(input, fs, main, defines);
+      steps.push(r);
+      if (!r.ok) return { r, steps };
+      const nx = src.next?.(steps);
+      if (!nx) return { r, steps };
+      for (const [k, v] of nx.files ?? []) fs.set(k, v);
+      main = nx.main;
+      input = r.rom;
+    }
+  };
+  let input = before.slice();
+  let saved = reserveTop(input);
+  let { r, steps } = runAll(input);
   // Asar expanded the ROM to 4 MB and used the reserved banks: run again with them blocked
-  if (r.ok && !saved && r.rom.length > RESERVED_TOP && r.blocks.some((b) => b.pc + b.size > RESERVED_TOP)) {
+  if (r.ok && !saved && r.rom.length > RESERVED_TOP && steps.some((x) => x.blocks.some((b) => b.pc + b.size > RESERVED_TOP))) {
     input = new Uint8Array(0x400000);
     input.set(before);
     input[0x7fd7] = 0x0c;
     saved = reserveTop(input);
-    r = assemble(input, files, src.main, defines);
+    ({ r, steps } = runAll(input));
   }
+  const prints = steps.flatMap((x) => x.prints);
   const fail = (errors: string[], warnings: string[] = []): ApplyResult => ({
-    ok: false, errors, warnings, prints: r.prints, asar: { errors: r.errors, warnings: r.warnings },
+    ok: false, errors, warnings, prints, steps, asar: { errors: r.errors, warnings: r.warnings },
   });
-  if (!r.ok) return fail(r.errors.map((e) => e.full));
+  if (!r.ok) return fail(r.errors.map((e) => e.full), steps.flatMap((x) => x.warnings.map((w) => w.full)));
   const out = r.rom;
   if (saved) out.set(saved, RESERVED_TOP);
 
@@ -155,13 +176,18 @@ export function applyPatch(rom: Rom, src: PatchSource): ApplyResult {
   const ownRanges: [number, number][] = own.map((b) => [b.start, b.size + 8]);
 
   const segs: [number, number][] = [];
-  for (const b of r.blocks) {
+  for (const b of steps.flatMap((x) => x.blocks)) {
     for (const s of subtract([b.pc, b.size], [...ownRanges, ...IGNORE])) segs.push(s);
   }
+  // merge overlapping writes of several runs
   segs.sort((a, b) => a[0] - b[0]);
+  for (let i = 1; i < segs.length; i++) {
+    const p = segs[i - 1], c = segs[i];
+    if (c[0] <= p[0] + p[1]) { p[1] = Math.max(p[1], c[0] + c[1] - p[0]); segs.splice(i--, 1); }
+  }
 
   const errors: string[] = [];
-  const warnings = r.warnings.map((w) => w.full);
+  const warnings = steps.flatMap((x) => x.warnings.map((w) => w.full));
   const others = listPatches(rom);
   for (const s of segs) {
     const where = `${pcHex(s[0])} (${s[1]} Bytes)`;
@@ -197,7 +223,7 @@ export function applyPatch(rom: Rom, src: PatchSource): ApplyResult {
     check: patchedHash(after, segs),
     kind: src.kind,
   }, original, src.archive);
-  return { ok: true, errors: [], warnings, prints: r.prints, entry, labels: r.labels, asar: { errors: [], warnings: r.warnings } };
+  return { ok: true, errors: [], warnings, prints, entry, labels: Object.assign({}, ...steps.map((x) => x.labels)), steps, asar: { errors: [], warnings: r.warnings } };
 }
 
 // Restores the original bytes and frees the patch's free space. Returns warnings; throws if a patch
