@@ -6,6 +6,7 @@ import { loadLevel, parseSprites, serializeSprites, spriteSizes, SPR_SIZE_PTR, n
 import { exportLevelFile, importLevelFile } from '../src/core/levelfile.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadAsar } from '../src/core/asar.ts';
+import { ROUTINES } from '../src/core/pixiroutines.ts';
 import { savePixiProject, removePixi, loadPixiProject, parsePixiList, parseCfg, parseJsonCfg, type PixiProject } from '../src/core/pixi.ts';
 
 await loadAsar();
@@ -138,6 +139,64 @@ const b2 = pemu.load(0x105, { sprites: serializeSprites(plv.sprites, plv.spriteH
 for (let i = 0; i < 60; i++) pemu.snes.runFrame();
 const live = (w: Uint8Array) => Array.from({ length: 12 }, (_, i) => [0x14c8, 0x9e, 0xe4, 0xd8, 0x14e0, 0x14d4, 0x161a].map((t) => w[t + i]).join(':')).join(' ') + ' ' + Array.from(w.subarray(0x1938, 0x1938 + 0x40)).join('');
 check(a.ok && b2.ok && live(vemu.snes.wram) === live(pemu.snes.wram), 'vanilla level 105 runs the same with the runtime installed');
+
+// math routines computed in the game: CircleX/Y/XY, Aiming, Random
+{
+  const math = `print "INIT ",pc
+  RTL
+print "MAIN ",pc
+  LDA $7FB0FF : BEQ + : RTL
++ LDA #$01 : STA $7FB0FF
+  ; CircleX/CircleY: angle $040 (45°), radius $40 → $7FB010/$7FB012
+  REP #$20 : LDA #$0040 : STA $04 : SEP #$20 : LDA #$40 : STA $06
+  %CircleX() : REP #$20 : LDA $07 : STA $7FB010 : SEP #$20
+  %CircleY() : REP #$20 : LDA $09 : STA $7FB012 : SEP #$20
+  ; CircleXY: angle $180 (270°), radius $30 → $7FB014/$7FB016
+  LDA #$80 : SEC : LDY #$30 : %CircleXY()
+  REP #$20 : LDA $07 : STA $7FB014 : LDA $09 : STA $7FB016 : SEP #$20
+  ; Aiming: shooter 30 px right of and 40 px below the target, speed $20 → $7FB018/$7FB019
+  REP #$20 : LDA #$001E : STA $00 : LDA #$0028 : STA $02 : SEP #$20
+  LDA #$20 : %Aiming()
+  LDA $00 : STA $7FB018 : LDA $02 : STA $7FB019
+  ; Random: 64 numbers 0-5, largest → $7FB01A
+  LDA #$00 : STA $7FB01A
+  LDY #$40
+- LDA #$05 : %Random() : CMP $7FB01A : BCC + : STA $7FB01A
++ DEY : BNE -
+  RTL
+`;
+  const r3 = new Rom(new Uint8Array(readFileSync('Super Mario World (U) [!].smc')));
+  const res3 = savePixiProject(r3, { files: new Map([
+    ['sprites/math.cfg', new TextEncoder().encode('01\n36\n00 00 3B 80 00 00\n00 00\nmath.asm\n00:00\n')],
+    ['sprites/math.asm', new TextEncoder().encode(math)],
+  ]), list: parsePixiList('00 math.cfg\n') });
+  if (!res3.ok) console.log(res3.errors.join('\n'));
+  const e3 = new LevelEmulator(r3); e3.boot();
+  const l3 = loadLevel(r3, 0x105);
+  l3.sprites = [{ uid: newUid(), num: 0x00, x: 6, y: 0x16, extra: 2 }];
+  e3.load(0x105, { sprites: serializeSprites(l3.sprites, l3.spriteHeader, false, spriteSizes(r3)) });
+  for (let i = 0; i < 40; i++) e3.snes.runFrame();
+  const w3 = (a: number) => e3.snes.wram[a - 0x7e0000];
+  const s16 = (a: number) => { const v = w3(a) | (w3(a + 1) << 8); return v >= 0x8000 ? v - 0x10000 : v; };
+  const s8 = (a: number) => (w3(a) >= 0x80 ? w3(a) - 0x100 : w3(a));
+  check(res3.ok && w3(0x7fb0ff) === 1, 'math sprite ran');
+  check(Math.abs(s16(0x7fb010) - 45) <= 1 && Math.abs(s16(0x7fb012) - 45) <= 1, `CircleX/Y at 45°, radius 64: ${s16(0x7fb010)}, ${s16(0x7fb012)} (≈45)`);
+  check(s16(0x7fb014) === 0 && s16(0x7fb016) === -48, `CircleXY at 270°, radius 48: ${s16(0x7fb014)}, ${s16(0x7fb016)} (0, -48)`);
+  check(Math.abs(s8(0x7fb018) + 19) <= 1 && Math.abs(s8(0x7fb019) + 26) <= 1, `Aiming towards the target: ${s8(0x7fb018)}, ${s8(0x7fb019)} (≈-19, -26)`);
+  check(w3(0x7fb01a) === 5, `Random 0-5 reaches 5 and no more (${w3(0x7fb01a)})`);
+}
+
+// every built-in routine assembles (called from code that never runs)
+{
+  const all = Object.keys(ROUTINES).filter((n) => !n.startsWith('Pixi'));
+  const r2 = new Rom(new Uint8Array(readFileSync('Super Mario World (U) [!].smc')));
+  const res2 = savePixiProject(r2, { files: new Map([
+    ['sprites/all.cfg', new TextEncoder().encode('01\n36\n00 00 3B 80 00 00\n00 00\nall.asm\n00:00\n')],
+    ['sprites/all.asm', new TextEncoder().encode('print "INIT ",pc\nprint "MAIN ",pc\n  RTL\n' + all.map((n) => `  %${n}()`).join('\n') + '\n')],
+  ]), list: parsePixiList('00 all.cfg\n') });
+  if (!res2.ok) console.log(res2.errors.slice(0, 20).join('\n'));
+  check(res2.ok, `all ${all.length} shared routines assemble`);
+}
 
 // removing restores the ROM
 const w = removePixi(prom);
