@@ -8,6 +8,7 @@ import { loadAsar } from '../core/asar.ts';
 import type { ApplyResult } from '../core/patchapply.ts';
 import type { PatchPackage } from '../core/patchpkg.ts';
 import { hex } from '../core/names.ts';
+import { definesButton } from './defineedit.ts';
 import { map16Source } from '../core/render.ts';
 import { EXT_TILES } from '../core/map16ext.ts';
 import {
@@ -83,12 +84,13 @@ export async function openPixiDialog(app: App, onDone?: () => void): Promise<voi
     const label = (e: { kind: SpriteFolder; file: string }) => {
       try { const c = spriteConfig(proj, { ...e, num: 0 }); return c.names[0]?.name ?? ''; } catch (err) { return `Fehler: ${err instanceof Error ? err.message : err}`; }
     };
+    const asmOf = (e: { kind: SpriteFolder; file: string }) => { try { return spriteConfig(proj, { ...e, num: 0 }).asm ?? e.file; } catch { return e.file; } };
     const rows = [...proj.list].sort((a, b) => KINDS.indexOf(a.kind) - KINDS.indexOf(b.kind) || a.num - b.num).map((e) => h('tr', null,
       h('td', null, KIND_LABEL[e.kind]),
       h('td', { class: 'mono' }, hex(e.num, 2)),
       h('td', { class: proj.files.has(e.file) ? '' : 'err' }, e.file.slice(FOLDER[e.kind].length)),
       h('td', null, label(e)),
-      h('td', null, h('button', { class: 'icon-btn', title: 'Entfernen', onclick: () => { proj.list = proj.list.filter((x) => x !== e); change(); } }, '✕'))));
+      h('td', null, definesButton(proj.files, asmOf(e), change), h('button', { class: 'icon-btn', title: 'Entfernen', onclick: () => { proj.list = proj.list.filter((x) => x !== e); change(); } }, '✕'))));
     let folder: SpriteFolder | 'routines' = 'sprites';
     const addFile = async () => {
       const f = await pickFile('.asm,.json,.cfg,.bin,.zip');
@@ -119,6 +121,7 @@ export async function openPixiDialog(app: App, onDone?: () => void): Promise<voi
         h('button', { onclick: add }, 'Eintragen')),
       h('h3', null, 'Projektdateien'),
       h('div', { class: 'uber-files' }, other.length ? other.map((f) => h('div', { class: 'row' }, h('span', { class: 'mono' }, f),
+        definesButton(proj.files, f, change),
         h('button', { class: 'icon-btn', title: 'Datei löschen', onclick: () => { proj.files.delete(f); change(); } }, '✕'))) : h('p', { class: 'hint' }, 'Keine Dateien.')),
       dirty ? h('p', { class: 'hint' }, 'Nicht übernommene Änderungen.') : '',
       log,

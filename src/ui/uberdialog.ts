@@ -8,6 +8,7 @@ import { unzipSync } from 'fflate';
 import { loadProject, saveProject, emptyProject, projectFromZip, projectToZip, type UberProject } from '../core/uberproject.ts';
 import { resourceFiles, ALL, CONTEXT_SIZE, type UberContext, type UberCall } from '../core/uberasm.ts';
 import { hex } from '../core/names.ts';
+import { definesButton } from './defineedit.ts';
 
 const CTX_LABEL: Record<UberContext, string> = { level: 'Level', overworld: 'Overworld-Karten', gamemode: 'Game Modes' };
 const FOLDERS = ['level/', 'overworld/', 'gamemode/', 'library/', 'routines/', 'other/'];
@@ -76,7 +77,7 @@ export async function openUberDialog(app: App, onDone?: () => void): Promise<voi
       h('td', null, i === 0 ? (num === ALL ? '*' : hex(num, digits)) : ''),
       h('td', { class: files().has(c.file) ? '' : 'err' }, c.file.replace(/^(level|overworld|gamemode)\//, '')),
       h('td', { class: 'mono' }, bytesText(c.bytes)),
-      h('td', null, h('button', { class: 'icon-btn', title: 'Entfernen', onclick: () => { calls.splice(i, 1); if (!calls.length) map.delete(num); change(); } }, '✕')),
+      h('td', null, definesButton(files(), c.file, change), h('button', { class: 'icon-btn', title: 'Entfernen', onclick: () => { calls.splice(i, 1); if (!calls.length) map.delete(num); change(); } }, '✕')),
     )));
     // new assignment
     let num = ctx === 'level' ? app.level.number : 0;
@@ -138,6 +139,7 @@ export async function openUberDialog(app: App, onDone?: () => void): Promise<voi
     return h('div', null,
       h('div', { class: 'uber-files' }, list.length ? list.map((f) => h('div', { class: 'row' },
         h('span', { class: 'mono' }, f),
+        definesButton(files(), f, change),
         h('button', { class: 'icon-btn', title: 'Datei löschen', onclick: () => { files().delete(f); change(); } }, '✕'))) : h('p', { class: 'hint' }, 'Keine Dateien.')),
       h('div', { class: 'row' },
         select(FOLDERS.map((f, i) => [i, f] as [number, string]), 0, (i) => (folder = FOLDERS[i])),

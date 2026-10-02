@@ -9,6 +9,7 @@ import { loadBlockProject, saveBlockProject, projectFromZip, projectToZip, block
 import { EXT_TILES } from '../core/map16ext.ts';
 import { map16Source } from '../core/render.ts';
 import { hex } from '../core/names.ts';
+import { definesButton } from './defineedit.ts';
 import type { Rom } from '../core/rom.ts';
 
 // block file per tile of the ROM's block project (cached per registry entry)
@@ -71,7 +72,7 @@ export async function openBlockDialog(app: App, tile = 0x200, onDone?: () => voi
       h('td', { class: 'mono' }, hex(b.tile, 3)),
       h('td', { class: proj.files.has(b.file) ? '' : 'err' }, b.file.replace(/^blocks\//, '')),
       h('td', { class: 'mono' }, b.acts !== undefined ? hex(b.acts, 3) : '–'),
-      h('td', null, h('button', { class: 'icon-btn', title: 'Entfernen', onclick: () => { proj.list = proj.list.filter((x) => x !== b); change(); } }, '✕'))));
+      h('td', null, definesButton(proj.files, b.file, change), h('button', { class: 'icon-btn', title: 'Entfernen', onclick: () => { proj.list = proj.list.filter((x) => x !== b); change(); } }, '✕'))));
     const other = [...proj.files.keys()].sort();
     let folder = 'blocks/';
     const addFile = async () => {
@@ -101,6 +102,7 @@ export async function openBlockDialog(app: App, tile = 0x200, onDone?: () => voi
         h('button', { onclick: add }, 'Zuordnen')),
       h('h3', null, 'Projektdateien'),
       h('div', { class: 'uber-files' }, other.length ? other.map((f) => h('div', { class: 'row' }, h('span', { class: 'mono' }, f),
+        definesButton(proj.files, f, change),
         h('button', { class: 'icon-btn', title: 'Datei löschen', onclick: () => { proj.files.delete(f); change(); } }, '✕'))) : h('p', { class: 'hint' }, 'Keine Dateien.')),
       dirty ? h('p', { class: 'hint' }, 'Nicht übernommene Änderungen.') : '',
       log,
