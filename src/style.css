@@ -323,6 +323,8 @@ body.mt-dragging .mt-big { outline: 2px dashed var(--accent); }
 .gt-gal-item { display: flex; flex-direction: column; gap: 2px; padding: 5px; border: 1px solid var(--border); border-radius: 5px; cursor: pointer; background: #1b1d22; }
 .gt-gal-item:hover { border-color: var(--accent); }
 .gt-gal-item.active { border-color: var(--accent); background: #1c2a36; }
+.gt-gal-new { border-style: dashed; }
+.gt-gal-new .gt-gal-none { font-size: 22px; }
 .gt-gal-img { width: 128px; height: 32px; image-rendering: pixelated; background: #111; }
 .gt-gal-none { width: 128px; height: 32px; display: flex; align-items: center; justify-content: center; color: var(--muted); background: #111; }
 .gt-zoom { width: 140px; }

@@ -5,10 +5,11 @@
 
 import type { App } from '../app.ts';
 import type { GfxWorkspace, WsPanel } from '../gfxworkspace.ts';
-import { menuButton } from '../menu.ts';
+import { menuButton, type MenuItem } from '../menu.ts';
 import { h, clear, toast, downloadBytes, pickFile, modal, choose, attachPanZoom } from '../dom.ts';
 
 const ZOOM_STEPS = [1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24, 32];
+const NEW_FILE = -2, IMPORT_FILE = -3; // gallery picks besides a file number (-1: default)
 import { lz2Decompress, lz2Compress } from '../../core/lz2.ts';
 import { decodeTile, encodeTile, cgramToRGBA } from '../../core/gfx.ts';
 import { snesToPc, type Rom } from '../../core/rom.ts';
@@ -146,7 +147,7 @@ export class GfxTab implements WsPanel {
       this.cards,
       h('div', { class: 'gt-main' },
         h('div', { class: 'gt-files' }, search, h('label', { class: 'toggle' }, only, 'nur vom Level benutzt'), this.list,
-          h('button', { onclick: () => this.newExGfx(), title: 'Leere 4bpp-Datei in der ersten freien ExGFX-Nummer anlegen' }, '+ Neue ExGFX')),
+          h('button', { onclick: () => void this.newExGfx(), title: 'Leere 4bpp-Datei in der ersten freien ExGFX-Nummer anlegen' }, '+ Neue ExGFX')),
         this.view,
         this.side));
     this.attachCanvas();
@@ -340,7 +341,12 @@ export class GfxTab implements WsPanel {
       class: `gt-gal-item${num === (s.custom ? s.file : -1) ? ' active' : ''}`,
       onclick: () => { done(num); dlg.close(); },
     }, img ?? h('div', { class: 'gt-gal-none' }, '—'), h('b', { class: 'mono' }, label), h('span', { class: 'hint' }, sub));
-    grid.append(item(-1, s.ext ? 'keine' : `Standard (${gfxName(s.def)})`, s.ext ? 'Slot frei lassen' : 'aus Tileset/Sprite-Set'));
+    grid.append(item(-1, s.ext ? 'keine' : `Standard (${gfxName(s.def)})`, s.ext ? 'Slot frei lassen' : s.sprite ? 'aus der Sprite-Grafik im Header' : 'aus dem Tileset im Header'));
+    const extra = (code: number, label: string, sub: string) => h('div', { class: 'gt-gal-item gt-gal-new', onclick: () => { done(code); dlg.close(); } },
+      h('div', { class: 'gt-gal-none' }, '+'), h('b', null, label), h('span', { class: 'hint' }, sub));
+    if (this.freeExGfx() >= 0) grid.append(
+      extra(NEW_FILE, 'Neue ExGFX', 'leer anlegen und hier einsetzen'),
+      extra(IMPORT_FILE, 'Importieren …', '.bin oder .png in eine freie Nummer, hier einsetzen'));
     for (let i = 0; i < n; i++) {
       if (!gfxEntry(app.rom, i)) continue;
       const c = h('canvas', { width: 128, height: 32, class: 'gt-gal-img' });
@@ -353,7 +359,17 @@ export class GfxTab implements WsPanel {
     const dlg = modal(`${s.name} von Level ${hex(app.level.number, 3)}: Grafik wählen`, h('div', { class: 'gt-gallery-wrap' }, grid), [{ label: 'Abbrechen' }], () => done(null));
     const pick = await result;
     if (pick === null) return;
-    const v = pick < 0 ? 0xff : pick;
+    if (pick === NEW_FILE || pick === IMPORT_FILE) {
+      const n = pick === NEW_FILE ? this.newExGfx(false) : await this.importNew();
+      if (n !== null) await this.assignSlot(s, n);
+      return;
+    }
+    await this.assignSlot(s, pick < 0 ? 0xff : pick);
+  }
+
+  // puts a file into a slot of the current level (0xff: the default / empty)
+  private async assignSlot(s: Slot, v: number): Promise<void> {
+    const app = this.app;
     if (v === (s.custom ? s.file : 0xff)) return;
     if (!s.ext && !hasEditorPatch(app.rom)) {
       const ok = await choose('Editor-Patch installieren?', 'Eigene Grafik pro Level braucht den Editor-Patch (wird einmalig installiert, wie bei Direct-Map16).', [{ label: 'Abbrechen' }, { label: 'Installieren', primary: true }]);
@@ -424,17 +440,35 @@ export class GfxTab implements WsPanel {
     } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
   }
 
-  private newExGfx(): void {
+  // first free ExGFX number (80-FF first, then 32-7F), -1: none
+  private freeExGfx(): number {
+    const rom = this.app.rom;
+    for (let i = 0x80; i < 0x100; i++) if (!hasEditorPatch(rom) || !gfxEntry(rom, i)) return i;
+    for (let i = VANILLA_GFX; i < 0x80; i++) if (!gfxEntry(rom, i)) return i;
+    return -1;
+  }
+
+  // creates an empty 4bpp file in the first free number; null: none left / failed
+  private newExGfx(hint = true): number | null {
     const app = this.app;
-    let n = -1;
-    for (let i = 0x80; i < 0x100 && n < 0; i++) if (!hasEditorPatch(app.rom) || !gfxEntry(app.rom, i)) n = i;
-    for (let i = VANILLA_GFX; i < 0x80 && n < 0; i++) if (!gfxEntry(app.rom, i)) n = i;
-    if (n < 0) { toast('Keine freie ExGFX-Nummer mehr', 'error'); return; }
+    const n = this.freeExGfx();
+    if (n < 0) { toast('Keine freie ExGFX-Nummer mehr', 'error'); return null; }
     try {
       app.romEdit(`${gfxName(n)} angelegt`, () => { installEditorPatch(app.rom); setGfxEntry(app.rom, n, app.rom.allocWrite(new Uint8Array(0x1000)), true); });
       this.select(n);
-      toast(`${gfxName(n)} angelegt (leer, 4bpp). Zuweisen: Slot-Karte oben → Tauschen.`);
-    } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
+      if (hint) toast(`${gfxName(n)} angelegt (leer, 4bpp). Rechts „In Slot verwenden“ setzt sie in diesem Level ein.`);
+      return n;
+    } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); return null; }
+  }
+
+  // import into the first free ExGFX number (from the slot gallery); the number it went to, null: cancelled
+  private async importNew(): Promise<number | null> {
+    const file = await pickFile('.bin,.png,image/png');
+    if (!file) return null;
+    const n = this.freeExGfx();
+    if (n < 0) { toast('Keine freie ExGFX-Nummer mehr', 'error'); return null; }
+    this.select(n);
+    return /\.png$/i.test(file.name) ? this.importPng(file) : this.importBin(file);
   }
 
   // ---------- tools bar ----------
@@ -507,6 +541,7 @@ export class GfxTab implements WsPanel {
       f.num >= ANIM_FILE ? h('div', { class: 'hint' }, 'Quellgrafik für eigene Animationen (Tab „Animationen“). Lunar Magic nennt sie ExGFX ' + hex(f.num - ANIM_FILE + 0x60, 2) + '.') : '',
       f.num >= ANIM_FILE && f.empty ? h('button', { onclick: () => void this.newAnimFile(f.num) }, 'Anlegen (128 leere Tiles)') : '',
       used.length ? h('div', { class: 'hint' }, `Im Level als ${used.join(', ')}`) : h('div', { class: 'hint' }, 'Vom aktuellen Level nicht benutzt'),
+      f.num < ANIM_FILE && !f.empty ? this.assignMenu(f.num, used.length > 0) : '',
       f.raw || f.empty ? '' : h('div', { class: 'prop' }, h('label', null, 'Format'),
         h('span', { class: 'btn-group' }, [2, 3, 4].map((b) => h('button', { class: f.bpp === b ? 'active' : '', title: 'Nur ändern, wenn die Grafik falsch aussieht', onclick: () => { this.bppOverride = b; this.reload(); } }, `${b}bpp`)))),
       h('div', { class: 'panel-title' }, 'Farbe', h('span', { class: 'hint' }, 'Rechtsklick malt transparent')),
@@ -515,6 +550,19 @@ export class GfxTab implements WsPanel {
       rowSel,
       this.usageUi(),
     );
+  }
+
+  // "In Slot verwenden": puts the open file into one of the level's slots (same as the card's "Tauschen")
+  private assignMenu(num: number, used: boolean): HTMLElement {
+    const items: MenuItem[] = [{ heading: `Level ${hex(this.app.level.number, 3)}` }];
+    for (const s of this.levelSlots()) {
+      items.push({
+        label: `${s.name} – jetzt ${s.file === 0xff ? 'leer' : gfxName(s.file)}${s.sprite ? ' (Sprites)' : ` (Tiles ${hex(s.first, 3)}–${hex(s.first + 0x7f, 3)})`}`,
+        disabled: () => s.file === num,
+        onClick: () => void this.assignSlot(s, num),
+      });
+    }
+    return h('div', { class: 'row' }, menuButton({ label: used ? 'In weiteren Slot' : 'In Slot verwenden', title: 'Diese Datei in einen Grafik-Slot des aktuellen Levels setzen', items }));
   }
 
   // Map16 tiles that use the focused 8x8 tile (when the file is in one of the level's layer slots)
@@ -872,21 +920,22 @@ export class GfxTab implements WsPanel {
     c.toBlob(async (b) => { if (b) { downloadBytes(`${gfxName(f.num)}.png`, new Uint8Array(await b.arrayBuffer()), 'image/png'); toast(`${gfxName(f.num)}.png exportiert`); } }, 'image/png');
   }
 
-  private async importPng(): Promise<void> {
+  // the number the image went to; null: cancelled or failed
+  private async importPng(given?: File): Promise<number | null> {
     const f = this.file;
-    if (!f) return;
-    const file = await pickFile('.png,image/png');
-    if (!file) return;
+    if (!f) return null;
+    const file = given ?? await pickFile('.png,image/png');
+    if (!file) return null;
     const bmp = await createImageBitmap(file);
-    if (bmp.width !== 128) { toast('Das Bild muss 128 Pixel breit sein (16 Tiles)', 'error'); return; }
+    if (bmp.width !== 128) { toast('Das Bild muss 128 Pixel breit sein (16 Tiles)', 'error'); return null; }
     let raw = f.raw;
-    if (f.num >= ANIM_FILE && !(await confirmExAnim(this.app))) return;
+    if (f.num >= ANIM_FILE && !(await confirmExAnim(this.app))) return null;
     if (f.empty && f.num >= ANIM_FILE) raw = true;
     else if (f.empty) {
       const c = await choose(`${gfxName(f.num)} anlegen`, 'In welchem Format speichern?', [{ label: 'Abbrechen' }, { label: 'LZ2 (wie Original, 3bpp/8 Farben)' }, { label: '4bpp unkomprimiert (16 Farben)', primary: true }]);
-      if (!c) return;
+      if (!c) return null;
       raw = c === 2;
-    } else if ((await choose(`${gfxName(f.num)} überschreiben?`, `Das Bild ersetzt den Inhalt von ${gfxName(f.num)}. Farben werden auf Palette ${hex(this.row(), 1)} abgebildet. (Rückgängig mit Strg+Z.)`, [{ label: 'Abbrechen' }, { label: 'Überschreiben', primary: true }])) !== 1) return;
+    } else if ((await choose(`${gfxName(f.num)} überschreiben?`, `Das Bild ersetzt den Inhalt von ${gfxName(f.num)}. Farben werden auf Palette ${hex(this.row(), 1)} abgebildet. (Rückgängig mit Strg+Z.)`, [{ label: 'Abbrechen' }, { label: 'Überschreiben', primary: true }])) !== 1) return null;
     const bpp = raw ? 4 : f.empty ? 3 : f.bpp;
     const c = document.createElement('canvas');
     c.width = bmp.width; c.height = bmp.height;
@@ -925,35 +974,44 @@ export class GfxTab implements WsPanel {
       this.bppOverride = f.empty || raw ? null : bpp;
       this.reload();
       toast(`${file.name} importiert`);
-    } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
+      return f.num;
+    } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); return null; }
   }
 
-  private async importBin(): Promise<void> {
-    const file = await pickFile('.bin');
-    if (!file) return;
+  // the number the file went to; null: cancelled or failed
+  private async importBin(given?: File): Promise<number | null> {
+    const file = given ?? await pickFile('.bin');
+    if (!file) return null;
     let target = this.cur;
-    const n0 = exgfxName(file.name).num;
-    // Lunar Magic's ExGFX 60-63 are the animation files
-    const n = n0 !== null && n0 >= 0x60 && n0 <= 0x63 ? ANIM_FILE + n0 - 0x60 : n0;
-    if (n !== null && n !== this.cur && (n <= 0xff || n >= ANIM_FILE)) {
-      const c = await choose('Ziel wählen', `Der Dateiname nennt ${gfxName(n)}. Wohin soll die Grafik?`, [{ label: 'Abbrechen' }, { label: `In ${gfxName(this.cur)} (aktuelle Datei)` }, { label: `In ${gfxName(n)}`, primary: true }]);
-      if (!c) return;
-      if (c === 2) target = n;
-    } else if ((target >= ANIM_FILE ? altFileAddr(this.app.rom, target - ANIM_FILE) : gfxEntry(this.app.rom, target)) && (await choose(`${gfxName(target)} überschreiben?`, `${file.name} ersetzt den Inhalt von ${gfxName(target)} (Rückgängig mit Strg+Z).`, [{ label: 'Abbrechen' }, { label: 'Überschreiben', primary: true }])) !== 1) return;
+    const n = exgfxName(file.name).num;
+    // the file name names a number: Lunar Magic's ExGFX 60-63 can also mean the animation files
+    const targets: number[] = [];
+    if (n !== null && n <= 0xff && n !== this.cur) targets.push(n);
+    if (n !== null && n >= 0x60 && n <= 0x63 && ANIM_FILE + n - 0x60 !== this.cur) targets.push(ANIM_FILE + n - 0x60);
+    const what = (t: number) => (t >= ANIM_FILE ? 'Animationsgrafik' : 'Layer-/Sprite-Grafik');
+    if (targets.length) {
+      const c = await choose('Ziel wählen', `Der Dateiname nennt ${hex(n!, 2)}. Wohin soll die Grafik?${targets.length > 1 ? ' Lunar Magic benutzt ExGFX60–63 als Quelle für Animationen.' : ''}`,
+        [{ label: 'Abbrechen' }, { label: `In ${gfxName(this.cur)} (aktuelle Datei)` }, ...targets.map((t, i) => ({ label: `In ${gfxName(t)} (${what(t)})`, primary: i === targets.length - 1 }))]);
+      if (!c) return null;
+      if (c >= 2) target = targets[c - 2];
+    }
+    if ((target === this.cur || !targets.length) && (target >= ANIM_FILE ? altFileAddr(this.app.rom, target - ANIM_FILE) : gfxEntry(this.app.rom, target))
+      && (await choose(`${gfxName(target)} überschreiben?`, `${file.name} ersetzt den Inhalt von ${gfxName(target)} (Rückgängig mit Strg+Z).`, [{ label: 'Abbrechen' }, { label: 'Überschreiben', primary: true }])) !== 1) return null;
     try {
       const data = new Uint8Array(await file.arrayBuffer());
       if (target >= ANIM_FILE) {
-        if (!(await confirmExAnim(this.app))) return;
+        if (!(await confirmExAnim(this.app))) return null;
         if (data.length % 32 || data.length > 0x8000) throw new Error('Animationsgrafik: unkomprimierte 4bpp-Datei bis 32 KB erwartet');
         this.app.romEdit(`${file.name} → ${gfxName(target)}`, () => writeAltFile(this.app.rom, target - ANIM_FILE, data));
         this.select(target);
         toast(`${file.name} → ${gfxName(target)}`);
-        return;
+        return target;
       }
-      const what = this.app.romEdit(`${file.name} → ${gfxName(target)}`, () => importGfxFile(this.app.rom, target, data));
+      const kind = this.app.romEdit(`${file.name} → ${gfxName(target)}`, () => importGfxFile(this.app.rom, target, data));
       this.select(target);
-      toast(`${file.name} → ${gfxName(target)} (${what})`);
-    } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
+      toast(`${file.name} → ${gfxName(target)} (${kind})`);
+      return target;
+    } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); return null; }
   }
 
   key(e: KeyboardEvent): boolean {
