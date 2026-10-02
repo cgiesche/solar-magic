@@ -353,6 +353,16 @@ org $02A9D7
   JML PixiLoad_next
 org $02ABE9
   JML PixiLoad_nextShooter
+org $02A866
+  JML PixiLoad_number ; custom shooters and generators
+org $02ABA0
+  JML PixiLoad_shooter
+
+; ---- shooters and generators
+org $02B395
+  JML PixiShooter
+org $02AFFE
+  JML PixiGenerator
 
 ; ---- status handling
 org $018127
@@ -414,6 +424,49 @@ PixiLoad:
   REP #$10 : TAX : LDA.l PixiSize,x : SEP #$10
   PLX
   RTS
+; $02A866: A = sprite number ($05), Y = entry + 1; custom C0-CF are shooters, D0-DF generators
+.number
+  CMP #$C0 : BCC .num
+  CMP #$E0 : BCS .num
+  DEY : LDA [$CE],y : INY : AND #$08 : BEQ .vnum
+  LDA $05 : CMP #$D0 : BCS .gen
+  JML $02A8D8 ; shooter
+.gen ; $18B9 = $80 | extra bit << 6 | number - $CF
+  DEY : LDA [$CE],y : INY : AND #$04 : ASL #4 : ORA #$80 : STA $18B9
+  LDA $05 : SEC : SBC #$CF : ORA $18B9 : STA $18B9
+  JML $02A8BB
+.vnum
+  LDA $05
+.num
+  CMP #$E7 : BCC +
+  JML $02A86A ; scroll sprites
++ JML $02A88C
+; $02ABA0: shooter slot X, entry at $03 (= Y), number in $04
+.shooter
+  LDA [$CE],y : AND #$08 : BNE +
+  LDA $04 : SEC : SBC #$C8 : STA $1783,x
+  JML $02ABA8
++ LDA [$CE],y : AND #$04 : ASL #4 : ORA #$80 : STA $1783,x ; $80 | extra bit << 6 | number - $BF
+  LDA $04 : SEC : SBC #$BF : ORA $1783,x : STA $1783,x
+  JSR .size
+  SEC : SBC #$03 : BEQ ++
+  CMP #$04 : BCS .sptr
+  PHY : PHA
+  INY #3 : LDA [$CE],y : STA.l !shooter_extra_byte_1,x
+  LDA $01,s : DEC : STA $01,s : BEQ +
+  INY : LDA [$CE],y : STA.l !shooter_extra_byte_2,x
+  LDA $01,s : DEC : STA $01,s : BEQ +
+  INY : LDA [$CE],y : STA.l !shooter_extra_byte_3,x
++ PLA : PLY
+++ JML $02ABA8
+.sptr ; 4 or more extra bytes: a pointer to them
+  PHY : INY #3
+  REP #$20 : TYA : CLC : ADC $CE : SEP #$20
+  STA.l !shooter_extra_byte_1,x : XBA : STA.l !shooter_extra_byte_2,x
+  LDA $D0 : STA.l !shooter_extra_byte_3,x
+  PLY
+  JML $02ABA8
+
 ; extra bits to !extra_bits; custom sprites keep only the position bit in the high position byte
 .bitsH
   PHA : AND #$0C : STA.l !extra_bits,x
@@ -487,11 +540,12 @@ PixiSetTables:
   PLB : PLP
   RTL
 
-; $00-$02 = MAIN of the custom sprite in slot X
+; $00-$02 = MAIN of the custom sprite in slot X (PixiMainOf: of number A)
 PixiGetMain:
+  LDA !new_sprite_num,x
+PixiMainOf:
   PHB : PHK : PLB
   PHY
-  LDA !new_sprite_num,x
   REP #$30 : AND #$00FF : ASL #4 : TAY
   LDA PixiSprites+11,y : STA $00
   SEP #$20 : LDA PixiSprites+13,y : STA $02
@@ -583,6 +637,36 @@ PixiStatusPtr:
   CLC : RTS
 PixiStatusOrder:
   db ${STATUS_ORDER.map((s) => h(s)).join(',')}
+
+; $02B395: shooter in slot X, A = !shoot_num; custom ones ($80 set) count their timer down and run MAIN
+PixiShooter:
+  BMI .custom
+  LDY $17AB,x : BEQ +
+  JML $02B39A
++ JML $02B3A4
+.custom
+  LDY $17AB,x : BEQ +
+  PHA : LDA $13 : LSR : BCC ++
+  DEC $17AB,x
+++ PLA
++ AND #$3F : CLC : ADC #$BF
+  JSR PixiMainOf
+  LDA #$02 : PHA : PEA $B3A6 ; RTL to $02B3A7 (next shooter)
+  JML [$0000]
+
+; $02AFFE: generators; custom ones ($18B9 bit 7) run MAIN
+PixiGenerator:
+  LDA $18B9 : BMI .custom
+  BNE +
+  JML $02B02A ; RTS
++ JML $02B003
+.custom
+  LDY $9D : BNE +
+  AND #$3F : CLC : ADC #$CF
+  JSR PixiMainOf
+  LDA #$02 : PHA : PEA $B029 ; RTL to the RTS at $02B02A
+  JML [$0000]
++ JML $02B02A
 
 ; $07F785: end of the routine clearing a slot's tables
 PixiErase:

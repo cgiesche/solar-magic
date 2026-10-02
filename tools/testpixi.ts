@@ -226,6 +226,50 @@ if (existsSync('resources_local/BrutalBill.zip')) {
   check(/^!Sprite\s*=\s*\$00/m.test(shooter), 'BrutalBill: the shooter spawns sprite $00');
 }
 
+// custom shooters and generators: MAIN runs every frame, the shooter with its extra byte
+{
+  const enc2 = new TextEncoder();
+  const r5 = new Rom(new Uint8Array(readFileSync('Super Mario World (U) [!].smc')));
+  const res5 = savePixiProject(r5, { files: new Map([
+    ['shooters/s.cfg', enc2.encode('01\n00\n00 00 00 00 00 00\n00 00\ns.asm\n01:01\n')],
+    ['shooters/s.asm', enc2.encode('print "MAIN ",pc\n  LDA $7FB020 : INC : STA $7FB020\n  LDA !shooter_extra_byte_1,x : STA $7FB021\n  LDA !shoot_num,x : STA $7FB023\n  RTL\n')],
+    ['generators/g.cfg', enc2.encode('01\n00\n00 00 00 00 00 00\n00 00\ng.asm\n00:00\n')],
+    ['generators/g.asm', enc2.encode('print "MAIN ",pc\n  LDA $7FB022 : INC : STA $7FB022\n  RTL\n')],
+  ]), list: parsePixiList('C0 s.cfg\nD0 g.cfg\n') });
+  if (!res5.ok) console.log(res5.errors.join('\n'));
+  check(res5.ok, 'shooter and generator assembled');
+  const e5 = new LevelEmulator(r5); e5.boot();
+  const l5 = loadLevel(r5, 0x105);
+  l5.sprites = [{ uid: newUid(), num: 0xc0, x: 8, y: 0x16, extra: 3, bytes: [0x42] }, { uid: newUid(), num: 0xd0, x: 9, y: 0x16, extra: 2 }];
+  e5.load(0x105, { sprites: serializeSprites(l5.sprites, l5.spriteHeader, false, spriteSizes(r5)) });
+  for (let i = 0; i < 40; i++) e5.snes.runFrame();
+  const w5 = (a: number) => e5.snes.wram[a - 0x7e0000];
+  check(w5(0x7fb020) > 10 && w5(0x7fb021) === 0x42 && w5(0x7fb023) === 0xc1, `custom shooter runs with its extra byte and extra bit (${w5(0x7fb020)} frames, byte ${w5(0x7fb021).toString(16)}, num ${w5(0x7fb023).toString(16)})`);
+  check(w5(0x7fb022) > 10, `custom generator runs (${w5(0x7fb022)} frames)`);
+}
+if (existsSync('resources_local/BrutalBill.zip')) {
+  const r6 = new Rom(new Uint8Array(readFileSync('Super Mario World (U) [!].smc')));
+  const pkg = packageFromFiles('BrutalBill.zip', packageFiles('BrutalBill.zip', new Uint8Array(readFileSync('resources_local/BrutalBill.zip'))));
+  const res6 = applyPixiPackage(r6, pkg, planPixiPackage(r6, pkg), [0, 0, 0, 0], () => [0, 0, 0, 0]);
+  const e6 = new LevelEmulator(r6); e6.boot();
+  const l6 = loadLevel(r6, 0x105);
+  l6.sprites = [{ uid: newUid(), num: 0xc0, x: 12, y: 0x17, extra: 2, bytes: [0x02] }];
+  e6.load(0x105, { sprites: serializeSprites(l6.sprites, l6.spriteHeader, false, spriteSizes(r6)) });
+  let bill = -1;
+  for (let i = 0; i < 400 && bill < 0; i++) {
+    e6.snes.runFrame();
+    const w = e6.snes.wram;
+    for (let k = 0; k < 12; k++) if (w[0x14c8 + k] >= 8 && (w[0x1ab10 + k] & 8) && w[0x1ab9e + k] === 0) bill = k;
+  }
+  check(res6.ok && bill >= 0, 'BrutalBill: the shooter fires a Brutal Bill (custom sprite 00)');
+  if (bill >= 0) {
+    const w = e6.snes.wram, x0 = w[0xe4 + bill] | (w[0x14e0 + bill] << 8);
+    for (let i = 0; i < 30; i++) e6.snes.runFrame();
+    const x1 = w[0xe4 + bill] | (w[0x14e0 + bill] << 8);
+    check(w[0x14c8 + bill] === 8 && x1 !== x0, `BrutalBill: the bill flies (x ${x0.toString(16)} → ${x1.toString(16)})`);
+  }
+}
+
 // removing restores the ROM
 const w = removePixi(prom);
 check(w.length === 0 && spriteSizes(prom) === null, 'removed: no size table');
