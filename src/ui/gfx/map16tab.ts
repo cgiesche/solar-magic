@@ -12,7 +12,8 @@ import { TileCache, map16Source } from '../../core/render.ts';
 import { hex } from '../../core/names.ts';
 import { EXT_FIRST, EXT_TILES, map16Ext, actsLike, setActsLike, setExtTileWords } from '../../core/map16ext.ts';
 import { BG_EXT_FIRST, bgMap16Ext, bgTileAddr, bgTileWords, setBgExtTileWords } from '../../core/bgmap16.ts';
-import { blockFileOf, openBlockDialog } from '../blockdialog.ts';
+import { blockFileOf } from '../blockdialog.ts';
+import { openResources } from '../resources.ts';
 import { parseMap16File, map16Targets, writeMap16File } from '../../core/map16file.ts';
 import { renderMap16Sheet } from '../panels.ts';
 import { probeText } from '../../core/blockprobe.ts';
@@ -418,7 +419,7 @@ export class Map16Tab implements WsPanel {
         h('div', { class: 'grow' }, a === t ? 'wie es selbst' : `wie Tile ${hex(a, 3)}`, h('div', { class: 'hint' }, info ? probeText(info) : 'wird ermittelt …')),
         h('button', { onclick: () => this.pickActs(), title: 'Verhalten von einem anderen Tile übernehmen' }, 'Ändern …')),
       h('div', { class: 'row' }, h('span', { class: 'hint grow' }, file ? `Custom Block: ${file}` : 'Kein Custom Block'),
-        h('button', { onclick: () => void openBlockDialog(app, t, () => this.redraw()) }, 'Custom Blocks …')),
+        h('button', { onclick: () => void openResources(app, 'blocks', { tile: t, onChange: () => this.redraw() }) }, 'Custom Blocks …')),
     );
   }
 

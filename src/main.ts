@@ -11,12 +11,10 @@ import { openHeaderDialog } from './ui/headerdialog.ts';
 import { hex } from './core/names.ts';
 import { GfxWorkspace, type WsTab } from './ui/gfxworkspace.ts';
 import { openEntrancesDialog, openRomInfo, openInsertDialog, openExpandDialog, installEditorPatchAction, openSaveAsDialog, exportLevel, importLevel, openScreenDialog, clearLevelConfirm } from './ui/tools.ts';
-import { openUberDialog } from './ui/uberdialog.ts';
-import { openBlockDialog } from './ui/blockdialog.ts';
 import { menuBar, closeMenus } from './ui/menu.ts';
 import { viewMenu } from './ui/viewmenu.ts';
 import { LEVEL_FILE_EXT } from './core/levelfile.ts';
-import { openPatchManager } from './ui/patchmanager.ts';
+import { openResources } from './ui/resources.ts';
 import { OverworldView } from './ui/overworld.ts';
 import { openTestPlay } from './ui/testplay.ts';
 import { openMessagesDialog } from './ui/messagedialog.ts';
@@ -141,9 +139,10 @@ function buildUi(app: App): void {
       { label: 'ROM-Informationen …', onClick: () => openRomInfo(app) },
       { label: 'ROM erweitern …', disabled: () => app.rom.size >= 0x400000, onClick: () => openExpandDialog(app) },
       'sep',
-      { label: 'Patches …', title: 'ASM-Patches (Asar) anwenden und verwalten', onClick: () => openPatchManager(app) },
-      { label: 'UberASM …', onClick: () => openUberDialog(app) },
-      { label: 'Custom Blocks …', onClick: () => openBlockDialog(app) },
+      { label: 'Patches …', title: 'ASM-Patches (Asar) anwenden und verwalten', onClick: () => openResources(app, 'patches') },
+      { label: 'UberASM …', onClick: () => openResources(app, 'uber') },
+      { label: 'Custom Blocks …', onClick: () => openResources(app, 'blocks') },
+      { label: 'Custom Sprites …', onClick: () => openResources(app, 'sprites') },
       { label: 'Editor-Patch installieren …', disabled: () => hasEditorPatch(app.rom), onClick: () => installEditorPatchAction(app) },
       'sep',
       { label: 'Nachrichtenboxen …', onClick: () => openMessagesDialog(app) },

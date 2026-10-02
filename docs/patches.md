@@ -5,9 +5,17 @@ sich drei Arten von ASM-Code direkt im Browser in die ROM bringen:
 
 | Art | Format | Wo |
 |---|---|---|
-| **Patches** | beliebige Asar-Patches (`.asm` oder `.zip`), z. B. von SMWCentral | Menü *ROM → Patches …* |
-| **UberASM** | Code pro Level, Overworld-Karte und Game Mode im Format von UberASM Tool 2.x | *Patches* → *UberASM …* |
-| **Custom Blocks** | Blöcke im GPS-Format | *Patches* → *Custom Blocks …* oder im Map16-Editor |
+| **Patches** | beliebige Asar-Patches (`.asm` oder `.zip`), z. B. von SMWCentral | Menü *ROM → Patches …*, Tab *Patches* |
+| **UberASM** | Code pro Level, Overworld-Karte und Game Mode im Format von UberASM Tool 2.x | Tab *UberASM* (auch *ROM → UberASM …*) |
+| **Custom Blocks** | Blöcke im GPS-Format | Tab *Custom Blocks* (auch *ROM → Custom Blocks …* oder im Map16-Editor) |
+
+Alles liegt in einem Dialog mit je einem Tab; Custom Sprites (PIXI, siehe [pixi.md](pixi.md)) haben den
+vierten. **Hinzufügen …** oben im Dialog nimmt jeden Download und erkennt, was er ist (Patch, UberASM-Code,
+Custom Block, Block-Paket, Custom Sprite, Lunar-Magic-Hintergrund); danach zeigt der passende Tab das
+Ergebnis. Was im aktuellen Tab gewählt ist, gibt die Vorauswahl: im UberASM-Tab Level/Overworld/Game Mode,
+im Blocks-Tab das Tile. Patches und Hinzugefügtes gehen sofort in die ROM; Änderungen in den Tabs UberASM,
+Custom Blocks und Custom Sprites (Zuordnungen, Dateien, Einstellungen) sammeln sich, bis man sie mit
+*Übernehmen* anwendet oder *Verwirft* – beim Schließen fragt der Dialog nach.
 
 Alle drei werden in einem **Patch-Verzeichnis in der ROM** geführt (RATS-Block „SMWA“). Für jeden Patch
 sind dort gespeichert:

@@ -1,18 +1,18 @@
-// Patch manager: apply Asar patches (.asm or .zip) with settings, list, reconfigure and remove them.
-// Sources are kept in IndexedDB per registry entry; the ROM's registry alone suffices to remove a patch.
+// Patches tab of the patches dialog: apply Asar patches (.asm or .zip) with settings, list, reconfigure
+// and remove them; and adding any downloaded package, recognized as a patch, UberASM resource, block,
+// block package, sprite package or Lunar Magic background. Sources are kept in the ROM (small ones) or
+// in IndexedDB per registry entry; the ROM's registry alone suffices to remove a patch.
 
 import type { App } from './app.ts';
-import { h, modal, clear, toast, pickFile, hexInput, select } from './dom.ts';
+import { h, modal, clear, toast, hexInput, select, choose } from './dom.ts';
 import { kvGet, kvSet, kvDel } from './storage.ts';
-import { loadAsar } from '../core/asar.ts';
 import { applyPatch, uninstallPatch, reapplyPatch, type ApplyResult, type PatchSource } from '../core/patchapply.ts';
 import { listPatches, patchArchive, type PatchEntry } from '../core/patchreg.ts';
 import { zipSync, unzipSync } from 'fflate';
-import { openUberDialog } from './uberdialog.ts';
-import { openBlockDialog } from './blockdialog.ts';
-import { openPixiDialog, openPixiPackageDialog } from './pixidialog.ts';
-import { removePixi } from '../core/pixi.ts';
-import { removeBlocks, loadBlockProject, saveBlockProject } from '../core/blocks.ts';
+import { pickFile } from './dom.ts';
+import { openPixiPackageDialog } from './pixidialog.ts';
+import { freeBlockTile } from './blockdialog.ts';
+import { loadBlockProject, saveBlockProject } from '../core/blocks.ts';
 import { installVramPatch, uninstallVramPatch } from '../core/vrampatch.ts';
 import { extGfxAvailable } from '../core/patches.ts';
 import { loadProject, emptyProject, saveProject } from '../core/uberproject.ts';
@@ -20,10 +20,12 @@ import { ALL, type UberContext } from '../core/uberasm.ts';
 import { hex } from '../core/names.ts';
 import { planBlockPack, applyBlockPack } from '../core/blockpack.ts';
 import { isBgPackage, planBgPack, applyBgPack, levelColors, type BgPackResult } from '../core/bgpack.ts';
-import { packageFiles, packageFromFiles, detectKind, type PackageInfo, scanDefines, effectiveDefines, packageSource, optionDefault, type PatchPackage, type PatchOption } from '../core/patchpkg.ts';
+import { packageFiles, packageFromFiles, detectKind, type PackageInfo, effectiveDefines, packageSource, optionDefault, type PatchPackage, type PatchOption } from '../core/patchpkg.ts';
 import { installEditorPatch } from '../core/patches.ts';
 import { installMap16Ext, map16Ext, setExtTileWords, EXT_FIRST, EXT_TILES } from '../core/map16ext.ts';
 import { map16Source } from '../core/render.ts';
+import { definesForm } from './defineedit.ts';
+import { romChanged, logView, errorText } from './projectpane.ts';
 
 interface StoredPackage { fileName: string; files: [string, Uint8Array][]; main: string }
 // sources up to this size (compressed) are kept in the ROM, larger ones only in the browser
@@ -51,40 +53,17 @@ function toPackage(s: StoredPackage): PatchPackage {
   return { ...packageFromFiles(s.fileName, new Map(s.files)), main: s.main };
 }
 
-// ROM changed by a patch: reload everything that depends on it
-function romChanged(app: App): void {
-  app.emu.syncRom();
-  app.persist();
-  app.openLevel(app.level.number);
-  app.emit('patch');
-}
-
-function logView(r: ApplyResult | null): HTMLElement {
-  const el = h('div', { class: 'patch-log' });
-  if (!r) return el;
-  for (const e of r.errors) el.appendChild(h('div', { class: 'err' }, e));
-  for (const w of r.warnings) el.appendChild(h('div', { class: 'warn' }, w));
-  for (const p of r.prints) el.appendChild(h('div', null, p));
-  return el;
-}
-
 // settings form: manifest options, or the define assignments at the top of the main file
 function settingsForm(pkg: PatchPackage, main: string, values: Record<string, string>): { el: HTMLElement; read: () => Record<string, string> } {
-  const inputs: [string, () => string][] = [];
-  const rows: HTMLElement[] = [];
   const opts = pkg.manifest?.options;
-  if (opts?.length) {
-    const eff = effectiveDefines(pkg, values);
-    for (const o of opts) rows.push(optionRow(o, eff[o.define] ?? optionDefault(o), inputs));
-  } else {
-    const defs = scanDefines(new TextDecoder().decode(pkg.files.get(main)!)).slice(0, 80);
-    for (const d of defs) {
-      const inp = h('input', { value: values[d.name] ?? d.value, spellcheck: false, style: 'width: 12em' });
-      inputs.push([d.name, () => (inp.value.trim() === d.value ? '' : inp.value.trim())]);
-      rows.push(h('div', { class: 'prop' }, h('label', { title: d.comment }, '!' + d.name), inp, d.comment ? h('span', { class: 'hint' }, d.comment) : null));
-    }
+  const wrap = (rows: HTMLElement[]) => h('div', { class: 'patch-settings' }, rows.length ? rows : h('p', { class: 'hint' }, 'Keine Einstellungen.'));
+  if (!opts?.length) {
+    const form = definesForm(new TextDecoder().decode(pkg.files.get(main)!), values);
+    return { el: wrap(form.rows), read: form.read };
   }
-  const el = h('div', { class: 'patch-settings' }, rows.length ? rows : h('p', { class: 'hint' }, 'Keine Einstellungen.'));
+  const inputs: [string, () => string][] = [];
+  const eff = effectiveDefines(pkg, values);
+  const el = wrap(opts.map((o) => optionRow(o, eff[o.define] ?? optionDefault(o), inputs)));
   return {
     el,
     read: () => {
@@ -152,7 +131,7 @@ function openApplyDialog(app: App, pkg: PatchPackage, fileName: string, entry: P
   );
   const run = (): boolean => {
     const values = form.read();
-    const fail = (e: unknown) => { clear(log).appendChild(logView({ ok: false, errors: [e instanceof Error ? e.message : String(e)], warnings: [], prints: [] })); return false; };
+    const fail = (e: unknown) => { clear(log).appendChild(logView({ ok: false, errors: [errorText(e)], warnings: [], prints: [] })); return false; };
     let src: PatchSource;
     try { src = packageSource(pkg, main, effectiveDefines(pkg, values)); } catch (e) { return fail(e); }
     src.settings = values;
@@ -198,10 +177,10 @@ function resultLog(log: HTMLElement, r: ApplyResult): void {
 }
 
 // an UberASM resource: choose where it runs, then add it to the ROM's UberASM project
-function openUberResourceDialog(app: App, pkg: PatchPackage, info: PackageInfo, onDone: () => void): void {
+function openUberResourceDialog(app: App, pkg: PatchPackage, info: PackageInfo, preset: AddPreset, onDone: () => void): void {
   type Where = 'level' | 'all' | 'gamemode' | 'overworld';
-  let where: Where = 'level';
-  let num = app.level.number;
+  let where: Where = preset.uberContext;
+  let num = where === 'level' ? app.level.number : where === 'gamemode' ? 0x14 : 0;
   const numBox = h('span');
   const buildNum = () => {
     const max = where === 'level' ? 0x1ff : where === 'gamemode' ? 0xff : 6;
@@ -217,8 +196,8 @@ function openUberResourceDialog(app: App, pkg: PatchPackage, info: PackageInfo, 
   buildNum();
   const body = h('div', { class: 'patch-apply' },
     h('p', null, `„${pkg.name}“ ist eine UberASM-Ressource – Code, der jedes Frame läuft (Labels init/main/…), kein eigenständiger Patch. Wo soll er laufen?`),
-    h('div', { class: 'row' }, select(opts, 0, (i) => { where = kinds[i]; buildNum(); }), numBox),
-    h('p', { class: 'hint' }, '„In allen Leveln“ nutzt UberASMs Level-Eintrag „*“. Zuordnungen lassen sich später unter Patches → UberASM → Bearbeiten ändern.'),
+    h('div', { class: 'row' }, select(opts, kinds.indexOf(where), (i) => { where = kinds[i]; buildNum(); }), numBox),
+    h('p', { class: 'hint' }, '„In allen Leveln“ nutzt UberASMs Level-Eintrag „*“. Zuordnungen lassen sich später im Tab UberASM ändern.'),
     h('h3', null, 'Einstellungen'), form.el, log);
   modal(`UberASM-Code hinzufügen: ${pkg.name}`, body, [
     { label: 'Abbrechen' },
@@ -237,7 +216,7 @@ function openUberResourceDialog(app: App, pkg: PatchPackage, info: PackageInfo, 
         if (!calls.some((c) => c.file === file)) calls.push({ file, bytes: [] });
         proj.list[ctx].set(key, calls);
         r = saveProject(app.rom, proj);
-      } catch (e) { r = { ok: false, errors: [e instanceof Error ? e.message : String(e)], warnings: [], prints: [] }; }
+      } catch (e) { r = { ok: false, errors: [errorText(e)], warnings: [], prints: [] }; }
       if (!r.ok) { resultLog(log, r); return false; }
       romChanged(app);
       const place = where === 'all' ? 'allen Leveln' : where === 'level' ? `Level ${hex(num, 3)}` : where === 'gamemode' ? `Game Mode ${hex(num, 2)}` : `Overworld-Karte ${num}`;
@@ -249,11 +228,10 @@ function openUberResourceDialog(app: App, pkg: PatchPackage, info: PackageInfo, 
 }
 
 // a GPS block: choose the Map16 tile, its acts like and graphics, then add it to the ROM's blocks
-function openBlockResourceDialog(app: App, pkg: PatchPackage, info: PackageInfo, onDone: () => void): void {
+function openBlockResourceDialog(app: App, pkg: PatchPackage, info: PackageInfo, preset: AddPreset, onDone: () => void): void {
   const proj = loadBlockProject(app.rom) ?? { files: new Map(), list: [] };
-  const used = new Set(proj.list.map((b) => b.tile));
-  let tile = EXT_FIRST;
-  while (used.has(tile) && tile < EXT_TILES - 1) tile++;
+  // the tile chosen in the blocks tab while it is free, otherwise the next free one
+  let tile = proj.list.some((b) => b.tile === preset.tile) ? freeBlockTile(proj) : preset.tile;
   let acts = info.acts ?? 0x130;
   let gfxFrom = acts;
   const form = settingsForm(pkg, info.file, {});
@@ -261,7 +239,7 @@ function openBlockResourceDialog(app: App, pkg: PatchPackage, info: PackageInfo,
   const body = h('div', { class: 'patch-apply' },
     h('p', null, `„${pkg.name}“ ist ein Custom Block (GPS-Format). Er wird einem Map16-Tile zugeordnet; im Level platziert man ihn wie jedes Map16-Tile (Palette → Map16 bzw. Direct-Map16-Objekt).`),
     h('div', { class: 'prop' }, h('label', null, 'Map16-Tile'), hexInput(tile, 3, (v) => (tile = v), EXT_TILES - 1),
-      h('span', { class: 'hint' }, 'Tiles ab 200 sind frei (erweiterte Map16-Seiten).')),
+      h('span', { class: 'hint' }, proj.list.length ? `Tiles ab 200 sind frei (erweiterte Map16-Seiten); belegt: ${proj.list.map((b) => hex(b.tile, 3)).join(', ')}` : 'Tiles ab 200 sind frei (erweiterte Map16-Seiten).')),
     h('div', { class: 'prop' }, h('label', null, 'Verhalten (acts like)'), hexInput(acts, 3, (v) => (acts = v), 0x1ff),
       h('span', { class: 'hint' }, info.acts !== undefined ? 'aus der Beschreibung des Blocks' : '130 = fester Block, 025 = Luft')),
     h('div', { class: 'prop' }, h('label', null, 'Grafik von Tile'), hexInput(gfxFrom, 3, (v) => (gfxFrom = v), EXT_TILES - 1),
@@ -281,7 +259,7 @@ function openBlockResourceDialog(app: App, pkg: PatchPackage, info: PackageInfo,
         proj.list.push({ tile, file: 'blocks/' + info.file, acts });
         r = saveBlockProject(app.rom, proj, blank);
         if (r.ok && tile >= EXT_FIRST) setExtTileWords(app.rom, tile, words, blank);
-      } catch (e) { r = { ok: false, errors: [e instanceof Error ? e.message : String(e)], warnings: [], prints: [] }; }
+      } catch (e) { r = { ok: false, errors: [errorText(e)], warnings: [], prints: [] }; }
       if (!r.ok) { resultLog(log, r); return false; }
       romChanged(app);
       toast(`„${pkg.name}“ liegt auf Map16-Tile ${hex(tile, 3)}.`);
@@ -376,7 +354,7 @@ function openBgPackDialog(app: App, fileName: string, files: Map<string, Uint8Ar
           if (!res.ok) app.rom.data = before;
           return res;
         });
-      } catch (e) { r = { ok: false, errors: [e instanceof Error ? e.message : String(e)], notes: [], bg: null }; }
+      } catch (e) { r = { ok: false, errors: [errorText(e)], notes: [], bg: null }; }
       if (!r.ok || !r.bg) { resultLog(log, { ok: false, errors: r.errors, warnings: [], prints: [] }); return false; }
       app.checkpoint();
       app.level.bg = r.bg;
@@ -390,63 +368,72 @@ function openBgPackDialog(app: App, fileName: string, files: Map<string, Uint8Ar
   ]);
 }
 
-export async function openPatchManager(app: App): Promise<void> {
-  const body = h('div', { class: 'patch-manager' });
-  const build = () => {
-    clear(body);
-    const list = listPatches(app.rom);
-    body.append(
-      h('p', { class: 'hint' }, '„Hinzufügen“ nimmt eine .asm- oder .zip-Datei (z. B. von SMWCentral) und erkennt, was sie ist: ein Patch wird direkt angewendet, UberASM-Code wird einem Level/Game Mode zugeordnet, ein Custom Block einem Map16-Tile, ein Custom Sprite (PIXI) einer Sprite-Nummer. Konflikte werden geprüft; alles lässt sich wieder entfernen.'),
+export type AddTarget = 'patches' | 'uber' | 'blocks' | 'sprites';
+// what the tab the package is added from suggests: where UberASM code runs, the tile of a block
+export interface AddPreset { uberContext: UberContext; tile: number }
+export interface PickedPackage {
+  name: string;
+  target: AddTarget | null; // the tab showing it afterwards; null: neither (a background goes into the level)
+  affects: AddTarget[]; // project tabs whose staged changes the dialog would bypass
+  open(preset: AddPreset, done: () => void): void;
+}
+
+// picks an .asm/.zip and recognizes what it is; open() shows the dialog adding it
+export async function pickPackage(app: App): Promise<PickedPackage | null> {
+  const f = await pickFile('.asm,.asar,.zip');
+  if (!f) return null;
+  const files = packageFiles(f.name, new Uint8Array(await f.arrayBuffer()));
+  if (isBgPackage(files)) return { name: f.name, target: null, affects: [], open: (_, done) => openBgPackDialog(app, f.name, files, done) };
+  const pkg = packageFromFiles(f.name, files);
+  const info = detectKind(pkg);
+  switch (info.kind) {
+    case 'uberasm': return { name: pkg.name, target: 'uber', affects: ['uber'], open: (p, done) => openUberResourceDialog(app, pkg, info, p, done) };
+    case 'block': return { name: pkg.name, target: 'blocks', affects: ['blocks'], open: (p, done) => openBlockResourceDialog(app, pkg, info, p, done) };
+    case 'blockpack': return { name: pkg.name, target: 'blocks', affects: ['blocks'], open: (_, done) => openBlockPackDialog(app, pkg, info, done) };
+    case 'pixi': return { name: pkg.name, target: 'sprites', affects: ['sprites', 'blocks'], open: (_, done) => openPixiPackageDialog(app, pkg, done) };
+    default: return { name: pkg.name, target: 'patches', affects: [], open: (_, done) => openApplyDialog(app, pkg, f.name, null, done) };
+  }
+}
+
+const PROJECT_KINDS = new Set(['uberasm', 'blocks', 'pixi']);
+
+// the list of the ROM's patches; the tool projects have tabs of their own
+export function patchesPane(app: App, changed: () => void): { el: HTMLElement; reload(): void } {
+  const el = h('div', { class: 'patch-pane' });
+  const reload = () => {
+    const list = listPatches(app.rom).filter((p) => !PROJECT_KINDS.has(p.kind ?? ''));
+    clear(el).append(
+      h('p', { class: 'hint' }, 'Asar-Patches ändern das Spiel selbst (z. B. von SMWCentral). Konflikte mit anderen Patches werden geprüft; jeder lässt sich wieder entfernen.'),
       list.length ? h('div', { class: 'patch-list' }, list.map((p) => {
         const bytes = p.segs.reduce((n, s) => n + s[1], 0);
         const own = p.own.reduce((n, o) => n + Math.max(0, app.rom.isRatsAt(o)), 0);
         return h('div', { class: 'patch-item' },
           h('div', null,
             h('div', { class: 'patch-name' }, p.name, p.version ? h('span', { class: 'hint' }, ` v${p.version}`) : null),
-            h('div', { class: 'hint' }, `${new Date(p.applied).toLocaleString()} · ${bytes} Bytes geändert · ${own < 1024 ? `${own} Bytes` : `${(own / 1024).toFixed(1)} KB`} Code/Daten${Object.keys(p.defines).length ? ` · ${Object.entries(p.defines).map(([k, v]) => `!${k}=${v}`).join(' ')}` : ''}`)),
+            h('div', { class: 'hint' }, p.kind === 'vram' ? 'Editor-Patch: Tilemaps für BG2/BG3 verlegt' : `${new Date(p.applied).toLocaleString()} · ${bytes} Bytes geändert · ${own < 1024 ? `${own} Bytes` : `${(own / 1024).toFixed(1)} KB`} Code/Daten${Object.keys(p.defines).length ? ` · ${Object.entries(p.defines).map(([k, v]) => `!${k}=${v}`).join(' ')}` : ''}`)),
           h('div', { class: 'row' },
-            p.kind === 'vram' ? h('span', { class: 'hint' }, 'Editor-Patch: Tilemaps für BG2/BG3 verlegt') :
-              h('button', { onclick: () => (p.kind === 'uberasm' ? openUberDialog(app, build) : p.kind === 'blocks' ? openBlockDialog(app, 0x200, build) : p.kind === 'pixi' ? openPixiDialog(app, build) : configure(p)) }, p.kind && p.kind !== 'patch' ? 'Bearbeiten …' : 'Einstellungen …'),
-            h('button', { onclick: () => remove(p) }, 'Entfernen')));
-      })) : h('p', null, 'Keine Patches installiert.'),
-      h('div', { class: 'row' }, h('button', { class: 'primary', onclick: add }, 'Hinzufügen …'),
-        list.some((p) => p.kind === 'uberasm') ? null : h('button', { onclick: () => openUberDialog(app, build) }, 'UberASM …'),
-        list.some((p) => p.kind === 'blocks') ? null : h('button', { onclick: () => openBlockDialog(app, 0x200, build) }, 'Custom Blocks …'),
-        list.some((p) => p.kind === 'pixi') ? null : h('button', { onclick: () => openPixiDialog(app, build) }, 'Custom Sprites …')),
+            p.kind === 'vram' ? null : h('button', { onclick: () => configure(p) }, 'Einstellungen …'),
+            h('button', { onclick: () => remove(p) }, 'Entfernen …')));
+      })) : h('p', { class: 'hint' }, 'Keine Patches installiert – „Hinzufügen …“ oben nimmt eine .asm- oder .zip-Datei.'),
     );
-  };
-  const add = async () => {
-    const f = await pickFile('.asm,.asar,.zip');
-    if (!f) return;
-    try {
-      const files = packageFiles(f.name, new Uint8Array(await f.arrayBuffer()));
-      if (isBgPackage(files)) { openBgPackDialog(app, f.name, files, build); return; }
-      const pkg = packageFromFiles(f.name, files);
-      const info = detectKind(pkg);
-      if (info.kind === 'uberasm') openUberResourceDialog(app, pkg, info, build);
-      else if (info.kind === 'block') openBlockResourceDialog(app, pkg, info, build);
-      else if (info.kind === 'blockpack') openBlockPackDialog(app, pkg, info, build);
-      else if (info.kind === 'pixi') openPixiPackageDialog(app, pkg, build);
-      else openApplyDialog(app, pkg, f.name, null, build);
-    } catch (e) { toast(e instanceof Error ? e.message : String(e), 'error'); }
   };
   const configure = async (p: PatchEntry) => {
     const s = await storedPackage(app, p);
     if (!s) { toast('Die Quelldateien dieses Patches sind nicht gespeichert – zum Ändern den Patch entfernen und neu hinzufügen.', 'error'); return; }
-    openApplyDialog(app, toPackage(s), s.fileName, p, build);
+    openApplyDialog(app, toPackage(s), s.fileName, p, changed);
   };
-  const remove = (p: PatchEntry) => {
+  const remove = async (p: PatchEntry) => {
+    const i = await choose('Patch entfernen', `„${p.name}“ aus der ROM entfernen? Die Bytes, die er geändert hat, werden wiederhergestellt.`, [{ label: 'Abbrechen' }, { label: 'Entfernen', danger: true }]);
+    if (i !== 1) return;
     if (app.dirty) app.saveLevel(true);
     try {
-      const w = p.kind === 'blocks' ? removeBlocks(app.rom) : p.kind === 'vram' ? uninstallVramPatch(app.rom) : p.kind === 'pixi' ? removePixi(app.rom) : uninstallPatch(app.rom, p.id);
+      const w = p.kind === 'vram' ? uninstallVramPatch(app.rom) : uninstallPatch(app.rom, p.id);
       kvDel(srcKey(p.id)).catch(() => {});
       romChanged(app);
       toast(`Patch „${p.name}“ entfernt${w.length ? ': ' + w.join(' ') : ''}`);
-    } catch (e) { toast(e instanceof Error ? e.message : String(e), 'error'); }
-    build();
+    } catch (e) { toast(errorText(e), 'error'); }
+    changed();
   };
-  body.appendChild(h('p', { class: 'hint' }, 'Asar wird geladen …'));
-  modal('Patches', body, [{ label: 'Schließen', primary: true }]);
-  try { await loadAsar(); } catch (e) { clear(body).appendChild(h('p', { class: 'hint error' }, `Asar konnte nicht geladen werden: ${e}`)); return; }
-  build();
+  reload();
+  return { el, reload };
 }

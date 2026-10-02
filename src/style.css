@@ -217,6 +217,23 @@ kbd { background: #181a1f; border: 1px solid var(--border); border-radius: 3px; 
 .uber-table td.err { color: var(--danger); }
 .uber-add { flex-wrap: wrap; margin: 6px 0; }
 .uber-files { max-height: 160px; overflow: auto; margin-bottom: 6px; }
+.uber-files .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.uber-table td.actions { text-align: right; white-space: nowrap; }
+.uber-table tr.selected td { background: var(--panel2); }
+.resources { width: 720px; max-width: 100%; }
+.res-top { margin-bottom: 10px; }
+.res-top > button { white-space: nowrap; flex: none; }
+.res-tabs { margin-bottom: 10px; }
+.sub-tabs { margin: 0 0 8px; }
+.res-content .patch-list { margin-top: 0; }
+.pending-bar { display: flex; align-items: center; gap: 8px; margin: 10px 0 4px; padding: 6px 10px; border: 1px solid var(--accent2); border-radius: 6px; background: var(--panel2); }
+.pending-bar .grow { flex: 1; }
+.pane-adv { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 8px; }
+.pane-adv summary { cursor: pointer; color: var(--muted); margin-bottom: 6px; }
+.pane-adv > .row { margin-top: 6px; }
+.inline-details { display: inline; }
+.inline-details summary { display: inline; cursor: pointer; color: var(--accent); }
+.inline-details[open] > div { margin-top: 4px; }
 .mono { font-family: monospace; font-size: 12px; }
 /* graphics workspace */
 .layout.gfx-mode { grid-template-columns: 190px 1fr 380px; }

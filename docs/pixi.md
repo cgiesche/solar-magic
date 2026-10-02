@@ -15,7 +15,7 @@ Diese Seite beschreibt die Schnittstelle, die Ressourcen sehen, und wie der Edit
   freie Map16-Tile ab 200. Defines, die einen Sprite des Pakets meinen, werden auf dessen Nummer gesetzt
   und im Dialog angezeigt: der Dateiname im Kommentar (`!Sprite = $18 ; Sprite number of BrutalBill.json`)
   oder eine Misc-Art im Namen (`!bounce_sprite`).
-- **Verwalten:** *Patches → Custom Sprites …* (oder *Bearbeiten …* beim Eintrag „Custom Sprites“): Einträge
+- **Verwalten:** Tab *Custom Sprites* im Patches-Dialog (auch *ROM → Custom Sprites …*): Einträge
   der `list.txt`, Projektdateien, Import und Export eines PIXI-Ordners als `.zip`. Alles wird als ein Patch
   mit den Quellen in der ROM verzeichnet und lässt sich wieder entfernen.
 - **Platzieren:** Die Palette zeigt unter *Sprites* einen Abschnitt „Custom Sprites (PIXI)“ mit den Namen aus

@@ -1,7 +1,7 @@
 // Tiny DOM helpers.
 
 type Attrs = Record<string, unknown> & { style?: string | Partial<CSSStyleDeclaration> };
-type Child = Node | string | number | null | undefined | false | Child[];
+export type Child = Node | string | number | null | undefined | false | Child[];
 
 export function h<K extends keyof HTMLElementTagNameMap>(tag: K, attrs: Attrs | null = null, ...children: Child[]): HTMLElementTagNameMap[K] {
   const el = document.createElement(tag);
@@ -101,7 +101,9 @@ export function toast(msg: string, kind: 'info' | 'error' = 'info'): void {
   setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 300); }, kind === 'error' ? 6000 : 2500);
 }
 
-export function modal(title: string, body: HTMLElement, buttons: { label: string; primary?: boolean; danger?: boolean; onClick?: () => boolean | void }[], onClose?: () => void): { close: () => void } {
+// beforeClose: asked on every way of closing (buttons, ✕, Esc, click beside the dialog); false keeps it
+// open. close(true) closes without asking.
+export function modal(title: string, body: HTMLElement, buttons: { label: string; primary?: boolean; danger?: boolean; onClick?: () => boolean | void }[], onClose?: () => void, beforeClose?: () => boolean): { close: (force?: boolean) => void } {
   const back = h('div', { class: 'modal-back' });
   let closed = false;
   // Esc closes the topmost dialog
@@ -111,10 +113,16 @@ export function modal(title: string, body: HTMLElement, buttons: { label: string
     e.stopPropagation();
     close();
   };
-  const close = () => { if (closed) return; closed = true; back.remove(); window.removeEventListener('keydown', esc, true); onClose?.(); };
+  const close = (force = false) => {
+    if (closed || (!force && beforeClose && !beforeClose())) return;
+    closed = true;
+    back.remove();
+    window.removeEventListener('keydown', esc, true);
+    onClose?.();
+  };
   window.addEventListener('keydown', esc, true);
   const box = h('div', { class: 'modal' },
-    h('div', { class: 'modal-title' }, title, h('button', { class: 'icon-btn', onclick: close, title: 'Schließen' }, '✕')),
+    h('div', { class: 'modal-title' }, title, h('button', { class: 'icon-btn', onclick: () => close(), title: 'Schließen' }, '✕')),
     h('div', { class: 'modal-body' }, body),
     h('div', { class: 'modal-buttons' }, buttons.map((b) => h('button', {
       class: b.danger ? 'danger' : b.primary ? 'primary' : '',

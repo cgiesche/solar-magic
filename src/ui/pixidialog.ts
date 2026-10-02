@@ -1,10 +1,9 @@
-// Custom sprites (PIXI format): the project dialog (list.txt entries, files, import/export of a PIXI
-// folder as .zip, "Übernehmen") and the dialog adding a downloaded sprite package.
+// Custom sprites (PIXI format): the tab of the patches dialog (list.txt entries, files, import/export
+// of a PIXI folder as .zip) and the dialog adding a downloaded sprite package.
 
 import type { App } from './app.ts';
-import { h, modal, clear, toast, pickFile, downloadBytes, hexInput, select } from './dom.ts';
-import { unzipSync } from 'fflate';
-import { loadAsar } from '../core/asar.ts';
+import { h, modal, clear, toast, hexInput, select, type Child } from './dom.ts';
+import { projectPane, logView, romChanged, type Pane } from './projectpane.ts';
 import type { ApplyResult } from '../core/patchapply.ts';
 import type { PatchPackage } from '../core/patchpkg.ts';
 import { hex } from '../core/names.ts';
@@ -12,7 +11,7 @@ import { definesButton } from './defineedit.ts';
 import { map16Source } from '../core/render.ts';
 import { EXT_TILES } from '../core/map16ext.ts';
 import {
-  loadPixiProject, savePixiProject, projectFromZip, projectToZip, spriteConfig, numberRange,
+  loadPixiProject, savePixiProject, projectFromZip, projectToZip, spriteConfig, numberRange, removePixi,
   FOLDER, KIND_LABEL, type PixiProject,
 } from '../core/pixi.ts';
 import { planPixiPackage, applyPixiPackage, hexNum } from '../core/pixipkg.ts';
@@ -20,60 +19,31 @@ import type { SpriteFolder } from '../core/pixirt.ts';
 
 const KINDS = Object.keys(FOLDER) as SpriteFolder[];
 
-function done(app: App): void {
-  app.emu.syncRom();
-  app.persist();
-  app.openLevel(app.level.number);
-  app.emit('patch');
-}
-
 function errorLog(log: HTMLElement, r: ApplyResult): void {
-  clear(log);
-  for (const m of r.errors) log.appendChild(h('div', { class: 'err' }, m));
-  for (const m of r.warnings) log.appendChild(h('div', { class: 'hint' }, m));
+  clear(log).appendChild(logView({ ...r, prints: [] }));
 }
 
-export async function openPixiDialog(app: App, onDone?: () => void): Promise<void> {
-  const body = h('div', { class: 'uber-dialog' }, h('p', { class: 'hint' }, 'Asar wird geladen …'));
-  let proj: PixiProject;
-  let dirty = false;
-  const log = h('div', { class: 'patch-log' });
-  modal('Custom Sprites', body, [
-    { label: 'Schließen', onClick: () => { if (!dirty || body.dataset.warned) return true; body.dataset.warned = '1'; toast('Nicht übernommene Änderungen – erneut „Schließen“ verwirft sie.'); return false; } },
-    { label: 'Übernehmen', primary: true, onClick: () => apply() },
-  ]);
-  try { await loadAsar(); proj = loadPixiProject(app.rom) ?? { files: new Map(), list: [] }; } catch (e) {
-    clear(body).appendChild(h('p', { class: 'hint error' }, String(e instanceof Error ? e.message : e)));
-    return;
-  }
-  const change = () => { dirty = true; delete body.dataset.warned; build(); };
+export function pixiPane(app: App, onDirty: () => void, changed: () => void): Pane {
+  let kind: SpriteFolder = 'sprites';
+  let num = 0;
 
-  function apply(): boolean {
-    if (app.dirty) app.saveLevel(true);
-    const r = savePixiProject(app.rom, proj);
-    errorLog(log, r);
-    if (!r.ok) return false;
-    done(app);
-    toast(`Custom Sprites übernommen (${proj.list.length})${r.warnings.length ? ` – ${r.warnings.join(' ')}` : ''}`);
-    onDone?.();
-    return true;
-  }
-
-  function build(): void {
-    let kind: SpriteFolder = 'sprites';
-    let num = 0;
+  function content(proj: PixiProject, change: () => void): Child[] {
+    const filesFor = (k: SpriteFolder) => [...proj.files.keys()].filter((f) => f.startsWith(FOLDER[k]) && (k === 'sprites' || k === 'shooters' || k === 'generators' ? /\.(json|cfg)$/i.test(f) : /\.asm$/i.test(f) && !/_header\.asm$/i.test(f))).sort();
     const fileSel = h('span');
     let file = '';
-    const filesFor = (k: SpriteFolder) => [...proj.files.keys()].filter((f) => f.startsWith(FOLDER[k]) && (k === 'sprites' || k === 'shooters' || k === 'generators' ? /\.(json|cfg)$/i.test(f) : /\.asm$/i.test(f) && !/_header\.asm$/i.test(f))).sort();
+    const numIn = hexInput(num, 2, (v) => (num = v));
+    const addBtn = h('button', { onclick: () => add() }, 'Zuordnen');
     const buildFiles = () => {
       const fs = filesFor(kind);
       file = fs[0] ?? '';
       const [lo, hi] = numberRange(kind);
       num = Math.max(lo, Math.min(hi, num));
+      numIn.value = hex(num, 2);
+      numIn.title = `${KIND_LABEL[kind]}: ${hex(lo, 2)}–${hex(hi, 2)}`;
+      addBtn.disabled = !fs.length;
       clear(fileSel).append(fs.length ? select(fs.map((f, i) => [i, f.slice(FOLDER[kind].length)] as [number, string]), 0, (i) => (file = fs[i])) : h('span', { class: 'hint' }, `keine Dateien in ${FOLDER[kind]}`));
     };
     const add = () => {
-      if (!file) { toast('Zuerst Dateien hinzufügen.', 'error'); return; }
       const [lo, hi] = numberRange(kind);
       if (num < lo || num > hi) { toast(`${KIND_LABEL[kind]}: Nummer ${hex(lo, 2)}–${hex(hi, 2)}`, 'error'); return; }
       const level = (k: SpriteFolder) => k === 'sprites' || k === 'shooters' || k === 'generators';
@@ -88,47 +58,39 @@ export async function openPixiDialog(app: App, onDone?: () => void): Promise<voi
     const rows = [...proj.list].sort((a, b) => KINDS.indexOf(a.kind) - KINDS.indexOf(b.kind) || a.num - b.num).map((e) => h('tr', null,
       h('td', null, KIND_LABEL[e.kind]),
       h('td', { class: 'mono' }, hex(e.num, 2)),
-      h('td', { class: proj.files.has(e.file) ? '' : 'err' }, e.file.slice(FOLDER[e.kind].length)),
+      h('td', { class: proj.files.has(e.file) ? '' : 'err', title: proj.files.has(e.file) ? e.file : `${e.file} fehlt im Projekt` }, e.file.slice(FOLDER[e.kind].length)),
       h('td', null, label(e)),
-      h('td', null, definesButton(proj.files, asmOf(e), change), h('button', { class: 'icon-btn', title: 'Entfernen', onclick: () => { proj.list = proj.list.filter((x) => x !== e); change(); } }, '✕'))));
-    let folder: SpriteFolder | 'routines' = 'sprites';
-    const addFile = async () => {
-      const f = await pickFile('.asm,.json,.cfg,.bin,.zip');
-      if (!f) return;
-      const data = new Uint8Array(await f.arrayBuffer());
-      const dest = folder === 'routines' ? 'routines/' : FOLDER[folder];
-      if (/\.zip$/i.test(f.name)) {
-        // a whole PIXI folder (with list.txt) replaces the project, otherwise the files are added
-        const all = unzipSync(data);
-        if (Object.keys(all).some((k) => /(^|\/)list\.txt$/i.test(k))) { proj = projectFromZip(data); toast(`PIXI-Ordner „${f.name}“ geladen`); }
-        else for (const [p, c] of Object.entries(all)) if (!p.endsWith('/')) proj.files.set(dest + p.split('/').pop(), c);
-      } else proj.files.set(dest + f.name, data);
-      change();
-    };
-    const other = [...proj.files.keys()].sort();
-    clear(body).append(
-      h('p', { class: 'hint' }, 'Custom Sprites im Format von PIXI: Sprites (00–BF), Shooter (C0–CF) und Generatoren (D0–DF) mit .json/.cfg, die übrigen Arten als .asm. Shared Routines wie %GetDrawInfo() sind eingebaut; eigene in routines/ haben Vorrang. Downloads von SMWCentral fügt man am einfachsten über Patches → Hinzufügen ein.'),
-      h('div', { class: 'row' },
-        h('button', { onclick: addFile }, 'PIXI-Ordner oder Dateien hinzufügen …'),
-        select([...KINDS.map((k, i) => [i, FOLDER[k]] as [number, string]), [KINDS.length, 'routines/']], 0, (i) => (folder = i < KINDS.length ? KINDS[i] : 'routines')),
-        h('button', { onclick: () => downloadBytes('pixi.zip', projectToZip(proj), 'application/zip') }, 'Exportieren (.zip)')),
+      h('td', { class: 'actions' }, definesButton(proj.files, asmOf(e), change), h('button', { class: 'icon-btn', title: 'Eintrag entfernen', onclick: () => { proj.list = proj.list.filter((x) => x !== e); change(); } }, '✕'))));
+    const out = [
       rows.length ? h('table', { class: 'uber-table' }, h('tr', null, h('th', null, 'Art'), h('th', null, 'Nr.'), h('th', null, 'Datei'), h('th', null, 'Name'), h('th')), rows)
-        : h('p', { class: 'hint' }, 'Noch keine Custom Sprites eingetragen.'),
-      h('div', { class: 'row uber-add' },
-        select(KINDS.map((k, i) => [i, KIND_LABEL[k]] as [number, string]), 0, (i) => { kind = KINDS[i]; num = numberRange(kind)[0]; buildFiles(); }),
-        h('label', null, ' Nr. '), hexInput(num, 2, (v) => (num = v)),
+        : h('p', { class: 'hint' }, 'Noch keine Custom Sprites – „Hinzufügen …“ oben nimmt einen Sprite-Download (.zip/.asm) und gibt ihm die nächste freie Nummer.'),
+      proj.files.size ? h('div', { class: 'row uber-add' },
+        select(KINDS.map((k, i) => [i, KIND_LABEL[k]] as [number, string]), KINDS.indexOf(kind), (i) => { kind = KINDS[i]; num = numberRange(kind)[0]; buildFiles(); }),
+        h('label', null, 'Nr.'), numIn,
         fileSel,
-        h('button', { onclick: add }, 'Eintragen')),
-      h('h3', null, 'Projektdateien'),
-      h('div', { class: 'uber-files' }, other.length ? other.map((f) => h('div', { class: 'row' }, h('span', { class: 'mono' }, f),
-        definesButton(proj.files, f, change),
-        h('button', { class: 'icon-btn', title: 'Datei löschen', onclick: () => { proj.files.delete(f); change(); } }, '✕'))) : h('p', { class: 'hint' }, 'Keine Dateien.')),
-      dirty ? h('p', { class: 'hint' }, 'Nicht übernommene Änderungen.') : '',
-      log,
-    );
+        addBtn) : '',
+    ];
     buildFiles();
+    return out;
   }
-  build();
+
+  return projectPane<PixiProject>(app, {
+    title: 'Custom Sprites',
+    intro: 'Sprites, Shooter, Generatoren und die übrigen Sprite-Arten von PIXI.',
+    format: 'Format von PIXI: Sprites (00–BF), Shooter (C0–CF) und Generatoren (D0–DF) mit .json/.cfg, die übrigen Arten als .asm. Shared Routines wie %GetDrawInfo() sind eingebaut; eigene in routines/ haben Vorrang.',
+    load: () => loadPixiProject(app.rom),
+    empty: () => ({ files: new Map(), list: [] }),
+    save: (p) => savePixiProject(app.rom, p),
+    remove: () => removePixi(app.rom),
+    folders: [...KINDS.map((k) => FOLDER[k]), 'routines/'],
+    accept: '.asm,.json,.cfg,.bin',
+    addFile: (p, folder, path, data) => p.files.set(folder + path, data),
+    fromZip: projectFromZip,
+    toZip: projectToZip,
+    zipName: 'pixi.zip',
+    content,
+    applied: (p) => `Custom Sprites übernommen (${p.list.length})`,
+  }, onDirty, changed);
 }
 
 // a downloaded package: numbers for its sprites, tiles for its blocks, linked defines – then added
@@ -166,7 +128,7 @@ export function openPixiPackageDialog(app: App, pkg: PatchPackage, onDone: () =>
         r = { ok: false, errors: [e instanceof Error ? e.message : String(e)], warnings: [], prints: [] };
       }
       if (!r.ok) { errorLog(log, r); return false; }
-      done(app);
+      romChanged(app);
       const where = p.sprites.map((s) => `${KIND_LABEL[s.kind]} ${hex(s.num, 2)}`).join(', ');
       toast(`„${pkg.name}“ eingefügt: ${where}${p.blocks.length ? ` · Blöcke auf ${p.blocks.map((b) => hex(b.tile, 3)).join(', ')}` : ''}`);
       onDone();
