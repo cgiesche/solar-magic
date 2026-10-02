@@ -343,8 +343,8 @@ export class App {
     const step = () => {
       if (this.spriteKey !== key) return;
       if (i === 0) {
-        // i2: with the sprites from $C9 on (shells, groups)
-        const stored = this.results.get<[number, SpriteImage][]>(`i2${key}`);
+        // i3: with the sprites from $C9 on (shells, groups), failed batches retried one by one
+        const stored = this.results.get<[number, SpriteImage][]>(`i3${key}`);
         if (stored) {
           for (const [n, img] of stored) map.set(n, this.spriteCanvas(img));
           this.setBusy('sprites', null);
@@ -361,7 +361,7 @@ export class App {
       this.emit('sprites');
       if (i < all.length) setTimeout(step, 0);
       else {
-        this.results.set(`i2${key}`, images, this.results.fp.deps(reads));
+        this.results.set(`i3${key}`, images, this.results.fp.deps(reads));
         this.setBusy('sprites', null);
       }
     };

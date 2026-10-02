@@ -66,7 +66,11 @@ export function captureSprites(
   for (const n of nums) if (n >= 0xc9) batches.push([n]);
   const firstPass = batches.length;
   let done = 0;
-  for (let bi = 0; bi < batches.length; bi++) {
+  for (let bi = 0; ; bi++) {
+    // second pass: retry sprites that were not captured, one per load (centered slot); also those
+    // of a batch that failed to load as a whole (one sprite crashing the test level)
+    if (bi === firstPass) for (const n of normal) if (!result.has(n)) batches.push([n]);
+    if (bi >= batches.length) break;
     const batch = batches[bi];
     const solo = batch.length === 1 && batch[0] >= 0xc9;
     const placed = batch.map((n, i) => ({ n, ...slots[i] }));
@@ -119,10 +123,6 @@ export function captureSprites(
     });
     done += batch.length;
     onProgress?.(Math.min(nums.length, done));
-    // second pass: retry sprites that were not captured, one per load (centered slot)
-    if (bi === firstPass - 1) {
-      for (const n of normal) if (!result.has(n)) batches.push([n]);
-    }
   }
   return result;
 }
