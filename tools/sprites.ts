@@ -9,10 +9,10 @@ const emu = new LevelEmulator(rom); emu.boot();
 const n = parseInt(process.argv[2] ?? '105', 16);
 const lv = loadLevel(rom, n);
 const t0 = Date.now();
-const nums = Array.from({ length: 0xc9 }, (_, i) => i);
+const nums = Array.from({ length: 0xe7 }, (_, i) => i);
 const m = captureSprites(emu, n, lv.header, lv.spriteHeader, lv.layer2Pointer >> 16 === 0xff ? lv.layer2Pointer : 0xffd900, nums);
 console.log('ms', Date.now() - t0, 'captured', m.size, [...m.keys()].map(k=>k.toString(16)).join(' '));
-const W = 16 * 48, H = Math.ceil(0xc9 / 16) * 48;
+const W = 16 * 48, H = Math.ceil(0xe7 / 16) * 48;
 const img = new Uint32Array(W * H).fill(0xff404040);
 for (const [k, s] of m) {
   const bx = (k % 16) * 48 + 16, by = Math.floor(k / 16) * 48 + 16;

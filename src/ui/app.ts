@@ -325,7 +325,7 @@ export class App {
     this.variantQueue = [];
     const map = new Map<number, HTMLCanvasElement>();
     this.spriteThumbs = map;
-    const all = Array.from({ length: 0xc9 }, (_, i) => i);
+    const all = Array.from({ length: 0xe7 }, (_, i) => i); // as listed in the palette
     const lvNum = this.level.number;
     const bg = this.level.layer2Pointer >> 16 === 0xff ? this.level.layer2Pointer : 0xffd900;
     const header = { ...hd };
@@ -336,7 +336,8 @@ export class App {
     const step = () => {
       if (this.spriteKey !== key) return;
       if (i === 0) {
-        const stored = this.results.get<[number, SpriteImage][]>(`i${key}`);
+        // i2: with the sprites from $C9 on (shells, groups)
+        const stored = this.results.get<[number, SpriteImage][]>(`i2${key}`);
         if (stored) {
           for (const [n, img] of stored) map.set(n, this.spriteCanvas(img));
           this.setBusy('sprites', null);
@@ -353,7 +354,7 @@ export class App {
       this.emit('sprites');
       if (i < all.length) setTimeout(step, 0);
       else {
-        this.results.set(`i${key}`, images, this.results.fp.deps(reads));
+        this.results.set(`i2${key}`, images, this.results.fp.deps(reads));
         this.setBusy('sprites', null);
       }
     };

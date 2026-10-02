@@ -47,12 +47,16 @@ export function captureSprites(
   const slots: { tx: number; ty: number }[] = [];
   for (const r of rows) for (const c of cols) slots.push({ tx: (camX >> 4) + c, ty: (camY >> 4) + r });
   const s = emu.snes;
-  const batches: number[][] = [];
-  for (let b = 0; b < nums.length; b += slots.length) batches.push(nums.slice(b, b + slots.length));
+  // sprites from $C9 on load specially (shells as Koopas, groups spawn several slots): one per load,
+  // everything that is alive then belongs to it
+  const normal = nums.filter((n) => n < 0xc9), batches: number[][] = [];
+  for (let b = 0; b < normal.length; b += slots.length) batches.push(normal.slice(b, b + slots.length));
+  for (const n of nums) if (n >= 0xc9) batches.push([n]);
+  const firstPass = batches.length;
   let done = 0;
   for (let bi = 0; bi < batches.length; bi++) {
     const batch = batches[bi];
-    const first = bi < Math.ceil(nums.length / slots.length);
+    const solo = batch.length === 1 && batch[0] >= 0xc9;
     const placed = batch.map((n, i) => ({ n, ...slots[i] }));
     // sprite data sorted by x (screen) — they are all on screen 0/1
     const order = [...placed].sort((a, b2) => a.tx - b2.tx || a.ty - b2.ty);
@@ -69,11 +73,12 @@ export function captureSprites(
     const { snapOwner, snapOam, snapConflicts } = rec;
     const w = s.wram;
     const cx = w[0x1a] | (w[0x1b] << 8), cy = w[0x1c] | (w[0x1d] << 8);
-    // live sprite slots
+    // live sprite slots (alone, a sprite from $C9 on owns all: shells $DA-$DD load as a Koopa
+    // 04-07 in carryable state, so $9E is not the placed number)
     const live = new Map<number, { n: number; x: number; y: number }>();
     for (let i = 0; i < 12; i++) {
-      if (w[0x14c8 + i] === 0 || !order[w[0x161a + i]]) continue;
-      live.set(i, { n: w[0x9e + i], x: w[0xe4 + i] | (w[0x14e0 + i] << 8), y: w[0xd8 + i] | (w[0x14d4 + i] << 8) });
+      if (w[0x14c8 + i] === 0 || !(solo || order[w[0x161a + i]])) continue;
+      live.set(i, { n: solo ? batch[0] : w[0x9e + i], x: w[0xe4 + i] | (w[0x14e0 + i] << 8), y: w[0xd8 + i] | (w[0x14d4 + i] << 8) });
     }
     const groups = new Map<number, OamTile[]>();
     for (const t of readOamBuffer(snapOam)) {
@@ -82,6 +87,14 @@ export function captureSprites(
       let g = groups.get(slot);
       if (!g) { g = []; groups.set(slot, g); }
       g.push(t);
+    }
+    // a group sprite ($DE five Eeries, $E0 three platforms) is drawn as a whole, positioned by
+    // the slot that came from the level data
+    if (solo && groups.size > 1) {
+      const all = [...groups.values()].flat();
+      const main = [...groups.keys()].find((i) => w[0x161a + i] === 0) ?? [...groups.keys()][0];
+      groups.clear();
+      groups.set(main, all);
     }
     groups.forEach((g, i) => {
       const l = live.get(i)!;
@@ -96,8 +109,8 @@ export function captureSprites(
     done += batch.length;
     onProgress?.(Math.min(nums.length, done));
     // second pass: retry sprites that were not captured, one per load (centered slot)
-    if (first && bi === Math.ceil(nums.length / slots.length) - 1) {
-      for (const n of nums) if (!result.has(n)) batches.push([n]);
+    if (bi === firstPass - 1) {
+      for (const n of normal) if (!result.has(n)) batches.push([n]);
     }
   }
   return result;
@@ -180,6 +193,8 @@ function drawTiles(emu: LevelEmulator, g: OamTile[]): SpriteImage | null {
       }
     }
   }
+  // nothing visible (e.g. tiles of graphics the level does not load): no image, the editor marks the spot
+  if (!rgba.some((c) => c !== 0)) return null;
   return { w: W, h: H, ox: x0, oy: y0, rgba };
 }
 
