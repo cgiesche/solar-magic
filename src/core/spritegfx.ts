@@ -50,14 +50,7 @@ export function captureSprites(
   onProgress?: (done: number) => void,
 ): Map<number, SpriteImage> {
   const result = new Map<number, SpriteImage>();
-  const hdr = encodePrimaryHeader({ ...header, mode: 0, screens: 2, time: 2 });
-  // empty level with a floor far below; mario enters at the left
-  const l1 = new Uint8Array([...hdr, 0xff]);
-  const secondary = [0x00, 0x00, 0x00, 0x00];
-  // first pass: find camera
-  const probe = emu.load(level, { layer1: l1, sprites: new Uint8Array([spriteHeader & 0x3f, 0xff]), secondaryHeader: secondary, layer2Pointer: bgPointer });
-  const camX = probe.wram[0x1a] | (probe.wram[0x1b] << 8);
-  const camY = probe.wram[0x1c] | (probe.wram[0x1d] << 8);
+  const { l1, secondary, camX, camY } = testLevel(emu, level, header, spriteHeader, bgPointer);
   const cols = [5, 9, 13], rows = [4, 10];
   const slots: { tx: number; ty: number }[] = [];
   for (const r of rows) for (const c of cols) slots.push({ tx: (camX >> 4) + c, ty: (camY >> 4) + r });
@@ -77,15 +70,8 @@ export function captureSprites(
     const batch = batches[bi];
     const solo = batch.length === 1 && batch[0] >= 0xc9;
     const placed = batch.map((n, i) => ({ n, ...slots[i] }));
-    // sprite data sorted by x (screen) — they are all on screen 0/1
-    const order = [...placed].sort((a, b2) => a.tx - b2.tx || a.ty - b2.ty);
-    const data: number[] = [spriteHeader & 0x3f];
-    for (const p of order) {
-      const screen = p.tx >> 4;
-      data.push(((p.ty & 15) << 4) | ((screen & 0x10) >> 3) | ((p.ty >> 4) & 1), ((p.tx & 15) << 4) | (screen & 15), p.n);
-    }
-    data.push(0xff);
-    const r = emu.load(level, { layer1: l1, sprites: new Uint8Array(data), secondaryHeader: secondary, layer2Pointer: bgPointer });
+    const order = sortPlaced(placed);
+    const r = emu.load(level, { layer1: l1, sprites: testSpriteData(spriteHeader, order), secondaryHeader: secondary, layer2Pointer: bgPointer });
     if (!r.ok) continue;
     const rec = record(emu, 3);
     if (!rec) continue;
@@ -141,17 +127,48 @@ export function captureSprites(
   return result;
 }
 
+// The empty test level (horizontal, two screens, floor far below; Mario enters at the left)
+// and where its camera starts
+export function testLevel(emu: LevelEmulator, level: number, header: PrimaryHeader, spriteHeader: number, bgPointer: number) {
+  const hdr = encodePrimaryHeader({ ...header, mode: 0, screens: 2, time: 2 });
+  const l1 = new Uint8Array([...hdr, 0xff]);
+  const secondary = [0x00, 0x00, 0x00, 0x00];
+  const probe = emu.load(level, { layer1: l1, sprites: new Uint8Array([spriteHeader & 0x3f, 0xff]), secondaryHeader: secondary, layer2Pointer: bgPointer });
+  return { l1, secondary, camX: probe.wram[0x1a] | (probe.wram[0x1b] << 8), camY: probe.wram[0x1c] | (probe.wram[0x1d] << 8) };
+}
+
+export interface PlacedSprite { n: number; tx: number; ty: number; extra?: number }
+
+// level sprite data must be sorted by x (screen); $161A of a live slot is the index in this order
+export function sortPlaced<T extends PlacedSprite>(placed: T[]): T[] {
+  return [...placed].sort((a, b) => a.tx - b.tx || a.ty - b.ty);
+}
+
+// sprite data of the test level (horizontal format) for sprites sorted with sortPlaced
+export function testSpriteData(spriteHeader: number, order: PlacedSprite[]): Uint8Array {
+  const data: number[] = [spriteHeader & 0x3f];
+  for (const p of order) {
+    const screen = p.tx >> 4;
+    data.push(((p.ty & 15) << 4) | (((p.extra ?? 0) & 3) << 2) | ((screen & 0x10) >> 3) | ((p.ty >> 4) & 1), ((p.tx & 15) << 4) | (screen & 15), p.n);
+  }
+  data.push(0xff);
+  return new Uint8Array(data);
+}
+
 // Continues the live emulator state for a few frames (first into gameplay), recording which
 // sprite slot writes each OAM buffer entry ($0200-$03FF): the sprite loop stores the slot
 // in $15E9 ($0180A9) before each sprite runs, Yoshi is drawn later with $15E9 set at $01EA83;
 // writes from shallower stack depth end the attribution.
 // (score/extended sprite loops in bank 2 reuse $15E9, hence the bank check)
-function record(emu: LevelEmulator, frames: number): { snapOwner: Int8Array; snapOam: Uint8Array; snapConflicts: Set<number> } | null {
+// snapLost: slots that lost a visible tile that way (the tile is missing on screen) and the slots
+// that overwrote it
+export function record(emu: LevelEmulator, frames: number): { snapOwner: Int8Array; snapOam: Uint8Array; snapConflicts: Set<number>; snapLost: Set<number> } | null {
   const s = emu.snes;
   const owner = new Int8Array(128).fill(-1);
   let snapOwner = owner.slice(), snapOam = s.wram.slice(0x200, 0x4a0);
   // slots whose OAM entries were overwritten by another sprite in the same frame
   let conflicts = new Set<number>(), snapConflicts = conflicts;
+  let lost = new Set<number>(), snapLost = lost;
   let cur = -1, s0 = 0;
   s.hook = {
     onWramWrite(a: number, v: number) {
@@ -167,10 +184,16 @@ function record(emu: LevelEmulator, frames: number): { snapOwner: Int8Array; sna
         snapOam = s.wram.slice(0x200, 0x4a0);
         snapConflicts = conflicts;
         conflicts = new Set();
+        snapLost = lost;
+        lost = new Set();
       }
       if (a >= 0x200 && a < 0x400) {
         const e = (a - 0x200) >> 2, prev = owner[e];
-        if (cur >= 0 && prev >= 0 && prev !== cur) { conflicts.add(prev); conflicts.add(cur); }
+        if (cur >= 0 && prev >= 0 && prev !== cur) {
+          conflicts.add(prev); conflicts.add(cur);
+          const y = s.wram[0x201 + e * 4]; // still the overwritten tile's: the first write of cur
+          if (y < 0xe0 || y >= 0xf8) { lost.add(prev); lost.add(cur); }
+        }
         owner[e] = cur;
       }
     },
@@ -180,7 +203,7 @@ function record(emu: LevelEmulator, frames: number): { snapOwner: Int8Array; sna
     while (s.wram[0x100] !== 0x14 && guard++ < 80) s.runFrame();
     for (let f = 0; f < frames; f++) s.runFrame();
   } catch { return null; } finally { s.hook = null; }
-  return { snapOwner, snapOam, snapConflicts };
+  return { snapOwner, snapOam, snapConflicts, snapLost };
 }
 
 // image of OAM tiles; ox/oy: its top-left on the screen
