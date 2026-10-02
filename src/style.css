@@ -366,6 +366,11 @@ button.danger:hover:not(:disabled) { border-color: var(--danger); }
 .at-sheet-scroll { overflow: auto; border: 1px solid var(--border); }
 .at-sheet { display: block; image-rendering: pixelated; cursor: crosshair; }
 .at-target-head { margin-top: 4px; }
+.at-source { display: flex; flex-direction: column; gap: 2px; padding: 4px 0; border-bottom: 1px solid var(--border); }
+.at-source .row { flex-wrap: nowrap; }
+.at-source .row .hint { white-space: nowrap; }
+.at-source select { flex: 1; min-width: 0; }
+.at-step { margin-top: 6px; color: var(--accent); }
 .at-palgrid { display: grid; grid-template-columns: repeat(16, 20px); gap: 2px; }
 .at-pal { width: 20px; height: 20px; border-radius: 2px; cursor: pointer; border: 1px solid #0008; }
 .at-pal.sel { outline: 2px solid #fff; }

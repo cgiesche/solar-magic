@@ -10,12 +10,13 @@ import { menuButton, type MenuItem } from '../menu.ts';
 import { hex } from '../../core/names.ts';
 import { cgramToRGBA, decodeTile, snesColorToRGBA } from '../../core/gfx.ts';
 import { map16Source } from '../../core/render.ts';
+import { EXT_FIRST, EXT_TILES, map16Ext } from '../../core/map16ext.ts';
 import {
   type ExList, type ExSlot, emptyList, readLevelList, readGlobalList, writeLevelList, writeGlobalList, levelSettings, setLevelSettings,
   readAltFile, writeAltFile, kindOf, tilesOf, secondSet, secondSetName, triggerName, TYPE_NAMES, SLOTS, exanimInstalled, exanimLayout,
   NO_GAME_COLORS, NO_GAME_TILES, NO_LEVEL_LIST, NO_GLOBAL_LIST,
 } from '../../core/exanim.ts';
-import { levelSlots, gfxName, ANIM_FILE } from './map16tab.ts';
+import { levelSlots, gfxName, lmAnimName, ANIM_FILE } from './map16tab.ts';
 import { confirmExAnim } from './gfxtab.ts';
 import { cssOf, htmlOf } from './palettetab.ts';
 
@@ -182,24 +183,33 @@ export class AnimTab implements WsPanel {
     const app = this.app, b = this.bar;
     clear(b);
     const scope = (g: boolean, label: string, title: string) => h('button', { class: this.global === g ? 'active' : '', title, onclick: () => { this.global = g; this.sel = 0; this.frame = 0; this.build(); } }, label);
-    b.append(h('span', { class: 'btn-group' },
-      scope(false, `Level ${hex(app.level.number, 3)}`, 'Animationen nur dieses Levels'),
-      scope(true, 'Global', 'Animationen aller Level (ein Level kann sie unten abschalten)')));
+    b.append(h('span', { class: 'hint' }, 'Liste'), h('span', { class: 'btn-group' },
+      scope(false, `Level ${hex(app.level.number, 3)}`, 'Animationen, die nur in diesem Level laufen'),
+      scope(true, 'Global', 'Animationen, die in allen Levels laufen (ein Level kann sie über „In Level … abspielen“ abschalten)')));
     const installed = exanimInstalled(app.rom);
     if (!installed && exanimLayout(app.rom) === null && app.rom.r8(0x0583ad) === 0x22) {
       b.append(h('span', { class: 'hint' }, 'Diese ROM hat ExAnimation in einem älteren Lunar-Magic-Format – nicht unterstützt.'));
       return;
     }
-    b.append(h('span', { class: 'sep' }), this.flagsMenu ??= this.levelFlagsMenu());
-    const l = this.list();
-    const alt = h('select', null, [0, 1, 2, 3].map((k) => h('option', { value: String(k), selected: l.altFile === k }, `${gfxName(ANIM_FILE + k)}${readAltFile(app.rom, k) ? '' : ' (leer)'}`)));
-    alt.addEventListener('change', () => { const nl = this.list(); nl.altFile = Number(alt.value); void this.save(nl, `Quelle ${gfxName(ANIM_FILE + nl.altFile)}`); });
-    b.append(h('span', { class: 'spacer' }), h('span', { class: 'hint' }, 'Bilder aus'), alt);
+    if (this.flagsLevel !== app.level.number) { this.flagsMenu = this.levelFlagsMenu(); this.flagsLevel = app.level.number; }
+    b.append(h('span', { class: 'spacer' }), this.flagsMenu!);
+  }
+
+  // the animation file all tile animations of the list take their frames from (one per list)
+  private sourceSelect(l: ExList): HTMLElement {
+    const app = this.app;
+    const alt = h('select', { title: 'Eine Animationsgrafik pro Liste: ein Wechsel betrifft alle Tile-Animationen dieser Liste' },
+      [0, 1, 2, 3].map((k) => h('option', { value: String(k), selected: l.altFile === k }, `${gfxName(ANIM_FILE + k)} (${lmAnimName(ANIM_FILE + k)})${readAltFile(app.rom, k) ? '' : ' – leer'}`)));
+    alt.addEventListener('change', () => { const nl = this.list(); nl.altFile = Number(alt.value); void this.save(nl, `Bilder aus ${gfxName(ANIM_FILE + nl.altFile)}`); });
+    const n = [...l.slots.values()].filter((s) => kindOf(s.type) === 'tiles' && s.dest & ALT).length;
+    return h('div', { class: 'at-source' }, h('div', { class: 'row' }, h('span', { class: 'hint' }, 'Bilder aus'), alt),
+      h('div', { class: 'hint' }, n > 1 ? `gilt für alle ${n} Tile-Animationen dieser Liste` : 'gilt für alle Tile-Animationen dieser Liste'));
   }
 
   // which animations play in the current level (always the level's settings, also in "Global"); kept across
   // rebuilds so the open menu stays open while toggling
   private flagsMenu: HTMLElement | null = null;
+  private flagsLevel = -1;
   private levelFlagsMenu(): HTMLElement {
     const app = this.app;
     const flag = (bit: number, label: string, title: string): MenuItem => ({
@@ -211,7 +221,7 @@ export class AnimTab implements WsPanel {
         app.romEdit(`Level ${hex(app.level.number, 3)}: ${label} ${on ? 'an' : 'aus'}`, () => setLevelSettings(app.rom, app.level.number, on ? st & ~bit : st | bit));
       },
     });
-    return menuButton({ label: 'Im Level abspielen', title: 'Welche Animationen im aktuellen Level laufen', items: [
+    return menuButton({ label: `In Level ${hex(app.level.number, 3)} abspielen`, title: 'Welche Animationen in diesem Level laufen (Einstellung des Levels, auch bei „Global“)', items: [
       { heading: 'Spiel' },
       flag(NO_GAME_TILES, 'Original-Tile-Animation', 'Die Animationen des Spiels (?-Block, Münze, Wasser …)'),
       flag(NO_GAME_COLORS, 'Original-Farbblinken', 'Das Blinken von Farbe 6·4 (Münzen, Yoshi-Coins)'),
@@ -226,7 +236,8 @@ export class AnimTab implements WsPanel {
     clear(box);
     this.previews = [];
     const l = this.list();
-    box.append(h('div', { class: 'panel-title' }, this.global ? 'Globale Animationen' : 'Animationen des Levels', h('span', { class: 'hint' }, `${l.slots.size} von ${SLOTS}`)));
+    box.append(h('div', { class: 'panel-title' }, this.global ? 'Globale Animationen' : `Animationen von Level ${hex(this.app.level.number, 3)}`, h('span', { class: 'hint' }, `${l.slots.size} von ${SLOTS}`)));
+    if (exanimInstalled(this.app.rom) || l.slots.size) box.append(this.sourceSelect(l));
     const items = h('div', { class: 'at-slot-list' });
     for (const [n, s] of [...l.slots.entries()].sort((a, b) => a[0] - b[0])) {
       const c = h('canvas', { class: 'at-mini' });
@@ -293,6 +304,7 @@ export class AnimTab implements WsPanel {
     // an open native color picker closes when its input is replaced: rebuild once it is done (change)
     if (pickerOpen(d)) return;
     clear(d);
+    if (this.ws.preview.highlight.size) { this.ws.preview.highlight.clear(); this.ws.preview.drawHighlight(); }
     const s = this.slot();
     if (!s) { d.append(h('p', { class: 'hint' }, 'Links eine Animation wählen oder anlegen.')); return; }
     const kind = kindOf(s.type);
@@ -304,27 +316,59 @@ export class AnimTab implements WsPanel {
       x.trigger = Number(trig.value);
       this.setColumns(x, cols);
     }, `Auslöser ${triggerName(Number(trig.value))}`));
-    d.append(
-      h('div', { class: 'prop-title' }, `Slot ${hex(this.sel, 2)}`),
-      h('div', { class: 'prop' }, h('label', null, 'Art'), typeSel),
+    const trigger = [
       h('div', { class: 'prop' }, h('label', null, 'Auslöser'), trig),
       secondSet(s.trigger) ? h('p', { class: 'hint' }, `Zwei Bildfolgen: oben normal, unten solange „${secondSetName(s.trigger)}“.`) : '',
       s.trigger === 6 || s.trigger === 8 ? h('p', { class: 'hint' }, 'Läuft einmal bis zum letzten Bild, sobald die Bedingung eintritt, und bleibt dort.') : '',
+    ];
+    d.append(
+      h('div', { class: 'prop-title' }, `Slot ${hex(this.sel, 2)}`, h('span', { class: 'hint' }, this.global ? ' · global' : ` · Level ${hex(this.app.level.number, 3)}`)),
+      h('div', { class: 'prop' }, h('label', null, 'Art'), typeSel),
     );
-    if (kind === 'tiles') this.tileDetail(d, s);
-    else if (kind === 'colors') this.colorDetail(d, s);
+    if (kind === 'tiles') { this.tileDetail(d, s, trigger); return; }
+    d.append(...trigger);
+    if (kind === 'colors') this.colorDetail(d, s);
     else d.append(h('p', { class: 'hint' }, 'Farbrotationen lassen sich hier noch nicht bearbeiten (in Lunar Magic angelegt).'));
   }
 
-  private tileDetail(d: HTMLElement, s: ExSlot): void {
+  // 8x8 tiles (VRAM numbers) a tile slot overwrites
+  private targetTiles(s: ExSlot): number[] {
+    const t = this.targetTile(s), shape = shapeOf(s.type);
+    const out: number[] = [];
+    for (let y = 0; y < shape.h; y++) for (let x = 0; x < shape.w; x++) out.push(t + y * 16 + x);
+    return out;
+  }
+
+  // Map16 tiles that use one of the slot's target tiles (they animate with it)
+  private targetUsers(s: ExSlot): number[] {
+    const tiles = new Set(this.targetTiles(s));
+    const src = map16Source(this.app.rom, this.app.render);
+    const max = map16Ext(this.app.rom) ? EXT_TILES : EXT_FIRST;
+    const users: number[] = [];
+    for (let m = 0; m < max && users.length < 64; m++) if (src.fg(m).some((w) => tiles.has(w & 0x3ff))) users.push(m);
+    return users;
+  }
+
+  private tileDetail(d: HTMLElement, s: ExSlot, trigger: (HTMLElement | string)[]): void {
     const t = this.targetTile(s);
     const shape = shapeOf(s.type);
     const slot = levelSlots(this.app).find((x) => t >= x.first && t < x.first + 0x80);
+    const users = this.targetUsers(s);
+    // places in the level: marked in the preview
+    this.ws.preview.highlight = new Set(users);
+    this.ws.preview.drawHighlight();
     d.append(
+      h('div', { class: 'panel-title at-step' }, '1 · Ziel', h('span', { class: 'hint' }, 'welche 8x8-Tiles ersetzt werden')),
       h('div', { class: 'prop' }, h('label', null, 'Ziel'),
         h('span', { class: 'mono' }, `8x8-Tile ${hex(t, 3)}`), slot ? h('span', { class: 'hint' }, ` ${slot.name}`) : '',
         h('button', { class: this.picking === 'target' ? 'active' : '', title: 'Rechts im VRAM-Raster oder in der Level-Vorschau anklicken', onclick: () => { this.picking = this.picking ? null : 'target'; this.buildSide(); this.buildDetail(); } }, 'Ziel wählen')),
-      h('div', { class: 'hint' }, `${shape.w}×${shape.h} Tiles · ${s.dest & ALT ? `Bilder aus ${gfxName(ANIM_FILE + this.list().altFile)}` : 'Bilder aus dem RAM ($7E, z. B. Original-Animationen)'}`),
+      h('div', { class: 'hint' }, `${shape.w}×${shape.h} Tiles`, slot ? h('span', null, ' · ', h('a', { href: '#', title: `${gfxName(slot.file)} im Tab Grafiken öffnen`, onclick: (e: Event) => { e.preventDefault(); this.ws.showGfx(slot.file, t - slot.first); } }, `in ${gfxName(slot.file)} ansehen`)) : ''),
+      users.length
+        ? h('div', { class: 'gt-users' }, h('span', { class: 'hint' }, 'animiert Map16:'), users.slice(0, 24).map((m) => h('a', { href: '#', class: 'mono', title: 'Im Map16-Tab öffnen', onclick: (e: Event) => { e.preventDefault(); this.ws.showMap16(m); } }, hex(m, 3))), users.length > 24 ? h('span', { class: 'hint' }, `… (${users.length})`) : '')
+        : h('div', { class: 'hint' }, 'Kein Map16-Tile benutzt dieses Ziel – die Animation ist im Level nicht zu sehen.'),
+      h('div', { class: 'panel-title at-step' }, '2 · Wann'),
+      ...trigger,
+      h('div', { class: 'panel-title at-step' }, '3 · Bilder', h('span', { class: 'hint' }, s.dest & ALT ? `aus ${gfxName(ANIM_FILE + this.list().altFile)}` : 'aus dem RAM ($7E, z. B. Original-Animationen)')),
     );
     // frames: big preview + columns
     const big = h('canvas', { class: 'at-big' });
@@ -476,7 +520,11 @@ export class AnimTab implements WsPanel {
         h('button', { onclick: () => void this.editSlot((x) => { x.dest |= ALT; x.frames = x.frames.map(() => 0); }, 'Bilder aus Animationsgrafik') }, 'Stattdessen Animationsgrafik benutzen'));
       return;
     }
-    if (!file) { box.append(h('p', { class: 'hint' }, `${gfxName(ANIM_FILE + l.altFile)} gibt es noch nicht – oben „Zeichnen …“ oder neue Tile-Animation legt sie an.`)); return; }
+    if (!file) {
+      box.append(h('p', { class: 'hint' }, `${gfxName(ANIM_FILE + l.altFile)} (Lunar Magic: ${lmAnimName(ANIM_FILE + l.altFile)}) ist noch leer.`),
+        h('button', { onclick: () => void this.createAltFile(l.altFile) }, `${gfxName(ANIM_FILE + l.altFile)} anlegen (128 leere Tiles)`));
+      return;
+    }
     const n = s.framesLess1 + 1;
     const cur = s.frames[this.set * n + this.frame] ?? 0;
     const per = shapeOf(s.type).w * shapeOf(s.type).h;
@@ -495,6 +543,12 @@ export class AnimTab implements WsPanel {
     box.append(h('div', { class: 'panel-title' }, `${gfxName(ANIM_FILE + l.altFile)}`, h('a', { href: '#', onclick: (e: Event) => { e.preventDefault(); this.ws.showGfx(ANIM_FILE + l.altFile, first); } }, 'zeichnen')),
       h('div', { class: 'hint' }, `Quelle für Bild ${this.frame + 1}${secondSet(s.trigger) ? ` (${this.set ? secondSetName(s.trigger) : 'normal'})` : ''} anklicken`),
       h('div', { class: 'at-sheet-scroll' }, c));
+  }
+
+  private async createAltFile(k: number): Promise<void> {
+    if (!(await confirmExAnim(this.app))) return;
+    try { this.app.romEdit(`${gfxName(ANIM_FILE + k)} angelegt`, () => writeAltFile(this.app.rom, k, new Uint8Array(0x1000))); }
+    catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
   }
 
   private targetPicker(box: HTMLElement, s: ExSlot, row: number): void {
