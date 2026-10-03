@@ -110,5 +110,27 @@ if (r.ok) {
   check(saveProject(rom, empty).ok && !uberEntry(rom), 'empty project removes UberASM');
 }
 
+// library with namespaces of its own and files outside library/ (as Retry System has): like UberASM
+// Tool, each library is assembled on its own and exports its labels as <file>_<label>; include paths
+// with "//" and several ".." in a row resolve like on a real file system
+{
+  const rom = new Rom(new Uint8Array(readFileSync('Super Mario World (U) [!].smc')));
+  const lib = new Map<string, Uint8Array>(Object.entries({
+    'library/big.asm': 'namespace ram\nincsrc "../big_config//ram.asm"\nnamespace off\nnamespace shared\nincsrc "../big_config/code/x/shared.asm"\nnamespace off\n',
+    'big_config/ram.asm': 'value: db $5C\n',
+    'big_config/code/x/shared.asm': 'get:\n  LDA.l ram_value\n  STA $7FB00A\n  RTL\nlate:\n  JSL shared_get\n  RTL\ngfx:\n  incbin "../../gfx/a.bin":0..2\n',
+    'big_config/gfx/a.bin': new Uint8Array([1, 2, 3, 4]),
+    'level/use.asm': 'init:\n  JSL big_shared_late\n  RTL\n',
+  }).map(([k, v]) => [k, typeof v === 'string' ? enc.encode(v) : v]));
+  const p = { files: lib, list: parseList('level:\n105 use.asm\n') };
+  const r = saveProject(rom, p);
+  check(r.ok, 'library with own namespaces and ../.. includes assembles ' + r.errors.slice(0, 3).join(' | '));
+  if (r.ok) {
+    const emu = new LevelEmulator(rom); emu.boot();
+    const l = emu.load(0x105);
+    check(l.wram[0x7fb00a - 0x7e0000] === 0x5c, 'library labels reach the level code');
+  }
+}
+
 console.log(bad ? `${bad} failures` : 'all ok');
 if (bad) process.exitCode = 1;

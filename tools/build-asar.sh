@@ -12,6 +12,8 @@ if [ ! -d "$WORK/.git" ]; then
   mkdir -p "$(dirname "$WORK")"
   git clone -q --depth 1 --branch $ASAR_TAG https://github.com/RPGHacker/asar "$WORK"
 fi
+# local fixes (idempotent): include paths resolved like the OS does (repeated slashes, several ".." in a row)
+git -C "$WORK" apply --check "$ROOT/tools/asar-wasm/normalize-paths.patch" 2>/dev/null && git -C "$WORK" apply "$ROOT/tools/asar-wasm/normalize-paths.patch"
 S=$WORK/src/asar
 mkdir -p "$OUT"
 em++ -O2 -std=c++14 -fexceptions -Dlinux -Dstricmp=strcasecmp -DASAR_SHARED -I"$S" \

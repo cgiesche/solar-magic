@@ -1,0 +1,42 @@
+diff --git a/src/asar/platform/file-helpers.cpp b/src/asar/platform/file-helpers.cpp
+index ad937cb..78c6a99 100644
+--- a/src/asar/platform/file-helpers.cpp
++++ b/src/asar/platform/file-helpers.cpp
+@@ -1,3 +1,5 @@
++#include <string>
++#include <vector>
+ #include "platform/file-helpers.h"
+ 
+ 
+@@ -94,6 +96,31 @@ string normalize_path(const char* path)
+ 		}
+ 	}
+ 
++	// smwe: resolve the path like the OS does - repeated slashes, "." and any
++	// number of ".." in a row (the code below handles only one ".." per folder),
++	// so in-memory files are found by the same paths as real files.
++	{
++		std::vector<std::string> parts;
++		std::string all(normalized.data(), normalized.length()), part;
++		bool absolute = !all.empty() && all[0] == '/';
++		bool trailing = !all.empty() && all[all.size() - 1] == '/';
++		for (size_t i = 0; i <= all.size(); ++i)
++		{
++			if (i < all.size() && all[i] != '/') { part += all[i]; continue; }
++			if (part == "..")
++			{
++				if (!parts.empty() && parts.back() != "..") parts.pop_back();
++				else if (!absolute) parts.push_back(part);
++			}
++			else if (!part.empty() && part != ".") parts.push_back(part);
++			part.clear();
++		}
++		std::string out = absolute ? "/" : "";
++		for (size_t i = 0; i < parts.size(); ++i) { if (i) out += '/'; out += parts[i]; }
++		if (trailing && !parts.empty()) out += '/';
++		normalized = out.c_str();
++	}
++
+ 	// RPG Hacker: Collapse path by removing all unnecessary
+ 	// . or .. path components.
+ 	// As a little hack, just overwrite all the stuff we're
