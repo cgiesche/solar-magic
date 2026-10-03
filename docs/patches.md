@@ -44,6 +44,41 @@ Viele Downloads auf SMWCentral sind keine eigenständigen Patches, sondern Resso
 | `.mwl` (meist mit `.map16`, `ExGFX…bin`, `.pal`, `.palmask`) | Hintergrund (Lunar Magic) | der Hintergrund kommt ins aktuelle Level, siehe [Hintergrund-Pakete](#hintergrund-pakete) |
 | `print "INIT ",pc` / `print "MAIN ",pc` | Custom Sprite (PIXI) | die Sprites bekommen die nächsten freien Nummern, enthaltene Blöcke die nächsten freien Map16-Tiles, siehe [pixi.md](pixi.md) |
 | alles andere | Patch | wie unten beschrieben |
+| UberASM-Tool-Ordner (`library/`, `gamemode/` …) in einem Unterordner, daneben eingebundene Ordner | Paket aus mehreren Teilen | Zuordnen von Hand mit Vorschlag, siehe [Pakete aus mehreren Teilen](#pakete-aus-mehreren-teilen) |
+
+Jedes Hinzufügen-Fenster hat *Anleitung …*, wenn das Paket eine Readme oder ein HTML-Handbuch enthält. Es
+wird im Editor angezeigt, mit Bildern und Links zwischen den Seiten; Skripte der Seiten laufen nicht.
+Anleitungen von Paketen in UberASM, Blöcken und Sprites bleiben im Browser gespeichert und stehen im
+jeweiligen Tab unter *Anleitungen*.
+
+## Pakete aus mehreren Teilen
+
+Manche Downloads lassen sich nicht in einem Schritt einordnen, z. B. Retry System: UberASM-Code in
+`src/library` und `src/gamemode`, dazu ein Konfigurationsordner `src/retry_config`, der laut Readme in den
+obersten Ordner von UberASM Tool gehört, außerdem Beispiele, AddmusicK-Dateien und ein Handbuch. Solche
+Pakete öffnen *Paket zuordnen* (für jedes andere Paket: *Manuell zuordnen …*):
+
+* Der Paketbaum mit einer Auswahl je Ordner und Datei: ein Ordner des UberASM-Projekts (`level/`,
+  `gamemode/`, `library/` …, der oberste Ordner oder ein eigener Ordner mit dem Namen) oder *nicht
+  übernehmen*. Ein Ordner gibt seine Zuordnung an alles darin weiter; rechts steht, wo jede Datei landet.
+* **Vorschlag:** Ordner, die wie die von UberASM Tool heißen und `.asm` enthalten, kommen in ihren Ordner;
+  Ordner daneben, die deren Code einbindet (`incsrc "../retry_config/…"`), in den obersten Ordner. Der Rest
+  bleibt draußen.
+* **list.txt:** Für Dateien in `level/`, `gamemode/` und `overworld/` je eine Zeile mit Nummer oder `*`.
+  Steht in der Anleitung eine passende Zeile (`* retry_gm.asm`), wird sie übernommen; vorhandene Einträge
+  derselben Nummer bleiben (wie `* a.asm,retry_gm.asm`).
+* **Weitere Schritte:** Nach *Übernehmen* listet ein Fenster, was nicht übernommen wurde. Jede `.asm`-Datei
+  lässt sich einzeln hinzufügen (erkannt wie oben); Dateien, die sie einbindet und die neben ihr fehlen,
+  kommen aus dem Paket mit (Retrys Beispielblöcke bekommen `ram.asm`). Dateien für andere Werkzeuge
+  (AddmusicK, Lunar Magic) lassen sich herunterladen.
+
+Danach ist alles im Tab UberASM: Zuordnungen ändern, *Einstellungen …* einer Datei (Defines nach den
+Abschnitten der Datei gruppiert, mit den Kommentaren darüber als Hilfe und einem Suchfeld) oder
+*Bearbeiten …* als Text für alles, was keine Define-Zeile ist (Makrolisten, Tabellen).
+
+Was nur in Lunar Magic oder im Spiel geht (Objekte mit Extension setzen, neuen Spielstand anlegen),
+steht in der Anleitung. Prüfungen eines Pakets bleiben wirksam: Retry System verlangt eine ROM, in der
+Lunar Magic schon ein Level gespeichert hat, und bricht sonst mit einer Asar-Meldung ab.
 
 ## Patches anwenden
 
@@ -187,7 +222,8 @@ Das Format entspricht UberASM Tool 2.x, vorhandene Ressourcen funktionieren unve
   der Ressource (außer mit `;>dbr off`).
 * Extra-Bytes: `;>bytes n` oder `;>bytes any`; Zeiger in `$00-$01`. In der `list.txt` stehen sie nach `:`,
   z. B. `105 wind.asm : 02`.
-* `library/`-Dateien: Labels heißen `<Dateiname>_<Label>`. Shared Routines aus `routines/` werden mit
+* `library/`-Dateien: Wie bei UberASM Tool wird jede für sich assembliert (eigene Namespaces und Labels);
+  ihre Labels heißen danach `<Dateiname>_<Label>`. Shared Routines aus `routines/` werden mit
   `%UberRoutine(Name)` aufgerufen.
 * `%prot_file()`, `%prot_source()`, `%require_uber_ver()`, `%move_block()` und die Sprite-Tabellen-Defines
   (`!sprite_num`, `!14C8` …) stehen zur Verfügung.
@@ -195,8 +231,8 @@ Das Format entspricht UberASM Tool 2.x, vorhandene Ressourcen funktionieren unve
   UberASM Tool.
 
 **Unterschiede zu UberASM Tool:**
-- Alles wird als **ein** Asar-Patch assembliert: erst die Bibliotheken, dann die Ressourcen, dann der
-  Verteiler.
+- Alles wird als **ein** Patch eingetragen: erst je ein Asar-Lauf pro Bibliothek, dann einer für
+  Ressourcen und Verteiler.
 - Das Überspringen von `*`-Ressourcen (`-datei.asm`) wird nicht unterstützt.
 - Kein SA-1, daher wird `;>sa1` ignoriert.
 - Level-Ressourcen brauchen die Levelnummer in `$7E010B`; dafür wird bei Bedarf der Editor-Patch
@@ -378,6 +414,9 @@ rückgängig zu machen.
 ## Technisches
 
 * `src/core/asar.ts`: Asar-WASM (`tools/build-asar.sh` baut es mit Emscripten nach `src/vendor/asar/`).
+  Pfade von `incsrc`/`incbin` werden wie von einem Dateisystem aufgelöst (`a//b`, mehrere `..`
+  hintereinander; `tools/asar-wasm/normalize-paths.patch`), da die Dateien nur im Speicher liegen.
+* `src/core/pkgmap.ts`, `src/ui/pkgmap.ts`: Pakete aus mehreren Teilen; `src/ui/docview.ts`: Anleitungen.
 * `src/core/patchapply.ts`: Anwenden, Konfliktprüfung, Entfernen.
 * `src/core/patchreg.ts`: Patch-Verzeichnis „SMWA“ in der ROM.
 * `src/core/patchpkg.ts`: `.zip`, `patch.json`, Defines.

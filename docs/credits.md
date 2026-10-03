@@ -10,3 +10,9 @@ nicht übernommen, außer bei Asar (eingebunden als WebAssembly).
 | [GPS](https://www.smwcentral.net/?p=section&a=details&id=31515) (Gopher Popcorn Stew) | Format der Custom Blocks, Namen und Verträge der Standard-Routinen | p4plus2; Pflege TheBiob, GHB, Arinsu; Beiträge von Majorflare, MarioFanGamer, Vitor Vilela; Routinen nach Akaginite, Tattletale, imamelia |
 | [UberASM Tool](https://github.com/Fernap/UberASMTool) | Format und Aufrufkonventionen von UberASM | Vitor Vilela, Fernap und weitere |
 | Lunar Magic | Formate von `.mwl`, `.map16`, ExGFX, Größentabelle der Sprite-Daten (`$0EF30C`) | FuSoYa |
+
+Pakete, an denen Funktionen des Editors entwickelt und getestet wurden (nicht im Repository):
+
+| Was | Wofür | Autoren |
+|---|---|---|
+| [Retry System](https://kkevinm.github.io/retry-system/) (Unlicense) | Testfall für Pakete aus mehreren Teilen, UberASM-Bibliotheken mit eigenen Namespaces und Anleitungen im Editor | Kevin (kkevinm); Nachfolger des Retry-Patches von worldpeace; Beiträge von lx5, imamelia, 0x400, Thomas, Lui, AmperSam, MiracleWater, elusive |
