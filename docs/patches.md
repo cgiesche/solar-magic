@@ -77,8 +77,13 @@ Abschnitten der Datei gruppiert, mit den Kommentaren darüber als Hilfe und eine
 *Bearbeiten …* als Text für alles, was keine Define-Zeile ist (Makrolisten, Tabellen).
 
 Was nur in Lunar Magic oder im Spiel geht (Objekte mit Extension setzen, neuen Spielstand anlegen),
-steht in der Anleitung. Prüfungen eines Pakets bleiben wirksam: Retry System verlangt eine ROM, in der
-Lunar Magic schon ein Level gespeichert hat, und bricht sonst mit einer Asar-Meldung ab.
+steht in der Anleitung.
+
+**„Save at least one level in Lunar Magic“:** Manche Patches (z. B. Retry System) prüfen `$0FF0A0 != $FF`.
+Dort schreibt Lunar Magic beim ersten Speichern seinen Versionstext, zusammen mit seinen Level-Hacks. Was
+Retry davon braucht, ist die aktuelle Levelnummer in `$7E010B`; die liefert der Editor-Patch. Er markiert
+die ROM deshalb ebenso (`SMW Editor`, `$0FF0B4` = 0, also keine LM-Version: Code nur für LM 3 wird nicht
+gewählt). Eine vorhandene Lunar-Magic-Kennung bleibt unangetastet.
 
 ## Patches anwenden
 

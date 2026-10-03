@@ -5,6 +5,7 @@
 //  - per-file format flag: 0 = LZ2 3bpp (vanilla), 1 = raw uncompressed 4bpp (DMA'd directly)
 //  - per-level GFX bypass: 8 slots (SP4..SP1, FG3, BG1, FG2, FG1), $FF = tileset default
 //  - extended object $02 "Direct Map16": 6 bytes, places any Map16 tile as a rectangle
+//  - "edited" mark at $0FF0A0 where Lunar Magic keeps its version string (see markEdited)
 
 import { Rom, pcToSnes } from './rom.ts';
 import { Asm } from './asm.ts';
@@ -18,8 +19,16 @@ const HOOK_FGGFX = 0x00aa22;
 const EXT_OBJ_TABLE = 0x0da10f;
 export const DM16_EXT = 0x02;
 const DM16_SLOT = EXT_OBJ_TABLE + DM16_EXT * 3; // empty in the original game
+// Lunar Magic writes "Lunar Magic Version x.yy …" to $0FF0A0 when it first saves a level, together with its
+// level hacks (current level in $7E010B and others). Patches test $0FF0A0 != $FF for "a level editor's
+// hacks are in" (Retry System) and read $0FF0B4, the version's first digit, for LM 3 features (with
+// vanilla code otherwise). The editor patch brings the hack such patches need ($7E010B) and marks the ROM
+// the same way, with its own name and $0FF0B4 = 0: no LM version, so LM-3-only paths are not taken.
+const EDITED_MARK = 0x0ff0a0;
+const EDITED_LEN = 0x15; // up to and including $0FF0B4
+const EDITED_TEXT = 'SMW Editor';
 // the bytes the editor patch changes in the game (SNES address, length), protected from other patches (patchapply.ts)
-export const EDITOR_HOOKS: [number, number][] = [[SPR_BANK_HOOK, 4], [HOOK_GFXPTR, 15], [HOOK_UPLOAD, 4], [HOOK_SPRGFX, 15], [HOOK_FGGFX, 15], [DM16_SLOT, 3]];
+export const EDITOR_HOOKS: [number, number][] = [[SPR_BANK_HOOK, 4], [HOOK_GFXPTR, 15], [HOOK_UPLOAD, 4], [HOOK_SPRGFX, 15], [HOOK_FGGFX, 15], [DM16_SLOT, 3], [EDITED_MARK, EDITED_LEN]];
 const MAGIC = [0x53, 0x4d, 0x57, 0x45]; // "SMWE"
 const HEADER = 32;
 
@@ -204,9 +213,15 @@ function hook(rom: Rom, at: number, target: number, len: number, braTo?: number)
   rom.writeBytes(at, Uint8Array.from(bytes));
 }
 
+// marks the ROM as edited (see EDITED_MARK) unless Lunar Magic (or anything else) already wrote there
+function markEdited(rom: Rom): void {
+  for (let i = 0; i < EDITED_LEN; i++) if (rom.r8(EDITED_MARK + i) !== 0xff) return;
+  for (let i = 0; i < EDITED_LEN; i++) rom.w8(EDITED_MARK + i, i < EDITED_TEXT.length ? EDITED_TEXT.charCodeAt(i) : 0);
+}
+
 export function installEditorPatch(rom: Rom): PatchInfo {
   const existing = editorPatch(rom);
-  if (existing) return existing;
+  if (existing) { markEdited(rom); return existing; }
   if (rom.r8(SPR_BANK_HOOK) !== 0xa9 || rom.r8(SPR_BANK_HOOK + 1) !== 0x07) throw new Error(`Unerwarteter Code bei $05D8F5${ownerNote(rom, SPR_BANK_HOOK, 4)} – Patch nicht möglich (ROM bereits anderweitig verändert?)`);
   if (rom.r8(HOOK_GFXPTR) !== 0xb9 || rom.r8(HOOK_UPLOAD) !== 0x22 || rom.r8(HOOK_SPRGFX) !== 0xad || rom.r8(HOOK_FGGFX) !== 0xad) {
     const note = ownerNote(rom, HOOK_GFXPTR, 15) || ownerNote(rom, HOOK_UPLOAD, 4) || ownerNote(rom, HOOK_SPRGFX, 15) || ownerNote(rom, HOOK_FGGFX, 15);
@@ -240,6 +255,7 @@ export function installEditorPatch(rom: Rom): PatchInfo {
   hook(rom, HOOK_SPRGFX, L('SprGfxSel'), 15, 0x00a9f0);
   hook(rom, HOOK_FGGFX, L('FgGfxSel'), 15, 0x00aa31);
   rom.w24(DM16_SLOT, L('DM16'));
+  markEdited(rom);
   return editorPatch(rom)!;
 }
 

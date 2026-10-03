@@ -9,6 +9,7 @@ import { packageFiles } from '../src/core/patchpkg.ts';
 import { suggestMapping, placed, suggestCalls, untaken, docFiles, extraParts } from '../src/core/pkgmap.ts';
 import { emptyProject, saveProject } from '../src/core/uberproject.ts';
 import { ALL } from '../src/core/uberasm.ts';
+import { installEditorPatch } from '../src/core/patches.ts';
 
 await loadAsar();
 let bad = 0;
@@ -50,6 +51,15 @@ const fallback = { level: 0x105, gamemode: 0x14, overworld: 0 };
   check(parts.some((x) => x.path === 'extra/music.txt' && !x.files) && !parts.some((x) => x.path === 'readme.txt' || x.path.startsWith('pkg/library/')), 'other files listed, docs and taken files not');
 }
 
+// the editor patch marks the ROM as edited where Lunar Magic keeps its version, but never over Lunar Magic's
+{
+  const lm = new Rom(new Uint8Array(readFileSync('Super Mario World (U) [!].smc')));
+  const text = 'Lunar Magic Version 3.31';
+  for (let i = 0; i < text.length; i++) lm.w8(0x0ff0a0 + i, text.charCodeAt(i));
+  installEditorPatch(lm);
+  check(String.fromCharCode(...lm.data.slice(0x7f0a0, 0x7f0a0 + text.length)) === text, "Lunar Magic's version string stays");
+}
+
 if (existsSync('resources_local/retry-system_v2.2.0.zip')) {
   const files = packageFiles('retry-system_v2.2.0.zip', new Uint8Array(readFileSync('resources_local/retry-system_v2.2.0.zip')));
   const s = suggestMapping(files)!;
@@ -58,15 +68,16 @@ if (existsSync('resources_local/retry-system_v2.2.0.zip')) {
   check(s.root === 'src/' && [...s.rules.values()].filter(Boolean).sort().join(' ') === 'gamemode/ library/ retry_config/', 'Retry: suggestion as in its readme');
   check(calls.length === 1 && calls[0].file === 'gamemode/retry_gm.asm' && calls[0].num === ALL, 'Retry: "* retry_gm.asm" from the docs');
   const rom = new Rom(new Uint8Array(readFileSync('Super Mario World (U) [!].smc')));
-  // Retry insists on a ROM saved by Lunar Magic (a byte LM writes); stand in for that here
-  rom.data[0x7f0a0] = 0;
   const proj = emptyProject();
   for (const [from, to] of p) proj.files.set(to, files.get(from)!);
   proj.list.gamemode.set(ALL, [{ file: 'gamemode/retry_gm.asm', bytes: [] }]);
   // an emulator booted before Retry was inserted (like the editor's): its boot snapshot must not be used
   const early = new LevelEmulator(rom); early.boot();
   const r = saveProject(rom, proj);
-  check(r.ok, 'Retry assembles ' + r.errors.slice(0, 3).join(' | '));
+  // Retry wants a ROM a level editor has marked ($0FF0A0, as Lunar Magic does); the editor patch marks it,
+  // without an LM version at $0FF0B4, so Retry takes its vanilla code paths
+  check(r.ok, 'Retry assembles on a vanilla ROM ' + r.errors.slice(0, 3).join(' | '));
+  check(rom.r8(0x0ff0a0) !== 0xff && rom.r8(0x0ff0b4) < 0x33, 'ROM marked as edited, no LM version');
   if (r.ok) {
     early.syncRom();
     const l = early.load(0x105);
