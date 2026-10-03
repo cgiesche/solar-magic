@@ -35,6 +35,7 @@ export interface LevelOverride {
   trackSources?: boolean; // record ROM provenance of CGRAM (slower)
   translevel?: number; // $13BF (messages, Yoshi coins); default: the level itself if it is a main level
   trace?: boolean; // record per object what its routine reads and writes (see ObjectTrace)
+  continueState?: boolean; // load from the emulator's current state (startGame) instead of the boot snapshot
 }
 
 // What the object routines did while the level loaded (analysis, see objkinds.ts).
@@ -151,7 +152,7 @@ export class LevelEmulator {
     if (!this.baseState) this.boot();
     const s = this.snes;
     s.rom = this.rom.data;
-    s.loadState(this.baseState!);
+    if (!ov.continueState) s.loadState(this.baseState!);
     const w = s.wram;
     w[0x141a] = 1;
     w[0x95] = 0;
@@ -160,7 +161,8 @@ export class LevelEmulator {
     w[0x19b8] = level & 0xff;
     w[0x19d8] = (level >> 8) & 1;
     w[0x0dd6] = 0;
-    w[0x1f11] = (level >> 8) & 1;
+    // level bank of screen exits; a game in progress keeps its submap where that already gives it
+    if (!ov.continueState || (w[0x1f11] !== 0 ? 1 : 0) !== ((level >> 8) & 1)) w[0x1f11] = (level >> 8) & 1;
     w[0x1b93] = 0;
     w[0x0109] = 0;
     // translevel $24 (Chocolate Island 2) makes the exit-based load pick a room by time/coins instead
@@ -284,6 +286,54 @@ export class LevelEmulator {
       error,
       frames,
     };
+  }
+
+  // From the boot snapshot, starts a new game the way a player does (file select, intro skipped) and
+  // puts Mario on the overworld tile of translevel tl, so a following load({ continueState }) plays the
+  // level within a game in progress: dying costs a life and returns to the overworld there, entering
+  // the tile again loads the level. Tiles of submaps get the submap whose camera view (from loading
+  // each submap) is centered nearest to them. Not found on the overworld: Mario stays at the start.
+  startGame(tl: number): void {
+    if (!this.baseState) this.boot();
+    const s = this.snes, w = s.wram;
+    s.rom = this.rom.data;
+    s.loadState(this.baseState!);
+    s.joy1 = 0;
+    for (let n = 0; w[0x100] !== 0x0e; n++) {
+      if (n > 1500) throw new Error('new game did not reach the overworld');
+      if (w[0x100] === 0x0b) w[0x109] = 0; // no intro level
+      s.joy1 = (n % 16) < 4 ? (w[0x100] === 0x07 ? 0x1000 : 0x0080) : 0;
+      s.runFrame();
+    }
+    s.joy1 = 0;
+    for (let i = 0; i < 3; i++) s.runFrame();
+    const i = tl > 0 ? w.subarray(0xd000, 0xd800).indexOf(tl) : -1; // translevel per tile ($7ED000)
+    if (i < 0) return;
+    const tx = ((i >> 8) & 1) * 16 + (i & 15), ty = ((i >> 9) & 1) * 16 + ((i >> 4) & 15);
+    // pixel position: like the start position relative to its tile
+    const px = tx * 16 + (w[0x1f17] - w[0x1f1f] * 16), py = ty * 16 + (w[0x1f19] - w[0x1f21] * 16);
+    let sub = 0;
+    if (i >= 0x400) {
+      const ow = s.saveState();
+      let best = Infinity;
+      for (let k = 1; k <= 6; k++) {
+        s.loadState(ow);
+        w[0x1f11] = k;
+        w[0x100] = 0x0b;
+        for (let f = 0; w[0x100] !== 0x0e && f < 500; f++) s.runFrame();
+        const cx = ((w[0x1a] | w[0x1b] << 8) << 16 >> 16) + 128, cy = ((w[0x1c] | w[0x1d] << 8) << 16 >> 16) + 112;
+        const d = Math.max(Math.abs(px + 8 - cx), Math.abs(py + 8 - cy));
+        if (d < best) { best = d; sub = k; }
+      }
+      s.loadState(ow);
+    }
+    for (const o of [0, 4]) { // Mario and Luigi
+      w[0x1f17 + o] = px & 0xff; w[0x1f18 + o] = px >> 8;
+      w[0x1f19 + o] = py & 0xff; w[0x1f1a + o] = py >> 8;
+      w[0x1f1f + o] = tx; w[0x1f20 + o] = 0;
+      w[0x1f21 + o] = ty; w[0x1f22 + o] = 0;
+    }
+    w[0x1f11] = w[0x1f12] = sub;
   }
 
   // runs a game routine (JSL addr, RTL) with X = x in 8-bit mode, then restores the CPU registers

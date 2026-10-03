@@ -64,7 +64,15 @@ export function openTestPlay(app: App, at?: { tx: number; ty: number }): void {
     sec.entranceAction = 0;
     ov.secondaryHeader = encodeSecondaryHeader(sec);
   }
-  const r = emu.load(lv.number, { ...ov, translevel: levelTranslevel(app.rom, lv.number) });
+  // a game in progress (lives, overworld with Mario on the level's tile): dying returns there
+  const translevel = levelTranslevel(app.rom, lv.number);
+  let r: ReturnType<LevelEmulator['load']>;
+  try {
+    emu.startGame(translevel);
+    r = emu.load(lv.number, { ...ov, translevel, continueState: true });
+  } catch {
+    r = emu.load(lv.number, { ...ov, translevel });
+  }
   const s = emu.snes;
   if (start && r.ok) {
     try { for (let i = 0; i < 80 && s.wram[0x100] !== 0x14; i++) s.runFrame(); } catch { /* shown when playing */ }
