@@ -82,10 +82,12 @@ export function suggestMapping(files: Map<string, Uint8Array>): PkgSuggestion | 
 }
 
 // readme files and HTML docs, most relevant first (a top-level readme, then docs/index.html, …)
+const DOC_NAME = /(^|\/)(readme|liesmich|anleitung|instructions?|manual|index|getting[_ ]started)[^/]*$/i;
+
 export function docFiles(files: Map<string, Uint8Array>): string[] {
   const depth = (p: string) => p.split('/').length;
   const docs = [...files.keys()].filter((p) => /\.(txt|md|html?)$/i.test(p) && !/(^|\/)list\.txt$/i.test(p)
-    && (/(^|\/)(readme|liesmich|anleitung|instructions?|manual|index|getting[_ ]started)[^/]*$/i.test(p) || depth(p) <= 2 && /\.(txt|md)$/i.test(p)));
+    && (DOC_NAME.test(p) || depth(p) <= 2 && /\.(txt|md)$/i.test(p)));
   const rank = (p: string) => (/readme|liesmich/i.test(p) ? 0 : /index\.html?$/i.test(p) ? 1 : 2);
   return docs.sort((a, b) => depth(a) - depth(b) || rank(a) - rank(b) || a.localeCompare(b));
 }
@@ -136,4 +138,63 @@ export function untaken(files: Map<string, Uint8Array>, rules: PkgRules): string
     out.add(node);
   }
   return [...out].sort();
+}
+
+// ---------------------------------------------------------------- further steps
+
+// a part of a package not taken into the project: an .asm file to add on its own (block, patch, …)
+// with the files it needs, or another file (for another tool: AddmusicK, Lunar Magic, …)
+export interface ExtraPart { path: string; files: Map<string, Uint8Array> | null }
+
+const INCLUDE_RE = /^\s*(?:incsrc|incbin)\s+"?([^"\s:]+)"?/gim;
+
+// `files` plus what their incsrc/incbin need and they lack, taken from the package by file name (the
+// readme's "copy ram.asm next to them"); paths relative to the part's folder
+export function withIncludes(pkg: Map<string, Uint8Array>, files: Map<string, Uint8Array>): Map<string, Uint8Array> {
+  const out = new Map(files);
+  const todo = [...out.keys()];
+  while (todo.length) {
+    const f = todo.pop()!;
+    if (!/\.(asm|asar)$/i.test(f)) continue;
+    for (const m of dec.decode(out.get(f)!).matchAll(INCLUDE_RE)) {
+      const want = joinPath(parentOf(f), m[1]);
+      if (want === null || out.has(want)) continue;
+      const name = baseOf(want).toLowerCase();
+      const found = [...pkg.keys()].filter((p) => baseOf(p).toLowerCase() === name).sort((a, b) => a.split('/').length - b.split('/').length)[0];
+      if (!found) continue;
+      out.set(want, pkg.get(found)!);
+      todo.push(want);
+    }
+  }
+  return out;
+}
+
+function joinPath(dir: string, rel: string): string | null {
+  const parts = dir.split('/').filter(Boolean);
+  for (const s of rel.replace(/\\/g, '/').split('/')) {
+    if (s === '..') { if (!parts.length) return null; parts.pop(); } else if (s && s !== '.') parts.push(s);
+  }
+  return parts.join('/');
+}
+
+// the parts not taken: each .asm file by itself (with the non-.asm files of its folder and what it
+// includes, relative to its folder), other files one by one; docs and the tool's own scripts left out
+export function extraParts(files: Map<string, Uint8Array>, rules: PkgRules): ExtraPart[] {
+  const taken = placed(files.keys(), rules);
+  const out: ExtraPart[] = [];
+  const skip = (p: string) => DOC_NAME.test(p) && /\.(txt|md|html?)$/i.test(p) || /\.(html?|css|js|png|jpe?g|gif|svg|bat|sh|exe|dll)$/i.test(p) || /(^|\/)(license|unlicense|copying)[^/]*$/i.test(p) || /(^|\/)docs?\//i.test(p);
+  for (const p of [...files.keys()].sort()) {
+    if (taken.has(p) || skip(p)) continue;
+    if (!/\.(asm|asar)$/i.test(p)) {
+      // data next to an .asm (.bin, .json, .cfg) goes with it
+      if (/\.(bin|json|cfg|map16)$/i.test(p) && [...files.keys()].some((q) => parentOf(q) === parentOf(p) && /\.(asm|asar)$/i.test(q) && !taken.has(q))) continue;
+      out.push({ path: p, files: null });
+      continue;
+    }
+    const dir = parentOf(p);
+    const own = new Map<string, Uint8Array>([[p.slice(dir.length), files.get(p)!]]);
+    for (const q of files.keys()) if (parentOf(q) === dir && /\.(bin|json|cfg|map16)$/i.test(q)) own.set(q.slice(dir.length), files.get(q)!);
+    out.push({ path: p, files: withIncludes(files, own) });
+  }
+  return out;
 }

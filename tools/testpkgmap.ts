@@ -6,7 +6,7 @@ import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadAsar } from '../src/core/asar.ts';
 import { packageFiles } from '../src/core/patchpkg.ts';
-import { suggestMapping, placed, suggestCalls, untaken, docFiles } from '../src/core/pkgmap.ts';
+import { suggestMapping, placed, suggestCalls, untaken, docFiles, extraParts } from '../src/core/pkgmap.ts';
 import { emptyProject, saveProject } from '../src/core/uberproject.ts';
 import { ALL } from '../src/core/uberasm.ts';
 
@@ -41,6 +41,13 @@ const fallback = { level: 0x105, gamemode: 0x14, overworld: 0 };
   check(JSON.stringify(untaken(files, s!.rules)) === JSON.stringify(['examples/', 'pkg/level/', 'pkg/unpatch.asm', 'pkg/unrelated/', 'readme.txt']), 'untaken parts ' + untaken(files, s!.rules).join(' '));
   check(docFiles(files)[0] === 'readme.txt', 'readme found');
   check(suggestMapping(new Map([['thing.asm', enc.encode('init:\nrtl\n')]])) === null, 'single resource: no suggestion');
+  // the rest: each .asm by itself with what it includes (found in the package by name), other files as they are
+  files.set('examples/blocks/b.asm', enc.encode('incsrc "settings.asm"\ndb $42\n'));
+  files.set('extra/music.txt', enc.encode('#amk 2\n'));
+  const parts = extraParts(files, suggestMapping(files)!.rules);
+  const b = parts.find((x) => x.path === 'examples/blocks/b.asm');
+  check(!!b?.files?.has('settings.asm') && b.files.get('settings.asm') === files.get('pkg/thing_cfg/settings.asm') && !!b.files.has('more/x.asm'), 'extra part with its includes from the package (also nested)');
+  check(parts.some((x) => x.path === 'extra/music.txt' && !x.files) && !parts.some((x) => x.path === 'readme.txt' || x.path.startsWith('pkg/library/')), 'other files listed, docs and taken files not');
 }
 
 if (existsSync('resources_local/retry-system_v2.2.0.zip')) {

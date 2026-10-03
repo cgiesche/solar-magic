@@ -4,10 +4,11 @@
 // core/pkgmap.ts); applying adds everything to the ROM's UberASM project in one step.
 
 import type { App } from './app.ts';
-import { h, clear, modal, toast, hexInput } from './dom.ts';
+import { h, clear, modal, toast, hexInput, downloadBytes } from './dom.ts';
 import { loadProject, emptyProject, saveProject } from '../core/uberproject.ts';
 import { ALL, CONTEXT_SIZE, type UberContext } from '../core/uberasm.ts';
-import { folders, placed, suggestCalls, type PkgRules } from '../core/pkgmap.ts';
+import { folders, placed, suggestCalls, extraParts, type PkgRules } from '../core/pkgmap.ts';
+import { packageFromFiles, detectKind, type PackageKind } from '../core/patchpkg.ts';
 import type { ApplyResult } from '../core/patchapply.ts';
 import { romChanged, logView, errorText } from './projectpane.ts';
 import { docsButton, keepDocs } from './docview.ts';
@@ -18,7 +19,10 @@ const IGNORE = '\u0000ignore';
 
 interface CallState { on: boolean; num: number; all: boolean }
 
-export function openPkgMapDialog(app: App, name: string, files: Map<string, Uint8Array>, rules: PkgRules, onDone: () => void): void {
+// openPart: adds a part of the package like a package of its own (its dialog), done after that
+export type OpenPart = (name: string, files: Map<string, Uint8Array>, done: () => void) => void;
+
+export function openPkgMapDialog(app: App, name: string, files: Map<string, Uint8Array>, rules: PkgRules, onDone: () => void, openPart: OpenPart): void {
   const paths = [...files.keys()].sort();
   const dirs = folders(paths);
   const open = new Set<string>(['']);
@@ -135,6 +139,7 @@ export function openPkgMapDialog(app: App, name: string, files: Map<string, Uint
     toast(`„${name}“ ins UberASM-Projekt übernommen: ${place.size} Datei(en)${added.length ? `, läuft in ${added.join(', ')}` : ''}.`);
     if (r.warnings.length || r.prints.length) modal(`Ausgabe: ${name}`, logView(r), [{ label: 'OK', primary: true }]);
     onDone();
+    openFurtherSteps(name, files, rules, onDone, openPart);
     return true;
   };
 
@@ -152,4 +157,36 @@ export function openPkgMapDialog(app: App, name: string, files: Map<string, Uint
     { label: 'Abbrechen' },
     { label: 'Übernehmen', primary: true, onClick: apply },
   ]);
+}
+
+const KIND_LABEL: Record<PackageKind, string> = { patch: 'Patch', uberasm: 'UberASM-Code', block: 'Custom Block', blockpack: 'Block-Paket', pixi: 'Custom Sprite' };
+
+// what is left of the package after the assignment: .asm parts each added with their own dialog (files
+// they include taken from the package), other files to download for the tool they are meant for
+function openFurtherSteps(name: string, files: Map<string, Uint8Array>, rules: PkgRules, onDone: () => void, openPart: OpenPart): void {
+  const parts = extraParts(files, rules);
+  if (!parts.length) return;
+  const rows = parts.map((part) => {
+    const file = part.path.split('/').pop()!;
+    const where = part.path.slice(0, -file.length);
+    const label = (...more: (HTMLElement | null)[]) => h('td', { class: 'pkg-part', title: part.path }, h('span', { class: 'mono' }, file), where ? h('div', { class: 'hint mono' }, where) : null, ...more);
+    if (!part.files) {
+      return h('tr', null, label(), h('td', { class: 'hint' }, 'für ein anderes Werkzeug'),
+        h('td', { class: 'actions' }, h('button', { onclick: () => downloadBytes(file, files.get(part.path)!) }, 'Herunterladen')));
+    }
+    let kind: string;
+    try { kind = KIND_LABEL[detectKind(packageFromFiles(file, part.files)).kind]; } catch { kind = '?'; }
+    const added = h('span', { class: 'hint' });
+    const extra = [...part.files.keys()].filter((f) => f !== file);
+    return h('tr', null,
+      label(extra.length ? h('div', { class: 'hint' }, `mit ${extra.join(', ')} aus dem Paket`) : null),
+      h('td', null, kind),
+      h('td', { class: 'actions' }, added, h('button', { onclick: () => openPart(file, part.files!, () => { added.textContent = 'hinzugefügt '; onDone(); }) }, 'Hinzufügen …')));
+  });
+  modal(`Weitere Schritte: ${name}`, h('div', { class: 'patch-apply pkg-map' },
+    h('p', null, `Nicht übernommen wurden diese Teile von „${name}“ – meist Beispiele und Optionales, laut Anleitung. Jeder lässt sich hier einzeln hinzufügen; Dateien, die er einbindet, kommen aus dem Paket mit.`),
+    h('div', { class: 'row' }, h('span', { class: 'grow' }), docsButton(name, files)),
+    h('table', { class: 'uber-table' }, h('tr', null, h('th', null, 'Teil'), h('th', null, 'Art'), h('th')), rows),
+    h('p', { class: 'hint' }, 'Was nur in Lunar Magic oder im Spiel zu erledigen ist (z. B. Objekte setzen, neuen Spielstand anlegen), steht in der Anleitung.')),
+    [{ label: 'Fertig', primary: true }]);
 }

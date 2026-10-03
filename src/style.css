@@ -230,6 +230,7 @@ kbd { background: #181a1f; border: 1px solid var(--border); border-radius: 3px; 
 .pkg-node select { flex: none; max-width: 210px; }
 .pkg-dest { flex: none; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pkg-indent { display: inline-block; width: 22px; flex: none; }
+.pkg-part { word-break: break-all; }
 .res-top { margin-bottom: 10px; }
 .res-top > button { white-space: nowrap; flex: none; }
 .res-tabs { margin-bottom: 10px; }

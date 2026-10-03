@@ -393,24 +393,29 @@ export interface PickedPackage {
 export async function pickPackage(app: App, manual = false): Promise<PickedPackage | null> {
   const f = await pickFile('.asm,.asar,.zip');
   if (!f) return null;
-  const files = packageFiles(f.name, new Uint8Array(await f.arrayBuffer()));
-  const base = f.name.replace(/\.[^.]*$/, '');
+  return recognize(app, f.name, packageFiles(f.name, new Uint8Array(await f.arrayBuffer())), manual);
+}
+
+// what a package (its files, paths relative to its root) is, with the dialog adding it
+export function recognize(app: App, fileName: string, files: Map<string, Uint8Array>, manual = false): PickedPackage {
+  const base = fileName.replace(/\.[^.]*$/, '').split(/[\\/]/).pop()!;
   // UberASM Tool folders inside, next to folders they include (like Retry System): assigned by hand,
-  // starting from the suggestion
+  // starting from the suggestion; its other parts are added afterwards like packages of their own
   const sug = suggestMapping(files);
   if (manual || sug && (sug.root !== '' || sug.extra.length)) {
     const rules = sug?.rules ?? new Map([['', null]]);
-    return { name: base, target: 'uber', affects: ['uber'], open: (_, done) => openPkgMapDialog(app, base, files, rules, done) };
+    return { name: base, target: 'uber', affects: ['uber', 'blocks', 'sprites'], open: (p, done) => openPkgMapDialog(app, base, files, rules, done,
+      (name, part, partDone) => recognize(app, name, part).open(p, partDone)) };
   }
-  if (isBgPackage(files)) return { name: f.name, target: null, affects: [], open: (_, done) => openBgPackDialog(app, f.name, files, done) };
-  const pkg = packageFromFiles(f.name, files);
+  if (isBgPackage(files)) return { name: fileName, target: null, affects: [], open: (_, done) => openBgPackDialog(app, fileName, files, done) };
+  const pkg = packageFromFiles(fileName, files);
   const info = detectKind(pkg);
   switch (info.kind) {
     case 'uberasm': return { name: pkg.name, target: 'uber', affects: ['uber'], open: (p, done) => openUberResourceDialog(app, pkg, info, p, done) };
     case 'block': return { name: pkg.name, target: 'blocks', affects: ['blocks'], open: (p, done) => openBlockResourceDialog(app, pkg, info, p, done) };
     case 'blockpack': return { name: pkg.name, target: 'blocks', affects: ['blocks'], open: (_, done) => openBlockPackDialog(app, pkg, info, done) };
     case 'pixi': return { name: pkg.name, target: 'sprites', affects: ['sprites', 'blocks'], open: (_, done) => openPixiPackageDialog(app, pkg, done) };
-    default: return { name: pkg.name, target: 'patches', affects: [], open: (_, done) => openApplyDialog(app, pkg, f.name, null, done) };
+    default: return { name: pkg.name, target: 'patches', affects: [], open: (_, done) => openApplyDialog(app, pkg, fileName, null, done) };
   }
 }
 
