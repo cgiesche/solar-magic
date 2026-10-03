@@ -122,12 +122,12 @@ export class BlockProber {
   private sets = new Map<number, TilesetProbes>();
   private cur!: TilesetProbes;
 
-  // boot: title screen snapshot of another emulator on the same ROM and the pages read to get
-  // there (saves booting again); results: where probe results are kept
-  constructor(rom: Rom, boot?: { state: SnesState | null; reads: RomReads | null }, results?: ResultCache) {
+  // boot: another emulator on the same ROM whose title screen snapshot is taken over (saves booting
+  // again); results: where probe results are kept
+  constructor(rom: Rom, boot?: LevelEmulator, results?: ResultCache) {
     this.rom = rom;
     this.emu = new LevelEmulator(rom);
-    if (boot?.state) { this.emu.baseState = boot.state; this.emu.bootReads = boot.reads; }
+    if (boot?.baseState) this.emu.adoptBoot(boot);
     this.results = results ?? new ResultCache(new RomFingerprint(this.emu));
     this.use(0);
   }

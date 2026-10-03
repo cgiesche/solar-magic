@@ -507,6 +507,12 @@ export class Snes implements Bus {
     this.cpu.reset();
   }
 
+  // power on: memory as a fresh console's (cleared, like a new emulator), then reset
+  powerOn(): void {
+    for (const m of [this.wram, this.sram, this.vram, this.cgram, this.oam]) m.fill(0);
+    this.reset();
+  }
+
   runFrame(maxSteps = 2_000_000): void {
     const cpu = this.cpu;
     let steps = 0;

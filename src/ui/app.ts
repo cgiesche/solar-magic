@@ -34,7 +34,7 @@ export type PaletteItem =
 
 type Listener = () => void;
 
-const CACHE_PREFIX = 'rc2:'; // IndexedDB keys of the result cache (bump when result formats change)
+const CACHE_PREFIX = 'rc3:'; // IndexedDB keys of the result cache (bump when result formats change or old results may be wrong: rc3 after the stale boot snapshot fix)
 const PROBE_SPRITE = 0x10000; // probe queue key flag: sprite number instead of Map16 tile
 const SPRITE_PROBE_END = 0xc9; // sprites from $C9 on are shooters, generators and run-once sprites
 
@@ -715,7 +715,7 @@ export class App {
       if (k && kindsStillValid(k, this.rom.data)) { this.setKinds(ts, k); return; }
       this.setBusy('kinds', 'Objektarten');
       const emu = new LevelEmulator(this.rom);
-      emu.baseState = this.emu.baseState;
+      emu.adoptBoot(this.emu);
       emu.skipMask = () => this.gfxSkipMask();
       const lv = { ...this.level, header: { ...this.level.header, tileset: ts } };
       job.probe = new ObjKindProbe(emu, lv, this.level.layer2Objects ? this.rom.r24(L2_PTRS + 0x105 * 3) : this.level.layer2Pointer);
@@ -752,7 +752,7 @@ export class App {
 
   private blockProber(): BlockProber {
     if (!this.prober || this.prober.rom !== this.rom) {
-      this.prober = new BlockProber(this.rom, { state: this.emu.baseState, reads: this.emu.bootReads }, this.results);
+      this.prober = new BlockProber(this.rom, this.emu, this.results);
       this.prober.emu.skipMask = () => this.gfxSkipMask();
       this.proberGen = this.emu.romGen;
     }

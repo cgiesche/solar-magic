@@ -6,7 +6,7 @@ import { Snes, type SnesState } from './snes.ts';
 import { Rom, snesToPc } from './rom.ts';
 import { L1_PTRS, L2_PTRS, SPR_PTRS, mainTranslevel } from './level.ts';
 import { editorPatch, BG_HOOK } from './patches.ts';
-import { RomReads, updateBytePages } from './romdeps.ts';
+import { RomReads, updateBytePages, PAGE_SHIFT } from './romdeps.ts';
 
 export const OV_L1 = 0x0000; // overlay offsets
 export const OV_L2 = 0x4000;
@@ -59,6 +59,17 @@ export interface LevelRender {
   frames: number;
 }
 
+// any ROM byte read while booting differs between the booted ROM and now
+function bootChanged(reads: RomReads, then: Uint8Array, now: Uint8Array): boolean {
+  for (const b of reads.bytes) if (then[b] !== now[b]) return true;
+  const size = 1 << PAGE_SHIFT;
+  for (let p = 0; p < reads.pages.length; p++) {
+    if (!reads.pages[p]) continue;
+    for (let i = p * size, end = i + size; i < end; i++) if (then[i] !== now[i]) return true;
+  }
+  return false;
+}
+
 export const MAP_BASE = 0xc800;
 export const MAP_SIZE = 0x3800;
 
@@ -79,12 +90,20 @@ export class LevelEmulator {
   }
 
   bootReads: RomReads | null = null; // ROM read while booting (every load starts from that state)
+  private bootRom: Uint8Array | null = null; // the ROM as it was booted
 
-  // Boot to the title screen once; all level loads start from this snapshot.
+  // the boot snapshot of another emulator on the same ROM (saves booting again)
+  adoptBoot(other: LevelEmulator): void {
+    this.baseState = other.baseState;
+    this.bootReads = other.bootReads;
+    this.bootRom = other.bootRom;
+  }
+
+  // Power on and boot to the title screen once; all level loads start from this snapshot.
   boot(): void {
     const s = this.snes;
     s.rom = this.rom.data;
-    s.reset();
+    s.powerOn();
     this.bootReads = this.tracked(() => {
       let f = 0;
       while (s.wram[0x100] !== 0x07) {
@@ -93,6 +112,7 @@ export class LevelEmulator {
       }
     }).reads;
     this.baseState = s.saveState();
+    this.bootRom = this.rom.data.slice();
   }
 
   // runs fn recording the ROM it reads, on top of base (default: the boot's); the reads also
@@ -114,10 +134,17 @@ export class LevelEmulator {
   }
 
   // ROM data array may be replaced (expansion); keep emulator in sync.
+  // A change of what the boot read (a patch's power-on code, e.g. Retry System's RAM setup) makes
+  // the boot snapshot stale: boot again with the next load.
   syncRom(): void {
     this.snes.rom = this.rom.data;
     this.romGen++;
     updateBytePages(this.rom);
+    if (this.baseState && this.bootReads && this.bootRom && bootChanged(this.bootReads, this.bootRom, this.rom.data)) {
+      this.baseState = null;
+      this.bootReads = null;
+      this.bootRom = null;
+    }
   }
 
   load(level: number, ov: LevelOverride = {}): LevelRender {

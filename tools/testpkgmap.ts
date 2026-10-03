@@ -56,8 +56,15 @@ if (existsSync('resources_local/retry-system_v2.2.0.zip')) {
   const proj = emptyProject();
   for (const [from, to] of p) proj.files.set(to, files.get(from)!);
   proj.list.gamemode.set(ALL, [{ file: 'gamemode/retry_gm.asm', bytes: [] }]);
+  // an emulator booted before Retry was inserted (like the editor's): its boot snapshot must not be used
+  const early = new LevelEmulator(rom); early.boot();
   const r = saveProject(rom, proj);
   check(r.ok, 'Retry assembles ' + r.errors.slice(0, 3).join(' | '));
+  if (r.ok) {
+    early.syncRom();
+    const l = early.load(0x105);
+    check(l.ok, 'level loads in an emulator booted before Retry (boot redone) ' + (l.ok ? '' : String((l as { error?: string }).error ?? '')));
+  }
   if (r.ok) {
     // falling into a pit: Retry respawns Mario in the level (vanilla: game over with 0 lives)
     const emu = new LevelEmulator(rom); emu.boot();
