@@ -83,6 +83,7 @@ export function blockPane(app: App, onDirty: () => void, changed: () => void): B
     zipName: 'blocks.zip',
     content,
     applied: (p) => `Custom Blocks übernommen (${p.list.length} Tile(s))`,
+    docs: 'blocks',
   }, onDirty, changed);
   return { ...pane, tile: () => tile, setTile: (t) => { tile = t; pane.render(); } };
 }

@@ -26,6 +26,7 @@ import { installMap16Ext, map16Ext, setExtTileWords, EXT_FIRST, EXT_TILES } from
 import { map16Source } from '../core/render.ts';
 import { definesForm } from './defineedit.ts';
 import { openPkgMapDialog } from './pkgmap.ts';
+import { docsButton, keepDocs } from './docview.ts';
 import { suggestMapping } from '../core/pkgmap.ts';
 import { romChanged, logView, errorText } from './projectpane.ts';
 
@@ -114,6 +115,7 @@ function openApplyDialog(app: App, pkg: PatchPackage, fileName: string, entry: P
     m?.description ? h('p', null, m.description) : null,
     h('p', { class: 'hint' }, [m?.author && `von ${m.author}`, m?.version && `Version ${m.version}`, `${pkg.files.size} Datei(en)`].filter(Boolean).join(' · '),
       m?.smwc ? [' · ', h('a', { href: m.smwc, target: '_blank', rel: 'noopener' }, 'SMWCentral')] : null),
+    docsButton(pkg.name, pkg.files),
   );
   const settingsBox = h('div');
   let form = settingsForm(pkg, main, entry?.defines ?? {});
@@ -198,6 +200,7 @@ function openUberResourceDialog(app: App, pkg: PatchPackage, info: PackageInfo, 
   buildNum();
   const body = h('div', { class: 'patch-apply' },
     h('p', null, `„${pkg.name}“ ist eine UberASM-Ressource – Code, der jedes Frame läuft (Labels init/main/…), kein eigenständiger Patch. Wo soll er laufen?`),
+    docsButton(pkg.name, pkg.files),
     h('div', { class: 'row' }, select(opts, kinds.indexOf(where), (i) => { where = kinds[i]; buildNum(); }), numBox),
     h('p', { class: 'hint' }, '„In allen Leveln“ nutzt UberASMs Level-Eintrag „*“. Zuordnungen lassen sich später im Tab UberASM ändern.'),
     h('h3', null, 'Einstellungen'), form.el, log);
@@ -221,6 +224,7 @@ function openUberResourceDialog(app: App, pkg: PatchPackage, info: PackageInfo, 
       } catch (e) { r = { ok: false, errors: [errorText(e)], warnings: [], prints: [] }; }
       if (!r.ok) { resultLog(log, r); return false; }
       romChanged(app);
+      void keepDocs('uber', pkg.name, pkg.files).catch(() => {});
       const place = where === 'all' ? 'allen Leveln' : where === 'level' ? `Level ${hex(num, 3)}` : where === 'gamemode' ? `Game Mode ${hex(num, 2)}` : `Overworld-Karte ${num}`;
       toast(`„${pkg.name}“ läuft jetzt in ${place} (UberASM).`);
       onDone();
@@ -239,6 +243,7 @@ function openBlockResourceDialog(app: App, pkg: PatchPackage, info: PackageInfo,
   const form = settingsForm(pkg, info.file, {});
   const log = h('div');
   const body = h('div', { class: 'patch-apply' },
+    docsButton(pkg.name, pkg.files),
     h('p', null, `„${pkg.name}“ ist ein Custom Block (GPS-Format). Er wird einem Map16-Tile zugeordnet; im Level platziert man ihn wie jedes Map16-Tile (Palette → Map16 bzw. Direct-Map16-Objekt).`),
     h('div', { class: 'prop' }, h('label', null, 'Map16-Tile'), hexInput(tile, 3, (v) => (tile = v), EXT_TILES - 1),
       h('span', { class: 'hint' }, proj.list.length ? `Tiles ab 200 sind frei (erweiterte Map16-Seiten); belegt: ${proj.list.map((b) => hex(b.tile, 3)).join(', ')}` : 'Tiles ab 200 sind frei (erweiterte Map16-Seiten).')),
@@ -264,6 +269,7 @@ function openBlockResourceDialog(app: App, pkg: PatchPackage, info: PackageInfo,
       } catch (e) { r = { ok: false, errors: [errorText(e)], warnings: [], prints: [] }; }
       if (!r.ok) { resultLog(log, r); return false; }
       romChanged(app);
+      void keepDocs('blocks', pkg.name, pkg.files).catch(() => {});
       toast(`„${pkg.name}“ liegt auf Map16-Tile ${hex(tile, 3)}.`);
       onDone();
       return true;
@@ -278,6 +284,7 @@ function openBlockPackDialog(app: App, pkg: PatchPackage, info: PackageInfo, onD
   let useLevel = true;
   const log = h('div');
   const body = h('div', { class: 'patch-apply' },
+    docsButton(pkg.name, pkg.files),
     h('p', null, `„${pkg.name}“ ist ein Block-Paket: Custom Blocks mit Tile-Liste${plan.map16 ? ', Map16-Grafik' : ''}${plan.gfx.length ? ' und Grafikdatei(en)' : ''}. Alles wird zusammen eingerichtet:`),
     h('table', { class: 'uber-table' }, h('tr', null, h('th', null, 'Tile'), h('th', null, 'Block'), h('th', null, 'acts like')),
       plan.blocks.map((b) => h('tr', null, h('td', { class: 'mono' }, hex(b.tile, 3)), h('td', null, b.file.split('/').pop()), h('td', { class: 'mono' }, b.acts !== undefined ? hex(b.acts, 3) : '–')))),
@@ -304,6 +311,7 @@ function openBlockPackDialog(app: App, pkg: PatchPackage, info: PackageInfo, onD
       const r = applyBlockPack(app.rom, pkg, plan, { blank: map16Source(app.rom, app.render).fg(0x025), level: useLevel ? app.level.number : null, map16At });
       if (!r.ok) { resultLog(log, r); return false; }
       romChanged(app);
+      void keepDocs('blocks', pkg.name, pkg.files).catch(() => {});
       toast(`„${pkg.name}“ eingerichtet: ${r.notes.join(' · ')}`);
       onDone();
       return true;

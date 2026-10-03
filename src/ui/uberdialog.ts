@@ -109,6 +109,7 @@ export function uberPane(app: App, onDirty: () => void, changed: () => void): Ub
       other(proj, change),
     ],
     applied: () => 'UberASM übernommen',
+    docs: 'uber',
   }, onDirty, changed);
   return { ...pane, context: () => ctx };
 }

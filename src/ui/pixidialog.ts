@@ -1,6 +1,7 @@
 // Custom sprites (PIXI format): the tab of the patches dialog (list.txt entries, files, import/export
 // of a PIXI folder as .zip) and the dialog adding a downloaded sprite package.
 
+import { docsButton, keepDocs } from './docview.ts';
 import type { App } from './app.ts';
 import { h, modal, clear, toast, hexInput, select, type Child } from './dom.ts';
 import { projectPane, logView, romChanged, type Pane } from './projectpane.ts';
@@ -90,6 +91,7 @@ export function pixiPane(app: App, onDirty: () => void, changed: () => void): Pa
     zipName: 'pixi.zip',
     content,
     applied: (p) => `Custom Sprites übernommen (${p.list.length})`,
+    docs: 'sprites',
   }, onDirty, changed);
 }
 
@@ -105,6 +107,7 @@ export function openPixiPackageDialog(app: App, pkg: PatchPackage, onDone: () =>
     `!${l.define} in ${l.file.split('/').pop()} = ${hexNum(p.sprites[l.sprite].num)} (${KIND_LABEL[p.sprites[l.sprite].kind]} ${p.sprites[l.sprite].name})`)));
   showLinks();
   const body = h('div', { class: 'patch-apply' },
+    docsButton(pkg.name, pkg.files),
     h('p', null, `„${pkg.name}“ enthält Custom Sprites im PIXI-Format${p.blocks.length ? ' und Custom Blocks, die sie benutzen' : ''}. Sie bekommen die nächsten freien Nummern:`),
     h('table', { class: 'uber-table' }, h('tr', null, h('th', null, 'Art'), h('th', null, 'Datei'), h('th', null, 'Name'), h('th', null, 'Nr.')),
       p.sprites.map((s) => {
@@ -129,6 +132,7 @@ export function openPixiPackageDialog(app: App, pkg: PatchPackage, onDone: () =>
       }
       if (!r.ok) { errorLog(log, r); return false; }
       romChanged(app);
+      void keepDocs('sprites', pkg.name, pkg.files).catch(() => {});
       const where = p.sprites.map((s) => `${KIND_LABEL[s.kind]} ${hex(s.num, 2)}`).join(', ');
       toast(`„${pkg.name}“ eingefügt: ${where}${p.blocks.length ? ` · Blöcke auf ${p.blocks.map((b) => hex(b.tile, 3)).join(', ')}` : ''}`);
       onDone();

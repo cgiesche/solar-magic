@@ -7,6 +7,7 @@ import { h, clear, toast, pickFile, downloadBytes, select, choose, type Child } 
 import { unzipSync } from 'fflate';
 import type { ApplyResult } from '../core/patchapply.ts';
 import { definesButton } from './defineedit.ts';
+import { keptDocsRow } from './docview.ts';
 
 export interface Project { files: Map<string, Uint8Array> }
 
@@ -26,6 +27,7 @@ export interface PaneSpec<P extends Project> {
   zipName: string;
   content(p: P, change: () => void): Child[]; // the assignments and the row to add one
   applied(p: P): string; // toast after "Übernehmen"
+  docs: string; // tool key of the kept docs of packages added to the project (see docview.ts)
 }
 
 export interface Pane {
@@ -158,6 +160,7 @@ export function projectPane<P extends Project>(app: App, spec: PaneSpec<P>, onDi
     clear(el).append(
       h('p', { class: 'hint' }, spec.intro, ' ', h('details', { class: 'inline-details' }, h('summary', null, 'Format'), h('div', null, spec.format))),
       h('div', { class: 'pane-content' }, spec.content(proj, change)),
+      keptDocsRow(spec.docs),
       dirty ? h('div', { class: 'pending-bar' }, h('span', { class: 'grow' }, 'Nicht übernommene Änderungen'),
         h('button', { onclick: reload }, 'Verwerfen'),
         h('button', { class: 'primary', onclick: apply }, 'Übernehmen')) : '',

@@ -10,6 +10,7 @@ import { ALL, CONTEXT_SIZE, type UberContext } from '../core/uberasm.ts';
 import { folders, placed, suggestCalls, type PkgRules } from '../core/pkgmap.ts';
 import type { ApplyResult } from '../core/patchapply.ts';
 import { romChanged, logView, errorText } from './projectpane.ts';
+import { docsButton, keepDocs } from './docview.ts';
 
 const CTX_LABEL: Record<UberContext, string> = { level: 'Level', gamemode: 'Game Mode', overworld: 'Overworld-Karte' };
 const INHERIT = '\u0000inherit';
@@ -130,6 +131,7 @@ export function openPkgMapDialog(app: App, name: string, files: Map<string, Uint
     } catch (e) { r = { ok: false, errors: [errorText(e)], warnings: [], prints: [] }; }
     if (!r.ok) { clear(log).appendChild(logView(r)); return false; }
     romChanged(app);
+    void keepDocs('uber', name, files).catch(() => {});
     toast(`„${name}“ ins UberASM-Projekt übernommen: ${place.size} Datei(en)${added.length ? `, läuft in ${added.join(', ')}` : ''}.`);
     if (r.warnings.length || r.prints.length) modal(`Ausgabe: ${name}`, logView(r), [{ label: 'OK', primary: true }]);
     onDone();
@@ -138,6 +140,7 @@ export function openPkgMapDialog(app: App, name: string, files: Map<string, Uint
 
   render();
   modal(`Paket zuordnen: ${name}`, h('div', { class: 'patch-apply pkg-map' },
+    h('div', { class: 'row' }, h('span', { class: 'grow hint' }, 'Wohin was gehört, steht meist in der Anleitung des Pakets.'), docsButton(name, files)),
     h('p', null, `„${name}“ enthält mehr als eine Ressource. Ordner und Dateien des Pakets lassen sich hier Ordnern des UberASM-Projekts zuordnen – wie beim Kopieren in den UberASM-Tool-Ordner laut Anleitung. Ein Ordner gibt seine Zuordnung an alles darin weiter.`),
     treeBox,
     summary,
