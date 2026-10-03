@@ -6,7 +6,7 @@ import type { App } from './app.ts';
 import { h, clear, toast, pickFile, downloadBytes, select, choose, type Child } from './dom.ts';
 import { unzipSync } from 'fflate';
 import type { ApplyResult } from '../core/patchapply.ts';
-import { definesButton } from './defineedit.ts';
+import { definesButton, editButton } from './defineedit.ts';
 import { keptDocsRow } from './docview.ts';
 
 export interface Project { files: Map<string, Uint8Array> }
@@ -72,6 +72,7 @@ export function projectPane<P extends Project>(app: App, spec: PaneSpec<P>, onDi
   let loadError = '';
   let dirty = false;
   let advanced = false;
+  let fileFilter = '';
   let folder = spec.folders[0];
   const log = h('div', { class: 'patch-log' });
 
@@ -143,11 +144,17 @@ export function projectPane<P extends Project>(app: App, spec: PaneSpec<P>, onDi
       return;
     }
     const files = [...proj.files.keys()].filter((f) => f !== 'list.txt').sort();
+    const shown = (f: string) => f.toLowerCase().includes(fileFilter.trim().toLowerCase());
     const adv = h('details', { class: 'pane-adv', open: advanced, ontoggle: () => (advanced = adv.open) },
       h('summary', null, `Projektdateien (${files.length}), Import/Export`),
-      h('div', { class: 'uber-files' }, files.length ? files.map((f) => h('div', { class: 'row' },
+      files.length > 12 ? h('input', { type: 'search', class: 'define-search', placeholder: 'Dateien filtern …', value: fileFilter, oninput: (e: Event) => {
+        fileFilter = (e.target as HTMLInputElement).value;
+        for (const r of adv.querySelectorAll<HTMLElement>('.uber-files > .row')) r.style.display = shown(r.dataset.path!) ? '' : 'none';
+      } }) : null,
+      h('div', { class: 'uber-files' }, files.length ? files.map((f) => h('div', { class: 'row', 'data-path': f, style: shown(f) ? '' : 'display: none' },
         h('span', { class: 'mono grow' }, f),
         definesButton(proj.files, f, change),
+        editButton(proj.files, f, change),
         h('button', { class: 'icon-btn', title: 'Datei löschen', onclick: () => { proj.files.delete(f); change(); } }, '✕'))) : h('p', { class: 'hint' }, 'Keine Dateien.')),
       h('div', { class: 'row' },
         h('span', null, 'Nach'),

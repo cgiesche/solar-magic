@@ -38,7 +38,9 @@ export interface PatchPackage {
   main: string | null; // null: several candidates, the user has to choose
   manifest: PatchManifest | null;
 }
-export interface DefineLine { name: string; value: string; comment: string; line: number }
+// a setting: the define, its value, the comment behind it, the comment lines above it (doc) and the
+// heading of its section (a comment line like ";=== Title ===")
+export interface DefineLine { name: string; value: string; comment: string; line: number; doc: string; section: string }
 
 const MAX_FILES = 2000;
 const MAX_TOTAL = 32 << 20;
@@ -105,13 +107,23 @@ const DEF_RE = /^(\s*)!([A-Za-z0-9_]+)(\s*)(\?=|=)(\s*)(.*?)(\s*;.*)?$/;
 export function scanDefines(text: string): DefineLine[] {
   const out: DefineLine[] = [];
   let depth = 0;
+  let section = '';
+  let above: string[] = []; // comment lines right above
+  let doc = ''; // shared by defines following each other without a blank line
   text.split(/\r?\n/).forEach((l, i) => {
     const t = l.trim().toLowerCase();
     if (/^(macro|if|while|for)\b/.test(t)) depth++;
     else if (/^(endmacro|endif|endwhile|endfor)\b/.test(t)) depth = Math.max(0, depth - 1);
-    if (depth) return;
+    if (depth) { above = []; doc = ''; return; }
+    if (t.startsWith(';')) {
+      const head = /^;\s*[=\-*#]{3,}\s*(.*?)\s*[=\-*#]*\s*$/.exec(l.trim());
+      if (head) { if (head[1]) section = head[1]; above = []; doc = ''; } else above.push(l.trim().replace(/^;+\s?/, ''));
+      return;
+    }
     const m = DEF_RE.exec(l);
-    if (m && !out.some((d) => d.name === m[2])) out.push({ name: m[2], value: m[6], comment: (m[7] ?? '').replace(/^\s*;\s*/, ''), line: i });
+    if (!m) { above = []; doc = ''; return; }
+    if (above.length) { doc = above.join('\n'); above = []; }
+    if (!out.some((d) => d.name === m[2])) out.push({ name: m[2], value: m[6], comment: (m[7] ?? '').replace(/^\s*;\s*/, ''), line: i, doc, section });
   });
   return out;
 }
