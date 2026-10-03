@@ -221,6 +221,15 @@ kbd { background: #181a1f; border: 1px solid var(--border); border-radius: 3px; 
 .uber-table td.actions { text-align: right; white-space: nowrap; }
 .uber-table tr.selected td { background: var(--panel2); }
 .resources { width: 720px; max-width: 100%; }
+.pkg-map { width: 680px; }
+.pkg-tree { max-height: 320px; overflow: auto; border: 1px solid var(--border); border-radius: 6px; padding: 4px; font-size: 12px; }
+.pkg-node { gap: 6px; min-height: 24px; }
+.pkg-node .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pkg-node.off .grow { color: var(--muted); }
+.pkg-node.ruled .grow { font-weight: 600; }
+.pkg-node select { flex: none; max-width: 210px; }
+.pkg-dest { flex: none; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pkg-indent { display: inline-block; width: 22px; flex: none; }
 .res-top { margin-bottom: 10px; }
 .res-top > button { white-space: nowrap; flex: none; }
 .res-tabs { margin-bottom: 10px; }

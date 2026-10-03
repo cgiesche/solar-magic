@@ -68,9 +68,9 @@ export async function openResources(app: App, tab: ResourceTab = 'patches', opts
     clear(content).appendChild(k === 'patches' ? patches.el : p[k].el);
   }
 
-  const add = async () => {
+  const add = async (manual = false) => {
     let picked;
-    try { picked = await pickPackage(app); } catch (e) { toast(errorText(e), 'error'); return; }
+    try { picked = await pickPackage(app, manual); } catch (e) { toast(errorText(e), 'error'); return; }
     if (!picked) return;
     const pk = picked;
     // the add dialogs work on the ROM's projects: staged changes of those first
@@ -91,7 +91,8 @@ export async function openResources(app: App, tab: ResourceTab = 'patches', opts
 
   clear(body).append(
     h('div', { class: 'row res-top' },
-      h('button', { class: 'primary', onclick: add }, 'Hinzufügen …'),
+      h('button', { class: 'primary', onclick: () => add() }, 'Hinzufügen …'),
+      h('button', { onclick: () => add(true), title: 'Ordner und Dateien eines Pakets selbst Ordnern des UberASM-Projekts zuordnen – für Pakete, die mehr als eine Ressource sind' }, 'Manuell zuordnen …'),
       h('span', { class: 'hint' }, '.asm oder .zip (z. B. von SMWCentral) – erkannt wird, ob Patch, UberASM-Code, Custom Block, Block-Paket, Custom Sprite oder Hintergrund.')),
     tabBar,
     content,

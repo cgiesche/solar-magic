@@ -25,6 +25,8 @@ import { installEditorPatch } from '../core/patches.ts';
 import { installMap16Ext, map16Ext, setExtTileWords, EXT_FIRST, EXT_TILES } from '../core/map16ext.ts';
 import { map16Source } from '../core/render.ts';
 import { definesForm } from './defineedit.ts';
+import { openPkgMapDialog } from './pkgmap.ts';
+import { suggestMapping } from '../core/pkgmap.ts';
 import { romChanged, logView, errorText } from './projectpane.ts';
 
 interface StoredPackage { fileName: string; files: [string, Uint8Array][]; main: string }
@@ -378,11 +380,20 @@ export interface PickedPackage {
   open(preset: AddPreset, done: () => void): void;
 }
 
-// picks an .asm/.zip and recognizes what it is; open() shows the dialog adding it
-export async function pickPackage(app: App): Promise<PickedPackage | null> {
+// picks an .asm/.zip and recognizes what it is; open() shows the dialog adding it. `manual`: always the
+// dialog assigning the package's parts by hand
+export async function pickPackage(app: App, manual = false): Promise<PickedPackage | null> {
   const f = await pickFile('.asm,.asar,.zip');
   if (!f) return null;
   const files = packageFiles(f.name, new Uint8Array(await f.arrayBuffer()));
+  const base = f.name.replace(/\.[^.]*$/, '');
+  // UberASM Tool folders inside, next to folders they include (like Retry System): assigned by hand,
+  // starting from the suggestion
+  const sug = suggestMapping(files);
+  if (manual || sug && (sug.root !== '' || sug.extra.length)) {
+    const rules = sug?.rules ?? new Map([['', null]]);
+    return { name: base, target: 'uber', affects: ['uber'], open: (_, done) => openPkgMapDialog(app, base, files, rules, done) };
+  }
   if (isBgPackage(files)) return { name: f.name, target: null, affects: [], open: (_, done) => openBgPackDialog(app, f.name, files, done) };
   const pkg = packageFromFiles(f.name, files);
   const info = detectKind(pkg);
