@@ -470,9 +470,10 @@ export class GfxTab implements WsPanel {
     } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); return null; }
   }
 
-  // import into the first free ExGFX number (from the slot gallery); the number it went to, null: cancelled
-  private async importNew(): Promise<number | null> {
-    const file = await pickFile('.bin,.png,image/png');
+  // import into the first free ExGFX number (from the slot gallery, or a file of a package); the number it
+  // went to, null: cancelled
+  async importNew(given?: File): Promise<number | null> {
+    const file = given ?? await pickFile('.bin,.png,image/png');
     if (!file) return null;
     const n = this.freeExGfx();
     if (n < 0) { toast('Keine freie ExGFX-Nummer mehr', 'error'); return null; }

@@ -1,19 +1,19 @@
-// Patches tab of the patches dialog: apply Asar patches (.asm or .zip) with settings, list, reconfigure
-// and remove them; and adding any downloaded package, recognized as a patch, UberASM resource, block,
-// block package, sprite package or Lunar Magic background. Sources are kept in the ROM (small ones) or
-// in IndexedDB per registry entry; the ROM's registry alone suffices to remove a patch.
+// Adding any downloaded package, recognized as a patch, UberASM resource, block, block package, sprite
+// package or Lunar Magic background, each with its dialog; applying Asar patches (.asm or .zip) with
+// settings. Patch sources are kept in the ROM (small ones) or in IndexedDB per registry entry; the ROM's
+// registry alone suffices to remove a patch. What a package brings is kept as one (pkgtrack.ts).
 
 import type { App } from './app.ts';
-import { h, modal, clear, toast, hexInput, select, choose } from './dom.ts';
+import { h, modal, clear, toast, hexInput, select } from './dom.ts';
 import { kvGet, kvSet, kvDel } from './storage.ts';
-import { applyPatch, uninstallPatch, reapplyPatch, type ApplyResult, type PatchSource } from '../core/patchapply.ts';
-import { listPatches, patchArchive, type PatchEntry } from '../core/patchreg.ts';
+import { applyPatch, reapplyPatch, type ApplyResult, type PatchSource } from '../core/patchapply.ts';
+import { patchArchive, type PatchEntry } from '../core/patchreg.ts';
 import { zipSync, unzipSync } from 'fflate';
 import { pickFile } from './dom.ts';
 import { openPixiPackageDialog } from './pixidialog.ts';
 import { freeBlockTile } from './blockdialog.ts';
 import { loadBlockProject, saveBlockProject } from '../core/blocks.ts';
-import { installVramPatch, uninstallVramPatch } from '../core/vrampatch.ts';
+import { installVramPatch } from '../core/vrampatch.ts';
 import { extGfxAvailable } from '../core/patches.ts';
 import { loadProject, emptyProject, saveProject } from '../core/uberproject.ts';
 import { ALL, type UberContext } from '../core/uberasm.ts';
@@ -29,8 +29,9 @@ import { openPkgMapDialog } from './pkgmap.ts';
 import { docsButton, keepDocs } from './docview.ts';
 import { suggestMapping } from '../core/pkgmap.ts';
 import { romChanged, logView, errorText } from './projectpane.ts';
+import { trackPackage, type Tracker } from './pkgtrack.ts';
 
-interface StoredPackage { fileName: string; files: [string, Uint8Array][]; main: string }
+export interface StoredPackage { fileName: string; files: [string, Uint8Array][]; main: string }
 // sources up to this size (compressed) are kept in the ROM, larger ones only in the browser
 const MAX_ROM_ARCHIVE = 256 << 10;
 const META = '.smwe-package.json';
@@ -46,18 +47,18 @@ function unpackArchive(a: Uint8Array): StoredPackage {
   delete all[META];
   return { ...meta, files: Object.entries(all) };
 }
-async function storedPackage(app: App, p: PatchEntry): Promise<StoredPackage | undefined> {
+export async function storedPackage(app: App, p: PatchEntry): Promise<StoredPackage | undefined> {
   const a = patchArchive(app.rom, p);
   return a ? unpackArchive(a) : kvGet<StoredPackage>(srcKey(p.id));
 }
 const srcKey = (id: string) => `patch:${id}`;
 
-function toPackage(s: StoredPackage): PatchPackage {
+export function toPackage(s: StoredPackage): PatchPackage {
   return { ...packageFromFiles(s.fileName, new Map(s.files)), main: s.main };
 }
 
 // settings form: manifest options, or the define assignments at the top of the main file
-function settingsForm(pkg: PatchPackage, main: string, values: Record<string, string>): { el: HTMLElement; read: () => Record<string, string> } {
+export function settingsForm(pkg: PatchPackage, main: string, values: Record<string, string>): { el: HTMLElement; read: () => Record<string, string> } {
   const opts = pkg.manifest?.options;
   const wrap = (rows: HTMLElement[]) => h('div', { class: 'patch-settings' }, rows.length ? rows : h('p', { class: 'hint' }, 'Keine Einstellungen.'));
   if (!opts?.length) {
@@ -107,6 +108,35 @@ function ensureRequirements(app: App, pkg: PatchPackage): void {
   }
 }
 
+// applies the package's patch: new, or anew (`entry`) with other settings; the ROM changed when ok
+export function runPatch(app: App, pkg: PatchPackage, fileName: string, main: string, values: Record<string, string>, entry: PatchEntry | null): ApplyResult {
+  const fail = (e: unknown): ApplyResult => ({ ok: false, errors: [errorText(e)], warnings: [], prints: [] });
+  let src: PatchSource;
+  try { src = packageSource(pkg, main, effectiveDefines(pkg, values)); } catch (e) { return fail(e); }
+  src.settings = values;
+  const stored: StoredPackage = { fileName, files: [...pkg.files], main };
+  const archive = packArchive(stored);
+  if (archive.length <= MAX_ROM_ARCHIVE) src.archive = archive;
+  if (app.dirty) app.saveLevel(true);
+  let r: ApplyResult;
+  try {
+    ensureRequirements(app, pkg);
+    r = entry ? reapplyPatch(app.rom, entry.id, src) : applyPatch(app.rom, src);
+  } catch (e) {
+    return fail(e);
+  }
+  if (!r.ok) return r;
+  if (entry) kvDel(srcKey(entry.id)).catch(() => {});
+  if (!src.archive) kvSet(srcKey(r.entry!.id), stored).catch(() => {});
+  romChanged(app);
+  return r;
+}
+
+export function patchDone(name: string, again: boolean, r: ApplyResult): void {
+  toast(`Patch „${name}“ ${again ? 'neu angewendet' : 'angewendet'}${r.warnings.length ? ` (${r.warnings.length} Warnung(en))` : ''}`);
+  if (r.warnings.length || r.prints.length) modal(`Ausgabe: ${name}`, logView(r), [{ label: 'OK', primary: true }]);
+}
+
 // dialog for a new patch or new settings of an installed one
 function openApplyDialog(app: App, pkg: PatchPackage, fileName: string, entry: PatchEntry | null, onDone: () => void): void {
   let main = pkg.main ?? pkg.asmFiles[0];
@@ -134,28 +164,9 @@ function openApplyDialog(app: App, pkg: PatchPackage, fileName: string, entry: P
     log,
   );
   const run = (): boolean => {
-    const values = form.read();
-    const fail = (e: unknown) => { clear(log).appendChild(logView({ ok: false, errors: [errorText(e)], warnings: [], prints: [] })); return false; };
-    let src: PatchSource;
-    try { src = packageSource(pkg, main, effectiveDefines(pkg, values)); } catch (e) { return fail(e); }
-    src.settings = values;
-    const stored: StoredPackage = { fileName, files: [...pkg.files], main };
-    const archive = packArchive(stored);
-    if (archive.length <= MAX_ROM_ARCHIVE) src.archive = archive;
-    if (app.dirty) app.saveLevel(true);
-    let r: ApplyResult;
-    try {
-      ensureRequirements(app, pkg);
-      r = entry ? reapplyPatch(app.rom, entry.id, src) : applyPatch(app.rom, src);
-    } catch (e) {
-      return fail(e);
-    }
+    const r = runPatch(app, pkg, fileName, main, form.read(), entry);
     if (!r.ok) { clear(log).appendChild(logView(r)); return false; }
-    if (entry) kvDel(srcKey(entry.id)).catch(() => {});
-    if (!src.archive) kvSet(srcKey(r.entry!.id), stored).catch(() => {});
-    romChanged(app);
-    toast(`Patch „${pkg.name}“ ${entry ? 'neu angewendet' : 'angewendet'}${r.warnings.length ? ` (${r.warnings.length} Warnung(en))` : ''}`);
-    if (r.warnings.length || r.prints.length) modal(`Ausgabe: ${pkg.name}`, logView(r), [{ label: 'OK', primary: true }]);
+    patchDone(pkg.name, !!entry, r);
     onDone();
     return true;
   };
@@ -397,67 +408,30 @@ export async function pickPackage(app: App, manual = false): Promise<PickedPacka
 }
 
 // what a package (its files, paths relative to its root) is, with the dialog adding it
-export function recognize(app: App, fileName: string, files: Map<string, Uint8Array>, manual = false): PickedPackage {
+// `into`: the installed package this is a part of; otherwise adding it makes a new one (see pkgtrack.ts)
+export function recognize(app: App, fileName: string, files: Map<string, Uint8Array>, manual = false, into?: Tracker): PickedPackage {
   const base = fileName.replace(/\.[^.]*$/, '').split(/[\\/]/).pop()!;
+  // what the dialog adds is kept as one package
+  const tracked = (name: string, open: (p: AddPreset, done: () => void, t: Tracker) => void) => (p: AddPreset, done: () => void) => {
+    const t = into ?? trackPackage(app, name, fileName, files);
+    open(p, () => { t.done(); done(); }, t);
+  };
   // UberASM Tool folders inside, next to folders they include (like Retry System): assigned by hand,
   // starting from the suggestion; its other parts are added afterwards like packages of their own
   const sug = suggestMapping(files);
   if (manual || sug && (sug.root !== '' || sug.extra.length)) {
     const rules = sug?.rules ?? new Map([['', null]]);
-    return { name: base, target: 'uber', affects: ['uber', 'blocks', 'sprites'], open: (p, done) => openPkgMapDialog(app, base, files, rules, done,
-      (name, part, partDone) => recognize(app, name, part).open(p, partDone)) };
+    return { name: base, target: 'uber', affects: ['uber', 'blocks', 'sprites'], open: tracked(base, (p, done, t) => openPkgMapDialog(app, base, files, rules, done,
+      (name, part, partDone) => recognize(app, name, part, false, t).open(p, partDone))) };
   }
-  if (isBgPackage(files)) return { name: fileName, target: null, affects: [], open: (_, done) => openBgPackDialog(app, fileName, files, done) };
+  if (isBgPackage(files)) return { name: fileName, target: null, affects: [], open: (_, done) => openBgPackDialog(app, fileName, files, done) }; // level content, no package
   const pkg = packageFromFiles(fileName, files);
   const info = detectKind(pkg);
   switch (info.kind) {
-    case 'uberasm': return { name: pkg.name, target: 'uber', affects: ['uber'], open: (p, done) => openUberResourceDialog(app, pkg, info, p, done) };
-    case 'block': return { name: pkg.name, target: 'blocks', affects: ['blocks'], open: (p, done) => openBlockResourceDialog(app, pkg, info, p, done) };
-    case 'blockpack': return { name: pkg.name, target: 'blocks', affects: ['blocks'], open: (_, done) => openBlockPackDialog(app, pkg, info, done) };
-    case 'pixi': return { name: pkg.name, target: 'sprites', affects: ['sprites', 'blocks'], open: (_, done) => openPixiPackageDialog(app, pkg, done) };
-    default: return { name: pkg.name, target: 'patches', affects: [], open: (_, done) => openApplyDialog(app, pkg, fileName, null, done) };
+    case 'uberasm': return { name: pkg.name, target: 'uber', affects: ['uber'], open: tracked(pkg.name, (p, done) => openUberResourceDialog(app, pkg, info, p, done)) };
+    case 'block': return { name: pkg.name, target: 'blocks', affects: ['blocks'], open: tracked(pkg.name, (p, done) => openBlockResourceDialog(app, pkg, info, p, done)) };
+    case 'blockpack': return { name: pkg.name, target: 'blocks', affects: ['blocks'], open: tracked(pkg.name, (_, done) => openBlockPackDialog(app, pkg, info, done)) };
+    case 'pixi': return { name: pkg.name, target: 'sprites', affects: ['sprites', 'blocks'], open: tracked(pkg.name, (_, done) => openPixiPackageDialog(app, pkg, done)) };
+    default: return { name: pkg.name, target: 'patches', affects: [], open: tracked(pkg.name, (_, done) => openApplyDialog(app, pkg, fileName, null, done)) };
   }
-}
-
-const PROJECT_KINDS = new Set(['uberasm', 'blocks', 'pixi']);
-
-// the list of the ROM's patches; the tool projects have tabs of their own
-export function patchesPane(app: App, changed: () => void): { el: HTMLElement; reload(): void } {
-  const el = h('div', { class: 'patch-pane' });
-  const reload = () => {
-    const list = listPatches(app.rom).filter((p) => !PROJECT_KINDS.has(p.kind ?? ''));
-    clear(el).append(
-      h('p', { class: 'hint' }, 'Asar-Patches ändern das Spiel selbst (z. B. von SMWCentral). Konflikte mit anderen Patches werden geprüft; jeder lässt sich wieder entfernen.'),
-      list.length ? h('div', { class: 'patch-list' }, list.map((p) => {
-        const bytes = p.segs.reduce((n, s) => n + s[1], 0);
-        const own = p.own.reduce((n, o) => n + Math.max(0, app.rom.isRatsAt(o)), 0);
-        return h('div', { class: 'patch-item' },
-          h('div', null,
-            h('div', { class: 'patch-name' }, p.name, p.version ? h('span', { class: 'hint' }, ` v${p.version}`) : null),
-            h('div', { class: 'hint' }, p.kind === 'vram' ? 'Editor-Patch: Tilemaps für BG2/BG3 verlegt' : `${new Date(p.applied).toLocaleString()} · ${bytes} Bytes geändert · ${own < 1024 ? `${own} Bytes` : `${(own / 1024).toFixed(1)} KB`} Code/Daten${Object.keys(p.defines).length ? ` · ${Object.entries(p.defines).map(([k, v]) => `!${k}=${v}`).join(' ')}` : ''}`)),
-          h('div', { class: 'row' },
-            p.kind === 'vram' ? null : h('button', { onclick: () => configure(p) }, 'Einstellungen …'),
-            h('button', { onclick: () => remove(p) }, 'Entfernen …')));
-      })) : h('p', { class: 'hint' }, 'Keine Patches installiert – „Hinzufügen …“ oben nimmt eine .asm- oder .zip-Datei.'),
-    );
-  };
-  const configure = async (p: PatchEntry) => {
-    const s = await storedPackage(app, p);
-    if (!s) { toast('Die Quelldateien dieses Patches sind nicht gespeichert – zum Ändern den Patch entfernen und neu hinzufügen.', 'error'); return; }
-    openApplyDialog(app, toPackage(s), s.fileName, p, changed);
-  };
-  const remove = async (p: PatchEntry) => {
-    const i = await choose('Patch entfernen', `„${p.name}“ aus der ROM entfernen? Die Bytes, die er geändert hat, werden wiederhergestellt.`, [{ label: 'Abbrechen' }, { label: 'Entfernen', danger: true }]);
-    if (i !== 1) return;
-    if (app.dirty) app.saveLevel(true);
-    try {
-      const w = p.kind === 'vram' ? uninstallVramPatch(app.rom) : uninstallPatch(app.rom, p.id);
-      kvDel(srcKey(p.id)).catch(() => {});
-      romChanged(app);
-      toast(`Patch „${p.name}“ entfernt${w.length ? ': ' + w.join(' ') : ''}`);
-    } catch (e) { toast(errorText(e), 'error'); }
-    changed();
-  };
-  reload();
-  return { el, reload };
 }

@@ -5,14 +5,14 @@ sich drei Arten von ASM-Code direkt im Browser in die ROM bringen:
 
 | Art | Format | Wo |
 |---|---|---|
-| **Patches** | beliebige Asar-Patches (`.asm` oder `.zip`), z. B. von SMWCentral | Menü *ROM → Patches …*, Tab *Patches* |
+| **Patches** | beliebige Asar-Patches (`.asm` oder `.zip`), z. B. von SMWCentral | Menü *ROM → Patches …*, Tab *Pakete* |
 | **UberASM** | Code pro Level, Overworld-Karte und Game Mode im Format von UberASM Tool 2.x | Tab *UberASM* (auch *ROM → UberASM …*) |
 | **Custom Blocks** | Blöcke im GPS-Format | Tab *Custom Blocks* (auch *ROM → Custom Blocks …* oder im Map16-Editor) |
 
-Alles liegt in einem Dialog mit je einem Tab; Custom Sprites (PIXI, siehe [pixi.md](pixi.md)) haben den
-vierten. **Hinzufügen …** oben im Dialog nimmt jeden Download und erkennt, was er ist (Patch, UberASM-Code,
-Custom Block, Block-Paket, Custom Sprite, Lunar-Magic-Hintergrund); danach zeigt der passende Tab das
-Ergebnis. Was im aktuellen Tab gewählt ist, gibt die Vorauswahl: im UberASM-Tab Level/Overworld/Game Mode,
+Alles liegt in einem Dialog: der Tab *Pakete* (siehe [Pakete](#pakete)) und je ein Tab für UberASM,
+Custom Blocks und Custom Sprites (PIXI, siehe [pixi.md](pixi.md)) mit dem ganzen Projekt. **Hinzufügen …**
+oben im Dialog nimmt jeden Download und erkennt, was er ist (Patch, UberASM-Code, Custom Block,
+Block-Paket, Custom Sprite, Lunar-Magic-Hintergrund); danach steht er im Tab *Pakete*. Was im aktuellen Tab gewählt ist, gibt die Vorauswahl: im UberASM-Tab Level/Overworld/Game Mode,
 im Blocks-Tab das Tile. Patches und Hinzugefügtes gehen sofort in die ROM; Änderungen in den Tabs UberASM,
 Custom Blocks und Custom Sprites (Zuordnungen, Dateien, Einstellungen) sammeln sich, bis man sie mit
 *Übernehmen* anwendet oder *Verwirft* – beim Schließen fragt der Dialog nach.
@@ -31,10 +31,41 @@ Da der Editor Levels durch Emulation des Spiels lädt, sieht man die Wirkung ein
 für geänderte Level-Lade-Routinen, Level-`init`/`load`-Code aus UberASM, Paletten usw. Im Testmodus (▶)
 läuft der gesamte Code.
 
+## Pakete
+
+Jeder hinzugefügte Download ist danach ein **Paket**: links die Liste, rechts das gewählte mit allem, was es
+mitgebracht hat –
+* sein **Patch** mit den Einstellungen und *Neu anwenden*;
+* sein **UberASM-Code**: wo er läuft (✕ nimmt eine Zuordnung heraus), *Einstellungen …*/*Bearbeiten …*
+  der Dateien, darunter die übrigen Dateien (Bibliotheken, Konfiguration);
+* seine **Custom Blocks** (Tile, Datei, acts like; das Tile öffnet den Map16-Editor) und **Custom Sprites**
+  (Art, Nummer, Name) mit den Einstellungen ihrer Dateien;
+* die **ExGFX-Dateien**, die es angelegt hat;
+* **Grafiken im Paket**: `.bin`-Grafikdateien und 128 Pixel breite `.png`. *Als Grafik importieren …*
+  wechselt in den Grafik-Bereich und legt die Datei in die erste freie ExGFX-Nummer (eine `.bin`, deren Name
+  eine Nummer nennt, wahlweise dorthin; PNG-Farben werden auf die dort gewählte Palette abgebildet);
+* **Dateien des Pakets**: alle Dateien des Downloads – lesen (Anleitungen), herunterladen und, für `.asm`,
+  *Hinzufügen …* als weiteren Teil (wie unter *Weitere Schritte*, auch später noch).
+
+Was ein Paket bringt, wird nicht von den Dialogen gemeldet, sondern beobachtet: Der Editor vergleicht die
+Projekte der ROM (Patches, UberASM, Blöcke, Sprites, ExGFX) vor und nach jedem Schritt. Teile, die später
+hinzukommen (*Weitere Schritte*, *Hinzufügen …* eines Teils, importierte Grafiken, neue Einstellungen),
+gehören zum selben Paket. Das Verzeichnis liegt in der ROM (RATS-Block „SMWK“), die Dateien des Downloads
+auch (komprimiert, bis 256 KB; größere nur im Browser).
+
+**Entfernen …** nimmt das ganze Paket heraus: Patches (spätere zuerst), UberASM-Dateien und
+-Zuordnungen, Blöcke, Sprites, angelegte ExGFX-Dateien. Dateien, die auch ein anderes Paket mitgebracht hat
+(eine gemeinsame Bibliothek), bleiben; was im Level platziert ist, auch. Schlägt ein Schritt fehl, bleibt
+die ROM unverändert.
+
+Patches, die vor dieser Verwaltung angewendet wurden, stehen als eigene Pakete in der Liste. Was in den
+Projekten zu keinem Paket gehört (früher oder von Hand hinzugefügt), nennt die Liste unten mit Link zum Tab.
+Hintergrund-Pakete gehen ins Level und werden kein Paket.
+
 ## Was „Hinzufügen“ erkennt
 
 Viele Downloads auf SMWCentral sind keine eigenständigen Patches, sondern Ressourcen für andere Werkzeuge.
-*Patches* → *Hinzufügen …* erkennt das am Code und führt jeweils weiter:
+*Hinzufügen …* erkennt das am Code und führt jeweils weiter:
 
 | Erkannt an | Art | Was passiert |
 |---|---|---|
@@ -87,7 +118,7 @@ gewählt). Eine vorhandene Lunar-Magic-Kennung bleibt unangetastet.
 
 ## Patches anwenden
 
-1. *Patches* → *Patch hinzufügen …* und eine `.asm`- oder `.zip`-Datei wählen. Aus einem Archiv wird ein
+1. *ROM → Patches …* → *Hinzufügen …* und eine `.asm`- oder `.zip`-Datei wählen. Aus einem Archiv wird ein
    gemeinsamer oberster Ordner entfernt; Includes und Binärdateien (`incsrc`/`incbin`) bleiben mit ihren
    relativen Pfaden erhalten.
 2. Enthält das Archiv mehrere `.asm`-Dateien, wird die Hauptdatei ausgewählt (siehe Readme des Patches).
@@ -424,10 +455,13 @@ rückgängig zu machen.
 * `src/core/pkgmap.ts`, `src/ui/pkgmap.ts`: Pakete aus mehreren Teilen; `src/ui/docview.ts`: Anleitungen.
 * `src/core/patchapply.ts`: Anwenden, Konfliktprüfung, Entfernen.
 * `src/core/patchreg.ts`: Patch-Verzeichnis „SMWA“ in der ROM.
+* `src/core/pkgreg.ts`, `src/ui/pkgtrack.ts`, `src/ui/packages.ts`: Paket-Verzeichnis „SMWK“, Beobachten,
+  Entfernen; der Tab *Pakete*.
 * `src/core/patchpkg.ts`: `.zip`, `patch.json`, Defines.
 * `src/core/uberasm.ts`, `src/core/uberproject.ts`: UberASM-Generator und -Projekt.
 * `src/core/blocks.ts`, `src/core/map16ext.ts`: Custom Blocks.
 * `src/core/structs.ts`: Strukturen (erweitertes Objekt `$03`). Level-Daten: `00`-Objekt-Bytes wie bei jedem
   erweiterten Objekt mit `$03`, dann 1 Byte Strukturnummer. Ohne SMWS gilt `$03` als gewöhnliches
   3-Byte-Objekt, damit Patches, die `$03` selbst belegen, weiter funktionieren.
-* Tests: `tools/testasar.ts`, `tools/testuberasm.ts`, `tools/testblocks.ts`, `tools/teststructs.ts` (Teil von `npm test`).
+* Tests: `tools/testasar.ts`, `tools/testuberasm.ts`, `tools/testblocks.ts`, `tools/teststructs.ts`,
+  `tools/testpkgreg.ts` (Teil von `npm test`).

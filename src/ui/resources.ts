@@ -1,11 +1,14 @@
-// The patches dialog: one place for everything assembled into the ROM – Asar patches, UberASM, custom
-// blocks and custom sprites, each in a tab. "Hinzufügen …" takes any download and shows it in its tab
-// afterwards; the project tabs stage their changes until "Übernehmen", closing asks about pending ones.
+// The patches dialog: one place for everything assembled into the ROM. "Pakete" lists every added download
+// with what it brought (see packages.ts); the tabs UberASM, Custom Blocks and Custom Sprites show the
+// tool projects as a whole. "Hinzufügen …" takes any download and shows it as a package afterwards; the
+// project tabs stage their changes until "Übernehmen", closing asks about pending ones.
 
 import type { App } from './app.ts';
 import { h, modal, clear, toast, choose } from './dom.ts';
 import { loadAsar } from '../core/asar.ts';
-import { patchesPane, pickPackage, type AddTarget } from './patchmanager.ts';
+import { pickPackage, recognize, type AddTarget, type PickedPackage } from './patchmanager.ts';
+import { packagesPane } from './packages.ts';
+import { trackPackage, findPackage } from './pkgtrack.ts';
 import { uberPane } from './uberdialog.ts';
 import { blockPane } from './blockdialog.ts';
 import { pixiPane } from './pixidialog.ts';
@@ -17,7 +20,7 @@ export interface ResourceOptions {
   onChange?: () => void; // after the ROM was changed from the dialog
 }
 
-const TAB_LABEL: Record<ResourceTab, string> = { patches: 'Patches', uber: 'UberASM', blocks: 'Custom Blocks', sprites: 'Custom Sprites' };
+const TAB_LABEL: Record<ResourceTab, string> = { patches: 'Pakete', uber: 'UberASM', blocks: 'Custom Blocks', sprites: 'Custom Sprites' };
 
 export async function openResources(app: App, tab: ResourceTab = 'patches', opts: ResourceOptions = {}): Promise<void> {
   const body = h('div', { class: 'resources' }, h('p', { class: 'hint' }, 'Asar wird geladen …'));
@@ -56,9 +59,31 @@ export async function openResources(app: App, tab: ResourceTab = 'patches', opts
   const renderTabs = () => clear(tabBar).append(...(Object.keys(TAB_LABEL) as ResourceTab[]).map((k) =>
     h('button', { class: k === tab ? 'mode active' : 'mode', onclick: () => show(k), title: panes && k !== 'patches' && panes[k].dirty() ? 'Nicht übernommene Änderungen' : undefined },
       TAB_LABEL[k], panes && k !== 'patches' && panes[k].dirty() ? ' •' : '')));
-  const patches = patchesPane(app, changed);
   const p = { uber: uberPane(app, renderTabs, changed), blocks: blockPane(app, renderTabs, changed), sprites: pixiPane(app, renderTabs, changed) };
   panes = p;
+  // staged changes of these tabs applied or discarded before the ROM is changed directly; false: back
+  const settle = async (keys: (keyof typeof p)[], what: string): Promise<boolean> => {
+    const dirty = keys.flatMap((k) => (p[k].dirty() ? [p[k]] : []));
+    if (!dirty.length) return true;
+    const i = await choose('Nicht übernommene Änderungen', `${what} ${dirty.map((x) => x.title).join(', ')}: Änderungen sind noch nicht übernommen – vorher …`,
+      [{ label: 'Abbrechen' }, { label: 'Verwerfen', danger: true }, { label: 'Übernehmen', primary: true }]);
+    if (i === null || i === 0) return false;
+    if (i === 1) for (const x of dirty) x.discard();
+    else { const failed = dirty.find((x) => !x.apply()); if (failed) { show(keyOf(failed)); return false; } }
+    return true;
+  };
+  const patches = packagesPane(app, {
+    panes: p,
+    changed,
+    show: (k) => show(k),
+    settle,
+    leave: (then) => void settle(['uber', 'blocks', 'sprites'], 'Der Dialog wird geschlossen.').then((ok) => { if (ok) { dlg.close(true); then(); } }),
+    addPart: (name, files, rec) => {
+      // later parts go into the package (its record, looked up again: it may have changed since)
+      const cur = findPackage(app, rec.id) ?? rec;
+      void run(recognize(app, name, files, false, trackPackage(app, cur.name, cur.fileName, null, cur)));
+    },
+  });
   if (opts.tile !== undefined) p.blocks.setTile(opts.tile);
   const keyOf = (pane: Pane) => (Object.keys(p) as (keyof typeof p)[]).find((k) => p[k] === pane) ?? 'patches';
 
@@ -68,25 +93,20 @@ export async function openResources(app: App, tab: ResourceTab = 'patches', opts
     clear(content).appendChild(k === 'patches' ? patches.el : p[k].el);
   }
 
+  // opens the dialog adding a package, the tabs it changed reloaded afterwards
+  const run = async (pk: PickedPackage) => {
+    // the add dialogs work on the ROM's projects: staged changes of those first
+    if (!(await settle(pk.affects.filter((k): k is keyof typeof p => k !== 'patches'), `„${pk.name}“ wird direkt in die ROM übernommen.`))) return;
+    pk.open({ uberContext: p.uber.context(), tile: p.blocks.tile() }, () => {
+      for (const k of pk.affects) if (k !== 'patches') p[k].reload();
+      if (pk.target) show('patches');
+      changed();
+    });
+  };
   const add = async (manual = false) => {
     let picked;
     try { picked = await pickPackage(app, manual); } catch (e) { toast(errorText(e), 'error'); return; }
-    if (!picked) return;
-    const pk = picked;
-    // the add dialogs work on the ROM's projects: staged changes of those first
-    const dirty = pk.affects.flatMap((k) => (k !== 'patches' && p[k].dirty() ? [p[k]] : []));
-    if (dirty.length) {
-      const i = await choose('Nicht übernommene Änderungen', `„${pk.name}“ wird direkt in die ROM übernommen. ${dirty.map((x) => x.title).join(', ')}: Änderungen sind noch nicht übernommen – vorher …`,
-        [{ label: 'Abbrechen' }, { label: 'Verwerfen', danger: true }, { label: 'Übernehmen', primary: true }]);
-      if (i === null || i === 0) return;
-      if (i === 1) for (const x of dirty) x.discard();
-      else { const failed = dirty.find((x) => !x.apply()); if (failed) { show(keyOf(failed)); return; } }
-    }
-    pk.open({ uberContext: p.uber.context(), tile: p.blocks.tile() }, () => {
-      for (const k of pk.affects) if (k !== 'patches') p[k].reload();
-      if (pk.target) show(pk.target);
-      changed();
-    });
+    if (picked) await run(picked);
   };
 
   clear(body).append(

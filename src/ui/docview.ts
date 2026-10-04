@@ -128,3 +128,8 @@ export function keptDocsRow(tool: string): HTMLElement {
   }).catch(() => {});
   return el;
 }
+
+// forgets the kept docs of a package (removed)
+export function forgetDocs(title: string): void {
+  for (const tool of ['uber', 'blocks', 'sprites']) kvDel(key(tool, title)).catch(() => {});
+}

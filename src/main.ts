@@ -252,7 +252,18 @@ function buildUi(app: App): void {
   };
   app.on('show-level-view', () => setWorkspace('level'));
   app.on('open-map16', () => setWorkspace('gfx', { tab: 'map16', tile: app.wsTile, bg: app.wsTileBg }));
-  app.on('open-gfx', () => setWorkspace('gfx', { tab: 'gfx' }));
+  app.on('open-gfx', () => {
+    const n = app.wsGfx;
+    app.wsGfx = null;
+    void setWorkspace('gfx', { tab: 'gfx' }).then((ok) => { if (ok && n !== null) ws!.showGfx(n); });
+  });
+  // a graphics file of a package (app.gfxImport) into a free ExGFX number
+  app.on('import-gfx', () => {
+    const job = app.gfxImport;
+    app.gfxImport = null;
+    if (!job) return;
+    void setWorkspace('gfx', { tab: 'gfx' }).then(async (ok) => { if (ok) job.done(await ws!.gfx.importNew(job.file)); });
+  });
 
   window.onkeydown = (e: KeyboardEvent) => {
     const t = e.target as HTMLElement;

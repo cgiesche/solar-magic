@@ -68,6 +68,8 @@ export class App {
   romHistory: RomHistory;
   wsTile = 0; // Map16 tile for 'open-map16' (opens the graphics workspace there)
   wsTileBg = false; // wsTile is a BG tile
+  gfxImport: { file: File; done: (num: number | null) => void } | null = null; // for 'import-gfx'
+  wsGfx: number | null = null; // GFX file for 'open-gfx'
   // order of level and ROM edits, so one undo/redo serves both (n: stack length after the push)
   undoOrder: { kind: 'level' | 'rom'; n: number }[] = [];
   redoOrder: ('level' | 'rom')[] = [];
@@ -1281,6 +1283,12 @@ export class App {
     this.romChanged();
     toast(`${undo ? 'Rückgängig' : 'Wiederholt'}: ${e.label}`);
     return true;
+  }
+
+  // the graphics workspace on a GFX/ExGFX file
+  showGfxFile(num: number): void {
+    this.wsGfx = num;
+    this.emit('open-gfx');
   }
 
   editMap16(tile: number, bg = false): void {

@@ -38,6 +38,8 @@ export interface Pane {
   discard(): void;
   reload(): void; // the ROM's project again, after it was changed outside the tab
   render(): void;
+  project(): Project; // the staged project
+  touch(): void; // the staged project was changed from outside the tab
 }
 
 // ROM changed by a patch or project: reload everything that depends on it
@@ -46,6 +48,7 @@ export function romChanged(app: App): void {
   app.persist();
   app.openLevel(app.level.number);
   app.emit('patch');
+  app.emit('rom-change'); // open editors (graphics workspace) show it, e.g. an ExGFX file removed with a package
 }
 
 export function errorText(e: unknown): string {
@@ -177,5 +180,5 @@ export function projectPane<P extends Project>(app: App, spec: PaneSpec<P>, onDi
   }
 
   reload();
-  return { title: spec.title, el, dirty: () => dirty, apply, discard: reload, reload, render, project: () => proj };
+  return { title: spec.title, el, dirty: () => dirty, apply, discard: reload, reload, render, project: () => proj, touch: change };
 }

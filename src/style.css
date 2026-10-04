@@ -419,3 +419,21 @@ button.danger:hover:not(:disabled) { border-color: var(--danger); }
 .define-doc { white-space: pre-wrap; font-size: 11px; margin: 8px 0 3px; }
 .text-edit-box { width: 820px; max-width: 100%; }
 .text-edit { width: 100%; height: 62vh; resize: vertical; font-size: 12px; tab-size: 4; white-space: pre; }
+/* "Pakete": installed packages left, the chosen one right */
+.resources:has(.pkg-pane) { width: 920px; }
+.pkg-pane { display: grid; grid-template-columns: 220px 1fr; gap: 12px; min-height: 360px; }
+.pkg-list { display: flex; flex-direction: column; gap: 4px; border-right: 1px solid var(--border); padding-right: 10px; max-height: 64vh; overflow: auto; }
+.pkg-item { text-align: left; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: transparent; }
+.pkg-item.active { border-color: var(--accent2); background: var(--panel2); }
+.pkg-item-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pkg-orphans { margin-top: 10px; font-size: 12px; }
+.pkg-detail { min-width: 0; max-height: 64vh; overflow: auto; padding-right: 4px; }
+.pkg-head { align-items: flex-start; gap: 8px; margin-bottom: 4px; }
+.pkg-title { font-weight: 600; font-size: 15px; }
+.pkg-sec { margin-top: 12px; }
+.pkg-sec h3 { margin: 0 0 4px; }
+.pkg-files summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+.pkg-filelist { display: flex; flex-direction: column; font-size: 12px; }
+.pkg-file { gap: 6px; min-height: 26px; border-bottom: 1px solid var(--border); }
+.pkg-file .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 700px) { .pkg-pane { grid-template-columns: 1fr; } .pkg-list { border-right: 0; padding-right: 0; max-height: 30vh; } }
