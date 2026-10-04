@@ -94,12 +94,12 @@ export function ownerNote(rom: Rom, snes: number, len: number): string {
   return p ? ` (belegt durch Patch „${p.name}“)` : '';
 }
 
-function writeChunks(rom: Rom, data: Uint8Array): number[] {
+export function writeChunks(rom: Rom, data: Uint8Array): number[] {
   const out: number[] = [];
   for (let i = 0; i < data.length; i += CHUNK) out.push(rom.allocWrite(data.subarray(i, i + CHUNK)));
   return out;
 }
-function readChunks(rom: Rom, addrs: number[], total: number): Uint8Array {
+export function readChunks(rom: Rom, addrs: number[], total: number): Uint8Array {
   const out = new Uint8Array(total);
   let o = 0;
   for (const addr of addrs) {
