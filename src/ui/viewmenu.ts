@@ -17,7 +17,7 @@ export function viewMenu(app: App, paint: () => void, full = true): HTMLElement 
   const gameState = (k: keyof App['switches'], label: string, title: string): MenuItem => ({
     label, title, checked: () => app.switches[k], onToggle: (v) => { app.switches[k] = v; app.refresh(); },
   });
-  const anim = show('anim', 'Animation', 'Animierte Tiles, Paletten und Sprites abspielen (wie im Spiel, auch eigene Animationen; Sprites bewegen sich auf ihrem Platz)');
+  const anim = show('anim', 'Animation', 'Animierte Tiles und Paletten abspielen (wie im Spiel, auch eigene Animationen)');
   const state: MenuItem[] = [
     { heading: 'Spielzustand' },
     gameState('palaces', '!-Blöcke gedrückt', 'Ansicht: alle Switch-Paläste gedrückt'),

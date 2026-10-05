@@ -11,21 +11,7 @@ export interface SpriteImage {
   ox: number; // offset of image top-left relative to the sprite's tile position (pixels)
   oy: number;
   rgba: Uint32Array;
-  // how the sprite moves on its spot: the distinct images (positioned like this one) and the sequence
-  // of [image, game frames] the game shows them in (absent: it looks the same all the time)
-  anim?: { imgs: SpriteImage[]; seq: [number, number][] };
 }
-
-// where a slot was and where the camera was when it wrote its OAM tiles
-interface DrawPos { x: number; y: number; cx: number; cy: number }
-const slotPos = (w: Uint8Array, i: number) => ({ x: w[0xe4 + i] | (w[0x14e0 + i] << 8), y: w[0xd8 + i] | (w[0x14d4 + i] << 8) });
-const camPos = (w: Uint8Array) => ({ cx: w[0x1a] | (w[0x1b] << 8), cy: w[0x1c] | (w[0x1d] << 8) });
-// game frames of the animation captured after the still image (after a few to land)
-const ANIM_FRAMES = 64, ANIM_WARMUP = 4;
-// what the sprites stand on while animating: the cement block, solid on all sides
-// (tiles below $200 act as the game itself defines them)
-const ANIM_FLOOR = 0x130;
-const MAP_BASE = 0xc800;
 
 interface OamTile { i: number; x: number; y: number; tile: number; attr: number; big: boolean }
 
@@ -94,16 +80,16 @@ export function captureSprites(
     if (!r.ok) continue;
     const rec = record(emu, 3);
     if (!rec) continue;
-    const { snapOwner, snapOam, snapConflicts, snapPos } = rec;
+    const { snapOwner, snapOam, snapConflicts } = rec;
     const w = s.wram;
-    const { cx, cy } = camPos(w);
+    const cx = w[0x1a] | (w[0x1b] << 8), cy = w[0x1c] | (w[0x1d] << 8);
     // live sprite slots (alone, a sprite from $C9 on owns all: shells $DA-$DD load as a Koopa
     // 04-07 in carryable state, so $9E is not the placed number; a custom sprite's $9E is what it acts like)
     const live = new Map<number, { n: number; x: number; y: number }>();
     for (let i = 0; i < 12; i++) {
       const from = order[w[0x161a + i]];
       if (w[0x14c8 + i] === 0 || !(solo || from)) continue;
-      live.set(i, { n: solo ? batch[0] : from.id >= 0x200 ? from.id : w[0x9e + i], ...slotPos(w, i) });
+      live.set(i, { n: solo ? batch[0] : from.id >= 0x200 ? from.id : w[0x9e + i], x: w[0xe4 + i] | (w[0x14e0 + i] << 8), y: w[0xd8 + i] | (w[0x14d4 + i] << 8) });
     }
     const groups = new Map<number, OamTile[]>();
     for (const t of readOamBuffer(snapOam)) {
@@ -127,73 +113,21 @@ export function captureSprites(
       const p = placed[0];
       if (img) result.set(p.id, { ...img, ox: img.ox + cx - p.tx * 16, oy: img.oy + cy - p.ty * 16 });
     }
-    const stills = new Map<number, SpriteImage>();
     groups.forEach((g, i) => {
       const l = live.get(i)!;
       if (result.has(l.n)) return;
       // partly off screen or sharing OAM entries with another sprite: retry alone in the first slot
-      if (batch.length > 1 && (snapConflicts.has(i) || w[0x15a0 + i] || w[0x186c + i] || g.some(clipped))) return;
+      if (batch.length > 1 && (snapConflicts.has(i) || w[0x15a0 + i] || w[0x186c + i]
+        || g.some(t => t.x < 0 || t.x + (t.big ? 16 : 8) > 256 || t.y + (t.big ? 16 : 8) > 224))) return;
       const img = drawTiles(emu, g);
-      // offset relative to where the sprite was when it drew itself (it moves after spawning)
-      const p = snapPos.get(i) ?? { ...l, cx, cy };
-      if (!img) return;
-      const still = { ...img, ox: img.ox + p.cx - p.x, oy: img.oy + p.cy - p.y };
-      result.set(l.n, still);
-      if (!solo) stills.set(i, still);
+      // offset relative to the spawn tile, compensating for movement since spawn
+      if (img) result.set(l.n, { ...img, ox: img.ox + cx - l.x, oy: img.oy + cy - l.y });
     });
-    animate(emu, stills);
     done += batch.length;
     onProgress?.(Math.min(nums.length, done));
   }
   return result;
 }
-
-const clipped = (t: OamTile) => t.x < 0 || t.x + (t.big ? 16 : 8) > 256 || t.y + (t.big ? 16 : 8) > 224;
-
-// Runs on and records how the sprites in the slots of stills (their image just captured) look
-// frame by frame, standing on blocks put under them in the (horizontal) test level. Each image is
-// placed relative to the slot's position at the time it drew itself, the slots' X and the camera
-// are put back each frame: the sprite animates on its spot instead of walking away or out of view.
-// A slot's recording ends when it dies, changes into another sprite, loses tiles to another one
-// or is cut off at the screen edge.
-function animate(emu: LevelEmulator, stills: Map<number, SpriteImage>): void {
-  if (!stills.size) return;
-  const w = emu.snes.wram;
-  const ident = (i: number) => `${w[0x14c8 + i] !== 0}:${w[0x9e + i]}:${w[0x1ab9e + i]}`;
-  const slots = [...stills.keys()].map((i) => ({ i, still: stills.get(i)!, ident: ident(i), ...slotPos(w, i), imgs: [] as SpriteImage[], seq: [] as [number, number][], on: true }));
-  for (const s of slots) {
-    const ty = (s.y >> 4) + 1;
-    if (ty >= 0x1b) continue;
-    for (let tx = (s.x >> 4) - 1; tx <= (s.x >> 4) + 1; tx++) {
-      if (tx < 0) continue;
-      const off = MAP_BASE + (tx >> 4) * 0x1b0 + ty * 16 + (tx & 15);
-      w[off] = ANIM_FLOOR & 0xff; w[off + 0x10000] = ANIM_FLOOR >> 8;
-    }
-  }
-  const cam = w.slice(0x1a, 0x1e), cam2 = w.slice(0x1462, 0x1466);
-  for (let f = 0; f < ANIM_WARMUP + ANIM_FRAMES && slots.some((s) => s.on); f++) {
-    for (const s of slots) if (s.on) { w[0xe4 + s.i] = s.x & 0xff; w[0x14e0 + s.i] = s.x >> 8; }
-    w.set(cam, 0x1a); w.set(cam2, 0x1462);
-    const rec = record(emu, 1);
-    for (const s of slots) {
-      if (!s.on) continue;
-      const p = rec?.snapPos.get(s.i);
-      const g = rec ? readOamBuffer(rec.snapOam).filter((t) => rec.snapOwner[t.i] === s.i) : [];
-      const img = p && g.length && !rec!.snapConflicts.has(s.i) && !g.some(clipped) && ident(s.i) === s.ident ? drawTiles(emu, g) : null;
-      if (!img) { s.on = false; continue; }
-      if (f < ANIM_WARMUP) continue;
-      const fr: SpriteImage = { ...img, ox: img.ox + p!.cx - p!.x, oy: img.oy + p!.cy - p!.y };
-      let k = s.imgs.findIndex((o) => sameImage(o, fr));
-      if (k < 0) { k = s.imgs.length; s.imgs.push(fr); }
-      const last = s.seq[s.seq.length - 1];
-      if (last?.[0] === k) last[1]++; else s.seq.push([k, 1]);
-    }
-  }
-  for (const s of slots) if (s.imgs.length > 1) s.still.anim = { imgs: s.imgs, seq: s.seq };
-}
-
-const sameImage = (a: SpriteImage, b: SpriteImage) =>
-  a.w === b.w && a.h === b.h && a.ox === b.ox && a.oy === b.oy && a.rgba.every((c, i) => c === b.rgba[i]);
 
 // loaded one per test level: sprites from $C9 on, custom shooters and generators (C0-DF)
 const alone = (id: number) => (id >= 0x200 ? (id & 0xff) >= 0xc0 : id >= 0xc9);
@@ -235,15 +169,13 @@ export function testSpriteData(spriteHeader: number, order: PlacedSprite[], size
 // (score/extended sprite loops in bank 2 reuse $15E9, hence the bank check)
 // snapLost: slots that lost a visible tile that way (the tile is missing on screen) and the slots
 // that overwrote it
-// snapPos: per slot, where it and the camera were at its first OAM write in that sprite loop
-export function record(emu: LevelEmulator, frames: number): { snapOwner: Int8Array; snapOam: Uint8Array; snapConflicts: Set<number>; snapLost: Set<number>; snapPos: Map<number, DrawPos> } | null {
+export function record(emu: LevelEmulator, frames: number): { snapOwner: Int8Array; snapOam: Uint8Array; snapConflicts: Set<number>; snapLost: Set<number> } | null {
   const s = emu.snes;
   const owner = new Int8Array(128).fill(-1);
   let snapOwner = owner.slice(), snapOam = s.wram.slice(0x200, 0x4a0);
   // slots whose OAM entries were overwritten by another sprite in the same frame
   let conflicts = new Set<number>(), snapConflicts = conflicts;
   let lost = new Set<number>(), snapLost = lost;
-  let pos = new Map<number, DrawPos>(), snapPos = pos;
   let cur = -1, s0 = 0;
   s.hook = {
     onWramWrite(a: number, v: number) {
@@ -261,8 +193,6 @@ export function record(emu: LevelEmulator, frames: number): { snapOwner: Int8Arr
         conflicts = new Set();
         snapLost = lost;
         lost = new Set();
-        snapPos = pos;
-        pos = new Map();
       }
       if (a >= 0x200 && a < 0x400) {
         const e = (a - 0x200) >> 2, prev = owner[e];
@@ -272,7 +202,6 @@ export function record(emu: LevelEmulator, frames: number): { snapOwner: Int8Arr
           if (y < 0xe0 || y >= 0xf8) { lost.add(prev); lost.add(cur); }
         }
         owner[e] = cur;
-        if (cur >= 0 && !pos.has(cur)) pos.set(cur, { ...slotPos(s.wram, cur), ...camPos(s.wram) });
       }
     },
   };
@@ -281,7 +210,7 @@ export function record(emu: LevelEmulator, frames: number): { snapOwner: Int8Arr
     while (s.wram[0x100] !== 0x14 && guard++ < 80) s.runFrame();
     for (let f = 0; f < frames; f++) s.runFrame();
   } catch { return null; } finally { s.hook = null; }
-  return { snapOwner, snapOam, snapConflicts, snapLost, snapPos };
+  return { snapOwner, snapOam, snapConflicts, snapLost };
 }
 
 // image of OAM tiles; ox/oy: its top-left on the screen
@@ -353,9 +282,8 @@ export function captureSpriteAt(
   const g = readOamBuffer(rec.snapOam).filter((t) => rec.snapOwner[t.i] === slot);
   const img = g.length ? drawTiles(emu, g) : null;
   if (!img) return null;
-  // offset relative to the sprite's position when it drew itself (it may have moved), the camera may have scrolled
-  const p = rec.snapPos.get(slot) ?? { ...slotPos(w, slot), ...camPos(w) };
-  const still = { ...img, ox: img.ox + p.cx - p.x, oy: img.oy + p.cy - p.y };
-  animate(emu, new Map([[slot, still]]));
-  return still;
+  // offset relative to the sprite's position (it may have moved), the camera may have scrolled
+  const sx = w[0xe4 + slot] | (w[0x14e0 + slot] << 8), sy = w[0xd8 + slot] | (w[0x14d4 + slot] << 8);
+  const ncx = w[0x1a] | (w[0x1b] << 8), ncy = w[0x1c] | (w[0x1d] << 8);
+  return { ...img, ox: img.ox + ncx - sx, oy: img.oy + ncy - sy };
 }
