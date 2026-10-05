@@ -1,8 +1,9 @@
 // Misc. dialogs and actions: secondary entrances, ROM info/expansion, level save as/file/screens.
 
 import type { App } from './app.ts';
-import { h, modal, clear, hexInput, select, toast, downloadBytes, pickFile, choose } from './dom.ts';
-import { readSecondaryEntrance, writeSecondaryEntrance, type SecondaryEntrance, loadLevel, cloneLevel, insertScreen, deleteScreen, clearLevel, spriteId } from '../core/level.ts';
+import { h, modal, clear, hexInput, select, toast, downloadBytes, pickFile, choose, emptyState } from './dom.ts';
+import { isBlank } from '../core/exitgraph.ts';
+import { readSecondaryEntrance, type SecondaryEntrance, loadLevel, cloneLevel, insertScreen, deleteScreen, clearLevel, spriteId } from '../core/level.ts';
 import { exportLevelFile, importLevelFile, LEVEL_FILE_EXT } from '../core/levelfile.ts';
 import { ENTRANCE_ACTIONS, hex, objectName } from '../core/names.ts';
 import { saveLevel } from '../core/save.ts';
@@ -10,48 +11,83 @@ import { hasEditorPatch, installEditorPatch, DM16_EXT, editorPatch, setLevelGfx,
 import { bgFromWram } from '../core/bg.ts';
 import { STRUCT_EXT, hasStructs } from '../core/structs.ts';
 
+// overview of all secondary entrances of the current level's bank: where each leads, which exits use it
 export function openEntrancesDialog(app: App): void {
   const rom = app.rom;
-  let sel = 0;
-  const filter = h('input', { type: 'checkbox', checked: true });
-  const list = h('div', { class: 'gfx-list', style: 'height: 420px' });
+  const bank = app.level.number & 0x100;
+  const filter = h('select', null, h('option', { value: 'level' }, 'in dieses Level'), h('option', { value: 'set' }, 'alle angelegten'), h('option', { value: 'all' }, 'alle (auch freie)'));
+  const list = h('div', { class: 'gfx-list', style: 'height: 420px; min-width: 360px' });
   const detail = h('div', { class: 'ent-detail' });
-  // which secondary exits point into this level (for "only this level")
+  let sel = -1;
   const buildList = () => {
     clear(list);
-    const lvLow = app.level.number & 0xff;
-    for (let i = 0; i < 0x200; i++) {
+    const g = app.exitGraph();
+    const mine = new Set(g.entrancesOf(app.level.number));
+    for (let i = bank; i < bank + 0x100; i++) {
       const e = readSecondaryEntrance(rom, i);
-      if (filter.checked && e.destLevel !== lvLow) continue;
-      list.appendChild(h('div', { class: `level-item${i === sel ? ' current' : ''}`, onclick: () => { sel = i; buildList(); buildDetail(); } }, `${hex(i, 3)} → ${hex(e.destLevel, 2)}`));
+      const users = g.usersOfEntrance(i).length;
+      const blank = isBlank(rom, i) && !users;
+      if (filter.value === 'level' && !mine.has(i)) continue;
+      if (filter.value === 'set' && blank) continue;
+      const to = e.destLevel | bank;
+      list.appendChild(h('div', { class: `level-item${i === sel ? ' current' : ''}${blank ? ' unused' : ''}`, onclick: () => { sel = i; buildList(); buildDetail(); } },
+        `${hex(i, 3)} `, blank ? h('span', { class: 'lname' }, 'frei') : h('span', null, `→ ${hex(to, 3)} `, h('span', { class: 'lname' }, `${g.name(to)} · ${users ? `${users} Exit${users > 1 ? 's' : ''}` : 'unbenutzt'}`))));
     }
+    if (!list.firstChild) list.append(emptyState(filter.value === 'level' ? 'Keine sekundären Eingänge in dieses Level.' : 'Keine Einträge.'));
   };
   const buildDetail = () => {
     clear(detail);
+    if (sel < 0) { detail.append(h('div', { class: 'hint' }, 'Einen Eintrag wählen. Bearbeiten und Verschieben geht direkt im Level im Modus „Ein-/Ausgänge“ (Taste 4).')); return; }
     const e = readSecondaryEntrance(rom, sel);
-    const set = (f: (x: SecondaryEntrance) => void) => { const x = readSecondaryEntrance(rom, sel); f(x); writeSecondaryEntrance(rom, sel, x); app.emu.syncRom(); buildList(); buildDetail(); };
+    const g = app.exitGraph();
+    const to = e.destLevel | bank;
+    const blank = isBlank(rom, sel);
+    const set = (label: string, f: (x: SecondaryEntrance) => void) => { app.editSecondaryEntrance(sel, `Sekundärer Eingang ${hex(sel, 3)}: ${label}`, f, `sec-entrance-dlg:${sel}`); buildList(); buildDetail(); };
     const range = (n: number): [number, string][] => Array.from({ length: n }, (_, i) => [i, String(i)]);
+    const users = g.usersOfEntrance(sel);
     detail.append(
       h('div', { class: 'prop-title' }, `Sekundärer Eingang ${hex(sel, 3)}`),
-      h('div', { class: 'prop' }, h('label', null, 'Ziel-Level (untere Stellen)'), hexInput(e.destLevel, 2, (v) => set((x) => (x.destLevel = v)))),
-      h('div', { class: 'hint' }, 'Das High-Bit der Levelnummer (0xx/1xx) ergibt sich in Vanilla-SMW aus der Karte, auf der das Hauptlevel liegt.'),
-      h('div', { class: 'prop' }, h('label', null, 'Screen'), hexInput(e.screen, 2, (v) => set((x) => (x.screen = v)), 0x1f)),
-      h('div', { class: 'prop' }, h('label', null, 'X-Position'), select(range(8), e.entranceX, (v) => set((x) => (x.entranceX = v)))),
-      h('div', { class: 'prop' }, h('label', null, 'Y-Position'), select(range(16), e.entranceY, (v) => set((x) => (x.entranceY = v)))),
-      h('div', { class: 'prop' }, h('label', null, 'Aktion'), select(ENTRANCE_ACTIONS.map((a, i) => [i, `${i} – ${a}`] as [number, string]), e.action, (v) => set((x) => (x.action = v)))),
-      h('div', { class: 'prop' }, h('label', null, 'FG Start-Y'), select(range(4), e.fgInitY, (v) => set((x) => (x.fgInitY = v)))),
-      h('div', { class: 'prop' }, h('label', null, 'BG Start-Y'), select(range(4), e.bgInitY, (v) => set((x) => (x.bgInitY = v)))),
-      h('button', { onclick: () => { const n = app.level.number & 0xff; set((x) => (x.destLevel = n)); } }, `Auf aktuelles Level (${hex(app.level.number & 0xff, 2)}) setzen`),
+      blank ? h('div', { class: 'hint' }, 'Frei: kein Exit benutzt ihn.') : h('div', null, 'Führt in ', h('b', null, `Level ${hex(to, 3)}`), ' ', h('span', { class: 'hint' }, g.name(to))),
+      h('div', { class: 'prop' }, h('label', null, 'Ziel-Level (untere Stellen)'), hexInput(e.destLevel, 2, (v) => set('Ziellevel', (x) => (x.destLevel = v)))),
+      h('div', { class: 'prop' }, h('label', null, 'Screen'), hexInput(e.screen, 2, (v) => set('Screen', (x) => (x.screen = v)), 0x1f)),
+      h('div', { class: 'prop' }, h('label', null, 'X-Position'), select(range(8), e.entranceX, (v) => set('X', (x) => (x.entranceX = v)))),
+      h('div', { class: 'prop' }, h('label', null, 'Y-Position'), select(range(16), e.entranceY, (v) => set('Y', (x) => (x.entranceY = v)))),
+      h('div', { class: 'prop' }, h('label', null, 'Aktion'), select(ENTRANCE_ACTIONS.map((a, i) => [i, `${i} – ${a}`] as [number, string]), e.action, (v) => set('Aktion', (x) => (x.action = v)))),
+      h('div', { class: 'prop' }, h('label', null, 'FG Start-Y'), select(range(4), e.fgInitY, (v) => set('FG Start-Y', (x) => (x.fgInitY = v)))),
+      h('div', { class: 'prop' }, h('label', null, 'BG Start-Y'), select(range(4), e.bgInitY, (v) => set('BG Start-Y', (x) => (x.bgInitY = v)))),
+      h('div', { class: 'hint' }, users.length ? `Benutzt von: ${users.map((u) => `${hex(u.from, 3)} (Screen ${hex(u.screen, 2)})`).join(', ')}` : 'Kein Exit benutzt diesen Eingang.'),
+      h('div', { class: 'row' },
+        blank ? '' : h('button', { onclick: () => { dlg.close(true); openTarget(to); } }, `Level ${hex(to, 3)} öffnen`),
+        h('button', { onclick: () => set('auf aktuelles Level', (x) => (x.destLevel = app.level.number & 0xff)) }, `Auf aktuelles Level (${hex(app.level.number, 3)}) setzen`)),
+      h('div', { class: 'hint' }, 'Das obere Bit (0xx/1xx) kommt vom Level, in dem der Exit liegt. Änderungen sind mit Strg+Z rückgängig zu machen.'),
     );
   };
+  const openTarget = (to: number) => {
+    const idx = sel;
+    if (to !== app.level.number) app.openLevel(to);
+    if (app.mode !== 'exit') app.setMode('exit');
+    app.exitMarker = { kind: 'sec', index: idx };
+    app.revealMarker();
+  };
+  const newEntry = () => {
+    const idx = app.exitGraph().freeEntrance(app.level.number);
+    if (idx === null) { toast('Kein freier sekundärer Eingang mehr.', 'error'); return; }
+    const s = app.level.secondary;
+    app.editSecondaryEntrance(idx, `Sekundärer Eingang ${hex(idx, 3)} angelegt`, (x) => {
+      x.destLevel = app.level.number & 0xff; x.screen = s.entranceScreen; x.entranceX = s.entranceX; x.entranceY = s.entranceY; x.action = s.entranceAction;
+    });
+    sel = idx;
+    buildList();
+    buildDetail();
+  };
   filter.addEventListener('change', buildList);
-  const first = (() => { for (let i = 0; i < 0x200; i++) if (readSecondaryEntrance(rom, i).destLevel === (app.level.number & 0xff)) return i; return 0; })();
-  sel = first;
+  sel = app.exitGraph().entrancesOf(app.level.number)[0] ?? -1;
+  if (sel < 0) filter.value = 'set';
   buildList();
   buildDetail();
-  modal('Sekundäre Eingänge', h('div', { class: 'ent-editor' },
-    h('div', null, h('label', { class: 'row small' }, filter, ' nur Ziel = aktuelles Level'), list), detail),
-  [{ label: 'Schließen', primary: true, onClick: () => { app.persist(); app.refresh(); } }]);
+  const dlg = modal(`Sekundäre Eingänge ${bank ? '100–1FF' : '000–0FF'}`, h('div', { class: 'ent-editor' },
+    h('div', null, h('div', { class: 'row small' }, 'Zeigen: ', filter, h('button', { title: 'Nächste freie Nummer, ins aktuelle Level (am Haupteingang)', onclick: newEntry }, '+ Neu')), list), detail),
+  [{ label: 'Schließen', primary: true }], () => { app.persist(); });
 }
 
 export function openRomInfo(app: App): void {
