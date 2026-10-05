@@ -1,4 +1,4 @@
-// "Paket zuordnen": a package that is more than one resource (e.g. Retry System) is taken apart by hand –
+// "Assign package": a package that is more than one resource (e.g. Retry System) is taken apart by hand –
 // each folder or file of the package goes into a folder of the UberASM project or is left out, the
 // resource files get their list.txt numbers. Opens with a suggestion derived from the package (see
 // core/pkgmap.ts); applying adds everything to the ROM's UberASM project in one step.
@@ -13,7 +13,7 @@ import type { ApplyResult } from '../core/patchapply.ts';
 import { romChanged, logView, errorText } from './projectpane.ts';
 import { docsButton, keepDocs } from './docview.ts';
 
-const CTX_LABEL: Record<UberContext, string> = { level: 'Level', gamemode: 'Game Mode', overworld: 'Overworld-Karte' };
+const CTX_LABEL: Record<UberContext, string> = { level: 'Level', gamemode: 'Game Mode', overworld: 'Overworld map' };
 const INHERIT = '\u0000inherit';
 const IGNORE = '\u0000ignore';
 
@@ -41,10 +41,10 @@ export function openPkgMapDialog(app: App, name: string, files: Map<string, Uint
     const isDir = node === '' || node.endsWith('/');
     const own = isDir && node ? node.replace(/\/$/, '').split('/').pop()! + '/' : null;
     const out: [string, string][] = [];
-    if (node !== '') out.push([INHERIT, 'wie der Ordner darüber']);
-    out.push([IGNORE, 'nicht übernehmen']);
-    if (own && !['level/', 'gamemode/', 'overworld/', 'library/', 'routines/', 'other/'].includes(own)) out.push([own, `→ ${own} (als eigener Ordner)`]);
-    out.push(['', `→ oberster Ordner`]);
+    if (node !== '') out.push([INHERIT, 'like the folder above']);
+    out.push([IGNORE, 'leave out']);
+    if (own && !['level/', 'gamemode/', 'overworld/', 'library/', 'routines/', 'other/'].includes(own)) out.push([own, `→ ${own} (as its own folder)`]);
+    out.push(['', `→ top folder`]);
     for (const d of ['level/', 'gamemode/', 'overworld/', 'library/', 'routines/', 'other/']) out.push([d, `→ ${d}`]);
     return out;
   };
@@ -59,7 +59,7 @@ export function openPkgMapDialog(app: App, name: string, files: Map<string, Uint
     const sel = h('select', { onchange: () => setRule(node, sel.value) },
       options(node).map(([v, l]) => h('option', { value: v, selected: v === value(node) }, l)));
     const dest = isDir ? null : place.get(node);
-    const toggle = isDir && node ? h('button', { class: 'icon-btn', title: open.has(node) ? 'Zuklappen' : 'Aufklappen', onclick: () => { if (open.has(node)) open.delete(node); else open.add(node); render(); } }, open.has(node) ? '▾' : '▸') : h('span', { class: 'pkg-indent' });
+    const toggle = isDir && node ? h('button', { class: 'icon-btn', title: open.has(node) ? 'Collapse' : 'Expand', onclick: () => { if (open.has(node)) open.delete(node); else open.add(node); render(); } }, open.has(node) ? '▾' : '▸') : h('span', { class: 'pkg-indent' });
     return h('div', { class: 'row pkg-node' + (rules.has(node) ? ' ruled' : '') + (isDir || dest ? '' : ' off'), style: `padding-left: ${depth * 14}px` },
       toggle,
       h('span', { class: 'mono grow', title: node || name }, label),
@@ -85,9 +85,9 @@ export function openPkgMapDialog(app: App, name: string, files: Map<string, Uint
 
   function callRows(place: Map<string, string>): HTMLElement {
     const sugg = suggestCalls(files, place, fallback);
-    if (!sugg.length) return h('p', { class: 'hint' }, 'Keine Dateien in level/, gamemode/ oder overworld/ – nichts zuzuordnen.');
+    if (!sugg.length) return h('p', { class: 'hint' }, 'No files in level/, gamemode/ or overworld/ – nothing to assign.');
     return h('table', { class: 'uber-table' },
-      h('tr', null, h('th'), h('th', null, 'Datei'), h('th', null, 'läuft in'), h('th', null, 'Nr.'), h('th')),
+      h('tr', null, h('th'), h('th', null, 'File'), h('th', null, 'runs in'), h('th', null, 'No.'), h('th')),
       sugg.map((s) => {
         let st = calls.get(s.file);
         if (!st) { st = { on: true, num: s.num === ALL ? fallback[s.ctx] : s.num, all: s.num === ALL }; calls.set(s.file, st); }
@@ -97,11 +97,11 @@ export function openPkgMapDialog(app: App, name: string, files: Map<string, Uint
         numIn.disabled = c.all;
         const allBox = h('input', { type: 'checkbox', checked: c.all, onchange: () => { c.all = allBox.checked; numIn.disabled = c.all; } });
         return h('tr', null,
-          h('td', null, h('input', { type: 'checkbox', checked: c.on, title: 'list.txt-Eintrag anlegen', onchange: (e: Event) => (c.on = (e.target as HTMLInputElement).checked) })),
+          h('td', null, h('input', { type: 'checkbox', checked: c.on, title: 'Create list.txt entry', onchange: (e: Event) => (c.on = (e.target as HTMLInputElement).checked) })),
           h('td', { class: 'mono' }, s.file),
           h('td', null, CTX_LABEL[s.ctx]),
-          h('td', { class: 'row' }, numIn, h('label', { class: 'row small' }, allBox, 'alle (*)')),
-          h('td', { class: 'hint' }, s.fromDocs ? 'laut Anleitung' : ''));
+          h('td', { class: 'row' }, numIn, h('label', { class: 'row small' }, allBox, 'all (*)')),
+          h('td', { class: 'hint' }, s.fromDocs ? 'per manual' : ''));
       }));
   }
 
@@ -110,13 +110,13 @@ export function openPkgMapDialog(app: App, name: string, files: Map<string, Uint
     const replaced = [...place.values()].filter((d) => existing.has(d)).length;
     clear(treeBox).append(...tree(place));
     clear(callBox).appendChild(callRows(place));
-    summary.textContent = `${place.size} von ${paths.length} Dateien werden übernommen${replaced ? `, ${replaced} davon ersetzen vorhandene Projektdateien` : ''}.`;
+    summary.textContent = `${place.size} of ${paths.length} files are taken over${replaced ? `, ${replaced} of them replace existing project files` : ''}.`;
   }
 
   const apply = (): boolean => {
     if (app.dirty) app.saveLevel(true);
     const place = placed(paths, rules);
-    if (!place.size) { clear(log).appendChild(logView({ ok: false, errors: ['Nichts ausgewählt.'], warnings: [], prints: [] })); return false; }
+    if (!place.size) { clear(log).appendChild(logView({ ok: false, errors: ['Nothing selected.'], warnings: [], prints: [] })); return false; }
     let r: ApplyResult;
     const added: string[] = [];
     try {
@@ -136,30 +136,30 @@ export function openPkgMapDialog(app: App, name: string, files: Map<string, Uint
     if (!r.ok) { clear(log).appendChild(logView(r)); return false; }
     romChanged(app);
     void keepDocs('uber', name, files).catch(() => {});
-    toast(`„${name}“ ins UberASM-Projekt übernommen: ${place.size} Datei(en)${added.length ? `, läuft in ${added.join(', ')}` : ''}.`);
-    if (r.warnings.length || r.prints.length) modal(`Ausgabe: ${name}`, logView(r), [{ label: 'OK', primary: true }]);
+    toast(`“${name}” added to the UberASM project: ${place.size} file(s)${added.length ? `, runs in ${added.join(', ')}` : ''}.`);
+    if (r.warnings.length || r.prints.length) modal(`Output: ${name}`, logView(r), [{ label: 'OK', primary: true }]);
     onDone();
     openFurtherSteps(name, files, rules, onDone, openPart);
     return true;
   };
 
   render();
-  modal(`Paket zuordnen: ${name}`, h('div', { class: 'patch-apply pkg-map' },
-    h('div', { class: 'row' }, h('span', { class: 'grow hint' }, 'Wohin was gehört, steht meist in der Anleitung des Pakets.'), docsButton(name, files)),
-    h('p', null, `„${name}“ enthält mehr als eine Ressource. Ordner und Dateien des Pakets lassen sich hier Ordnern des UberASM-Projekts zuordnen – wie beim Kopieren in den UberASM-Tool-Ordner laut Anleitung. Ein Ordner gibt seine Zuordnung an alles darin weiter.`),
+  modal(`Assign package: ${name}`, h('div', { class: 'patch-apply pkg-map' },
+    h('div', { class: 'row' }, h('span', { class: 'grow hint' }, 'What goes where is usually in the package’s manual.'), docsButton(name, files)),
+    h('p', null, `“${name}” contains more than one resource. Here the package’s folders and files can be assigned to folders of the UberASM project – like copying them into the UberASM Tool folder as its manual says. A folder passes its assignment on to everything in it.`),
     treeBox,
     summary,
     h('h3', null, 'list.txt'),
     callBox,
-    h('p', { class: 'hint' }, 'Zuordnungen, Einstellungen und Dateien lassen sich danach im Tab UberASM ändern.'),
+    h('p', { class: 'hint' }, 'Assignments, settings and files can be changed afterwards in the UberASM tab.'),
     log,
   ), [
-    { label: 'Abbrechen' },
-    { label: 'Übernehmen', primary: true, onClick: apply },
+    { label: 'Cancel' },
+    { label: 'Apply', primary: true, onClick: apply },
   ]);
 }
 
-const KIND_LABEL: Record<PackageKind, string> = { patch: 'Patch', uberasm: 'UberASM-Code', block: 'Custom Block', blockpack: 'Block-Paket', pixi: 'Custom Sprite' };
+const KIND_LABEL: Record<PackageKind, string> = { patch: 'Patch', uberasm: 'UberASM code', block: 'Custom block', blockpack: 'Block package', pixi: 'Custom sprite' };
 
 // what is left of the package after the assignment: .asm parts each added with their own dialog (files
 // they include taken from the package), other files to download for the tool they are meant for
@@ -171,22 +171,22 @@ function openFurtherSteps(name: string, files: Map<string, Uint8Array>, rules: P
     const where = part.path.slice(0, -file.length);
     const label = (...more: (HTMLElement | null)[]) => h('td', { class: 'pkg-part', title: part.path }, h('span', { class: 'mono' }, file), where ? h('div', { class: 'hint mono' }, where) : null, ...more);
     if (!part.files) {
-      return h('tr', null, label(), h('td', { class: 'hint' }, 'für ein anderes Werkzeug'),
-        h('td', { class: 'actions' }, h('button', { onclick: () => downloadBytes(file, files.get(part.path)!) }, 'Herunterladen')));
+      return h('tr', null, label(), h('td', { class: 'hint' }, 'for another tool'),
+        h('td', { class: 'actions' }, h('button', { onclick: () => downloadBytes(file, files.get(part.path)!) }, 'Download')));
     }
     let kind: string;
     try { kind = KIND_LABEL[detectKind(packageFromFiles(file, part.files)).kind]; } catch { kind = '?'; }
     const added = h('span', { class: 'hint' });
     const extra = [...part.files.keys()].filter((f) => f !== file);
     return h('tr', null,
-      label(extra.length ? h('div', { class: 'hint' }, `mit ${extra.join(', ')} aus dem Paket`) : null),
+      label(extra.length ? h('div', { class: 'hint' }, `with ${extra.join(', ')} from the package`) : null),
       h('td', null, kind),
-      h('td', { class: 'actions' }, added, h('button', { onclick: () => openPart(file, part.files!, () => { added.textContent = 'hinzugefügt '; onDone(); }) }, 'Hinzufügen …')));
+      h('td', { class: 'actions' }, added, h('button', { onclick: () => openPart(file, part.files!, () => { added.textContent = 'added '; onDone(); }) }, 'Add …')));
   });
-  modal(`Weitere Schritte: ${name}`, h('div', { class: 'patch-apply pkg-map' },
-    h('p', null, `Nicht übernommen wurden diese Teile von „${name}“ – meist Beispiele und Optionales, laut Anleitung. Jeder lässt sich hier einzeln hinzufügen; Dateien, die er einbindet, kommen aus dem Paket mit.`),
+  modal(`Further steps: ${name}`, h('div', { class: 'patch-apply pkg-map' },
+    h('p', null, `These parts of “${name}” were not taken over – mostly examples and optional parts, per its manual. Each can be added here on its own; the files it includes come along from the package.`),
     h('div', { class: 'row' }, h('span', { class: 'grow' }), docsButton(name, files)),
-    h('table', { class: 'uber-table' }, h('tr', null, h('th', null, 'Teil'), h('th', null, 'Art'), h('th')), rows),
-    h('p', { class: 'hint' }, 'Was nur in Lunar Magic oder im Spiel zu erledigen ist (z. B. Objekte setzen, neuen Spielstand anlegen), steht in der Anleitung.')),
-    [{ label: 'Fertig', primary: true }]);
+    h('table', { class: 'uber-table' }, h('tr', null, h('th', null, 'Part'), h('th', null, 'Type'), h('th')), rows),
+    h('p', { class: 'hint' }, 'What can only be done in Lunar Magic or in the game (e.g. placing objects, starting a new save file) is in the manual.')),
+    [{ label: 'Done', primary: true }]);
 }

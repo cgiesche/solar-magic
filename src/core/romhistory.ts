@@ -173,7 +173,7 @@ export class RomHistory {
     if (!this.applies(e, false)) {
       this.undoStack = [];
       this.redoStack = [];
-      throw new Error(`„${e.label}“ kann nicht rückgängig gemacht werden: die ROM wurde inzwischen an derselben Stelle anders geändert`);
+      throw new Error(`“${e.label}” cannot be undone: the ROM has since been changed differently at the same place`);
     }
     this.apply(e, false);
     this.redoStack.push(e);
@@ -185,7 +185,7 @@ export class RomHistory {
     if (!e) return null;
     if (!this.applies(e, true)) {
       this.redoStack = [];
-      throw new Error(`„${e.label}“ kann nicht wiederholt werden: die ROM wurde inzwischen geändert`);
+      throw new Error(`“${e.label}” cannot be redone: the ROM has changed since`);
     }
     this.apply(e, true);
     e.key = null; // a redone edit never merges with the next one

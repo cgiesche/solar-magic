@@ -1,6 +1,6 @@
 // A tool project (UberASM, GPS blocks, PIXI sprites) as a tab of the patches dialog: the assignments,
 // a bar for changes not applied yet, and below the project files, import/export of the tool folder and
-// removing everything. Changes are staged in memory until "Übernehmen".
+// removing everything. Changes are staged in memory until "Apply".
 
 import type { App } from './app.ts';
 import { h, clear, toast, pickFile, downloadBytes, select, choose, type Child } from './dom.ts';
@@ -26,7 +26,7 @@ export interface PaneSpec<P extends Project> {
   toZip(p: P): Uint8Array;
   zipName: string;
   content(p: P, change: () => void): Child[]; // the assignments and the row to add one
-  applied(p: P): string; // toast after "Übernehmen"
+  applied(p: P): string; // toast after "Apply"
   docs: string; // tool key of the kept docs of packages added to the project (see docview.ts)
 }
 
@@ -119,7 +119,7 @@ export function projectPane<P extends Project>(app: App, spec: PaneSpec<P>, onDi
     try {
       if (/\.zip$/i.test(f.name)) {
         const all = unzipSync(data);
-        if (isToolFolder(all)) { proj = spec.fromZip(data); toast(`${spec.title}-Ordner „${f.name}“ geladen – „Übernehmen“ wendet ihn an.`); }
+        if (isToolFolder(all)) { proj = spec.fromZip(data); toast(`${spec.title} folder “${f.name}” loaded – “Apply” applies it.`); }
         else for (const [p, c] of Object.entries(all)) if (!p.endsWith('/') && !p.startsWith('__MACOSX/')) spec.addFile(proj, folder, p.replace(/\\/g, '/').split('/').pop()!, c);
       } else spec.addFile(proj, folder, f.name, data);
     } catch (e) { toast(errorText(e), 'error'); return; }
@@ -127,8 +127,8 @@ export function projectPane<P extends Project>(app: App, spec: PaneSpec<P>, onDi
   };
 
   const removeAll = async () => {
-    const i = await choose(`${spec.title} entfernen`, `Alle ${spec.title} samt Projektdateien aus der ROM entfernen? Wer sie später noch braucht, exportiert sie vorher als .zip.`,
-      [{ label: 'Abbrechen' }, { label: 'Entfernen', danger: true }]);
+    const i = await choose(`Remove ${spec.title}`, `Remove all ${spec.title} with the project files from the ROM? If you still need them later, export them as .zip first.`,
+      [{ label: 'Cancel' }, { label: 'Remove', danger: true }]);
     if (i !== 1) return;
     if (app.dirty) app.saveLevel(true);
     try {
@@ -136,21 +136,21 @@ export function projectPane<P extends Project>(app: App, spec: PaneSpec<P>, onDi
       reload();
       romChanged(app);
       changed();
-      toast(`${spec.title} entfernt${w.length ? ': ' + w.join(' ') : ''}`);
+      toast(`${spec.title} removed${w.length ? ': ' + w.join(' ') : ''}`);
     } catch (e) { toast(errorText(e), 'error'); }
   };
 
   function render(): void {
     if (loadError) {
       clear(el).append(h('p', { class: 'hint error' }, loadError),
-        h('div', { class: 'row' }, h('button', { class: 'danger', onclick: removeAll }, 'Alles entfernen …')));
+        h('div', { class: 'row' }, h('button', { class: 'danger', onclick: removeAll }, 'Remove all …')));
       return;
     }
     const files = [...proj.files.keys()].filter((f) => f !== 'list.txt').sort();
     const shown = (f: string) => f.toLowerCase().includes(fileFilter.trim().toLowerCase());
     const adv = h('details', { class: 'pane-adv', open: advanced, ontoggle: () => (advanced = adv.open) },
-      h('summary', null, `Projektdateien (${files.length}), Import/Export`),
-      files.length > 12 ? h('input', { type: 'search', class: 'define-search', placeholder: 'Dateien filtern …', value: fileFilter, oninput: (e: Event) => {
+      h('summary', null, `Project files (${files.length}), import/export`),
+      files.length > 12 ? h('input', { type: 'search', class: 'define-search', placeholder: 'Filter files …', value: fileFilter, oninput: (e: Event) => {
         fileFilter = (e.target as HTMLInputElement).value;
         for (const r of adv.querySelectorAll<HTMLElement>('.uber-files > .row')) r.style.display = shown(r.dataset.path!) ? '' : 'none';
       } }) : null,
@@ -158,22 +158,22 @@ export function projectPane<P extends Project>(app: App, spec: PaneSpec<P>, onDi
         h('span', { class: 'mono grow' }, f),
         definesButton(proj.files, f, change),
         editButton(proj.files, f, change),
-        h('button', { class: 'icon-btn', title: 'Datei löschen', onclick: () => { proj.files.delete(f); change(); } }, '✕'))) : h('p', { class: 'hint' }, 'Keine Dateien.')),
+        h('button', { class: 'icon-btn', title: 'Delete file', onclick: () => { proj.files.delete(f); change(); } }, '✕'))) : h('p', { class: 'hint' }, 'No files.')),
       h('div', { class: 'row' },
-        h('span', null, 'Nach'),
+        h('span', null, 'To'),
         select(spec.folders.map((f, i) => [i, f] as [number, string]), spec.folders.indexOf(folder), (i) => (folder = spec.folders[i])),
-        h('button', { onclick: addFile, title: `Einzelne Dateien in den Ordner – oder ein ganzer ${spec.title}-Ordner als .zip (mit list.txt), der das Projekt ersetzt` }, 'Datei oder Ordner (.zip) hinzufügen …')),
+        h('button', { onclick: addFile, title: `Single files into the folder – or a whole ${spec.title} folder as .zip (with list.txt) that replaces the project` }, 'Add file or folder (.zip) …')),
       h('div', { class: 'row' },
-        h('button', { onclick: () => downloadBytes(spec.zipName, spec.toZip(proj), 'application/zip') }, `Als ${spec.title}-Ordner exportieren (.zip)`),
-        installed ? h('button', { class: 'danger', onclick: removeAll }, 'Alles entfernen …') : null),
+        h('button', { onclick: () => downloadBytes(spec.zipName, spec.toZip(proj), 'application/zip') }, `Export as ${spec.title} folder (.zip)`),
+        installed ? h('button', { class: 'danger', onclick: removeAll }, 'Remove all …') : null),
     );
     clear(el).append(
       h('p', { class: 'hint' }, spec.intro, ' ', h('details', { class: 'inline-details' }, h('summary', null, 'Format'), h('div', null, spec.format))),
       h('div', { class: 'pane-content' }, spec.content(proj, change)),
       keptDocsRow(spec.docs),
-      dirty ? h('div', { class: 'pending-bar' }, h('span', { class: 'grow' }, 'Nicht übernommene Änderungen'),
-        h('button', { onclick: reload }, 'Verwerfen'),
-        h('button', { class: 'primary', onclick: apply }, 'Übernehmen')) : '',
+      dirty ? h('div', { class: 'pending-bar' }, h('span', { class: 'grow' }, 'Unapplied changes'),
+        h('button', { onclick: reload }, 'Discard'),
+        h('button', { class: 'primary', onclick: apply }, 'Apply')) : '',
       log,
       adv,
     );

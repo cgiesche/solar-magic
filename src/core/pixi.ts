@@ -66,24 +66,24 @@ export function parsePixiList(text: string): PixiEntry[] {
   text.split(/\r?\n/).forEach((raw, i) => {
     const line = raw.replace(/;.*$/, '').trim();
     if (!line) return;
-    const err = (m: string) => new Error(`list.txt Zeile ${i + 1}: ${m}`);
+    const err = (m: string) => new Error(`list.txt line ${i + 1}: ${m}`);
     const head = /^([A-Z]+):$/i.exec(line);
     if (head) {
       const k = SECTION[head[1].toUpperCase()];
-      if (!k) throw err(`Unbekannter Abschnitt „${head[1]}:“`);
+      if (!k) throw err(`Unknown section “${head[1]}:”`);
       section = k;
       return;
     }
-    if (/^[0-9a-f]+:[0-9a-f]+\s/i.test(line)) throw err('Per-Level-Sprites (Level:Nummer) werden nicht unterstützt');
+    if (/^[0-9a-f]+:[0-9a-f]+\s/i.test(line)) throw err('Per-level sprites (level:number) are not supported');
     const m = /^([0-9a-f]{1,2})\s+(.+?)(?:\s+(display|nodisplay))?$/i.exec(line);
-    if (!m) throw err(`Unverständlicher Eintrag „${line}“`);
+    if (!m) throw err(`Unrecognized entry “${line}”`);
     const num = parseInt(m[1], 16);
     const kind = section === 'sprites' ? levelKind(num) : section;
     const [lo, hi] = numberRange(kind);
-    if (num < lo || num > hi) throw err(`Nummer ${m[1]} liegt außerhalb von ${lo.toString(16).toUpperCase()}–${hi.toString(16).toUpperCase()}`);
+    if (num < lo || num > hi) throw err(`Number ${m[1]} is outside ${lo.toString(16).toUpperCase()}–${hi.toString(16).toUpperCase()}`);
     const file = m[2].trim();
     const isCfg = /\.(cfg|json)$/i.test(file);
-    if (section === 'sprites' ? !isCfg : !/\.asm$/i.test(file)) throw err(section === 'sprites' ? `„${file}“: Sprites brauchen eine .cfg- oder .json-Datei` : `„${file}“: hier wird eine .asm-Datei erwartet`);
+    if (section === 'sprites' ? !isCfg : !/\.asm$/i.test(file)) throw err(section === 'sprites' ? `“${file}”: sprites need a .cfg or .json file` : `“${file}”: an .asm file is expected here`);
     out.push({ kind, num, file: normPath(FOLDER[kind] + file) });
   });
   return out;
@@ -147,19 +147,19 @@ export function parseCfg(text: string, path: string): SpriteConfig {
   const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   const hexes = (l: string | undefined, n: number, what: string) => {
     const v = (l ?? '').split(/\s+/).map((x) => parseInt(x, 16));
-    if (v.length < n || v.slice(0, n).some((x) => Number.isNaN(x))) throw new Error(`${path}: ${what} fehlt oder ist ungültig`);
+    if (v.length < n || v.slice(0, n).some((x) => Number.isNaN(x))) throw new Error(`${path}: ${what} missing or invalid`);
     return v.slice(0, n);
   };
-  const [type] = hexes(lines[0], 1, 'Typ');
-  const [actlike] = hexes(lines[1], 1, '„acts like“');
-  const tweak = hexes(lines[2], 6, 'Tweaker-Zeile');
+  const [type] = hexes(lines[0], 1, 'type');
+  const [actlike] = hexes(lines[1], 1, '“acts like”');
+  const tweak = hexes(lines[2], 6, 'tweaker line');
   const prop = hexes(lines[3], 2, 'Extra Property Bytes') as [number, number];
   const asm = lines[4] ? normPath(dirOf(path) + lines[4]) : null;
   let bytes = 0, bytesExtra = 0;
   const bc = lines[5];
   if (bc && bc.includes(':')) {
     const [a, b] = bc.split(':').map((x) => parseInt(x.trim(), 16));
-    if (Number.isNaN(a) || Number.isNaN(b) || a > 12 || b > 12) throw new Error(`${path}: Anzahl der Extra-Bytes ungültig (00–0C)`);
+    if (Number.isNaN(a) || Number.isNaN(b) || a > 12 || b > 12) throw new Error(`${path}: invalid extra byte count (00–0C)`);
     bytes = a; bytesExtra = b;
   }
   const name = path.slice(path.lastIndexOf('/') + 1).replace(/\.cfg$/i, '');
@@ -168,7 +168,7 @@ export function parseCfg(text: string, path: string): SpriteConfig {
 
 export function parseJsonCfg(text: string, path: string): SpriteConfig {
   let j: Record<string, any>;
-  try { j = JSON.parse(text.replace(/^﻿/, '')); } catch (e) { throw new Error(`${path}: ungültiges JSON (${e instanceof Error ? e.message : e})`); }
+  try { j = JSON.parse(text.replace(/^﻿/, '')); } catch (e) { throw new Error(`${path}: invalid JSON (${e instanceof Error ? e.message : e})`); }
   const num = (k: string, d = 0) => { const v = j[k]; return v === undefined ? d : Number(v); };
   const type = num('Type');
   const clamp = (n: number) => Math.max(0, Math.min(12, n | 0));
@@ -190,7 +190,7 @@ export function parseJsonCfg(text: string, path: string): SpriteConfig {
 // the cfg/json of a sprite, shooter or generator; misc sprites only have their asm
 export function spriteConfig(p: PixiProject, e: PixiEntry): SpriteConfig {
   const data = p.files.get(e.file);
-  if (!data) throw new Error(`Datei „${e.file}“ fehlt`);
+  if (!data) throw new Error(`File “${e.file}” is missing`);
   if (/\.json$/i.test(e.file)) return parseJsonCfg(dec.decode(data), e.file);
   if (/\.cfg$/i.test(e.file)) return parseCfg(dec.decode(data), e.file);
   const name = e.file.slice(e.file.lastIndexOf('/') + 1).replace(/\.asm$/i, '');
@@ -209,7 +209,7 @@ export function customSpriteList(p: PixiProject): CustomSprite[] {
     try { c = spriteConfig(p, e); } catch { continue; }
     for (const eb of [false, true]) {
       const named = c.names.find((n) => n.extraBit === eb);
-      const name = named?.name ?? (c.names[0]?.name ?? e.file) + (eb ? ' (Extra-Bit)' : '');
+      const name = named?.name ?? (c.names[0]?.name ?? e.file) + (eb ? ' (extra bit)' : '');
       out.push({ id: ((eb ? 3 : 2) << 8) | e.num, num: e.num, extraBit: eb, listed: !!named, kind: e.kind, name, description: c.description, bytes: eb ? c.bytesExtra : c.bytes, file: e.file });
     }
   }
@@ -251,7 +251,7 @@ interface Built { entry: PixiEntry; cfg: SpriteConfig }
 export function buildPixiPatch(p: PixiProject): PatchSource {
   const files = new Map<string, Uint8Array | string>(p.files);
   const built: Built[] = p.list.map((entry) => ({ entry, cfg: spriteConfig(p, entry) }));
-  for (const b of built) if (b.cfg.asm && !p.files.has(b.cfg.asm)) throw new Error(`${b.entry.file}: ASM-Datei „${b.cfg.asm}“ fehlt`);
+  for (const b of built) if (b.cfg.asm && !p.files.has(b.cfg.asm)) throw new Error(`${b.entry.file}: ASM file “${b.cfg.asm}” is missing`);
   const code = built.filter((b) => b.cfg.asm);
 
   // shared routines: the project's own, then the built-in ones
@@ -314,7 +314,7 @@ endmacro`);
       const m = /^\s*([A-Z]+)\s*:?\s*\$?([0-9A-Fa-f]{6})\s*$/.exec(line);
       if (m) out[m[1]] = parseInt(m[2], 16);
     }
-    if (out.MAIN === undefined) throw new Error(`${b.cfg.asm}: kein „print "MAIN ",pc“`);
+    if (out.MAIN === undefined) throw new Error(`${b.cfg.asm}: no “print "MAIN ",pc”`);
     return out;
   };
 
@@ -334,7 +334,7 @@ endmacro`);
         const labels = done[0].labels;
         const calls = [...all.keys()].map((n) => labels[`PixiR_${n}`] !== undefined
           ? `macro ${n}()\n  JSL $${labels[`PixiR_${n}`].toString(16).toUpperCase().padStart(6, '0')}\nendmacro`
-          : `macro ${n}()\n  error "Shared Routine ${n} wurde nicht eingefügt"\nendmacro`);
+          : `macro ${n}()\n  error "Shared routine ${n} was not inserted"\nendmacro`);
         out.set(`${BUILTIN_DIR}routines.asm`, calls.join('\n') + '\n');
       } else {
         const b = code[step - 1];
@@ -431,7 +431,7 @@ export function savePixiProject(rom: Rom, p: PixiProject): ApplyResult {
   const after = (r: ApplyResult): ApplyResult => {
     if (r.ok && rewrite.length) {
       for (const lv of rewrite) saveSprites(rom, lv);
-      r.warnings.push(`Sprite-Daten von ${rewrite.length} Level(s) an die neue Anzahl Extra-Bytes angepasst.`);
+      r.warnings.push(`Sprite data of ${rewrite.length} level(s) adjusted to the new extra byte count.`);
     }
     return r;
   };

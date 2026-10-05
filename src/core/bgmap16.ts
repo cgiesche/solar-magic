@@ -40,14 +40,14 @@ export function installBgMap16Ext(rom: Rom): BgMap16Ext {
   const ex = bgMap16Ext(rom);
   if (ex) return ex;
   for (let i = 0; i < ORIG.length; i++) {
-    if (rom.r8(BG_HOOK_TILE + i) !== ORIG[i]) throw new Error(`Unerwarteter Code bei $058DE6${ownerNote(rom, BG_HOOK_TILE, ORIG.length)} – BG-Map16-Erweiterung nicht möglich`);
+    if (rom.r8(BG_HOOK_TILE + i) !== ORIG[i]) throw new Error(`Unexpected code at $058DE6${ownerNote(rom, BG_HOOK_TILE, ORIG.length)} – extended BG Map16 not possible`);
   }
   const blank = vanillaBgWords(rom, 0x025);
   const n = BG_EXT_TILES - BG_EXT_FIRST;
   const gfxData = new Uint8Array(n * 8);
   for (let t = 0; t < n; t++) for (let k = 0; k < 4; k++) { gfxData[t * 8 + k * 2] = blank[k] & 0xff; gfxData[t * 8 + k * 2 + 1] = blank[k] >> 8; }
   const gfx = rom.allocWrite(gfxData);
-  if ((gfx & 0xffff) + gfxData.length > 0x10000) throw new Error('BG-Map16-Tabelle überschreitet eine Bankgrenze');
+  if ((gfx & 0xffff) + gfxData.length > 0x10000) throw new Error('BG Map16 table crosses a bank boundary');
 
   // M=16 X=16; $00 = tile. Out: Y = offset, [$0A] (bank $0C) = table
   const a = new Asm();
@@ -96,7 +96,7 @@ export function bgTileAddr(rom: Rom, t: number, install = false): number | null 
 
 export function setBgExtTileWords(rom: Rom, t: number, words: number[]): void {
   const a = bgTileAddr(rom, t, true);
-  if (a === null) throw new Error(`BG-Tile ${t.toString(16).toUpperCase()} außerhalb von 000–FFF`);
+  if (a === null) throw new Error(`BG tile ${t.toString(16).toUpperCase()} outside 000–FFF`);
   words.forEach((w, k) => rom.w16(a + k * 2, w));
 }
 

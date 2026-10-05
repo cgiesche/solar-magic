@@ -28,15 +28,15 @@ export function loadAsar(): Promise<AsarModule> {
   return loading;
 }
 export function asarVersion(): number {
-  if (!mod) throw new Error('Asar ist noch nicht geladen');
+  if (!mod) throw new Error('Asar is not loaded yet');
   return mod._smwe_version();
 }
 
 // files: path (relative, "/" separated) → contents; main: path of the patch to assemble.
 export function assemble(rom: Uint8Array, files: Map<string, Uint8Array | string>, main: string, defines: Record<string, string> = {}): AsarResult {
   const m = mod;
-  if (!m) throw new Error('Asar ist noch nicht geladen');
-  if (rom.length > MAX_ROM_SIZE) throw new Error('ROM ist größer als 4 MB');
+  if (!m) throw new Error('Asar is not loaded yet');
+  if (rom.length > MAX_ROM_SIZE) throw new Error('ROM is larger than 4 MB');
   const allocs: number[] = [];
   const alloc = (n: number) => { const p = m._malloc(Math.max(n, 1)); allocs.push(p); return p; };
   const str = (s: string) => { const p = m.stringToNewUTF8(s); allocs.push(p); return p; };

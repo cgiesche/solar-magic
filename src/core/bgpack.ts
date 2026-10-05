@@ -35,14 +35,14 @@ export interface MwlBackground {
 const u32 = (d: Uint8Array, o: number) => (o + 4 <= d.length ? (d[o] | (d[o + 1] << 8) | (d[o + 2] << 16) | (d[o + 3] << 24)) >>> 0 : 0);
 
 export function parseMwl(d: Uint8Array): MwlBackground {
-  if (d.length < 0x80 || d[0] !== 0x4c || d[1] !== 0x4d) throw new Error('Keine Lunar-Magic-Leveldatei (.mwl)');
+  if (d.length < 0x80 || d[0] !== 0x4c || d[1] !== 0x4d) throw new Error('Not a Lunar Magic level file (.mwl)');
   const section = (i: number, header: number): Uint8Array | null => {
     const off = u32(d, 0x40 + i * 8), size = u32(d, 0x44 + i * 8);
     if (!off || size <= header || off + size > d.length) return null;
     return d.subarray(off + header, off + size);
   };
   const l2 = section(2, 8);
-  if (!l2 || l2.length !== 0x800) throw new Error('Das Level der .mwl hat keinen BG-Hintergrund (Layer 2 ist keine BG-Tilemap)');
+  if (!l2 || l2.length !== 0x800) throw new Error('The level in the .mwl has no BG background (layer 2 is not a BG tilemap)');
   const bg = new Uint16Array(BG_SIZE);
   for (let half = 0; half < 2; half++) for (let y = 0; y < 27; y++) for (let x = 0; x < 16; x++) {
     const w = half * 0x200 + y * 16 + x;
@@ -108,11 +108,11 @@ function freeGfx(rom: Rom, taken: Set<number>): number {
 export function planBgPack(rom: Rom, name: string, files: Map<string, Uint8Array>): BgPackPlan {
   const keys = [...files.keys()];
   const mwl = keys.find((f) => /\.mwl$/i.test(f));
-  if (!mwl) throw new Error('Keine .mwl-Datei im Paket');
+  if (!mwl) throw new Error('No .mwl file in the package');
   const bg = parseMwl(files.get(mwl)!);
   const notes: string[] = [];
   const used = [...new Set(bg.bg)].filter((t) => t >= BG_EXT_FIRST).sort((a, b) => a - b);
-  if (used.some((t) => t >= BG_EXT_TILES)) throw new Error('Die BG-Tilemap benutzt Tiles ab 1000 – das unterstützt der Editor nicht');
+  if (used.some((t) => t >= BG_EXT_TILES)) throw new Error('The BG tilemap uses tiles from 1000 on – the editor does not support that');
   const mf = keys.find((f) => /\.map16$/i.test(f));
   let map16: BgPackPlan['map16'] = null;
   if (mf) {
@@ -120,8 +120,8 @@ export function planBgPack(rom: Rom, name: string, files: Map<string, Uint8Array
     const from = used.length ? used[0] & ~0xf : BG_EXT_FIRST;
     map16 = { file: mf, data, from };
     const outside = used.filter((t) => t < from || t >= from + data.height * 16);
-    if (outside.length) notes.push(`${outside.length} BG-Tile(s) der Tilemap liegen nicht in der .map16`);
-  } else if (used.length) notes.push('Keine .map16 im Paket – die BG-Tiles ab 200 bleiben leer');
+    if (outside.length) notes.push(`${outside.length} BG tile(s) of the tilemap are not in the .map16`);
+  } else if (used.length) notes.push('No .map16 in the package – BG tiles from 200 on stay empty');
   // ExGFX: the package's files by number, assigned to the slots the .mwl names
   const bins = new Map<number, string>();
   for (const f of keys) if (/\.bin$/i.test(f)) { const n = exgfxName(f.split('/').pop()!).num; if (n !== null) bins.set(n, f); }
@@ -140,14 +140,14 @@ export function planBgPack(rom: Rom, name: string, files: Map<string, Uint8Array
     let num = byNum.get(lmNum);
     if (num === undefined) {
       num = lmNum < 0xff && lmNum >= VANILLA_GFX && (!hasEditorPatch(rom) || !gfxEntry(rom, lmNum)) && !taken.has(lmNum) ? lmNum : freeGfx(rom, taken);
-      if (num < 0) throw new Error('Keine freie ExGFX-Nummer mehr');
+      if (num < 0) throw new Error('No free ExGFX number left');
       taken.add(num);
       byNum.set(lmNum, num);
     }
     gfx.push({ file, slot, lmNum, num });
   }
   const unused = [...bins].filter(([n]) => !byNum.has(n)).map(([, f]) => f.split('/').pop());
-  if (unused.length) notes.push(`Nicht benutzt (kein Grafik-Slot im Level): ${unused.join(', ')}`);
+  if (unused.length) notes.push(`Not used (no graphics slot in the level): ${unused.join(', ')}`);
   // colors
   const pf = keys.find((f) => /\.pal$/i.test(f)), mk = keys.find((f) => /\.palmask$/i.test(f));
   const pal = bg.palette.slice();
@@ -158,7 +158,7 @@ export function planBgPack(rom: Rom, name: string, files: Map<string, Uint8Array
     const m = files.get(mk)!;
     colors = Array.from({ length: 256 }, (_, i) => i).filter((i) => i > 0 && m[i]);
     back = m.length > 256 && m[256] !== 0;
-  } else notes.push('Keine .palmask im Paket – die Palette bleibt, wie sie ist');
+  } else notes.push('No .palmask in the package – the palette stays as it is');
   let at = map16 ? map16.from : BG_EXT_FIRST;
   const n = map16 ? map16.data.height * 16 : 0;
   if (n && !freeBgTiles(rom, at, n)) {
@@ -189,18 +189,18 @@ export function applyBgPack(rom: Rom, lv: Level, files: Map<string, Uint8Array>,
   const notes: string[] = [];
   const lvl = lv.number, hx = (v: number, d: number) => v.toString(16).toUpperCase().padStart(d, '0');
   try {
-    if (lv.layer2Objects || hasLayer2Objects(lv.header.mode)) throw new Error(`Level ${hx(lvl, 3)} hat Layer-2-Objekte statt eines BG-Hintergrunds`);
+    if (lv.layer2Objects || hasLayer2Objects(lv.header.mode)) throw new Error(`Level ${hx(lvl, 3)} has layer 2 objects instead of a BG background`);
     const at = opt.at ?? plan.at;
     // 1. BG Map16 tiles, the tilemap moved along
     const bg = plan.bg.bg.slice();
     if (plan.map16) {
       const m = plan.map16;
-      if (at < BG_EXT_FIRST || at + m.data.height * 16 > BG_EXT_TILES || (at & 15) + Math.min(16, m.data.width) > 16) throw new Error(`Die ${m.data.tiles.length} BG-Tiles passen ab ${hx(at, 3)} nicht auf die Seiten 2–F`);
+      if (at < BG_EXT_FIRST || at + m.data.height * 16 > BG_EXT_TILES || (at & 15) + Math.min(16, m.data.width) > 16) throw new Error(`The ${m.data.tiles.length} BG tiles do not fit on pages 2–F from ${hx(at, 3)} on`);
       installBgMap16Ext(rom);
       m.data.tiles.forEach((ws, i) => setBgExtTileWords(rom, at + Math.floor(i / m.data.width) * 16 + (i % m.data.width), ws));
       const end = m.from + m.data.height * 16;
       for (let o = 0; o < bg.length; o++) if (bg[o] >= m.from && bg[o] < end) bg[o] = bg[o] - m.from + at;
-      notes.push(`${m.data.tiles.length} BG-Tiles ab ${hx(at, 3)}`);
+      notes.push(`${m.data.tiles.length} BG tiles from ${hx(at, 3)}`);
     } else if (plan.used.length) installBgMap16Ext(rom);
     // 2. graphics and the level's slots
     const std = levelGfx(rom, lvl), ext = levelExtGfx(rom, lvl);
@@ -210,18 +210,18 @@ export function applyBgPack(rom: Rom, lv: Level, files: Map<string, Uint8Array>,
       if (g.file && !stored.has(g.file)) {
         const what = importGfxFile(rom, g.num, files.get(g.file)!);
         stored.set(g.file, g.num);
-        notes.push(`${g.file.split('/').pop()} als ExGFX ${hx(g.num, 2)} (${what})`);
+        notes.push(`${g.file.split('/').pop()} as ExGFX ${hx(g.num, 2)} (${what})`);
       }
       const e = EXT_GFX_SLOT_NAMES.indexOf(g.slot), s = GFX_SLOT_NAMES.indexOf(g.slot);
       if (e >= 0) {
-        if (!extGfxAvailable(rom)) { notes.push(`${g.slot}-Slot nicht verfügbar (VRAM-Patch fehlt) – Grafik ${hx(g.num, 2)} wird noch nicht geladen`); continue; }
+        if (!extGfxAvailable(rom)) { notes.push(`${g.slot} slot not available (VRAM patch missing) – graphics ${hx(g.num, 2)} not loaded yet`); continue; }
         ext[e] = g.num; extSet = true;
       } else if (s >= 0) std[s] = g.num;
     }
     if (plan.gfx.some((g) => GFX_SLOT_NAMES.includes(g.slot))) setLevelGfx(rom, lvl, std);
     if (extSet) setLevelExtGfx(rom, lvl, ext);
     const slots = plan.gfx.filter((g) => (g.slot !== 'BG2' && g.slot !== 'BG3') || extSet).map((g) => `${g.slot} = ${hx(g.num, 2)}`);
-    if (slots.length) notes.push(`Grafik-Slots: ${slots.join(', ')}`);
+    if (slots.length) notes.push(`Graphics slots: ${slots.join(', ')}`);
     // 3. colors: the level's own palette, the package's colors where the mask says so
     if (plan.colors && opt.palette !== false && (plan.colors.length || plan.back)) {
       const own = customPalette(rom, lvl);
@@ -230,7 +230,7 @@ export function applyBgPack(rom: Rom, lv: Level, files: Map<string, Uint8Array>,
       for (const i of plan.colors) put(i, plan.pal[i]);
       if (plan.back) put(0, plan.bg.back);
       setCustomPalette(rom, lvl, pal);
-      notes.push(`${plan.colors.length} Farbe(n)${plan.back ? ' und die Hintergrundfarbe' : ''} übernommen`);
+      notes.push(`${plan.colors.length} color(s)${plan.back ? ' and the background color' : ''} applied`);
     }
     return { ok: true, errors: [], notes: [...notes, ...plan.notes], bg };
   } catch (e) {

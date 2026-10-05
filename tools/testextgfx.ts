@@ -39,7 +39,7 @@ let d = 0; for (let i = 0; i < 0x10000; i++) if ((i < 0xc000 || i >= 0xc800) && 
 check(fixed.ok && d === 0, `level loads like before (${d} VRAM bytes differ)`);
 let refused = '';
 try { installExtGfxPatch(new Rom(vanilla.data.slice())); } catch (e) { refused = (e as Error).message; }
-check(refused.includes('VRAM-Patch'), 'new installs are refused without the VRAM patch');
+check(refused.includes('VRAM patch'), 'new installs are refused without the VRAM patch');
 
 // with the VRAM patch: the switched-off install comes back and BG2 loads into VRAM $2000, while the
 // tilemaps (now at $3000/$3800) show exactly what the game shows without any of this

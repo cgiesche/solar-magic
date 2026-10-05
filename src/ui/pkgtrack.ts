@@ -1,6 +1,6 @@
 // Keeps what adding a package puts into the ROM as one installed package (core/pkgreg.ts): the ROM's
-// projects are compared when its dialog opens and after each step it (or a part of it, "Weitere
-// Schritte") finishes. The package's files go with the record – into the ROM when small, otherwise into
+// projects are compared when its dialog opens and after each step it (or a part of it, "Further
+// steps") finishes. The package's files go with the record – into the ROM when small, otherwise into
 // the browser – so its graphics, docs and parts can be taken later.
 
 import { zipSync, unzipSync } from 'fflate';

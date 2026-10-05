@@ -18,14 +18,14 @@ import { listPatches, addPatch, removeEntry, backupBytes, patchedHash, hashBytes
 // hook sites of the editor's own patches (SNES address, length)
 interface Builtin { name: string; installed: (rom: Rom) => boolean; hooks: [number, number][] }
 export const BUILTINS: Builtin[] = [
-  { name: 'Editor-Patch (SMWE)', installed: (r) => !!editorPatch(r), hooks: EDITOR_HOOKS },
-  { name: 'Level-Paletten (SMWP)', installed: (r) => !!customPalettePatch(r), hooks: PAL_HOOKS },
-  { name: 'BG-Tilemaps (SMWB)', installed: (r) => !!bgPatch(r), hooks: BG_HOOKS },
-  { name: 'BG2/BG3-Grafik (SMWG)', installed: (r) => !!extGfxPatch(r), hooks: EXT_GFX_HOOKS },
-  { name: 'Nachrichten (SMWM)', installed: (r) => !!messagePatch(r), hooks: MSG_HOOKS },
-  { name: 'Strukturen (SMWS)', installed: (r) => !!structPatch(r), hooks: STRUCT_HOOKS },
-  { name: 'Map16-Erweiterung (SMWX)', installed: (r) => !!map16Ext(r), hooks: MAP16X_HOOKS },
-  { name: 'BG-Map16-Erweiterung (SMWH)', installed: (r) => !!bgMap16Ext(r), hooks: BGMAP16_HOOKS },
+  { name: 'Editor patch (SMWE)', installed: (r) => !!editorPatch(r), hooks: EDITOR_HOOKS },
+  { name: 'Level palettes (SMWP)', installed: (r) => !!customPalettePatch(r), hooks: PAL_HOOKS },
+  { name: 'BG tilemaps (SMWB)', installed: (r) => !!bgPatch(r), hooks: BG_HOOKS },
+  { name: 'BG2/BG3 graphics (SMWG)', installed: (r) => !!extGfxPatch(r), hooks: EXT_GFX_HOOKS },
+  { name: 'Messages (SMWM)', installed: (r) => !!messagePatch(r), hooks: MSG_HOOKS },
+  { name: 'Structures (SMWS)', installed: (r) => !!structPatch(r), hooks: STRUCT_HOOKS },
+  { name: 'Extended Map16 (SMWX)', installed: (r) => !!map16Ext(r), hooks: MAP16X_HOOKS },
+  { name: 'Extended BG Map16 (SMWH)', installed: (r) => !!bgMap16Ext(r), hooks: BGMAP16_HOOKS },
 ];
 
 // "smwe.asm", available to every patch (incsrc "smwe.asm"): the editor's RAM/ROM interfaces as defines
@@ -157,14 +157,14 @@ export function ramConflicts(ram: RamClaim[], seen: [number, number][], others: 
   for (const o of others) {
     for (const c of ram) {
       const d = o.ram?.find((x) => overlaps([x[0], x[1]], [c[0], c[1]]));
-      if (d) { errors.push(`RAM-Konflikt mit „${o.name}“: beide belegen ${ramRange(Math.max(c[0], d[0]), Math.min(c[0] + c[1], d[0] + d[1]) - Math.max(c[0], d[0]))}.`); continue; }
+      if (d) { errors.push(`RAM conflict with “${o.name}”: both use ${ramRange(Math.max(c[0], d[0]), Math.min(c[0] + c[1], d[0] + d[1]) - Math.max(c[0], d[0]))}.`); continue; }
       const w = o.ramSeen?.find((x) => overlaps(x, [c[0], c[1]]));
-      if (w && !c[2]) warnings.push(`„${o.name}“ schreibt bei ${hex(Math.max(w[0], c[0]))} in RAM, das der Patch belegt (${ramRange(c[0], c[1])}).`);
+      if (w && !c[2]) warnings.push(`“${o.name}” writes at ${hex(Math.max(w[0], c[0]))} to RAM the patch uses (${ramRange(c[0], c[1])}).`);
     }
     for (const d of o.ram ?? []) {
       if (d[2] || ram.some((c) => overlaps([c[0], c[1]], [d[0], d[1]]))) continue;
       const w = seen.find((x) => overlaps(x, [d[0], d[1]]));
-      if (w) warnings.push(`Der Patch schreibt bei ${hex(Math.max(w[0], d[0]))} in RAM von „${o.name}“ (${ramRange(d[0], d[1])}).`);
+      if (w) warnings.push(`The patch writes at ${hex(Math.max(w[0], d[0]))} to RAM of “${o.name}” (${ramRange(d[0], d[1])}).`);
     }
   }
   return { errors, warnings };
@@ -244,17 +244,17 @@ export function applyPatch(rom: Rom, src: PatchSource): ApplyResult {
   const warnings = steps.flatMap((x) => x.warnings.map((w) => w.full));
   const others = listPatches(rom);
   for (const s of segs) {
-    const where = `${pcHex(s[0])} (${s[1]} Bytes)`;
-    if (s[0] + s[1] > RESERVED_TOP) { errors.push(`Der Patch schreibt bei ${where} in die für den Editor reservierten Banks $7E/$7F.`); continue; }
+    const where = `${pcHex(s[0])} (${s[1]} bytes)`;
+    if (s[0] + s[1] > RESERVED_TOP) { errors.push(`The patch writes at ${where} to banks $7E/$7F, which are reserved for the editor.`); continue; }
     const p = others.find((o) => o.segs.some((t) => overlaps(t, s)) || o.own.some((t) => overlaps([t, (rom.isRatsAt(t) + 8)], s)));
-    if (p) { errors.push(`Konflikt mit Patch „${p.name}“ bei ${where}.`); continue; }
+    if (p) { errors.push(`Conflict with patch “${p.name}” at ${where}.`); continue; }
     const hit = beforeRats.find((b) => overlaps([b.start, b.size + 8], s));
-    if (hit) { errors.push(`Der Patch überschreibt geschützte Daten (RATS-Block bei ${pcHex(hit.start)}) bei ${where}.`); continue; }
+    if (hit) { errors.push(`The patch overwrites protected data (RATS block at ${pcHex(hit.start)}) at ${where}.`); continue; }
     for (const bi of BUILTINS) {
       const h = bi.hooks.find(([a, n]) => overlaps([snesToPc(a), n], s));
       if (!h) continue;
-      if (bi.installed(rom)) errors.push(`Konflikt mit ${bi.name}: der Patch ändert dessen Einsprungstelle ${hex(h[0])}.`);
-      else warnings.push(`Der Patch belegt ${hex(h[0])}; ${bi.name} kann danach nicht mehr installiert werden.`);
+      if (bi.installed(rom)) errors.push(`Conflict with ${bi.name}: the patch changes its hook at ${hex(h[0])}.`);
+      else warnings.push(`The patch uses ${hex(h[0])}; ${bi.name} can no longer be installed afterwards.`);
     }
   }
   const ram = (src.ram ?? []).map(([a, n, sh]): RamClaim => { const w = wramAddr(a) < 0 ? a : wramAddr(a); return sh ? [w, n, sh] : [w, n]; });
@@ -292,16 +292,16 @@ export function applyPatch(rom: Rom, src: PatchSource): ApplyResult {
 export function uninstallPatch(rom: Rom, id: string): string[] {
   const all = listPatches(rom);
   const i = all.findIndex((p) => p.id === id);
-  if (i < 0) throw new Error('Patch ist nicht installiert');
+  if (i < 0) throw new Error('Patch is not installed');
   const p = all[i];
   const mine: [number, number][] = [...p.segs, ...p.own.map((o): [number, number] => [o, rom.isRatsAt(o) + 8])];
   for (const later of all.slice(i + 1)) {
     if (later.segs.some((s) => mine.some((m) => overlaps(m, s)))) {
-      throw new Error(`„${later.name}“ verändert Code dieses Patches – zuerst „${later.name}“ entfernen.`);
+      throw new Error(`“${later.name}” changes code of this patch – remove “${later.name}” first.`);
     }
   }
   const warnings: string[] = [];
-  if (patchedHash(rom, p.segs) !== p.check) warnings.push('Vom Patch geänderte Bytes wurden seitdem verändert; sie werden trotzdem auf den Originalzustand zurückgesetzt.');
+  if (patchedHash(rom, p.segs) !== p.check) warnings.push('Bytes changed by the patch have been modified since; they are reset to their original state anyway.');
   const orig = backupBytes(rom, p);
   let o = 0;
   for (const [pc, n] of p.segs) { rom.data.set(orig.subarray(o, o + n), pc); o += n; }

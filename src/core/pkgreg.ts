@@ -55,7 +55,7 @@ function find(rom: Rom): number {
 export function listPackages(rom: Rom): PkgRecord[] {
   const p = find(rom);
   if (p < 0) return [];
-  if (rom.data[p + 4] > VERSION) throw new Error('Paket-Verzeichnis im ROM stammt von einer neueren Editor-Version');
+  if (rom.data[p + 4] > VERSION) throw new Error('Package registry in the ROM is from a newer editor version');
   const size = rom.isRatsAt(p - 8);
   return JSON.parse(new TextDecoder().decode(inflateSync(rom.data.subarray(p + 5, p + size)))) as PkgRecord[];
 }
@@ -65,7 +65,7 @@ function write(rom: Rom, all: PkgRecord[]): void {
   if (old >= 0) rom.freeAt(pcToSnes(old));
   if (!all.length) return;
   const z = deflateSync(new TextEncoder().encode(JSON.stringify(all)), { level: 9 });
-  if (z.length + 5 > 0x7f00) throw new Error('Paket-Verzeichnis ist zu groß');
+  if (z.length + 5 > 0x7f00) throw new Error('Package registry is too large');
   const buf = new Uint8Array(z.length + 5);
   buf.set(MAGIC); buf[4] = VERSION; buf.set(z, 5);
   rom.allocWrite(buf);
@@ -178,7 +178,7 @@ export function mergeParts(r: PkgRecord, p: PkgParts, now: Snapshot): PkgRecord 
 export function uninstallPackage(rom: Rom, id: string, blank: number[]): string[] {
   const all = listPackages(rom);
   const rec = all.find((r) => r.id === id);
-  if (!rec) throw new Error('Paket ist nicht installiert');
+  if (!rec) throw new Error('Package is not installed');
   const others = all.filter((r) => r !== rec);
   const shared = (tool: 'uber' | 'blocks' | 'pixi', f: string) => others.some((r) => r[tool].files.includes(f));
   const before = rom.data.slice();

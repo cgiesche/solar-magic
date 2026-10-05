@@ -35,7 +35,7 @@ export interface LevelFileData {
 
 const toHex = (b: Uint8Array) => Array.from(b, (v) => v.toString(16).padStart(2, '0')).join('');
 function fromHex(s: string): Uint8Array {
-  if (!/^([0-9a-f]{2})*$/i.test(s)) throw new Error('Ungültige Hex-Daten in der Level-Datei');
+  if (!/^([0-9a-f]{2})*$/i.test(s)) throw new Error('Invalid hex data in the level file');
   return Uint8Array.from(s.match(/../g) ?? [], (x) => parseInt(x, 16));
 }
 
@@ -71,12 +71,12 @@ export function exportLevelFile(rom: Rom, lv: Level, bg: Uint16Array | null = lv
 // parses a level file as level `n`; ROM locations (for in-place saving) are taken from `into`
 export function importLevelFile(rom: Rom, text: string, into: Level): LevelFileData {
   let j: LevelFileJson;
-  try { j = JSON.parse(text); } catch { throw new Error('Keine gültige Level-Datei (JSON)'); }
-  if (j?.format !== 'smwe-level') throw new Error('Keine SMW-Editor-Level-Datei');
-  if (j.version !== 1) throw new Error(`Nicht unterstützte Version ${j.version}`);
-  if (!Array.isArray(j.secondary) || j.secondary.length !== 4) throw new Error('Sekundärer Header fehlt');
+  try { j = JSON.parse(text); } catch { throw new Error('Not a valid level file (JSON)'); }
+  if (j?.format !== 'smwe-level') throw new Error('Not an SMW Editor level file');
+  if (j.version !== 1) throw new Error(`Unsupported version ${j.version}`);
+  if (!Array.isArray(j.secondary) || j.secondary.length !== 4) throw new Error('Secondary header missing');
   const palette = j.palette ? fromHex(j.palette) : null;
-  if (palette && palette.length !== 512) throw new Error('Palette in der Level-Datei hat nicht 512 Bytes');
+  if (palette && palette.length !== 512) throw new Error('Palette in the level file is not 512 bytes');
   // structures: reuse an identical one of this ROM, else store under a free number
   const remap = new Map<number, number>();
   if (j.structs?.length) {
@@ -87,7 +87,7 @@ export function importLevelFile(rom: Rom, text: string, into: Level): LevelFileD
       const hit = [...have].find(([, x]) => same(x, s));
       if (hit) { remap.set(s.n, hit[0]); continue; }
       const n = freeStructureNumber(rom);
-      if (n < 0) throw new Error('Kein freier Platz für die Strukturen der Level-Datei (256 belegt)');
+      if (n < 0) throw new Error('No free slot for the structures of the level file (all 256 in use)');
       const st: Structure = { w: s.w, h: s.h, tiles: s.tiles, name: s.name };
       writeStructure(rom, n, st);
       have.set(n, st);

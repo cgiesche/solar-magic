@@ -15,7 +15,7 @@ const NAME_P2 = 0x049ccf; // 15 entries
 const NAME_P3 = 0x049ced; // 10 entries
 export const NAME_PART_COUNTS = [31, 15, 10];
 
-export const MAP_NAMES = ['Hauptkarte', "Yoshi's Island", 'Vanilla Dome', 'Forest of Illusion', 'Valley of Bowser', 'Special World', 'Star World'];
+export const MAP_NAMES = ['Main map', "Yoshi's Island", 'Vanilla Dome', 'Forest of Illusion', 'Valley of Bowser', 'Special World', 'Star World'];
 
 export function l1Index(map: number, x: number, y: number): number {
   return map * 0x400 + ((y >> 4) * 2 + (x >> 4)) * 0x100 + (y & 15) * 16 + (x & 15);

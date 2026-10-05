@@ -48,7 +48,7 @@ export function openDocs(title: string, files: Map<string, Uint8Array>, start?: 
   const frame = h('iframe', { class: 'doc-frame', sandbox: 'allow-same-origin allow-popups allow-popups-to-escape-sandbox' });
   const pick = h('select', { onchange: () => show(pick.value) }, docs.map((d) => h('option', { value: d }, d)));
   const history: string[] = [];
-  const back = h('button', { disabled: true, onclick: () => { history.pop(); const p = history.pop(); if (p) show(p); } }, '← Zurück');
+  const back = h('button', { disabled: true, onclick: () => { history.pop(); const p = history.pop(); if (p) show(p); } }, '← Back');
 
   function page(path: string): string {
     const text = dec.decode(files.get(path)!);
@@ -97,12 +97,12 @@ export function openDocs(title: string, files: Map<string, Uint8Array>, start?: 
 
   const body = h('div', { class: 'doc-view' }, h('div', { class: 'row' }, back, pick), frame);
   show(start && files.has(start) ? start : docs[0]);
-  modal(`Anleitung: ${title}`, body, [{ label: 'Schließen', primary: true }], () => { for (const u of urls.values()) URL.revokeObjectURL(u); });
+  modal(`Manual: ${title}`, body, [{ label: 'Close', primary: true }], () => { for (const u of urls.values()) URL.revokeObjectURL(u); });
 }
 
 // a button opening the package's docs, null without any
 export function docsButton(title: string, files: Map<string, Uint8Array>): HTMLElement | null {
-  return packageDocs(files).length ? h('button', { onclick: () => openDocs(title, files) }, 'Anleitung …') : null;
+  return packageDocs(files).length ? h('button', { onclick: () => openDocs(title, files) }, 'Manual …') : null;
 }
 
 // docs of packages added to a tool project, kept in the browser by tool and package name
@@ -119,10 +119,10 @@ export function keptDocsRow(tool: string): HTMLElement {
   const el = h('div', { class: 'row doc-row' });
   void kvEntries<StoredDocs>(`docs:${tool}:`).then((all) => {
     if (!all.length) return;
-    clear(el).append(h('span', { class: 'hint' }, 'Anleitungen:'), ...all.map(([k, d]) => {
+    clear(el).append(h('span', { class: 'hint' }, 'Manuals:'), ...all.map(([k, d]) => {
       const chip = h('span', { class: 'row doc-chip' },
         h('button', { onclick: () => openDocs(d.title, new Map(d.files)) }, d.title),
-        h('button', { class: 'icon-btn', title: 'Anleitung vergessen (nur im Browser gespeichert)', onclick: () => { void kvDel(k); chip.remove(); } }, '✕'));
+        h('button', { class: 'icon-btn', title: 'Forget manual (only stored in the browser)', onclick: () => { void kvDel(k); chip.remove(); } }, '✕'));
       return chip;
     }));
   }).catch(() => {});

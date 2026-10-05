@@ -447,15 +447,15 @@ function columns(hit: (col: number, big: number) => HitResult, tile: number): Co
 
 function describe(tile: number, r: HitResult): string {
   const p: string[] = r.sprites.map(spriteName);
-  if (r.coins) p.push(`+${r.coins} Münze${r.coins > 1 ? 'n' : ''}`);
-  if (r.lives) p.push(`+${r.lives} Leben`);
+  if (r.coins) p.push(`+${r.coins} coin${r.coins > 1 ? 's' : ''}`);
+  if (r.lives) p.push(`+${r.lives} ${r.lives > 1 ? 'lives' : 'life'}`);
   if (r.onOff) p.push('ON/OFF');
-  if (r.hurt) p.push('verletzt');
+  if (r.hurt) p.push('hurts');
   if (r.after < 0) return p.join(', '); // sprite
-  if (!p.length) return r.after === tile ? '' : `wird zu ${hex3(r.after)}`;
+  if (!p.length) return r.after === tile ? '' : `becomes ${hex3(r.after)}`;
   // a tile that stays after giving something can be hit again (multi-coin blocks and the like)
-  if (r.after === tile) p.push('mehrfach');
-  else if (r.after !== 0x25) p.push(`danach ${hex3(r.after)}`);
+  if (r.after === tile) p.push('repeatable');
+  else if (r.after !== 0x25) p.push(`then ${hex3(r.after)}`);
   return p.join(', ');
 }
 
@@ -474,17 +474,17 @@ function byColumn(pos: PosProbe[]): string | null {
     }
     return out.join(',');
   };
-  return 'je nach Spalte (X & F): ' + [...groups].map(([k, l]) => `${cols(l)}: ${k}`).join(' | ');
+  return 'by column (X & F): ' + [...groups].map(([k, l]) => `${cols(l)}: ${k}`).join(' | ');
 }
 const hex1 = (n: number) => n.toString(16).toUpperCase();
 
 function summarizeSprite(small: HitResult, big: HitResult, stomp: HitResult): string | null {
   const below = summarize(-1, small, big), on = describe(-1, stomp);
-  const p = [below && `von unten: ${below}`, on && `draufspringen: ${on}`].filter(Boolean);
+  const p = [below && `from below: ${below}`, on && `jumped on: ${on}`].filter(Boolean);
   return p.length ? p.join(' · ') : null;
 }
 
-// one text for all variants, grouped by the positions they apply to ("X gerade: …")
+// one text for all variants, grouped by the positions they apply to ("X even: …")
 function byVariant(v: SpriteVariants, pos: PosProbe[]): string | null {
   if (pos.every((q) => q.summary === pos[0].summary)) return pos[0].summary;
   const groups = new Map<string, number[]>();
@@ -497,16 +497,16 @@ function byVariant(v: SpriteVariants, pos: PosProbe[]): string | null {
     if (ys.size < ny) p.push(residues('Y', v.ys.flatMap((c, i) => (ys.has(c) ? [i] : []))));
     return p.join(', ');
   };
-  return 'je nach Position: ' + [...groups].map(([k, l]) => `${where(l)}: ${k}`).join(' | ');
+  return 'by position: ' + [...groups].map(([k, l]) => `${where(l)}: ${k}`).join(' | ');
 }
 
-// set of tile position low nibbles as the fewest low bits that tell it ("X gerade", "X & 3: 1,2",
+// set of tile position low nibbles as the fewest low bits that tell it ("X even", "X & 3: 1,2",
 // "Y & F ≠ F")
 function residues(axis: string, l: number[]): string {
   for (const m of [1, 3, 7, 15]) {
     const s = new Set(l.map((r) => r & m));
     if (l.length !== s.size * (16 / (m + 1))) continue;
-    if (m === 1) return `${axis} ${s.has(0) ? 'gerade' : 'ungerade'}`;
+    if (m === 1) return `${axis} ${s.has(0) ? 'even' : 'odd'}`;
     const all = Array.from({ length: m + 1 }, (_, i) => i), not = all.filter((r) => !s.has(r));
     return not.length < s.size ? `${axis} & ${hex1(m)} ≠ ${not.map(hex1).join(',')}` : `${axis} & ${hex1(m)}: ${[...s].sort((a, b) => a - b).map(hex1).join(',')}`;
   }
@@ -517,20 +517,20 @@ function summarize(tile: number, small: HitResult, big: HitResult): string | nul
   const a = describe(tile, small), b = describe(tile, big);
   if (!a && !b) return null;
   if (a === b) return a;
-  return `klein: ${a || '–'} · groß: ${b || '–'}`;
+  return `small: ${a || '–'} · big: ${b || '–'}`;
 }
 
 // one line for tooltips and the status bar; with x: the result at that tile column
 export function probeText(p: ColumnProbe | BlockProbe, x?: number): string {
   const s = x === undefined ? p.summary : probeAt(p, x).summary;
-  return (s ?? (p.solid ? 'von unten: fest, ohne Effekt' : 'von unten: durchlässig')) + enterSuffix(p);
+  return (s ?? (p.solid ? 'from below: solid, no effect' : 'from below: passable')) + enterSuffix(p);
 }
 
 export function enterText(enter: string): string {
-  return enter ? `betretbar (${enter})` : '';
+  return enter ? `enterable (${enter})` : '';
 }
 
-// ", betretbar (↓)" for tiles that can be entered, '' otherwise
+// ", enterable (↓)" for tiles that can be entered, '' otherwise
 export function enterSuffix(p: ColumnProbe | BlockProbe): string {
   return 'enter' in p && p.enter ? ', ' + enterText(p.enter) : '';
 }

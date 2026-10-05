@@ -56,7 +56,7 @@ function parseByte(tok: string): number[] {
   if (t.startsWith('@')) v = parseInt(t.slice(1), 10);
   else if (t.startsWith('%')) v = parseInt(t.slice(1), 2);
   else v = parseInt(t.replace(/^(\$|0x)/i, ''), 16);
-  if (Number.isNaN(v)) throw new Error(`Ungültiges Extra-Byte „${tok}“`);
+  if (Number.isNaN(v)) throw new Error(`Invalid extra byte “${tok}”`);
   if (neg) v = -v;
   return Array.from({ length: width }, (_, i) => (v >> (i * 8)) & 0xff);
 }
@@ -71,12 +71,12 @@ export function parseList(text: string): UberList {
   text.split(/\r?\n/).forEach((raw, i) => {
     const line = raw.replace(/;.*$/, '').trim();
     if (!line) return;
-    const err = (m: string) => new Error(`list.txt Zeile ${i + 1}: ${m}`);
+    const err = (m: string) => new Error(`list.txt line ${i + 1}: ${m}`);
     const cmd = /^([a-z]+):\s*(.*)$/i.exec(line);
     if (cmd) {
       const [, c, arg] = cmd;
       const k = c.toLowerCase();
-      if (k === 'level' || k === 'gamemode' || k === 'overworld') { ctx = k; if (arg) throw err('Nach „' + k + ':“ folgen die Einträge in eigenen Zeilen'); return; }
+      if (k === 'level' || k === 'gamemode' || k === 'overworld') { ctx = k; if (arg) throw err('The entries after “' + k + ':” go on lines of their own'); return; }
       ctx = null;
       if (k === 'global') list.global = normPath(arg);
       else if (k === 'statusbar') list.statusbar = normPath(arg);
@@ -85,17 +85,17 @@ export function parseList(text: string): UberList {
       // verbose:, rom:, sprite: (1.x) and others are irrelevant here
       return;
     }
-    if (!ctx) throw err('Eintrag außerhalb von level:/gamemode:/overworld:');
+    if (!ctx) throw err('Entry outside level:/gamemode:/overworld:');
     const m = /^(\*|[0-9a-f]+)\s+(.+)$/i.exec(line);
-    if (!m) throw err(`Unverständlicher Eintrag „${line}“`);
+    if (!m) throw err(`Unrecognized entry “${line}”`);
     const num = m[1] === '*' ? ALL : parseInt(m[1], 16);
-    if (num !== ALL && num >= CONTEXT_SIZE[ctx]) throw err(`Nummer ${m[1]} außerhalb des gültigen Bereichs`);
+    if (num !== ALL && num >= CONTEXT_SIZE[ctx]) throw err(`Number ${m[1]} out of range`);
     const calls = list[ctx].get(num) ?? [];
     for (const part of m[2].split(',')) {
       const [file, bytes] = part.split(':');
       const f = file.trim();
       if (!f) continue;
-      if (f.startsWith('-')) throw err('Das Überspringen von „*“-Ressourcen (-datei.asm) wird nicht unterstützt');
+      if (f.startsWith('-')) throw err('Skipping “*” resources (-file.asm) is not supported');
       calls.push({ file: normPath(FOLDER[ctx] + f), bytes: bytes ? bytes.trim().split(/\s+/).flatMap(parseByte) : [] });
     }
     list[ctx].set(num, calls);
@@ -255,7 +255,7 @@ const OFFSET: Record<EntryLabel, number> = { init: 0, main: 2, end: 4, load: 6, 
 const dec = new TextDecoder();
 function text(files: Map<string, Uint8Array>, path: string): string {
   const f = files.get(path);
-  if (!f) throw new Error(`Datei „${path}“ fehlt im UberASM-Projekt`);
+  if (!f) throw new Error(`File “${path}” is missing from the UberASM project`);
   return dec.decode(f);
 }
 
@@ -285,7 +285,7 @@ function resourceInfo(files: Map<string, Uint8Array>, file: string, id: number):
   if (b) {
     const t = b.slice(8).trim();
     bytes = t === 'any' ? 'any' : parseInt(t, 10);
-    if (bytes !== 'any' && (Number.isNaN(bytes) || bytes < 0 || bytes > 255)) throw new Error(`${file}: ungültige „;>bytes“-Angabe`);
+    if (bytes !== 'any' && (Number.isNaN(bytes) || bytes < 0 || bytes > 255)) throw new Error(`${file}: invalid “;>bytes” line`);
   }
   return { id, file, labels, dbr: !lines.includes(';>dbr off'), bytes, uses: [] };
 }
@@ -315,7 +315,7 @@ export function buildUberPatch(files: Map<string, Uint8Array>, list: UberList): 
         let bytes = c.bytes;
         if (r.bytes === 'any') bytes = [bytes.length, ...bytes];
         else if (r.bytes !== bytes.length) {
-          if (bytes.length < r.bytes) warnings.push(`${c.file} erwartet ${r.bytes} Extra-Byte(s), angegeben: ${bytes.length}`);
+          if (bytes.length < r.bytes) warnings.push(`${c.file} expects ${r.bytes} extra byte(s), given: ${bytes.length}`);
           bytes = [...bytes, ...new Array(Math.max(0, r.bytes - bytes.length)).fill(0)].slice(0, r.bytes);
         }
         let b = -1;
@@ -457,7 +457,7 @@ export function buildUberPatch(files: Map<string, Uint8Array>, list: UberList): 
     o('namespace off');
   }
   for (const [ctx, what] of [['global', list.global], ['statusbar', list.statusbar], ['macrolib', list.macrolib]] as const) {
-    if (what && !files.has(what)) warnings.push(`${ctx}: Datei „${what}“ fehlt – wird ignoriert`);
+    if (what && !files.has(what)) warnings.push(`${ctx}: file “${what}” is missing – ignored`);
   }
 
   const src = new Map<string, Uint8Array | string>(files);

@@ -111,7 +111,7 @@ function build(): Asm {
 export function installStructPatch(rom: Rom): { base: number; table: number } {
   const ex = structPatch(rom);
   if (ex) return ex;
-  if (rom.r24(STRUCT_SLOT) !== 0) throw new Error(`Erweitertes Objekt $03 ist bereits belegt${ownerNote(rom, STRUCT_SLOT, 3)} – Strukturen nicht möglich`);
+  if (rom.r24(STRUCT_SLOT) !== 0) throw new Error(`Extended object $03 is already in use${ownerNote(rom, STRUCT_SLOT, 3)} – structures not possible`);
   const a = build();
   const addr = rom.allocWrite(new Uint8Array(a.bytes.length));
   rom.writeBytes(addr, a.link(addr));
@@ -168,7 +168,7 @@ export function writeStructure(rom: Rom, n: number, s: Structure | null): void {
   const old = ptrOf(rom, p.table, n);
   if (old >> 16) rom.freeAt(old);
   if (!s) { setPtr(rom, p.table, n, 0); return; }
-  if (s.w < 1 || s.h < 1 || s.w > STRUCT_MAX || s.h > STRUCT_MAX || s.tiles.length !== s.w * s.h) throw new Error(`Struktur ${s.w}×${s.h} ungültig (höchstens ${STRUCT_MAX}×${STRUCT_MAX})`);
+  if (s.w < 1 || s.h < 1 || s.w > STRUCT_MAX || s.h > STRUCT_MAX || s.tiles.length !== s.w * s.h) throw new Error(`Structure ${s.w}×${s.h} invalid (at most ${STRUCT_MAX}×${STRUCT_MAX})`);
   const name = new TextEncoder().encode(s.name).slice(0, 63);
   const buf = new Uint8Array(2 + s.tiles.length * 2 + name.length + 1);
   buf[0] = s.w; buf[1] = s.h;

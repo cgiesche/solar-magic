@@ -33,7 +33,7 @@ export function pixiPane(app: App, onDirty: () => void, changed: () => void): Pa
     const fileSel = h('span');
     let file = '';
     const numIn = hexInput(num, 2, (v) => (num = v));
-    const addBtn = h('button', { onclick: () => add() }, 'Zuordnen');
+    const addBtn = h('button', { onclick: () => add() }, 'Assign');
     const buildFiles = () => {
       const fs = filesFor(kind);
       file = fs[0] ?? '';
@@ -42,32 +42,32 @@ export function pixiPane(app: App, onDirty: () => void, changed: () => void): Pa
       numIn.value = hex(num, 2);
       numIn.title = `${KIND_LABEL[kind]}: ${hex(lo, 2)}–${hex(hi, 2)}`;
       addBtn.disabled = !fs.length;
-      clear(fileSel).append(fs.length ? select(fs.map((f, i) => [i, f.slice(FOLDER[kind].length)] as [number, string]), 0, (i) => (file = fs[i])) : h('span', { class: 'hint' }, `keine Dateien in ${FOLDER[kind]}`));
+      clear(fileSel).append(fs.length ? select(fs.map((f, i) => [i, f.slice(FOLDER[kind].length)] as [number, string]), 0, (i) => (file = fs[i])) : h('span', { class: 'hint' }, `no files in ${FOLDER[kind]}`));
     };
     const add = () => {
       const [lo, hi] = numberRange(kind);
-      if (num < lo || num > hi) { toast(`${KIND_LABEL[kind]}: Nummer ${hex(lo, 2)}–${hex(hi, 2)}`, 'error'); return; }
+      if (num < lo || num > hi) { toast(`${KIND_LABEL[kind]}: number ${hex(lo, 2)}–${hex(hi, 2)}`, 'error'); return; }
       const level = (k: SpriteFolder) => k === 'sprites' || k === 'shooters' || k === 'generators';
       proj.list = proj.list.filter((e) => !(e.num === num && (e.kind === kind || (level(e.kind) && level(kind)))));
       proj.list.push({ kind, num, file });
       change();
     };
     const label = (e: { kind: SpriteFolder; file: string }) => {
-      try { const c = spriteConfig(proj, { ...e, num: 0 }); return c.names[0]?.name ?? ''; } catch (err) { return `Fehler: ${err instanceof Error ? err.message : err}`; }
+      try { const c = spriteConfig(proj, { ...e, num: 0 }); return c.names[0]?.name ?? ''; } catch (err) { return `Error: ${err instanceof Error ? err.message : err}`; }
     };
     const asmOf = (e: { kind: SpriteFolder; file: string }) => { try { return spriteConfig(proj, { ...e, num: 0 }).asm ?? e.file; } catch { return e.file; } };
     const rows = [...proj.list].sort((a, b) => KINDS.indexOf(a.kind) - KINDS.indexOf(b.kind) || a.num - b.num).map((e) => h('tr', null,
       h('td', null, KIND_LABEL[e.kind]),
       h('td', { class: 'mono' }, hex(e.num, 2)),
-      h('td', { class: proj.files.has(e.file) ? '' : 'err', title: proj.files.has(e.file) ? e.file : `${e.file} fehlt im Projekt` }, e.file.slice(FOLDER[e.kind].length)),
+      h('td', { class: proj.files.has(e.file) ? '' : 'err', title: proj.files.has(e.file) ? e.file : `${e.file} is missing from the project` }, e.file.slice(FOLDER[e.kind].length)),
       h('td', null, label(e)),
-      h('td', { class: 'actions' }, definesButton(proj.files, asmOf(e), change), h('button', { class: 'icon-btn', title: 'Eintrag entfernen', onclick: () => { proj.list = proj.list.filter((x) => x !== e); change(); } }, '✕'))));
+      h('td', { class: 'actions' }, definesButton(proj.files, asmOf(e), change), h('button', { class: 'icon-btn', title: 'Remove entry', onclick: () => { proj.list = proj.list.filter((x) => x !== e); change(); } }, '✕'))));
     const out = [
-      rows.length ? h('table', { class: 'uber-table' }, h('tr', null, h('th', null, 'Art'), h('th', null, 'Nr.'), h('th', null, 'Datei'), h('th', null, 'Name'), h('th')), rows)
-        : h('p', { class: 'hint' }, 'Noch keine Custom Sprites – „Hinzufügen …“ oben nimmt einen Sprite-Download (.zip/.asm) und gibt ihm die nächste freie Nummer.'),
+      rows.length ? h('table', { class: 'uber-table' }, h('tr', null, h('th', null, 'Type'), h('th', null, 'No.'), h('th', null, 'File'), h('th', null, 'Name'), h('th')), rows)
+        : h('p', { class: 'hint' }, 'No custom sprites yet – “Add …” above takes a sprite download (.zip/.asm) and gives it the next free number.'),
       proj.files.size ? h('div', { class: 'row uber-add' },
         select(KINDS.map((k, i) => [i, KIND_LABEL[k]] as [number, string]), KINDS.indexOf(kind), (i) => { kind = KINDS[i]; num = numberRange(kind)[0]; buildFiles(); }),
-        h('label', null, 'Nr.'), numIn,
+        h('label', null, 'No.'), numIn,
         fileSel,
         addBtn) : '',
     ];
@@ -77,8 +77,8 @@ export function pixiPane(app: App, onDirty: () => void, changed: () => void): Pa
 
   return projectPane<PixiProject>(app, {
     title: 'Custom Sprites',
-    intro: 'Sprites, Shooter, Generatoren und die übrigen Sprite-Arten von PIXI.',
-    format: 'Format von PIXI: Sprites (00–BF), Shooter (C0–CF) und Generatoren (D0–DF) mit .json/.cfg, die übrigen Arten als .asm. Shared Routines wie %GetDrawInfo() sind eingebaut; eigene in routines/ haben Vorrang.',
+    intro: 'Sprites, shooters, generators and the other sprite types of PIXI.',
+    format: 'PIXI format: sprites (00–BF), shooters (C0–CF) and generators (D0–DF) with .json/.cfg, the other types as .asm. Shared routines like %GetDrawInfo() are built in; your own in routines/ take precedence.',
     load: () => loadPixiProject(app.rom),
     empty: () => ({ files: new Map(), list: [] }),
     save: (p) => savePixiProject(app.rom, p),
@@ -90,7 +90,7 @@ export function pixiPane(app: App, onDirty: () => void, changed: () => void): Pa
     toZip: projectToZip,
     zipName: 'pixi.zip',
     content,
-    applied: (p) => `Custom Sprites übernommen (${p.list.length})`,
+    applied: (p) => `Custom sprites applied (${p.list.length})`,
     docs: 'sprites',
   }, onDirty, changed);
 }
@@ -99,7 +99,7 @@ export function pixiPane(app: App, onDirty: () => void, changed: () => void): Pa
 export function openPixiPackageDialog(app: App, pkg: PatchPackage, onDone: () => void): void {
   let plan;
   try { plan = planPixiPackage(app.rom, pkg); } catch (e) { toast(e instanceof Error ? e.message : String(e), 'error'); return; }
-  if (!plan.sprites.length) { toast(`„${pkg.name}“: keine Custom Sprites gefunden`, 'error'); return; }
+  if (!plan.sprites.length) { toast(`“${pkg.name}”: no custom sprites found`, 'error'); return; }
   const p = plan;
   const log = h('div');
   const links = h('div');
@@ -108,22 +108,22 @@ export function openPixiPackageDialog(app: App, pkg: PatchPackage, onDone: () =>
   showLinks();
   const body = h('div', { class: 'patch-apply' },
     docsButton(pkg.name, pkg.files),
-    h('p', null, `„${pkg.name}“ enthält Custom Sprites im PIXI-Format${p.blocks.length ? ' und Custom Blocks, die sie benutzen' : ''}. Sie bekommen die nächsten freien Nummern:`),
-    h('table', { class: 'uber-table' }, h('tr', null, h('th', null, 'Art'), h('th', null, 'Datei'), h('th', null, 'Name'), h('th', null, 'Nr.')),
+    h('p', null, `“${pkg.name}” contains custom sprites in PIXI format${p.blocks.length ? ' and custom blocks they use' : ''}. They get the next free numbers:`),
+    h('table', { class: 'uber-table' }, h('tr', null, h('th', null, 'Type'), h('th', null, 'File'), h('th', null, 'Name'), h('th', null, 'No.')),
       p.sprites.map((s) => {
         const [lo, hi] = numberRange(s.kind);
         return h('tr', null, h('td', null, KIND_LABEL[s.kind]), h('td', null, s.file.split('/').pop()), h('td', null, s.name),
-          h('td', null, hexInput(s.num, 2, (v) => { if (v < lo || v > hi) { toast(`${KIND_LABEL[s.kind]}: Nummer ${hex(lo, 2)}–${hex(hi, 2)}`, 'error'); return; } s.num = v; showLinks(); })));
+          h('td', null, hexInput(s.num, 2, (v) => { if (v < lo || v > hi) { toast(`${KIND_LABEL[s.kind]}: number ${hex(lo, 2)}–${hex(hi, 2)}`, 'error'); return; } s.num = v; showLinks(); })));
       })),
-    p.blocks.length ? h('table', { class: 'uber-table' }, h('tr', null, h('th', null, 'Block'), h('th', null, 'Map16-Tile'), h('th', null, 'acts like')),
+    p.blocks.length ? h('table', { class: 'uber-table' }, h('tr', null, h('th', null, 'Block'), h('th', null, 'Map16 tile'), h('th', null, 'acts like')),
       p.blocks.map((b) => h('tr', null, h('td', null, b.file.split('/').pop()),
         h('td', null, hexInput(b.tile, 3, (v) => (b.tile = v), EXT_TILES - 1)),
         h('td', null, hexInput(b.acts, 3, (v) => (b.acts = v), 0x1ff))))) : '',
-    p.links.length ? h('h3', null, 'Verknüpfte Einstellungen') : '', links,
+    p.links.length ? h('h3', null, 'Linked settings') : '', links,
     log);
-  modal(`Custom Sprites hinzufügen: ${pkg.name}`, body, [
-    { label: 'Abbrechen' },
-    { label: 'Hinzufügen', primary: true, onClick: () => {
+  modal(`Add custom sprites: ${pkg.name}`, body, [
+    { label: 'Cancel' },
+    { label: 'Add', primary: true, onClick: () => {
       if (app.dirty) app.saveLevel(true);
       const src = map16Source(app.rom, app.render);
       let r: ApplyResult;
@@ -134,7 +134,7 @@ export function openPixiPackageDialog(app: App, pkg: PatchPackage, onDone: () =>
       romChanged(app);
       void keepDocs('sprites', pkg.name, pkg.files).catch(() => {});
       const where = p.sprites.map((s) => `${KIND_LABEL[s.kind]} ${hex(s.num, 2)}`).join(', ');
-      toast(`„${pkg.name}“ eingefügt: ${where}${p.blocks.length ? ` · Blöcke auf ${p.blocks.map((b) => hex(b.tile, 3)).join(', ')}` : ''}`);
+      toast(`“${pkg.name}” inserted: ${where}${p.blocks.length ? ` · blocks at ${p.blocks.map((b) => hex(b.tile, 3)).join(', ')}` : ''}`);
       onDone();
       return true;
     } },

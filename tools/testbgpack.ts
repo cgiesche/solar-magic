@@ -54,7 +54,7 @@ const map16 = parseMap16File(files.get('ghostbustersghosttrapjavamanhattanBG.map
   const lv = loadLevel(rom, LV);
   const r = applyBgPack(rom, lv, files, plan, { cgram: levelColors(before) });
   check(r.ok && !!r.bg, 'applied: ' + [...r.errors, ...r.notes].join(' | '));
-  check(r.notes.some((n) => n.includes('BG2-Slot nicht verfügbar')), 'BG2/BG3 need the VRAM patch (noted)');
+  check(r.notes.some((n) => n.includes('BG2 slot not available')), 'BG2/BG3 need the VRAM patch (noted)');
   check(map16.tiles.every((ws, i) => same(bgExtTileWords(rom, 0x200 + i)!, ws)), 'BG Map16 tiles 200-25F from the .map16');
   const bg1 = plan.gfx.find((g) => g.slot === 'BG1')!;
   check(levelGfx(rom, LV)[GFX_SLOT_NAMES.indexOf('BG1')] === bg1.num && !!gfxEntry(rom, bg1.num)?.raw, 'BG1 slot = the stored 4bpp ExGFX');
@@ -123,7 +123,7 @@ const map16 = parseMap16File(files.get('ghostbustersghosttrapjavamanhattanBG.map
   const l2 = [...Array(0x200).keys()].find((n) => hasLayer2Objects(loadLevel(rom, n).header.mode))!;
   const lv2 = loadLevel(rom, l2);
   const r2 = applyBgPack(rom, lv2, syn, plan, { cgram: levelColors(emu0.load(LV)) });
-  check(!r2.ok && /Layer-2-Objekte/.test(r2.errors[0]), 'level with layer 2 objects is refused');
+  check(!r2.ok && /layer 2 objects/.test(r2.errors[0]), 'level with layer 2 objects is refused');
 }
 
 console.log(bad ? `${bad} FAILED` : 'all ok');

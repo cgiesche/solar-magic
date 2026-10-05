@@ -15,7 +15,7 @@ import { STRUCT_EXT, hasStructs } from '../core/structs.ts';
 export function openEntrancesDialog(app: App): void {
   const rom = app.rom;
   const bank = app.level.number & 0x100;
-  const filter = h('select', null, h('option', { value: 'level' }, 'in dieses Level'), h('option', { value: 'set' }, 'alle angelegten'), h('option', { value: 'all' }, 'alle (auch freie)'));
+  const filter = h('select', null, h('option', { value: 'level' }, 'into this level'), h('option', { value: 'set' }, 'all set up'), h('option', { value: 'all' }, 'all (including free)'));
   const list = h('div', { class: 'gfx-list', style: 'height: 420px; min-width: 360px' });
   const detail = h('div', { class: 'ent-detail' });
   let sel = -1;
@@ -31,35 +31,35 @@ export function openEntrancesDialog(app: App): void {
       if (filter.value === 'set' && blank) continue;
       const to = e.destLevel | bank;
       list.appendChild(h('div', { class: `level-item${i === sel ? ' current' : ''}${blank ? ' unused' : ''}`, onclick: () => { sel = i; buildList(); buildDetail(); } },
-        `${hex(i, 3)} `, blank ? h('span', { class: 'lname' }, 'frei') : h('span', null, `→ ${hex(to, 3)} `, h('span', { class: 'lname' }, `${g.name(to)} · ${users ? `${users} Exit${users > 1 ? 's' : ''}` : 'unbenutzt'}`))));
+        `${hex(i, 3)} `, blank ? h('span', { class: 'lname' }, 'free') : h('span', null, `→ ${hex(to, 3)} `, h('span', { class: 'lname' }, `${g.name(to)} · ${users ? `${users} Exit${users > 1 ? 's' : ''}` : 'unused'}`))));
     }
-    if (!list.firstChild) list.append(emptyState(filter.value === 'level' ? 'Keine sekundären Eingänge in dieses Level.' : 'Keine Einträge.'));
+    if (!list.firstChild) list.append(emptyState(filter.value === 'level' ? 'No secondary entrances into this level.' : 'No entries.'));
   };
   const buildDetail = () => {
     clear(detail);
-    if (sel < 0) { detail.append(h('div', { class: 'hint' }, 'Einen Eintrag wählen. Bearbeiten und Verschieben geht direkt im Level im Modus „Ein-/Ausgänge“ (Taste 4).')); return; }
+    if (sel < 0) { detail.append(h('div', { class: 'hint' }, 'Select an entry. Edit and move it directly in the level in “Entrances/Exits” mode (key 4).')); return; }
     const e = readSecondaryEntrance(rom, sel);
     const g = app.exitGraph();
     const to = e.destLevel | bank;
     const blank = isBlank(rom, sel);
-    const set = (label: string, f: (x: SecondaryEntrance) => void) => { app.editSecondaryEntrance(sel, `Sekundärer Eingang ${hex(sel, 3)}: ${label}`, f, `sec-entrance-dlg:${sel}`); buildList(); buildDetail(); };
+    const set = (label: string, f: (x: SecondaryEntrance) => void) => { app.editSecondaryEntrance(sel, `Secondary entrance ${hex(sel, 3)}: ${label}`, f, `sec-entrance-dlg:${sel}`); buildList(); buildDetail(); };
     const range = (n: number): [number, string][] => Array.from({ length: n }, (_, i) => [i, String(i)]);
     const users = g.usersOfEntrance(sel);
     detail.append(
-      h('div', { class: 'prop-title' }, `Sekundärer Eingang ${hex(sel, 3)}`),
-      blank ? h('div', { class: 'hint' }, 'Frei: kein Exit benutzt ihn.') : h('div', null, 'Führt in ', h('b', null, `Level ${hex(to, 3)}`), ' ', h('span', { class: 'hint' }, g.name(to))),
-      h('div', { class: 'prop' }, h('label', null, 'Ziel-Level (untere Stellen)'), hexInput(e.destLevel, 2, (v) => set('Ziellevel', (x) => (x.destLevel = v)))),
+      h('div', { class: 'prop-title' }, `Secondary entrance ${hex(sel, 3)}`),
+      blank ? h('div', { class: 'hint' }, 'Free: no exit uses it.') : h('div', null, 'Leads to ', h('b', null, `level ${hex(to, 3)}`), ' ', h('span', { class: 'hint' }, g.name(to))),
+      h('div', { class: 'prop' }, h('label', null, 'Target level (low digits)'), hexInput(e.destLevel, 2, (v) => set('Target level', (x) => (x.destLevel = v)))),
       h('div', { class: 'prop' }, h('label', null, 'Screen'), hexInput(e.screen, 2, (v) => set('Screen', (x) => (x.screen = v)), 0x1f)),
-      h('div', { class: 'prop' }, h('label', null, 'X-Position'), select(range(8), e.entranceX, (v) => set('X', (x) => (x.entranceX = v)))),
-      h('div', { class: 'prop' }, h('label', null, 'Y-Position'), select(range(16), e.entranceY, (v) => set('Y', (x) => (x.entranceY = v)))),
-      h('div', { class: 'prop' }, h('label', null, 'Aktion'), select(ENTRANCE_ACTIONS.map((a, i) => [i, `${i} – ${a}`] as [number, string]), e.action, (v) => set('Aktion', (x) => (x.action = v)))),
-      h('div', { class: 'prop' }, h('label', null, 'FG Start-Y'), select(range(4), e.fgInitY, (v) => set('FG Start-Y', (x) => (x.fgInitY = v)))),
-      h('div', { class: 'prop' }, h('label', null, 'BG Start-Y'), select(range(4), e.bgInitY, (v) => set('BG Start-Y', (x) => (x.bgInitY = v)))),
-      h('div', { class: 'hint' }, users.length ? `Benutzt von: ${users.map((u) => `${hex(u.from, 3)} (Screen ${hex(u.screen, 2)})`).join(', ')}` : 'Kein Exit benutzt diesen Eingang.'),
+      h('div', { class: 'prop' }, h('label', null, 'X position'), select(range(8), e.entranceX, (v) => set('X', (x) => (x.entranceX = v)))),
+      h('div', { class: 'prop' }, h('label', null, 'Y position'), select(range(16), e.entranceY, (v) => set('Y', (x) => (x.entranceY = v)))),
+      h('div', { class: 'prop' }, h('label', null, 'Action'), select(ENTRANCE_ACTIONS.map((a, i) => [i, `${i} – ${a}`] as [number, string]), e.action, (v) => set('Action', (x) => (x.action = v)))),
+      h('div', { class: 'prop' }, h('label', null, 'FG start Y'), select(range(4), e.fgInitY, (v) => set('FG start Y', (x) => (x.fgInitY = v)))),
+      h('div', { class: 'prop' }, h('label', null, 'BG start Y'), select(range(4), e.bgInitY, (v) => set('BG start Y', (x) => (x.bgInitY = v)))),
+      h('div', { class: 'hint' }, users.length ? `Used by: ${users.map((u) => `${hex(u.from, 3)} (screen ${hex(u.screen, 2)})`).join(', ')}` : 'No exit uses this entrance.'),
       h('div', { class: 'row' },
-        blank ? '' : h('button', { onclick: () => { dlg.close(true); openTarget(to); } }, `Level ${hex(to, 3)} öffnen`),
-        h('button', { onclick: () => set('auf aktuelles Level', (x) => (x.destLevel = app.level.number & 0xff)) }, `Auf aktuelles Level (${hex(app.level.number, 3)}) setzen`)),
-      h('div', { class: 'hint' }, 'Das obere Bit (0xx/1xx) kommt vom Level, in dem der Exit liegt. Änderungen sind mit Strg+Z rückgängig zu machen.'),
+        blank ? '' : h('button', { onclick: () => { dlg.close(true); openTarget(to); } }, `Open level ${hex(to, 3)}`),
+        h('button', { onclick: () => set('to current level', (x) => (x.destLevel = app.level.number & 0xff)) }, `Set to current level (${hex(app.level.number, 3)})`)),
+      h('div', { class: 'hint' }, 'The high bit (0xx/1xx) comes from the level the exit is in. Changes can be undone with Ctrl+Z.'),
     );
   };
   const openTarget = (to: number) => {
@@ -71,9 +71,9 @@ export function openEntrancesDialog(app: App): void {
   };
   const newEntry = () => {
     const idx = app.exitGraph().freeEntrance(app.level.number);
-    if (idx === null) { toast('Kein freier sekundärer Eingang mehr.', 'error'); return; }
+    if (idx === null) { toast('No free secondary entrance left.', 'error'); return; }
     const s = app.level.secondary;
-    app.editSecondaryEntrance(idx, `Sekundärer Eingang ${hex(idx, 3)} angelegt`, (x) => {
+    app.editSecondaryEntrance(idx, `Secondary entrance ${hex(idx, 3)} created`, (x) => {
       x.destLevel = app.level.number & 0xff; x.screen = s.entranceScreen; x.entranceX = s.entranceX; x.entranceY = s.entranceY; x.action = s.entranceAction;
     });
     sel = idx;
@@ -85,9 +85,9 @@ export function openEntrancesDialog(app: App): void {
   if (sel < 0) filter.value = 'set';
   buildList();
   buildDetail();
-  const dlg = modal(`Sekundäre Eingänge ${bank ? '100–1FF' : '000–0FF'}`, h('div', { class: 'ent-editor' },
-    h('div', null, h('div', { class: 'row small' }, 'Zeigen: ', filter, h('button', { title: 'Nächste freie Nummer, ins aktuelle Level (am Haupteingang)', onclick: newEntry }, '+ Neu')), list), detail),
-  [{ label: 'Schließen', primary: true }], () => { app.persist(); });
+  const dlg = modal(`Secondary entrances ${bank ? '100–1FF' : '000–0FF'}`, h('div', { class: 'ent-editor' },
+    h('div', null, h('div', { class: 'row small' }, 'Show: ', filter, h('button', { title: 'Next free number, into the current level (at the main entrance)', onclick: newEntry }, '+ New')), list), detail),
+  [{ label: 'Close', primary: true }], () => { app.persist(); });
 }
 
 export function openRomInfo(app: App): void {
@@ -96,31 +96,31 @@ export function openRomInfo(app: App): void {
   const used = rats.reduce((a, b) => a + b.size + 8, 0);
   const expanded = Math.max(0, rom.size - 0x80000);
   const body = h('div', null,
-    h('div', { class: 'prop' }, h('label', null, 'Titel'), h('span', null, rom.title())),
-    h('div', { class: 'prop' }, h('label', null, 'Größe'), h('span', null, `${rom.size / 1024} KB${rom.smcHeader ? ' (+512 Byte Copier-Header)' : ''}`)),
-    h('div', { class: 'prop' }, h('label', null, 'Erweiterter Bereich'), h('span', null, `${expanded / 1024} KB, davon ${(used / 1024).toFixed(1)} KB belegt (${rats.length} RATS-Blöcke)`)),
-    h('div', { class: 'prop' }, h('label', null, 'Editor-Patch'), h('span', null, hasEditorPatch(rom) ? 'installiert' : 'nicht installiert')),
+    h('div', { class: 'prop' }, h('label', null, 'Title'), h('span', null, rom.title())),
+    h('div', { class: 'prop' }, h('label', null, 'Size'), h('span', null, `${rom.size / 1024} KB${rom.smcHeader ? ' (+512 byte copier header)' : ''}`)),
+    h('div', { class: 'prop' }, h('label', null, 'Expanded area'), h('span', null, `${expanded / 1024} KB, ${(used / 1024).toFixed(1)} KB of it in use (${rats.length} RATS blocks)`)),
+    h('div', { class: 'prop' }, h('label', null, 'Editor patch'), h('span', null, hasEditorPatch(rom) ? 'installed' : 'not installed')),
   );
-  modal('ROM-Informationen', body, [{ label: 'Schließen', primary: true }]);
+  modal('ROM information', body, [{ label: 'Close', primary: true }]);
 }
 
 export function openExpandDialog(app: App): void {
   const rom = app.rom;
   const body = h('div', null,
-    h('p', { class: 'hint' }, `Aktuell ${rom.size / 1024} KB. Mehr Platz für Levels, Grafiken, Musik usw. Beim Speichern wird automatisch erweitert, wenn nötig. Maximal 4 MB (LoROM).`),
+    h('p', { class: 'hint' }, `Currently ${rom.size / 1024} KB. More room for levels, graphics, music etc. Saving expands automatically when needed. At most 4 MB (LoROM).`),
     h('div', { class: 'row' }, [0x100000, 0x200000, 0x400000].map((sz) => h('button', {
       disabled: rom.size >= sz,
-      onclick: () => { rom.expand(sz); app.emu.syncRom(); app.persist(); toast(`ROM auf ${sz / 1048576} MB erweitert`); dlg.close(); },
+      onclick: () => { rom.expand(sz); app.emu.syncRom(); app.persist(); toast(`ROM expanded to ${sz / 1048576} MB`); dlg.close(); },
     }, `${sz / 1048576} MB`))),
   );
-  const dlg = modal('ROM erweitern', body, [{ label: 'Abbrechen' }]);
+  const dlg = modal('Expand ROM', body, [{ label: 'Cancel' }]);
 }
 
 export async function installEditorPatchAction(app: App): Promise<void> {
-  const ok = await choose('Editor-Patch installieren', 'Der Editor-Patch erlaubt Sprite-Daten in beliebigen Banks, 256 Grafikdateien (ExGFX, auch unkomprimiert als 4bpp), Grafik-Zuordnung pro Level und das "Direct Map16"-Objekt (beliebige Map16-Tiles platzieren). Er wird bei Bedarf auch automatisch installiert.',
-    [{ label: 'Abbrechen' }, { label: 'Installieren', primary: true }]);
+  const ok = await choose('Install editor patch', 'The editor patch allows sprite data in any bank, 256 graphics files (ExGFX, also uncompressed as 4bpp), graphics assignment per level and the "Direct Map16" object (place any Map16 tiles). It is also installed automatically when needed.',
+    [{ label: 'Cancel' }, { label: 'Install', primary: true }]);
   if (ok !== 1) return;
-  try { installEditorPatch(app.rom); app.emu.syncRom(); app.persist(); toast('Editor-Patch installiert'); app.refresh(); app.emit('patch'); } catch (e) { toast(String(e), 'error'); }
+  try { installEditorPatch(app.rom); app.emu.syncRom(); app.persist(); toast('Editor patch installed'); app.refresh(); app.emit('patch'); } catch (e) { toast(String(e), 'error'); }
 }
 
 // one undoable structural edit of the current level
@@ -137,9 +137,9 @@ export function openSaveAsDialog(app: App): void {
   const lv = app.level;
   let target = lv.number;
   const body = h('div', null,
-    h('p', { class: 'hint', style: 'max-width:420px' }, `Level ${hex(lv.number, 3)} (mit allen aktuellen Änderungen) unter einer anderen Nummer speichern. Das Ziel wird überschrieben.`),
-    h('div', { class: 'row' }, h('label', null, 'Ziel-Level '), hexInput(target, 3, (v) => (target = v), 0x1ff)));
-  modal(`Level ${hex(lv.number, 3)} speichern unter`, body, [{ label: 'Abbrechen' }, { label: 'Speichern', primary: true, onClick: () => saveAs(app, target) }]);
+    h('p', { class: 'hint', style: 'max-width:420px' }, `Save level ${hex(lv.number, 3)} (with all current changes) under another number. The target is overwritten.`),
+    h('div', { class: 'row' }, h('label', null, 'Target level '), hexInput(target, 3, (v) => (target = v), 0x1ff)));
+  modal(`Save level ${hex(lv.number, 3)} as`, body, [{ label: 'Cancel' }, { label: 'Save', primary: true, onClick: () => saveAs(app, target) }]);
 }
 
 export function exportLevel(app: App): void {
@@ -152,20 +152,20 @@ export function openScreenDialog(app: App, op: 'insert' | 'delete'): void {
   const lv = app.level;
   let screen = 0;
   const screenOpts: [number, string][] = Array.from({ length: lv.header.screens }, (_, i) => [i, hex(i, 2)]);
-  const dir = app.vertical ? 'nach unten' : 'nach rechts';
+  const dir = app.vertical ? 'down' : 'to the right';
   const body = h('div', null,
     h('p', { class: 'hint', style: 'max-width:420px' }, op === 'insert'
-      ? `Alles ab dem gewählten Screen wird um einen Screen ${dir} verschoben (Objekte, Sprites, Exits, Eingang, Zwischenziel). Sekundäre Eingänge bleiben unverändert.`
-      : `Der gewählte Screen wird entfernt, alles dahinter rückt einen Screen zurück (Objekte, Sprites, Exits, Eingang, Zwischenziel). Sekundäre Eingänge bleiben unverändert.`),
-    h('div', { class: 'row' }, h('label', null, op === 'insert' ? 'Leeren Screen einfügen vor Screen ' : 'Screen '), select(screenOpts, screen, (v) => (screen = v))));
-  modal(op === 'insert' ? 'Screen einfügen' : 'Screen löschen', body, [
-    { label: 'Abbrechen' },
-    { label: op === 'insert' ? 'Einfügen' : 'Löschen', primary: true, onClick: () => levelEdit(app, () => (op === 'insert' ? insertScreen : deleteScreen)(app.rom, app.level, screen)) },
+      ? `Everything from the chosen screen on is moved one screen ${dir} (objects, sprites, exits, entrance, midway). Secondary entrances stay unchanged.`
+      : `The chosen screen is removed; everything after it moves back one screen (objects, sprites, exits, entrance, midway). Secondary entrances stay unchanged.`),
+    h('div', { class: 'row' }, h('label', null, op === 'insert' ? 'Insert empty screen before screen ' : 'Screen '), select(screenOpts, screen, (v) => (screen = v))));
+  modal(op === 'insert' ? 'Insert screen' : 'Delete screen', body, [
+    { label: 'Cancel' },
+    { label: op === 'insert' ? 'Insert' : 'Delete', primary: true, onClick: () => levelEdit(app, () => (op === 'insert' ? insertScreen : deleteScreen)(app.rom, app.level, screen)) },
   ]);
 }
 
 export async function clearLevelConfirm(app: App): Promise<void> {
-  const r = await choose(`Level ${hex(app.level.number, 3)} leeren`, 'Alle Objekte, Sprites und Exits entfernen? (rückgängig machbar)', [{ label: 'Abbrechen' }, { label: 'Leeren', danger: true }]);
+  const r = await choose(`Clear level ${hex(app.level.number, 3)}`, 'Remove all objects, sprites and exits? (undoable)', [{ label: 'Cancel' }, { label: 'Clear', danger: true }]);
   if (r === 1) levelEdit(app, () => clearLevel(app.level));
 }
 
@@ -181,7 +181,7 @@ function saveAs(app: App, target: number): void {
     const log = saveLevel(app.rom, copy);
     app.emu.syncRom();
     app.persist();
-    toast(`Gespeichert als Level ${hex(target, 3)}: ${log.join(' · ')}`);
+    toast(`Saved as level ${hex(target, 3)}: ${log.join(' · ')}`);
     app.emit('level');
   } catch (e) {
     toast(String(e), 'error');
@@ -196,8 +196,8 @@ export async function importLevel(app: App): Promise<boolean> {
     const data = importLevelFile(rom, await f.text(), app.level);
     app.checkpoint();
     app.level = data.level;
-    // graphics slots and palette live in the ROM: an undoable ROM edit (Strg+Z takes them back first)
-    if (data.gfx || editorPatch(rom) || data.palette || customPalette(rom, n)) app.romEdit(`${f.name}: Grafik-Slots/Palette von Level ${hex(n, 3)}`, () => {
+    // graphics slots and palette live in the ROM: an undoable ROM edit (Ctrl+Z takes them back first)
+    if (data.gfx || editorPatch(rom) || data.palette || customPalette(rom, n)) app.romEdit(`${f.name}: graphics slots/palette of level ${hex(n, 3)}`, () => {
       if (data.gfx || editorPatch(rom)) setLevelGfx(rom, n, data.gfx ?? new Array(8).fill(0xff));
       if (data.palette || customPalette(rom, n)) setCustomPalette(rom, n, data.palette);
     });
@@ -207,7 +207,7 @@ export async function importLevel(app: App): Promise<boolean> {
     app.changed();
     app.emit('level-header');
     app.palettesChanged();
-    toast(`${f.name} als Level ${hex(n, 3)} importiert (noch nicht gespeichert).`);
+    toast(`${f.name} imported as level ${hex(n, 3)} (not saved yet).`);
     return true;
   } catch (e) {
     toast(String(e instanceof Error ? e.message : e), 'error');
@@ -230,15 +230,15 @@ export function openInsertDialog(app: App, tx: number, ty: number): void {
     if (kind === 0) num = Math.max(1, Math.min(0x3f, num));
     showName();
     fields.append(
-      h('div', { class: 'prop' }, h('label', null, 'Nummer'), hexInput(num, 2, (v) => { num = v; showName(); }, kind === 0 ? 0x3f : 0xff)),
-      kind === 0 ? h('div', { class: 'prop' }, h('label', null, 'Größe/Einstellung'), hexInput(size, 2, (v) => (size = v))) : '',
-      kind === 2 ? h('div', { class: 'prop' }, h('label', null, 'Extra-Bits'), hexInput(extra, 1, (v) => { extra = v; showName(); }, 3)) : '',
-      kind === 2 ? h('div', { class: 'hint' }, 'Extra-Bits 2/3: Custom Sprite (PIXI) ohne/mit Extra-Bit') : '',
+      h('div', { class: 'prop' }, h('label', null, 'Number'), hexInput(num, 2, (v) => { num = v; showName(); }, kind === 0 ? 0x3f : 0xff)),
+      kind === 0 ? h('div', { class: 'prop' }, h('label', null, 'Size/setting'), hexInput(size, 2, (v) => (size = v))) : '',
+      kind === 2 ? h('div', { class: 'prop' }, h('label', null, 'Extra bits'), hexInput(extra, 1, (v) => { extra = v; showName(); }, 3)) : '',
+      kind === 2 ? h('div', { class: 'hint' }, 'Extra bits 2/3: custom sprite (PIXI) without/with extra bit') : '',
       name,
     );
   };
   const body = h('div', null,
-    h('div', { class: 'prop' }, h('label', null, 'Typ'), select([[0, 'Objekt'], [1, 'Erweitertes Objekt'], [2, 'Sprite']], kind, (v) => { kind = v as 0 | 1 | 2; build(); })),
+    h('div', { class: 'prop' }, h('label', null, 'Type'), select([[0, 'Object'], [1, 'Extended object'], [2, 'Sprite']], kind, (v) => { kind = v as 0 | 1 | 2; build(); })),
     fields,
     h('div', { class: 'hint' }, `Position X ${hex(tx, 2)} · Y ${hex(ty, 2)}`),
   );
@@ -248,13 +248,13 @@ export function openInsertDialog(app: App, tx: number, ty: number): void {
       app.insertAt(tx, ty, { kind: 'spr', num, extra });
     } else {
       if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1');
-      if (kind === 0 && num === 0) { toast('Objekt 00 gibt es nicht – erweiterte Objekte über „Erweitertes Objekt“.', 'error'); return false; }
-      if (kind === 1 && num === DM16_EXT) { toast('Direct-Map16 bitte über den Map16-Reiter der Palette platzieren.', 'error'); return false; }
-      if (kind === 1 && num === STRUCT_EXT && hasStructs(app.rom)) { toast('Strukturen bitte über den Strukturen-Reiter der Palette platzieren.', 'error'); return false; }
+      if (kind === 0 && num === 0) { toast('There is no object 00 – use “Extended object” for extended objects.', 'error'); return false; }
+      if (kind === 1 && num === DM16_EXT) { toast('Please place Direct Map16 via the palette\'s Map16 tab.', 'error'); return false; }
+      if (kind === 1 && num === STRUCT_EXT && hasStructs(app.rom)) { toast('Please place structures via the palette\'s Structures tab.', 'error'); return false; }
       app.insertAt(tx, ty, kind === 0 ? { kind: 'obj', num, ext: 0, size } : { kind: 'obj', num: 0, ext: num, size: 0 });
     }
   };
-  const dlg = modal('Einfügen nach Nummer', body, [{ label: 'Abbrechen' }, { label: 'Einfügen', primary: true, onClick: insert }]);
+  const dlg = modal('Insert by number', body, [{ label: 'Cancel' }, { label: 'Insert', primary: true, onClick: insert }]);
   body.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter') return;
     (e.target as HTMLElement).dispatchEvent(new Event('change')); // commit the field being edited

@@ -68,7 +68,7 @@ export function applyBlockPack(rom: Rom, pkg: PatchPackage, plan: BlockPackPlan,
     for (const [f, c] of pkg.files) if (/(^|\/)routines\/[^/]+\.asm$/i.test(f)) proj.files.set(f.slice(f.search(/routines\//i)), c);
     const r = saveBlockProject(rom, proj, opt.blank);
     if (!r.ok) { rom.data = snapshot; return { ...r, notes }; }
-    notes.push(`${plan.blocks.length} Block(s) auf ${plan.blocks.map((b) => b.tile.toString(16).toUpperCase()).join(', ')}`);
+    notes.push(`${plan.blocks.length} block(s) at ${plan.blocks.map((b) => b.tile.toString(16).toUpperCase()).join(', ')}`);
     // 2. Map16 graphics (and acts like where list.txt gives none)
     if (plan.map16) {
       const at = opt.map16At ?? plan.map16.at;
@@ -81,8 +81,8 @@ export function applyBlockPack(rom: Rom, pkg: PatchPackage, plan: BlockPackPlan,
         if (acts !== undefined && !plan.blocks.some((b) => b.tile === t && b.acts !== undefined)) setActsLike(rom, t, acts, opt.blank);
         n++;
       });
-      if (n < targets.length) notes.push(`${targets.length - n} Map16-Tile(s) unter 200 übersprungen`);
-      notes.push(`Map16-Grafik für ${n} Tile(s) ab ${at.toString(16).toUpperCase()}`);
+      if (n < targets.length) notes.push(`${targets.length - n} Map16 tile(s) below 200 skipped`);
+      notes.push(`Map16 graphics for ${n} tile(s) from ${at.toString(16).toUpperCase()}`);
     }
     // 3. ExGFX and the level's slot
     for (const g of plan.gfx) {
@@ -91,10 +91,10 @@ export function applyBlockPack(rom: Rom, pkg: PatchPackage, plan: BlockPackPlan,
       if (opt.level !== null && g.slot) {
         const ext = EXT_GFX_SLOT_NAMES.indexOf(g.slot);
         const std = GFX_SLOT_NAMES.indexOf(g.slot);
-        if (ext >= 0 && !extGfxAvailable(rom)) notes.push(`${g.slot}-Slot noch nicht verfügbar (VRAM-Patch fehlt) – die Grafik ist gespeichert, wird aber noch nicht geladen`);
+        if (ext >= 0 && !extGfxAvailable(rom)) notes.push(`${g.slot} slot not available yet (VRAM patch missing) – the graphics are stored but not loaded yet`);
         else if (ext >= 0) { const s = levelExtGfx(rom, opt.level); s[ext] = g.num; setLevelExtGfx(rom, opt.level, s); }
         else if (std >= 0) { const s = levelGfx(rom, opt.level); s[std] = g.num; setLevelGfx(rom, opt.level, s); }
-        if ((ext >= 0 && extGfxAvailable(rom)) || std >= 0) where = ` als ${g.slot} von Level ${opt.level.toString(16).toUpperCase().padStart(3, '0')}`;
+        if ((ext >= 0 && extGfxAvailable(rom)) || std >= 0) where = ` as ${g.slot} of level ${opt.level.toString(16).toUpperCase().padStart(3, '0')}`;
       }
       notes.push(`ExGFX ${g.num.toString(16).toUpperCase()} (${what})${where}`);
     }

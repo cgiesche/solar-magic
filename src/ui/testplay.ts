@@ -1,4 +1,4 @@
-// "Level testen": runs the edited level in the built-in emulator (video + input, no sound).
+// "Test level": runs the edited level in the built-in emulator (video + input, no sound).
 
 import type { App } from './app.ts';
 import { h, modal } from './dom.ts';
@@ -121,15 +121,15 @@ export function openTestPlay(app: App, at?: { tx: number; ty: number }): void {
       acc -= 1000 / 60;
       if (!paused) {
         s.joy1 = keys | pad.bits;
-        try { s.runFrame(); } catch (e) { info.textContent = `Emulationsfehler: ${e}`; paused = true; }
+        try { s.runFrame(); } catch (e) { info.textContent = `Emulation error: ${e}`; paused = true; }
         frames++;
       }
       n++;
     }
     new Uint32Array(img.data.buffer).set(ppu.frame);
     ctx.putImageData(img, 0, 0);
-    info.textContent = `Level ${hex(lv.number, 3)} · Frame ${frames}${paused ? ' · Pause' : ''} · Spielmodus ${hex(s.wram[0x100], 2)}`
-      + (padNames.length ? ` · Gamepad: ${padNames.join(', ')}` : ' · Gamepad: keins erkannt (eine Taste drücken)');
+    info.textContent = `Level ${hex(lv.number, 3)} · Frame ${frames}${paused ? ' · Pause' : ''} · Game mode ${hex(s.wram[0x100], 2)}`
+      + (padNames.length ? ` · Gamepad: ${padNames.join(', ')}` : ' · Gamepad: none detected (press a button)');
     schedule();
   };
   // requestAnimationFrame pauses in hidden tabs; fall back to timers there
@@ -142,11 +142,11 @@ export function openTestPlay(app: App, at?: { tx: number; ty: number }): void {
     window.removeEventListener('keydown', kd, true);
     window.removeEventListener('keyup', ku, true);
   };
-  const m = modal(`Level testen – ${hex(lv.number, 3)}${at ? ` ab ${hex(at.tx, 2)}/${hex(at.ty, 2)}` : ''}${r.ok ? '' : ' (Ladefehler)'}`, h('div', { class: 'play' },
+  const m = modal(`Test level – ${hex(lv.number, 3)}${at ? ` from ${hex(at.tx, 2)}/${hex(at.ty, 2)}` : ''}${r.ok ? '' : ' (load error)'}`, h('div', { class: 'play' },
     canvas,
     info,
-    h('div', { class: 'hint' }, 'Steuerung: Pfeile · X = Springen (B) · Z/Y = Rennen/Feuer (Y) · A = Drehsprung · S = X-Taste · Enter = Start · Shift = Select · Q/W = L/R · P = Pause. Gamepad: Steuerkreuz/linker Stick, Tasten nach Position wie beim SNES-Pad (unten = B, rechts = A, links = Y, oben = X), Schultertasten/Trigger = L/R, Start/Select, Home = Pause. Ohne Ton. Ungespeicherte Änderungen werden mitgetestet.'),
-  ), [{ label: 'Neu starten', onClick: () => { setTimeout(() => openTestPlay(app, at), 0); } }, { label: 'Beenden', primary: true }], stop);
+    h('div', { class: 'hint' }, 'Controls: arrows · X = jump (B) · Z/Y = run/fire (Y) · A = spin jump · S = X button · Enter = Start · Shift = Select · Q/W = L/R · P = pause. Gamepad: d-pad/left stick, buttons by position as on the SNES pad (bottom = B, right = A, left = Y, top = X), shoulder buttons/triggers = L/R, Start/Select, Home = pause. No sound. Unsaved changes are included in the test.'),
+  ), [{ label: 'Restart', onClick: () => { setTimeout(() => openTestPlay(app, at), 0); } }, { label: 'Quit', primary: true }], stop);
   void m;
   canvas.focus();
 }

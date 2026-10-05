@@ -59,7 +59,7 @@ export function packageFiles(fileName: string, data: Uint8Array): Map<string, Ui
     for (const [path, content] of Object.entries(all)) {
       if (path.endsWith('/') || path.startsWith('__MACOSX/') || /(^|\/)\.[^/]*$/.test(path)) continue;
       total += content.length;
-      if (files.size >= MAX_FILES || total > MAX_TOTAL) throw new Error('Das Archiv ist zu groß');
+      if (files.size >= MAX_FILES || total > MAX_TOTAL) throw new Error('The archive is too large');
       files.set(path.replace(/\\/g, '/'), content);
     }
     // strip one common top-level folder
@@ -81,18 +81,18 @@ export function readPackage(fileName: string, data: Uint8Array): PatchPackage {
 // package from already extracted files (paths relative to the package root)
 export function packageFromFiles(fileName: string, files: Map<string, Uint8Array>): PatchPackage {
   const base = fileName.replace(/\.[^.]*$/, '');
-  if (!files.size) throw new Error('Das Archiv ist leer');
+  if (!files.size) throw new Error('The archive is empty');
 
   let manifest: PatchManifest | null = null;
   const mf = files.get('patch.json');
   if (mf) {
     manifest = JSON.parse(new TextDecoder().decode(mf)) as PatchManifest;
-    if (!manifest.name || !manifest.main) throw new Error('patch.json: "name" und "main" sind Pflichtfelder');
-    if (!files.has(manifest.main)) throw new Error(`patch.json: Hauptdatei „${manifest.main}“ fehlt im Archiv`);
+    if (!manifest.name || !manifest.main) throw new Error('patch.json: "name" and "main" are required');
+    if (!files.has(manifest.main)) throw new Error(`patch.json: main file “${manifest.main}” is missing from the archive`);
   }
   const depth = (p: string) => p.split('/').length;
   const asmFiles = [...files.keys()].filter((p) => /\.(asm|asar)$/i.test(p)).sort((a, b) => depth(a) - depth(b) || a.localeCompare(b));
-  if (!asmFiles.length) throw new Error('Keine .asm-Datei gefunden');
+  if (!asmFiles.length) throw new Error('No .asm file found');
   let main = manifest?.main ?? null;
   if (!main) {
     const top = asmFiles.filter((p) => depth(p) === depth(asmFiles[0]));
@@ -172,7 +172,7 @@ export function manifestRam(pkg: PatchPackage, mainText: string, defines: Record
   for (const r of pkg.manifest?.ram ?? []) {
     const v = r.define !== undefined ? defines[r.define] ?? own.get(r.define) : r.addr;
     const a = typeof v === 'number' ? v : parseNum(String(v ?? '').trim());
-    if (a === null || !(r.size > 0)) throw new Error(`patch.json: RAM-Angabe ${JSON.stringify(r)} ist ungültig`);
+    if (a === null || !(r.size > 0)) throw new Error(`patch.json: RAM entry ${JSON.stringify(r)} is invalid`);
     out.push(r.shared ? [a, r.size, 1] : [a, r.size]);
   }
   return out;

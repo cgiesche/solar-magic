@@ -70,10 +70,10 @@ export function textToLine(s: string): number[] {
     const m = /^\{([0-9a-fA-F]{2})\}/.exec(s.slice(i));
     if (m) { out.push(parseInt(m[1], 16) & 0x7f); i += m[0].length - 1; continue; }
     const c = CHAR_TO_CODE.get(s[i]);
-    if (c === undefined) throw new Error(`Zeichen „${s[i]}“ gibt es in der Nachrichtenschrift nicht`);
+    if (c === undefined) throw new Error(`Character “${s[i]}” does not exist in the message font`);
     out.push(c);
   }
-  if (out.length > MSG_COLS) throw new Error(`Zeile zu lang (${out.length} von ${MSG_COLS} Zeichen)`);
+  if (out.length > MSG_COLS) throw new Error(`Line too long (${out.length} of ${MSG_COLS} characters)`);
   return out;
 }
 
@@ -114,22 +114,22 @@ export function writeMessages(rom: Rom, msgs: Message[]): string {
   let where: string;
   if (!p && bytes.length <= MSG_TEXT_END - MSG_TEXT) {
     rom.writeBytes(MSG_TEXT, bytes);
-    where = 'an Ort und Stelle';
+    where = 'in place';
   } else {
     if (!p) p = installMessagePatch(rom);
     else rom.freeAt(p.text);
     const addr = rom.allocWrite(bytes);
     rom.w24(p.base + 4, addr);
     rom.w24(p.base + 8 + 3, addr); // operand of LDA.l in the routine
-    where = `in freiem Speicher @ $${addr.toString(16).toUpperCase()}`;
+    where = `in free space @ $${addr.toString(16).toUpperCase()}`;
   }
   offsets.forEach((o, i) => rom.w16(MSG_PTRS + i * 2, o));
-  return `${bytes.length} Bytes ${where}`;
+  return `${bytes.length} bytes ${where}`;
 }
 
 function installMessagePatch(rom: Rom): { base: number; text: number } {
   if (rom.r8(MSG_HOOK) !== 0xb9 || rom.r16(MSG_HOOK + 1) !== 0xa5d9 || rom.r8(MSG_HOOK + 3) !== 0x8d) {
-    throw new Error(`Unerwarteter Code bei $05B20F${ownerNote(rom, MSG_HOOK, 6)} – Nachrichten können nicht verlegt werden`);
+    throw new Error(`Unexpected code at $05B20F${ownerNote(rom, MSG_HOOK, 6)} – messages cannot be moved`);
   }
   const a = new Asm();
   a.b(...MSG_MAGIC); a.fill(4); // +4: text address

@@ -56,15 +56,15 @@ function originOf(addr: number): Origin {
 
 function originName(o: Origin): string {
   switch (o.kind) {
-    case 'back': return `Hintergrundfarbe ${o.num}`;
-    case 'bg': return `BG-Palette ${o.num}`;
-    case 'fg': return `FG-Palette ${o.num}`;
-    case 'spr': return `Sprite-Palette ${o.num}`;
-    case 'l3': return 'Layer 3 / Statusleiste';
+    case 'back': return `Back area color ${o.num}`;
+    case 'bg': return `BG palette ${o.num}`;
+    case 'fg': return `FG palette ${o.num}`;
+    case 'spr': return `Sprite palette ${o.num}`;
+    case 'l3': return 'Layer 3 / status bar';
     case 'mario': return 'Mario';
     case 'global': return 'Global';
-    case 'own': return 'Eigene Palette';
-    default: return 'vom Spiel gesetzt';
+    case 'own': return 'Own palette';
+    default: return 'set by the game';
   }
 }
 
@@ -105,7 +105,7 @@ export class PaletteTab implements WsPanel {
   }
 
   previewHint(): string {
-    return 'Klick: Farbe unter der Maus auswählen (Pipette)';
+    return 'Click: pick the color under the mouse (eyedropper)';
   }
 
   show(): void {
@@ -195,14 +195,14 @@ export class PaletteTab implements WsPanel {
     if (!users.size) return true;
     const list = [...users].sort((a, b) => a - b);
     const body = h('div', { style: 'max-width:480px; display:flex; flex-direction:column; gap:8px' },
-      h('p', { style: 'margin:0' }, `Diese Farbe gehört zu ${[...kinds].join(', ')}. Sie wird auch von ${list.length} anderen Level${list.length === 1 ? '' : 's'} benutzt:`),
+      h('p', { style: 'margin:0' }, `This color belongs to ${[...kinds].join(', ')}. It is also used by ${list.length} other level${list.length === 1 ? '' : 's'}:`),
       h('p', { class: 'hint mono', style: 'margin:0' }, list.slice(0, 24).map((n) => hex(n, 3)).join(' ') + (list.length > 24 ? ' …' : '')),
-      h('p', { class: 'hint', style: 'margin:0' }, '„Nur dieses Level“ legt eine eigene Palette mit allen 256 Farben für dieses Level an (installiert dafür einmalig einen kleinen Patch). Danach ändern sich andere Level nicht mehr mit.'),
+      h('p', { class: 'hint', style: 'margin:0' }, '“Only this level” creates an own palette with all 256 colors for this level (installs a small patch once for that). Other levels no longer change along with it.'),
     );
-    const c = await choose('Gemeinsame Palette ändern?', body, [
-      { label: 'Abbrechen' },
-      { label: `Für alle ${list.length + 1} Level ändern` },
-      { label: 'Nur dieses Level', primary: true },
+    const c = await choose('Change shared palette?', body, [
+      { label: 'Cancel' },
+      { label: `Change for all ${list.length + 1} levels` },
+      { label: 'Only this level', primary: true },
     ]);
     if (c === 1) { this.shareOk.add(lvl); return true; }
     if (c === 2) return this.makeOwn();
@@ -214,7 +214,7 @@ export class PaletteTab implements WsPanel {
     const pal = new Uint8Array(512);
     for (let i = 0; i < 256; i++) { const v = this.color(i); pal[i * 2] = v & 0xff; pal[i * 2 + 1] = v >> 8; }
     try {
-      this.custom = app.romEdit(`Eigene Palette für Level ${hex(app.level.number, 3)}`, () => setCustomPalette(app.rom, app.level.number, pal));
+      this.custom = app.romEdit(`Own palette for level ${hex(app.level.number, 3)}`, () => setCustomPalette(app.rom, app.level.number, pal));
     } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); return false; }
     this.headers = null;
     this.buildBar();
@@ -223,7 +223,7 @@ export class PaletteTab implements WsPanel {
 
   private dropOwn(): void {
     const app = this.app;
-    app.romEdit(`Eigene Palette von Level ${hex(app.level.number, 3)} entfernt`, () => setCustomPalette(app.rom, app.level.number, null));
+    app.romEdit(`Own palette of level ${hex(app.level.number, 3)} removed`, () => setCustomPalette(app.rom, app.level.number, null));
     this.custom = 0;
     this.trace = null;
     this.headers = null;
@@ -237,7 +237,7 @@ export class PaletteTab implements WsPanel {
   private async write(changes: [number, number][], label: string, key: string | null = null): Promise<void> {
     const ok = changes.filter(([i]) => this.src(i) >= 0);
     const locked = changes.length - ok.length;
-    if (locked && changes.length > 1) toast(`${locked} vom Spiel gesetzte Farbe${locked > 1 ? 'n' : ''} übersprungen (nur mit eigener Palette bearbeitbar)`);
+    if (locked && changes.length > 1) toast(`${locked} color${locked > 1 ? 's' : ''} set by the game skipped (only editable with an own palette)`);
     if (!ok.length) return;
     if (!(await this.allowed(ok.map(([i]) => i)))) { this.paint(); return; }
     this.app.romEdit(label, () => { for (const [i, v] of ok) this.app.rom.w16(this.src(i), v & 0x7fff); }, key);
@@ -245,7 +245,7 @@ export class PaletteTab implements WsPanel {
   }
 
   private setColor(v: number, key: string | null = null): void {
-    void this.write([[this.sel, v]], `Farbe ${hex(this.sel >> 4, 1)}·${hex(this.sel & 15, 1)}`, key);
+    void this.write([[this.sel, v]], `Color ${hex(this.sel >> 4, 1)}·${hex(this.sel & 15, 1)}`, key);
   }
 
   // ---------- UI ----------
@@ -255,17 +255,17 @@ export class PaletteTab implements WsPanel {
     const own = this.custom !== 0;
     this.bar.append(
       h('span', { class: 'prop-title' }, `Level ${hex(app.level.number, 3)}`),
-      own ? h('span', { class: 'badge' }, 'eigene Palette') : h('span', { class: 'badge muted', title: 'Farben kommen aus den gemeinsamen Paletten-Tabellen (FG/BG/Sprite-Palette des Headers)' }, 'gemeinsame Paletten'),
-      own ? h('button', { onclick: () => this.dropOwn(), title: 'Wieder die gemeinsamen Paletten des Headers benutzen' }, 'Eigene Palette entfernen')
-        : h('button', { onclick: () => { if (this.makeOwn()) this.paint(); }, title: 'Alle 256 Farben nur für dieses Level (macht auch die grauen Farben bearbeitbar)' }, 'Eigene Palette anlegen'),
+      own ? h('span', { class: 'badge' }, 'own palette') : h('span', { class: 'badge muted', title: 'Colors come from the shared palette tables (FG/BG/sprite palette of the header)' }, 'shared palettes'),
+      own ? h('button', { onclick: () => this.dropOwn(), title: 'Use the header\'s shared palettes again' }, 'Remove own palette')
+        : h('button', { onclick: () => { if (this.makeOwn()) this.paint(); }, title: 'All 256 colors for this level only (also makes the gray colors editable)' }, 'Create own palette'),
       h('span', { class: 'sep' }),
-      h('button', { onclick: () => this.copyRow(), title: 'Gewählte Palette (16 Farben) kopieren (Strg+C)' }, 'Palette kopieren'),
-      h('button', { onclick: () => this.pasteRow(), title: 'Kopierte Palette in die gewählte einfügen (Strg+V)' }, 'Palette einfügen'),
-      h('button', { onclick: () => this.gradient(), title: 'Shift+Klick markiert einen Bereich in der Palette; die Farben dazwischen werden ein Verlauf' }, 'Verlauf'),
+      h('button', { onclick: () => this.copyRow(), title: 'Copy the selected palette (16 colors) (Ctrl+C)' }, 'Copy palette'),
+      h('button', { onclick: () => this.pasteRow(), title: 'Paste the copied palette into the selected one (Ctrl+V)' }, 'Paste palette'),
+      h('button', { onclick: () => this.gradient(), title: 'Shift+click marks a range in the palette; the colors in between become a gradient' }, 'Gradient'),
       h('span', { class: 'spacer' }),
       menuButton({ label: 'Import/Export', items: [
-        { label: 'Importieren (.pal) …', title: 'Farben aus einer .pal-Datei (RGB) übernehmen', onClick: () => void this.importPal() },
-        { label: 'Exportieren (.pal)', title: 'Alle 256 Farben als .pal (RGB, 768 Bytes)', onClick: () => this.exportPal() },
+        { label: 'Import (.pal) …', title: 'Take colors from a .pal file (RGB)', onClick: () => void this.importPal() },
+        { label: 'Export (.pal)', title: 'All 256 colors as .pal (RGB, 768 bytes)', onClick: () => this.exportPal() },
       ] }),
     );
   }
@@ -306,7 +306,7 @@ export class PaletteTab implements WsPanel {
       const animated = !!this.app.animated()?.colors.has(i);
       sw.classList.toggle('locked', locked);
       sw.classList.toggle('animated', animated);
-      sw.title = `Farbe ${hex(i >> 4, 1)}·${hex(i & 15, 1)} – ${locked ? 'vom Spiel gesetzt, nicht bearbeitbar (nur mit eigener Palette)' : originName(this.origin(i))}${animated ? ' · animiert: das Spiel schreibt sie laufend neu' : ''}`;
+      sw.title = `Color ${hex(i >> 4, 1)}·${hex(i & 15, 1)} – ${locked ? 'set by the game, not editable (only with an own palette)' : originName(this.origin(i))}${animated ? ' · animated: the game keeps rewriting it' : ''}`;
     }
     for (let row = 0; row < 16; row++) {
       const names: string[] = [];
@@ -316,7 +316,7 @@ export class PaletteTab implements WsPanel {
         const n = originName(this.origin(i));
         if (!names.includes(n)) names.push(n);
       }
-      this.rowLabels[row].textContent = this.custom ? (row === 0 ? 'Eigene Palette dieses Levels' : '') : names.filter((n) => n !== 'Global' || names.length === 1).join(' · ');
+      this.rowLabels[row].textContent = this.custom ? (row === 0 ? 'Own palette of this level' : '') : names.filter((n) => n !== 'Global' || names.length === 1).join(' · ');
     }
     this.buildDetail();
     this.buildHeader();
@@ -335,26 +335,26 @@ export class PaletteTab implements WsPanel {
     const others = users ? users.filter((n) => n !== this.app.level.number).length : 0;
     d.append(
       h('div', { class: 'pt-big', style: { background: cssOf(c) } }),
-      h('div', { class: 'prop-title' }, `Farbe ${hex(i >> 4, 1)}·${hex(i & 15, 1)}`, h('span', { class: 'hint' }, `  Palette ${hex(i >> 4, 1)}, Farbe ${hex(i & 15, 1)}`)),
-      h('div', { class: 'hint' }, editable ? `${originName(o)} · ${o.kind === 'own' ? 'gilt nur für dieses Level' : others ? `auch in ${others} anderen Level${others === 1 ? '' : 's'}` : 'nur dieses Level'}` : ''),
-      this.app.animated()?.colors.has(i) ? h('div', { class: 'warn-box' }, 'Animiert: das Spiel schreibt diese Farbe laufend neu (Blinken von Münzen, ?-Blöcken o. ä.). Eine Änderung hier sieht man im Spiel kaum oder gar nicht.') : '',
+      h('div', { class: 'prop-title' }, `Color ${hex(i >> 4, 1)}·${hex(i & 15, 1)}`, h('span', { class: 'hint' }, `  Palette ${hex(i >> 4, 1)}, color ${hex(i & 15, 1)}`)),
+      h('div', { class: 'hint' }, editable ? `${originName(o)} · ${o.kind === 'own' ? 'applies to this level only' : others ? `also in ${others} other level${others === 1 ? '' : 's'}` : 'this level only'}` : ''),
+      this.app.animated()?.colors.has(i) ? h('div', { class: 'warn-box' }, 'Animated: the game keeps rewriting this color (flashing coins, ?-blocks etc.). A change here is barely or not at all visible in the game.') : '',
     );
     if (!editable) {
       d.append(
-        h('p', { class: 'pt-locked' }, 'Diese Farbe setzt das Spiel zur Laufzeit (Statusleiste, Animation o. ä.) – sie hat keinen festen Platz in den Paletten-Tabellen.'),
-        h('button', { onclick: () => { if (this.makeOwn()) this.paint(); } }, 'Eigene Palette anlegen (macht alle Farben bearbeitbar)'),
+        h('p', { class: 'pt-locked' }, 'The game sets this color at run time (status bar, animation etc.) – it has no fixed place in the palette tables.'),
+        h('button', { onclick: () => { if (this.makeOwn()) this.paint(); } }, 'Create own palette (makes all colors editable)'),
       );
       return;
     }
     const [R, G, B] = rgbOf(c);
     const vals = [R, G, B];
-    const htmlIn = h('input', { class: 'mono', value: htmlOf(c), size: 8, spellcheck: false, title: 'HTML-Farbe; wird auf die 15-Bit-SNES-Farbe gerundet' });
+    const htmlIn = h('input', { class: 'mono', value: htmlOf(c), size: 8, spellcheck: false, title: 'HTML color; rounded to the 15-bit SNES color' });
     htmlIn.addEventListener('change', () => { const v = parseHtml(htmlIn.value); if (v === null) htmlIn.value = htmlOf(c); else this.setColor(v); });
     const picker = h('input', { type: 'color', value: htmlOf(c) });
     picker.addEventListener('input', () => { const v = parseHtml(picker.value); if (v !== null) this.setColor(v, `pal:${i}`); });
     picker.addEventListener('change', () => { picker.blur(); this.buildDetail(); });
     const big = d.firstChild as HTMLElement;
-    const sliders = ['Rot', 'Grün', 'Blau'].map((l, k) => {
+    const sliders = ['Red', 'Green', 'Blue'].map((l, k) => {
       const inp = h('input', { type: 'range', min: 0, max: 31, value: String(vals[k]), class: `pt-slider pt-${'rgb'[k]}` });
       const num = h('input', { type: 'number', min: 0, max: 31, value: String(vals[k]), class: 'pt-num' });
       const cur = () => vals[0] | (vals[1] << 5) | (vals[2] << 10);
@@ -369,9 +369,9 @@ export class PaletteTab implements WsPanel {
     });
     d.append(
       ...sliders,
-      h('div', { class: 'prop' }, h('label', null, 'HTML-Farbe'), htmlIn, picker),
-      h('div', { class: 'prop' }, h('label', null, 'SNES-Wert'), h('span', { class: 'mono' }, `$${hex(c, 4)}`), h('span', { class: 'hint mono' }, `@ $${hex(this.src(i), 6)}`)),
-      h('p', { class: 'hint' }, 'Shift+Klick markiert einen Bereich der Palette (für „Verlauf“). Klick in die Level-Vorschau wählt die Farbe dort.'),
+      h('div', { class: 'prop' }, h('label', null, 'HTML color'), htmlIn, picker),
+      h('div', { class: 'prop' }, h('label', null, 'SNES value'), h('span', { class: 'mono' }, `$${hex(c, 4)}`), h('span', { class: 'hint mono' }, `@ $${hex(this.src(i), 6)}`)),
+      h('p', { class: 'hint' }, 'Shift+click marks a range of the palette (for “Gradient”). A click into the level preview selects the color there.'),
     );
   }
 
@@ -381,7 +381,7 @@ export class PaletteTab implements WsPanel {
     const box = this.headerBox;
     clear(box);
     if (this.custom) {
-      box.append(h('p', { class: 'hint' }, 'Mit eigener Palette spielen FG-, BG- und Sprite-Palette des Headers keine Rolle.'));
+      box.append(h('p', { class: 'hint' }, 'With an own palette, the header\'s FG, BG and sprite palettes do not matter.'));
       return;
     }
     const hd = app.level.header;
@@ -407,11 +407,11 @@ export class PaletteTab implements WsPanel {
           },
         }, tableCanvas(base, k, colors), h('span', null, String(k))))));
     box.append(
-      h('div', { class: 'panel-title' }, 'Paletten dieses Levels (Header)'),
-      group('FG-Palette', 'fgPalette', FG_PALS, 6),
-      group('BG-Palette', 'bgPalette', BG_PALS, 6),
-      group('Sprite-Palette', 'spritePalette', SPR_PALS, 6),
-      group('Hintergrundfarbe', 'backAreaColor', BACK_AREA, 1),
+      h('div', { class: 'panel-title' }, 'Palettes of this level (header)'),
+      group('FG palette', 'fgPalette', FG_PALS, 6),
+      group('BG palette', 'bgPalette', BG_PALS, 6),
+      group('Sprite palette', 'spritePalette', SPR_PALS, 6),
+      group('Back area color', 'backAreaColor', BACK_AREA, 1),
     );
   }
 
@@ -422,17 +422,17 @@ export class PaletteTab implements WsPanel {
 
   private copyRow(): void {
     this.clip = this.rowIdx().map((i) => this.color(i));
-    toast(`Palette ${hex(this.sel >> 4, 1)} kopiert`);
+    toast(`Palette ${hex(this.sel >> 4, 1)} copied`);
   }
   private pasteRow(): void {
     const clip = this.clip;
-    if (!clip) { toast('Erst eine Palette kopieren'); return; }
+    if (!clip) { toast('Copy a palette first'); return; }
     // color 0 is transparent (except the back area color in row 0) and stays
-    void this.write(this.rowIdx().map((i, c) => [i, clip[c]] as [number, number]).filter(([i]) => i & 15), `Palette ${hex(this.sel >> 4, 1)} eingefügt`);
+    void this.write(this.rowIdx().map((i, c) => [i, clip[c]] as [number, number]).filter(([i]) => i & 15), `Palette ${hex(this.sel >> 4, 1)} pasted`);
   }
   private gradient(): void {
     const lo = Math.min(this.sel, this.selEnd), hi = Math.max(this.sel, this.selEnd);
-    if (hi - lo < 2) { toast('Mit Shift+Klick erst einen Bereich von mindestens 3 Farben markieren'); return; }
+    if (hi - lo < 2) { toast('First mark a range of at least 3 colors with Shift+click'); return; }
     const a = rgbOf(this.color(lo)), b = rgbOf(this.color(hi));
     const ch: [number, number][] = [];
     for (let i = lo + 1; i < hi; i++) {
@@ -440,7 +440,7 @@ export class PaletteTab implements WsPanel {
       const v = a.map((x, k) => Math.round(x + (b[k] - x) * t));
       ch.push([i, v[0] | (v[1] << 5) | (v[2] << 10)]);
     }
-    void this.write(ch, 'Farbverlauf');
+    void this.write(ch, 'Color gradient');
   }
 
   private exportPal(): void {
@@ -450,18 +450,18 @@ export class PaletteTab implements WsPanel {
       out[i * 3] = v & 255; out[i * 3 + 1] = (v >> 8) & 255; out[i * 3 + 2] = (v >> 16) & 255;
     }
     downloadBytes(`level${hex(this.app.level.number, 3)}.pal`, out);
-    toast(`level${hex(this.app.level.number, 3)}.pal exportiert`);
+    toast(`level${hex(this.app.level.number, 3)}.pal exported`);
   }
   private async importPal(): Promise<void> {
     const f = await pickFile('.pal');
     if (!f) return;
     const d = new Uint8Array(await f.arrayBuffer());
-    if (d.length < 768) { toast('.pal-Datei muss 768 Bytes (256 RGB-Farben) haben', 'error'); return; }
+    if (d.length < 768) { toast('.pal file must have 768 bytes (256 RGB colors)', 'error'); return; }
     const ch: [number, number][] = [];
     for (let i = 0; i < 256; i++) ch.push([i, (d[i * 3] >> 3) | ((d[i * 3 + 1] >> 3) << 5) | ((d[i * 3 + 2] >> 3) << 10)]);
     const n = ch.filter(([i]) => this.src(i) >= 0).length;
-    await this.write(ch, `${f.name} importiert`);
-    toast(`${n} Farben übernommen${n < 256 ? ' (die übrigen setzt das Spiel; „Eigene Palette“ macht alle bearbeitbar)' : ''}`);
+    await this.write(ch, `${f.name} imported`);
+    toast(`${n} colors applied${n < 256 ? ' (the game sets the rest; “Own palette” makes all editable)' : ''}`);
   }
 
   // pipette: the CGRAM entry with the clicked pixel's color (FG/BG rows first)
@@ -474,7 +474,7 @@ export class PaletteTab implements WsPanel {
       if (pal[row * 16 + c] === v) { this.select(row * 16 + c); return; }
     }
     if (pal[0] === v || (v >>> 0) === (im.backdrop >>> 0)) { this.select(0); return; }
-    toast('Farbe nicht in der Palette gefunden (gemischt/transparent?)');
+    toast('Color not found in the palette (blended/transparent?)');
   }
 
   key(e: KeyboardEvent): boolean {

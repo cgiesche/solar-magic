@@ -9,10 +9,10 @@ import { TileCache, blit8 } from '../core/render.ts';
 import { levelTranslevel } from '../core/level.ts';
 
 function label(app: App, i: number, users: { translevel: number; msg: number }[]): string {
-  if (i < 4) return `Switch-Palast ${i + 1}`;
-  if (i === 0x17) return 'Yoshis Haus (mit Yoshi)';
-  if (i === 0x18) return 'Nachricht 3 (Intro)';
-  return users.map((u) => `Level ${hex(translevelToLevel(u.translevel), 3)} ${levelName(app.rom, u.translevel)} · Nachricht ${u.msg}`).join(', ') || '(unbenutzt)';
+  if (i < 4) return `Switch palace ${i + 1}`;
+  if (i === 0x17) return 'Yoshi\'s House (with Yoshi)';
+  if (i === 0x18) return 'Message 3 (intro)';
+  return users.map((u) => `Level ${hex(translevelToLevel(u.translevel), 3)} ${levelName(app.rom, u.translevel)} · message ${u.msg}`).join(', ') || '(unused)';
 }
 
 export function openMessagesDialog(app: App): void {
@@ -65,26 +65,26 @@ export function openMessagesDialog(app: App): void {
       return inp;
     });
     detail.append(
-      h('div', { class: 'prop-title' }, `Nachricht ${hex(sel, 2)} – ${label(app, sel, users[sel])}`),
+      h('div', { class: 'prop-title' }, `Message ${hex(sel, 2)} – ${label(app, sel, users[sel])}`),
       canvas,
       h('div', { class: 'msg-lines' }, inputs),
       err,
-      h('p', { class: 'hint' }, `Bis zu ${MSG_COLS} Zeichen pro Zeile: A–Z a–z 0–7 ! . - , ? # ( ) ' und Leerzeichen; andere Zeichen als {xx} (Hex-Code der Schrift, z. B. {60}{61} für Yoshis Unterschrift). Die Schrift hat keine 8 und 9.`),
+      h('p', { class: 'hint' }, `Up to ${MSG_COLS} characters per line: A–Z a–z 0–7 ! . - , ? # ( ) ' and space; other characters as {xx} (hex code in the font, e.g. {60}{61} for Yoshi's signature). The font has no 8 and 9.`),
     );
     drawPreview(canvas, m);
   };
   buildList();
   buildDetail();
-  modal('Nachrichten', h('div', { class: 'msg-editor' }, list, detail), [
-    { label: 'Abbrechen' },
+  modal('Messages', h('div', { class: 'msg-editor' }, list, detail), [
+    { label: 'Cancel' },
     {
-      label: 'Übernehmen', primary: true, onClick: () => {
+      label: 'Apply', primary: true, onClick: () => {
         if (!changed) return;
         try {
           const log = writeMessages(rom, msgs);
           app.emu.syncRom();
           app.persist();
-          toast(`Nachrichten gespeichert: ${log}`);
+          toast(`Messages saved: ${log}`);
         } catch (e) {
           toast(String(e instanceof Error ? e.message : e), 'error');
           return false;

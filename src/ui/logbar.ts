@@ -3,7 +3,7 @@
 import { h, logEntries, onLog, clearLog, type LogEntry } from './dom.ts';
 
 const PREF = 'smw-log-open';
-const KIND_LABEL = { info: 'Meldung', error: 'Fehler', event: 'Ereignis' } as const;
+const KIND_LABEL = { info: 'Message', error: 'Error', event: 'Event' } as const;
 
 const pad = (n: number) => String(n).padStart(2, '0');
 const timeStr = (d: Date) => `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
@@ -12,16 +12,16 @@ export class LogBar {
   readonly root: HTMLElement;
   private list = h('div', { class: 'log-list' });
   private latest = h('span', { class: 'log-latest' });
-  private toggleBtn = h('button', { class: 'log-toggle', title: 'Protokoll ein-/ausklappen (L)' });
-  private errBadge = h('span', { class: 'log-badge', title: 'Neue Fehler seit dem letzten Aufklappen' });
+  private toggleBtn = h('button', { class: 'log-toggle', title: 'Expand/collapse log (L)' });
+  private errBadge = h('span', { class: 'log-badge', title: 'New errors since last expanded' });
   private rows = new Map<LogEntry, HTMLElement>();
   private unseenErrors = 0;
   private open = false;
 
   constructor() {
-    const copyBtn = h('button', { title: 'Protokoll als Text in die Zwischenablage' }, 'Kopieren');
+    const copyBtn = h('button', { title: 'Copy log as text to the clipboard' }, 'Copy');
     copyBtn.onclick = () => this.copy(copyBtn);
-    const clearBtn = h('button', { class: 'danger', title: 'Alle Einträge entfernen', onclick: () => clearLog() }, 'Leeren');
+    const clearBtn = h('button', { class: 'danger', title: 'Remove all entries', onclick: () => clearLog() }, 'Clear');
     const head = h('div', { class: 'log-head' }, this.toggleBtn, this.errBadge, this.latest, h('span', { class: 'log-actions' }, copyBtn, clearBtn));
     // clicking the collapsed line opens it, the buttons keep their own action
     head.addEventListener('click', (e) => { if (!(e.target as HTMLElement).closest('.log-actions')) this.toggle(); });
@@ -39,7 +39,7 @@ export class LogBar {
   private setOpen(open: boolean): void {
     this.open = open;
     this.root.classList.toggle('open', open);
-    this.toggleBtn.textContent = open ? '▾ Protokoll' : '▸ Protokoll';
+    this.toggleBtn.textContent = open ? '▾ Log' : '▸ Log';
     try { localStorage.setItem(PREF, open ? '1' : '0'); } catch { /* no storage */ }
     if (open) {
       this.unseenErrors = 0;
@@ -89,15 +89,15 @@ export class LogBar {
     const e = logEntries[logEntries.length - 1];
     this.latest.replaceChildren(...(e
       ? [h('span', { class: 'log-time' }, timeStr(e.time)), h('span', { class: `log-msg ${e.kind}` }, e.msg), e.count > 1 ? h('span', { class: 'log-count' }, `×${e.count}`) : '']
-      : [h('span', { class: 'hint' }, 'Noch keine Meldungen')]));
+      : [h('span', { class: 'hint' }, 'No messages yet')]));
     this.latest.style.visibility = this.open ? 'hidden' : '';
-    this.errBadge.textContent = this.unseenErrors ? `${this.unseenErrors} Fehler` : '';
+    this.errBadge.textContent = this.unseenErrors ? `${this.unseenErrors} error${this.unseenErrors === 1 ? '' : 's'}` : '';
     this.errBadge.hidden = !this.unseenErrors;
   }
 
   private copy(btn: HTMLButtonElement): void {
     const text = logEntries.map((e) => `${timeStr(e.time)}  [${KIND_LABEL[e.kind]}]  ${e.msg}${e.count > 1 ? `  ×${e.count}` : ''}`).join('\n');
-    const done = (label: string) => { btn.textContent = label; setTimeout(() => (btn.textContent = 'Kopieren'), 1500); };
-    navigator.clipboard.writeText(text).then(() => done('Kopiert ✓'), () => done('Fehlgeschlagen'));
+    const done = (label: string) => { btn.textContent = label; setTimeout(() => (btn.textContent = 'Copy'), 1500); };
+    navigator.clipboard.writeText(text).then(() => done('Copied ✓'), () => done('Failed'));
   }
 }

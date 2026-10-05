@@ -18,7 +18,8 @@ import { listPatches } from './patchreg.ts';
 import { EXANIMATION_ASM, MEMORY_ASM } from './kobo/exanimation.ts';
 import { installEditorPatch } from './patches.ts';
 
-export const EXANIM_PATCH_NAME = 'ExAnimation (Lunar-Magic-Format)';
+export const EXANIM_PATCH_NAME = 'ExAnimation (Lunar Magic format)';
+const EXANIM_PATCH_NAME_OLD = 'ExAnimation (Lunar-Magic-Format)'; // name in ROMs patched before the UI was English
 const LOAD_HOOK = 0x0583ad;
 const NMI_HOOK = 0x00a390;
 const TABLE_OFFSET = 0xea;
@@ -82,36 +83,36 @@ export function frameWords(type: number, trigger: number, framesLess1: number): 
 }
 
 export const TYPE_NAMES: Record<number, string> = {
-  0x01: '1 Tile', 0x02: '2 Tiles nebeneinander', 0x03: '3 Tiles', 0x04: '4 Tiles nebeneinander', 0x05: '5 Tiles', 0x06: '6 Tiles', 0x07: '7 Tiles', 0x08: '8 Tiles',
-  0x09: '12 Tiles', 0x0a: '16 Tiles', 0x0b: '20 Tiles', 0x0c: '24 Tiles', 0x0d: '28 Tiles', 0x0e: '32 Tiles', 0x0f: '1 Tile (2bpp, Layer 3)',
-  0x10: '2 Tiles übereinander (8×16)', 0x11: '16×16 (2×2 Tiles)', 0x12: '32×16 (4×2 Tiles)',
-  0x13: 'Farben (nur CGRAM)', 0x14: 'Farben (Palette, blendet mit)', 0x15: 'Farben (bis Levelende)', 0x16: 'Hintergrundfarbe', 0x17: 'Hintergrundfarbe (bis Levelende)',
-  0x18: 'Farben rotieren rechts', 0x19: 'Farben rotieren rechts (umkehrbar)', 0x1a: 'Farben rotieren links', 0x1b: 'Farben rotieren links (umkehrbar)',
+  0x01: '1 tile', 0x02: '2 tiles side by side', 0x03: '3 tiles', 0x04: '4 tiles side by side', 0x05: '5 tiles', 0x06: '6 tiles', 0x07: '7 tiles', 0x08: '8 tiles',
+  0x09: '12 tiles', 0x0a: '16 tiles', 0x0b: '20 tiles', 0x0c: '24 tiles', 0x0d: '28 tiles', 0x0e: '32 tiles', 0x0f: '1 tile (2bpp, layer 3)',
+  0x10: '2 tiles stacked (8×16)', 0x11: '16×16 (2×2 tiles)', 0x12: '32×16 (4×2 tiles)',
+  0x13: 'Colors (CGRAM only)', 0x14: 'Colors (palette, fades along)', 0x15: 'Colors (until level end)', 0x16: 'Background color', 0x17: 'Background color (until level end)',
+  0x18: 'Rotate colors right', 0x19: 'Rotate colors right (reversible)', 0x1a: 'Rotate colors left', 0x1b: 'Rotate colors left (reversible)',
 };
 
 export function triggerName(t: number): string {
   const fixed: Record<number, string> = {
-    0x00: 'Immer', 0x01: 'Blauer P-Schalter', 0x02: 'Silberner P-Schalter', 0x03: 'ON/OFF-Schalter', 0x04: 'Stern', 0x05: 'Zeit unter 100',
-    0x06: 'Stern (einmalig)', 0x07: '5 Drachenmünzen', 0x08: '5 Drachenmünzen (einmalig)', 0x0f: 'Präzisions-Timer',
+    0x00: 'Always', 0x01: 'Blue P-switch', 0x02: 'Silver P-switch', 0x03: 'ON/OFF switch', 0x04: 'Star', 0x05: 'Time below 100',
+    0x06: 'Star (one-time)', 0x07: '5 Dragon Coins', 0x08: '5 Dragon Coins (one-time)', 0x0f: 'Precision timer',
   };
   if (fixed[t] !== undefined) return fixed[t];
-  if (t >= 0x09 && t <= 0x0e) return `Reserviert ${t.toString(16).toUpperCase()}`;
-  if (t >= 0x10 && t <= 0x1f) return `Manuell ${(t - 0x10).toString(16).toUpperCase()}`;
+  if (t >= 0x09 && t <= 0x0e) return `Reserved ${t.toString(16).toUpperCase()}`;
+  if (t >= 0x10 && t <= 0x1f) return `Manual ${(t - 0x10).toString(16).toUpperCase()}`;
   if (t >= 0x20 && t <= 0x2f) return `Custom ${(t - 0x20).toString(16).toUpperCase()}`;
   if (t >= 0x30 && t <= 0x4f) return `One-Shot ${(t - 0x30).toString(16).toUpperCase().padStart(2, '0')}`;
   return `$${t.toString(16)}`;
 }
 // what the second frame set means
 export function secondSetName(t: number): string {
-  return ({ 1: 'P-Schalter aktiv', 2: 'P-Schalter aktiv', 3: 'Schalter auf OFF', 4: 'Stern aktiv', 5: 'Zeit unter 100', 7: '5 Drachenmünzen gesammelt' } as Record<number, string>)[t] ?? 'Auslöser an';
+  return ({ 1: 'P-switch active', 2: 'P-switch active', 3: 'Switch OFF', 4: 'Star active', 5: 'Time below 100', 7: '5 Dragon Coins collected' } as Record<number, string>)[t] ?? 'Trigger on';
 }
 
 // ---- list bytes ----
 export function parseList(b: Uint8Array): { list: ExList; length: number } {
-  const get = (i: number) => { if (i >= b.length) throw new Error('ExAnimation-Liste abgeschnitten'); return b[i]; };
+  const get = (i: number) => { if (i >= b.length) throw new Error('ExAnimation list truncated'); return b[i]; };
   const word = (i: number) => get(i) | (get(i + 1) << 8);
   const count = get(0);
-  if (count > SLOTS) throw new Error('ExAnimation-Liste: zu viele Slots');
+  if (count > SLOTS) throw new Error('ExAnimation list: too many slots');
   const list: ExList = { count, altFile: get(1), customKeep: word(2), customSet: word(4), manual: new Map(), slots: new Map() };
   const mask = word(6);
   let at = 8;
@@ -123,7 +124,7 @@ export function parseList(b: Uint8Array): { list: ExList; length: number } {
     if (!off) continue;
     const p = base + off;
     const type = get(p), trigger = get(p + 1), framesLess1 = get(p + 2), dest = word(p + 3);
-    if (!kindOf(type)) throw new Error(`ExAnimation-Liste: unbekannter Typ ${type.toString(16)} in Slot ${s.toString(16)}`);
+    if (!kindOf(type)) throw new Error(`ExAnimation list: unknown type ${type.toString(16)} in slot ${s.toString(16)}`);
     const n = frameWords(type, trigger, framesLess1);
     const frames = Array.from({ length: n }, (_, i) => word(p + 5 + 2 * i));
     end = Math.max(end, p + 5 + 2 * n);
@@ -173,14 +174,14 @@ export function exanimInstalled(rom: Rom): boolean {
 export function installExAnim(rom: Rom): ApplyResult {
   if (exanimInstalled(rom)) return { ok: true, errors: [], warnings: [], prints: [] };
   if (rom.r8(LOAD_HOOK) === 0x22 || rom.r8(NMI_HOOK) === 0x22) {
-    return { ok: false, errors: ['Die ROM hat bereits eine ExAnimation in einem älteren Lunar-Magic-Format (oder einen anderen Patch an $0583AD/$00A390) – nicht unterstützt.'], warnings: [], prints: [] };
+    return { ok: false, errors: ['The ROM already has an ExAnimation in an older Lunar Magic format (or another patch at $0583AD/$00A390) – not supported.'], warnings: [], prints: [] };
   }
   installEditorPatch(rom); // keeps the level number in $010B, which the engine reads (as Lunar Magic's does)
   return applyPatch(rom, { name: EXANIM_PATCH_NAME, main: 'exanimation.asm', files: new Map([['exanimation.asm', EXANIMATION_ASM], ['memory.asm', MEMORY_ASM]]), ram: [[0x7fc003, 0xfd]] });
 }
 
 export function uninstallExAnim(rom: Rom): string[] {
-  const e = listPatches(rom).find((p) => p.name === EXANIM_PATCH_NAME);
+  const e = listPatches(rom).find((p) => p.name === EXANIM_PATCH_NAME || p.name === EXANIM_PATCH_NAME_OLD);
   return e ? uninstallPatch(rom, e.id) : [];
 }
 
@@ -271,7 +272,7 @@ export function readAltFile(rom: Rom, n: number): Uint8Array | null {
   return size > 0 ? rom.bytes(a, size) : null;
 }
 export function writeAltFile(rom: Rom, n: number, data: Uint8Array | null): void {
-  if (data && data.length > ALT_FILE_MAX) throw new Error('Animationsgrafik zu groß (max. 32 KB)');
+  if (data && data.length > ALT_FILE_MAX) throw new Error('Animation graphics too large (max. 32 KB)');
   if (!exanimInstalled(rom)) {
     if (!data) return;
     const r = installExAnim(rom);

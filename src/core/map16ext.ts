@@ -182,18 +182,18 @@ export function installMap16Ext(rom: Rom, blank: number[]): Map16Ext {
   const ex = map16Ext(rom);
   if (ex) return ex.version < VERSION ? upgrade(rom, ex) : ex;
   const expect = (at: number, bytes: number[], what: string) => {
-    for (let i = 0; i < bytes.length; i++) if (rom.r8(at + i) !== bytes[i]) throw new Error(`Unerwarteter Code bei $${at.toString(16).toUpperCase()} (${what})${ownerNote(rom, at, bytes.length)} – Map16-Erweiterung nicht möglich`);
+    for (let i = 0; i < bytes.length; i++) if (rom.r8(at + i) !== bytes[i]) throw new Error(`Unexpected code at $${at.toString(16).toUpperCase()} (${what})${ownerNote(rom, at, bytes.length)} – extended Map16 not possible`);
   };
-  expect(F545, [0xa8, 0xd0, 0x2f, 0xac], 'Block-Interaktion');
-  expect(HIT_HOOK, [0xa7, 0x05, 0xd0, 0x29], 'Block von unten');
-  for (const r of RENDER_HOOKS) expect(r, [0xb9, 0xbe, 0x0f, 0x85, 0x0a], 'Tilemap-Aufbau');
-  expect(PAGE0_FIX, [0x29, 0xfe], 'Tile ersetzen');
-  expect(PAGE1_FIX, [0x09, 0x01], 'Tile ersetzen');
+  expect(F545, [0xa8, 0xd0, 0x2f, 0xac], 'block interaction');
+  expect(HIT_HOOK, [0xa7, 0x05, 0xd0, 0x29], 'block from below');
+  for (const r of RENDER_HOOKS) expect(r, [0xb9, 0xbe, 0x0f, 0x85, 0x0a], 'tilemap building');
+  expect(PAGE0_FIX, [0x29, 0xfe], 'tile replacement');
+  expect(PAGE1_FIX, [0x09, 0x01], 'tile replacement');
 
   const gfxData = new Uint8Array((EXT_TILES - EXT_FIRST) * 8);
   for (let t = 0; t < EXT_TILES - EXT_FIRST; t++) for (let k = 0; k < 4; k++) { gfxData[t * 8 + k * 2] = blank[k] & 0xff; gfxData[t * 8 + k * 2 + 1] = blank[k] >> 8; }
   const gfx = rom.allocWrite(gfxData);
-  if ((gfx & 0xffff) + gfxData.length > 0x10000) throw new Error('Map16-Grafiktabelle überschreitet eine Bankgrenze');
+  if ((gfx & 0xffff) + gfxData.length > 0x10000) throw new Error('Map16 graphics table crosses a bank boundary');
   // acts like: identity for pages 0/1, air for the new pages
   const acts = new Uint8Array(EXT_TILES * 2);
   for (let t = 0; t < EXT_TILES; t++) { const v = t < EXT_FIRST ? t : DEFAULT_ACTS; acts[t * 2] = v & 0xff; acts[t * 2 + 1] = v >> 8; }
@@ -268,7 +268,7 @@ export function blockOf(rom: Rom, t: number): { addr: number; wall: boolean } | 
 }
 export function setBlock(rom: Rom, t: number, addr: number, wall: boolean): void {
   const p = map16Ext(rom);
-  if (!p?.blocks) throw new Error('Custom Blocks sind nicht aktiviert');
+  if (!p?.blocks) throw new Error('Custom blocks are not enabled');
   const e = p.blocks + (t & 0xfff) * 4;
   rom.w24(e, addr);
   rom.w8(e + 3, addr && wall ? 1 : 0);
@@ -292,7 +292,7 @@ export function extTileWords(rom: Rom, t: number): number[] | null {
   return [rom.r16(a), rom.r16(a + 2), rom.r16(a + 4), rom.r16(a + 6)];
 }
 export function setExtTileWords(rom: Rom, t: number, words: number[], blank: number[]): void {
-  if (t < EXT_FIRST || t >= EXT_TILES) throw new Error(`Tile ${t.toString(16)} ist kein erweitertes Map16-Tile`);
+  if (t < EXT_FIRST || t >= EXT_TILES) throw new Error(`Tile ${t.toString(16)} is not an extended Map16 tile`);
   const p = installMap16Ext(rom, blank);
   const a = p.gfx + (t - EXT_FIRST) * 8;
   words.forEach((w, k) => rom.w16(a + k * 2, w));

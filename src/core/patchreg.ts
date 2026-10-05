@@ -46,7 +46,7 @@ function read(rom: Rom): Registry {
   const p = findRegistry(rom);
   if (p < 0) return { v: VERSION, patches: [] };
   const size = rom.isRatsAt(p - 8);
-  if (rom.data[p + 4] > VERSION) throw new Error('Patch-Verzeichnis im ROM stammt von einer neueren Editor-Version');
+  if (rom.data[p + 4] > VERSION) throw new Error('Patch registry in the ROM is from a newer editor version');
   return JSON.parse(new TextDecoder().decode(rom.data.subarray(p + 5, p - 8 + 8 + size))) as Registry;
 }
 
@@ -55,7 +55,7 @@ function write(rom: Rom, reg: Registry): void {
   if (old >= 0) rom.freeAt(pcToSnes(old));
   if (!reg.patches.length) return;
   const json = new TextEncoder().encode(JSON.stringify(reg));
-  if (json.length + 5 > CHUNK) throw new Error('Patch-Verzeichnis ist zu groß');
+  if (json.length + 5 > CHUNK) throw new Error('Patch registry is too large');
   const buf = new Uint8Array(json.length + 5);
   buf.set(MAGIC); buf[4] = VERSION; buf.set(json, 5);
   rom.allocWrite(buf);
@@ -88,10 +88,10 @@ export function ownerOf(rom: Rom, pc: number, len = 1): PatchEntry | null {
   return null;
 }
 
-// " (belegt durch Patch „X“)" for error messages of the built-in patches, '' if no patch is there
+// " (used by patch “X”)" for error messages of the built-in patches, '' if no patch is there
 export function ownerNote(rom: Rom, snes: number, len: number): string {
   const p = ownerOf(rom, snesToPc(snes), len);
-  return p ? ` (belegt durch Patch „${p.name}“)` : '';
+  return p ? ` (used by patch “${p.name}”)` : '';
 }
 
 export function writeChunks(rom: Rom, data: Uint8Array): number[] {

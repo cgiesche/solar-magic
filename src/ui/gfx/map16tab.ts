@@ -32,7 +32,7 @@ interface Clip { w: number; h: number; words: number[][]; acts: number[] | null 
 // files 100-103: the ExAnimation alternative files (Lunar Magic's ExGFX 60-63)
 export const ANIM_FILE = 0x100;
 export function gfxName(n: number): string {
-  if (n >= ANIM_FILE) return `Anim-Grafik ${'ABCD'[n - ANIM_FILE]}`;
+  if (n >= ANIM_FILE) return `Anim graphic ${'ABCD'[n - ANIM_FILE]}`;
   return `${n < VANILLA_GFX ? 'GFX' : 'ExGFX'}${hex(n, 2)}`;
 }
 // Lunar Magic's name of an animation file (ExGFX60-63)
@@ -90,7 +90,7 @@ export class Map16Tab implements WsPanel {
   }
 
   previewHint(): string {
-    return 'Klick: Tile unter der Maus bearbeiten · markiert: wo das gewählte Tile im Level vorkommt';
+    return 'Click: edit the tile under the mouse · marked: where the selected tile occurs in the level';
   }
 
   show(): void {
@@ -134,7 +134,7 @@ export class Map16Tab implements WsPanel {
     return new TileCache(r.vram, r.cgram, (this.bg ? r.ppuRegs[0x0b] >> 4 : r.ppuRegs[0x0b] & 0x0f) << 13);
   }
   private tileName(t: number): string {
-    return `${this.bg ? 'BG' : 'FG'}-Tile ${hex(t, 3)}`;
+    return `${this.bg ? 'BG' : 'FG'} tile ${hex(t, 3)}`;
   }
 
   private edit(label: string, fn: () => void, key: string | null = null): void {
@@ -159,25 +159,25 @@ export class Map16Tab implements WsPanel {
     const ext = this.bg ? !!bgMap16Ext(this.app.rom) : !!map16Ext(this.app.rom);
     const page = (b: number) => h('button', {
       class: this.base === b ? 'active' : '',
-      title: b === 0 ? (this.bg ? 'BG-Tiles der Original-Hintergründe' : 'Standard-Tiles und Tileset-Tiles')
-        : `Erweiterte ${this.bg ? 'BG-' : ''}Tiles ${hex(b, 3)}–${hex(b + 511, 3)}${this.bg ? '' : ' (im Level per Direct-Map16-Objekt)'}${ext ? '' : ' – werden beim ersten Ändern angelegt'}`,
+      title: b === 0 ? (this.bg ? 'BG tiles of the original backgrounds' : 'Standard tiles and tileset tiles')
+        : `Extended ${this.bg ? 'BG ' : ''}tiles ${hex(b, 3)}–${hex(b + 511, 3)}${this.bg ? '' : ' (in the level via Direct Map16 object)'}${ext ? '' : ' – created on the first change'}`,
       onclick: () => { this.base = b; this.sel = b + (this.sel & 0x1ff); this.selW = this.selH = 1; this.buildBar(); this.redraw(); },
-    }, b === 0 ? 'Seite 0–1' : `${hex(b >> 8, 1)}–${hex((b >> 8) + 1, 1)}`);
+    }, b === 0 ? 'Page 0–1' : `${hex(b >> 8, 1)}–${hex((b >> 8) + 1, 1)}`);
     this.bar.append(
       h('span', { class: 'btn-group' },
-        layer(false, 'Vordergrund', 'FG-Tiles (Layer 1 und Layer-2-Objekte)'),
-        layer(true, 'Hintergrund', 'BG-Tiles (Layer-2-Hintergründe)')),
+        layer(false, 'Foreground', 'FG tiles (layer 1 and layer 2 objects)'),
+        layer(true, 'Background', 'BG tiles (layer 2 backgrounds)')),
       h('span', { class: 'btn-group' }, ...Array.from({ length: EXT_TILES / 512 }, (_, i) => page(i * 512))),
       h('span', { class: 'sep' }),
-      h('button', { onclick: () => this.copy(), title: 'Gewählte Tiles kopieren, mit Verhalten (Strg+C)' }, 'Kopieren'),
-      h('button', { onclick: () => this.paste(), title: 'Ab dem gewählten Tile einfügen (Strg+V)' }, 'Einfügen'),
-      this.bg ? '' : h('label', { class: 'toggle', title: 'Alle Tiles markieren, die sich wie das gewählte verhalten' },
+      h('button', { onclick: () => this.copy(), title: 'Copy the selected tiles, with behavior (Ctrl+C)' }, 'Copy'),
+      h('button', { onclick: () => this.paste(), title: 'Paste starting at the selected tile (Ctrl+V)' }, 'Paste'),
+      this.bg ? '' : h('label', { class: 'toggle', title: 'Mark all tiles that behave like the selected one' },
         (() => { const cb = h('input', { type: 'checkbox', checked: this.sameActs }); cb.addEventListener('change', () => { this.sameActs = cb.checked; this.drawSheet(); }); return cb; })(),
-        'Gleiches Verhalten markieren'),
+        'Mark same behavior'),
       h('span', { class: 'spacer' }),
       menuButton({ label: 'Import/Export', items: [
-        { label: 'Importieren (.map16) …', title: 'Lunar-Magic-.map16 ab dem gewählten Tile einfügen', onClick: () => void this.importMap16() },
-        { label: 'Exportieren (.map16)', title: 'Gewählte Tiles (mit Verhalten) als .map16 speichern', onClick: () => this.exportMap16() },
+        { label: 'Import (.map16) …', title: 'Insert a Lunar Magic .map16 starting at the selected tile', onClick: () => void this.importMap16() },
+        { label: 'Export (.map16)', title: 'Save the selected tiles (with behavior) as .map16', onClick: () => this.exportMap16() },
       ] }),
     );
   }
@@ -221,14 +221,14 @@ export class Map16Tab implements WsPanel {
       ctx.restore();
     };
     if (this.bg) {
-      band(0, 0x1ff, '#7d8bff', 'Hintergrund-Tiles');
-      band(BG_EXT_FIRST, EXT_TILES - 1, '#4cc2ff', 'Erweitert');
+      band(0, 0x1ff, '#7d8bff', 'Background tiles');
+      band(BG_EXT_FIRST, EXT_TILES - 1, '#4cc2ff', 'Extended');
     }
     else {
       band(0x000, 0x072, '#8b93a3', 'Standard');
       band(0x073, 0x0ff, '#ffb000', `Tileset ${hex(this.app.level.header.tileset, 1)}`);
       band(0x100, 0x1ff, '#8b93a3', 'Standard');
-      band(0x200, EXT_TILES - 1, '#4cc2ff', 'Erweitert');
+      band(0x200, EXT_TILES - 1, '#4cc2ff', 'Extended');
     }
     ctx.fillStyle = 'rgba(255,255,255,0.45)';
     ctx.font = '10px ui-monospace, monospace';
@@ -279,7 +279,7 @@ export class Map16Tab implements WsPanel {
       const p = cell(e);
       const t = this.base + p.y * 16 + p.x;
       const info = this.bg ? undefined : this.app.blockInfo(actsLike(this.app.rom, t));
-      c.title = `${this.tileName(t)}${this.bg ? '' : ` – ${info ? probeText(info) : 'Verhalten wird ermittelt …'}`}`;
+      c.title = `${this.tileName(t)}${this.bg ? '' : ` – ${info ? probeText(info) : 'determining behavior …'}`}`;
     });
   }
 
@@ -324,7 +324,7 @@ export class Map16Tab implements WsPanel {
     ctx.strokeStyle = '#ffb000';
     ctx.lineWidth = 3;
     ctx.strokeRect((this.quad >> 1) * 8 * BZ + 1.5, (this.quad & 1) * 8 * BZ + 1.5, 8 * BZ - 3, 8 * BZ - 3);
-    cv.title = 'Klick: Viertel wählen · Doppelklick: 8x8-Tile im Grafik-Tab bearbeiten';
+    cv.title = 'Click: select quarter · Double click: edit the 8x8 tile in the Graphics tab';
     cv.addEventListener('mousedown', (e) => {
       const rc = cv.getBoundingClientRect();
       const q = quarterAt(e.clientX - rc.left >= rc.width / 2 ? 1 : 0, e.clientY - rc.top >= rc.height / 2 ? 1 : 0);
@@ -354,37 +354,37 @@ export class Map16Tab implements WsPanel {
       for (let k = 0; k < 7; k++) pp[k] = allPal[p * 16 + 1 + k * 2] | 0xff000000;
       cx.putImageData(im, 0, 0);
       return h('button', {
-        class: `mt-pal${p === pal ? ' active' : ''}`, title: `Palette ${p} (Taste ${p + 1}) · Strg+Klick: im Paletten-Tab öffnen`,
+        class: `mt-pal${p === pal ? ' active' : ''}`, title: `Palette ${p} (key ${p + 1}) · Ctrl+click: open in the Palettes tab`,
         onclick: (e: MouseEvent) => {
           if (e.ctrlKey || e.metaKey) { this.ws.showPalette(p, 1); return; }
           this.writeWord(this.quad, (v & ~0x1c00) | (p << 10), `Palette ${p}`);
         },
       }, c, h('span', null, String(p)));
     };
-    const quarterNames = ['oben links', 'unten links', 'oben rechts', 'unten rechts'];
+    const quarterNames = ['top left', 'bottom left', 'top right', 'bottom right'];
     const num8 = v & 0x3ff;
     const slot = levelSlots(app).find((s) => num8 >= s.first && num8 < s.first + 0x80);
     const used = this.bg ? 0 : this.ws.preview.count(t);
     b.append(
-      h('div', { class: 'prop-title' }, this.tileName(t), this.selW * this.selH > 1 ? h('span', { class: 'hint' }, `  (${this.selW}×${this.selH} gewählt)`) : ''),
-      h('div', { class: 'hint' }, this.rangeText(t), !this.bg ? ` · im Level ${used}×` : ''),
-      h('div', { class: 'mt-section' }, 'Viertel', h('span', { class: 'hint' }, 'Q: nächstes')),
+      h('div', { class: 'prop-title' }, this.tileName(t), this.selW * this.selH > 1 ? h('span', { class: 'hint' }, `  (${this.selW}×${this.selH} selected)`) : ''),
+      h('div', { class: 'hint' }, this.rangeText(t), !this.bg ? ` · in the level ${used}×` : ''),
+      h('div', { class: 'mt-section' }, 'Quarter', h('span', { class: 'hint' }, 'Q: next')),
       cv,
-      h('div', { class: 'hint' }, `Viertel ${quarterNames[this.quad]}: 8x8-Tile ${hex(num8, 3)}${slot ? ` aus ${slot.name} (${gfxName(slot.file)})` : ''}`),
+      h('div', { class: 'hint' }, `Quarter ${quarterNames[this.quad]}: 8x8 tile ${hex(num8, 3)}${slot ? ` from ${slot.name} (${gfxName(slot.file)})` : ''}`),
       !this.bg && ws.some((w) => app.animated()?.tiles.has(w & 0x3ff)) ? h('div', { class: 'warn-box' },
-        `Animiert: das Spiel überschreibt ${ws.filter((w) => app.animated()?.tiles.has(w & 0x3ff)).length === 4 ? 'alle Viertel' : 'markierte Viertel'} laufend mit Animationsbildern (z. B. ?-Block, Münze, Wasser). Gezeichnete Änderungen an diesen 8x8-Tiles sieht man im Spiel nicht.`) : '',
-      h('div', { class: 'hint' }, 'Palette (Tasten 1–8)'),
+        `Animated: the game keeps overwriting ${ws.filter((w) => app.animated()?.tiles.has(w & 0x3ff)).length === 4 ? 'all quarters' : 'the marked quarters'} with animation frames (e.g. ?-block, coin, water). Changes drawn on these 8x8 tiles are not visible in the game.`) : '',
+      h('div', { class: 'hint' }, 'Palette (keys 1–8)'),
       h('div', { class: 'mt-pals' }, Array.from({ length: 8 }, (_, p) => palDot(p))),
       h('div', { class: 'row' },
-        toggle('↔ Spiegeln', FLIP_X, 'Horizontal spiegeln (X)'),
-        toggle('↕ Spiegeln', FLIP_Y, 'Vertikal spiegeln (Y)'),
-        toggle('Priorität', PRIO, 'Vor Sprites/Mario gezeichnet')),
+        toggle('↔ Flip', FLIP_X, 'Flip horizontally (X)'),
+        toggle('↕ Flip', FLIP_Y, 'Flip vertically (Y)'),
+        toggle('Priority', PRIO, 'Drawn in front of sprites/Mario')),
       h('div', { class: 'mt-section' }, 'Tile'),
       this.bg ? '' : this.actsUi(t),
-      h('details', { class: 'mt-adv' }, h('summary', null, 'Rohwerte'),
-        h('div', { class: 'mono hint' }, ws.map((w, q) => `${['oben links', 'unten links', 'oben rechts', 'unten rechts'][q]} $${hex(w, 4)}`).join('  ')),
-        h('div', { class: 'hint' }, this.tileAddr(t) < 0 ? 'Erweitertes Tile – wird beim ersten Ändern angelegt.' : `ROM $${hex(this.tileAddr(t), 6)}`)),
-      h('p', { class: 'hint' }, 'Viertel anklicken, dann rechts ein 8x8-Tile wählen oder auf ein Viertel ziehen; 2×2 Tiles ziehen füllt alle vier.'),
+      h('details', { class: 'mt-adv' }, h('summary', null, 'Raw values'),
+        h('div', { class: 'mono hint' }, ws.map((w, q) => `${['top left', 'bottom left', 'top right', 'bottom right'][q]} $${hex(w, 4)}`).join('  ')),
+        h('div', { class: 'hint' }, this.tileAddr(t) < 0 ? 'Extended tile – created on the first change.' : `ROM $${hex(this.tileAddr(t), 6)}`)),
+      h('p', { class: 'hint' }, 'Click a quarter, then choose an 8x8 tile on the right or drag it onto a quarter; dragging 2×2 tiles fills all four.'),
     );
   }
 
@@ -395,15 +395,15 @@ export class Map16Tab implements WsPanel {
     const w = this.words(this.sel)[q];
     const num = w & 0x3ff;
     const slot = levelSlots(this.app).find((s) => num >= s.first && num < s.first + 0x80);
-    if (!slot) { toast(`8x8-Tile ${hex(num, 3)} liegt in keinem Grafik-Slot dieses Levels`); return; }
+    if (!slot) { toast(`8x8 tile ${hex(num, 3)} is in none of this level's graphics slots`); return; }
     this.ws.showGfx(slot.file, num - slot.first, (w >> 10) & 7);
   }
 
   private rangeText(t: number): string {
-    if (this.bg) return t >= BG_EXT_FIRST ? 'erweitertes Hintergrund-Tile' : 'Hintergrund-Tile';
-    if (t >= EXT_FIRST) return 'erweitertes Tile (im Level per Direct-Map16-Objekt)';
-    if (t >= 0x073 && t <= 0x0ff) return `Tileset-Tile (gilt nur für Tileset ${hex(this.app.level.header.tileset, 1)})`;
-    return 'Standard-Tile (alle Tilesets)';
+    if (this.bg) return t >= BG_EXT_FIRST ? 'extended background tile' : 'background tile';
+    if (t >= EXT_FIRST) return 'extended tile (in the level via Direct Map16 object)';
+    if (t >= 0x073 && t <= 0x0ff) return `tileset tile (applies to tileset ${hex(this.app.level.header.tileset, 1)} only)`;
+    return 'standard tile (all tilesets)';
   }
 
   private actsUi(t: number): HTMLElement {
@@ -414,11 +414,11 @@ export class Map16Tab implements WsPanel {
     thumb.getContext('2d')!.drawImage(renderMap16Sheet(app, false, a & ~0x1ff), (a & 15) * 16, ((a >> 4) & 31) * 16, 16, 16, 0, 0, 16, 16);
     const file = blockFileOf(app.rom, t);
     return h('div', { class: 'mt-acts' },
-      h('div', { class: 'panel-title' }, 'Verhalten'),
+      h('div', { class: 'panel-title' }, 'Behavior'),
       h('div', { class: 'row' }, thumb,
-        h('div', { class: 'grow' }, a === t ? 'wie es selbst' : `wie Tile ${hex(a, 3)}`, h('div', { class: 'hint' }, info ? probeText(info) : 'wird ermittelt …')),
-        h('button', { onclick: () => this.pickActs(), title: 'Verhalten von einem anderen Tile übernehmen' }, 'Ändern …')),
-      h('div', { class: 'row' }, h('span', { class: 'hint grow' }, file ? `Custom Block: ${file}` : 'Kein Custom Block'),
+        h('div', { class: 'grow' }, a === t ? 'like itself' : `like tile ${hex(a, 3)}`, h('div', { class: 'hint' }, info ? probeText(info) : 'determining …')),
+        h('button', { onclick: () => this.pickActs(), title: 'Take the behavior from another tile' }, 'Change …')),
+      h('div', { class: 'row' }, h('span', { class: 'hint grow' }, file ? `Custom Block: ${file}` : 'No custom block'),
         h('button', { onclick: () => void openResources(app, 'blocks', { tile: t, onChange: () => this.redraw() }) }, 'Custom Blocks …')),
     );
   }
@@ -434,7 +434,7 @@ export class Map16Tab implements WsPanel {
     const cur = actsLike(app.rom, this.sel);
     ctx.strokeStyle = '#ffb000'; ctx.lineWidth = 2;
     ctx.strokeRect((cur & 15) * 32 + 1, (cur >> 4) * 32 + 1, 30, 30);
-    const info = h('div', { class: 'hint', style: 'min-height:2.6em' }, 'Tile anklicken: das gewählte Tile verhält sich dann wie dieses.');
+    const info = h('div', { class: 'hint', style: 'min-height:2.6em' }, 'Click a tile: the selected tile then behaves like this one.');
     const at = (e: MouseEvent) => {
       const rc = c.getBoundingClientRect();
       return Math.floor((e.clientY - rc.top) / (rc.height / 32)) * 16 + Math.floor((e.clientX - rc.left) / (rc.width / 16));
@@ -442,13 +442,13 @@ export class Map16Tab implements WsPanel {
     c.addEventListener('mousemove', (e) => {
       const t = at(e);
       const p = app.blockInfo(t);
-      info.textContent = `Tile ${hex(t, 3)}: ${p ? probeText(p) : 'wird ermittelt …'}`;
+      info.textContent = `Tile ${hex(t, 3)}: ${p ? probeText(p) : 'determining …'}`;
     });
-    const dlg = modal(`Verhalten für ${tiles.length > 1 ? `${tiles.length} Tiles` : this.tileName(this.sel)}`,
-      h('div', { class: 'mt-acts-dlg' }, info, h('div', { class: 'mt-acts-scroll' }, c)), [{ label: 'Abbrechen' }]);
+    const dlg = modal(`Behavior for ${tiles.length > 1 ? `${tiles.length} Tiles` : this.tileName(this.sel)}`,
+      h('div', { class: 'mt-acts-dlg' }, info, h('div', { class: 'mt-acts-scroll' }, c)), [{ label: 'Cancel' }]);
     c.addEventListener('mousedown', (e) => {
       const v = at(e);
-      this.edit(`Verhalten wie ${hex(v, 3)}`, () => { for (const t of tiles) setActsLike(app.rom, t, v, this.blank()); });
+      this.edit(`Behavior like ${hex(v, 3)}`, () => { for (const t of tiles) setActsLike(app.rom, t, v, this.blank()); });
       dlg.close();
     });
   }
@@ -508,11 +508,11 @@ export class Map16Tab implements WsPanel {
     clear(box);
     const labels = h('div', { class: 'mt-gfx-labels' }, slots.map((s) => h('div', { class: 'mt-slot', style: { height: `${64 * GZ}px` } },
       h('span', { class: 'mt-slot-name' }, s.name),
-      h('a', { href: '#', class: 'mt-slot-file', title: 'Im Grafik-Tab öffnen (zum Bearbeiten/Zeichnen)', onclick: (e: Event) => { e.preventDefault(); this.ws.showGfx(s.file); } }, gfxName(s.file)),
-      s.custom ? h('span', { class: 'hint' }, 'eigene') : '',
+      h('a', { href: '#', class: 'mt-slot-file', title: 'Open in the Graphics tab (to edit/draw)', onclick: (e: Event) => { e.preventDefault(); this.ws.showGfx(s.file); } }, gfxName(s.file)),
+      s.custom ? h('span', { class: 'hint' }, 'custom') : '',
       h('span', { class: 'hint mono' }, `${hex(s.first, 3)}–${hex(s.first + 0x7f, 3)}`))));
     box.append(
-      h('div', { class: 'panel-title' }, `8x8-Grafik in Palette ${pal}`, h('span', { class: 'hint' }, 'folgt dem gewählten Viertel')),
+      h('div', { class: 'panel-title' }, `8x8 graphics in palette ${pal}`, h('span', { class: 'hint' }, 'follows the selected quarter')),
       h('div', { class: 'mt-gfx-scroll' }, h('div', { class: 'mt-gfx-wrap' }, labels, c)),
     );
   }
@@ -559,20 +559,20 @@ export class Map16Tab implements WsPanel {
           const rc = target.getBoundingClientRect();
           const q = quarterAt(ev.clientX - rc.left >= rc.width / 2 ? 1 : 0, ev.clientY - rc.top >= rc.height / 2 ? 1 : 0);
           const n = tileOf(d.a);
-          if (n >= 0) { this.quad = q; this.writeWord(q, keep(q, n), `8x8-Tile ${hex(n, 3)}`); }
+          if (n >= 0) { this.quad = q; this.writeWord(q, keep(q, n), `8x8 tile ${hex(n, 3)}`); }
         } else if (w === 2 && hh === 2) {
           const nums = [tileOf({ x: x0, y: y0 }), tileOf({ x: x0, y: y0 + 1 }), tileOf({ x: x0 + 1, y: y0 }), tileOf({ x: x0 + 1, y: y0 + 1 })];
           if (nums.every((n) => n >= 0) && (y0 >> 3) === ((y0 + 1) >> 3)) {
             const t = this.sel;
             const pal = ws[this.quad] & 0x1c00;
             const nw = nums.map((n, q) => (ws[q] & 0xe000) | pal | n);
-            this.edit(`${this.tileName(t)}: 2×2 Grafik`, () => this.setWords(t, nw));
+            this.edit(`${this.tileName(t)}: 2×2 graphics`, () => this.setWords(t, nw));
           }
         } else if (w === 1 && hh === 1) {
           const n = tileOf(d.a);
           const q = this.quad;
-          if (n >= 0) this.writeWord(q, keep(q, n), `8x8-Tile ${hex(n, 3)}`);
-        } else toast('Ein einzelnes 8x8-Tile oder einen 2×2-Block ziehen');
+          if (n >= 0) this.writeWord(q, keep(q, n), `8x8 tile ${hex(n, 3)}`);
+        } else toast('Drag a single 8x8 tile or a 2×2 block');
         this.redraw();
       };
       window.addEventListener('mousemove', move);
@@ -581,7 +581,7 @@ export class Map16Tab implements WsPanel {
     c.addEventListener('mousemove', (e) => {
       if (this.drag) return;
       const n = tileOf(cell(e));
-      c.title = n >= 0 ? `8x8-Tile ${hex(n, 3)}${this.app.animated()?.tiles.has(n) ? ' – animiert (das Spiel überschreibt es laufend)' : ''}` : '';
+      c.title = n >= 0 ? `8x8 tile ${hex(n, 3)}${this.app.animated()?.tiles.has(n) ? ' – animated (the game keeps overwriting it)' : ''}` : '';
     });
   }
 
@@ -589,16 +589,16 @@ export class Map16Tab implements WsPanel {
   private copy(): void {
     const tiles = this.selection();
     this.clip = { w: this.selW, h: this.selH, words: tiles.map((t) => this.words(t)), acts: this.bg ? null : tiles.map((t) => actsLike(this.app.rom, t)) };
-    toast(`${tiles.length} Tile${tiles.length > 1 ? 's' : ''} kopiert`);
+    toast(`${tiles.length} tile${tiles.length > 1 ? 's' : ''} copied`);
   }
   private paste(): void {
     const c = this.clip;
-    if (!c) { toast('Erst Tiles kopieren (Strg+C)'); return; }
+    if (!c) { toast('Copy tiles first (Ctrl+C)'); return; }
     const max = EXT_TILES;
     const targets: number[] = [];
     for (let y = 0; y < c.h; y++) for (let x = 0; x < c.w; x++) targets.push(this.sel + y * 16 + x);
-    if (targets.some((t) => t >= max) || (this.sel & 15) + c.w > 16) { toast('Die Tiles passen ab hier nicht auf die Seite', 'error'); return; }
-    this.edit(`${targets.length} Tile${targets.length > 1 ? 's' : ''} eingefügt ab ${hex(this.sel, 3)}`, () => {
+    if (targets.some((t) => t >= max) || (this.sel & 15) + c.w > 16) { toast('The tiles do not fit on the page from here', 'error'); return; }
+    this.edit(`${targets.length} tile${targets.length > 1 ? 's' : ''} pasted at ${hex(this.sel, 3)}`, () => {
       targets.forEach((t, i) => {
         this.setWords(t, c.words[i]);
         if (c.acts && !this.bg) setActsLike(this.app.rom, t, c.acts[i], this.blank());
@@ -614,13 +614,13 @@ export class Map16Tab implements WsPanel {
     try {
       const m = parseMap16File(new Uint8Array(await f.arrayBuffer()));
       const targets = map16Targets(m, this.sel);
-      if (targets.some((t) => t >= EXT_TILES)) throw new Error('Die Tiles passen ab hier nicht mehr auf die Map16-Seiten');
-      this.edit(`${f.name} importiert`, () => targets.forEach((t, i) => {
+      if (targets.some((t) => t >= EXT_TILES)) throw new Error('The tiles no longer fit on the Map16 pages from here');
+      this.edit(`${f.name} imported`, () => targets.forEach((t, i) => {
         this.setWords(t, m.tiles[i]);
         if (m.acts && !this.bg) setActsLike(this.app.rom, t, m.acts[i], this.blank());
       }));
       this.selW = Math.min(16, m.width); this.selH = m.height;
-      toast(`${m.tiles.length} Tile(s) aus ${f.name} ab ${hex(this.sel, 3)} importiert`);
+      toast(`${m.tiles.length} tile(s) from ${f.name} imported at ${hex(this.sel, 3)}`);
     } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
     this.buildBar();
     this.redraw();
@@ -631,7 +631,7 @@ export class Map16Tab implements WsPanel {
     const data = writeMap16File({ width: this.selW, height: this.selH, tiles: tiles.map((t) => this.words(t)), acts: this.bg ? null : tiles.map((t) => actsLike(this.app.rom, t)) });
     const name = `${this.bg ? 'bg' : 'fg'}_${hex(this.sel, 3)}.map16`;
     downloadBytes(name, data);
-    toast(`${name} exportiert`);
+    toast(`${name} exported`);
   }
 
   key(e: KeyboardEvent): boolean {
@@ -641,8 +641,8 @@ export class Map16Tab implements WsPanel {
     if (ctrl && k.toLowerCase() === 'v') { this.paste(); return true; }
     if (ctrl || e.altKey) return false;
     const v = this.words(this.sel)[this.quad];
-    if (k === 'x' || k === 'X') { this.writeWord(this.quad, v ^ FLIP_X, '↔ Spiegeln'); return true; }
-    if (k === 'y' || k === 'Y') { this.writeWord(this.quad, v ^ FLIP_Y, '↕ Spiegeln'); return true; }
+    if (k === 'x' || k === 'X') { this.writeWord(this.quad, v ^ FLIP_X, '↔ Flip'); return true; }
+    if (k === 'y' || k === 'Y') { this.writeWord(this.quad, v ^ FLIP_Y, '↕ Flip'); return true; }
     if (k >= '1' && k <= '8') { const p = Number(k) - 1; this.writeWord(this.quad, (v & ~0x1c00) | (p << 10), `Palette ${p}`); return true; }
     if (k === 'q' || k === 'Q') { this.quad = [2, 3, 1, 0][this.quad]; this.buildBuilder(); this.drawGfx(); return true; }
     if (k === 'ArrowLeft' || k === 'ArrowRight' || k === 'ArrowUp' || k === 'ArrowDown') {

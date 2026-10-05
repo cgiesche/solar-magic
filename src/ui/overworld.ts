@@ -35,7 +35,7 @@ export class OverworldView {
   private tlList = h('div', { class: 'level-list' });
   private tlCount = h('span', { class: 'hint' });
   private zoomLabel = h('span', { class: 'zoom' });
-  private roBadge = h('div', { class: 'ow-badge' }, 'Layer 1: nur Ansicht (Zustand nach allen Events)');
+  private roBadge = h('div', { class: 'ow-badge' }, 'Layer 1: view only (state after all events)');
   emu: OverworldEmulator;
   map = 0;
   renders = new Map<string, OwRender>();
@@ -76,7 +76,7 @@ export class OverworldView {
     this.side = h('div', { class: 'ow-side' }, this.palPanel, this.props);
     this.bar = h('div', { class: 'ctxbar' });
     this.left = h('div', { class: 'left' }, h('div', { class: 'panel levels' },
-      h('div', { class: 'panel-title' }, 'Level-Tiles', this.tlCount), this.tlList));
+      h('div', { class: 'panel-title' }, 'Level tiles', this.tlCount), this.tlList));
     this.root = h('div', { class: 'center' }, h('div', { class: 'level-view' }, this.scroller, this.roBadge), this.status);
     this.scroller.addEventListener('scroll', () => this.paint());
     new ResizeObserver(() => this.layout()).observe(this.scroller);
@@ -226,7 +226,7 @@ export class OverworldView {
     if (e.clientX - rc.left > this.scroller.clientWidth || e.clientY - rc.top > this.scroller.clientHeight) return;
     const c = this.cell(e);
     if (e.button === 2 || (e.button === 0 && e.shiftKey && !e.ctrlKey)) {
-      if (this.readOnly()) { toast('Layer 1 zeigt den Zustand nach allen Events und ist hier nur Ansicht – „Nach allen Events“ im Menü Ansicht ausschalten.'); return; }
+      if (this.readOnly()) { toast('Layer 1 shows the state after all events and is view only here – turn off “After all events” in the View menu.'); return; }
       this.begin();
       this.drag = { kind: 'paint', x0: c.x, y0: c.y, lastX: c.x, lastY: c.y };
       this.paintAt(c.x, c.y);
@@ -327,7 +327,7 @@ export class OverworldView {
         if (this.l1[i] === v) continue;
         if (!this.warnedTl && (isLevelTile(this.l1[i]) || isLevelTile(v))) {
           this.warnedTl = true;
-          toast('Hinweis: Level-Tiles (56–80) bekommen ihre Translevel-Nummer in Scan-Reihenfolge – neue oder entfernte Level-Tiles verschieben die Nummern aller folgenden.');
+          toast('Note: level tiles (56–80) get their translevel number in scan order – adding or removing level tiles shifts the numbers of all following ones.');
         }
         this.l1[i] = v; changed = true;
       } else {
@@ -350,13 +350,13 @@ export class OverworldView {
   }
 
   info(x: number, y: number): void {
-    if (this.mode !== 'l1') { toast('Level-Info gibt es auf Layer 1 (Wege/Level)'); return; }
+    if (this.mode !== 'l1') { toast('Level info is available on layer 1 (paths/levels)'); return; }
     const tl = translevels(this.l1)[l1Index(this.region, x, y)];
-    if (!tl) toast('Kein Level-Tile');
+    if (!tl) toast('Not a level tile');
     this.selectTl(tl || -1, false);
   }
 
-  // selects a translevel (list, Alt/Strg+click); center: scroll the map to its tile
+  // selects a translevel (list, Alt/Ctrl+click); center: scroll the map to its tile
   selectTl(tl: number, center: boolean): void {
     this.selectedTl = tl;
     if (center && tl > 0) {
@@ -384,10 +384,10 @@ export class OverworldView {
   updateStatus(): void {
     const c = this.hover;
     const b = this.brush;
-    this.statusStats.textContent = b.kind === this.mode ? `Pinsel ${b.w}×${b.h}` : '';
+    this.statusStats.textContent = b.kind === this.mode ? `Brush ${b.w}×${b.h}` : '';
     if (!c) {
-      this.statusText.textContent = this.readOnly() ? 'Layer 1 nur Ansicht – „Nach allen Events“ ausschalten zum Bearbeiten'
-        : 'Klick/Ziehen nimmt Tiles auf · Rechtsklick/Shift+Klick malt · Alt/Strg+Klick: Level-Info';
+      this.statusText.textContent = this.readOnly() ? 'Layer 1 view only – turn off “After all events” to edit'
+        : 'Click/drag picks up tiles · Right click/Shift+click paints · Alt/Ctrl+click: level info';
       return;
     }
     let t = `X ${hex(c.x, 2)}  Y ${hex(c.y, 2)}`;
@@ -396,9 +396,9 @@ export class OverworldView {
         const i = l1Index(this.region, c.x, c.y);
         t += `  ·  Tile ${hex(this.l1[i], 2)}`;
         const tl = translevels(this.l1)[i];
-        if (tl) t += `  ·  Translevel ${hex(tl, 2)} → Level ${hex(translevelToLevel(tl), 3)} „${this.nameOf(tl)}“`;
+        if (tl) t += `  ·  Translevel ${hex(tl, 2)} → Level ${hex(translevelToLevel(tl), 3)} “${this.nameOf(tl)}”`;
       }
-    } else if (c.x >= 0 && c.y >= 0 && c.x < 64 && c.y < 64) t += `  ·  Eintrag ${hex(this.l2[l2Index(this.region, c.x, c.y)], 4)}`;
+    } else if (c.x >= 0 && c.y >= 0 && c.x < 64 && c.y < 64) t += `  ·  Entry ${hex(this.l2[l2Index(this.region, c.x, c.y)], 4)}`;
     this.statusText.textContent = t;
   }
 
@@ -417,27 +417,27 @@ export class OverworldView {
       ({ label, title, shortcut, checked: get, onToggle: (v: boolean) => { set(v); this.redrawMap(); this.updateStatus(); } });
     this.zoomLabel.textContent = `${Math.round(this.zoom * 100)}%`;
     this.bar.replaceChildren(
-      h('label', { class: 'row' }, 'Karte ', select(MAP_NAMES.map((n, i) => [i, n] as [number, string]), this.map, (v) => { this.map = v; this.selectedTl = -1; this.redrawMap(); this.buildSide(); this.buildLeft(); })),
+      h('label', { class: 'row' }, 'Map ', select(MAP_NAMES.map((n, i) => [i, n] as [number, string]), this.map, (v) => { this.map = v; this.selectedTl = -1; this.redrawMap(); this.buildSide(); this.buildLeft(); })),
       h('span', { class: 'sep' }),
       h('div', { class: 'btn-group' },
-        h('button', { class: this.mode === 'l1' ? 'active' : '', title: 'Layer 1 (1)', onclick: () => setMode('l1') }, 'Layer 1 (Wege/Level)'),
-        h('button', { class: this.mode === 'l2' ? 'active' : '', title: 'Layer 2 (2)', onclick: () => setMode('l2') }, 'Layer 2 (Gelände)')),
+        h('button', { class: this.mode === 'l1' ? 'active' : '', title: 'Layer 1 (1)', onclick: () => setMode('l1') }, 'Layer 1 (paths/levels)'),
+        h('button', { class: this.mode === 'l2' ? 'active' : '', title: 'Layer 2 (2)', onclick: () => setMode('l2') }, 'Layer 2 (terrain)')),
       h('span', { class: 'sep' }),
-      menuButton({ label: 'Ansicht', items: [
-        { heading: 'Ebenen' },
+      menuButton({ label: 'View', items: [
+        { heading: 'Layers' },
         view('Layer 1', () => this.showL1, (v) => (this.showL1 = v)),
         view('Layer 2', () => this.showL2, (v) => (this.showL2 = v)),
-        { heading: 'Hilfen' },
-        view('Raster', () => this.showGrid, (v) => (this.showGrid = v), undefined, 'G'),
-        { heading: 'Spielzustand' },
-        view('Nach allen Events', () => this.showEvents, (v) => (this.showEvents = v), 'Zustand nach allen Events (nur Ansicht, Layer 1 dann nicht bearbeitbar)'),
+        { heading: 'Guides' },
+        view('Grid', () => this.showGrid, (v) => (this.showGrid = v), undefined, 'G'),
+        { heading: 'Game state' },
+        view('After all events', () => this.showEvents, (v) => (this.showEvents = v), 'State after all events (view only, layer 1 then not editable)'),
       ] }),
       h('span', { class: 'sep' }),
       h('div', { class: 'row zoom-ctl' },
-        h('button', { onclick: () => this.setZoom(this.zoom / 2), title: 'Verkleinern (Strg+Mausrad)' }, '−'), this.zoomLabel,
-        h('button', { onclick: () => this.setZoom(this.zoom * 2), title: 'Vergrößern (Strg+Mausrad)' }, '+')),
+        h('button', { onclick: () => this.setZoom(this.zoom / 2), title: 'Zoom out (Ctrl+mouse wheel)' }, '−'), this.zoomLabel,
+        h('button', { onclick: () => this.setZoom(this.zoom * 2), title: 'Zoom in (Ctrl+mouse wheel)' }, '+')),
       h('span', { class: 'spacer' }),
-      h('button', { onclick: () => void this.reload(), title: 'Overworld neu aus der ROM laden (verwirft ungespeicherte Änderungen)' }, 'Neu laden'),
+      h('button', { onclick: () => void this.reload(), title: 'Reload the overworld from the ROM (discards unsaved changes)' }, 'Reload'),
     );
   }
 
@@ -464,21 +464,21 @@ export class OverworldView {
       seen.add(tl);
       const lvl = translevelToLevel(tl), name = this.nameOf(tl);
       const cur = tl === this.selectedTl;
-      const el = h('div', { class: `level-item${cur ? ' current' : ''}`, title: `${name}\nKlick: auswählen · Doppelklick: im Level-Editor öffnen`,
+      const el = h('div', { class: `level-item${cur ? ' current' : ''}`, title: `${name}\nClick: select · Double click: open in the level editor`,
         onclick: () => this.selectTl(tl, true), ondblclick: () => this.onOpenLevel(lvl) },
         hex(lvl, 3), h('span', { class: 'lname' }, ` ${name}`));
       items.push(el);
       if (cur) setTimeout(() => el.scrollIntoView({ block: 'nearest' }), 0);
     }
     this.tlCount.textContent = String(items.length);
-    this.tlList.replaceChildren(...(items.length ? items : [emptyState('Auf dieser Karte gibt es keine Level-Tiles (56–80).')]));
+    this.tlList.replaceChildren(...(items.length ? items : [emptyState('This map has no level tiles (56–80).')]));
   }
 
   // ---------------- right: palette, properties ----------------
   buildSide(): void {
     const scroll = this.palPanel.scrollTop;
     this.palPanel.replaceChildren(
-      h('div', { class: 'panel-title' }, 'Malen', h('span', { class: 'hint' }, 'Rechtsklick/Shift+Klick malt')),
+      h('div', { class: 'panel-title' }, 'Paint', h('span', { class: 'hint' }, 'Right click/Shift+click paints')),
       this.mode === 'l1' ? this.l1Palette() : this.l2Palette());
     this.palPanel.scrollTop = scroll;
     this.roBadge.classList.toggle('show', this.readOnly());
@@ -488,14 +488,14 @@ export class OverworldView {
 
   buildProps(): void {
     const tl = this.selectedTl;
-    this.props.replaceChildren(h('div', { class: 'panel-title' }, 'Eigenschaften'),
-      tl > 0 ? this.levelInfo(tl) : emptyState('Level-Tile links in der Liste oder per Alt/Strg+Klick auf der Karte wählen.'));
+    this.props.replaceChildren(h('div', { class: 'panel-title' }, 'Properties'),
+      tl > 0 ? this.levelInfo(tl) : emptyState('Select a level tile in the list on the left or with Alt/Ctrl+click on the map.'));
   }
 
   levelInfo(tl: number): HTMLElement {
     const rom = this.app.rom;
     const parts = splitNameCode(this.nameCodeOf(tl));
-    const sel = (k: number) => select(Array.from({ length: NAME_PART_COUNTS[k] }, (_, i) => [i, `${hex(i, 2)}: ${nameWord(rom, k, i).trim() || '(leer)'}`] as [number, string]), parts[k], (v) => {
+    const sel = (k: number) => select(Array.from({ length: NAME_PART_COUNTS[k] }, (_, i) => [i, `${hex(i, 2)}: ${nameWord(rom, k, i).trim() || '(empty)'}`] as [number, string]), parts[k], (v) => {
       parts[k] = v;
       this.begin();
       this.names.set(tl, joinNameCode(parts));
@@ -506,11 +506,11 @@ export class OverworldView {
     const lvl = translevelToLevel(tl);
     return h('div', { class: 'ow-info' },
       h('div', { class: 'prop-title' }, `Translevel ${hex(tl, 2)} → Level ${hex(lvl, 3)}`),
-      h('div', null, `„${this.nameOf(tl)}“`),
-      h('div', { class: 'prop' }, h('label', null, 'Name Teil 1'), sel(0)),
-      h('div', { class: 'prop' }, h('label', null, 'Name Teil 2'), sel(1)),
-      h('div', { class: 'prop' }, h('label', null, 'Name Teil 3'), sel(2)),
-      h('div', { class: 'row' }, h('button', { onclick: () => this.onOpenLevel(lvl), title: 'Im Level-Editor öffnen (auch per Doppelklick in der Liste)' }, `Level ${hex(lvl, 3)} bearbeiten`)),
+      h('div', null, `“${this.nameOf(tl)}”`),
+      h('div', { class: 'prop' }, h('label', null, 'Name part 1'), sel(0)),
+      h('div', { class: 'prop' }, h('label', null, 'Name part 2'), sel(1)),
+      h('div', { class: 'prop' }, h('label', null, 'Name part 3'), sel(2)),
+      h('div', { class: 'row' }, h('button', { onclick: () => this.onOpenLevel(lvl), title: 'Open in the level editor (also by double click in the list)' }, `Edit level ${hex(lvl, 3)}`)),
     );
   }
 
@@ -545,7 +545,7 @@ export class OverworldView {
       preview(p.getContext('2d')!);
       p.style.width = `${Math.min(b.w * cell * 2, 256)}px`;
       p.style.imageRendering = 'pixelated';
-      out.append(h('div', { class: 'hint' }, `Pinsel ${b.w}×${b.h}:`), h('div', { class: 'row' }, p));
+      out.append(h('div', { class: 'hint' }, `Brush ${b.w}×${b.h}:`), h('div', { class: 'row' }, p));
     }
     out.append(c);
     return out;
@@ -569,7 +569,7 @@ export class OverworldView {
     const b = this.brush;
     const one = b.kind === 'l1' && b.entries.length === 1;
     return h('div', null,
-      h('div', { class: 'hint' }, `${one ? `Tile ${hex(b.entries[0], 2)}` : b.kind === 'l1' ? `Block ${b.w}×${b.h}` : ''} · Level-Tiles: 56–80`),
+      h('div', { class: 'hint' }, `${one ? `Tile ${hex(b.entries[0], 2)}` : b.kind === 'l1' ? `Block ${b.w}×${b.h}` : ''} · Level tiles: 56–80`),
       this.sheetPalette(sheet, 'ow-pal', 16, 16, 16, (x, y) => y * 16 + x,
         (ctx) => ctx.drawImage(tiles(b.entries, b.w, b.w * 16, b.h * 16), 0, 0)));
   }
@@ -590,7 +590,7 @@ export class OverworldView {
     };
     const sheet = entries(Array.from({ length: 1024 }, (_, t) => t | (this.l2Pal << 10)), 16, 128, 512);
     const b = this.brush;
-    const brushInfo = b.kind === 'l2' ? `Pinsel ${b.w}×${b.h}: ${b.entries.slice(0, 16).map((v) => hex(v, 4)).join(' ')}${b.entries.length > 16 ? ' …' : ''}` : '';
+    const brushInfo = b.kind === 'l2' ? `Brush ${b.w}×${b.h}: ${b.entries.slice(0, 16).map((v) => hex(v, 4)).join(' ')}${b.entries.length > 16 ? ' …' : ''}` : '';
     // X-flip mirrors every row of the block, Y-flip the order of the rows
     const flip = (bit: number, label: string) => h('button', {
       onclick: () => {
@@ -607,7 +607,7 @@ export class OverworldView {
       (ctx) => ctx.drawImage(entries(b.entries, b.w, b.w * 8, b.h * 8), 0, 0)));
     return h('div', null,
       h('div', { class: 'prop' }, h('label', null, 'Palette'), select(Array.from({ length: 8 }, (_, i) => [i, String(i)] as [number, string]), this.l2Pal, (v) => { this.l2Pal = v; this.buildSide(); })),
-      h('div', { class: 'row' }, flip(0x4000, 'X-Flip'), flip(0x8000, 'Y-Flip'), flip(0x2000, 'Priorität')),
+      h('div', { class: 'row' }, flip(0x4000, 'X-Flip'), flip(0x8000, 'Y-Flip'), flip(0x2000, 'Priority')),
       h('div', { class: 'hint mono' }, brushInfo),
       pal);
   }
@@ -626,9 +626,9 @@ export class OverworldView {
       this.invalidate();
       this.redrawMap();
       this.onChange();
-      toast(`Overworld gespeichert (Layer 2: ${n} Bytes RLE).`);
+      toast(`Overworld saved (layer 2: ${n} bytes RLE).`);
     } catch (e) {
-      toast(`Overworld nicht gespeichert: ${e instanceof Error ? e.message : e}`, 'error');
+      toast(`Overworld not saved: ${e instanceof Error ? e.message : e}`, 'error');
     }
   }
 
@@ -644,15 +644,15 @@ export class OverworldView {
   }
 
   async reload(): Promise<void> {
-    if (this.dirty && (await choose('Overworld neu laden', 'Ungespeicherte Änderungen an der Overworld verwerfen?', [{ label: 'Abbrechen' }, { label: 'Verwerfen', danger: true }])) !== 1) return;
+    if (this.dirty && (await choose('Reload overworld', 'Discard unsaved changes to the overworld?', [{ label: 'Cancel' }, { label: 'Discard', danger: true }])) !== 1) return;
     this.show();
-    toast('Overworld neu geladen');
+    toast('Overworld reloaded');
   }
 
   // leaving: save, discard or stay; false = stay
   async confirmLeave(): Promise<boolean> {
     if (!this.dirty) return true;
-    const r = await choose('Overworld verlassen', 'Die Overworld hat ungespeicherte Änderungen.', [{ label: 'Abbrechen' }, { label: 'Verwerfen' }, { label: 'Speichern', primary: true }]);
+    const r = await choose('Leave overworld', 'The overworld has unsaved changes.', [{ label: 'Cancel' }, { label: 'Discard' }, { label: 'Save', primary: true }]);
     if (r === 2) { this.save(); return !this.dirty; }
     if (r === 1) { this.discard(); return true; }
     return false;

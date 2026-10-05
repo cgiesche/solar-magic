@@ -52,25 +52,25 @@ export function blockPane(app: App, onDirty: () => void, changed: () => void): B
     };
     const rows = [...proj.list].sort((a, b) => a.tile - b.tile).map((b) => h('tr', { class: b.tile === tile ? 'selected' : '' },
       h('td', { class: 'mono' }, hex(b.tile, 3)),
-      h('td', { class: proj.files.has(b.file) ? '' : 'err', title: proj.files.has(b.file) ? b.file : `${b.file} fehlt im Projekt` }, b.file.replace(/^blocks\//, '')),
+      h('td', { class: proj.files.has(b.file) ? '' : 'err', title: proj.files.has(b.file) ? b.file : `${b.file} is missing from the project` }, b.file.replace(/^blocks\//, '')),
       h('td', { class: 'mono' }, b.acts !== undefined ? hex(b.acts, 3) : '–'),
-      h('td', { class: 'actions' }, definesButton(proj.files, b.file, change), h('button', { class: 'icon-btn', title: 'Zuordnung entfernen', onclick: () => { proj.list = proj.list.filter((x) => x !== b); change(); } }, '✕'))));
+      h('td', { class: 'actions' }, definesButton(proj.files, b.file, change), h('button', { class: 'icon-btn', title: 'Remove assignment', onclick: () => { proj.list = proj.list.filter((x) => x !== b); change(); } }, '✕'))));
     return [
       rows.length ? h('table', { class: 'uber-table' }, h('tr', null, h('th', null, 'Tile'), h('th', null, 'Block'), h('th', null, 'acts like'), h('th')), rows)
-        : h('p', { class: 'hint' }, 'Noch keine Blöcke – „Hinzufügen …“ oben nimmt einen GPS-Block oder ein Block-Paket (.asm/.zip) und legt ihn auf ein Map16-Tile.'),
+        : h('p', { class: 'hint' }, 'No blocks yet – “Add …” above takes a GPS block or a block package (.asm/.zip) and puts it on a Map16 tile.'),
       files.length ? h('div', { class: 'row uber-add' },
         h('label', null, 'Tile'), hexInput(tile, 3, (v) => (tile = v), EXT_TILES - 1),
         select(files.map((f, i) => [i, f.slice(7)] as [number, string]), 0, (i) => (file = files[i])),
-        h('label', { class: 'row small', title: 'Verhalten ohne eigenen Code; ohne Haken bleibt das des Tiles' }, actsBox, 'acts like'), actsIn,
-        h('button', { onclick: add }, 'Zuordnen')) : '',
-      h('p', { class: 'hint' }, 'Platzieren: Palette → Map16 bzw. Direct-Map16-Objekt mit dem jeweiligen Tile.'),
+        h('label', { class: 'row small', title: 'Behavior without custom code; unchecked keeps the tile\'s own' }, actsBox, 'acts like'), actsIn,
+        h('button', { onclick: add }, 'Assign')) : '',
+      h('p', { class: 'hint' }, 'To place: Palette → Map16, or a Direct Map16 object with that tile.'),
     ];
   }
 
   pane = projectPane<BlockProject>(app, {
     title: 'Custom Blocks',
-    intro: 'Blöcke mit eigenem Verhalten, je einem Map16-Tile zugeordnet.',
-    format: 'GPS-Format: „db $42“/„db $37“ und eine JMP-Tabelle mit MarioBelow, MarioAbove, MarioSide, SpriteV, SpriteH, MarioCape, MarioFireball, TopCorner, BodyInside, HeadInside [, WallFeet, WallBody]. Shared Routines aus routines/ werden als %name() aufgerufen, die von GPS sind eingebaut. Das Verhalten ohne eigenen Code bestimmt „acts like“.',
+    intro: 'Blocks with custom behavior, each assigned to a Map16 tile.',
+    format: 'GPS format: “db $42”/“db $37” and a JMP table with MarioBelow, MarioAbove, MarioSide, SpriteV, SpriteH, MarioCape, MarioFireball, TopCorner, BodyInside, HeadInside [, WallFeet, WallBody]. Shared routines from routines/ are called as %name(); those of GPS are built in. “acts like” sets the behavior without custom code.',
     load: () => loadBlockProject(app.rom),
     empty: () => ({ files: new Map(), list: [] }),
     save: (p) => { const r = saveBlockProject(app.rom, p, map16Source(app.rom, app.render).fg(0x025)); cache = null; return r; },
@@ -82,7 +82,7 @@ export function blockPane(app: App, onDirty: () => void, changed: () => void): B
     toZip: projectToZip,
     zipName: 'blocks.zip',
     content,
-    applied: (p) => `Custom Blocks übernommen (${p.list.length} Tile(s))`,
+    applied: (p) => `Custom blocks applied (${p.list.length} tile(s))`,
     docs: 'blocks',
   }, onDirty, changed);
   return { ...pane, tile: () => tile, setTile: (t) => { tile = t; pane.render(); } };

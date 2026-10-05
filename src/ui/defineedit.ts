@@ -28,7 +28,7 @@ export function definesForm(text: string, values: Record<string, string> = {}): 
     return { d, inp, row };
   });
   const sections = [...new Set(defs.map((d) => d.section))];
-  const heads = new Map(sections.filter(Boolean).length > 1 ? sections.map((t) => [t, h('h4', { class: 'define-section' }, t || 'Allgemein')]) : []);
+  const heads = new Map(sections.filter(Boolean).length > 1 ? sections.map((t) => [t, h('h4', { class: 'define-section' }, t || 'General')]) : []);
   const rows: HTMLElement[] = [];
   for (const x of inputs) {
     const head = heads.get(x.d.section);
@@ -36,7 +36,7 @@ export function definesForm(text: string, values: Record<string, string> = {}): 
     rows.push(x.row);
   }
   if (inputs.length > 12) {
-    const search = h('input', { type: 'search', placeholder: `${inputs.length} Einstellungen durchsuchen …`, spellcheck: false, class: 'define-search', oninput: () => {
+    const search = h('input', { type: 'search', placeholder: `Search ${inputs.length} settings …`, spellcheck: false, class: 'define-search', oninput: () => {
       const q = search.value.trim().toLowerCase();
       for (const x of inputs) x.row.hidden = !!q && !`${x.d.name} ${x.d.comment} ${x.d.doc} ${x.d.section}`.toLowerCase().includes(q);
       for (const [t, el] of heads) el.hidden = inputs.every((x) => x.d.section !== t || x.row.hidden);
@@ -56,18 +56,18 @@ export function definesForm(text: string, values: Record<string, string> = {}): 
 // button opening the settings of `path`; onChange after the file was rewritten
 export function definesButton(files: Map<string, Uint8Array>, path: string, onChange: () => void): HTMLElement | null {
   if (!hasDefines(files, path)) return null;
-  return h('button', { title: 'Defines der Datei ändern', onclick: () => openDefines(files, path, onChange) }, 'Einstellungen …');
+  return h('button', { title: 'Change the file\'s defines', onclick: () => openDefines(files, path, onChange) }, 'Settings …');
 }
 
 export function openDefines(files: Map<string, Uint8Array>, path: string, onChange: () => void): void {
   const text = dec.decode(files.get(path)!);
   const form = definesForm(text);
-  const dlg = modal(`Einstellungen: ${path.split('/').pop()}`, h('div', { class: 'patch-settings define-dialog' },
+  const dlg = modal(`Settings: ${path.split('/').pop()}`, h('div', { class: 'patch-settings define-dialog' },
     h('div', { class: 'row' },
-      h('span', { class: 'hint grow' }, 'Die Werte stehen in der Datei selbst; wirksam werden sie mit „Übernehmen“.'),
-      h('button', { title: 'Die ganze Datei als Text – für alles, was keine Einstellung der Form !name = wert ist', onclick: () => { dlg.close(); openTextEdit(files, path, onChange); } }, 'Als Text bearbeiten …')),
+      h('span', { class: 'hint grow' }, 'The values are stored in the file itself; they take effect with “Apply”.'),
+      h('button', { title: 'The whole file as text – for anything that is not a setting of the form !name = value', onclick: () => { dlg.close(); openTextEdit(files, path, onChange); } }, 'Edit as text …')),
     form.rows), [
-    { label: 'Abbrechen' },
+    { label: 'Cancel' },
     { label: 'OK', primary: true, onClick: () => {
       const changed = form.read();
       if (!Object.keys(changed).length) return;
@@ -82,7 +82,7 @@ export const isTextFile = (path: string) => /\.(asm|asar|txt|cfg|json|md)$/i.tes
 
 export function editButton(files: Map<string, Uint8Array>, path: string, onChange: () => void): HTMLElement | null {
   if (!isTextFile(path)) return null;
-  return h('button', { title: 'Die Datei als Text bearbeiten', onclick: () => openTextEdit(files, path, onChange) }, 'Bearbeiten …');
+  return h('button', { title: 'Edit the file as text', onclick: () => openTextEdit(files, path, onChange) }, 'Edit …');
 }
 
 export function openTextEdit(files: Map<string, Uint8Array>, path: string, onChange: () => void): void {
@@ -92,9 +92,9 @@ export function openTextEdit(files: Map<string, Uint8Array>, path: string, onCha
     e.preventDefault();
     area.setRangeText('\t', area.selectionStart, area.selectionEnd, 'end');
   } });
-  modal(`Bearbeiten: ${path}`, h('div', { class: 'text-edit-box' },
-    h('p', { class: 'hint' }, 'Wirksam wird die Änderung mit „Übernehmen“; Fehler zeigt Asar dann mit Datei und Zeile.'), area), [
-    { label: 'Abbrechen' },
+  modal(`Edit: ${path}`, h('div', { class: 'text-edit-box' },
+    h('p', { class: 'hint' }, 'The change takes effect with “Apply”; Asar then reports errors with file and line.'), area), [
+    { label: 'Cancel' },
     { label: 'OK', primary: true, onClick: () => {
       if (area.value === text) return;
       files.set(path, enc.encode(area.value));

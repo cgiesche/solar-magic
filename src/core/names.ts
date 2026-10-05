@@ -9,7 +9,7 @@ export function spriteName(n: number): string {
 const STD_OBJECTS = `Extended object|Water (blue)|Invisible coin blocks|Invisible note blocks|Invisible POW coins|Coins|Walk-through dirt|Water (other color)|Note blocks|Turn blocks|Coin ? blocks|Throw blocks|Black piranha plants|Cement blocks|Brown blocks|Vertical pipes|Horizontal pipes|Bullet shooter|Slopes|Ledge edges|Ground ledge|Midway/goal point|Blue coins|Rope/clouds|Water surface (animated)|Water surface (static)|Lava surface (animated)|Net top edge|Donut bridge|Net bottom edge|Net vertical edge|Vertical pipe/bone/log|Horizontal pipe/bone/log|Long ground ledge`.split('|');
 
 export function objectName(num: number, ext: number): string {
-  if (num === 0) return ext === 2 ? 'Direct Map16 (Editor-Patch)' : ext === 3 ? 'Struktur' : `Extended object ${hex2(ext)}`;
+  if (num === 0) return ext === 2 ? 'Direct Map16 (editor patch)' : ext === 3 ? 'Structure' : `Extended object ${hex2(ext)}`;
   return STD_OBJECTS[num] ?? `Tileset object ${hex2(num)}`;
 }
 
@@ -28,8 +28,8 @@ export function levelModeName(m: number): string {
 }
 
 export const MUSIC = ['Overworld', 'Athletic', 'Underground', 'Water', 'Castle', 'Ghost House', 'Bonus/Sky', 'Boss'];
-export const ENTRANCE_ACTIONS = ['Normal / Rohr nach oben', 'Rohr nach rechts', 'Rohr nach links', 'Rohr nach unten',
-  'Rohr nach oben', 'Von links rutschend/laufend', 'Tür / von unten springend (Wasser)', 'Normal (ohne Yoshi-Intro)'];
+export const ENTRANCE_ACTIONS = ['Normal / pipe up', 'Pipe right', 'Pipe left', 'Pipe down',
+  'Pipe up', 'Slide/walk in from the left', 'Door / jump up from below (water)', 'Normal (no Yoshi intro)'];
 export const TIME_SETTINGS = ['0 (none)', '200', '300', '400'];
 export const ITEM_MEMORY = ['0', '1', '2', '3'];
 export const VERTICAL_SCROLL = ['Vertical scroll at will', 'No vertical scroll', 'Vertical scroll always', 'No scroll at all'];

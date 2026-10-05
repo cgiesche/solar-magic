@@ -1,4 +1,4 @@
-// "Eigenschaften" in mode 'exit' (Ein-/Ausgänge): the chosen screen's exit, a secondary entrance,
+// "Properties" in mode 'exit' (Entrances/Exits): the chosen screen's exit, a secondary entrance,
 // the main entrance or the midway point – where it leads, who leads here, all chosen by level name.
 
 import type { App, Marker } from './app.ts';
@@ -32,7 +32,7 @@ function exitPanel(app: App, body: HTMLElement): boolean {
   body.append(h('div', { class: 'prop-title' }, `Screen ${hex2(scr)} – Exit`));
   if (!ex) {
     body.append(
-      hint(enter ? 'Auf diesem Screen gibt es Rohre oder Türen, aber noch keinen Exit – sie führen nirgendwohin.' : 'Kein Exit auf diesem Screen.'),
+      hint(enter ? 'This screen has pipes or doors but no exit yet – they lead nowhere.' : 'No exit on this screen.'),
       h('button', {
         class: 'primary',
         onclick: () => {
@@ -40,8 +40,8 @@ function exitPanel(app: App, body: HTMLElement): boolean {
           lv.exits.push({ uid: newUid(), screen: scr, dest: n & 0x1ff, secondary: false, flags: 0 });
           app.changed(false);
         },
-      }, 'Exit anlegen'),
-      hint('Ein Exit gilt für alle Rohre und Türen dieses Screens. Anderen Screen per Klick in der Levelansicht wählen, Eingänge (M, Z, S) ebenso.'));
+      }, 'Create exit'),
+      hint('An exit applies to all pipes and doors of this screen. Click another screen in the level view to select it, likewise entrances (M, Z, S).'));
     return enter === null;
   }
   const e = ex;
@@ -58,10 +58,10 @@ function exitPanel(app: App, body: HTMLElement): boolean {
     return h('label', { class: 'row', title }, r, label);
   };
   body.append(
-    field('Führt zum', h('div', { class: 'radio-col' },
-      radio(false, 'Haupteingang eines Levels', 'Mario kommt am Haupteingang (M) des Ziellevels heraus'),
-      radio(true, 'Sekundären Eingang', 'Mario kommt an einem bestimmten Eingang (S) des Ziellevels heraus, z. B. an einem Rohr'))),
-    field('Ziellevel', levelPicker(app, t.to, (m) => sameBank(m, n), (m) => {
+    field('Leads to', h('div', { class: 'radio-col' },
+      radio(false, 'Main entrance of a level', 'Mario comes out at the main entrance (M) of the target level'),
+      radio(true, 'Secondary entrance', 'Mario comes out at a specific entrance (S) of the target level, e.g. at a pipe'))),
+    field('Target level', levelPicker(app, t.to, (m) => sameBank(m, n), (m) => {
       if (e.secondary) secondaryTo(m); else upd(() => (e.dest = m & 0x1ff));
     })),
   );
@@ -70,34 +70,34 @@ function exitPanel(app: App, body: HTMLElement): boolean {
     if (!ents.includes(t.entrance)) ents.unshift(t.entrance);
     const label = (i: number) => {
       const s = readSecondaryEntrance(app.rom, i);
-      return g.entrancesOf(t.to).includes(i) ? `${hex3(i)} · Screen ${hex2(s.screen)} · ${ENTRANCE_ACTIONS[s.action]}` : `${hex3(i)} (leer)`;
+      return g.entrancesOf(t.to).includes(i) ? `${hex3(i)} · Screen ${hex2(s.screen)} · ${ENTRANCE_ACTIONS[s.action]}` : `${hex3(i)} (empty)`;
     };
-    body.append(field('Eingang',
+    body.append(field('Entrance',
       select(ents.map((i) => [i, label(i)]), t.entrance, (v) => upd(() => (e.dest = v & 0x1ff))),
       h('button', {
-        title: 'Neuen sekundären Eingang im Ziellevel anlegen (am Haupteingang, danach verschieben)',
+        title: 'Create a new secondary entrance in the target level (at the main entrance, move it afterwards)',
         onclick: () => { const idx = newEntranceIn(app, t.to); if (idx !== null) upd(() => (e.dest = idx & 0x1ff)); },
-      }, '+ Neu')));
+      }, '+ New')));
   }
   // where Mario arrives
   const arrive = e.secondary ? (() => {
     const s = readSecondaryEntrance(app.rom, t.entrance);
     return g.entrancesOf(t.to).includes(t.entrance)
-      ? `Sekundärer Eingang ${hex3(t.entrance)}: Screen ${hex2(s.screen)}, ${ENTRANCE_ACTIONS[s.action]}`
-      : `Sekundärer Eingang ${hex3(t.entrance)} ist leer – „+ Neu“ legt einen an.`;
+      ? `Secondary entrance ${hex3(t.entrance)}: screen ${hex2(s.screen)}, ${ENTRANCE_ACTIONS[s.action]}`
+      : `Secondary entrance ${hex3(t.entrance)} is empty – “+ New” creates one.`;
   })() : (() => {
     const s = t.to === n ? lv.secondary : readSecondaryHeader(app.rom, t.to);
-    return `Haupteingang: Screen ${hex2(s.entranceScreen)}, ${ENTRANCE_ACTIONS[s.entranceAction]}`;
+    return `Main entrance: screen ${hex2(s.entranceScreen)}, ${ENTRANCE_ACTIONS[s.entranceAction]}`;
   })();
   body.append(
     h('div', { class: 'exit-target' },
-      h('div', null, 'Mario landet in ', h('b', null, `Level ${hex3(t.to)}`), ' ', h('span', { class: 'lname' }, g.name(t.to))),
+      h('div', null, 'Mario arrives in ', h('b', null, `level ${hex3(t.to)}`), ' ', h('span', { class: 'lname' }, g.name(t.to))),
       hint(arrive),
       h('div', { class: 'row' },
-        h('button', { title: 'Das Ziellevel öffnen und den Eingang auswählen', onclick: () => app.gotoExitTarget(e) }, '→ Ziel öffnen'),
-        h('button', { class: 'danger', onclick: () => { app.checkpoint(); lv.exits = lv.exits.filter((x) => x !== e); app.changed(false); } }, 'Exit löschen'))),
-    hint(`Nur Level ${n & 0x100 ? '100–1FF' : '000–0FF'} wählbar: das obere Bit der Zielnummer kommt vom Level, in dem der Exit liegt.`),
-    hint(enter === false ? 'Auf diesem Screen wurden keine Rohre oder Türen gefunden.' : 'Der Exit gilt für alle Rohre und Türen dieses Screens.'),
+        h('button', { title: 'Open the target level and select the entrance', onclick: () => app.gotoExitTarget(e) }, '→ Open target'),
+        h('button', { class: 'danger', onclick: () => { app.checkpoint(); lv.exits = lv.exits.filter((x) => x !== e); app.changed(false); } }, 'Delete exit'))),
+    hint(`Only levels ${n & 0x100 ? '100–1FF' : '000–0FF'} can be chosen: the high bit of the target number comes from the level the exit is in.`),
+    hint(enter === false ? 'No pipes or doors were found on this screen.' : 'The exit applies to all pipes and doors of this screen.'),
   );
   return enter === null;
 }
@@ -105,13 +105,13 @@ function exitPanel(app: App, body: HTMLElement): boolean {
 // a new secondary entrance into `level`, placed like its main entrance
 export function newEntranceIn(app: App, level: number): number | null {
   const idx = app.exitGraph().freeEntrance(level);
-  if (idx === null) { toast(`Kein freier sekundärer Eingang mehr in ${level & 0x100 ? '100–1FF' : '000–0FF'}.`, 'error'); return null; }
+  if (idx === null) { toast(`No free secondary entrance left in ${level & 0x100 ? '100–1FF' : '000–0FF'}.`, 'error'); return null; }
   const s = level === app.level.number ? app.level.secondary : readSecondaryHeader(app.rom, level);
-  app.editSecondaryEntrance(idx, `Sekundärer Eingang ${hex3(idx)} angelegt`, (x) => {
+  app.editSecondaryEntrance(idx, `Secondary entrance ${hex3(idx)} created`, (x) => {
     x.destLevel = level & 0xff; x.screen = s.entranceScreen; x.entranceX = s.entranceX; x.entranceY = s.entranceY;
     x.action = s.entranceAction; x.fgInitY = s.fgInitY; x.bgInitY = s.bgInitY;
   });
-  if (level !== app.level.number) toast(`Sekundärer Eingang ${hex3(idx)} in Level ${hex3(level)} angelegt (am Haupteingang) – mit „Ziel öffnen“ hinwechseln und verschieben.`);
+  if (level !== app.level.number) toast(`Secondary entrance ${hex3(idx)} created in level ${hex3(level)} (at the main entrance) – go there with “Open target” and move it.`);
   return idx;
 }
 
@@ -119,9 +119,9 @@ export function newEntranceIn(app: App, level: number): number | null {
 function users(app: App, refs: ExitRef[], extra: HTMLElement[], empty: string): HTMLElement {
   const g = app.exitGraph();
   const rows = refs.map((r) => h('div', { class: 'row' },
-    h('span', { class: 'mono' }, `${hex3(r.from)}`), h('span', { class: 'lname' }, g.name(r.from)), `· Screen ${hex2(r.screen)}`,
-    h('button', { class: 'link-btn', title: 'Level öffnen und den Screen mit diesem Exit wählen', onclick: () => app.gotoExit(r.from, r.screen) }, 'öffnen')));
-  return h('div', { class: 'exit-users' }, h('div', { class: 'hint' }, 'Hierher führen:'), ...extra, ...rows, ...(rows.length || extra.length ? [] : [hint(empty)]));
+    h('span', { class: 'mono' }, `${hex3(r.from)}`), h('span', { class: 'lname' }, g.name(r.from)), `· screen ${hex2(r.screen)}`,
+    h('button', { class: 'link-btn', title: 'Open the level and select the screen with this exit', onclick: () => app.gotoExit(r.from, r.screen) }, 'open')));
+  return h('div', { class: 'exit-users' }, h('div', { class: 'hint' }, 'Leading here:'), ...extra, ...rows, ...(rows.length || extra.length ? [] : [hint(empty)]));
 }
 
 // test play from a marker
@@ -134,28 +134,28 @@ function testAt(app: App, kind: Marker['kind'], index: number): void {
 // ---- secondary entrance ----
 function secondaryPanel(app: App, body: HTMLElement, idx: number): void {
   const e = readSecondaryEntrance(app.rom, idx);
-  const set = (label: string, f: (x: typeof e) => void, key: string) => app.editSecondaryEntrance(idx, `Sekundärer Eingang ${hex3(idx)}: ${label}`, f, `sec-entrance-${key}:${idx}`);
+  const set = (label: string, f: (x: typeof e) => void, key: string) => app.editSecondaryEntrance(idx, `Secondary entrance ${hex3(idx)}: ${label}`, f, `sec-entrance-${key}:${idx}`);
   const refs = app.exitGraph().usersOfEntrance(idx);
   body.append(
-    h('div', { class: 'prop-title' }, `Sekundärer Eingang ${hex3(idx)}`),
-    hint(`Screen ${hex2(e.screen)}, X ${e.entranceX}, Y ${e.entranceY} – Marker ziehen zum Verschieben`),
-    field('Aktion', select(actions(), e.action, (v) => set('Aktion', (x) => (x.action = v), 'a'))),
-    field('FG Start-Y', select(range(4), e.fgInitY, (v) => set('FG Start-Y', (x) => (x.fgInitY = v), 'f'))),
-    field('BG Start-Y', select(range(4), e.bgInitY, (v) => set('BG Start-Y', (x) => (x.bgInitY = v), 'b'))),
-    users(app, refs, [], 'Noch kein Exit. In einem anderen Level einen Screen wählen, „Exit anlegen“, „Sekundären Eingang“ und dieses Level als Ziel wählen.'),
+    h('div', { class: 'prop-title' }, `Secondary entrance ${hex3(idx)}`),
+    hint(`Screen ${hex2(e.screen)}, X ${e.entranceX}, Y ${e.entranceY} – drag the marker to move it`),
+    field('Action', select(actions(), e.action, (v) => set('Action', (x) => (x.action = v), 'a'))),
+    field('FG start Y', select(range(4), e.fgInitY, (v) => set('FG start Y', (x) => (x.fgInitY = v), 'f'))),
+    field('BG start Y', select(range(4), e.bgInitY, (v) => set('BG start Y', (x) => (x.bgInitY = v), 'b'))),
+    users(app, refs, [], 'No exit yet. In another level, select a screen, choose “Create exit”, “Secondary entrance” and this level as the target.'),
     h('div', { class: 'row' },
-      h('button', { title: 'Testspiel ab diesem Eingang', onclick: () => testAt(app, 'sec', idx) }, '▶ Hier testen'),
+      h('button', { title: 'Test play from this entrance', onclick: () => testAt(app, 'sec', idx) }, '▶ Test here'),
       h('button', {
         class: 'danger',
         onclick: async () => {
           if (refs.length) {
-            const r = await choose(`Eingang ${hex3(idx)} entfernen`, `${refs.length} Exit(s) führen noch hierher und landen danach im Leeren. Trotzdem entfernen? (rückgängig machbar)`, [{ label: 'Abbrechen' }, { label: 'Entfernen', danger: true }]);
+            const r = await choose(`Remove entrance ${hex3(idx)}`, `${refs.length} exit(s) still lead here and will then lead nowhere. Remove anyway? (undoable)`, [{ label: 'Cancel' }, { label: 'Remove', danger: true }]);
             if (r !== 1) return;
           }
           app.removeSecondaryEntrance(idx);
         },
-      }, 'Entfernen')),
-    hint('Ändert die ROM direkt (rückgängig machbar mit Strg+Z).'),
+      }, 'Remove')),
+    hint('Edits the ROM directly (undoable with Ctrl+Z).'),
   );
 }
 
@@ -165,23 +165,23 @@ function mainPanel(app: App, body: HTMLElement, kind: 'main' | 'midway'): void {
   const upd = (f: () => void) => { app.checkpoint(); f(); app.changed(); };
   if (kind === 'midway') {
     body.append(
-      h('div', { class: 'prop-title' }, 'Zwischenziel (Midway)'),
+      h('div', { class: 'prop-title' }, 'Midway point'),
       field('Screen', select(range(Math.min(16, lv.header.screens)).map(([v]) => [v, hex2(v)]), s.midwayScreen, (v) => upd(() => (s.midwayScreen = v)))),
-      hint('Höhe und Position im Screen teilt sich das Zwischenziel mit dem Haupteingang (M); nur der Screen ist eigen. Es wirkt, wenn Mario die Zwischenziel-Tafel des Levels berührt hat.'),
-      h('div', { class: 'row' }, h('button', { onclick: () => testAt(app, 'midway', 0) }, '▶ Hier testen')),
+      hint('The midway point shares its height and position within the screen with the main entrance (M); only the screen is its own. It applies once Mario has touched the level\'s midway tape.'),
+      h('div', { class: 'row' }, h('button', { onclick: () => testAt(app, 'midway', 0) }, '▶ Test here')),
     );
     return;
   }
   const g = app.exitGraph();
   const tl = mainTranslevel(n);
-  const extra = tl ? [h('div', { class: 'row' }, h('span', null, 'Overworld'), h('span', { class: 'lname' }, `(Level-Feld, Translevel ${hex2(tl)})`))] : [];
+  const extra = tl ? [h('div', { class: 'row' }, h('span', null, 'Overworld'), h('span', { class: 'lname' }, `(level tile, translevel ${hex2(tl)})`))] : [];
   body.append(
-    h('div', { class: 'prop-title' }, 'Haupteingang'),
-    hint(`Screen ${hex2(s.entranceScreen)}, X ${s.entranceX}, Y ${s.entranceY} – Marker ziehen zum Verschieben`),
-    field('Aktion', select(actions(), s.entranceAction, (v) => upd(() => (s.entranceAction = v)))),
-    users(app, g.exitsInto(n).filter((r) => !r.secondary), extra, 'Kein Exit führt zum Haupteingang.'),
-    h('div', { class: 'row' }, h('button', { title: 'Testspiel ab dem Haupteingang (T)', onclick: () => testAt(app, 'main', 0) }, '▶ Hier testen')),
-    hint('Weitere Einstellungen (Scrollen, Layer 3 …) im Header-Dialog (H).'),
+    h('div', { class: 'prop-title' }, 'Main entrance'),
+    hint(`Screen ${hex2(s.entranceScreen)}, X ${s.entranceX}, Y ${s.entranceY} – drag the marker to move it`),
+    field('Action', select(actions(), s.entranceAction, (v) => upd(() => (s.entranceAction = v)))),
+    users(app, g.exitsInto(n).filter((r) => !r.secondary), extra, 'No exit leads to the main entrance.'),
+    h('div', { class: 'row' }, h('button', { title: 'Test play from the main entrance (T)', onclick: () => testAt(app, 'main', 0) }, '▶ Test here')),
+    hint('More settings (scrolling, layer 3 …) in the header dialog (H).'),
   );
 }
 

@@ -171,7 +171,7 @@ export class App {
     this.spriteMem = this.spriteMemBase = null;
     this.refresh();
     this.emit('level');
-    logMsg(`Level ${hex(n, 3)} geöffnet`);
+    logMsg(`Level ${hex(n, 3)} opened`);
     this.ensureSpriteImages();
     this.scheduleSpriteMem();
     this.prefetchProbes();
@@ -207,7 +207,7 @@ export class App {
     this.graph = null;
     const lv = this.level;
     const r = this.emu.load(lv.number, this.buildOverrides());
-    this.renderError = r.ok ? null : r.error ?? 'Fehler';
+    this.renderError = r.ok ? null : r.error ?? 'Error';
     this.anim.snaps = this.show.anim && r.ok ? this.emu.animationFrames() : [];
     this.render = r;
     this.images = renderLevel(this.rom, r, lv.header.mode, lv.header.screens);
@@ -242,7 +242,7 @@ export class App {
     let i = 0;
     const step = () => {
       if (gen !== a.gen) return;
-      this.setBusy('anim', `Animationen ${i + 1}/${snaps.length}`);
+      this.setBusy('anim', `Animations ${i + 1}/${snaps.length}`);
       const li = renderLevel(this.rom, { ...this.render, vram: snaps[i].vram, cgram: snaps[i].cgram }, lv.header.mode, lv.header.screens);
       const img = this.compose(li);
       const idx: number[] = [];
@@ -310,7 +310,7 @@ export class App {
       if (e.screen === p.screen && e.entranceX === p.ex && e.entranceY === p.ey) return false;
       e.screen = p.screen; e.entranceX = p.ex; e.entranceY = p.ey;
       // ROM data: one undo step per marker (successive moves merge)
-      this.romEdit(`Sekundärer Eingang ${hex(m.index, 3)} verschoben`, () => writeSecondaryEntrance(this.rom, m.index, e), `sec-entrance:${m.index}`);
+      this.romEdit(`Secondary entrance ${hex(m.index, 3)} moved`, () => writeSecondaryEntrance(this.rom, m.index, e), `sec-entrance:${m.index}`);
     }
     return true;
   }
@@ -367,9 +367,9 @@ export class App {
   newSecondaryEntrance(px: number, py: number): number | null {
     const n = this.level.number;
     const idx = this.exitGraph().freeEntrance(n);
-    if (idx === null) { toast(`Kein freier sekundärer Eingang mehr in ${n & 0x100 ? '100–1FF' : '000–0FF'}.`, 'error'); return null; }
+    if (idx === null) { toast(`No free secondary entrance left in ${n & 0x100 ? '100–1FF' : '000–0FF'}.`, 'error'); return null; }
     const p = nearestEntrance(this.rom, px, py, (this.level.secondary.verticalPositioning & 1) !== 0, this.level.header.screens - 1);
-    this.editSecondaryEntrance(idx, `Sekundärer Eingang ${hex(idx, 3)} angelegt`, (e) => {
+    this.editSecondaryEntrance(idx, `Secondary entrance ${hex(idx, 3)} created`, (e) => {
       e.destLevel = n & 0xff; e.screen = p.screen; e.entranceX = p.ex; e.entranceY = p.ey;
     });
     this.selectEntrance({ kind: 'sec', index: idx });
@@ -378,7 +378,7 @@ export class App {
 
   // clears a secondary entrance (all bytes 0: free again)
   removeSecondaryEntrance(idx: number): void {
-    this.romEdit(`Sekundärer Eingang ${hex(idx, 3)} entfernt`, () => {
+    this.romEdit(`Secondary entrance ${hex(idx, 3)} removed`, () => {
       writeSecondaryEntrance(this.rom, idx, { destLevel: 0, entranceY: 0, fgInitY: 0, bgInitY: 0, entranceX: 0, screen: 0, action: 0, raw3: 0 });
     });
     this.findSecondaryEntrances();
@@ -461,7 +461,7 @@ export class App {
   // name of a sprite id
   spriteLabel(id: number): string {
     if (id < 0x200) return spriteName(id);
-    return this.customSprite(id)?.name ?? `Custom Sprite ${hex(id & 0xff, 2)}${id & 0x100 ? ' (Extra-Bit)' : ''} – nicht eingefügt`;
+    return this.customSprite(id)?.name ?? `Custom Sprite ${hex(id & 0xff, 2)}${id & 0x100 ? ' (extra bit)' : ''} – not inserted`;
   }
 
   ensureSpriteImages(): void {
@@ -494,7 +494,7 @@ export class App {
           return;
         }
       }
-      this.setBusy('sprites', `Sprite-Grafiken ${Math.min(100, Math.round(i / all.length * 100))} %`);
+      this.setBusy('sprites', `Sprite graphics ${Math.min(100, Math.round(i / all.length * 100))} %`);
       const chunk = all.slice(i, i + 12);
       i += 12;
       const r = this.emu.tracked(() => captureSprites(this.emu, lvNum, header, sh, bg, chunk));
@@ -507,7 +507,7 @@ export class App {
         this.setBusy('sprites', null);
       }
     };
-    this.setBusy('sprites', 'Sprite-Grafiken');
+    this.setBusy('sprites', 'Sprite graphics');
     this.cacheReady.then(() => setTimeout(step, 0));
   }
 
@@ -591,7 +591,7 @@ export class App {
     const step = () => {
       if (queue !== this.variantQueue || key !== this.spriteKey) return;
       const n = queue[0];
-      this.setBusy('variants', `Sprite-Varianten (${queue.length})`);
+      this.setBusy('variants', `Sprite variants (${queue.length})`);
       const p = this.prober?.cachedSprite(n);
       const lv = this.level, bg = lv.layer2Pointer >> 16 === 0xff ? lv.layer2Pointer : 0xffd900;
       for (const at of p?.variants.reps ?? []) {
@@ -668,7 +668,7 @@ export class App {
       } catch (e) { console.error(e); this.setBusy('spritemem', null); return; }
       setTimeout(step, 0);
     };
-    this.setBusy('spritemem', 'Sprite-Speicher prüfen');
+    this.setBusy('spritemem', 'Checking sprite memory');
     setTimeout(step, 0);
   }
 
@@ -681,7 +681,7 @@ export class App {
     if (this.undoOrder[this.undoOrder.length - 1]?.kind !== 'level') return;
     this.level.spriteHeader = (this.level.spriteHeader & 0xc0) | cur.suggestion;
     this.changed();
-    toast(`Sprite-Speicher auf ${hex(cur.suggestion, 2)} gestellt, damit alle Sprites vollständig angezeigt werden (Strg+Z macht es rückgängig).`);
+    toast(`Sprite memory set to ${hex(cur.suggestion, 2)} so all sprites are shown completely (Ctrl+Z undoes it).`);
     this.emit('level-header');
   }
 
@@ -691,7 +691,7 @@ export class App {
     this.level.spriteHeader = (this.level.spriteHeader & 0xc0) | (m & 0x3f);
     this.changed();
     this.emit('level-header');
-    logMsg(`Sprite-Speicher auf ${hex(m, 2)} gestellt`);
+    logMsg(`Sprite memory set to ${hex(m, 2)}`);
   }
 
   // 8x8 tiles (layer 1 tile numbers) and colors the game keeps rewriting in this level (tile and
@@ -832,7 +832,7 @@ export class App {
     kvGet<StoredObjKinds>(`objkinds-${ts}`).catch(() => undefined).then((st) => {
       const k = st && loadKinds(st);
       if (k && kindsStillValid(k, this.rom.data)) { this.setKinds(ts, k); return; }
-      this.setBusy('kinds', 'Objektarten');
+      this.setBusy('kinds', 'Object kinds');
       const emu = new LevelEmulator(this.rom);
       emu.adoptBoot(this.emu);
       emu.skipMask = () => this.gfxSkipMask();
@@ -911,7 +911,7 @@ export class App {
 
   private probeBusy(): void {
     const n = this.probeQueue.length + this.prefetchQueue.size;
-    this.setBusy('probe', n ? `Blockverhalten (${n})` : null);
+    this.setBusy('probe', n ? `Block behavior (${n})` : null);
   }
 
   private scheduleProbes(): void {
@@ -1031,7 +1031,7 @@ export class App {
       return;
     }
     if (this.undoStack.length) this.levelUndo();
-    else toast('Nichts rückgängig zu machen');
+    else toast('Nothing to undo');
   }
   redo(): void {
     while (this.redoOrder.length) {
@@ -1065,11 +1065,11 @@ export class App {
 
   setMode(m: EditMode, selection: Iterable<number> = []): void {
     if (m === 'l2' && !this.level.layer2Objects) {
-      toast('Dieses Level hat keine Layer-2-Objekte (Layer 2 ist Hintergrund, Modus BG).');
+      toast('This level has no layer 2 objects (layer 2 is background, mode BG).');
       return;
     }
     if (m === 'bg' && !this.canEditBg()) {
-      toast('Dieses Level hat Layer-2-Objekte statt einer BG-Tilemap.');
+      toast('This level has layer 2 objects instead of a BG tilemap.');
       return;
     }
     const recompose = (this.level.layer2Objects || m === 'bg' || this.mode === 'bg') && this.show.ghost && m !== this.mode;
@@ -1118,7 +1118,7 @@ export class App {
   }
 
   insertAt(tx: number, ty: number, p: PaletteItem | null = this.paletteItem): void {
-    if (!p) { toast('Zuerst ein Objekt/Sprite in der Palette wählen.'); return; }
+    if (!p) { toast('Choose an object/sprite in the palette first.'); return; }
     this.checkpoint();
     if (p.kind === 'obj' && (this.mode === 'l1' || this.mode === 'l2')) {
       if (p.num === 0 && p.ext === DM16_EXT && !this.ensureEditorPatch()) { this.undoStack.pop(); return; }
@@ -1128,7 +1128,7 @@ export class App {
         installMap16Ext(this.rom, map16Source(this.rom, this.render).fg(0x025));
         this.emu.syncRom();
         this.persist();
-        toast('Map16-Erweiterung installiert (Tiles 200–FFF).');
+        toast('Map16 expansion installed (tiles 200–FFF).');
       }
       this.selection = new Set();
       for (const { dx, dy } of cells) {
@@ -1159,7 +1159,7 @@ export class App {
       installEditorPatch(this.rom);
       this.emu.syncRom();
       this.persist();
-      toast('Editor-Patch installiert (für Direct-Map16-Objekte).');
+      toast('Editor patch installed (for Direct Map16 objects).');
       return true;
     } catch (e) { toast(String(e), 'error'); return false; }
   }
@@ -1173,10 +1173,10 @@ export class App {
   // transparent, empty rows and columns at the border are cut off
   structureFromSelection(): { x: number; y: number; w: number; h: number; tiles: number[] } | string {
     const objs = this.selectedObjects();
-    if (!objs.length || (this.mode !== 'l1' && this.mode !== 'l2')) return 'Zuerst Objekte im Level auswählen (Layer 1 oder 2).';
+    if (!objs.length || (this.mode !== 'l1' && this.mode !== 'l2')) return 'Select objects in the level first (layer 1 or 2).';
     const l2 = this.mode === 'l2';
     const g = l2 ? this.images.geom2 : this.images.geom1;
-    if (!g) return 'Layer ohne Objekte';
+    if (!g) return 'Layer without objects';
     const all = this.currentObjects();
     const keys = new Set(objs.map((o) => this.objectKey(l2, all.indexOf(o))));
     let x0 = Infinity, y0 = Infinity, x1 = -1, y1 = -1;
@@ -1188,9 +1188,9 @@ export class App {
       cells.set(t, this.render.wram[a] | (this.render.wram[a + 0x10000] << 8));
       x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y);
     }
-    if (x1 < 0) return 'Die ausgewählten Objekte haben keine sichtbaren Tiles.';
+    if (x1 < 0) return 'The selected objects have no visible tiles.';
     const w = x1 - x0 + 1, h = y1 - y0 + 1;
-    if (w > STRUCT_MAX || h > STRUCT_MAX) return `Auswahl ist ${w}×${h} Tiles groß, eine Struktur höchstens ${STRUCT_MAX}×${STRUCT_MAX}.`;
+    if (w > STRUCT_MAX || h > STRUCT_MAX) return `Selection is ${w}×${h} tiles, a structure can be at most ${STRUCT_MAX}×${STRUCT_MAX}.`;
     const tiles = Array.from({ length: w * h }, (_, i) => cells.get(((y0 + Math.floor(i / w)) << 16) | (x0 + (i % w))) ?? TRANSPARENT);
     return { x: x0, y: y0, w, h, tiles };
   }
@@ -1241,9 +1241,9 @@ export class App {
   // a structure object becomes one Direct-Map16 object per tile, at its place in the object list
   explodeStructure(o: LevelObject): void {
     const s = o.struct !== undefined ? readStructure(this.rom, o.struct) : null;
-    if (!s) { toast('Die Struktur gibt es nicht (mehr).', 'error'); return; }
+    if (!s) { toast('The structure does not exist (anymore).', 'error'); return; }
     if (!this.ensureEditorPatch()) return;
-    if (s.tiles.some((t) => t >= EXT_FIRST) && !map16Ext(this.rom)) { toast('Die Struktur nutzt Tiles ab 200, die Map16-Erweiterung fehlt.', 'error'); return; }
+    if (s.tiles.some((t) => t >= EXT_FIRST) && !map16Ext(this.rom)) { toast('The structure uses tiles from 200 up, the Map16 expansion is missing.', 'error'); return; }
     this.checkpoint();
     const parts: LevelObject[] = [];
     s.tiles.forEach((t, i) => { if (t !== TRANSPARENT) parts.push({ uid: newUid(), num: 0, ext: DM16_EXT, x: o.x + (i % s.w), y: o.y + Math.floor(i / s.w), size: 0, tile: t }); });
@@ -1282,7 +1282,7 @@ export class App {
     this.changed();
   }
 
-  // copies the selection and pastes it one tile down-right (Strg+D)
+  // copies the selection and pastes it one tile down-right (Ctrl+D)
   duplicateSelection(): void {
     this.copy();
     const s = this.mode === 'spr' ? this.selectedSprites() : this.selectedObjects();
@@ -1335,12 +1335,12 @@ export class App {
       this.mode = mode;
       this.selection = sel;
       this.persist();
-      if (!silent) toast(`Level ${hex(n, 3)} gespeichert. ${log.join(' · ')}`);
-      else logMsg(`Level ${hex(n, 3)} automatisch gespeichert. ${log.join(' · ')}`);
+      if (!silent) toast(`Level ${hex(n, 3)} saved. ${log.join(' · ')}`);
+      else logMsg(`Level ${hex(n, 3)} saved automatically. ${log.join(' · ')}`);
       this.refresh();
       this.emit('change');
     } catch (e) {
-      toast(`Speichern fehlgeschlagen: ${e}`, 'error');
+      toast(`Save failed: ${e}`, 'error');
     }
   }
 
@@ -1400,7 +1400,7 @@ export class App {
     }
     if (!e) return false;
     this.romChanged();
-    toast(`${undo ? 'Rückgängig' : 'Wiederholt'}: ${e.label}`);
+    toast(`${undo ? 'Undone' : 'Redone'}: ${e.label}`);
     return true;
   }
 

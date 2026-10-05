@@ -20,9 +20,9 @@ type Drag =
   | { kind: 'pick'; x0: number; y0: number; x1: number; y1: number }; // BG tiles taken into the brush
 
 const MARKER_STYLE: Record<Marker['kind'], { color: string; label: string; title: string }> = {
-  main: { color: 'rgba(255,40,40,0.9)', label: 'M', title: 'Haupteingang' },
-  midway: { color: 'rgba(255,150,0,0.9)', label: 'Z', title: 'Zwischenziel (Screen)' },
-  sec: { color: 'rgba(40,120,255,0.9)', label: 'S', title: 'Sekundärer Eingang' },
+  main: { color: 'rgba(255,40,40,0.9)', label: 'M', title: 'Main entrance' },
+  midway: { color: 'rgba(255,150,0,0.9)', label: 'Z', title: 'Midway point (screen)' },
+  sec: { color: 'rgba(40,120,255,0.9)', label: 'S', title: 'Secondary entrance' },
 };
 
 export class LevelView {
@@ -200,7 +200,7 @@ export class LevelView {
           ctx.fillText(txt, x + 20 / app.zoom, ty);
         };
         line(`Exit → ${g.label(t.to)}`, 0);
-        if (t.entrance >= 0) line(ok ? `über sek. Eingang ${hex3(t.entrance)}` : `sek. Eingang ${hex3(t.entrance)} fehlt`, 1);
+        if (t.entrance >= 0) line(ok ? `via sec. entrance ${hex3(t.entrance)}` : `sec. entrance ${hex3(t.entrance)} missing`, 1);
       }
     }
     // entrance markers (Mario's start position, drawn at his lower 16x16 half)
@@ -466,7 +466,7 @@ export class LevelView {
     if (hit && !e.ctrlKey) {
       if (hit.mode !== app.mode) {
         app.setMode(hit.mode, [hit.item.uid]);
-        toast(`Modus: ${hit.mode === 'spr' ? 'Sprites' : hit.mode === 'l2' ? 'Layer 2' : 'Layer 1'}`);
+        toast(`Mode: ${hit.mode === 'spr' ? 'Sprites' : hit.mode === 'l2' ? 'Layer 2' : 'Layer 1'}`);
       }
       else if (!app.selection.has(hit.item.uid)) app.selection = new Set([hit.item.uid]);
       app.emit('change');
@@ -607,9 +607,9 @@ export class LevelView {
   idleStatus(): void {
     const m = this.app.mode;
     this.pos.textContent = '';
-    this.status.textContent = m === 'bg' ? 'Klick/Ziehen nimmt Tiles als Pinsel auf · Rechtsklick/Shift+Klick malt'
-      : m === 'exit' ? 'Klick auf einen Eingang (M, Z, S) oder Screen wählt aus – bearbeiten rechts unter „Eigenschaften“ · Ziehen verschiebt Eingänge · Rechtsklick: neuer Eingang, Exit anlegen …'
-        : 'Klick wählt aus, Ziehen verschiebt · Rechtsklick/Shift+Klick fügt das gewählte Element aus „Einfügen“ ein · Alt+Klick: darunterliegendes Element';
+    this.status.textContent = m === 'bg' ? 'Click/drag picks up tiles as brush · Right click/Shift+click paints'
+      : m === 'exit' ? 'Click an entrance (M, Z, S) or screen to select it – edit it on the right under “Properties” · Drag moves entrances · Right click: new entrance, create exit …'
+        : 'Click selects, drag moves · Right click/Shift+click inserts the item chosen in “Insert” · Alt+click: item underneath';
   }
 
   updateStatus(tx: number, ty: number): void {
@@ -627,12 +627,12 @@ export class LevelView {
     }
     if (app.mode === 'bg') {
       const b = app.bgBrush;
-      txt += `  ·  BG-Tile ${hex3(app.bgAt(tx, ty))}  ·  Pinsel ${b.tiles.length > 1 ? `${b.w}×${b.h}` : hex3(b.tiles[0])}`;
+      txt += `  ·  BG-Tile ${hex3(app.bgAt(tx, ty))}  ·  Brush ${b.tiles.length > 1 ? `${b.w}×${b.h}` : hex3(b.tiles[0])}`;
       this.status.textContent = txt.replace(/^\s*·\s*/, '');
       return;
     }
     const mk = this.hover ? this.markerAt(this.hover.px, this.hover.py) : null;
-    if (mk) txt += `  · ${MARKER_STYLE[mk.kind].title}${mk.kind === 'sec' ? ' ' + hex3(mk.index) : ''} (ziehen zum Verschieben)`;
+    if (mk) txt += `  · ${MARKER_STYLE[mk.kind].title}${mk.kind === 'sec' ? ' ' + hex3(mk.index) : ''} (drag to move)`;
     const hits = app.hitsAt(this.hover?.px ?? tx * 16, this.hover?.py ?? ty * 16);
     for (const { mode, item } of hits) {
       const tag = hits.length > 1 ? (mode === 'spr' ? '' : mode === 'l1' ? ' (Layer 1)' : ' (Layer 2)') : '';
@@ -642,7 +642,7 @@ export class LevelView {
         const sum = p && spriteProbeAt(p, s.x, s.y).summary;
         txt += `  · ${s.extra >= 2 ? 'Custom Sprite' : 'Sprite'} ${hex2(s.num)} ${app.spriteLabel(spriteId(s))}${sum ? ` (${sum})` : ''}`;
       }
-      else { const o = item as LevelObject; txt += `  · ${o.num ? 'Objekt ' + hex2(o.num) : 'Erw. Objekt ' + hex2(o.ext)}${tag} ${objectName(o.num, o.ext)}${o.num ? ' Größe ' + hex2(o.size) : ''}`; }
+      else { const o = item as LevelObject; txt += `  · ${o.num ? 'Object ' + hex2(o.num) : 'Ext. object ' + hex2(o.ext)}${tag} ${objectName(o.num, o.ext)}${o.num ? ' size ' + hex2(o.size) : ''}`; }
     }
     this.status.textContent = txt.replace(/^\s*·\s*/, '');
   }
@@ -684,18 +684,18 @@ export class LevelView {
     // marker positions are Mario's top-left, the circle is drawn at his feet
     const mx = px - 8, my = py - 24;
     const items: MenuItem[] = [
-      { heading: 'Eingänge' },
-      { label: 'Neuer sekundärer Eingang hier', title: 'Legt einen Eingang mit freier Nummer an, auf den Exits anderer Level zeigen können', onClick: () => { app.newSecondaryEntrance(mx, my); } },
-      { label: 'Haupteingang hierher', onClick: () => app.placeEntrance('main', mx, my) },
-      { label: 'Zwischenziel hierher (nur der Screen)', disabled: () => scr > 15, onClick: () => app.placeEntrance('midway', mx, my) },
+      { heading: 'Entrances' },
+      { label: 'New secondary entrance here', title: 'Creates an entrance with a free number that exits of other levels can point to', onClick: () => { app.newSecondaryEntrance(mx, my); } },
+      { label: 'Main entrance here', onClick: () => app.placeEntrance('main', mx, my) },
+      { label: 'Midway point here (screen only)', disabled: () => scr > 15, onClick: () => app.placeEntrance('midway', mx, my) },
     ];
-    if (mk?.kind === 'sec') items.push({ label: `Eingang ${hex3(mk.index)} entfernen`, onClick: () => app.removeSecondaryEntrance(mk.index) });
+    if (mk?.kind === 'sec') items.push({ label: `Remove entrance ${hex3(mk.index)}`, onClick: () => app.removeSecondaryEntrance(mk.index) });
     items.push({ heading: `Screen ${hex2(scr)}` });
     if (ex) {
-      items.push({ label: 'Exit bearbeiten', onClick: () => app.selectScreen(scr) });
-      items.push({ label: '→ Ziel des Exits öffnen', onClick: () => app.gotoExitTarget(ex) });
+      items.push({ label: 'Edit exit', onClick: () => app.selectScreen(scr) });
+      items.push({ label: '→ Open exit target', onClick: () => app.gotoExitTarget(ex) });
     } else {
-      items.push({ label: 'Exit anlegen', onClick: () => { app.selectScreen(scr); app.checkpoint(); app.level.exits.push({ uid: newUid(), screen: scr, dest: app.level.number & 0x1ff, secondary: false, flags: 0 }); app.changed(false); } });
+      items.push({ label: 'Create exit', onClick: () => { app.selectScreen(scr); app.checkpoint(); app.level.exits.push({ uid: newUid(), screen: scr, dest: app.level.number & 0x1ff, secondary: false, flags: 0 }); app.changed(false); } });
     }
     contextMenu(e.clientX, e.clientY, items);
   }
@@ -716,12 +716,12 @@ export class LevelView {
     if (!lv) return;
     const l1 = serializeLayer1(app.rom, lv).length, l2 = serializeLayer2(app.rom, lv)?.length;
     const spr = serializeSprites(lv.sprites, lv.spriteHeader, app.vertical, spriteSizes(app.rom)).length;
-    const parts = [`Objekte ${lv.objects.length}${lv.layer2Objects ? ' / L2 ' + lv.layer2Objects.length : ''}`, `Sprites ${lv.sprites.length}`,
-      `Daten: L1 ${l1}${l2 !== undefined ? ` · L2 ${l2}` : ''} · Sprites ${spr} Bytes`];
+    const parts = [`Objects ${lv.objects.length}${lv.layer2Objects ? ' / L2 ' + lv.layer2Objects.length : ''}`, `Sprites ${lv.sprites.length}`,
+      `Data: L1 ${l1}${l2 !== undefined ? ` · L2 ${l2}` : ''} · sprites ${spr} bytes`];
     this.stats.textContent = parts.join('  ·  ');
     const over = lv.sprites.length > 128;
     this.stats.classList.toggle('warn', over);
-    this.stats.title = over ? 'Mehr als 128 Sprites: das Spiel lädt nur die ersten 128.' : '';
+    this.stats.title = over ? 'More than 128 sprites: the game only loads the first 128.' : '';
     const n = incompleteSprites(app).length;
     this.memWarn.hidden = !n;
     this.memWarn.textContent = n ? `⚠ ${spriteMemText(n)}` : '';

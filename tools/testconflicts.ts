@@ -78,7 +78,7 @@ const blocks: BlockProject = { files: files({ 'blocks/b.asm': 'db $42\nJMP A : J
     'claim.asm': '!freeram = $7FAC81\nlorom\norg $00922F\n  autoclean JSL Code\n  NOP #2\nfreecode\nCode:\n  STZ $0703 : STZ $0704\n  RTL\n',
   }));
   const c = applyPatch(rom, packageSource(pkg, 'claim.asm', {}));
-  check(!c.ok && c.errors.some((x) => x.includes('RAM-Konflikt') && x.includes('UberASM') && x.includes('$7FAC81')), 'claim of UberASM\'s free RAM rejected: ' + c.errors.join(' '));
+  check(!c.ok && c.errors.some((x) => x.includes('RAM conflict') && x.includes('UberASM') && x.includes('$7FAC81')), 'claim of UberASM\'s free RAM rejected: ' + c.errors.join(' '));
   const moved = applyPatch(rom, packageSource(pkg, 'claim.asm', { freeram: '$7FB200' }));
   check(moved.ok && moved.entry?.ram?.[0][0] === 0x7fb200 && !moved.warnings.some((x) => x.includes('RAM')), 'the same patch with its setting moved applies ' + moved.errors.join(' '));
   // code without a claim: long writes into private RAM warn, into the sprite tables (shared) and vanilla RAM don't
@@ -113,7 +113,7 @@ const blocks: BlockProject = { files: files({ 'blocks/b.asm': 'db $42\nJMP A : J
     'main.asm': 'lorom\norg $00922F\n  autoclean JSL Code\n  NOP #2\nfreecode\nCode:\n  STZ $0703 : STZ $0704\n  RTL\n',
   }));
   const c = applyPatch(rom, packageSource(pkg, 'main.asm', {}));
-  check(!c.ok && c.errors.some((x) => x.includes('RAM-Konflikt')), 'low RAM claim $0DC4 vs $7E0DC5 rejected: ' + c.errors.join(' '));
+  check(!c.ok && c.errors.some((x) => x.includes('RAM conflict')), 'low RAM claim $0DC4 vs $7E0DC5 rejected: ' + c.errors.join(' '));
 }
 
 // 3. the editor patch's extended object $02 slot

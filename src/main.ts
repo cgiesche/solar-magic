@@ -22,16 +22,16 @@ import { openMessagesDialog } from './ui/messagedialog.ts';
 const root = document.getElementById('app')!;
 
 // errors nobody caught would otherwise only show up in the dev console
-window.addEventListener('error', (e) => log(`Unerwarteter Fehler: ${e.message}`, 'error'));
-window.addEventListener('unhandledrejection', (e) => log(`Unerwarteter Fehler: ${e.reason instanceof Error ? e.reason.message : e.reason}`, 'error'));
+window.addEventListener('error', (e) => log(`Unexpected error: ${e.message}`, 'error'));
+window.addEventListener('unhandledrejection', (e) => log(`Unexpected error: ${e.reason instanceof Error ? e.reason.message : e.reason}`, 'error'));
 
 function welcome(): void {
   clear(root);
   const drop = h('div', { class: 'welcome' },
     h('h1', null, 'SMW Level Editor'),
-    h('p', null, 'Super-Mario-World-ROM (US, .smc/.sfc, mit oder ohne Header) öffnen oder hierher ziehen.'),
-    h('button', { class: 'primary big', onclick: async () => { const f = await pickFile('.smc,.sfc,.bin'); if (f) openFile(f); } }, 'ROM öffnen …'),
-    h('p', { class: 'hint' }, 'Die ROM bleibt lokal im Browser (IndexedDB). Nichts wird hochgeladen.'),
+    h('p', null, 'Open a Super Mario World ROM (US, .smc/.sfc, with or without header) or drop it here.'),
+    h('button', { class: 'primary big', onclick: async () => { const f = await pickFile('.smc,.sfc,.bin'); if (f) openFile(f); } }, 'Open ROM …'),
+    h('p', { class: 'hint' }, 'The ROM stays local in the browser (IndexedDB). Nothing is uploaded.'),
   );
   root.appendChild(drop);
 }
@@ -43,19 +43,19 @@ async function openFile(f: File): Promise<void> {
 }
 
 function startWith(rom: Rom, name: string): void {
-  log(`ROM „${name}“ geladen (${Math.round(rom.size / 1024)} KB${rom.smcHeader ? ', mit Header' : ''})`);
+  log(`ROM “${name}” loaded (${Math.round(rom.size / 1024)} KB${rom.smcHeader ? ', with header' : ''})`);
   if (disableUnsafeExtGfx(rom)) {
     kvSet('rom', { name, data: rom.output(false), header: rom.smcHeader }).catch(() => {});
-    toast('BG2/BG3-Grafik wurde abgeschaltet: sie überschrieb die Layer-1-Tilemap (kaputter Hintergrund). Die Zuordnungen bleiben gespeichert und gelten wieder, sobald der VRAM-Patch verfügbar ist.', 'error');
+    toast('BG2/BG3 graphics were turned off: they overwrote the layer 1 tilemap (broken background). The assignments stay saved and apply again once the VRAM patch is available.', 'error');
   }
   if (!rom.title().startsWith('SUPER MARIOWORLD')) {
-    toast(`Unerwarteter ROM-Titel "${rom.title()}" – versuche es trotzdem.`, 'error');
+    toast(`Unexpected ROM title "${rom.title()}" – trying anyway.`, 'error');
   }
   let app: App;
   try {
     app = new App(rom, name);
   } catch (e) {
-    toast(`Emulator-Start fehlgeschlagen: ${e}`, 'error');
+    toast(`Emulator start failed: ${e}`, 'error');
     return;
   }
   (window as unknown as { app: App }).app = app;
@@ -94,70 +94,70 @@ function buildUi(app: App): void {
   // ---- level context bar: mode, view, zoom
   const modeBtn = (m: EditMode, label: string, key: string) => h('button', { class: 'mode', 'data-mode': m, title: `${label} (${key})`, onclick: () => app.setMode(m) }, label);
   const modes = h('div', { class: 'btn-group' },
-    modeBtn('l1', 'Layer 1', '1'), modeBtn('l2', 'Layer 2', '2'), modeBtn('spr', 'Sprites', '3'), modeBtn('exit', 'Ein-/Ausgänge', '4'), modeBtn('bg', 'BG', '5'));
+    modeBtn('l1', 'Layer 1', '1'), modeBtn('l2', 'Layer 2', '2'), modeBtn('spr', 'Sprites', '3'), modeBtn('exit', 'Entrances/Exits', '4'), modeBtn('bg', 'BG', '5'));
   const levelTitle = h('span', { class: 'level-title' });
   const zoomLabel = h('span', { class: 'zoom' });
   const levelBar = h('div', { class: 'ctxbar' },
     levelTitle,
-    h('button', { onclick: () => openHeaderDialog(app), title: 'Level-Header (H)' }, 'Header …'),
+    h('button', { onclick: () => openHeaderDialog(app), title: 'Level header (H)' }, 'Header …'),
     h('span', { class: 'sep' }),
     modes,
     h('span', { class: 'sep' }),
     viewMenu(app, () => view.paint()),
     h('span', { class: 'sep' }),
     h('div', { class: 'row zoom-ctl' },
-      h('button', { onclick: () => view.setZoom(app.zoom / 2), title: 'Verkleinern (Strg+Mausrad)' }, '−'), zoomLabel,
-      h('button', { onclick: () => view.setZoom(app.zoom * 2), title: 'Vergrößern (Strg+Mausrad)' }, '+')),
+      h('button', { onclick: () => view.setZoom(app.zoom / 2), title: 'Zoom out (Ctrl+mouse wheel)' }, '−'), zoomLabel,
+      h('button', { onclick: () => view.setZoom(app.zoom * 2), title: 'Zoom in (Ctrl+mouse wheel)' }, '+')),
   );
 
   // ---- app bar: menus, workspace switcher, main actions
   const testHere = () => { const hv = view.hover; openTestPlay(app, hv ? { tx: hv.tx, ty: hv.ty } : undefined); };
   const insertHere = () => { const hv = view.hover, c = view.centerTile(); openInsertDialog(app, hv ? hv.tx : c.tx, hv ? hv.ty : c.ty); };
   const menus = menuBar([
-    { label: 'Datei', items: [
-      { label: 'ROM öffnen …', onClick: async () => { const f = await pickFile('.smc,.sfc,.bin'); if (f) openFile(f); } },
-      { label: 'ROM exportieren', title: 'ROM mit allen gespeicherten Änderungen herunterladen', onClick: () => { if (ow?.dirty) ow.save(); exportRom(app); } },
+    { label: 'File', items: [
+      { label: 'Open ROM …', onClick: async () => { const f = await pickFile('.smc,.sfc,.bin'); if (f) openFile(f); } },
+      { label: 'Export ROM', title: 'Download the ROM with all saved changes', onClick: () => { if (ow?.dirty) ow.save(); exportRom(app); } },
       'sep',
-      { label: 'Level-Datei importieren …', title: 'Ersetzt das aktuelle Level (rückgängig machbar; Palette/Grafik-Bypass werden direkt in die ROM geschrieben)', disabled: () => !inLevel(), onClick: () => importLevel(app) },
-      { label: 'Level-Datei exportieren …', title: `Level als ${LEVEL_FILE_EXT}-Datei (Objekte, Sprites, Exits, Header, Grafik-Bypass, eigene Palette)`, disabled: () => !inLevel(), onClick: () => exportLevel(app) },
-      { label: 'Level als PNG …', title: 'Sichtbare Ebenen und Sprites in Originalgröße', disabled: () => !inLevel(), onClick: () => view.exportPng() },
+      { label: 'Import level file …', title: 'Replaces the current level (undoable; palette/graphics bypass are written to the ROM directly)', disabled: () => !inLevel(), onClick: () => importLevel(app) },
+      { label: 'Export level file …', title: `Level as ${LEVEL_FILE_EXT} file (objects, sprites, exits, header, graphics bypass, custom palette)`, disabled: () => !inLevel(), onClick: () => exportLevel(app) },
+      { label: 'Level as PNG …', title: 'Visible layers and sprites at original size', disabled: () => !inLevel(), onClick: () => view.exportPng() },
     ] },
     { label: 'Level', disabled: () => !inLevel(), items: [
-      { label: 'Speichern', shortcut: 'Strg+S', onClick: () => app.saveLevel() },
-      { label: 'Speichern unter …', onClick: () => openSaveAsDialog(app) },
+      { label: 'Save', shortcut: 'Ctrl+S', onClick: () => app.saveLevel() },
+      { label: 'Save as …', onClick: () => openSaveAsDialog(app) },
       { label: 'Header …', shortcut: 'H', onClick: () => openHeaderDialog(app) },
-      { label: 'Testen', shortcut: 'T', onClick: () => openTestPlay(app) },
+      { label: 'Test play', shortcut: 'T', onClick: () => openTestPlay(app) },
       'sep',
-      { label: 'Einfügen nach Nummer …', shortcut: 'I', onClick: insertHere },
-      { label: 'Screen einfügen …', disabled: () => app.level.header.screens >= 32, onClick: () => openScreenDialog(app, 'insert') },
-      { label: 'Screen löschen …', disabled: () => app.level.header.screens <= 1, onClick: () => openScreenDialog(app, 'delete') },
-      { label: 'Level leeren …', onClick: () => clearLevelConfirm(app) },
+      { label: 'Insert by number …', shortcut: 'I', onClick: insertHere },
+      { label: 'Insert screen …', disabled: () => app.level.header.screens >= 32, onClick: () => openScreenDialog(app, 'insert') },
+      { label: 'Delete screen …', disabled: () => app.level.header.screens <= 1, onClick: () => openScreenDialog(app, 'delete') },
+      { label: 'Clear level …', onClick: () => clearLevelConfirm(app) },
       'sep',
-      { label: 'Sekundäre Eingänge …', onClick: () => openEntrancesDialog(app) },
+      { label: 'Secondary entrances …', onClick: () => openEntrancesDialog(app) },
     ] },
     { label: 'ROM', items: [
-      { label: 'ROM-Informationen …', onClick: () => openRomInfo(app) },
-      { label: 'ROM erweitern …', disabled: () => app.rom.size >= 0x400000, onClick: () => openExpandDialog(app) },
+      { label: 'ROM information …', onClick: () => openRomInfo(app) },
+      { label: 'Expand ROM …', disabled: () => app.rom.size >= 0x400000, onClick: () => openExpandDialog(app) },
       'sep',
-      { label: 'Patches …', title: 'ASM-Patches (Asar) anwenden und verwalten', onClick: () => openResources(app, 'patches') },
+      { label: 'Patches …', title: 'Apply and manage ASM patches (Asar)', onClick: () => openResources(app, 'patches') },
       { label: 'UberASM …', onClick: () => openResources(app, 'uber') },
       { label: 'Custom Blocks …', onClick: () => openResources(app, 'blocks') },
       { label: 'Custom Sprites …', onClick: () => openResources(app, 'sprites') },
-      { label: 'Editor-Patch installieren …', disabled: () => hasEditorPatch(app.rom), onClick: () => installEditorPatchAction(app) },
+      { label: 'Install editor patch …', disabled: () => hasEditorPatch(app.rom), onClick: () => installEditorPatchAction(app) },
       'sep',
-      { label: 'Nachrichtenboxen …', onClick: () => openMessagesDialog(app) },
+      { label: 'Message boxes …', onClick: () => openMessagesDialog(app) },
     ] },
-    { label: 'Hilfe', items: [
-      { label: 'Tastenkürzel …', shortcut: '?', onClick: () => showHelp() },
-      { label: 'Protokoll ein-/ausklappen', shortcut: 'L', onClick: () => logBar.toggle() },
+    { label: 'Help', items: [
+      { label: 'Keyboard shortcuts …', shortcut: '?', onClick: () => showHelp() },
+      { label: 'Expand/collapse log', shortcut: 'L', onClick: () => logBar.toggle() },
     ] },
   ]);
   const wsBtn = (w: typeof workspace, label: string, key: string) => h('button', { 'data-ws': w, title: `${label} (${key})`, onclick: () => setWorkspace(w) }, label);
-  const wsSwitch = h('div', { class: 'btn-group ws-switch' }, wsBtn('level', 'Level', 'Esc'), wsBtn('ow', 'Overworld', 'O'), wsBtn('gfx', 'Grafik', 'P / M / G / A'));
-  const undoBtn = h('button', { onclick: () => (workspace === 'ow' ? ow?.undo() : app.undo()), title: 'Rückgängig (Strg+Z)' }, '↶');
-  const redoBtn = h('button', { onclick: () => (workspace === 'ow' ? ow?.redo() : app.redo()), title: 'Wiederholen (Strg+Y)' }, '↷');
+  const wsSwitch = h('div', { class: 'btn-group ws-switch' }, wsBtn('level', 'Level', 'Esc'), wsBtn('ow', 'Overworld', 'O'), wsBtn('gfx', 'Graphics', 'P / M / G / A'));
+  const undoBtn = h('button', { onclick: () => (workspace === 'ow' ? ow?.undo() : app.undo()), title: 'Undo (Ctrl+Z)' }, '↶');
+  const redoBtn = h('button', { onclick: () => (workspace === 'ow' ? ow?.redo() : app.redo()), title: 'Redo (Ctrl+Y)' }, '↷');
   const saveBtn = h('button', { class: 'primary', onclick: () => (workspace === 'ow' ? ow?.save() : app.saveLevel()) });
-  const testBtn = h('button', { onclick: () => openTestPlay(app), title: 'Level im eingebauten Emulator testen (T, Shift+T: ab Mausposition)' }, '▶ Testen');
+  const testBtn = h('button', { onclick: () => openTestPlay(app), title: 'Test the level in the built-in emulator (T, Shift+T: from the mouse position)' }, '▶ Test');
   const appbar = h('header', { class: 'appbar' },
     h('span', { class: 'brand' }, 'SMW Editor'),
     menus,
@@ -176,12 +176,12 @@ function buildUi(app: App): void {
     zoomLabel.textContent = `${Math.round(app.zoom * 100)}%`;
     for (const b of wsSwitch.querySelectorAll('button')) b.classList.toggle('active', b.dataset.ws === workspace);
     const inOw = workspace === 'ow' && ow;
-    saveBtn.textContent = inOw ? `Overworld speichern${ow!.dirty ? ' *' : ''}` : `Level speichern${app.dirty ? ' *' : ''}`;
-    saveBtn.title = inOw ? 'Overworld in ROM schreiben (Strg+S)' : 'Level in ROM schreiben (Strg+S)';
+    saveBtn.textContent = inOw ? `Save overworld${ow!.dirty ? ' *' : ''}` : `Save level${app.dirty ? ' *' : ''}`;
+    saveBtn.title = inOw ? 'Write overworld to ROM (Ctrl+S)' : 'Write level to ROM (Ctrl+S)';
     undoBtn.disabled = inOw ? !ow!.canUndo : false;
     redoBtn.disabled = inOw ? !ow!.canRedo : false;
     testBtn.disabled = workspace === 'ow';
-    testBtn.title = workspace === 'ow' ? 'Testen gibt es im Level-Editor' : 'Level im eingebauten Emulator testen (T, Shift+T: ab Mausposition)';
+    testBtn.title = workspace === 'ow' ? 'Test play is available in the level editor' : 'Test the level in the built-in emulator (T, Shift+T: from the mouse position)';
     menus.refresh();
   };
   app.on('mode', updateToolbar);
@@ -338,62 +338,62 @@ function exportRom(app: App): void {
   const out = app.rom.output(withHeader);
   const base = app.romName.replace(/\.(smc|sfc|bin)$/i, '');
   downloadBytes(`${base}.${withHeader ? 'smc' : 'sfc'}`, out);
-  log(`ROM exportiert als „${base}.${withHeader ? 'smc' : 'sfc'}“ (${Math.round(out.length / 1024)} KB)`);
+  log(`ROM exported as “${base}.${withHeader ? 'smc' : 'sfc'}” (${Math.round(out.length / 1024)} KB)`);
   app.persist();
 }
 
 function showHelp(): void {
   const sections: [string, [string, string][]][] = [
-    ['Allgemein', [
-      ['Strg+S', 'Speichern (Level bzw. Overworld)'],
-      ['Strg+Z / Strg+Y', 'Rückgängig / Wiederholen'],
-      ['Esc / O / M · P · A', 'Bereich Level / Overworld / Grafik (Map16, Paletten, Animationen)'],
-      ['Strg+Mausrad · Mittlere Maustaste ziehen', 'Zoom · Ansicht verschieben'],
-      ['? / F1', 'Diese Übersicht'],
-      ['L', 'Protokoll (alle Meldungen mit Uhrzeit) ein-/ausklappen'],
-      ['Menüs: ↑ ↓ ← → / Enter / Esc', 'Eintrag wählen, Nachbarmenü / ausführen / schließen'],
+    ['General', [
+      ['Ctrl+S', 'Save (level or overworld)'],
+      ['Ctrl+Z / Ctrl+Y', 'Undo / Redo'],
+      ['Esc / O / M · P · A', 'Workspace level / overworld / graphics (Map16, palettes, animations)'],
+      ['Ctrl+mouse wheel · Middle mouse button drag', 'Zoom · Pan view'],
+      ['? / F1', 'This overview'],
+      ['L', 'Expand/collapse log (all messages with time)'],
+      ['Menus: ↑ ↓ ← → / Enter / Esc', 'Choose entry, neighboring menu / run / close'],
     ]],
     ['Level', [
-      ['1 / 2 / 3 / 4 / 5', 'Modus Layer 1 / Layer 2 / Sprites / Ein-/Ausgänge / BG'],
-      ['Klick · Strg+Klick · Alt+Klick', 'Auswählen · zur Auswahl hinzufügen · darunterliegendes Element'],
-      ['Ziehen', 'Auswahl verschieben / Rahmen aufziehen'],
-      ['Griff unten rechts', 'Objektgröße ändern'],
-      ['Rechtsklick / Shift+Klick', 'Gewähltes Element aus „Einfügen“ platzieren'],
-      ['BG: Klick/Ziehen · Rechtsklick/Shift+Klick', 'Tile(s) als Pinsel aufnehmen · malen'],
-      ['Einfg / I', 'Objekt/Sprite nach Nummer einfügen (an der Maus)'],
-      ['M / Z / S-Markierung ziehen', 'Haupteingang / Zwischenziel-Screen / sekundären Eingang verschieben'],
-      ['Ein-/Ausgänge: Klick · Rechtsklick', 'Eingang oder Screen (Exit) wählen, rechts bearbeiten · neuer sekundärer Eingang, Exit anlegen, Eingang hierher'],
-      ['Pfeiltasten · Alt+Pfeiltasten', 'Auswahl um 1 Tile verschieben · Größe ändern'],
-      ['+ / - · * / /', 'Breite ändern · Höhe ändern'],
-      ['Entf / Rücktaste', 'Auswahl löschen'],
-      ['Strg+A · Esc', 'Alles auswählen · Auswahl aufheben'],
-      ['Strg+C / Strg+V / Strg+D', 'Kopieren / Einfügen an der Maus / Duplizieren'],
-      ['Bild↑ / Bild↓', 'Nach vorne / hinten (Zeichenreihenfolge)'],
-      ['H · G', 'Level-Header · Raster ein/aus'],
-      ['T · Shift+T', 'Level testen · Mario startet an der Maus'],
+      ['1 / 2 / 3 / 4 / 5', 'Mode layer 1 / layer 2 / sprites / entrances/exits / BG'],
+      ['Click · Ctrl+click · Alt+click', 'Select · add to selection · element underneath'],
+      ['Drag', 'Move selection / drag a selection box'],
+      ['Handle at bottom right', 'Resize object'],
+      ['Right click / Shift+click', 'Place the element chosen in “Insert”'],
+      ['BG: click/drag · right click/Shift+click', 'Pick up tile(s) as brush · paint'],
+      ['Ins / I', 'Insert object/sprite by number (at the mouse)'],
+      ['Drag M / Z / S marker', 'Move main entrance / midway screen / secondary entrance'],
+      ['Entrances/Exits: click · right click', 'Choose entrance or screen (exit), edit on the right · new secondary entrance, create exit, entrance here'],
+      ['Arrow keys · Alt+arrow keys', 'Move selection by 1 tile · resize'],
+      ['+ / - · * / /', 'Change width · change height'],
+      ['Del / Backspace', 'Delete selection'],
+      ['Ctrl+A · Esc', 'Select all · deselect'],
+      ['Ctrl+C / Ctrl+V / Ctrl+D', 'Copy / paste at the mouse / duplicate'],
+      ['PgUp / PgDn', 'Bring to front / send to back (drawing order)'],
+      ['H · G', 'Level header · grid on/off'],
+      ['T · Shift+T', 'Test level · Mario starts at the mouse'],
     ]],
     ['Overworld', [
-      ['1 / 2', 'Layer 1 (Wege/Level) / Layer 2 (Gelände)'],
-      ['Klick/Ziehen · Rechtsklick/Shift+Klick', 'Tile(s) als Pinsel aufnehmen · malen'],
-      ['Alt+Klick / Strg+Klick', 'Level-Info des Level-Tiles'],
-      ['G', 'Raster ein/aus'],
+      ['1 / 2', 'Layer 1 (paths/levels) / layer 2 (terrain)'],
+      ['Click/drag · right click/Shift+click', 'Pick up tile(s) as brush · paint'],
+      ['Alt+click / Ctrl+click', 'Level info of the level tile'],
+      ['G', 'Grid on/off'],
     ]],
-    ['Grafik', [
-      ['P / M / G / A', 'Reiter Paletten / Map16-Tiles / Grafiken / Animationen; Esc zurück zum Level'],
-      ['Strg+C / Strg+V', 'Palette, Map16-Tiles bzw. Pixel kopieren / einfügen'],
-      ['Paletten: Pfeiltasten · Shift+Klick', 'Andere Farbe · Bereich markieren (für „Verlauf“)'],
-      ['Map16: X / Y / 1–8 / Q', 'Viertel spiegeln / Palette 0–7 / nächstes Viertel; Pfeile: anderes Tile'],
-      ['Map16: Doppelklick · Strg+Klick auf Palette', 'Viertel in „Grafiken“ bearbeiten · Palette in „Paletten“ öffnen'],
-      ['Grafiken: B / F / I / S / 0–9', 'Stift / Füllen / Pipette / Auswahl / Farbe'],
-      ['Grafiken: Rechtsklick · Alt+Klick', 'Transparent malen · Farbe aufnehmen'],
-      ['Grafiken: Enter / Esc', 'Schwebende Auswahl absetzen / Auswahl aufheben'],
-      ['Animationen: Entf / Esc', 'Animation löschen / Auswahl abbrechen'],
+    ['Graphics', [
+      ['P / M / G / A', 'Tab palettes / Map16 tiles / graphics / animations; Esc back to the level'],
+      ['Ctrl+C / Ctrl+V', 'Copy / paste palette, Map16 tiles or pixels'],
+      ['Palettes: arrow keys · Shift+click', 'Other color · mark a range (for “Gradient”)'],
+      ['Map16: X / Y / 1–8 / Q', 'Flip quarter / palette 0–7 / next quarter; arrows: other tile'],
+      ['Map16: double click · Ctrl+click on palette', 'Edit quarter in “Graphics” · open palette in “Palettes”'],
+      ['Graphics: B / F / I / S / 0–9', 'Pencil / fill / eyedropper / selection / color'],
+      ['Graphics: right click · Alt+click', 'Paint transparent · pick color'],
+      ['Graphics: Enter / Esc', 'Drop floating selection / deselect'],
+      ['Animations: Del / Esc', 'Delete animation / cancel selection'],
     ]],
   ];
-  modal('Tastenkürzel', h('div', { class: 'help-cols' }, sections.map(([title, rows]) => h('section', null,
+  modal('Keyboard shortcuts', h('div', { class: 'help-cols' }, sections.map(([title, rows]) => h('section', null,
     h('h3', null, title),
     h('table', { class: 'help' }, rows.map(([a, b]) => h('tr', null, h('td', null, h('kbd', null, a)), h('td', null, b))))))),
-  [{ label: 'Schließen', primary: true }]);
+  [{ label: 'Close', primary: true }]);
 }
 
 // drag & drop

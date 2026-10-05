@@ -1,4 +1,4 @@
-// The "Ansicht" menu of the level view, shared by the level editor and the graphics workspace.
+// The "View" menu of the level view, shared by the level editor and the graphics workspace.
 
 import type { App } from './app.ts';
 import { menuButton, type MenuItem } from './menu.ts';
@@ -17,21 +17,21 @@ export function viewMenu(app: App, paint: () => void, full = true): HTMLElement 
   const gameState = (k: keyof App['switches'], label: string, title: string): MenuItem => ({
     label, title, checked: () => app.switches[k], onToggle: (v) => { app.switches[k] = v; app.refresh(); },
   });
-  const anim = show('anim', 'Animation', 'Animierte Tiles und Paletten abspielen (wie im Spiel, auch eigene Animationen)');
+  const anim = show('anim', 'Animation', 'Play animated tiles and palettes (as in the game, custom animations too)');
   const state: MenuItem[] = [
-    { heading: 'Spielzustand' },
-    gameState('palaces', '!-Blöcke gedrückt', 'Ansicht: alle Switch-Paläste gedrückt'),
-    gameState('onOff', 'ON/OFF auf OFF', 'Ansicht: ON/OFF-Schalter auf OFF'),
+    { heading: 'Game state' },
+    gameState('palaces', '!-blocks pressed', 'View: all switch palaces pressed'),
+    gameState('onOff', 'ON/OFF set to OFF', 'View: ON/OFF switch set to OFF'),
   ];
-  return menuButton({ label: 'Ansicht', items: full ? [
-    { heading: 'Ebenen' },
-    show('layer1', 'Layer 1'), show('layer2', 'Layer 2 / BG'), show('layer3', 'Layer 3', 'Layer 3 (Flut, Layer-3-Bilder) – Vorschau, Scrollen angenähert'),
+  return menuButton({ label: 'View', items: full ? [
+    { heading: 'Layers' },
+    show('layer1', 'Layer 1'), show('layer2', 'Layer 2 / BG'), show('layer3', 'Layer 3', 'Layer 3 (tides, layer 3 images) – preview, scrolling approximated'),
     show('sprites', 'Sprites'), show('exits', 'Exits'),
-    { heading: 'Hilfen' },
-    show('screens', 'Screen-Grenzen'), show('grid', 'Raster', undefined, 'G'),
-    show('ghost', 'Inaktive Ebene durchscheinend', 'Nicht bearbeitete Objektebene halbtransparent (nur Level mit Layer-2-Objekten)'),
-    show('items', 'Block-Inhalte', 'Inhalt von Blöcken (per Emulation ermittelt) halbtransparent über den Blöcken, Pfeile an betretbaren Blöcken (Pipes, Türen)'),
+    { heading: 'Overlays' },
+    show('screens', 'Screen boundaries'), show('grid', 'Grid', undefined, 'G'),
+    show('ghost', 'Inactive layer translucent', 'Object layer not being edited shown semi-transparent (only levels with layer 2 objects)'),
+    show('items', 'Block contents', 'Contents of blocks (found by emulation) semi-transparent over the blocks, arrows at enterable blocks (pipes, doors)'),
     anim,
     ...state,
-  ] : [{ heading: 'Level-Vorschau' }, anim, ...state] });
+  ] : [{ heading: 'Level preview' }, anim, ...state] });
 }

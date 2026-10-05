@@ -15,7 +15,7 @@ import { applyPatch, uninstallPatch, type ApplyResult } from './patchapply.ts';
 import { listPatches } from './patchreg.ts';
 import { setVramPatchCheck, extGfxPatch, installExtGfxPatch, disableUnsafeExtGfx } from './patches.ts';
 
-export const VRAM_PATCH_NAME = 'VRAM-Layout (SMWV)';
+export const VRAM_PATCH_NAME = 'VRAM layout (SMWV)';
 
 export const VRAM_ASM = `asar 1.90
 lorom

@@ -23,7 +23,7 @@ export function projectFromFiles(files: Map<string, Uint8Array>): UberProject {
   let root = '';
   if (!files.has('list.txt')) {
     const l = [...files.keys()].find((p) => /^[^/]+\/list\.txt$/i.test(p));
-    if (!l) throw new Error('Keine list.txt gefunden – ist das ein UberASM-Tool-Ordner?');
+    if (!l) throw new Error('No list.txt found – is this an UberASM Tool folder?');
     root = l.slice(0, l.indexOf('/') + 1);
   }
   const out = new Map<string, Uint8Array>();
@@ -54,7 +54,7 @@ export function loadProject(rom: Rom): UberProject | null {
   const e = uberEntry(rom);
   if (!e) return null;
   const a = patchArchive(rom, e);
-  if (!a) throw new Error('Die UberASM-Quellen sind nicht in der ROM gespeichert');
+  if (!a) throw new Error('The UberASM sources are not stored in the ROM');
   return projectFromZip(a);
 }
 

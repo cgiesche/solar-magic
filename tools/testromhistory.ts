@@ -11,7 +11,7 @@ let bad = 0;
 const check = (ok: boolean, what: string) => { if (!ok) { console.log('FAIL', what); bad++; } };
 const same = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((v, i) => v === b[i]);
 
-h.edit('Farbe', () => rom.w16(0x00b0a0, 0x1234));
+h.edit('Color', () => rom.w16(0x00b0a0, 0x1234));
 h.edit('Tiles', () => { rom.w16(0x0d8000, 0xffff); rom.w16(0x0d8010, 0xaaaa); rom.w8(0x0d8020, 1); });
 const two = rom.data.slice();
 check(h.undoStack.length === 2, 'two edits recorded');
@@ -43,7 +43,7 @@ check(rom.size === 0x100000 && rom.data[0x90000] === 7, 'redo of expansion');
 h.undo();
 
 // conflict
-h.edit('Farbe', () => rom.w16(0x00b0a0, 0x1234));
+h.edit('Color', () => rom.w16(0x00b0a0, 0x1234));
 rom.w16(0x00b0a0, 0x4321);
 let threw = false;
 try { h.undo(); } catch { threw = true; }

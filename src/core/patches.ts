@@ -222,12 +222,12 @@ function markEdited(rom: Rom): void {
 export function installEditorPatch(rom: Rom): PatchInfo {
   const existing = editorPatch(rom);
   if (existing) { markEdited(rom); return existing; }
-  if (rom.r8(SPR_BANK_HOOK) !== 0xa9 || rom.r8(SPR_BANK_HOOK + 1) !== 0x07) throw new Error(`Unerwarteter Code bei $05D8F5${ownerNote(rom, SPR_BANK_HOOK, 4)} – Patch nicht möglich (ROM bereits anderweitig verändert?)`);
+  if (rom.r8(SPR_BANK_HOOK) !== 0xa9 || rom.r8(SPR_BANK_HOOK + 1) !== 0x07) throw new Error(`Unexpected code at $05D8F5${ownerNote(rom, SPR_BANK_HOOK, 4)} – patch not possible (ROM already modified otherwise?)`);
   if (rom.r8(HOOK_GFXPTR) !== 0xb9 || rom.r8(HOOK_UPLOAD) !== 0x22 || rom.r8(HOOK_SPRGFX) !== 0xad || rom.r8(HOOK_FGGFX) !== 0xad) {
     const note = ownerNote(rom, HOOK_GFXPTR, 15) || ownerNote(rom, HOOK_UPLOAD, 4) || ownerNote(rom, HOOK_SPRGFX, 15) || ownerNote(rom, HOOK_FGGFX, 15);
-    throw new Error(`Unerwarteter Code in der Grafik-Laderoutine${note} – Patch nicht möglich`);
+    throw new Error(`Unexpected code in the graphics loading routine${note} – patch not possible`);
   }
-  if (rom.r24(DM16_SLOT) !== 0) throw new Error(`Erweitertes Objekt $${DM16_EXT.toString(16).padStart(2, '0')} ist bereits belegt${ownerNote(rom, DM16_SLOT, 3)} – Patch nicht möglich`);
+  if (rom.r24(DM16_SLOT) !== 0) throw new Error(`Extended object $${DM16_EXT.toString(16).padStart(2, '0')} is already in use${ownerNote(rom, DM16_SLOT, 3)} – patch not possible`);
   const a = build();
   // allocate first to know the base address, then link
   const size = a.bytes.length;
@@ -334,7 +334,7 @@ export function installCustomPalettePatch(rom: Rom): { base: number; table: numb
   const ex = customPalettePatch(rom);
   if (ex) return ex;
   installEditorPatch(rom); // needs the level number in $010B
-  if (rom.r8(PAL_HOOK) !== 0x9c || rom.r16(PAL_HOOK + 1) !== 0x0703) throw new Error(`Unerwarteter Code bei $00922F${ownerNote(rom, PAL_HOOK, 6)} – Paletten-Patch nicht möglich`);
+  if (rom.r8(PAL_HOOK) !== 0x9c || rom.r16(PAL_HOOK + 1) !== 0x0703) throw new Error(`Unexpected code at $00922F${ownerNote(rom, PAL_HOOK, 6)} – palette patch not possible`);
   const a = new Asm();
   a.b(...PAL_MAGIC); a.fill(4); // +4: table pointer
   a.label('Pal');
@@ -409,7 +409,7 @@ export function installBgPatch(rom: Rom): { table: number } {
   if (ex) return ex;
   installEditorPatch(rom); // needs the level number in $010B
   if (rom.r8(BG_HOOK) !== 0xa9 || rom.r8(BG_HOOK + 1) !== 0x0c || rom.r16(BG_HOOK + 2) !== 0x6a85) {
-    throw new Error(`Unerwarteter Code bei $058060${ownerNote(rom, BG_HOOK, 4)} – BG-Patch nicht möglich`);
+    throw new Error(`Unexpected code at $058060${ownerNote(rom, BG_HOOK, 4)} – BG patch not possible`);
   }
   const a = new Asm();
   a.b(...BG_MAGIC); a.fill(4); // +4: table pointer
@@ -482,7 +482,7 @@ export function disableUnsafeExtGfx(rom: Rom): boolean {
 }
 
 export function installExtGfxPatch(rom: Rom): { table: number; active: boolean } {
-  if (!vramPatchInstalled(rom)) throw new Error('BG2/BG3-Grafik ist noch nicht verfügbar: dafür müssen erst die Layer-Tilemaps im VRAM verlegt werden (VRAM-Patch).');
+  if (!vramPatchInstalled(rom)) throw new Error('BG2/BG3 graphics are not available yet: the layer tilemaps must first be moved in VRAM (VRAM patch).');
   const ex = extGfxPatch(rom);
   if (ex?.active) return ex;
   if (ex) {
@@ -493,7 +493,7 @@ export function installExtGfxPatch(rom: Rom): { table: number; active: boolean }
   }
   installEditorPatch(rom); // level number in $010B, ExGFX pointers
   const orig = EXT_GFX_ORIG;
-  for (let i = 0; i < orig.length; i++) if (rom.r8(EXT_GFX_HOOK + i) !== orig[i]) throw new Error(`Unerwarteter Code bei $00AA50${ownerNote(rom, EXT_GFX_HOOK, 5)} – BG2/BG3-Grafik nicht möglich`);
+  for (let i = 0; i < orig.length; i++) if (rom.r8(EXT_GFX_HOOK + i) !== orig[i]) throw new Error(`Unexpected code at $00AA50${ownerNote(rom, EXT_GFX_HOOK, 5)} – BG2/BG3 graphics not possible`);
   const a = new Asm();
   a.b(...EXT_GFX_MAGIC); a.fill(4); // +4: table pointer
   a.label('Ext');

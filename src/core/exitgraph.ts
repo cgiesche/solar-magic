@@ -93,7 +93,7 @@ export class ExitGraph {
     return this.parents.get(level) ?? null;
   }
 
-  // "105 Vanilla Dome 2" / "1C3 (zu 105 Vanilla Dome 2)" / "0F0 (nicht erreichbar)"
+  // "105 Vanilla Dome 2" / "1C3 (from 105 Vanilla Dome 2)" / "0F0 (unreachable)"
   label(level: number): string {
     return `${hex(level, 3)} ${this.name(level)}`;
   }
@@ -102,7 +102,7 @@ export class ExitGraph {
     const t = mainTranslevel(level);
     if (t) return levelName(this.rom, t) || 'Level';
     const p = this.parentOf(level);
-    return p === null ? '(nicht erreichbar)' : `(zu ${hex(p, 3)} ${levelName(this.rom, mainTranslevel(p)!)})`;
+    return p === null ? '(unreachable)' : `(from ${hex(p, 3)} ${levelName(this.rom, mainTranslevel(p)!)})`;
   }
 }
 

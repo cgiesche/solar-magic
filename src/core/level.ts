@@ -489,13 +489,13 @@ function shiftScreens(rom: Rom, lv: Level, from: number, delta: number): void {
 }
 
 export function insertScreen(rom: Rom, lv: Level, s: number): void {
-  if (lv.header.screens >= 32) throw new Error('Das Level hat bereits 32 Screens.');
+  if (lv.header.screens >= 32) throw new Error('The level already has 32 screens.');
   shiftScreens(rom, lv, s, 1);
   lv.header.screens++;
 }
 
 export function deleteScreen(rom: Rom, lv: Level, s: number): void {
-  if (lv.header.screens <= 1) throw new Error('Das Level braucht mindestens einen Screen.');
+  if (lv.header.screens <= 1) throw new Error('The level needs at least one screen.');
   const v1 = isL1Vertical(rom, lv.header.mode), v2 = isL2Vertical(rom, lv.header.mode);
   const on = (o: { x: number; y: number }, vertical: boolean) => (vertical ? o.y : o.x) >> 4 === s;
   lv.objects = lv.objects.filter((o) => !on(o, v1));

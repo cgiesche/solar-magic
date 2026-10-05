@@ -35,7 +35,7 @@ export function saveLevel(rom: Rom, lv: Level): string[] {
   const l1Shared = countRefs(rom, L1_PTRS, 3, lv.l1Addr) > 1;
   const a1 = place(rom, lv.l1Addr, lv.l1Size, l1Shared, l1, null);
   rom.w24(L1_PTRS + n * 3, a1);
-  log.push(`Layer 1: ${l1.length} Bytes @ $${a1.toString(16).toUpperCase()}`);
+  log.push(`Layer 1: ${l1.length} bytes @ $${a1.toString(16).toUpperCase()}`);
   // layer 2
   const l2 = serializeLayer2(rom, lv);
   if (l2) {
@@ -43,7 +43,7 @@ export function saveLevel(rom: Rom, lv: Level): string[] {
     const shared = countRefs(rom, L2_PTRS, 3, old) > 1;
     const a2 = place(rom, old, lv.l2Size, shared, l2, null);
     rom.w24(L2_PTRS + n * 3, a2);
-    log.push(`Layer 2: ${l2.length} Bytes @ $${a2.toString(16).toUpperCase()}`);
+    log.push(`Layer 2: ${l2.length} bytes @ $${a2.toString(16).toUpperCase()}`);
   } else {
     // BG tilemap: edited data goes to free space (bank via BG patch); a changed pointer drops old custom data
     const old = rom.r24(L2_PTRS + n * 3), oldBank = bgBank(rom, n);
@@ -58,7 +58,7 @@ export function saveLevel(rom: Rom, lv: Level): string[] {
       const a = rom.allocWrite(data);
       setBgBank(rom, n, a >> 16);
       rom.w24(L2_PTRS + n * 3, 0xff0000 | (a & 0xffff));
-      log.push(`BG: ${data.length} Bytes @ $${a.toString(16).toUpperCase()}`);
+      log.push(`BG: ${data.length} bytes @ $${a.toString(16).toUpperCase()}`);
     } else rom.w24(L2_PTRS + n * 3, lv.layer2Pointer);
   }
   log.push(saveSprites(rom, lv));
@@ -85,5 +85,5 @@ export function saveSprites(rom: Rom, lv: Level): string {
   if ((as >> 16) !== 0x07 || editorPatch(rom)) setSpriteBank(rom, n, as >> 16);
   lv.sprAddr = as;
   lv.sprSize = spr.length;
-  return `Sprites: ${spr.length} Bytes @ $${as.toString(16).toUpperCase()}`;
+  return `Sprites: ${spr.length} bytes @ $${as.toString(16).toUpperCase()}`;
 }

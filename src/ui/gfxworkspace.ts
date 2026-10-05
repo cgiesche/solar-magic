@@ -46,7 +46,7 @@ export class LevelPreview {
       this.layout();
     } }, `${z}×`);
     this.root = h('div', { class: 'ws-prev' },
-      h('div', { class: 'panel-title' }, 'Level-Vorschau',
+      h('div', { class: 'panel-title' }, 'Level preview',
         h('span', { class: 'btn-group' }, zoomBtn(1), zoomBtn(2))),
       this.scroller, this.info);
     this.scroller.addEventListener('mousemove', (e) => {
@@ -162,9 +162,9 @@ export class GfxWorkspace {
     this.anim = new AnimTab(app, this);
     const tabBtn = (t: WsTab, label: string, key: string) => h('button', { 'data-tab': t, title: `${label} (${key})`, onclick: () => this.open(t) }, label);
     this.bar = h('div', { class: 'ctxbar ws-tabs' },
-      h('div', { class: 'btn-group' }, tabBtn('pal', 'Paletten', 'P'), tabBtn('map16', 'Map16-Tiles', 'M'), tabBtn('gfx', 'Grafiken', 'G'), tabBtn('anim', 'Animationen', 'A')),
+      h('div', { class: 'btn-group' }, tabBtn('pal', 'Palettes', 'P'), tabBtn('map16', 'Map16 tiles', 'M'), tabBtn('gfx', 'Graphics', 'G'), tabBtn('anim', 'Animations', 'A')),
       h('span', { class: 'spacer' }),
-      h('span', { class: 'hint', title: 'Ausnahme: die Paletten-Auswahl im Header (Reiter Paletten, unten) gehört zum Level und wird mit „Level speichern“ geschrieben.' }, 'Änderungen gehen sofort in die ROM · Strg+Z / Strg+Y'),
+      h('span', { class: 'hint', title: 'Exception: the palette choice in the header (Palettes tab, below) belongs to the level and is written with “Save level”.' }, 'Changes go straight into the ROM · Ctrl+Z / Ctrl+Y'),
       viewMenu(app, () => this.preview.update(), false));
     this.root = h('div', { class: 'ws' }, this.body);
     this.side = h('div', { class: 'right ws-side' }, this.preview.root);

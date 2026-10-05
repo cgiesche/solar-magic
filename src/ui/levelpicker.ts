@@ -5,11 +5,11 @@ import { h, clear, emptyState } from './dom.ts';
 import { hex3 } from '../core/names.ts';
 import { closeMenus } from './menu.ts';
 
-// allowed: the levels that can be chosen (others are not listed); the list starts with "nur benutzte":
+// allowed: the levels that can be chosen (others are not listed); the list starts with "only used":
 // main levels, relocated ones and those an exit leads to
 export function levelPicker(app: App, value: number, allowed: (n: number) => boolean, onPick: (n: number) => void): HTMLElement {
   const g = app.exitGraph();
-  const btn = h('button', { class: 'level-pick', title: 'Anderes Level wählen' }, h('span', { class: 'mono' }, hex3(value)), ' ', h('span', { class: 'lname' }, g.name(value)), h('span', { class: 'caret' }, ' ▾'));
+  const btn = h('button', { class: 'level-pick', title: 'Choose another level' }, h('span', { class: 'mono' }, hex3(value)), ' ', h('span', { class: 'lname' }, g.name(value)), h('span', { class: 'caret' }, ' ▾'));
   btn.addEventListener('click', () => openPicker(app, btn, value, allowed, onPick));
   return btn;
 }
@@ -24,10 +24,10 @@ function openPicker(app: App, anchor: HTMLElement, value: number, allowed: (n: n
   const g = app.exitGraph();
   const used = app.usedLevels();
   for (const e of g.exits) used.add(e.to);
-  const filter = h('input', { class: 'filter', placeholder: 'Nr. (hex) oder Name …', spellcheck: false });
+  const filter = h('input', { class: 'filter', placeholder: 'No. (hex) or name …', spellcheck: false });
   const onlyUsed = h('input', { type: 'checkbox', checked: true });
   const list = h('div', { class: 'level-list' });
-  const pop = h('div', { class: 'menu level-pop' }, filter, h('label', { class: 'row small' }, onlyUsed, ' nur benutzte'), list);
+  const pop = h('div', { class: 'menu level-pop' }, filter, h('label', { class: 'row small' }, onlyUsed, ' only used'), list);
   let first = -1;
   const pick = (n: number) => { close(); onPick(n); };
   const build = () => {
@@ -43,7 +43,7 @@ function openPicker(app: App, anchor: HTMLElement, value: number, allowed: (n: n
       if (first < 0) first = i;
       if (i === value) setTimeout(() => el.scrollIntoView({ block: 'nearest' }), 0);
     }
-    if (first < 0) list.append(emptyState('Kein Level passt.'));
+    if (first < 0) list.append(emptyState('No level matches.'));
   };
   filter.addEventListener('input', build);
   onlyUsed.addEventListener('change', build);

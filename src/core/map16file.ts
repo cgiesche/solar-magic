@@ -12,7 +12,7 @@ export interface Map16File { width: number; height: number; tiles: number[][]; a
 
 export function parseMap16File(d: Uint8Array): Map16File {
   const u32 = (o: number) => (o + 4 <= d.length ? d[o] | (d[o + 1] << 8) | (d[o + 2] << 16) | (d[o + 3] << 24) : -1);
-  if (String.fromCharCode(...d.subarray(0, 4)) !== 'LM16') throw new Error('Keine Lunar-Magic-Map16-Datei (LM16)');
+  if (String.fromCharCode(...d.subarray(0, 4)) !== 'LM16') throw new Error('Not a Lunar Magic Map16 file (LM16)');
   const table = u32(0x10);
   const section = (i: number): Uint8Array | null => {
     const off = u32(table + i * 8), size = u32(table + i * 8 + 4);
@@ -20,7 +20,7 @@ export function parseMap16File(d: Uint8Array): Map16File {
     return d.subarray(off, off + size);
   };
   const td = section(0);
-  if (!td || td.length % 8) throw new Error('Map16-Datei: keine Tile-Daten gefunden');
+  if (!td || td.length % 8) throw new Error('Map16 file: no tile data found');
   const tiles: number[][] = [];
   for (let i = 0; i < td.length; i += 8) tiles.push([0, 2, 4, 6].map((k) => td[i + k] | (td[i + k + 1] << 8)));
   const ad = section(1);
@@ -63,16 +63,16 @@ export function exgfxName(name: string): { num: number | null; slot: string | nu
 // stores a GFX/ExGFX file: 4 KB = raw 4bpp (DMA'd directly), 3 KB = 3bpp (packed with LZ2),
 // otherwise LZ2 data as it is (like Lunar Magic's compressed ExGFX). Replaces a file in free space.
 export function importGfxFile(rom: Rom, num: number, data: Uint8Array): string {
-  if (num < 0 || num > 0xff) throw new Error('GFX-Nummer muss 00–FF sein');
+  if (num < 0 || num > 0xff) throw new Error('GFX number must be 00–FF');
   let raw: boolean, stored: Uint8Array, what: string;
-  if (data.length === 0x1000) { raw = true; stored = data; what = '4bpp unkomprimiert'; }
-  else if (data.length === 0xc00) { raw = false; stored = lz2Compress(data); what = '3bpp, LZ2-gepackt'; }
+  if (data.length === 0x1000) { raw = true; stored = data; what = '4bpp uncompressed'; }
+  else if (data.length === 0xc00) { raw = false; stored = lz2Compress(data); what = '3bpp, LZ2-compressed'; }
   else {
     let un: Uint8Array;
-    try { un = lz2Decompress(data, 0).data; } catch { throw new Error(`Unbekanntes GFX-Format (${data.length} Bytes)`); }
-    if (un.length === 0x1000) { raw = true; stored = un; what = '4bpp (entpackt)'; }
+    try { un = lz2Decompress(data, 0).data; } catch { throw new Error(`Unknown GFX format (${data.length} bytes)`); }
+    if (un.length === 0x1000) { raw = true; stored = un; what = '4bpp (decompressed)'; }
     else if (un.length === 0xc00) { raw = false; stored = data; what = '3bpp, LZ2'; }
-    else throw new Error(`Unbekanntes GFX-Format (${data.length} Bytes, entpackt ${un.length})`);
+    else throw new Error(`Unknown GFX format (${data.length} bytes, decompressed ${un.length})`);
   }
   const old = gfxEntry(rom, num);
   if (old && num >= VANILLA_GFX) rom.freeAt(old.addr);

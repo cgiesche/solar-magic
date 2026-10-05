@@ -61,18 +61,18 @@ export class LevelList {
   private first = -1;
   constructor(app: App) {
     this.app = app;
-    this.filter = h('input', { placeholder: 'Nr. (hex) oder Name …', class: 'filter', spellcheck: false, title: 'Filtert nach Levelnummer (hex) oder Name; Enter öffnet den ersten Treffer' });
+    this.filter = h('input', { placeholder: 'No. (hex) or name …', class: 'filter', spellcheck: false, title: 'Filters by level number (hex) or name; Enter opens the first match' });
     this.onlyUsed = h('input', { type: 'checkbox', checked: true });
     this.list = h('div', { class: 'level-list' });
     this.root = h('div', { class: 'panel levels' },
       h('div', { class: 'panel-title' }, 'Level', this.count),
       h('div', { class: 'row' }, this.filter),
-      h('label', { class: 'row small' }, this.onlyUsed, ' nur benutzte'),
+      h('label', { class: 'row small' }, this.onlyUsed, ' used only'),
       this.list);
     this.filter.addEventListener('input', () => this.build());
     this.filter.addEventListener('keydown', (e) => {
       if (e.key !== 'Enter') return;
-      // an exact number first (also levels hidden by "nur benutzte"), else the first match
+      // an exact number first (also levels hidden by "used only"), else the first match
       const v = this.filter.value.trim(), n = parseInt(v, 16);
       if (/^[0-9a-f]{1,3}$/i.test(v) && n < 0x200) app.openLevel(n);
       else if (this.first >= 0) app.openLevel(this.first);
@@ -99,7 +99,7 @@ export class LevelList {
       if (cur) setTimeout(() => el.scrollIntoView({ block: 'nearest' }), 0);
     }
     this.count.textContent = String(n);
-    if (!n) this.list.append(emptyState(f ? 'Kein Level passt zum Filter.' : 'Keine Level.'));
+    if (!n) this.list.append(emptyState(f ? 'No level matches the filter.' : 'No levels.'));
   }
 }
 
@@ -119,11 +119,11 @@ export class Palette {
   constructor(app: App) {
     this.app = app;
     this.body = h('div', { class: 'palette-body' });
-    this.search = h('input', { class: 'filter', placeholder: 'Suchen …', spellcheck: false });
+    this.search = h('input', { class: 'filter', placeholder: 'Search …', spellcheck: false });
     this.search.addEventListener('input', () => this.build());
     this.tabs = h('div', { class: 'tabs seg' });
     this.searchRow = h('div', { class: 'row' }, this.search);
-    this.root = h('div', { class: 'panel palette' }, h('div', { class: 'panel-title' }, 'Einfügen', h('span', { class: 'hint' }, 'Rechtsklick/Shift+Klick platziert')), this.tabs,
+    this.root = h('div', { class: 'panel palette' }, h('div', { class: 'panel-title' }, 'Insert', h('span', { class: 'hint' }, 'Right click/Shift+click places')), this.tabs,
       this.searchRow, this.body);
     app.on('objkinds', () => this.invalidate());
     app.on('level', () => { this.ensureThumbs(); this.build(); });
@@ -208,7 +208,7 @@ export class Palette {
     const selTile = curTile >= 0 && (curTile & ~0x1ff) === this.m16Base ? curTile & 0x1ff : -1;
     const bw = cur?.kind === 'obj' && cur.block ? cur.block.w : 1, bh = cur?.kind === 'obj' && cur.block ? cur.block.h : 1;
     const pages = h('select', null, Array.from({ length: EXT_TILES / 512 }, (_, i) => h('option', { value: String(i * 512), selected: i * 512 === this.m16Base },
-      i === 0 ? 'Seiten 0–1' : `Seiten ${(2 * i).toString(16).toUpperCase()}–${(2 * i + 1).toString(16).toUpperCase()}${map16Ext(app.rom) ? '' : ' (leer)'}`)));
+      i === 0 ? 'Pages 0–1' : `Pages ${(2 * i).toString(16).toUpperCase()}–${(2 * i + 1).toString(16).toUpperCase()}${map16Ext(app.rom) ? '' : ' (empty)'}`)));
     pages.addEventListener('change', () => { this.m16Base = Number(pages.value); this.build(); });
     const S = 16 * 1.2;
     const c = h('canvas', { width: 256 * 1.2, height: 512 * 1.2, class: 'm16-pick' });
@@ -223,9 +223,9 @@ export class Palette {
     };
     draw(selTile & 15, selTile >> 4, bw, bh);
     const label = h('div', { class: 'hint' }, curTile >= 0
-      ? (bw * bh > 1 ? `Block ${bw}×${bh} ab Tile ${hex3(curTile)} gewählt – Rechtsklick in der Levelansicht platziert ihn (je Tile ein Direct-Map16-Objekt).`
-        : `Tile ${hex3(curTile)} gewählt – Rechtsklick in der Levelansicht platziert es (Direct-Map16-Objekt).`)
-      : 'Tile anklicken (oder mehrere per Ziehen), dann per Rechtsklick im Level platzieren. Erfordert den Editor-Patch (wird automatisch installiert).');
+      ? (bw * bh > 1 ? `Block ${bw}×${bh} from tile ${hex3(curTile)} chosen – right click in the level view places it (one Direct Map16 object per tile).`
+        : `Tile ${hex3(curTile)} chosen – right click in the level view places it (Direct Map16 object).`)
+      : 'Click a tile (or drag for several), then right click in the level to place it. Requires the editor patch (installed automatically).');
     // click picks a tile, dragging picks a rectangle of tiles
     attachRectPick(c, 16, 32, (r) => draw(r.x, r.y, r.w, r.h), (r) => {
       app.paletteItem = { kind: 'obj', num: 0, ext: DM16_EXT, size: 0, tile: this.m16Base + r.y * 16 + r.x, ...(r.w * r.h > 1 ? { block: { w: r.w, h: r.h } } : {}) };
@@ -236,7 +236,7 @@ export class Palette {
     let hoverTile = -1;
     const tip = () => {
       const p = app.blockInfo(hoverTile);
-      c.title = `Tile ${hex3(hoverTile)}: ${p ? probeText(p) : 'Verhalten wird ermittelt …'}`;
+      c.title = `Tile ${hex3(hoverTile)}: ${p ? probeText(p) : 'determining behavior …'}`;
     };
     c.addEventListener('mousemove', (e) => {
       const rc = c.getBoundingClientRect();
@@ -246,7 +246,7 @@ export class Palette {
     });
     this.m16Tip = () => { if (hoverTile >= 0 && c.isConnected) tip(); };
     this.body.append(h('div', { class: 'row' }, pages,
-      h('button', { title: 'Gewähltes Tile im Grafik-Bereich bearbeiten (auch Tiles ab 200 anlegen)', onclick: () => app.editMap16(curTile >= 0 ? curTile : this.m16Base) }, 'Bearbeiten …')), label, c);
+      h('button', { title: 'Edit the chosen tile in the graphics area (also create tiles from 200 on)', onclick: () => app.editMap16(curTile >= 0 ? curTile : this.m16Base) }, 'Edit …')), label, c);
   }
 
   // structures: blocks of Map16 tiles stored in the ROM, placed as one object each (structs.ts)
@@ -258,26 +258,26 @@ export class Palette {
     const f = this.search.value.trim().toLowerCase();
     this.body.append(
       h('div', { class: 'row' },
-        h('button', { disabled: !sel, title: 'Die Tiles der ausgewählten Objekte als Struktur speichern', onclick: () => openSaveStructure(app) }, 'Auswahl als Struktur …')),
-      h('div', { class: 'hint' }, sel ? `${sel} Objekt${sel > 1 ? 'e' : ''} ausgewählt.` : 'Objekte im Level auswählen (auch Direct-Map16-Blöcke), dann „Auswahl als Struktur“. Eine Struktur ist im Level ein einziges Objekt; Änderungen an ihr gelten in allen Leveln.'),
+        h('button', { disabled: !sel, title: 'Save the tiles of the selected objects as a structure', onclick: () => openSaveStructure(app) }, 'Selection as structure …')),
+      h('div', { class: 'hint' }, sel ? `${sel} object${sel > 1 ? 's' : ''} selected.` : 'Select objects in the level (also Direct Map16 blocks), then “Selection as structure”. In the level, a structure is a single object; changes to it apply in all levels.'),
     );
     const all = app.structures();
-    if (!all.size) { this.body.append(emptyState('Noch keine Strukturen.')); return; }
+    if (!all.size) { this.body.append(emptyState('No structures yet.')); return; }
     const sheet = structTileSource(app);
     let shown = 0;
     for (const [n, st] of all) {
       if (f && !`${hex2(n)} ${st.name}`.toLowerCase().includes(f)) continue;
       const row = h('div', {
-        class: `pal-row${n === curN ? ' selected' : ''}`, title: `Struktur ${hex2(n)}: ${st.name || '(ohne Namen)'}, ${st.w}×${st.h}`,
+        class: `pal-row${n === curN ? ' selected' : ''}`, title: `Structure ${hex2(n)}: ${st.name || '(unnamed)'}, ${st.w}×${st.h}`,
         onclick: () => { app.paletteItem = { kind: 'obj', num: 0, ext: STRUCT_EXT, size: 0, struct: n }; if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1'); this.build(); },
       }, h('span', { class: 'pal-thumb-s struct' }, structCanvas(sheet, st)), h('span', { class: 'num' }, hex2(n)),
-        h('span', { class: 'grow' }, st.name || '(ohne Namen)', h('span', { class: 'hint' }, ` ${st.w}×${st.h}`)),
-        h('button', { class: 'icon-btn', title: 'Umbenennen', 'aria-label': 'Umbenennen', onclick: (e: Event) => { e.stopPropagation(); renameStructure(app, n, st); } }, '✎'),
-        h('button', { class: 'icon-btn', title: 'Löschen', 'aria-label': 'Löschen', onclick: (e: Event) => { e.stopPropagation(); deleteStructure(app, n, st); } }, '✕'));
+        h('span', { class: 'grow' }, st.name || '(unnamed)', h('span', { class: 'hint' }, ` ${st.w}×${st.h}`)),
+        h('button', { class: 'icon-btn', title: 'Rename', 'aria-label': 'Rename', onclick: (e: Event) => { e.stopPropagation(); renameStructure(app, n, st); } }, '✎'),
+        h('button', { class: 'icon-btn', title: 'Delete', 'aria-label': 'Delete', onclick: (e: Event) => { e.stopPropagation(); deleteStructure(app, n, st); } }, '✕'));
       this.body.appendChild(row);
       shown++;
     }
-    if (!shown) this.body.append(emptyState('Keine Struktur passt zur Suche.'));
+    if (!shown) this.body.append(emptyState('No structure matches the search.'));
   }
 
   // BG Map16 tiles for painting the level background (BG mode); pages 2-F with the extended BG Map16
@@ -304,18 +304,18 @@ export class Palette {
     // click picks a tile, dragging picks a rectangle of tiles (as in the Map16 tab)
     attachRectPick(c, 16, 32, (r) => draw(r.x, r.y, r.w, r.h), (r) => {
       // tiles from pages 2-F need the extended BG Map16 in the game
-      if (this.bgBase && !bgMap16Ext(app.rom)) app.romEdit('BG-Map16-Erweiterung angelegt', () => { installBgMap16Ext(app.rom); });
+      if (this.bgBase && !bgMap16Ext(app.rom)) app.romEdit('BG Map16 extension created', () => { installBgMap16Ext(app.rom); });
       app.bgBrush = { w: r.w, h: r.h, tiles: Array.from({ length: r.w * r.h }, (_, i) => this.bgBase + (r.y + Math.floor(i / r.w)) * 16 + r.x + (i % r.w)) };
       this.build();
     });
-    const what = brush.tiles.length > 1 ? `Block ${brush.w}×${brush.h}${onSheet ? ` ab BG-Tile ${hex3(brush.tiles[0])}` : ' aus dem Level'}` : `BG-Tile ${hex3(brush.tiles[0])}`;
+    const what = brush.tiles.length > 1 ? `Block ${brush.w}×${brush.h}${onSheet ? ` from BG tile ${hex3(brush.tiles[0])}` : ' from the level'}` : `BG tile ${hex3(brush.tiles[0])}`;
     const pages = h('select', null, Array.from({ length: EXT_TILES / 512 }, (_, i) => h('option', { value: String(i * 512), selected: i * 512 === this.bgBase },
-      i === 0 ? 'Seiten 0–1' : `Seiten ${(2 * i).toString(16).toUpperCase()}–${(2 * i + 1).toString(16).toUpperCase()}${bgMap16Ext(app.rom) ? '' : ' (leer)'}`)));
+      i === 0 ? 'Pages 0–1' : `Pages ${(2 * i).toString(16).toUpperCase()}–${(2 * i + 1).toString(16).toUpperCase()}${bgMap16Ext(app.rom) ? '' : ' (empty)'}`)));
     pages.addEventListener('change', () => { this.bgBase = Number(pages.value); this.build(); });
     // same order as the Map16 tab: pages, state, sheet
     this.body.append(h('div', { class: 'row' }, pages,
-      h('button', { title: 'BG-Tiles im Grafik-Bereich bearbeiten (auch Tiles ab 200 anlegen)', onclick: () => app.editMap16(onSheet ? brush.tiles[0] : this.bgBase, true) }, 'Bearbeiten …')),
-    h('div', { class: 'hint' }, `Pinsel: ${what} – Tiles hier oder im Level anklicken (Ziehen: Block). Die BG-Tilemap (32×27) wiederholt sich.`));
+      h('button', { title: 'Edit BG tiles in the graphics area (also create tiles from 200 on)', onclick: () => app.editMap16(onSheet ? brush.tiles[0] : this.bgBase, true) }, 'Edit …')),
+    h('div', { class: 'hint' }, `Brush: ${what} – click tiles here or in the level (drag: block). The BG tilemap (32×27) repeats.`));
     if (!onSheet) {
       const p = h('canvas', { width: brush.w * 16, height: brush.h * 16, class: 'bg-brush' });
       const pc = p.getContext('2d')!;
@@ -373,9 +373,9 @@ export class Palette {
     clear(this.tabs);
     const searchable = app.mode !== 'bg' && this.tab !== 'm16';
     this.searchRow.style.display = searchable ? '' : 'none';
-    this.search.placeholder = this.tab === 'spr' ? 'Sprites suchen (Nr., Name) …' : this.tab === 'str' ? 'Strukturen suchen …' : 'Suchen (Nr., Name, Verhalten) …';
+    this.search.placeholder = this.tab === 'spr' ? 'Search sprites (no., name) …' : this.tab === 'str' ? 'Search structures …' : 'Search (no., name, behavior) …';
     if (app.mode === 'bg') { clear(this.body); this.buildBg(); return; }
-    const tabDefs: [typeof this.tab, string][] = [['obj', 'Objekte'], ['ext', 'Erweitert'], ['m16', 'Map16'], ['str', 'Strukturen'], ['spr', 'Sprites']];
+    const tabDefs: [typeof this.tab, string][] = [['obj', 'Objects'], ['ext', 'Extended'], ['m16', 'Map16'], ['str', 'Structures'], ['spr', 'Sprites']];
     for (const [t, l] of tabDefs) this.tabs.appendChild(h('button', { class: this.tab === t ? 'active' : '', onclick: () => { this.tab = t; this.build(); } }, l));
     clear(this.body);
     const f = this.search.value.trim().toLowerCase();
@@ -393,7 +393,7 @@ export class Palette {
         const info = p?.summary ?? '';
         const num = id >= 0x200 ? `C${hex2(n)}` : hex2(n);
         if (f && !(`${hex2(n)} ${num} ${name} ${info}${id >= 0x200 ? ' custom' : ''}`.toLowerCase().includes(f))) continue;
-        if (id >= 0x200 && !head) { head = true; this.body.appendChild(h('div', { class: 'pal-head' }, 'Custom Sprites (PIXI)')); }
+        if (id >= 0x200 && !head) { head = true; this.body.appendChild(h('div', { class: 'pal-head' }, 'Custom sprites (PIXI)')); }
         const sel = cur?.kind === 'spr' && spriteId(cur) === id;
         const img = app.spriteThumbs?.get(id);
         const items = p ? [...new Set(p.pos.flatMap(spritesOf))] : [];
@@ -403,7 +403,7 @@ export class Palette {
           onclick: () => { app.paletteItem = { kind: 'spr', num: n, extra }; if (app.mode !== 'spr') app.setMode('spr'); this.build(); },
         }, h('span', { class: 'pal-thumb-s' }, img ? cloneCanvas(img) : ''), h('span', { class: 'num' }, num), name, itemBadge(app, items, 'pal-items-row')));
       }
-      if (!this.body.firstChild) this.body.append(emptyState('Kein Sprite passt zur Suche.'));
+      if (!this.body.firstChild) this.body.append(emptyState('No sprite matches the search.'));
       return;
     }
     if (this.tab === 'm16') { this.buildMap16(); return; }
@@ -413,7 +413,7 @@ export class Palette {
       if ((this.tab === 'obj') !== (s.num !== 0)) continue;
       const kind = app.objectKind(s.num);
       const vt = objectVariant(kind, s.size);
-      const name = objectName(s.num, s.ext) + (vt >= 0 ? ` – Typ ${vt.toString(16).toUpperCase()}` : '');
+      const name = objectName(s.num, s.ext) + (vt >= 0 ? ` – type ${vt.toString(16).toUpperCase()}` : '');
       const label = s.num ? hex2(s.num) + (vt >= 0 ? `.${vt.toString(16).toUpperCase()}` : '') : hex2(s.ext);
       // Map16 tiles and what they do when hit or entered (emulated, see blockprobe.ts); tells apart
       // objects that look the same, like pipes with and without an entrance
@@ -426,7 +426,7 @@ export class Palette {
         enter = blockEnter(app, tiles);
         const sum = tiles.length ? blockSummary(app, tiles) : [];
         info = (tiles.length ? `\nMap16 ${tiles.slice(0, 8).map(hex3).join(' ')}${tiles.length > 8 ? ' …' : ''}` : '')
-          + (sum === undefined ? '\n(Verhalten wird ermittelt …)' : sum.map((x) => '\n' + x).join(''));
+          + (sum === undefined ? '\n(determining behavior …)' : sum.map((x) => '\n' + x).join(''));
       }
       if (f && !(`${label} ${name} ${info}`.toLowerCase().includes(f))) continue;
       const th = this.thumbs.get(objKey(s, kind));
@@ -443,7 +443,7 @@ export class Palette {
         h('div', { class: 'pal-corner' }, itemBadge(app, items), enter ? h('div', { class: 'pal-enter', title: enterText(enter) }, enter) : '')),
         h('div', { class: 'pal-label' }, label), h('div', { class: 'pal-name' }, objectName(s.num, s.ext))));
     }
-    this.body.appendChild(grid.firstChild ? grid : emptyState('Kein Objekt passt zur Suche.'));
+    this.body.appendChild(grid.firstChild ? grid : emptyState('No object matches the search.'));
   }
 }
 
@@ -485,8 +485,8 @@ function openSaveStructure(app: App): void {
   const all = app.structures();
   const name = h('input', { value: '', placeholder: 'Name', spellcheck: false });
   const target = h('select', null,
-    free >= 0 ? h('option', { value: String(free) }, `Neue Struktur ${hex2(free)}`) : '',
-    ...[...all].map(([n, st]) => h('option', { value: String(n) }, `${hex2(n)} ersetzen: ${st.name || '(ohne Namen)'}`)));
+    free >= 0 ? h('option', { value: String(free) }, `New structure ${hex2(free)}`) : '',
+    ...[...all].map(([n, st]) => h('option', { value: String(n) }, `Replace ${hex2(n)}: ${st.name || '(unnamed)'}`)));
   const replace = h('input', { type: 'checkbox', checked: true });
   const preview = structCanvas(structTileSource(app), { ...r, name: '' });
   preview.style.cssText = `width:${Math.min(r.w * 32, 320)}px;image-rendering:pixelated;background:repeating-conic-gradient(#333 0 25%,#222 0 50%) 0 0/16px 16px`;
@@ -494,22 +494,22 @@ function openSaveStructure(app: App): void {
   const upd = () => {
     const n = Number(target.value);
     const users = all.has(n) ? app.structureUsers(n) : [];
-    note.textContent = all.has(n) ? `Die Struktur ändert sich überall, wo sie benutzt wird${users.length ? ` (Level ${users.map(hex3).join(', ')})` : ''}.` : '';
+    note.textContent = all.has(n) ? `The structure changes everywhere it is used${users.length ? ` (level ${users.map(hex3).join(', ')})` : ''}.` : '';
     if (all.has(n) && !name.value) name.value = all.get(n)!.name;
   };
   target.addEventListener('change', upd);
-  if (free < 0 && !all.size) { toast(`Alle ${STRUCT_COUNT} Strukturen belegt.`, 'error'); return; }
+  if (free < 0 && !all.size) { toast(`All ${STRUCT_COUNT} structures are in use.`, 'error'); return; }
   upd();
   const save = () => app.saveSelectionAsStructure(Number(target.value), name.value.trim(), replace.checked);
   const body = h('div', null,
     h('div', { class: 'row' }, preview),
-    h('div', { class: 'hint' }, `${r.w}×${r.h} Tiles, ${r.tiles.filter((t) => t === TRANSPARENT).length} davon durchsichtig (Tiles anderer Objekte bleiben dort erhalten).`),
+    h('div', { class: 'hint' }, `${r.w}×${r.h} tiles, ${r.tiles.filter((t) => t === TRANSPARENT).length} of them transparent (tiles of other objects are kept there).`),
     h('div', { class: 'prop' }, h('label', null, 'Name'), name),
-    h('div', { class: 'prop' }, h('label', null, 'Speichern als'), target),
-    h('label', { class: 'row small' }, replace, ' Auswahl im Level durch die Struktur ersetzen'),
+    h('div', { class: 'prop' }, h('label', null, 'Save as'), target),
+    h('label', { class: 'row small' }, replace, ' Replace the selection in the level with the structure'),
     note,
-    h('div', { class: 'hint' }, 'Beim ersten Mal wird der Strukturen-Patch (SMWS) installiert. Er belegt nur das erweiterte Objekt 03 und ändert keinen Code des Spiels.'));
-  const dlg = modal('Auswahl als Struktur', body, [{ label: 'Abbrechen' }, { label: 'Speichern', primary: true, onClick: save }]);
+    h('div', { class: 'hint' }, 'The first time, the structures patch (SMWS) is installed. It only uses extended object 03 and does not change any game code.'));
+  const dlg = modal('Selection as structure', body, [{ label: 'Cancel' }, { label: 'Save', primary: true, onClick: save }]);
   name.addEventListener('keydown', (e) => { if (e.key === 'Enter' && save()) dlg.close(); });
   setTimeout(() => name.focus(), 0);
 }
@@ -522,19 +522,19 @@ function renameStructure(app: App, n: number, st: Structure): void {
     writeStructure(app.rom, n, { ...cur, name: name.value.trim() });
     app.structuresChanged();
   };
-  const dlg = modal(`Struktur ${hex2(n)} umbenennen`, h('div', null, h('div', { class: 'prop' }, h('label', null, 'Name'), name)),
-    [{ label: 'Abbrechen' }, { label: 'OK', primary: true, onClick: save }]);
+  const dlg = modal(`Rename structure ${hex2(n)}`, h('div', null, h('div', { class: 'prop' }, h('label', null, 'Name'), name)),
+    [{ label: 'Cancel' }, { label: 'OK', primary: true, onClick: save }]);
   name.addEventListener('keydown', (e) => { if (e.key === 'Enter') { save(); dlg.close(); } });
   setTimeout(() => name.select(), 0);
 }
 
 function deleteStructure(app: App, n: number, st: Structure): void {
   const users = app.structureUsers(n);
-  const body = h('div', null, h('div', null, `Struktur ${hex2(n)} „${st.name || '(ohne Namen)'}“ löschen?`),
+  const body = h('div', null, h('div', null, `Delete structure ${hex2(n)} “${st.name || '(unnamed)'}”?`),
     h('div', { class: 'hint' }, users.length
-      ? `Sie wird in Level ${users.map(hex3).join(', ')} benutzt. Die Objekte bleiben dort, zeigen aber nichts mehr, bis wieder eine Struktur ${hex2(n)} angelegt wird.`
-      : 'Sie wird in keinem Level benutzt.'));
-  modal('Struktur löschen', body, [{ label: 'Abbrechen' }, { label: 'Löschen', danger: true, onClick: () => { writeStructure(app.rom, n, null); app.structuresChanged(); } }]);
+      ? `It is used in level ${users.map(hex3).join(', ')}. The objects stay there but show nothing until a structure ${hex2(n)} is created again.`
+      : 'It is not used in any level.'));
+  modal('Delete structure', body, [{ label: 'Cancel' }, { label: 'Delete', danger: true, onClick: () => { writeStructure(app.rom, n, null); app.structuresChanged(); } }]);
 }
 
 // small images of the sprites a block spawns, shown in the corner of a palette cell
@@ -574,7 +574,7 @@ export class Properties {
   constructor(app: App) {
     this.app = app;
     this.body = h('div', { class: 'props-body' });
-    this.root = h('div', { class: 'panel props' }, h('div', { class: 'panel-title' }, 'Eigenschaften'), this.body);
+    this.root = h('div', { class: 'panel props' }, h('div', { class: 'panel-title' }, 'Properties'), this.body);
     app.on('change', () => this.build());
     app.on('level', () => this.build());
     app.on('objkinds', () => this.build());
@@ -592,11 +592,11 @@ export class Properties {
   actions(objects: boolean): HTMLElement {
     const app = this.app;
     return h('div', { class: 'row prop-actions' },
-      h('button', { title: 'Duplizieren (Strg+D)', onclick: () => app.duplicateSelection() }, 'Duplizieren'),
-      objects ? h('button', { title: 'Nach vorne – zuletzt gezeichnet (Bild↑)', onclick: () => app.reorderSelection('front') }, 'Nach vorne') : '',
-      objects ? h('button', { title: 'Nach hinten – zuerst gezeichnet (Bild↓)', onclick: () => app.reorderSelection('back') }, 'Nach hinten') : '',
-      objects ? h('button', { title: 'Die Tiles der Auswahl als Struktur speichern', onclick: () => openSaveStructure(app) }, 'Als Struktur …') : '',
-      h('button', { class: 'danger', title: 'Löschen (Entf)', onclick: () => app.deleteSelection() }, 'Löschen'));
+      h('button', { title: 'Duplicate (Ctrl+D)', onclick: () => app.duplicateSelection() }, 'Duplicate'),
+      objects ? h('button', { title: 'To front – drawn last (PgUp)', onclick: () => app.reorderSelection('front') }, 'To front') : '',
+      objects ? h('button', { title: 'To back – drawn first (PgDn)', onclick: () => app.reorderSelection('back') }, 'To back') : '',
+      objects ? h('button', { title: 'Save the tiles of the selection as a structure', onclick: () => openSaveStructure(app) }, 'As structure …') : '',
+      h('button', { class: 'danger', title: 'Delete (Del)', onclick: () => app.deleteSelection() }, 'Delete'));
   }
 
   build(): void {
@@ -606,13 +606,13 @@ export class Properties {
     if (!app.level) return;
     if (app.mode === 'exit') return this.buildExit();
     if (app.mode === 'bg') {
-      this.body.appendChild(h('div', { class: 'hint' }, `Hintergrund (BG-Tilemap) bearbeiten. ${app.level.bg ? 'Geändert – wird beim Speichern in freien ROM-Speicher geschrieben (BG-Patch).' : 'Unverändert.'}`));
+      this.body.appendChild(h('div', { class: 'hint' }, `Edit the background (BG tilemap). ${app.level.bg ? 'Changed – written to free ROM space on save (BG patch).' : 'Unchanged.'}`));
       return;
     }
     if (app.mode === 'spr') {
       const sel = app.selectedSprites();
-      if (!sel.length) { this.body.appendChild(emptyState(`${app.level.sprites.length} Sprites – keins ausgewählt.`)); return; }
-      if (sel.length > 1) { this.body.append(h('div', { class: 'prop-title' }, `${sel.length} Sprites ausgewählt`), this.actions(false)); return; }
+      if (!sel.length) { this.body.appendChild(emptyState(`${app.level.sprites.length} sprites – none selected.`)); return; }
+      if (sel.length > 1) { this.body.append(h('div', { class: 'prop-title' }, `${sel.length} sprites selected`), this.actions(false)); return; }
       const s = sel[0];
       const upd = (f: () => void) => { app.checkpoint(); f(); app.changed(false); };
       const id = spriteId(s), custom = app.customSprite(id);
@@ -621,12 +621,12 @@ export class Properties {
       const resize = () => { const b = spriteBytes(spriteSizes(app.rom), s); if (b.length) s.bytes = b; else delete s.bytes; };
       this.body.append(
         h('div', { class: 'prop-title' }, `${s.extra >= 2 ? 'Custom Sprite' : 'Sprite'} ${hex2(s.num)}: ${app.spriteLabel(id)}`),
-        this.field('Nummer', hexInput(s.num, 2, (v) => upd(() => { s.num = v; resize(); }))),
+        this.field('Number', hexInput(s.num, 2, (v) => upd(() => { s.num = v; resize(); }))),
         this.field('X', hexInput(s.x, 3, (v) => upd(() => (s.x = v)), app.levelWidthTiles() - 1)),
         this.field('Y', hexInput(s.y, 3, (v) => upd(() => (s.y = v)), app.levelHeightTiles() - 1)),
-        this.field('Extra-Bits', hexInput(s.extra, 1, (v) => upd(() => { s.extra = v; resize(); }), 3)),
-        ...Array.from({ length: nBytes }, (_, i) => this.field(`Extra-Byte ${i + 1}`, hexInput(s.bytes?.[i] ?? 0, 2, (v) => upd(() => { resize(); if (s.bytes) s.bytes[i] = v; })))),
-        s.extra >= 2 ? h('div', { class: 'hint' }, custom ? 'Extra-Bits 2/3: Custom Sprite ohne/mit Extra-Bit.' : 'Dieser Custom Sprite ist nicht eingefügt (ROM → Custom Sprites …); das Spiel behandelt ihn wie den Original-Sprite gleicher Nummer.') : '',
+        this.field('Extra bits', hexInput(s.extra, 1, (v) => upd(() => { s.extra = v; resize(); }), 3)),
+        ...Array.from({ length: nBytes }, (_, i) => this.field(`Extra byte ${i + 1}`, hexInput(s.bytes?.[i] ?? 0, 2, (v) => upd(() => { resize(); if (s.bytes) s.bytes[i] = v; })))),
+        s.extra >= 2 ? h('div', { class: 'hint' }, custom ? 'Extra bits 2/3: custom sprite without/with extra bit.' : 'This custom sprite is not inserted (ROM → Custom Sprites …); the game treats it like the original sprite with the same number.') : '',
         custom?.description ? h('div', { class: 'hint pre' }, custom.description) : '',
         this.actions(false),
       );
@@ -635,37 +635,37 @@ export class Properties {
       this.probePending = !p && (s.extra >= 2 ? s.num < 0xc0 : s.num < 0xc9);
       if (p?.summary) {
         const here = spriteProbeAt(p, s.x, s.y).summary;
-        this.body.append(h('div', { class: 'hint' }, `An dieser Stelle: ${here ?? 'nichts'}`,
-          p.summary !== here ? [h('br'), `Allgemein: ${p.summary}`] : ''));
-      } else if (this.probePending) this.body.append(h('div', { class: 'hint' }, 'Verhalten wird ermittelt …'));
+        this.body.append(h('div', { class: 'hint' }, `At this position: ${here ?? 'nothing'}`,
+          p.summary !== here ? [h('br'), `In general: ${p.summary}`] : ''));
+      } else if (this.probePending) this.body.append(h('div', { class: 'hint' }, 'Determining behavior …'));
       return;
     }
     const sel = app.selectedObjects();
     if (!sel.length) {
-      this.body.appendChild(emptyState(`${app.currentObjects().length} Objekte auf ${app.mode === 'l2' ? 'Layer 2' : 'Layer 1'} – keins ausgewählt.`));
+      this.body.appendChild(emptyState(`${app.currentObjects().length} objects on ${app.mode === 'l2' ? 'layer 2' : 'layer 1'} – none selected.`));
       return;
     }
-    if (sel.length > 1) { this.body.append(h('div', { class: 'prop-title' }, `${sel.length} Objekte ausgewählt`), this.actions(true)); return; }
+    if (sel.length > 1) { this.body.append(h('div', { class: 'prop-title' }, `${sel.length} objects selected`), this.actions(true)); return; }
     const o = sel[0];
     const upd = (f: () => void) => { app.checkpoint(); f(); app.changed(); };
     const idx = app.currentObjects().indexOf(o);
     const ov = app.objectKind(o.num);
     this.body.append(
-      h('div', { class: 'prop-title' }, `${o.num ? 'Objekt ' + hex2(o.num) : 'Erw. Objekt ' + hex2(o.ext)}: ${objectName(o.num, o.ext)}`),
-      h('div', { class: 'hint' }, `Nr. ${idx + 1} von ${app.currentObjects().length} (Zeichenreihenfolge)`),
-      this.field('Objekt', hexInput(o.num, 2, (v) => upd(() => { o.num = v; fixStruct(app, o); }), 0x3f)),
-      o.num === 0 ? this.field('Erw. Objekt', hexInput(o.ext, 2, (v) => upd(() => { o.ext = v; fixStruct(app, o); }), 0xff)) : '',
-      o.num === 0 && o.ext === STRUCT_EXT && o.struct !== undefined ? this.field('Struktur', hexInput(o.struct, 2, (v) => upd(() => (o.struct = v)), 0xff)) : '',
+      h('div', { class: 'prop-title' }, `${o.num ? 'Object ' + hex2(o.num) : 'Ext. object ' + hex2(o.ext)}: ${objectName(o.num, o.ext)}`),
+      h('div', { class: 'hint' }, `No. ${idx + 1} of ${app.currentObjects().length} (drawing order)`),
+      this.field('Object', hexInput(o.num, 2, (v) => upd(() => { o.num = v; fixStruct(app, o); }), 0x3f)),
+      o.num === 0 ? this.field('Ext. object', hexInput(o.ext, 2, (v) => upd(() => { o.ext = v; fixStruct(app, o); }), 0xff)) : '',
+      o.num === 0 && o.ext === STRUCT_EXT && o.struct !== undefined ? this.field('Structure', hexInput(o.struct, 2, (v) => upd(() => (o.struct = v)), 0xff)) : '',
       o.num === 0 && o.ext === STRUCT_EXT && o.struct !== undefined ? h('div', { class: 'hint' }, structInfo(app, o.struct), ' ',
-        h('button', { title: 'Die Struktur hier durch einzelne Direct-Map16-Objekte ersetzen (zum Bearbeiten, danach wieder „Auswahl als Struktur“)', onclick: () => app.explodeStructure(o) }, 'Auflösen')) : '',
-      o.num === 0 && o.ext === DM16_EXT ? this.field('Map16-Tile', hexInput(o.tile ?? 0, 3, (v) => upd(() => (o.tile = v)), EXT_TILES - 1),
-        h('button', { title: 'Das Tile im Grafik-Bereich bearbeiten', onclick: () => app.editMap16(o.tile ?? 0) }, 'Bearbeiten …')) : '',
-      o.num === 0 && o.ext === DM16_EXT ? this.field('Größe (hw)', hexInput(o.size, 2, (v) => upd(() => (o.size = v)))) : '',
+        h('button', { title: 'Replace the structure here with single Direct Map16 objects (to edit it, then “Selection as structure” again)', onclick: () => app.explodeStructure(o) }, 'Break up')) : '',
+      o.num === 0 && o.ext === DM16_EXT ? this.field('Map16 tile', hexInput(o.tile ?? 0, 3, (v) => upd(() => (o.tile = v)), EXT_TILES - 1),
+        h('button', { title: 'Edit the tile in the graphics area', onclick: () => app.editMap16(o.tile ?? 0) }, 'Edit …')) : '',
+      o.num === 0 && o.ext === DM16_EXT ? this.field('Size (hw)', hexInput(o.size, 2, (v) => upd(() => (o.size = v)))) : '',
       this.field('X', hexInput(o.x, 3, (v) => upd(() => (o.x = v)), app.levelWidthTiles() - 1)),
       this.field('Y', hexInput(o.y, 3, (v) => upd(() => (o.y = v)), app.levelHeightTiles() - 1)),
-      o.num !== 0 && ov?.type ? this.field('Typ', hexInput(objectVariant(ov, o.size), 1, (v) => upd(() => (o.size = withObjectVariant(ov, o.size, v))), ov.count - 1)) : '',
-      o.num !== 0 ? this.field('Größe (Byte)', hexInput(o.size, 2, (v) => upd(() => (o.size = v)))) : '',
-      o.num !== 0 ? h('div', { class: 'hint' }, `${nibbleText(ov)} · Tasten: + / - Breite, * / / Höhe, Alt+Pfeile`) : '',
+      o.num !== 0 && ov?.type ? this.field('Type', hexInput(objectVariant(ov, o.size), 1, (v) => upd(() => (o.size = withObjectVariant(ov, o.size, v))), ov.count - 1)) : '',
+      o.num !== 0 ? this.field('Size (byte)', hexInput(o.size, 2, (v) => upd(() => (o.size = v)))) : '',
+      o.num !== 0 ? h('div', { class: 'hint' }, `${nibbleText(ov)} · Keys: + / - width, * / / height, Alt+arrows`) : '',
       this.actions(true),
     );
     // Map16 tiles of the object and their behaviour when hit from below (emulated)
@@ -675,7 +675,7 @@ export class Properties {
       this.probePending = sum === undefined;
       this.body.append(h('div', { class: 'hint' },
         `Map16: ${tiles.slice(0, 12).map(hex3).join(' ')}${tiles.length > 12 ? ' …' : ''}`,
-        ...(sum === undefined ? [h('br'), 'Verhalten wird ermittelt …'] : sum.flatMap((x) => [h('br'), x]))));
+        ...(sum === undefined ? [h('br'), 'Determining behavior …'] : sum.flatMap((x) => [h('br'), x]))));
     }
   }
 
@@ -692,13 +692,13 @@ function fixStruct(app: App, o: LevelObject): void {
 
 function structInfo(app: App, n: number): string {
   const st = readStructure(app.rom, n);
-  return st ? `${st.name || '(ohne Namen)'}, ${st.w}×${st.h}` : 'Diese Struktur gibt es nicht – das Objekt platziert nichts.';
+  return st ? `${st.name || '(unnamed)'}, ${st.w}×${st.h}` : 'This structure does not exist – the object places nothing.';
 }
 
 // what the nibbles of a standard object's settings byte do (emulated, see objkinds.ts)
 function nibbleText(k: ObjKind | null): string {
-  if (!k) return 'Unteres Nibble = Breite, oberes = Höhe';
-  if (k.lo === 'w' && k.hi === 'w') return 'Das ganze Byte ist die Breite';
-  const part = (d: 'w' | 'h' | null, type: boolean) => (type ? 'Typ' : d === 'w' ? 'Breite' : d === 'h' ? 'Höhe' : 'ohne Wirkung');
-  return `${k.type ? `Unterobjekt mit ${k.count} Typen: ` : ''}unteres Nibble = ${part(k.lo, k.type === 'lo')}, oberes = ${part(k.hi, k.type === 'hi')}`;
+  if (!k) return 'Low nibble = width, high = height';
+  if (k.lo === 'w' && k.hi === 'w') return 'The whole byte is the width';
+  const part = (d: 'w' | 'h' | null, type: boolean) => (type ? 'type' : d === 'w' ? 'width' : d === 'h' ? 'height' : 'no effect');
+  return `${k.type ? `Sub-object with ${k.count} types: ` : ''}low nibble = ${part(k.lo, k.type === 'lo')}, high = ${part(k.hi, k.type === 'hi')}`;
 }

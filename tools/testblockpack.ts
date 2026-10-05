@@ -59,7 +59,7 @@ check(r.ok, 'package applied: ' + [...r.errors, ...r.notes].join(' | '));
 check(!!blockOf(rom, 0x500) && !!blockOf(rom, 0x501) && actsLike(rom, 0x500) === 0x25, 'blocks and acts like on 500/501');
 check(extTileWords(rom, 0x501)?.join() === words[1].join(), 'Map16 graphics of 501');
 // (the BG2 slot needs the VRAM patch; until then the file is only stored)
-check(gfxEntry(rom, 0x80)?.raw === true && levelExtGfx(rom, 0x105)[0] === 0xff && r.notes.some((n) => n.includes('VRAM-Patch')), 'ExGFX 80 stored, BG2 slot left alone with a note');
+check(gfxEntry(rom, 0x80)?.raw === true && levelExtGfx(rom, 0x105)[0] === 0xff && r.notes.some((n) => n.includes('VRAM patch')), 'ExGFX 80 stored, BG2 slot left alone with a note');
 
 // with the VRAM patch the BG2 slot is used: a placed tile 500 shows the package's graphics in the level
 {

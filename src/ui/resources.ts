@@ -1,7 +1,7 @@
-// The patches dialog: one place for everything assembled into the ROM. "Pakete" lists every added download
+// The patches dialog: one place for everything assembled into the ROM. "Packages" lists every added download
 // with what it brought (see packages.ts); the tabs UberASM, Custom Blocks and Custom Sprites show the
-// tool projects as a whole. "Hinzufügen …" takes any download and shows it as a package afterwards; the
-// project tabs stage their changes until "Übernehmen", closing asks about pending ones.
+// tool projects as a whole. "Add …" takes any download and shows it as a package afterwards; the
+// project tabs stage their changes until "Apply", closing asks about pending ones.
 
 import type { App } from './app.ts';
 import { h, modal, clear, toast, choose } from './dom.ts';
@@ -20,10 +20,10 @@ export interface ResourceOptions {
   onChange?: () => void; // after the ROM was changed from the dialog
 }
 
-const TAB_LABEL: Record<ResourceTab, string> = { patches: 'Pakete', uber: 'UberASM', blocks: 'Custom Blocks', sprites: 'Custom Sprites' };
+const TAB_LABEL: Record<ResourceTab, string> = { patches: 'Packages', uber: 'UberASM', blocks: 'Custom Blocks', sprites: 'Custom Sprites' };
 
 export async function openResources(app: App, tab: ResourceTab = 'patches', opts: ResourceOptions = {}): Promise<void> {
-  const body = h('div', { class: 'resources' }, h('p', { class: 'hint' }, 'Asar wird geladen …'));
+  const body = h('div', { class: 'resources' }, h('p', { class: 'hint' }, 'Loading Asar …'));
   let panes: Record<'uber' | 'blocks' | 'sprites', Pane> | null = null;
   const pending = () => (panes ? Object.values(panes).filter((p) => p.dirty()) : []);
 
@@ -34,8 +34,8 @@ export async function openResources(app: App, tab: ResourceTab = 'patches', opts
     if (!dirty.length) return true;
     if (asking) return false;
     asking = true;
-    void choose('Nicht übernommene Änderungen', `${dirty.map((p) => p.title).join(', ')}: Änderungen sind noch nicht übernommen.`,
-      [{ label: 'Zurück' }, { label: 'Verwerfen', danger: true }, { label: 'Übernehmen', primary: true }]).then((i) => {
+    void choose('Unapplied changes', `${dirty.map((p) => p.title).join(', ')}: changes have not been applied yet.`,
+      [{ label: 'Back' }, { label: 'Discard', danger: true }, { label: 'Apply', primary: true }]).then((i) => {
       asking = false;
       if (i === 1) dlg.close(true);
       else if (i === 2) {
@@ -46,10 +46,10 @@ export async function openResources(app: App, tab: ResourceTab = 'patches', opts
     });
     return false;
   };
-  const dlg = modal('Patches', body, [{ label: 'Schließen', primary: true }], undefined, beforeClose);
+  const dlg = modal('Patches', body, [{ label: 'Close', primary: true }], undefined, beforeClose);
 
   try { await loadAsar(); } catch (e) {
-    clear(body).appendChild(h('p', { class: 'hint error' }, `Asar konnte nicht geladen werden: ${errorText(e)}`));
+    clear(body).appendChild(h('p', { class: 'hint error' }, `Asar could not be loaded: ${errorText(e)}`));
     return;
   }
 
@@ -57,7 +57,7 @@ export async function openResources(app: App, tab: ResourceTab = 'patches', opts
   const content = h('div', { class: 'res-content' });
   const changed = () => { patches.reload(); opts.onChange?.(); };
   const renderTabs = () => clear(tabBar).append(...(Object.keys(TAB_LABEL) as ResourceTab[]).map((k) =>
-    h('button', { class: k === tab ? 'mode active' : 'mode', onclick: () => show(k), title: panes && k !== 'patches' && panes[k].dirty() ? 'Nicht übernommene Änderungen' : undefined },
+    h('button', { class: k === tab ? 'mode active' : 'mode', onclick: () => show(k), title: panes && k !== 'patches' && panes[k].dirty() ? 'Unapplied changes' : undefined },
       TAB_LABEL[k], panes && k !== 'patches' && panes[k].dirty() ? ' •' : '')));
   const p = { uber: uberPane(app, renderTabs, changed), blocks: blockPane(app, renderTabs, changed), sprites: pixiPane(app, renderTabs, changed) };
   panes = p;
@@ -65,8 +65,8 @@ export async function openResources(app: App, tab: ResourceTab = 'patches', opts
   const settle = async (keys: (keyof typeof p)[], what: string): Promise<boolean> => {
     const dirty = keys.flatMap((k) => (p[k].dirty() ? [p[k]] : []));
     if (!dirty.length) return true;
-    const i = await choose('Nicht übernommene Änderungen', `${what} ${dirty.map((x) => x.title).join(', ')}: Änderungen sind noch nicht übernommen – vorher …`,
-      [{ label: 'Abbrechen' }, { label: 'Verwerfen', danger: true }, { label: 'Übernehmen', primary: true }]);
+    const i = await choose('Unapplied changes', `${what} ${dirty.map((x) => x.title).join(', ')}: changes have not been applied yet – first …`,
+      [{ label: 'Cancel' }, { label: 'Discard', danger: true }, { label: 'Apply', primary: true }]);
     if (i === null || i === 0) return false;
     if (i === 1) for (const x of dirty) x.discard();
     else { const failed = dirty.find((x) => !x.apply()); if (failed) { show(keyOf(failed)); return false; } }
@@ -77,7 +77,7 @@ export async function openResources(app: App, tab: ResourceTab = 'patches', opts
     changed,
     show: (k) => show(k),
     settle,
-    leave: (then) => void settle(['uber', 'blocks', 'sprites'], 'Der Dialog wird geschlossen.').then((ok) => { if (ok) { dlg.close(true); then(); } }),
+    leave: (then) => void settle(['uber', 'blocks', 'sprites'], 'The dialog will be closed.').then((ok) => { if (ok) { dlg.close(true); then(); } }),
     addPart: (name, files, rec) => {
       // later parts go into the package (its record, looked up again: it may have changed since)
       const cur = findPackage(app, rec.id) ?? rec;
@@ -96,7 +96,7 @@ export async function openResources(app: App, tab: ResourceTab = 'patches', opts
   // opens the dialog adding a package, the tabs it changed reloaded afterwards
   const run = async (pk: PickedPackage) => {
     // the add dialogs work on the ROM's projects: staged changes of those first
-    if (!(await settle(pk.affects.filter((k): k is keyof typeof p => k !== 'patches'), `„${pk.name}“ wird direkt in die ROM übernommen.`))) return;
+    if (!(await settle(pk.affects.filter((k): k is keyof typeof p => k !== 'patches'), `“${pk.name}” goes directly into the ROM.`))) return;
     pk.open({ uberContext: p.uber.context(), tile: p.blocks.tile() }, () => {
       for (const k of pk.affects) if (k !== 'patches') p[k].reload();
       if (pk.target) show('patches');
@@ -111,9 +111,9 @@ export async function openResources(app: App, tab: ResourceTab = 'patches', opts
 
   clear(body).append(
     h('div', { class: 'row res-top' },
-      h('button', { class: 'primary', onclick: () => add() }, 'Hinzufügen …'),
-      h('button', { onclick: () => add(true), title: 'Ordner und Dateien eines Pakets selbst Ordnern des UberASM-Projekts zuordnen – für Pakete, die mehr als eine Ressource sind' }, 'Manuell zuordnen …'),
-      h('span', { class: 'hint' }, '.asm oder .zip (z. B. von SMWCentral) – erkannt wird, ob Patch, UberASM-Code, Custom Block, Block-Paket, Custom Sprite oder Hintergrund.')),
+      h('button', { class: 'primary', onclick: () => add() }, 'Add …'),
+      h('button', { onclick: () => add(true), title: 'Assign a package’s folders and files to folders of the UberASM project yourself – for packages that are more than one resource' }, 'Assign manually …'),
+      h('span', { class: 'hint' }, '.asm or .zip (e.g. from SMWCentral) – recognized as patch, UberASM code, custom block, block package, custom sprite or background.')),
     tabBar,
     content,
   );

@@ -54,7 +54,7 @@ export function hexInput(value: number, digits: number, onChange: (v: number) =>
     const v = valid();
     inp.classList.remove('invalid');
     if (v >= 0) { value = v; onChange(v); }
-    else { inp.value = value.toString(16).toUpperCase().padStart(digits, '0'); toast(`Ungültig: hex 0–${max.toString(16).toUpperCase()} erwartet`, 'error'); }
+    else { inp.value = value.toString(16).toUpperCase().padStart(digits, '0'); toast(`Invalid: expected hex 0–${max.toString(16).toUpperCase()}`, 'error'); }
   });
   return inp;
 }
@@ -122,7 +122,7 @@ export function modal(title: string, body: HTMLElement, buttons: { label: string
   };
   window.addEventListener('keydown', esc, true);
   const box = h('div', { class: 'modal' },
-    h('div', { class: 'modal-title' }, title, h('button', { class: 'icon-btn', onclick: () => close(), title: 'Schließen' }, '✕')),
+    h('div', { class: 'modal-title' }, title, h('button', { class: 'icon-btn', onclick: () => close(), title: 'Close' }, '✕')),
     h('div', { class: 'modal-body' }, body),
     h('div', { class: 'modal-buttons' }, buttons.map((b) => h('button', {
       class: b.danger ? 'danger' : b.primary ? 'primary' : '',
