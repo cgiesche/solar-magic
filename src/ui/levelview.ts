@@ -64,6 +64,7 @@ export class LevelView {
     app.on('anim-frame', () => { this.updateLevelImage(false); });
     app.on('change', () => { this.paint(); this.updateStats(); });
     app.on('sprites', () => this.requestPaint());
+    app.on('sprite-frame', () => { if (app.show.sprites) this.requestPaint(); });
     app.on('sprite-mem', () => { this.requestPaint(); this.updateStats(); });
     app.on('mode', () => { if (!this.hover) this.idleStatus(); });
     this.idleStatus();
@@ -341,8 +342,9 @@ export class LevelView {
     const thumbs = this.app.spriteThumbs;
     const small = r.small.sprites[0], big = r.big.sprites[0];
     const main = small ?? big ?? r.stomp?.sprites[0];
-    const img = main !== undefined ? thumbs?.get(main) : undefined;
-    if (!img) return;
+    const c = main !== undefined ? thumbs?.get(main) : undefined;
+    if (!c) return;
+    const img = this.app.spriteFrame(c);
     ctx.drawImage(img, x + Number(img.dataset.ox), y + Number(img.dataset.oy));
     const alt = big !== undefined && big !== main ? thumbs?.get(big) : undefined;
     if (alt) ctx.drawImage(alt, x + 8 + Number(alt.dataset.ox) / 2, y + Number(alt.dataset.oy) / 2, alt.width / 2, alt.height / 2);
@@ -358,8 +360,9 @@ export class LevelView {
       const sel = app.selection.has(s.uid) && active;
       const img = app.spriteImageOf(s);
       if (img) {
+        const f = app.spriteFrame(img);
         ctx.globalAlpha = active ? 1 : 0.85;
-        ctx.drawImage(img, x + Number(img.dataset.ox), y + Number(img.dataset.oy));
+        ctx.drawImage(f, x + Number(f.dataset.ox), y + Number(f.dataset.oy));
         ctx.globalAlpha = 1;
       }
       ctx.fillStyle = sel ? 'rgba(255,80,200,0.45)' : active ? 'rgba(255,80,200,0.22)' : 'rgba(255,80,200,0.12)';

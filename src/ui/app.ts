@@ -95,6 +95,9 @@ export class App {
   spriteThumbs: Map<number, HTMLCanvasElement> | null = null;
   variantQueue: number[] = []; // sprites whose variant images are captured next
   private canvases = new WeakMap<SpriteImage, HTMLCanvasElement>();
+  // a sprite image's animation (SpriteImage.anim): its images and the sequence, in game frames
+  private spriteAnims = new WeakMap<HTMLCanvasElement, { frames: HTMLCanvasElement[]; seq: [number, number][]; total: number }>();
+  private spriteTimer = 0; // repaints animated sprites while the animation is shown
   // results found out by emulation, valid while the ROM they read is unchanged (see romdeps.ts);
   // stored in IndexedDB, loaded once at start (cacheReady)
   results: ResultCache;
@@ -207,6 +210,7 @@ export class App {
     this.buildOffsetMaps();
     this.findSecondaryEntrances();
     this.startAnimation();
+    this.startSpriteAnimation();
     this.emit('render');
   }
 
@@ -246,6 +250,23 @@ export class App {
       if (i === snaps.length && !a.timer) a.timer = window.setInterval(() => this.animTick(), 1000 / 7.5);
     };
     setTimeout(step, 0);
+  }
+
+  // sprites move in game frames (60 per second), the view is repainted at 20 per second
+  private startSpriteAnimation(): void {
+    if (this.show.anim && !this.spriteTimer) this.spriteTimer = window.setInterval(() => {
+      if (!this.show.anim) { clearInterval(this.spriteTimer); this.spriteTimer = 0; return; }
+      this.emit('sprite-frame');
+    }, 1000 / 20);
+  }
+
+  // the image of a sprite to show now (the animation's current one while the animation is shown)
+  spriteFrame(c: HTMLCanvasElement): HTMLCanvasElement {
+    const a = this.show.anim ? this.spriteAnims.get(c) : undefined;
+    if (!a) return c;
+    let t = Math.floor(performance.now() * 60 / 1000) % a.total;
+    for (const [k, d] of a.seq) { if (t < d) return a.frames[k]; t -= d; }
+    return c;
   }
 
   animTick(): void {
@@ -369,7 +390,8 @@ export class App {
       if (this.spriteKey !== key) return;
       if (i === 0) {
         // i3: with the sprites from $C9 on (shells, groups), failed batches retried one by one
-        const stored = this.results.get<[number, SpriteImage][]>(`i3${key}`);
+        // i4: with the animation
+        const stored = this.results.get<[number, SpriteImage][]>(`i4${key}`);
         if (stored) {
           for (const [n, img] of stored) map.set(n, this.spriteCanvas(img));
           this.setBusy('sprites', null);
@@ -386,7 +408,7 @@ export class App {
       this.emit('sprites');
       if (i < all.length) setTimeout(step, 0);
       else {
-        this.results.set(`i3${key}`, images, this.results.fp.deps(reads));
+        this.results.set(`i4${key}`, images, this.results.fp.deps(reads));
         this.setBusy('sprites', null);
       }
     };
@@ -416,7 +438,7 @@ export class App {
   }
 
   private bytesKey(id: number, bytes: number[]): string {
-    return `b${this.spriteKey}:${id}:${bytes.join(',')}`;
+    return `b2${this.spriteKey}:${id}:${bytes.join(',')}`;
   }
   private bytesQueue: { id: number; bytes: number[] }[] = [];
   private queueBytesImage(id: number, bytes: number[]): void {
@@ -441,7 +463,7 @@ export class App {
   }
 
   private variantKey(num: number, at: { x: number; y: number }): string {
-    return `v${this.spriteKey}:${num}:${at.x}:${at.y}`;
+    return `v2${this.spriteKey}:${num}:${at.x}:${at.y}`;
   }
 
   // ROM bytes of GFX file data: emulated results don't depend on them (graphics only reach VRAM);
@@ -462,7 +484,11 @@ export class App {
 
   private spriteCanvas(img: SpriteImage): HTMLCanvasElement {
     let c = this.canvases.get(img);
-    if (!c) this.canvases.set(img, (c = spriteCanvas(img)));
+    if (!c) {
+      this.canvases.set(img, (c = spriteCanvas(img)));
+      const a = img.anim;
+      if (a) this.spriteAnims.set(c, { frames: a.imgs.map(spriteCanvas), seq: a.seq, total: a.seq.reduce((t, [, d]) => t + d, 0) });
+    }
     return c;
   }
 
