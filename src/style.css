@@ -437,3 +437,15 @@ button.danger:hover:not(:disabled) { border-color: var(--danger); }
 .pkg-file { gap: 6px; min-height: 26px; border-bottom: 1px solid var(--border); }
 .pkg-file .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 700px) { .pkg-pane { grid-template-columns: 1fr; } .pkg-list { border-right: 0; padding-right: 0; max-height: 30vh; } }
+/* entrances & exits: level picker, exit/entrance panels */
+.level-pick { display: flex; align-items: baseline; gap: 2px; min-width: 0; flex: 1; text-align: left; overflow: hidden; white-space: nowrap; }
+.level-pick .lname { overflow: hidden; text-overflow: ellipsis; flex: 1; }
+.level-pick .caret { color: var(--muted); font-size: 10px; }
+.level-pop { width: 320px; max-height: 360px; gap: 4px; }
+.level-pop .level-list { max-height: 280px; }
+.exit-target { background: var(--panel2); border: 1px solid var(--border); border-radius: 4px; padding: 6px 8px; display: flex; flex-direction: column; gap: 3px; }
+.exit-target .lname, .exit-users .lname { color: var(--muted); }
+.exit-users { display: flex; flex-direction: column; gap: 2px; }
+.exit-users .row { gap: 6px; align-items: center; }
+.link-btn { background: none; border: none; padding: 0; color: var(--accent); cursor: pointer; text-decoration: underline; }
+.radio-col { display: flex; flex-direction: column; gap: 2px; }

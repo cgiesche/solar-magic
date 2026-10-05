@@ -7,6 +7,7 @@ import { objectVariant, withObjectVariant, type ObjKind } from '../core/objkinds
 import { objectThumbs, thumbCanvas, objKey, type ObjSpec } from './thumbs.ts';
 import { newUid, spriteId, spriteBytes, spriteSizes, type LevelObject } from '../core/level.ts';
 import { levelName } from '../core/overworld.ts';
+import { buildExitPanel } from './exitpanel.ts';
 import { DM16_EXT } from '../core/patches.ts';
 import { STRUCT_EXT, TRANSPARENT, hasStructs, freeStructureNumber, readStructure, writeStructure, STRUCT_COUNT, type Structure } from '../core/structs.ts';
 import { EXT_TILES, map16Ext } from '../core/map16ext.ts';
@@ -578,6 +579,7 @@ export class Properties {
     app.on('level', () => this.build());
     app.on('objkinds', () => this.build());
     app.on('blockinfo', () => { if (this.probePending) this.build(); });
+    app.on('rom-change', () => { if (app.mode === 'exit') this.build(); });
   }
 
   probePending = false; // the shown object's block behaviour is still being probed
@@ -678,29 +680,7 @@ export class Properties {
   }
 
   buildExit(): void {
-    const app = this.app;
-    const lv = app.level;
-    const scr = app.exitScreen;
-    let ex = lv.exits.find((e) => e.screen === scr);
-    this.body.appendChild(h('div', { class: 'prop-title' }, `Screen ${hex2(scr)}`));
-    if (!ex) {
-      this.body.appendChild(h('button', {
-        onclick: () => { app.checkpoint(); lv.exits.push({ uid: newUid(), screen: scr, dest: 0, secondary: false, flags: 0 }); app.changed(); },
-      }, 'Screen-Exit anlegen'));
-    } else {
-      const e = ex;
-      const upd = (f: () => void) => { app.checkpoint(); f(); app.changed(false); };
-      const sec = h('input', { type: 'checkbox', checked: e.secondary });
-      sec.addEventListener('change', () => upd(() => (e.secondary = sec.checked)));
-      this.body.append(
-        this.field('Ziel', hexInput(e.dest, 3, (v) => upd(() => (e.dest = v)), 0x1ff)),
-        this.field('Sekundär', sec),
-        h('div', { class: 'hint' }, e.secondary ? 'Ziel = Nummer des sekundären Eingangs' : 'Ziel = Levelnummer (Haupteingang)'),
-        h('button', { class: 'danger', onclick: () => { app.checkpoint(); lv.exits = lv.exits.filter((x) => x !== e); app.changed(); } }, 'Exit löschen'),
-      );
-      ex = e;
-    }
-    this.body.appendChild(h('div', { class: 'hint' }, 'Exits gelten für Türen, Rohre usw. auf diesem Screen. Anderen Screen per Klick in der Levelansicht wählen.'));
+    this.probePending = buildExitPanel(this.app, this.body);
   }
 }
 

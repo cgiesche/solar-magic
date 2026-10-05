@@ -124,3 +124,50 @@ export function menuBar(menus: Menu[]): HTMLElement & { refresh: () => void } {
 export function menuButton(menu: Menu): HTMLElement {
   return dropdown(menu);
 }
+
+// a context menu at a viewport position (right click); closes on a choice, Esc or a click elsewhere
+export function contextMenu(x: number, y: number, items: MenuItem[]): void {
+  closeMenus();
+  const list = h('div', { class: 'menu context-menu', role: 'menu', style: `position: fixed; left: ${x}px; top: ${y}px` });
+  const entries: HTMLButtonElement[] = [];
+  for (const it of items) {
+    if (it === 'sep') { list.append(h('div', { class: 'menu-sep', role: 'separator' })); continue; }
+    if ('heading' in it) { list.append(h('div', { class: 'menu-heading' }, it.heading)); continue; }
+    if (!('onClick' in it)) continue;
+    const e = h('button', { class: 'menu-item', role: 'menuitem', disabled: it.disabled?.() ?? false, title: it.title, tabindex: '-1' },
+      h('span', { class: 'menu-check' }), h('span', { class: 'menu-label' }, it.label), it.shortcut ? h('kbd', null, it.shortcut) : null);
+    e.addEventListener('click', () => { closeMenus(); it.onClick(); });
+    e.addEventListener('mouseenter', () => e.focus());
+    entries.push(e);
+    list.append(e);
+  }
+  document.body.append(list);
+  // keep it on screen
+  const r = list.getBoundingClientRect();
+  if (r.right > window.innerWidth - 4) list.style.left = `${Math.max(4, x - r.width)}px`;
+  if (r.bottom > window.innerHeight - 4) list.style.top = `${Math.max(4, y - r.height)}px`;
+  const outside = (ev: MouseEvent) => { if (!list.contains(ev.target as Node)) closeMenus(); };
+  const keys = (ev: KeyboardEvent) => {
+    const enabled = entries.filter((b) => !b.disabled);
+    const i = enabled.indexOf(document.activeElement as HTMLButtonElement);
+    if (ev.key === 'Escape') closeMenus();
+    else if (ev.key === 'ArrowDown') enabled[(i + 1) % enabled.length]?.focus();
+    else if (ev.key === 'ArrowUp') enabled[(i - 1 + enabled.length) % enabled.length]?.focus();
+    else if (ev.key === 'Enter' || ev.key === ' ') { if (i >= 0) enabled[i].click(); }
+    else if (ev.key !== 'Tab') return;
+    ev.preventDefault();
+    ev.stopPropagation();
+  };
+  window.addEventListener('keydown', keys, true);
+  // the right click that opened the menu must not close it
+  setTimeout(() => window.addEventListener('mousedown', outside, true), 0);
+  current = {
+    owner: list,
+    close: () => {
+      list.remove();
+      window.removeEventListener('keydown', keys, true);
+      window.removeEventListener('mousedown', outside, true);
+      current = null;
+    },
+  };
+}

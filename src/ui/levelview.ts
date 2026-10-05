@@ -5,9 +5,10 @@ import { h, attachPanZoom, downloadBytes, toast } from './dom.ts';
 import { objectName, hex2, hex3 } from '../core/names.ts';
 import { resizeObjectSize } from '../core/objkinds.ts';
 import { probeAt, spriteProbeAt, enterText, type PosProbe } from '../core/blockprobe.ts';
-import { type LevelObject, type LevelSprite, serializeLayer1, serializeLayer2, serializeSprites, spriteSizes, spriteId } from '../core/level.ts';
+import { type LevelObject, type LevelSprite, newUid, serializeLayer1, serializeLayer2, serializeSprites, spriteSizes, spriteId } from '../core/level.ts';
 import { composite } from '../core/render.ts';
 import { exitTarget } from '../core/exitgraph.ts';
+import { contextMenu, type MenuItem } from './menu.ts';
 import { incompleteSprites, spriteMemDialog, spriteMemText, SPRITE_MEM_HELP } from './spritemem.ts';
 
 type Drag =
@@ -411,7 +412,7 @@ export class LevelView {
     if (e.button === 1) return;
     if (e.button === 2 || (e.button === 0 && e.shiftKey && !e.ctrlKey)) {
       // insert palette item (BG: paint with the brush, dragging keeps painting)
-      if (app.mode === 'exit') return;
+      if (app.mode === 'exit') { if (e.button === 2) this.exitMenu(e, px, py, tx, ty); return; }
       if (app.mode === 'bg') {
         app.checkpoint();
         this.drag = { kind: 'paint', changed: app.paintBrush(tx, ty), x0: tx, y0: ty, lastX: tx, lastY: ty };
@@ -437,12 +438,7 @@ export class LevelView {
       return;
     }
     if (app.mode === 'exit') {
-      const scr = app.vertical ? ty >> 4 : tx >> 4;
-      const ex = app.level.exits.find((x) => x.screen === scr);
-      app.selection = new Set(ex ? [ex.uid] : []);
-      app.exitScreen = scr;
-      app.exitMarker = null;
-      app.emit('change');
+      app.selectScreen(app.vertical ? ty >> 4 : tx >> 4);
       return;
     }
     // resize handle?
@@ -677,6 +673,31 @@ export class LevelView {
     else if (this.handleAt(px, py)) c = 'nwse-resize';
     else if (top >= 0 && app.selection.has(top)) c = 'move';
     this.scroller.style.cursor = c;
+  }
+
+  // right click in mode 'exit': entrances and the screen's exit at the mouse
+  exitMenu(e: MouseEvent, px: number, py: number, tx: number, ty: number): void {
+    const app = this.app;
+    const scr = app.vertical ? ty >> 4 : tx >> 4;
+    const ex = app.level.exits.find((x) => x.screen === scr);
+    const mk = this.markerAt(px, py);
+    // marker positions are Mario's top-left, the circle is drawn at his feet
+    const mx = px - 8, my = py - 24;
+    const items: MenuItem[] = [
+      { heading: 'Eingänge' },
+      { label: 'Neuer sekundärer Eingang hier', title: 'Legt einen Eingang mit freier Nummer an, auf den Exits anderer Level zeigen können', onClick: () => { app.newSecondaryEntrance(mx, my); } },
+      { label: 'Haupteingang hierher', onClick: () => app.placeEntrance('main', mx, my) },
+      { label: 'Zwischenziel hierher (nur der Screen)', disabled: () => scr > 15, onClick: () => app.placeEntrance('midway', mx, my) },
+    ];
+    if (mk?.kind === 'sec') items.push({ label: `Eingang ${hex3(mk.index)} entfernen`, onClick: () => app.removeSecondaryEntrance(mk.index) });
+    items.push({ heading: `Screen ${hex2(scr)}` });
+    if (ex) {
+      items.push({ label: 'Exit bearbeiten', onClick: () => app.selectScreen(scr) });
+      items.push({ label: '→ Ziel des Exits öffnen', onClick: () => app.gotoExitTarget(ex) });
+    } else {
+      items.push({ label: 'Exit anlegen', onClick: () => { app.selectScreen(scr); app.checkpoint(); app.level.exits.push({ uid: newUid(), screen: scr, dest: app.level.number & 0x1ff, secondary: false, flags: 0 }); app.changed(false); } });
+    }
+    contextMenu(e.clientX, e.clientY, items);
   }
 
   // topmost marker whose circle contains the pixel

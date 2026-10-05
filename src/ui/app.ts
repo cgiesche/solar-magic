@@ -315,6 +315,24 @@ export class App {
     return true;
   }
 
+  // whether a screen has tiles that can be entered (pipes, doors); null while probes are pending
+  enterableOn(screen: number): boolean | null {
+    const g = this.images?.geom1, w = this.render?.wram;
+    if (!g || !w) return null;
+    const v = this.vertical;
+    const x0 = v ? 0 : screen * 16, x1 = Math.min(g.width, v ? g.width : x0 + 16);
+    const y0 = v ? screen * 16 : 0, y1 = Math.min(g.height, v ? y0 + 16 : g.height);
+    let pending = false;
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+      const a = g.addr(x, y);
+      if (a < 0) continue;
+      const p = this.blockInfo(w[a] | (w[a + 0x10000] << 8));
+      if (!p) pending = true;
+      else if (p.enter) return true;
+    }
+    return pending ? null : false;
+  }
+
   // all exits of the ROM, the current level as edited
   exitGraph(): ExitGraph {
     return (this.graph ??= new ExitGraph(this.rom, this.level));
@@ -324,6 +342,15 @@ export class App {
   selectEntrance(m: { kind: Marker['kind']; index: number } | null): void {
     this.exitMarker = m && { kind: m.kind, index: m.index };
     if (m) this.selection.clear();
+    this.emit('change');
+  }
+
+  // mode 'exit': chooses a screen (and its exit)
+  selectScreen(scr: number): void {
+    const ex = this.level.exits.find((x) => x.screen === scr);
+    this.selection = new Set(ex ? [ex.uid] : []);
+    this.exitScreen = scr;
+    this.exitMarker = null;
     this.emit('change');
   }
 
@@ -381,12 +408,8 @@ export class App {
   gotoExit(level: number, screen: number): void {
     if (level !== this.level.number) this.openLevel(level);
     this.mode = 'exit';
-    this.exitMarker = null;
-    this.exitScreen = screen;
-    const ex = this.level.exits.find((x) => x.screen === screen);
-    this.selection = new Set(ex ? [ex.uid] : []);
     this.emit('mode');
-    this.emit('change');
+    this.selectScreen(screen);
     this.reveal = this.vertical ? { x: 128, y: screen * 256 + 128 } : { x: screen * 256 + 128, y: 200 };
     this.emit('reveal');
   }
