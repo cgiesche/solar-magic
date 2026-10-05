@@ -91,7 +91,7 @@ export function parsePixiList(text: string): PixiEntry[] {
 
 export function writePixiList(list: PixiEntry[]): string {
   const hx = (n: number) => n.toString(16).toUpperCase().padStart(2, '0');
-  const out = ['; custom sprites (SMW Editor, PIXI format)'];
+  const out = ['; custom sprites (Solar Magic, PIXI format)'];
   const byKind = (k: SpriteFolder[]) => list.filter((e) => k.includes(e.kind)).sort((a, b) => a.num - b.num);
   for (const e of byKind(['sprites', 'shooters', 'generators'])) out.push(`${hx(e.num)} ${e.file.slice(FOLDER[e.kind].length)}`);
   for (const [head, k] of Object.entries(SECTION)) {

@@ -113,7 +113,7 @@ steht in der Anleitung.
 **„Save at least one level in Lunar Magic“:** Manche Patches (z. B. Retry System) prüfen `$0FF0A0 != $FF`.
 Dort schreibt Lunar Magic beim ersten Speichern seinen Versionstext, zusammen mit seinen Level-Hacks. Was
 Retry davon braucht, ist die aktuelle Levelnummer in `$7E010B`; die liefert der Editor-Patch. Er markiert
-die ROM deshalb ebenso (`SMW Editor`, `$0FF0B4` = 0, also keine LM-Version: Code nur für LM 3 wird nicht
+die ROM deshalb ebenso (`Solar Magic`, `$0FF0B4` = 0, also keine LM-Version: Code nur für LM 3 wird nicht
 gewählt). Eine vorhandene Lunar-Magic-Kennung bleibt unangetastet.
 
 ## Patches anwenden

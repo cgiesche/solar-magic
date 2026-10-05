@@ -28,7 +28,7 @@ window.addEventListener('unhandledrejection', (e) => log(`Unexpected error: ${e.
 function welcome(): void {
   clear(root);
   const drop = h('div', { class: 'welcome' },
-    h('h1', null, 'SMW Level Editor'),
+    h('h1', null, 'Solar Magic'),
     h('p', null, 'Open a Super Mario World ROM (US, .smc/.sfc, with or without header) or drop it here.'),
     h('button', { class: 'primary big', onclick: async () => { const f = await pickFile('.smc,.sfc,.bin'); if (f) openFile(f); } }, 'Open ROM …'),
     h('p', { class: 'hint' }, 'The ROM stays local in the browser (IndexedDB). Nothing is uploaded.'),
@@ -159,7 +159,7 @@ function buildUi(app: App): void {
   const saveBtn = h('button', { class: 'primary', onclick: () => (workspace === 'ow' ? ow?.save() : app.saveLevel()) });
   const testBtn = h('button', { onclick: () => openTestPlay(app), title: 'Test the level in the built-in emulator (T, Shift+T: from the mouse position)' }, '▶ Test');
   const appbar = h('header', { class: 'appbar' },
-    h('span', { class: 'brand' }, 'SMW Editor'),
+    h('span', { class: 'brand' }, 'Solar Magic'),
     menus,
     h('span', { class: 'spacer' }),
     wsSwitch,

@@ -1,4 +1,4 @@
-# SMW Editor – Level-Editor für Super Mario World
+# Solar Magic – Level-Editor für Super Mario World
 
 Browserbasierter Editor für *Super Mario World* (US), orientiert am Funktionsumfang von Lunar Magic.
 Läuft komplett lokal im Browser; die ROM wird nirgends hochgeladen (sie wird nur in der IndexedDB des Browsers zwischengespeichert).

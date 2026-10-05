@@ -72,7 +72,7 @@ export function exportLevelFile(rom: Rom, lv: Level, bg: Uint16Array | null = lv
 export function importLevelFile(rom: Rom, text: string, into: Level): LevelFileData {
   let j: LevelFileJson;
   try { j = JSON.parse(text); } catch { throw new Error('Not a valid level file (JSON)'); }
-  if (j?.format !== 'smwe-level') throw new Error('Not an SMW Editor level file');
+  if (j?.format !== 'smwe-level') throw new Error('Not an Solar Magic level file');
   if (j.version !== 1) throw new Error(`Unsupported version ${j.version}`);
   if (!Array.isArray(j.secondary) || j.secondary.length !== 4) throw new Error('Secondary header missing');
   const palette = j.palette ? fromHex(j.palette) : null;

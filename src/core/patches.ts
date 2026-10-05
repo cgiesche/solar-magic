@@ -26,7 +26,7 @@ const DM16_SLOT = EXT_OBJ_TABLE + DM16_EXT * 3; // empty in the original game
 // the same way, with its own name and $0FF0B4 = 0: no LM version, so LM-3-only paths are not taken.
 const EDITED_MARK = 0x0ff0a0;
 const EDITED_LEN = 0x15; // up to and including $0FF0B4
-const EDITED_TEXT = 'SMW Editor';
+const EDITED_TEXT = 'Solar Magic';
 // the bytes the editor patch changes in the game (SNES address, length), protected from other patches (patchapply.ts)
 export const EDITOR_HOOKS: [number, number][] = [[SPR_BANK_HOOK, 4], [HOOK_GFXPTR, 15], [HOOK_UPLOAD, 4], [HOOK_SPRGFX, 15], [HOOK_FGGFX, 15], [DM16_SLOT, 3], [EDITED_MARK, EDITED_LEN]];
 const MAGIC = [0x53, 0x4d, 0x57, 0x45]; // "SMWE"
