@@ -94,7 +94,7 @@ function buildUi(app: App): void {
   // ---- level context bar: mode, view, zoom
   const modeBtn = (m: EditMode, label: string, key: string) => h('button', { class: 'mode', 'data-mode': m, title: `${label} (${key})`, onclick: () => app.setMode(m) }, label);
   const modes = h('div', { class: 'btn-group' },
-    modeBtn('l1', 'Layer 1', '1'), modeBtn('l2', 'Layer 2', '2'), modeBtn('spr', 'Sprites', '3'), modeBtn('exit', 'Exits', '4'), modeBtn('bg', 'BG', '5'));
+    modeBtn('l1', 'Layer 1', '1'), modeBtn('l2', 'Layer 2', '2'), modeBtn('spr', 'Sprites', '3'), modeBtn('exit', 'Ein-/Ausgänge', '4'), modeBtn('bg', 'BG', '5'));
   const levelTitle = h('span', { class: 'level-title' });
   const zoomLabel = h('span', { class: 'zoom' });
   const levelBar = h('div', { class: 'ctxbar' },
@@ -354,7 +354,7 @@ function showHelp(): void {
       ['Menüs: ↑ ↓ ← → / Enter / Esc', 'Eintrag wählen, Nachbarmenü / ausführen / schließen'],
     ]],
     ['Level', [
-      ['1 / 2 / 3 / 4 / 5', 'Modus Layer 1 / Layer 2 / Sprites / Exits / BG'],
+      ['1 / 2 / 3 / 4 / 5', 'Modus Layer 1 / Layer 2 / Sprites / Ein-/Ausgänge / BG'],
       ['Klick · Strg+Klick · Alt+Klick', 'Auswählen · zur Auswahl hinzufügen · darunterliegendes Element'],
       ['Ziehen', 'Auswahl verschieben / Rahmen aufziehen'],
       ['Griff unten rechts', 'Objektgröße ändern'],
@@ -362,6 +362,7 @@ function showHelp(): void {
       ['BG: Klick/Ziehen · Rechtsklick/Shift+Klick', 'Tile(s) als Pinsel aufnehmen · malen'],
       ['Einfg / I', 'Objekt/Sprite nach Nummer einfügen (an der Maus)'],
       ['M / Z / S-Markierung ziehen', 'Haupteingang / Zwischenziel-Screen / sekundären Eingang verschieben'],
+      ['Ein-/Ausgänge: Klick · Rechtsklick', 'Eingang oder Screen (Exit) wählen, rechts bearbeiten · neuer sekundärer Eingang, Exit anlegen, Eingang hierher'],
       ['Pfeiltasten · Alt+Pfeiltasten', 'Auswahl um 1 Tile verschieben · Größe ändern'],
       ['+ / - · * / /', 'Breite ändern · Höhe ändern'],
       ['Entf / Rücktaste', 'Auswahl löschen'],

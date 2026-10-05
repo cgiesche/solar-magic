@@ -3,7 +3,7 @@
 import { Rom, snesToPc } from '../core/rom.ts';
 import { LevelEmulator, OV_L1, OV_L2, type LevelRender, type LevelOverride, MAP_BASE, MAP_SIZE } from '../core/levelemu.ts';
 import {
-  type Level, type LevelObject, type LevelSprite, loadLevel, serializeLayer1, serializeLayer2, serializeSprites, spriteSizes, spriteId, spriteBytes,
+  type Level, type LevelObject, type LevelSprite, type ScreenExit, type SecondaryEntrance, loadLevel, serializeLayer1, serializeLayer2, serializeSprites, spriteSizes, spriteId, spriteBytes,
   isL1Vertical, cloneLevel, newUid, hasLayer2Objects, hasObjects, L1_PTRS, L2_PTRS, SEC_HDR,
   readSecondaryEntrance, writeSecondaryEntrance, entrancePos, nearestEntrance, encodeSecondaryHeader,
 } from '../core/level.ts';
@@ -21,6 +21,7 @@ import { kvSet, kvGet, kvEntries, kvKeys, kvWrite } from './storage.ts';
 import { ResultCache, RomFingerprint, RomReads, type CacheEntry } from '../core/romdeps.ts';
 import { bgFromWram, bgIndex, encodeBg } from '../core/bg.ts';
 import { toast, log as logMsg } from './dom.ts';
+import { ExitGraph, exitTarget } from '../core/exitgraph.ts';
 import { RomHistory, type RomEdit } from '../core/romhistory.ts';
 import { ObjKindProbe, kindsStillValid, storeKinds, loadKinds, resizeObjectSize, type ObjKind, type ObjKinds, type StoredObjKinds } from '../core/objkinds.ts';
 import { BlockProber, variantOf, type BlockProbe, type SpriteProbe } from '../core/blockprobe.ts';
@@ -92,6 +93,9 @@ export class App {
   probeScheduled = false;
   probeChannel: MessageChannel | null = null; // yields between probe slices (setTimeout is throttled in hidden tabs)
   exitScreen = 0;
+  // mode 'exit': the chosen entrance marker, else the screen exitScreen (and its exit)
+  exitMarker: { kind: Marker['kind']; index: number } | null = null;
+  private graph: ExitGraph | null = null;
   spriteThumbs: Map<number, HTMLCanvasElement> | null = null;
   variantQueue: number[] = []; // sprites whose variant images are captured next
   private canvases = new WeakMap<SpriteImage, HTMLCanvasElement>();
@@ -104,6 +108,7 @@ export class App {
   kinds = new Map<number, { k: ObjKinds; gen: number }>();
   kindJob: { ts: number; probe: ObjKindProbe | null } | null = null;
   kindChannel: MessageChannel | null = null;
+  reveal = { x: 0, y: 0 }; // pixel the level view scrolls to on 'reveal'
   secEntrances: number[] = []; // secondary entrance indices leading into the current level
   // tile/palette animation: frames stored as pixel diffs against the static composite
   anim = { gen: 0, snaps: [] as { vram: Uint8Array; cgram: Uint8Array }[], base: null as Uint32Array | null,
@@ -157,6 +162,8 @@ export class App {
     this.level = loadLevel(this.rom, n);
     this.prober?.use(this.level.header.tileset);
     this.selection.clear();
+    this.exitScreen = 0;
+    this.exitMarker = null;
     if ((this.mode === 'l2' && !this.level.layer2Objects) || (this.mode === 'bg' && !this.canEditBg())) this.mode = 'l1';
     this.undoStack = [];
     this.redoStack = [];
@@ -197,6 +204,7 @@ export class App {
   }
 
   refresh(): void {
+    this.graph = null;
     const lv = this.level;
     const r = this.emu.load(lv.number, this.buildOverrides());
     this.renderError = r.ok ? null : r.error ?? 'Fehler';
@@ -305,6 +313,92 @@ export class App {
       this.romEdit(`Sekundärer Eingang ${hex(m.index, 3)} verschoben`, () => writeSecondaryEntrance(this.rom, m.index, e), `sec-entrance:${m.index}`);
     }
     return true;
+  }
+
+  // all exits of the ROM, the current level as edited
+  exitGraph(): ExitGraph {
+    return (this.graph ??= new ExitGraph(this.rom, this.level));
+  }
+
+  // mode 'exit': chooses an entrance marker (null: the screen exitScreen)
+  selectEntrance(m: { kind: Marker['kind']; index: number } | null): void {
+    this.exitMarker = m && { kind: m.kind, index: m.index };
+    if (m) this.selection.clear();
+    this.emit('change');
+  }
+
+  // changes a secondary entrance (undoable ROM edit; edits with the same key merge)
+  editSecondaryEntrance(idx: number, label: string, f: (e: SecondaryEntrance) => void, key: string | null = null): void {
+    const e = readSecondaryEntrance(this.rom, idx);
+    f(e);
+    this.romEdit(label, () => writeSecondaryEntrance(this.rom, idx, e), key);
+    this.findSecondaryEntrances();
+    this.emit('change');
+  }
+
+  // a new secondary entrance into the current level at the entrance setting nearest to (px, py)
+  newSecondaryEntrance(px: number, py: number): number | null {
+    const n = this.level.number;
+    const idx = this.exitGraph().freeEntrance(n);
+    if (idx === null) { toast(`Kein freier sekundärer Eingang mehr in ${n & 0x100 ? '100–1FF' : '000–0FF'}.`, 'error'); return null; }
+    const p = nearestEntrance(this.rom, px, py, (this.level.secondary.verticalPositioning & 1) !== 0, this.level.header.screens - 1);
+    this.editSecondaryEntrance(idx, `Sekundärer Eingang ${hex(idx, 3)} angelegt`, (e) => {
+      e.destLevel = n & 0xff; e.screen = p.screen; e.entranceX = p.ex; e.entranceY = p.ey;
+    });
+    this.selectEntrance({ kind: 'sec', index: idx });
+    return idx;
+  }
+
+  // clears a secondary entrance (all bytes 0: free again)
+  removeSecondaryEntrance(idx: number): void {
+    this.romEdit(`Sekundärer Eingang ${hex(idx, 3)} entfernt`, () => {
+      writeSecondaryEntrance(this.rom, idx, { destLevel: 0, entranceY: 0, fgInitY: 0, bgInitY: 0, entranceX: 0, screen: 0, action: 0, raw3: 0 });
+    });
+    this.findSecondaryEntrances();
+    if (this.exitMarker?.kind === 'sec' && this.exitMarker.index === idx) this.exitMarker = null;
+    this.emit('change');
+  }
+
+  // moves the main entrance or the midway point to the setting nearest to (px, py), undoable
+  placeEntrance(kind: 'main' | 'midway', px: number, py: number): void {
+    this.checkpoint();
+    if (!this.moveMarker({ kind, index: 0, x: 0, y: 0 }, px, py)) { this.undoStack.pop(); return; }
+    this.changed();
+    this.selectEntrance({ kind, index: 0 });
+  }
+
+  // opens the level an exit leads to and chooses the entrance it arrives at
+  gotoExitTarget(e: ScreenExit): void {
+    const t = exitTarget(this.rom, this.level.number, e);
+    this.openLevel(t.to);
+    this.mode = 'exit';
+    this.exitMarker = t.entrance >= 0 ? { kind: 'sec', index: t.entrance } : { kind: 'main', index: 0 };
+    this.emit('mode');
+    this.revealMarker();
+  }
+
+  // opens a level and chooses the screen of one of its exits
+  gotoExit(level: number, screen: number): void {
+    if (level !== this.level.number) this.openLevel(level);
+    this.mode = 'exit';
+    this.exitMarker = null;
+    this.exitScreen = screen;
+    const ex = this.level.exits.find((x) => x.screen === screen);
+    this.selection = new Set(ex ? [ex.uid] : []);
+    this.emit('mode');
+    this.emit('change');
+    this.reveal = this.vertical ? { x: 128, y: screen * 256 + 128 } : { x: screen * 256 + 128, y: 200 };
+    this.emit('reveal');
+  }
+
+  // scrolls the level view to the chosen marker
+  revealMarker(): void {
+    const sel = this.exitMarker;
+    const m = sel && this.markers().find((x) => x.kind === sel.kind && x.index === sel.index);
+    this.emit('change');
+    if (!m) return;
+    this.reveal = { x: m.x + 8, y: m.y + 24 };
+    this.emit('reveal');
   }
 
   buildOffsetMaps(): void {
@@ -896,6 +990,7 @@ export class App {
   }
   changed(rerender = true): void {
     this.dirty = true;
+    this.graph = null;
     if (rerender) this.refresh();
     this.emit('change');
     this.ensureSpriteImages(); // sprite memory may have changed
@@ -1242,6 +1337,7 @@ export class App {
 
   // the ROM changed: editors redraw at once ('rom-change'), the level render follows debounced
   romChanged(): void {
+    this.graph = null;
     this.emu.syncRom();
     this.emit('rom-change');
     clearTimeout(this.romTimer);

@@ -7,6 +7,7 @@ import { resizeObjectSize } from '../core/objkinds.ts';
 import { probeAt, spriteProbeAt, enterText, type PosProbe } from '../core/blockprobe.ts';
 import { type LevelObject, type LevelSprite, serializeLayer1, serializeLayer2, serializeSprites, spriteSizes, spriteId } from '../core/level.ts';
 import { composite } from '../core/render.ts';
+import { exitTarget } from '../core/exitgraph.ts';
 import { incompleteSprites, spriteMemDialog, spriteMemText, SPRITE_MEM_HELP } from './spritemem.ts';
 
 type Drag =
@@ -63,6 +64,7 @@ export class LevelView {
     app.on('render', () => { this.updateLevelImage(); this.updateStats(); });
     app.on('anim-frame', () => { this.updateLevelImage(false); });
     app.on('change', () => { this.paint(); this.updateStats(); });
+    app.on('reveal', () => this.scrollToTile(app.reveal.x >> 4, app.reveal.y >> 4));
     app.on('sprites', () => this.requestPaint());
     app.on('sprite-mem', () => { this.requestPaint(); this.updateStats(); });
     app.on('mode', () => { if (!this.hover) this.idleStatus(); });
@@ -173,21 +175,31 @@ export class LevelView {
     // exits
     if (app.show.exits || app.mode === 'exit') {
       const scrH = vertical ? 256 : im.height;
-      if (app.mode === 'exit') {
+      if (app.mode === 'exit' && !app.exitMarker) {
         // the chosen screen, also without an exit
         const x = vertical ? 0 : app.exitScreen * 256, y = vertical ? app.exitScreen * 256 : 0;
         ctx.strokeStyle = 'rgba(255,200,0,0.9)';
         ctx.lineWidth = 2 / app.zoom;
         ctx.strokeRect(x + 1 / app.zoom, y + 1 / app.zoom, 256 - 2 / app.zoom, (vertical ? 256 : scrH) - 2 / app.zoom);
       }
+      const g = app.exitGraph();
       for (const ex of app.level.exits) {
         const x = vertical ? 0 : ex.screen * 256, y = vertical ? ex.screen * 256 : 0;
-        const sel = app.mode === 'exit' && app.selection.has(ex.uid);
+        const sel = app.mode === 'exit' && !app.exitMarker && app.exitScreen === ex.screen;
         ctx.fillStyle = sel ? 'rgba(255,200,0,0.25)' : 'rgba(255,160,0,0.08)';
         ctx.fillRect(x, y, 256, vertical ? 256 : scrH);
-        ctx.fillStyle = '#ffb000';
+        const t = exitTarget(app.rom, app.level.number, ex);
+        const ok = t.entrance < 0 || g.entrancesOf(t.to).includes(t.entrance);
         ctx.font = `bold ${12 / app.zoom}px sans-serif`;
-        ctx.fillText(`Exit → ${ex.secondary ? 'Sek. ' : ''}${hex3(ex.dest)}`, x + 20 / app.zoom, y + 12 / app.zoom);
+        const line = (txt: string, i: number) => {
+          const ty = y + (12 + i * 14) / app.zoom;
+          ctx.fillStyle = 'rgba(0,0,0,0.6)';
+          ctx.fillRect(x + 18 / app.zoom, ty - 11 / app.zoom, ctx.measureText(txt).width + 4 / app.zoom, 14 / app.zoom);
+          ctx.fillStyle = ok ? '#ffb000' : '#ff5050';
+          ctx.fillText(txt, x + 20 / app.zoom, ty);
+        };
+        line(`Exit → ${g.label(t.to)}`, 0);
+        if (t.entrance >= 0) line(ok ? `über sek. Eingang ${hex3(t.entrance)}` : `sek. Eingang ${hex3(t.entrance)} fehlt`, 1);
       }
     }
     // entrance markers (Mario's start position, drawn at his lower 16x16 half)
@@ -200,6 +212,13 @@ export class LevelView {
       ctx.beginPath();
       ctx.arc(m.x + 8, m.y + 24, dragged ? 8 : 6, 0, Math.PI * 2);
       ctx.fill();
+      if (app.mode === 'exit' && app.exitMarker?.kind === m.kind && app.exitMarker.index === m.index) {
+        ctx.strokeStyle = '#ffd800';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(m.x + 8, m.y + 24, 9.5, 0, Math.PI * 2);
+        ctx.stroke();
+      }
       ctx.fillStyle = '#fff';
       ctx.fillText(st.label, m.x + 5, m.y + 27.5);
       if (m.kind === 'sec') ctx.fillText(hex3(m.index), m.x + 15, m.y + 27.5);
@@ -405,6 +424,7 @@ export class LevelView {
     if (e.button !== 0) return;
     const mk = this.markerAt(px, py);
     if (mk && !e.ctrlKey) {
+      if (app.mode === 'exit') app.selectEntrance(mk);
       if (mk.kind !== 'sec') app.checkpoint();
       this.drag = { kind: 'marker', marker: mk, offX: px - mk.x, offY: py - mk.y, moved: false };
       this.paint();
@@ -421,6 +441,7 @@ export class LevelView {
       const ex = app.level.exits.find((x) => x.screen === scr);
       app.selection = new Set(ex ? [ex.uid] : []);
       app.exitScreen = scr;
+      app.exitMarker = null;
       app.emit('change');
       return;
     }
@@ -591,7 +612,7 @@ export class LevelView {
     const m = this.app.mode;
     this.pos.textContent = '';
     this.status.textContent = m === 'bg' ? 'Klick/Ziehen nimmt Tiles als Pinsel auf · Rechtsklick/Shift+Klick malt'
-      : m === 'exit' ? 'Klick wählt einen Screen – sein Exit steht rechts unter „Eigenschaften“'
+      : m === 'exit' ? 'Klick auf einen Eingang (M, Z, S) oder Screen wählt aus – bearbeiten rechts unter „Eigenschaften“ · Ziehen verschiebt Eingänge · Rechtsklick: neuer Eingang, Exit anlegen …'
         : 'Klick wählt aus, Ziehen verschiebt · Rechtsklick/Shift+Klick fügt das gewählte Element aus „Einfügen“ ein · Alt+Klick: darunterliegendes Element';
   }
 
@@ -651,9 +672,9 @@ export class LevelView {
     if (d?.kind === 'resize') c = 'nwse-resize';
     else if (d?.kind === 'marker' || d?.kind === 'move') c = 'grabbing';
     else if (app.mode === 'bg') c = 'crosshair';
+    else if (this.markerAt(px, py)) c = 'grab';
     else if (app.mode === 'exit') c = 'pointer';
     else if (this.handleAt(px, py)) c = 'nwse-resize';
-    else if (this.markerAt(px, py)) c = 'grab';
     else if (top >= 0 && app.selection.has(top)) c = 'move';
     this.scroller.style.cursor = c;
   }
