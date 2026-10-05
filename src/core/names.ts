@@ -28,8 +28,8 @@ export function levelModeName(m: number): string {
 }
 
 export const MUSIC = ['Overworld', 'Athletic', 'Underground', 'Water', 'Castle', 'Ghost House', 'Bonus/Sky', 'Boss'];
-export const ENTRANCE_ACTIONS = ['Normal/vertical pipe up', 'Pipe going right', 'Pipe going left', 'Pipe going down',
-  'Pipe going up', 'Slide/walk from left', 'Door/jump from below (water)', 'Normal (no Yoshi intro)'];
+export const ENTRANCE_ACTIONS = ['Normal / Rohr nach oben', 'Rohr nach rechts', 'Rohr nach links', 'Rohr nach unten',
+  'Rohr nach oben', 'Von links rutschend/laufend', 'Tür / von unten springend (Wasser)', 'Normal (ohne Yoshi-Intro)'];
 export const TIME_SETTINGS = ['0 (none)', '200', '300', '400'];
 export const ITEM_MEMORY = ['0', '1', '2', '3'];
 export const VERTICAL_SCROLL = ['Vertical scroll at will', 'No vertical scroll', 'Vertical scroll always', 'No scroll at all'];

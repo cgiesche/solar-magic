@@ -8,7 +8,7 @@
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
     "docker": "docker build -t registry.traumwald.net/smw-editor:latest . && docker push registry.traumwald.net/smw-editor:latest",
-    "test": "node tools/testlevels.ts && node tools/testpatch.ts && node tools/testsave.ts && node tools/testlevelfile.ts && node tools/testbg.ts && node tools/testmessages.ts && node tools/testmap16ext.ts && node tools/testasar.ts && node tools/testconflicts.ts && node tools/testuberasm.ts && node tools/testblocks.ts && node tools/testextgfx.ts && node tools/testblockpack.ts && node tools/testbgpack.ts && node tools/teststructs.ts && node tools/testvram.ts --frames=200 && node tools/testromhistory.ts && node tools/testexanim.ts && node tools/testspritemem.ts && node tools/testpixi.ts && node tools/testpkgmap.ts && node tools/testpkgreg.ts && node tools/testgame.ts"
+    "test": "node tools/testlevels.ts && node tools/testpatch.ts && node tools/testsave.ts && node tools/testlevelfile.ts && node tools/testbg.ts && node tools/testmessages.ts && node tools/testmap16ext.ts && node tools/testasar.ts && node tools/testconflicts.ts && node tools/testuberasm.ts && node tools/testblocks.ts && node tools/testextgfx.ts && node tools/testblockpack.ts && node tools/testbgpack.ts && node tools/teststructs.ts && node tools/testvram.ts --frames=200 && node tools/testromhistory.ts && node tools/testexanim.ts && node tools/testspritemem.ts && node tools/testpixi.ts && node tools/testpkgmap.ts && node tools/testpkgreg.ts && node tools/testgame.ts && node tools/testexits.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.3",
