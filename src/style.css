@@ -463,8 +463,9 @@ button.danger:hover:not(:disabled) { border-color: var(--danger); }
 .prop > select, .prop > input, .prop > button { min-width: 0; }
 
 /* music */
-.play-btn { min-width: 26px; }
-.play-btn.active { color: var(--accent2); border-color: var(--accent2); }
+.play-btn { min-width: 26px; display: inline-flex; align-items: center; justify-content: center; }
+.play-btn svg { display: block; }
+.play-btn.active { color: #fff; background: var(--accent2); border-color: var(--accent); border-radius: 4px; }
 .music-table tr.current td { background: var(--panel2); }
 .music-table td .hint { font-size: 11px; }
 .music-pane { min-height: 360px; max-height: 64vh; overflow: auto; }

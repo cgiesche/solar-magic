@@ -47,10 +47,18 @@ export function currentSongs(app: App): SongInfo[] {
   return romSongs(app.rom, p);
 }
 
+const PLAY_ICON = '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 2.5v11l9.5-5.5z" fill="currentColor"/></svg>';
+const STOP_ICON = '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><rect x="3" y="3" width="10" height="10" rx="1" fill="currentColor"/></svg>';
+
 // a play/stop toggle for `label`
 export function playButton(label: string, play: () => void, title = 'Listen'): HTMLButtonElement {
   const b = h('button', { class: 'icon-btn play-btn', title }) as HTMLButtonElement;
-  const sync = () => { b.textContent = musicPlayer.label === label ? '■' : '▶'; b.classList.toggle('active', musicPlayer.label === label); };
+  const sync = () => {
+    const on = musicPlayer.label === label;
+    b.innerHTML = on ? STOP_ICON : PLAY_ICON;
+    b.classList.toggle('active', on);
+    b.title = on ? 'Stop' : title;
+  };
   b.onclick = () => { if (musicPlayer.label === label) musicPlayer.stop(); else play(); };
   const off = musicPlayer.onChange(() => { if (!b.isConnected) { off(); return; } sync(); });
   sync();
