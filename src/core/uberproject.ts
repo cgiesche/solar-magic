@@ -4,7 +4,7 @@
 import { unzipSync, zipSync } from 'fflate';
 import { Rom } from './rom.ts';
 import { applyPatch, reapplyPatch, uninstallPatch, type ApplyResult } from './patchapply.ts';
-import { listPatches, patchArchive, type PatchEntry } from './patchreg.ts';
+import { listPatches, patchArchive, missingSources, type PatchEntry } from './patchreg.ts';
 import { installEditorPatch } from './patches.ts';
 import { buildUberPatch, parseList, emptyList, writeList, type UberList } from './uberasm.ts';
 
@@ -54,7 +54,7 @@ export function loadProject(rom: Rom): UberProject | null {
   const e = uberEntry(rom);
   if (!e) return null;
   const a = patchArchive(rom, e);
-  if (!a) throw new Error('The UberASM sources are not stored in the ROM');
+  if (!a) throw missingSources('UberASM');
   return projectFromZip(a);
 }
 

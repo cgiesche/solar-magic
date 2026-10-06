@@ -1,14 +1,13 @@
 // Keeps what adding a package puts into the ROM as one installed package (core/pkgreg.ts): the ROM's
 // projects are compared when its dialog opens and after each step it (or a part of it, "Further
-// steps") finishes. The package's files go with the record – into the ROM when small, otherwise into
-// the browser – so its graphics, docs and parts can be taken later.
+// steps") finishes. The package's files go with the record into the editor data (rom.extra, saved with
+// the project) so its graphics, docs and parts can be taken later.
 
 import { zipSync, unzipSync } from 'fflate';
 import type { App } from './app.ts';
-import { kvGet, kvSet, kvDel } from './storage.ts';
+import { kvGet, kvDel } from './storage.ts';
 import { snapshot, partsBetween, mergeParts, isEmptyParts, emptyParts, savePackage, listPackages, packageArchive, type PkgRecord } from '../core/pkgreg.ts';
 
-const MAX_ROM_ARCHIVE = 256 << 10;
 const kvKey = (id: string) => `pkg:${id}`;
 
 export interface Tracker {
@@ -29,9 +28,7 @@ export function trackPackage(app: App, name: string, fileName: string, files: Ma
       const base: PkgRecord = cur ?? { id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`, name, fileName, added: new Date().toISOString(), ...emptyParts() };
       let archive: Uint8Array | undefined;
       if (first && files) {
-        const z = zipSync(Object.fromEntries(files), { level: 9 });
-        if (z.length <= MAX_ROM_ARCHIVE) archive = z;
-        else void kvSet(kvKey(base.id), [...files]).catch(() => {});
+        archive = zipSync(Object.fromEntries(files), { level: 9 });
       }
       try {
         cur = savePackage(app.rom, mergeParts(base, parts, after), archive);

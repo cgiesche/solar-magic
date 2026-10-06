@@ -22,7 +22,8 @@ export interface PatchEntry {
   own: number[]; // pc of the RATS tags of the patch's free space blocks
   check: number; // hash of the patched bytes of segs, to notice later edits
   kind?: 'patch' | 'uberasm' | 'blocks' | 'vram' | 'pixi' | 'music';
-  src?: number[]; // SNES addresses of RATS blocks holding the sources (zip), if stored in the ROM
+  srcId?: string; // the sources (zip) in the editor data (rom.extra), if kept
+  src?: number[]; // older ROMs: SNES addresses of RATS blocks holding the sources (see migrateSources)
   srcSize?: number;
   ram?: RamClaim[]; // free RAM the patch claims
   ramSeen?: [number, number][]; // [snes, size] written with long addressing by its code
@@ -110,14 +111,15 @@ export function readChunks(rom: Rom, addrs: number[], total: number): Uint8Array
   return out;
 }
 
-// adds an entry; original[i] holds the bytes of segs[i] before the patch; archive: sources to keep in the ROM
-export function addPatch(rom: Rom, entry: Omit<PatchEntry, 'backup' | 'src' | 'srcSize'>, original: Uint8Array[], archive?: Uint8Array): PatchEntry {
+// adds an entry; original[i] holds the bytes of segs[i] before the patch (in the ROM, so a playable ROM can
+// still remove it); archive: sources to keep with the editor data
+export function addPatch(rom: Rom, entry: Omit<PatchEntry, 'backup' | 'src' | 'srcSize' | 'srcId'>, original: Uint8Array[], archive?: Uint8Array): PatchEntry {
   const reg = read(rom);
   const all = new Uint8Array(original.reduce((n, o) => n + o.length, 0));
   let o = 0;
   for (const b of original) { all.set(b, o); o += b.length; }
   const full: PatchEntry = { ...entry, backup: writeChunks(rom, all) };
-  if (archive) { full.src = writeChunks(rom, archive); full.srcSize = archive.length; }
+  if (archive) full.srcId = rom.putBlob(archive);
   reg.patches.push(full);
   write(rom, reg);
   return full;
@@ -127,8 +129,14 @@ export function backupBytes(rom: Rom, p: PatchEntry): Uint8Array {
   return readChunks(rom, p.backup, p.segs.reduce((n, s) => n + s[1], 0));
 }
 
-// the sources stored with the patch, null if they were not kept in the ROM
+// error for a tool project whose sources aren't there: a playable ROM (exported without the editor data)
+export function missingSources(what: string): Error {
+  return new Error(`The ${what} sources are not in this ROM (it was exported without the editor data) – open the project file (.smwproj) to edit them, or remove ${what} and add it anew.`);
+}
+
+// the sources stored with the patch, null if they are not there (not kept, or a playable ROM without the editor data)
 export function patchArchive(rom: Rom, p: PatchEntry): Uint8Array | null {
+  if (p.srcId) return rom.getBlob(p.srcId);
   return p.src && p.srcSize ? readChunks(rom, p.src, p.srcSize) : null;
 }
 
@@ -137,6 +145,23 @@ export function removeEntry(rom: Rom, id: string): void {
   const p = reg.patches.find((e) => e.id === id);
   if (!p) return;
   for (const addr of [...p.backup, ...(p.src ?? [])]) rom.freeAt(addr);
+  if (p.srcId) rom.dropBlob(p.srcId);
   reg.patches = reg.patches.filter((e) => e.id !== id);
   write(rom, reg);
+}
+
+// Sources that older versions kept in the ROM go into the editor data, their RATS blocks are freed.
+// Returns whether anything moved.
+export function migratePatchSources(rom: Rom): boolean {
+  const reg = read(rom);
+  let moved = false;
+  for (const p of reg.patches) {
+    if (!p.src) continue;
+    if (p.srcSize) p.srcId = rom.putBlob(readChunks(rom, p.src, p.srcSize));
+    for (const a of p.src) rom.freeAt(a);
+    delete p.src; delete p.srcSize;
+    moved = true;
+  }
+  if (moved) write(rom, reg);
+  return moved;
 }

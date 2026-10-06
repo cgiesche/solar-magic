@@ -12,7 +12,7 @@ import { loadLevel, spriteSizes, type Level } from './level.ts';
 import { saveSprites } from './save.ts';
 import { applyPatch, reapplyPatch, uninstallPatch, type ApplyResult, type PatchSource } from './patchapply.ts';
 import type { AsarResult } from './asar.ts';
-import { listPatches, patchArchive, type PatchEntry } from './patchreg.ts';
+import { listPatches, patchArchive, missingSources, type PatchEntry } from './patchreg.ts';
 import { pixiDefines, HEADERS, runtimeAsm, STATUS_LABELS, MISC_MAX, PIXI_RAM, type SpriteFolder, type SpriteRow } from './pixirt.ts';
 import { ROUTINES } from './pixiroutines.ts';
 
@@ -399,7 +399,8 @@ export function loadPixiProject(rom: Rom): PixiProject | null {
   const e = pixiEntry(rom);
   if (!e) return null;
   const a = patchArchive(rom, e);
-  return a ? projectFromZip(a) : null;
+  if (!a) throw missingSources('custom sprite');
+  return projectFromZip(a);
 }
 
 // levels holding custom sprites whose entries change size with the new size table, parsed as they are
@@ -445,11 +446,11 @@ export function savePixiProject(rom: Rom, p: PixiProject): ApplyResult {
   } catch (err) {
     return { ok: false, errors: [err instanceof Error ? err.message : String(err)], warnings: [], prints: [] };
   }
-  const snapshot = rom.data.slice();
+  const snapshot = rom.snapshot();
   try {
     return after(e ? reapplyPatch(rom, e.id, src) : applyPatch(rom, src));
   } catch (err) {
-    rom.data = snapshot;
+    rom.restore(snapshot);
     return { ok: false, errors: [err instanceof Error ? err.message : String(err)], warnings: [], prints: [] };
   }
 }

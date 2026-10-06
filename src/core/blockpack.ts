@@ -49,10 +49,10 @@ export interface BlockPackOptions {
 }
 
 export function applyBlockPack(rom: Rom, pkg: PatchPackage, plan: BlockPackPlan, opt: BlockPackOptions): ApplyResult & { notes: string[] } {
-  const snapshot = rom.data.slice();
+  const snapshot = rom.snapshot();
   const notes: string[] = [];
   const fail = (e: unknown): ApplyResult & { notes: string[] } => {
-    rom.data = snapshot;
+    rom.restore(snapshot);
     return { ok: false, errors: [e instanceof Error ? e.message : String(e)], warnings: [], prints: [], notes };
   };
   try {
@@ -67,7 +67,7 @@ export function applyBlockPack(rom: Rom, pkg: PatchPackage, plan: BlockPackPlan,
     }
     for (const [f, c] of pkg.files) if (/(^|\/)routines\/[^/]+\.asm$/i.test(f)) proj.files.set(f.slice(f.search(/routines\//i)), c);
     const r = saveBlockProject(rom, proj, opt.blank);
-    if (!r.ok) { rom.data = snapshot; return { ...r, notes }; }
+    if (!r.ok) { rom.restore(snapshot); return { ...r, notes }; }
     notes.push(`${plan.blocks.length} block(s) at ${plan.blocks.map((b) => b.tile.toString(16).toUpperCase()).join(', ')}`);
     // 2. Map16 graphics (and acts like where list.txt gives none)
     if (plan.map16) {

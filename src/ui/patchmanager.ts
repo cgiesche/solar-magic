@@ -1,13 +1,13 @@
 // Adding any downloaded package, recognized as a patch, UberASM resource, block, block package, sprite
 // package or Lunar Magic background, each with its dialog; applying Asar patches (.asm or .zip) with
-// settings. Patch sources are kept in the ROM (small ones) or in IndexedDB per registry entry; the ROM's
+// settings. Patch sources are kept with the editor data (rom.extra, older ones in IndexedDB) per registry entry; the ROM's
 // registry alone suffices to remove a patch. What a package brings is kept as one (pkgtrack.ts).
 
 import { openAddSongDialog } from './musicdialog.ts';
 import { isSongText } from '../core/music.ts';
 import type { App } from './app.ts';
 import { h, modal, clear, toast, hexInput, select } from './dom.ts';
-import { kvGet, kvSet, kvDel } from './storage.ts';
+import { kvGet, kvDel } from './storage.ts';
 import { applyPatch, reapplyPatch, type ApplyResult, type PatchSource } from '../core/patchapply.ts';
 import { patchArchive, type PatchEntry } from '../core/patchreg.ts';
 import { zipSync, unzipSync } from 'fflate';
@@ -34,8 +34,6 @@ import { romChanged, logView, errorText } from './projectpane.ts';
 import { trackPackage, type Tracker } from './pkgtrack.ts';
 
 export interface StoredPackage { fileName: string; files: [string, Uint8Array][]; main: string }
-// sources up to this size (compressed) are kept in the ROM, larger ones only in the browser
-const MAX_ROM_ARCHIVE = 256 << 10;
 const META = '.smwe-package.json';
 
 function packArchive(s: StoredPackage): Uint8Array {
@@ -51,7 +49,7 @@ function unpackArchive(a: Uint8Array): StoredPackage {
 }
 export async function storedPackage(app: App, p: PatchEntry): Promise<StoredPackage | undefined> {
   const a = patchArchive(app.rom, p);
-  return a ? unpackArchive(a) : kvGet<StoredPackage>(srcKey(p.id));
+  return a ? unpackArchive(a) : kvGet<StoredPackage>(srcKey(p.id)); // older versions kept large sources in the browser
 }
 const srcKey = (id: string) => `patch:${id}`;
 
@@ -117,8 +115,7 @@ export function runPatch(app: App, pkg: PatchPackage, fileName: string, main: st
   try { src = packageSource(pkg, main, effectiveDefines(pkg, values)); } catch (e) { return fail(e); }
   src.settings = values;
   const stored: StoredPackage = { fileName, files: [...pkg.files], main };
-  const archive = packArchive(stored);
-  if (archive.length <= MAX_ROM_ARCHIVE) src.archive = archive;
+  src.archive = packArchive(stored); // kept with the editor data, not in the ROM
   if (app.dirty) app.saveLevel(true);
   let r: ApplyResult;
   try {
@@ -128,8 +125,7 @@ export function runPatch(app: App, pkg: PatchPackage, fileName: string, main: st
     return fail(e);
   }
   if (!r.ok) return r;
-  if (entry) kvDel(srcKey(entry.id)).catch(() => {});
-  if (!src.archive) kvSet(srcKey(r.entry!.id), stored).catch(() => {});
+  if (entry) kvDel(srcKey(entry.id)).catch(() => {}); // sources older versions kept in the browser
   romChanged(app);
   return r;
 }
@@ -367,14 +363,14 @@ function openBgPackDialog(app: App, fileName: string, files: Map<string, Uint8Ar
       let r: BgPackResult;
       try {
         r = app.romEdit(`Background “${name}” in level ${lvl}`, () => {
-          const before = app.rom.data.slice();
+          const before = app.rom.snapshot();
           // BG2/BG3 need the tilemaps moved out of VRAM $2000 first
           if (ext && !extGfxAvailable(app.rom)) {
             const v = installVramPatch(app.rom);
             if (!v.ok) return { ok: false, errors: v.errors, notes: [], bg: null };
           }
           const res = applyBgPack(app.rom, app.level, files, plan, { at, palette: usePalette, cgram: levelColors(app.render) });
-          if (!res.ok) app.rom.data = before;
+          if (!res.ok) app.rom.restore(before);
           return res;
         });
       } catch (e) { r = { ok: false, errors: [errorText(e)], notes: [], bg: null }; }

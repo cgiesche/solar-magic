@@ -91,7 +91,7 @@ export function uberPane(app: App, onDirty: () => void, changed: () => void): Ub
   pane = projectPane<UberProject>(app, {
     title: 'UberASM',
     intro: 'Code that runs every frame per level, overworld map or game mode.',
-    format: 'UberASM Tool 2.x format: labels init/main/end/load/nmi, libraries (library/), shared routines (routines/), extra bytes. An existing UberASM Tool folder can be imported as .zip; the sources are stored in the ROM.',
+    format: 'UberASM Tool 2.x format: labels init/main/end/load/nmi, libraries (library/), shared routines (routines/), extra bytes. An existing UberASM Tool folder can be imported as .zip; the sources are kept with the editor data (saved with “Export project”).',
     load: () => loadProject(app.rom),
     empty: emptyProject,
     save: (p) => saveProject(app.rom, p),

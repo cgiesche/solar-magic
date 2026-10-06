@@ -11,7 +11,7 @@
 import { unzipSync, zipSync, strFromU8, strToU8 } from 'fflate';
 import { Rom, MAX_ROM_SIZE, snesToPc } from './rom.ts';
 import { registerChanges, reserveTop, uninstallPatch } from './patchapply.ts';
-import { listPatches, patchArchive, hashBytes, type PatchEntry } from './patchreg.ts';
+import { listPatches, patchArchive, hashBytes, missingSources, type PatchEntry } from './patchreg.ts';
 import { RESERVED_TOP } from './rom.ts';
 import { HEADER_MUSIC_TABLE, musicPatch, levelMusic, setLevelMusic } from './patches.ts';
 import { MUSIC } from './names.ts';
@@ -201,7 +201,7 @@ export function loadMusicProject(rom: Rom): MusicProject | null {
   const e = musicEntry(rom);
   if (!e) return null;
   const a = patchArchive(rom, e);
-  if (!a) throw new Error('The music sources are not stored in the ROM');
+  if (!a) throw missingSources('music');
   return projectFromZip(a);
 }
 
@@ -263,11 +263,11 @@ function remapLevelMusic(rom: Rom, before: Uint8Array): void {
 
 async function insertProject(rom: Rom, p: MusicProject): Promise<MusicResult> {
   const e = musicEntry(rom);
-  const snapshot = rom.data;
+  const snapshot = rom.snapshot();
   const warnings: string[] = [];
-  const fail = (errors: string[], log = ''): MusicResult => { rom.data = snapshot; return { ok: false, errors, warnings, log }; };
+  const fail = (errors: string[], log = ''): MusicResult => { rom.restore(snapshot); return { ok: false, errors, warnings, log }; };
   try {
-    if (e) { rom.data = snapshot.slice(); warnings.push(...uninstallPatch(rom, e.id)); }
+    if (e) warnings.push(...uninstallPatch(rom, e.id));
   } catch (err) {
     return fail([String((err as Error).message ?? err)]);
   }

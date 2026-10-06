@@ -1,5 +1,7 @@
 // IndexedDB persistence of the working ROM (so a page reload keeps work).
 
+import { Rom } from '../core/rom.ts';
+
 const DB = 'smw-editor';
 function open(): Promise<IDBDatabase> {
   return new Promise((res, rej) => {
@@ -70,4 +72,21 @@ export async function kvKeys(prefix: string): Promise<string[]> {
     r.onsuccess = () => res(r.result as string[]);
     r.onerror = () => rej(r.error);
   });
+}
+
+// the working ROM as stored under 'rom': image, SMC header and the editor data (sources)
+export interface RomRecord { name: string; data: Uint8Array; header: Uint8Array | null; extra?: [string, Uint8Array][] }
+
+export function romRecord(name: string, rom: Rom): RomRecord {
+  return { name, data: rom.output(false), header: rom.smcHeader, extra: [...rom.extra] };
+}
+export function saveRom(name: string, rom: Rom): Promise<void> {
+  return kvSet('rom', romRecord(name, rom));
+}
+export function romFromRecord(r: RomRecord): Rom {
+  let full = r.data;
+  if (r.header) { full = new Uint8Array(r.header.length + r.data.length); full.set(r.header); full.set(r.data, r.header.length); }
+  const rom = new Rom(full);
+  rom.extra = new Map(r.extra ?? []);
+  return rom;
 }

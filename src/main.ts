@@ -4,7 +4,9 @@ import { disableUnsafeExtGfx, hasEditorPatch } from './core/patches.ts';
 import { App, type EditMode } from './ui/app.ts';
 import { h, clear, toast, log, downloadBytes, pickFile, modal } from './ui/dom.ts';
 import { LogBar } from './ui/logbar.ts';
-import { kvGet, kvSet } from './ui/storage.ts';
+import { kvGet, saveRom, romFromRecord, type RomRecord } from './ui/storage.ts';
+import { migratePatchSources } from './core/patchreg.ts';
+import { migratePackageFiles } from './core/pkgreg.ts';
 import { LevelView } from './ui/levelview.ts';
 import { LevelList, Palette, Properties } from './ui/panels.ts';
 import { openHeaderDialog } from './ui/headerdialog.ts';
@@ -30,7 +32,7 @@ function welcome(): void {
   const drop = h('div', { class: 'welcome' },
     h('h1', null, 'Solar Magic'),
     h('p', null, 'Open a Super Mario World ROM (US, .smc/.sfc, with or without header) or drop it here.'),
-    h('button', { class: 'primary big', onclick: async () => { const f = await pickFile('.smc,.sfc,.bin'); if (f) openFile(f); } }, 'Open ROM …'),
+    h('button', { class: 'primary big', onclick: async () => { const f = await pickFile('.smc,.sfc,.bin,.smwproj'); if (f) openFile(f); } }, 'Open ROM …'),
     h('p', { class: 'hint' }, 'The ROM stays local in the browser (IndexedDB). Nothing is uploaded.'),
   );
   root.appendChild(drop);
@@ -38,14 +40,21 @@ function welcome(): void {
 
 async function openFile(f: File): Promise<void> {
   const data = new Uint8Array(await f.arrayBuffer());
-  startWith(new Rom(data), f.name);
-  kvSet('rom', { name: f.name, data: new Rom(data).data, header: new Rom(data).smcHeader }).catch(() => {});
+  let rom: Rom;
+  try { rom = Rom.fromFile(data); } catch (e) { toast(`Could not open “${f.name}”: ${e instanceof Error ? e.message : e}`, 'error'); return; }
+  startWith(rom, f.name);
+  saveRom(f.name, rom).catch(() => {});
 }
 
 function startWith(rom: Rom, name: string): void {
-  log(`ROM “${name}” loaded (${Math.round(rom.size / 1024)} KB${rom.smcHeader ? ', with header' : ''})`);
+  log(`ROM “${name}” loaded (${Math.round(rom.size / 1024)} KB${rom.smcHeader ? ', with header' : ''}${rom.extra.size ? `, editor data ${Math.round(rom.extraSize / 1024)} KB` : ''})`);
+  // sources older versions kept in the ROM go into the editor data, freeing the ROM space
+  try {
+    const moved = [migratePatchSources(rom), migratePackageFiles(rom)].some(Boolean);
+    if (moved) { saveRom(name, rom).catch(() => {}); log('Sources of patches and packages moved out of the ROM into the editor data (saved with “Export project”).'); }
+  } catch (e) { console.warn('migrating sources', e); }
   if (disableUnsafeExtGfx(rom)) {
-    kvSet('rom', { name, data: rom.output(false), header: rom.smcHeader }).catch(() => {});
+    saveRom(name, rom).catch(() => {});
     toast('BG2/BG3 graphics were turned off: they overwrote the layer 1 tilemap (broken background). The assignments stay saved and apply again once the VRAM patch is available.', 'error');
   }
   if (!rom.title().startsWith('SUPER MARIOWORLD')) {
@@ -115,8 +124,9 @@ function buildUi(app: App): void {
   const insertHere = () => { const hv = view.hover, c = view.centerTile(); openInsertDialog(app, hv ? hv.tx : c.tx, hv ? hv.ty : c.ty); };
   const menus = menuBar([
     { label: 'File', items: [
-      { label: 'Open ROM …', onClick: async () => { const f = await pickFile('.smc,.sfc,.bin'); if (f) openFile(f); } },
-      { label: 'Export ROM', title: 'Download the ROM with all saved changes', onClick: () => { if (ow?.dirty) ow.save(); exportRom(app); } },
+      { label: 'Open ROM …', onClick: async () => { const f = await pickFile('.smc,.sfc,.bin,.smwproj'); if (f) openFile(f); } },
+      { label: 'Export ROM', title: 'Download the playable ROM with all saved changes (without the editor data)', onClick: () => { if (ow?.dirty) ow.save(); exportRom(app); } },
+      { label: 'Export project', title: 'The ROM with the editor data: sources of patches, packages, UberASM, blocks, sprites and music – to keep editing it later or elsewhere', onClick: () => { if (ow?.dirty) ow.save(); exportProject(app); } },
       'sep',
       { label: 'Import level file …', title: 'Replaces the current level (undoable; palette/graphics bypass are written to the ROM directly)', disabled: () => !inLevel(), onClick: () => importLevel(app) },
       { label: 'Export level file …', title: `Level as ${LEVEL_FILE_EXT} file (objects, sprites, exits, header, graphics bypass, custom palette)`, disabled: () => !inLevel(), onClick: () => exportLevel(app) },
@@ -336,13 +346,25 @@ function hoverTile(app: App, tx: number, ty: number): number {
   return a < 0 ? 0 : app.render.wram[a] | (app.render.wram[a + 0x10000] << 8);
 }
 
+// the playable ROM: without the editor data (sources of patches, packages, UberASM/blocks/sprites/music)
 function exportRom(app: App): void {
   if (app.dirty) app.saveLevel(true);
   const withHeader = app.rom.smcHeader !== null;
   const out = app.rom.output(withHeader);
-  const base = app.romName.replace(/\.(smc|sfc|bin)$/i, '');
+  const base = app.romName.replace(/\.(smc|sfc|bin|smwproj)$/i, '');
   downloadBytes(`${base}.${withHeader ? 'smc' : 'sfc'}`, out);
   log(`ROM exported as “${base}.${withHeader ? 'smc' : 'sfc'}” (${Math.round(out.length / 1024)} KB)`);
+  if (app.rom.extra.size) toast('The playable ROM holds no sources of patches, packages and projects – to keep editing elsewhere, use “Export project”.');
+  app.persist();
+}
+
+// ROM plus editor data, to open again in the editor
+function exportProject(app: App): void {
+  if (app.dirty) app.saveLevel(true);
+  const out = app.rom.outputProject(app.rom.smcHeader !== null);
+  const base = app.romName.replace(/\.(smc|sfc|bin|smwproj)$/i, '');
+  downloadBytes(`${base}.smwproj`, out);
+  log(`Project exported as “${base}.smwproj” (${Math.round(out.length / 1024)} KB, of which ${Math.round(app.rom.extraSize / 1024)} KB editor data)`);
   app.persist();
 }
 
@@ -415,16 +437,14 @@ window.addEventListener('drop', (e) => {
     const res = await fetch(q);
     if (res.ok) {
       const data = new Uint8Array(await res.arrayBuffer());
-      startWith(new Rom(data), q.split('/').pop() ?? 'rom.smc');
+      startWith(Rom.fromFile(data), q.split('/').pop() ?? 'rom.smc');
       return;
     }
   }
   try {
-    const saved = await kvGet<{ name: string; data: Uint8Array; header: Uint8Array | null }>('rom');
+    const saved = await kvGet<RomRecord>('rom');
     if (saved?.data) {
-      let full = saved.data;
-      if (saved.header) { full = new Uint8Array(saved.header.length + saved.data.length); full.set(saved.header); full.set(saved.data, saved.header.length); }
-      startWith(new Rom(full), saved.name);
+      startWith(romFromRecord(saved), saved.name);
       return;
     }
   } catch (e) {

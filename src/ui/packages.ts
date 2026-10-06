@@ -162,7 +162,7 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
     if (p.kind === 'vram') return box;
     const s = await storedPackage(app, p).catch(() => undefined);
     if (n !== seq) return box;
-    if (!s) { box.appendChild(h('p', { class: 'hint' }, 'The source files are not stored – settings cannot be changed.')); return box; }
+    if (!s) { box.appendChild(h('p', { class: 'hint' }, 'The source files are not in this ROM (exported without the editor data, or not kept) – settings cannot be changed. Open the project file (.smwproj) to change them.')); return box; }
     const pkg = toPackage(s);
     const m = pkg.manifest;
     if (m?.description) box.appendChild(h('p', null, m.description));

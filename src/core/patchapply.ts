@@ -339,10 +339,10 @@ export function uninstallPatch(rom: Rom, id: string): string[] {
 
 // uninstall + apply with new sources/defines; on failure the ROM is left as it was
 export function reapplyPatch(rom: Rom, id: string, src: PatchSource): ApplyResult {
-  const snapshot = rom.data.slice();
+  const snapshot = rom.snapshot();
   const warnings = uninstallPatch(rom, id);
   const r = applyPatch(rom, src);
-  if (!r.ok) rom.data = snapshot;
+  if (!r.ok) rom.restore(snapshot);
   r.warnings.unshift(...warnings);
   return r;
 }

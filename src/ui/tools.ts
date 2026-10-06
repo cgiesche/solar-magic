@@ -99,6 +99,7 @@ export function openRomInfo(app: App): void {
     h('div', { class: 'prop' }, h('label', null, 'Title'), h('span', null, rom.title())),
     h('div', { class: 'prop' }, h('label', null, 'Size'), h('span', null, `${rom.size / 1024} KB${rom.smcHeader ? ' (+512 byte copier header)' : ''}`)),
     h('div', { class: 'prop' }, h('label', null, 'Expanded area'), h('span', null, `${expanded / 1024} KB, ${(used / 1024).toFixed(1)} KB of it in use (${rats.length} RATS blocks)`)),
+    h('div', { class: 'prop' }, h('label', null, 'Editor data'), h('span', null, rom.extra.size ? `${(rom.extraSize / 1024).toFixed(1)} KB (${rom.extra.size} source archives) – not in the ROM, saved with “Export project”` : 'none')),
     h('div', { class: 'prop' }, h('label', null, 'Editor patch'), h('span', null, hasEditorPatch(rom) ? 'installed' : 'not installed')),
   );
   modal('ROM information', body, [{ label: 'Close', primary: true }]);

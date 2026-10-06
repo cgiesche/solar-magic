@@ -123,9 +123,9 @@ export function hexNum(n: number): string {
 // adds the package to the ROM's PIXI project (and its blocks to the GPS project); blank: tile words for new Map16 tiles,
 // gfxOf: tile words to copy for a block's new tile (from its acts like)
 export function applyPixiPackage(rom: Rom, pkg: PatchPackage, plan: PixiPlan, blank: number[], gfxOf: (acts: number) => number[]): ApplyResult {
-  const snapshot = rom.data.slice();
+  const snapshot = rom.snapshot();
   const r = addPackage(rom, pkg, plan, blank, gfxOf);
-  if (!r.ok) rom.data = snapshot; // all or nothing
+  if (!r.ok) rom.restore(snapshot); // all or nothing
   return r;
 }
 

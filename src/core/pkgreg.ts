@@ -38,7 +38,8 @@ export interface PkgRecord extends PkgParts {
   name: string;
   fileName: string;
   added: string; // ISO date
-  src?: number[]; // SNES addresses of the RATS blocks holding its files (zip), if kept in the ROM
+  srcId?: string; // its files (zip) in the editor data (rom.extra)
+  src?: number[]; // older ROMs: SNES addresses of the RATS blocks holding its files (see migratePackageFiles)
   srcSize?: number;
 }
 
@@ -73,11 +74,11 @@ function write(rom: Rom, all: PkgRecord[]): void {
   rom.allocWrite(buf);
 }
 
-// adds or replaces the record; archive: the package's files to keep in the ROM (once)
+// adds or replaces the record; archive: the package's files to keep with the editor data (once)
 export function savePackage(rom: Rom, rec: PkgRecord, archive?: Uint8Array): PkgRecord {
   const all = listPackages(rom);
   const full = { ...rec };
-  if (archive && !full.src) { full.src = writeChunks(rom, archive); full.srcSize = archive.length; }
+  if (archive && !full.src && !full.srcId) full.srcId = rom.putBlob(archive);
   const i = all.findIndex((r) => r.id === rec.id);
   if (i >= 0) all[i] = full; else all.push(full);
   write(rom, all);
@@ -89,12 +90,29 @@ export function removePackageRecord(rom: Rom, id: string): void {
   const r = all.find((x) => x.id === id);
   if (!r) return;
   for (const a of r.src ?? []) rom.freeAt(a);
+  if (r.srcId) rom.dropBlob(r.srcId);
   write(rom, all.filter((x) => x.id !== id));
 }
 
-// the package's files kept in the ROM, null if they are not
+// the package's files, null if they are not kept
 export function packageArchive(rom: Rom, r: PkgRecord): Uint8Array | null {
+  if (r.srcId) return rom.getBlob(r.srcId);
   return r.src && r.srcSize ? readChunks(rom, r.src, r.srcSize) : null;
+}
+
+// files older versions kept in the ROM go into the editor data; returns whether anything moved
+export function migratePackageFiles(rom: Rom): boolean {
+  const all = listPackages(rom);
+  let moved = false;
+  for (const r of all) {
+    if (!r.src) continue;
+    if (r.srcSize) r.srcId = rom.putBlob(readChunks(rom, r.src, r.srcSize));
+    for (const a of r.src) rom.freeAt(a);
+    delete r.src; delete r.srcSize;
+    moved = true;
+  }
+  if (moved) write(rom, all);
+  return moved;
 }
 
 // ---------- observing what a package adds ----------
@@ -188,7 +206,7 @@ export function uninstallPackage(rom: Rom, id: string, blank: number[]): string[
   if (!rec) throw new Error('Package is not installed');
   const others = all.filter((r) => r !== rec);
   const shared = (tool: 'uber' | 'blocks' | 'pixi', f: string) => others.some((r) => r[tool].files.includes(f));
-  const before = rom.data.slice();
+  const before = rom.snapshot();
   const warnings: string[] = [];
   const check = (r: { ok: boolean; errors: string[]; warnings: string[] }, what: string) => {
     if (!r.ok) throw new Error(`${what}: ${r.errors.join(' ')}`);
@@ -233,7 +251,7 @@ export function uninstallPackage(rom: Rom, id: string, blank: number[]): string[
     }
     removePackageRecord(rom, id);
   } catch (e) {
-    rom.data = before;
+    rom.restore(before);
     throw e;
   }
   return warnings;
@@ -244,7 +262,7 @@ export function uninstallPackage(rom: Rom, id: string, blank: number[]): string[
 export async function uninstallPackageWithMusic(rom: Rom, id: string, blank: number[]): Promise<string[]> {
   const rec = listPackages(rom).find((r) => r.id === id);
   if (!rec) throw new Error('Package is not installed');
-  const before = rom.data.slice();
+  const before = rom.snapshot();
   const warnings: string[] = [];
   try {
     const p = rec.music?.length ? loadMusicProject(rom) : null;
@@ -258,7 +276,7 @@ export async function uninstallPackageWithMusic(rom: Rom, id: string, blank: num
     }
     warnings.push(...uninstallPackage(rom, id, blank));
   } catch (e) {
-    rom.data = before;
+    rom.restore(before);
     throw e;
   }
   return warnings;

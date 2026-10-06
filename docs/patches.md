@@ -22,10 +22,17 @@ sind dort gespeichert:
 - die Bytes, die er außerhalb seines eigenen freien Speichers geändert hat, **mit den Originalbytes**;
 - die RATS-Blöcke, die er angelegt hat;
 - die gewählten Einstellungen;
-- die Quelldateien (komprimiert, bis 256 KB; größere nur im Browser).
+- ein Verweis auf die Quelldateien.
 
-Deshalb lässt sich jeder Patch später wieder **vollständig entfernen** oder mit anderen Einstellungen
-**neu anwenden**, auch nach einem Export der ROM oder auf einem anderen Rechner.
+Die **Quelldateien** (komprimiert) liegen nicht in der ROM, sondern in den **Editor-Daten** neben ihr: im
+Browser mit der Arbeits-ROM gespeichert und mit *Datei → Export project* in einer Projektdatei (`.smwproj` =
+ROM + angehängte Editor-Daten), die *Open ROM …* wieder öffnet. *Export ROM* liefert die spielbare ROM ohne
+sie. Das gilt auch für die Projekte von UberASM, Custom Blocks, Custom Sprites und Musik sowie die Dateien der
+Pakete. ROMs älterer Versionen, die Quellen noch in RATS-Blöcken hatten, werden beim Öffnen umgestellt.
+
+Deshalb lässt sich jeder Patch später wieder **vollständig entfernen** – auch aus einer exportierten spielbaren
+ROM, denn Verzeichnis und Originalbytes stehen in der ROM. Mit anderen Einstellungen **neu anwenden** oder ein
+Projekt bearbeiten geht mit den Quellen, also in der Projektdatei (oder im Browser, in dem gearbeitet wurde).
 
 Da der Editor Levels durch Emulation des Spiels lädt, sieht man die Wirkung eines Patches sofort. Das gilt
 für geänderte Level-Lade-Routinen, Level-`init`/`load`-Code aus UberASM, Paletten usw. Im Testmodus (▶)
@@ -51,7 +58,7 @@ Was ein Paket bringt, wird nicht von den Dialogen gemeldet, sondern beobachtet: 
 Projekte der ROM (Patches, UberASM, Blöcke, Sprites, ExGFX) vor und nach jedem Schritt. Teile, die später
 hinzukommen (*Weitere Schritte*, *Hinzufügen …* eines Teils, importierte Grafiken, neue Einstellungen),
 gehören zum selben Paket. Das Verzeichnis liegt in der ROM (RATS-Block „SMWK“), die Dateien des Downloads
-auch (komprimiert, bis 256 KB; größere nur im Browser).
+in den Editor-Daten (siehe oben).
 
 **Entfernen …** nimmt das ganze Paket heraus: Patches (spätere zuerst), UberASM-Dateien und
 -Zuordnungen, Blöcke, Sprites, angelegte ExGFX-Dateien. Dateien, die auch ein anderes Paket mitgebracht hat

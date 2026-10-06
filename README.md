@@ -83,7 +83,7 @@ Beim Anzeigen eines Levels führt er die **originalen Laderoutinen** des ROMs au
   oder anstelle eines Originalsongs.
 * Eingefügt wird mit **AddmusicK 1.0.11**, das als WebAssembly im Editor steckt (Song-Compiler, Sound-Treiber, SNES-Patch).
   Jeder Lauf fügt das ganze Musik-Projekt neu ein (~1 s) und steht als ein Eintrag im Patch-Verzeichnis: Hijacks mit
-  Originalbytes, freier Speicher, die Songs samt Samples als Quellen. Deshalb lässt sich AddmusicK jederzeit wieder
+  Originalbytes, freier Speicher; die Songs samt Samples als Quellen in den Editor-Daten (nicht in der ROM). Deshalb lässt sich AddmusicK jederzeit wieder
   vollständig entfernen; Songs aus einem Paket gehen mit dem Paket.
 * **Zuordnung zu Leveln:** im Header-Dialog *Song for this level* oder im Music-Tab *Level* – jeder Song der ROM statt der
   8 Header-Einstellungen (Editor-Patch SMWU, wie der Music Bypass von Lunar Magic; funktioniert auch ohne AddmusicK mit
@@ -119,6 +119,9 @@ Beim Anzeigen eines Levels führt er die **originalen Laderoutinen** des ROMs au
   RATS-Tags verwaltet (kompatibel zum üblichen Schema), alte Blöcke werden freigegeben.
 * Geänderte Level werden, wenn sie passen, an Ort und Stelle geschrieben; geteilte oder größere Daten wandern
   in freien Speicher.
+* **Editor-Daten außerhalb der ROM:** Quellen von Patches, Paketen und den Projekten (UberASM, Blocks, Sprites,
+  Musik) belegen keinen ROM-Platz. *Datei → Export project* speichert ROM + Editor-Daten als `.smwproj`
+  (zum Weiterbearbeiten, öffnen mit *Open ROM …*), *Export ROM* die spielbare ROM ohne sie.
 
 ## Eigener ROM-Patch („SMWE“)
 

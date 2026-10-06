@@ -185,7 +185,7 @@ export interface BgPackOptions {
 export interface BgPackResult { ok: boolean; errors: string[]; notes: string[]; bg: Uint16Array | null }
 
 export function applyBgPack(rom: Rom, lv: Level, files: Map<string, Uint8Array>, plan: BgPackPlan, opt: BgPackOptions): BgPackResult {
-  const snapshot = rom.data.slice();
+  const snapshot = rom.snapshot();
   const notes: string[] = [];
   const lvl = lv.number, hx = (v: number, d: number) => v.toString(16).toUpperCase().padStart(d, '0');
   try {
@@ -234,7 +234,7 @@ export function applyBgPack(rom: Rom, lv: Level, files: Map<string, Uint8Array>,
     }
     return { ok: true, errors: [], notes: [...notes, ...plan.notes], bg };
   } catch (e) {
-    rom.data = snapshot;
+    rom.restore(snapshot);
     return { ok: false, errors: [e instanceof Error ? e.message : String(e)], notes, bg: null };
   }
 }

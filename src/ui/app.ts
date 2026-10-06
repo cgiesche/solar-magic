@@ -17,7 +17,7 @@ import { spriteMemJob, usedSpriteMemory } from '../core/spritemem.ts';
 import { DM16_EXT, hasEditorPatch, installEditorPatch, levelGfx, defaultGfx } from '../core/patches.ts';
 import { gfxSkipMask, gfxFilesHash } from '../core/gfxpages.ts';
 import { STRUCT_EXT, STRUCT_MAX, TRANSPARENT, listStructures, readStructure, writeStructure, type Structure } from '../core/structs.ts';
-import { kvSet, kvGet, kvEntries, kvKeys, kvWrite } from './storage.ts';
+import { kvSet, kvGet, kvEntries, kvKeys, kvWrite, saveRom } from './storage.ts';
 import { ResultCache, RomFingerprint, RomReads, type CacheEntry } from '../core/romdeps.ts';
 import { bgFromWram, bgIndex, encodeBg } from '../core/bg.ts';
 import { toast, log as logMsg } from './dom.ts';
@@ -1589,7 +1589,7 @@ export class App {
   }
 
   persist(): void {
-    kvSet('rom', { name: this.romName, data: this.rom.output(false), header: this.rom.smcHeader }).catch(() => {});
+    saveRom(this.romName, this.rom).catch(() => {});
   }
 
   // vanilla levels plus anything relocated into expanded ROM space

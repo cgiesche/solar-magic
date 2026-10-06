@@ -17,7 +17,8 @@ export function blockFileOf(rom: Rom, tile: number): string | null {
   const e = blocksEntry(rom);
   if (!e) return null;
   if (cache?.id !== e.id) {
-    const p = loadBlockProject(rom);
+    let p = null;
+    try { p = loadBlockProject(rom); } catch { /* sources missing: no file names */ }
     cache = { id: e.id, tiles: new Map((p?.list ?? []).map((b) => [b.tile, b.file.replace(/^blocks\//, '')])) };
   }
   return cache.tiles.get(tile) ?? null;

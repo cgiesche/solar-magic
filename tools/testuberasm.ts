@@ -88,11 +88,12 @@ if (r.ok) {
   for (const n of [...Array(0x25).keys(), ...Array.from({ length: 0x3b }, (_, i) => 0x101 + i)]) if (!emu.load(n).ok) loadBad++;
   check(loadBad === 0, `all levels load with UberASM (${loadBad} bad)`);
   const e = listPatches(rom)[0];
-  check(e.kind === 'uberasm' && !!e.src, 'registered as UberASM with sources in the ROM');
+  check(e.kind === 'uberasm' && !!e.srcId && !!rom.getBlob(e.srcId) && !e.src, 'registered as UberASM with sources in the editor data (not in the ROM)');
   uninstallPatch(rom, e.id);
   let diff = 0;
   for (let i = 0; i < rom.data.length; i++) if (rom.data[i] !== (i < before.length ? before[i] : 0) && i !== 0x7fd7) diff++;
   check(diff === 0, `uninstall restores the ROM (${diff} bytes differ)`);
+  check(rom.extra.size === 0, 'sources dropped with the patch');
 }
 
 // project round trip: UberASM Tool folder as zip → ROM → back

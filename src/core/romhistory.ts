@@ -10,6 +10,7 @@ export interface RomEdit {
   runs: Run[];
   // ROM size changed (expansion): whole ROM before/after instead of runs
   whole: { before: Uint8Array; after: Uint8Array } | null;
+  extra?: { before: Map<string, Uint8Array>; after: Map<string, Uint8Array> }; // the editor data changed (sources of patches)
   key: string | null; // edits with the same key in quick succession merge into one
   time: number;
 }
@@ -55,6 +56,13 @@ function equal(a: Uint8Array, b: Uint8Array): boolean {
   return a.length === b.length && matches(a, 0, b);
 }
 
+// same entries (blobs are never changed in place, so identity is enough)
+function sameMap(a: Map<string, Uint8Array>, b: Map<string, Uint8Array>): boolean {
+  if (a.size !== b.size) return false;
+  for (const [k, v] of a) if (b.get(k) !== v) return false;
+  return true;
+}
+
 function size(e: RomEdit): number {
   return e.runs.reduce((s, r) => s + r.old.length, 0);
 }
@@ -86,6 +94,7 @@ export class RomHistory {
   undoStack: RomEdit[] = [];
   redoStack: RomEdit[] = [];
   private snap: Uint8Array | null = null;
+  private snapExtra: Map<string, Uint8Array> | null = null;
   private depth = 0;
   private label = '';
   private key: string | null = null;
@@ -106,6 +115,7 @@ export class RomHistory {
   begin(label: string, key: string | null = null): void {
     if (this.depth++ === 0) {
       this.snap = this.rom.data.slice();
+      this.snapExtra = new Map(this.rom.extra);
       this.label = label;
       this.key = key;
     }
@@ -115,16 +125,19 @@ export class RomHistory {
   commit(): RomEdit | null {
     if (this.depth === 0) return null;
     if (--this.depth > 0) return null;
-    const before = this.snap!;
+    const before = this.snap!, beforeExtra = this.snapExtra!;
     this.snap = null;
+    this.snapExtra = null;
     const now = this.rom.data;
+    const extra = sameMap(beforeExtra, this.rom.extra) ? undefined : { before: beforeExtra, after: new Map(this.rom.extra) };
     let e: RomEdit;
     if (before.length !== now.length) e = { label: this.label, runs: [], whole: { before, after: now.slice() }, key: null, time: Date.now() };
     else {
       const runs = diff(before, now);
-      if (!runs.length) return null;
-      e = { label: this.label, runs, whole: null, key: this.key, time: Date.now() };
+      if (!runs.length && !extra) return null;
+      e = { label: this.label, runs, whole: null, key: extra ? null : this.key, time: Date.now() };
     }
+    if (extra) e.extra = extra;
     const last = this.undoStack[this.undoStack.length - 1];
     if (last && e.key && last.key === e.key && !last.whole && !e.whole && e.time - last.time < MERGE_MS && size(last) + size(e) <= MERGE_MAX) {
       this.undoStack[this.undoStack.length - 1] = merge(last, e);
@@ -141,6 +154,7 @@ export class RomHistory {
   cancel(): void {
     this.depth = 0;
     this.snap = null;
+    this.snapExtra = null;
   }
 
   edit<T>(label: string, fn: () => T, key: string | null = null): T {
@@ -161,6 +175,7 @@ export class RomHistory {
   }
 
   private apply(e: RomEdit, forward: boolean): void {
+    if (e.extra) this.rom.extra = new Map(forward ? e.extra.after : e.extra.before);
     if (e.whole) { this.rom.data = (forward ? e.whole.after : e.whole.before).slice(); return; }
     for (const r of e.runs) this.rom.data.set(forward ? r.neu : r.old, r.off);
   }

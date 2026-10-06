@@ -1,6 +1,9 @@
 // ROM container: LoROM address mapping, header handling, expansion, checksum
-// and RATS-tag based free space management.
+// and RATS-tag based free space management. Besides the ROM image (`data`) it holds the editor's own
+// data (`extra`: sources of patches, packages and tool projects) that the game never reads: kept
+// outside the image, saved with a project file (outputProject) and left out of the playable ROM.
 
+import { zipSync, unzipSync, strToU8, strFromU8, type Zippable } from 'fflate';
 import type { RomReads } from './romdeps.ts';
 export const MAX_ROM_SIZE = 0x400000;
 // Offsets reachable only through banks $FE/$FF are reserved for the editor's
@@ -18,6 +21,13 @@ export function pcToSnes(off: number): number {
   return a;
 }
 
+// project file: ROM file, then a zip of the editor data, then this footer (magic, zip length, version)
+const PROJECT_MAGIC = 'SMWEPROJ';
+const FOOTER = 16;
+const PROJECT_VERSION = 1;
+
+export interface RomSnapshot { data: Uint8Array; extra: Map<string, Uint8Array> }
+
 export interface RatsBlock {
   start: number; // offset of "STAR"
   size: number; // payload size
@@ -27,11 +37,48 @@ export class Rom {
   data: Uint8Array;
   smcHeader: Uint8Array | null;
   reads: RomReads | null = null; // records reads through r8/r16/r24/bytes (see romdeps.ts)
+  extra = new Map<string, Uint8Array>(); // editor data by id, not part of the ROM image (blobs are never changed in place)
 
   constructor(file: Uint8Array) {
     const hdr = file.length % 0x8000;
     this.smcHeader = hdr === 512 ? file.slice(0, 512) : null;
     this.data = file.slice(hdr);
+  }
+
+  // a ROM file or a project file (ROM + editor data)
+  static fromFile(file: Uint8Array): Rom {
+    const split = splitProject(file);
+    const rom = new Rom(split.rom);
+    if (split.extra) rom.extra = split.extra;
+    return rom;
+  }
+
+  // ---------- editor data ----------
+  putBlob(data: Uint8Array): string {
+    let id: string;
+    do id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`; while (this.extra.has(id));
+    this.extra.set(id, data);
+    return id;
+  }
+  getBlob(id: string): Uint8Array | null {
+    return this.extra.get(id) ?? null;
+  }
+  dropBlob(id: string): void {
+    this.extra.delete(id);
+  }
+  get extraSize(): number {
+    let n = 0;
+    for (const b of this.extra.values()) n += b.length;
+    return n;
+  }
+
+  // the whole state (image and editor data), to go back to when a multi-step change fails
+  snapshot(): RomSnapshot {
+    return { data: this.data.slice(), extra: new Map(this.extra) };
+  }
+  restore(s: RomSnapshot): void {
+    this.data = s.data;
+    this.extra = new Map(s.extra);
   }
 
   get size(): number {
@@ -112,12 +159,28 @@ export class Rom {
     d[0x7fdc] = ~sum & 0xff; d[0x7fdd] = (~sum >> 8) & 0xff;
   }
 
+  // the playable ROM (without the editor data)
   output(withHeader: boolean): Uint8Array {
     this.fixChecksum();
     if (!withHeader) return this.data.slice();
     const out = new Uint8Array(this.data.length + 512);
     if (this.smcHeader) out.set(this.smcHeader);
     out.set(this.data, 512);
+    return out;
+  }
+
+  // the ROM with the editor data appended (a project file, see Rom.fromFile)
+  outputProject(withHeader: boolean): Uint8Array {
+    const rom = this.output(withHeader);
+    if (!this.extra.size) return rom;
+    const z = packExtra(this.extra);
+    const out = new Uint8Array(rom.length + z.length + FOOTER);
+    out.set(rom);
+    out.set(z, rom.length);
+    const f = rom.length + z.length;
+    for (let i = 0; i < 8; i++) out[f + i] = PROJECT_MAGIC.charCodeAt(i);
+    new DataView(out.buffer).setUint32(f + 8, z.length, true);
+    out[f + 12] = PROJECT_VERSION;
     return out;
   }
 
@@ -202,4 +265,31 @@ export class Rom {
     this.data.fill(0, off, off + 8 + size);
     return true;
   }
+}
+
+// editor data as a zip: one file per blob, named by its id
+export function packExtra(extra: Map<string, Uint8Array>): Uint8Array {
+  const files: Zippable = { 'manifest.json': strToU8(JSON.stringify({ v: PROJECT_VERSION, ids: [...extra.keys()] })) };
+  for (const [id, b] of extra) files['blob/' + id] = [b, { level: 0 }]; // blobs are zips already
+  return zipSync(files);
+}
+export function unpackExtra(z: Uint8Array): Map<string, Uint8Array> {
+  const files = unzipSync(z);
+  const meta = JSON.parse(strFromU8(files['manifest.json'])) as { v: number; ids: string[] };
+  if (meta.v > PROJECT_VERSION) throw new Error('The project file is from a newer editor version');
+  return new Map(meta.ids.filter((id) => files['blob/' + id]).map((id) => [id, files['blob/' + id]]));
+}
+
+// a file's ROM part and editor data (null for a plain ROM)
+export function splitProject(file: Uint8Array): { rom: Uint8Array; extra: Map<string, Uint8Array> | null } {
+  if (file.length > FOOTER) {
+    const f = file.length - FOOTER;
+    let magic = true;
+    for (let i = 0; i < 8; i++) if (file[f + i] !== PROJECT_MAGIC.charCodeAt(i)) magic = false;
+    if (magic) {
+      const n = new DataView(file.buffer, file.byteOffset).getUint32(f + 8, true);
+      if (n <= f) return { rom: file.subarray(0, f - n), extra: unpackExtra(file.subarray(f - n, f)) };
+    }
+  }
+  return { rom: file, extra: null };
 }
