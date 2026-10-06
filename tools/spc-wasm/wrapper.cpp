@@ -1,6 +1,8 @@
 // C interface of snes_spc for the editor (src/core/apu.ts): one SPC per handle, port reads/writes
 // at SPC clock times within the current frame, filtered sample output per frame and full state
-// save/load.
+// save/load. The output buffer is the instance's own and is set at the start of every frame:
+// the DSP also produces samples while the CPU's port accesses run the SPC (set_output only at the
+// frame's end would lose them and write to wherever the previous frame's buffer pointer was).
 #define private public // spcw_ram reads the RAM directly
 #include "SNES_SPC.h"
 #undef private
@@ -17,10 +19,16 @@ static const unsigned char ipl_rom[64] = {
 	0xF6, 0xDA, 0x00, 0xBA, 0xF4, 0xC4, 0xF4, 0xDD, 0x5D, 0xD0, 0xDB, 0x1F, 0x00, 0x00, 0xC0, 0xFF,
 };
 
+enum { buf_size = 8192 }; // samples (2 per stereo pair); a frame has ~1065
+
 struct Inst {
 	SNES_SPC spc;
 	SPC_Filter filter; // the SNES's analog output stage (low-pass and bass)
+	short buf [buf_size];
 };
+
+// a new frame's samples go to the start of buf (after reset/load/play too)
+static void arm( Inst* s ) { s->spc.set_output( s->buf, buf_size ); }
 
 static void save_func( unsigned char** io, void* state, size_t size ) { memcpy( *io, state, size ); *io += size; }
 static void load_func( unsigned char** io, void* state, size_t size ) { memcpy( state, *io, size ); *io += size; }
@@ -32,24 +40,29 @@ EMSCRIPTEN_KEEPALIVE Inst* spcw_new() {
 	if ( s->spc.init() ) { delete s; return 0; }
 	s->spc.init_rom( ipl_rom );
 	s->spc.reset();
+	arm( s );
 	return s;
 }
 EMSCRIPTEN_KEEPALIVE void spcw_delete( Inst* s ) { delete s; }
-EMSCRIPTEN_KEEPALIVE void spcw_reset( Inst* s ) { s->spc.reset(); s->filter.clear(); }
+EMSCRIPTEN_KEEPALIVE void spcw_reset( Inst* s ) { s->spc.reset(); s->filter.clear(); arm( s ); }
 EMSCRIPTEN_KEEPALIVE int spcw_read( Inst* s, int time, int port ) { return s->spc.read_port( time, port ); }
 EMSCRIPTEN_KEEPALIVE void spcw_write( Inst* s, int time, int port, int data ) { s->spc.write_port( time, port, data ); }
 // runs to time (SPC clocks since the frame began) and starts a new frame; out: room for max
 // samples (16-bit, stereo interleaved); returns the number written (2 per stereo pair)
 EMSCRIPTEN_KEEPALIVE int spcw_end_frame( Inst* s, int time, short* out, int max ) {
-	s->spc.set_output( out, max );
 	s->spc.end_frame( time );
 	int n = s->spc.sample_count();
+	if ( n > max ) n = max & ~1;
+	memcpy( out, s->buf, n * sizeof (short) );
+	arm( s );
 	s->filter.run( out, n );
 	return n;
 }
 // produces count samples (2 per stereo pair) without port activity (an .spc file, a preview)
 EMSCRIPTEN_KEEPALIVE int spcw_play( Inst* s, int count, short* out ) {
-	if ( s->spc.play( count, out ) ) return 0;
+	const char* err = s->spc.play( count, out );
+	arm( s );
+	if ( err ) return 0;
 	s->filter.run( out, count );
 	return 1;
 }
@@ -63,11 +76,14 @@ EMSCRIPTEN_KEEPALIVE void spcw_load( Inst* s, unsigned char* in ) {
 	unsigned char* p = in;
 	s->spc.copy_state( &p, load_func );
 	s->filter.clear();
+	s->spc.m.extra_pos = s->spc.m.extra_buf; // samples left over from before the load aren't part of the state
+	arm( s );
 }
 EMSCRIPTEN_KEEPALIVE int spcw_load_spc( Inst* s, const unsigned char* data, int size ) {
-	if ( s->spc.load_spc( data, size ) ) return 0;
+	if ( s->spc.load_spc( data, size ) ) { arm( s ); return 0; }
 	s->spc.clear_echo();
 	s->filter.clear();
+	arm( s );
 	return 1;
 }
 EMSCRIPTEN_KEEPALIVE void spcw_mute( Inst* s, int mask ) { s->spc.mute_voices( mask ); }
