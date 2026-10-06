@@ -24,6 +24,7 @@ import { toast, log as logMsg } from './dom.ts';
 import { ExitGraph, exitTarget } from '../core/exitgraph.ts';
 import { RomHistory, type RomEdit } from '../core/romhistory.ts';
 import { ObjKindProbe, kindsStillValid, storeKinds, loadKinds, resizeObjectSize, type ObjKind, type ObjKinds, type StoredObjKinds } from '../core/objkinds.ts';
+import { JumpArcs, ARC_SPEEDS, type JumpArc } from '../core/jumparcs.ts';
 import { BlockProber, variantOf, type BlockProbe, type SpriteProbe, type CollisionProbe } from '../core/blockprobe.ts';
 
 export type EditMode = 'l1' | 'l2' | 'spr' | 'exit' | 'bg';
@@ -60,7 +61,7 @@ export class App {
   // BG mode brush: a w×h block of BG Map16 tiles (row-major), picked from the palette sheet or the level
   bgBrush: { w: number; h: number; tiles: number[] } = { w: 1, h: 1, tiles: [0] };
   zoom = 2;
-  show = { layer1: true, layer2: true, layer3: true, sprites: true, grid: false, screens: true, exits: true, ghost: true, anim: false, items: true, collision: false };
+  show = { layer1: true, layer2: true, layer3: true, sprites: true, grid: false, screens: true, exits: true, ghost: true, anim: false, items: true, collision: false, arcs: false };
   // view-only game state applied before the emulated level load
   switches = { palaces: false, onOff: false };
   dirty = false;
@@ -206,6 +207,8 @@ export class App {
 
   refresh(): void {
     this.graph = null;
+    this.arcCache.clear();
+    this.arcLevel = null;
     const lv = this.level;
     const r = this.emu.load(lv.number, this.buildOverrides());
     this.renderError = r.ok ? null : r.error ?? 'Error';
@@ -803,6 +806,59 @@ export class App {
     const p = this.blockProber().cachedCollision(tile);
     if (!p) this.queueProbe(PROBE_COLL | tile);
     return p;
+  }
+
+  // ------------- jump arcs (see jumparcs.ts) -------------
+  // arcs from a tile of the current level as edited, by tile (ty << 16 | tx); emulated in the
+  // background on an own emulator, the latest request first; 'arcs' when some are ready
+  arcCache = new Map<number, JumpArc[]>();
+  private arcs: JumpArcs | null = null;
+  private arcLevel: Level | null = null; // the level state the arc emulator is prepared for
+  private arcWant: { tx: number; ty: number; done: JumpArc[] } | null = null;
+  private arcChannel: MessageChannel | null = null;
+
+  jumpArcs(tx: number, ty: number): JumpArc[] | undefined {
+    const k = (ty << 16) | tx, c = this.arcCache.get(k);
+    if (c) return c;
+    if (this.arcWant?.tx !== tx || this.arcWant.ty !== ty) this.arcWant = { tx, ty, done: [] };
+    if (!this.arcChannel) {
+      this.arcChannel = new MessageChannel();
+      this.arcChannel.port1.onmessage = () => this.runArcs();
+    }
+    this.arcChannel.port2.postMessage(0);
+    return undefined;
+  }
+
+  private runArcs(): void {
+    const want = this.arcWant;
+    if (!want) return;
+    const t0 = performance.now();
+    try {
+      if (!this.arcs || this.arcs.emu.rom !== this.rom) {
+        this.arcs = new JumpArcs(this.rom, this.emu);
+        this.arcs.emu.skipMask = () => this.gfxSkipMask();
+      }
+      if (this.arcLevel !== this.level) {
+        this.setBusy('arcs', 'Jump arcs');
+        const lv = this.level;
+        this.arcLevel = this.arcs.prepare(lv.number, this.buildOverrides(), lv.spriteHeader, this.images.height) ? lv : null;
+        if (!this.arcLevel) throw new Error('level did not reach gameplay');
+      }
+      const runs = this.blockProber().runStates();
+      const all = ARC_SPEEDS.flatMap((sp) => [{ sp, dir: 1 as const }, { sp, dir: -1 as const }]);
+      while (want.done.length < all.length && performance.now() - t0 < 30) {
+        const { sp, dir } = all[want.done.length];
+        want.done.push(this.arcs.arc(want.tx, want.ty, sp, dir, runs));
+      }
+      if (want.done.length < all.length) { this.setBusy('arcs', 'Jump arcs'); this.arcChannel!.port2.postMessage(0); return; }
+      this.arcCache.set((want.ty << 16) | want.tx, want.done);
+    } catch (e) {
+      console.error(e);
+      this.arcCache.set((want.ty << 16) | want.tx, []);
+    }
+    if (this.arcWant === want) this.arcWant = null;
+    this.setBusy('arcs', null);
+    this.emit('arcs');
   }
 
   // the same for a sprite id hit from below (normal sprites only, not shooters/generators)

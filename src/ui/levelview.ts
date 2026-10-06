@@ -7,6 +7,7 @@ import { resizeObjectSize } from '../core/objkinds.ts';
 import { probeAt, spriteProbeAt, enterText, collisionText, type PosProbe, type CollisionProbe } from '../core/blockprobe.ts';
 import { type LevelObject, type LevelSprite, newUid, serializeLayer1, serializeLayer2, serializeSprites, spriteSizes, spriteId } from '../core/level.ts';
 import { composite } from '../core/render.ts';
+import type { ArcSpeed } from '../core/jumparcs.ts';
 import { exitTarget } from '../core/exitgraph.ts';
 import { contextMenu, type MenuItem } from './menu.ts';
 import { incompleteSprites } from './spritemem.ts';
@@ -19,6 +20,13 @@ type Drag =
   | { kind: 'marker'; marker: Marker; offX: number; offY: number; moved: boolean }
   | { kind: 'paint'; changed: boolean; x0: number; y0: number; lastX: number; lastY: number } // BG brush, stamped on a grid from (x0, y0)
   | { kind: 'pick'; x0: number; y0: number; x1: number; y1: number }; // BG tiles taken into the brush
+
+const ARC_STYLE: Record<ArcSpeed, { color: string; label: string; dash?: boolean }> = {
+  stand: { color: '#ffffff', label: 'from standing' },
+  walk: { color: '#7fe0ff', label: 'walking' },
+  run: { color: '#ffd84c', label: 'running' },
+  p: { color: '#ff6bd5', label: 'P-speed', dash: true },
+};
 
 const MARKER_STYLE: Record<Marker['kind'], { color: string; label: string; title: string }> = {
   main: { color: 'rgba(255,40,40,0.9)', label: 'M', title: 'Main entrance' },
@@ -41,6 +49,7 @@ export class LevelView {
   problems: ReturnType<typeof problemsButton>;
   pos: HTMLSpanElement;
   pendingFrame = 0;
+  arcPin: { tx: number; ty: number } | null = null; // jump arcs stay at this tile instead of following the mouse
 
   constructor(app: App, statusBar: HTMLDivElement) {
     this.app = app;
@@ -71,6 +80,7 @@ export class LevelView {
     app.on('sprite-mem', () => { this.requestPaint(); this.updateStats(); });
     app.on('mode', () => { if (!this.hover) this.idleStatus(); });
     app.on('rom-change', () => this.problems.update());
+    app.on('arcs', () => this.requestPaint());
     this.idleStatus();
     app.on('blockinfo', () => { if (this.hover && !this.drag) this.updateStatus(this.hover.tx, this.hover.ty); this.requestPaint(); this.problems.update(); });
   }
@@ -231,6 +241,7 @@ export class LevelView {
     // sprites
     if (app.show.sprites) this.paintSprites(ctx, z);
     if (app.show.sprites && app.show.items) this.paintSpriteItems(ctx);
+    if (app.show.arcs) this.paintArcs(ctx);
     // selection
     if (app.mode === 'l1' || app.mode === 'l2') {
       const sel = app.selectedObjects();
@@ -275,6 +286,7 @@ export class LevelView {
       ctx.strokeRect(x, y, Math.abs(d.x1 - d.x0), Math.abs(d.y1 - d.y0));
     }
     ctx.setTransform(1, 0, 0, 1, 0, 0);
+    if (app.show.arcs) this.paintArcLegend(ctx, dpr);
     if (app.renderError) {
       ctx.fillStyle = 'rgba(200,30,30,0.85)';
       ctx.fillRect(0, 0, this.canvas.width, 22 * dpr);
@@ -308,6 +320,76 @@ export class LevelView {
       ctx.fillStyle = '#4cc2ff';
       ctx.fillRect(b.x1 * 16 + 11, b.y1 * 16 + 11, hs, hs);
     }
+  }
+
+  // the tile jump arcs start from: the pinned one, else the one under the mouse
+  arcTile(): { tx: number; ty: number } | null {
+    return this.arcPin ?? (this.hover && !this.drag ? { tx: this.hover.tx, ty: this.hover.ty } : null);
+  }
+
+  // Jump arcs from the arc tile (emulated, see jumparcs.ts): a line per speed and direction,
+  // a dot where Mario lands, a red cross where he dies
+  paintArcs(ctx: CanvasRenderingContext2D): void {
+    const at = this.arcTile();
+    if (!at) return;
+    const arcs = this.app.jumpArcs(at.tx, at.ty), lw = 1.5 / this.app.zoom;
+    ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+    ctx.lineWidth = lw;
+    ctx.strokeRect(at.tx * 16, at.ty * 16, 16, 16);
+    if (this.arcPin) { ctx.fillStyle = 'rgba(255,255,255,0.25)'; ctx.fillRect(at.tx * 16, at.ty * 16, 16, 16); }
+    for (const a of arcs ?? []) {
+      const st = ARC_STYLE[a.speed], p = a.pts;
+      if (p.length < 4) continue;
+      ctx.strokeStyle = st.color;
+      ctx.lineWidth = 2 * lw;
+      ctx.setLineDash(st.dash ? [4 * lw, 3 * lw] : []);
+      ctx.beginPath();
+      ctx.moveTo(p[0], p[1]);
+      for (let i = 2; i < p.length; i += 2) ctx.lineTo(p[i], p[i + 1]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      const ex = p[p.length - 2], ey = p[p.length - 1];
+      if (a.end === 'land') {
+        ctx.fillStyle = st.color;
+        ctx.beginPath();
+        ctx.arc(ex, ey, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (a.end === 'dead') {
+        ctx.strokeStyle = '#ff4040';
+        ctx.beginPath();
+        ctx.moveTo(ex - 3, ey - 3); ctx.lineTo(ex + 3, ey + 3);
+        ctx.moveTo(ex + 3, ey - 3); ctx.lineTo(ex - 3, ey + 3);
+        ctx.stroke();
+      }
+    }
+  }
+
+  // which line is which, in the top left corner of the view
+  paintArcLegend(ctx: CanvasRenderingContext2D, dpr: number): void {
+    const kinds = Object.values(ARC_STYLE);
+    ctx.font = `${11 * dpr}px sans-serif`;
+    const w = 112 * dpr, lh = 15 * dpr, x = 8 * dpr, y = 8 * dpr;
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(x, y, w, lh * (kinds.length + 1) + 6 * dpr);
+    ctx.fillStyle = '#fff';
+    ctx.fillText(this.arcPin ? 'Jump arcs (pinned)' : 'Jump arcs', x + 6 * dpr, y + lh - 3 * dpr);
+    kinds.forEach((k, i) => {
+      const ly = y + lh * (i + 2) - 7 * dpr;
+      ctx.strokeStyle = k.color;
+      ctx.lineWidth = 2 * dpr;
+      ctx.setLineDash(k.dash ? [4 * dpr, 3 * dpr] : []);
+      ctx.beginPath(); ctx.moveTo(x + 6 * dpr, ly); ctx.lineTo(x + 26 * dpr, ly); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = '#fff';
+      ctx.fillText(k.label, x + 32 * dpr, ly + 4 * dpr);
+    });
+  }
+
+  // pins the jump arcs to the tile under the mouse, or unpins them
+  toggleArcPin(): void {
+    this.arcPin = this.arcPin || !this.hover ? null : { tx: this.hover.tx, ty: this.hover.ty };
+    if (this.arcPin) this.app.show.arcs = true;
+    this.paint();
   }
 
   // tiles of layer 1 in view: x0..x1, y0..y1 (exclusive)

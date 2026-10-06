@@ -17,6 +17,8 @@
 // How Mario collides with a tile (the collision overlay) is found out the same way: he drops onto
 // it at both ends (a different landing height is a slope), walks against it from both sides on a
 // floor, jumps against it from below and stands inside a passable one (water, vines and nets).
+// Mario's speed and P-meter when walking, running and at P-speed (for the jump arcs) are taken
+// from him running on a long floor of the probe level.
 // Some tiles behave differently per tileset (vanilla: the boss door tile 9C can only be entered in
 // castle tilesets), so the probe level gets the tileset of the edited level and results are kept
 // per tileset.
@@ -44,8 +46,8 @@ const ENTER_FRAMES = 24;
 const COLLISION_VERSION = 2; // part of the result key: raise when the collision probe changes
 const SETTLE_FRAMES = 6; // frames Mario has to stand still before a probe stops early
 const marioY = (w: Uint8Array) => w[0x96] | (w[0x97] << 8);
-// joypad bits ($4218) and Mario's offset to the tile for each enter direction
-const PAD = { up: 0x0800, down: 0x0400, left: 0x0200, right: 0x0100 };
+// joypad bits ($4218); Mario's offset to the tile for each enter direction
+export const PAD = { up: 0x0800, down: 0x0400, left: 0x0200, right: 0x0100, b: 0x8000, y: 0x4000 };
 const ENTER_DX = [-8, -4, 0, 4, 8]; // pipes only let Mario in within a few pixels of their middle
 
 export interface HitResult {
@@ -89,6 +91,10 @@ export interface CollisionProbe {
   water: boolean; // swimming inside it
   climb: boolean; // climbing inside it (vines, nets)
 }
+
+// Mario's X speed ($7B, to the right) and P-meter ($13E4) in a running state
+export interface RunState { vx: number; pmeter: number }
+export interface RunStates { walk: RunState; run: RunState; p: RunState }
 
 // positions (low nibbles of the tile X and Y) a sprite behaves differently at
 export interface SpriteVariants {
@@ -195,6 +201,34 @@ export class BlockProber {
 
   probeCollision(tile: number): CollisionProbe {
     return this.cachedCollision(tile) ?? this.computed(`c${COLLISION_VERSION}.${this.tileset}:${tile}`, () => this.collision(tile));
+  }
+
+  // walking: after a while holding right; running: holding Y too, once the P-meter starts to
+  // fill (top running speed reached); P-speed: once the P-meter and the speed don't change any more
+  runStates(): RunStates {
+    return this.results.get<RunStates>(`r1.${this.tileset}`) ?? this.computed(`r1.${this.tileset}`, (): RunStates => {
+      const floor = this.floor();
+      if (floor < 0) throw new Error('no floor tile found');
+      const trace = (pad: number, frames: number): RunState[] => {
+        const w = this.start(16, 0), s = this.emu.snes, out: RunState[] = [];
+        for (let x = 12; x < 16 + 16 * 18; x++) this.put(x, this.by + 1, floor);
+        this.placeMario(16 * 16, this.by * 16, -16, 0);
+        for (let f = 0; f < 4; f++) s.runFrame();
+        try {
+          for (let f = 0; f < frames; f++) { s.joy1 = pad; s.runFrame(); out.push({ vx: (w[0x7b] << 24) >> 24, pmeter: w[0x13e4] }); }
+        } finally { s.joy1 = 0; }
+        return out;
+      };
+      const walk = trace(PAD.right, 48), run = trace(PAD.right | PAD.y, 240);
+      const fill = run.findIndex((r) => r.pmeter > 0);
+      const last = run[run.length - 1];
+      const settled = run.findIndex((r, i) => r.pmeter === last.pmeter && run.slice(i).every((q) => q.pmeter === last.pmeter && Math.abs(q.vx - last.vx) <= 2));
+      return {
+        walk: walk[walk.length - 1],
+        run: run[fill > 0 ? fill - 1 : 40],
+        p: run[Math.min(run.length - 1, (settled < 0 ? run.length - 1 : settled) + 8)],
+      };
+    });
   }
 
   cachedSprite(num: number): SpriteProbe | undefined {

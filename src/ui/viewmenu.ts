@@ -32,6 +32,7 @@ export function viewMenu(app: App, paint: () => void, full = true): HTMLElement 
     show('ghost', 'Inactive layer translucent', 'Object layer not being edited shown semi-transparent (only levels with layer 2 objects)'),
     show('items', 'Block contents', 'Contents of blocks (found by emulation) semi-transparent over the blocks, arrows at enterable blocks (pipes, doors)'),
     show('collision', 'Collision', 'How Mario collides with layer 1 (found by emulation): solid sides white, platforms dashed, slopes diagonal; red hurts, blue water, green climbable', 'C'),
+    show('arcs', 'Jump arcs at the mouse', 'Where Mario gets jumping from the tile under the mouse (emulated): from standing, walking, running and at P-speed, to both sides; Shift+J pins them to the tile', 'J'),
     anim,
     ...state,
   ] : [{ heading: 'Level preview' }, anim, ...state] });
