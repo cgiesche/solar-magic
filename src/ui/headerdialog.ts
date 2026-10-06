@@ -5,6 +5,7 @@ import { h, select, hexInput, modal } from './dom.ts';
 import { TILESETS, levelModeName, MUSIC, TIME_SETTINGS, VERTICAL_SCROLL, ENTRANCE_ACTIONS, hex2, hex } from '../core/names.ts';
 import { hasLayer2Objects, type PrimaryHeader, type SecondaryHeader, L2_PTRS } from '../core/level.ts';
 import { bgBank } from '../core/patches.ts';
+import { LAYER3_KIND_TEXT } from '../core/layer3.ts';
 import { incompleteSprites, spriteMemText, SPRITE_MEM_HELP } from './spritemem.ts';
 
 function range(n: number, fmt: (i: number) => string = (i) => String(i)): [number, string][] {
@@ -47,6 +48,14 @@ export function openHeaderDialog(app: App): void {
   if (lv.bg || bgBank(app.rom, lv.number)) { l2ptr = CUSTOM_BG; bgOpts.unshift([CUSTOM_BG, 'Custom (edited in BG mode)']); }
   else if (!bgs.has(l2ptr) && l2ptr >> 16 === 0xff) bgOpts.push([l2ptr, `$${hex(l2ptr & 0xffff, 4)}`]);
 
+  // layer 3: what each setting does depends on the tileset (found by emulation, see layer3.ts)
+  const l3Opts = (): [number, string][] => app.layer3Kinds(hd.tileset).map((k, i) => [i, `${i} – ${LAYER3_KIND_TEXT[k]}`]);
+  const l3Sel = sel2('layer3', l3Opts());
+  const tilesetSel = select(range(16, (i) => `${hex2(i)} – ${TILESETS[i]}`), hd.tileset, (v) => {
+    hd.tileset = v;
+    l3Sel.replaceChildren(...l3Opts().map(([v, l]) => h('option', { value: String(v), selected: v === sd.layer3 }, l)));
+  });
+
   const screensWarn = h('div', { class: 'hint warn-text' });
   const body = h('div', { class: 'header-dialog' },
     h('h3', null, 'General'),
@@ -56,7 +65,7 @@ export function openHeaderDialog(app: App): void {
         hd.screens = v;
         screensWarn.textContent = v < lv.header.screens ? 'Fewer screens: objects, sprites and exits beyond are kept but cannot be reached in the game.' : '';
       })),
-      f('FG/BG tileset', sel('tileset', range(16, (i) => `${hex2(i)} – ${TILESETS[i]}`))),
+      f('FG/BG tileset', tilesetSel),
       f('FG palette', sel('fgPalette', range(8))),
       f('BG palette', sel('bgPalette', range(8))),
       f('Background color', sel('backAreaColor', range(8))),
@@ -77,7 +86,7 @@ export function openHeaderDialog(app: App): void {
       f('Entrance action', sel2('entranceAction', range(8, (i) => `${i} – ${ENTRANCE_ACTIONS[i]}`))),
       f('Midway screen', sel2('midwayScreen', range(16, hex2))),
       f('Layer 2 scroll', sel2('layer2Scroll', range(16, hex2))),
-      f('Layer 3', sel2('layer3', [[0, 'None'], [1, 'Tide'], [2, 'Tide, variable'], [3, 'Moonlight/other']])),
+      f('Layer 3', l3Sel, 'Depends on the tileset'),
       f('FG start Y', sel2('fgInitY', range(4))),
       f('BG start Y', sel2('bgInitY', range(4))),
       f('Vertical positioning', sel2('verticalPositioning', range(4))),

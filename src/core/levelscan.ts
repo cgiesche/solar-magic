@@ -9,12 +9,14 @@
 //   appearing, or that stay stuck: they bump into blocks ($1588) in the direction they move, to
 //   both sides, without getting more than a tile away (inside a wall, trapped in a gap; bumping
 //   on one side only is often chasing Mario, who is somewhere else here).
+// Afterwards, in levels whose layer 3 tide rises and falls, how far it moves (layer3.ts).
 
 import type { LevelEmulator, LevelOverride } from './levelemu.ts';
+import { tideRangeJob, type TideRange } from './layer3.ts';
 
 export interface ScreenLoad { screen: number; frames: number; lag: number; maxBusy: number }
 export interface SpriteFate { index: number; kind: 'fell' | 'stuck'; frame: number }
-export interface ScanResult { screens: ScreenLoad[]; sprites: SpriteFate[]; frames: number; ok: boolean }
+export interface ScanResult { screens: ScreenLoad[]; sprites: SpriteFate[]; frames: number; ok: boolean; tide?: TideRange | null }
 
 export interface ScanLevel {
   number: number;
@@ -105,5 +107,7 @@ export function* levelScanJob(emu: LevelEmulator, lv: ScanLevel): Generator<void
       if (f % SLICE === SLICE - 1) yield;
     }
   } catch { /* what was observed */ }
-  return { screens: [...loads.values()].sort((a, b) => a.screen - b.screen), sprites: fates, frames: f, ok: true };
+  let tide: TideRange | null = null;
+  try { tide = yield* tideRangeJob(emu, lv.number, lv.ov); } catch { /* none */ }
+  return { screens: [...loads.values()].sort((a, b) => a.screen - b.screen), sprites: fates, frames: f, ok: true, tide };
 }

@@ -26,6 +26,7 @@ import { RomHistory, type RomEdit } from '../core/romhistory.ts';
 import { ObjKindProbe, kindsStillValid, storeKinds, loadKinds, resizeObjectSize, type ObjKind, type ObjKinds, type StoredObjKinds } from '../core/objkinds.ts';
 import { JumpArcs, ARC_SPEEDS, type JumpArc } from '../core/jumparcs.ts';
 import { levelScanJob, type ScanResult } from '../core/levelscan.ts';
+import { layer3Kinds, type Layer3Kind } from '../core/layer3.ts';
 import { BlockProber, variantOf, type BlockProbe, type SpriteProbe, type CollisionProbe } from '../core/blockprobe.ts';
 
 export type EditMode = 'l1' | 'l2' | 'spr' | 'exit' | 'bg';
@@ -836,7 +837,7 @@ export class App {
       for (let i = 0; i < b.length; i++) hsh = Math.imul(hsh ^ b[i], 0x01000193);
       hsh = Math.imul(hsh ^ b.length, 0x01000193);
     }
-    const key = `ls1:${lv.number}:${(hsh >>> 0).toString(16)}`;
+    const key = `ls2:${lv.number}:${(hsh >>> 0).toString(16)}`;
     const uids = spriteLoadOrder(lv.sprites, vertical).map((q) => q.uid);
     const done = (result: ScanResult) => {
       if (run !== this.scanRun || this.level !== lv) return;
@@ -847,13 +848,7 @@ export class App {
     if (this.levelScan?.key === key) { done(this.levelScan.result); return; }
     const stored = this.results.get<ScanResult>(key);
     if (stored) { done(stored); return; }
-    if (!this.scanEmu || this.scanEmu.rom !== this.rom) {
-      this.scanEmu = new LevelEmulator(this.rom);
-      this.scanEmu.skipMask = () => this.gfxSkipMask();
-    }
-    const emu = this.scanEmu;
-    emu.adoptBoot(this.emu);
-    emu.syncRom();
+    const emu = this.scanEmu = this.auxEmu(this.scanEmu);
     const job = levelScanJob(emu, { number: lv.number, ov, vertical, width: this.images.width, height: this.images.height });
     const reads = new RomReads(this.rom.data.length);
     const step = () => {
@@ -874,6 +869,33 @@ export class App {
     };
     this.setBusy('scan', 'Level scan');
     setTimeout(step, 0);
+  }
+
+  // What the four layer 3 settings do in a tileset (see layer3.ts): the level as edited is loaded
+  // with each of them on an own emulator; kept per tileset while the ROM it read is unchanged
+  layer3Kinds(tileset: number): Layer3Kind[] {
+    const key = `l3k1:${tileset}`;
+    const stored = this.results.get<Layer3Kind[]>(key);
+    if (stored) return stored;
+    const lv = this.level, ov = this.buildOverrides();
+    if (tileset !== lv.header.tileset) ov.layer1 = serializeLayer1(this.rom, { ...lv, header: { ...lv.header, tileset } });
+    const emu = this.layer3Emu = this.auxEmu(this.layer3Emu);
+    const { result, reads } = emu.tracked(() => layer3Kinds(emu, lv.number, ov));
+    this.results.set(key, result, this.results.fp.deps(reads));
+    return result;
+  }
+
+  private layer3Emu: LevelEmulator | null = null;
+
+  // a background emulator (new for another ROM) set up from the main one's boot state
+  private auxEmu(emu: LevelEmulator | null): LevelEmulator {
+    if (!emu || emu.rom !== this.rom) {
+      emu = new LevelEmulator(this.rom);
+      emu.skipMask = () => this.gfxSkipMask();
+    }
+    emu.adoptBoot(this.emu);
+    emu.syncRom();
+    return emu;
   }
 
   // ------------- jump arcs (see jumparcs.ts) -------------
