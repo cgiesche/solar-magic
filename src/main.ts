@@ -73,7 +73,7 @@ function startWith(rom: Rom, name: string): void {
 }
 
 // spinner pill for background analyses; shown after a short delay so quick jobs don't flicker,
-// ignores the mouse so the editor stays usable underneath
+// ignores the mouse so the editor stays usable underneath; hidden while background work is held
 function busyIndicator(app: App): HTMLElement {
   const label = h('span');
   const el = h('div', { class: 'busy' }, h('span', { class: 'busy-spin' }), label);
@@ -81,8 +81,9 @@ function busyIndicator(app: App): HTMLElement {
   app.on('busy', () => {
     label.textContent = [...app.busy.values()].join(' · ') + ' …';
     el.title = label.textContent;
-    if (!app.busy.size) { clearTimeout(timer); timer = 0; el.classList.remove('show'); }
-    else if (!timer && !el.classList.contains('show')) timer = window.setTimeout(() => { timer = 0; if (app.busy.size) el.classList.add('show'); }, 200);
+    const on = () => app.busy.size > 0 && !app.backgroundHeld();
+    if (!on()) { clearTimeout(timer); timer = 0; el.classList.remove('show'); }
+    else if (!timer && !el.classList.contains('show')) timer = window.setTimeout(() => { timer = 0; if (on()) el.classList.add('show'); }, 200);
   });
   return el;
 }

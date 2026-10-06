@@ -124,8 +124,8 @@ export class App {
     this.emu = new LevelEmulator(rom);
     this.emu.skipMask = () => this.gfxSkipMask();
     this.emu.boot();
-    onModalsChange(() => this.resumeBackground());
-    musicPlayer.onChange(() => this.resumeBackground());
+    onModalsChange(() => { this.resumeBackground(); this.emit('busy'); });
+    musicPlayer.onChange(() => { this.resumeBackground(); this.emit('busy'); });
     this.romHistory = new RomHistory(rom);
     this.results = new ResultCache(new RomFingerprint(this.emu));
     this.cacheReady = kvEntries<CacheEntry>(CACHE_PREFIX)
