@@ -27,6 +27,7 @@ export interface MusicSong {
   num: number; // AddmusicK song number
   file: string; // the .txt, relative to AddmusicK's music folder ("<folder>/<song>.txt")
   name: string; // shown in the editor
+  volume?: number; // loudness in percent of the song's own (100 when not set), see songWithVolume
 }
 
 export interface MusicProject {
@@ -246,9 +247,42 @@ export function amkList(p: MusicProject): string {
   return `Globals:\n${globals.join('\n')}\n\nLocals:\n${locals.join('\n')}\n`;
 }
 
+// AddmusicK's driver sets a voice's volume from (volume · master volume)² – the master volume is the
+// song's global volume ("w", hex $E0, faded to with $E1; $C0 until the song sets one). A song gets
+// `percent` of its loudness by scaling all of them by √(percent/100), up to 255; one that never sets it
+// gets "w" at the start of channel 0. Replacements ("x = w200") are scaled too; comments and the
+// #samples, #instruments and #spc blocks stay.
+export function songWithVolume(text: string, percent: number): string {
+  const f = Math.sqrt(percent / 100);
+  const sc = (v: string, hexa = false) => {
+    const n = Math.min(255, Math.round(parseInt(v, hexa ? 16 : 10) * f));
+    return hexa ? n.toString(16).toUpperCase().padStart(2, '0') : String(n);
+  };
+  let found = false;
+  const re = /(;[^\n]*|#(?:samples|instruments|spc)\s*\{[^}]*\})|"([^"\n]*)"|(?<![A-Za-z_@#$(.-])(w\s*)(\d+)(?:(\s*,\s*)(\d+))?|(\$E0\s*\$)([0-9A-F]{2})|(\$E1\s*\$[0-9A-F]{2}\s*\$)([0-9A-F]{2})/gi;
+  const scale = (t: string): string => t.replace(re, (m, com, q, w, a, sep, b, e0, x0, e1, x1) => {
+    if (com !== undefined) return m;
+    if (q !== undefined) return q.includes('=') ? `"${q.slice(0, q.indexOf('=') + 1)}${scale(q.slice(q.indexOf('=') + 1))}"` : m;
+    found = true;
+    if (w !== undefined) return b !== undefined ? `${w}${a}${sep}${sc(b)}` : `${w}${sc(a)}`;
+    if (e0 !== undefined) return e0 + sc(x0, true);
+    return e1 + sc(x1, true);
+  });
+  const out = scale(text);
+  if (found) return out;
+  // no global volume: the driver's $C0, set at the start of channel 0
+  const at = /;[^\n]*|#(?:samples|instruments|spc)\s*\{[^}]*\}|"[^"\n]*"|#0(?![\w])/gi;
+  for (let m; (m = at.exec(out));) if (m[0] === '#0') return `${out.slice(0, at.lastIndex)} w${sc('192')} ${out.slice(at.lastIndex)}`;
+  return out;
+}
+
 export function amkFiles(p: MusicProject): Map<string, Uint8Array | string> {
   const files = new Map<string, Uint8Array | string>();
   for (const [f, c] of p.files) files.set('music/' + f, c);
+  for (const s of p.songs) {
+    const c = p.files.get(s.file);
+    if (c && s.volume && s.volume !== 100) files.set('music/' + s.file, strToU8(songWithVolume(strFromU8(c, true), s.volume), true));
+  }
   files.set('Addmusic_list.txt', amkList(p));
   // sample groups the songs brought along (runAmk adds them to AddmusicK's own)
   const groups = [...p.files].filter(([f]) => f.endsWith('/' + SAMPLE_GROUPS)).map(([, c]) => strFromU8(c, true));

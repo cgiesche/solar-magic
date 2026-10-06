@@ -78,6 +78,29 @@ if (spc) {
   check(songsFromZip('Group.zip', zipSync(z)).missing.includes('sample group #mygroup'), 'undefined sample group reported missing');
 }
 
+// a song's volume: its global volume scaled (here set by the song, and the driver's default for one
+// that sets none), so its SPC plays about that much louder or quieter
+{
+  const rms = (spc: Uint8Array | null | undefined) => {
+    if (!spc) return 0;
+    const a = new Apu(); a.loadSpc(spc);
+    const o = a.play(32000 * 2); let t = 0;
+    for (const v of o) t += v * v;
+    return Math.sqrt(t / o.length);
+  };
+  const orig = strFromU8(unzipSync(testSongZip())['Square Test/Square Test.txt']);
+  for (const [what, txt] of [['without "w"', orig.replace('t40 w200', 't40')], ['with "w"', orig.replace('t40 w200', 't40 w100')]] as const) {
+    const z = unzipSync(testSongZip());
+    z['Square Test/Square Test.txt'] = strToU8(txt);
+    const pv = emptyMusicProject();
+    const [sv] = addSongs(pv, songsFromZip('Vol.zip', zipSync(z)));
+    const loud = async (volume: number) => { sv.volume = volume; return rms(spcOf((await songSpcs(pv, [sv.file])).spcs, sv.file)); };
+    const base = await loud(100), half = await loud(50), dbl = await loud(200);
+    check(base > 0 && Math.abs(half / base - 0.5) < 0.08 && Math.abs(dbl / base - 2) < 0.3,
+      `song volume ${what}: 50% → ${(half / base).toFixed(2)}, 200% → ${(dbl / base).toFixed(2)}`);
+  }
+}
+
 // level 106 set to the song of header setting 2 of the original driver (installs the music patch before
 // inserting, so the editor's patches are part of the ROM to restore)
 const vanillaSong = rom.r8(0x0584db + 2);

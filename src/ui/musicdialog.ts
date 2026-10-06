@@ -203,6 +203,14 @@ export function musicPane(app: App, changed: () => void): Pane {
     }
   };
 
+  // loudness of a custom song (its global volume scaled when AddmusicK inserts it)
+  const VOLUMES = [25, 35, 50, 70, 85, 100, 120, 140, 170, 200, 250, 300];
+  const setVolume = async (num: number, volume: number) => {
+    const p: MusicProject = { songs: proj.songs.map((x) => (x.num === num ? { ...x, volume } : x)), files: proj.files };
+    if (await insertMusic(app, p, `Song ${songHex(num)} at ${volume}% volume`)) changed();
+    reload();
+  };
+
   const setForLevel = (num: number) => {
     try {
       setLevelMusic(app.rom, app.level.number, levelMusic(app.rom, app.level.number) === num ? 0 : num);
@@ -210,6 +218,13 @@ export function musicPane(app: App, changed: () => void): Pane {
     } catch (e) { toast(errorText(e), 'error'); return; }
     render();
   };
+
+  function volumeSelect(num: number): HTMLSelectElement {
+    const v = proj.songs.find((x) => x.num === num)?.volume ?? 100;
+    const sel = select([...new Set([...VOLUMES, v])].sort((a, b) => a - b).map((x) => [x, `${x}%`]), v, (x) => void setVolume(num, x));
+    sel.title = 'Loudness of the song (its global volume, scaled when AddmusicK inserts it; songs already near the maximum get only a little louder)';
+    return sel;
+  }
 
   function render(): void {
     const songs = romSongs(app.rom, proj);
@@ -232,7 +247,7 @@ export function musicPane(app: App, changed: () => void): Pane {
       h('p', { class: 'hint' }, `Level ${hex(lv, 3)} plays song ${songHex(cur.num)}${cur.own ? ' (set for the level)' : ` (header music ${app.level.header.music})`}. `
         + '▶ plays a song in this level as the game does; “Level” makes it the music of the level (instead of its header music).'),
       h('table', { class: 'uber-table music-table' },
-        h('tr', null, h('th'), h('th', null, 'No.'), h('th', null, 'Song'), h('th', null, 'Type'), h('th', null, 'Set for levels'), h('th')),
+        h('tr', null, h('th'), h('th', null, 'No.'), h('th', null, 'Song'), h('th', null, 'Type'), h('th', null, 'Volume'), h('th', null, 'Set for levels'), h('th')),
         songs.map((s) => {
           const ls = users.get(s.num) ?? [];
           const mine = cur.own && cur.num === s.num;
@@ -241,6 +256,7 @@ export function musicPane(app: App, changed: () => void): Pane {
             h('td', { class: 'mono' }, songHex(s.num)),
             h('td', null, s.name, s.file ? h('div', { class: 'hint mono' }, s.file) : ''),
             h('td', { class: 'hint' }, kindText(s)),
+            h('td', null, s.kind === 'custom' && entry ? volumeSelect(s.num) : ''),
             h('td', { class: 'mono hint' }, ls.length > 6 ? `${ls.slice(0, 6).map((l) => hex(l, 3)).join(' ')} … (${ls.length})` : ls.map((l) => hex(l, 3)).join(' ')),
             h('td', { class: 'actions' },
               h('button', { class: mine ? 'active' : '', title: mine ? `Level ${hex(lv, 3)}: back to its header music` : `Make this the music of level ${hex(lv, 3)}`, onclick: () => setForLevel(s.num) }, 'Level'),
