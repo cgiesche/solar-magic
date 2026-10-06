@@ -103,6 +103,16 @@ export function toast(msg: string, kind: 'info' | 'error' = 'info'): void {
 
 // beforeClose: asked on every way of closing (buttons, ✕, Esc, click beside the dialog); false keeps it
 // open. close(true) closes without asking.
+// open dialogs: background work waits while there are any (see App.later)
+let openModals = 0;
+const modalWatchers = new Set<() => void>();
+export function modalsOpen(): number { return openModals; }
+export function onModalsChange(fn: () => void): () => void {
+  modalWatchers.add(fn);
+  return () => modalWatchers.delete(fn);
+}
+const modalsChanged = (d: number) => { openModals += d; for (const f of modalWatchers) f(); };
+
 export function modal(title: string, body: HTMLElement, buttons: { label: string; primary?: boolean; danger?: boolean; onClick?: () => boolean | void }[], onClose?: () => void, beforeClose?: () => boolean): { close: (force?: boolean) => void } {
   const back = h('div', { class: 'modal-back' });
   let closed = false;
@@ -119,6 +129,7 @@ export function modal(title: string, body: HTMLElement, buttons: { label: string
     back.remove();
     window.removeEventListener('keydown', esc, true);
     onClose?.();
+    modalsChanged(-1);
   };
   window.addEventListener('keydown', esc, true);
   const box = h('div', { class: 'modal' },
@@ -132,6 +143,7 @@ export function modal(title: string, body: HTMLElement, buttons: { label: string
   back.appendChild(box);
   back.addEventListener('mousedown', (e) => { if (e.target === back) close(); });
   document.body.appendChild(back);
+  modalsChanged(1);
   return { close };
 }
 

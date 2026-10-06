@@ -20,7 +20,8 @@ import { STRUCT_EXT, STRUCT_MAX, TRANSPARENT, listStructures, readStructure, wri
 import { kvSet, kvGet, kvEntries, kvKeys, kvWrite, saveRom } from './storage.ts';
 import { ResultCache, RomFingerprint, RomReads, type CacheEntry } from '../core/romdeps.ts';
 import { bgFromWram, bgIndex, encodeBg } from '../core/bg.ts';
-import { toast, log as logMsg } from './dom.ts';
+import { toast, log as logMsg, modalsOpen, onModalsChange } from './dom.ts';
+import { musicPlayer } from './musicplayer.ts';
 import { ExitGraph, exitTarget } from '../core/exitgraph.ts';
 import { RomHistory, type RomEdit } from '../core/romhistory.ts';
 import { ObjKindProbe, kindsStillValid, storeKinds, loadKinds, resizeObjectSize, type ObjKind, type ObjKinds, type StoredObjKinds } from '../core/objkinds.ts';
@@ -42,6 +43,7 @@ const CACHE_PREFIX = 'rc3:'; // IndexedDB keys of the result cache (bump when re
 const PROBE_SPRITE = 0x10000; // probe queue key flag: sprite number instead of Map16 tile
 const PROBE_COLL = 0x20000; // probe queue key flag: collision of a Map16 tile
 const SPRITE_PROBE_END = 0xc9; // sprites from $C9 on are shooters, generators and run-once sprites
+const BG_SLICE = 12; // ms a slice of background work runs before input and drawing get through
 
 // result of the sprite memory check (see App.checkSpriteMem); gen: App.editGen when it started
 export interface SpriteMemState { key: string; level: number; mem: number; gen: number; conflicts: Set<number>; suggestion: number | null }
@@ -95,7 +97,6 @@ export class App {
   prefetchQueue = new Set<number>(); // the same, probed when probeQueue is empty
   probeFailed = new Set<number>();
   probeScheduled = false;
-  probeChannel: MessageChannel | null = null; // yields between probe slices (setTimeout is throttled in hidden tabs)
   exitScreen = 0;
   // mode 'exit': the chosen entrance marker, else the screen exitScreen (and its exit)
   exitMarker: { kind: Marker['kind']; index: number } | null = null;
@@ -111,7 +112,6 @@ export class App {
   // what the settings byte nibbles of standard objects mean, per tileset (emulated, see objkinds.ts)
   kinds = new Map<number, { k: ObjKinds; gen: number }>();
   kindJob: { ts: number; probe: ObjKindProbe | null } | null = null;
-  kindChannel: MessageChannel | null = null;
   reveal = { x: 0, y: 0 }; // pixel the level view scrolls to on 'reveal'
   secEntrances: number[] = []; // secondary entrance indices leading into the current level
   // tile/palette animation: frames stored as pixel diffs against the static composite
@@ -124,6 +124,8 @@ export class App {
     this.emu = new LevelEmulator(rom);
     this.emu.skipMask = () => this.gfxSkipMask();
     this.emu.boot();
+    onModalsChange(() => this.resumeBackground());
+    musicPlayer.onChange(() => this.resumeBackground());
     this.romHistory = new RomHistory(rom);
     this.results = new ResultCache(new RomFingerprint(this.emu));
     this.cacheReady = kvEntries<CacheEntry>(CACHE_PREFIX)
@@ -158,6 +160,35 @@ export class App {
     if (label === null ? !this.busy.delete(key) : this.busy.get(key) === label) return;
     if (label !== null) this.busy.set(key, label);
     this.emit('busy');
+  }
+
+  // ------------- background work -------------
+  // Slices of background emulation (block behavior, sprite graphics, scans …) run as low-priority
+  // tasks, so input, drawing and audio go first. While a dialog is open or music plays they wait:
+  // they would stall the dialog and make the sound crackle. The next slice of each job is parked by
+  // its key and continues once nothing holds it.
+  private parked = new Map<string, () => void>();
+  backgroundHeld(): boolean { return modalsOpen() > 0 || musicPlayer.playing; }
+  later(key: string, step: () => void): void {
+    if (this.backgroundHeld()) { this.parked.set(key, step); return; }
+    const go = () => { if (this.backgroundHeld()) this.parked.set(key, step); else step(); };
+    const sch = (globalThis as { scheduler?: { postTask?: (f: () => void, o: { priority: string }) => Promise<void> } }).scheduler;
+    if (sch?.postTask) { sch.postTask(go, { priority: 'background' }).catch((e) => console.error(e)); return; }
+    // otherwise a message (setTimeout is throttled in hidden tabs)
+    if (!this.bgChannel) {
+      const ch = this.bgChannel = new MessageChannel(), q = this.bgQueue;
+      ch.port1.onmessage = () => q.shift()?.();
+    }
+    this.bgQueue.push(go);
+    this.bgChannel.port2.postMessage(0);
+  }
+  private bgChannel: MessageChannel | null = null;
+  private bgQueue: (() => void)[] = [];
+  private resumeBackground(): void {
+    if (this.backgroundHeld() || !this.parked.size) return;
+    const p = [...this.parked];
+    this.parked.clear();
+    for (const [k, step] of p) this.later(k, step);
   }
 
   // ------------- level loading / rendering -------------
@@ -256,17 +287,18 @@ export class App {
       for (let k = 0; k < img.length; k++) if (img[k] !== base[k]) idx.push(k);
       const ix = Uint32Array.from(idx);
       a.frames.push({ idx: ix, val: ix.map((k) => img[k]) });
-      if (++i < snaps.length) setTimeout(step, 0);
+      if (++i < snaps.length) this.later('anim', step);
       else this.setBusy('anim', null);
       if (i === snaps.length && !a.timer) a.timer = window.setInterval(() => this.animTick(), 1000 / 7.5);
     };
-    setTimeout(step, 0);
+    this.later('anim', step);
   }
 
   animTick(): void {
     const a = this.anim;
     if (!a.frames.length || !a.base) return;
     if (!this.show.anim) { clearInterval(a.timer); a.timer = 0; return; }
+    if (this.backgroundHeld()) return;
     const img = this.compositeImg === a.base ? a.base.slice() : this.compositeImg;
     const prev = a.frames[a.phase];
     if (prev) for (const k of prev.idx) img[k] = a.base[k];
@@ -502,20 +534,20 @@ export class App {
         }
       }
       this.setBusy('sprites', `Sprite graphics ${Math.min(100, Math.round(i / all.length * 100))} %`);
-      const chunk = all.slice(i, i + 12);
-      i += 12;
+      const chunk = all.slice(i, i + 6); // one test level load (six sprite slots) per slice
+      i += 6;
       const r = this.emu.tracked(() => captureSprites(this.emu, lvNum, header, sh, bg, chunk));
       reads.add(r.reads);
       for (const [n, img] of r.result) { map.set(n, this.spriteCanvas(img)); images.push([n, img]); }
       this.emit('sprites');
-      if (i < all.length) setTimeout(step, 0);
+      if (i < all.length) this.later('sprites', step);
       else {
         this.results.set(`i3${key}`, images, this.results.fp.deps(reads));
         this.setBusy('sprites', null);
       }
     };
     this.setBusy('sprites', 'Sprite graphics');
-    this.cacheReady.then(() => setTimeout(step, 0));
+    this.cacheReady.then(() => this.later('sprites', step));
   }
 
   // image of sprite id (see spriteId) at tile (x, y): sprites that start differently depending on their
@@ -559,9 +591,9 @@ export class App {
       } catch (e) { console.error(e); }
       queue.shift();
       this.emit('sprites');
-      if (queue.length) setTimeout(step, 0);
+      if (queue.length) this.later('bytes', step);
     };
-    setTimeout(step, 0);
+    this.later('bytes', step);
   }
 
   private variantKey(num: number, at: { x: number; y: number }): string {
@@ -611,10 +643,10 @@ export class App {
       }
       queue.shift();
       this.emit('sprites');
-      if (queue.length) setTimeout(step, 0);
+      if (queue.length) this.later('variants', step);
       else this.setBusy('variants', null);
     };
-    setTimeout(step, 0);
+    this.later('variants', step);
   }
 
   // ------------- sprite memory (see spritemem.ts) -------------
@@ -670,13 +702,13 @@ export class App {
             done(res);
             return;
           }
-          if (performance.now() - t0 > 30) break;
+          if (performance.now() - t0 > BG_SLICE) break;
         }
       } catch (e) { console.error(e); this.setBusy('spritemem', null); return; }
-      setTimeout(step, 0);
+      this.later('spritemem', step);
     };
     this.setBusy('spritemem', 'Checking sprite memory');
-    setTimeout(step, 0);
+    this.later('spritemem', step);
   }
 
   // An edit (checkpoint since the previous check, same sprite memory) that makes further sprites
@@ -855,7 +887,7 @@ export class App {
       if (run !== this.scanRun || this.level !== lv) return;
       const t0 = performance.now();
       try {
-        while (performance.now() - t0 < 25) {
+        while (performance.now() - t0 < BG_SLICE) {
           const r = emu.tracked(() => job.next());
           reads.add(r.reads);
           if (r.result.done) {
@@ -865,10 +897,10 @@ export class App {
           }
         }
       } catch (e) { console.error(e); this.setBusy('scan', null); return; }
-      setTimeout(step, 0);
+      this.later('scan', step);
     };
     this.setBusy('scan', 'Level scan');
-    setTimeout(step, 0);
+    this.later('scan', step);
   }
 
   // What the four layer 3 settings do in a tileset (see layer3.ts): the level as edited is loaded
@@ -921,17 +953,12 @@ export class App {
   private arcs: JumpArcs | null = null;
   private arcLevel: Level | null = null; // the level state the arc emulator is prepared for
   private arcWant: { tx: number; ty: number; done: JumpArc[] } | null = null;
-  private arcChannel: MessageChannel | null = null;
 
   jumpArcs(tx: number, ty: number): JumpArc[] | undefined {
     const k = (ty << 16) | tx, c = this.arcCache.get(k);
     if (c) return c;
     if (this.arcWant?.tx !== tx || this.arcWant.ty !== ty) this.arcWant = { tx, ty, done: [] };
-    if (!this.arcChannel) {
-      this.arcChannel = new MessageChannel();
-      this.arcChannel.port1.onmessage = () => this.runArcs();
-    }
-    this.arcChannel.port2.postMessage(0);
+    this.later('arcs', () => this.runArcs());
     return undefined;
   }
 
@@ -952,11 +979,11 @@ export class App {
       }
       const runs = this.blockProber().runStates();
       const all = ARC_SPEEDS.flatMap((sp) => [{ sp, dir: 1 as const }, { sp, dir: -1 as const }]);
-      while (want.done.length < all.length && performance.now() - t0 < 30) {
+      while (want.done.length < all.length && performance.now() - t0 < BG_SLICE) {
         const { sp, dir } = all[want.done.length];
         want.done.push(this.arcs.arc(want.tx, want.ty, sp, dir, runs));
       }
-      if (want.done.length < all.length) { this.setBusy('arcs', 'Jump arcs'); this.arcChannel!.port2.postMessage(0); return; }
+      if (want.done.length < all.length) { this.setBusy('arcs', 'Jump arcs'); this.later('arcs', () => this.runArcs()); return; }
       this.arcCache.set((want.ty << 16) | want.tx, want.done);
     } catch (e) {
       console.error(e);
@@ -1008,11 +1035,7 @@ export class App {
       emu.skipMask = () => this.gfxSkipMask();
       const lv = { ...this.level, header: { ...this.level.header, tileset: ts } };
       job.probe = new ObjKindProbe(emu, lv, this.level.layer2Objects ? this.rom.r24(L2_PTRS + 0x105 * 3) : this.level.layer2Pointer);
-      if (!this.kindChannel) {
-        this.kindChannel = new MessageChannel();
-        this.kindChannel.port1.onmessage = () => this.runKindJob();
-      }
-      this.kindChannel.port2.postMessage(0);
+      this.later('kinds', () => this.runKindJob());
     });
   }
 
@@ -1021,8 +1044,8 @@ export class App {
     if (!j?.probe) return;
     const t0 = performance.now();
     try {
-      while (!j.probe.done && performance.now() - t0 < 30) j.probe.step();
-      if (!j.probe.done) { this.kindChannel!.port2.postMessage(0); return; }
+      while (!j.probe.done && performance.now() - t0 < BG_SLICE) j.probe.step();
+      if (!j.probe.done) { this.later('kinds', () => this.runKindJob()); return; }
       const k = j.probe.result();
       kvSet(`objkinds-${j.ts}`, storeKinds(k)).catch(() => {});
       this.setKinds(j.ts, k);
@@ -1087,11 +1110,7 @@ export class App {
   private scheduleProbes(): void {
     if (this.probeScheduled) return;
     this.probeScheduled = true;
-    if (!this.probeChannel) {
-      this.probeChannel = new MessageChannel();
-      this.probeChannel.port1.onmessage = () => this.runProbes();
-    }
-    this.cacheReady.then(() => this.probeChannel!.port2.postMessage(0));
+    this.cacheReady.then(() => this.later('probe', () => this.runProbes()));
   }
 
   // requested probes first, then prefetched ones; 'blockinfo' when either queue runs empty
@@ -1099,7 +1118,7 @@ export class App {
     this.probeScheduled = false;
     const t0 = performance.now();
     const hadAsked = this.probeQueue.length > 0, hadPrefetch = this.prefetchQueue.size > 0;
-    while ((this.probeQueue.length || this.prefetchQueue.size) && performance.now() - t0 < 30) {
+    while ((this.probeQueue.length || this.prefetchQueue.size) && performance.now() - t0 < BG_SLICE) {
       let t: number;
       if (this.probeQueue.length) t = this.probeQueue.shift()!;
       else { t = this.prefetchQueue.values().next().value!; this.prefetchQueue.delete(t); }

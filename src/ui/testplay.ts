@@ -27,7 +27,7 @@ const PADMAP: [number, number][] = [
   [12, 0x0800], [13, 0x0400], [14, 0x0200], [15, 0x0100], // d-pad
 ];
 const PAD_PAUSE = 16; // home / guide button
-const AUDIO_AHEAD = 1800; // sample pairs to keep queued (~56 ms)
+const AUDIO_LEAD = 1800; // sample pairs to keep queued at first (~56 ms; grows after underruns)
 
 // buttons of all connected gamepads; pause: the pause button is held on one of them
 function readPads(): { bits: number; pause: boolean; names: string[] } {
@@ -52,7 +52,7 @@ let soundMuted = false; // kept between test runs
 // at: Mario's start tile (his feet stand in it) instead of the main entrance
 export function openTestPlay(app: App, at?: { tx: number; ty: number }): void {
   // the sound emulator loads once; the audio context must start within the key press or click
-  const audio = new AudioOut();
+  const audio = new AudioOut(AUDIO_LEAD);
   if (!apuReady()) {
     loadApu().then(() => start(app, at, audio), () => start(app, at, audio));
     return;
@@ -145,7 +145,7 @@ function start(app: App, at: { tx: number; ty: number } | undefined, audio: Audi
     if (audio.ready && s.apu) {
       // paced by the audio clock: keep ~3 frames queued
       acc = 0;
-      while (!paused && audio.buffered() < AUDIO_AHEAD && n < 4) { frame(); n++; }
+      while (!paused && audio.buffered() < audio.lead && n < 4) { frame(); n++; }
     } else {
       while (acc >= 1000 / 60 && n < 4) {
         acc -= 1000 / 60;

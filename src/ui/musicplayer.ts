@@ -45,7 +45,7 @@ class MusicPlayer {
   private begin(label: string): { audio: AudioOut; token: number } {
     this.stop();
     this.error = null;
-    this.audio = new AudioOut();
+    this.audio = new AudioOut(AHEAD);
     this.label = label;
     this.emit();
     return { audio: this.audio, token: this.token };
@@ -56,7 +56,7 @@ class MusicPlayer {
       if (token !== this.token) return;
       if (audio.failed) { this.error = 'No audio output available'; this.stop(); return; }
       if (!audio.ready) return;
-      for (let n = 0; n < 8 && audio.buffered() < AHEAD; n++) {
+      for (let n = 0; n < 8 && audio.buffered() < audio.lead; n++) {
         const s = next();
         if (!s) { this.stop(); return; }
         audio.push(s);
