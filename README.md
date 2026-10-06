@@ -88,6 +88,14 @@ Beim Anzeigen eines Levels führt er die **originalen Laderoutinen** des ROMs au
 * **Zuordnung zu Leveln:** im Header-Dialog *Song for this level* oder im Music-Tab *Level* – jeder Song der ROM statt der
   8 Header-Einstellungen (Editor-Patch SMWU, wie der Music Bypass von Lunar Magic; funktioniert auch ohne AddmusicK mit
   den Songs des Original-Treibers). Beim Installieren/Entfernen von AddmusicK werden die Nummern umgerechnet.
+* **Song-Einstellungen** (Music-Tab, *Settings …*): Optionen, die ein Song über den Präprozessor von AddmusicK anbietet
+  (`#define NAME wert` außerhalb von `#if`-Blöcken, z. B. Tonart in „Faith in Wily“). Aus dem Song selbst abgeleitet:
+  Werte aus `#if NAME == v ; Text` werden eine Auswahl (beschriftet mit dem Kommentar oder mit Zeilen `; v = Text`
+  nach dem Define), nur mit `#ifdef`/`#ifndef` geprüfte Defines ein Schalter. Die Werte bleiben beim Song im Projekt und
+  werden erst beim Einfügen gesetzt – die Datei bleibt wie geliefert, *Reset* stellt die Werte des Songs wieder her; ▶ im
+  Dialog spielt den Song mit den gewählten Werten. Für alles andere: *Edit …* (die Song-Datei als Text); meldet AddmusicK
+  danach einen Fehler, bleibt alles beim Alten.
+* **Lautstärke** pro Song (25–300 %): skaliert die globale Lautstärke des Songs beim Einfügen.
 * **Abspielen (▶):** in der Songliste, im Header-Dialog und bei Paketen. Gespielt wird per Emulation, wie im Spiel: Das Level
   wird mit Soundchip geladen, das Spiel schickt seine Musik, danach läuft nur noch der SPC700 weiter.
 

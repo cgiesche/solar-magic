@@ -12,7 +12,7 @@ import { Apu, loadApu } from '../src/core/apu.ts';
 import { setLevelMusic, levelMusic } from '../src/core/patches.ts';
 import {
   emptyMusicProject, songsFromZip, addSongs, saveMusicProject, loadMusicProject, musicEntry, hasAmk, romSongs,
-  songSpcs, spcOf, removeSong, folders,
+  songSpcs, spcOf, removeSong, folders, songDefines, songWithDefines,
 } from '../src/core/music.ts';
 
 let fails = 0;
@@ -99,6 +99,62 @@ if (spc) {
     check(base > 0 && Math.abs(half / base - 0.5) < 0.08 && Math.abs(dbl / base - 2) < 0.3,
       `song volume ${what}: 50% → ${(half / base).toFixed(2)}, 200% → ${(dbl / base).toFixed(2)}`);
   }
+}
+
+// a song's settings: its #defines as AddmusicK's preprocessor takes them – choices from "#if NAME == v"
+// (labelled by the "; v = text" lines after the define), a flag tested with #ifdef, directives in
+// comments counted (the preprocessor runs before comments go), in quotes not – set when it is compiled,
+// the file otherwise as it was
+{
+  const orig = strFromU8(unzipSync(testSongZip())['Square Test/Square Test.txt']);
+  const txt = orig.replace('#0 @30 v220', `;=====;
+; Loudness
+;=====;
+
+; how loud it is
+\t#define LOUD 1 ; 1 - 2
+
+; 1 = full
+; 2 = soft
+
+; silence:
+#define MUTE
+; "#define NOPE 1" not here, but the next is: #define LATE 3
+
+#0 @30
+#if LOUD == 1 ; Full
+v220
+#endif
+#if LOUD == 2 ; Soft
+v60
+#endif
+#ifdef MUTE
+v0
+#endif
+`);
+  const defs = songDefines(txt);
+  const loud = defs.find((d) => d.name === 'LOUD'), mute = defs.find((d) => d.name === 'MUTE');
+  check(defs.length === 3 && defs[2]?.name === 'LATE' && defs[2].value === '3' && loud?.value === '1' && loud.section === 'Loudness' && loud.doc === 'how loud it is' && loud.comment === '1 - 2'
+    && JSON.stringify(loud.choices) === JSON.stringify([{ value: '1', label: 'full' }, { value: '2', label: 'soft' }]),
+    `song settings found: a choice with labels (${JSON.stringify(loud)})`);
+  check(!!mute && mute.flag && mute.value === '' && mute.doc === 'silence:', `a flag (${JSON.stringify(mute)})`);
+  const set = songWithDefines(txt, { LOUD: '2', MUTE: null });
+  check(set === txt.replace('#define LOUD 1', '#define LOUD 2').replace('#define MUTE\n', '\n'), 'settings set in the song text (a flag turned off taken out), the rest unchanged');
+  const z = unzipSync(testSongZip());
+  z['Square Test/Square Test.txt'] = strToU8(txt);
+  const pd = emptyMusicProject();
+  const [sd] = addSongs(pd, songsFromZip('Defs.zip', zipSync(z)));
+  const peakOf = async (defines?: Record<string, string | null>) => {
+    sd.defines = defines;
+    const r = await songSpcs(pd, [sd.file]);
+    const spc = spcOf(r.spcs, sd.file);
+    if (!spc) { console.log('  ', r.errors.join(' ')); return -1; }
+    const a = new Apu(); a.loadSpc(spc);
+    return peak(a.play(32000));
+  };
+  const muted = await peakOf(), full = await peakOf({ MUTE: null }), soft = await peakOf({ LOUD: '2', MUTE: null });
+  check(full > 1000 && soft > 0 && soft < full * 0.6 && muted === 0, `settings take effect when compiled (peak ${full}, soft ${soft}, muted ${muted})`);
+  check(strFromU8(pd.files.get(sd.file)!) === txt, 'the song file stays as it came');
 }
 
 // level 106 set to the song of header setting 2 of the original driver (installs the music patch before

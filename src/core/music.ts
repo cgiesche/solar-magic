@@ -28,6 +28,7 @@ export interface MusicSong {
   file: string; // the .txt, relative to AddmusicK's music folder ("<folder>/<song>.txt")
   name: string; // shown in the editor
   volume?: number; // loudness in percent of the song's own (100 when not set), see songWithVolume
+  defines?: Record<string, string | null>; // settings differing from the song's own (null: not defined), see songWithDefines
 }
 
 export interface MusicProject {
@@ -276,12 +277,131 @@ export function songWithVolume(text: string, percent: number): string {
   return out;
 }
 
+// ---------- settings of a song ----------
+
+// A setting of a song: a "#define NAME value" of AddmusicK's preprocessor outside its #if…#endif
+// blocks, as songs offer options (another key, an instrument on or off). How the song tests it gives
+// the form: values compared with "#if NAME == v ; label" are choices (labelled by the comment, or by a
+// "; v = text" line in the comments after the define), a define only tested with #ifdef/#ifndef is on
+// or off. Read as the preprocessor does: directives anywhere outside quotes – comments go only after it,
+// so "; #define X" defines X too – and the value up to the next space.
+export interface SongDefine {
+  name: string;
+  value: string; // the song's own value ('' for a define without one)
+  line: number;
+  start: number; // "#define NAME value" in the line
+  end: number;
+  comment: string; // after it on its line
+  doc: string; // the comment lines right above
+  section: string; // the heading it is under (";=== Title ===" or a title between two such lines)
+  choices: { value: string; label: string }[];
+  flag: boolean;
+}
+
+const DIRECTIVE_RE = /#(define|undef|ifdef|ifndef|if|endif)(?=[ \t\r]|$)(?:[ \t]+([^ \t\r]+))?(?:[ \t]+([^ \t\r]+))?(?:[ \t]+([^ \t\r]+))?/g;
+const SEP_RE = /^;\s*[=\-*#~]{3,}\s*(.*?)\s*[=\-*#~;]*\s*$/;
+// quoted text (replacements, file names) blanked out, at the same length
+const unquoted = (l: string) => l.replace(/"[^"]*"/g, (q) => '"' + '_'.repeat(q.length - 2) + '"');
+
+export function songDefines(text: string): SongDefine[] {
+  const lines = text.split(/\r?\n/);
+  const dirs = lines.map((l) => [...unquoted(l).matchAll(DIRECTIVE_RE)]);
+  // how each name is tested
+  const tested = new Map<string, { ifdef: boolean; cmp: boolean; eq: Map<string, string> }>();
+  const use = (n: string) => tested.get(n) ?? (tested.set(n, { ifdef: false, cmp: false, eq: new Map() }), tested.get(n)!);
+  dirs.forEach((ds, i) => {
+    for (const m of ds) {
+      if (!m[2]) continue;
+      if (m[1] === 'ifdef' || m[1] === 'ifndef') use(m[2]).ifdef = true;
+      else if (m[1] === 'if') {
+        const u = use(m[2]);
+        u.cmp = true;
+        const rest = lines[i].slice(m.index + m[0].length);
+        if (m[3] === '==' && m[4] && !u.eq.has(m[4])) u.eq.set(m[4], rest.includes(';') ? rest.slice(rest.indexOf(';')).replace(/^;+/, '').trim() : '');
+      }
+    }
+  });
+  const out: SongDefine[] = [];
+  let depth = 0, section = '', above: string[] = [], sepAt = -2;
+  lines.forEach((l, i) => {
+    let def: RegExpMatchArray | null = null;
+    for (const m of dirs[i]) {
+      if (m[1] === 'define' && depth === 0 && m[2] && !def) def = m;
+      else if (m[1] === 'endif') depth = Math.max(0, depth - 1);
+      else if (m[1].startsWith('if')) depth++;
+    }
+    if (!def) {
+      const t = l.trim();
+      const sep = SEP_RE.exec(t);
+      if (dirs[i].length) above = [];
+      else if (sep) {
+        if (sep[1]) section = sep[1];
+        else if (above.length && sepAt === i - above.length - 1) section = above.join(' ').trim();
+        above = [];
+        sepAt = i;
+      } else if (t.startsWith(';')) above.push(t.replace(/^;+\s?/, ''));
+      else above = [];
+      return;
+    }
+    const doc = above.join('\n').trim();
+    above = [];
+    const name = def[2]!;
+    if (out.some((d) => d.name === name)) return;
+    // "#define NAME" alone (AddmusicK's 1), or with a value
+    const value = def[3] ?? '';
+    const end = def.index! + /^#define[ \t]+[^ \t\r]+(?:[ \t]+[^ \t\r]+)?/.exec(unquoted(l).slice(def.index))![0].length;
+    // "; v = text" lines in the comments after it label the values (up to the next code or heading)
+    const labels = new Map<string, string>();
+    for (let j = i + 1; j < lines.length; j++) {
+      const t = lines[j].trim();
+      if (t && (!t.startsWith(';') || SEP_RE.exec(t)?.[1] || dirs[j].length)) break;
+      const lm = /^;+\s*(-?\d+)\s*[=:)\-]\s*(.+)$/.exec(t);
+      if (lm) labels.set(lm[1], lm[2].trim());
+    }
+    const u = tested.get(name);
+    const choices = [...(u?.eq ?? new Map<string, string>())].map(([v, c]) => ({ value: v, label: labels.get(v) ?? c }));
+    if (choices.length && !choices.some((c) => c.value === value)) choices.unshift({ value, label: labels.get(value) ?? '' });
+    out.push({
+      name, value, line: i, start: def.index!, end, comment: l.slice(end).trim().replace(/^;+\s*/, '').trim(), doc, section,
+      choices: choices.length > 1 ? choices : [], flag: !!u?.ifdef && !u.cmp,
+    });
+  });
+  return out;
+}
+
+// the song with its settings set to `values` (null: not defined – the "#define" taken out of its line);
+// names it doesn't define are left out
+export function songWithDefines(text: string, values: Record<string, string | null>): string {
+  const lines = text.split(/(?<=\n)/);
+  for (const d of songDefines(text)) {
+    if (!(d.name in values)) continue;
+    const v = values[d.name];
+    const l = lines[d.line];
+    lines[d.line] = l.slice(0, d.start) + (v === null ? '' : `#define ${d.name}${v === '' ? '' : ' ' + v}`) + l.slice(d.end);
+  }
+  return lines.join('');
+}
+
+// a setting's value AddmusicK takes: a whole number, or nothing for a define only tested with #ifdef
+export const validDefine = (v: string) => /^-?\d+$/.test(v);
+
+// the song file as AddmusicK gets it: its settings, then its volume
+export function songText(p: MusicProject, s: MusicSong): string | null {
+  const c = p.files.get(s.file);
+  if (!c) return null;
+  let t = strFromU8(c, true);
+  if (s.defines && Object.keys(s.defines).length) t = songWithDefines(t, s.defines);
+  if (s.volume && s.volume !== 100) t = songWithVolume(t, s.volume);
+  return t;
+}
+
 export function amkFiles(p: MusicProject): Map<string, Uint8Array | string> {
   const files = new Map<string, Uint8Array | string>();
   for (const [f, c] of p.files) files.set('music/' + f, c);
   for (const s of p.songs) {
-    const c = p.files.get(s.file);
-    if (c && s.volume && s.volume !== 100) files.set('music/' + s.file, strToU8(songWithVolume(strFromU8(c, true), s.volume), true));
+    if (!(s.volume && s.volume !== 100) && !(s.defines && Object.keys(s.defines).length)) continue;
+    const t = songText(p, s);
+    if (t !== null) files.set('music/' + s.file, strToU8(t, true));
   }
   files.set('Addmusic_list.txt', amkList(p));
   // sample groups the songs brought along (runAmk adds them to AddmusicK's own)
