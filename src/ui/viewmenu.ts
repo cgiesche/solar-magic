@@ -31,6 +31,7 @@ export function viewMenu(app: App, paint: () => void, full = true): HTMLElement 
     show('screens', 'Screen boundaries'), show('grid', 'Grid', undefined, 'G'),
     show('ghost', 'Inactive layer translucent', 'Object layer not being edited shown semi-transparent (only levels with layer 2 objects)'),
     show('items', 'Block contents', 'Contents of blocks (found by emulation) semi-transparent over the blocks, arrows at enterable blocks (pipes, doors)'),
+    show('collision', 'Collision', 'How Mario collides with layer 1 (found by emulation): solid sides white, platforms dashed, slopes diagonal; red hurts, blue water, green climbable', 'C'),
     anim,
     ...state,
   ] : [{ heading: 'Level preview' }, anim, ...state] });

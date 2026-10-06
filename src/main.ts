@@ -318,6 +318,7 @@ function buildUi(app: App): void {
     else if (k === 'PageUp') app.reorderSelection('front');
     else if (k === 'PageDown') app.reorderSelection('back');
     else if (k === 'g' || k === 'G') { app.show.grid = !app.show.grid; view.paint(); }
+    else if (k === 'c' || k === 'C') { app.show.collision = !app.show.collision; view.paint(); }
     else if (k === 'm' || k === 'M') setWorkspace('gfx', { tab: 'map16', tile: view.hover ? hoverTile(app, view.hover.tx, view.hover.ty) : undefined });
     else if (k === 'p' || k === 'P') setWorkspace('gfx', { tab: 'pal' });
     else if (k === 'a' || k === 'A') setWorkspace('gfx', { tab: 'anim' });
@@ -369,7 +370,7 @@ function showHelp(): void {
       ['Ctrl+A · Esc', 'Select all · deselect'],
       ['Ctrl+C / Ctrl+V / Ctrl+D', 'Copy / paste at the mouse / duplicate'],
       ['PgUp / PgDn', 'Bring to front / send to back (drawing order)'],
-      ['H · G', 'Level header · grid on/off'],
+      ['H · G · C', 'Level header · grid on/off · collision overlay on/off'],
       ['T · Shift+T', 'Test level · Mario starts at the mouse'],
     ]],
     ['Overworld', [

@@ -24,7 +24,7 @@ import { toast, log as logMsg } from './dom.ts';
 import { ExitGraph, exitTarget } from '../core/exitgraph.ts';
 import { RomHistory, type RomEdit } from '../core/romhistory.ts';
 import { ObjKindProbe, kindsStillValid, storeKinds, loadKinds, resizeObjectSize, type ObjKind, type ObjKinds, type StoredObjKinds } from '../core/objkinds.ts';
-import { BlockProber, variantOf, type BlockProbe, type SpriteProbe } from '../core/blockprobe.ts';
+import { BlockProber, variantOf, type BlockProbe, type SpriteProbe, type CollisionProbe } from '../core/blockprobe.ts';
 
 export type EditMode = 'l1' | 'l2' | 'spr' | 'exit' | 'bg';
 export type PaletteItem =
@@ -37,6 +37,7 @@ type Listener = () => void;
 
 const CACHE_PREFIX = 'rc3:'; // IndexedDB keys of the result cache (bump when result formats change or old results may be wrong: rc3 after the stale boot snapshot fix)
 const PROBE_SPRITE = 0x10000; // probe queue key flag: sprite number instead of Map16 tile
+const PROBE_COLL = 0x20000; // probe queue key flag: collision of a Map16 tile
 const SPRITE_PROBE_END = 0xc9; // sprites from $C9 on are shooters, generators and run-once sprites
 
 // result of the sprite memory check (see App.checkSpriteMem); gen: App.editGen when it started
@@ -59,7 +60,7 @@ export class App {
   // BG mode brush: a w×h block of BG Map16 tiles (row-major), picked from the palette sheet or the level
   bgBrush: { w: number; h: number; tiles: number[] } = { w: 1, h: 1, tiles: [0] };
   zoom = 2;
-  show = { layer1: true, layer2: true, layer3: true, sprites: true, grid: false, screens: true, exits: true, ghost: true, anim: false, items: true };
+  show = { layer1: true, layer2: true, layer3: true, sprites: true, grid: false, screens: true, exits: true, ghost: true, anim: false, items: true, collision: false };
   // view-only game state applied before the emulated level load
   switches = { palaces: false, onOff: false };
   dirty = false;
@@ -87,7 +88,7 @@ export class App {
   // block behaviour probes (emulated hits), run in the background
   prober: BlockProber | null = null;
   proberGen = -1;
-  probeQueue: number[] = []; // Map16 tiles; sprites as PROBE_SPRITE | num
+  probeQueue: number[] = []; // Map16 tiles; sprites as PROBE_SPRITE | num, collision as PROBE_COLL | tile
   prefetchQueue = new Set<number>(); // the same, probed when probeQueue is empty
   probeFailed = new Set<number>();
   probeScheduled = false;
@@ -797,6 +798,13 @@ export class App {
     return p;
   }
 
+  // How Mario collides with a Map16 tile (probed on demand, 'blockinfo' when done)
+  collisionInfo(tile: number): CollisionProbe | undefined {
+    const p = this.blockProber().cachedCollision(tile);
+    if (!p) this.queueProbe(PROBE_COLL | tile);
+    return p;
+  }
+
   // the same for a sprite id hit from below (normal sprites only, not shooters/generators)
   spriteInfo(num: number): SpriteProbe | undefined {
     if (num < 0x200 ? num >= SPRITE_PROBE_END : (num & 0xff) >= 0xc0) return undefined;
@@ -934,7 +942,9 @@ export class App {
       if (this.probeQueue.length) t = this.probeQueue.shift()!;
       else { t = this.prefetchQueue.values().next().value!; this.prefetchQueue.delete(t); }
       try {
-        if (t & PROBE_SPRITE) this.prober?.probeSprite(t & 0x3ff); else this.prober?.probe(t);
+        if (t & PROBE_SPRITE) this.prober?.probeSprite(t & 0x3ff);
+        else if (t & PROBE_COLL) this.prober?.probeCollision(t & 0xffff);
+        else this.prober?.probe(t);
       } catch (e) { console.error(e); this.probeFailed.add(t); }
     }
     this.probeBusy();

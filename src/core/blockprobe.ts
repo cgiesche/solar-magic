@@ -14,6 +14,9 @@
 // Whether a tile can be entered (pipes, doors) is found out the same way: Mario stands on, below,
 // beside or in front of it and holds a direction; entering shows as a change of his animation
 // state or the game mode that a run without the button doesn't show.
+// How Mario collides with a tile (the collision overlay) is found out the same way: he drops onto
+// it at both ends (a different landing height is a slope), walks against it from both sides on a
+// floor, jumps against it from below and stands inside a passable one (water, vines and nets).
 // Some tiles behave differently per tileset (vanilla: the boss door tile 9C can only be entered in
 // castle tilesets), so the probe level gets the tileset of the edited level and results are kept
 // per tileset.
@@ -38,6 +41,7 @@ const SPRITE_ROW = 6; // probed sprites go to rows 6-21 (Mario fits below them, 
 const PROBE_CAM_Y_MAX = 0x1b * 16 - 224;
 const MAX_VARIANTS = 16; // more X × Y combinations: Y is ignored
 const ENTER_FRAMES = 24;
+const COLLISION_VERSION = 2; // part of the result key: raise when the collision probe changes
 const SETTLE_FRAMES = 6; // frames Mario has to stand still before a probe stops early
 const marioY = (w: Uint8Array) => w[0x96] | (w[0x97] << 8);
 // joypad bits ($4218) and Mario's offset to the tile for each enter direction
@@ -71,6 +75,21 @@ export interface BlockProbe extends ColumnProbe {
   tile: number;
   enter: string; // directions to hold to enter it (pipes, doors) as arrows ↓↑←→, '' = none
 }
+// How Mario collides with a tile; slope: how far below the tile top Mario stands at its left and
+// right edge (null: flat or no floor)
+export interface CollisionProbe {
+  top: boolean; // Mario can stand on it
+  bottom: boolean; // stops him from below
+  left: boolean; // stops him walking right against its left side
+  right: boolean;
+  slope: [number, number] | null;
+  hurtsTop: boolean; // standing on it (or falling into it) hurts
+  hurtsSide: boolean; // walking against it hurts
+  kills: boolean; // touching it kills even big Mario (lava)
+  water: boolean; // swimming inside it
+  climb: boolean; // climbing inside it (vines, nets)
+}
+
 // positions (low nibbles of the tile X and Y) a sprite behaves differently at
 export interface SpriteVariants {
   xs: number[]; // X class by X & 15
@@ -168,6 +187,14 @@ export class BlockProber {
       const c = columns((col, big) => this.hit(tile, big, col), tile);
       return { tile, ...c, enter: this.enterDirs(tile, c.solid) };
     });
+  }
+
+  cachedCollision(tile: number): CollisionProbe | undefined {
+    return this.results.get(`c${COLLISION_VERSION}.${this.tileset}:${tile}`);
+  }
+
+  probeCollision(tile: number): CollisionProbe {
+    return this.cachedCollision(tile) ?? this.computed(`c${COLLISION_VERSION}.${this.tileset}:${tile}`, () => this.collision(tile));
   }
 
   cachedSprite(num: number): SpriteProbe | undefined {
@@ -402,6 +429,87 @@ export class BlockProber {
     }
   }
 
+  private collision(tile: number): CollisionProbe {
+    const bx = 16, by = this.by, ty = by * 16;
+    // drop: Mario (big, so damage shows as losing the powerup) falls onto the tile with his middle
+    // above pixel cx of it; landing: his Y when he first stands
+    const drop = (cx: number, t = tile) => {
+      const w = this.start(bx, 1);
+      this.put(bx, by, t);
+      this.placeMario(bx * 16 + cx - 8, ty, -40, 0);
+      let land = -1, hurt = false, dead = false, still = 0;
+      try {
+        for (let f = 0; f < PROBE_FRAMES && still < SETTLE_FRAMES; f++) {
+          this.emu.snes.runFrame();
+          if (w[0x71] === 9) { dead = true; break; }
+          if (w[0x19] < 1) hurt = true;
+          if (w[0x77] & 4) { if (land < 0 && marioY(w) < ty) land = marioY(w); still++; } else still = 0;
+        }
+      } catch { /* what was seen */ }
+      return { land, hurt, dead };
+    };
+    // (at a slope's low end Mario may fall through: it needs the tile below; three drops, the
+    // outermost that land give the slope)
+    const drops = [3, 8, 13].map((cx) => ({ cx, ...drop(cx) }));
+    const landed = drops.filter((d) => d.land >= 0);
+    const top = landed.length > 0;
+    // how far below the top of a flat floor tile Mario stands at the tile's edges
+    let slope: [number, number] | null = null;
+    const floor = this.floor();
+    const a = landed[0], b = landed[landed.length - 1];
+    if (landed.length >= 2 && a.land !== b.land && floor >= 0) {
+      const flat = drop(8, floor).land;
+      if (flat >= 0) {
+        const k = (b.land - a.land) / (b.cx - a.cx), at = (x: number) => Math.round(a.land - flat + k * (x - a.cx));
+        slope = [at(0), at(16)];
+      }
+    }
+    // walk against a side on a floor next to it; blocked right ($77 bit 0) / left (bit 1)
+    const walk = (fromLeft: boolean) => {
+      if (floor < 0) return { blocked: false, hurt: false, dead: false };
+      const w = this.start(bx, 1);
+      for (let x = bx - 4; x <= bx + 4; x++) this.put(x, by + 1, floor);
+      this.put(bx, by, tile);
+      this.placeMario(bx * 16 + (fromLeft ? -20 : 20), ty, -16, 0);
+      const s = this.emu.snes;
+      let blocked = false, hurt = false, dead = false;
+      try {
+        for (let f = 0; f < PROBE_FRAMES; f++) {
+          s.joy1 = fromLeft ? PAD.right : PAD.left;
+          s.runFrame();
+          if (w[0x71] === 9) { dead = true; break; }
+          if (w[0x19] < 1) hurt = true;
+          if (w[0x77] & (fromLeft ? 1 : 2)) blocked = true;
+        }
+      } catch { /* what was seen */ }
+      s.joy1 = 0;
+      return { blocked, hurt, dead };
+    };
+    const l = walk(true), r = walk(false);
+    const bottom = this.hit(tile, 0, 0).solid;
+    // inside a passable tile: water ($75) or climbing ($74, holding up)
+    let water = false, climb = false;
+    if (!top && !bottom && !l.blocked && !r.blocked) {
+      const w = this.start(bx, 0), s = this.emu.snes;
+      for (let y = by - 1; y <= by + 1; y++) for (let x = bx - 1; x <= bx + 1; x++) this.put(x, y, tile);
+      this.placeMario(bx * 16, ty, -16, 0);
+      try {
+        for (let f = 0; f < 8; f++) {
+          s.joy1 = PAD.up;
+          s.runFrame();
+          if (w[0x75]) water = true;
+          if (w[0x74]) climb = true;
+        }
+      } catch { /* what was seen */ }
+      s.joy1 = 0;
+    }
+    return {
+      top, bottom, left: l.blocked, right: r.blocked, slope,
+      hurtsTop: drops.some((d) => d.hurt), hurtsSide: l.hurt || r.hurt, kills: drops.some((d) => d.dead) || l.dead || r.dead,
+      water, climb,
+    };
+  }
+
   private hit(tile: number, big: number, col: number): HitResult {
     const bx = 16 + col, by = this.by;
     const w = this.start(bx, big);
@@ -524,6 +632,25 @@ function summarize(tile: number, small: HitResult, big: HitResult): string | nul
 export function probeText(p: ColumnProbe | BlockProbe, x?: number): string {
   const s = x === undefined ? p.summary : probeAt(p, x).summary;
   return (s ?? (p.solid ? 'from below: solid, no effect' : 'from below: passable')) + enterSuffix(p);
+}
+
+// "solid: top, sides · hurts on top" for the status bar
+export function collisionText(c: CollisionProbe): string {
+  const sides = [c.left && 'left', c.right && 'right'].filter(Boolean);
+  const solid = [c.top && 'top', c.bottom && 'bottom', ...(sides.length === 2 ? ['sides'] : sides)].filter(Boolean);
+  const p: string[] = [];
+  if (c.slope) p.push(`slope ${c.slope[0]}→${c.slope[1]} px`);
+  else if (solid.length === 4 || (solid.length === 3 && sides.length === 2)) p.push('solid');
+  else if (c.top && solid.length === 1) p.push('platform (solid from above)');
+  else if (solid.length) p.push(`solid: ${solid.join(', ')}`);
+  else p.push('passable');
+  if (c.kills) p.push('kills');
+  else if (c.hurtsTop && c.hurtsSide) p.push('hurts');
+  else if (c.hurtsTop) p.push('hurts on top');
+  else if (c.hurtsSide) p.push('hurts from the side');
+  if (c.water && !c.kills) p.push('water');
+  if (c.climb) p.push('climbable');
+  return p.join(' · ');
 }
 
 export function enterText(enter: string): string {

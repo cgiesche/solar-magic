@@ -4,7 +4,7 @@ import { App, type Marker } from './app.ts';
 import { h, attachPanZoom, downloadBytes, toast } from './dom.ts';
 import { objectName, hex2, hex3 } from '../core/names.ts';
 import { resizeObjectSize } from '../core/objkinds.ts';
-import { probeAt, spriteProbeAt, enterText, type PosProbe } from '../core/blockprobe.ts';
+import { probeAt, spriteProbeAt, enterText, collisionText, type PosProbe, type CollisionProbe } from '../core/blockprobe.ts';
 import { type LevelObject, type LevelSprite, newUid, serializeLayer1, serializeLayer2, serializeSprites, spriteSizes, spriteId } from '../core/level.ts';
 import { composite } from '../core/render.ts';
 import { exitTarget } from '../core/exitgraph.ts';
@@ -226,6 +226,7 @@ export class LevelView {
       ctx.fillText(st.label, m.x + 5, m.y + 27.5);
       if (m.kind === 'sec') ctx.fillText(hex3(m.index), m.x + 15, m.y + 27.5);
     }
+    if (app.show.collision) this.paintCollision(ctx);
     if (app.show.items) this.paintItems(ctx);
     // sprites
     if (app.show.sprites) this.paintSprites(ctx, z);
@@ -307,6 +308,72 @@ export class LevelView {
       ctx.fillStyle = '#4cc2ff';
       ctx.fillRect(b.x1 * 16 + 11, b.y1 * 16 + 11, hs, hs);
     }
+  }
+
+  // tiles of layer 1 in view: x0..x1, y0..y1 (exclusive)
+  private visibleTiles(): { x0: number; y0: number; x1: number; y1: number } {
+    const g = this.app.images.geom1, z = this.app.zoom;
+    const x0 = Math.max(0, Math.floor(this.scroller.scrollLeft / z / 16)), y0 = Math.max(0, Math.floor(this.scroller.scrollTop / z / 16));
+    return { x0, y0, x1: Math.min(g.width, x0 + Math.ceil(this.scroller.clientWidth / z / 16) + 1), y1: Math.min(g.height, y0 + Math.ceil(this.scroller.clientHeight / z / 16) + 1) };
+  }
+
+  // How Mario collides with layer 1 (found by emulation): the level is dimmed, solid sides are
+  // white lines where they face something passable, platforms (solid from above only) dashed,
+  // slopes diagonal; red: hurts (stronger: kills), blue: water, green: climbable.
+  paintCollision(ctx: CanvasRenderingContext2D): void {
+    const app = this.app, g = app.images.geom1, w = app.render.wram;
+    if (!app.show.layer1) return;
+    const { x0, y0, x1, y1 } = this.visibleTiles();
+    const info = new Map<number, CollisionProbe | undefined>();
+    const at = (x: number, y: number): CollisionProbe | undefined => {
+      const a = g.addr(x, y);
+      if (a < 0) return undefined;
+      const t = w[a] | (w[a + 0x10000] << 8);
+      if (!info.has(t)) info.set(t, app.collisionInfo(t));
+      return info.get(t);
+    };
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    ctx.fillRect(x0 * 16, y0 * 16, (x1 - x0) * 16, (y1 - y0) * 16);
+    const lw = 2 / app.zoom;
+    const solidLines = new Path2D(), platLines = new Path2D();
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+      const c = at(x, y);
+      if (!c) continue;
+      const px = x * 16, py = y * 16;
+      const fill = c.kills ? 'rgba(255,30,30,0.6)' : c.hurtsTop || c.hurtsSide ? 'rgba(255,70,70,0.4)'
+        : c.water ? 'rgba(60,140,255,0.35)' : c.climb ? 'rgba(60,220,90,0.35)' : null;
+      if (fill) { ctx.fillStyle = fill; ctx.fillRect(px, py, 16, 16); }
+      if (c.slope) {
+        // the surface within the tile (steep slopes measure beyond it)
+        const [l, r] = c.slope, k = (r - l) / 16, xAt = (yy: number) => (yy - l) / k;
+        let xa = 0, xb = 16;
+        if (k !== 0) {
+          const lo = Math.min(xAt(0), xAt(16)), hi = Math.max(xAt(0), xAt(16));
+          xa = Math.max(0, lo); xb = Math.min(16, hi);
+        }
+        const yAt = (xx: number) => Math.max(0, Math.min(16, l + k * xx));
+        solidLines.moveTo(px + xa, py + yAt(xa));
+        solidLines.lineTo(px + xb, py + yAt(xb));
+        continue;
+      }
+      const full = c.bottom || c.left || c.right;
+      if (c.top && !full) {
+        if (!at(x, y - 1)?.bottom) { platLines.moveTo(px, py); platLines.lineTo(px + 16, py); }
+        continue;
+      }
+      // sides facing a tile that doesn't close them off
+      if (c.top && !at(x, y - 1)?.bottom) { solidLines.moveTo(px, py); solidLines.lineTo(px + 16, py); }
+      if (c.bottom && !at(x, y + 1)?.top) { solidLines.moveTo(px, py + 16); solidLines.lineTo(px + 16, py + 16); }
+      if (c.left && !at(x - 1, y)?.right) { solidLines.moveTo(px, py); solidLines.lineTo(px, py + 16); }
+      if (c.right && !at(x + 1, y)?.left) { solidLines.moveTo(px + 16, py); solidLines.lineTo(px + 16, py + 16); }
+    }
+    ctx.lineWidth = lw;
+    ctx.strokeStyle = '#fff';
+    ctx.stroke(solidLines);
+    ctx.strokeStyle = '#7fe0ff';
+    ctx.setLineDash([3 * lw, 2 * lw]);
+    ctx.stroke(platLines);
+    ctx.setLineDash([]);
   }
 
   // translucent image of the item a block (visible part of layer 1) or sprite gives, drawn over it
@@ -626,6 +693,8 @@ export class LevelView {
       const p = app.mode === 'bg' ? undefined : app.blockInfo(t); // result arrives via 'blockinfo'
       const sum = [p && probeAt(p, tx).summary, p && enterText(p.enter)].filter(Boolean).join(', ');
       if (sum) txt += ` (${sum})`;
+      const c = app.show.collision && app.mode !== 'bg' ? app.collisionInfo(t) : undefined;
+      if (c) txt += ` · ${collisionText(c)}`;
     }
     if (app.mode === 'bg') {
       const b = app.bgBrush;
