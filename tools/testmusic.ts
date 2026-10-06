@@ -60,6 +60,24 @@ if (spc) {
   check(!!spcOf(r2.spcs, s2.file) && r2.errors.length === 0, `SPC of a song with ../ samples (${r2.errors.join(' ')})`);
 }
 
+// a song whose sample group the readme defines for "Addmusic_sample groups.txt", in #SAMPLES written in
+// capitals, with channel 0 reached by a replacement ("Channel # = #" … "Channel #0", as in Faith in Wily)
+{
+  const z = unzipSync(testSongZip());
+  const txt = strFromU8(z['Square Test/Square Test.txt']).replace('#samples', '#SAMPLES').replace('#optimized', '#mygroup')
+    .replace('#0 @30', '"Channel # = #"\nChannel #0 @30');
+  z['Square Test/Square Test.txt'] = strToU8(txt);
+  z['Square Test/readme.txt'] = strToU8('Add this to Addmusic_sample groups.txt:\n#mygroup\n{\n\t"optimized/00 SMW @0.brr"!\n\t"EMPTY.brr"!\n}\n');
+  const sf3 = songsFromZip('Group.zip', zipSync(z));
+  check(sf3.songs.length === 1 && sf3.missing.length === 0, `song with its own sample group found (${sf3.songs.length}; ${sf3.missing.join(', ')})`);
+  const p3 = emptyMusicProject();
+  const [s3] = addSongs(p3, sf3);
+  const r3 = await songSpcs(p3, [s3.file]);
+  check(!!spcOf(r3.spcs, s3.file) && r3.errors.length === 0, `SPC of a song with its own sample group (${r3.errors.join(' ')})`);
+  z['Square Test/readme.txt'] = strToU8('Insert with AddmusicK.');
+  check(songsFromZip('Group.zip', zipSync(z)).missing.includes('sample group #mygroup'), 'undefined sample group reported missing');
+}
+
 // level 106 set to the song of header setting 2 of the original driver (installs the music patch before
 // inserting, so the editor's patches are part of the ROM to restore)
 const vanillaSong = rom.r8(0x0584db + 2);

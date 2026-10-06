@@ -39,7 +39,8 @@ function dotDotDirs(text: string): string[] {
 }
 
 // files: paths relative to AddmusicK's folder ("music/…", "Addmusic_list.txt") → contents, written
-// over AddmusicK's own; args: its command line without the ROM name
+// over AddmusicK's own – except "Addmusic_sample groups.txt", whose groups are added to AddmusicK's
+// own; args: its command line without the ROM name
 export async function runAmk(rom: Uint8Array | null, files: Map<string, Uint8Array | string>, args: string[] = []): Promise<AmkResult> {
   await loadAmk();
   const out: string[] = [], err: string[] = [];
@@ -49,7 +50,12 @@ export async function runAmk(rom: Uint8Array | null, files: Map<string, Uint8Arr
   for (const [p, c] of files) {
     const dir = p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '';
     if (dir) fs.mkdirTree('/amk/' + dir);
-    fs.writeFile('/amk/' + p, c);
+    if (p === 'Addmusic_sample groups.txt') {
+      const own: Uint8Array = fs.readFile('/amk/' + p), add = typeof c === 'string' ? new TextEncoder().encode(c) : c;
+      const all = new Uint8Array(own.length + 2 + add.length);
+      all.set(own); all.set([10, 10], own.length); all.set(add, own.length + 2);
+      fs.writeFile('/amk/' + p, all);
+    } else fs.writeFile('/amk/' + p, c);
     if (dir.startsWith('music/') && /\.txt$/i.test(p)) for (const d of dotDotDirs(typeof c === 'string' ? c : new TextDecoder('latin1').decode(c))) {
       fs.mkdirTree(`/amk/${dir}/${d}`);
       fs.mkdirTree(`/amk/samples/${d}`);

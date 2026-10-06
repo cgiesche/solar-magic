@@ -49,9 +49,11 @@ export const originalName = (file: string) => file.replace(/^originals\/\d+ /, '
 
 const dec = (b: Uint8Array) => strFromU8(b, true).replace(/^﻿/, '');
 
-// an AddmusicK song (or Addmusic 4.05 / AddmusicM one) rather than a readme
+// an AddmusicK song (or Addmusic 4.05 / AddmusicM one) rather than a readme; channel 0 may follow other
+// text on its line, e.g. a replacement ("Channel # = #" … "Channel #0")
 export function isSongText(text: string): boolean {
-  return /^\s*#(amk|am4|amm|samples|instruments|spc|0)\b/m.test(text) && /^\s*#0\b/m.test(text);
+  const code = text.replace(/;[^\n]*/g, '');
+  return /^\s*#(amk|am4|amm|samples|instruments|spc|0)\b/m.test(code) && /#0\b/.test(code);
 }
 
 // #title of the song's #spc block
@@ -60,23 +62,40 @@ export function songTitle(text: string): string | null {
   return m && m[1].trim() ? m[1].trim() : null;
 }
 
-// the samples a song names (#samples, #instruments), relative to its #path
-export function songSamples(text: string): { path: string; samples: string[] } {
+// the samples a song names (#samples, #instruments), relative to its #path, and the sample groups its
+// #samples takes in (from AddmusicK's "Addmusic_sample groups.txt")
+export function songSamples(text: string): { path: string; samples: string[]; groups: string[] } {
   const noComments = text.replace(/;[^\n]*/g, '');
-  const path = /#path\s+"([^"]*)"/.exec(noComments)?.[1] ?? '';
-  const samples = new Set<string>();
+  const path = /#path\s+"([^"]*)"/i.exec(noComments)?.[1] ?? '';
+  const samples = new Set<string>(), groups = new Set<string>();
   for (const block of ['samples', 'instruments']) {
-    const re = new RegExp(`#${block}\\s*\\{([^}]*)\\}`, 'g');
-    for (let m; (m = re.exec(noComments));) for (const q of m[1].matchAll(/"([^"]+)"/g)) samples.add(q[1].replace(/\\/g, '/'));
+    const re = new RegExp(`#${block}\\s*\\{([^}]*)\\}`, 'gi');
+    for (let m; (m = re.exec(noComments));) {
+      for (const q of m[1].matchAll(/"([^"]+)"/g)) samples.add(q[1].replace(/\\/g, '/'));
+      if (block === 'samples') for (const g of m[1].replace(/"[^"]*"/g, '').matchAll(/#([^\s"{}]+)/g)) groups.add(g[1]);
+    }
   }
-  return { path, samples: [...samples] };
+  return { path, samples: [...samples], groups: [...groups] };
 }
+
+// sample group definitions ("#name { "x.brr" … }") in a text, by name – as downloads give them in their
+// readme for "Addmusic_sample groups.txt"
+function sampleGroupDefs(text: string): Map<string, string> {
+  const defs = new Map<string, string>();
+  for (const m of text.replace(/;[^\n]*/g, '').matchAll(/#([^\s"{}]+)\s*\{([^{}]*)\}/g)) {
+    if (/"[^"]+\.brr"/i.test(m[2])) defs.set(m[1].toLowerCase(), `#${m[1]}\n{${m[2].replace(/\r/g, '')}}\n`);
+  }
+  return defs;
+}
+
+// the sample groups a song folder brings along (AddmusicK's own: default, optimized, AMM)
+export const SAMPLE_GROUPS = 'Addmusic_sample groups.txt';
 
 export interface SongFiles {
   folder: string; // the song's folder in the project
   songs: { file: string; name: string }[]; // files relative to the music folder
   files: Map<string, Uint8Array>; // all files to add, relative to the music folder
-  missing: string[]; // samples the songs name that aren't in the download
+  missing: string[]; // samples the songs name that aren't in the download (or sample groups)
 }
 
 const norm = (p: string) => p.replace(/\\/g, '/').replace(/^\.\//, '').split('/').filter((x) => x && x !== '.').join('/');
@@ -113,9 +132,17 @@ export function songsFromFiles(name: string, files: Map<string, Uint8Array>, tak
     const b = p.slice(p.lastIndexOf('/') + 1).toLowerCase();
     byBase.set(b, [...(byBase.get(b) ?? []), p]);
   }
+  const groupDefs = new Map<string, string>();
+  for (const [p, c] of all) if (/\.txt$/i.test(p) && !songs.some(([q]) => q === p)) for (const [g, d] of sampleGroupDefs(dec(c))) groupDefs.set(g, d);
+  const groups = new Set<string>();
   for (const [p, c] of songs) {
     const dir = p.includes('/') ? p.slice(0, p.lastIndexOf('/') + 1) : '';
-    const { path, samples } = songSamples(dec(c));
+    const { path, samples, groups: used } = songSamples(dec(c));
+    for (const g of used) {
+      if (/^(default|optimized|amm)$/i.test(g)) continue;
+      if (groupDefs.has(g.toLowerCase())) groups.add(groupDefs.get(g.toLowerCase())!);
+      else missing.push(`sample group #${g}`);
+    }
     for (const s of samples) {
       const want = resolve(`${dir}${path ? path + '/' : ''}${s}`);
       if (all.has(want)) continue;
@@ -126,6 +153,7 @@ export function songsFromFiles(name: string, files: Map<string, Uint8Array>, tak
       else if (!/^(default\/|optimized\/|EMPTY\.brr$)/i.test(resolve(`${path}/${s}`))) missing.push(s); // samples of AddmusicK itself
     }
   }
+  if (groups.size) out.set(`${folder}/${SAMPLE_GROUPS}`, strToU8([...groups].join('\n'), true));
   return {
     folder,
     songs: songs.map(([p, c]) => ({ file: `${folder}/${p}`, name: songTitle(dec(c)) ?? p.slice(p.lastIndexOf('/') + 1).replace(/\.txt$/i, '') })),
@@ -222,6 +250,9 @@ export function amkFiles(p: MusicProject): Map<string, Uint8Array | string> {
   const files = new Map<string, Uint8Array | string>();
   for (const [f, c] of p.files) files.set('music/' + f, c);
   files.set('Addmusic_list.txt', amkList(p));
+  // sample groups the songs brought along (runAmk adds them to AddmusicK's own)
+  const groups = [...p.files].filter(([f]) => f.endsWith('/' + SAMPLE_GROUPS)).map(([, c]) => strFromU8(c, true));
+  if (groups.length) files.set(SAMPLE_GROUPS, strToU8(groups.join('\n'), true));
   return files;
 }
 
