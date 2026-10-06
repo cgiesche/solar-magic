@@ -74,6 +74,7 @@ Viele Downloads auf SMWCentral sind keine eigenständigen Patches, sondern Resso
 | `list.txt` mit Blöcken, oft `.map16` und `ExGFX…bin` | Block-Paket | alles in einem Schritt, siehe [Block-Pakete](#block-pakete) |
 | `.mwl` (meist mit `.map16`, `ExGFX…bin`, `.pal`, `.palmask`) | Hintergrund (Lunar Magic) | der Hintergrund kommt ins aktuelle Level, siehe [Hintergrund-Pakete](#hintergrund-pakete) |
 | `print "INIT ",pc` / `print "MAIN ",pc` | Custom Sprite (PIXI) | die Sprites bekommen die nächsten freien Nummern, enthaltene Blöcke die nächsten freien Map16-Tiles, siehe [pixi.md](pixi.md) |
+| `.txt` mit `#0` und `#amk`/`#samples` (MML), dazu `.brr`, kein `.asm` | Song (AddmusicK) | Dialog *Add music*: anhören, Nummer, Level; AddmusicK fügt die Musik ein, siehe README → Musik und Tab *Music* |
 | alles andere | Patch | wie unten beschrieben |
 | UberASM-Tool-Ordner (`library/`, `gamemode/` …) in einem Unterordner, daneben eingebundene Ordner | Paket aus mehreren Teilen | Zuordnen von Hand mit Vorschlag, siehe [Pakete aus mehreren Teilen](#pakete-aus-mehreren-teilen) |
 
@@ -238,6 +239,7 @@ Patch hat Vorrang. Adressen sind 0, wenn der jeweilige Editor-Patch nicht instal
 | `!SMWE_LEVEL_GFX` | 512 × 8 Bytes: Grafik-Bypass pro Level (SP4…SP1, FG3, BG1, FG2, FG1; `$FF` = Standard) |
 | `!SMWE_PALETTES` | 512 × 3 Bytes: Zeiger auf die 256-Farben-Palette eines Levels (0 = keine) |
 | `!SMWE_BG_BANKS` | 512 Bytes: Bank der BG-Tilemap eines Levels (0 = Original) |
+| `!SMWE_LEVEL_MUSIC` | 512 Bytes: Song eines Levels statt seiner Header-Einstellung, 0 = Header (Musik pro Level, SMWU) |
 | `!SMWE_EXT_GFX` | 512 × 2 Bytes: BG2/BG3-Grafikdatei eines Levels (Tiles 200–27F/280–2FF), `$FF` = keine |
 | `!SMWE_MAP16X` | 1, wenn die Map16-Erweiterung (SMWX) installiert ist |
 | `!SMWE_BG_MAP16_GFX` | 8 Bytes (4 Tile-Wörter) je BG-Tile 200–FFF (SMWH), 0 = nicht installiert |
@@ -417,6 +419,7 @@ mit der jeweiligen Funktion nicht kompatibel.
 | `$00922F` | Level-Paletten (SMWP) |
 | `$058060` | BG-Tilemaps (SMWB) |
 | `$058DE6` | BG-Map16-Erweiterung, BG-Tiles 200–FFF (SMWH) |
+| `$058551` | Musik pro Level (SMWU) |
 | `$00AA50` | BG2/BG3-Grafik-Slots (SMWG) |
 | `$008A7F`, `$0087AD`, `$0085E3`, `$0580B0`, `$0580B4`, `$0580BF`, `$0580C3`, `$058730`, `$058770`, `$0587D4`, `$0587DB`, `$05880B`, `$058812` | VRAM-Patch (SMWV): Tilemaps verlegt; RAM `$7F0000–$7F3653` |
 | Ext.-Objekt-Tabelle `$0DA118` (Eintrag `$03`) | Strukturen (SMWS); im Original leer, kein Code-Hook |

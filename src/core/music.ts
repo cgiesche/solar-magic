@@ -9,11 +9,11 @@
 // level by the music patch (patches.ts, "SMWU").
 
 import { unzipSync, zipSync, strFromU8, strToU8 } from 'fflate';
-import { Rom, MAX_ROM_SIZE } from './rom.ts';
+import { Rom, MAX_ROM_SIZE, snesToPc } from './rom.ts';
 import { registerChanges, reserveTop, uninstallPatch } from './patchapply.ts';
 import { listPatches, patchArchive, hashBytes, type PatchEntry } from './patchreg.ts';
 import { RESERVED_TOP } from './rom.ts';
-import { HEADER_MUSIC_TABLE } from './patches.ts';
+import { HEADER_MUSIC_TABLE, musicPatch, levelMusic, setLevelMusic } from './patches.ts';
 import { MUSIC } from './names.ts';
 import { runAmk, type AmkResult } from './amk.ts';
 import { AMK_ORIGINALS } from '../vendor/amk/originals.ts';
@@ -240,6 +240,28 @@ function amkErrors(r: AmkResult): string[] {
 // Inserts the project with AddmusicK, replacing an earlier run; on failure the ROM is left as it was.
 // An empty project removes AddmusicK again.
 export async function saveMusicProject(rom: Rom, p: MusicProject): Promise<MusicResult> {
+  const amkBefore = hasAmk(rom);
+  const table = rom.data.slice(snesToPc(HEADER_MUSIC_TABLE), snesToPc(HEADER_MUSIC_TABLE) + 8);
+  const r = await insertProject(rom, p);
+  if (r.ok && hasAmk(rom) !== amkBefore) remapLevelMusic(rom, table);
+  return r;
+}
+
+// AddmusicK installed or removed: song numbers mean other songs now. The 8 header settings play the
+// same songs before and after (AddmusicK rewrites their table), so levels set to one of those songs get
+// its new number; levels set to any other song (a custom one gone) get their header music back.
+function remapLevelMusic(rom: Rom, before: Uint8Array): void {
+  if (!musicPatch(rom)) return;
+  const after = rom.data.subarray(snesToPc(HEADER_MUSIC_TABLE), snesToPc(HEADER_MUSIC_TABLE) + 8);
+  for (let l = 0; l < 0x200; l++) {
+    const s = levelMusic(rom, l);
+    if (!s) continue;
+    const i = before.indexOf(s);
+    setLevelMusic(rom, l, i >= 0 ? after[i] : 0);
+  }
+}
+
+async function insertProject(rom: Rom, p: MusicProject): Promise<MusicResult> {
   const e = musicEntry(rom);
   const snapshot = rom.data;
   const warnings: string[] = [];

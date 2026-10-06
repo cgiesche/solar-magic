@@ -28,7 +28,8 @@ Beim Anzeigen eines Levels führt er die **originalen Laderoutinen** des ROMs au
   (Sprites: ein paar Frames laufen lassen und die OAM-Einträge einsammeln).
 * Ein Provenance-Tracking verfolgt, aus welchem ROM-Byte jede CGRAM-Farbe stammt – darüber schreibt der
   Paletten-Editor an die richtige Stelle zurück.
-* Mit dem eingebauten PPU-Scanline-Renderer lässt sich das bearbeitete Level direkt **anspielen** (ohne Ton).
+* Mit dem eingebauten PPU-Scanline-Renderer lässt sich das bearbeitete Level direkt **anspielen** – mit Ton: Der Soundchip
+  (SPC700 + S-DSP, [snes_spc](docs/credits.md)) wird mitemuliert, das Spiel lädt Sound-Treiber und Musik selbst hoch.
 
 ## Funktionen
 
@@ -72,7 +73,23 @@ Beim Anzeigen eines Levels führt er die **originalen Laderoutinen** des ROMs au
   Überschneidungen entstehen.
 * **Nachrichtenboxen** (*ROM → Nachrichtenboxen*): alle 25 Nachrichtenboxen mit Vorschau in der Spielschrift bearbeiten; passen die Texte
   nicht mehr an ihren Platz, werden sie in freien Speicher verlegt.
-* **Level testen (T):** das Level (inkl. ungespeicherter Änderungen) im eingebauten Emulator spielen, mit Tastatur oder Gamepad.
+* **Level testen (T):** das Level (inkl. ungespeicherter Änderungen) im eingebauten Emulator spielen, mit Tastatur oder Gamepad, mit Musik und Soundeffekten (M schaltet den Ton ab).
+
+### Musik
+* **Songs importieren** (*ROM → Music …* oder *Add …* im Patches-Dialog): Songs im AddmusicK-Format (`.zip` von SMWCentral
+  oder `.txt`). Der Editor findet die Songs (MML mit `#0`) und legt die BRR-Samples dorthin, wo der Song sie sucht (`#path`),
+  auch wenn das Archiv sie in einem eigenen `samples`-Ordner mitbringt; fehlende Samples werden genannt.
+  Vor dem Einfügen lässt sich der Song anhören (AddmusicK erzeugt seine SPC). Nummer: die nächste freie ab 29
+  oder anstelle eines Originalsongs.
+* Eingefügt wird mit **AddmusicK 1.0.11**, das als WebAssembly im Editor steckt (Song-Compiler, Sound-Treiber, SNES-Patch).
+  Jeder Lauf fügt das ganze Musik-Projekt neu ein (~1 s) und steht als ein Eintrag im Patch-Verzeichnis: Hijacks mit
+  Originalbytes, freier Speicher, die Songs samt Samples als Quellen. Deshalb lässt sich AddmusicK jederzeit wieder
+  vollständig entfernen; Songs aus einem Paket gehen mit dem Paket.
+* **Zuordnung zu Leveln:** im Header-Dialog *Song for this level* oder im Music-Tab *Level* – jeder Song der ROM statt der
+  8 Header-Einstellungen (Editor-Patch SMWU, wie der Music Bypass von Lunar Magic; funktioniert auch ohne AddmusicK mit
+  den Songs des Original-Treibers). Beim Installieren/Entfernen von AddmusicK werden die Nummern umgerechnet.
+* **Abspielen (▶):** in der Songliste, im Header-Dialog und bei Paketen. Gespielt wird per Emulation, wie im Spiel: Das Level
+  wird mit Soundchip geladen, das Spiel schickt seine Musik, danach läuft nur noch der SPC700 weiter.
 
 ### Grafik, Paletten, Map16
 * **Map16-Editor** (M): FG- und BG-Tiles des aktuellen Tilesets, pro Viertel 8x8-Tile, Palette, Flip, Priorität.
@@ -123,6 +140,7 @@ assembliert und ändert nur wenige, verifizierte Stellen:
 | `$058A66`, `$058B46`, `$058C34`, `$058D2B` | Tilemap-Aufbau: Tiles ab 200 aus der erweiterten Map16-Grafiktabelle |
 | `$00C096`, `$00C0E7` | Tile ersetzen setzt die Seite auf 0/1 statt nur Bit 0 (für Tiles auf Seite ≥ 2) |
 | `$05B20F` („SMWM“) | Nachrichtentexte aus freiem Speicher lesen (nur wenn sie nicht mehr an Ort und Stelle passen) |
+| `$058551` („SMWU“) | Musik pro Level: Songnummer aus einer Tabelle (512 Level) statt der 8 Header-Einstellungen (`$0584DB`), 0 = Header |
 | `$00AA50` („SMWG“) | BG2/BG3-Grafik-Slots pro Level für die Map16-Tiles 200–2FF (wie in Lunar Magic); braucht den VRAM-Patch |
 | 13 Stellen („SMWV“) | VRAM-Patch: Layer-1/2-Tilemaps in Leveln 64×32 bei `$3000`/`$3800` statt 64×64 bei `$2000`/`$3000` (wie LM), damit BG2/BG3 Platz haben; Details in [docs/patches.md](docs/patches.md) |
 
@@ -144,9 +162,10 @@ Wessen Formate und Schnittstellen der Editor nachbildet: [docs/credits.md](docs/
 
 ## Grenzen / nicht enthalten
 
-* **Musik:** Es gibt keinen Musik-Import (AddmusicK-artig). Die ROM-Erweiterung schafft Platz; das Einfügen
-  von Musik bleibt Aufgabe eines separaten Werkzeugs.
-* **Test-Emulator:** ohne Ton, ohne Mode 7 (Boss-Level), Fenster/HDMA-Effekte werden ignoriert.
+* **Musik:** nur AddmusicK (kein Addmusic 4.05/AddmusicM-Treiber, deren Songs AddmusicK aber umwandelt); eigene
+  Soundeffekte und die Musik der Overworld-Karten/Spezialsongs (Titel, Abspann) sind nicht einstellbar. Eine ROM, in die
+  AddmusicK außerhalb des Editors eingefügt wurde, kann keine Songs dazubekommen.
+* **Test-Emulator:** ohne Mode 7 (Boss-Level), Fenster/HDMA-Effekte werden ignoriert.
 * **Overworld:** Events, Overworld-Sprites und Pfad-Einstellungen sind nicht editierbar (Ansicht „alle Events“
   ist nur lesend). Translevel-Nummern folgen wie in Vanilla der Scan-Reihenfolge – neue Level-Tiles
   verschieben die Nummern nachfolgender Level.
@@ -174,6 +193,8 @@ src/core/patches.ts      Editor-Patch (assembliert mit asm.ts)
 src/core/overworld.ts    Overworld-Formate, RLE, Namen, OW-Emulation
 src/core/spritegfx.ts    Sprite-Grafiken aus dem laufenden Spiel erfassen
 src/core/spritemem.ts    Sprite-Speicher prüfen: unvollständig gezeigte Sprites, passender Wert
+src/core/apu.ts          Soundchip (snes_spc als WebAssembly, tools/build-spc.sh)
+src/core/amk.ts          AddmusicK als WebAssembly (tools/build-amk.sh); music.ts: Musik-Projekt, Songs pro Level
 src/ui/*                 Oberfläche (ohne Framework)
 tools/*                  Tests und Analysewerkzeuge (Disassembler: node tools/dis.ts 05D796 40)
 ```

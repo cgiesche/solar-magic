@@ -45,9 +45,10 @@ if (spc) {
   check(pk > 1000, `SPC plays (peak ${pk})`);
 }
 
-// the level plays the song (set before inserting, so the editor's patches are part of the ROM to restore)
-setLevelMusic(rom, 0x105, 0x29);
-check(levelMusic(rom, 0x105) === 0x29, 'level 105 set to song 29');
+// level 106 set to the song of header setting 2 of the original driver (installs the music patch before
+// inserting, so the editor's patches are part of the ROM to restore)
+const vanillaSong = rom.r8(0x0584db + 2);
+setLevelMusic(rom, 0x106, vanillaSong);
 const beforeAmk = rom.data.slice();
 
 // insert
@@ -75,6 +76,11 @@ check(songs.some((s) => s.num === 0x29 && s.kind === 'custom') && songs.some((s)
   check(same === levels.length, `levels load the same (${same}/${levels.length})`);
 }
 
+check(levelMusic(rom, 0x106) === rom.r8(0x0584db + 2) && rom.r8(0x0584db + 2) !== vanillaSong,
+  `level 106 keeps the same song under its AddmusicK number (${vanillaSong.toString(16)} → ${levelMusic(rom, 0x106).toString(16)})`);
+setLevelMusic(rom, 0x105, 0x29);
+check(levelMusic(rom, 0x105) === 0x29, 'level 105 set to song 29');
+
 // the level plays the song: in a game in progress (as in the test mode), with the sound unit
 {
   const emu = new LevelEmulator(rom);
@@ -95,6 +101,7 @@ removeSong(p, 0x29);
 check(p.files.size === 0 && folders(p).size === 0, 'song files removed with the song');
 const r2 = await saveMusicProject(rom, p);
 check(r2.ok && !musicEntry(rom) && !hasAmk(rom), `empty project removes AddmusicK ${r2.errors.join(' ')}`);
+check(levelMusic(rom, 0x106) === vanillaSong && levelMusic(rom, 0x105) === 0, `level settings back to the original driver's numbers (106: ${levelMusic(rom, 0x106).toString(16)}, 105: ${levelMusic(rom, 0x105)})`);
 let diff = 0;
 for (let i = 0; i < 0x80000; i++) if (rom.data[i] !== beforeAmk[i] && !(i >= 0x7fdc && i < 0x7fe0) && i !== 0x7fd7) { diff++; console.log('  differs', i.toString(16), beforeAmk[i].toString(16), rom.data[i].toString(16)); }
 check(diff === 0, `original ROM area restored, apart from size and checksum (${diff} bytes differ)`);

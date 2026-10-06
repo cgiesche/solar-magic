@@ -185,7 +185,7 @@ export function musicPane(app: App, changed: () => void): Pane {
     removeSong(p, num);
     const original = AMK_ORIGINALS.some((o) => o[0] === num);
     if (await insertMusic(app, p, p.songs.length ? `Song ${songHex(num)} removed` : 'Music removed – AddmusicK is no longer in the ROM')) {
-      if (!original) for (const l of users) setLevelMusic(app.rom, l, 0);
+      if (!original && hasAmk(app.rom)) for (const l of users) setLevelMusic(app.rom, l, 0);
       if (users.length && !original) romChanged(app);
       reload();
       changed();
@@ -196,10 +196,8 @@ export function musicPane(app: App, changed: () => void): Pane {
     const i = await choose('Remove AddmusicK', 'Remove AddmusicK with all custom songs from the ROM? The original sound driver and music come back; levels set to custom songs get their header music back. Export the songs as .zip first if you still need them.',
       [{ label: 'Cancel' }, { label: 'Remove', danger: true }]);
     if (i !== 1) return;
-    const users = levelsBySong(app);
+    // levels get the same songs of the original driver (or their header music for custom ones), see music.ts
     if (await insertMusic(app, emptyMusicProject(), 'Music removed – AddmusicK is no longer in the ROM')) {
-      for (const [song, ls] of users) if (song >= FIRST_CUSTOM || !hasAmk(app.rom)) for (const l of ls) setLevelMusic(app.rom, l, 0);
-      romChanged(app);
       reload();
       changed();
     }
