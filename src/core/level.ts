@@ -323,8 +323,13 @@ export function parseSprites(data: Uint8Array, start: number, vertical: boolean,
   return { sprites, header, size: p - start + 1 };
 }
 
+// the order sprites are stored in (the game's sprite load index, $161A, counts in it)
+export function spriteLoadOrder(sprites: LevelSprite[], vertical: boolean): LevelSprite[] {
+  return [...sprites].sort((a, b) => (vertical ? a.y - b.y || a.x - b.x : a.x - b.x || a.y - b.y));
+}
+
 export function serializeSprites(sprites: LevelSprite[], header: number, vertical: boolean, sizes: SpriteSizes = null): Uint8Array {
-  const sorted = [...sprites].sort((a, b) => (vertical ? a.y - b.y || a.x - b.x : a.x - b.x || a.y - b.y));
+  const sorted = spriteLoadOrder(sprites, vertical);
   const out: number[] = [header];
   for (const s of sorted) {
     let screen: number, lo: number, hi: number, col: number;

@@ -4,13 +4,15 @@
 import type { App } from './app.ts';
 import { h, clear } from './dom.ts';
 import { closeMenus } from './menu.ts';
-import { exitProblems, levelProblems, sortProblems, type Problem, type ProblemPlace } from '../core/problems.ts';
+import { exitProblems, levelProblems, scanProblems, sortProblems, type Problem, type ProblemPlace } from '../core/problems.ts';
 import { incompleteSprites, spriteMemDialog, spriteMemText, SPRITE_MEM_HELP } from './spritemem.ts';
 
 // everything known about the current level; reveal: shows sprites (selects them in sprite mode)
 export function collectProblems(app: App, reveal: (uids: number[]) => void): Problem[] {
   if (!app.level || !app.images) return [];
   const out = [...levelProblems(app.level, app.vertical), ...exitProblems(app.rom, app.level, app.exitGraph(), (s) => app.enterableOn(s))];
+  const sc = app.levelScan;
+  if (sc && sc.level === app.level.number) out.push(...scanProblems(app.level, sc.result, sc.uids));
   const inc = incompleteSprites(app);
   if (inc.length) {
     out.push({ key: 'sprite-mem', severity: 'warn', text: `${spriteMemText(inc.length)}: not enough sprite memory`, title: SPRITE_MEM_HELP,
@@ -28,7 +30,8 @@ export function problemsButton(app: App, reveal: (uids: number[]) => void): HTML
   const btn = h('button', { class: 'status-warn', hidden: true, title: 'Problems found in this level' }) as HTMLButtonElement & { update: () => void };
   const show = (p: ProblemPlace) => {
     if ('sprites' in p) reveal(p.sprites);
-    else if ('screen' in p) app.gotoExit(app.level.number, p.screen);
+    else if ('screen' in p && p.exit) app.gotoExit(app.level.number, p.screen);
+    else if ('screen' in p) { app.reveal = app.vertical ? { x: 128, y: p.screen * 256 + 128 } : { x: p.screen * 256 + 128, y: app.images.height - 112 }; app.emit('reveal'); }
     else { app.reveal = { x: p.tx * 16 + 8, y: p.ty * 16 + 8 }; app.emit('reveal'); }
   };
   const fill = () => {

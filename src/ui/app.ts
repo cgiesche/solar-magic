@@ -3,7 +3,7 @@
 import { Rom, snesToPc } from '../core/rom.ts';
 import { LevelEmulator, OV_L1, OV_L2, type LevelRender, type LevelOverride, MAP_BASE, MAP_SIZE } from '../core/levelemu.ts';
 import {
-  type Level, type LevelObject, type LevelSprite, type ScreenExit, type SecondaryEntrance, loadLevel, serializeLayer1, serializeLayer2, serializeSprites, spriteSizes, spriteId, spriteBytes,
+  type Level, type LevelObject, type LevelSprite, type ScreenExit, type SecondaryEntrance, loadLevel, spriteLoadOrder, serializeLayer1, serializeLayer2, serializeSprites, spriteSizes, spriteId, spriteBytes,
   isL1Vertical, cloneLevel, newUid, hasLayer2Objects, hasObjects, L1_PTRS, L2_PTRS, SEC_HDR,
   readSecondaryEntrance, writeSecondaryEntrance, entrancePos, nearestEntrance, encodeSecondaryHeader,
 } from '../core/level.ts';
@@ -25,6 +25,7 @@ import { ExitGraph, exitTarget } from '../core/exitgraph.ts';
 import { RomHistory, type RomEdit } from '../core/romhistory.ts';
 import { ObjKindProbe, kindsStillValid, storeKinds, loadKinds, resizeObjectSize, type ObjKind, type ObjKinds, type StoredObjKinds } from '../core/objkinds.ts';
 import { JumpArcs, ARC_SPEEDS, type JumpArc } from '../core/jumparcs.ts';
+import { levelScanJob, type ScanResult } from '../core/levelscan.ts';
 import { BlockProber, variantOf, type BlockProbe, type SpriteProbe, type CollisionProbe } from '../core/blockprobe.ts';
 
 export type EditMode = 'l1' | 'l2' | 'spr' | 'exit' | 'bg';
@@ -220,6 +221,7 @@ export class App {
     this.findSecondaryEntrances();
     this.startAnimation();
     this.emit('render');
+    this.scheduleScan();
   }
 
   recomposite(): void {
@@ -806,6 +808,72 @@ export class App {
     const p = this.blockProber().cachedCollision(tile);
     if (!p) this.queueProbe(PROBE_COLL | tile);
     return p;
+  }
+
+  // ------------- level scan (see levelscan.ts) -------------
+  // slowdown and sprite problems found by playing the level through, in the background a while
+  // after the last change; stored with a key of the level data it played
+  levelScan: { key: string; level: number; result: ScanResult; uids: number[] } | null = null;
+  private scanTimer = 0;
+  private scanRun = 0;
+  private scanEmu: LevelEmulator | null = null;
+
+  private scheduleScan(): void {
+    clearTimeout(this.scanTimer);
+    this.scanRun++;
+    this.setBusy('scan', null);
+    this.scanTimer = window.setTimeout(() => this.cacheReady.then(() => this.runScan()), 1500);
+  }
+
+  private runScan(): void {
+    if (this.holdRender) { this.scheduleScan(); return; }
+    const lv = this.level, vertical = this.vertical, run = ++this.scanRun;
+    const ov = this.buildOverrides();
+    const bytes = [ov.layer1, ov.layer2, ov.bgData, ov.sprites, Uint8Array.from(ov.secondaryHeader ?? []), Uint8Array.from([ov.layer2Pointer ?? 0, (ov.layer2Pointer ?? 0) >> 8, (ov.layer2Pointer ?? 0) >> 16, +!!ov.switchPalaces, +!!ov.onOffSwitch])];
+    let hsh = 0x811c9dc5;
+    for (const b of bytes) {
+      if (!b) { hsh = Math.imul(hsh ^ 0xff, 0x01000193); continue; }
+      for (let i = 0; i < b.length; i++) hsh = Math.imul(hsh ^ b[i], 0x01000193);
+      hsh = Math.imul(hsh ^ b.length, 0x01000193);
+    }
+    const key = `ls1:${lv.number}:${(hsh >>> 0).toString(16)}`;
+    const uids = spriteLoadOrder(lv.sprites, vertical).map((q) => q.uid);
+    const done = (result: ScanResult) => {
+      if (run !== this.scanRun || this.level !== lv) return;
+      this.setBusy('scan', null);
+      this.levelScan = { key, level: lv.number, result, uids };
+      this.emit('level-scan');
+    };
+    if (this.levelScan?.key === key) { done(this.levelScan.result); return; }
+    const stored = this.results.get<ScanResult>(key);
+    if (stored) { done(stored); return; }
+    if (!this.scanEmu || this.scanEmu.rom !== this.rom) {
+      this.scanEmu = new LevelEmulator(this.rom);
+      this.scanEmu.skipMask = () => this.gfxSkipMask();
+    }
+    const emu = this.scanEmu;
+    emu.adoptBoot(this.emu);
+    emu.syncRom();
+    const job = levelScanJob(emu, { number: lv.number, ov, vertical, width: this.images.width, height: this.images.height });
+    const reads = new RomReads(this.rom.data.length);
+    const step = () => {
+      if (run !== this.scanRun || this.level !== lv) return;
+      const t0 = performance.now();
+      try {
+        while (performance.now() - t0 < 25) {
+          const r = emu.tracked(() => job.next());
+          reads.add(r.reads);
+          if (r.result.done) {
+            this.results.set(key, r.result.value, this.results.fp.deps(reads));
+            done(r.result.value);
+            return;
+          }
+        }
+      } catch (e) { console.error(e); this.setBusy('scan', null); return; }
+      setTimeout(step, 0);
+    };
+    this.setBusy('scan', 'Level scan');
+    setTimeout(step, 0);
   }
 
   // ------------- jump arcs (see jumparcs.ts) -------------

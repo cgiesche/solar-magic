@@ -513,11 +513,20 @@ export class Snes implements Bus {
     this.reset();
   }
 
+  // CPU load: lines from an NMI until the CPU waits for the next one (a wait loop, see Cpu.idle),
+  // for the frame that ended with the latest NMI; -1: it never waited (a lag frame)
+  busyLines = 0;
+  private sinceNmi = 0;
+  private waited = -1;
+
   runFrame(maxSteps = 2_000_000): void {
     const cpu = this.cpu;
     let steps = 0;
-    for (this.line = 0; this.line < LINES_PER_FRAME; this.line++) {
+    for (this.line = 0; this.line < LINES_PER_FRAME; this.line++, this.sinceNmi++) {
       if (this.line === VBLANK_LINE) {
+        this.busyLines = this.waited;
+        this.waited = -1;
+        this.sinceNmi = 0;
         this.nmiFlag = true;
         this.autoJoypad();
         if (this.nmitimen & 0x80) cpu.nmiPending = true;
@@ -541,6 +550,7 @@ export class Snes implements Bus {
         // wait loop: skip the rest of the line (interrupts are only raised at line starts)
         if (cpu.idle) {
           cpu.idle = false;
+          if (this.waited < 0) this.waited = this.sinceNmi;
           if (!cpu.nmiPending && !(cpu.irqLine && !(cpu.p & 0x04))) cpu.cycles = target;
         }
       }
