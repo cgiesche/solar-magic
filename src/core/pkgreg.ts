@@ -12,7 +12,8 @@ import { uninstallPatch } from './patchapply.ts';
 import { loadProject, saveProject, emptyProject } from './uberproject.ts';
 import { loadBlockProject, saveBlockProject } from './blocks.ts';
 import { loadPixiProject, savePixiProject } from './pixi.ts';
-import { gfxEntry, setGfxEntry, VANILLA_GFX } from './patches.ts';
+import { gfxEntry, setGfxEntry, VANILLA_GFX, levelMusic, setLevelMusic } from './patches.ts';
+import { loadMusicProject, saveMusicProject, removeSong } from './music.ts';
 import type { UberContext } from './uberasm.ts';
 import type { SpriteFolder } from './pixirt.ts';
 
@@ -29,6 +30,7 @@ export interface PkgParts {
   blocks: { files: string[]; tiles: number[] };
   pixi: { files: string[]; list: [SpriteFolder, number][] };
   gfx: number[]; // ExGFX numbers it created
+  music?: string[]; // songs it added to the music project (their .txt)
 }
 
 export interface PkgRecord extends PkgParts {
@@ -40,7 +42,7 @@ export interface PkgRecord extends PkgParts {
   srcSize?: number;
 }
 
-export const emptyParts = (): PkgParts => ({ patches: [], uber: { files: [], calls: [], other: {} }, blocks: { files: [], tiles: [] }, pixi: { files: [], list: [] }, gfx: [] });
+export const emptyParts = (): PkgParts => ({ patches: [], uber: { files: [], calls: [], other: {} }, blocks: { files: [], tiles: [] }, pixi: { files: [], list: [] }, gfx: [], music: [] });
 
 // ---------- the registry ----------
 
@@ -107,6 +109,7 @@ export interface Snapshot {
   pixi: Map<string, number>;
   sprites: Map<string, string>; // kind:num → file
   gfx: number[]; // ExGFX address per number, 0 = none
+  music: Map<string, number>; // song file → number
 }
 
 // list.txt is written from the assignments, which are compared on their own
@@ -117,6 +120,7 @@ export function snapshot(rom: Rom): Snapshot {
   const uber = tryLoad(() => loadProject(rom));
   const blocks = tryLoad(() => loadBlockProject(rom));
   const pixi = tryLoad(() => loadPixiProject(rom));
+  const music = tryLoad(() => loadMusicProject(rom));
   const calls = new Set<string>();
   for (const ctx of CONTEXTS) for (const [num, cs] of uber?.list[ctx] ?? []) for (const c of cs) calls.add(`${ctx}:${num}:${c.file}`);
   const other: Partial<Record<Other, string>> = {};
@@ -127,6 +131,7 @@ export function snapshot(rom: Rom): Snapshot {
     blocks: hashes(blocks?.files), tiles: new Map((blocks?.list ?? []).map((b) => [b.tile, b.file])),
     pixi: hashes(pixi?.files), sprites: new Map((pixi?.list ?? []).map((e) => [`${e.kind}:${e.num}`, e.file])),
     gfx: Array.from({ length: 0x100 }, (_, i) => (i >= VANILLA_GFX ? gfxEntry(rom, i)?.addr ?? 0 : 0)),
+    music: new Map((music?.songs ?? []).map((x) => [x.file, x.num])),
   };
 }
 
@@ -146,12 +151,13 @@ export function partsBetween(a: Snapshot, b: Snapshot): PkgParts {
     blocks: { files: changedFiles(a.blocks, b.blocks), tiles: [...b.tiles].filter(([t, f]) => a.tiles.get(t) !== f).map(([t]) => t) },
     pixi: { files: changedFiles(a.pixi, b.pixi), list: [...b.sprites].filter(([k, f]) => a.sprites.get(k) !== f).map(([k]) => { const [kind, num] = k.split(':'); return [kind as SpriteFolder, Number(num)]; }) },
     gfx: b.gfx.flatMap((addr, i) => (addr && !a.gfx[i] ? [i] : [])),
+    music: [...b.music.keys()].filter((f) => !a.music.has(f)),
   };
 }
 
 export function isEmptyParts(p: PkgParts): boolean {
   return !p.patches.length && !p.uber.files.length && !p.uber.calls.length && !Object.keys(p.uber.other).length
-    && !p.blocks.files.length && !p.blocks.tiles.length && !p.pixi.files.length && !p.pixi.list.length && !p.gfx.length;
+    && !p.blocks.files.length && !p.blocks.tiles.length && !p.pixi.files.length && !p.pixi.list.length && !p.gfx.length && !p.music?.length;
 }
 
 const union = <T>(a: T[], b: T[], key: (x: T) => string = String) => {
@@ -168,6 +174,7 @@ export function mergeParts(r: PkgRecord, p: PkgParts, now: Snapshot): PkgRecord 
     blocks: { files: union(r.blocks.files, p.blocks.files), tiles: union(r.blocks.tiles, p.blocks.tiles) },
     pixi: { files: union(r.pixi.files, p.pixi.files), list: union(r.pixi.list, p.pixi.list, (e) => e.join(':')) },
     gfx: union(r.gfx, p.gfx),
+    music: union(r.music ?? [], p.music ?? []),
   };
 }
 
@@ -225,6 +232,31 @@ export function uninstallPackage(rom: Rom, id: string, blank: number[]): string[
       setGfxEntry(rom, n, 0, false);
     }
     removePackageRecord(rom, id);
+  } catch (e) {
+    rom.data = before;
+    throw e;
+  }
+  return warnings;
+}
+
+// uninstallPackage for packages with songs too: the songs are removed first (AddmusicK runs again;
+// levels set to a removed song get their header music back), all or nothing like uninstallPackage
+export async function uninstallPackageWithMusic(rom: Rom, id: string, blank: number[]): Promise<string[]> {
+  const rec = listPackages(rom).find((r) => r.id === id);
+  if (!rec) throw new Error('Package is not installed');
+  const before = rom.data.slice();
+  const warnings: string[] = [];
+  try {
+    const p = rec.music?.length ? loadMusicProject(rom) : null;
+    if (p) {
+      const nums = p.songs.filter((s) => rec.music!.includes(s.file)).map((s) => s.num);
+      for (const n of nums) removeSong(p, n);
+      const r = await saveMusicProject(rom, p);
+      if (!r.ok) throw new Error(`Music: ${r.errors.join(' ')}`);
+      warnings.push(...r.warnings);
+      for (let l = 0; l < 0x200; l++) if (nums.includes(levelMusic(rom, l)) && !p.songs.some((s) => s.num === levelMusic(rom, l))) setLevelMusic(rom, l, 0);
+    }
+    warnings.push(...uninstallPackage(rom, id, blank));
   } catch (e) {
     rom.data = before;
     throw e;

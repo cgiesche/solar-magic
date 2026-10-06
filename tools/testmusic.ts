@@ -4,7 +4,7 @@
 // plays, and removing the project restores the ROM.
 // node tools/testmusic.ts
 import { readFileSync } from 'node:fs';
-import { zipSync, strToU8 } from 'fflate';
+import { testSongZip } from './testsong.ts';
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { Apu, loadApu } from '../src/core/apu.ts';
@@ -16,45 +16,6 @@ import {
 
 let fails = 0;
 const check = (ok: boolean, what: string) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if (!ok) fails++; };
-
-// a looping square wave as BRR: 2-byte loop header (offset 0), then 9-byte blocks of 16 samples
-function squareBrr(blocks = 4): Uint8Array {
-  const out = new Uint8Array(2 + blocks * 9);
-  for (let b = 0; b < blocks; b++) {
-    const o = 2 + b * 9;
-    out[o] = (11 << 4) | (b === blocks - 1 ? 3 : 0); // shift 11, filter 0, loop+end on the last
-    for (let i = 0; i < 8; i++) out[o + 1 + i] = b % 2 ? 0x99 : 0x77; // -7 / +7 per nibble
-  }
-  return out;
-}
-
-export function testSongZip(): Uint8Array {
-  const song = `#amk 2
-#path "testsong"
-#samples
-{
-	#optimized
-	"square.brr"
-}
-#instruments
-{
-	"square.brr" $8F $E0 $00 $04 $00
-}
-#spc
-{
-	#title "Square Test"
-	#author "Solar Magic test"
-}
-t40 w200
-#0 @30 v220 o4 l8 c d e f g a b > c < /
-c e g > c < g e c4
-`;
-  return zipSync({
-    'Square Test/Square Test.txt': strToU8(song),
-    'Square Test/readme.txt': strToU8('Insert with AddmusicK. Put the samples folder into AddmusicK\'s samples folder.'),
-    'Square Test/samples/testsong/square.brr': squareBrr(),
-  });
-}
 
 const peak = (a: Int16Array) => a.reduce((m, v) => Math.max(m, Math.abs(v)), 0);
 

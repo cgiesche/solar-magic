@@ -9,7 +9,9 @@ import { h, clear, toast, choose, downloadBytes } from './dom.ts';
 import { listPatches, type PatchEntry } from '../core/patchreg.ts';
 import { uninstallPatch } from '../core/patchapply.ts';
 import { uninstallVramPatch } from '../core/vrampatch.ts';
-import { listPackages, uninstallPackage, type PkgRecord } from '../core/pkgreg.ts';
+import { listPackages, uninstallPackageWithMusic, type PkgRecord } from '../core/pkgreg.ts';
+import { loadMusicProject, songHex } from '../core/music.ts';
+import { playButton, playSong, currentSongs } from './musicdialog.ts';
 import { extraParts } from '../core/pkgmap.ts';
 import { lz2Decompress } from '../core/lz2.ts';
 import { hex } from '../core/names.ts';
@@ -61,6 +63,7 @@ function summary(r: PkgRecord): string[] {
   if (r.blocks.tiles.length) out.push(r.blocks.tiles.length > 1 ? `${r.blocks.tiles.length} blocks` : 'Block');
   if (r.pixi.list.length) out.push(r.pixi.list.length > 1 ? `${r.pixi.list.length} sprites` : 'Sprite');
   if (r.gfx.length) out.push('ExGFX');
+  if (r.music?.length) out.push(r.music.length > 1 ? `${r.music.length} songs` : 'Song');
   return out;
 }
 
@@ -243,6 +246,18 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
         h('div', { class: 'row' }, rec.gfx.map((g) => h('button', { title: 'Open in the graphics workspace', onclick: () => host.leave(() => app.showGfxFile(g)) }, gfxName(g)))),
         h('p', { class: 'hint' }, 'Removed with the package. To use: level header → graphics bypass, or “Use in slot” in the graphics workspace.')));
     }
+    // songs it added to the music project
+    if (rec.music?.length) {
+      let proj = null;
+      try { proj = loadMusicProject(app.rom); } catch { /* shown in the Music tab */ }
+      const songs = currentSongs(app).filter((x) => x.file && rec.music!.includes(x.file));
+      out.push(h('section', { class: 'pkg-sec' },
+        h('div', { class: 'row' }, h('h3', { class: 'grow' }, 'Music'), h('a', { href: '#', class: 'hint', onclick: (e: Event) => { e.preventDefault(); host.show('music'); } }, 'in the Music tab')),
+        proj ? h('table', { class: 'uber-table' }, songs.map((x) => h('tr', null,
+          h('td', null, playButton(`song:${x.num}`, () => playSong(app, x))), h('td', { class: 'mono' }, songHex(x.num)), h('td', null, x.name), h('td', { class: 'mono hint' }, x.file ?? ''))))
+          : h('p', { class: 'hint' }, 'The music project is not in the ROM any more.'),
+        h('p', { class: 'hint' }, 'To use: level header → Music, or “Level” in the Music tab.')));
+    }
     return out;
   }
 
@@ -309,6 +324,7 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
     if (rec.blocks.tiles.length) parts.push(`block(s) at ${rec.blocks.tiles.map((t) => hex(t, 3)).join(', ')}`);
     if (rec.pixi.list.length) parts.push(`sprite(s) ${rec.pixi.list.map(([, n]) => hex(n, 2)).join(', ')}`);
     if (rec.gfx.length) parts.push(rec.gfx.map(gfxName).join(', '));
+    if (rec.music?.length) parts.push(`${rec.music.length > 1 ? 'songs' : 'the song'} (AddmusicK inserts the music again)`);
     const i = await choose('Remove package', `Remove “${rec.name}” from the ROM completely: ${parts.join(', ')}. Files another package brought as well stay. Whatever is placed in levels stays in place.`,
       [{ label: 'Cancel' }, { label: 'Remove', danger: true }]);
     if (i !== 1) return;
@@ -316,7 +332,7 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
     if (!(await host.settle(keys, `“${rec.name}” will be removed.`))) return;
     if (app.dirty) app.saveLevel(true);
     try {
-      const w = uninstallPackage(app.rom, rec.id, map16Source(app.rom, app.render).fg(0x025));
+      const w = await uninstallPackageWithMusic(app.rom, rec.id, map16Source(app.rom, app.render).fg(0x025));
       forgetRecordFiles(rec.id);
       forgetDocs(rec.name);
       romChanged(app);

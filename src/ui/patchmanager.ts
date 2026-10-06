@@ -3,6 +3,8 @@
 // settings. Patch sources are kept in the ROM (small ones) or in IndexedDB per registry entry; the ROM's
 // registry alone suffices to remove a patch. What a package brings is kept as one (pkgtrack.ts).
 
+import { openAddSongDialog } from './musicdialog.ts';
+import { isSongText } from '../core/music.ts';
 import type { App } from './app.ts';
 import { h, modal, clear, toast, hexInput, select } from './dom.ts';
 import { kvGet, kvSet, kvDel } from './storage.ts';
@@ -389,7 +391,7 @@ function openBgPackDialog(app: App, fileName: string, files: Map<string, Uint8Ar
   ]);
 }
 
-export type AddTarget = 'patches' | 'uber' | 'blocks' | 'sprites';
+export type AddTarget = 'patches' | 'uber' | 'blocks' | 'sprites' | 'music';
 // what the tab the package is added from suggests: where UberASM code runs, the tile of a block
 export interface AddPreset { uberContext: UberContext; tile: number }
 export interface PickedPackage {
@@ -401,8 +403,14 @@ export interface PickedPackage {
 
 // picks an .asm/.zip and recognizes what it is; open() shows the dialog adding it. `manual`: always the
 // dialog assigning the package's parts by hand
+function isMusicPackage(files: Map<string, Uint8Array>): boolean {
+  const paths = [...files.keys()];
+  if (paths.some((p) => /\.(asm|asar)$/i.test(p))) return false;
+  return paths.some((p) => /\.txt$/i.test(p) && isSongText(new TextDecoder().decode(files.get(p)!)));
+}
+
 export async function pickPackage(app: App, manual = false): Promise<PickedPackage | null> {
-  const f = await pickFile('.asm,.asar,.zip');
+  const f = await pickFile('.asm,.asar,.zip,.txt');
   if (!f) return null;
   return recognize(app, f.name, packageFiles(f.name, new Uint8Array(await f.arrayBuffer())), manual);
 }
@@ -424,6 +432,8 @@ export function recognize(app: App, fileName: string, files: Map<string, Uint8Ar
     return { name: base, target: 'uber', affects: ['uber', 'blocks', 'sprites'], open: tracked(base, (p, done, t) => openPkgMapDialog(app, base, files, rules, done,
       (name, part, partDone) => recognize(app, name, part, false, t).open(p, partDone))) };
   }
+  // AddmusicK songs (MML .txt, BRR samples) and no ASM: music
+  if (isMusicPackage(files)) return { name: base, target: 'music', affects: ['music'], open: tracked(base, (_, done) => openAddSongDialog(app, fileName, files, done)) };
   if (isBgPackage(files)) return { name: fileName, target: null, affects: [], open: (_, done) => openBgPackDialog(app, fileName, files, done) }; // level content, no package
   const pkg = packageFromFiles(fileName, files);
   const info = detectKind(pkg);

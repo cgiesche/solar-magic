@@ -143,6 +143,7 @@ function buildUi(app: App): void {
       { label: 'UberASM …', onClick: () => openResources(app, 'uber') },
       { label: 'Custom Blocks …', onClick: () => openResources(app, 'blocks') },
       { label: 'Custom Sprites …', onClick: () => openResources(app, 'sprites') },
+      { label: 'Music …', title: 'Custom music (AddmusicK): add songs, listen, set the music of levels', onClick: () => openResources(app, 'music') },
       { label: 'Install editor patch …', disabled: () => hasEditorPatch(app.rom), onClick: () => installEditorPatchAction(app) },
       'sep',
       { label: 'Message boxes …', onClick: () => openMessagesDialog(app) },

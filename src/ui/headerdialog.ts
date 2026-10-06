@@ -1,10 +1,13 @@
 // Level header / secondary header editor.
 
 import type { App } from './app.ts';
-import { h, select, hexInput, modal } from './dom.ts';
+import { h, select, hexInput, modal, toast } from './dom.ts';
 import { TILESETS, levelModeName, MUSIC, TIME_SETTINGS, VERTICAL_SCROLL, ENTRANCE_ACTIONS, hex2, hex } from '../core/names.ts';
 import { hasLayer2Objects, type PrimaryHeader, type SecondaryHeader, L2_PTRS } from '../core/level.ts';
-import { bgBank } from '../core/patches.ts';
+import { bgBank, levelMusic, setLevelMusic, HEADER_MUSIC_TABLE } from '../core/patches.ts';
+import { songHex } from '../core/music.ts';
+import { currentSongs, playButton } from './musicdialog.ts';
+import { musicPlayer } from './musicplayer.ts';
 import { LAYER3_KIND_TEXT } from '../core/layer3.ts';
 import { incompleteSprites, spriteMemText, SPRITE_MEM_HELP } from './spritemem.ts';
 
@@ -56,6 +59,20 @@ export function openHeaderDialog(app: App): void {
     l3Sel.replaceChildren(...l3Opts().map(([v, l]) => h('option', { value: String(v), selected: v === sd.layer3 }, l)));
   });
 
+  // music: the header's 8 settings, or a song of the ROM for this level (music per level)
+  const songs = currentSongs(app);
+  const songName = (n: number) => songs.find((x) => x.num === n)?.name;
+  const tableSong = (i: number) => app.rom.r8(HEADER_MUSIC_TABLE + i);
+  let levelSong = levelMusic(app.rom, lv.number);
+  const songSel = select([[0, 'Header music'], ...songs.map((x): [number, string] => [x.num, `${songHex(x.num)} – ${x.name}`]),
+    ...(levelSong && !songName(levelSong) ? [[levelSong, `${songHex(levelSong)}`] as [number, string]] : [])], levelSong, (v) => { levelSong = v; if (musicPlayer.label === 'header') musicPlayer.stop(); });
+  const listen = playButton('header', () => {
+    const song = levelSong || tableSong(hd.music);
+    void musicPlayer.playLevel(app, lv.number, 'header', song).then(() => { if (musicPlayer.error) toast(`Could not play: ${musicPlayer.error}`, 'error'); });
+  }, 'Listen: the level with this music, as the game plays it');
+  const musicSel = sel('music', range(8, (i) => `${i} – ${MUSIC[i]} (Song ${hex2(tableSong(i))}${songName(tableSong(i)) && songName(tableSong(i)) !== MUSIC[i] ? ` ${songName(tableSong(i))}` : ''})`));
+  musicSel.addEventListener('change', () => { if (musicPlayer.label === 'header') musicPlayer.stop(); });
+
   const screensWarn = h('div', { class: 'hint warn-text' });
   const body = h('div', { class: 'header-dialog' },
     h('h3', null, 'General'),
@@ -71,7 +88,8 @@ export function openHeaderDialog(app: App): void {
       f('Background color', sel('backAreaColor', range(8))),
       f('Sprite palette', sel('spritePalette', range(8))),
       f('Sprite graphics', sel('spriteGfx', range(16, (i) => hex2(i)))),
-      f('Music', sel('music', range(8, (i) => `${i} – ${MUSIC[i]} (Song ${hex2(app.rom.r8(0x0584db + i))})`))),
+      f('Music', h('div', { class: 'row' }, musicSel, listen)),
+      f('Song for this level', songSel, 'Instead of the header music – any song of the ROM (Patches → Music adds songs)'),
       f('Time', sel('time', range(4, (i) => TIME_SETTINGS[i]))),
       f('Item memory', sel('itemMemory', range(4))),
       f('Vertical scroll', sel('verticalScroll', range(4, (i) => VERTICAL_SCROLL[i]))),
@@ -105,10 +123,14 @@ export function openHeaderDialog(app: App): void {
     ),
   );
   const dlg = modal(`Level ${hex(lv.number, 3)} – Header`, body, [
-    { label: 'Cancel' },
+    { label: 'Cancel', onClick: () => { if (musicPlayer.label === 'header') musicPlayer.stop(); } },
     {
       label: 'Apply', primary: true, onClick: () => {
         app.checkpoint();
+        if (musicPlayer.label === 'header') musicPlayer.stop();
+        if (levelSong !== levelMusic(app.rom, lv.number)) {
+          try { setLevelMusic(app.rom, lv.number, levelSong); app.emu.syncRom(); app.persist(); } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
+        }
         const modeChangedL2 = hasLayer2Objects(hd.mode) !== hasLayer2Objects(lv.header.mode);
         lv.header = hd;
         lv.secondary = sd;
@@ -127,5 +149,5 @@ export function openHeaderDialog(app: App): void {
         app.emit('level-header');
       },
     },
-  ]);
+  ], () => { if (musicPlayer.label === 'header') musicPlayer.stop(); });
 }

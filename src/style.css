@@ -461,3 +461,13 @@ button.danger:hover:not(:disabled) { border-color: var(--danger); }
 .link-btn { background: none; border: none; padding: 0; color: var(--accent); cursor: pointer; text-decoration: underline; }
 .radio-col { display: flex; flex-direction: column; gap: 2px; }
 .prop > select, .prop > input, .prop > button { min-width: 0; }
+
+/* music */
+.play-btn { min-width: 26px; }
+.play-btn.active { color: var(--accent2); border-color: var(--accent2); }
+.music-table tr.current td { background: var(--panel2); }
+.music-table td .hint { font-size: 11px; }
+.music-pane { min-height: 360px; max-height: 64vh; overflow: auto; }
+.resources:has(.music-pane) { width: 920px; }
+.song-add { width: 620px; display: flex; flex-direction: column; gap: 8px; }
+.amk-log { max-height: 300px; overflow: auto; font-size: 11px; white-space: pre-wrap; }

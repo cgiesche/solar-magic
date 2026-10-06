@@ -5,7 +5,7 @@
 import { Snes, type SnesState } from './snes.ts';
 import { Rom, snesToPc } from './rom.ts';
 import { L1_PTRS, L2_PTRS, SPR_PTRS, mainTranslevel } from './level.ts';
-import { editorPatch, BG_HOOK } from './patches.ts';
+import { editorPatch, musicPatch, BG_HOOK, HEADER_MUSIC_TABLE } from './patches.ts';
 import { RomReads, updateBytePages, PAGE_SHIFT } from './romdeps.ts';
 
 export const OV_L1 = 0x0000; // overlay offsets
@@ -36,6 +36,7 @@ export interface LevelOverride {
   translevel?: number; // $13BF (messages, Yoshi coins); default: the level itself if it is a main level
   trace?: boolean; // record per object what its routine reads and writes (see ObjectTrace)
   continueState?: boolean; // load from the emulator's current state (startGame) instead of the boot snapshot
+  music?: number; // the song the level plays instead of its own (all header settings and the level's music patch entry)
 }
 
 // What the object routines did while the level loaded (analysis, see objkinds.ts).
@@ -211,6 +212,11 @@ export class LevelEmulator {
     }
     if (ov.secondaryHeader) {
       for (let i = 0; i < 4; i++) patch(0x05f000 + i * 0x200 + level, ov.secondaryHeader[i]);
+    }
+    if (ov.music !== undefined) {
+      for (let i = 0; i < 8; i++) patch(HEADER_MUSIC_TABLE + i, ov.music);
+      const mp = musicPatch(rom);
+      if (mp) patch(mp.table + level, ov.music);
     }
 
     const owner = new Int32Array(MAP_SIZE).fill(-1);

@@ -12,6 +12,8 @@ import { trackPackage, findPackage } from './pkgtrack.ts';
 import { uberPane } from './uberdialog.ts';
 import { blockPane } from './blockdialog.ts';
 import { pixiPane } from './pixidialog.ts';
+import { musicPane } from './musicdialog.ts';
+import { musicPlayer } from './musicplayer.ts';
 import { errorText, type Pane } from './projectpane.ts';
 
 export type ResourceTab = AddTarget;
@@ -20,7 +22,8 @@ export interface ResourceOptions {
   onChange?: () => void; // after the ROM was changed from the dialog
 }
 
-const TAB_LABEL: Record<ResourceTab, string> = { patches: 'Packages', uber: 'UberASM', blocks: 'Custom Blocks', sprites: 'Custom Sprites' };
+const TAB_LABEL: Record<ResourceTab, string> = { patches: 'Packages', uber: 'UberASM', blocks: 'Custom Blocks', sprites: 'Custom Sprites', music: 'Music' };
+const staged = (k: ResourceTab): k is 'uber' | 'blocks' | 'sprites' => k !== 'patches' && k !== 'music';
 
 export async function openResources(app: App, tab: ResourceTab = 'patches', opts: ResourceOptions = {}): Promise<void> {
   const body = h('div', { class: 'resources' }, h('p', { class: 'hint' }, 'Loading Asar …'));
@@ -46,7 +49,7 @@ export async function openResources(app: App, tab: ResourceTab = 'patches', opts
     });
     return false;
   };
-  const dlg = modal('Patches', body, [{ label: 'Close', primary: true }], undefined, beforeClose);
+  const dlg = modal('Patches', body, [{ label: 'Close', primary: true }], () => { if (musicPlayer.label?.startsWith('song:')) musicPlayer.stop(); }, beforeClose);
 
   try { await loadAsar(); } catch (e) {
     clear(body).appendChild(h('p', { class: 'hint error' }, `Asar could not be loaded: ${errorText(e)}`));
@@ -57,9 +60,10 @@ export async function openResources(app: App, tab: ResourceTab = 'patches', opts
   const content = h('div', { class: 'res-content' });
   const changed = () => { patches.reload(); opts.onChange?.(); };
   const renderTabs = () => clear(tabBar).append(...(Object.keys(TAB_LABEL) as ResourceTab[]).map((k) =>
-    h('button', { class: k === tab ? 'mode active' : 'mode', onclick: () => show(k), title: panes && k !== 'patches' && panes[k].dirty() ? 'Unapplied changes' : undefined },
-      TAB_LABEL[k], panes && k !== 'patches' && panes[k].dirty() ? ' •' : '')));
+    h('button', { class: k === tab ? 'mode active' : 'mode', onclick: () => show(k), title: panes && staged(k) && panes[k].dirty() ? 'Unapplied changes' : undefined },
+      TAB_LABEL[k], panes && staged(k) && panes[k].dirty() ? ' •' : '')));
   const p = { uber: uberPane(app, renderTabs, changed), blocks: blockPane(app, renderTabs, changed), sprites: pixiPane(app, renderTabs, changed) };
+  const music = musicPane(app, changed);
   panes = p;
   // staged changes of these tabs applied or discarded before the ROM is changed directly; false: back
   const settle = async (keys: (keyof typeof p)[], what: string): Promise<boolean> => {
@@ -90,15 +94,16 @@ export async function openResources(app: App, tab: ResourceTab = 'patches', opts
   function show(k: ResourceTab): void {
     tab = k;
     renderTabs();
-    clear(content).appendChild(k === 'patches' ? patches.el : p[k].el);
+    if (k === 'music') music.render();
+    clear(content).appendChild(k === 'patches' ? patches.el : k === 'music' ? music.el : p[k].el);
   }
 
   // opens the dialog adding a package, the tabs it changed reloaded afterwards
   const run = async (pk: PickedPackage) => {
     // the add dialogs work on the ROM's projects: staged changes of those first
-    if (!(await settle(pk.affects.filter((k): k is keyof typeof p => k !== 'patches'), `“${pk.name}” goes directly into the ROM.`))) return;
+    if (!(await settle(pk.affects.filter(staged), `“${pk.name}” goes directly into the ROM.`))) return;
     pk.open({ uberContext: p.uber.context(), tile: p.blocks.tile() }, () => {
-      for (const k of pk.affects) if (k !== 'patches') p[k].reload();
+      for (const k of pk.affects) if (staged(k)) p[k].reload(); else if (k === 'music') music.reload();
       if (pk.target) show('patches');
       changed();
     });
@@ -113,7 +118,7 @@ export async function openResources(app: App, tab: ResourceTab = 'patches', opts
     h('div', { class: 'row res-top' },
       h('button', { class: 'primary', onclick: () => add() }, 'Add …'),
       h('button', { onclick: () => add(true), title: 'Assign a package’s folders and files to folders of the UberASM project yourself – for packages that are more than one resource' }, 'Assign manually …'),
-      h('span', { class: 'hint' }, '.asm or .zip (e.g. from SMWCentral) – recognized as patch, UberASM code, custom block, block package, custom sprite or background.')),
+      h('span', { class: 'hint' }, '.asm or .zip (e.g. from SMWCentral) – recognized as patch, UberASM code, custom block, block package, custom sprite, background or music (AddmusicK).')),
     tabBar,
     content,
   );

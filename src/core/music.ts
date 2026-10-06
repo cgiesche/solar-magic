@@ -43,7 +43,7 @@ export interface SongInfo {
 
 export const emptyMusicProject = (): MusicProject => ({ songs: [], files: new Map() });
 
-const originalName = (file: string) => file.replace(/^originals\/\d+ /, '').replace(/\.txt$/i, '');
+export const originalName = (file: string) => file.replace(/^originals\/\d+ /, '').replace(/\.txt$/i, '');
 
 // ---------- songs in a download ----------
 
