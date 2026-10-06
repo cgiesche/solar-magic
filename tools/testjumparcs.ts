@@ -40,5 +40,16 @@ const walled = arcs.arc(TX, TY, 'p', 1, runs);
 const maxX = Math.max(...walled.pts.filter((_, i) => !(i & 1)));
 check(maxX <= (TX + 3) * 16, `the wall stops the jump (Mario's middle at most at ${maxX}, wall at ${(TX + 3) * 16})`);
 
+// the 45° slope (tile 1AA, up to the right) in the original level 105 at tile (11, 20): Mario
+// starts on its surface and jumps full height in both directions, also running downhill
+const orig = loadLevel(rom, 0x105);
+check(arcs.prepare(orig.number, { layer1: serializeLayer1(rom, orig) }, orig.spriteHeader, 27 * 16), 'original level 105 runs to gameplay');
+for (const dir of [-1, 1] as const) {
+  const sl = ARC_SPEEDS.map((sp) => arcs.arc(11, 20, sp, dir, runs));
+  const rise = sl.map((a) => a.pts[1] - Math.min(...a.pts.filter((_, i) => i & 1)));
+  check(sl.every((a) => a.end === 'land' && a.pts[1] > 20 * 16 && a.pts[1] < 21 * 16) && rise.every((r) => r > 48),
+    `jumps ${dir < 0 ? 'down' : 'up'} the slope from its surface (${sl[0].pts[1]}) rise ${rise.join(', ')} px`);
+}
+
 console.log(bad ? `${bad} failures` : 'all ok');
 if (bad) process.exitCode = 1;
