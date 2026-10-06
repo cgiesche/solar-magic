@@ -4,6 +4,7 @@
 // plays, and removing the project restores the ROM.
 // node tools/testmusic.ts
 import { readFileSync } from 'node:fs';
+import { unzipSync, zipSync, strFromU8, strToU8 } from 'fflate';
 import { testSongZip } from './testsong.ts';
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
@@ -43,6 +44,20 @@ if (spc) {
   check(apu.loadSpc(spc), 'SPC loads');
   const pk = peak(apu.play(32000 * 2));
   check(pk > 1000, `SPC plays (peak ${pk})`);
+}
+
+// a song that reaches AddmusicK's own samples from its #path ("../optimized/…", as downloads made
+// with the default sample group do): not missing, and found though samples/<#path> doesn't exist
+{
+  const z = unzipSync(testSongZip());
+  const txt = strFromU8(z['Square Test/Square Test.txt']).replace('#optimized', '"../optimized/00 SMW @0.brr"\n\t"../EMPTY.brr"');
+  z['Square Test/Square Test.txt'] = strToU8(txt);
+  const sf2 = songsFromZip('Dot Dot.zip', zipSync(z));
+  check(sf2.missing.length === 0, `AddmusicK's samples via ../ not missing (${sf2.missing.join(', ')})`);
+  const p2 = emptyMusicProject();
+  const [s2] = addSongs(p2, sf2);
+  const r2 = await songSpcs(p2, [s2.file]);
+  check(!!spcOf(r2.spcs, s2.file) && r2.errors.length === 0, `SPC of a song with ../ samples (${r2.errors.join(' ')})`);
 }
 
 // level 106 set to the song of header setting 2 of the original driver (installs the music patch before

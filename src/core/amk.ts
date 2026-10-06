@@ -20,6 +20,24 @@ export async function loadAmk(): Promise<void> {
   factory ??= (await import('../vendor/amk/amk.mjs')).default;
 }
 
+// The folders a song's sample paths step through before a "..", e.g. "Song" of #path "Song" with
+// "../optimized/00 SMW @0.brr": Windows resolves such paths by their text, so AddmusicK finds
+// samples/optimized/… whether or not samples/Song exists; the in-memory file system needs the folder.
+function dotDotDirs(text: string): string[] {
+  const t = text.replace(/;[^\n]*/g, '');
+  const base = /#path\s+"([^"]*)"/.exec(t)?.[1] ?? '';
+  const dirs = new Set<string>();
+  for (const [, q] of t.matchAll(/"([^"\n]*\.\.[^"\n]*)"/g)) {
+    const seg = `${base}/${q}`.replace(/\\/g, '/').split('/').filter((x) => x && x !== '.');
+    for (let i = 0; i < seg.length; i++) {
+      if (seg[i] !== '..') continue;
+      const d = seg.slice(0, i);
+      if (d.length && !d.includes('..')) dirs.add(d.join('/'));
+    }
+  }
+  return [...dirs];
+}
+
 // files: paths relative to AddmusicK's folder ("music/…", "Addmusic_list.txt") → contents, written
 // over AddmusicK's own; args: its command line without the ROM name
 export async function runAmk(rom: Uint8Array | null, files: Map<string, Uint8Array | string>, args: string[] = []): Promise<AmkResult> {
@@ -32,6 +50,10 @@ export async function runAmk(rom: Uint8Array | null, files: Map<string, Uint8Arr
     const dir = p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '';
     if (dir) fs.mkdirTree('/amk/' + dir);
     fs.writeFile('/amk/' + p, c);
+    if (dir.startsWith('music/') && /\.txt$/i.test(p)) for (const d of dotDotDirs(typeof c === 'string' ? c : new TextDecoder('latin1').decode(c))) {
+      fs.mkdirTree(`/amk/${dir}/${d}`);
+      fs.mkdirTree(`/amk/samples/${d}`);
+    }
   }
   if (rom) fs.writeFile('/amk/rom.sfc', rom);
   let code: number;

@@ -80,6 +80,8 @@ export interface SongFiles {
 }
 
 const norm = (p: string) => p.replace(/\\/g, '/').replace(/^\.\//, '').split('/').filter((x) => x && x !== '.').join('/');
+// ".." taken by the text, as Windows does ("Song/../optimized/x.brr" → "optimized/x.brr")
+const resolve = (p: string) => norm(p).split('/').reduce<string[]>((a, x) => (x === '..' ? a.slice(0, -1) : [...a, x]), []).join('/');
 
 // The songs of a download (zip or loose files) and the files they need, placed the way AddmusicK
 // looks for samples: next to the song (its folder + #path) – so a download keeps its layout under one
@@ -115,13 +117,13 @@ export function songsFromFiles(name: string, files: Map<string, Uint8Array>, tak
     const dir = p.includes('/') ? p.slice(0, p.lastIndexOf('/') + 1) : '';
     const { path, samples } = songSamples(dec(c));
     for (const s of samples) {
-      const want = norm(`${dir}${path ? path + '/' : ''}${s}`);
+      const want = resolve(`${dir}${path ? path + '/' : ''}${s}`);
       if (all.has(want)) continue;
       const base = s.slice(s.lastIndexOf('/') + 1).toLowerCase();
       const cand = byBase.get(base) ?? [];
       const pick = cand.find((x) => path && x.toLowerCase().includes(path.toLowerCase() + '/')) ?? cand[0];
       if (pick) out.set(`${folder}/${want}`, all.get(pick)!);
-      else if (!/^(default|optimized)\//i.test(s)) missing.push(s); // sample groups of AddmusicK itself
+      else if (!/^(default\/|optimized\/|EMPTY\.brr$)/i.test(resolve(`${path}/${s}`))) missing.push(s); // samples of AddmusicK itself
     }
   }
   return {
