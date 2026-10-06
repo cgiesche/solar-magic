@@ -1,15 +1,17 @@
 // Minimal SNES system model: LoROM mapping, WRAM, SRAM, PPU memories (VRAM/CGRAM/OAM),
 // DMA, math registers, simple timing (NMI / V-IRQ) and a high-level fake of the APU
-// upload protocol. Nothing is rendered by this module; the editor renders from
+// upload protocol (or, with an Apu attached, the real sound unit). Nothing is rendered by this module; the editor renders from
 // VRAM/CGRAM/WRAM contents itself.
 
 import { CPU, type Bus } from './cpu.ts';
 import type { PPU } from './ppu.ts';
+import { APU_CLOCKS_PER_FRAME, type Apu } from './apu.ts';
 import { BYTE_PAGES, type RomReads } from './romdeps.ts';
 
 export const CYCLES_PER_LINE = 170; // approximate CPU cycles (bus accesses) per scanline
 export const LINES_PER_FRAME = 262;
 export const VBLANK_LINE = 225;
+const APU_RATIO = APU_CLOCKS_PER_FRAME / (CYCLES_PER_LINE * LINES_PER_FRAME); // SPC clocks per CPU cycle
 
 export interface MemHook {
   // called for every read of a ROM byte (after mapping): pc offset in rom
@@ -26,7 +28,7 @@ export interface SnesState {
 const STATE_ARRAYS = ['wram', 'sram', 'vram', 'cgram', 'oam', 'ppuRegs', 'dma', 'apuIn', 'apuOut'] as const;
 const STATE_SCALARS = ['vmain', 'vaddr', 'vreadLatch', 'cgaddr', 'cgLatch', 'cgReadHigh', 'oamaddr', 'oamLatch', 'm7a', 'm7b',
   'm7latch', 'wmaddr', 'nmitimen', 'wrmpya', 'wrdiv', 'rddiv', 'rdmpy', 'htime', 'vtime', 'nmiFlag', 'irqFlag', 'joy1',
-  'apuLastReadAddr', 'apuSpin', 'frame', 'line', 'lineCycle', 'openBus', 'hdmaen', 'hdmaDo', 'hdmaOn'] as const;
+  'apuLastReadAddr', 'apuSpin', 'apuFrameStart', 'frame', 'line', 'lineCycle', 'openBus', 'hdmaen', 'hdmaDo', 'hdmaOn'] as const;
 const CPU_SCALARS = ['a', 'x', 'y', 's', 'd', 'dbr', 'pbr', 'pc', 'p', 'e', 'cycles', 'stopped', 'waiting', 'nmiPending', 'irqLine'] as const;
 
 export class Snes implements Bus {
@@ -95,6 +97,10 @@ export class Snes implements Bus {
   apuOut = new Uint8Array([0xaa, 0xbb, 0, 0]); // values CPU reads
   apuLastReadAddr = -1;
   apuSpin = 0;
+  // the real sound unit instead of the fake; its time runs with the CPU's cycles
+  apu: Apu | null = null;
+  apuFrameStart = 0; // cpu.cycles when the APU's current frame began
+  audio: Int16Array | null = null; // with an Apu: the samples of the latest frame (stereo, 32 kHz)
 
   // timing
   frame = 0;
@@ -463,11 +469,13 @@ export class Snes implements Bus {
   // Implements the IPL boot-ROM transfer handshake (echo of port 0) and answers
   // "ready" when the game asks the sound engine to return to its loader.
   apuWrite(port: number, v: number): void {
+    if (this.apu) { this.apu.write(this.apuTime(), port, v); return; }
     this.apuIn[port] = v;
     this.apuSpin = 0;
     if (port === 0) this.apuOut[0] = v;
   }
   apuRead(port: number): number {
+    if (this.apu) return this.apu.read(this.apuTime(), port);
     // Detect busy-waiting on the ports; after some spinning answer with the
     // IPL loader signature, which is what the game waits for in all cases
     // that matter for level loading.
@@ -485,6 +493,11 @@ export class Snes implements Bus {
     return this.apuOut[port];
   }
 
+  // SPC clocks since the APU's frame began
+  private apuTime(): number {
+    return Math.floor((this.cpu.cycles - this.apuFrameStart) * APU_RATIO);
+  }
+
   saveState(): SnesState {
     const st: SnesState = {};
     const self = this as unknown as Record<string, unknown>;
@@ -492,6 +505,7 @@ export class Snes implements Bus {
     for (const k of STATE_SCALARS) st[k] = self[k];
     const cpu = this.cpu as unknown as Record<string, unknown>;
     for (const k of CPU_SCALARS) st['cpu.' + k] = cpu[k];
+    if (this.apu) st.apu = this.apu.save();
     return st;
   }
   loadState(st: SnesState): void {
@@ -500,6 +514,10 @@ export class Snes implements Bus {
     for (const k of STATE_SCALARS) self[k] = st[k];
     const cpu = this.cpu as unknown as Record<string, unknown>;
     for (const k of CPU_SCALARS) cpu[k] = st['cpu.' + k];
+    if (this.apu) {
+      if (st.apu) this.apu.load(st.apu as Uint8Array);
+      else this.apu.reset();
+    }
   }
 
   // --------------- timing ---------------
@@ -510,6 +528,8 @@ export class Snes implements Bus {
   // power on: memory as a fresh console's (cleared, like a new emulator), then reset
   powerOn(): void {
     for (const m of [this.wram, this.sram, this.vram, this.cgram, this.oam]) m.fill(0);
+    this.apu?.reset();
+    this.apuFrameStart = this.cpu.cycles;
     this.reset();
   }
 
@@ -554,6 +574,11 @@ export class Snes implements Bus {
           if (!cpu.nmiPending && !(cpu.irqLine && !(cpu.p & 0x04))) cpu.cycles = target;
         }
       }
+    }
+    if (this.apu) {
+      const t = this.apuTime();
+      this.apuFrameStart = cpu.cycles;
+      this.audio = this.apu.endFrame(t);
     }
     this.frame++;
   }

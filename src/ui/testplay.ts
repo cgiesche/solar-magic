@@ -1,4 +1,5 @@
-// "Test level": runs the edited level in the built-in emulator (video + input, no sound).
+// "Test level": runs the edited level in the built-in emulator (video, sound, input). The sound unit
+// is emulated too (apu.ts): the game uploads and plays its music and sound effects itself.
 
 import type { App } from './app.ts';
 import { h, modal } from './dom.ts';
@@ -6,6 +7,8 @@ import { LevelEmulator } from '../core/levelemu.ts';
 import { PPU } from '../core/ppu.ts';
 import { hex } from '../core/names.ts';
 import { levelTranslevel, nearestEntrance, encodeSecondaryHeader } from '../core/level.ts';
+import { Apu, apuReady, loadApu } from '../core/apu.ts';
+import { AudioOut } from './audio.ts';
 
 const KEYMAP: Record<string, number> = {
   ArrowUp: 0x0800, ArrowDown: 0x0400, ArrowLeft: 0x0200, ArrowRight: 0x0100,
@@ -24,6 +27,7 @@ const PADMAP: [number, number][] = [
   [12, 0x0800], [13, 0x0400], [14, 0x0200], [15, 0x0100], // d-pad
 ];
 const PAD_PAUSE = 16; // home / guide button
+const AUDIO_AHEAD = 1800; // sample pairs to keep queued (~56 ms)
 
 // buttons of all connected gamepads; pause: the pause button is held on one of them
 function readPads(): { bits: number; pause: boolean; names: string[] } {
@@ -43,11 +47,23 @@ function readPads(): { bits: number; pause: boolean; names: string[] } {
 }
 
 let testEmu: LevelEmulator | null = null;
+let soundMuted = false; // kept between test runs
 
 // at: Mario's start tile (his feet stand in it) instead of the main entrance
 export function openTestPlay(app: App, at?: { tx: number; ty: number }): void {
+  // the sound emulator loads once; the audio context must start within the key press or click
+  const audio = new AudioOut();
+  if (!apuReady()) {
+    loadApu().then(() => start(app, at, audio), () => start(app, at, audio));
+    return;
+  }
+  start(app, at, audio);
+}
+
+function start(app: App, at: { tx: number; ty: number } | undefined, audio: AudioOut): void {
   if (!testEmu || testEmu.rom !== app.rom) {
     testEmu = new LevelEmulator(app.rom);
+    if (apuReady()) testEmu.snes.apu = new Apu();
     testEmu.boot();
   }
   const emu = testEmu;
@@ -97,9 +113,11 @@ export function openTestPlay(app: App, at?: { tx: number; ty: number }): void {
   let frames = 0;
   let padPause = false;
   let padNames: string[] = [];
+  audio.setMuted(soundMuted);
   const onKey = (down: boolean) => (e: KeyboardEvent) => {
     const bit = KEYMAP[e.key];
-    if (e.key === 'p' || e.key === 'P') { if (down) paused = !paused; e.preventDefault(); return; }
+    if (e.key === 'p' || e.key === 'P') { if (down) setPaused(!paused); e.preventDefault(); return; }
+    if (e.key === 'm' || e.key === 'M') { if (down) { soundMuted = !soundMuted; audio.setMuted(soundMuted); } e.preventDefault(); return; }
     if (bit === undefined) return;
     e.preventDefault();
     e.stopPropagation();
@@ -108,28 +126,38 @@ export function openTestPlay(app: App, at?: { tx: number; ty: number }): void {
   const kd = onKey(true), ku = onKey(false);
   window.addEventListener('keydown', kd, true);
   window.addEventListener('keyup', ku, true);
+  const setPaused = (p: boolean) => { paused = p; audio.resync(); };
+  const frame = () => {
+    s.joy1 = keys | readPads().bits;
+    try { s.runFrame(); } catch (e) { info.textContent = `Emulation error: ${e}`; paused = true; }
+    if (s.audio) audio.push(s.audio);
+    frames++;
+  };
   const loop = (t: number) => {
     if (!running) return;
     acc += Math.min(100, t - last);
     last = t;
     const pad = readPads();
-    if (pad.pause && !padPause) paused = !paused;
+    if (pad.pause && !padPause) setPaused(!paused);
     padPause = pad.pause;
     padNames = pad.names;
     let n = 0;
-    while (acc >= 1000 / 60 && n < 4) {
-      acc -= 1000 / 60;
-      if (!paused) {
-        s.joy1 = keys | pad.bits;
-        try { s.runFrame(); } catch (e) { info.textContent = `Emulation error: ${e}`; paused = true; }
-        frames++;
+    if (audio.ready && s.apu) {
+      // paced by the audio clock: keep ~3 frames queued
+      acc = 0;
+      while (!paused && audio.buffered() < AUDIO_AHEAD && n < 4) { frame(); n++; }
+    } else {
+      while (acc >= 1000 / 60 && n < 4) {
+        acc -= 1000 / 60;
+        if (!paused) frame();
+        n++;
       }
-      n++;
     }
     new Uint32Array(img.data.buffer).set(ppu.frame);
     ctx.putImageData(img, 0, 0);
     info.textContent = `Level ${hex(lv.number, 3)} · Frame ${frames}${paused ? ' · Pause' : ''} · Game mode ${hex(s.wram[0x100], 2)}`
-      + (padNames.length ? ` · Gamepad: ${padNames.join(', ')}` : ' · Gamepad: none detected (press a button)');
+      + (padNames.length ? ` · Gamepad: ${padNames.join(', ')}` : ' · Gamepad: none detected (press a button)')
+      + (!s.apu || audio.failed ? ' · No sound' : soundMuted ? ' · Sound off (M)' : '');
     schedule();
   };
   // requestAnimationFrame pauses in hidden tabs; fall back to timers there
@@ -139,13 +167,14 @@ export function openTestPlay(app: App, at?: { tx: number; ty: number }): void {
     if (!running) return;
     running = false;
     s.ppu = null;
+    audio.close();
     window.removeEventListener('keydown', kd, true);
     window.removeEventListener('keyup', ku, true);
   };
   const m = modal(`Test level – ${hex(lv.number, 3)}${at ? ` from ${hex(at.tx, 2)}/${hex(at.ty, 2)}` : ''}${r.ok ? '' : ' (load error)'}`, h('div', { class: 'play' },
     canvas,
     info,
-    h('div', { class: 'hint' }, 'Controls: arrows · X = jump (B) · Z/Y = run/fire (Y) · A = spin jump · S = X button · Enter = Start · Shift = Select · Q/W = L/R · P = pause. Gamepad: d-pad/left stick, buttons by position as on the SNES pad (bottom = B, right = A, left = Y, top = X), shoulder buttons/triggers = L/R, Start/Select, Home = pause. No sound. Unsaved changes are included in the test.'),
+    h('div', { class: 'hint' }, 'Controls: arrows · X = jump (B) · Z/Y = run/fire (Y) · A = spin jump · S = X button · Enter = Start · Shift = Select · Q/W = L/R · P = pause. Gamepad: d-pad/left stick, buttons by position as on the SNES pad (bottom = B, right = A, left = Y, top = X), shoulder buttons/triggers = L/R, Start/Select, Home = pause. M = sound on/off. Unsaved changes are included in the test.'),
   ), [{ label: 'Restart', onClick: () => { setTimeout(() => openTestPlay(app, at), 0); } }, { label: 'Quit', primary: true }], stop);
   void m;
   canvas.focus();
