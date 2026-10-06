@@ -441,6 +441,64 @@ export function setBgBank(rom: Rom, level: number, bank: number): void {
 }
 
 // ---------------------------------------------------------------------------
+// Music per level ("SMWU", like Lunar Magic's music bypass): the level header has only 8 music
+// settings, looked up in the table at $0584DB. The hook at $058551 (LDA $0584DB,x) reads a song number
+// from a per-level table first; 0 = the header's setting. The value is what the game writes to $0DDA,
+// so any song of the sound engine works (vanilla or AddmusicK, whose patch keeps this code).
+export const MUSIC_HOOK = 0x058551;
+export const MUSIC_HOOKS: [number, number][] = [[MUSIC_HOOK, 4]];
+const MUSIC_MAGIC = [0x53, 0x4d, 0x57, 0x55]; // "SMWU"
+export const HEADER_MUSIC_TABLE = 0x0584db;
+
+export function musicPatch(rom: Rom): { table: number } | null {
+  if (rom.r8(MUSIC_HOOK) !== 0x22) return null;
+  const base = rom.r24(MUSIC_HOOK + 1) - 8;
+  for (let i = 0; i < 4; i++) if (rom.r8(base + i) !== MUSIC_MAGIC[i]) return null;
+  return { table: rom.r24(base + 4) };
+}
+
+export function installMusicPatch(rom: Rom): { table: number } {
+  const ex = musicPatch(rom);
+  if (ex) return ex;
+  installEditorPatch(rom); // needs the level number in $010B
+  if (rom.r8(MUSIC_HOOK) !== 0xbf || rom.r24(MUSIC_HOOK + 1) !== HEADER_MUSIC_TABLE) {
+    throw new Error(`Unexpected code at $058551${ownerNote(rom, MUSIC_HOOK, 4)} – music per level not possible`);
+  }
+  const a = new Asm();
+  a.b(...MUSIC_MAGIC); a.fill(4); // +4: table pointer
+  a.label('Mus');
+  // called with A and X 8 bit, X = the header's music setting
+  a.b(0xda); // PHX
+  a.b(0xc2, 0x30); // REP #$30
+  a.b(0xaf, 0x0b, 0x01, 0x7e, 0x29, 0xff, 0x01, 0xaa); // LDA.l $7E010B AND #$01FF TAX
+  a.b(0xe2, 0x20); // SEP #$20
+  a.long(0xbf, 'Tbl'); // LDA.l Tbl,x
+  a.b(0xe2, 0x10, 0xfa); // SEP #$10 : PLX
+  a.b(0x09, 0x00); // ORA #$00
+  a.br(0xd0, 'set');
+  a.b(0xbf, HEADER_MUSIC_TABLE & 0xff, (HEADER_MUSIC_TABLE >> 8) & 0xff, HEADER_MUSIC_TABLE >> 16); // LDA.l $0584DB,x
+  a.label('set');
+  a.b(0x6b); // RTL
+  a.label('Tbl');
+  a.fill(512);
+  const addr = rom.allocWrite(new Uint8Array(a.bytes.length));
+  rom.writeBytes(addr, a.link(addr));
+  rom.w24(addr + 4, a.addrOf('Tbl', addr));
+  rom.writeBytes(MUSIC_HOOK, Uint8Array.from([0x22, ...[0, 8, 16].map((s) => (a.addrOf('Mus', addr) >> s) & 0xff)]));
+  return musicPatch(rom)!;
+}
+
+// the song a level plays instead of its header setting, 0 = none
+export function levelMusic(rom: Rom, level: number): number {
+  const p = musicPatch(rom);
+  return p ? rom.r8(p.table + level) : 0;
+}
+export function setLevelMusic(rom: Rom, level: number, song: number): void {
+  if (!song && !musicPatch(rom)) return;
+  rom.w8(installMusicPatch(rom).table + level, song);
+}
+
+// ---------------------------------------------------------------------------
 // BG2/BG3 GFX slots per level ("SMWG"): after the FG/BG1 files are uploaded ($00AA50, end of the
 // tileset GFX routine), GFX/ExGFX files are uploaded to VRAM $2000 (BG2, tiles 200-27F) and $2800
 // (BG3, tiles 280-2FF) - like Lunar Magic's BG2/BG3 slots. The upload uses the game's own routine

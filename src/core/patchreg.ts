@@ -21,7 +21,7 @@ export interface PatchEntry {
   backup: number[]; // SNES addresses of the RATS blocks holding the original bytes of segs
   own: number[]; // pc of the RATS tags of the patch's free space blocks
   check: number; // hash of the patched bytes of segs, to notice later edits
-  kind?: 'patch' | 'uberasm' | 'blocks' | 'vram' | 'pixi';
+  kind?: 'patch' | 'uberasm' | 'blocks' | 'vram' | 'pixi' | 'music';
   src?: number[]; // SNES addresses of RATS blocks holding the sources (zip), if stored in the ROM
   srcSize?: number;
   ram?: RamClaim[]; // free RAM the patch claims

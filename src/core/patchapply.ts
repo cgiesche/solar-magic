@@ -8,7 +8,7 @@
 
 import { Rom, snesToPc, pcToSnes, RESERVED_TOP, type RatsBlock } from './rom.ts';
 import { assemble, type AsarMessage, type AsarResult } from './asar.ts';
-import { editorPatch, customPalettePatch, bgPatch, extGfxPatch, EDITOR_HOOKS, PAL_HOOKS, BG_HOOKS, EXT_GFX_HOOKS } from './patches.ts';
+import { editorPatch, customPalettePatch, bgPatch, extGfxPatch, musicPatch, EDITOR_HOOKS, PAL_HOOKS, BG_HOOKS, EXT_GFX_HOOKS, MUSIC_HOOKS } from './patches.ts';
 import { messagePatch, MSG_HOOKS } from './messages.ts';
 import { map16Ext, MAP16X_HOOKS } from './map16ext.ts';
 import { bgMap16Ext, BGMAP16_HOOKS } from './bgmap16.ts';
@@ -21,6 +21,7 @@ export const BUILTINS: Builtin[] = [
   { name: 'Editor patch (SMWE)', installed: (r) => !!editorPatch(r), hooks: EDITOR_HOOKS },
   { name: 'Level palettes (SMWP)', installed: (r) => !!customPalettePatch(r), hooks: PAL_HOOKS },
   { name: 'BG tilemaps (SMWB)', installed: (r) => !!bgPatch(r), hooks: BG_HOOKS },
+  { name: 'Music per level (SMWU)', installed: (r) => !!musicPatch(r), hooks: MUSIC_HOOKS },
   { name: 'BG2/BG3 graphics (SMWG)', installed: (r) => !!extGfxPatch(r), hooks: EXT_GFX_HOOKS },
   { name: 'Messages (SMWM)', installed: (r) => !!messagePatch(r), hooks: MSG_HOOKS },
   { name: 'Structures (SMWS)', installed: (r) => !!structPatch(r), hooks: STRUCT_HOOKS },
@@ -44,6 +45,7 @@ export function editorInclude(rom: Rom): string {
     `!SMWE_LEVEL_GFX = ${h(e?.levelGfx ?? 0)} ; 512 x 8 bytes: GFX bypass (SP4..SP1, FG3, BG1, FG2, FG1), $FF = default`,
     `!SMWE_PALETTES = ${h(p?.table ?? 0)} ; 512 x 3 bytes: pointer to a level's 256-color palette, 0 = none`,
     `!SMWE_BG_BANKS = ${h(b?.table ?? 0)} ; 512 bytes: bank of a level's BG tilemap, 0 = vanilla`,
+    `!SMWE_LEVEL_MUSIC = ${h(musicPatch(rom)?.table ?? 0)} ; 512 bytes: song of a level instead of its header setting, 0 = header`,
     `!SMWE_EXT_GFX = ${h(g?.table ?? 0)} ; 512 x 2 bytes: BG2/BG3 GFX file of a level (tiles 200-27F/280-2FF), $FF = none`,
     `!SMWE_MAP16X = ${x ? 1 : 0}`,
     `!SMWE_ACTS_LIKE = ${h(x?.acts ?? 0)} ; $1000 x 2 bytes: acts like of Map16 tiles 000-FFF`,
@@ -70,7 +72,7 @@ export interface PatchSource {
   files: Map<string, Uint8Array | string>;
   defines?: Record<string, string>; // passed to Asar
   settings?: Record<string, string>; // all settings chosen by the user (stored in the registry)
-  kind?: 'patch' | 'uberasm' | 'blocks' | 'vram' | 'pixi';
+  kind?: PatchEntry['kind'];
   archive?: Uint8Array; // sources to keep in the ROM (zip)
   ram?: RamClaim[]; // free RAM the patch uses
   // further Asar runs on the result of the previous ones, all recorded as this one patch (PIXI assembles
@@ -173,7 +175,7 @@ export function ramConflicts(ram: RamClaim[], seen: [number, number][], others: 
 const key = (b: RatsBlock) => `${b.start}:${b.size}`;
 
 // Temporary RATS tags over the reserved banks keep Asar's free space search out of them.
-function reserveTop(data: Uint8Array): Uint8Array | null {
+export function reserveTop(data: Uint8Array): Uint8Array | null {
   if (data.length <= RESERVED_TOP) return null;
   const saved = data.slice(RESERVED_TOP, data.length);
   for (let o = RESERVED_TOP; o + 0x8000 <= data.length; o += 0x8000) {
@@ -181,6 +183,83 @@ function reserveTop(data: Uint8Array): Uint8Array | null {
     data.set([0x53, 0x54, 0x41, 0x52, s & 0xff, s >> 8, ~s & 0xff, (~s >> 8) & 0xff], o);
   }
   return saved;
+}
+
+export interface RegisterMeta {
+  name: string;
+  version?: string;
+  hash: string;
+  settings: Record<string, string>;
+  kind?: PatchEntry['kind'];
+  ram?: RamClaim[];
+  archive?: Uint8Array;
+}
+
+// Records the change from `before` to `out` as one patch: new RATS blocks are its own free space, the
+// written ranges outside them its segments (checked against the other patches, the editor's hooks,
+// protected data and the reserved banks). On success rom.data becomes `out` and the entry is added.
+export function registerChanges(rom: Rom, before: Uint8Array, beforeRats: RatsBlock[], out: Uint8Array, written: [number, number][], meta: RegisterMeta, warn: string[] = []): { errors: string[]; warnings: string[]; entry?: PatchEntry } {
+  const after = new Rom(out);
+  const known = new Set(beforeRats.map(key));
+  const own = after.scanRats().filter((b) => !known.has(key(b)) && b.start < RESERVED_TOP);
+  const ownRanges: [number, number][] = own.map((b) => [b.start, b.size + 8]);
+
+  const segs: [number, number][] = [];
+  for (const w of written) {
+    for (const s of subtract(w, [...ownRanges, ...IGNORE])) segs.push(s);
+  }
+  // merge overlapping writes of several runs
+  segs.sort((a, b) => a[0] - b[0]);
+  for (let i = 1; i < segs.length; i++) {
+    const p = segs[i - 1], c = segs[i];
+    if (c[0] <= p[0] + p[1]) { p[1] = Math.max(p[1], c[0] + c[1] - p[0]); segs.splice(i--, 1); }
+  }
+
+  const errors: string[] = [];
+  const warnings = [...warn];
+  const others = listPatches(rom);
+  for (const s of segs) {
+    const where = `${pcHex(s[0])} (${s[1]} bytes)`;
+    if (s[0] + s[1] > RESERVED_TOP) { errors.push(`The patch writes at ${where} to banks $7E/$7F, which are reserved for the editor.`); continue; }
+    const p = others.find((o) => o.segs.some((t) => overlaps(t, s)) || o.own.some((t) => overlaps([t, (rom.isRatsAt(t) + 8)], s)));
+    if (p) { errors.push(`Conflict with patch “${p.name}” at ${where}.`); continue; }
+    const hit = beforeRats.find((b) => overlaps([b.start, b.size + 8], s));
+    if (hit) { errors.push(`The patch overwrites protected data (RATS block at ${pcHex(hit.start)}) at ${where}.`); continue; }
+    for (const bi of BUILTINS) {
+      const h = bi.hooks.find(([a, n]) => overlaps([snesToPc(a), n], s));
+      if (!h) continue;
+      if (bi.installed(rom)) errors.push(`Conflict with ${bi.name}: the patch changes its hook at ${hex(h[0])}.`);
+      else warnings.push(`The patch uses ${hex(h[0])}; ${bi.name} can no longer be installed afterwards.`);
+    }
+  }
+  const ram = (meta.ram ?? []).map(([a, n, sh]): RamClaim => { const w = wramAddr(a) < 0 ? a : wramAddr(a); return sh ? [w, n, sh] : [w, n]; });
+  const ramSeen = longWrites(out, [...own.map((b): [number, number] => [b.start + 8, b.size]), ...segs]);
+  const rc = ramConflicts(ram, ramSeen, others);
+  errors.push(...rc.errors);
+  warnings.push(...rc.warnings);
+  if (errors.length) return { errors, warnings };
+
+  const original = segs.map(([pc, n]) => {
+    const o = new Uint8Array(n);
+    if (pc < before.length) o.set(before.subarray(pc, Math.min(pc + n, before.length)));
+    return o;
+  });
+  rom.data = out;
+  const entry = addPatch(rom, {
+    id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+    name: meta.name,
+    version: meta.version,
+    hash: meta.hash,
+    defines: meta.settings,
+    applied: new Date().toISOString(),
+    segs,
+    own: own.map((b) => b.start),
+    check: patchedHash(after, segs),
+    kind: meta.kind,
+    ...(ram.length ? { ram } : {}),
+    ...(ramSeen.length ? { ramSeen } : {}),
+  }, original, meta.archive);
+  return { errors: [], warnings, entry };
 }
 
 export function applyPatch(rom: Rom, src: PatchSource): ApplyResult {
@@ -224,66 +303,11 @@ export function applyPatch(rom: Rom, src: PatchSource): ApplyResult {
   const out = r.rom;
   if (saved) out.set(saved, RESERVED_TOP);
 
-  const after = new Rom(out);
-  const known = new Set(beforeRats.map(key));
-  const own = after.scanRats().filter((b) => !known.has(key(b)) && b.start < RESERVED_TOP);
-  const ownRanges: [number, number][] = own.map((b) => [b.start, b.size + 8]);
-
-  const segs: [number, number][] = [];
-  for (const b of steps.flatMap((x) => x.blocks)) {
-    for (const s of subtract([b.pc, b.size], [...ownRanges, ...IGNORE])) segs.push(s);
-  }
-  // merge overlapping writes of several runs
-  segs.sort((a, b) => a[0] - b[0]);
-  for (let i = 1; i < segs.length; i++) {
-    const p = segs[i - 1], c = segs[i];
-    if (c[0] <= p[0] + p[1]) { p[1] = Math.max(p[1], c[0] + c[1] - p[0]); segs.splice(i--, 1); }
-  }
-
-  const errors: string[] = [];
-  const warnings = steps.flatMap((x) => x.warnings.map((w) => w.full));
-  const others = listPatches(rom);
-  for (const s of segs) {
-    const where = `${pcHex(s[0])} (${s[1]} bytes)`;
-    if (s[0] + s[1] > RESERVED_TOP) { errors.push(`The patch writes at ${where} to banks $7E/$7F, which are reserved for the editor.`); continue; }
-    const p = others.find((o) => o.segs.some((t) => overlaps(t, s)) || o.own.some((t) => overlaps([t, (rom.isRatsAt(t) + 8)], s)));
-    if (p) { errors.push(`Conflict with patch “${p.name}” at ${where}.`); continue; }
-    const hit = beforeRats.find((b) => overlaps([b.start, b.size + 8], s));
-    if (hit) { errors.push(`The patch overwrites protected data (RATS block at ${pcHex(hit.start)}) at ${where}.`); continue; }
-    for (const bi of BUILTINS) {
-      const h = bi.hooks.find(([a, n]) => overlaps([snesToPc(a), n], s));
-      if (!h) continue;
-      if (bi.installed(rom)) errors.push(`Conflict with ${bi.name}: the patch changes its hook at ${hex(h[0])}.`);
-      else warnings.push(`The patch uses ${hex(h[0])}; ${bi.name} can no longer be installed afterwards.`);
-    }
-  }
-  const ram = (src.ram ?? []).map(([a, n, sh]): RamClaim => { const w = wramAddr(a) < 0 ? a : wramAddr(a); return sh ? [w, n, sh] : [w, n]; });
-  const ramSeen = longWrites(out, [...own.map((b): [number, number] => [b.start + 8, b.size]), ...segs]);
-  const rc = ramConflicts(ram, ramSeen, others);
-  errors.push(...rc.errors);
-  warnings.push(...rc.warnings);
-  if (errors.length) return fail(errors, warnings);
-
-  const original = segs.map(([pc, n]) => {
-    const o = new Uint8Array(n);
-    if (pc < before.length) o.set(before.subarray(pc, Math.min(pc + n, before.length)));
-    return o;
-  });
-  rom.data = out;
-  const entry = addPatch(rom, {
-    id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
-    name: src.name,
-    version: src.version,
-    hash: sourceHash(src),
-    defines: src.settings ?? src.defines ?? {},
-    applied: new Date().toISOString(),
-    segs,
-    own: own.map((b) => b.start),
-    check: patchedHash(after, segs),
-    kind: src.kind,
-    ...(ram.length ? { ram } : {}),
-    ...(ramSeen.length ? { ramSeen } : {}),
-  }, original, src.archive);
+  const reg = registerChanges(rom, before, beforeRats, out, steps.flatMap((x) => x.blocks.map((b): [number, number] => [b.pc, b.size])), {
+    name: src.name, version: src.version, hash: sourceHash(src), settings: src.settings ?? src.defines ?? {}, kind: src.kind, ram: src.ram, archive: src.archive,
+  }, steps.flatMap((x) => x.warnings.map((w) => w.full)));
+  if (!reg.entry) return fail(reg.errors, reg.warnings);
+  const { entry, warnings } = reg;
   return { ok: true, errors: [], warnings, prints, entry, labels: Object.assign({}, ...steps.map((x) => x.labels)), steps, asar: { errors: [], warnings: r.warnings } };
 }
 
