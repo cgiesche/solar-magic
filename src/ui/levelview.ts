@@ -9,7 +9,8 @@ import { type LevelObject, type LevelSprite, newUid, serializeLayer1, serializeL
 import { composite } from '../core/render.ts';
 import { exitTarget } from '../core/exitgraph.ts';
 import { contextMenu, type MenuItem } from './menu.ts';
-import { incompleteSprites, spriteMemDialog, spriteMemText, SPRITE_MEM_HELP } from './spritemem.ts';
+import { incompleteSprites } from './spritemem.ts';
+import { problemsButton } from './problems.ts';
 
 type Drag =
   | { kind: 'move'; startTx: number; startTy: number; lastDx: number; lastDy: number; orig: Map<number, { x: number; y: number }> }
@@ -37,7 +38,7 @@ export class LevelView {
   drag: Drag | null = null;
   status: HTMLSpanElement;
   stats: HTMLSpanElement;
-  memWarn: HTMLButtonElement;
+  problems: ReturnType<typeof problemsButton>;
   pos: HTMLSpanElement;
   pendingFrame = 0;
 
@@ -46,8 +47,8 @@ export class LevelView {
     this.pos = h('span', { class: 'status-pos' });
     this.status = h('span', { class: 'status-text' });
     this.stats = h('span', { class: 'status-stats' });
-    this.memWarn = h('button', { class: 'status-warn', hidden: true, title: SPRITE_MEM_HELP, onclick: () => spriteMemDialog(app, (u) => this.revealSprites(u)) });
-    statusBar.append(this.pos, this.status, this.stats, this.memWarn);
+    this.problems = problemsButton(app, (u) => this.revealSprites(u));
+    statusBar.append(this.pos, this.status, this.stats, this.problems);
     this.canvas = h('canvas', { class: 'level-canvas' });
     this.sizer = h('div', { class: 'level-sizer' });
     this.scroller = h('div', { class: 'level-scroller', tabIndex: 0 }, this.canvas, this.sizer);
@@ -69,8 +70,9 @@ export class LevelView {
     app.on('sprites', () => this.requestPaint());
     app.on('sprite-mem', () => { this.requestPaint(); this.updateStats(); });
     app.on('mode', () => { if (!this.hover) this.idleStatus(); });
+    app.on('rom-change', () => this.problems.update());
     this.idleStatus();
-    app.on('blockinfo', () => { if (this.hover && !this.drag) this.updateStatus(this.hover.tx, this.hover.ty); this.requestPaint(); });
+    app.on('blockinfo', () => { if (this.hover && !this.drag) this.updateStatus(this.hover.tx, this.hover.ty); this.requestPaint(); this.problems.update(); });
   }
 
   setZoom(z: number, anchor?: { ax: number; ay: number }): void {
@@ -722,9 +724,7 @@ export class LevelView {
     const over = lv.sprites.length > 128;
     this.stats.classList.toggle('warn', over);
     this.stats.title = over ? 'More than 128 sprites: the game only loads the first 128.' : '';
-    const n = incompleteSprites(app).length;
-    this.memWarn.hidden = !n;
-    this.memWarn.textContent = n ? `⚠ ${spriteMemText(n)}` : '';
+    this.problems.update();
   }
 
   // selects the sprites (sprite mode) and scrolls to the first

@@ -123,6 +123,17 @@ input.invalid, input.invalid:focus { outline: 1px solid var(--danger); border-co
 .statusbar .status-stats.warn { color: #ff6060; opacity: 1; }
 .statusbar .status-warn { flex: none; padding: 0 6px; height: 18px; font: inherit; color: #ffa020; background: none; border: 1px solid #ffa020; border-radius: 3px; cursor: pointer; }
 .statusbar .status-warn:hover { background: #ffa02022; }
+.statusbar .status-warn.status-info { color: var(--muted); border-color: var(--border); }
+.problems-pop { position: fixed; top: auto; left: auto; min-width: 320px; max-width: min(560px, 90vw); max-height: 50vh; overflow-y: auto; }
+.problem { display: flex; align-items: center; gap: 6px; padding: 2px 4px; }
+.problem-icon { flex: none; width: 18px; text-align: center; }
+.problem-error .problem-icon { color: var(--danger); }
+.problem-warn .problem-icon { color: #ffa020; }
+.problem-info .problem-icon { color: var(--muted); }
+.problem-text { flex: 1; text-align: left; background: none; border: 1px solid transparent; border-radius: 4px; padding: 3px 6px; }
+.problem-text:hover:not(:disabled) { background: var(--accent2); color: #fff; }
+.problem-text:disabled { opacity: 1; cursor: default; }
+.problem-fix { flex: none; padding: 2px 8px; }
 .toast { position: fixed; bottom: calc(var(--log-h, 0px) + 36px); left: 50%; transform: translate(-50%, 20px); opacity: 0; background: #333842; border: 1px solid var(--border); padding: 8px 14px; border-radius: 6px; transition: all .25s; z-index: 1000; max-width: 80vw; }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 .toast.error { border-color: var(--danger); background: #4a2626; }
