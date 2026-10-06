@@ -60,7 +60,7 @@ Beim Anzeigen eines Levels führt er die **originalen Laderoutinen** des ROMs au
 * **Einfügen nach Nummer** (Einfg/I): Objekt, erweitertes Objekt oder Sprite mit Größe/Extra-Bits.
 * Menü *Ansicht*: Raster, Screen-Grenzen, Layer ein-/ausblendbar; **inaktive Ebene durchscheinend** (nicht bearbeitete Objektebene halbtransparent);
   Ansicht mit gedrückten Switch-Palästen bzw. ON/OFF auf OFF; Zoom 50–400 %.
-* **Layer 3** (Flut, Layer-3-Bilder) als Vorschau (Scrollen angenähert), **animierte Tiles/Paletten** (Ansicht → Animation).
+* **Layer 3** (Flut, Layer-3-Bilder) als Vorschau (Scrollen angenähert); der Header-Dialog nennt per Emulation, was die vier Layer-3-Einstellungen im gewählten Tileset bewirken (steigende/fallende oder feste Flut, Layer-3-Bild). Bei steigender/fallender Flut zeigt die Level-Ansicht höchsten und tiefsten Wasserstand (vom Level-Scan gemessen), das Collision-Overlay das Flutwasser blau. **animierte Tiles/Paletten** (Ansicht → Animation).
 * Statuszeile mit Objekt-/Sprite-Anzahl und Datengröße (Warnung ab 128 Sprites); **Level als PNG** exportieren (*Datei → Level als PNG*).
 * **Sprite-Speicher-Prüfung:** Der Editor lässt die Sprites, die gleichzeitig im Bild sein können, im Spiel laufen und
   erkennt, wenn ein Sprite wegen zu wenig Sprite-Speicher (Sprite-Header, `$1692`) Teile seiner Grafik verliert

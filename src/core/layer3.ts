@@ -21,12 +21,15 @@ export const LAYER3_KIND_TEXT: Record<Layer3Kind, string> = {
   'image': 'Layer 3 image',
 };
 
+// the tide of the loaded level, if it has one
+export function tideKind(r: LevelRender): 'tide-moving' | 'tide-fixed' | null {
+  const t = r.wram[0x1403];
+  return t === 1 ? 'tide-moving' : t === 2 ? 'tide-fixed' : null;
+}
+
 // what the loaded level does with layer 3
 export function layer3Kind(r: LevelRender): Layer3Kind {
-  const t = r.wram[0x1403];
-  if (t === 1) return 'tide-moving';
-  if (t === 2) return 'tide-fixed';
-  return r.wram[0x1be3] && renderLayer3(r, 256, 432) ? 'image' : 'none';
+  return tideKind(r) ?? (r.wram[0x1be3] && renderLayer3(r, 256, 432) ? 'image' : 'none');
 }
 
 // the kind for each of the four settings, in the level as given (its tileset decides)

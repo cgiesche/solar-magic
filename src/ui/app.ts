@@ -26,7 +26,7 @@ import { RomHistory, type RomEdit } from '../core/romhistory.ts';
 import { ObjKindProbe, kindsStillValid, storeKinds, loadKinds, resizeObjectSize, type ObjKind, type ObjKinds, type StoredObjKinds } from '../core/objkinds.ts';
 import { JumpArcs, ARC_SPEEDS, type JumpArc } from '../core/jumparcs.ts';
 import { levelScanJob, type ScanResult } from '../core/levelscan.ts';
-import { layer3Kinds, type Layer3Kind } from '../core/layer3.ts';
+import { layer3Kinds, tideKind, layer3Top, type Layer3Kind } from '../core/layer3.ts';
 import { BlockProber, variantOf, type BlockProbe, type SpriteProbe, type CollisionProbe } from '../core/blockprobe.ts';
 
 export type EditMode = 'l1' | 'l2' | 'spr' | 'exit' | 'bg';
@@ -884,6 +884,22 @@ export class App {
     this.results.set(key, result, this.results.fp.deps(reads));
     return result;
   }
+
+  // Water line of a layer 3 tide in level pixels: the surface where the level view draws layer 3
+  // (as at the end of the level load), and for a tide that rises and falls its highest and lowest
+  // line once the level scan has measured how far it moves (higher $24 - $1C: water higher up)
+  tide(): { moving: boolean; surface: number; high: number; low: number } | null {
+    const im = this.images, range = this.levelScan?.level === this.level.number ? this.levelScan.result.tide ?? null : null;
+    if (this.tideCache?.images === im && this.tideCache.range === range) return this.tideCache.value;
+    const kind = tideKind(this.render), surface = kind ? layer3Top(im.layer3, im.width) : -1;
+    const value = surface < 0 ? null : {
+      moving: kind === 'tide-moving', surface,
+      high: range ? surface + range.load - range.max : surface, low: range ? surface + range.load - range.min : surface,
+    };
+    this.tideCache = { images: im, range, value };
+    return value;
+  }
+  private tideCache: { images: LevelImages; range: unknown; value: ReturnType<App['tide']> } | null = null;
 
   private layer3Emu: LevelEmulator | null = null;
 

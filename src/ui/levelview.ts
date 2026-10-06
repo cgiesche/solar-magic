@@ -81,7 +81,7 @@ export class LevelView {
     app.on('mode', () => { if (!this.hover) this.idleStatus(); });
     app.on('rom-change', () => this.problems.update());
     app.on('arcs', () => this.requestPaint());
-    app.on('level-scan', () => this.problems.update());
+    app.on('level-scan', () => { this.problems.update(); this.requestPaint(); });
     this.idleStatus();
     app.on('blockinfo', () => { if (this.hover && !this.drag) this.updateStatus(this.hover.tx, this.hover.ty); this.requestPaint(); this.problems.update(); });
   }
@@ -238,6 +238,7 @@ export class LevelView {
       if (m.kind === 'sec') ctx.fillText(hex3(m.index), m.x + 15, m.y + 27.5);
     }
     if (app.show.collision) this.paintCollision(ctx);
+    if (app.show.collision || app.show.layer3) this.paintTide(ctx);
     if (app.show.items) this.paintItems(ctx);
     // sprites
     if (app.show.sprites) this.paintSprites(ctx, z);
@@ -457,6 +458,37 @@ export class LevelView {
     ctx.setLineDash([3 * lw, 2 * lw]);
     ctx.stroke(platLines);
     ctx.setLineDash([]);
+  }
+
+  // Water of a layer 3 tide (see App.tide): in the collision overlay the area Mario swims in is
+  // blue (lighter where only at high tide); a tide that rises and falls gets dashed lines at its
+  // highest and lowest water line
+  paintTide(ctx: CanvasRenderingContext2D): void {
+    const app = this.app, t = app.tide(), im = app.images;
+    if (!t) return;
+    if (app.show.collision) {
+      ctx.fillStyle = 'rgba(60,140,255,0.18)';
+      ctx.fillRect(0, t.high, im.width, t.low - t.high);
+      ctx.fillStyle = 'rgba(60,140,255,0.35)';
+      ctx.fillRect(0, t.low, im.width, im.height - t.low);
+    }
+    if (!t.moving || t.high === t.low) return;
+    const lw = 1.5 / app.zoom;
+    ctx.lineWidth = lw;
+    ctx.strokeStyle = '#7fc8ff';
+    ctx.setLineDash([6 * lw, 4 * lw]);
+    ctx.beginPath();
+    for (const y of [t.high, t.low]) { ctx.moveTo(0, y); ctx.lineTo(im.width, y); }
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.font = `bold ${11 / app.zoom}px sans-serif`;
+    const x0 = this.scroller.scrollLeft / app.zoom + 8 / app.zoom;
+    for (const [y, txt] of [[t.high, 'Tide: highest water'], [t.low, 'Tide: lowest water']] as [number, string][]) {
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.fillRect(x0 - 2 / app.zoom, y - 14 / app.zoom, ctx.measureText(txt).width + 4 / app.zoom, 13 / app.zoom);
+      ctx.fillStyle = '#7fc8ff';
+      ctx.fillText(txt, x0, y - 4 / app.zoom);
+    }
   }
 
   // translucent image of the item a block (visible part of layer 1) or sprite gives, drawn over it
@@ -778,6 +810,8 @@ export class LevelView {
       if (sum) txt += ` (${sum})`;
       const c = app.show.collision && app.mode !== 'bg' ? app.collisionInfo(t) : undefined;
       if (c) txt += ` · ${collisionText(c)}`;
+      const tide = app.show.collision && app.mode !== 'bg' ? app.tide() : null;
+      if (tide && ty * 16 + 8 >= tide.high) txt += ty * 16 + 8 >= tide.low ? ' · water (tide)' : ' · water at high tide';
     }
     if (app.mode === 'bg') {
       const b = app.bgBrush;
