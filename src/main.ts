@@ -5,9 +5,9 @@ import { createBps, crc32 } from './core/bps.ts';
 const SMW_CLEAN_CRC = 0xb19ed489; // Super Mario World (U), headerless
 import { disableUnsafeExtGfx, hasEditorPatch } from './core/patches.ts';
 import { App, type EditMode } from './ui/app.ts';
-import { h, clear, toast, log, downloadBytes, pickFile, modal } from './ui/dom.ts';
+import { h, clear, toast, log, downloadBytes, pickFile, modal, choose } from './ui/dom.ts';
 import { LogBar } from './ui/logbar.ts';
-import { kvGet, saveRom, romFromRecord, type RomRecord } from './ui/storage.ts';
+import { kvGet, kvClear, saveRom, romFromRecord, type RomRecord } from './ui/storage.ts';
 import { migratePatchSources } from './core/patchreg.ts';
 import { migratePackageFiles } from './core/pkgreg.ts';
 import { LevelView } from './ui/levelview.ts';
@@ -143,6 +143,8 @@ function buildUi(app: App): void {
       { label: 'Import level file …', title: 'Replaces the current level (undoable; palette/graphics bypass are written to the ROM directly)', disabled: () => !inLevel(), onClick: () => importLevel(app) },
       { label: 'Export level file …', title: `Level as ${LEVEL_FILE_EXT} file (objects, sprites, exits, header, graphics bypass, custom palette)`, disabled: () => !inLevel(), onClick: () => exportLevel(app) },
       { label: 'Level as PNG …', title: 'Visible layers and sprites at original size', disabled: () => !inLevel(), onClick: () => view.exportPng() },
+      'sep',
+      { label: 'Close project …', title: 'Remove the ROM and all editor data from the browser and return to the start page', onClick: () => closeProject(app) },
     ] },
     { label: 'Level', disabled: () => !inLevel(), items: [
       { label: 'Save', shortcut: 'Ctrl+S', onClick: () => app.saveLevel() },
@@ -385,6 +387,17 @@ async function exportPatch(app: App): Promise<void> {
   downloadBytes(`${base}.bps`, patch);
   log(`Patch exported as “${base}.bps” (${Math.max(1, Math.round(patch.length / 1024))} KB, from “${f.name}”)`);
   app.persist();
+}
+// forgets everything stored in the browser and starts over (reloading drops all state of the session)
+async function closeProject(app: App): Promise<void> {
+  const r = await choose('Close project', `“${app.romName}” and all editor data (sources, caches, imported manuals) are removed from the browser. Changes not saved with “Save project” or “Export ROM” are lost.`,
+    [{ label: 'Cancel' }, { label: 'Close project', danger: true }]);
+  if (r !== 1) return;
+  app.close();
+  window.onbeforeunload = null;
+  try { await kvClear(); } catch (e) { toast(`Could not clear the browser storage: ${e instanceof Error ? e.message : e}`, 'error'); return; }
+  try { localStorage.clear(); } catch { /* no storage */ }
+  location.replace(location.pathname);
 }
 function exportProject(app: App): void {
   if (app.dirty) app.saveLevel(true);

@@ -109,6 +109,7 @@ export class App {
   results: ResultCache;
   cacheReady: Promise<void>;
   private cacheTimer = 0;
+  private closed = false; // project closed: nothing is written to the browser any more
   // what the settings byte nibbles of standard objects mean, per tileset (emulated, see objkinds.ts)
   kinds = new Map<number, { k: ObjKinds; gen: number }>();
   kindJob: { ts: number; probe: ObjKindProbe | null } | null = null;
@@ -134,9 +135,9 @@ export class App {
     // results of older formats
     kvKeys('rc').then((k) => kvWrite([], k.filter((x) => !x.startsWith(CACHE_PREFIX)))).catch(() => {});
     this.results.onChange = () => {
-      if (!this.cacheTimer) this.cacheTimer = window.setTimeout(() => this.storeResults(), 3000);
+      if (!this.cacheTimer && !this.closed) this.cacheTimer = window.setTimeout(() => this.storeResults(), 3000);
     };
-    window.addEventListener('pagehide', () => { if (this.cacheTimer) { clearTimeout(this.cacheTimer); this.storeResults(); } });
+    window.addEventListener('pagehide', () => { if (this.cacheTimer && !this.closed) { clearTimeout(this.cacheTimer); this.storeResults(); } });
   }
 
   private storeResults(): void {
@@ -1607,7 +1608,15 @@ export class App {
     this.emit('open-map16');
   }
 
+  // stops all writes to the browser storage (before it is cleared)
+  close(): void {
+    this.closed = true;
+    clearTimeout(this.cacheTimer);
+    this.cacheTimer = 0;
+  }
+
   persist(): void {
+    if (this.closed) return;
     saveRom(this.romName, this.rom).catch(() => {});
   }
 

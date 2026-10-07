@@ -64,6 +64,17 @@ export async function kvWrite(put: [string, unknown][], del: string[] = []): Pro
   });
 }
 
+// everything the editor keeps in the browser (working ROM, editor data, caches, manuals)
+export async function kvClear(): Promise<void> {
+  const db = await open();
+  await new Promise<void>((res, rej) => {
+    const tx = db.transaction('kv', 'readwrite');
+    tx.objectStore('kv').clear();
+    tx.oncomplete = () => res();
+    tx.onerror = () => rej(tx.error);
+  });
+}
+
 export async function kvKeys(prefix: string): Promise<string[]> {
   const db = await open();
   return new Promise((res, rej) => {
