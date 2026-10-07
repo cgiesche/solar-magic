@@ -9,7 +9,7 @@
 // level by the music patch (patches.ts, "SMWU").
 
 import { unzipSync, zipSync, strFromU8, strToU8 } from 'fflate';
-import { Rom, MAX_ROM_SIZE, snesToPc } from './rom.ts';
+import { Rom, MAX_ROM_SIZE, snesToPc, pcToSnes } from './rom.ts';
 import { registerChanges, reserveTop, uninstallPatch } from './patchapply.ts';
 import { listPatches, patchArchive, hashBytes, missingSources, type PatchEntry } from './patchreg.ts';
 import { RESERVED_TOP } from './rom.ts';
@@ -479,10 +479,15 @@ async function insertProject(rom: Rom, p: MusicProject): Promise<MusicResult> {
   }
   if (!r.ok || !r.rom) return fail(amkErrors(r).length ? amkErrors(r) : ['AddmusicK failed.'], r.log);
   const out = r.rom;
+  // the reserved banks: AddmusicK must have left them (and our temporary tags there) alone
+  const top = saved ? RESERVED_TOP : out.length;
+  for (let i = top; i < out.length; i++) {
+    if (out[i] !== input[i]) return fail([`AddmusicK wrote at ${'$' + pcToSnes(i).toString(16).toUpperCase()} to banks $7E/$7F, which are reserved for the editor.`], r.log);
+  }
   if (saved) out.set(saved, RESERVED_TOP);
   // what AddmusicK wrote: every changed byte, runs closer than 16 bytes joined
   const written: [number, number][] = [];
-  for (let i = 0; i < out.length; i++) {
+  for (let i = 0; i < top; i++) {
     if (i < input.length && out[i] === input[i]) continue;
     const last = written[written.length - 1];
     if (last && i - (last[0] + last[1]) < 16) last[1] = i + 1 - last[0];

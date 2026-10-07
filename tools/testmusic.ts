@@ -9,7 +9,8 @@ import { testSongZip } from './testsong.ts';
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { Apu, loadApu } from '../src/core/apu.ts';
-import { setLevelMusic, levelMusic } from '../src/core/patches.ts';
+import { setLevelMusic, levelMusic, installEditorPatch } from '../src/core/patches.ts';
+import { RESERVED_TOP } from '../src/core/rom.ts';
 import {
   emptyMusicProject, songsFromZip, addSongs, saveMusicProject, loadMusicProject, musicEntry, hasAmk, romSongs,
   songSpcs, spcOf, removeSong, folders, songDefines, songWithDefines,
@@ -217,6 +218,20 @@ check(levelMusic(rom, 0x106) === vanillaSong && levelMusic(rom, 0x105) === 0, `l
 let diff = 0;
 for (let i = 0; i < 0x80000; i++) if (rom.data[i] !== beforeAmk[i] && !(i >= 0x7fdc && i < 0x7fe0) && i !== 0x7fd7) { diff++; console.log('  differs', i.toString(16), beforeAmk[i].toString(16), rom.data[i].toString(16)); }
 check(diff === 0, `original ROM area restored, apart from size and checksum (${diff} bytes differ)`);
+
+// a 4 MB ROM with the editor patch: the temporary tags over the reserved banks are not taken for
+// AddmusicK's writes, and the banks come out as they were
+{
+  const big = new Rom(vanilla.data.slice());
+  big.expand(0x400000);
+  installEditorPatch(big);
+  const top = big.data.slice(RESERVED_TOP);
+  const pb = emptyMusicProject();
+  addSongs(pb, songsFromZip('Square Test.zip', testSongZip()));
+  const rb = await saveMusicProject(big, pb);
+  check(rb.ok && hasAmk(big), `songs inserted into a 4 MB ROM (${rb.errors.join(' ')})`);
+  check(big.data.subarray(RESERVED_TOP).every((b, i) => b === top[i]), 'reserved banks unchanged');
+}
 
 console.log(fails ? `${fails} failed` : 'all ok');
 process.exit(fails ? 1 : 0);
