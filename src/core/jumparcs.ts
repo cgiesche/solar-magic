@@ -10,6 +10,7 @@ import { LevelEmulator, type LevelOverride } from './levelemu.ts';
 import type { Rom } from './rom.ts';
 import type { SnesState } from './snes.ts';
 import { PAD, type RunStates, type RunState } from './blockprobe.ts';
+import { GM, RAM, setCameraX, setCameraY, marioX, getS16, marioY, setMarioPos } from './ram.ts';
 
 export type ArcSpeed = 'stand' | 'walk' | 'run' | 'p';
 export const ARC_SPEEDS: ArcSpeed[] = ['stand', 'walk', 'run', 'p'];
@@ -47,9 +48,9 @@ export class JumpArcs {
     if (!r.ok) return false;
     const s = e.snes, w = s.wram;
     try {
-      for (let f = 0; f < LOAD_FRAMES && !(w[0x100] === 0x14 && w[0x71] === 0 && !w[0x9d]); f++) s.runFrame();
+      for (let f = 0; f < LOAD_FRAMES && !(w[RAM.gameMode] === GM.level && w[RAM.marioAnim] === 0 && !w[RAM.spritesLocked]); f++) s.runFrame();
     } catch { return false; }
-    if (w[0x100] !== 0x14) return false;
+    if (w[RAM.gameMode] !== GM.level) return false;
     this.ready = s.saveState();
     return true;
   }
@@ -65,32 +66,30 @@ export class JumpArcs {
     const x = tx * 16;
     let y = ty * 16 - 16;
     const cam = Math.max(0, x - 0x70), camY = Math.max(0, Math.min(this.height - 224, y - 0x70));
-    w[0x1a] = w[0x1462] = cam & 0xff; w[0x1b] = w[0x1463] = cam >> 8;
-    w[0x1c] = w[0x1464] = camY & 0xff; w[0x1d] = w[0x1465] = camY >> 8;
-    w[0x19] = 0;
+    setCameraX(w, cam);
+    setCameraY(w, camY);
+    w[RAM.powerup] = 0;
     const st: RunState = speed === 'stand' ? { vx: 0, pmeter: 0 } : runs[speed];
     const place = (resetVy = true) => {
-      w[0x94] = w[0xd1] = x & 0xff; w[0x95] = w[0xd2] = (x >> 8) & 0xff;
-      w[0x96] = w[0xd3] = y & 0xff; w[0x97] = w[0xd4] = (y >> 8) & 0xff;
-      w[0x7b] = (st.vx * dir) & 0xff; if (resetVy) w[0x7d] = 0; w[0x13e4] = st.pmeter; w[0x76] = dir > 0 ? 1 : 0;
+      setMarioPos(w, x, y);
+      w[RAM.marioSpeedX] = (st.vx * dir) & 0xff; if (resetVy) w[RAM.marioSpeedY] = 0; w[RAM.pMeter] = st.pmeter; w[RAM.marioDir] = dir > 0 ? 1 : 0;
     };
     const settle = () => {
       const top = ty * 16 - 32;
-      w[0x94] = w[0xd1] = x & 0xff; w[0x95] = w[0xd2] = (x >> 8) & 0xff;
-      w[0x96] = w[0xd3] = top & 0xff; w[0x97] = w[0xd4] = (top >> 8) & 0xff;
-      w[0x7b] = w[0x7d] = 0; s.joy1 = 0;
+      setMarioPos(w, x, top);
+      w[RAM.marioSpeedX] = w[RAM.marioSpeedY] = 0; s.joy1 = 0;
       // the blocked flags of the first frame are still those from before
       let last = top;
       for (let f = 0; f < SETTLE_FRAMES; f++) {
         s.runFrame();
-        const my = (w[0x96] | (w[0x97] << 8)) << 16 >> 16;
+        const my = getS16(w, RAM.marioY);
         if (my > y) return;
-        if (f > 0 && (w[0x77] & 4) && my === last) { y = my; return; }
+        if (f > 0 && (w[RAM.marioBlocked] & 4) && my === last) { y = my; return; }
         last = my;
       }
     };
     const hold = (dir > 0 ? PAD.right : PAD.left) | (speed === 'run' || speed === 'p' ? PAD.y : 0);
-    const pos = () => [(w[0x94] | (w[0x95] << 8)) + 8, ((w[0x96] | (w[0x97] << 8)) << 16 >> 16) + 32];
+    const pos = () => [marioX(w) + 8, getS16(w, RAM.marioY) + 32];
     const pts: number[] = [];
     let end: JumpArc['end'] = 'time';
     try {
@@ -109,8 +108,8 @@ export class JumpArcs {
         s.joy1 = hold | PAD.b;
         s.runFrame();
         pts.push(...pos());
-        if (w[0x71] === 9) { end = 'dead'; break; }
-        const ground = (w[0x77] & 4) !== 0;
+        if (w[RAM.marioAnim] === 9) { end = 'dead'; break; }
+        const ground = (w[RAM.marioBlocked] & 4) !== 0;
         if (!ground) air = true;
         else if (air) { end = 'land'; break; }
         if (pts[pts.length - 1] > this.height + 32) { end = 'dead'; break; }

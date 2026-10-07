@@ -9,6 +9,7 @@ import { hex } from '../core/names.ts';
 import { levelTranslevel, nearestEntrance, encodeSecondaryHeader } from '../core/level.ts';
 import { Apu, apuReady, loadApu } from '../core/apu.ts';
 import { AudioOut } from './audio.ts';
+import { GM, RAM, set16 } from '../core/ram.ts';
 
 const KEYMAP: Record<string, number> = {
   ArrowUp: 0x0800, ArrowDown: 0x0400, ArrowLeft: 0x0200, ArrowRight: 0x0100,
@@ -91,14 +92,13 @@ function start(app: App, at: { tx: number; ty: number } | undefined, audio: Audi
   }
   const s = emu.snes;
   if (start && r.ok) {
-    try { for (let i = 0; i < 80 && s.wram[0x100] !== 0x14; i++) s.runFrame(); } catch { /* shown when playing */ }
+    try { for (let i = 0; i < 80 && s.wram[RAM.gameMode] !== GM.level; i++) s.runFrame(); } catch { /* shown when playing */ }
     const w = s.wram;
-    w[0x94] = start.x & 0xff; w[0x95] = start.x >> 8;
-    w[0x96] = start.y & 0xff; w[0x97] = (start.y >> 8) & 0xff;
+    set16(w, RAM.marioX, start.x); set16(w, RAM.marioY, start.y);
   }
   // sub-level loads keep the old timer; give the level its header time
   const hundreds = app.rom.r8(0x0584d7 + lv.header.time);
-  s.wram[0x0f31] = hundreds; s.wram[0x0f32] = 0; s.wram[0x0f33] = 0;
+  s.wram[RAM.timer] = hundreds; s.wram[RAM.timer + 1] = 0; s.wram[RAM.timer + 2] = 0;
   const ppu = new PPU(s);
   s.ppu = ppu;
   const canvas = h('canvas', { width: 256, height: 224, class: 'play-canvas', tabIndex: 0 });
@@ -155,7 +155,7 @@ function start(app: App, at: { tx: number; ty: number } | undefined, audio: Audi
     }
     new Uint32Array(img.data.buffer).set(ppu.frame);
     ctx.putImageData(img, 0, 0);
-    info.textContent = `Level ${hex(lv.number, 3)} · Frame ${frames}${paused ? ' · Pause' : ''} · Game mode ${hex(s.wram[0x100], 2)}`
+    info.textContent = `Level ${hex(lv.number, 3)} · Frame ${frames}${paused ? ' · Pause' : ''} · Game mode ${hex(s.wram[RAM.gameMode], 2)}`
       + (padNames.length ? ` · Gamepad: ${padNames.join(', ')}` : ' · Gamepad: none detected (press a button)')
       + (!s.apu || audio.failed ? ' · No sound' : soundMuted ? ' · Sound off (M)' : '');
     schedule();

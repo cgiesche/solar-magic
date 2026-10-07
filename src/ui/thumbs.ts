@@ -4,7 +4,7 @@ import type { App } from './app.ts';
 import { OV_L1 } from '../core/levelemu.ts';
 import { encodePrimaryHeader, serializeObjects, type LevelObject, newUid, L2_PTRS } from '../core/level.ts';
 import { renderLevel, layerGeom } from '../core/render.ts';
-import { MAP_BASE } from '../core/levelemu.ts';
+import { MAP_BASE, map16Tile } from '../core/ram.ts';
 import { objectVariant, type ObjKind } from '../core/objkinds.ts';
 
 export interface ObjSpec { num: number; ext: number; size: number }
@@ -92,7 +92,7 @@ function renderObjectThumbs(app: App, specs: ObjSpec[]): ObjThumb[] {
         }
       }
       const m16 = new Set<number>();
-      for (const off of set!) m16.add(r.wram[MAP_BASE + off] | (r.wram[0x10000 + MAP_BASE + off] << 8));
+      for (const off of set!) m16.add(map16Tile(r.wram, MAP_BASE + off));
       out.push({ key: objKey(s, app.objectKind(s.num)), w, h: hh, px, m16: [...m16].sort((a, b) => a - b) });
     });
   }

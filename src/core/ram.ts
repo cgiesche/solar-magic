@@ -1,0 +1,134 @@
+// The game's RAM as the editor's emulation reads and writes it: the addresses (offsets into
+// Snes.wram, i.e. $7E0000 + offset; $10000 and up is bank $7F) of the vanilla layout, by name,
+// and accessors for values spread over several bytes. Code that looks into the game's RAM goes
+// through here, so another layout replaces this file, not its users: SA-1 Pack (Vitor Vilela)
+// moves the direct page and $0100-$1FFF, gives the sprite tables 22 slots elsewhere and puts the
+// level data into banks $40/$41.
+
+// game modes ($0100)
+export const GM = {
+  title: 0x07, // title screen (waits for a button)
+  overworldLoad: 0x0b, // fading into the overworld
+  overworld: 0x0e,
+  levelLoad: 0x11, // loading a level ("Mario Start!")
+  level: 0x14,
+} as const;
+
+export const RAM = {
+  gameMode: 0x0100,
+  introLevel: 0x0109, // level the game starts with instead of the overworld (0 = none)
+
+  // camera: layer 1 position (16-bit) and its copy for the next frame, layer 3 position
+  layer1X: 0x1a, layer1Y: 0x1c,
+  layer1XNext: 0x1462, layer1YNext: 0x1464,
+  layer3X: 0x22, layer3Y: 0x24,
+  screenMode: 0x5b, // vertical level / layer 2 interaction bits
+
+  // Mario
+  powerup: 0x19,
+  marioAnim: 0x71, // animation (9 = dying)
+  marioInAir: 0x72,
+  marioClimbing: 0x74,
+  marioInWater: 0x75,
+  marioDir: 0x76,
+  marioBlocked: 0x77, // bits: 1 right, 2 left, 4 floor, 8 ceiling
+  marioSpeedX: 0x7b, marioSpeedY: 0x7d,
+  marioX: 0x94, marioY: 0x96, // 16-bit
+  marioXFrame: 0xd1, marioYFrame: 0xd3, // 16-bit, at the start of the frame
+  spritesLocked: 0x9d,
+  pMeter: 0x13e4,
+  hurtTimer: 0x1497, // invulnerable while not 0
+
+  // player status
+  lives: 0x0dbe,
+  coins: 0x0dbf,
+  currentPlayer: 0x0dd6, // 0 Mario, 4 Luigi
+  timer: 0x0f31, // 3 digits
+  coinsToAdd: 0x13cc,
+  livesToAdd: 0x18e4,
+
+  // level
+  translevel: 0x13bf,
+  onOff: 0x14af,
+  layer3Tide: 0x1403, // 1 rising and falling, 2 fixed
+  layer3Setting: 0x1be3,
+  sublevelCount: 0x141a,
+  screenExitLo: 0x19b8, screenExitHi: 0x19d8, // per screen
+  useSecondaryExit: 0x1b93,
+  backdrop: 0x0701, // 16-bit color
+  map16Pointers: 0x0fbe, // 16-bit per FG Map16 tile: bank $0D address of its 8x8 tiles
+  bgMapLo: 0xb900, bgMapHi: 0xbd00, // layer 2 background tilemap, low and high bytes
+
+  // OAM buffer ($0200-$049F: 128 entries of 4 bytes, then the high table)
+  oam: 0x0200, oamEnd: 0x04a0,
+  currentSprite: 0x15e9, // slot the sprite code runs for
+
+  // other sprite kinds
+  bounceSprites: 0x1699, // 4 slots: number
+  scoreSprites: 0x16e1, // number
+
+  // overworld
+  owEvents: 0x1f02, // 15 bytes of event bits
+  submap: 0x1f11, // per player (2)
+  owPlayerX: 0x1f17, owPlayerY: 0x1f19, // 16-bit pixel position, per player 4 bytes apart
+  owPlayerTileX: 0x1f1f, owPlayerTileY: 0x1f21, // 16-bit
+  owPlayerStride: 4,
+  switchPalaces: 0x1f27, // 4
+  owLayer1: 0xc800, owLayer1End: 0xd000, // overworld layer 1 tilemap (with events applied)
+  owTranslevels: 0xd000, owTranslevelsEnd: 0xd800, // translevel per overworld tile
+} as const;
+
+// level data: Map16 tile numbers, low bytes at MAP_BASE, high bytes in bank $7F
+export const MAP_BASE = 0xc800;
+export const MAP_SIZE = 0x3800;
+export const MAP_HI = 0x10000; // from a low byte to its high byte
+
+// normal sprites: per-slot tables (address + slot)
+export const SPRITE_SLOTS = 12;
+export const SPR = {
+  num: 0x9e,
+  speedY: 0xaa, speedX: 0xb6,
+  yLo: 0xd8, xLo: 0xe4, yHi: 0x14d4, xHi: 0x14e0,
+  status: 0x14c8,
+  blocked: 0x1588, // bits: 1 right, 2 left
+  offScreenH: 0x15a0, offScreenV: 0x186c,
+  loadIndex: 0x161a, // index in the level's sprite data ($FF = not from there)
+  // PIXI's tables (bank $7F): custom sprite number, extra bits, extra bytes
+  customNum: 0x1ab9e, extraBits: 0x1ab10, extraBytes: [0x1ab40, 0x1ab4c, 0x1ab58, 0x1ab64],
+} as const;
+
+// all tables of a sprite's state but its position, subpixels and off-screen flags
+export const SPR_STATE = [0x9e, 0xaa, 0xb6, 0xc2, 0x14c8, 0x1504, 0x1510, 0x151c, 0x1528, 0x1534, 0x1540, 0x154c, 0x1558, 0x1564,
+  0x1570, 0x157c, 0x1594, 0x15ac, 0x15c4, 0x15d0, 0x15dc, 0x15f6, 0x1602, 0x160e, 0x1626, 0x1632, 0x163e, 0x164a, 0x1656,
+  0x1662, 0x166e, 0x167a, 0x1686, 0x187b, 0x190f, 0x1fd6, 0x1fe2];
+
+// 16-bit values: low byte at lo, high byte at hi (default: the next byte)
+export const get16 = (w: Uint8Array, lo: number, hi = lo + 1) => w[lo] | (w[hi] << 8);
+export const getS16 = (w: Uint8Array, lo: number, hi = lo + 1) => (get16(w, lo, hi) << 16) >> 16;
+export function set16(w: Uint8Array, lo: number, v: number, hi = lo + 1): void {
+  w[lo] = v & 0xff; w[hi] = (v >> 8) & 0xff;
+}
+
+export const map16Tile = (w: Uint8Array, a: number) => get16(w, a, a + MAP_HI);
+export const bgTile = (w: Uint8Array, o: number) => get16(w, RAM.bgMapLo + o, RAM.bgMapHi + o);
+export const map16Pointer = (w: Uint8Array, t: number) => get16(w, RAM.map16Pointers + t * 2);
+
+export const spriteX = (w: Uint8Array, i: number) => get16(w, SPR.xLo + i, SPR.xHi + i);
+export const spriteY = (w: Uint8Array, i: number) => get16(w, SPR.yLo + i, SPR.yHi + i);
+export function setSpritePos(w: Uint8Array, i: number, x: number, y: number): void {
+  set16(w, SPR.xLo + i, x, SPR.xHi + i); set16(w, SPR.yLo + i, y, SPR.yHi + i);
+}
+
+export const cameraX = (w: Uint8Array) => get16(w, RAM.layer1X);
+export const cameraY = (w: Uint8Array) => get16(w, RAM.layer1Y);
+// the camera, for this frame and the next
+export function setCameraX(w: Uint8Array, x: number): void { set16(w, RAM.layer1X, x); set16(w, RAM.layer1XNext, x); }
+export function setCameraY(w: Uint8Array, y: number): void { set16(w, RAM.layer1Y, y); set16(w, RAM.layer1YNext, y); }
+
+export const marioX = (w: Uint8Array) => get16(w, RAM.marioX);
+export const marioY = (w: Uint8Array) => get16(w, RAM.marioY);
+// Mario's position, also as the one at the start of the frame
+export function setMarioPos(w: Uint8Array, x: number, y: number): void {
+  set16(w, RAM.marioX, x); set16(w, RAM.marioXFrame, x);
+  set16(w, RAM.marioY, y); set16(w, RAM.marioYFrame, y);
+}

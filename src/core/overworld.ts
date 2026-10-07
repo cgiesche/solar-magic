@@ -3,6 +3,7 @@
 import { Rom, snesToPc } from './rom.ts';
 import { Snes, type SnesState } from './snes.ts';
 import { rleDecode, rleEncode } from './rle.ts';
+import { GM, RAM } from './ram.ts';
 
 export const OW_L1 = 0x0cf7df; // 0x800 bytes: 2 maps × 32×32 16x16 tiles (quadrant layout)
 const L2_TILE_PTR = 0x04dc72; // LDA #$A533 operand
@@ -130,20 +131,20 @@ export class OverworldEmulator {
     if (!this.titleState) {
       s.reset();
       let f = 0;
-      while (s.wram[0x100] !== 0x07 && f++ < 2000) s.runFrame();
+      while (s.wram[RAM.gameMode] !== GM.title && f++ < 2000) s.runFrame();
       this.titleState = s.saveState();
     } else s.loadState(this.titleState);
     const w = s.wram;
     let n = 0;
     try {
-      while (w[0x100] !== 0x0e && n < 1500) {
-        if (w[0x100] === 0x0b) {
-          w[0x109] = 0;
-          w[0x1f11] = map;
-          w[0x1f12] = map;
-          if (allEvents) for (let i = 0; i < 15; i++) w[0x1f02 + i] = 0xff;
+      while (w[RAM.gameMode] !== GM.overworld && n < 1500) {
+        if (w[RAM.gameMode] === GM.overworldLoad) {
+          w[RAM.introLevel] = 0;
+          w[RAM.submap] = map;
+          w[RAM.submap + 1] = map;
+          if (allEvents) for (let i = 0; i < 15; i++) w[RAM.owEvents + i] = 0xff;
         }
-        s.joy1 = (n % 16) < 4 ? (w[0x100] === 0x07 ? 0x1000 : 0x0080) : 0;
+        s.joy1 = (n % 16) < 4 ? (w[RAM.gameMode] === GM.title ? 0x1000 : 0x0080) : 0;
         s.runFrame();
         n++;
       }
@@ -152,6 +153,6 @@ export class OverworldEmulator {
     } catch {
       return { vram: s.vram.slice(), cgram: s.cgram.slice(), wram: s.wram.slice(), ppuRegs: s.ppuRegs.slice(), ok: false };
     }
-    return { vram: s.vram.slice(), cgram: s.cgram.slice(), wram: s.wram.slice(), ppuRegs: s.ppuRegs.slice(), ok: w[0x100] === 0x0e };
+    return { vram: s.vram.slice(), cgram: s.cgram.slice(), wram: s.wram.slice(), ppuRegs: s.ppuRegs.slice(), ok: w[RAM.gameMode] === GM.overworld };
   }
 }

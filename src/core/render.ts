@@ -6,6 +6,7 @@ import { isL1Vertical, isL2Vertical, hasLayer2Objects } from './level.ts';
 import { MAP_BASE, type LevelRender } from './levelemu.ts';
 import { EXT_FIRST, extTileWords } from './map16ext.ts';
 import { bgTileWords } from './bgmap16.ts';
+import { RAM, get16, map16Tile, bgTile, map16Pointer, cameraX, cameraY } from './ram.ts';
 
 export interface LayerGeom {
   vertical: boolean;
@@ -103,7 +104,7 @@ export function map16Source(rom: Rom, r: LevelRender): Map16Source {
   return {
     fg(t: number) {
       if (t >= EXT_FIRST) return extTileWords(rom, t) ?? this.fg(0x025);
-      const ptr = w[0x0fbe + t * 2] | (w[0x0fbf + t * 2] << 8);
+      const ptr = map16Pointer(w, t);
       const base = 0x0d0000 | ptr;
       return [rom.r16(base), rom.r16(base + 2), rom.r16(base + 4), rom.r16(base + 6)];
     },
@@ -136,7 +137,7 @@ export interface LevelImages {
 }
 
 export function backdropColor(r: LevelRender): number {
-  const c = r.wram[0x0701] | (r.wram[0x0702] << 8);
+  const c = get16(r.wram, RAM.backdrop);
   return snesColorToRGBA(c);
 }
 
@@ -150,7 +151,7 @@ export function renderLevel(rom: Rom, r: LevelRender, mode: number, screens: num
   const tiles1 = new Uint16Array(geom1.width * geom1.height);
   for (let y = 0; y < geom1.height; y++) for (let x = 0; x < geom1.width; x++) {
     const a = geom1.addr(x, y);
-    const t = w[a] | (w[a + 0x10000] << 8);
+    const t = map16Tile(w, a);
     tiles1[y * geom1.width + x] = t;
     drawMap16(layer1, width, height, tc, src.fg(t), x * 16, y * 16);
   }
@@ -163,7 +164,7 @@ export function renderLevel(rom: Rom, r: LevelRender, mode: number, screens: num
     tiles2 = new Uint16Array(geom2.width * geom2.height);
     for (let y = 0; y < geom2.height; y++) for (let x = 0; x < geom2.width; x++) {
       const a = geom2.addr(x, y);
-      const t = w[a] | (w[a + 0x10000] << 8);
+      const t = map16Tile(w, a);
       tiles2[y * geom2.width + x] = t;
       if (x * 16 < width && y * 16 < height) drawMap16(layer2, width, height, tc2, src.fg(t), x * 16, y * 16);
     }
@@ -175,7 +176,7 @@ export function renderLevel(rom: Rom, r: LevelRender, mode: number, screens: num
       const row: number[] = [];
       for (let x = 0; x < bgw; x++) {
         const o = (x >> 4) * 0x1b0 + y * 16 + (x & 15);
-        row.push(w[0xb900 + o] | (w[0xbd00 + o] << 8));
+        row.push(bgTile(w, o));
       }
       bgTiles.push(row);
     }
@@ -197,8 +198,8 @@ export function renderLayer3(r: LevelRender, width: number, height: number): Lev
   if (!(p[0x2c] & 0x04) && !(p[0x2d] & 0x04)) return null;
   const sc = p[0x09], base = (sc & 0xfc) << 9, wide = sc & 1, tall = (sc >> 1) & 1;
   const mw = 256 << wide, mh = 256 << tall;
-  const dx = (w[0x22] | (w[0x23] << 8)) - (w[0x1a] | (w[0x1b] << 8));
-  const dy = (w[0x24] | (w[0x25] << 8)) - (w[0x1c] | (w[0x1d] << 8));
+  const dx = get16(w, RAM.layer3X) - cameraX(w);
+  const dy = get16(w, RAM.layer3Y) - cameraY(w);
   const tc = new TileCache(r.vram, r.cgram, (p[0x0c] & 0x0f) << 13);
   const back = new Uint32Array(width * height), front = new Uint32Array(width * height);
   const prioFront = (p[0x05] & 0x0f) === 0x09;

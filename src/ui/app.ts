@@ -29,6 +29,7 @@ import { JumpArcs, ARC_SPEEDS, type JumpArc } from '../core/jumparcs.ts';
 import { levelScanJob, type ScanResult } from '../core/levelscan.ts';
 import { layer3Kinds, tideKind, layer3Top, type Layer3Kind } from '../core/layer3.ts';
 import { BlockProber, variantOf, type BlockProbe, type SpriteProbe, type CollisionProbe } from '../core/blockprobe.ts';
+import { map16Tile, bgTile } from '../core/ram.ts';
 
 export type EditMode = 'l1' | 'l2' | 'spr' | 'exit' | 'bg';
 export type PaletteItem =
@@ -366,7 +367,7 @@ export class App {
     for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
       const a = g.addr(x, y);
       if (a < 0) continue;
-      const p = this.blockInfo(w[a] | (w[a + 0x10000] << 8));
+      const p = this.blockInfo(map16Tile(w, a));
       if (!p) pending = true;
       else if (p.enter) return true;
     }
@@ -823,7 +824,7 @@ export class App {
     if (set) for (const off of set) {
       if (this.render.owner[off] !== key) continue;
       const a = MAP_BASE + off;
-      out.add(this.render.wram[a] | (this.render.wram[a + 0x10000] << 8));
+      out.add(map16Tile(this.render.wram, a));
     }
     return [...out].sort((a, b) => a - b);
   }
@@ -1278,7 +1279,7 @@ export class App {
   }
   bgAt(tx: number, ty: number): number {
     const o = bgIndex(tx, ty);
-    return this.level.bg ? this.level.bg[o] : this.render.wram[0xb900 + o] | (this.render.wram[0xbd00 + o] << 8);
+    return this.level.bg ? this.level.bg[o] : bgTile(this.render.wram, o);
   }
   // sets one BG tile (the map repeats, so all copies change); caller handles checkpoint/refresh
   paintBg(tx: number, ty: number, tile: number): boolean {
@@ -1377,7 +1378,7 @@ export class App {
       const x = t & 0xffff, y = t >> 16;
       const a = g.addr(x, y);
       if (a < 0 || !keys.has(this.render.owner[a - MAP_BASE])) continue;
-      cells.set(t, this.render.wram[a] | (this.render.wram[a + 0x10000] << 8));
+      cells.set(t, map16Tile(this.render.wram, a));
       x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y);
     }
     if (x1 < 0) return 'The selected objects have no visible tiles.';

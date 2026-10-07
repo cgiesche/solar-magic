@@ -7,6 +7,7 @@ import { Rom, snesToPc } from './rom.ts';
 import { L1_PTRS, L2_PTRS, SPR_PTRS, mainTranslevel } from './level.ts';
 import { editorPatch, musicPatch, BG_HOOK, HEADER_MUSIC_TABLE } from './patches.ts';
 import { RomReads, updateBytePages, PAGE_SHIFT } from './romdeps.ts';
+import { GM, RAM, SPR, MAP_BASE, MAP_SIZE, MAP_HI, getS16, set16, setSpritePos } from './ram.ts';
 
 export const OV_L1 = 0x0000; // overlay offsets
 export const OV_L2 = 0x4000;
@@ -72,8 +73,7 @@ function bootChanged(reads: RomReads, then: Uint8Array, now: Uint8Array): boolea
   return false;
 }
 
-export const MAP_BASE = 0xc800;
-export const MAP_SIZE = 0x3800;
+export { MAP_BASE, MAP_SIZE };
 
 export class LevelEmulator {
   rom: Rom;
@@ -108,7 +108,7 @@ export class LevelEmulator {
     s.powerOn();
     this.bootReads = this.tracked(() => {
       let f = 0;
-      while (s.wram[0x100] !== 0x07) {
+      while (s.wram[RAM.gameMode] !== GM.title) {
         s.runFrame();
         if (++f > 2000) throw new Error('boot did not reach title screen');
       }
@@ -155,23 +155,23 @@ export class LevelEmulator {
     s.rom = this.rom.data;
     if (!ov.continueState) s.loadState(this.baseState!);
     const w = s.wram;
-    w[0x141a] = 1;
-    w[0x95] = 0;
-    w[0x97] = 0;
-    w[0x5b] = 0;
-    w[0x19b8] = level & 0xff;
-    w[0x19d8] = (level >> 8) & 1;
-    w[0x0dd6] = 0;
+    w[RAM.sublevelCount] = 1;
+    w[RAM.marioX + 1] = 0;
+    w[RAM.marioY + 1] = 0;
+    w[RAM.screenMode] = 0;
+    w[RAM.screenExitLo] = level & 0xff;
+    w[RAM.screenExitHi] = (level >> 8) & 1;
+    w[RAM.currentPlayer] = 0;
     // level bank of screen exits; a game in progress keeps its submap where that already gives it
-    if (!ov.continueState || (w[0x1f11] !== 0 ? 1 : 0) !== ((level >> 8) & 1)) w[0x1f11] = (level >> 8) & 1;
-    w[0x1b93] = 0;
-    w[0x0109] = 0;
+    if (!ov.continueState || (w[RAM.submap] !== 0 ? 1 : 0) !== ((level >> 8) & 1)) w[RAM.submap] = (level >> 8) & 1;
+    w[RAM.useSecondaryExit] = 0;
+    w[RAM.introLevel] = 0;
     // translevel $24 (Chocolate Island 2) makes the exit-based load pick a room by time/coins instead
     const tl = ov.translevel ?? mainTranslevel(level) ?? 0;
-    w[0x13bf] = tl === 0x24 ? 0 : tl;
-    if (ov.switchPalaces) for (let i = 0; i < 4; i++) w[0x1f27 + i] = 1;
-    if (ov.onOffSwitch) w[0x14af] = 1;
-    w[0x100] = 0x11;
+    w[RAM.translevel] = tl === 0x24 ? 0 : tl;
+    if (ov.switchPalaces) for (let i = 0; i < 4; i++) w[RAM.switchPalaces + i] = 1;
+    if (ov.onOffSwitch) w[RAM.onOff] = 1;
+    w[RAM.gameMode] = GM.levelLoad;
 
     // temporary pointer patches in the ROM image
     const rom = this.rom;
@@ -245,7 +245,7 @@ export class LevelEmulator {
       onWramWrite(a: number, v: number) {
         if (current < 0) return;
         if (a >= MAP_BASE && a < MAP_BASE + MAP_SIZE) { touch(current, a - MAP_BASE); if (trace) put(a - MAP_BASE, v, false); }
-        else if (a >= 0x10000 + MAP_BASE && a < 0x10000 + MAP_BASE + MAP_SIZE) { touch(current, a - 0x10000 - MAP_BASE); if (trace) put(a - 0x10000 - MAP_BASE, v, true); }
+        else if (a >= MAP_HI + MAP_BASE && a < MAP_HI + MAP_BASE + MAP_SIZE) { touch(current, a - MAP_HI - MAP_BASE); if (trace) put(a - MAP_HI - MAP_BASE, v, true); }
       },
       onRomRead: trace ? (ro: number) => {
         if (skip === null || skip[ro] !== 1) trace.rom.add(ro);
@@ -265,11 +265,11 @@ export class LevelEmulator {
     let error: string | undefined;
     try {
       // GM $11 loads the level; hooks only needed there
-      while (w[0x100] === 0x11 && frames < 30) { s.runFrame(); frames++; }
+      while (w[RAM.gameMode] === GM.levelLoad && frames < 30) { s.runFrame(); frames++; }
       s.hook = null;
-      while (w[0x100] < 0x13 && frames < 120) { s.runFrame(); frames++; }
+      while (w[RAM.gameMode] < 0x13 && frames < 120) { s.runFrame(); frames++; }
       s.runFrame(); frames++;
-      if (w[0x100] < 0x13) { ok = false; error = `level load stalled in game mode ${w[0x100].toString(16)}`; }
+      if (w[RAM.gameMode] < 0x13) { ok = false; error = `level load stalled in game mode ${w[RAM.gameMode].toString(16)}`; }
     } catch (e) {
       ok = false;
       error = String(e);
@@ -305,41 +305,39 @@ export class LevelEmulator {
     s.rom = this.rom.data;
     s.loadState(this.baseState!);
     s.joy1 = 0;
-    for (let n = 0; w[0x100] !== 0x0e; n++) {
+    for (let n = 0; w[RAM.gameMode] !== GM.overworld; n++) {
       if (n > 1500) throw new Error('new game did not reach the overworld');
-      if (w[0x100] === 0x0b) w[0x109] = 0; // no intro level
-      s.joy1 = (n % 16) < 4 ? (w[0x100] === 0x07 ? 0x1000 : 0x0080) : 0;
+      if (w[RAM.gameMode] === GM.overworldLoad) w[RAM.introLevel] = 0; // no intro level
+      s.joy1 = (n % 16) < 4 ? (w[RAM.gameMode] === GM.title ? 0x1000 : 0x0080) : 0;
       s.runFrame();
     }
     s.joy1 = 0;
     for (let i = 0; i < 3; i++) s.runFrame();
-    const i = tl > 0 ? w.subarray(0xd000, 0xd800).indexOf(tl) : -1; // translevel per tile ($7ED000)
+    const i = tl > 0 ? w.subarray(RAM.owTranslevels, RAM.owTranslevelsEnd).indexOf(tl) : -1;
     if (i < 0) return;
     const tx = ((i >> 8) & 1) * 16 + (i & 15), ty = ((i >> 9) & 1) * 16 + ((i >> 4) & 15);
     // pixel position: like the start position relative to its tile
-    const px = tx * 16 + (w[0x1f17] - w[0x1f1f] * 16), py = ty * 16 + (w[0x1f19] - w[0x1f21] * 16);
+    const px = tx * 16 + (w[RAM.owPlayerX] - w[RAM.owPlayerTileX] * 16), py = ty * 16 + (w[RAM.owPlayerY] - w[RAM.owPlayerTileY] * 16);
     let sub = 0;
     if (i >= 0x400) {
       const ow = s.saveState();
       let best = Infinity;
       for (let k = 1; k <= 6; k++) {
         s.loadState(ow);
-        w[0x1f11] = k;
-        w[0x100] = 0x0b;
-        for (let f = 0; w[0x100] !== 0x0e && f < 500; f++) s.runFrame();
-        const cx = ((w[0x1a] | w[0x1b] << 8) << 16 >> 16) + 128, cy = ((w[0x1c] | w[0x1d] << 8) << 16 >> 16) + 112;
+        w[RAM.submap] = k;
+        w[RAM.gameMode] = GM.overworldLoad;
+        for (let f = 0; w[RAM.gameMode] !== GM.overworld && f < 500; f++) s.runFrame();
+        const cx = getS16(w, RAM.layer1X) + 128, cy = getS16(w, RAM.layer1Y) + 112;
         const d = Math.max(Math.abs(px + 8 - cx), Math.abs(py + 8 - cy));
         if (d < best) { best = d; sub = k; }
       }
       s.loadState(ow);
     }
-    for (const o of [0, 4]) { // Mario and Luigi
-      w[0x1f17 + o] = px & 0xff; w[0x1f18 + o] = px >> 8;
-      w[0x1f19 + o] = py & 0xff; w[0x1f1a + o] = py >> 8;
-      w[0x1f1f + o] = tx; w[0x1f20 + o] = 0;
-      w[0x1f21 + o] = ty; w[0x1f22 + o] = 0;
+    for (const o of [0, RAM.owPlayerStride]) { // Mario and Luigi
+      set16(w, RAM.owPlayerX + o, px); set16(w, RAM.owPlayerY + o, py);
+      set16(w, RAM.owPlayerTileX + o, tx); set16(w, RAM.owPlayerTileY + o, ty);
     }
-    w[0x1f11] = w[0x1f12] = sub;
+    w[RAM.submap] = w[RAM.submap + 1] = sub;
   }
 
   // runs a game routine (JSL addr, RTL) with X = x in 8-bit mode, then restores the CPU registers
@@ -363,17 +361,16 @@ export class LevelEmulator {
   spawnSprite(slot: number, id: number, x: number, y: number): void {
     const w = this.snes.wram;
     const num = id & 0xff;
-    w[0x9e + slot] = num;
-    w[0x14c8 + slot] = 1;
-    w[0xe4 + slot] = x & 0xff; w[0x14e0 + slot] = x >> 8;
-    w[0xd8 + slot] = y & 0xff; w[0x14d4 + slot] = y >> 8;
-    w[0x161a + slot] = 0xff;
+    w[SPR.num + slot] = num;
+    w[SPR.status + slot] = 1;
+    setSpritePos(w, slot, x, y);
+    w[SPR.loadIndex + slot] = 0xff;
     this.call(INIT_TABLES, slot);
     if (id >= 0x200) {
       // custom sprite (PIXI): number and extra bits; its INIT sets up the tables
-      w[0x1ab9e + slot] = num;
-      w[0x1ab10 + slot] = 0x08 | ((id >> 6) & 0x04);
-      for (const t of [0x1ab40, 0x1ab4c, 0x1ab58, 0x1ab64]) w[t + slot] = 0;
+      w[SPR.customNum + slot] = num;
+      w[SPR.extraBits + slot] = 0x08 | ((id >> 6) & 0x04);
+      for (const t of SPR.extraBytes) w[t + slot] = 0;
     }
   }
 
@@ -383,7 +380,7 @@ export class LevelEmulator {
     const s = this.snes, out: { vram: Uint8Array; cgram: Uint8Array }[] = [];
     try {
       let guard = 0;
-      while (s.wram[0x100] !== 0x14 && guard++ < 80) s.runFrame();
+      while (s.wram[RAM.gameMode] !== GM.level && guard++ < 80) s.runFrame();
       for (let i = 0; i < count; i++) {
         for (let f = 0; f < step; f++) s.runFrame();
         out.push({ vram: s.vram.slice(), cgram: s.cgram.slice() });

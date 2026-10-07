@@ -9,6 +9,7 @@ import {
 import { TileCache, blit8 } from '../core/render.ts';
 import { hex } from '../core/names.ts';
 import { menuButton } from './menu.ts';
+import { RAM, map16Pointer } from '../core/ram.ts';
 
 // a w×h block of L1 tiles (16x16) or L2 tilemap entries (8x8), row-major
 type Brush = { kind: 'l1' | 'l2'; w: number; h: number; entries: number[] };
@@ -126,7 +127,7 @@ export class OverworldView {
       for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) blit8(img, W, W, tc.get(this.l2[l2Index(this.region, x, y)]), x * 8, y * 8);
     }
     if (this.showL1) {
-      const src = this.showEvents ? r.wram.subarray(0xc800, 0xd000) : this.l1;
+      const src = this.showEvents ? r.wram.subarray(RAM.owLayer1, RAM.owLayer1End) : this.l1;
       for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) this.drawL1Tile(img, tc, r, src[l1Index(this.region, x, y)], x * 16, y * 16);
     }
     this.mapCanvas.width = W; this.mapCanvas.height = W;
@@ -139,7 +140,7 @@ export class OverworldView {
   }
 
   l1Words(r: OwRender, t: number): number[] {
-    const p = r.wram[0x0fbe + t * 2] | (r.wram[0x0fbf + t * 2] << 8);
+    const p = map16Pointer(r.wram, t);
     return [0, 1, 2, 3].map((q) => this.app.rom.r16(0x050000 | (p + q * 2)));
   }
   drawL1Tile(img: Uint32Array, tc: TileCache, r: OwRender, t: number, px: number, py: number, W = 512, H = 512): void {
@@ -341,7 +342,7 @@ export class OverworldView {
   }
 
   pick(r: { x: number; y: number; w: number; h: number }): void {
-    const src = this.mode === 'l2' ? this.l2 : this.showEvents ? this.render().wram.subarray(0xc800, 0xd000) : this.l1;
+    const src = this.mode === 'l2' ? this.l2 : this.showEvents ? this.render().wram.subarray(RAM.owLayer1, RAM.owLayer1End) : this.l1;
     const idx = this.mode === 'l2' ? l2Index : l1Index;
     const entries = Array.from({ length: r.w * r.h }, (_, i) => src[idx(this.region, r.x + (i % r.w), r.y + Math.floor(i / r.w))]);
     this.brush = { kind: this.mode, w: r.w, h: r.h, entries };

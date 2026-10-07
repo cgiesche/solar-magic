@@ -19,6 +19,7 @@ import { renderMap16Sheet } from '../panels.ts';
 import { probeText } from '../../core/blockprobe.ts';
 import { levelGfx, defaultGfx, levelExtGfx, VANILLA_GFX } from '../../core/patches.ts';
 import { cgramToRGBA } from '../../core/gfx.ts';
+import { map16Pointer } from '../../core/ram.ts';
 
 const Z = 2; // sheet zoom
 const GZ = 2; // 8x8 graphics zoom
@@ -117,7 +118,7 @@ export class Map16Tab implements WsPanel {
     if (this.bg) return bgTileAddr(this.app.rom, t) ?? -1;
     if (t >= EXT_FIRST) { const p = map16Ext(this.app.rom); return p ? p.gfx + (t - EXT_FIRST) * 8 : -1; }
     const w = this.app.render.wram;
-    return 0x0d0000 | (w[0x0fbe + t * 2] | (w[0x0fbf + t * 2] << 8));
+    return 0x0d0000 | map16Pointer(w, t);
   }
   words(t: number): number[] {
     const a = this.tileAddr(t);

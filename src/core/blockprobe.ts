@@ -30,22 +30,18 @@ import { Rom } from './rom.ts';
 import type { SnesState } from './snes.ts';
 import { ResultCache, RomFingerprint, type RomDeps, type RomReads } from './romdeps.ts';
 import { spriteName, hex3 } from './names.ts';
+import { GM, RAM, SPR, SPR_STATE, SPRITE_SLOTS, MAP_HI, marioY, map16Tile, spriteX, spriteY, cameraY, setCameraX, setCameraY, setMarioPos } from './ram.ts';
 
 const PROBE_LEVEL = 0x105; // horizontal level, loaded with PROBE_HEADER, without objects and sprites
 const PROBE_HEADER = [0x33, 0x40, 0x08, 0x80, 0x27]; // primary header; the tileset is replaced
 const PROBE_FRAMES = 24;
 const SPRITE_SLOT = 11; // slot of a probed sprite (items it spawns take lower free slots)
-// sprite tables compared between positions (everything but position, subpixel and off-screen flags)
-const SPRITE_TABLES = [0x9e, 0xaa, 0xb6, 0xc2, 0x14c8, 0x1504, 0x1510, 0x151c, 0x1528, 0x1534, 0x1540, 0x154c, 0x1558, 0x1564,
-  0x1570, 0x157c, 0x1594, 0x15ac, 0x15c4, 0x15d0, 0x15dc, 0x15f6, 0x1602, 0x160e, 0x1626, 0x1632, 0x163e, 0x164a, 0x1656,
-  0x1662, 0x166e, 0x167a, 0x1686, 0x187b, 0x190f, 0x1fd6, 0x1fe2];
 const SPRITE_ROW = 6; // probed sprites go to rows 6-21 (Mario fits below them, the level has $1B rows)
 const PROBE_CAM_Y_MAX = 0x1b * 16 - 224;
 const MAX_VARIANTS = 16; // more X × Y combinations: Y is ignored
 const ENTER_FRAMES = 24;
 const COLLISION_VERSION = 2; // part of the result key: raise when the collision probe changes
 const SETTLE_FRAMES = 6; // frames Mario has to stand still before a probe stops early
-const marioY = (w: Uint8Array) => w[0x96] | (w[0x97] << 8);
 // joypad bits ($4218); Mario's offset to the tile for each enter direction
 export const PAD = { up: 0x0800, down: 0x0400, left: 0x0200, right: 0x0100, b: 0x8000, y: 0x4000 };
 const ENTER_DX = [-8, -4, 0, 4, 8]; // pipes only let Mario in within a few pixels of their middle
@@ -215,7 +211,7 @@ export class BlockProber {
         this.placeMario(16 * 16, this.by * 16, -16, 0);
         for (let f = 0; f < 4; f++) s.runFrame();
         try {
-          for (let f = 0; f < frames; f++) { s.joy1 = pad; s.runFrame(); out.push({ vx: (w[0x7b] << 24) >> 24, pmeter: w[0x13e4] }); }
+          for (let f = 0; f < frames; f++) { s.joy1 = pad; s.runFrame(); out.push({ vx: (w[RAM.marioSpeedX] << 24) >> 24, pmeter: w[RAM.pMeter] }); }
         } finally { s.joy1 = 0; }
         return out;
       };
@@ -256,13 +252,13 @@ export class BlockProber {
   private spriteVariants(num: number): SpriteVariants {
     const state = (x: number, y: number): number[] | null => {
       const w = this.spawn(num, 0, x, y);
-      this.placeMario(w[0xe4 + SPRITE_SLOT] + (w[0x14e0 + SPRITE_SLOT] << 8) - 64, w[0xd8 + SPRITE_SLOT] | (w[0x14d4 + SPRITE_SLOT] << 8), 0, 0);
+      this.placeMario(spriteX(w, SPRITE_SLOT) - 64, spriteY(w, SPRITE_SLOT), 0, 0);
       try { for (let f = 0; f < 2; f++) this.emu.snes.runFrame(); } catch { return null; }
-      return SPRITE_TABLES.map((t) => w[t + SPRITE_SLOT]);
+      return SPR_STATE.map((t) => w[t + SPRITE_SLOT]);
     };
     // pos(i): candidate position values (pixel low/high byte, tile) at step i
     const classes = (a: (number[] | null)[], pos: (i: number) => number[]) => {
-      const copies = SPRITE_TABLES.map((_, t) => pos(0).some((_, k) => {
+      const copies = SPR_STATE.map((_, t) => pos(0).some((_, k) => {
         const d = (i: number) => (a[i]![t] - pos(i)[k]) & 0xff;
         return a.every((v, i) => v && d(i) === d(0));
       }));
@@ -309,9 +305,9 @@ export class BlockProber {
     e.load(PROBE_LEVEL, { layer1: header, sprites: new Uint8Array([0, 0xff]) });
     const s = e.snes, w = s.wram;
     let g = 0;
-    while (w[0x100] !== 0x14 && g++ < 200) s.runFrame();
+    while (w[RAM.gameMode] !== GM.level && g++ < 200) s.runFrame();
     for (let i = 0; i < 4; i++) s.runFrame();
-    const camY = w[0x1c] | (w[0x1d] << 8);
+    const camY = cameraY(w);
     this.cur.by = Math.min(0x18, (camY >> 4) + 6);
     this.cur.ready = s.saveState();
   }
@@ -323,12 +319,12 @@ export class BlockProber {
     const s = this.emu.snes, w = s.wram;
     s.loadState(this.cur.ready!);
     const cam = bx * 16 - 0x70;
-    w[0x1a] = w[0x1462] = cam & 0xff; w[0x1b] = w[0x1463] = cam >> 8;
+    setCameraX(w, cam);
     if (by >= 0) {
       const cy = Math.max(0, Math.min(PROBE_CAM_Y_MAX, by * 16 - 0x70));
-      w[0x1c] = w[0x1464] = cy & 0xff; w[0x1d] = w[0x1465] = cy >> 8;
+      setCameraY(w, cy);
     }
-    w[0x19] = big;
+    w[RAM.powerup] = big;
     return w;
   }
 
@@ -344,34 +340,33 @@ export class BlockProber {
   // Mario dy pixels below pixel position (x, y) with Y speed vy (negative: up), in the air
   private placeMario(x: number, y: number, dy: number, vy: number): void {
     const w = this.emu.snes.wram, my = y + dy;
-    w[0x94] = w[0xd1] = x & 0xff; w[0x95] = w[0xd2] = (x >> 8) & 0xff;
-    w[0x96] = w[0xd3] = my & 0xff; w[0x97] = w[0xd4] = my >> 8;
-    w[0x7b] = 0; w[0x7d] = vy & 0xff; w[0x72] = 0x0b;
+    setMarioPos(w, x, my);
+    w[RAM.marioSpeedX] = 0; w[RAM.marioSpeedY] = vy & 0xff; w[RAM.marioInAir] = 0x0b;
   }
 
   // runs the probe frames; ignore: sprite slot excluded from the observation (the probed sprite);
   // stops early once settled() says nothing can happen any more
   private observe(big: number, off: number, ignore = -1, settled?: (w: Uint8Array) => boolean): HitResult {
     const s = this.emu.snes, w = s.wram;
-    const coins = w[0xdbf], lives = w[0xdbe], onOff = w[0x14af];
+    const coins = w[RAM.coins], lives = w[RAM.lives], onOff = w[RAM.onOff];
     const seen = new Set<number>();
     let solid = false, hurt = false;
     try {
       for (let f = 0; f < PROBE_FRAMES; f++) {
         s.runFrame();
-        if (w[0x77] & 8) solid = true;
-        if (w[0x71] === 9 || w[0x19] < big) hurt = true;
-        for (let i = 0; i < 12; i++) if (i !== ignore && w[0x14c8 + i]) seen.add(w[0x9e + i]);
+        if (w[RAM.marioBlocked] & 8) solid = true;
+        if (w[RAM.marioAnim] === 9 || w[RAM.powerup] < big) hurt = true;
+        for (let i = 0; i < SPRITE_SLOTS; i++) if (i !== ignore && w[SPR.status + i]) seen.add(w[SPR.num + i]);
         if (settled?.(w)) break;
       }
     } catch { /* keep what was observed */ }
     return {
       sprites: [...seen],
-      coins: (w[0xdbf] - coins + 100) % 100,
-      lives: (w[0xdbe] - lives) & 0xff,
+      coins: (w[RAM.coins] - coins + 100) % 100,
+      lives: (w[RAM.lives] - lives) & 0xff,
       hurt,
-      onOff: w[0x14af] !== onOff,
-      after: off < 0 ? -1 : w[off] | (w[off + 0x10000] << 8),
+      onOff: w[RAM.onOff] !== onOff,
+      after: off < 0 ? -1 : map16Tile(w, off),
       solid,
     };
   }
@@ -379,7 +374,7 @@ export class BlockProber {
   private put(x: number, y: number, tile: number): void {
     const w = this.emu.snes.wram, off = MAP_BASE + (x >> 4) * 0x1b0 + y * 16 + (x & 15);
     w[off] = tile & 0xff;
-    w[off + 0x10000] = tile >> 8;
+    w[off + MAP_HI] = tile >> 8;
   }
 
   // runs frames holding pad; true when Mario's animation state ($71) or the game mode changed;
@@ -392,7 +387,7 @@ export class BlockProber {
       for (let f = 0; f < frames && !hit; f++) {
         s.joy1 = pad;
         s.runFrame();
-        hit = w[0x71] !== 0 || w[0x100] !== 0x14;
+        hit = w[RAM.marioAnim] !== 0 || w[RAM.gameMode] !== GM.level;
         if (!hit && done?.(w)) break;
       }
     } catch { /* counts as nothing */ }
@@ -421,8 +416,8 @@ export class BlockProber {
     };
     // settled: standing still for a few frames, or fallen past the tile
     const ty = () => by() * 16;
-    const standing = () => { let n = 0; return (w: Uint8Array) => (n = w[0x77] & 4 ? n + 1 : 0) >= SETTLE_FRAMES || marioY(w) > ty() + 32; };
-    const fallen = () => (w: Uint8Array) => w[0x7d] < 0x80 && w[0x7d] > 0 && marioY(w) > ty() + 24;
+    const standing = () => { let n = 0; return (w: Uint8Array) => (n = w[RAM.marioBlocked] & 4 ? n + 1 : 0) >= SETTLE_FRAMES || marioY(w) > ty() + 32; };
+    const fallen = () => (w: Uint8Array) => w[RAM.marioSpeedY] < 0x80 && w[RAM.marioSpeedY] > 0 && marioY(w) > ty() + 24;
     let out = '';
     if (solid) {
       if (ENTER_DX.some((dx) => this.enters(at(dx, -40, 0), PAD.down, ENTER_FRAMES, standing))) out += '↓';
@@ -459,7 +454,7 @@ export class BlockProber {
       this.placeMario(bx * 16, this.by * 16, -40, 0); // feet 8 px above
       if (this.runHeld(0, 16)) continue;
       const off = MAP_BASE + (bx >> 4) * 0x1b0 + this.by * 16 + (bx & 15);
-      if ((w[0x77] & 4) && w[0x19] === 0 && (w[off] | (w[off + 0x10000] << 8)) === t) { c.floorTile = t; break; }
+      if ((w[RAM.marioBlocked] & 4) && w[RAM.powerup] === 0 && map16Tile(w, off) === t) { c.floorTile = t; break; }
     }
   }
 
@@ -475,9 +470,9 @@ export class BlockProber {
       try {
         for (let f = 0; f < PROBE_FRAMES && still < SETTLE_FRAMES; f++) {
           this.emu.snes.runFrame();
-          if (w[0x71] === 9) { dead = true; break; }
-          if (w[0x19] < 1) hurt = true;
-          if (w[0x77] & 4) { if (land < 0 && marioY(w) < ty) land = marioY(w); still++; } else still = 0;
+          if (w[RAM.marioAnim] === 9) { dead = true; break; }
+          if (w[RAM.powerup] < 1) hurt = true;
+          if (w[RAM.marioBlocked] & 4) { if (land < 0 && marioY(w) < ty) land = marioY(w); still++; } else still = 0;
         }
       } catch { /* what was seen */ }
       return { land, hurt, dead };
@@ -511,9 +506,9 @@ export class BlockProber {
         for (let f = 0; f < PROBE_FRAMES; f++) {
           s.joy1 = fromLeft ? PAD.right : PAD.left;
           s.runFrame();
-          if (w[0x71] === 9) { dead = true; break; }
-          if (w[0x19] < 1) hurt = true;
-          if (w[0x77] & (fromLeft ? 1 : 2)) blocked = true;
+          if (w[RAM.marioAnim] === 9) { dead = true; break; }
+          if (w[RAM.powerup] < 1) hurt = true;
+          if (w[RAM.marioBlocked] & (fromLeft ? 1 : 2)) blocked = true;
         }
       } catch { /* what was seen */ }
       s.joy1 = 0;
@@ -531,8 +526,8 @@ export class BlockProber {
         for (let f = 0; f < 8; f++) {
           s.joy1 = PAD.up;
           s.runFrame();
-          if (w[0x75]) water = true;
-          if (w[0x74]) climb = true;
+          if (w[RAM.marioInWater]) water = true;
+          if (w[RAM.marioClimbing]) climb = true;
         }
       } catch { /* what was seen */ }
       s.joy1 = 0;
@@ -549,12 +544,12 @@ export class BlockProber {
     const w = this.start(bx, big);
     const off = MAP_BASE + (bx >> 4) * 0x1b0 + by * 16 + (bx & 15);
     w[off] = tile & 0xff;
-    w[off + 0x10000] = tile >> 8;
+    w[off + MAP_HI] = tile >> 8;
     this.placeMario(bx * 16, by * 16, 20, -0x40);
     // settled: Mario falls back, no bounce block is running and no coins/lives are still being
     // counted up (lives also come from score sprites: 1-up and the like)
-    const settled = (w: Uint8Array) => w[0x7d] > 0 && w[0x7d] < 0x80 && w[0x71] === 0
-      && !(w[0x1699] | w[0x169a] | w[0x169b] | w[0x169c]) && !w[0x13cc] && !w[0x18e4] && !w.subarray(0x16e1, 0x16eb).some((v) => v);
+    const settled = (w: Uint8Array) => w[RAM.marioSpeedY] > 0 && w[RAM.marioSpeedY] < 0x80 && w[RAM.marioAnim] === 0
+      && !w.subarray(RAM.bounceSprites, RAM.bounceSprites + 4).some((v) => v) && !w[RAM.coinsToAdd] && !w[RAM.livesToAdd] && !w.subarray(RAM.scoreSprites, RAM.scoreSprites + 10).some((v) => v);
     return this.observe(big, off, -1, settled);
   }
 
@@ -562,12 +557,12 @@ export class BlockProber {
   // falls onto it from above; 'none': he stays below it (baseline).
   private hitSprite(num: number, big: number, x: number, y: number, how: 'none' | 'below' | 'stomp'): HitResult {
     const w = this.spawn(num, big, x, y), s = this.emu.snes, slot = SPRITE_SLOT;
-    const px = w[0xe4 + slot] | (w[0x14e0 + slot] << 8), py = w[0xd8 + slot] | (w[0x14d4 + slot] << 8);
+    const px = spriteX(w, slot), py = spriteY(w, slot);
     this.placeMario(px, py, 64, 0);
     try { for (let f = 0; f < 2; f++) s.runFrame(); } catch { /* observed below */ }
     // the sprite may move sideways: aim at where it is a few frames later
-    const sx = w[0xe4 + slot] | (w[0x14e0 + slot] << 8), sy = w[0xd8 + slot] | (w[0x14d4 + slot] << 8);
-    const vx = (w[0xb6 + slot] << 24) >> 24;
+    const sx = spriteX(w, slot), sy = spriteY(w, slot);
+    const vx = (w[SPR.speedX + slot] << 24) >> 24;
     const ax = sx + Math.round((vx / 16) * (how === 'stomp' ? 6 : 4));
     if (how === 'below') this.placeMario(ax, sy, 24, -0x60);
     else if (how === 'stomp') this.placeMario(ax, sy, -28, 0x30);

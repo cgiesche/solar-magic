@@ -8,6 +8,7 @@ import { LevelEmulator } from './levelemu.ts';
 import { loadLevel, spriteSizes, type LevelSprite, type PrimaryHeader } from './level.ts';
 import { record, sortPlaced, testLevel, testSpriteData } from './spritegfx.ts';
 import type { Rom } from './rom.ts';
+import { SPR, SPRITE_SLOTS, spriteX, spriteY, cameraX, cameraY } from './ram.ts';
 
 const SCREEN_W = 16, SCREEN_H = 14; // tiles
 
@@ -59,15 +60,15 @@ function runWindow(ctx: SpriteMemContext, m: number, win: LevelSprite[], cam: { 
   const w = emu.snes.wram;
   const lost = new Set<number>();
   let live = 0;
-  const cx = w[0x1a] | (w[0x1b] << 8), cy = w[0x1c] | (w[0x1d] << 8);
-  for (let i = 0; i < 12; i++) {
-    if (!w[0x14c8 + i]) continue;
+  const cx = cameraX(w), cy = cameraY(w);
+  for (let i = 0; i < SPRITE_SLOTS; i++) {
+    if (!w[SPR.status + i]) continue;
     live++;
     if (!rec.snapLost.has(i)) continue;
     // a slot spawned by another sprite (the platforms of $E0: $161A = $FF) counts for the nearest one
-    let p = order[w[0x161a + i]];
+    let p = order[w[SPR.loadIndex + i]];
     if (!p) {
-      const x = (w[0xe4 + i] | (w[0x14e0 + i] << 8)) - cx, y = (w[0xd8 + i] | (w[0x14d4 + i] << 8)) - cy;
+      const x = spriteX(w, i) - cx, y = spriteY(w, i) - cy;
       const d = (q: typeof p) => Math.abs(q.tx * 16 - (cam.camX & ~15) - x) + Math.abs(q.ty * 16 - (cam.camY & ~15) - y);
       p = order.reduce((a, b) => (d(b) < d(a) ? b : a));
     }

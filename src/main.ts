@@ -23,6 +23,7 @@ import { openResources } from './ui/resources.ts';
 import { OverworldView } from './ui/overworld.ts';
 import { openTestPlay } from './ui/testplay.ts';
 import { openMessagesDialog } from './ui/messagedialog.ts';
+import { map16Tile } from './core/ram.ts';
 
 const root = document.getElementById('app')!;
 
@@ -357,7 +358,7 @@ function buildUi(app: App): void {
 
 function hoverTile(app: App, tx: number, ty: number): number {
   const a = app.images.geom1.addr(tx, ty);
-  return a < 0 ? 0 : app.render.wram[a] | (app.render.wram[a + 0x10000] << 8);
+  return a < 0 ? 0 : map16Tile(app.render.wram, a);
 }
 
 // the playable ROM: without the editor data (sources of patches, packages, UberASM/blocks/sprites/music)

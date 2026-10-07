@@ -24,6 +24,7 @@ import {
   gfxEntry, hasEditorPatch, VANILLA_GFX, levelGfx, setLevelGfx, levelExtGfx, setLevelExtGfx, GFX_SLOT_NAMES,
   EXT_GFX_SLOT_NAMES, extGfxAvailable, customPalette, setCustomPalette,
 } from './patches.ts';
+import { RAM } from './ram.ts';
 
 export const LM_SLOTS = ['AN2', 'LT3', 'BG3', 'BG2', 'FG3', 'BG1', 'FG2', 'FG1', 'SP4', 'SP3', 'SP2', 'SP1', 'LG4', 'LG3', 'LG2', 'LG1'];
 const LAYER3_SLOTS = ['LT3', 'LG1', 'LG2', 'LG3', 'LG4'];
@@ -237,7 +238,7 @@ export function planBgPack(rom: Rom, name: string, files: Map<string, Uint8Array
 // the level's colors as a custom palette would hold them: CGRAM, color 0 = back area color ($0701)
 export function levelColors(r: { cgram: Uint8Array; wram: Uint8Array }): Uint8Array {
   const pal = r.cgram.slice(0, 512);
-  pal[0] = r.wram[0x701]; pal[1] = r.wram[0x702] & 0x7f;
+  pal[0] = r.wram[RAM.backdrop]; pal[1] = r.wram[RAM.backdrop + 1] & 0x7f;
   return pal;
 }
 

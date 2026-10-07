@@ -2,6 +2,7 @@
 // two 16-column halves, decoded by the game to $7EB900 (low bytes) / $7EBD00 (high bytes).
 
 import { rleEncode, rleDecode } from './rle.ts';
+import { bgTile } from './ram.ts';
 
 export const BG_W = 32, BG_H = 27;
 export const BG_SIZE = 0x360; // entries per byte plane that the level uses
@@ -14,7 +15,7 @@ export function bgIndex(tx: number, ty: number): number {
 
 export function bgFromWram(wram: Uint8Array): Uint16Array {
   const bg = new Uint16Array(BG_SIZE);
-  for (let o = 0; o < BG_SIZE; o++) bg[o] = wram[0xb900 + o] | (wram[0xbd00 + o] << 8);
+  for (let o = 0; o < BG_SIZE; o++) bg[o] = bgTile(wram, o);
   return bg;
 }
 

@@ -11,6 +11,7 @@
 import type { LevelEmulator, LevelOverride, LevelRender } from './levelemu.ts';
 import { renderLayer3 } from './render.ts';
 import { decodeSecondaryHeader, encodeSecondaryHeader } from './level.ts';
+import { GM, RAM, get16, set16, cameraY, marioX, marioY } from './ram.ts';
 
 export type Layer3Kind = 'none' | 'tide-moving' | 'tide-fixed' | 'image';
 
@@ -23,13 +24,13 @@ export const LAYER3_KIND_TEXT: Record<Layer3Kind, string> = {
 
 // the tide of the loaded level, if it has one
 export function tideKind(r: LevelRender): 'tide-moving' | 'tide-fixed' | null {
-  const t = r.wram[0x1403];
+  const t = r.wram[RAM.layer3Tide];
   return t === 1 ? 'tide-moving' : t === 2 ? 'tide-fixed' : null;
 }
 
 // what the loaded level does with layer 3
 export function layer3Kind(r: LevelRender): Layer3Kind {
-  return tideKind(r) ?? (r.wram[0x1be3] && renderLayer3(r, 256, 432) ? 'image' : 'none');
+  return tideKind(r) ?? (r.wram[RAM.layer3Setting] && renderLayer3(r, 256, 432) ? 'image' : 'none');
 }
 
 // the kind for each of the four settings, in the level as given (its tileset decides)
@@ -47,23 +48,23 @@ export interface TideRange { load: number; min: number; max: number }
 
 export const TIDE_FRAMES = 3000; // the vanilla tide starts after ~1000 frames, one cycle is ~1500
 
-const dy = (w: Uint8Array) => (((w[0x24] | (w[0x25] << 8)) - (w[0x1c] | (w[0x1d] << 8))) << 16) >> 16;
+const dy = (w: Uint8Array) => ((get16(w, RAM.layer3Y) - cameraY(w)) << 16) >> 16;
 
 // yields between slices of frames; null when the level has no rising and falling tide
 export function* tideRangeJob(emu: LevelEmulator, level: number, ov: LevelOverride): Generator<void, TideRange | null> {
   const r = emu.load(level, ov);
-  if (!r.ok || r.wram[0x1403] !== 1) return null;
+  if (!r.ok || r.wram[RAM.layer3Tide] !== 1) return null;
   const s = emu.snes, w = s.wram;
   const range: TideRange = { load: dy(w), min: dy(w), max: dy(w) };
   yield;
   // Mario stays where he starts, can't be hurt, and the camera with him
-  const x = w[0x94] | (w[0x95] << 8), y = w[0x96] | (w[0x97] << 8);
+  const x = marioX(w), y = marioY(w);
   for (let f = 0; f < TIDE_FRAMES; f++) {
-    w[0x94] = x & 0xff; w[0x95] = x >> 8; w[0x96] = y & 0xff; w[0x97] = y >> 8;
-    w[0x7b] = 0; w[0x7d] = 0; w[0x1497] = 0x40;
+    set16(w, RAM.marioX, x); set16(w, RAM.marioY, y);
+    w[RAM.marioSpeedX] = 0; w[RAM.marioSpeedY] = 0; w[RAM.hurtTimer] = 0x40;
     s.runFrame();
-    if (w[0x100] !== 0x14 && f > 200) break;
-    if (w[0x100] === 0x14) { const d = dy(w); range.min = Math.min(range.min, d); range.max = Math.max(range.max, d); }
+    if (w[RAM.gameMode] !== GM.level && f > 200) break;
+    if (w[RAM.gameMode] === GM.level) { const d = dy(w); range.min = Math.min(range.min, d); range.max = Math.max(range.max, d); }
     if (f % 120 === 119) yield;
   }
   return range;

@@ -12,6 +12,7 @@ import { exitTarget } from '../core/exitgraph.ts';
 import { contextMenu, type MenuItem } from './menu.ts';
 import { incompleteSprites } from './spritemem.ts';
 import { problemsButton } from './problems.ts';
+import { map16Tile } from '../core/ram.ts';
 
 type Drag =
   | { kind: 'move'; startTx: number; startTy: number; lastDx: number; lastDy: number; orig: Map<number, { x: number; y: number }> }
@@ -412,7 +413,7 @@ export class LevelView {
     const at = (x: number, y: number): CollisionProbe | undefined => {
       const a = g.addr(x, y);
       if (a < 0) return undefined;
-      const t = w[a] | (w[a + 0x10000] << 8);
+      const t = map16Tile(w, a);
       if (!info.has(t)) info.set(t, app.collisionInfo(t));
       return info.get(t);
     };
@@ -502,7 +503,7 @@ export class LevelView {
     for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
       const a = g.addr(x, y);
       if (a < 0) continue;
-      const p = app.blockInfo(w[a] | (w[a + 0x10000] << 8));
+      const p = app.blockInfo(map16Tile(w, a));
       if (!p) continue;
       if (p.summary !== null) this.drawItem(ctx, probeAt(p, x), x * 16, y * 16);
       if (p.enter) this.drawEnter(ctx, p.enter, x * 16, y * 16);
@@ -803,7 +804,7 @@ export class LevelView {
     let txt = '';
     const a = g.addr(tx, ty);
     if (a >= 0) {
-      const t = app.render.wram[a] | (app.render.wram[a + 0x10000] << 8);
+      const t = map16Tile(app.render.wram, a);
       txt += `Map16 ${hex3(t)}`;
       const p = app.mode === 'bg' ? undefined : app.blockInfo(t); // result arrives via 'blockinfo'
       const sum = [p && probeAt(p, tx).summary, p && enterText(p.enter)].filter(Boolean).join(', ');
