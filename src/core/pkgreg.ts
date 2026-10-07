@@ -14,6 +14,8 @@ import { loadBlockProject, saveBlockProject } from './blocks.ts';
 import { loadPixiProject, savePixiProject } from './pixi.ts';
 import { gfxEntry, setGfxEntry, VANILLA_GFX, levelMusic, setLevelMusic } from './patches.ts';
 import { loadMusicProject, saveMusicProject, removeSong } from './music.ts';
+import { EXT_FIRST, EXT_TILES, DEFAULT_ACTS, map16Ext, extTileWords, actsLike, setExtTileWords, setActsLike } from './map16ext.ts';
+import { BG_EXT_FIRST, BG_EXT_TILES, bgMap16Ext, bgExtTileWords, setBgExtTileWords, vanillaBgWords } from './bgmap16.ts';
 import type { UberContext } from './uberasm.ts';
 import type { SpriteFolder } from './pixirt.ts';
 
@@ -31,6 +33,8 @@ export interface PkgParts {
   pixi: { files: string[]; list: [SpriteFolder, number][] };
   gfx: number[]; // ExGFX numbers it created
   music?: string[]; // songs it added to the music project (their .txt)
+  map16?: number[]; // extended FG Map16 tiles it filled (graphics packages)
+  bgMap16?: number[]; // extended BG Map16 tiles it filled
 }
 
 export interface PkgRecord extends PkgParts {
@@ -43,7 +47,7 @@ export interface PkgRecord extends PkgParts {
   srcSize?: number;
 }
 
-export const emptyParts = (): PkgParts => ({ patches: [], uber: { files: [], calls: [], other: {} }, blocks: { files: [], tiles: [] }, pixi: { files: [], list: [] }, gfx: [], music: [] });
+export const emptyParts = (): PkgParts => ({ patches: [], uber: { files: [], calls: [], other: {} }, blocks: { files: [], tiles: [] }, pixi: { files: [], list: [] }, gfx: [], music: [], map16: [], bgMap16: [] });
 
 // ---------- the registry ----------
 
@@ -128,6 +132,8 @@ export interface Snapshot {
   sprites: Map<string, string>; // kind:num → file
   gfx: number[]; // ExGFX address per number, 0 = none
   music: Map<string, number>; // song file → number
+  map16: string[]; // extended FG Map16 tiles (from 200): words and acts like, '' = not installed
+  bgMap16: string[]; // extended BG Map16 tiles (from 200)
 }
 
 // list.txt is written from the assignments, which are compared on their own
@@ -150,7 +156,22 @@ export function snapshot(rom: Rom): Snapshot {
     pixi: hashes(pixi?.files), sprites: new Map((pixi?.list ?? []).map((e) => [`${e.kind}:${e.num}`, e.file])),
     gfx: Array.from({ length: 0x100 }, (_, i) => (i >= VANILLA_GFX ? gfxEntry(rom, i)?.addr ?? 0 : 0)),
     music: new Map((music?.songs ?? []).map((x) => [x.file, x.num])),
+    map16: map16Ext(rom) ? Array.from({ length: EXT_TILES - EXT_FIRST }, (_, i) => `${extTileWords(rom, EXT_FIRST + i)!.join()}:${actsLike(rom, EXT_FIRST + i)}`) : [],
+    bgMap16: bgMap16Ext(rom) ? Array.from({ length: BG_EXT_TILES - BG_EXT_FIRST }, (_, i) => bgExtTileWords(rom, BG_EXT_FIRST + i)!.join()) : [],
   };
+}
+
+// tiles that differ between two snapshots; when the table came in, the ones not holding its fill (the
+// tile most of them hold)
+function changedTiles(a: string[], b: string[], first: number): number[] {
+  let base = a;
+  if (!a.length && b.length) {
+    const n = new Map<string, number>();
+    for (const v of b) n.set(v, (n.get(v) ?? 0) + 1);
+    const fill = [...n].reduce((m, e) => (e[1] > m[1] ? e : m))[0];
+    base = b.map(() => fill);
+  }
+  return b.flatMap((v, i) => (v !== base[i] ? [first + i] : []));
 }
 
 const changedFiles = (a: Map<string, number>, b: Map<string, number>) => [...b].filter(([f, h]) => a.get(f) !== h).map(([f]) => f);
@@ -170,12 +191,14 @@ export function partsBetween(a: Snapshot, b: Snapshot): PkgParts {
     pixi: { files: changedFiles(a.pixi, b.pixi), list: [...b.sprites].filter(([k, f]) => a.sprites.get(k) !== f).map(([k]) => { const [kind, num] = k.split(':'); return [kind as SpriteFolder, Number(num)]; }) },
     gfx: b.gfx.flatMap((addr, i) => (addr && !a.gfx[i] ? [i] : [])),
     music: [...b.music.keys()].filter((f) => !a.music.has(f)),
+    map16: changedTiles(a.map16, b.map16, EXT_FIRST),
+    bgMap16: changedTiles(a.bgMap16, b.bgMap16, BG_EXT_FIRST),
   };
 }
 
 export function isEmptyParts(p: PkgParts): boolean {
   return !p.patches.length && !p.uber.files.length && !p.uber.calls.length && !Object.keys(p.uber.other).length
-    && !p.blocks.files.length && !p.blocks.tiles.length && !p.pixi.files.length && !p.pixi.list.length && !p.gfx.length && !p.music?.length;
+    && !p.blocks.files.length && !p.blocks.tiles.length && !p.pixi.files.length && !p.pixi.list.length && !p.gfx.length && !p.music?.length && !p.map16?.length && !p.bgMap16?.length;
 }
 
 const union = <T>(a: T[], b: T[], key: (x: T) => string = String) => {
@@ -193,6 +216,8 @@ export function mergeParts(r: PkgRecord, p: PkgParts, now: Snapshot): PkgRecord 
     pixi: { files: union(r.pixi.files, p.pixi.files), list: union(r.pixi.list, p.pixi.list, (e) => e.join(':')) },
     gfx: union(r.gfx, p.gfx),
     music: union(r.music ?? [], p.music ?? []),
+    map16: union(r.map16 ?? [], p.map16 ?? []),
+    bgMap16: union(r.bgMap16 ?? [], p.bgMap16 ?? []),
   };
 }
 
@@ -243,6 +268,10 @@ export function uninstallPackage(rom: Rom, id: string, blank: number[]): string[
     // patches applied later first
     const order = listPatches(rom).map((p) => p.id);
     for (const pid of [...rec.patches].filter((x) => order.includes(x)).sort((a, b) => order.indexOf(b) - order.indexOf(a))) warnings.push(...uninstallPatch(rom, pid));
+    // Map16 tiles back to empty ones, unless another package filled them too
+    for (const t of rec.map16 ?? []) if (map16Ext(rom) && !others.some((r) => r.map16?.includes(t))) { setExtTileWords(rom, t, blank, blank); setActsLike(rom, t, DEFAULT_ACTS, blank); }
+    const fill = vanillaBgWords(rom, 0x025);
+    for (const t of rec.bgMap16 ?? []) if (bgMap16Ext(rom) && !others.some((r) => r.bgMap16?.includes(t))) setBgExtTileWords(rom, t, fill);
     for (const n of rec.gfx) {
       const e = n >= VANILLA_GFX ? gfxEntry(rom, n) : null;
       if (!e) continue;

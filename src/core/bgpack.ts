@@ -1,32 +1,39 @@
-// Background packages as found on SMWCentral: a Lunar Magic level (.mwl) whose layer 2 is a BG
-// tilemap, a .map16 file with its BG Map16 tiles (usually pages 2+), the ExGFX files of its BG slots and
-// a .pal with a .palmask telling which colors belong to the background. Only the background is taken
-// over into a level: tilemap, BG Map16 tiles (extended BG Map16, bgmap16.ts), GFX slots, masked colors.
+// Lunar Magic graphics packages as found on SMWCentral (the graphics section's submission format): a
+// sample level (.mwl), the Map16 tiles it uses (.map16, FG and/or BG), the ExGFX files of its graphics
+// slots and palettes as .pal with a .palmask telling which colors belong to the package. Taken over
+// into a level: the BG tilemap with its BG Map16 tiles, the FG Map16 tiles (to place them), the
+// graphics slots those tiles use, the masked colors. The sample level's layer 1 and sprites stay out.
+// Which .map16 is which comes from the file (Map16File.origin), what a palette covers from its mask.
 //
 // .mwl (as far as needed here): "LM" magic, at 0x40 a table of (offset, size) pairs (u32). Sections
 // 1-4 start with 8 bytes of their own (flags, source address in the ROM it was exported from):
 //  - 2: layer 2; a BG tilemap is 0x800 bytes = 0x400 tile words, two halves of 16 columns x 32 rows
 //    (of which the game uses 27);
 //  - 4: palette, 256 colors (BGR555) followed by the back area color;
-//  - 7 (no header): ExGFX numbers of the 16 GFX slots, in Lunar Magic's order (LM_SLOTS).
+//  - 7 (no header): ExGFX numbers of the 16 GFX slots, in Lunar Magic's order (LM_SLOTS); LT3 is a
+//    layer 3 tilemap file, LG1-LG4 the layer 3 graphics (vanilla 28-2B).
 // .palmask: 256 bytes, nonzero = the color is the package's, byte 256 = the back area color is.
 
 import { Rom } from './rom.ts';
 import { type Level, hasLayer2Objects } from './level.ts';
 import { BG_SIZE } from './bg.ts';
-import { parseMap16File, exgfxName, importGfxFile, type Map16File } from './map16file.ts';
-import { BG_EXT_FIRST, BG_EXT_TILES, bgExtTileWords, vanillaBgWords, setBgExtTileWords, installBgMap16Ext } from './bgmap16.ts';
+import { parseMap16File, map16Targets, exgfxName, importGfxFile, type Map16File } from './map16file.ts';
+import { BG_EXT_FIRST, BG_EXT_TILES, bgExtTileWords, vanillaBgWords, setBgExtTileWords, installBgMap16Ext, bgTileWords } from './bgmap16.ts';
+import { EXT_FIRST, EXT_TILES, DEFAULT_ACTS, extTileWords, actsLike, setExtTileWords, setActsLike } from './map16ext.ts';
 import {
   gfxEntry, hasEditorPatch, VANILLA_GFX, levelGfx, setLevelGfx, levelExtGfx, setLevelExtGfx, GFX_SLOT_NAMES,
   EXT_GFX_SLOT_NAMES, extGfxAvailable, customPalette, setCustomPalette,
 } from './patches.ts';
 
 export const LM_SLOTS = ['AN2', 'LT3', 'BG3', 'BG2', 'FG3', 'BG1', 'FG2', 'FG1', 'SP4', 'SP3', 'SP2', 'SP1', 'LG4', 'LG3', 'LG2', 'LG1'];
-// slots taken over from the package (graphics of the level's FG/BG tiles; sprites and layer 3 stay)
-const TILE_SLOTS = ['FG1', 'FG2', 'FG3', 'BG1', 'BG2', 'BG3'];
+const LAYER3_SLOTS = ['LT3', 'LG1', 'LG2', 'LG3', 'LG4'];
+// the slot an 8x8 tile number (tile word bits 0-9) is loaded from: 80 tiles per slot in VRAM order
+// (BG2/BG3 with the VRAM patch, patches.ts)
+const VRAM_SLOTS = ['FG1', 'FG2', 'BG1', 'FG3', 'BG2', 'BG3'];
+const slotOfWord = (w: number) => VRAM_SLOTS[(w & 0x3ff) >> 7] ?? null;
 
-export interface MwlBackground {
-  bg: Uint16Array; // BG tiles in the editor's layout (bg.ts)
+export interface MwlLevel {
+  bg: Uint16Array | null; // BG tiles in the editor's layout (bg.ts); null: layer 2 is not a BG tilemap
   palette: Uint16Array; // 256 colors
   back: number; // back area color
   gfx: Map<string, number>; // slot name → ExGFX number (Lunar Magic numbering, up to FFF)
@@ -34,7 +41,7 @@ export interface MwlBackground {
 
 const u32 = (d: Uint8Array, o: number) => (o + 4 <= d.length ? (d[o] | (d[o + 1] << 8) | (d[o + 2] << 16) | (d[o + 3] << 24)) >>> 0 : 0);
 
-export function parseMwl(d: Uint8Array): MwlBackground {
+export function parseMwl(d: Uint8Array): MwlLevel {
   if (d.length < 0x80 || d[0] !== 0x4c || d[1] !== 0x4d) throw new Error('Not a Lunar Magic level file (.mwl)');
   const section = (i: number, header: number): Uint8Array | null => {
     const off = u32(d, 0x40 + i * 8), size = u32(d, 0x44 + i * 8);
@@ -42,11 +49,13 @@ export function parseMwl(d: Uint8Array): MwlBackground {
     return d.subarray(off + header, off + size);
   };
   const l2 = section(2, 8);
-  if (!l2 || l2.length !== 0x800) throw new Error('The level in the .mwl has no BG background (layer 2 is not a BG tilemap)');
-  const bg = new Uint16Array(BG_SIZE);
-  for (let half = 0; half < 2; half++) for (let y = 0; y < 27; y++) for (let x = 0; x < 16; x++) {
-    const w = half * 0x200 + y * 16 + x;
-    bg[half * 0x1b0 + y * 16 + x] = l2[w * 2] | (l2[w * 2 + 1] << 8);
+  let bg: Uint16Array | null = null;
+  if (l2 && l2.length === 0x800) {
+    bg = new Uint16Array(BG_SIZE);
+    for (let half = 0; half < 2; half++) for (let y = 0; y < 27; y++) for (let x = 0; x < 16; x++) {
+      const w = half * 0x200 + y * 16 + x;
+      bg[half * 0x1b0 + y * 16 + x] = l2[w * 2] | (l2[w * 2 + 1] << 8);
+    }
   }
   const pal = section(4, 8);
   const palette = new Uint16Array(256);
@@ -61,24 +70,37 @@ export function parseMwl(d: Uint8Array): MwlBackground {
   return { bg, palette, back, gfx };
 }
 
+export type PackPart = 'fg' | 'bg';
+
 export interface BgPackGfx {
   file: string | null; // file in the package, null = a GFX file the ROM already has (vanilla number)
   slot: string; // FG1..BG3
   lmNum: number; // number in the package
   num: number; // ExGFX number it is stored as (00-FE)
+  parts: PackPart[]; // the parts whose tiles use the slot
+}
+
+export interface PackPalette {
+  file: string; // .pal
+  mask: string; // .palmask
+  colors: number[]; // palette indices the mask gives (not 0)
+  back: boolean; // the mask includes the back area color
+  pal: Uint16Array; // the file's colors
+  layer3: boolean; // only colors 0-31, the 2bpp palettes of layer 3
 }
 
 export interface BgPackPlan {
   name: string;
   mwl: string;
-  bg: MwlBackground;
-  map16: { file: string; data: Map16File; from: number } | null; // from: first BG tile the file stands for
+  level: MwlLevel;
+  map16: { file: string; data: Map16File; from: number } | null; // BG Map16; from: first BG tile the file stands for
+  fg: { file: string; data: Map16File; from: number } | null; // FG Map16; from: first tile it was exported from
   used: number[]; // BG tiles >= 200 the tilemap uses
   gfx: BgPackGfx[];
-  colors: number[] | null; // palette indices from the .palmask
-  back: boolean; // the mask includes the back area color
-  pal: Uint16Array; // the package's colors (.pal, else the .mwl palette)
-  at: number; // suggested first BG tile for the .map16 tiles
+  palettes: PackPalette[];
+  at: number; // suggested first BG tile for the BG Map16 tiles
+  fgAt: number; // suggested first tile for the FG Map16 tiles
+  layer3: string[]; // the package's layer 3 files (not taken over)
   notes: string[];
 }
 
@@ -97,6 +119,16 @@ function freeBgTiles(rom: Rom, at: number, n: number): boolean {
   return true;
 }
 
+// tiles of an extended FG Map16 block (width x height from `at`) are still empty
+function freeFgTiles(rom: Rom, f: Map16File, at: number, blank: number[]): boolean {
+  if ((at & 15) + Math.min(16, f.width) > 16) return false;
+  return map16Targets(f, at).every((t) => {
+    if (t < EXT_FIRST || t >= EXT_TILES) return false;
+    const w = extTileWords(rom, t);
+    return !w || (w.every((v, k) => v === blank[k]) && actsLike(rom, t) === DEFAULT_ACTS);
+  });
+}
+
 // first ExGFX number that is free and not taken by `taken`
 function freeGfx(rom: Rom, taken: Set<number>): number {
   const free = (i: number) => !taken.has(i) && (!hasEditorPatch(rom) || !gfxEntry(rom, i));
@@ -105,36 +137,56 @@ function freeGfx(rom: Rom, taken: Set<number>): number {
   return -1;
 }
 
-export function planBgPack(rom: Rom, name: string, files: Map<string, Uint8Array>): BgPackPlan {
+const base = (f: string) => f.split('/').pop()!;
+const stem = (f: string) => f.replace(/\.[^./]*$/, '').toLowerCase();
+
+// `blank`: tile words of an empty FG Map16 tile
+export function planBgPack(rom: Rom, name: string, files: Map<string, Uint8Array>, blank: number[]): BgPackPlan {
   const keys = [...files.keys()];
   const mwl = keys.find((f) => /\.mwl$/i.test(f));
   if (!mwl) throw new Error('No .mwl file in the package');
-  const bg = parseMwl(files.get(mwl)!);
+  const level = parseMwl(files.get(mwl)!);
   const notes: string[] = [];
-  const used = [...new Set(bg.bg)].filter((t) => t >= BG_EXT_FIRST).sort((a, b) => a - b);
+  const used = level.bg ? [...new Set(level.bg)].filter((t) => t >= BG_EXT_FIRST).sort((a, b) => a - b) : [];
   if (used.some((t) => t >= BG_EXT_TILES)) throw new Error('The BG tilemap uses tiles from 1000 on – the editor does not support that');
-  const mf = keys.find((f) => /\.map16$/i.test(f));
+  // Map16 files: FG or BG as the file says; one that does not say is BG if the tilemap needs BG tiles
+  const maps = keys.filter((f) => /\.map16$/i.test(f)).map((file) => ({ file, data: parseMap16File(files.get(file)!) }));
+  let bgMap = level.bg ? maps.find((m) => m.data.origin?.bg) ?? null : null;
+  let fgMap = maps.find((m) => m.data.origin && !m.data.origin.bg) ?? null;
+  for (const m of maps) if (!m.data.origin) { if (!bgMap && used.length) bgMap = m; else if (!fgMap) fgMap = m; }
+  const extra = maps.filter((m) => m !== bgMap && m !== fgMap);
+  if (extra.length) notes.push(`Not used: ${extra.map((m) => base(m.file)).join(', ')}`);
   let map16: BgPackPlan['map16'] = null;
-  if (mf) {
-    const data = parseMap16File(files.get(mf)!);
-    const from = used.length ? used[0] & ~0xf : BG_EXT_FIRST;
-    map16 = { file: mf, data, from };
-    const outside = used.filter((t) => t < from || t >= from + data.height * 16);
+  if (bgMap) {
+    const o = bgMap.data.origin?.tile;
+    const from = o !== undefined && o >= BG_EXT_FIRST ? o : used.length ? used[0] & ~0xf : BG_EXT_FIRST;
+    map16 = { file: bgMap.file, data: bgMap.data, from };
+    const outside = used.filter((t) => t < from || t >= from + bgMap!.data.height * 16);
     if (outside.length) notes.push(`${outside.length} BG tile(s) of the tilemap are not in the .map16`);
-  } else if (used.length) notes.push('No .map16 in the package – BG tiles from 200 on stay empty');
-  // ExGFX: the package's files by number, assigned to the slots the .mwl names
+  } else if (used.length) notes.push('No BG .map16 in the package – BG tiles from 200 on stay empty');
+  const fg: BgPackPlan['fg'] = fgMap ? { file: fgMap.file, data: fgMap.data, from: fgMap.data.origin?.tile ?? EXT_FIRST } : null;
+  // graphics slots: the ones the taken-over tiles use, with the package's file or the ROM's
+  const need = new Map<string, Set<PackPart>>();
+  const use = (w: number, p: PackPart) => { const s = slotOfWord(w); if (s) (need.get(s) ?? need.set(s, new Set()).get(s)!).add(p); };
+  if (level.bg) {
+    for (const t of new Set(level.bg)) if (t < BG_EXT_FIRST) for (const w of bgTileWords(rom, t)) use(w, 'bg');
+    for (const ws of map16?.data.tiles ?? []) for (const w of ws) use(w, 'bg');
+  }
+  for (const ws of fg?.data.tiles ?? []) for (const w of ws) use(w, 'fg');
   const bins = new Map<number, string>();
-  for (const f of keys) if (/\.bin$/i.test(f)) { const n = exgfxName(f.split('/').pop()!).num; if (n !== null) bins.set(n, f); }
+  for (const f of keys) if (/\.bin$/i.test(f)) { const n = exgfxName(base(f)).num; if (n !== null) bins.set(n, f); }
   const gfx: BgPackGfx[] = [];
   const taken = new Set<number>();
   const byNum = new Map<number, number>(); // package number → stored number
-  for (const slot of TILE_SLOTS) {
-    const lmNum = bg.gfx.get(slot);
-    if (lmNum === undefined) continue;
+  for (const slot of VRAM_SLOTS) {
+    const lmNum = level.gfx.get(slot), parts = need.get(slot);
+    if (lmNum === undefined || !parts) continue;
     const file = bins.get(lmNum) ?? null;
     if (!file) {
-      // not in the package: only the BG slots matter, and only if the ROM has that file
-      if (slot.startsWith('BG') && lmNum !== 0x7f && lmNum <= 0xff && gfxEntry(rom, lmNum)) gfx.push({ file: null, slot, lmNum, num: lmNum });
+      // not in the package: the ROM's file, if it has it – only for the part's own slots (a background
+      // does not change the level's FG graphics)
+      const own = [...parts].filter((p) => slot.startsWith(p.toUpperCase()));
+      if (own.length && lmNum !== 0x7f && lmNum <= 0xff && gfxEntry(rom, lmNum)) gfx.push({ file: null, slot, lmNum, num: lmNum, parts: own });
       continue;
     }
     let num = byNum.get(lmNum);
@@ -144,21 +196,28 @@ export function planBgPack(rom: Rom, name: string, files: Map<string, Uint8Array
       taken.add(num);
       byNum.set(lmNum, num);
     }
-    gfx.push({ file, slot, lmNum, num });
+    gfx.push({ file, slot, lmNum, num, parts: [...parts] });
   }
-  const unused = [...bins].filter(([n]) => !byNum.has(n)).map(([, f]) => f.split('/').pop());
-  if (unused.length) notes.push(`Not used (no graphics slot in the level): ${unused.join(', ')}`);
-  // colors
-  const pf = keys.find((f) => /\.pal$/i.test(f)), mk = keys.find((f) => /\.palmask$/i.test(f));
-  const pal = bg.palette.slice();
-  const pd = pf ? files.get(pf)! : null;
-  if (pd && pd.length >= 768) for (let i = 0; i < 256; i++) pal[i] = (pd[i * 3] >> 3) | ((pd[i * 3 + 1] >> 3) << 5) | ((pd[i * 3 + 2] >> 3) << 10);
-  let colors: number[] | null = null, back = false;
-  if (mk) {
+  // layer 3 (a tilemap file and its graphics, Lunar Magic's layer 3 bypass): not taken over
+  const layer3 = [...new Set(LAYER3_SLOTS.map((s) => bins.get(level.gfx.get(s) ?? -1)).filter((f): f is string => !!f))];
+  const unused = [...bins].filter(([n, f]) => !byNum.has(n) && !layer3.includes(f)).map(([, f]) => base(f));
+  if (unused.length) notes.push(`Not used (no graphics slot of the taken-over tiles): ${unused.join(', ')}`);
+  // palettes: each .pal with the .palmask of the same name (or the only ones there are)
+  const pals = keys.filter((f) => /\.pal$/i.test(f)), masks = keys.filter((f) => /\.palmask$/i.test(f));
+  const palettes: PackPalette[] = [];
+  for (const pf of pals) {
+    const mk = masks.find((m) => stem(m) === stem(pf)) ?? (pals.length === 1 && masks.length === 1 ? masks[0] : undefined);
+    const pd = files.get(pf)!;
+    if (!mk) { notes.push(`${base(pf)} has no .palmask – its colors are not taken over`); continue; }
+    if (pd.length < 768) { notes.push(`${base(pf)} is not a 256-color palette – not taken over`); continue; }
     const m = files.get(mk)!;
-    colors = Array.from({ length: 256 }, (_, i) => i).filter((i) => i > 0 && m[i]);
-    back = m.length > 256 && m[256] !== 0;
-  } else notes.push('No .palmask in the package – the palette stays as it is');
+    const pal = new Uint16Array(256);
+    for (let i = 0; i < 256; i++) pal[i] = (pd[i * 3] >> 3) | ((pd[i * 3 + 1] >> 3) << 5) | ((pd[i * 3 + 2] >> 3) << 10);
+    const colors = Array.from({ length: 256 }, (_, i) => i).filter((i) => i > 0 && m[i]);
+    const back = m.length > 256 && m[256] !== 0;
+    if (colors.length || back) palettes.push({ file: pf, mask: mk, colors, back, pal, layer3: colors.every((i) => i < 32) && !back });
+  }
+  if (!pals.length && masks.length) notes.push('.palmask without a .pal – colors not taken over');
   let at = map16 ? map16.from : BG_EXT_FIRST;
   const n = map16 ? map16.data.height * 16 : 0;
   if (n && !freeBgTiles(rom, at, n)) {
@@ -166,7 +225,13 @@ export function planBgPack(rom: Rom, name: string, files: Map<string, Uint8Array
     for (let a = BG_EXT_FIRST; a + n <= BG_EXT_TILES && at < 0; a += 16) if (freeBgTiles(rom, a, n)) at = a;
     if (at < 0) at = map16!.from;
   }
-  return { name, mwl, bg, map16, used, gfx, colors, back, pal, at, notes };
+  let fgAt = fg ? fg.from : EXT_FIRST;
+  if (fg && !freeFgTiles(rom, fg.data, fgAt, blank)) {
+    let a = EXT_FIRST;
+    while (a + fg.data.height * 16 <= EXT_TILES && !freeFgTiles(rom, fg.data, a, blank)) a += 16;
+    if (a + fg.data.height * 16 <= EXT_TILES) fgAt = a;
+  }
+  return { name, mwl, level, map16, fg, used, gfx, palettes, at, fgAt, layer3, notes };
 }
 
 // the level's colors as a custom palette would hold them: CGRAM, color 0 = back area color ($0701)
@@ -177,60 +242,89 @@ export function levelColors(r: { cgram: Uint8Array; wram: Uint8Array }): Uint8Ar
 }
 
 export interface BgPackOptions {
-  at?: number; // first BG tile for the .map16 tiles (default: the plan's)
-  palette?: boolean; // take over the masked colors (default true)
+  bg?: boolean; // take over the background (default: if the package has one)
+  fg?: boolean; // take over the FG Map16 tiles (default: if the package has them)
+  at?: number; // first BG tile for the BG .map16 tiles (default: the plan's)
+  fgAt?: number; // first tile for the FG .map16 tiles (default: the plan's)
+  palettes?: boolean[]; // per plan palette: take over its colors (default: all but layer 3 ones)
   cgram: Uint8Array; // the level's current colors (levelColors), base for a new own palette
+  blank: number[]; // tile words of an empty FG Map16 tile
 }
 
 export interface BgPackResult { ok: boolean; errors: string[]; notes: string[]; bg: Uint16Array | null }
 
+const hx = (v: number, d: number) => v.toString(16).toUpperCase().padStart(d, '0');
+
 export function applyBgPack(rom: Rom, lv: Level, files: Map<string, Uint8Array>, plan: BgPackPlan, opt: BgPackOptions): BgPackResult {
   const snapshot = rom.snapshot();
   const notes: string[] = [];
-  const lvl = lv.number, hx = (v: number, d: number) => v.toString(16).toUpperCase().padStart(d, '0');
+  const lvl = lv.number;
   try {
-    if (lv.layer2Objects || hasLayer2Objects(lv.header.mode)) throw new Error(`Level ${hx(lvl, 3)} has layer 2 objects instead of a BG background`);
-    const at = opt.at ?? plan.at;
+    const withBg = !!plan.level.bg && opt.bg !== false, withFg = !!plan.fg && opt.fg !== false;
+    if (!withBg && !withFg) throw new Error('Nothing to take over');
+    if (withBg && (lv.layer2Objects || hasLayer2Objects(lv.header.mode))) throw new Error(`Level ${hx(lvl, 3)} has layer 2 objects instead of a BG background`);
     // 1. BG Map16 tiles, the tilemap moved along
-    const bg = plan.bg.bg.slice();
-    if (plan.map16) {
-      const m = plan.map16;
-      if (at < BG_EXT_FIRST || at + m.data.height * 16 > BG_EXT_TILES || (at & 15) + Math.min(16, m.data.width) > 16) throw new Error(`The ${m.data.tiles.length} BG tiles do not fit on pages 2–F from ${hx(at, 3)} on`);
-      installBgMap16Ext(rom);
-      m.data.tiles.forEach((ws, i) => setBgExtTileWords(rom, at + Math.floor(i / m.data.width) * 16 + (i % m.data.width), ws));
-      const end = m.from + m.data.height * 16;
-      for (let o = 0; o < bg.length; o++) if (bg[o] >= m.from && bg[o] < end) bg[o] = bg[o] - m.from + at;
-      notes.push(`${m.data.tiles.length} BG tiles from ${hx(at, 3)}`);
-    } else if (plan.used.length) installBgMap16Ext(rom);
-    // 2. graphics and the level's slots
+    let bg: Uint16Array | null = null;
+    if (withBg) {
+      bg = plan.level.bg!.slice();
+      const at = opt.at ?? plan.at;
+      if (plan.map16) {
+        const m = plan.map16;
+        if (at < BG_EXT_FIRST || at + m.data.height * 16 > BG_EXT_TILES || (at & 15) + Math.min(16, m.data.width) > 16) throw new Error(`The ${m.data.tiles.length} BG tiles do not fit on pages 2–F from ${hx(at, 3)} on`);
+        installBgMap16Ext(rom);
+        m.data.tiles.forEach((ws, i) => setBgExtTileWords(rom, at + Math.floor(i / m.data.width) * 16 + (i % m.data.width), ws));
+        const end = m.from + m.data.height * 16;
+        for (let o = 0; o < bg.length; o++) if (bg[o] >= m.from && bg[o] < end) bg[o] = bg[o] - m.from + at;
+        notes.push(`${m.data.tiles.length} BG tiles from ${hx(at, 3)}`);
+      } else if (plan.used.length) installBgMap16Ext(rom);
+    }
+    // 2. FG Map16 tiles (acts like pointing into the block moved along)
+    if (withFg) {
+      const f = plan.fg!, at = opt.fgAt ?? plan.fgAt;
+      if (!f.data.tiles.length) throw new Error('The FG .map16 has no tiles');
+      if (at < EXT_FIRST || at + f.data.height * 16 > EXT_TILES || (at & 15) + Math.min(16, f.data.width) > 16) throw new Error(`The ${f.data.tiles.length} FG tiles do not fit from ${hx(at, 3)} on (tiles 200–FFF)`);
+      const targets = map16Targets(f.data, at), from = map16Targets(f.data, f.from);
+      targets.forEach((t, i) => {
+        setExtTileWords(rom, t, f.data.tiles[i], opt.blank);
+        const a = f.data.acts?.[i];
+        if (a !== undefined) { const k = from.indexOf(a); setActsLike(rom, t, k >= 0 ? targets[k] : a, opt.blank); }
+      });
+      notes.push(`${f.data.tiles.length} FG Map16 tiles from ${hx(at, 3)}`);
+    }
+    // 3. graphics and the level's slots
     const std = levelGfx(rom, lvl), ext = levelExtGfx(rom, lvl);
-    let extSet = false;
+    let stdSet = false, extSet = false;
     const stored = new Map<string, number>();
+    const slots: string[] = [];
     for (const g of plan.gfx) {
+      if (!g.parts.some((p) => (p === 'bg' ? withBg : withFg))) continue;
       if (g.file && !stored.has(g.file)) {
         const what = importGfxFile(rom, g.num, files.get(g.file)!);
         stored.set(g.file, g.num);
-        notes.push(`${g.file.split('/').pop()} as ExGFX ${hx(g.num, 2)} (${what})`);
+        notes.push(`${base(g.file)} as ExGFX ${hx(g.num, 2)} (${what})`);
       }
       const e = EXT_GFX_SLOT_NAMES.indexOf(g.slot), s = GFX_SLOT_NAMES.indexOf(g.slot);
       if (e >= 0) {
         if (!extGfxAvailable(rom)) { notes.push(`${g.slot} slot not available (VRAM patch missing) – graphics ${hx(g.num, 2)} not loaded yet`); continue; }
         ext[e] = g.num; extSet = true;
-      } else if (s >= 0) std[s] = g.num;
+      } else if (s >= 0) { std[s] = g.num; stdSet = true; }
+      slots.push(`${g.slot} = ${hx(g.num, 2)}`);
     }
-    if (plan.gfx.some((g) => GFX_SLOT_NAMES.includes(g.slot))) setLevelGfx(rom, lvl, std);
+    if (stdSet) setLevelGfx(rom, lvl, std);
     if (extSet) setLevelExtGfx(rom, lvl, ext);
-    const slots = plan.gfx.filter((g) => (g.slot !== 'BG2' && g.slot !== 'BG3') || extSet).map((g) => `${g.slot} = ${hx(g.num, 2)}`);
     if (slots.length) notes.push(`Graphics slots: ${slots.join(', ')}`);
-    // 3. colors: the level's own palette, the package's colors where the mask says so
-    if (plan.colors && opt.palette !== false && (plan.colors.length || plan.back)) {
+    // 4. colors: the level's own palette, each chosen package palette where its mask says so
+    const chosen = plan.palettes.filter((p, i) => opt.palettes?.[i] ?? !p.layer3);
+    if (chosen.length) {
       const own = customPalette(rom, lvl);
       const pal = own ? rom.bytes(own, 512).slice() : opt.cgram.slice(0, 512);
       const put = (i: number, c: number) => { pal[i * 2] = c & 0xff; pal[i * 2 + 1] = c >> 8; };
-      for (const i of plan.colors) put(i, plan.pal[i]);
-      if (plan.back) put(0, plan.bg.back);
+      for (const p of chosen) {
+        for (const i of p.colors) put(i, p.pal[i]);
+        if (p.back) put(0, plan.level.back);
+        notes.push(`${p.colors.length} color(s)${p.back ? ' and the background color' : ''} from ${base(p.file)}`);
+      }
       setCustomPalette(rom, lvl, pal);
-      notes.push(`${plan.colors.length} color(s)${plan.back ? ' and the background color' : ''} applied`);
     }
     return { ok: true, errors: [], notes: [...notes, ...plan.notes], bg };
   } catch (e) {

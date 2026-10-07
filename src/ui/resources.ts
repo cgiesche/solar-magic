@@ -118,7 +118,7 @@ export async function openResources(app: App, tab: ResourceTab = 'patches', opts
     h('div', { class: 'row res-top' },
       h('button', { class: 'primary', onclick: () => add() }, 'Add …'),
       h('button', { onclick: () => add(true), title: 'Assign a package’s folders and files to folders of the UberASM project yourself – for packages that are more than one resource' }, 'Assign manually …'),
-      h('span', { class: 'hint' }, '.asm or .zip (e.g. from SMWCentral) – recognized as patch, UberASM code, custom block, block package, custom sprite, background or music (AddmusicK).')),
+      h('span', { class: 'hint' }, '.asm or .zip (e.g. from SMWCentral) – recognized as patch, UberASM code, custom block, block package, custom sprite, graphics (Lunar Magic: background, Map16 tiles) or music (AddmusicK).')),
     tabBar,
     content,
   );

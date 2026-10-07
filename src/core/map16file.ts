@@ -3,12 +3,18 @@
 // .map16 (as far as needed here): "LM16" magic, width/height in tiles at 0x18/0x1C, and at the offset
 // stored at 0x10 a list of (offset, size) pairs: the tile data (8 bytes per tile: TL, BL, TR, BR tile
 // words) and the acts-like values (2 bytes per tile). Tiles are row by row, 16 per Map16 row.
+// When the section table starts after it, 0x24 tells where the tiles were exported from: the first
+// tile / 16, bit 0x400 set for BG Map16 (seen in Lunar Magic 3.31 exports: FG page 2 = 0x20, BG tile
+// 200 = 0x420, blocks at 500 = 0x50).
 
 import { Rom } from './rom.ts';
 import { lz2Decompress, lz2Compress } from './lz2.ts';
 import { gfxEntry, setGfxEntry, VANILLA_GFX } from './patches.ts';
 
-export interface Map16File { width: number; height: number; tiles: number[][]; acts: number[] | null }
+export interface Map16File {
+  width: number; height: number; tiles: number[][]; acts: number[] | null;
+  origin?: { bg: boolean; tile: number } | null; // where the tiles were exported from, if the file says
+}
 
 export function parseMap16File(d: Uint8Array): Map16File {
   const u32 = (o: number) => (o + 4 <= d.length ? d[o] | (d[o + 1] << 8) | (d[o + 2] << 16) | (d[o + 3] << 24) : -1);
@@ -27,7 +33,9 @@ export function parseMap16File(d: Uint8Array): Map16File {
   const acts = ad && ad.length >= tiles.length * 2 ? tiles.map((_, i) => ad[i * 2] | (ad[i * 2 + 1] << 8)) : null;
   let width = u32(0x18), height = u32(0x1c);
   if (width <= 0 || height <= 0 || width * height !== tiles.length) { width = Math.min(16, tiles.length); height = Math.ceil(tiles.length / width); }
-  return { width, height, tiles, acts };
+  const o = table >= 0x28 ? u32(0x24) : -1;
+  const origin = o > 0 ? { bg: (o & 0x400) !== 0, tile: (o & 0x3ff) << 4 } : null;
+  return origin ? { width, height, tiles, acts, origin } : { width, height, tiles, acts };
 }
 
 // writes the same layout: header (magic, section table offset at 0x10, width/height at 0x18/0x1C),

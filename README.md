@@ -165,7 +165,7 @@ Der Editor enthält Asar (als WebAssembly) und wendet damit ASM-Code direkt im B
 - **Custom Blocks** im GPS-Format;
 - **Custom Sprites** im PIXI-Format: Sprites, Shooter, Generatoren und alle Misc-Arten (cluster, extended,
   bounce …), mit Extra-Bytes; in der Palette mit Namen und echter Grafik ([docs/pixi.md](docs/pixi.md));
-- **Hintergründe** aus Lunar Magic (`.zip` mit `.mwl`, `.map16`, ExGFX, `.pal`/`.palmask`) ins aktuelle Level.
+- **Grafik-Pakete** aus Lunar Magic (`.zip` mit `.mwl`, `.map16`, ExGFX, `.pal`/`.palmask`): Hintergrund, FG-Map16-Tiles, Grafik-Slots und Farben ins aktuelle Level.
 
 Jeder Patch wird mit Originalbytes und Quellen in der ROM verzeichnet und lässt sich jederzeit wieder
 entfernen. Details, `patch.json` und die Schnittstellen für eigene Patches: [docs/patches.md](docs/patches.md).

@@ -64,6 +64,7 @@ function summary(r: PkgRecord): string[] {
   if (r.pixi.list.length) out.push(r.pixi.list.length > 1 ? `${r.pixi.list.length} sprites` : 'Sprite');
   if (r.gfx.length) out.push('ExGFX');
   if (r.music?.length) out.push(r.music.length > 1 ? `${r.music.length} songs` : 'Song');
+  if (r.map16?.length || r.bgMap16?.length) out.push('Map16 tiles');
   return out;
 }
 
@@ -246,6 +247,18 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
         h('div', { class: 'row' }, rec.gfx.map((g) => h('button', { title: 'Open in the graphics workspace', onclick: () => host.leave(() => app.showGfxFile(g)) }, gfxName(g)))),
         h('p', { class: 'hint' }, 'Removed with the package. To use: level header → graphics bypass, or “Use in slot” in the graphics workspace.')));
     }
+    // Map16 tiles it filled
+    if (rec.map16?.length || rec.bgMap16?.length) {
+      const ranges = (ts: number[]) => ts.slice().sort((a, b) => a - b).reduce<[number, number][]>((rs, t) => {
+        const l = rs[rs.length - 1];
+        if (l && l[1] === t - 1) l[1] = t; else rs.push([t, t]);
+        return rs;
+      }, []).map(([a, b]) => (a === b ? hex(a, 3) : `${hex(a, 3)}–${hex(b, 3)}`)).join(', ');
+      out.push(h('section', { class: 'pkg-sec' }, h('h3', null, 'Map16 tiles'),
+        rec.map16?.length ? h('p', null, `FG: ${ranges(rec.map16)}`) : '',
+        rec.bgMap16?.length ? h('p', null, `BG: ${ranges(rec.bgMap16)}`) : '',
+        h('p', { class: 'hint' }, 'Emptied again when the package is removed.')));
+    }
     // songs it added to the music project
     if (rec.music?.length) {
       let proj = null;
@@ -324,6 +337,7 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
     if (rec.blocks.tiles.length) parts.push(`block(s) at ${rec.blocks.tiles.map((t) => hex(t, 3)).join(', ')}`);
     if (rec.pixi.list.length) parts.push(`sprite(s) ${rec.pixi.list.map(([, n]) => hex(n, 2)).join(', ')}`);
     if (rec.gfx.length) parts.push(rec.gfx.map(gfxName).join(', '));
+    if (rec.map16?.length || rec.bgMap16?.length) parts.push(`${(rec.map16?.length ?? 0) + (rec.bgMap16?.length ?? 0)} Map16 tile(s)`);
     if (rec.music?.length) parts.push(`${rec.music.length > 1 ? 'songs' : 'the song'} (AddmusicK inserts the music again)`);
     const i = await choose('Remove package', `Remove “${rec.name}” from the ROM completely: ${parts.join(', ')}. Files another package brought as well stay. Whatever is placed in levels stays in place.`,
       [{ label: 'Cancel' }, { label: 'Remove', danger: true }]);
