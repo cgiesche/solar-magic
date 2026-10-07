@@ -128,8 +128,8 @@ Beim Anzeigen eines Levels führt er die **originalen Laderoutinen** des ROMs au
 * Geänderte Level werden, wenn sie passen, an Ort und Stelle geschrieben; geteilte oder größere Daten wandern
   in freien Speicher.
 * **Editor-Daten außerhalb der ROM:** Quellen von Patches, Paketen und den Projekten (UberASM, Blocks, Sprites,
-  Musik) belegen keinen ROM-Platz. *Datei → Export project* speichert ROM + Editor-Daten als `.smwproj`
-  (zum Weiterbearbeiten, öffnen mit *Open ROM …*), *Export ROM* die spielbare ROM ohne sie.
+  Musik) belegen keinen ROM-Platz. *Datei → Save project* speichert ROM + Editor-Daten als `.smwproj`
+  (zum Weiterbearbeiten, öffnen mit *Open project …*), *Export ROM* die spielbare ROM ohne sie, *Export patch …* einen BPS-Patch (Flips) gegen eine gewählte saubere ROM.
 
 ## Eigener ROM-Patch („SMWE“)
 

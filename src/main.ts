@@ -1,5 +1,8 @@
 import './style.css';
 import { Rom } from './core/rom.ts';
+import { createBps, crc32 } from './core/bps.ts';
+
+const SMW_CLEAN_CRC = 0xb19ed489; // Super Mario World (U), headerless
 import { disableUnsafeExtGfx, hasEditorPatch } from './core/patches.ts';
 import { App, type EditMode } from './ui/app.ts';
 import { h, clear, toast, log, downloadBytes, pickFile, modal } from './ui/dom.ts';
@@ -31,12 +34,17 @@ function welcome(): void {
   clear(root);
   const drop = h('div', { class: 'welcome' },
     h('h1', null, 'Solar Magic'),
-    h('p', null, 'Open a Super Mario World ROM (US, .smc/.sfc, with or without header) or drop it here.'),
-    h('button', { class: 'primary big', onclick: async () => { const f = await pickFile('.smc,.sfc,.bin,.smwproj'); if (f) openFile(f); } }, 'Open ROM …'),
+    h('p', null, 'Import a Super Mario World ROM (US, .smc/.sfc, with or without header), open a project (.smwproj) or drop either here.'),
+    h('div', { class: 'row welcome-actions' },
+      h('button', { class: 'primary big', onclick: importRomFile }, 'Import ROM …'),
+      h('button', { class: 'big', onclick: openProjectFile }, 'Open project …')),
     h('p', { class: 'hint' }, 'The ROM stays local in the browser (IndexedDB). Nothing is uploaded.'),
   );
   root.appendChild(drop);
 }
+
+async function importRomFile(): Promise<void> { const f = await pickFile('.smc,.sfc,.bin'); if (f) openFile(f); }
+async function openProjectFile(): Promise<void> { const f = await pickFile('.smwproj'); if (f) openFile(f); }
 
 async function openFile(f: File): Promise<void> {
   const data = new Uint8Array(await f.arrayBuffer());
@@ -51,7 +59,7 @@ function startWith(rom: Rom, name: string): void {
   // sources older versions kept in the ROM go into the editor data, freeing the ROM space
   try {
     const moved = [migratePatchSources(rom), migratePackageFiles(rom)].some(Boolean);
-    if (moved) { saveRom(name, rom).catch(() => {}); log('Sources of patches and packages moved out of the ROM into the editor data (saved with “Export project”).'); }
+    if (moved) { saveRom(name, rom).catch(() => {}); log('Sources of patches and packages moved out of the ROM into the editor data (saved with “Save project”).'); }
   } catch (e) { console.warn('migrating sources', e); }
   if (disableUnsafeExtGfx(rom)) {
     saveRom(name, rom).catch(() => {});
@@ -125,9 +133,12 @@ function buildUi(app: App): void {
   const insertHere = () => { const hv = view.hover, c = view.centerTile(); openInsertDialog(app, hv ? hv.tx : c.tx, hv ? hv.ty : c.ty); };
   const menus = menuBar([
     { label: 'File', items: [
-      { label: 'Open ROM …', onClick: async () => { const f = await pickFile('.smc,.sfc,.bin,.smwproj'); if (f) openFile(f); } },
+      { label: 'Open project …', title: 'A project file (.smwproj) saved with “Save project”', onClick: openProjectFile },
+      { label: 'Save project', title: 'The ROM with the editor data: sources of patches, packages, UberASM, blocks, sprites and music – to keep editing it later or elsewhere', onClick: () => { if (ow?.dirty) ow.save(); exportProject(app); } },
+      'sep',
+      { label: 'Import ROM …', title: 'Start from a ROM (.smc/.sfc) – clean or already modified', onClick: importRomFile },
       { label: 'Export ROM', title: 'Download the playable ROM with all saved changes (without the editor data)', onClick: () => { if (ow?.dirty) ow.save(); exportRom(app); } },
-      { label: 'Export project', title: 'The ROM with the editor data: sources of patches, packages, UberASM, blocks, sprites and music – to keep editing it later or elsewhere', onClick: () => { if (ow?.dirty) ow.save(); exportProject(app); } },
+      { label: 'Export patch …', title: 'A BPS patch (for Floating IPS / Flips) from a clean ROM you choose to the playable ROM with all saved changes', onClick: () => { if (ow?.dirty) ow.save(); exportPatch(app); } },
       'sep',
       { label: 'Import level file …', title: 'Replaces the current level (undoable; palette/graphics bypass are written to the ROM directly)', disabled: () => !inLevel(), onClick: () => importLevel(app) },
       { label: 'Export level file …', title: `Level as ${LEVEL_FILE_EXT} file (objects, sprites, exits, header, graphics bypass, custom palette)`, disabled: () => !inLevel(), onClick: () => exportLevel(app) },
@@ -355,17 +366,32 @@ function exportRom(app: App): void {
   const base = app.romName.replace(/\.(smc|sfc|bin|smwproj)$/i, '');
   downloadBytes(`${base}.${withHeader ? 'smc' : 'sfc'}`, out);
   log(`ROM exported as “${base}.${withHeader ? 'smc' : 'sfc'}” (${Math.round(out.length / 1024)} KB)`);
-  if (app.rom.extra.size) toast('The playable ROM holds no sources of patches, packages and projects – to keep editing elsewhere, use “Export project”.');
+  if (app.rom.extra.size) toast('The playable ROM holds no sources of patches, packages and projects – to keep editing elsewhere, use “Save project”.');
   app.persist();
 }
 
 // ROM plus editor data, to open again in the editor
+// BPS patch from a clean ROM (headerless on both sides, as Flips expects for SMW)
+async function exportPatch(app: App): Promise<void> {
+  const f = await pickFile('.smc,.sfc,.bin');
+  if (!f) return;
+  let source: Uint8Array;
+  try { source = Rom.fromFile(new Uint8Array(await f.arrayBuffer())).output(false); } catch (e) { toast(`Could not open “${f.name}”: ${e instanceof Error ? e.message : e}`, 'error'); return; }
+  if (crc32(source) !== SMW_CLEAN_CRC) toast(`“${f.name}” is not a clean Super Mario World (U) ROM – the patch only applies to exactly this file.`, 'error');
+  if (app.dirty) app.saveLevel(true);
+  const target = app.rom.output(false);
+  const patch = createBps(source, target);
+  const base = app.romName.replace(/\.(smc|sfc|bin|smwproj)$/i, '');
+  downloadBytes(`${base}.bps`, patch);
+  log(`Patch exported as “${base}.bps” (${Math.max(1, Math.round(patch.length / 1024))} KB, from “${f.name}”)`);
+  app.persist();
+}
 function exportProject(app: App): void {
   if (app.dirty) app.saveLevel(true);
   const out = app.rom.outputProject(app.rom.smcHeader !== null);
   const base = app.romName.replace(/\.(smc|sfc|bin|smwproj)$/i, '');
   downloadBytes(`${base}.smwproj`, out);
-  log(`Project exported as “${base}.smwproj” (${Math.round(out.length / 1024)} KB, of which ${Math.round(app.rom.extraSize / 1024)} KB editor data)`);
+  log(`Project saved as “${base}.smwproj” (${Math.round(out.length / 1024)} KB, of which ${Math.round(app.rom.extraSize / 1024)} KB editor data)`);
   app.persist();
 }
 

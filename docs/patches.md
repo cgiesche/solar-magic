@@ -25,8 +25,8 @@ sind dort gespeichert:
 - ein Verweis auf die Quelldateien.
 
 Die **Quelldateien** (komprimiert) liegen nicht in der ROM, sondern in den **Editor-Daten** neben ihr: im
-Browser mit der Arbeits-ROM gespeichert und mit *Datei → Export project* in einer Projektdatei (`.smwproj` =
-ROM + angehängte Editor-Daten), die *Open ROM …* wieder öffnet. *Export ROM* liefert die spielbare ROM ohne
+Browser mit der Arbeits-ROM gespeichert und mit *Datei → Save project* in einer Projektdatei (`.smwproj` =
+ROM + angehängte Editor-Daten), die *Open project …* wieder öffnet. *Export ROM* liefert die spielbare ROM ohne
 sie. Das gilt auch für die Projekte von UberASM, Custom Blocks, Custom Sprites und Musik sowie die Dateien der
 Pakete. ROMs älterer Versionen, die Quellen noch in RATS-Blöcken hatten, werden beim Öffnen umgestellt.
 
