@@ -18,4 +18,3 @@ Pakete, an denen Funktionen des Editors entwickelt und getestet wurden (nicht im
 | Was | Wofür | Autoren |
 |---|---|---|
 | [Retry System](https://kkevinm.github.io/retry-system/) (Unlicense) | Testfall für Pakete aus mehreren Teilen, UberASM-Bibliotheken mit eigenen Namespaces und Anleitungen im Editor | Kevin (kkevinm); Nachfolger des Retry-Patches von worldpeace; Beiträge von lx5, imamelia, 0x400, Thomas, Lui, AmperSam, MiracleWater, elusive |
-| Sonic Mania – Studiopolis Zone Act 1 (SMWCentral, Grafik, `sonicmaniasszact1.zip`) | Testfall für Lunar-Magic-Grafikpakete mit FG- und BG-Map16, mehreren Paletten und Layer 3; daran wurde der Ursprung im `.map16`-Kopf erkannt | *Autor noch nachzutragen* |
