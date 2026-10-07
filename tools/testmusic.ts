@@ -233,5 +233,19 @@ check(diff === 0, `original ROM area restored, apart from size and checksum (${d
   check(big.data.subarray(RESERVED_TOP).every((b, i) => b === top[i]), 'reserved banks unchanged');
 }
 
+// a big song (two samples, nearly all of the sound unit's memory) takes long to upload when the level
+// fades in, in level 11A beyond the 120 frames a level load may take otherwise: the level still loads
+// with the sound unit emulated (as the editor's music player does)
+{
+  const rb = new Rom(vanilla.data.slice());
+  const pb = emptyMusicProject();
+  addSongs(pb, songsFromZip('Big.zip', testSongZip(1950, 1)));
+  const sb = await saveMusicProject(rb, pb);
+  const emu = new LevelEmulator(rb);
+  emu.snes.apu = new Apu();
+  const lr = emu.load(0x11a, { music: 0x29 });
+  check(sb.ok && lr.ok, `level loads with a big song (${sb.errors.join(' ')}${lr.error ?? ''})`);
+}
+
 console.log(fails ? `${fails} failed` : 'all ok');
 process.exit(fails ? 1 : 0);

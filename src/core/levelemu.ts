@@ -267,7 +267,10 @@ export class LevelEmulator {
       // GM $11 loads the level; hooks only needed there
       while (w[RAM.gameMode] === GM.levelLoad && frames < 30) { s.runFrame(); frames++; }
       s.hook = null;
-      while (w[RAM.gameMode] < 0x13 && frames < 120) { s.runFrame(); frames++; }
+      // with the sound unit emulated, the fade-in also waits for the song's upload (AddmusicK sends a
+      // song with its samples then: well over 100 frames for big ones)
+      const limit = s.apu ? 600 : 120;
+      while (w[RAM.gameMode] < 0x13 && frames < limit) { s.runFrame(); frames++; }
       s.runFrame(); frames++;
       if (w[RAM.gameMode] < 0x13) { ok = false; error = `level load stalled in game mode ${w[RAM.gameMode].toString(16)}`; }
     } catch (e) {
