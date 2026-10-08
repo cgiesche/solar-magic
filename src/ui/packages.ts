@@ -9,8 +9,9 @@ import type { App } from './app.ts';
 import { h, clear, toast, choose, downloadBytes } from './dom.ts';
 import { listPatches, type PatchEntry } from '../core/patchreg.ts';
 import { uninstallVramPatch } from '../core/vrampatch.ts';
-import { listPackages, type Package } from '../core/pkgreg.ts';
-import { removePackage } from '../core/packages.ts';
+import { listPackages, packageSummary, type Package } from '../core/pkgreg.ts';
+import { SECTIONS } from '../core/pkgsections.ts';
+import { removePackage, packageFiles } from '../core/packages.ts';
 import { loadMusicProject, songHex } from '../core/music.ts';
 import { playButton, playSong, currentSongs } from './musicdialog.ts';
 import { lz2Decompress } from '../core/lz2.ts';
@@ -21,10 +22,9 @@ import type { UberProject } from '../core/uberproject.ts';
 import type { BlockProject } from '../core/blocks.ts';
 import { map16Source } from '../core/render.ts';
 import { storedUpload, toUpload, settingsForm, reapplyPackagePatch, patchDone, type PackagesTab } from './patchmanager.ts';
-import { recordFiles, forgetRecordFiles, trackPackage } from './pkgtrack.ts';
-import { romChanged, logView, errorText, type Pane } from './projectpane.ts';
+import { patchesChanged, logView, errorText, type Pane } from './projectpane.ts';
 import { definesButton, editButton } from './defineedit.ts';
-import { openDocs, packageDocs, forgetDocs } from './docview.ts';
+import { openDocs, packageDocs } from './docview.ts';
 import { gfxName } from './gfx/map16tab.ts';
 import { TOOL_KINDS, type ToolKind } from '../core/parts.ts';
 
@@ -52,19 +52,6 @@ function isGfxFile(path: string, data: Uint8Array): boolean {
   try { return GFX_SIZES.has(lz2Decompress(data, 0).data.length); } catch { return false; }
 }
 const base = (p: string) => p.split('/').pop()!;
-
-// what the package brought, in a few words
-function summary(r: Package): string[] {
-  const out: string[] = [];
-  if (r.patches.length) out.push(r.patches.length > 1 ? `${r.patches.length} patches` : 'Patch');
-  if (r.uber.files.length || r.uber.calls.length) out.push('UberASM');
-  if (r.blocks.tiles.length) out.push(r.blocks.tiles.length > 1 ? `${r.blocks.tiles.length} blocks` : 'Block');
-  if (r.pixi.list.length) out.push(r.pixi.list.length > 1 ? `${r.pixi.list.length} sprites` : 'Sprite');
-  if (r.gfx.length) out.push('ExGFX');
-  if (r.music?.length) out.push(r.music.length > 1 ? `${r.music.length} songs` : 'Song');
-  if (r.map16?.length || r.bgMap16?.length) out.push('Map16 tiles');
-  return out;
-}
 
 export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; reload(): void } {
   const el = h('div', { class: 'pkg-pane' });
@@ -98,7 +85,7 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
   function renderList(): void {
     clear(list).append(...items.map((it) => h('button', { class: 'pkg-item' + (it.key === sel ? ' active' : ''), onclick: () => { sel = it.key; fileFilter = ''; renderList(); renderDetail(); } },
       h('div', { class: 'pkg-item-name' }, it.name),
-      h('div', { class: 'hint' }, it.rec ? [it.rec.legacy ? 'Legacy package' : '', ...summary(it.rec)].filter(Boolean).join(' · ') : 'Editor patch'))),
+      h('div', { class: 'hint' }, it.rec ? [it.rec.legacy ? 'Legacy package' : '', ...packageSummary(it.rec)].filter(Boolean).join(' · ') : 'Editor patch'))),
     items.length ? '' : h('p', { class: 'hint' }, 'Nothing installed yet.'),
     orphans());
   }
@@ -143,7 +130,7 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
     for (const p of patches) void patchSection(p, rec, n).then((s) => { if (n === seq) patchBox.appendChild(s); });
     void (async () => {
       // a legacy package's files are kept with its patch
-      const files = rec?.legacy ? new Map((patches[0] && (await storedUpload(app, patches[0]))?.files) || []) : rec ? await recordFiles(app, rec) : null;
+      const files = rec?.legacy ? new Map((patches[0] && (await storedUpload(app, patches[0]))?.files) || []) : rec ? packageFiles(app.rom, rec) : null;
       if (n !== seq || !files?.size) return;
       const docs = detail.querySelector('.pkg-docs')!;
       if (packageDocs(files).length) docs.appendChild(h('button', { onclick: () => openDocs(it.name, files) }, 'Manual …'));
@@ -190,7 +177,7 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
     // UberASM: where it runs, then its files
     if (rec.uber.files.length || rec.uber.calls.length) {
       const proj = host.panes.uberasm.project() as UberProject;
-      const calls = rec.uber.calls.filter(([ctx, num, file]) => proj.list[ctx].get(num)?.some((c) => c.file === file));
+      const calls = SECTIONS.uber.owned(rec.uber, proj);
       const shown = new Set(calls.map((c) => c[2]));
       const rest = rec.uber.files.filter((f) => !shown.has(f)).sort();
       const where = ([ctx, num]: [UberContext, number, string]) => num === ALL ? `all ${CTX_LABEL[ctx].toLowerCase()}s` : `${CTX_LABEL[ctx]} ${hex(num, ctx === 'level' ? 3 : 2)}`;
@@ -210,7 +197,7 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
     // blocks
     if (rec.blocks.tiles.length || rec.blocks.files.length) {
       const proj = host.panes.block.project() as BlockProject;
-      const blocks = proj.list.filter((b) => rec.blocks.tiles.includes(b.tile) && rec.blocks.files.includes(b.file)).sort((a, b) => a.tile - b.tile);
+      const blocks = SECTIONS.blocks.owned(rec.blocks, proj).sort((a, b) => a.tile - b.tile);
       const rest = rec.blocks.files.filter((f) => !blocks.some((b) => b.file === f)).sort();
       out.push(section('block', 'Blocks', 'To place: palette → Map16, or a Direct Map16 object with the tile.',
         blocks.length ? h('table', { class: 'uber-table' }, h('tr', null, h('th', null, 'Tile'), h('th', null, 'Block'), h('th', null, 'acts like'), h('th')),
@@ -225,8 +212,7 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
     // sprites
     if (rec.pixi.list.length || rec.pixi.files.length) {
       const proj = host.panes.sprite.project() as PixiProject;
-      const mine = new Set(rec.pixi.list.map((e) => e.join(':')));
-      const sprites = proj.list.filter((e) => mine.has(`${e.kind}:${e.num}`) && rec.pixi.files.includes(e.file));
+      const sprites = SECTIONS.pixi.owned(rec.pixi, proj);
       const nameOf = (e: PixiProject['list'][number]) => { try { return spriteConfig(proj, e).names[0]?.name ?? ''; } catch { return ''; } };
       const asmOf = (e: PixiProject['list'][number]) => { try { return spriteConfig(proj, e).asm ?? e.file; } catch { return e.file; } };
       const used = new Set(sprites.flatMap((e) => [e.file, asmOf(e)]));
@@ -304,8 +290,7 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
   // into a free ExGFX number, in the graphics workspace; the number goes to the package
   function importGfx(file: File, rec: Package | null): void {
     host.leave(() => {
-      const t = rec ? trackPackage(app, rec.name, rec.fileName, null, rec) : null;
-      app.gfxImport = { file, done: (n) => { if (n !== null) t?.done(); } };
+      app.gfxImport = { file, into: rec };
       app.emit('import-gfx');
     });
   }
@@ -331,9 +316,7 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
     try {
       const blank = map16Source(app.rom, app.render).fg(0x025);
       const w = await app.romEditAsync(`Package “${rec.name}” removed`, () => removePackage(app.rom, rec.id, blank));
-      forgetRecordFiles(rec.id);
-      forgetDocs(rec.name);
-      romChanged(app);
+      patchesChanged(app);
       toast(`“${rec.name}” removed${w.length ? ': ' + w.join(' ') : ''}`);
     } catch (e) { toast(errorText(e), 'error'); }
     for (const k of keys) host.panes[k].reload();
@@ -347,7 +330,7 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
     if (app.dirty) app.saveLevel(true);
     try {
       const w = app.romEdit(`“${p.name}” removed`, () => uninstallVramPatch(app.rom));
-      romChanged(app);
+      patchesChanged(app);
       toast(`Patch “${p.name}” removed${w.length ? ': ' + w.join(' ') : ''}`);
     } catch (e) { toast(errorText(e), 'error'); }
     host.changed();

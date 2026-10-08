@@ -400,9 +400,7 @@ export class PaletteTab implements WsPanel {
           class: `pt-hopt${hd[key] === k ? ' active' : ''}`, title: `${label} ${k}`,
           onclick: () => {
             if (app.level.header[key] === k) return;
-            app.checkpoint();
-            app.level.header = { ...app.level.header, [key]: k };
-            app.changed();
+            app.editLevel(() => { app.level.header = { ...app.level.header, [key]: k }; });
             app.emit('level-header');
           },
         }, tableCanvas(base, k, colors), h('span', null, String(k))))));

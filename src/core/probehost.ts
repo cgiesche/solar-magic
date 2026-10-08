@@ -10,7 +10,7 @@ import { BlockProber, blockKey, collisionKey, spriteKey, runsKey } from './block
 import { gfxSkipMask } from './gfxpages.ts';
 import { RomReads, type CacheEntry } from './romdeps.ts';
 import { LevelEmulator } from './levelemu.ts';
-import { ObjKindProbe, type ObjKinds, type KindLevel } from './objkinds.ts';
+import { ObjKindProbe, kindsKey, type KindLevel } from './objkinds.ts';
 import { levelScanJob, type ScanLevel, type ScanResult } from './levelscan.ts';
 
 // job keys: Map16 tile; sprites as PROBE_SPRITE | num, collision as PROBE_COLL | tile, Mario's
@@ -29,8 +29,8 @@ export interface ProbeDone {
   failed: boolean;
 }
 
-// the object kinds of tileset ts (kinds null: the probe failed)
-export interface KindsDone { type: 'kinds'; gen: number; ts: number; kinds: ObjKinds | null }
+// the object kinds of tileset ts, with their result cache entry (none: the probe failed)
+export interface KindsDone { type: 'kinds'; gen: number; ts: number; failed: boolean; put: [string, CacheEntry][] }
 // a level scan (id: the editor's request; result null: it failed), with its result cache entry
 export interface ScanDone { type: 'scan'; gen: number; id: number; result: ScanResult | null; put: [string, CacheEntry][] }
 export type ProbeReply = ProbeDone | KindsDone | ScanDone;
@@ -77,14 +77,13 @@ export class ProbeHost {
       const emu = this.prober.emu, rom = this.rom;
       // ROM bytes of GFX file data: emulated results don't depend on them (see App.gfxSkipMask)
       emu.skipMask = () => {
-        if (this.mask.gen !== emu.romGen) this.mask = { gen: emu.romGen, mask: gfxSkipMask(rom) };
+        if (this.mask.gen !== rom.gen) this.mask = { gen: rom.gen, mask: gfxSkipMask(rom) };
         return this.mask.mask;
       };
       return;
     }
     this.rom.data = data;
-    this.prober.reset(); // syncs the emulator's ROM
-    for (const e of this.emus.values()) e.syncRom();
+    this.prober.reset(); // probe levels that read changed pages are prepared again
   }
 
   handle(m: ProbeMessage): void {
@@ -116,15 +115,17 @@ export class ProbeHost {
   }
 
   private *kindsTask(ts: number, level: KindLevel, layer2Pointer: number): Generator<void, ProbeReply> {
-    let kinds: ObjKinds | null = null;
+    const p = this.prober!;
+    let failed = true;
     try {
       const probe = new ObjKindProbe(this.emu('kinds'), { ...level, header: { ...level.header, tileset: ts } }, layer2Pointer);
       while (!probe.done) { probe.step(); yield; }
-      kinds = probe.result();
+      p.results.set(kindsKey(ts), probe.result(), p.results.fp.deps(probe.reads()));
+      failed = false;
     } catch (e) {
       console.error(e);
     }
-    return { type: 'kinds', gen: this.gen, ts, kinds };
+    return { type: 'kinds', gen: this.gen, ts, failed, put: p.results.flush().put };
   }
 
   private *scanTask(id: number, key: string, level: ScanLevel): Generator<void, ProbeReply> {

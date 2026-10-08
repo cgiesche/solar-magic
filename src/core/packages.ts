@@ -8,14 +8,14 @@
 // - removePackage: the package and everything it brought, files shared with other packages kept;
 // - wrapLegacyPatches: patches applied before packages were tracked become a legacy package each.
 
-import { zipSync } from 'fflate';
+import { zipSync, unzipSync } from 'fflate';
 import type { Rom } from './rom.ts';
 import type { ApplyResult } from './patchapply.ts';
 import { applyPatch } from './patchapply.ts';
 import type { PartKind } from './parts.ts';
 import { PART_LABEL } from './parts.ts';
 import { uploadFiles, uploadFromFiles, detectKind, uploadSource, effectiveDefines, packUpload, type Upload } from './patchpkg.ts';
-import { suggestMapping, withIncludes, placed, suggestCalls, type PkgSuggestion, type PkgRules } from './pkgmap.ts';
+import { suggestMapping, withIncludes, placed, suggestCalls, packageDocs, type PkgSuggestion, type PkgRules } from './pkgmap.ts';
 import { isLevelImport } from './bgpack.ts';
 import { isSongText, songsFromFiles, loadMusicProject, emptyMusicProject, addSongs, nextFreeSong, folders as musicFolders, saveMusicProject, hasAmk, musicEntry } from './music.ts';
 import { pixiParts, planPixiUpload, applyPixiUpload } from './pixipkg.ts';
@@ -26,7 +26,7 @@ import { installEditorPatch, extGfxAvailable, setLevelMusic } from './patches.ts
 import { installVramPatch } from './vrampatch.ts';
 import { installMap16Ext, map16Ext, setExtTileWords, EXT_FIRST, EXT_TILES } from './map16ext.ts';
 import { ALL, type UberContext } from './uberasm.ts';
-import { snapshot, partsBetween, mergeParts, emptyParts, isEmptyParts, savePackage, listPackages, uninstallPackageWithMusic, type Package } from './pkgreg.ts';
+import { recordPackageChangeAsync, emptyParts, savePackage, listPackages, packageArchive, uninstallPackage, type Package, type Claim } from './pkgreg.ts';
 import { listPatches } from './patchreg.ts';
 
 // one part as the preview lists it
@@ -245,38 +245,29 @@ export async function installPackage(rom: Rom, preview: ReadyPreview | ManualPre
     return installPackage(rom, ready, opt);
   }
   const before = rom.snapshot();
-  const was = snapshot(rom);
   const warnings: string[] = [];
   const prints: string[] = [];
-  const brought: Brought = { uber: new Set(), blocks: new Set() };
   try {
-    for (const step of preview.steps) {
-      const r = await installStep(rom, preview, step, opt, brought);
-      warnings.push(...r.warnings);
-      prints.push(...r.prints);
-      if (!r.ok) { rom.restore(before); return failed(r.errors, r.warnings); }
-    }
-    const now = snapshot(rom);
-    const parts = partsBetween(was, now);
-    // files the package placed that were there already (same content, brought by another package too)
-    // belong to it as well, so removing the other one keeps them
-    for (const f of brought.uber) if (!parts.uber.files.includes(f)) parts.uber.files.push(f);
-    for (const f of brought.blocks) if (!parts.blocks.files.includes(f)) parts.blocks.files.push(f);
-    if (isEmptyParts(parts)) { rom.restore(before); return failed(['Nothing changed – everything in the package is already in the ROM.']); }
-    const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
-    const rec: Package = { id, name: preview.name, fileName: preview.fileName, added: new Date().toISOString(), ...emptyParts() };
-    const pkg = savePackage(rom, mergeParts(rec, parts, now), zipSync(Object.fromEntries(preview.files), { level: 9 }));
+    const archive = zipSync(Object.fromEntries(preview.files), { level: 9 });
+    const { result, pkg } = await recordPackageChangeAsync(rom, { name: preview.name, fileName: preview.fileName, archive }, async (claim) => {
+      for (const step of preview.steps) {
+        const r = await installStep(rom, preview, step, opt, claim);
+        warnings.push(...r.warnings);
+        prints.push(...r.prints);
+        if (!r.ok) return r;
+      }
+      const done: ApplyResult = { ok: true, errors: [], warnings: [], prints: [] };
+      return done;
+    });
+    if (!result.ok) return failed(result.errors, result.warnings);
+    if (!pkg) { rom.restore(before); return failed(['Nothing changed – everything in the package is already in the ROM.']); }
     return { ok: true, errors: [], warnings, prints, pkg };
   } catch (e) {
-    rom.restore(before);
     return failed([e instanceof Error ? e.message : String(e)], warnings);
   }
 }
 
-// the project files the parts placed (tool → paths)
-interface Brought { uber: Set<string>; blocks: Set<string> }
-
-async function installStep(rom: Rom, preview: ReadyPreview, step: Step, opt: InstallOptions, brought: Brought): Promise<ApplyResult> {
+async function installStep(rom: Rom, preview: ReadyPreview, step: Step, opt: InstallOptions, claim: Claim): Promise<ApplyResult> {
   const ok: ApplyResult = { ok: true, errors: [], warnings: [], prints: [] };
   switch (step.kind) {
     case 'patch': {
@@ -293,7 +284,7 @@ async function installStep(rom: Rom, preview: ReadyPreview, step: Step, opt: Ins
       const folder = `${step.ctx}/`;
       const text = uploadSource(step.upload, step.file, {}).files.get(step.file) as string;
       const proj = loadProject(rom) ?? emptyProject();
-      for (const [f, c] of placeFiles(preview, step.upload, step.file, text, folder)) { proj.files.set(f, c); brought.uber.add(f); }
+      for (const [f, c] of placeFiles(preview, step.upload, step.file, text, folder)) { proj.files.set(f, c); claim('uber', f); }
       const file = placeOf(step.file, folder);
       const key = step.ctx === 'level' ? opt.level ?? ALL : step.ctx === 'gamemode' ? 0x14 : 0;
       const calls = proj.list[step.ctx].get(key) ?? [];
@@ -303,7 +294,7 @@ async function installStep(rom: Rom, preview: ReadyPreview, step: Step, opt: Ins
     }
     case 'uber-folder': {
       const proj = loadProject(rom) ?? emptyProject();
-      for (const [f, c] of step.project.files) if (f !== 'list.txt') { proj.files.set(f, c); brought.uber.add(f); }
+      for (const [f, c] of step.project.files) if (f !== 'list.txt') { proj.files.set(f, c); claim('uber', f); }
       for (const ctx of ['level', 'gamemode', 'overworld'] as UberContext[]) {
         for (const [num, cs] of step.project.list[ctx]) {
           const have = proj.list[ctx].get(num) ?? [];
@@ -320,7 +311,7 @@ async function installStep(rom: Rom, preview: ReadyPreview, step: Step, opt: Ins
       while (used.has(tile) && tile < EXT_TILES - 1) tile++;
       const acts = step.acts ?? 0x130;
       const text = uploadSource(step.upload, step.file, {}).files.get(step.file) as string;
-      for (const [f, c] of placeFiles(preview, step.upload, step.file, text, 'blocks/')) { proj.files.set(f, c); brought.blocks.add(f); }
+      for (const [f, c] of placeFiles(preview, step.upload, step.file, text, 'blocks/')) { proj.files.set(f, c); claim('blocks', f); }
       proj.list.push({ tile, file: placeOf(step.file, 'blocks/'), acts });
       const r = saveBlockProject(rom, proj, opt.blank);
       if (r.ok && tile >= EXT_FIRST) setExtTileWords(rom, tile, opt.tileWords(acts), opt.blank);
@@ -344,7 +335,7 @@ async function installStep(rom: Rom, preview: ReadyPreview, step: Step, opt: Ins
       const place = placed(preview.files.keys(), step.assignment.rules);
       if (!place.size) return { ...ok, ok: false, errors: ['Nothing selected – no file of the package is assigned to a folder.'] };
       const proj = loadProject(rom) ?? emptyProject();
-      for (const [from, to] of place) { proj.files.set(to, preview.files.get(from)!); brought.uber.add(to); }
+      for (const [from, to] of place) { proj.files.set(to, preview.files.get(from)!); claim('uber', to); }
       for (const c of step.assignment.calls) {
         const list = proj.list[c.ctx].get(c.num) ?? [];
         if (!list.some((x) => x.file === c.file)) list.push({ file: c.file, bytes: [] });
@@ -371,7 +362,7 @@ async function installStep(rom: Rom, preview: ReadyPreview, step: Step, opt: Ins
 
 // the package and everything it brought (songs too); files another package brought as well stay
 export function removePackage(rom: Rom, id: string, blank: number[]): Promise<string[]> {
-  return uninstallPackageWithMusic(rom, id, blank);
+  return uninstallPackage(rom, id, blank);
 }
 
 // ---------- legacy packages ----------
@@ -384,6 +375,26 @@ export function wrapLegacyPatches(rom: Rom): Package[] {
   for (const p of listPatches(rom)) {
     if ((p.kind && p.kind !== 'patch') || owned.has(p.id)) continue;
     out.push(savePackage(rom, { id: `legacy-${p.id}`, name: p.name, fileName: p.name, added: p.applied, legacy: true, ...emptyParts(), patches: [p.id] }));
+  }
+  return out;
+}
+
+// ---------- files and manuals ----------
+
+// the files of an installed package (kept with its record in the editor data), null if there are none
+export function packageFiles(rom: Rom, pkg: Package): Map<string, Uint8Array> | null {
+  const a = packageArchive(rom, pkg);
+  return a ? new Map(Object.entries(unzipSync(a))) : null;
+}
+
+// the installed packages that brought files of a tool project (uber = UberASM, blocks, pixi = sprites)
+// and have a manual, with their files: the manual comes and goes with its package (and its undo)
+export function packageManuals(rom: Rom, tool: 'uber' | 'blocks' | 'pixi'): { pkg: Package; files: Map<string, Uint8Array> }[] {
+  const out: { pkg: Package; files: Map<string, Uint8Array> }[] = [];
+  for (const pkg of listPackages(rom)) {
+    if (!pkg[tool].files.length) continue;
+    const files = packageFiles(rom, pkg);
+    if (files && packageDocs(files).length) out.push({ pkg, files });
   }
   return out;
 }

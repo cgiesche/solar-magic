@@ -76,10 +76,9 @@ export function openLevelImportDialog(app: App, fileName: string, files: Map<str
           importLevelFile(app.rom, app.level, files, plan, { bg: useBg, fg: useFg, at, fgAt, palettes: usePal, cgram: levelColors(app.render), blank }));
       } catch (e) { r = { ok: false, errors: [errorText(e)], notes: [], bg: null }; }
       if (!r.ok) { clear(log).appendChild(logView({ ok: false, errors: r.errors, warnings: [], prints: [] })); return false; }
-      app.checkpoint();
-      if (r.bg) { app.level.bg = r.bg; app.changed(); }
+      const bg = r.bg;
+      if (bg) app.editLevel(() => { app.level.bg = bg; });
       app.emit('level-header');
-      app.emit('patch');
       toast(`“${name}” imported into level ${lvl}: ${r.notes.join(' · ')}${r.bg ? ' – level not saved yet' : ''}`);
       return true;
     } },

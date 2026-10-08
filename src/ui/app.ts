@@ -17,19 +17,22 @@ import { spriteMemJob, usedSpriteMemory } from '../core/spritemem.ts';
 import { DM16_EXT, hasEditorPatch, installEditorPatch, levelGfx, defaultGfx } from '../core/patches.ts';
 import { gfxSkipMask, gfxFilesHash } from '../core/gfxpages.ts';
 import { STRUCT_EXT, STRUCT_MAX, TRANSPARENT, listStructures, readStructure, writeStructure, type Structure } from '../core/structs.ts';
-import { kvSet, kvGet, kvEntries, kvKeys, kvWrite, saveRom } from './storage.ts';
+import type { Package } from '../core/pkgreg.ts';
+import { kvEntries, kvKeys, kvWrite, saveRom } from './storage.ts';
 import { ResultCache, RomFingerprint, RomReads, type CacheEntry } from '../core/romdeps.ts';
 import { bgFromWram, bgIndex, encodeBg } from '../core/bg.ts';
 import { toast, log as logMsg, modalsOpen, onModalsChange } from './dom.ts';
 import { musicPlayer } from './musicplayer.ts';
 import { ExitGraph, exitTarget } from '../core/exitgraph.ts';
 import { RomHistory, type RomEdit } from '../core/romhistory.ts';
-import { kindsStillValid, storeKinds, loadKinds, resizeObjectSize, type ObjKind, type ObjKinds, type StoredObjKinds } from '../core/objkinds.ts';
+import { LevelHistory } from '../core/levelhistory.ts';
+import { resizeObjectSize, type ObjKind, type ObjKinds } from '../core/objkinds.ts';
 import { JumpArcs, ARC_SPEEDS, type JumpArc } from '../core/jumparcs.ts';
-import type { ScanResult } from '../core/levelscan.ts';
+import { scanKey, type ScanResult } from '../core/levelscan.ts';
 import { layer3Kinds, tideKind, layer3Top, type Layer3Kind } from '../core/layer3.ts';
-import { variantOf, blockKey, collisionKey, spriteKey, runsKey, type BlockProbe, type SpriteProbe, type CollisionProbe, type RunStates } from '../core/blockprobe.ts';
-import { ProbeHost, PROBE_SPRITE, PROBE_COLL, PROBE_RUNS, jobId, jobKey, type ProbeJob, type ProbeMessage, type ProbeDone, type ProbeReply, type KindsDone, type ScanDone } from '../core/probehost.ts';
+import { variantOf, blockKey, spriteKey, type BlockProbe, type SpriteProbe } from '../core/blockprobe.ts';
+import type { ProbeReply } from '../core/probehost.ts';
+import { ProbeClient } from '../core/probeclient.ts';
 import { map16Tile, bgTile } from '../core/ram.ts';
 
 export type EditMode = 'l1' | 'l2' | 'spr' | 'exit' | 'bg';
@@ -41,8 +44,39 @@ export type PaletteItem =
 
 type Listener = () => void;
 
+// an undoable level edit begun with App.beginLevelEdit
+export interface LevelEdit {
+  commit(rerender?: boolean): void;
+  cancel(restore?: boolean): void;
+}
+
+// What App tells its views (on/once/emit). None carries data: listeners read what they need from App.
+export type AppEvent =
+  | 'change' // the level (or the selection, the mode's objects) was edited
+  | 'level' // another level was opened (also after "Save as")
+  | 'level-header' // the level's header, GFX slots or palette changed
+  | 'mode' // the edit mode (layer 1/2, sprites, BG, exits …) changed
+  | 'render' // the level was emulated and drawn again
+  | 'rom-change' // the ROM was written (romWritten, romChanged)
+  | 'probes' // the asked or the prefetched probes are done (block, collision, sprite, run speeds)
+  | 'objkinds' // object kinds asked for are known (or failed)
+  | 'level-scan' // the level scan of the level as edited is known
+  | 'arcs' // jump arcs asked for are known
+  | 'sprites' // sprite images were captured
+  | 'sprite-mem' // the sprite memory check of the level is known
+  | 'animated' // which tiles and colors of the level animate is known
+  | 'anim-frame' // the next frame of the level animation is shown
+  | 'palettes' // the palettes changed (sprite images are captured again)
+  | 'structs' // the structure table changed
+  | 'bgtile' // the BG brush changed (picked from the level)
+  | 'reveal' // the level view scrolls to App.reveal
+  | 'zoom' // the level view's zoom changed
+  | 'busy' // background work (setBusy), a modal or the music player changed
+  | 'open-gfx' // the graphics workspace opens on App.wsGfx
+  | 'open-map16' // the graphics workspace opens on the Map16 tab
+  | 'import-gfx'; // the graphics workspace imports App.gfxImport
+
 const CACHE_PREFIX = 'rc3:'; // IndexedDB keys of the result cache (bump when result formats change or old results may be wrong: rc3 after the stale boot snapshot fix)
-const SPRITE_PROBE_END = 0xc9; // sprites from $C9 on are shooters, generators and run-once sprites
 const BG_SLICE = 12; // ms a slice of background work runs before input and drawing get through
 
 // result of the sprite memory check (see App.checkSpriteMem); gen: App.editGen when it started
@@ -69,13 +103,13 @@ export class App {
   // view-only game state applied before the emulated level load
   switches = { palaces: false, onOff: false };
   dirty = false;
-  undoStack: Level[] = [];
-  redoStack: Level[] = [];
+  private levelHistory = new LevelHistory<Level>(cloneLevel);
+  private editToken = 0; // the latest begun level edit (older handles do nothing)
   // undo for ROM edits of the graphics workspace (palettes, Map16, GFX, slot assignments)
   romHistory: RomHistory;
   wsTile = 0; // Map16 tile for 'open-map16' (opens the graphics workspace there)
   wsTileBg = false; // wsTile is a BG tile
-  gfxImport: { file: File; done: (num: number | null) => void } | null = null; // for 'import-gfx'
+  gfxImport: { file: File; into: Package | null } | null = null; // for 'import-gfx'
   wsGfx: number | null = null; // GFX file for 'open-gfx'
   // order of level and ROM edits, so one undo/redo serves both (n: stack length after the push)
   undoOrder: { kind: 'level' | 'rom'; n: number }[] = [];
@@ -88,14 +122,11 @@ export class App {
   // tile (x,y) lookup from map offset
   offsetToTile1 = new Int32Array(MAP_SIZE);
   offsetToTile2 = new Int32Array(MAP_SIZE);
-  listeners = new Map<string, Set<Listener>>();
+  private listeners = new Map<AppEvent, Set<Listener>>();
   renderError: string | null = null;
-  // block behaviour probes (emulated hits), run in a Web Worker (see probehost.ts); jobs by jobId
-  private probeSend: ((m: ProbeMessage) => void) | null = null;
-  private probeGen = -1; // ROM generation the probes run on
-  private probeAsked = new Map<string, ProbeJob>(); // asked for and not done yet
-  private probePrefetch = new Map<string, ProbeJob>(); // the same, probed after the asked ones
-  private probeFailed = new Set<string>();
+  // block behaviour probes (emulated hits), object kinds and level scan, run in a Web Worker;
+  // 'probes' once the asked or the prefetched probes are done
+  probes: ProbeClient;
   exitScreen = 0;
   // mode 'exit': the chosen entrance marker, else the screen exitScreen (and its exit)
   exitMarker: { kind: Marker['kind']; index: number } | null = null;
@@ -109,9 +140,6 @@ export class App {
   cacheReady: Promise<void>;
   private cacheTimer = 0;
   private closed = false; // project closed: nothing is written to the browser any more
-  // what the settings byte nibbles of standard objects mean, per tileset (emulated, see objkinds.ts)
-  kinds = new Map<number, { k: ObjKinds; gen: number }>();
-  kindJob: { ts: number; msg: ProbeMessage | null } | null = null; // msg: sent to the probe worker
   reveal = { x: 0, y: 0 }; // pixel the level view scrolls to on 'reveal'
   secEntrances: number[] = []; // secondary entrance indices leading into the current level
   // tile/palette animation: frames stored as pixel diffs against the static composite
@@ -127,12 +155,34 @@ export class App {
     onModalsChange(() => { this.resumeBackground(); this.emit('busy'); });
     musicPlayer.onChange(() => { this.resumeBackground(); this.emit('busy'); });
     this.romHistory = new RomHistory(rom);
-    this.results = new ResultCache(new RomFingerprint(this.emu));
+    this.results = new ResultCache(new RomFingerprint(rom));
     this.cacheReady = kvEntries<CacheEntry>(CACHE_PREFIX)
       .then((e) => this.results.load(e.map(([k, v]) => [k.slice(CACHE_PREFIX.length), v])))
       .catch((e) => console.error(e));
     // results of older formats
+    this.probes = new ProbeClient({
+      results: this.results,
+      cacheReady: this.cacheReady,
+      rom: () => ({ gen: this.rom.gen, data: this.rom.data }),
+      tileset: () => this.level.header.tileset,
+      kindLevel: () => {
+        const lv = this.level;
+        return { level: { number: lv.number, header: lv.header }, layer2Pointer: lv.layer2Objects ? this.rom.r24(L2_PTRS + 0x105 * 3) : lv.layer2Pointer };
+      },
+      connect: (reply, failed) => {
+        const w = new Worker(new URL('./probeworker.ts', import.meta.url), { type: 'module' });
+        w.onmessage = (e: MessageEvent<ProbeReply>) => reply(e.data);
+        w.onerror = (e) => { console.error(e); w.terminate(); failed(); };
+        return (m) => w.postMessage(m, m.type === 'rom' ? [m.data.buffer] : []);
+      },
+      later: (key, step) => this.later(key, step),
+      setBusy: (key, label) => this.setBusy(key, label),
+      ready: () => this.emit('probes'),
+      kindsReady: () => this.emit('objkinds'),
+    });
     kvKeys('rc').then((k) => kvWrite([], k.filter((x) => !x.startsWith(CACHE_PREFIX)))).catch(() => {});
+    kvKeys('objkinds-').then((k) => kvWrite([], k)).catch(() => {}); // object kinds before they were in the result cache
+    kvKeys('docs:').then((k) => kvWrite([], k)).catch(() => {}); // copies of package manuals (they come from the packages now)
     this.results.onChange = () => {
       if (!this.cacheTimer && !this.closed) this.cacheTimer = window.setTimeout(() => this.storeResults(), 3000);
     };
@@ -145,12 +195,17 @@ export class App {
     kvWrite(put.map(([k, v]) => [CACHE_PREFIX + k, v]), del.map((k) => CACHE_PREFIX + k)).catch((e) => console.error(e));
   }
 
-  on(ev: string, fn: Listener): void {
+  on(ev: AppEvent, fn: Listener): void {
     let s = this.listeners.get(ev);
     if (!s) { s = new Set(); this.listeners.set(ev, s); }
     s.add(fn);
   }
-  emit(ev: string): void {
+  // fn the next time ev is emitted only
+  once(ev: AppEvent, fn: Listener): void {
+    const go = () => { this.listeners.get(ev)?.delete(go); fn(); };
+    this.on(ev, go);
+  }
+  emit(ev: AppEvent): void {
     this.listeners.get(ev)?.forEach((f) => f());
   }
 
@@ -199,8 +254,7 @@ export class App {
     this.exitScreen = 0;
     this.exitMarker = null;
     if ((this.mode === 'l2' && !this.level.layer2Objects) || (this.mode === 'bg' && !this.canEditBg())) this.mode = 'l1';
-    this.undoStack = [];
-    this.redoStack = [];
+    this.levelHistory.clear();
     this.dirty = false;
     this.spriteMem = this.spriteMemBase = null;
     this.refresh();
@@ -208,7 +262,7 @@ export class App {
     logMsg(`Level ${hex(n, 3)} opened`);
     this.ensureSpriteImages();
     this.scheduleSpriteMem();
-    this.prefetchProbes();
+    this.probes.prefetch();
   }
 
   get vertical(): boolean {
@@ -364,7 +418,7 @@ export class App {
     for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
       const a = g.addr(x, y);
       if (a < 0) continue;
-      const p = this.blockInfo(map16Tile(w, a));
+      const p = this.probes.block(map16Tile(w, a));
       if (!p) pending = true;
       else if (p.enter) return true;
     }
@@ -426,9 +480,7 @@ export class App {
 
   // moves the main entrance or the midway point to the setting nearest to (px, py), undoable
   placeEntrance(kind: 'main' | 'midway', px: number, py: number): void {
-    this.checkpoint();
-    if (!this.moveMarker({ kind, index: 0, x: 0, y: 0 }, px, py)) { this.undoStack.pop(); return; }
-    this.changed();
+    if (!this.editLevel(() => this.moveMarker({ kind, index: 0, x: 0, y: 0 }, px, py))) return;
     this.selectEntrance({ kind, index: 0 });
   }
 
@@ -482,11 +534,11 @@ export class App {
   // variant images by sprite and position
   spriteKey = '';
   // custom sprites of the ROM's PIXI project (see pixi.ts), by sprite id ($2xx / $3xx with the extra bit)
-  private customMemo: { gen: number; data: Uint8Array | null; list: CustomSprite[] } = { gen: -1, data: null, list: [] };
+  private customMemo: { gen: number; list: CustomSprite[] } = { gen: -1, list: [] };
   customSprites(): CustomSprite[] {
     const m = this.customMemo;
-    if (m.gen === this.emu.romGen && m.data === this.rom.data) return m.list;
-    m.gen = this.emu.romGen; m.data = this.rom.data; m.list = [];
+    if (m.gen === this.rom.gen) return m.list;
+    m.gen = this.rom.gen; m.list = [];
     try {
       const p = loadPixiProject(this.rom);
       if (p) m.list = customSpriteList(p);
@@ -559,7 +611,7 @@ export class App {
       if (img === undefined) this.queueBytesImage(id, bytes);
       return img ? this.spriteCanvas(img) : base;
     }
-    const p = this.spriteInfo(id);
+    const p = this.probes.sprite(id);
     if (!p || p.variants.reps.length < 2) return base;
     const img = this.results.get<SpriteImage | null>(this.variantKey(id, p.variants.reps[variantOf(p.variants, x, y)]));
     if (img === undefined) this.queueVariantImages(id);
@@ -601,10 +653,10 @@ export class App {
 
   // ROM bytes of GFX file data: emulated results don't depend on them (graphics only reach VRAM);
   // sprite images name the sprite files' content in their key instead
-  private gfxMaskMemo: { gen: number; data: Uint8Array | null; mask: Uint8Array | null } = { gen: -1, data: null, mask: null };
+  private gfxMaskMemo: { gen: number; mask: Uint8Array | null } = { gen: -1, mask: null };
   gfxSkipMask(): Uint8Array | null {
     const m = this.gfxMaskMemo;
-    if (m.gen !== this.emu.romGen || m.data !== this.rom.data) { m.gen = this.emu.romGen; m.data = this.rom.data; m.mask = gfxSkipMask(this.rom); }
+    if (m.gen !== this.rom.gen) { m.gen = this.rom.gen; m.mask = gfxSkipMask(this.rom); }
     return m.mask;
   }
 
@@ -655,7 +707,7 @@ export class App {
   private spriteMemBase: SpriteMemState | null = null; // the latest check no edit came after (autocorrection compares with it)
   private spriteMemTimer = 0;
   private spriteMemRun = 0;
-  private editGen = 0; // counts checkpoints: edits (not undo/redo/loading)
+  private editGen = 0; // counts committed level edits (not undo/redo/loading)
   private usedMem: { gen: number; list: number[] } = { gen: -1, list: [] };
 
   private scheduleSpriteMem(): void {
@@ -667,7 +719,7 @@ export class App {
     const lv = this.level, mem = lv.spriteHeader & 0x3f, gen = this.editGen;
     // canonical order: results are stored by index, uids differ between sessions
     const sprites = [...lv.sprites].sort((a, b) => a.x - b.x || a.y - b.y || a.num - b.num || a.extra - b.extra);
-    if (this.usedMem.gen !== this.emu.romGen) this.usedMem = { gen: this.emu.romGen, list: usedSpriteMemory(this.rom) };
+    if (this.usedMem.gen !== this.rom.gen) this.usedMem = { gen: this.rom.gen, list: usedSpriteMemory(this.rom) };
     const candidates = this.usedMem.list;
     const key = `sm${lv.number}:${mem}:${JSON.stringify(lv.header)}:${candidates.join(',')}:${sprites.map((q) => `${q.num}.${q.x}.${q.y}.${q.extra}${q.bytes?.length ? '.' + q.bytes.join('-') : ''}`).join(' ')}`;
     if (this.spriteMem?.key === key) return;
@@ -710,7 +762,7 @@ export class App {
     this.later('spritemem', step);
   }
 
-  // An edit (checkpoint since the previous check, same sprite memory) that makes further sprites
+  // An edit (committed since the previous check, same sprite memory) that makes further sprites
   // incomplete sets the suggested value, as part of that edit's undo step. A value chosen by hand
   // stays as long as edits add no new conflicts.
   private autoSpriteMem(prev: SpriteMemState, cur: SpriteMemState): void {
@@ -725,9 +777,7 @@ export class App {
 
   // sets the sprite memory value as an own undo step
   setSpriteMemory(m: number): void {
-    this.checkpoint();
-    this.level.spriteHeader = (this.level.spriteHeader & 0xc0) | (m & 0x3f);
-    this.changed();
+    this.editLevel(() => { this.level.spriteHeader = (this.level.spriteHeader & 0xc0) | (m & 0x3f); });
     this.emit('level-header');
     logMsg(`Sprite memory set to ${hex(m, 2)}`);
   }
@@ -826,12 +876,6 @@ export class App {
     return [...out].sort((a, b) => a - b);
   }
 
-  // What a Map16 tile does when hit from below. Unknown tiles are probed in the background;
-  // 'blockinfo' is emitted once queued probes are done.
-  blockInfo(tile: number): BlockProbe | undefined {
-    return this.probed<BlockProbe>(tile);
-  }
-
   // finished probes only (nothing is queued)
   cachedBlock(tile: number): BlockProbe | undefined {
     return this.results.get(blockKey(this.level.header.tileset, tile));
@@ -840,24 +884,17 @@ export class App {
     return this.results.get(spriteKey(this.level.header.tileset, num));
   }
 
-  // How Mario collides with a Map16 tile (probed on demand, 'blockinfo' when done)
-  collisionInfo(tile: number): CollisionProbe | undefined {
-    return this.probed<CollisionProbe>(PROBE_COLL | tile);
-  }
-
   // ------------- level scan (see levelscan.ts) -------------
   // slowdown and sprite problems found by playing the level through, in the background a while
   // after the last change; stored with a key of the level data it played
   levelScan: { key: string; level: number; result: ScanResult; uids: number[] } | null = null;
   private scanTimer = 0;
   private scanRun = 0;
-  private scanWant: { msg: ProbeMessage; done: (r: ScanResult) => void } | null = null; // sent to the probe worker
 
   private scheduleScan(): void {
     clearTimeout(this.scanTimer);
     this.scanRun++;
-    this.scanWant = null;
-    this.setBusy('scan', null);
+    this.probes.cancelScan();
     this.scanTimer = window.setTimeout(() => this.cacheReady.then(() => this.runScan()), 1500);
   }
 
@@ -865,39 +902,18 @@ export class App {
     if (this.holdRender) { this.scheduleScan(); return; }
     const lv = this.level, vertical = this.vertical, run = ++this.scanRun;
     const ov = this.buildOverrides();
-    const bytes = [ov.layer1, ov.layer2, ov.bgData, ov.sprites, Uint8Array.from(ov.secondaryHeader ?? []), Uint8Array.from([ov.layer2Pointer ?? 0, (ov.layer2Pointer ?? 0) >> 8, (ov.layer2Pointer ?? 0) >> 16, +!!ov.switchPalaces, +!!ov.onOffSwitch])];
-    let hsh = 0x811c9dc5;
-    for (const b of bytes) {
-      if (!b) { hsh = Math.imul(hsh ^ 0xff, 0x01000193); continue; }
-      for (let i = 0; i < b.length; i++) hsh = Math.imul(hsh ^ b[i], 0x01000193);
-      hsh = Math.imul(hsh ^ b.length, 0x01000193);
-    }
-    const key = `ls2:${lv.number}:${(hsh >>> 0).toString(16)}`;
+    const key = scanKey(lv.number, ov);
     const uids = spriteLoadOrder(lv.sprites, vertical).map((q) => q.uid);
     const done = (result: ScanResult) => {
       if (run !== this.scanRun || this.level !== lv) return;
-      this.setBusy('scan', null);
       this.levelScan = { key, level: lv.number, result, uids };
       this.emit('level-scan');
     };
     if (this.levelScan?.key === key) { done(this.levelScan.result); return; }
     const stored = this.results.get<ScanResult>(key);
     if (stored) { done(stored); return; }
-    // played in the probe worker (see scanDone)
-    const msg: ProbeMessage = { type: 'scan', id: run, key, level: { number: lv.number, ov, vertical, width: this.images.width, height: this.images.height } };
-    this.syncProbes(); // (first: after a ROM change it sends the scan wanted then)
-    this.scanWant = { msg, done };
-    this.setBusy('scan', 'Level scan');
-    this.probeSend?.(msg);
-  }
-
-  private scanDone(d: ScanDone): void {
-    const want = this.scanWant;
-    if (d.gen !== this.probeGen || !want || want.msg.type !== 'scan' || want.msg.id !== d.id) return;
-    this.scanWant = null;
-    for (const [k, e] of d.put) this.results.set(k, e.data, e.deps);
-    if (d.result) want.done(d.result);
-    else this.setBusy('scan', null);
+    // played in the probe worker
+    this.probes.requestScan(run, key, { number: lv.number, ov, vertical, width: this.images.width, height: this.images.height }, (r) => { if (r) done(r); });
   }
 
   // What the four layer 3 settings do in a tileset (see layer3.ts): the level as edited is loaded
@@ -939,7 +955,6 @@ export class App {
       emu.skipMask = () => this.gfxSkipMask();
     }
     emu.adoptBoot(this.emu);
-    emu.syncRom();
     return emu;
   }
 
@@ -975,15 +990,14 @@ export class App {
         this.arcLevel = this.arcs.prepare(lv.number, this.buildOverrides(), lv.spriteHeader, this.images.height) ? lv : null;
         if (!this.arcLevel) throw new Error('level did not reach gameplay');
       }
-      // Mario's run speeds in this tileset: probed first, the arcs continue on 'blockinfo'
-      const runs = this.probed<RunStates>(PROBE_RUNS);
+      // Mario's run speeds in this tileset: probed first, the arcs continue on 'probes'
+      const runs = this.probes.runSpeeds();
+      if (runs === null) throw new Error('run speeds not found');
       if (!runs) {
-        if (this.probeFailed.has(jobId({ ts: this.level.header.tileset, k: PROBE_RUNS }))) throw new Error('run speeds not found');
         this.setBusy('arcs', 'Jump arcs');
         if (!this.arcsWaiting) {
-          const go = () => { this.arcsWaiting = false; this.listeners.get('blockinfo')?.delete(go); this.later('arcs', () => this.runArcs()); };
           this.arcsWaiting = true;
-          this.on('blockinfo', go);
+          this.once('probes', () => { this.arcsWaiting = false; this.later('arcs', () => this.runArcs()); });
         }
         return;
       }
@@ -1003,179 +1017,16 @@ export class App {
     this.emit('arcs');
   }
 
-  // the same for a sprite id hit from below (normal sprites only, not shooters/generators)
-  spriteInfo(num: number): SpriteProbe | undefined {
-    if (num < 0x200 ? num >= SPRITE_PROBE_END : (num & 0xff) >= 0xc0) return undefined;
-    return this.probed<SpriteProbe>(PROBE_SPRITE | num);
-  }
-
   // kind of a standard object in the current tileset; null while unknown (then treated as plain)
   objectKind(num: number): ObjKind | null {
     if (num === 0) return null;
     return this.tilesetKinds()?.kinds.get(num) ?? null;
   }
 
+  // (empty while unknown or when they could not be found: objects are treated as plain then)
   tilesetKinds(ts = this.level.header.tileset): ObjKinds | null {
-    const c = this.kinds.get(ts);
-    if (c && c.gen !== this.emu.romGen) {
-      if (kindsStillValid(c.k, this.rom.data)) c.gen = this.emu.romGen;
-      else this.kinds.delete(ts);
-    }
-    if (this.kinds.has(ts)) return c!.k;
-    this.startKindJob(ts);
-    return null;
-  }
-
-  // stored result first (valid while the ROM bytes it depends on are unchanged), otherwise
-  // emulated in the probe worker (see kindsDone)
-  private startKindJob(ts: number): void {
-    if (this.kindJob) return;
-    const job: { ts: number; msg: ProbeMessage | null } = { ts, msg: null };
-    this.kindJob = job;
-    kvGet<StoredObjKinds>(`objkinds-${ts}`).catch(() => undefined).then((st) => {
-      const k = st && loadKinds(st);
-      if (k && kindsStillValid(k, this.rom.data)) { this.setKinds(ts, k); return; }
-      this.setBusy('kinds', 'Object kinds');
-      const lv = this.level;
-      this.syncProbes();
-      job.msg = { type: 'kinds', ts, level: { number: lv.number, header: lv.header }, layer2Pointer: lv.layer2Objects ? this.rom.r24(L2_PTRS + 0x105 * 3) : lv.layer2Pointer };
-      this.probeSend?.(job.msg);
-    });
-  }
-
-  private kindsDone(d: KindsDone): void {
-    if (d.gen !== this.probeGen || this.kindJob?.ts !== d.ts) return;
-    if (d.kinds) kvSet(`objkinds-${d.ts}`, storeKinds(d.kinds)).catch(() => {});
-    this.setKinds(d.ts, d.kinds ?? { kinds: new Map(), deps: new Map() });
-  }
-
-  private setKinds(ts: number, k: ObjKinds): void {
-    this.kinds.set(ts, { k, gen: this.emu.romGen });
-    this.kindJob = null;
-    this.setBusy('kinds', null);
-    this.emit('objkinds');
-  }
-
-  // A probe result in the current tileset (k: job key, see probehost.ts); unknown ones are probed
-  // in the background, 'blockinfo' is emitted once the asked probes are done.
-  private probed<T>(k: number): T | undefined {
-    const job = { ts: this.level.header.tileset, k };
-    const p = this.results.get<T>(jobKey(job));
-    if (p === undefined) this.askProbe(job);
-    return p;
-  }
-
-  private askProbe(job: ProbeJob): void {
-    this.syncProbes();
-    const id = jobId(job);
-    if (this.probeFailed.has(id) || this.probeAsked.has(id)) return;
-    this.probeAsked.set(id, job);
-    this.probePrefetch.delete(id);
-    this.probeBusy();
-    // (stored results first: the job may be known by then)
-    this.cacheReady.then(() => {
-      if (this.results.get(jobKey(job)) === undefined) this.probeSend?.({ type: 'ask', jobs: [job] });
-      else this.probeDone({ type: 'probe', gen: this.probeGen, job, put: [], failed: false });
-    });
-  }
-
-  // Probes everything the palette tabs can show (Map16 tiles 000-1FF, the objects' tiles, all
-  // sprites) in the background, after what is asked for directly; results go to the cache, so
-  // this runs once per tileset and ROM state.
-  prefetchProbes(tiles: Iterable<number> = []): void {
-    this.cacheReady.then(() => {
-      this.syncProbes();
-      const ts = this.level.header.tileset;
-      // (the queue of another tileset is dropped)
-      const jobs = new Map([...this.probePrefetch].filter(([, j]) => j.ts === ts));
-      const add = (k: number) => {
-        const job = { ts, k }, id = jobId(job);
-        if (!this.probeFailed.has(id) && !this.probeAsked.has(id) && this.results.get(jobKey(job)) === undefined) jobs.set(id, job);
-      };
-      for (const t of tiles) add(t);
-      for (let t = 0; t < 0x200; t++) add(t);
-      for (let n = 0; n < SPRITE_PROBE_END; n++) add(PROBE_SPRITE | n);
-      if (!jobs.size && !this.probePrefetch.size) return;
-      this.probePrefetch = jobs;
-      this.probeSend?.({ type: 'prefetch', jobs: [...jobs.values()] });
-      this.probeBusy();
-    });
-  }
-
-  // Starts the probe worker, and sends it the ROM again after a change (it drops its queue then:
-  // the asked jobs are sent again, the prefetch is made anew).
-  private syncProbes(): void {
-    if (!this.probeSend) this.probeSend = this.startProbes();
-    if (this.probeGen === this.emu.romGen) return;
-    this.probeGen = this.emu.romGen;
-    this.probeFailed.clear();
-    this.probePrefetch.clear();
-    this.probeSend({ type: 'rom', gen: this.probeGen, data: this.rom.data.slice() });
-    if (this.probeAsked.size) this.probeSend({ type: 'ask', jobs: [...this.probeAsked.values()] });
-    for (const m of [this.kindJob?.msg, this.scanWant?.msg]) if (m) this.probeSend(m);
-    setTimeout(() => this.prefetchProbes(), 0); // results that read changed ROM data are redone
-  }
-
-  // a Web Worker; without one (it failed to start) the same jobs run here in background slices
-  private startProbes(): (m: ProbeMessage) => void {
-    try {
-      const w = new Worker(new URL('./probeworker.ts', import.meta.url), { type: 'module' });
-      w.onmessage = (e: MessageEvent<ProbeReply>) => this.probeReply(e.data);
-      w.onerror = (e) => {
-        console.error('probe worker failed, probing on the main thread', e);
-        w.terminate();
-        this.probeSend = this.localProbes();
-        this.probeGen = -1;
-        this.syncProbes();
-      };
-      return (m) => w.postMessage(m, m.type === 'rom' ? [m.data.buffer] : []);
-    } catch (e) {
-      console.error(e);
-      return this.localProbes();
-    }
-  }
-
-  private localProbes(): (m: ProbeMessage) => void {
-    const host = new ProbeHost();
-    let scheduled = false;
-    const run = () => {
-      scheduled = false;
-      const t0 = performance.now();
-      while (performance.now() - t0 < BG_SLICE && host.pending) {
-        const d = host.next();
-        if (d) this.probeReply(d);
-      }
-      schedule();
-    };
-    const schedule = () => {
-      if (scheduled || !host.pending) return;
-      scheduled = true;
-      this.later('probe', run);
-    };
-    return (m) => { host.handle(m); schedule(); };
-  }
-
-  // a finished job: its results go to the cache; 'blockinfo' when the asked or the prefetched
-  // jobs are all done
-  private probeReply(d: ProbeReply): void {
-    if (d.type === 'probe') this.probeDone(d);
-    else if (d.type === 'kinds') this.kindsDone(d);
-    else this.scanDone(d);
-  }
-
-  private probeDone(d: ProbeDone): void {
-    if (d.gen !== this.probeGen) return; // ran on an older ROM
-    for (const [k, e] of d.put) this.results.set(k, e.data, e.deps);
-    const id = jobId(d.job);
-    if (d.failed) this.probeFailed.add(id);
-    const asked = this.probeAsked.delete(id), prefetched = this.probePrefetch.delete(id);
-    this.probeBusy();
-    if ((asked && !this.probeAsked.size) || (prefetched && !this.probePrefetch.size)) this.emit('blockinfo');
-  }
-
-  private probeBusy(): void {
-    const n = this.probeAsked.size + this.probePrefetch.size;
-    this.setBusy('probe', n ? `Block behavior (${n})` : null);
+    const k = this.probes.kinds(ts);
+    return k === undefined ? null : k ?? { kinds: new Map() };
   }
 
   objectBounds(o: LevelObject): { x0: number; y0: number; x1: number; y1: number } {
@@ -1235,12 +1086,41 @@ export class App {
   }
 
   // ------------- edit plumbing -------------
-  checkpoint(): void {
+  // An undoable level edit: begun before the level changes, then committed (an undo step; the level is
+  // drawn again unless rerender is false) or cancelled (nothing recorded, redo stays; restore: the
+  // level as before, after a failed change). For edits spanning several events (dragging).
+  beginLevelEdit(): LevelEdit {
+    if (this.levelHistory.begin(this.level)) this.levelEditDone();
+    const token = ++this.editToken;
+    const live = () => token === this.editToken && this.levelHistory.editing;
+    return {
+      commit: (rerender = true) => {
+        if (!live()) return;
+        this.commitLevelEdit();
+        this.changed(rerender);
+      },
+      cancel: (restore = false) => {
+        if (!live()) return;
+        const was = this.levelHistory.cancel();
+        if (restore && was) { this.level = was; this.changed(); }
+      },
+    };
+  }
+  // A level edit at once: f changes the level, returns false when it changed nothing (cancelled);
+  // when it throws, the level is as before and the error passed on. True when committed.
+  editLevel(f: () => boolean | void, rerender = true): boolean {
+    const e = this.beginLevelEdit();
+    let ok: boolean;
+    try { ok = f() !== false; } catch (err) { e.cancel(true); throw err; }
+    if (ok) e.commit(rerender); else e.cancel();
+    return ok;
+  }
+  private commitLevelEdit(): void {
+    if (this.levelHistory.commit()) this.levelEditDone();
+  }
+  private levelEditDone(): void {
     this.editGen++;
-    this.undoStack.push(cloneLevel(this.level));
-    if (this.undoStack.length > 200) this.undoStack.shift();
-    this.redoStack = [];
-    this.pushOrder('level', this.undoStack.length);
+    this.pushOrder('level', this.levelHistory.undoSize);
   }
   private pushOrder(kind: 'level' | 'rom', n: number): void {
     this.undoOrder.push({ kind, n });
@@ -1257,19 +1137,21 @@ export class App {
   }
   // undoes the latest level or ROM edit
   undo(): void {
+    this.commitLevelEdit(); // (an edit still open, e.g. while dragging)
     while (this.undoOrder.length) {
       const o = this.undoOrder.pop()!;
-      const len = o.kind === 'level' ? this.undoStack.length : this.romHistory.undoStack.length;
-      if (o.n > len || len === 0) continue; // cancelled checkpoint or dropped history
+      const len = o.kind === 'level' ? this.levelHistory.undoSize : this.romHistory.undoStack.length;
+      if (o.n > len || len === 0) continue; // dropped history (beyond the limit)
       if (o.kind === 'rom') { if (this.romStep(true)) this.redoOrder.push('rom'); return; }
       this.levelUndo();
       this.redoOrder.push('level');
       return;
     }
-    if (this.undoStack.length) this.levelUndo();
+    if (this.levelHistory.undoSize) this.levelUndo();
     else toast('Nothing to undo');
   }
   redo(): void {
+    this.commitLevelEdit();
     while (this.redoOrder.length) {
       const k = this.redoOrder.pop()!;
       if (k === 'rom') {
@@ -1277,24 +1159,22 @@ export class App {
         if (this.romStep(false)) this.undoOrder.push({ kind: 'rom', n: this.romHistory.undoStack.length });
         return;
       }
-      if (!this.redoStack.length) continue;
+      if (!this.levelHistory.redoSize) continue;
       this.levelRedo();
-      this.undoOrder.push({ kind: 'level', n: this.undoStack.length });
+      this.undoOrder.push({ kind: 'level', n: this.levelHistory.undoSize });
       return;
     }
-    if (this.redoStack.length) this.levelRedo();
+    if (this.levelHistory.redoSize) this.levelRedo();
   }
   private levelUndo(): void {
-    const prev = this.undoStack.pop();
+    const prev = this.levelHistory.undo(this.level);
     if (!prev) return;
-    this.redoStack.push(cloneLevel(this.level));
     this.level = prev;
     this.changed();
   }
   private levelRedo(): void {
-    const next = this.redoStack.pop();
+    const next = this.levelHistory.redo(this.level);
     if (!next) return;
-    this.undoStack.push(cloneLevel(this.level));
     this.level = next;
     this.changed();
   }
@@ -1324,7 +1204,7 @@ export class App {
     const o = bgIndex(tx, ty);
     return this.level.bg ? this.level.bg[o] : bgTile(this.render.wram, o);
   }
-  // sets one BG tile (the map repeats, so all copies change); caller handles checkpoint/refresh
+  // sets one BG tile (the map repeats, so all copies change); caller handles the level edit and refresh
   paintBg(tx: number, ty: number, tile: number): boolean {
     if (this.bgAt(tx, ty) === tile) return false;
     this.level.bg ??= bgFromWram(this.render.wram);
@@ -1355,15 +1235,16 @@ export class App {
 
   insertAt(tx: number, ty: number, p: PaletteItem | null = this.paletteItem): void {
     if (!p) { toast('Choose an object/sprite in the palette first.'); return; }
-    this.checkpoint();
+    this.editLevel(() => this.insert(tx, ty, p));
+  }
+  private insert(tx: number, ty: number, p: PaletteItem): boolean {
     if (p.kind === 'obj' && (this.mode === 'l1' || this.mode === 'l2')) {
-      if (p.num === 0 && p.ext === DM16_EXT && !this.ensureEditorPatch()) { this.undoStack.pop(); return; }
+      if (p.num === 0 && p.ext === DM16_EXT && !this.ensureEditorPatch()) return false;
       const cells = p.block ? Array.from({ length: p.block.w * p.block.h }, (_, i) => ({ dx: i % p.block!.w, dy: Math.floor(i / p.block!.w) })) : [{ dx: 0, dy: 0 }];
       const lastTile = (p.tile ?? 0) + (p.block ? (p.block.h - 1) * 16 + p.block.w - 1 : 0);
       if (p.num === 0 && p.ext === DM16_EXT && lastTile >= EXT_FIRST && !map16Ext(this.rom)) {
         installMap16Ext(this.rom, map16Source(this.rom, this.render).fg(0x025));
-        this.emu.syncRom();
-        this.persist();
+        this.romWritten();
         toast('Map16 expansion installed (tiles 200–FFF).');
       }
       this.selection = new Set();
@@ -1381,11 +1262,8 @@ export class App {
       if (s.extra >= 2) { const b = spriteBytes(spriteSizes(this.rom), s); if (b.length) s.bytes = b; }
       this.level.sprites.push(s);
       this.selection = new Set([s.uid]);
-    } else {
-      this.undoStack.pop();
-      return;
-    }
-    this.changed();
+    } else return false;
+    return true;
   }
 
   // Direct-Map16 objects need the editor patch; installs it, false if that is not possible
@@ -1393,8 +1271,7 @@ export class App {
     if (hasEditorPatch(this.rom)) return true;
     try {
       installEditorPatch(this.rom);
-      this.emu.syncRom();
-      this.persist();
+      this.romWritten();
       toast('Editor patch installed (for Direct Map16 objects).');
       return true;
     } catch (e) { toast(String(e), 'error'); return false; }
@@ -1433,8 +1310,7 @@ export class App {
 
   // after the structure table changed: the emulator sees the new ROM, the level is drawn again
   structuresChanged(): void {
-    this.emu.syncRom();
-    this.persist();
+    this.romWritten();
     this.refresh();
     this.emit('structs');
     this.emit('change');
@@ -1449,14 +1325,14 @@ export class App {
       writeStructure(this.rom, n, { w: r.w, h: r.h, tiles: r.tiles, name });
     } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); return false; }
     if (replace) {
-      this.checkpoint();
-      const all = this.currentObjects();
-      const at = Math.max(...this.selectedObjects().map((o) => all.indexOf(o)));
-      const o: LevelObject = { uid: newUid(), num: 0, ext: STRUCT_EXT, x: r.x, y: r.y, size: 0, struct: n };
-      const res = [...all.slice(0, at + 1).filter((x) => !this.selection.has(x.uid)), o, ...all.slice(at + 1)];
-      if (this.mode === 'l2') this.level.layer2Objects = res; else this.level.objects = res;
-      this.selection = new Set([o.uid]);
-      this.dirty = true;
+      this.editLevel(() => {
+        const all = this.currentObjects();
+        const at = Math.max(...this.selectedObjects().map((o) => all.indexOf(o)));
+        const o: LevelObject = { uid: newUid(), num: 0, ext: STRUCT_EXT, x: r.x, y: r.y, size: 0, struct: n };
+        const res = [...all.slice(0, at + 1).filter((x) => !this.selection.has(x.uid)), o, ...all.slice(at + 1)];
+        if (this.mode === 'l2') this.level.layer2Objects = res; else this.level.objects = res;
+        this.selection = new Set([o.uid]);
+      }, false); // (drawn by structuresChanged)
     }
     this.paletteItem = { kind: 'obj', num: 0, ext: STRUCT_EXT, size: 0, struct: n };
     this.structuresChanged();
@@ -1480,42 +1356,40 @@ export class App {
     if (!s) { toast('The structure does not exist (anymore).', 'error'); return; }
     if (!this.ensureEditorPatch()) return;
     if (s.tiles.some((t) => t >= EXT_FIRST) && !map16Ext(this.rom)) { toast('The structure uses tiles from 200 up, the Map16 expansion is missing.', 'error'); return; }
-    this.checkpoint();
-    const parts: LevelObject[] = [];
-    s.tiles.forEach((t, i) => { if (t !== TRANSPARENT) parts.push({ uid: newUid(), num: 0, ext: DM16_EXT, x: o.x + (i % s.w), y: o.y + Math.floor(i / s.w), size: 0, tile: t }); });
-    const all = this.currentObjects();
-    const at = all.indexOf(o);
-    const res = [...all.slice(0, at), ...parts, ...all.slice(at + 1)];
-    if (this.mode === 'l2') this.level.layer2Objects = res; else this.level.objects = res;
-    this.selection = new Set(parts.map((p) => p.uid));
-    this.changed();
+    this.editLevel(() => {
+      const parts: LevelObject[] = [];
+      s.tiles.forEach((t, i) => { if (t !== TRANSPARENT) parts.push({ uid: newUid(), num: 0, ext: DM16_EXT, x: o.x + (i % s.w), y: o.y + Math.floor(i / s.w), size: 0, tile: t }); });
+      const all = this.currentObjects();
+      const at = all.indexOf(o);
+      const res = [...all.slice(0, at), ...parts, ...all.slice(at + 1)];
+      if (this.mode === 'l2') this.level.layer2Objects = res; else this.level.objects = res;
+      this.selection = new Set(parts.map((p) => p.uid));
+    });
   }
 
   deleteSelection(): void {
     if (!this.selection.size) return;
-    this.checkpoint();
-    if (this.mode === 'spr') this.level.sprites = this.level.sprites.filter((s) => !this.selection.has(s.uid));
-    else if (this.mode === 'l2' && this.level.layer2Objects) this.level.layer2Objects = this.level.layer2Objects.filter((o) => !this.selection.has(o.uid));
-    else if (this.mode === 'l1') this.level.objects = this.level.objects.filter((o) => !this.selection.has(o.uid));
-    this.selection.clear();
-    this.changed();
+    this.editLevel(() => {
+      if (this.mode === 'spr') this.level.sprites = this.level.sprites.filter((s) => !this.selection.has(s.uid));
+      else if (this.mode === 'l2' && this.level.layer2Objects) this.level.layer2Objects = this.level.layer2Objects.filter((o) => !this.selection.has(o.uid));
+      else if (this.mode === 'l1') this.level.objects = this.level.objects.filter((o) => !this.selection.has(o.uid));
+      this.selection.clear();
+    });
   }
 
-  moveSelection(dx: number, dy: number, withCheckpoint = true): void {
+  moveSelection(dx: number, dy: number): void {
     if (!this.selection.size) return;
-    if (withCheckpoint) this.checkpoint();
-    const items = this.mode === 'spr' ? this.selectedSprites() : this.selectedObjects();
-    for (const o of items) { o.x += dx; o.y += dy; this.clampObject(o); }
-    this.changed();
+    this.editLevel(() => {
+      const items = this.mode === 'spr' ? this.selectedSprites() : this.selectedObjects();
+      for (const o of items) { o.x += dx; o.y += dy; this.clampObject(o); }
+    });
   }
 
   // resize: width/height nibbles of settings byte
   resizeSelection(dw: number, dh: number): void {
     const objs = this.selectedObjects().filter((o) => o.num !== 0 || o.ext === DM16_EXT);
     if (!objs.length) return;
-    this.checkpoint();
-    for (const o of objs) o.size = resizeObjectSize(this.objectKind(o.num), o.size, dw, dh);
-    this.changed();
+    this.editLevel(() => { for (const o of objs) o.size = resizeObjectSize(this.objectKind(o.num), o.size, dw, dh); });
   }
 
   // copies the selection and pastes it one tile down-right (Ctrl+D)
@@ -1527,13 +1401,13 @@ export class App {
 
   reorderSelection(dir: 'front' | 'back'): void {
     if (this.mode === 'spr' || !this.selection.size) return;
-    this.checkpoint();
-    const objs = this.currentObjects();
-    const sel = objs.filter((o) => this.selection.has(o.uid));
-    const rest = objs.filter((o) => !this.selection.has(o.uid));
-    const res = dir === 'front' ? [...rest, ...sel] : [...sel, ...rest];
-    if (this.mode === 'l2') this.level.layer2Objects = res; else this.level.objects = res;
-    this.changed();
+    this.editLevel(() => {
+      const objs = this.currentObjects();
+      const sel = objs.filter((o) => this.selection.has(o.uid));
+      const rest = objs.filter((o) => !this.selection.has(o.uid));
+      const res = dir === 'front' ? [...rest, ...sel] : [...sel, ...rest];
+      if (this.mode === 'l2') this.level.layer2Objects = res; else this.level.objects = res;
+    });
   }
 
   copy(): void {
@@ -1543,25 +1417,24 @@ export class App {
   paste(tx: number, ty: number): void {
     const items = this.mode === 'spr' ? this.clipboard.sprites : this.clipboard.objects;
     if (!items?.length) return;
-    this.checkpoint();
-    const minX = Math.min(...items.map((o) => o.x)), minY = Math.min(...items.map((o) => o.y));
-    const sel = new Set<number>();
-    for (const it of items) {
-      const c = { ...structuredClone(it), uid: newUid(), x: it.x - minX + tx, y: it.y - minY + ty };
-      this.clampObject(c);
-      sel.add(c.uid);
-      if (this.mode === 'spr') this.level.sprites.push(c as LevelSprite);
-      else this.currentObjects().push(c as LevelObject);
-    }
-    this.selection = sel;
-    this.changed();
+    this.editLevel(() => {
+      const minX = Math.min(...items.map((o) => o.x)), minY = Math.min(...items.map((o) => o.y));
+      const sel = new Set<number>();
+      for (const it of items) {
+        const c = { ...structuredClone(it), uid: newUid(), x: it.x - minX + tx, y: it.y - minY + ty };
+        this.clampObject(c);
+        sel.add(c.uid);
+        if (this.mode === 'spr') this.level.sprites.push(c as LevelSprite);
+        else this.currentObjects().push(c as LevelObject);
+      }
+      this.selection = sel;
+    });
   }
 
   // ------------- saving -------------
   saveLevel(silent = false): void {
     try {
       const log = saveLevel(this.rom, this.level);
-      this.emu.syncRom();
       this.dirty = false;
       const n = this.level.number;
       // re-read to refresh addresses/sizes, keep selection by position
@@ -1570,7 +1443,7 @@ export class App {
       this.level = loadLevel(this.rom, n);
       this.mode = mode;
       this.selection = sel;
-      this.persist();
+      this.romWritten();
       if (!silent) toast(`Level ${hex(n, 3)} saved. ${log.join(' · ')}`);
       else logMsg(`Level ${hex(n, 3)} saved automatically. ${log.join(' · ')}`);
       this.refresh();
@@ -1609,11 +1482,20 @@ export class App {
     }
   }
 
-  // the ROM changed: editors redraw at once ('rom-change'), the level render follows debounced
+  // Whoever writes the ROM tells it with one of these two (emulators and caches follow rom.gen by
+  // themselves; this is for the editor's views and the copy in the browser):
+  // romWritten – written outside the ROM history (saving a level, the overworld, messages …): editors
+  // show it ('rom-change'), the copy in the browser is stored at once;
+  romWritten(): void {
+    this.romNotice();
+    clearTimeout(this.persistTimer);
+    this.persistTimer = 0;
+    this.persist();
+  }
+  // romChanged – an undoable ROM edit (romEdit, undo/redo): editors show it at once, the level render and
+  // storing follow debounced (edits come in quick succession, e.g. graphics strokes)
   romChanged(): void {
-    this.graph = null;
-    this.emu.syncRom();
-    this.emit('rom-change');
+    this.romNotice();
     clearTimeout(this.romTimer);
     const run = () => {
       const wait = this.holdRender ? 150 : this.quietUntil - performance.now();
@@ -1625,6 +1507,10 @@ export class App {
     this.romTimer = window.setTimeout(run, 150);
     clearTimeout(this.persistTimer);
     this.persistTimer = window.setTimeout(() => { this.persistTimer = 0; this.persist(); }, 1000);
+  }
+  private romNotice(): void {
+    this.graph = null;
+    this.emit('rom-change');
   }
 
   // a stroke ended: the re-emulation waits for a pause in drawing

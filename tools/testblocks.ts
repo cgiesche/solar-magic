@@ -51,7 +51,6 @@ check(blockOf(rom, WALL) !== null && blockOf(rom, 0x2a2) === null, 'block table 
   const raw = new TextDecoder('latin1').decode(rom.data);
   check(listPatches(rom).some((p) => p.kind === 'block') && raw.includes('"kind":"blocks"') && !raw.includes('"kind":"block"'), 'registered with part kind "block", stored as "blocks"');
 }
-emu.syncRom();
 
 // wall of the tile in front of Mario in level 105 plus a ledge; run right, jump periodically
 const withWall = (tile: number, floor = REF): LevelOverride => {
@@ -82,7 +81,6 @@ check(refRun.x < 150 && passing.x > refRun.x + 64, `a block that turns into air 
 const back = loadBlockProject(rom);
 check(!!back && back.list.length === 2 && back.files.size === 3, 'block project stored in the ROM');
 removeBlocks(rom);
-emu.syncRom();
 check(blockOf(rom, WALL) === null && play(PASS, 120, REF, false).x === refRun.x, 'removed: blocks behave like their acts-like again');
 
 // SMWX v1 → v2 upgrade keeps tables

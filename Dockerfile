@@ -4,6 +4,9 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
+# commit the image is built from (.git is not in the context), shown in the log bar
+ARG COMMIT=
+ENV VITE_COMMIT=$COMMIT
 RUN npm run build
 
 # Serve: static files only

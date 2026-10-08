@@ -156,6 +156,7 @@ input.invalid, input.invalid:focus { outline: 1px solid var(--danger); border-co
 .log-latest .log-msg { overflow: hidden; text-overflow: ellipsis; }
 .log-actions { display: none; gap: 4px; flex: none; }
 .logbar.open .log-actions { display: flex; }
+.log-build { flex: none; color: var(--muted); font-family: ui-monospace, monospace; font-size: 11px; cursor: text; user-select: all; }
 .log-actions button { padding: 1px 8px; font-size: 12px; }
 .log-list { display: none; height: 150px; overflow-y: auto; padding: 2px 0 4px; border-top: 1px solid var(--border); font-family: ui-monospace, monospace; }
 .logbar.open .log-list { display: block; }

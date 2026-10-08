@@ -86,7 +86,7 @@ export class Map16Tab implements WsPanel {
     const redraw = () => { if (this.visible) this.redraw(); };
     app.on('rom-change', redraw);
     app.on('render', redraw);
-    app.on('blockinfo', () => { if (this.visible) this.buildBuilder(); });
+    app.on('probes', () => { if (this.visible) this.buildBuilder(); });
     app.on('animated', redraw);
   }
 
@@ -279,7 +279,7 @@ export class Map16Tab implements WsPanel {
     c.addEventListener('mousemove', (e) => {
       const p = cell(e);
       const t = this.base + p.y * 16 + p.x;
-      const info = this.bg ? undefined : this.app.blockInfo(actsLike(this.app.rom, t));
+      const info = this.bg ? undefined : this.app.probes.block(actsLike(this.app.rom, t));
       c.title = `${this.tileName(t)}${this.bg ? '' : ` – ${info ? probeText(info) : 'determining behavior …'}`}`;
     });
   }
@@ -410,7 +410,7 @@ export class Map16Tab implements WsPanel {
   private actsUi(t: number): HTMLElement {
     const app = this.app;
     const a = actsLike(app.rom, t);
-    const info = app.blockInfo(a);
+    const info = app.probes.block(a);
     const thumb = h('canvas', { width: 16, height: 16, class: 'mt-acts-thumb' });
     thumb.getContext('2d')!.drawImage(renderMap16Sheet(app, false, a & ~0x1ff), (a & 15) * 16, ((a >> 4) & 31) * 16, 16, 16, 0, 0, 16, 16);
     const file = blockFileOf(app.rom, t);
@@ -442,7 +442,7 @@ export class Map16Tab implements WsPanel {
     };
     c.addEventListener('mousemove', (e) => {
       const t = at(e);
-      const p = app.blockInfo(t);
+      const p = app.probes.block(t);
       info.textContent = `Tile ${hex(t, 3)}: ${p ? probeText(p) : 'determining …'}`;
     });
     const dlg = modal(`Behavior for ${tiles.length > 1 ? `${tiles.length} Tiles` : this.tileName(this.sel)}`,

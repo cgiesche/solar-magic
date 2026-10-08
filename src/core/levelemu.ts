@@ -16,6 +16,11 @@ export const OV_BG = 0xa000; // edited BG tilemap (editor format, see bg.ts)
 const OV_BG_HOOK = 0xb000; // LDA #$FF : STA $6A : RTL (BG data bank = overlay)
 const OV_STUB = 0xc000; // JSL stub used to call game routines
 const INIT_TABLES = 0x07f7d2; // game routine that sets up a new sprite's tables (tweakers), X = slot
+// where the level load calls the upload of the level music bank (JSR $8134, 3 bytes; AddmusicK's
+// patch makes it NOPs): it uploads when the level is entered from the overworld ($141A = 0). Loads
+// here go by screen exit ($141A = 1), so the sound unit would keep the title/overworld bank, whose
+// songs have the same numbers
+const LEVEL_MUSIC_CALL = 0x009702;
 export const OV_BASE_SNES = 0xfe8000;
 
 export function overlaySnes(off: number): number {
@@ -62,24 +67,13 @@ export interface LevelRender {
   frames: number;
 }
 
-// any ROM byte read while booting differs between the booted ROM and now
-function bootChanged(reads: RomReads, then: Uint8Array, now: Uint8Array): boolean {
-  for (const b of reads.bytes) if (then[b] !== now[b]) return true;
-  const size = 1 << PAGE_SHIFT;
-  for (let p = 0; p < reads.pages.length; p++) {
-    if (!reads.pages[p]) continue;
-    for (let i = p * size, end = i + size; i < end; i++) if (then[i] !== now[i]) return true;
-  }
-  return false;
-}
-
 export { MAP_BASE, MAP_SIZE };
 
 export class LevelEmulator {
   rom: Rom;
   snes: Snes;
   baseState: SnesState | null = null;
-  romGen = 0; // counts syncRom() calls: the ROM may have changed
+  private romGen: number; // the ROM's generation the emulator is synced to (see sync)
   // ROM bytes whose reads by the emulated CPU don't count for tracked() results (GFX file data)
   skipMask: (() => Uint8Array | null) | null = null;
   overlay = new Uint8Array(0x10000);
@@ -88,6 +82,7 @@ export class LevelEmulator {
     this.rom = rom;
     this.snes = new Snes(rom.data);
     this.snes.overlay = this.overlay;
+    this.romGen = rom.gen;
     updateBytePages(rom);
   }
 
@@ -99,12 +94,13 @@ export class LevelEmulator {
     this.baseState = other.baseState;
     this.bootReads = other.bootReads;
     this.bootRom = other.bootRom;
+    this.romGen = -1; // it may be from an older ROM: checked with the next entry
   }
 
   // Power on and boot to the title screen once; all level loads start from this snapshot.
   boot(): void {
+    this.sync();
     const s = this.snes;
-    s.rom = this.rom.data;
     s.powerOn();
     this.bootReads = this.tracked(() => {
       let f = 0;
@@ -135,14 +131,16 @@ export class LevelEmulator {
     }
   }
 
-  // ROM data array may be replaced (expansion); keep emulator in sync.
-  // A change of what the boot read (a patch's power-on code, e.g. Retry System's RAM setup) makes
-  // the boot snapshot stale: boot again with the next load.
-  syncRom(): void {
+  // Every entry (boot, load, startGame, call, animationFrames) first catches up with a changed ROM
+  // (rom.gen): the data array may be replaced (expansion), and a change of what the boot read (a
+  // patch's power-on code, e.g. Retry System's RAM setup) makes the boot snapshot stale: boot again
+  // with the next load.
+  private sync(): void {
     this.snes.rom = this.rom.data;
-    this.romGen++;
+    if (this.romGen === this.rom.gen) return;
+    this.romGen = this.rom.gen;
     updateBytePages(this.rom);
-    if (this.baseState && this.bootReads && this.bootRom && bootChanged(this.bootReads, this.bootRom, this.rom.data)) {
+    if (this.baseState && this.bootReads && this.bootRom && this.bootReads.differ(this.bootRom, this.rom.data)) {
       this.baseState = null;
       this.bootReads = null;
       this.bootRom = null;
@@ -150,12 +148,11 @@ export class LevelEmulator {
   }
 
   load(level: number, ov: LevelOverride = {}): LevelRender {
+    this.sync();
     if (!this.baseState) this.boot();
     const s = this.snes;
-    s.rom = this.rom.data;
     if (!ov.continueState) s.loadState(this.baseState!);
     const w = s.wram;
-    w[RAM.sublevelCount] = 1;
     w[RAM.marioX + 1] = 0;
     w[RAM.marioY + 1] = 0;
     w[RAM.screenMode] = 0;
@@ -166,6 +163,13 @@ export class LevelEmulator {
     if (!ov.continueState || (w[RAM.submap] !== 0 ? 1 : 0) !== ((level >> 8) & 1)) w[RAM.submap] = (level >> 8) & 1;
     w[RAM.useSecondaryExit] = 0;
     w[RAM.introLevel] = 0;
+    // coming from the title screen or overworld, the game's call of the music bank upload sees $141A
+    // as on entering a level from there (the routine checks the other conditions itself)
+    const musicCall = s.apu && w[RAM.sublevelCount] === 0 ? snesToPc(LEVEL_MUSIC_CALL) : -1;
+    // and no level song playing, as the overworld load leaves it ($00A0B9; the title screen's demo
+    // level set one, so the level's song wouldn't start if it was the same)
+    if (musicCall >= 0) w[RAM.levelMusic] = 0;
+    w[RAM.sublevelCount] = 1;
     // translevel $24 (Chocolate Island 2) makes the exit-based load pick a room by time/coins instead
     const tl = ov.translevel ?? mainTranslevel(level) ?? 0;
     w[RAM.translevel] = tl === 0x24 ? 0 : tl;
@@ -247,7 +251,9 @@ export class LevelEmulator {
         if (a >= MAP_BASE && a < MAP_BASE + MAP_SIZE) { touch(current, a - MAP_BASE); if (trace) put(a - MAP_BASE, v, false); }
         else if (a >= MAP_HI + MAP_BASE && a < MAP_HI + MAP_BASE + MAP_SIZE) { touch(current, a - MAP_HI - MAP_BASE); if (trace) put(a - MAP_HI - MAP_BASE, v, true); }
       },
-      onRomRead: trace ? (ro: number) => {
+      onRomRead: trace || musicCall >= 0 ? (ro: number) => {
+        if (cpu.inFetch && (ro === musicCall || ro === musicCall + 3)) w[RAM.sublevelCount] = ro === musicCall ? 0 : 1;
+        if (!trace) return;
         if (skip === null || skip[ro] !== 1) trace.rom.add(ro);
         if (cpu.inFetch) { trace.code.add(ro); return; }
         if (current < 0) return;
@@ -264,8 +270,10 @@ export class LevelEmulator {
     let ok = true;
     let error: string | undefined;
     try {
-      // GM $11 loads the level; hooks only needed there
-      while (w[RAM.gameMode] === GM.levelLoad && frames < 30) { s.runFrame(); frames++; }
+      // GM $11 loads the level; hooks only needed there. With the sound unit emulated, the upload of
+      // the level music bank takes some 40 frames of it
+      const loadLimit = musicCall >= 0 ? 120 : 30;
+      while (w[RAM.gameMode] === GM.levelLoad && frames < loadLimit) { s.runFrame(); frames++; }
       s.hook = null;
       // with the sound unit emulated, the fade-in also waits for the song's upload (AddmusicK sends a
       // song with its samples then: well over 100 frames for big ones)
@@ -303,9 +311,9 @@ export class LevelEmulator {
   // the tile again loads the level. Tiles of submaps get the submap whose camera view (from loading
   // each submap) is centered nearest to them. Not found on the overworld: Mario stays at the start.
   startGame(tl: number): void {
+    this.sync();
     if (!this.baseState) this.boot();
     const s = this.snes, w = s.wram;
-    s.rom = this.rom.data;
     s.loadState(this.baseState!);
     s.joy1 = 0;
     for (let n = 0; w[RAM.gameMode] !== GM.overworld; n++) {
@@ -345,6 +353,7 @@ export class LevelEmulator {
 
   // runs a game routine (JSL addr, RTL) with X = x in 8-bit mode, then restores the CPU registers
   call(addr: number, x: number): void {
+    this.sync();
     const cpu = this.snes.cpu;
     const saved = { a: cpu.a, x: cpu.x, y: cpu.y, s: cpu.s, d: cpu.d, dbr: cpu.dbr, pbr: cpu.pbr, pc: cpu.pc, p: cpu.p, e: cpu.e, waiting: cpu.waiting };
     const stub = overlaySnes(OV_STUB);
@@ -380,6 +389,7 @@ export class LevelEmulator {
   // Continues the live state left by load() into gameplay (GM $14) and snapshots VRAM/CGRAM
   // every `step` frames (tile and palette animation). Must directly follow load().
   animationFrames(count = 8, step = 8): { vram: Uint8Array; cgram: Uint8Array }[] {
+    this.sync();
     const s = this.snes, out: { vram: Uint8Array; cgram: Uint8Array }[] = [];
     try {
       let guard = 0;

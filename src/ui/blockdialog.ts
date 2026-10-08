@@ -74,7 +74,6 @@ export function blockPane(app: App, changed: () => void): BlockPane {
     zipName: 'blocks.zip',
     content,
     applied: (p) => `Custom blocks applied (${p.list.length} tile(s))`,
-    docs: 'blocks',
   }, changed);
   return { ...pane, tile: () => tile, setTile: (t) => { tile = t; pane.render(); } };
 }

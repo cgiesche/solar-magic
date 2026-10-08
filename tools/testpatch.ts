@@ -38,7 +38,6 @@ const modified = raw.slice(); for (let i = 0; i < 0x200; i++) modified[i] ^= 0xf
 const addr = rom.allocWrite(modified);
 setGfxEntry(rom, 0x80, addr, true);
 setLevelGfx(rom, 0x105, [0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x80]);
-e1.syncRom();
 const r2 = e1.load(0x105);
 let eq = 0; for (let i = 0; i < 0x1000; i++) if (r2.vram[i] === modified[i]) eq++;
 let other = 0; for (let i = 0x1000; i < 0x8000; i++) if (r2.vram[i] !== base.vram[i]) other++;
@@ -52,6 +51,5 @@ for (let i = 0; i < 20; i++) lv2.sprites.push({ uid: newUid(), num: 0x0f, x: 40 
 console.log(saveLevel(rom, lv2).join(' | '));
 const lv3 = loadLevel(rom, 0x105);
 console.log('reloaded sprites', lv3.sprites.length, 'addr', lv3.sprAddr.toString(16));
-e1.syncRom();
 const r3 = e1.load(0x105);
 console.log('load after save ok', r3.ok, r3.error ?? '');

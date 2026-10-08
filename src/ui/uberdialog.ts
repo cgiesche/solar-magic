@@ -106,7 +106,6 @@ export function uberPane(app: App, changed: () => void): UberPane {
       other(proj, change),
     ],
     applied: () => 'UberASM applied',
-    docs: 'uber',
   }, changed);
   return { ...pane, context: () => ctx };
 }

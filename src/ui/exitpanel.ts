@@ -35,18 +35,14 @@ function exitPanel(app: App, body: HTMLElement): boolean {
       hint(enter ? 'This screen has pipes or doors but no exit yet – they lead nowhere.' : 'No exit on this screen.'),
       h('button', {
         class: 'primary',
-        onclick: () => {
-          app.checkpoint();
-          lv.exits.push({ uid: newUid(), screen: scr, dest: n & 0x1ff, secondary: false, flags: 0 });
-          app.changed(false);
-        },
+        onclick: () => { app.editLevel(() => { lv.exits.push({ uid: newUid(), screen: scr, dest: n & 0x1ff, secondary: false, flags: 0 }); }, false); },
       }, 'Create exit'),
       hint('An exit applies to all pipes and doors of this screen. Click another screen in the level view to select it, likewise entrances (M, Z, S).'));
     return enter === null;
   }
   const e = ex;
   const t = exitTarget(app.rom, n, e);
-  const upd = (f: () => void) => { app.checkpoint(); f(); app.changed(false); };
+  const upd = (f: () => void) => app.editLevel(f, false);
   // a secondary exit into `level`: its first entrance, or a new one at its main entrance
   const secondaryTo = (level: number) => {
     const idx = g.entrancesOf(level)[0] ?? newEntranceIn(app, level);
@@ -95,7 +91,7 @@ function exitPanel(app: App, body: HTMLElement): boolean {
       hint(arrive),
       h('div', { class: 'row' },
         h('button', { title: 'Open the target level and select the entrance', onclick: () => app.gotoExitTarget(e) }, '→ Open target'),
-        h('button', { class: 'danger', onclick: () => { app.checkpoint(); lv.exits = lv.exits.filter((x) => x !== e); app.changed(false); } }, 'Delete exit'))),
+        h('button', { class: 'danger', onclick: () => { app.editLevel(() => { lv.exits = lv.exits.filter((x) => x !== e); }, false); } }, 'Delete exit'))),
     hint(`Only levels ${n & 0x100 ? '100–1FF' : '000–0FF'} can be chosen: the high bit of the target number comes from the level the exit is in.`),
     hint(enter === false ? 'No pipes or doors were found on this screen.' : 'The exit applies to all pipes and doors of this screen.'),
   );
@@ -162,7 +158,7 @@ function secondaryPanel(app: App, body: HTMLElement, idx: number): void {
 // ---- main entrance / midway point ----
 function mainPanel(app: App, body: HTMLElement, kind: 'main' | 'midway'): void {
   const lv = app.level, s = lv.secondary, n = lv.number;
-  const upd = (f: () => void) => { app.checkpoint(); f(); app.changed(); };
+  const upd = (f: () => void) => app.editLevel(f);
   if (kind === 'midway') {
     body.append(
       h('div', { class: 'prop-title' }, 'Midway point'),

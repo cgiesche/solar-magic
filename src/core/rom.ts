@@ -34,7 +34,13 @@ export interface RatsBlock {
 }
 
 export class Rom {
-  data: Uint8Array;
+  // counts changes of the ROM image: every write through these methods and every new `data` (the editor
+  // data doesn't count). Emulators and caches compare it to see the ROM changed, so the image is only
+  // written through Rom – never into `data` directly.
+  gen = 0;
+  private image: Uint8Array;
+  get data(): Uint8Array { return this.image; }
+  set data(d: Uint8Array) { this.image = d; this.gen++; }
   smcHeader: Uint8Array | null;
   reads: RomReads | null = null; // records reads through r8/r16/r24/bytes (see romdeps.ts)
   extra = new Map<string, Uint8Array>(); // editor data by id, not part of the ROM image (blobs are never changed in place)
@@ -42,7 +48,7 @@ export class Rom {
   constructor(file: Uint8Array) {
     const hdr = file.length % 0x8000;
     this.smcHeader = hdr === 512 ? file.slice(0, 512) : null;
-    this.data = file.slice(hdr);
+    this.image = file.slice(hdr);
   }
 
   // a ROM file or a project file (ROM + editor data)
@@ -102,14 +108,17 @@ export class Rom {
   }
   w8(snes: number, v: number): void {
     this.data[snesToPc(snes)] = v & 0xff;
+    this.gen++;
   }
   w16(snes: number, v: number): void {
     const o = snesToPc(snes);
+    this.gen++;
     this.data[o] = v & 0xff;
     this.data[o + 1] = (v >> 8) & 0xff;
   }
   w24(snes: number, v: number): void {
     const o = snesToPc(snes);
+    this.gen++;
     this.data[o] = v & 0xff;
     this.data[o + 1] = (v >> 8) & 0xff;
     this.data[o + 2] = (v >> 16) & 0xff;
@@ -120,7 +129,16 @@ export class Rom {
     return this.data.slice(o, o + len);
   }
   writeBytes(snes: number, b: Uint8Array): void {
-    this.data.set(b, snesToPc(snes));
+    this.writeAt(snesToPc(snes), b);
+  }
+  // by file offset (PC)
+  writeAt(pc: number, b: Uint8Array): void {
+    this.data.set(b, pc);
+    this.gen++;
+  }
+  fillAt(pc: number, len: number, v = 0): void {
+    this.data.fill(v, pc, pc + len);
+    this.gen++;
   }
 
   title(): string {
@@ -142,6 +160,7 @@ export class Rom {
 
   fixChecksum(): void {
     const d = this.data;
+    this.gen++;
     // SNES checksum: sum of all bytes; non power-of-two sizes mirror the upper part
     let pow = 1;
     while (pow * 2 <= d.length) pow *= 2;
@@ -249,9 +268,8 @@ export class Rom {
       off = this.findFree(payload.length);
     }
     const s = payload.length - 1;
-    const d = this.data;
-    d.set([0x53, 0x54, 0x41, 0x52, s & 0xff, s >> 8, ~s & 0xff, (~s >> 8) & 0xff], off);
-    d.set(payload, off + 8);
+    this.writeAt(off, Uint8Array.from([0x53, 0x54, 0x41, 0x52, s & 0xff, s >> 8, ~s & 0xff, (~s >> 8) & 0xff]));
+    this.writeAt(off + 8, payload);
     return pcToSnes(off + 8);
   }
 
@@ -262,7 +280,7 @@ export class Rom {
     if (off < 0x80000) return false;
     const size = this.isRatsAt(off);
     if (size < 0) return false;
-    this.data.fill(0, off, off + 8 + size);
+    this.fillAt(off, 8 + size);
     return true;
   }
 }

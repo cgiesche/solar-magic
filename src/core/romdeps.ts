@@ -11,7 +11,6 @@
 // ExGFX file or another level's GFX setting only drops what read that entry. The same for the
 // pages holding ExAnimation data.
 
-import type { LevelEmulator } from './levelemu.ts';
 import type { Rom } from './rom.ts';
 import { snesToPc } from './rom.ts';
 import { editorPatch } from './patches.ts';
@@ -69,6 +68,17 @@ export class RomReads {
     }
   }
 
+  // any byte read differs between two ROM images
+  differ(then: Uint8Array, now: Uint8Array): boolean {
+    for (const b of this.bytes) if (then[b] !== now[b]) return true;
+    const size = 1 << PAGE_SHIFT;
+    for (let p = 0; p < this.pages.length; p++) {
+      if (!this.pages[p]) continue;
+      for (let i = p * size, end = i + size; i < end; i++) if (then[i] !== now[i]) return true;
+    }
+    return false;
+  }
+
   add(r: RomReads): void {
     const n = Math.min(this.pages.length, r.pages.length);
     for (let p = 0; p < n; p++) this.pages[p] |= r.pages[p];
@@ -76,21 +86,21 @@ export class RomReads {
   }
 }
 
-// hashes of all pages of the current ROM, recomputed when the emulator's ROM generation changes
+// hashes of all pages of the current ROM, recomputed when the ROM's generation changes
 export class RomFingerprint {
   gen = 0; // counts recomputations; cached validity checks are redone when it changes
-  private emu: LevelEmulator;
+  private rom: Rom;
   private romGen = -1;
   private hashes = new Uint32Array(0);
 
-  constructor(emu: LevelEmulator) {
-    this.emu = emu;
+  constructor(rom: Rom) {
+    this.rom = rom;
   }
 
   sync(): void {
-    if (this.romGen === this.emu.romGen && this.hashes.length === this.emu.rom.data.length >> (PAGE_SHIFT - 1)) return;
-    this.romGen = this.emu.romGen;
-    const d = this.emu.rom.data, n = d.length >> PAGE_SHIFT;
+    if (this.romGen === this.rom.gen) return;
+    this.romGen = this.rom.gen;
+    const d = this.rom.data, n = d.length >> PAGE_SHIFT;
     const words = d.byteOffset & 3 ? new Uint32Array(d.slice().buffer, 0, d.length >> 2) : new Uint32Array(d.buffer, d.byteOffset, d.length >> 2);
     const h = new Uint32Array(n * 2);
     const per = 1 << (PAGE_SHIFT - 2);
@@ -118,7 +128,7 @@ export class RomFingerprint {
 
   valid(d: RomDeps): boolean {
     this.sync();
-    const n = this.hashes.length >> 1, len = this.emu.rom.data.length;
+    const n = this.hashes.length >> 1, len = this.rom.data.length;
     for (const p of d.pages) if (p >= n) return false;
     for (const o of d.bytes) if (o >= len) return false;
     const [h1, h2] = this.combine(d);
@@ -126,7 +136,7 @@ export class RomFingerprint {
   }
 
   private combine(d: { pages: Uint16Array; bytes: Uint32Array }): [number, number] {
-    const h = this.hashes, rom = this.emu.rom.data;
+    const h = this.hashes, rom = this.rom.data;
     let a = 0x9e3779b9, b = 0x85ebca6b;
     for (const p of d.pages) {
       a = Math.imul(a ^ h[p * 2], 0x01000193) ^ p;

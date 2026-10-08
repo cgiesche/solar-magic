@@ -43,7 +43,6 @@ export class JumpArcs {
     this.ready = null;
     this.height = height;
     const e = this.emu;
-    e.syncRom();
     const r = e.load(level, { ...ov, sprites: new Uint8Array([spriteHeader, 0xff]), byteOwner: undefined });
     if (!r.ok) return false;
     const s = e.snes, w = s.wram;

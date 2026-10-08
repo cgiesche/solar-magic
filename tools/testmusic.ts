@@ -1,7 +1,8 @@
 // Music: a generated song with its own BRR sample (zip laid out like a download, the sample in a
 // folder other than the song's #path) is inserted with AddmusicK, levels still load the same, a level
 // set to the song plays it in the game (emulated with the sound unit), AddmusicK's SPC of the song
-// plays, and removing the project restores the ROM.
+// plays, and removing the project restores the ROM. Without AddmusicK, levels play the original
+// level songs (the level music bank is in the sound unit).
 // node tools/testmusic.ts
 import { readFileSync } from 'node:fs';
 import { unzipSync, zipSync, strFromU8, strToU8 } from 'fflate';
@@ -234,6 +235,28 @@ check(diff === 0, `original ROM area restored, apart from size and checksum (${d
 }
 
 // a big song (two samples, nearly all of the sound unit's memory) takes long to upload when the level
+// the original game: a level loaded from the title screen or the overworld has the level music bank
+// ($0EAED6: blocks of length, ARAM address, data) in the sound unit, as on entering a level there –
+// not the overworld's, whose songs have the same numbers
+{
+  const rv = new Rom(vanilla.data.slice());
+  const blocks: [number, number, number][] = []; // length, ARAM address, data in the ROM
+  for (let a = 0x0eaed6, len; (len = rv.r16(a)); a += 4 + len) blocks.push([len, rv.r16(a + 2), a + 4]);
+  const levelBank = (e: LevelEmulator) => {
+    const ram = e.snes.apu!.ram();
+    return blocks.every(([len, dst, src]) => ram.subarray(dst, dst + len).every((v, i) => v === rv.r8(src + i)));
+  };
+  const emu = new LevelEmulator(rv);
+  emu.snes.apu = new Apu();
+  check(emu.load(0x105).ok && blocks.length > 0 && levelBank(emu), 'original ROM, level from the title screen: level music bank in the sound unit');
+  // Here We Go, also the title screen demo's song: it starts anyway
+  let pk = 0;
+  for (let f = 0; f < 120; f++) { emu.snes.runFrame(); pk = Math.max(pk, peak(emu.snes.audio!)); }
+  check(pk > 1000 && emu.snes.wram[0x141a] === 1, `original ROM, level from the title screen: its song plays (peak ${pk})`);
+  emu.startGame(0x29);
+  check(emu.load(0x105, { translevel: 0x29, continueState: true }).ok && levelBank(emu), 'original ROM, level from the overworld: level music bank in the sound unit');
+}
+
 // fades in, in level 11A beyond the 120 frames a level load may take otherwise: the level still loads
 // with the sound unit emulated (as the editor's music player does)
 {

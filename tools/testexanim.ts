@@ -45,7 +45,6 @@ writeLevelList(rom, 0x105, list);
 const back = readLevelList(rom, 0x105);
 check(!!back && listBytes(back).join() === listBytes(list).join(), 'level list reads back');
 check(parseList(listBytes(list)).length === listBytes(list).length, 'parsed length = bytes');
-ep.syncRom();
 const tileBytes = (v: Uint8Array, t: number) => v.subarray(t * 32, t * 32 + 32);
 const seen60 = new Set<number>(), seen21 = new Set<number>();
 ep.load(0x105);
@@ -68,7 +67,6 @@ const g = emptyList();
 g.slots.set(0, { type: 0x01, trigger: 0x00, framesLess1: 0, dest: 0x8000 | 0x0700, frames: [0x00] });
 writeGlobalList(rom, g);
 check(readGlobalList(rom)?.slots.get(0)?.dest === (0x8000 | 0x0700), 'global list reads back');
-ep.syncRom();
 ep.load(0x106);
 check(ep.animationFrames(4, 4).some((f) => tileBytes(f.vram, 0x70)[0] === 0x11), 'global list animates level 106');
 

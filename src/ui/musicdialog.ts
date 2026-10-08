@@ -14,7 +14,7 @@ import {
 } from '../core/music.ts';
 import { levelMusic, setLevelMusic, musicPatch, HEADER_MUSIC_TABLE } from '../core/patches.ts';
 import { musicPlayer } from './musicplayer.ts';
-import { romChanged, errorText, type Pane } from './projectpane.ts';
+import { patchesChanged, errorText, type Pane } from './projectpane.ts';
 import { listPackages, type Package } from '../core/pkgreg.ts';
 import { strFromU8, strToU8 } from 'fflate';
 
@@ -92,7 +92,7 @@ export async function insertMusic(app: App, p: MusicProject, what: string, then?
       r.log ? h('details', null, h('summary', null, 'AddmusicK output'), h('pre', { class: 'amk-log' }, r.log)) : ''), [{ label: 'OK', primary: true }]);
     return false;
   }
-  romChanged(app);
+  patchesChanged(app);
   toast(`${what}${r.warnings.length ? ` – ${r.warnings.join(' ')}` : ''}`);
   return true;
 }
@@ -255,7 +255,7 @@ export function musicPane(app: App, changed: () => void): Pane {
   const setForLevel = (num: number) => {
     try {
       app.romEdit(`Music of level ${hex(app.level.number, 3)}`, () => setLevelMusic(app.rom, app.level.number, levelMusic(app.rom, app.level.number) === num ? 0 : num));
-      romChanged(app);
+      patchesChanged(app);
     } catch (e) { toast(errorText(e), 'error'); return; }
     render();
   };

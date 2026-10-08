@@ -27,6 +27,20 @@ export interface ScanLevel {
   height: number;
 }
 
+// The result cache key of a scan: the level and the level data it plays (as edited), so a stored
+// scan is found again for the same data; the ROM it read is checked by the cache.
+export function scanKey(level: number, ov: LevelOverride): string {
+  const l2 = ov.layer2Pointer ?? 0;
+  const bytes = [ov.layer1, ov.layer2, ov.bgData, ov.sprites, Uint8Array.from(ov.secondaryHeader ?? []), Uint8Array.from([l2, l2 >> 8, l2 >> 16, +!!ov.switchPalaces, +!!ov.onOffSwitch])];
+  let h = 0x811c9dc5;
+  for (const b of bytes) {
+    if (!b) { h = Math.imul(h ^ 0xff, 0x01000193); continue; }
+    for (let i = 0; i < b.length; i++) h = Math.imul(h ^ b[i], 0x01000193);
+    h = Math.imul(h ^ b.length, 0x01000193);
+  }
+  return `ls2:${level}:${(h >>> 0).toString(16)}`;
+}
+
 const STEP = 2; // pixels Mario is carried per frame
 const ABOVE = -48; // Mario's Y in horizontal levels: above the level (vertical levels: he keeps his X)
 const FELL_WINDOW = 90; // frames after appearing within which falling out is reported

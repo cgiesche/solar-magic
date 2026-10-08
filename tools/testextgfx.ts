@@ -33,7 +33,6 @@ check(tm === 0, `forced install without the VRAM patch: the slot code itself lea
 
 check(disableUnsafeExtGfx(rom) && rom.r8(EXT_GFX_HOOK) === 0xa2, 'switched off, original code at $00AA50 restored');
 check(!!extGfxPatch(rom) && !extGfxPatch(rom)!.active && levelExtGfx(rom, 0x105)[0] === 0xff, 'table kept, slots inactive');
-ep.syncRom();
 const fixed = ep.load(0x105);
 let d = 0; for (let i = 0; i < 0x10000; i++) if ((i < 0xc000 || i >= 0xc800) && fixed.vram[i] !== ok.vram[i]) d++;
 check(fixed.ok && d === 0, `level loads like before (${d} VRAM bytes differ)`);
@@ -44,7 +43,6 @@ check(refused.includes('VRAM patch'), 'new installs are refused without the VRAM
 // with the VRAM patch: the switched-off install comes back and BG2 loads into VRAM $2000, while the
 // tilemaps (now at $3000/$3800) show exactly what the game shows without any of this
 check(installVramPatch(rom).ok && extGfxPatch(rom)!.active && levelExtGfx(rom, 0x105)[0] === 0x80, 'VRAM patch installed: BG2/BG3 slots active again with their table');
-ep.syncRom();
 const good = ep.load(0x105);
 let g2 = 0; for (let i = 0; i < 0x1000; i++) if (good.vram[0x4000 + i] === raw[i]) g2++;
 check(good.ok && g2 === 0x1000, `BG2 file in VRAM $2000 (tiles 200-27F): ${g2}/4096`);

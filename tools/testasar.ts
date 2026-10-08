@@ -46,7 +46,6 @@ check(loadBad === 0, `all ${levels.length} levels load with the patch and run it
 // 2. reapply with another define, then uninstall → byte-identical to vanilla (expanded area zero)
 const r2 = reapplyPatch(rom, r1.entry!.id, { ...marker, defines: { val: '$33' } });
 check(r2.ok && listPatches(rom).length === 1 && rom.scanRats().length === 3, `reapply with define (${rom.scanRats().length} RATS blocks: code, backup, registry)`);
-emu.syncRom();
 check(emu.load(0x105).wram[0x1b000] === 0x33, 'define reaches the code');
 check(uninstallPatch(rom, r2.entry!.id).length === 0, 'uninstall without warnings');
 let diff = 0;

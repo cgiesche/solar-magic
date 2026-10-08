@@ -10,6 +10,7 @@ import type { LevelEmulator, ObjectTrace } from './levelemu.ts';
 import { OV_L1, MAP_BASE } from './levelemu.ts';
 import { layerGeom } from './render.ts';
 import { encodePrimaryHeader, serializeObjects, newUid, type LevelObject, type Level } from './level.ts';
+import { RomReads } from './romdeps.ts';
 
 export interface ObjKind {
   type: 'lo' | 'hi' | null; // nibble that selects a sub-object
@@ -23,8 +24,10 @@ const PLAIN: ObjKind = { type: null, count: 0, lo: 'w', hi: 'h' };
 
 export interface ObjKinds {
   kinds: Map<number, ObjKind>;
-  deps: Map<number, number>; // ROM bytes the result depends on (offset → value)
 }
+
+// the result cache key of a tileset's object kinds
+export const kindsKey = (ts: number) => `ok1:${ts}`;
 
 interface Shape { w: number; h: number; sig: string }
 interface Run { shape: Shape | null; reads: Set<number> }
@@ -114,27 +117,16 @@ export class ObjKindProbe {
       const kind = classify(this.runs.slice(k, k + 16), this.runs.slice(k + 16, k + 32), this.code);
       if (kind) kinds.set(n, kind);
     }
-    const deps = new Map<number, number>();
-    for (const o of this.romRead) deps.set(o, this.emu.rom.data[o]);
-    return { kinds, deps };
+    return { kinds };
   }
-}
 
-// the result only holds while the ROM bytes the object routines read are unchanged
-export function kindsStillValid(k: ObjKinds, rom: Uint8Array): boolean {
-  for (const [o, v] of k.deps) if (rom[o] !== v) return false;
-  return true;
-}
-
-// storable form (IndexedDB)
-export interface StoredObjKinds { kinds: [number, ObjKind][]; depOffsets: Int32Array; depValues: Uint8Array }
-export function storeKinds(k: ObjKinds): StoredObjKinds {
-  return { kinds: [...k.kinds], depOffsets: Int32Array.from(k.deps.keys()), depValues: Uint8Array.from(k.deps.values()) };
-}
-export function loadKinds(s: StoredObjKinds): ObjKinds {
-  const deps = new Map<number, number>();
-  s.depOffsets.forEach((o, i) => deps.set(o, s.depValues[i]));
-  return { kinds: new Map(s.kinds), deps };
+  // what the result depends on: the single ROM bytes the object routines read (not the level load
+  // around them, so saving a level doesn't drop it)
+  reads(): RomReads {
+    const r = new RomReads(this.emu.rom.data.length);
+    for (const o of this.romRead) r.bytes.add(o);
+    return r;
+  }
 }
 
 const area = (s: Shape | null) => (s ? s.w * s.h : 0);

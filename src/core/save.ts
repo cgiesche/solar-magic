@@ -1,6 +1,6 @@
 // Writing an edited level back into the ROM.
 
-import { Rom, snesToPc } from './rom.ts';
+import { Rom } from './rom.ts';
 import {
   type Level, L1_PTRS, L2_PTRS, SPR_PTRS, serializeLayer1, serializeLayer2, serializeSprites, isL1Vertical, spriteSizes,
   writeSecondaryHeader, spriteBank,
@@ -20,7 +20,7 @@ function countRefs(rom: Rom, table: number, stride: number, addr: number, bankFn
 
 function place(rom: Rom, oldAddr: number, oldSize: number, shared: boolean, data: Uint8Array, bankLocked: number | null): number {
   if (!shared && data.length <= oldSize && (bankLocked === null || oldAddr >> 16 === bankLocked)) {
-    rom.data.set(data, snesToPc(oldAddr));
+    rom.writeBytes(oldAddr, data);
     return oldAddr;
   }
   if (!shared) rom.freeAt(oldAddr);
@@ -74,7 +74,7 @@ export function saveSprites(rom: Rom, lv: Level): string {
   const sprShared = countRefs(rom, SPR_PTRS, 2, lv.sprAddr, bankOf) > 1;
   let as: number;
   if (!sprShared && spr.length <= lv.sprSize) {
-    rom.data.set(spr, snesToPc(lv.sprAddr));
+    rom.writeBytes(lv.sprAddr, spr);
     as = lv.sprAddr;
   } else {
     installEditorPatch(rom);

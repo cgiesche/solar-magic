@@ -21,7 +21,6 @@ for (const n of levels) {
   expected.set(n, r.wram.slice(0xc800, 0x10000));
   saveLevel(rom, lv);
 }
-emu.syncRom();
 for (const n of levels) {
   const r = emu.load(n);
   const exp = expected.get(n)!;

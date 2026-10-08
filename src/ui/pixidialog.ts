@@ -79,6 +79,5 @@ export function pixiPane(app: App, changed: () => void): Pane {
     zipName: 'pixi.zip',
     content,
     applied: (p) => `Custom sprites applied (${p.list.length})`,
-    docs: 'sprites',
   }, changed);
 }

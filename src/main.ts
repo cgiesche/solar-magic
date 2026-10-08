@@ -12,6 +12,7 @@ import { LogBar } from './ui/logbar.ts';
 import { kvGet, kvClear, saveRom, romFromRecord, type RomRecord } from './ui/storage.ts';
 import { migratePatchSources } from './core/patchreg.ts';
 import { migratePackageFiles } from './core/pkgreg.ts';
+import { moveBrowserPackageFiles } from './ui/pkgtrack.ts';
 import { LevelView } from './ui/levelview.ts';
 import { LevelList, Palette, Properties } from './ui/panels.ts';
 import { openHeaderDialog } from './ui/headerdialog.ts';
@@ -86,6 +87,9 @@ function startWith(rom: Rom, name: string): void {
   (window as unknown as { app: App }).app = app;
   buildUi(app);
   app.openLevel(0x105);
+  // files of packages older versions kept in the browser go into the editor data
+  void moveBrowserPackageFiles(app).then((n) => { if (n) log(`Files of ${n} package(s) moved from the browser into the editor data (saved with “Save project”).`); })
+    .catch((e) => console.warn('moving package files', e));
 }
 
 // spinner pill for background analyses; shown after a short delay so quick jobs don't flicker,
@@ -280,7 +284,6 @@ function buildUi(app: App): void {
     updateToolbar();
     return true;
   };
-  app.on('show-level-view', () => setWorkspace('level'));
   app.on('open-map16', () => setWorkspace('gfx', { tab: 'map16', tile: app.wsTile, bg: app.wsTileBg }));
   app.on('open-gfx', () => {
     const n = app.wsGfx;
@@ -292,7 +295,7 @@ function buildUi(app: App): void {
     const job = app.gfxImport;
     app.gfxImport = null;
     if (!job) return;
-    void setWorkspace('gfx', { tab: 'gfx' }).then(async (ok) => { if (ok) job.done(await ws!.gfx.importNew(job.file)); });
+    void setWorkspace('gfx', { tab: 'gfx' }).then((ok) => { if (ok) void ws!.gfx.importNew(job.file, job.into ?? undefined); });
   });
 
   window.onkeydown = (e: KeyboardEvent) => {
@@ -374,7 +377,6 @@ function exportRom(app: App): void {
   downloadBytes(`${base}.${withHeader ? 'smc' : 'sfc'}`, out);
   log(`ROM exported as “${base}.${withHeader ? 'smc' : 'sfc'}” (${Math.round(out.length / 1024)} KB)`);
   if (app.rom.extra.size) toast('The playable ROM holds no sources of patches, packages and projects – to keep editing elsewhere, use “Save project”.');
-  app.persist();
 }
 
 // ROM plus editor data, to open again in the editor
@@ -391,7 +393,6 @@ async function exportPatch(app: App): Promise<void> {
   const base = app.romName.replace(/\.(smc|sfc|bin|smwproj)$/i, '');
   downloadBytes(`${base}.bps`, patch);
   log(`Patch exported as “${base}.bps” (${Math.max(1, Math.round(patch.length / 1024))} KB, from “${f.name}”)`);
-  app.persist();
 }
 // forgets everything stored in the browser and starts over (reloading drops all state of the session)
 async function closeProject(app: App): Promise<void> {
@@ -410,7 +411,6 @@ function exportProject(app: App): void {
   const base = app.romName.replace(/\.(smc|sfc|bin|smwproj)$/i, '');
   downloadBytes(`${base}.smwproj`, out);
   log(`Project saved as “${base}.smwproj” (${Math.round(out.length / 1024)} KB, of which ${Math.round(app.rom.extraSize / 1024)} KB editor data)`);
-  app.persist();
 }
 
 function showHelp(): void {

@@ -9,7 +9,7 @@ import { h, clear, toast, downloadBytes, type Child } from './dom.ts';
 import { listPackages, type Package } from '../core/pkgreg.ts';
 import type { ApplyResult } from '../core/patchapply.ts';
 import { definesButton, editButton } from './defineedit.ts';
-import { keptDocsRow } from './docview.ts';
+import { manualsRow } from './docview.ts';
 
 export interface Project { files: Map<string, Uint8Array> }
 
@@ -26,7 +26,6 @@ export interface PaneSpec<P extends Project> {
   // the assignments and the row to assign; origin: the name of the package that brought a file
   content(p: P, change: () => void, origin: (file: string) => HTMLElement): Child[];
   applied(p: P): string; // toast after a change was applied
-  docs: string; // tool key of the kept docs of packages added to the project (see docview.ts)
 }
 
 export interface Pane {
@@ -38,13 +37,10 @@ export interface Pane {
   touch(): void; // the project was changed from outside the tab: applied to the ROM at once
 }
 
-// ROM changed by a patch or project: reload everything that depends on it
-export function romChanged(app: App): void {
-  app.emu.syncRom();
-  app.persist();
+// after a ROM edit by a patch, project or package (romEdit told the editors): the level is loaded again
+// from the ROM
+export function patchesChanged(app: App): void {
   app.openLevel(app.level.number);
-  app.emit('patch');
-  app.emit('rom-change'); // open editors (graphics workspace) show it, e.g. an ExGFX file removed with a package
 }
 
 export function errorText(e: unknown): string {
@@ -61,7 +57,7 @@ export function logView(r: ApplyResult | null): HTMLElement {
 }
 
 
-// changed: after this tab changed the ROM (and romChanged)
+// changed: after this tab changed the ROM (and patchesChanged)
 export function projectPane<P extends Project>(app: App, spec: PaneSpec<P>, changed: () => void): Pane & { project(): P } {
   const el = h('div', { class: 'project-pane' });
   let proj: P;
@@ -114,7 +110,7 @@ export function projectPane<P extends Project>(app: App, spec: PaneSpec<P>, chan
       toast(`${spec.title}: not applied – ${r.errors[0] ?? 'error'}`, 'error');
       return;
     }
-    romChanged(app);
+    patchesChanged(app);
     changed();
     toast(`${text}${r.warnings.length ? ` – ${r.warnings.join(' ')}` : ''}`);
   };
@@ -143,7 +139,7 @@ export function projectPane<P extends Project>(app: App, spec: PaneSpec<P>, chan
     clear(el).append(
       h('p', { class: 'hint' }, spec.intro, ' ', h('details', { class: 'inline-details' }, h('summary', null, 'Format'), h('div', null, spec.format))),
       h('div', { class: 'pane-content' }, spec.content(proj, change, origin)),
-      keptDocsRow(spec.docs),
+      manualsRow(app.rom, spec.tool),
       log,
       adv,
     );

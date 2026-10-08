@@ -75,7 +75,6 @@ class MusicPlayer {
         this.emu.snes.apu = new Apu();
       }
       const emu = this.emu;
-      emu.syncRom();
       const ov = { ...app.buildOverrides(), ...(song !== undefined ? { music: song } : {}) };
       if (level !== app.level.number) { delete ov.layer1; delete ov.layer2; delete ov.sprites; delete ov.bgData; delete ov.byteOwner; delete ov.secondaryHeader; }
       const r = emu.load(level, ov);

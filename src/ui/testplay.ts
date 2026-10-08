@@ -68,7 +68,6 @@ function start(app: App, at: { tx: number; ty: number } | undefined, audio: Audi
     testEmu.boot();
   }
   const emu = testEmu;
-  emu.syncRom();
   const lv = app.level;
   const ov = app.buildOverrides();
   // the start position: the nearest main entrance setting loads the level around it (camera, tilemap),
