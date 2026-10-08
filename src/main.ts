@@ -280,7 +280,6 @@ function buildUi(app: App): void {
     updateToolbar();
     return true;
   };
-  app.on('show-level-view', () => setWorkspace('level'));
   app.on('open-map16', () => setWorkspace('gfx', { tab: 'map16', tile: app.wsTile, bg: app.wsTileBg }));
   app.on('open-gfx', () => {
     const n = app.wsGfx;

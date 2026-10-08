@@ -121,7 +121,7 @@ export async function installEditorPatchAction(app: App): Promise<void> {
   const ok = await choose('Install editor patch', 'The editor patch allows sprite data in any bank, 256 graphics files (ExGFX, also uncompressed as 4bpp), graphics assignment per level and the "Direct Map16" object (place any Map16 tiles). It is also installed automatically when needed.',
     [{ label: 'Cancel' }, { label: 'Install', primary: true }]);
   if (ok !== 1) return;
-  try { installEditorPatch(app.rom); app.romWritten(); toast('Editor patch installed'); app.refresh(); app.emit('patch'); } catch (e) { toast(String(e), 'error'); }
+  try { installEditorPatch(app.rom); app.romWritten(); toast('Editor patch installed'); app.refresh(); } catch (e) { toast(String(e), 'error'); }
 }
 
 // one undoable structural edit of the current level

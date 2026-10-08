@@ -39,10 +39,9 @@ export interface Pane {
 }
 
 // after a ROM edit by a patch, project or package (romEdit told the editors): the level is loaded again
-// from the ROM and the patch lists follow ('patch')
+// from the ROM
 export function patchesChanged(app: App): void {
   app.openLevel(app.level.number);
-  app.emit('patch');
 }
 
 export function errorText(e: unknown): string {

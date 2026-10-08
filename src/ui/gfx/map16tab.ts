@@ -86,7 +86,7 @@ export class Map16Tab implements WsPanel {
     const redraw = () => { if (this.visible) this.redraw(); };
     app.on('rom-change', redraw);
     app.on('render', redraw);
-    app.on('blockinfo', () => { if (this.visible) this.buildBuilder(); });
+    app.on('probes', () => { if (this.visible) this.buildBuilder(); });
     app.on('animated', redraw);
   }
 

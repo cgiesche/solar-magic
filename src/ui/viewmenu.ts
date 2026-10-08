@@ -9,7 +9,7 @@ export function viewMenu(app: App, paint: () => void, full = true): HTMLElement 
     label, title, shortcut, checked: () => app.show[k],
     onToggle: (v) => {
       app.show[k] = v;
-      if (k === 'anim') { app.refresh(); app.emit('show-anim'); }
+      if (k === 'anim') app.refresh();
       else if (k === 'layer1' || k === 'layer2' || k === 'layer3' || k === 'ghost') app.recomposite(); else paint();
     },
   });

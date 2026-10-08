@@ -43,6 +43,32 @@ export type PaletteItem =
 
 type Listener = () => void;
 
+// What App tells its views (on/once/emit). None carries data: listeners read what they need from App.
+export type AppEvent =
+  | 'change' // the level (or the selection, the mode's objects) was edited
+  | 'level' // another level was opened (also after "Save as")
+  | 'level-header' // the level's header, GFX slots or palette changed
+  | 'mode' // the edit mode (layer 1/2, sprites, BG, exits …) changed
+  | 'render' // the level was emulated and drawn again
+  | 'rom-change' // the ROM was written (romWritten, romChanged)
+  | 'probes' // the asked or the prefetched probes are done (block, collision, sprite, run speeds)
+  | 'objkinds' // object kinds asked for are known (or failed)
+  | 'level-scan' // the level scan of the level as edited is known
+  | 'arcs' // jump arcs asked for are known
+  | 'sprites' // sprite images were captured
+  | 'sprite-mem' // the sprite memory check of the level is known
+  | 'animated' // which tiles and colors of the level animate is known
+  | 'anim-frame' // the next frame of the level animation is shown
+  | 'palettes' // the palettes changed (sprite images are captured again)
+  | 'structs' // the structure table changed
+  | 'bgtile' // the BG brush changed (picked from the level)
+  | 'reveal' // the level view scrolls to App.reveal
+  | 'zoom' // the level view's zoom changed
+  | 'busy' // background work (setBusy), a modal or the music player changed
+  | 'open-gfx' // the graphics workspace opens on App.wsGfx
+  | 'open-map16' // the graphics workspace opens on the Map16 tab
+  | 'import-gfx'; // the graphics workspace imports App.gfxImport
+
 const CACHE_PREFIX = 'rc3:'; // IndexedDB keys of the result cache (bump when result formats change or old results may be wrong: rc3 after the stale boot snapshot fix)
 const BG_SLICE = 12; // ms a slice of background work runs before input and drawing get through
 
@@ -89,10 +115,10 @@ export class App {
   // tile (x,y) lookup from map offset
   offsetToTile1 = new Int32Array(MAP_SIZE);
   offsetToTile2 = new Int32Array(MAP_SIZE);
-  listeners = new Map<string, Set<Listener>>();
+  private listeners = new Map<AppEvent, Set<Listener>>();
   renderError: string | null = null;
   // block behaviour probes (emulated hits), object kinds and level scan, run in a Web Worker;
-  // 'blockinfo' once the asked or the prefetched probes are done
+  // 'probes' once the asked or the prefetched probes are done
   probes: ProbeClient;
   exitScreen = 0;
   // mode 'exit': the chosen entrance marker, else the screen exitScreen (and its exit)
@@ -144,7 +170,7 @@ export class App {
       },
       later: (key, step) => this.later(key, step),
       setBusy: (key, label) => this.setBusy(key, label),
-      ready: () => this.emit('blockinfo'),
+      ready: () => this.emit('probes'),
       kindsReady: () => this.emit('objkinds'),
     });
     kvKeys('rc').then((k) => kvWrite([], k.filter((x) => !x.startsWith(CACHE_PREFIX)))).catch(() => {});
@@ -161,17 +187,17 @@ export class App {
     kvWrite(put.map(([k, v]) => [CACHE_PREFIX + k, v]), del.map((k) => CACHE_PREFIX + k)).catch((e) => console.error(e));
   }
 
-  on(ev: string, fn: Listener): void {
+  on(ev: AppEvent, fn: Listener): void {
     let s = this.listeners.get(ev);
     if (!s) { s = new Set(); this.listeners.set(ev, s); }
     s.add(fn);
   }
   // fn the next time ev is emitted only
-  once(ev: string, fn: Listener): void {
+  once(ev: AppEvent, fn: Listener): void {
     const go = () => { this.listeners.get(ev)?.delete(go); fn(); };
     this.on(ev, go);
   }
-  emit(ev: string): void {
+  emit(ev: AppEvent): void {
     this.listeners.get(ev)?.forEach((f) => f());
   }
 
@@ -961,14 +987,14 @@ export class App {
         this.arcLevel = this.arcs.prepare(lv.number, this.buildOverrides(), lv.spriteHeader, this.images.height) ? lv : null;
         if (!this.arcLevel) throw new Error('level did not reach gameplay');
       }
-      // Mario's run speeds in this tileset: probed first, the arcs continue on 'blockinfo'
+      // Mario's run speeds in this tileset: probed first, the arcs continue on 'probes'
       const runs = this.probes.runSpeeds();
       if (runs === null) throw new Error('run speeds not found');
       if (!runs) {
         this.setBusy('arcs', 'Jump arcs');
         if (!this.arcsWaiting) {
           this.arcsWaiting = true;
-          this.once('blockinfo', () => { this.arcsWaiting = false; this.later('arcs', () => this.runArcs()); });
+          this.once('probes', () => { this.arcsWaiting = false; this.later('arcs', () => this.runArcs()); });
         }
         return;
       }

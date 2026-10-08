@@ -84,7 +84,7 @@ export class LevelView {
     app.on('arcs', () => this.requestPaint());
     app.on('level-scan', () => { this.problems.update(); this.requestPaint(); });
     this.idleStatus();
-    app.on('blockinfo', () => { if (this.hover && !this.drag) this.updateStatus(this.hover.tx, this.hover.ty); this.requestPaint(); this.problems.update(); });
+    app.on('probes', () => { if (this.hover && !this.drag) this.updateStatus(this.hover.tx, this.hover.ty); this.requestPaint(); this.problems.update(); });
   }
 
   setZoom(z: number, anchor?: { ax: number; ay: number }): void {
@@ -806,7 +806,7 @@ export class LevelView {
     if (a >= 0) {
       const t = map16Tile(app.render.wram, a);
       txt += `Map16 ${hex3(t)}`;
-      const p = app.mode === 'bg' ? undefined : app.probes.block(t); // result arrives via 'blockinfo'
+      const p = app.mode === 'bg' ? undefined : app.probes.block(t); // result arrives via 'probes'
       const sum = [p && probeAt(p, tx).summary, p && enterText(p.enter)].filter(Boolean).join(', ');
       if (sum) txt += ` (${sum})`;
       const c = app.show.collision && app.mode !== 'bg' ? app.probes.collision(t) : undefined;

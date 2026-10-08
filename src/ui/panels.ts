@@ -132,7 +132,7 @@ export class Palette {
     let t = 0;
     app.on('sprites', () => { if (this.tab !== 'm16' && !t) t = window.setTimeout(() => { t = 0; this.build(); }, 300); });
     app.on('bgtile', () => { if (app.mode === 'bg') this.build(); });
-    app.on('blockinfo', () => { if (this.tab === 'm16') this.m16Tip(); else this.build(); });
+    app.on('probes', () => { if (this.tab === 'm16') this.m16Tip(); else this.build(); });
     app.on('render', () => { if (app.mode === 'bg') this.build(); });
     app.on('change', () => { this.followSelection(); if (this.tab === 'str') this.build(); });
     app.on('structs', () => { if (this.tab === 'str') this.build(); });
@@ -642,7 +642,7 @@ export class Properties {
     app.on('change', () => this.build());
     app.on('level', () => this.build());
     app.on('objkinds', () => this.build());
-    app.on('blockinfo', () => { if (this.probePending) this.build(); });
+    app.on('probes', () => { if (this.probePending) this.build(); });
     app.on('rom-change', () => { if (app.mode === 'exit') this.build(); });
   }
 
