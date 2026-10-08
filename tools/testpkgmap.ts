@@ -1,7 +1,7 @@
 // Packages assigned by hand ("Paket zuordnen"): the suggestion finds UberASM Tool folders inside a package,
 // the folders their code includes and list.txt lines quoted in the docs; Retry System (test/fixtures;
 // by Kevin/kkevinm) assembled from that suggestion and working in the emulator.
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadAsar } from '../src/core/asar.ts';
@@ -60,7 +60,7 @@ const fallback = { level: 0x105, gamemode: 0x14, overworld: 0 };
   check(String.fromCharCode(...lm.data.slice(0x7f0a0, 0x7f0a0 + text.length)) === text, "Lunar Magic's version string stays");
 }
 
-if (existsSync('test/fixtures/retry-system_v2.2.0.zip')) {
+{
   const files = packageFiles('retry-system_v2.2.0.zip', new Uint8Array(readFileSync('test/fixtures/retry-system_v2.2.0.zip')));
   const s = suggestMapping(files)!;
   const p = placed(files.keys(), s.rules);

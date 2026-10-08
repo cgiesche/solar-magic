@@ -11,7 +11,6 @@ import { setActsLike } from '../src/core/map16ext.ts';
 import { captureSprites } from '../src/core/spritegfx.ts';
 import { loadAsar } from '../src/core/asar.ts';
 import { ROUTINES } from '../src/core/pixiroutines.ts';
-import { existsSync } from 'node:fs';
 import { packageFiles, packageFromFiles } from '../src/core/patchpkg.ts';
 import { planPixiPackage, applyPixiPackage } from '../src/core/pixipkg.ts';
 import { savePixiProject, removePixi, loadPixiProject, parsePixiList, parseCfg, parseJsonCfg, type PixiProject } from '../src/core/pixi.ts';
@@ -226,7 +225,7 @@ print "MAIN ",pc
 }
 
 // a downloaded package (test/fixtures): numbers, linked defines, applied
-if (existsSync('test/fixtures/BrutalBill.zip')) {
+{
   const r4 = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
   const pkg = packageFromFiles('BrutalBill.zip', packageFiles('BrutalBill.zip', new Uint8Array(readFileSync('test/fixtures/BrutalBill.zip'))));
   const plan = planPixiPackage(r4, pkg);
@@ -262,7 +261,7 @@ if (existsSync('test/fixtures/BrutalBill.zip')) {
   check(w5(0x7fb020) > 10 && w5(0x7fb021) === 0x42 && w5(0x7fb023) === 0xc1, `custom shooter runs with its extra byte and extra bit (${w5(0x7fb020)} frames, byte ${w5(0x7fb021).toString(16)}, num ${w5(0x7fb023).toString(16)})`);
   check(w5(0x7fb022) > 10, `custom generator runs (${w5(0x7fb022)} frames)`);
 }
-if (existsSync('test/fixtures/BrutalBill.zip')) {
+{
   const r6 = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
   const pkg = packageFromFiles('BrutalBill.zip', packageFiles('BrutalBill.zip', new Uint8Array(readFileSync('test/fixtures/BrutalBill.zip'))));
   const res6 = applyPixiPackage(r6, pkg, planPixiPackage(r6, pkg), [0, 0, 0, 0], () => [0, 0, 0, 0]);
@@ -335,7 +334,7 @@ print "MAIN ",pc
 
 // a package with a block that spawns its custom bounce sprite (Aftertouch Shatter, test/fixtures): the block
 // Mario stood on shatters once he has left it
-if (existsSync('test/fixtures/Aftertouch Shatter.zip')) {
+{
   const r8 = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
   installEditorPatch(r8);
   const f = 'test/fixtures/Aftertouch Shatter.zip';
