@@ -32,7 +32,7 @@ export function blockSummary(app: App, tiles: number[], all = false): string[] |
 export function blockSprites(app: App, tiles: number[]): number[] {
   const out = new Set<number>();
   for (const t of tiles.slice(0, 16)) {
-    const p = app.prober?.cached(t);
+    const p = app.cachedBlock(t);
     if (p) for (const q of p.pos) for (const n of spritesOf(q)) out.add(n);
   }
   return [...out];
@@ -41,7 +41,7 @@ export function blockSprites(app: App, tiles: number[]): number[] {
 // directions (↓↑←→) in which any of the tiles can be entered, from finished probes only
 export function blockEnter(app: App, tiles: number[]): string {
   const dirs = new Set<string>();
-  for (const t of tiles.slice(0, 16)) for (const d of app.prober?.cached(t)?.enter ?? '') dirs.add(d);
+  for (const t of tiles.slice(0, 16)) for (const d of app.cachedBlock(t)?.enter ?? '') dirs.add(d);
   return [...'↓↑←→'].filter((d) => dirs.has(d)).join('');
 }
 

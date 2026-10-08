@@ -46,6 +46,12 @@ const SETTLE_FRAMES = 6; // frames Mario has to stand still before a probe stops
 export const PAD = { up: 0x0800, down: 0x0400, left: 0x0200, right: 0x0100, b: 0x8000, y: 0x4000 };
 const ENTER_DX = [-8, -4, 0, 4, 8]; // pipes only let Mario in within a few pixels of their middle
 
+// result cache keys (see ResultCache) of the probes in tileset ts
+export const blockKey = (ts: number, tile: number) => `b${ts}:${tile}`;
+export const collisionKey = (ts: number, tile: number) => `c${COLLISION_VERSION}.${ts}:${tile}`;
+export const spriteKey = (ts: number, num: number) => `s${ts}:${num}`;
+export const runsKey = (ts: number) => `r1.${ts}`;
+
 export interface HitResult {
   sprites: number[]; // sprite numbers that appeared
   coins: number;
@@ -181,28 +187,28 @@ export class BlockProber {
   }
 
   cached(tile: number): BlockProbe | undefined {
-    return this.results.get(`b${this.tileset}:${tile}`);
+    return this.results.get(blockKey(this.tileset, tile));
   }
 
   probe(tile: number): BlockProbe {
-    return this.cached(tile) ?? this.computed(`b${this.tileset}:${tile}`, () => {
+    return this.cached(tile) ?? this.computed(blockKey(this.tileset, tile), () => {
       const c = columns((col, big) => this.hit(tile, big, col), tile);
       return { tile, ...c, enter: this.enterDirs(tile, c.solid) };
     });
   }
 
   cachedCollision(tile: number): CollisionProbe | undefined {
-    return this.results.get(`c${COLLISION_VERSION}.${this.tileset}:${tile}`);
+    return this.results.get(collisionKey(this.tileset, tile));
   }
 
   probeCollision(tile: number): CollisionProbe {
-    return this.cachedCollision(tile) ?? this.computed(`c${COLLISION_VERSION}.${this.tileset}:${tile}`, () => this.collision(tile));
+    return this.cachedCollision(tile) ?? this.computed(collisionKey(this.tileset, tile), () => this.collision(tile));
   }
 
   // walking: after a while holding right; running: holding Y too, once the P-meter starts to
   // fill (top running speed reached); P-speed: once the P-meter and the speed don't change any more
   runStates(): RunStates {
-    return this.results.get<RunStates>(`r1.${this.tileset}`) ?? this.computed(`r1.${this.tileset}`, (): RunStates => {
+    return this.results.get<RunStates>(runsKey(this.tileset)) ?? this.computed(runsKey(this.tileset), (): RunStates => {
       const floor = this.floor();
       if (floor < 0) throw new Error('no floor tile found');
       const trace = (pad: number, frames: number): RunState[] => {
@@ -228,11 +234,11 @@ export class BlockProber {
   }
 
   cachedSprite(num: number): SpriteProbe | undefined {
-    return this.results.get(`s${this.tileset}:${num}`);
+    return this.results.get(spriteKey(this.tileset, num));
   }
 
   probeSprite(num: number): SpriteProbe {
-    return this.cachedSprite(num) ?? this.computed(`s${this.tileset}:${num}`, (): SpriteProbe => {
+    return this.cachedSprite(num) ?? this.computed(spriteKey(this.tileset, num), (): SpriteProbe => {
       const variants = this.spriteVariants(num);
       const pos = variants.reps.map(({ x, y }): PosProbe => {
         const base0 = this.hitSprite(num, 0, x, y, 'none');
