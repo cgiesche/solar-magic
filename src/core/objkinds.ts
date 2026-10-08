@@ -44,6 +44,9 @@ function shapeOf(writes: Map<number, number> | undefined, pos: (off: number) => 
   return { w: x1 - x0 + 1, h: y1 - y0 + 1, sig: t.map(([x, y, v]) => `${x - x0},${y - y0},${v}`).sort().join(' ') };
 }
 
+// the level whose header (tileset, …) the objects are loaded with
+export type KindLevel = Pick<Level, 'number' | 'header'>;
+
 // Objects 01-3F, each with the low nibble 0-F (high = 2) and the high nibble 0-F (low = 2).
 // Runs in steps (one emulated level load each) so a UI can spread it over idle time.
 export class ObjKindProbe {
@@ -54,10 +57,10 @@ export class ObjKindProbe {
   private pos: (off: number) => [number, number] | undefined;
   private todo: [number, number][] = []; // spec ranges still to load, in order
   private emu: LevelEmulator;
-  private level: Level;
+  private level: KindLevel;
   private layer2Pointer: number;
 
-  constructor(emu: LevelEmulator, level: Level, layer2Pointer: number) {
+  constructor(emu: LevelEmulator, level: KindLevel, layer2Pointer: number) {
     this.emu = emu;
     this.level = level;
     this.layer2Pointer = layer2Pointer;

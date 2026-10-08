@@ -24,12 +24,12 @@ import { toast, log as logMsg, modalsOpen, onModalsChange } from './dom.ts';
 import { musicPlayer } from './musicplayer.ts';
 import { ExitGraph, exitTarget } from '../core/exitgraph.ts';
 import { RomHistory, type RomEdit } from '../core/romhistory.ts';
-import { ObjKindProbe, kindsStillValid, storeKinds, loadKinds, resizeObjectSize, type ObjKind, type ObjKinds, type StoredObjKinds } from '../core/objkinds.ts';
+import { kindsStillValid, storeKinds, loadKinds, resizeObjectSize, type ObjKind, type ObjKinds, type StoredObjKinds } from '../core/objkinds.ts';
 import { JumpArcs, ARC_SPEEDS, type JumpArc } from '../core/jumparcs.ts';
-import { levelScanJob, type ScanResult } from '../core/levelscan.ts';
+import type { ScanResult } from '../core/levelscan.ts';
 import { layer3Kinds, tideKind, layer3Top, type Layer3Kind } from '../core/layer3.ts';
 import { variantOf, blockKey, collisionKey, spriteKey, runsKey, type BlockProbe, type SpriteProbe, type CollisionProbe, type RunStates } from '../core/blockprobe.ts';
-import { ProbeHost, PROBE_SPRITE, PROBE_COLL, PROBE_RUNS, jobId, jobKey, type ProbeJob, type ProbeMessage, type ProbeDone } from '../core/probehost.ts';
+import { ProbeHost, PROBE_SPRITE, PROBE_COLL, PROBE_RUNS, jobId, jobKey, type ProbeJob, type ProbeMessage, type ProbeDone, type ProbeReply, type KindsDone, type ScanDone } from '../core/probehost.ts';
 import { map16Tile, bgTile } from '../core/ram.ts';
 
 export type EditMode = 'l1' | 'l2' | 'spr' | 'exit' | 'bg';
@@ -111,7 +111,7 @@ export class App {
   private closed = false; // project closed: nothing is written to the browser any more
   // what the settings byte nibbles of standard objects mean, per tileset (emulated, see objkinds.ts)
   kinds = new Map<number, { k: ObjKinds; gen: number }>();
-  kindJob: { ts: number; probe: ObjKindProbe | null } | null = null;
+  kindJob: { ts: number; msg: ProbeMessage | null } | null = null; // msg: sent to the probe worker
   reveal = { x: 0, y: 0 }; // pixel the level view scrolls to on 'reveal'
   secEntrances: number[] = []; // secondary entrance indices leading into the current level
   // tile/palette animation: frames stored as pixel diffs against the static composite
@@ -851,11 +851,12 @@ export class App {
   levelScan: { key: string; level: number; result: ScanResult; uids: number[] } | null = null;
   private scanTimer = 0;
   private scanRun = 0;
-  private scanEmu: LevelEmulator | null = null;
+  private scanWant: { msg: ProbeMessage; done: (r: ScanResult) => void } | null = null; // sent to the probe worker
 
   private scheduleScan(): void {
     clearTimeout(this.scanTimer);
     this.scanRun++;
+    this.scanWant = null;
     this.setBusy('scan', null);
     this.scanTimer = window.setTimeout(() => this.cacheReady.then(() => this.runScan()), 1500);
   }
@@ -882,27 +883,21 @@ export class App {
     if (this.levelScan?.key === key) { done(this.levelScan.result); return; }
     const stored = this.results.get<ScanResult>(key);
     if (stored) { done(stored); return; }
-    const emu = this.scanEmu = this.auxEmu(this.scanEmu);
-    const job = levelScanJob(emu, { number: lv.number, ov, vertical, width: this.images.width, height: this.images.height });
-    const reads = new RomReads(this.rom.data.length);
-    const step = () => {
-      if (run !== this.scanRun || this.level !== lv) return;
-      const t0 = performance.now();
-      try {
-        while (performance.now() - t0 < BG_SLICE) {
-          const r = emu.tracked(() => job.next());
-          reads.add(r.reads);
-          if (r.result.done) {
-            this.results.set(key, r.result.value, this.results.fp.deps(reads));
-            done(r.result.value);
-            return;
-          }
-        }
-      } catch (e) { console.error(e); this.setBusy('scan', null); return; }
-      this.later('scan', step);
-    };
+    // played in the probe worker (see scanDone)
+    const msg: ProbeMessage = { type: 'scan', id: run, key, level: { number: lv.number, ov, vertical, width: this.images.width, height: this.images.height } };
+    this.syncProbes(); // (first: after a ROM change it sends the scan wanted then)
+    this.scanWant = { msg, done };
     this.setBusy('scan', 'Level scan');
-    this.later('scan', step);
+    this.probeSend?.(msg);
+  }
+
+  private scanDone(d: ScanDone): void {
+    const want = this.scanWant;
+    if (d.gen !== this.probeGen || !want || want.msg.type !== 'scan' || want.msg.id !== d.id) return;
+    this.scanWant = null;
+    for (const [k, e] of d.put) this.results.set(k, e.data, e.deps);
+    if (d.result) want.done(d.result);
+    else this.setBusy('scan', null);
   }
 
   // What the four layer 3 settings do in a tileset (see layer3.ts): the level as edited is loaded
@@ -1031,39 +1026,27 @@ export class App {
     return null;
   }
 
-  // stored result first (valid while the ROM bytes it depends on are unchanged), otherwise emulate
-  // in slices between UI work, on an own emulator (the main one keeps the animation state)
+  // stored result first (valid while the ROM bytes it depends on are unchanged), otherwise
+  // emulated in the probe worker (see kindsDone)
   private startKindJob(ts: number): void {
     if (this.kindJob) return;
-    const job: { ts: number; probe: ObjKindProbe | null } = { ts, probe: null };
+    const job: { ts: number; msg: ProbeMessage | null } = { ts, msg: null };
     this.kindJob = job;
     kvGet<StoredObjKinds>(`objkinds-${ts}`).catch(() => undefined).then((st) => {
       const k = st && loadKinds(st);
       if (k && kindsStillValid(k, this.rom.data)) { this.setKinds(ts, k); return; }
       this.setBusy('kinds', 'Object kinds');
-      const emu = new LevelEmulator(this.rom);
-      emu.adoptBoot(this.emu);
-      emu.skipMask = () => this.gfxSkipMask();
-      const lv = { ...this.level, header: { ...this.level.header, tileset: ts } };
-      job.probe = new ObjKindProbe(emu, lv, this.level.layer2Objects ? this.rom.r24(L2_PTRS + 0x105 * 3) : this.level.layer2Pointer);
-      this.later('kinds', () => this.runKindJob());
+      const lv = this.level;
+      this.syncProbes();
+      job.msg = { type: 'kinds', ts, level: { number: lv.number, header: lv.header }, layer2Pointer: lv.layer2Objects ? this.rom.r24(L2_PTRS + 0x105 * 3) : lv.layer2Pointer };
+      this.probeSend?.(job.msg);
     });
   }
 
-  private runKindJob(): void {
-    const j = this.kindJob;
-    if (!j?.probe) return;
-    const t0 = performance.now();
-    try {
-      while (!j.probe.done && performance.now() - t0 < BG_SLICE) j.probe.step();
-      if (!j.probe.done) { this.later('kinds', () => this.runKindJob()); return; }
-      const k = j.probe.result();
-      kvSet(`objkinds-${j.ts}`, storeKinds(k)).catch(() => {});
-      this.setKinds(j.ts, k);
-    } catch (e) {
-      console.error(e);
-      this.setKinds(j.ts, { kinds: new Map(), deps: new Map() });
-    }
+  private kindsDone(d: KindsDone): void {
+    if (d.gen !== this.probeGen || this.kindJob?.ts !== d.ts) return;
+    if (d.kinds) kvSet(`objkinds-${d.ts}`, storeKinds(d.kinds)).catch(() => {});
+    this.setKinds(d.ts, d.kinds ?? { kinds: new Map(), deps: new Map() });
   }
 
   private setKinds(ts: number, k: ObjKinds): void {
@@ -1092,7 +1075,7 @@ export class App {
     // (stored results first: the job may be known by then)
     this.cacheReady.then(() => {
       if (this.results.get(jobKey(job)) === undefined) this.probeSend?.({ type: 'ask', jobs: [job] });
-      else this.probeDone({ gen: this.probeGen, job, put: [], failed: false });
+      else this.probeDone({ type: 'probe', gen: this.probeGen, job, put: [], failed: false });
     });
   }
 
@@ -1129,6 +1112,7 @@ export class App {
     this.probePrefetch.clear();
     this.probeSend({ type: 'rom', gen: this.probeGen, data: this.rom.data.slice() });
     if (this.probeAsked.size) this.probeSend({ type: 'ask', jobs: [...this.probeAsked.values()] });
+    for (const m of [this.kindJob?.msg, this.scanWant?.msg]) if (m) this.probeSend(m);
     setTimeout(() => this.prefetchProbes(), 0); // results that read changed ROM data are redone
   }
 
@@ -1136,7 +1120,7 @@ export class App {
   private startProbes(): (m: ProbeMessage) => void {
     try {
       const w = new Worker(new URL('./probeworker.ts', import.meta.url), { type: 'module' });
-      w.onmessage = (e: MessageEvent<ProbeDone>) => this.probeDone(e.data);
+      w.onmessage = (e: MessageEvent<ProbeReply>) => this.probeReply(e.data);
       w.onerror = (e) => {
         console.error('probe worker failed, probing on the main thread', e);
         w.terminate();
@@ -1157,8 +1141,10 @@ export class App {
     const run = () => {
       scheduled = false;
       const t0 = performance.now();
-      let d: ProbeDone | null;
-      while (performance.now() - t0 < BG_SLICE && (d = host.next())) this.probeDone(d);
+      while (performance.now() - t0 < BG_SLICE && host.pending) {
+        const d = host.next();
+        if (d) this.probeReply(d);
+      }
       schedule();
     };
     const schedule = () => {
@@ -1171,6 +1157,12 @@ export class App {
 
   // a finished job: its results go to the cache; 'blockinfo' when the asked or the prefetched
   // jobs are all done
+  private probeReply(d: ProbeReply): void {
+    if (d.type === 'probe') this.probeDone(d);
+    else if (d.type === 'kinds') this.kindsDone(d);
+    else this.scanDone(d);
+  }
+
   private probeDone(d: ProbeDone): void {
     if (d.gen !== this.probeGen) return; // ran on an older ROM
     for (const [k, e] of d.put) this.results.set(k, e.data, e.deps);
