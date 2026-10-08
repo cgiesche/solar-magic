@@ -1,9 +1,12 @@
-# Tests on every push to master/develop; when they pass, the Docker image is built and pushed:
-# master → registry.traumwald.net/smw-editor:latest, develop → :develop (each also as :sha-<commit>).
+# Tests run on pull requests (into master/develop). On every push to master/develop the Docker image
+# is built and pushed: master → registry.traumwald.net/smw-editor:latest, develop → :develop
+# (each also as :sha-<commit>).
 name: CI
 
 on:
   push:
+    branches: [master, develop]
+  pull_request:
     branches: [master, develop]
 
 concurrency:
@@ -15,6 +18,7 @@ env:
 
 jobs:
   test:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -36,7 +40,7 @@ jobs:
       - run: npm test
 
   docker:
-    needs: test
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
