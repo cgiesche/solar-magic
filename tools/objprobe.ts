@@ -6,7 +6,7 @@ import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadLevel, L2_PTRS } from '../src/core/level.ts';
 import { ObjKindProbe, type ObjKind } from '../src/core/objkinds.ts';
 
-const rom = new Rom(new Uint8Array(readFileSync('Super Mario World (U) [!].smc')));
+const rom = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
 const emu = new LevelEmulator(rom);
 emu.boot();
 const base = loadLevel(rom, 0x105);
