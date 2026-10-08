@@ -76,11 +76,11 @@ Beim Anzeigen eines Levels führt er die **originalen Laderoutinen** des ROMs au
 * **Level testen (T):** das Level (inkl. ungespeicherter Änderungen) im eingebauten Emulator spielen, mit Tastatur oder Gamepad, mit Musik und Soundeffekten (M schaltet den Ton ab).
 
 ### Musik
-* **Songs importieren** (*ROM → Music …* oder *Add …* im Patches-Dialog): Songs im AddmusicK-Format (`.zip` von SMWCentral
+* **Songs importieren** (*ROM → Packages … → Upload package …*): Songs im AddmusicK-Format (`.zip` von SMWCentral
   oder `.txt`). Der Editor findet die Songs (MML mit `#0`) und legt die BRR-Samples dorthin, wo der Song sie sucht (`#path`),
   auch wenn das Archiv sie in einem eigenen `samples`-Ordner mitbringt; fehlende Samples werden genannt.
-  Vor dem Einfügen lässt sich der Song anhören (AddmusicK erzeugt seine SPC). Nummer: die nächste freie ab 29
-  oder anstelle eines Originalsongs.
+  Der Song bekommt die nächste freie Nummer ab 29 und spielt im aktuellen Level; anhören lässt er sich
+  im Tab *Music*.
 * Eingefügt wird mit **AddmusicK 1.0.11**, das als WebAssembly im Editor steckt (Song-Compiler, Sound-Treiber, SNES-Patch).
   Jeder Lauf fügt das ganze Musik-Projekt neu ein (~1 s) und steht als ein Eintrag im Patch-Verzeichnis: Hijacks mit
   Originalbytes, freier Speicher; die Songs samt Samples als Quellen in den Editor-Daten (nicht in der ROM). Deshalb lässt sich AddmusicK jederzeit wieder

@@ -1,19 +1,18 @@
-// The patches dialog: one place for everything assembled into the ROM. "Packages" lists every added download
-// with what it brought (see packages.ts); the tabs UberASM, Custom Blocks and Custom Sprites show the
-// tool projects as a whole. "Add …" takes any download and shows it as a package afterwards. Every
-// change goes into the ROM at once; Ctrl+Z / Ctrl+Y in the dialog undo and redo it (ADR 0001).
+// The Packages dialog: the one place third-party content enters the ROM. "Upload package …" (or a file
+// dropped on the dialog) shows the upload preview and installs the package (upload.ts); the Packages tab
+// lists every installed package with what it brought (packages.ts); UberASM, Blocks, Sprites and Music
+// configure what packages brought. Every change goes into the ROM at once; Ctrl+Z / Ctrl+Y in the dialog
+// undo and redo it (ADR 0001).
 
 import type { App } from './app.ts';
 import { h, modal, clear, toast, pickFile, choose } from './dom.ts';
 import { hex } from '../core/names.ts';
 import { openLevelImportDialog } from './levelimport.ts';
 import { loadAsar } from '../core/asar.ts';
-import { recognize, type PackagesTab, type PickedUpload } from './patchmanager.ts';
+import type { PackagesTab } from './patchmanager.ts';
 import { packagesPane } from './packages.ts';
 import { inspectUpload } from '../core/packages.ts';
 import { openUploadPreview, showUploadFailure } from './upload.ts';
-import type { ToolKind } from '../core/parts.ts';
-import { trackPackage, findPackage } from './pkgtrack.ts';
 import { uberPane } from './uberdialog.ts';
 import { blockPane } from './blockdialog.ts';
 import { pixiPane } from './pixidialog.ts';
@@ -27,8 +26,7 @@ export interface ResourceOptions {
   onChange?: () => void; // after the ROM was changed from the dialog
 }
 
-const TAB_LABEL: Record<ResourceTab, string> = { packages: 'Packages', uberasm: 'UberASM', block: 'Custom Blocks', sprite: 'Custom Sprites', music: 'Music' };
-const isTool = (k: ResourceTab): k is ToolKind => k !== 'packages' && k !== 'music';
+const TAB_LABEL: Record<ResourceTab, string> = { packages: 'Packages', uberasm: 'UberASM', block: 'Blocks', sprite: 'Sprites', music: 'Music' };
 
 export async function openResources(app: App, tab: ResourceTab = 'packages', opts: ResourceOptions = {}): Promise<void> {
   const body = h('div', { class: 'resources' }, h('p', { class: 'hint' }, 'Loading Asar …'));
@@ -46,7 +44,7 @@ export async function openResources(app: App, tab: ResourceTab = 'packages', opt
     afterUndo();
   };
   window.addEventListener('keydown', keys);
-  const dlg = modal('Patches', body, [{ label: 'Close', primary: true }], () => {
+  const dlg = modal('Packages', body, [{ label: 'Close', primary: true }], () => {
     window.removeEventListener('keydown', keys);
     if (musicPlayer.label?.startsWith('song:')) musicPlayer.stop();
   });
@@ -73,11 +71,6 @@ export async function openResources(app: App, tab: ResourceTab = 'packages', opt
     changed,
     show: (k) => show(k),
     leave: (then) => { dlg.close(true); then(); },
-    addPart: (name, files, rec) => {
-      // later parts go into the package (its record, looked up again: it may have changed since)
-      const cur = findPackage(app, rec.id) ?? rec;
-      void run(recognize(app, name, files, trackPackage(app, cur.name, cur.fileName, null, cur)));
-    },
   });
   if (opts.tile !== undefined) p.block.setTile(opts.tile);
 
@@ -88,14 +81,6 @@ export async function openResources(app: App, tab: ResourceTab = 'packages', opt
     clear(content).appendChild(k === 'packages' ? patches.el : k === 'music' ? music.el : p[k].el);
   }
 
-  // opens the dialog adding a package, the tabs it changed reloaded afterwards
-  const run = async (pk: PickedUpload) => {
-    pk.open({ uberContext: p.uberasm.context(), tile: p.block.tile() }, () => {
-      for (const k of pk.affects) if (isTool(k)) p[k].reload(); else if (k === 'music') music.reload();
-      if (pk.target) show('packages');
-      changed();
-    });
-  };
   // an upload: its preview, then the package installed and selected
   const upload = async (f: File) => {
     const files = new Uint8Array(await f.arrayBuffer());

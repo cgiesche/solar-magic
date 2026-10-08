@@ -6,7 +6,7 @@
 import { zipSync, unzipSync } from 'fflate';
 import type { App } from './app.ts';
 import { kvGet, kvDel } from './storage.ts';
-import { snapshot, partsBetween, mergeParts, isEmptyParts, emptyParts, savePackage, listPackages, packageArchive, type Package } from '../core/pkgreg.ts';
+import { snapshot, partsBetween, mergeParts, isEmptyParts, emptyParts, savePackage, packageArchive, type Package } from '../core/pkgreg.ts';
 
 const kvKey = (id: string) => `pkg:${id}`;
 
@@ -48,8 +48,4 @@ export async function recordFiles(app: App, rec: Package): Promise<Map<string, U
 
 export function forgetRecordFiles(id: string): void {
   kvDel(kvKey(id)).catch(() => {});
-}
-
-export function findPackage(app: App, id: string): Package | null {
-  try { return listPackages(app.rom).find((r) => r.id === id) ?? null; } catch { return null; }
 }

@@ -5,12 +5,12 @@ sich drei Arten von ASM-Code direkt im Browser in die ROM bringen:
 
 | Art | Format | Wo |
 |---|---|---|
-| **Patches** | beliebige Asar-Patches (`.asm` oder `.zip`), z. B. von SMWCentral | Menü *ROM → Patches …*, Tab *Pakete* |
-| **UberASM** | Code pro Level, Overworld-Karte und Game Mode im Format von UberASM Tool 2.x | Tab *UberASM* (auch *ROM → UberASM …*) |
-| **Custom Blocks** | Blöcke im GPS-Format | Tab *Custom Blocks* (auch *ROM → Custom Blocks …* oder im Map16-Editor) |
+| **Patches** | beliebige Asar-Patches (`.asm` oder `.zip`), z. B. von SMWCentral | Menü *ROM → Packages …*, Tab *Packages* |
+| **UberASM** | Code pro Level, Overworld-Karte und Game Mode im Format von UberASM Tool 2.x | Tab *UberASM* |
+| **Custom Blocks** | Blöcke im GPS-Format | Tab *Blocks* (auch über *Custom Blocks …* im Map16-Editor) |
 
-Alles liegt in einem Dialog: der Tab *Pakete* (siehe [Pakete](#pakete)) und je ein Tab für UberASM,
-Custom Blocks und Custom Sprites (PIXI, siehe [pixi.md](pixi.md)) mit dem ganzen Projekt. **Ein Paket
+Alles liegt in einem Dialog, *ROM → Packages …*: der Tab *Packages* (siehe [Pakete](#pakete)) und je ein Tab
+für UberASM, Blocks, Sprites (PIXI, siehe [pixi.md](pixi.md)) und Music mit dem ganzen Projekt. **Ein Paket
 hochzuladen ist der einzige Weg, auf dem Fremdinhalte in die ROM kommen:** *Upload package …* oben im Dialog
 (oder eine Datei auf den Dialog ziehen) zeigt eine Vorschau mit allem, was erkannt wurde, und *Install*
 installiert alles als **ein Paket** (siehe [Paket hochladen](#paket-hochladen-vorschau-und-installieren)).
@@ -56,13 +56,13 @@ mitgebracht hat –
 * **Grafiken im Paket**: `.bin`-Grafikdateien und 128 Pixel breite `.png`. *Als Grafik importieren …*
   wechselt in den Grafik-Bereich und legt die Datei in die erste freie ExGFX-Nummer (eine `.bin`, deren Name
   eine Nummer nennt, wahlweise dorthin; PNG-Farben werden auf die dort gewählte Palette abgebildet);
-* **Dateien des Pakets**: alle Dateien des Downloads – lesen (Anleitungen), herunterladen und, für `.asm`,
-  *Hinzufügen …* als weiteren Teil (wie unter *Weitere Schritte*, auch später noch).
+* **Dateien des Pakets**: alle Dateien des Downloads – lesen (Anleitungen) und herunterladen. Dateien zu einem
+  installierten Paket hinzufügen geht nicht: ein Upload, ein Paket.
 
 Was ein Paket bringt, wird nicht von den Dialogen gemeldet, sondern beobachtet: Der Editor vergleicht die
-Projekte der ROM (Patches, UberASM, Blöcke, Sprites, ExGFX) vor und nach jedem Schritt. Teile, die später
-hinzukommen (*Weitere Schritte*, *Hinzufügen …* eines Teils, importierte Grafiken, neue Einstellungen),
-gehören zum selben Paket. Das Verzeichnis liegt in der ROM (RATS-Block „SMWK“), die Dateien des Downloads
+Projekte der ROM (Patches, UberASM, Blöcke, Sprites, ExGFX) vor und nach der Installation. Was später aus
+dem Paket heraus geschieht (als Grafik importierte Dateien, neu angewendete Einstellungen), gehört zum
+selben Paket. Das Verzeichnis liegt in der ROM (RATS-Block „SMWK“), die Dateien des Downloads
 in den Editor-Daten (siehe oben).
 
 **Entfernen …** nimmt das ganze Paket heraus: Patches (spätere zuerst), UberASM-Dateien und
@@ -149,7 +149,7 @@ gewählt). Eine vorhandene Lunar-Magic-Kennung bleibt unangetastet.
 
 ## Patches anwenden
 
-1. *ROM → Patches …* → *Upload package …* und eine `.asm`- oder `.zip`-Datei wählen. Aus einem Archiv wird ein
+1. *ROM → Packages …* → *Upload package …* und eine `.asm`- oder `.zip`-Datei wählen. Aus einem Archiv wird ein
    gemeinsamer oberster Ordner entfernt; Includes und Binärdateien (`incsrc`/`incbin`) bleiben mit ihren
    relativen Pfaden erhalten.
 2. Enthält das Archiv mehrere `.asm`-Dateien, wird in der Vorschau die Hauptdatei ausgewählt (siehe Readme
@@ -338,7 +338,7 @@ MarioSide:
   des Spiels geschrieben); gleichnamige Dateien in `routines/` haben Vorrang. Ebenso die zusätzlichen Defines
   von GPS (`!sprite_extra_bits`, `!bounce_map16_low` … für den Custom-Bounce-Block-Patch).
 * `list.txt` wie bei GPS: `200 block.asm` oder `200:130 block.asm` (Tile, optional „acts like“).
-  Zuweisen lässt sich auch im Map16-Editor (*Custom Blocks …*).
+  Zuweisen lässt sich auch im Map16-Editor: *Custom Blocks …* öffnet den Tab *Blocks* mit dem gewählten Tile.
 
 Die Blöcke hängen an der Map16-Erweiterung (SMWX); sie wird bei Bedarf installiert. Custom Blocks
 funktionieren für alle Tiles 000–FFF.
@@ -506,11 +506,13 @@ rückgängig zu machen.
 * `src/core/asar.ts`: Asar-WASM (`tools/build-asar.sh` baut es mit Emscripten nach `src/vendor/asar/`).
   Pfade von `incsrc`/`incbin` werden wie von einem Dateisystem aufgelöst (`a//b`, mehrere `..`
   hintereinander; `tools/asar-wasm/normalize-paths.patch`), da die Dateien nur im Speicher liegen.
+* `src/core/packages.ts`, `src/ui/upload.ts`: Upload, Vorschau, Installieren, Legacy-Pakete.
 * `src/core/pkgmap.ts`, `src/ui/pkgmap.ts`: Pakete aus mehreren Teilen; `src/ui/docview.ts`: Anleitungen.
+* `src/core/bgpack.ts`, `src/ui/levelimport.ts`: Level-Import (Lunar Magic).
 * `src/core/patchapply.ts`: Anwenden, Konfliktprüfung, Entfernen.
 * `src/core/patchreg.ts`: Patch-Verzeichnis „SMWA“ in der ROM.
 * `src/core/pkgreg.ts`, `src/ui/pkgtrack.ts`, `src/ui/packages.ts`: Paket-Verzeichnis „SMWK“, Beobachten,
-  Entfernen; der Tab *Pakete*.
+  Entfernen; der Tab *Packages*.
 * `src/core/patchpkg.ts`: `.zip`, `patch.json`, Defines.
 * `src/core/uberasm.ts`, `src/core/uberproject.ts`: UberASM-Generator und -Projekt.
 * `src/core/blocks.ts`, `src/core/map16ext.ts`: Custom Blocks.

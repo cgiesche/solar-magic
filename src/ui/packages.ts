@@ -13,7 +13,6 @@ import { listPackages, type Package } from '../core/pkgreg.ts';
 import { removePackage } from '../core/packages.ts';
 import { loadMusicProject, songHex } from '../core/music.ts';
 import { playButton, playSong, currentSongs } from './musicdialog.ts';
-import { extraParts } from '../core/pkgmap.ts';
 import { lz2Decompress } from '../core/lz2.ts';
 import { hex } from '../core/names.ts';
 import { ALL, type UberContext } from '../core/uberasm.ts';
@@ -21,7 +20,7 @@ import { KIND_LABEL as SPRITE_KIND, spriteConfig, type PixiProject } from '../co
 import type { UberProject } from '../core/uberproject.ts';
 import type { BlockProject } from '../core/blocks.ts';
 import { map16Source } from '../core/render.ts';
-import { storedUpload, toUpload, settingsForm, runPatch, patchDone, type PackagesTab } from './patchmanager.ts';
+import { storedUpload, toUpload, settingsForm, reapplyPackagePatch, patchDone, type PackagesTab } from './patchmanager.ts';
 import { recordFiles, forgetRecordFiles, trackPackage } from './pkgtrack.ts';
 import { romChanged, logView, errorText, type Pane } from './projectpane.ts';
 import { definesButton, editButton } from './defineedit.ts';
@@ -38,7 +37,6 @@ export interface PackagesHost {
   changed(): void; // the ROM changed from this tab
   show(tab: PackagesTab): void;
   leave(then: () => void): void; // closes the dialog, then `then`
-  addPart(name: string, files: Map<string, Uint8Array>, rec: Package): void;
 }
 
 // one entry of the list: a package, or the editor's VRAM patch
@@ -123,7 +121,7 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
     const it = items.find((i) => i.key === sel);
     const n = ++seq;
     if (!it) {
-      clear(detail).append(h('p', { class: 'hint' }, '“Add …” above takes a download (.asm or .zip, e.g. from SMWCentral): patch, UberASM code, custom block, block package or custom sprite. It then shows up here as a package – with everything it brought.'));
+      clear(detail).append(h('p', { class: 'hint' }, '“Upload package …” above takes a download (.asm or .zip, e.g. from SMWCentral) or an AddmusicK song. What it brings – patches, UberASM code, blocks, sprites, songs, graphics – is installed as one package and shows up here with all its parts.'));
       return;
     }
     const rec = it.rec;
@@ -171,10 +169,8 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
     const form = settingsForm(upload, s.main, p.defines);
     const log = h('div');
     const again = () => {
-      const t = rec ? trackPackage(app, rec.name, rec.fileName, null, rec) : null;
-      const r = runPatch(app, upload, s.fileName, s.main, form.read(), p);
+      const r = reapplyPackagePatch(app, upload, s.fileName, s.main, form.read(), p, rec);
       if (!r.ok) { clear(log).appendChild(logView(r)); return; }
-      t?.done();
       patchDone(upload.name, true, r);
       host.changed();
     };
@@ -284,11 +280,9 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
     const paths = [...files.keys()].filter((p) => !p.endsWith('/')).sort();
     const gfx = paths.filter((p) => isGfxFile(p, files.get(p)!));
     const docs = new Set(packageDocs(files));
-    const parts = new Map(rec ? extraParts(files, new Map([['', null]])).flatMap((p) => (p.files ? [[p.path, p.files] as const] : [])) : []);
     const importBtn = (p: string) => h('button', { title: 'Import into a free ExGFX number (in the graphics workspace; PNG colors are mapped to the palette chosen there)', onclick: () => importGfx(new File([files.get(p)! as BlobPart], base(p)), rec) }, 'Import as graphics …');
     const actions = (p: string) => [
       gfx.includes(p) ? importBtn(p) : null,
-      parts.has(p) ? h('button', { title: 'Add this file (with the files it includes) like a package of its own – it then belongs to this package', onclick: () => host.addPart(base(p), parts.get(p)!, rec!) }, 'Add …') : null,
       docs.has(p) ? h('button', { onclick: () => openDocs(it.name, files, p) }, 'Read') : null,
       h('button', { class: 'icon-btn', title: 'Download', onclick: () => downloadBytes(base(p), files.get(p)!) }, '⤓'),
     ];
@@ -299,8 +293,7 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
         fileFilter = (e.target as HTMLInputElement).value;
         for (const r of all.querySelectorAll<HTMLElement>('.pkg-file')) r.style.display = shown(r.dataset.path!) ? '' : 'none';
       } }) : '',
-      h('div', { class: 'pkg-filelist' }, paths.map(row)),
-      rec ? h('p', { class: 'hint' }, '“Add …” takes another part of the package (e.g. example blocks); what it brings then belongs to this package and is removed with it.') : '');
+      h('div', { class: 'pkg-filelist' }, paths.map(row)));
     return [
       gfx.length ? h('section', { class: 'pkg-sec' }, h('h3', null, 'Graphics in the package'),
         h('div', { class: 'pkg-filelist' }, gfx.map((p) => h('div', { class: 'row pkg-file' }, h('span', { class: 'mono grow', title: p }, p), importBtn(p))))) : '',

@@ -61,7 +61,7 @@ export function uberPane(app: App, changed: () => void): UberPane {
     };
     return h('div', null,
       rows.length ? h('table', { class: 'uber-table' }, h('tr', null, h('th', null, 'No.'), h('th', null, 'File'), h('th', null, 'Extra bytes'), h('th')), rows)
-        : h('p', { class: 'hint' }, `No assignments for ${CTX_LABEL[ctx].toLowerCase()} yet – “Add …” above takes an UberASM resource (.asm/.zip) and assigns it right away.`),
+        : h('p', { class: 'hint' }, `No assignments for ${CTX_LABEL[ctx].toLowerCase()} yet – “Upload package …” above installs UberASM code; it runs in the current level.`),
       res.length ? h('div', { class: 'row uber-add' },
         numIn,
         ctx === 'level' ? h('label', { class: 'row small' }, allBox, 'all (*)') : null,
