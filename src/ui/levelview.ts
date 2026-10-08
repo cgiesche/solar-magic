@@ -874,7 +874,7 @@ export class LevelView {
       items.push({ label: 'Edit exit', onClick: () => app.selectScreen(scr) });
       items.push({ label: '→ Open exit target', onClick: () => app.gotoExitTarget(ex) });
     } else {
-      items.push({ label: 'Create exit', onClick: () => { app.selectScreen(scr); app.checkpoint(); app.level.exits.push({ uid: newUid(), screen: scr, dest: app.level.number & 0x1ff, secondary: false, flags: 0 }); app.changed(false); } });
+      items.push({ label: 'Create exit', onClick: () => { app.selectScreen(scr); app.editLevel(() => { app.level.exits.push({ uid: newUid(), screen: scr, dest: app.level.number & 0x1ff, secondary: false, flags: 0 }); }, false); } });
     }
     contextMenu(e.clientX, e.clientY, items);
   }

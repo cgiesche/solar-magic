@@ -707,7 +707,7 @@ export class App {
   private spriteMemBase: SpriteMemState | null = null; // the latest check no edit came after (autocorrection compares with it)
   private spriteMemTimer = 0;
   private spriteMemRun = 0;
-  private editGen = 0; // counts checkpoints: edits (not undo/redo/loading)
+  private editGen = 0; // counts committed level edits (not undo/redo/loading)
   private usedMem: { gen: number; list: number[] } = { gen: -1, list: [] };
 
   private scheduleSpriteMem(): void {
@@ -762,7 +762,7 @@ export class App {
     this.later('spritemem', step);
   }
 
-  // An edit (checkpoint since the previous check, same sprite memory) that makes further sprites
+  // An edit (committed since the previous check, same sprite memory) that makes further sprites
   // incomplete sets the suggested value, as part of that edit's undo step. A value chosen by hand
   // stays as long as edits add no new conflicts.
   private autoSpriteMem(prev: SpriteMemState, cur: SpriteMemState): void {
@@ -777,9 +777,7 @@ export class App {
 
   // sets the sprite memory value as an own undo step
   setSpriteMemory(m: number): void {
-    this.checkpoint();
-    this.level.spriteHeader = (this.level.spriteHeader & 0xc0) | (m & 0x3f);
-    this.changed();
+    this.editLevel(() => { this.level.spriteHeader = (this.level.spriteHeader & 0xc0) | (m & 0x3f); });
     this.emit('level-header');
     logMsg(`Sprite memory set to ${hex(m, 2)}`);
   }
@@ -1117,11 +1115,6 @@ export class App {
     if (ok) e.commit(rerender); else e.cancel();
     return ok;
   }
-  // (an undo step taken right away; for code not on editLevel yet)
-  checkpoint(): void {
-    this.beginLevelEdit();
-    this.commitLevelEdit();
-  }
   private commitLevelEdit(): void {
     if (this.levelHistory.commit()) this.levelEditDone();
   }
@@ -1211,7 +1204,7 @@ export class App {
     const o = bgIndex(tx, ty);
     return this.level.bg ? this.level.bg[o] : bgTile(this.render.wram, o);
   }
-  // sets one BG tile (the map repeats, so all copies change); caller handles checkpoint/refresh
+  // sets one BG tile (the map repeats, so all copies change); caller handles the level edit and refresh
   paintBg(tx: number, ty: number, tile: number): boolean {
     if (this.bgAt(tx, ty) === tile) return false;
     this.level.bg ??= bgFromWram(this.render.wram);
@@ -1332,14 +1325,14 @@ export class App {
       writeStructure(this.rom, n, { w: r.w, h: r.h, tiles: r.tiles, name });
     } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); return false; }
     if (replace) {
-      this.checkpoint();
-      const all = this.currentObjects();
-      const at = Math.max(...this.selectedObjects().map((o) => all.indexOf(o)));
-      const o: LevelObject = { uid: newUid(), num: 0, ext: STRUCT_EXT, x: r.x, y: r.y, size: 0, struct: n };
-      const res = [...all.slice(0, at + 1).filter((x) => !this.selection.has(x.uid)), o, ...all.slice(at + 1)];
-      if (this.mode === 'l2') this.level.layer2Objects = res; else this.level.objects = res;
-      this.selection = new Set([o.uid]);
-      this.dirty = true;
+      this.editLevel(() => {
+        const all = this.currentObjects();
+        const at = Math.max(...this.selectedObjects().map((o) => all.indexOf(o)));
+        const o: LevelObject = { uid: newUid(), num: 0, ext: STRUCT_EXT, x: r.x, y: r.y, size: 0, struct: n };
+        const res = [...all.slice(0, at + 1).filter((x) => !this.selection.has(x.uid)), o, ...all.slice(at + 1)];
+        if (this.mode === 'l2') this.level.layer2Objects = res; else this.level.objects = res;
+        this.selection = new Set([o.uid]);
+      }, false); // (drawn by structuresChanged)
     }
     this.paletteItem = { kind: 'obj', num: 0, ext: STRUCT_EXT, size: 0, struct: n };
     this.structuresChanged();
@@ -1363,42 +1356,40 @@ export class App {
     if (!s) { toast('The structure does not exist (anymore).', 'error'); return; }
     if (!this.ensureEditorPatch()) return;
     if (s.tiles.some((t) => t >= EXT_FIRST) && !map16Ext(this.rom)) { toast('The structure uses tiles from 200 up, the Map16 expansion is missing.', 'error'); return; }
-    this.checkpoint();
-    const parts: LevelObject[] = [];
-    s.tiles.forEach((t, i) => { if (t !== TRANSPARENT) parts.push({ uid: newUid(), num: 0, ext: DM16_EXT, x: o.x + (i % s.w), y: o.y + Math.floor(i / s.w), size: 0, tile: t }); });
-    const all = this.currentObjects();
-    const at = all.indexOf(o);
-    const res = [...all.slice(0, at), ...parts, ...all.slice(at + 1)];
-    if (this.mode === 'l2') this.level.layer2Objects = res; else this.level.objects = res;
-    this.selection = new Set(parts.map((p) => p.uid));
-    this.changed();
+    this.editLevel(() => {
+      const parts: LevelObject[] = [];
+      s.tiles.forEach((t, i) => { if (t !== TRANSPARENT) parts.push({ uid: newUid(), num: 0, ext: DM16_EXT, x: o.x + (i % s.w), y: o.y + Math.floor(i / s.w), size: 0, tile: t }); });
+      const all = this.currentObjects();
+      const at = all.indexOf(o);
+      const res = [...all.slice(0, at), ...parts, ...all.slice(at + 1)];
+      if (this.mode === 'l2') this.level.layer2Objects = res; else this.level.objects = res;
+      this.selection = new Set(parts.map((p) => p.uid));
+    });
   }
 
   deleteSelection(): void {
     if (!this.selection.size) return;
-    this.checkpoint();
-    if (this.mode === 'spr') this.level.sprites = this.level.sprites.filter((s) => !this.selection.has(s.uid));
-    else if (this.mode === 'l2' && this.level.layer2Objects) this.level.layer2Objects = this.level.layer2Objects.filter((o) => !this.selection.has(o.uid));
-    else if (this.mode === 'l1') this.level.objects = this.level.objects.filter((o) => !this.selection.has(o.uid));
-    this.selection.clear();
-    this.changed();
+    this.editLevel(() => {
+      if (this.mode === 'spr') this.level.sprites = this.level.sprites.filter((s) => !this.selection.has(s.uid));
+      else if (this.mode === 'l2' && this.level.layer2Objects) this.level.layer2Objects = this.level.layer2Objects.filter((o) => !this.selection.has(o.uid));
+      else if (this.mode === 'l1') this.level.objects = this.level.objects.filter((o) => !this.selection.has(o.uid));
+      this.selection.clear();
+    });
   }
 
-  moveSelection(dx: number, dy: number, withCheckpoint = true): void {
+  moveSelection(dx: number, dy: number): void {
     if (!this.selection.size) return;
-    if (withCheckpoint) this.checkpoint();
-    const items = this.mode === 'spr' ? this.selectedSprites() : this.selectedObjects();
-    for (const o of items) { o.x += dx; o.y += dy; this.clampObject(o); }
-    this.changed();
+    this.editLevel(() => {
+      const items = this.mode === 'spr' ? this.selectedSprites() : this.selectedObjects();
+      for (const o of items) { o.x += dx; o.y += dy; this.clampObject(o); }
+    });
   }
 
   // resize: width/height nibbles of settings byte
   resizeSelection(dw: number, dh: number): void {
     const objs = this.selectedObjects().filter((o) => o.num !== 0 || o.ext === DM16_EXT);
     if (!objs.length) return;
-    this.checkpoint();
-    for (const o of objs) o.size = resizeObjectSize(this.objectKind(o.num), o.size, dw, dh);
-    this.changed();
+    this.editLevel(() => { for (const o of objs) o.size = resizeObjectSize(this.objectKind(o.num), o.size, dw, dh); });
   }
 
   // copies the selection and pastes it one tile down-right (Ctrl+D)
@@ -1410,13 +1401,13 @@ export class App {
 
   reorderSelection(dir: 'front' | 'back'): void {
     if (this.mode === 'spr' || !this.selection.size) return;
-    this.checkpoint();
-    const objs = this.currentObjects();
-    const sel = objs.filter((o) => this.selection.has(o.uid));
-    const rest = objs.filter((o) => !this.selection.has(o.uid));
-    const res = dir === 'front' ? [...rest, ...sel] : [...sel, ...rest];
-    if (this.mode === 'l2') this.level.layer2Objects = res; else this.level.objects = res;
-    this.changed();
+    this.editLevel(() => {
+      const objs = this.currentObjects();
+      const sel = objs.filter((o) => this.selection.has(o.uid));
+      const rest = objs.filter((o) => !this.selection.has(o.uid));
+      const res = dir === 'front' ? [...rest, ...sel] : [...sel, ...rest];
+      if (this.mode === 'l2') this.level.layer2Objects = res; else this.level.objects = res;
+    });
   }
 
   copy(): void {
@@ -1426,18 +1417,18 @@ export class App {
   paste(tx: number, ty: number): void {
     const items = this.mode === 'spr' ? this.clipboard.sprites : this.clipboard.objects;
     if (!items?.length) return;
-    this.checkpoint();
-    const minX = Math.min(...items.map((o) => o.x)), minY = Math.min(...items.map((o) => o.y));
-    const sel = new Set<number>();
-    for (const it of items) {
-      const c = { ...structuredClone(it), uid: newUid(), x: it.x - minX + tx, y: it.y - minY + ty };
-      this.clampObject(c);
-      sel.add(c.uid);
-      if (this.mode === 'spr') this.level.sprites.push(c as LevelSprite);
-      else this.currentObjects().push(c as LevelObject);
-    }
-    this.selection = sel;
-    this.changed();
+    this.editLevel(() => {
+      const minX = Math.min(...items.map((o) => o.x)), minY = Math.min(...items.map((o) => o.y));
+      const sel = new Set<number>();
+      for (const it of items) {
+        const c = { ...structuredClone(it), uid: newUid(), x: it.x - minX + tx, y: it.y - minY + ty };
+        this.clampObject(c);
+        sel.add(c.uid);
+        if (this.mode === 'spr') this.level.sprites.push(c as LevelSprite);
+        else this.currentObjects().push(c as LevelObject);
+      }
+      this.selection = sel;
+    });
   }
 
   // ------------- saving -------------

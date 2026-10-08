@@ -126,26 +126,26 @@ export function openHeaderDialog(app: App): void {
     { label: 'Cancel', onClick: () => { if (musicPlayer.label === 'header') musicPlayer.stop(); } },
     {
       label: 'Apply', primary: true, onClick: () => {
-        app.checkpoint();
         if (musicPlayer.label === 'header') musicPlayer.stop();
         if (levelSong !== levelMusic(app.rom, lv.number)) {
           try { setLevelMusic(app.rom, lv.number, levelSong); app.romWritten(); } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
         }
-        const modeChangedL2 = hasLayer2Objects(hd.mode) !== hasLayer2Objects(lv.header.mode);
-        lv.header = hd;
-        lv.secondary = sd;
-        lv.spriteHeader = spriteHeader;
-        if (l2ptr !== CUSTOM_BG) { lv.bg = null; lv.layer2Pointer = l2ptr; }
-        if (modeChangedL2) {
-          if (hasLayer2Objects(hd.mode) && !lv.layer2Objects) { lv.layer2Objects = []; lv.layer2Header = new Uint8Array(5); }
-          if (!hasLayer2Objects(hd.mode) && lv.layer2Objects) {
-            lv.layer2Objects = null;
-            if (lv.layer2Pointer >> 16 !== 0xff) lv.layer2Pointer = app.rom.r24(L2_PTRS + 0x105 * 3);
+        app.editLevel(() => {
+          const modeChangedL2 = hasLayer2Objects(hd.mode) !== hasLayer2Objects(lv.header.mode);
+          lv.header = hd;
+          lv.secondary = sd;
+          lv.spriteHeader = spriteHeader;
+          if (l2ptr !== CUSTOM_BG) { lv.bg = null; lv.layer2Pointer = l2ptr; }
+          if (modeChangedL2) {
+            if (hasLayer2Objects(hd.mode) && !lv.layer2Objects) { lv.layer2Objects = []; lv.layer2Header = new Uint8Array(5); }
+            if (!hasLayer2Objects(hd.mode) && lv.layer2Objects) {
+              lv.layer2Objects = null;
+              if (lv.layer2Pointer >> 16 !== 0xff) lv.layer2Pointer = app.rom.r24(L2_PTRS + 0x105 * 3);
+            }
           }
-        }
-        if (app.mode === 'l2' && !lv.layer2Objects) app.mode = 'l1';
-        if (app.mode === 'bg' && lv.layer2Objects) app.mode = 'l1';
-        app.changed();
+          if (app.mode === 'l2' && !lv.layer2Objects) app.mode = 'l1';
+          if (app.mode === 'bg' && lv.layer2Objects) app.mode = 'l1';
+        });
         app.emit('level-header');
       },
     },

@@ -678,7 +678,7 @@ export class Properties {
       if (!sel.length) { this.body.appendChild(emptyState(`${app.level.sprites.length} sprites – none selected.`)); return; }
       if (sel.length > 1) { this.body.append(h('div', { class: 'prop-title' }, `${sel.length} sprites selected`), this.actions(false)); return; }
       const s = sel[0];
-      const upd = (f: () => void) => { app.checkpoint(); f(); app.changed(false); };
+      const upd = (f: () => void) => app.editLevel(f, false);
       const id = spriteId(s), custom = app.customSprite(id);
       // custom sprites: their extra bytes (as many as the size table says for number and extra bit)
       const nBytes = s.extra >= 2 ? spriteBytes(spriteSizes(app.rom), s).length : 0;
@@ -711,7 +711,7 @@ export class Properties {
     }
     if (sel.length > 1) { this.body.append(h('div', { class: 'prop-title' }, `${sel.length} objects selected`), this.actions(true)); return; }
     const o = sel[0];
-    const upd = (f: () => void) => { app.checkpoint(); f(); app.changed(); };
+    const upd = (f: () => void) => app.editLevel(f);
     const idx = app.currentObjects().indexOf(o);
     const ov = app.objectKind(o.num);
     this.body.append(

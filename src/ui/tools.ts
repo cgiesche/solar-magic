@@ -191,8 +191,7 @@ export async function importLevel(app: App): Promise<boolean> {
   try {
     const rom = app.rom, n = app.level.number;
     const data = importLevelFile(rom, await f.text(), app.level);
-    app.checkpoint();
-    app.level = data.level;
+    app.editLevel(() => { app.level = data.level; }, false);
     // graphics slots and palette live in the ROM: an undoable ROM edit (Ctrl+Z takes them back first)
     if (data.gfx || editorPatch(rom) || data.palette || customPalette(rom, n)) app.romEdit(`${f.name}: graphics slots/palette of level ${hex(n, 3)}`, () => {
       if (data.gfx || editorPatch(rom)) setLevelGfx(rom, n, data.gfx ?? new Array(8).fill(0xff));
