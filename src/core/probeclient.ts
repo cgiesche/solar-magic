@@ -3,12 +3,13 @@
 // object kinds and level scan, all in the probe worker. It sends the ROM again after a change
 // (the worker drops its queue then) together with everything still wanted, and falls back to
 // probing on the main thread in background slices when the worker fails. Results go to the
-// editor's ResultCache.
+// editor's ResultCache, also those from before a ROM change: they hold while the ROM bytes they read
+// are unchanged.
 
 import { ProbeHost, PROBE_SPRITE, PROBE_COLL, PROBE_RUNS, jobId, jobKey, type ProbeJob, type ProbeMessage, type ProbeDone, type ProbeReply, type KindsDone, type ScanDone } from './probehost.ts';
 import type { ResultCache } from './romdeps.ts';
 import type { BlockProbe, CollisionProbe, SpriteProbe, RunStates } from './blockprobe.ts';
-import type { ObjKinds, KindLevel } from './objkinds.ts';
+import { kindsStillValid, type ObjKinds, type KindLevel } from './objkinds.ts';
 import type { ScanLevel, ScanResult } from './levelscan.ts';
 
 export const SPRITE_PROBE_END = 0xc9; // sprites from $C9 on are shooters, generators and run-once sprites
@@ -177,11 +178,14 @@ export class ProbeClient {
     else this.scanDone(d);
   }
 
+  // Results are kept whatever ROM they ran on: the cache checks them against the ROM bytes they
+  // read. A job that ran on an older ROM is done only if its result still holds (otherwise the
+  // worker, which got the jobs again with the new ROM, answers it once more).
   private probeDone(d: ProbeDone): void {
-    if (d.gen !== this.gen) return; // ran on an older ROM
     for (const [k, e] of d.put) this.d.results.set(k, e.data, e.deps);
     const id = jobId(d.job);
-    if (d.failed) this.failed.add(id);
+    if (d.gen !== this.gen && this.d.results.get(jobKey(d.job)) === undefined) return;
+    if (d.failed && d.gen === this.gen) this.failed.add(id);
     const asked = this.asked.delete(id), prefetched = this.prefetched.delete(id);
     this.busy();
     if ((asked && !this.asked.size) || (prefetched && !this.prefetched.size)) this.d.ready();
@@ -189,7 +193,8 @@ export class ProbeClient {
 
   private kindsDone(d: KindsDone): void {
     const want = this.kindsWant;
-    if (d.gen !== this.gen || want?.msg.ts !== d.ts) return;
+    if (want?.msg.ts !== d.ts) return;
+    if (d.gen !== this.gen && !(d.kinds && kindsStillValid(d.kinds, this.d.rom().data))) return;
     this.kindsWant = null;
     this.d.setBusy('kinds', null);
     want.done(d.kinds);
@@ -197,10 +202,10 @@ export class ProbeClient {
 
   private scanDone(d: ScanDone): void {
     const want = this.scanWant;
-    if (d.gen !== this.gen || want?.msg.id !== d.id) return;
+    for (const [k, e] of d.put) this.d.results.set(k, e.data, e.deps);
+    if (want?.msg.id !== d.id || (d.gen !== this.gen && this.d.results.get(want.msg.key) === undefined)) return;
     this.scanWant = null;
     this.d.setBusy('scan', null);
-    for (const [k, e] of d.put) this.d.results.set(k, e.data, e.deps);
     want.done(d.result);
   }
 

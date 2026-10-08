@@ -1,7 +1,8 @@
 // The editor's probe client (probeclient.ts) against a probe host (probehost.ts) in a stand-in
 // worker the test runs by hand: a reply from before a ROM change does not make it ask again and
-// again, results come in after it; a broken worker hands everything wanted to the main thread; a
-// failed probe is not asked again until the ROM changes; the prefetch follows the tileset.
+// again, results come in after it, and one still valid is kept; a broken worker hands everything
+// wanted to the main thread; a failed probe is not asked again until the ROM changes; the
+// prefetch follows the tileset.
 import { readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
 import { BlockProber } from '../src/core/blockprobe.ts';
@@ -78,6 +79,21 @@ function editor(worker: Worker | null) {
   w.run();
   check(JSON.stringify(e.client.block(0x11f)) === JSON.stringify(direct.probe(0x11f)), 'block 11F as probed directly');
   check(e.ready > 0 && !e.busy.has('probe'), "'ready' told, nothing busy");
+}
+
+// a reply from before a ROM change that did not touch what the probe read: kept, the job is done
+{
+  const w = new Worker(), e = editor(w);
+  e.client.block(0x130);
+  await settle();
+  const old = w.host.next(); // (computed on the ROM before, not handed over yet)
+  e.emu.syncRom();
+  e.client.block(0x130); // (the client sees the change: sends the new ROM and the job again)
+  await settle();
+  check(old?.type === 'probe' && old.gen !== e.emu.romGen && w.sent.some((m) => m.type === 'rom' && m.gen === e.emu.romGen), 'reply from the generation before');
+  w.reply(old!);
+  check(JSON.stringify(e.client.block(0x130)) === JSON.stringify(direct.probe(0x130)), 'its result is kept: still valid');
+  check(e.ready === 1 && !e.busy.has('probe'), "job done: 'ready' told, nothing busy");
 }
 
 // the worker breaks down: asked probes and object kinds go to the main thread
