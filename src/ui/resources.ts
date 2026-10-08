@@ -101,7 +101,7 @@ export async function openResources(app: App, tab: ResourceTab = 'packages', opt
     });
   };
   const pickAndUpload = async () => {
-    const f = await pickFile('.asm,.asar,.zip,.txt');
+    const f = await pickFile('.asm,.asar,.zip,.txt,.mwl');
     if (f) await upload(f).catch((e) => toast(errorText(e), 'error'));
   };
   // a file dropped anywhere on the dialog is uploaded (not opened as a ROM by the editor's own handler)

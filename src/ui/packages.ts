@@ -111,7 +111,7 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
       const files = [...host.panes[k].project().files.keys()].filter((f) => f !== 'list.txt' && !recs.some((r) => r[TOOL[k]].files.includes(f)));
       if (files.length) notes.push([k, `${label}: ${files.length} file(s)`]);
     };
-    count('uberasm', 'UberASM'); count('block', 'Custom Blocks'); count('sprite', 'Custom Sprites');
+    count('uberasm', 'UberASM'); count('block', 'Blocks'); count('sprite', 'Sprites');
     if (!notes.length) return '';
     return h('div', { class: 'pkg-orphans hint' }, h('div', null, 'Not from a package (added earlier or by hand):'),
       notes.map(([k, t]) => h('div', null, h('a', { href: '#', onclick: (e: Event) => { e.preventDefault(); host.show(k); } }, t))));
@@ -121,7 +121,7 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
     const it = items.find((i) => i.key === sel);
     const n = ++seq;
     if (!it) {
-      clear(detail).append(h('p', { class: 'hint' }, '“Upload package …” above takes a download (.asm or .zip, e.g. from SMWCentral) or an AddmusicK song. What it brings – patches, UberASM code, blocks, sprites, songs, graphics – is installed as one package and shows up here with all its parts.'));
+      clear(detail).append(h('p', { class: 'hint' }, '“Upload package …” above takes an upload (.asm or .zip, e.g. from SMWCentral) or an AddmusicK song. What it brings – patches, UberASM code, blocks, sprites, songs, graphics – is installed as one package and shows up here with all its parts.'));
       return;
     }
     const rec = it.rec;
@@ -212,7 +212,7 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
       const proj = host.panes.block.project() as BlockProject;
       const blocks = proj.list.filter((b) => rec.blocks.tiles.includes(b.tile) && rec.blocks.files.includes(b.file)).sort((a, b) => a.tile - b.tile);
       const rest = rec.blocks.files.filter((f) => !blocks.some((b) => b.file === f)).sort();
-      out.push(section('block', 'Custom Blocks', 'To place: palette → Map16, or a Direct Map16 object with the tile.',
+      out.push(section('block', 'Blocks', 'To place: palette → Map16, or a Direct Map16 object with the tile.',
         blocks.length ? h('table', { class: 'uber-table' }, h('tr', null, h('th', null, 'Tile'), h('th', null, 'Block'), h('th', null, 'acts like'), h('th')),
           blocks.map((b) => h('tr', null,
             h('td', { class: 'mono' }, h('a', { href: '#', title: 'Open in the Map16 editor', onclick: (e: Event) => { e.preventDefault(); host.leave(() => app.editMap16(b.tile)); } }, hex(b.tile, 3))),
@@ -231,7 +231,7 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
       const asmOf = (e: PixiProject['list'][number]) => { try { return spriteConfig(proj, e).asm ?? e.file; } catch { return e.file; } };
       const used = new Set(sprites.flatMap((e) => [e.file, asmOf(e)]));
       const rest = rec.pixi.files.filter((f) => !used.has(f)).sort();
-      out.push(section('sprite', 'Custom Sprites', 'To insert: sprite mode, custom sprite with the number.',
+      out.push(section('sprite', 'Sprites', 'To insert: sprite mode, custom sprite with the number.',
         sprites.length ? h('table', { class: 'uber-table' }, h('tr', null, h('th', null, 'Type'), h('th', null, 'No.'), h('th', null, 'Name'), h('th')),
           sprites.map((e) => h('tr', null, h('td', null, SPRITE_KIND[e.kind]), h('td', { class: 'mono' }, hex(e.num, 2)), h('td', { title: e.file }, nameOf(e)),
             h('td', { class: 'actions' }, definesButton(proj.files, asmOf(e), () => touch('sprite')), editButton(proj.files, asmOf(e), () => touch('sprite')))))) : '',

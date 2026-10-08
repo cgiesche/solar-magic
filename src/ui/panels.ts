@@ -626,7 +626,7 @@ export class Properties {
         this.field('Y', hexInput(s.y, 3, (v) => upd(() => (s.y = v)), app.levelHeightTiles() - 1)),
         this.field('Extra bits', hexInput(s.extra, 1, (v) => upd(() => { s.extra = v; resize(); }), 3)),
         ...Array.from({ length: nBytes }, (_, i) => this.field(`Extra byte ${i + 1}`, hexInput(s.bytes?.[i] ?? 0, 2, (v) => upd(() => { resize(); if (s.bytes) s.bytes[i] = v; })))),
-        s.extra >= 2 ? h('div', { class: 'hint' }, custom ? 'Extra bits 2/3: custom sprite without/with extra bit.' : 'This custom sprite is not inserted (ROM → Custom Sprites …); the game treats it like the original sprite with the same number.') : '',
+        s.extra >= 2 ? h('div', { class: 'hint' }, custom ? 'Extra bits 2/3: custom sprite without/with extra bit.' : 'This custom sprite is not inserted (ROM → Packages …, Sprites); the game treats it like the original sprite with the same number.') : '',
         custom?.description ? h('div', { class: 'hint pre' }, custom.description) : '',
         this.actions(false),
       );

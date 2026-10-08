@@ -32,7 +32,7 @@ export function openLevelImportDialog(app: App, fileName: string, files: Map<str
   const canBg = !!plan.level.bg && app.canEditBg();
   if (!canBg && !plan.fg) {
     modal(`Import level file: ${name}`, h('p', null, plan.level.bg
-      ? `“${name}” is a background package (BG tilemap). But level ${lvl} has layer 2 objects instead of a BG background – open a level with a BG first.`
+      ? `“${name}” has a background (BG tilemap). But level ${lvl} has layer 2 objects instead of a BG background – open a level with a BG first.`
       : `“${name}” has neither a BG background nor FG Map16 tiles to take over.`), [{ label: 'OK', primary: true }]);
     return;
   }
@@ -50,11 +50,11 @@ export function openLevelImportDialog(app: App, fileName: string, files: Map<str
       canBg ? ` Background: the BG tilemap${n16 ? ` and ${n16} BG Map16 tiles` : ''}` : ` Background – not possible: level ${lvl} has layer 2 objects instead of a BG background`) : '',
     plan.map16 && canBg ? h('div', { class: 'prop' }, h('label', { title: file(plan.map16.file) }, 'BG Map16'),
       h('span', null, `${n16} tiles from BG tile `), hexInput(at, 3, (v) => (at = v), 0xfff),
-      h('span', { class: 'hint' }, at !== plan.map16.from ? ` (from ${hex(plan.map16.from, 3)} in the package, already in use there)` : '')) : '',
+      h('span', { class: 'hint' }, at !== plan.map16.from ? ` (from ${hex(plan.map16.from, 3)} in the level file, already in use here)` : '')) : '',
     plan.fg ? h('label', { class: 'row small' }, check(useFg, (v) => (useFg = v)), ` Foreground: ${plan.fg.data.tiles.length} FG Map16 tiles (${file(plan.fg.file)}) to place in levels`) : '',
     plan.fg ? h('div', { class: 'prop' }, h('label', null, 'FG Map16'),
       h('span', null, 'from tile '), hexInput(fgAt, 3, (v) => (fgAt = v), 0xfff),
-      h('span', { class: 'hint' }, fgAt !== plan.fg.from ? ` (from ${hex(plan.fg.from, 3)} in the package, already in use there)` : '')) : '',
+      h('span', { class: 'hint' }, fgAt !== plan.fg.from ? ` (from ${hex(plan.fg.from, 3)} in the level file, already in use here)` : '')) : '',
     ...plan.gfx.map((g) => g.file
       ? h('div', { class: 'prop' }, h('label', null, `${g.slot}: ${file(g.file)}`),
         h('span', null, 'as ExGFX '), hexInput(g.num, 2, (v) => (g.num = v), 0xfe),

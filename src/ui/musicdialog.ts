@@ -9,7 +9,7 @@ import { h, clear, modal, toast, select, downloadBytes } from './dom.ts';
 import { hex } from '../core/names.ts';
 import {
   loadMusicProject, saveMusicProject, emptyMusicProject, romSongs, songSpcs, spcOf,
-  hasAmk, musicEntry, songHex, projectToZip,
+  hasAmk, musicEntry, songHex, projectToZip, FIRST_CUSTOM, LAST_SONG,
   songDefines, validDefine, type MusicProject, type MusicSong, type SongInfo,
 } from '../core/music.ts';
 import { levelMusic, setLevelMusic, musicPatch, HEADER_MUSIC_TABLE } from '../core/patches.ts';
@@ -71,13 +71,20 @@ export function playSong(app: App, s: SongInfo): void {
   });
 }
 
-// runs AddmusicK on the project, with a note while it works; true when inserted
-export async function insertMusic(app: App, p: MusicProject, what: string): Promise<boolean> {
+// runs AddmusicK on the project, with a note while it works; `then`: further ROM changes of the same
+// undo step once inserted. true when inserted
+export async function insertMusic(app: App, p: MusicProject, what: string, then?: () => void): Promise<boolean> {
   if (app.dirty) app.saveLevel(true);
   musicPlayer.stop();
   const wait = modal('Music', h('p', null, `${what} – AddmusicK is inserting the music …`), []);
   let r;
-  try { r = await app.romEditAsync(what, () => saveMusicProject(app.rom, p)); } catch (e) { r = { ok: false, errors: [errorText(e)], warnings: [], log: '' }; }
+  try {
+    r = await app.romEditAsync(what, async () => {
+      const res = await saveMusicProject(app.rom, p);
+      if (res.ok) then?.();
+      return res;
+    });
+  } catch (e) { r = { ok: false, errors: [errorText(e)], warnings: [], log: '' }; }
   wait.close(true);
   if (!r.ok) {
     modal('Music – AddmusicK failed', h('div', { class: 'patch-log' },
@@ -217,6 +224,14 @@ export function musicPane(app: App, changed: () => void): Pane {
     reload();
   };
 
+  // a custom song under another number; levels playing it keep playing it
+  const setNumber = async (num: number, to: number) => {
+    const users = levelsBySong(app).get(num) ?? [];
+    const p: MusicProject = { songs: proj.songs.map((x) => (x.num === num ? { ...x, num: to } : x)), files: proj.files };
+    if (await insertMusic(app, p, `Song ${songHex(num)} is now song ${songHex(to)}`, () => { for (const l of users) setLevelMusic(app.rom, l, to); })) changed();
+    reload();
+  };
+
   // a song with new settings, or its file as new text: inserted again
   const saveSong = async (next: MusicSong, what: string, files = proj.files) => {
     const p: MusicProject = { songs: proj.songs.map((x) => (x.num === next.num ? next : x)), files };
@@ -244,6 +259,15 @@ export function musicPane(app: App, changed: () => void): Pane {
     } catch (e) { toast(errorText(e), 'error'); return; }
     render();
   };
+
+  // the song's number: its own, or a free one
+  function numberSelect(num: number): HTMLSelectElement {
+    const free: [number, string][] = [];
+    for (let n = FIRST_CUSTOM; n <= LAST_SONG; n++) if (n === num || !proj.songs.some((x) => x.num === n)) free.push([n, songHex(n)]);
+    const sel = select(free, num, (to) => { if (to !== num) void setNumber(num, to); });
+    sel.title = 'The song number (AddmusicK inserts all songs again)';
+    return sel;
+  }
 
   function volumeSelect(num: number): HTMLSelectElement {
     const v = proj.songs.find((x) => x.num === num)?.volume ?? 100;
@@ -278,7 +302,7 @@ export function musicPane(app: App, changed: () => void): Pane {
           const mine = cur.own && cur.num === s.num;
           return h('tr', { class: mine ? 'current' : '' },
             h('td', null, playButton(`song:${s.num}`, () => playSong(app, s))),
-            h('td', { class: 'mono' }, songHex(s.num)),
+            h('td', { class: 'mono' }, ps ? numberSelect(s.num) : songHex(s.num)),
             h('td', null, s.name, s.file ? h('div', { class: 'hint mono' }, s.file) : ''),
             h('td', { class: 'hint' }, kindText(s)),
             h('td', null, s.kind === 'custom' && entry ? volumeSelect(s.num) : ''),

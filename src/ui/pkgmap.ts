@@ -1,4 +1,4 @@
-// The manual assignment inside the upload preview: a package that is more than one resource (e.g. Retry
+// The manual assignment inside the upload preview: a package of several tool folders (e.g. Retry
 // System) is taken apart by hand – each folder or file of the package goes into a folder of the UberASM
 // project or is left out, the resource files get their list.txt numbers. Starts from the suggestion
 // derived from the package (see core/pkgmap.ts); "Install" installs it with this assignment.
@@ -121,7 +121,7 @@ export function assignmentEditor(app: App, p: ManualPreview): { el: HTMLElement;
   render();
   return {
     el: h('div', { class: 'pkg-map' },
-      h('p', null, `“${name}” contains more than one resource. Assign its folders and files to folders of the UberASM project – like copying them into the UberASM Tool folder as its manual says. A folder passes its assignment on to everything in it.`),
+      h('p', null, `“${name}” has UberASM Tool folders next to folders their code includes. Assign its folders and files to folders of the UberASM project – like copying them into the UberASM Tool folder as its manual says. A folder passes its assignment on to everything in it.`),
       treeBox,
       summary,
       h('h3', null, 'list.txt'),
