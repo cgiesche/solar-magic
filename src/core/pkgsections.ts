@@ -1,18 +1,20 @@
 // The sections of a package record (pkgreg.ts), one adapter each: patches, UberASM, blocks, sprites
 // (PIXI), ExGFX files, songs, FG and BG Map16 tiles – the fields of PackageParts, as stored in the ROM.
 // An adapter knows what of the ROM its section observes (read), what came in between two reads
-// (added), how that goes into a record (merge) and when there is nothing (empty). pkgreg.ts loops over
-// them instead of naming each section.
+// (added), how that goes into a record (merge), when there is nothing (empty) and how to take it out of
+// the ROM again (remove). pkgreg.ts loops over them instead of naming each section; the order of
+// SECTIONS is the order of removing (songs first: AddmusicK runs again; patches applied later first).
 
 import type { Rom } from './rom.ts';
 import { listPatches, hashBytes } from './patchreg.ts';
-import { loadProject } from './uberproject.ts';
-import { loadBlockProject } from './blocks.ts';
-import { loadPixiProject } from './pixi.ts';
-import { gfxEntry, VANILLA_GFX } from './patches.ts';
-import { loadMusicProject } from './music.ts';
-import { EXT_FIRST, EXT_TILES, map16Ext, extTileWords, actsLike } from './map16ext.ts';
-import { BG_EXT_FIRST, BG_EXT_TILES, bgMap16Ext, bgExtTileWords } from './bgmap16.ts';
+import { uninstallPatch } from './patchapply.ts';
+import { loadProject, saveProject, emptyProject, type UberProject } from './uberproject.ts';
+import { loadBlockProject, saveBlockProject, type BlockProject } from './blocks.ts';
+import { loadPixiProject, savePixiProject, type PixiProject } from './pixi.ts';
+import { gfxEntry, setGfxEntry, VANILLA_GFX, levelMusic, setLevelMusic } from './patches.ts';
+import { loadMusicProject, saveMusicProject, removeSong } from './music.ts';
+import { EXT_FIRST, EXT_TILES, DEFAULT_ACTS, map16Ext, extTileWords, actsLike, setExtTileWords, setActsLike } from './map16ext.ts';
+import { BG_EXT_FIRST, BG_EXT_TILES, bgMap16Ext, bgExtTileWords, setBgExtTileWords, vanillaBgWords } from './bgmap16.ts';
 import type { UberContext } from './uberasm.ts';
 import type { SpriteFolder } from './pixirt.ts';
 import type { PackageParts } from './pkgreg.ts';
@@ -28,7 +30,19 @@ export interface PartSection<S, P> {
   added(a: S, b: S): P; // what came in from a to b
   merge(rec: P, p: P, now: S): P; // the record's section with more
   empty(p: P): boolean;
+  // takes the package's section (mine, not empty) out of the ROM; what other packages brought as well
+  // (others: their sections) stays. Returns warnings, throws when it fails.
+  remove(rom: Rom, mine: P, others: P[], blank: number[]): string[] | Promise<string[]>;
 }
+
+// sections of tool projects also tell which entries of the project are the package's (the Packages
+// dialog shows them; removing takes them out)
+interface Owns { owned(mine: never, project: never): unknown[] }
+
+const check = (r: { ok: boolean; errors: string[]; warnings: string[] }, what: string): string[] => {
+  if (!r.ok) throw new Error(`${what}: ${r.errors.join(' ')}`);
+  return r.warnings;
+};
 
 // list.txt is written from the assignments, which are compared on their own
 const hashes = (files: Map<string, Uint8Array> | undefined) => new Map([...(files ?? [])].filter(([f]) => f !== 'list.txt').map(([f, c]) => [f, hashBytes([c])]));
@@ -40,10 +54,11 @@ const union = <T>(a: T[], b: T[], key: (x: T) => string = String) => {
 };
 
 // a list of numbers or names: what is new in b
-function listSection<T>(read: (rom: Rom) => T[], key: (x: T) => string = String): PartSection<T[], T[]> {
+function listSection<T>(read: (rom: Rom) => T[], remove: PartSection<T[], T[]>['remove'], key: (x: T) => string = String): PartSection<T[], T[]> {
   return {
     none: () => [],
     read,
+    remove,
     added: (a, b) => { const had = new Set(a.map(key)); return b.filter((x) => !had.has(key(x))); },
     merge: (r, p) => union(r, p, key),
     empty: (p) => !p.length,
@@ -64,10 +79,11 @@ function changedTiles(a: string[], b: string[], first: number): number[] {
 }
 
 // extended Map16 tiles it filled (read: each tile's content, [] while the table is not installed)
-function tileSection(read: (rom: Rom) => string[], first: number): PartSection<string[], number[]> {
+function tileSection(read: (rom: Rom) => string[], first: number, remove: PartSection<string[], number[]>['remove']): PartSection<string[], number[]> {
   return {
     none: () => [],
     read,
+    remove,
     added: (a, b) => changedTiles(a, b, first),
     merge: (r, p) => union(r, p),
     empty: (p) => !p.length,
@@ -77,14 +93,17 @@ function tileSection(read: (rom: Rom) => string[], first: number): PartSection<s
 // its Asar patches (ids in the patch registry); a patch applied anew gets a new id: ids no longer in
 // the ROM are dropped
 const patches: PartSection<string[], string[]> = {
-  ...listSection((rom) => listPatches(rom).filter((p) => !p.kind || p.kind === 'patch').map((p) => p.id)),
+  ...listSection((rom) => listPatches(rom).filter((p) => !p.kind || p.kind === 'patch').map((p) => p.id), (rom, mine) => {
+    const order = listPatches(rom).map((p) => p.id);
+    return mine.filter((x) => order.includes(x)).sort((a, b) => order.indexOf(b) - order.indexOf(a)).flatMap((id) => uninstallPatch(rom, id));
+  }),
   merge: (r, p, now) => union(r.filter((id) => now.includes(id)), p),
 };
 
 type UberPart = PackageParts['uber'];
 interface UberRead { files: Map<string, number>; calls: Set<string>; other: Partial<Record<Other, string>> }
 // UberASM files (with their content), calls (ctx:num:file) and the other list.txt entries
-const uber: PartSection<UberRead, UberPart> = {
+export const uber = {
   none: () => ({ files: [], calls: [], other: {} }),
   read(rom) {
     const p = tryLoad(() => loadProject(rom));
@@ -105,11 +124,23 @@ const uber: PartSection<UberRead, UberPart> = {
   },
   merge: (r, p) => ({ files: union(r.files, p.files), calls: union(r.calls, p.calls, (c) => c.join(':')), other: { ...r.other, ...p.other } }),
   empty: (p) => !p.files.length && !p.calls.length && !Object.keys(p.other).length,
-};
+  // its calls still in the project
+  owned: (mine: UberPart, p: UberProject) => mine.calls.filter(([ctx, num, file]) => p.list[ctx].get(num)?.some((c) => c.file === file)),
+  remove(rom, mine, others) {
+    const p = loadProject(rom) ?? emptyProject();
+    for (const [ctx, num, file] of mine.calls) {
+      const cs = p.list[ctx].get(num)?.filter((c) => c.file !== file);
+      if (cs?.length) p.list[ctx].set(num, cs); else p.list[ctx].delete(num);
+    }
+    for (const k of OTHER) if (mine.other[k] && p.list[k] === mine.other[k]) p.list[k] = null;
+    for (const f of mine.files) if (!others.some((o) => o.files.includes(f))) p.files.delete(f);
+    return check(saveProject(rom, p), 'UberASM');
+  },
+} satisfies PartSection<UberRead, UberPart> & Owns;
 
 type BlocksPart = PackageParts['blocks'];
 // block files and the Map16 tiles they are on (tile → file)
-const blocks: PartSection<{ files: Map<string, number>; tiles: Map<number, string> }, BlocksPart> = {
+export const blocks = {
   none: () => ({ files: [], tiles: [] }),
   read(rom) {
     const p = tryLoad(() => loadBlockProject(rom));
@@ -118,11 +149,21 @@ const blocks: PartSection<{ files: Map<string, number>; tiles: Map<number, strin
   added: (a, b) => ({ files: changedFiles(a.files, b.files), tiles: [...b.tiles].filter(([t, f]) => a.tiles.get(t) !== f).map(([t]) => t) }),
   merge: (r, p) => ({ files: union(r.files, p.files), tiles: union(r.tiles, p.tiles) }),
   empty: (p) => !p.files.length && !p.tiles.length,
-};
+  // its blocks in the project: on one of its tiles with one of its files
+  owned: (mine: BlocksPart, p: BlockProject) => p.list.filter((b) => mine.tiles.includes(b.tile) && mine.files.includes(b.file)),
+  remove(rom, mine, others, blank) {
+    const p = loadBlockProject(rom);
+    if (!p) return [];
+    const own = new Set(blocks.owned(mine, p));
+    p.list = p.list.filter((b) => !own.has(b));
+    for (const f of mine.files) if (!others.some((o) => o.files.includes(f))) p.files.delete(f);
+    return check(saveBlockProject(rom, p, blank), 'Custom Blocks');
+  },
+} satisfies PartSection<{ files: Map<string, number>; tiles: Map<number, string> }, BlocksPart> & Owns;
 
 type PixiPart = PackageParts['pixi'];
 // sprite files and the list entries (kind:num → file)
-const pixi: PartSection<{ files: Map<string, number>; sprites: Map<string, string> }, PixiPart> = {
+export const pixi = {
   none: () => ({ files: [], list: [] }),
   read(rom) {
     const p = tryLoad(() => loadPixiProject(rom));
@@ -134,7 +175,20 @@ const pixi: PartSection<{ files: Map<string, number>; sprites: Map<string, strin
   }),
   merge: (r, p) => ({ files: union(r.files, p.files), list: union(r.list, p.list, (e) => e.join(':')) }),
   empty: (p) => !p.files.length && !p.list.length,
-};
+  // its sprites in the project: one of its kind/number entries with one of its files
+  owned(mine: PixiPart, p: PixiProject) {
+    const keys = new Set(mine.list.map((e) => e.join(':')));
+    return p.list.filter((e) => keys.has(`${e.kind}:${e.num}`) && mine.files.includes(e.file));
+  },
+  remove(rom, mine, others) {
+    const p = loadPixiProject(rom);
+    if (!p) return [];
+    const own = new Set(pixi.owned(mine, p));
+    p.list = p.list.filter((e) => !own.has(e));
+    for (const f of mine.files) if (!others.some((o) => o.files.includes(f))) p.files.delete(f);
+    return check(savePixiProject(rom, p), 'Custom Sprites');
+  },
+} satisfies PartSection<{ files: Map<string, number>; sprites: Map<string, string> }, PixiPart> & Owns;
 
 // ExGFX files it created (read: the file's address per number, 0 = none)
 const gfx: PartSection<number[], number[]> = {
@@ -143,13 +197,42 @@ const gfx: PartSection<number[], number[]> = {
   added: (a, b) => b.flatMap((addr, i) => (addr && !a[i] ? [i] : [])),
   merge: (r, p) => union(r, p),
   empty: (p) => !p.length,
+  remove(rom, mine) {
+    for (const n of mine) {
+      const e = n >= VANILLA_GFX ? gfxEntry(rom, n) : null;
+      if (!e) continue;
+      rom.freeAt(e.addr);
+      setGfxEntry(rom, n, 0, false);
+    }
+    return [];
+  },
 };
 
 // songs it added to the music project (their .txt)
-const music = listSection((rom) => (tryLoad(() => loadMusicProject(rom))?.songs ?? []).map((s) => s.file));
+// (AddmusicK inserts the rest again; levels set to a removed song get their header music back)
+const music = listSection((rom) => (tryLoad(() => loadMusicProject(rom))?.songs ?? []).map((s) => s.file), async (rom, mine) => {
+  const p = loadMusicProject(rom);
+  if (!p) return [];
+  const nums = p.songs.filter((s) => mine.includes(s.file)).map((s) => s.num);
+  for (const n of nums) removeSong(p, n);
+  const r = await saveMusicProject(rom, p);
+  if (!r.ok) throw new Error(`Music: ${r.errors.join(' ')}`);
+  for (let l = 0; l < 0x200; l++) if (nums.includes(levelMusic(rom, l)) && !p.songs.some((s) => s.num === levelMusic(rom, l))) setLevelMusic(rom, l, 0);
+  return r.warnings;
+});
 
-const map16 = tileSection((rom) => (map16Ext(rom) ? Array.from({ length: EXT_TILES - EXT_FIRST }, (_, i) => `${extTileWords(rom, EXT_FIRST + i)!.join()}:${actsLike(rom, EXT_FIRST + i)}`) : []), EXT_FIRST);
-const bgMap16 = tileSection((rom) => (bgMap16Ext(rom) ? Array.from({ length: BG_EXT_TILES - BG_EXT_FIRST }, (_, i) => bgExtTileWords(rom, BG_EXT_FIRST + i)!.join()) : []), BG_EXT_FIRST);
+// emptied again, unless another package filled them too
+const map16 = tileSection((rom) => (map16Ext(rom) ? Array.from({ length: EXT_TILES - EXT_FIRST }, (_, i) => `${extTileWords(rom, EXT_FIRST + i)!.join()}:${actsLike(rom, EXT_FIRST + i)}`) : []), EXT_FIRST,
+  (rom, mine, others, blank) => {
+    for (const t of mine) if (map16Ext(rom) && !others.some((o) => o.includes(t))) { setExtTileWords(rom, t, blank, blank); setActsLike(rom, t, DEFAULT_ACTS, blank); }
+    return [];
+  });
+const bgMap16 = tileSection((rom) => (bgMap16Ext(rom) ? Array.from({ length: BG_EXT_TILES - BG_EXT_FIRST }, (_, i) => bgExtTileWords(rom, BG_EXT_FIRST + i)!.join()) : []), BG_EXT_FIRST,
+  (rom, mine, others) => {
+    const fill = vanillaBgWords(rom, 0x025);
+    for (const t of mine) if (bgMap16Ext(rom) && !others.some((o) => o.includes(t))) setBgExtTileWords(rom, t, fill);
+    return [];
+  });
 
 // every field of PackageParts has its adapter (the compiler checks it)
 type Sections = { [K in keyof PackageParts]-?: PartSection<any, NonNullable<PackageParts[K]>> };

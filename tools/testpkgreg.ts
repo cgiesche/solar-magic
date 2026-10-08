@@ -77,7 +77,7 @@ for (const k of SECTION_KEYS) {
 }
 
 // removing A: its patch, call, files and block go; the shared file stays for B
-const w = uninstallPackage(rom, a.id, blank);
+const w = await uninstallPackage(rom, a.id, blank);
 const up = loadProject(rom)!;
 check(!listPatches(rom).some((p) => p.name === 'A-Patch') && rom.r8(0x00a1da) === romBefore[0x21da], 'A: patch removed, byte restored');
 check(!up.files.has('level/a.asm') && up.files.has('library/shared.asm') && !up.list.level.has(0x105) && up.list.level.has(0x106), 'A: UberASM file and call removed, shared file kept');
@@ -85,7 +85,7 @@ check(loadBlockProject(rom)!.list.map((x) => x.tile).join() === '673', 'A: block
 check(listPackages(rom).map((r) => r.id).join() === bId, 'A: record removed' + (w.length ? ` (${w.join(' ')})` : ''));
 
 // removing B too: projects and ExGFX gone, the ROM as before both packages
-uninstallPackage(rom, bId, blank);
+await uninstallPackage(rom, bId, blank);
 check(!loadProject(rom) && !loadBlockProject(rom) && !gfxEntry(rom, 0x80) && !listPackages(rom).length, 'B: UberASM, blocks and ExGFX removed');
 check(listPatches(rom).length === 0, 'no registry entries left');
 
@@ -93,7 +93,7 @@ check(listPatches(rom).length === 0, 'no registry entries left');
 {
   const before = rom.data.slice();
   let threw = false;
-  try { uninstallPackage(rom, 'nope', blank); } catch { threw = true; }
+  try { await uninstallPackage(rom, 'nope', blank); } catch { threw = true; }
   check(threw && rom.data.every((v, i) => v === before[i]), 'unknown package: error, ROM unchanged');
 }
 
@@ -117,9 +117,9 @@ check(listPatches(rom).length === 0, 'no registry entries left');
   const c = track('C', () => addUber('library/common.asm', 'common:\n  RTL\n'));
   const d = track('D', (claim) => { addUber('library/common.asm', 'common:\n  RTL\n'); claim('uber', 'library/common.asm'); addUber('level/d.asm', 'main:\n  RTL\n'); });
   check(c.uber.files.join() === 'library/common.asm' && d.uber.files.includes('library/common.asm') && d.uber.files.includes('level/d.asm'), 'a claimed file that was there already belongs to the package');
-  uninstallPackage(rom, c.id, blank);
+  await uninstallPackage(rom, c.id, blank);
   check(loadProject(rom)?.files.has('library/common.asm') === true, '… and stays when the other package is removed');
-  uninstallPackage(rom, d.id, blank);
+  await uninstallPackage(rom, d.id, blank);
 
   const patch = (n: number) => ({ files: new Map([['e.asm', `org $00A1DA\n  db $${n}\n`]]), main: 'e.asm', name: 'E-Patch' });
   let e = track('E', () => ok(applyPatch(rom, patch(0xea))));
@@ -127,7 +127,7 @@ check(listPatches(rom).length === 0, 'no registry entries left');
   e = recordPackageChange(rom, e, () => reapplyPatch(rom, oldId, patch(0xeb))).pkg!;
   const newId = listPatches(rom).find((p) => p.name === 'E-Patch')!.id;
   check(!!e && newId !== oldId && e.patches.join() === newId && listPackages(rom).length === 1, 'patch applied anew: the record holds its new id, not the old one');
-  uninstallPackage(rom, e.id, blank);
+  await uninstallPackage(rom, e.id, blank);
 }
 
 if (bad) { console.log(`${bad} FAILED`); process.exit(1); }

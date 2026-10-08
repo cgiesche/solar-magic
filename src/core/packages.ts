@@ -26,7 +26,7 @@ import { installEditorPatch, extGfxAvailable, setLevelMusic } from './patches.ts
 import { installVramPatch } from './vrampatch.ts';
 import { installMap16Ext, map16Ext, setExtTileWords, EXT_FIRST, EXT_TILES } from './map16ext.ts';
 import { ALL, type UberContext } from './uberasm.ts';
-import { recordPackageChangeAsync, emptyParts, savePackage, listPackages, packageArchive, uninstallPackageWithMusic, type Package, type Claim } from './pkgreg.ts';
+import { recordPackageChangeAsync, emptyParts, savePackage, listPackages, packageArchive, uninstallPackage, type Package, type Claim } from './pkgreg.ts';
 import { listPatches } from './patchreg.ts';
 
 // one part as the preview lists it
@@ -362,7 +362,7 @@ async function installStep(rom: Rom, preview: ReadyPreview, step: Step, opt: Ins
 
 // the package and everything it brought (songs too); files another package brought as well stay
 export function removePackage(rom: Rom, id: string, blank: number[]): Promise<string[]> {
-  return uninstallPackageWithMusic(rom, id, blank);
+  return uninstallPackage(rom, id, blank);
 }
 
 // ---------- legacy packages ----------

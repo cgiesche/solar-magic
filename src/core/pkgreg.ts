@@ -7,18 +7,10 @@
 
 import { deflateSync, inflateSync } from 'fflate';
 import { Rom, pcToSnes } from './rom.ts';
-import { listPatches, writeChunks, readChunks } from './patchreg.ts';
-import { uninstallPatch } from './patchapply.ts';
-import { loadProject, saveProject, emptyProject } from './uberproject.ts';
-import { loadBlockProject, saveBlockProject } from './blocks.ts';
-import { loadPixiProject, savePixiProject } from './pixi.ts';
-import { gfxEntry, setGfxEntry, VANILLA_GFX, levelMusic, setLevelMusic } from './patches.ts';
-import { loadMusicProject, saveMusicProject, removeSong } from './music.ts';
-import { DEFAULT_ACTS, map16Ext, setExtTileWords, setActsLike } from './map16ext.ts';
-import { bgMap16Ext, setBgExtTileWords, vanillaBgWords } from './bgmap16.ts';
+import { readChunks } from './patchreg.ts';
 import type { UberContext } from './uberasm.ts';
 import type { SpriteFolder } from './pixirt.ts';
-import { SECTIONS, SECTION_KEYS, OTHER, type SectionKey, type PartSection, type Other } from './pkgsections.ts';
+import { SECTIONS, SECTION_KEYS, type SectionKey, type PartSection, type Other } from './pkgsections.ts';
 
 const MAGIC = [0x53, 0x4d, 0x57, 0x4b]; // "SMWK"
 const VERSION = 1;
@@ -203,87 +195,22 @@ function startRecording(rom: Rom, target: PackageTarget) {
 
 // ---------- removing a package ----------
 
-// removes everything the package put into the ROM and its record; files another package also brought
-// stay. All or nothing: throws, the ROM unchanged. Returns warnings.
-export function uninstallPackage(rom: Rom, id: string, blank: number[]): string[] {
+// removes everything the package put into the ROM (each section by its adapter, in their order) and
+// its record; what another package brought as well stays. All or nothing: throws, the ROM unchanged.
+// Returns warnings.
+export async function uninstallPackage(rom: Rom, id: string, blank: number[]): Promise<string[]> {
   const all = listPackages(rom);
   const rec = all.find((r) => r.id === id);
   if (!rec) throw new Error('Package is not installed');
-  const others = all.filter((r) => r !== rec);
-  const shared = (tool: 'uber' | 'blocks' | 'pixi', f: string) => others.some((r) => r[tool].files.includes(f));
+  const mine = complete(rec) as unknown as Parts, others = all.filter((r) => r !== rec).map((r) => complete(r) as unknown as Parts);
   const before = rom.snapshot();
   const warnings: string[] = [];
-  const check = (r: { ok: boolean; errors: string[]; warnings: string[] }, what: string) => {
-    if (!r.ok) throw new Error(`${what}: ${r.errors.join(' ')}`);
-    warnings.push(...r.warnings);
-  };
   try {
-    if (rec.pixi.files.length || rec.pixi.list.length) {
-      const p = loadPixiProject(rom);
-      if (p) {
-        const mine = new Set(rec.pixi.list.map((e) => e.join(':')));
-        p.list = p.list.filter((e) => !mine.has(`${e.kind}:${e.num}`) || !rec.pixi.files.includes(e.file));
-        for (const f of rec.pixi.files) if (!shared('pixi', f)) p.files.delete(f);
-        check(savePixiProject(rom, p), 'Custom Sprites');
-      }
-    }
-    if (rec.blocks.files.length || rec.blocks.tiles.length) {
-      const p = loadBlockProject(rom);
-      if (p) {
-        p.list = p.list.filter((b) => !rec.blocks.tiles.includes(b.tile) || !rec.blocks.files.includes(b.file));
-        for (const f of rec.blocks.files) if (!shared('blocks', f)) p.files.delete(f);
-        check(saveBlockProject(rom, p, blank), 'Custom Blocks');
-      }
-    }
-    if (rec.uber.files.length || rec.uber.calls.length || Object.keys(rec.uber.other).length) {
-      const p = loadProject(rom) ?? emptyProject();
-      for (const [ctx, num, file] of rec.uber.calls) {
-        const cs = p.list[ctx].get(num)?.filter((c) => c.file !== file);
-        if (cs?.length) p.list[ctx].set(num, cs); else p.list[ctx].delete(num);
-      }
-      for (const k of OTHER) if (rec.uber.other[k] && p.list[k] === rec.uber.other[k]) p.list[k] = null;
-      for (const f of rec.uber.files) if (!shared('uber', f)) p.files.delete(f);
-      check(saveProject(rom, p), 'UberASM');
-    }
-    // patches applied later first
-    const order = listPatches(rom).map((p) => p.id);
-    for (const pid of [...rec.patches].filter((x) => order.includes(x)).sort((a, b) => order.indexOf(b) - order.indexOf(a))) warnings.push(...uninstallPatch(rom, pid));
-    // Map16 tiles back to empty ones, unless another package filled them too
-    for (const t of rec.map16 ?? []) if (map16Ext(rom) && !others.some((r) => r.map16?.includes(t))) { setExtTileWords(rom, t, blank, blank); setActsLike(rom, t, DEFAULT_ACTS, blank); }
-    const fill = vanillaBgWords(rom, 0x025);
-    for (const t of rec.bgMap16 ?? []) if (bgMap16Ext(rom) && !others.some((r) => r.bgMap16?.includes(t))) setBgExtTileWords(rom, t, fill);
-    for (const n of rec.gfx) {
-      const e = n >= VANILLA_GFX ? gfxEntry(rom, n) : null;
-      if (!e) continue;
-      rom.freeAt(e.addr);
-      setGfxEntry(rom, n, 0, false);
+    for (const k of SECTION_KEYS) {
+      if (section(k).empty(mine[k])) continue;
+      warnings.push(...await section(k).remove(rom, mine[k], others.map((o) => o[k]), blank));
     }
     removePackageRecord(rom, id);
-  } catch (e) {
-    rom.restore(before);
-    throw e;
-  }
-  return warnings;
-}
-
-// uninstallPackage for packages with songs too: the songs are removed first (AddmusicK runs again;
-// levels set to a removed song get their header music back), all or nothing like uninstallPackage
-export async function uninstallPackageWithMusic(rom: Rom, id: string, blank: number[]): Promise<string[]> {
-  const rec = listPackages(rom).find((r) => r.id === id);
-  if (!rec) throw new Error('Package is not installed');
-  const before = rom.snapshot();
-  const warnings: string[] = [];
-  try {
-    const p = rec.music?.length ? loadMusicProject(rom) : null;
-    if (p) {
-      const nums = p.songs.filter((s) => rec.music!.includes(s.file)).map((s) => s.num);
-      for (const n of nums) removeSong(p, n);
-      const r = await saveMusicProject(rom, p);
-      if (!r.ok) throw new Error(`Music: ${r.errors.join(' ')}`);
-      warnings.push(...r.warnings);
-      for (let l = 0; l < 0x200; l++) if (nums.includes(levelMusic(rom, l)) && !p.songs.some((s) => s.num === levelMusic(rom, l))) setLevelMusic(rom, l, 0);
-    }
-    warnings.push(...uninstallPackage(rom, id, blank));
   } catch (e) {
     rom.restore(before);
     throw e;
