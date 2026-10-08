@@ -5,6 +5,9 @@ import { h, logEntries, onLog, clearLog, type LogEntry } from './dom.ts';
 const PREF = 'smw-log-open';
 const KIND_LABEL = { info: 'Message', error: 'Error', event: 'Event' } as const;
 
+// commit of the build (set by the Docker build), shown at the right of the bar
+const COMMIT = import.meta.env.VITE_COMMIT || '';
+
 const pad = (n: number) => String(n).padStart(2, '0');
 const timeStr = (d: Date) => `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 
@@ -22,9 +25,10 @@ export class LogBar {
     const copyBtn = h('button', { title: 'Copy log as text to the clipboard' }, 'Copy');
     copyBtn.onclick = () => this.copy(copyBtn);
     const clearBtn = h('button', { class: 'danger', title: 'Remove all entries', onclick: () => clearLog() }, 'Clear');
-    const head = h('div', { class: 'log-head' }, this.toggleBtn, this.errBadge, this.latest, h('span', { class: 'log-actions' }, copyBtn, clearBtn));
+    const head = h('div', { class: 'log-head' }, this.toggleBtn, this.errBadge, this.latest, h('span', { class: 'log-actions' }, copyBtn, clearBtn),
+      h('span', { class: 'log-build', title: COMMIT ? `Build from commit ${COMMIT}` : 'Development build' }, COMMIT ? COMMIT.slice(0, 7) : 'dev'));
     // clicking the collapsed line opens it, the buttons keep their own action
-    head.addEventListener('click', (e) => { if (!(e.target as HTMLElement).closest('.log-actions')) this.toggle(); });
+    head.addEventListener('click', (e) => { if (!(e.target as HTMLElement).closest('.log-actions, .log-build')) this.toggle(); });
     this.root = h('div', { class: 'logbar' }, head, this.list);
     for (const e of logEntries) this.list.append(this.row(e));
     onLog((e, repeat) => this.add(e, repeat));
