@@ -40,6 +40,15 @@ check(host.pending === 0 && host.next() === null, 'changed ROM: queue dropped');
 host.ask([{ ts: 0, k: 0x2b }]);
 check(host.next()?.gen === 2, 'results after the change carry its generation');
 
+// a result the editor dropped (it came from an older generation) still reaches it when asked again:
+// the host's own cache knows it, its reply must hand the entry back all the same
+host.ask([{ ts: 0, k: 0x2c }]);
+host.next(); // (dropped by the editor)
+host.setRom(3, changed);
+host.ask([{ ts: 0, k: 0x2c }]);
+const again = host.next();
+check(again?.type === 'probe' && again.put.some(([k]) => k === blockKey(0, 0x2c)), 'a result already known to the host is handed back again');
+
 // object kinds and a level scan: as computed directly; an asked job between their slices goes first
 const lv = loadLevel(rom, 0x105), l2 = rom.r24(L2_PTRS + 0x105 * 3);
 const scanLevel: ScanLevel = {
@@ -64,7 +73,7 @@ check(k?.type === 'kinds' && k.ts === 1 && JSON.stringify([...k.kinds!.kinds]) =
 check(sc?.type === 'scan' && sc.id === 7 && JSON.stringify(sc.result) === JSON.stringify(scanned) && sc.put.some(([key]) => key === 'scan-key'), 'level scan as played directly, with its cache entry');
 host.handle({ type: 'scan', id: 8, key: 'scan-key', level: scanLevel });
 host.next();
-host.setRom(3, rom.data.slice());
+host.setRom(4, rom.data.slice());
 check(host.pending === 0, 'changed ROM: tasks dropped');
 
 console.log(bad ? `${bad} failures` : 'all ok');

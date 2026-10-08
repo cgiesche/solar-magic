@@ -190,6 +190,11 @@ export class ProbeHost {
       console.error(e);
       failed = true;
     }
-    return { type: 'probe', gen: this.gen, job, put: p.results.flush().put, failed };
+    const put = p.results.flush().put, key = jobKey(job);
+    // a result found in this cache is handed back too: the editor may have dropped it when it came
+    // (computed on an older ROM generation) and would otherwise ask for it again and again
+    const e = !failed && !put.some(([k]) => k === key) ? p.results.entry(key) : undefined;
+    if (e) put.push([key, e]);
+    return { type: 'probe', gen: this.gen, job, put, failed };
   }
 }
