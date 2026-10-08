@@ -16,6 +16,11 @@ export const OV_BG = 0xa000; // edited BG tilemap (editor format, see bg.ts)
 const OV_BG_HOOK = 0xb000; // LDA #$FF : STA $6A : RTL (BG data bank = overlay)
 const OV_STUB = 0xc000; // JSL stub used to call game routines
 const INIT_TABLES = 0x07f7d2; // game routine that sets up a new sprite's tables (tweakers), X = slot
+// where the level load calls the upload of the level music bank (JSR $8134, 3 bytes; AddmusicK's
+// patch makes it NOPs): it uploads when the level is entered from the overworld ($141A = 0). Loads
+// here go by screen exit ($141A = 1), so the sound unit would keep the title/overworld bank, whose
+// songs have the same numbers
+const LEVEL_MUSIC_CALL = 0x009702;
 export const OV_BASE_SNES = 0xfe8000;
 
 export function overlaySnes(off: number): number {
@@ -148,7 +153,6 @@ export class LevelEmulator {
     const s = this.snes;
     if (!ov.continueState) s.loadState(this.baseState!);
     const w = s.wram;
-    w[RAM.sublevelCount] = 1;
     w[RAM.marioX + 1] = 0;
     w[RAM.marioY + 1] = 0;
     w[RAM.screenMode] = 0;
@@ -159,6 +163,10 @@ export class LevelEmulator {
     if (!ov.continueState || (w[RAM.submap] !== 0 ? 1 : 0) !== ((level >> 8) & 1)) w[RAM.submap] = (level >> 8) & 1;
     w[RAM.useSecondaryExit] = 0;
     w[RAM.introLevel] = 0;
+    // coming from the title screen or overworld, the game's call of the music bank upload sees $141A
+    // as on entering a level from there (the routine checks the other conditions itself)
+    const musicCall = s.apu && w[RAM.sublevelCount] === 0 ? snesToPc(LEVEL_MUSIC_CALL) : -1;
+    w[RAM.sublevelCount] = 1;
     // translevel $24 (Chocolate Island 2) makes the exit-based load pick a room by time/coins instead
     const tl = ov.translevel ?? mainTranslevel(level) ?? 0;
     w[RAM.translevel] = tl === 0x24 ? 0 : tl;
@@ -240,7 +248,9 @@ export class LevelEmulator {
         if (a >= MAP_BASE && a < MAP_BASE + MAP_SIZE) { touch(current, a - MAP_BASE); if (trace) put(a - MAP_BASE, v, false); }
         else if (a >= MAP_HI + MAP_BASE && a < MAP_HI + MAP_BASE + MAP_SIZE) { touch(current, a - MAP_HI - MAP_BASE); if (trace) put(a - MAP_HI - MAP_BASE, v, true); }
       },
-      onRomRead: trace ? (ro: number) => {
+      onRomRead: trace || musicCall >= 0 ? (ro: number) => {
+        if (cpu.inFetch && (ro === musicCall || ro === musicCall + 3)) w[RAM.sublevelCount] = ro === musicCall ? 0 : 1;
+        if (!trace) return;
         if (skip === null || skip[ro] !== 1) trace.rom.add(ro);
         if (cpu.inFetch) { trace.code.add(ro); return; }
         if (current < 0) return;
