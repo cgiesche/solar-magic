@@ -13,6 +13,7 @@ import { STRUCT_EXT, TRANSPARENT, hasStructs, freeStructureNumber, readStructure
 import { EXT_TILES, map16Ext } from '../core/map16ext.ts';
 import { bgMap16Ext, installBgMap16Ext } from '../core/bgmap16.ts';
 import { TileCache, map16Source, drawMap16 } from '../core/render.ts';
+import { probeable } from '../core/probeclient.ts';
 import { probeText, spritesOf, spriteProbeAt, enterText, enterSuffix } from '../core/blockprobe.ts';
 
 // behaviour of the given Map16 tiles when hit from below or entered (only tiles with an effect);
@@ -21,7 +22,7 @@ export function blockSummary(app: App, tiles: number[], all = false): string[] |
   const out: string[] = [];
   let pending = false;
   for (const t of tiles.slice(0, 16)) {
-    const p = app.blockInfo(t);
+    const p = app.probes.block(t);
     if (!p) { pending = true; continue; }
     if (p.summary || p.enter || all) out.push(tiles.length > 1 || all ? `${hex3(t)}: ${probeText(p)}` : p.summary ? p.summary + enterSuffix(p) : enterText(p.enter));
   }
@@ -245,7 +246,7 @@ export class Palette {
     // tooltip: tile number and behaviour when hit from below
     let hoverTile = -1, hoverCanvas: HTMLCanvasElement | null = null;
     const tip = () => {
-      const p = app.blockInfo(hoverTile);
+      const p = app.probes.block(hoverTile);
       if (hoverCanvas) hoverCanvas.title = `Tile ${hex3(hoverTile)}: ${p ? probeText(p) : 'determining behavior …'}`;
     };
     this.m16Tip = () => { if (hoverTile >= 0 && hoverCanvas?.isConnected) tip(); };
@@ -450,7 +451,7 @@ export class Palette {
         const n = id & 0xff, extra = id >> 8;
         const name = app.spriteLabel(id);
         // what the sprite gives when hit from below or jumped on (emulated, see blockprobe.ts)
-        const p = app.spriteInfo(id);
+        const p = app.probes.sprite(id);
         const info = p?.summary ?? '';
         const num = id >= 0x200 ? `C${hex2(n)}` : hex2(n);
         if (f && !(`${hex2(n)} ${num} ${name} ${info}${id >= 0x200 ? ' custom' : ''}`.toLowerCase().includes(f))) continue;
@@ -694,8 +695,8 @@ export class Properties {
         this.actions(false),
       );
       // behaviour when hit from below or jumped on, at this position and in general (emulated)
-      const p = app.spriteInfo(id);
-      this.probePending = !p && (s.extra >= 2 ? s.num < 0xc0 : s.num < 0xc9);
+      const p = app.probes.sprite(id);
+      this.probePending = !p && probeable(id);
       if (p?.summary) {
         const here = spriteProbeAt(p, s.x, s.y).summary;
         this.body.append(h('div', { class: 'hint' }, `At this position: ${here ?? 'nothing'}`,

@@ -414,7 +414,7 @@ export class LevelView {
       const a = g.addr(x, y);
       if (a < 0) return undefined;
       const t = map16Tile(w, a);
-      if (!info.has(t)) info.set(t, app.collisionInfo(t));
+      if (!info.has(t)) info.set(t, app.probes.collision(t));
       return info.get(t);
     };
     ctx.fillStyle = 'rgba(0,0,0,0.45)';
@@ -503,7 +503,7 @@ export class LevelView {
     for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
       const a = g.addr(x, y);
       if (a < 0) continue;
-      const p = app.blockInfo(map16Tile(w, a));
+      const p = app.probes.block(map16Tile(w, a));
       if (!p) continue;
       if (p.summary !== null) this.drawItem(ctx, probeAt(p, x), x * 16, y * 16);
       if (p.enter) this.drawEnter(ctx, p.enter, x * 16, y * 16);
@@ -535,7 +535,7 @@ export class LevelView {
     const app = this.app;
     ctx.globalAlpha = 0.65;
     for (const s of app.level.sprites) {
-      const p = app.spriteInfo(spriteId(s));
+      const p = app.probes.sprite(spriteId(s));
       if (p?.summary) this.drawItem(ctx, spriteProbeAt(p, s.x, s.y), s.x * 16, s.y * 16);
     }
     ctx.globalAlpha = 1;
@@ -806,10 +806,10 @@ export class LevelView {
     if (a >= 0) {
       const t = map16Tile(app.render.wram, a);
       txt += `Map16 ${hex3(t)}`;
-      const p = app.mode === 'bg' ? undefined : app.blockInfo(t); // result arrives via 'blockinfo'
+      const p = app.mode === 'bg' ? undefined : app.probes.block(t); // result arrives via 'blockinfo'
       const sum = [p && probeAt(p, tx).summary, p && enterText(p.enter)].filter(Boolean).join(', ');
       if (sum) txt += ` (${sum})`;
-      const c = app.show.collision && app.mode !== 'bg' ? app.collisionInfo(t) : undefined;
+      const c = app.show.collision && app.mode !== 'bg' ? app.probes.collision(t) : undefined;
       if (c) txt += ` · ${collisionText(c)}`;
       const tide = app.show.collision && app.mode !== 'bg' ? app.tide() : null;
       if (tide && ty * 16 + 8 >= tide.high) txt += ty * 16 + 8 >= tide.low ? ' · water (tide)' : ' · water at high tide';
@@ -827,7 +827,7 @@ export class LevelView {
       const tag = hits.length > 1 ? (mode === 'spr' ? '' : mode === 'l1' ? ' (Layer 1)' : ' (Layer 2)') : '';
       if (mode === 'spr') {
         const s = item as LevelSprite;
-        const p = app.spriteInfo(spriteId(s));
+        const p = app.probes.sprite(spriteId(s));
         const sum = p && spriteProbeAt(p, s.x, s.y).summary;
         txt += `  · ${s.extra >= 2 ? 'Custom Sprite' : 'Sprite'} ${hex2(s.num)} ${app.spriteLabel(spriteId(s))}${sum ? ` (${sum})` : ''}`;
       }

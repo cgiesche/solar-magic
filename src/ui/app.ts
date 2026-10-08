@@ -28,7 +28,7 @@ import { kindsStillValid, storeKinds, loadKinds, resizeObjectSize, type ObjKind,
 import { JumpArcs, ARC_SPEEDS, type JumpArc } from '../core/jumparcs.ts';
 import type { ScanResult } from '../core/levelscan.ts';
 import { layer3Kinds, tideKind, layer3Top, type Layer3Kind } from '../core/layer3.ts';
-import { variantOf, blockKey, spriteKey, type BlockProbe, type SpriteProbe, type CollisionProbe } from '../core/blockprobe.ts';
+import { variantOf, blockKey, spriteKey, type BlockProbe, type SpriteProbe } from '../core/blockprobe.ts';
 import type { ProbeReply } from '../core/probehost.ts';
 import { ProbeClient } from '../core/probeclient.ts';
 import { map16Tile, bgTile } from '../core/ram.ts';
@@ -90,7 +90,8 @@ export class App {
   offsetToTile2 = new Int32Array(MAP_SIZE);
   listeners = new Map<string, Set<Listener>>();
   renderError: string | null = null;
-  // block behaviour probes (emulated hits), object kinds and level scan, run in a Web Worker
+  // block behaviour probes (emulated hits), object kinds and level scan, run in a Web Worker;
+  // 'blockinfo' once the asked or the prefetched probes are done
   probes: ProbeClient;
   exitScreen = 0;
   // mode 'exit': the chosen entrance marker, else the screen exitScreen (and its exit)
@@ -375,7 +376,7 @@ export class App {
     for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
       const a = g.addr(x, y);
       if (a < 0) continue;
-      const p = this.blockInfo(map16Tile(w, a));
+      const p = this.probes.block(map16Tile(w, a));
       if (!p) pending = true;
       else if (p.enter) return true;
     }
@@ -570,7 +571,7 @@ export class App {
       if (img === undefined) this.queueBytesImage(id, bytes);
       return img ? this.spriteCanvas(img) : base;
     }
-    const p = this.spriteInfo(id);
+    const p = this.probes.sprite(id);
     if (!p || p.variants.reps.length < 2) return base;
     const img = this.results.get<SpriteImage | null>(this.variantKey(id, p.variants.reps[variantOf(p.variants, x, y)]));
     if (img === undefined) this.queueVariantImages(id);
@@ -837,23 +838,12 @@ export class App {
     return [...out].sort((a, b) => a - b);
   }
 
-  // What a Map16 tile does when hit from below. Unknown tiles are probed in the background;
-  // 'blockinfo' is emitted once queued probes are done.
-  blockInfo(tile: number): BlockProbe | undefined {
-    return this.probes.block(tile);
-  }
-
   // finished probes only (nothing is queued)
   cachedBlock(tile: number): BlockProbe | undefined {
     return this.results.get(blockKey(this.level.header.tileset, tile));
   }
   cachedSprite(num: number): SpriteProbe | undefined {
     return this.results.get(spriteKey(this.level.header.tileset, num));
-  }
-
-  // How Mario collides with a Map16 tile (probed on demand, 'blockinfo' when done)
-  collisionInfo(tile: number): CollisionProbe | undefined {
-    return this.probes.collision(tile);
   }
 
   // ------------- level scan (see levelscan.ts) -------------
@@ -996,11 +986,6 @@ export class App {
     if (this.arcWant === want) this.arcWant = null;
     this.setBusy('arcs', null);
     this.emit('arcs');
-  }
-
-  // the same for a sprite id hit from below (normal sprites only, not shooters/generators)
-  spriteInfo(num: number): SpriteProbe | undefined {
-    return this.probes.sprite(num);
   }
 
   // kind of a standard object in the current tileset; null while unknown (then treated as plain)
