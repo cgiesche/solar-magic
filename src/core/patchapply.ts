@@ -328,10 +328,10 @@ export function uninstallPatch(rom: Rom, id: string): string[] {
   if (patchedHash(rom, p.segs) !== p.check) warnings.push('Bytes changed by the patch have been modified since; they are reset to their original state anyway.');
   const orig = backupBytes(rom, p);
   let o = 0;
-  for (const [pc, n] of p.segs) { rom.data.set(orig.subarray(o, o + n), pc); o += n; }
+  for (const [pc, n] of p.segs) { rom.writeAt(pc, orig.subarray(o, o + n)); o += n; }
   for (const t of p.own) {
     const n = rom.isRatsAt(t);
-    if (n > 0) rom.data.fill(0, t, t + n + 8);
+    if (n > 0) rom.fillAt(t, n + 8);
   }
   removeEntry(rom, id);
   return warnings;

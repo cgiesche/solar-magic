@@ -34,7 +34,6 @@ check(bad === 0, 'levels unchanged by the patch');
 const T = TRANSPARENT;
 writeStructure(rom, 5, { w: 3, h: 2, tiles: [0x130, T, 0x132, 0x025, 0x1ff, 0x0af], name: 'Test ä' });
 writeStructure(rom, 7, { w: 2, h: 2, tiles: [0x145, 0x146, 0x147, 0x148], name: '' });
-e1.syncRom();
 const s5 = readStructure(rom, 5);
 check(s5?.name === 'Test ä' && s5.w === 3 && s5.tiles[1] === T && s5.tiles[4] === 0x1ff, 'read back');
 check(listStructures(rom).size === 2, 'list');

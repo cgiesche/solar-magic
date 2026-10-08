@@ -193,7 +193,7 @@ export class RomHistory {
       this.rom.extra = extra;
     }
     if (e.whole) { this.rom.data = (forward ? e.whole.after : e.whole.before).slice(); return; }
-    for (const r of e.runs) this.rom.data.set(forward ? r.neu : r.old, r.off);
+    for (const r of e.runs) this.rom.writeAt(r.off, forward ? r.neu : r.old);
   }
 
   // undoes the last edit; null when there is none. Throws when the ROM changed elsewhere since

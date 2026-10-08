@@ -77,14 +77,13 @@ export class ProbeHost {
       const emu = this.prober.emu, rom = this.rom;
       // ROM bytes of GFX file data: emulated results don't depend on them (see App.gfxSkipMask)
       emu.skipMask = () => {
-        if (this.mask.gen !== emu.romGen) this.mask = { gen: emu.romGen, mask: gfxSkipMask(rom) };
+        if (this.mask.gen !== rom.gen) this.mask = { gen: rom.gen, mask: gfxSkipMask(rom) };
         return this.mask.mask;
       };
       return;
     }
     this.rom.data = data;
-    this.prober.reset(); // syncs the emulator's ROM
-    for (const e of this.emus.values()) e.syncRom();
+    this.prober.reset(); // probe levels that read changed pages are prepared again
   }
 
   handle(m: ProbeMessage): void {

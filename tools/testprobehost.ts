@@ -27,7 +27,7 @@ check(done.map((d) => d.job.k).join(',') === [0x11f, PROBE_RUNS, 0x130, PROBE_SP
 check(done.every((d) => d.gen === 1 && !d.failed && d.put.some(([k]) => k === jobKey(d.job))), 'every job gives its result entry');
 
 // the entries hold in the editor's cache (same ROM) and equal the prober's results
-const cache = new ResultCache(new RomFingerprint(new LevelEmulator(rom)));
+const cache = new ResultCache(new RomFingerprint(rom));
 for (const d of done) for (const [k, e] of d.put) cache.set(k, e.data, e.deps);
 check(JSON.stringify(cache.get(blockKey(0, 0x11f))) === JSON.stringify(direct.probe(0x11f)), 'block 11F as probed directly');
 check(JSON.stringify(cache.get(spriteKey(0, 0x0d))) === JSON.stringify(direct.probeSprite(0x0d)), 'sprite 0D as probed directly');

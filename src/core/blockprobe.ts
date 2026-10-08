@@ -155,7 +155,7 @@ export class BlockProber {
     this.rom = rom;
     this.emu = new LevelEmulator(rom);
     if (boot?.baseState) this.emu.adoptBoot(boot);
-    this.results = results ?? new ResultCache(new RomFingerprint(this.emu));
+    this.results = results ?? new ResultCache(new RomFingerprint(rom));
     this.use(0);
   }
 
@@ -170,7 +170,6 @@ export class BlockProber {
   // the ROM changed (patches, acts-like, blocks): probe levels that read changed pages are prepared
   // again; results are checked when used
   reset(): void {
-    this.emu.syncRom();
     for (const t of this.sets.values()) {
       if (t.deps && !this.results.fp.valid(t.deps)) Object.assign(t, { ready: null, reads: null, deps: null, by: 0, floorTile: -1 });
     }
@@ -303,7 +302,6 @@ export class BlockProber {
 
   private prepareLevel(): void {
     const e = this.emu;
-    e.syncRom();
     // a fixed header (vanilla level 105's): the probes don't depend on the level's saved state
     const header = Uint8Array.from([...PROBE_HEADER, 0]);
     header[4] = (header[4] & 0xf0) | this.tileset;

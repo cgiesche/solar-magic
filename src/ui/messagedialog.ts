@@ -82,7 +82,6 @@ export function openMessagesDialog(app: App): void {
         if (!changed) return;
         try {
           const log = writeMessages(rom, msgs);
-          app.emu.syncRom();
           app.persist();
           toast(`Messages saved: ${log}`);
         } catch (e) {

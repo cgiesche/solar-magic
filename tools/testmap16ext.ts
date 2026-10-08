@@ -19,7 +19,6 @@ const ev = new LevelEmulator(vanilla); ev.boot();
 const ep = new LevelEmulator(patched); ep.boot();
 const blank = map16Source(vanilla, ev.load(0x105)).fg(0x025);
 installMap16Ext(patched, blank);
-ep.syncRom();
 
 // 1. every vanilla level loads identically (level map, Map16 pointers, BG1/BG2 tilemaps); the hook
 // code costs cycles, so frame counters, fades and tile animation may be a frame apart
@@ -62,7 +61,6 @@ for (const n of [0x105, 0x106, 0x001, 0x009, 0x10f, 0x0c]) {
 const EXT = 0x2a0, REF = 0x130;
 setExtTileWords(patched, EXT, map16Source(patched, ep.load(0x105)).fg(REF), blank);
 setActsLike(patched, EXT, REF, blank);
-ep.syncRom();
 const withWall = (tile: number): LevelOverride => {
   const lv: Level = loadLevel(patched, 0x105);
   lv.objects.push({ uid: newUid(), num: 0, ext: DM16_EXT, x: 9, y: 14, size: 0x91, tile }); // 2×10 wall

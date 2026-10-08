@@ -40,7 +40,6 @@ export interface Pane {
 
 // ROM changed by a patch or project: reload everything that depends on it
 export function romChanged(app: App): void {
-  app.emu.syncRom();
   app.persist();
   app.openLevel(app.level.number);
   app.emit('patch');

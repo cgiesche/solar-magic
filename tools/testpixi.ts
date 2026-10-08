@@ -348,7 +348,6 @@ print "MAIN ",pc
   if (!res8.ok) console.log(res8.errors.join('\n'));
   check(res8.ok, 'Shatter applied (GPS routines spawn_bounce_sprite and change_map16 built in)');
   setActsLike(r8, 0x601, 0x130, blank); // the package's cracked tile (!cracked_tile = $0601), solid
-  e8.syncRom();
   const tile = plan.blocks[0].tile;
   const l8 = loadLevel(r8, 0x105);
   l8.objects.push({ uid: newUid(), num: 0, ext: DM16_EXT, x: 0, y: 24, size: 0x08, tile }); // floor of shatter blocks under Mario

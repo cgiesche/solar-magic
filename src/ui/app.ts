@@ -125,7 +125,7 @@ export class App {
     onModalsChange(() => { this.resumeBackground(); this.emit('busy'); });
     musicPlayer.onChange(() => { this.resumeBackground(); this.emit('busy'); });
     this.romHistory = new RomHistory(rom);
-    this.results = new ResultCache(new RomFingerprint(this.emu));
+    this.results = new ResultCache(new RomFingerprint(rom));
     this.cacheReady = kvEntries<CacheEntry>(CACHE_PREFIX)
       .then((e) => this.results.load(e.map(([k, v]) => [k.slice(CACHE_PREFIX.length), v])))
       .catch((e) => console.error(e));
@@ -133,7 +133,7 @@ export class App {
     this.probes = new ProbeClient({
       results: this.results,
       cacheReady: this.cacheReady,
-      rom: () => ({ gen: this.emu.romGen, data: this.rom.data }),
+      rom: () => ({ gen: this.rom.gen, data: this.rom.data }),
       tileset: () => this.level.header.tileset,
       connect: (reply, failed) => {
         const w = new Worker(new URL('./probeworker.ts', import.meta.url), { type: 'module' });
@@ -500,11 +500,11 @@ export class App {
   // variant images by sprite and position
   spriteKey = '';
   // custom sprites of the ROM's PIXI project (see pixi.ts), by sprite id ($2xx / $3xx with the extra bit)
-  private customMemo: { gen: number; data: Uint8Array | null; list: CustomSprite[] } = { gen: -1, data: null, list: [] };
+  private customMemo: { gen: number; list: CustomSprite[] } = { gen: -1, list: [] };
   customSprites(): CustomSprite[] {
     const m = this.customMemo;
-    if (m.gen === this.emu.romGen && m.data === this.rom.data) return m.list;
-    m.gen = this.emu.romGen; m.data = this.rom.data; m.list = [];
+    if (m.gen === this.rom.gen) return m.list;
+    m.gen = this.rom.gen; m.list = [];
     try {
       const p = loadPixiProject(this.rom);
       if (p) m.list = customSpriteList(p);
@@ -619,10 +619,10 @@ export class App {
 
   // ROM bytes of GFX file data: emulated results don't depend on them (graphics only reach VRAM);
   // sprite images name the sprite files' content in their key instead
-  private gfxMaskMemo: { gen: number; data: Uint8Array | null; mask: Uint8Array | null } = { gen: -1, data: null, mask: null };
+  private gfxMaskMemo: { gen: number; mask: Uint8Array | null } = { gen: -1, mask: null };
   gfxSkipMask(): Uint8Array | null {
     const m = this.gfxMaskMemo;
-    if (m.gen !== this.emu.romGen || m.data !== this.rom.data) { m.gen = this.emu.romGen; m.data = this.rom.data; m.mask = gfxSkipMask(this.rom); }
+    if (m.gen !== this.rom.gen) { m.gen = this.rom.gen; m.mask = gfxSkipMask(this.rom); }
     return m.mask;
   }
 
@@ -685,7 +685,7 @@ export class App {
     const lv = this.level, mem = lv.spriteHeader & 0x3f, gen = this.editGen;
     // canonical order: results are stored by index, uids differ between sessions
     const sprites = [...lv.sprites].sort((a, b) => a.x - b.x || a.y - b.y || a.num - b.num || a.extra - b.extra);
-    if (this.usedMem.gen !== this.emu.romGen) this.usedMem = { gen: this.emu.romGen, list: usedSpriteMemory(this.rom) };
+    if (this.usedMem.gen !== this.rom.gen) this.usedMem = { gen: this.rom.gen, list: usedSpriteMemory(this.rom) };
     const candidates = this.usedMem.list;
     const key = `sm${lv.number}:${mem}:${JSON.stringify(lv.header)}:${candidates.join(',')}:${sprites.map((q) => `${q.num}.${q.x}.${q.y}.${q.extra}${q.bytes?.length ? '.' + q.bytes.join('-') : ''}`).join(' ')}`;
     if (this.spriteMem?.key === key) return;
@@ -930,7 +930,6 @@ export class App {
       emu.skipMask = () => this.gfxSkipMask();
     }
     emu.adoptBoot(this.emu);
-    emu.syncRom();
     return emu;
   }
 
@@ -1001,8 +1000,8 @@ export class App {
 
   tilesetKinds(ts = this.level.header.tileset): ObjKinds | null {
     const c = this.kinds.get(ts);
-    if (c && c.gen !== this.emu.romGen) {
-      if (kindsStillValid(c.k, this.rom.data)) c.gen = this.emu.romGen;
+    if (c && c.gen !== this.rom.gen) {
+      if (kindsStillValid(c.k, this.rom.data)) c.gen = this.rom.gen;
       else this.kinds.delete(ts);
     }
     if (this.kinds.has(ts)) return c!.k;
@@ -1027,7 +1026,7 @@ export class App {
   }
 
   private setKinds(ts: number, k: ObjKinds): void {
-    this.kinds.set(ts, { k, gen: this.emu.romGen });
+    this.kinds.set(ts, { k, gen: this.rom.gen });
     this.kindJob = null;
     this.emit('objkinds');
   }
@@ -1217,7 +1216,6 @@ export class App {
       const lastTile = (p.tile ?? 0) + (p.block ? (p.block.h - 1) * 16 + p.block.w - 1 : 0);
       if (p.num === 0 && p.ext === DM16_EXT && lastTile >= EXT_FIRST && !map16Ext(this.rom)) {
         installMap16Ext(this.rom, map16Source(this.rom, this.render).fg(0x025));
-        this.emu.syncRom();
         this.persist();
         toast('Map16 expansion installed (tiles 200–FFF).');
       }
@@ -1248,7 +1246,6 @@ export class App {
     if (hasEditorPatch(this.rom)) return true;
     try {
       installEditorPatch(this.rom);
-      this.emu.syncRom();
       this.persist();
       toast('Editor patch installed (for Direct Map16 objects).');
       return true;
@@ -1288,7 +1285,6 @@ export class App {
 
   // after the structure table changed: the emulator sees the new ROM, the level is drawn again
   structuresChanged(): void {
-    this.emu.syncRom();
     this.persist();
     this.refresh();
     this.emit('structs');
@@ -1416,7 +1412,6 @@ export class App {
   saveLevel(silent = false): void {
     try {
       const log = saveLevel(this.rom, this.level);
-      this.emu.syncRom();
       this.dirty = false;
       const n = this.level.number;
       // re-read to refresh addresses/sizes, keep selection by position
@@ -1467,7 +1462,6 @@ export class App {
   // the ROM changed: editors redraw at once ('rom-change'), the level render follows debounced
   romChanged(): void {
     this.graph = null;
-    this.emu.syncRom();
     this.emit('rom-change');
     clearTimeout(this.romTimer);
     const run = () => {

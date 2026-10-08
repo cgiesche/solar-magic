@@ -79,7 +79,6 @@ const fallback = { level: 0x105, gamemode: 0x14, overworld: 0 };
   check(r.ok, 'Retry assembles on a vanilla ROM ' + r.errors.slice(0, 3).join(' | '));
   check(rom.r8(0x0ff0a0) !== 0xff && rom.r8(0x0ff0b4) < 0x33, 'ROM marked as edited, no LM version');
   if (r.ok) {
-    early.syncRom();
     const l = early.load(0x105);
     check(l.ok, 'level loads in an emulator booted before Retry (boot redone) ' + (l.ok ? '' : String((l as { error?: string }).error ?? '')));
   }

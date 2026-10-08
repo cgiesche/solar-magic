@@ -2,6 +2,7 @@
 
 import { Rom, snesToPc } from './rom.ts';
 import { Snes, type SnesState } from './snes.ts';
+import { RomReads, updateBytePages } from './romdeps.ts';
 import { rleDecode, rleEncode } from './rle.ts';
 import { GM, RAM } from './ram.ts';
 
@@ -121,18 +122,35 @@ export class OverworldEmulator {
   rom: Rom;
   snes: Snes;
   titleState: SnesState | null = null;
+  private title: { reads: RomReads; rom: Uint8Array } | null = null; // what reaching the title screen read
+  private romGen: number;
   constructor(rom: Rom) {
     this.rom = rom;
     this.snes = new Snes(rom.data);
+    this.romGen = rom.gen;
+  }
+  // catches up with a changed ROM (rom.gen); a change of what reaching the title screen read makes its
+  // snapshot stale (as LevelEmulator's boot snapshot)
+  private sync(): void {
+    this.snes.rom = this.rom.data;
+    if (this.romGen === this.rom.gen) return;
+    this.romGen = this.rom.gen;
+    if (this.title?.reads.differ(this.title.rom, this.rom.data)) { this.titleState = null; this.title = null; }
   }
   load(map: number, allEvents: boolean): OwRender {
+    this.sync();
     const s = this.snes;
-    s.rom = this.rom.data;
     if (!this.titleState) {
-      s.reset();
-      let f = 0;
-      while (s.wram[RAM.gameMode] !== GM.title && f++ < 2000) s.runFrame();
+      updateBytePages(this.rom);
+      const reads = new RomReads(this.rom.data.length);
+      s.romReads = reads;
+      try {
+        s.reset();
+        let f = 0;
+        while (s.wram[RAM.gameMode] !== GM.title && f++ < 2000) s.runFrame();
+      } finally { s.romReads = null; }
       this.titleState = s.saveState();
+      this.title = { reads, rom: this.rom.data.slice() };
     } else s.loadState(this.titleState);
     const w = s.wram;
     let n = 0;

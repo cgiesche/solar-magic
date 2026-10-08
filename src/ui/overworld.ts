@@ -114,7 +114,6 @@ export class OverworldView {
   }
   invalidate(): void {
     this.renders.clear();
-    this.emu.titleState = null;
   }
 
   // ---------------- drawing ----------------
@@ -621,7 +620,6 @@ export class OverworldView {
       writeL1(rom, this.l1);
       for (const [tl, code] of this.names) setNameCode(rom, tl, code);
       this.names.clear();
-      this.app.emu.syncRom();
       this.app.persist();
       this.dirty = false;
       this.invalidate();

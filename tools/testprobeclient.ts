@@ -14,6 +14,8 @@ import { loadLevel, L2_PTRS } from '../src/core/level.ts';
 
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
+// a write that changes no byte: a new ROM generation that nothing a probe read differs in
+const touch = (rom: Rom) => rom.writeAt(0, rom.data.slice(0, 1));
 const file = new Uint8Array(readFileSync('test/fixtures/smw.smc'));
 const direct = new BlockProber(new Rom(file));
 const settle = () => new Promise((r) => setTimeout(r, 0)); // (stored results are awaited first)
@@ -43,7 +45,7 @@ function editor(worker: Worker | null) {
   const steps: [string, () => void][] = [];
   const e = {
     rom, emu, ts: 0, ready: 0, busy: new Map<string, string>(), steps,
-    results: new ResultCache(new RomFingerprint(emu)),
+    results: new ResultCache(new RomFingerprint(rom)),
     client: null as unknown as ProbeClient,
     // background slices on the main thread (the prefetch after a ROM change only when asked)
     drain(prefetch = false) {
@@ -55,7 +57,7 @@ function editor(worker: Worker | null) {
   };
   e.client = new ProbeClient({
     results: e.results, cacheReady: Promise.resolve(),
-    rom: () => ({ gen: emu.romGen, data: rom.data }), tileset: () => e.ts,
+    rom: () => ({ gen: rom.gen, data: rom.data }), tileset: () => e.ts,
     connect: worker ? worker.connect : undefined,
     later: (key, step) => steps.push([key, step]),
     setBusy: (key, label) => { if (label === null) e.busy.delete(key); else e.busy.set(key, label); },
@@ -70,10 +72,11 @@ function editor(worker: Worker | null) {
   const w = new Worker(), e = editor(w);
   check(e.client.block(0x11f) === undefined, 'unknown block: asked for');
   await settle();
-  e.emu.syncRom(); // the ROM changed (nothing the probe reads)
+  const genBefore = e.rom.gen;
+  touch(e.rom); // the ROM changed (nothing the probe reads)
   check(e.client.block(0x11f) === undefined, 'asked again after the ROM change');
   await settle();
-  w.run(1, (d) => ({ ...d, gen: 1 })); // a reply as from the generation before
+  w.run(1, (d) => ({ ...d, gen: genBefore })); // a reply as from the generation before
   for (let i = 0; i < 5; i++) { e.client.block(0x11f); await settle(); }
   check(w.asks(0x11f) <= 3, `old reply: asked ${w.asks(0x11f)} times, not again and again`);
   w.run();
@@ -87,10 +90,10 @@ function editor(worker: Worker | null) {
   e.client.block(0x130);
   await settle();
   const old = w.host.next(); // (computed on the ROM before, not handed over yet)
-  e.emu.syncRom();
+  touch(e.rom);
   e.client.block(0x130); // (the client sees the change: sends the new ROM and the job again)
   await settle();
-  check(old?.type === 'probe' && old.gen !== e.emu.romGen && w.sent.some((m) => m.type === 'rom' && m.gen === e.emu.romGen), 'reply from the generation before');
+  check(old?.type === 'probe' && old.gen !== e.rom.gen && w.sent.some((m) => m.type === 'rom' && m.gen === e.rom.gen), 'reply from the generation before');
   w.reply(old!);
   check(JSON.stringify(e.client.block(0x130)) === JSON.stringify(direct.probe(0x130)), 'its result is kept: still valid');
   check(e.ready === 1 && !e.busy.has('probe'), "job done: 'ready' told, nothing busy");
@@ -122,7 +125,7 @@ function editor(worker: Worker | null) {
   e.client.block(0x2b);
   await settle();
   check(w.asks(0x2b) === n, 'failed probe: not asked again');
-  e.emu.syncRom();
+  touch(e.rom);
   e.client.block(0x2b);
   await settle();
   check(w.asks(0x2b) > n, 'after a ROM change: asked again');

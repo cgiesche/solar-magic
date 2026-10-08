@@ -62,24 +62,13 @@ export interface LevelRender {
   frames: number;
 }
 
-// any ROM byte read while booting differs between the booted ROM and now
-function bootChanged(reads: RomReads, then: Uint8Array, now: Uint8Array): boolean {
-  for (const b of reads.bytes) if (then[b] !== now[b]) return true;
-  const size = 1 << PAGE_SHIFT;
-  for (let p = 0; p < reads.pages.length; p++) {
-    if (!reads.pages[p]) continue;
-    for (let i = p * size, end = i + size; i < end; i++) if (then[i] !== now[i]) return true;
-  }
-  return false;
-}
-
 export { MAP_BASE, MAP_SIZE };
 
 export class LevelEmulator {
   rom: Rom;
   snes: Snes;
   baseState: SnesState | null = null;
-  romGen = 0; // counts syncRom() calls: the ROM may have changed
+  private romGen: number; // the ROM's generation the emulator is synced to (see sync)
   // ROM bytes whose reads by the emulated CPU don't count for tracked() results (GFX file data)
   skipMask: (() => Uint8Array | null) | null = null;
   overlay = new Uint8Array(0x10000);
@@ -88,6 +77,7 @@ export class LevelEmulator {
     this.rom = rom;
     this.snes = new Snes(rom.data);
     this.snes.overlay = this.overlay;
+    this.romGen = rom.gen;
     updateBytePages(rom);
   }
 
@@ -99,12 +89,13 @@ export class LevelEmulator {
     this.baseState = other.baseState;
     this.bootReads = other.bootReads;
     this.bootRom = other.bootRom;
+    this.romGen = -1; // it may be from an older ROM: checked with the next entry
   }
 
   // Power on and boot to the title screen once; all level loads start from this snapshot.
   boot(): void {
+    this.sync();
     const s = this.snes;
-    s.rom = this.rom.data;
     s.powerOn();
     this.bootReads = this.tracked(() => {
       let f = 0;
@@ -135,14 +126,16 @@ export class LevelEmulator {
     }
   }
 
-  // ROM data array may be replaced (expansion); keep emulator in sync.
-  // A change of what the boot read (a patch's power-on code, e.g. Retry System's RAM setup) makes
-  // the boot snapshot stale: boot again with the next load.
-  syncRom(): void {
+  // Every entry (boot, load, startGame, call, animationFrames) first catches up with a changed ROM
+  // (rom.gen): the data array may be replaced (expansion), and a change of what the boot read (a
+  // patch's power-on code, e.g. Retry System's RAM setup) makes the boot snapshot stale: boot again
+  // with the next load.
+  private sync(): void {
     this.snes.rom = this.rom.data;
-    this.romGen++;
+    if (this.romGen === this.rom.gen) return;
+    this.romGen = this.rom.gen;
     updateBytePages(this.rom);
-    if (this.baseState && this.bootReads && this.bootRom && bootChanged(this.bootReads, this.bootRom, this.rom.data)) {
+    if (this.baseState && this.bootReads && this.bootRom && this.bootReads.differ(this.bootRom, this.rom.data)) {
       this.baseState = null;
       this.bootReads = null;
       this.bootRom = null;
@@ -150,9 +143,9 @@ export class LevelEmulator {
   }
 
   load(level: number, ov: LevelOverride = {}): LevelRender {
+    this.sync();
     if (!this.baseState) this.boot();
     const s = this.snes;
-    s.rom = this.rom.data;
     if (!ov.continueState) s.loadState(this.baseState!);
     const w = s.wram;
     w[RAM.sublevelCount] = 1;
@@ -303,9 +296,9 @@ export class LevelEmulator {
   // the tile again loads the level. Tiles of submaps get the submap whose camera view (from loading
   // each submap) is centered nearest to them. Not found on the overworld: Mario stays at the start.
   startGame(tl: number): void {
+    this.sync();
     if (!this.baseState) this.boot();
     const s = this.snes, w = s.wram;
-    s.rom = this.rom.data;
     s.loadState(this.baseState!);
     s.joy1 = 0;
     for (let n = 0; w[RAM.gameMode] !== GM.overworld; n++) {
@@ -345,6 +338,7 @@ export class LevelEmulator {
 
   // runs a game routine (JSL addr, RTL) with X = x in 8-bit mode, then restores the CPU registers
   call(addr: number, x: number): void {
+    this.sync();
     const cpu = this.snes.cpu;
     const saved = { a: cpu.a, x: cpu.x, y: cpu.y, s: cpu.s, d: cpu.d, dbr: cpu.dbr, pbr: cpu.pbr, pc: cpu.pc, p: cpu.p, e: cpu.e, waiting: cpu.waiting };
     const stub = overlaySnes(OV_STUB);
@@ -380,6 +374,7 @@ export class LevelEmulator {
   // Continues the live state left by load() into gameplay (GM $14) and snapshots VRAM/CGRAM
   // every `step` frames (tile and palette animation). Must directly follow load().
   animationFrames(count = 8, step = 8): { vram: Uint8Array; cgram: Uint8Array }[] {
+    this.sync();
     const s = this.snes, out: { vram: Uint8Array; cgram: Uint8Array }[] = [];
     try {
       let guard = 0;
