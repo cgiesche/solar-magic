@@ -17,7 +17,7 @@ await loadAsar();
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
 const enc = new TextEncoder();
-const file = new Uint8Array(readFileSync('Super Mario World (U) [!].smc'));
+const file = new Uint8Array(readFileSync('test/fixtures/smw.smc'));
 const fresh = () => new Rom(file.slice());
 const src = (name: string, main: string): PatchSource => ({ name, main: 'main.asm', files: new Map([['main.asm', main]]) });
 // a patch hooking the level load palette upload whose code is `body`

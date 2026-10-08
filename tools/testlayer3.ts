@@ -9,7 +9,7 @@ import { layer3Kind, layer3Kinds, tideRangeJob, layer3Top, type TideRange } from
 
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
-const rom = new Rom(new Uint8Array(readFileSync('Super Mario World (U) [!].smc')));
+const rom = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
 const emu = new LevelEmulator(rom); emu.boot();
 
 const ovOf = (n: number, tileset?: number) => {

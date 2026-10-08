@@ -9,7 +9,7 @@ import { bgFromWram, encodeBg, decodeBg } from '../src/core/bg.ts';
 import { exportLevelFile, importLevelFile } from '../src/core/levelfile.ts';
 import { installBgMap16Ext, setBgExtTileWords, bgTileWords, bgMap16Ext } from '../src/core/bgmap16.ts';
 
-const file = new Uint8Array(readFileSync('Super Mario World (U) [!].smc'));
+const file = new Uint8Array(readFileSync('test/fixtures/smw.smc'));
 const rom = new Rom(file.slice());
 const emu = new LevelEmulator(rom);
 emu.boot();

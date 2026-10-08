@@ -5,7 +5,7 @@ import { loadLevel, serializeLayer1, serializeLayer2, serializeSprites, isL1Vert
 import { renderLevel, composite } from '../src/core/render.ts';
 import { writePng } from './png.ts';
 
-const rom = new Rom(new Uint8Array(readFileSync('Super Mario World (U) [!].smc')));
+const rom = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
 const emu = new LevelEmulator(rom);
 let t0 = Date.now();
 emu.boot();

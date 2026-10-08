@@ -22,7 +22,7 @@ await loadAsar();
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
 const same = (a: ArrayLike<number>, b: ArrayLike<number>) => a.length === b.length && Array.prototype.every.call(a, (v: number, i: number) => v === b[i]);
-const file = new Uint8Array(readFileSync('Super Mario World (U) [!].smc'));
+const file = new Uint8Array(readFileSync('test/fixtures/smw.smc'));
 const LV = 0x105;
 let BLANK: number[] = [];
 { const rom = new Rom(file.slice()); const e = new LevelEmulator(rom); e.boot(); BLANK = map16Source(rom, e.load(LV)).fg(0x025); }
@@ -40,7 +40,7 @@ const bgAt = (bg: Uint16Array, x: number, y: number) => bg[(x >> 4) * 0x1b0 + y 
 const color = (cg: Uint8Array, i: number) => cg[i * 2] | (cg[i * 2 + 1] << 8);
 
 // ---- the real package ----
-const files = packageFiles('ghostbusters.zip', new Uint8Array(readFileSync('resources_local/ghostbustersghosttrapjavamanhattanBG.zip')));
+const files = packageFiles('ghostbusters.zip', new Uint8Array(readFileSync('test/fixtures/ghostbustersghosttrapjavamanhattanBG.zip')));
 check(isBgPackage(files), 'detected as background package');
 const mwl = parseMwl(files.get('ghostbustersghosttrapjavamanhattanBG.mwl')!);
 check(mwl.gfx.get('BG1') === 0x8a1 && mwl.gfx.get('BG2') === 0x8a2 && mwl.gfx.get('BG3') === 0x8a3 && mwl.gfx.get('FG1') === 0x14, '.mwl: ExGFX list (BG1-3 = 8A1-8A3)');
@@ -133,7 +133,7 @@ const map16 = parseMap16File(files.get('ghostbustersghosttrapjavamanhattanBG.map
 // ---- FG + BG + layer 3 package (Sonic Mania Studiopolis Act 1): which .map16/.pal is which comes from
 // the files, not their names ----
 {
-  const ssz = packageFiles('ssz.zip', new Uint8Array(readFileSync('resources_local/sonicmaniasszact1.zip')));
+  const ssz = packageFiles('ssz.zip', new Uint8Array(readFileSync('test/fixtures/sonicmaniasszact1.zip')));
   const fgFile = parseMap16File(ssz.get('sonicmaniasszact1FG.map16')!), bgFile = parseMap16File(ssz.get('sonicmaniasszact1BG-L2.map16')!);
   check(fgFile.origin?.bg === false && fgFile.origin.tile === 0x200 && bgFile.origin?.bg === true && bgFile.origin.tile === 0x200, '.map16 header: FG from 200, BG from BG tile 200');
   // renamed files: same result

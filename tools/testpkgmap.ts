@@ -1,7 +1,7 @@
 // Packages assigned by hand ("Paket zuordnen"): the suggestion finds UberASM Tool folders inside a package,
-// the folders their code includes and list.txt lines quoted in the docs; Retry System (resources_local,
-// not in the repository; by Kevin/kkevinm) assembled from that suggestion and working in the emulator.
-import { readFileSync, existsSync } from 'node:fs';
+// the folders their code includes and list.txt lines quoted in the docs; Retry System (test/fixtures;
+// by Kevin/kkevinm) assembled from that suggestion and working in the emulator.
+import { readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadAsar } from '../src/core/asar.ts';
@@ -53,21 +53,21 @@ const fallback = { level: 0x105, gamemode: 0x14, overworld: 0 };
 
 // the editor patch marks the ROM as edited where Lunar Magic keeps its version, but never over Lunar Magic's
 {
-  const lm = new Rom(new Uint8Array(readFileSync('Super Mario World (U) [!].smc')));
+  const lm = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
   const text = 'Lunar Magic Version 3.31';
   for (let i = 0; i < text.length; i++) lm.w8(0x0ff0a0 + i, text.charCodeAt(i));
   installEditorPatch(lm);
   check(String.fromCharCode(...lm.data.slice(0x7f0a0, 0x7f0a0 + text.length)) === text, "Lunar Magic's version string stays");
 }
 
-if (existsSync('resources_local/retry-system_v2.2.0.zip')) {
-  const files = packageFiles('retry-system_v2.2.0.zip', new Uint8Array(readFileSync('resources_local/retry-system_v2.2.0.zip')));
+{
+  const files = packageFiles('retry-system_v2.2.0.zip', new Uint8Array(readFileSync('test/fixtures/retry-system_v2.2.0.zip')));
   const s = suggestMapping(files)!;
   const p = placed(files.keys(), s.rules);
   const calls = suggestCalls(files, p, fallback);
   check(s.root === 'src/' && [...s.rules.values()].filter(Boolean).sort().join(' ') === 'gamemode/ library/ retry_config/', 'Retry: suggestion as in its readme');
   check(calls.length === 1 && calls[0].file === 'gamemode/retry_gm.asm' && calls[0].num === ALL, 'Retry: "* retry_gm.asm" from the docs');
-  const rom = new Rom(new Uint8Array(readFileSync('Super Mario World (U) [!].smc')));
+  const rom = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
   const proj = emptyProject();
   for (const [from, to] of p) proj.files.set(to, files.get(from)!);
   proj.list.gamemode.set(ALL, [{ file: 'gamemode/retry_gm.asm', bytes: [] }]);

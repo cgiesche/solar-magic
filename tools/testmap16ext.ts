@@ -8,7 +8,7 @@ import { installEditorPatch, DM16_EXT } from '../src/core/patches.ts';
 import { installMap16Ext, setActsLike, setExtTileWords } from '../src/core/map16ext.ts';
 import { map16Source } from '../src/core/render.ts';
 
-const file = new Uint8Array(readFileSync('Super Mario World (U) [!].smc'));
+const file = new Uint8Array(readFileSync('test/fixtures/smw.smc'));
 let bad = 0;
 const list = [...Array(0x25).keys(), ...Array.from({ length: 0x3c }, (_, i) => 0x101 + i)];
 

@@ -5,7 +5,7 @@ import { LevelEmulator } from '../src/core/levelemu.ts';
 import { translevelToLevel } from '../src/core/overworld.ts';
 import { readMessage, writeMessages, lineToText, textToLine, messageUsers, MSG_COUNT, MSG_COLS, type Message } from '../src/core/messages.ts';
 
-const file = new Uint8Array(readFileSync('Super Mario World (U) [!].smc'));
+const file = new Uint8Array(readFileSync('test/fixtures/smw.smc'));
 let bad = 0;
 const pad = (m: Message) => m.map((l) => [...l, ...Array(MSG_COLS - l.length).fill(0x1f)].join(',')).join('|');
 

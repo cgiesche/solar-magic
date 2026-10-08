@@ -50,7 +50,7 @@ check(m.width === 2 && m.tiles[1][0] === 0x1a01 && m.acts?.[0] === 0x25, '.map16
 const plan = planBlockPack(pkg, info.file);
 check(plan.blocks.length === 2 && plan.map16?.at === 0x500 && plan.gfx[0]?.num === 0x80 && plan.gfx[0]?.slot === 'BG2' && !plan.missing.length, 'plan: 2 blocks, Map16 at 500, ExGFX 80 as BG2');
 
-const rom = new Rom(new Uint8Array(readFileSync('Super Mario World (U) [!].smc')));
+const rom = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
 installEditorPatch(rom);
 const emu = new LevelEmulator(rom); emu.boot();
 const blank = map16Source(rom, emu.load(0x105)).fg(0x25);
@@ -63,7 +63,7 @@ check(gfxEntry(rom, 0x80)?.raw === true && levelExtGfx(rom, 0x105)[0] === 0xff &
 
 // with the VRAM patch the BG2 slot is used: a placed tile 500 shows the package's graphics in the level
 {
-  const rom = new Rom(new Uint8Array(readFileSync('Super Mario World (U) [!].smc')));
+  const rom = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
   installEditorPatch(rom);
   check(installVramPatch(rom).ok, 'VRAM patch installed');
   const r = applyBlockPack(rom, pkg, plan, { blank, level: 0x105 });
@@ -81,10 +81,10 @@ check(gfxEntry(rom, 0x80)?.raw === true && levelExtGfx(rom, 0x105)[0] === 0xff &
 
 // the real package, if present locally
 try {
-  const real = readPackage('RockClimbBlocksUpdate.zip', new Uint8Array(readFileSync('resources_local/RockClimbBlocksUpdate.zip')));
+  const real = readPackage('RockClimbBlocksUpdate.zip', new Uint8Array(readFileSync('test/fixtures/RockClimbBlocksUpdate.zip')));
   const ri = detectKind(real);
   const rp = planBlockPack(real, ri.file);
-  const rom2 = new Rom(new Uint8Array(readFileSync('Super Mario World (U) [!].smc')));
+  const rom2 = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
   const rr = applyBlockPack(rom2, real, rp, { blank, level: 0x105 });
   check(ri.kind === 'blockpack' && rr.ok, 'RockClimbBlocks: ' + [...rr.errors, ...rr.notes].join(' | '));
 } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; }

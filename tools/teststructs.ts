@@ -11,7 +11,7 @@ import { exportLevelFile, importLevelFile } from '../src/core/levelfile.ts';
 import { loadAsar } from '../src/core/asar.ts';
 import { applyPatch, type PatchSource } from '../src/core/patchapply.ts';
 
-const file = 'Super Mario World (U) [!].smc';
+const file = 'test/fixtures/smw.smc';
 const orig = new Rom(new Uint8Array(readFileSync(file)));
 const rom = new Rom(new Uint8Array(readFileSync(file)));
 let fail = 0;

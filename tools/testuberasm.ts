@@ -45,7 +45,7 @@ check(list.level.get(0x105)?.length === 2 && list.level.get(0x106)?.[0].bytes[0]
 const again = parseList(writeList(list));
 check(JSON.stringify([...again.level]) === JSON.stringify([...list.level]) && again.global === list.global && again.freeram === list.freeram, 'writeList round trip');
 
-const rom = new Rom(new Uint8Array(readFileSync('Super Mario World (U) [!].smc')));
+const rom = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
 installEditorPatch(rom);
 const before = rom.data.slice();
 const b = buildUberPatch(files, list);
@@ -98,7 +98,7 @@ if (r.ok) {
 
 // project round trip: UberASM Tool folder as zip → ROM → back
 {
-  const rom = new Rom(new Uint8Array(readFileSync('Super Mario World (U) [!].smc')));
+  const rom = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
   const zip = zipSync({ ...Object.fromEntries([...files].map(([k, v]) => ['MyHack/' + k, v])), 'MyHack/UberASMTool.exe': new Uint8Array(4), 'MyHack/asm/base/main.asm': enc.encode('junk') });
   const p = projectFromZip(zip);
   check(p.files.has('level/marker.asm') && !p.files.has('UberASMTool.exe') && !p.files.has('asm/base/main.asm'), 'import drops the tool\'s own files');
@@ -115,7 +115,7 @@ if (r.ok) {
 // Tool, each library is assembled on its own and exports its labels as <file>_<label>; include paths
 // with "//" and several ".." in a row resolve like on a real file system
 {
-  const rom = new Rom(new Uint8Array(readFileSync('Super Mario World (U) [!].smc')));
+  const rom = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
   const lib = new Map<string, Uint8Array>(Object.entries({
     'library/big.asm': 'namespace ram\nincsrc "../big_config//ram.asm"\nnamespace off\nnamespace shared\nincsrc "../big_config/code/x/shared.asm"\nnamespace off\n',
     'big_config/ram.asm': 'value: db $5C\n',

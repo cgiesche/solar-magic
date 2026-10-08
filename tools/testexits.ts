@@ -5,7 +5,7 @@ import { Rom } from '../src/core/rom.ts';
 import { ExitGraph, exitTarget, isBlank } from '../src/core/exitgraph.ts';
 import { loadLevel, readSecondaryEntrance, writeSecondaryEntrance } from '../src/core/level.ts';
 
-const rom = new Rom(new Uint8Array(readFileSync('Super Mario World (U) [!].smc')));
+const rom = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
 let bad = 0;
 const check = (ok: boolean, what: string) => { if (!ok) { console.log('FAIL', what); bad++; } };
 

@@ -16,7 +16,7 @@ let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
 const enc = new TextEncoder();
 
-const rom = new Rom(new Uint8Array(readFileSync('Super Mario World (U) [!].smc')));
+const rom = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
 installEditorPatch(rom);
 const emu = new LevelEmulator(rom); emu.boot();
 const blank = map16Source(rom, emu.load(0x105)).fg(0x025);
@@ -81,7 +81,7 @@ check(blockOf(rom, WALL) === null && play(PASS, 120, REF, false).x === refRun.x,
 
 // SMWX v1 → v2 upgrade keeps tables
 {
-  const old = new Rom(new Uint8Array(readFileSync('Super Mario World (U) [!].smc')));
+  const old = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
   installEditorPatch(old);
   const e = new LevelEmulator(old); e.boot();
   setActsLike(old, 0x2b0, 0x130, blank);
@@ -94,7 +94,7 @@ check(blockOf(rom, WALL) === null && play(PASS, 120, REF, false).x === refRun.x,
 
 // GPS's standard routines are built in: every one assembles (called from code that never runs)
 {
-  const r2 = new Rom(new Uint8Array(readFileSync('Super Mario World (U) [!].smc')));
+  const r2 = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
   installEditorPatch(r2);
   const names = Object.keys(GPS_ROUTINES).filter((n) => !/^[A-Z]/.test(n));
   const all = ['db $42', ...OFFS.map((o) => `JMP ${o}`), ...OFFS.map((o) => `${o}:`), '  RTL', ...names.map((n) => `  %${n}()`), '  RTL'].join('\n');

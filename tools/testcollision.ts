@@ -5,7 +5,7 @@ import { BlockProber, collisionText, type CollisionProbe } from '../src/core/blo
 
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
-const rom = new Rom(new Uint8Array(readFileSync('Super Mario World (U) [!].smc')));
+const rom = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
 const p = new BlockProber(rom);
 const c = (t: number): CollisionProbe => p.probeCollision(t);
 const near = (s: [number, number] | null, l: number, r: number) => !!s && Math.abs(s[0] - l) <= 1 && Math.abs(s[1] - r) <= 1;

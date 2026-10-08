@@ -13,9 +13,13 @@ nicht übernommen, außer bei Asar, snes_spc und AddmusicK (eingebunden als WebA
 | [UberASM Tool](https://github.com/Fernap/UberASMTool) | Format und Aufrufkonventionen von UberASM | Vitor Vilela, Fernap und weitere |
 | Lunar Magic | Formate von `.mwl`, `.map16`, ExGFX, Größentabelle der Sprite-Daten (`$0EF30C`) | FuSoYa |
 
-Pakete, an denen Funktionen des Editors entwickelt und getestet wurden (nicht im Repository):
+Pakete, an denen Funktionen des Editors entwickelt und getestet wurden (als Testdaten in `test/fixtures/`):
 
 | Was | Wofür | Autoren |
 |---|---|---|
 | [Retry System](https://kkevinm.github.io/retry-system/) (Unlicense) | Testfall für Pakete aus mehreren Teilen, UberASM-Bibliotheken mit eigenen Namespaces und Anleitungen im Editor | Kevin (kkevinm); Nachfolger des Retry-Patches von worldpeace; Beiträge von lx5, imamelia, 0x400, Thomas, Lui, AmperSam, MiracleWater, elusive |
 | Sonic Mania – Studiopolis Zone Act 1 (SMWCentral, Grafik, `sonicmaniasszact1.zip`) | Testfall für Lunar-Magic-Grafikpakete mit FG- und BG-Map16, mehreren Paletten und Layer 3; daran wurde der Ursprung im `.map16`-Kopf erkannt | *Autor noch nachzutragen* |
+| Ghostbusters – Ghost Trap / Java Manhattan BG (SMWCentral, Grafik, `ghostbustersghosttrapjavamanhattanBG.zip`) | Testfall für Lunar-Magic-Hintergrundpakete (`.mwl`, `.map16`, ExGFX, Palette) | *Autor noch nachzutragen* |
+| Rock Climbing Blocks (SMWCentral, Blöcke, `RockClimbBlocksUpdate.zip`) | Testfall für Blockpakete mit `list.txt`, Map16 und ExGFX | GreenHammerBro; SA-1-Update von yoshifanatic |
+| Brutal Bill (SMWCentral, Sprite, `BrutalBill.zip`) | Testfall für PIXI-Pakete mit Sprite und Shooter | Sonikku; nach dem Homing Bullet Bill von Carol |
+| Aftertouch Shatter (SMWCentral, Block, `Aftertouch Shatter.zip`) | Testfall für Blöcke, die einen eigenen Bounce-Sprite erzeugen | Arinsu; Original von HammerBrother |

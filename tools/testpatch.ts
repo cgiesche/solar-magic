@@ -5,8 +5,8 @@ import { loadLevel, serializeLayer1, newUid } from '../src/core/level.ts';
 import { installEditorPatch, setGfxEntry, setLevelGfx, DM16_EXT } from '../src/core/patches.ts';
 import { saveLevel } from '../src/core/save.ts';
 
-const orig = new Rom(new Uint8Array(readFileSync('Super Mario World (U) [!].smc')));
-const rom = new Rom(new Uint8Array(readFileSync('Super Mario World (U) [!].smc')));
+const orig = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
+const rom = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
 const p = installEditorPatch(rom);
 console.log('patch at', p.base.toString(16), 'rom size', rom.size.toString(16));
 const e0 = new LevelEmulator(orig); e0.boot();

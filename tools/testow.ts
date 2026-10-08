@@ -3,7 +3,7 @@ import { Rom } from '../src/core/rom.ts';
 import { readL2, writeL2, readL1, OverworldEmulator, l2Index, l1Index, translevels, levelName, translevelToLevel } from '../src/core/overworld.ts';
 import { TileCache } from '../src/core/render.ts';
 import { writePng } from './png.ts';
-const rom = new Rom(new Uint8Array(readFileSync('Super Mario World (U) [!].smc')));
+const rom = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
 const l2 = readL2(rom);
 const copy = new Rom(rom.output(false));
 const size = writeL2(copy, l2);

@@ -9,7 +9,7 @@ import { installEditorPatch, DM16_EXT } from '../src/core/patches.ts';
 
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
-const rom = new Rom(new Uint8Array(readFileSync('Super Mario World (U) [!].smc')));
+const rom = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
 installEditorPatch(rom);
 const emu = new LevelEmulator(rom); emu.boot();
 

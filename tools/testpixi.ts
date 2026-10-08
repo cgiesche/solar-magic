@@ -11,7 +11,6 @@ import { setActsLike } from '../src/core/map16ext.ts';
 import { captureSprites } from '../src/core/spritegfx.ts';
 import { loadAsar } from '../src/core/asar.ts';
 import { ROUTINES } from '../src/core/pixiroutines.ts';
-import { existsSync } from 'node:fs';
 import { packageFiles, packageFromFiles } from '../src/core/patchpkg.ts';
 import { planPixiPackage, applyPixiPackage } from '../src/core/pixipkg.ts';
 import { savePixiProject, removePixi, loadPixiProject, parsePixiList, parseCfg, parseJsonCfg, type PixiProject } from '../src/core/pixi.ts';
@@ -21,7 +20,7 @@ let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
 const same = (a: ArrayLike<number>, b: ArrayLike<number>) => a.length === b.length && Array.from(a).every((v, i) => v === b[i]);
 
-const rom = new Rom(new Uint8Array(readFileSync('Super Mario World (U) [!].smc')));
+const rom = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
 
 // ---- level format with extra bytes
 check(spriteSizes(rom) === null, 'vanilla ROM: no size table');
@@ -51,7 +50,7 @@ const lv = loadLevel(rom, 0x105);
 lv.sprites.push(...sprites.slice(1, 3).map((s) => ({ ...s, uid: newUid() })));
 const file = exportLevelFile(rom, lv);
 check(JSON.parse(file).spriteSizes?.length === 0x800, 'level file carries the size table');
-const plain = new Rom(new Uint8Array(readFileSync('Super Mario World (U) [!].smc')));
+const plain = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
 const imp = importLevelFile(plain, file, loadLevel(plain, 0x105)).level;
 const custom = imp.sprites.filter((s) => s.extra >= 2);
 check(imp.sprites.length === lv.sprites.length && custom.length === 2 && same(custom[0].bytes ?? [], [0xaa]),
@@ -100,7 +99,7 @@ const project: PixiProject = {
   }).map(([k, v]) => [k, new TextEncoder().encode(v)])),
   list: parsePixiList('10 marker.cfg\n11 kill.cfg\n'),
 };
-const prom = new Rom(new Uint8Array(readFileSync('Super Mario World (U) [!].smc')));
+const prom = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
 const res = savePixiProject(prom, project);
 if (!res.ok) console.log(res.errors.join('\n'));
 check(res.ok, 'project assembled and applied');
@@ -144,7 +143,7 @@ pemu.snes.joy1 = 0;
 for (let i = 0; i < 4; i++) pemu.snes.runFrame();
 check(W(0x7fb000) === 0x11 && W(0x7fb002) === 0x77, 'a sprite past byte $80 of the sprite data loads with its extra byte');
 // vanilla sprites still work next to custom ones
-const vrom = new Rom(new Uint8Array(readFileSync('Super Mario World (U) [!].smc')));
+const vrom = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
 const vemu = new LevelEmulator(vrom); vemu.boot();
 const vlv = loadLevel(vrom, 0x105);
 const a = vemu.load(0x105, { sprites: serializeSprites(vlv.sprites, vlv.spriteHeader, false) });
@@ -190,7 +189,7 @@ print "MAIN ",pc
 + DEY : BNE -
   RTL
 `;
-  const r3 = new Rom(new Uint8Array(readFileSync('Super Mario World (U) [!].smc')));
+  const r3 = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
   const res3 = savePixiProject(r3, { files: new Map([
     ['sprites/math.cfg', new TextEncoder().encode('01\n36\n00 00 3B 80 00 00\n00 00\nmath.asm\n00:00\n')],
     ['sprites/math.asm', new TextEncoder().encode(math)],
@@ -216,7 +215,7 @@ print "MAIN ",pc
 // every built-in routine assembles (called from code that never runs)
 {
   const all = Object.keys(ROUTINES).filter((n) => !n.startsWith('Pixi'));
-  const r2 = new Rom(new Uint8Array(readFileSync('Super Mario World (U) [!].smc')));
+  const r2 = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
   const res2 = savePixiProject(r2, { files: new Map([
     ['sprites/all.cfg', new TextEncoder().encode('01\n36\n00 00 3B 80 00 00\n00 00\nall.asm\n00:00\n')],
     ['sprites/all.asm', new TextEncoder().encode('print "INIT ",pc\nprint "MAIN ",pc\n  RTL\n' + all.map((n) => `  %${n}()`).join('\n') + '\n')],
@@ -225,10 +224,10 @@ print "MAIN ",pc
   check(res2.ok, `all ${all.length} shared routines assemble`);
 }
 
-// a downloaded package (resources_local, not in the repository): numbers, linked defines, applied
-if (existsSync('resources_local/BrutalBill.zip')) {
-  const r4 = new Rom(new Uint8Array(readFileSync('Super Mario World (U) [!].smc')));
-  const pkg = packageFromFiles('BrutalBill.zip', packageFiles('BrutalBill.zip', new Uint8Array(readFileSync('resources_local/BrutalBill.zip'))));
+// a downloaded package (test/fixtures): numbers, linked defines, applied
+{
+  const r4 = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
+  const pkg = packageFromFiles('BrutalBill.zip', packageFiles('BrutalBill.zip', new Uint8Array(readFileSync('test/fixtures/BrutalBill.zip'))));
   const plan = planPixiPackage(r4, pkg);
   const desc = plan.sprites.map((q) => `${q.kind}:${q.num.toString(16)}`).sort().join(' ');
   check(desc === 'shooters:c0 sprites:0', `BrutalBill: sprite 00 and shooter C0 (${desc})`);
@@ -244,7 +243,7 @@ if (existsSync('resources_local/BrutalBill.zip')) {
 // custom shooters and generators: MAIN runs every frame, the shooter with its extra byte
 {
   const enc2 = new TextEncoder();
-  const r5 = new Rom(new Uint8Array(readFileSync('Super Mario World (U) [!].smc')));
+  const r5 = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
   const res5 = savePixiProject(r5, { files: new Map([
     ['shooters/s.cfg', enc2.encode('01\n00\n00 00 00 00 00 00\n00 00\ns.asm\n01:01\n')],
     ['shooters/s.asm', enc2.encode('print "MAIN ",pc\n  LDA $7FB020 : INC : STA $7FB020\n  LDA !shooter_extra_byte_1,x : STA $7FB021\n  LDA !shoot_num,x : STA $7FB023\n  RTL\n')],
@@ -262,9 +261,9 @@ if (existsSync('resources_local/BrutalBill.zip')) {
   check(w5(0x7fb020) > 10 && w5(0x7fb021) === 0x42 && w5(0x7fb023) === 0xc1, `custom shooter runs with its extra byte and extra bit (${w5(0x7fb020)} frames, byte ${w5(0x7fb021).toString(16)}, num ${w5(0x7fb023).toString(16)})`);
   check(w5(0x7fb022) > 10, `custom generator runs (${w5(0x7fb022)} frames)`);
 }
-if (existsSync('resources_local/BrutalBill.zip')) {
-  const r6 = new Rom(new Uint8Array(readFileSync('Super Mario World (U) [!].smc')));
-  const pkg = packageFromFiles('BrutalBill.zip', packageFiles('BrutalBill.zip', new Uint8Array(readFileSync('resources_local/BrutalBill.zip'))));
+{
+  const r6 = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
+  const pkg = packageFromFiles('BrutalBill.zip', packageFiles('BrutalBill.zip', new Uint8Array(readFileSync('test/fixtures/BrutalBill.zip'))));
   const res6 = applyPixiPackage(r6, pkg, planPixiPackage(r6, pkg), [0, 0, 0, 0], () => [0, 0, 0, 0]);
   const e6 = new LevelEmulator(r6); e6.boot();
   const l6 = loadLevel(r6, 0x105);
@@ -308,7 +307,7 @@ if (existsSync('resources_local/BrutalBill.zip')) {
 print "MAIN ",pc
   RTL
 `;
-  const r7 = new Rom(new Uint8Array(readFileSync('Super Mario World (U) [!].smc')));
+  const r7 = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
   const files = new Map<string, Uint8Array>([
     ['sprites/spawner.cfg', enc3.encode('01\n36\n00 00 3B 80 00 00\n00 00\nspawner.asm\n00:00\n')],
     ['sprites/spawner.asm', enc3.encode(spawner)],
@@ -333,12 +332,12 @@ print "MAIN ",pc
   names.forEach((n, i) => check(w7(0x7fb030 + i) > 0, `custom ${n} sprite runs (${w7(0x7fb030 + i)} frames)`));
 }
 
-// a package with a block that spawns its custom bounce sprite (Aftertouch Shatter, resources_local): the block
+// a package with a block that spawns its custom bounce sprite (Aftertouch Shatter, test/fixtures): the block
 // Mario stood on shatters once he has left it
-if (existsSync('resources_local/Aftertouch Shatter.zip')) {
-  const r8 = new Rom(new Uint8Array(readFileSync('Super Mario World (U) [!].smc')));
+{
+  const r8 = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
   installEditorPatch(r8);
-  const f = 'resources_local/Aftertouch Shatter.zip';
+  const f = 'test/fixtures/Aftertouch Shatter.zip';
   const pkg = packageFromFiles('Aftertouch Shatter.zip', packageFiles('Aftertouch Shatter.zip', new Uint8Array(readFileSync(f))));
   const plan = planPixiPackage(r8, pkg);
   check(plan.sprites.length === 1 && plan.sprites[0].kind === 'bounce' && plan.blocks.length === 1 && plan.links.some((l) => l.define === 'bounce_sprite'),
@@ -370,7 +369,7 @@ if (existsSync('resources_local/Aftertouch Shatter.zip')) {
 // removing restores the ROM
 const w = removePixi(prom);
 check(w.length === 0 && spriteSizes(prom) === null, 'removed: no size table');
-const orig = new Uint8Array(readFileSync('Super Mario World (U) [!].smc'));
+const orig = new Uint8Array(readFileSync('test/fixtures/smw.smc'));
 let diff = 0;
 for (let i = 0; i < Math.min(orig.length - 512, prom.data.length); i++) if (prom.data[i] !== orig[i + 512] && i !== 0x7fd7) diff++; // ROM size: stays expanded
 check(diff === 0, `removed: ROM as before (${diff} bytes differ)`);

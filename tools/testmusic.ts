@@ -22,7 +22,7 @@ const check = (ok: boolean, what: string) => { console.log(`${ok ? 'ok  ' : 'FAI
 const peak = (a: Int16Array) => a.reduce((m, v) => Math.max(m, Math.abs(v)), 0);
 
 await loadApu();
-const raw = readFileSync('Super Mario World (U) [!].smc');
+const raw = readFileSync('test/fixtures/smw.smc');
 const vanilla = new Rom(new Uint8Array(raw.subarray(raw.length % 0x8000)));
 const rom = new Rom(vanilla.data.slice());
 
