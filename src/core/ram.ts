@@ -53,6 +53,7 @@ export const RAM = {
   layer3Tide: 0x1403, // 1 rising and falling, 2 fixed
   layer3Setting: 0x1be3,
   sublevelCount: 0x141a,
+  levelMusic: 0x0dda, // song of the level; the game doesn't restart it when the next level has the same
   screenExitLo: 0x19b8, screenExitHi: 0x19d8, // per screen
   useSecondaryExit: 0x1b93,
   backdrop: 0x0701, // 16-bit color

@@ -249,6 +249,10 @@ check(diff === 0, `original ROM area restored, apart from size and checksum (${d
   const emu = new LevelEmulator(rv);
   emu.snes.apu = new Apu();
   check(emu.load(0x105).ok && blocks.length > 0 && levelBank(emu), 'original ROM, level from the title screen: level music bank in the sound unit');
+  // Here We Go, also the title screen demo's song: it starts anyway
+  let pk = 0;
+  for (let f = 0; f < 120; f++) { emu.snes.runFrame(); pk = Math.max(pk, peak(emu.snes.audio!)); }
+  check(pk > 1000 && emu.snes.wram[0x141a] === 1, `original ROM, level from the title screen: its song plays (peak ${pk})`);
   emu.startGame(0x29);
   check(emu.load(0x105, { translevel: 0x29, continueState: true }).ok && levelBank(emu), 'original ROM, level from the overworld: level music bank in the sound unit');
 }

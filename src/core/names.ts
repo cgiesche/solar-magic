@@ -27,7 +27,9 @@ export function levelModeName(m: number): string {
   return LEVEL_MODES[m] ?? `Mode ${hex2(m)} (unusual)`;
 }
 
-export const MUSIC = ['Overworld', 'Athletic', 'Underground', 'Water', 'Castle', 'Ghost House', 'Bonus/Sky', 'Boss'];
+// the songs of the 8 level header music settings in the original game (AddmusicK maps them to its
+// originals of these names; e.g. Iggy's Castle has 3, the Yellow Switch Palace 7)
+export const MUSIC = ['Here We Go', 'Underground', 'Athletic', 'Castle', 'Ghost House', 'Water', 'Boss', 'Switch Palace'];
 export const ENTRANCE_ACTIONS = ['Normal / pipe up', 'Pipe right', 'Pipe left', 'Pipe down',
   'Pipe up', 'Slide/walk in from the left', 'Door / jump up from below (water)', 'Normal (no Yoshi intro)'];
 export const TIME_SETTINGS = ['0 (none)', '200', '300', '400'];

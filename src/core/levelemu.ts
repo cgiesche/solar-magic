@@ -166,6 +166,9 @@ export class LevelEmulator {
     // coming from the title screen or overworld, the game's call of the music bank upload sees $141A
     // as on entering a level from there (the routine checks the other conditions itself)
     const musicCall = s.apu && w[RAM.sublevelCount] === 0 ? snesToPc(LEVEL_MUSIC_CALL) : -1;
+    // and no level song playing, as the overworld load leaves it ($00A0B9; the title screen's demo
+    // level set one, so the level's song wouldn't start if it was the same)
+    if (musicCall >= 0) w[RAM.levelMusic] = 0;
     w[RAM.sublevelCount] = 1;
     // translevel $24 (Chocolate Island 2) makes the exit-based load pick a room by time/coins instead
     const tl = ov.translevel ?? mainTranslevel(level) ?? 0;
@@ -267,8 +270,10 @@ export class LevelEmulator {
     let ok = true;
     let error: string | undefined;
     try {
-      // GM $11 loads the level; hooks only needed there
-      while (w[RAM.gameMode] === GM.levelLoad && frames < 30) { s.runFrame(); frames++; }
+      // GM $11 loads the level; hooks only needed there. With the sound unit emulated, the upload of
+      // the level music bank takes some 40 frames of it
+      const loadLimit = musicCall >= 0 ? 120 : 30;
+      while (w[RAM.gameMode] === GM.levelLoad && frames < loadLimit) { s.runFrame(); frames++; }
       s.hook = null;
       // with the sound unit emulated, the fade-in also waits for the song's upload (AddmusicK sends a
       // song with its samples then: well over 100 frames for big ones)
