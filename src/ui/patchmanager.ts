@@ -10,7 +10,6 @@ import { h, modal, clear, toast, hexInput, select } from './dom.ts';
 import { kvGet, kvDel } from './storage.ts';
 import { applyPatch, reapplyPatch, type ApplyResult, type PatchSource } from '../core/patchapply.ts';
 import { patchArchive, type PatchEntry } from '../core/patchreg.ts';
-import { zipSync, unzipSync } from 'fflate';
 import { pickFile } from './dom.ts';
 import { openPixiUploadDialog } from './pixidialog.ts';
 import { freeBlockTile } from './blockdialog.ts';
@@ -22,7 +21,7 @@ import { ALL, type UberContext } from '../core/uberasm.ts';
 import { hex } from '../core/names.ts';
 import { planBlockPack, applyBlockPack } from '../core/blockpack.ts';
 import { isLevelImport, planBgPack, applyBgPack, levelColors, type BgPackResult } from '../core/bgpack.ts';
-import { uploadFiles, uploadFromFiles, detectKind, type DetectedPart, effectiveDefines, uploadSource, optionDefault, type Upload, type PatchOption } from '../core/patchpkg.ts';
+import { uploadFiles, uploadFromFiles, detectKind, type DetectedPart, effectiveDefines, uploadSource, optionDefault, packUpload, unpackUpload, type StoredUpload, type Upload, type PatchOption } from '../core/patchpkg.ts';
 import { installEditorPatch } from '../core/patches.ts';
 import { installMap16Ext, map16Ext, setExtTileWords, EXT_FIRST, EXT_TILES } from '../core/map16ext.ts';
 import { map16Source } from '../core/render.ts';
@@ -34,23 +33,10 @@ import { romChanged, logView, errorText } from './projectpane.ts';
 import { trackPackage, type Tracker } from './pkgtrack.ts';
 import { TOOL_KINDS, type ToolKind } from '../core/parts.ts';
 
-export interface StoredUpload { fileName: string; files: [string, Uint8Array][]; main: string }
-const META = '.smwe-package.json';
-
-function packArchive(s: StoredUpload): Uint8Array {
-  const files: Record<string, Uint8Array> = Object.fromEntries(s.files);
-  files[META] = new TextEncoder().encode(JSON.stringify({ fileName: s.fileName, main: s.main }));
-  return zipSync(files, { level: 9 });
-}
-function unpackArchive(a: Uint8Array): StoredUpload {
-  const all = unzipSync(a);
-  const meta = JSON.parse(new TextDecoder().decode(all[META])) as { fileName: string; main: string };
-  delete all[META];
-  return { ...meta, files: Object.entries(all) };
-}
+export type { StoredUpload };
 export async function storedUpload(app: App, p: PatchEntry): Promise<StoredUpload | undefined> {
   const a = patchArchive(app.rom, p);
-  return a ? unpackArchive(a) : kvGet<StoredUpload>(srcKey(p.id)); // older versions kept large sources in the browser
+  return a ? unpackUpload(a) : kvGet<StoredUpload>(srcKey(p.id)); // older versions kept large sources in the browser
 }
 const srcKey = (id: string) => `patch:${id}`;
 
@@ -116,7 +102,7 @@ export function runPatch(app: App, upload: Upload, fileName: string, main: strin
   try { src = uploadSource(upload, main, effectiveDefines(upload, values)); } catch (e) { return fail(e); }
   src.settings = values;
   const stored: StoredUpload = { fileName, files: [...upload.files], main };
-  src.archive = packArchive(stored); // kept with the editor data, not in the ROM
+  src.archive = packUpload(stored); // kept with the editor data, not in the ROM
   if (app.dirty) app.saveLevel(true);
   let r: ApplyResult;
   try {

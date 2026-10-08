@@ -4,7 +4,7 @@
 // (`!name = value`) are rewritten in place, so configuration defines of ordinary patches can be changed
 // too; others are passed to Asar as additional defines.
 
-import { unzipSync } from 'fflate';
+import { unzipSync, zipSync } from 'fflate';
 import type { PatchSource } from './patchapply.ts';
 import type { RamClaim } from './patchreg.ts';
 import type { PartKind } from './parts.ts';
@@ -219,4 +219,21 @@ export function detectKind(upload: Upload, main = upload.main ?? upload.asmFiles
   const hijacks = st.some((l) => /^(org|freecode|freedata|autoclean|pushpc|lorom|sa1rom|hirom)\b/i.test(l));
   if (hasLabel && !hijacks) return { kind: 'uberasm', file: main };
   return { kind: 'patch', file: main };
+}
+
+// an upload as kept with a patch it applied (its archive in the editor data), to reapply it later
+export interface StoredUpload { fileName: string; files: [string, Uint8Array][]; main: string }
+const STORED_META = '.smwe-package.json';
+
+export function packUpload(s: StoredUpload): Uint8Array {
+  const files: Record<string, Uint8Array> = Object.fromEntries(s.files);
+  files[STORED_META] = new TextEncoder().encode(JSON.stringify({ fileName: s.fileName, main: s.main }));
+  return zipSync(files, { level: 9 });
+}
+
+export function unpackUpload(a: Uint8Array): StoredUpload {
+  const all = unzipSync(a);
+  const meta = JSON.parse(new TextDecoder().decode(all[STORED_META])) as { fileName: string; main: string };
+  delete all[STORED_META];
+  return { ...meta, files: Object.entries(all) };
 }

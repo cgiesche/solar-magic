@@ -4,10 +4,12 @@
 // change goes into the ROM at once; Ctrl+Z / Ctrl+Y in the dialog undo and redo it (ADR 0001).
 
 import type { App } from './app.ts';
-import { h, modal, clear, toast } from './dom.ts';
+import { h, modal, clear, toast, pickFile } from './dom.ts';
 import { loadAsar } from '../core/asar.ts';
 import { pickUpload, recognize, type PackagesTab, type PickedUpload } from './patchmanager.ts';
 import { packagesPane } from './packages.ts';
+import { inspectUpload } from '../core/packages.ts';
+import { openUploadPreview, showUploadFailure } from './upload.ts';
 import type { ToolKind } from '../core/parts.ts';
 import { trackPackage, findPackage } from './pkgtrack.ts';
 import { uberPane } from './uberdialog.ts';
@@ -98,11 +100,40 @@ export async function openResources(app: App, tab: ResourceTab = 'packages', opt
     if (picked) await run(picked);
   };
 
+  // an upload: its preview, then the package installed and selected
+  const upload = async (f: File) => {
+    const files = new Uint8Array(await f.arrayBuffer());
+    const pv = inspectUpload(f.name, files);
+    if (pv.status === 'failed') { showUploadFailure(pv.name, pv.reason); return; }
+    if (pv.status !== 'ready') { await run(recognize(app, f.name, pv.files)); return; }
+    openUploadPreview(app, pv, () => {
+      for (const x of Object.values(p)) x.reload();
+      music.reload();
+      show('packages');
+      changed();
+    });
+  };
+  const pickAndUpload = async () => {
+    const f = await pickFile('.asm,.asar,.zip,.txt');
+    if (f) await upload(f).catch((e) => toast(errorText(e), 'error'));
+  };
+  // a file dropped anywhere on the dialog is uploaded (not opened as a ROM by the editor's own handler)
+  body.addEventListener('dragover', (e) => { if (e.dataTransfer?.types.includes('Files')) { e.preventDefault(); e.stopPropagation(); body.classList.add('drop-target'); } });
+  body.addEventListener('dragleave', (e) => { if (!body.contains(e.relatedTarget as Node)) body.classList.remove('drop-target'); });
+  body.addEventListener('drop', (e) => {
+    body.classList.remove('drop-target');
+    const f = e.dataTransfer?.files[0];
+    if (!f) return;
+    e.preventDefault();
+    e.stopPropagation();
+    void upload(f).catch((err) => toast(errorText(err), 'error'));
+  });
+
   clear(body).append(
     h('div', { class: 'row res-top' },
-      h('button', { class: 'primary', onclick: () => add() }, 'Add …'),
+      h('button', { class: 'primary', onclick: () => void pickAndUpload() }, 'Upload package …'),
       h('button', { onclick: () => add(true), title: 'Assign a package’s folders and files to folders of the UberASM project yourself – for packages that are more than one resource' }, 'Assign manually …'),
-      h('span', { class: 'hint' }, '.asm or .zip (e.g. from SMWCentral) – recognized as patch, UberASM code, custom block, block package, custom sprite, graphics (Lunar Magic: background, Map16 tiles) or music (AddmusicK).')),
+      h('span', { class: 'hint' }, 'or drop a file here: .asm, .zip (e.g. from SMWCentral, or a whole UberASM Tool, GPS or PIXI folder) or an AddmusicK song – everything it contains is installed as one package.')),
     tabBar,
     content,
   );

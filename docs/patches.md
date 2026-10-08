@@ -10,10 +10,11 @@ sich drei Arten von ASM-Code direkt im Browser in die ROM bringen:
 | **Custom Blocks** | Blöcke im GPS-Format | Tab *Custom Blocks* (auch *ROM → Custom Blocks …* oder im Map16-Editor) |
 
 Alles liegt in einem Dialog: der Tab *Pakete* (siehe [Pakete](#pakete)) und je ein Tab für UberASM,
-Custom Blocks und Custom Sprites (PIXI, siehe [pixi.md](pixi.md)) mit dem ganzen Projekt. **Hinzufügen …**
-oben im Dialog nimmt jeden Download und erkennt, was er ist (Patch, UberASM-Code, Custom Block,
-Block-Paket, Custom Sprite, Lunar-Magic-Hintergrund); danach steht er im Tab *Pakete*. Was im aktuellen Tab gewählt ist, gibt die Vorauswahl: im UberASM-Tab Level/Overworld/Game Mode,
-im Blocks-Tab das Tile. **Jede Änderung geht sofort in die ROM** – Patches und Hinzugefügtes ebenso wie jede
+Custom Blocks und Custom Sprites (PIXI, siehe [pixi.md](pixi.md)) mit dem ganzen Projekt. **Ein Paket
+hochzuladen ist der einzige Weg, auf dem Fremdinhalte in die ROM kommen:** *Upload package …* oben im Dialog
+(oder eine Datei auf den Dialog ziehen) zeigt eine Vorschau mit allem, was erkannt wurde, und *Install*
+installiert alles als **ein Paket** (siehe [Paket hochladen](#paket-hochladen-vorschau-und-installieren)).
+**Jede Änderung geht sofort in die ROM** – Patches und Hinzugefügtes ebenso wie jede
 Änderung in den Tabs UberASM, Custom Blocks und Custom Sprites (eine Zuordnung, eine Datei, eine
 Einstellung). Dabei wird das ganze Projekt neu gebaut und angewendet; schlägt das fehl, bleibt die ROM
 unverändert und der Tab zeigt wieder den Stand der ROM. Jede Änderung ist **ein Schritt für Strg+Z**
@@ -73,23 +74,37 @@ Patches, die vor dieser Verwaltung angewendet wurden, stehen als eigene Pakete i
 Projekten zu keinem Paket gehört (früher oder von Hand hinzugefügt), nennt die Liste unten mit Link zum Tab.
 Hintergrund-Pakete gehen ins Level und werden kein Paket.
 
-## Was „Hinzufügen“ erkennt
+## Paket hochladen: Vorschau und Installieren
 
-Viele Downloads auf SMWCentral sind keine eigenständigen Patches, sondern Ressourcen für andere Werkzeuge.
-*Hinzufügen …* erkennt das am Code und führt jeweils weiter:
+Ein **Upload** ist, was man für ein Paket hineingibt: eine einzelne Datei (`.asm`, ein AddmusicK-Song `.txt`)
+oder ein `.zip` – ein Download von SMWCentral so, wie er ist, oder ein ganzer Ordner von UberASM Tool, GPS
+oder PIXI. Nach dem Hochladen erkennt der Editor (`src/core/packages.ts`), welche **Teile** (Parts) darin
+stecken, und zeigt sie in einer **Vorschau** („2 sprites, 1 UberASM file, 1 song“), jeden Teil mit seiner
+Art. Noch ist nichts geschrieben: *Cancel* lässt die ROM unverändert. *Install* wendet alle Teile auf einmal
+an und legt **ein** Paket an, das danach in der Liste gewählt ist; Strg+Z nimmt die ganze Installation in
+einem Schritt zurück. Schlägt ein Teil fehl, bleibt die ROM wie vorher.
 
-| Erkannt an | Art | Was passiert |
+| Erkannt an | Teil | Was *Install* macht |
 |---|---|---|
-| `init:`/`main:`/…-Labels ohne `org` | UberASM-Ressource | Abfrage, wo der Code läuft (ein Level, alle Level, Game Mode, Overworld-Karte), dann Aufnahme ins UberASM-Projekt |
-| beginnt mit `db $42`/`db $37` | Custom Block (GPS) | Abfrage von Map16-Tile, „acts like“ (aus der Beschreibung übernommen, z. B. „Act like 130“) und Grafik |
-| `list.txt` mit Blöcken, oft `.map16` und `ExGFX…bin` | Block-Paket | alles in einem Schritt, siehe [Block-Pakete](#block-pakete) |
-| `.mwl` (meist mit `.map16`, `ExGFX…bin`, `.pal`, `.palmask`) | Grafik-Paket (Lunar Magic) | Hintergrund, FG-Map16-Tiles, Slots und Farben ins aktuelle Level, siehe [Grafik-Pakete](#grafik-pakete-lunar-magic) |
-| `print "INIT ",pc` / `print "MAIN ",pc` | Custom Sprite (PIXI) | die Sprites bekommen die nächsten freien Nummern, enthaltene Blöcke die nächsten freien Map16-Tiles, siehe [pixi.md](pixi.md) |
-| `.txt` mit `#0` und `#amk`/`#samples` (MML), dazu `.brr`, kein `.asm` | Song (AddmusicK) | Dialog *Add music*: anhören, Nummer, Level; AddmusicK fügt die Musik ein, siehe README → Musik und Tab *Music* |
-| alles andere | Patch | wie unten beschrieben |
-| UberASM-Tool-Ordner (`library/`, `gamemode/` …) in einem Unterordner, daneben eingebundene Ordner | Paket aus mehreren Teilen | Zuordnen von Hand mit Vorschlag, siehe [Pakete aus mehreren Teilen](#pakete-aus-mehreren-teilen) |
+| `.txt` mit `#0` und `#amk`/`#samples` (MML), dazu `.brr` | Song (AddmusicK) | nächste freie Nummer, spielt im aktuellen Level; AddmusicK fügt die Musik ein (Tab *Music*) |
+| `print "INIT ",pc` / `print "MAIN ",pc`, `.json`/`.cfg` | Custom Sprite (PIXI) | nächste freie Nummern; Blöcke im selben Upload kommen auf die nächsten freien Map16-Tiles, siehe [pixi.md](pixi.md) |
+| `list.txt` mit Blöcken, oft `.map16` und `ExGFX…bin` (auch ein GPS-Ordner) | Custom Blocks und Grafik | alles in einem Schritt, Grafik im aktuellen Level, siehe [Block-Pakete](#block-pakete) |
+| `list.txt` mit `level:`/`gamemode:`/`overworld:` | UberASM-Tool-Ordner | Dateien und Zuordnungen kommen zum UberASM-Projekt der ROM dazu |
+| `init:`/`main:`/…-Labels ohne `org`, oder eine Datei in `level/`, `gamemode/`, `overworld/` | UberASM-Code | läuft im aktuellen Level (aus `gamemode/`: Game Mode 14, aus `overworld/`: Karte 0) |
+| beginnt mit `db $42`/`db $37` | Custom Block (GPS) | nächstes freies Map16-Tile ab 200, „acts like“ aus der Beschreibung (sonst 130) |
+| eine `patch.json`, oder die übrigen `.asm` | Patch | höchstens einer je Paket; Einstellungen in der Vorschau, siehe unten |
 
-Jedes Hinzufügen-Fenster hat *Anleitung …*, wenn das Paket eine Readme oder ein HTML-Handbuch enthält. Es
+Ein Upload kann Teile mehrerer Arten haben (ein Boss-Sprite mit UberASM-Code und Song) oder viele einer Art
+(ein Sprite-Paket) – es bleibt ein Paket, das als Ganzes installiert und entfernt wird. Dateien, die eine
+andere `.asm` einbindet, und gemeinsamer Code in `library/`, `routines/` und `other/` sind keine eigenen
+Teile, sondern gehen mit dem Teil, der sie braucht. Die Zuordnungen lassen sich danach in den Tabs ändern.
+
+Sonderfälle: Ein **UberASM-Tool-Ordner in einem Unterordner, dessen Code daneben liegende Ordner einbindet**
+(Retry System), wird von Hand zugeordnet, siehe [Pakete aus mehreren Teilen](#pakete-aus-mehreren-teilen).
+Eine **`.mwl`** ist ein Level-Import, kein Paket, siehe [Grafik-Pakete](#grafik-pakete-lunar-magic). Wird
+gar nichts erkannt, sagt die Vorschau, was gefunden wurde und was fehlt.
+
+Die Vorschau hat *Anleitung …*, wenn das Paket eine Readme oder ein HTML-Handbuch enthält. Es
 wird im Editor angezeigt, mit Bildern und Links zwischen den Seiten; Skripte der Seiten laufen nicht.
 Anleitungen von Paketen in UberASM, Blöcken und Sprites bleiben im Browser gespeichert und stehen im
 jeweiligen Tab unter *Anleitungen*.
@@ -130,16 +145,17 @@ gewählt). Eine vorhandene Lunar-Magic-Kennung bleibt unangetastet.
 
 ## Patches anwenden
 
-1. *ROM → Patches …* → *Hinzufügen …* und eine `.asm`- oder `.zip`-Datei wählen. Aus einem Archiv wird ein
+1. *ROM → Patches …* → *Upload package …* und eine `.asm`- oder `.zip`-Datei wählen. Aus einem Archiv wird ein
    gemeinsamer oberster Ordner entfernt; Includes und Binärdateien (`incsrc`/`incbin`) bleiben mit ihren
    relativen Pfaden erhalten.
-2. Enthält das Archiv mehrere `.asm`-Dateien, wird die Hauptdatei ausgewählt (siehe Readme des Patches).
-3. **Einstellungen:**
-   - Ohne `patch.json` zeigt der Dialog alle Define-Zuweisungen (`!name = wert`) auf oberster Ebene der
+2. Enthält das Archiv mehrere `.asm`-Dateien, wird in der Vorschau die Hauptdatei ausgewählt (siehe Readme
+   des Patches).
+3. **Einstellungen** (in der Vorschau, später in den Paket-Details):
+   - Ohne `patch.json` zeigt die Vorschau alle Define-Zuweisungen (`!name = wert`) auf oberster Ebene der
      Hauptdatei. Geänderte Werte werden direkt in diese Zeilen eingesetzt. So lassen sich auch die
      Konfigurations-Defines gewöhnlicher Patches ändern, ohne die Datei zu bearbeiten.
    - Mit `patch.json` erscheinen stattdessen die dort beschriebenen Optionen.
-4. *Anwenden*. Asar-Fehler, Warnungen und `print`-Ausgaben werden angezeigt.
+4. *Install*. Asar-Fehler und Warnungen werden angezeigt.
 
 **Konflikte** werden vor dem Übernehmen geprüft; im Fehlerfall bleibt die ROM unverändert. Abgelehnt wird
 ein Patch, wenn er
@@ -348,9 +364,9 @@ Viele Blöcke auf SMWCentral kommen als Paket, z. B.:
 - `Tiles.map16`: die Grafik der Map16-Tiles, als Lunar-Magic-Export;
 - `ExGFX80_BG2.bin`: die 8×8-Grafik, auf die die Map16-Tiles verweisen, hier für den BG2-Slot.
 
-*Hinzufügen …* richtet das zusammen ein:
+Hochgeladen, richtet *Install* das zusammen ein:
 1. Die Blöcke kommen auf die Tiles aus der `list.txt`.
-2. Die `.map16`-Tiles kommen ab dem ersten Tile der Liste (änderbar) in die Map16-Tabelle, mit ihrem
+2. Die `.map16`-Tiles kommen ab dem ersten Tile der Liste in die Map16-Tabelle, mit ihrem
    „acts like“, sofern die Liste keines angibt.
 3. Die ExGFX-Datei wird unter ihrer Nummer aus dem Dateinamen gespeichert und im aktuellen Level in den
    Slot aus dem Dateinamen gelegt (`_BG2`, `_FG1` …). Für andere Level: Grafik-Bereich → *Grafiken* → Slot-Karte → „Tauschen …“.

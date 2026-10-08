@@ -471,3 +471,4 @@ button.danger:hover:not(:disabled) { border-color: var(--danger); }
 .resources:has(.music-pane) { width: 920px; }
 .song-add { width: 620px; display: flex; flex-direction: column; gap: 8px; }
 .amk-log { max-height: 300px; overflow: auto; font-size: 11px; white-space: pre-wrap; }
+.resources.drop-target { outline: 2px dashed var(--accent2); outline-offset: 4px; }

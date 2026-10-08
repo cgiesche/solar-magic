@@ -9,12 +9,13 @@ Diese Seite beschreibt die Schnittstelle, die Ressourcen sehen, und wie der Edit
 
 ## Im Editor
 
-- **Hinzufügen:** *ROM → Patches → Hinzufügen …* mit einem Download (`.zip` oder `.asm`). Der Editor erkennt
+- **Hochladen:** *ROM → Patches → Upload package …* mit einem Download (`.zip` oder `.asm`, auch ein ganzer
+  PIXI-Ordner). Der Editor erkennt
   Sprites (an `.json`/`.cfg`), Misc-Sprites (`.asm` mit `print "MAIN ",pc` in einem Ordner ihrer Art) und
   enthaltene Custom Blocks. Jeder Sprite bekommt die nächste freie Nummer seiner Art, jeder Block das nächste
-  freie Map16-Tile ab 200. Defines, die einen Sprite des Pakets meinen, werden auf dessen Nummer gesetzt
-  und im Dialog angezeigt: der Dateiname im Kommentar (`!Sprite = $18 ; Sprite number of BrutalBill.json`)
-  oder eine Misc-Art im Namen (`!bounce_sprite`).
+  freie Map16-Tile ab 200. Defines, die einen Sprite des Pakets meinen, werden auf dessen Nummer gesetzt,
+  erkannt am Dateinamen im Kommentar (`!Sprite = $18 ; Sprite number of BrutalBill.json`)
+  oder an einer Misc-Art im Namen (`!bounce_sprite`).
 - **Verwalten:** Tab *Custom Sprites* im Patches-Dialog (auch *ROM → Custom Sprites …*): Einträge
   der `list.txt`, Projektdateien, Import und Export eines PIXI-Ordners als `.zip`. Alles wird als ein Patch
   mit den Quellen in der ROM verzeichnet und lässt sich wieder entfernen.

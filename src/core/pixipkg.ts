@@ -40,8 +40,8 @@ const isBlock = (text: string) => {
   return !!first && /^db\s+\$(42|37)\b/i.test(first);
 };
 
-export function planPixiUpload(rom: Rom, upload: Upload): PixiPlan {
-  const proj = loadPixiProject(rom) ?? { files: new Map(), list: [] };
+// the sprites, blocks and routines of an upload, without numbers and tiles yet (-1)
+export function pixiParts(upload: Upload): Omit<PixiPlan, 'links'> {
   const sprites: PixiPlanSprite[] = [];
   const used = new Set<string>(); // asm files belonging to a cfg/json
   for (const [f, data] of upload.files) {
@@ -69,6 +69,12 @@ export function planPixiUpload(rom: Rom, upload: Upload): PixiPlan {
     const k = folderKind(f);
     sprites.push({ kind: k && MISC_KINDS.includes(k) ? k : k ?? 'sprites', file: f, num: -1, name: base(f).replace(/\.asm$/i, '') });
   }
+  return { sprites, blocks, routines };
+}
+
+export function planPixiUpload(rom: Rom, upload: Upload): PixiPlan {
+  const proj = loadPixiProject(rom) ?? { files: new Map(), list: [] };
+  const { sprites, blocks, routines } = pixiParts(upload);
   // numbers: a sprite file already in the project keeps its number, the others get the next free one
   for (const s of sprites) {
     const dest = destOf(upload, s);

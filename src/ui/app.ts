@@ -1551,6 +1551,21 @@ export class App {
     }
   }
 
+  // romEdit for a change that awaits (AddmusicK inserting songs): one undo step for all of it
+  async romEditAsync<T>(label: string, fn: () => Promise<T>): Promise<T> {
+    const h = this.romHistory, pushes = h.pushes;
+    h.begin(label);
+    try {
+      return await fn();
+    } finally {
+      h.commit();
+      if (!h.open) {
+        if (h.pushes !== pushes) this.pushOrder('rom', h.undoStack.length);
+        this.romChanged();
+      }
+    }
+  }
+
   // the ROM changed: editors redraw at once ('rom-change'), the level render follows debounced
   romChanged(): void {
     this.graph = null;
