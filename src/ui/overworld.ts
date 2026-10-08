@@ -620,7 +620,7 @@ export class OverworldView {
       writeL1(rom, this.l1);
       for (const [tl, code] of this.names) setNameCode(rom, tl, code);
       this.names.clear();
-      this.app.persist();
+      this.app.romWritten();
       this.dirty = false;
       this.invalidate();
       this.redrawMap();

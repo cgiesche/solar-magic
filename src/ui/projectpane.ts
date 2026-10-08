@@ -38,12 +38,11 @@ export interface Pane {
   touch(): void; // the project was changed from outside the tab: applied to the ROM at once
 }
 
-// ROM changed by a patch or project: reload everything that depends on it
-export function romChanged(app: App): void {
-  app.persist();
+// after a ROM edit by a patch, project or package (romEdit told the editors): the level is loaded again
+// from the ROM and the patch lists follow ('patch')
+export function patchesChanged(app: App): void {
   app.openLevel(app.level.number);
   app.emit('patch');
-  app.emit('rom-change'); // open editors (graphics workspace) show it, e.g. an ExGFX file removed with a package
 }
 
 export function errorText(e: unknown): string {
@@ -60,7 +59,7 @@ export function logView(r: ApplyResult | null): HTMLElement {
 }
 
 
-// changed: after this tab changed the ROM (and romChanged)
+// changed: after this tab changed the ROM (and patchesChanged)
 export function projectPane<P extends Project>(app: App, spec: PaneSpec<P>, changed: () => void): Pane & { project(): P } {
   const el = h('div', { class: 'project-pane' });
   let proj: P;
@@ -113,7 +112,7 @@ export function projectPane<P extends Project>(app: App, spec: PaneSpec<P>, chan
       toast(`${spec.title}: not applied – ${r.errors[0] ?? 'error'}`, 'error');
       return;
     }
-    romChanged(app);
+    patchesChanged(app);
     changed();
     toast(`${text}${r.warnings.length ? ` – ${r.warnings.join(' ')}` : ''}`);
   };

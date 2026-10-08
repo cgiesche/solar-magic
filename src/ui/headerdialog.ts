@@ -129,7 +129,7 @@ export function openHeaderDialog(app: App): void {
         app.checkpoint();
         if (musicPlayer.label === 'header') musicPlayer.stop();
         if (levelSong !== levelMusic(app.rom, lv.number)) {
-          try { setLevelMusic(app.rom, lv.number, levelSong); app.persist(); } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
+          try { setLevelMusic(app.rom, lv.number, levelSong); app.romWritten(); } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
         }
         const modeChangedL2 = hasLayer2Objects(hd.mode) !== hasLayer2Objects(lv.header.mode);
         lv.header = hd;

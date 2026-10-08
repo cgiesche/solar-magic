@@ -87,7 +87,7 @@ export function openEntrancesDialog(app: App): void {
   buildDetail();
   const dlg = modal(`Secondary entrances ${bank ? '100–1FF' : '000–0FF'}`, h('div', { class: 'ent-editor' },
     h('div', null, h('div', { class: 'row small' }, 'Show: ', filter, h('button', { title: 'Next free number, into the current level (at the main entrance)', onclick: newEntry }, '+ New')), list), detail),
-  [{ label: 'Close', primary: true }], () => { app.persist(); });
+  [{ label: 'Close', primary: true }], () => { app.romWritten(); });
 }
 
 export function openRomInfo(app: App): void {
@@ -111,7 +111,7 @@ export function openExpandDialog(app: App): void {
     h('p', { class: 'hint' }, `Currently ${rom.size / 1024} KB. More room for levels, graphics, music etc. Saving expands automatically when needed. At most 4 MB (LoROM).`),
     h('div', { class: 'row' }, [0x100000, 0x200000, 0x400000].map((sz) => h('button', {
       disabled: rom.size >= sz,
-      onclick: () => { rom.expand(sz); app.persist(); toast(`ROM expanded to ${sz / 1048576} MB`); dlg.close(); },
+      onclick: () => { rom.expand(sz); app.romWritten(); toast(`ROM expanded to ${sz / 1048576} MB`); dlg.close(); },
     }, `${sz / 1048576} MB`))),
   );
   const dlg = modal('Expand ROM', body, [{ label: 'Cancel' }]);
@@ -121,7 +121,7 @@ export async function installEditorPatchAction(app: App): Promise<void> {
   const ok = await choose('Install editor patch', 'The editor patch allows sprite data in any bank, 256 graphics files (ExGFX, also uncompressed as 4bpp), graphics assignment per level and the "Direct Map16" object (place any Map16 tiles). It is also installed automatically when needed.',
     [{ label: 'Cancel' }, { label: 'Install', primary: true }]);
   if (ok !== 1) return;
-  try { installEditorPatch(app.rom); app.persist(); toast('Editor patch installed'); app.refresh(); app.emit('patch'); } catch (e) { toast(String(e), 'error'); }
+  try { installEditorPatch(app.rom); app.romWritten(); toast('Editor patch installed'); app.refresh(); app.emit('patch'); } catch (e) { toast(String(e), 'error'); }
 }
 
 // one undoable structural edit of the current level
@@ -180,7 +180,7 @@ function saveAs(app: App, target: number): void {
   copy.l1Addr = dst.l1Addr; copy.l1Size = 0; copy.l2Size = 0; copy.sprAddr = dst.sprAddr; copy.sprSize = 0;
   try {
     const log = saveLevel(app.rom, copy);
-    app.persist();
+    app.romWritten();
     toast(`Saved as level ${hex(target, 3)}: ${log.join(' · ')}`);
     app.emit('level');
   } catch (e) {
@@ -201,7 +201,7 @@ export async function importLevel(app: App): Promise<boolean> {
       if (data.gfx || editorPatch(rom)) setLevelGfx(rom, n, data.gfx ?? new Array(8).fill(0xff));
       if (data.palette || customPalette(rom, n)) setCustomPalette(rom, n, data.palette);
     });
-    app.persist();
+    app.romWritten();
     app.selection.clear();
     app.changed();
     app.emit('level-header');

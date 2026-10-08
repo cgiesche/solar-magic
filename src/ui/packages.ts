@@ -22,7 +22,7 @@ import type { BlockProject } from '../core/blocks.ts';
 import { map16Source } from '../core/render.ts';
 import { storedUpload, toUpload, settingsForm, reapplyPackagePatch, patchDone, type PackagesTab } from './patchmanager.ts';
 import { recordFiles, forgetRecordFiles } from './pkgtrack.ts';
-import { romChanged, logView, errorText, type Pane } from './projectpane.ts';
+import { patchesChanged, logView, errorText, type Pane } from './projectpane.ts';
 import { definesButton, editButton } from './defineedit.ts';
 import { openDocs, packageDocs, forgetDocs } from './docview.ts';
 import { gfxName } from './gfx/map16tab.ts';
@@ -332,7 +332,7 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
       const w = await app.romEditAsync(`Package “${rec.name}” removed`, () => removePackage(app.rom, rec.id, blank));
       forgetRecordFiles(rec.id);
       forgetDocs(rec.name);
-      romChanged(app);
+      patchesChanged(app);
       toast(`“${rec.name}” removed${w.length ? ': ' + w.join(' ') : ''}`);
     } catch (e) { toast(errorText(e), 'error'); }
     for (const k of keys) host.panes[k].reload();
@@ -346,7 +346,7 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
     if (app.dirty) app.saveLevel(true);
     try {
       const w = app.romEdit(`“${p.name}” removed`, () => uninstallVramPatch(app.rom));
-      romChanged(app);
+      patchesChanged(app);
       toast(`Patch “${p.name}” removed${w.length ? ': ' + w.join(' ') : ''}`);
     } catch (e) { toast(errorText(e), 'error'); }
     host.changed();

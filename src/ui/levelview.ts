@@ -754,7 +754,7 @@ export class LevelView {
       return;
     }
     if (d.kind === 'marker') {
-      if (d.marker.kind === 'sec') { if (d.moved) app.persist(); this.paint(); return; }
+      if (d.marker.kind === 'sec') { if (d.moved) app.romWritten(); this.paint(); return; }
       if (!d.moved) { app.undoStack.pop(); this.paint(); return; }
       app.changed();
       return;

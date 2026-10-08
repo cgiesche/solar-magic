@@ -12,7 +12,7 @@ import { uploadFromFiles, effectiveDefines, uploadSource, optionDefault, packUpl
 import { ensureRequirements } from '../core/packages.ts';
 import { map16Source } from '../core/render.ts';
 import { definesForm } from './defineedit.ts';
-import { logView, romChanged, errorText } from './projectpane.ts';
+import { logView, patchesChanged, errorText } from './projectpane.ts';
 import type { ToolKind } from '../core/parts.ts';
 import { recordPackageChange, type Package } from '../core/pkgreg.ts';
 
@@ -98,7 +98,7 @@ export function reapplyPackagePatch(app: App, upload: Upload, fileName: string, 
   }
   if (!r.ok) return r;
   kvDel(srcKey(entry.id)).catch(() => {}); // sources older versions kept in the browser
-  romChanged(app);
+  patchesChanged(app);
   return r;
 }
 

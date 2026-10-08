@@ -12,7 +12,7 @@ import type { PartKind } from '../core/parts.ts';
 import { map16Source } from '../core/render.ts';
 import { hex } from '../core/names.ts';
 import { settingsForm } from './patchmanager.ts';
-import { romChanged, logView, errorText } from './projectpane.ts';
+import { patchesChanged, logView, errorText } from './projectpane.ts';
 import { docsButton, keepDocs } from './docview.ts';
 import { musicPlayer } from './musicplayer.ts';
 
@@ -82,7 +82,7 @@ function installDialog(app: App, p: ReadyPreview | ManualPreview, body: HTMLElem
     busy = false;
     if (!r.ok || !r.pkg) { clear(log).appendChild(logView(r)); return; }
     dlg.close(true);
-    romChanged(app);
+    patchesChanged(app);
     for (const k of docs) void keepDocs(k, p.name, p.files).catch(() => {});
     toast(`“${p.name}” installed${r.warnings.length ? ` (${r.warnings.length} warning(s))` : ''} – Ctrl+Z undoes it.`);
     if (r.warnings.length) modal(`Output: ${p.name}`, logView({ ...r, prints: [] }), [{ label: 'OK', primary: true }]);

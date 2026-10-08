@@ -82,7 +82,7 @@ export function openMessagesDialog(app: App): void {
         if (!changed) return;
         try {
           const log = writeMessages(rom, msgs);
-          app.persist();
+          app.romWritten();
           toast(`Messages saved: ${log}`);
         } catch (e) {
           toast(String(e instanceof Error ? e.message : e), 'error');

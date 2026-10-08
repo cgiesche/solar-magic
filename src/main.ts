@@ -374,7 +374,6 @@ function exportRom(app: App): void {
   downloadBytes(`${base}.${withHeader ? 'smc' : 'sfc'}`, out);
   log(`ROM exported as “${base}.${withHeader ? 'smc' : 'sfc'}” (${Math.round(out.length / 1024)} KB)`);
   if (app.rom.extra.size) toast('The playable ROM holds no sources of patches, packages and projects – to keep editing elsewhere, use “Save project”.');
-  app.persist();
 }
 
 // ROM plus editor data, to open again in the editor
@@ -391,7 +390,6 @@ async function exportPatch(app: App): Promise<void> {
   const base = app.romName.replace(/\.(smc|sfc|bin|smwproj)$/i, '');
   downloadBytes(`${base}.bps`, patch);
   log(`Patch exported as “${base}.bps” (${Math.max(1, Math.round(patch.length / 1024))} KB, from “${f.name}”)`);
-  app.persist();
 }
 // forgets everything stored in the browser and starts over (reloading drops all state of the session)
 async function closeProject(app: App): Promise<void> {
@@ -410,7 +408,6 @@ function exportProject(app: App): void {
   const base = app.romName.replace(/\.(smc|sfc|bin|smwproj)$/i, '');
   downloadBytes(`${base}.smwproj`, out);
   log(`Project saved as “${base}.smwproj” (${Math.round(out.length / 1024)} KB, of which ${Math.round(app.rom.extraSize / 1024)} KB editor data)`);
-  app.persist();
 }
 
 function showHelp(): void {

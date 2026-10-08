@@ -1216,7 +1216,7 @@ export class App {
       const lastTile = (p.tile ?? 0) + (p.block ? (p.block.h - 1) * 16 + p.block.w - 1 : 0);
       if (p.num === 0 && p.ext === DM16_EXT && lastTile >= EXT_FIRST && !map16Ext(this.rom)) {
         installMap16Ext(this.rom, map16Source(this.rom, this.render).fg(0x025));
-        this.persist();
+        this.romWritten();
         toast('Map16 expansion installed (tiles 200–FFF).');
       }
       this.selection = new Set();
@@ -1246,7 +1246,7 @@ export class App {
     if (hasEditorPatch(this.rom)) return true;
     try {
       installEditorPatch(this.rom);
-      this.persist();
+      this.romWritten();
       toast('Editor patch installed (for Direct Map16 objects).');
       return true;
     } catch (e) { toast(String(e), 'error'); return false; }
@@ -1285,7 +1285,7 @@ export class App {
 
   // after the structure table changed: the emulator sees the new ROM, the level is drawn again
   structuresChanged(): void {
-    this.persist();
+    this.romWritten();
     this.refresh();
     this.emit('structs');
     this.emit('change');
@@ -1420,7 +1420,7 @@ export class App {
       this.level = loadLevel(this.rom, n);
       this.mode = mode;
       this.selection = sel;
-      this.persist();
+      this.romWritten();
       if (!silent) toast(`Level ${hex(n, 3)} saved. ${log.join(' · ')}`);
       else logMsg(`Level ${hex(n, 3)} saved automatically. ${log.join(' · ')}`);
       this.refresh();
@@ -1459,10 +1459,20 @@ export class App {
     }
   }
 
-  // the ROM changed: editors redraw at once ('rom-change'), the level render follows debounced
+  // Whoever writes the ROM tells it with one of these two (emulators and caches follow rom.gen by
+  // themselves; this is for the editor's views and the copy in the browser):
+  // romWritten – written outside the ROM history (saving a level, the overworld, messages …): editors
+  // show it ('rom-change'), the copy in the browser is stored at once;
+  romWritten(): void {
+    this.romNotice();
+    clearTimeout(this.persistTimer);
+    this.persistTimer = 0;
+    this.persist();
+  }
+  // romChanged – an undoable ROM edit (romEdit, undo/redo): editors show it at once, the level render and
+  // storing follow debounced (edits come in quick succession, e.g. graphics strokes)
   romChanged(): void {
-    this.graph = null;
-    this.emit('rom-change');
+    this.romNotice();
     clearTimeout(this.romTimer);
     const run = () => {
       const wait = this.holdRender ? 150 : this.quietUntil - performance.now();
@@ -1474,6 +1484,10 @@ export class App {
     this.romTimer = window.setTimeout(run, 150);
     clearTimeout(this.persistTimer);
     this.persistTimer = window.setTimeout(() => { this.persistTimer = 0; this.persist(); }, 1000);
+  }
+  private romNotice(): void {
+    this.graph = null;
+    this.emit('rom-change');
   }
 
   // a stroke ended: the re-emulation waits for a pause in drawing
