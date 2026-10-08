@@ -99,7 +99,7 @@ Byte 3…: Extra-Bytes (0–12)
   Zeiger `$CE` weiter und setzt ihn am Ende der Schleife zurück. So passen auch lange Listen mit Extra-Bytes.
 - `.smwlevel`-Dateien enthalten die Größentabelle, mit der ihre Sprite-Daten geschrieben sind.
 - Ändert sich die Anzahl für einen Sprite, der schon in Levels steht, schreibt der Editor diese Levels
-  beim Übernehmen neu, wie PIXIs MeiMei.
+  bei der Änderung gleich mit neu, wie PIXIs MeiMei.
 
 ## Laufzeit-RAM
 
@@ -207,7 +207,7 @@ Ladeschleife `$02A82A`/`$02A846`/`$02A936`/`$02A9D7`/`$02ABE9`, Extra-Bits `$02A
 [Free RAM](patches.md#patches-anwenden)).
 
 Ändert sich die Anzahl der Extra-Bytes eines Sprites, der in Levels steht, schreibt der Editor diese Levels
-beim Übernehmen mit der neuen Größe neu (Extra-Bytes bleiben, soweit sie passen), wie PIXIs MeiMei. Beim
+bei der Änderung gleich mit der neuen Größe neu (Extra-Bytes bleiben, soweit sie passen), wie PIXIs MeiMei. Beim
 Entfernen fallen die Extra-Bytes weg.
 
 ## Grenzen

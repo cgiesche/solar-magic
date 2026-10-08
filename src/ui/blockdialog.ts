@@ -34,7 +34,7 @@ export function freeBlockTile(p: BlockProject | null, from = EXT_FIRST): number 
 
 export type BlockPane = Pane & { tile(): number; setTile(t: number): void };
 
-export function blockPane(app: App, onDirty: () => void, changed: () => void): BlockPane {
+export function blockPane(app: App, changed: () => void): BlockPane {
   let tile = EXT_FIRST;
   let ownActs = false;
   let acts = 0x130;
@@ -85,6 +85,6 @@ export function blockPane(app: App, onDirty: () => void, changed: () => void): B
     content,
     applied: (p) => `Custom blocks applied (${p.list.length} tile(s))`,
     docs: 'blocks',
-  }, onDirty, changed);
+  }, changed);
   return { ...pane, tile: () => tile, setTile: (t) => { tile = t; pane.render(); } };
 }

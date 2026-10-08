@@ -248,8 +248,6 @@ kbd { background: #181a1f; border: 1px solid var(--border); border-radius: 3px; 
 .res-tabs { margin-bottom: 10px; }
 .sub-tabs { margin: 0 0 8px; }
 .res-content .patch-list { margin-top: 0; }
-.pending-bar { display: flex; align-items: center; gap: 8px; margin: 10px 0 4px; padding: 6px 10px; border: 1px solid var(--accent2); border-radius: 6px; background: var(--panel2); }
-.pending-bar .grow { flex: 1; }
 .pane-adv { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 8px; }
 .pane-adv summary { cursor: pointer; color: var(--muted); margin-bottom: 6px; }
 .pane-adv > .row { margin-top: 6px; }

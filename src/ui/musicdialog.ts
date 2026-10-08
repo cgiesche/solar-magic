@@ -405,9 +405,6 @@ export function musicPane(app: App, changed: () => void): Pane {
   return {
     title: 'Music',
     el,
-    dirty: () => false,
-    apply: () => true,
-    discard: () => undefined,
     reload,
     render,
     project: () => ({ files: proj.files }),

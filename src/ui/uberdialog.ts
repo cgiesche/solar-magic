@@ -27,7 +27,7 @@ function parseBytes(s: string): number[] {
 
 export type UberPane = Pane & { context(): UberContext };
 
-export function uberPane(app: App, onDirty: () => void, changed: () => void): UberPane {
+export function uberPane(app: App, changed: () => void): UberPane {
   let ctx: UberContext = 'level';
   let otherOpen = false;
   let pane: Pane;
@@ -110,6 +110,6 @@ export function uberPane(app: App, onDirty: () => void, changed: () => void): Ub
     ],
     applied: () => 'UberASM applied',
     docs: 'uber',
-  }, onDirty, changed);
+  }, changed);
   return { ...pane, context: () => ctx };
 }

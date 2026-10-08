@@ -24,7 +24,7 @@ function errorLog(log: HTMLElement, r: ApplyResult): void {
   clear(log).appendChild(logView({ ...r, prints: [] }));
 }
 
-export function pixiPane(app: App, onDirty: () => void, changed: () => void): Pane {
+export function pixiPane(app: App, changed: () => void): Pane {
   let kind: SpriteFolder = 'sprites';
   let num = 0;
 
@@ -92,7 +92,7 @@ export function pixiPane(app: App, onDirty: () => void, changed: () => void): Pa
     content,
     applied: (p) => `Custom sprites applied (${p.list.length})`,
     docs: 'sprites',
-  }, onDirty, changed);
+  }, changed);
 }
 
 // an upload with PIXI sprites: numbers for its sprites, tiles for its blocks, linked defines – then added

@@ -13,9 +13,13 @@ Alles liegt in einem Dialog: der Tab *Pakete* (siehe [Pakete](#pakete)) und je e
 Custom Blocks und Custom Sprites (PIXI, siehe [pixi.md](pixi.md)) mit dem ganzen Projekt. **Hinzufügen …**
 oben im Dialog nimmt jeden Download und erkennt, was er ist (Patch, UberASM-Code, Custom Block,
 Block-Paket, Custom Sprite, Lunar-Magic-Hintergrund); danach steht er im Tab *Pakete*. Was im aktuellen Tab gewählt ist, gibt die Vorauswahl: im UberASM-Tab Level/Overworld/Game Mode,
-im Blocks-Tab das Tile. Patches und Hinzugefügtes gehen sofort in die ROM; Änderungen in den Tabs UberASM,
-Custom Blocks und Custom Sprites (Zuordnungen, Dateien, Einstellungen) sammeln sich, bis man sie mit
-*Übernehmen* anwendet oder *Verwirft* – beim Schließen fragt der Dialog nach.
+im Blocks-Tab das Tile. **Jede Änderung geht sofort in die ROM** – Patches und Hinzugefügtes ebenso wie jede
+Änderung in den Tabs UberASM, Custom Blocks und Custom Sprites (eine Zuordnung, eine Datei, eine
+Einstellung). Dabei wird das ganze Projekt neu gebaut und angewendet; schlägt das fehl, bleibt die ROM
+unverändert und der Tab zeigt wieder den Stand der ROM. Jede Änderung ist **ein Schritt für Strg+Z**
+(auch im offenen Dialog; Strg+Y bzw. Strg+Umschalt+Z stellt wieder her), der ROM-Bytes und Editor-Daten
+zusammen zurücknimmt. Es gibt kein *Übernehmen*/*Verwerfen* und keine Nachfrage beim Schließen (siehe
+[ADR 0001](adr/0001-immediate-apply-for-packages.md)).
 
 Alle drei werden in einem **Patch-Verzeichnis in der ROM** geführt (RATS-Block „SMWA“). Für jeden Patch
 sind dort gespeichert:

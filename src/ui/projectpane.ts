@@ -1,6 +1,6 @@
 // A tool project (UberASM, GPS blocks, PIXI sprites) as a tab of the patches dialog: the assignments,
-// a bar for changes not applied yet, and below the project files, import/export of the tool folder and
-// removing everything. Changes are staged in memory until "Apply".
+// and below the project files, import/export of the tool folder and removing everything. Every change
+// is written to the ROM at once as one undoable ROM edit (ADR 0001); nothing is staged.
 
 import type { App } from './app.ts';
 import { h, clear, toast, pickFile, downloadBytes, select, choose, type Child } from './dom.ts';
@@ -26,20 +26,17 @@ export interface PaneSpec<P extends Project> {
   toZip(p: P): Uint8Array;
   zipName: string;
   content(p: P, change: () => void): Child[]; // the assignments and the row to add one
-  applied(p: P): string; // toast after "Apply"
+  applied(p: P): string; // toast after a change was applied
   docs: string; // tool key of the kept docs of packages added to the project (see docview.ts)
 }
 
 export interface Pane {
   title: string;
   el: HTMLElement;
-  dirty(): boolean;
-  apply(): boolean;
-  discard(): void;
   reload(): void; // the ROM's project again, after it was changed outside the tab
   render(): void;
-  project(): Project; // the staged project
-  touch(): void; // the staged project was changed from outside the tab
+  project(): Project; // the project as in the ROM
+  touch(): void; // the project was changed from outside the tab: applied to the ROM at once
 }
 
 // ROM changed by a patch or project: reload everything that depends on it
@@ -67,20 +64,17 @@ export function logView(r: ApplyResult | null): HTMLElement {
 // a .zip is a tool folder when it has a list.txt; otherwise its files are added one by one
 const isToolFolder = (all: Record<string, Uint8Array>) => Object.keys(all).some((k) => /(^|\/)list\.txt$/i.test(k));
 
-// onDirty: the dirty state changed (tab label); changed: after this tab changed the ROM (and romChanged)
-export function projectPane<P extends Project>(app: App, spec: PaneSpec<P>, onDirty: () => void, changed: () => void): Pane & { project(): P } {
+// changed: after this tab changed the ROM (and romChanged)
+export function projectPane<P extends Project>(app: App, spec: PaneSpec<P>, changed: () => void): Pane & { project(): P } {
   const el = h('div', { class: 'project-pane' });
   let proj: P;
   let installed = false;
   let loadError = '';
-  let dirty = false;
   let advanced = false;
   let fileFilter = '';
   let folder = spec.folders[0];
   const log = h('div', { class: 'patch-log' });
 
-  const setDirty = (d: boolean) => { if (d !== dirty) { dirty = d; onDirty(); } };
-  const change = () => { setDirty(true); render(); };
   const reload = () => {
     loadError = '';
     try {
@@ -92,24 +86,34 @@ export function projectPane<P extends Project>(app: App, spec: PaneSpec<P>, onDi
       installed = true;
       proj = spec.empty();
     }
-    setDirty(false);
     clear(log);
     render();
   };
 
-  const apply = (): boolean => {
-    if (!dirty) return true;
-    if (app.dirty) app.saveLevel(true);
+  // the changed project into the ROM, one undo step with the editor data; a failed one leaves the ROM
+  // as it was and the tab shows the ROM's project again
+  const change = () => {
+    if (app.dirty) app.saveLevel(true); // the level save is not part of the undo step
     let r: ApplyResult;
-    try { r = spec.save(proj); } catch (e) { r = { ok: false, errors: [errorText(e)], warnings: [], prints: [] }; }
-    clear(log).appendChild(logView({ ...r, warnings: r.ok ? [] : r.warnings, prints: [] }));
-    if (!r.ok) return false;
     const text = spec.applied(proj);
+    try {
+      r = app.romEdit(`${spec.title} changed`, () => {
+        const before = app.rom.snapshot();
+        let res: ApplyResult;
+        try { res = spec.save(proj); } catch (e) { res = { ok: false, errors: [errorText(e)], warnings: [], prints: [] }; }
+        if (!res.ok) app.rom.restore(before);
+        return res;
+      });
+    } catch (e) { r = { ok: false, errors: [errorText(e)], warnings: [], prints: [] }; }
     reload();
+    if (!r.ok) {
+      log.appendChild(logView({ ...r, prints: [] }));
+      toast(`${spec.title}: not applied – ${r.errors[0] ?? 'error'}`, 'error');
+      return;
+    }
     romChanged(app);
     changed();
     toast(`${text}${r.warnings.length ? ` – ${r.warnings.join(' ')}` : ''}`);
-    return true;
   };
 
   const addFile = async () => {
@@ -119,7 +123,7 @@ export function projectPane<P extends Project>(app: App, spec: PaneSpec<P>, onDi
     try {
       if (/\.zip$/i.test(f.name)) {
         const all = unzipSync(data);
-        if (isToolFolder(all)) { proj = spec.fromZip(data); toast(`${spec.title} folder “${f.name}” loaded – “Apply” applies it.`); }
+        if (isToolFolder(all)) proj = spec.fromZip(data);
         else for (const [p, c] of Object.entries(all)) if (!p.endsWith('/') && !p.startsWith('__MACOSX/')) spec.addFile(proj, folder, p.replace(/\\/g, '/').split('/').pop()!, c);
       } else spec.addFile(proj, folder, f.name, data);
     } catch (e) { toast(errorText(e), 'error'); return; }
@@ -132,7 +136,7 @@ export function projectPane<P extends Project>(app: App, spec: PaneSpec<P>, onDi
     if (i !== 1) return;
     if (app.dirty) app.saveLevel(true);
     try {
-      const w = spec.remove();
+      const w = app.romEdit(`${spec.title} removed`, () => spec.remove());
       reload();
       romChanged(app);
       changed();
@@ -171,14 +175,11 @@ export function projectPane<P extends Project>(app: App, spec: PaneSpec<P>, onDi
       h('p', { class: 'hint' }, spec.intro, ' ', h('details', { class: 'inline-details' }, h('summary', null, 'Format'), h('div', null, spec.format))),
       h('div', { class: 'pane-content' }, spec.content(proj, change)),
       keptDocsRow(spec.docs),
-      dirty ? h('div', { class: 'pending-bar' }, h('span', { class: 'grow' }, 'Unapplied changes'),
-        h('button', { onclick: reload }, 'Discard'),
-        h('button', { class: 'primary', onclick: apply }, 'Apply')) : '',
       log,
       adv,
     );
   }
 
   reload();
-  return { title: spec.title, el, dirty: () => dirty, apply, discard: reload, reload, render, project: () => proj, touch: change };
+  return { title: spec.title, el, reload, render, project: () => proj, touch: change };
 }

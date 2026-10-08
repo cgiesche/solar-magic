@@ -410,7 +410,7 @@ export interface AddPreset { uberContext: UberContext; tile: number }
 export interface PickedUpload {
   name: string;
   target: PackagesTab | null; // the tab showing it afterwards; null: neither (a background goes into the level)
-  affects: PackagesTab[]; // project tabs whose staged changes the dialog would bypass
+  affects: PackagesTab[]; // tabs showing the ROM's projects that adding it changes (reloaded afterwards)
   open(preset: AddPreset, done: () => void): void;
 }
 

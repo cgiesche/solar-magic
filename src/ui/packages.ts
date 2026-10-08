@@ -36,9 +36,7 @@ export interface PackagesHost {
   panes: Record<ToolKind, Pane>;
   changed(): void; // the ROM changed from this tab
   show(tab: PackagesTab): void;
-  // staged changes of these tabs applied or discarded first; false: the user went back
-  settle(keys: ToolKind[], what: string): Promise<boolean>;
-  leave(then: () => void): void; // closes the dialog (pending changes settled), then `then`
+  leave(then: () => void): void; // closes the dialog, then `then`
   addPart(name: string, files: Map<string, Uint8Array>, rec: Package): void;
 }
 
@@ -140,7 +138,6 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
         h('button', { class: 'danger', onclick: () => void remove(it) }, 'Remove …')),
       patchBox,
       ...(rec ? toolSections(rec) : []),
-      pending(rec),
       filesBox,
     );
     for (const p of patches) void patchSection(p, rec, n).then((s) => { if (n === seq) patchBox.appendChild(s); });
@@ -277,16 +274,6 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
 
   const touch = (k: ToolKind) => { host.panes[k].touch(); renderDetail(); };
 
-  // staged changes of the tool tabs this package touches
-  function pending(rec: Package | null): HTMLElement | string {
-    if (!rec) return '';
-    const keys = TOOL_KINDS.filter((k) => host.panes[k].dirty());
-    if (!keys.length) return '';
-    return h('div', { class: 'pending-bar' }, h('span', { class: 'grow' }, `Unapplied changes (${keys.map((k) => host.panes[k].title).join(', ')})`),
-      h('button', { onclick: () => { for (const k of keys) host.panes[k].discard(); renderDetail(); } }, 'Discard'),
-      h('button', { class: 'primary', onclick: () => { const bad = keys.find((k) => !host.panes[k].apply()); if (bad) host.show(bad); else reload(); } }, 'Apply'));
-  }
-
   // ---------- the package's own files ----------
 
   function filesSection(it: Item, files: Map<string, Uint8Array>): HTMLElement[] {
@@ -344,7 +331,6 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
       [{ label: 'Cancel' }, { label: 'Remove', danger: true }]);
     if (i !== 1) return;
     const keys = TOOL_KINDS.filter((k) => rec[TOOL[k]].files.length);
-    if (!(await host.settle(keys, `“${rec.name}” will be removed.`))) return;
     if (app.dirty) app.saveLevel(true);
     try {
       const w = await uninstallPackageWithMusic(app.rom, rec.id, map16Source(app.rom, app.render).fg(0x025));
