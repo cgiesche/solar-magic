@@ -7,7 +7,7 @@ import { BlockProber, blockKey, spriteKey } from '../src/core/blockprobe.ts';
 import { ProbeHost, PROBE_SPRITE, PROBE_RUNS, jobKey, type ProbeDone, type ProbeReply } from '../src/core/probehost.ts';
 import { ResultCache, RomFingerprint } from '../src/core/romdeps.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
-import { ObjKindProbe } from '../src/core/objkinds.ts';
+import { ObjKindProbe, kindsKey, type ObjKinds } from '../src/core/objkinds.ts';
 import { levelScanJob, type ScanLevel } from '../src/core/levelscan.ts';
 import { loadLevel, serializeLayer1, serializeSprites, L2_PTRS } from '../src/core/level.ts';
 
@@ -56,7 +56,7 @@ const scanLevel: ScanLevel = {
   ov: { layer1: serializeLayer1(rom, lv), sprites: serializeSprites(lv.sprites, lv.spriteHeader, false) },
 };
 const emu = new LevelEmulator(new Rom(file));
-const kinds = new ObjKindProbe(emu, { ...lv, header: { ...lv.header, tileset: 1 } }, l2).result();
+const kindProbe = new ObjKindProbe(emu, { ...lv, header: { ...lv.header, tileset: 1 } }, l2), kinds = kindProbe.result();
 const job = levelScanJob(emu, scanLevel);
 let scanned; for (;;) { const r = job.next(); if (r.done) { scanned = r.value; break; } }
 host.handle({ type: 'kinds', ts: 1, level: { number: lv.number, header: lv.header }, layer2Pointer: l2 });
@@ -69,7 +69,9 @@ for (let i = 0; host.pending; i++) {
 }
 check(replies[0]?.type === 'probe', 'asked job before the rest of the tasks');
 const k = replies.find((d) => d.type === 'kinds'), sc = replies.find((d) => d.type === 'scan');
-check(k?.type === 'kinds' && k.ts === 1 && JSON.stringify([...k.kinds!.kinds]) === JSON.stringify([...kinds.kinds]) && k.kinds!.deps.size === kinds.deps.size, 'object kinds as computed directly');
+const kEntry = k?.type === 'kinds' ? k.put.find(([key]) => key === kindsKey(1))?.[1] : undefined;
+check(k?.type === 'kinds' && k.ts === 1 && !k.failed && JSON.stringify([...(kEntry?.data as ObjKinds).kinds]) === JSON.stringify([...kinds.kinds]), 'object kinds as computed directly, in a result cache entry');
+check(!!kEntry && kEntry.deps.pages.length === 0 && kEntry.deps.bytes.length === kindProbe.reads().bytes.size && kEntry.deps.bytes.length > 0, 'object kinds depend on the single bytes the object routines read, no pages');
 check(sc?.type === 'scan' && sc.id === 7 && JSON.stringify(sc.result) === JSON.stringify(scanned) && sc.put.some(([key]) => key === 'scan-key'), 'level scan as played directly, with its cache entry');
 host.handle({ type: 'scan', id: 8, key: 'scan-key', level: scanLevel });
 host.next();

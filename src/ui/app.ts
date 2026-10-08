@@ -18,14 +18,14 @@ import { DM16_EXT, hasEditorPatch, installEditorPatch, levelGfx, defaultGfx } fr
 import { gfxSkipMask, gfxFilesHash } from '../core/gfxpages.ts';
 import { STRUCT_EXT, STRUCT_MAX, TRANSPARENT, listStructures, readStructure, writeStructure, type Structure } from '../core/structs.ts';
 import type { Package } from '../core/pkgreg.ts';
-import { kvSet, kvGet, kvEntries, kvKeys, kvWrite, saveRom } from './storage.ts';
+import { kvEntries, kvKeys, kvWrite, saveRom } from './storage.ts';
 import { ResultCache, RomFingerprint, RomReads, type CacheEntry } from '../core/romdeps.ts';
 import { bgFromWram, bgIndex, encodeBg } from '../core/bg.ts';
 import { toast, log as logMsg, modalsOpen, onModalsChange } from './dom.ts';
 import { musicPlayer } from './musicplayer.ts';
 import { ExitGraph, exitTarget } from '../core/exitgraph.ts';
 import { RomHistory, type RomEdit } from '../core/romhistory.ts';
-import { kindsStillValid, storeKinds, loadKinds, resizeObjectSize, type ObjKind, type ObjKinds, type StoredObjKinds } from '../core/objkinds.ts';
+import { resizeObjectSize, type ObjKind, type ObjKinds } from '../core/objkinds.ts';
 import { JumpArcs, ARC_SPEEDS, type JumpArc } from '../core/jumparcs.ts';
 import type { ScanResult } from '../core/levelscan.ts';
 import { layer3Kinds, tideKind, layer3Top, type Layer3Kind } from '../core/layer3.ts';
@@ -107,9 +107,6 @@ export class App {
   cacheReady: Promise<void>;
   private cacheTimer = 0;
   private closed = false; // project closed: nothing is written to the browser any more
-  // what the settings byte nibbles of standard objects mean, per tileset (emulated, see objkinds.ts)
-  kinds = new Map<number, { k: ObjKinds; gen: number }>();
-  private kindJob: number | null = null; // tileset whose kinds are being found
   reveal = { x: 0, y: 0 }; // pixel the level view scrolls to on 'reveal'
   secEntrances: number[] = []; // secondary entrance indices leading into the current level
   // tile/palette animation: frames stored as pixel diffs against the static composite
@@ -135,6 +132,10 @@ export class App {
       cacheReady: this.cacheReady,
       rom: () => ({ gen: this.rom.gen, data: this.rom.data }),
       tileset: () => this.level.header.tileset,
+      kindLevel: () => {
+        const lv = this.level;
+        return { level: { number: lv.number, header: lv.header }, layer2Pointer: lv.layer2Objects ? this.rom.r24(L2_PTRS + 0x105 * 3) : lv.layer2Pointer };
+      },
       connect: (reply, failed) => {
         const w = new Worker(new URL('./probeworker.ts', import.meta.url), { type: 'module' });
         w.onmessage = (e: MessageEvent<ProbeReply>) => reply(e.data);
@@ -144,8 +145,10 @@ export class App {
       later: (key, step) => this.later(key, step),
       setBusy: (key, label) => this.setBusy(key, label),
       ready: () => this.emit('blockinfo'),
+      kindsReady: () => this.emit('objkinds'),
     });
     kvKeys('rc').then((k) => kvWrite([], k.filter((x) => !x.startsWith(CACHE_PREFIX)))).catch(() => {});
+    kvKeys('objkinds-').then((k) => kvWrite([], k)).catch(() => {}); // object kinds before they were in the result cache
     this.results.onChange = () => {
       if (!this.cacheTimer && !this.closed) this.cacheTimer = window.setTimeout(() => this.storeResults(), 3000);
     };
@@ -998,39 +1001,11 @@ export class App {
     return this.tilesetKinds()?.kinds.get(num) ?? null;
   }
 
+  // (empty while unknown or when they could not be found: objects are treated as plain then)
   tilesetKinds(ts = this.level.header.tileset): ObjKinds | null {
-    const c = this.kinds.get(ts);
-    if (c && c.gen !== this.rom.gen) {
-      if (kindsStillValid(c.k, this.rom.data)) c.gen = this.rom.gen;
-      else this.kinds.delete(ts);
-    }
-    if (this.kinds.has(ts)) return c!.k;
-    this.startKindJob(ts);
-    return null;
+    const k = this.probes.kinds(ts);
+    return k === undefined ? null : k ?? { kinds: new Map() };
   }
-
-  // stored result first (valid while the ROM bytes it depends on are unchanged), otherwise
-  // emulated in the probe worker (see kindsDone)
-  private startKindJob(ts: number): void {
-    if (this.kindJob !== null) return;
-    this.kindJob = ts;
-    kvGet<StoredObjKinds>(`objkinds-${ts}`).catch(() => undefined).then((st) => {
-      const k = st && loadKinds(st);
-      if (k && kindsStillValid(k, this.rom.data)) { this.setKinds(ts, k); return; }
-      const lv = this.level;
-      this.probes.requestKinds(ts, { number: lv.number, header: lv.header }, lv.layer2Objects ? this.rom.r24(L2_PTRS + 0x105 * 3) : lv.layer2Pointer, (kinds) => {
-        if (kinds) kvSet(`objkinds-${ts}`, storeKinds(kinds)).catch(() => {});
-        this.setKinds(ts, kinds ?? { kinds: new Map(), deps: new Map() });
-      });
-    });
-  }
-
-  private setKinds(ts: number, k: ObjKinds): void {
-    this.kinds.set(ts, { k, gen: this.rom.gen });
-    this.kindJob = null;
-    this.emit('objkinds');
-  }
-
 
   objectBounds(o: LevelObject): { x0: number; y0: number; x1: number; y1: number } {
     let x0 = o.x, y0 = o.y, x1 = o.x, y1 = o.y;

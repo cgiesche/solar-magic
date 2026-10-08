@@ -2,7 +2,7 @@
 // worker the test runs by hand: a reply from before a ROM change does not make it ask again and
 // again, results come in after it, and one still valid is kept; a broken worker hands everything
 // wanted to the main thread; a failed probe is not asked again until the ROM changes; the
-// prefetch follows the tileset.
+// prefetch follows the tileset; object kinds are kept while the bytes they read are unchanged.
 import { readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
 import { BlockProber } from '../src/core/blockprobe.ts';
@@ -11,6 +11,7 @@ import { ProbeClient } from '../src/core/probeclient.ts';
 import { ResultCache, RomFingerprint } from '../src/core/romdeps.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadLevel, L2_PTRS } from '../src/core/level.ts';
+import { ObjKindProbe, kindsKey, type ObjKinds } from '../src/core/objkinds.ts';
 
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
@@ -44,7 +45,7 @@ function editor(worker: Worker | null) {
   const rom = new Rom(file.slice()), emu = new LevelEmulator(rom);
   const steps: [string, () => void][] = [];
   const e = {
-    rom, emu, ts: 0, ready: 0, busy: new Map<string, string>(), steps,
+    rom, emu, ts: 0, ready: 0, kindsReady: 0, busy: new Map<string, string>(), steps,
     results: new ResultCache(new RomFingerprint(rom)),
     client: null as unknown as ProbeClient,
     // background slices on the main thread (the prefetch after a ROM change only when asked)
@@ -62,6 +63,11 @@ function editor(worker: Worker | null) {
     later: (key, step) => steps.push([key, step]),
     setBusy: (key, label) => { if (label === null) e.busy.delete(key); else e.busy.set(key, label); },
     ready: () => e.ready++,
+    kindLevel: () => {
+      const lv = loadLevel(rom, 0x105);
+      return { level: { number: lv.number, header: lv.header }, layer2Pointer: rom.r24(L2_PTRS + 0x105 * 3) };
+    },
+    kindsReady: () => e.kindsReady++,
   });
   return e;
 }
@@ -102,16 +108,15 @@ function editor(worker: Worker | null) {
 // the worker breaks down: asked probes and object kinds go to the main thread
 {
   const w = new Worker(), e = editor(w);
-  const lv = loadLevel(e.rom, 0x105);
-  let kinds: unknown = undefined;
   e.client.block(0x130);
-  e.client.requestKinds(1, { number: lv.number, header: lv.header }, e.rom.r24(L2_PTRS + 0x105 * 3), (k) => { kinds = k; });
+  e.client.kinds(1);
   await settle();
   w.failed();
   await settle();
   e.drain();
   check(JSON.stringify(e.client.block(0x130)) === JSON.stringify(direct.probe(0x130)), 'worker failed: block 130 probed on the main thread');
-  check(kinds !== undefined && kinds !== null, 'worker failed: object kinds found on the main thread');
+  const kinds = e.client.kinds(1);
+  check(kinds !== undefined && kinds !== null && e.kindsReady === 1, 'worker failed: object kinds found on the main thread');
   check(!e.busy.has('probe') && !e.busy.has('kinds'), 'nothing busy after');
 }
 
@@ -142,6 +147,52 @@ function editor(worker: Worker | null) {
   const pf = w.sent.filter((m) => m.type === 'prefetch');
   check(pf.length === 2 && pf[0].type === 'prefetch' && pf[0].jobs.some((j) => j.k === 0x300), 'prefetch of tileset 0 with the extra tile');
   check(pf[1]?.type === 'prefetch' && pf[1].jobs.length > 0 && pf[1].jobs.every((j) => j.ts === 2), 'tileset 2: only its jobs');
+}
+
+// object kinds: asked like probes, kept in the result cache while the bytes the object routines
+// read are unchanged, also across sessions; failed ones wait for a ROM change
+{
+  const lv = loadLevel(new Rom(file), 0x105);
+  const direct = new ObjKindProbe(new LevelEmulator(new Rom(file)), { ...lv, header: { ...lv.header, tileset: 1 } }, new Rom(file).r24(L2_PTRS + 0x105 * 3)).result();
+  const same = (k: ObjKinds | null | undefined) => !!k && JSON.stringify([...k.kinds]) === JSON.stringify([...direct.kinds]);
+  const kindsSent = (w: Worker) => w.sent.filter((m) => m.type === 'kinds').length;
+
+  const w = new Worker(), e = editor(w);
+  check(e.client.kinds(1) === undefined && e.busy.has('kinds'), 'kinds: unknown, asked for');
+  e.client.kinds(1);
+  await settle();
+  check(kindsSent(w) === 1, 'kinds: asked once');
+  w.run();
+  check(same(e.client.kinds(1)) && e.kindsReady === 1 && !e.busy.has('kinds'), 'kinds: as computed directly, told once');
+
+  const entry = e.results.entry(kindsKey(1))!;
+  const read = entry.deps.bytes[0], unread = 0x7fc0;
+  check(!entry.deps.bytes.includes(unread), '(the internal name is not read by object routines)');
+  e.rom.writeAt(unread, Uint8Array.of(e.rom.data[unread] ^ 1));
+  check(same(e.client.kinds(1)), 'kinds: a byte they did not read changed: still known');
+  await settle();
+  check(kindsSent(w) === 1, '… and not asked again');
+  e.rom.writeAt(read, Uint8Array.of(e.rom.data[read] ^ 1));
+  check(e.client.kinds(1) === undefined, 'kinds: a byte they read changed: unknown again');
+  e.client.kinds(1);
+  await settle();
+  check(kindsSent(w) === 2, '… and asked once more');
+
+  const w2 = new Worker(), e2 = editor(w2);
+  e2.results.load([[kindsKey(1), entry]]);
+  check(same(e2.client.kinds(1)), 'stored kinds (another session): used at once');
+  await settle();
+  check(kindsSent(w2) === 0, '… without asking');
+
+  const w3 = new Worker(), e3 = editor(w3);
+  e3.client.kinds(1);
+  await settle();
+  w3.run(Infinity, (d) => d.type === 'kinds' ? { ...d, failed: true, put: [] } : d);
+  check(e3.client.kinds(1) === null && e3.kindsReady === 1 && !e3.busy.has('kinds'), 'failed kinds: null');
+  await settle();
+  check(kindsSent(w3) === 1, '… not asked again');
+  touch(e3.rom);
+  check(e3.client.kinds(1) === undefined, 'after a ROM change: asked again');
 }
 
 console.log(bad ? `${bad} failures` : 'all ok');

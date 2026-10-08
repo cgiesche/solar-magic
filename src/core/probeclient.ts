@@ -9,7 +9,7 @@
 import { ProbeHost, PROBE_SPRITE, PROBE_COLL, PROBE_RUNS, jobId, jobKey, type ProbeJob, type ProbeMessage, type ProbeDone, type ProbeReply, type KindsDone, type ScanDone } from './probehost.ts';
 import type { ResultCache } from './romdeps.ts';
 import type { BlockProbe, CollisionProbe, SpriteProbe, RunStates } from './blockprobe.ts';
-import { kindsStillValid, type ObjKinds, type KindLevel } from './objkinds.ts';
+import { kindsKey, type ObjKinds, type KindLevel } from './objkinds.ts';
 import type { ScanLevel, ScanResult } from './levelscan.ts';
 
 export const SPRITE_PROBE_END = 0xc9; // sprites from $C9 on are shooters, generators and run-once sprites
@@ -22,11 +22,13 @@ export interface ProbeClientDeps {
   cacheReady: Promise<void>; // stored results are loaded
   rom(): { gen: number; data: Uint8Array }; // the current ROM and its count of changes
   tileset(): number; // the tileset probes are asked for
+  kindLevel(): { level: KindLevel; layer2Pointer: number }; // the level object kinds are found with
   // starts the worker (replies go to reply, failed() once it broke down); null or a throw: none
   connect?(reply: (d: ProbeReply) => void, failed: () => void): Send | null;
   later(key: string, step: () => void): void; // a background slice on the main thread
   setBusy(key: 'probe' | 'kinds' | 'scan', label: string | null): void;
   ready(): void; // the asked or the prefetched probes are all done
+  kindsReady(): void; // object kinds asked for are known (or failed)
 }
 
 export class ProbeClient {
@@ -35,7 +37,8 @@ export class ProbeClient {
   private asked = new Map<string, ProbeJob>(); // asked for and not done yet
   private prefetched = new Map<string, ProbeJob>(); // the same, probed after the asked ones
   private failed = new Set<string>();
-  private kindsWant: { msg: ProbeMessage & { type: 'kinds' }; done: (k: ObjKinds | null) => void } | null = null;
+  private kindsWant: ProbeMessage & { type: 'kinds' } | null = null;
+  private kindsFailed = new Set<number>(); // tilesets (until the ROM changes)
   private scanWant: { msg: ProbeMessage & { type: 'scan' }; done: (r: ScanResult | null) => void } | null = null;
   private d: ProbeClientDeps;
 
@@ -98,13 +101,25 @@ export class ProbeClient {
     });
   }
 
-  // The object kinds of tileset ts, found with a level (replaces a request still running); done
-  // gets null when the probe failed
-  requestKinds(ts: number, level: KindLevel, layer2Pointer: number, done: (k: ObjKinds | null) => void): void {
+  // What the nibbles of standard objects mean in tileset ts (objkinds.ts): undefined while unknown,
+  // then asked for (replacing kinds of another tileset still running); null when they could not be
+  // found
+  kinds(ts = this.d.tileset()): ObjKinds | null | undefined {
+    const k = this.d.results.get<ObjKinds>(kindsKey(ts));
+    if (k !== undefined) return k;
     this.sync();
-    this.kindsWant = { msg: { type: 'kinds', ts, level, layer2Pointer }, done };
+    if (this.kindsFailed.has(ts)) return null;
+    if (this.kindsWant?.ts === ts) return undefined;
+    const { level, layer2Pointer } = this.d.kindLevel();
+    const msg = this.kindsWant = { type: 'kinds', ts, level, layer2Pointer };
     this.d.setBusy('kinds', 'Object kinds');
-    this.send?.(this.kindsWant.msg);
+    // (stored results first: they may be known by then)
+    this.d.cacheReady.then(() => {
+      if (this.kindsWant !== msg) return;
+      if (this.d.results.get(kindsKey(ts)) === undefined) this.send?.(msg);
+      else this.kindsDone({ type: 'kinds', gen: this.gen, ts, failed: false, put: [] });
+    });
+    return undefined;
   }
 
   // A level scan (replaces one still running); its result goes to the cache under key too
@@ -129,10 +144,12 @@ export class ProbeClient {
     if (this.gen === rom.gen) return;
     this.gen = rom.gen;
     this.failed.clear();
+    this.kindsFailed.clear();
     this.prefetched.clear();
     this.send({ type: 'rom', gen: this.gen, data: rom.data.slice() });
     if (this.asked.size) this.send({ type: 'ask', jobs: [...this.asked.values()] });
-    for (const w of [this.kindsWant, this.scanWant]) if (w) this.send(w.msg);
+    if (this.kindsWant) this.send(this.kindsWant);
+    if (this.scanWant) this.send(this.scanWant.msg);
     this.d.later('probe-prefetch', () => this.prefetch()); // results that read changed ROM data are redone
   }
 
@@ -191,13 +208,15 @@ export class ProbeClient {
     if ((asked && !this.asked.size) || (prefetched && !this.prefetched.size)) this.d.ready();
   }
 
+  // (as probeDone: kinds from an older ROM count while their result holds)
   private kindsDone(d: KindsDone): void {
-    const want = this.kindsWant;
-    if (want?.msg.ts !== d.ts) return;
-    if (d.gen !== this.gen && !(d.kinds && kindsStillValid(d.kinds, this.d.rom().data))) return;
+    for (const [k, e] of d.put) this.d.results.set(k, e.data, e.deps);
+    if (this.kindsWant?.ts !== d.ts) return;
+    if (d.gen !== this.gen && this.d.results.get(kindsKey(d.ts)) === undefined) return;
+    if (d.failed) this.kindsFailed.add(d.ts);
     this.kindsWant = null;
     this.d.setBusy('kinds', null);
-    want.done(d.kinds);
+    this.d.kindsReady();
   }
 
   private scanDone(d: ScanDone): void {
