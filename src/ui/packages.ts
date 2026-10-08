@@ -2,14 +2,15 @@
 // with everything it brought – its patch with the settings, where its UberASM code runs, its blocks and
 // sprites with their files' settings, its ExGFX files – the graphics and other files in the package to
 // take later (import a graphic, add a part), and removing it with all of that. Patches applied before
-// packages were recorded are listed as packages of their own.
+// packages were recorded are legacy packages (wrapped when the ROM is opened); the editor's VRAM patch is
+// listed on its own.
 
 import type { App } from './app.ts';
 import { h, clear, toast, choose, downloadBytes } from './dom.ts';
 import { listPatches, type PatchEntry } from '../core/patchreg.ts';
-import { uninstallPatch } from '../core/patchapply.ts';
 import { uninstallVramPatch } from '../core/vrampatch.ts';
-import { listPackages, uninstallPackageWithMusic, type Package } from '../core/pkgreg.ts';
+import { listPackages, type Package } from '../core/pkgreg.ts';
+import { removePackage } from '../core/packages.ts';
 import { loadMusicProject, songHex } from '../core/music.ts';
 import { playButton, playSong, currentSongs } from './musicdialog.ts';
 import { extraParts } from '../core/pkgmap.ts';
@@ -40,7 +41,7 @@ export interface PackagesHost {
   addPart(name: string, files: Map<string, Uint8Array>, rec: Package): void;
 }
 
-// one entry of the list: a recorded package, or a patch from before packages were recorded
+// one entry of the list: a package, or the editor's VRAM patch
 interface Item { key: string; name: string; rec: Package | null; patch: PatchEntry | null }
 
 const GFX_SIZES = new Set([0x1000, 0xc00, 0x800, 0x2000]);
@@ -84,7 +85,7 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
     const owned = new Set(recs.flatMap((r) => r.patches));
     items = [
       ...recs.map((r): Item => ({ key: r.id, name: r.name, rec: r, patch: null })),
-      ...listPatches(app.rom).filter((p) => (!p.kind || p.kind === 'patch' || p.kind === 'vram') && !owned.has(p.id))
+      ...listPatches(app.rom).filter((p) => p.kind === 'vram' && !owned.has(p.id))
         .map((p): Item => ({ key: 'patch:' + p.id, name: p.name, rec: null, patch: p })),
     ];
     // a package just added is shown
@@ -99,7 +100,7 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
   function renderList(): void {
     clear(list).append(...items.map((it) => h('button', { class: 'pkg-item' + (it.key === sel ? ' active' : ''), onclick: () => { sel = it.key; fileFilter = ''; renderList(); renderDetail(); } },
       h('div', { class: 'pkg-item-name' }, it.name),
-      h('div', { class: 'hint' }, it.rec ? summary(it.rec).join(' · ') : it.patch?.kind === 'vram' ? 'Editor patch' : 'Patch'))),
+      h('div', { class: 'hint' }, it.rec ? [it.rec.legacy ? 'Legacy package' : '', ...summary(it.rec)].filter(Boolean).join(' · ') : 'Editor patch'))),
     items.length ? '' : h('p', { class: 'hint' }, 'Nothing installed yet.'),
     orphans());
   }
@@ -133,7 +134,8 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
       h('div', { class: 'row pkg-head' },
         h('div', { class: 'grow' },
           h('div', { class: 'pkg-title' }, it.name, patches[0]?.version ? h('span', { class: 'hint' }, ` v${patches[0].version}`) : ''),
-          h('div', { class: 'hint' }, [rec ? `added ${new Date(rec.added).toLocaleString()}` : patches[0] ? `applied ${new Date(patches[0].applied).toLocaleString()}` : '', rec?.fileName].filter(Boolean).join(' · '))),
+          h('div', { class: 'hint' }, rec?.legacy ? `Legacy package: applied ${new Date(rec.added).toLocaleString()}, before packages were tracked`
+            : [rec ? `added ${new Date(rec.added).toLocaleString()}` : patches[0] ? `applied ${new Date(patches[0].applied).toLocaleString()}` : '', rec?.fileName].filter(Boolean).join(' · '))),
         h('span', { class: 'pkg-docs' }),
         h('button', { class: 'danger', onclick: () => void remove(it) }, 'Remove …')),
       patchBox,
@@ -142,7 +144,8 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
     );
     for (const p of patches) void patchSection(p, rec, n).then((s) => { if (n === seq) patchBox.appendChild(s); });
     void (async () => {
-      const files = rec ? await recordFiles(app, rec) : it.patch && it.patch.kind !== 'vram' ? new Map((await storedUpload(app, it.patch))?.files ?? []) : null;
+      // a legacy package's files are kept with its patch
+      const files = rec?.legacy ? new Map((patches[0] && (await storedUpload(app, patches[0]))?.files) || []) : rec ? await recordFiles(app, rec) : null;
       if (n !== seq || !files?.size) return;
       const docs = detail.querySelector('.pkg-docs')!;
       if (packageDocs(files).length) docs.appendChild(h('button', { onclick: () => openDocs(it.name, files) }, 'Manual …'));
@@ -318,7 +321,7 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
 
   async function remove(it: Item): Promise<void> {
     const rec = it.rec;
-    if (!rec) return removePatch(it.patch!);
+    if (!rec) return removeVramPatch(it.patch!);
     const parts: string[] = [];
     if (rec.patches.length) parts.push(rec.patches.length > 1 ? `${rec.patches.length} patches` : 'the patch');
     if (rec.uber.files.length) parts.push(`${rec.uber.files.length} UberASM file(s) with their assignments`);
@@ -333,7 +336,8 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
     const keys = TOOL_KINDS.filter((k) => rec[TOOL[k]].files.length);
     if (app.dirty) app.saveLevel(true);
     try {
-      const w = await uninstallPackageWithMusic(app.rom, rec.id, map16Source(app.rom, app.render).fg(0x025));
+      const blank = map16Source(app.rom, app.render).fg(0x025);
+      const w = await app.romEditAsync(`Package “${rec.name}” removed`, () => removePackage(app.rom, rec.id, blank));
       forgetRecordFiles(rec.id);
       forgetDocs(rec.name);
       romChanged(app);
@@ -343,12 +347,13 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
     host.changed();
   }
 
-  async function removePatch(p: PatchEntry): Promise<void> {
-    const i = await choose('Remove patch', `Remove “${p.name}” from the ROM? The bytes it changed are restored.`, [{ label: 'Cancel' }, { label: 'Remove', danger: true }]);
+  // the editor's VRAM patch (BG2/BG3 graphics)
+  async function removeVramPatch(p: PatchEntry): Promise<void> {
+    const i = await choose('Remove editor patch', `Remove “${p.name}” from the ROM? The bytes it changed are restored.`, [{ label: 'Cancel' }, { label: 'Remove', danger: true }]);
     if (i !== 1) return;
     if (app.dirty) app.saveLevel(true);
     try {
-      const w = p.kind === 'vram' ? uninstallVramPatch(app.rom) : uninstallPatch(app.rom, p.id);
+      const w = app.romEdit(`“${p.name}” removed`, () => uninstallVramPatch(app.rom));
       romChanged(app);
       toast(`Patch “${p.name}” removed${w.length ? ': ' + w.join(' ') : ''}`);
     } catch (e) { toast(errorText(e), 'error'); }

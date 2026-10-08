@@ -1,5 +1,6 @@
 import './style.css';
 import { Rom } from './core/rom.ts';
+import { wrapLegacyPatches } from './core/packages.ts';
 import { createBps, crc32 } from './core/bps.ts';
 
 const SMW_CLEAN_CRC = 0xb19ed489; // Super Mario World (U), headerless
@@ -62,6 +63,11 @@ function startWith(rom: Rom, name: string): void {
     const moved = [migratePatchSources(rom), migratePackageFiles(rom)].some(Boolean);
     if (moved) { saveRom(name, rom).catch(() => {}); log('Sources of patches and packages moved out of the ROM into the editor data (saved with “Save project”).'); }
   } catch (e) { console.warn('migrating sources', e); }
+  // patches applied before packages were tracked: a legacy package each
+  try {
+    const legacy = wrapLegacyPatches(rom);
+    if (legacy.length) { saveRom(name, rom).catch(() => {}); log(`${legacy.length} patch(es) applied before packages were tracked are now listed as legacy packages.`); }
+  } catch (e) { console.warn('legacy packages', e); }
   if (disableUnsafeExtGfx(rom)) {
     saveRom(name, rom).catch(() => {});
     toast('BG2/BG3 graphics were turned off: they overwrote the layer 1 tilemap (broken background). The assignments stay saved and apply again once the VRAM patch is available.', 'error');

@@ -68,9 +68,12 @@ in den Editor-Daten (siehe oben).
 **Entfernen …** nimmt das ganze Paket heraus: Patches (spätere zuerst), UberASM-Dateien und
 -Zuordnungen, Blöcke, Sprites, angelegte ExGFX-Dateien. Dateien, die auch ein anderes Paket mitgebracht hat
 (eine gemeinsame Bibliothek), bleiben; was im Level platziert ist, auch. Schlägt ein Schritt fehl, bleibt
-die ROM unverändert.
+die ROM unverändert; Strg+Z holt ein entferntes Paket zurück.
 
-Patches, die vor dieser Verwaltung angewendet wurden, stehen als eigene Pakete in der Liste. Was in den
+**Legacy-Pakete:** Patches, die angewendet wurden, bevor Pakete verwaltet wurden, werden beim Öffnen der
+ROM in je ein **Legacy-Paket** gepackt (einmal; erneutes Öffnen legt keine doppelten an). Sie stehen wie
+jedes andere Paket in der Liste, mit den Einstellungen ihres Patches, und lassen sich ebenso entfernen. Der
+VRAM-Patch des Editors (BG2/BG3) ist kein Fremdinhalt und steht als *Editor patch* für sich. Was in den
 Projekten zu keinem Paket gehört (früher oder von Hand hinzugefügt), nennt die Liste unten mit Link zum Tab.
 Hintergrund-Pakete gehen ins Level und werden kein Paket.
 

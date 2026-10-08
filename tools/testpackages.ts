@@ -2,7 +2,8 @@
 // uploads (single files, tool folders, a package of several kinds, songs, an unrecognizable upload); an
 // install has its effect in the emulator and is one package; removing gives the ROM as before, keeping
 // files another package brought too (the editor's own patches it needed, like the Map16 extension, stay);
-// undoing an install restores ROM bytes and editor data in one step.
+// undoing an install restores ROM bytes and editor data in one step. Patches applied before packages were
+// tracked become one legacy package each, once; removing one restores the ROM as before that patch.
 import { readFileSync } from 'node:fs';
 import { unzipSync, zipSync } from 'fflate';
 import { Rom } from '../src/core/rom.ts';
@@ -11,8 +12,10 @@ import { loadApu } from '../src/core/apu.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { map16Source } from '../src/core/render.ts';
 import { RomHistory } from '../src/core/romhistory.ts';
-import { inspectUpload, installPackage, removePackage, partsSummary, type UploadPreview, type ReadyPreview, type InstallOptions } from '../src/core/packages.ts';
+import { inspectUpload, installPackage, removePackage, wrapLegacyPatches, partsSummary, type UploadPreview, type ReadyPreview, type InstallOptions } from '../src/core/packages.ts';
 import { listPackages } from '../src/core/pkgreg.ts';
+import { applyPatch } from '../src/core/patchapply.ts';
+import { listPatches } from '../src/core/patchreg.ts';
 import { loadProject } from '../src/core/uberproject.ts';
 import { loadBlockProject } from '../src/core/blocks.ts';
 import { loadPixiProject } from '../src/core/pixi.ts';
@@ -156,6 +159,25 @@ sameRom('song removed');
   h.undo();
   check(rom.data.length === data.length && rom.data.every((v, i) => v === data[i]) && rom.extra.size === extra.size && [...extra].every(([k, v]) => rom.extra.get(k) === v) && !listPackages(rom).length,
     'undo restores ROM bytes and editor data');
+}
+
+// legacy packages: patches applied before packages were tracked
+{
+  const pkg = await install(mixed);
+  const before = rom.data.slice();
+  const ok1 = applyPatch(rom, { files: new Map([['old1.asm', 'org $00A1DF\n  db $EA\n']]), main: 'old1.asm', name: 'Old one' }).ok;
+  const ok2 = applyPatch(rom, { files: new Map([['old2.asm', 'org $00A1E4\n  db $EA\n']]), main: 'old2.asm', name: 'Old two' }).ok;
+  const wrapped = wrapLegacyPatches(rom);
+  const all = listPackages(rom);
+  check(ok1 && ok2 && wrapped.length === 2 && all.length === 3 && wrapped.every((r) => r.legacy && r.patches.length === 1), `one legacy package per untracked patch (${wrapped.map((r) => r.name).join(', ')})`);
+  check(wrapLegacyPatches(rom).length === 0 && listPackages(rom).length === 3, 'wrapping again creates no duplicates');
+  const two = wrapped.find((r) => r.name === 'Old two')!;
+  await removePackage(rom, two.id, opts.blank);
+  const one = wrapped.find((r) => r.name === 'Old one')!;
+  await removePackage(rom, one.id, opts.blank);
+  check(rom.data[0x21df] === before[0x21df] && rom.data[0x21e4] === before[0x21e4] && !listPatches(rom).some((p) => p.name.startsWith('Old')) && listPackages(rom).length === 1,
+    'removing the legacy packages restores the bytes their patches changed');
+  await removePackage(rom, pkg.pkg!.id, opts.blank);
 }
 
 if (bad) { console.log(`${bad} FAILED`); process.exit(1); }

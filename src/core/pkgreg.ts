@@ -46,6 +46,7 @@ export interface Package extends PackageParts {
   srcId?: string; // its files (zip) in the editor data (rom.extra)
   src?: number[]; // older ROMs: SNES addresses of the RATS blocks holding its files (see migratePackageFiles)
   srcSize?: number;
+  legacy?: boolean; // wraps a patch applied before packages were tracked (its files are kept with the patch)
 }
 
 export const emptyParts = (): PackageParts => ({ patches: [], uber: { files: [], calls: [], other: {} }, blocks: { files: [], tiles: [] }, pixi: { files: [], list: [] }, gfx: [], music: [], map16: [], bgMap16: [] });
