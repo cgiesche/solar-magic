@@ -10,7 +10,7 @@ import { h, clear, toast, choose, downloadBytes } from './dom.ts';
 import { listPatches, type PatchEntry } from '../core/patchreg.ts';
 import { uninstallVramPatch } from '../core/vrampatch.ts';
 import { listPackages, type Package } from '../core/pkgreg.ts';
-import { removePackage } from '../core/packages.ts';
+import { removePackage, packageFiles } from '../core/packages.ts';
 import { loadMusicProject, songHex } from '../core/music.ts';
 import { playButton, playSong, currentSongs } from './musicdialog.ts';
 import { lz2Decompress } from '../core/lz2.ts';
@@ -21,7 +21,6 @@ import type { UberProject } from '../core/uberproject.ts';
 import type { BlockProject } from '../core/blocks.ts';
 import { map16Source } from '../core/render.ts';
 import { storedUpload, toUpload, settingsForm, reapplyPackagePatch, patchDone, type PackagesTab } from './patchmanager.ts';
-import { recordFiles, forgetRecordFiles } from './pkgtrack.ts';
 import { patchesChanged, logView, errorText, type Pane } from './projectpane.ts';
 import { definesButton, editButton } from './defineedit.ts';
 import { openDocs, packageDocs } from './docview.ts';
@@ -143,7 +142,7 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
     for (const p of patches) void patchSection(p, rec, n).then((s) => { if (n === seq) patchBox.appendChild(s); });
     void (async () => {
       // a legacy package's files are kept with its patch
-      const files = rec?.legacy ? new Map((patches[0] && (await storedUpload(app, patches[0]))?.files) || []) : rec ? await recordFiles(app, rec) : null;
+      const files = rec?.legacy ? new Map((patches[0] && (await storedUpload(app, patches[0]))?.files) || []) : rec ? packageFiles(app.rom, rec) : null;
       if (n !== seq || !files?.size) return;
       const docs = detail.querySelector('.pkg-docs')!;
       if (packageDocs(files).length) docs.appendChild(h('button', { onclick: () => openDocs(it.name, files) }, 'Manual …'));
@@ -330,7 +329,6 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
     try {
       const blank = map16Source(app.rom, app.render).fg(0x025);
       const w = await app.romEditAsync(`Package “${rec.name}” removed`, () => removePackage(app.rom, rec.id, blank));
-      forgetRecordFiles(rec.id);
       patchesChanged(app);
       toast(`“${rec.name}” removed${w.length ? ': ' + w.join(' ') : ''}`);
     } catch (e) { toast(errorText(e), 'error'); }

@@ -1,22 +1,28 @@
-// The files of an installed package: kept with its record in the editor data (rom.extra, saved with the
-// project), or by older editor versions in the browser. Recording what a package puts into the ROM is
-// core/pkgreg.ts (recordPackageChange).
+// Files of installed packages that older editor versions kept in the browser (pkg:<id>) move into the
+// editor data with the package record (rom.extra, saved with the project), where they are under undo
+// like everything else of the package.
 
-import { unzipSync } from 'fflate';
+import { zipSync } from 'fflate';
 import type { App } from './app.ts';
-import { kvGet, kvDel } from './storage.ts';
-import { packageArchive, type Package } from '../core/pkgreg.ts';
+import { kvGet, kvWrite } from './storage.ts';
+import { listPackages, savePackage } from '../core/pkgreg.ts';
 
 const kvKey = (id: string) => `pkg:${id}`;
 
-// the files of an installed package, null if they are kept nowhere
-export async function recordFiles(app: App, rec: Package): Promise<Map<string, Uint8Array> | null> {
-  const a = packageArchive(app.rom, rec);
-  if (a) return new Map(Object.entries(unzipSync(a)));
-  const kept = await kvGet<[string, Uint8Array][]>(kvKey(rec.id)).catch(() => undefined);
-  return kept ? new Map(kept) : null;
-}
-
-export function forgetRecordFiles(id: string): void {
-  kvDel(kvKey(id)).catch(() => {});
+// moves them (the ROM is stored before the browser copies are deleted); the number of packages moved
+export async function moveBrowserPackageFiles(app: App): Promise<number> {
+  const moved: string[] = [];
+  for (const rec of listPackages(app.rom)) {
+    if (rec.srcId || rec.src || rec.legacy) continue;
+    const kept = await kvGet<[string, Uint8Array][]>(kvKey(rec.id)).catch(() => undefined);
+    if (!kept) continue;
+    const now = listPackages(app.rom).find((r) => r.id === rec.id); // (the ROM may have changed meanwhile)
+    if (!now || now.srcId) continue;
+    savePackage(app.rom, now, zipSync(Object.fromEntries(kept), { level: 9 }));
+    moved.push(rec.id);
+  }
+  if (!moved.length) return 0;
+  app.romWritten();
+  await kvWrite([], moved.map(kvKey));
+  return moved.length;
 }

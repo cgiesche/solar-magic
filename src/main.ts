@@ -12,6 +12,7 @@ import { LogBar } from './ui/logbar.ts';
 import { kvGet, kvClear, saveRom, romFromRecord, type RomRecord } from './ui/storage.ts';
 import { migratePatchSources } from './core/patchreg.ts';
 import { migratePackageFiles } from './core/pkgreg.ts';
+import { moveBrowserPackageFiles } from './ui/pkgtrack.ts';
 import { LevelView } from './ui/levelview.ts';
 import { LevelList, Palette, Properties } from './ui/panels.ts';
 import { openHeaderDialog } from './ui/headerdialog.ts';
@@ -86,6 +87,9 @@ function startWith(rom: Rom, name: string): void {
   (window as unknown as { app: App }).app = app;
   buildUi(app);
   app.openLevel(0x105);
+  // files of packages older versions kept in the browser go into the editor data
+  void moveBrowserPackageFiles(app).then((n) => { if (n) log(`Files of ${n} package(s) moved from the browser into the editor data (saved with “Save project”).`); })
+    .catch((e) => console.warn('moving package files', e));
 }
 
 // spinner pill for background analyses; shown after a short delay so quick jobs don't flicker,

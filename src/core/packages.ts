@@ -379,7 +379,13 @@ export function wrapLegacyPatches(rom: Rom): Package[] {
   return out;
 }
 
-// ---------- manuals ----------
+// ---------- files and manuals ----------
+
+// the files of an installed package (kept with its record in the editor data), null if there are none
+export function packageFiles(rom: Rom, pkg: Package): Map<string, Uint8Array> | null {
+  const a = packageArchive(rom, pkg);
+  return a ? new Map(Object.entries(unzipSync(a))) : null;
+}
 
 // the installed packages that brought files of a tool project (uber = UberASM, blocks, pixi = sprites)
 // and have a manual, with their files: the manual comes and goes with its package (and its undo)
@@ -387,10 +393,8 @@ export function packageManuals(rom: Rom, tool: 'uber' | 'blocks' | 'pixi'): { pk
   const out: { pkg: Package; files: Map<string, Uint8Array> }[] = [];
   for (const pkg of listPackages(rom)) {
     if (!pkg[tool].files.length) continue;
-    const a = packageArchive(rom, pkg);
-    if (!a) continue;
-    const files = new Map(Object.entries(unzipSync(a)));
-    if (packageDocs(files).length) out.push({ pkg, files });
+    const files = packageFiles(rom, pkg);
+    if (files && packageDocs(files).length) out.push({ pkg, files });
   }
   return out;
 }
