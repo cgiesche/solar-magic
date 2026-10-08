@@ -8,14 +8,14 @@
 // - removePackage: the package and everything it brought, files shared with other packages kept;
 // - wrapLegacyPatches: patches applied before packages were tracked become a legacy package each.
 
-import { zipSync } from 'fflate';
+import { zipSync, unzipSync } from 'fflate';
 import type { Rom } from './rom.ts';
 import type { ApplyResult } from './patchapply.ts';
 import { applyPatch } from './patchapply.ts';
 import type { PartKind } from './parts.ts';
 import { PART_LABEL } from './parts.ts';
 import { uploadFiles, uploadFromFiles, detectKind, uploadSource, effectiveDefines, packUpload, type Upload } from './patchpkg.ts';
-import { suggestMapping, withIncludes, placed, suggestCalls, type PkgSuggestion, type PkgRules } from './pkgmap.ts';
+import { suggestMapping, withIncludes, placed, suggestCalls, packageDocs, type PkgSuggestion, type PkgRules } from './pkgmap.ts';
 import { isLevelImport } from './bgpack.ts';
 import { isSongText, songsFromFiles, loadMusicProject, emptyMusicProject, addSongs, nextFreeSong, folders as musicFolders, saveMusicProject, hasAmk, musicEntry } from './music.ts';
 import { pixiParts, planPixiUpload, applyPixiUpload } from './pixipkg.ts';
@@ -26,7 +26,7 @@ import { installEditorPatch, extGfxAvailable, setLevelMusic } from './patches.ts
 import { installVramPatch } from './vrampatch.ts';
 import { installMap16Ext, map16Ext, setExtTileWords, EXT_FIRST, EXT_TILES } from './map16ext.ts';
 import { ALL, type UberContext } from './uberasm.ts';
-import { recordPackageChangeAsync, emptyParts, savePackage, listPackages, uninstallPackageWithMusic, type Package, type Claim } from './pkgreg.ts';
+import { recordPackageChangeAsync, emptyParts, savePackage, listPackages, packageArchive, uninstallPackageWithMusic, type Package, type Claim } from './pkgreg.ts';
 import { listPatches } from './patchreg.ts';
 
 // one part as the preview lists it
@@ -375,6 +375,22 @@ export function wrapLegacyPatches(rom: Rom): Package[] {
   for (const p of listPatches(rom)) {
     if ((p.kind && p.kind !== 'patch') || owned.has(p.id)) continue;
     out.push(savePackage(rom, { id: `legacy-${p.id}`, name: p.name, fileName: p.name, added: p.applied, legacy: true, ...emptyParts(), patches: [p.id] }));
+  }
+  return out;
+}
+
+// ---------- manuals ----------
+
+// the installed packages that brought files of a tool project (uber = UberASM, blocks, pixi = sprites)
+// and have a manual, with their files: the manual comes and goes with its package (and its undo)
+export function packageManuals(rom: Rom, tool: 'uber' | 'blocks' | 'pixi'): { pkg: Package; files: Map<string, Uint8Array> }[] {
+  const out: { pkg: Package; files: Map<string, Uint8Array> }[] = [];
+  for (const pkg of listPackages(rom)) {
+    if (!pkg[tool].files.length) continue;
+    const a = packageArchive(rom, pkg);
+    if (!a) continue;
+    const files = new Map(Object.entries(unzipSync(a)));
+    if (packageDocs(files).length) out.push({ pkg, files });
   }
   return out;
 }

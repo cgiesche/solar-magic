@@ -13,11 +13,8 @@ import { map16Source } from '../core/render.ts';
 import { hex } from '../core/names.ts';
 import { settingsForm } from './patchmanager.ts';
 import { patchesChanged, logView, errorText } from './projectpane.ts';
-import { docsButton, keepDocs } from './docview.ts';
+import { docsButton } from './docview.ts';
 import { musicPlayer } from './musicplayer.ts';
-
-// the tool whose kept docs list a package with parts of that kind (see docview.ts)
-const DOCS: Partial<Record<PartKind, string>> = { uberasm: 'uber', block: 'blocks', sprite: 'sprites' };
 
 // done: after the package was installed
 export function openUploadPreview(app: App, p: ReadyPreview | ManualPreview, done: (pkg: Package) => void): void {
@@ -48,8 +45,7 @@ export function openUploadPreview(app: App, p: ReadyPreview | ManualPreview, don
     p.patch ? [h('h3', null, 'Patch settings'), settingsBox] : '',
     log,
   );
-  const docs = [...new Set(p.parts.map((x) => DOCS[x.kind]))].filter((k): k is string => !!k);
-  installDialog(app, p, body, log, docs, has('music'), () => ({ patch: p.patch ? { main, values: form!.read() } : undefined }), done);
+  installDialog(app, p, body, log, has('music'), () => ({ patch: p.patch ? { main, values: form!.read() } : undefined }), done);
 }
 
 // a package to assign by hand: the assignment, prefilled with the suggestion
@@ -60,11 +56,11 @@ function openManual(app: App, p: ManualPreview, done: (pkg: Package) => void): v
     h('div', { class: 'row' }, h('span', { class: 'grow hint' }, 'What goes where is usually in the package’s manual.'), docsButton(p.name, p.files)),
     editor.el,
     log);
-  installDialog(app, p, body, log, ['uber'], false, () => ({ assignment: editor.read() }), done);
+  installDialog(app, p, body, log, false, () => ({ assignment: editor.read() }), done);
 }
 
 // the preview dialog with Install / Cancel; `choices`: what the user set in it
-function installDialog(app: App, p: ReadyPreview | ManualPreview, body: HTMLElement, log: HTMLElement, docs: string[], music: boolean,
+function installDialog(app: App, p: ReadyPreview | ManualPreview, body: HTMLElement, log: HTMLElement, music: boolean,
   choices: () => Pick<InstallOptions, 'patch' | 'assignment'>, done: (pkg: Package) => void): void {
   let busy = false;
   const install = async () => {
@@ -83,7 +79,6 @@ function installDialog(app: App, p: ReadyPreview | ManualPreview, body: HTMLElem
     if (!r.ok || !r.pkg) { clear(log).appendChild(logView(r)); return; }
     dlg.close(true);
     patchesChanged(app);
-    for (const k of docs) void keepDocs(k, p.name, p.files).catch(() => {});
     toast(`“${p.name}” installed${r.warnings.length ? ` (${r.warnings.length} warning(s))` : ''} – Ctrl+Z undoes it.`);
     if (r.warnings.length) modal(`Output: ${p.name}`, logView({ ...r, prints: [] }), [{ label: 'OK', primary: true }]);
     done(r.pkg);

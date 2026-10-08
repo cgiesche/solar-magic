@@ -9,7 +9,7 @@ import { h, clear, toast, downloadBytes, type Child } from './dom.ts';
 import { listPackages, type Package } from '../core/pkgreg.ts';
 import type { ApplyResult } from '../core/patchapply.ts';
 import { definesButton, editButton } from './defineedit.ts';
-import { keptDocsRow } from './docview.ts';
+import { manualsRow } from './docview.ts';
 
 export interface Project { files: Map<string, Uint8Array> }
 
@@ -26,7 +26,6 @@ export interface PaneSpec<P extends Project> {
   // the assignments and the row to assign; origin: the name of the package that brought a file
   content(p: P, change: () => void, origin: (file: string) => HTMLElement): Child[];
   applied(p: P): string; // toast after a change was applied
-  docs: string; // tool key of the kept docs of packages added to the project (see docview.ts)
 }
 
 export interface Pane {
@@ -140,7 +139,7 @@ export function projectPane<P extends Project>(app: App, spec: PaneSpec<P>, chan
     clear(el).append(
       h('p', { class: 'hint' }, spec.intro, ' ', h('details', { class: 'inline-details' }, h('summary', null, 'Format'), h('div', null, spec.format))),
       h('div', { class: 'pane-content' }, spec.content(proj, change, origin)),
-      keptDocsRow(spec.docs),
+      manualsRow(app.rom, spec.tool),
       log,
       adv,
     );

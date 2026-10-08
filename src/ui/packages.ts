@@ -24,7 +24,7 @@ import { storedUpload, toUpload, settingsForm, reapplyPackagePatch, patchDone, t
 import { recordFiles, forgetRecordFiles } from './pkgtrack.ts';
 import { patchesChanged, logView, errorText, type Pane } from './projectpane.ts';
 import { definesButton, editButton } from './defineedit.ts';
-import { openDocs, packageDocs, forgetDocs } from './docview.ts';
+import { openDocs, packageDocs } from './docview.ts';
 import { gfxName } from './gfx/map16tab.ts';
 import { TOOL_KINDS, type ToolKind } from '../core/parts.ts';
 
@@ -331,7 +331,6 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
       const blank = map16Source(app.rom, app.render).fg(0x025);
       const w = await app.romEditAsync(`Package “${rec.name}” removed`, () => removePackage(app.rom, rec.id, blank));
       forgetRecordFiles(rec.id);
-      forgetDocs(rec.name);
       patchesChanged(app);
       toast(`“${rec.name}” removed${w.length ? ': ' + w.join(' ') : ''}`);
     } catch (e) { toast(errorText(e), 'error'); }

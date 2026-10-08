@@ -3,7 +3,8 @@
 // install has its effect in the emulator and is one package; removing gives the ROM as before, keeping
 // files another package brought too (the editor's own patches it needed, like the Map16 extension, stay);
 // undoing an install restores ROM bytes and editor data in one step. Patches applied before packages were
-// tracked become one legacy package each, once; removing one restores the ROM as before that patch.
+// tracked become one legacy package each, once; removing one restores the ROM as before that patch. The
+// manuals the tool tabs list come and go with their packages.
 import { readFileSync } from 'node:fs';
 import { unzipSync, zipSync } from 'fflate';
 import { Rom } from '../src/core/rom.ts';
@@ -12,7 +13,7 @@ import { loadApu } from '../src/core/apu.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { map16Source } from '../src/core/render.ts';
 import { RomHistory } from '../src/core/romhistory.ts';
-import { inspectUpload, installPackage, removePackage, wrapLegacyPatches, defaultAssignment, partsSummary, type UploadPreview, type ReadyPreview, type InstallOptions } from '../src/core/packages.ts';
+import { inspectUpload, installPackage, removePackage, wrapLegacyPatches, defaultAssignment, partsSummary, packageManuals, type UploadPreview, type ReadyPreview, type InstallOptions } from '../src/core/packages.ts';
 import { listPackages } from '../src/core/pkgreg.ts';
 import { applyPatch } from '../src/core/patchapply.ts';
 import { listPatches } from '../src/core/patchreg.ts';
@@ -116,6 +117,22 @@ await removePackage(rom, pa.pkg!.id, opts.blank);
 const up = loadProject(rom)!;
 check(!up.files.has('level/a.asm') && up.files.has('library/shared.asm') && up.files.has('level/b.asm'), 'removing A keeps the library file B uses');
 await removePackage(rom, pb.pkg!.id, opts.blank);
+
+// manuals: the tool tabs list those of the installed packages, so they come and go with the package
+// (and its undo, which restores ROM and editor data)
+{
+  const withDocs = await install(inspectUpload('Docs.zip', zip({ 'level/d.asm': 'main:\n  RTL\n', 'readme.txt': 'How to use D' })));
+  const without = await install(inspectUpload('NoDocs.zip', zip({ 'level/n.asm': 'main:\n  RTL\n' })), { level: 0x106 });
+  const names = (tool: 'uber' | 'blocks' | 'pixi') => packageManuals(rom, tool).map((m) => m.pkg.name).join();
+  check(withDocs.ok && without.ok && names('uber') === 'Docs' && !names('blocks') && !names('pixi'), `manuals: only the package with a readme, in the UberASM tab (${names('uber')})`);
+  check(packageManuals(rom, 'uber')[0]?.files.has('readme.txt') === true, 'manuals: with the package files');
+  const before = rom.snapshot();
+  await removePackage(rom, withDocs.pkg!.id, opts.blank);
+  check(!names('uber'), 'manuals: gone with the package');
+  rom.restore(before);
+  check(names('uber') === 'Docs', 'manuals: back when the removal is undone');
+  for (const r of [withDocs, without]) await removePackage(rom, r.pkg!.id, opts.blank);
+}
 
 // sprites and blocks
 const rb = await install(bill);

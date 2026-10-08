@@ -1,25 +1,20 @@
 // The readme or HTML manual of a package, shown inside the editor: pages, images and stylesheets come from
 // the package (as blob URLs), links between its pages stay in the viewer, the pages' own scripts don't
-// run. Docs of packages added to a tool project are kept in the browser, so they can be read again later.
+// run. The tool tabs list the manuals of the installed packages that brought their files.
 
 import { h, clear, modal } from './dom.ts';
-import { kvSet, kvEntries, kvDel } from './storage.ts';
-import { docFiles } from '../core/pkgmap.ts';
+import { packageDocs } from '../core/pkgmap.ts';
+import { packageManuals } from '../core/packages.ts';
+import type { Rom } from '../core/rom.ts';
+
+export { packageDocs };
 
 const MIME: Record<string, string> = {
   html: 'text/html', htm: 'text/html', css: 'text/css', txt: 'text/plain', md: 'text/plain', png: 'image/png', jpg: 'image/jpeg',
   jpeg: 'image/jpeg', gif: 'image/gif', svg: 'image/svg+xml', webp: 'image/webp', bmp: 'image/bmp',
 };
 const ext = (p: string) => p.split('.').pop()!.toLowerCase();
-const isDocAsset = (p: string) => ext(p) in MIME;
 const dec = new TextDecoder();
-
-// all readable docs of a package, most relevant first
-export function packageDocs(files: Map<string, Uint8Array>): string[] {
-  const main = docFiles(files);
-  const rest = [...files.keys()].filter((p) => /\.(html?|txt|md)$/i.test(p) && !/(^|\/)list\.txt$/i.test(p) && !main.includes(p)).sort();
-  return [...main, ...rest];
-}
 
 function resolve(from: string, rel: string): string {
   const parts = from.split('/').slice(0, -1);
@@ -105,32 +100,11 @@ export function docsButton(title: string, files: Map<string, Uint8Array>): HTMLE
   return packageDocs(files).length ? h('button', { onclick: () => openDocs(title, files) }, 'Manual …') : null;
 }
 
-// docs of packages added to a tool project, kept in the browser by tool and package name
-interface StoredDocs { title: string; files: [string, Uint8Array][] }
-// `tool`: 'uber' | 'blocks' | 'sprites' – browser storage keys from before the part kinds, kept so stored docs are found
-const key = (tool: string, title: string) => `docs:${tool}:${title}`;
-
-export async function keepDocs(tool: string, title: string, files: Map<string, Uint8Array>): Promise<void> {
-  const keep = [...files].filter(([p]) => isDocAsset(p) && !/(^|\/)list\.txt$/i.test(p));
-  if (keep.some(([p]) => /\.(html?|txt|md)$/i.test(p))) await kvSet(key(tool, title), { title, files: keep } satisfies StoredDocs);
-}
-
-// the kept docs of a tool as buttons (filled in once loaded), each with one to forget them
-export function keptDocsRow(tool: string): HTMLElement {
+// the manuals of the installed packages that brought files of a tool project (UberASM, blocks, sprites):
+// a button each, filled in once the package files are read
+export function manualsRow(rom: Rom, tool: 'uber' | 'blocks' | 'pixi'): HTMLElement {
   const el = h('div', { class: 'row doc-row' });
-  void kvEntries<StoredDocs>(`docs:${tool}:`).then((all) => {
-    if (!all.length) return;
-    clear(el).append(h('span', { class: 'hint' }, 'Manuals:'), ...all.map(([k, d]) => {
-      const chip = h('span', { class: 'row doc-chip' },
-        h('button', { onclick: () => openDocs(d.title, new Map(d.files)) }, d.title),
-        h('button', { class: 'icon-btn', title: 'Forget manual (only stored in the browser)', onclick: () => { void kvDel(k); chip.remove(); } }, '✕'));
-      return chip;
-    }));
-  }).catch(() => {});
+  const all = packageManuals(rom, tool);
+  if (all.length) el.append(h('span', { class: 'hint' }, 'Manuals:'), ...all.map(({ pkg, files }) => h('button', { onclick: () => openDocs(pkg.name, files) }, pkg.name)));
   return el;
-}
-
-// forgets the kept docs of a package (removed)
-export function forgetDocs(title: string): void {
-  for (const tool of ['uber', 'blocks', 'sprites']) kvDel(key(tool, title)).catch(() => {});
 }

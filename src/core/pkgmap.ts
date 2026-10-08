@@ -92,6 +92,13 @@ export function docFiles(files: Map<string, Uint8Array>): string[] {
   return docs.sort((a, b) => depth(a) - depth(b) || rank(a) - rank(b) || a.localeCompare(b));
 }
 
+// all readable docs of a package, most relevant first
+export function packageDocs(files: Map<string, Uint8Array>): string[] {
+  const main = docFiles(files);
+  const rest = [...files.keys()].filter((p) => /\.(html?|txt|md)$/i.test(p) && !/(^|\/)list\.txt$/i.test(p) && !main.includes(p)).sort();
+  return [...main, ...rest];
+}
+
 // plain text of a doc (HTML without tags and entities)
 export function docText(data: Uint8Array, path: string): string {
   const t = dec.decode(data);

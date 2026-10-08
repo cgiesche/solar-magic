@@ -175,6 +175,7 @@ export class App {
     });
     kvKeys('rc').then((k) => kvWrite([], k.filter((x) => !x.startsWith(CACHE_PREFIX)))).catch(() => {});
     kvKeys('objkinds-').then((k) => kvWrite([], k)).catch(() => {}); // object kinds before they were in the result cache
+    kvKeys('docs:').then((k) => kvWrite([], k)).catch(() => {}); // copies of package manuals (they come from the packages now)
     this.results.onChange = () => {
       if (!this.cacheTimer && !this.closed) this.cacheTimer = window.setTimeout(() => this.storeResults(), 3000);
     };
