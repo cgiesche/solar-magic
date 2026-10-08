@@ -5,7 +5,7 @@ import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { levelTranslevel } from '../src/core/level.ts';
 
-const rom = new Rom(new Uint8Array(readFileSync('Super Mario World (U) [!].smc')));
+const rom = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
 const emu = new LevelEmulator(rom);
 emu.boot();
 let bad = 0;

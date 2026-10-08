@@ -11,7 +11,7 @@ import { installVramPatch, uninstallVramPatch } from '../src/core/vrampatch.ts';
 await loadAsar();
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
-const file = new Uint8Array(readFileSync('Super Mario World (U) [!].smc'));
+const file = new Uint8Array(readFileSync('test/fixtures/smw.smc'));
 const vanilla = new Rom(file.slice());
 const rom = new Rom(file.slice());
 const r = installVramPatch(rom);

@@ -6,3 +6,4 @@ dist
 *.png
 resources_local
 docs
+test

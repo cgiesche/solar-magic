@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
 import { createBps, applyBps, crc32 } from '../src/core/bps.ts';
 
-const clean = Rom.fromFile(new Uint8Array(readFileSync('Super Mario World (U) [!].smc'))).output(false);
+const clean = Rom.fromFile(new Uint8Array(readFileSync('test/fixtures/smw.smc'))).output(false);
 if (crc32(clean) !== 0xb19ed489) throw new Error('unexpected clean ROM CRC ' + crc32(clean).toString(16));
 const t = new Uint8Array(0x200000).fill(0xff);
 t.set(clean);

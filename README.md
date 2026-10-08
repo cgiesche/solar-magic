@@ -9,7 +9,7 @@ Läuft komplett lokal im Browser; die ROM wird nirgends hochgeladen (sie wird nu
 npm install
 npm run dev          # http://localhost:5173 – ROM per Button oder Drag & Drop öffnen
 npm run build        # statischer Build nach dist/
-npm test             # Regressionstests (benötigt "Super Mario World (U) [!].smc" im Projektordner)
+npm test             # Regressionstests (benötigt die ROM als test/fixtures/smw.smc, siehe test/fixtures/README.md)
 ```
 
 Im Dev-Modus lädt `?rom=/<Dateiname>` eine ROM direkt aus dem Projektordner.

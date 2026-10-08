@@ -4,7 +4,7 @@ import { Rom } from '../src/core/rom.ts';
 import { loadLevel, serializeLayer1, serializeLayer2, serializeSprites, isL1Vertical, cloneLevel, insertScreen, deleteScreen, encodeSecondaryHeader, type Level } from '../src/core/level.ts';
 import { exportLevelFile, importLevelFile } from '../src/core/levelfile.ts';
 
-const rom = new Rom(new Uint8Array(readFileSync('Super Mario World (U) [!].smc')));
+const rom = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
 const list = [...Array(0x25).keys(), ...Array.from({ length: 0x3c }, (_, i) => 0x101 + i)];
 const dump = (lv: Level) => [serializeLayer1(rom, lv), serializeLayer2(rom, lv) ?? [], serializeSprites(lv.sprites, lv.spriteHeader, isL1Vertical(rom, lv.header.mode)),
   encodeSecondaryHeader(lv.secondary), [lv.layer2Pointer]].map((a) => Array.from(a).join(',')).join('|');

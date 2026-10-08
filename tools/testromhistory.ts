@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
 import { RomHistory } from '../src/core/romhistory.ts';
 
-const rom = new Rom(new Uint8Array(readFileSync('Super Mario World (U) [!].smc')));
+const rom = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
 const orig = rom.data.slice();
 const h = new RomHistory(rom);
 let bad = 0;

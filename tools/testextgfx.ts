@@ -10,7 +10,7 @@ import { installVramPatch, uninstallVramPatch } from '../src/core/vrampatch.ts';
 
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
-const file = new Uint8Array(readFileSync('Super Mario World (U) [!].smc'));
+const file = new Uint8Array(readFileSync('test/fixtures/smw.smc'));
 const vanilla = new Rom(file.slice());
 installEditorPatch(vanilla);
 const ev = new LevelEmulator(vanilla); ev.boot();

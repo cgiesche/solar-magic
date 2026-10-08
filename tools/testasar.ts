@@ -11,7 +11,7 @@ import { readPackage, detectKind } from '../src/core/patchpkg.ts';
 import { installMap16Ext } from '../src/core/map16ext.ts';
 
 await loadAsar();
-const file = new Uint8Array(readFileSync('Super Mario World (U) [!].smc'));
+const file = new Uint8Array(readFileSync('test/fixtures/smw.smc'));
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
 const src = (name: string, main: string, extra: Record<string, string> = {}, defines: Record<string, string> = {}): PatchSource =>

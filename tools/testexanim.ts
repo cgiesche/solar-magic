@@ -8,7 +8,7 @@ import { loadAsar } from '../src/core/asar.ts';
 import { installExAnim, writeLevelList, readLevelList, writeAltFile, readAltFile, listBytes, parseList, emptyList, writeGlobalList, readGlobalList, exanimInstalled, type ExList } from '../src/core/exanim.ts';
 
 await loadAsar();
-const file = new Uint8Array(readFileSync('Super Mario World (U) [!].smc'));
+const file = new Uint8Array(readFileSync('test/fixtures/smw.smc'));
 let bad = 0;
 const check = (ok: boolean, what: string) => { if (!ok) { console.log('FAIL', what); bad++; } };
 

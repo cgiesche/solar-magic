@@ -7,7 +7,7 @@ import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadLevel, newUid } from '../src/core/level.ts';
 import { checkSpriteMemory, spriteWindows, suggestSpriteMemory, usedSpriteMemory } from '../src/core/spritemem.ts';
 
-const rom = new Rom(new Uint8Array(readFileSync('Super Mario World (U) [!].smc')));
+const rom = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
 const emu = new LevelEmulator(rom);
 emu.boot();
 const bgOf = (p: number) => (p >> 16 === 0xff ? p : 0xffd900);

@@ -19,7 +19,7 @@ const check = (ok: boolean, what: string) => { console.log(`${ok ? 'ok  ' : 'FAI
 const zipsInRom = (rom: Rom) => rom.scanRats().filter((b) => rom.data[b.start + 8] === 0x50 && rom.data[b.start + 9] === 0x4b).length;
 
 await loadAsar();
-const raw = readFileSync('Super Mario World (U) [!].smc');
+const raw = readFileSync('test/fixtures/smw.smc');
 const vanilla = new Rom(new Uint8Array(raw.subarray(raw.length % 0x8000)));
 const rom = new Rom(vanilla.data.slice());
 
