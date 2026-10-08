@@ -76,7 +76,7 @@ endmacro`;
   });
   files.set('__gps_defines.asm', definesFile(freeram) + GPS_DEFINES + '\n' + macros.join('\n') + '\n');
   files.set('__gps_main.asm', out.join('\n') + '\n');
-  return { name: BLOCKS_NAME, main: '__gps_main.asm', files, kind: 'blocks', archive: projectToZip(p) };
+  return { name: BLOCKS_NAME, main: '__gps_main.asm', files, kind: 'block', archive: projectToZip(p) };
 }
 
 export function projectToZip(p: BlockProject): Uint8Array {
@@ -104,7 +104,7 @@ export function projectFromZip(data: Uint8Array): BlockProject {
 }
 
 export function blocksEntry(rom: Rom): PatchEntry | null {
-  return listPatches(rom).find((p) => p.kind === 'blocks') ?? null;
+  return listPatches(rom).find((p) => p.kind === 'block') ?? null;
 }
 export function loadBlockProject(rom: Rom): BlockProject | null {
   const e = blocksEntry(rom);

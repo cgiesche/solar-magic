@@ -3,7 +3,7 @@
 // planBlockPack() works out what goes where; applyBlockPack() does it in one step.
 
 import { Rom } from './rom.ts';
-import type { PatchPackage } from './patchpkg.ts';
+import type { Upload } from './patchpkg.ts';
 import type { ApplyResult } from './patchapply.ts';
 import { parseBlockList, loadBlockProject, saveBlockProject, type BlockAssign } from './blocks.ts';
 import { parseMap16File, map16Targets, exgfxName, importGfxFile, type Map16File } from './map16file.ts';
@@ -19,23 +19,23 @@ export interface BlockPackPlan {
 
 const dec = new TextDecoder();
 
-export function planBlockPack(pkg: PatchPackage, listFile: string): BlockPackPlan {
+export function planBlockPack(upload: Upload, listFile: string): BlockPackPlan {
   const dir = listFile.includes('/') ? listFile.slice(0, listFile.lastIndexOf('/') + 1) : '';
   const find = (name: string) => {
     const n = name.replace(/\\/g, '/');
-    for (const c of [dir + n, dir + 'blocks/' + n]) if (pkg.files.has(c)) return c;
-    return [...pkg.files.keys()].find((f) => f.toLowerCase().endsWith('/' + n.toLowerCase()) || f.toLowerCase() === n.toLowerCase()) ?? null;
+    for (const c of [dir + n, dir + 'blocks/' + n]) if (upload.files.has(c)) return c;
+    return [...upload.files.keys()].find((f) => f.toLowerCase().endsWith('/' + n.toLowerCase()) || f.toLowerCase() === n.toLowerCase()) ?? null;
   };
   const missing: string[] = [];
   const blocks: BlockAssign[] = [];
-  for (const b of parseBlockList(dec.decode(pkg.files.get(listFile)!))) {
+  for (const b of parseBlockList(dec.decode(upload.files.get(listFile)!))) {
     const f = find(b.file.replace(/^blocks\//, ''));
     if (f) blocks.push({ ...b, file: f }); else missing.push(b.file.replace(/^blocks\//, ''));
   }
-  const mf = [...pkg.files.keys()].find((f) => /\.map16$/i.test(f));
+  const mf = [...upload.files.keys()].find((f) => /\.map16$/i.test(f));
   const first = blocks.length ? Math.min(...blocks.map((b) => b.tile)) : EXT_FIRST;
-  const map16 = mf ? { file: mf, data: parseMap16File(pkg.files.get(mf)!), at: first } : null;
-  const gfx = [...pkg.files.keys()].filter((f) => /\.bin$/i.test(f) && /exgfx/i.test(f)).map((f) => {
+  const map16 = mf ? { file: mf, data: parseMap16File(upload.files.get(mf)!), at: first } : null;
+  const gfx = [...upload.files.keys()].filter((f) => /\.bin$/i.test(f) && /exgfx/i.test(f)).map((f) => {
     const n = exgfxName(f.split('/').pop()!);
     return { file: f, num: n.num ?? 0x80, slot: n.slot };
   });
@@ -48,7 +48,7 @@ export interface BlockPackOptions {
   map16At?: number; // top-left tile for the .map16 tiles (default: the plan's)
 }
 
-export function applyBlockPack(rom: Rom, pkg: PatchPackage, plan: BlockPackPlan, opt: BlockPackOptions): ApplyResult & { notes: string[] } {
+export function applyBlockPack(rom: Rom, upload: Upload, plan: BlockPackPlan, opt: BlockPackOptions): ApplyResult & { notes: string[] } {
   const snapshot = rom.snapshot();
   const notes: string[] = [];
   const fail = (e: unknown): ApplyResult & { notes: string[] } => {
@@ -62,10 +62,10 @@ export function applyBlockPack(rom: Rom, pkg: PatchPackage, plan: BlockPackPlan,
     proj.list = proj.list.filter((b) => !tiles.has(b.tile));
     for (const b of plan.blocks) {
       const name = 'blocks/' + b.file.split('/').pop();
-      proj.files.set(name, pkg.files.get(b.file)!);
+      proj.files.set(name, upload.files.get(b.file)!);
       proj.list.push({ tile: b.tile, file: name, acts: b.acts });
     }
-    for (const [f, c] of pkg.files) if (/(^|\/)routines\/[^/]+\.asm$/i.test(f)) proj.files.set(f.slice(f.search(/routines\//i)), c);
+    for (const [f, c] of upload.files) if (/(^|\/)routines\/[^/]+\.asm$/i.test(f)) proj.files.set(f.slice(f.search(/routines\//i)), c);
     const r = saveBlockProject(rom, proj, opt.blank);
     if (!r.ok) { rom.restore(snapshot); return { ...r, notes }; }
     notes.push(`${plan.blocks.length} block(s) at ${plan.blocks.map((b) => b.tile.toString(16).toUpperCase()).join(', ')}`);
@@ -86,7 +86,7 @@ export function applyBlockPack(rom: Rom, pkg: PatchPackage, plan: BlockPackPlan,
     }
     // 3. ExGFX and the level's slot
     for (const g of plan.gfx) {
-      const what = importGfxFile(rom, g.num, pkg.files.get(g.file)!);
+      const what = importGfxFile(rom, g.num, upload.files.get(g.file)!);
       let where = '';
       if (opt.level !== null && g.slot) {
         const ext = EXT_GFX_SLOT_NAMES.indexOf(g.slot);

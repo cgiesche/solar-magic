@@ -16,7 +16,7 @@ import { levelMusic, setLevelMusic, musicPatch, HEADER_MUSIC_TABLE } from '../co
 import { AMK_ORIGINALS } from '../vendor/amk/originals.ts';
 import { musicPlayer } from './musicplayer.ts';
 import { romChanged, errorText, type Pane } from './projectpane.ts';
-import { packageFiles } from '../core/patchpkg.ts';
+import { uploadFiles } from '../core/patchpkg.ts';
 import { strFromU8, strToU8 } from 'fflate';
 
 // levels set to each song (music per level)
@@ -91,7 +91,7 @@ export async function insertMusic(app: App, p: MusicProject, what: string): Prom
   return true;
 }
 
-// The dialog adding the songs of a download: what was found, missing samples, the song number, listening
+// The dialog adding the songs of an upload: what was found, missing samples, the song number, listening
 // before adding (AddmusicK's SPC of the song), then inserting. done: after it was inserted.
 export function openAddSongDialog(app: App, fileName: string, files: Map<string, Uint8Array>, done: () => void): void {
   let proj: MusicProject;
@@ -266,7 +266,7 @@ async function pickSong(): Promise<{ name: string; files: Map<string, Uint8Array
   const f = await pickFile('.zip,.txt');
   if (!f) return null;
   const data = new Uint8Array(await f.arrayBuffer());
-  return { name: f.name, files: /\.zip$/i.test(f.name) ? packageFiles(f.name, data) : new Map([[f.name, data]]) };
+  return { name: f.name, files: /\.zip$/i.test(f.name) ? uploadFiles(f.name, data) : new Map([[f.name, data]]) };
 }
 
 // The Music tab: AddmusicK's state, all songs (listen, set for the level, remove), adding songs.

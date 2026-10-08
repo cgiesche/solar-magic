@@ -5,8 +5,8 @@ import { zipSync } from 'fflate';
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadAsar } from '../src/core/asar.ts';
-import { packageFiles } from '../src/core/patchpkg.ts';
-import { parseMwl, isBgPackage, planBgPack, applyBgPack, levelColors } from '../src/core/bgpack.ts';
+import { uploadFiles } from '../src/core/patchpkg.ts';
+import { parseMwl, isLevelImport, planBgPack, applyBgPack, levelColors } from '../src/core/bgpack.ts';
 import { bgTileWords, bgExtTileWords } from '../src/core/bgmap16.ts';
 import { parseMap16File } from '../src/core/map16file.ts';
 import { bgFromWram } from '../src/core/bg.ts';
@@ -40,8 +40,8 @@ const bgAt = (bg: Uint16Array, x: number, y: number) => bg[(x >> 4) * 0x1b0 + y 
 const color = (cg: Uint8Array, i: number) => cg[i * 2] | (cg[i * 2 + 1] << 8);
 
 // ---- the real package ----
-const files = packageFiles('ghostbusters.zip', new Uint8Array(readFileSync('test/fixtures/ghostbustersghosttrapjavamanhattanBG.zip')));
-check(isBgPackage(files), 'detected as background package');
+const files = uploadFiles('ghostbusters.zip', new Uint8Array(readFileSync('test/fixtures/ghostbustersghosttrapjavamanhattanBG.zip')));
+check(isLevelImport(files), 'detected as background package');
 const mwl = parseMwl(files.get('ghostbustersghosttrapjavamanhattanBG.mwl')!);
 check(mwl.gfx.get('BG1') === 0x8a1 && mwl.gfx.get('BG2') === 0x8a2 && mwl.gfx.get('BG3') === 0x8a3 && mwl.gfx.get('FG1') === 0x14, '.mwl: ExGFX list (BG1-3 = 8A1-8A3)');
 const usedTiles = [...new Set(mwl.bg!)].filter((t) => t >= 0x200);
@@ -114,7 +114,7 @@ const map16 = parseMap16File(files.get('ghostbustersghosttrapjavamanhattanBG.map
   const l32 = (o: number, v: number) => { lm[o] = v & 0xff; lm[o + 1] = (v >> 8) & 0xff; lm[o + 2] = (v >> 16) & 0xff; lm[o + 3] = v >>> 24; };
   l32(0x10, 0x70); l32(0x18, 16); l32(0x1c, 2); l32(0x70, 0xb0); l32(0x74, 32 * 8);
   for (let i = 0; i < 32 * 4; i++) { lm[0xb0 + i * 2] = (i + 1) & 0xff; lm[0xb1 + i * 2] = 0x05; }
-  const syn = packageFiles('syn.zip', zipSync({ 'Syn/syn.mwl': mwlData, 'Syn/syn.map16': lm }));
+  const syn = uploadFiles('syn.zip', zipSync({ 'Syn/syn.mwl': mwlData, 'Syn/syn.map16': lm }));
   const rom = new Rom(file.slice());
   const emu0 = new LevelEmulator(rom); emu0.boot();
   const plan = planBgPack(rom, 'syn', syn, BLANK);
@@ -133,7 +133,7 @@ const map16 = parseMap16File(files.get('ghostbustersghosttrapjavamanhattanBG.map
 // ---- FG + BG + layer 3 package (Sonic Mania Studiopolis Act 1): which .map16/.pal is which comes from
 // the files, not their names ----
 {
-  const ssz = packageFiles('ssz.zip', new Uint8Array(readFileSync('test/fixtures/sonicmaniasszact1.zip')));
+  const ssz = uploadFiles('ssz.zip', new Uint8Array(readFileSync('test/fixtures/sonicmaniasszact1.zip')));
   const fgFile = parseMap16File(ssz.get('sonicmaniasszact1FG.map16')!), bgFile = parseMap16File(ssz.get('sonicmaniasszact1BG-L2.map16')!);
   check(fgFile.origin?.bg === false && fgFile.origin.tile === 0x200 && bgFile.origin?.bg === true && bgFile.origin.tile === 0x200, '.map16 header: FG from 200, BG from BG tile 200');
   // renamed files: same result

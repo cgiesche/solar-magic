@@ -1,4 +1,4 @@
-// Adding any downloaded package, recognized as a patch, UberASM resource, block, block package, sprite
+// Adding any upload, recognized as a patch, UberASM resource, block, block package, sprite
 // package or Lunar Magic background, each with its dialog; applying Asar patches (.asm or .zip) with
 // settings. Patch sources are kept with the editor data (rom.extra, older ones in IndexedDB) per registry entry; the ROM's
 // registry alone suffices to remove a patch. What a package brings is kept as one (pkgtrack.ts).
@@ -12,7 +12,7 @@ import { applyPatch, reapplyPatch, type ApplyResult, type PatchSource } from '..
 import { patchArchive, type PatchEntry } from '../core/patchreg.ts';
 import { zipSync, unzipSync } from 'fflate';
 import { pickFile } from './dom.ts';
-import { openPixiPackageDialog } from './pixidialog.ts';
+import { openPixiUploadDialog } from './pixidialog.ts';
 import { freeBlockTile } from './blockdialog.ts';
 import { loadBlockProject, saveBlockProject } from '../core/blocks.ts';
 import { installVramPatch } from '../core/vrampatch.ts';
@@ -21,8 +21,8 @@ import { loadProject, emptyProject, saveProject } from '../core/uberproject.ts';
 import { ALL, type UberContext } from '../core/uberasm.ts';
 import { hex } from '../core/names.ts';
 import { planBlockPack, applyBlockPack } from '../core/blockpack.ts';
-import { isBgPackage, planBgPack, applyBgPack, levelColors, type BgPackResult } from '../core/bgpack.ts';
-import { packageFiles, packageFromFiles, detectKind, type PackageInfo, effectiveDefines, packageSource, optionDefault, type PatchPackage, type PatchOption } from '../core/patchpkg.ts';
+import { isLevelImport, planBgPack, applyBgPack, levelColors, type BgPackResult } from '../core/bgpack.ts';
+import { uploadFiles, uploadFromFiles, detectKind, type DetectedPart, effectiveDefines, uploadSource, optionDefault, type Upload, type PatchOption } from '../core/patchpkg.ts';
 import { installEditorPatch } from '../core/patches.ts';
 import { installMap16Ext, map16Ext, setExtTileWords, EXT_FIRST, EXT_TILES } from '../core/map16ext.ts';
 import { map16Source } from '../core/render.ts';
@@ -32,41 +32,42 @@ import { docsButton, keepDocs } from './docview.ts';
 import { suggestMapping } from '../core/pkgmap.ts';
 import { romChanged, logView, errorText } from './projectpane.ts';
 import { trackPackage, type Tracker } from './pkgtrack.ts';
+import { TOOL_KINDS, type ToolKind } from '../core/parts.ts';
 
-export interface StoredPackage { fileName: string; files: [string, Uint8Array][]; main: string }
+export interface StoredUpload { fileName: string; files: [string, Uint8Array][]; main: string }
 const META = '.smwe-package.json';
 
-function packArchive(s: StoredPackage): Uint8Array {
+function packArchive(s: StoredUpload): Uint8Array {
   const files: Record<string, Uint8Array> = Object.fromEntries(s.files);
   files[META] = new TextEncoder().encode(JSON.stringify({ fileName: s.fileName, main: s.main }));
   return zipSync(files, { level: 9 });
 }
-function unpackArchive(a: Uint8Array): StoredPackage {
+function unpackArchive(a: Uint8Array): StoredUpload {
   const all = unzipSync(a);
   const meta = JSON.parse(new TextDecoder().decode(all[META])) as { fileName: string; main: string };
   delete all[META];
   return { ...meta, files: Object.entries(all) };
 }
-export async function storedPackage(app: App, p: PatchEntry): Promise<StoredPackage | undefined> {
+export async function storedUpload(app: App, p: PatchEntry): Promise<StoredUpload | undefined> {
   const a = patchArchive(app.rom, p);
-  return a ? unpackArchive(a) : kvGet<StoredPackage>(srcKey(p.id)); // older versions kept large sources in the browser
+  return a ? unpackArchive(a) : kvGet<StoredUpload>(srcKey(p.id)); // older versions kept large sources in the browser
 }
 const srcKey = (id: string) => `patch:${id}`;
 
-export function toPackage(s: StoredPackage): PatchPackage {
-  return { ...packageFromFiles(s.fileName, new Map(s.files)), main: s.main };
+export function toUpload(s: StoredUpload): Upload {
+  return { ...uploadFromFiles(s.fileName, new Map(s.files)), main: s.main };
 }
 
 // settings form: manifest options, or the define assignments at the top of the main file
-export function settingsForm(pkg: PatchPackage, main: string, values: Record<string, string>): { el: HTMLElement; read: () => Record<string, string> } {
-  const opts = pkg.manifest?.options;
+export function settingsForm(upload: Upload, main: string, values: Record<string, string>): { el: HTMLElement; read: () => Record<string, string> } {
+  const opts = upload.manifest?.options;
   const wrap = (rows: HTMLElement[]) => h('div', { class: 'patch-settings' }, rows.length ? rows : h('p', { class: 'hint' }, 'No settings.'));
   if (!opts?.length) {
-    const form = definesForm(new TextDecoder().decode(pkg.files.get(main)!), values);
+    const form = definesForm(new TextDecoder().decode(upload.files.get(main)!), values);
     return { el: wrap(form.rows), read: form.read };
   }
   const inputs: [string, () => string][] = [];
-  const eff = effectiveDefines(pkg, values);
+  const eff = effectiveDefines(upload, values);
   const el = wrap(opts.map((o) => optionRow(o, eff[o.define] ?? optionDefault(o), inputs)));
   return {
     el,
@@ -100,8 +101,8 @@ function optionRow(o: PatchOption, value: string, inputs: [string, () => string]
   return h('div', { class: 'prop' }, h('label', null, o.label), control, o.hint ? h('span', { class: 'hint' }, o.hint) : null);
 }
 
-function ensureRequirements(app: App, pkg: PatchPackage): void {
-  for (const req of pkg.manifest?.requires ?? []) {
+function ensureRequirements(app: App, upload: Upload): void {
+  for (const req of upload.manifest?.requires ?? []) {
     if (req === 'smwe') installEditorPatch(app.rom);
     else if (req === 'smwx') { if (!map16Ext(app.rom)) installMap16Ext(app.rom, map16Source(app.rom, app.render).fg(0x025)); }
     else throw new Error(`Unknown requirement “${req}” in patch.json`);
@@ -109,17 +110,17 @@ function ensureRequirements(app: App, pkg: PatchPackage): void {
 }
 
 // applies the package's patch: new, or anew (`entry`) with other settings; the ROM changed when ok
-export function runPatch(app: App, pkg: PatchPackage, fileName: string, main: string, values: Record<string, string>, entry: PatchEntry | null): ApplyResult {
+export function runPatch(app: App, upload: Upload, fileName: string, main: string, values: Record<string, string>, entry: PatchEntry | null): ApplyResult {
   const fail = (e: unknown): ApplyResult => ({ ok: false, errors: [errorText(e)], warnings: [], prints: [] });
   let src: PatchSource;
-  try { src = packageSource(pkg, main, effectiveDefines(pkg, values)); } catch (e) { return fail(e); }
+  try { src = uploadSource(upload, main, effectiveDefines(upload, values)); } catch (e) { return fail(e); }
   src.settings = values;
-  const stored: StoredPackage = { fileName, files: [...pkg.files], main };
+  const stored: StoredUpload = { fileName, files: [...upload.files], main };
   src.archive = packArchive(stored); // kept with the editor data, not in the ROM
   if (app.dirty) app.saveLevel(true);
   let r: ApplyResult;
   try {
-    ensureRequirements(app, pkg);
+    ensureRequirements(app, upload);
     r = entry ? reapplyPatch(app.rom, entry.id, src) : applyPatch(app.rom, src);
   } catch (e) {
     return fail(e);
@@ -136,48 +137,48 @@ export function patchDone(name: string, again: boolean, r: ApplyResult): void {
 }
 
 // dialog for a new patch or new settings of an installed one
-function openApplyDialog(app: App, pkg: PatchPackage, fileName: string, entry: PatchEntry | null, onDone: () => void): void {
-  let main = pkg.main ?? pkg.asmFiles[0];
-  const m = pkg.manifest;
+function openApplyDialog(app: App, upload: Upload, fileName: string, entry: PatchEntry | null, onDone: () => void): void {
+  let main = upload.main ?? upload.asmFiles[0];
+  const m = upload.manifest;
   const info = h('div', null,
     m?.description ? h('p', null, m.description) : null,
-    h('p', { class: 'hint' }, [m?.author && `by ${m.author}`, m?.version && `version ${m.version}`, `${pkg.files.size} file(s)`].filter(Boolean).join(' · '),
+    h('p', { class: 'hint' }, [m?.author && `by ${m.author}`, m?.version && `version ${m.version}`, `${upload.files.size} file(s)`].filter(Boolean).join(' · '),
       m?.smwc ? [' · ', h('a', { href: m.smwc, target: '_blank', rel: 'noopener' }, 'SMWCentral')] : null),
-    docsButton(pkg.name, pkg.files),
+    docsButton(upload.name, upload.files),
   );
   const settingsBox = h('div');
-  let form = settingsForm(pkg, main, entry?.defines ?? {});
+  let form = settingsForm(upload, main, entry?.defines ?? {});
   settingsBox.appendChild(form.el);
-  const mainSel = pkg.asmFiles.length > 1 && !m
-    ? h('select', { onchange: (e: Event) => { main = (e.target as HTMLSelectElement).value; form = settingsForm(pkg, main, {}); clear(settingsBox).appendChild(form.el); } },
-      pkg.asmFiles.map((f) => h('option', { value: f, selected: f === main }, f)))
+  const mainSel = upload.asmFiles.length > 1 && !m
+    ? h('select', { onchange: (e: Event) => { main = (e.target as HTMLSelectElement).value; form = settingsForm(upload, main, {}); clear(settingsBox).appendChild(form.el); } },
+      upload.asmFiles.map((f) => h('option', { value: f, selected: f === main }, f)))
     : null;
   const log = h('div');
   const body = h('div', { class: 'patch-apply' },
     info,
     mainSel ? h('div', { class: 'prop' }, h('label', null, 'Main file'), mainSel) : null,
-    !pkg.main && !entry ? h('p', { class: 'hint' }, 'The archive contains several .asm files – please choose the patch file (see the patch’s readme).') : null,
+    !upload.main && !entry ? h('p', { class: 'hint' }, 'The archive contains several .asm files – please choose the patch file (see the patch’s readme).') : null,
     h('h3', null, 'Settings'),
     settingsBox,
     log,
   );
   const run = (): boolean => {
-    const r = runPatch(app, pkg, fileName, main, form.read(), entry);
+    const r = runPatch(app, upload, fileName, main, form.read(), entry);
     if (!r.ok) { clear(log).appendChild(logView(r)); return false; }
-    patchDone(pkg.name, !!entry, r);
+    patchDone(upload.name, !!entry, r);
     onDone();
     return true;
   };
-  modal(`${entry ? 'Patch settings' : 'Apply patch'}: ${pkg.name}`, body, [
+  modal(`${entry ? 'Patch settings' : 'Apply patch'}: ${upload.name}`, body, [
     { label: 'Cancel' },
     { label: entry ? 'Reapply' : 'Apply', primary: true, onClick: run },
   ]);
 }
 
 // files of a resource package for a tool folder: shared folders stay at the root, the rest goes into `folder`
-function placeFiles(pkg: PatchPackage, main: string, mainText: string, folder: string): Map<string, Uint8Array> {
+function placeFiles(upload: Upload, main: string, mainText: string, folder: string): Map<string, Uint8Array> {
   const out = new Map<string, Uint8Array>();
-  for (const [f, c] of pkg.files) {
+  for (const [f, c] of upload.files) {
     if (!/\.(asm|bin)$/i.test(f)) continue;
     const dest = /^(routines|library|other)\//.test(f) ? f : folder + f;
     out.set(dest, f === main ? new TextEncoder().encode(mainText) : c);
@@ -190,7 +191,7 @@ function resultLog(log: HTMLElement, r: ApplyResult): void {
 }
 
 // an UberASM resource: choose where it runs, then add it to the ROM's UberASM project
-function openUberResourceDialog(app: App, pkg: PatchPackage, info: PackageInfo, preset: AddPreset, onDone: () => void): void {
+function openUberResourceDialog(app: App, upload: Upload, info: DetectedPart, preset: AddPreset, onDone: () => void): void {
   type Where = 'level' | 'all' | 'gamemode' | 'overworld';
   let where: Where = preset.uberContext;
   let num = where === 'level' ? app.level.number : where === 'gamemode' ? 0x14 : 0;
@@ -204,26 +205,26 @@ function openUberResourceDialog(app: App, pkg: PatchPackage, info: PackageInfo, 
   };
   const opts: [number, string][] = [[0, 'only in level'], [1, 'in all levels'], [2, 'in game mode'], [3, 'on overworld map']];
   const kinds: Where[] = ['level', 'all', 'gamemode', 'overworld'];
-  const form = settingsForm(pkg, info.file, {});
+  const form = settingsForm(upload, info.file, {});
   const log = h('div');
   buildNum();
   const body = h('div', { class: 'patch-apply' },
-    h('p', null, `“${pkg.name}” is an UberASM resource – code that runs every frame (labels init/main/…), not a standalone patch. Where should it run?`),
-    docsButton(pkg.name, pkg.files),
+    h('p', null, `“${upload.name}” is an UberASM resource – code that runs every frame (labels init/main/…), not a standalone patch. Where should it run?`),
+    docsButton(upload.name, upload.files),
     h('div', { class: 'row' }, select(opts, kinds.indexOf(where), (i) => { where = kinds[i]; buildNum(); }), numBox),
     h('p', { class: 'hint' }, '“In all levels” uses UberASM’s level entry “*”. Assignments can be changed later in the UberASM tab.'),
     h('h3', null, 'Settings'), form.el, log);
-  modal(`Add UberASM code: ${pkg.name}`, body, [
+  modal(`Add UberASM code: ${upload.name}`, body, [
     { label: 'Cancel' },
     { label: 'Add', primary: true, onClick: () => {
       if (app.dirty) app.saveLevel(true);
       const ctx: UberContext = where === 'all' ? 'level' : where;
       const folder = `${ctx}/`;
-      const text = packageSource(pkg, info.file, form.read()).files.get(info.file) as string;
+      const text = uploadSource(upload, info.file, form.read()).files.get(info.file) as string;
       let r: ApplyResult;
       try {
         const proj = loadProject(app.rom) ?? emptyProject();
-        for (const [f, c] of placeFiles(pkg, info.file, text, folder)) proj.files.set(f, c);
+        for (const [f, c] of placeFiles(upload, info.file, text, folder)) proj.files.set(f, c);
         const file = folder + info.file;
         const key = where === 'all' ? ALL : num;
         const calls = proj.list[ctx].get(key) ?? [];
@@ -233,9 +234,9 @@ function openUberResourceDialog(app: App, pkg: PatchPackage, info: PackageInfo, 
       } catch (e) { r = { ok: false, errors: [errorText(e)], warnings: [], prints: [] }; }
       if (!r.ok) { resultLog(log, r); return false; }
       romChanged(app);
-      void keepDocs('uber', pkg.name, pkg.files).catch(() => {});
+      void keepDocs('uber', upload.name, upload.files).catch(() => {});
       const place = where === 'all' ? 'all levels' : where === 'level' ? `level ${hex(num, 3)}` : where === 'gamemode' ? `game mode ${hex(num, 2)}` : `overworld map ${num}`;
-      toast(`“${pkg.name}” now runs in ${place} (UberASM).`);
+      toast(`“${upload.name}” now runs in ${place} (UberASM).`);
       onDone();
       return true;
     } },
@@ -243,17 +244,17 @@ function openUberResourceDialog(app: App, pkg: PatchPackage, info: PackageInfo, 
 }
 
 // a GPS block: choose the Map16 tile, its acts like and graphics, then add it to the ROM's blocks
-function openBlockResourceDialog(app: App, pkg: PatchPackage, info: PackageInfo, preset: AddPreset, onDone: () => void): void {
+function openBlockResourceDialog(app: App, upload: Upload, info: DetectedPart, preset: AddPreset, onDone: () => void): void {
   const proj = loadBlockProject(app.rom) ?? { files: new Map(), list: [] };
   // the tile chosen in the blocks tab while it is free, otherwise the next free one
   let tile = proj.list.some((b) => b.tile === preset.tile) ? freeBlockTile(proj) : preset.tile;
   let acts = info.acts ?? 0x130;
   let gfxFrom = acts;
-  const form = settingsForm(pkg, info.file, {});
+  const form = settingsForm(upload, info.file, {});
   const log = h('div');
   const body = h('div', { class: 'patch-apply' },
-    docsButton(pkg.name, pkg.files),
-    h('p', null, `“${pkg.name}” is a custom block (GPS format). It is assigned to a Map16 tile; in a level it is placed like any Map16 tile (palette → Map16, or a Direct Map16 object).`),
+    docsButton(upload.name, upload.files),
+    h('p', null, `“${upload.name}” is a custom block (GPS format). It is assigned to a Map16 tile; in a level it is placed like any Map16 tile (palette → Map16, or a Direct Map16 object).`),
     h('div', { class: 'prop' }, h('label', null, 'Map16-Tile'), hexInput(tile, 3, (v) => (tile = v), EXT_TILES - 1),
       h('span', { class: 'hint' }, proj.list.length ? `Tiles from 200 on are free (extended Map16 pages); in use: ${proj.list.map((b) => hex(b.tile, 3)).join(', ')}` : 'Tiles from 200 on are free (extended Map16 pages).')),
     h('div', { class: 'prop' }, h('label', null, 'Behavior (acts like)'), hexInput(acts, 3, (v) => (acts = v), 0x1ff),
@@ -261,16 +262,16 @@ function openBlockResourceDialog(app: App, pkg: PatchPackage, info: PackageInfo,
     h('div', { class: 'prop' }, h('label', null, 'Graphics from tile'), hexInput(gfxFrom, 3, (v) => (gfxFrom = v), EXT_TILES - 1),
       h('span', { class: 'hint' }, 'only for new tiles from 200 on; can be changed later in the Map16 editor')),
     h('h3', null, 'Settings'), form.el, log);
-  modal(`Add custom block: ${pkg.name}`, body, [
+  modal(`Add custom block: ${upload.name}`, body, [
     { label: 'Cancel' },
     { label: 'Add', primary: true, onClick: () => {
       if (app.dirty) app.saveLevel(true);
-      const text = packageSource(pkg, info.file, form.read()).files.get(info.file) as string;
+      const text = uploadSource(upload, info.file, form.read()).files.get(info.file) as string;
       const blank = map16Source(app.rom, app.render).fg(0x025);
       const words = map16Source(app.rom, app.render).fg(gfxFrom);
       let r: ApplyResult;
       try {
-        for (const [f, c] of placeFiles(pkg, info.file, text, 'blocks/')) proj.files.set(f, c);
+        for (const [f, c] of placeFiles(upload, info.file, text, 'blocks/')) proj.files.set(f, c);
         proj.list = proj.list.filter((b) => b.tile !== tile);
         proj.list.push({ tile, file: 'blocks/' + info.file, acts });
         r = saveBlockProject(app.rom, proj, blank);
@@ -278,8 +279,8 @@ function openBlockResourceDialog(app: App, pkg: PatchPackage, info: PackageInfo,
       } catch (e) { r = { ok: false, errors: [errorText(e)], warnings: [], prints: [] }; }
       if (!r.ok) { resultLog(log, r); return false; }
       romChanged(app);
-      void keepDocs('blocks', pkg.name, pkg.files).catch(() => {});
-      toast(`“${pkg.name}” is on Map16 tile ${hex(tile, 3)}.`);
+      void keepDocs('blocks', upload.name, upload.files).catch(() => {});
+      toast(`“${upload.name}” is on Map16 tile ${hex(tile, 3)}.`);
       onDone();
       return true;
     } },
@@ -287,14 +288,14 @@ function openBlockResourceDialog(app: App, pkg: PatchPackage, info: PackageInfo,
 }
 
 // a block package (list.txt + blocks, often .map16 and ExGFX): everything in one step
-function openBlockPackDialog(app: App, pkg: PatchPackage, info: PackageInfo, onDone: () => void): void {
-  const plan = planBlockPack(pkg, info.file);
+function openBlockPackDialog(app: App, upload: Upload, info: DetectedPart, onDone: () => void): void {
+  const plan = planBlockPack(upload, info.file);
   let map16At = plan.map16?.at ?? 0x200;
   let useLevel = true;
   const log = h('div');
   const body = h('div', { class: 'patch-apply' },
-    docsButton(pkg.name, pkg.files),
-    h('p', null, `“${pkg.name}” is a block package: custom blocks with a tile list${plan.map16 ? ', Map16 graphics' : ''}${plan.gfx.length ? ' and graphics file(s)' : ''}. Everything is set up together:`),
+    docsButton(upload.name, upload.files),
+    h('p', null, `“${upload.name}” is a block package: custom blocks with a tile list${plan.map16 ? ', Map16 graphics' : ''}${plan.gfx.length ? ' and graphics file(s)' : ''}. Everything is set up together:`),
     h('table', { class: 'uber-table' }, h('tr', null, h('th', null, 'Tile'), h('th', null, 'Block'), h('th', null, 'acts like')),
       plan.blocks.map((b) => h('tr', null, h('td', { class: 'mono' }, hex(b.tile, 3)), h('td', null, b.file.split('/').pop()), h('td', { class: 'mono' }, b.acts !== undefined ? hex(b.acts, 3) : '–')))),
     plan.missing.length ? h('p', { class: 'hint error' }, `Missing from the package: ${plan.missing.join(', ')}`) : '',
@@ -308,7 +309,7 @@ function openBlockPackDialog(app: App, pkg: PatchPackage, info: PackageInfo, onD
       ` Load graphics in level ${hex(app.level.number, 3)} (for other levels: header → graphics bypass)`) : '',
     h('p', { class: 'hint' }, 'To place: palette → Map16, or a Direct Map16 object with the respective tile.'),
     log);
-  modal(`Block package: ${pkg.name}`, body, [
+  modal(`Block package: ${upload.name}`, body, [
     { label: 'Cancel' },
     { label: 'Set up', primary: true, onClick: () => {
       if (app.dirty) app.saveLevel(true);
@@ -317,11 +318,11 @@ function openBlockPackDialog(app: App, pkg: PatchPackage, info: PackageInfo, onD
         const v = installVramPatch(app.rom);
         if (!v.ok) { resultLog(log, v); return false; }
       }
-      const r = applyBlockPack(app.rom, pkg, plan, { blank: map16Source(app.rom, app.render).fg(0x025), level: useLevel ? app.level.number : null, map16At });
+      const r = applyBlockPack(app.rom, upload, plan, { blank: map16Source(app.rom, app.render).fg(0x025), level: useLevel ? app.level.number : null, map16At });
       if (!r.ok) { resultLog(log, r); return false; }
       romChanged(app);
-      void keepDocs('blocks', pkg.name, pkg.files).catch(() => {});
-      toast(`“${pkg.name}” set up: ${r.notes.join(' · ')}`);
+      void keepDocs('blocks', upload.name, upload.files).catch(() => {});
+      toast(`“${upload.name}” set up: ${r.notes.join(' · ')}`);
       onDone();
       return true;
     } },
@@ -402,33 +403,34 @@ function openBgPackDialog(app: App, fileName: string, files: Map<string, Uint8Ar
   ]);
 }
 
-export type AddTarget = 'patches' | 'uber' | 'blocks' | 'sprites' | 'music';
+// the tabs of the Packages dialog: the package list and the view of each tool
+export type PackagesTab = 'packages' | ToolKind | 'music';
 // what the tab the package is added from suggests: where UberASM code runs, the tile of a block
 export interface AddPreset { uberContext: UberContext; tile: number }
-export interface PickedPackage {
+export interface PickedUpload {
   name: string;
-  target: AddTarget | null; // the tab showing it afterwards; null: neither (a background goes into the level)
-  affects: AddTarget[]; // project tabs whose staged changes the dialog would bypass
+  target: PackagesTab | null; // the tab showing it afterwards; null: neither (a background goes into the level)
+  affects: PackagesTab[]; // project tabs whose staged changes the dialog would bypass
   open(preset: AddPreset, done: () => void): void;
 }
 
 // picks an .asm/.zip and recognizes what it is; open() shows the dialog adding it. `manual`: always the
 // dialog assigning the package's parts by hand
-function isMusicPackage(files: Map<string, Uint8Array>): boolean {
+function isMusicUpload(files: Map<string, Uint8Array>): boolean {
   const paths = [...files.keys()];
   if (paths.some((p) => /\.(asm|asar)$/i.test(p))) return false;
   return paths.some((p) => /\.txt$/i.test(p) && isSongText(new TextDecoder().decode(files.get(p)!)));
 }
 
-export async function pickPackage(app: App, manual = false): Promise<PickedPackage | null> {
+export async function pickUpload(app: App, manual = false): Promise<PickedUpload | null> {
   const f = await pickFile('.asm,.asar,.zip,.txt');
   if (!f) return null;
-  return recognize(app, f.name, packageFiles(f.name, new Uint8Array(await f.arrayBuffer())), manual);
+  return recognize(app, f.name, uploadFiles(f.name, new Uint8Array(await f.arrayBuffer())), manual);
 }
 
 // what a package (its files, paths relative to its root) is, with the dialog adding it
 // `into`: the installed package this is a part of; otherwise adding it makes a new one (see pkgtrack.ts)
-export function recognize(app: App, fileName: string, files: Map<string, Uint8Array>, manual = false, into?: Tracker): PickedPackage {
+export function recognize(app: App, fileName: string, files: Map<string, Uint8Array>, manual = false, into?: Tracker): PickedUpload {
   const base = fileName.replace(/\.[^.]*$/, '').split(/[\\/]/).pop()!;
   // what the dialog adds is kept as one package
   const tracked = (name: string, open: (p: AddPreset, done: () => void, t: Tracker) => void) => (p: AddPreset, done: () => void) => {
@@ -440,19 +442,20 @@ export function recognize(app: App, fileName: string, files: Map<string, Uint8Ar
   const sug = suggestMapping(files);
   if (manual || sug && (sug.root !== '' || sug.extra.length)) {
     const rules = sug?.rules ?? new Map([['', null]]);
-    return { name: base, target: 'uber', affects: ['uber', 'blocks', 'sprites'], open: tracked(base, (p, done, t) => openPkgMapDialog(app, base, files, rules, done,
+    return { name: base, target: 'uberasm', affects: TOOL_KINDS, open: tracked(base, (p, done, t) => openPkgMapDialog(app, base, files, rules, done,
       (name, part, partDone) => recognize(app, name, part, false, t).open(p, partDone))) };
   }
   // AddmusicK songs (MML .txt, BRR samples) and no ASM: music
-  if (isMusicPackage(files)) return { name: base, target: 'music', affects: ['music'], open: tracked(base, (_, done) => openAddSongDialog(app, fileName, files, done)) };
-  if (isBgPackage(files)) return { name: base, target: 'patches', affects: [], open: tracked(base, (_, done) => openBgPackDialog(app, fileName, files, done)) };
-  const pkg = packageFromFiles(fileName, files);
-  const info = detectKind(pkg);
+  if (isMusicUpload(files)) return { name: base, target: 'music', affects: ['music'], open: tracked(base, (_, done) => openAddSongDialog(app, fileName, files, done)) };
+  if (isLevelImport(files)) return { name: base, target: 'packages', affects: [], open: tracked(base, (_, done) => openBgPackDialog(app, fileName, files, done)) };
+  const upload = uploadFromFiles(fileName, files);
+  const info = detectKind(upload);
   switch (info.kind) {
-    case 'uberasm': return { name: pkg.name, target: 'uber', affects: ['uber'], open: tracked(pkg.name, (p, done) => openUberResourceDialog(app, pkg, info, p, done)) };
-    case 'block': return { name: pkg.name, target: 'blocks', affects: ['blocks'], open: tracked(pkg.name, (p, done) => openBlockResourceDialog(app, pkg, info, p, done)) };
-    case 'blockpack': return { name: pkg.name, target: 'blocks', affects: ['blocks'], open: tracked(pkg.name, (_, done) => openBlockPackDialog(app, pkg, info, done)) };
-    case 'pixi': return { name: pkg.name, target: 'sprites', affects: ['sprites', 'blocks'], open: tracked(pkg.name, (_, done) => openPixiPackageDialog(app, pkg, done)) };
-    default: return { name: pkg.name, target: 'patches', affects: [], open: tracked(pkg.name, (_, done) => openApplyDialog(app, pkg, fileName, null, done)) };
+    case 'uberasm': return { name: upload.name, target: 'uberasm', affects: ['uberasm'], open: tracked(upload.name, (p, done) => openUberResourceDialog(app, upload, info, p, done)) };
+    case 'block': return info.pack
+      ? { name: upload.name, target: 'block', affects: ['block'], open: tracked(upload.name, (_, done) => openBlockPackDialog(app, upload, info, done)) }
+      : { name: upload.name, target: 'block', affects: ['block'], open: tracked(upload.name, (p, done) => openBlockResourceDialog(app, upload, info, p, done)) };
+    case 'sprite': return { name: upload.name, target: 'sprite', affects: ['sprite', 'block'], open: tracked(upload.name, (_, done) => openPixiUploadDialog(app, upload, done)) };
+    default: return { name: upload.name, target: 'packages', affects: [], open: tracked(upload.name, (_, done) => openApplyDialog(app, upload, fileName, null, done)) };
   }
 }

@@ -6,7 +6,7 @@ import type { App } from './app.ts';
 import { h, modal, clear, toast, hexInput, select, type Child } from './dom.ts';
 import { projectPane, logView, romChanged, type Pane } from './projectpane.ts';
 import type { ApplyResult } from '../core/patchapply.ts';
-import type { PatchPackage } from '../core/patchpkg.ts';
+import type { Upload } from '../core/patchpkg.ts';
 import { hex } from '../core/names.ts';
 import { definesButton } from './defineedit.ts';
 import { map16Source } from '../core/render.ts';
@@ -15,7 +15,7 @@ import {
   loadPixiProject, savePixiProject, projectFromZip, projectToZip, spriteConfig, numberRange, removePixi,
   FOLDER, KIND_LABEL, type PixiProject,
 } from '../core/pixi.ts';
-import { planPixiPackage, applyPixiPackage, hexNum } from '../core/pixipkg.ts';
+import { planPixiUpload, applyPixiUpload, hexNum } from '../core/pixipkg.ts';
 import type { SpriteFolder } from '../core/pixirt.ts';
 
 const KINDS = Object.keys(FOLDER) as SpriteFolder[];
@@ -95,11 +95,11 @@ export function pixiPane(app: App, onDirty: () => void, changed: () => void): Pa
   }, onDirty, changed);
 }
 
-// a downloaded package: numbers for its sprites, tiles for its blocks, linked defines – then added
-export function openPixiPackageDialog(app: App, pkg: PatchPackage, onDone: () => void): void {
+// an upload with PIXI sprites: numbers for its sprites, tiles for its blocks, linked defines – then added
+export function openPixiUploadDialog(app: App, upload: Upload, onDone: () => void): void {
   let plan;
-  try { plan = planPixiPackage(app.rom, pkg); } catch (e) { toast(e instanceof Error ? e.message : String(e), 'error'); return; }
-  if (!plan.sprites.length) { toast(`“${pkg.name}”: no custom sprites found`, 'error'); return; }
+  try { plan = planPixiUpload(app.rom, upload); } catch (e) { toast(e instanceof Error ? e.message : String(e), 'error'); return; }
+  if (!plan.sprites.length) { toast(`“${upload.name}”: no custom sprites found`, 'error'); return; }
   const p = plan;
   const log = h('div');
   const links = h('div');
@@ -107,8 +107,8 @@ export function openPixiPackageDialog(app: App, pkg: PatchPackage, onDone: () =>
     `!${l.define} in ${l.file.split('/').pop()} = ${hexNum(p.sprites[l.sprite].num)} (${KIND_LABEL[p.sprites[l.sprite].kind]} ${p.sprites[l.sprite].name})`)));
   showLinks();
   const body = h('div', { class: 'patch-apply' },
-    docsButton(pkg.name, pkg.files),
-    h('p', null, `“${pkg.name}” contains custom sprites in PIXI format${p.blocks.length ? ' and custom blocks they use' : ''}. They get the next free numbers:`),
+    docsButton(upload.name, upload.files),
+    h('p', null, `“${upload.name}” contains custom sprites in PIXI format${p.blocks.length ? ' and custom blocks they use' : ''}. They get the next free numbers:`),
     h('table', { class: 'uber-table' }, h('tr', null, h('th', null, 'Type'), h('th', null, 'File'), h('th', null, 'Name'), h('th', null, 'No.')),
       p.sprites.map((s) => {
         const [lo, hi] = numberRange(s.kind);
@@ -121,20 +121,20 @@ export function openPixiPackageDialog(app: App, pkg: PatchPackage, onDone: () =>
         h('td', null, hexInput(b.acts, 3, (v) => (b.acts = v), 0x1ff))))) : '',
     p.links.length ? h('h3', null, 'Linked settings') : '', links,
     log);
-  modal(`Add custom sprites: ${pkg.name}`, body, [
+  modal(`Add custom sprites: ${upload.name}`, body, [
     { label: 'Cancel' },
     { label: 'Add', primary: true, onClick: () => {
       if (app.dirty) app.saveLevel(true);
       const src = map16Source(app.rom, app.render);
       let r: ApplyResult;
-      try { r = applyPixiPackage(app.rom, pkg, p, src.fg(0x025), (acts) => src.fg(acts)); } catch (e) {
+      try { r = applyPixiUpload(app.rom, upload, p, src.fg(0x025), (acts) => src.fg(acts)); } catch (e) {
         r = { ok: false, errors: [e instanceof Error ? e.message : String(e)], warnings: [], prints: [] };
       }
       if (!r.ok) { errorLog(log, r); return false; }
       romChanged(app);
-      void keepDocs('sprites', pkg.name, pkg.files).catch(() => {});
+      void keepDocs('sprites', upload.name, upload.files).catch(() => {});
       const where = p.sprites.map((s) => `${KIND_LABEL[s.kind]} ${hex(s.num, 2)}`).join(', ');
-      toast(`“${pkg.name}” inserted: ${where}${p.blocks.length ? ` · blocks at ${p.blocks.map((b) => hex(b.tile, 3)).join(', ')}` : ''}`);
+      toast(`“${upload.name}” inserted: ${where}${p.blocks.length ? ` · blocks at ${p.blocks.map((b) => hex(b.tile, 3)).join(', ')}` : ''}`);
       onDone();
       return true;
     } },

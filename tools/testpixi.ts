@@ -11,8 +11,8 @@ import { setActsLike } from '../src/core/map16ext.ts';
 import { captureSprites } from '../src/core/spritegfx.ts';
 import { loadAsar } from '../src/core/asar.ts';
 import { ROUTINES } from '../src/core/pixiroutines.ts';
-import { packageFiles, packageFromFiles } from '../src/core/patchpkg.ts';
-import { planPixiPackage, applyPixiPackage } from '../src/core/pixipkg.ts';
+import { uploadFiles, uploadFromFiles } from '../src/core/patchpkg.ts';
+import { planPixiUpload, applyPixiUpload } from '../src/core/pixipkg.ts';
 import { savePixiProject, removePixi, loadPixiProject, parsePixiList, parseCfg, parseJsonCfg, type PixiProject } from '../src/core/pixi.ts';
 
 await loadAsar();
@@ -227,13 +227,13 @@ print "MAIN ",pc
 // a downloaded package (test/fixtures): numbers, linked defines, applied
 {
   const r4 = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
-  const pkg = packageFromFiles('BrutalBill.zip', packageFiles('BrutalBill.zip', new Uint8Array(readFileSync('test/fixtures/BrutalBill.zip'))));
-  const plan = planPixiPackage(r4, pkg);
+  const upload = uploadFromFiles('BrutalBill.zip', uploadFiles('BrutalBill.zip', new Uint8Array(readFileSync('test/fixtures/BrutalBill.zip'))));
+  const plan = planPixiUpload(r4, upload);
   const desc = plan.sprites.map((q) => `${q.kind}:${q.num.toString(16)}`).sort().join(' ');
   check(desc === 'shooters:c0 sprites:0', `BrutalBill: sprite 00 and shooter C0 (${desc})`);
   const link = plan.links.find((l) => l.define === 'Sprite');
   check(!!link && plan.sprites[link.sprite].kind === 'sprites', 'BrutalBill: the shooter\'s !Sprite names the sprite');
-  const res4 = applyPixiPackage(r4, pkg, plan, [0, 0, 0, 0], () => [0, 0, 0, 0]);
+  const res4 = applyPixiUpload(r4, upload, plan, [0, 0, 0, 0], () => [0, 0, 0, 0]);
   if (!res4.ok) console.log(res4.errors.join('\n'));
   check(res4.ok, 'BrutalBill applied');
   const shooter = new TextDecoder().decode(loadPixiProject(r4)?.files.get('shooters/BrutalBillShooter.asm'));
@@ -263,8 +263,8 @@ print "MAIN ",pc
 }
 {
   const r6 = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
-  const pkg = packageFromFiles('BrutalBill.zip', packageFiles('BrutalBill.zip', new Uint8Array(readFileSync('test/fixtures/BrutalBill.zip'))));
-  const res6 = applyPixiPackage(r6, pkg, planPixiPackage(r6, pkg), [0, 0, 0, 0], () => [0, 0, 0, 0]);
+  const upload = uploadFromFiles('BrutalBill.zip', uploadFiles('BrutalBill.zip', new Uint8Array(readFileSync('test/fixtures/BrutalBill.zip'))));
+  const res6 = applyPixiUpload(r6, upload, planPixiUpload(r6, upload), [0, 0, 0, 0], () => [0, 0, 0, 0]);
   const e6 = new LevelEmulator(r6); e6.boot();
   const l6 = loadLevel(r6, 0x105);
   l6.sprites = [{ uid: newUid(), num: 0xc0, x: 12, y: 0x17, extra: 2, bytes: [0x02] }];
@@ -338,13 +338,13 @@ print "MAIN ",pc
   const r8 = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
   installEditorPatch(r8);
   const f = 'test/fixtures/Aftertouch Shatter.zip';
-  const pkg = packageFromFiles('Aftertouch Shatter.zip', packageFiles('Aftertouch Shatter.zip', new Uint8Array(readFileSync(f))));
-  const plan = planPixiPackage(r8, pkg);
+  const upload = uploadFromFiles('Aftertouch Shatter.zip', uploadFiles('Aftertouch Shatter.zip', new Uint8Array(readFileSync(f))));
+  const plan = planPixiUpload(r8, upload);
   check(plan.sprites.length === 1 && plan.sprites[0].kind === 'bounce' && plan.blocks.length === 1 && plan.links.some((l) => l.define === 'bounce_sprite'),
     'Shatter: a bounce sprite, a block and the block\'s !bounce_sprite');
   const e8 = new LevelEmulator(r8); e8.boot();
   const blank = [0x1f8, 0x1f8, 0x1f8, 0x1f8];
-  const res8 = applyPixiPackage(r8, pkg, plan, blank, () => [0x1f8, 0x1f8, 0x1f8, 0x1f8]);
+  const res8 = applyPixiUpload(r8, upload, plan, blank, () => [0x1f8, 0x1f8, 0x1f8, 0x1f8]);
   if (!res8.ok) console.log(res8.errors.join('\n'));
   check(res8.ok, 'Shatter applied (GPS routines spawn_bounce_sprite and change_map16 built in)');
   setActsLike(r8, 0x601, 0x130, blank); // the package's cracked tile (!cracked_tile = $0601), solid

@@ -8,7 +8,8 @@ import { h, clear, modal, toast, hexInput, downloadBytes } from './dom.ts';
 import { loadProject, emptyProject, saveProject } from '../core/uberproject.ts';
 import { ALL, CONTEXT_SIZE, type UberContext } from '../core/uberasm.ts';
 import { folders, placed, suggestCalls, extraParts, type PkgRules } from '../core/pkgmap.ts';
-import { packageFromFiles, detectKind, type PackageKind } from '../core/patchpkg.ts';
+import { uploadFromFiles, detectKind } from '../core/patchpkg.ts';
+import { PART_LABEL } from '../core/parts.ts';
 import type { ApplyResult } from '../core/patchapply.ts';
 import { romChanged, logView, errorText } from './projectpane.ts';
 import { docsButton, keepDocs } from './docview.ts';
@@ -159,8 +160,6 @@ export function openPkgMapDialog(app: App, name: string, files: Map<string, Uint
   ]);
 }
 
-const KIND_LABEL: Record<PackageKind, string> = { patch: 'Patch', uberasm: 'UberASM code', block: 'Custom block', blockpack: 'Block package', pixi: 'Custom sprite' };
-
 // what is left of the package after the assignment: .asm parts each added with their own dialog (files
 // they include taken from the package), other files to download for the tool they are meant for
 function openFurtherSteps(name: string, files: Map<string, Uint8Array>, rules: PkgRules, onDone: () => void, openPart: OpenPart): void {
@@ -175,7 +174,7 @@ function openFurtherSteps(name: string, files: Map<string, Uint8Array>, rules: P
         h('td', { class: 'actions' }, h('button', { onclick: () => downloadBytes(file, files.get(part.path)!) }, 'Download')));
     }
     let kind: string;
-    try { kind = KIND_LABEL[detectKind(packageFromFiles(file, part.files)).kind]; } catch { kind = '?'; }
+    try { const d = detectKind(uploadFromFiles(file, part.files)); kind = d.pack ? 'Block package' : PART_LABEL[d.kind]; } catch { kind = '?'; }
     const added = h('span', { class: 'hint' });
     const extra = [...part.files.keys()].filter((f) => f !== file);
     return h('tr', null,

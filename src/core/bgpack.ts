@@ -105,7 +105,7 @@ export interface BgPackPlan {
   notes: string[];
 }
 
-export function isBgPackage(files: Map<string, Uint8Array>): boolean {
+export function isLevelImport(files: Map<string, Uint8Array>): boolean {
   return [...files.keys()].some((f) => /\.mwl$/i.test(f));
 }
 

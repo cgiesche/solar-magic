@@ -323,7 +323,7 @@ endmacro`);
     name: PIXI_NAME,
     main: `${BUILTIN_DIR}routines_main.asm`,
     files,
-    kind: 'pixi',
+    kind: 'sprite',
     archive: projectToZip(p),
     ram: PIXI_RAM,
     next: (done) => {
@@ -393,7 +393,7 @@ export function projectFromZip(data: Uint8Array): PixiProject {
 }
 
 export function pixiEntry(rom: Rom): PatchEntry | null {
-  return listPatches(rom).find((p) => p.kind === 'pixi') ?? null;
+  return listPatches(rom).find((p) => p.kind === 'sprite') ?? null;
 }
 export function loadPixiProject(rom: Rom): PixiProject | null {
   const e = pixiEntry(rom);

@@ -9,6 +9,7 @@ import { setActsLike, setExtTileWords, map16Ext, blockOf } from '../src/core/map
 import { map16Source } from '../src/core/render.ts';
 import { loadAsar } from '../src/core/asar.ts';
 import { GPS_ROUTINES } from '../src/core/gpsroutines.ts';
+import { listPatches } from '../src/core/patchreg.ts';
 import { saveBlockProject, loadBlockProject, removeBlocks, parseBlockList, writeBlockList, type BlockProject } from '../src/core/blocks.ts';
 
 await loadAsar();
@@ -45,6 +46,11 @@ check(project.list.length === 2 && project.list[1].acts === REF && parseBlockLis
 const r = saveBlockProject(rom, project, blank);
 check(r.ok, 'blocks assemble and are entered ' + r.errors.join(' | '));
 check(blockOf(rom, WALL) !== null && blockOf(rom, 0x2a2) === null, 'block table entries');
+{
+  // the registry speaks part kinds; the ROM keeps the stored string older editors wrote ("blocks")
+  const raw = new TextDecoder('latin1').decode(rom.data);
+  check(listPatches(rom).some((p) => p.kind === 'block') && raw.includes('"kind":"blocks"') && !raw.includes('"kind":"block"'), 'registered with part kind "block", stored as "blocks"');
+}
 emu.syncRom();
 
 // wall of the tile in front of Mario in level 105 plus a ledge; run right, jump periodically

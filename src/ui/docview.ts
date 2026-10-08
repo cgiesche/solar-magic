@@ -107,6 +107,7 @@ export function docsButton(title: string, files: Map<string, Uint8Array>): HTMLE
 
 // docs of packages added to a tool project, kept in the browser by tool and package name
 interface StoredDocs { title: string; files: [string, Uint8Array][] }
+// `tool`: 'uber' | 'blocks' | 'sprites' – browser storage keys from before the part kinds, kept so stored docs are found
 const key = (tool: string, title: string) => `docs:${tool}:${title}`;
 
 export async function keepDocs(tool: string, title: string, files: Map<string, Uint8Array>): Promise<void> {

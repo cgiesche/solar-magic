@@ -7,7 +7,7 @@ import { loadAsar } from '../src/core/asar.ts';
 import { applyPatch, type PatchSource } from '../src/core/patchapply.ts';
 import { listPatches } from '../src/core/patchreg.ts';
 import { installEditorPatch } from '../src/core/patches.ts';
-import { packageSource, packageFromFiles } from '../src/core/patchpkg.ts';
+import { uploadSource, uploadFromFiles } from '../src/core/patchpkg.ts';
 import { saveProject, emptyProject, type UberProject } from '../src/core/uberproject.ts';
 import { parseList } from '../src/core/uberasm.ts';
 import { savePixiProject, parsePixiList, type PixiProject } from '../src/core/pixi.ts';
@@ -71,15 +71,15 @@ const blocks: BlockProject = { files: files({ 'blocks/b.asm': 'db $42\nJMP A : J
   const rom = fresh();
   check(saveProject(rom, uber()).ok && savePixiProject(rom, pixi).ok, 'UberASM and custom sprites side by side');
   const e = listPatches(rom);
-  check(e.find((x) => x.kind === 'uberasm')?.ram?.[0][0] === 0x7fac80 && !!e.find((x) => x.kind === 'pixi')?.ram?.length, 'their RAM is in the registry');
+  check(e.find((x) => x.kind === 'uberasm')?.ram?.[0][0] === 0x7fac80 && !!e.find((x) => x.kind === 'sprite')?.ram?.length, 'their RAM is in the registry');
   // a manifest claiming UberASM's free RAM through a define
-  const pkg = packageFromFiles('claim.zip', files({
+  const upload = uploadFromFiles('claim.zip', files({
     'patch.json': JSON.stringify({ name: 'Claim', main: 'claim.asm', ram: [{ define: 'freeram', size: 2 }] }),
     'claim.asm': '!freeram = $7FAC81\nlorom\norg $00922F\n  autoclean JSL Code\n  NOP #2\nfreecode\nCode:\n  STZ $0703 : STZ $0704\n  RTL\n',
   }));
-  const c = applyPatch(rom, packageSource(pkg, 'claim.asm', {}));
+  const c = applyPatch(rom, uploadSource(upload, 'claim.asm', {}));
   check(!c.ok && c.errors.some((x) => x.includes('RAM conflict') && x.includes('UberASM') && x.includes('$7FAC81')), 'claim of UberASM\'s free RAM rejected: ' + c.errors.join(' '));
-  const moved = applyPatch(rom, packageSource(pkg, 'claim.asm', { freeram: '$7FB200' }));
+  const moved = applyPatch(rom, uploadSource(upload, 'claim.asm', { freeram: '$7FB200' }));
   check(moved.ok && moved.entry?.ram?.[0][0] === 0x7fb200 && !moved.warnings.some((x) => x.includes('RAM')), 'the same patch with its setting moved applies ' + moved.errors.join(' '));
   // code without a claim: long writes into private RAM warn, into the sprite tables (shared) and vanilla RAM don't
   const w = applyPatch(fresh(), hooked('x', 'RTL'));
@@ -108,11 +108,11 @@ const blocks: BlockProject = { files: files({ 'blocks/b.asm': 'db $42\nJMP A : J
   // claims in the low RAM mirror are compared as $7Exxxx
   const rom = fresh();
   saveProject(rom, uber('$0DC4'));
-  const pkg = packageFromFiles('low.zip', files({
+  const upload = uploadFromFiles('low.zip', files({
     'patch.json': JSON.stringify({ name: 'Low', main: 'main.asm', ram: [{ addr: '$7E0DC5', size: 1 }] }),
     'main.asm': 'lorom\norg $00922F\n  autoclean JSL Code\n  NOP #2\nfreecode\nCode:\n  STZ $0703 : STZ $0704\n  RTL\n',
   }));
-  const c = applyPatch(rom, packageSource(pkg, 'main.asm', {}));
+  const c = applyPatch(rom, uploadSource(upload, 'main.asm', {}));
   check(!c.ok && c.errors.some((x) => x.includes('RAM conflict')), 'low RAM claim $0DC4 vs $7E0DC5 rejected: ' + c.errors.join(' '));
 }
 

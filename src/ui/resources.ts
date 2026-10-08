@@ -6,8 +6,9 @@
 import type { App } from './app.ts';
 import { h, modal, clear, toast, choose } from './dom.ts';
 import { loadAsar } from '../core/asar.ts';
-import { pickPackage, recognize, type AddTarget, type PickedPackage } from './patchmanager.ts';
+import { pickUpload, recognize, type PackagesTab, type PickedUpload } from './patchmanager.ts';
 import { packagesPane } from './packages.ts';
+import { TOOL_KINDS, type ToolKind } from '../core/parts.ts';
 import { trackPackage, findPackage } from './pkgtrack.ts';
 import { uberPane } from './uberdialog.ts';
 import { blockPane } from './blockdialog.ts';
@@ -16,18 +17,18 @@ import { musicPane } from './musicdialog.ts';
 import { musicPlayer } from './musicplayer.ts';
 import { errorText, type Pane } from './projectpane.ts';
 
-export type ResourceTab = AddTarget;
+export type ResourceTab = PackagesTab;
 export interface ResourceOptions {
   tile?: number; // Map16 tile preselected in the blocks tab
   onChange?: () => void; // after the ROM was changed from the dialog
 }
 
-const TAB_LABEL: Record<ResourceTab, string> = { patches: 'Packages', uber: 'UberASM', blocks: 'Custom Blocks', sprites: 'Custom Sprites', music: 'Music' };
-const staged = (k: ResourceTab): k is 'uber' | 'blocks' | 'sprites' => k !== 'patches' && k !== 'music';
+const TAB_LABEL: Record<ResourceTab, string> = { packages: 'Packages', uberasm: 'UberASM', block: 'Custom Blocks', sprite: 'Custom Sprites', music: 'Music' };
+const staged = (k: ResourceTab): k is ToolKind => k !== 'packages' && k !== 'music';
 
-export async function openResources(app: App, tab: ResourceTab = 'patches', opts: ResourceOptions = {}): Promise<void> {
+export async function openResources(app: App, tab: ResourceTab = 'packages', opts: ResourceOptions = {}): Promise<void> {
   const body = h('div', { class: 'resources' }, h('p', { class: 'hint' }, 'Loading Asar …'));
-  let panes: Record<'uber' | 'blocks' | 'sprites', Pane> | null = null;
+  let panes: Record<ToolKind, Pane> | null = null;
   const pending = () => (panes ? Object.values(panes).filter((p) => p.dirty()) : []);
 
   // pending changes: apply them all, discard them, or stay
@@ -62,7 +63,7 @@ export async function openResources(app: App, tab: ResourceTab = 'patches', opts
   const renderTabs = () => clear(tabBar).append(...(Object.keys(TAB_LABEL) as ResourceTab[]).map((k) =>
     h('button', { class: k === tab ? 'mode active' : 'mode', onclick: () => show(k), title: panes && staged(k) && panes[k].dirty() ? 'Unapplied changes' : undefined },
       TAB_LABEL[k], panes && staged(k) && panes[k].dirty() ? ' •' : '')));
-  const p = { uber: uberPane(app, renderTabs, changed), blocks: blockPane(app, renderTabs, changed), sprites: pixiPane(app, renderTabs, changed) };
+  const p = { uberasm: uberPane(app, renderTabs, changed), block: blockPane(app, renderTabs, changed), sprite: pixiPane(app, renderTabs, changed) };
   const music = musicPane(app, changed);
   panes = p;
   // staged changes of these tabs applied or discarded before the ROM is changed directly; false: back
@@ -81,36 +82,36 @@ export async function openResources(app: App, tab: ResourceTab = 'patches', opts
     changed,
     show: (k) => show(k),
     settle,
-    leave: (then) => void settle(['uber', 'blocks', 'sprites'], 'The dialog will be closed.').then((ok) => { if (ok) { dlg.close(true); then(); } }),
+    leave: (then) => void settle(TOOL_KINDS, 'The dialog will be closed.').then((ok) => { if (ok) { dlg.close(true); then(); } }),
     addPart: (name, files, rec) => {
       // later parts go into the package (its record, looked up again: it may have changed since)
       const cur = findPackage(app, rec.id) ?? rec;
       void run(recognize(app, name, files, false, trackPackage(app, cur.name, cur.fileName, null, cur)));
     },
   });
-  if (opts.tile !== undefined) p.blocks.setTile(opts.tile);
-  const keyOf = (pane: Pane) => (Object.keys(p) as (keyof typeof p)[]).find((k) => p[k] === pane) ?? 'patches';
+  if (opts.tile !== undefined) p.block.setTile(opts.tile);
+  const keyOf = (pane: Pane) => (Object.keys(p) as (keyof typeof p)[]).find((k) => p[k] === pane) ?? 'packages';
 
   function show(k: ResourceTab): void {
     tab = k;
     renderTabs();
     if (k === 'music') music.render();
-    clear(content).appendChild(k === 'patches' ? patches.el : k === 'music' ? music.el : p[k].el);
+    clear(content).appendChild(k === 'packages' ? patches.el : k === 'music' ? music.el : p[k].el);
   }
 
   // opens the dialog adding a package, the tabs it changed reloaded afterwards
-  const run = async (pk: PickedPackage) => {
+  const run = async (pk: PickedUpload) => {
     // the add dialogs work on the ROM's projects: staged changes of those first
     if (!(await settle(pk.affects.filter(staged), `“${pk.name}” goes directly into the ROM.`))) return;
-    pk.open({ uberContext: p.uber.context(), tile: p.blocks.tile() }, () => {
+    pk.open({ uberContext: p.uberasm.context(), tile: p.block.tile() }, () => {
       for (const k of pk.affects) if (staged(k)) p[k].reload(); else if (k === 'music') music.reload();
-      if (pk.target) show('patches');
+      if (pk.target) show('packages');
       changed();
     });
   };
   const add = async (manual = false) => {
     let picked;
-    try { picked = await pickPackage(app, manual); } catch (e) { toast(errorText(e), 'error'); return; }
+    try { picked = await pickUpload(app, manual); } catch (e) { toast(errorText(e), 'error'); return; }
     if (picked) await run(picked);
   };
 

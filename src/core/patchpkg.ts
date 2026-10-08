@@ -1,11 +1,13 @@
-// Patch packages: a single .asm file or a .zip (as on SMWCentral) with includes, binaries and an
-// optional manifest "patch.json" (see docs/patches.md). Settings are Asar defines: those assigned at
-// the top level of the main file (`!name = value`) are rewritten in place, so configuration defines of
-// ordinary patches can be changed too; others are passed to Asar as additional defines.
+// Uploads: what the user hands in for one package (see CONTEXT.md) – a single .asm file or a .zip
+// (as on SMWCentral) with includes, binaries and an optional manifest "patch.json" (see
+// docs/patches.md). Settings are Asar defines: those assigned at the top level of the main file
+// (`!name = value`) are rewritten in place, so configuration defines of ordinary patches can be changed
+// too; others are passed to Asar as additional defines.
 
 import { unzipSync } from 'fflate';
 import type { PatchSource } from './patchapply.ts';
 import type { RamClaim } from './patchreg.ts';
+import type { PartKind } from './parts.ts';
 
 export type OptionType = 'bool' | 'number' | 'hex' | 'enum' | 'text';
 export interface PatchOption {
@@ -31,7 +33,7 @@ export interface PatchManifest {
 }
 // a free RAM range: at a define's value (its setting, or its assignment in the main file) or a fixed address
 export interface PatchRam { define?: string; addr?: string | number; size: number; shared?: boolean }
-export interface PatchPackage {
+export interface Upload {
   name: string;
   files: Map<string, Uint8Array>;
   asmFiles: string[]; // candidates for the main file, shallowest first
@@ -51,7 +53,7 @@ function isZip(d: Uint8Array): boolean {
 
 // the files of a .zip (or the single file), paths relative to the archive root; one common top-level
 // folder is stripped
-export function packageFiles(fileName: string, data: Uint8Array): Map<string, Uint8Array> {
+export function uploadFiles(fileName: string, data: Uint8Array): Map<string, Uint8Array> {
   let files = new Map<string, Uint8Array>();
   if (isZip(data)) {
     const all = unzipSync(data);
@@ -74,12 +76,12 @@ export function packageFiles(fileName: string, data: Uint8Array): Map<string, Ui
   return files;
 }
 
-export function readPackage(fileName: string, data: Uint8Array): PatchPackage {
-  return packageFromFiles(fileName, packageFiles(fileName, data));
+export function readUpload(fileName: string, data: Uint8Array): Upload {
+  return uploadFromFiles(fileName, uploadFiles(fileName, data));
 }
 
-// package from already extracted files (paths relative to the package root)
-export function packageFromFiles(fileName: string, files: Map<string, Uint8Array>): PatchPackage {
+// upload from already extracted files (paths relative to the package root)
+export function uploadFromFiles(fileName: string, files: Map<string, Uint8Array>): Upload {
   const base = fileName.replace(/\.[^.]*$/, '');
   if (!files.size) throw new Error('The archive is empty');
 
@@ -137,9 +139,9 @@ export function optionDefault(o: PatchOption): string {
 }
 
 // defines for the chosen settings: manifest defaults, overridden by `values`
-export function effectiveDefines(pkg: PatchPackage, values: Record<string, string>): Record<string, string> {
+export function effectiveDefines(upload: Upload, values: Record<string, string>): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const o of pkg.manifest?.options ?? []) out[o.define] = optionDefault(o);
+  for (const o of upload.manifest?.options ?? []) out[o.define] = optionDefault(o);
   return { ...out, ...values };
 }
 
@@ -157,19 +159,19 @@ export function rewriteDefines(text: string, defines: Record<string, string>): {
 }
 
 // the Asar input for a package: defines of the main file are rewritten, the rest are passed on
-export function packageSource(pkg: PatchPackage, main: string, defines: Record<string, string>): PatchSource {
-  const files = new Map<string, Uint8Array | string>(pkg.files);
-  const { text, rest } = rewriteDefines(new TextDecoder().decode(pkg.files.get(main)!), defines);
+export function uploadSource(upload: Upload, main: string, defines: Record<string, string>): PatchSource {
+  const files = new Map<string, Uint8Array | string>(upload.files);
+  const { text, rest } = rewriteDefines(new TextDecoder().decode(upload.files.get(main)!), defines);
   files.set(main, text);
-  const ram = manifestRam(pkg, text, defines);
-  return { name: pkg.name, version: pkg.manifest?.version, main, files, defines: rest, settings: defines, ...(ram.length ? { ram } : {}) };
+  const ram = manifestRam(upload, text, defines);
+  return { name: upload.name, version: upload.manifest?.version, main, files, defines: rest, settings: defines, ...(ram.length ? { ram } : {}) };
 }
 
 // the manifest's RAM ranges as claims; an address that isn't a plain number ($7FB000, 0x7FB000, decimal) is an error
-export function manifestRam(pkg: PatchPackage, mainText: string, defines: Record<string, string>): RamClaim[] {
+export function manifestRam(upload: Upload, mainText: string, defines: Record<string, string>): RamClaim[] {
   const out: RamClaim[] = [];
   const own = new Map(scanDefines(mainText).map((d) => [d.name, d.value]));
-  for (const r of pkg.manifest?.ram ?? []) {
+  for (const r of upload.manifest?.ram ?? []) {
     const v = r.define !== undefined ? defines[r.define] ?? own.get(r.define) : r.addr;
     const a = typeof v === 'number' ? v : parseNum(String(v ?? '').trim());
     if (a === null || !(r.size > 0)) throw new Error(`patch.json: RAM entry ${JSON.stringify(r)} is invalid`);
@@ -184,27 +186,27 @@ function parseNum(s: string): number | null {
   return /^\d+$/.test(s) ? parseInt(s, 10) : null;
 }
 
-// What a package is: an ordinary patch, an UberASM resource, a GPS block or a PIXI sprite. Many
-// SMWCentral downloads are resources for other tools, which cannot be applied as a patch by themselves.
-export type PackageKind = 'patch' | 'uberasm' | 'block' | 'blockpack' | 'pixi';
-export interface PackageInfo { kind: PackageKind; file: string; acts?: number }
+// What the ASM of an upload is: an ordinary patch, an UberASM resource, a GPS block (`pack`: a block
+// package, its list.txt in `file`) or a PIXI sprite. Many SMWCentral downloads are resources for other
+// tools, which cannot be applied as a patch by themselves.
+export interface DetectedPart { kind: Exclude<PartKind, 'music' | 'graphics'>; file: string; pack?: boolean; acts?: number }
 
 function statements(text: string): string[] {
   return text.split(/\r?\n/).map((l) => l.replace(/;.*$/, '').trim()).filter(Boolean);
 }
 
-export function detectKind(pkg: PatchPackage, main = pkg.main ?? pkg.asmFiles[0]): PackageInfo {
-  if (pkg.manifest) return { kind: 'patch', file: main };
-  const text = (f: string) => new TextDecoder().decode(pkg.files.get(f)!);
+export function detectKind(upload: Upload, main = upload.main ?? upload.asmFiles[0]): DetectedPart {
+  if (upload.manifest) return { kind: 'patch', file: main };
+  const text = (f: string) => new TextDecoder().decode(upload.files.get(f)!);
   // PIXI sprites: "print "INIT ",pc" / "print "MAIN ",pc", usually with a .json/.cfg next to them
-  for (const f of pkg.asmFiles) if (/print\s+"(INIT|MAIN) ?"\s*,\s*pc/i.test(text(f))) return { kind: 'pixi', file: f };
+  for (const f of upload.asmFiles) if (/print\s+"(INIT|MAIN) ?"\s*,\s*pc/i.test(text(f))) return { kind: 'sprite', file: f };
   const isBlock = (f: string) => {
     const first = statements(text(f)).find((l) => !/^(print|!|incsrc|incbin|if|endif|else|macro|endmacro|%)/i.test(l) && !/^[A-Za-z_.][A-Za-z0-9_.]*:$/.test(l));
     return !!first && /^db\s+\$(42|37)\b/i.test(first);
   };
   // block package: a GPS list.txt with the blocks (often with a .map16 file and ExGFX)
-  const list = [...pkg.files.keys()].find((f) => /(^|\/)list\.txt$/i.test(f));
-  if (list && pkg.asmFiles.some(isBlock) && /^[0-9a-f]{3,4}(:[0-9a-f]{3})?\s+\S+\.asm/im.test(new TextDecoder().decode(pkg.files.get(list)!))) return { kind: 'blockpack', file: list };
+  const list = [...upload.files.keys()].find((f) => /(^|\/)list\.txt$/i.test(f));
+  if (list && upload.asmFiles.some(isBlock) && /^[0-9a-f]{3,4}(:[0-9a-f]{3})?\s+\S+\.asm/im.test(new TextDecoder().decode(upload.files.get(list)!))) return { kind: 'block', file: list, pack: true };
   const src = text(main);
   const st = statements(src);
   // GPS block: first real statement is db $42 / db $37

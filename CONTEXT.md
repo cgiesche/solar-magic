@@ -10,6 +10,10 @@ A browser-based editor for Super Mario World ROMs: levels, graphics and third-pa
 Something the user uploaded, together with everything it brought into the ROM; it is installed and removed as a whole. Uploading a package is the only way third-party content enters the ROM.
 _Avoid_: Patch (for the whole thing), Resource, Download, Project
 
+**Upload**:
+The files the user hands in for one package (a single file or a .zip), before anything is installed.
+_Avoid_: Download, patch package
+
 **Part**:
 One typed piece of a package: a patch, an UberASM file, a block, a sprite, a song or graphics. A package's kind is simply the set of its parts.
 _Avoid_: Component, Item
