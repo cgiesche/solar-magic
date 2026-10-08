@@ -26,9 +26,7 @@ import { installEditorPatch } from '../core/patches.ts';
 import { installMap16Ext, map16Ext, setExtTileWords, EXT_FIRST, EXT_TILES } from '../core/map16ext.ts';
 import { map16Source } from '../core/render.ts';
 import { definesForm } from './defineedit.ts';
-import { openPkgMapDialog } from './pkgmap.ts';
 import { docsButton, keepDocs } from './docview.ts';
-import { suggestMapping } from '../core/pkgmap.ts';
 import { romChanged, logView, errorText } from './projectpane.ts';
 import { trackPackage, type Tracker } from './pkgtrack.ts';
 import { TOOL_KINDS, type ToolKind } from '../core/parts.ts';
@@ -400,37 +398,21 @@ export interface PickedUpload {
   open(preset: AddPreset, done: () => void): void;
 }
 
-// picks an .asm/.zip and recognizes what it is; open() shows the dialog adding it. `manual`: always the
-// dialog assigning the package's parts by hand
 function isMusicUpload(files: Map<string, Uint8Array>): boolean {
   const paths = [...files.keys()];
   if (paths.some((p) => /\.(asm|asar)$/i.test(p))) return false;
   return paths.some((p) => /\.txt$/i.test(p) && isSongText(new TextDecoder().decode(files.get(p)!)));
 }
 
-export async function pickUpload(app: App, manual = false): Promise<PickedUpload | null> {
-  const f = await pickFile('.asm,.asar,.zip,.txt');
-  if (!f) return null;
-  return recognize(app, f.name, uploadFiles(f.name, new Uint8Array(await f.arrayBuffer())), manual);
-}
-
 // what a package (its files, paths relative to its root) is, with the dialog adding it
 // `into`: the installed package this is a part of; otherwise adding it makes a new one (see pkgtrack.ts)
-export function recognize(app: App, fileName: string, files: Map<string, Uint8Array>, manual = false, into?: Tracker): PickedUpload {
+export function recognize(app: App, fileName: string, files: Map<string, Uint8Array>, into?: Tracker): PickedUpload {
   const base = fileName.replace(/\.[^.]*$/, '').split(/[\\/]/).pop()!;
   // what the dialog adds is kept as one package
   const tracked = (name: string, open: (p: AddPreset, done: () => void, t: Tracker) => void) => (p: AddPreset, done: () => void) => {
     const t = into ?? trackPackage(app, name, fileName, files);
     open(p, () => { t.done(); done(); }, t);
   };
-  // UberASM Tool folders inside, next to folders they include (like Retry System): assigned by hand,
-  // starting from the suggestion; its other parts are added afterwards like packages of their own
-  const sug = suggestMapping(files);
-  if (manual || sug && (sug.root !== '' || sug.extra.length)) {
-    const rules = sug?.rules ?? new Map([['', null]]);
-    return { name: base, target: 'uberasm', affects: TOOL_KINDS, open: tracked(base, (p, done, t) => openPkgMapDialog(app, base, files, rules, done,
-      (name, part, partDone) => recognize(app, name, part, false, t).open(p, partDone))) };
-  }
   // AddmusicK songs (MML .txt, BRR samples) and no ASM: music
   if (isMusicUpload(files)) return { name: base, target: 'music', affects: ['music'], open: tracked(base, (_, done) => openAddSongDialog(app, fileName, files, done)) };
   if (isLevelImport(files)) return { name: base, target: 'packages', affects: [], open: tracked(base, (_, done) => openBgPackDialog(app, fileName, files, done)) };

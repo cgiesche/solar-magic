@@ -1,10 +1,12 @@
 // The upload preview of the Packages dialog: what was detected in an upload (each part with its kind,
-// the settings of a patch part) and "Install", which applies the whole package as one undoable ROM edit.
-// Cancel leaves the ROM untouched.
+// the settings of a patch part) – or, when detection is ambiguous, the manual assignment prefilled with
+// the suggestion – and "Install", which applies the whole package as one undoable ROM edit. Cancel
+// leaves the ROM untouched.
 
 import type { App } from './app.ts';
 import { h, modal, clear, toast } from './dom.ts';
-import { installPackage, partsSummary, partLabel, type ReadyPreview } from '../core/packages.ts';
+import { installPackage, partsSummary, partLabel, type ReadyPreview, type ManualPreview, type InstallOptions } from '../core/packages.ts';
+import { assignmentEditor } from './pkgmap.ts';
 import type { Package } from '../core/pkgreg.ts';
 import type { PartKind } from '../core/parts.ts';
 import { map16Source } from '../core/render.ts';
@@ -18,7 +20,8 @@ import { musicPlayer } from './musicplayer.ts';
 const DOCS: Partial<Record<PartKind, string>> = { uberasm: 'uber', block: 'blocks', sprite: 'sprites' };
 
 // done: after the package was installed
-export function openUploadPreview(app: App, p: ReadyPreview, done: (pkg: Package) => void): void {
+export function openUploadPreview(app: App, p: ReadyPreview | ManualPreview, done: (pkg: Package) => void): void {
+  if (p.status === 'manual') { openManual(app, p, done); return; }
   const lvl = hex(app.level.number, 3);
   const has = (k: PartKind) => p.parts.some((x) => x.kind === k);
   let main = p.patch?.main ?? '';
@@ -45,28 +48,42 @@ export function openUploadPreview(app: App, p: ReadyPreview, done: (pkg: Package
     p.patch ? [h('h3', null, 'Patch settings'), settingsBox] : '',
     log,
   );
+  const docs = [...new Set(p.parts.map((x) => DOCS[x.kind]))].filter((k): k is string => !!k);
+  installDialog(app, p, body, log, docs, has('music'), () => ({ patch: p.patch ? { main, values: form!.read() } : undefined }), done);
+}
+
+// a package to assign by hand: the assignment, prefilled with the suggestion
+function openManual(app: App, p: ManualPreview, done: (pkg: Package) => void): void {
+  const editor = assignmentEditor(app, p);
+  const log = h('div');
+  const body = h('div', { class: 'patch-apply' },
+    h('div', { class: 'row' }, h('span', { class: 'grow hint' }, 'What goes where is usually in the package’s manual.'), docsButton(p.name, p.files)),
+    editor.el,
+    log);
+  installDialog(app, p, body, log, ['uber'], false, () => ({ assignment: editor.read() }), done);
+}
+
+// the preview dialog with Install / Cancel; `choices`: what the user set in it
+function installDialog(app: App, p: ReadyPreview | ManualPreview, body: HTMLElement, log: HTMLElement, docs: string[], music: boolean,
+  choices: () => Pick<InstallOptions, 'patch' | 'assignment'>, done: (pkg: Package) => void): void {
   let busy = false;
   const install = async () => {
     if (busy) return;
     busy = true;
     if (app.dirty) app.saveLevel(true); // the level save is not part of the undo step
-    if (has('music')) musicPlayer.stop();
-    clear(log).appendChild(h('p', { class: 'hint' }, has('music') ? 'Installing – AddmusicK is inserting the music …' : 'Installing …'));
+    if (music) musicPlayer.stop();
+    clear(log).appendChild(h('p', { class: 'hint' }, music ? 'Installing – AddmusicK is inserting the music …' : 'Installing …'));
     const src = map16Source(app.rom, app.render);
     let r;
     try {
-      r = await app.romEditAsync(`Package “${p.name}” installed`, () => installPackage(app.rom, p, {
-        level: app.level.number,
-        blank: src.fg(0x025),
-        tileWords: (t) => src.fg(t),
-        patch: p.patch ? { main, values: form!.read() } : undefined,
-      }));
+      const opt: InstallOptions = { level: app.level.number, blank: src.fg(0x025), tileWords: (t) => src.fg(t), ...choices() };
+      r = await app.romEditAsync(`Package “${p.name}” installed`, () => installPackage(app.rom, p, opt));
     } catch (e) { r = { ok: false, errors: [errorText(e)], warnings: [], prints: [], pkg: null }; }
     busy = false;
     if (!r.ok || !r.pkg) { clear(log).appendChild(logView(r)); return; }
     dlg.close(true);
     romChanged(app);
-    for (const k of new Set(p.parts.map((x) => DOCS[x.kind]))) if (k) void keepDocs(k, p.name, p.files).catch(() => {});
+    for (const k of docs) void keepDocs(k, p.name, p.files).catch(() => {});
     toast(`“${p.name}” installed${r.warnings.length ? ` (${r.warnings.length} warning(s))` : ''} – Ctrl+Z undoes it.`);
     if (r.warnings.length) modal(`Output: ${p.name}`, logView({ ...r, prints: [] }), [{ label: 'OK', primary: true }]);
     done(r.pkg);

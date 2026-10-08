@@ -12,7 +12,7 @@ import { loadApu } from '../src/core/apu.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { map16Source } from '../src/core/render.ts';
 import { RomHistory } from '../src/core/romhistory.ts';
-import { inspectUpload, installPackage, removePackage, wrapLegacyPatches, partsSummary, type UploadPreview, type ReadyPreview, type InstallOptions } from '../src/core/packages.ts';
+import { inspectUpload, installPackage, removePackage, wrapLegacyPatches, defaultAssignment, partsSummary, type UploadPreview, type ReadyPreview, type InstallOptions } from '../src/core/packages.ts';
 import { listPackages } from '../src/core/pkgreg.ts';
 import { applyPatch } from '../src/core/patchapply.ts';
 import { listPatches } from '../src/core/patchreg.ts';
@@ -159,6 +159,34 @@ sameRom('song removed');
   h.undo();
   check(rom.data.length === data.length && rom.data.every((v, i) => v === data[i]) && rom.extra.size === extra.size && [...extra].every(([k, v]) => rom.extra.get(k) === v) && !listPackages(rom).length,
     'undo restores ROM bytes and editor data');
+}
+
+// a package assigned by hand: Retry System (by Kevin/kkevinm) with the suggestion – it works in the emulator
+{
+  if (retry.status !== 'manual') throw new Error('Retry: no manual preview');
+  const a = defaultAssignment(retry, 0x105);
+  check(a.calls.length === 1 && a.calls[0].file === 'gamemode/retry_gm.asm', 'Retry: the assignment suggested (list.txt line from its readme)');
+  const r = await installPackage(rom, retry, { ...opts, assignment: a });
+  check(r.ok && !!r.pkg && r.pkg.uber.calls.length === 1 && listPackages(rom).length === 1, 'Retry installed as one package ' + r.errors.slice(0, 2).join(' | '));
+  if (r.ok) {
+    // falling into a pit: Retry respawns Mario in the level (vanilla: game over with 0 lives)
+    const e = new LevelEmulator(rom); e.boot();
+    e.load(0x105);
+    const t = e.snes;
+    let k = 0; while (t.wram[0x100] !== 0x14 && k++ < 200) t.runFrame();
+    for (let i = 0; i < 30; i++) t.runFrame();
+    t.wram[0x96] = 0xf0; t.wram[0x97] = 0x01;
+    const modes: number[] = [];
+    for (let i = 0; i < 400; i++) {
+      t.runFrame();
+      if (modes[modes.length - 1] !== t.wram[0x100]) modes.push(t.wram[0x100]);
+      t.joy1 = i >= 200 && i < 204 ? 0x0080 : 0;
+    }
+    check(modes.includes(0x0f) && modes[modes.length - 1] === 0x14 && !modes.includes(0x15), `in the emulator: Retry respawns in the level (game modes ${modes.map((m) => m.toString(16)).join(' ')})`);
+    await removePackage(rom, r.pkg!.id, opts.blank);
+  }
+  const nothing = await installPackage(rom, retry, { ...opts, assignment: { rules: new Map([['', null]]), calls: [] } });
+  check(!nothing.ok && /Nothing/i.test(nothing.errors[0] ?? ''), 'an assignment taking nothing: error');
 }
 
 // legacy packages: patches applied before packages were tracked

@@ -116,8 +116,10 @@ jeweiligen Tab unter *Anleitungen*.
 
 Manche Downloads lassen sich nicht in einem Schritt einordnen, z. B. Retry System: UberASM-Code in
 `src/library` und `src/gamemode`, dazu ein Konfigurationsordner `src/retry_config`, der laut Readme in den
-obersten Ordner von UberASM Tool gehört, außerdem Beispiele, AddmusicK-Dateien und ein Handbuch. Solche
-Pakete öffnen *Paket zuordnen* (für jedes andere Paket: *Manuell zuordnen …*):
+obersten Ordner von UberASM Tool gehört, außerdem Beispiele, AddmusicK-Dateien und ein Handbuch. Bei
+solchen Paketen zeigt die Vorschau statt der erkannten Teile die **Zuordnung von Hand**, mit dem Vorschlag
+ausgefüllt; *Install* installiert das Paket so, wie es dort zugeordnet ist. Einen eigenen Knopf zum
+Zuordnen gibt es nicht: die Zuordnung erscheint nur, wenn die Erkennung nicht eindeutig ist.
 
 * Der Paketbaum mit einer Auswahl je Ordner und Datei: ein Ordner des UberASM-Projekts (`level/`,
   `gamemode/`, `library/` …, der oberste Ordner oder ein eigener Ordner mit dem Namen) oder *nicht
@@ -128,10 +130,9 @@ Pakete öffnen *Paket zuordnen* (für jedes andere Paket: *Manuell zuordnen …*
 * **list.txt:** Für Dateien in `level/`, `gamemode/` und `overworld/` je eine Zeile mit Nummer oder `*`.
   Steht in der Anleitung eine passende Zeile (`* retry_gm.asm`), wird sie übernommen; vorhandene Einträge
   derselben Nummer bleiben (wie `* a.asm,retry_gm.asm`).
-* **Weitere Schritte:** Nach *Übernehmen* listet ein Fenster, was nicht übernommen wurde. Jede `.asm`-Datei
-  lässt sich einzeln hinzufügen (erkannt wie oben); Dateien, die sie einbindet und die neben ihr fehlen,
-  kommen aus dem Paket mit (Retrys Beispielblöcke bekommen `ram.asm`). Dateien für andere Werkzeuge
-  (AddmusicK, Lunar Magic) lassen sich herunterladen.
+* **Was draußen bleibt** (Beispiele, Dateien für AddmusicK oder Lunar Magic), steht danach in den Dateien des
+  Pakets zum Lesen und Herunterladen. Ein Beispiel, das man haben möchte, wird als eigenes Paket hochgeladen –
+  ein Upload, ein Paket.
 
 Danach ist alles im Tab UberASM: Zuordnungen ändern, *Einstellungen …* einer Datei (Defines nach den
 Abschnitten der Datei gruppiert, mit den Kommentaren darüber als Hilfe und einem Suchfeld) oder

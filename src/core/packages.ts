@@ -15,7 +15,7 @@ import { applyPatch } from './patchapply.ts';
 import type { PartKind } from './parts.ts';
 import { PART_LABEL } from './parts.ts';
 import { uploadFiles, uploadFromFiles, detectKind, uploadSource, effectiveDefines, packUpload, type Upload } from './patchpkg.ts';
-import { suggestMapping, withIncludes, type PkgSuggestion } from './pkgmap.ts';
+import { suggestMapping, withIncludes, placed, suggestCalls, type PkgSuggestion, type PkgRules } from './pkgmap.ts';
 import { isLevelImport } from './bgpack.ts';
 import { isSongText, songsFromFiles, loadMusicProject, emptyMusicProject, addSongs, nextFreeSong, folders as musicFolders, saveMusicProject, hasAmk, musicEntry } from './music.ts';
 import { pixiParts, planPixiUpload, applyPixiUpload } from './pixipkg.ts';
@@ -43,13 +43,16 @@ type Step =
   | { kind: 'block'; upload: Upload; file: string; acts?: number }
   | { kind: 'blockpack'; upload: Upload; list: string }
   | { kind: 'pixi'; upload: Upload }
-  | { kind: 'music' };
+  | { kind: 'music' }
+  | { kind: 'mapped'; assignment: ManualAssignment };
 
 interface PreviewBase { name: string; fileName: string; files: Map<string, Uint8Array> }
 export interface ReadyPreview extends PreviewBase { status: 'ready'; parts: PreviewPart[]; patch: PatchChoice | null; steps: Step[] }
+// tool folders next to folders they include (Retry System): assigned by hand, starting from the suggestion
+export interface ManualPreview extends PreviewBase { status: 'manual'; suggestion: PkgSuggestion }
 export type UploadPreview =
   | ReadyPreview
-  | PreviewBase & { status: 'manual'; suggestion: PkgSuggestion } // tool folders next to folders they include (Retry System)
+  | ManualPreview
   | PreviewBase & { status: 'level-import' } // a Lunar Magic level (.mwl): not a package
   | PreviewBase & { status: 'failed'; reason: string };
 
@@ -182,11 +185,24 @@ function describe(paths: string[]): string {
 
 // ---------- installing ----------
 
+// what goes where for a package assigned by hand: package node → UberASM project folder (null: left
+// out), and the list.txt lines of its resource files
+export interface ManualAssignment { rules: PkgRules; calls: { file: string; ctx: UberContext; num: number }[] }
+
+// the suggestion: its folders, and a list.txt line for each resource file (number from the docs, else
+// `level` for level code, game mode 14, overworld map 0)
+export function defaultAssignment(p: ManualPreview, level: number): ManualAssignment {
+  const rules: PkgRules = new Map(p.suggestion.rules);
+  const calls = suggestCalls(p.files, placed(p.files.keys(), rules), { level, gamemode: 0x14, overworld: 0 }).map(({ file, ctx, num }) => ({ file, ctx, num }));
+  return { rules, calls };
+}
+
 export interface InstallOptions {
   level: number | null; // the current level: UberASM level code runs there, songs play there, a block package's graphics load there
   blank: number[]; // tile words of an empty Map16 tile
   tileWords(tile: number): number[]; // the words of a Map16 tile, for the graphics of new block tiles (from their acts like)
   patch?: { main?: string; values?: Record<string, string> }; // the patch part's main file and settings
+  assignment?: ManualAssignment; // a package assigned by hand (default: the suggestion)
 }
 export interface InstallResult extends ApplyResult { pkg: Package | null }
 
@@ -222,7 +238,12 @@ function placeFiles(preview: ReadyPreview, upload: Upload, main: string, mainTex
 }
 
 // applies every part and records the package; on failure the ROM is as before
-export async function installPackage(rom: Rom, preview: ReadyPreview, opt: InstallOptions): Promise<InstallResult> {
+export async function installPackage(rom: Rom, preview: ReadyPreview | ManualPreview, opt: InstallOptions): Promise<InstallResult> {
+  if (preview.status === 'manual') {
+    const a = opt.assignment ?? defaultAssignment(preview, opt.level ?? 0x105);
+    const ready: ReadyPreview = { ...preview, status: 'ready', parts: [], patch: null, steps: [{ kind: 'mapped', assignment: a }] };
+    return installPackage(rom, ready, opt);
+  }
   const before = rom.snapshot();
   const was = snapshot(rom);
   const warnings: string[] = [];
@@ -319,6 +340,18 @@ async function installStep(rom: Rom, preview: ReadyPreview, step: Step, opt: Ins
     }
     case 'pixi':
       return applyPixiUpload(rom, step.upload, planPixiUpload(rom, step.upload), opt.blank, opt.tileWords);
+    case 'mapped': {
+      const place = placed(preview.files.keys(), step.assignment.rules);
+      if (!place.size) return { ...ok, ok: false, errors: ['Nothing selected – no file of the package is assigned to a folder.'] };
+      const proj = loadProject(rom) ?? emptyProject();
+      for (const [from, to] of place) { proj.files.set(to, preview.files.get(from)!); brought.uber.add(to); }
+      for (const c of step.assignment.calls) {
+        const list = proj.list[c.ctx].get(c.num) ?? [];
+        if (!list.some((x) => x.file === c.file)) list.push({ file: c.file, bytes: [] });
+        proj.list[c.ctx].set(c.num, list);
+      }
+      return saveProject(rom, proj);
+    }
     case 'music': {
       if (hasAmk(rom) && !musicEntry(rom)) return { ...ok, ok: false, errors: ['AddmusicK was inserted by another tool – songs cannot be added here.'] };
       const proj = loadMusicProject(rom) ?? emptyMusicProject();

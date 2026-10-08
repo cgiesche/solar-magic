@@ -6,7 +6,7 @@
 import type { App } from './app.ts';
 import { h, modal, clear, toast, pickFile } from './dom.ts';
 import { loadAsar } from '../core/asar.ts';
-import { pickUpload, recognize, type PackagesTab, type PickedUpload } from './patchmanager.ts';
+import { recognize, type PackagesTab, type PickedUpload } from './patchmanager.ts';
 import { packagesPane } from './packages.ts';
 import { inspectUpload } from '../core/packages.ts';
 import { openUploadPreview, showUploadFailure } from './upload.ts';
@@ -74,7 +74,7 @@ export async function openResources(app: App, tab: ResourceTab = 'packages', opt
     addPart: (name, files, rec) => {
       // later parts go into the package (its record, looked up again: it may have changed since)
       const cur = findPackage(app, rec.id) ?? rec;
-      void run(recognize(app, name, files, false, trackPackage(app, cur.name, cur.fileName, null, cur)));
+      void run(recognize(app, name, files, trackPackage(app, cur.name, cur.fileName, null, cur)));
     },
   });
   if (opts.tile !== undefined) p.block.setTile(opts.tile);
@@ -94,18 +94,12 @@ export async function openResources(app: App, tab: ResourceTab = 'packages', opt
       changed();
     });
   };
-  const add = async (manual = false) => {
-    let picked;
-    try { picked = await pickUpload(app, manual); } catch (e) { toast(errorText(e), 'error'); return; }
-    if (picked) await run(picked);
-  };
-
   // an upload: its preview, then the package installed and selected
   const upload = async (f: File) => {
     const files = new Uint8Array(await f.arrayBuffer());
     const pv = inspectUpload(f.name, files);
     if (pv.status === 'failed') { showUploadFailure(pv.name, pv.reason); return; }
-    if (pv.status !== 'ready') { await run(recognize(app, f.name, pv.files)); return; }
+    if (pv.status === 'level-import') { await run(recognize(app, f.name, pv.files)); return; }
     openUploadPreview(app, pv, () => {
       for (const x of Object.values(p)) x.reload();
       music.reload();
@@ -132,7 +126,6 @@ export async function openResources(app: App, tab: ResourceTab = 'packages', opt
   clear(body).append(
     h('div', { class: 'row res-top' },
       h('button', { class: 'primary', onclick: () => void pickAndUpload() }, 'Upload package …'),
-      h('button', { onclick: () => add(true), title: 'Assign a package’s folders and files to folders of the UberASM project yourself – for packages that are more than one resource' }, 'Assign manually …'),
       h('span', { class: 'hint' }, 'or drop a file here: .asm, .zip (e.g. from SMWCentral, or a whole UberASM Tool, GPS or PIXI folder) or an AddmusicK song – everything it contains is installed as one package.')),
     tabBar,
     content,
