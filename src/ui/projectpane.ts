@@ -1,10 +1,12 @@
-// A tool project (UberASM, GPS blocks, PIXI sprites) as a tab of the patches dialog: the assignments,
-// and below the project files, import/export of the tool folder and removing everything. Every change
-// is written to the ROM at once as one undoable ROM edit (ADR 0001); nothing is staged.
+// A tool project (UberASM, GPS blocks, PIXI sprites) as a configuration view of the Packages dialog: it
+// assigns and unassigns what installed packages brought (each item names its package), and shows the
+// project files with their settings and the export of the tool folder. It never adds content and never
+// deletes a part – that is what uploading and removing packages do. Every change is written to the ROM
+// at once as one undoable ROM edit (ADR 0001); nothing is staged.
 
 import type { App } from './app.ts';
-import { h, clear, toast, pickFile, downloadBytes, select, choose, type Child } from './dom.ts';
-import { unzipSync } from 'fflate';
+import { h, clear, toast, downloadBytes, type Child } from './dom.ts';
+import { listPackages, type Package } from '../core/pkgreg.ts';
 import type { ApplyResult } from '../core/patchapply.ts';
 import { definesButton, editButton } from './defineedit.ts';
 import { keptDocsRow } from './docview.ts';
@@ -15,17 +17,14 @@ export interface PaneSpec<P extends Project> {
   title: string; // tab label, also in messages
   intro: string; // one line at the top
   format: string; // the file format, collapsed
+  tool: 'uber' | 'blocks' | 'pixi'; // the field of a package record listing this project's files
   load(): P | null; // the ROM's project, null: none installed
   empty(): P;
   save(p: P): ApplyResult;
-  remove(): string[];
-  folders: string[]; // where single files can be added
-  accept: string;
-  addFile(p: P, folder: string, path: string, data: Uint8Array): void; // a file (or a file of a .zip) to `folder`
-  fromZip(data: Uint8Array): P; // a whole tool folder
   toZip(p: P): Uint8Array;
   zipName: string;
-  content(p: P, change: () => void): Child[]; // the assignments and the row to add one
+  // the assignments and the row to assign; origin: the name of the package that brought a file
+  content(p: P, change: () => void, origin: (file: string) => HTMLElement): Child[];
   applied(p: P): string; // toast after a change was applied
   docs: string; // tool key of the kept docs of packages added to the project (see docview.ts)
 }
@@ -61,8 +60,6 @@ export function logView(r: ApplyResult | null): HTMLElement {
   return el;
 }
 
-// a .zip is a tool folder when it has a list.txt; otherwise its files are added one by one
-const isToolFolder = (all: Record<string, Uint8Array>) => Object.keys(all).some((k) => /(^|\/)list\.txt$/i.test(k));
 
 // changed: after this tab changed the ROM (and romChanged)
 export function projectPane<P extends Project>(app: App, spec: PaneSpec<P>, changed: () => void): Pane & { project(): P } {
@@ -72,11 +69,17 @@ export function projectPane<P extends Project>(app: App, spec: PaneSpec<P>, chan
   let loadError = '';
   let advanced = false;
   let fileFilter = '';
-  let folder = spec.folders[0];
+  let packages: Package[] = [];
   const log = h('div', { class: 'patch-log' });
+  // the package that brought a project file (the last one installed, if several did)
+  const origin = (file: string): HTMLElement => {
+    const r = packages.filter((x) => x[spec.tool].files.includes(file)).pop();
+    return h('span', { class: r ? 'hint' : 'hint pkg-none', title: r ? `from the package “${r.name}”` : 'not from a package (added before packages were tracked)' }, r?.name ?? '–');
+  };
 
   const reload = () => {
     loadError = '';
+    try { packages = listPackages(app.rom); } catch { packages = []; }
     try {
       const p = spec.load();
       installed = !!p;
@@ -116,64 +119,30 @@ export function projectPane<P extends Project>(app: App, spec: PaneSpec<P>, chan
     toast(`${text}${r.warnings.length ? ` – ${r.warnings.join(' ')}` : ''}`);
   };
 
-  const addFile = async () => {
-    const f = await pickFile(spec.accept + ',.zip');
-    if (!f) return;
-    const data = new Uint8Array(await f.arrayBuffer());
-    try {
-      if (/\.zip$/i.test(f.name)) {
-        const all = unzipSync(data);
-        if (isToolFolder(all)) proj = spec.fromZip(data);
-        else for (const [p, c] of Object.entries(all)) if (!p.endsWith('/') && !p.startsWith('__MACOSX/')) spec.addFile(proj, folder, p.replace(/\\/g, '/').split('/').pop()!, c);
-      } else spec.addFile(proj, folder, f.name, data);
-    } catch (e) { toast(errorText(e), 'error'); return; }
-    change();
-  };
-
-  const removeAll = async () => {
-    const i = await choose(`Remove ${spec.title}`, `Remove all ${spec.title} with the project files from the ROM? If you still need them later, export them as .zip first.`,
-      [{ label: 'Cancel' }, { label: 'Remove', danger: true }]);
-    if (i !== 1) return;
-    if (app.dirty) app.saveLevel(true);
-    try {
-      const w = app.romEdit(`${spec.title} removed`, () => spec.remove());
-      reload();
-      romChanged(app);
-      changed();
-      toast(`${spec.title} removed${w.length ? ': ' + w.join(' ') : ''}`);
-    } catch (e) { toast(errorText(e), 'error'); }
-  };
-
   function render(): void {
     if (loadError) {
-      clear(el).append(h('p', { class: 'hint error' }, loadError),
-        h('div', { class: 'row' }, h('button', { class: 'danger', onclick: removeAll }, 'Remove all …')));
+      clear(el).append(h('p', { class: 'hint error' }, loadError));
       return;
     }
     const files = [...proj.files.keys()].filter((f) => f !== 'list.txt').sort();
     const shown = (f: string) => f.toLowerCase().includes(fileFilter.trim().toLowerCase());
     const adv = h('details', { class: 'pane-adv', open: advanced, ontoggle: () => (advanced = adv.open) },
-      h('summary', null, `Project files (${files.length}), import/export`),
+      h('summary', null, `Project files (${files.length}), export`),
       files.length > 12 ? h('input', { type: 'search', class: 'define-search', placeholder: 'Filter files …', value: fileFilter, oninput: (e: Event) => {
         fileFilter = (e.target as HTMLInputElement).value;
         for (const r of adv.querySelectorAll<HTMLElement>('.uber-files > .row')) r.style.display = shown(r.dataset.path!) ? '' : 'none';
       } }) : null,
       h('div', { class: 'uber-files' }, files.length ? files.map((f) => h('div', { class: 'row', 'data-path': f, style: shown(f) ? '' : 'display: none' },
         h('span', { class: 'mono grow' }, f),
+        origin(f),
         definesButton(proj.files, f, change),
-        editButton(proj.files, f, change),
-        h('button', { class: 'icon-btn', title: 'Delete file', onclick: () => { proj.files.delete(f); change(); } }, '✕'))) : h('p', { class: 'hint' }, 'No files.')),
-      h('div', { class: 'row' },
-        h('span', null, 'To'),
-        select(spec.folders.map((f, i) => [i, f] as [number, string]), spec.folders.indexOf(folder), (i) => (folder = spec.folders[i])),
-        h('button', { onclick: addFile, title: `Single files into the folder – or a whole ${spec.title} folder as .zip (with list.txt) that replaces the project` }, 'Add file or folder (.zip) …')),
-      h('div', { class: 'row' },
-        h('button', { onclick: () => downloadBytes(spec.zipName, spec.toZip(proj), 'application/zip') }, `Export as ${spec.title} folder (.zip)`),
-        installed ? h('button', { class: 'danger', onclick: removeAll }, 'Remove all …') : null),
+        editButton(proj.files, f, change))) : h('p', { class: 'hint' }, 'No files – they come with packages (“Upload package …” above).')),
+      installed ? h('div', { class: 'row' },
+        h('button', { onclick: () => downloadBytes(spec.zipName, spec.toZip(proj), 'application/zip') }, `Export as ${spec.title} folder (.zip)`)) : '',
     );
     clear(el).append(
       h('p', { class: 'hint' }, spec.intro, ' ', h('details', { class: 'inline-details' }, h('summary', null, 'Format'), h('div', null, spec.format))),
-      h('div', { class: 'pane-content' }, spec.content(proj, change)),
+      h('div', { class: 'pane-content' }, spec.content(proj, change, origin)),
       keptDocsRow(spec.docs),
       log,
       adv,

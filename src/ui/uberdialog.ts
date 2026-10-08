@@ -1,11 +1,11 @@
-// UberASM tab of the patches dialog: assign resources to levels, overworld maps and game modes, the
-// global and status bar code, the project's files, import/export of an UberASM Tool folder (.zip).
+// UberASM tab of the Packages dialog, a configuration view: assigns the UberASM code packages brought to
+// levels, overworld maps and game modes, the global and status bar code; the project's files with their
+// settings, export as an UberASM Tool folder (.zip).
 
 import type { App } from './app.ts';
 import { h, toast, hexInput, select } from './dom.ts';
-import { loadProject, saveProject, emptyProject, projectFromZip, projectToZip, uberEntry, type UberProject } from '../core/uberproject.ts';
+import { loadProject, saveProject, emptyProject, projectToZip, type UberProject } from '../core/uberproject.ts';
 import { resourceFiles, ALL, CONTEXT_SIZE, type UberContext, type UberCall } from '../core/uberasm.ts';
-import { uninstallPatch } from '../core/patchapply.ts';
 import { hex } from '../core/names.ts';
 import { definesButton } from './defineedit.ts';
 import { projectPane, type Pane } from './projectpane.ts';
@@ -32,7 +32,7 @@ export function uberPane(app: App, changed: () => void): UberPane {
   let otherOpen = false;
   let pane: Pane;
 
-  function assignments(proj: UberProject, change: () => void): HTMLElement {
+  function assignments(proj: UberProject, change: () => void, origin: (file: string) => HTMLElement): HTMLElement {
     const files = proj.files;
     const map = proj.list[ctx];
     const digits = ctx === 'level' ? 3 : 2;
@@ -40,7 +40,8 @@ export function uberPane(app: App, changed: () => void): UberPane {
       h('td', { class: 'mono' }, i === 0 ? (num === ALL ? '*' : hex(num, digits)) : ''),
       h('td', { class: files.has(c.file) ? '' : 'err', title: files.has(c.file) ? c.file : `${c.file} is missing from the project` }, c.file.replace(/^(level|overworld|gamemode)\//, '')),
       h('td', { class: 'mono' }, bytesText(c.bytes)),
-      h('td', { class: 'actions' }, definesButton(files, c.file, change), h('button', { class: 'icon-btn', title: 'Remove assignment', onclick: () => { calls.splice(i, 1); if (!calls.length) map.delete(num); change(); } }, '✕')),
+      h('td', null, origin(c.file)),
+      h('td', { class: 'actions' }, definesButton(files, c.file, change), h('button', { class: 'icon-btn', title: 'Remove assignment (the file stays)', onclick: () => { calls.splice(i, 1); if (!calls.length) map.delete(num); change(); } }, '✕')),
     )));
     // new assignment of a file already in the project
     let num = ctx === 'level' ? app.level.number : 0;
@@ -60,7 +61,7 @@ export function uberPane(app: App, changed: () => void): UberPane {
       change();
     };
     return h('div', null,
-      rows.length ? h('table', { class: 'uber-table' }, h('tr', null, h('th', null, 'No.'), h('th', null, 'File'), h('th', null, 'Extra bytes'), h('th')), rows)
+      rows.length ? h('table', { class: 'uber-table' }, h('tr', null, h('th', null, 'No.'), h('th', null, 'File'), h('th', null, 'Extra bytes'), h('th', null, 'Package'), h('th')), rows)
         : h('p', { class: 'hint' }, `No assignments for ${CTX_LABEL[ctx].toLowerCase()} yet – “Upload package …” above installs UberASM code; it runs in the current level.`),
       res.length ? h('div', { class: 'row uber-add' },
         numIn,
@@ -79,7 +80,7 @@ export function uberPane(app: App, changed: () => void): UberPane {
     };
     const d = h('details', { class: 'pane-adv', open: otherOpen, ontoggle: () => (otherOpen = d.open) },
       h('summary', null, 'Global, status bar, free RAM'),
-      h('p', { class: 'hint' }, 'Files from other/ (add them under “Project files”).'),
+      h('p', { class: 'hint' }, 'Files from other/ that packages brought.'),
       pick('Global (init)', proj.list.global, (v) => (proj.list.global = v)),
       pick('Status bar (main)', proj.list.statusbar, (v) => (proj.list.statusbar = v)),
       pick('Macro library', proj.list.macrolib, (v) => (proj.list.macrolib = v)),
@@ -90,22 +91,18 @@ export function uberPane(app: App, changed: () => void): UberPane {
 
   pane = projectPane<UberProject>(app, {
     title: 'UberASM',
+    tool: 'uber',
     intro: 'Code that runs every frame per level, overworld map or game mode.',
-    format: 'UberASM Tool 2.x format: labels init/main/end/load/nmi, libraries (library/), shared routines (routines/), extra bytes. An existing UberASM Tool folder can be imported as .zip; the sources are kept with the editor data (saved with “Save project”).',
+    format: 'UberASM Tool 2.x format: labels init/main/end/load/nmi, libraries (library/), shared routines (routines/), extra bytes. An existing UberASM Tool folder is uploaded as a package (.zip); the sources are kept with the editor data (saved with “Save project”).',
     load: () => loadProject(app.rom),
     empty: emptyProject,
     save: (p) => saveProject(app.rom, p),
-    remove: () => { const e = uberEntry(app.rom); return e ? uninstallPatch(app.rom, e.id) : []; },
-    folders: ['level/', 'overworld/', 'gamemode/', 'library/', 'routines/', 'other/'],
-    accept: '.asm,.bin',
-    addFile: (p, folder, path, data) => p.files.set(folder + path, data),
-    fromZip: projectFromZip,
     toZip: projectToZip,
     zipName: 'uberasm.zip',
-    content: (proj, change) => [
+    content: (proj, change, origin) => [
       h('div', { class: 'tabs seg sub-tabs' }, (['level', 'overworld', 'gamemode'] as UberContext[]).map((c) =>
         h('button', { class: c === ctx ? 'mode active' : 'mode', onclick: () => { ctx = c; pane.render(); } }, CTX_LABEL[c]))),
-      assignments(proj, change),
+      assignments(proj, change, origin),
       other(proj, change),
     ],
     applied: () => 'UberASM applied',

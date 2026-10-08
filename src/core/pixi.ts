@@ -436,7 +436,8 @@ export function savePixiProject(rom: Rom, p: PixiProject): ApplyResult {
     }
     return r;
   };
-  if (!p.list.length) {
+  // a project without entries keeps its files (to assign them again); without files too it is removed
+  if (!p.list.length && ![...p.files.keys()].some((f) => f !== 'list.txt')) {
     const warnings = e ? uninstallPatch(rom, e.id) : [];
     return after({ ok: true, errors: [], warnings, prints: [] });
   }

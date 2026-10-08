@@ -16,9 +16,9 @@ import { inspectUpload, installPackage, removePackage, wrapLegacyPatches, defaul
 import { listPackages } from '../src/core/pkgreg.ts';
 import { applyPatch } from '../src/core/patchapply.ts';
 import { listPatches } from '../src/core/patchreg.ts';
-import { loadProject } from '../src/core/uberproject.ts';
-import { loadBlockProject } from '../src/core/blocks.ts';
-import { loadPixiProject } from '../src/core/pixi.ts';
+import { loadProject, saveProject } from '../src/core/uberproject.ts';
+import { loadBlockProject, saveBlockProject } from '../src/core/blocks.ts';
+import { loadPixiProject, savePixiProject } from '../src/core/pixi.ts';
 import { loadMusicProject } from '../src/core/music.ts';
 import { levelMusic, setLevelMusic, installEditorPatch } from '../src/core/patches.ts';
 import { enableBlocks } from '../src/core/map16ext.ts';
@@ -187,6 +187,28 @@ sameRom('song removed');
   }
   const nothing = await installPackage(rom, retry, { ...opts, assignment: { rules: new Map([['', null]]), calls: [] } });
   check(!nothing.ok && /Nothing/i.test(nothing.errors[0] ?? ''), 'an assignment taking nothing: error');
+}
+
+// configuration views: unassigning everything keeps the content, so it can be assigned again
+{
+  const rb2 = await install(bill), rr2 = await install(rock, { level: null }), ru = await install(mixed);
+  const pp = loadPixiProject(rom)!, sprites = pp.list;
+  const unP = savePixiProject(rom, { ...pp, list: [] });
+  const bp = loadBlockProject(rom)!, blocks = bp.list;
+  const unB = saveBlockProject(rom, { ...bp, list: [] }, opts.blank);
+  const up2 = loadProject(rom)!, calls = new Map(up2.list.level);
+  up2.list.level.clear();
+  const unU = saveProject(rom, up2);
+  check(unP.ok && unB.ok && unU.ok, 'everything unassigned ' + [...unP.errors, ...unB.errors, ...unU.errors].join(' '));
+  check(loadPixiProject(rom)?.files.size === pp.files.size && loadBlockProject(rom)?.files.size === bp.files.size && loadProject(rom)?.files.size === up2.files.size,
+    'the files stay in the projects');
+  const reP = savePixiProject(rom, { ...loadPixiProject(rom)!, list: sprites });
+  const reB = saveBlockProject(rom, { ...loadBlockProject(rom)!, list: blocks }, opts.blank);
+  const up3 = loadProject(rom)!; up3.list.level = calls;
+  const reU = saveProject(rom, up3);
+  check(reP.ok && reB.ok && reU.ok && loadPixiProject(rom)!.list.length === 2 && loadBlockProject(rom)!.list.length === 2, 'assigned again');
+  for (const r of [ru, rr2, rb2]) await removePackage(rom, r.pkg!.id, opts.blank);
+  check(!listPackages(rom).length && !loadPixiProject(rom) && !loadBlockProject(rom), 'and removed with their packages');
 }
 
 // legacy packages: patches applied before packages were tracked

@@ -16,9 +16,11 @@ Diese Seite beschreibt die Schnittstelle, die Ressourcen sehen, und wie der Edit
   freie Map16-Tile ab 200. Defines, die einen Sprite des Pakets meinen, werden auf dessen Nummer gesetzt,
   erkannt am Dateinamen im Kommentar (`!Sprite = $18 ; Sprite number of BrutalBill.json`)
   oder an einer Misc-Art im Namen (`!bounce_sprite`).
-- **Verwalten:** Tab *Sprites* im Packages-Dialog: Einträge
-  der `list.txt`, Projektdateien, Import und Export eines PIXI-Ordners als `.zip`. Alles wird als ein Patch
-  mit den Quellen in der ROM verzeichnet und lässt sich wieder entfernen.
+- **Konfigurieren:** Tab *Sprites* im Packages-Dialog, eine Konfigurationsansicht: Einträge der `list.txt`
+  (Sprite → Nummer) zuordnen und aufheben, jeder mit dem Paket, aus dem er stammt; Einstellungen der Dateien;
+  Export eines PIXI-Ordners als `.zip`. Hinzugefügt wird nur durch Hochladen eines Pakets, entfernt mit dem
+  Paket; eine aufgehobene Zuordnung lässt die Dateien im Projekt. Alles wird als ein Patch mit den Quellen in
+  der ROM verzeichnet.
 - **Platzieren:** Die Palette zeigt unter *Sprites* einen Abschnitt „Custom Sprites (PIXI)“ mit den Namen aus
   `Collection` und der Grafik, die das Spiel zeichnet – wie Lunar Magic nur die Varianten (Extra-Bit
   gelöscht/gesetzt), die `Collection` nennt; ohne `Collection` (`.cfg`) die ohne Extra-Bit. In den

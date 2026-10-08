@@ -120,10 +120,11 @@ function clearTable(rom: Rom): void {
   for (let t = 0; t < EXT_TILES; t++) setBlock(rom, t, 0, false);
 }
 
-// assembles the blocks and enters them into the block table; blank: tile words for new Map16 tiles
+// assembles the blocks and enters them into the block table; blank: tile words for new Map16 tiles. A
+// project without assignments keeps its files (to assign them again); without files too it is removed.
 export function saveBlockProject(rom: Rom, p: BlockProject, blank: number[]): ApplyResult {
   const e = blocksEntry(rom);
-  if (!p.list.length) {
+  if (!p.list.length && ![...p.files.keys()].some((f) => f !== 'list.txt')) {
     const warnings = e ? removeBlocks(rom) : [];
     return { ok: true, errors: [], warnings, prints: [] };
   }

@@ -10,13 +10,21 @@ sich drei Arten von ASM-Code direkt im Browser in die ROM bringen:
 | **Custom Blocks** | Blöcke im GPS-Format | Tab *Blocks* (auch über *Custom Blocks …* im Map16-Editor) |
 
 Alles liegt in einem Dialog, *ROM → Packages …*: der Tab *Packages* (siehe [Pakete](#pakete)) und je ein Tab
-für UberASM, Blocks, Sprites (PIXI, siehe [pixi.md](pixi.md)) und Music mit dem ganzen Projekt. **Ein Paket
+für UberASM, Blocks, Sprites (PIXI, siehe [pixi.md](pixi.md)) und Music. **Ein Paket
 hochzuladen ist der einzige Weg, auf dem Fremdinhalte in die ROM kommen:** *Upload package …* oben im Dialog
 (oder eine Datei auf den Dialog ziehen) zeigt eine Vorschau mit allem, was erkannt wurde, und *Install*
 installiert alles als **ein Paket** (siehe [Paket hochladen](#paket-hochladen-vorschau-und-installieren)).
-**Jede Änderung geht sofort in die ROM** – Patches und Hinzugefügtes ebenso wie jede
-Änderung in den Tabs UberASM, Custom Blocks und Custom Sprites (eine Zuordnung, eine Datei, eine
-Einstellung). Dabei wird das ganze Projekt neu gebaut und angewendet; schlägt das fehl, bleibt die ROM
+
+Die Tabs UberASM, Blocks, Sprites und Music sind **Konfigurationsansichten** über das, was die Pakete
+mitgebracht haben: Sie ordnen zu und heben Zuordnungen auf – eine UberASM-Datei einem Level, Game Mode
+oder einer Overworld-Karte, einen Block einem Map16-Tile, einen Sprite einer Nummer, einen Song einem
+Level –, ändern Einstellungen von Dateien und exportieren den Werkzeug-Ordner als `.zip`. Jeder Eintrag
+nennt das Paket, aus dem er stammt. Inhalte hinzufügen oder einzelne Teile löschen geht dort nicht: Das
+tun *Upload package …* und *Remove …* eines Pakets. Eine aufgehobene Zuordnung löscht nichts; die Datei
+bleibt im Projekt und lässt sich wieder zuordnen.
+
+**Jede Änderung geht sofort in die ROM** – Installieren und Entfernen von Paketen ebenso wie jede
+Änderung in den Konfigurationsansichten (eine Zuordnung, eine Einstellung). Dabei wird das ganze Projekt neu gebaut und angewendet; schlägt das fehl, bleibt die ROM
 unverändert und der Tab zeigt wieder den Stand der ROM. Jede Änderung ist **ein Schritt für Strg+Z**
 (auch im offenen Dialog; Strg+Y bzw. Strg+Umschalt+Z stellt wieder her), der ROM-Bytes und Editor-Daten
 zusammen zurücknimmt. Es gibt kein *Übernehmen*/*Verwerfen* und keine Nachfrage beim Schließen (siehe
@@ -285,8 +293,8 @@ Code pro **Level** (000–1FF), **Overworld-Karte** (0–6) und **Game Mode** (0
 Das Format entspricht UberASM Tool 2.x, vorhandene Ressourcen funktionieren unverändert:
 
 * Ordner `level/`, `overworld/`, `gamemode/`, `library/`, `routines/`, `other/` und eine `list.txt`. Ein
-  UberASM-Tool-Ordner lässt sich als `.zip` importieren; die Dateien des Tools selbst (`asm/`, `.exe` …)
-  werden ignoriert. *Exportieren* erzeugt wieder einen Ordner für UberASM Tool.
+  UberASM-Tool-Ordner wird als `.zip` hochgeladen (ein Paket); die Dateien des Tools selbst (`asm/`, `.exe` …)
+  werden ignoriert. *Export* im Tab erzeugt wieder einen Ordner für UberASM Tool.
 * Labels `init`, `main`, `end`, `load`, `nmi`, jeweils mit `RTL`. A/X/Y sind 8 Bit, das DBR ist die Bank
   der Ressource (außer mit `;>dbr off`).
 * Extra-Bytes: `;>bytes n` oder `;>bytes any`; Zeiger in `$00-$01`. In der `list.txt` stehen sie nach `:`,
