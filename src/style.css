@@ -100,6 +100,7 @@ input.invalid, input.invalid:focus { outline: 1px solid var(--danger); border-co
 .pal-row.selected { background: var(--accent2); color: #fff; }
 .pal-row .num { font-family: ui-monospace, monospace; color: var(--muted); min-width: 1.8em; flex: none; }
 .pal-head { font-weight: 600; font-size: 12px; color: var(--muted); padding: 8px 4px 2px; }
+.m16-pages button { min-width: 0; font-family: ui-monospace, monospace; }
 .pal-row.selected .num { color: #fff; }
 .pal-thumb-s { width: 32px; height: 24px; display: inline-flex; align-items: center; justify-content: center; }
 .pal-thumb-s canvas { max-width: 32px; max-height: 24px; image-rendering: pixelated; }
@@ -186,6 +187,7 @@ kbd { background: #181a1f; border: 1px solid var(--border); border-radius: 3px; 
 .ent-detail { width: 360px; display: flex; flex-direction: column; gap: 6px; }
 .modal-body h3 { margin: 12px 0 6px; font-size: 12px; text-transform: uppercase; color: var(--muted); }
 .m16-pick { image-rendering: pixelated; cursor: crosshair; display: block; }
+.palette-body .m16-pick { max-width: 100%; height: auto; }
 .grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px 14px; } .grid4 .prop label { width: 36px; }
 .ow-side { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .ow-pal-panel { flex: 1; min-height: 0; overflow-y: auto; }

@@ -124,7 +124,8 @@ export class Palette {
     this.tabs = h('div', { class: 'tabs seg' });
     this.searchRow = h('div', { class: 'row' }, this.search);
     this.root = h('div', { class: 'panel palette' }, h('div', { class: 'panel-title' }, 'Insert', h('span', { class: 'hint' }, 'Right click/Shift+click places')), this.tabs,
-      this.searchRow, this.body);
+      this.searchRow, this.m16Bar, this.body);
+    this.body.addEventListener('scroll', () => this.m16Scrolled());
     app.on('objkinds', () => this.invalidate());
     app.on('level', () => { this.ensureThumbs(); this.build(); });
     let t = 0;
@@ -161,7 +162,6 @@ export class Palette {
       if (o.num === 0 && o.ext === DM16_EXT) {
         item = { kind: 'obj', num: 0, ext: DM16_EXT, size: 0, tile: o.tile ?? 0 };
         this.tab = 'm16';
-        this.m16Base = (o.tile ?? 0) & ~0x1ff;
       } else if (o.num === 0 && o.ext === STRUCT_EXT && o.struct !== undefined) {
         item = { kind: 'obj', num: 0, ext: STRUCT_EXT, size: 0, struct: o.struct };
         this.tab = 'str';
@@ -189,64 +189,123 @@ export class Palette {
     const el = this.body.querySelector<HTMLElement>('.selected');
     if (el) { el.scrollIntoView({ block: 'nearest' }); return; }
     const cur = this.app.paletteItem;
-    const c = this.body.querySelector<HTMLCanvasElement>('canvas.m16-pick');
-    if (!c || cur?.kind !== 'obj' || cur.tile === undefined) return;
+    if (cur?.kind !== 'obj' || cur.tile === undefined) return;
+    const c = this.body.querySelector<HTMLCanvasElement>(`canvas.m16-pick[data-page="${cur.tile >> 8}"]`);
+    if (!c) return;
     // the canvas row of the tile
-    const y = (((cur.tile & 0x1ff) >> 4) / 32) * c.clientHeight;
+    const y = (((cur.tile & 0xff) >> 4) / 16) * c.clientHeight;
     const body = this.body.getBoundingClientRect(), rc = c.getBoundingClientRect();
     const top = rc.top - body.top + this.body.scrollTop + y;
     if (top < this.body.scrollTop || top + 20 > this.body.scrollTop + this.body.clientHeight) this.body.scrollTop = top - this.body.clientHeight / 2;
   }
 
-  m16Base = 0; // first tile of the shown sheet (pages 0-1, 2-3, …)
+  // all Map16 pages in one list; the bar above jumps to a page and shows the one in view
   m16Tip: () => void = () => {};
+  m16Observer?: IntersectionObserver;
+  m16Page = 0; // page at the top of the list
+  m16Scroll = 0; // scroll position of the list, kept across rebuilds and tab changes
+  m16Bar: HTMLDivElement = h('div', { class: 'tabs seg m16-pages' });
+  scrollToM16Page(page: number): void {
+    const head = this.body.querySelector<HTMLElement>(`.m16-page-head[data-page="${page}"]`);
+    if (head) this.body.scrollTop = head.offsetTop - this.body.offsetTop;
+    this.m16Scrolled();
+  }
+  // marks the page at the top of the list in the bar
+  m16Scrolled(): void {
+    if (this.tab !== 'm16' || this.app.mode === 'bg') return;
+    let page = 0;
+    for (const head of this.body.querySelectorAll<HTMLElement>('.m16-page-head')) {
+      if (head.offsetTop - this.body.offsetTop > this.body.scrollTop + 4) break;
+      page = Number(head.dataset.page);
+    }
+    this.m16Page = page;
+    this.m16Scroll = this.body.scrollTop;
+    this.m16Bar.querySelectorAll('button').forEach((b, i) => b.classList.toggle('active', i === page));
+  }
   buildMap16(): void {
     const app = this.app;
-    const sheet = renderMap16Sheet(app, false, this.m16Base);
     const cur = app.paletteItem;
     const curTile = cur?.kind === 'obj' && cur.num === 0 && cur.ext === DM16_EXT ? cur.tile ?? -1 : -1;
-    const selTile = curTile >= 0 && (curTile & ~0x1ff) === this.m16Base ? curTile & 0x1ff : -1;
     const bw = cur?.kind === 'obj' && cur.block ? cur.block.w : 1, bh = cur?.kind === 'obj' && cur.block ? cur.block.h : 1;
-    const pages = h('select', null, Array.from({ length: EXT_TILES / 512 }, (_, i) => h('option', { value: String(i * 512), selected: i * 512 === this.m16Base },
-      i === 0 ? 'Pages 0–1' : `Pages ${(2 * i).toString(16).toUpperCase()}–${(2 * i + 1).toString(16).toUpperCase()}${map16Ext(app.rom) ? '' : ' (empty)'}`)));
-    pages.addEventListener('change', () => { this.m16Base = Number(pages.value); this.build(); });
-    const S = 16 * 1.2;
-    const c = h('canvas', { width: 256 * 1.2, height: 512 * 1.2, class: 'm16-pick' });
-    const ctx = c.getContext('2d')!;
-    ctx.imageSmoothingEnabled = false;
-    // sheet plus the chosen rectangle of tiles (x, y, w, h in cells)
-    const draw = (x: number, y: number, w: number, hh: number) => {
-      ctx.drawImage(sheet, 0, 0, c.width, c.height);
-      if (x < 0) return;
-      ctx.strokeStyle = '#4cc2ff'; ctx.lineWidth = 2;
-      ctx.strokeRect(x * S, y * S, w * S, hh * S);
-    };
-    draw(selTile & 15, selTile >> 4, bw, bh);
+    const ext = !!map16Ext(app.rom);
+    const pages = EXT_TILES / 256;
+    clear(this.m16Bar);
+    for (let p = 0; p < pages; p++) {
+      this.m16Bar.appendChild(h('button', {
+        class: p === this.m16Page ? 'active' : '', title: `Page ${p.toString(16).toUpperCase()}${p >= 2 && !ext ? ' (empty)' : ''}`,
+        onclick: () => this.scrollToM16Page(p),
+      }, p.toString(16).toUpperCase()));
+    }
     const label = h('div', { class: 'hint' }, curTile >= 0
       ? (bw * bh > 1 ? `Block ${bw}×${bh} from tile ${hex3(curTile)} chosen – right click in the level view places it (one Direct Map16 object per tile).`
         : `Tile ${hex3(curTile)} chosen – right click in the level view places it (Direct Map16 object).`)
       : 'Click a tile (or drag for several), then right click in the level to place it. Requires the editor patch (installed automatically).');
-    // click picks a tile, dragging picks a rectangle of tiles
-    attachRectPick(c, 16, 32, (r) => draw(r.x, r.y, r.w, r.h), (r) => {
-      app.paletteItem = { kind: 'obj', num: 0, ext: DM16_EXT, size: 0, tile: this.m16Base + r.y * 16 + r.x, ...(r.w * r.h > 1 ? { block: { w: r.w, h: r.h } } : {}) };
-      if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1');
-      this.build();
-    });
+    this.body.append(h('div', { class: 'row' },
+      h('button', { title: 'Edit the chosen tile in the graphics area (also create tiles from 200 on)', onclick: () => app.editMap16(curTile >= 0 ? curTile : this.m16Page * 256) }, 'Edit …')), label);
     // tooltip: tile number and behaviour when hit from below
-    let hoverTile = -1;
+    let hoverTile = -1, hoverCanvas: HTMLCanvasElement | null = null;
     const tip = () => {
       const p = app.blockInfo(hoverTile);
-      c.title = `Tile ${hex3(hoverTile)}: ${p ? probeText(p) : 'determining behavior …'}`;
+      if (hoverCanvas) hoverCanvas.title = `Tile ${hex3(hoverTile)}: ${p ? probeText(p) : 'determining behavior …'}`;
     };
-    c.addEventListener('mousemove', (e) => {
-      const rc = c.getBoundingClientRect();
-      const x = Math.floor((e.clientX - rc.left) / (rc.width / 16)), y = Math.floor((e.clientY - rc.top) / (rc.height / 32));
-      const t = this.m16Base + Math.min(31, y) * 16 + Math.min(15, x);
-      if (t !== hoverTile) { hoverTile = t; tip(); }
-    });
-    this.m16Tip = () => { if (hoverTile >= 0 && c.isConnected) tip(); };
-    this.body.append(h('div', { class: 'row' }, pages,
-      h('button', { title: 'Edit the chosen tile in the graphics area (also create tiles from 200 on)', onclick: () => app.editMap16(curTile >= 0 ? curTile : this.m16Base) }, 'Edit …')), label, c);
+    this.m16Tip = () => { if (hoverTile >= 0 && hoverCanvas?.isConnected) tip(); };
+    // a page is drawn once it scrolls into view
+    this.m16Observer?.disconnect();
+    const draws = new Map<Element, () => void>();
+    const observer = new IntersectionObserver((entries) => {
+      for (const e of entries) {
+        if (!e.isIntersecting) continue;
+        draws.get(e.target)?.();
+        draws.delete(e.target);
+        observer.unobserve(e.target);
+      }
+    }, { root: this.body, rootMargin: '300px 0px' });
+    this.m16Observer = observer;
+    const S = 16 * 1.2;
+    for (let p = 0; p < pages; p++) {
+      const base = p * 256;
+      const c = h('canvas', { width: 256 * 1.2, height: 256 * 1.2, class: 'm16-pick', 'data-page': String(p) });
+      const ctx = c.getContext('2d')!;
+      ctx.imageSmoothingEnabled = false;
+      let sheet: HTMLCanvasElement | null = null;
+      // page plus the chosen rectangle of tiles (x, y, w, h in cells)
+      const draw = (x: number, y: number, w: number, hh: number) => {
+        sheet ??= renderMap16Sheet(app, false, base, 256);
+        ctx.drawImage(sheet, 0, 0, c.width, c.height);
+        if (x < 0) return;
+        ctx.strokeStyle = '#4cc2ff'; ctx.lineWidth = 2;
+        ctx.strokeRect(x * S, y * S, w * S, hh * S);
+      };
+      const sel = curTile - base;
+      const shown = () => (sel >= 0 && sel < 256 ? draw(sel & 15, sel >> 4, bw, bh) : draw(-1, 0, 0, 0));
+      draws.set(c, shown);
+      observer.observe(c);
+      // click picks a tile, dragging picks a rectangle of tiles
+      attachRectPick(c, 16, 16, (r) => draw(r.x, r.y, r.w, r.h), (r) => {
+        app.paletteItem = { kind: 'obj', num: 0, ext: DM16_EXT, size: 0, tile: base + r.y * 16 + r.x, ...(r.w * r.h > 1 ? { block: { w: r.w, h: r.h } } : {}) };
+        if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1');
+        this.build();
+      });
+      c.addEventListener('mousemove', (e) => {
+        const rc = c.getBoundingClientRect();
+        const x = Math.floor((e.clientX - rc.left) / (rc.width / 16)), y = Math.floor((e.clientY - rc.top) / (rc.height / 16));
+        const t = base + Math.min(15, y) * 16 + Math.min(15, x);
+        if (t !== hoverTile || c !== hoverCanvas) { hoverTile = t; hoverCanvas = c; tip(); }
+      });
+      this.body.append(h('div', { class: 'pal-head m16-page-head', 'data-page': String(p) }, `Page ${p.toString(16).toUpperCase()}`,
+        p >= 2 && !ext ? h('span', { class: 'hint' }, ' (empty)') : ''), c);
+    }
+    // back to where the list was; the pages in view are drawn right away so nothing flickers
+    this.body.scrollTop = this.m16Scroll;
+    const top = this.body.scrollTop, bottom = top + this.body.clientHeight;
+    for (const [c, draw] of draws) {
+      const y = (c as HTMLElement).offsetTop - this.body.offsetTop;
+      if (y + (c as HTMLElement).offsetHeight < top || y > bottom) continue;
+      draw();
+      draws.delete(c);
+      observer.unobserve(c);
+    }
+    this.m16Scrolled();
   }
 
   // structures: blocks of Map16 tiles stored in the ROM, placed as one object each (structs.ts)
@@ -373,8 +432,10 @@ export class Palette {
     clear(this.tabs);
     const searchable = app.mode !== 'bg' && this.tab !== 'm16';
     this.searchRow.style.display = searchable ? '' : 'none';
+    this.m16Bar.style.display = app.mode !== 'bg' && this.tab === 'm16' ? '' : 'none';
     this.search.placeholder = this.tab === 'spr' ? 'Search sprites (no., name) …' : this.tab === 'str' ? 'Search structures …' : 'Search (no., name, behavior) …';
     if (app.mode === 'bg') { clear(this.body); this.buildBg(); return; }
+    if (this.body.querySelector('.m16-page-head')) this.m16Scroll = this.body.scrollTop; // the scroll event may still be pending
     const tabDefs: [typeof this.tab, string][] = [['obj', 'Objects'], ['ext', 'Extended'], ['m16', 'Map16'], ['str', 'Structures'], ['spr', 'Sprites']];
     for (const [t, l] of tabDefs) this.tabs.appendChild(h('button', { class: this.tab === t ? 'active' : '', onclick: () => { this.tab = t; this.build(); } }, l));
     clear(this.body);
@@ -544,17 +605,19 @@ function itemBadge(app: App, items: number[], cls = 'pal-items'): HTMLElement | 
   return h('div', { class: cls }, ...imgs.map(cloneCanvas));
 }
 
-export function renderMap16Sheet(app: App, bg = false, base = 0): HTMLCanvasElement {
+// `count` tiles from `base`, 16 per row
+export function renderMap16Sheet(app: App, bg = false, base = 0, count = 512): HTMLCanvasElement {
   const r = app.render;
   const tc = new TileCache(r.vram, r.cgram, (bg ? r.ppuRegs[0x0b] >> 4 : r.ppuRegs[0x0b] & 0x0f) << 13);
   const src = map16Source(app.rom, r);
   const c = document.createElement('canvas');
-  c.width = 256; c.height = 512;
+  const hgt = count / 16 * 16;
+  c.width = 256; c.height = hgt;
   const ctx = c.getContext('2d')!;
-  const img = ctx.createImageData(256, 512);
+  const img = ctx.createImageData(256, hgt);
   const px = new Uint32Array(img.data.buffer);
   px.fill(0xff181818);
-  for (let t = 0; t < 512; t++) drawMap16(px, 256, 512, tc, bg ? src.bg(base + t) : src.fg(base + t), (t & 15) * 16, (t >> 4) * 16);
+  for (let t = 0; t < count; t++) drawMap16(px, 256, hgt, tc, bg ? src.bg(base + t) : src.fg(base + t), (t & 15) * 16, (t >> 4) * 16);
   ctx.putImageData(img, 0, 0);
   return c;
 }
