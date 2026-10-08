@@ -27,7 +27,7 @@ import { ExitGraph, exitTarget } from '../core/exitgraph.ts';
 import { RomHistory, type RomEdit } from '../core/romhistory.ts';
 import { resizeObjectSize, type ObjKind, type ObjKinds } from '../core/objkinds.ts';
 import { JumpArcs, ARC_SPEEDS, type JumpArc } from '../core/jumparcs.ts';
-import type { ScanResult } from '../core/levelscan.ts';
+import { scanKey, type ScanResult } from '../core/levelscan.ts';
 import { layer3Kinds, tideKind, layer3Top, type Layer3Kind } from '../core/layer3.ts';
 import { variantOf, blockKey, spriteKey, type BlockProbe, type SpriteProbe } from '../core/blockprobe.ts';
 import type { ProbeReply } from '../core/probehost.ts';
@@ -873,14 +873,7 @@ export class App {
     if (this.holdRender) { this.scheduleScan(); return; }
     const lv = this.level, vertical = this.vertical, run = ++this.scanRun;
     const ov = this.buildOverrides();
-    const bytes = [ov.layer1, ov.layer2, ov.bgData, ov.sprites, Uint8Array.from(ov.secondaryHeader ?? []), Uint8Array.from([ov.layer2Pointer ?? 0, (ov.layer2Pointer ?? 0) >> 8, (ov.layer2Pointer ?? 0) >> 16, +!!ov.switchPalaces, +!!ov.onOffSwitch])];
-    let hsh = 0x811c9dc5;
-    for (const b of bytes) {
-      if (!b) { hsh = Math.imul(hsh ^ 0xff, 0x01000193); continue; }
-      for (let i = 0; i < b.length; i++) hsh = Math.imul(hsh ^ b[i], 0x01000193);
-      hsh = Math.imul(hsh ^ b.length, 0x01000193);
-    }
-    const key = `ls2:${lv.number}:${(hsh >>> 0).toString(16)}`;
+    const key = scanKey(lv.number, ov);
     const uids = spriteLoadOrder(lv.sprites, vertical).map((q) => q.uid);
     const done = (result: ScanResult) => {
       if (run !== this.scanRun || this.level !== lv) return;
