@@ -14,8 +14,7 @@ import { map16Source } from '../core/render.ts';
 import { definesForm } from './defineedit.ts';
 import { logView, romChanged, errorText } from './projectpane.ts';
 import type { ToolKind } from '../core/parts.ts';
-import type { Package } from '../core/pkgreg.ts';
-import { trackPackage } from './pkgtrack.ts';
+import { recordPackageChange, type Package } from '../core/pkgreg.ts';
 
 export type { StoredUpload };
 export async function storedUpload(app: App, p: PatchEntry): Promise<StoredUpload | undefined> {
@@ -84,12 +83,14 @@ export function reapplyPackagePatch(app: App, upload: Upload, fileName: string, 
   let r: ApplyResult;
   try {
     r = app.romEdit(`Patch “${upload.name}” reapplied`, () => {
+      const apply = () => {
+        ensureRequirements(app.rom, upload, map16Source(app.rom, app.render).fg(0x025));
+        return reapplyPatch(app.rom, entry.id, src);
+      };
+      if (rec) return recordPackageChange(app.rom, rec, apply).result; // the patch's new id goes into the record
       const before = app.rom.snapshot();
-      const t = rec ? trackPackage(app, rec.name, rec.fileName, null, rec) : null; // the patch's new id goes into the record
-      ensureRequirements(app.rom, upload, map16Source(app.rom, app.render).fg(0x025));
-      const res = reapplyPatch(app.rom, entry.id, src);
+      const res = apply();
       if (!res.ok) app.rom.restore(before);
-      else t?.done();
       return res;
     });
   } catch (e) {

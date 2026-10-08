@@ -223,6 +223,49 @@ export function mergeParts(r: Package, p: PackageParts, now: Snapshot): Package 
   };
 }
 
+// ---------- recording a change into a package ----------
+
+// an installed package getting more, or a new one (its files kept with the editor data)
+export type PackageTarget = Package | { name: string; fileName: string; archive?: Uint8Array };
+// a project file the change placed that was there already (same content, brought by another package
+// too): it belongs to the package as well, so removing the other one keeps it
+export type Claim = (tool: 'uber' | 'blocks' | 'pixi', file: string) => void;
+// pkg: the saved record, null when nothing came in (nothing saved)
+export interface Recorded<R> { result: R; pkg: Package | null }
+
+// runs `change` and records what it put into the ROM into the package, all or nothing: when it fails
+// (ok false or throws) or the record can't be saved, the ROM is as before (and the error thrown)
+export function recordPackageChange<R extends { ok: boolean }>(rom: Rom, target: PackageTarget, change: (claim: Claim) => R): Recorded<R> {
+  const rec = startRecording(rom, target);
+  try { return rec.finish(change(rec.claim)); } catch (e) { rec.undo(); throw e; }
+}
+
+// recordPackageChange for a change that awaits
+export async function recordPackageChangeAsync<R extends { ok: boolean }>(rom: Rom, target: PackageTarget, change: (claim: Claim) => Promise<R>): Promise<Recorded<R>> {
+  const rec = startRecording(rom, target);
+  try { return rec.finish(await change(rec.claim)); } catch (e) { rec.undo(); throw e; }
+}
+
+function startRecording(rom: Rom, target: PackageTarget) {
+  const romBefore = rom.snapshot();
+  const was = snapshot(rom);
+  const claimed: Record<'uber' | 'blocks' | 'pixi', Set<string>> = { uber: new Set(), blocks: new Set(), pixi: new Set() };
+  return {
+    claim: ((tool, file) => { claimed[tool].add(file); }) as Claim,
+    undo: () => rom.restore(romBefore),
+    finish<R extends { ok: boolean }>(result: R): Recorded<R> {
+      if (!result.ok) { rom.restore(romBefore); return { result, pkg: null }; }
+      const now = snapshot(rom);
+      const parts = partsBetween(was, now);
+      for (const tool of ['uber', 'blocks', 'pixi'] as const) for (const f of claimed[tool]) if (!parts[tool].files.includes(f)) parts[tool].files.push(f);
+      const old = 'id' in target ? target : null;
+      if (isEmptyParts(parts) && (!old || old.patches.every((p) => now.patches.has(p)))) return { result, pkg: null };
+      const base: Package = old ?? { id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`, name: target.name, fileName: target.fileName, added: new Date().toISOString(), ...emptyParts() };
+      return { result, pkg: savePackage(rom, mergeParts(base, parts, now), old ? undefined : (target as { archive?: Uint8Array }).archive) };
+    },
+  };
+}
+
 // ---------- removing a package ----------
 
 // removes everything the package put into the ROM and its record; files another package also brought

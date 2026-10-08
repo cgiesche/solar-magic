@@ -6,12 +6,12 @@ import { loadAsar } from '../src/core/asar.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { map16Source } from '../src/core/render.ts';
 import { installEditorPatch, gfxEntry } from '../src/core/patches.ts';
-import { applyPatch } from '../src/core/patchapply.ts';
+import { applyPatch, reapplyPatch } from '../src/core/patchapply.ts';
 import { listPatches } from '../src/core/patchreg.ts';
 import { loadProject, saveProject, emptyProject } from '../src/core/uberproject.ts';
 import { loadBlockProject, saveBlockProject, type BlockProject } from '../src/core/blocks.ts';
 import { importGfxFile } from '../src/core/map16file.ts';
-import { snapshot, partsBetween, mergeParts, emptyParts, isEmptyParts, savePackage, listPackages, packageArchive, uninstallPackage, type Package } from '../src/core/pkgreg.ts';
+import { recordPackageChange, listPackages, packageArchive, uninstallPackage, type Package, type PackageTarget, type Claim } from '../src/core/pkgreg.ts';
 
 await loadAsar();
 let bad = 0;
@@ -25,14 +25,10 @@ const blank = map16Source(rom, emu.load(0x105)).fg(0x025);
 const block = (n: number) => `db $42\nJMP Code : JMP Code : JMP Code : JMP Code : JMP Code : JMP Code : JMP Code : JMP Code : JMP Code : JMP Code\nCode:\n  LDA #$${n.toString(16).padStart(2, '0')} : STA $7FB010\n  RTL\n`;
 
 // adds like the dialogs do and records what came in
-const track = (name: string, add: () => void, archive?: Uint8Array, into?: Package): Package => {
-  const before = snapshot(rom);
-  add();
-  const after = snapshot(rom);
-  const parts = partsBetween(before, after);
-  check(!isEmptyParts(parts), `${name}: parts observed`);
-  const rec: Package = into ?? { id: name, name, fileName: name + '.zip', added: new Date().toISOString(), ...emptyParts() };
-  return savePackage(rom, mergeParts(rec, parts, after), archive);
+const track = (name: string, add: (claim: Claim) => void, archive?: Uint8Array, into?: Package): Package => {
+  const { pkg } = recordPackageChange(rom, into ?? { name, fileName: name + '.zip', archive }, (claim) => { add(claim); return { ok: true }; });
+  check(!!pkg, `${name}: parts observed`);
+  return pkg!;
 };
 const ok = (r: { ok: boolean; errors: string[] }) => { if (!r.ok) throw new Error(r.errors.join(' ')); };
 const romBefore = rom.data.slice();
@@ -58,7 +54,7 @@ check(new TextDecoder().decode(packageArchive(rom, listPackages(rom)[0])!) === '
 
 // package B: shares library/shared.asm, has a block and an ExGFX file
 const gfx = new Uint8Array(0x1000).fill(0x55);
-track('B', () => {
+const bId = track('B', () => {
   const p = loadProject(rom)!;
   p.files.set('level/b.asm', enc.encode('main:\n  RTL\n'));
   p.files.set('library/shared.asm', enc.encode('shared:\n  NOP\n  RTL\n'));
@@ -69,20 +65,20 @@ track('B', () => {
   bp.list.push({ tile: 0x2a1, file: 'blocks/b.asm' });
   ok(saveBlockProject(rom, bp, blank));
   importGfxFile(rom, 0x80, gfx);
-});
-const b = listPackages(rom).find((r) => r.id === 'B')!;
+}).id;
+const b = listPackages(rom).find((r) => r.id === bId)!;
 check(b.uber.files.includes('library/shared.asm') && b.gfx.join() === '128' && b.blocks.tiles.join() === '673' && !b.patches.length, 'B: changed shared file, block and ExGFX recorded');
 
 // removing A: its patch, call, files and block go; the shared file stays for B
-const w = uninstallPackage(rom, 'A', blank);
+const w = uninstallPackage(rom, a.id, blank);
 const up = loadProject(rom)!;
 check(!listPatches(rom).some((p) => p.name === 'A-Patch') && rom.r8(0x00a1da) === romBefore[0x21da], 'A: patch removed, byte restored');
 check(!up.files.has('level/a.asm') && up.files.has('library/shared.asm') && !up.list.level.has(0x105) && up.list.level.has(0x106), 'A: UberASM file and call removed, shared file kept');
 check(loadBlockProject(rom)!.list.map((x) => x.tile).join() === '673', 'A: block removed, B\'s stays');
-check(listPackages(rom).map((r) => r.id).join() === 'B', 'A: record removed' + (w.length ? ` (${w.join(' ')})` : ''));
+check(listPackages(rom).map((r) => r.id).join() === bId, 'A: record removed' + (w.length ? ` (${w.join(' ')})` : ''));
 
 // removing B too: projects and ExGFX gone, the ROM as before both packages
-uninstallPackage(rom, 'B', blank);
+uninstallPackage(rom, bId, blank);
 check(!loadProject(rom) && !loadBlockProject(rom) && !gfxEntry(rom, 0x80) && !listPackages(rom).length, 'B: UberASM, blocks and ExGFX removed');
 check(listPatches(rom).length === 0, 'no registry entries left');
 
@@ -92,6 +88,39 @@ check(listPatches(rom).length === 0, 'no registry entries left');
   let threw = false;
   try { uninstallPackage(rom, 'nope', blank); } catch { threw = true; }
   check(threw && rom.data.every((v, i) => v === before[i]), 'unknown package: error, ROM unchanged');
+}
+
+// recording a change: all or nothing, nothing new is no record, claimed files, a patch applied anew
+{
+  const same = (d: Uint8Array) => rom.data.length === d.length && rom.data.every((v, i) => v === d[i]);
+  const target: PackageTarget = { name: 'F', fileName: 'F.zip', archive: enc.encode('archive of F') };
+  const addUber = (file: string, text: string) => { const p = loadProject(rom) ?? emptyProject(); p.files.set(file, enc.encode(text)); ok(saveProject(rom, p)); };
+
+  const before = rom.data.slice();
+  const extra = rom.extraSize;
+  const failed = recordPackageChange(rom, target, () => { addUber('level/f.asm', 'main:\n  RTL\n'); return { ok: false }; });
+  check(!failed.pkg && same(before) && rom.extraSize === extra && !listPackages(rom).length, 'failed change (ok false): ROM and records unchanged');
+  let threw = false;
+  try { recordPackageChange(rom, target, () => { addUber('level/f.asm', 'main:\n  RTL\n'); throw new Error('boom'); }); } catch { threw = true; }
+  check(threw && same(before) && rom.extraSize === extra && !listPackages(rom).length, 'failed change (throws): error passed on, ROM and records unchanged');
+
+  const none = recordPackageChange(rom, target, () => ({ ok: true }));
+  check(none.result.ok && !none.pkg && same(before) && !listPackages(rom).length, 'nothing came in: no record');
+
+  const c = track('C', () => addUber('library/common.asm', 'common:\n  RTL\n'));
+  const d = track('D', (claim) => { addUber('library/common.asm', 'common:\n  RTL\n'); claim('uber', 'library/common.asm'); addUber('level/d.asm', 'main:\n  RTL\n'); });
+  check(c.uber.files.join() === 'library/common.asm' && d.uber.files.includes('library/common.asm') && d.uber.files.includes('level/d.asm'), 'a claimed file that was there already belongs to the package');
+  uninstallPackage(rom, c.id, blank);
+  check(loadProject(rom)?.files.has('library/common.asm') === true, '… and stays when the other package is removed');
+  uninstallPackage(rom, d.id, blank);
+
+  const patch = (n: number) => ({ files: new Map([['e.asm', `org $00A1DA\n  db $${n}\n`]]), main: 'e.asm', name: 'E-Patch' });
+  let e = track('E', () => ok(applyPatch(rom, patch(0xea))));
+  const oldId = e.patches[0];
+  e = recordPackageChange(rom, e, () => reapplyPatch(rom, oldId, patch(0xeb))).pkg!;
+  const newId = listPatches(rom).find((p) => p.name === 'E-Patch')!.id;
+  check(!!e && newId !== oldId && e.patches.join() === newId && listPackages(rom).length === 1, 'patch applied anew: the record holds its new id, not the old one');
+  uninstallPackage(rom, e.id, blank);
 }
 
 if (bad) { console.log(`${bad} FAILED`); process.exit(1); }
