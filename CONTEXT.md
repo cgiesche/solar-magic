@@ -24,3 +24,16 @@ A package wrapped around a single patch that was applied before packages were tr
 **Level import**:
 A Lunar Magic level file (.mwl) applied to the current level. It changes a level rather than installing content, so it is not a package.
 _Avoid_: Graphics package, background package
+
+### Emulated results
+
+**Probe**:
+Finding out how something behaves in the game by running the game's own code on it in an emulator: what a Map16 block does when Mario touches it, how Mario collides with it, what a sprite does when hit from below, how fast Mario runs in a tileset. A probe is always for one tileset.
+_Avoid_: Test, check, lookup table
+
+**Emulated result**:
+Anything the editor learned by emulation (a probe's outcome, the kinds of a tileset's objects, a level scan). It stays valid as long as the ROM bytes it read are unchanged, and is learned again otherwise.
+_Avoid_: Cached value, generation (for validity)
+
+**Prefetch**:
+Probing what the palettes could show before anyone asks for it, after everything asked for directly.
