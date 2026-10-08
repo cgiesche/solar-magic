@@ -1,12 +1,13 @@
 // Background packages (Lunar Magic .mwl + .map16 + ExGFX + .pal/.palmask, as on SMWCentral): only the
 // background goes into a level; the game then draws the package's BG tiles with its graphics and colors.
+// A level import changes a level, it is never recorded as a package.
 import { readFileSync } from 'node:fs';
 import { zipSync } from 'fflate';
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadAsar } from '../src/core/asar.ts';
 import { uploadFiles } from '../src/core/patchpkg.ts';
-import { parseMwl, isLevelImport, planBgPack, applyBgPack, levelColors } from '../src/core/bgpack.ts';
+import { parseMwl, isLevelImport, planBgPack, applyBgPack, importLevelFile, levelColors } from '../src/core/bgpack.ts';
 import { bgTileWords, bgExtTileWords } from '../src/core/bgmap16.ts';
 import { parseMap16File } from '../src/core/map16file.ts';
 import { bgFromWram } from '../src/core/bg.ts';
@@ -15,7 +16,7 @@ import { saveLevel } from '../src/core/save.ts';
 import { levelGfx, levelExtGfx, GFX_SLOT_NAMES, gfxEntry, customPalette } from '../src/core/patches.ts';
 import { renderLevel, map16Source } from '../src/core/render.ts';
 import { extTileWords, actsLike } from '../src/core/map16ext.ts';
-import { snapshot, partsBetween, savePackage, emptyParts, mergeParts, uninstallPackage } from '../src/core/pkgreg.ts';
+import { listPackages } from '../src/core/pkgreg.ts';
 import { installVramPatch } from '../src/core/vrampatch.ts';
 
 await loadAsar();
@@ -153,9 +154,8 @@ const map16 = parseMap16File(files.get('ghostbustersghosttrapjavamanhattanBG.map
   const pFg = plan.palettes.find((p) => p.file.endsWith('FG.pal'))!, pL3 = plan.palettes.find((p) => p.file.endsWith('L3.pal'))!;
   check(plan.palettes.length === 2 && pFg.colors.join() === Array.from({ length: 15 }, (_, i) => 33 + i).join() && !pFg.layer3 && pL3.colors.join() === '1,2,3,5,6' && pL3.layer3, 'palettes: FG colors 21-2F, layer 3 colors 1-6 (each .pal with its .palmask)');
   check(plan.layer3.some((f) => f.endsWith('ExGFX3AB.bin')) && plan.layer3.some((f) => f.endsWith('ExGFX3AA.bin')), 'layer 3 files noted (LT3 tilemap 3AB, LG3 graphics 3AA)');
-  const before2 = snapshot(rom);
   const lv = loadLevel(rom, LV);
-  const r = applyBgPack(rom, lv, ssz, plan, { blank: BLANK, cgram: levelColors(before) });
+  const r = importLevelFile(rom, lv, ssz, plan, { blank: BLANK, cgram: levelColors(before) });
   check(r.ok && !!r.bg, 'applied: ' + [...r.errors, ...r.notes].join(' | '));
   const at = plan.fgAt;
   check(plan.fg!.data.tiles.every((ws, i) => same(extTileWords(rom, at + i)!, ws)), `FG Map16 tiles from ${at.toString(16)}`);
@@ -169,12 +169,7 @@ const map16 = parseMap16File(files.get('ghostbustersghosttrapjavamanhattanBG.map
   const exp = (i: number) => (pal[i * 3] >> 3) | ((pal[i * 3 + 1] >> 3) << 5) | ((pal[i * 3 + 2] >> 3) << 10);
   check(after.ok && pFg.colors.every((i) => color(after.cgram, i) === exp(i)), 'FG colors in the game');
   check([1, 2, 3, 5, 6].every((i) => color(after.cgram, i) === color(before.cgram, i)), 'layer 3 colors not taken over by default (layer 3 is not)');
-  // as a package: its Map16 tiles are recorded and emptied again on removal
-  const parts = partsBetween(before2, snapshot(rom));
-  check(parts.map16?.length === 256 && parts.map16[0] === at && parts.bgMap16?.length === 128, `recorded: ${parts.map16?.length} FG, ${parts.bgMap16?.length} BG Map16 tiles, ExGFX ${parts.gfx.map((g) => g.toString(16)).join(' ')}`);
-  const rec = savePackage(rom, mergeParts({ id: 'ssz', name: 'ssz', fileName: 'ssz.zip', added: '', ...emptyParts() }, parts, snapshot(rom)));
-  uninstallPackage(rom, rec.id, BLANK);
-  check(same(extTileWords(rom, at)!, BLANK) && actsLike(rom, at) === 0x25 && parts.gfx.every((g) => !gfxEntry(rom, g)), 'removed: FG tiles empty again, ExGFX gone');
+  check(listPackages(rom).length === 0, 'a level import creates no package record');
 }
 
 console.log(bad ? `${bad} FAILED` : 'all ok');

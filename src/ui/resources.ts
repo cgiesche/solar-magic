@@ -4,7 +4,9 @@
 // change goes into the ROM at once; Ctrl+Z / Ctrl+Y in the dialog undo and redo it (ADR 0001).
 
 import type { App } from './app.ts';
-import { h, modal, clear, toast, pickFile } from './dom.ts';
+import { h, modal, clear, toast, pickFile, choose } from './dom.ts';
+import { hex } from '../core/names.ts';
+import { openLevelImportDialog } from './levelimport.ts';
 import { loadAsar } from '../core/asar.ts';
 import { recognize, type PackagesTab, type PickedUpload } from './patchmanager.ts';
 import { packagesPane } from './packages.ts';
@@ -99,7 +101,13 @@ export async function openResources(app: App, tab: ResourceTab = 'packages', opt
     const files = new Uint8Array(await f.arrayBuffer());
     const pv = inspectUpload(f.name, files);
     if (pv.status === 'failed') { showUploadFailure(pv.name, pv.reason); return; }
-    if (pv.status === 'level-import') { await run(recognize(app, f.name, pv.files)); return; }
+    if (pv.status === 'level-import') {
+      // not a package: imported into a level from the level editor
+      const i = await choose(`Upload: ${pv.name}`, `“${pv.name}” is a Lunar Magic level file (.mwl): a level import, not a package. It changes a level, so it is imported in the level editor – Level → Import LM level file …`,
+        [{ label: 'OK' }, { label: `Import into level ${hex(app.level.number, 3)} …`, primary: true }]);
+      if (i === 1) { dlg.close(true); openLevelImportDialog(app, f.name, pv.files); }
+      return;
+    }
     openUploadPreview(app, pv, () => {
       for (const x of Object.values(p)) x.reload();
       music.reload();

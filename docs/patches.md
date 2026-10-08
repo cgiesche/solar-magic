@@ -75,7 +75,7 @@ ROM in je ein **Legacy-Paket** gepackt (einmal; erneutes Öffnen legt keine dopp
 jedes andere Paket in der Liste, mit den Einstellungen ihres Patches, und lassen sich ebenso entfernen. Der
 VRAM-Patch des Editors (BG2/BG3) ist kein Fremdinhalt und steht als *Editor patch* für sich. Was in den
 Projekten zu keinem Paket gehört (früher oder von Hand hinzugefügt), nennt die Liste unten mit Link zum Tab.
-Hintergrund-Pakete gehen ins Level und werden kein Paket.
+Lunar-Magic-Level-Dateien (`.mwl`) sind Level-Importe und werden kein Paket.
 
 ## Paket hochladen: Vorschau und Installieren
 
@@ -104,7 +104,7 @@ Teile, sondern gehen mit dem Teil, der sie braucht. Die Zuordnungen lassen sich 
 
 Sonderfälle: Ein **UberASM-Tool-Ordner in einem Unterordner, dessen Code daneben liegende Ordner einbindet**
 (Retry System), wird von Hand zugeordnet, siehe [Pakete aus mehreren Teilen](#pakete-aus-mehreren-teilen).
-Eine **`.mwl`** ist ein Level-Import, kein Paket, siehe [Grafik-Pakete](#grafik-pakete-lunar-magic). Wird
+Eine **`.mwl`** ist ein Level-Import, kein Paket, siehe [Level-Import](#level-import-lunar-magic). Wird
 gar nichts erkannt, sagt die Vorschau, was gefunden wurde und was fehlt.
 
 Die Vorschau hat *Anleitung …*, wenn das Paket eine Readme oder ein HTML-Handbuch enthält. Es
@@ -409,13 +409,16 @@ ein Lag-Frame mehr, im Test rund 0,1 % der Frames. Belegt ein anderer Patch RAM 
 [Free RAM](#patches-anwenden)). Patches, die den Bereich trotzdem nutzen oder die Tilemap-Uploads selbst
 verändern, vertragen sich nicht damit.
 
-## Grafik-Pakete (Lunar Magic)
+## Level-Import (Lunar Magic)
 
 Grafiken im Grafikbereich von SMWCentral sind Lunar-Magic-Exporte, wie ihn die Einreichungsregeln
 dort verlangen: ein Beispiel-Level (`.mwl`), die `.map16`-Dateien der benutzten Map16-Tiles (FG
 und/oder BG), die ExGFX-Dateien der Slots und Paletten als `.pal` mit `.palmask`, die angibt, welche
-Farben zum Paket gehören. *Hinzufügen …* übernimmt davon ins **aktuelle Level**, was im Dialog
-angehakt ist. Layer 1, Sprites und Header bleiben. Danach steht es als Paket in der Liste.
+Farben zum Paket gehören. So eine Datei ist ein **Level-Import**, kein Paket: Sie ändert ein Level, statt
+Inhalte zu installieren. Importiert wird im Level-Editor mit *Level → Import LM level file …* (eine `.mwl`
+oder ein `.zip` mit einer). Übernommen wird ins **aktuelle Level**, was im Dialog angehakt ist; Layer 1,
+Sprites und Header bleiben. Ein Paketeintrag entsteht nicht. Lädt man so eine Datei im Packages-Dialog hoch,
+sagt die Vorschau, dass es ein Level-Import ist, und führt in den Level-Editor.
 
 Welche Datei was ist, steht in den Dateien selbst, nicht in ihren Namen (die wählt jeder Autor anders):
 Lunar Magic schreibt in den Kopf der `.map16` bei 0x24, woher die Tiles stammen (erstes Tile / 16,
@@ -443,10 +446,8 @@ gehört zur `.palmask` gleichen Namens.
 Layer 3 (in der `.mwl` die Slots LT3 = Tilemap-Datei und LG1–LG4 = Layer-3-Grafiken, Lunar Magics
 Layer-3-Bypass) wird noch nicht übernommen; der Dialog nennt die Dateien.
 
-Rückgängig: Strg+Z nimmt zuerst die Tilemap zurück, dann den Rest. Entfernt man das Paket, werden
-seine ExGFX-Dateien gelöscht und seine Map16-Tiles wieder geleert (die Paketverwaltung merkt sich
-geänderte Map16-Tiles, auch bei Block-Paketen). Die Einstellungen des Levels (Slots, Palette,
-Hintergrund) bleiben.
+Rückgängig: Strg+Z nimmt zuerst die Tilemap zurück, dann den Rest (Map16-Tiles, ExGFX-Dateien, Slots,
+Palette).
 
 ### BG-Map16-Erweiterung (SMWH)
 

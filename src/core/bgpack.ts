@@ -25,6 +25,7 @@ import {
   EXT_GFX_SLOT_NAMES, extGfxAvailable, customPalette, setCustomPalette,
 } from './patches.ts';
 import { RAM } from './ram.ts';
+import { installVramPatch } from './vrampatch.ts';
 
 export const LM_SLOTS = ['AN2', 'LT3', 'BG3', 'BG2', 'FG3', 'BG1', 'FG2', 'FG1', 'SP4', 'SP3', 'SP2', 'SP1', 'LG4', 'LG3', 'LG2', 'LG1'];
 const LAYER3_SLOTS = ['LT3', 'LG1', 'LG2', 'LG3', 'LG4'];
@@ -255,6 +256,20 @@ export interface BgPackOptions {
 export interface BgPackResult { ok: boolean; errors: string[]; notes: string[]; bg: Uint16Array | null }
 
 const hx = (v: number, d: number) => v.toString(16).toUpperCase().padStart(d, '0');
+
+// A level import (see CONTEXT.md): what the plan takes from a Lunar Magic level file into level `lv` –
+// background, FG Map16 tiles, graphics slots, colors. Installs the VRAM patch first when it uses the
+// BG2/BG3 slots. All or nothing; it changes a level and is never recorded as a package.
+export function importLevelFile(rom: Rom, lv: Level, files: Map<string, Uint8Array>, plan: BgPackPlan, opt: BgPackOptions): BgPackResult {
+  const before = rom.snapshot();
+  if (plan.gfx.some((g) => g.slot === 'BG2' || g.slot === 'BG3') && !extGfxAvailable(rom)) {
+    const v = installVramPatch(rom);
+    if (!v.ok) return { ok: false, errors: v.errors, notes: [], bg: null };
+  }
+  const r = applyBgPack(rom, lv, files, plan, opt);
+  if (!r.ok) rom.restore(before);
+  return r;
+}
 
 export function applyBgPack(rom: Rom, lv: Level, files: Map<string, Uint8Array>, plan: BgPackPlan, opt: BgPackOptions): BgPackResult {
   const snapshot = rom.snapshot();

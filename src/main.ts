@@ -1,6 +1,7 @@
 import './style.css';
 import { Rom } from './core/rom.ts';
 import { wrapLegacyPatches } from './core/packages.ts';
+import { openLevelImport } from './ui/levelimport.ts';
 import { createBps, crc32 } from './core/bps.ts';
 
 const SMW_CLEAN_CRC = 0xb19ed489; // Super Mario World (U), headerless
@@ -163,6 +164,7 @@ function buildUi(app: App): void {
       { label: 'Insert screen …', disabled: () => app.level.header.screens >= 32, onClick: () => openScreenDialog(app, 'insert') },
       { label: 'Delete screen …', disabled: () => app.level.header.screens <= 1, onClick: () => openScreenDialog(app, 'delete') },
       { label: 'Clear level …', onClick: () => clearLevelConfirm(app) },
+      { label: 'Import LM level file …', title: 'A Lunar Magic level file (.mwl, or a .zip with one): its background, Map16 tiles, graphics slots and colors into this level', onClick: () => void openLevelImport(app) },
       'sep',
       { label: 'Secondary entrances …', onClick: () => openEntrancesDialog(app) },
     ] },

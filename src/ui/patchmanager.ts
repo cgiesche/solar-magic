@@ -10,7 +10,6 @@ import { h, modal, clear, toast, hexInput, select } from './dom.ts';
 import { kvGet, kvDel } from './storage.ts';
 import { applyPatch, reapplyPatch, type ApplyResult, type PatchSource } from '../core/patchapply.ts';
 import { patchArchive, type PatchEntry } from '../core/patchreg.ts';
-import { pickFile } from './dom.ts';
 import { openPixiUploadDialog } from './pixidialog.ts';
 import { freeBlockTile } from './blockdialog.ts';
 import { loadBlockProject, saveBlockProject } from '../core/blocks.ts';
@@ -20,8 +19,7 @@ import { loadProject, emptyProject, saveProject } from '../core/uberproject.ts';
 import { ALL, type UberContext } from '../core/uberasm.ts';
 import { hex } from '../core/names.ts';
 import { planBlockPack, applyBlockPack } from '../core/blockpack.ts';
-import { isLevelImport, planBgPack, applyBgPack, levelColors, type BgPackResult } from '../core/bgpack.ts';
-import { uploadFiles, uploadFromFiles, detectKind, type DetectedPart, effectiveDefines, uploadSource, optionDefault, packUpload, unpackUpload, type StoredUpload, type Upload, type PatchOption } from '../core/patchpkg.ts';
+import { uploadFromFiles, detectKind, type DetectedPart, effectiveDefines, uploadSource, optionDefault, packUpload, unpackUpload, type StoredUpload, type Upload, type PatchOption } from '../core/patchpkg.ts';
 import { installEditorPatch } from '../core/patches.ts';
 import { installMap16Ext, map16Ext, setExtTileWords, EXT_FIRST, EXT_TILES } from '../core/map16ext.ts';
 import { map16Source } from '../core/render.ts';
@@ -313,80 +311,6 @@ function openBlockPackDialog(app: App, upload: Upload, info: DetectedPart, onDon
   ]);
 }
 
-// a Lunar Magic graphics package (.mwl with .map16, ExGFX, .pal/.palmask): its background into the
-// current level, its FG Map16 tiles to place, the graphics slots and colors they need
-function openBgPackDialog(app: App, fileName: string, files: Map<string, Uint8Array>, onDone: () => void): void {
-  const name = fileName.replace(/\.[^.]*$/, '').split(/[\\/]/).pop()!;
-  const lvl = hex(app.level.number, 3);
-  const blank = map16Source(app.rom, app.render).fg(0x025);
-  const plan = planBgPack(app.rom, name, files, blank);
-  const canBg = !!plan.level.bg && app.canEditBg();
-  if (!canBg && !plan.fg) {
-    modal(`Graphics: ${name}`, h('p', null, plan.level.bg
-      ? `“${name}” is a background package (BG tilemap). But level ${lvl} has layer 2 objects instead of a BG background – open a level with a BG first.`
-      : `“${name}” has neither a BG background nor FG Map16 tiles to take over.`), [{ label: 'OK', primary: true }]);
-    return;
-  }
-  let at = plan.at, fgAt = plan.fgAt, useBg = canBg, useFg = !!plan.fg;
-  const usePal = plan.palettes.map((p) => !p.layer3);
-  const n16 = plan.map16 ? plan.map16.data.tiles.length : 0;
-  const ext = plan.gfx.some((g) => g.slot === 'BG2' || g.slot === 'BG3');
-  const file = (f: string) => f.split('/').pop()!;
-  const check = (on: boolean, set: (v: boolean) => void, disabled = false) =>
-    h('input', { type: 'checkbox', checked: on, disabled, onchange: (e: Event) => set((e.target as HTMLInputElement).checked) });
-  const log = h('div');
-  const body = h('div', { class: 'patch-apply' },
-    h('p', null, `“${name}” is a Lunar Magic graphics package (sample level ${file(plan.mwl)}). Taken over into level ${lvl}: what is checked below, the graphics slots its tiles use and the colors per .palmask. Layer 1, sprites and header of level ${lvl} stay.`),
-    plan.level.bg ? h('label', { class: 'row small' }, check(useBg, (v) => (useBg = v), !canBg),
-      canBg ? ` Background: the BG tilemap${n16 ? ` and ${n16} BG Map16 tiles` : ''}` : ` Background – not possible: level ${lvl} has layer 2 objects instead of a BG background`) : '',
-    plan.map16 && canBg ? h('div', { class: 'prop' }, h('label', { title: file(plan.map16.file) }, 'BG Map16'),
-      h('span', null, `${n16} tiles from BG tile `), hexInput(at, 3, (v) => (at = v), 0xfff),
-      h('span', { class: 'hint' }, at !== plan.map16.from ? ` (from ${hex(plan.map16.from, 3)} in the package, already in use there)` : '')) : '',
-    plan.fg ? h('label', { class: 'row small' }, check(useFg, (v) => (useFg = v)), ` Foreground: ${plan.fg.data.tiles.length} FG Map16 tiles (${file(plan.fg.file)}) to place in levels`) : '',
-    plan.fg ? h('div', { class: 'prop' }, h('label', null, 'FG Map16'),
-      h('span', null, 'from tile '), hexInput(fgAt, 3, (v) => (fgAt = v), 0xfff),
-      h('span', { class: 'hint' }, fgAt !== plan.fg.from ? ` (from ${hex(plan.fg.from, 3)} in the package, already in use there)` : '')) : '',
-    ...plan.gfx.map((g) => g.file
-      ? h('div', { class: 'prop' }, h('label', null, `${g.slot}: ${file(g.file)}`),
-        h('span', null, 'as ExGFX '), hexInput(g.num, 2, (v) => (g.num = v), 0xfe),
-        g.lmNum > 0xff ? h('span', { class: 'hint' }, ` (Lunar Magic: ${hex(g.lmNum, 3)})`) : '')
-      : h('div', { class: 'prop' }, h('label', null, g.slot), h('span', { class: 'hint' }, `ROM graphics file ${hex(g.num, 2)}`))),
-    ...plan.palettes.map((p, i) => h('label', { class: 'row small' }, check(usePal[i], (v) => (usePal[i] = v)),
-      ` Colors from ${file(p.file)}: ${p.colors.length} color(s)${p.back ? ' and the background color' : ''} (custom palette for level ${lvl})`,
-      p.layer3 ? h('span', { class: 'hint' }, ' – layer 3 colors') : '')),
-    plan.layer3.length ? h('p', { class: 'hint' }, `Layer 3 (${plan.layer3.map(file).join(', ')}) is not taken over – Lunar Magic's layer 3 tilemaps are not supported yet.`) : '',
-    ext && !extGfxAvailable(app.rom) ? h('p', { class: 'hint' }, 'For the BG2/BG3 slots the VRAM patch is installed.') : '',
-    plan.notes.length ? h('ul', { class: 'hint' }, plan.notes.map((t) => h('li', null, t))) : '',
-    log);
-  modal(`Graphics: ${name}`, body, [
-    { label: 'Cancel' },
-    { label: 'Set up', primary: true, onClick: () => {
-      let r: BgPackResult;
-      try {
-        r = app.romEdit(`Graphics “${name}” in level ${lvl}`, () => {
-          const before = app.rom.snapshot();
-          // BG2/BG3 need the tilemaps moved out of VRAM $2000 first
-          if (ext && !extGfxAvailable(app.rom)) {
-            const v = installVramPatch(app.rom);
-            if (!v.ok) return { ok: false, errors: v.errors, notes: [], bg: null };
-          }
-          const res = applyBgPack(app.rom, app.level, files, plan, { bg: useBg, fg: useFg, at, fgAt, palettes: usePal, cgram: levelColors(app.render), blank });
-          if (!res.ok) app.rom.restore(before);
-          return res;
-        });
-      } catch (e) { r = { ok: false, errors: [errorText(e)], notes: [], bg: null }; }
-      if (!r.ok) { resultLog(log, { ok: false, errors: r.errors, warnings: [], prints: [] }); return false; }
-      app.checkpoint();
-      if (r.bg) { app.level.bg = r.bg; app.changed(); }
-      app.emit('level-header');
-      app.emit('patch');
-      toast(`Graphics “${name}” set up: ${r.notes.join(' · ')}${r.bg ? ' – level not saved yet' : ''}`);
-      onDone();
-      return true;
-    } },
-  ]);
-}
-
 // the tabs of the Packages dialog: the package list and the view of each tool
 export type PackagesTab = 'packages' | ToolKind | 'music';
 // what the tab the package is added from suggests: where UberASM code runs, the tile of a block
@@ -415,7 +339,6 @@ export function recognize(app: App, fileName: string, files: Map<string, Uint8Ar
   };
   // AddmusicK songs (MML .txt, BRR samples) and no ASM: music
   if (isMusicUpload(files)) return { name: base, target: 'music', affects: ['music'], open: tracked(base, (_, done) => openAddSongDialog(app, fileName, files, done)) };
-  if (isLevelImport(files)) return { name: base, target: 'packages', affects: [], open: tracked(base, (_, done) => openBgPackDialog(app, fileName, files, done)) };
   const upload = uploadFromFiles(fileName, files);
   const info = detectKind(upload);
   switch (info.kind) {
