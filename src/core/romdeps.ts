@@ -175,6 +175,13 @@ export class ResultCache {
     return e.data as T;
   }
 
+  // the entry under key, if it holds for the current ROM
+  entry(key: string): CacheEntry | undefined {
+    if (this.get(key) === undefined) return undefined;
+    const e = this.entries.get(key)!;
+    return { deps: e.deps, data: e.data };
+  }
+
   set(key: string, data: unknown, deps: RomDeps): void {
     this.entries.set(key, { deps, data, gen: this.fp.gen });
     this.dropped.delete(key);

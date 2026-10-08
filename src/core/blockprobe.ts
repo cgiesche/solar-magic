@@ -46,6 +46,12 @@ const SETTLE_FRAMES = 6; // frames Mario has to stand still before a probe stops
 export const PAD = { up: 0x0800, down: 0x0400, left: 0x0200, right: 0x0100, b: 0x8000, y: 0x4000 };
 const ENTER_DX = [-8, -4, 0, 4, 8]; // pipes only let Mario in within a few pixels of their middle
 
+// result cache keys (see ResultCache) of the probes in tileset ts
+export const blockKey = (ts: number, tile: number) => `b${ts}:${tile}`;
+export const collisionKey = (ts: number, tile: number) => `c${COLLISION_VERSION}.${ts}:${tile}`;
+export const spriteKey = (ts: number, num: number) => `s${ts}:${num}`;
+export const runsKey = (ts: number) => `r1.${ts}`;
+
 export interface HitResult {
   sprites: number[]; // sprite numbers that appeared
   coins: number;
@@ -181,28 +187,28 @@ export class BlockProber {
   }
 
   cached(tile: number): BlockProbe | undefined {
-    return this.results.get(`b${this.tileset}:${tile}`);
+    return this.results.get(blockKey(this.tileset, tile));
   }
 
   probe(tile: number): BlockProbe {
-    return this.cached(tile) ?? this.computed(`b${this.tileset}:${tile}`, () => {
+    return this.cached(tile) ?? this.computed(blockKey(this.tileset, tile), () => {
       const c = columns((col, big) => this.hit(tile, big, col), tile);
       return { tile, ...c, enter: this.enterDirs(tile, c.solid) };
     });
   }
 
   cachedCollision(tile: number): CollisionProbe | undefined {
-    return this.results.get(`c${COLLISION_VERSION}.${this.tileset}:${tile}`);
+    return this.results.get(collisionKey(this.tileset, tile));
   }
 
   probeCollision(tile: number): CollisionProbe {
-    return this.cachedCollision(tile) ?? this.computed(`c${COLLISION_VERSION}.${this.tileset}:${tile}`, () => this.collision(tile));
+    return this.cachedCollision(tile) ?? this.computed(collisionKey(this.tileset, tile), () => this.collision(tile));
   }
 
   // walking: after a while holding right; running: holding Y too, once the P-meter starts to
   // fill (top running speed reached); P-speed: once the P-meter and the speed don't change any more
   runStates(): RunStates {
-    return this.results.get<RunStates>(`r1.${this.tileset}`) ?? this.computed(`r1.${this.tileset}`, (): RunStates => {
+    return this.results.get<RunStates>(runsKey(this.tileset)) ?? this.computed(runsKey(this.tileset), (): RunStates => {
       const floor = this.floor();
       if (floor < 0) throw new Error('no floor tile found');
       const trace = (pad: number, frames: number): RunState[] => {
@@ -228,11 +234,11 @@ export class BlockProber {
   }
 
   cachedSprite(num: number): SpriteProbe | undefined {
-    return this.results.get(`s${this.tileset}:${num}`);
+    return this.results.get(spriteKey(this.tileset, num));
   }
 
   probeSprite(num: number): SpriteProbe {
-    return this.cachedSprite(num) ?? this.computed(`s${this.tileset}:${num}`, (): SpriteProbe => {
+    return this.cachedSprite(num) ?? this.computed(spriteKey(this.tileset, num), (): SpriteProbe => {
       const variants = this.spriteVariants(num);
       const pos = variants.reps.map(({ x, y }): PosProbe => {
         const base0 = this.hitSprite(num, 0, x, y, 'none');
@@ -473,6 +479,7 @@ export class BlockProber {
           if (w[RAM.marioAnim] === 9) { dead = true; break; }
           if (w[RAM.powerup] < 1) hurt = true;
           if (w[RAM.marioBlocked] & 4) { if (land < 0 && marioY(w) < ty) land = marioY(w); still++; } else still = 0;
+          if (marioY(w) > ty + 16) break; // fell through: below the tile, nothing touches it any more
         }
       } catch { /* what was seen */ }
       return { land, hurt, dead };
@@ -501,14 +508,15 @@ export class BlockProber {
       this.put(bx, by, tile);
       this.placeMario(bx * 16 + (fromLeft ? -20 : 20), ty, -16, 0);
       const s = this.emu.snes;
-      let blocked = false, hurt = false, dead = false;
+      let blocked = false, hurt = false, dead = false, pushing = 0;
       try {
-        for (let f = 0; f < PROBE_FRAMES; f++) {
+        for (let f = 0; f < PROBE_FRAMES && pushing < SETTLE_FRAMES; f++) {
           s.joy1 = fromLeft ? PAD.right : PAD.left;
           s.runFrame();
           if (w[RAM.marioAnim] === 9) { dead = true; break; }
           if (w[RAM.powerup] < 1) hurt = true;
-          if (w[RAM.marioBlocked] & (fromLeft ? 1 : 2)) blocked = true;
+          // settled: pushing against the side for a few frames
+          if (w[RAM.marioBlocked] & (fromLeft ? 1 : 2)) { blocked = true; pushing++; } else pushing = 0;
         }
       } catch { /* what was seen */ }
       s.joy1 = 0;
@@ -546,11 +554,7 @@ export class BlockProber {
     w[off] = tile & 0xff;
     w[off + MAP_HI] = tile >> 8;
     this.placeMario(bx * 16, by * 16, 20, -0x40);
-    // settled: Mario falls back, no bounce block is running and no coins/lives are still being
-    // counted up (lives also come from score sprites: 1-up and the like)
-    const settled = (w: Uint8Array) => w[RAM.marioSpeedY] > 0 && w[RAM.marioSpeedY] < 0x80 && w[RAM.marioAnim] === 0
-      && !w.subarray(RAM.bounceSprites, RAM.bounceSprites + 4).some((v) => v) && !w[RAM.coinsToAdd] && !w[RAM.livesToAdd] && !w.subarray(RAM.scoreSprites, RAM.scoreSprites + 10).some((v) => v);
-    return this.observe(big, off, -1, settled);
+    return this.observe(big, off, -1, settledHit);
   }
 
   // Sprite num spawned at tile X & 15 = x, Y & 15 = y, then Mario jumps against it from below or
@@ -567,8 +571,16 @@ export class BlockProber {
     if (how === 'below') this.placeMario(ax, sy, 24, -0x60);
     else if (how === 'stomp') this.placeMario(ax, sy, -28, 0x30);
     else this.placeMario(ax, sy, 64, 0);
-    return this.observe(big, -1, slot);
+    // settled: as for blocks, once Mario has fallen past the sprite
+    return this.observe(big, -1, slot, how === 'none' ? undefined : (w) => marioY(w) > sy + 32 && settledHit(w));
   }
+}
+
+// a hit is over: Mario falls back, no bounce block is running and no coins/lives are still being
+// counted up (lives also come from score sprites: 1-up and the like)
+function settledHit(w: Uint8Array): boolean {
+  return w[RAM.marioSpeedY] > 0 && w[RAM.marioSpeedY] < 0x80 && w[RAM.marioAnim] === 0
+    && !w.subarray(RAM.bounceSprites, RAM.bounceSprites + 4).some((v) => v) && !w[RAM.coinsToAdd] && !w[RAM.livesToAdd] && !w.subarray(RAM.scoreSprites, RAM.scoreSprites + 10).some((v) => v);
 }
 
 // hit(col, big) in column 0; the other 15 columns only when column 0 shows an effect

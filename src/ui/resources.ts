@@ -1,55 +1,53 @@
-// The patches dialog: one place for everything assembled into the ROM. "Packages" lists every added download
-// with what it brought (see packages.ts); the tabs UberASM, Custom Blocks and Custom Sprites show the
-// tool projects as a whole. "Add …" takes any download and shows it as a package afterwards; the
-// project tabs stage their changes until "Apply", closing asks about pending ones.
+// The Packages dialog: the one place third-party content enters the ROM. "Upload package …" (or a file
+// dropped on the dialog) shows the upload preview and installs the package (upload.ts); the Packages tab
+// lists every installed package with what it brought (packages.ts); UberASM, Blocks, Sprites and Music
+// configure what packages brought. Every change goes into the ROM at once; Ctrl+Z / Ctrl+Y in the dialog
+// undo and redo it (ADR 0001).
 
 import type { App } from './app.ts';
-import { h, modal, clear, toast, choose } from './dom.ts';
+import { h, modal, clear, toast, pickFile, choose } from './dom.ts';
+import { hex } from '../core/names.ts';
+import { openLevelImportDialog } from './levelimport.ts';
 import { loadAsar } from '../core/asar.ts';
-import { pickPackage, recognize, type AddTarget, type PickedPackage } from './patchmanager.ts';
+import type { PackagesTab } from './patchmanager.ts';
 import { packagesPane } from './packages.ts';
-import { trackPackage, findPackage } from './pkgtrack.ts';
+import { inspectUpload } from '../core/packages.ts';
+import { openUploadPreview, showUploadFailure } from './upload.ts';
 import { uberPane } from './uberdialog.ts';
 import { blockPane } from './blockdialog.ts';
 import { pixiPane } from './pixidialog.ts';
 import { musicPane } from './musicdialog.ts';
 import { musicPlayer } from './musicplayer.ts';
-import { errorText, type Pane } from './projectpane.ts';
+import { errorText } from './projectpane.ts';
 
-export type ResourceTab = AddTarget;
+export type ResourceTab = PackagesTab;
 export interface ResourceOptions {
   tile?: number; // Map16 tile preselected in the blocks tab
   onChange?: () => void; // after the ROM was changed from the dialog
 }
 
-const TAB_LABEL: Record<ResourceTab, string> = { patches: 'Packages', uber: 'UberASM', blocks: 'Custom Blocks', sprites: 'Custom Sprites', music: 'Music' };
-const staged = (k: ResourceTab): k is 'uber' | 'blocks' | 'sprites' => k !== 'patches' && k !== 'music';
+const TAB_LABEL: Record<ResourceTab, string> = { packages: 'Packages', uberasm: 'UberASM', block: 'Blocks', sprite: 'Sprites', music: 'Music' };
 
-export async function openResources(app: App, tab: ResourceTab = 'patches', opts: ResourceOptions = {}): Promise<void> {
+export async function openResources(app: App, tab: ResourceTab = 'packages', opts: ResourceOptions = {}): Promise<void> {
   const body = h('div', { class: 'resources' }, h('p', { class: 'hint' }, 'Loading Asar …'));
-  let panes: Record<'uber' | 'blocks' | 'sprites', Pane> | null = null;
-  const pending = () => (panes ? Object.values(panes).filter((p) => p.dirty()) : []);
-
-  // pending changes: apply them all, discard them, or stay
-  let asking = false;
-  const beforeClose = (): boolean => {
-    const dirty = pending();
-    if (!dirty.length) return true;
-    if (asking) return false;
-    asking = true;
-    void choose('Unapplied changes', `${dirty.map((p) => p.title).join(', ')}: changes have not been applied yet.`,
-      [{ label: 'Back' }, { label: 'Discard', danger: true }, { label: 'Apply', primary: true }]).then((i) => {
-      asking = false;
-      if (i === 1) dlg.close(true);
-      else if (i === 2) {
-        const failed = dirty.find((p) => !p.apply());
-        if (!failed) dlg.close(true);
-        else show(keyOf(failed));
-      }
-    });
-    return false;
+  // undo/redo while the dialog is the topmost one (the editor's own keys wait while a dialog is open);
+  // the tabs show the ROM afterwards
+  let afterUndo = () => {};
+  const keys = (e: KeyboardEvent) => {
+    const t = e.target as HTMLElement;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
+    if (!(e.ctrlKey || e.metaKey) || ![...document.querySelectorAll('.modal-back')].pop()?.contains(body)) return;
+    const k = e.key.toLowerCase();
+    if (k !== 'z' && k !== 'y') return;
+    e.preventDefault();
+    if (k === 'y' || e.shiftKey) app.redo(); else app.undo();
+    afterUndo();
   };
-  const dlg = modal('Patches', body, [{ label: 'Close', primary: true }], () => { if (musicPlayer.label?.startsWith('song:')) musicPlayer.stop(); }, beforeClose);
+  window.addEventListener('keydown', keys);
+  const dlg = modal('Packages', body, [{ label: 'Close', primary: true }], () => {
+    window.removeEventListener('keydown', keys);
+    if (musicPlayer.label?.startsWith('song:')) musicPlayer.stop();
+  });
 
   try { await loadAsar(); } catch (e) {
     clear(body).appendChild(h('p', { class: 'hint error' }, `Asar could not be loaded: ${errorText(e)}`));
@@ -60,65 +58,68 @@ export async function openResources(app: App, tab: ResourceTab = 'patches', opts
   const content = h('div', { class: 'res-content' });
   const changed = () => { patches.reload(); opts.onChange?.(); };
   const renderTabs = () => clear(tabBar).append(...(Object.keys(TAB_LABEL) as ResourceTab[]).map((k) =>
-    h('button', { class: k === tab ? 'mode active' : 'mode', onclick: () => show(k), title: panes && staged(k) && panes[k].dirty() ? 'Unapplied changes' : undefined },
-      TAB_LABEL[k], panes && staged(k) && panes[k].dirty() ? ' •' : '')));
-  const p = { uber: uberPane(app, renderTabs, changed), blocks: blockPane(app, renderTabs, changed), sprites: pixiPane(app, renderTabs, changed) };
+    h('button', { class: k === tab ? 'mode active' : 'mode', onclick: () => show(k) }, TAB_LABEL[k])));
+  const p = { uberasm: uberPane(app, changed), block: blockPane(app, changed), sprite: pixiPane(app, changed) };
   const music = musicPane(app, changed);
-  panes = p;
-  // staged changes of these tabs applied or discarded before the ROM is changed directly; false: back
-  const settle = async (keys: (keyof typeof p)[], what: string): Promise<boolean> => {
-    const dirty = keys.flatMap((k) => (p[k].dirty() ? [p[k]] : []));
-    if (!dirty.length) return true;
-    const i = await choose('Unapplied changes', `${what} ${dirty.map((x) => x.title).join(', ')}: changes have not been applied yet – first …`,
-      [{ label: 'Cancel' }, { label: 'Discard', danger: true }, { label: 'Apply', primary: true }]);
-    if (i === null || i === 0) return false;
-    if (i === 1) for (const x of dirty) x.discard();
-    else { const failed = dirty.find((x) => !x.apply()); if (failed) { show(keyOf(failed)); return false; } }
-    return true;
+  afterUndo = () => {
+    for (const x of Object.values(p)) x.reload();
+    music.reload();
+    changed();
   };
   const patches = packagesPane(app, {
     panes: p,
     changed,
     show: (k) => show(k),
-    settle,
-    leave: (then) => void settle(['uber', 'blocks', 'sprites'], 'The dialog will be closed.').then((ok) => { if (ok) { dlg.close(true); then(); } }),
-    addPart: (name, files, rec) => {
-      // later parts go into the package (its record, looked up again: it may have changed since)
-      const cur = findPackage(app, rec.id) ?? rec;
-      void run(recognize(app, name, files, false, trackPackage(app, cur.name, cur.fileName, null, cur)));
-    },
+    leave: (then) => { dlg.close(true); then(); },
   });
-  if (opts.tile !== undefined) p.blocks.setTile(opts.tile);
-  const keyOf = (pane: Pane) => (Object.keys(p) as (keyof typeof p)[]).find((k) => p[k] === pane) ?? 'patches';
+  if (opts.tile !== undefined) p.block.setTile(opts.tile);
 
   function show(k: ResourceTab): void {
     tab = k;
     renderTabs();
     if (k === 'music') music.render();
-    clear(content).appendChild(k === 'patches' ? patches.el : k === 'music' ? music.el : p[k].el);
+    clear(content).appendChild(k === 'packages' ? patches.el : k === 'music' ? music.el : p[k].el);
   }
 
-  // opens the dialog adding a package, the tabs it changed reloaded afterwards
-  const run = async (pk: PickedPackage) => {
-    // the add dialogs work on the ROM's projects: staged changes of those first
-    if (!(await settle(pk.affects.filter(staged), `“${pk.name}” goes directly into the ROM.`))) return;
-    pk.open({ uberContext: p.uber.context(), tile: p.blocks.tile() }, () => {
-      for (const k of pk.affects) if (staged(k)) p[k].reload(); else if (k === 'music') music.reload();
-      if (pk.target) show('patches');
+  // an upload: its preview, then the package installed and selected
+  const upload = async (f: File) => {
+    const files = new Uint8Array(await f.arrayBuffer());
+    const pv = inspectUpload(f.name, files);
+    if (pv.status === 'failed') { showUploadFailure(pv.name, pv.reason); return; }
+    if (pv.status === 'level-import') {
+      // not a package: imported into a level from the level editor
+      const i = await choose(`Upload: ${pv.name}`, `“${pv.name}” is a Lunar Magic level file (.mwl): a level import, not a package. It changes a level, so it is imported in the level editor – Level → Import LM level file …`,
+        [{ label: 'OK' }, { label: `Import into level ${hex(app.level.number, 3)} …`, primary: true }]);
+      if (i === 1) { dlg.close(true); openLevelImportDialog(app, f.name, pv.files); }
+      return;
+    }
+    openUploadPreview(app, pv, () => {
+      for (const x of Object.values(p)) x.reload();
+      music.reload();
+      show('packages');
       changed();
     });
   };
-  const add = async (manual = false) => {
-    let picked;
-    try { picked = await pickPackage(app, manual); } catch (e) { toast(errorText(e), 'error'); return; }
-    if (picked) await run(picked);
+  const pickAndUpload = async () => {
+    const f = await pickFile('.asm,.asar,.zip,.txt,.mwl');
+    if (f) await upload(f).catch((e) => toast(errorText(e), 'error'));
   };
+  // a file dropped anywhere on the dialog is uploaded (not opened as a ROM by the editor's own handler)
+  body.addEventListener('dragover', (e) => { if (e.dataTransfer?.types.includes('Files')) { e.preventDefault(); e.stopPropagation(); body.classList.add('drop-target'); } });
+  body.addEventListener('dragleave', (e) => { if (!body.contains(e.relatedTarget as Node)) body.classList.remove('drop-target'); });
+  body.addEventListener('drop', (e) => {
+    body.classList.remove('drop-target');
+    const f = e.dataTransfer?.files[0];
+    if (!f) return;
+    e.preventDefault();
+    e.stopPropagation();
+    void upload(f).catch((err) => toast(errorText(err), 'error'));
+  });
 
   clear(body).append(
     h('div', { class: 'row res-top' },
-      h('button', { class: 'primary', onclick: () => add() }, 'Add …'),
-      h('button', { onclick: () => add(true), title: 'Assign a package’s folders and files to folders of the UberASM project yourself – for packages that are more than one resource' }, 'Assign manually …'),
-      h('span', { class: 'hint' }, '.asm or .zip (e.g. from SMWCentral) – recognized as patch, UberASM code, custom block, block package, custom sprite, graphics (Lunar Magic: background, Map16 tiles) or music (AddmusicK).')),
+      h('button', { class: 'primary', onclick: () => void pickAndUpload() }, 'Upload package …'),
+      h('span', { class: 'hint' }, 'or drop a file here: .asm, .zip (e.g. from SMWCentral, or a whole UberASM Tool, GPS or PIXI folder) or an AddmusicK song – everything it contains is installed as one package.')),
     tabBar,
     content,
   );

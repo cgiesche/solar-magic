@@ -11,7 +11,7 @@ import { listPatches } from '../src/core/patchreg.ts';
 import { loadProject, saveProject, emptyProject } from '../src/core/uberproject.ts';
 import { loadBlockProject, saveBlockProject, type BlockProject } from '../src/core/blocks.ts';
 import { importGfxFile } from '../src/core/map16file.ts';
-import { snapshot, partsBetween, mergeParts, emptyParts, isEmptyParts, savePackage, listPackages, packageArchive, uninstallPackage, type PkgRecord } from '../src/core/pkgreg.ts';
+import { snapshot, partsBetween, mergeParts, emptyParts, isEmptyParts, savePackage, listPackages, packageArchive, uninstallPackage, type Package } from '../src/core/pkgreg.ts';
 
 await loadAsar();
 let bad = 0;
@@ -25,13 +25,13 @@ const blank = map16Source(rom, emu.load(0x105)).fg(0x025);
 const block = (n: number) => `db $42\nJMP Code : JMP Code : JMP Code : JMP Code : JMP Code : JMP Code : JMP Code : JMP Code : JMP Code : JMP Code\nCode:\n  LDA #$${n.toString(16).padStart(2, '0')} : STA $7FB010\n  RTL\n`;
 
 // adds like the dialogs do and records what came in
-const track = (name: string, add: () => void, archive?: Uint8Array, into?: PkgRecord): PkgRecord => {
+const track = (name: string, add: () => void, archive?: Uint8Array, into?: Package): Package => {
   const before = snapshot(rom);
   add();
   const after = snapshot(rom);
   const parts = partsBetween(before, after);
   check(!isEmptyParts(parts), `${name}: parts observed`);
-  const rec: PkgRecord = into ?? { id: name, name, fileName: name + '.zip', added: new Date().toISOString(), ...emptyParts() };
+  const rec: Package = into ?? { id: name, name, fileName: name + '.zip', added: new Date().toISOString(), ...emptyParts() };
   return savePackage(rom, mergeParts(rec, parts, after), archive);
 };
 const ok = (r: { ok: boolean; errors: string[] }) => { if (!r.ok) throw new Error(r.errors.join(' ')); };

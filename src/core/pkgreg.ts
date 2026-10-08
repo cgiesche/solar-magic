@@ -25,8 +25,8 @@ const CONTEXTS: UberContext[] = ['level', 'gamemode', 'overworld'];
 const OTHER = ['global', 'statusbar', 'macrolib'] as const;
 type Other = (typeof OTHER)[number];
 
-// what a package put into the ROM
-export interface PkgParts {
+// what a package put into the ROM (field names as stored in the ROM: uber = UberASM, blocks, pixi = sprites)
+export interface PackageParts {
   patches: string[]; // ids of its Asar patches in the patch registry
   uber: { files: string[]; calls: [UberContext, number, string][]; other: Partial<Record<Other, string>> };
   blocks: { files: string[]; tiles: number[] };
@@ -37,7 +37,8 @@ export interface PkgParts {
   bgMap16?: number[]; // extended BG Map16 tiles it filled
 }
 
-export interface PkgRecord extends PkgParts {
+// an installed package: the upload's name and files and what it brought
+export interface Package extends PackageParts {
   id: string;
   name: string;
   fileName: string;
@@ -45,9 +46,10 @@ export interface PkgRecord extends PkgParts {
   srcId?: string; // its files (zip) in the editor data (rom.extra)
   src?: number[]; // older ROMs: SNES addresses of the RATS blocks holding its files (see migratePackageFiles)
   srcSize?: number;
+  legacy?: boolean; // wraps a patch applied before packages were tracked (its files are kept with the patch)
 }
 
-export const emptyParts = (): PkgParts => ({ patches: [], uber: { files: [], calls: [], other: {} }, blocks: { files: [], tiles: [] }, pixi: { files: [], list: [] }, gfx: [], music: [], map16: [], bgMap16: [] });
+export const emptyParts = (): PackageParts => ({ patches: [], uber: { files: [], calls: [], other: {} }, blocks: { files: [], tiles: [] }, pixi: { files: [], list: [] }, gfx: [], music: [], map16: [], bgMap16: [] });
 
 // ---------- the registry ----------
 
@@ -59,15 +61,15 @@ function find(rom: Rom): number {
   return -1;
 }
 
-export function listPackages(rom: Rom): PkgRecord[] {
+export function listPackages(rom: Rom): Package[] {
   const p = find(rom);
   if (p < 0) return [];
   if (rom.data[p + 4] > VERSION) throw new Error('Package registry in the ROM is from a newer editor version');
   const size = rom.isRatsAt(p - 8);
-  return JSON.parse(new TextDecoder().decode(inflateSync(rom.data.subarray(p + 5, p + size)))) as PkgRecord[];
+  return JSON.parse(new TextDecoder().decode(inflateSync(rom.data.subarray(p + 5, p + size)))) as Package[];
 }
 
-function write(rom: Rom, all: PkgRecord[]): void {
+function write(rom: Rom, all: Package[]): void {
   const old = find(rom);
   if (old >= 0) rom.freeAt(pcToSnes(old));
   if (!all.length) return;
@@ -79,7 +81,7 @@ function write(rom: Rom, all: PkgRecord[]): void {
 }
 
 // adds or replaces the record; archive: the package's files to keep with the editor data (once)
-export function savePackage(rom: Rom, rec: PkgRecord, archive?: Uint8Array): PkgRecord {
+export function savePackage(rom: Rom, rec: Package, archive?: Uint8Array): Package {
   const all = listPackages(rom);
   const full = { ...rec };
   if (archive && !full.src && !full.srcId) full.srcId = rom.putBlob(archive);
@@ -99,7 +101,7 @@ export function removePackageRecord(rom: Rom, id: string): void {
 }
 
 // the package's files, null if they are not kept
-export function packageArchive(rom: Rom, r: PkgRecord): Uint8Array | null {
+export function packageArchive(rom: Rom, r: Package): Uint8Array | null {
   if (r.srcId) return rom.getBlob(r.srcId);
   return r.src && r.srcSize ? readChunks(rom, r.src, r.srcSize) : null;
 }
@@ -177,7 +179,7 @@ function changedTiles(a: string[], b: string[], first: number): number[] {
 const changedFiles = (a: Map<string, number>, b: Map<string, number>) => [...b].filter(([f, h]) => a.get(f) !== h).map(([f]) => f);
 
 // what came in between two snapshots
-export function partsBetween(a: Snapshot, b: Snapshot): PkgParts {
+export function partsBetween(a: Snapshot, b: Snapshot): PackageParts {
   const other: Partial<Record<Other, string>> = {};
   for (const k of OTHER) if (b.other[k] && b.other[k] !== a.other[k]) other[k] = b.other[k];
   return {
@@ -196,7 +198,7 @@ export function partsBetween(a: Snapshot, b: Snapshot): PkgParts {
   };
 }
 
-export function isEmptyParts(p: PkgParts): boolean {
+export function isEmptyParts(p: PackageParts): boolean {
   return !p.patches.length && !p.uber.files.length && !p.uber.calls.length && !Object.keys(p.uber.other).length
     && !p.blocks.files.length && !p.blocks.tiles.length && !p.pixi.files.length && !p.pixi.list.length && !p.gfx.length && !p.music?.length && !p.map16?.length && !p.bgMap16?.length;
 }
@@ -207,7 +209,7 @@ const union = <T>(a: T[], b: T[], key: (x: T) => string = String) => {
 };
 
 // the record with more parts; patches no longer in the ROM (applied anew under a new id) are dropped
-export function mergeParts(r: PkgRecord, p: PkgParts, now: Snapshot): PkgRecord {
+export function mergeParts(r: Package, p: PackageParts, now: Snapshot): Package {
   return {
     ...r,
     patches: union(r.patches.filter((id) => now.patches.has(id)), p.patches),
@@ -312,6 +314,6 @@ export async function uninstallPackageWithMusic(rom: Rom, id: string, blank: num
 }
 
 // the package that brought a patch (by registry id)
-export function packageOfPatch(rom: Rom, patchId: string): PkgRecord | null {
+export function packageOfPatch(rom: Rom, patchId: string): Package | null {
   return listPackages(rom).find((r) => r.patches.includes(patchId)) ?? null;
 }

@@ -89,7 +89,7 @@ export function openHeaderDialog(app: App): void {
       f('Sprite palette', sel('spritePalette', range(8))),
       f('Sprite graphics', sel('spriteGfx', range(16, (i) => hex2(i)))),
       f('Music', h('div', { class: 'row' }, musicSel, listen)),
-      f('Song for this level', songSel, 'Instead of the header music – any song of the ROM (Patches → Music adds songs)'),
+      f('Song for this level', songSel, 'Instead of the header music – any song of the ROM (songs come with packages: ROM → Packages …)'),
       f('Time', sel('time', range(4, (i) => TIME_SETTINGS[i]))),
       f('Item memory', sel('itemMemory', range(4))),
       f('Vertical scroll', sel('verticalScroll', range(4, (i) => VERTICAL_SCROLL[i]))),

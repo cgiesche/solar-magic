@@ -1,17 +1,14 @@
-// "Assign package": a package that is more than one resource (e.g. Retry System) is taken apart by hand –
-// each folder or file of the package goes into a folder of the UberASM project or is left out, the
-// resource files get their list.txt numbers. Opens with a suggestion derived from the package (see
-// core/pkgmap.ts); applying adds everything to the ROM's UberASM project in one step.
+// The manual assignment inside the upload preview: a package of several tool folders (e.g. Retry
+// System) is taken apart by hand – each folder or file of the package goes into a folder of the UberASM
+// project or is left out, the resource files get their list.txt numbers. Starts from the suggestion
+// derived from the package (see core/pkgmap.ts); "Install" installs it with this assignment.
 
 import type { App } from './app.ts';
-import { h, clear, modal, toast, hexInput, downloadBytes } from './dom.ts';
-import { loadProject, emptyProject, saveProject } from '../core/uberproject.ts';
+import { h, clear, hexInput } from './dom.ts';
+import { loadProject } from '../core/uberproject.ts';
 import { ALL, CONTEXT_SIZE, type UberContext } from '../core/uberasm.ts';
-import { folders, placed, suggestCalls, extraParts, type PkgRules } from '../core/pkgmap.ts';
-import { packageFromFiles, detectKind, type PackageKind } from '../core/patchpkg.ts';
-import type { ApplyResult } from '../core/patchapply.ts';
-import { romChanged, logView, errorText } from './projectpane.ts';
-import { docsButton, keepDocs } from './docview.ts';
+import { folders, placed, suggestCalls } from '../core/pkgmap.ts';
+import type { ManualPreview, ManualAssignment } from '../core/packages.ts';
 
 const CTX_LABEL: Record<UberContext, string> = { level: 'Level', gamemode: 'Game Mode', overworld: 'Overworld map' };
 const INHERIT = '\u0000inherit';
@@ -19,23 +16,21 @@ const IGNORE = '\u0000ignore';
 
 interface CallState { on: boolean; num: number; all: boolean }
 
-// openPart: adds a part of the package like a package of its own (its dialog), done after that
-export type OpenPart = (name: string, files: Map<string, Uint8Array>, done: () => void) => void;
-
-export function openPkgMapDialog(app: App, name: string, files: Map<string, Uint8Array>, rules: PkgRules, onDone: () => void, openPart: OpenPart): void {
+export function assignmentEditor(app: App, p: ManualPreview): { el: HTMLElement; read(): ManualAssignment } {
+  const { name, files } = p;
+  const rules = new Map(p.suggestion.rules);
   const paths = [...files.keys()].sort();
   const dirs = folders(paths);
   const open = new Set<string>(['']);
   for (const n of rules.keys()) for (let d = n.replace(/[^/]*\/?$/, ''); d; d = d.replace(/[^/]*\/$/, '')) open.add(d);
-  const calls = new Map<string, CallState>(); // by project path, kept while the mapping changes
+  const callsState = new Map<string, CallState>(); // by project path, kept while the mapping changes
   const fallback: Record<UberContext, number> = { level: app.level.number, gamemode: 0x14, overworld: 0 };
   let existing: Map<string, Uint8Array> = new Map();
-  try { existing = loadProject(app.rom)?.files ?? new Map(); } catch { /* shown when applying */ }
+  try { existing = loadProject(app.rom)?.files ?? new Map(); } catch { /* shown when installing */ }
 
   const treeBox = h('div', { class: 'pkg-tree' });
   const callBox = h('div');
   const summary = h('p', { class: 'hint' });
-  const log = h('div');
 
   const options = (node: string): [string, string][] => {
     const isDir = node === '' || node.endsWith('/');
@@ -89,8 +84,8 @@ export function openPkgMapDialog(app: App, name: string, files: Map<string, Uint
     return h('table', { class: 'uber-table' },
       h('tr', null, h('th'), h('th', null, 'File'), h('th', null, 'runs in'), h('th', null, 'No.'), h('th')),
       sugg.map((s) => {
-        let st = calls.get(s.file);
-        if (!st) { st = { on: true, num: s.num === ALL ? fallback[s.ctx] : s.num, all: s.num === ALL }; calls.set(s.file, st); }
+        let st = callsState.get(s.file);
+        if (!st) { st = { on: true, num: s.num === ALL ? fallback[s.ctx] : s.num, all: s.num === ALL }; callsState.set(s.file, st); }
         const c = st;
         const digits = s.ctx === 'level' ? 3 : s.ctx === 'gamemode' ? 2 : 1;
         const numIn = hexInput(c.num, digits, (v) => (c.num = v), CONTEXT_SIZE[s.ctx] - 1);
@@ -113,80 +108,25 @@ export function openPkgMapDialog(app: App, name: string, files: Map<string, Uint
     summary.textContent = `${place.size} of ${paths.length} files are taken over${replaced ? `, ${replaced} of them replace existing project files` : ''}.`;
   }
 
-  const apply = (): boolean => {
-    if (app.dirty) app.saveLevel(true);
+  const read = (): ManualAssignment => {
     const place = placed(paths, rules);
-    if (!place.size) { clear(log).appendChild(logView({ ok: false, errors: ['Nothing selected.'], warnings: [], prints: [] })); return false; }
-    let r: ApplyResult;
-    const added: string[] = [];
-    try {
-      const proj = loadProject(app.rom) ?? emptyProject();
-      for (const [from, to] of place) proj.files.set(to, files.get(from)!);
-      for (const s of suggestCalls(files, place, fallback)) {
-        const c = calls.get(s.file);
-        if (!c?.on) continue;
-        const key = c.all ? ALL : c.num;
-        const list = proj.list[s.ctx].get(key) ?? [];
-        if (!list.some((x) => x.file === s.file)) list.push({ file: s.file, bytes: [] });
-        proj.list[s.ctx].set(key, list);
-        added.push(`${s.file} (${CTX_LABEL[s.ctx]} ${c.all ? '*' : c.num.toString(16).toUpperCase()})`);
-      }
-      r = saveProject(app.rom, proj);
-    } catch (e) { r = { ok: false, errors: [errorText(e)], warnings: [], prints: [] }; }
-    if (!r.ok) { clear(log).appendChild(logView(r)); return false; }
-    romChanged(app);
-    void keepDocs('uber', name, files).catch(() => {});
-    toast(`“${name}” added to the UberASM project: ${place.size} file(s)${added.length ? `, runs in ${added.join(', ')}` : ''}.`);
-    if (r.warnings.length || r.prints.length) modal(`Output: ${name}`, logView(r), [{ label: 'OK', primary: true }]);
-    onDone();
-    openFurtherSteps(name, files, rules, onDone, openPart);
-    return true;
+    const calls: ManualAssignment['calls'] = [];
+    for (const x of suggestCalls(files, place, fallback)) {
+      const c = callsState.get(x.file);
+      if (c?.on) calls.push({ file: x.file, ctx: x.ctx, num: c.all ? ALL : c.num });
+    }
+    return { rules: new Map(rules), calls };
   };
 
   render();
-  modal(`Assign package: ${name}`, h('div', { class: 'patch-apply pkg-map' },
-    h('div', { class: 'row' }, h('span', { class: 'grow hint' }, 'What goes where is usually in the package’s manual.'), docsButton(name, files)),
-    h('p', null, `“${name}” contains more than one resource. Here the package’s folders and files can be assigned to folders of the UberASM project – like copying them into the UberASM Tool folder as its manual says. A folder passes its assignment on to everything in it.`),
-    treeBox,
-    summary,
-    h('h3', null, 'list.txt'),
-    callBox,
-    h('p', { class: 'hint' }, 'Assignments, settings and files can be changed afterwards in the UberASM tab.'),
-    log,
-  ), [
-    { label: 'Cancel' },
-    { label: 'Apply', primary: true, onClick: apply },
-  ]);
-}
-
-const KIND_LABEL: Record<PackageKind, string> = { patch: 'Patch', uberasm: 'UberASM code', block: 'Custom block', blockpack: 'Block package', pixi: 'Custom sprite' };
-
-// what is left of the package after the assignment: .asm parts each added with their own dialog (files
-// they include taken from the package), other files to download for the tool they are meant for
-function openFurtherSteps(name: string, files: Map<string, Uint8Array>, rules: PkgRules, onDone: () => void, openPart: OpenPart): void {
-  const parts = extraParts(files, rules);
-  if (!parts.length) return;
-  const rows = parts.map((part) => {
-    const file = part.path.split('/').pop()!;
-    const where = part.path.slice(0, -file.length);
-    const label = (...more: (HTMLElement | null)[]) => h('td', { class: 'pkg-part', title: part.path }, h('span', { class: 'mono' }, file), where ? h('div', { class: 'hint mono' }, where) : null, ...more);
-    if (!part.files) {
-      return h('tr', null, label(), h('td', { class: 'hint' }, 'for another tool'),
-        h('td', { class: 'actions' }, h('button', { onclick: () => downloadBytes(file, files.get(part.path)!) }, 'Download')));
-    }
-    let kind: string;
-    try { kind = KIND_LABEL[detectKind(packageFromFiles(file, part.files)).kind]; } catch { kind = '?'; }
-    const added = h('span', { class: 'hint' });
-    const extra = [...part.files.keys()].filter((f) => f !== file);
-    return h('tr', null,
-      label(extra.length ? h('div', { class: 'hint' }, `with ${extra.join(', ')} from the package`) : null),
-      h('td', null, kind),
-      h('td', { class: 'actions' }, added, h('button', { onclick: () => openPart(file, part.files!, () => { added.textContent = 'added '; onDone(); }) }, 'Add …')));
-  });
-  modal(`Further steps: ${name}`, h('div', { class: 'patch-apply pkg-map' },
-    h('p', null, `These parts of “${name}” were not taken over – mostly examples and optional parts, per its manual. Each can be added here on its own; the files it includes come along from the package.`),
-    h('div', { class: 'row' }, h('span', { class: 'grow' }), docsButton(name, files)),
-    h('table', { class: 'uber-table' }, h('tr', null, h('th', null, 'Part'), h('th', null, 'Type'), h('th')), rows),
-    h('p', { class: 'hint' }, 'What can only be done in Lunar Magic or in the game (e.g. placing objects, starting a new save file) is in the manual.')),
-    [{ label: 'Done', primary: true }]);
+  return {
+    el: h('div', { class: 'pkg-map' },
+      h('p', null, `“${name}” has UberASM Tool folders next to folders their code includes. Assign its folders and files to folders of the UberASM project – like copying them into the UberASM Tool folder as its manual says. A folder passes its assignment on to everything in it.`),
+      treeBox,
+      summary,
+      h('h3', null, 'list.txt'),
+      callBox,
+      h('p', { class: 'hint' }, 'Assignments, settings and files can be changed afterwards in the UberASM tab.')),
+    read,
+  };
 }

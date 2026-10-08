@@ -44,6 +44,9 @@ function shapeOf(writes: Map<number, number> | undefined, pos: (off: number) => 
   return { w: x1 - x0 + 1, h: y1 - y0 + 1, sig: t.map(([x, y, v]) => `${x - x0},${y - y0},${v}`).sort().join(' ') };
 }
 
+// the level whose header (tileset, …) the objects are loaded with
+export type KindLevel = Pick<Level, 'number' | 'header'>;
+
 // Objects 01-3F, each with the low nibble 0-F (high = 2) and the high nibble 0-F (low = 2).
 // Runs in steps (one emulated level load each) so a UI can spread it over idle time.
 export class ObjKindProbe {
@@ -52,12 +55,12 @@ export class ObjKindProbe {
   private code = new Set<number>();
   private romRead = new Set<number>();
   private pos: (off: number) => [number, number] | undefined;
-  private next = 0;
+  private todo: [number, number][] = []; // spec ranges still to load, in order
   private emu: LevelEmulator;
-  private level: Level;
+  private level: KindLevel;
   private layer2Pointer: number;
 
-  constructor(emu: LevelEmulator, level: Level, layer2Pointer: number) {
+  constructor(emu: LevelEmulator, level: KindLevel, layer2Pointer: number) {
     this.emu = emu;
     this.level = level;
     this.layer2Pointer = layer2Pointer;
@@ -69,19 +72,24 @@ export class ObjKindProbe {
       for (let v = 0; v < 16; v++) this.specs.push({ num: n, size: 0x20 | v });
       for (let v = 0; v < 16; v++) this.specs.push({ num: n, size: (v << 4) | 2 });
     }
+    for (let i = 0; i < this.specs.length; i += PER) this.todo.push([i, Math.min(i + PER, this.specs.length)]);
   }
 
-  get done(): boolean { return this.next >= this.specs.length; }
+  get done(): boolean { return !this.todo.length; }
 
+  // one emulated level load; a crashing object (invalid type) spoils its whole batch, so a failed
+  // batch is split up and its halves are loaded in the next steps (a failed load takes long: splitting
+  // all at once would stall a UI for a second or more)
   step(): void {
-    if (this.done) return;
-    this.runs.push(...this.run(this.specs.slice(this.next, this.next + PER)));
-    this.next += PER;
+    const [a, b] = this.todo.shift() ?? [];
+    if (a === undefined || b === undefined) return;
+    const runs = this.run(this.specs.slice(a, b));
+    if (runs) runs.forEach((r, i) => (this.runs[a + i] = r));
+    else { const h = a + ((b - a) >> 1); this.todo.unshift([a, h], [h, b]); }
   }
 
-  // one emulated level load; a crashing object (invalid type) spoils its whole batch, so failed
-  // batches are split up
-  private run(batch: { num: number; size: number }[]): Run[] {
+  // null: the load failed and the batch has to be split
+  private run(batch: { num: number; size: number }[]): Run[] | null {
     const objs: LevelObject[] = batch.map((s, i) => ({ uid: newUid(), num: s.num, ext: 0, size: s.size, x: i * 32 + 16, y: 4 }));
     const owners: number[] = [-1, -1, -1, -1, -1];
     const body = serializeObjects(objs, [], false, owners);
@@ -91,10 +99,7 @@ export class ObjKindProbe {
     const byteOwner = new Int32Array(0x10000).fill(-1);
     owners.forEach((o, i) => (byteOwner[OV_L1 + i] = o));
     const r = this.emu.load(this.level.number, { layer1: l1, layer2Pointer: this.layer2Pointer, sprites: new Uint8Array([0, 0xff]), byteOwner, trace: true });
-    if (!r.ok && batch.length > 1) {
-      const h = batch.length >> 1;
-      return [...this.run(batch.slice(0, h)), ...this.run(batch.slice(h))];
-    }
+    if (!r.ok && batch.length > 1) return null;
     const tr = r.trace as ObjectTrace;
     for (const c of tr.code) this.code.add(c);
     for (const c of tr.rom) this.romRead.add(c);

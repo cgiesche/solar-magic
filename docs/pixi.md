@@ -9,15 +9,18 @@ Diese Seite beschreibt die Schnittstelle, die Ressourcen sehen, und wie der Edit
 
 ## Im Editor
 
-- **Hinzufügen:** *ROM → Patches → Hinzufügen …* mit einem Download (`.zip` oder `.asm`). Der Editor erkennt
+- **Hochladen:** *ROM → Packages … → Upload package …* mit einem Download (`.zip` oder `.asm`, auch ein ganzer
+  PIXI-Ordner). Der Editor erkennt
   Sprites (an `.json`/`.cfg`), Misc-Sprites (`.asm` mit `print "MAIN ",pc` in einem Ordner ihrer Art) und
   enthaltene Custom Blocks. Jeder Sprite bekommt die nächste freie Nummer seiner Art, jeder Block das nächste
-  freie Map16-Tile ab 200. Defines, die einen Sprite des Pakets meinen, werden auf dessen Nummer gesetzt
-  und im Dialog angezeigt: der Dateiname im Kommentar (`!Sprite = $18 ; Sprite number of BrutalBill.json`)
-  oder eine Misc-Art im Namen (`!bounce_sprite`).
-- **Verwalten:** Tab *Custom Sprites* im Patches-Dialog (auch *ROM → Custom Sprites …*): Einträge
-  der `list.txt`, Projektdateien, Import und Export eines PIXI-Ordners als `.zip`. Alles wird als ein Patch
-  mit den Quellen in der ROM verzeichnet und lässt sich wieder entfernen.
+  freie Map16-Tile ab 200. Defines, die einen Sprite des Pakets meinen, werden auf dessen Nummer gesetzt,
+  erkannt am Dateinamen im Kommentar (`!Sprite = $18 ; Sprite number of BrutalBill.json`)
+  oder an einer Misc-Art im Namen (`!bounce_sprite`).
+- **Konfigurieren:** Tab *Sprites* im Packages-Dialog, eine Konfigurationsansicht: Einträge der `list.txt`
+  (Sprite → Nummer) zuordnen und aufheben, jeder mit dem Paket, aus dem er stammt; Einstellungen der Dateien;
+  Export eines PIXI-Ordners als `.zip`. Hinzugefügt wird nur durch Hochladen eines Pakets, entfernt mit dem
+  Paket; eine aufgehobene Zuordnung lässt die Dateien im Projekt. Alles wird als ein Patch mit den Quellen in
+  der ROM verzeichnet.
 - **Platzieren:** Die Palette zeigt unter *Sprites* einen Abschnitt „Custom Sprites (PIXI)“ mit den Namen aus
   `Collection` und der Grafik, die das Spiel zeichnet – wie Lunar Magic nur die Varianten (Extra-Bit
   gelöscht/gesetzt), die `Collection` nennt; ohne `Collection` (`.cfg`) die ohne Extra-Bit. In den
@@ -99,7 +102,7 @@ Byte 3…: Extra-Bytes (0–12)
   Zeiger `$CE` weiter und setzt ihn am Ende der Schleife zurück. So passen auch lange Listen mit Extra-Bytes.
 - `.smwlevel`-Dateien enthalten die Größentabelle, mit der ihre Sprite-Daten geschrieben sind.
 - Ändert sich die Anzahl für einen Sprite, der schon in Levels steht, schreibt der Editor diese Levels
-  beim Übernehmen neu, wie PIXIs MeiMei.
+  bei der Änderung gleich mit neu, wie PIXIs MeiMei.
 
 ## Laufzeit-RAM
 
@@ -207,7 +210,7 @@ Ladeschleife `$02A82A`/`$02A846`/`$02A936`/`$02A9D7`/`$02ABE9`, Extra-Bits `$02A
 [Free RAM](patches.md#patches-anwenden)).
 
 Ändert sich die Anzahl der Extra-Bytes eines Sprites, der in Levels steht, schreibt der Editor diese Levels
-beim Übernehmen mit der neuen Größe neu (Extra-Bytes bleiben, soweit sie passen), wie PIXIs MeiMei. Beim
+bei der Änderung gleich mit der neuen Größe neu (Extra-Bytes bleiben, soweit sie passen), wie PIXIs MeiMei. Beim
 Entfernen fallen die Extra-Bytes weg.
 
 ## Grenzen

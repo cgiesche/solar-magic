@@ -47,7 +47,7 @@ export const emptyMusicProject = (): MusicProject => ({ songs: [], files: new Ma
 
 export const originalName = (file: string) => file.replace(/^originals\/\d+ /, '').replace(/\.txt$/i, '');
 
-// ---------- songs in a download ----------
+// ---------- songs in an upload ----------
 
 const dec = (b: Uint8Array) => strFromU8(b, true).replace(/^﻿/, '');
 
@@ -104,8 +104,8 @@ const norm = (p: string) => p.replace(/\\/g, '/').replace(/^\.\//, '').split('/'
 // ".." taken by the text, as Windows does ("Song/../optimized/x.brr" → "optimized/x.brr")
 const resolve = (p: string) => norm(p).split('/').reduce<string[]>((a, x) => (x === '..' ? a.slice(0, -1) : [...a, x]), []).join('/');
 
-// The songs of a download (zip or loose files) and the files they need, placed the way AddmusicK
-// looks for samples: next to the song (its folder + #path) – so a download keeps its layout under one
+// The songs of an upload (zip or loose files) and the files they need, placed the way AddmusicK
+// looks for samples: next to the song (its folder + #path) – so an upload keeps its layout under one
 // folder of the project, and samples it keeps elsewhere (e.g. a separate "samples" folder) are copied
 // to where the song expects them.
 export function songsFromFiles(name: string, files: Map<string, Uint8Array>, taken: Set<string> = new Set()): SongFiles {
@@ -170,7 +170,7 @@ export function songsFromZip(name: string, data: Uint8Array, taken?: Set<string>
   return songsFromFiles(name, files, taken);
 }
 
-// adds the songs of a download with the next free numbers (or `num` for the first); returns them
+// adds the songs of an upload with the next free numbers (or `num` for the first); returns them
 export function addSongs(p: MusicProject, sf: SongFiles, num?: number): MusicSong[] {
   for (const [f, c] of sf.files) p.files.set(f, c);
   const added: MusicSong[] = [];

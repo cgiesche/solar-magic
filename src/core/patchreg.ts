@@ -5,6 +5,7 @@
 // ranges (`ram`) and the RAM its code writes with long addressing (`ramSeen`, found in its code).
 
 import { Rom, pcToSnes, snesToPc } from './rom.ts';
+import type { PartKind } from './parts.ts';
 
 const MAGIC = [0x53, 0x4d, 0x57, 0x41]; // "SMWA"
 const VERSION = 1;
@@ -21,7 +22,7 @@ export interface PatchEntry {
   backup: number[]; // SNES addresses of the RATS blocks holding the original bytes of segs
   own: number[]; // pc of the RATS tags of the patch's free space blocks
   check: number; // hash of the patched bytes of segs, to notice later edits
-  kind?: 'patch' | 'uberasm' | 'blocks' | 'vram' | 'pixi' | 'music';
+  kind?: PartKind | 'vram'; // 'vram': the editor's own VRAM patch
   srcId?: string; // the sources (zip) in the editor data (rom.extra), if kept
   src?: number[]; // older ROMs: SNES addresses of RATS blocks holding the sources (see migrateSources)
   srcSize?: number;
@@ -34,6 +35,10 @@ export interface PatchEntry {
 export type RamClaim = [number, number, number?];
 
 interface Registry { v: number; patches: PatchEntry[] }
+
+// kinds as stored in the ROM, where they differ from the part kind (kept so older editors read them)
+const STORED: Partial<Record<PartKind, string>> = { block: 'blocks', sprite: 'pixi' };
+const FROM_STORED: Partial<Record<string, PartKind>> = { blocks: 'block', pixi: 'sprite' };
 
 function findRegistry(rom: Rom): number {
   for (const b of rom.scanRats()) {
@@ -48,14 +53,17 @@ function read(rom: Rom): Registry {
   if (p < 0) return { v: VERSION, patches: [] };
   const size = rom.isRatsAt(p - 8);
   if (rom.data[p + 4] > VERSION) throw new Error('Patch registry in the ROM is from a newer editor version');
-  return JSON.parse(new TextDecoder().decode(rom.data.subarray(p + 5, p - 8 + 8 + size))) as Registry;
+  const reg = JSON.parse(new TextDecoder().decode(rom.data.subarray(p + 5, p - 8 + 8 + size))) as Registry;
+  for (const e of reg.patches) if (e.kind) e.kind = FROM_STORED[e.kind] ?? e.kind;
+  return reg;
 }
 
 function write(rom: Rom, reg: Registry): void {
   const old = findRegistry(rom);
   if (old >= 0) rom.freeAt(pcToSnes(old));
   if (!reg.patches.length) return;
-  const json = new TextEncoder().encode(JSON.stringify(reg));
+  const stored = { ...reg, patches: reg.patches.map((e) => (e.kind && e.kind !== 'vram' && STORED[e.kind] ? { ...e, kind: STORED[e.kind] } : e)) };
+  const json = new TextEncoder().encode(JSON.stringify(stored));
   if (json.length + 5 > CHUNK) throw new Error('Patch registry is too large');
   const buf = new Uint8Array(json.length + 5);
   buf.set(MAGIC); buf[4] = VERSION; buf.set(json, 5);

@@ -10,7 +10,7 @@ export interface RomEdit {
   runs: Run[];
   // ROM size changed (expansion): whole ROM before/after instead of runs
   whole: { before: Uint8Array; after: Uint8Array } | null;
-  extra?: { before: Map<string, Uint8Array>; after: Map<string, Uint8Array> }; // the editor data changed (sources of patches)
+  extra?: { before: Map<string, Uint8Array>; after: Map<string, Uint8Array> }; // the editor data entries it changed (sources of patches)
   key: string | null; // edits with the same key in quick succession merge into one
   time: number;
 }
@@ -56,10 +56,19 @@ function equal(a: Uint8Array, b: Uint8Array): boolean {
   return a.length === b.length && matches(a, 0, b);
 }
 
-// same entries (blobs are never changed in place, so identity is enough)
-function sameMap(a: Map<string, Uint8Array>, b: Map<string, Uint8Array>): boolean {
-  if (a.size !== b.size) return false;
-  for (const [k, v] of a) if (b.get(k) !== v) return false;
+// the entries that differ, as before/after (blobs are never changed in place, so identity is enough);
+// null when none do
+function changedEntries(a: Map<string, Uint8Array>, b: Map<string, Uint8Array>): RomEdit['extra'] | null {
+  const before = new Map<string, Uint8Array>(), after = new Map<string, Uint8Array>();
+  for (const [k, v] of a) if (b.get(k) !== v) { before.set(k, v); const n = b.get(k); if (n) after.set(k, n); }
+  for (const [k, v] of b) if (!a.has(k)) after.set(k, v);
+  return before.size || after.size ? { before, after } : null;
+}
+
+// the entries the edit changed are as it left them (undo) or found them (redo); missing ones absent
+function entriesAre(extra: Map<string, Uint8Array>, e: NonNullable<RomEdit['extra']>, forward: boolean): boolean {
+  const [from, to] = forward ? [e.before, e.after] : [e.after, e.before];
+  for (const k of new Set([...from.keys(), ...to.keys()])) if (extra.get(k) !== from.get(k)) return false;
   return true;
 }
 
@@ -129,7 +138,7 @@ export class RomHistory {
     this.snap = null;
     this.snapExtra = null;
     const now = this.rom.data;
-    const extra = sameMap(beforeExtra, this.rom.extra) ? undefined : { before: beforeExtra, after: new Map(this.rom.extra) };
+    const extra = changedEntries(beforeExtra, this.rom.extra) ?? undefined;
     let e: RomEdit;
     if (before.length !== now.length) e = { label: this.label, runs: [], whole: { before, after: now.slice() }, key: null, time: Date.now() };
     else {
@@ -169,13 +178,20 @@ export class RomHistory {
   }
 
   private applies(e: RomEdit, forward: boolean): boolean {
+    if (e.extra && !entriesAre(this.rom.extra, e.extra, forward)) return false;
     const d = this.rom.data;
     if (e.whole) return equal(d, forward ? e.whole.before : e.whole.after);
     return e.runs.every((r) => matches(d, r.off, forward ? r.old : r.neu));
   }
 
   private apply(e: RomEdit, forward: boolean): void {
-    if (e.extra) this.rom.extra = new Map(forward ? e.extra.after : e.extra.before);
+    if (e.extra) {
+      const [from, to] = forward ? [e.extra.before, e.extra.after] : [e.extra.after, e.extra.before];
+      const extra = new Map(this.rom.extra);
+      for (const k of from.keys()) extra.delete(k);
+      for (const [k, v] of to) extra.set(k, v);
+      this.rom.extra = extra;
+    }
     if (e.whole) { this.rom.data = (forward ? e.whole.after : e.whole.before).slice(); return; }
     for (const r of e.runs) this.rom.data.set(forward ? r.neu : r.old, r.off);
   }

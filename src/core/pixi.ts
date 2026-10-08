@@ -323,7 +323,7 @@ endmacro`);
     name: PIXI_NAME,
     main: `${BUILTIN_DIR}routines_main.asm`,
     files,
-    kind: 'pixi',
+    kind: 'sprite',
     archive: projectToZip(p),
     ram: PIXI_RAM,
     next: (done) => {
@@ -393,7 +393,7 @@ export function projectFromZip(data: Uint8Array): PixiProject {
 }
 
 export function pixiEntry(rom: Rom): PatchEntry | null {
-  return listPatches(rom).find((p) => p.kind === 'pixi') ?? null;
+  return listPatches(rom).find((p) => p.kind === 'sprite') ?? null;
 }
 export function loadPixiProject(rom: Rom): PixiProject | null {
   const e = pixiEntry(rom);
@@ -436,7 +436,8 @@ export function savePixiProject(rom: Rom, p: PixiProject): ApplyResult {
     }
     return r;
   };
-  if (!p.list.length) {
+  // a project without entries keeps its files (to assign them again); without files too it is removed
+  if (!p.list.length && ![...p.files.keys()].some((f) => f !== 'list.txt')) {
     const warnings = e ? uninstallPatch(rom, e.id) : [];
     return after({ ok: true, errors: [], warnings, prints: [] });
   }

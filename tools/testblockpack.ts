@@ -5,7 +5,7 @@ import { zipSync } from 'fflate';
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadAsar } from '../src/core/asar.ts';
-import { readPackage, detectKind } from '../src/core/patchpkg.ts';
+import { readUpload, detectKind } from '../src/core/patchpkg.ts';
 import { planBlockPack, applyBlockPack } from '../src/core/blockpack.ts';
 import { parseMap16File } from '../src/core/map16file.ts';
 import { blockOf, actsLike, extTileWords } from '../src/core/map16ext.ts';
@@ -42,19 +42,19 @@ const zip = zipSync({
   'Pack/readme.txt': enc.encode('read me'),
 });
 
-const pkg = readPackage('Pack.zip', zip);
-const info = detectKind(pkg);
-check(info.kind === 'blockpack', 'detected as block package');
-const m = parseMap16File(pkg.files.get('Tiles.map16')!);
+const upload = readUpload('Pack.zip', zip);
+const info = detectKind(upload);
+check(info.kind === 'block' && !!info.pack, 'detected as block package');
+const m = parseMap16File(upload.files.get('Tiles.map16')!);
 check(m.width === 2 && m.tiles[1][0] === 0x1a01 && m.acts?.[0] === 0x25, '.map16 parsed');
-const plan = planBlockPack(pkg, info.file);
+const plan = planBlockPack(upload, info.file);
 check(plan.blocks.length === 2 && plan.map16?.at === 0x500 && plan.gfx[0]?.num === 0x80 && plan.gfx[0]?.slot === 'BG2' && !plan.missing.length, 'plan: 2 blocks, Map16 at 500, ExGFX 80 as BG2');
 
 const rom = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
 installEditorPatch(rom);
 const emu = new LevelEmulator(rom); emu.boot();
 const blank = map16Source(rom, emu.load(0x105)).fg(0x25);
-const r = applyBlockPack(rom, pkg, plan, { blank, level: 0x105 });
+const r = applyBlockPack(rom, upload, plan, { blank, level: 0x105 });
 check(r.ok, 'package applied: ' + [...r.errors, ...r.notes].join(' | '));
 check(!!blockOf(rom, 0x500) && !!blockOf(rom, 0x501) && actsLike(rom, 0x500) === 0x25, 'blocks and acts like on 500/501');
 check(extTileWords(rom, 0x501)?.join() === words[1].join(), 'Map16 graphics of 501');
@@ -66,7 +66,7 @@ check(gfxEntry(rom, 0x80)?.raw === true && levelExtGfx(rom, 0x105)[0] === 0xff &
   const rom = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
   installEditorPatch(rom);
   check(installVramPatch(rom).ok, 'VRAM patch installed');
-  const r = applyBlockPack(rom, pkg, plan, { blank, level: 0x105 });
+  const r = applyBlockPack(rom, upload, plan, { blank, level: 0x105 });
   check(r.ok && levelExtGfx(rom, 0x105)[0] === 0x80, 'with the VRAM patch: ExGFX 80 set as BG2 of level 105');
   const e = new LevelEmulator(rom); e.boot();
   const lv = loadLevel(rom, 0x105);
@@ -81,12 +81,12 @@ check(gfxEntry(rom, 0x80)?.raw === true && levelExtGfx(rom, 0x105)[0] === 0xff &
 
 // the real package, if present locally
 try {
-  const real = readPackage('RockClimbBlocksUpdate.zip', new Uint8Array(readFileSync('test/fixtures/RockClimbBlocksUpdate.zip')));
+  const real = readUpload('RockClimbBlocksUpdate.zip', new Uint8Array(readFileSync('test/fixtures/RockClimbBlocksUpdate.zip')));
   const ri = detectKind(real);
   const rp = planBlockPack(real, ri.file);
   const rom2 = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
   const rr = applyBlockPack(rom2, real, rp, { blank, level: 0x105 });
-  check(ri.kind === 'blockpack' && rr.ok, 'RockClimbBlocks: ' + [...rr.errors, ...rr.notes].join(' | '));
+  check(ri.kind === 'block' && !!ri.pack && rr.ok, 'RockClimbBlocks: ' + [...rr.errors, ...rr.notes].join(' | '));
 } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; }
 
 console.log(bad ? `${bad} failures` : 'all ok');

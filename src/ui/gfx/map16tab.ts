@@ -420,7 +420,7 @@ export class Map16Tab implements WsPanel {
         h('div', { class: 'grow' }, a === t ? 'like itself' : `like tile ${hex(a, 3)}`, h('div', { class: 'hint' }, info ? probeText(info) : 'determining …')),
         h('button', { onclick: () => this.pickActs(), title: 'Take the behavior from another tile' }, 'Change …')),
       h('div', { class: 'row' }, h('span', { class: 'hint grow' }, file ? `Custom Block: ${file}` : 'No custom block'),
-        h('button', { onclick: () => void openResources(app, 'blocks', { tile: t, onChange: () => this.redraw() }) }, 'Custom Blocks …')),
+        h('button', { onclick: () => void openResources(app, 'block', { tile: t, onChange: () => this.redraw() }) }, 'Custom Blocks …')),
     );
   }
 

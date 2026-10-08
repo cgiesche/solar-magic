@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadAsar } from '../src/core/asar.ts';
-import { packageFiles } from '../src/core/patchpkg.ts';
+import { uploadFiles } from '../src/core/patchpkg.ts';
 import { suggestMapping, placed, suggestCalls, untaken, docFiles, extraParts } from '../src/core/pkgmap.ts';
 import { emptyProject, saveProject } from '../src/core/uberproject.ts';
 import { ALL } from '../src/core/uberasm.ts';
@@ -61,7 +61,7 @@ const fallback = { level: 0x105, gamemode: 0x14, overworld: 0 };
 }
 
 {
-  const files = packageFiles('retry-system_v2.2.0.zip', new Uint8Array(readFileSync('test/fixtures/retry-system_v2.2.0.zip')));
+  const files = uploadFiles('retry-system_v2.2.0.zip', new Uint8Array(readFileSync('test/fixtures/retry-system_v2.2.0.zip')));
   const s = suggestMapping(files)!;
   const p = placed(files.keys(), s.rules);
   const calls = suggestCalls(files, p, fallback);

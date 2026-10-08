@@ -64,7 +64,7 @@ export function openDefines(files: Map<string, Uint8Array>, path: string, onChan
   const form = definesForm(text);
   const dlg = modal(`Settings: ${path.split('/').pop()}`, h('div', { class: 'patch-settings define-dialog' },
     h('div', { class: 'row' },
-      h('span', { class: 'hint grow' }, 'The values are stored in the file itself; they take effect with “Apply”.'),
+      h('span', { class: 'hint grow' }, 'The values are stored in the file itself; “OK” applies them to the ROM (Ctrl+Z undoes).'),
       h('button', { title: 'The whole file as text – for anything that is not a setting of the form !name = value', onclick: () => { dlg.close(); openTextEdit(files, path, onChange); } }, 'Edit as text …')),
     form.rows), [
     { label: 'Cancel' },
@@ -93,7 +93,7 @@ export function openTextEdit(files: Map<string, Uint8Array>, path: string, onCha
     area.setRangeText('\t', area.selectionStart, area.selectionEnd, 'end');
   } });
   modal(`Edit: ${path}`, h('div', { class: 'text-edit-box' },
-    h('p', { class: 'hint' }, 'The change takes effect with “Apply”; Asar then reports errors with file and line.'), area), [
+    h('p', { class: 'hint' }, '“OK” applies the change to the ROM (Ctrl+Z undoes); Asar reports errors with file and line.'), area), [
     { label: 'Cancel' },
     { label: 'OK', primary: true, onClick: () => {
       if (area.value === text) return;

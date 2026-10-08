@@ -1,5 +1,7 @@
 import './style.css';
 import { Rom } from './core/rom.ts';
+import { wrapLegacyPatches } from './core/packages.ts';
+import { openLevelImport } from './ui/levelimport.ts';
 import { createBps, crc32 } from './core/bps.ts';
 
 const SMW_CLEAN_CRC = 0xb19ed489; // Super Mario World (U), headerless
@@ -62,6 +64,11 @@ function startWith(rom: Rom, name: string): void {
     const moved = [migratePatchSources(rom), migratePackageFiles(rom)].some(Boolean);
     if (moved) { saveRom(name, rom).catch(() => {}); log('Sources of patches and packages moved out of the ROM into the editor data (saved with “Save project”).'); }
   } catch (e) { console.warn('migrating sources', e); }
+  // patches applied before packages were tracked: a legacy package each
+  try {
+    const legacy = wrapLegacyPatches(rom);
+    if (legacy.length) { saveRom(name, rom).catch(() => {}); log(`${legacy.length} patch(es) applied before packages were tracked are now listed as legacy packages.`); }
+  } catch (e) { console.warn('legacy packages', e); }
   if (disableUnsafeExtGfx(rom)) {
     saveRom(name, rom).catch(() => {});
     toast('BG2/BG3 graphics were turned off: they overwrote the layer 1 tilemap (broken background). The assignments stay saved and apply again once the VRAM patch is available.', 'error');
@@ -157,6 +164,7 @@ function buildUi(app: App): void {
       { label: 'Insert screen …', disabled: () => app.level.header.screens >= 32, onClick: () => openScreenDialog(app, 'insert') },
       { label: 'Delete screen …', disabled: () => app.level.header.screens <= 1, onClick: () => openScreenDialog(app, 'delete') },
       { label: 'Clear level …', onClick: () => clearLevelConfirm(app) },
+      { label: 'Import LM level file …', title: 'A Lunar Magic level file (.mwl, or a .zip with one): its background, Map16 tiles, graphics slots and colors into this level', onClick: () => void openLevelImport(app) },
       'sep',
       { label: 'Secondary entrances …', onClick: () => openEntrancesDialog(app) },
     ] },
@@ -164,11 +172,7 @@ function buildUi(app: App): void {
       { label: 'ROM information …', onClick: () => openRomInfo(app) },
       { label: 'Expand ROM …', disabled: () => app.rom.size >= 0x400000, onClick: () => openExpandDialog(app) },
       'sep',
-      { label: 'Patches …', title: 'Apply and manage ASM patches (Asar)', onClick: () => openResources(app, 'patches') },
-      { label: 'UberASM …', onClick: () => openResources(app, 'uber') },
-      { label: 'Custom Blocks …', onClick: () => openResources(app, 'blocks') },
-      { label: 'Custom Sprites …', onClick: () => openResources(app, 'sprites') },
-      { label: 'Music …', title: 'Custom music (AddmusicK): add songs, listen, set the music of levels', onClick: () => openResources(app, 'music') },
+      { label: 'Packages …', title: 'Third-party content: upload packages (patches, UberASM, blocks, sprites, music) and configure what they brought', onClick: () => openResources(app, 'packages') },
       { label: 'Install editor patch …', disabled: () => hasEditorPatch(app.rom), onClick: () => installEditorPatchAction(app) },
       'sep',
       { label: 'Message boxes …', onClick: () => openMessagesDialog(app) },

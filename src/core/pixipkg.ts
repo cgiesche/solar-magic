@@ -5,7 +5,7 @@
 // name, e.g. !bounce_sprite) are set to its number.
 
 import type { Rom } from './rom.ts';
-import { scanDefines, rewriteDefines, type PatchPackage } from './patchpkg.ts';
+import { scanDefines, rewriteDefines, type Upload } from './patchpkg.ts';
 import { FOLDER, MISC_KINDS, numberRange, loadPixiProject, savePixiProject, parseCfg, parseJsonCfg, type PixiEntry, type PixiProject } from './pixi.ts';
 import { loadBlockProject, saveBlockProject, type BlockProject } from './blocks.ts';
 import { setExtTileWords, EXT_FIRST, EXT_TILES } from './map16ext.ts';
@@ -40,11 +40,11 @@ const isBlock = (text: string) => {
   return !!first && /^db\s+\$(42|37)\b/i.test(first);
 };
 
-export function planPixiPackage(rom: Rom, pkg: PatchPackage): PixiPlan {
-  const proj = loadPixiProject(rom) ?? { files: new Map(), list: [] };
+// the sprites, blocks and routines of an upload, without numbers and tiles yet (-1)
+export function pixiParts(upload: Upload): Omit<PixiPlan, 'links'> {
   const sprites: PixiPlanSprite[] = [];
   const used = new Set<string>(); // asm files belonging to a cfg/json
-  for (const [f, data] of pkg.files) {
+  for (const [f, data] of upload.files) {
     if (!/\.(json|cfg)$/i.test(f)) continue;
     try {
       const c = /\.json$/i.test(f) ? parseJsonCfg(dec.decode(data), f) : parseCfg(dec.decode(data), f);
@@ -55,7 +55,7 @@ export function planPixiPackage(rom: Rom, pkg: PatchPackage): PixiPlan {
   }
   const blocks: PixiPlanBlock[] = [];
   const routines: string[] = [];
-  for (const [f, data] of pkg.files) {
+  for (const [f, data] of upload.files) {
     if (!/\.asm$/i.test(f) || used.has(f)) continue;
     if (/(^|\/)routines\//i.test(f)) { routines.push(f); continue; }
     if (/(^|\/)_header\.asm$/i.test(f)) continue;
@@ -69,9 +69,15 @@ export function planPixiPackage(rom: Rom, pkg: PatchPackage): PixiPlan {
     const k = folderKind(f);
     sprites.push({ kind: k && MISC_KINDS.includes(k) ? k : k ?? 'sprites', file: f, num: -1, name: base(f).replace(/\.asm$/i, '') });
   }
+  return { sprites, blocks, routines };
+}
+
+export function planPixiUpload(rom: Rom, upload: Upload): PixiPlan {
+  const proj = loadPixiProject(rom) ?? { files: new Map(), list: [] };
+  const { sprites, blocks, routines } = pixiParts(upload);
   // numbers: a sprite file already in the project keeps its number, the others get the next free one
   for (const s of sprites) {
-    const dest = destOf(pkg, s);
+    const dest = destOf(upload, s);
     const have = proj.list.find((e) => e.kind === s.kind && e.file === dest);
     if (have) { s.num = have.num; continue; }
     const [lo, hi] = numberRange(s.kind);
@@ -88,7 +94,7 @@ export function planPixiPackage(rom: Rom, pkg: PatchPackage): PixiPlan {
   for (const b of blocks) { while (tiles.has(t) && t < EXT_TILES - 1) t++; b.tile = t; tiles.add(t++); }
   // defines naming a sprite of the package
   const links: PixiLink[] = [];
-  for (const [f, data] of pkg.files) {
+  for (const [f, data] of upload.files) {
     if (!/\.asm$/i.test(f)) continue;
     for (const d of scanDefines(dec.decode(data))) {
       const byFile = sprites.findIndex((s) => d.comment.toLowerCase().includes(base(s.file).toLowerCase()));
@@ -107,7 +113,7 @@ const isLevelKind = (k: SpriteFolder) => k === 'sprites' || k === 'shooters' || 
 
 // where a sprite's file goes in the project: below the folder of its type, with the path inside the
 // package's folder for that type (or next to the file) kept
-function destOf(pkg: PatchPackage, s: PixiPlanSprite): string {
+function destOf(upload: Upload, s: PixiPlanSprite): string {
   return FOLDER[s.kind] + relIn(s.file, s.kind);
 }
 function relIn(f: string, kind: SpriteFolder): string {
@@ -122,18 +128,18 @@ export function hexNum(n: number): string {
 
 // adds the package to the ROM's PIXI project (and its blocks to the GPS project); blank: tile words for new Map16 tiles,
 // gfxOf: tile words to copy for a block's new tile (from its acts like)
-export function applyPixiPackage(rom: Rom, pkg: PatchPackage, plan: PixiPlan, blank: number[], gfxOf: (acts: number) => number[]): ApplyResult {
+export function applyPixiUpload(rom: Rom, upload: Upload, plan: PixiPlan, blank: number[], gfxOf: (acts: number) => number[]): ApplyResult {
   const snapshot = rom.snapshot();
-  const r = addPackage(rom, pkg, plan, blank, gfxOf);
+  const r = addUpload(rom, upload, plan, blank, gfxOf);
   if (!r.ok) rom.restore(snapshot); // all or nothing
   return r;
 }
 
-function addPackage(rom: Rom, pkg: PatchPackage, plan: PixiPlan, blank: number[], gfxOf: (acts: number) => number[]): ApplyResult {
+function addUpload(rom: Rom, upload: Upload, plan: PixiPlan, blank: number[], gfxOf: (acts: number) => number[]): ApplyResult {
   const proj: PixiProject = loadPixiProject(rom) ?? { files: new Map(), list: [] };
   // define values from the chosen numbers
   const texts = new Map<string, string>();
-  const textOf = (f: string) => texts.get(f) ?? dec.decode(pkg.files.get(f)!);
+  const textOf = (f: string) => texts.get(f) ?? dec.decode(upload.files.get(f)!);
   const byFile = new Map<string, Record<string, string>>();
   for (const l of plan.links) {
     const d = byFile.get(l.file) ?? {};
@@ -141,7 +147,7 @@ function addPackage(rom: Rom, pkg: PatchPackage, plan: PixiPlan, blank: number[]
     byFile.set(l.file, d);
   }
   for (const [f, d] of byFile) texts.set(f, rewriteDefines(textOf(f), d).text);
-  const content = (f: string) => (texts.has(f) ? enc.encode(texts.get(f)!) : pkg.files.get(f)!);
+  const content = (f: string) => (texts.has(f) ? enc.encode(texts.get(f)!) : upload.files.get(f)!);
 
   // the files of a sprite or block: those in its folder, except what belongs to a deeper folder of another
   // one, the other sprites' and blocks' own files and the routines
@@ -149,7 +155,7 @@ function addPackage(rom: Rom, pkg: PatchPackage, plan: PixiPlan, blank: number[]
   const dirs = [...new Set([...mains].map(dirOf))];
   const filesOf = (main: string) => {
     const dir = dirOf(main);
-    return [...pkg.files.keys()].filter((f) => f.startsWith(dir) && (f === main || !mains.has(f)) && !/(^|\/)routines\//i.test(f)
+    return [...upload.files.keys()].filter((f) => f.startsWith(dir) && (f === main || !mains.has(f)) && !/(^|\/)routines\//i.test(f)
       && !dirs.some((d) => d.length > dir.length && d.startsWith(dir) && f.startsWith(d)));
   };
   for (const s of plan.sprites) {

@@ -6,7 +6,7 @@
 import { zipSync, unzipSync } from 'fflate';
 import type { App } from './app.ts';
 import { kvGet, kvDel } from './storage.ts';
-import { snapshot, partsBetween, mergeParts, isEmptyParts, emptyParts, savePackage, listPackages, packageArchive, type PkgRecord } from '../core/pkgreg.ts';
+import { snapshot, partsBetween, mergeParts, isEmptyParts, emptyParts, savePackage, packageArchive, type Package } from '../core/pkgreg.ts';
 
 const kvKey = (id: string) => `pkg:${id}`;
 
@@ -15,9 +15,9 @@ export interface Tracker {
 }
 
 // `rec`: an installed package getting more (a part, an imported graphic, new settings)
-export function trackPackage(app: App, name: string, fileName: string, files: Map<string, Uint8Array> | null, rec?: PkgRecord): Tracker {
+export function trackPackage(app: App, name: string, fileName: string, files: Map<string, Uint8Array> | null, rec?: Package): Tracker {
   let before = snapshot(app.rom);
-  let cur: PkgRecord | null = rec ?? null;
+  let cur: Package | null = rec ?? null;
   return {
     done() {
       const after = snapshot(app.rom);
@@ -25,7 +25,7 @@ export function trackPackage(app: App, name: string, fileName: string, files: Ma
       before = after;
       if (isEmptyParts(parts) && (!cur || cur.patches.every((p) => after.patches.has(p)))) return;
       const first = !cur;
-      const base: PkgRecord = cur ?? { id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`, name, fileName, added: new Date().toISOString(), ...emptyParts() };
+      const base: Package = cur ?? { id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`, name, fileName, added: new Date().toISOString(), ...emptyParts() };
       let archive: Uint8Array | undefined;
       if (first && files) {
         archive = zipSync(Object.fromEntries(files), { level: 9 });
@@ -39,7 +39,7 @@ export function trackPackage(app: App, name: string, fileName: string, files: Ma
 }
 
 // the files of an installed package, null if they are kept nowhere
-export async function recordFiles(app: App, rec: PkgRecord): Promise<Map<string, Uint8Array> | null> {
+export async function recordFiles(app: App, rec: Package): Promise<Map<string, Uint8Array> | null> {
   const a = packageArchive(app.rom, rec);
   if (a) return new Map(Object.entries(unzipSync(a)));
   const kept = await kvGet<[string, Uint8Array][]>(kvKey(rec.id)).catch(() => undefined);
@@ -48,8 +48,4 @@ export async function recordFiles(app: App, rec: PkgRecord): Promise<Map<string,
 
 export function forgetRecordFiles(id: string): void {
   kvDel(kvKey(id)).catch(() => {});
-}
-
-export function findPackage(app: App, id: string): PkgRecord | null {
-  try { return listPackages(app.rom).find((r) => r.id === id) ?? null; } catch { return null; }
 }
