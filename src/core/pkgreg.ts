@@ -142,7 +142,7 @@ export interface Snapshot {
 const hashes = (files: Map<string, Uint8Array> | undefined) => new Map([...(files ?? [])].filter(([f]) => f !== 'list.txt').map(([f, c]) => [f, hashBytes([c])]));
 const tryLoad = <T>(load: () => T | null): T | null => { try { return load(); } catch { return null; } };
 
-export function snapshot(rom: Rom): Snapshot {
+function snapshot(rom: Rom): Snapshot {
   const uber = tryLoad(() => loadProject(rom));
   const blocks = tryLoad(() => loadBlockProject(rom));
   const pixi = tryLoad(() => loadPixiProject(rom));
@@ -179,7 +179,7 @@ function changedTiles(a: string[], b: string[], first: number): number[] {
 const changedFiles = (a: Map<string, number>, b: Map<string, number>) => [...b].filter(([f, h]) => a.get(f) !== h).map(([f]) => f);
 
 // what came in between two snapshots
-export function partsBetween(a: Snapshot, b: Snapshot): PackageParts {
+function partsBetween(a: Snapshot, b: Snapshot): PackageParts {
   const other: Partial<Record<Other, string>> = {};
   for (const k of OTHER) if (b.other[k] && b.other[k] !== a.other[k]) other[k] = b.other[k];
   return {
@@ -198,7 +198,7 @@ export function partsBetween(a: Snapshot, b: Snapshot): PackageParts {
   };
 }
 
-export function isEmptyParts(p: PackageParts): boolean {
+function isEmptyParts(p: PackageParts): boolean {
   return !p.patches.length && !p.uber.files.length && !p.uber.calls.length && !Object.keys(p.uber.other).length
     && !p.blocks.files.length && !p.blocks.tiles.length && !p.pixi.files.length && !p.pixi.list.length && !p.gfx.length && !p.music?.length && !p.map16?.length && !p.bgMap16?.length;
 }
@@ -209,7 +209,7 @@ const union = <T>(a: T[], b: T[], key: (x: T) => string = String) => {
 };
 
 // the record with more parts; patches no longer in the ROM (applied anew under a new id) are dropped
-export function mergeParts(r: Package, p: PackageParts, now: Snapshot): Package {
+function mergeParts(r: Package, p: PackageParts, now: Snapshot): Package {
   return {
     ...r,
     patches: union(r.patches.filter((id) => now.patches.has(id)), p.patches),

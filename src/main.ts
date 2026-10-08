@@ -292,7 +292,7 @@ function buildUi(app: App): void {
     const job = app.gfxImport;
     app.gfxImport = null;
     if (!job) return;
-    void setWorkspace('gfx', { tab: 'gfx' }).then(async (ok) => { if (ok) job.done(await ws!.gfx.importNew(job.file)); });
+    void setWorkspace('gfx', { tab: 'gfx' }).then((ok) => { if (ok) void ws!.gfx.importNew(job.file, job.into ?? undefined); });
   });
 
   window.onkeydown = (e: KeyboardEvent) => {

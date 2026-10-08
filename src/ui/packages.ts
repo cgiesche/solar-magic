@@ -21,7 +21,7 @@ import type { UberProject } from '../core/uberproject.ts';
 import type { BlockProject } from '../core/blocks.ts';
 import { map16Source } from '../core/render.ts';
 import { storedUpload, toUpload, settingsForm, reapplyPackagePatch, patchDone, type PackagesTab } from './patchmanager.ts';
-import { recordFiles, forgetRecordFiles, trackPackage } from './pkgtrack.ts';
+import { recordFiles, forgetRecordFiles } from './pkgtrack.ts';
 import { romChanged, logView, errorText, type Pane } from './projectpane.ts';
 import { definesButton, editButton } from './defineedit.ts';
 import { openDocs, packageDocs, forgetDocs } from './docview.ts';
@@ -304,8 +304,7 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
   // into a free ExGFX number, in the graphics workspace; the number goes to the package
   function importGfx(file: File, rec: Package | null): void {
     host.leave(() => {
-      const t = rec ? trackPackage(app, rec.name, rec.fileName, null, rec) : null;
-      app.gfxImport = { file, done: (n) => { if (n !== null) t?.done(); } };
+      app.gfxImport = { file, into: rec };
       app.emit('import-gfx');
     });
   }

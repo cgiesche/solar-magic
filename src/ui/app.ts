@@ -17,6 +17,7 @@ import { spriteMemJob, usedSpriteMemory } from '../core/spritemem.ts';
 import { DM16_EXT, hasEditorPatch, installEditorPatch, levelGfx, defaultGfx } from '../core/patches.ts';
 import { gfxSkipMask, gfxFilesHash } from '../core/gfxpages.ts';
 import { STRUCT_EXT, STRUCT_MAX, TRANSPARENT, listStructures, readStructure, writeStructure, type Structure } from '../core/structs.ts';
+import type { Package } from '../core/pkgreg.ts';
 import { kvSet, kvGet, kvEntries, kvKeys, kvWrite, saveRom } from './storage.ts';
 import { ResultCache, RomFingerprint, RomReads, type CacheEntry } from '../core/romdeps.ts';
 import { bgFromWram, bgIndex, encodeBg } from '../core/bg.ts';
@@ -75,7 +76,7 @@ export class App {
   romHistory: RomHistory;
   wsTile = 0; // Map16 tile for 'open-map16' (opens the graphics workspace there)
   wsTileBg = false; // wsTile is a BG tile
-  gfxImport: { file: File; done: (num: number | null) => void } | null = null; // for 'import-gfx'
+  gfxImport: { file: File; into: Package | null } | null = null; // for 'import-gfx'
   wsGfx: number | null = null; // GFX file for 'open-gfx'
   // order of level and ROM edits, so one undo/redo serves both (n: stack length after the push)
   undoOrder: { kind: 'level' | 'rom'; n: number }[] = [];

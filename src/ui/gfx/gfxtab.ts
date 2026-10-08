@@ -19,6 +19,7 @@ import {
   levelExtGfx, setLevelExtGfx, extGfxAvailable,
 } from '../../core/patches.ts';
 import { importGfxFile, exgfxName } from '../../core/map16file.ts';
+import { recordPackageChange, type Package } from '../../core/pkgreg.ts';
 import { parsePrimaryHeader, L1_PTRS } from '../../core/level.ts';
 import { map16Source } from '../../core/render.ts';
 import { EXT_FIRST, EXT_TILES, map16Ext } from '../../core/map16ext.ts';
@@ -470,15 +471,15 @@ export class GfxTab implements WsPanel {
     } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); return null; }
   }
 
-  // import into the first free ExGFX number (from the slot gallery, or a file of a package); the number it
-  // went to, null: cancelled
-  async importNew(given?: File): Promise<number | null> {
+  // import into the first free ExGFX number (from the slot gallery, or a file of a package: `into`, which
+  // the number goes to in the same undo step); the number it went to, null: cancelled
+  async importNew(given?: File, into?: Package): Promise<number | null> {
     const file = given ?? await pickFile('.bin,.png,image/png');
     if (!file) return null;
     const n = this.freeExGfx();
     if (n < 0) { toast('Keine freie ExGFX-Nummer mehr', 'error'); return null; }
     this.select(n);
-    return /\.png$/i.test(file.name) ? this.importPng(file) : this.importBin(file);
+    return /\.png$/i.test(file.name) ? this.importPng(file, into) : this.importBin(file, into);
   }
 
   // ---------- tools bar ----------
@@ -946,8 +947,18 @@ export class GfxTab implements WsPanel {
     c.toBlob(async (b) => { if (b) { const name = `${f.num >= ANIM_FILE ? lmAnimName(f.num) : gfxName(f.num)}.png`; downloadBytes(name, new Uint8Array(await b.arrayBuffer()), 'image/png'); toast(`${name} exported`); } }, 'image/png');
   }
 
+  // writes an imported file as one undoable ROM edit; into: the package that gets the new number
+  private importEdit<T>(label: string, into: Package | undefined, write: () => T): T {
+    return this.app.romEdit(label, () => {
+      if (!into) return write();
+      let value!: T;
+      recordPackageChange(this.app.rom, into, () => { value = write(); return { ok: true }; });
+      return value;
+    });
+  }
+
   // the number the image went to; null: cancelled or failed
-  private async importPng(given?: File): Promise<number | null> {
+  private async importPng(given?: File, into?: Package): Promise<number | null> {
     const f = this.file;
     if (!f) return null;
     const file = given ?? await pickFile('.png,image/png');
@@ -990,7 +1001,7 @@ export class GfxTab implements WsPanel {
     }
     const nf: GfxFile = { ...f, raw, bpp, tiles, pix, empty: false };
     try {
-      this.app.romEdit(`${file.name} → ${gfxName(f.num)}`, () => {
+      this.importEdit(`${file.name} → ${gfxName(f.num)}`, into, () => {
         const enc = encodeGfx(nf);
         if (f.num >= ANIM_FILE) { writeAltFile(this.app.rom, f.num - ANIM_FILE, enc); return; }
         const payload = raw ? enc : lz2Compress(enc);
@@ -1005,7 +1016,7 @@ export class GfxTab implements WsPanel {
   }
 
   // the number the file went to; null: cancelled or failed
-  private async importBin(given?: File): Promise<number | null> {
+  private async importBin(given?: File, into?: Package): Promise<number | null> {
     const file = given ?? await pickFile('.bin');
     if (!file) return null;
     let target = this.cur;
@@ -1028,12 +1039,12 @@ export class GfxTab implements WsPanel {
       if (target >= ANIM_FILE) {
         if (!(await confirmExAnim(this.app))) return null;
         if (data.length % 32 || data.length > 0x8000) throw new Error('Animation graphic: an uncompressed 4bpp file of up to 32 KB is expected');
-        this.app.romEdit(`${file.name} → ${gfxName(target)}`, () => writeAltFile(this.app.rom, target - ANIM_FILE, data));
+        this.importEdit(`${file.name} → ${gfxName(target)}`, into, () => writeAltFile(this.app.rom, target - ANIM_FILE, data));
         this.select(target);
         toast(`${file.name} → ${gfxName(target)}`);
         return target;
       }
-      const kind = this.app.romEdit(`${file.name} → ${gfxName(target)}`, () => importGfxFile(this.app.rom, target, data));
+      const kind = this.importEdit(`${file.name} → ${gfxName(target)}`, into, () => importGfxFile(this.app.rom, target, data));
       this.select(target);
       toast(`${file.name} → ${gfxName(target)} (${kind})`);
       return target;
