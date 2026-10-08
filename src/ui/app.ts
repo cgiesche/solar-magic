@@ -162,6 +162,11 @@ export class App {
     if (!s) { s = new Set(); this.listeners.set(ev, s); }
     s.add(fn);
   }
+  // fn the next time ev is emitted only
+  once(ev: string, fn: Listener): void {
+    const go = () => { this.listeners.get(ev)?.delete(go); fn(); };
+    this.on(ev, go);
+  }
   emit(ev: string): void {
     this.listeners.get(ev)?.forEach((f) => f());
   }
@@ -966,9 +971,8 @@ export class App {
       if (!runs) {
         this.setBusy('arcs', 'Jump arcs');
         if (!this.arcsWaiting) {
-          const go = () => { this.arcsWaiting = false; this.listeners.get('blockinfo')?.delete(go); this.later('arcs', () => this.runArcs()); };
           this.arcsWaiting = true;
-          this.on('blockinfo', go);
+          this.once('blockinfo', () => { this.arcsWaiting = false; this.later('arcs', () => this.runArcs()); });
         }
         return;
       }
