@@ -149,6 +149,12 @@ function mergeParts(r: Package, p: PackageParts, now: Snapshot): Package {
   return out as unknown as Package;
 }
 
+// what the package brought, in a few words each ("Patch", "2 blocks", "UberASM" …)
+export function packageSummary(r: Package): string[] {
+  const c = complete(r) as unknown as Parts;
+  return [...new Set(SECTION_KEYS.flatMap((k) => section(k).summary(c[k]) ?? []))];
+}
+
 // ---------- recording a change into a package ----------
 
 // an installed package getting more, or a new one (its files kept with the editor data)

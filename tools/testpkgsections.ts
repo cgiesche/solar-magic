@@ -14,7 +14,7 @@ import { importGfxFile } from '../src/core/map16file.ts';
 import { installEditorPatch, setLevelMusic } from '../src/core/patches.ts';
 import { enableBlocks, setExtTileWords, EXT_FIRST } from '../src/core/map16ext.ts';
 import { installBgMap16Ext, setBgExtTileWords, BG_EXT_FIRST } from '../src/core/bgmap16.ts';
-import { recordPackageChange, uninstallPackage, listPackages, type Package } from '../src/core/pkgreg.ts';
+import { recordPackageChange, uninstallPackage, listPackages, packageSummary, type Package } from '../src/core/pkgreg.ts';
 import { SECTIONS, SECTION_KEYS, type SectionKey, type PartSection } from '../src/core/pkgsections.ts';
 import { inspectUpload, installPackage, type InstallOptions, type ReadyPreview } from '../src/core/packages.ts';
 import { testSongZip } from './testsong.ts';
@@ -70,7 +70,7 @@ for (const k of SECTION_KEYS) {
   if (!sample) { check(false, `section ${k}: a sample package`); continue; }
   const before = rom.data.slice();
   const pkg = await sample();
-  check(!!pkg && pkg[k] !== undefined && !sec.empty(pkg[k]), `section ${k}: recorded`);
+  check(!!pkg && pkg[k] !== undefined && !sec.empty(pkg[k]) && !!sec.summary(pkg[k]), `section ${k}: recorded (${pkg && packageSummary(pkg).join(', ')})`);
   if (!pkg) continue;
   await uninstallPackage(rom, pkg.id, blank);
   let diff = 0;

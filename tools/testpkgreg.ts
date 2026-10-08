@@ -73,7 +73,7 @@ check(b.uber.files.includes('library/shared.asm') && b.gfx.join() === '128' && b
 // every section of the record (its adapter): nothing is nothing, an unchanged ROM brings nothing
 for (const k of SECTION_KEYS) {
   const sec = SECTIONS[k] as PartSection<unknown, unknown>;
-  check(sec.empty(sec.none()) && sec.empty(sec.added(sec.read(rom), sec.read(rom))), `section ${k}: empty when nothing changed`);
+  check(sec.empty(sec.none()) && sec.empty(sec.added(sec.read(rom), sec.read(rom))) && sec.summary(sec.none()) === null, `section ${k}: empty when nothing changed, no summary`);
 }
 
 // removing A: its patch, call, files and block go; the shared file stays for B

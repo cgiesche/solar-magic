@@ -33,7 +33,10 @@ export interface PartSection<S, P> {
   // takes the package's section (mine, not empty) out of the ROM; what other packages brought as well
   // (others: their sections) stays. Returns warnings, throws when it fails.
   remove(rom: Rom, mine: P, others: P[], blank: number[]): string[] | Promise<string[]>;
+  summary(p: P): string | null; // in a few words ("2 blocks"), null when empty
 }
+
+const count = (n: number, one: string, many: string) => (!n ? null : n > 1 ? `${n} ${many}` : one);
 
 // sections of tool projects also tell which entries of the project are the package's (the Packages
 // dialog shows them; removing takes them out)
@@ -54,8 +57,9 @@ const union = <T>(a: T[], b: T[], key: (x: T) => string = String) => {
 };
 
 // a list of numbers or names: what is new in b
-function listSection<T>(read: (rom: Rom) => T[], remove: PartSection<T[], T[]>['remove'], key: (x: T) => string = String): PartSection<T[], T[]> {
+function listSection<T>(read: (rom: Rom) => T[], remove: PartSection<T[], T[]>['remove'], summary: PartSection<T[], T[]>['summary'], key: (x: T) => string = String): PartSection<T[], T[]> {
   return {
+    summary,
     none: () => [],
     read,
     remove,
@@ -81,6 +85,7 @@ function changedTiles(a: string[], b: string[], first: number): number[] {
 // extended Map16 tiles it filled (read: each tile's content, [] while the table is not installed)
 function tileSection(read: (rom: Rom) => string[], first: number, remove: PartSection<string[], number[]>['remove']): PartSection<string[], number[]> {
   return {
+    summary: (p) => (p.length ? 'Map16 tiles' : null),
     none: () => [],
     read,
     remove,
@@ -96,7 +101,7 @@ const patches: PartSection<string[], string[]> = {
   ...listSection((rom) => listPatches(rom).filter((p) => !p.kind || p.kind === 'patch').map((p) => p.id), (rom, mine) => {
     const order = listPatches(rom).map((p) => p.id);
     return mine.filter((x) => order.includes(x)).sort((a, b) => order.indexOf(b) - order.indexOf(a)).flatMap((id) => uninstallPatch(rom, id));
-  }),
+  }, (p) => count(p.length, 'Patch', 'patches')),
   merge: (r, p, now) => union(r.filter((id) => now.includes(id)), p),
 };
 
@@ -124,6 +129,7 @@ export const uber = {
   },
   merge: (r, p) => ({ files: union(r.files, p.files), calls: union(r.calls, p.calls, (c) => c.join(':')), other: { ...r.other, ...p.other } }),
   empty: (p) => !p.files.length && !p.calls.length && !Object.keys(p.other).length,
+  summary: (p) => (p.files.length || p.calls.length ? 'UberASM' : null),
   // its calls still in the project
   owned: (mine: UberPart, p: UberProject) => mine.calls.filter(([ctx, num, file]) => p.list[ctx].get(num)?.some((c) => c.file === file)),
   remove(rom, mine, others) {
@@ -149,6 +155,7 @@ export const blocks = {
   added: (a, b) => ({ files: changedFiles(a.files, b.files), tiles: [...b.tiles].filter(([t, f]) => a.tiles.get(t) !== f).map(([t]) => t) }),
   merge: (r, p) => ({ files: union(r.files, p.files), tiles: union(r.tiles, p.tiles) }),
   empty: (p) => !p.files.length && !p.tiles.length,
+  summary: (p) => count(p.tiles.length, 'Block', 'blocks'),
   // its blocks in the project: on one of its tiles with one of its files
   owned: (mine: BlocksPart, p: BlockProject) => p.list.filter((b) => mine.tiles.includes(b.tile) && mine.files.includes(b.file)),
   remove(rom, mine, others, blank) {
@@ -175,6 +182,7 @@ export const pixi = {
   }),
   merge: (r, p) => ({ files: union(r.files, p.files), list: union(r.list, p.list, (e) => e.join(':')) }),
   empty: (p) => !p.files.length && !p.list.length,
+  summary: (p) => count(p.list.length, 'Sprite', 'sprites'),
   // its sprites in the project: one of its kind/number entries with one of its files
   owned(mine: PixiPart, p: PixiProject) {
     const keys = new Set(mine.list.map((e) => e.join(':')));
@@ -197,6 +205,7 @@ const gfx: PartSection<number[], number[]> = {
   added: (a, b) => b.flatMap((addr, i) => (addr && !a[i] ? [i] : [])),
   merge: (r, p) => union(r, p),
   empty: (p) => !p.length,
+  summary: (p) => (p.length ? 'ExGFX' : null),
   remove(rom, mine) {
     for (const n of mine) {
       const e = n >= VANILLA_GFX ? gfxEntry(rom, n) : null;
@@ -219,7 +228,7 @@ const music = listSection((rom) => (tryLoad(() => loadMusicProject(rom))?.songs 
   if (!r.ok) throw new Error(`Music: ${r.errors.join(' ')}`);
   for (let l = 0; l < 0x200; l++) if (nums.includes(levelMusic(rom, l)) && !p.songs.some((s) => s.num === levelMusic(rom, l))) setLevelMusic(rom, l, 0);
   return r.warnings;
-});
+}, (p) => count(p.length, 'Song', 'songs'));
 
 // emptied again, unless another package filled them too
 const map16 = tileSection((rom) => (map16Ext(rom) ? Array.from({ length: EXT_TILES - EXT_FIRST }, (_, i) => `${extTileWords(rom, EXT_FIRST + i)!.join()}:${actsLike(rom, EXT_FIRST + i)}`) : []), EXT_FIRST,

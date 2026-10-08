@@ -9,7 +9,8 @@ import type { App } from './app.ts';
 import { h, clear, toast, choose, downloadBytes } from './dom.ts';
 import { listPatches, type PatchEntry } from '../core/patchreg.ts';
 import { uninstallVramPatch } from '../core/vrampatch.ts';
-import { listPackages, type Package } from '../core/pkgreg.ts';
+import { listPackages, packageSummary, type Package } from '../core/pkgreg.ts';
+import { SECTIONS } from '../core/pkgsections.ts';
 import { removePackage, packageFiles } from '../core/packages.ts';
 import { loadMusicProject, songHex } from '../core/music.ts';
 import { playButton, playSong, currentSongs } from './musicdialog.ts';
@@ -52,19 +53,6 @@ function isGfxFile(path: string, data: Uint8Array): boolean {
 }
 const base = (p: string) => p.split('/').pop()!;
 
-// what the package brought, in a few words
-function summary(r: Package): string[] {
-  const out: string[] = [];
-  if (r.patches.length) out.push(r.patches.length > 1 ? `${r.patches.length} patches` : 'Patch');
-  if (r.uber.files.length || r.uber.calls.length) out.push('UberASM');
-  if (r.blocks.tiles.length) out.push(r.blocks.tiles.length > 1 ? `${r.blocks.tiles.length} blocks` : 'Block');
-  if (r.pixi.list.length) out.push(r.pixi.list.length > 1 ? `${r.pixi.list.length} sprites` : 'Sprite');
-  if (r.gfx.length) out.push('ExGFX');
-  if (r.music?.length) out.push(r.music.length > 1 ? `${r.music.length} songs` : 'Song');
-  if (r.map16?.length || r.bgMap16?.length) out.push('Map16 tiles');
-  return out;
-}
-
 export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; reload(): void } {
   const el = h('div', { class: 'pkg-pane' });
   const list = h('div', { class: 'pkg-list' });
@@ -97,7 +85,7 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
   function renderList(): void {
     clear(list).append(...items.map((it) => h('button', { class: 'pkg-item' + (it.key === sel ? ' active' : ''), onclick: () => { sel = it.key; fileFilter = ''; renderList(); renderDetail(); } },
       h('div', { class: 'pkg-item-name' }, it.name),
-      h('div', { class: 'hint' }, it.rec ? [it.rec.legacy ? 'Legacy package' : '', ...summary(it.rec)].filter(Boolean).join(' · ') : 'Editor patch'))),
+      h('div', { class: 'hint' }, it.rec ? [it.rec.legacy ? 'Legacy package' : '', ...packageSummary(it.rec)].filter(Boolean).join(' · ') : 'Editor patch'))),
     items.length ? '' : h('p', { class: 'hint' }, 'Nothing installed yet.'),
     orphans());
   }
@@ -189,7 +177,7 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
     // UberASM: where it runs, then its files
     if (rec.uber.files.length || rec.uber.calls.length) {
       const proj = host.panes.uberasm.project() as UberProject;
-      const calls = rec.uber.calls.filter(([ctx, num, file]) => proj.list[ctx].get(num)?.some((c) => c.file === file));
+      const calls = SECTIONS.uber.owned(rec.uber, proj);
       const shown = new Set(calls.map((c) => c[2]));
       const rest = rec.uber.files.filter((f) => !shown.has(f)).sort();
       const where = ([ctx, num]: [UberContext, number, string]) => num === ALL ? `all ${CTX_LABEL[ctx].toLowerCase()}s` : `${CTX_LABEL[ctx]} ${hex(num, ctx === 'level' ? 3 : 2)}`;
@@ -209,7 +197,7 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
     // blocks
     if (rec.blocks.tiles.length || rec.blocks.files.length) {
       const proj = host.panes.block.project() as BlockProject;
-      const blocks = proj.list.filter((b) => rec.blocks.tiles.includes(b.tile) && rec.blocks.files.includes(b.file)).sort((a, b) => a.tile - b.tile);
+      const blocks = SECTIONS.blocks.owned(rec.blocks, proj).sort((a, b) => a.tile - b.tile);
       const rest = rec.blocks.files.filter((f) => !blocks.some((b) => b.file === f)).sort();
       out.push(section('block', 'Blocks', 'To place: palette → Map16, or a Direct Map16 object with the tile.',
         blocks.length ? h('table', { class: 'uber-table' }, h('tr', null, h('th', null, 'Tile'), h('th', null, 'Block'), h('th', null, 'acts like'), h('th')),
@@ -224,8 +212,7 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
     // sprites
     if (rec.pixi.list.length || rec.pixi.files.length) {
       const proj = host.panes.sprite.project() as PixiProject;
-      const mine = new Set(rec.pixi.list.map((e) => e.join(':')));
-      const sprites = proj.list.filter((e) => mine.has(`${e.kind}:${e.num}`) && rec.pixi.files.includes(e.file));
+      const sprites = SECTIONS.pixi.owned(rec.pixi, proj);
       const nameOf = (e: PixiProject['list'][number]) => { try { return spriteConfig(proj, e).names[0]?.name ?? ''; } catch { return ''; } };
       const asmOf = (e: PixiProject['list'][number]) => { try { return spriteConfig(proj, e).asm ?? e.file; } catch { return e.file; } };
       const used = new Set(sprites.flatMap((e) => [e.file, asmOf(e)]));
