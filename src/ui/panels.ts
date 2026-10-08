@@ -415,7 +415,7 @@ export class Palette {
         this.thumbs.set(t.key, thumbCanvas(t));
         this.thumbTiles.set(t.key, t.m16);
       }
-      this.app.prefetchProbes([...this.thumbTiles.values()].flat());
+      this.app.probes.prefetch([...this.thumbTiles.values()].flat());
     } catch (e) {
       console.error(e);
     }
