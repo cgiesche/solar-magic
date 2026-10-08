@@ -1,12 +1,13 @@
 // Block/sprite probe benchmark (blockprobe.ts): time, emulator runs and frames per probe kind, and
 // all results for comparing before/after a speed-up (results must stay the same).
-//   node tools/benchprobe.ts [--ts=0,1] [--save=file.json] [--check=file.json]
+//   node tools/benchprobe.ts [--ts=0,1] [--kinds=runs,blocks,collision,sprites] [--save=file.json] [--check=file.json]
 import { readFileSync, writeFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
 import { BlockProber } from '../src/core/blockprobe.ts';
 
 const arg = (k: string) => process.argv.find((a) => a.startsWith(`--${k}=`))?.slice(k.length + 3);
 const tilesets = (arg('ts') ?? '0,1').split(',').map(Number);
+const kinds = new Set((arg('kinds') ?? 'runs,blocks,collision,sprites').split(','));
 const rom = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
 const p = new BlockProber(rom);
 const s = p.emu.snes;
@@ -18,6 +19,7 @@ s.loadState = (st) => { runs++; loadState(st); };
 const results: Record<string, unknown> = {};
 const total = { ms: 0, runs: 0, frames: 0 };
 const bench = (name: string, n: number, fn: (i: number) => unknown) => {
+  if (!kinds.has(name.split('/')[1])) return;
   frames = runs = 0;
   const t0 = performance.now();
   for (let i = 0; i < n; i++) results[`${name}:${i}`] = fn(i);
