@@ -25,6 +25,7 @@ import { toast, log as logMsg, modalsOpen, onModalsChange } from './dom.ts';
 import { musicPlayer } from './musicplayer.ts';
 import { ExitGraph, exitTarget } from '../core/exitgraph.ts';
 import { RomHistory, type RomEdit } from '../core/romhistory.ts';
+import { LevelHistory } from '../core/levelhistory.ts';
 import { resizeObjectSize, type ObjKind, type ObjKinds } from '../core/objkinds.ts';
 import { JumpArcs, ARC_SPEEDS, type JumpArc } from '../core/jumparcs.ts';
 import { scanKey, type ScanResult } from '../core/levelscan.ts';
@@ -42,6 +43,12 @@ export type PaletteItem =
   | { kind: 'spr'; num: number; extra: number };
 
 type Listener = () => void;
+
+// an undoable level edit begun with App.beginLevelEdit
+export interface LevelEdit {
+  commit(rerender?: boolean): void;
+  cancel(restore?: boolean): void;
+}
 
 // What App tells its views (on/once/emit). None carries data: listeners read what they need from App.
 export type AppEvent =
@@ -96,8 +103,8 @@ export class App {
   // view-only game state applied before the emulated level load
   switches = { palaces: false, onOff: false };
   dirty = false;
-  undoStack: Level[] = [];
-  redoStack: Level[] = [];
+  private levelHistory = new LevelHistory<Level>(cloneLevel);
+  private editToken = 0; // the latest begun level edit (older handles do nothing)
   // undo for ROM edits of the graphics workspace (palettes, Map16, GFX, slot assignments)
   romHistory: RomHistory;
   wsTile = 0; // Map16 tile for 'open-map16' (opens the graphics workspace there)
@@ -247,8 +254,7 @@ export class App {
     this.exitScreen = 0;
     this.exitMarker = null;
     if ((this.mode === 'l2' && !this.level.layer2Objects) || (this.mode === 'bg' && !this.canEditBg())) this.mode = 'l1';
-    this.undoStack = [];
-    this.redoStack = [];
+    this.levelHistory.clear();
     this.dirty = false;
     this.spriteMem = this.spriteMemBase = null;
     this.refresh();
@@ -474,9 +480,7 @@ export class App {
 
   // moves the main entrance or the midway point to the setting nearest to (px, py), undoable
   placeEntrance(kind: 'main' | 'midway', px: number, py: number): void {
-    this.checkpoint();
-    if (!this.moveMarker({ kind, index: 0, x: 0, y: 0 }, px, py)) { this.undoStack.pop(); return; }
-    this.changed();
+    if (!this.editLevel(() => this.moveMarker({ kind, index: 0, x: 0, y: 0 }, px, py))) return;
     this.selectEntrance({ kind, index: 0 });
   }
 
@@ -1084,12 +1088,46 @@ export class App {
   }
 
   // ------------- edit plumbing -------------
+  // An undoable level edit: begun before the level changes, then committed (an undo step; the level is
+  // drawn again unless rerender is false) or cancelled (nothing recorded, redo stays; restore: the
+  // level as before, after a failed change). For edits spanning several events (dragging).
+  beginLevelEdit(): LevelEdit {
+    if (this.levelHistory.begin(this.level)) this.levelEditDone();
+    const token = ++this.editToken;
+    const live = () => token === this.editToken && this.levelHistory.editing;
+    return {
+      commit: (rerender = true) => {
+        if (!live()) return;
+        this.commitLevelEdit();
+        this.changed(rerender);
+      },
+      cancel: (restore = false) => {
+        if (!live()) return;
+        const was = this.levelHistory.cancel();
+        if (restore && was) { this.level = was; this.changed(); }
+      },
+    };
+  }
+  // A level edit at once: f changes the level, returns false when it changed nothing (cancelled);
+  // when it throws, the level is as before and the error passed on. True when committed.
+  editLevel(f: () => boolean | void, rerender = true): boolean {
+    const e = this.beginLevelEdit();
+    let ok: boolean;
+    try { ok = f() !== false; } catch (err) { e.cancel(true); throw err; }
+    if (ok) e.commit(rerender); else e.cancel();
+    return ok;
+  }
+  // (an undo step taken right away; for code not on editLevel yet)
   checkpoint(): void {
+    this.beginLevelEdit();
+    this.commitLevelEdit();
+  }
+  private commitLevelEdit(): void {
+    if (this.levelHistory.commit()) this.levelEditDone();
+  }
+  private levelEditDone(): void {
     this.editGen++;
-    this.undoStack.push(cloneLevel(this.level));
-    if (this.undoStack.length > 200) this.undoStack.shift();
-    this.redoStack = [];
-    this.pushOrder('level', this.undoStack.length);
+    this.pushOrder('level', this.levelHistory.undoSize);
   }
   private pushOrder(kind: 'level' | 'rom', n: number): void {
     this.undoOrder.push({ kind, n });
@@ -1106,19 +1144,21 @@ export class App {
   }
   // undoes the latest level or ROM edit
   undo(): void {
+    this.commitLevelEdit(); // (an edit still open, e.g. while dragging)
     while (this.undoOrder.length) {
       const o = this.undoOrder.pop()!;
-      const len = o.kind === 'level' ? this.undoStack.length : this.romHistory.undoStack.length;
-      if (o.n > len || len === 0) continue; // cancelled checkpoint or dropped history
+      const len = o.kind === 'level' ? this.levelHistory.undoSize : this.romHistory.undoStack.length;
+      if (o.n > len || len === 0) continue; // dropped history (beyond the limit)
       if (o.kind === 'rom') { if (this.romStep(true)) this.redoOrder.push('rom'); return; }
       this.levelUndo();
       this.redoOrder.push('level');
       return;
     }
-    if (this.undoStack.length) this.levelUndo();
+    if (this.levelHistory.undoSize) this.levelUndo();
     else toast('Nothing to undo');
   }
   redo(): void {
+    this.commitLevelEdit();
     while (this.redoOrder.length) {
       const k = this.redoOrder.pop()!;
       if (k === 'rom') {
@@ -1126,24 +1166,22 @@ export class App {
         if (this.romStep(false)) this.undoOrder.push({ kind: 'rom', n: this.romHistory.undoStack.length });
         return;
       }
-      if (!this.redoStack.length) continue;
+      if (!this.levelHistory.redoSize) continue;
       this.levelRedo();
-      this.undoOrder.push({ kind: 'level', n: this.undoStack.length });
+      this.undoOrder.push({ kind: 'level', n: this.levelHistory.undoSize });
       return;
     }
-    if (this.redoStack.length) this.levelRedo();
+    if (this.levelHistory.redoSize) this.levelRedo();
   }
   private levelUndo(): void {
-    const prev = this.undoStack.pop();
+    const prev = this.levelHistory.undo(this.level);
     if (!prev) return;
-    this.redoStack.push(cloneLevel(this.level));
     this.level = prev;
     this.changed();
   }
   private levelRedo(): void {
-    const next = this.redoStack.pop();
+    const next = this.levelHistory.redo(this.level);
     if (!next) return;
-    this.undoStack.push(cloneLevel(this.level));
     this.level = next;
     this.changed();
   }
@@ -1204,9 +1242,11 @@ export class App {
 
   insertAt(tx: number, ty: number, p: PaletteItem | null = this.paletteItem): void {
     if (!p) { toast('Choose an object/sprite in the palette first.'); return; }
-    this.checkpoint();
+    this.editLevel(() => this.insert(tx, ty, p));
+  }
+  private insert(tx: number, ty: number, p: PaletteItem): boolean {
     if (p.kind === 'obj' && (this.mode === 'l1' || this.mode === 'l2')) {
-      if (p.num === 0 && p.ext === DM16_EXT && !this.ensureEditorPatch()) { this.undoStack.pop(); return; }
+      if (p.num === 0 && p.ext === DM16_EXT && !this.ensureEditorPatch()) return false;
       const cells = p.block ? Array.from({ length: p.block.w * p.block.h }, (_, i) => ({ dx: i % p.block!.w, dy: Math.floor(i / p.block!.w) })) : [{ dx: 0, dy: 0 }];
       const lastTile = (p.tile ?? 0) + (p.block ? (p.block.h - 1) * 16 + p.block.w - 1 : 0);
       if (p.num === 0 && p.ext === DM16_EXT && lastTile >= EXT_FIRST && !map16Ext(this.rom)) {
@@ -1229,11 +1269,8 @@ export class App {
       if (s.extra >= 2) { const b = spriteBytes(spriteSizes(this.rom), s); if (b.length) s.bytes = b; }
       this.level.sprites.push(s);
       this.selection = new Set([s.uid]);
-    } else {
-      this.undoStack.pop();
-      return;
-    }
-    this.changed();
+    } else return false;
+    return true;
   }
 
   // Direct-Map16 objects need the editor patch; installs it, false if that is not possible

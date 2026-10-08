@@ -1,6 +1,6 @@
 // Scrollable, zoomable level canvas with editing interactions.
 
-import { App, type Marker } from './app.ts';
+import { App, type Marker, type LevelEdit } from './app.ts';
 import { h, attachPanZoom, downloadBytes, toast } from './dom.ts';
 import { objectName, hex2, hex3 } from '../core/names.ts';
 import { resizeObjectSize } from '../core/objkinds.ts';
@@ -15,11 +15,11 @@ import { problemsButton } from './problems.ts';
 import { map16Tile } from '../core/ram.ts';
 
 type Drag =
-  | { kind: 'move'; startTx: number; startTy: number; lastDx: number; lastDy: number; orig: Map<number, { x: number; y: number }> }
-  | { kind: 'resize'; startTx: number; startTy: number; origSize: Map<number, number>; lastDw: number; lastDh: number }
+  | { kind: 'move'; edit: LevelEdit; startTx: number; startTy: number; lastDx: number; lastDy: number; orig: Map<number, { x: number; y: number }> }
+  | { kind: 'resize'; edit: LevelEdit; startTx: number; startTy: number; origSize: Map<number, number>; lastDw: number; lastDh: number }
   | { kind: 'band'; x0: number; y0: number; x1: number; y1: number; add: boolean }
-  | { kind: 'marker'; marker: Marker; offX: number; offY: number; moved: boolean }
-  | { kind: 'paint'; changed: boolean; x0: number; y0: number; lastX: number; lastY: number } // BG brush, stamped on a grid from (x0, y0)
+  | { kind: 'marker'; edit: LevelEdit | null; marker: Marker; offX: number; offY: number; moved: boolean } // (secondary entrances: not a level edit)
+  | { kind: 'paint'; edit: LevelEdit; changed: boolean; x0: number; y0: number; lastX: number; lastY: number } // BG brush, stamped on a grid from (x0, y0)
   | { kind: 'pick'; x0: number; y0: number; x1: number; y1: number }; // BG tiles taken into the brush
 
 const ARC_STYLE: Record<ArcSpeed, { color: string; label: string; dash?: boolean }> = {
@@ -599,8 +599,8 @@ export class LevelView {
       // insert palette item (BG: paint with the brush, dragging keeps painting)
       if (app.mode === 'exit') { if (e.button === 2) this.exitMenu(e, px, py, tx, ty); return; }
       if (app.mode === 'bg') {
-        app.checkpoint();
-        this.drag = { kind: 'paint', changed: app.paintBrush(tx, ty), x0: tx, y0: ty, lastX: tx, lastY: ty };
+        const edit = app.beginLevelEdit();
+        this.drag = { kind: 'paint', edit, changed: app.paintBrush(tx, ty), x0: tx, y0: ty, lastX: tx, lastY: ty };
         if (this.drag.changed) this.scheduleRefresh();
         return;
       }
@@ -611,8 +611,7 @@ export class LevelView {
     const mk = this.markerAt(px, py);
     if (mk && !e.ctrlKey) {
       if (app.mode === 'exit') app.selectEntrance(mk);
-      if (mk.kind !== 'sec') app.checkpoint();
-      this.drag = { kind: 'marker', marker: mk, offX: px - mk.x, offY: py - mk.y, moved: false };
+      this.drag = { kind: 'marker', edit: mk.kind !== 'sec' ? app.beginLevelEdit() : null, marker: mk, offX: px - mk.x, offY: py - mk.y, moved: false };
       this.paint();
       return;
     }
@@ -629,8 +628,7 @@ export class LevelView {
     // resize handle?
     const ho = this.handleAt(px, py);
     if (ho) {
-      app.checkpoint();
-      this.drag = { kind: 'resize', startTx: tx, startTy: ty, origSize: new Map([[ho.uid, ho.size]]), lastDw: 0, lastDh: 0 };
+      this.drag = { kind: 'resize', edit: app.beginLevelEdit(), startTx: tx, startTy: ty, origSize: new Map([[ho.uid, ho.size]]), lastDw: 0, lastDh: 0 };
       return;
     }
     const hits = app.hitsAt(px, py);
@@ -656,8 +654,7 @@ export class LevelView {
       else if (!app.selection.has(hit.item.uid)) app.selection = new Set([hit.item.uid]);
       app.emit('change');
       const items = app.mode === 'spr' ? app.selectedSprites() : app.selectedObjects();
-      app.checkpoint();
-      this.drag = { kind: 'move', startTx: tx, startTy: ty, lastDx: 0, lastDy: 0, orig: new Map(items.map((o) => [o.uid, { x: o.x, y: o.y }])) };
+      this.drag = { kind: 'move', edit: app.beginLevelEdit(), startTx: tx, startTy: ty, lastDx: 0, lastDy: 0, orig: new Map(items.map((o) => [o.uid, { x: o.x, y: o.y }])) };
     } else {
       if (!e.ctrlKey) app.selection.clear();
       this.drag = { kind: 'band', x0: px, y0: py, x1: px, y1: py, add: e.ctrlKey };
@@ -744,7 +741,7 @@ export class LevelView {
     this.drag = null;
     if (this.hover) this.updateCursor(this.hover.px, this.hover.py, this.hover.top);
     if (d.kind === 'paint') {
-      if (!d.changed) app.undoStack.pop(); else app.changed();
+      if (d.changed) d.edit.commit(); else d.edit.cancel();
       return;
     }
     if (d.kind === 'pick') {
@@ -754,9 +751,9 @@ export class LevelView {
       return;
     }
     if (d.kind === 'marker') {
-      if (d.marker.kind === 'sec') { if (d.moved) app.romWritten(); this.paint(); return; }
-      if (!d.moved) { app.undoStack.pop(); this.paint(); return; }
-      app.changed();
+      if (!d.edit) { if (d.moved) app.romWritten(); this.paint(); return; }
+      if (!d.moved) { d.edit.cancel(); this.paint(); return; }
+      d.edit.commit();
       return;
     }
     if (d.kind === 'band') {
@@ -777,15 +774,8 @@ export class LevelView {
       app.emit('change');
       return;
     }
-    if (d.kind === 'move' && d.lastDx === 0 && d.lastDy === 0) {
-      app.undoStack.pop();
-      return;
-    }
-    if (d.kind === 'resize' && d.lastDw === 0 && d.lastDh === 0) {
-      app.undoStack.pop();
-      return;
-    }
-    app.changed();
+    if (d.kind === 'move') { if (d.lastDx || d.lastDy) d.edit.commit(); else d.edit.cancel(); return; }
+    if (d.kind === 'resize') { if (d.lastDw || d.lastDh) d.edit.commit(); else d.edit.cancel(); return; }
   }
 
   // status bar without the mouse over the level: what the mouse does in this mode

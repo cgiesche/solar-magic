@@ -126,10 +126,7 @@ export async function installEditorPatchAction(app: App): Promise<void> {
 
 // one undoable structural edit of the current level
 function levelEdit(app: App, f: () => void): boolean {
-  app.checkpoint();
-  try { f(); } catch (e) { app.undoStack.pop(); toast(String(e instanceof Error ? e.message : e), 'error'); return false; }
-  app.selection.clear();
-  app.changed();
+  try { app.editLevel(() => { f(); app.selection.clear(); }); } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); return false; }
   app.emit('level-header');
   return true;
 }
