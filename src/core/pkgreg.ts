@@ -7,23 +7,21 @@
 
 import { deflateSync, inflateSync } from 'fflate';
 import { Rom, pcToSnes } from './rom.ts';
-import { listPatches, hashBytes, writeChunks, readChunks } from './patchreg.ts';
+import { listPatches, writeChunks, readChunks } from './patchreg.ts';
 import { uninstallPatch } from './patchapply.ts';
 import { loadProject, saveProject, emptyProject } from './uberproject.ts';
 import { loadBlockProject, saveBlockProject } from './blocks.ts';
 import { loadPixiProject, savePixiProject } from './pixi.ts';
 import { gfxEntry, setGfxEntry, VANILLA_GFX, levelMusic, setLevelMusic } from './patches.ts';
 import { loadMusicProject, saveMusicProject, removeSong } from './music.ts';
-import { EXT_FIRST, EXT_TILES, DEFAULT_ACTS, map16Ext, extTileWords, actsLike, setExtTileWords, setActsLike } from './map16ext.ts';
-import { BG_EXT_FIRST, BG_EXT_TILES, bgMap16Ext, bgExtTileWords, setBgExtTileWords, vanillaBgWords } from './bgmap16.ts';
+import { DEFAULT_ACTS, map16Ext, setExtTileWords, setActsLike } from './map16ext.ts';
+import { bgMap16Ext, setBgExtTileWords, vanillaBgWords } from './bgmap16.ts';
 import type { UberContext } from './uberasm.ts';
 import type { SpriteFolder } from './pixirt.ts';
+import { SECTIONS, SECTION_KEYS, OTHER, type SectionKey, type PartSection, type Other } from './pkgsections.ts';
 
 const MAGIC = [0x53, 0x4d, 0x57, 0x4b]; // "SMWK"
 const VERSION = 1;
-const CONTEXTS: UberContext[] = ['level', 'gamemode', 'overworld'];
-const OTHER = ['global', 'statusbar', 'macrolib'] as const;
-type Other = (typeof OTHER)[number];
 
 // what a package put into the ROM (field names as stored in the ROM: uber = UberASM, blocks, pixi = sprites)
 export interface PackageParts {
@@ -49,7 +47,7 @@ export interface Package extends PackageParts {
   legacy?: boolean; // wraps a patch applied before packages were tracked (its files are kept with the patch)
 }
 
-export const emptyParts = (): PackageParts => ({ patches: [], uber: { files: [], calls: [], other: {} }, blocks: { files: [], tiles: [] }, pixi: { files: [], list: [] }, gfx: [], music: [], map16: [], bgMap16: [] });
+export const emptyParts = (): PackageParts => Object.fromEntries(SECTION_KEYS.map((k) => [k, SECTIONS[k].none()])) as unknown as PackageParts;
 
 // ---------- the registry ----------
 
@@ -122,105 +120,41 @@ export function migratePackageFiles(rom: Rom): boolean {
 }
 
 // ---------- observing what a package adds ----------
+// (each section of the record by its adapter, see pkgsections.ts)
 
-export interface Snapshot {
-  patches: Set<string>;
-  uber: Map<string, number>; // file → hash
-  calls: Set<string>; // ctx:num:file
-  other: Partial<Record<Other, string>>;
-  blocks: Map<string, number>;
-  tiles: Map<number, string>; // tile → file
-  pixi: Map<string, number>;
-  sprites: Map<string, string>; // kind:num → file
-  gfx: number[]; // ExGFX address per number, 0 = none
-  music: Map<string, number>; // song file → number
-  map16: string[]; // extended FG Map16 tiles (from 200): words and acts like, '' = not installed
-  bgMap16: string[]; // extended BG Map16 tiles (from 200)
-}
-
-// list.txt is written from the assignments, which are compared on their own
-const hashes = (files: Map<string, Uint8Array> | undefined) => new Map([...(files ?? [])].filter(([f]) => f !== 'list.txt').map(([f, c]) => [f, hashBytes([c])]));
-const tryLoad = <T>(load: () => T | null): T | null => { try { return load(); } catch { return null; } };
+type Snapshot = { [K in SectionKey]: ReturnType<(typeof SECTIONS)[K]['read']> };
+const section = (k: SectionKey) => SECTIONS[k] as PartSection<unknown, unknown>;
+type Parts = Record<SectionKey, unknown>;
 
 function snapshot(rom: Rom): Snapshot {
-  const uber = tryLoad(() => loadProject(rom));
-  const blocks = tryLoad(() => loadBlockProject(rom));
-  const pixi = tryLoad(() => loadPixiProject(rom));
-  const music = tryLoad(() => loadMusicProject(rom));
-  const calls = new Set<string>();
-  for (const ctx of CONTEXTS) for (const [num, cs] of uber?.list[ctx] ?? []) for (const c of cs) calls.add(`${ctx}:${num}:${c.file}`);
-  const other: Partial<Record<Other, string>> = {};
-  for (const k of OTHER) { const v = uber?.list[k]; if (v) other[k] = v; }
-  return {
-    patches: new Set(listPatches(rom).filter((p) => !p.kind || p.kind === 'patch').map((p) => p.id)),
-    uber: hashes(uber?.files), calls, other,
-    blocks: hashes(blocks?.files), tiles: new Map((blocks?.list ?? []).map((b) => [b.tile, b.file])),
-    pixi: hashes(pixi?.files), sprites: new Map((pixi?.list ?? []).map((e) => [`${e.kind}:${e.num}`, e.file])),
-    gfx: Array.from({ length: 0x100 }, (_, i) => (i >= VANILLA_GFX ? gfxEntry(rom, i)?.addr ?? 0 : 0)),
-    music: new Map((music?.songs ?? []).map((x) => [x.file, x.num])),
-    map16: map16Ext(rom) ? Array.from({ length: EXT_TILES - EXT_FIRST }, (_, i) => `${extTileWords(rom, EXT_FIRST + i)!.join()}:${actsLike(rom, EXT_FIRST + i)}`) : [],
-    bgMap16: bgMap16Ext(rom) ? Array.from({ length: BG_EXT_TILES - BG_EXT_FIRST }, (_, i) => bgExtTileWords(rom, BG_EXT_FIRST + i)!.join()) : [],
-  };
+  const s = {} as Parts;
+  for (const k of SECTION_KEYS) s[k] = section(k).read(rom);
+  return s as Snapshot;
 }
-
-// tiles that differ between two snapshots; when the table came in, the ones not holding its fill (the
-// tile most of them hold)
-function changedTiles(a: string[], b: string[], first: number): number[] {
-  let base = a;
-  if (!a.length && b.length) {
-    const n = new Map<string, number>();
-    for (const v of b) n.set(v, (n.get(v) ?? 0) + 1);
-    const fill = [...n].reduce((m, e) => (e[1] > m[1] ? e : m))[0];
-    base = b.map(() => fill);
-  }
-  return b.flatMap((v, i) => (v !== base[i] ? [first + i] : []));
-}
-
-const changedFiles = (a: Map<string, number>, b: Map<string, number>) => [...b].filter(([f, h]) => a.get(f) !== h).map(([f]) => f);
 
 // what came in between two snapshots
 function partsBetween(a: Snapshot, b: Snapshot): PackageParts {
-  const other: Partial<Record<Other, string>> = {};
-  for (const k of OTHER) if (b.other[k] && b.other[k] !== a.other[k]) other[k] = b.other[k];
-  return {
-    patches: [...b.patches].filter((id) => !a.patches.has(id)),
-    uber: {
-      files: changedFiles(a.uber, b.uber),
-      calls: [...b.calls].filter((c) => !a.calls.has(c)).map((c) => { const [ctx, num, ...f] = c.split(':'); return [ctx as UberContext, Number(num), f.join(':')]; }),
-      other,
-    },
-    blocks: { files: changedFiles(a.blocks, b.blocks), tiles: [...b.tiles].filter(([t, f]) => a.tiles.get(t) !== f).map(([t]) => t) },
-    pixi: { files: changedFiles(a.pixi, b.pixi), list: [...b.sprites].filter(([k, f]) => a.sprites.get(k) !== f).map(([k]) => { const [kind, num] = k.split(':'); return [kind as SpriteFolder, Number(num)]; }) },
-    gfx: b.gfx.flatMap((addr, i) => (addr && !a.gfx[i] ? [i] : [])),
-    music: [...b.music.keys()].filter((f) => !a.music.has(f)),
-    map16: changedTiles(a.map16, b.map16, EXT_FIRST),
-    bgMap16: changedTiles(a.bgMap16, b.bgMap16, BG_EXT_FIRST),
-  };
+  const p = {} as Parts;
+  for (const k of SECTION_KEYS) p[k] = section(k).added(a[k], b[k]);
+  return p as unknown as PackageParts;
 }
 
 function isEmptyParts(p: PackageParts): boolean {
-  return !p.patches.length && !p.uber.files.length && !p.uber.calls.length && !Object.keys(p.uber.other).length
-    && !p.blocks.files.length && !p.blocks.tiles.length && !p.pixi.files.length && !p.pixi.list.length && !p.gfx.length && !p.music?.length && !p.map16?.length && !p.bgMap16?.length;
+  return SECTION_KEYS.every((k) => p[k] === undefined || section(k).empty(p[k]));
 }
 
-const union = <T>(a: T[], b: T[], key: (x: T) => string = String) => {
-  const seen = new Set(a.map(key));
-  return [...a, ...b.filter((x) => !seen.has(key(x)))];
-};
+// every section filled in (records from before a section existed lack it)
+function complete(r: Package): Package {
+  const out: Record<string, unknown> = { ...r };
+  for (const k of SECTION_KEYS) out[k] = r[k] ?? section(k).none();
+  return out as unknown as Package;
+}
 
-// the record with more parts; patches no longer in the ROM (applied anew under a new id) are dropped
+// the record with more parts
 function mergeParts(r: Package, p: PackageParts, now: Snapshot): Package {
-  return {
-    ...r,
-    patches: union(r.patches.filter((id) => now.patches.has(id)), p.patches),
-    uber: { files: union(r.uber.files, p.uber.files), calls: union(r.uber.calls, p.uber.calls, (c) => c.join(':')), other: { ...r.uber.other, ...p.uber.other } },
-    blocks: { files: union(r.blocks.files, p.blocks.files), tiles: union(r.blocks.tiles, p.blocks.tiles) },
-    pixi: { files: union(r.pixi.files, p.pixi.files), list: union(r.pixi.list, p.pixi.list, (e) => e.join(':')) },
-    gfx: union(r.gfx, p.gfx),
-    music: union(r.music ?? [], p.music ?? []),
-    map16: union(r.map16 ?? [], p.map16 ?? []),
-    bgMap16: union(r.bgMap16 ?? [], p.bgMap16 ?? []),
-  };
+  const out = complete(r) as unknown as Record<string, unknown>;
+  for (const k of SECTION_KEYS) out[k] = section(k).merge(out[k], p[k], now[k]);
+  return out as unknown as Package;
 }
 
 // ---------- recording a change into a package ----------
@@ -259,7 +193,8 @@ function startRecording(rom: Rom, target: PackageTarget) {
       const parts = partsBetween(was, now);
       for (const tool of ['uber', 'blocks', 'pixi'] as const) for (const f of claimed[tool]) if (!parts[tool].files.includes(f)) parts[tool].files.push(f);
       const old = 'id' in target ? target : null;
-      if (isEmptyParts(parts) && (!old || old.patches.every((p) => now.patches.has(p)))) return { result, pkg: null };
+      // (nothing new, but the record may still change: a patch applied anew drops its old id)
+      if (isEmptyParts(parts) && (!old || JSON.stringify(mergeParts(old, parts, now)) === JSON.stringify(complete(old)))) return { result, pkg: null };
       const base: Package = old ?? { id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`, name: target.name, fileName: target.fileName, added: new Date().toISOString(), ...emptyParts() };
       return { result, pkg: savePackage(rom, mergeParts(base, parts, now), old ? undefined : (target as { archive?: Uint8Array }).archive) };
     },

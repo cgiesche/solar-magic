@@ -11,6 +11,7 @@ import { listPatches } from '../src/core/patchreg.ts';
 import { loadProject, saveProject, emptyProject } from '../src/core/uberproject.ts';
 import { loadBlockProject, saveBlockProject, type BlockProject } from '../src/core/blocks.ts';
 import { importGfxFile } from '../src/core/map16file.ts';
+import { SECTIONS, SECTION_KEYS, type PartSection } from '../src/core/pkgsections.ts';
 import { recordPackageChange, listPackages, packageArchive, uninstallPackage, type Package, type PackageTarget, type Claim } from '../src/core/pkgreg.ts';
 
 await loadAsar();
@@ -68,6 +69,12 @@ const bId = track('B', () => {
 }).id;
 const b = listPackages(rom).find((r) => r.id === bId)!;
 check(b.uber.files.includes('library/shared.asm') && b.gfx.join() === '128' && b.blocks.tiles.join() === '673' && !b.patches.length, 'B: changed shared file, block and ExGFX recorded');
+
+// every section of the record (its adapter): nothing is nothing, an unchanged ROM brings nothing
+for (const k of SECTION_KEYS) {
+  const sec = SECTIONS[k] as PartSection<unknown, unknown>;
+  check(sec.empty(sec.none()) && sec.empty(sec.added(sec.read(rom), sec.read(rom))), `section ${k}: empty when nothing changed`);
+}
 
 // removing A: its patch, call, files and block go; the shared file stays for B
 const w = uninstallPackage(rom, a.id, blank);
