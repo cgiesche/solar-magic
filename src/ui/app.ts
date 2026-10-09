@@ -575,8 +575,9 @@ export class App {
     const step = () => {
       if (this.spriteKey !== key) return;
       if (i === 0) {
-        // i3: with the sprites from $C9 on (shells, groups), failed batches retried one by one
-        const stored = this.results.get<[number, SpriteImage][]>(`i3${key}`);
+        // i4: with the sprites from $C9 on (shells, groups), failed batches retried one by one; sprites
+        // that draw nothing shown by what they spawn
+        const stored = this.results.get<[number, SpriteImage][]>(`i4${key}`);
         if (stored) {
           for (const [n, img] of stored) map.set(n, this.spriteCanvas(img));
           this.setBusy('sprites', null);
@@ -593,7 +594,7 @@ export class App {
       this.emit('sprites');
       if (i < all.length) this.later('sprites', step);
       else {
-        this.results.set(`i3${key}`, images, this.results.fp.deps(reads));
+        this.results.set(`i4${key}`, images, this.results.fp.deps(reads));
         this.setBusy('sprites', null);
       }
     };
@@ -623,7 +624,7 @@ export class App {
   }
 
   private bytesKey(id: number, bytes: number[]): string {
-    return `b${this.spriteKey}:${id}:${bytes.join(',')}`;
+    return `b2${this.spriteKey}:${id}:${bytes.join(',')}`;
   }
   private bytesQueue: { id: number; bytes: number[] }[] = [];
   private queueBytesImage(id: number, bytes: number[]): void {
@@ -721,7 +722,7 @@ export class App {
     const sprites = [...lv.sprites].sort((a, b) => a.x - b.x || a.y - b.y || a.num - b.num || a.extra - b.extra);
     if (this.usedMem.gen !== this.rom.gen) this.usedMem = { gen: this.rom.gen, list: usedSpriteMemory(this.rom) };
     const candidates = this.usedMem.list;
-    const key = `sm${lv.number}:${mem}:${JSON.stringify(lv.header)}:${candidates.join(',')}:${sprites.map((q) => `${q.num}.${q.x}.${q.y}.${q.extra}${q.bytes?.length ? '.' + q.bytes.join('-') : ''}`).join(' ')}`;
+    const key = `sm2${lv.number}:${mem}:${JSON.stringify(lv.header)}:${candidates.join(',')}:${sprites.map((q) => `${q.num}.${q.x}.${q.y}.${q.extra}${q.bytes?.length ? '.' + q.bytes.join('-') : ''}`).join(' ')}`;
     if (this.spriteMem?.key === key) return;
     const run = ++this.spriteMemRun;
     const done = (r: { lost: number[]; suggestion: number | null }) => {

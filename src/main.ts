@@ -7,9 +7,10 @@ import { createBps, crc32 } from './core/bps.ts';
 const SMW_CLEAN_CRC = 0xb19ed489; // Super Mario World (U), headerless
 import { disableUnsafeExtGfx, hasEditorPatch } from './core/patches.ts';
 import { App, type EditMode } from './ui/app.ts';
-import { h, clear, toast, log, downloadBytes, pickFile, modal, choose } from './ui/dom.ts';
+import { h, clear, toast, log, modal, choose } from './ui/dom.ts';
+import { downloadBytes, pickFile, saveFile, filePath, fileName, desktop, guardClose } from './ui/platform.ts';
 import { LogBar } from './ui/logbar.ts';
-import { kvGet, kvClear, saveRom, romFromRecord, type RomRecord } from './ui/storage.ts';
+import { kvGet, kvSet, kvDel, kvClear, saveRom, romFromRecord, type RomRecord } from './ui/storage.ts';
 import { migratePatchSources } from './core/patchreg.ts';
 import { migratePackageFiles } from './core/pkgreg.ts';
 import { moveBrowserPackageFiles } from './ui/pkgtrack.ts';
@@ -56,6 +57,15 @@ async function openFile(f: File): Promise<void> {
   try { rom = Rom.fromFile(data); } catch (e) { toast(`Could not open “${f.name}”: ${e instanceof Error ? e.message : e}`, 'error'); return; }
   startWith(rom, f.name);
   saveRom(f.name, rom).catch(() => {});
+  const path = filePath(f);
+  setProjectPath(path && /\.smwproj$/i.test(path) ? path : null);
+}
+
+// desktop app: the .smwproj the project was opened from or last saved to – “Save project” writes there
+let projectPath: string | null = null;
+function setProjectPath(path: string | null): void {
+  projectPath = path;
+  (path ? kvSet('projectPath', path) : kvDel('projectPath')).catch(() => {});
 }
 
 function startWith(rom: Rom, name: string): void {
@@ -147,6 +157,7 @@ function buildUi(app: App): void {
     { label: 'File', items: [
       { label: 'Open project …', title: 'A project file (.smwproj) saved with “Save project”', onClick: openProjectFile },
       { label: 'Save project', title: 'The ROM with the editor data: sources of patches, packages, UberASM, blocks, sprites and music – to keep editing it later or elsewhere', onClick: () => { if (ow?.dirty) ow.save(); exportProject(app); } },
+      ...(desktop ? [{ label: 'Save project as …', title: 'Save the project to another file and keep working on that one', onClick: () => { if (ow?.dirty) ow.save(); exportProject(app, true); } }] : []),
       'sep',
       { label: 'Import ROM …', title: 'Start from a ROM (.smc/.sfc) – clean or already modified', onClick: importRomFile },
       { label: 'Export ROM', title: 'Download the playable ROM with all saved changes (without the editor data)', onClick: () => { if (ow?.dirty) ow.save(); exportRom(app); } },
@@ -359,6 +370,7 @@ function buildUi(app: App): void {
     else if (k === 'a' || k === 'A') setWorkspace('gfx', { tab: 'anim' });
   };
   window.onbeforeunload = (e) => { if (app.dirty || ow?.dirty) { e.preventDefault(); } };
+  guardClose(() => app.dirty || !!ow?.dirty);
   updateToolbar();
   levels.build();
 }
@@ -369,12 +381,12 @@ function hoverTile(app: App, tx: number, ty: number): number {
 }
 
 // the playable ROM: without the editor data (sources of patches, packages, UberASM/blocks/sprites/music)
-function exportRom(app: App): void {
+async function exportRom(app: App): Promise<void> {
   if (app.dirty) app.saveLevel(true);
   const withHeader = app.rom.smcHeader !== null;
   const out = app.rom.output(withHeader);
   const base = app.romName.replace(/\.(smc|sfc|bin|smwproj)$/i, '');
-  downloadBytes(`${base}.${withHeader ? 'smc' : 'sfc'}`, out);
+  if (!await downloadBytes(`${base}.${withHeader ? 'smc' : 'sfc'}`, out)) return;
   log(`ROM exported as “${base}.${withHeader ? 'smc' : 'sfc'}” (${Math.round(out.length / 1024)} KB)`);
   if (app.rom.extra.size) toast('The playable ROM holds no sources of patches, packages and projects – to keep editing elsewhere, use “Save project”.');
 }
@@ -391,8 +403,7 @@ async function exportPatch(app: App): Promise<void> {
   const target = app.rom.output(false);
   const patch = createBps(source, target);
   const base = app.romName.replace(/\.(smc|sfc|bin|smwproj)$/i, '');
-  downloadBytes(`${base}.bps`, patch);
-  log(`Patch exported as “${base}.bps” (${Math.max(1, Math.round(patch.length / 1024))} KB, from “${f.name}”)`);
+  if (await downloadBytes(`${base}.bps`, patch)) log(`Patch exported as “${base}.bps” (${Math.max(1, Math.round(patch.length / 1024))} KB, from “${f.name}”)`);
 }
 // forgets everything stored in the browser and starts over (reloading drops all state of the session)
 async function closeProject(app: App): Promise<void> {
@@ -401,16 +412,24 @@ async function closeProject(app: App): Promise<void> {
   if (r !== 1) return;
   app.close();
   window.onbeforeunload = null;
+  guardClose(() => false);
   try { await kvClear(); } catch (e) { toast(`Could not clear the browser storage: ${e instanceof Error ? e.message : e}`, 'error'); return; }
   try { localStorage.clear(); } catch { /* no storage */ }
   location.replace(location.pathname);
 }
-function exportProject(app: App): void {
+async function exportProject(app: App, askWhere = false): Promise<void> {
   if (app.dirty) app.saveLevel(true);
   const out = app.rom.outputProject(app.rom.smcHeader !== null);
   const base = app.romName.replace(/\.(smc|sfc|bin|smwproj)$/i, '');
-  downloadBytes(`${base}.smwproj`, out);
-  log(`Project saved as “${base}.smwproj” (${Math.round(out.length / 1024)} KB, of which ${Math.round(app.rom.extraSize / 1024)} KB editor data)`);
+  const res = await saveFile(`${base}.smwproj`, out, { path: askWhere ? undefined : projectPath ?? undefined });
+  if (!res) return;
+  if (res.path) {
+    setProjectPath(res.path);
+    // saved under another name: the project is called so from now on
+    const name = fileName(res.path);
+    if (name !== app.romName) { app.romName = name; saveRom(name, app.rom).catch(() => {}); }
+  }
+  log(`Project saved as “${res.path ?? `${base}.smwproj`}” (${Math.round(out.length / 1024)} KB, of which ${Math.round(app.rom.extraSize / 1024)} KB editor data)`);
 }
 
 function showHelp(): void {
@@ -489,6 +508,7 @@ window.addEventListener('drop', (e) => {
   try {
     const saved = await kvGet<RomRecord>('rom');
     if (saved?.data) {
+      if (desktop) projectPath = (await kvGet<string>('projectPath')) ?? null;
       startWith(romFromRecord(saved), saved.name);
       return;
     }

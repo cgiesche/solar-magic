@@ -6,7 +6,8 @@
 // listed on its own.
 
 import type { App } from './app.ts';
-import { h, clear, toast, choose, downloadBytes } from './dom.ts';
+import { h, clear, toast, choose } from './dom.ts';
+import { downloadBytes } from './platform.ts';
 import { listPatches, type PatchEntry } from '../core/patchreg.ts';
 import { uninstallVramPatch } from '../core/vrampatch.ts';
 import { listPackages, packageSummary, type Package } from '../core/pkgreg.ts';

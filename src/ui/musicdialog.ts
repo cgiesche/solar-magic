@@ -5,7 +5,8 @@
 // AddmusicK at once (music.ts), as one undoable ROM edit. Songs come with packages (upload them).
 
 import type { App } from './app.ts';
-import { h, clear, modal, toast, select, downloadBytes } from './dom.ts';
+import { h, clear, modal, toast, select } from './dom.ts';
+import { downloadBytes } from './platform.ts';
 import { hex } from '../core/names.ts';
 import {
   loadMusicProject, saveMusicProject, emptyMusicProject, romSongs, songSpcs, spcOf,

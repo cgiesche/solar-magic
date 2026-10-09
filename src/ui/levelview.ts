@@ -1,7 +1,8 @@
 // Scrollable, zoomable level canvas with editing interactions.
 
 import { App, type Marker, type LevelEdit } from './app.ts';
-import { h, attachPanZoom, downloadBytes, toast } from './dom.ts';
+import { h, attachPanZoom, toast } from './dom.ts';
+import { downloadBytes } from './platform.ts';
 import { objectName, hex2, hex3 } from '../core/names.ts';
 import { resizeObjectSize } from '../core/objkinds.ts';
 import { probeAt, spriteProbeAt, enterText, collisionText, type PosProbe, type CollisionProbe } from '../core/blockprobe.ts';

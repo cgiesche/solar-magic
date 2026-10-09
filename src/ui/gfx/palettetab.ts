@@ -6,7 +6,8 @@
 import type { App } from '../app.ts';
 import type { GfxWorkspace, WsPanel } from '../gfxworkspace.ts';
 import { menuButton } from '../menu.ts';
-import { h, clear, toast, downloadBytes, pickFile, choose, pickerOpen } from '../dom.ts';
+import { h, clear, toast, choose, pickerOpen } from '../dom.ts';
+import { downloadBytes, pickFile } from '../platform.ts';
 import { snesColorToRGBA, cgramToRGBA } from '../../core/gfx.ts';
 import { pcToSnes } from '../../core/rom.ts';
 import { hex } from '../../core/names.ts';
@@ -441,14 +442,13 @@ export class PaletteTab implements WsPanel {
     void this.write(ch, 'Color gradient');
   }
 
-  private exportPal(): void {
+  private async exportPal(): Promise<void> {
     const out = new Uint8Array(768);
     for (let i = 0; i < 256; i++) {
       const v = snesColorToRGBA(this.color(i));
       out[i * 3] = v & 255; out[i * 3 + 1] = (v >> 8) & 255; out[i * 3 + 2] = (v >> 16) & 255;
     }
-    downloadBytes(`level${hex(this.app.level.number, 3)}.pal`, out);
-    toast(`level${hex(this.app.level.number, 3)}.pal exported`);
+    if (await downloadBytes(`level${hex(this.app.level.number, 3)}.pal`, out)) toast(`level${hex(this.app.level.number, 3)}.pal exported`);
   }
   private async importPal(): Promise<void> {
     const f = await pickFile('.pal');

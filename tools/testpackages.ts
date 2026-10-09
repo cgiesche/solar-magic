@@ -18,6 +18,7 @@ import { listPackages } from '../src/core/pkgreg.ts';
 import { applyPatch } from '../src/core/patchapply.ts';
 import { listPatches } from '../src/core/patchreg.ts';
 import { loadProject, saveProject } from '../src/core/uberproject.ts';
+import { ALL } from '../src/core/uberasm.ts';
 import { loadBlockProject, saveBlockProject } from '../src/core/blocks.ts';
 import { loadPixiProject, savePixiProject } from '../src/core/pixi.ts';
 import { loadMusicProject } from '../src/core/music.ts';
@@ -117,6 +118,19 @@ await removePackage(rom, pa.pkg!.id, opts.blank);
 const up = loadProject(rom)!;
 check(!up.files.has('level/a.asm') && up.files.has('library/shared.asm') && up.files.has('level/b.asm'), 'removing A keeps the library file B uses');
 await removePackage(rom, pb.pkg!.id, opts.blank);
+
+// its file assigned by hand elsewhere (all levels) and its own assignment dropped: removing it takes
+// the hand-made assignment along instead of leaving a call to a missing file
+{
+  const r = await install(inspectUpload('C.zip', zip({ 'level/c.asm': 'main:\n  RTL\n' })));
+  const p = loadProject(rom)!;
+  p.list.level.delete(0x105);
+  p.list.level.set(ALL, [{ file: 'level/c.asm', bytes: [] }]);
+  saveProject(rom, p);
+  const rm = await removePackage(rom, r.pkg!.id, opts.blank);
+  const after = loadProject(rom);
+  check(r.ok && !rm.length && !after?.files.has('level/c.asm') && !after?.list.level.has(ALL), 'removing a package drops hand-made assignments of its files ' + rm.join(' | '));
+}
 
 // manuals: the tool tabs list those of the installed packages, so they come and go with the package
 // (and its undo, which restores ROM and editor data)

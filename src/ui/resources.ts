@@ -5,7 +5,8 @@
 // undo and redo it (ADR 0001).
 
 import type { App } from './app.ts';
-import { h, modal, clear, toast, pickFile, choose } from './dom.ts';
+import { h, modal, clear, toast, choose } from './dom.ts';
+import { pickFile } from './platform.ts';
 import { hex } from '../core/names.ts';
 import { openLevelImportDialog } from './levelimport.ts';
 import { loadAsar } from '../core/asar.ts';

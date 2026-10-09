@@ -11,6 +11,7 @@ nicht übernommen, außer bei Asar, snes_spc und AddmusicK (eingebunden als WebA
 | [AddmusicK](https://github.com/KungFuFurby/AddMusicKFF) 1.0.11 | Musik einfügen: Compiler der Songs (MML), Sound-Treiber, SNES-Patch; eingebunden als WebAssembly mit Asar (`tools/build-amk.sh`), samt seiner Originalsongs, Samples und Soundeffekte. Ohne angegebene Lizenz; Nutzung wie in der SMW-Szene üblich mit Nennung der Autoren | Kipernal; seit 1.0.6 gepflegt von Medic, HertzDevil, Vitor Vilela, Lui, KevinM, KungFuFurby u. a.; Grundlage Addmusic 4.05 (Romi) und AddmusicM (Masashi27) |
 | [GPS](https://www.smwcentral.net/?p=section&a=details&id=31515) (Gopher Popcorn Stew) | Format der Custom Blocks, Namen und Verträge der Standard-Routinen | p4plus2; Pflege TheBiob, GHB, Arinsu; Beiträge von Majorflare, MarioFanGamer, Vitor Vilela; Routinen nach Akaginite, Tattletale, imamelia |
 | [UberASM Tool](https://github.com/Fernap/UberASMTool) | Format und Aufrufkonventionen von UberASM | Vitor Vilela, Fernap und weitere |
+| [Tauri](https://tauri.app) 2 (MIT/Apache-2.0) | Rahmen der Desktop-App (`src-tauri/`): natives Fenster mit dem Webview des Systems | Tauri Programme within The Commons Conservancy und Mitwirkende |
 | Lunar Magic | Formate von `.mwl`, `.map16`, ExGFX, Größentabelle der Sprite-Daten (`$0EF30C`) | FuSoYa |
 
 Pakete, an denen Funktionen des Editors entwickelt und getestet wurden (als Testdaten in `test/fixtures/`):
@@ -23,3 +24,4 @@ Pakete, an denen Funktionen des Editors entwickelt und getestet wurden (als Test
 | Rock Climbing Blocks (SMWCentral, Blöcke, `RockClimbBlocksUpdate.zip`) | Testfall für Blockpakete mit `list.txt`, Map16 und ExGFX | GreenHammerBro; SA-1-Update von yoshifanatic |
 | Brutal Bill (SMWCentral, Sprite, `BrutalBill.zip`) | Testfall für PIXI-Pakete mit Sprite und Shooter | Sonikku; nach dem Homing Bullet Bill von Carol |
 | Aftertouch Shatter (SMWCentral, Block, `Aftertouch Shatter.zip`) | Testfall für Blöcke, die einen eigenen Bounce-Sprite erzeugen | Arinsu; Original von HammerBrother |
+| Enemy Stack (SMWCentral, Sprite, `EnemyStack.zip`; nicht in `test/fixtures/`, der Test baut einen eigenen Stapel-Sprite nach) | Fall, an dem die Sprite-Bilder aus gespawnten Sprites entwickelt wurden: ein unsichtbarer Sprite, der die Sprites seiner Extra-Bytes übereinander spawnt | dtothefourth |

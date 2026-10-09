@@ -2,6 +2,7 @@
 // the level runs a few frames, and the OAM tiles belonging to each sprite are collected.
 
 import { LevelEmulator } from './levelemu.ts';
+import type { Snes, MemHook } from './snes.ts';
 import { encodePrimaryHeader, spriteBytes, spriteSizes, type PrimaryHeader, type SpriteSizes } from './level.ts';
 import { decodeTile, cgramToRGBA } from './gfx.ts';
 import { GM, RAM, SPR, SPRITE_SLOTS, spriteX, spriteY, cameraX, cameraY, setCameraX, setCameraY, setMarioPos } from './ram.ts';
@@ -77,24 +78,35 @@ export function captureSprites(
     const solo = batch.length === 1 && alone(batch[0]);
     const placed = batch.map((id, i) => ({ id, n: id & 0xff, extra: id >> 8, bytes, ...slots[i] }));
     const order = sortPlaced(placed);
-    const r = emu.load(level, { layer1: l1, sprites: testSpriteData(spriteHeader, order, spriteSizes(emu.rom)), secondaryHeader: secondary, layer2Pointer: bgPointer });
+    const tracker = new SlotTracker(s);
+    const r = emu.load(level, { layer1: l1, sprites: testSpriteData(spriteHeader, order, spriteSizes(emu.rom)), secondaryHeader: secondary, layer2Pointer: bgPointer, fadeHook: tracker.start });
     if (!r.ok) continue;
-    const rec = record(emu, 3);
+    const rec = record(emu, 3, tracker);
     if (!rec) continue;
-    const { snapOwner, snapOam, snapConflicts } = rec;
+    const { snapOwner, snapOam, snapConflicts, spawner } = rec;
     const w = s.wram;
     const cx = cameraX(w), cy = cameraY(w);
     // live sprite slots (alone, a sprite from $C9 on owns all: shells $DA-$DD load as a Koopa
     // 04-07 in carryable state, so $9E is not the placed number; a custom sprite's $9E is what it acts like)
+    // a slot spawned by sprite code shows the placed sprite that spawned it if that one draws nothing
+    // itself (an enemy stack, an invisible spawner; it may be gone by now) – what a visible sprite
+    // spawns (the Bowser statue's flame) is not part of its image
+    const tiles = readOamBuffer(snapOam).filter((t) => snapOwner[t.i] >= 0);
+    const drawn = new Set(tiles.map((t) => snapOwner[t.i]));
+    const shownBy = (i: number) => {
+      const r = rootSlot(spawner, i);
+      return drawn.has(r) ? i : r;
+    };
     const live = new Map<number, { n: number; x: number; y: number }>();
     for (let i = 0; i < SPRITE_SLOTS; i++) {
-      const from = order[w[SPR.loadIndex + i]];
-      if (w[SPR.status + i] === 0 || !(solo || from)) continue;
-      live.set(i, { n: solo ? batch[0] : from.id >= 0x200 ? from.id : w[SPR.num + i], x: spriteX(w, i), y: spriteY(w, i) });
+      const k = shownBy(i);
+      const from = order[w[SPR.loadIndex + k]];
+      if (w[SPR.status + i] === 0 || !(solo || from) || live.has(k)) continue;
+      live.set(k, { n: solo ? batch[0] : from.id >= 0x200 ? from.id : w[SPR.num + k], x: spriteX(w, k), y: spriteY(w, k) });
     }
     const groups = new Map<number, OamTile[]>();
-    for (const t of readOamBuffer(snapOam)) {
-      const slot = snapOwner[t.i];
+    for (const t of tiles) {
+      const slot = shownBy(snapOwner[t.i]);
       if (!live.has(slot)) continue;
       let g = groups.get(slot);
       if (!g) { g = []; groups.set(slot, g); }
@@ -118,7 +130,7 @@ export function captureSprites(
       const l = live.get(i)!;
       if (result.has(l.n)) return;
       // partly off screen or sharing OAM entries with another sprite: retry alone in the first slot
-      if (batch.length > 1 && (snapConflicts.has(i) || w[SPR.offScreenH + i] || w[SPR.offScreenV + i]
+      if (batch.length > 1 && ([...snapConflicts].some((c) => shownBy(c) === i) || w[SPR.offScreenH + i] || w[SPR.offScreenV + i]
         || g.some(t => t.x < 0 || t.x + (t.big ? 16 : 8) > 256 || t.y + (t.big ? 16 : 8) > 224))) return;
       const img = drawTiles(emu, g);
       // offset relative to the spawn tile, compensating for movement since spawn
@@ -163,55 +175,95 @@ export function testSpriteData(spriteHeader: number, order: PlacedSprite[], size
   return new Uint8Array(data);
 }
 
-// Continues the live emulator state for a few frames (first into gameplay), recording which
-// sprite slot writes each OAM buffer entry ($0200-$03FF): the sprite loop stores the slot
-// in $15E9 ($0180A9) before each sprite runs, Yoshi is drawn later with $15E9 set at $01EA83;
-// writes from shallower stack depth end the attribution.
-// (score/extended sprite loops in bank 2 reuse $15E9, hence the bank check)
-// snapLost: slots that lost a visible tile that way (the tile is missing on screen) and the slots
-// that overwrote it
-export function record(emu: LevelEmulator, frames: number): { snapOwner: Int8Array; snapOam: Uint8Array; snapConflicts: Set<number>; snapLost: Set<number> } | null {
-  const s = emu.snes;
-  const owner = new Int8Array(128).fill(-1);
-  let snapOwner = owner.slice(), snapOam = s.wram.slice(RAM.oam, RAM.oamEnd);
+// Follows which sprite slot's code runs: the sprite loop stores the slot in $15E9 ($0180A9) before
+// each sprite runs, Yoshi is drawn later with $15E9 set at $01EA83; writes from shallower stack depth
+// end the attribution (score/extended sprite loops in bank 2 reuse $15E9, hence the bank check).
+// Records which slot writes each OAM buffer entry ($0200-$03FF), per frame, and which slot's code
+// brought each slot to life ($14C8 from 0; spawner, -1 for the loader's, see rootSlot).
+// Pass start to load() as fadeHook to see the spawns of the sprites' first frames during the fade-in.
+export class SlotTracker {
+  readonly spawner = new Int8Array(SPRITE_SLOTS).fill(-1);
+  private owner = new Int8Array(128).fill(-1);
+  snapOwner = this.owner.slice();
+  snapOam: Uint8Array;
   // slots whose OAM entries were overwritten by another sprite in the same frame
-  let conflicts = new Set<number>(), snapConflicts = conflicts;
-  let lost = new Set<number>(), snapLost = lost;
-  let cur = -1, s0 = 0;
-  s.hook = {
-    onWramWrite(a: number, v: number) {
-      if (a === 0x15e9) {
-        if (s.cpu.pbr === 1) { cur = v; s0 = s.cpu.s; }
-        else if (cur >= 0 && s.cpu.s < s0) cur = v; // sprite code switching slots
-        else cur = -1;
-        return;
-      }
-      if (cur >= 0 && s.cpu.s > s0) {
-        cur = -1;
-        snapOwner = owner.slice();
-        snapOam = s.wram.slice(RAM.oam, RAM.oamEnd);
-        snapConflicts = conflicts;
-        conflicts = new Set();
-        snapLost = lost;
-        lost = new Set();
-      }
-      if (a >= RAM.oam && a < RAM.oam + 0x200) {
-        const e = (a - RAM.oam) >> 2, prev = owner[e];
-        if (cur >= 0 && prev >= 0 && prev !== cur) {
-          conflicts.add(prev); conflicts.add(cur);
-          const y = s.wram[RAM.oam + 1 + e * 4]; // still the overwritten tile's: the first write of cur
-          if (y < 0xe0 || y >= 0xf8) { lost.add(prev); lost.add(cur); }
+  private conflicts = new Set<number>();
+  snapConflicts = this.conflicts;
+  // slots that lost a visible tile that way (the tile is missing on screen) and the slots that overwrote it
+  private lost = new Set<number>();
+  snapLost = this.lost;
+  private hook: MemHook;
+  private status = new Uint8Array(SPRITE_SLOTS); // as before the write the hook sees
+  private s: Snes;
+  constructor(s: Snes) {
+    this.s = s;
+    this.snapOam = s.wram.slice(RAM.oam, RAM.oamEnd);
+    const status = this.status;
+    let cur = -1, s0 = 0;
+    this.hook = {
+      onWramWrite: (a: number, v: number) => {
+        if (a === 0x15e9) {
+          if (s.cpu.pbr === 1) { cur = v; s0 = s.cpu.s; }
+          else if (cur >= 0 && s.cpu.s < s0) cur = v; // sprite code switching slots
+          else cur = -1;
+          return;
         }
-        owner[e] = cur;
-      }
-    },
+        if (cur >= 0 && s.cpu.s > s0) {
+          cur = -1;
+          this.snapOwner = this.owner.slice();
+          this.snapOam = s.wram.slice(RAM.oam, RAM.oamEnd);
+          this.snapConflicts = this.conflicts;
+          this.conflicts = new Set();
+          this.snapLost = this.lost;
+          this.lost = new Set();
+        }
+        if (a >= SPR.status && a < SPR.status + SPRITE_SLOTS) {
+          const i = a - SPR.status;
+          if (v && !status[i]) this.spawner[i] = cur;
+          status[i] = v;
+        }
+        if (a >= RAM.oam && a < RAM.oam + 0x200) {
+          const e = (a - RAM.oam) >> 2, prev = this.owner[e];
+          if (cur >= 0 && prev >= 0 && prev !== cur) {
+            this.conflicts.add(prev); this.conflicts.add(cur);
+            const y = s.wram[RAM.oam + 1 + e * 4]; // still the overwritten tile's: the first write of cur
+            if (y < 0xe0 || y >= 0xf8) { this.lost.add(prev); this.lost.add(cur); }
+          }
+          this.owner[e] = cur;
+        }
+      },
+    };
+  }
+  // the hook, following from the emulator's current state
+  // (frame records start anew, spawns are kept)
+  start = (): MemHook => {
+    this.owner.fill(-1);
+    this.snapOwner = this.owner.slice();
+    this.snapOam = this.s.wram.slice(RAM.oam, RAM.oamEnd);
+    this.snapConflicts = this.conflicts = new Set();
+    this.snapLost = this.lost = new Set();
+    this.status.set(this.s.wram.subarray(SPR.status, SPR.status + SPRITE_SLOTS));
+    return this.hook;
   };
+}
+
+// Continues the live emulator state for a few frames (first into gameplay) with the tracker
+// (a new one, or the one given to load() as fadeHook); null if the game crashes
+export function record(emu: LevelEmulator, frames: number, t = new SlotTracker(emu.snes)): SlotTracker | null {
+  const s = emu.snes;
+  s.hook = t.start();
   try {
     let guard = 0;
     while (s.wram[RAM.gameMode] !== GM.level && guard++ < 80) s.runFrame();
     for (let f = 0; f < frames; f++) s.runFrame();
   } catch { return null; } finally { s.hook = null; }
-  return { snapOwner, snapOam, snapConflicts, snapLost };
+  return t;
+}
+
+// the slot a slot descends from through spawns (itself if no sprite spawned it)
+export function rootSlot(spawner: Int8Array, slot: number): number {
+  for (let k = 0; k < SPRITE_SLOTS && spawner[slot] >= 0 && spawner[slot] !== slot; k++) slot = spawner[slot];
+  return slot;
 }
 
 // image of OAM tiles; ox/oy: its top-left on the screen

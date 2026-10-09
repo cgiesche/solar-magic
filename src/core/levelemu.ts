@@ -2,7 +2,7 @@
 // graphics (VRAM) and palettes (CGRAM) of a level, including per-tile ownership
 // (which object produced which tile).
 
-import { Snes, type SnesState } from './snes.ts';
+import { Snes, type SnesState, type MemHook } from './snes.ts';
 import { Rom, snesToPc } from './rom.ts';
 import { L1_PTRS, L2_PTRS, SPR_PTRS, mainTranslevel } from './level.ts';
 import { editorPatch, musicPatch, BG_HOOK, HEADER_MUSIC_TABLE } from './patches.ts';
@@ -43,6 +43,7 @@ export interface LevelOverride {
   trace?: boolean; // record per object what its routine reads and writes (see ObjectTrace)
   continueState?: boolean; // load from the emulator's current state (startGame) instead of the boot snapshot
   music?: number; // the song the level plays instead of its own (all header settings and the level's music patch entry)
+  fadeHook?: () => MemHook; // watches the frames after GM $11 (level start, fade-in: sprites run their first frames there), made when GM $11 is done
 }
 
 // What the object routines did while the level loaded (analysis, see objkinds.ts).
@@ -274,7 +275,7 @@ export class LevelEmulator {
       // the level music bank takes some 40 frames of it
       const loadLimit = musicCall >= 0 ? 120 : 30;
       while (w[RAM.gameMode] === GM.levelLoad && frames < loadLimit) { s.runFrame(); frames++; }
-      s.hook = null;
+      s.hook = ov.fadeHook?.() ?? null;
       // with the sound unit emulated, the fade-in also waits for the song's upload (AddmusicK sends a
       // song with its samples then: well over 100 frames for big ones)
       const limit = s.apu ? 600 : 120;
