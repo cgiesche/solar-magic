@@ -1,39 +1,39 @@
-# Custom Sprites (PIXI-Format)
+# Custom Sprites (PIXI format)
 
-Der Editor fügt Custom Sprites im Format von [PIXI](https://github.com/JackTheSpades/SpriteToolSuperDelux)
-1.4x ein. Ressourcen von SMWCentral laufen unverändert. PIXI selbst wird nicht verwendet: Die
-Laufzeit (Lader, Verteiler, Shared Routines) ist eine eigene Implementierung derselben Schnittstelle und
-wird mit dem eingebauten Asar als **ein** Patch in die ROM gebracht, wie die Custom Blocks.
+The editor inserts custom sprites in the format of [PIXI](https://github.com/JackTheSpades/SpriteToolSuperDelux)
+1.4x. Resources from SMWCentral work unchanged. PIXI itself is not used: the
+runtime (loader, dispatcher, shared routines) is a separate implementation of the same interface and
+is put into the ROM with the built-in Asar as **one** patch, like the custom blocks.
 
-Diese Seite beschreibt die Schnittstelle, die Ressourcen sehen, und wie der Editor sie umsetzt.
+This page describes the interface that resources see and how the editor implements it.
 
-## Im Editor
+## In the editor
 
-- **Hochladen:** *ROM → Packages … → Upload package …* mit einem Download (`.zip` oder `.asm`, auch ein ganzer
-  PIXI-Ordner). Der Editor erkennt
-  Sprites (an `.json`/`.cfg`), Misc-Sprites (`.asm` mit `print "MAIN ",pc` in einem Ordner ihrer Art) und
-  enthaltene Custom Blocks. Jeder Sprite bekommt die nächste freie Nummer seiner Art, jeder Block das nächste
-  freie Map16-Tile ab 200. Defines, die einen Sprite des Pakets meinen, werden auf dessen Nummer gesetzt,
-  erkannt am Dateinamen im Kommentar (`!Sprite = $18 ; Sprite number of BrutalBill.json`)
-  oder an einer Misc-Art im Namen (`!bounce_sprite`).
-- **Konfigurieren:** Tab *Sprites* im Packages-Dialog, eine Konfigurationsansicht: Einträge der `list.txt`
-  (Sprite → Nummer) zuordnen und aufheben, jeder mit dem Paket, aus dem er stammt; Einstellungen der Dateien;
-  Export eines PIXI-Ordners als `.zip`. Hinzugefügt wird nur durch Hochladen eines Pakets, entfernt mit dem
-  Paket; eine aufgehobene Zuordnung lässt die Dateien im Projekt. Alles wird als ein Patch mit den Quellen in
-  der ROM verzeichnet.
-- **Platzieren:** Die Palette zeigt unter *Sprites* einen Abschnitt „Custom Sprites (PIXI)“ mit den Namen aus
-  `Collection` und der Grafik, die das Spiel zeichnet – wie Lunar Magic nur die Varianten (Extra-Bit
-  gelöscht/gesetzt), die `Collection` nennt; ohne `Collection` (`.cfg`) die ohne Extra-Bit. In den
-  Eigenschaften stehen die Extra-Bytes; Sprites mit anderen Extra-Bytes als 0 bekommen ein eigenes Bild. Beim
-  Einfügen nach Nummer gelten die Extra-Bits 2/3 als Custom Sprite.
+- **Upload:** *ROM → Packages … → Upload package …* with a download (`.zip` or `.asm`, also a whole
+  PIXI folder). The editor recognizes
+  sprites (by `.json`/`.cfg`), misc sprites (`.asm` with `print "MAIN ",pc` in a folder of their type) and
+  included custom blocks. Each sprite gets the next free number of its type, each block the next
+  free Map16 tile from 200 on. Defines that refer to a sprite of the package are set to its number,
+  recognized by the file name in the comment (`!Sprite = $18 ; Sprite number of BrutalBill.json`)
+  or by a misc type in the name (`!bounce_sprite`).
+- **Configure:** *Sprites* tab in the Packages dialog, a configuration view: assign and unassign entries of
+  the `list.txt` (sprite → number), each with the package it comes from; settings of the files;
+  export of a PIXI folder as `.zip`. Sprites are only added by uploading a package and removed with the
+  package; an unassigned entry leaves the files in the project. Everything is recorded in the ROM as one patch
+  with its sources.
+- **Place:** under *Sprites*, the palette shows a section "Custom Sprites (PIXI)" with the names from
+  `Collection` and the graphics the game draws – like Lunar Magic, only the variants (extra bit
+  clear/set) that `Collection` lists; without `Collection` (`.cfg`) the one without the extra bit. The
+  properties show the extra bytes; sprites with extra bytes other than 0 get their own image. When
+  inserting by number, extra bits 2/3 count as a custom sprite.
 
-## Arten und Ordner
+## Types and folders
 
-| Art | Ordner | Nummern | Datei in `list.txt` |
+| Type | Folder | Numbers | File in `list.txt` |
 |---|---|---|---|
-| Sprite | `sprites/` | 00–BF | `.json` oder `.cfg` (verweist auf die `.asm`) |
-| Shooter | `shooters/` | C0–CF | `.json` oder `.cfg` |
-| Generator | `generators/` | D0–DF | `.json` oder `.cfg` |
+| Sprite | `sprites/` | 00–BF | `.json` or `.cfg` (points to the `.asm`) |
+| Shooter | `shooters/` | C0–CF | `.json` or `.cfg` |
+| Generator | `generators/` | D0–DF | `.json` or `.cfg` |
 | Cluster | `cluster/` | 00–7F | `.asm` |
 | Extended | `extended/` | 00–7F | `.asm` |
 | Minor Extended | `misc_sprites/minorextended/` | 00–3F | `.asm` |
@@ -42,7 +42,7 @@ Diese Seite beschreibt die Schnittstelle, die Ressourcen sehen, und wie der Edit
 | Spinning Coin | `misc_sprites/spinningcoin/` | 00–1F | `.asm` |
 | Score | `misc_sprites/score/` | 00–1F | `.asm` |
 
-Jeder Ordner darf eine `_header.asm` haben; sie wird in jede Datei dieser Art eingebunden.
+Each folder may have a `_header.asm`; it is included in every file of that type.
 
 ### `list.txt`
 
@@ -58,18 +58,18 @@ BOUNCE:
 01 shatter_aftertouch_bounce.asm
 ```
 
-Abschnitte: `SPRITE:` (Standard), `CLUSTER:`, `EXTENDED:`, `MINOREXTENDED:`, `BOUNCE:`, `SMOKE:`,
-`SPINNINGCOIN:`, `SCORE:`. Zusätze wie `display`/`nodisplay` (nur für Lunar Magic) werden ignoriert.
+Sections: `SPRITE:` (default), `CLUSTER:`, `EXTENDED:`, `MINOREXTENDED:`, `BOUNCE:`, `SMOKE:`,
+`SPINNINGCOIN:`, `SCORE:`. Additions such as `display`/`nodisplay` (only for Lunar Magic) are ignored.
 
-**Nicht unterstützt:** Per-Level-Sprites (`105:B0 datei.cfg`, PIXI-Option `-pl`). B0–BF sind normale
-Sprites.
+**Not supported:** per-level sprites (`105:B0 file.cfg`, PIXI option `-pl`). B0–BF are normal
+sprites.
 
-### Nummern im Spiel
+### Numbers in the game
 
-Die Misc-Sprites teilen sich die Nummern mit den Original-Sprites ihrer Art. Custom Sprite *n* hat im Spiel
-die Nummer *n* + Offset:
+The misc sprites share their numbers with the original sprites of their type. Custom sprite *n* has
+the number *n* + offset in the game:
 
-| Art | Offset (`!…Offset`) |
+| Type | Offset (`!…Offset`) |
 |---|---|
 | Cluster | `$09` |
 | Extended | `$13` |
@@ -79,91 +79,91 @@ die Nummer *n* + Offset:
 | Bounce | `$08` |
 | Score | `$16` |
 
-Ein Block, der Bounce-Sprite 01 erzeugt, schreibt also `!bounce_sprite+$08` = `$09` nach `!bounce_num`.
+So a block that spawns bounce sprite 01 writes `!bounce_sprite+$08` = `$09` to `!bounce_num`.
 
-## Sprites in den Level-Daten
+## Sprites in the level data
 
-Ein Eintrag besteht aus 3 Bytes plus den Extra-Bytes des Sprites:
+An entry consists of 3 bytes plus the sprite's extra bytes:
 
 ```
-Byte 0: YYYYEEsy   Y = Zeile, EE = Extra-Bits, s = Bildschirm-Bit 4, y = Zeile Bit 4
-Byte 1: XXXXSSSS   X = Spalte, S = Bildschirm Bit 0–3
-Byte 2: Nummer
-Byte 3…: Extra-Bytes (0–12)
+Byte 0: YYYYEEsy   Y = row, EE = extra bits, s = screen bit 4, y = row bit 4
+Byte 1: XXXXSSSS   X = column, S = screen bits 0–3
+Byte 2: number
+Byte 3…: extra bytes (0–12)
 ```
 
-- `EE` Bit 1 (`$08` in Byte 0) ist das **Custom-Flag**, Bit 0 (`$04`) das **Extra-Bit**. Werte 0/1 sind
-  Original-Sprites, 2/3 Custom Sprites ohne/mit Extra-Bit.
-- Die Länge eines Eintrags ergibt sich aus einer Größentabelle mit `$400` Bytes: Index
-  `EE × $100 + Nummer`, Wert = 3 + Anzahl Extra-Bytes. Die Anzahl steht in der cfg/json, getrennt für
-  gelöschtes und gesetztes Extra-Bit. Ihre Adresse steht wie bei Lunar Magic und PIXI bei `$0EF30C`,
-  gültig mit `$42` bei `$0EF30F`.
-- Der Lader des Spiels liest die Liste mit 8-Bit-Index. Überschreitet der Index `$80`, rückt die Laufzeit den
-  Zeiger `$CE` weiter und setzt ihn am Ende der Schleife zurück. So passen auch lange Listen mit Extra-Bytes.
-- `.smwlevel`-Dateien enthalten die Größentabelle, mit der ihre Sprite-Daten geschrieben sind.
-- Ändert sich die Anzahl für einen Sprite, der schon in Levels steht, schreibt der Editor diese Levels
-  bei der Änderung gleich mit neu, wie PIXIs MeiMei.
+- `EE` bit 1 (`$08` in byte 0) is the **custom flag**, bit 0 (`$04`) the **extra bit**. Values 0/1 are
+  original sprites, 2/3 custom sprites without/with extra bit.
+- The length of an entry comes from a size table of `$400` bytes: index
+  `EE × $100 + number`, value = 3 + number of extra bytes. The count is in the cfg/json, separately for
+  extra bit clear and set. Its address is at `$0EF30C`, as with Lunar Magic and PIXI,
+  valid with `$42` at `$0EF30F`.
+- The game's loader reads the list with an 8-bit index. When the index exceeds `$80`, the runtime advances the
+  pointer `$CE` and resets it at the end of the loop. That way long lists with extra bytes fit too.
+- `.smwlevel` files contain the size table their sprite data was written with.
+- If the count changes for a sprite that is already placed in levels, the editor rewrites those levels
+  right away along with the change, like PIXI's MeiMei.
 
-## Laufzeit-RAM
+## Runtime RAM
 
-| Define | Adresse | Inhalt |
+| Define | Address | Contents |
 |---|---|---|
-| `!extra_bits` / `!7FAB10` | `$7FAB10,x` | Extra-Bits: `$08` = Custom, `$04` = Extra-Bit |
-| `!new_code_flag` / `!7FAB1C` | `$7FAB1C,x` | Custom-Code aktiv |
-| `!extra_prop_1/2` / `!7FAB28/34` | `$7FAB28,x` / `$7FAB34,x` | Extra Property Bytes aus der cfg/json |
-| `!new_sprite_num` / `!7FAB9E` | `$7FAB9E,x` | Custom-Nummer |
-| `!extra_byte_1…4` | `$7FAB40/4C/58/64,x` | Extra-Bytes; ab 5 Bytes ein 24-Bit-Zeiger auf die Bytes in `extra_byte_1…3` |
-| `!shooter_extra_byte_1…3` | `$7FAC00/08/10,x` | Extra-Bytes von Shootern; ab 4 Bytes ein Zeiger |
+| `!extra_bits` / `!7FAB10` | `$7FAB10,x` | Extra bits: `$08` = custom, `$04` = extra bit |
+| `!new_code_flag` / `!7FAB1C` | `$7FAB1C,x` | Custom code active |
+| `!extra_prop_1/2` / `!7FAB28/34` | `$7FAB28,x` / `$7FAB34,x` | Extra property bytes from the cfg/json |
+| `!new_sprite_num` / `!7FAB9E` | `$7FAB9E,x` | Custom number |
+| `!extra_byte_1…4` | `$7FAB40/4C/58/64,x` | Extra bytes; from 5 bytes on, a 24-bit pointer to the bytes in `extra_byte_1…3` |
+| `!shooter_extra_byte_1…3` | `$7FAC00/08/10,x` | Extra bytes of shooters; from 4 bytes on, a pointer |
 
-`!extra_prop_2` Bit 7: MAIN läuft in jedem Status statt des Originalcodes; Bit 6: MAIN läuft in jedem
-Status zusätzlich.
+`!extra_prop_2` bit 7: MAIN runs in every status instead of the original code; bit 6: MAIN runs in every
+status in addition.
 
-## Code-Einsprünge
+## Code entry points
 
-- **Sprite:** `print "INIT ",pc` (Status `$01`) und `print "MAIN ",pc` (Status `$08`), beide mit `RTL`.
-  Optional `CARRIABLE` (`$09`), `KICKED` (`$0A`), `CARRIED` (`$0B`), `MOUTH` (`$07`), `GOAL` (`$0C`); sie
-  ersetzen den Originalcode dieses Status, das DBR ist gesetzt.
-- **Shooter, Generator:** `MAIN`, jeden Frame (Shooter nach ihrem Timer, Generatoren nicht bei `$9D`).
-  `!shoot_num` bzw. `$18B9` enthalten `$80` (Custom), das Extra-Bit als `$40` und Nummer − `$BF` bzw. − `$CF`.
-- **Extended:** zusätzlich `print "CAPE",pc` für den Kontakt mit dem Cape.
-- **Misc-Sprites:** `MAIN`, mit X = Slot und dem DBR auf der Bank der Routine.
-- Öffentliche Einsprünge wie bei PIXI: `JSL $0187A7` richtet den Custom Sprite in Slot X ein (Nummer in
-  `!new_sprite_num`, `$00-$02` = INIT), `JSL $01D43E` führt den Originalcode des Status in A aus.
-- `print "VERG<version>"`: Mindestversion von PIXI. Der Editor gilt als 1.43.
+- **Sprite:** `print "INIT ",pc` (status `$01`) and `print "MAIN ",pc` (status `$08`), both with `RTL`.
+  Optionally `CARRIABLE` (`$09`), `KICKED` (`$0A`), `CARRIED` (`$0B`), `MOUTH` (`$07`), `GOAL` (`$0C`); they
+  replace the original code of that status, the DBR is set.
+- **Shooter, generator:** `MAIN`, every frame (shooters after their timer, generators not during `$9D`).
+  `!shoot_num` and `$18B9` respectively contain `$80` (custom), the extra bit as `$40`, and number − `$BF` or − `$CF`.
+- **Extended:** additionally `print "CAPE",pc` for contact with the cape.
+- **Misc sprites:** `MAIN`, with X = slot and the DBR set to the routine's bank.
+- Public entry points as in PIXI: `JSL $0187A7` sets up the custom sprite in slot X (number in
+  `!new_sprite_num`, `$00-$02` = INIT), `JSL $01D43E` runs the original code of the status in A.
+- `print "VERG<version>"`: minimum PIXI version. The editor counts as 1.43.
 
-## cfg und json
+## cfg and json
 
 **cfg:**
 ```
-<Typ>
+<type>
 <acts like>
 <$1656> <$1662> <$166E> <$167A> <$1686> <$190F>
-<Extra Property 1> <Extra Property 2>
-<asm-Datei>
-<Bytes ohne Extra-Bit>:<Bytes mit Extra-Bit>
+<extra property 1> <extra property 2>
+<asm file>
+<bytes without extra bit>:<bytes with extra bit>
 ```
-Alle Werte hexadezimal. Fehlt der Doppelpunkt in der letzten Zeile (altes Format), sind beide Anzahlen 0.
+All values are hexadecimal. If the colon in the last line is missing (old format), both counts are 0.
 
 **json:** `Type`, `ActLike`, `AsmFile`, `Extra Property Byte 1/2`,
-`Additional Byte Count (extra bit clear/set)` (dezimal, höchstens 12), die Tweaker als Objekte `"$1656"`
-… `"$190F"` mit benannten Bits, außerdem `Collection` (Namen) und `Displays` (Beschreibung). `Map16`,
-`GFXInfo` und die Tile-Angaben in `Displays` sind für Lunar Magic gedacht und werden ignoriert, denn der
-Editor zeigt Sprites per Emulation.
+`Additional Byte Count (extra bit clear/set)` (decimal, at most 12), the tweakers as objects `"$1656"`
+… `"$190F"` with named bits, plus `Collection` (names) and `Displays` (description). `Map16`,
+`GFXInfo` and the tile data in `Displays` are meant for Lunar Magic and are ignored, because the
+editor shows sprites via emulation.
 
-**Typ:** 0 = „Tweak“ (Original-Sprite `acts like` mit geänderten Tweakern, kein eigener Code),
-1 = Custom Sprite. Shooter und Generatoren sind am Nummernbereich zu erkennen.
+**Type:** 0 = "tweak" (original sprite `acts like` with changed tweakers, no code of its own),
+1 = custom sprite. Shooters and generators are recognized by their number range.
 
-## Shared Routines
+## Shared routines
 
-Aufruf als `%Name()`. Unterordner werden ohne Trennzeichen vorangestellt (`routines/Bounce/GetDrawInfo.asm`
-→ `%BounceGetDrawInfo()`). Jede Routine wird nur eingefügt, wenn sie benutzt wird. Eigene Dateien in
-`routines/` haben Vorrang vor den eingebauten.
+Called as `%Name()`. Subfolders are prepended without a separator (`routines/Bounce/GetDrawInfo.asm`
+→ `%BounceGetDrawInfo()`). Each routine is only inserted if it is used. Your own files in
+`routines/` take precedence over the built-in ones.
 
-Eingebaut sind die Routinen von PIXI 1.43 mit denselben Ein- und Ausgaben. Sie sind nach den Routinen des
-Spiels geschrieben; deren Tabellen (Sinus, OAM-Indizes, Geschwindigkeiten) werden aus der ROM gelesen, und wo
-das Spiel eine passende Routine hat, wird sie aufgerufen (z. B. `FinishOAMWrite` = `$01B7B3`):
+Built in are the routines of PIXI 1.43 with the same inputs and outputs. They are written after the game's
+routines; their tables (sine, OAM indices, speeds) are read from the ROM, and where
+the game has a suitable routine, it is called (e.g. `FinishOAMWrite` = `$01B7B3`):
 
-- **Allgemein:** `Aiming`, `CapeContact`, `ChangeMap16`, `CheckForContactAlternate`, `CircleX`,
+- **General:** `Aiming`, `CapeContact`, `ChangeMap16`, `CheckForContactAlternate`, `CircleX`,
   `CircleXY`, `CircleY`, `FinishOAMWrite`, `FireballContact`, `GetDrawInfo`, `GetMap16`, `LoseYoshi`,
   `Random`, `ReplaceSelf`, `SetPlayerClippingAlternate`, `SetSpriteClippingAlternate`, `ShooterMain`,
   `Star`, `SubHorzPos`, `SubOffScreen`, `SubVertPos`.
@@ -181,42 +181,42 @@ das Spiel eine passende Routine hat, wird sie aufgerufen (z. B. `FinishOAMWrite`
 
 ## Defines
 
-Jede Datei sieht die Defines von PIXIs `sa1def.asm` für ein ROM ohne SA-1:
+Every file sees the defines of PIXI's `sa1def.asm` for a ROM without SA-1:
 
 - `!sa1 = 0`, `!SA1`, `!SA_1`, `!Base1 = $0000`, `!Base2 = $0000`, `!dp`, `!addr`, `!bank`, `!BankA`,
   `!BankB`, `!bank8`, `!SprSize = $0C`, `!CustomBit = $08`, `!GenStart = $D0`.
-- `!…Offset` (siehe oben) und `!…Size` für jede Misc-Art.
-- Die Sprite-Tabellen (`!sprite_num`, `!9E` …), außerdem `!shoot_…`, `!cluster_…`, `!extended_…`,
+- `!…Offset` (see above) and `!…Size` for each misc type.
+- The sprite tables (`!sprite_num`, `!9E` …), plus `!shoot_…`, `!cluster_…`, `!extended_…`,
   `!minor_extended_…`, `!smoke_…`, `!spinning_coin_…`, `!score_…`, `!bounce_…`.
-- `!sprite_load_table` / `!1938` = `$1938`. PIXIs Umzug auf `$7FAF00` für 255 Sprites pro Level gibt
-  es im Editor nicht.
-- Makros `%BES()`, `%BEC()`, `%Between()`, `%debugmsg()`.
+- `!sprite_load_table` / `!1938` = `$1938`. PIXI's relocation to `$7FAF00` for 255 sprites per level does
+  not exist in the editor.
+- Macros `%BES()`, `%BEC()`, `%Between()`, `%debugmsg()`.
 
-## Umsetzung
+## Implementation
 
-Assembliert wird in mehreren Asar-Läufen, die zusammen als ein Patch verzeichnet werden:
+Assembly happens in several Asar runs that are recorded together as one patch:
 
-1. die benutzten Shared Routines, jede einmal (Routinen, die andere aufrufen, ziehen diese nach);
-2. jeder Sprite für sich, mit den Defines, den Routinen als `%Name()` → `JSL` und der `_header.asm` seiner
-   Art (eine eigene im Projekt hat Vorrang). Labels und Makros verschiedener Sprites stören sich so nicht.
-3. die Laufzeit mit den Tabellen, gefüllt aus den cfg/json und den `print`-Ausgaben der Sprites.
+1. the shared routines in use, each once (routines that call others pull those in);
+2. each sprite on its own, with the defines, the routines as `%Name()` → `JSL` and the `_header.asm` of its
+   type (one of your own in the project takes precedence). That way labels and macros of different sprites don't interfere.
+3. the runtime with the tables, filled from the cfg/json and the sprites' `print` output.
 
-Die Hooks der Laufzeit (alle in Bank 01/02/07, bei Misc-Arten nur, wenn das Projekt sie benutzt):
-Ladeschleife `$02A82A`/`$02A846`/`$02A936`/`$02A9D7`/`$02ABE9`, Extra-Bits `$02A94B`/`$02A963`, Spawn
-`$02A9C9`, Shooter/Generatoren `$02A866`/`$02ABA0`/`$02B395`/`$02AFFE`, Status `$018127`/`$018151`/
-`$018172`/`$0185C3`, Tabellen `$07F785`, öffentlich `$0187A7`/`$01D43E`; Misc-Verteiler `$029052` (Bounce),
-`$02F818`/`$00A686` (Cluster), `$029B1B`/`$029633` (Extended), `$028B6C` (Minor Extended), `$0296C0`
-(Smoke), `$0299D4`/`$028A7D` (Spinning Coin), `$02ADBA` (Score). Freies RAM: die Sprite-Tabellen (oben) und `$7FAC18-$7FAC19`, im Patch-Verzeichnis belegt (siehe
-[Free RAM](patches.md#patches-anwenden)).
+The runtime's hooks (all in bank 01/02/07; for misc types only if the project uses them):
+load loop `$02A82A`/`$02A846`/`$02A936`/`$02A9D7`/`$02ABE9`, extra bits `$02A94B`/`$02A963`, spawn
+`$02A9C9`, shooters/generators `$02A866`/`$02ABA0`/`$02B395`/`$02AFFE`, status `$018127`/`$018151`/
+`$018172`/`$0185C3`, tables `$07F785`, public `$0187A7`/`$01D43E`; misc dispatchers `$029052` (bounce),
+`$02F818`/`$00A686` (cluster), `$029B1B`/`$029633` (extended), `$028B6C` (minor extended), `$0296C0`
+(smoke), `$0299D4`/`$028A7D` (spinning coin), `$02ADBA` (score). Free RAM: the sprite tables (above) and `$7FAC18-$7FAC19`, claimed in the patch registry (see
+[Free RAM](patches.md#applying-patches)).
 
-Ändert sich die Anzahl der Extra-Bytes eines Sprites, der in Levels steht, schreibt der Editor diese Levels
-bei der Änderung gleich mit der neuen Größe neu (Extra-Bytes bleiben, soweit sie passen), wie PIXIs MeiMei. Beim
-Entfernen fallen die Extra-Bytes weg.
+If the number of extra bytes changes for a sprite that is placed in levels, the editor rewrites those levels
+right away with the new size along with the change (extra bytes are kept as far as they fit), like PIXI's MeiMei. On
+removal, the extra bytes are dropped.
 
-## Grenzen
+## Limitations
 
-- Kein SA-1, keine Per-Level-Sprites, kein Umzug von `$1938` (255 Sprites pro Level), keine „Run-once“-
-  Sprites jenseits von DF.
-- `asm/ExtraDefines` und `asm/ExtraHijacks` werden nicht ausgewertet. Eigene Hijacks gehören in einen
-  normalen Patch.
-- ROMs, in die bereits mit PIXI Sprites eingefügt wurden, werden nicht erkannt.
+- No SA-1, no per-level sprites, no relocation of `$1938` (255 sprites per level), no "run-once"
+  sprites beyond DF.
+- `asm/ExtraDefines` and `asm/ExtraHijacks` are not evaluated. Custom hijacks belong in a
+  normal patch.
+- ROMs into which sprites have already been inserted with PIXI are not recognized.
