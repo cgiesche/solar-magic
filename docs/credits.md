@@ -23,3 +23,4 @@ Pakete, an denen Funktionen des Editors entwickelt und getestet wurden (als Test
 | Rock Climbing Blocks (SMWCentral, Blöcke, `RockClimbBlocksUpdate.zip`) | Testfall für Blockpakete mit `list.txt`, Map16 und ExGFX | GreenHammerBro; SA-1-Update von yoshifanatic |
 | Brutal Bill (SMWCentral, Sprite, `BrutalBill.zip`) | Testfall für PIXI-Pakete mit Sprite und Shooter | Sonikku; nach dem Homing Bullet Bill von Carol |
 | Aftertouch Shatter (SMWCentral, Block, `Aftertouch Shatter.zip`) | Testfall für Blöcke, die einen eigenen Bounce-Sprite erzeugen | Arinsu; Original von HammerBrother |
+| Enemy Stack (SMWCentral, Sprite, `EnemyStack.zip`; nicht in `test/fixtures/`, der Test baut einen eigenen Stapel-Sprite nach) | Fall, an dem die Sprite-Bilder aus gespawnten Sprites entwickelt wurden: ein unsichtbarer Sprite, der die Sprites seiner Extra-Bytes übereinander spawnt | dtothefourth |
