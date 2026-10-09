@@ -15,15 +15,30 @@ The files the user hands in for one package (a single file or a .zip), before an
 _Avoid_: Download, patch package
 
 **Part**:
-One typed piece of a package: a patch, an UberASM file, a block, a sprite, a song or graphics. A package's kind is simply the set of its parts.
+One typed piece of a package: a patch, an UberASM file, a block, a sprite, a song or a graphics part. A package's kind is simply the set of its parts. Which part a file belongs to is decided per file (folder, then content, then extension), never by which other files are in the upload.
 _Avoid_: Component, Item
+
+**Graphics part**:
+A part without code: Map16 tiles (.map16), an ExGFX file or a palette (.pal with its .palmask). Map16 tiles and ExGFX keep the author's tile or number if it is free, else they take the next free one.
+_Avoid_: Resource, asset
+
+**Link**:
+A connection between two parts of one package that the editor works out: a block on the Map16 tiles that show it, a sprite's number in the define of a block that spawns it, an ExGFX file in the graphics slot its tiles are drawn from.
+_Avoid_: Dependency, binding
 
 **Legacy package**:
 A package wrapped around a single patch that was applied before packages were tracked.
 
 **Level import**:
-A Lunar Magic level file (.mwl) applied to the current level. It changes a level rather than installing content, so it is not a package.
+An upload with a Lunar Magic level file (.mwl) and no code or songs, applied to the current level. It changes a level rather than installing content, so it is not a package. An upload with code is a package even when it holds a .mwl (see Sample level).
 _Avoid_: Graphics package, background package
+
+**Sample level**:
+The .mwl of a package that also has code: an example of the package in use. Optionally replaces the current level, with its Map16 tiles, ExGFX and (where certain) sprite numbers rewritten to where the package's parts landed. A level edit, not part of the package.
+_Avoid_: Demo level, test level
+
+**Level setup**:
+What installing a package does to the current level so its graphics show: its ExGFX in the slots its tiles use, its masked colors in the level's palette. A level edit: undo reverts it, removing the package does not.
 
 ### Emulated results
 
