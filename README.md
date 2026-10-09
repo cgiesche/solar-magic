@@ -1,223 +1,223 @@
-# Solar Magic – Level-Editor für Super Mario World
+# Solar Magic – Level Editor for Super Mario World
 
-Browserbasierter Editor für *Super Mario World* (US), orientiert am Funktionsumfang von Lunar Magic.
-Läuft komplett lokal im Browser; die ROM wird nirgends hochgeladen (sie wird nur in der IndexedDB des Browsers zwischengespeichert).
+Browser-based editor for *Super Mario World* (US), modelled on the feature set of Lunar Magic.
+Runs entirely locally in the browser; the ROM is never uploaded anywhere (it is only cached in the browser's IndexedDB).
 
-## Start
+## Getting started
 
 ```sh
 npm install
-npm run dev          # http://localhost:5173 – ROM per Button oder Drag & Drop öffnen
-npm run build        # statischer Build nach dist/
-npm test             # Regressionstests (benötigt die ROM als test/fixtures/smw.smc, siehe test/fixtures/README.md)
+npm run dev          # http://localhost:5173 – open a ROM via the button or drag & drop
+npm run build        # static build into dist/
+npm test             # regression tests (need the ROM as test/fixtures/smw.smc, see test/fixtures/README.md)
 ```
 
-Im Dev-Modus lädt `?rom=/<Dateiname>` eine ROM direkt aus dem Projektordner.
+In dev mode, `?rom=/<file name>` loads a ROM directly from the project folder.
 
-### Desktop-App (Tauri)
+### Desktop app (Tauri)
 
 ```sh
-npm run tauri dev    # Desktop-Fenster gegen den Vite-Dev-Server
-npm run desktop      # Release-Build mit Installern nach src-tauri/target/release/bundle/
+npm run tauri dev    # desktop window against the Vite dev server
+npm run desktop      # release build with installers into src-tauri/target/release/bundle/
 ```
 
-Benötigt Rust und unter Linux WebKitGTK 4.1 (`webkit2gtk-4.1`). Gleicher Code wie im Browser; Unterschiede nur in
-`src/ui/platform.ts`: Öffnen/Speichern über die Dialoge des Systems, „Save project“ schreibt direkt in die geöffnete
-`.smwproj`, Schließen mit ungespeicherten Änderungen fragt nach. Installer für Linux/Windows/macOS baut der Workflow
-*Desktop* (bei Push auf master oder von Hand).
+Requires Rust and, on Linux, WebKitGTK 4.1 (`webkit2gtk-4.1`). Same code as in the browser; the only differences live in
+`src/ui/platform.ts`: opening/saving goes through the system's dialogs, "Save project" writes directly to the opened
+`.smwproj`, and closing with unsaved changes asks first. Installers for Linux/Windows/macOS are built by the
+*Desktop* workflow (on push to master or manually).
 
-## Grundidee: Das Spiel rendert sich selbst
+## Core idea: the game renders itself
 
-Statt die rund 250 Objektroutinen von SMW nachzuprogrammieren, enthält der Editor einen 65816-CPU-Emulator
-mit SNES-Speicherabbild (DMA, VRAM/CGRAM/OAM, Mathe-Register, NMI/IRQ, APU-Handshake-Attrappe).
-Beim Anzeigen eines Levels führt er die **originalen Laderoutinen** des ROMs aus (~15 ms pro Level):
+Instead of reimplementing SMW's roughly 250 object routines, the editor contains a 65816 CPU emulator
+with an SNES memory map (DMA, VRAM/CGRAM/OAM, math registers, NMI/IRQ, APU handshake stub).
+When a level is displayed, it runs the ROM's **original loading routines** (~15 ms per level):
 
-* Die Map16-Daten der Level (`$7EC800`/`$7FC800`), Grafik (VRAM) und Palette (CGRAM) kommen direkt aus dem Spiel –
-  pixelgenau, auch mit geänderten Grafiken und ROM-Patches.
-* Beim Laden wird mitgeschrieben, welches Objekt welches Tile schreibt. So sind Auswahl, Hover und
-  Umrisse exakt, ohne dass der Editor Objektformen kennen muss.
-* Objektvorschauen in der Palette und Sprite-Grafiken werden ebenfalls erzeugt, indem das Spiel sie rendert
-  (Sprites: ein paar Frames laufen lassen und die OAM-Einträge einsammeln).
-* Ein Provenance-Tracking verfolgt, aus welchem ROM-Byte jede CGRAM-Farbe stammt – darüber schreibt der
-  Paletten-Editor an die richtige Stelle zurück.
-* Mit dem eingebauten PPU-Scanline-Renderer lässt sich das bearbeitete Level direkt **anspielen** – mit Ton: Der Soundchip
-  (SPC700 + S-DSP, [snes_spc](docs/credits.md)) wird mitemuliert, das Spiel lädt Sound-Treiber und Musik selbst hoch.
+* The level's Map16 data (`$7EC800`/`$7FC800`), graphics (VRAM) and palette (CGRAM) come straight from the game –
+  pixel-perfect, even with modified graphics and ROM patches.
+* While loading, the editor records which object writes which tile. This makes selection, hover and
+  outlines exact without the editor having to know object shapes.
+* Object previews in the palette and sprite graphics are also produced by letting the game render them
+  (sprites: run a few frames and collect the OAM entries).
+* Provenance tracking follows which ROM byte each CGRAM color comes from – that is how the
+  palette editor writes back to the right place.
+* With the built-in PPU scanline renderer, the edited level can be **play-tested** right away – with sound: the sound chip
+  (SPC700 + S-DSP, [snes_spc](docs/credits.md)) is emulated too, and the game uploads its sound driver and music itself.
 
-## Funktionen
+## Features
 
-### Level-Editor
-* Alle 512 Level; Liste mit Levelnamen (aus der Overworld), Filter nach Nummer/Name.
-* **Layer 1 / Layer 2 (bei L2-Levels) / Sprites / Screen-Exits / BG** als Bearbeitungsmodi (Tasten 1–5).
-* **Hintergrund malen (BG-Modus):** die BG-Tilemap (32×27 BG-Map16-Tiles 000–1FF, mit der BG-Map16-Erweiterung bis FFF) mit Pinsel
-  bearbeiten – wie in den anderen Modi: Klick/Ziehen nimmt ein Tile oder einen Block als Pinsel auf (im Level
-  oder in der Palette), Rechtsklick/Shift+Klick malt (Ziehen malt weiter); gespeichert wird sie in freiem Speicher (BG-Patch).
-* Objekte: auswählen (auch Rahmen, Strg+Klick), verschieben (Maus/Pfeile), Größe per Griff/Tasten,
-  einfügen (Rechtsklick/Shift+Klick mit Paletteneintrag), löschen, kopieren/einfügen/duplizieren,
-  Zeichenreihenfolge (Bild↑/↓), Undo/Redo.
-* Palette: Standardobjekte 01–3F, erweiterte Objekte, **Map16-Direktplatzierung** (beliebiges Tile, s. Patch),
-  Sprites mit Namen und echter Grafik, auch Custom Sprites (PIXI) mit ihren Extra-Bytes in den Eigenschaften.
-* **Strukturen:** ausgewählte Objekte (z. B. ein Aufbau aus Direct-Map16-Blöcken) als Struktur speichern
-  (Palette → Strukturen → „Auswahl als Struktur“). Im Level ist sie dann ein einziges Objekt mit 4 Byte;
-  Zellen, die zu keinem ausgewählten Objekt gehören, sind durchsichtig. Wird eine Struktur geändert, gilt das
-  in allen Leveln. „Auflösen“ macht eine platzierte Struktur wieder zu einzelnen Direct-Map16-Objekten.
-  `.smwlevel`-Dateien nehmen die benutzten Strukturen mit.
-* Header-Dialog (H): Primärer Header (Modus, Screens, Tileset, Paletten, Musik, Zeit, Sprite-GFX, …),
-  Eingang & Scrollen (Eingang, Zwischenziel, Layer-2/3-Einstellungen), Sprite-Header, BG-Tilemap-Auswahl.
-  Welche GFX/ExGFX-Dateien ein Level lädt (Grafik-Bypass), stellt man im Grafik-Bereich ein:
-  *Grafiken* → Slot-Karten („Tauschen …“) oder rechts bei einer Datei „In Slot verwenden“.
-* Screen-Exits pro Screen (Ziel, sekundär), **sekundäre Eingänge** (Dialog).
-* **Menü *Level*:** speichern unter, **Screen einfügen/löschen** (verschiebt alles dahinter), Level leeren;
-  **Menü *Datei*:** **Export/Import als `.smwlevel`-Datei** (Objekte, Sprites, Exits, Header, Grafik-Bypass, eigene Palette).
-* **Eingangsmarkierungen** für Haupteingang (M), Zwischenziel-Screen (Z) und sekundäre Eingänge (S) – per Ziehen
-  verschiebbar (rastet auf die möglichen Eingangspositionen ein).
-* **Einfügen nach Nummer** (Einfg/I): Objekt, erweitertes Objekt oder Sprite mit Größe/Extra-Bits.
-* Menü *Ansicht*: Raster, Screen-Grenzen, Layer ein-/ausblendbar; **inaktive Ebene durchscheinend** (nicht bearbeitete Objektebene halbtransparent);
-  Ansicht mit gedrückten Switch-Palästen bzw. ON/OFF auf OFF; Zoom 50–400 %.
-* **Layer 3** (Flut, Layer-3-Bilder) als Vorschau (Scrollen angenähert); der Header-Dialog nennt per Emulation, was die vier Layer-3-Einstellungen im gewählten Tileset bewirken (steigende/fallende oder feste Flut, Layer-3-Bild). Bei steigender/fallender Flut zeigt die Level-Ansicht höchsten und tiefsten Wasserstand (vom Level-Scan gemessen), das Collision-Overlay das Flutwasser blau. **animierte Tiles/Paletten** (Ansicht → Animation).
-* Statuszeile mit Objekt-/Sprite-Anzahl und Datengröße (Warnung ab 128 Sprites); **Level als PNG** exportieren (*Datei → Level als PNG*).
-* **Sprite-Speicher-Prüfung:** Der Editor lässt die Sprites, die gleichzeitig im Bild sein können, im Spiel laufen und
-  erkennt, wenn ein Sprite wegen zu wenig Sprite-Speicher (Sprite-Header, `$1692`) Teile seiner Grafik verliert
-  (z. B. E0, drei Kettenplattformen, mit Wert 00). Betroffene Sprites bekommen einen orangen Rahmen, die Statuszeile
-  einen Hinweis mit Erklärung und einem passenden Wert. Ein Wert passt, wenn die Levels der ROM ihn benutzen, alle
-  Sprites vollständig zeigt und nicht weniger Sprites gleichzeitig erscheinen lässt.
-  **Autokorrektur:** Macht eine Sprite-Bearbeitung weitere Sprites unvollständig, stellt der Editor den Wert selbst um.
-  Das gehört zum selben Undo-Schritt. Ein im Header-Dialog von Hand gewählter Wert bleibt, solange keine neuen
-  Überschneidungen entstehen.
-* **Nachrichtenboxen** (*ROM → Nachrichtenboxen*): alle 25 Nachrichtenboxen mit Vorschau in der Spielschrift bearbeiten; passen die Texte
-  nicht mehr an ihren Platz, werden sie in freien Speicher verlegt.
-* **Level testen (T):** das Level (inkl. ungespeicherter Änderungen) im eingebauten Emulator spielen, mit Tastatur oder Gamepad, mit Musik und Soundeffekten (M schaltet den Ton ab).
+### Level editor
+* All 512 levels; list with level names (from the overworld), filter by number/name.
+* **Layer 1 / Layer 2 (in L2 levels) / Sprites / Screen exits / BG** as editing modes (keys 1–5).
+* **Painting the background (BG mode):** edit the BG tilemap (32×27 BG Map16 tiles 000–1FF, up to FFF with the BG Map16 extension) with a brush
+  – just like the other modes: click/drag picks up a tile or a block as the brush (in the level
+  or in the palette), right-click/Shift+click paints (dragging keeps painting); it is saved in free space (BG patch).
+* Objects: select (also by rectangle, Ctrl+click), move (mouse/arrow keys), resize via handle/keys,
+  insert (right-click/Shift+click with a palette entry), delete, copy/paste/duplicate,
+  drawing order (PgUp/PgDn), undo/redo.
+* Palette: standard objects 01–3F, extended objects, **direct Map16 placement** (any tile, see patch),
+  sprites with names and real graphics, including custom sprites (PIXI) with their extra bytes in the properties.
+* **Structures:** save selected objects (e.g. an arrangement of Direct Map16 blocks) as a structure
+  (Palette → Structures → "Selection as structure"). In the level it is then a single 4-byte object;
+  cells that belong to none of the selected objects are transparent. Changing a structure affects
+  all levels. "Dissolve" turns a placed structure back into individual Direct Map16 objects.
+  `.smwlevel` files carry along the structures they use.
+* Header dialog (H): primary header (mode, screens, tileset, palettes, music, time, sprite GFX, …),
+  entrance & scrolling (entrance, midway point, layer 2/3 settings), sprite header, BG tilemap selection.
+  Which GFX/ExGFX files a level loads (graphics bypass) is set in the graphics section:
+  *Graphics* → slot cards ("Swap …") or "Use in slot" next to a file on the right.
+* Screen exits per screen (destination, secondary), **secondary entrances** (dialog).
+* **Menu *Level*:** save as, **insert/delete screen** (shifts everything after it), clear level;
+  **menu *File*:** **export/import as a `.smwlevel` file** (objects, sprites, exits, header, graphics bypass, custom palette).
+* **Entrance markers** for the main entrance (M), midway screen (Z) and secondary entrances (S) – movable by
+  dragging (snaps to the possible entrance positions).
+* **Insert by number** (Ins/I): object, extended object or sprite with size/extra bits.
+* Menu *View*: grid, screen boundaries, toggle layers; **inactive layer translucent** (the object layer not being edited is semi-transparent);
+  view with switch palaces pressed or ON/OFF set to OFF; zoom 50–400 %.
+* **Layer 3** (tides, layer 3 images) as a preview (scrolling approximated); the header dialog uses emulation to tell what the four layer 3 settings do in the chosen tileset (rising/falling or fixed tide, layer 3 image). With a rising/falling tide, the level view shows the highest and lowest water level (measured by the level scan), and the collision overlay shows the tide water in blue. **Animated tiles/palettes** (View → Animation).
+* Status bar with object/sprite count and data size (warning from 128 sprites); export the **level as PNG** (*File → Level as PNG*).
+* **Sprite memory check:** the editor runs the sprites that can be on screen at the same time in the game and
+  detects when a sprite loses parts of its graphics because of insufficient sprite memory (sprite header, `$1692`)
+  (e.g. E0, three chained platforms, with value 00). Affected sprites get an orange outline, and the status bar
+  a notice with an explanation and a suitable value. A value is suitable if the ROM's levels use it, it shows all
+  sprites completely and it does not let fewer sprites appear at the same time.
+  **Auto-correction:** if a sprite edit makes other sprites incomplete, the editor adjusts the value itself.
+  This is part of the same undo step. A value chosen by hand in the header dialog stays as long as no new
+  overlaps arise.
+* **Message boxes** (*ROM → Message boxes*): edit all 25 message boxes with a preview in the game's font; if the texts
+  no longer fit in their place, they are moved to free space.
+* **Test level (T):** play the level (including unsaved changes) in the built-in emulator, with keyboard or gamepad, with music and sound effects (M mutes the sound).
 
-### Musik
-* **Songs importieren** (*ROM → Packages … → Upload package …*): Songs im AddmusicK-Format (`.zip` von SMWCentral
-  oder `.txt`). Der Editor findet die Songs (MML mit `#0`) und legt die BRR-Samples dorthin, wo der Song sie sucht (`#path`),
-  auch wenn das Archiv sie in einem eigenen `samples`-Ordner mitbringt; fehlende Samples werden genannt.
-  Der Song bekommt die nächste freie Nummer ab 29 und spielt im aktuellen Level; anhören lässt er sich
-  im Tab *Music*.
-* Eingefügt wird mit **AddmusicK 1.0.11**, das als WebAssembly im Editor steckt (Song-Compiler, Sound-Treiber, SNES-Patch).
-  Jeder Lauf fügt das ganze Musik-Projekt neu ein (~1 s) und steht als ein Eintrag im Patch-Verzeichnis: Hijacks mit
-  Originalbytes, freier Speicher; die Songs samt Samples als Quellen in den Editor-Daten (nicht in der ROM). Deshalb lässt sich AddmusicK jederzeit wieder
-  vollständig entfernen; Songs aus einem Paket gehen mit dem Paket.
-* **Zuordnung zu Leveln:** im Header-Dialog *Song for this level* oder im Music-Tab *Level* – jeder Song der ROM statt der
-  8 Header-Einstellungen (Editor-Patch SMWU, wie der Music Bypass von Lunar Magic; funktioniert auch ohne AddmusicK mit
-  den Songs des Original-Treibers). Beim Installieren/Entfernen von AddmusicK werden die Nummern umgerechnet.
-* **Song-Einstellungen** (Music-Tab, *Settings …*): Optionen, die ein Song über den Präprozessor von AddmusicK anbietet
-  (`#define NAME wert` außerhalb von `#if`-Blöcken, z. B. Tonart in „Faith in Wily“). Aus dem Song selbst abgeleitet:
-  Werte aus `#if NAME == v ; Text` werden eine Auswahl (beschriftet mit dem Kommentar oder mit Zeilen `; v = Text`
-  nach dem Define), nur mit `#ifdef`/`#ifndef` geprüfte Defines ein Schalter. Die Werte bleiben beim Song im Projekt und
-  werden erst beim Einfügen gesetzt – die Datei bleibt wie geliefert, *Reset* stellt die Werte des Songs wieder her; ▶ im
-  Dialog spielt den Song mit den gewählten Werten. Für alles andere: *Edit …* (die Song-Datei als Text); meldet AddmusicK
-  danach einen Fehler, bleibt alles beim Alten.
-* **Lautstärke** pro Song (25–300 %): skaliert die globale Lautstärke des Songs beim Einfügen.
-* **Abspielen (▶):** in der Songliste, im Header-Dialog und bei Paketen. Gespielt wird per Emulation, wie im Spiel: Das Level
-  wird mit Soundchip geladen, das Spiel schickt seine Musik, danach läuft nur noch der SPC700 weiter.
+### Music
+* **Import songs** (*ROM → Packages … → Upload package …*): songs in AddmusicK format (`.zip` from SMWCentral
+  or `.txt`). The editor finds the songs (MML with `#0`) and puts the BRR samples where the song looks for them (`#path`),
+  even if the archive ships them in its own `samples` folder; missing samples are reported.
+  The song gets the next free number from 29 on and plays in the current level; you can listen to it
+  in the *Music* tab.
+* Insertion is done with **AddmusicK 1.0.11**, which is built into the editor as WebAssembly (song compiler, sound driver, SNES patch).
+  Every run reinserts the whole music project (~1 s) and is a single entry in the patch registry: hijacks with
+  original bytes, free space; the songs and samples are kept as sources in the editor data (not in the ROM). That is why AddmusicK can always be
+  removed completely; songs from a package go with the package.
+* **Assignment to levels:** in the header dialog *Song for this level* or in the Music tab *Level* – any song in the ROM instead of the
+  8 header settings (editor patch SMWU, like Lunar Magic's music bypass; also works without AddmusicK with
+  the original driver's songs). Numbers are converted when AddmusicK is installed/removed.
+* **Song settings** (Music tab, *Settings …*): options a song offers through AddmusicK's preprocessor
+  (`#define NAME value` outside of `#if` blocks, e.g. the key in "Faith in Wily"). Derived from the song itself:
+  values from `#if NAME == v ; text` become a choice (labelled with the comment or with lines `; v = text`
+  after the define), defines only checked with `#ifdef`/`#ifndef` become a switch. The values are stored with the song in the project and
+  are only applied on insertion – the file stays as delivered, *Reset* restores the song's values; ▶ in the
+  dialog plays the song with the chosen values. For everything else: *Edit …* (the song file as text); if AddmusicK
+  then reports an error, everything stays as it was.
+* **Volume** per song (25–300 %): scales the song's global volume on insertion.
+* **Playback (▶):** in the song list, in the header dialog and for packages. Playback is emulated, as in the game: the level
+  is loaded with the sound chip, the game sends its music, after which only the SPC700 keeps running.
 
-### Grafik, Paletten, Map16
-* **Map16-Editor** (M): FG- und BG-Tiles des aktuellen Tilesets, pro Viertel 8x8-Tile, Palette, Flip, Priorität.
-* **Erweiterte Map16-Seiten 2–F** (Tiles 200–FFF, für alle Tilesets) und **„Acts like“ pro Tile** – auch für
-  Vanilla-Tiles (z. B. Boden, der sich wie Luft verhält). „Grafik + Verhalten kopieren“ legt neue Tiles schnell an;
-  platziert werden sie per Direct-Map16-Objekt (Palette → Map16 → Seitenwahl).
-* **Paletten-Editor** (P): Farben direkt an ihrer ROM-Quelle bearbeiten, `.pal` Import/Export,
-  optional **eigene Palette pro Level** (alle 256 Farben).
-* **Grafiken:** GFX00–31 und ExGFX 32–FF anzeigen, als PNG exportieren/importieren.
-  Import wahlweise LZ2-komprimiert (Originalformat, 2/3/4bpp) oder als einheitliches **4bpp unkomprimiert**
-  (16 Farben, per DMA aus dem ROM – kein 3bpp-Umweg mehr).
-  Der eigene LZ2-Kompressor erzeugt kleinere Daten als das Original.
+### Graphics, palettes, Map16
+* **Map16 editor** (M): FG and BG tiles of the current tileset, per quarter 8x8 tile, palette, flip, priority.
+* **Extended Map16 pages 2–F** (tiles 200–FFF, for all tilesets) and **"Acts like" per tile** – also for
+  vanilla tiles (e.g. ground that behaves like air). "Copy graphics + behavior" quickly creates new tiles;
+  they are placed via the Direct Map16 object (Palette → Map16 → page selection).
+* **Palette editor** (P): edit colors directly at their ROM source, `.pal` import/export,
+  optionally a **custom palette per level** (all 256 colors).
+* **Graphics:** view GFX00–31 and ExGFX 32–FF, export/import as PNG.
+  Import either LZ2-compressed (original format, 2/3/4bpp) or as uniform **uncompressed 4bpp**
+  (16 colors, via DMA from the ROM – no more 3bpp detour).
+  The editor's own LZ2 compressor produces smaller data than the original.
 
-### Overworld-Editor (O)
-* Hauptkarte und alle Submaps, Layer 1 (Wege/Level-Tiles) und Layer 2 (Gelände, 8x8) malen – Maustasten wie
-  im Level-Editor: Klick/Ziehen nimmt ein Tile oder einen Block als Pinsel auf (Karte oder Palette),
-  Rechtsklick/Shift+Klick malt; X-/Y-Flip für Layer-2-Blöcke; optionale Ansicht „alle Events freigeschaltet“.
-* Level-Tiles zeigen Translevel → Levelnummer; links die Liste der Level-Tiles der Karte (Klick wählt und
-  zentriert, Doppelklick öffnet das Level); Levelnamen aus den drei Namensbausteinen wählbar.
-* Rückgängig/Wiederholen wie im Level-Editor (auch für Namen); beim Verlassen mit ungespeicherten Änderungen:
-  Speichern, Verwerfen oder Abbrechen.
-* Speichern: Layer 1 an Ort und Stelle, Layer 2 mit optimalem RLE-Encoder in freien Speicher.
+### Overworld editor (O)
+* Main map and all submaps; paint layer 1 (paths/level tiles) and layer 2 (terrain, 8x8) – mouse buttons as
+  in the level editor: click/drag picks up a tile or a block as the brush (map or palette),
+  right-click/Shift+click paints; X/Y flip for layer 2 blocks; optional "all events unlocked" view.
+* Level tiles show translevel → level number; on the left, the list of the map's level tiles (click selects and
+  centers, double-click opens the level); level names can be composed from the three name parts.
+* Undo/redo as in the level editor (also for names); when leaving with unsaved changes:
+  save, discard or cancel.
+* Saving: layer 1 in place, layer 2 with an optimal RLE encoder into free space.
 
 ### ROM
-* Header (512 Byte) wird erkannt und beim Export beibehalten; Prüfsumme wird korrigiert.
-* Erweiterung auf 1/2/4 MB (automatisch beim Speichern, wenn nötig). Freier Speicher wird über
-  RATS-Tags verwaltet (kompatibel zum üblichen Schema), alte Blöcke werden freigegeben.
-* Geänderte Level werden, wenn sie passen, an Ort und Stelle geschrieben; geteilte oder größere Daten wandern
-  in freien Speicher.
-* **Editor-Daten außerhalb der ROM:** Quellen von Patches, Paketen und den Projekten (UberASM, Blocks, Sprites,
-  Musik) belegen keinen ROM-Platz. *Datei → Save project* speichert ROM + Editor-Daten als `.smwproj`
-  (zum Weiterbearbeiten, öffnen mit *Open project …*), *Export ROM* die spielbare ROM ohne sie, *Export patch …* einen BPS-Patch (Flips) gegen eine gewählte saubere ROM.
+* A header (512 bytes) is detected and kept on export; the checksum is fixed.
+* Expansion to 1/2/4 MB (automatically when saving, if needed). Free space is managed via
+  RATS tags (compatible with the usual scheme); old blocks are freed.
+* Changed levels are written in place if they fit; shared or larger data moves
+  to free space.
+* **Editor data outside the ROM:** sources of patches, packages and the projects (UberASM, blocks, sprites,
+  music) take up no ROM space. *File → Save project* saves ROM + editor data as `.smwproj`
+  (for further editing, open with *Open project …*), *Export ROM* the playable ROM without them, *Export patch …* a BPS patch (Flips) against a chosen clean ROM.
 
-## Eigener ROM-Patch („SMWE“)
+## Custom ROM patch ("SMWE")
 
-Wird bei Bedarf automatisch installiert (oder über *ROM → Editor-Patch installieren …*). Er wird zur Laufzeit
-assembliert und ändert nur wenige, verifizierte Stellen:
+Installed automatically when needed (or via *ROM → Install editor patch …*). It is assembled at runtime
+and changes only a few verified locations:
 
-| Stelle | Zweck |
+| Location | Purpose |
 |---|---|
-| `$05D8F5` | Sprite-Daten in beliebigen Banks (Banktabelle für 512 Level); aktuelle Levelnummer in `$7E010B` (wie Lunar Magic) |
-| `$00BA2C` | GFX-Zeigertabelle mit 256 Einträgen (ExGFX) |
-| `$00AA6B` | pro Datei wählbares Format: LZ2/3bpp (Original) oder 4bpp unkomprimiert per DMA |
-| `$00A9E1`, `$00AA22` | Grafik-Bypass: 8 GFX-Slots pro Level (SP1–4, FG1–3, BG1) |
-| Ext.-Objekt `$02` | „Direct Map16“: platziert ein beliebiges Map16-Tile als Rechteck (6 Byte) |
-| Ext.-Objekt `$03` („SMWS“) | Strukturen: platziert einen gespeicherten Block von Map16-Tiles (4 Byte, 4. Byte = Strukturnummer 00–FF); belegt nur den im Original leeren Eintrag `$03` der Tabelle der erweiterten Objekte, unabhängig vom Editor-Patch |
-| `$00922F` („SMWP“) | eigene 256-Farben-Palette pro Level |
-| `$058060` („SMWB“) | BG-Tilemap-Daten pro Level in beliebiger Bank (bearbeitete Hintergründe) |
-| `$058DE6` („SMWH“) | BG-Map16-Erweiterung: BG-Tiles 200–FFF (Seiten 2–F) aus einer eigenen Tabelle, wie die BG-Map16-Seiten von Lunar Magic |
-| `$00F545`, `$029328` („SMWX“) | Map16 „acts like“-Tabelle für Tiles 000–FFF (Mario, Sprites, Feuerbälle, Blöcke von unten) |
-| `$058A66`, `$058B46`, `$058C34`, `$058D2B` | Tilemap-Aufbau: Tiles ab 200 aus der erweiterten Map16-Grafiktabelle |
-| `$00C096`, `$00C0E7` | Tile ersetzen setzt die Seite auf 0/1 statt nur Bit 0 (für Tiles auf Seite ≥ 2) |
-| `$05B20F` („SMWM“) | Nachrichtentexte aus freiem Speicher lesen (nur wenn sie nicht mehr an Ort und Stelle passen) |
-| `$058551` („SMWU“) | Musik pro Level: Songnummer aus einer Tabelle (512 Level) statt der 8 Header-Einstellungen (`$0584DB`), 0 = Header |
-| `$00AA50` („SMWG“) | BG2/BG3-Grafik-Slots pro Level für die Map16-Tiles 200–2FF (wie in Lunar Magic); braucht den VRAM-Patch |
-| 13 Stellen („SMWV“) | VRAM-Patch: Layer-1/2-Tilemaps in Leveln 64×32 bei `$3000`/`$3800` statt 64×64 bei `$2000`/`$3000` (wie LM), damit BG2/BG3 Platz haben; Details in [docs/patches.md](docs/patches.md) |
+| `$05D8F5` | Sprite data in any bank (bank table for 512 levels); current level number in `$7E010B` (like Lunar Magic) |
+| `$00BA2C` | GFX pointer table with 256 entries (ExGFX) |
+| `$00AA6B` | Format selectable per file: LZ2/3bpp (original) or uncompressed 4bpp via DMA |
+| `$00A9E1`, `$00AA22` | Graphics bypass: 8 GFX slots per level (SP1–4, FG1–3, BG1) |
+| Ext. object `$02` | "Direct Map16": places any Map16 tile as a rectangle (6 bytes) |
+| Ext. object `$03` ("SMWS") | Structures: places a stored block of Map16 tiles (4 bytes, 4th byte = structure number 00–FF); only occupies entry `$03` of the extended object table, which is empty in the original, independent of the editor patch |
+| `$00922F` ("SMWP") | Custom 256-color palette per level |
+| `$058060` ("SMWB") | BG tilemap data per level in any bank (edited backgrounds) |
+| `$058DE6` ("SMWH") | BG Map16 extension: BG tiles 200–FFF (pages 2–F) from a separate table, like Lunar Magic's BG Map16 pages |
+| `$00F545`, `$029328` ("SMWX") | Map16 "acts like" table for tiles 000–FFF (Mario, sprites, fireballs, blocks hit from below) |
+| `$058A66`, `$058B46`, `$058C34`, `$058D2B` | Tilemap building: tiles from 200 on come from the extended Map16 graphics table |
+| `$00C096`, `$00C0E7` | Tile replacement sets the page to 0/1 instead of only bit 0 (for tiles on page ≥ 2) |
+| `$05B20F` ("SMWM") | Read message texts from free space (only if they no longer fit in place) |
+| `$058551` ("SMWU") | Music per level: song number from a table (512 levels) instead of the 8 header settings (`$0584DB`), 0 = header |
+| `$00AA50` ("SMWG") | BG2/BG3 graphics slots per level for Map16 tiles 200–2FF (as in Lunar Magic); requires the VRAM patch |
+| 13 locations ("SMWV") | VRAM patch: layer 1/2 tilemaps in levels 64×32 at `$3000`/`$3800` instead of 64×64 at `$2000`/`$3000` (like LM), so that BG2/BG3 have room; details in [docs/patches.md](docs/patches.md) |
 
-Die Tests prüfen, dass alle Vanilla-Level mit installiertem Patch identisch geladen werden.
+The tests check that all vanilla levels load identically with the patch installed.
 
-## ASM-Patches, UberASM, Custom Blocks, Custom Sprites
+## ASM patches, UberASM, custom blocks, custom sprites
 
-Der Editor enthält Asar (als WebAssembly) und wendet damit ASM-Code direkt im Browser an:
-- **Patches** (`.asm`/`.zip`, z. B. von SMWCentral), mit Einstellungen und Konfliktprüfung;
-- **UberASM**-Code pro Level, Overworld-Karte und Game Mode (Format von UberASM Tool 2.x);
-- **Custom Blocks** im GPS-Format;
-- **Custom Sprites** im PIXI-Format: Sprites, Shooter, Generatoren und alle Misc-Arten (cluster, extended,
-  bounce …), mit Extra-Bytes; in der Palette mit Namen und echter Grafik ([docs/pixi.md](docs/pixi.md));
-- **Level-Import** aus Lunar Magic (*Level → Import LM level file …*, `.mwl` oder `.zip` mit `.mwl`, `.map16`, ExGFX, `.pal`/`.palmask`): Hintergrund, FG-Map16-Tiles, Grafik-Slots und Farben ins aktuelle Level – kein Paket.
+The editor contains Asar (as WebAssembly) and uses it to apply ASM code directly in the browser:
+- **Patches** (`.asm`/`.zip`, e.g. from SMWCentral), with settings and conflict checking;
+- **UberASM** code per level, overworld map and game mode (UberASM Tool 2.x format);
+- **Custom blocks** in GPS format;
+- **Custom sprites** in PIXI format: sprites, shooters, generators and all misc types (cluster, extended,
+  bounce …), with extra bytes; shown in the palette with names and real graphics ([docs/pixi.md](docs/pixi.md));
+- **Level import** from Lunar Magic (*Level → Import LM level file …*, `.mwl` or `.zip` with `.mwl`, `.map16`, ExGFX, `.pal`/`.palmask`): background, FG Map16 tiles, graphics slots and colors into the current level – not a package.
 
-Jeder Patch wird mit Originalbytes und Quellen in der ROM verzeichnet und lässt sich jederzeit wieder
-entfernen. Details, `patch.json` und die Schnittstellen für eigene Patches: [docs/patches.md](docs/patches.md).
-Wessen Formate und Schnittstellen der Editor nachbildet: [docs/credits.md](docs/credits.md).
+Every patch is recorded in the ROM with its original bytes and sources and can be removed again at any
+time. Details, `patch.json` and the interfaces for your own patches: [docs/patches.md](docs/patches.md).
+Whose formats and interfaces the editor follows: [docs/credits.md](docs/credits.md).
 
-## Grenzen / nicht enthalten
+## Limitations / not included
 
-* **Musik:** nur AddmusicK (kein Addmusic 4.05/AddmusicM-Treiber, deren Songs AddmusicK aber umwandelt); eigene
-  Soundeffekte und die Musik der Overworld-Karten/Spezialsongs (Titel, Abspann) sind nicht einstellbar. Eine ROM, in die
-  AddmusicK außerhalb des Editors eingefügt wurde, kann keine Songs dazubekommen.
-* **Test-Emulator:** ohne Mode 7 (Boss-Level), Fenster/HDMA-Effekte werden ignoriert.
-* **Overworld:** Events, Overworld-Sprites und Pfad-Einstellungen sind nicht editierbar (Ansicht „alle Events“
-  ist nur lesend). Translevel-Nummern folgen wie in Vanilla der Scan-Reihenfolge – neue Level-Tiles
-  verschieben die Nummern nachfolgender Level.
-* Titelbild und Abspann sind nicht enthalten.
-* ASM-Patches: nur LoROM, kein SA-1; Patches, die Lunar Magic voraussetzen, funktionieren nicht.
-* Getestet mit der US-ROM (`Super Mario World (U) [!]`, MD5 `cdd3c8c37322978ca8669b34bc89c804`). Mit
-  Lunar Magic bearbeitete ROMs nutzen andere Hooks/Formate und werden nicht gezielt unterstützt.
+* **Music:** AddmusicK only (no Addmusic 4.05/AddmusicM driver, though AddmusicK converts their songs); custom
+  sound effects and the music of the overworld maps/special songs (title, credits) cannot be set. A ROM into which
+  AddmusicK was inserted outside the editor cannot get additional songs.
+* **Test emulator:** no Mode 7 (boss levels); window/HDMA effects are ignored.
+* **Overworld:** events, overworld sprites and path settings are not editable (the "all events" view
+  is read-only). Translevel numbers follow the scan order as in vanilla – new level tiles
+  shift the numbers of subsequent levels.
+* Title screen and credits are not included.
+* ASM patches: LoROM only, no SA-1; patches that require Lunar Magic do not work.
+* Tested with the US ROM (`Super Mario World (U) [!]`, MD5 `cdd3c8c37322978ca8669b34bc89c804`). ROMs edited with
+  Lunar Magic use other hooks/formats and are not specifically supported.
 
-## Aufbau
+## Structure
 
 ```
-src/core/cpu.ts          65816-Interpreter
-src/core/snes.ts         Speicherabbild, DMA, PPU-Register, Timing, APU-Attrappe, Provenance-Tracking
-src/core/ppu.ts          Scanline-Renderer für den Testmodus
-src/core/levelemu.ts     Level laden per Emulation, Tile-Besitz pro Objekt
-src/core/level.ts        Levelformat: Header, Objekte, Exits, Sprites, sek. Header/Eingänge
-src/core/render.ts       Level-Layer aus Emulationsergebnis rendern
-src/core/save.ts         Level in die ROM schreiben
-src/core/asar.ts         Asar (WebAssembly, LGPL-3.0; gebaut mit tools/build-asar.sh)
-src/core/patchapply.ts   ASM-Patches anwenden/entfernen, Konfliktprüfung; patchreg.ts: Verzeichnis in der ROM
-src/core/uberasm.ts      UberASM-Generator; blocks.ts: Custom Blocks (GPS-Format)
-src/core/rom.ts          LoROM-Adressen, Erweiterung, Prüfsumme, RATS
-src/core/lz2.ts          LZ2 (de)kompression
-src/core/patches.ts      Editor-Patch (assembliert mit asm.ts)
-src/core/overworld.ts    Overworld-Formate, RLE, Namen, OW-Emulation
-src/core/spritegfx.ts    Sprite-Grafiken aus dem laufenden Spiel erfassen
-src/core/spritemem.ts    Sprite-Speicher prüfen: unvollständig gezeigte Sprites, passender Wert
-src/core/apu.ts          Soundchip (snes_spc als WebAssembly, tools/build-spc.sh)
-src/core/amk.ts          AddmusicK als WebAssembly (tools/build-amk.sh); music.ts: Musik-Projekt, Songs pro Level
-src/ui/*                 Oberfläche (ohne Framework)
-tools/*                  Tests und Analysewerkzeuge (Disassembler: node tools/dis.ts 05D796 40)
+src/core/cpu.ts          65816 interpreter
+src/core/snes.ts         memory map, DMA, PPU registers, timing, APU stub, provenance tracking
+src/core/ppu.ts          scanline renderer for test mode
+src/core/levelemu.ts     level loading via emulation, tile ownership per object
+src/core/level.ts        level format: header, objects, exits, sprites, secondary headers/entrances
+src/core/render.ts       render level layers from the emulation result
+src/core/save.ts         write levels into the ROM
+src/core/asar.ts         Asar (WebAssembly, LGPL-3.0; built with tools/build-asar.sh)
+src/core/patchapply.ts   apply/remove ASM patches, conflict checking; patchreg.ts: registry in the ROM
+src/core/uberasm.ts      UberASM generator; blocks.ts: custom blocks (GPS format)
+src/core/rom.ts          LoROM addresses, expansion, checksum, RATS
+src/core/lz2.ts          LZ2 (de)compression
+src/core/patches.ts      editor patch (assembled with asm.ts)
+src/core/overworld.ts    overworld formats, RLE, names, OW emulation
+src/core/spritegfx.ts    capture sprite graphics from the running game
+src/core/spritemem.ts    sprite memory check: incompletely shown sprites, suitable value
+src/core/apu.ts          sound chip (snes_spc as WebAssembly, tools/build-spc.sh)
+src/core/amk.ts          AddmusicK as WebAssembly (tools/build-amk.sh); music.ts: music project, songs per level
+src/ui/*                 user interface (no framework)
+tools/*                  tests and analysis tools (disassembler: node tools/dis.ts 05D796 40)
 ```
