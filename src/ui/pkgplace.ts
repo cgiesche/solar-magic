@@ -1,7 +1,7 @@
 // The placement part of the upload preview (ADR 0002): where the package's Map16 tiles, blocks and
 // ExGFX go in this ROM and how they link up – which block each Map16 tile shows, which slot each ExGFX
-// file is for – as planUpload works it out, changeable before installing; and the level setup for the
-// current level (its slots and colors), which can be unchecked.
+// file is for – as planUpload works it out, changeable before installing; the level setup for the
+// current level (its slots and colors), which can be unchecked; and the sample level in its place.
 
 import type { App } from './app.ts';
 import { h, clear, hexInput } from './dom.ts';
@@ -17,12 +17,12 @@ const file = (f: string) => f.split('/').pop()!;
 export interface Placement {
   el: HTMLElement;
   // the install options it stands for; throws when the edits don't fit together
-  read(): Pick<InstallOptions, 'plan' | 'setup' | 'cgram'>;
+  read(): Pick<InstallOptions, 'plan' | 'setup' | 'cgram' | 'sample'>;
 }
 
 // null: the package has nothing to place (no blocks, no graphics)
 export function placementEditor(app: App, p: ReadyPreview, blank: number[]): Placement | null {
-  if (!p.blocks.length && !p.graphics.map16.length && !p.graphics.exgfx.length && !p.graphics.pal.length) return null;
+  if (!p.blocks.length && !p.graphics.map16.length && !p.graphics.exgfx.length && !p.graphics.pal.length && !p.graphics.mwl) return null;
   const lvl = hex(app.level.number, 3);
   let plan: PackagePlan;
   try { plan = planUpload(app.rom, p, blank); } catch (e) {
@@ -33,7 +33,7 @@ export function placementEditor(app: App, p: ReadyPreview, blank: number[]): Pla
   // blocks (also) on tiles off the .map16
   const mapTiles = plan.map16 ? map16Targets(plan.map16.data, plan.map16.at) : [];
   for (const b of plan.blocks) { const off = b.tiles.filter((t) => !mapTiles.includes(t)); if (off.length) edits.blockTiles!.set(b.file, off); }
-  let setup = true;
+  let setup = true, sample = false;
   const status = h('div');
   const tileCells: HTMLElement[] = [];
   const current = (): PackagePlan => editPlan(plan, edits);
@@ -74,8 +74,10 @@ export function placementEditor(app: App, p: ReadyPreview, blank: number[]): Pla
         ...[...GFX_SLOTS, ...(g.slot && !GFX_SLOTS.includes(g.slot) ? [g.slot] : [])].map((s) => h('option', { value: s, selected: s === g.slot }, GFX_SLOTS.includes(s) ? s : `${s} (not supported)`))),
       g.lmNum !== null && g.lmNum !== g.num ? h('span', { class: 'hint' }, ` (${hex(g.lmNum, g.lmNum > 0xff ? 3 : 2)} in the package)`) : '')),
     h('label', { class: 'row small' }, h('input', { type: 'checkbox', checked: true, onchange: (e: Event) => { setup = (e.target as HTMLInputElement).checked; } }), setupText),
+    p.graphics.mwl ? h('label', { class: 'row small' }, h('input', { type: 'checkbox', onchange: (e: Event) => { sample = (e.target as HTMLInputElement).checked; } }),
+      ` Replace level ${lvl} by the sample level (${file(p.graphics.mwl)}): layer 1, layer 2, sprites, header and colors, its tiles and sprites where the package's went; the screen exits of level ${lvl} stay`) : '',
     plan.notes.length ? h('ul', { class: 'hint' }, plan.notes.map((t) => h('li', null, t))) : '',
     status);
   refresh();
-  return { el, read: () => ({ plan: current(), setup, cgram: levelColors(app.render) }) };
+  return { el, read: () => ({ plan: current(), setup, cgram: levelColors(app.render), sample: sample ? app.level : undefined }) };
 }

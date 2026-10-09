@@ -65,7 +65,7 @@ function openManual(app: App, p: ManualPreview, done: (pkg: Package) => void): v
 
 // the preview dialog with Install / Cancel; `choices`: what the user set in it
 function installDialog(app: App, p: ReadyPreview | ManualPreview, body: HTMLElement, log: HTMLElement, music: boolean,
-  choices: () => Pick<InstallOptions, 'patch' | 'assignment' | 'plan' | 'setup' | 'cgram'>, done: (pkg: Package) => void): void {
+  choices: () => Pick<InstallOptions, 'patch' | 'assignment' | 'plan' | 'setup' | 'cgram' | 'sample'>, done: (pkg: Package) => void): void {
   let busy = false;
   const install = async () => {
     if (busy) return;
@@ -83,9 +83,16 @@ function installDialog(app: App, p: ReadyPreview | ManualPreview, body: HTMLElem
     if (!r.ok || !r.pkg) { clear(log).appendChild(logView(r)); return; }
     dlg.close(true);
     patchesChanged(app);
+    // the sample level: a level edit of its own (not saved yet)
+    const sample = r.sample;
+    if (sample) {
+      app.editLevel(() => { app.level = sample.level; }, false);
+      app.selection.clear();
+      app.changed();
+    }
     app.emit('level-header'); // the level setup may have changed its graphics slots and colors
     app.palettesChanged();
-    toast(`“${p.name}” installed${r.warnings.length ? ` (${r.warnings.length} warning(s))` : ''} – Ctrl+Z undoes it.`);
+    toast(`“${p.name}” installed${r.warnings.length ? ` (${r.warnings.length} warning(s))` : ''}${sample ? `, its sample level in place of level ${hex(app.level.number, 3)} (not saved yet)` : ''} – Ctrl+Z undoes it.`);
     if (r.warnings.length) modal(`Output: ${p.name}`, logView({ ...r, prints: [] }), [{ label: 'OK', primary: true }]);
     done(r.pkg);
   };

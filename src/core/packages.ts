@@ -21,8 +21,11 @@ import { pixiParts, planPixiUpload, applyPixiUpload, linkedDefines, type PixiPla
 import { parseCfg, parseJsonCfg } from './pixi.ts';
 import { detectBlocks, detectGraphics, graphicsFiles, includedFiles, planPackage, applyBlocks, applyGraphics, applyLevelSetup, routinesCalled, type DetectedBlock, type DetectedGraphics, type PackagePlan } from './pkgplan.ts';
 import { loadProject, saveProject, emptyProject, projectFromFiles, type UberProject } from './uberproject.ts';
-import { installEditorPatch, extGfxAvailable, setLevelMusic } from './patches.ts';
+import { installEditorPatch, extGfxAvailable, setLevelMusic, setCustomPalette } from './patches.ts';
 import { map16Targets } from './map16file.ts';
+import { mwlSections, sampleLevel, type SampleLevel } from './mwl.ts';
+import { planBgPack, applyBgPack } from './bgpack.ts';
+import { parseSprites, spriteSizes, type Level } from './level.ts';
 import { installVramPatch } from './vrampatch.ts';
 import { installMap16Ext, map16Ext } from './map16ext.ts';
 import { ALL, type UberContext } from './uberasm.ts';
@@ -245,8 +248,10 @@ export interface InstallOptions {
   plan?: PackagePlan; // where blocks, Map16 tiles and ExGFX go, with their links (default: planUpload's)
   setup?: boolean; // the level setup for `level`: the package's ExGFX in its slots, its colors (default: on)
   cgram?: Uint8Array; // the colors of `level` now (levelColors), base of its own palette for the setup
+  sample?: Level; // replace this level (the current one, number `level`) by the package's sample level
 }
-export interface InstallResult extends ApplyResult { pkg: Package | null }
+// sample: the sample level to put in place of the current one (a level edit, not saved yet)
+export interface InstallResult extends ApplyResult { pkg: Package | null; sample?: SampleLevel }
 
 // where the package's blocks, Map16 tiles and ExGFX would go in this ROM, and how they link up
 export function planUpload(rom: Rom, preview: ReadyPreview, blank: number[]): PackagePlan {
@@ -255,6 +260,59 @@ export function planUpload(rom: Rom, preview: ReadyPreview, blank: number[]): Pa
 
 // what the steps share: the plan, the sprites' numbers
 interface InstallContext { plan: PackagePlan; pixi: PixiPlan | null }
+
+// the sample level with the package's parts where they landed: Map16 tiles by the plan, custom sprites
+// when certain (one level sprite of that type in the package and one number of it in the level, or a
+// PIXI list.txt of the package naming the number); its background with the package's BG Map16 tiles,
+// its own colors, the package's ExGFX in its slots (the level setup)
+function placeSample(rom: Rom, preview: ReadyPreview, ctx: InstallContext, into: Level, opt: InstallOptions): SampleLevel {
+  const d = preview.files.get(preview.graphics.mwl!)!;
+  const m = ctx.plan.map16;
+  const from = m ? map16Targets(m.data, m.from) : [], to = m ? map16Targets(m.data, m.at) : [];
+  const sprites = ctx.pixi?.sprites ?? [];
+  const kindOf = (num: number) => (num < 0xc0 ? 'sprites' : num < 0xd0 ? 'shooters' : 'generators');
+  const sec = mwlSections(d);
+  const used = parseSprites(sec.sprites, 0, false, spriteSizes(rom)).sprites.filter((q) => q.extra & 2);
+  const listed = pixiListNumbers(preview);
+  const sample = sampleLevel(rom, d, into, {
+    tile: (t) => { const i = from.indexOf(t); return i >= 0 ? to[i] : null; },
+    sprite: (num) => {
+      const file = listed.get(num);
+      const byList = file ? sprites.find((x) => x.file === file) : undefined;
+      if (byList) return byList.num;
+      const k = kindOf(num), mine = sprites.filter((x) => x.kind === k);
+      return mine.length === 1 && new Set(used.filter((q) => kindOf(q.num) === k).map((q) => q.num)).size === 1 ? mine[0].num : null;
+    },
+  });
+  if (sample.level.objects.some((o) => o.tile !== undefined)) installEditorPatch(rom);
+  // the background: the BG tilemap, BG Map16 tiles of the package moved along
+  const mwl = ctx.plan.sample;
+  if (mwl?.bg && !sample.level.layer2Objects) {
+    try {
+      const bp = planBgPack(rom, preview.name, preview.files, opt.blank);
+      const r = applyBgPack(rom, sample.level, preview.files, bp, { bg: true, fg: false, palettes: bp.palettes.map(() => false), cgram: opt.cgram ?? new Uint8Array(512), blank: opt.blank });
+      if (r.ok) sample.level.bg = r.bg; else sample.notes.push(`Background not taken over: ${r.errors.join(' ')}`);
+    } catch (e) { sample.notes.push(`Background not taken over: ${e instanceof Error ? e.message : e}`); }
+  }
+  if (sample.palette) setCustomPalette(rom, into.number, sample.palette);
+  return sample;
+}
+
+// a PIXI list.txt in the package: number → the sprite file it names
+function pixiListNumbers(preview: ReadyPreview): Map<number, string> {
+  const out = new Map<number, string>();
+  for (const [f, c] of preview.files) {
+    if (!/(^|\/)list\.txt$/i.test(f)) continue;
+    const dir = f.slice(0, f.length - 'list.txt'.length);
+    for (const line of dec.decode(c).split(/\r?\n/)) {
+      const m = /^\s*([0-9a-f]{1,2})\s+(\S+\.(?:json|cfg|asm))\s*$/i.exec(line);
+      if (!m) continue;
+      const file = preview.sprites.find((s) => s === dir + m[2] || s.endsWith('/' + m[2]));
+      if (file) out.set(parseInt(m[1], 16), file);
+    }
+  }
+  return out;
+}
 
 const failed = (errors: string[], warnings: string[] = []): InstallResult => ({ ok: false, errors, warnings, prints: [], pkg: null });
 
@@ -297,6 +355,7 @@ export async function installPackage(rom: Rom, preview: ReadyPreview | ManualPre
   const before = rom.snapshot();
   const warnings: string[] = [];
   const prints: string[] = [];
+  let sample: SampleLevel | undefined;
   try {
     const upload = preview.steps.find((s): s is Extract<Step, { upload: Upload }> => 'upload' in s)?.upload;
     const ctx: InstallContext = {
@@ -312,17 +371,22 @@ export async function installPackage(rom: Rom, preview: ReadyPreview | ManualPre
         prints.push(...r.prints);
         if (!r.ok) return r;
       }
-      if (opt.level !== null && opt.setup !== false && (ctx.plan.gfx.some((g) => g.slot) || ctx.plan.palettes.length)) {
+      // the sample level needs the package's ExGFX in its slots: the level setup comes with it
+      if (opt.level !== null && (opt.setup !== false || opt.sample) && (ctx.plan.gfx.some((g) => g.slot) || ctx.plan.palettes.length)) {
         const r = levelSetup(rom, opt.level, ctx.plan, opt.cgram ?? null);
         warnings.push(...r.warnings);
         prints.push(...r.prints);
+      }
+      if (opt.sample && preview.graphics.mwl) {
+        sample = placeSample(rom, preview, ctx, opt.sample, opt);
+        warnings.push(...sample.notes);
       }
       const done: ApplyResult = { ok: true, errors: [], warnings: [], prints: [] };
       return done;
     });
     if (!result.ok) return failed(result.errors, result.warnings);
     if (!pkg) { rom.restore(before); return failed(['Nothing changed – everything in the package is already in the ROM.']); }
-    return { ok: true, errors: [], warnings, prints, pkg };
+    return { ok: true, errors: [], warnings, prints, pkg, sample };
   } catch (e) {
     return failed([e instanceof Error ? e.message : String(e)], warnings);
   }

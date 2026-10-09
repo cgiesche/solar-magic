@@ -125,6 +125,16 @@ file's number and slot – and lets you change all of it before installing. Two 
 The checkbox below sets up the current level (the ExGFX in its slots, the colors of a `.pal` with its `.palmask`
 in its palette); it is a level edit: Ctrl+Z reverts it, removing the package does not.
 
+**Sample level:** a package with code and an `.mwl` offers its sample level (unchecked): it replaces the current
+level – layer 1, layer 2, sprites, primary and secondary header, its own colors – with its Map16 tiles where the
+package's went (Lunar Magic's Direct Map16 objects 22/23/27/29 become the editor's own) and its custom sprites
+with the package's numbers where that is certain (one sprite of that type in the package and one number of it in
+the level, or a PIXI `list.txt` naming the number); other custom sprites are left out with a note. The `.map16`
+only records the row it was exported from; the column comes from the tiles the sample level places there. The
+current level keeps its screen exits (those on screens the sample level has) and secondary entrances.
+ExAnimation and Lunar Magic's AN2 slot are not taken over. Like the level setup it is a level edit (not saved
+yet after installing).
+
 The preview has *Manual …* if the package contains a readme or an HTML manual. It
 is shown inside the editor, with images and links between the pages; the pages' scripts do not run.
 Manuals of packages in UberASM, Blocks and Sprites stay stored in the browser and are listed in the

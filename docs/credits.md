@@ -13,6 +13,8 @@ except for Asar, snes_spc and AddmusicK (included as WebAssembly).
 | [UberASM Tool](https://github.com/Fernap/UberASMTool) | Format and calling conventions of UberASM | Vitor Vilela, Fernap and others |
 | [Tauri](https://tauri.app) 2 (MIT/Apache-2.0) | Framework of the desktop app (`src-tauri/`): native window with the system's webview | Tauri Programme within The Commons Conservancy and contributors |
 | Lunar Magic | Formats of `.mwl`, `.map16`, ExGFX, size table of the sprite data (`$0EF30C`) | FuSoYa |
+| [SMW-Data: MWL File Format](https://github.com/Ankouno/SMW-Data/blob/master/Misc/MWL%20File%20Format.md) | Sections of the `.mwl` (level information, layers, sprites, palette) for sample levels | Ankouno |
+| [Level Data Format](https://www.smwspeedruns.com/Level_Data_Format) (SMW Speedrunning Wiki) | Lunar Magic's Direct Map16 objects 22/23/27/29 in sample levels; also the ExAnimation format | SMW speedrunning community |
 
 Packages on which editor features were developed and tested (as test data in `test/fixtures/`):
 

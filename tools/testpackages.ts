@@ -22,9 +22,12 @@ import { ALL } from '../src/core/uberasm.ts';
 import { loadBlockProject, saveBlockProject } from '../src/core/blocks.ts';
 import { loadPixiProject, savePixiProject } from '../src/core/pixi.ts';
 import { loadMusicProject } from '../src/core/music.ts';
+import { loadLevel } from '../src/core/level.ts';
+import { saveLevel } from '../src/core/save.ts';
 import { levelMusic, setLevelMusic, installEditorPatch, customPalette } from '../src/core/patches.ts';
 import { levelColors } from '../src/core/bgpack.ts';
-import { enableBlocks } from '../src/core/map16ext.ts';
+import { enableBlocks, setExtTileWords } from '../src/core/map16ext.ts';
+import { parseLmObjects } from '../src/core/mwl.ts';
 import { testSongZip } from './testsong.ts';
 
 await loadAsar();
@@ -291,6 +294,69 @@ sameRom('song removed');
   check(r.ok && row7.every((c, i) => c === want(0x70 + i)) && other === before, `level setup: palette row 7 from PinkThreeCols.pal in the level, other colors kept (${r.prints.filter((p) => /color/.test(p)).join()})`);
   await removePackage(rom, r.pkg!.id, o.blank);
   check(!!customPalette(rom, 0x105), 'removing the package keeps the level setup');
+}
+
+// the sample level (a level edit, on its own ROM): On-Off Blocks' SampleLevel.mwl in place of level 105 –
+// Lunar Magic's Direct Map16 objects become the editor's, on the tiles the block went to; the .map16
+// lands where the author had it (508, the column from the sample level); bumping a block from below
+// flips the ON/OFF switch
+{
+  const rom = new Rom(fixture('smw.smc'));
+  const e = new LevelEmulator(rom); e.boot();
+  const l = e.load(0x105);
+  const s = map16Source(rom, l);
+  const into = loadLevel(rom, 0x105);
+  const r = await installPackage(rom, ready(onoff), { level: 0x105, blank: s.fg(0x025), tileWords: (t) => s.fg(t), cgram: levelColors(l), sample: into });
+  const lv = r.sample?.level;
+  const dm = lv?.objects.filter((o) => o.tile !== undefined) ?? [];
+  check(r.ok && !!lv && dm.map((o) => `${o.x},${o.y}:${o.tile!.toString(16)}`).sort().join(' ') === '6,20:508 9,20:509' && r.pkg!.blocks.tiles.join() === [0x508, 0x509].join(),
+    `sample level: its blocks on tiles 508/509, where the block went (${dm.map((o) => `${o.x},${o.y}:${o.tile!.toString(16)}`).join(' ')}; ${r.warnings.join(' | ')})`);
+  if (lv) {
+    saveLevel(rom, lv);
+    const e2 = new LevelEmulator(rom); e2.boot();
+    const l2 = e2.load(0x105);
+    const t = e2.snes, w = t.wram;
+    const at = (x: number, y: number) => w[0xc800 + (x >> 4) * 0x1b0 + y * 16 + (x & 15)] | (w[0x1c800 + (x >> 4) * 0x1b0 + y * 16 + (x & 15)] << 8);
+    let k = 0; while (w[0x100] !== 0x14 && k++ < 200) t.runFrame();
+    check(l2.ok && at(6, 20) === 0x508 && at(9, 20) === 0x509, `sample level in the game: tiles ${at(6, 20).toString(16)} ${at(9, 20).toString(16)}`);
+    // Mario under the block at (6, 20), jumping
+    const sw = w[0x14af];
+    for (let i = 0; i < 40; i++) { w[0x94] = 6 * 16; w[0x95] = 0; t.runFrame(); }
+    w[0x96] = (22 * 16) & 0xff; w[0x97] = (22 * 16) >> 8; w[0x7d] = 0xb0; w[0x72] = 0x0b;
+    let flipped = false;
+    for (let i = 0; i < 40 && !flipped; i++) { t.runFrame(); if (w[0x14af] !== sw) flipped = true; }
+    check(flipped, `sample level: bumping the block flips the ON/OFF switch (${sw} → ${w[0x14af]})`);
+  }
+}
+
+// the sample level follows the blocks when the author's tiles are taken
+{
+  const rom = new Rom(fixture('smw.smc'));
+  const e = new LevelEmulator(rom); e.boot();
+  const s = map16Source(rom, e.load(0x105));
+  setExtTileWords(rom, 0x508, s.fg(0x130), s.fg(0x025));
+  const r = await installPackage(rom, ready(onoff), { level: null, blank: s.fg(0x025), tileWords: (t) => s.fg(t), sample: loadLevel(rom, 0x105) });
+  const tiles = (r.sample?.level.objects ?? []).filter((o) => o.tile !== undefined).map((o) => o.tile!).sort((a, b) => a - b);
+  check(r.ok && tiles.join() === r.pkg!.blocks.tiles.slice().sort((a, b) => a - b).join() && !tiles.includes(0x508), `508 taken: the sample level's blocks on ${tiles.map((t) => t.toString(16)).join(', ')}`);
+}
+
+// Lunar Magic's Direct Map16 objects: 22/23 (page 0/1), 27 with one tile, a block of tiles, a block
+// repeated over a rectangle and over screens
+{
+  const notes: string[] = [];
+  const data = Uint8Array.from([
+    0x45, 0x23, 0x10, 0x30, // 22 at (3, 5): tile 030, 1x2
+    0x46, 0x34, 0x00, 0x2a, // 23 at (4, 6): tile 12A
+    0x47, 0x75, 0x21, 0x05, 0x08, // 27 fmt 0 at (5, 7): tile 508, 3x2
+    0x48, 0x76, 0x11, 0x45, 0x08, // 27 fmt 1 at (6, 8): 2x2 tiles from 508
+    0x49, 0x77, 0x13, 0x85, 0x08, 0x01, // 27 fmt 2 at (7, 9): 2x4 of 1x2 tiles from 508
+    0x4a, 0x78, 0x02, 0xc5, 0x08, 0x00, 0x00, // 27 fmt 3 at (8, 10): 1x3 of tile 508
+    0x4b, 0xd9, 0x00, 0x00, 0x00, // 2D (custom): left out
+    0xff]);
+  const { objects } = parseLmObjects(data, 0, false, notes);
+  const d = objects.map((o) => `${o.x},${o.y}:${o.tile?.toString(16)}/${o.size.toString(16)}`).join(' ');
+  check(d === '3,5:30/10 4,6:12a/0 5,7:508/21 6,8:508/0 7,8:509/0 6,9:518/0 7,9:519/0 7,9:508/0 8,9:509/0 9,9:508/0 10,9:509/0 7,10:508/0 8,10:509/0 9,10:508/0 10,10:509/0 8,10:508/0 9,10:508/0 10,10:508/0'
+    && notes.some((n) => /2D/.test(n)), `Direct Map16 objects converted (${d}; ${notes.join(' | ')})`);
 }
 
 // legacy packages: patches applied before packages were tracked

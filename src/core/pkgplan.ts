@@ -19,6 +19,7 @@ import { EXT_FIRST, EXT_TILES, DEFAULT_ACTS, map16Ext, extTileWords, actsLike, s
 import { gfxEntry, hasEditorPatch, VANILLA_GFX, levelGfx, setLevelGfx, levelExtGfx, setLevelExtGfx, GFX_SLOT_NAMES, EXT_GFX_SLOT_NAMES, extGfxAvailable, customPalette, setCustomPalette } from './patches.ts';
 import { parseMwl, packPalettes, slotOfWord, type MwlLevel, type PackPalette } from './bgpack.ts';
 import { withIncludes } from './pkgmap.ts';
+import { sampleTiles } from './mwl.ts';
 
 const dec = new TextDecoder();
 const enc = new TextEncoder();
@@ -184,7 +185,14 @@ export function planPackage(rom: Rom, input: PlanInput, blank: number[]): Packag
   let map16: PlannedMap16 | null = null;
   let shift = 0; // list.txt tiles moved by this much (taken here)
   if (fgMap) {
-    const from = fgMap.data.origin && !fgMap.data.origin.bg ? fgMap.data.origin.tile : listed.length ? Math.min(...listed.map((b) => b.tile!)) : EXT_FIRST;
+    let from = fgMap.data.origin && !fgMap.data.origin.bg ? fgMap.data.origin.tile : listed.length ? Math.min(...listed.map((b) => b.tile!)) : EXT_FIRST;
+    // the .map16 knows its row only: the column from the tiles the sample level places in those rows
+    if (fgMap.data.origin && !fgMap.data.origin.bg && graphics.mwl && fgMap.data.width < 16) {
+      let tiles: number[] = [];
+      try { tiles = sampleTiles(rom, files.get(graphics.mwl)!).filter((t) => t >= from && t < from + fgMap.data.height * 16); } catch { /* no level data */ }
+      const col = Math.min(...tiles.map((t) => t & 15));
+      if (tiles.length && tiles.every((t) => (t & 15) - col < fgMap.data.width)) from += col;
+    }
     const want = listed.length ? Math.min(...listed.map((b) => b.tile!)) : Math.max(from, EXT_FIRST);
     const offsets = [...new Set([...map16Targets(fgMap.data, 0), ...listed.map((b) => b.tile! - want)])];
     const at = freeRun(want, offsets, isUsed, Math.min(16, fgMap.data.width));
