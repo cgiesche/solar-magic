@@ -25,7 +25,7 @@ import {
   EXT_GFX_SLOT_NAMES, extGfxAvailable, customPalette, setCustomPalette, setLevelAn2,
 } from './patches.ts';
 import { mwlExAnim } from './mwl.ts';
-import { slotTiles, usesAltFile, addLevelSlots, type ExSlot } from './exanim.ts';
+import { slotTiles, usesAltFile, framesPastAn2, addLevelSlots, type ExSlot } from './exanim.ts';
 import { RAM } from './ram.ts';
 import { installVramPatch } from './vrampatch.ts';
 
@@ -236,6 +236,7 @@ export function planBgPack(rom: Rom, name: string, files: Map<string, Uint8Array
     const parts = (['bg', 'fg'] as PackPart[]).filter((p) => slotTiles(e).some((t) => drawn[p].has(t)));
     if (!parts.length) continue;
     if (usesAltFile(e)) { notes.push('An ExAnimation slot takes its frames from an alternative file (ExGFX 60-63) – not taken over'); continue; }
+    if (framesPastAn2(e)) notes.push('An ExAnimation slot takes frames past the first 3 KB of AN2 – the editor keeps the BG tilemap there, so they show something else');
     exanim.push({ slot: e, parts });
   }
   const an2 = level.gfx.get('AN2');

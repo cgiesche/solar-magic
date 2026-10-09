@@ -117,6 +117,8 @@ export function slotTiles(e: ExSlot): number[] {
   if (e.type >= 0x10) out.push(...out.map((t) => t + 0x10));
   return out;
 }
+// a tile slot with frames past AN2 ($7EAD00-$7EB8FF, patches.ts): the BG tilemap is there
+export const framesPastAn2 = (e: ExSlot) => kindOf(e.type) === 'tiles' && !(e.dest & 0x8000) && e.frames.some((f) => f >= 0xb900 && f < 0xc100);
 // a slot whose frames come from the list's alternative file (ExGFX 60-63, shared by all levels)
 export const usesAltFile = (e: ExSlot) => kindOf(e.type) === 'tiles' ? (e.dest & 0x8000) !== 0 : kindOf(e.type) === 'colors' && e.type < 0x16 && ((e.dest >> 8) & 0x80) !== 0;
 

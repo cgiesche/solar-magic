@@ -609,17 +609,19 @@ export function setLevelExtGfx(rom: Rom, n: number, slots: number[]): void {
 // ---------------------------------------------------------------------------
 // AN2 per level ("SMWN"), like Lunar Magic's AN2 slot: a 4bpp ExGFX file kept in RAM from $7EAD00 for
 // ExAnimation to copy frames from (frames there are addresses in bank $7E; the game's own animation
-// graphics are at $7E7D00-$7EACFF). During a level load the game uses $7EAD00-$7EC0FF only as scratch
-// (graphics decompression, the BG tilemap), during play nothing touches it – found by emulation. So the
-// file is copied in after all graphics are uploaded and before the animations are first run: the level
-// load's JSL $05BE8A at $00A5BF (after JSR $A9DA, the graphics; before JSR $A5F9, the animations)
-// becomes a JSL to the copy, which goes on to $05BE8A. Only uncompressed 4bpp files (4 KB) can be AN2.
+// graphics are at $7E7D00-$7EACFF). During a level load the game uses $7EAD00-$7EB8FF only as scratch
+// for decompressing graphics files, during play nothing touches it – found by emulation; right after
+// it, $7EB900-$7EC0FF keep the level's BG tilemap (bg.ts), so AN2 is the first 3 KB (96 tiles) of the
+// file. It is copied in after all graphics are uploaded and before the animations are first run: the
+// level load's JSL $05BE8A at $00A5BF (after JSR $A9DA, the graphics; before JSR $A5F9, the
+// animations) becomes a JSL to the copy, which goes on to $05BE8A. Only uncompressed 4bpp files can be AN2.
 export const AN2_HOOK = 0x00a5bf;
 export const AN2_HOOKS: [number, number][] = [[AN2_HOOK, 4]];
 const AN2_MAGIC = [0x53, 0x4d, 0x57, 0x4e]; // "SMWN"
 const AN2_ORIG = [0x22, 0x8a, 0xbe, 0x05]; // JSL $05BE8A
 export const AN2_RAM = 0x7ead00;
-export const AN2_SIZE = 0x1000;
+export const AN2_SIZE = 0xc00; // $7EAD00-$7EB8FF
+const AN2_COPY_OLD = [0xa0, 0xfe, 0x0f]; // LDY #$0FFE: 4 KB, over the BG tilemap (patches up to 709a7fd)
 
 // the patch with its table of 512 files ($FF = none)
 export function an2Patch(rom: Rom): { table: number } | null {
@@ -632,6 +634,21 @@ export function an2Patch(rom: Rom): { table: number } | null {
 export function installAn2Patch(rom: Rom): { table: number } {
   const ex = an2Patch(rom);
   if (ex) return ex;
+  return installNewAn2Patch(rom);
+}
+
+// an AN2 patch of an earlier version copying 4 KB (over the level's BG tilemap) copies 3 KB; true if it did
+export function fixAn2Patch(rom: Rom): boolean {
+  const p = an2Patch(rom);
+  if (!p) return false;
+  const code = rom.r24(AN2_HOOK + 1);
+  for (let a = code; a < code + 0x60; a++) {
+    if (AN2_COPY_OLD.every((v, i) => rom.r8(a + i) === v) && rom.r8(a - 1) === 0x30) { rom.w8(a + 2, (AN2_SIZE - 2) >> 8); return true; }
+  }
+  return false;
+}
+
+function installNewAn2Patch(rom: Rom): { table: number } {
   for (let i = 0; i < AN2_ORIG.length; i++) if (rom.r8(AN2_HOOK + i) !== AN2_ORIG[i]) throw new Error(`Unexpected code at $00A5BF${ownerNote(rom, AN2_HOOK, 4)} – AN2 not possible`);
   const p = installEditorPatch(rom); // level number in $010B, ExGFX pointers
   const a = new Asm();
@@ -652,7 +669,7 @@ export function installAn2Patch(rom: Rom): { table: number } {
   a.b(0xbf).l(p.gfxLo); a.b(0x85, 0x00); // LDA.l GfxLo,x : STA $00
   a.b(0xbf).l(p.gfxHi); a.b(0x85, 0x01);
   a.b(0xbf).l(p.gfxBank); a.b(0x85, 0x02);
-  a.b(0xc2, 0x30, 0xa0).w(AN2_SIZE - 2); // REP #$30 : LDY #$0FFE
+  a.b(0xc2, 0x30, 0xa0).w(AN2_SIZE - 2); // REP #$30 : LDY #$0BFE
   a.label('cp');
   a.b(0xb7, 0x00, 0xbb, 0x9f).l(AN2_RAM); // LDA [$00],y : TYX : STA.l $7EAD00,x
   a.b(0x88, 0x88); a.br(0x10, 'cp'); // DEY : DEY : BPL cp

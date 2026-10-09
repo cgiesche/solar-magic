@@ -17,7 +17,7 @@ import { parseBlockList, loadBlockProject, saveBlockProject, type BlockProject }
 import { parseMap16File, map16Targets, exgfxName, importGfxFile, type Map16File } from './map16file.ts';
 import { EXT_FIRST, EXT_TILES, DEFAULT_ACTS, map16Ext, extTileWords, actsLike, setExtTileWords, setActsLike } from './map16ext.ts';
 import { gfxEntry, hasEditorPatch, VANILLA_GFX, levelGfx, setLevelGfx, levelExtGfx, setLevelExtGfx, GFX_SLOT_NAMES, EXT_GFX_SLOT_NAMES, extGfxAvailable, customPalette, setCustomPalette, setLevelAn2 } from './patches.ts';
-import { slotTiles, usesAltFile, addLevelSlots, type ExList, type ExSlot } from './exanim.ts';
+import { slotTiles, usesAltFile, framesPastAn2, addLevelSlots, type ExList, type ExSlot } from './exanim.ts';
 import { parseMwl, packPalettes, slotOfWord, type MwlLevel, type PackPalette } from './bgpack.ts';
 import { withIncludes } from './pkgmap.ts';
 import { sampleTiles, mwlExAnim } from './mwl.ts';
@@ -270,6 +270,7 @@ export function planPackage(rom: Rom, input: PlanInput, blank: number[]): Packag
     for (const e of list?.slots.values() ?? []) {
       if (!slotTiles(e).some((t) => drawn.has(t))) continue;
       if (usesAltFile(e)) { notes.push('An ExAnimation slot of the package takes its frames from an alternative file (ExGFX 60-63) – not taken over'); continue; }
+      if (framesPastAn2(e)) notes.push('An ExAnimation slot of the package takes frames past the first 3 KB of AN2 – the editor keeps the BG tilemap there, so they show something else');
       exanim.push(e);
     }
   }

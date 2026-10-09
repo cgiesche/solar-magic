@@ -5,7 +5,7 @@ import { openLevelImport } from './ui/levelimport.ts';
 import { createBps, crc32 } from './core/bps.ts';
 
 const SMW_CLEAN_CRC = 0xb19ed489; // Super Mario World (U), headerless
-import { disableUnsafeExtGfx, hasEditorPatch } from './core/patches.ts';
+import { disableUnsafeExtGfx, hasEditorPatch, fixAn2Patch } from './core/patches.ts';
 import { App, type EditMode } from './ui/app.ts';
 import { h, clear, toast, log, modal, choose } from './ui/dom.ts';
 import { downloadBytes, pickFile, saveFile, filePath, fileName, desktop, guardClose } from './ui/platform.ts';
@@ -83,6 +83,10 @@ function startWith(rom: Rom, name: string): void {
   if (disableUnsafeExtGfx(rom)) {
     saveRom(name, rom).catch(() => {});
     toast('BG2/BG3 graphics were turned off: they overwrote the layer 1 tilemap (broken background). The assignments stay saved and apply again once the VRAM patch is available.', 'error');
+  }
+  if (fixAn2Patch(rom)) {
+    saveRom(name, rom).catch(() => {});
+    log('AN2 patch updated: it copied 4 KB over the level\'s BG tilemap, now the first 3 KB of the file.');
   }
   if (!rom.title().startsWith('SUPER MARIOWORLD')) {
     toast(`Unexpected ROM title "${rom.title()}" – trying anyway.`, 'error');
