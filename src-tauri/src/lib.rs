@@ -3,6 +3,8 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
+        // after fs: keeps the files chosen in dialogs writable after a restart (the open project)
+        .plugin(tauri_plugin_persisted_scope::init())
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
