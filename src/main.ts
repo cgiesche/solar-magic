@@ -7,7 +7,8 @@ import { createBps, crc32 } from './core/bps.ts';
 const SMW_CLEAN_CRC = 0xb19ed489; // Super Mario World (U), headerless
 import { disableUnsafeExtGfx, hasEditorPatch } from './core/patches.ts';
 import { App, type EditMode } from './ui/app.ts';
-import { h, clear, toast, log, downloadBytes, pickFile, modal, choose } from './ui/dom.ts';
+import { h, clear, toast, log, modal, choose } from './ui/dom.ts';
+import { downloadBytes, pickFile } from './ui/platform.ts';
 import { LogBar } from './ui/logbar.ts';
 import { kvGet, kvClear, saveRom, romFromRecord, type RomRecord } from './ui/storage.ts';
 import { migratePatchSources } from './core/patchreg.ts';
@@ -369,12 +370,12 @@ function hoverTile(app: App, tx: number, ty: number): number {
 }
 
 // the playable ROM: without the editor data (sources of patches, packages, UberASM/blocks/sprites/music)
-function exportRom(app: App): void {
+async function exportRom(app: App): Promise<void> {
   if (app.dirty) app.saveLevel(true);
   const withHeader = app.rom.smcHeader !== null;
   const out = app.rom.output(withHeader);
   const base = app.romName.replace(/\.(smc|sfc|bin|smwproj)$/i, '');
-  downloadBytes(`${base}.${withHeader ? 'smc' : 'sfc'}`, out);
+  if (!await downloadBytes(`${base}.${withHeader ? 'smc' : 'sfc'}`, out)) return;
   log(`ROM exported as “${base}.${withHeader ? 'smc' : 'sfc'}” (${Math.round(out.length / 1024)} KB)`);
   if (app.rom.extra.size) toast('The playable ROM holds no sources of patches, packages and projects – to keep editing elsewhere, use “Save project”.');
 }
@@ -391,8 +392,7 @@ async function exportPatch(app: App): Promise<void> {
   const target = app.rom.output(false);
   const patch = createBps(source, target);
   const base = app.romName.replace(/\.(smc|sfc|bin|smwproj)$/i, '');
-  downloadBytes(`${base}.bps`, patch);
-  log(`Patch exported as “${base}.bps” (${Math.max(1, Math.round(patch.length / 1024))} KB, from “${f.name}”)`);
+  if (await downloadBytes(`${base}.bps`, patch)) log(`Patch exported as “${base}.bps” (${Math.max(1, Math.round(patch.length / 1024))} KB, from “${f.name}”)`);
 }
 // forgets everything stored in the browser and starts over (reloading drops all state of the session)
 async function closeProject(app: App): Promise<void> {
@@ -405,12 +405,11 @@ async function closeProject(app: App): Promise<void> {
   try { localStorage.clear(); } catch { /* no storage */ }
   location.replace(location.pathname);
 }
-function exportProject(app: App): void {
+async function exportProject(app: App): Promise<void> {
   if (app.dirty) app.saveLevel(true);
   const out = app.rom.outputProject(app.rom.smcHeader !== null);
   const base = app.romName.replace(/\.(smc|sfc|bin|smwproj)$/i, '');
-  downloadBytes(`${base}.smwproj`, out);
-  log(`Project saved as “${base}.smwproj” (${Math.round(out.length / 1024)} KB, of which ${Math.round(app.rom.extraSize / 1024)} KB editor data)`);
+  if (await downloadBytes(`${base}.smwproj`, out)) log(`Project saved as “${base}.smwproj” (${Math.round(out.length / 1024)} KB, of which ${Math.round(app.rom.extraSize / 1024)} KB editor data)`);
 }
 
 function showHelp(): void {

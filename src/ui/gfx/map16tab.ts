@@ -7,7 +7,8 @@
 import type { App } from '../app.ts';
 import type { GfxWorkspace, WsPanel } from '../gfxworkspace.ts';
 import { menuButton } from '../menu.ts';
-import { h, clear, toast, pickFile, modal, downloadBytes } from '../dom.ts';
+import { h, clear, toast, modal } from '../dom.ts';
+import { pickFile, downloadBytes } from '../platform.ts';
 import { TileCache, map16Source } from '../../core/render.ts';
 import { hex } from '../../core/names.ts';
 import { EXT_FIRST, EXT_TILES, map16Ext, actsLike, setActsLike, setExtTileWords } from '../../core/map16ext.ts';
@@ -627,12 +628,11 @@ export class Map16Tab implements WsPanel {
     this.redraw();
   }
 
-  private exportMap16(): void {
+  private async exportMap16(): Promise<void> {
     const tiles = this.selection();
     const data = writeMap16File({ width: this.selW, height: this.selH, tiles: tiles.map((t) => this.words(t)), acts: this.bg ? null : tiles.map((t) => actsLike(this.app.rom, t)) });
     const name = `${this.bg ? 'bg' : 'fg'}_${hex(this.sel, 3)}.map16`;
-    downloadBytes(name, data);
-    toast(`${name} exported`);
+    if (await downloadBytes(name, data)) toast(`${name} exported`);
   }
 
   key(e: KeyboardEvent): boolean {

@@ -147,23 +147,6 @@ export function modal(title: string, body: HTMLElement, buttons: { label: string
   return { close };
 }
 
-export function downloadBytes(name: string, data: Uint8Array, mime = 'application/octet-stream'): void {
-  const blob = new Blob([data as BlobPart], { type: mime });
-  const a = h('a', { href: URL.createObjectURL(blob), download: name });
-  document.body.appendChild(a);
-  a.click();
-  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
-}
-
-export function pickFile(accept: string): Promise<File | null> {
-  return new Promise((resolve) => {
-    const inp = h('input', { type: 'file', accept, style: 'display:none' });
-    inp.addEventListener('change', () => { resolve(inp.files?.[0] ?? null); inp.remove(); });
-    document.body.appendChild(inp);
-    inp.click();
-  });
-}
-
 const ZOOM_STEPS = [0.5, 0.75, 1, 1.5, 2, 3, 4];
 
 // Middle-button drag pans a scroll container; Ctrl+wheel zooms in steps around the cursor.

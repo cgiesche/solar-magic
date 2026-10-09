@@ -6,7 +6,8 @@
 import type { App } from '../app.ts';
 import type { GfxWorkspace, WsPanel } from '../gfxworkspace.ts';
 import { menuButton, type MenuItem } from '../menu.ts';
-import { h, clear, toast, downloadBytes, pickFile, modal, choose, attachPanZoom } from '../dom.ts';
+import { h, clear, toast, modal, choose, attachPanZoom } from '../dom.ts';
+import { downloadBytes, pickFile } from '../platform.ts';
 
 const ZOOM_STEPS = [1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24, 32];
 const NEW_FILE = -2, IMPORT_FILE = -3; // gallery picks besides a file number (-1: default)
@@ -944,7 +945,7 @@ export class GfxTab implements WsPanel {
     const cols = this.colors();
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const v = this.get(x, y); px[y * W + x] = v ? cols[v] : 0; }
     ctx.putImageData(img, 0, 0);
-    c.toBlob(async (b) => { if (b) { const name = `${f.num >= ANIM_FILE ? lmAnimName(f.num) : gfxName(f.num)}.png`; downloadBytes(name, new Uint8Array(await b.arrayBuffer()), 'image/png'); toast(`${name} exported`); } }, 'image/png');
+    c.toBlob(async (b) => { if (b) { const name = `${f.num >= ANIM_FILE ? lmAnimName(f.num) : gfxName(f.num)}.png`; if (await downloadBytes(name, new Uint8Array(await b.arrayBuffer()), 'image/png')) toast(`${name} exported`); } }, 'image/png');
   }
 
   // writes an imported file as one undoable ROM edit; into: the package that gets the new number

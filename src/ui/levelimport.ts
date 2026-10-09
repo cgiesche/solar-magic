@@ -4,7 +4,8 @@
 // in the level editor (Level → Import LM level file …) and is never a package. Undoable like level edits.
 
 import type { App } from './app.ts';
-import { h, modal, clear, toast, hexInput, pickFile } from './dom.ts';
+import { h, modal, clear, toast, hexInput } from './dom.ts';
+import { pickFile } from './platform.ts';
 import { hex } from '../core/names.ts';
 import { planBgPack, importLevelFile, isLevelImport, levelColors, type BgPackResult } from '../core/bgpack.ts';
 import { extGfxAvailable } from '../core/patches.ts';

@@ -5,7 +5,8 @@
 // at once as one undoable ROM edit (ADR 0001); nothing is staged.
 
 import type { App } from './app.ts';
-import { h, clear, toast, downloadBytes, type Child } from './dom.ts';
+import { h, clear, toast, type Child } from './dom.ts';
+import { downloadBytes } from './platform.ts';
 import { listPackages, type Package } from '../core/pkgreg.ts';
 import type { ApplyResult } from '../core/patchapply.ts';
 import { definesButton, editButton } from './defineedit.ts';

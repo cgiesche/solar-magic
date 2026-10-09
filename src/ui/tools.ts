@@ -1,7 +1,8 @@
 // Misc. dialogs and actions: secondary entrances, ROM info/expansion, level save as/file/screens.
 
 import type { App } from './app.ts';
-import { h, modal, clear, hexInput, select, toast, downloadBytes, pickFile, choose, emptyState } from './dom.ts';
+import { h, modal, clear, hexInput, select, toast, choose, emptyState } from './dom.ts';
+import { downloadBytes, pickFile } from './platform.ts';
 import { isBlank } from '../core/exitgraph.ts';
 import { readSecondaryEntrance, type SecondaryEntrance, loadLevel, cloneLevel, insertScreen, deleteScreen, clearLevel, spriteId } from '../core/level.ts';
 import { exportLevelFile, importLevelFile, LEVEL_FILE_EXT } from '../core/levelfile.ts';
