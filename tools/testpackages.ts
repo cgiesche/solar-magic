@@ -31,6 +31,7 @@ await loadApu();
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
 const enc = new TextEncoder();
+const dec = new TextDecoder();
 const fixture = (f: string) => new Uint8Array(readFileSync('test/fixtures/' + f));
 const zip = (files: Record<string, string | Uint8Array>) => zipSync(Object.fromEntries(Object.entries(files).map(([k, v]) => [k, typeof v === 'string' ? enc.encode(v) : v])));
 const kinds = (p: UploadPreview) => (p.status === 'ready' ? p.parts.map((x) => x.kind).sort().join(' ') : p.status);
@@ -39,15 +40,20 @@ const ready = (p: UploadPreview): ReadyPreview => { if (p.status !== 'ready') th
 // ---------- the preview ----------
 
 const shatter = inspectUpload('Aftertouch Shatter.zip', fixture('Aftertouch Shatter.zip'));
-check(kinds(shatter) === 'block sprite', `Aftertouch Shatter: a bounce sprite and the block spawning it (${kinds(shatter)})`);
+check(kinds(shatter) === 'block graphics sprite', `Aftertouch Shatter: a bounce sprite, the block spawning it and its graphics (${kinds(shatter)})`);
 const bill = inspectUpload('BrutalBill.zip', fixture('BrutalBill.zip'));
 check(kinds(bill) === 'sprite sprite', `Brutal Bill: sprite and shooter, one package (${kinds(bill)})`);
 const rock = inspectUpload('RockClimbBlocksUpdate.zip', fixture('RockClimbBlocksUpdate.zip'));
-check(kinds(rock) === 'block block graphics', `Rock Climb Blocks: two blocks and their ExGFX (${kinds(rock)})`);
-check(rock.status === 'ready' && partsSummary(rock.parts) === '2 blocks, 1 graphics file', 'summary ' + (rock.status === 'ready' ? partsSummary(rock.parts) : ''));
+check(kinds(rock) === 'block block graphics graphics', `Rock Climb Blocks: two blocks, their Map16 tiles and ExGFX (${kinds(rock)})`);
+check(rock.status === 'ready' && partsSummary(rock.parts) === '2 blocks, 2 graphics files', 'summary ' + (rock.status === 'ready' ? partsSummary(rock.parts) : ''));
 const retry = inspectUpload('retry-system_v2.2.0.zip', fixture('retry-system_v2.2.0.zip'));
 check(retry.status === 'manual' && retry.suggestion.root === 'src/', `Retry System: assigned by hand, with the suggestion (${retry.status})`);
 for (const f of ['ghostbustersghosttrapjavamanhattanBG.zip', 'sonicmaniasszact1.zip']) check(inspectUpload(f, fixture(f)).status === 'level-import', `${f}: a level import`);
+// On-Off Blocks (MarioFanGamer): a GPS block, its PIXI bounce sprite, Map16 tiles, ExGFX, a palette and
+// a sample level – a package, each file in its part, though it holds a Lunar Magic level
+const onoff = inspectUpload('On-Off Block.zip', fixture('On-Off Block.zip'));
+check(kinds(onoff) === 'block graphics graphics graphics graphics sprite', `On-Off Blocks: block, sprite and graphics, not a level import (${kinds(onoff)})`);
+check(onoff.status === 'ready' && onoff.unclaimed.join() === 'On-Off Blocks - Readme.txt' && onoff.graphics.mwl === 'SampleLevel.mwl', `On-Off Blocks: only the readme not installed, the .mwl its sample level (${onoff.status === 'ready' ? onoff.unclaimed.join() : ''})`);
 
 const patchAsm = 'org $00A1DA\n  db $EA\n';
 const uberAsm = 'load:\n  LDA #$11 : STA $7FB001\n  RTL\n';
@@ -72,6 +78,10 @@ const gpsFolder = inspectUpload('MyGPS.zip', zip({ 'list.txt': '200 solid.asm\n2
 check(kinds(gpsFolder) === 'block block', `GPS folder (${kinds(gpsFolder)})`);
 const pixiFolder = inspectUpload('MyPixi.zip', zip({ 'list.txt': '00 BrutalBill.json\n', ...Object.fromEntries(Object.entries(billFiles).filter(([k]) => k.startsWith('sprites/'))) }));
 check(kinds(pixiFolder) === 'sprite', `PIXI folder (${kinds(pixiFolder)})`);
+
+// graphics without code and without a .mwl: a package of graphics parts
+const tilesOnly = inspectUpload('Tiles.zip', zip({ 'Tiles.map16': unzipSync(fixture('RockClimbBlocksUpdate.zip'))['Tiles.map16'], 'ExGFX80_BG2.bin': new Uint8Array(0x1000) }));
+check(kinds(tilesOnly) === 'graphics graphics', `graphics only: a package (${kinds(tilesOnly)})`);
 
 const junk = inspectUpload('stuff.zip', zip({ 'readme.txt': 'hello', 'pic.png': new Uint8Array(30) }));
 check(junk.status === 'failed' && /2 files/.test(junk.reason) && /\.png/.test(junk.reason) && /no \.asm/.test(junk.reason), `unrecognizable: says what was found and what is missing (${junk.status === 'failed' ? junk.reason : junk.status})`);
@@ -153,9 +163,18 @@ const rb = await install(bill);
 check(rb.ok && loadPixiProject(rom)!.list.length === 2, 'Brutal Bill: sprite and shooter in the PIXI project');
 const rr = await install(rock, { level: null }); // with a level, its graphics slots would be set (they stay)
 check(rr.ok && loadBlockProject(rom)!.list.length === 2, 'Rock Climb Blocks: two blocks on Map16 tiles');
-const rs = await install(shatter);
+const rs = await install(shatter, { level: null }); // with a level, the VRAM patch for its BG3 graphics (it stays)
 check(rs.ok && loadPixiProject(rom)!.list.some((e) => e.kind === 'bounce'), 'Aftertouch Shatter: its bounce sprite');
-for (const r of [rs, rr, rb, r1]) await removePackage(rom, r.pkg!.id, opts.blank);
+// On-Off Blocks: the block on both tiles of its .map16, its bounce sprite's number in the block
+const ro = await install(onoff, { level: null });
+{
+  const sprite = loadPixiProject(rom)?.list.find((e) => e.kind === 'bounce' && /on_off_block/.test(e.file));
+  const block = dec.decode(loadBlockProject(rom)?.files.get('blocks/on_off_block.asm'));
+  const num = /^!bounce_num\s*=\s*\$([0-9A-F]+)/im.exec(block)?.[1];
+  check(ro.ok && ro.pkg!.blocks.tiles.length === 2 && ro.pkg!.map16!.length === 2 && ro.pkg!.gfx.length === 1, `On-Off Blocks: block on two Map16 tiles, ExGFX (${ro.prints.join(' | ')})`);
+  check(!!sprite && num !== undefined && parseInt(num, 16) === sprite.num, `On-Off Blocks: the block spawns bounce sprite ${sprite?.num.toString(16)} (!bounce_num = $${num})`);
+}
+for (const r of [ro, rs, rr, rb, r1]) await removePackage(rom, r.pkg!.id, opts.blank);
 sameRom('all removed');
 
 // tool folders
@@ -165,6 +184,14 @@ for (const [p, what] of [[uberFolder, 'UberASM Tool folder'], [gpsFolder, 'GPS f
   await removePackage(rom, r.pkg!.id, opts.blank);
 }
 sameRom('tool folders removed');
+
+// graphics only: Map16 tiles and ExGFX recorded, removed with the package
+{
+  const r = await install(tilesOnly, { level: null });
+  check(r.ok && r.pkg!.map16!.length === 2 && r.pkg!.gfx.length === 1, 'graphics only: Map16 tiles and ExGFX installed as one package');
+  await removePackage(rom, r.pkg!.id, opts.blank);
+}
+sameRom('graphics removed');
 
 // a song: inserted with AddmusicK, set for the current level
 const rm = await install(inspectUpload('Square Test.zip', testSongZip()));

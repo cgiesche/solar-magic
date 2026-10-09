@@ -14,17 +14,17 @@ import type { ApplyResult } from './patchapply.ts';
 import { applyPatch } from './patchapply.ts';
 import type { PartKind } from './parts.ts';
 import { PART_LABEL } from './parts.ts';
-import { uploadFiles, uploadFromFiles, detectKind, uploadSource, effectiveDefines, packUpload, type Upload } from './patchpkg.ts';
-import { suggestMapping, withIncludes, placed, suggestCalls, packageDocs, type PkgSuggestion, type PkgRules } from './pkgmap.ts';
-import { isLevelImport } from './bgpack.ts';
+import { uploadFiles, uploadFromFiles, uploadSource, effectiveDefines, packUpload, type Upload } from './patchpkg.ts';
+import { suggestMapping, placed, suggestCalls, packageDocs, type PkgSuggestion, type PkgRules } from './pkgmap.ts';
 import { isSongText, songsFromFiles, loadMusicProject, emptyMusicProject, addSongs, nextFreeSong, folders as musicFolders, saveMusicProject, hasAmk, musicEntry } from './music.ts';
-import { pixiParts, planPixiUpload, applyPixiUpload } from './pixipkg.ts';
-import { planBlockPack, applyBlockPack } from './blockpack.ts';
+import { pixiParts, planPixiUpload, applyPixiUpload, linkedDefines, type PixiPlan } from './pixipkg.ts';
+import { parseCfg, parseJsonCfg } from './pixi.ts';
+import { detectBlocks, detectGraphics, graphicsFiles, includedFiles, planPackage, applyBlocks, applyGraphics, applyLevelSetup, routinesCalled, type DetectedBlock, type DetectedGraphics, type PackagePlan } from './pkgplan.ts';
 import { loadProject, saveProject, emptyProject, projectFromFiles, type UberProject } from './uberproject.ts';
-import { loadBlockProject, saveBlockProject, type BlockProject } from './blocks.ts';
 import { installEditorPatch, extGfxAvailable, setLevelMusic } from './patches.ts';
+import { map16Targets } from './map16file.ts';
 import { installVramPatch } from './vrampatch.ts';
-import { installMap16Ext, map16Ext, setExtTileWords, EXT_FIRST, EXT_TILES } from './map16ext.ts';
+import { installMap16Ext, map16Ext } from './map16ext.ts';
 import { ALL, type UberContext } from './uberasm.ts';
 import { recordPackageChangeAsync, emptyParts, savePackage, listPackages, packageArchive, uninstallPackage, type Package, type Claim } from './pkgreg.ts';
 import { listPatches } from './patchreg.ts';
@@ -40,14 +40,24 @@ type Step =
   | { kind: 'patch' }
   | { kind: 'uberasm'; upload: Upload; file: string; ctx: UberContext }
   | { kind: 'uber-folder'; project: UberProject }
-  | { kind: 'block'; upload: Upload; file: string; acts?: number }
-  | { kind: 'blockpack'; upload: Upload; list: string }
   | { kind: 'pixi'; upload: Upload }
+  | { kind: 'blocks'; upload: Upload }
+  | { kind: 'graphics' }
   | { kind: 'music' }
   | { kind: 'mapped'; assignment: ManualAssignment };
 
 interface PreviewBase { name: string; fileName: string; files: Map<string, Uint8Array> }
-export interface ReadyPreview extends PreviewBase { status: 'ready'; parts: PreviewPart[]; patch: PatchChoice | null; steps: Step[] }
+export interface ReadyPreview extends PreviewBase {
+  status: 'ready';
+  parts: PreviewPart[];
+  patch: PatchChoice | null;
+  steps: Step[];
+  blocks: DetectedBlock[]; // the block parts (tiles from list.txt)
+  graphics: DetectedGraphics; // the graphics parts and the sample level
+  sprites: string[]; // the sprite parts' files
+  unclaimed: string[]; // files no part takes: not installed
+  docs: string[]; // the package's manuals (readme)
+}
 // tool folders next to folders they include (Retry System): assigned by hand, starting from the suggestion
 export interface ManualPreview extends PreviewBase { status: 'manual'; suggestion: PkgSuggestion }
 export type UploadPreview =
@@ -79,101 +89,130 @@ export function inspectUpload(fileName: string, data: Uint8Array): UploadPreview
   return inspectFiles(fileName, files);
 }
 
-// what a package (its files, paths relative to its root) is
+// what a package (its files, paths relative to its root) is: each file belongs to one part, decided by
+// the file alone (ADR 0002)
 export function inspectFiles(fileName: string, files: Map<string, Uint8Array>): UploadPreview {
   const name = nameOf(fileName);
   const head = { name, fileName, files };
   if (!files.size) return { ...head, status: 'failed', reason: 'The upload is empty.' };
-  if (isLevelImport(files)) return { ...head, status: 'level-import' };
+  const paths = [...files.keys()];
+  const asm = paths.filter((p) => /\.(asm|asar)$/i.test(p));
+  const songs = paths.filter((p) => /\.txt$/i.test(p) && isSongText(dec.decode(files.get(p)!)));
+  const included = includedFiles(files);
+  const graphics = detectGraphics(files, included);
+  // a Lunar Magic level without code or songs: a level import, not a package
+  if (graphics.mwl && !asm.length && !songs.length) return { ...head, status: 'level-import' };
   // UberASM Tool folders whose code includes folders next to them: placed by hand (from the suggestion)
-  const sug = suggestMapping(files);
+  const sug = asm.length ? suggestMapping(files) : null;
   if (sug?.extra.length) return { ...head, status: 'manual', suggestion: sug };
 
   const parts: PreviewPart[] = [];
   const steps: Step[] = [];
-  const paths = [...files.keys()];
-  const asm = paths.filter((p) => /\.(asm|asar)$/i.test(p));
-  const songs = paths.filter((p) => /\.txt$/i.test(p) && isSongText(dec.decode(files.get(p)!)));
+  const claimed = new Set<string>();
+  const docs = packageDocs(files);
+  let upload: Upload | null = null;
+  if (asm.length) {
+    try { upload = uploadFromFiles(fileName, files); } catch (e) {
+      return { ...head, status: 'failed', reason: e instanceof Error ? e.message : String(e) };
+    }
+    // a patch with a manifest is one patch, whatever else it holds
+    if (upload.manifest) {
+      const main = upload.manifest.main;
+      return { ...head, name: upload.name, status: 'ready', parts: [{ kind: 'patch', name: upload.name, file: main }], patch: { upload, main, candidates: [main] }, steps: [{ kind: 'patch' }], blocks: [], graphics: noGraphics(), sprites: [], unclaimed: [], docs };
+    }
+  }
   if (songs.length) {
     steps.push({ kind: 'music' });
-    for (const p of songs) parts.push({ kind: 'music', name: base(p).replace(/\.txt$/i, ''), file: p });
+    for (const p of songs) { parts.push({ kind: 'music', name: base(p).replace(/\.txt$/i, ''), file: p }); claimed.add(p); }
   }
-  if (!asm.length) {
-    if (songs.length) return { ...head, status: 'ready', parts, patch: null, steps };
-    return { ...head, status: 'failed', reason: `Found ${describe(paths)}, but no .asm file (patch, UberASM code, block or sprite), no AddmusicK song (.txt) and no Lunar Magic level (.mwl).` };
-  }
-  let upload: Upload;
-  try { upload = uploadFromFiles(fileName, files); } catch (e) {
-    return { ...head, status: 'failed', reason: e instanceof Error ? e.message : String(e) };
-  }
-  // a patch with a manifest is one patch, whatever else it holds
-  if (upload.manifest) {
-    const main = upload.manifest.main;
-    return { ...head, name: upload.name, status: 'ready', parts: [{ kind: 'patch', name: upload.name, file: main }], patch: { upload, main, candidates: [main] }, steps: [{ kind: 'patch' }] };
-  }
-
-  const claimed = new Set<string>();
-  // an UberASM Tool folder: its list.txt has the sections of UberASM Tool
-  const list = paths.find((p) => /^([^/]+\/)?list\.txt$/i.test(p));
-  if (list && /^\s*(level|gamemode|overworld)\s*:/im.test(dec.decode(files.get(list)!))) {
-    try {
-      const project = projectFromFiles(files);
-      steps.push({ kind: 'uber-folder', project });
-      for (const f of [...project.files.keys()].filter((f) => /^(level|gamemode|overworld)\/[^/]+\.asm$/i.test(f)).sort()) parts.push({ kind: 'uberasm', name: base(f), file: f });
-      for (const p of paths) claimed.add(p);
-    } catch { /* not a tool folder after all */ }
-  }
-  // sprites (PIXI; a PIXI folder too) with the blocks they bring
-  const pixi = claimed.size ? null : pixiParts(upload);
-  if (pixi && pixi.sprites.length) {
-    steps.push({ kind: 'pixi', upload });
-    for (const s of pixi.sprites) parts.push({ kind: 'sprite', name: s.name, file: s.file });
-    for (const b of pixi.blocks) parts.push({ kind: 'block', name: base(b.file), file: b.file });
-    for (const f of [...pixi.sprites.map((s) => s.file), ...pixi.blocks.map((b) => b.file)]) {
-      const dir = f.slice(0, f.lastIndexOf('/') + 1);
-      for (const p of paths) if (p.startsWith(dir) && (dir || p === f)) claimed.add(p);
-    }
-    for (const r of pixi.routines) claimed.add(r);
-    for (const p of asm) if (!/\.(json|cfg)$/i.test(p) && /print\s+"(INIT|MAIN) ?"\s*,\s*pc/i.test(dec.decode(files.get(p)!))) claimed.add(p);
-  }
-  // a block package or GPS folder: list.txt with the blocks (often a .map16 file and ExGFX)
-  const blockList = claimed.size ? undefined : paths.find((p) => /(^|\/)list\.txt$/i.test(p) && /^[0-9a-f]{3,4}(:[0-9a-f]{3})?\s+\S+\.asm/im.test(dec.decode(files.get(p)!)));
-  if (blockList) {
-    const plan = planBlockPack(upload, blockList);
-    if (plan.blocks.length) {
-      steps.push({ kind: 'blockpack', upload, list: blockList });
-      for (const b of plan.blocks) parts.push({ kind: 'block', name: base(b.file), file: b.file });
-      for (const g of plan.gfx) parts.push({ kind: 'graphics', name: base(g.file), file: g.file });
-      for (const f of [blockList, ...plan.blocks.map((b) => b.file), ...plan.gfx.map((g) => g.file), ...(plan.map16 ? [plan.map16.file] : [])]) claimed.add(f);
-    }
-  }
-  // the other .asm files that nothing includes: UberASM code, blocks, a patch. Shared code (library/,
-  // routines/, other/) goes with the part using it.
-  const included = new Set<string>();
-  for (const p of asm) for (const f of withIncludes(files, new Map([[p, files.get(p)!]])).keys()) if (f !== p) included.add(f);
+  const gfxFiles = graphicsFiles(graphics);
+  const sprites: string[] = [];
+  let blocks: DetectedBlock[] = [];
   const candidates: string[] = [];
-  for (const p of upload.asmFiles) {
-    if (claimed.has(p) || included.has(p) || /(^|\/)(library|routines|other)\//i.test(p)) continue;
-    const ctx = /(^|\/)(level|gamemode|overworld)\/[^/]+$/i.exec(p)?.[2].toLowerCase() as UberContext | undefined;
-    const kind = ctx ? null : detectKind(upload, p);
-    if (ctx || kind?.kind === 'uberasm') {
-      steps.push({ kind: 'uberasm', upload, file: p, ctx: ctx ?? 'level' });
-      parts.push({ kind: 'uberasm', name: base(p), file: p });
-    } else if (kind?.kind === 'block') {
-      steps.push({ kind: 'block', upload, file: p, acts: kind.acts });
-      parts.push({ kind: 'block', name: base(p), file: p });
-    } else candidates.push(p);
+  if (upload) {
+    // an UberASM Tool folder: its list.txt has the sections of UberASM Tool
+    const list = paths.find((p) => /^([^/]+\/)?list\.txt$/i.test(p));
+    if (list && /^\s*(level|gamemode|overworld)\s*:/im.test(dec.decode(files.get(list)!))) {
+      try {
+        const project = projectFromFiles(files);
+        steps.push({ kind: 'uber-folder', project });
+        for (const f of [...project.files.keys()].filter((f) => /^(level|gamemode|overworld)\/[^/]+\.asm$/i.test(f)).sort()) parts.push({ kind: 'uberasm', name: base(f), file: f });
+        const root = list.slice(0, list.length - 'list.txt'.length);
+        for (const p of paths) if (p.startsWith(root) && !gfxFiles.includes(p)) claimed.add(p);
+      } catch { /* not a tool folder after all */ }
+    }
+    // blocks: named in a GPS list.txt or found by their content
+    const found = detectBlocks(files, claimed);
+    blocks = found.blocks;
+    if (found.list) claimed.add(found.list);
+    // sprites (PIXI): cfg/json with their .asm, misc sprites by their folder
+    const pixi = pixiParts(upload);
+    for (const s of pixi.sprites) {
+      if (claimed.has(s.file) || blocks.some((b) => b.file === s.file)) continue;
+      sprites.push(s.file);
+      parts.push({ kind: 'sprite', name: s.name, file: s.file });
+      claimed.add(s.file);
+      // its folder (cfg/json next to it, files it includes) – not what belongs to other parts
+      const dir = s.file.slice(0, s.file.lastIndexOf('/') + 1);
+      if (dir) for (const p of paths) if (p.startsWith(dir) && !gfxFiles.includes(p) && !blocks.some((b) => b.file === p) && !docs.includes(p)) claimed.add(p);
+      const cfg = /\.(json|cfg)$/i.test(s.file) ? cfgAsm(upload, s.file) : null;
+      if (cfg) claimed.add(cfg);
+    }
+    if (sprites.length) steps.push({ kind: 'pixi', upload });
+    for (const b of blocks) {
+      claimed.add(b.file);
+      if (!parts.some((p) => p.kind === 'block' && p.file === b.file)) parts.push({ kind: 'block', name: base(b.file), file: b.file });
+    }
+    if (blocks.length) steps.push({ kind: 'blocks', upload });
+    // the other .asm files that nothing includes: UberASM code or a patch. Shared code (library/,
+    // routines/, other/) goes with the part using it.
+    for (const p of upload.asmFiles) {
+      if (claimed.has(p) || included.has(p) || /(^|\/)(library|routines|other)\//i.test(p)) continue;
+      claimed.add(p);
+      const ctx = /(^|\/)(level|gamemode|overworld)\/[^/]+$/i.exec(p)?.[2].toLowerCase() as UberContext | undefined;
+      if (ctx || isUberText(dec.decode(files.get(p)!))) {
+        steps.push({ kind: 'uberasm', upload, file: p, ctx: ctx ?? 'level' });
+        parts.push({ kind: 'uberasm', name: base(p), file: p });
+      } else candidates.push(p);
+    }
   }
+  // graphics parts
+  for (const f of gfxFiles) { parts.push({ kind: 'graphics', name: base(f), file: f }); claimed.add(f); }
+  if (gfxFiles.length) steps.push({ kind: 'graphics' });
   // one patch at most: the main file of the upload, or – when it has no other parts – one to choose
   let patch: PatchChoice | null = null;
-  const main = upload.main && candidates.includes(upload.main) ? upload.main : candidates.length === 1 ? candidates[0] : null;
-  if (main || (candidates.length && !parts.length)) {
+  const main = upload?.main && candidates.includes(upload.main) ? upload.main : candidates.length === 1 ? candidates[0] : null;
+  if (upload && (main || (candidates.length && !parts.length))) {
     patch = { upload, main: main ?? candidates[0], candidates: main ? [main] : candidates };
     steps.unshift({ kind: 'patch' });
     parts.unshift({ kind: 'patch', name: upload.name, file: patch.main });
   }
-  if (!parts.length) return { ...head, status: 'failed', reason: `Found ${describe(paths)}, but nothing to install: the .asm files are only included by each other.` };
-  return { ...head, status: 'ready', parts, patch, steps };
+  for (const c of candidates) if (c !== patch?.main && !patch?.candidates.includes(c)) claimed.delete(c);
+  if (graphics.mwl) claimed.add(graphics.mwl);
+  if (!parts.length) {
+    if (!asm.length) return { ...head, status: 'failed', reason: `Found ${describe(paths)}, but no .asm file (patch, UberASM code, block or sprite), no AddmusicK song (.txt), no graphics and no Lunar Magic level (.mwl).` };
+    return { ...head, status: 'failed', reason: `Found ${describe(paths)}, but nothing to install: the .asm files are only included by each other.` };
+  }
+  // shared code goes with the parts using it; what is left is not installed
+  const unclaimed = paths.filter((p) => !claimed.has(p) && !included.has(p) && !(upload && /(^|\/)(library|routines|other)\/.*\.(asm|asar)$/i.test(p))).sort();
+  return { ...head, status: 'ready', parts, patch, steps, blocks, graphics, sprites, unclaimed, docs };
+}
+
+const noGraphics = (): DetectedGraphics => ({ map16: [], exgfx: [], pal: [], palmask: [], mwl: null });
+
+// the .asm a sprite's cfg/json names
+function cfgAsm(upload: Upload, cfg: string): string | null {
+  try {
+    const t = dec.decode(upload.files.get(cfg)!);
+    const c = /\.json$/i.test(cfg) ? parseJsonCfg(t, cfg) : parseCfg(t, cfg);
+    return c.asm && upload.files.has(c.asm) ? c.asm : null;
+  } catch { return null; }
+}
+
+// UberASM code: entry labels and no hijack/free space of its own
+function isUberText(src: string): boolean {
+  const st = src.split(/\r?\n/).map((l) => l.replace(/;.*$/, '').trim()).filter(Boolean);
+  return st.some((l) => /^(init|main|load|end|nmi)\s*:/i.test(l)) && !st.some((l) => /^(org|freecode|freedata|autoclean|pushpc|lorom|sa1rom|hirom)\b/i.test(l));
 }
 
 // "3 files (2 .txt, 1 .png)"
@@ -203,8 +242,19 @@ export interface InstallOptions {
   tileWords(tile: number): number[]; // the words of a Map16 tile, for the graphics of new block tiles (from their acts like)
   patch?: { main?: string; values?: Record<string, string> }; // the patch part's main file and settings
   assignment?: ManualAssignment; // a package assigned by hand (default: the suggestion)
+  plan?: PackagePlan; // where blocks, Map16 tiles and ExGFX go, with their links (default: planUpload's)
+  setup?: boolean; // the level setup for `level`: the package's ExGFX in its slots, its colors (default: on)
+  cgram?: Uint8Array; // the colors of `level` now (levelColors), base of its own palette for the setup
 }
 export interface InstallResult extends ApplyResult { pkg: Package | null }
+
+// where the package's blocks, Map16 tiles and ExGFX would go in this ROM, and how they link up
+export function planUpload(rom: Rom, preview: ReadyPreview, blank: number[]): PackagePlan {
+  return planPackage(rom, { files: preview.files, blocks: preview.blocks, graphics: preview.graphics }, blank);
+}
+
+// what the steps share: the plan, the sprites' numbers
+interface InstallContext { plan: PackagePlan; pixi: PixiPlan | null }
 
 const failed = (errors: string[], warnings: string[] = []): InstallResult => ({ ok: false, errors, warnings, prints: [], pkg: null });
 
@@ -241,20 +291,31 @@ function placeFiles(preview: ReadyPreview, upload: Upload, main: string, mainTex
 export async function installPackage(rom: Rom, preview: ReadyPreview | ManualPreview, opt: InstallOptions): Promise<InstallResult> {
   if (preview.status === 'manual') {
     const a = opt.assignment ?? defaultAssignment(preview, opt.level ?? 0x105);
-    const ready: ReadyPreview = { ...preview, status: 'ready', parts: [], patch: null, steps: [{ kind: 'mapped', assignment: a }] };
+    const ready: ReadyPreview = { ...preview, status: 'ready', parts: [], patch: null, steps: [{ kind: 'mapped', assignment: a }], blocks: [], graphics: { map16: [], exgfx: [], pal: [], palmask: [], mwl: null }, sprites: [], unclaimed: [], docs: [] };
     return installPackage(rom, ready, opt);
   }
   const before = rom.snapshot();
   const warnings: string[] = [];
   const prints: string[] = [];
   try {
+    const upload = preview.steps.find((s): s is Extract<Step, { upload: Upload }> => 'upload' in s)?.upload;
+    const ctx: InstallContext = {
+      plan: opt.plan ?? planUpload(rom, preview, opt.blank),
+      pixi: preview.sprites.length && upload ? planPixiUpload(rom, upload) : null,
+    };
+    if (ctx.pixi) ctx.pixi.sprites = ctx.pixi.sprites.filter((s) => preview.sprites.includes(s.file));
     const archive = zipSync(Object.fromEntries(preview.files), { level: 9 });
     const { result, pkg } = await recordPackageChangeAsync(rom, { name: preview.name, fileName: preview.fileName, archive }, async (claim) => {
       for (const step of preview.steps) {
-        const r = await installStep(rom, preview, step, opt, claim);
+        const r = await installStep(rom, preview, step, opt, ctx, claim);
         warnings.push(...r.warnings);
         prints.push(...r.prints);
         if (!r.ok) return r;
+      }
+      if (opt.level !== null && opt.setup !== false && (ctx.plan.gfx.some((g) => g.slot) || ctx.plan.palettes.length)) {
+        const r = levelSetup(rom, opt.level, ctx.plan, opt.cgram ?? null);
+        warnings.push(...r.warnings);
+        prints.push(...r.prints);
       }
       const done: ApplyResult = { ok: true, errors: [], warnings: [], prints: [] };
       return done;
@@ -267,7 +328,18 @@ export async function installPackage(rom: Rom, preview: ReadyPreview | ManualPre
   }
 }
 
-async function installStep(rom: Rom, preview: ReadyPreview, step: Step, opt: InstallOptions, claim: Claim): Promise<ApplyResult> {
+// the level setup; BG2/BG3 need the tilemaps moved out of VRAM $2000 first (the VRAM patch)
+function levelSetup(rom: Rom, level: number, plan: PackagePlan, cgram: Uint8Array | null): { warnings: string[]; prints: string[] } {
+  const warnings: string[] = [];
+  if (plan.gfx.some((g) => g.slot === 'BG2' || g.slot === 'BG3') && !extGfxAvailable(rom)) {
+    const v = installVramPatch(rom);
+    if (!v.ok) warnings.push(`BG2/BG3 graphics not loaded in the level (${v.errors.join(' ')}); use the level header's graphics bypass.`);
+  }
+  const r = applyLevelSetup(rom, level, plan, cgram);
+  return { warnings: [...warnings, ...r.warnings], prints: r.prints };
+}
+
+async function installStep(rom: Rom, preview: ReadyPreview, step: Step, opt: InstallOptions, ctx: InstallContext, claim: Claim): Promise<ApplyResult> {
   const ok: ApplyResult = { ok: true, errors: [], warnings: [], prints: [] };
   switch (step.kind) {
     case 'patch': {
@@ -304,33 +376,18 @@ async function installStep(rom: Rom, preview: ReadyPreview, step: Step, opt: Ins
       for (const k of ['global', 'statusbar', 'macrolib'] as const) proj.list[k] ??= step.project.list[k];
       return saveProject(rom, proj);
     }
-    case 'block': {
-      const proj: BlockProject = loadBlockProject(rom) ?? { files: new Map(), list: [] };
-      const used = new Set(proj.list.map((b) => b.tile));
-      let tile = EXT_FIRST;
-      while (used.has(tile) && tile < EXT_TILES - 1) tile++;
-      const acts = step.acts ?? 0x130;
-      const text = uploadSource(step.upload, step.file, {}).files.get(step.file) as string;
-      for (const [f, c] of placeFiles(preview, step.upload, step.file, text, 'blocks/')) { proj.files.set(f, c); claim('blocks', f); }
-      proj.list.push({ tile, file: placeOf(step.file, 'blocks/'), acts });
-      const r = saveBlockProject(rom, proj, opt.blank);
-      if (r.ok && tile >= EXT_FIRST) setExtTileWords(rom, tile, opt.tileWords(acts), opt.blank);
-      return r;
+    case 'pixi': {
+      const others = new Set(preview.parts.filter((p) => p.kind !== 'sprite').map((p) => p.file));
+      const plan = { ...ctx.pixi!, routines: partRoutines(preview, step.upload, 'sprite') };
+      return applyPixiUpload(rom, step.upload, plan, others);
     }
-    case 'blockpack': {
-      const plan = planBlockPack(step.upload, step.list);
-      let level = opt.level;
-      const warnings: string[] = [];
-      // BG2/BG3 need the tilemaps moved out of VRAM $2000 first; without, the graphics are not loaded in the level
-      if (level !== null && plan.gfx.some((g) => g.slot === 'BG2' || g.slot === 'BG3') && !extGfxAvailable(rom)) {
-        const v = installVramPatch(rom);
-        if (!v.ok) { level = null; warnings.push(`Graphics not loaded in the level (${v.errors.join(' ')}); use the level header's graphics bypass.`); }
-      }
-      const r = applyBlockPack(rom, step.upload, plan, { blank: opt.blank, level });
-      return { ...r, warnings: [...warnings, ...r.warnings], prints: [...r.prints, ...r.notes] };
+    case 'blocks': {
+      const defines = ctx.pixi ? linkedDefines(ctx.pixi) : new Map<string, Record<string, string>>();
+      const drawn = new Set(ctx.plan.map16 ? map16Targets(ctx.plan.map16.data, ctx.plan.map16.at) : []);
+      return applyBlocks(rom, step.upload, ctx.plan.blocks, defines, partRoutines(preview, step.upload, 'block'), opt.blank, opt.tileWords, drawn, (f) => claim('blocks', f));
     }
-    case 'pixi':
-      return applyPixiUpload(rom, step.upload, planPixiUpload(rom, step.upload), opt.blank, opt.tileWords);
+    case 'graphics':
+      return applyGraphics(rom, preview.files, ctx.plan, opt.blank);
     case 'mapped': {
       const place = placed(preview.files.keys(), step.assignment.rules);
       if (!place.size) return { ...ok, ok: false, errors: ['Nothing selected – no file of the package is assigned to a folder.'] };
@@ -356,6 +413,16 @@ async function installStep(rom: Rom, preview: ReadyPreview, step: Step, opt: Ins
       return { ...ok, warnings: [...r.warnings, ...sf.missing.map((m) => `Missing sample: ${m}`)] };
     }
   }
+}
+
+// the routines (routines/ folders) going with the sprites or the blocks: those they call; ones nobody
+// calls go with both
+function partRoutines(preview: ReadyPreview, upload: Upload, kind: 'sprite' | 'block'): string[] {
+  const all = [...upload.files.keys()].filter((f) => /(^|\/)routines\/[^/]+\.asm$/i.test(f));
+  const files = (k: string) => preview.parts.filter((p) => p.kind === k).map((p) => p.file);
+  const mine = routinesCalled(upload, all, files(kind));
+  const other = routinesCalled(upload, all, files(kind === 'sprite' ? 'block' : 'sprite'));
+  return all.filter((r) => mine.includes(r) || !other.includes(r));
 }
 
 // ---------- removing ----------

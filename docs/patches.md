@@ -83,14 +83,15 @@ the ROM stays unchanged; Ctrl+Z brings back a removed package.
 any other package, with the settings of their patch, and can be removed the same way. The
 editor's VRAM patch (BG2/BG3) is not third-party content and is listed on its own as *Editor patch*. Whatever in the
 projects belongs to no package (added earlier or by hand) is listed at the bottom of the list with a link to the tab.
-Lunar Magic level files (`.mwl`) are level imports and do not become a package.
+A Lunar Magic level file (`.mwl`) without code is a level import and does not become a package; in a package with code it is the package's sample level.
 
 ## Uploading a package: preview and install
 
 An **upload** is what you put in for a package: a single file (`.asm`, an AddmusicK song `.txt`)
 or a `.zip` – a download from SMWCentral as it is, or a whole folder of UberASM Tool, GPS
-or PIXI. After uploading, the editor (`src/core/packages.ts`) detects which **parts** it
-contains and shows them in a **preview** ("2 sprites, 1 UberASM file, 1 song"), each part with its
+or PIXI. After uploading, the editor (`src/core/packages.ts`, `src/core/pkgplan.ts`) detects which **parts** it
+contains – each file on its own, by its folder, then its content, then its extension, never by which other files are
+in the upload (ADR 0002) – and shows them in a **preview** ("2 sprites, 1 UberASM file, 1 song"), each part with its
 kind. Nothing has been written yet: *Cancel* leaves the ROM unchanged. *Install* applies all parts at once
 and creates **one** package, which is then selected in the list; Ctrl+Z reverts the whole installation in
 one step. If a part fails, the ROM stays as it was.
@@ -98,11 +99,12 @@ one step. If a part fails, the ROM stays as it was.
 | Recognized by | Part | What *Install* does |
 |---|---|---|
 | `.txt` with `#0` and `#amk`/`#samples` (MML), plus `.brr` | Song (AddmusicK) | next free number, plays in the current level; AddmusicK inserts the music (tab *Music*) |
-| `print "INIT ",pc` / `print "MAIN ",pc`, `.json`/`.cfg` | Custom sprite (PIXI) | next free numbers; blocks in the same upload go to the next free Map16 tiles, see [pixi.md](pixi.md) |
-| `list.txt` with blocks, often `.map16` and `ExGFX…bin` (also a GPS folder) | Custom blocks and graphics | everything in one step, graphics in the current level, see [Block packages](#block-packages) |
+| `print "INIT ",pc` / `print "MAIN ",pc`, `.json`/`.cfg` | Custom sprite (PIXI) | next free numbers; defines in other files naming the sprite (a block's `!bounce_num`) get its number, see [pixi.md](pixi.md) |
+| `list.txt` with blocks (also a GPS folder) | Custom blocks | on the tiles of the list, see [Block packages](#block-packages) |
 | `list.txt` with `level:`/`gamemode:`/`overworld:` | UberASM Tool folder | files and assignments are added to the ROM's UberASM project |
 | `init:`/`main:`/… labels without `org`, or a file in `level/`, `gamemode/`, `overworld/` | UberASM code | runs in the current level (from `gamemode/`: game mode 14, from `overworld/`: map 0) |
-| starts with `db $42`/`db $37` | Custom block (GPS) | next free Map16 tile from 200, "acts like" from the description (otherwise 130) |
+| starts with `db $42`/`db $37` | Custom block (GPS) | on the package's Map16 tiles, else the next free Map16 tile from 200; "acts like" from the description, the `.map16` or 130 |
+| `.map16`, `.bin` not included by code (ExGFX), `.pal` + `.palmask` | Graphics | Map16 tiles at the author's position if free, ExGFX under its number if free, otherwise the next free ones; the level setup puts the ExGFX into the current level's slots and the colors into its palette |
 | a `patch.json`, or the remaining `.asm` | Patch | at most one per package; settings in the preview, see below |
 
 An upload can have parts of several kinds (a boss sprite with UberASM code and a song) or many of one kind
@@ -112,8 +114,10 @@ but go with the part that needs them. The assignments can be changed in the tabs
 
 Special cases: an **UberASM Tool folder in a subfolder whose code includes folders next to it**
 (Retry System) is assigned by hand, see [Packages with several parts](#packages-with-several-parts).
-An **`.mwl`** is a level import, not a package, see [Level import](#level-import-lunar-magic). If
-nothing at all is recognized, the preview says what was found and what is missing.
+An **`.mwl`** without code or songs is a level import, not a package, see [Level import](#level-import-lunar-magic);
+with code it is the package's sample level. Graphics without code and without an `.mwl` are a package. Files that
+no part takes (a readme, unknown formats) are listed in the preview as not installed. If nothing at all is
+recognized, the preview says what was found and what is missing.
 
 The preview has *Manual …* if the package contains a readme or an HTML manual. It
 is shown inside the editor, with images and links between the pages; the pages' scripts do not run.
@@ -377,11 +381,15 @@ Many blocks on SMWCentral come as a package, e.g.:
 - `ExGFX80_BG2.bin`: the 8×8 graphics the Map16 tiles refer to, here for the BG2 slot.
 
 Once uploaded, *Install* sets it all up together:
-1. The blocks go onto the tiles from the `list.txt`.
-2. The `.map16` tiles go into the Map16 table starting at the list's first tile, with their
-   "acts like" unless the list specifies one.
-3. The ExGFX file is stored under the number from its file name and put into the current level's
-   slot from the file name (`_BG2`, `_FG1` …). For other levels: graphics section → *Graphics* → slot card → "Swap …".
+1. The blocks go onto the tiles from the `list.txt` – if those are taken, the blocks and the `.map16` tiles move
+   together to the next free place. Without a `list.txt`, a block goes onto the `.map16` tiles (one block: all of
+   them; as many blocks as tiles: one each, in order), otherwise onto the next free tile.
+2. The `.map16` tiles go into the Map16 table starting at the list's first tile (without a list: where the
+   `.map16` was exported from, if free), with their "acts like" unless the list specifies one.
+3. The ExGFX file is stored under the number from its file name (if free, otherwise the next free one) and,
+   with the level setup, put into the current level's slot: from the file name (`_BG2`, `_FG1` …), the sample
+   level's slots, or the one slot the `.map16` tiles draw from. For other levels: graphics section → *Graphics* →
+   slot card → "Swap …".
 
 This also works step by step:
 - *Graphics* → *Import/Export → Import (.bin) …* (4 KB = uncompressed 4bpp, 3 KB = 3bpp, otherwise LZ2-compressed);

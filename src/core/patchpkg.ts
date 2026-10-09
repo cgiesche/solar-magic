@@ -7,7 +7,6 @@
 import { unzipSync, zipSync } from 'fflate';
 import type { PatchSource } from './patchapply.ts';
 import type { RamClaim } from './patchreg.ts';
-import type { PartKind } from './parts.ts';
 
 export type OptionType = 'bool' | 'number' | 'hex' | 'enum' | 'text';
 export interface PatchOption {
@@ -189,38 +188,6 @@ function parseNum(s: string): number | null {
 // What the ASM of an upload is: an ordinary patch, an UberASM resource, a GPS block (`pack`: a block
 // package, its list.txt in `file`) or a PIXI sprite. Many SMWCentral downloads are resources for other
 // tools, which cannot be applied as a patch by themselves.
-export interface DetectedPart { kind: Exclude<PartKind, 'music' | 'graphics'>; file: string; pack?: boolean; acts?: number }
-
-function statements(text: string): string[] {
-  return text.split(/\r?\n/).map((l) => l.replace(/;.*$/, '').trim()).filter(Boolean);
-}
-
-export function detectKind(upload: Upload, main = upload.main ?? upload.asmFiles[0]): DetectedPart {
-  if (upload.manifest) return { kind: 'patch', file: main };
-  const text = (f: string) => new TextDecoder().decode(upload.files.get(f)!);
-  // PIXI sprites: "print "INIT ",pc" / "print "MAIN ",pc", usually with a .json/.cfg next to them
-  for (const f of upload.asmFiles) if (/print\s+"(INIT|MAIN) ?"\s*,\s*pc/i.test(text(f))) return { kind: 'sprite', file: f };
-  const isBlock = (f: string) => {
-    const first = statements(text(f)).find((l) => !/^(print|!|incsrc|incbin|if|endif|else|macro|endmacro|%)/i.test(l) && !/^[A-Za-z_.][A-Za-z0-9_.]*:$/.test(l));
-    return !!first && /^db\s+\$(42|37)\b/i.test(first);
-  };
-  // block package: a GPS list.txt with the blocks (often with a .map16 file and ExGFX)
-  const list = [...upload.files.keys()].find((f) => /(^|\/)list\.txt$/i.test(f));
-  if (list && upload.asmFiles.some(isBlock) && /^[0-9a-f]{3,4}(:[0-9a-f]{3})?\s+\S+\.asm/im.test(new TextDecoder().decode(upload.files.get(list)!))) return { kind: 'block', file: list, pack: true };
-  const src = text(main);
-  const st = statements(src);
-  // GPS block: first real statement is db $42 / db $37
-  if (isBlock(main)) {
-    const al = /act(?:s)?\s*like[:\s]*\$?([0-9a-f]{1,3})\b/i.exec(src);
-    return { kind: 'block', file: main, acts: al ? parseInt(al[1], 16) : undefined };
-  }
-  // UberASM resource: entry labels and no hijack/free space of its own
-  const hasLabel = st.some((l) => /^(init|main|load|end|nmi)\s*:/i.test(l));
-  const hijacks = st.some((l) => /^(org|freecode|freedata|autoclean|pushpc|lorom|sa1rom|hirom)\b/i.test(l));
-  if (hasLabel && !hijacks) return { kind: 'uberasm', file: main };
-  return { kind: 'patch', file: main };
-}
-
 // an upload as kept with a patch it applied (its archive in the editor data), to reapply it later
 export interface StoredUpload { fileName: string; files: [string, Uint8Array][]; main: string }
 const STORED_META = '.smwe-package.json';

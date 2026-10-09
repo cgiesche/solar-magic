@@ -32,7 +32,7 @@ const LAYER3_SLOTS = ['LT3', 'LG1', 'LG2', 'LG3', 'LG4'];
 // the slot an 8x8 tile number (tile word bits 0-9) is loaded from: 80 tiles per slot in VRAM order
 // (BG2/BG3 with the VRAM patch, patches.ts)
 const VRAM_SLOTS = ['FG1', 'FG2', 'BG1', 'FG3', 'BG2', 'BG3'];
-const slotOfWord = (w: number) => VRAM_SLOTS[(w & 0x3ff) >> 7] ?? null;
+export const slotOfWord = (w: number) => VRAM_SLOTS[(w & 0x3ff) >> 7] ?? null;
 
 export interface MwlLevel {
   bg: Uint16Array | null; // BG tiles in the editor's layout (bg.ts); null: layer 2 is not a BG tilemap
@@ -142,6 +142,26 @@ function freeGfx(rom: Rom, taken: Set<number>): number {
 const base = (f: string) => f.split('/').pop()!;
 const stem = (f: string) => f.replace(/\.[^./]*$/, '').toLowerCase();
 
+// palettes: each .pal with the .palmask of the same name (or the only ones there are); what is not
+// taken over goes into `notes`
+export function packPalettes(files: Map<string, Uint8Array>, pals: string[], masks: string[], notes: string[]): PackPalette[] {
+  const palettes: PackPalette[] = [];
+  for (const pf of pals) {
+    const mk = masks.find((m) => stem(m) === stem(pf)) ?? (pals.length === 1 && masks.length === 1 ? masks[0] : undefined);
+    const pd = files.get(pf)!;
+    if (!mk) { notes.push(`${base(pf)} has no .palmask – its colors are not taken over`); continue; }
+    if (pd.length < 768) { notes.push(`${base(pf)} is not a 256-color palette – not taken over`); continue; }
+    const m = files.get(mk)!;
+    const pal = new Uint16Array(256);
+    for (let i = 0; i < 256; i++) pal[i] = (pd[i * 3] >> 3) | ((pd[i * 3 + 1] >> 3) << 5) | ((pd[i * 3 + 2] >> 3) << 10);
+    const colors = Array.from({ length: 256 }, (_, i) => i).filter((i) => i > 0 && m[i]);
+    const back = m.length > 256 && m[256] !== 0;
+    if (colors.length || back) palettes.push({ file: pf, mask: mk, colors, back, pal, layer3: colors.every((i) => i < 32) && !back });
+  }
+  if (!pals.length && masks.length) notes.push('.palmask without a .pal – colors not taken over');
+  return palettes;
+}
+
 // `blank`: tile words of an empty FG Map16 tile
 export function planBgPack(rom: Rom, name: string, files: Map<string, Uint8Array>, blank: number[]): BgPackPlan {
   const keys = [...files.keys()];
@@ -204,22 +224,7 @@ export function planBgPack(rom: Rom, name: string, files: Map<string, Uint8Array
   const layer3 = [...new Set(LAYER3_SLOTS.map((s) => bins.get(level.gfx.get(s) ?? -1)).filter((f): f is string => !!f))];
   const unused = [...bins].filter(([n, f]) => !byNum.has(n) && !layer3.includes(f)).map(([, f]) => base(f));
   if (unused.length) notes.push(`Not used (no graphics slot of the taken-over tiles): ${unused.join(', ')}`);
-  // palettes: each .pal with the .palmask of the same name (or the only ones there are)
-  const pals = keys.filter((f) => /\.pal$/i.test(f)), masks = keys.filter((f) => /\.palmask$/i.test(f));
-  const palettes: PackPalette[] = [];
-  for (const pf of pals) {
-    const mk = masks.find((m) => stem(m) === stem(pf)) ?? (pals.length === 1 && masks.length === 1 ? masks[0] : undefined);
-    const pd = files.get(pf)!;
-    if (!mk) { notes.push(`${base(pf)} has no .palmask – its colors are not taken over`); continue; }
-    if (pd.length < 768) { notes.push(`${base(pf)} is not a 256-color palette – not taken over`); continue; }
-    const m = files.get(mk)!;
-    const pal = new Uint16Array(256);
-    for (let i = 0; i < 256; i++) pal[i] = (pd[i * 3] >> 3) | ((pd[i * 3 + 1] >> 3) << 5) | ((pd[i * 3 + 2] >> 3) << 10);
-    const colors = Array.from({ length: 256 }, (_, i) => i).filter((i) => i > 0 && m[i]);
-    const back = m.length > 256 && m[256] !== 0;
-    if (colors.length || back) palettes.push({ file: pf, mask: mk, colors, back, pal, layer3: colors.every((i) => i < 32) && !back });
-  }
-  if (!pals.length && masks.length) notes.push('.palmask without a .pal – colors not taken over');
+  const palettes = packPalettes(files, keys.filter((f) => /\.pal$/i.test(f)), keys.filter((f) => /\.palmask$/i.test(f)), notes);
   let at = map16 ? map16.from : BG_EXT_FIRST;
   const n = map16 ? map16.data.height * 16 : 0;
   if (n && !freeBgTiles(rom, at, n)) {

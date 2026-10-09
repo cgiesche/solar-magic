@@ -13,6 +13,7 @@ import { loadAsar } from '../src/core/asar.ts';
 import { ROUTINES } from '../src/core/pixiroutines.ts';
 import { uploadFiles, uploadFromFiles } from '../src/core/patchpkg.ts';
 import { planPixiUpload, applyPixiUpload } from '../src/core/pixipkg.ts';
+import { inspectUpload, installPackage } from '../src/core/packages.ts';
 import { savePixiProject, removePixi, loadPixiProject, parsePixiList, parseCfg, parseJsonCfg, type PixiProject } from '../src/core/pixi.ts';
 
 await loadAsar();
@@ -233,7 +234,7 @@ print "MAIN ",pc
   check(desc === 'shooters:c0 sprites:0', `BrutalBill: sprite 00 and shooter C0 (${desc})`);
   const link = plan.links.find((l) => l.define === 'Sprite');
   check(!!link && plan.sprites[link.sprite].kind === 'sprites', 'BrutalBill: the shooter\'s !Sprite names the sprite');
-  const res4 = applyPixiUpload(r4, upload, plan, [0, 0, 0, 0], () => [0, 0, 0, 0]);
+  const res4 = applyPixiUpload(r4, upload, plan);
   if (!res4.ok) console.log(res4.errors.join('\n'));
   check(res4.ok, 'BrutalBill applied');
   const shooter = new TextDecoder().decode(loadPixiProject(r4)?.files.get('shooters/BrutalBillShooter.asm'));
@@ -264,7 +265,7 @@ print "MAIN ",pc
 {
   const r6 = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
   const upload = uploadFromFiles('BrutalBill.zip', uploadFiles('BrutalBill.zip', new Uint8Array(readFileSync('test/fixtures/BrutalBill.zip'))));
-  const res6 = applyPixiUpload(r6, upload, planPixiUpload(r6, upload), [0, 0, 0, 0], () => [0, 0, 0, 0]);
+  const res6 = applyPixiUpload(r6, upload, planPixiUpload(r6, upload));
   const e6 = new LevelEmulator(r6); e6.boot();
   const l6 = loadLevel(r6, 0x105);
   l6.sprites = [{ uid: newUid(), num: 0xc0, x: 12, y: 0x17, extra: 2, bytes: [0x02] }];
@@ -338,17 +339,18 @@ print "MAIN ",pc
   const r8 = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
   installEditorPatch(r8);
   const f = 'test/fixtures/Aftertouch Shatter.zip';
-  const upload = uploadFromFiles('Aftertouch Shatter.zip', uploadFiles('Aftertouch Shatter.zip', new Uint8Array(readFileSync(f))));
-  const plan = planPixiUpload(r8, upload);
-  check(plan.sprites.length === 1 && plan.sprites[0].kind === 'bounce' && plan.blocks.length === 1 && plan.links.some((l) => l.define === 'bounce_sprite'),
+  const preview = inspectUpload('Aftertouch Shatter.zip', new Uint8Array(readFileSync(f)));
+  if (preview.status !== 'ready') throw new Error('Shatter: ' + preview.status);
+  const blank = [0x1f8, 0x1f8, 0x1f8, 0x1f8];
+  const plan = planPixiUpload(r8, preview.steps.find((s) => s.kind === 'pixi')!.upload);
+  check(plan.sprites.length === 1 && plan.sprites[0].kind === 'bounce' && preview.blocks.length === 1 && plan.links.some((l) => l.define === 'bounce_sprite' && preview.blocks[0].file === l.file),
     'Shatter: a bounce sprite, a block and the block\'s !bounce_sprite');
   const e8 = new LevelEmulator(r8); e8.boot();
-  const blank = [0x1f8, 0x1f8, 0x1f8, 0x1f8];
-  const res8 = applyPixiUpload(r8, upload, plan, blank, () => [0x1f8, 0x1f8, 0x1f8, 0x1f8]);
+  const res8 = await installPackage(r8, preview, { level: null, blank, tileWords: () => blank });
   if (!res8.ok) console.log(res8.errors.join('\n'));
   check(res8.ok, 'Shatter applied (GPS routines spawn_bounce_sprite and change_map16 built in)');
   setActsLike(r8, 0x601, 0x130, blank); // the package's cracked tile (!cracked_tile = $0601), solid
-  const tile = plan.blocks[0].tile;
+  const tile = res8.pkg!.blocks.tiles[0];
   const l8 = loadLevel(r8, 0x105);
   l8.objects.push({ uid: newUid(), num: 0, ext: DM16_EXT, x: 0, y: 24, size: 0x08, tile }); // floor of shatter blocks under Mario
   e8.load(0x105, { layer1: serializeLayer1(r8, l8), sprites: serializeSprites(l8.sprites, l8.spriteHeader, isL1Vertical(r8, l8.header.mode), spriteSizes(r8)) });

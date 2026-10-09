@@ -1,17 +1,16 @@
-// Block packages: GPS list.txt + blocks + Lunar Magic .map16 + ExGFX for BG2 in one step; the tile
-// then shows the ExGFX graphics in the level (tiles 200+ from the BG2 slot).
+// Block packages: GPS list.txt + blocks + Lunar Magic .map16 + ExGFX for BG2, installed as one package;
+// the blocks' tiles get the .map16 graphics (moved along when the tiles are taken), and with the level
+// setup the tile shows the ExGFX graphics in the level (tiles 200+ from the BG2 slot).
 import { readFileSync } from 'node:fs';
 import { zipSync } from 'fflate';
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadAsar } from '../src/core/asar.ts';
-import { readUpload, detectKind } from '../src/core/patchpkg.ts';
-import { planBlockPack, applyBlockPack } from '../src/core/blockpack.ts';
+import { inspectUpload, installPackage, planUpload } from '../src/core/packages.ts';
 import { parseMap16File } from '../src/core/map16file.ts';
-import { blockOf, actsLike, extTileWords } from '../src/core/map16ext.ts';
+import { blockOf, actsLike, extTileWords, setExtTileWords } from '../src/core/map16ext.ts';
 import { levelExtGfx, gfxEntry, installEditorPatch } from '../src/core/patches.ts';
 import { map16Source } from '../src/core/render.ts';
-import { installVramPatch } from '../src/core/vrampatch.ts';
 import { loadLevel, serializeLayer1, newUid } from '../src/core/level.ts';
 import { DM16_EXT } from '../src/core/patches.ts';
 
@@ -42,32 +41,46 @@ const zip = zipSync({
   'Pack/readme.txt': enc.encode('read me'),
 });
 
-const upload = readUpload('Pack.zip', zip);
-const info = detectKind(upload);
-check(info.kind === 'block' && !!info.pack, 'detected as block package');
-const m = parseMap16File(upload.files.get('Tiles.map16')!);
+const preview = inspectUpload('Pack.zip', zip);
+if (preview.status !== 'ready') throw new Error('Pack: ' + preview.status);
+check(preview.blocks.length === 2 && preview.blocks.every((b) => b.tile !== undefined) && preview.graphics.map16.length === 1 && preview.graphics.exgfx.length === 1, 'detected: 2 blocks of a list.txt, Map16 tiles and ExGFX');
+check(preview.unclaimed.join() === 'readme.txt' && preview.docs.includes('readme.txt'), `not installed: the readme only (${preview.unclaimed.join(', ')})`);
+const m = parseMap16File(preview.files.get('Tiles.map16')!);
 check(m.width === 2 && m.tiles[1][0] === 0x1a01 && m.acts?.[0] === 0x25, '.map16 parsed');
-const plan = planBlockPack(upload, info.file);
-check(plan.blocks.length === 2 && plan.map16?.at === 0x500 && plan.gfx[0]?.num === 0x80 && plan.gfx[0]?.slot === 'BG2' && !plan.missing.length, 'plan: 2 blocks, Map16 at 500, ExGFX 80 as BG2');
 
-const rom = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
-installEditorPatch(rom);
+const fresh = () => { const r = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc'))); installEditorPatch(r); return r; };
+const rom = fresh();
 const emu = new LevelEmulator(rom); emu.boot();
 const blank = map16Source(rom, emu.load(0x105)).fg(0x25);
-const r = applyBlockPack(rom, upload, plan, { blank, level: 0x105 });
-check(r.ok, 'package applied: ' + [...r.errors, ...r.notes].join(' | '));
-check(!!blockOf(rom, 0x500) && !!blockOf(rom, 0x501) && actsLike(rom, 0x500) === 0x25, 'blocks and acts like on 500/501');
-check(extTileWords(rom, 0x501)?.join() === words[1].join(), 'Map16 graphics of 501');
-// (the BG2 slot needs the VRAM patch; until then the file is only stored)
-check(gfxEntry(rom, 0x80)?.raw === true && levelExtGfx(rom, 0x105)[0] === 0xff && r.notes.some((n) => n.includes('VRAM patch')), 'ExGFX 80 stored, BG2 slot left alone with a note');
-
-// with the VRAM patch the BG2 slot is used: a placed tile 500 shows the package's graphics in the level
+const plan = planUpload(rom, preview, blank);
+check(plan.blocks.map((b) => b.tiles.map((t) => t.toString(16)).join()).join(' ') === '500 501' && plan.map16?.at === 0x500 && plan.gfx[0]?.num === 0x80 && plan.gfx[0]?.slot === 'BG2', 'plan: blocks on 500/501, Map16 at 500, ExGFX 80 for BG2');
+const opts = { blank, tileWords: () => blank };
 {
-  const rom = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
-  installEditorPatch(rom);
-  check(installVramPatch(rom).ok, 'VRAM patch installed');
-  const r = applyBlockPack(rom, upload, plan, { blank, level: 0x105 });
-  check(r.ok && levelExtGfx(rom, 0x105)[0] === 0x80, 'with the VRAM patch: ExGFX 80 set as BG2 of level 105');
+  const r = await installPackage(rom, preview, { ...opts, level: 0x105, setup: false });
+  check(r.ok, 'package installed without level setup: ' + [...r.errors, ...r.prints].join(' | '));
+  check(!!blockOf(rom, 0x500) && !!blockOf(rom, 0x501) && actsLike(rom, 0x500) === 0x25, 'blocks and acts like on 500/501');
+  check(extTileWords(rom, 0x501)?.join() === words[1].join(), 'Map16 graphics of 501');
+  check(gfxEntry(rom, 0x80)?.raw === true && levelExtGfx(rom, 0x105)[0] === 0xff, 'ExGFX 80 stored, BG2 slot of the level left alone');
+}
+
+// the 500 taken: blocks and Map16 tiles move along to the next free run
+{
+  const rom = fresh();
+  const one = inspectUpload('one.asm', enc.encode(block));
+  if (one.status !== 'ready') throw new Error('one.asm: ' + one.status);
+  const taken = await installPackage(rom, one, { ...opts, level: null });
+  setExtTileWords(rom, 0x500, words[0], blank);
+  const p = planUpload(rom, preview, blank);
+  check(taken.ok && p.map16?.at === p.blocks[0].tiles[0] && p.blocks[1].tiles[0] === p.blocks[0].tiles[0] + 1 && p.blocks[0].tiles[0] !== 0x500 && p.notes.some((n) => /taken/.test(n)),
+    `500 taken: blocks and Map16 tiles together from ${p.map16?.at.toString(16)}`);
+}
+
+// with the level setup the BG2 slot is used (VRAM patch installed for it): a placed tile 500 shows the
+// package's graphics in the level
+{
+  const rom = fresh();
+  const r = await installPackage(rom, preview, { ...opts, level: 0x105 });
+  check(r.ok && levelExtGfx(rom, 0x105)[0] === 0x80, 'level setup: ExGFX 80 set as BG2 of level 105 ' + r.errors.join(' '));
   const e = new LevelEmulator(rom); e.boot();
   const lv = loadLevel(rom, 0x105);
   lv.objects.push({ uid: newUid(), num: 0, ext: DM16_EXT, x: 4, y: 20, size: 0x00, tile: 0x500 });
@@ -79,15 +92,13 @@ check(gfxEntry(rom, 0x80)?.raw === true && levelExtGfx(rom, 0x105)[0] === 0xff &
   check(l.ok && eq === 0x1000 && got.join() === words[0].join(), `tile 500 in the level: words ${got.map((v) => v.toString(16)).join(' ')}, BG2 graphics ${eq}/4096`);
 }
 
-// the real package, if present locally
-try {
-  const real = readUpload('RockClimbBlocksUpdate.zip', new Uint8Array(readFileSync('test/fixtures/RockClimbBlocksUpdate.zip')));
-  const ri = detectKind(real);
-  const rp = planBlockPack(real, ri.file);
-  const rom2 = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
-  const rr = applyBlockPack(rom2, real, rp, { blank, level: 0x105 });
-  check(ri.kind === 'block' && !!ri.pack && rr.ok, 'RockClimbBlocks: ' + [...rr.errors, ...rr.notes].join(' | '));
-} catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; }
+// the real package
+{
+  const rom2 = fresh();
+  const real = inspectUpload('RockClimbBlocksUpdate.zip', new Uint8Array(readFileSync('test/fixtures/RockClimbBlocksUpdate.zip')));
+  const rr = real.status === 'ready' ? await installPackage(rom2, real, { ...opts, level: 0x105 }) : null;
+  check(!!rr?.ok, 'RockClimbBlocks: ' + (rr ? [...rr.errors, ...rr.prints].join(' | ') : real.status));
+}
 
 console.log(bad ? `${bad} failures` : 'all ok');
 if (bad) process.exitCode = 1;

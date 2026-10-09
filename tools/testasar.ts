@@ -7,7 +7,7 @@ import { loadAsar } from '../src/core/asar.ts';
 import { applyPatch, uninstallPatch, reapplyPatch, type PatchSource } from '../src/core/patchapply.ts';
 import { listPatches } from '../src/core/patchreg.ts';
 import { installEditorPatch } from '../src/core/patches.ts';
-import { readUpload, detectKind } from '../src/core/patchpkg.ts';
+import { inspectUpload } from '../src/core/packages.ts';
 import { installMap16Ext } from '../src/core/map16ext.ts';
 
 await loadAsar();
@@ -95,12 +95,12 @@ check(diff === 0 && listPatches(rom).length === 0 && rom.scanRats().length === 0
 
 // 5. what a download is: patch, UberASM resource, GPS block, PIXI sprite
 {
-  const kind = (name: string, text: string) => detectKind(readUpload(name, new TextEncoder().encode(text)));
-  check(kind('p.asm', 'lorom\norg $00A1DA\nJSL Code\nfreecode\nCode:\nRTL\n').kind === 'patch', 'detect: patch');
-  check(kind('u.asm', '; resource\n!x = 1\nmain:\n  LDA $71\n  RTL\n').kind === 'uberasm', 'detect: UberASM resource');
+  const kind = (name: string, text: string) => { const p = inspectUpload(name, new TextEncoder().encode(text)); return p.status === 'ready' ? p : null; };
+  check(kind('p.asm', 'lorom\norg $00A1DA\nJSL Code\nfreecode\nCode:\nRTL\n')?.parts[0].kind === 'patch', 'detect: patch');
+  check(kind('u.asm', '; resource\n!x = 1\nmain:\n  LDA $71\n  RTL\n')?.parts[0].kind === 'uberasm', 'detect: UberASM resource');
   const b = kind('b.asm', '; Act like 130\nprint "a block"\ndb $42\nJMP A : JMP A\nA: RTL\n');
-  check(b.kind === 'block' && !b.pack && b.acts === 0x130, 'detect: GPS block with acts like from its description');
-  check(kind('s.asm', 'print "INIT ",pc\nRTL\nprint "MAIN ",pc\nRTL\n').kind === 'sprite', 'detect: PIXI sprite');
+  check(b?.parts[0].kind === 'block' && b.blocks[0].acts === 0x130, 'detect: GPS block with acts like from its description');
+  check(kind('s.asm', 'print "INIT ",pc\nRTL\nprint "MAIN ",pc\nRTL\n')?.parts[0].kind === 'sprite', 'detect: PIXI sprite');
 }
 
 console.log(bad ? `${bad} failures` : 'all ok');
