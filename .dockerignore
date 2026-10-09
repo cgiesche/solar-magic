@@ -7,3 +7,4 @@ dist
 resources_local
 docs
 test
+src-tauri
