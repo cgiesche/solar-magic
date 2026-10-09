@@ -24,6 +24,7 @@ import { loadProject, saveProject, emptyProject, projectFromFiles, type UberProj
 import { installEditorPatch, extGfxAvailable, setLevelMusic, setCustomPalette } from './patches.ts';
 import { map16Targets } from './map16file.ts';
 import { mwlSections, sampleLevel, type SampleLevel } from './mwl.ts';
+import { slotTiles, usesAltFile, writeLevelList, setLevelSettings, levelSettings } from './exanim.ts';
 import { planBgPack, applyBgPack } from './bgpack.ts';
 import { parseSprites, spriteSizes, type Level } from './level.ts';
 import { installVramPatch } from './vrampatch.ts';
@@ -295,6 +296,18 @@ function placeSample(rom: Rom, preview: ReadyPreview, ctx: InstallContext, into:
     } catch (e) { sample.notes.push(`Background not taken over: ${e instanceof Error ? e.message : e}`); }
   }
   if (sample.palette) setCustomPalette(rom, into.number, sample.palette);
+  // its ExAnimation in place of the level's (the level setup's slots of the package included)
+  if (sample.exanim) {
+    const alt = [...sample.exanim.slots].filter(([, e]) => usesAltFile(e));
+    for (const [k] of alt) sample.exanim.slots.delete(k);
+    if (alt.length) sample.notes.push(`${alt.length} ExAnimation slot(s) of the sample level take their frames from an alternative file (ExGFX 60-63) – left out`);
+  }
+  if (sample.exanim && [...sample.exanim.slots.values()].some((e) => slotTiles(e).some((t) => t >= 0x200 && t < 0x300)) && !extGfxAvailable(rom)) {
+    const v = installVramPatch(rom);
+    if (!v.ok) sample.notes.push(`ExAnimation into tiles 200-2FF needs the VRAM patch: ${v.errors.join(' ')}`);
+  }
+  writeLevelList(rom, into.number, sample.exanim);
+  if (sample.exanim || levelSettings(rom, into.number)) setLevelSettings(rom, into.number, sample.exanimSettings);
   return sample;
 }
 
@@ -372,7 +385,7 @@ export async function installPackage(rom: Rom, preview: ReadyPreview | ManualPre
         if (!r.ok) return r;
       }
       // the sample level needs the package's ExGFX in its slots: the level setup comes with it
-      if (opt.level !== null && (opt.setup !== false || opt.sample) && (ctx.plan.gfx.some((g) => g.slot) || ctx.plan.palettes.length)) {
+      if (opt.level !== null && (opt.setup !== false || opt.sample) && (ctx.plan.gfx.some((g) => g.slot) || ctx.plan.palettes.length || ctx.plan.exanim.length)) {
         const r = levelSetup(rom, opt.level, ctx.plan, opt.cgram ?? null);
         warnings.push(...r.warnings);
         prints.push(...r.prints);
@@ -392,10 +405,12 @@ export async function installPackage(rom: Rom, preview: ReadyPreview | ManualPre
   }
 }
 
-// the level setup; BG2/BG3 need the tilemaps moved out of VRAM $2000 first (the VRAM patch)
+// the level setup; BG2/BG3 – graphics or ExAnimation into tiles 200-2FF – need the tilemaps moved out
+// of VRAM $2000 first (the VRAM patch)
 function levelSetup(rom: Rom, level: number, plan: PackagePlan, cgram: Uint8Array | null): { warnings: string[]; prints: string[] } {
   const warnings: string[] = [];
-  if (plan.gfx.some((g) => g.slot === 'BG2' || g.slot === 'BG3') && !extGfxAvailable(rom)) {
+  const bg23 = plan.gfx.some((g) => g.slot === 'BG2' || g.slot === 'BG3') || plan.exanim.some((e) => slotTiles(e).some((t) => t >= 0x200 && t < 0x300));
+  if (bg23 && !extGfxAvailable(rom)) {
     const v = installVramPatch(rom);
     if (!v.ok) warnings.push(`BG2/BG3 graphics not loaded in the level (${v.errors.join(' ')}); use the level header's graphics bypass.`);
   }

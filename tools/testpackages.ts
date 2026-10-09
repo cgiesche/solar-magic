@@ -22,9 +22,10 @@ import { ALL } from '../src/core/uberasm.ts';
 import { loadBlockProject, saveBlockProject } from '../src/core/blocks.ts';
 import { loadPixiProject, savePixiProject } from '../src/core/pixi.ts';
 import { loadMusicProject } from '../src/core/music.ts';
-import { loadLevel } from '../src/core/level.ts';
+import { loadLevel, newUid } from '../src/core/level.ts';
 import { saveLevel } from '../src/core/save.ts';
-import { levelMusic, setLevelMusic, installEditorPatch, customPalette } from '../src/core/patches.ts';
+import { levelMusic, setLevelMusic, installEditorPatch, customPalette, levelAn2, DM16_EXT } from '../src/core/patches.ts';
+import { readLevelList } from '../src/core/exanim.ts';
 import { levelColors } from '../src/core/bgpack.ts';
 import { enableBlocks, setExtTileWords } from '../src/core/map16ext.ts';
 import { parseLmObjects } from '../src/core/mwl.ts';
@@ -296,6 +297,34 @@ sameRom('song removed');
   check(!!customPalette(rom, 0x105), 'removing the package keeps the level setup');
 }
 
+// the level setup with Lunar Magic's AN2 and ExAnimation (on its own ROM): On-Off Blocks' ExGFX291 is AN2
+// of level 105, the sample level's two ExAnimation slots for tiles 200-207 come into its list; in the
+// game the block's tiles show AN2's frames by the ON/OFF switch
+{
+  const rom = new Rom(fixture('smw.smc'));
+  const e = new LevelEmulator(rom); e.boot();
+  const l = e.load(0x105);
+  const s = map16Source(rom, l);
+  const r = await installPackage(rom, ready(onoff), { level: 0x105, blank: s.fg(0x025), tileWords: (t) => s.fg(t), cgram: levelColors(l) });
+  const an2 = onoff.status === 'ready' ? onoff.files.get('ExGraphics/ExGFX291.bin')! : new Uint8Array();
+  const list = readLevelList(rom, 0x105);
+  check(r.ok && levelAn2(rom, 0x105) === r.pkg!.gfx[0] && list?.slots.size === 2 && [...list.slots.values()].every((x) => x.trigger === 3),
+    `level setup: ExGFX291 as AN2 of level 105, 2 ExAnimation slots (${r.prints.filter((p) => /Level 105/.test(p)).join(' | ')})`);
+  const lv = loadLevel(rom, 0x105);
+  lv.objects.push({ uid: newUid(), num: 0, ext: DM16_EXT, x: 4, y: 20, size: 0x00, tile: r.pkg!.blocks.tiles[0] });
+  saveLevel(rom, lv);
+  const vramAt = (sw: number) => {
+    const e2 = new LevelEmulator(rom); e2.boot();
+    e2.load(0x105, { onOffSwitch: sw === 1 });
+    for (let i = 0; i < 16; i++) e2.snes.runFrame();
+    return e2.snes.vram;
+  };
+  const same = (v: Uint8Array, at: number, from: number) => an2.subarray(from, from + 0x80).every((x, i) => v[at + i] === x);
+  const on = vramAt(0), off = vramAt(1);
+  check(same(on, 0x2040 * 2, 0x80) && !same(on, 0x2000 * 2, 0), 'switch ON: tiles 204-207 from AN2 tiles 4-7');
+  check(same(off, 0x2000 * 2, 0) && !same(off, 0x2040 * 2, 0x80), 'switch OFF: tiles 200-203 from AN2 tiles 0-3');
+}
+
 // the sample level (a level edit, on its own ROM): On-Off Blocks' SampleLevel.mwl in place of level 105 –
 // Lunar Magic's Direct Map16 objects become the editor's, on the tiles the block went to; the .map16
 // lands where the author had it (508, the column from the sample level); bumping a block from below
@@ -311,6 +340,8 @@ sameRom('song removed');
   const dm = lv?.objects.filter((o) => o.tile !== undefined) ?? [];
   check(r.ok && !!lv && dm.map((o) => `${o.x},${o.y}:${o.tile!.toString(16)}`).sort().join(' ') === '6,20:508 9,20:509' && r.pkg!.blocks.tiles.join() === [0x508, 0x509].join(),
     `sample level: its blocks on tiles 508/509, where the block went (${dm.map((o) => `${o.x},${o.y}:${o.tile!.toString(16)}`).join(' ')}; ${r.warnings.join(' | ')})`);
+  const keys = [...(readLevelList(rom, 0x105)?.slots.keys() ?? [])].sort((a, b) => a - b).join();
+  check(keys === '0,8', `sample level: its ExAnimation list in place of the level's (slots ${keys})`);
   if (lv) {
     saveLevel(rom, lv);
     const e2 = new LevelEmulator(rom); e2.boot();

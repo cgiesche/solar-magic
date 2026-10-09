@@ -107,6 +107,19 @@ export function secondSetName(t: number): string {
   return ({ 1: 'P-switch active', 2: 'P-switch active', 3: 'Switch OFF', 4: 'Star active', 5: 'Time below 100', 7: '5 Dragon Coins collected' } as Record<number, string>)[t] ?? 'Trigger on';
 }
 
+// the 8x8 tiles (4bpp: VRAM word address / 16) a tile slot writes; types 10-12 write two rows, the
+// second $100 words below (tile_bytes in the engine). Colors and rotations: none.
+export function slotTiles(e: ExSlot): number[] {
+  if (kindOf(e.type) !== 'tiles' || e.type === 0x0f) return [];
+  const first = (e.dest & 0x7fff) >> 4;
+  const row = e.type === 0x10 ? 1 : e.type === 0x11 ? 2 : e.type === 0x12 ? 4 : tilesOf(e.type);
+  const out = Array.from({ length: row }, (_, i) => first + i);
+  if (e.type >= 0x10) out.push(...out.map((t) => t + 0x10));
+  return out;
+}
+// a slot whose frames come from the list's alternative file (ExGFX 60-63, shared by all levels)
+export const usesAltFile = (e: ExSlot) => kindOf(e.type) === 'tiles' ? (e.dest & 0x8000) !== 0 : kindOf(e.type) === 'colors' && e.type < 0x16 && ((e.dest >> 8) & 0x80) !== 0;
+
 // ---- list bytes ----
 export function parseList(b: Uint8Array): { list: ExList; length: number } {
   const get = (i: number) => { if (i >= b.length) throw new Error('ExAnimation list truncated'); return b[i]; };
@@ -311,4 +324,21 @@ export function exanimDataRanges(rom: Rom): [number, number][] {
     if (size > 0) add(a, size);
   }
   return out;
+}
+
+// adds slots to a level's list, in its free slots (its own slots stay); returns the slot numbers used
+export function addLevelSlots(rom: Rom, level: number, slots: ExSlot[]): number[] {
+  if (!slots.length) return [];
+  const list = readLevelList(rom, level) ?? emptyList();
+  const used: number[] = [];
+  for (const e of slots) {
+    let k = 0;
+    while (k < SLOTS && list.slots.has(k)) k++;
+    if (k >= SLOTS) throw new Error(`No free ExAnimation slot left in level ${level.toString(16).toUpperCase().padStart(3, '0')}`);
+    list.slots.set(k, { ...e, frames: [...e.frames] });
+    used.push(k);
+  }
+  list.count = slotsUsed(list);
+  writeLevelList(rom, level, list);
+  return used;
 }

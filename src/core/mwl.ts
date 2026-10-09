@@ -8,7 +8,8 @@
 //  - 1 layer 1, 2 layer 2, 3 sprites: 8 header bytes (layer 1: byte 0 bit 0 = custom palette), then the
 //    data as in the ROM; a BG tilemap as layer 2 is 0x800 bytes (bgpack.ts);
 //  - 4 palette: 8 header bytes, 256 colors and the back area color;
-//  - 6 ExAnimation, 7 ExGFX numbers of the slots (bgpack.ts).
+//  - 6 ExAnimation: 8 header bytes (byte 0: the settings byte, $03FE00), then the list (exanim.ts);
+//  - 7 ExGFX numbers of the slots (bgpack.ts).
 // Lunar Magic's Direct Map16 objects in layer 1/2 (smwspeedruns' "Level Data Format") become the
 // editor's own (extended object $02, patches.ts):
 //  - 22 / 23: N10YYYYY 0010XXXX / 0011XXXX HHHHWWWW bbbbbbbb – one tile of page 0 / 1;
@@ -24,6 +25,7 @@ import {
 } from './level.ts';
 import { DM16_EXT } from './patches.ts';
 import { EXT_FIRST, EXT_TILES } from './map16ext.ts';
+import { parseList, type ExList } from './exanim.ts';
 
 const u32 = (d: Uint8Array, o: number) => (o + 4 <= d.length ? (d[o] | (d[o + 1] << 8) | (d[o + 2] << 16) | (d[o + 3] << 24)) >>> 0 : 0);
 const hx = (v: number, d: number) => v.toString(16).toUpperCase().padStart(d, '0');
@@ -36,7 +38,8 @@ export interface MwlSections {
   layer2: Uint8Array | null; // object data (with header) or a BG tilemap (0x800 bytes)
   sprites: Uint8Array; // with the header byte
   palette: Uint8Array | null; // 512 bytes (BGR555 words), color 0 = the back area color
-  exanim: boolean; // has ExAnimation of its own
+  exanim: ExList | null; // its ExAnimation list
+  exanimSettings: number; // its ExAnimation settings byte ($03FE00)
 }
 
 export function mwlSections(d: Uint8Array): MwlSections {
@@ -46,7 +49,7 @@ export function mwlSections(d: Uint8Array): MwlSections {
     if (!off || size < header || off + size > d.length) return null;
     return d.subarray(off + header, off + size);
   };
-  const info = sec(0, 0), l1 = sec(1, 8), l2 = sec(2, 8), spr = sec(3, 8), pal = sec(4, 8), ex = sec(6, 8);
+  const info = sec(0, 0), l1 = sec(1, 8), l2 = sec(2, 8), spr = sec(3, 8), pal = sec(4, 8), ex = sec(6, 8), exh = sec(6, 0);
   if (!info || info.length < 6 || !l1 || l1.length < 6 || !spr || !spr.length) throw new Error('Lunar Magic level file without level data');
   let palette: Uint8Array | null = null;
   if (pal && pal.length >= 514) {
@@ -62,7 +65,8 @@ export function mwlSections(d: Uint8Array): MwlSections {
     layer2: l2 && l2.length ? l2 : null,
     sprites: spr,
     palette,
-    exanim: !!ex && ex.some((b) => b !== 0),
+    exanim: ex && ex.some((b) => b !== 0) ? parseList(ex).list : null,
+    exanimSettings: exh && exh.length ? exh[0] & 0xf0 : 0,
   };
 }
 
@@ -126,7 +130,7 @@ export interface SampleMapping {
   sprite(num: number, extra: number): number | null; // a custom sprite's number → ours, null: not known
 }
 
-export interface SampleLevel { level: Level; palette: Uint8Array | null; notes: string[] }
+export interface SampleLevel { level: Level; palette: Uint8Array | null; exanim: ExList | null; exanimSettings: number; notes: string[] }
 
 // the sample level as level `into.number` (ROM locations for saving in place from `into`); the current
 // level keeps its screen exits (those on screens the sample level has)
@@ -158,7 +162,6 @@ export function sampleLevel(rom: Rom, d: Uint8Array, into: Level, map: SampleMap
     return true;
   });
   if (dropped) notes.push(`${dropped} custom sprite(s) left out: which sprite of the package they are is not certain`);
-  if (s.exanim) notes.push('ExAnimation of the sample level not taken over');
   // the current level's screen exits, as far as the sample level has their screens
   const exits = into.exits.filter((x) => x.screen < header.screens).map((x) => ({ ...x }));
   if (exits.length < into.exits.length) notes.push(`${into.exits.length - exits.length} screen exit(s) of level ${hx(into.number, 3)} dropped: the sample level has ${header.screens} screen(s)`);
@@ -175,5 +178,5 @@ export function sampleLevel(rom: Rom, d: Uint8Array, into: Level, map: SampleMap
     spriteHeader: ps.header,
     l1Addr: into.l1Addr, l1Size: into.l1Size, l2Size: into.l2Size, sprAddr: into.sprAddr, sprSize: into.sprSize,
   };
-  return { level, palette: s.customPalette ? s.palette : null, notes };
+  return { level, palette: s.customPalette ? s.palette : null, exanim: s.exanim, exanimSettings: s.exanimSettings, notes };
 }

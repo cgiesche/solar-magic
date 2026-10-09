@@ -44,7 +44,8 @@ export function placementEditor(app: App, p: ReadyPreview, blank: number[]): Pla
       const c = current();
       const slots = c.gfx.filter((g) => g.slot && GFX_SLOTS.includes(g.slot)).map((g) => `${g.slot} = ExGFX ${hex(g.num, 2)}`);
       const colors = c.palettes.filter((x) => !x.layer3).map((x) => `${x.colors.length} color(s) from ${file(x.file)}`);
-      setupText.textContent = slots.length || colors.length ? ` Set up level ${lvl}: ${[...slots, ...colors].join(', ')}` : ` Level ${lvl}: nothing to set up`;
+      const anim = c.exanim.length ? [`${c.exanim.length} ExAnimation slot(s)`] : [];
+      setupText.textContent = slots.length || colors.length || anim.length ? ` Set up level ${lvl}: ${[...slots, ...anim, ...colors].join(', ')}` : ` Level ${lvl}: nothing to set up`;
     } catch (e) { status.appendChild(h('p', { class: 'hint error' }, errorText(e))); }
   };
   const blockOptions = (sel: string | null) => [h('option', { value: '', selected: sel === null }, '(no block)'),

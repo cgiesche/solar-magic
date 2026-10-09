@@ -16,10 +16,11 @@ import { rewriteDefines } from './patchpkg.ts';
 import { parseBlockList, loadBlockProject, saveBlockProject, type BlockProject } from './blocks.ts';
 import { parseMap16File, map16Targets, exgfxName, importGfxFile, type Map16File } from './map16file.ts';
 import { EXT_FIRST, EXT_TILES, DEFAULT_ACTS, map16Ext, extTileWords, actsLike, setExtTileWords, setActsLike } from './map16ext.ts';
-import { gfxEntry, hasEditorPatch, VANILLA_GFX, levelGfx, setLevelGfx, levelExtGfx, setLevelExtGfx, GFX_SLOT_NAMES, EXT_GFX_SLOT_NAMES, extGfxAvailable, customPalette, setCustomPalette } from './patches.ts';
+import { gfxEntry, hasEditorPatch, VANILLA_GFX, levelGfx, setLevelGfx, levelExtGfx, setLevelExtGfx, GFX_SLOT_NAMES, EXT_GFX_SLOT_NAMES, extGfxAvailable, customPalette, setCustomPalette, setLevelAn2 } from './patches.ts';
+import { slotTiles, usesAltFile, addLevelSlots, type ExList, type ExSlot } from './exanim.ts';
 import { parseMwl, packPalettes, slotOfWord, type MwlLevel, type PackPalette } from './bgpack.ts';
 import { withIncludes } from './pkgmap.ts';
-import { sampleTiles } from './mwl.ts';
+import { sampleTiles, mwlSections } from './mwl.ts';
 
 const dec = new TextDecoder();
 const enc = new TextEncoder();
@@ -124,13 +125,15 @@ export interface PackagePlan {
   gfx: PlannedGfx[];
   palettes: PackPalette[];
   sample: MwlLevel | null; // the sample level, parsed
+  exanim: ExSlot[]; // the sample level's ExAnimation slots that write tiles the package's Map16 tiles draw from
   notes: string[];
 }
 
 export interface PlanInput { files: Map<string, Uint8Array>; blocks: DetectedBlock[]; graphics: DetectedGraphics }
 
-// the slots ExGFX can go in: the level's GFX bypass and the BG2/BG3 slots of the VRAM patch
-export const GFX_SLOTS = [...GFX_SLOT_NAMES, ...EXT_GFX_SLOT_NAMES];
+// the slots ExGFX can go in: the level's GFX bypass, the BG2/BG3 slots of the VRAM patch and AN2 (for
+// ExAnimation, patches.ts)
+export const GFX_SLOTS = [...GFX_SLOT_NAMES, ...EXT_GFX_SLOT_NAMES, 'AN2'];
 
 // first ExGFX number that is free and not taken by `taken` (80-FE first, as Lunar Magic suggests)
 function freeGfx(rom: Rom, taken: Set<number>): number {
@@ -256,9 +259,23 @@ export function planPackage(rom: Rom, input: PlanInput, blank: number[]): Packag
   const openSlots = [...mapSlots].filter((s) => GFX_SLOTS.includes(s) && !gfx.some((g) => g.slot === s));
   if (open.length === 1 && openSlots.length === 1) open[0].slot = openSlots[0];
   for (const g of gfx) if (g.slot && !GFX_SLOTS.includes(g.slot)) notes.push(`${base(g.file)} is for Lunar Magic's ${g.slot} slot – not supported, stored only`);
+  for (const g of gfx) if (g.slot === 'AN2' && files.get(g.file)!.length !== 0x1000) notes.push(`${base(g.file)} cannot be AN2: only uncompressed 4bpp files (4 KB) can`);
+
+  // ExAnimation: the sample level's slots writing tiles the .map16 tiles draw from
+  const exanim: ExSlot[] = [];
+  if (graphics.mwl && map16) {
+    let list: ExList | null = null;
+    try { list = mwlSections(files.get(graphics.mwl)!).exanim; } catch { /* no level data */ }
+    const drawn = new Set(map16.data.tiles.flat().map((w) => w & 0x3ff));
+    for (const e of list?.slots.values() ?? []) {
+      if (!slotTiles(e).some((t) => drawn.has(t))) continue;
+      if (usesAltFile(e)) { notes.push('An ExAnimation slot of the package takes its frames from an alternative file (ExGFX 60-63) – not taken over'); continue; }
+      exanim.push(e);
+    }
+  }
 
   const palettes = packPalettes(files, graphics.pal, graphics.palmask, notes);
-  return { blocks, map16, gfx, palettes, sample, notes };
+  return { blocks, map16, gfx, palettes, sample, exanim, notes };
 }
 
 // links changed in the preview: where the .map16 tiles go, which block each of them shows (null: none),
@@ -362,9 +379,9 @@ export function applyGraphics(rom: Rom, files: Map<string, Uint8Array>, plan: Pa
 
 export interface SetupResult { warnings: string[]; prints: string[] }
 
-// the level setup (see CONTEXT.md): the package's ExGFX in the level's slots, the masked colors in its
-// palette. cgram: the level's colors now (base of a new own palette). The VRAM patch for BG2/BG3 is
-// the caller's.
+// the level setup (see CONTEXT.md): the package's ExGFX in the level's slots (AN2 too), its ExAnimation
+// slots in the level's list, the masked colors in its palette. cgram: the level's colors now (base of a
+// new own palette). The VRAM patch for BG2/BG3 is the caller's.
 export function applyLevelSetup(rom: Rom, level: number, plan: PackagePlan, cgram: Uint8Array | null): SetupResult {
   const warnings: string[] = [], prints: string[] = [];
   const std = levelGfx(rom, level), ext = levelExtGfx(rom, level);
@@ -376,8 +393,14 @@ export function applyLevelSetup(rom: Rom, level: number, plan: PackagePlan, cgra
     if (e >= 0) {
       if (!extGfxAvailable(rom)) { warnings.push(`${g.slot} slot not available (VRAM patch missing) – ExGFX ${hx(g.num, 2)} not loaded in level ${hx(level, 3)}`); continue; }
       ext[e] = g.num; extSet = true;
-    } else if (s >= 0) { std[s] = g.num; stdSet = true; } else continue;
+    } else if (s >= 0) { std[s] = g.num; stdSet = true; } else if (g.slot === 'AN2') {
+      try { setLevelAn2(rom, level, g.num); } catch (err) { warnings.push(err instanceof Error ? err.message : String(err)); continue; }
+    } else continue;
     slots.push(`${g.slot} = ${hx(g.num, 2)}`);
+  }
+  if (plan.exanim.length) {
+    const used = addLevelSlots(rom, level, plan.exanim);
+    prints.push(`Level ${hx(level, 3)}: ExAnimation slot(s) ${used.map((k) => hx(k, 2)).join(', ')}`);
   }
   if (stdSet) setLevelGfx(rom, level, std);
   if (extSet) setLevelExtGfx(rom, level, ext);

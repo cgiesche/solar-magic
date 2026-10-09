@@ -122,8 +122,8 @@ recognized, the preview says what was found and what is missing.
 **Placement:** for blocks and graphics the preview shows where they go in this ROM and how they link up – the
 first tile of the `.map16`, which block each of its tiles shows, the tiles of blocks off the `.map16`, each ExGFX
 file's number and slot – and lets you change all of it before installing. Two blocks on one tile are refused.
-The checkbox below sets up the current level (the ExGFX in its slots, the colors of a `.pal` with its `.palmask`
-in its palette); it is a level edit: Ctrl+Z reverts it, removing the package does not.
+The checkbox below sets up the current level (the ExGFX in its slots – AN2 too –, the sample level's ExAnimation slots
+that animate the package's tiles, the colors of a `.pal` with its `.palmask` in its palette); it is a level edit: Ctrl+Z reverts it, removing the package does not.
 
 **Sample level:** a package with code and an `.mwl` offers its sample level (unchecked): it replaces the current
 level – layer 1, layer 2, sprites, primary and secondary header, its own colors – with its Map16 tiles where the
@@ -131,8 +131,8 @@ package's went (Lunar Magic's Direct Map16 objects 22/23/27/29 become the editor
 with the package's numbers where that is certain (one sprite of that type in the package and one number of it in
 the level, or a PIXI `list.txt` naming the number); other custom sprites are left out with a note. The `.map16`
 only records the row it was exported from; the column comes from the tiles the sample level places there. The
-current level keeps its screen exits (those on screens the sample level has) and secondary entrances.
-ExAnimation and Lunar Magic's AN2 slot are not taken over. Like the level setup it is a level edit (not saved
+current level keeps its screen exits (those on screens the sample level has) and secondary entrances. Its
+ExAnimation list replaces the level's (slots taking frames from the alternative files ExGFX 60–63 are left out). Like the level setup it is a level edit (not saved
 yet after installing).
 
 The preview has *Manual …* if the package contains a readme or an HTML manual. It
