@@ -365,6 +365,36 @@ print "MAIN ",pc
   check(after !== tile, `Shatter: the block is gone after Mario left it (now ${after.toString(16)})`);
 }
 
+// a sprite that draws nothing and spawns the sprite of its extra byte on its tile and one above
+// (like an enemy stack): its image is what it spawned; a visible sprite's spawns are not part of it
+// (the Bowser statue's flame)
+{
+  const enc9 = new TextEncoder();
+  const spawn = (dy: number) => `  JSL $02A9DE : BMI +
+  LDA #$01 : STA !14C8,y
+  LDA !extra_byte_1,x : PHX : TYX : STA !9E,x : PLX
+  LDA !E4,x : STA !E4,y : LDA !14E0,x : STA !14E0,y
+  LDA !D8,x : SEC : SBC #$${dy.toString(16).padStart(2, '0')} : STA !D8,y : LDA !14D4,x : SBC #$00 : STA !14D4,y
+  PHX : TYX : JSL $07F7D2 : PLX
++
+`;
+  const r9 = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
+  const res9 = savePixiProject(r9, { files: new Map([
+    ['sprites/stack.cfg', enc9.encode('01\n36\n00 00 00 00 00 00\n00 00\nstack.asm\n01:01\n')],
+    ['sprites/stack.asm', enc9.encode(`print "INIT ",pc\n  RTL\nprint "MAIN ",pc\n  LDA !1534,x : BNE ++\n  INC !1534,x\n${spawn(0)}${spawn(0x10)}++\n  RTL\n`)],
+  ]), list: parsePixiList('20 stack.cfg\n') });
+  if (!res9.ok) console.log(res9.errors.join('\n'));
+  check(res9.ok, 'stack sprite assembled');
+  const e9 = new LevelEmulator(r9); e9.boot();
+  const l9 = loadLevel(r9, 0x105), bg9 = l9.layer2Pointer >> 16 === 0xff ? l9.layer2Pointer : 0xffd900;
+  const goomba = captureSprites(e9, 0x105, l9.header, l9.spriteHeader, bg9, [0x0f]).get(0x0f);
+  const stack = captureSprites(e9, 0x105, l9.header, l9.spriteHeader, bg9, [0x220], undefined, [0x0f]).get(0x220);
+  check(!!goomba && !!stack && stack.w === goomba.w && stack.h === goomba.h + 16 && stack.oy === goomba.oy - 16,
+    `stack sprite: shown as the two Goombas it spawned (${stack ? `${stack.w}x${stack.h} at ${stack.ox},${stack.oy}` : 'no image'})`);
+  const statue = captureSprites(e9, 0x105, l9.header, l9.spriteHeader, bg9, [0xbc]).get(0xbc);
+  check(!!statue && statue.w === 24 && statue.h === 24, `Bowser statue without its flame (${statue ? `${statue.w}x${statue.h}` : 'no image'})`);
+}
+
 // removing restores the ROM
 const w = removePixi(prom);
 check(w.length === 0 && spriteSizes(prom) === null, 'removed: no size table');

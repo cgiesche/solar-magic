@@ -6,7 +6,7 @@
 
 import { LevelEmulator } from './levelemu.ts';
 import { loadLevel, spriteSizes, type LevelSprite, type PrimaryHeader } from './level.ts';
-import { record, sortPlaced, testLevel, testSpriteData } from './spritegfx.ts';
+import { record, rootSlot, sortPlaced, SlotTracker, testLevel, testSpriteData } from './spritegfx.ts';
 import type { Rom } from './rom.ts';
 import { SPR, SPRITE_SLOTS, spriteX, spriteY, cameraX, cameraY } from './ram.ts';
 
@@ -53,9 +53,10 @@ function runWindow(ctx: SpriteMemContext, m: number, win: LevelSprite[], cam: { 
   const y0 = Math.min(...ys) - ((SCREEN_H - 1 - Math.max(...ys) + Math.min(...ys)) >> 1);
   const placed = win.map((s) => ({ n: s.num, extra: s.extra, bytes: s.bytes, uid: s.uid, tx: (cam.camX >> 4) + s.x - x0, ty: (cam.camY >> 4) + s.y - y0 }));
   const order = sortPlaced(placed);
-  const r = emu.load(level, { layer1: cam.l1, sprites: testSpriteData(m, order, spriteSizes(emu.rom)), secondaryHeader: cam.secondary, layer2Pointer: bgPointer });
+  const tracker = new SlotTracker(emu.snes);
+  const r = emu.load(level, { layer1: cam.l1, sprites: testSpriteData(m, order, spriteSizes(emu.rom)), secondaryHeader: cam.secondary, layer2Pointer: bgPointer, fadeHook: tracker.start });
   if (!r.ok) return null;
-  const rec = record(emu, 3);
+  const rec = record(emu, 3, tracker);
   if (!rec) return null;
   const w = emu.snes.wram;
   const lost = new Set<number>();
@@ -65,8 +66,9 @@ function runWindow(ctx: SpriteMemContext, m: number, win: LevelSprite[], cam: { 
     if (!w[SPR.status + i]) continue;
     live++;
     if (!rec.snapLost.has(i)) continue;
-    // a slot spawned by another sprite (the platforms of $E0: $161A = $FF) counts for the nearest one
-    let p = order[w[SPR.loadIndex + i]];
+    // a slot spawned by sprite code counts for the sprite that spawned it, one spawned otherwise
+    // (the platforms of $E0: $161A = $FF) for the nearest one
+    let p = order[w[SPR.loadIndex + rootSlot(rec.spawner, i)]];
     if (!p) {
       const x = spriteX(w, i) - cx, y = spriteY(w, i) - cy;
       const d = (q: typeof p) => Math.abs(q.tx * 16 - (cam.camX & ~15) - x) + Math.abs(q.ty * 16 - (cam.camY & ~15) - y);
