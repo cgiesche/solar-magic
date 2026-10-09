@@ -38,7 +38,7 @@ The .mwl of a package that also has code: an example of the package in use. Opti
 _Avoid_: Demo level, test level
 
 **Level setup**:
-What installing a package does to the current level so its graphics show: its ExGFX in the slots its tiles use, its masked colors in the level's palette. A level edit: undo reverts it, removing the package does not.
+What installing a package does to the current level so its graphics show: its ExGFX in the slots its tiles use (AN2 too), the ExAnimation slots that animate its tiles, its masked colors in the level's palette. A level edit: undo reverts it, removing the package does not.
 
 ### Emulated results
 
