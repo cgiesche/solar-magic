@@ -15,8 +15,8 @@ const KEYMAP: Record<string, number> = {
   ArrowUp: 0x0800, ArrowDown: 0x0400, ArrowLeft: 0x0200, ArrowRight: 0x0100,
   x: 0x8000, X: 0x8000, // B: jump
   z: 0x4000, Z: 0x4000, y: 0x4000, Y: 0x4000, // Y: run / fire
-  a: 0x0080, A: 0x0080, // A: spin jump
-  s: 0x0040, S: 0x0040, // X
+  s: 0x0080, S: 0x0080, // A: spin jump
+  a: 0x0040, A: 0x0040, // X
   Enter: 0x1000, Shift: 0x2000, q: 0x0020, Q: 0x0020, w: 0x0010, W: 0x0010,
 };
 
@@ -173,7 +173,7 @@ function start(app: App, at: { tx: number; ty: number } | undefined, audio: Audi
   const m = modal(`Test level – ${hex(lv.number, 3)}${at ? ` from ${hex(at.tx, 2)}/${hex(at.ty, 2)}` : ''}${r.ok ? '' : ' (load error)'}`, h('div', { class: 'play' },
     canvas,
     info,
-    h('div', { class: 'hint' }, 'Controls: arrows · X = jump (B) · Z/Y = run/fire (Y) · A = spin jump · S = X button · Enter = Start · Shift = Select · Q/W = L/R · P = pause. Gamepad: d-pad/left stick, buttons by position as on the SNES pad (bottom = B, right = A, left = Y, top = X), shoulder buttons/triggers = L/R, Start/Select, Home = pause. M = sound on/off. Unsaved changes are included in the test.'),
+    h('div', { class: 'hint' }, 'Controls: arrows · X = jump (B) · Z/Y = run/fire (Y) · S = spin jump · A = X button · Enter = Start · Shift = Select · Q/W = L/R · P = pause. Gamepad: d-pad/left stick, buttons by position as on the SNES pad (bottom = B, right = A, left = Y, top = X), shoulder buttons/triggers = L/R, Start/Select, Home = pause. M = sound on/off. Unsaved changes are included in the test.'),
   ), [{ label: 'Restart', onClick: () => { setTimeout(() => openTestPlay(app, at), 0); } }, { label: 'Quit', primary: true }], stop);
   void m;
   canvas.focus();
