@@ -64,6 +64,7 @@ export function openLevelImportDialog(app: App, fileName: string, files: Map<str
     ...plan.palettes.map((p, i) => h('label', { class: 'row small' }, check(usePal[i], (v) => (usePal[i] = v)),
       ` Colors from ${file(p.file)}: ${p.colors.length} color(s)${p.back ? ' and the background color' : ''} (custom palette for level ${lvl})`,
       p.layer3 ? h('span', { class: 'hint' }, ' – layer 3 colors') : '')),
+    plan.exanim.length ? h('p', { class: 'hint' }, `ExAnimation: ${plan.exanim.length} slot(s) animating its tiles go into the list of level ${lvl}${plan.gfx.some((g) => g.slot === 'AN2') ? ', with their frames from AN2' : ''}.`) : '',
     plan.layer3.length ? h('p', { class: 'hint' }, `Layer 3 (${plan.layer3.map(file).join(', ')}) is not taken over – Lunar Magic's layer 3 tilemaps are not supported yet.`) : '',
     ext && !extGfxAvailable(app.rom) ? h('p', { class: 'hint' }, 'For the BG2/BG3 slots the VRAM patch is installed.') : '',
     plan.notes.length ? h('ul', { class: 'hint' }, plan.notes.map((t) => h('li', null, t))) : '',

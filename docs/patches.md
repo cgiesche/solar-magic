@@ -417,6 +417,13 @@ spot in VRAM (`$2000–$2FFF`) holds the layer 1 tilemap. The slots therefore ne
 ("SMWV"), which relocates the tilemaps as LM does, see below. It is installed with the "BG2/BG3" card → "Enable …"
 in the *Graphics* tab, and automatically for block packages with BG2/BG3 graphics.
 
+**AN2:** like Lunar Magic's AN2 slot, a level can have an uncompressed 4bpp ExGFX file (4 KB) that is kept in RAM
+from `$7EAD00`; ExAnimation frames from `$7EAD00` on come from it (the game's own animation graphics are at
+`$7E7D00–$7EACFF`). It is the *AN2* card next to the slot cards. The patch ("SMWN") copies the file there in the
+level load after all graphics are uploaded and before the animations first run (hook at `$00A5BF`); the game uses
+that RAM only as scratch while loading, nothing touches it during play (found by emulation). Packages and level
+imports set it together with the ExAnimation slots that animate their tiles.
+
 An earlier installation of the slots without the VRAM patch (up to this version) overwrote the layer 1 tilemap.
 It is disabled when the ROM is opened; its assignments are kept and apply
 again as soon as the VRAM patch is installed.

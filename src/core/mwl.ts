@@ -70,6 +70,14 @@ export function mwlSections(d: Uint8Array): MwlSections {
   };
 }
 
+// the ExAnimation list of a level file alone (null: none)
+export function mwlExAnim(d: Uint8Array): ExList | null {
+  const off = u32(d, 0x40 + 6 * 8), size = u32(d, 0x44 + 6 * 8);
+  if (d.length < 0x80 || !off || size <= 8 || off + size > d.length) return null;
+  const ex = d.subarray(off + 8, off + size);
+  return ex.some((b) => b !== 0) ? parseList(ex).list : null;
+}
+
 // layer 1/2 objects with Lunar Magic's Direct Map16 objects as the editor's; `notes`: what is left out
 export function parseLmObjects(data: Uint8Array, start: number, vertical: boolean, notes: string[]): { objects: LevelObject[]; exits: ScreenExit[] } {
   const objects: LevelObject[] = [];

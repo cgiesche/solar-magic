@@ -20,7 +20,7 @@ import { gfxEntry, hasEditorPatch, VANILLA_GFX, levelGfx, setLevelGfx, levelExtG
 import { slotTiles, usesAltFile, addLevelSlots, type ExList, type ExSlot } from './exanim.ts';
 import { parseMwl, packPalettes, slotOfWord, type MwlLevel, type PackPalette } from './bgpack.ts';
 import { withIncludes } from './pkgmap.ts';
-import { sampleTiles, mwlSections } from './mwl.ts';
+import { sampleTiles, mwlExAnim } from './mwl.ts';
 
 const dec = new TextDecoder();
 const enc = new TextEncoder();
@@ -265,7 +265,7 @@ export function planPackage(rom: Rom, input: PlanInput, blank: number[]): Packag
   const exanim: ExSlot[] = [];
   if (graphics.mwl && map16) {
     let list: ExList | null = null;
-    try { list = mwlSections(files.get(graphics.mwl)!).exanim; } catch { /* no level data */ }
+    try { list = mwlExAnim(files.get(graphics.mwl)!); } catch { /* not a list */ }
     const drawn = new Set(map16.data.tiles.flat().map((w) => w & 0x3ff));
     for (const e of list?.slots.values() ?? []) {
       if (!slotTiles(e).some((t) => drawn.has(t))) continue;
