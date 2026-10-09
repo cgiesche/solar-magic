@@ -253,6 +253,43 @@ export function planPackage(rom: Rom, input: PlanInput, blank: number[]): Packag
   return { blocks, map16, gfx, palettes, sample, notes };
 }
 
+// links changed in the preview: where the .map16 tiles go, which block each of them shows (null: none),
+// the tiles of blocks that are on none of them, the ExGFX numbers and slots
+export interface PlanEdits {
+  map16At?: number;
+  tileBlocks?: (string | null)[]; // per .map16 tile (in file order)
+  blockTiles?: Map<string, number[]>; // blocks off the .map16
+  gfx?: { num: number; slot: string | null }[]; // per plan.gfx
+}
+
+// the block on each .map16 tile of a plan (null: none)
+export function tileBlocks(plan: PackagePlan): (string | null)[] {
+  if (!plan.map16) return [];
+  return map16Targets(plan.map16.data, plan.map16.at).map((t) => plan.blocks.find((b) => b.tiles.includes(t))?.file ?? null);
+}
+
+// the plan with the edits; throws when two blocks end up on one tile or a tile is outside 200–FFF
+export function editPlan(plan: PackagePlan, e: PlanEdits): PackagePlan {
+  const old = plan.map16 ? map16Targets(plan.map16.data, plan.map16.at) : [];
+  const map16 = plan.map16 ? { ...plan.map16, at: e.map16At ?? plan.map16.at } : null;
+  const targets = map16 ? map16Targets(map16.data, map16.at) : [];
+  const links = e.tileBlocks ?? tileBlocks(plan);
+  const blocks = plan.blocks.map((b) => ({
+    ...b,
+    tiles: [...targets.filter((_, i) => links[i] === b.file), ...(e.blockTiles?.get(b.file) ?? b.tiles.filter((t) => !old.includes(t)))],
+  }));
+  const seen = new Set<number>();
+  for (const b of blocks) for (const t of b.tiles) {
+    if (t < EXT_FIRST || t >= EXT_TILES) throw new Error(`Tile ${hx(t, 3)} of ${base(b.file)} is outside 200–FFF`);
+    if (seen.has(t)) throw new Error(`Two blocks on tile ${hx(t, 3)}`);
+    seen.add(t);
+  }
+  if (map16 && ((map16.at & 15) + Math.min(16, map16.data.width) > 16 || map16.at < EXT_FIRST || targets[targets.length - 1] >= EXT_TILES)) throw new Error(`The .map16 tiles do not fit from ${hx(map16.at, 3)} on`);
+  const gfx = plan.gfx.map((g, i) => ({ ...g, ...(e.gfx?.[i] ?? {}) }));
+  if (new Set(gfx.map((g) => g.num)).size < gfx.length) throw new Error('Two ExGFX files under one number');
+  return { ...plan, map16, blocks: blocks.filter((b) => b.tiles.length), gfx };
+}
+
 // ---------- the ROM side ----------
 
 // the files of a block for the block project: its own file and what it includes (paths relative to its

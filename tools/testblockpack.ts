@@ -7,9 +7,11 @@ import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadAsar } from '../src/core/asar.ts';
 import { inspectUpload, installPackage, planUpload } from '../src/core/packages.ts';
+import { editPlan, tileBlocks } from '../src/core/pkgplan.ts';
+import { loadBlockProject } from '../src/core/blocks.ts';
 import { parseMap16File } from '../src/core/map16file.ts';
 import { blockOf, actsLike, extTileWords, setExtTileWords } from '../src/core/map16ext.ts';
-import { levelExtGfx, gfxEntry, installEditorPatch } from '../src/core/patches.ts';
+import { levelExtGfx, levelGfx, gfxEntry, installEditorPatch, GFX_SLOT_NAMES } from '../src/core/patches.ts';
 import { map16Source } from '../src/core/render.ts';
 import { loadLevel, serializeLayer1, newUid } from '../src/core/level.ts';
 import { DM16_EXT } from '../src/core/patches.ts';
@@ -73,6 +75,23 @@ const opts = { blank, tileWords: () => blank };
   const p = planUpload(rom, preview, blank);
   check(taken.ok && p.map16?.at === p.blocks[0].tiles[0] && p.blocks[1].tiles[0] === p.blocks[0].tiles[0] + 1 && p.blocks[0].tiles[0] !== 0x500 && p.notes.some((n) => /taken/.test(n)),
     `500 taken: blocks and Map16 tiles together from ${p.map16?.at.toString(16)}`);
+}
+
+// links changed in the preview: the .map16 at 700, the blocks swapped, the ExGFX as 90 for FG3
+{
+  const rom = fresh();
+  const p0 = planUpload(rom, preview, blank);
+  check(tileBlocks(p0).join() === 'Left.asm,Right.asm', 'links: Left on the first .map16 tile, Right on the second');
+  const p = editPlan(p0, { map16At: 0x700, tileBlocks: ['Right.asm', 'Left.asm'], gfx: [{ num: 0x90, slot: 'FG3' }] });
+  const r = await installPackage(rom, preview, { ...opts, level: 0x105, plan: p });
+  const proj = loadBlockProject(rom)!;
+  const on = (t: number) => proj.list.find((b) => b.tile === t)?.file;
+  check(r.ok && on(0x700) === 'blocks/Right.asm' && on(0x701) === 'blocks/Left.asm' && extTileWords(rom, 0x701)?.join() === words[1].join() && !blockOf(rom, 0x500),
+    'edited links installed: Right on 700, Left on 701 with the second tile\'s graphics');
+  check(!!gfxEntry(rom, 0x90) && levelGfx(rom, 0x105)[GFX_SLOT_NAMES.indexOf('FG3')] === 0x90, 'edited ExGFX: stored as 90, FG3 of level 105');
+  let err = '';
+  try { editPlan(p0, { tileBlocks: ['Left.asm', 'Left.asm'], blockTiles: new Map([['Right.asm', [0x500]]]) }); } catch (e) { err = String(e); }
+  check(/Two blocks on tile 500/.test(err), 'two blocks on one tile: refused');
 }
 
 // with the level setup the BG2 slot is used (VRAM patch installed for it): a placed tile 500 shows the

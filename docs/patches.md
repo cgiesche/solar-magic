@@ -119,6 +119,12 @@ with code it is the package's sample level. Graphics without code and without an
 no part takes (a readme, unknown formats) are listed in the preview as not installed. If nothing at all is
 recognized, the preview says what was found and what is missing.
 
+**Placement:** for blocks and graphics the preview shows where they go in this ROM and how they link up – the
+first tile of the `.map16`, which block each of its tiles shows, the tiles of blocks off the `.map16`, each ExGFX
+file's number and slot – and lets you change all of it before installing. Two blocks on one tile are refused.
+The checkbox below sets up the current level (the ExGFX in its slots, the colors of a `.pal` with its `.palmask`
+in its palette); it is a level edit: Ctrl+Z reverts it, removing the package does not.
+
 The preview has *Manual …* if the package contains a readme or an HTML manual. It
 is shown inside the editor, with images and links between the pages; the pages' scripts do not run.
 Manuals of packages in UberASM, Blocks and Sprites stay stored in the browser and are listed in the

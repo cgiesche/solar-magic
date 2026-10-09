@@ -22,7 +22,8 @@ import { ALL } from '../src/core/uberasm.ts';
 import { loadBlockProject, saveBlockProject } from '../src/core/blocks.ts';
 import { loadPixiProject, savePixiProject } from '../src/core/pixi.ts';
 import { loadMusicProject } from '../src/core/music.ts';
-import { levelMusic, setLevelMusic, installEditorPatch } from '../src/core/patches.ts';
+import { levelMusic, setLevelMusic, installEditorPatch, customPalette } from '../src/core/patches.ts';
+import { levelColors } from '../src/core/bgpack.ts';
 import { enableBlocks } from '../src/core/map16ext.ts';
 import { testSongZip } from './testsong.ts';
 
@@ -267,6 +268,29 @@ sameRom('song removed');
   check(reP.ok && reB.ok && reU.ok && loadPixiProject(rom)!.list.length === 2 && loadBlockProject(rom)!.list.length === 2, 'assigned again');
   for (const r of [ru, rr2, rb2]) await removePackage(rom, r.pkg!.id, opts.blank);
   check(!listPackages(rom).length && !loadPixiProject(rom) && !loadBlockProject(rom), 'and removed with their packages');
+}
+
+// the level setup (a level edit, on its own ROM): On-Off Blocks' masked colors in level 105's palette;
+// removing the package keeps them. Unchecked: the level stays as it was.
+{
+  const rom = new Rom(fixture('smw.smc'));
+  const e = new LevelEmulator(rom); e.boot();
+  const l = e.load(0x105);
+  const s = map16Source(rom, l);
+  const o: InstallOptions = { level: 0x105, blank: s.fg(0x025), tileWords: (t) => s.fg(t), cgram: levelColors(l) };
+  const pal = onoff.status === 'ready' ? onoff.files.get('PinkThreeCols.pal')! : new Uint8Array();
+  const want = (i: number) => (pal[i * 3] >> 3) | ((pal[i * 3 + 1] >> 3) << 5) | ((pal[i * 3 + 2] >> 3) << 10);
+  const off = await installPackage(rom, ready(onoff), { ...o, setup: false });
+  check(off.ok && !customPalette(rom, 0x105), 'level setup unchecked: level 105 keeps its colors');
+  await removePackage(rom, off.pkg!.id, o.blank);
+  const r = await installPackage(rom, ready(onoff), o);
+  const e2 = new LevelEmulator(rom); e2.boot();
+  const cg = e2.load(0x105).cgram;
+  const row7 = Array.from({ length: 9 }, (_, i) => cg[(0x70 + i) * 2] | (cg[(0x70 + i) * 2 + 1] << 8));
+  const other = cg[0x12] | (cg[0x13] << 8), before = l.cgram[0x12] | (l.cgram[0x13] << 8);
+  check(r.ok && row7.every((c, i) => c === want(0x70 + i)) && other === before, `level setup: palette row 7 from PinkThreeCols.pal in the level, other colors kept (${r.prints.filter((p) => /color/.test(p)).join()})`);
+  await removePackage(rom, r.pkg!.id, o.blank);
+  check(!!customPalette(rom, 0x105), 'removing the package keeps the level setup');
 }
 
 // legacy packages: patches applied before packages were tracked
