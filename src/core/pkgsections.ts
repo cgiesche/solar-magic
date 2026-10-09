@@ -140,6 +140,11 @@ export const uber = {
     }
     for (const k of OTHER) if (mine.other[k] && p.list[k] === mine.other[k]) p.list[k] = null;
     for (const f of mine.files) if (!others.some((o) => o.files.includes(f))) p.files.delete(f);
+    // calls to its files made by hand (another level, all levels) go with the files
+    for (const ctx of CONTEXTS) for (const [num, cs] of p.list[ctx]) {
+      const kept = cs.filter((c) => p.files.has(c.file) || !mine.files.includes(c.file));
+      if (kept.length) p.list[ctx].set(num, kept); else p.list[ctx].delete(num);
+    }
     return check(saveProject(rom, p), 'UberASM');
   },
 } satisfies PartSection<UberRead, UberPart> & Owns;
