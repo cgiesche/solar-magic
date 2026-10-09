@@ -14,6 +14,18 @@ npm test             # Regressionstests (benötigt die ROM als test/fixtures/smw
 
 Im Dev-Modus lädt `?rom=/<Dateiname>` eine ROM direkt aus dem Projektordner.
 
+### Desktop-App (Tauri)
+
+```sh
+npm run tauri dev    # Desktop-Fenster gegen den Vite-Dev-Server
+npm run desktop      # Release-Build mit Installern nach src-tauri/target/release/bundle/
+```
+
+Benötigt Rust und unter Linux WebKitGTK 4.1 (`webkit2gtk-4.1`). Gleicher Code wie im Browser; Unterschiede nur in
+`src/ui/platform.ts`: Öffnen/Speichern über die Dialoge des Systems, „Save project“ schreibt direkt in die geöffnete
+`.smwproj`, Schließen mit ungespeicherten Änderungen fragt nach. Installer für Linux/Windows/macOS baut der Workflow
+*Desktop* (bei Push auf master oder von Hand).
+
 ## Grundidee: Das Spiel rendert sich selbst
 
 Statt die rund 250 Objektroutinen von SMW nachzuprogrammieren, enthält der Editor einen 65816-CPU-Emulator
