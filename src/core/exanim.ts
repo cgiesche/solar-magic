@@ -117,8 +117,6 @@ export function slotTiles(e: ExSlot): number[] {
   if (e.type >= 0x10) out.push(...out.map((t) => t + 0x10));
   return out;
 }
-// a tile slot with frames past AN2 ($7EAD00-$7EB8FF, patches.ts): the BG tilemap is there
-export const framesPastAn2 = (e: ExSlot) => kindOf(e.type) === 'tiles' && !(e.dest & 0x8000) && e.frames.some((f) => f >= 0xb900 && f < 0xc100);
 // a slot whose frames come from the list's alternative file (ExGFX 60-63, shared by all levels)
 export const usesAltFile = (e: ExSlot) => kindOf(e.type) === 'tiles' ? (e.dest & 0x8000) !== 0 : kindOf(e.type) === 'colors' && e.type < 0x16 && ((e.dest >> 8) & 0x80) !== 0;
 
@@ -343,4 +341,62 @@ export function addLevelSlots(rom: Rom, level: number, slots: ExSlot[]): number[
   list.count = slotsUsed(list);
   writeLevelList(rom, level, list);
   return used;
+}
+
+// ---- frames from elsewhere into an alternative file ----
+// Lunar Magic's AN2: a level's 4 KB ExGFX file in RAM from $7EAD00, where a slot's RAM frames point
+export const AN2_FRAMES = 0xad00, AN2_FRAMES_END = 0xbd00;
+export const altFileName = (n: number) => `Anim graphic ${'ABCD'[n]}`;
+const frameBytes = (type: number) => type === 0x0f ? 16 : tilesOf(type) * 32;
+const tileSlotFromAn2 = (e: ExSlot) => kindOf(e.type) === 'tiles' && !(e.dest & 0x8000) && e.frames.some((f) => f >= AN2_FRAMES && f < AN2_FRAMES_END);
+
+// the alternative file a level's tile slots take their frames from (its list's; 0 without one)
+export function levelAltFile(rom: Rom, level: number): number {
+  return readLevelList(rom, level)?.altFile ?? 0;
+}
+
+// slots of another list (a level file's, or one reading AN2) taking their frames from alternative file
+// `file`: the frames they use from AN2 (`src.an2`) or from their own alternative file (`src.alt`) are
+// copied into it (a frame already there is used again) and the slots point there. A slot's other RAM
+// frames (the game's graphics, e.g. GFX33 from $7E7D00) come along from `src.ram`, the level's WRAM
+// after its load; slots without AN2 frames keep reading RAM. Without `alt` the slots' alternative file is
+// `file` already and they stay. Per slot the new one, or null where its frames are missing or do not fit
+// (with a note).
+export function localizeFrames(rom: Rom, slots: ExSlot[], src: { an2?: Uint8Array | null; alt?: Uint8Array | null; ram?: Uint8Array | null }, file: number): { slots: (ExSlot | null)[]; notes: string[] } {
+  const foreign = 'alt' in src;
+  let data = readAltFile(rom, file) ?? new Uint8Array(0);
+  const start = data;
+  const out: (ExSlot | null)[] = [], notes: string[] = [];
+  const place = (b: Uint8Array): number => {
+    for (let o = 0; o + b.length <= data.length; o += Math.min(b.length, 32)) if (b.every((v, i) => data[o + i] === v)) return o;
+    const o = data.length, grown = new Uint8Array(o + ((b.length + 31) & ~31));
+    grown.set(data); grown.set(b, o);
+    data = grown;
+    return o;
+  };
+  for (const e of slots) {
+    out.push(null);
+    const tiles = kindOf(e.type) === 'tiles';
+    const fromAlt = foreign && usesAltFile(e), fromAn2 = tileSlotFromAn2(e);
+    if (!fromAlt && !fromAn2) { out[out.length - 1] = { ...e, frames: [...e.frames] }; continue; }
+    if (fromAlt && !tiles) { notes.push('An ExAnimation slot takes colors from an alternative file (ExGFX 60-63) – left out'); continue; }
+    const len = frameBytes(e.type);
+    // the bytes of a frame, null when its source is missing
+    const bytes = (f: number): Uint8Array | null => {
+      const [from, at] = fromAlt ? [src.alt, f] : f >= AN2_FRAMES && f < AN2_FRAMES_END ? [src.an2, f - AN2_FRAMES] : [src.ram, f];
+      return from && at + len <= from.length ? from.subarray(at, at + len) : null;
+    };
+    const got = e.frames.map(bytes);
+    if (got.some((b) => !b)) {
+      const what = fromAlt ? 'an alternative file (ExGFX 60-63)' : e.frames.every((f) => f >= AN2_FRAMES && f < AN2_FRAMES_END) || !src.an2 ? 'AN2' : 'RAM';
+      notes.push(`An ExAnimation slot takes frames from ${what} that ${what === 'RAM' ? 'is not known here' : 'is missing'} – left out`);
+      continue;
+    }
+    const before = data;
+    const frames = got.map((b) => place(b!));
+    if (data.length > ALT_FILE_MAX) { data = before; notes.push(`${altFileName(file)} is full (32 KB) – an ExAnimation slot left out`); continue; }
+    out[out.length - 1] = { ...e, dest: e.dest | 0x8000, frames };
+  }
+  if (data !== start) writeAltFile(rom, file, data);
+  return { slots: out, notes };
 }

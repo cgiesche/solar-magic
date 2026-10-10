@@ -9,6 +9,7 @@ import { pickFile } from './platform.ts';
 import { hex } from '../core/names.ts';
 import { planBgPack, importLevelFile, isLevelImport, levelColors, type BgPackResult } from '../core/bgpack.ts';
 import { extGfxAvailable } from '../core/patches.ts';
+import { altFileName, levelAltFile } from '../core/exanim.ts';
 import { uploadFiles } from '../core/patchpkg.ts';
 import { map16Source } from '../core/render.ts';
 import { logView, errorText } from './projectpane.ts';
@@ -64,7 +65,7 @@ export function openLevelImportDialog(app: App, fileName: string, files: Map<str
     ...plan.palettes.map((p, i) => h('label', { class: 'row small' }, check(usePal[i], (v) => (usePal[i] = v)),
       ` Colors from ${file(p.file)}: ${p.colors.length} color(s)${p.back ? ' and the background color' : ''} (custom palette for level ${lvl})`,
       p.layer3 ? h('span', { class: 'hint' }, ' – layer 3 colors') : '')),
-    plan.exanim.length ? h('p', { class: 'hint' }, `ExAnimation: ${plan.exanim.length} slot(s) animating its tiles go into the list of level ${lvl}${plan.gfx.some((g) => g.slot === 'AN2') ? ', with their frames from AN2' : ''}.`) : '',
+    plan.exanim.length ? h('p', { class: 'hint' }, `Animations: ${plan.exanim.length} slot(s) animating its tiles go into the list of level ${lvl}; their frames are copied into ${altFileName(levelAltFile(app.rom, app.level.number))}, which all levels using it share.`) : '',
     plan.layer3.length ? h('p', { class: 'hint' }, `Layer 3 (${plan.layer3.map(file).join(', ')}) is not taken over – Lunar Magic's layer 3 tilemaps are not supported yet.`) : '',
     ext && !extGfxAvailable(app.rom) ? h('p', { class: 'hint' }, 'For the BG2/BG3 slots the VRAM patch is installed.') : '',
     plan.notes.length ? h('ul', { class: 'hint' }, plan.notes.map((t) => h('li', null, t))) : '',
@@ -75,7 +76,7 @@ export function openLevelImportDialog(app: App, fileName: string, files: Map<str
       let r: BgPackResult;
       try {
         r = app.romEdit(`Level import “${name}” into level ${lvl}`, () =>
-          importLevelFile(app.rom, app.level, files, plan, { bg: useBg, fg: useFg, at, fgAt, palettes: usePal, cgram: levelColors(app.render), blank }));
+          importLevelFile(app.rom, app.level, files, plan, { bg: useBg, fg: useFg, at, fgAt, palettes: usePal, cgram: levelColors(app.render), wram: app.render.wram, blank }));
       } catch (e) { r = { ok: false, errors: [errorText(e)], notes: [], bg: null }; }
       if (!r.ok) { clear(log).appendChild(logView({ ok: false, errors: r.errors, warnings: [], prints: [] })); return false; }
       const bg = r.bg;

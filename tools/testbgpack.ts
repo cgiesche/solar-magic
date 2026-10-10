@@ -12,9 +12,9 @@ import { bgTileWords, bgExtTileWords } from '../src/core/bgmap16.ts';
 import { parseMap16File } from '../src/core/map16file.ts';
 import { bgFromWram } from '../src/core/bg.ts';
 import { loadLevel, hasLayer2Objects, newUid } from '../src/core/level.ts';
-import { readLevelList } from '../src/core/exanim.ts';
+import { readLevelList, readAltFile, usesAltFile } from '../src/core/exanim.ts';
 import { saveLevel } from '../src/core/save.ts';
-import { levelGfx, levelExtGfx, GFX_SLOT_NAMES, gfxEntry, customPalette, levelAn2, DM16_EXT } from '../src/core/patches.ts';
+import { levelGfx, levelExtGfx, GFX_SLOT_NAMES, gfxEntry, customPalette, DM16_EXT } from '../src/core/patches.ts';
 import { renderLevel, map16Source } from '../src/core/render.ts';
 import { extTileWords, actsLike } from '../src/core/map16ext.ts';
 import { listPackages } from '../src/core/pkgreg.ts';
@@ -174,8 +174,9 @@ const map16 = parseMap16File(files.get('ghostbustersghosttrapjavamanhattanBG.map
 }
 
 // Lunar Magic's AN2 and ExAnimation: On-Off Blocks' graphics without the code (a level import) – the FG
-// Map16 tiles, AN2 and the two ExAnimation slots animating them come into the level; in the game the
-// tiles show AN2's frames by the ON/OFF switch
+// Map16 tiles and the two ExAnimation slots animating them come into the level, their frames from AN2
+// copied into Anim graphic A (with their GFX33 frames from RAM); in the game the tiles show AN2's frames by
+// the ON/OFF switch
 {
   const all = uploadFiles('On-Off Block.zip', new Uint8Array(readFileSync('test/fixtures/On-Off Block.zip')));
   const files = new Map([...all].filter(([k]) => !/\.(asm|txt)$/i.test(k)));
@@ -183,14 +184,15 @@ const map16 = parseMap16File(files.get('ghostbustersghosttrapjavamanhattanBG.map
   const e = new LevelEmulator(rom); e.boot();
   const l = e.load(LV);
   const plan = planBgPack(rom, 'On-Off', files, BLANK);
-  const an2 = plan.gfx.find((g) => g.slot === 'AN2');
-  check(isLevelImport(files) && !!an2 && an2.lmNum === 0x291 && plan.exanim.length === 2 && plan.exanim.every((x) => x.parts.join() === 'fg'), `plan: ExGFX291 as AN2, 2 ExAnimation slots for the FG tiles (${plan.notes.join(' | ')})`);
-  const r = importLevelFile(rom, loadLevel(rom, LV), files, plan, { cgram: levelColors(l), blank: BLANK });
-  check(r.ok && levelAn2(rom, LV) === an2!.num && readLevelList(rom, LV)?.slots.size === 2, `imported: AN2 and the ExAnimation slots in level ${LV.toString(16)} (${[...r.errors, ...r.notes].join(' | ')})`);
+  const gfx = files.get('ExGraphics/ExGFX291.bin')!;
+  check(isLevelImport(files) && plan.frames.an2 === gfx && !plan.gfx.some((g) => g.file) && plan.exanim.length === 2 && plan.exanim.every((x) => x.parts.join() === 'fg') && !plan.notes.some((n) => /ExGFX291/.test(n)),
+    `plan: ExGFX291 the frames (AN2), not an ExGFX; 2 ExAnimation slots for the FG tiles (${plan.notes.join(' | ')})`);
+  const r = importLevelFile(rom, loadLevel(rom, LV), files, plan, { cgram: levelColors(l), wram: l.wram, blank: BLANK });
+  const list = readLevelList(rom, LV);
+  check(r.ok && list?.slots.size === 2 && [...list.slots.values()].every(usesAltFile) && readAltFile(rom, list.altFile)?.length === 0x200, `imported: the ExAnimation slots in level ${LV.toString(16)}, frames in its Anim graphic (${[...r.errors, ...r.notes].join(' | ')})`);
   const lv = loadLevel(rom, LV);
   lv.objects.push({ uid: newUid(), num: 0, ext: DM16_EXT, x: 4, y: 20, size: 0x00, tile: plan.fgAt });
   saveLevel(rom, lv);
-  const gfx = files.get('ExGraphics/ExGFX291.bin')!;
   const vramAt = (off: boolean) => { const e2 = new LevelEmulator(rom); e2.boot(); e2.load(LV, { onOffSwitch: off }); for (let i = 0; i < 16; i++) e2.snes.runFrame(); return e2.snes.vram; };
   const shows = (v: Uint8Array, at: number, from: number) => gfx.subarray(from, from + 0x80).every((x, i) => v[at + i] === x);
   check(shows(vramAt(false), 0x4080, 0x80) && shows(vramAt(true), 0x4000, 0), 'in the game: the tiles show AN2\'s frames by the ON/OFF switch');

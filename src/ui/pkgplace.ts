@@ -10,6 +10,7 @@ import { planUpload, type ReadyPreview, type InstallOptions } from '../core/pack
 import { editPlan, tileBlocks, GFX_SLOTS, type PackagePlan, type PlanEdits } from '../core/pkgplan.ts';
 import { map16Targets } from '../core/map16file.ts';
 import { levelColors } from '../core/bgpack.ts';
+import { altFileName, levelAltFile } from '../core/exanim.ts';
 import { errorText } from './projectpane.ts';
 
 const file = (f: string) => f.split('/').pop()!;
@@ -17,7 +18,7 @@ const file = (f: string) => f.split('/').pop()!;
 export interface Placement {
   el: HTMLElement;
   // the install options it stands for; throws when the edits don't fit together
-  read(): Pick<InstallOptions, 'plan' | 'setup' | 'cgram' | 'sample'>;
+  read(): Pick<InstallOptions, 'plan' | 'setup' | 'cgram' | 'wram' | 'sample'>;
 }
 
 // null: the package has nothing to place (no blocks, no graphics)
@@ -44,7 +45,7 @@ export function placementEditor(app: App, p: ReadyPreview, blank: number[]): Pla
       const c = current();
       const slots = c.gfx.filter((g) => g.slot && GFX_SLOTS.includes(g.slot)).map((g) => `${g.slot} = ExGFX ${hex(g.num, 2)}`);
       const colors = c.palettes.filter((x) => !x.layer3).map((x) => `${x.colors.length} color(s) from ${file(x.file)}`);
-      const anim = c.exanim.length ? [`${c.exanim.length} ExAnimation slot(s)`] : [];
+      const anim = c.exanim.length ? [`${c.exanim.length} animation(s) with their frames in ${altFileName(levelAltFile(app.rom, app.level.number))}`] : [];
       setupText.textContent = slots.length || colors.length || anim.length ? ` Set up level ${lvl}: ${[...slots, ...anim, ...colors].join(', ')}` : ` Level ${lvl}: nothing to set up`;
     } catch (e) { status.appendChild(h('p', { class: 'hint error' }, errorText(e))); }
   };
@@ -80,5 +81,5 @@ export function placementEditor(app: App, p: ReadyPreview, blank: number[]): Pla
     plan.notes.length ? h('ul', { class: 'hint' }, plan.notes.map((t) => h('li', null, t))) : '',
     status);
   refresh();
-  return { el, read: () => ({ plan: current(), setup, cgram: levelColors(app.render), sample: sample ? app.level : undefined }) };
+  return { el, read: () => ({ plan: current(), setup, cgram: levelColors(app.render), wram: app.render.wram, sample: sample ? app.level : undefined }) };
 }

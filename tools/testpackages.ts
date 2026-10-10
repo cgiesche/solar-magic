@@ -24,8 +24,8 @@ import { loadPixiProject, savePixiProject } from '../src/core/pixi.ts';
 import { loadMusicProject } from '../src/core/music.ts';
 import { loadLevel, newUid } from '../src/core/level.ts';
 import { saveLevel } from '../src/core/save.ts';
-import { levelMusic, setLevelMusic, installEditorPatch, customPalette, levelAn2, DM16_EXT } from '../src/core/patches.ts';
-import { readLevelList } from '../src/core/exanim.ts';
+import { levelMusic, setLevelMusic, installEditorPatch, customPalette, DM16_EXT } from '../src/core/patches.ts';
+import { readLevelList, readAltFile, usesAltFile } from '../src/core/exanim.ts';
 import { levelColors } from '../src/core/bgpack.ts';
 import { enableBlocks, setExtTileWords } from '../src/core/map16ext.ts';
 import { parseLmObjects } from '../src/core/mwl.ts';
@@ -176,7 +176,7 @@ const ro = await install(onoff, { level: null });
   const sprite = loadPixiProject(rom)?.list.find((e) => e.kind === 'bounce' && /on_off_block/.test(e.file));
   const block = dec.decode(loadBlockProject(rom)?.files.get('blocks/on_off_block.asm'));
   const num = /^!bounce_num\s*=\s*\$([0-9A-F]+)/im.exec(block)?.[1];
-  check(ro.ok && ro.pkg!.blocks.tiles.length === 2 && ro.pkg!.map16!.length === 2 && ro.pkg!.gfx.length === 1, `On-Off Blocks: block on two Map16 tiles, ExGFX (${ro.prints.join(' | ')})`);
+  check(ro.ok && ro.pkg!.blocks.tiles.length === 2 && ro.pkg!.map16!.length === 2 && ro.pkg!.gfx.length === 0, `On-Off Blocks: block on two Map16 tiles, no ExGFX (its only file is AN2, animation frames) (${ro.prints.join(' | ')})`);
   check(!!sprite && num !== undefined && parseInt(num, 16) === sprite.num, `On-Off Blocks: the block spawns bounce sprite ${sprite?.num.toString(16)} (!bounce_num = $${num})`);
 }
 for (const r of [ro, rs, rr, rb, r1]) await removePackage(rom, r.pkg!.id, opts.blank);
@@ -297,19 +297,20 @@ sameRom('song removed');
   check(!!customPalette(rom, 0x105), 'removing the package keeps the level setup');
 }
 
-// the level setup with Lunar Magic's AN2 and ExAnimation (on its own ROM): On-Off Blocks' ExGFX291 is AN2
-// of level 105, the sample level's two ExAnimation slots for tiles 200-207 come into its list; in the
-// game the block's tiles show AN2's frames by the ON/OFF switch
+// the level setup with Lunar Magic's AN2 and ExAnimation (on its own ROM): the sample level's two
+// ExAnimation slots for tiles 200-207 come into the list of level 105, their frames from On-Off Blocks'
+// ExGFX291 (AN2) copied into Anim graphic A; in the game the block's tiles show them by the ON/OFF switch
 {
   const rom = new Rom(fixture('smw.smc'));
   const e = new LevelEmulator(rom); e.boot();
   const l = e.load(0x105);
   const s = map16Source(rom, l);
-  const r = await installPackage(rom, ready(onoff), { level: 0x105, blank: s.fg(0x025), tileWords: (t) => s.fg(t), cgram: levelColors(l) });
+  const r = await installPackage(rom, ready(onoff), { level: 0x105, blank: s.fg(0x025), tileWords: (t) => s.fg(t), cgram: levelColors(l), wram: l.wram });
   const an2 = onoff.status === 'ready' ? onoff.files.get('ExGraphics/ExGFX291.bin')! : new Uint8Array();
   const list = readLevelList(rom, 0x105);
-  check(r.ok && levelAn2(rom, 0x105) === r.pkg!.gfx[0] && list?.slots.size === 2 && [...list.slots.values()].every((x) => x.trigger === 3),
-    `level setup: ExGFX291 as AN2 of level 105, 2 ExAnimation slots (${r.prints.filter((p) => /Level 105/.test(p)).join(' | ')})`);
+  const alt = readAltFile(rom, 0);
+  check(r.ok && list?.slots.size === 2 && [...list.slots.values()].every((x) => x.trigger === 3 && usesAltFile(x)) && alt?.length === 0x200,
+    `level setup: 2 ExAnimation slots in level 105, their 16 frame tiles (AN2 and GFX33 from RAM) in Anim graphic A (${alt?.length}; ${r.prints.filter((p) => /Level 105/.test(p)).join(' | ')})`);
   const lv = loadLevel(rom, 0x105);
   lv.objects.push({ uid: newUid(), num: 0, ext: DM16_EXT, x: 4, y: 20, size: 0x00, tile: r.pkg!.blocks.tiles[0] });
   saveLevel(rom, lv);
@@ -335,7 +336,7 @@ sameRom('song removed');
   const l = e.load(0x105);
   const s = map16Source(rom, l);
   const into = loadLevel(rom, 0x105);
-  const r = await installPackage(rom, ready(onoff), { level: 0x105, blank: s.fg(0x025), tileWords: (t) => s.fg(t), cgram: levelColors(l), sample: into });
+  const r = await installPackage(rom, ready(onoff), { level: 0x105, blank: s.fg(0x025), tileWords: (t) => s.fg(t), cgram: levelColors(l), wram: l.wram, sample: into });
   const lv = r.sample?.level;
   const dm = lv?.objects.filter((o) => o.tile !== undefined) ?? [];
   check(r.ok && !!lv && dm.map((o) => `${o.x},${o.y}:${o.tile!.toString(16)}`).sort().join(' ') === '6,20:508 9,20:509' && r.pkg!.blocks.tiles.join() === [0x508, 0x509].join(),
