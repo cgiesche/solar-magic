@@ -17,7 +17,7 @@ import { snesToPc, type Rom } from '../../core/rom.ts';
 import { hex } from '../../core/names.ts';
 import {
   gfxEntry, setGfxEntry, hasEditorPatch, installEditorPatch, VANILLA_GFX, levelGfx, setLevelGfx, defaultGfx,
-  levelExtGfx, setLevelExtGfx, extGfxAvailable, levelAn2, setLevelAn2,
+  levelExtGfx, setLevelExtGfx, extGfxAvailable,
 } from '../../core/patches.ts';
 import { importGfxFile, exgfxName } from '../../core/map16file.ts';
 import { recordPackageChange, type Package } from '../../core/pkgreg.ts';
@@ -25,7 +25,7 @@ import { parsePrimaryHeader, L1_PTRS } from '../../core/level.ts';
 import { map16Source } from '../../core/render.ts';
 import { EXT_FIRST, EXT_TILES, map16Ext } from '../../core/map16ext.ts';
 import { gfxName, lmAnimName, ANIM_FILE, levelSlots as map16Slots } from './map16tab.ts';
-import { readAltFile, writeAltFile, altFileAddr, exanimInstalled } from '../../core/exanim.ts';
+import { readAltFile, writeAltFile, altFileAddr, exanimInstalled, ALT_FILE_MAX } from '../../core/exanim.ts';
 import { openHeaderDialog } from '../headerdialog.ts';
 import { animsAt } from './animtab.ts';
 
@@ -93,7 +93,7 @@ function storeGfx(rom: Rom, f: GfxFile): void {
 
 // slots of a level: name, storage index (levelGfx order) or BG2/BG3 index, file, default file; first: the
 // first 8x8 tile number (Map16 tiles, or for SP1-SP4 the sprite tile number in OAM: 100-1FF = page 1)
-interface Slot { name: string; k: number; ext: boolean; file: number; def: number; custom: boolean; first: number; sprite: boolean; an2?: boolean }
+interface Slot { name: string; k: number; ext: boolean; file: number; def: number; custom: boolean; first: number; sprite: boolean }
 function slotsOf(app: App, level: number, tileset: number, spriteSet: number): Slot[] {
   const set = levelGfx(app.rom, level);
   const def = defaultGfx(app.rom, tileset, spriteSet);
@@ -277,10 +277,7 @@ export class GfxTab implements WsPanel {
     const hd = app.level.header;
     box.append(h('div', { class: 'gt-cards-title' }, h('b', null, `Graphics slots of level ${hex(app.level.number, 3)}`),
       h('span', { class: 'hint' }, 'apply to this level only · a click opens the file, “Swap” chooses another')));
-    // AN2: no VRAM tiles of its own, frames for ExAnimation (patches.ts)
-    const a2 = levelAn2(app.rom, app.level.number);
-    const an2: Slot = { name: 'AN2', k: 0, ext: true, an2: true, file: a2, def: 0xff, custom: a2 !== 0xff, first: -1, sprite: false };
-    for (const s of [...slots, an2]) {
+    for (const s of slots) {
       const has = s.file !== 0xff;
       const thumb = h('canvas', { class: 'gt-card-img', width: 64, height: 16 });
       if (has) this.thumb(thumb, s.file, s.sprite ? 9 : this.rowForSlot(s), 64, 16);
@@ -292,8 +289,7 @@ export class GfxTab implements WsPanel {
       box.append(h('div', { class: `gt-card${has && s.file === this.cur ? ' active' : ''}${has ? '' : ' empty'}` },
         h('div', { class: 'gt-card-head' }, h('b', null, s.name), status),
         h('div', { class: 'gt-card-body', title: has ? `Open ${gfxName(s.file)}` : '', onclick: () => { if (has) this.select(s.file); } }, thumb, h('span', { class: 'mono' }, has ? gfxName(s.file) : '–')),
-        s.an2 ? h('div', { class: 'hint gt-card-range', title: 'Like Lunar Magic\'s AN2: an uncompressed 4bpp file kept in RAM from $7EAD00; ExAnimation frames from $7EAD00 on come from it' }, 'Frames for animations')
-          : h('div', { class: 'hint gt-card-range', title: s.sprite ? 'Sprite tile numbers (as in patches and sprites); from 100 = second page (T bit), given there without the 1' : 'The Map16 tiles use these 8x8 tile numbers' }, s.sprite ? `Sprite tiles ${spriteRange(s.first)}` : `Tiles ${hex(s.first, 3)}–${hex(s.first + 0x7f, 3)}`),
+        h('div', { class: 'hint gt-card-range', title: s.sprite ? 'Sprite tile numbers (as in patches and sprites); from 100 = second page (T bit), given there without the 1' : 'The Map16 tiles use these 8x8 tile numbers' }, s.sprite ? `Sprite tiles ${spriteRange(s.first)}` : `Tiles ${hex(s.first, 3)}–${hex(s.first + 0x7f, 3)}`),
         h('button', { class: 'gt-card-btn', onclick: () => void this.swap(s) }, 'Swap …')));
     }
     if (!extGfxAvailable(app.rom)) box.append(h('div', { class: 'gt-card empty' }, h('div', { class: 'gt-card-head' }, h('b', null, 'BG2/BG3')),
@@ -391,8 +387,7 @@ export class GfxTab implements WsPanel {
     }
     try {
       app.romEdit(`${s.name} of level ${hex(app.level.number, 3)} → ${v === 0xff ? 'default' : gfxName(v)}`, () => {
-        if (s.an2) setLevelAn2(app.rom, app.level.number, v);
-        else if (s.ext) { const ex = levelExtGfx(app.rom, app.level.number); ex[s.k] = v; setLevelExtGfx(app.rom, app.level.number, ex); }
+        if (s.ext) { const ex = levelExtGfx(app.rom, app.level.number); ex[s.k] = v; setLevelExtGfx(app.rom, app.level.number, ex); }
         else { const set = levelGfx(app.rom, app.level.number); set[s.k] = v; setLevelGfx(app.rom, app.level.number, set); }
       });
       app.flushRomChange();
@@ -1044,7 +1039,7 @@ export class GfxTab implements WsPanel {
       const data = new Uint8Array(await file.arrayBuffer());
       if (target >= ANIM_FILE) {
         if (!(await confirmExAnim(this.app))) return null;
-        if (data.length % 32 || data.length > 0x8000) throw new Error('Animation graphic: an uncompressed 4bpp file of up to 32 KB is expected');
+        if (data.length % 32 || data.length > ALT_FILE_MAX) throw new Error('Animation graphic: an uncompressed 4bpp file of up to 1023 tiles is expected');
         this.importEdit(`${file.name} → ${gfxName(target)}`, into, () => writeAltFile(this.app.rom, target - ANIM_FILE, data));
         this.select(target);
         toast(`${file.name} → ${gfxName(target)}`);

@@ -8,7 +8,7 @@
 
 import { Rom, snesToPc, pcToSnes, RESERVED_TOP, type RatsBlock } from './rom.ts';
 import { assemble, type AsarMessage, type AsarResult } from './asar.ts';
-import { editorPatch, customPalettePatch, bgPatch, extGfxPatch, musicPatch, an2Patch, EDITOR_HOOKS, PAL_HOOKS, BG_HOOKS, EXT_GFX_HOOKS, MUSIC_HOOKS, AN2_HOOKS } from './patches.ts';
+import { editorPatch, customPalettePatch, bgPatch, extGfxPatch, musicPatch, EDITOR_HOOKS, PAL_HOOKS, BG_HOOKS, EXT_GFX_HOOKS, MUSIC_HOOKS } from './patches.ts';
 import { messagePatch, MSG_HOOKS } from './messages.ts';
 import { map16Ext, MAP16X_HOOKS } from './map16ext.ts';
 import { bgMap16Ext, BGMAP16_HOOKS } from './bgmap16.ts';
@@ -23,7 +23,6 @@ export const BUILTINS: Builtin[] = [
   { name: 'BG tilemaps (SMWB)', installed: (r) => !!bgPatch(r), hooks: BG_HOOKS },
   { name: 'Music per level (SMWU)', installed: (r) => !!musicPatch(r), hooks: MUSIC_HOOKS },
   { name: 'BG2/BG3 graphics (SMWG)', installed: (r) => !!extGfxPatch(r), hooks: EXT_GFX_HOOKS },
-  { name: 'AN2 graphics (SMWN)', installed: (r) => !!an2Patch(r), hooks: AN2_HOOKS },
   { name: 'Messages (SMWM)', installed: (r) => !!messagePatch(r), hooks: MSG_HOOKS },
   { name: 'Structures (SMWS)', installed: (r) => !!structPatch(r), hooks: STRUCT_HOOKS },
   { name: 'Extended Map16 (SMWX)', installed: (r) => !!map16Ext(r), hooks: MAP16X_HOOKS },

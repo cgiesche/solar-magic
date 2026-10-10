@@ -5,7 +5,8 @@ import { openLevelImport } from './ui/levelimport.ts';
 import { createBps, crc32 } from './core/bps.ts';
 
 const SMW_CLEAN_CRC = 0xb19ed489; // Super Mario World (U), headerless
-import { disableUnsafeExtGfx, hasEditorPatch, fixAn2Patch } from './core/patches.ts';
+import { disableUnsafeExtGfx, hasEditorPatch } from './core/patches.ts';
+import { migrateAn2 } from './core/an2legacy.ts';
 import { App, type EditMode } from './ui/app.ts';
 import { h, clear, toast, log, modal, choose } from './ui/dom.ts';
 import { downloadBytes, pickFile, saveFile, filePath, fileName, desktop, guardClose } from './ui/platform.ts';
@@ -84,10 +85,14 @@ function startWith(rom: Rom, name: string): void {
     saveRom(name, rom).catch(() => {});
     toast('BG2/BG3 graphics were turned off: they overwrote the layer 1 tilemap (broken background). The assignments stay saved and apply again once the VRAM patch is available.', 'error');
   }
-  if (fixAn2Patch(rom)) {
-    saveRom(name, rom).catch(() => {});
-    log('AN2 patch updated: it copied 4 KB over the level\'s BG tilemap, now the first 3 KB of the file.');
-  }
+  try {
+    const an2 = migrateAn2(rom);
+    if (an2) {
+      saveRom(name, rom).catch(() => {});
+      log(`AN2 removed: animations take their frames from the Anim graphics now${an2.levels.length ? `; the frames of ${an2.levels.length} level(s) were copied there` : ''}.`);
+      for (const n of an2.notes) log(n);
+    }
+  } catch (e) { console.warn('AN2 migration', e); }
   if (!rom.title().startsWith('SUPER MARIOWORLD')) {
     toast(`Unexpected ROM title "${rom.title()}" – trying anyway.`, 'error');
   }

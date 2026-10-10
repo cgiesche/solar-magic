@@ -13,7 +13,7 @@
 
 import type { Rom } from './rom.ts';
 import { snesToPc } from './rom.ts';
-import { editorPatch, an2DataRanges } from './patches.ts';
+import { editorPatch } from './patches.ts';
 import { exanimDataRanges } from './exanim.ts';
 
 export const PAGE_SHIFT = 8;
@@ -40,7 +40,7 @@ export function updateBytePages(rom: Rom): void {
   rom.reads = null;
   try {
     const markPc = (o: number, end: number) => BYTE_PAGES.fill(1, o >> PAGE_SHIFT, ((end - 1) >> PAGE_SHIFT) + 1);
-    for (const [a, b] of [...exanimDataRanges(rom), ...an2DataRanges(rom)]) markPc(a, b);
+    for (const [a, b] of exanimDataRanges(rom)) markPc(a, b);
     const p = editorPatch(rom);
     if (!p) return;
     const mark = (snes: number, len: number) => { const o = snesToPc(snes); markPc(o, o + len); };

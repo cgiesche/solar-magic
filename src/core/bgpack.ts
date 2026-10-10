@@ -25,7 +25,7 @@ import {
   EXT_GFX_SLOT_NAMES, extGfxAvailable, customPalette, setCustomPalette,
 } from './patches.ts';
 import { mwlExAnim } from './mwl.ts';
-import { slotTiles, usesAltFile, addLevelSlots, localizeFrames, levelAltFile, altFileName, kindOf, AN2_FRAMES, AN2_FRAMES_END, type ExList, type ExSlot } from './exanim.ts';
+import { slotTiles, usesAltFile, addLevelSlots, localizeFrames, levelAltFile, altFileName, kindOf, AN2_FRAMES, AN2_FRAMES_END, ALT_FILE_MAX, type ExList, type ExSlot } from './exanim.ts';
 import { RAM } from './ram.ts';
 import { installVramPatch } from './vrampatch.ts';
 
@@ -118,7 +118,7 @@ export function frameSources(files: Map<string, Uint8Array>, list: ExList | null
   const pick = (f: string | undefined) => {
     if (!f) return null;
     const d = files.get(f)!;
-    if (d.length & 31 || d.length > 0x8000) { notes.push(`${base(f)} is not uncompressed 4bpp graphics – the animation frames from it are left out`); return null; }
+    if (d.length & 31 || d.length > ALT_FILE_MAX) { notes.push(`${base(f)} is not uncompressed 4bpp graphics – the animation frames from it are left out`); return null; }
     return d;
   };
   const tiles = [...(list?.slots.values() ?? [])].filter((e) => kindOf(e.type) === 'tiles');

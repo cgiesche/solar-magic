@@ -27,7 +27,7 @@ const GLOBAL_BANK = 0x5b;
 const GLOBAL_LOW = 0x65;
 export const SETTINGS = 0x03fe00;
 export const ALT_FILES = 0x03bcc0;
-export const ALT_FILE_MAX = 0x8000;
+export const ALT_FILE_MAX = 0x7fe0; // 1023 tiles: a RATS block within one bank
 export const SLOTS = 0x20;
 
 // settings bits (set = off)
@@ -285,7 +285,7 @@ export function readAltFile(rom: Rom, n: number): Uint8Array | null {
   return size > 0 ? rom.bytes(a, size) : null;
 }
 export function writeAltFile(rom: Rom, n: number, data: Uint8Array | null): void {
-  if (data && data.length > ALT_FILE_MAX) throw new Error('Animation graphics too large (max. 32 KB)');
+  if (data && data.length > ALT_FILE_MAX) throw new Error('Animation graphics too large (max. 1023 tiles)');
   if (!exanimInstalled(rom)) {
     if (!data) return;
     const r = installExAnim(rom);
@@ -355,14 +355,22 @@ export function levelAltFile(rom: Rom, level: number): number {
   return readLevelList(rom, level)?.altFile ?? 0;
 }
 
+// the lists whose tile slots take frames from alternative file `n`: levels and the global list
+export function altFileUsers(rom: Rom, n: number): { levels: number[]; global: boolean } {
+  const uses = (l: ExList | null) => !!l && l.altFile === n && [...l.slots.values()].some((e) => kindOf(e.type) === 'tiles' && (e.dest & 0x8000) !== 0);
+  const levels: number[] = [];
+  if (exanimInstalled(rom)) for (let i = 0; i < 512; i++) if (uses(readLevelList(rom, i))) levels.push(i);
+  return { levels, global: uses(readGlobalList(rom)) };
+}
+
 // slots of another list (a level file's, or one reading AN2) taking their frames from alternative file
 // `file`: the frames they use from AN2 (`src.an2`) or from their own alternative file (`src.alt`) are
 // copied into it (a frame already there is used again) and the slots point there. A slot's other RAM
 // frames (the game's graphics, e.g. GFX33 from $7E7D00) come along from `src.ram`, the level's WRAM
-// after its load; slots without AN2 frames keep reading RAM. Without `alt` the slots' alternative file is
-// `file` already and they stay. Per slot the new one, or null where its frames are missing or do not fit
-// (with a note).
-export function localizeFrames(rom: Rom, slots: ExSlot[], src: { an2?: Uint8Array | null; alt?: Uint8Array | null; ram?: Uint8Array | null }, file: number): { slots: (ExSlot | null)[]; notes: string[] } {
+// after its load; slots without AN2 frames keep reading RAM unless `allRam`. Without `alt` the slots'
+// alternative file is `file` already and they stay. Per slot the new one, or null where its frames are
+// missing or do not fit (with a note).
+export function localizeFrames(rom: Rom, slots: ExSlot[], src: { an2?: Uint8Array | null; alt?: Uint8Array | null; ram?: Uint8Array | null }, file: number, allRam = false): { slots: (ExSlot | null)[]; notes: string[] } {
   const foreign = 'alt' in src;
   let data = readAltFile(rom, file) ?? new Uint8Array(0);
   const start = data;
@@ -377,7 +385,7 @@ export function localizeFrames(rom: Rom, slots: ExSlot[], src: { an2?: Uint8Arra
   for (const e of slots) {
     out.push(null);
     const tiles = kindOf(e.type) === 'tiles';
-    const fromAlt = foreign && usesAltFile(e), fromAn2 = tileSlotFromAn2(e);
+    const fromAlt = foreign && usesAltFile(e), fromAn2 = tileSlotFromAn2(e) || (allRam && tiles && !(e.dest & 0x8000));
     if (!fromAlt && !fromAn2) { out[out.length - 1] = { ...e, frames: [...e.frames] }; continue; }
     if (fromAlt && !tiles) { notes.push('An ExAnimation slot takes colors from an alternative file (ExGFX 60-63) – left out'); continue; }
     const len = frameBytes(e.type);
@@ -394,7 +402,7 @@ export function localizeFrames(rom: Rom, slots: ExSlot[], src: { an2?: Uint8Arra
     }
     const before = data;
     const frames = got.map((b) => place(b!));
-    if (data.length > ALT_FILE_MAX) { data = before; notes.push(`${altFileName(file)} is full (32 KB) – an ExAnimation slot left out`); continue; }
+    if (data.length > ALT_FILE_MAX) { data = before; notes.push(`${altFileName(file)} is full (1023 tiles) – an ExAnimation slot left out`); continue; }
     out[out.length - 1] = { ...e, dest: e.dest | 0x8000, frames };
   }
   if (data !== start) writeAltFile(rom, file, data);
