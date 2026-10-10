@@ -7,6 +7,7 @@ import { createBps, crc32 } from './core/bps.ts';
 const SMW_CLEAN_CRC = 0xb19ed489; // Super Mario World (U), headerless
 import { disableUnsafeExtGfx, hasEditorPatch } from './core/patches.ts';
 import { migrateAn2 } from './core/an2legacy.ts';
+import { upgradeMap16Ext } from './core/map16ext.ts';
 import { App, type EditMode } from './ui/app.ts';
 import { h, clear, toast, log, modal, choose } from './ui/dom.ts';
 import { downloadBytes, pickFile, saveFile, filePath, fileName, desktop, guardClose } from './ui/platform.ts';
@@ -93,6 +94,9 @@ function startWith(rom: Rom, name: string): void {
       for (const n of an2.notes) log(n);
     }
   } catch (e) { console.warn('AN2 migration', e); }
+  try {
+    if (upgradeMap16Ext(rom)) { saveRom(name, rom).catch(() => {}); log('Extended Map16 updated: custom blocks also work with AddmusicK.'); }
+  } catch (e) { console.warn('Map16 extension upgrade', e); }
   if (!rom.title().startsWith('SUPER MARIOWORLD')) {
     toast(`Unexpected ROM title "${rom.title()}" – trying anyway.`, 'error');
   }

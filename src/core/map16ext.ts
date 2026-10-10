@@ -15,6 +15,8 @@
 // caller of $00F545 is identified from its return address (Mario $00F4E0 with the interaction point
 // in X, sprites $019536 with the point in $0F, cape $02961D, fireball $02A6EE) and the block code is
 // called with the GPS offset: Y:$1693 = acts like (the block may change it), X = the caller's X.
+// Version 3 takes the caller's bank without bit 7: AddmusicK returns to the main loop at $80806B, so
+// with it the game runs in the FastROM mirrors $80-$82 and version 2 found no caller.
 
 import { Rom } from './rom.ts';
 import { Asm } from './asm.ts';
@@ -25,7 +27,7 @@ export const EXT_TILES = 0x1000; // tiles $000-$FFF
 export const DEFAULT_ACTS = 0x025; // new tiles act like air
 const MAGIC = [0x53, 0x4d, 0x57, 0x58]; // "SMWX"
 const HEADER = 16; // +4 acts table, +7 graphics table, +10 block table, +13 blocks enabled, +14 version
-const VERSION = 2;
+const VERSION = 3;
 
 const F545 = 0x00f545;
 const HIT_HOOK = 0x029328;
@@ -120,7 +122,7 @@ function build(): Asm {
   // Ctx (JSR from Blk; stack: 3 page, 4 X, 5-7 Blk return, 8-10 return address of the $00F545 caller)
   const ret = (v: number) => a.b(0xa9, v, 0x60); // LDA #v : RTS
   a.label('Ctx');
-  a.b(0xa3, 0x0a); a.br(0xd0, 'cNotMario'); // LDA $0A,S (bank) : BNE
+  a.b(0xa3, 0x0a, 0x29, 0x7f); a.br(0xd0, 'cNotMario'); // LDA $0A,S (bank) : AND #$7F : BNE
   a.b(0xa3, 0x09, 0xc9, 0xf4); a.br(0xd0, 'cNone'); // $00F4E0: Mario
   a.b(0x8a, 0xc9, 0x62); a.br(0xb0, 'cWall'); // TXA : CMP #$62 : BCS wall running
   a.b(0x38, 0xe9, 0x02); // SEC : SBC #$02
@@ -230,12 +232,20 @@ function writeCode(rom: Rom, gfx: number, acts: Uint8Array, blocks: number): num
   return addr;
 }
 
-// version 1 (no custom blocks): same tables, new code
+// an older version: same tables (and block table), new code
 function upgrade(rom: Rom, old: Map16Ext): Map16Ext {
   const acts = rom.bytes(old.acts, EXT_TILES * 2);
-  writeCode(rom, old.gfx, acts, 0);
+  writeCode(rom, old.gfx, acts, old.blocks);
   rom.freeAt(old.base);
   return map16Ext(rom)!;
+}
+
+// brings an older version of the patch up to date (when the ROM is opened); true if it did
+export function upgradeMap16Ext(rom: Rom): boolean {
+  const ex = map16Ext(rom);
+  if (!ex || ex.version >= VERSION) return false;
+  upgrade(rom, ex);
+  return true;
 }
 
 // points the table operands of Blk at the block table and enables the dispatch

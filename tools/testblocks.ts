@@ -23,7 +23,7 @@ const emu = new LevelEmulator(rom); emu.boot();
 const blank = map16Source(rom, emu.load(0x105)).fg(0x025);
 const WALL = 0x2a0, PASS = 0x2a1, REF = 0x130;
 for (const t of [WALL, PASS]) { setExtTileWords(rom, t, map16Source(rom, emu.load(0x105)).fg(REF), blank); setActsLike(rom, t, REF, blank); }
-check(map16Ext(rom)?.version === 2 && !map16Ext(rom)?.blocks, 'SMWX v2 installed, blocks not yet enabled');
+check(map16Ext(rom)?.version === 3 && !map16Ext(rom)?.blocks, 'SMWX v3 installed, blocks not yet enabled');
 
 const OFFS = ['MarioBelow', 'MarioAbove', 'MarioSide', 'SpriteV', 'SpriteH', 'MarioCape', 'MarioFireball', 'TopCorner', 'BodyInside', 'HeadInside'];
 // marker: sets bit n of $7FB010/11 for offset n
@@ -83,7 +83,7 @@ check(!!back && back.list.length === 2 && back.files.size === 3, 'block project 
 removeBlocks(rom);
 check(blockOf(rom, WALL) === null && play(PASS, 120, REF, false).x === refRun.x, 'removed: blocks behave like their acts-like again');
 
-// SMWX v1 → v2 upgrade keeps tables
+// SMWX v1 → v3 upgrade keeps tables
 {
   const old = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
   installEditorPatch(old);
@@ -93,7 +93,7 @@ check(blockOf(rom, WALL) === null && play(PASS, 120, REF, false).x === refRun.x,
   old.w8(ex.base + 14, 0); // pretend version 1
   const up = saveBlockProject(old, { ...project, list: parseBlockList(`2B0 marker.asm\n`) }, blank);
   const nx = map16Ext(old)!;
-  check(up.ok && nx.version === 2 && nx.base !== ex.base && nx.gfx === ex.gfx && old.r16(nx.acts + 0x2b0 * 2) === 0x130, 'SMWX v1 upgraded with its tables');
+  check(up.ok && nx.version === 3 && nx.base !== ex.base && nx.gfx === ex.gfx && old.r16(nx.acts + 0x2b0 * 2) === 0x130, 'SMWX v1 upgraded with its tables');
 }
 
 // GPS's standard routines are built in: every one assembles (called from code that never runs)

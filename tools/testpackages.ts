@@ -27,7 +27,7 @@ import { saveLevel } from '../src/core/save.ts';
 import { levelMusic, setLevelMusic, installEditorPatch, customPalette, DM16_EXT } from '../src/core/patches.ts';
 import { readLevelList, readAltFile, usesAltFile } from '../src/core/exanim.ts';
 import { levelColors } from '../src/core/bgpack.ts';
-import { enableBlocks, setExtTileWords } from '../src/core/map16ext.ts';
+import { enableBlocks, setExtTileWords, map16Ext, upgradeMap16Ext, blockOf } from '../src/core/map16ext.ts';
 import { parseLmObjects } from '../src/core/mwl.ts';
 import { testSongZip } from './testsong.ts';
 
@@ -329,7 +329,8 @@ sameRom('song removed');
 // the sample level (a level edit, on its own ROM): On-Off Blocks' SampleLevel.mwl in place of level 105 –
 // Lunar Magic's Direct Map16 objects become the editor's, on the tiles the block went to; the .map16
 // lands where the author had it (508, the column from the sample level); bumping a block from below
-// flips the ON/OFF switch
+// flips the ON/OFF switch – also after a song is installed (AddmusicK runs the game in the FastROM banks
+// $80+, the block's caller is still found) and after an older Map16 extension is brought up to date
 {
   const rom = new Rom(fixture('smw.smc'));
   const e = new LevelEmulator(rom); e.boot();
@@ -343,21 +344,33 @@ sameRom('song removed');
     `sample level: its blocks on tiles 508/509, where the block went (${dm.map((o) => `${o.x},${o.y}:${o.tile!.toString(16)}`).join(' ')}; ${r.warnings.join(' | ')})`);
   const keys = [...(readLevelList(rom, 0x105)?.slots.keys() ?? [])].sort((a, b) => a - b).join();
   check(keys === '0,8', `sample level: its ExAnimation list in place of the level's (slots ${keys})`);
-  if (lv) {
-    saveLevel(rom, lv);
+  // Mario under the block at (6, 20), jumping: whether the ON/OFF switch flips
+  const bump = (what: string): void => {
     const e2 = new LevelEmulator(rom); e2.boot();
     const l2 = e2.load(0x105);
     const t = e2.snes, w = t.wram;
     const at = (x: number, y: number) => w[0xc800 + (x >> 4) * 0x1b0 + y * 16 + (x & 15)] | (w[0x1c800 + (x >> 4) * 0x1b0 + y * 16 + (x & 15)] << 8);
     let k = 0; while (w[0x100] !== 0x14 && k++ < 200) t.runFrame();
-    check(l2.ok && at(6, 20) === 0x508 && at(9, 20) === 0x509, `sample level in the game: tiles ${at(6, 20).toString(16)} ${at(9, 20).toString(16)}`);
-    // Mario under the block at (6, 20), jumping
+    check(l2.ok && at(6, 20) === 0x508 && at(9, 20) === 0x509, `${what} in the game: tiles ${at(6, 20).toString(16)} ${at(9, 20).toString(16)}`);
     const sw = w[0x14af];
     for (let i = 0; i < 40; i++) { w[0x94] = 6 * 16; w[0x95] = 0; t.runFrame(); }
     w[0x96] = (22 * 16) & 0xff; w[0x97] = (22 * 16) >> 8; w[0x7d] = 0xb0; w[0x72] = 0x0b;
     let flipped = false;
     for (let i = 0; i < 40 && !flipped; i++) { t.runFrame(); if (w[0x14af] !== sw) flipped = true; }
-    check(flipped, `sample level: bumping the block flips the ON/OFF switch (${sw} → ${w[0x14af]})`);
+    check(flipped, `${what}: bumping the block flips the ON/OFF switch (${sw} → ${w[0x14af]})`);
+  };
+  if (lv) {
+    saveLevel(rom, lv);
+    bump('sample level');
+    const rm = await installPackage(rom, ready(inspectUpload('Square Test.zip', testSongZip())), { level: null, blank: s.fg(0x025), tileWords: (t) => s.fg(t) });
+    check(rm.ok && rom.r24(0x008076) >> 16 === 0x0e, `a song installed: AddmusicK's main loop at $008075 (${rm.warnings.join(' | ')})`);
+    bump('with AddmusicK');
+    // an older Map16 extension (version byte 2): new code, the same block table
+    const ex = map16Ext(rom)!, block = blockOf(rom, 0x508);
+    rom.w8(ex.base + 14, 2);
+    check(upgradeMap16Ext(rom) && map16Ext(rom)!.version === 3 && map16Ext(rom)!.blocks === ex.blocks && blockOf(rom, 0x508)?.addr === block?.addr && !upgradeMap16Ext(rom),
+      'Map16 extension version 2 upgraded once, its block table kept');
+    bump('upgraded Map16 extension');
   }
 }
 
