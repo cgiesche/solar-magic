@@ -8,7 +8,7 @@ We decided that every file is classified on its own (folder, then content, then 
 - A patch with a patch.json stays one patch: the manifest describes the whole upload.
 - Map16 tiles and ExGFX keep the author's position or number if free, else the next free one, and everything referring to them is rewritten; a list.txt decides block tiles and the .map16 is placed to fit them.
 - Links (block ↔ tiles, sprite ↔ define, ExGFX ↔ slot) are guessed and shown in the preview; tile → block and ExGFX → slot can be changed there. One block may sit on several tiles.
-- Level setup (ExGFX into the slots its tiles use – Lunar Magic's AN2 slot too –, the sample level's ExAnimation slots that animate the package's tiles into free slots of the level's list, masked colors into the level's palette) is on by default for the current level. It and the sample level are level edits: undo reverts them, removing the package does not. The package records only what it brought (code, ExGFX, Map16 tiles).
+- Level setup (ExGFX into the slots its tiles use, the sample level's ExAnimation slots that animate the package's tiles into free slots of the level's list – their frames copied into the level's Anim graphic, ADR 0003 –, masked colors into the level's palette) is on by default for the current level. It and the sample level are level edits: undo reverts them, removing the package does not. The package records only what it brought (code, ExGFX, Map16 tiles).
 - Files no part claims are listed in the preview as not installed; the readme can be opened.
 
 ## Considered options

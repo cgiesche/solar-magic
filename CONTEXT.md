@@ -38,7 +38,11 @@ The .mwl of a package that also has code: an example of the package in use. Opti
 _Avoid_: Demo level, test level
 
 **Level setup**:
-What installing a package does to the current level so its graphics show: its ExGFX in the slots its tiles use (AN2 too), the ExAnimation slots that animate its tiles, its masked colors in the level's palette. A level edit: undo reverts it, removing the package does not.
+What installing a package does to the current level so its graphics show: its ExGFX in the slots its tiles use, the ExAnimation slots that animate its tiles (their frames copied into the level's Anim graphic), its masked colors in the level's palette. A level edit: undo reverts it, removing the package does not.
+
+**Anim graphic**:
+One of four graphics (A–D, Lunar Magic's ExGFX 60–63) that tile animations take their frames from; each animation list (a level's, the global one) uses one, and every list using it shares it. The only place animation frames come from: frames a package or level file keeps elsewhere (Lunar Magic's AN2, its own ExGFX 60–63, the game's graphics in RAM) are copied in when it is imported (ADR 0003).
+_Avoid_: AN2, alternative file, animation ExGFX
 
 ### Emulated results
 
