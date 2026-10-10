@@ -162,6 +162,7 @@ and changes only a few verified locations:
 | `$00F545`, `$029328` ("SMWX") | Map16 "acts like" table for tiles 000–FFF (Mario, sprites, fireballs, blocks hit from below) |
 | `$058A66`, `$058B46`, `$058C34`, `$058D2B` | Tilemap building: tiles from 200 on come from the extended Map16 graphics table |
 | `$00C096`, `$00C0E7` | Tile replacement sets the page to 0/1 instead of only bit 0 (for tiles on page ≥ 2) |
+| `$00C176` | Tile replacement draws tiles from 200 on from the extended Map16 graphics table (blocks changing into such a tile) |
 | `$05B20F` ("SMWM") | Read message texts from free space (only if they no longer fit in place) |
 | `$058551` ("SMWU") | Music per level: song number from a table (512 levels) instead of the 8 header settings (`$0584DB`), 0 = header |
 | `$00AA50` ("SMWG") | BG2/BG3 graphics slots per level for Map16 tiles 200–2FF (as in Lunar Magic); requires the VRAM patch |

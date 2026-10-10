@@ -7,7 +7,7 @@ import { exportLevelFile, importLevelFile } from '../src/core/levelfile.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { serializeLayer1, isL1Vertical } from '../src/core/level.ts';
 import { installEditorPatch, DM16_EXT } from '../src/core/patches.ts';
-import { setActsLike } from '../src/core/map16ext.ts';
+import { setActsLike, setExtTileWords } from '../src/core/map16ext.ts';
 import { captureSprites } from '../src/core/spritegfx.ts';
 import { loadAsar } from '../src/core/asar.ts';
 import { ROUTINES } from '../src/core/pixiroutines.ts';
@@ -365,6 +365,19 @@ print "MAIN ",pc
   const after = at(2, 24);
   check(before === tile && bounced, `Shatter: the block spawns its bounce sprite (block ${before.toString(16)})`);
   check(after !== tile, `Shatter: the block is gone after Mario left it (now ${after.toString(16)})`);
+
+  // standing still: the block becomes the cracked tile (drawn with its own tile words, $00C0FB with a
+  // tile >= $200) and holds until Mario leaves
+  const cracked = [0x1c21, 0x1c31, 0x1c22, 0x1c32];
+  setExtTileWords(r8, 0x601, cracked, blank);
+  e8.load(0x105, { layer1: serializeLayer1(r8, l8), sprites: serializeSprites(l8.sprites, l8.spriteHeader, isL1Vertical(r8, l8.header.mode), spriteSizes(r8)) });
+  g = 0; while (w8[0x100] !== 0x14 && g++ < 100) s8.runFrame();
+  const under = (w8[0x94] + 8) >> 4; // the block under Mario
+  for (let i = 0; i < 60; i++) s8.runFrame();
+  const vw = (wa: number) => s8.vram[wa * 2] | (s8.vram[wa * 2 + 1] << 8);
+  let shown = false;
+  for (let wa = 0; wa < 0x7fff && !shown; wa++) shown = vw(wa) === cracked[0] && vw(wa + 1) === cracked[2] && vw(wa + 32) === cracked[1] && vw(wa + 33) === cracked[3];
+  check(at(under, 24) === 0x601 && shown, `Shatter: Mario stands on the cracked tile, shown with its graphics (tile ${at(under, 24).toString(16)}, in VRAM: ${shown})`);
 }
 
 // a sprite that draws nothing and spawns the sprite of its extra byte on its tile and one above

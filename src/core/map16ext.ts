@@ -17,6 +17,9 @@
 // called with the GPS offset: Y:$1693 = acts like (the block may change it), X = the caller's X.
 // Version 3 takes the caller's bank without bit 7: AddmusicK returns to the main loop at $80806B, so
 // with it the game runs in the FastROM mirrors $80-$82 and version 2 found no caller.
+// Version 4 hooks the change-tile routine's own drawing ($00C176: LDA #$0D : STA $06 : REP #$20 :
+// LDA $0FBE,y : STA $04, the tile written to VRAM as a stripe), which blocks reach through $00C0FB
+// (GPS change_map16): a tile >= $200 showed whatever its index past $0FBE pointed at.
 
 import { Rom } from './rom.ts';
 import { Asm } from './asm.ts';
@@ -27,14 +30,16 @@ export const EXT_TILES = 0x1000; // tiles $000-$FFF
 export const DEFAULT_ACTS = 0x025; // new tiles act like air
 const MAGIC = [0x53, 0x4d, 0x57, 0x58]; // "SMWX"
 const HEADER = 16; // +4 acts table, +7 graphics table, +10 block table, +13 blocks enabled, +14 version
-const VERSION = 3;
+const VERSION = 4;
 
 const F545 = 0x00f545;
 const HIT_HOOK = 0x029328;
 const RENDER_HOOKS = [0x058a66, 0x058b46, 0x058c34, 0x058d2b];
 const PAGE0_FIX = 0x00c096;
 const PAGE1_FIX = 0x00c0e7;
-export const MAP16X_HOOKS: [number, number][] = [[F545, 4], [HIT_HOOK, 4], ...RENDER_HOOKS.map((r): [number, number] => [r, 5]), [PAGE0_FIX, 2], [PAGE1_FIX, 2]];
+const CHANGE_HOOK = 0x00c176;
+const CHANGE_CODE = [0xa9, 0x0d, 0x85, 0x06, 0xc2, 0x20, 0xb9, 0xbe, 0x0f, 0x85, 0x04];
+export const MAP16X_HOOKS: [number, number][] = [[F545, 4], [HIT_HOOK, 4], ...RENDER_HOOKS.map((r): [number, number] => [r, 5]), [PAGE0_FIX, 2], [PAGE1_FIX, 2], [CHANGE_HOOK, CHANGE_CODE.length]];
 
 export interface Map16Ext { base: number; acts: number; gfx: number; blocks: number; version: number }
 
@@ -174,6 +179,27 @@ function build(): Asm {
   a.label('rbk');
   a.b(0xa9, 0x00); // LDA #bank (patched)
   a.b(0x85, 0x0c, 0xc2, 0x20, 0x6b); // STA $0C REP #$20 RTL
+
+  // change-tile drawing (M=8 X=16, Y = tile * 2): pointer to the tile's 8 bytes in $04, bank in $06; M=16
+  a.label('Change');
+  a.b(0xa9, 0x0d, 0x85, 0x06, 0xc2, 0x20); // LDA #$0D STA $06 REP #$20 (vanilla)
+  a.label('cgv');
+  a.b(0xc0, 0x00, 0x04); // CPY #$0400
+  a.br(0xb0, 'cgext');
+  a.b(0xb9, 0xbe, 0x0f, 0x85, 0x04, 0x6b); // LDA $0FBE,y STA $04 RTL
+  a.label('cgext');
+  a.b(0xc0, 0x00, 0x20); // CPY #$2000 (pages >= $10: draw tile $025)
+  a.br(0x90, 'cgin');
+  a.b(0xa0, 0x4a, 0x00); // LDY #$004A
+  a.br(0x80, 'cgv');
+  a.label('cgin');
+  a.b(0x98, 0x38, 0xe9, 0x00, 0x04, 0x0a, 0x0a, 0x18); // TYA SEC SBC #$0400 ASL ASL CLC
+  a.label('cadc');
+  a.b(0x69, 0x00, 0x00); // ADC #gfx (patched after allocation)
+  a.b(0x85, 0x04, 0xe2, 0x20); // STA $04 SEP #$20
+  a.label('cbk');
+  a.b(0xa9, 0x00); // LDA #bank (patched)
+  a.b(0x85, 0x06, 0xc2, 0x20, 0x6b); // STA $06 REP #$20 RTL
   a.label('ActsTbl');
   a.fill(EXT_TILES * 2);
   return a;
@@ -212,9 +238,11 @@ function writeCode(rom: Rom, gfx: number, acts: Uint8Array, blocks: number): num
   const code = a.link(addr);
   const L = (n: string) => a.addrOf(n, addr);
   // ADC #gfx operand and LDA #bank operand
-  const adc = L('radc') - addr;
-  code[adc + 1] = gfx & 0xff; code[adc + 2] = (gfx >> 8) & 0xff;
-  code[L('rbk') - addr + 1] = gfx >> 16;
+  for (const [adcAt, bankAt] of [['radc', 'rbk'], ['cadc', 'cbk']]) {
+    const adc = L(adcAt) - addr;
+    code[adc + 1] = gfx & 0xff; code[adc + 2] = (gfx >> 8) & 0xff;
+    code[L(bankAt) - addr + 1] = gfx >> 16;
+  }
   code.set(acts, L('ActsTbl') - addr);
   rom.writeBytes(addr, code);
   rom.w24(addr + 4, L('ActsTbl'));
@@ -229,6 +257,8 @@ function writeCode(rom: Rom, gfx: number, acts: Uint8Array, blocks: number): num
   };
   jsl(HIT_HOOK, L('Hit'), 4);
   for (const r of RENDER_HOOKS) jsl(r, L('Render'), 5);
+  // the change-tile drawing (versions before 4 left it vanilla; another patch's code there stays)
+  if (CHANGE_CODE.every((b, i) => rom.r8(CHANGE_HOOK + i) === b)) jsl(CHANGE_HOOK, L('Change'), CHANGE_CODE.length);
   return addr;
 }
 

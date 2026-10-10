@@ -368,7 +368,7 @@ sameRom('song removed');
     // an older Map16 extension (version byte 2): new code, the same block table
     const ex = map16Ext(rom)!, block = blockOf(rom, 0x508);
     rom.w8(ex.base + 14, 2);
-    check(upgradeMap16Ext(rom) && map16Ext(rom)!.version === 3 && map16Ext(rom)!.blocks === ex.blocks && blockOf(rom, 0x508)?.addr === block?.addr && !upgradeMap16Ext(rom),
+    check(upgradeMap16Ext(rom) && map16Ext(rom)!.version === 4 && map16Ext(rom)!.blocks === ex.blocks && blockOf(rom, 0x508)?.addr === block?.addr && !upgradeMap16Ext(rom),
       'Map16 extension version 2 upgraded once, its block table kept');
     bump('upgraded Map16 extension');
   }
