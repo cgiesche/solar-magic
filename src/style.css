@@ -29,7 +29,7 @@ input.invalid, input.invalid:focus { outline: 1px solid var(--danger); border-co
 .ctxbar { grid-column: 1 / 4; display: flex; align-items: center; gap: 6px; padding: 5px 8px; background: var(--panel); border-bottom: 1px solid var(--border); flex-wrap: wrap; min-height: 38px; }
 .ctxbar .sep { width: 1px; height: 22px; background: var(--border); margin: 0 4px; }
 .ctxbar .level-title { font-weight: 600; min-width: 80px; }
-.ctxbar .zoom { min-width: 42px; text-align: center; }
+.zoom-ctl .zoom { min-width: 42px; text-align: center; }
 .ctxbar label.row { white-space: nowrap; }
 .ws-switch button { padding: 4px 16px; font-weight: 600; }
 .menubar { display: flex; gap: 1px; }
@@ -382,11 +382,9 @@ body.mt-dragging .mt-big { outline: 2px dashed var(--accent); }
 .gt-gal-new .gt-gal-none { font-size: 22px; }
 .gt-gal-img { width: 128px; height: 32px; image-rendering: pixelated; background: #111; }
 .gt-gal-none { width: 128px; height: 32px; display: flex; align-items: center; justify-content: center; color: var(--muted); background: #111; }
-.gt-zoom { width: 140px; }
 .gt-viewctl { display: inline-flex; align-items: center; gap: 6px; }
 .mt-section { margin-top: 10px; padding-bottom: 2px; border-bottom: 1px solid var(--border); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); display: flex; justify-content: space-between; }
 .mt-section .hint { text-transform: none; letter-spacing: 0; font-weight: 400; }
-.gt-zoom-label { min-width: 2.6em; }
 .warn-text { color: #e0b050; }
 button.danger { background: #5a2626; border-color: #8a3a3a; color: #fff; }
 button.danger:hover:not(:disabled) { border-color: var(--danger); }

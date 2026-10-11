@@ -9,7 +9,7 @@ import { disableUnsafeExtGfx, hasEditorPatch } from './core/patches.ts';
 import { migrateAn2 } from './core/an2legacy.ts';
 import { upgradeMap16Ext } from './core/map16ext.ts';
 import { App, type EditMode } from './ui/app.ts';
-import { h, clear, toast, log, modal, choose } from './ui/dom.ts';
+import { h, clear, toast, log, modal, choose, zoomControl } from './ui/dom.ts';
 import { downloadBytes, pickFile, saveFile, filePath, fileName, desktop, guardClose } from './ui/platform.ts';
 import { LogBar } from './ui/logbar.ts';
 import { kvGet, kvSet, kvDel, kvClear, saveRom, romFromRecord, type RomRecord } from './ui/storage.ts';
@@ -150,7 +150,7 @@ function buildUi(app: App): void {
   const modes = h('div', { class: 'btn-group' },
     modeBtn('l1', 'Layer 1', '1'), modeBtn('l2', 'Layer 2', '2'), modeBtn('spr', 'Sprites', '3'), modeBtn('exit', 'Entrances/Exits', '4'), modeBtn('bg', 'BG', '5'));
   const levelTitle = h('span', { class: 'level-title' });
-  const zoomLabel = h('span', { class: 'zoom' });
+  const zoomCtl = zoomControl(() => app.zoom, (z) => view.setZoom(z));
   const levelBar = h('div', { class: 'ctxbar' },
     levelTitle,
     h('button', { onclick: () => openHeaderDialog(app), title: 'Level header (H)' }, 'Header …'),
@@ -159,9 +159,7 @@ function buildUi(app: App): void {
     h('span', { class: 'sep' }),
     viewMenu(app, () => view.paint()),
     h('span', { class: 'sep' }),
-    h('div', { class: 'row zoom-ctl' },
-      h('button', { onclick: () => view.setZoom(app.zoom / 2), title: 'Zoom out (Ctrl+mouse wheel)' }, '−'), zoomLabel,
-      h('button', { onclick: () => view.setZoom(app.zoom * 2), title: 'Zoom in (Ctrl+mouse wheel)' }, '+')),
+    zoomCtl.root,
   );
 
   // ---- app bar: menus, workspace switcher, main actions
@@ -239,7 +237,7 @@ function buildUi(app: App): void {
     btnL2.disabled = !app.level?.layer2Objects;
     (modes.querySelector('[data-mode="bg"]') as HTMLButtonElement).disabled = !app.level || !app.canEditBg();
     if (app.level) levelTitle.textContent = `Level ${hex(app.level.number, 3)}${app.dirty ? ' *' : ''}`;
-    zoomLabel.textContent = `${Math.round(app.zoom * 100)}%`;
+    zoomCtl.update();
     for (const b of wsSwitch.querySelectorAll('button')) b.classList.toggle('active', b.dataset.ws === workspace);
     const inOw = workspace === 'ow' && ow;
     saveBtn.textContent = inOw ? `Save overworld${ow!.dirty ? ' *' : ''}` : `Save level${app.dirty ? ' *' : ''}`;

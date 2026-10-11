@@ -147,10 +147,33 @@ export function modal(title: string, body: HTMLElement, buttons: { label: string
   return { close };
 }
 
-const ZOOM_STEPS = [0.5, 0.75, 1, 1.5, 2, 3, 4];
+// zoom levels of every view (1: one SNES pixel per screen pixel); a view uses a range of them
+// (the level, overworld and level preview 50–400%, the pixel editor up to 3200%)
+const ZOOM_STEPS = [0.5, 0.75, 1, 1.5, 2, 3, 4, 6, 8, 12, 16, 24, 32];
+export const ZOOM_MIN = 0.5, ZOOM_MAX = 4;
+
+// the next zoom level in or out (dir > 0: in) from z within [min, max], undefined at the end
+export function zoomStep(z: number, dir: number, min = ZOOM_MIN, max = ZOOM_MAX): number | undefined {
+  const steps = ZOOM_STEPS.filter((s) => s >= min && s <= max);
+  return dir > 0 ? steps.find((s) => s > z + 1e-6) : [...steps].reverse().find((s) => s < z - 1e-6);
+}
+
+// “− 100% +” of every view; update() shows the current zoom
+export function zoomControl(zoom: () => number, setZoom: (z: number) => void, min = ZOOM_MIN, max = ZOOM_MAX): { root: HTMLElement; update: () => void } {
+  const label = h('span', { class: 'zoom' });
+  const step = (dir: number) => { const z = zoomStep(zoom(), dir, min, max); if (z !== undefined) setZoom(z); };
+  const update = () => { label.textContent = `${Math.round(zoom() * 100)}%`; };
+  update();
+  return {
+    root: h('div', { class: 'row zoom-ctl' },
+      h('button', { onclick: () => step(-1), title: 'Zoom out (Ctrl+mouse wheel)' }, '−'), label,
+      h('button', { onclick: () => step(1), title: 'Zoom in (Ctrl+mouse wheel)' }, '+')),
+    update,
+  };
+}
 
 // Middle-button drag pans a scroll container; Ctrl+wheel zooms in steps around the cursor.
-export function attachPanZoom(scroller: HTMLElement, zoom: () => number, setZoom: (z: number, anchorX: number, anchorY: number) => void, min = 0.5, max = 4, zoomSteps = ZOOM_STEPS): void {
+export function attachPanZoom(scroller: HTMLElement, zoom: () => number, setZoom: (z: number, anchorX: number, anchorY: number) => void, min = ZOOM_MIN, max = ZOOM_MAX): void {
   let pan: { x: number; y: number; sl: number; st: number } | null = null;
   scroller.addEventListener('mousedown', (e) => {
     if (e.button !== 1) return;
@@ -178,9 +201,7 @@ export function attachPanZoom(scroller: HTMLElement, zoom: () => number, setZoom
     if (Math.abs(acc) < 50) return;
     const dir = acc < 0 ? 1 : -1;
     acc = 0;
-    const steps = zoomSteps.filter((s) => s >= min && s <= max);
-    const cur = zoom();
-    const next = dir > 0 ? steps.find((s) => s > cur + 1e-6) : [...steps].reverse().find((s) => s < cur - 1e-6);
+    const next = zoomStep(zoom(), dir, min, max);
     if (next === undefined) return;
     const rc = scroller.getBoundingClientRect();
     setZoom(next, e.clientX - rc.left, e.clientY - rc.top);

@@ -6,10 +6,10 @@
 import type { App } from '../app.ts';
 import type { GfxWorkspace, WsPanel } from '../gfxworkspace.ts';
 import { menuButton, type MenuItem } from '../menu.ts';
-import { h, clear, toast, modal, choose, attachPanZoom, showColorLoupe, hideColorLoupe } from '../dom.ts';
+import { h, clear, toast, modal, choose, attachPanZoom, zoomControl, zoomStep, showColorLoupe, hideColorLoupe } from '../dom.ts';
 import { downloadBytes, pickFile } from '../platform.ts';
 
-const ZOOM_STEPS = [1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24, 32];
+const ZOOM_MIN = 1, ZOOM_MAX = 32; // of the shared zoom levels (dom.ts)
 const NEW_FILE = -2, IMPORT_FILE = -3; // gallery picks besides a file number (-1: default)
 import { lz2Decompress, lz2Compress } from '../../core/lz2.ts';
 import { decodeTile, encodeTile, cgramToRGBA } from '../../core/gfx.ts';
@@ -126,6 +126,7 @@ export class GfxTab implements WsPanel {
   private color = 1;
   private tool: Tool = 'pen';
   private zoom = 4;
+  private zoomCtl = zoomControl(() => this.zoom, (z) => this.setZoom(z), ZOOM_MIN, ZOOM_MAX);
   private fitted = false; // zoomed to fit once on first show
   private zoomFixed = false; // opened at a tile: no fitting
   private grid: 0 | 8 | 16 = 8;
@@ -164,7 +165,7 @@ export class GfxTab implements WsPanel {
     attachPanZoom(this.view, () => this.zoom, (z, ax, ay) => {
       const rc = this.view.getBoundingClientRect();
       this.setZoom(z, rc.left + ax, rc.top + ay);
-    }, 1, 32, ZOOM_STEPS);
+    }, ZOOM_MIN, ZOOM_MAX);
     // own strokes already are in this.file: no reload (it would stall the end of every stroke)
     app.on('rom-change', () => { if (this.visible && !this.stroke && !this.ownEdit) this.reload(); });
     app.on('render', () => { this.autoRows = null; if (this.visible) { this.buildCards(); this.draw(); this.buildSide(); } });
@@ -489,10 +490,6 @@ export class GfxTab implements WsPanel {
     const b = this.tools;
     clear(b);
     const tool = (t: Tool, label: string, key: string, title: string) => h('button', { class: this.tool === t ? 'active' : '', title: `${title} (${key})`, onclick: () => this.setTool(t) }, label);
-    const slider = h('input', { type: 'range', min: 1, max: 32, value: String(this.zoom), class: 'gt-zoom', title: 'Zoom (Ctrl+mouse wheel, middle mouse button pans)' });
-    slider.addEventListener('input', () => this.setZoom(Number(slider.value)));
-    this.zoomSlider = slider;
-    this.zoomLabel = h('span', { class: 'mono gt-zoom-label' }, `${this.zoom}×`);
     const gridBtn = (g: 0 | 8 | 16, label: string) => h('button', { class: this.grid === g ? 'active' : '', onclick: () => { this.grid = g; this.buildTools(); this.draw(); } }, label);
     b.append(
       h('span', { class: 'btn-group' },
@@ -510,7 +507,7 @@ export class GfxTab implements WsPanel {
       h('span', { class: 'sep' }),
       h('span', { class: 'gt-viewctl' },
         h('span', { class: 'hint' }, 'Grid'), h('span', { class: 'btn-group' }, gridBtn(0, 'off'), gridBtn(8, '8'), gridBtn(16, '16')),
-        h('span', { class: 'hint' }, 'Zoom'), slider, this.zoomLabel,
+        this.zoomCtl.root,
         h('button', { title: 'Fit the whole file', onclick: () => this.fit() }, 'Fit')),
       h('span', { class: 'spacer' }),
       menuButton({ label: 'Import/Export', items: [
@@ -660,7 +657,8 @@ export class GfxTab implements WsPanel {
     if (!f || !this.img) return;
     const W = this.W(), H = this.H(), z = this.zoom;
     const c = this.canvas;
-    if (c.width !== W * z || c.height !== H * z) { c.width = W * z; c.height = H * z; }
+    const cw = Math.round(W * z), ch = Math.round(H * z);
+    if (c.width !== cw || c.height !== ch) { c.width = cw; c.height = ch; }
     const ctx = c.getContext('2d')!;
     this.off.getContext('2d')!.putImageData(this.img, 0, 0);
     ctx.imageSmoothingEnabled = false;
@@ -713,7 +711,7 @@ export class GfxTab implements WsPanel {
 
   // zoom around a point of the view (client coordinates; default: its center)
   setZoom(z: number, ax?: number, ay?: number): void {
-    z = Math.max(1, Math.min(32, Math.round(z)));
+    z = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z));
     const old = this.zoom;
     if (z === old) return;
     const v = this.view;
@@ -728,13 +726,12 @@ export class GfxTab implements WsPanel {
   }
   private fit(): void {
     const v = this.view;
-    this.setZoom(Math.max(1, Math.floor(Math.min((v.clientWidth - 4) / this.W(), (v.clientHeight - 4) / this.H()))));
+    // the largest zoom level at which the whole file fits
+    const fits = Math.min((v.clientWidth - 4) / this.W(), (v.clientHeight - 4) / this.H());
+    this.setZoom(zoomStep(fits + 1e-5, -1, ZOOM_MIN, ZOOM_MAX) ?? ZOOM_MIN);
   }
-  private zoomSlider: HTMLInputElement | null = null;
-  private zoomLabel: HTMLElement | null = null;
   private syncZoomUi(): void {
-    if (this.zoomSlider) this.zoomSlider.value = String(this.zoom);
-    if (this.zoomLabel) this.zoomLabel.textContent = `${this.zoom}×`;
+    this.zoomCtl.update();
   }
 
   // tiles of this file the game overwrites with animation frames (when it is in a layer slot)

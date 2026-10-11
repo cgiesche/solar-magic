@@ -2,7 +2,7 @@
 // Not a modal: the level list stays usable, edits show up in the preview right away and undo works.
 
 import type { App } from './app.ts';
-import { h, attachPanZoom, showColorLoupe, hideColorLoupe } from './dom.ts';
+import { h, attachPanZoom, zoomControl, showColorLoupe, hideColorLoupe } from './dom.ts';
 import { viewMenu } from './viewmenu.ts';
 import { hex } from '../core/names.ts';
 import { PaletteTab } from './gfx/palettetab.ts';
@@ -32,8 +32,8 @@ export class LevelPreview {
   private box: HTMLElement;
   private scroller: HTMLElement;
   private info = h('div', { class: 'ws-prev-info hint' });
-  private zoomBtns: HTMLElement;
   zoom = 1;
+  private zoomCtl = zoomControl(() => this.zoom, (z) => this.setZoom(z));
   highlight = new Set<number>();
   onClick: ((px: number, py: number, e: MouseEvent) => void) | null = null;
   colorAt: ((px: number, py: number) => { rgba: number; label: string }) | null = null;
@@ -44,12 +44,9 @@ export class LevelPreview {
     this.app = app;
     this.box = h('div', { class: 'ws-prev-box' }, this.img, this.over);
     this.scroller = h('div', { class: 'ws-prev-scroll' }, this.box);
-    const zoomBtn = (z: number) => h('button', { 'data-zoom': z, title: 'Zoom (Ctrl+mouse wheel, middle mouse button pans)', onclick: () => this.setZoom(z) }, `${z}×`);
-    this.zoomBtns = h('span', { class: 'btn-group' }, zoomBtn(1), zoomBtn(2));
     this.root = h('div', { class: 'ws-prev' },
-      h('div', { class: 'panel-title' }, 'Level preview', this.zoomBtns),
+      h('div', { class: 'panel-title' }, 'Level preview', this.zoomCtl.root),
       this.scroller, this.info);
-    this.markZoom();
     attachPanZoom(this.scroller, () => this.zoom, (z, ax, ay) => this.setZoom(z, ax, ay));
     this.scroller.addEventListener('mousemove', (e) => {
       const p = this.pos(e);
@@ -78,11 +75,7 @@ export class LevelPreview {
     this.layout();
     this.scroller.scrollLeft = lx * z - ax;
     this.scroller.scrollTop = ly * z - ay;
-    this.markZoom();
-  }
-
-  private markZoom(): void {
-    for (const b of this.zoomBtns.children) b.classList.toggle('active', Number((b as HTMLElement).dataset.zoom) === this.zoom);
+    this.zoomCtl.update();
   }
 
   private pos(e: MouseEvent): { px: number; py: number } | null {
