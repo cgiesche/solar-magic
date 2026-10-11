@@ -439,7 +439,7 @@ export class Map16Tab implements WsPanel {
     const tip = 'Click a tile or type its number: the selected tile then behaves like this one.';
     const info = h('div', { class: 'hint mt-acts-info' }, tip);
     const say = (text: string) => { info.textContent = text; info.title = text; };
-    const describe = (t: number, pre = '') => { const p = app.probes.block(t); say(`${pre}Tile ${hex(t, 3)}: ${p ? probeText(p) : 'determining …'}`); };
+    const describe = (t: number) => { const p = app.probes.block(t); say(`Tile ${hex(t, 3)}: ${p ? probeText(p) : 'determining …'}`); };
     const input = h('input', { type: 'text', class: 'mt-acts-input', placeholder: 'Tile number (hex), e.g. 130', spellcheck: false, autocomplete: 'off' });
     let matches: number[] = [];
     // leading zero or all three digits: compared from the left of the 3-digit number, otherwise as typed
@@ -471,7 +471,7 @@ export class Map16Tab implements WsPanel {
       const q = input.value.trim().toUpperCase().replace(/^(\$|0X)/, '');
       matches = filter(q);
       draw();
-      if (matches.length === 1) describe(matches[0], 'Enter takes it – ');
+      if (matches.length === 1) describe(matches[0]);
       else say(!q ? tip : matches.length ? `${matches.length} tiles match.` : 'No tile 000–1FF matches.');
       if (q && matches.length) {
         const y = (matches[0] >> 4) * 32 * (c.getBoundingClientRect().height / 1024 || 1);
