@@ -18,6 +18,7 @@ import { migratePackageFiles } from './core/pkgreg.ts';
 import { moveBrowserPackageFiles } from './ui/pkgtrack.ts';
 import { LevelView } from './ui/levelview.ts';
 import { LevelList, Palette, Properties } from './ui/panels.ts';
+import { openSearch } from './ui/search.ts';
 import { openHeaderDialog } from './ui/headerdialog.ts';
 import { hex } from './core/names.ts';
 import { GfxWorkspace, type WsTab } from './ui/gfxworkspace.ts';
@@ -165,6 +166,10 @@ function buildUi(app: App): void {
 
   // ---- app bar: menus, workspace switcher, main actions
   const testHere = () => { const hv = view.hover; openTestPlay(app, hv ? { tx: hv.tx, ty: hv.ty } : undefined); };
+  // central search (Ctrl+F): a result is shown in the level workspace
+  const search = () => openSearch(palette.searchProviders().map((p) => ({
+    ...p, search: (terms) => p.search(terms).map((r) => ({ ...r, pick: () => void setWorkspace('level').then((ok) => { if (ok) r.pick(); }) })),
+  })));
   const insertHere = () => { const hv = view.hover, c = view.centerTile(); openInsertDialog(app, hv ? hv.tx : c.tx, hv ? hv.ty : c.ty); };
   const menus = menuBar([
     { label: 'File', items: [
@@ -204,6 +209,9 @@ function buildUi(app: App): void {
       { label: 'Install editor patch …', disabled: () => hasEditorPatch(app.rom), onClick: () => installEditorPatchAction(app) },
       'sep',
       { label: 'Message boxes …', onClick: () => openMessagesDialog(app) },
+    ] },
+    { label: 'Search', items: [
+      { label: 'Search everywhere …', shortcut: 'Ctrl+F', title: 'Objects, extended objects, Map16 tiles, structures and sprites by number, name or behavior', onClick: search },
     ] },
     { label: 'Help', items: [
       { label: 'Keyboard shortcuts …', shortcut: '?', onClick: () => showHelp() },
@@ -323,6 +331,7 @@ function buildUi(app: App): void {
   });
 
   window.onkeydown = (e: KeyboardEvent) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f' && !e.altKey && !document.querySelector('.modal-back')) { e.preventDefault(); search(); return; }
     const t = e.target as HTMLElement;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
     if (document.querySelector('.modal-back')) return;
@@ -452,6 +461,7 @@ function showHelp(): void {
       ['Ctrl+Z / Ctrl+Y', 'Undo / Redo'],
       ['Esc / O / M · P · A', 'Workspace level / overworld / graphics (Map16, palettes, animations)'],
       ['Ctrl+mouse wheel · Middle mouse button drag', 'Zoom · Pan view'],
+      ['Ctrl+F', 'Search everywhere: objects, Map16 tiles, structures, sprites (Tab: only one group)'],
       ['? / F1', 'This overview'],
       ['L', 'Expand/collapse log (all messages with time)'],
       ['Menus: ↑ ↓ ← → / Enter / Esc', 'Choose entry, neighboring menu / run / close'],

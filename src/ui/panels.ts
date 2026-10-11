@@ -16,6 +16,7 @@ import { TileCache, map16Source, drawMap16 } from '../core/render.ts';
 import { probeable } from '../core/probeclient.ts';
 import { probeText, spritesOf, spriteProbeAt, enterText, enterSuffix } from '../core/blockprobe.ts';
 import { tileMatches, drawTileMatches } from './tilesearch.ts';
+import { matchesAll, type SearchProvider, type SearchResult } from './search.ts';
 
 // behaviour of the given Map16 tiles when hit from below or entered (only tiles with an effect);
 // undefined while probes are still pending
@@ -456,6 +457,130 @@ export class Palette {
     this.build();
   }
 
+  // the standard objects (with their types) or the extended objects as listed in the tab; `text` is what the
+  // search looks in (lower case): number, name, Map16 tiles and what they do when hit or entered (emulated,
+  // see blockprobe.ts), which tells apart objects that look the same, like pipes with and without an entrance
+  objectEntries(ext: boolean) {
+    const app = this.app;
+    const out = [];
+    for (const s of this.specs()) {
+      if (ext !== (s.num === 0)) continue;
+      const kind = app.objectKind(s.num);
+      const vt = objectVariant(kind, s.size);
+      const name = objectName(s.num, s.ext) + (vt >= 0 ? ` – type ${vt.toString(16).toUpperCase()}` : '');
+      const label = s.num ? hex2(s.num) + (vt >= 0 ? `.${vt.toString(16).toUpperCase()}` : '') : hex2(s.ext);
+      const tiles = this.thumbTiles.get(objKey(s, kind)) ?? [];
+      const sum = tiles.length ? blockSummary(app, tiles) : [];
+      const info = (tiles.length ? `\nMap16 ${tiles.slice(0, 8).map(hex3).join(' ')}${tiles.length > 8 ? ' …' : ''}` : '')
+        + (sum === undefined ? '\n(determining behavior …)' : sum.map((x) => '\n' + x).join(''));
+      const th = this.thumbs.get(objKey(s, kind));
+      if (!th && ext) continue; // invalid ext objects produce nothing
+      out.push({
+        s, vt, label, name, th, title: `${label}: ${name}${info}`, behavior: sum?.join(' · ') ?? '', text: `${label} ${name} ${info}`.toLowerCase(),
+        items: blockSprites(app, tiles), enter: blockEnter(app, tiles),
+        item: { kind: 'obj', num: s.num, ext: s.ext, size: s.size } as PaletteItem,
+      });
+    }
+    return out;
+  }
+
+  // original sprites 00-E6, then the custom sprites of the ROM (PIXI, ids $2xx/$3xx); `text` for the search
+  // includes what the sprite gives when hit from below or jumped on (emulated, see blockprobe.ts)
+  spriteEntries() {
+    const app = this.app;
+    const custom = app.customSprites().filter((c) => c.listed);
+    return [...Array.from({ length: 0xe7 }, (_, i) => i), ...custom.map((c) => c.id)].map((id) => {
+      const n = id & 0xff, extra = id >> 8;
+      const name = app.spriteLabel(id);
+      const p = app.probes.sprite(id);
+      const info = p?.summary ?? '';
+      const num = id >= 0x200 ? `C${hex2(n)}` : hex2(n);
+      return {
+        id, num, name, info, items: p ? [...new Set(p.pos.flatMap(spritesOf))] : [],
+        title: [`${num}: ${name}`, info, app.customSprite(id)?.description].filter(Boolean).join('\n'),
+        text: `${hex2(n)} ${num} ${name} ${info}${id >= 0x200 ? ' custom' : ''}`.toLowerCase(),
+        item: { kind: 'spr', num: n, extra } as PaletteItem,
+      };
+    });
+  }
+
+  // shows an item in its tab, chosen as the palette item (from the central search)
+  choose(tab: typeof this.tab, item: PaletteItem): void {
+    const app = this.app;
+    if (tab === 'spr' ? app.mode !== 'spr' : app.mode !== 'l1' && app.mode !== 'l2') app.setMode(tab === 'spr' ? 'spr' : 'l1');
+    this.tab = tab;
+    app.paletteItem = item;
+    // (filters that would hide it)
+    this.search.value = '';
+    this.m16Search.value = '';
+    this.m16Match = null;
+    this.build();
+    requestAnimationFrame(() => this.scrollToSelected());
+  }
+
+  // the tabs for the central search (search.ts)
+  searchProviders(): SearchProvider[] {
+    const app = this.app;
+    const objects = (id: 'obj' | 'ext', label: string): SearchProvider => ({
+      id, label,
+      search: (terms) => {
+        this.ensureThumbs();
+        return this.objectEntries(id === 'ext').filter((e) => matchesAll(e.text, terms)).map((e) => ({
+          label: e.label, name: e.name, detail: e.behavior, title: e.title, thumb: () => (e.th ? cloneCanvas(e.th) : null), pick: () => this.choose(id, e.item),
+        }));
+      },
+    });
+    // Map16 tiles by number (the rules of the tab's tile search) or by what they do (finished probes only)
+    const map16: SearchProvider = {
+      id: 'm16', label: 'Map16',
+      search: (terms) => {
+        const count = map16Ext(app.rom) ? EXT_TILES : 0x200;
+        const nums = terms.map((t) => new Set(tileMatches(t, EXT_TILES) ?? []));
+        const sheets = new Map<number, HTMLCanvasElement>();
+        const out: SearchResult[] = [];
+        for (let t = 0; t < count; t++) {
+          const p = app.cachedBlock(t);
+          const text = p ? probeText(p) : '';
+          const low = text.toLowerCase();
+          if (!terms.every((x, i) => nums[i].has(t) || low.includes(x))) continue;
+          out.push({
+            label: hex3(t), name: text, title: `Tile ${hex3(t)}${text ? `: ${text}` : ''}`,
+            thumb: () => {
+              const page = t >> 8;
+              if (!sheets.has(page)) sheets.set(page, renderMap16Sheet(app, false, page * 256, 256));
+              const c = h('canvas', { width: 16, height: 16 });
+              c.getContext('2d')!.drawImage(sheets.get(page)!, (t & 15) * 16, ((t & 0xff) >> 4) * 16, 16, 16, 0, 0, 16, 16);
+              c.style.width = c.style.height = '24px';
+              return c;
+            },
+            pick: () => this.choose('m16', { kind: 'obj', num: 0, ext: DM16_EXT, size: 0, tile: t }),
+          });
+        }
+        return out;
+      },
+    };
+    const structs: SearchProvider = {
+      id: 'str', label: 'Structures',
+      search: (terms) => {
+        const sheet = structTileSource(app);
+        return [...app.structures()].filter(([n, st]) => matchesAll(`${hex2(n)} ${st.name}`.toLowerCase(), terms)).map(([n, st]) => ({
+          label: hex2(n), name: `${st.name || '(unnamed)'} ${st.w}×${st.h}`, title: `Structure ${hex2(n)}: ${st.name || '(unnamed)'}, ${st.w}×${st.h}`,
+          thumb: () => structCanvas(sheet, st),
+          pick: () => this.choose('str', { kind: 'obj', num: 0, ext: STRUCT_EXT, size: 0, struct: n }),
+        }));
+      },
+    };
+    const sprites: SearchProvider = {
+      id: 'spr', label: 'Sprites',
+      search: (terms) => this.spriteEntries().filter((e) => matchesAll(e.text, terms)).map((e) => ({
+        label: e.num, name: e.name, detail: e.info, title: e.title,
+        thumb: () => { const img = app.spriteThumbs?.get(e.id); return img ? cloneCanvas(img) : null; },
+        pick: () => this.choose('spr', e.item),
+      })),
+    };
+    return [objects('obj', 'Objects'), objects('ext', 'Extended'), map16, structs, sprites];
+  }
+
   build(): void {
     const app = this.app;
     clear(this.tabs);
@@ -471,27 +596,16 @@ export class Palette {
     const f = this.search.value.trim().toLowerCase();
     const cur = app.paletteItem;
     if (this.tab === 'spr') {
-      // original sprites 00-E6, then the custom sprites of the ROM (PIXI, ids $2xx/$3xx)
-      const custom = app.customSprites().filter((c) => c.listed);
-      const ids = [...Array.from({ length: 0xe7 }, (_, i) => i), ...custom.map((c) => c.id)];
       let head = false;
-      for (const id of ids) {
-        const n = id & 0xff, extra = id >> 8;
-        const name = app.spriteLabel(id);
-        // what the sprite gives when hit from below or jumped on (emulated, see blockprobe.ts)
-        const p = app.probes.sprite(id);
-        const info = p?.summary ?? '';
-        const num = id >= 0x200 ? `C${hex2(n)}` : hex2(n);
-        if (f && !(`${hex2(n)} ${num} ${name} ${info}${id >= 0x200 ? ' custom' : ''}`.toLowerCase().includes(f))) continue;
-        if (id >= 0x200 && !head) { head = true; this.body.appendChild(h('div', { class: 'pal-head' }, 'Custom sprites (PIXI)')); }
-        const sel = cur?.kind === 'spr' && spriteId(cur) === id;
-        const img = app.spriteThumbs?.get(id);
-        const items = p ? [...new Set(p.pos.flatMap(spritesOf))] : [];
-        const desc = app.customSprite(id)?.description;
+      for (const e of this.spriteEntries()) {
+        if (f && !e.text.includes(f)) continue;
+        if (e.id >= 0x200 && !head) { head = true; this.body.appendChild(h('div', { class: 'pal-head' }, 'Custom sprites (PIXI)')); }
+        const sel = cur?.kind === 'spr' && spriteId(cur) === e.id;
+        const img = app.spriteThumbs?.get(e.id);
         this.body.appendChild(h('div', {
-          class: `pal-row${sel ? ' selected' : ''}`, title: [`${num}: ${name}`, info, desc].filter(Boolean).join('\n'),
-          onclick: () => { app.paletteItem = { kind: 'spr', num: n, extra }; if (app.mode !== 'spr') app.setMode('spr'); this.build(); },
-        }, h('span', { class: 'pal-thumb-s' }, img ? cloneCanvas(img) : ''), h('span', { class: 'num' }, num), name, itemBadge(app, items, 'pal-items-row')));
+          class: `pal-row${sel ? ' selected' : ''}`, title: e.title,
+          onclick: () => { app.paletteItem = e.item; if (app.mode !== 'spr') app.setMode('spr'); this.build(); },
+        }, h('span', { class: 'pal-thumb-s' }, img ? cloneCanvas(img) : ''), h('span', { class: 'num' }, e.num), e.name, itemBadge(app, e.items, 'pal-items-row')));
       }
       if (!this.body.firstChild) this.body.append(emptyState('No sprite matches the search.'));
       return;
@@ -499,39 +613,20 @@ export class Palette {
     if (this.tab === 'm16') { this.buildMap16(); return; }
     if (this.tab === 'str') { this.buildStructs(); return; }
     const grid = h('div', { class: 'pal-grid' });
-    for (const s of this.specs()) {
-      if ((this.tab === 'obj') !== (s.num !== 0)) continue;
-      const kind = app.objectKind(s.num);
-      const vt = objectVariant(kind, s.size);
-      const name = objectName(s.num, s.ext) + (vt >= 0 ? ` – type ${vt.toString(16).toUpperCase()}` : '');
-      const label = s.num ? hex2(s.num) + (vt >= 0 ? `.${vt.toString(16).toUpperCase()}` : '') : hex2(s.ext);
-      // Map16 tiles and what they do when hit or entered (emulated, see blockprobe.ts); tells apart
-      // objects that look the same, like pipes with and without an entrance
-      let info = '';
-      let items: number[] = [];
-      let enter = '';
-      {
-        const tiles = this.thumbTiles.get(objKey(s, kind)) ?? [];
-        items = blockSprites(app, tiles);
-        enter = blockEnter(app, tiles);
-        const sum = tiles.length ? blockSummary(app, tiles) : [];
-        info = (tiles.length ? `\nMap16 ${tiles.slice(0, 8).map(hex3).join(' ')}${tiles.length > 8 ? ' …' : ''}` : '')
-          + (sum === undefined ? '\n(determining behavior …)' : sum.map((x) => '\n' + x).join(''));
-      }
-      if (f && !(`${label} ${name} ${info}`.toLowerCase().includes(f))) continue;
-      const th = this.thumbs.get(objKey(s, kind));
-      if (!th && this.tab === 'ext') continue; // invalid ext objects produce nothing
-      const sel = cur?.kind === 'obj' && cur.num === s.num && (s.num !== 0 || cur.ext === s.ext) && objectVariant(kind, cur.size) === vt;
+    for (const e of this.objectEntries(this.tab === 'ext')) {
+      if (f && !e.text.includes(f)) continue;
+      const { s, vt } = e;
+      const sel = cur?.kind === 'obj' && cur.num === s.num && (s.num !== 0 || cur.ext === s.ext) && objectVariant(app.objectKind(s.num), cur.size) === vt;
       grid.appendChild(h('div', {
-        class: `pal-cell${sel ? ' selected' : ''}`, title: `${label}: ${name}${info}`,
+        class: `pal-cell${sel ? ' selected' : ''}`, title: e.title,
         onclick: () => {
-          app.paletteItem = { kind: 'obj', num: s.num, ext: s.ext, size: s.size };
+          app.paletteItem = e.item;
           if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1');
           this.build();
         },
-      }, h('div', { class: 'pal-img' }, th ? cloneCanvas(th) : h('span', { class: 'none' }, '–'),
-        h('div', { class: 'pal-corner' }, itemBadge(app, items), enter ? h('div', { class: 'pal-enter', title: enterText(enter) }, enter) : '')),
-        h('div', { class: 'pal-label' }, label), h('div', { class: 'pal-name' }, objectName(s.num, s.ext))));
+      }, h('div', { class: 'pal-img' }, e.th ? cloneCanvas(e.th) : h('span', { class: 'none' }, '–'),
+        h('div', { class: 'pal-corner' }, itemBadge(app, e.items), e.enter ? h('div', { class: 'pal-enter', title: enterText(e.enter) }, e.enter) : '')),
+        h('div', { class: 'pal-label' }, e.label), h('div', { class: 'pal-name' }, objectName(s.num, s.ext))));
     }
     this.body.appendChild(grid.firstChild ? grid : emptyState('No object matches the search.'));
   }

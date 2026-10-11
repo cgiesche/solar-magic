@@ -480,3 +480,16 @@ button.danger:hover:not(:disabled) { border-color: var(--danger); }
 .song-add { width: 620px; display: flex; flex-direction: column; gap: 8px; }
 .amk-log { max-height: 300px; overflow: auto; font-size: 11px; white-space: pre-wrap; }
 .resources.drop-target { outline: 2px dashed var(--accent2); outline-offset: 4px; }
+
+/* central search (Ctrl+F, search.ts) */
+.search-back { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 450; display: flex; justify-content: center; align-items: flex-start; padding-top: 10vh; }
+.search-box { width: min(620px, calc(100vw - 32px)); max-height: 70vh; display: flex; flex-direction: column; gap: 6px; padding: 8px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 10px 40px rgba(0,0,0,.5); }
+.search-input { flex: 1; font-size: 14px; padding: 6px 8px; }
+.search-groups button { flex: 1; }
+.search-list { overflow-y: auto; flex: 1; min-height: 120px; }
+.search-list .pal-row.active { background: var(--accent2); color: #fff; }
+.search-list .pal-row.active .num { color: #fff; }
+.search-list .pal-row .num { min-width: 3em; }
+.search-more { color: var(--muted); font-style: italic; }
+.search-foot { padding: 0 2px; }
