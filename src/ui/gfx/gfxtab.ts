@@ -6,7 +6,7 @@
 import type { App } from '../app.ts';
 import type { GfxWorkspace, WsPanel } from '../gfxworkspace.ts';
 import { menuButton, type MenuItem } from '../menu.ts';
-import { h, clear, toast, modal, choose, attachPanZoom } from '../dom.ts';
+import { h, clear, toast, modal, choose, attachPanZoom, showColorLoupe, hideColorLoupe } from '../dom.ts';
 import { downloadBytes, pickFile } from '../platform.ts';
 
 const ZOOM_STEPS = [1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24, 32];
@@ -140,7 +140,7 @@ export class GfxTab implements WsPanel {
   private ownEdit = false;
   private cards = h('div', { class: 'gt-cards' });
   private list = h('div', { class: 'gt-list' });
-  private canvas = h('canvas', { class: 'gt-canvas' });
+  private canvas = h('canvas', { class: 'gt-canvas', 'data-tool': 'pen' });
   private view = h('div', { class: 'gt-view' }, this.canvas);
   private side = h('div', { class: 'gt-side' });
   private tools = h('div', { class: 'ws-bar' });
@@ -193,6 +193,7 @@ export class GfxTab implements WsPanel {
   }
   hide(): void {
     this.dropFloat();
+    hideColorLoupe();
     this.visible = false;
   }
 
@@ -867,12 +868,20 @@ export class GfxTab implements WsPanel {
     c.addEventListener('mousemove', (e) => {
       if (this.stroke) return;
       const p = pos(e);
+      // eyedropper (tool or Alt held): pipette cursor and the color under it
+      const picking = this.tool === 'pick' || e.altKey;
+      c.classList.toggle('pipette', picking);
+      if (picking && this.file && p.x >= 0 && p.y >= 0 && p.x < this.W() && p.y < this.H()) {
+        const v = this.get(p.x, p.y);
+        showColorLoupe(e, v ? this.colors()[v] : null, `Color ${v}`);
+      } else hideColorLoupe();
       const t = (p.y >> 3) * 16 + (p.x >> 3);
       if (p.y * 128 + p.x === lastHover) return;
       lastHover = p.y * 128 + p.x;
       const spr = t < 0x80 ? this.levelSlots().filter((s) => s.sprite && s.file === this.cur).map((s) => ` · sprite tile ${spriteTile(s.first, t)}`).join('') : '';
       c.title = `Tile ${hex(t, 2)}${spr}${this.animatedTiles().has(t) ? ' (animated)' : ''} · pixel ${p.x & 7},${p.y & 7} · color ${this.file ? this.get(Math.max(0, p.x), Math.max(0, p.y)) : ''}`;
     });
+    c.addEventListener('mouseleave', () => { c.classList.remove('pipette'); hideColorLoupe(); });
   }
 
   // lifts the selected pixels into a floating block (the place becomes transparent)

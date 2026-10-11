@@ -462,17 +462,27 @@ export class PaletteTab implements WsPanel {
     toast(`${n} colors applied${n < 256 ? ' (the game sets the rest; “Own palette” makes all editable)' : ''}`);
   }
 
-  // pipette: the CGRAM entry with the clicked pixel's color (FG/BG rows first)
-  previewClick(px: number, py: number): void {
+  // pipette: the CGRAM entry with the pixel's color (FG/BG rows first), -1 if none has it
+  private entryAt(px: number, py: number): number {
     const im = this.app.images;
     const v = this.app.compositeImg[py * im.width + px];
     const pal = cgramToRGBA(this.app.render.cgram);
     const order = [2, 3, 4, 5, 6, 7, 0, 1, 8, 9, 10, 11, 12, 13, 14, 15];
     for (const row of order) for (let c = 1; c < 16; c++) {
-      if (pal[row * 16 + c] === v) { this.select(row * 16 + c); return; }
+      if (pal[row * 16 + c] === v) return row * 16 + c;
     }
-    if (pal[0] === v || (v >>> 0) === (im.backdrop >>> 0)) { this.select(0); return; }
-    toast('Color not found in the palette (blended/transparent?)');
+    return pal[0] === v || (v >>> 0) === (im.backdrop >>> 0) ? 0 : -1;
+  }
+
+  previewClick(px: number, py: number): void {
+    const i = this.entryAt(px, py);
+    if (i >= 0) this.select(i);
+    else toast('Color not found in the palette (blended/transparent?)');
+  }
+
+  previewColor(px: number, py: number): { rgba: number; label: string } {
+    const i = this.entryAt(px, py);
+    return { rgba: this.app.compositeImg[py * this.app.images.width + px], label: i >= 0 ? `Color ${hex(i >> 4, 1)}·${hex(i & 15, 1)}` : 'not in the palette' };
   }
 
   key(e: KeyboardEvent): boolean {

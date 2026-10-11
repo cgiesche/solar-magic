@@ -2,7 +2,7 @@
 // Not a modal: the level list stays usable, edits show up in the preview right away and undo works.
 
 import type { App } from './app.ts';
-import { h } from './dom.ts';
+import { h, attachPanZoom, showColorLoupe, hideColorLoupe } from './dom.ts';
 import { viewMenu } from './viewmenu.ts';
 import { hex } from '../core/names.ts';
 import { PaletteTab } from './gfx/palettetab.ts';
@@ -20,6 +20,8 @@ export interface WsPanel {
   // click into the level preview (pixel position in the level image)
   previewClick?(px: number, py: number, e: MouseEvent): void;
   previewHint?(): string;
+  // eyedropper in the preview: the color under the mouse (pipette cursor and swatch)
+  previewColor?(px: number, py: number): { rgba: number; label: string };
 }
 
 // the current level image, scaled; marks every place of the highlighted Map16 tiles
@@ -30,9 +32,11 @@ export class LevelPreview {
   private box: HTMLElement;
   private scroller: HTMLElement;
   private info = h('div', { class: 'ws-prev-info hint' });
+  private zoomBtns: HTMLElement;
   zoom = 1;
   highlight = new Set<number>();
   onClick: ((px: number, py: number, e: MouseEvent) => void) | null = null;
+  colorAt: ((px: number, py: number) => { rgba: number; label: string }) | null = null;
   hint = '';
   private app: App;
 
@@ -40,22 +44,22 @@ export class LevelPreview {
     this.app = app;
     this.box = h('div', { class: 'ws-prev-box' }, this.img, this.over);
     this.scroller = h('div', { class: 'ws-prev-scroll' }, this.box);
-    const zoomBtn = (z: number) => h('button', { class: this.zoom === z ? 'active' : '', onclick: (e: MouseEvent) => {
-      this.zoom = z;
-      for (const b of (e.currentTarget as HTMLElement).parentElement!.children) b.classList.toggle('active', b === e.currentTarget);
-      this.layout();
-    } }, `${z}×`);
+    const zoomBtn = (z: number) => h('button', { 'data-zoom': z, title: 'Zoom (Ctrl+mouse wheel, middle mouse button pans)', onclick: () => this.setZoom(z) }, `${z}×`);
+    this.zoomBtns = h('span', { class: 'btn-group' }, zoomBtn(1), zoomBtn(2));
     this.root = h('div', { class: 'ws-prev' },
-      h('div', { class: 'panel-title' }, 'Level preview',
-        h('span', { class: 'btn-group' }, zoomBtn(1), zoomBtn(2))),
+      h('div', { class: 'panel-title' }, 'Level preview', this.zoomBtns),
       this.scroller, this.info);
+    this.markZoom();
+    attachPanZoom(this.scroller, () => this.zoom, (z, ax, ay) => this.setZoom(z, ax, ay));
     this.scroller.addEventListener('mousemove', (e) => {
       const p = this.pos(e);
+      this.box.classList.toggle('pipette', !!(p && this.colorAt));
+      if (p && this.colorAt && !(e.buttons & 4)) { const c = this.colorAt(p.px, p.py); showColorLoupe(e, c.rgba, c.label); } else hideColorLoupe();
       if (!p) { this.info.textContent = this.hint; return; }
       const t = this.tileAt(p.px, p.py);
       this.info.textContent = `X ${hex(p.px >> 4, 2)} Y ${hex(p.py >> 4, 2)}${t >= 0 ? ` · Map16 ${hex(t, 3)}` : ''}${this.hint ? ` — ${this.hint}` : ''}`;
     });
-    this.scroller.addEventListener('mouseleave', () => (this.info.textContent = this.hint));
+    this.scroller.addEventListener('mouseleave', () => { this.info.textContent = this.hint; hideColorLoupe(); });
     this.scroller.addEventListener('mousedown', (e) => {
       if (e.button !== 0) return;
       const p = this.pos(e);
@@ -63,6 +67,22 @@ export class LevelPreview {
     });
     app.on('render', () => this.update());
     app.on('anim-frame', () => this.update());
+  }
+
+  // z: zoom factor; anchor: point in the scroller that stays put (default: the middle)
+  setZoom(z: number, ax = this.scroller.clientWidth / 2, ay = this.scroller.clientHeight / 2): void {
+    const old = this.zoom;
+    if (z === old) return;
+    const lx = (this.scroller.scrollLeft + ax) / old, ly = (this.scroller.scrollTop + ay) / old;
+    this.zoom = z;
+    this.layout();
+    this.scroller.scrollLeft = lx * z - ax;
+    this.scroller.scrollTop = ly * z - ay;
+    this.markZoom();
+  }
+
+  private markZoom(): void {
+    for (const b of this.zoomBtns.children) b.classList.toggle('active', Number((b as HTMLElement).dataset.zoom) === this.zoom);
   }
 
   private pos(e: MouseEvent): { px: number; py: number } | null {
@@ -182,6 +202,9 @@ export class GfxWorkspace {
     this.body.replaceChildren(this.panel().root);
     this.preview.highlight.clear();
     this.preview.setHint(this.panel().previewHint?.() ?? '');
+    const p = this.panel();
+    this.preview.colorAt = p.previewColor ? (px, py) => p.previewColor!(px, py) : null;
+    hideColorLoupe();
     this.panel().show();
     this.preview.update();
   }

@@ -235,6 +235,29 @@ export function pickerOpen(el: HTMLElement): boolean {
   return a instanceof HTMLInputElement && a.type === 'color' && el.contains(a);
 }
 
+// eyedropper: the swatch of the hovered color next to the mouse (RGBA as packed by snesColorToRGBA,
+// null: transparent); hideColorLoupe() removes it. The pipette cursor is the CSS class 'pipette'.
+let loupe: { root: HTMLElement; sw: HTMLElement; text: HTMLElement } | null = null;
+export function showColorLoupe(e: MouseEvent, rgba: number | null, label = ''): void {
+  if (!loupe) {
+    const sw = h('span', { class: 'loupe-sw' }), text = h('span', { class: 'loupe-text' });
+    loupe = { root: h('div', { class: 'loupe' }, sw, text), sw, text };
+  }
+  if (!loupe.root.isConnected) document.body.append(loupe.root);
+  const r = rgba === null ? 0 : rgba & 0xff, g = rgba === null ? 0 : (rgba >> 8) & 0xff, b = rgba === null ? 0 : (rgba >> 16) & 0xff;
+  loupe.sw.classList.toggle('transp', rgba === null);
+  loupe.sw.style.background = rgba === null ? '' : `rgb(${r},${g},${b})`;
+  loupe.text.textContent = (label ? `${label} · ` : '') + (rgba === null ? 'transparent' : `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0').toUpperCase()}`);
+  // below right of the cursor; flipped at the window edges
+  const w = loupe.root.offsetWidth, hh = loupe.root.offsetHeight;
+  const x = e.clientX + 18 + w > innerWidth ? e.clientX - 10 - w : e.clientX + 18;
+  const y = e.clientY + 18 + hh > innerHeight ? e.clientY - 10 - hh : e.clientY + 18;
+  loupe.root.style.transform = `translate(${x}px, ${y}px)`;
+}
+export function hideColorLoupe(): void {
+  loupe?.root.remove();
+}
+
 // placeholder for an empty list or panel
 export function emptyState(text: string): HTMLElement {
   return h('div', { class: 'empty' }, text);
