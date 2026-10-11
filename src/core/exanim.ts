@@ -73,6 +73,35 @@ export function tilesOf(type: number): number {
   if (type === 0x12) return 8;
   return 1;
 }
+// tile shape of a type: columns, rows (rows are $100 VRAM words = 16 tiles apart)
+export function shapeOf(type: number): { w: number; h: number } {
+  if (type === 0x10) return { w: 1, h: 2 };
+  if (type === 0x11) return { w: 2, h: 2 };
+  if (type === 0x12) return { w: 4, h: 2 };
+  return { w: tilesOf(type), h: 1 };
+}
+// VRAM tiles (numbers from the layer character base charWord) the tile slots of a level's list and
+// the global one overwrite, with the slots that do it
+export function exanimTiles(rom: Rom, level: number, charWord: number): Map<number, { global: boolean; slot: number }[]> {
+  const out = new Map<number, { global: boolean; slot: number }[]>();
+  if (!exanimInstalled(rom)) return out;
+  const lists: [boolean, ExList | null][] = [[false, readLevelList(rom, level)], [true, readGlobalList(rom)]];
+  for (const [global, l] of lists) {
+    if (!l) continue;
+    for (const [slot, sl] of l.slots) {
+      if (kindOf(sl.type) !== 'tiles') continue;
+      const t0 = ((sl.dest & 0x7fff) - charWord) >> 4, shape = shapeOf(sl.type);
+      for (let y = 0; y < shape.h; y++) for (let x = 0; x < shape.w; x++) {
+        const t = t0 + y * 16 + x;
+        if (t < 0 || t >= 0x400) continue;
+        let a = out.get(t);
+        if (!a) out.set(t, a = []);
+        a.push({ global, slot });
+      }
+    }
+  }
+  return out;
+}
 // whether a trigger has a second set of frames (shown while its condition holds)
 export function secondSet(trigger: number): boolean {
   return (trigger >= 1 && trigger <= 5) || trigger === 7 || (trigger >= 9 && trigger <= 0x0e) || (trigger >= 0x20 && trigger <= 0x2f);

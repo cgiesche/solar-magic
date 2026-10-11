@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadAsar } from '../src/core/asar.ts';
-import { installExAnim, writeLevelList, readLevelList, writeAltFile, readAltFile, listBytes, parseList, emptyList, writeGlobalList, readGlobalList, exanimInstalled, type ExList } from '../src/core/exanim.ts';
+import { installExAnim, writeLevelList, readLevelList, writeAltFile, readAltFile, listBytes, parseList, emptyList, writeGlobalList, readGlobalList, exanimInstalled, exanimTiles, type ExList } from '../src/core/exanim.ts';
 
 await loadAsar();
 const file = new Uint8Array(readFileSync('test/fixtures/smw.smc'));
@@ -69,6 +69,9 @@ writeGlobalList(rom, g);
 check(readGlobalList(rom)?.slots.get(0)?.dest === (0x8000 | 0x0700), 'global list reads back');
 ep.load(0x106);
 check(ep.animationFrames(4, 4).some((f) => tileBytes(f.vram, 0x70)[0] === 0x11), 'global list animates level 106');
+// the tiles the slots overwrite, also those an ON/OFF trigger keeps unchanged in the emulated frames
+const own = exanimTiles(rom, 0x105, 0);
+check([0x60, 0x61, 0x70].every((t) => own.has(t)) && own.size === 3 && own.get(0x61)?.[0].slot === 1 && own.get(0x70)?.[0].global === true, `own animation tiles (${[...own.keys()].map((t) => t.toString(16))})`);
 
 // 4. removing the level list frees it
 writeLevelList(rom, 0x105, null);

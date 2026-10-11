@@ -14,7 +14,7 @@ import { EXT_FIRST, EXT_TILES, map16Ext } from '../../core/map16ext.ts';
 import {
   type ExList, type ExSlot, emptyList, readLevelList, readGlobalList, writeLevelList, writeGlobalList, levelSettings, setLevelSettings,
   readAltFile, writeAltFile, kindOf, tilesOf, secondSet, secondSetName, triggerName, TYPE_NAMES, SLOTS, exanimInstalled, exanimLayout,
-  NO_GAME_COLORS, NO_GAME_TILES, NO_LEVEL_LIST, NO_GLOBAL_LIST, altFileUsers, localizeFrames,
+  NO_GAME_COLORS, NO_GAME_TILES, NO_LEVEL_LIST, NO_GLOBAL_LIST, altFileUsers, localizeFrames, shapeOf, exanimTiles,
 } from '../../core/exanim.ts';
 import { levelSlots, gfxName, lmAnimName, ANIM_FILE } from './map16tab.ts';
 import { confirmExAnim } from './gfxtab.ts';
@@ -25,30 +25,9 @@ const COLOR_TYPES = [0x14, 0x13, 0x15, 0x16, 0x17];
 const TRIGGERS = [0x00, 0x03, 0x01, 0x02, 0x04, 0x05, 0x07, 0x06, 0x08];
 const ALT = 0x8000;
 
-// tile shape of a type: columns, rows (rows are $100 VRAM words = 16 tiles apart)
-function shapeOf(type: number): { w: number; h: number } {
-  if (type === 0x10) return { w: 1, h: 2 };
-  if (type === 0x11) return { w: 2, h: 2 };
-  if (type === 0x12) return { w: 4, h: 2 };
-  return { w: tilesOf(type), h: 1 };
-}
-
 // own tile animations of the current level (its list and the global one) that overwrite a VRAM tile
 export function animsAt(app: App, tile: number): { global: boolean; slot: number }[] {
-  const out: { global: boolean; slot: number }[] = [];
-  if (!exanimInstalled(app.rom)) return out;
-  const charWord = (app.render.ppuRegs[0x0b] & 0x0f) << 12;
-  const lists: [boolean, ExList | null][] = [[false, readLevelList(app.rom, app.level.number)], [true, readGlobalList(app.rom)]];
-  for (const [global, l] of lists) {
-    if (!l) continue;
-    for (const [slot, s] of l.slots) {
-      if (kindOf(s.type) !== 'tiles') continue;
-      const t0 = ((s.dest & 0x7fff) - charWord) >> 4, shape = shapeOf(s.type);
-      const d = tile - t0;
-      if (d >= 0 && (d & 15) < shape.w && d >> 4 < shape.h) out.push({ global, slot });
-    }
-  }
-  return out;
+  return exanimTiles(app.rom, app.level.number, (app.render.ppuRegs[0x0b] & 0x0f) << 12).get(tile) ?? [];
 }
 
 export class AnimTab implements WsPanel {

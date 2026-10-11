@@ -34,6 +34,7 @@ import { variantOf, blockKey, spriteKey, type BlockProbe, type SpriteProbe } fro
 import type { ProbeReply } from '../core/probehost.ts';
 import { ProbeClient } from '../core/probeclient.ts';
 import { map16Tile, bgTile } from '../core/ram.ts';
+import { exanimTiles } from '../core/exanim.ts';
 
 export type EditMode = 'l1' | 'l2' | 'spr' | 'exit' | 'bg';
 export type PaletteItem =
@@ -788,7 +789,7 @@ export class App {
   private animInfo: { render: LevelRender | null; level: number; res: { tiles: Set<number>; colors: Set<number> } | null; timer: number } = { render: null, level: -1, res: null, timer: 0 };
   animated(): { tiles: Set<number>; colors: Set<number> } | null {
     const a = this.animInfo;
-    if (a.render === this.render) return a.res;
+    if (a.render === this.render) return this.withOwnAnims(a.res);
     if (!a.timer) a.timer = window.setTimeout(() => {
       a.timer = 0;
       const render = this.render;
@@ -810,7 +811,22 @@ export class App {
       a.level = this.level.number;
       this.emit('animated');
     }, 50);
-    return a.level === this.level.number ? a.res : null; // same level: the previous result until known
+    return a.level === this.level.number ? this.withOwnAnims(a.res) : null; // same level: the previous result until known
+  }
+  // plus the tiles the ROM's own ExAnimation slots overwrite (their trigger may not fire in the
+  // emulated frames, e.g. on/off or manual), read from the lists as they are now
+  private ownAnim: { key: string; res: { tiles: Set<number>; colors: Set<number> } | null; out: { tiles: Set<number>; colors: Set<number> } | null } = { key: '', res: null, out: null };
+  private withOwnAnims(res: { tiles: Set<number>; colors: Set<number> } | null): { tiles: Set<number>; colors: Set<number> } | null {
+    if (!res) return null;
+    const o = this.ownAnim, charWord = (this.render.ppuRegs[0x0b] & 0x0f) << 12;
+    const key = `${this.rom.gen}:${this.level.number}:${charWord}`;
+    if (o.key !== key || o.res !== res) {
+      const own = exanimTiles(this.rom, this.level.number, charWord);
+      o.key = key;
+      o.res = res;
+      o.out = own.size ? { tiles: new Set([...res.tiles, ...own.keys()]), colors: res.colors } : res;
+    }
+    return o.out;
   }
 
   palettesChanged(): void {
