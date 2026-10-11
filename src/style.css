@@ -321,6 +321,7 @@ body.mt-dragging .mt-big { outline: 2px dashed var(--accent); }
 .mt-adv summary { cursor: pointer; color: var(--muted); }
 .mt-acts-dlg { display: flex; flex-direction: column; gap: 6px; }
 .mt-acts-scroll { max-height: 60vh; overflow-y: auto; border: 1px solid var(--border); }
+.mt-acts-input { font-family: ui-monospace, monospace; }
 .mt-acts-pick { display: block; image-rendering: pixelated; cursor: pointer; }
 .mt-gfx-col { flex: 1; min-width: 0; }
 .mt-gfx-wrap { display: flex; }

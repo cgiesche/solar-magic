@@ -425,34 +425,79 @@ export class Map16Tab implements WsPanel {
     );
   }
 
-  // picks the acts-like value from a sheet of the vanilla tiles
+  // picks the acts-like value from a sheet of the vanilla tiles, by click or by typing its number:
+  // typing dims the tiles that do not match, Enter takes the tile once only one is left
   private pickActs(): void {
     const app = this.app;
     const tiles = this.selection();
     const c = h('canvas', { width: 256 * 2, height: 512 * 2, class: 'mt-acts-pick' });
     const ctx = c.getContext('2d')!;
     ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(renderMap16Sheet(app, false, 0), 0, 0, 512, 1024);
+    const sheet = renderMap16Sheet(app, false, 0);
     const cur = actsLike(app.rom, this.sel);
-    ctx.strokeStyle = '#ffb000'; ctx.lineWidth = 2;
-    ctx.strokeRect((cur & 15) * 32 + 1, (cur >> 4) * 32 + 1, 30, 30);
-    const info = h('div', { class: 'hint', style: 'min-height:2.6em' }, 'Click a tile: the selected tile then behaves like this one.');
+    const scroll = h('div', { class: 'mt-acts-scroll' }, c);
+    const tip = 'Click a tile or type its number: the selected tile then behaves like this one.';
+    const info = h('div', { class: 'hint', style: 'min-height:2.6em' }, tip);
+    const describe = (t: number) => { const p = app.probes.block(t); info.textContent = `Tile ${hex(t, 3)}: ${p ? probeText(p) : 'determining …'}`; };
+    const input = h('input', { type: 'text', class: 'mt-acts-input', placeholder: 'Tile number (hex), e.g. 130', spellcheck: false, autocomplete: 'off' });
+    let matches: number[] = [];
+    // leading zero or all three digits: compared from the left of the 3-digit number, otherwise as typed
+    // ("25" is tile 025, "1A" is 01A and 1A0–1AF)
+    const filter = (q: string): number[] => {
+      const all = Array.from({ length: 0x200 }, (_, t) => t);
+      if (!q) return all;
+      if (!/^[0-9A-F]{1,3}$/.test(q)) return [];
+      const padded = q.length === 3 || q[0] === '0';
+      return all.filter((t) => (padded ? hex(t, 3) : t.toString(16).toUpperCase()).startsWith(q));
+    };
+    const draw = () => {
+      ctx.drawImage(sheet, 0, 0, 512, 1024);
+      if (matches.length < 0x200) {
+        const hit = new Set(matches);
+        ctx.fillStyle = 'rgba(0,0,0,0.75)';
+        for (let t = 0; t < 0x200; t++) if (!hit.has(t)) ctx.fillRect((t & 15) * 32, (t >> 4) * 32, 32, 32);
+      }
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = '#ffb000';
+      ctx.strokeRect((cur & 15) * 32 + 1, (cur >> 4) * 32 + 1, 30, 30);
+      if (matches.length === 1) {
+        const t = matches[0];
+        ctx.strokeStyle = '#ffffff';
+        ctx.strokeRect((t & 15) * 32 + 3, (t >> 4) * 32 + 3, 26, 26);
+      }
+    };
+    const update = () => {
+      const q = input.value.trim().toUpperCase().replace(/^(\$|0X)/, '');
+      matches = filter(q);
+      draw();
+      if (matches.length === 1) { describe(matches[0]); info.textContent += ' – Enter takes it.'; }
+      else info.textContent = !q ? tip : matches.length ? `${matches.length} tiles match.` : 'No tile 000–1FF matches.';
+      if (q && matches.length) {
+        const y = (matches[0] >> 4) * 32 * (c.getBoundingClientRect().height / 1024 || 1);
+        if (y < scroll.scrollTop || y > scroll.scrollTop + scroll.clientHeight - 32) scroll.scrollTop = y - 8;
+      }
+    };
     const at = (e: MouseEvent) => {
       const rc = c.getBoundingClientRect();
       return Math.floor((e.clientY - rc.top) / (rc.height / 32)) * 16 + Math.floor((e.clientX - rc.left) / (rc.width / 16));
     };
-    c.addEventListener('mousemove', (e) => {
-      const t = at(e);
-      const p = app.probes.block(t);
-      info.textContent = `Tile ${hex(t, 3)}: ${p ? probeText(p) : 'determining …'}`;
-    });
+    c.addEventListener('mousemove', (e) => describe(at(e)));
+    c.addEventListener('mouseleave', update);
     const dlg = modal(`Behavior for ${tiles.length > 1 ? `${tiles.length} Tiles` : this.tileName(this.sel)}`,
-      h('div', { class: 'mt-acts-dlg' }, info, h('div', { class: 'mt-acts-scroll' }, c)), [{ label: 'Cancel' }]);
-    c.addEventListener('mousedown', (e) => {
-      const v = at(e);
+      h('div', { class: 'mt-acts-dlg' }, input, info, scroll), [{ label: 'Cancel' }]);
+    const take = (v: number) => {
       this.edit(`Behavior like ${hex(v, 3)}`, () => { for (const t of tiles) setActsLike(app.rom, t, v, this.blank()); });
       dlg.close();
+    };
+    c.addEventListener('mousedown', (e) => take(at(e)));
+    input.addEventListener('input', update);
+    input.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      if (matches.length === 1) take(matches[0]);
     });
+    update();
+    input.focus();
   }
 
   // ---------- 8x8 graphics ----------
