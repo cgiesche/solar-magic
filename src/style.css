@@ -307,6 +307,7 @@ kbd { background: #181a1f; border: 1px solid var(--border); border-radius: 3px; 
 .mt-main { flex: 1; min-height: 0; display: flex; gap: 12px; padding: 8px; }
 .mt-col { display: flex; flex-direction: column; gap: 6px; min-height: 0; }
 .mt-scroll, .mt-gfx-scroll { overflow-y: auto; border: 1px solid var(--border); flex: 1; min-height: 0; }
+.mt-search { width: 9em; font-family: ui-monospace, monospace; }
 .mt-sheet { display: block; image-rendering: pixelated; cursor: crosshair; }
 .mt-builder-col { width: 300px; flex-shrink: 0; overflow-y: auto; }
 .mt-builder { display: flex; flex-direction: column; gap: 8px; }

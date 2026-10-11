@@ -21,8 +21,10 @@ import { probeText } from '../../core/blockprobe.ts';
 import { levelGfx, defaultGfx, levelExtGfx, VANILLA_GFX } from '../../core/patches.ts';
 import { cgramToRGBA } from '../../core/gfx.ts';
 import { map16Pointer } from '../../core/ram.ts';
+import { tileMatches, drawTileMatches } from '../tilesearch.ts';
 
 const Z = 2; // sheet zoom
+const M = 34; // sheet margin for the ranges and row numbers
 const GZ = 2; // 8x8 graphics zoom
 const BZ = 12; // builder zoom
 const FLIP_X = 0x4000, FLIP_Y = 0x8000, PRIO = 0x2000;
@@ -60,7 +62,6 @@ export class Map16Tab implements WsPanel {
   private app: App;
   private ws: GfxWorkspace;
   private bg = false;
-  private base = 0; // first tile of the shown sheet
   private sel = 0x130;
   private selW = 1;
   private selH = 1;
@@ -69,7 +70,18 @@ export class Map16Tab implements WsPanel {
   private sameActs = false; // mark tiles that act like the selected one
   private visible = false;
   private bar = h('div', { class: 'ws-bar' });
-  private sheet = h('canvas', { class: 'mt-sheet', width: 256 * Z + 34, height: 512 * Z });
+  // all pages of 256 tiles in one list, each drawn once it scrolls into view
+  private scroll = h('div', { class: 'mt-scroll' });
+  private pages: HTMLCanvasElement[] = [];
+  private heads: HTMLElement[] = [];
+  private near = new Set<number>(); // pages in or near the view
+  private dirty = new Set<number>(); // pages to draw once they come near the view
+  private topPage = 0; // page at the top of the list
+  private pageBar = h('span', { class: 'btn-group m16-pages' });
+  private search = h('input', { type: 'text', class: 'mt-search', placeholder: 'Tile no. (hex) …', spellcheck: false, autocomplete: 'off',
+    title: 'Dims the tiles that do not match; Enter selects the tile once only one is left' });
+  private match: number[] | null = null;
+  private scrollPending = false; // selected while hidden: scroll there when shown
   private builder = h('div', { class: 'mt-builder' });
   private gfxBox = h('div', { class: 'mt-gfx' });
   private gfxCanvas = h('canvas', { class: 'mt-gfx-canvas' });
@@ -79,10 +91,12 @@ export class Map16Tab implements WsPanel {
     this.ws = ws;
     this.root = h('div', { class: 'mt' }, this.bar,
       h('div', { class: 'mt-main' },
-        h('div', { class: 'mt-col mt-sheet-col' }, h('div', { class: 'mt-scroll' }, this.sheet)),
+        h('div', { class: 'mt-col mt-sheet-col' }, this.scroll),
         h('div', { class: 'mt-col mt-builder-col' }, this.builder),
         h('div', { class: 'mt-col mt-gfx-col' }, this.gfxBox)));
+    this.buildPages();
     this.attachSheet();
+    this.attachSearch();
     this.attachGfx();
     const redraw = () => { if (this.visible) this.redraw(); };
     app.on('rom-change', redraw);
@@ -99,16 +113,16 @@ export class Map16Tab implements WsPanel {
     this.visible = true;
     this.buildBar();
     this.redraw();
+    if (this.scrollPending) requestAnimationFrame(() => this.scrollToSel());
   }
   hide(): void { this.visible = false; }
 
   select(tile: number, bg = false): void {
     this.bg = bg;
     this.sel = tile & (EXT_TILES - 1);
-    this.base = this.sel & ~0x1ff;
     this.selW = this.selH = 1;
     this.quad = 0;
-    if (this.visible) { this.buildBar(); this.redraw(); this.scrollToSel(); }
+    if (this.visible) { this.buildBar(); this.redraw(); this.scrollToSel(); } else this.scrollPending = true;
   }
 
   // ---------- data ----------
@@ -156,20 +170,25 @@ export class Map16Tab implements WsPanel {
     clear(this.bar);
     const layer = (bg: boolean, label: string, title: string) => h('button', {
       class: this.bg === bg ? 'active' : '', title,
-      onclick: () => { if (this.bg === bg) return; this.bg = bg; this.base = 0; this.sel = this.sel & 0x1ff; this.selW = this.selH = 1; this.buildBar(); this.redraw(); },
+      onclick: () => { if (this.bg === bg) return; this.bg = bg; this.sel = this.sel & 0x1ff; this.selW = this.selH = 1; this.buildBar(); this.redraw(); this.scrollToSel(); },
     }, label);
     const ext = this.bg ? !!bgMap16Ext(this.app.rom) : !!map16Ext(this.app.rom);
-    const page = (b: number) => h('button', {
-      class: this.base === b ? 'active' : '',
-      title: b === 0 ? (this.bg ? 'BG tiles of the original backgrounds' : 'Standard tiles and tileset tiles')
-        : `Extended ${this.bg ? 'BG ' : ''}tiles ${hex(b, 3)}–${hex(b + 511, 3)}${this.bg ? '' : ' (in the level via Direct Map16 object)'}${ext ? '' : ' – created on the first change'}`,
-      onclick: () => { this.base = b; this.sel = b + (this.sel & 0x1ff); this.selW = this.selH = 1; this.buildBar(); this.redraw(); },
-    }, b === 0 ? 'Page 0–1' : `${hex(b >> 8, 1)}–${hex((b >> 8) + 1, 1)}`);
+    clear(this.pageBar);
+    for (let p = 0; p < this.pages.length; p++) {
+      this.pageBar.appendChild(h('button', {
+        class: p === this.topPage ? 'active' : '',
+        title: p < 2 ? `Page ${p}: ${this.bg ? 'BG tiles of the original backgrounds' : p ? 'standard tiles' : 'standard and tileset tiles'}`
+          : `Page ${hex(p, 1)}: extended ${this.bg ? 'BG ' : ''}tiles${this.bg ? '' : ' (in the level via Direct Map16 object)'}${ext ? '' : ' – created on the first change'}`,
+        onclick: () => this.scrollToPage(p),
+      }, hex(p, 1)));
+      this.heads[p].replaceChildren(`Page ${hex(p, 1)}`, p >= 2 && !ext ? h('span', { class: 'hint' }, ' (created on the first change)') : '');
+    }
     this.bar.append(
       h('span', { class: 'btn-group' },
         layer(false, 'Foreground', 'FG tiles (layer 1 and layer 2 objects)'),
         layer(true, 'Background', 'BG tiles (layer 2 backgrounds)')),
-      h('span', { class: 'btn-group' }, ...Array.from({ length: EXT_TILES / 512 }, (_, i) => page(i * 512))),
+      this.pageBar,
+      this.search,
       h('span', { class: 'sep' }),
       h('button', { onclick: () => this.copy(), title: 'Copy the selected tiles, with behavior (Ctrl+C)' }, 'Copy'),
       h('button', { onclick: () => this.paste(), title: 'Paste starting at the selected tile (Ctrl+V)' }, 'Paste'),
@@ -198,19 +217,49 @@ export class Map16Tab implements WsPanel {
     return out;
   }
 
-  // sheet: 16x32 tiles with a margin showing what the ranges are
+  // the sheet: one canvas per page of 256 tiles (16x16) under its heading, with a margin showing what the
+  // ranges are
+  private buildPages(): void {
+    const observer = new IntersectionObserver((entries) => {
+      for (const e of entries) {
+        const p = this.pages.indexOf(e.target as HTMLCanvasElement);
+        if (!e.isIntersecting) { this.near.delete(p); continue; }
+        this.near.add(p);
+        if (this.dirty.has(p)) this.drawPage(p);
+      }
+    }, { root: this.scroll, rootMargin: '300px 0px' });
+    for (let p = 0; p < EXT_TILES / 256; p++) {
+      const c = h('canvas', { class: 'mt-sheet', width: 256 * Z + M, height: 256 * Z });
+      const head = h('div', { class: 'pal-head' });
+      this.pages.push(c);
+      this.heads.push(head);
+      this.dirty.add(p);
+      observer.observe(c);
+      this.scroll.append(head, c);
+    }
+    this.scroll.addEventListener('scroll', () => this.pageScrolled());
+  }
+
+  // pages near the view are drawn now, the others once they come near it
   private drawSheet(): void {
-    const c = this.sheet, ctx = c.getContext('2d')!;
-    const M = 34; // left margin
+    for (let p = 0; p < this.pages.length; p++) {
+      if (this.near.has(p)) this.drawPage(p); else this.dirty.add(p);
+    }
+  }
+
+  private drawPage(p: number): void {
+    this.dirty.delete(p);
+    const c = this.pages[p], ctx = c.getContext('2d')!;
+    const base = p * 256;
     ctx.fillStyle = '#1b1d22';
     ctx.fillRect(0, 0, c.width, c.height);
     ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(renderMap16Sheet(this.app, this.bg, this.base), M, 0, 256 * Z, 512 * Z);
+    ctx.drawImage(renderMap16Sheet(this.app, this.bg, base, 256), M, 0, 256 * Z, 256 * Z);
     // ranges
     const band = (from: number, to: number, color: string, label: string) => {
-      const a = Math.max(from, this.base), b = Math.min(to, this.base + 0x1ff);
+      const a = Math.max(from, base), b = Math.min(to, base + 0xff);
       if (a > b) return;
-      const y0 = ((a - this.base) >> 4) * 16 * Z, y1 = (((b - this.base) >> 4) + 1) * 16 * Z;
+      const y0 = ((a - base) >> 4) * 16 * Z, y1 = (((b - base) >> 4) + 1) * 16 * Z;
       ctx.fillStyle = color;
       ctx.fillRect(0, y0, 4, y1 - y0);
       ctx.save();
@@ -235,60 +284,113 @@ export class Map16Tab implements WsPanel {
     ctx.fillStyle = 'rgba(255,255,255,0.45)';
     ctx.font = '10px ui-monospace, monospace';
     ctx.textAlign = 'right';
-    for (let row = 0; row < 32; row += 2) ctx.fillText(hex(this.base + row * 16, 3), M - 2, row * 16 * Z + 11);
+    for (let row = 0; row < 16; row += 2) ctx.fillText(hex(base + row * 16, 3), M - 2, row * 16 * Z + 11);
     ctx.textAlign = 'left';
     if (this.sameActs && !this.bg) {
       const a = actsLike(this.app.rom, this.sel);
       ctx.fillStyle = 'rgba(255,176,0,0.35)';
-      for (let t = 0; t < 512; t++) if (actsLike(this.app.rom, this.base + t) === a) ctx.fillRect(M + (t & 15) * 16 * Z, (t >> 4) * 16 * Z, 16 * Z, 16 * Z);
+      for (let t = 0; t < 256; t++) if (actsLike(this.app.rom, base + t) === a) ctx.fillRect(M + (t & 15) * 16 * Z, (t >> 4) * 16 * Z, 16 * Z, 16 * Z);
     }
-    if ((this.sel & ~0x1ff) === this.base) {
-      const s = this.sel - this.base;
+    drawTileMatches(ctx, this.match, base, 256, 16 * Z, M);
+    // the selection may reach over several pages; each draws its part
+    const row = (this.sel >> 4) - p * 16;
+    if (row < 16 && row + this.selH > 0) {
       ctx.strokeStyle = '#4cc2ff';
       ctx.lineWidth = 2;
-      ctx.strokeRect(M + (s & 15) * 16 * Z + 1, (s >> 4) * 16 * Z + 1, this.selW * 16 * Z - 2, this.selH * 16 * Z - 2);
+      ctx.strokeRect(M + (this.sel & 15) * 16 * Z + 1, row * 16 * Z + 1, this.selW * 16 * Z - 2, this.selH * 16 * Z - 2);
     }
   }
 
-  private attachSheet(): void {
-    const c = this.sheet;
-    const M = 34;
-    const cell = (e: MouseEvent) => {
-      const rc = c.getBoundingClientRect();
-      const sx = c.width / rc.width;
-      return {
-        x: Math.max(0, Math.min(15, Math.floor(((e.clientX - rc.left) * sx - M) / (16 * Z)))),
-        y: Math.max(0, Math.min(31, Math.floor(((e.clientY - rc.top) * sx) / (16 * Z)))),
-      };
+  // tile column and row (over all pages) under the mouse; between pages: the page above
+  private cellAt(e: MouseEvent): { x: number; y: number } {
+    let p = 0;
+    for (let i = 1; i < this.pages.length; i++) if (this.pages[i].getBoundingClientRect().top <= e.clientY) p = i;
+    const c = this.pages[p], rc = c.getBoundingClientRect();
+    const sx = c.width / rc.width;
+    return {
+      x: Math.max(0, Math.min(15, Math.floor(((e.clientX - rc.left) * sx - M) / (16 * Z)))),
+      y: p * 16 + Math.max(0, Math.min(15, Math.floor(((e.clientY - rc.top) * sx) / (16 * Z)))),
     };
-    c.addEventListener('mousedown', (e) => {
-      if (e.button !== 0) return;
+  }
+
+  private attachSheet(): void {
+    this.scroll.addEventListener('mousedown', (e) => {
+      if (e.button !== 0 || !(e.target instanceof HTMLCanvasElement)) return;
       e.preventDefault();
-      const a = cell(e);
+      const a = this.cellAt(e);
       const pick = (b: { x: number; y: number }) => {
-        this.sel = this.base + Math.min(a.y, b.y) * 16 + Math.min(a.x, b.x);
+        this.sel = Math.min(a.y, b.y) * 16 + Math.min(a.x, b.x);
         this.selW = Math.abs(a.x - b.x) + 1;
         this.selH = Math.abs(a.y - b.y) + 1;
         this.drawSheet();
       };
       pick(a);
-      const move = (ev: MouseEvent) => pick(cell(ev));
+      const move = (ev: MouseEvent) => pick(this.cellAt(ev));
       const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); this.quad = 0; this.redraw(); };
       window.addEventListener('mousemove', move);
       window.addEventListener('mouseup', up);
     });
-    c.addEventListener('mousemove', (e) => {
-      const p = cell(e);
-      const t = this.base + p.y * 16 + p.x;
+    this.scroll.addEventListener('mousemove', (e) => {
+      if (!(e.target instanceof HTMLCanvasElement)) return;
+      const p = this.cellAt(e);
+      const t = p.y * 16 + p.x;
       const info = this.bg ? undefined : this.app.probes.block(actsLike(this.app.rom, t));
-      c.title = `${this.tileName(t)}${this.bg ? '' : ` – ${info ? probeText(info) : 'determining behavior …'}`}`;
+      e.target.title = `${this.tileName(t)}${this.bg ? '' : ` – ${info ? probeText(info) : 'determining behavior …'}`}`;
     });
   }
 
-  private scrollToSel(): void {
-    const sc = this.sheet.parentElement!;
-    const y = ((this.sel - this.base) >> 4) * 16 * Z;
+  // search by tile number: the other tiles are dimmed, the list goes to the first match, Enter selects a
+  // single match
+  private attachSearch(): void {
+    const s = this.search;
+    s.addEventListener('input', () => {
+      this.match = tileMatches(s.value, EXT_TILES);
+      this.drawSheet();
+      if (this.match?.length) this.scrollToTile(this.match[0]);
+    });
+    s.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && s.value) { e.preventDefault(); this.clearSearch(); return; }
+      if (e.key !== 'Enter' || this.match?.length !== 1) return;
+      e.preventDefault();
+      this.sel = this.match[0];
+      this.selW = this.selH = 1;
+      this.quad = 0;
+      this.clearSearch();
+      s.blur();
+      this.redraw();
+      this.scrollToSel();
+    });
+  }
+  private clearSearch(): void {
+    this.search.value = '';
+    this.match = null;
+    this.drawSheet();
+  }
+
+  // y of a tile's row in the list
+  private tileY(t: number): number {
+    const c = this.pages[t >> 8];
+    return c.getBoundingClientRect().top - this.scroll.getBoundingClientRect().top + this.scroll.scrollTop
+      + ((t & 0xff) >> 4) * 16 * Z * (c.clientHeight / c.height);
+  }
+  private scrollToTile(t: number): void {
+    const sc = this.scroll, y = this.tileY(t);
     if (y < sc.scrollTop || y > sc.scrollTop + sc.clientHeight - 40) sc.scrollTop = y - sc.clientHeight / 2;
+  }
+  private scrollToSel(): void {
+    this.scrollPending = false;
+    this.scrollToTile(this.sel);
+  }
+  private scrollToPage(p: number): void {
+    this.scroll.scrollTop = this.heads[p].offsetTop - this.scroll.offsetTop;
+    this.pageScrolled();
+  }
+  // marks the page at the top of the list in the bar
+  private pageScrolled(): void {
+    let page = 0;
+    this.heads.forEach((head, p) => { if (head.offsetTop - this.scroll.offsetTop <= this.scroll.scrollTop + 4) page = p; });
+    this.topPage = page;
+    this.pageBar.querySelectorAll('button').forEach((b, i) => b.classList.toggle('active', i === page));
   }
 
   // ---------- builder ----------
@@ -441,39 +543,20 @@ export class Map16Tab implements WsPanel {
     const say = (text: string) => { info.textContent = text; info.title = text; };
     const describe = (t: number) => { const p = app.probes.block(t); say(`Tile ${hex(t, 3)}: ${p ? probeText(p) : 'determining …'}`); };
     const input = h('input', { type: 'text', class: 'mt-acts-input', placeholder: 'Tile number (hex), e.g. 130', spellcheck: false, autocomplete: 'off' });
-    let matches: number[] = [];
-    // leading zero or all three digits: compared from the left of the 3-digit number, otherwise as typed
-    // ("25" is tile 025, "1A" is 01A and 1A0–1AF)
-    const filter = (q: string): number[] => {
-      const all = Array.from({ length: 0x200 }, (_, t) => t);
-      if (!q) return all;
-      if (!/^[0-9A-F]{1,3}$/.test(q)) return [];
-      const padded = q.length === 3 || q[0] === '0';
-      return all.filter((t) => (padded ? hex(t, 3) : t.toString(16).toUpperCase()).startsWith(q));
-    };
+    let matches: number[] | null = null;
     const draw = () => {
       ctx.drawImage(sheet, 0, 0, 512, 1024);
-      if (matches.length < 0x200) {
-        const hit = new Set(matches);
-        ctx.fillStyle = 'rgba(0,0,0,0.75)';
-        for (let t = 0; t < 0x200; t++) if (!hit.has(t)) ctx.fillRect((t & 15) * 32, (t >> 4) * 32, 32, 32);
-      }
       ctx.lineWidth = 2;
       ctx.strokeStyle = '#ffb000';
       ctx.strokeRect((cur & 15) * 32 + 1, (cur >> 4) * 32 + 1, 30, 30);
-      if (matches.length === 1) {
-        const t = matches[0];
-        ctx.strokeStyle = '#ffffff';
-        ctx.strokeRect((t & 15) * 32 + 3, (t >> 4) * 32 + 3, 26, 26);
-      }
+      drawTileMatches(ctx, matches, 0, 0x200, 32);
     };
     const update = () => {
-      const q = input.value.trim().toUpperCase().replace(/^(\$|0X)/, '');
-      matches = filter(q);
+      matches = tileMatches(input.value, 0x200);
       draw();
-      if (matches.length === 1) describe(matches[0]);
-      else say(!q ? tip : matches.length ? `${matches.length} tiles match.` : 'No tile 000–1FF matches.');
-      if (q && matches.length) {
+      if (matches?.length === 1) describe(matches[0]);
+      else say(!matches ? tip : matches.length ? `${matches.length} tiles match.` : 'No tile 000–1FF matches.');
+      if (matches?.length) {
         const y = (matches[0] >> 4) * 32 * (c.getBoundingClientRect().height / 1024 || 1);
         if (y < scroll.scrollTop || y > scroll.scrollTop + scroll.clientHeight - 32) scroll.scrollTop = y - 8;
       }
@@ -495,7 +578,7 @@ export class Map16Tab implements WsPanel {
     input.addEventListener('keydown', (e) => {
       if (e.key !== 'Enter') return;
       e.preventDefault();
-      if (matches.length === 1) take(matches[0]);
+      if (matches?.length === 1) take(matches[0]);
     });
     update();
     input.focus();
@@ -698,9 +781,7 @@ export class Map16Tab implements WsPanel {
       const n = this.sel + d;
       if (n < 0 || n >= max) return true;
       this.sel = n;
-      this.base = n & ~0x1ff;
       this.selW = this.selH = 1;
-      this.buildBar();
       this.redraw();
       this.scrollToSel();
       return true;

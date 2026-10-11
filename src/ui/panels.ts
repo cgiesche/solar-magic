@@ -15,6 +15,7 @@ import { bgMap16Ext, installBgMap16Ext } from '../core/bgmap16.ts';
 import { TileCache, map16Source, drawMap16 } from '../core/render.ts';
 import { probeable } from '../core/probeclient.ts';
 import { probeText, spritesOf, spriteProbeAt, enterText, enterSuffix } from '../core/blockprobe.ts';
+import { tileMatches, drawTileMatches } from './tilesearch.ts';
 
 // behaviour of the given Map16 tiles when hit from below or entered (only tiles with an effect);
 // undefined while probes are still pending
@@ -125,8 +126,25 @@ export class Palette {
     this.tabs = h('div', { class: 'tabs seg' });
     this.searchRow = h('div', { class: 'row' }, this.search);
     this.root = h('div', { class: 'panel palette' }, h('div', { class: 'panel-title' }, 'Insert', h('span', { class: 'hint' }, 'Right click/Shift+click places')), this.tabs,
-      this.searchRow, this.m16Bar, this.body);
+      this.searchRow, this.m16SearchRow, this.m16Bar, this.body);
     this.body.addEventListener('scroll', () => this.m16Scrolled());
+    this.m16Search.addEventListener('input', () => {
+      this.m16Match = tileMatches(this.m16Search.value, EXT_TILES);
+      this.build();
+      if (this.m16Match?.length) this.scrollToM16Tile(this.m16Match[0]);
+    });
+    this.m16Search.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && this.m16Search.value) { e.preventDefault(); this.m16Search.value = ''; this.m16Match = null; this.build(); return; }
+      if (e.key !== 'Enter' || this.m16Match?.length !== 1) return;
+      e.preventDefault();
+      app.paletteItem = { kind: 'obj', num: 0, ext: DM16_EXT, size: 0, tile: this.m16Match[0] };
+      this.m16Search.value = '';
+      this.m16Match = null;
+      this.m16Search.blur();
+      if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1');
+      this.build();
+      this.scrollToSelected();
+    });
     app.on('objkinds', () => this.invalidate());
     app.on('level', () => { this.ensureThumbs(); this.build(); });
     let t = 0;
@@ -191,10 +209,14 @@ export class Palette {
     if (el) { el.scrollIntoView({ block: 'nearest' }); return; }
     const cur = this.app.paletteItem;
     if (cur?.kind !== 'obj' || cur.tile === undefined) return;
-    const c = this.body.querySelector<HTMLCanvasElement>(`canvas.m16-pick[data-page="${cur.tile >> 8}"]`);
+    this.scrollToM16Tile(cur.tile);
+  }
+  // scrolls a Map16 tile into view if it is not
+  scrollToM16Tile(t: number): void {
+    const c = this.body.querySelector<HTMLCanvasElement>(`canvas.m16-pick[data-page="${t >> 8}"]`);
     if (!c) return;
     // the canvas row of the tile
-    const y = (((cur.tile & 0xff) >> 4) / 16) * c.clientHeight;
+    const y = (((t & 0xff) >> 4) / 16) * c.clientHeight;
     const body = this.body.getBoundingClientRect(), rc = c.getBoundingClientRect();
     const top = rc.top - body.top + this.body.scrollTop + y;
     if (top < this.body.scrollTop || top + 20 > this.body.scrollTop + this.body.clientHeight) this.body.scrollTop = top - this.body.clientHeight / 2;
@@ -206,6 +228,11 @@ export class Palette {
   m16Page = 0; // page at the top of the list
   m16Scroll = 0; // scroll position of the list, kept across rebuilds and tab changes
   m16Bar: HTMLDivElement = h('div', { class: 'tabs seg m16-pages' });
+  // search by tile number: the other tiles are dimmed, the list goes to the first match, Enter takes a single match
+  m16Search: HTMLInputElement = h('input', { class: 'filter', placeholder: 'Tile no. (hex) …', spellcheck: false, autocomplete: 'off',
+    title: 'Dims the tiles that do not match; Enter takes the tile once only one is left' });
+  m16SearchRow: HTMLDivElement = h('div', { class: 'row' }, this.m16Search);
+  m16Match: number[] | null = null;
   scrollToM16Page(page: number): void {
     const head = this.body.querySelector<HTMLElement>(`.m16-page-head[data-page="${page}"]`);
     if (head) this.body.scrollTop = head.offsetTop - this.body.offsetTop;
@@ -273,6 +300,7 @@ export class Palette {
       const draw = (x: number, y: number, w: number, hh: number) => {
         sheet ??= renderMap16Sheet(app, false, base, 256);
         ctx.drawImage(sheet, 0, 0, c.width, c.height);
+        drawTileMatches(ctx, this.m16Match, base, 256, S);
         if (x < 0) return;
         ctx.strokeStyle = '#4cc2ff'; ctx.lineWidth = 2;
         ctx.strokeRect(x * S, y * S, w * S, hh * S);
@@ -433,7 +461,7 @@ export class Palette {
     clear(this.tabs);
     const searchable = app.mode !== 'bg' && this.tab !== 'm16';
     this.searchRow.style.display = searchable ? '' : 'none';
-    this.m16Bar.style.display = app.mode !== 'bg' && this.tab === 'm16' ? '' : 'none';
+    this.m16Bar.style.display = this.m16SearchRow.style.display = app.mode !== 'bg' && this.tab === 'm16' ? '' : 'none';
     this.search.placeholder = this.tab === 'spr' ? 'Search sprites (no., name) …' : this.tab === 'str' ? 'Search structures …' : 'Search (no., name, behavior) …';
     if (app.mode === 'bg') { clear(this.body); this.buildBg(); return; }
     if (this.body.querySelector('.m16-page-head')) this.m16Scroll = this.body.scrollTop; // the scroll event may still be pending
