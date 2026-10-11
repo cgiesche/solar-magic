@@ -22,6 +22,7 @@ import { levelGfx, defaultGfx, levelExtGfx, VANILLA_GFX } from '../../core/patch
 import { cgramToRGBA } from '../../core/gfx.ts';
 import { map16Pointer } from '../../core/ram.ts';
 import { tileMatches, drawTileMatches } from '../tilesearch.ts';
+import { animsAt, animLinks } from './animtab.ts';
 
 const Z = 2; // sheet zoom
 const M = 34; // sheet margin for the ranges and row numbers
@@ -428,7 +429,7 @@ export class Map16Tab implements WsPanel {
     ctx.strokeStyle = '#ffb000';
     ctx.lineWidth = 3;
     ctx.strokeRect((this.quad >> 1) * 8 * BZ + 1.5, (this.quad & 1) * 8 * BZ + 1.5, 8 * BZ - 3, 8 * BZ - 3);
-    cv.title = 'Click: select quarter · Double click: edit the 8x8 tile in the Graphics tab';
+    cv.title = 'Click: select quarter · Double click: edit the 8x8 tile in the Graphics tab · Ctrl+click: its own animation, if it has one, else the 8x8 tile';
     cv.addEventListener('mousedown', (e) => {
       const rc = cv.getBoundingClientRect();
       const q = quarterAt(e.clientX - rc.left >= rc.width / 2 ? 1 : 0, e.clientY - rc.top >= rc.height / 2 ? 1 : 0);
@@ -437,6 +438,11 @@ export class Map16Tab implements WsPanel {
       const dbl = q === this.lastClick.q && now - this.lastClick.t < 400;
       this.lastClick = { q, t: dbl ? 0 : now };
       this.quad = q;
+      if (e.ctrlKey || e.metaKey) {
+        const a = this.bg ? undefined : animsAt(app, ws[q] & 0x3ff)[0];
+        if (a) this.ws.showAnim(a.global, a.slot); else this.editGfx(q);
+        return;
+      }
       if (dbl) { this.editGfx(q); return; }
       this.buildBuilder();
       this.drawGfx();
@@ -465,6 +471,8 @@ export class Map16Tab implements WsPanel {
         },
       }, c, h('span', null, String(p)));
     };
+    // own animations on the quarters, each once
+    const own = this.bg ? [] : ws.flatMap((w) => animsAt(app, w & 0x3ff)).filter((a, i, all) => all.findIndex((b) => b.global === a.global && b.slot === a.slot) === i);
     const quarterNames = ['top left', 'bottom left', 'top right', 'bottom right'];
     const num8 = v & 0x3ff;
     const slot = levelSlots(app).find((s) => num8 >= s.first && num8 < s.first + 0x80);
@@ -476,7 +484,8 @@ export class Map16Tab implements WsPanel {
       cv,
       h('div', { class: 'hint' }, `Quarter ${quarterNames[this.quad]}: 8x8 tile ${hex(num8, 3)}${slot ? ` from ${slot.name} (${gfxName(slot.file)})` : ''}`),
       !this.bg && ws.some((w) => app.animated()?.tiles.has(w & 0x3ff)) ? h('div', { class: 'warn-box' },
-        `Animated: the game keeps overwriting ${ws.filter((w) => app.animated()?.tiles.has(w & 0x3ff)).length === 4 ? 'all quarters' : 'the marked quarters'} with animation frames (e.g. ?-block, coin, water). Changes drawn on these 8x8 tiles are not visible in the game.`) : '',
+        `Animated: the game keeps overwriting ${ws.filter((w) => app.animated()?.tiles.has(w & 0x3ff)).length === 4 ? 'all quarters' : 'the marked quarters'} with animation frames (e.g. ?-block, coin, water). Changes drawn on these 8x8 tiles are not visible in the game.`,
+        own.length ? h('div', null, 'By ', animLinks(this.ws, own), '.') : '') : '',
       h('div', { class: 'hint' }, 'Palette (keys 1–8)'),
       h('div', { class: 'mt-pals' }, Array.from({ length: 8 }, (_, p) => palDot(p))),
       h('div', { class: 'row' },

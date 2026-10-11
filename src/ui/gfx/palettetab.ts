@@ -14,6 +14,7 @@ import { hex } from '../../core/names.ts';
 import { customPalette, setCustomPalette } from '../../core/patches.ts';
 import { parsePrimaryHeader, L1_PTRS, type PrimaryHeader } from '../../core/level.ts';
 import type { LevelRender } from '../../core/levelemu.ts';
+import { animLinks, colorAnimsAt } from './animtab.ts';
 
 // vanilla palette tables (bank $00)
 const BACK_AREA = 0x00b0a0;
@@ -72,6 +73,7 @@ function originName(o: Origin): string {
 export class PaletteTab implements WsPanel {
   root: HTMLElement;
   private app: App;
+  private ws: GfxWorkspace;
   private trace: LevelRender | null = null;
   private custom = 0;
   private sel = 0x21;
@@ -88,8 +90,9 @@ export class PaletteTab implements WsPanel {
   private rowLabels: HTMLElement[] = [];
   private visible = false;
 
-  constructor(app: App, _ws: GfxWorkspace) {
+  constructor(app: App, ws: GfxWorkspace) {
     this.app = app;
+    this.ws = ws;
     this.root = h('div', { class: 'pt' }, this.bar, h('div', { class: 'pt-main' }, h('div', { class: 'pt-left' }, this.rows, this.headerBox), this.detail));
     app.on('render', () => { if (this.visible) { this.retrace(); this.paint(); } });
     app.on('rom-change', () => {
@@ -283,6 +286,7 @@ export class PaletteTab implements WsPanel {
         const sw = h('div', { class: 'pt-sw' });
         sw.addEventListener('mousedown', (e) => {
           e.preventDefault();
+          if (e.button === 0 && (e.ctrlKey || e.metaKey)) { this.gotoAnim(i); return; }
           if (e.shiftKey && (this.sel >> 4) === row) this.selEnd = i;
           else this.sel = this.selEnd = i;
           this.paint();
@@ -307,7 +311,7 @@ export class PaletteTab implements WsPanel {
       const animated = !!this.app.animated()?.colors.has(i);
       sw.classList.toggle('locked', locked);
       sw.classList.toggle('animated', animated);
-      sw.title = `Color ${hex(i >> 4, 1)}·${hex(i & 15, 1)} – ${locked ? 'set by the game, not editable (only with an own palette)' : originName(this.origin(i))}${animated ? ' · animated: the game keeps rewriting it' : ''}`;
+      sw.title = `Color ${hex(i >> 4, 1)}·${hex(i & 15, 1)} – ${locked ? 'set by the game, not editable (only with an own palette)' : originName(this.origin(i))}${animated ? ' · animated: the game keeps rewriting it (Ctrl+click: open its animation)' : ''}`;
     }
     for (let row = 0; row < 16; row++) {
       const names: string[] = [];
@@ -334,11 +338,13 @@ export class PaletteTab implements WsPanel {
     const o = this.origin(i);
     const users = editable ? this.affected(i) : null;
     const others = users ? users.filter((n) => n !== this.app.level.number).length : 0;
+    const own = colorAnimsAt(this.app, i);
     d.append(
       h('div', { class: 'pt-big', style: { background: cssOf(c) } }),
       h('div', { class: 'prop-title' }, `Color ${hex(i >> 4, 1)}·${hex(i & 15, 1)}`, h('span', { class: 'hint' }, `  Palette ${hex(i >> 4, 1)}, color ${hex(i & 15, 1)}`)),
       h('div', { class: 'hint' }, editable ? `${originName(o)} · ${o.kind === 'own' ? 'applies to this level only' : others ? `also in ${others} other level${others === 1 ? '' : 's'}` : 'this level only'}` : ''),
-      this.app.animated()?.colors.has(i) ? h('div', { class: 'warn-box' }, 'Animated: the game keeps rewriting this color (flashing coins, ?-blocks etc.). A change here is barely or not at all visible in the game.') : '',
+      own.length ? h('div', { class: 'warn-box' }, 'Animated by ', animLinks(this.ws, own), ' – the level shows its colors instead of this one.')
+        : this.app.animated()?.colors.has(i) ? h('div', { class: 'warn-box' }, 'Animated: the game keeps rewriting this color (flashing coins, ?-blocks etc.). A change here is barely or not at all visible in the game.') : '',
     );
     if (!editable) {
       d.append(
@@ -483,6 +489,13 @@ export class PaletteTab implements WsPanel {
   previewColor(px: number, py: number): { rgba: number; label: string } {
     const i = this.entryAt(px, py);
     return { rgba: this.app.compositeImg[py * this.app.images.width + px], label: i >= 0 ? `Color ${hex(i >> 4, 1)}·${hex(i & 15, 1)}` : 'not in the palette' };
+  }
+
+  // Ctrl+click: the own animation that rewrites the color, in the Animations tab
+  private gotoAnim(i: number): void {
+    const own = colorAnimsAt(this.app, i);
+    if (own.length) { this.ws.showAnim(own[0].global, own[0].slot); return; }
+    toast(`Color ${hex(i >> 4, 1)}·${hex(i & 15, 1)} is ${this.app.animated()?.colors.has(i) ? 'animated by the game itself, not by an own animation' : 'not animated'}.`);
   }
 
   key(e: KeyboardEvent): boolean {

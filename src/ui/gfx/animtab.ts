@@ -14,7 +14,7 @@ import { EXT_FIRST, EXT_TILES, map16Ext } from '../../core/map16ext.ts';
 import {
   type ExList, type ExSlot, emptyList, readLevelList, readGlobalList, writeLevelList, writeGlobalList, levelSettings, setLevelSettings,
   readAltFile, writeAltFile, kindOf, tilesOf, secondSet, secondSetName, triggerName, TYPE_NAMES, SLOTS, exanimInstalled, exanimLayout,
-  NO_GAME_COLORS, NO_GAME_TILES, NO_LEVEL_LIST, NO_GLOBAL_LIST, altFileUsers, localizeFrames, shapeOf, exanimTiles,
+  NO_GAME_COLORS, NO_GAME_TILES, NO_LEVEL_LIST, NO_GLOBAL_LIST, altFileUsers, localizeFrames, shapeOf, exanimTiles, exanimColors,
 } from '../../core/exanim.ts';
 import { levelSlots, gfxName, lmAnimName, ANIM_FILE } from './map16tab.ts';
 import { confirmExAnim } from './gfxtab.ts';
@@ -28,6 +28,14 @@ const ALT = 0x8000;
 // own tile animations of the current level (its list and the global one) that overwrite a VRAM tile
 export function animsAt(app: App, tile: number): { global: boolean; slot: number }[] {
   return exanimTiles(app.rom, app.level.number, (app.render.ppuRegs[0x0b] & 0x0f) << 12).get(tile) ?? [];
+}
+// own color animations (and rotations) of the current level that rewrite a color
+export function colorAnimsAt(app: App, color: number): { global: boolean; slot: number }[] {
+  return exanimColors(app.rom, app.level.number).get(color) ?? [];
+}
+// links to own animations, for the warnings of the other tabs
+export function animLinks(ws: GfxWorkspace, own: { global: boolean; slot: number }[]): HTMLElement[] {
+  return own.map((a, i) => h('span', null, i ? ', ' : '', h('a', { href: '#', title: 'Open in the Animations tab (Ctrl+click on the tile or color does the same)', onclick: (e: Event) => { e.preventDefault(); ws.showAnim(a.global, a.slot); } }, `Animation ${hex(a.slot, 2)} (${a.global ? 'global' : 'level'})`)));
 }
 
 export class AnimTab implements WsPanel {

@@ -27,7 +27,7 @@ import { EXT_FIRST, EXT_TILES, map16Ext } from '../../core/map16ext.ts';
 import { gfxName, lmAnimName, ANIM_FILE, levelSlots as map16Slots } from './map16tab.ts';
 import { readAltFile, writeAltFile, altFileAddr, exanimInstalled, ALT_FILE_MAX } from '../../core/exanim.ts';
 import { openHeaderDialog } from '../headerdialog.ts';
-import { animsAt } from './animtab.ts';
+import { animsAt, animLinks } from './animtab.ts';
 
 // before the first ExAnimation data: the engine (Lunar Magic compatible) is installed with it
 export async function confirmExAnim(app: App): Promise<boolean> {
@@ -590,9 +590,7 @@ export class GfxTab implements WsPanel {
     for (let m = 0; m < max && users.length < 64; m++) if (src.fg(m).some((w) => (w & 0x3ff) === num)) users.push(m);
     // animated tiles: the game overwrites them, so drawing there does not show in the level
     const own = animsAt(this.app, num);
-    const anim = own.length ? h('div', { class: 'warn-box' }, 'Animated by ',
-      own.map((a, i) => h('span', null, i ? ', ' : '', h('a', { href: '#', title: 'Open in the Animations tab', onclick: (e: Event) => { e.preventDefault(); this.ws.showAnim(a.global, a.slot); } }, `Animation ${hex(a.slot, 2)} (${a.global ? 'global' : 'level'})`))),
-      ' – the level shows its frames instead of this tile.')
+    const anim = own.length ? h('div', { class: 'warn-box' }, 'Animated by ', animLinks(this.ws, own), ' – the level shows its frames instead of this tile.')
       : this.animatedTiles().has(t) ? h('div', { class: 'warn-box' }, 'Animated by the game (original animation, e.g. ?-block, coin): the level shows its frames instead of this tile. To turn it off: Animations tab → “Play in level …”.') : '';
     box.append(h('div', { class: 'hint' }, `= VRAM tile ${hex(num, 3)} (${slot.name})`), anim,
       users.length ? h('div', { class: 'gt-users' }, users.map((m) => h('a', { href: '#', class: 'mono', title: 'Open in the Map16 tab', onclick: (e: Event) => { e.preventDefault(); this.ws.showMap16(m); } }, hex(m, 3))))
@@ -745,6 +743,13 @@ export class GfxTab implements WsPanel {
     }
     return out;
   }
+  // Ctrl+click: the own animation that overwrites the tile, in the Animations tab
+  private gotoAnim(t: number): void {
+    const slot = this.levelSlots().find((s) => s.file === this.cur && !s.sprite);
+    const own = slot ? animsAt(this.app, slot.first + t) : [];
+    if (own.length) { this.ws.showAnim(own[0].global, own[0].slot); return; }
+    toast(this.animatedTiles().has(t) ? `Tile ${hex(t, 2)} is animated by the game itself, not by an own animation.` : `Tile ${hex(t, 2)} is not animated.`);
+  }
   private warned = new Set<string>(); // file:tile already warned about
 
   private warnAnimated(x: number, y: number): void {
@@ -795,6 +800,7 @@ export class GfxTab implements WsPanel {
       if (!f || (e.button !== 0 && e.button !== 2)) return;
       e.preventDefault();
       const p = pos(e);
+      if (e.button === 0 && (e.ctrlKey || e.metaKey)) { this.gotoAnim((p.y >> 3) * 16 + (p.x >> 3)); return; }
       const tool: Tool = e.altKey ? 'pick' : this.tool;
       if (tool === 'pick') {
         this.color = this.get(p.x, p.y);
@@ -876,7 +882,7 @@ export class GfxTab implements WsPanel {
       if (p.y * 128 + p.x === lastHover) return;
       lastHover = p.y * 128 + p.x;
       const spr = t < 0x80 ? this.levelSlots().filter((s) => s.sprite && s.file === this.cur).map((s) => ` · sprite tile ${spriteTile(s.first, t)}`).join('') : '';
-      c.title = `Tile ${hex(t, 2)}${spr}${this.animatedTiles().has(t) ? ' (animated)' : ''} · pixel ${p.x & 7},${p.y & 7} · color ${this.file ? this.get(Math.max(0, p.x), Math.max(0, p.y)) : ''}`;
+      c.title = `Tile ${hex(t, 2)}${spr}${this.animatedTiles().has(t) ? ' (animated – Ctrl+click: open its animation)' : ''} · pixel ${p.x & 7},${p.y & 7} · color ${this.file ? this.get(Math.max(0, p.x), Math.max(0, p.y)) : ''}`;
     });
     c.addEventListener('mouseleave', () => { c.classList.remove('pipette'); hideColorLoupe(); });
   }

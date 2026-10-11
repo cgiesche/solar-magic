@@ -493,6 +493,7 @@ function showHelp(): void {
     ['Graphics', [
       ['P / M / G / A', 'Tab palettes / Map16 tiles / graphics / animations; Esc back to the level'],
       ['Ctrl+C / Ctrl+V', 'Copy / paste palette, Map16 tiles or pixels'],
+      ['Ctrl+click', 'Go to definition: an animated tile or color opens its own animation, a Map16 quarter its 8x8 tile, a palette button its palette'],
       ['Palettes: arrow keys · Shift+click', 'Other color · mark a range (for “Gradient”)'],
       ['Map16: X / Y / 1–8 / Q', 'Flip quarter / palette 0–7 / next quarter; arrows: other tile'],
       ['Map16: double click · Ctrl+click on palette', 'Edit quarter in “Graphics” · open palette in “Palettes”'],
