@@ -190,6 +190,18 @@ for (const [p, what] of [[uberFolder, 'UberASM Tool folder'], [gpsFolder, 'GPS f
 }
 sameRom('tool folders removed');
 
+// No Overworld (UberASM Tool 2.0): three game mode files, each including the same file of defines and
+// macros (with a hijack) – each resource assembled on its own, as in UberASM Tool; the game modes from
+// the readme's list.txt lines
+{
+  const r = await install(inspectUpload('No Overworld v1.3.zip', fixture('No Overworld v1.3.zip')));
+  const modes = r.pkg?.uber.calls.map(([ctx, num, f]) => `${ctx} ${num.toString(16)} ${f.replace(/^.*_/, '')}`).join(', ');
+  check(r.ok && modes === 'gamemode c gm0C.asm, gamemode 10 gm10.asm, gamemode 14 gm14.asm', `No Overworld: installed, game modes from the readme (${modes})`);
+  check([...rom.data.slice(0x25c64, 0x25c67)].every((b) => b === 0xea), 'No Overworld: its hijack (NOP #3 at $04DC64)');
+  await removePackage(rom, r.pkg!.id, opts.blank);
+}
+sameRom('No Overworld removed');
+
 // graphics only: Map16 tiles and ExGFX recorded, removed with the package
 {
   const r = await install(tilesOnly, { level: null });

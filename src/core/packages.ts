@@ -441,7 +441,9 @@ async function installStep(rom: Rom, preview: ReadyPreview, step: Step, opt: Ins
       const proj = loadProject(rom) ?? emptyProject();
       for (const [f, c] of placeFiles(preview, step.upload, step.file, text, folder)) { proj.files.set(f, c); claim('uber', f); }
       const file = placeOf(step.file, folder);
-      const key = step.ctx === 'level' ? opt.level ?? ALL : step.ctx === 'gamemode' ? 0x14 : 0;
+      // game mode and overworld map as the docs say ("0C file.asm"), else 14 and the main map; level code
+      // in the level chosen
+      const key = step.ctx === 'level' ? opt.level ?? ALL : suggestCalls(preview.files, new Map([[step.file, file]]), { level: ALL, gamemode: 0x14, overworld: 0 })[0].num;
       const calls = proj.list[step.ctx].get(key) ?? [];
       if (!calls.some((c) => c.file === file)) calls.push({ file, bytes: [] });
       proj.list[step.ctx].set(key, calls);
