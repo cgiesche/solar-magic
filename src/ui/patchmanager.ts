@@ -4,7 +4,7 @@
 // remove a patch. Installing goes through the upload preview (upload.ts, core/packages.ts).
 
 import type { App } from './app.ts';
-import { h, modal, toast } from './dom.ts';
+import { h, modal, toast, logTool } from './dom.ts';
 import { kvGet, kvDel } from './storage.ts';
 import { reapplyPatch, type ApplyResult, type PatchSource } from '../core/patchapply.ts';
 import { patchArchive, type PatchEntry } from '../core/patchreg.ts';
@@ -12,7 +12,7 @@ import { uploadFromFiles, effectiveDefines, uploadSource, optionDefault, packUpl
 import { ensureRequirements } from '../core/packages.ts';
 import { map16Source } from '../core/render.ts';
 import { definesForm } from './defineedit.ts';
-import { logView, patchesChanged, errorText } from './projectpane.ts';
+import { patchesChanged, errorText } from './projectpane.ts';
 import type { ToolKind } from '../core/parts.ts';
 import { recordPackageChange, type Package } from '../core/pkgreg.ts';
 
@@ -104,7 +104,7 @@ export function reapplyPackagePatch(app: App, upload: Upload, fileName: string, 
 
 export function patchDone(name: string, again: boolean, r: ApplyResult): void {
   toast(`Patch “${name}” ${again ? 'reapplied' : 'applied'}${r.warnings.length ? ` (${r.warnings.length} warning(s))` : ''}`);
-  if (r.warnings.length || r.prints.length) modal(`Output: ${name}`, logView(r), [{ label: 'OK', primary: true }]);
+  logTool(`Patch “${name}”`, r);
 }
 
 // the tabs of the Packages dialog: the package list and the configuration view of each tool

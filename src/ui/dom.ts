@@ -66,7 +66,7 @@ export function select(options: [number, string][], value: number, onChange: (v:
 }
 
 // message log: every toast plus events that are worth knowing afterwards (shown in the log bar)
-export type LogKind = 'info' | 'error' | 'event';
+export type LogKind = 'info' | 'error' | 'warn' | 'output' | 'event';
 export interface LogEntry { time: Date; msg: string; kind: LogKind; count: number }
 export const logEntries: LogEntry[] = [];
 // listener gets the new/updated entry, or null when the log was cleared
@@ -87,6 +87,14 @@ export function log(msg: string, kind: LogKind = 'event'): void {
     if (logEntries.length > 500) logEntries.shift();
   }
   for (const fn of logListeners) fn(e, repeat);
+}
+// what a tool (Asar, UberASM, AddmusicK, PIXI …) reported: errors, warnings and its prints, each a line
+// of the log with the tool's name in front; `output`: everything the tool printed, as one entry
+export function logTool(tool: string, r: { errors: string[]; warnings: string[]; prints?: string[] }, output = ''): void {
+  for (const p of r.prints ?? []) log(`${tool}: ${p}`, 'output');
+  if (output.trim()) log(`${tool} output:\n${output.trimEnd()}`, 'output');
+  for (const w of r.warnings) log(`${tool}: ${w}`, 'warn');
+  for (const e of r.errors) log(`${tool}: ${e}`, 'error');
 }
 export function clearLog(): void {
   logEntries.length = 0;

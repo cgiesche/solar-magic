@@ -6,7 +6,7 @@
 // listed on its own.
 
 import type { App } from './app.ts';
-import { h, clear, toast, choose } from './dom.ts';
+import { h, clear, toast, choose, logTool } from './dom.ts';
 import { downloadBytes } from './platform.ts';
 import { listPatches, type PatchEntry } from '../core/patchreg.ts';
 import { uninstallVramPatch } from '../core/vrampatch.ts';
@@ -23,7 +23,7 @@ import type { UberProject } from '../core/uberproject.ts';
 import type { BlockProject } from '../core/blocks.ts';
 import { map16Source } from '../core/render.ts';
 import { storedUpload, toUpload, settingsForm, reapplyPackagePatch, patchDone, type PackagesTab } from './patchmanager.ts';
-import { patchesChanged, logView, errorText, type Pane } from './projectpane.ts';
+import { patchesChanged, errorText, type Pane } from './projectpane.ts';
 import { definesButton, editButton } from './defineedit.ts';
 import { openDocs, packageDocs } from './docview.ts';
 import { gfxName } from './gfx/map16tab.ts';
@@ -155,14 +155,13 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
     const m = upload.manifest;
     if (m?.description) box.appendChild(h('p', null, m.description));
     const form = settingsForm(upload, s.main, p.defines);
-    const log = h('div');
     const again = () => {
       const r = reapplyPackagePatch(app, upload, s.fileName, s.main, form.read(), p, rec);
-      if (!r.ok) { clear(log).appendChild(logView(r)); return; }
+      if (!r.ok) { logTool(`Patch “${upload.name}”`, r); return; }
       patchDone(upload.name, true, r);
       host.changed();
     };
-    box.append(form.el, h('div', { class: 'row' }, h('button', { onclick: again, title: 'Reapply the patch with these settings' }, 'Reapply')), log);
+    box.append(form.el, h('div', { class: 'row' }, h('button', { onclick: again, title: 'Reapply the patch with these settings' }, 'Reapply')));
     return box;
   }
 

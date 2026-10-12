@@ -5,7 +5,7 @@
 // AddmusicK at once (music.ts), as one undoable ROM edit. Songs come with packages (upload them).
 
 import type { App } from './app.ts';
-import { h, clear, modal, toast, select } from './dom.ts';
+import { h, clear, modal, toast, select, logTool } from './dom.ts';
 import { downloadBytes } from './platform.ts';
 import { hex } from '../core/names.ts';
 import {
@@ -87,10 +87,9 @@ export async function insertMusic(app: App, p: MusicProject, what: string, then?
     });
   } catch (e) { r = { ok: false, errors: [errorText(e)], warnings: [], log: '' }; }
   wait.close(true);
+  logTool('AddmusicK', r, r.log);
   if (!r.ok) {
-    modal('Music – AddmusicK failed', h('div', { class: 'patch-log' },
-      r.errors.map((e) => h('div', { class: 'err' }, e)),
-      r.log ? h('details', null, h('summary', null, 'AddmusicK output'), h('pre', { class: 'amk-log' }, r.log)) : ''), [{ label: 'OK', primary: true }]);
+    toast(`${what}: AddmusicK failed – ${r.errors[0] ?? 'error'}`, 'error');
     return false;
   }
   patchesChanged(app);
@@ -152,6 +151,7 @@ export function openSongSettings(proj: MusicProject, song: MusicSong, save: (s: 
     status.textContent = 'AddmusicK is compiling the song …';
     const p: MusicProject = { songs: [{ ...song, defines: v }], files: proj.files };
     void songSpcs(p, [song.file]).then((r) => {
+      if (r.errors.length) logTool('AddmusicK', { errors: r.errors, warnings: [] }, r.log);
       const spc = spcOf(r.spcs, song.file);
       status.textContent = spc ? '' : `AddmusicK could not compile the song: ${r.errors.join(' ') || 'no SPC'}`;
       if (spc) void musicPlayer.playSpc(spc, label);

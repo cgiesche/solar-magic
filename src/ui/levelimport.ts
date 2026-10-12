@@ -4,7 +4,7 @@
 // in the level editor (Level → Import LM level file …) and is never a package. Undoable like level edits.
 
 import type { App } from './app.ts';
-import { h, modal, clear, toast, hexInput } from './dom.ts';
+import { h, modal, toast, hexInput, logTool } from './dom.ts';
 import { pickFile } from './platform.ts';
 import { hex } from '../core/names.ts';
 import { planBgPack, importLevelFile, isLevelImport, levelColors, type BgPackResult } from '../core/bgpack.ts';
@@ -12,7 +12,7 @@ import { extGfxAvailable } from '../core/patches.ts';
 import { altFileName, levelAltFile } from '../core/exanim.ts';
 import { uploadFiles } from '../core/patchpkg.ts';
 import { map16Source } from '../core/render.ts';
-import { logView, errorText } from './projectpane.ts';
+import { errorText } from './projectpane.ts';
 
 // picks a level file (.mwl, or a .zip holding one) and opens the import for the current level
 export async function openLevelImport(app: App): Promise<void> {
@@ -45,7 +45,6 @@ export function openLevelImportDialog(app: App, fileName: string, files: Map<str
   const file = (f: string) => f.split('/').pop()!;
   const check = (on: boolean, set: (v: boolean) => void, disabled = false) =>
     h('input', { type: 'checkbox', checked: on, disabled, onchange: (e: Event) => set((e.target as HTMLInputElement).checked) });
-  const log = h('div');
   const body = h('div', { class: 'patch-apply' },
     h('p', null, `“${name}” is a Lunar Magic level file (${file(plan.mwl)}). Taken over into level ${lvl}: what is checked below, the graphics slots its tiles use and the colors per .palmask. Layer 1, sprites and header of level ${lvl} stay.`),
     plan.level.bg ? h('label', { class: 'row small' }, check(useBg, (v) => (useBg = v), !canBg),
@@ -68,8 +67,7 @@ export function openLevelImportDialog(app: App, fileName: string, files: Map<str
     plan.exanim.length ? h('p', { class: 'hint' }, `Animations: ${plan.exanim.length} slot(s) animating its tiles go into the list of level ${lvl}; their frames are copied into ${altFileName(levelAltFile(app.rom, app.level.number))}, which all levels using it share.`) : '',
     plan.layer3.length ? h('p', { class: 'hint' }, `Layer 3 (${plan.layer3.map(file).join(', ')}) is not taken over – Lunar Magic's layer 3 tilemaps are not supported yet.`) : '',
     ext && !extGfxAvailable(app.rom) ? h('p', { class: 'hint' }, 'For the BG2/BG3 slots the VRAM patch is installed.') : '',
-    plan.notes.length ? h('ul', { class: 'hint' }, plan.notes.map((t) => h('li', null, t))) : '',
-    log);
+    plan.notes.length ? h('ul', { class: 'hint' }, plan.notes.map((t) => h('li', null, t))) : '');
   modal(`Import level file: ${name}`, body, [
     { label: 'Cancel' },
     { label: 'Import', primary: true, onClick: () => {
@@ -78,7 +76,7 @@ export function openLevelImportDialog(app: App, fileName: string, files: Map<str
         r = app.romEdit(`Level import “${name}” into level ${lvl}`, () =>
           importLevelFile(app.rom, app.level, files, plan, { bg: useBg, fg: useFg, at, fgAt, palettes: usePal, cgram: levelColors(app.render), wram: app.render.wram, blank }));
       } catch (e) { r = { ok: false, errors: [errorText(e)], notes: [], bg: null }; }
-      if (!r.ok) { clear(log).appendChild(logView({ ok: false, errors: r.errors, warnings: [], prints: [] })); return false; }
+      if (!r.ok) { logTool(`Level import “${name}”`, { errors: r.errors, warnings: [] }); return false; }
       const bg = r.bg;
       if (bg) app.editLevel(() => { app.level.bg = bg; });
       app.emit('level-header');

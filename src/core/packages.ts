@@ -331,7 +331,7 @@ function pixiListNumbers(preview: ReadyPreview): Map<number, string> {
   return out;
 }
 
-const failed = (errors: string[], warnings: string[] = []): InstallResult => ({ ok: false, errors, warnings, prints: [], pkg: null });
+const failed = (errors: string[], warnings: string[] = [], prints: string[] = []): InstallResult => ({ ok: false, errors, warnings, prints, pkg: null });
 
 // built-in editor patches a patch.json asks for
 export function ensureRequirements(rom: Rom, upload: Upload, blank: number[]): void {
@@ -401,11 +401,11 @@ export async function installPackage(rom: Rom, preview: ReadyPreview | ManualPre
       const done: ApplyResult = { ok: true, errors: [], warnings: [], prints: [] };
       return done;
     });
-    if (!result.ok) return failed(result.errors, result.warnings);
+    if (!result.ok) return failed(result.errors, warnings, prints);
     if (!pkg) { rom.restore(before); return failed(['Nothing changed – everything in the package is already in the ROM.']); }
     return { ok: true, errors: [], warnings, prints, pkg, sample };
   } catch (e) {
-    return failed([e instanceof Error ? e.message : String(e)], warnings);
+    return failed([e instanceof Error ? e.message : String(e)], warnings, prints);
   }
 }
 
@@ -493,9 +493,10 @@ async function installStep(rom: Rom, preview: ReadyPreview, step: Step, opt: Ins
       if (num < 0) return { ...ok, ok: false, errors: ['All song numbers up to FF are used.'] };
       const added = addSongs(proj, sf, num);
       const r = await saveMusicProject(rom, proj);
-      if (!r.ok) return { ok: false, errors: r.errors, warnings: r.warnings, prints: [] };
+      const prints = r.log.trim() ? [`AddmusicK output:\n${r.log.trimEnd()}`] : [];
+      if (!r.ok) return { ok: false, errors: r.errors, warnings: r.warnings, prints };
       if (opt.level !== null) setLevelMusic(rom, opt.level, added[0].num);
-      return { ...ok, warnings: [...r.warnings, ...sf.missing.map((m) => `Missing sample: ${m}`)] };
+      return { ...ok, prints, warnings: [...r.warnings, ...sf.missing.map((m) => `Missing sample: ${m}`)] };
     }
   }
 }

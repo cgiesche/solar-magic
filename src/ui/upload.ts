@@ -4,7 +4,7 @@
 // leaves the ROM untouched.
 
 import type { App } from './app.ts';
-import { h, modal, clear, toast } from './dom.ts';
+import { h, modal, clear, toast, logTool } from './dom.ts';
 import { installPackage, partsSummary, partLabel, type ReadyPreview, type ManualPreview, type InstallOptions } from '../core/packages.ts';
 import { assignmentEditor } from './pkgmap.ts';
 import type { Package } from '../core/pkgreg.ts';
@@ -12,7 +12,7 @@ import type { PartKind } from '../core/parts.ts';
 import { map16Source } from '../core/render.ts';
 import { hex } from '../core/names.ts';
 import { settingsForm } from './patchmanager.ts';
-import { patchesChanged, logView, errorText } from './projectpane.ts';
+import { patchesChanged, errorText } from './projectpane.ts';
 import { docsButton } from './docview.ts';
 import { musicPlayer } from './musicplayer.ts';
 import { placementEditor } from './pkgplace.ts';
@@ -80,7 +80,9 @@ function installDialog(app: App, p: ReadyPreview | ManualPreview, body: HTMLElem
       r = await app.romEditAsync(`Package “${p.name}” installed`, () => installPackage(app.rom, p, opt));
     } catch (e) { r = { ok: false, errors: [errorText(e)], warnings: [], prints: [], pkg: null }; }
     busy = false;
-    if (!r.ok || !r.pkg) { clear(log).appendChild(logView(r)); return; }
+    clear(log);
+    logTool(`Package “${p.name}”`, r);
+    if (!r.ok || !r.pkg) return;
     dlg.close(true);
     patchesChanged(app);
     // the sample level: a level edit of its own (not saved yet)
@@ -93,7 +95,6 @@ function installDialog(app: App, p: ReadyPreview | ManualPreview, body: HTMLElem
     app.emit('level-header'); // the level setup may have changed its graphics slots and colors
     app.palettesChanged();
     toast(`“${p.name}” installed${r.warnings.length ? ` (${r.warnings.length} warning(s))` : ''}${sample ? `, its sample level in place of level ${hex(app.level.number, 3)} (not saved yet)` : ''} – Ctrl+Z undoes it.`);
-    if (r.warnings.length) modal(`Output: ${p.name}`, logView({ ...r, prints: [] }), [{ label: 'OK', primary: true }]);
     done(r.pkg);
   };
   const dlg = modal(`Upload: ${p.name}`, body, [

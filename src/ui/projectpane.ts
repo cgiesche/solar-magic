@@ -5,7 +5,7 @@
 // at once as one undoable ROM edit (ADR 0001); nothing is staged.
 
 import type { App } from './app.ts';
-import { h, clear, toast, type Child } from './dom.ts';
+import { h, clear, toast, logTool, type Child } from './dom.ts';
 import { downloadBytes } from './platform.ts';
 import { listPackages, type Package } from '../core/pkgreg.ts';
 import type { ApplyResult } from '../core/patchapply.ts';
@@ -48,16 +48,6 @@ export function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-export function logView(r: ApplyResult | null): HTMLElement {
-  const el = h('div', { class: 'patch-log' });
-  if (!r) return el;
-  for (const e of r.errors) el.appendChild(h('div', { class: 'err' }, e));
-  for (const w of r.warnings) el.appendChild(h('div', { class: 'warn' }, w));
-  for (const p of r.prints) el.appendChild(h('div', null, p));
-  return el;
-}
-
-
 // changed: after this tab changed the ROM (and patchesChanged)
 export function projectPane<P extends Project>(app: App, spec: PaneSpec<P>, changed: () => void): Pane & { project(): P } {
   const el = h('div', { class: 'project-pane' });
@@ -67,7 +57,6 @@ export function projectPane<P extends Project>(app: App, spec: PaneSpec<P>, chan
   let advanced = false;
   let fileFilter = '';
   let packages: Package[] = [];
-  const log = h('div', { class: 'patch-log' });
   // the package that brought a project file (the last one installed, if several did)
   const origin = (file: string): HTMLElement => {
     const r = packages.filter((x) => x[spec.tool].files.includes(file)).pop();
@@ -86,7 +75,6 @@ export function projectPane<P extends Project>(app: App, spec: PaneSpec<P>, chan
       installed = true;
       proj = spec.empty();
     }
-    clear(log);
     render();
   };
 
@@ -106,8 +94,8 @@ export function projectPane<P extends Project>(app: App, spec: PaneSpec<P>, chan
       });
     } catch (e) { r = { ok: false, errors: [errorText(e)], warnings: [], prints: [] }; }
     reload();
+    logTool(spec.title, r);
     if (!r.ok) {
-      log.appendChild(logView({ ...r, prints: [] }));
       toast(`${spec.title}: not applied – ${r.errors[0] ?? 'error'}`, 'error');
       return;
     }
@@ -141,7 +129,6 @@ export function projectPane<P extends Project>(app: App, spec: PaneSpec<P>, chan
       h('p', { class: 'hint' }, spec.intro, ' ', h('details', { class: 'inline-details' }, h('summary', null, 'Format'), h('div', null, spec.format))),
       h('div', { class: 'pane-content' }, spec.content(proj, change, origin)),
       manualsRow(app.rom, spec.tool),
-      log,
       adv,
     );
   }

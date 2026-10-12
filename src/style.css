@@ -158,7 +158,6 @@ input.invalid, input.invalid:focus { outline: 1px solid var(--danger); border-co
 .log-head { display: flex; align-items: center; gap: 8px; padding: 2px 8px; height: 26px; cursor: pointer; min-width: 0; }
 .log-head:hover .log-toggle { border-color: var(--accent); }
 .log-toggle { padding: 1px 8px; font-size: 12px; flex: none; }
-.log-badge { flex: none; background: var(--danger); color: #fff; border-radius: 8px; padding: 0 7px; font-size: 11px; font-weight: 600; }
 .log-latest { flex: 1; min-width: 0; display: flex; gap: 10px; overflow: hidden; white-space: nowrap; }
 .log-latest .log-msg { overflow: hidden; text-overflow: ellipsis; }
 .log-actions { display: none; gap: 4px; flex: none; }
@@ -172,9 +171,10 @@ input.invalid, input.invalid:focus { outline: 1px solid var(--danger); border-co
 .log-time { flex: none; color: var(--muted); font-family: ui-monospace, monospace; }
 .log-msg { flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .log-msg.error, .log-row.error .log-msg { color: #ff8a8a; }
+.log-msg.warn, .log-row.warn .log-msg { color: #e0b050; }
 .log-msg.event, .log-row.event .log-msg { color: var(--muted); }
 .log-count { flex: none; color: var(--muted); }
-.modal-back { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; z-index: 500; }
+.modal-back { position: fixed; inset: 0 0 var(--log-h, 0px) 0; /* the log stays visible and usable below dialogs */ background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; z-index: 500; }
 .modal { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; min-width: 360px; max-width: 92vw; max-height: 90vh; display: flex; flex-direction: column; box-shadow: 0 10px 40px rgba(0,0,0,.5); }
 .modal-title { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; font-weight: 600; border-bottom: 1px solid var(--border); }
 .modal-body { padding: 12px 14px; overflow: auto; }
@@ -228,9 +228,6 @@ kbd { background: #181a1f; border: 1px solid var(--border); border-radius: 3px; 
 .patch-name { font-weight: 600; }
 .patch-apply { width: 560px; max-width: 100%; }
 .patch-settings .prop label { font-family: monospace; }
-.patch-log { font-family: monospace; font-size: 12px; white-space: pre-wrap; max-height: 240px; overflow: auto; margin-top: 8px; }
-.patch-log .err { color: var(--danger); }
-.patch-log .warn { color: #e0b050; }
 .uber-dialog { width: 680px; max-width: 100%; }
 .uber-dialog .tabs { display: flex; gap: 4px; margin: 10px 0 6px; }
 .uber-table { border-collapse: collapse; width: 100%; font-size: 12px; margin-bottom: 6px; }
@@ -488,7 +485,6 @@ button.danger:hover:not(:disabled) { border-color: var(--danger); }
 .music-pane { min-height: 360px; max-height: 64vh; overflow: auto; }
 .resources:has(.music-pane) { width: 920px; }
 .song-add { width: 620px; display: flex; flex-direction: column; gap: 8px; }
-.amk-log { max-height: 300px; overflow: auto; font-size: 11px; white-space: pre-wrap; }
 .resources.drop-target { outline: 2px dashed var(--accent2); outline-offset: 4px; }
 
 /* central search (Ctrl+F, search.ts) */
