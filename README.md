@@ -145,9 +145,9 @@ When a level is displayed, it runs the ROM's **original loading routines** (~15 
 
 ## Custom ROM patch ("SMWE")
 
-Installed when a ROM is opened, together with the editor's other patches below (all but SMWM, which moves
-the message texts only when they no longer fit in place). A ROM whose hooks already hold other code (another
-patch, Lunar Magic) is not opened. The patches are assembled at runtime and change only a few verified locations:
+Installed into the clean ROM when it is opened, together with the editor's other patches below (all but SMWM,
+which moves the message texts only when they no longer fit in place). The patches are assembled at runtime and
+change only a few verified locations:
 
 | Location | Purpose |
 |---|---|
@@ -196,8 +196,8 @@ Whose formats and interfaces the editor follows: [docs/credits.md](docs/credits.
   shift the numbers of subsequent levels.
 * Title screen and credits are not included.
 * ASM patches: LoROM only, no SA-1; patches that require Lunar Magic do not work.
-* Tested with the US ROM (`Super Mario World (U) [!]`, MD5 `cdd3c8c37322978ca8669b34bc89c804`). ROMs edited with
-  Lunar Magic use other hooks/formats and are not opened.
+* Opens only the clean US ROM (`Super Mario World (U) [!]`, MD5 `cdd3c8c37322978ca8669b34bc89c804`, with or
+  without header) and ROMs/projects made with the editor; ROMs edited with Lunar Magic or other tools are not opened.
 
 ## Structure
 

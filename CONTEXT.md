@@ -7,7 +7,7 @@ A browser-based editor for Super Mario World ROMs: levels, graphics and third-pa
 ### The editor's own patches
 
 **Editor patches**:
-The editor's own ASM in the ROM (SMWE, SMWV, SMWG, SMWP, SMWB, SMWU, SMWX, SMWH, SMWS, the ExAnimation engine), installed when a ROM is opened; the editor relies on them, and a ROM whose hooks hold other code is not opened (ADR 0004). Only SMWM (message texts in free space) is installed when it is needed. Not third-party content and never part of a package.
+The editor's own ASM in the ROM (SMWE, SMWV, SMWG, SMWP, SMWB, SMWU, SMWX, SMWH, SMWS, the ExAnimation engine), installed into the clean ROM when it is opened; the editor relies on them and opens no other ROMs than the clean game and its own (ADR 0004). Only SMWM (message texts in free space) is installed when it is needed. Not third-party content and never part of a package.
 _Avoid_: Lunar Magic hacks, built-in patches
 
 ### Third-party content
@@ -31,9 +31,6 @@ _Avoid_: Resource, asset
 **Link**:
 A connection between two parts of one package that the editor works out: a block on the Map16 tiles that show it, a sprite's number in the define of a block that spawns it, an ExGFX file in the graphics slot its tiles are drawn from.
 _Avoid_: Dependency, binding
-
-**Legacy package**:
-A package wrapped around a single patch that was applied before packages were tracked.
 
 **Level import**:
 An upload with a Lunar Magic level file (.mwl) and no code or songs, applied to the current level. It changes a level rather than installing content, so it is not a package. An upload with code is a package even when it holds a .mwl (see Sample level).

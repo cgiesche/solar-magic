@@ -41,7 +41,7 @@ The **source files** (compressed) are not in the ROM but in the **editor data** 
 browser, stored with the working ROM, and with *File → Save project* in a project file (`.smwproj` =
 ROM + appended editor data), which *Open project …* opens again. *Export ROM* produces the playable ROM without
 them. The same goes for the UberASM, custom block, custom sprite and music projects and the files of the
-packages. ROMs from older versions that still kept sources in RATS blocks are converted when opened.
+packages.
 
 That is why every patch can later be **removed completely** – even from an exported playable
 ROM, since the registry and the original bytes are in the ROM. **Reapplying** with different settings or
@@ -78,10 +78,7 @@ assignments, blocks, sprites, created ExGFX files. Files that another package al
 (a shared library) stay; so does whatever is placed in the level. If a step fails,
 the ROM stays unchanged; Ctrl+Z brings back a removed package.
 
-**Legacy packages:** patches that were applied before packages were managed are wrapped into one
-**legacy package** each when the ROM is opened (once; reopening does not create duplicates). They appear in the list like
-any other package, with the settings of their patch, and can be removed the same way. The
-editor's own patches (including the VRAM patch and the ExAnimation engine) are not third-party content and are not listed. Whatever in the
+The editor's own patches (including the VRAM patch and the ExAnimation engine) are not third-party content and are not listed. Whatever in the
 projects belongs to no package (added earlier or by hand) is listed at the bottom of the list with a link to the tab.
 A Lunar Magic level file (`.mwl`) without code is a level import and does not become a package; in a package with code it is the package's sample level.
 
@@ -173,7 +170,7 @@ is described in the manual.
 That is where Lunar Magic writes its version text on the first save, together with its level hacks. What
 Retry needs from that is the current level number in `$7E010B`; the editor patch provides it. So it marks
 the ROM the same way (`Solar Magic`, `$0FF0B4` = 0, i.e. no LM version: code meant only for LM 3 is not
-chosen). An existing Lunar Magic marker is left untouched.
+chosen). The editor also recognizes its own ROMs by this mark.
 
 ## Applying patches
 
@@ -417,17 +414,6 @@ spot in VRAM (`$2000–$2FFF`) holds the layer 1 tilemap. The slots therefore ne
 ("SMWV"), which relocates the tilemaps as LM does, see below. Like the other editor patches it is installed when
 the ROM is opened.
 
-**AN2:** like Lunar Magic's AN2 slot, a level can have an uncompressed 4bpp ExGFX file whose first 3 KB (96 tiles)
-are kept in RAM at `$7EAD00–$7EB8FF`; ExAnimation frames from `$7EAD00` on come from it (the game's own animation
-graphics are at `$7E7D00–$7EACFF`). It is the *AN2* card next to the slot cards. The patch ("SMWN") copies the file
-there in the level load after all graphics are uploaded and before the animations first run (hook at `$00A5BF`);
-the game uses that RAM only as scratch for decompressing graphics while loading, nothing touches it during play
-(found by emulation). Right after it, `$7EB900–$7EC0FF`, the level's BG tilemap stays, which the editor reads. Packages and level
-imports set it together with the ExAnimation slots that animate their tiles.
-
-An earlier installation of the slots without the VRAM patch overwrote the layer 1 tilemap. Opening such a ROM
-installs the VRAM patch, and the slots work with their assignments.
-
 ### VRAM patch (SMWV)
 
 With the patch, the layer 1/2 tilemaps in levels are 64×32 at `$3000`/`$3800` instead of 64×64 at
@@ -543,7 +529,7 @@ again.
 * `src/core/asar.ts`: Asar WASM (`tools/build-asar.sh` builds it with Emscripten into `src/vendor/asar/`).
   Paths of `incsrc`/`incbin` are resolved as on a file system (`a//b`, several `..`
   in a row; `tools/asar-wasm/normalize-paths.patch`), since the files only exist in memory.
-* `src/core/packages.ts`, `src/ui/upload.ts`: upload, preview, install, legacy packages.
+* `src/core/packages.ts`, `src/ui/upload.ts`: upload, preview, install.
 * `src/core/pkgmap.ts`, `src/ui/pkgmap.ts`: packages with several parts; `src/ui/docview.ts`: manuals.
 * `src/core/bgpack.ts`, `src/ui/levelimport.ts`: level import (Lunar Magic).
 * `src/core/patchapply.ts`: applying, conflict checking, removing.
