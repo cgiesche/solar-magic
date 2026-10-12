@@ -4,9 +4,11 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
-# commit the image is built from (.git is not in the context), shown in the log bar
+# commit the image is built from and its version (tools/version.ts; .git is not in the context), shown in the log bar
 ARG COMMIT=
+ARG VERSION=
 ENV VITE_COMMIT=$COMMIT
+ENV VITE_VERSION=$VERSION
 RUN npm run build
 
 # Serve: static files only

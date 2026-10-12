@@ -5,8 +5,11 @@ import { h, logEntries, onLog, clearLog, type LogEntry } from './dom.ts';
 const PREF = 'smw-log-open';
 const KIND_LABEL = { info: 'Message', error: 'Error', event: 'Event' } as const;
 
-// commit of the build (set by the Docker build), shown at the right of the bar
+// version and commit of the build (set by the Docker and desktop builds), shown at the right of the bar
 const COMMIT = import.meta.env.VITE_COMMIT || '';
+const VERSION = import.meta.env.VITE_VERSION || '';
+const BUILD_LABEL = VERSION || (COMMIT ? COMMIT.slice(0, 7) : 'dev');
+const BUILD_TITLE = [VERSION && `Version ${VERSION}`, COMMIT && `built from commit ${COMMIT}`].filter(Boolean).join(', ') || 'Development build';
 
 const pad = (n: number) => String(n).padStart(2, '0');
 const timeStr = (d: Date) => `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
@@ -26,7 +29,7 @@ export class LogBar {
     copyBtn.onclick = () => this.copy(copyBtn);
     const clearBtn = h('button', { class: 'danger', title: 'Remove all entries', onclick: () => clearLog() }, 'Clear');
     const head = h('div', { class: 'log-head' }, this.toggleBtn, this.errBadge, this.latest, h('span', { class: 'log-actions' }, copyBtn, clearBtn),
-      h('span', { class: 'log-build', title: COMMIT ? `Build from commit ${COMMIT}` : 'Development build' }, COMMIT ? COMMIT.slice(0, 7) : 'dev'));
+      h('span', { class: 'log-build', title: BUILD_TITLE }, BUILD_LABEL));
     // clicking the collapsed line opens it, the buttons keep their own action
     head.addEventListener('click', (e) => { if (!(e.target as HTMLElement).closest('.log-actions, .log-build')) this.toggle(); });
     this.root = h('div', { class: 'logbar' }, head, this.list);

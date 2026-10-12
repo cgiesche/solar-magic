@@ -1,5 +1,7 @@
 # The desktop app (Tauri) for Linux, Windows and macOS, on every push to master and by hand
-# (Actions → Desktop → Run workflow). The installers are the run's artifacts; nothing is released.
+# (Actions → Desktop → Run workflow). The installers are the run's artifacts; on master they are also
+# published as a GitHub release v<version> (tools/version.ts: 0.1.<build number>) under fixed names, so
+# releases/latest/download/solar-magic-windows-x64-setup.exe etc. always point to the newest one.
 name: Desktop
 
 on:
@@ -12,7 +14,24 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # the build number counts the commits
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - id: v
+        run: echo "version=$(node tools/version.ts)" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: version
     strategy:
       fail-fast: false
       matrix:
@@ -46,10 +65,14 @@ jobs:
 
       - run: npm ci
 
-      # the commit is shown in the log bar
-      - run: npx tauri build
+      # the version replaces the one in tauri.conf.json; commit and version are shown in the log bar
+      - shell: bash
+        run: |
+          echo "{\"version\":\"$VITE_VERSION\"}" > version.conf.json
+          npx tauri build --config version.conf.json
         env:
           VITE_COMMIT: ${{ github.sha }}
+          VITE_VERSION: ${{ needs.version.outputs.version }}
 
       - uses: actions/upload-artifact@v7
         with:
@@ -62,3 +85,50 @@ jobs:
             src-tauri/target/release/bundle/nsis/*.exe
             src-tauri/target/release/bundle/dmg/*.dmg
           if-no-files-found: error
+
+  release:
+    needs: [version, build]
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # earlier tags for the notes
+
+      - run: gh run download ${{ github.run_id }} --dir artifacts
+
+      # fixed names without the version, for links to releases/latest/download/<name>
+      - name: Rename installers
+        run: |
+          mkdir release
+          take() { f=$(find artifacts -name "$1" | head -n 1); [ -n "$f" ] || { echo "missing $1"; exit 1; }; cp "$f" "release/$2"; }
+          take '*.AppImage'  solar-magic-linux-x86_64.AppImage
+          take '*.deb'       solar-magic-linux-amd64.deb
+          take '*.rpm'       solar-magic-linux-x86_64.rpm
+          take '*.msi'       solar-magic-windows-x64.msi
+          take '*-setup.exe' solar-magic-windows-x64-setup.exe
+          take '*.dmg'       solar-magic-macos-arm64.dmg
+          ls -l release
+
+      # the notes list the commits since the previous release
+      - name: Release notes
+        run: |
+          prev=$(git describe --tags --abbrev=0 --match 'v*' HEAD^ 2>/dev/null || true)
+          {
+            echo "Build $VERSION from commit $GITHUB_SHA."
+            echo
+            if [ -n "$prev" ]; then
+              echo "Changes since $prev:"
+              echo
+              git log --no-merges --format='- %s' "$prev..HEAD"
+            else
+              echo "First release."
+            fi
+          } > notes.md
+
+      - run: gh release create "v$VERSION" release/* --target "$GITHUB_SHA" --title "Solar Magic $VERSION" --notes-file notes.md
