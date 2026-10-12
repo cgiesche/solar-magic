@@ -118,6 +118,8 @@ export class Map16Tab implements WsPanel {
   }
   hide(): void { this.visible = false; }
 
+  get selected(): { tile: number; bg: boolean } { return { tile: this.sel, bg: this.bg }; }
+
   select(tile: number, bg = false): void {
     this.bg = bg;
     this.sel = tile & (EXT_TILES - 1);

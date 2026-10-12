@@ -164,6 +164,8 @@ export class GfxWorkspace {
   private body = h('div', { class: 'ws-body' });
   bar: HTMLElement;
   active = false;
+  // set by the host: a tab was opened (jump: a jump to something in it, Ctrl+click or a link)
+  onNav: (jump: boolean) => void = () => {};
   private app: App;
 
   constructor(app: App) {
@@ -189,7 +191,7 @@ export class GfxWorkspace {
   }
 
   open(t: WsTab): void {
-    if (this.active && this.tab !== t) this.panel().hide?.();
+    if (this.active && this.tab !== t) { this.panel().hide?.(); this.onNav(false); }
     this.tab = t;
     for (const b of this.bar.querySelectorAll('button')) b.classList.toggle('active', (b as HTMLElement).dataset.tab === t);
     this.body.replaceChildren(this.panel().root);
@@ -218,21 +220,25 @@ export class GfxWorkspace {
   showPalette(row: number, col = 1): void {
     this.open('pal');
     this.pal.select(row * 16 + col);
+    this.onNav(true);
   }
 
   showMap16(tile: number, bg = false): void {
     this.open('map16');
     this.map16.select(tile, bg);
+    this.onNav(true);
   }
 
   showGfx(file: number, tile?: number, palRow?: number): void {
     this.open('gfx');
     this.gfx.select(file, tile, palRow);
+    this.onNav(true);
   }
 
   showAnim(global: boolean, slot: number): void {
     this.anim.select(global, slot);
     this.open('anim');
+    this.onNav(true);
   }
 
   key(e: KeyboardEvent): boolean {

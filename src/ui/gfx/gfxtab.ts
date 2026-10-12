@@ -198,6 +198,8 @@ export class GfxTab implements WsPanel {
     this.visible = false;
   }
 
+  get selected(): number { return this.cur; }
+
   select(file: number, tile?: number, palRow?: number): void {
     if (file !== this.cur) { this.dropFloat(); this.cur = file; this.bppOverride = null; this.palRow = -1; this.sel = null; }
     if (palRow !== undefined) this.palRow = palRow;

@@ -74,6 +74,8 @@ export class AnimTab implements WsPanel {
     return 'Click: take the Map16 tile under the mouse as target (top left quarter)';
   }
 
+  get selected(): { global: boolean; slot: number } { return { global: this.global, slot: this.sel }; }
+
   // opens a slot of the level's or the global list
   select(global: boolean, slot: number): void {
     this.global = global;

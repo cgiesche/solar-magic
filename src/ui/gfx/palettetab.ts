@@ -120,6 +120,8 @@ export class PaletteTab implements WsPanel {
   }
   hide(): void { this.visible = false; }
 
+  get selected(): number { return this.sel; }
+
   select(i: number): void {
     this.sel = this.selEnd = i & 0xff;
     this.paint();
@@ -503,7 +505,7 @@ export class PaletteTab implements WsPanel {
     const k = e.key;
     if (ctrl && k.toLowerCase() === 'c') { this.copyRow(); return true; }
     if (ctrl && k.toLowerCase() === 'v') { this.pasteRow(); return true; }
-    if (!ctrl && (k === 'ArrowLeft' || k === 'ArrowRight' || k === 'ArrowUp' || k === 'ArrowDown')) {
+    if (!ctrl && !e.altKey && (k === 'ArrowLeft' || k === 'ArrowRight' || k === 'ArrowUp' || k === 'ArrowDown')) {
       const d = k === 'ArrowLeft' ? -1 : k === 'ArrowRight' ? 1 : k === 'ArrowUp' ? -16 : 16;
       this.select((this.sel + d + 256) & 0xff);
       return true;

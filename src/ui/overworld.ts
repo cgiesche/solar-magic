@@ -64,6 +64,7 @@ export class OverworldView {
   // set by the host: dirty/undo state changed, open a level in the level editor
   onChange: () => void = () => {};
   onOpenLevel: (n: number) => void = () => {};
+  onNav: () => void = () => {};
 
   constructor(app: App) {
     this.app = app;
@@ -402,6 +403,17 @@ export class OverworldView {
     this.statusText.textContent = t;
   }
 
+  setMap(n: number): void {
+    if (n === this.map) return;
+    this.map = n;
+    this.selectedTl = -1;
+    this.redrawMap();
+    this.buildBar();
+    this.buildSide();
+    this.buildLeft();
+    this.onNav();
+  }
+
   // ---------------- context bar (map, layer, view, zoom) ----------------
   buildBar(): void {
     const setMode = (m: 'l1' | 'l2') => {
@@ -417,7 +429,7 @@ export class OverworldView {
       ({ label, title, shortcut, checked: get, onToggle: (v: boolean) => { set(v); this.redrawMap(); this.updateStatus(); } });
     this.zoomCtl.update();
     this.bar.replaceChildren(
-      h('label', { class: 'row' }, 'Map ', select(MAP_NAMES.map((n, i) => [i, n] as [number, string]), this.map, (v) => { this.map = v; this.selectedTl = -1; this.redrawMap(); this.buildSide(); this.buildLeft(); })),
+      h('label', { class: 'row' }, 'Map ', select(MAP_NAMES.map((n, i) => [i, n] as [number, string]), this.map, (v) => this.setMap(v))),
       h('span', { class: 'sep' }),
       h('div', { class: 'btn-group' },
         h('button', { class: this.mode === 'l1' ? 'active' : '', title: 'Layer 1 (1)', onclick: () => setMode('l1') }, 'Layer 1 (paths/levels)'),
