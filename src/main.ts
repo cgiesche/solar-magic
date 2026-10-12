@@ -1,21 +1,13 @@
 import './style.css';
 import { Rom } from './core/rom.ts';
-import { wrapLegacyPatches } from './core/packages.ts';
 import { openLevelImport } from './ui/levelimport.ts';
 import { createBps, crc32 } from './core/bps.ts';
-
-const SMW_CLEAN_CRC = 0xb19ed489; // Super Mario World (U), headerless
-import { migrateAn2 } from './core/an2legacy.ts';
-import { upgradeMap16Ext } from './core/map16ext.ts';
-import { installEditorPatches } from './core/editorpatches.ts';
+import { prepareRom, SMW_CLEAN_CRC } from './core/editorpatches.ts';
 import { App, type EditMode } from './ui/app.ts';
 import { h, clear, toast, log, modal, choose, zoomControl } from './ui/dom.ts';
 import { downloadBytes, pickFile, saveFile, filePath, fileName, desktop, guardClose } from './ui/platform.ts';
 import { LogBar } from './ui/logbar.ts';
 import { kvGet, kvSet, kvDel, kvClear, saveRom, romFromRecord, type RomRecord } from './ui/storage.ts';
-import { migratePatchSources } from './core/patchreg.ts';
-import { migratePackageFiles } from './core/pkgreg.ts';
-import { moveBrowserPackageFiles } from './ui/pkgtrack.ts';
 import { LevelView } from './ui/levelview.ts';
 import { LevelList, Palette, Properties } from './ui/panels.ts';
 import { openSearch } from './ui/search.ts';
@@ -75,36 +67,12 @@ function setProjectPath(path: string | null): void {
 // false if the ROM cannot be opened
 async function startWith(rom: Rom, name: string): Promise<boolean> {
   log(`ROM “${name}” loaded (${Math.round(rom.size / 1024)} KB${rom.smcHeader ? ', with header' : ''}${rom.extra.size ? `, editor data ${Math.round(rom.extraSize / 1024)} KB` : ''})`);
-  // sources older versions kept in the ROM go into the editor data, freeing the ROM space
+  // a clean ROM gets the editor's patches; anything but it and the editor's own ROMs is refused
   try {
-    const moved = [migratePatchSources(rom), migratePackageFiles(rom)].some(Boolean);
-    if (moved) { saveRom(name, rom).catch(() => {}); log('Sources of patches and packages moved out of the ROM into the editor data (saved with “Save project”).'); }
-  } catch (e) { console.warn('migrating sources', e); }
-  try {
-    const an2 = migrateAn2(rom);
-    if (an2) {
-      saveRom(name, rom).catch(() => {});
-      log(`AN2 removed: animations take their frames from the Anim graphics now${an2.levels.length ? `; the frames of ${an2.levels.length} level(s) were copied there` : ''}.`);
-      for (const n of an2.notes) log(n);
-    }
-  } catch (e) { console.warn('AN2 migration', e); }
-  try {
-    if (upgradeMap16Ext(rom)) { saveRom(name, rom).catch(() => {}); log('Extended Map16 updated: custom blocks also work with AddmusicK.'); }
-  } catch (e) { console.warn('Map16 extension upgrade', e); }
-  // the editor's own patches (a new ROM gets them all, an older one what it lacks)
-  try {
-    if (await installEditorPatches(rom)) { saveRom(name, rom).catch(() => {}); log('Editor patches installed.'); }
+    if (await prepareRom(rom)) { saveRom(name, rom).catch(() => {}); log('Editor patches installed.'); }
   } catch (e) {
     toast(`Could not open “${name}”: ${e instanceof Error ? e.message : e}`, 'error');
     return false;
-  }
-  // patches applied before packages were tracked: a legacy package each
-  try {
-    const legacy = wrapLegacyPatches(rom);
-    if (legacy.length) { saveRom(name, rom).catch(() => {}); log(`${legacy.length} patch(es) applied before packages were tracked are now listed as legacy packages.`); }
-  } catch (e) { console.warn('legacy packages', e); }
-  if (!rom.title().startsWith('SUPER MARIOWORLD')) {
-    toast(`Unexpected ROM title "${rom.title()}" – trying anyway.`, 'error');
   }
   let app: App;
   try {
@@ -120,9 +88,6 @@ async function startWith(rom: Rom, name: string): Promise<boolean> {
   const at = st && typeof st === 'object' && 'nav' in st ? (st as { nav: NavLoc }).nav : fromHash(location.hash);
   if (at?.w !== 'level') app.openLevel(0x105);
   void ui.start(at);
-  // files of packages older versions kept in the browser go into the editor data
-  void moveBrowserPackageFiles(app).then((n) => { if (n) log(`Files of ${n} package(s) moved from the browser into the editor data (saved with “Save project”).`); })
-    .catch((e) => console.warn('moving package files', e));
   return true;
 }
 

@@ -17,7 +17,7 @@ import { DM16_EXT, levelGfx, defaultGfx } from '../core/patches.ts';
 import { gfxSkipMask, gfxFilesHash } from '../core/gfxpages.ts';
 import { STRUCT_EXT, STRUCT_MAX, TRANSPARENT, listStructures, readStructure, writeStructure, type Structure } from '../core/structs.ts';
 import type { Package } from '../core/pkgreg.ts';
-import { kvEntries, kvKeys, kvWrite, saveRom } from './storage.ts';
+import { kvEntries, kvWrite, saveRom } from './storage.ts';
 import { ResultCache, RomFingerprint, RomReads, type CacheEntry } from '../core/romdeps.ts';
 import { bgFromWram, bgIndex, encodeBg } from '../core/bg.ts';
 import { toast, log as logMsg, modalsOpen, onModalsChange } from './dom.ts';
@@ -159,7 +159,6 @@ export class App {
     this.cacheReady = kvEntries<CacheEntry>(CACHE_PREFIX)
       .then((e) => this.results.load(e.map(([k, v]) => [k.slice(CACHE_PREFIX.length), v])))
       .catch((e) => console.error(e));
-    // results of older formats
     this.probes = new ProbeClient({
       results: this.results,
       cacheReady: this.cacheReady,
@@ -180,9 +179,6 @@ export class App {
       ready: () => this.emit('probes'),
       kindsReady: () => this.emit('objkinds'),
     });
-    kvKeys('rc').then((k) => kvWrite([], k.filter((x) => !x.startsWith(CACHE_PREFIX)))).catch(() => {});
-    kvKeys('objkinds-').then((k) => kvWrite([], k)).catch(() => {}); // object kinds before they were in the result cache
-    kvKeys('docs:').then((k) => kvWrite([], k)).catch(() => {}); // copies of package manuals (they come from the packages now)
     this.results.onChange = () => {
       if (!this.cacheTimer && !this.closed) this.cacheTimer = window.setTimeout(() => this.storeResults(), 3000);
     };

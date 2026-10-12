@@ -3,13 +3,12 @@
 // playable ROM, which can still remove its patches. Older ROMs with sources in the ROM are migrated;
 // undo/redo restores the editor data too.
 // node tools/testextra.ts
-import { readFileSync } from 'node:fs';
 import { strToU8 } from 'fflate';
 import { Rom } from '../src/core/rom.ts';
 import { loadAsar } from '../src/core/asar.ts';
 import { applyPatch, uninstallPatch } from '../src/core/patchapply.ts';
-import { listPatches, patchArchive, writeChunks, migratePatchSources } from '../src/core/patchreg.ts';
-import { savePackage, packageArchive, listPackages, emptyParts, migratePackageFiles } from '../src/core/pkgreg.ts';
+import { listPatches, patchArchive } from '../src/core/patchreg.ts';
+import { savePackage, packageArchive, listPackages, emptyParts } from '../src/core/pkgreg.ts';
 import { emptyMusicProject, songsFromZip, addSongs, saveMusicProject, loadMusicProject } from '../src/core/music.ts';
 import { RomHistory } from '../src/core/romhistory.ts';
 import { testSongZip } from './testsong.ts';
@@ -61,23 +60,6 @@ const pe = listPatches(playable).find((p) => p.name === 'Test patch')!;
 check(patchArchive(playable, pe) === null, 'patch sources missing');
 uninstallPatch(playable, pe.id);
 check(playable.data[0x50b6] === vanilla.data[0x50b6] && playable.data[0x50b7] === vanilla.data[0x50b7], 'patch removed from the playable ROM');
-
-// migration of a ROM with sources in RATS blocks (as older versions stored them)
-{
-  const old = Rom.fromFile(rom.output(false)); // registry entries point to blobs that are gone
-  const reg = old.scanRats().find((b) => String.fromCharCode(...old.data.subarray(b.start + 8, b.start + 12)) === 'SMWA')!;
-  const json = JSON.parse(new TextDecoder().decode(old.data.subarray(reg.start + 13, reg.start + 8 + reg.size)));
-  const src = strToU8('PK\u0003\u0004 old sources');
-  for (const p of json.patches) { delete p.srcId; p.src = writeChunks(old, src); p.srcSize = src.length; }
-  old.data.fill(0, reg.start, reg.start + 8 + reg.size);
-  const j = strToU8(JSON.stringify(json));
-  old.allocWrite(new Uint8Array([0x53, 0x4d, 0x57, 0x41, 1, ...j]));
-  const zipsBefore = zipsInRom(old);
-  check(zipsBefore > 0, `old-style sources in the ROM (${zipsBefore})`);
-  check(migratePatchSources(old) && zipsInRom(old) === 0, 'migrated: no source blocks left in the ROM');
-  check(listPatches(old).every((p) => !p.src && p.srcId && new TextDecoder().decode(patchArchive(old, p)!).includes('old sources')), 'sources now in the editor data');
-  check(!migratePatchSources(old) && !migratePackageFiles(old), 'nothing more to migrate');
-}
 
 // undo/redo keeps the editor data in step
 {

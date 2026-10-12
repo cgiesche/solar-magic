@@ -5,7 +5,6 @@
 
 import type { App } from './app.ts';
 import { h, modal, toast, logTool } from './dom.ts';
-import { kvGet, kvDel } from './storage.ts';
 import { reapplyPatch, type ApplyResult, type PatchSource } from '../core/patchapply.ts';
 import { patchArchive, type PatchEntry } from '../core/patchreg.ts';
 import { uploadFromFiles, effectiveDefines, uploadSource, optionDefault, packUpload, unpackUpload, type StoredUpload, type Upload, type PatchOption } from '../core/patchpkg.ts';
@@ -18,9 +17,8 @@ import { recordPackageChange, type Package } from '../core/pkgreg.ts';
 export type { StoredUpload };
 export async function storedUpload(app: App, p: PatchEntry): Promise<StoredUpload | undefined> {
   const a = patchArchive(app.rom, p);
-  return a ? unpackUpload(a) : kvGet<StoredUpload>(srcKey(p.id)); // older versions kept large sources in the browser
+  return a ? unpackUpload(a) : undefined;
 }
-const srcKey = (id: string) => `patch:${id}`;
 
 export function toUpload(s: StoredUpload): Upload {
   return { ...uploadFromFiles(s.fileName, new Map(s.files)), main: s.main };
@@ -96,7 +94,6 @@ export function reapplyPackagePatch(app: App, upload: Upload, fileName: string, 
     return fail(e);
   }
   if (!r.ok) return r;
-  kvDel(srcKey(entry.id)).catch(() => {}); // sources older versions kept in the browser
   patchesChanged(app);
   return r;
 }

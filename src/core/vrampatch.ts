@@ -13,7 +13,7 @@
 import { Rom } from './rom.ts';
 import { applyPatch, type ApplyResult } from './patchapply.ts';
 import { listPatches } from './patchreg.ts';
-import { setVramPatchCheck, extGfxPatch, installExtGfxPatch } from './patches.ts';
+import { setVramPatchCheck } from './patches.ts';
 
 export const VRAM_PATCH_NAME = 'VRAM layout (SMWV)';
 
@@ -519,13 +519,11 @@ export function vramPatchEntry(rom: Rom) {
   return listPatches(rom).find((p) => p.kind === 'vram') ?? null;
 }
 
-// needs Asar (loadAsar) to be loaded. BG2/BG3 slots switched off earlier (SMWG) become active again.
+// needs Asar (loadAsar) to be loaded
 export function installVramPatch(rom: Rom): ApplyResult {
   const e = vramPatchEntry(rom);
   if (e) return { ok: true, errors: [], warnings: [], prints: [], entry: e };
-  const r = applyPatch(rom, { name: VRAM_PATCH_NAME, main: 'vram.asm', files: new Map([['vram.asm', VRAM_ASM]]), kind: 'vram', ram: [[0x7f0000, 0x3654]] });
-  if (r.ok && extGfxPatch(rom) && !extGfxPatch(rom)!.active) installExtGfxPatch(rom);
-  return r;
+  return applyPatch(rom, { name: VRAM_PATCH_NAME, main: 'vram.asm', files: new Map([['vram.asm', VRAM_ASM]]), kind: 'vram', ram: [[0x7f0000, 0x3654]] });
 }
 
 setVramPatchCheck((rom) => vramPatchEntry(rom) !== null);

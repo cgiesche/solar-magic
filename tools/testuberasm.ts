@@ -91,7 +91,7 @@ if (r.ok) {
   for (const n of [...Array(0x25).keys(), ...Array.from({ length: 0x3b }, (_, i) => 0x101 + i)]) if (!emu.load(n).ok) loadBad++;
   check(loadBad === 0, `all levels load with UberASM (${loadBad} bad)`);
   const e = listPatches(rom).find((p) => p.kind === 'uberasm')!;
-  check(!!e && !!e.srcId && !!rom.getBlob(e.srcId) && !e.src, 'registered as UberASM with sources in the editor data (not in the ROM)');
+  check(!!e && !!e.srcId && !!rom.getBlob(e.srcId), 'registered as UberASM with sources in the editor data (not in the ROM)');
   uninstallPatch(rom, e.id);
   const diff = romDiff(rom.data, before, (i) => i === 0x7fd7);
   check(diff === 0, `uninstall restores the ROM (${diff} bytes differ)`);

@@ -1,9 +1,7 @@
 // "Packages" tab of the patches dialog: the installed packages on the left, the chosen one on the right
 // with everything it brought – its patch with the settings, where its UberASM code runs, its blocks and
 // sprites with their files' settings, its ExGFX files – the graphics and other files in the package to
-// take later (import a graphic, add a part), and removing it with all of that. Patches applied before
-// packages were recorded are legacy packages (wrapped when the ROM is opened); the editor's VRAM patch is
-// listed on its own.
+// take later (import a graphic, add a part), and removing it with all of that.
 
 import type { App } from './app.ts';
 import { h, clear, toast, choose, logTool } from './dom.ts';
@@ -80,7 +78,7 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
   function renderList(): void {
     clear(list).append(...items.map((it) => h('button', { class: 'pkg-item' + (it.key === sel ? ' active' : ''), onclick: () => { sel = it.key; fileFilter = ''; renderList(); renderDetail(); } },
       h('div', { class: 'pkg-item-name' }, it.name),
-      h('div', { class: 'hint' }, [it.rec.legacy ? 'Legacy package' : '', ...packageSummary(it.rec)].filter(Boolean).join(' · ')))),
+      h('div', { class: 'hint' }, packageSummary(it.rec).join(' · ')))),
     items.length ? '' : h('p', { class: 'hint' }, 'Nothing installed yet.'),
     orphans());
   }
@@ -114,8 +112,7 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
       h('div', { class: 'row pkg-head' },
         h('div', { class: 'grow' },
           h('div', { class: 'pkg-title' }, it.name, patches[0]?.version ? h('span', { class: 'hint' }, ` v${patches[0].version}`) : ''),
-          h('div', { class: 'hint' }, rec.legacy ? `Legacy package: applied ${new Date(rec.added).toLocaleString()}, before packages were tracked`
-            : [`added ${new Date(rec.added).toLocaleString()}`, rec.fileName].filter(Boolean).join(' · '))),
+          h('div', { class: 'hint' }, [`added ${new Date(rec.added).toLocaleString()}`, rec.fileName].filter(Boolean).join(' · '))),
         h('span', { class: 'pkg-docs' }),
         h('button', { class: 'danger', onclick: () => void remove(it) }, 'Remove …')),
       patchBox,
@@ -124,8 +121,7 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
     );
     for (const p of patches) void patchSection(p, rec, n).then((s) => { if (n === seq) patchBox.appendChild(s); });
     void (async () => {
-      // a legacy package's files are kept with its patch
-      const files = rec.legacy ? new Map((patches[0] && (await storedUpload(app, patches[0]))?.files) || []) : packageFiles(app.rom, rec);
+      const files = packageFiles(app.rom, rec);
       if (n !== seq || !files?.size) return;
       const docs = detail.querySelector('.pkg-docs')!;
       if (packageDocs(files).length) docs.appendChild(h('button', { onclick: () => openDocs(it.name, files) }, 'Manual …'));

@@ -5,8 +5,7 @@
 //   found and what is missing;
 // - installPackage: applies every part of a previewed upload and records what it brought as one package
 //   (observed like pkgreg.ts does: the ROM's projects before and after); all or nothing;
-// - removePackage: the package and everything it brought, files shared with other packages kept;
-// - wrapLegacyPatches: patches applied before packages were tracked become a legacy package each.
+// - removePackage: the package and everything it brought, files shared with other packages kept.
 
 import { zipSync, unzipSync } from 'fflate';
 import type { Rom } from './rom.ts';
@@ -28,8 +27,7 @@ import { writeLevelList, setLevelSettings, levelSettings, localizeFrames, levelA
 import { planBgPack, applyBgPack } from './bgpack.ts';
 import { parseSprites, spriteSizes, type Level } from './level.ts';
 import { ALL, type UberContext } from './uberasm.ts';
-import { recordPackageChangeAsync, emptyParts, savePackage, listPackages, packageArchive, uninstallPackage, type Package, type Claim } from './pkgreg.ts';
-import { listPatches } from './patchreg.ts';
+import { recordPackageChangeAsync, listPackages, packageArchive, uninstallPackage, type Package, type Claim } from './pkgreg.ts';
 
 // one part as the preview lists it
 export interface PreviewPart { kind: PartKind; name: string; file: string }
@@ -496,20 +494,6 @@ function partRoutines(preview: ReadyPreview, upload: Upload, kind: 'sprite' | 'b
 // the package and everything it brought (songs too); files another package brought as well stay
 export function removePackage(rom: Rom, id: string, blank: number[]): Promise<string[]> {
   return uninstallPackage(rom, id, blank);
-}
-
-// ---------- legacy packages ----------
-
-// every patch no package owns gets a legacy package of its own (when a ROM is opened); running it again
-// changes nothing. Tool projects and editor patches (kind set) are not packages. Returns the new ones.
-export function wrapLegacyPatches(rom: Rom): Package[] {
-  const owned = new Set(listPackages(rom).flatMap((r) => r.patches));
-  const out: Package[] = [];
-  for (const p of listPatches(rom)) {
-    if ((p.kind && p.kind !== 'patch') || owned.has(p.id)) continue;
-    out.push(savePackage(rom, { id: `legacy-${p.id}`, name: p.name, fileName: p.name, added: p.applied, legacy: true, ...emptyParts(), patches: [p.id] }));
-  }
-  return out;
 }
 
 // ---------- files and manuals ----------

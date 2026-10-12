@@ -1,11 +1,10 @@
 // Custom blocks (GPS format): block code runs for the right offsets, can change its acts-like
 // (Y:$1693), an old SMWX install is upgraded, and removing the blocks restores normal behaviour.
-import { readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator, type LevelOverride } from '../src/core/levelemu.ts';
 import { loadLevel, serializeLayer1, serializeSprites, isL1Vertical, newUid, type Level } from '../src/core/level.ts';
 import { installEditorPatch, DM16_EXT } from '../src/core/patches.ts';
-import { setActsLike, setExtTileWords, map16Ext, blockOf, upgradeMap16Ext } from '../src/core/map16ext.ts';
+import { setActsLike, setExtTileWords, map16Ext, blockOf } from '../src/core/map16ext.ts';
 import { map16Source } from '../src/core/render.ts';
 import { loadAsar } from '../src/core/asar.ts';
 import { GPS_ROUTINES } from '../src/core/gpsroutines.ts';
@@ -23,10 +22,9 @@ const enc = new TextEncoder();
 const rom = new Rom(EDITOR_IMAGE.slice());
 installEditorPatch(rom);
 const emu = new LevelEmulator(rom); emu.boot();
-const blank = map16Source(rom, emu.load(0x105)).fg(0x025);
 const WALL = 0x2a0, PASS = 0x2a1, REF = 0x130;
 for (const t of [WALL, PASS]) { setExtTileWords(rom, t, map16Source(rom, emu.load(0x105)).fg(REF)); setActsLike(rom, t, REF); }
-check(map16Ext(rom)?.version === 4 && !!map16Ext(rom)?.blocks, 'SMWX v4 installed with the block table');
+check(!!map16Ext(rom)?.blocks, 'SMWX installed with the block table');
 
 const OFFS = ['MarioBelow', 'MarioAbove', 'MarioSide', 'SpriteV', 'SpriteH', 'MarioCape', 'MarioFireball', 'TopCorner', 'BodyInside', 'HeadInside'];
 // marker: sets bit n of $7FB010/11 for offset n
@@ -50,9 +48,7 @@ const r = saveBlockProject(rom, project);
 check(r.ok, 'blocks assemble and are entered ' + r.errors.join(' | '));
 check(blockOf(rom, WALL) !== null && blockOf(rom, 0x2a2) === null, 'block table entries');
 {
-  // the registry speaks part kinds; the ROM keeps the stored string older editors wrote ("blocks")
-  const raw = new TextDecoder('latin1').decode(rom.data);
-  check(listPatches(rom).some((p) => p.kind === 'block') && raw.includes('"kind":"blocks"') && !raw.includes('"kind":"block"'), 'registered with part kind "block", stored as "blocks"');
+  check(listPatches(rom).some((p) => p.kind === 'block'), 'registered with part kind "block"');
 }
 
 // wall of the tile in front of Mario in level 105 plus a ledge; run right, jump periodically
@@ -85,20 +81,6 @@ const back = loadBlockProject(rom);
 check(!!back && back.list.length === 2 && back.files.size === 3, 'block project stored in the ROM');
 removeBlocks(rom);
 check(blockOf(rom, WALL) === null && play(PASS, 120, REF, false).x === refRun.x, 'removed: blocks behave like their acts-like again');
-
-// SMWX v1 → v4 upgrade keeps tables
-{
-  const old = new Rom(EDITOR_IMAGE.slice());
-  installEditorPatch(old);
-  const e = new LevelEmulator(old); e.boot();
-  setActsLike(old, 0x2b0, 0x130);
-  const ex = map16Ext(old)!;
-  old.w8(ex.base + 14, 0); // pretend version 1
-  check(upgradeMap16Ext(old), 'SMWX v1 upgraded when the ROM is opened');
-  const up = saveBlockProject(old, { ...project, list: parseBlockList(`2B0 marker.asm\n`) });
-  const nx = map16Ext(old)!;
-  check(up.ok && nx.version === 4 && nx.base !== ex.base && nx.gfx === ex.gfx && old.r16(nx.acts + 0x2b0 * 2) === 0x130, 'SMWX v1 upgraded with its tables');
-}
 
 // GPS's standard routines are built in: every one assembles (called from code that never runs)
 {

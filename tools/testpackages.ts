@@ -2,9 +2,8 @@
 // uploads (single files, tool folders, a package of several kinds, songs, an unrecognizable upload); an
 // install has its effect in the emulator and is one package; removing gives the ROM as before, keeping
 // files another package brought too (the editor's own patches it needed, like the Map16 extension, stay);
-// undoing an install restores ROM bytes and editor data in one step. Patches applied before packages were
-// tracked become one legacy package each, once; removing one restores the ROM as before that patch. The
-// manuals the tool tabs list come and go with their packages.
+// undoing an install restores ROM bytes and editor data in one step. The manuals the tool tabs list come
+// and go with their packages.
 import { readFileSync } from 'node:fs';
 import { unzipSync, zipSync } from 'fflate';
 import { Rom } from '../src/core/rom.ts';
@@ -13,10 +12,8 @@ import { loadApu } from '../src/core/apu.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { map16Source } from '../src/core/render.ts';
 import { RomHistory } from '../src/core/romhistory.ts';
-import { inspectUpload, installPackage, removePackage, wrapLegacyPatches, defaultAssignment, partsSummary, packageManuals, type UploadPreview, type ReadyPreview, type InstallOptions } from '../src/core/packages.ts';
+import { inspectUpload, installPackage, removePackage, defaultAssignment, partsSummary, packageManuals, type UploadPreview, type ReadyPreview, type InstallOptions } from '../src/core/packages.ts';
 import { listPackages } from '../src/core/pkgreg.ts';
-import { applyPatch } from '../src/core/patchapply.ts';
-import { listPatches } from '../src/core/patchreg.ts';
 import { loadProject, saveProject } from '../src/core/uberproject.ts';
 import { ALL } from '../src/core/uberasm.ts';
 import { loadBlockProject, saveBlockProject } from '../src/core/blocks.ts';
@@ -27,7 +24,7 @@ import { saveLevel } from '../src/core/save.ts';
 import { levelMusic, setLevelMusic, installEditorPatch, customPalette, DM16_EXT } from '../src/core/patches.ts';
 import { readLevelList, readAltFile, usesAltFile } from '../src/core/exanim.ts';
 import { levelColors } from '../src/core/bgpack.ts';
-import { enableBlocks, setExtTileWords, map16Ext, upgradeMap16Ext, blockOf } from '../src/core/map16ext.ts';
+import { enableBlocks, setExtTileWords } from '../src/core/map16ext.ts';
 import { parseLmObjects } from '../src/core/mwl.ts';
 import { testSongZip } from './testsong.ts';
 import { editorImage, romDiff } from './fixture.ts';
@@ -379,12 +376,6 @@ sameRom('song removed');
     const rm = await installPackage(rom, ready(inspectUpload('Square Test.zip', testSongZip())), { level: null, blank: s.fg(0x025), tileWords: (t) => s.fg(t) });
     check(rm.ok && rom.r24(0x008076) >> 16 === 0x0e, `a song installed: AddmusicK's main loop at $008075 (${rm.warnings.join(' | ')})`);
     bump('with AddmusicK');
-    // an older Map16 extension (version byte 2): new code, the same block table
-    const ex = map16Ext(rom)!, block = blockOf(rom, 0x508);
-    rom.w8(ex.base + 14, 2);
-    check(upgradeMap16Ext(rom) && map16Ext(rom)!.version === 4 && map16Ext(rom)!.blocks === ex.blocks && blockOf(rom, 0x508)?.addr === block?.addr && !upgradeMap16Ext(rom),
-      'Map16 extension version 2 upgraded once, its block table kept');
-    bump('upgraded Map16 extension');
   }
 }
 
@@ -416,25 +407,6 @@ sameRom('song removed');
   const d = objects.map((o) => `${o.x},${o.y}:${o.tile?.toString(16)}/${o.size.toString(16)}`).join(' ');
   check(d === '3,5:30/10 4,6:12a/0 5,7:508/21 6,8:508/0 7,8:509/0 6,9:518/0 7,9:519/0 7,9:508/0 8,9:509/0 9,9:508/0 10,9:509/0 7,10:508/0 8,10:509/0 9,10:508/0 10,10:509/0 8,10:508/0 9,10:508/0 10,10:508/0'
     && notes.some((n) => /2D/.test(n)), `Direct Map16 objects converted (${d}; ${notes.join(' | ')})`);
-}
-
-// legacy packages: patches applied before packages were tracked
-{
-  const pkg = await install(mixed);
-  const before = rom.data.slice();
-  const ok1 = applyPatch(rom, { files: new Map([['old1.asm', 'org $00A1DF\n  db $EA\n']]), main: 'old1.asm', name: 'Old one' }).ok;
-  const ok2 = applyPatch(rom, { files: new Map([['old2.asm', 'org $00A1E4\n  db $EA\n']]), main: 'old2.asm', name: 'Old two' }).ok;
-  const wrapped = wrapLegacyPatches(rom);
-  const all = listPackages(rom);
-  check(ok1 && ok2 && wrapped.length === 2 && all.length === 3 && wrapped.every((r) => r.legacy && r.patches.length === 1), `one legacy package per untracked patch (${wrapped.map((r) => r.name).join(', ')})`);
-  check(wrapLegacyPatches(rom).length === 0 && listPackages(rom).length === 3, 'wrapping again creates no duplicates');
-  const two = wrapped.find((r) => r.name === 'Old two')!;
-  await removePackage(rom, two.id, opts.blank);
-  const one = wrapped.find((r) => r.name === 'Old one')!;
-  await removePackage(rom, one.id, opts.blank);
-  check(rom.data[0x21df] === before[0x21df] && rom.data[0x21e4] === before[0x21e4] && !listPatches(rom).some((p) => p.name.startsWith('Old')) && listPackages(rom).length === 1,
-    'removing the legacy packages restores the bytes their patches changed');
-  await removePackage(rom, pkg.pkg!.id, opts.blank);
 }
 
 if (bad) { console.log(`${bad} FAILED`); process.exit(1); }

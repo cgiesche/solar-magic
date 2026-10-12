@@ -19,7 +19,6 @@ import { EXANIMATION_ASM, MEMORY_ASM } from './kobo/exanimation.ts';
 import { installEditorPatch } from './patches.ts';
 
 export const EXANIM_PATCH_NAME = 'ExAnimation (Lunar Magic format)';
-const EXANIM_PATCH_NAME_OLD = 'ExAnimation (Lunar-Magic-Format)'; // name in ROMs patched before the UI was English
 const LOAD_HOOK = 0x0583ad;
 const NMI_HOOK = 0x00a390;
 const TABLE_OFFSET = 0xea;
@@ -243,9 +242,9 @@ export function installExAnim(rom: Rom): ApplyResult {
   return applyPatch(rom, { name: EXANIM_PATCH_NAME, main: 'exanimation.asm', files: new Map([['exanimation.asm', EXANIMATION_ASM], ['memory.asm', MEMORY_ASM]]), kind: 'exanim', ram: [[0x7fc003, 0xfd]] });
 }
 
-// the registry entry of the engine (ROMs patched before it had a kind of its own: by its name)
+// the registry entry of the engine
 export function exanimEntry(rom: Rom) {
-  return listPatches(rom).find((p) => p.kind === 'exanim' || p.name === EXANIM_PATCH_NAME || p.name === EXANIM_PATCH_NAME_OLD) ?? null;
+  return listPatches(rom).find((p) => p.kind === 'exanim') ?? null;
 }
 
 

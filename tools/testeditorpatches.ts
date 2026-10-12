@@ -1,10 +1,8 @@
-// The editor's own patches installed when a ROM is opened: a clean ROM gets all of them (not SMWM),
-// every level loads as before, a second run changes nothing, and a ROM with foreign code at a hook is
-// refused and left unchanged.
-import { readFileSync } from 'node:fs';
+// Opening a ROM (editorpatches.ts): a clean ROM gets all of the editor's own patches (not SMWM) and every
+// level loads as before; a ROM the editor made opens as it is; any other ROM is refused.
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
-import { installEditorPatches } from '../src/core/editorpatches.ts';
+import { prepareRom } from '../src/core/editorpatches.ts';
 import { editorPatch, customPalettePatch, bgPatch, musicPatch, extGfxPatch } from '../src/core/patches.ts';
 import { vramPatchEntry } from '../src/core/vrampatch.ts';
 import { exanimEntry, exanimInstalled } from '../src/core/exanim.ts';
@@ -12,18 +10,18 @@ import { map16Ext } from '../src/core/map16ext.ts';
 import { bgMap16Ext } from '../src/core/bgmap16.ts';
 import { structPatch } from '../src/core/structs.ts';
 import { messagePatch } from '../src/core/messages.ts';
-import { applyPatch } from '../src/core/patchapply.ts';
+import { cleanImage } from './fixture.ts';
 
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
-const file = new Uint8Array(readFileSync('test/fixtures/smw.smc'));
-const vanilla = new Rom(file.slice());
-const rom = new Rom(file.slice());
+const refused = async (rom: Rom) => { try { await prepareRom(rom); return ''; } catch (e) { return (e as Error).message; } };
+const vanilla = new Rom(cleanImage());
+const rom = new Rom(cleanImage());
 
-check(await installEditorPatches(rom), 'clean ROM: patches installed');
+check(await prepareRom(rom), 'clean ROM: patches installed');
 check(!!editorPatch(rom), 'SMWE');
 check(!!vramPatchEntry(rom), 'SMWV');
-check(!!extGfxPatch(rom)?.active, 'SMWG (active)');
+check(!!extGfxPatch(rom), 'SMWG');
 check(!!customPalettePatch(rom), 'SMWP');
 check(!!bgPatch(rom), 'SMWB');
 check(!!musicPatch(rom), 'SMWU');
@@ -33,9 +31,10 @@ check(!!structPatch(rom), 'SMWS');
 check(exanimInstalled(rom) && exanimEntry(rom)?.kind === 'exanim', 'ExAnimation engine (kind exanim)');
 check(!messagePatch(rom), 'no SMWM');
 
+// a ROM the editor made: opened as it is (also as exported, with its header)
 const data = rom.data.slice();
-check(!(await installEditorPatches(rom)), 'second run: nothing to do');
-check(data.every((b, i) => rom.data[i] === b), 'second run: ROM unchanged');
+check(!(await prepareRom(rom)) && data.every((b, i) => rom.data[i] === b), "the editor's own ROM: opened unchanged");
+check(!(await refused(Rom.fromFile(rom.output(true)))), "the editor's exported ROM (with header): opened");
 
 // every level: same map and colors (VRAM differs: the VRAM patch moves the tilemaps)
 const e0 = new LevelEmulator(vanilla); e0.boot();
@@ -51,17 +50,13 @@ for (const n of levels) {
 }
 check(!diff, `levels load as in the clean ROM (${levels.length})`);
 
-// foreign code at an editor hook: refused, ROM unchanged
-{
-  const taken = new Rom(file.slice());
-  const p = applyPatch(taken, { name: 'Foreign', main: 'main.asm', files: new Map([['main.asm', 'lorom\norg $05D8F5\n  JSL $0FFF00\n']]) });
-  check(p.ok, 'foreign patch at $05D8F5 applies to a clean ROM');
-  const before = taken.data.slice();
-  let msg = '';
-  try { await installEditorPatches(taken); } catch (e) { msg = (e as Error).message; }
-  check(msg.includes('$05D8F5') && msg.includes('Foreign'), 'refused, naming the hook and the patch: ' + msg.replace(/\n/g, ' '));
-  check(taken.data.length === before.length && before.every((b, i) => taken.data[i] === b), 'refused ROM unchanged');
-}
+// anything else is refused: a changed byte in the clean game, an expanded clean ROM
+const changed = new Rom(cleanImage());
+changed.w8(0x00a1da, 0xea);
+check(/Only a clean/.test(await refused(changed)), 'a modified ROM is refused');
+const expanded = new Rom(cleanImage());
+expanded.expand(0x100000);
+check(/Only a clean/.test(await refused(expanded)), 'an expanded (not clean) ROM is refused');
 
 console.log(bad ? `${bad} failed` : 'all ok');
 if (bad) process.exitCode = 1;

@@ -7,7 +7,6 @@
 
 import { deflateSync, inflateSync } from 'fflate';
 import { Rom, pcToSnes } from './rom.ts';
-import { readChunks } from './patchreg.ts';
 import type { UberContext } from './uberasm.ts';
 import type { SpriteFolder } from './pixirt.ts';
 import { SECTIONS, SECTION_KEYS, type SectionKey, type PartSection, type Other } from './pkgsections.ts';
@@ -34,9 +33,6 @@ export interface Package extends PackageParts {
   fileName: string;
   added: string; // ISO date
   srcId?: string; // its files (zip) in the editor data (rom.extra)
-  src?: number[]; // older ROMs: SNES addresses of the RATS blocks holding its files (see migratePackageFiles)
-  srcSize?: number;
-  legacy?: boolean; // wraps a patch applied before packages were tracked (its files are kept with the patch)
 }
 
 export const emptyParts = (): PackageParts => Object.fromEntries(SECTION_KEYS.map((k) => [k, SECTIONS[k].none()])) as unknown as PackageParts;
@@ -74,7 +70,7 @@ function write(rom: Rom, all: Package[]): void {
 export function savePackage(rom: Rom, rec: Package, archive?: Uint8Array): Package {
   const all = listPackages(rom);
   const full = { ...rec };
-  if (archive && !full.src && !full.srcId) full.srcId = rom.putBlob(archive);
+  if (archive && !full.srcId) full.srcId = rom.putBlob(archive);
   const i = all.findIndex((r) => r.id === rec.id);
   if (i >= 0) all[i] = full; else all.push(full);
   write(rom, all);
@@ -85,31 +81,15 @@ export function removePackageRecord(rom: Rom, id: string): void {
   const all = listPackages(rom);
   const r = all.find((x) => x.id === id);
   if (!r) return;
-  for (const a of r.src ?? []) rom.freeAt(a);
   if (r.srcId) rom.dropBlob(r.srcId);
   write(rom, all.filter((x) => x.id !== id));
 }
 
 // the package's files, null if they are not kept
 export function packageArchive(rom: Rom, r: Package): Uint8Array | null {
-  if (r.srcId) return rom.getBlob(r.srcId);
-  return r.src && r.srcSize ? readChunks(rom, r.src, r.srcSize) : null;
+  return r.srcId ? rom.getBlob(r.srcId) : null;
 }
 
-// files older versions kept in the ROM go into the editor data; returns whether anything moved
-export function migratePackageFiles(rom: Rom): boolean {
-  const all = listPackages(rom);
-  let moved = false;
-  for (const r of all) {
-    if (!r.src) continue;
-    if (r.srcSize) r.srcId = rom.putBlob(readChunks(rom, r.src, r.srcSize));
-    for (const a of r.src) rom.freeAt(a);
-    delete r.src; delete r.srcSize;
-    moved = true;
-  }
-  if (moved) write(rom, all);
-  return moved;
-}
 
 // ---------- observing what a package adds ----------
 // (each section of the record by its adapter, see pkgsections.ts)

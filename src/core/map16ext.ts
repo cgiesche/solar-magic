@@ -30,8 +30,7 @@ export const EXT_FIRST = 0x200;
 export const EXT_TILES = 0x1000; // tiles $000-$FFF
 export const DEFAULT_ACTS = 0x025; // new tiles act like air
 const MAGIC = [0x53, 0x4d, 0x57, 0x58]; // "SMWX"
-const HEADER = 16; // +4 acts table, +7 graphics table, +10 block table, +13 blocks enabled, +14 version
-const VERSION = 4;
+const HEADER = 16; // +4 acts table, +7 graphics table, +10 block table, +13 blocks enabled
 
 const F545 = 0x00f545;
 const HIT_HOOK = 0x029328;
@@ -42,21 +41,19 @@ const CHANGE_HOOK = 0x00c176;
 const CHANGE_CODE = [0xa9, 0x0d, 0x85, 0x06, 0xc2, 0x20, 0xb9, 0xbe, 0x0f, 0x85, 0x04];
 export const MAP16X_HOOKS: [number, number][] = [[F545, 4], [HIT_HOOK, 4], ...RENDER_HOOKS.map((r): [number, number] => [r, 5]), [PAGE0_FIX, 2], [PAGE1_FIX, 2], [CHANGE_HOOK, CHANGE_CODE.length]];
 
-export interface Map16Ext { base: number; acts: number; gfx: number; blocks: number; version: number }
+export interface Map16Ext { base: number; acts: number; gfx: number; blocks: number }
 
 export function map16Ext(rom: Rom): Map16Ext | null {
   if (rom.r8(F545) !== 0x5c) return null;
   const base = rom.r24(F545 + 1) - HEADER;
   for (let i = 0; i < 4; i++) if (rom.r8(base + i) !== MAGIC[i]) return null;
-  const version = rom.r8(base + 14) || 1;
-  return { base, acts: rom.r24(base + 4), gfx: rom.r24(base + 7), blocks: version >= 2 && rom.r8(base + 13) ? rom.r24(base + 10) : 0, version };
+  return { base, acts: rom.r24(base + 4), gfx: rom.r24(base + 7), blocks: rom.r8(base + 13) ? rom.r24(base + 10) : 0 };
 }
 
 function build(): Asm {
   const a = new Asm();
   a.b(...MAGIC); a.fill(HEADER - 4);
   a.labels.set('Flag', 13);
-  a.bytes[14] = VERSION;
   // $00F545 replacement (entered by JML, M=8 X=8): custom block, map the tile, continue in the vanilla routine
   a.label('F545');
   a.long(0x22, 'Blk'); // JSL Blk
@@ -209,7 +206,7 @@ function build(): Asm {
 // blank: the 4 tile words new tiles start with (an empty tile of the current tileset)
 export function installMap16Ext(rom: Rom, blank: number[]): Map16Ext {
   const ex = map16Ext(rom);
-  if (ex) return ex.version < VERSION ? upgrade(rom, ex) : ex;
+  if (ex) return ex;
   const expect = (at: number, bytes: number[], what: string) => {
     for (let i = 0; i < bytes.length; i++) if (rom.r8(at + i) !== bytes[i]) throw new Error(`Unexpected code at $${at.toString(16).toUpperCase()} (${what})${ownerNote(rom, at, bytes.length)} – extended Map16 not possible`);
   };
@@ -218,6 +215,7 @@ export function installMap16Ext(rom: Rom, blank: number[]): Map16Ext {
   for (const r of RENDER_HOOKS) expect(r, [0xb9, 0xbe, 0x0f, 0x85, 0x0a], 'tilemap building');
   expect(PAGE0_FIX, [0x29, 0xfe], 'tile replacement');
   expect(PAGE1_FIX, [0x09, 0x01], 'tile replacement');
+  expect(CHANGE_HOOK, CHANGE_CODE, 'tile replacement drawing');
 
   const gfxData = new Uint8Array((EXT_TILES - EXT_FIRST) * 8);
   for (let t = 0; t < EXT_TILES - EXT_FIRST; t++) for (let k = 0; k < 4; k++) { gfxData[t * 8 + k * 2] = blank[k] & 0xff; gfxData[t * 8 + k * 2 + 1] = blank[k] >> 8; }
@@ -226,14 +224,14 @@ export function installMap16Ext(rom: Rom, blank: number[]): Map16Ext {
   // acts like: identity for pages 0/1, air for the new pages
   const acts = new Uint8Array(EXT_TILES * 2);
   for (let t = 0; t < EXT_TILES; t++) { const v = t < EXT_FIRST ? t : DEFAULT_ACTS; acts[t * 2] = v & 0xff; acts[t * 2 + 1] = v >> 8; }
-  writeCode(rom, gfx, acts, 0);
+  writeCode(rom, gfx, acts);
   rom.writeBytes(PAGE0_FIX, Uint8Array.from([0xa9, 0x00]));
   rom.writeBytes(PAGE1_FIX, Uint8Array.from([0xa9, 0x01]));
   return map16Ext(rom)!;
 }
 
 // assembles the code block with the given tables and points the hooks at it
-function writeCode(rom: Rom, gfx: number, acts: Uint8Array, blocks: number): number {
+function writeCode(rom: Rom, gfx: number, acts: Uint8Array): number {
   const a = build();
   const addr = rom.allocWrite(new Uint8Array(a.bytes.length));
   const code = a.link(addr);
@@ -248,7 +246,6 @@ function writeCode(rom: Rom, gfx: number, acts: Uint8Array, blocks: number): num
   rom.writeBytes(addr, code);
   rom.w24(addr + 4, L('ActsTbl'));
   rom.w24(addr + 7, gfx);
-  if (blocks) linkBlocks(rom, addr, blocks);
   const jml = L('F545');
   rom.writeBytes(F545, Uint8Array.from([0x5c, jml & 0xff, (jml >> 8) & 0xff, jml >> 16]));
   const jsl = (at: number, t: number, len: number) => {
@@ -258,25 +255,8 @@ function writeCode(rom: Rom, gfx: number, acts: Uint8Array, blocks: number): num
   };
   jsl(HIT_HOOK, L('Hit'), 4);
   for (const r of RENDER_HOOKS) jsl(r, L('Render'), 5);
-  // the change-tile drawing (versions before 4 left it vanilla; another patch's code there stays)
-  if (CHANGE_CODE.every((b, i) => rom.r8(CHANGE_HOOK + i) === b)) jsl(CHANGE_HOOK, L('Change'), CHANGE_CODE.length);
+  jsl(CHANGE_HOOK, L('Change'), CHANGE_CODE.length); // the change-tile drawing
   return addr;
-}
-
-// an older version: same tables (and block table), new code
-function upgrade(rom: Rom, old: Map16Ext): Map16Ext {
-  const acts = rom.bytes(old.acts, EXT_TILES * 2);
-  writeCode(rom, old.gfx, acts, old.blocks);
-  rom.freeAt(old.base);
-  return map16Ext(rom)!;
-}
-
-// brings an older version of the patch up to date (when the ROM is opened); true if it did
-export function upgradeMap16Ext(rom: Rom): boolean {
-  const ex = map16Ext(rom);
-  if (!ex || ex.version >= VERSION) return false;
-  upgrade(rom, ex);
-  return true;
 }
 
 // points the table operands of Blk at the block table and enables the dispatch

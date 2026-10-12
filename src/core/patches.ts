@@ -7,7 +7,7 @@
 //  - extended object $02 "Direct Map16": 6 bytes, places any Map16 tile as a rectangle
 //  - "edited" mark at $0FF0A0 where Lunar Magic keeps its version string (see markEdited)
 
-import { Rom, pcToSnes, snesToPc } from './rom.ts';
+import { Rom } from './rom.ts';
 import { Asm } from './asm.ts';
 import { ownerNote } from './patchreg.ts';
 
@@ -215,15 +215,19 @@ function hook(rom: Rom, at: number, target: number, len: number, braTo?: number)
   rom.writeBytes(at, Uint8Array.from(bytes));
 }
 
-// marks the ROM as edited (see EDITED_MARK) unless Lunar Magic (or anything else) already wrote there
+// marks the ROM as edited (see EDITED_MARK)
 function markEdited(rom: Rom): void {
-  for (let i = 0; i < EDITED_LEN; i++) if (rom.r8(EDITED_MARK + i) !== 0xff) return;
   for (let i = 0; i < EDITED_LEN; i++) rom.w8(EDITED_MARK + i, i < EDITED_TEXT.length ? EDITED_TEXT.charCodeAt(i) : 0);
+}
+// the editor's mark: a ROM it made
+export function madeByEditor(rom: Rom): boolean {
+  for (let i = 0; i < EDITED_LEN; i++) if (rom.r8(EDITED_MARK + i) !== (i < EDITED_TEXT.length ? EDITED_TEXT.charCodeAt(i) : 0)) return false;
+  return true;
 }
 
 export function installEditorPatch(rom: Rom): PatchInfo {
   const existing = editorPatch(rom);
-  if (existing) { markEdited(rom); return existing; }
+  if (existing) return existing;
   if (rom.r8(SPR_BANK_HOOK) !== 0xa9 || rom.r8(SPR_BANK_HOOK + 1) !== 0x07) throw new Error(`Unexpected code at $05D8F5${ownerNote(rom, SPR_BANK_HOOK, 4)} – patch not possible (ROM already modified otherwise?)`);
   if (rom.r8(HOOK_GFXPTR) !== 0xb9 || rom.r8(HOOK_UPLOAD) !== 0x22 || rom.r8(HOOK_SPRGFX) !== 0xad || rom.r8(HOOK_FGGFX) !== 0xad) {
     const note = ownerNote(rom, HOOK_GFXPTR, 15) || ownerNote(rom, HOOK_UPLOAD, 4) || ownerNote(rom, HOOK_SPRGFX, 15) || ownerNote(rom, HOOK_FGGFX, 15);
@@ -490,7 +494,7 @@ export function setLevelMusic(rom: Rom, level: number, song: number): void {
 // (BG3, tiles 280-2FF) - like Lunar Magic's BG2/BG3 slots. The upload uses the game's own routine
 // $00AA6B, so both LZ2 (3bpp) and raw 4bpp files work.
 // In the original game the layer 1 tilemap lives at VRAM $2000-$2FFF, so the slots need the tilemaps
-// moved out of the way first (VRAM patch, like LM's). Without it the hook stays off; the table is kept.
+// moved out of the way first (VRAM patch, like LM's).
 export const EXT_GFX_HOOK = 0x00aa50;
 export const EXT_GFX_HOOKS: [number, number][] = [[EXT_GFX_HOOK, 5]];
 const EXT_GFX_MAGIC = [0x53, 0x4d, 0x57, 0x47]; // "SMWG"
@@ -501,32 +505,17 @@ const EXT_GFX_ORIG = [0xa2, 0x03, 0xb5, 0x04, 0x9d, 0x05, 0x01, 0xca, 0x10, 0xf8
 export let vramPatchInstalled: (rom: Rom) => boolean = () => false;
 export function setVramPatchCheck(f: (rom: Rom) => boolean): void { vramPatchInstalled = f; }
 
-function extGfxBlock(rom: Rom): number {
-  if (rom.r8(EXT_GFX_HOOK) === 0x22) {
-    const base = rom.r24(EXT_GFX_HOOK + 1) - 8;
-    if (EXT_GFX_MAGIC.every((m, i) => rom.r8(base + i) === m)) return base;
-  }
-  for (const b of rom.scanRats()) if (EXT_GFX_MAGIC.every((m, i) => rom.data[b.start + 8 + i] === m)) return pcToSnes(b.start + 8);
-  return -1;
+export function extGfxPatch(rom: Rom): { table: number } | null {
+  if (rom.r8(EXT_GFX_HOOK) !== 0x22) return null;
+  const base = rom.r24(EXT_GFX_HOOK + 1) - 8;
+  if (!EXT_GFX_MAGIC.every((m, i) => rom.r8(base + i) === m)) return null;
+  return { table: rom.r24(base + 4) };
 }
 
-// the patch with its table; active = the hook at $00AA50 is in place
-export function extGfxPatch(rom: Rom): { table: number; active: boolean } | null {
-  const base = extGfxBlock(rom);
-  if (base < 0) return null;
-  return { table: rom.r24(base + 4), active: rom.r8(EXT_GFX_HOOK) === 0x22 && rom.r24(EXT_GFX_HOOK + 1) === base + 8 };
-}
-
-export function installExtGfxPatch(rom: Rom): { table: number; active: boolean } {
+export function installExtGfxPatch(rom: Rom): { table: number } {
   if (!vramPatchInstalled(rom)) throw new Error('BG2/BG3 graphics are not available yet: the layer tilemaps must first be moved in VRAM (VRAM patch).');
   const ex = extGfxPatch(rom);
-  if (ex?.active) return ex;
-  if (ex) {
-    // switched off earlier: the code block and its table are still there, just hook it in again
-    const base = extGfxBlock(rom) + 8;
-    rom.writeBytes(EXT_GFX_HOOK, Uint8Array.from([0x22, base & 0xff, (base >> 8) & 0xff, base >> 16, 0x60]));
-    return extGfxPatch(rom)!;
-  }
+  if (ex) return ex;
   installEditorPatch(rom); // level number in $010B, ExGFX pointers
   const orig = EXT_GFX_ORIG;
   for (let i = 0; i < orig.length; i++) if (rom.r8(EXT_GFX_HOOK + i) !== orig[i]) throw new Error(`Unexpected code at $00AA50${ownerNote(rom, EXT_GFX_HOOK, 5)} – BG2/BG3 graphics not possible`);

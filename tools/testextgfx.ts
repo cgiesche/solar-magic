@@ -28,7 +28,7 @@ installExtGfxPatch(rom);
 const raw = new Uint8Array(0x1000).fill(0x5a);
 setGfxEntry(rom, 0x80, rom.allocWrite(raw), true);
 setLevelExtGfx(rom, 0x105, [0x80, 0xff]);
-check(levelExtGfx(rom, 0x105)[0] === 0x80 && extGfxPatch(rom)!.active, 'BG2 slot of level 105 set');
+check(levelExtGfx(rom, 0x105)[0] === 0x80 && !!extGfxPatch(rom), 'BG2 slot of level 105 set');
 const ep = new LevelEmulator(rom); ep.boot();
 const ok = ev.load(0x105), good = ep.load(0x105);
 let g2 = 0; for (let i = 0; i < 0x1000; i++) if (good.vram[0x4000 + i] === raw[i]) g2++;
