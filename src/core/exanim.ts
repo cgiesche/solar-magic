@@ -242,11 +242,16 @@ export function installExAnim(rom: Rom): ApplyResult {
     return { ok: false, errors: ['The ROM already has an ExAnimation in an older Lunar Magic format (or another patch at $0583AD/$00A390) – not supported.'], warnings: [], prints: [] };
   }
   installEditorPatch(rom); // keeps the level number in $010B, which the engine reads (as Lunar Magic's does)
-  return applyPatch(rom, { name: EXANIM_PATCH_NAME, main: 'exanimation.asm', files: new Map([['exanimation.asm', EXANIMATION_ASM], ['memory.asm', MEMORY_ASM]]), ram: [[0x7fc003, 0xfd]] });
+  return applyPatch(rom, { name: EXANIM_PATCH_NAME, main: 'exanimation.asm', files: new Map([['exanimation.asm', EXANIMATION_ASM], ['memory.asm', MEMORY_ASM]]), kind: 'exanim', ram: [[0x7fc003, 0xfd]] });
+}
+
+// the registry entry of the engine (ROMs patched before it had a kind of its own: by its name)
+export function exanimEntry(rom: Rom) {
+  return listPatches(rom).find((p) => p.kind === 'exanim' || p.name === EXANIM_PATCH_NAME || p.name === EXANIM_PATCH_NAME_OLD) ?? null;
 }
 
 export function uninstallExAnim(rom: Rom): string[] {
-  const e = listPatches(rom).find((p) => p.name === EXANIM_PATCH_NAME || p.name === EXANIM_PATCH_NAME_OLD);
+  const e = exanimEntry(rom);
   return e ? uninstallPatch(rom, e.id) : [];
 }
 

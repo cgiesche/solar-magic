@@ -5,9 +5,10 @@ import { openLevelImport } from './ui/levelimport.ts';
 import { createBps, crc32 } from './core/bps.ts';
 
 const SMW_CLEAN_CRC = 0xb19ed489; // Super Mario World (U), headerless
-import { disableUnsafeExtGfx, hasEditorPatch } from './core/patches.ts';
+import { hasEditorPatch } from './core/patches.ts';
 import { migrateAn2 } from './core/an2legacy.ts';
 import { upgradeMap16Ext } from './core/map16ext.ts';
+import { installEditorPatches } from './core/editorpatches.ts';
 import { App, type EditMode } from './ui/app.ts';
 import { h, clear, toast, log, modal, choose, zoomControl } from './ui/dom.ts';
 import { downloadBytes, pickFile, saveFile, filePath, fileName, desktop, guardClose } from './ui/platform.ts';
@@ -59,7 +60,7 @@ async function openFile(f: File): Promise<void> {
   const data = new Uint8Array(await f.arrayBuffer());
   let rom: Rom;
   try { rom = Rom.fromFile(data); } catch (e) { toast(`Could not open “${f.name}”: ${e instanceof Error ? e.message : e}`, 'error'); return; }
-  startWith(rom, f.name);
+  if (!(await startWith(rom, f.name))) return;
   saveRom(f.name, rom).catch(() => {});
   const path = filePath(f);
   setProjectPath(path && /\.smwproj$/i.test(path) ? path : null);
@@ -72,22 +73,14 @@ function setProjectPath(path: string | null): void {
   (path ? kvSet('projectPath', path) : kvDel('projectPath')).catch(() => {});
 }
 
-function startWith(rom: Rom, name: string): void {
+// false if the ROM cannot be opened
+async function startWith(rom: Rom, name: string): Promise<boolean> {
   log(`ROM “${name}” loaded (${Math.round(rom.size / 1024)} KB${rom.smcHeader ? ', with header' : ''}${rom.extra.size ? `, editor data ${Math.round(rom.extraSize / 1024)} KB` : ''})`);
   // sources older versions kept in the ROM go into the editor data, freeing the ROM space
   try {
     const moved = [migratePatchSources(rom), migratePackageFiles(rom)].some(Boolean);
     if (moved) { saveRom(name, rom).catch(() => {}); log('Sources of patches and packages moved out of the ROM into the editor data (saved with “Save project”).'); }
   } catch (e) { console.warn('migrating sources', e); }
-  // patches applied before packages were tracked: a legacy package each
-  try {
-    const legacy = wrapLegacyPatches(rom);
-    if (legacy.length) { saveRom(name, rom).catch(() => {}); log(`${legacy.length} patch(es) applied before packages were tracked are now listed as legacy packages.`); }
-  } catch (e) { console.warn('legacy packages', e); }
-  if (disableUnsafeExtGfx(rom)) {
-    saveRom(name, rom).catch(() => {});
-    toast('BG2/BG3 graphics were turned off: they overwrote the layer 1 tilemap (broken background). The assignments stay saved and apply again once the VRAM patch is available.', 'error');
-  }
   try {
     const an2 = migrateAn2(rom);
     if (an2) {
@@ -99,6 +92,18 @@ function startWith(rom: Rom, name: string): void {
   try {
     if (upgradeMap16Ext(rom)) { saveRom(name, rom).catch(() => {}); log('Extended Map16 updated: custom blocks also work with AddmusicK.'); }
   } catch (e) { console.warn('Map16 extension upgrade', e); }
+  // the editor's own patches (a new ROM gets them all, an older one what it lacks)
+  try {
+    if (await installEditorPatches(rom)) { saveRom(name, rom).catch(() => {}); log('Editor patches installed.'); }
+  } catch (e) {
+    toast(`Could not open “${name}”: ${e instanceof Error ? e.message : e}`, 'error');
+    return false;
+  }
+  // patches applied before packages were tracked: a legacy package each
+  try {
+    const legacy = wrapLegacyPatches(rom);
+    if (legacy.length) { saveRom(name, rom).catch(() => {}); log(`${legacy.length} patch(es) applied before packages were tracked are now listed as legacy packages.`); }
+  } catch (e) { console.warn('legacy packages', e); }
   if (!rom.title().startsWith('SUPER MARIOWORLD')) {
     toast(`Unexpected ROM title "${rom.title()}" – trying anyway.`, 'error');
   }
@@ -107,7 +112,7 @@ function startWith(rom: Rom, name: string): void {
     app = new App(rom, name);
   } catch (e) {
     toast(`Emulator start failed: ${e}`, 'error');
-    return;
+    return false;
   }
   (window as unknown as { app: App }).app = app;
   const ui = buildUi(app);
@@ -119,6 +124,7 @@ function startWith(rom: Rom, name: string): void {
   // files of packages older versions kept in the browser go into the editor data
   void moveBrowserPackageFiles(app).then((n) => { if (n) log(`Files of ${n} package(s) moved from the browser into the editor data (saved with “Save project”).`); })
     .catch((e) => console.warn('moving package files', e));
+  return true;
 }
 
 // spinner pill for background analyses; shown after a short delay so quick jobs don't flicker,
@@ -596,16 +602,14 @@ window.addEventListener('drop', (e) => {
     const res = await fetch(q);
     if (res.ok) {
       const data = new Uint8Array(await res.arrayBuffer());
-      startWith(Rom.fromFile(data), q.split('/').pop() ?? 'rom.smc');
-      return;
+      if (await startWith(Rom.fromFile(data), q.split('/').pop() ?? 'rom.smc')) return;
     }
   }
   try {
     const saved = await kvGet<RomRecord>('rom');
     if (saved?.data) {
       if (desktop) projectPath = (await kvGet<string>('projectPath')) ?? null;
-      startWith(romFromRecord(saved), saved.name);
-      return;
+      if (await startWith(romFromRecord(saved), saved.name)) return;
     }
   } catch (e) {
     console.warn(e);

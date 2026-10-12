@@ -22,7 +22,7 @@ export interface PatchEntry {
   backup: number[]; // SNES addresses of the RATS blocks holding the original bytes of segs
   own: number[]; // pc of the RATS tags of the patch's free space blocks
   check: number; // hash of the patched bytes of segs, to notice later edits
-  kind?: PartKind | 'vram'; // 'vram': the editor's own VRAM patch
+  kind?: PartKind | 'vram' | 'exanim'; // 'vram', 'exanim': the editor's own VRAM patch and ExAnimation engine
   srcId?: string; // the sources (zip) in the editor data (rom.extra), if kept
   src?: number[]; // older ROMs: SNES addresses of RATS blocks holding the sources (see migrateSources)
   srcSize?: number;
@@ -62,7 +62,7 @@ function write(rom: Rom, reg: Registry): void {
   const old = findRegistry(rom);
   if (old >= 0) rom.freeAt(pcToSnes(old));
   if (!reg.patches.length) return;
-  const stored = { ...reg, patches: reg.patches.map((e) => (e.kind && e.kind !== 'vram' && STORED[e.kind] ? { ...e, kind: STORED[e.kind] } : e)) };
+  const stored = { ...reg, patches: reg.patches.map((e) => (e.kind && e.kind !== 'vram' && e.kind !== 'exanim' && STORED[e.kind] ? { ...e, kind: STORED[e.kind] } : e)) };
   const json = new TextEncoder().encode(JSON.stringify(stored));
   if (json.length + 5 > CHUNK) throw new Error('Patch registry is too large');
   const buf = new Uint8Array(json.length + 5);
@@ -146,6 +146,15 @@ export function missingSources(what: string): Error {
 export function patchArchive(rom: Rom, p: PatchEntry): Uint8Array | null {
   if (p.srcId) return rom.getBlob(p.srcId);
   return p.src && p.srcSize ? readChunks(rom, p.src, p.srcSize) : null;
+}
+
+// changes the kind of an entry (older ROMs recorded the editor's own patches without one)
+export function setPatchKind(rom: Rom, id: string, kind: PatchEntry['kind']): void {
+  const reg = read(rom);
+  const p = reg.patches.find((e) => e.id === id);
+  if (!p || p.kind === kind) return;
+  p.kind = kind;
+  write(rom, reg);
 }
 
 export function removeEntry(rom: Rom, id: string): void {
