@@ -230,13 +230,10 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   const saveBtn = h('button', { class: 'primary', onclick: () => (workspace === 'ow' ? ow?.save() : app.saveLevel()) });
   const testBtn = h('button', { onclick: () => openTestPlay(app), title: 'Test the level in the built-in emulator (T, Shift+T: from the mouse position)' }, '▶ Test');
   const appbar = h('header', { class: 'appbar' },
-    h('span', { class: 'brand' }, 'Solar Magic'),
-    menus,
-    h('span', { class: 'spacer' }),
-    h('div', { class: 'btn-group' }, backBtn, fwdBtn),
+    // three columns, so nothing moves when the buttons on the right change their labels with the workspace
+    h('div', { class: 'appbar-l' }, h('span', { class: 'brand' }, 'Solar Magic'), menus, h('div', { class: 'btn-group' }, backBtn, fwdBtn)),
     wsSwitch,
-    h('span', { class: 'spacer' }),
-    undoBtn, redoBtn, saveBtn, testBtn,
+    h('div', { class: 'appbar-r' }, undoBtn, redoBtn, saveBtn, testBtn),
   );
 
   const updateToolbar = () => {
