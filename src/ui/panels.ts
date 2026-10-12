@@ -275,7 +275,7 @@ export class Palette {
     let hoverTile = -1, hoverCanvas: HTMLCanvasElement | null = null;
     const tip = () => {
       const p = app.probes.block(hoverTile);
-      if (hoverCanvas) hoverCanvas.title = `Tile ${hex3(hoverTile)}: ${p ? probeText(p) : 'determining behavior …'}`;
+      if (hoverCanvas) hoverCanvas.title = `Tile ${hex3(hoverTile)}: ${p ? probeText(p) : 'determining behavior …'}\nCtrl+click: edit in the Map16 tab`;
     };
     this.m16Tip = () => { if (hoverTile >= 0 && hoverCanvas?.isConnected) tip(); };
     // a page is drawn once it scrolls into view
@@ -315,7 +315,7 @@ export class Palette {
         app.paletteItem = { kind: 'obj', num: 0, ext: DM16_EXT, size: 0, tile: base + r.y * 16 + r.x, ...(r.w * r.h > 1 ? { block: { w: r.w, h: r.h } } : {}) };
         if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1');
         this.build();
-      });
+      }, (x, y) => app.editMap16(base + y * 16 + x));
       c.addEventListener('mousemove', (e) => {
         const rc = c.getBoundingClientRect();
         const x = Math.floor((e.clientX - rc.left) / (rc.width / 16)), y = Math.floor((e.clientY - rc.top) / (rc.height / 16));
@@ -380,7 +380,7 @@ export class Palette {
     const onSheet = t0 >= 0 && t0 < 0x200 && (t0 & 15) + brush.w <= 16 && (t0 >> 4) + brush.h <= 32
       && brush.tiles.every((t, i) => t === brush.tiles[0] + Math.floor(i / brush.w) * 16 + (i % brush.w));
     const S = 16 * 1.2;
-    const c = h('canvas', { width: 256 * 1.2, height: 512 * 1.2, class: 'm16-pick' });
+    const c = h('canvas', { width: 256 * 1.2, height: 512 * 1.2, class: 'm16-pick', title: 'Click/drag: tile(s) as brush · Ctrl+click: edit in the Map16 tab' });
     const ctx = c.getContext('2d')!;
     ctx.imageSmoothingEnabled = false;
     const draw = (x: number, y: number, w: number, hh: number) => {
@@ -396,7 +396,7 @@ export class Palette {
       if (this.bgBase && !bgMap16Ext(app.rom)) app.romEdit('BG Map16 extension created', () => { installBgMap16Ext(app.rom); });
       app.bgBrush = { w: r.w, h: r.h, tiles: Array.from({ length: r.w * r.h }, (_, i) => this.bgBase + (r.y + Math.floor(i / r.w)) * 16 + r.x + (i % r.w)) };
       this.build();
-    });
+    }, (x, y) => app.editMap16(this.bgBase + y * 16 + x, true));
     const what = brush.tiles.length > 1 ? `Block ${brush.w}×${brush.h}${onSheet ? ` from BG tile ${hex3(brush.tiles[0])}` : ' from the level'}` : `BG tile ${hex3(brush.tiles[0])}`;
     const pages = h('select', null, Array.from({ length: EXT_TILES / 512 }, (_, i) => h('option', { value: String(i * 512), selected: i * 512 === this.bgBase },
       i === 0 ? 'Pages 0–1' : `Pages ${(2 * i).toString(16).toUpperCase()}–${(2 * i + 1).toString(16).toUpperCase()}${bgMap16Ext(app.rom) ? '' : ' (empty)'}`)));

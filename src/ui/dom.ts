@@ -209,8 +209,9 @@ export function attachPanZoom(scroller: HTMLElement, zoom: () => number, setZoom
 }
 
 export type CellRect = { x: number; y: number; w: number; h: number };
-// palette sheets: a click picks a cell, dragging a rectangle of cells; show() previews the rectangle while dragging
-export function attachRectPick(c: HTMLElement, cols: number, rows: number, show: (r: CellRect) => void, done: (r: CellRect) => void): void {
+// palette sheets: a click picks a cell, dragging a rectangle of cells; show() previews the rectangle while dragging;
+// Ctrl+click goes to the cell's definition instead, if there is one (jump)
+export function attachRectPick(c: HTMLElement, cols: number, rows: number, show: (r: CellRect) => void, done: (r: CellRect) => void, jump?: (x: number, y: number) => void): void {
   const cellAt = (e: MouseEvent) => {
     const rc = c.getBoundingClientRect();
     return {
@@ -222,6 +223,7 @@ export function attachRectPick(c: HTMLElement, cols: number, rows: number, show:
     if (e.button !== 0) return;
     e.preventDefault();
     const a = cellAt(e);
+    if (jump && (e.ctrlKey || e.metaKey)) { jump(a.x, a.y); return; }
     let b = a;
     const rect = (): CellRect => ({ x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(a.x - b.x) + 1, h: Math.abs(a.y - b.y) + 1 });
     const move = (ev: MouseEvent) => {
