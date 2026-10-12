@@ -55,6 +55,10 @@ input.invalid, input.invalid:focus { outline: 1px solid var(--danger); border-co
 .btn-group button { border-radius: 0; margin-left: -1px; }
 .btn-group button:first-child { border-radius: 4px 0 0 4px; }
 .btn-group button:last-child { border-radius: 0 4px 4px 0; }
+/* Joined buttons overlap by 1px; lift the active/hovered one so its right border is not covered by the next. */
+.btn-group button, .tabs.seg button, .at-rows button { position: relative; }
+.btn-group button.active, .tabs.seg button.active, .at-rows button.active { z-index: 1; }
+.btn-group button:hover:not(:disabled), .tabs.seg button:hover:not(:disabled), .at-rows button:hover:not(:disabled) { z-index: 2; }
 .left, .right { background: var(--panel); overflow: hidden; display: flex; flex-direction: column; min-height: 0; }
 .left { border-right: 1px solid var(--border); }
 .right { border-left: 1px solid var(--border); }
