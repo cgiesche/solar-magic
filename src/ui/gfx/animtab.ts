@@ -10,14 +10,13 @@ import { menuButton, type MenuItem } from '../menu.ts';
 import { hex } from '../../core/names.ts';
 import { cgramToRGBA, decodeTile, snesColorToRGBA } from '../../core/gfx.ts';
 import { map16Source } from '../../core/render.ts';
-import { EXT_FIRST, EXT_TILES, map16Ext } from '../../core/map16ext.ts';
+import { EXT_TILES } from '../../core/map16ext.ts';
 import {
   type ExList, type ExSlot, emptyList, readLevelList, readGlobalList, writeLevelList, writeGlobalList, levelSettings, setLevelSettings,
-  readAltFile, writeAltFile, kindOf, tilesOf, secondSet, secondSetName, triggerName, TYPE_NAMES, SLOTS, exanimInstalled, exanimLayout,
+  readAltFile, writeAltFile, kindOf, tilesOf, secondSet, secondSetName, triggerName, TYPE_NAMES, SLOTS,
   NO_GAME_COLORS, NO_GAME_TILES, NO_LEVEL_LIST, NO_GLOBAL_LIST, altFileUsers, localizeFrames, shapeOf, exanimTiles, exanimColors,
 } from '../../core/exanim.ts';
 import { levelSlots, gfxName, lmAnimName, ANIM_FILE } from './map16tab.ts';
-import { confirmExAnim } from './gfxtab.ts';
 import { cssOf, htmlOf } from './palettetab.ts';
 
 const TILE_TYPES = [0x01, 0x02, 0x04, 0x08, 0x10, 0x11, 0x12, 0x03, 0x05, 0x06, 0x07, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e];
@@ -107,7 +106,6 @@ export class AnimTab implements WsPanel {
   }
 
   private async save(list: ExList, label: string, key: string | null = null): Promise<void> {
-    if (!(await confirmExAnim(this.app))) return;
     const app = this.app;
     try {
       app.romEdit(`${this.global ? 'Global animation' : `Animation level ${hex(app.level.number, 3)}`}: ${label}`, () => {
@@ -203,11 +201,6 @@ export class AnimTab implements WsPanel {
     b.append(h('span', { class: 'hint' }, 'List'), h('span', { class: 'btn-group' },
       scope(false, `Level ${hex(app.level.number, 3)}`, 'Animations that run only in this level'),
       scope(true, 'Global', 'Animations that run in all levels (a level can turn them off via “Play in level …”)')));
-    const installed = exanimInstalled(app.rom);
-    if (!installed && exanimLayout(app.rom) === null && app.rom.r8(0x0583ad) === 0x22) {
-      b.append(h('span', { class: 'hint' }, 'This ROM has ExAnimation in an older Lunar Magic format – not supported.'));
-      return;
-    }
     if (this.flagsLevel !== app.level.number) { this.flagsMenu = this.levelFlagsMenu(); this.flagsLevel = app.level.number; }
     b.append(h('span', { class: 'spacer' }), this.flagsMenu!);
   }
@@ -237,7 +230,6 @@ export class AnimTab implements WsPanel {
       label, title,
       checked: () => !(levelSettings(app.rom, app.level.number) & bit),
       onToggle: async (on) => {
-        if (!(await confirmExAnim(app))) return;
         const st = levelSettings(app.rom, app.level.number);
         app.romEdit(`Level ${hex(app.level.number, 3)}: ${label} ${on ? 'on' : 'off'}`, () => setLevelSettings(app.rom, app.level.number, on ? st & ~bit : st | bit));
       },
@@ -258,7 +250,7 @@ export class AnimTab implements WsPanel {
     this.previews = [];
     const l = this.list();
     box.append(h('div', { class: 'panel-title' }, this.global ? 'Global animations' : `Animations of level ${hex(this.app.level.number, 3)}`, h('span', { class: 'hint' }, `${l.slots.size} of ${SLOTS}`)));
-    if (exanimInstalled(this.app.rom) || l.slots.size) box.append(this.sourceSelect(l));
+    box.append(this.sourceSelect(l));
     const items = h('div', { class: 'at-slot-list' });
     for (const [n, s] of [...l.slots.entries()].sort((a, b) => a[0] - b[0])) {
       const c = h('canvas', { class: 'at-mini' });
@@ -292,7 +284,6 @@ export class AnimTab implements WsPanel {
     if (n < 0) { toast('All 32 slots are in use'); return; }
     if (kind === 'tiles') {
       if (!readAltFile(this.app.rom, l.altFile)) {
-        if (!(await confirmExAnim(this.app))) return;
         this.app.romEdit(`${gfxName(ANIM_FILE + l.altFile)} created`, () => writeAltFile(this.app.rom, l.altFile, new Uint8Array(0x1000)));
       }
       l.slots.set(n, { type: 0x01, trigger: 0, framesLess1: 1, dest: ALT | (this.charWord() + 0x60 * 16), frames: [0x00, 0x20] });
@@ -364,7 +355,7 @@ export class AnimTab implements WsPanel {
   private targetUsers(s: ExSlot): number[] {
     const tiles = new Set(this.targetTiles(s));
     const src = map16Source(this.app.rom, this.app.render);
-    const max = map16Ext(this.app.rom) ? EXT_TILES : EXT_FIRST;
+    const max = EXT_TILES;
     const users: number[] = [];
     for (let m = 0; m < max && users.length < 64; m++) if (src.fg(m).some((w) => tiles.has(w & 0x3ff))) users.push(m);
     return users;
@@ -568,7 +559,6 @@ export class AnimTab implements WsPanel {
 
   // the selected RAM slot's frames (as the level's WRAM has them after its load) into the list's graphic
   private async copyRamFrames(): Promise<void> {
-    if (!(await confirmExAnim(this.app))) return;
     const app = this.app, l = this.list(), s = l.slots.get(this.sel);
     if (!s) return;
     try {
@@ -582,7 +572,6 @@ export class AnimTab implements WsPanel {
   }
 
   private async createAltFile(k: number): Promise<void> {
-    if (!(await confirmExAnim(this.app))) return;
     try { this.app.romEdit(`${gfxName(ANIM_FILE + k)} created`, () => writeAltFile(this.app.rom, k, new Uint8Array(0x1000))); }
     catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
   }

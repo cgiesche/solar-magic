@@ -11,9 +11,9 @@
 // the layout is only switched on by the level load (game mode $12), not in boss/mode 7 rooms.
 
 import { Rom } from './rom.ts';
-import { applyPatch, uninstallPatch, type ApplyResult } from './patchapply.ts';
+import { applyPatch, type ApplyResult } from './patchapply.ts';
 import { listPatches } from './patchreg.ts';
-import { setVramPatchCheck, extGfxPatch, installExtGfxPatch, disableUnsafeExtGfx } from './patches.ts';
+import { setVramPatchCheck, extGfxPatch, installExtGfxPatch } from './patches.ts';
 
 export const VRAM_PATCH_NAME = 'VRAM layout (SMWV)';
 
@@ -526,15 +526,6 @@ export function installVramPatch(rom: Rom): ApplyResult {
   const r = applyPatch(rom, { name: VRAM_PATCH_NAME, main: 'vram.asm', files: new Map([['vram.asm', VRAM_ASM]]), kind: 'vram', ram: [[0x7f0000, 0x3654]] });
   if (r.ok && extGfxPatch(rom) && !extGfxPatch(rom)!.active) installExtGfxPatch(rom);
   return r;
-}
-
-// also switches the BG2/BG3 slots off, which would overwrite the layer 1 tilemap again
-export function uninstallVramPatch(rom: Rom): string[] {
-  const e = vramPatchEntry(rom);
-  if (!e) return [];
-  const w = uninstallPatch(rom, e.id);
-  disableUnsafeExtGfx(rom);
-  return w;
 }
 
 setVramPatchCheck((rom) => vramPatchEntry(rom) !== null);

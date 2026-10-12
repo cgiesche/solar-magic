@@ -209,11 +209,10 @@ export class LevelEmulator {
       const a = overlaySnes(OV_SPR);
       patch(SPR_PTRS + level * 2, a & 0xff);
       patch(SPR_PTRS + level * 2 + 1, (a >> 8) & 0xff);
-      // force sprite data bank: vanilla code is LDA #$07 : STA $D0 at $05D8F5,
-      // patched ROMs have a bank table
+      // sprite data bank: the editor patch's bank table
       const p = editorPatch(rom);
       if (p) patch(p.sprBank + level, a >> 16);
-      else patch(0x05d8f6, a >> 16);
+      else patch(0x05d8f6, a >> 16); // a clean ROM (tests): vanilla LDA #$07 : STA $D0 at $05D8F5
     }
     if (ov.secondaryHeader) {
       for (let i = 0; i < 4; i++) patch(0x05f000 + i * 0x200 + level, ov.secondaryHeader[i]);

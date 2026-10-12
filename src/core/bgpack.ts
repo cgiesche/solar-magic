@@ -18,16 +18,15 @@ import { Rom } from './rom.ts';
 import { type Level, hasLayer2Objects } from './level.ts';
 import { BG_SIZE } from './bg.ts';
 import { parseMap16File, map16Targets, exgfxName, importGfxFile, type Map16File } from './map16file.ts';
-import { BG_EXT_FIRST, BG_EXT_TILES, bgExtTileWords, vanillaBgWords, setBgExtTileWords, installBgMap16Ext, bgTileWords } from './bgmap16.ts';
+import { BG_EXT_FIRST, BG_EXT_TILES, bgExtTileWords, vanillaBgWords, setBgExtTileWords, bgTileWords } from './bgmap16.ts';
 import { EXT_FIRST, EXT_TILES, DEFAULT_ACTS, extTileWords, actsLike, setExtTileWords, setActsLike } from './map16ext.ts';
 import {
-  gfxEntry, hasEditorPatch, VANILLA_GFX, levelGfx, setLevelGfx, levelExtGfx, setLevelExtGfx, GFX_SLOT_NAMES,
-  EXT_GFX_SLOT_NAMES, extGfxAvailable, customPalette, setCustomPalette,
+  gfxEntry, VANILLA_GFX, levelGfx, setLevelGfx, levelExtGfx, setLevelExtGfx, GFX_SLOT_NAMES,
+  EXT_GFX_SLOT_NAMES, customPalette, setCustomPalette,
 } from './patches.ts';
 import { mwlExAnim } from './mwl.ts';
 import { slotTiles, usesAltFile, addLevelSlots, localizeFrames, levelAltFile, altFileName, kindOf, AN2_FRAMES, AN2_FRAMES_END, ALT_FILE_MAX, type ExList, type ExSlot } from './exanim.ts';
 import { RAM } from './ram.ts';
-import { installVramPatch } from './vrampatch.ts';
 
 export const LM_SLOTS = ['AN2', 'LT3', 'BG3', 'BG2', 'FG3', 'BG1', 'FG2', 'FG1', 'SP4', 'SP3', 'SP2', 'SP1', 'LG4', 'LG3', 'LG2', 'LG1'];
 const LAYER3_SLOTS = ['LT3', 'LG1', 'LG2', 'LG3', 'LG4'];
@@ -155,7 +154,7 @@ function freeFgTiles(rom: Rom, f: Map16File, at: number, blank: number[]): boole
 
 // first ExGFX number that is free and not taken by `taken`
 function freeGfx(rom: Rom, taken: Set<number>): number {
-  const free = (i: number) => !taken.has(i) && (!hasEditorPatch(rom) || !gfxEntry(rom, i));
+  const free = (i: number) => !taken.has(i) && !gfxEntry(rom, i);
   for (let i = 0x80; i < 0xff; i++) if (free(i)) return i;
   for (let i = VANILLA_GFX; i < 0x80; i++) if (free(i)) return i;
   return -1;
@@ -235,7 +234,7 @@ export function planBgPack(rom: Rom, name: string, files: Map<string, Uint8Array
     }
     let num = byNum.get(lmNum);
     if (num === undefined) {
-      num = lmNum < 0xff && lmNum >= VANILLA_GFX && (!hasEditorPatch(rom) || !gfxEntry(rom, lmNum)) && !taken.has(lmNum) ? lmNum : freeGfx(rom, taken);
+      num = lmNum < 0xff && lmNum >= VANILLA_GFX && !gfxEntry(rom, lmNum) && !taken.has(lmNum) ? lmNum : freeGfx(rom, taken);
       if (num < 0) throw new Error('No free ExGFX number left');
       taken.add(num);
       byNum.set(lmNum, num);
@@ -303,17 +302,10 @@ export interface BgPackResult { ok: boolean; errors: string[]; notes: string[]; 
 const hx = (v: number, d: number) => v.toString(16).toUpperCase().padStart(d, '0');
 
 // A level import (see CONTEXT.md): what the plan takes from a Lunar Magic level file into level `lv` –
-// background, FG Map16 tiles, graphics slots, colors. Installs the VRAM patch first when it uses the
-// BG2/BG3 slots. All or nothing; it changes a level and is never recorded as a package.
+// background, FG Map16 tiles, graphics slots, colors. All or nothing; it changes a level and is never
+// recorded as a package.
 export function importLevelFile(rom: Rom, lv: Level, files: Map<string, Uint8Array>, plan: BgPackPlan, opt: BgPackOptions): BgPackResult {
-  const before = rom.snapshot();
-  if ((plan.gfx.some((g) => g.slot === 'BG2' || g.slot === 'BG3') || plan.exanim.some((x) => slotTiles(x.slot).some((t) => t >= 0x200 && t < 0x300))) && !extGfxAvailable(rom)) {
-    const v = installVramPatch(rom);
-    if (!v.ok) return { ok: false, errors: v.errors, notes: [], bg: null };
-  }
-  const r = applyBgPack(rom, lv, files, plan, opt);
-  if (!r.ok) rom.restore(before);
-  return r;
+  return applyBgPack(rom, lv, files, plan, opt);
 }
 
 export function applyBgPack(rom: Rom, lv: Level, files: Map<string, Uint8Array>, plan: BgPackPlan, opt: BgPackOptions): BgPackResult {
@@ -332,12 +324,11 @@ export function applyBgPack(rom: Rom, lv: Level, files: Map<string, Uint8Array>,
       if (plan.map16) {
         const m = plan.map16;
         if (at < BG_EXT_FIRST || at + m.data.height * 16 > BG_EXT_TILES || (at & 15) + Math.min(16, m.data.width) > 16) throw new Error(`The ${m.data.tiles.length} BG tiles do not fit on pages 2–F from ${hx(at, 3)} on`);
-        installBgMap16Ext(rom);
         m.data.tiles.forEach((ws, i) => setBgExtTileWords(rom, at + Math.floor(i / m.data.width) * 16 + (i % m.data.width), ws));
         const end = m.from + m.data.height * 16;
         for (let o = 0; o < bg.length; o++) if (bg[o] >= m.from && bg[o] < end) bg[o] = bg[o] - m.from + at;
         notes.push(`${m.data.tiles.length} BG tiles from ${hx(at, 3)}`);
-      } else if (plan.used.length) installBgMap16Ext(rom);
+      }
     }
     // 2. FG Map16 tiles (acts like pointing into the block moved along)
     if (withFg) {
@@ -346,9 +337,9 @@ export function applyBgPack(rom: Rom, lv: Level, files: Map<string, Uint8Array>,
       if (at < EXT_FIRST || at + f.data.height * 16 > EXT_TILES || (at & 15) + Math.min(16, f.data.width) > 16) throw new Error(`The ${f.data.tiles.length} FG tiles do not fit from ${hx(at, 3)} on (tiles 200–FFF)`);
       const targets = map16Targets(f.data, at), from = map16Targets(f.data, f.from);
       targets.forEach((t, i) => {
-        setExtTileWords(rom, t, f.data.tiles[i], opt.blank);
+        setExtTileWords(rom, t, f.data.tiles[i]);
         const a = f.data.acts?.[i];
-        if (a !== undefined) { const k = from.indexOf(a); setActsLike(rom, t, k >= 0 ? targets[k] : a, opt.blank); }
+        if (a !== undefined) { const k = from.indexOf(a); setActsLike(rom, t, k >= 0 ? targets[k] : a); }
       });
       notes.push(`${f.data.tiles.length} FG Map16 tiles from ${hx(at, 3)}`);
     }
@@ -366,7 +357,6 @@ export function applyBgPack(rom: Rom, lv: Level, files: Map<string, Uint8Array>,
       }
       const e = EXT_GFX_SLOT_NAMES.indexOf(g.slot), s = GFX_SLOT_NAMES.indexOf(g.slot);
       if (e >= 0) {
-        if (!extGfxAvailable(rom)) { notes.push(`${g.slot} slot not available (VRAM patch missing) – graphics ${hx(g.num, 2)} not loaded yet`); continue; }
         ext[e] = g.num; extSet = true;
       } else if (s >= 0) { std[s] = g.num; stdSet = true; }
       slots.push(`${g.slot} = ${hx(g.num, 2)}`);

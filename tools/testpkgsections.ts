@@ -18,6 +18,9 @@ import { recordPackageChange, uninstallPackage, listPackages, packageSummary, ty
 import { SECTIONS, SECTION_KEYS, type SectionKey, type PartSection } from '../src/core/pkgsections.ts';
 import { inspectUpload, installPackage, type InstallOptions, type ReadyPreview } from '../src/core/packages.ts';
 import { testSongZip } from './testsong.ts';
+import { editorImage, romDiff } from './fixture.ts';
+
+const EDITOR_IMAGE = await editorImage(); // the fixture as the editor opens it
 
 await loadAsar();
 await loadApu();
@@ -26,7 +29,7 @@ const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL
 const enc = new TextEncoder();
 const fixture = (f: string) => new Uint8Array(readFileSync('test/fixtures/' + f));
 
-const rom = new Rom(fixture('smw.smc'));
+const rom = new Rom(EDITOR_IMAGE.slice());
 const emu = new LevelEmulator(rom);
 const src = map16Source(rom, emu.load(0x105));
 const blank = src.fg(0x025);
@@ -55,12 +58,12 @@ const samples: Record<SectionKey, () => Promise<Package | null> | Package | null
     const p: BlockProject = loadBlockProject(rom) ?? { files: new Map(), list: [] };
     p.files.set('blocks/b.asm', enc.encode(block));
     p.list.push({ tile: 0x2a0, file: 'blocks/b.asm' });
-    return ok(saveBlockProject(rom, p, blank));
+    return ok(saveBlockProject(rom, p));
   }),
   pixi: () => install('BrutalBill.zip', fixture('BrutalBill.zip')),
   gfx: () => record('gfx', () => { importGfxFile(rom, 0x90, new Uint8Array(0x1000).fill(0x33)); return { ok: true }; }),
   music: () => install('Song.zip', testSongZip()),
-  map16: () => record('map16', () => { setExtTileWords(rom, EXT_FIRST + 0x40, [1, 2, 3, 4], blank); return { ok: true }; }),
+  map16: () => record('map16', () => { setExtTileWords(rom, EXT_FIRST + 0x40, [1, 2, 3, 4]); return { ok: true }; }),
   bgMap16: () => record('bgMap16', () => { setBgExtTileWords(rom, BG_EXT_FIRST + 0x40, [5, 6, 7, 8]); return { ok: true }; }),
 };
 
@@ -73,9 +76,8 @@ for (const k of SECTION_KEYS) {
   check(!!pkg && pkg[k] !== undefined && !sec.empty(pkg[k]) && !!sec.summary(pkg[k]), `section ${k}: recorded (${pkg && packageSummary(pkg).join(', ')})`);
   if (!pkg) continue;
   await uninstallPackage(rom, pkg.id, blank);
-  let diff = 0;
   // the checksum (AddmusicK rewrites it) doesn't count
-  for (let i = 0; i < rom.data.length; i++) if (rom.data[i] !== (before[i] ?? 0) && !(i >= 0x7fdc && i < 0x7fe0)) diff++;
+  const diff = romDiff(rom.data, before, (i) => i >= 0x7fdc && i < 0x7fe0);
   check(diff === 0 && !listPackages(rom).length, `section ${k}: removing the package gives the ROM as before (${diff} bytes differ)`);
 }
 

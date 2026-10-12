@@ -7,9 +7,11 @@ import { renderLevel } from '../src/core/render.ts';
 import { saveLevel } from '../src/core/save.ts';
 import { bgFromWram, encodeBg, decodeBg } from '../src/core/bg.ts';
 import { exportLevelFile, importLevelFile } from '../src/core/levelfile.ts';
-import { installBgMap16Ext, setBgExtTileWords, bgTileWords, bgMap16Ext } from '../src/core/bgmap16.ts';
+import { installBgMap16Ext, setBgExtTileWords, bgTileWords } from '../src/core/bgmap16.ts';
+import { editorImage, cleanImage } from './fixture.ts';
+import { installEditorPatch, installBgPatch } from '../src/core/patches.ts';
 
-const file = new Uint8Array(readFileSync('test/fixtures/smw.smc'));
+const file = await editorImage();
 const rom = new Rom(file.slice());
 const emu = new LevelEmulator(rom);
 emu.boot();
@@ -55,9 +57,10 @@ const vr = new LevelEmulator(vanilla); vr.boot();
 if (!same(bgFromWram(emu3.load(n0).wram), bgFromWram(vr.load(n0).wram))) { console.log(n0.toString(16), 'revert to vanilla BG failed'); bad++; }
 
 // extended BG Map16 (SMWH): vanilla BGs stay the same, tiles of pages 2-F are drawn from the new table
-const ext = new Rom(file.slice());
-installBgMap16Ext(ext);
-const emuV = new LevelEmulator(new Rom(file.slice())); emuV.boot();
+// (without the VRAM patch, which lays the tilemaps out differently; saving needs SMWE and SMWB)
+const ext = new Rom(cleanImage());
+installEditorPatch(ext); installBgPatch(ext); installBgMap16Ext(ext);
+const emuV = new LevelEmulator(new Rom(cleanImage())); emuV.boot();
 const emuX = new LevelEmulator(ext); emuX.boot();
 // (only the layer 2 tilemap: the hook costs a few cycles, so frame-counter driven animations may differ)
 const l2map = (r: { vram: Uint8Array; ppuRegs: Uint8Array }) => { const wa = (r.ppuRegs[0x08] & 0xfc) << 8; return r.vram.subarray(wa * 2, wa * 2 + 0x2000); };
@@ -89,9 +92,5 @@ for (let y = 0; y < 27; y++) for (let x = 0; x < 32; x++) {
   if (!same(vramBg(rx, x, y), bgTileWords(ext, t))) wrong++;
 }
 if (wrong) { console.log(nx.toString(16), 'game draws', wrong, 'BG tiles not like the editor'); bad++; }
-// saving a BG with tiles of pages 2-F installs the patch
-const plain = new Rom(file.slice());
-const lvp = loadLevel(plain, nx); lvp.bg = bgx; saveLevel(plain, lvp);
-if (!bgMap16Ext(plain)) { console.log('saving BG tiles >= 200 did not install SMWH'); bad++; }
 console.log('bg levels', n2, 'bad', bad);
 if (bad) process.exitCode = 1;

@@ -13,7 +13,7 @@ import { Rom, MAX_ROM_SIZE, snesToPc, pcToSnes } from './rom.ts';
 import { registerChanges, reserveTop, uninstallPatch } from './patchapply.ts';
 import { listPatches, patchArchive, hashBytes, missingSources, type PatchEntry } from './patchreg.ts';
 import { RESERVED_TOP } from './rom.ts';
-import { HEADER_MUSIC_TABLE, musicPatch, levelMusic, setLevelMusic } from './patches.ts';
+import { HEADER_MUSIC_TABLE, levelMusic, setLevelMusic } from './patches.ts';
 import { MUSIC } from './names.ts';
 import { runAmk, type AmkResult } from './amk.ts';
 import { AMK_ORIGINALS } from '../vendor/amk/originals.ts';
@@ -438,7 +438,6 @@ export async function saveMusicProject(rom: Rom, p: MusicProject): Promise<Music
 // same songs before and after (AddmusicK rewrites their table), so levels set to one of those songs get
 // its new number; levels set to any other song (a custom one gone) get their header music back.
 function remapLevelMusic(rom: Rom, before: Uint8Array): void {
-  if (!musicPatch(rom)) return;
   const after = rom.data.subarray(snesToPc(HEADER_MUSIC_TABLE), snesToPc(HEADER_MUSIC_TABLE) + 8);
   for (let l = 0; l < 0x200; l++) {
     const s = levelMusic(rom, l);

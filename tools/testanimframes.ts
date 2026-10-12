@@ -11,11 +11,14 @@ import { installEditorPatch } from '../src/core/patches.ts';
 import { importGfxFile } from '../src/core/map16file.ts';
 import { emptyList, writeLevelList, readLevelList, readAltFile, writeAltFile, localizeFrames, usesAltFile, altFileUsers, ALT_FILE_MAX, type ExSlot } from '../src/core/exanim.ts';
 import { migrateAn2 } from '../src/core/an2legacy.ts';
+import { editorImage } from './fixture.ts';
+
+const EDITOR_IMAGE = await editorImage(); // the fixture as the editor opens it
 
 await loadAsar();
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
-const fresh = () => new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
+const fresh = () => new Rom(EDITOR_IMAGE.slice());
 const pattern = (n: number, k: number) => Uint8Array.from({ length: n }, (_, i) => (i * k + (i >> 5)) & 0xff);
 const same = (a: Uint8Array, at: number, b: Uint8Array, from: number, n: number) => { for (let i = 0; i < n; i++) if (a[at + i] !== b[from + i]) return false; return true; };
 

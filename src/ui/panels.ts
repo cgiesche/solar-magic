@@ -9,9 +9,8 @@ import { newUid, spriteId, spriteBytes, spriteSizes, type LevelObject } from '..
 import { levelName } from '../core/overworld.ts';
 import { buildExitPanel } from './exitpanel.ts';
 import { DM16_EXT } from '../core/patches.ts';
-import { STRUCT_EXT, TRANSPARENT, hasStructs, freeStructureNumber, readStructure, writeStructure, STRUCT_COUNT, type Structure } from '../core/structs.ts';
-import { EXT_TILES, map16Ext } from '../core/map16ext.ts';
-import { bgMap16Ext, installBgMap16Ext } from '../core/bgmap16.ts';
+import { STRUCT_EXT, TRANSPARENT, freeStructureNumber, readStructure, writeStructure, STRUCT_COUNT, type Structure } from '../core/structs.ts';
+import { EXT_TILES } from '../core/map16ext.ts';
 import { TileCache, map16Source, drawMap16 } from '../core/render.ts';
 import { probeable } from '../core/probeclient.ts';
 import { probeText, spritesOf, spriteProbeAt, enterText, enterSuffix } from '../core/blockprobe.ts';
@@ -256,12 +255,11 @@ export class Palette {
     const cur = app.paletteItem;
     const curTile = cur?.kind === 'obj' && cur.num === 0 && cur.ext === DM16_EXT ? cur.tile ?? -1 : -1;
     const bw = cur?.kind === 'obj' && cur.block ? cur.block.w : 1, bh = cur?.kind === 'obj' && cur.block ? cur.block.h : 1;
-    const ext = !!map16Ext(app.rom);
     const pages = EXT_TILES / 256;
     clear(this.m16Bar);
     for (let p = 0; p < pages; p++) {
       this.m16Bar.appendChild(h('button', {
-        class: p === this.m16Page ? 'active' : '', title: `Page ${p.toString(16).toUpperCase()}${p >= 2 && !ext ? ' (empty)' : ''}`,
+        class: p === this.m16Page ? 'active' : '', title: `Page ${p.toString(16).toUpperCase()}`,
         onclick: () => this.scrollToM16Page(p),
       }, p.toString(16).toUpperCase()));
     }
@@ -322,8 +320,7 @@ export class Palette {
         const t = base + Math.min(15, y) * 16 + Math.min(15, x);
         if (t !== hoverTile || c !== hoverCanvas) { hoverTile = t; hoverCanvas = c; tip(); }
       });
-      this.body.append(h('div', { class: 'pal-head m16-page-head', 'data-page': String(p) }, `Page ${p.toString(16).toUpperCase()}`,
-        p >= 2 && !ext ? h('span', { class: 'hint' }, ' (empty)') : ''), c);
+      this.body.append(h('div', { class: 'pal-head m16-page-head', 'data-page': String(p) }, `Page ${p.toString(16).toUpperCase()}`), c);
     }
     // back to where the list was; the pages in view are drawn right away so nothing flickers
     this.body.scrollTop = this.m16Scroll;
@@ -392,14 +389,12 @@ export class Palette {
     if (onSheet) draw(t0 & 15, t0 >> 4, brush.w, brush.h); else draw(-1, 0, 0, 0);
     // click picks a tile, dragging picks a rectangle of tiles (as in the Map16 tab)
     attachRectPick(c, 16, 32, (r) => draw(r.x, r.y, r.w, r.h), (r) => {
-      // tiles from pages 2-F need the extended BG Map16 in the game
-      if (this.bgBase && !bgMap16Ext(app.rom)) app.romEdit('BG Map16 extension created', () => { installBgMap16Ext(app.rom); });
       app.bgBrush = { w: r.w, h: r.h, tiles: Array.from({ length: r.w * r.h }, (_, i) => this.bgBase + (r.y + Math.floor(i / r.w)) * 16 + r.x + (i % r.w)) };
       this.build();
     }, (x, y) => app.editMap16(this.bgBase + y * 16 + x, true));
     const what = brush.tiles.length > 1 ? `Block ${brush.w}×${brush.h}${onSheet ? ` from BG tile ${hex3(brush.tiles[0])}` : ' from the level'}` : `BG tile ${hex3(brush.tiles[0])}`;
     const pages = h('select', null, Array.from({ length: EXT_TILES / 512 }, (_, i) => h('option', { value: String(i * 512), selected: i * 512 === this.bgBase },
-      i === 0 ? 'Pages 0–1' : `Pages ${(2 * i).toString(16).toUpperCase()}–${(2 * i + 1).toString(16).toUpperCase()}${bgMap16Ext(app.rom) ? '' : ' (empty)'}`)));
+      i === 0 ? 'Pages 0–1' : `Pages ${(2 * i).toString(16).toUpperCase()}–${(2 * i + 1).toString(16).toUpperCase()}`)));
     pages.addEventListener('change', () => { this.bgBase = Number(pages.value); this.build(); });
     // same order as the Map16 tab: pages, state, sheet
     this.body.append(h('div', { class: 'row' }, pages,
@@ -534,11 +529,10 @@ export class Palette {
     const map16: SearchProvider = {
       id: 'm16', label: 'Map16',
       search: (terms) => {
-        const count = map16Ext(app.rom) ? EXT_TILES : 0x200;
         const nums = terms.map((t) => new Set(tileMatches(t, EXT_TILES) ?? []));
         const sheets = new Map<number, HTMLCanvasElement>();
         const out: SearchResult[] = [];
-        for (let t = 0; t < count; t++) {
+        for (let t = 0; t < EXT_TILES; t++) {
           const p = app.cachedBlock(t);
           const text = p ? probeText(p) : '';
           const low = text.toLowerCase();
@@ -840,8 +834,8 @@ export class Properties {
     this.body.append(
       h('div', { class: 'prop-title' }, `${o.num ? 'Object ' + hex2(o.num) : 'Ext. object ' + hex2(o.ext)}: ${objectName(o.num, o.ext)}`),
       h('div', { class: 'hint' }, `No. ${idx + 1} of ${app.currentObjects().length} (drawing order)`),
-      this.field('Object', hexInput(o.num, 2, (v) => upd(() => { o.num = v; fixStruct(app, o); }), 0x3f)),
-      o.num === 0 ? this.field('Ext. object', hexInput(o.ext, 2, (v) => upd(() => { o.ext = v; fixStruct(app, o); }), 0xff)) : '',
+      this.field('Object', hexInput(o.num, 2, (v) => upd(() => { o.num = v; fixStruct(o); }), 0x3f)),
+      o.num === 0 ? this.field('Ext. object', hexInput(o.ext, 2, (v) => upd(() => { o.ext = v; fixStruct(o); }), 0xff)) : '',
       o.num === 0 && o.ext === STRUCT_EXT && o.struct !== undefined ? this.field('Structure', hexInput(o.struct, 2, (v) => upd(() => (o.struct = v)), 0xff)) : '',
       o.num === 0 && o.ext === STRUCT_EXT && o.struct !== undefined ? h('div', { class: 'hint' }, structInfo(app, o.struct), ' ',
         h('button', { title: 'Replace the structure here with single Direct Map16 objects (to edit it, then “Selection as structure” again)', onclick: () => app.explodeStructure(o) }, 'Break up')) : '',
@@ -871,9 +865,9 @@ export class Properties {
   }
 }
 
-// with the structure patch, extended object $03 always carries a structure number (its 4th byte)
-function fixStruct(app: App, o: LevelObject): void {
-  if (o.num === 0 && o.ext === STRUCT_EXT && hasStructs(app.rom)) o.struct ??= 0;
+// extended object $03 always carries a structure number (its 4th byte)
+function fixStruct(o: LevelObject): void {
+  if (o.num === 0 && o.ext === STRUCT_EXT) o.struct ??= 0;
   else delete o.struct;
 }
 

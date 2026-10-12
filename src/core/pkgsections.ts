@@ -13,8 +13,8 @@ import { loadBlockProject, saveBlockProject, type BlockProject } from './blocks.
 import { loadPixiProject, savePixiProject, type PixiProject } from './pixi.ts';
 import { gfxEntry, setGfxEntry, VANILLA_GFX, levelMusic, setLevelMusic } from './patches.ts';
 import { loadMusicProject, saveMusicProject, removeSong } from './music.ts';
-import { EXT_FIRST, EXT_TILES, DEFAULT_ACTS, map16Ext, extTileWords, actsLike, setExtTileWords, setActsLike } from './map16ext.ts';
-import { BG_EXT_FIRST, BG_EXT_TILES, bgMap16Ext, bgExtTileWords, setBgExtTileWords, vanillaBgWords } from './bgmap16.ts';
+import { EXT_FIRST, EXT_TILES, DEFAULT_ACTS, extTileWords, actsLike, setExtTileWords, setActsLike } from './map16ext.ts';
+import { BG_EXT_FIRST, BG_EXT_TILES, bgExtTileWords, setBgExtTileWords, vanillaBgWords } from './bgmap16.ts';
 import type { UberContext } from './uberasm.ts';
 import type { SpriteFolder } from './pixirt.ts';
 import type { PackageParts } from './pkgreg.ts';
@@ -169,7 +169,7 @@ export const blocks = {
     const own = new Set(blocks.owned(mine, p));
     p.list = p.list.filter((b) => !own.has(b));
     for (const f of mine.files) if (!others.some((o) => o.files.includes(f))) p.files.delete(f);
-    return check(saveBlockProject(rom, p, blank), 'Custom Blocks');
+    return check(saveBlockProject(rom, p), 'Custom Blocks');
   },
 } satisfies PartSection<{ files: Map<string, number>; tiles: Map<number, string> }, BlocksPart> & Owns;
 
@@ -236,15 +236,15 @@ const music = listSection((rom) => (tryLoad(() => loadMusicProject(rom))?.songs 
 }, (p) => count(p.length, 'Song', 'songs'));
 
 // emptied again, unless another package filled them too
-const map16 = tileSection((rom) => (map16Ext(rom) ? Array.from({ length: EXT_TILES - EXT_FIRST }, (_, i) => `${extTileWords(rom, EXT_FIRST + i)!.join()}:${actsLike(rom, EXT_FIRST + i)}`) : []), EXT_FIRST,
+const map16 = tileSection((rom) => Array.from({ length: EXT_TILES - EXT_FIRST }, (_, i) => `${extTileWords(rom, EXT_FIRST + i)!.join()}:${actsLike(rom, EXT_FIRST + i)}`), EXT_FIRST,
   (rom, mine, others, blank) => {
-    for (const t of mine) if (map16Ext(rom) && !others.some((o) => o.includes(t))) { setExtTileWords(rom, t, blank, blank); setActsLike(rom, t, DEFAULT_ACTS, blank); }
+    for (const t of mine) if (!others.some((o) => o.includes(t))) { setExtTileWords(rom, t, blank); setActsLike(rom, t, DEFAULT_ACTS); }
     return [];
   });
-const bgMap16 = tileSection((rom) => (bgMap16Ext(rom) ? Array.from({ length: BG_EXT_TILES - BG_EXT_FIRST }, (_, i) => bgExtTileWords(rom, BG_EXT_FIRST + i)!.join()) : []), BG_EXT_FIRST,
+const bgMap16 = tileSection((rom) => Array.from({ length: BG_EXT_TILES - BG_EXT_FIRST }, (_, i) => bgExtTileWords(rom, BG_EXT_FIRST + i)!.join()), BG_EXT_FIRST,
   (rom, mine, others) => {
     const fill = vanillaBgWords(rom, 0x025);
-    for (const t of mine) if (bgMap16Ext(rom) && !others.some((o) => o.includes(t))) setBgExtTileWords(rom, t, fill);
+    for (const t of mine) if (!others.some((o) => o.includes(t))) setBgExtTileWords(rom, t, fill);
     return [];
   });
 

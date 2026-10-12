@@ -24,6 +24,7 @@
 import { Rom } from './rom.ts';
 import { Asm } from './asm.ts';
 import { ownerNote } from './patchreg.ts';
+import { missingPatch } from './patches.ts';
 
 export const EXT_FIRST = 0x200;
 export const EXT_TILES = 0x1000; // tiles $000-$FFF
@@ -299,41 +300,33 @@ export function enableBlocks(rom: Rom, blank: number[]): Map16Ext {
   return map16Ext(rom)!;
 }
 // address of the block's JMP table (after "db $42/$37") and whether it has the wall offsets; 0 = none
+const ext = (rom: Rom) => map16Ext(rom) ?? missingPatch('Extended Map16 (SMWX)');
 export function blockOf(rom: Rom, t: number): { addr: number; wall: boolean } | null {
-  const p = map16Ext(rom);
-  if (!p?.blocks) return null;
-  const e = p.blocks + (t & 0xfff) * 4;
+  const e = ext(rom).blocks + (t & 0xfff) * 4;
   const addr = rom.r24(e);
   return addr ? { addr, wall: (rom.r8(e + 3) & 1) !== 0 } : null;
 }
 export function setBlock(rom: Rom, t: number, addr: number, wall: boolean): void {
-  const p = map16Ext(rom);
-  if (!p?.blocks) throw new Error('Custom blocks are not enabled');
-  const e = p.blocks + (t & 0xfff) * 4;
+  const e = ext(rom).blocks + (t & 0xfff) * 4;
   rom.w24(e, addr);
   rom.w8(e + 3, addr && wall ? 1 : 0);
 }
 
 export function actsLike(rom: Rom, t: number): number {
-  const p = map16Ext(rom);
-  if (!p) return t < EXT_FIRST ? t : DEFAULT_ACTS;
-  return rom.r16(p.acts + (t & 0xfff) * 2);
+  return rom.r16(ext(rom).acts + (t & 0xfff) * 2);
 }
-export function setActsLike(rom: Rom, t: number, v: number, blank: number[]): void {
-  const p = installMap16Ext(rom, blank);
-  rom.w16(p.acts + (t & 0xfff) * 2, v & 0x1ff);
+export function setActsLike(rom: Rom, t: number, v: number): void {
+  rom.w16(ext(rom).acts + (t & 0xfff) * 2, v & 0x1ff);
 }
 
-// tile words (TL, BL, TR, BR) of an extended tile; null when the patch is not installed
+// tile words (TL, BL, TR, BR) of an extended tile; null for tiles outside 200-FFF
 export function extTileWords(rom: Rom, t: number): number[] | null {
-  const p = map16Ext(rom);
-  if (!p || t < EXT_FIRST || t >= EXT_TILES) return null;
-  const a = p.gfx + (t - EXT_FIRST) * 8;
+  if (t < EXT_FIRST || t >= EXT_TILES) return null;
+  const a = ext(rom).gfx + (t - EXT_FIRST) * 8;
   return [rom.r16(a), rom.r16(a + 2), rom.r16(a + 4), rom.r16(a + 6)];
 }
-export function setExtTileWords(rom: Rom, t: number, words: number[], blank: number[]): void {
+export function setExtTileWords(rom: Rom, t: number, words: number[]): void {
   if (t < EXT_FIRST || t >= EXT_TILES) throw new Error(`Tile ${t.toString(16)} is not an extended Map16 tile`);
-  const p = installMap16Ext(rom, blank);
-  const a = p.gfx + (t - EXT_FIRST) * 8;
+  const a = ext(rom).gfx + (t - EXT_FIRST) * 8;
   words.forEach((w, k) => rom.w16(a + k * 2, w));
 }

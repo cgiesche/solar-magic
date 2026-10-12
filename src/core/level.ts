@@ -2,7 +2,7 @@
 
 import { Rom } from './rom.ts';
 import { spriteBankOf, DM16_EXT } from './patches.ts';
-import { STRUCT_EXT, hasStructs } from './structs.ts';
+import { STRUCT_EXT } from './structs.ts';
 
 export const L1_PTRS = 0x05e000;
 export const L2_PTRS = 0x05e600;
@@ -177,8 +177,8 @@ export interface ParsedObjects {
   size: number; // bytes consumed including terminating $FF
 }
 
-// structs: extended object $03 is a structure (4 bytes), only where the structure patch is installed
-export function parseObjects(data: Uint8Array, start: number, vertical: boolean, structs = false): ParsedObjects {
+// extended object $03 is a structure (4 bytes, structure patch)
+export function parseObjects(data: Uint8Array, start: number, vertical: boolean): ParsedObjects {
   const objects: LevelObject[] = [];
   const exits: ScreenExit[] = [];
   let p = start;
@@ -218,7 +218,7 @@ export function parseObjects(data: Uint8Array, start: number, vertical: boolean,
       p += 6;
       continue;
     }
-    if (structs && num === 0 && b2 === STRUCT_EXT) {
+    if (num === 0 && b2 === STRUCT_EXT) {
       objects.push({ uid: newUid(), num, ext: b2, x, y, size: 0, struct: data[p + 3] });
       p += 4;
       continue;
@@ -365,13 +365,13 @@ export function loadLevel(rom: Rom, n: number): Level {
 export function parseLevelData(rom: Rom, n: number, l1: Uint8Array, l2: Uint8Array | null, l2Pointer: number, spr: Uint8Array, secondary: SecondaryHeader, sizes: SpriteSizes = spriteSizes(rom)): Level {
   const header = parsePrimaryHeader(l1.subarray(0, 5));
   const vert1 = isL1Vertical(rom, header.mode);
-  const p1 = hasObjects(header.mode) ? parseObjects(l1, 5, vert1, hasStructs(rom)) : { objects: [], exits: [], size: 1 };
+  const p1 = hasObjects(header.mode) ? parseObjects(l1, 5, vert1) : { objects: [], exits: [], size: 1 };
   let layer2Objects: LevelObject[] | null = null;
   let layer2Header: Uint8Array | null = null;
   let l2Size = 0;
   if (l2 && hasLayer2Objects(header.mode)) {
     layer2Header = l2.slice(0, 5);
-    const p2 = parseObjects(l2, 5, isL2Vertical(rom, header.mode), hasStructs(rom));
+    const p2 = parseObjects(l2, 5, isL2Vertical(rom, header.mode));
     layer2Objects = p2.objects;
     l2Size = 5 + p2.size;
     // exits in layer 2 data are unusual; keep them with layer 1

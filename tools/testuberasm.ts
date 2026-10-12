@@ -10,6 +10,9 @@ import { installEditorPatch } from '../src/core/patches.ts';
 import { parseList, writeList, buildUberPatch } from '../src/core/uberasm.ts';
 import { projectFromZip, saveProject, loadProject, uberEntry } from '../src/core/uberproject.ts';
 import { zipSync } from 'fflate';
+import { editorImage, romDiff } from './fixture.ts';
+
+const EDITOR_IMAGE = await editorImage(); // the fixture as the editor opens it
 
 await loadAsar();
 let bad = 0;
@@ -45,7 +48,7 @@ check(list.level.get(0x105)?.length === 2 && list.level.get(0x106)?.[0].bytes[0]
 const again = parseList(writeList(list));
 check(JSON.stringify([...again.level]) === JSON.stringify([...list.level]) && again.global === list.global && again.freeram === list.freeram, 'writeList round trip');
 
-const rom = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
+const rom = new Rom(EDITOR_IMAGE.slice());
 installEditorPatch(rom);
 const before = rom.data.slice();
 const b = buildUberPatch(files, list);
@@ -87,18 +90,17 @@ if (r.ok) {
   let loadBad = 0;
   for (const n of [...Array(0x25).keys(), ...Array.from({ length: 0x3b }, (_, i) => 0x101 + i)]) if (!emu.load(n).ok) loadBad++;
   check(loadBad === 0, `all levels load with UberASM (${loadBad} bad)`);
-  const e = listPatches(rom)[0];
-  check(e.kind === 'uberasm' && !!e.srcId && !!rom.getBlob(e.srcId) && !e.src, 'registered as UberASM with sources in the editor data (not in the ROM)');
+  const e = listPatches(rom).find((p) => p.kind === 'uberasm')!;
+  check(!!e && !!e.srcId && !!rom.getBlob(e.srcId) && !e.src, 'registered as UberASM with sources in the editor data (not in the ROM)');
   uninstallPatch(rom, e.id);
-  let diff = 0;
-  for (let i = 0; i < rom.data.length; i++) if (rom.data[i] !== (i < before.length ? before[i] : 0) && i !== 0x7fd7) diff++;
+  const diff = romDiff(rom.data, before, (i) => i === 0x7fd7);
   check(diff === 0, `uninstall restores the ROM (${diff} bytes differ)`);
   check(rom.extra.size === 0, 'sources dropped with the patch');
 }
 
 // project round trip: UberASM Tool folder as zip → ROM → back
 {
-  const rom = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
+  const rom = new Rom(EDITOR_IMAGE.slice());
   const zip = zipSync({ ...Object.fromEntries([...files].map(([k, v]) => ['MyHack/' + k, v])), 'MyHack/UberASMTool.exe': new Uint8Array(4), 'MyHack/asm/base/main.asm': enc.encode('junk') });
   const p = projectFromZip(zip);
   check(p.files.has('level/marker.asm') && !p.files.has('UberASMTool.exe') && !p.files.has('asm/base/main.asm'), 'import drops the tool\'s own files');
@@ -115,7 +117,7 @@ if (r.ok) {
 // Tool, each library is assembled on its own and exports its labels as <file>_<label>; include paths
 // with "//" and several ".." in a row resolve like on a real file system
 {
-  const rom = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
+  const rom = new Rom(EDITOR_IMAGE.slice());
   const lib = new Map<string, Uint8Array>(Object.entries({
     'library/big.asm': 'namespace ram\nincsrc "../big_config//ram.asm"\nnamespace off\nnamespace shared\nincsrc "../big_config/code/x/shared.asm"\nnamespace off\n',
     'big_config/ram.asm': 'value: db $5C\n',

@@ -21,14 +21,12 @@ import { pixiParts, planPixiUpload, applyPixiUpload, linkedDefines, type PixiPla
 import { parseCfg, parseJsonCfg } from './pixi.ts';
 import { detectBlocks, detectGraphics, graphicsFiles, includedFiles, planPackage, applyBlocks, applyGraphics, applyLevelSetup, routinesCalled, type DetectedBlock, type DetectedGraphics, type PackagePlan } from './pkgplan.ts';
 import { loadProject, saveProject, emptyProject, projectFromFiles, type UberProject } from './uberproject.ts';
-import { installEditorPatch, extGfxAvailable, setLevelMusic, setCustomPalette } from './patches.ts';
+import { setLevelMusic, setCustomPalette } from './patches.ts';
 import { map16Targets } from './map16file.ts';
 import { mwlSections, sampleLevel, type SampleLevel } from './mwl.ts';
-import { slotTiles, writeLevelList, setLevelSettings, levelSettings, localizeFrames, levelAltFile } from './exanim.ts';
+import { writeLevelList, setLevelSettings, levelSettings, localizeFrames, levelAltFile } from './exanim.ts';
 import { planBgPack, applyBgPack } from './bgpack.ts';
 import { parseSprites, spriteSizes, type Level } from './level.ts';
-import { installVramPatch } from './vrampatch.ts';
-import { installMap16Ext, map16Ext } from './map16ext.ts';
 import { ALL, type UberContext } from './uberasm.ts';
 import { recordPackageChangeAsync, emptyParts, savePackage, listPackages, packageArchive, uninstallPackage, type Package, type Claim } from './pkgreg.ts';
 import { listPatches } from './patchreg.ts';
@@ -286,7 +284,6 @@ function placeSample(rom: Rom, preview: ReadyPreview, ctx: InstallContext, into:
       return mine.length === 1 && new Set(used.filter((q) => kindOf(q.num) === k).map((q) => q.num)).size === 1 ? mine[0].num : null;
     },
   });
-  if (sample.level.objects.some((o) => o.tile !== undefined)) installEditorPatch(rom);
   // the background: the BG tilemap, BG Map16 tiles of the package moved along
   const mwl = ctx.plan.sample;
   if (mwl?.bg && !sample.level.layer2Objects) {
@@ -305,10 +302,6 @@ function placeSample(rom: Rom, preview: ReadyPreview, ctx: InstallContext, into:
     sample.notes.push(...f.notes);
     sample.exanim.slots = new Map(slots.flatMap(([k], i) => f.slots[i] ? [[k, f.slots[i]!] as const] : []));
     sample.exanim.altFile = file;
-  }
-  if (sample.exanim && [...sample.exanim.slots.values()].some((e) => slotTiles(e).some((t) => t >= 0x200 && t < 0x300)) && !extGfxAvailable(rom)) {
-    const v = installVramPatch(rom);
-    if (!v.ok) sample.notes.push(`ExAnimation into tiles 200-2FF needs the VRAM patch: ${v.errors.join(' ')}`);
   }
   writeLevelList(rom, into.number, sample.exanim);
   if (sample.exanim || levelSettings(rom, into.number)) setLevelSettings(rom, into.number, sample.exanimSettings);
@@ -333,13 +326,9 @@ function pixiListNumbers(preview: ReadyPreview): Map<number, string> {
 
 const failed = (errors: string[], warnings: string[] = [], prints: string[] = []): InstallResult => ({ ok: false, errors, warnings, prints, pkg: null });
 
-// built-in editor patches a patch.json asks for
-export function ensureRequirements(rom: Rom, upload: Upload, blank: number[]): void {
-  for (const req of upload.manifest?.requires ?? []) {
-    if (req === 'smwe') installEditorPatch(rom);
-    else if (req === 'smwx') { if (!map16Ext(rom)) installMap16Ext(rom, blank); }
-    else throw new Error(`Unknown requirement “${req}” in patch.json`);
-  }
+// built-in editor patches a patch.json asks for (every opened ROM has them)
+export function ensureRequirements(upload: Upload): void {
+  for (const req of upload.manifest?.requires ?? []) if (req !== 'smwe' && req !== 'smwx') throw new Error(`Unknown requirement “${req}” in patch.json`);
 }
 
 // where a file of an upload goes in a tool folder: shared folders (wherever they are in the upload) to
@@ -409,17 +398,8 @@ export async function installPackage(rom: Rom, preview: ReadyPreview | ManualPre
   }
 }
 
-// the level setup; BG2/BG3 – graphics or ExAnimation into tiles 200-2FF – need the tilemaps moved out
-// of VRAM $2000 first (the VRAM patch)
 function levelSetup(rom: Rom, level: number, plan: PackagePlan, cgram: Uint8Array | null, wram: Uint8Array | null): { warnings: string[]; prints: string[] } {
-  const warnings: string[] = [];
-  const bg23 = plan.gfx.some((g) => g.slot === 'BG2' || g.slot === 'BG3') || plan.exanim.some((e) => slotTiles(e).some((t) => t >= 0x200 && t < 0x300));
-  if (bg23 && !extGfxAvailable(rom)) {
-    const v = installVramPatch(rom);
-    if (!v.ok) warnings.push(`BG2/BG3 graphics not loaded in the level (${v.errors.join(' ')}); use the level header's graphics bypass.`);
-  }
-  const r = applyLevelSetup(rom, level, plan, cgram, wram);
-  return { warnings: [...warnings, ...r.warnings], prints: r.prints };
+  return applyLevelSetup(rom, level, plan, cgram, wram);
 }
 
 async function installStep(rom: Rom, preview: ReadyPreview, step: Step, opt: InstallOptions, ctx: InstallContext, claim: Claim): Promise<ApplyResult> {
@@ -432,7 +412,7 @@ async function installStep(rom: Rom, preview: ReadyPreview, step: Step, opt: Ins
       const src = uploadSource(upload, main, effectiveDefines(upload, values));
       src.settings = values;
       src.archive = packUpload({ fileName: preview.fileName, files: [...upload.files], main }); // kept with the editor data, to reapply it
-      ensureRequirements(rom, upload, opt.blank);
+      ensureRequirements(upload);
       return applyPatch(rom, src);
     }
     case 'uberasm': {

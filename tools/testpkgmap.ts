@@ -10,6 +10,9 @@ import { suggestMapping, placed, suggestCalls, untaken, docFiles, extraParts } f
 import { emptyProject, saveProject } from '../src/core/uberproject.ts';
 import { ALL } from '../src/core/uberasm.ts';
 import { installEditorPatch } from '../src/core/patches.ts';
+import { editorImage } from './fixture.ts';
+
+const EDITOR_IMAGE = await editorImage(); // the fixture as the editor opens it
 
 await loadAsar();
 let bad = 0;
@@ -53,7 +56,7 @@ const fallback = { level: 0x105, gamemode: 0x14, overworld: 0 };
 
 // the editor patch marks the ROM as edited where Lunar Magic keeps its version, but never over Lunar Magic's
 {
-  const lm = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
+  const lm = new Rom(EDITOR_IMAGE.slice());
   const text = 'Lunar Magic Version 3.31';
   for (let i = 0; i < text.length; i++) lm.w8(0x0ff0a0 + i, text.charCodeAt(i));
   installEditorPatch(lm);
@@ -67,7 +70,7 @@ const fallback = { level: 0x105, gamemode: 0x14, overworld: 0 };
   const calls = suggestCalls(files, p, fallback);
   check(s.root === 'src/' && [...s.rules.values()].filter(Boolean).sort().join(' ') === 'gamemode/ library/ retry_config/', 'Retry: suggestion as in its readme');
   check(calls.length === 1 && calls[0].file === 'gamemode/retry_gm.asm' && calls[0].num === ALL, 'Retry: "* retry_gm.asm" from the docs');
-  const rom = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
+  const rom = new Rom(EDITOR_IMAGE.slice());
   const proj = emptyProject();
   for (const [from, to] of p) proj.files.set(to, files.get(from)!);
   proj.list.gamemode.set(ALL, [{ file: 'gamemode/retry_gm.asm', bytes: [] }]);

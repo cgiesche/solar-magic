@@ -5,7 +5,6 @@ import { unzipSync, zipSync } from 'fflate';
 import { Rom } from './rom.ts';
 import { applyPatch, reapplyPatch, uninstallPatch, type ApplyResult } from './patchapply.ts';
 import { listPatches, patchArchive, missingSources, type PatchEntry } from './patchreg.ts';
-import { installEditorPatch } from './patches.ts';
 import { buildUberPatch, parseList, emptyList, writeList, type UberList } from './uberasm.ts';
 
 export interface UberProject { files: Map<string, Uint8Array>; list: UberList }
@@ -70,7 +69,6 @@ export function saveProject(rom: Rom, p: UberProject): ApplyResult {
     const warnings = e ? uninstallPatch(rom, e.id) : [];
     return { ok: true, errors: [], warnings, prints: [] };
   }
-  installEditorPatch(rom); // level resources use the level number in $7E010B
   const b = buildUberPatch(p.files, p.list);
   const r = e ? reapplyPatch(rom, e.id, b.source) : applyPatch(rom, b.source);
   r.warnings.unshift(...b.warnings);

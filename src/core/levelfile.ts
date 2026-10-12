@@ -5,9 +5,9 @@ import {
   type Level, parseLevelData, serializeLayer1, serializeLayer2, serializeSprites, isL1Vertical, spriteSizes,
   encodeSecondaryHeader, decodeSecondaryHeader,
 } from './level.ts';
-import { editorPatch, levelGfx, customPalette } from './patches.ts';
+import { levelGfx, customPalette } from './patches.ts';
 import { encodeBg, decodeBg } from './bg.ts';
-import { STRUCT_EXT, readStructure, listStructures, freeStructureNumber, writeStructure, installStructPatch, type Structure } from './structs.ts';
+import { STRUCT_EXT, readStructure, listStructures, freeStructureNumber, writeStructure, type Structure } from './structs.ts';
 
 export const LEVEL_FILE_EXT = '.smwlevel';
 
@@ -55,10 +55,8 @@ export function exportLevelFile(rom: Rom, lv: Level, bg: Uint16Array | null = lv
   // custom sprites with extra bytes: the size table the sprite data was written with
   const sizes = spriteSizes(rom);
   if (sizes && lv.sprites.some((q) => q.bytes?.length)) out.spriteSizes = toHex(sizes);
-  if (editorPatch(rom)) {
-    const g = levelGfx(rom, lv.number);
-    if (g.some((v) => v !== 0xff)) out.gfx = g;
-  }
+  const g = levelGfx(rom, lv.number);
+  if (g.some((v) => v !== 0xff)) out.gfx = g;
   const pal = customPalette(rom, lv.number);
   if (pal) out.palette = toHex(rom.bytes(pal, 512));
   if (bg && !l2) out.bg = toHex(encodeBg(bg));
@@ -80,7 +78,6 @@ export function importLevelFile(rom: Rom, text: string, into: Level): LevelFileD
   // structures: reuse an identical one of this ROM, else store under a free number
   const remap = new Map<number, number>();
   if (j.structs?.length) {
-    installStructPatch(rom); // before parsing: extended object $03 is 4 bytes with the patch
     const have = listStructures(rom);
     const same = (a: Structure, b: Structure) => a.w === b.w && a.h === b.h && a.name === b.name && a.tiles.every((t, i) => t === b.tiles[i]);
     for (const s of j.structs) {

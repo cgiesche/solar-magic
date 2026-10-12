@@ -5,25 +5,28 @@ import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator, type LevelOverride } from '../src/core/levelemu.ts';
 import { loadLevel, serializeLayer1, serializeSprites, isL1Vertical, newUid, type Level } from '../src/core/level.ts';
 import { installEditorPatch, DM16_EXT } from '../src/core/patches.ts';
-import { setActsLike, setExtTileWords, map16Ext, blockOf } from '../src/core/map16ext.ts';
+import { setActsLike, setExtTileWords, map16Ext, blockOf, upgradeMap16Ext } from '../src/core/map16ext.ts';
 import { map16Source } from '../src/core/render.ts';
 import { loadAsar } from '../src/core/asar.ts';
 import { GPS_ROUTINES } from '../src/core/gpsroutines.ts';
 import { listPatches } from '../src/core/patchreg.ts';
 import { saveBlockProject, loadBlockProject, removeBlocks, parseBlockList, writeBlockList, type BlockProject } from '../src/core/blocks.ts';
+import { editorImage } from './fixture.ts';
+
+const EDITOR_IMAGE = await editorImage(); // the fixture as the editor opens it
 
 await loadAsar();
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
 const enc = new TextEncoder();
 
-const rom = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
+const rom = new Rom(EDITOR_IMAGE.slice());
 installEditorPatch(rom);
 const emu = new LevelEmulator(rom); emu.boot();
 const blank = map16Source(rom, emu.load(0x105)).fg(0x025);
 const WALL = 0x2a0, PASS = 0x2a1, REF = 0x130;
-for (const t of [WALL, PASS]) { setExtTileWords(rom, t, map16Source(rom, emu.load(0x105)).fg(REF), blank); setActsLike(rom, t, REF, blank); }
-check(map16Ext(rom)?.version === 4 && !map16Ext(rom)?.blocks, 'SMWX v4 installed, blocks not yet enabled');
+for (const t of [WALL, PASS]) { setExtTileWords(rom, t, map16Source(rom, emu.load(0x105)).fg(REF)); setActsLike(rom, t, REF); }
+check(map16Ext(rom)?.version === 4 && !!map16Ext(rom)?.blocks, 'SMWX v4 installed with the block table');
 
 const OFFS = ['MarioBelow', 'MarioAbove', 'MarioSide', 'SpriteV', 'SpriteH', 'MarioCape', 'MarioFireball', 'TopCorner', 'BodyInside', 'HeadInside'];
 // marker: sets bit n of $7FB010/11 for offset n
@@ -43,7 +46,7 @@ const project: BlockProject = {
 };
 check(project.list.length === 2 && project.list[1].acts === REF && parseBlockList(writeBlockList(project.list)).length === 2, 'block list.txt parsed and written');
 
-const r = saveBlockProject(rom, project, blank);
+const r = saveBlockProject(rom, project);
 check(r.ok, 'blocks assemble and are entered ' + r.errors.join(' | '));
 check(blockOf(rom, WALL) !== null && blockOf(rom, 0x2a2) === null, 'block table entries');
 {
@@ -83,26 +86,27 @@ check(!!back && back.list.length === 2 && back.files.size === 3, 'block project 
 removeBlocks(rom);
 check(blockOf(rom, WALL) === null && play(PASS, 120, REF, false).x === refRun.x, 'removed: blocks behave like their acts-like again');
 
-// SMWX v1 → v3 upgrade keeps tables
+// SMWX v1 → v4 upgrade keeps tables
 {
-  const old = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
+  const old = new Rom(EDITOR_IMAGE.slice());
   installEditorPatch(old);
   const e = new LevelEmulator(old); e.boot();
-  setActsLike(old, 0x2b0, 0x130, blank);
+  setActsLike(old, 0x2b0, 0x130);
   const ex = map16Ext(old)!;
   old.w8(ex.base + 14, 0); // pretend version 1
-  const up = saveBlockProject(old, { ...project, list: parseBlockList(`2B0 marker.asm\n`) }, blank);
+  check(upgradeMap16Ext(old), 'SMWX v1 upgraded when the ROM is opened');
+  const up = saveBlockProject(old, { ...project, list: parseBlockList(`2B0 marker.asm\n`) });
   const nx = map16Ext(old)!;
   check(up.ok && nx.version === 4 && nx.base !== ex.base && nx.gfx === ex.gfx && old.r16(nx.acts + 0x2b0 * 2) === 0x130, 'SMWX v1 upgraded with its tables');
 }
 
 // GPS's standard routines are built in: every one assembles (called from code that never runs)
 {
-  const r2 = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
+  const r2 = new Rom(EDITOR_IMAGE.slice());
   installEditorPatch(r2);
   const names = Object.keys(GPS_ROUTINES).filter((n) => !/^[A-Z]/.test(n));
   const all = ['db $42', ...OFFS.map((o) => `JMP ${o}`), ...OFFS.map((o) => `${o}:`), '  RTL', ...names.map((n) => `  %${n}()`), '  RTL'].join('\n');
-  const res = saveBlockProject(r2, { files: new Map([['blocks/all.asm', enc.encode(all)]]), list: parseBlockList('2C0 all.asm\n') }, blank);
+  const res = saveBlockProject(r2, { files: new Map([['blocks/all.asm', enc.encode(all)]]), list: parseBlockList('2C0 all.asm\n') });
   if (!res.ok) console.log(res.errors.join('\n'));
   check(res.ok, `all ${names.length} GPS routines assemble`);
 }

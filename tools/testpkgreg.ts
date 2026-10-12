@@ -13,13 +13,16 @@ import { loadBlockProject, saveBlockProject, type BlockProject } from '../src/co
 import { importGfxFile } from '../src/core/map16file.ts';
 import { SECTIONS, SECTION_KEYS, type PartSection } from '../src/core/pkgsections.ts';
 import { recordPackageChange, listPackages, packageArchive, uninstallPackage, type Package, type PackageTarget, type Claim } from '../src/core/pkgreg.ts';
+import { editorImage } from './fixture.ts';
+
+const EDITOR_IMAGE = await editorImage(); // the fixture as the editor opens it
 
 await loadAsar();
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
 const enc = new TextEncoder();
 
-const rom = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
+const rom = new Rom(EDITOR_IMAGE.slice());
 installEditorPatch(rom);
 const emu = new LevelEmulator(rom); emu.boot();
 const blank = map16Source(rom, emu.load(0x105)).fg(0x025);
@@ -48,7 +51,7 @@ a = track('A', () => {
   const p: BlockProject = loadBlockProject(rom) ?? { files: new Map(), list: [] };
   p.files.set('blocks/a.asm', enc.encode(block(1)));
   p.list.push({ tile: 0x2a0, file: 'blocks/a.asm' });
-  ok(saveBlockProject(rom, p, blank));
+  ok(saveBlockProject(rom, p));
 }, undefined, a);
 check(a.blocks.tiles.join() === '672' && a.patches.length === 1 && a.uber.files.length === 2, 'a part added later goes into the same record');
 check(new TextDecoder().decode(packageArchive(rom, listPackages(rom)[0])!) === 'archive of A', 'package files kept in the ROM');
@@ -64,7 +67,7 @@ const bId = track('B', () => {
   const bp = loadBlockProject(rom)!;
   bp.files.set('blocks/b.asm', enc.encode(block(2)));
   bp.list.push({ tile: 0x2a1, file: 'blocks/b.asm' });
-  ok(saveBlockProject(rom, bp, blank));
+  ok(saveBlockProject(rom, bp));
   importGfxFile(rom, 0x80, gfx);
 }).id;
 const b = listPackages(rom).find((r) => r.id === bId)!;
@@ -87,7 +90,7 @@ check(listPackages(rom).map((r) => r.id).join() === bId, 'A: record removed' + (
 // removing B too: projects and ExGFX gone, the ROM as before both packages
 await uninstallPackage(rom, bId, blank);
 check(!loadProject(rom) && !loadBlockProject(rom) && !gfxEntry(rom, 0x80) && !listPackages(rom).length, 'B: UberASM, blocks and ExGFX removed');
-check(listPatches(rom).length === 0, 'no registry entries left');
+check(listPatches(rom).every((p) => p.kind === 'vram' || p.kind === 'exanim'), 'no registry entries left but the editor\'s own');
 
 // a failing removal leaves the ROM unchanged
 {

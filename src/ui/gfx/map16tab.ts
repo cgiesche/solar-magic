@@ -9,10 +9,10 @@ import type { GfxWorkspace, WsPanel } from '../gfxworkspace.ts';
 import { menuButton } from '../menu.ts';
 import { h, clear, toast, modal } from '../dom.ts';
 import { pickFile, downloadBytes } from '../platform.ts';
-import { TileCache, map16Source } from '../../core/render.ts';
+import { TileCache } from '../../core/render.ts';
 import { hex } from '../../core/names.ts';
 import { EXT_FIRST, EXT_TILES, map16Ext, actsLike, setActsLike, setExtTileWords } from '../../core/map16ext.ts';
-import { BG_EXT_FIRST, bgMap16Ext, bgTileAddr, bgTileWords, setBgExtTileWords } from '../../core/bgmap16.ts';
+import { BG_EXT_FIRST, bgTileAddr, bgTileWords, setBgExtTileWords } from '../../core/bgmap16.ts';
 import { blockFileOf } from '../blockdialog.ts';
 import { openResources } from '../resources.ts';
 import { parseMap16File, map16Targets, writeMap16File } from '../../core/map16file.ts';
@@ -129,23 +129,20 @@ export class Map16Tab implements WsPanel {
   }
 
   // ---------- data ----------
-  private blank(): number[] {
-    return map16Source(this.app.rom, this.app.render).fg(0x025);
-  }
   private tileAddr(t: number): number {
     if (this.bg) return bgTileAddr(this.app.rom, t) ?? -1;
-    if (t >= EXT_FIRST) { const p = map16Ext(this.app.rom); return p ? p.gfx + (t - EXT_FIRST) * 8 : -1; }
+    if (t >= EXT_FIRST) return map16Ext(this.app.rom)!.gfx + (t - EXT_FIRST) * 8;
     const w = this.app.render.wram;
     return 0x0d0000 | map16Pointer(w, t);
   }
   words(t: number): number[] {
     const a = this.tileAddr(t);
-    if (a < 0) return this.bg ? bgTileWords(this.app.rom, t) : this.blank();
+    if (a < 0) return bgTileWords(this.app.rom, t);
     return [0, 1, 2, 3].map((q) => this.app.rom.r16(a + q * 2));
   }
   private setWords(t: number, ws: number[]): void {
     if (this.bg && t >= BG_EXT_FIRST) setBgExtTileWords(this.app.rom, t, ws);
-    else if (!this.bg && t >= EXT_FIRST) setExtTileWords(this.app.rom, t, ws, this.blank());
+    else if (!this.bg && t >= EXT_FIRST) setExtTileWords(this.app.rom, t, ws);
     else { const a = this.tileAddr(t); ws.forEach((v, q) => this.app.rom.w16(a + q * 2, v)); }
   }
   private tc(): TileCache {
@@ -175,16 +172,15 @@ export class Map16Tab implements WsPanel {
       class: this.bg === bg ? 'active' : '', title,
       onclick: () => { if (this.bg === bg) return; this.bg = bg; this.sel = this.sel & 0x1ff; this.selW = this.selH = 1; this.buildBar(); this.redraw(); this.scrollToSel(); },
     }, label);
-    const ext = this.bg ? !!bgMap16Ext(this.app.rom) : !!map16Ext(this.app.rom);
     clear(this.pageBar);
     for (let p = 0; p < this.pages.length; p++) {
       this.pageBar.appendChild(h('button', {
         class: p === this.topPage ? 'active' : '',
         title: p < 2 ? `Page ${p}: ${this.bg ? 'BG tiles of the original backgrounds' : p ? 'standard tiles' : 'standard and tileset tiles'}`
-          : `Page ${hex(p, 1)}: extended ${this.bg ? 'BG ' : ''}tiles${this.bg ? '' : ' (in the level via Direct Map16 object)'}${ext ? '' : ' – created on the first change'}`,
+          : `Page ${hex(p, 1)}: extended ${this.bg ? 'BG ' : ''}tiles${this.bg ? '' : ' (in the level via Direct Map16 object)'}`,
         onclick: () => this.scrollToPage(p),
       }, hex(p, 1)));
-      this.heads[p].replaceChildren(`Page ${hex(p, 1)}`, p >= 2 && !ext ? h('span', { class: 'hint' }, ' (created on the first change)') : '');
+      this.heads[p].replaceChildren(`Page ${hex(p, 1)}`);
     }
     this.bar.append(
       h('span', { class: 'btn-group' },
@@ -581,7 +577,7 @@ export class Map16Tab implements WsPanel {
     const dlg = modal(`Behavior for ${tiles.length > 1 ? `${tiles.length} Tiles` : this.tileName(this.sel)}`,
       h('div', { class: 'mt-acts-dlg' }, input, info, scroll), [{ label: 'Cancel' }]);
     const take = (v: number) => {
-      this.edit(`Behavior like ${hex(v, 3)}`, () => { for (const t of tiles) setActsLike(app.rom, t, v, this.blank()); });
+      this.edit(`Behavior like ${hex(v, 3)}`, () => { for (const t of tiles) setActsLike(app.rom, t, v); });
       dlg.close();
     };
     c.addEventListener('mousedown', (e) => take(at(e)));
@@ -743,7 +739,7 @@ export class Map16Tab implements WsPanel {
     this.edit(`${targets.length} tile${targets.length > 1 ? 's' : ''} pasted at ${hex(this.sel, 3)}`, () => {
       targets.forEach((t, i) => {
         this.setWords(t, c.words[i]);
-        if (c.acts && !this.bg) setActsLike(this.app.rom, t, c.acts[i], this.blank());
+        if (c.acts && !this.bg) setActsLike(this.app.rom, t, c.acts[i]);
       });
     });
     this.selW = c.w; this.selH = c.h;
@@ -759,7 +755,7 @@ export class Map16Tab implements WsPanel {
       if (targets.some((t) => t >= EXT_TILES)) throw new Error('The tiles no longer fit on the Map16 pages from here');
       this.edit(`${f.name} imported`, () => targets.forEach((t, i) => {
         this.setWords(t, m.tiles[i]);
-        if (m.acts && !this.bg) setActsLike(this.app.rom, t, m.acts[i], this.blank());
+        if (m.acts && !this.bg) setActsLike(this.app.rom, t, m.acts[i]);
       }));
       this.selW = Math.min(16, m.width); this.selH = m.height;
       toast(`${m.tiles.length} tile(s) from ${f.name} imported at ${hex(this.sel, 3)}`);

@@ -8,7 +8,7 @@ import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadAsar } from '../src/core/asar.ts';
 import { uploadFiles } from '../src/core/patchpkg.ts';
 import { parseMwl, isLevelImport, planBgPack, applyBgPack, importLevelFile, levelColors } from '../src/core/bgpack.ts';
-import { bgTileWords, bgExtTileWords } from '../src/core/bgmap16.ts';
+import { bgExtTileWords } from '../src/core/bgmap16.ts';
 import { parseMap16File } from '../src/core/map16file.ts';
 import { bgFromWram } from '../src/core/bg.ts';
 import { loadLevel, hasLayer2Objects, newUid } from '../src/core/level.ts';
@@ -19,25 +19,19 @@ import { renderLevel, map16Source } from '../src/core/render.ts';
 import { extTileWords, actsLike } from '../src/core/map16ext.ts';
 import { listPackages } from '../src/core/pkgreg.ts';
 import { installVramPatch } from '../src/core/vrampatch.ts';
+import { editorImage } from './fixture.ts';
+
+const EDITOR_IMAGE = await editorImage(); // the fixture as the editor opens it
 
 await loadAsar();
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
 const same = (a: ArrayLike<number>, b: ArrayLike<number>) => a.length === b.length && Array.prototype.every.call(a, (v: number, i: number) => v === b[i]);
-const file = new Uint8Array(readFileSync('test/fixtures/smw.smc'));
+const file = EDITOR_IMAGE.slice();
 const LV = 0x105;
 let BLANK: number[] = [];
 { const rom = new Rom(file.slice()); const e = new LevelEmulator(rom); e.boot(); BLANK = map16Source(rom, e.load(LV)).fg(0x025); }
 
-// words of BG tile (x, y) in the layer 2 tilemap (VRAM, 64x64 cells without the VRAM patch): TL, BL, TR, BR
-const vramBg = (r: { vram: Uint8Array; ppuRegs: Uint8Array }, x: number, y: number) => {
-  const base = (r.ppuRegs[0x08] & 0xfc) << 8;
-  const cell = (cx: number, cy: number) => {
-    const wa = base + (cx >= 32 ? 0x400 : 0) + (cy >= 32 ? 0x800 : 0) + (cy & 31) * 32 + (cx & 31);
-    return r.vram[wa * 2] | (r.vram[wa * 2 + 1] << 8);
-  };
-  return [cell(2 * x, 2 * y), cell(2 * x, 2 * y + 1), cell(2 * x + 1, 2 * y), cell(2 * x + 1, 2 * y + 1)];
-};
 const bgAt = (bg: Uint16Array, x: number, y: number) => bg[(x >> 4) * 0x1b0 + y * 16 + (x & 15)];
 const color = (cg: Uint8Array, i: number) => cg[i * 2] | (cg[i * 2 + 1] << 8);
 
@@ -51,7 +45,7 @@ check(Math.min(...usedTiles) === 0x200 && Math.max(...usedTiles) === 0x257 && mw
 const map16 = parseMap16File(files.get('ghostbustersghosttrapjavamanhattanBG.map16')!);
 
 {
-  // without the VRAM patch: BG1 and the tiles, BG2/BG3 noted as not available
+  // BG1, the BG Map16 tiles and the colors (BG2/BG3: below)
   const rom = new Rom(file.slice());
   const emu0 = new LevelEmulator(rom); emu0.boot();
   const before = emu0.load(LV);
@@ -60,7 +54,6 @@ const map16 = parseMap16File(files.get('ghostbustersghosttrapjavamanhattanBG.map
   const lv = loadLevel(rom, LV);
   const r = applyBgPack(rom, lv, files, plan, { blank: BLANK, cgram: levelColors(before) });
   check(r.ok && !!r.bg, 'applied: ' + [...r.errors, ...r.notes].join(' | '));
-  check(r.notes.some((n) => n.includes('BG2 slot not available')), 'BG2/BG3 need the VRAM patch (noted)');
   check(map16.tiles.every((ws, i) => same(bgExtTileWords(rom, 0x200 + i)!, ws)), 'BG Map16 tiles 200-25F from the .map16');
   const bg1 = plan.gfx.find((g) => g.slot === 'BG1')!;
   check(levelGfx(rom, LV)[GFX_SLOT_NAMES.indexOf('BG1')] === bg1.num && !!gfxEntry(rom, bg1.num)?.raw, 'BG1 slot = the stored 4bpp ExGFX');
@@ -68,9 +61,6 @@ const map16 = parseMap16File(files.get('ghostbustersghosttrapjavamanhattanBG.map
   const emu = new LevelEmulator(rom); emu.boot();
   const after = emu.load(LV);
   check(after.ok && same(bgFromWram(after.wram), r.bg!), 'saved level loads the package BG');
-  let wrong = 0;
-  for (let y = 0; y < 27; y++) for (let x = 0; x < 32; x++) if (!same(vramBg(after, x, y), bgTileWords(rom, bgAt(r.bg!, x, y)))) wrong++;
-  check(!wrong, `game draws the package's BG tiles (${wrong} wrong)`);
   // the package's colors, the rest as before
   const pal = files.get('ghostbustersghosttrapjavamanhattanBG.pal')!;
   const exp = (i: number) => (pal[i * 3] >> 3) | ((pal[i * 3 + 1] >> 3) << 5) | ((pal[i * 3 + 2] >> 3) << 10);
@@ -83,10 +73,8 @@ const map16 = parseMap16File(files.get('ghostbustersghosttrapjavamanhattanBG.map
 }
 
 {
-  // with the VRAM patch: BG2/BG3 slots get the files, the game uploads them to VRAM $2000/$2800
+  // BG2/BG3 slots get the files, the game uploads them to VRAM $2000/$2800 (VRAM patch)
   const rom = new Rom(file.slice());
-  const v = installVramPatch(rom);
-  check(v.ok, 'VRAM patch installed ' + v.errors.join(' '));
   const emu0 = new LevelEmulator(rom); emu0.boot();
   const plan = planBgPack(rom, 'ghostbusters', files, BLANK);
   const lv = loadLevel(rom, LV);

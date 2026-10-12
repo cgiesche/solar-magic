@@ -9,12 +9,11 @@ import {
 } from '../core/level.ts';
 import { hex, spriteName } from '../core/names.ts';
 import { loadPixiProject, customSpriteList, type CustomSprite } from '../core/pixi.ts';
-import { renderLevel, type LevelImages, composite, map16Source } from '../core/render.ts';
-import { EXT_FIRST, map16Ext, installMap16Ext } from '../core/map16ext.ts';
+import { renderLevel, type LevelImages, composite } from '../core/render.ts';
 import { saveLevel } from '../core/save.ts';
 import { captureSprites, captureSpriteAt, type SpriteImage } from '../core/spritegfx.ts';
 import { spriteMemJob, usedSpriteMemory } from '../core/spritemem.ts';
-import { DM16_EXT, hasEditorPatch, installEditorPatch, levelGfx, defaultGfx } from '../core/patches.ts';
+import { DM16_EXT, levelGfx, defaultGfx } from '../core/patches.ts';
 import { gfxSkipMask, gfxFilesHash } from '../core/gfxpages.ts';
 import { STRUCT_EXT, STRUCT_MAX, TRANSPARENT, listStructures, readStructure, writeStructure, type Structure } from '../core/structs.ts';
 import type { Package } from '../core/pkgreg.ts';
@@ -1256,14 +1255,7 @@ export class App {
   }
   private insert(tx: number, ty: number, p: PaletteItem): boolean {
     if (p.kind === 'obj' && (this.mode === 'l1' || this.mode === 'l2')) {
-      if (p.num === 0 && p.ext === DM16_EXT && !this.ensureEditorPatch()) return false;
       const cells = p.block ? Array.from({ length: p.block.w * p.block.h }, (_, i) => ({ dx: i % p.block!.w, dy: Math.floor(i / p.block!.w) })) : [{ dx: 0, dy: 0 }];
-      const lastTile = (p.tile ?? 0) + (p.block ? (p.block.h - 1) * 16 + p.block.w - 1 : 0);
-      if (p.num === 0 && p.ext === DM16_EXT && lastTile >= EXT_FIRST && !map16Ext(this.rom)) {
-        installMap16Ext(this.rom, map16Source(this.rom, this.render).fg(0x025));
-        this.romWritten();
-        toast('Map16 expansion installed (tiles 200–FFF).');
-      }
       this.selection = new Set();
       for (const { dx, dy } of cells) {
         const o: LevelObject = { uid: newUid(), num: p.num, ext: p.ext, x: tx + dx, y: ty + dy, size: p.size };
@@ -1281,17 +1273,6 @@ export class App {
       this.selection = new Set([s.uid]);
     } else return false;
     return true;
-  }
-
-  // Direct-Map16 objects need the editor patch; installs it, false if that is not possible
-  ensureEditorPatch(): boolean {
-    if (hasEditorPatch(this.rom)) return true;
-    try {
-      installEditorPatch(this.rom);
-      this.romWritten();
-      toast('Editor patch installed (for Direct Map16 objects).');
-      return true;
-    } catch (e) { toast(String(e), 'error'); return false; }
   }
 
   // ------------- structures (structs.ts) -------------
@@ -1371,8 +1352,6 @@ export class App {
   explodeStructure(o: LevelObject): void {
     const s = o.struct !== undefined ? readStructure(this.rom, o.struct) : null;
     if (!s) { toast('The structure does not exist (anymore).', 'error'); return; }
-    if (!this.ensureEditorPatch()) return;
-    if (s.tiles.some((t) => t >= EXT_FIRST) && !map16Ext(this.rom)) { toast('The structure uses tiles from 200 up, the Map16 expansion is missing.', 'error'); return; }
     this.editLevel(() => {
       const parts: LevelObject[] = [];
       s.tiles.forEach((t, i) => { if (t !== TRANSPARENT) parts.push({ uid: newUid(), num: 0, ext: DM16_EXT, x: o.x + (i % s.w), y: o.y + Math.floor(i / s.w), size: 0, tile: t }); });

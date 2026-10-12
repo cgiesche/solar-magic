@@ -8,7 +8,6 @@ import { h, modal, toast, hexInput, logTool } from './dom.ts';
 import { pickFile } from './platform.ts';
 import { hex } from '../core/names.ts';
 import { planBgPack, importLevelFile, isLevelImport, levelColors, type BgPackResult } from '../core/bgpack.ts';
-import { extGfxAvailable } from '../core/patches.ts';
 import { altFileName, levelAltFile } from '../core/exanim.ts';
 import { uploadFiles } from '../core/patchpkg.ts';
 import { map16Source } from '../core/render.ts';
@@ -41,7 +40,6 @@ export function openLevelImportDialog(app: App, fileName: string, files: Map<str
   let at = plan.at, fgAt = plan.fgAt, useBg = canBg, useFg = !!plan.fg;
   const usePal = plan.palettes.map((p) => !p.layer3);
   const n16 = plan.map16 ? plan.map16.data.tiles.length : 0;
-  const ext = plan.gfx.some((g) => g.slot === 'BG2' || g.slot === 'BG3');
   const file = (f: string) => f.split('/').pop()!;
   const check = (on: boolean, set: (v: boolean) => void, disabled = false) =>
     h('input', { type: 'checkbox', checked: on, disabled, onchange: (e: Event) => set((e.target as HTMLInputElement).checked) });
@@ -66,7 +64,6 @@ export function openLevelImportDialog(app: App, fileName: string, files: Map<str
       p.layer3 ? h('span', { class: 'hint' }, ' – layer 3 colors') : '')),
     plan.exanim.length ? h('p', { class: 'hint' }, `Animations: ${plan.exanim.length} slot(s) animating its tiles go into the list of level ${lvl}; their frames are copied into ${altFileName(levelAltFile(app.rom, app.level.number))}, which all levels using it share.`) : '',
     plan.layer3.length ? h('p', { class: 'hint' }, `Layer 3 (${plan.layer3.map(file).join(', ')}) is not taken over – Lunar Magic's layer 3 tilemaps are not supported yet.`) : '',
-    ext && !extGfxAvailable(app.rom) ? h('p', { class: 'hint' }, 'For the BG2/BG3 slots the VRAM patch is installed.') : '',
     plan.notes.length ? h('ul', { class: 'hint' }, plan.notes.map((t) => h('li', null, t))) : '');
   modal(`Import level file: ${name}`, body, [
     { label: 'Cancel' },

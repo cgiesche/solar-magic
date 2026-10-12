@@ -12,16 +12,19 @@ import { saveProject, emptyProject, type UberProject } from '../src/core/uberpro
 import { parseList } from '../src/core/uberasm.ts';
 import { savePixiProject, parsePixiList, type PixiProject } from '../src/core/pixi.ts';
 import { saveBlockProject, parseBlockList, type BlockProject } from '../src/core/blocks.ts';
+import { editorImage, cleanImage } from './fixture.ts';
+
+const EDITOR_IMAGE = await editorImage(); // the fixture as the editor opens it
 
 await loadAsar();
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
 const enc = new TextEncoder();
-const file = new Uint8Array(readFileSync('test/fixtures/smw.smc'));
+const file = EDITOR_IMAGE.slice();
 const fresh = () => new Rom(file.slice());
 const src = (name: string, main: string): PatchSource => ({ name, main: 'main.asm', files: new Map([['main.asm', main]]) });
-// a patch hooking the level load palette upload whose code is `body`
-const hooked = (name: string, body: string) => src(name, `lorom\norg $00922F\n  autoclean JSL Code\n  NOP #2\nfreecode\nCode:\n  STZ $0703 : STZ $0704\n${body}\n  RTL\n`);
+// a patch hooking the game's code (at no hook of the editor's own patches) whose code is `body`
+const hooked = (name: string, body: string) => src(name, `lorom\norg $00A1DA\n  autoclean JSL Code\n  NOP #2\nfreecode\nCode:\n${body}\n  RTL\n`);
 const files = (o: Record<string, string>) => new Map(Object.entries(o).map(([k, v]) => [k, enc.encode(v)]));
 
 const uber = (freeram = '$7FAC80'): UberProject => {
@@ -75,7 +78,7 @@ const blocks: BlockProject = { files: files({ 'blocks/b.asm': 'db $42\nJMP A : J
   // a manifest claiming UberASM's free RAM through a define
   const upload = uploadFromFiles('claim.zip', files({
     'patch.json': JSON.stringify({ name: 'Claim', main: 'claim.asm', ram: [{ define: 'freeram', size: 2 }] }),
-    'claim.asm': '!freeram = $7FAC81\nlorom\norg $00922F\n  autoclean JSL Code\n  NOP #2\nfreecode\nCode:\n  STZ $0703 : STZ $0704\n  RTL\n',
+    'claim.asm': '!freeram = $7FAC81\nlorom\norg $00A1DA\n  autoclean JSL Code\n  NOP #2\nfreecode\nCode:\n  RTL\n',
   }));
   const c = applyPatch(rom, uploadSource(upload, 'claim.asm', {}));
   check(!c.ok && c.errors.some((x) => x.includes('RAM conflict') && x.includes('UberASM') && x.includes('$7FAC81')), 'claim of UberASM\'s free RAM rejected: ' + c.errors.join(' '));
@@ -110,17 +113,19 @@ const blocks: BlockProject = { files: files({ 'blocks/b.asm': 'db $42\nJMP A : J
   saveProject(rom, uber('$0DC4'));
   const upload = uploadFromFiles('low.zip', files({
     'patch.json': JSON.stringify({ name: 'Low', main: 'main.asm', ram: [{ addr: '$7E0DC5', size: 1 }] }),
-    'main.asm': 'lorom\norg $00922F\n  autoclean JSL Code\n  NOP #2\nfreecode\nCode:\n  STZ $0703 : STZ $0704\n  RTL\n',
+    'main.asm': 'lorom\norg $00A1DA\n  autoclean JSL Code\n  NOP #2\nfreecode\nCode:\n  RTL\n',
   }));
   const c = applyPatch(rom, uploadSource(upload, 'main.asm', {}));
   check(!c.ok && c.errors.some((x) => x.includes('RAM conflict')), 'low RAM claim $0DC4 vs $7E0DC5 rejected: ' + c.errors.join(' '));
 }
 
-// 3. the editor patch's extended object $02 slot
+// 3. the editor patch's extended object $02 slot: protected in an opened ROM; in a clean ROM a patch
+// that took it first blocks the editor patch
 {
-  const rom = fresh();
-  const p = applyPatch(rom, src('ExtObj', 'lorom\norg $0DA115\ndl $0DA000\n'));
-  check(p.ok && p.warnings.some((w) => w.includes('SMWE')), 'patch on extended object $02 warns that SMWE can\'t be installed');
+  const p = applyPatch(fresh(), src('ExtObj', 'lorom\norg $0DA115\ndl $0DA000\n'));
+  check(!p.ok && p.errors.some((e) => e.includes('SMWE')), 'patch on extended object $02 rejected: ' + p.errors[0]);
+  const rom = new Rom(cleanImage());
+  check(applyPatch(rom, src('ExtObj', 'lorom\norg $0DA115\ndl $0DA000\n')).ok, 'the same patch applies to a clean ROM');
   let msg = '';
   try { installEditorPatch(rom); } catch (e) { msg = (e as Error).message; }
   check(msg.includes('ExtObj'), 'editor patch refuses the taken slot and names the patch: ' + msg);
@@ -133,7 +138,7 @@ const blocks: BlockProject = { files: files({ 'blocks/b.asm': 'db $42\nJMP A : J
   const counts: number[] = [];
   for (let i = 0; i < 3; i++) {
     const s = savePixiProject(rom, pixi);
-    const b = saveBlockProject(rom, blocks, [0, 0, 0, 0]);
+    const b = saveBlockProject(rom, blocks);
     const u = saveProject(rom, uber());
     if (!s.ok || !b.ok || !u.ok) console.log([...s.errors, ...b.errors, ...u.errors].join('\n'));
     counts.push(rom.scanRats().length);

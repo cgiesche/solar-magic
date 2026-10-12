@@ -5,8 +5,9 @@ import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadLevel, serializeLayer1, serializeLayer2, serializeSprites, isL1Vertical, newUid } from '../src/core/level.ts';
 import { saveLevel } from '../src/core/save.ts';
 import { readL1, readL2, writeL1, writeL2, OverworldEmulator } from '../src/core/overworld.ts';
+import { editorImage } from './fixture.ts';
 
-const rom = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
+const rom = new Rom(await editorImage());
 const emu = new LevelEmulator(rom); emu.boot();
 const levels = [...Array(0x25).keys(), ...Array.from({ length: 0x3b }, (_, i) => 0x101 + i)];
 const expected = new Map<number, Uint8Array>();

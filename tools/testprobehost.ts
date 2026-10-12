@@ -10,10 +10,14 @@ import { LevelEmulator } from '../src/core/levelemu.ts';
 import { ObjKindProbe, kindsKey, type ObjKinds } from '../src/core/objkinds.ts';
 import { levelScanJob, type ScanLevel } from '../src/core/levelscan.ts';
 import { loadLevel, serializeLayer1, serializeSprites, L2_PTRS } from '../src/core/level.ts';
+import { editorImage } from './fixture.ts';
+import { gfxSkipMask } from '../src/core/gfxpages.ts';
+
+const EDITOR_IMAGE = await editorImage(); // the fixture as the editor opens it
 
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
-const file = new Uint8Array(readFileSync('test/fixtures/smw.smc'));
+const file = EDITOR_IMAGE.slice();
 const rom = new Rom(file);
 const direct = new BlockProber(new Rom(file));
 
@@ -56,6 +60,7 @@ const scanLevel: ScanLevel = {
   ov: { layer1: serializeLayer1(rom, lv), sprites: serializeSprites(lv.sprites, lv.spriteHeader, false) },
 };
 const emu = new LevelEmulator(new Rom(file));
+const emuRom = new Rom(file); emu.skipMask = () => gfxSkipMask(emuRom); // as the host: GFX and ExAnimation data are no dependency
 const kindProbe = new ObjKindProbe(emu, { ...lv, header: { ...lv.header, tileset: 1 } }, l2), kinds = kindProbe.result();
 const job = levelScanJob(emu, scanLevel);
 let scanned; for (;;) { const r = job.next(); if (r.done) { scanned = r.value; break; } }

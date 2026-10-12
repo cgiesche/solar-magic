@@ -15,8 +15,8 @@ import type { ApplyResult } from './patchapply.ts';
 import { rewriteDefines } from './patchpkg.ts';
 import { parseBlockList, loadBlockProject, saveBlockProject, type BlockProject } from './blocks.ts';
 import { parseMap16File, map16Targets, exgfxName, importGfxFile, type Map16File } from './map16file.ts';
-import { EXT_FIRST, EXT_TILES, DEFAULT_ACTS, map16Ext, extTileWords, actsLike, setExtTileWords, setActsLike } from './map16ext.ts';
-import { gfxEntry, hasEditorPatch, VANILLA_GFX, levelGfx, setLevelGfx, levelExtGfx, setLevelExtGfx, GFX_SLOT_NAMES, EXT_GFX_SLOT_NAMES, extGfxAvailable, customPalette, setCustomPalette } from './patches.ts';
+import { EXT_FIRST, EXT_TILES, DEFAULT_ACTS, extTileWords, actsLike, setExtTileWords, setActsLike } from './map16ext.ts';
+import { gfxEntry, VANILLA_GFX, levelGfx, setLevelGfx, levelExtGfx, setLevelExtGfx, GFX_SLOT_NAMES, EXT_GFX_SLOT_NAMES, customPalette, setCustomPalette } from './patches.ts';
 import { slotTiles, addLevelSlots, localizeFrames, levelAltFile, altFileName, type ExList, type ExSlot } from './exanim.ts';
 import { parseMwl, packPalettes, slotOfWord, frameSources, type MwlLevel, type PackPalette, type FrameSources } from './bgpack.ts';
 import { withIncludes } from './pkgmap.ts';
@@ -139,7 +139,7 @@ export const GFX_SLOTS = [...GFX_SLOT_NAMES, ...EXT_GFX_SLOT_NAMES];
 
 // first ExGFX number that is free and not taken by `taken` (80-FE first, as Lunar Magic suggests)
 function freeGfx(rom: Rom, taken: Set<number>): number {
-  const free = (i: number) => !taken.has(i) && (!hasEditorPatch(rom) || !gfxEntry(rom, i));
+  const free = (i: number) => !taken.has(i) && !gfxEntry(rom, i);
   for (let i = 0x80; i < 0xff; i++) if (free(i)) return i;
   for (let i = VANILLA_GFX; i < 0x80; i++) if (free(i)) return i;
   return -1;
@@ -148,11 +148,9 @@ function freeGfx(rom: Rom, taken: Set<number>): number {
 // tiles the ROM already uses: a block on them, or graphics / acts like other than an empty tile's
 function usedTiles(rom: Rom, blank: number[]): (t: number) => boolean {
   const blocks = new Set((loadBlockProject(rom)?.list ?? []).map((b) => b.tile));
-  const ext = !!map16Ext(rom);
   return (t) => {
     if (t < EXT_FIRST || t >= EXT_TILES) return true;
     if (blocks.has(t)) return true;
-    if (!ext) return false;
     const w = extTileWords(rom, t);
     return !!w && (w.some((v, k) => v !== blank[k]) || actsLike(rom, t) !== DEFAULT_ACTS);
   };
@@ -248,7 +246,7 @@ export function planPackage(rom: Rom, input: PlanInput, blank: number[]): Packag
   const mapSlots = new Set((map16?.data.tiles ?? []).flat().map(slotOfWord).filter((s): s is string => !!s));
   for (const file of graphics.exgfx) {
     const n = exgfxName(base(file));
-    const free = n.num !== null && n.num >= VANILLA_GFX && n.num < 0xff && !nums.has(n.num) && (!hasEditorPatch(rom) || !gfxEntry(rom, n.num));
+    const free = n.num !== null && n.num >= VANILLA_GFX && n.num < 0xff && !nums.has(n.num) && !gfxEntry(rom, n.num);
     const num = free ? n.num! : freeGfx(rom, nums);
     if (num < 0) throw new Error('No free ExGFX number left');
     nums.add(num);
@@ -352,9 +350,9 @@ export function applyBlocks(rom: Rom, upload: Upload, blocks: PlannedBlock[], de
     for (const t of b.tiles) proj.list.push({ tile: t, file: 'blocks/' + base(b.file), acts: b.acts });
   }
   for (const r of routines) { const f = r.slice(r.search(/routines\//i)); proj.files.set(f, upload.files.get(r)!); claim(f); }
-  const r = saveBlockProject(rom, proj, blank);
+  const r = saveBlockProject(rom, proj);
   if (!r.ok) return { ...r, errors: r.errors.map((e) => 'Custom blocks: ' + e) };
-  for (const b of blocks) for (const t of b.tiles) if (!drawn.has(t)) setExtTileWords(rom, t, tileWords(b.acts), blank);
+  for (const b of blocks) for (const t of b.tiles) if (!drawn.has(t)) setExtTileWords(rom, t, tileWords(b.acts));
   return { ...r, prints: [...r.prints, `${blocks.length} block(s): ${blocks.map((b) => `${base(b.file)} on ${b.tiles.map((t) => hx(t, 3)).join(', ')}`).join('; ')}`] };
 }
 
@@ -366,10 +364,10 @@ export function applyGraphics(rom: Rom, files: Map<string, Uint8Array>, plan: Pa
     const targets = map16Targets(m.data, m.at), from = map16Targets(m.data, m.from);
     const onBlock = new Set(plan.blocks.flatMap((b) => b.tiles));
     targets.forEach((t, i) => {
-      setExtTileWords(rom, t, m.data.tiles[i], blank);
+      setExtTileWords(rom, t, m.data.tiles[i]);
       const a = m.data.acts?.[i];
       // acts like pointing into the .map16 itself moves along
-      if (a !== undefined && !onBlock.has(t)) { const k = from.indexOf(a); setActsLike(rom, t, k >= 0 ? targets[k] : a, blank); }
+      if (a !== undefined && !onBlock.has(t)) { const k = from.indexOf(a); setActsLike(rom, t, k >= 0 ? targets[k] : a); }
     });
     prints.push(`${targets.length} Map16 tile(s) from ${hx(m.at, 3)}`);
   }
@@ -382,7 +380,7 @@ export interface SetupResult { warnings: string[]; prints: string[] }
 // the level setup (see CONTEXT.md): the package's ExGFX in the level's slots, its ExAnimation slots in
 // the level's list (their frames copied into its Anim graphic), the masked colors in its palette.
 // cgram: the level's colors now (base of a new own palette); wram: its WRAM after the load (RAM frames of
-// animations come along from it). The VRAM patch for BG2/BG3 is the caller's.
+// animations come along from it).
 export function applyLevelSetup(rom: Rom, level: number, plan: PackagePlan, cgram: Uint8Array | null, wram: Uint8Array | null = null): SetupResult {
   const warnings: string[] = [], prints: string[] = [];
   const std = levelGfx(rom, level), ext = levelExtGfx(rom, level);
@@ -392,7 +390,6 @@ export function applyLevelSetup(rom: Rom, level: number, plan: PackagePlan, cgra
     if (!g.slot) continue;
     const e = EXT_GFX_SLOT_NAMES.indexOf(g.slot), s = GFX_SLOT_NAMES.indexOf(g.slot);
     if (e >= 0) {
-      if (!extGfxAvailable(rom)) { warnings.push(`${g.slot} slot not available (VRAM patch missing) – ExGFX ${hx(g.num, 2)} not loaded in level ${hx(level, 3)}`); continue; }
       ext[e] = g.num; extSet = true;
     } else if (s >= 0) { std[s] = g.num; stdSet = true; } else continue;
     slots.push(`${g.slot} = ${hx(g.num, 2)}`);

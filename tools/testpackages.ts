@@ -30,6 +30,9 @@ import { levelColors } from '../src/core/bgpack.ts';
 import { enableBlocks, setExtTileWords, map16Ext, upgradeMap16Ext, blockOf } from '../src/core/map16ext.ts';
 import { parseLmObjects } from '../src/core/mwl.ts';
 import { testSongZip } from './testsong.ts';
+import { editorImage, romDiff } from './fixture.ts';
+
+const EDITOR_IMAGE = await editorImage(); // the fixture as the editor opens it
 
 await loadAsar();
 await loadApu();
@@ -93,7 +96,7 @@ check(junk.status === 'failed' && /2 files/.test(junk.reason) && /\.png/.test(ju
 
 // ---------- install, remove, undo ----------
 
-const rom = new Rom(fixture('smw.smc'));
+const rom = new Rom(EDITOR_IMAGE.slice());
 const emu = new LevelEmulator(rom); emu.boot();
 const src = map16Source(rom, emu.load(0x105));
 const opts: InstallOptions = { level: 0x105, blank: src.fg(0x025), tileWords: (t) => src.fg(t) };
@@ -102,9 +105,8 @@ enableBlocks(rom, opts.blank); // the Map16 extension with custom blocks enabled
 setLevelMusic(rom, 0x105, 1); setLevelMusic(rom, 0x105, 0); // the patch for music set per level (stays)
 const vanilla = rom.data.slice();
 const sameRom = (what: string) => {
-  let diff = 0;
   // the checksum (rewritten by AddmusicK) and the ROM size byte don't count
-  for (let i = 0; i < rom.data.length; i++) if (rom.data[i] !== (i < vanilla.length ? vanilla[i] : 0) && i !== 0x7fd7 && !(i >= 0x7fdc && i < 0x7fe0)) diff++;
+  const diff = romDiff(rom.data, vanilla, (i) => i === 0x7fd7 || (i >= 0x7fdc && i < 0x7fe0));
   check(diff === 0 && !listPackages(rom).length, `${what}: ROM as before (${diff} bytes differ)`);
 };
 const install = async (p: UploadPreview, o: Partial<InstallOptions> = {}) => {
@@ -270,7 +272,7 @@ sameRom('song removed');
   const pp = loadPixiProject(rom)!, sprites = pp.list;
   const unP = savePixiProject(rom, { ...pp, list: [] });
   const bp = loadBlockProject(rom)!, blocks = bp.list;
-  const unB = saveBlockProject(rom, { ...bp, list: [] }, opts.blank);
+  const unB = saveBlockProject(rom, { ...bp, list: [] });
   const up2 = loadProject(rom)!, calls = new Map(up2.list.level);
   up2.list.level.clear();
   const unU = saveProject(rom, up2);
@@ -278,7 +280,7 @@ sameRom('song removed');
   check(loadPixiProject(rom)?.files.size === pp.files.size && loadBlockProject(rom)?.files.size === bp.files.size && loadProject(rom)?.files.size === up2.files.size,
     'the files stay in the projects');
   const reP = savePixiProject(rom, { ...loadPixiProject(rom)!, list: sprites });
-  const reB = saveBlockProject(rom, { ...loadBlockProject(rom)!, list: blocks }, opts.blank);
+  const reB = saveBlockProject(rom, { ...loadBlockProject(rom)!, list: blocks });
   const up3 = loadProject(rom)!; up3.list.level = calls;
   const reU = saveProject(rom, up3);
   check(reP.ok && reB.ok && reU.ok && loadPixiProject(rom)!.list.length === 2 && loadBlockProject(rom)!.list.length === 2, 'assigned again');
@@ -289,7 +291,7 @@ sameRom('song removed');
 // the level setup (a level edit, on its own ROM): On-Off Blocks' masked colors in level 105's palette;
 // removing the package keeps them. Unchecked: the level stays as it was.
 {
-  const rom = new Rom(fixture('smw.smc'));
+  const rom = new Rom(EDITOR_IMAGE.slice());
   const e = new LevelEmulator(rom); e.boot();
   const l = e.load(0x105);
   const s = map16Source(rom, l);
@@ -313,7 +315,7 @@ sameRom('song removed');
 // ExAnimation slots for tiles 200-207 come into the list of level 105, their frames from On-Off Blocks'
 // ExGFX291 (AN2) copied into Anim graphic A; in the game the block's tiles show them by the ON/OFF switch
 {
-  const rom = new Rom(fixture('smw.smc'));
+  const rom = new Rom(EDITOR_IMAGE.slice());
   const e = new LevelEmulator(rom); e.boot();
   const l = e.load(0x105);
   const s = map16Source(rom, l);
@@ -344,7 +346,7 @@ sameRom('song removed');
 // flips the ON/OFF switch – also after a song is installed (AddmusicK runs the game in the FastROM banks
 // $80+, the block's caller is still found) and after an older Map16 extension is brought up to date
 {
-  const rom = new Rom(fixture('smw.smc'));
+  const rom = new Rom(EDITOR_IMAGE.slice());
   const e = new LevelEmulator(rom); e.boot();
   const l = e.load(0x105);
   const s = map16Source(rom, l);
@@ -388,10 +390,10 @@ sameRom('song removed');
 
 // the sample level follows the blocks when the author's tiles are taken
 {
-  const rom = new Rom(fixture('smw.smc'));
+  const rom = new Rom(EDITOR_IMAGE.slice());
   const e = new LevelEmulator(rom); e.boot();
   const s = map16Source(rom, e.load(0x105));
-  setExtTileWords(rom, 0x508, s.fg(0x130), s.fg(0x025));
+  setExtTileWords(rom, 0x508, s.fg(0x130));
   const r = await installPackage(rom, ready(onoff), { level: null, blank: s.fg(0x025), tileWords: (t) => s.fg(t), sample: loadLevel(rom, 0x105) });
   const tiles = (r.sample?.level.objects ?? []).filter((o) => o.tile !== undefined).map((o) => o.tile!).sort((a, b) => a - b);
   check(r.ok && tiles.join() === r.pkg!.blocks.tiles.slice().sort((a, b) => a - b).join() && !tiles.includes(0x508), `508 taken: the sample level's blocks on ${tiles.map((t) => t.toString(16)).join(', ')}`);

@@ -13,7 +13,7 @@
 //    offset, 0 = unused); an entry: type, trigger, frames less one, 16-bit destination, 16-bit frames
 
 import { snesToPc, type Rom } from './rom.ts';
-import { applyPatch, uninstallPatch, type ApplyResult } from './patchapply.ts';
+import { applyPatch, type ApplyResult } from './patchapply.ts';
 import { listPatches } from './patchreg.ts';
 import { EXANIMATION_ASM, MEMORY_ASM } from './kobo/exanimation.ts';
 import { installEditorPatch } from './patches.ts';
@@ -84,7 +84,6 @@ export function shapeOf(type: number): { w: number; h: number } {
 // the global one overwrite, with the slots that do it
 export function exanimTiles(rom: Rom, level: number, charWord: number): Map<number, { global: boolean; slot: number }[]> {
   const out = new Map<number, { global: boolean; slot: number }[]>();
-  if (!exanimInstalled(rom)) return out;
   const lists: [boolean, ExList | null][] = [[false, readLevelList(rom, level)], [true, readGlobalList(rom)]];
   for (const [global, l] of lists) {
     if (!l) continue;
@@ -107,7 +106,6 @@ export function exanimTiles(rom: Rom, level: number, charWord: number): Map<numb
 // the back area color (types 16, 17) is color 0
 export function exanimColors(rom: Rom, level: number): Map<number, { global: boolean; slot: number }[]> {
   const out = new Map<number, { global: boolean; slot: number }[]>();
-  if (!exanimInstalled(rom)) return out;
   const lists: [boolean, ExList | null][] = [[false, readLevelList(rom, level)], [true, readGlobalList(rom)]];
   for (const [global, l] of lists) {
     if (!l) continue;
@@ -250,10 +248,6 @@ export function exanimEntry(rom: Rom) {
   return listPatches(rom).find((p) => p.kind === 'exanim' || p.name === EXANIM_PATCH_NAME || p.name === EXANIM_PATCH_NAME_OLD) ?? null;
 }
 
-export function uninstallExAnim(rom: Rom): string[] {
-  const e = exanimEntry(rom);
-  return e ? uninstallPatch(rom, e.id) : [];
-}
 
 const listAt = (rom: Rom, addr: number): ExList | null => {
   try { return parseList(rom.bytes(addr, Math.min(0x8000 - (addr & 0x7fff), 0x4000))).list; } catch { return null; }
@@ -291,13 +285,8 @@ function freeList(rom: Rom, addr: number, level: number | null): void {
 
 const hasContent = (l: ExList | null) => !!l && (l.slots.size > 0 || l.manual.size > 0 || l.customSet !== 0 || l.customKeep !== 0xffff);
 
-// writes a level's list (null or empty: none); installs the engine if needed
+// writes a level's list (null or empty: none)
 export function writeLevelList(rom: Rom, level: number, list: ExList | null): void {
-  if (!exanimInstalled(rom)) {
-    if (!hasContent(list)) return;
-    const r = installExAnim(rom);
-    if (!r.ok) throw new Error(r.errors.join(' '));
-  }
   const l = exanimLayout(rom)!;
   const old = levelListAddr(rom, level);
   freeList(rom, old, level);
@@ -306,11 +295,6 @@ export function writeLevelList(rom: Rom, level: number, list: ExList | null): vo
 }
 
 export function writeGlobalList(rom: Rom, list: ExList | null): void {
-  if (!exanimInstalled(rom)) {
-    if (!hasContent(list)) return;
-    const r = installExAnim(rom);
-    if (!r.ok) throw new Error(r.errors.join(' '));
-  }
   const l = exanimLayout(rom)!;
   freeList(rom, globalListAddr(rom), null);
   const p = hasContent(list) ? rom.allocWrite(listBytes(list!)) : 0;
@@ -319,19 +303,14 @@ export function writeGlobalList(rom: Rom, list: ExList | null): void {
 }
 
 export function levelSettings(rom: Rom, level: number): number {
-  return exanimInstalled(rom) ? rom.r8(SETTINGS + level) : 0;
+  return rom.r8(SETTINGS + level);
 }
 export function setLevelSettings(rom: Rom, level: number, v: number): void {
-  if (!exanimInstalled(rom)) {
-    const r = installExAnim(rom);
-    if (!r.ok) throw new Error(r.errors.join(' '));
-  }
   rom.w8(SETTINGS + level, v & 0xf0);
 }
 
 // ---- alternative files ExGFX 60-63 ----
 export function altFileAddr(rom: Rom, n: number): number {
-  if (!exanimInstalled(rom)) return 0;
   const p = rom.r24(ALT_FILES + n * 3);
   return p === 0 || p === 0xffffff ? 0 : p;
 }
@@ -343,11 +322,6 @@ export function readAltFile(rom: Rom, n: number): Uint8Array | null {
 }
 export function writeAltFile(rom: Rom, n: number, data: Uint8Array | null): void {
   if (data && data.length > ALT_FILE_MAX) throw new Error('Animation graphics too large (max. 1023 tiles)');
-  if (!exanimInstalled(rom)) {
-    if (!data) return;
-    const r = installExAnim(rom);
-    if (!r.ok) throw new Error(r.errors.join(' '));
-  }
   const old = altFileAddr(rom, n);
   if (old && data && rom.isRatsAt(snesToPc(old) - 8) === data.length) { rom.writeBytes(old, data); return; } // same size: in place
   if (old) rom.freeAt(old);
@@ -416,7 +390,7 @@ export function levelAltFile(rom: Rom, level: number): number {
 export function altFileUsers(rom: Rom, n: number): { levels: number[]; global: boolean } {
   const uses = (l: ExList | null) => !!l && l.altFile === n && [...l.slots.values()].some((e) => kindOf(e.type) === 'tiles' && (e.dest & 0x8000) !== 0);
   const levels: number[] = [];
-  if (exanimInstalled(rom)) for (let i = 0; i < 512; i++) if (uses(readLevelList(rom, i))) levels.push(i);
+  for (let i = 0; i < 512; i++) if (uses(readLevelList(rom, i))) levels.push(i);
   return { levels, global: uses(readGlobalList(rom)) };
 }
 

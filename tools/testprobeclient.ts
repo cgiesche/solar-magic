@@ -12,12 +12,15 @@ import { ResultCache, RomFingerprint } from '../src/core/romdeps.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadLevel, L2_PTRS } from '../src/core/level.ts';
 import { ObjKindProbe, kindsKey, type ObjKinds } from '../src/core/objkinds.ts';
+import { editorImage } from './fixture.ts';
+
+const EDITOR_IMAGE = await editorImage(); // the fixture as the editor opens it
 
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
 // a write that changes no byte: a new ROM generation that nothing a probe read differs in
 const touch = (rom: Rom) => rom.writeAt(0, rom.data.slice(0, 1));
-const file = new Uint8Array(readFileSync('test/fixtures/smw.smc'));
+const file = EDITOR_IMAGE.slice();
 const direct = new BlockProber(new Rom(file));
 const settle = () => new Promise((r) => setTimeout(r, 0)); // (stored results are awaited first)
 

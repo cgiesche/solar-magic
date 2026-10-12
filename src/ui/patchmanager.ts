@@ -10,7 +10,6 @@ import { reapplyPatch, type ApplyResult, type PatchSource } from '../core/patcha
 import { patchArchive, type PatchEntry } from '../core/patchreg.ts';
 import { uploadFromFiles, effectiveDefines, uploadSource, optionDefault, packUpload, unpackUpload, type StoredUpload, type Upload, type PatchOption } from '../core/patchpkg.ts';
 import { ensureRequirements } from '../core/packages.ts';
-import { map16Source } from '../core/render.ts';
 import { definesForm } from './defineedit.ts';
 import { patchesChanged, errorText } from './projectpane.ts';
 import type { ToolKind } from '../core/parts.ts';
@@ -84,7 +83,7 @@ export function reapplyPackagePatch(app: App, upload: Upload, fileName: string, 
   try {
     r = app.romEdit(`Patch “${upload.name}” reapplied`, () => {
       const apply = () => {
-        ensureRequirements(app.rom, upload, map16Source(app.rom, app.render).fg(0x025));
+        ensureRequirements(upload);
         return reapplyPatch(app.rom, entry.id, src);
       };
       if (rec) return recordPackageChange(app.rom, rec, apply).result; // the patch's new id goes into the record

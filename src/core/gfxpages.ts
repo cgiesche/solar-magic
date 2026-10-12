@@ -6,7 +6,7 @@
 // animation keeps the block probes (whose test level may be the level being animated).
 
 import { snesToPc, type Rom } from './rom.ts';
-import { gfxEntry, hasEditorPatch, VANILLA_GFX } from './patches.ts';
+import { gfxEntry } from './patches.ts';
 import { lz2Decompress } from './lz2.ts';
 import { exanimDataRanges } from './exanim.ts';
 
@@ -26,8 +26,7 @@ export function gfxSkipMask(rom: Rom): Uint8Array {
   rom.reads = null;
   try {
     const mask = new Uint8Array(rom.data.length);
-    const n = hasEditorPatch(rom) ? 0x100 : VANILLA_GFX;
-    for (let i = 0; i < n; i++) {
+    for (let i = 0; i < 0x100; i++) {
       const r = fileRange(rom, i);
       if (r) mask.fill(1, r[0], r[1]);
     }

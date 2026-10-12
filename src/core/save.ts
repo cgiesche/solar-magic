@@ -5,9 +5,8 @@ import {
   type Level, L1_PTRS, L2_PTRS, SPR_PTRS, serializeLayer1, serializeLayer2, serializeSprites, isL1Vertical, spriteSizes,
   writeSecondaryHeader, spriteBank,
 } from './level.ts';
-import { installEditorPatch, setSpriteBank, editorPatch, bgBank, setBgBank } from './patches.ts';
+import { setSpriteBank, bgBank, setBgBank } from './patches.ts';
 import { encodeBg } from './bg.ts';
-import { BG_EXT_FIRST, installBgMap16Ext } from './bgmap16.ts';
 
 function countRefs(rom: Rom, table: number, stride: number, addr: number, bankFn?: (i: number) => number): number {
   let n = 0;
@@ -53,7 +52,6 @@ export function saveLevel(rom: Rom, lv: Level): string[] {
       setBgBank(rom, n, 0);
     }
     if (lv.bg) {
-      if (lv.bg.some((t) => t >= BG_EXT_FIRST)) installBgMap16Ext(rom); // tiles from BG pages 2-F
       const data = encodeBg(lv.bg);
       const a = rom.allocWrite(data);
       setBgBank(rom, n, a >> 16);
@@ -77,12 +75,11 @@ export function saveSprites(rom: Rom, lv: Level): string {
     rom.writeBytes(lv.sprAddr, spr);
     as = lv.sprAddr;
   } else {
-    installEditorPatch(rom);
     if (!sprShared) rom.freeAt(lv.sprAddr);
     as = rom.allocWrite(spr);
   }
   rom.w16(SPR_PTRS + n * 2, as & 0xffff);
-  if ((as >> 16) !== 0x07 || editorPatch(rom)) setSpriteBank(rom, n, as >> 16);
+  setSpriteBank(rom, n, as >> 16);
   lv.sprAddr = as;
   lv.sprSize = spr.length;
   return `Sprites: ${spr.length} bytes @ $${as.toString(16).toUpperCase()}`;

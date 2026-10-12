@@ -9,7 +9,7 @@ import { zipSync, unzipSync } from 'fflate';
 import { Rom } from './rom.ts';
 import { applyPatch, reapplyPatch, uninstallPatch, type ApplyResult, type PatchSource } from './patchapply.ts';
 import { listPatches, patchArchive, missingSources, type PatchEntry } from './patchreg.ts';
-import { enableBlocks, map16Ext, setBlock, setActsLike, EXT_TILES } from './map16ext.ts';
+import { setBlock, setActsLike, EXT_TILES } from './map16ext.ts';
 import { definesFile, DEFAULT_FREERAM } from './uberasm.ts';
 import { GPS_ROUTINES, GPS_DEFINES } from './gpsroutines.ts';
 
@@ -115,21 +115,18 @@ export function loadBlockProject(rom: Rom): BlockProject | null {
 }
 
 function clearTable(rom: Rom): void {
-  const ex = map16Ext(rom);
-  if (!ex?.blocks) return;
   for (let t = 0; t < EXT_TILES; t++) setBlock(rom, t, 0, false);
 }
 
-// assembles the blocks and enters them into the block table; blank: tile words for new Map16 tiles. A
-// project without assignments keeps its files (to assign them again); without files too it is removed.
-export function saveBlockProject(rom: Rom, p: BlockProject, blank: number[]): ApplyResult {
+// assembles the blocks and enters them into the block table. A project without assignments keeps its
+// files (to assign them again); without files too it is removed.
+export function saveBlockProject(rom: Rom, p: BlockProject): ApplyResult {
   const e = blocksEntry(rom);
   if (!p.list.length && ![...p.files.keys()].some((f) => f !== 'list.txt')) {
     const warnings = e ? removeBlocks(rom) : [];
     return { ok: true, errors: [], warnings, prints: [] };
   }
   const snapshot = rom.snapshot();
-  enableBlocks(rom, blank);
   let r: ApplyResult;
   try {
     const uber = listPatches(rom).find((x) => x.kind === 'uberasm');
@@ -156,7 +153,7 @@ export function saveBlockProject(rom: Rom, p: BlockProject, blank: number[]): Ap
   for (const b of p.list) {
     const x = addrOf.get(b.file)!;
     setBlock(rom, b.tile, x.addr, x.wall);
-    if (b.acts !== undefined) setActsLike(rom, b.tile, b.acts, blank);
+    if (b.acts !== undefined) setActsLike(rom, b.tile, b.acts);
   }
   return r;
 }

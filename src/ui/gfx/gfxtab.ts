@@ -16,29 +16,19 @@ import { decodeTile, encodeTile, cgramToRGBA } from '../../core/gfx.ts';
 import { snesToPc, type Rom } from '../../core/rom.ts';
 import { hex } from '../../core/names.ts';
 import {
-  gfxEntry, setGfxEntry, hasEditorPatch, installEditorPatch, VANILLA_GFX, levelGfx, setLevelGfx, defaultGfx,
-  levelExtGfx, setLevelExtGfx, extGfxAvailable,
+  gfxEntry, setGfxEntry, VANILLA_GFX, levelGfx, setLevelGfx, defaultGfx,
+  levelExtGfx, setLevelExtGfx,
 } from '../../core/patches.ts';
 import { importGfxFile, exgfxName } from '../../core/map16file.ts';
 import { recordPackageChange, type Package } from '../../core/pkgreg.ts';
 import { parsePrimaryHeader, L1_PTRS } from '../../core/level.ts';
 import { map16Source } from '../../core/render.ts';
-import { EXT_FIRST, EXT_TILES, map16Ext } from '../../core/map16ext.ts';
+import { EXT_FIRST, EXT_TILES } from '../../core/map16ext.ts';
 import { gfxName, lmAnimName, ANIM_FILE, levelSlots as map16Slots } from './map16tab.ts';
-import { readAltFile, writeAltFile, altFileAddr, exanimInstalled, ALT_FILE_MAX } from '../../core/exanim.ts';
+import { readAltFile, writeAltFile, altFileAddr, ALT_FILE_MAX } from '../../core/exanim.ts';
 import { openHeaderDialog } from '../headerdialog.ts';
 import { animsAt, animLinks } from './animtab.ts';
 
-// before the first ExAnimation data: the engine (Lunar Magic compatible) is installed with it
-export async function confirmExAnim(app: App): Promise<boolean> {
-  if (exanimInstalled(app.rom)) return true;
-  const c = await choose('Set up ExAnimation?', 'Own animations need the ExAnimation engine in Lunar Magic format (an ASM patch, plus the editor patch). Lunar Magic recognizes it and can keep editing the animations.', [{ label: 'Cancel' }, { label: 'Set up', primary: true }]);
-  if (c !== 1) return false;
-  await loadAsar();
-  return true;
-}
-import { loadAsar } from '../../core/asar.ts';
-import { installVramPatch } from '../../core/vrampatch.ts';
 
 export function defaultBpp(i: number, size: number): number {
   if ((i >= 0x28 && i <= 0x2b) || i === 0x2f) return 2;
@@ -99,10 +89,8 @@ function slotsOf(app: App, level: number, tileset: number, spriteSet: number): S
   const def = defaultGfx(app.rom, tileset, spriteSet);
   const order: [string, number, number][] = [['FG1', 7, 0], ['FG2', 6, 0x80], ['BG1', 5, 0x100], ['FG3', 4, 0x180], ['SP1', 3, 0x00], ['SP2', 2, 0x80], ['SP3', 1, 0x100], ['SP4', 0, 0x180]];
   const out: Slot[] = order.map(([name, k, first]) => ({ name, k, ext: false, file: set[k] !== 0xff ? set[k] : def[k], def: def[k], custom: set[k] !== 0xff, first, sprite: name.startsWith('SP') }));
-  if (extGfxAvailable(app.rom)) {
-    const ex = levelExtGfx(app.rom, level);
-    ['BG2', 'BG3'].forEach((name, k) => out.push({ name, k, ext: true, file: ex[k], def: 0xff, custom: ex[k] !== 0xff, first: 0x200 + k * 0x80, sprite: false }));
-  }
+  const ex = levelExtGfx(app.rom, level);
+  ['BG2', 'BG3'].forEach((name, k) => out.push({ name, k, ext: true, file: ex[k], def: 0xff, custom: ex[k] !== 0xff, first: 0x200 + k * 0x80, sprite: false }));
   return out;
 }
 
@@ -296,9 +284,6 @@ export class GfxTab implements WsPanel {
         h('div', { class: 'hint gt-card-range', title: s.sprite ? 'Sprite tile numbers (as in patches and sprites); from 100 = second page (T bit), given there without the 1' : 'The Map16 tiles use these 8x8 tile numbers' }, s.sprite ? `Sprite tiles ${spriteRange(s.first)}` : `Tiles ${hex(s.first, 3)}–${hex(s.first + 0x7f, 3)}`),
         h('button', { class: 'gt-card-btn', onclick: () => void this.swap(s) }, 'Swap …')));
     }
-    if (!extGfxAvailable(app.rom)) box.append(h('div', { class: 'gt-card empty' }, h('div', { class: 'gt-card-head' }, h('b', null, 'BG2/BG3')),
-      h('div', { class: 'hint' }, 'Additional graphics for tiles 200–2FF'),
-      h('button', { class: 'gt-card-btn', title: 'Moves the layer 1 tilemap like Lunar Magic so VRAM becomes free for BG2/BG3', onclick: () => void this.enableExt() }, 'Enable …')));
   }
 
   private rowForSlot(s: Slot): number {
@@ -346,7 +331,6 @@ export class GfxTab implements WsPanel {
   private async swap(s: Slot): Promise<void> {
     const app = this.app;
     const usage = this.usage();
-    const n = hasEditorPatch(app.rom) ? 0x100 : VANILLA_GFX;
     const row = this.rowForSlot(s);
     const grid = h('div', { class: 'gt-gallery' });
     let done: (v: number | null) => void = () => {};
@@ -361,7 +345,7 @@ export class GfxTab implements WsPanel {
     if (this.freeExGfx() >= 0) grid.append(
       extra(NEW_FILE, 'New ExGFX', 'create empty and use here'),
       extra(IMPORT_FILE, 'Import …', '.bin or .png into a free number, use here'));
-    for (let i = 0; i < n; i++) {
+    for (let i = 0; i < 0x100; i++) {
       if (!gfxEntry(app.rom, i)) continue;
       const c = h('canvas', { width: 128, height: 32, class: 'gt-gal-img' });
       this.thumb(c, i, row, 128, 32);
@@ -385,10 +369,6 @@ export class GfxTab implements WsPanel {
   private async assignSlot(s: Slot, v: number): Promise<void> {
     const app = this.app;
     if (v === (s.custom ? s.file : 0xff)) return;
-    if (!s.ext && !hasEditorPatch(app.rom)) {
-      const ok = await choose('Install editor patch?', 'Own graphics per level need the editor patch (installed once, as for Direct Map16).', [{ label: 'Cancel' }, { label: 'Install', primary: true }]);
-      if (ok !== 1) return;
-    }
     try {
       app.romEdit(`${s.name} of level ${hex(app.level.number, 3)} → ${v === 0xff ? 'default' : gfxName(v)}`, () => {
         if (s.ext) { const ex = levelExtGfx(app.rom, app.level.number); ex[s.k] = v; setLevelExtGfx(app.rom, app.level.number, ex); }
@@ -398,27 +378,12 @@ export class GfxTab implements WsPanel {
     } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
   }
 
-  private async enableExt(): Promise<void> {
-    const app = this.app;
-    const ok = await choose('Enable BG2/BG3?', 'Moves the layer 1 tilemap in VRAM (like Lunar Magic) so tiles 200–2FF can get their own graphics. An ASM patch is applied for this.', [{ label: 'Cancel' }, { label: 'Enable', primary: true }]);
-    if (ok !== 1) return;
-    try {
-      await loadAsar();
-      let err: string[] = [];
-      app.romEdit('BG2/BG3 enabled (VRAM patch)', () => { const r = installVramPatch(app.rom); if (!r.ok) err = r.errors; });
-      if (err.length) { toast(err.join(' '), 'error'); return; }
-      app.flushRomChange();
-      toast('VRAM patch installed: BG2/BG3 are now available.');
-    } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
-  }
-
   // ---------- file list ----------
   private buildList(): void {
     const app = this.app;
     clear(this.list);
-    const n = hasEditorPatch(app.rom) ? 0x100 : VANILLA_GFX;
     const used = new Map(this.levelSlots().filter((s) => s.file !== 0xff).map((s) => [s.file, s.name] as [number, string]));
-    for (let i = 0; i < n; i++) {
+    for (let i = 0; i < 0x100; i++) {
       const e = gfxEntry(app.rom, i);
       const name = gfxName(i);
       if (this.filter && !name.toLowerCase().includes(this.filter) && !hex(i, 2).toLowerCase().includes(this.filter)) continue;
@@ -448,7 +413,6 @@ export class GfxTab implements WsPanel {
 
   // creates an empty animation source file (4 KB, 128 tiles)
   private async newAnimFile(n: number): Promise<void> {
-    if (!(await confirmExAnim(this.app))) return;
     try {
       this.app.romEdit(`${gfxName(n)} created`, () => writeAltFile(this.app.rom, n - ANIM_FILE, new Uint8Array(0x1000)));
       this.reload();
@@ -458,7 +422,7 @@ export class GfxTab implements WsPanel {
   // first free ExGFX number (80-FF first, then 32-7F), -1: none
   private freeExGfx(): number {
     const rom = this.app.rom;
-    for (let i = 0x80; i < 0x100; i++) if (!hasEditorPatch(rom) || !gfxEntry(rom, i)) return i;
+    for (let i = 0x80; i < 0x100; i++) if (!gfxEntry(rom, i)) return i;
     for (let i = VANILLA_GFX; i < 0x80; i++) if (!gfxEntry(rom, i)) return i;
     return -1;
   }
@@ -469,7 +433,7 @@ export class GfxTab implements WsPanel {
     const n = this.freeExGfx();
     if (n < 0) { toast('Keine freie ExGFX-Nummer mehr', 'error'); return null; }
     try {
-      app.romEdit(`${gfxName(n)} created`, () => { installEditorPatch(app.rom); setGfxEntry(app.rom, n, app.rom.allocWrite(new Uint8Array(0x1000)), true); });
+      app.romEdit(`${gfxName(n)} created`, () => setGfxEntry(app.rom, n, app.rom.allocWrite(new Uint8Array(0x1000)), true));
       this.select(n);
       if (hint) toast(`${gfxName(n)} created (empty, 4bpp). “Use in slot” on the right puts it into this level.`);
       return n;
@@ -588,7 +552,7 @@ export class GfxTab implements WsPanel {
     const num = slot.first + t;
     const src = map16Source(this.app.rom, this.app.render);
     const users: number[] = [];
-    const max = map16Ext(this.app.rom) ? EXT_TILES : EXT_FIRST;
+    const max = EXT_TILES;
     for (let m = 0; m < max && users.length < 64; m++) if (src.fg(m).some((w) => (w & 0x3ff) === num)) users.push(m);
     // animated tiles: the game overwrites them, so drawing there does not show in the level
     const own = animsAt(this.app, num);
@@ -981,7 +945,6 @@ export class GfxTab implements WsPanel {
     const bmp = await createImageBitmap(file);
     if (bmp.width !== 128) { toast('The image must be 128 pixels wide (16 tiles)', 'error'); return null; }
     let raw = f.raw;
-    if (f.num >= ANIM_FILE && !(await confirmExAnim(this.app))) return null;
     if (f.empty && f.num >= ANIM_FILE) raw = true;
     else if (f.empty) {
       const c = await choose(`Create ${gfxName(f.num)}`, 'Save in which format?', [{ label: 'Cancel' }, { label: 'LZ2 (like the original, 3bpp/8 colors)' }, { label: '4bpp uncompressed (16 colors)', primary: true }]);
@@ -1052,7 +1015,6 @@ export class GfxTab implements WsPanel {
     try {
       const data = new Uint8Array(await file.arrayBuffer());
       if (target >= ANIM_FILE) {
-        if (!(await confirmExAnim(this.app))) return null;
         if (data.length % 32 || data.length > ALT_FILE_MAX) throw new Error('Animation graphic: an uncompressed 4bpp file of up to 1023 tiles is expected');
         this.importEdit(`${file.name} → ${gfxName(target)}`, into, () => writeAltFile(this.app.rom, target - ANIM_FILE, data));
         this.select(target);

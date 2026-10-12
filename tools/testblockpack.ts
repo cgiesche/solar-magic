@@ -15,6 +15,9 @@ import { levelExtGfx, levelGfx, gfxEntry, installEditorPatch, GFX_SLOT_NAMES } f
 import { map16Source } from '../src/core/render.ts';
 import { loadLevel, serializeLayer1, newUid } from '../src/core/level.ts';
 import { DM16_EXT } from '../src/core/patches.ts';
+import { editorImage } from './fixture.ts';
+
+const EDITOR_IMAGE = await editorImage(); // the fixture as the editor opens it
 
 await loadAsar();
 let bad = 0;
@@ -50,7 +53,7 @@ check(preview.unclaimed.join() === 'readme.txt' && preview.docs.includes('readme
 const m = parseMap16File(preview.files.get('Tiles.map16')!);
 check(m.width === 2 && m.tiles[1][0] === 0x1a01 && m.acts?.[0] === 0x25, '.map16 parsed');
 
-const fresh = () => { const r = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc'))); installEditorPatch(r); return r; };
+const fresh = () => { const r = new Rom(EDITOR_IMAGE.slice()); installEditorPatch(r); return r; };
 const rom = fresh();
 const emu = new LevelEmulator(rom); emu.boot();
 const blank = map16Source(rom, emu.load(0x105)).fg(0x25);
@@ -71,7 +74,7 @@ const opts = { blank, tileWords: () => blank };
   const one = inspectUpload('one.asm', enc.encode(block));
   if (one.status !== 'ready') throw new Error('one.asm: ' + one.status);
   const taken = await installPackage(rom, one, { ...opts, level: null });
-  setExtTileWords(rom, 0x500, words[0], blank);
+  setExtTileWords(rom, 0x500, words[0]);
   const p = planUpload(rom, preview, blank);
   check(taken.ok && p.map16?.at === p.blocks[0].tiles[0] && p.blocks[1].tiles[0] === p.blocks[0].tiles[0] + 1 && p.blocks[0].tiles[0] !== 0x500 && p.notes.some((n) => /taken/.test(n)),
     `500 taken: blocks and Map16 tiles together from ${p.map16?.at.toString(16)}`);

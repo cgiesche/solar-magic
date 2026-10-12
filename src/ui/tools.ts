@@ -8,9 +8,9 @@ import { readSecondaryEntrance, type SecondaryEntrance, loadLevel, cloneLevel, i
 import { exportLevelFile, importLevelFile, LEVEL_FILE_EXT } from '../core/levelfile.ts';
 import { ENTRANCE_ACTIONS, hex, objectName } from '../core/names.ts';
 import { saveLevel } from '../core/save.ts';
-import { hasEditorPatch, installEditorPatch, DM16_EXT, editorPatch, setLevelGfx, customPalette, setCustomPalette, bgBank } from '../core/patches.ts';
+import { DM16_EXT, setLevelGfx, customPalette, setCustomPalette, bgBank } from '../core/patches.ts';
 import { bgFromWram } from '../core/bg.ts';
-import { STRUCT_EXT, hasStructs } from '../core/structs.ts';
+import { STRUCT_EXT } from '../core/structs.ts';
 
 // overview of all secondary entrances of the current level's bank: where each leads, which exits use it
 export function openEntrancesDialog(app: App): void {
@@ -101,7 +101,6 @@ export function openRomInfo(app: App): void {
     h('div', { class: 'prop' }, h('label', null, 'Size'), h('span', null, `${rom.size / 1024} KB${rom.smcHeader ? ' (+512 byte copier header)' : ''}`)),
     h('div', { class: 'prop' }, h('label', null, 'Expanded area'), h('span', null, `${expanded / 1024} KB, ${(used / 1024).toFixed(1)} KB of it in use (${rats.length} RATS blocks)`)),
     h('div', { class: 'prop' }, h('label', null, 'Editor data'), h('span', null, rom.extra.size ? `${(rom.extraSize / 1024).toFixed(1)} KB (${rom.extra.size} source archives) – not in the ROM, saved with “Save project”` : 'none')),
-    h('div', { class: 'prop' }, h('label', null, 'Editor patch'), h('span', null, hasEditorPatch(rom) ? 'installed' : 'not installed')),
   );
   modal('ROM information', body, [{ label: 'Close', primary: true }]);
 }
@@ -116,13 +115,6 @@ export function openExpandDialog(app: App): void {
     }, `${sz / 1048576} MB`))),
   );
   const dlg = modal('Expand ROM', body, [{ label: 'Cancel' }]);
-}
-
-export async function installEditorPatchAction(app: App): Promise<void> {
-  const ok = await choose('Install editor patch', 'The editor patch allows sprite data in any bank, 256 graphics files (ExGFX, also uncompressed as 4bpp), graphics assignment per level and the "Direct Map16" object (place any Map16 tiles). It is also installed automatically when needed.',
-    [{ label: 'Cancel' }, { label: 'Install', primary: true }]);
-  if (ok !== 1) return;
-  try { installEditorPatch(app.rom); app.romWritten(); toast('Editor patch installed'); app.refresh(); } catch (e) { toast(String(e), 'error'); }
 }
 
 // one undoable structural edit of the current level
@@ -194,8 +186,8 @@ export async function importLevel(app: App): Promise<boolean> {
     const data = importLevelFile(rom, await f.text(), app.level);
     app.editLevel(() => { app.level = data.level; }, false);
     // graphics slots and palette live in the ROM: an undoable ROM edit (Ctrl+Z takes them back first)
-    if (data.gfx || editorPatch(rom) || data.palette || customPalette(rom, n)) app.romEdit(`${f.name}: graphics slots/palette of level ${hex(n, 3)}`, () => {
-      if (data.gfx || editorPatch(rom)) setLevelGfx(rom, n, data.gfx ?? new Array(8).fill(0xff));
+    app.romEdit(`${f.name}: graphics slots/palette of level ${hex(n, 3)}`, () => {
+      setLevelGfx(rom, n, data.gfx ?? new Array(8).fill(0xff));
       if (data.palette || customPalette(rom, n)) setCustomPalette(rom, n, data.palette);
     });
     app.romWritten();
@@ -246,7 +238,7 @@ export function openInsertDialog(app: App, tx: number, ty: number): void {
       if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1');
       if (kind === 0 && num === 0) { toast('There is no object 00 – use “Extended object” for extended objects.', 'error'); return false; }
       if (kind === 1 && num === DM16_EXT) { toast('Please place Direct Map16 via the palette\'s Map16 tab.', 'error'); return false; }
-      if (kind === 1 && num === STRUCT_EXT && hasStructs(app.rom)) { toast('Please place structures via the palette\'s Structures tab.', 'error'); return false; }
+      if (kind === 1 && num === STRUCT_EXT) { toast('Please place structures via the palette\'s Structures tab.', 'error'); return false; }
       app.insertAt(tx, ty, kind === 0 ? { kind: 'obj', num, ext: 0, size } : { kind: 'obj', num: 0, ext: num, size: 0 });
     }
   };

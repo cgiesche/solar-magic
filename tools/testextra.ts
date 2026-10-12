@@ -13,14 +13,14 @@ import { savePackage, packageArchive, listPackages, emptyParts, migratePackageFi
 import { emptyMusicProject, songsFromZip, addSongs, saveMusicProject, loadMusicProject } from '../src/core/music.ts';
 import { RomHistory } from '../src/core/romhistory.ts';
 import { testSongZip } from './testsong.ts';
+import { editorImage } from './fixture.ts';
 
 let fails = 0;
 const check = (ok: boolean, what: string) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if (!ok) fails++; };
 const zipsInRom = (rom: Rom) => rom.scanRats().filter((b) => rom.data[b.start + 8] === 0x50 && rom.data[b.start + 9] === 0x4b).length;
 
 await loadAsar();
-const raw = readFileSync('test/fixtures/smw.smc');
-const vanilla = new Rom(new Uint8Array(raw.subarray(raw.length % 0x8000)));
+const vanilla = new Rom(await editorImage()); // the fixture as the editor opens it
 const rom = new Rom(vanilla.data.slice());
 
 // a patch with sources, a package with files, the music project
