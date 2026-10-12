@@ -4,6 +4,12 @@ A browser-based editor for Super Mario World ROMs: levels, graphics and third-pa
 
 ## Language
 
+### The editor's own patches
+
+**Editor patches**:
+The editor's own ASM in the ROM (SMWE, SMWV, SMWG, SMWP, SMWB, SMWU, SMWX, SMWH, SMWS, the ExAnimation engine), installed when a ROM is opened; the editor relies on them, and a ROM whose hooks hold other code is not opened (ADR 0004). Only SMWM (message texts in free space) is installed when it is needed. Not third-party content and never part of a package.
+_Avoid_: Lunar Magic hacks, built-in patches
+
 ### Third-party content
 
 **Package**:

@@ -145,8 +145,9 @@ When a level is displayed, it runs the ROM's **original loading routines** (~15 
 
 ## Custom ROM patch ("SMWE")
 
-Installed automatically when needed (or via *ROM → Install editor patch …*). It is assembled at runtime
-and changes only a few verified locations:
+Installed when a ROM is opened, together with the editor's other patches below (all but SMWM, which moves
+the message texts only when they no longer fit in place). A ROM whose hooks already hold other code (another
+patch, Lunar Magic) is not opened. The patches are assembled at runtime and change only a few verified locations:
 
 | Location | Purpose |
 |---|---|
@@ -168,7 +169,7 @@ and changes only a few verified locations:
 | `$00AA50` ("SMWG") | BG2/BG3 graphics slots per level for Map16 tiles 200–2FF (as in Lunar Magic); requires the VRAM patch |
 | 13 locations ("SMWV") | VRAM patch: layer 1/2 tilemaps in levels 64×32 at `$3000`/`$3800` instead of 64×64 at `$2000`/`$3000` (like LM), so that BG2/BG3 have room; details in [docs/patches.md](docs/patches.md) |
 
-The tests check that all vanilla levels load identically with the patch installed.
+The tests check that all vanilla levels load identically with the patches installed.
 
 ## ASM patches, UberASM, custom blocks, custom sprites
 
@@ -196,7 +197,7 @@ Whose formats and interfaces the editor follows: [docs/credits.md](docs/credits.
 * Title screen and credits are not included.
 * ASM patches: LoROM only, no SA-1; patches that require Lunar Magic do not work.
 * Tested with the US ROM (`Super Mario World (U) [!]`, MD5 `cdd3c8c37322978ca8669b34bc89c804`). ROMs edited with
-  Lunar Magic use other hooks/formats and are not specifically supported.
+  Lunar Magic use other hooks/formats and are not opened.
 
 ## Structure
 

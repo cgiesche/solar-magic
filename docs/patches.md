@@ -81,7 +81,7 @@ the ROM stays unchanged; Ctrl+Z brings back a removed package.
 **Legacy packages:** patches that were applied before packages were managed are wrapped into one
 **legacy package** each when the ROM is opened (once; reopening does not create duplicates). They appear in the list like
 any other package, with the settings of their patch, and can be removed the same way. The
-editor's VRAM patch (BG2/BG3) is not third-party content and is listed on its own as *Editor patch*. Whatever in the
+editor's own patches (including the VRAM patch and the ExAnimation engine) are not third-party content and are not listed. Whatever in the
 projects belongs to no package (added earlier or by hand) is listed at the bottom of the list with a link to the tab.
 A Lunar Magic level file (`.mwl`) without code is a level import and does not become a package; in a package with code it is the package's sample level.
 
@@ -221,9 +221,10 @@ themselves, external patches via `ram` in the `patch.json` (see below):
 - RAM of the original game (e.g. `$7F837B`) belongs to no one and is not checked.
 - Addresses in the low RAM mirror (`$0DC4`) are compared as `$7E0DC4`.
 
-If a patch occupies the entry point of an editor patch that is **not** installed yet, there is only
-a warning. The corresponding editor feature (e.g. custom level palettes) can then no longer be
-activated, and its error message names the patch.
+The editor's own patches are installed when a ROM is opened (see [Editor hooks](#editor-hooks)), so a
+patch that changes one of their entry points is rejected. The one exception is SMWM (message texts in free
+space), installed only when the texts no longer fit in place: a patch on its entry point only gets a
+warning, and moving the texts is then no longer possible.
 
 **Removing** resets the changed bytes to their original state and frees the patch's free
 space. If a patch applied later has modified this patch's code, that one has to be removed
@@ -287,7 +288,7 @@ Optional, in the root directory of the archive:
 ### `smwe.asm`
 
 Generated for every patch from the ROM's current state; a file of the same name in the
-patch takes precedence. Addresses are 0 if the respective editor patch is not installed.
+patch takes precedence. Every ROM the editor opens has all editor patches, so all addresses are set.
 
 | Define | Content |
 |---|---|
@@ -301,11 +302,11 @@ patch takes precedence. Addresses are 0 if the respective editor patch is not in
 | `!SMWE_LEVEL_MUSIC` | 512 bytes: a level's song instead of its header setting, 0 = header (music per level, SMWU) |
 | `!SMWE_EXT_GFX` | 512 × 2 bytes: a level's BG2/BG3 graphics file (tiles 200–27F/280–2FF), `$FF` = none |
 | `!SMWE_MAP16X` | 1 if the Map16 extension (SMWX) is installed |
-| `!SMWE_BG_MAP16_GFX` | 8 bytes (4 tile words) per BG tile 200–FFF (SMWH), 0 = not installed |
+| `!SMWE_BG_MAP16_GFX` | 8 bytes (4 tile words) per BG tile 200–FFF (SMWH) |
 | `!SMWE_ACTS_LIKE` | `$1000` × 2 bytes: "acts like" of Map16 tiles 000–FFF |
 | `!SMWE_MAP16_GFX` | 8 bytes (4 tile words) per tile 200–FFF |
 | `!SMWE_BLOCKS` | `$1000` × 4 bytes: custom block per tile (address of the JMP table, flags) |
-| `%smwe_require(X)` | aborts with a message if `!SMWE_X` is 0, e.g. `%smwe_require(MAP16X)` |
+| `%smwe_require(X)` | aborts with a message if `!SMWE_X` is 0, e.g. `%smwe_require(MAP16X)` (kept for older patches; always passes) |
 
 ## UberASM
 
@@ -332,8 +333,7 @@ The format matches UberASM Tool 2.x; existing resources work unchanged:
   resources and dispatchers.
 - Skipping `*` resources (`-file.asm`) is not supported.
 - No SA-1, so `;>sa1` is ignored.
-- Level resources need the level number in `$7E010B`; for that, the editor patch is installed
-  when needed.
+- Level resources need the level number in `$7E010B`, which the editor patch provides.
 
 The entry points are the same as in UberASM Tool (see [Hooks](#editor-hooks)). Patches that
 collide with UberASM Tool therefore collide here too.
@@ -368,7 +368,7 @@ MarioSide:
 * `list.txt` as in GPS: `200 block.asm` or `200:130 block.asm` (tile, optionally "acts like").
   Assigning also works in the Map16 editor: *Custom Blocks …* opens the *Blocks* tab with the selected tile.
 
-The blocks depend on the Map16 extension (SMWX); it is installed when needed. Custom blocks
+The blocks depend on the Map16 extension (SMWX), which every ROM the editor opens has. Custom blocks
 work for all tiles 000–FFF.
 
 **Which offset is called** follows from the caller of the block routine `$00F545`:
@@ -414,8 +414,8 @@ This also works step by step:
 **BG2/BG3:** like Lunar Magic, the editor has two additional graphics slots per level for Map16 tiles
 200–27F (BG2) and 280–2FF (BG3), in the graphics section under *Graphics* as the BG2/BG3 slot cards. In the original game, this
 spot in VRAM (`$2000–$2FFF`) holds the layer 1 tilemap. The slots therefore need the **VRAM patch**
-("SMWV"), which relocates the tilemaps as LM does, see below. It is installed with the "BG2/BG3" card → "Enable …"
-in the *Graphics* tab, and automatically for block packages with BG2/BG3 graphics.
+("SMWV"), which relocates the tilemaps as LM does, see below. Like the other editor patches it is installed when
+the ROM is opened.
 
 **AN2:** like Lunar Magic's AN2 slot, a level can have an uncompressed 4bpp ExGFX file whose first 3 KB (96 tiles)
 are kept in RAM at `$7EAD00–$7EB8FF`; ExAnimation frames from `$7EAD00` on come from it (the game's own animation
@@ -425,9 +425,8 @@ the game uses that RAM only as scratch for decompressing graphics while loading,
 (found by emulation). Right after it, `$7EB900–$7EC0FF`, the level's BG tilemap stays, which the editor reads. Packages and level
 imports set it together with the ExAnimation slots that animate their tiles.
 
-An earlier installation of the slots without the VRAM patch (up to this version) overwrote the layer 1 tilemap.
-It is disabled when the ROM is opened; its assignments are kept and apply
-again as soon as the VRAM patch is installed.
+An earlier installation of the slots without the VRAM patch overwrote the layer 1 tilemap. Opening such a ROM
+installs the VRAM patch, and the slots work with their assignments.
 
 ### VRAM patch (SMWV)
 
@@ -477,8 +476,7 @@ belongs to the `.palmask` of the same name.
    8×8 tile numbers of the tile words: 000 FG1, 080 FG2, 100 BG1, 180 FG3, 200 BG2, 280 BG3), with the
    number the `.mwl` gives for them. The package's ExGFX files are stored under free numbers
    (Lunar Magic counts up to FFF, the editor up to FE). A file the ROM already has is only set for the
-   part's own slots (a background does not change FG slots). For BG2/BG3 the VRAM patch is installed
-   when needed.
+   part's own slots (a background does not change FG slots).
 4. **Colors**: per palette, the colors according to the `.palmask` and, if marked, the background color (from the
    `.mwl`) go into the level's custom palette. It is created from the current colors when needed.
    Palettes with only colors 0–31 (the 2bpp palettes of layer 3) are not preselected.
@@ -496,8 +494,7 @@ tile words of a BG tile are located there at `$0D9100 + tile × 8`. The hook at 
 (`!SMWE_BG_MAP16_GFX`) for tiles 200–FFF; 000–1FF stay unchanged. The high bytes
 of the tilemap (`$7EBD00`) are already fully written by the game's RLE decoder, so no further hook
 is needed for them. In the graphics section, *Map16 tiles → Background* shows pages 2–F. The BG brush
-has a page selection. When a BG with such tiles is saved, the editor installs the patch
-automatically.
+has a page selection.
 
 ## Editor hooks
 
