@@ -86,7 +86,8 @@ async function startWith(rom: Rom, name: string): Promise<boolean> {
   // a reload stays where it was: the entry of the browser history, else the place in the URL
   const st: unknown = history.state;
   const at = st && typeof st === 'object' && 'nav' in st ? (st as { nav: NavLoc }).nav : fromHash(location.hash);
-  if (at?.w !== 'level') app.openLevel(0x105);
+  // a level is open before the UI starts: the workspaces and the restore read app.level
+  app.openLevel(at?.w === 'level' ? at.level : 0x105);
   void ui.start(at);
   return true;
 }
