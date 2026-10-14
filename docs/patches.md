@@ -434,6 +434,20 @@ one extra lag frame – in the test about 0.1 % of frames. If another patch occu
 [Free RAM](#applying-patches)). Patches that use the range anyway or modify the tilemap uploads themselves
 are not compatible with it.
 
+### Layer 2 scroll rates
+
+The level header pairs a horizontal and a vertical layer 2 rate in one of 16 settings. As in Lunar Magic 3.40,
+a level can instead have **separate horizontal and vertical rates** (*Level header → Layer 2 scroll →
+Separate H/V*): None, Constant, Medium (1/2), Slow (1/32), Medium 2–4 (1/4, 1/8, 1/16), Slow 2 (1/64), Fast (1.2×),
+and auto-scrolls up/down or left/right (layer 2 follows layer 1 and moves on by 1/4 to 4 pixels per frame
+while the game runs). The data is Lunar Magic's: a byte per level at `$06FA00` (`SHC-VVVV`: S separate,
+H the header's 4 bits are a horizontal auto-scroll, C Lunar Magic's "auto-set screens", V the vertical
+rate), also read from a `.mwl` (level information byte 17). The format was learned from what a Lunar
+Magic-saved ROM does in the editor's emulator, not from Lunar Magic's code. The patch hooks the level load
+(`$05D915`) and the layer 2 scroll (`$00F79D`, the place Lunar Magic hooks); levels without separate rates
+run the game's own code. The dialog shows what each setting does by letting the level run
+(`src/core/l2scroll.ts`, `tools/testl2scroll.ts`).
+
 ## Level import (Lunar Magic)
 
 Graphics in SMWCentral's graphics section are Lunar Magic exports, as the submission rules
@@ -495,6 +509,7 @@ not compatible with the respective feature.
 | `$058DE6` | BG Map16 extension, BG tiles 200–FFF (SMWH) |
 | `$058551` | Music per level (SMWU) |
 | `$00AA50` | BG2/BG3 graphics slots (SMWG) |
+| `$05D915`, `$00F79D`, table `$06FA00` | Layer 2 scroll rates; RAM `$7F3660–$7F3665` |
 | `$008A7F`, `$0087AD`, `$0085E3`, `$0580B0`, `$0580B4`, `$0580BF`, `$0580C3`, `$058730`, `$058770`, `$0587D4`, `$0587DB`, `$05880B`, `$058812` | VRAM patch (SMWV): tilemaps relocated; RAM `$7F0000–$7F3653` |
 | Ext. object table `$0DA118` (entry `$03`) | Structures (SMWS); empty in the original, no code hook |
 | `$05B20F` | Messages in free space (SMWM), only if the texts no longer fit |

@@ -30,6 +30,7 @@ import { resizeObjectSize, type ObjKind, type ObjKinds } from '../core/objkinds.
 import { JumpArcs, ARC_SPEEDS, type JumpArc } from '../core/jumparcs.ts';
 import { scanKey, type ScanResult } from '../core/levelscan.ts';
 import { layer3Kinds, tideKind, layer3Top, type Layer3Kind } from '../core/layer3.ts';
+import { layer2MotionsJob, type Layer2Motions } from '../core/l2scroll.ts';
 import { variantOf, blockKey, spriteKey, type BlockProbe, type SpriteProbe } from '../core/blockprobe.ts';
 import type { ProbeReply } from '../core/probehost.ts';
 import { ProbeClient } from '../core/probeclient.ts';
@@ -977,6 +978,31 @@ export class App {
   private tideCache: { images: LevelImages; range: unknown; value: ReturnType<App['tide']> } | null = null;
 
   private layer3Emu: LevelEmulator | null = null;
+
+  // What every layer 2 scroll setting does (l2scroll.ts), measured with the level's code on an own
+  // emulator a setting at a time; null while that runs, then `done` is called. Kept per level while
+  // the ROM it read is unchanged.
+  layer2Motions(done: () => void): Layer2Motions | null {
+    const key = `l2m1:${this.level.number}`;
+    const stored = this.results.get<Layer2Motions>(key);
+    if (stored) return stored;
+    if (this.l2Run?.key === key) { this.l2Run.waiting.push(done); return null; }
+    const emu = this.l2Emu = this.auxEmu(this.l2Emu);
+    const run = this.l2Run = { key, waiting: [done] };
+    const job = layer2MotionsJob(emu, this.level.number, this.buildOverrides());
+    const step = () => {
+      if (this.l2Run !== run) return;
+      const r = job.next();
+      if (!r.done) { setTimeout(step, 0); return; }
+      this.l2Run = null;
+      this.results.set(key, r.value.result, this.results.fp.deps(r.value.reads));
+      for (const f of run.waiting) f();
+    };
+    setTimeout(step, 0);
+    return null;
+  }
+  private l2Emu: LevelEmulator | null = null;
+  private l2Run: { key: string; waiting: (() => void)[] } | null = null;
 
   // a background emulator (new for another ROM) set up from the main one's boot state
   private auxEmu(emu: LevelEmulator | null): LevelEmulator {

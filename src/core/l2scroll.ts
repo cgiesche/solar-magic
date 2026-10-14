@@ -13,7 +13,8 @@
 
 import type { Rom } from './rom.ts';
 import type { LevelEmulator, LevelOverride } from './levelemu.ts';
-import { L1_PTRS } from './level.ts';
+import { L1_PTRS, L2_PTRS, encodeSecondaryHeader, decodeSecondaryHeader, readSecondaryHeader, type SecondaryHeader } from './level.ts';
+import type { RomReads } from './romdeps.ts';
 import { GM, RAM, get16, setMarioPos, setCameraX, setCameraY } from './ram.ts';
 import { applyPatch, type ApplyResult } from './patchapply.ts';
 import { listPatches } from './patchreg.ts';
@@ -206,7 +207,10 @@ const d16 = (a: number, b: number) => (((b - a) << 16) >> 16);
 export function layer2Motion(emu: LevelEmulator, level: number, ov: LevelOverride): { x: Motion; y: Motion } {
   const rom = emu.rom, l1 = ov.layer1 ?? rom.bytes(rom.r24(L1_PTRS + level * 3), 5);
   const hdr = [(l1[0] & 0xe0) | 0x0f, (l1[1] & 0xe0) | VERTICAL_MODE, l1[2], l1[3], l1[4]];
-  const r = emu.load(level, { ...ov, layer1: new Uint8Array([...hdr, 0xff]), layer2: undefined, sprites: new Uint8Array([0, 0xff]), byteOwner: undefined });
+  const r = emu.load(level, {
+    ...ov, layer1: new Uint8Array([...hdr, 0xff]), layer2: undefined, bgData: undefined, layer2Pointer: rom.r24(L2_PTRS + 0x105 * 3),
+    sprites: new Uint8Array([0, 0xff]), byteOwner: undefined,
+  });
   const none = { x: { rate: 0, drift: 0 }, y: { rate: 0, drift: 0 } };
   if (!r.ok) return none;
   const s = emu.snes, w = s.wram;
@@ -233,4 +237,41 @@ export function layer2Motion(emu: LevelEmulator, level: number, ov: LevelOverrid
     return { drift, rate: l1 ? (d16(b[i + 2], c[i + 2]) - drift * MOVE) / l1 : 0 };
   };
   return { x: motion(0), y: motion(1) };
+}
+
+// The separate rates, the same values for both directions as the header dialog offers them: 0-8,
+// then the auto-scrolls $10-$1B (horizontally the header's 4 bits with H set).
+export const RATE_OPTIONS = [...Array(9).keys(), ...Array.from({ length: 12 }, (_, i) => 0x10 + i)];
+export const hRate = (s: SecondaryHeader) => (s.layer2HAuto ? 0x10 | s.layer2Scroll : s.layer2Scroll);
+export function withRates(s: SecondaryHeader, h: number, v: number): SecondaryHeader {
+  return { ...s, layer2Separate: 1, layer2Scroll: h & 0x0f, layer2HAuto: h >= 0x10 ? 1 : 0, layer2V: v };
+}
+
+export interface Layer2Motions {
+  paired: { x: Motion; y: Motion }[]; // the game's 16 settings
+  separate: { x: Motion; y: Motion }[]; // RATE_OPTIONS, each in both directions at once
+}
+
+// every setting measured (layer2Motion) in the level with its code (ov); yields between the settings
+export function* layer2MotionsJob(emu: LevelEmulator, level: number, ov: LevelOverride): Generator<void, { result: Layer2Motions; reads: RomReads }> {
+  const sec = ov.secondaryHeader ? decodeSecondaryHeader(ov.secondaryHeader) : readSecondaryHeader(emu.rom, level);
+  let reads: RomReads | null = null;
+  const measure = (s: SecondaryHeader) => {
+    const r = emu.tracked(() => layer2Motion(emu, level, { ...ov, secondaryHeader: encodeSecondaryHeader(s) }));
+    if (reads) reads.add(r.reads); else reads = r.reads;
+    return r.result;
+  };
+  const result: Layer2Motions = { paired: [], separate: [] };
+  for (let p = 0; p < 16; p++) { result.paired.push(measure({ ...sec, layer2Separate: 0, layer2Scroll: p })); yield; }
+  for (const v of RATE_OPTIONS) { result.separate.push(measure(withRates(sec, v, v))); yield; }
+  return { result, reads: reads! };
+}
+
+// what a motion looks like: "fixed", "1:1", "1/4", "1.2×", "1:1, up 0.25 px/frame"
+export function motionText(m: Motion, axis: 'x' | 'y'): string {
+  const rate = m.rate < 0.005 ? 'fixed' : m.rate > 0.95 && m.rate < 1.05 ? '1:1'
+    : m.rate > 1 ? `${Math.round(m.rate * 10) / 10}×` : `1/${2 ** Math.round(Math.log2(1 / m.rate))}`;
+  if (Math.abs(m.drift) < 0.01) return rate;
+  const dir = axis === 'x' ? (m.drift > 0 ? 'left' : 'right') : (m.drift > 0 ? 'up' : 'down');
+  return `${rate}, ${dir} ${Math.round(Math.abs(m.drift) * 100) / 100} px/frame`;
 }

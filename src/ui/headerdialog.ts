@@ -2,13 +2,14 @@
 
 import type { App } from './app.ts';
 import { h, select, hexInput, modal, toast } from './dom.ts';
-import { TILESETS, levelModeName, MUSIC, TIME_SETTINGS, VERTICAL_SCROLL, ENTRANCE_ACTIONS, hex2, hex } from '../core/names.ts';
+import { TILESETS, levelModeName, MUSIC, TIME_SETTINGS, VERTICAL_SCROLL, ENTRANCE_ACTIONS, layer2RateName, hex2, hex } from '../core/names.ts';
 import { hasLayer2Objects, type PrimaryHeader, type SecondaryHeader, L2_PTRS } from '../core/level.ts';
 import { bgBank, levelMusic, setLevelMusic, HEADER_MUSIC_TABLE } from '../core/patches.ts';
 import { songHex } from '../core/music.ts';
 import { currentSongs, playButton } from './musicdialog.ts';
 import { musicPlayer } from './musicplayer.ts';
 import { LAYER3_KIND_TEXT } from '../core/layer3.ts';
+import { RATE_OPTIONS, hRate, withRates, motionText, type Layer2Motions } from '../core/l2scroll.ts';
 import { incompleteSprites, spriteMemText, SPRITE_MEM_HELP } from './spritemem.ts';
 
 function range(n: number, fmt: (i: number) => string = (i) => String(i)): [number, string][] {
@@ -73,6 +74,53 @@ export function openHeaderDialog(app: App): void {
   const musicSel = sel('music', range(8, (i) => `${i} – ${MUSIC[i]} (Song ${hex2(tableSong(i))}${songName(tableSong(i)) && songName(tableSong(i)) !== MUSIC[i] ? ` ${songName(tableSong(i))}` : ''})`));
   musicSel.addEventListener('change', () => { if (musicPlayer.label === 'header') musicPlayer.stop(); });
 
+  // layer 2 scroll: the game's 16 paired settings, or separate horizontal and vertical rates (Lunar
+  // Magic 3.40's); what each does is measured by letting the level run (l2scroll.ts), shown once known
+  let motions: Layer2Motions | null = null;
+  let hr = sd.layer2Separate ? hRate(sd) : 0, vr = sd.layer2Separate ? sd.layer2V : 0;
+  const pairedOpts = (): [number, string][] => range(16, (i) => {
+    const m = motions?.paired[i];
+    return m ? `${hex(i, 1)} – H ${motionText(m.x, 'x')}, V ${motionText(m.y, 'y')}` : hex(i, 1);
+  });
+  const rateOpts = (axis: 'x' | 'y', cur: number): [number, string][] => {
+    const opts = RATE_OPTIONS.map((v, i): [number, string] => {
+      const m = motions?.separate[i][axis];
+      return [v, `${layer2RateName(v, axis === 'x')}${m ? ` (${motionText(m, axis)})` : ''}`];
+    });
+    return RATE_OPTIONS.includes(cur) ? opts : [...opts, [cur, layer2RateName(cur, axis === 'x')]];
+  };
+  const pairedSel = select(pairedOpts(), sd.layer2Scroll, (v) => { sd.layer2Scroll = v; });
+  const hSel = select(rateOpts('x', hr), hr, (v) => { hr = v; });
+  const vSel = select(rateOpts('y', vr), vr, (v) => { vr = v; });
+  const setOpts = (el: HTMLSelectElement, opts: [number, string][], cur: number) =>
+    el.replaceChildren(...opts.map(([v, l]) => h('option', { value: String(v), selected: v === cur }, l)));
+  const hRow = f('Layer 2 horizontal', hSel), vRow = f('Layer 2 vertical', vSel);
+  const sepBox = h('input', { type: 'checkbox', checked: !!sd.layer2Separate });
+  const showSeparate = () => {
+    pairedSel.style.display = sepBox.checked ? 'none' : '';
+    hRow.style.display = vRow.style.display = sepBox.checked ? '' : 'none';
+  };
+  sepBox.addEventListener('change', () => {
+    // separate rates start where the paired setting was, when it is measured
+    const m = motions?.paired[sd.layer2Scroll];
+    const same = (axis: 'x' | 'y') => RATE_OPTIONS.findIndex((_, i) => motionText(motions!.separate[i][axis], axis) === motionText(m![axis], axis));
+    if (sepBox.checked && m && same('x') >= 0 && same('y') >= 0) {
+      hr = RATE_OPTIONS[same('x')]; vr = RATE_OPTIONS[same('y')];
+      hSel.value = String(hr); vSel.value = String(vr);
+    }
+    showSeparate();
+  });
+  showSeparate();
+  const measured = () => {
+    if (!open) return;
+    motions = app.layer2Motions(measured);
+    if (!motions) return;
+    setOpts(pairedSel, pairedOpts(), sd.layer2Scroll);
+    setOpts(hSel, rateOpts('x', hr), hr);
+    setOpts(vSel, rateOpts('y', vr), vr);
+  };
+
+  let open = true;
   const screensWarn = h('div', { class: 'hint warn-text' });
   const body = h('div', { class: 'header-dialog' },
     h('h3', null, 'General'),
@@ -103,7 +151,8 @@ export function openHeaderDialog(app: App): void {
       f('Entrance screen', sel2('entranceScreen', range(32, hex2))),
       f('Entrance action', sel2('entranceAction', range(8, (i) => `${i} – ${ENTRANCE_ACTIONS[i]}`))),
       f('Midway screen', sel2('midwayScreen', range(16, hex2))),
-      f('Layer 2 scroll', sel2('layer2Scroll', range(16, hex2))),
+      f('Layer 2 scroll', h('div', null, h('label', { title: 'Separate horizontal and vertical layer 2 rates, with more rates and auto-scrolls (as Lunar Magic 3.40)' }, sepBox, ' Separate H/V'), pairedSel)),
+      hRow, vRow,
       f('Layer 3', l3Sel, 'Depends on the tileset'),
       f('FG start Y', sel2('fgInitY', range(4))),
       f('BG start Y', sel2('bgInitY', range(4))),
@@ -134,7 +183,7 @@ export function openHeaderDialog(app: App): void {
           const lv = app.level; // (the music edit saves a changed level first: a new object)
           const modeChangedL2 = hasLayer2Objects(hd.mode) !== hasLayer2Objects(lv.header.mode);
           lv.header = hd;
-          lv.secondary = sd;
+          lv.secondary = sepBox.checked ? withRates(sd, hr, vr) : { ...sd, layer2Separate: 0, layer2HAuto: 0, layer2V: 0 };
           lv.spriteHeader = spriteHeader;
           if (l2ptr !== CUSTOM_BG) { lv.bg = null; lv.layer2Pointer = l2ptr; }
           if (modeChangedL2) {
@@ -150,5 +199,6 @@ export function openHeaderDialog(app: App): void {
         app.emit('level-header');
       },
     },
-  ], () => { if (musicPlayer.label === 'header') musicPlayer.stop(); });
+  ], () => { open = false; if (musicPlayer.label === 'header') musicPlayer.stop(); });
+  measured();
 }

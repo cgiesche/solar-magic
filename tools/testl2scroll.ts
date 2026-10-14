@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadLevel, encodeSecondaryHeader, decodeSecondaryHeader, readSecondaryHeader, type SecondaryHeader } from '../src/core/level.ts';
-import { layer2Motion, type Motion } from '../src/core/l2scroll.ts';
+import { layer2Motion, layer2MotionsJob, motionText, RATE_OPTIONS, type Motion } from '../src/core/l2scroll.ts';
 import { exportLevelFile, importLevelFile } from '../src/core/levelfile.ts';
 import { mwlSections } from '../src/core/mwl.ts';
 import { uploadFiles } from '../src/core/patchpkg.ts';
@@ -47,6 +47,18 @@ for (let i = 0; i < 12; i++) {
   const m = motion(emu, { layer2Separate: 1, layer2HAuto: 1, layer2Scroll: i, layer2V: 0x10 + i });
   const ok = (a: Motion) => near(a.rate, 1, 0.05) && near(a.drift, speed, 0.05);
   check(ok(m.x) && ok(m.y), `auto-scroll ${i < 6 ? 'left/up' : 'right/down'} ${SPEEDS[i % 6]}: H ${fmt(m.x)}, V ${fmt(m.y)}`);
+}
+
+// what the header dialog shows: measured for every setting
+{
+  const job = layer2MotionsJob(emu, N, {});
+  let r = job.next();
+  while (!r.done) r = job.next();
+  const m = r.value.result;
+  check(m.paired.length === 16 && m.separate.length === RATE_OPTIONS.length, `measured: ${m.paired.length} paired, ${m.separate.length} separate settings`);
+  const text = (v: number, axis: 'x' | 'y') => motionText(m.separate[RATE_OPTIONS.indexOf(v)][axis], axis);
+  const shown = [text(0, 'x'), text(1, 'x'), text(4, 'y'), text(7, 'y'), text(8, 'x'), text(0x10, 'y'), text(0x16, 'x'), motionText(m.paired[0].y, 'y')];
+  check(shown.join(' | ') === 'fixed | 1:1 | 1/4 | 1/64 | 1.2× | 1:1, up 0.25 px/frame | 1:1, right 0.25 px/frame | 1/32', `texts: ${shown.join(' | ')}`);
 }
 
 // the editor's ROM: no level has separate rates, vanilla levels keep their setting
