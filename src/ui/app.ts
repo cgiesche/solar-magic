@@ -5,7 +5,7 @@ import { LevelEmulator, OV_L1, OV_L2, type LevelRender, type LevelOverride, MAP_
 import {
   type Level, type LevelObject, type LevelSprite, type ScreenExit, type SecondaryEntrance, loadLevel, spriteLoadOrder, serializeLayer1, serializeLayer2, serializeSprites, serializeLevelSprites, spriteSizes, spriteId, spriteBytes,
   isL1Vertical, cloneLevel, newUid, hasLayer2Objects, hasObjects, L1_PTRS, L2_PTRS, SEC_HDR,
-  readSecondaryEntrance, writeSecondaryEntrance, entrancePos, nearestEntrance, encodeSecondaryHeader, SPRITE_MEMORY, levelRows,
+  readSecondaryEntrance, writeSecondaryEntrance, decodeSecondaryEntrance, entrancePos, nearestEntrance, encodeSecondaryHeader, SPRITE_MEMORY, levelRows,
 } from '../core/level.ts';
 import { hex, spriteName } from '../core/names.ts';
 import { loadPixiProject, customSpriteList, type CustomSprite } from '../core/pixi.ts';
@@ -486,7 +486,7 @@ export class App {
   // clears a secondary entrance (all bytes 0: free again)
   removeSecondaryEntrance(idx: number): void {
     this.romEdit(`Secondary entrance ${hex(idx, 3)} removed`, () => {
-      writeSecondaryEntrance(this.rom, idx, { destLevel: 0, entranceY: 0, fgInitY: 0, bgInitY: 0, entranceX: 0, screen: 0, action: 0, raw3: 0 });
+      writeSecondaryEntrance(this.rom, idx, decodeSecondaryEntrance([0, 0, 0, 0, 0, 0]));
     });
     this.findSecondaryEntrances();
     if (this.exitMarker?.kind === 'sec' && this.exitMarker.index === idx) this.exitMarker = null;

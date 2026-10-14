@@ -15,7 +15,8 @@
 // Playing such a level (camera, sprites, interaction) is not part of it yet.
 
 import type { Rom } from './rom.ts';
-import { LEVEL_SIZE_TABLE, LEVEL_HEIGHTS } from './level.ts';
+import { LEVEL_SIZE_TABLE, LEVEL_HEIGHTS, SEC_HDR, SEC_ENT } from './level.ts';
+import { L2_SCROLL_TABLE } from './l2scroll.ts';
 import { LEVEL_HEIGHT_RAM, LEVEL_HEIGHT, SCREEN_PTRS } from './ram.ts';
 import { applyPatch, type ApplyResult } from './patchapply.ts';
 import { installEditorPatch } from './patches.ts';
@@ -34,6 +35,16 @@ lorom
 !RowMask = !Size+6     ; and a position's row bits (the game's $01F0)
 !NewSpr = !Size+8      ; the level's sprite data is in Lunar Magic's new format (header bit 5)
 !SprSub = !Size+9      ; loading sprites: the subscreen of the sprites that follow, * 2 (a Y high byte)
+!Level = !Size+10      ; the level being loaded (16-bit)
+!Ent = !Size+12        ; the secondary entrance it is entered by (16-bit)
+!Tmp = !Size+14        ; (16-bit)
+!Ent1 = $${hx(SEC_HDR[6])}       ; per level, Lunar Magic's: IWPXXtTT (P: the entrance at tile X/Y, XX: X bits 4-3)
+!Ent2 = $${hx(SEC_HDR[7])}       ; OFYYYYYY (O: BG relative to FG, F: camera offset bit 4, Y: Y bits 9-4)
+!Ent3 = $${hx(SEC_HDR[8])}       ; RL-ooooo (R: camera relative to Mario, L: face left, o: BG height - 1, or with O its offset)
+!SecFE = $${hx(SEC_ENT[3])}       ; per secondary entrance: IPXXDAAA (P: at tile X/Y, XX: X bits 4-3)
+!SecY = $${hx(SEC_ENT[4])}        ; EFYYYYYY (Lunar Magic's, at a place of its own: F camera offset bit 4, Y: Y bits 9-4)
+!SecR = $${hx(SEC_ENT[5])}        ; RLW----- (R: camera relative to Mario)
+!L2Table = $${hx(L2_SCROLL_TABLE)}     ; separate layer 2 rates (S, bit 7)
 !Height = $${hx(LEVEL_HEIGHT)}       ; playing: the level's height in pixels, a screen's bytes (Lunar Magic's)
 !Ptr = $${hx(SCREEN_PTRS[0])}          ; per screen: 3-byte pointers to the low bytes (Lunar Magic's place)
 !PtrHi = !Ptr+$60      ; to the high bytes
@@ -42,6 +53,11 @@ lorom
 
 org !Table
   fillbyte $00 : fill 512
+org !Ent1 : fill 512
+org !Ent2 : fill 512
+org !Ent3 : fill 512
+org !SecY : fill 512
+org !SecR : fill 512
 
 ; the game's mode tables of a horizontal layer's screen pointers (tilemap columns, changing a tile, and code
 ; that finds a block the same way) point to the tables in RAM, which the setup builds for every level
@@ -91,10 +107,17 @@ org $03D793 : ADC.w !Height          ; a screen further on
 
 ; changing a tile ($00BEB0) below the game's 32 rows
 org $00BEEC : JSL TileBound : BCS Out00BEBB : NOP #2   ; CPY #$0200 : BCS : LDA $1933
+org $00BF41 : JSL TileVram : NOP         ; LDA $9B : LSR : LDA $99 (then ROL: the VRAM address's row bit 5)
 org $00C079 : JSL TileRow : NOP          ; LDA $98 : AND #$01F0 (A 16)
 org $00C0C6 : JSL TileRow : NOP
 org $00C1B1 : JSL TileRow : NOP
 org $00C3D3 : JSL TileRow : NOP
+
+; entrances (Lunar Magic's format): Mario at a tile (screen * 256 + X * 16, Y * 16), the camera relative to
+; him (Y * 16 + offset * 16, the 5-bit offset from the FG and BG start settings), the BG then bottom-aligned
+; with the level (or relative to the FG)
+org $05D7E0 : JSL SecEntrance : NOP        ; LDY $0E : LDA $F800,y (Y = the secondary entrance)
+org $05DA17 : JSL Entrance                 ; SEP #$30 : LDA $13BF (both entrances set up)
 
 ; loading sprites from the level's data: Lunar Magic's new format ($FF V: the sprites that follow are in
 ; subscreen V, $FF $FE: the end, $FF $FF: a sprite starting with $FF); a sprite's Y high byte gets the subscreen
@@ -148,6 +171,7 @@ Setup:
   LDA $1692 : AND #$1F : STA $1692
   LDA #$00 : STA.l !Sub
   REP #$20
+  TYA : STA.l !Level
   TYX
   LDA.l !Table,x : AND #$001F : ASL : TAX
   LDA.l Sizes,x : STA.l !Size
@@ -194,13 +218,156 @@ YHi0D:
 ; Y (16 bit) = the position along the screens' rows: carry set when it is outside the level; then the
 ; game's LDA $1933 (A 8)
 TileBound:
-  REP #$20 : TYA : CMP.l !MaxY : SEP #$20
+  REP #$20 : TYA : CMP.l !MaxY
+  LDA #$0000 : SEP #$20                    ; the high byte 0, as the game's (a 16-bit TAX follows)
   LDA.l $7E1933
+  RTL
+; the tilemap holds rows modulo 64: only bit 0 of the Y high byte goes into the address (A 8)
+TileVram:
+  LDA $9B : LSR
+  LDA $99 : AND #$01                       ; (carry kept)
   RTL
 ; the row bits of Y position $98 (A 16)
 TileRow:
   LDA $98 : AND.l !RowMask
   RTL
+
+; the secondary entrance (A 8, X/Y 16, data bank $05): kept, then the game's LDY $0E : LDA $F800,y
+SecEntrance:
+  LDY $0E
+  REP #$20 : TYA : STA.l !Ent : SEP #$20
+  LDA $F800,y
+  RTL
+
+; both entrances set up (Mario $94-$97, camera $1C, BG $20 from the game's tables): Lunar Magic's tile
+; position and relative camera; then the game's SEP #$30 : LDA $13BF
+Entrance:
+  PHP
+  REP #$30
+  LDA $1B93 : AND #$00FF : BNE +
+  JMP .main
++
+  ; a secondary entrance: P, XX in $05FE00, xxx in $05FC00, Y bits 9-4 in !SecY, yyyy in $05FA00
+  LDA.l !Ent : TAX
+  LDA.l !SecFE,x : AND #$0040 : BEQ +
+  LDA.l !SecFE,x : AND #$0030 : LSR : STA.l !Tmp
+  LDA.l $05FC00,x : AND #$00E0 : LSR #5 : ORA.l !Tmp : TAY
+  LDA.l !SecY,x : AND #$003F : ASL #4 : STA.l !Tmp
+  LDA.l $05FA00,x : AND #$000F : ORA.l !Tmp
+  JSR TilePos
++ LDA.l !SecR,x : AND #$0080 : BNE +
+  JMP .done
++
+  ; offset: F (!SecY bit 6), ff ($05FA00 bits 5-4), bb ($05FA00 bits 7-6)
+  LDA.l !SecY,x : AND #$0040 : LSR #2 : STA.l !Tmp
+  LDA.l $05FA00,x : AND #$0030 : LSR #2 : ORA.l !Tmp : STA.l !Tmp
+  LDA.l $05FA00,x : AND #$00C0 : ASL #2 : XBA : ORA.l !Tmp
+  JSR Relative
+  BRA .done
+.main
+  ; the main entrance: P, XX in !Ent1, xxx in $05F200, Y bits 9-4 in !Ent2, yyyy in $05F000
+  LDA.l !Level : TAX
+  LDA.l !Ent1,x : AND #$0020 : BEQ +
+  LDA.l !Ent1,x : AND #$0018 : STA.l !Tmp
+  LDA.l $05F200,x : AND #$0007 : ORA.l !Tmp : TAY
+  LDA.l !Ent2,x : AND #$003F : ASL #4 : STA.l !Tmp
+  LDA.l $05F000,x : AND #$000F : ORA.l !Tmp
+  JSR TilePos
++ LDA.l !Ent3,x : AND #$0080 : BEQ .done
+  ; offset: F (!Ent2 bit 6), ff, bb ($05F400 bits 3-0)
+  LDA.l !Ent2,x : AND #$0040 : LSR #2 : STA.l !Tmp
+  LDA.l $05F400,x : AND #$000F : ORA.l !Tmp
+  JSR Relative
+.done
+  PLP
+  SEP #$30 : LDA $13BF
+  RTL
+
+; Mario at tile X = Y, Y = A of the entrance's screen ($95, or $97 in a vertical level) (A/X/Y 16; X kept)
+TilePos:
+  ASL #4 : STA.l !Tmp
+  TYA : ASL #4 : TAY
+  LDA $5B : AND #$0001 : BNE .vert
+  LDA $95 : AND #$00FF : XBA : PHA
+  TYA : CLC : ADC $01,s : STA $94
+  PLA
+  LDA.l !Tmp : STA $96
+  RTS
+.vert
+  STY $94
+  LDA $97 : AND #$00FF : XBA : CLC : ADC.l !Tmp : STA $96
+  RTS
+
+; the camera relative to Mario: Y + 16 * the 5-bit signed offset A, inside the level; the BG to match
+; (A/X/Y 16, X = the level for the BG settings when it is the main entrance, else !Level)
+Relative:
+  PHA
+  LDA $5B : AND #$0003 : BEQ +                 ; horizontal levels only (layer 2 not vertical either)
+  PLA
+  RTS
++ PLA
+  AND #$001F : CMP #$0010 : BCC + : ORA #$FFE0 : +
+  ASL #4 : CLC : ADC $96 : BPL + : LDA #$0000 : +
+  PHA
+  LDA !Height : SEC : SBC #$00F0 : CMP $01,s : BCS + : STA $01,s : +
+  PLA : STA $1C
+  ; the BG: with O, the FG's position + 16 * the signed offset ($10: absolute 0); else so that it shows
+  ; its bottom (its height - $F0) when the camera is at the level's bottom
+  LDA.l !Level : TAX
+  LDA.l !Ent2,x : AND #$0080 : BEQ .bottom
+  LDA.l !Ent3,x : AND #$001F : CMP #$0010 : BNE +
+  LDA #$0000 : STA $20 : RTS
++ CMP #$0010 : BCC + : ORA #$FFE0 : +
+  ASL #4 : CLC : ADC $1C : STA $20
+  RTS
+.bottom
+  LDA !Height : SEC : SBC #$00F0 : SEC : SBC $1C   ; the camera's distance to the bottom
+  JSR L2Rate
+  STA.l !Tmp
+  LDA.l !Ent3,x : AND #$001F : INC : ASL #4 : SEC : SBC #$00F0
+  SEC : SBC.l !Tmp : STA $20
+  RTS
+
+; A = a distance layer 1 moves: how far layer 2 moves vertically, by its rate $1414 (the game's paired
+; settings, or the separate rates of l2scroll.ts); none: 0 (A/X/Y 16, X = the level)
+L2Rate:
+  PHA
+  LDA $1414 : AND #$00FF : TAY
+  PLA
+  CPY #$0000 : BEQ .zero
+  CPY #$0001 : BEQ .r
+  CPY #$0002 : BEQ .s1
+  CPY #$0003 : BNE +
+  PHA : LDA.l !L2Table,x : AND #$0080 : BEQ .r16p
+  PLA : BRA .s5
+.r16p
+  PLA : BRA .s4
++ CPY #$0004 : BEQ .s2
+  CPY #$0005 : BEQ .s3
+  CPY #$0006 : BEQ .s4
+  CPY #$0007 : BEQ .s6
+  CPY #$0008 : BEQ .fast
+.zero
+  LDA #$0000
+  RTS
+.s6
+  LSR
+  LSR
+.s5
+  LSR
+.s4
+  LSR
+.s3
+  LSR
+.s2
+  LSR
+.s1
+  LSR
+.r
+  RTS
+.fast
+  STA.l !Tmp : LSR #2 : CLC : ADC.l !Tmp       ; about 6/5 (5/4)
+  RTS
 
 ; the sprite list's entry at Y (A/X/Y 8): A = its first byte (Z clear), or Z set at the end. Lunar Magic's
 ; markers are skipped, a subscreen marker taken; the list's first entry (X 0, Y 1) starts in subscreen 0
