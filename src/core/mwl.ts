@@ -23,7 +23,7 @@
 import type { Rom } from './rom.ts';
 import {
   type Level, type LevelObject, type ScreenExit, newUid, parsePrimaryHeader, decodeSecondaryHeader, isL1Vertical, isL2Vertical,
-  hasLayer2Objects, hasObjects, parseSprites, spriteSizes, hasLevelSize, MAX_LEVEL_SIZE, SUBSCREEN_ROWS,
+  hasLayer2Objects, hasObjects, parseSprites, spriteSizes, hasLevelSize, isSized, MAX_LEVEL_SIZE, SUBSCREEN_ROWS,
 } from './level.ts';
 import { DM16_EXT } from './patches.ts';
 import { EXT_FIRST, EXT_TILES } from './map16ext.ts';
@@ -132,7 +132,7 @@ export function sampleTiles(rom: Rom, d: Uint8Array): number[] {
   const s = mwlSections(d);
   const header = parsePrimaryHeader(s.layer1.subarray(0, 5));
   if (!hasObjects(header.mode)) return [];
-  const { objects } = parseLmObjects(s.layer1, 5, isL1Vertical(rom, header.mode), [], decodeSecondaryHeader(s.secondary).levelSize !== 0);
+  const { objects } = parseLmObjects(s.layer1, 5, isL1Vertical(rom, header.mode), [], isSized(decodeSecondaryHeader(s.secondary)));
   return [...new Set(objects.filter((o) => o.tile !== undefined).map((o) => o.tile!))].sort((a, b) => a - b);
 }
 
@@ -153,7 +153,7 @@ export function sampleLevel(rom: Rom, d: Uint8Array, into: Level, map: SampleMap
   if (secondary.levelSize > MAX_LEVEL_SIZE) throw new Error(`The level file's level size ${hx(secondary.levelSize, 2)} (Lunar Magic) is not supported – the editor has sizes up to ${hx(MAX_LEVEL_SIZE, 2)}`);
   if (secondary.levelSize && !hasLevelSize(rom, header.mode)) throw new Error(`The level file's level has a size (Lunar Magic) in a level mode (${hx(header.mode, 2)}) the editor has no sizes for`);
   const vert1 = isL1Vertical(rom, header.mode);
-  const l1 = hasObjects(header.mode) ? parseLmObjects(s.layer1, 5, vert1, notes, secondary.levelSize !== 0) : { objects: [], exits: [] };
+  const l1 = hasObjects(header.mode) ? parseLmObjects(s.layer1, 5, vert1, notes, isSized(secondary)) : { objects: [], exits: [] };
   let layer2Objects: LevelObject[] | null = null, layer2Header: Uint8Array | null = null;
   if (s.layer2 && hasLayer2Objects(header.mode) && s.layer2.length !== 0x800) {
     layer2Header = s.layer2.slice(0, 5);

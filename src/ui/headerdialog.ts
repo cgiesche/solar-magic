@@ -152,7 +152,7 @@ export function openHeaderDialog(app: App): void {
   const showSize = () => {
     sizeSel.disabled = !hasLevelSize(rom, hd.mode) && !sd.levelSize;
     sizeHint.textContent = sizeSel.disabled ? 'Horizontal levels without layer 2 objects only'
-      : !hasLevelSize(rom, hd.mode) ? 'The level mode has no heights: back to the game\'s height' : 'As Lunar Magic 3.00; playing taller levels comes later';
+      : !hasLevelSize(rom, hd.mode) ? `The level mode has no heights: back to the game's height${lowest >= SUBSCREEN_ROWS ? ` – not while objects or sprites lie down to row ${hex(lowest, 3)}` : ''}` : 'As Lunar Magic 3.00; playing taller levels comes later';
   };
   sizeSel.addEventListener('change', () => { sd.levelSize = Number(sizeSel.value); screensSel.replaceChildren(...screenOpts()); });
 
@@ -219,6 +219,11 @@ export function openHeaderDialog(app: App): void {
     { label: 'Cancel', onClick: () => { if (musicPlayer.label === 'header') musicPlayer.stop(); } },
     {
       label: 'Apply', primary: true, onClick: () => {
+        // a mode without heights takes the game's: refused while objects or sprites lie below what it reaches
+        if (sd.levelSize && !hasLevelSize(rom, hd.mode) && lowest >= SUBSCREEN_ROWS) {
+          toast(`Level mode ${hex2(hd.mode)} has no heights, and objects or sprites lie down to row ${hex(lowest, 3)} – move them up first.`, 'error');
+          return false;
+        }
         if (musicPlayer.label === 'header') musicPlayer.stop();
         if (levelSong !== levelMusic(app.rom, lv.number)) {
           try { app.romEdit(`Music of level ${hex(lv.number, 3)}`, () => setLevelMusic(app.rom, lv.number, levelSong)); } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }

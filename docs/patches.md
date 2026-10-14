@@ -471,7 +471,8 @@ The patch makes the game's own level load build such a level, which is what the 
 setup (`$05D928`) takes the screen size for the level's size, each object (`$0586BB`) its address from the
 screen, the subscreen and the high Y bit, and where objects go on to the next screen (`$0DA963`, `$0DA9D6`,
 `$0DA9EF`, the places Lunar Magic changes) they step by the level's screen size; Direct Map16 and
-structures too. After the load (`$058091`) the size is cleared, so loads without the setup (the credits) are
+structures too. Those three places are Lunar Magic's: a patch written for a Lunar Magic ROM that changes them is
+not compatible. After the load (`$058091`) the size is cleared, so loads without the setup (the credits) are
 the game's. Levels of the game's size run the game's code (`src/core/levelheight.ts`,
 `tools/testlevelheight.ts`). **Playing** a taller level (camera, sprites, interaction, `$13D7`) is not there
 yet: in test play the game still scrolls as in a level of 27 rows and loads no sprites after the first subscreen change.

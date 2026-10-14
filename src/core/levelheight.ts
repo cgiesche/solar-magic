@@ -83,8 +83,8 @@ Pointer:
   LDA $59 : CMP #$01 : BNE +   ; extended object $01: a screen jump
   LDA $0B : AND #$0F : STA.l !Sub
 + PHX
-  REP #$20
-  LDA.l !Sub : AND #$000F : XBA : ASL   ; subscreen * $200
+  LDA.l !Sub : AND #$0F : ASL : XBA : LDA #$00
+  REP #$20                              ; subscreen * $200
   CLC : ADC #$C800
   LDX $1928
 - DEX : BMI +

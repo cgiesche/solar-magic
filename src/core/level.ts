@@ -3,6 +3,7 @@
 import { Rom } from './rom.ts';
 import { spriteBankOf, DM16_EXT } from './patches.ts';
 import { STRUCT_EXT } from './structs.ts';
+import { MAP_SIZE } from './ram.ts';
 
 export const L1_PTRS = 0x05e000;
 export const L2_PTRS = 0x05e600;
@@ -29,7 +30,9 @@ export const levelRows = (s: { levelSize: number }): number => LEVEL_HEIGHTS[s.l
 // a level with subscreens: objects and sprites below row 31 (screen jumps with a subscreen, sprite data
 // in Lunar Magic's new format)
 export const isTall = (s: { levelSize: number }): boolean => levelRows(s) > SUBSCREEN_ROWS;
-export const maxScreens = (s: { levelSize: number }): number => Math.min(32, Math.floor(0x3800 / LEVEL_HEIGHTS[s.levelSize & 0x1f]));
+// a level with a size: its screen jumps have a subscreen (as the patch reads them)
+export const isSized = (s: { levelSize: number }): boolean => (s.levelSize & 0x1f) !== 0;
+export const maxScreens = (s: { levelSize: number }): number => Math.min(32, Math.floor(MAP_SIZE / LEVEL_HEIGHTS[s.levelSize & 0x1f]));
 export const SEC_ENT = [0x05f800, 0x05fa00, 0x05fc00, 0x05fe00];
 
 export interface LevelObject {
@@ -439,7 +442,7 @@ export function loadLevel(rom: Rom, n: number): Level {
 export function parseLevelData(rom: Rom, n: number, l1: Uint8Array, l2: Uint8Array | null, l2Pointer: number, spr: Uint8Array, secondary: SecondaryHeader, sizes: SpriteSizes = spriteSizes(rom)): Level {
   const header = parsePrimaryHeader(l1.subarray(0, 5));
   const vert1 = isL1Vertical(rom, header.mode);
-  const p1 = hasObjects(header.mode) ? parseObjects(l1, 5, vert1, secondary.levelSize !== 0) : { objects: [], exits: [], size: 1 };
+  const p1 = hasObjects(header.mode) ? parseObjects(l1, 5, vert1, isSized(secondary)) : { objects: [], exits: [], size: 1 };
   let layer2Objects: LevelObject[] | null = null;
   let layer2Header: Uint8Array | null = null;
   let l2Size = 0;
@@ -475,7 +478,7 @@ export function serializeLayer1(rom: Rom, lv: Level, owners?: number[]): Uint8Ar
   const hdr = encodePrimaryHeader(lv.header);
   if (owners) for (let i = 0; i < 5; i++) owners.push(-1);
   const body = hasObjects(lv.header.mode)
-    ? serializeObjects(lv.objects, lv.exits, isL1Vertical(rom, lv.header.mode), owners, lv.secondary.levelSize !== 0)
+    ? serializeObjects(lv.objects, lv.exits, isL1Vertical(rom, lv.header.mode), owners, isSized(lv.secondary))
     : new Uint8Array([0xff]);
   const out = new Uint8Array(hdr.length + body.length);
   out.set(hdr);
