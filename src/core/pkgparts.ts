@@ -23,7 +23,7 @@ import { isSongText, songsFromFiles, loadMusicProject, emptyMusicProject, addSon
 import { pixiParts, planPixiUpload, applyPixiUpload, linkedDefines, type PixiPlan } from './pixipkg.ts';
 import { parseCfg, parseJsonCfg } from './pixi.ts';
 import { detectBlocks, applyBlocks, applyGraphics, routinesCalled, planPackage, type DetectedBlock, type DetectedGraphics, type PackagePlan } from './pkgplan.ts';
-import { loadProject, saveProject, emptyProject, projectFromFiles, addCall, type UberProject } from './uberproject.ts';
+import { loadProject, saveProject, emptyProject, projectFromFiles, addCall, isUberList, type UberProject } from './uberproject.ts';
 import { setLevelMusic } from './patches.ts';
 import { map16Targets } from './map16file.ts';
 import { ALL, type UberContext } from './uberasm.ts';
@@ -181,7 +181,7 @@ const uberasm: PartAdapter<'uberasm'> = {
     const out: FileClaim[] = [];
     // an UberASM Tool folder (its list.txt has the sections of UberASM Tool): all its files
     const list = d.paths.find((p) => /^([^/]+\/)?list\.txt$/i.test(p));
-    if (list && /^\s*(level|gamemode|overworld)\s*:/im.test(dec.decode(d.files.get(list)!))) {
+    if (list && isUberList(dec.decode(d.files.get(list)!))) {
       try {
         const folder = projectFromFiles(d.files);
         const root = list.slice(0, list.length - 'list.txt'.length);
@@ -338,6 +338,8 @@ const graphics: PartAdapter<'graphics'> = {
 // ---------- all of them ----------
 
 export const PART_ADAPTERS: { [K in PartKind]: PartAdapter<K> } = { patch, uberasm, block, sprite, music, graphics };
+// an adapter by its kind, for loops over all kinds
+export const partAdapter = (k: PartKind) => PART_ADAPTERS[k] as PartAdapter<PartKind>;
 // who wins a file at equal rank
 export const DETECT_ORDER: PartKind[] = ['graphics', 'music', 'uberasm', 'block', 'sprite', 'patch'];
 // the order of applying: the patch first, the sprites' numbers before the blocks spawning them, the
@@ -375,7 +377,7 @@ export async function applyParts(rom: Rom, ctx: InstallContext, claim: Claim): P
   for (const k of INSTALL_ORDER) {
     const mine = partsOf(ctx.preview, k);
     if (!mine.length) continue;
-    const r = await (PART_ADAPTERS[k] as PartAdapter<PartKind>).apply(rom, mine, ctx, claim);
+    const r = await partAdapter(k).apply(rom, mine, ctx, claim);
     warnings.push(...r.warnings);
     prints.push(...r.prints);
     if (!r.ok) return { ...r, warnings, prints };

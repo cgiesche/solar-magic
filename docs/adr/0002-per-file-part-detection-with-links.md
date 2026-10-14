@@ -10,6 +10,7 @@ We decided that every file is classified on its own (folder, then content, then 
 - Links (block ↔ tiles, sprite ↔ define, ExGFX ↔ slot) are guessed and shown in the preview; tile → block and ExGFX → slot can be changed there. One block may sit on several tiles.
 - Level setup (ExGFX into the slots its tiles use, the sample level's ExAnimation slots that animate the package's tiles into free slots of the level's list – their frames copied into the level's Anim graphic, ADR 0003 –, masked colors into the level's palette) is on by default for the current level. It and the sample level are level edits: undo reverts them, removing the package does not. The package records only what it brought (code, ExGFX, Map16 tiles).
 - Files no part claims are listed in the preview as not installed; the readme can be opened.
+- Each part kind has an adapter (pkgparts.ts) that claims files with a rank: an unambiguous file type (graphics, a song, the .mwl), a tool folder's list.txt, content (a block, a sprite with its folder), code (UberASM), the fallback (a patch). A file goes to its best claim; only between equal ranks does a fixed adapter order decide (a file that is both a block and in a sprite's folder is the block's), and a file going with a part counts only when that part's main file went to the same adapter. The one rule that looks at the rest of the upload is the patch's: several unnamed patch files are offered as a choice only when the upload has no other parts.
 
 ## Considered options
 

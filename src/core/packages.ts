@@ -26,8 +26,8 @@ import { planBgPack, applyBgPack } from './bgpack.ts';
 import { parseSprites, spriteSizes, type Level } from './level.ts';
 import { recordPackageChange, recordPackageChangeAsync, listPackages, packageArchive, uninstallPackage, type Package } from './pkgreg.ts';
 import { allOrNothing } from './romedit.ts';
-import { PART_ADAPTERS, DETECT_ORDER, PART_ORDER, SHARED_CODE, planInstall, planUpload, applyParts, applyAssignment, patchSource, partsOf,
-  type PreviewPart, type PreviewBase, type ReadyPreview, type Detection, type FileClaim, type PartAdapter, type InstallOptions, type InstallContext, type ManualAssignment } from './pkgparts.ts';
+import { partAdapter, DETECT_ORDER, PART_ORDER, SHARED_CODE, planInstall, planUpload, applyParts, applyAssignment, patchSource, partsOf,
+  type PreviewPart, type PreviewBase, type ReadyPreview, type Detection, type FileClaim, type InstallOptions, type InstallContext, type ManualAssignment } from './pkgparts.ts';
 
 export type { PreviewPart, ReadyPreview, InstallOptions, ManualAssignment };
 export { planUpload };
@@ -97,7 +97,7 @@ export function inspectFiles(fileName: string, files: Map<string, Uint8Array>): 
   const found = new Map(DETECT_ORDER.map((k) => [k, won.parts.filter((p) => p.kind === k)]));
   let parts: PreviewPart[] = [];
   for (const k of DETECT_ORDER) {
-    const a = PART_ADAPTERS[k] as PartAdapter<PartKind>;
+    const a = partAdapter(k);
     const others = DETECT_ORDER.filter((o) => o !== k).flatMap((o) => found.get(o)!);
     const kept = a.finish ? a.finish(found.get(k)!, others, d) : found.get(k)!;
     found.set(k, kept);
@@ -123,7 +123,7 @@ function resolveClaims(d: Detection): { files: Set<string>; parts: PreviewPart[]
   const byFile = new Map<string, Ranked[]>();
   let seq = 0;
   DETECT_ORDER.forEach((k, by) => {
-    for (const c of PART_ADAPTERS[k].claims(d)) byFile.set(c.file, [...(byFile.get(c.file) ?? []), { ...c, by, seq: seq++ }]);
+    for (const c of partAdapter(k).claims(d)) byFile.set(c.file, [...(byFile.get(c.file) ?? []), { ...c, by, seq: seq++ }]);
   });
   for (const cs of byFile.values()) cs.sort((a, b) => a.rank - b.rank || a.by - b.by || Number(!a.part) - Number(!b.part));
   const won = new Map<string, Ranked | null>();

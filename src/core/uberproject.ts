@@ -17,11 +17,14 @@ export function emptyProject(): UberProject {
   return { files: new Map(), list: emptyList() };
 }
 
-// assigns a file to a level, game mode or overworld map (num: ALL for every level), unless it is called
-// there already – for installing and for the UberASM tab
+// an UberASM Tool list.txt: it has the sections of UberASM Tool
+export const isUberList = (text: string) => /^\s*(level|gamemode|overworld)\s*:/im.test(text);
+
+// assigns a file to a level, game mode or overworld map (num: ALL for every level), unless that call
+// (with these extra bytes) is there already – for installing and for the UberASM tab
 export function addCall(p: UberProject, ctx: UberContext, num: number, file: string, bytes: number[] = []): void {
   const calls = p.list[ctx].get(num) ?? [];
-  if (!calls.some((c) => c.file === file)) calls.push({ file, bytes });
+  if (!calls.some((c) => c.file === file && c.bytes.join() === bytes.join())) calls.push({ file, bytes });
   p.list[ctx].set(num, calls);
 }
 

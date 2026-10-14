@@ -20,6 +20,7 @@ import { gfxEntry, VANILLA_GFX, levelGfx, setLevelGfx, levelExtGfx, setLevelExtG
 import { slotTiles, addLevelSlots, localizeFrames, levelAltFile, altFileName, type ExList, type ExSlot } from './exanim.ts';
 import { parseMwl, packPalettes, slotOfWord, frameSources, type MwlLevel, type PackPalette, type FrameSources } from './bgpack.ts';
 import { withIncludes } from './pkgmap.ts';
+import { isUberList } from './uberproject.ts';
 import { sampleTiles, mwlExAnim } from './mwl.ts';
 
 const dec = new TextDecoder();
@@ -45,7 +46,7 @@ export function actsComment(text: string): number | undefined {
 
 const GPS_LINE = /^[0-9a-f]{3,4}(:[0-9a-f]{3})?\s+\S+\.asm/im;
 // (not an UberASM Tool list, whose level lines look alike)
-export const isGpsList = (path: string, text: string) => /(^|\/)list\.txt$/i.test(path) && GPS_LINE.test(text) && !/^\s*(level|gamemode|overworld)\s*:/im.test(text);
+export const isGpsList = (path: string, text: string) => /(^|\/)list\.txt$/i.test(path) && GPS_LINE.test(text) && !isUberList(text);
 
 // a block of the upload; tile (and acts) when a GPS list.txt names it
 export interface DetectedBlock { file: string; tile?: number; acts?: number }
