@@ -9,7 +9,7 @@ import { hex } from '../core/names.ts';
 import { planUpload, type ReadyPreview, type InstallOptions } from '../core/packages.ts';
 import { editPlan, tileBlocks, GFX_SLOTS, type PackagePlan, type PlanEdits } from '../core/pkgplan.ts';
 import { map16Targets } from '../core/map16file.ts';
-import { levelColors } from '../core/bgpack.ts';
+import { levelColors } from '../core/levelgfx.ts';
 import { altFileName, levelAltFile } from '../core/exanim.ts';
 import { errorText } from './projectpane.ts';
 

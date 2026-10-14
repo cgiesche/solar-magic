@@ -17,12 +17,12 @@ import { PART_LABEL } from './parts.ts';
 import { uploadFiles, uploadFromFiles, type Upload } from './patchpkg.ts';
 import { suggestMapping, placed, suggestCalls, packageDocs, type PkgSuggestion } from './pkgmap.ts';
 import { detectGraphics, includedFiles, applyLevelSetup } from './pkgplan.ts';
-import { isSongText } from './music.ts';
 import { setCustomPalette } from './patches.ts';
 import { map16Targets } from './map16file.ts';
 import { mwlSections, sampleLevel, type SampleLevel } from './mwl.ts';
-import { writeLevelList, setLevelSettings, levelSettings, localizeFrames, levelAltFile } from './exanim.ts';
-import { planBgPack, applyBgPack } from './bgpack.ts';
+import { writeLevelList, setLevelSettings, levelSettings } from './exanim.ts';
+import { planBgPack, applyBgPack, isLevelImport } from './bgpack.ts';
+import { levelFrames } from './levelgfx.ts';
 import { parseSprites, spriteSizes, type Level } from './level.ts';
 import { recordPackageChange, recordPackageChangeAsync, listPackages, packageArchive, uninstallPackage, type Package } from './pkgreg.ts';
 import { allOrNothing } from './romedit.ts';
@@ -72,9 +72,8 @@ export function inspectFiles(fileName: string, files: Map<string, Uint8Array>): 
   const asm = paths.filter((p) => /\.(asm|asar)$/i.test(p));
   const included = includedFiles(files);
   const graphics = detectGraphics(files, included);
-  const hasSongs = paths.some((p) => /\.txt$/i.test(p) && isSongText(dec.decode(files.get(p)!)));
   // a Lunar Magic level without code or songs: a level import, not a package
-  if (graphics.mwl && !asm.length && !hasSongs) return { ...head, status: 'level-import' };
+  if (isLevelImport(files)) return { ...head, status: 'level-import' };
   // UberASM Tool folders whose code includes folders next to them: placed by hand (from the suggestion)
   const sug = asm.length ? suggestMapping(files) : null;
   if (sug?.extra.length) return { ...head, status: 'manual', suggestion: sug };
@@ -191,7 +190,7 @@ function placeSample(rom: Rom, preview: ReadyPreview, ctx: InstallContext, into:
   if (mwl?.bg && !sample.level.layer2Objects) {
     try {
       const bp = planBgPack(rom, preview.name, preview.files, opt.blank);
-      const r = allOrNothing(rom, () => applyBgPack(rom, sample.level, preview.files, bp, { bg: true, fg: false, palettes: bp.palettes.map(() => false), cgram: opt.cgram ?? new Uint8Array(512), blank: opt.blank }));
+      const r = allOrNothing(rom, () => applyBgPack(rom, sample.level, preview.files, bp, { bg: true, fg: false, palettes: bp.palettes.map(() => false), cgram: opt.cgram ?? null, blank: opt.blank }));
       if (r.ok) sample.level.bg = r.bg; else sample.notes.push(`Background not taken over: ${r.errors.join(' ')}`);
     } catch (e) { sample.notes.push(`Background not taken over: ${e instanceof Error ? e.message : e}`); }
   }
@@ -199,11 +198,11 @@ function placeSample(rom: Rom, preview: ReadyPreview, ctx: InstallContext, into:
   // its ExAnimation in place of the level's (the level setup's slots of the package included), its frames
   // copied into the level's Anim graphic
   if (sample.exanim) {
-    const file = levelAltFile(rom, into.number), slots = [...sample.exanim.slots];
-    const f = localizeFrames(rom, slots.map(([, e]) => e), { ...ctx.plan.frames, ram: opt.wram }, file);
+    const slots = [...sample.exanim.slots];
+    const f = levelFrames(rom, into.number, slots.map(([, e]) => e), ctx.plan.frames, opt.wram);
     sample.notes.push(...f.notes);
     sample.exanim.slots = new Map(slots.flatMap(([k], i) => f.slots[i] ? [[k, f.slots[i]!] as const] : []));
-    sample.exanim.altFile = file;
+    sample.exanim.altFile = f.file;
   }
   writeLevelList(rom, into.number, sample.exanim);
   if (sample.exanim || levelSettings(rom, into.number)) setLevelSettings(rom, into.number, sample.exanimSettings);
@@ -252,7 +251,7 @@ export async function installPackage(rom: Rom, preview: ReadyPreview | ManualPre
         if (!r.ok) return r;
         // the sample level needs the package's ExGFX in its slots: the level setup comes with it
         if (opt.level !== null && (opt.setup !== false || opt.sample) && (ctx.plan.gfx.some((g) => g.slot) || ctx.plan.palettes.length || ctx.plan.exanim.length)) {
-          const s = applyLevelSetup(rom, opt.level, ctx.plan, opt.cgram ?? null, opt.wram ?? null);
+          const s = applyLevelSetup(rom, opt.level, ctx.plan, { cgram: opt.cgram ?? null, wram: opt.wram });
           warnings.push(...s.warnings);
           prints.push(...s.prints);
         }

@@ -7,21 +7,25 @@
 // - planPackage: where it goes in a ROM – Map16 tiles and ExGFX keep the author's position or number
 //   when free, else the next free ones; which tiles show which block; which slot each ExGFX file is for;
 // - applyBlocks / applyGraphics / applyLevelSetup: the ROM side.
-// The defines naming a sprite of the package are linked by pixipkg.ts.
+// Graphics go where the level graphics placement (levelgfx.ts) says, as in a level import. The defines
+// naming a sprite of the package are linked by pixipkg.ts.
 
 import type { Rom } from './rom.ts';
 import type { Upload } from './patchpkg.ts';
 import type { ApplyResult } from './patchapply.ts';
 import { rewriteDefines } from './patchpkg.ts';
 import { parseBlockList, loadBlockProject, saveBlockProject, assignBlock, type BlockProject } from './blocks.ts';
-import { parseMap16File, map16Targets, exgfxName, importGfxFile, type Map16File } from './map16file.ts';
-import { EXT_FIRST, EXT_TILES, DEFAULT_ACTS, extTileWords, actsLike, setExtTileWords, setActsLike } from './map16ext.ts';
-import { gfxEntry, VANILLA_GFX, levelGfx, setLevelGfx, levelExtGfx, setLevelExtGfx, GFX_SLOT_NAMES, EXT_GFX_SLOT_NAMES, customPalette, setCustomPalette } from './patches.ts';
-import { slotTiles, addLevelSlots, localizeFrames, levelAltFile, altFileName, type ExList, type ExSlot } from './exanim.ts';
-import { parseMwl, packPalettes, slotOfWord, frameSources, type MwlLevel, type PackPalette, type FrameSources } from './bgpack.ts';
+import { parseMap16File, map16Targets, exgfxName, type Map16File } from './map16file.ts';
+import { EXT_FIRST, EXT_TILES, setExtTileWords } from './map16ext.ts';
+import { slotTiles, type ExList, type ExSlot } from './exanim.ts';
+import { parseMwl, type MwlLevel } from './bgpack.ts';
+import {
+  GFX_SLOTS, slotOfWord, gfxNumber, usedFgTiles, freeRun, fgOrigin, packPalettes, frameSources, putFgTiles, storeGfx, placeInLevel,
+  type PackPalette, type FrameSources, type LevelState, type Placed,
+} from './levelgfx.ts';
 import { withIncludes } from './pkgmap.ts';
 import { isUberList } from './uberproject.ts';
-import { sampleTiles, mwlExAnim } from './mwl.ts';
+import { mwlExAnim } from './mwl.ts';
 
 const dec = new TextDecoder();
 const enc = new TextEncoder();
@@ -136,36 +140,7 @@ export interface PackagePlan {
 
 export interface PlanInput { files: Map<string, Uint8Array>; blocks: DetectedBlock[]; graphics: DetectedGraphics }
 
-// the slots ExGFX can go in: the level's GFX bypass and the BG2/BG3 slots of the VRAM patch
-export const GFX_SLOTS = [...GFX_SLOT_NAMES, ...EXT_GFX_SLOT_NAMES];
-
-// first ExGFX number that is free and not taken by `taken` (80-FE first, as Lunar Magic suggests)
-function freeGfx(rom: Rom, taken: Set<number>): number {
-  const free = (i: number) => !taken.has(i) && !gfxEntry(rom, i);
-  for (let i = 0x80; i < 0xff; i++) if (free(i)) return i;
-  for (let i = VANILLA_GFX; i < 0x80; i++) if (free(i)) return i;
-  return -1;
-}
-
-// tiles the ROM already uses: a block on them, or graphics / acts like other than an empty tile's
-function usedTiles(rom: Rom, blank: number[]): (t: number) => boolean {
-  const blocks = new Set((loadBlockProject(rom)?.list ?? []).map((b) => b.tile));
-  return (t) => {
-    if (t < EXT_FIRST || t >= EXT_TILES) return true;
-    if (blocks.has(t)) return true;
-    const w = extTileWords(rom, t);
-    return !!w && (w.some((v, k) => v !== blank[k]) || actsLike(rom, t) !== DEFAULT_ACTS);
-  };
-}
-
-// the first position from `want` on (then from 200) where all `offsets` (relative tiles) are free and
-// stay in their rows; `want` itself when it fits
-function freeRun(want: number, offsets: number[], used: (t: number) => boolean, width: number): number {
-  const fits = (at: number) => (at & 15) + width <= 16 && offsets.every((o) => !used(at + o));
-  if (fits(want)) return want;
-  for (let at = EXT_FIRST; at < EXT_TILES; at++) if (fits(at)) return at;
-  return -1;
-}
+export { GFX_SLOTS };
 
 export function planPackage(rom: Rom, input: PlanInput, blank: number[]): PackagePlan {
   const { files, graphics } = input;
@@ -180,7 +155,7 @@ export function planPackage(rom: Rom, input: PlanInput, blank: number[]): Packag
   });
   const fgMap = maps.find((m) => !m.data.origin?.bg) ?? null;
   for (const m of maps) if (m !== fgMap && !m.data.origin?.bg) notes.push(`${base(m.file)}: only one FG .map16 per package – not used`);
-  const used = usedTiles(rom, blank);
+  const used = usedFgTiles(rom, blank);
   const taken = new Set<number>();
   const isUsed = (t: number) => used(t) || taken.has(t);
 
@@ -190,14 +165,7 @@ export function planPackage(rom: Rom, input: PlanInput, blank: number[]): Packag
   let map16: PlannedMap16 | null = null;
   let shift = 0; // list.txt tiles moved by this much (taken here)
   if (fgMap) {
-    let from = fgMap.data.origin && !fgMap.data.origin.bg ? fgMap.data.origin.tile : listed.length ? Math.min(...listed.map((b) => b.tile!)) : EXT_FIRST;
-    // the .map16 knows its row only: the column from the tiles the sample level places in those rows
-    if (fgMap.data.origin && !fgMap.data.origin.bg && graphics.mwl && fgMap.data.width < 16) {
-      let tiles: number[] = [];
-      try { tiles = sampleTiles(rom, files.get(graphics.mwl)!).filter((t) => t >= from && t < from + fgMap.data.height * 16); } catch { /* no level data */ }
-      const col = Math.min(...tiles.map((t) => t & 15));
-      if (tiles.length && tiles.every((t) => (t & 15) - col < fgMap.data.width)) from += col;
-    }
+    const from = fgOrigin(rom, fgMap.data, graphics.mwl ? files.get(graphics.mwl)! : null) ?? (listed.length ? Math.min(...listed.map((b) => b.tile!)) : EXT_FIRST);
     const want = listed.length ? Math.min(...listed.map((b) => b.tile!)) : Math.max(from, EXT_FIRST);
     const offsets = [...new Set([...map16Targets(fgMap.data, 0), ...listed.map((b) => b.tile! - want)])];
     const at = freeRun(want, offsets, isUsed, Math.min(16, fgMap.data.width));
@@ -241,25 +209,12 @@ export function planPackage(rom: Rom, input: PlanInput, blank: number[]): Packag
     blocks.push({ file: b.file, tiles: [t], acts: b.acts ?? 0x130 });
   }
 
-  // ExGFX: the author's number when free (00-FE), else the next free one; the slot from the file name,
-  // the sample level's slots or the slot the .map16 tiles draw from
-  const gfx: PlannedGfx[] = [];
-  const nums = new Set<number>();
-  const mapSlots = new Set((map16?.data.tiles ?? []).flat().map(slotOfWord).filter((s): s is string => !!s));
-  for (const file of graphics.exgfx) {
+  // ExGFX: the slot from the file name or the sample level's slots
+  const named = graphics.exgfx.map((file) => {
     const n = exgfxName(base(file));
-    const free = n.num !== null && n.num >= VANILLA_GFX && n.num < 0xff && !nums.has(n.num) && !gfxEntry(rom, n.num);
-    const num = free ? n.num! : freeGfx(rom, nums);
-    if (num < 0) throw new Error('No free ExGFX number left');
-    nums.add(num);
-    let slot = n.slot;
-    if (!slot && sample && n.num !== null) slot = [...sample.gfx].find(([, v]) => v === n.num)?.[0] ?? null;
-    gfx.push({ file, lmNum: n.num, num, slot });
-  }
-  // one file without a slot and one slot the tiles draw from that no other file is for: that one
-  const open = gfx.filter((g) => !g.slot);
-  const openSlots = [...mapSlots].filter((s) => GFX_SLOTS.includes(s) && !gfx.some((g) => g.slot === s));
-  if (open.length === 1 && openSlots.length === 1) open[0].slot = openSlots[0];
+    const slot = n.slot ?? (sample && n.num !== null ? [...sample.gfx].find(([, v]) => v === n.num)?.[0] ?? null : null);
+    return { file, lmNum: n.num, slot };
+  });
 
   // ExAnimation: the sample level's slots writing tiles the .map16 tiles draw from; the files they take
   // frames from (AN2, the list's alternative file ExGFX 60-63) are frame sources, not ExGFX
@@ -270,12 +225,22 @@ export function planPackage(rom: Rom, input: PlanInput, blank: number[]): Packag
     const drawn = new Set(map16.data.tiles.flat().map((w) => w & 0x3ff));
     for (const e of list.slots.values()) if (slotTiles(e).some((t) => drawn.has(t))) exanim.push(e);
   }
-  const frames = frameSources(files, list, gfx.find((g) => g.slot === 'AN2')?.file, gfx.find((g) => list && g.lmNum === 0x60 + list.altFile && !g.slot)?.file, notes);
-  const kept = gfx.filter((g) => g.slot !== 'AN2' && !(list && g.lmNum === 0x60 + list.altFile && !g.slot));
+  const isAlt = (g: { lmNum: number | null; slot: string | null }) => !!list && g.lmNum === 0x60 + list.altFile && !g.slot;
+  const frames = frameSources(files, list, named.find((g) => g.slot === 'AN2')?.file, named.find(isAlt)?.file, notes);
+  const kept = named.filter((g) => g.slot !== 'AN2' && !isAlt(g));
+
+  // one file without a slot and one slot the tiles draw from that no other file is for: that one
+  const mapSlots = new Set((map16?.data.tiles ?? []).flat().map(slotOfWord).filter((s): s is string => !!s));
+  const open = kept.filter((g) => !g.slot);
+  const openSlots = [...mapSlots].filter((s) => GFX_SLOTS.includes(s) && !kept.some((g) => g.slot === s));
+  if (open.length === 1 && openSlots.length === 1) open[0].slot = openSlots[0];
   for (const g of kept) if (g.slot && !GFX_SLOTS.includes(g.slot)) notes.push(`${base(g.file)} is for Lunar Magic's ${g.slot} slot – not supported, stored only`);
+  // the number: the author's when free (00-FE), else the next free one
+  const nums = new Set<number>();
+  const gfx: PlannedGfx[] = kept.map((g) => ({ ...g, num: gfxNumber(rom, g.lmNum, nums) }));
 
   const palettes = packPalettes(files, graphics.pal, graphics.palmask, notes);
-  return { blocks, map16, gfx: kept, palettes, sample, exanim, frames, notes };
+  return { blocks, map16, gfx, palettes, sample, exanim, frames, notes };
 }
 
 // links changed in the preview: where the .map16 tiles go, which block each of them shows (null: none),
@@ -361,61 +326,17 @@ export function applyGraphics(rom: Rom, files: Map<string, Uint8Array>, plan: Pa
   const prints: string[] = [];
   if (plan.map16) {
     const m = plan.map16;
-    const targets = map16Targets(m.data, m.at), from = map16Targets(m.data, m.from);
-    const onBlock = new Set(plan.blocks.flatMap((b) => b.tiles));
-    targets.forEach((t, i) => {
-      setExtTileWords(rom, t, m.data.tiles[i]);
-      const a = m.data.acts?.[i];
-      // acts like pointing into the .map16 itself moves along
-      if (a !== undefined && !onBlock.has(t)) { const k = from.indexOf(a); setActsLike(rom, t, k >= 0 ? targets[k] : a); }
-    });
+    const targets = putFgTiles(rom, m.data, m.from, m.at, new Set(plan.blocks.flatMap((b) => b.tiles)));
     prints.push(`${targets.length} Map16 tile(s) from ${hx(m.at, 3)}`);
   }
-  for (const g of plan.gfx) prints.push(`${base(g.file)} as ExGFX ${hx(g.num, 2)} (${importGfxFile(rom, g.num, files.get(g.file)!)})`);
+  prints.push(...storeGfx(rom, files, plan.gfx));
   return { ok: true, errors: [], warnings: [], prints };
 }
 
-export interface SetupResult { warnings: string[]; prints: string[] }
-
 // the level setup (see CONTEXT.md): the package's ExGFX in the level's slots, its ExAnimation slots in
-// the level's list (their frames copied into its Anim graphic), the masked colors in its palette.
-// cgram: the level's colors now (base of a new own palette); wram: its WRAM after the load (RAM frames of
-// animations come along from it).
-export function applyLevelSetup(rom: Rom, level: number, plan: PackagePlan, cgram: Uint8Array | null, wram: Uint8Array | null = null): SetupResult {
-  const warnings: string[] = [], prints: string[] = [];
-  const std = levelGfx(rom, level), ext = levelExtGfx(rom, level);
-  let stdSet = false, extSet = false;
-  const slots: string[] = [];
-  for (const g of plan.gfx) {
-    if (!g.slot) continue;
-    const e = EXT_GFX_SLOT_NAMES.indexOf(g.slot), s = GFX_SLOT_NAMES.indexOf(g.slot);
-    if (e >= 0) {
-      ext[e] = g.num; extSet = true;
-    } else if (s >= 0) { std[s] = g.num; stdSet = true; } else continue;
-    slots.push(`${g.slot} = ${hx(g.num, 2)}`);
-  }
-  if (plan.exanim.length) {
-    const file = levelAltFile(rom, level), f = localizeFrames(rom, plan.exanim, { ...plan.frames, ram: wram }, file);
-    warnings.push(...f.notes);
-    const used = addLevelSlots(rom, level, f.slots.filter((e): e is ExSlot => !!e));
-    if (used.length) prints.push(`Level ${hx(level, 3)}: ExAnimation slot(s) ${used.map((k) => hx(k, 2)).join(', ')}, frames in ${altFileName(file)}`);
-  }
-  if (stdSet) setLevelGfx(rom, level, std);
-  if (extSet) setLevelExtGfx(rom, level, ext);
-  if (slots.length) prints.push(`Level ${hx(level, 3)}: ${slots.join(', ')}`);
-  const pals = plan.palettes.filter((p) => !p.layer3);
-  if (pals.length) {
-    const own = customPalette(rom, level);
-    if (!own && !cgram) warnings.push(`Colors not set: the colors of level ${hx(level, 3)} are not known`);
-    else {
-      const pal = own ? rom.bytes(own, 512).slice() : cgram!.slice(0, 512);
-      for (const p of pals) {
-        for (const i of p.colors) { pal[i * 2] = p.pal[i] & 0xff; pal[i * 2 + 1] = p.pal[i] >> 8; }
-        if (p.back && plan.sample) { pal[0] = plan.sample.back & 0xff; pal[1] = plan.sample.back >> 8; }
-        prints.push(`Level ${hx(level, 3)}: ${p.colors.length} color(s) from ${base(p.file)}`);
-      }
-      setCustomPalette(rom, level, pal);
-    }
-  }
-  return { warnings, prints };
+// the level's list (their frames copied into its Anim graphic), the masked colors in its palette
+export function applyLevelSetup(rom: Rom, level: number, plan: PackagePlan, state: LevelState): Placed {
+  return placeInLevel(rom, level, {
+    slots: plan.gfx, palettes: plan.palettes.filter((p) => !p.layer3), back: plan.sample?.back ?? null, exanim: plan.exanim, frames: plan.frames,
+  }, state);
 }

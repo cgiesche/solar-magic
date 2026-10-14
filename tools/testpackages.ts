@@ -24,7 +24,7 @@ import { loadLevel, newUid } from '../src/core/level.ts';
 import { saveLevel } from '../src/core/save.ts';
 import { levelMusic, setLevelMusic, installEditorPatch, customPalette, DM16_EXT } from '../src/core/patches.ts';
 import { readLevelList, readAltFile, usesAltFile } from '../src/core/exanim.ts';
-import { levelColors } from '../src/core/bgpack.ts';
+import { levelColors } from '../src/core/levelgfx.ts';
 import { enableBlocks, setExtTileWords } from '../src/core/map16ext.ts';
 import { parseLmObjects } from '../src/core/mwl.ts';
 import { testSongZip } from './testsong.ts';

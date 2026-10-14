@@ -7,7 +7,8 @@ import type { App } from './app.ts';
 import { h, modal, toast, hexInput, logTool } from './dom.ts';
 import { pickFile } from './platform.ts';
 import { hex } from '../core/names.ts';
-import { planBgPack, importLevelFile, isLevelImport, levelColors, type BgPackResult } from '../core/bgpack.ts';
+import { planBgPack, importLevelFile, isLevelImport, type BgPackResult } from '../core/bgpack.ts';
+import { levelColors } from '../core/levelgfx.ts';
 import { altFileName, levelAltFile } from '../core/exanim.ts';
 import { uploadFiles } from '../core/patchpkg.ts';
 import { map16Source } from '../core/render.ts';
@@ -19,7 +20,8 @@ export async function openLevelImport(app: App): Promise<void> {
   if (!f) return;
   let files: Map<string, Uint8Array>;
   try { files = uploadFiles(f.name, new Uint8Array(await f.arrayBuffer())); } catch (e) { toast(errorText(e), 'error'); return; }
-  if (!isLevelImport(files)) { toast(`“${f.name}” holds no Lunar Magic level file (.mwl).`, 'error'); return; }
+  // (one with code or songs is a package, its level file a sample level)
+  if (!isLevelImport(files)) { toast(`“${f.name}” is no level import: it holds no Lunar Magic level file (.mwl), or it holds code or songs – a package, uploaded under Packages.`, 'error'); return; }
   openLevelImportDialog(app, f.name, files);
 }
 
