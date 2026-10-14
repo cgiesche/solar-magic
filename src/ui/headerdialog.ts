@@ -3,7 +3,9 @@
 import type { App } from './app.ts';
 import { h, select, hexInput, modal, toast } from './dom.ts';
 import { TILESETS, levelModeName, MUSIC, TIME_SETTINGS, VERTICAL_SCROLL, ENTRANCE_ACTIONS, layer2RateName, hex2, hex } from '../core/names.ts';
-import { hasLayer2Objects, type PrimaryHeader, type SecondaryHeader, L2_PTRS, SPRITE_MEMORY } from '../core/level.ts';
+import {
+  hasLayer2Objects, type PrimaryHeader, type SecondaryHeader, L2_PTRS, SPRITE_MEMORY, MAX_LEVEL_SIZE, SUBSCREEN_ROWS, levelRows, maxScreens, hasLevelSize,
+} from '../core/level.ts';
 import { bgBank, levelMusic, setLevelMusic, HEADER_MUSIC_TABLE } from '../core/patches.ts';
 import { songHex } from '../core/music.ts';
 import { currentSongs, playButton } from './musicdialog.ts';
@@ -23,7 +25,7 @@ export function openHeaderDialog(app: App): void {
   let spriteHeader = lv.spriteHeader;
   let l2ptr = lv.layer2Pointer;
 
-  const f = (label: string, el: HTMLElement, hint?: string) => h('div', { class: 'prop' }, h('label', null, label), el, hint ? h('span', { class: 'hint' }, hint) : null);
+  const f = (label: string, el: HTMLElement, hint?: string | HTMLElement) => h('div', { class: 'prop' }, h('label', null, label), el, typeof hint === 'string' ? h('span', { class: 'hint' }, hint) : hint ?? null);
   const sel = <K extends keyof PrimaryHeader>(k: K, opts: [number, string][]) => select(opts, hd[k] as number, (v) => { (hd[k] as number) = v; });
   const sel2 = <K extends keyof SecondaryHeader>(k: K, opts: [number, string][]) => select(opts, sd[k] as number, (v) => { (sd[k] as number) = v; });
 
@@ -132,16 +134,44 @@ export function openHeaderDialog(app: App): void {
     pending = null;
   };
 
+  // level height (Lunar Magic 3.00's sizes of horizontal levels): the screens that fit, and no height the
+  // level's objects and sprites lie below
+  const rom = app.rom;
+  const lowest = Math.max(-1, ...lv.objects.map((o) => o.y), ...lv.sprites.map((q) => q.y));
+  const sizeOpts = (): HTMLOptionElement[] => Array.from({ length: MAX_LEVEL_SIZE + 1 }, (_, i) => {
+    const rows = levelRows({ levelSize: i }), screens = maxScreens({ levelSize: i });
+    const why = !hasLevelSize(rom, hd.mode) && i ? 'Horizontal levels without layer 2 objects only'
+      : hd.screens > screens ? `The level has ${hd.screens} screens` : lowest >= Math.max(rows, SUBSCREEN_ROWS) ? `Objects or sprites lie down to row ${hex(lowest, 3)}` : '';
+    return h('option', { value: String(i), selected: i === sd.levelSize, disabled: !!why && i !== sd.levelSize, title: why },
+      `${i ? `${hex2(i)} – ` : ''}${rows} rows (${hex(rows * 16, 3)} px), up to ${screens} screens${i ? '' : ' – the game\'s'}`);
+  });
+  const sizeSel = h('select', null, sizeOpts());
+  const screenOpts = (): HTMLOptionElement[] => range(maxScreens(sd), (i) => String(i + 1)).map(([v, l]) => h('option', { value: String(v + 1), selected: v + 1 === hd.screens }, l));
+  const screensSel = h('select', null, screenOpts());
+  const sizeHint = h('span', { class: 'hint' });
+  const showSize = () => {
+    sizeSel.disabled = !hasLevelSize(rom, hd.mode) && !sd.levelSize;
+    sizeHint.textContent = sizeSel.disabled ? 'Horizontal levels without layer 2 objects only'
+      : !hasLevelSize(rom, hd.mode) ? 'The level mode has no heights: back to the game\'s height' : 'As Lunar Magic 3.00; playing taller levels comes later';
+  };
+  sizeSel.addEventListener('change', () => { sd.levelSize = Number(sizeSel.value); screensSel.replaceChildren(...screenOpts()); });
+
   let open = true;
   const screensWarn = h('div', { class: 'hint warn-text' });
+  screensSel.addEventListener('change', () => {
+    hd.screens = Number(screensSel.value);
+    screensWarn.textContent = hd.screens < lv.header.screens ? 'Fewer screens: objects, sprites and exits beyond are kept but cannot be reached in the game.' : '';
+    sizeSel.replaceChildren(...sizeOpts());
+  });
+  const modeSel = sel('mode', modes);
+  modeSel.addEventListener('change', () => { sizeSel.replaceChildren(...sizeOpts()); showSize(); });
+  showSize();
   const body = h('div', { class: 'header-dialog' },
     h('h3', null, 'General'),
     h('div', { class: 'grid2' },
-      f('Level mode', sel('mode', modes)),
-      f('Number of screens', select(range(32, (i) => String(i + 1)).map(([v, l]) => [v + 1, l] as [number, string]), hd.screens, (v) => {
-        hd.screens = v;
-        screensWarn.textContent = v < lv.header.screens ? 'Fewer screens: objects, sprites and exits beyond are kept but cannot be reached in the game.' : '';
-      })),
+      f('Level mode', modeSel),
+      f('Number of screens', screensSel),
+      f('Level height', sizeSel, sizeHint),
       f('FG/BG tileset', tilesetSel),
       f('FG palette', sel('fgPalette', range(8))),
       f('BG palette', sel('bgPalette', range(8))),
@@ -197,6 +227,8 @@ export function openHeaderDialog(app: App): void {
           const lv = app.level; // (the music edit saves a changed level first: a new object)
           const modeChangedL2 = hasLayer2Objects(hd.mode) !== hasLayer2Objects(lv.header.mode);
           lv.header = hd;
+          if (!hasLevelSize(rom, hd.mode)) sd.levelSize = 0;
+          hd.screens = Math.min(hd.screens, maxScreens(sd));
           lv.secondary = sepBox.checked ? withRates(sd, hr, vr) : { ...sd, layer2Separate: 0, layer2HAuto: 0, layer2V: 0 };
           lv.spriteHeader = spriteHeader;
           if (l2ptr !== CUSTOM_BG) { lv.bg = null; lv.layer2Pointer = l2ptr; }

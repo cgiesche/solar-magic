@@ -4,7 +4,7 @@
 
 import { Snes, type SnesState, type MemHook } from './snes.ts';
 import { Rom, snesToPc } from './rom.ts';
-import { L1_PTRS, L2_PTRS, SPR_PTRS, SEC_HDR, mainTranslevel } from './level.ts';
+import { L1_PTRS, L2_PTRS, SPR_PTRS, SEC_HDR, LEVEL_SIZE_TABLE, mainTranslevel } from './level.ts';
 import { editorPatch, musicPatch, BG_HOOK, HEADER_MUSIC_TABLE } from './patches.ts';
 import { RomReads, updateBytePages, PAGE_SHIFT } from './romdeps.ts';
 import { GM, RAM, SPR, MAP_BASE, MAP_SIZE, MAP_HI, getS16, set16, setSpritePos } from './ram.ts';
@@ -35,7 +35,7 @@ export interface LevelOverride {
   sprites?: Uint8Array;
   // objIndexOfByte maps overlay byte offset → object index (layer1: idx, layer2: 0x8000|idx)
   byteOwner?: Int32Array;
-  secondaryHeader?: number[]; // the bytes of SEC_HDR
+  secondaryHeader?: number[]; // the bytes of SEC_HDR (missing ones: 0)
   switchPalaces?: boolean; // treat all switch palaces as pressed
   onOffSwitch?: boolean; // ON/OFF switch in the OFF state ($14AF)
   trackSources?: boolean; // record ROM provenance of CGRAM (slower)
@@ -214,9 +214,10 @@ export class LevelEmulator {
       if (p) patch(p.sprBank + level, a >> 16);
       else patch(0x05d8f6, a >> 16); // a clean ROM (tests): vanilla LDA #$07 : STA $D0 at $05D8F5
     }
-    if (ov.secondaryHeader) {
-      ov.secondaryHeader.forEach((v, i) => patch(SEC_HDR[i] + level, v));
-    }
+    // bytes a secondary header leaves out are 0 (probes' test levels: the game's level size, paired
+    // layer 2 rates); layer 1 data without one is in the game's layout (the game's size)
+    if (ov.secondaryHeader) SEC_HDR.forEach((t, i) => patch(t + level, ov.secondaryHeader![i] ?? 0));
+    else if (ov.layer1) patch(LEVEL_SIZE_TABLE + level, 0);
     if (ov.music !== undefined) {
       for (let i = 0; i < 8; i++) patch(HEADER_MUSIC_TABLE + i, ov.music);
       const mp = musicPatch(rom);

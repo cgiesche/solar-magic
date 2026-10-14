@@ -131,6 +131,19 @@ check(readSecondaryHeader(rom, N).levelSize === 0 && rom.r8(LEVEL_SIZE_TABLE + 0
   check(got.every((t) => t === 0x130) && at(0x12, 0x2a) === 0x25 && at(0x0e, 0x2c) === 0x25, `Direct Map16 over the screen edge: ${got.map((t) => t.toString(16)).join(' ')}`);
 }
 
+// probes load their own layer 1 data, in the game's layout, also under a level with a size
+{
+  const sizedRom = new Rom(rom.data.slice());
+  sizedRom.w8(LEVEL_SIZE_TABLE + N, 0x0e);
+  const e2 = new LevelEmulator(sizedRom);
+  const l1 = serializeLayer1(rom, base);
+  const map = (r: ReturnType<LevelEmulator['load']>) => hex(r.wram.subarray(0xc800, 0x10000));
+  const want = map(emu.load(N, { layer1: l1 }));
+  check(map(e2.load(N, { layer1: l1 })) === want, 'layer 1 without a secondary header: the game\'s size');
+  check(map(e2.load(N, { layer1: l1, secondaryHeader: [0, 0, 0, 0] })) === want, 'a secondary header without the size byte: the game\'s size');
+  check(map(e2.load(N)) !== want, 'the level itself: its size');
+}
+
 // the level's size goes along: level file, Lunar Magic level file (level information byte 16)
 {
   const lv = sized(base, 0x0d);
