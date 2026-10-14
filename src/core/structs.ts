@@ -10,7 +10,7 @@
 import { Rom } from './rom.ts';
 import { Asm } from './asm.ts';
 import { ownerNote } from './patchreg.ts';
-import { missingPatch } from './patches.ts';
+import { missingPatch, nextScreen } from './patches.ts';
 
 export const EXT_OBJ_TABLE = 0x0da10f;
 export const STRUCT_EXT = 0x03;
@@ -80,7 +80,7 @@ function build(): Asm {
   a.br(0xd0, 'col');
   a.b(0xa5, 0x0f);
   a.br(0xd0, 'vcross');
-  a.b(0xa5, 0x6b, 0x18, 0x69, 0xb0, 0x85, 0x6b, 0x85, 0x6e, 0xa5, 0x6c, 0x69, 0x01, 0x85, 0x6c, 0x85, 0x6f); // += $1B0
+  a.b(...nextScreen()); // += a screen
   a.br(0x80, 'crossed');
   a.label('vcross');
   a.b(0xe6, 0x6c, 0xe6, 0x6f); // += $100

@@ -6,7 +6,7 @@ import { downloadBytes } from './platform.ts';
 import { objectName, hex2, hex3 } from '../core/names.ts';
 import { resizeObjectSize } from '../core/objkinds.ts';
 import { probeAt, spriteProbeAt, enterText, collisionText, type PosProbe, type CollisionProbe } from '../core/blockprobe.ts';
-import { type LevelObject, type LevelSprite, newUid, serializeLayer1, serializeLayer2, serializeSprites, spriteSizes, spriteId } from '../core/level.ts';
+import { type LevelObject, type LevelSprite, newUid, serializeLayer1, serializeLayer2, serializeLevelSprites, spriteSizes, spriteId } from '../core/level.ts';
 import { composite } from '../core/render.ts';
 import type { ArcSpeed } from '../core/jumparcs.ts';
 import { exitTarget } from '../core/exitgraph.ts';
@@ -895,7 +895,7 @@ export class LevelView {
     const app = this.app, lv = app.level;
     if (!lv) return;
     const l1 = serializeLayer1(app.rom, lv).length, l2 = serializeLayer2(app.rom, lv)?.length;
-    const spr = serializeSprites(lv.sprites, lv.spriteHeader, app.vertical, spriteSizes(app.rom)).length;
+    const spr = serializeLevelSprites(app.rom, lv).length;
     const parts = [`Objects ${lv.objects.length}${lv.layer2Objects ? ' / L2 ' + lv.layer2Objects.length : ''}`, `Sprites ${lv.sprites.length}`,
       `Data: L1 ${l1}${l2 !== undefined ? ` · L2 ${l2}` : ''} · sprites ${spr} bytes`];
     this.stats.textContent = parts.join('  ·  ');

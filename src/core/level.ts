@@ -7,8 +7,29 @@ import { STRUCT_EXT } from './structs.ts';
 export const L1_PTRS = 0x05e000;
 export const L2_PTRS = 0x05e600;
 export const SPR_PTRS = 0x05ec00;
-// the secondary header: the game's four tables and Lunar Magic's layer 2 scroll byte ($06FA00, l2scroll.ts)
-export const SEC_HDR = [0x05f000, 0x05f200, 0x05f400, 0x05f600, 0x06fa00];
+// the secondary header: the game's four tables, Lunar Magic's layer 2 scroll byte ($06FA00, l2scroll.ts)
+// and the level size byte (LEVEL_SIZE_TABLE)
+export const SEC_HDR = [0x05f000, 0x05f200, 0x05f400, 0x05f600, 0x06fa00, 0x06ca00];
+
+// ----- level size (Lunar Magic 3.00's horizontal level heights, levelheight.ts) -----
+// A byte per level in Lunar Magic's format TB0MMMMM: M the size, T (layer 2 or 3) and B (show the bottom
+// row) Lunar Magic's own, kept. Lunar Magic keeps the table where its code is; the editor's is here.
+export const LEVEL_SIZE_TABLE = SEC_HDR[5];
+// the height in pixels per size (the 0x3800 bytes of level data shared by the screens); also a screen's
+// bytes in the level data. Measured: what Lunar Magic's code sets as the level's height ($13D7) per size.
+export const LEVEL_HEIGHTS = [
+  0x1b0, 0x1c0, 0x1d0, 0x200, 0x220, 0x250, 0x260, 0x280, 0x2a0, 0x2c0, 0x2f0, 0x310, 0x340, 0x380, 0x3b0, 0x400,
+  0x440, 0x4a0, 0x510, 0x590, 0x630, 0x700, 0x800, 0x950, 0xb30, 0xe00, 0x12a0, 0x1c00, 0x3800, 0x100, 0xf0, 0xe0,
+];
+// sizes the editor offers: 1C (one screen, 0x3800 pixels) needs Lunar Magic's swapped screen jump, extended
+// object $03, which is the editor's structure; 1D-1F have more than 32 screens
+export const MAX_LEVEL_SIZE = 0x1b;
+export const SUBSCREEN_ROWS = 32; // a taller level's object and sprite positions count in subscreens of 32 rows
+export const levelRows = (s: { levelSize: number }): number => LEVEL_HEIGHTS[s.levelSize & 0x1f] >> 4;
+// a level with subscreens: objects and sprites below row 31 (screen jumps with a subscreen, sprite data
+// in Lunar Magic's new format)
+export const isTall = (s: { levelSize: number }): boolean => levelRows(s) > SUBSCREEN_ROWS;
+export const maxScreens = (s: { levelSize: number }): number => Math.min(32, Math.floor(0x3800 / LEVEL_HEIGHTS[s.levelSize & 0x1f]));
 export const SEC_ENT = [0x05f800, 0x05fa00, 0x05fc00, 0x05fe00];
 
 export interface LevelObject {
@@ -71,6 +92,8 @@ export interface SecondaryHeader {
   layer2HAuto: number; // FA00 bit 6: the horizontal rate (layer2Scroll) is an auto-scroll
   layer2V: number; // FA00 bits 4-0: the vertical rate
   lmAutoScreens: number; // FA00 bit 5: Lunar Magic's "auto-set number of screens" (kept, not used)
+  levelSize: number; // CA00 bits 4-0: the height of a horizontal level (LEVEL_HEIGHTS), 0 = the game's
+  levelSizeFlags: number; // CA00 bits 7-5: Lunar Magic's T and B (kept, not used)
 }
 
 export interface Level {
@@ -116,6 +139,10 @@ export function hasLayer2Objects(mode: number): boolean {
 export function hasObjects(mode: number): boolean {
   return ![0x09, 0x0b, 0x10].includes(mode);
 }
+// modes a level can have a size (a height) in: horizontal, with objects, layer 2 not of objects
+export function hasLevelSize(rom: Rom, mode: number): boolean {
+  return hasObjects(mode) && !hasLayer2Objects(mode) && !isL1Vertical(rom, mode);
+}
 
 // ----- header -----
 export function parsePrimaryHeader(b: Uint8Array): PrimaryHeader {
@@ -145,7 +172,7 @@ export function encodePrimaryHeader(h: PrimaryHeader): Uint8Array {
   ]);
 }
 
-export function decodeSecondaryHeader([a, b, c, d, e = 0]: Iterable<number> & ArrayLike<number>): SecondaryHeader {
+export function decodeSecondaryHeader([a, b, c, d, e = 0, f = 0]: Iterable<number> & ArrayLike<number>): SecondaryHeader {
   return {
     layer2Scroll: a >> 4,
     entranceY: a & 0x0f,
@@ -162,6 +189,8 @@ export function decodeSecondaryHeader([a, b, c, d, e = 0]: Iterable<number> & Ar
     layer2HAuto: (e >> 6) & 1,
     layer2V: e & 0x1f,
     lmAutoScreens: (e >> 5) & 1,
+    levelSize: f & 0x1f,
+    levelSizeFlags: f & 0xe0,
   };
 }
 export function encodeSecondaryHeader(s: SecondaryHeader): number[] {
@@ -171,6 +200,7 @@ export function encodeSecondaryHeader(s: SecondaryHeader): number[] {
     (s.midwayScreen << 4) | ((s.fgInitY & 3) << 2) | (s.bgInitY & 3),
     (s.noYoshiIntro << 7) | ((s.verticalPositioning & 3) << 5) | (s.entranceScreen & 0x1f),
     (s.layer2Separate << 7) | ((s.layer2HAuto & 1) << 6) | ((s.lmAutoScreens & 1) << 5) | (s.layer2V & 0x1f),
+    (s.levelSizeFlags & 0xe0) | (s.levelSize & 0x1f),
   ];
 }
 export function readSecondaryHeader(rom: Rom, n: number): SecondaryHeader {
@@ -187,12 +217,14 @@ export interface ParsedObjects {
   size: number; // bytes consumed including terminating $FF
 }
 
-// extended object $03 is a structure (4 bytes, structure patch)
-export function parseObjects(data: Uint8Array, start: number, vertical: boolean): ParsedObjects {
+// extended object $03 is a structure (4 bytes, structure patch). In a level with a size (`sized`) the
+// screen jump's low nibble of the second byte is the subscreen (000HHHHH 0000VVVV 00000001): rows
+// V * 32 on; the new screen flag keeps it (observed: where the game puts objects in a Lunar Magic-saved ROM)
+export function parseObjects(data: Uint8Array, start: number, vertical: boolean, sized = false): ParsedObjects {
   const objects: LevelObject[] = [];
   const exits: ScreenExit[] = [];
   let p = start;
-  let screen = 0;
+  let screen = 0, sub = 0;
   while (p < data.length && data[p] !== 0xff) {
     const b0 = data[p], b1 = data[p + 1], b2 = data[p + 2];
     const num = ((b0 >> 1) & 0x30) | (b1 >> 4);
@@ -210,6 +242,7 @@ export function parseObjects(data: Uint8Array, start: number, vertical: boolean)
     }
     if (num === 0 && b2 === 1) {
       screen = b0 & 0x1f;
+      if (sized && !vertical) sub = b1 & 0x0f;
       p += 3;
       continue;
     }
@@ -221,7 +254,7 @@ export function parseObjects(data: Uint8Array, start: number, vertical: boolean)
       y = screen * 16 + f4;
     } else {
       x = screen * 16 + f4;
-      y = f5;
+      y = sub * SUBSCREEN_ROWS + f5;
     }
     if (dm16) {
       objects.push({ uid: newUid(), num, ext: b2, x, y, size: data[p + 5], tile: data[p + 3] | (data[p + 4] << 8) });
@@ -239,8 +272,9 @@ export function parseObjects(data: Uint8Array, start: number, vertical: boolean)
   return { objects, exits, size: p - start + 1 };
 }
 
-// owners (optional): receives, per output byte, the index of the object it belongs to (or -1)
-export function serializeObjects(objects: LevelObject[], exits: ScreenExit[], vertical: boolean, owners?: number[]): Uint8Array {
+// owners (optional): receives, per output byte, the index of the object it belongs to (or -1);
+// sized: a level with a size (subscreens, see parseObjects)
+export function serializeObjects(objects: LevelObject[], exits: ScreenExit[], vertical: boolean, owners?: number[], sized = false): Uint8Array {
   const out: number[] = [];
   const own = (n: number, v: number) => { if (owners) for (let i = 0; i < n; i++) owners.push(v); };
   for (const e of exits) {
@@ -248,17 +282,19 @@ export function serializeObjects(objects: LevelObject[], exits: ScreenExit[], ve
     out.push(e.screen & 0x1f, flags, 0x00, e.dest & 0xff);
     own(4, -1);
   }
-  let screen = 0;
+  let screen = 0, sub = 0;
   for (const o of objects) {
     const s = vertical ? o.y >> 4 : o.x >> 4;
+    const v = sized && !vertical ? Math.floor(o.y / SUBSCREEN_ROWS) : 0;
     let nflag = 0;
-    if (s === screen + 1) {
+    if (s === screen + 1 && v === sub) {
       nflag = 0x80;
       screen = s;
-    } else if (s !== screen) {
-      out.push(s & 0x1f, 0x00, 0x01);
+    } else if (s !== screen || v !== sub) {
+      out.push(s & 0x1f, v & 0x0f, 0x01);
       own(3, -1);
       screen = s;
+      sub = v;
     }
     const f5 = vertical ? o.x & 0x1f : o.y & 0x1f;
     const f4 = vertical ? o.y & 0x0f : o.x & 0x0f;
@@ -305,11 +341,26 @@ export function spriteId(s: { num: number; extra: number }): number {
 }
 export const isCustomId = (id: number) => id >= 0x200;
 
+// Lunar Magic's new sprite format (header bit 5, NEW_SPRITE_FORMAT): $FF starts a command, $FF $00-$7F
+// sets the subscreen of the sprites that follow (rows V * 32 on), $FF $FE ends the data, $FF $FF is a
+// sprite whose first byte is $FF (smwspeedruns' "Level Data Format"; seen in a Lunar Magic-saved ROM)
+export const NEW_SPRITE_FORMAT = 0x20;
+export const SPRITE_MEMORY = 0x1f; // the header's sprite memory (bits 4-0; bit 5 is the format)
+
 export function parseSprites(data: Uint8Array, start: number, vertical: boolean, sizes: SpriteSizes = null): { sprites: LevelSprite[]; header: number; size: number } {
   const header = data[start];
+  const newFormat = (header & NEW_SPRITE_FORMAT) !== 0;
   const sprites: LevelSprite[] = [];
-  let p = start + 1;
-  while (p < data.length && data[p] !== 0xff) {
+  let p = start + 1, sub = 0;
+  while (p < data.length) {
+    if (data[p] === 0xff) {
+      if (!newFormat) break;
+      const c = data[p + 1];
+      if (c === 0xfe || c === undefined) { p++; break; }
+      if (c < 0x80) { sub = c; p += 2; continue; }
+      p++;
+      if (c !== 0xff) { p++; continue; } // reserved commands: skipped
+    }
     const b0 = data[p], b1 = data[p + 1], b2 = data[p + 2];
     const screen = (b1 & 0x0f) | ((b0 & 2) << 3);
     const lo = b0 >> 4; // y within screen (or tile row)
@@ -321,7 +372,7 @@ export function parseSprites(data: Uint8Array, start: number, vertical: boolean,
       x = hi * 16 + col;
     } else {
       x = screen * 16 + col;
-      y = hi * 16 + lo;
+      y = sub * SUBSCREEN_ROWS + hi * 16 + lo;
     }
     const extra = (b0 >> 2) & 3;
     const len = spriteEntrySize(sizes, extra, b2);
@@ -338,20 +389,33 @@ export function spriteLoadOrder(sprites: LevelSprite[], vertical: boolean): Leve
   return [...sprites].sort((a, b) => (vertical ? a.y - b.y || a.x - b.x : a.x - b.x || a.y - b.y));
 }
 
-export function serializeSprites(sprites: LevelSprite[], header: number, vertical: boolean, sizes: SpriteSizes = null): Uint8Array {
+// tall: a level with subscreens (isTall), written in Lunar Magic's new format; others in the game's
+export function serializeSprites(sprites: LevelSprite[], header: number, vertical: boolean, sizes: SpriteSizes = null, tall = false): Uint8Array {
   const sorted = spriteLoadOrder(sprites, vertical);
-  const out: number[] = [header];
+  const out: number[] = [tall ? header | NEW_SPRITE_FORMAT : header & ~NEW_SPRITE_FORMAT];
+  let sub = 0;
   for (const s of sorted) {
+    if (tall) {
+      const v = Math.floor(s.y / SUBSCREEN_ROWS);
+      if (v !== sub) { out.push(0xff, v & 0x7f); sub = v; }
+    }
     let screen: number, lo: number, hi: number, col: number;
     if (vertical) {
       screen = s.y >> 4; lo = s.y & 15; hi = (s.x >> 4) & 1; col = s.x & 15;
     } else {
       screen = s.x >> 4; col = s.x & 15; hi = (s.y >> 4) & 1; lo = s.y & 15;
     }
-    out.push((lo << 4) | ((s.extra & 3) << 2) | ((screen & 0x10) >> 3) | hi, (col << 4) | (screen & 0x0f), s.num, ...spriteBytes(sizes, s));
+    const b0 = (lo << 4) | ((s.extra & 3) << 2) | ((screen & 0x10) >> 3) | hi;
+    if (tall && b0 === 0xff) out.push(0xff);
+    out.push(b0, (col << 4) | (screen & 0x0f), s.num, ...spriteBytes(sizes, s));
   }
-  out.push(0xff);
+  out.push(...(tall ? [0xff, 0xfe] : [0xff]));
   return new Uint8Array(out);
+}
+
+// the level's sprite data as the ROM keeps it
+export function serializeLevelSprites(rom: Rom, lv: Level): Uint8Array {
+  return serializeSprites(lv.sprites, lv.spriteHeader, isL1Vertical(rom, lv.header.mode), spriteSizes(rom), isTall(lv.secondary));
 }
 
 export function spriteBank(rom: Rom, n: number): number {
@@ -375,7 +439,7 @@ export function loadLevel(rom: Rom, n: number): Level {
 export function parseLevelData(rom: Rom, n: number, l1: Uint8Array, l2: Uint8Array | null, l2Pointer: number, spr: Uint8Array, secondary: SecondaryHeader, sizes: SpriteSizes = spriteSizes(rom)): Level {
   const header = parsePrimaryHeader(l1.subarray(0, 5));
   const vert1 = isL1Vertical(rom, header.mode);
-  const p1 = hasObjects(header.mode) ? parseObjects(l1, 5, vert1) : { objects: [], exits: [], size: 1 };
+  const p1 = hasObjects(header.mode) ? parseObjects(l1, 5, vert1, secondary.levelSize !== 0) : { objects: [], exits: [], size: 1 };
   let layer2Objects: LevelObject[] | null = null;
   let layer2Header: Uint8Array | null = null;
   let l2Size = 0;
@@ -411,7 +475,7 @@ export function serializeLayer1(rom: Rom, lv: Level, owners?: number[]): Uint8Ar
   const hdr = encodePrimaryHeader(lv.header);
   if (owners) for (let i = 0; i < 5; i++) owners.push(-1);
   const body = hasObjects(lv.header.mode)
-    ? serializeObjects(lv.objects, lv.exits, isL1Vertical(rom, lv.header.mode), owners)
+    ? serializeObjects(lv.objects, lv.exits, isL1Vertical(rom, lv.header.mode), owners, lv.secondary.levelSize !== 0)
     : new Uint8Array([0xff]);
   const out = new Uint8Array(hdr.length + body.length);
   out.set(hdr);
@@ -504,7 +568,8 @@ function shiftScreens(rom: Rom, lv: Level, from: number, delta: number): void {
 }
 
 export function insertScreen(rom: Rom, lv: Level, s: number): void {
-  if (lv.header.screens >= 32) throw new Error('The level already has 32 screens.');
+  const max = maxScreens(lv.secondary);
+  if (lv.header.screens >= max) throw new Error(`The level already has ${max} screens${max < 32 ? ', as many as its height allows' : ''}.`);
   shiftScreens(rom, lv, s, 1);
   lv.header.screens++;
 }

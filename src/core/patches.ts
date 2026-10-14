@@ -10,8 +10,17 @@
 import { Rom } from './rom.ts';
 import { Asm } from './asm.ts';
 import { ownerNote } from './patchreg.ts';
+import { LEVEL_HEIGHT_RAM } from './ram.ts';
 
 export const SPR_BANK_HOOK = 0x05d8f5;
+
+// object code (M=8): $6B/$6E on to the next screen of a horizontal level – the game's $1B0 bytes, or the
+// level's screen size while the level heights patch loads a level with a size (levelheight.ts)
+export function nextScreen(): number[] {
+  const [a] = LEVEL_HEIGHT_RAM;
+  return [0xc2, 0x20, 0xaf, a & 0xff, (a >> 8) & 0xff, a >> 16, 0xd0, 0x03, 0xa9, 0xb0, 0x01, // REP #$20 : LDA.l size : BNE + : LDA #$01B0
+    0x18, 0x65, 0x6b, 0x85, 0x6b, 0x85, 0x6e, 0xe2, 0x20]; // + CLC : ADC $6B : STA $6B : STA $6E : SEP #$20
+}
 const HOOK_GFXPTR = 0x00ba2c;
 const HOOK_UPLOAD = 0x00aa6b;
 const HOOK_SPRGFX = 0x00a9e1;
@@ -176,7 +185,7 @@ function build(): Asm {
   a.br(0xd0, 'dmcol');
   a.b(0xa5, 0x0f);
   a.br(0xd0, 'dmvcross');
-  a.b(0xa5, 0x6b, 0x18, 0x69, 0xb0, 0x85, 0x6b, 0x85, 0x6e, 0xa5, 0x6c, 0x69, 0x01, 0x85, 0x6c, 0x85, 0x6f); // += $1B0
+  a.b(...nextScreen()); // += a screen
   a.br(0x80, 'dmcrossed');
   a.label('dmvcross');
   a.b(0xe6, 0x6c, 0xe6, 0x6f); // += $100

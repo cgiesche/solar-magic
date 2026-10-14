@@ -4,11 +4,12 @@
 import type { App } from './app.ts';
 import { h, choose } from './dom.ts';
 import { hex2 } from '../core/names.ts';
+import { SPRITE_MEMORY } from '../core/level.ts';
 
 // uids of the level's sprites drawn incompletely (only while the check matches the level)
 export function incompleteSprites(app: App): number[] {
   const m = app.spriteMem;
-  if (!m || m.level !== app.level.number || m.mem !== (app.level.spriteHeader & 0x3f)) return [];
+  if (!m || m.level !== app.level.number || m.mem !== (app.level.spriteHeader & SPRITE_MEMORY)) return [];
   return app.level.sprites.filter((s) => m.conflicts.has(s.uid)).map((s) => s.uid);
 }
 
@@ -25,7 +26,7 @@ export async function spriteMemDialog(app: App, reveal: (uids: number[]) => void
   if (!uids.length) return;
   const sug = app.spriteMem!.suggestion;
   const body = h('div', { style: 'max-width:460px' },
-    h('p', null, `${spriteMemText(uids.length)}: the level's sprite memory ${hex2(app.level.spriteHeader & 0x3f)} does not have enough room for them.`),
+    h('p', null, `${spriteMemText(uids.length)}: the level's sprite memory ${hex2(app.level.spriteHeader & SPRITE_MEMORY)} does not have enough room for them.`),
     h('p', { class: 'hint' }, SPRITE_MEM_HELP),
     sug !== null
       ? h('p', null, `With sprite memory ${hex2(sug)}, all sprites are shown completely, without fewer appearing at once.`)

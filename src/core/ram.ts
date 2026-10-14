@@ -86,6 +86,9 @@ export const RAM = {
 export const MAP_BASE = 0xc800;
 export const MAP_SIZE = 0x3800;
 export const MAP_HI = 0x10000; // from a low byte to its high byte
+// the level heights patch's RAM (levelheight.ts, SNES address, bytes): a screen's bytes in the level data
+// while a level with a size loads (16-bit, 0: the game's $1B0), the subscreen of the objects that follow
+export const LEVEL_HEIGHT_RAM: [number, number] = [0x7f3666, 3];
 
 // normal sprites: per-slot tables (address + slot)
 export const SPRITE_SLOTS = 12;

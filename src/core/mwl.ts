@@ -4,8 +4,9 @@
 //
 // .mwl (Ankouno's "MWL File Format", SMW-Data): at 0x40 (offset, size) pairs of the sections
 //  - 0 level information: 2 bytes the level number, then the secondary header ($05F000, $05F200,
-//    $05F400, $05F600, …), at 17 the layer 2 scroll byte ($06FA00, l2scroll.ts; $FF from a ROM
-//    without Lunar Magic's table: the paired setting);
+//    $05F400, $05F600, …), at 16 the level size (Lunar Magic 3.00's TB0MMMMM, LEVEL_SIZE_TABLE; seen in
+//    level files Lunar Magic 3.71 exported), at 17 the layer 2 scroll byte ($06FA00, l2scroll.ts; $FF
+//    from a ROM without Lunar Magic's table: the paired setting);
 //  - 1 layer 1, 2 layer 2, 3 sprites: 8 header bytes (layer 1: byte 0 bit 0 = custom palette), then the
 //    data as in the ROM; a BG tilemap as layer 2 is 0x800 bytes (bgpack.ts);
 //  - 4 palette: 8 header bytes, 256 colors and the back area color;
@@ -22,7 +23,7 @@
 import type { Rom } from './rom.ts';
 import {
   type Level, type LevelObject, type ScreenExit, newUid, parsePrimaryHeader, decodeSecondaryHeader, isL1Vertical, isL2Vertical,
-  hasLayer2Objects, hasObjects, parseSprites, spriteSizes,
+  hasLayer2Objects, hasObjects, parseSprites, spriteSizes, hasLevelSize, MAX_LEVEL_SIZE, SUBSCREEN_ROWS,
 } from './level.ts';
 import { DM16_EXT } from './patches.ts';
 import { EXT_FIRST, EXT_TILES } from './map16ext.ts';
@@ -60,7 +61,7 @@ export function mwlSections(d: Uint8Array): MwlSections {
   const l1h = d.subarray(u32(d, 0x40 + 8), u32(d, 0x40 + 8) + 1);
   return {
     number: info[0] | (info[1] << 8),
-    secondary: [...info.subarray(2, 6), info.length > 17 && info[17] !== 0xff ? info[17] : 0],
+    secondary: [...info.subarray(2, 6), info.length > 17 && info[17] !== 0xff ? info[17] : 0, info.length > 16 ? info[16] : 0],
     layer1: l1,
     customPalette: (l1h[0] & 1) !== 0,
     layer2: l2 && l2.length ? l2 : null,
@@ -80,13 +81,14 @@ export function mwlExAnim(d: Uint8Array): ExList | null {
 }
 
 // layer 1/2 objects with Lunar Magic's Direct Map16 objects as the editor's; `notes`: what is left out
-export function parseLmObjects(data: Uint8Array, start: number, vertical: boolean, notes: string[]): { objects: LevelObject[]; exits: ScreenExit[] } {
+// sized: a level with a size, whose screen jumps have a subscreen (parseObjects)
+export function parseLmObjects(data: Uint8Array, start: number, vertical: boolean, notes: string[], sized = false): { objects: LevelObject[]; exits: ScreenExit[] } {
   const objects: LevelObject[] = [];
   const exits: ScreenExit[] = [];
-  let p = start, screen = 0, custom = 0, high = 0;
+  let p = start, screen = 0, sub = 0, custom = 0, high = 0;
   const at = (b0: number, b1: number) => {
     const f5 = b0 & 0x1f, f4 = b1 & 0x0f;
-    return vertical ? { x: f5, y: screen * 16 + f4 } : { x: screen * 16 + f4, y: f5 };
+    return vertical ? { x: f5, y: screen * 16 + f4 } : { x: screen * 16 + f4, y: sub * SUBSCREEN_ROWS + f5 };
   };
   const dm16 = (x: number, y: number, tile: number, size: number) => objects.push({ uid: newUid(), num: 0, ext: DM16_EXT, x, y, size, tile });
   // a block of (ph+1)x(pw+1) tiles from `tile` (Map16 rows of 16) over (h+1)x(w+1) tiles
@@ -102,7 +104,7 @@ export function parseLmObjects(data: Uint8Array, start: number, vertical: boolea
       p += 4;
       continue;
     }
-    if (num === 0 && b2 === 1) { screen = b0 & 0x1f; p += 3; continue; }
+    if (num === 0 && b2 === 1) { screen = b0 & 0x1f; if (sized && !vertical) sub = b1 & 0x0f; p += 3; continue; }
     const { x, y } = at(b0, b1);
     if (num === 0x22 || num === 0x23) { dm16(x, y, ((num - 0x22) << 8) | data[p + 3], b2); p += 4; continue; }
     if (num === 0x27 || num === 0x29) {
@@ -130,7 +132,7 @@ export function sampleTiles(rom: Rom, d: Uint8Array): number[] {
   const s = mwlSections(d);
   const header = parsePrimaryHeader(s.layer1.subarray(0, 5));
   if (!hasObjects(header.mode)) return [];
-  const { objects } = parseLmObjects(s.layer1, 5, isL1Vertical(rom, header.mode), []);
+  const { objects } = parseLmObjects(s.layer1, 5, isL1Vertical(rom, header.mode), [], decodeSecondaryHeader(s.secondary).levelSize !== 0);
   return [...new Set(objects.filter((o) => o.tile !== undefined).map((o) => o.tile!))].sort((a, b) => a - b);
 }
 
@@ -147,8 +149,11 @@ export function sampleLevel(rom: Rom, d: Uint8Array, into: Level, map: SampleMap
   const s = mwlSections(d);
   const notes: string[] = [];
   const header = parsePrimaryHeader(s.layer1.subarray(0, 5));
+  const secondary = decodeSecondaryHeader(s.secondary);
+  if (secondary.levelSize > MAX_LEVEL_SIZE) throw new Error(`The level file's level size ${hx(secondary.levelSize, 2)} (Lunar Magic) is not supported – the editor has sizes up to ${hx(MAX_LEVEL_SIZE, 2)}`);
+  if (secondary.levelSize && !hasLevelSize(rom, header.mode)) throw new Error(`The level file's level has a size (Lunar Magic) in a level mode (${hx(header.mode, 2)}) the editor has no sizes for`);
   const vert1 = isL1Vertical(rom, header.mode);
-  const l1 = hasObjects(header.mode) ? parseLmObjects(s.layer1, 5, vert1, notes) : { objects: [], exits: [] };
+  const l1 = hasObjects(header.mode) ? parseLmObjects(s.layer1, 5, vert1, notes, secondary.levelSize !== 0) : { objects: [], exits: [] };
   let layer2Objects: LevelObject[] | null = null, layer2Header: Uint8Array | null = null;
   if (s.layer2 && hasLayer2Objects(header.mode) && s.layer2.length !== 0x800) {
     layer2Header = s.layer2.slice(0, 5);
@@ -177,7 +182,7 @@ export function sampleLevel(rom: Rom, d: Uint8Array, into: Level, map: SampleMap
   const level: Level = {
     number: into.number,
     header,
-    secondary: decodeSecondaryHeader(s.secondary),
+    secondary,
     objects: l1.objects,
     exits,
     layer2Objects,

@@ -2,7 +2,7 @@
 
 import { Rom } from './rom.ts';
 import {
-  type Level, L1_PTRS, L2_PTRS, SPR_PTRS, serializeLayer1, serializeLayer2, serializeSprites, isL1Vertical, spriteSizes,
+  type Level, L1_PTRS, L2_PTRS, SPR_PTRS, serializeLayer1, serializeLayer2, serializeLevelSprites, isL1Vertical, spriteSizes,
   writeSecondaryHeader, spriteBank,
 } from './level.ts';
 import { setSpriteBank, bgBank, setBgBank } from './patches.ts';
@@ -67,7 +67,7 @@ export function saveLevel(rom: Rom, lv: Level): string[] {
 // writes a level's sprite data (in place when it fits and no other level uses it)
 export function saveSprites(rom: Rom, lv: Level): string {
   const n = lv.number;
-  const spr = serializeSprites(lv.sprites, lv.spriteHeader, isL1Vertical(rom, lv.header.mode), spriteSizes(rom));
+  const spr = serializeLevelSprites(rom, lv);
   const bankOf = (i: number) => spriteBank(rom, i);
   const sprShared = countRefs(rom, SPR_PTRS, 2, lv.sprAddr, bankOf) > 1;
   let as: number;

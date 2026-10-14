@@ -9,6 +9,7 @@ import { editorPatch, madeByEditor, installEditorPatch, installCustomPalettePatc
 import { installVramPatch } from './vrampatch.ts';
 import { installExAnim } from './exanim.ts';
 import { installL2ScrollPatch } from './l2scroll.ts';
+import { installLevelHeightPatch } from './levelheight.ts';
 import { installMap16Ext, enableBlocks } from './map16ext.ts';
 import { installBgMap16Ext } from './bgmap16.ts';
 import { installStructPatch } from './structs.ts';
@@ -43,6 +44,7 @@ export async function installEditorPatches(rom: Rom): Promise<void> {
   installStructPatch(rom);
   asar(installExAnim(rom));
   asar(installL2ScrollPatch(rom));
+  asar(installLevelHeightPatch(rom));
   // new Map16 tiles start as the empty tile 025 of the ROM
   const blank = map16Source(rom, new LevelEmulator(rom).load(0x105)).fg(0x025);
   installMap16Ext(rom, blank);

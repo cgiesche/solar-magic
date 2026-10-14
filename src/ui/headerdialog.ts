@@ -3,7 +3,7 @@
 import type { App } from './app.ts';
 import { h, select, hexInput, modal, toast } from './dom.ts';
 import { TILESETS, levelModeName, MUSIC, TIME_SETTINGS, VERTICAL_SCROLL, ENTRANCE_ACTIONS, layer2RateName, hex2, hex } from '../core/names.ts';
-import { hasLayer2Objects, type PrimaryHeader, type SecondaryHeader, L2_PTRS } from '../core/level.ts';
+import { hasLayer2Objects, type PrimaryHeader, type SecondaryHeader, L2_PTRS, SPRITE_MEMORY } from '../core/level.ts';
 import { bgBank, levelMusic, setLevelMusic, HEADER_MUSIC_TABLE } from '../core/patches.ts';
 import { songHex } from '../core/music.ts';
 import { currentSongs, playButton } from './musicdialog.ts';
@@ -28,9 +28,9 @@ export function openHeaderDialog(app: App): void {
   const sel2 = <K extends keyof SecondaryHeader>(k: K, opts: [number, string][]) => select(opts, sd[k] as number, (v) => { (sd[k] as number) = v; });
 
   // sprite memory with the result of the background check (for the level's current value)
-  const memInput = hexInput(spriteHeader & 0x3f, 2, (v) => (spriteHeader = (spriteHeader & 0xc0) | v), 0x3f);
+  const memInput = hexInput(spriteHeader & SPRITE_MEMORY, 2, (v) => (spriteHeader = (spriteHeader & 0xc0) | v), SPRITE_MEMORY);
   const incomplete = incompleteSprites(app).length, sm = app.spriteMem;
-  const checked = sm && sm.level === lv.number && sm.mem === (lv.spriteHeader & 0x3f);
+  const checked = sm && sm.level === lv.number && sm.mem === (lv.spriteHeader & SPRITE_MEMORY);
   const memStatus = !checked ? h('p', { class: 'hint' }, 'Checking sprite memory …')
     : !incomplete ? h('p', { class: 'hint' }, '✓ All sprites are shown completely.')
     : h('div', { class: 'warn-box', title: SPRITE_MEM_HELP }, `⚠ ${spriteMemText(incomplete)}: not enough sprite memory. `,
@@ -180,7 +180,7 @@ export function openHeaderDialog(app: App): void {
     memStatus,
     h('div', { class: 'grid2' },
       h('div', { class: 'prop', title: SPRITE_MEM_HELP }, h('label', null, 'Sprite memory'), memInput, h('span', { class: 'hint' }, 'Room for sprite graphics ($1692)')),
-      f('Buoyancy in water', select([[0, 'Off'], [0x80, 'On'], [0xc0, 'On + disabled (underwater)'], [0x40, 'Bit 6']], spriteHeader & 0xc0, (v) => (spriteHeader = (spriteHeader & 0x3f) | v))),
+      f('Buoyancy in water', select([[0, 'Off'], [0x80, 'On'], [0xc0, 'On + disabled (underwater)'], [0x40, 'Bit 6']], spriteHeader & 0xc0, (v) => (spriteHeader = (spriteHeader & SPRITE_MEMORY) | v))),
       lv.layer2Objects || hasLayer2Objects(hd.mode) ? f('Layer 2', lv.layer2Objects ? h('span', null, 'Layer 2 objects (L2 mode)') : h('span', { class: 'warn-box' }, 'The mode expects layer 2 objects')) :
         f('BG tilemap', select(bgOpts, l2ptr, (v) => (l2ptr = v))),
     ),

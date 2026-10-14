@@ -3,9 +3,9 @@
 import { Rom, snesToPc } from '../core/rom.ts';
 import { LevelEmulator, OV_L1, OV_L2, type LevelRender, type LevelOverride, MAP_BASE, MAP_SIZE } from '../core/levelemu.ts';
 import {
-  type Level, type LevelObject, type LevelSprite, type ScreenExit, type SecondaryEntrance, loadLevel, spriteLoadOrder, serializeLayer1, serializeLayer2, serializeSprites, spriteSizes, spriteId, spriteBytes,
+  type Level, type LevelObject, type LevelSprite, type ScreenExit, type SecondaryEntrance, loadLevel, spriteLoadOrder, serializeLayer1, serializeLayer2, serializeSprites, serializeLevelSprites, spriteSizes, spriteId, spriteBytes,
   isL1Vertical, cloneLevel, newUid, hasLayer2Objects, hasObjects, L1_PTRS, L2_PTRS, SEC_HDR,
-  readSecondaryEntrance, writeSecondaryEntrance, entrancePos, nearestEntrance, encodeSecondaryHeader,
+  readSecondaryEntrance, writeSecondaryEntrance, entrancePos, nearestEntrance, encodeSecondaryHeader, SPRITE_MEMORY, levelRows,
 } from '../core/level.ts';
 import { hex, spriteName } from '../core/names.ts';
 import { loadPixiProject, customSpriteList, type CustomSprite } from '../core/pixi.ts';
@@ -298,7 +298,7 @@ export class App {
       layer2: l2 ?? undefined,
       layer2Pointer: l2 ? undefined : lv.layer2Pointer,
       bgData: !l2 && lv.bg ? encodeBg(lv.bg) : undefined,
-      sprites: serializeSprites(lv.sprites, lv.spriteHeader, this.vertical, spriteSizes(this.rom)),
+      sprites: serializeLevelSprites(this.rom, lv),
       byteOwner,
       switchPalaces: this.switches.palaces,
       onOffSwitch: this.switches.onOff,
@@ -315,7 +315,7 @@ export class App {
     this.renderError = r.ok ? null : r.error ?? 'Error';
     this.anim.snaps = this.show.anim && r.ok ? this.emu.animationFrames() : [];
     this.render = r;
-    this.images = renderLevel(this.rom, r, lv.header.mode, lv.header.screens);
+    this.images = renderLevel(this.rom, r, lv.header.mode, lv.header.screens, levelRows(lv.secondary));
     this.compositeImg = this.compose();
     this.buildOffsetMaps();
     this.findSecondaryEntrances();
@@ -349,7 +349,7 @@ export class App {
     const step = () => {
       if (gen !== a.gen) return;
       this.setBusy('anim', `Animations ${i + 1}/${snaps.length}`);
-      const li = renderLevel(this.rom, { ...this.render, vram: snaps[i].vram, cgram: snaps[i].cgram }, lv.header.mode, lv.header.screens);
+      const li = renderLevel(this.rom, { ...this.render, vram: snaps[i].vram, cgram: snaps[i].cgram }, lv.header.mode, lv.header.screens, levelRows(lv.secondary));
       const img = this.compose(li);
       const idx: number[] = [];
       for (let k = 0; k < img.length; k++) if (img[k] !== base[k]) idx.push(k);
@@ -573,7 +573,7 @@ export class App {
     const hd = this.level.header;
     // sprite memory: a sprite whose OAM range is too small is captured as the game shows it
     const custom = this.customSprites().map((c) => c.id);
-    const key = `${hd.spriteGfx}-${hd.spritePalette}-${this.level.spriteHeader & 0x3f}-${gfxFilesHash(this.rom, this.spriteGfxFiles()).toString(36)}${custom.length ? '-' + custom.map((c) => c.toString(16)).join('.') : ''}`;
+    const key = `${hd.spriteGfx}-${hd.spritePalette}-${this.level.spriteHeader & SPRITE_MEMORY}-${gfxFilesHash(this.rom, this.spriteGfxFiles()).toString(36)}${custom.length ? '-' + custom.map((c) => c.toString(16)).join('.') : ''}`;
     if (key === this.spriteKey) return;
     this.spriteKey = key;
     this.variantQueue = [];
@@ -732,7 +732,7 @@ export class App {
   }
 
   private checkSpriteMem(): void {
-    const lv = this.level, mem = lv.spriteHeader & 0x3f, gen = this.editGen;
+    const lv = this.level, mem = lv.spriteHeader & SPRITE_MEMORY, gen = this.editGen;
     // canonical order: results are stored by index, uids differ between sessions
     const sprites = [...lv.sprites].sort((a, b) => a.x - b.x || a.y - b.y || a.num - b.num || a.extra - b.extra);
     if (this.usedMem.gen !== this.rom.gen) this.usedMem = { gen: this.rom.gen, list: usedSpriteMemory(this.rom) };
@@ -793,7 +793,7 @@ export class App {
 
   // sets the sprite memory value as an own undo step
   setSpriteMemory(m: number): void {
-    this.editLevel(() => { this.level.spriteHeader = (this.level.spriteHeader & 0xc0) | (m & 0x3f); });
+    this.editLevel(() => { this.level.spriteHeader = (this.level.spriteHeader & 0xc0) | (m & SPRITE_MEMORY); });
     this.emit('level-header');
     logMsg(`Sprite memory set to ${hex(m, 2)}`);
   }
@@ -1287,7 +1287,7 @@ export class App {
     const w = this.mode === 'l2' && this.images.geom2 ? this.images.geom2.width : this.levelWidthTiles();
     const hgt = this.mode === 'l2' && this.images.geom2 ? this.images.geom2.height : this.levelHeightTiles();
     o.x = Math.max(0, Math.min(w - 1, o.x));
-    o.y = Math.max(0, Math.min(Math.min(hgt, this.vertical ? 0x1ff : 0x1f + 1) - 1, o.y));
+    o.y = Math.max(0, Math.min((this.vertical ? Math.min(hgt, 0x1ff) : hgt) - 1, o.y));
   }
 
   insertAt(tx: number, ty: number, p: PaletteItem | null = this.paletteItem): void {

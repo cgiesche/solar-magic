@@ -91,7 +91,7 @@ check(listPackages(rom).map((r) => r.id).join() === bId, 'A: record removed' + (
 // removing B too: projects and ExGFX gone, the ROM as before both packages
 await uninstallPackage(rom, bId, blank);
 check(!loadProject(rom) && !loadBlockProject(rom) && !gfxEntry(rom, 0x80) && !listPackages(rom).length, 'B: UberASM, blocks and ExGFX removed');
-check(listPatches(rom).every((p) => p.kind === 'vram' || p.kind === 'exanim' || p.kind === 'l2scroll'), 'no registry entries left but the editor\'s own');
+check(listPatches(rom).every((p) => p.kind === 'vram' || p.kind === 'exanim' || p.kind === 'l2scroll' || p.kind === 'levelheight'), 'no registry entries left but the editor\'s own');
 
 // a failing removal leaves the ROM unchanged
 {

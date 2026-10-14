@@ -21,8 +21,20 @@ export function screenBase(rom: Rom, layer: number, mode: number, s: number): nu
   return rom.r16(screenTable + s * 3);
 }
 
-export function layerGeom(rom: Rom, layer: number, mode: number, screens: number): LayerGeom {
+// rows: the height of a horizontal level (levelRows); a level with a size has screens of rows * 16 bytes
+// one after the other (levelheight.ts)
+export function layerGeom(rom: Rom, layer: number, mode: number, screens: number, rows = 27): LayerGeom {
   const vertical = layer === 0 ? isL1Vertical(rom, mode) : isL2Vertical(rom, mode);
+  if (!vertical && layer === 0 && rows !== 27) {
+    const w = screens * 16;
+    return {
+      vertical, width: w, height: rows,
+      addr(x, y) {
+        if (x < 0 || y < 0 || x >= w || y >= rows) return -1;
+        return MAP_BASE + (x >> 4) * rows * 16 + y * 16 + (x & 15);
+      },
+    };
+  }
   const bases: number[] = [];
   const maxScreens = 32;
   for (let s = 0; s < maxScreens; s++) bases.push(screenBase(rom, layer, mode, s));
@@ -141,9 +153,9 @@ export function backdropColor(r: LevelRender): number {
   return snesColorToRGBA(c);
 }
 
-export function renderLevel(rom: Rom, r: LevelRender, mode: number, screens: number): LevelImages {
+export function renderLevel(rom: Rom, r: LevelRender, mode: number, screens: number, rows = 27): LevelImages {
   const w = r.wram;
-  const geom1 = layerGeom(rom, 0, mode, screens);
+  const geom1 = layerGeom(rom, 0, mode, screens, rows);
   const width = geom1.width * 16, height = geom1.height * 16;
   const tc = new TileCache(r.vram, r.cgram, ((r.ppuRegs[0x0b] & 0x0f) << 13));
   const src = map16Source(rom, r);

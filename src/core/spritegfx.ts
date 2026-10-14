@@ -3,7 +3,7 @@
 
 import { LevelEmulator } from './levelemu.ts';
 import type { Snes, MemHook } from './snes.ts';
-import { encodePrimaryHeader, spriteBytes, spriteSizes, type PrimaryHeader, type SpriteSizes } from './level.ts';
+import { encodePrimaryHeader, spriteBytes, spriteSizes, SPRITE_MEMORY, type PrimaryHeader, type SpriteSizes } from './level.ts';
 import { decodeTile, cgramToRGBA } from './gfx.ts';
 import { GM, RAM, SPR, SPRITE_SLOTS, spriteX, spriteY, cameraX, cameraY, setCameraX, setCameraY, setMarioPos } from './ram.ts';
 
@@ -151,7 +151,7 @@ export function testLevel(emu: LevelEmulator, level: number, header: PrimaryHead
   const hdr = encodePrimaryHeader({ ...header, mode: 0, screens: 2, time: 2 });
   const l1 = new Uint8Array([...hdr, 0xff]);
   const secondary = [0x00, 0x00, 0x00, 0x00];
-  const probe = emu.load(level, { layer1: l1, sprites: new Uint8Array([spriteHeader & 0x3f, 0xff]), secondaryHeader: secondary, layer2Pointer: bgPointer });
+  const probe = emu.load(level, { layer1: l1, sprites: new Uint8Array([spriteHeader & SPRITE_MEMORY, 0xff]), secondaryHeader: secondary, layer2Pointer: bgPointer });
   return { l1, secondary, camX: cameraX(probe.wram), camY: cameraY(probe.wram) };
 }
 
@@ -165,7 +165,7 @@ export function sortPlaced<T extends PlacedSprite>(placed: T[]): T[] {
 // sprite data of the test level (horizontal format) for sprites sorted with sortPlaced;
 // sizes: the ROM's sprite size table (custom sprites with extra bytes)
 export function testSpriteData(spriteHeader: number, order: PlacedSprite[], sizes: SpriteSizes): Uint8Array {
-  const data: number[] = [spriteHeader & 0x3f];
+  const data: number[] = [spriteHeader & SPRITE_MEMORY];
   for (const p of order) {
     const screen = p.tx >> 4, extra = p.extra ?? 0;
     data.push(((p.ty & 15) << 4) | ((extra & 3) << 2) | ((screen & 0x10) >> 3) | ((p.ty >> 4) & 1), ((p.tx & 15) << 4) | (screen & 15), p.n,
@@ -313,7 +313,7 @@ export function captureSpriteAt(
   emu: LevelEmulator, level: number, header: PrimaryHeader, spriteHeader: number, bgPointer: number, num: number, x: number, y: number,
 ): SpriteImage | null {
   const hdr = encodePrimaryHeader({ ...header, mode: 0, screens: 4, time: 2 });
-  const r = emu.load(level, { layer1: new Uint8Array([...hdr, 0xff]), sprites: new Uint8Array([spriteHeader & 0x3f, 0xff]), secondaryHeader: [0, 0, 0, 0], layer2Pointer: bgPointer });
+  const r = emu.load(level, { layer1: new Uint8Array([...hdr, 0xff]), sprites: new Uint8Array([spriteHeader & SPRITE_MEMORY, 0xff]), secondaryHeader: [0, 0, 0, 0], layer2Pointer: bgPointer });
   if (!r.ok) return null;
   const s = emu.snes, w = s.wram;
   try {

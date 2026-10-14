@@ -5,7 +5,7 @@
 // show which slots lost visible tiles to another one.
 
 import { LevelEmulator } from './levelemu.ts';
-import { loadLevel, spriteSizes, type LevelSprite, type PrimaryHeader } from './level.ts';
+import { loadLevel, spriteSizes, SPRITE_MEMORY, type LevelSprite, type PrimaryHeader } from './level.ts';
 import { record, rootSlot, sortPlaced, SlotTracker, testLevel, testSpriteData } from './spritegfx.ts';
 import type { Rom } from './rom.ts';
 import { SPR, SPRITE_SLOTS, spriteX, spriteY, cameraX, cameraY } from './ram.ts';
@@ -105,7 +105,7 @@ export function usedSpriteMemory(rom: Rom): number[] {
   const count = new Map<number, number>();
   for (let n = 0; n < 0x200; n++) {
     try {
-      const m = loadLevel(rom, n).spriteHeader & 0x3f;
+      const m = loadLevel(rom, n).spriteHeader & SPRITE_MEMORY;
       count.set(m, (count.get(m) ?? 0) + 1);
     } catch { /* unreadable level */ }
   }
