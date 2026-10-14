@@ -180,10 +180,15 @@ input.invalid, input.invalid:focus { outline: 1px solid var(--danger); border-co
 .modal-body { padding: 12px 14px; overflow: auto; }
 .modal-buttons { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--border); }
 .icon-btn { border: none; background: none; font-size: 15px; }
+.header-dialog { max-width: 920px; }
+.header-dialog .grid2 { align-items: start; }
+.header-dialog .grid2 .prop { flex-wrap: wrap; }
+.header-dialog .grid2 .prop > .hint { flex-basis: 100%; padding-left: 146px; }
 .header-dialog h3 { margin: 10px 0 6px; font-size: 12px; text-transform: uppercase; color: var(--muted); letter-spacing: .05em; }
 .header-dialog h3:first-child { margin-top: 0; }
-.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 18px; }
-.grid2 .prop label { width: 140px; }
+.grid2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 6px 18px; }
+.grid2 .prop > label:first-child { width: 140px; }
+.grid2 .wide { grid-column: 1 / -1; } .grid2 .wide label.row { width: auto; color: inherit; margin-right: 8px; }
 .grid2 select { max-width: 220px; }
 table.help td { padding: 3px 10px 3px 0; vertical-align: top; }
 .help-cols { columns: 2 440px; column-gap: 28px; max-width: 1000px; }

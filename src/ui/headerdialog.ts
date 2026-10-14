@@ -94,7 +94,7 @@ export function openHeaderDialog(app: App): void {
   const vSel = select(rateOpts('y', vr), vr, (v) => { vr = v; });
   const setOpts = (el: HTMLSelectElement, opts: [number, string][], cur: number) =>
     el.replaceChildren(...opts.map(([v, l]) => h('option', { value: String(v), selected: v === cur }, l)));
-  const hRow = f('Layer 2 horizontal', hSel), vRow = f('Layer 2 vertical', vSel);
+  const hRow = h('span', { class: 'row' }, 'Horizontal', hSel), vRow = h('span', { class: 'row', style: 'margin-left: 12px' }, 'Vertical', vSel);
   const sepBox = h('input', { type: 'checkbox', checked: !!sd.layer2Separate });
   const showSeparate = () => {
     pairedSel.style.display = sepBox.checked ? 'none' : '';
@@ -163,13 +163,15 @@ export function openHeaderDialog(app: App): void {
       f('Entrance screen', sel2('entranceScreen', range(32, hex2))),
       f('Entrance action', sel2('entranceAction', range(8, (i) => `${i} – ${ENTRANCE_ACTIONS[i]}`))),
       f('Midway screen', sel2('midwayScreen', range(16, hex2))),
-      f('Layer 2 scroll', h('div', null, h('label', { title: 'Separate horizontal and vertical layer 2 rates, with more rates and auto-scrolls (as Lunar Magic 3.40)' }, sepBox, ' Separate H/V'), pairedSel)),
-      hRow, vRow,
       f('Layer 3', l3Sel, 'Depends on the tileset'),
       f('FG start Y', sel2('fgInitY', range(4))),
       f('BG start Y', sel2('bgInitY', range(4))),
       f('Vertical positioning', sel2('verticalPositioning', range(4))),
       f('Yoshi intro', sel2('noYoshiIntro', [[0, 'On'], [1, 'Off']])),
+      // a row of its own: with separate rates the two dropdowns stay side by side
+      h('div', { class: 'prop wide' }, h('label', null, 'Layer 2 scroll'),
+        h('label', { class: 'row', title: 'Separate horizontal and vertical layer 2 rates, with more rates and auto-scrolls (as Lunar Magic 3.40)' }, sepBox, 'Separate H/V'),
+        pairedSel, hRow, vRow),
     ),
     h('h3', null, 'Graphics'),
     h('p', { class: 'hint' }, 'The GFX/ExGFX files the level loads (FG1–FG3, BG1–BG3, sprites) and the palettes are chosen and edited in the graphics area – with preview.'),
