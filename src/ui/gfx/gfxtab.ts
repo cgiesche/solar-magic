@@ -20,6 +20,7 @@ import {
   levelExtGfx, setLevelExtGfx,
 } from '../../core/patches.ts';
 import { importGfxFile, exgfxName } from '../../core/map16file.ts';
+import { freeGfx } from '../../core/levelgfx.ts';
 import { recordPackageChange, type Package } from '../../core/pkgreg.ts';
 import { parsePrimaryHeader, L1_PTRS } from '../../core/level.ts';
 import { map16Source } from '../../core/render.ts';
@@ -418,19 +419,16 @@ export class GfxTab implements WsPanel {
     } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
   }
 
-  // first free ExGFX number (80-FF first, then 32-7F), -1: none
+  // first free ExGFX number (levelgfx.ts), -1: none
   private freeExGfx(): number {
-    const rom = this.app.rom;
-    for (let i = 0x80; i < 0x100; i++) if (!gfxEntry(rom, i)) return i;
-    for (let i = VANILLA_GFX; i < 0x80; i++) if (!gfxEntry(rom, i)) return i;
-    return -1;
+    return freeGfx(this.app.rom, new Set());
   }
 
   // creates an empty 4bpp file in the first free number; null: none left / failed
   private newExGfx(hint = true): number | null {
     const app = this.app;
     const n = this.freeExGfx();
-    if (n < 0) { toast('Keine freie ExGFX-Nummer mehr', 'error'); return null; }
+    if (n < 0) { toast('No free ExGFX number left', 'error'); return null; }
     try {
       app.romEdit(`${gfxName(n)} created`, () => setGfxEntry(app.rom, n, app.rom.allocWrite(new Uint8Array(0x1000)), true));
       this.select(n);
@@ -445,7 +443,7 @@ export class GfxTab implements WsPanel {
     const file = given ?? await pickFile('.bin,.png,image/png');
     if (!file) return null;
     const n = this.freeExGfx();
-    if (n < 0) { toast('Keine freie ExGFX-Nummer mehr', 'error'); return null; }
+    if (n < 0) { toast('No free ExGFX number left', 'error'); return null; }
     this.select(n);
     return /\.png$/i.test(file.name) ? this.importPng(file, into) : this.importBin(file, into);
   }

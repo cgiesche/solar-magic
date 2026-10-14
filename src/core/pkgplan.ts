@@ -140,8 +140,6 @@ export interface PackagePlan {
 
 export interface PlanInput { files: Map<string, Uint8Array>; blocks: DetectedBlock[]; graphics: DetectedGraphics }
 
-export { GFX_SLOTS };
-
 export function planPackage(rom: Rom, input: PlanInput, blank: number[]): PackagePlan {
   const { files, graphics } = input;
   const notes: string[] = [];

@@ -187,6 +187,7 @@ export function planBgPack(rom: Rom, name: string, files: Map<string, Uint8Array
   const palettes = packPalettes(files, keys.filter((f) => /\.pal$/i.test(f)), keys.filter((f) => /\.palmask$/i.test(f)), notes);
   const at = map16 ? bgPlace(rom, map16.data, map16.from, BG_EXT_FIRST) : BG_EXT_FIRST;
   const fgFree = fg ? fgPlace(rom, fg.data, fg.from, blank) : -1;
+  if (fg && fgFree < 0) notes.push(`No free FG Map16 tiles for the ${fg.data.tiles.length} tiles of ${base(fg.file)} – the tiles from ${hx(fg.from, 3)} would be overwritten`);
   const fgAt = fgFree >= 0 ? fgFree : fg ? fg.from : EXT_FIRST;
   return { name, mwl, level, map16, fg, used, gfx, palettes, at, fgAt, layer3, exanim, frames, notes };
 }
@@ -244,13 +245,14 @@ export function applyBgPack(rom: Rom, lv: Level, files: Map<string, Uint8Array>,
     }
     // 3. graphics, then the level: its slots, animations and colors (each chosen package palette where
     // its mask says so)
-    const gfx = plan.gfx.filter((g) => g.parts.some((p) => (p === 'bg' ? withBg : withFg)));
+    const taken = (parts: PackPart[]) => parts.some((p) => (p === 'bg' ? withBg : withFg));
+    const gfx = plan.gfx.filter((g) => taken(g.parts));
     notes.push(...storeGfx(rom, files, gfx));
     const placed = placeInLevel(rom, lvl, {
       slots: gfx,
       palettes: plan.palettes.filter((p, i) => opt.palettes?.[i] ?? !p.layer3),
       back: plan.level.back,
-      exanim: plan.exanim.filter((x) => x.parts.some((p) => (p === 'bg' ? withBg : withFg))).map((x) => x.slot),
+      exanim: plan.exanim.filter((x) => taken(x.parts)).map((x) => x.slot),
       frames: plan.frames,
     }, { cgram: opt.cgram, wram: opt.wram });
     notes.push(...placed.prints, ...placed.warnings);

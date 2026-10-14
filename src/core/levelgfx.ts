@@ -33,8 +33,9 @@ export const slotOfWord = (w: number) => VRAM_SLOTS[(w & 0x3ff) >> 7] ?? null;
 // the slots ExGFX can go in: the level's GFX bypass and the BG2/BG3 slots of the VRAM patch
 export const GFX_SLOTS = [...GFX_SLOT_NAMES, ...EXT_GFX_SLOT_NAMES];
 
-// first ExGFX number that is free and not taken by `taken` (80-FE first, as Lunar Magic suggests)
-function freeGfx(rom: Rom, taken: Set<number>): number {
+// first ExGFX number that is free and not taken by `taken` (80-FE first, as Lunar Magic suggests; FF is
+// a level slot's "none"), -1: none left
+export function freeGfx(rom: Rom, taken: Set<number>): number {
   const free = (i: number) => !taken.has(i) && !gfxEntry(rom, i);
   for (let i = 0x80; i < 0xff; i++) if (free(i)) return i;
   for (let i = VANILLA_GFX; i < 0x80; i++) if (free(i)) return i;
