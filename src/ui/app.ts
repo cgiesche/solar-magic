@@ -197,7 +197,10 @@ export class App {
     this.results.onChange = () => {
       if (!this.cacheTimer && !this.closed) this.cacheTimer = window.setTimeout(() => this.storeResults(), 3000);
     };
-    window.addEventListener('pagehide', () => { if (this.cacheTimer && !this.closed) { clearTimeout(this.cacheTimer); this.storeResults(); } });
+    window.addEventListener('pagehide', () => {
+      if (this.cacheTimer && !this.closed) { clearTimeout(this.cacheTimer); this.storeResults(); }
+      if (this.persistTimer) { clearTimeout(this.persistTimer); this.persistTimer = 0; this.persist(); } // a ROM edit not stored yet
+    });
   }
 
   private storeResults(): void {

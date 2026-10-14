@@ -110,8 +110,9 @@ export function openExpandDialog(app: App): void {
   const body = h('div', null,
     h('p', { class: 'hint' }, `Currently ${rom.size / 1024} KB. More room for levels, graphics, music etc. Saving expands automatically when needed. At most 4 MB (LoROM).`),
     h('div', { class: 'row' }, [0x100000, 0x200000, 0x400000].map((sz) => h('button', {
+      // not undoable: the step would hold two whole ROM copies
       disabled: rom.size >= sz,
-      onclick: () => { app.romEdit(`ROM expanded to ${sz / 1048576} MB`, () => rom.expand(sz)); toast(`ROM expanded to ${sz / 1048576} MB`); dlg.close(); },
+      onclick: () => { app.romEdit(`ROM expanded to ${sz / 1048576} MB`, () => rom.expand(sz), { record: false }); toast(`ROM expanded to ${sz / 1048576} MB`); dlg.close(); },
     }, `${sz / 1048576} MB`))),
   );
   const dlg = modal('Expand ROM', body, [{ label: 'Cancel' }]);

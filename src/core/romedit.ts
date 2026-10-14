@@ -35,13 +35,24 @@ export function failed(v: unknown): boolean {
   return typeof v === 'object' && v !== null && (v as { ok?: unknown }).ok === false;
 }
 
+// runs fn: when it throws or fails, `back` runs (and the error is passed on), else `keep`
+function guard<T>(fn: () => T, back: () => void, keep: () => void): T {
+  let v: T;
+  try { v = fn(); } catch (e) { back(); throw e; }
+  if (failed(v)) back(); else keep();
+  return v;
+}
+async function guardAsync<T>(fn: () => Promise<T>, back: () => void, keep: () => void): Promise<T> {
+  let v: T;
+  try { v = await fn(); } catch (e) { back(); throw e; }
+  if (failed(v)) back(); else keep();
+  return v;
+}
+
 // runs fn; when it throws or fails, the ROM and editor data are as before
 export function allOrNothing<T>(rom: Rom, fn: () => T): T {
   const s = rom.snapshot();
-  let v: T;
-  try { v = fn(); } catch (e) { rom.restore(s); throw e; }
-  if (failed(v)) rom.restore(s);
-  return v;
+  return guard(fn, () => rom.restore(s), () => {});
 }
 
 export class RomEditSession {
@@ -57,28 +68,14 @@ export class RomEditSession {
   }
 
   edit<T>(label: string, fn: () => T, opt: EditOptions = {}): T {
-    if (this.depth || this.history.open) return this.inner(() => allOrNothing(this.rom, fn));
     const run = this.start(label, opt);
-    let v: T;
-    try { v = this.inner(fn); } catch (e) { run.rollback(); throw e; }
-    if (failed(v)) run.rollback(); else run.finish();
-    return v;
+    return guard(() => this.inner(fn), run.rollback, run.finish);
   }
 
   // edit for a change that awaits (AddmusicK inserting songs): one step for all of it
-  async editAsync<T>(label: string, fn: () => Promise<T>, opt: EditOptions = {}): Promise<T> {
-    if (this.depth || this.history.open) {
-      const s = this.rom.snapshot();
-      let v: T;
-      try { v = await this.innerAsync(fn); } catch (e) { this.rom.restore(s); throw e; }
-      if (failed(v)) this.rom.restore(s);
-      return v;
-    }
+  editAsync<T>(label: string, fn: () => Promise<T>, opt: EditOptions = {}): Promise<T> {
     const run = this.start(label, opt);
-    let v: T;
-    try { v = await this.innerAsync(fn); } catch (e) { run.rollback(); throw e; }
-    if (failed(v)) run.rollback(); else run.finish();
-    return v;
+    return guardAsync(() => this.innerAsync(fn), run.rollback, run.finish);
   }
 
   // undoes the last step (null: none); throws when it can't (see RomHistory.undo)
@@ -107,7 +104,12 @@ export class RomEditSession {
     try { return await fn(); } finally { this.depth--; }
   }
 
-  private start(label: string, opt: EditOptions) {
+  // how an edit ends: put back or kept (an inner edit: its own part put back, the rest is the outer's)
+  private start(label: string, opt: EditOptions): { rollback: () => void; finish: () => void } {
+    if (this.depth || this.history.open) {
+      const s = this.rom.snapshot();
+      return { rollback: () => this.rom.restore(s), finish: () => {} };
+    }
     this.hooks.prepare?.();
     const before = this.readAll();
     const h = this.history, record = opt.record !== false;
@@ -129,6 +131,9 @@ export class RomEditSession {
 
   private done(label: string, recorded: boolean, before: string[]): void {
     this.hooks.written?.({ label, recorded });
-    (this.hooks.followUps ?? []).forEach((f, i) => { if (f.read(this.rom) !== before[i]) f.changed(); });
+    // (the edit is done either way: a failing follow-up is reported, not passed on to the caller)
+    (this.hooks.followUps ?? []).forEach((f, i) => {
+      try { if (f.read(this.rom) !== before[i]) f.changed(); } catch (e) { console.error(e); }
+    });
   }
 }

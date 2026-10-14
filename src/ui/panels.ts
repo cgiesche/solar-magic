@@ -712,7 +712,7 @@ function deleteStructure(app: App, n: number, st: Structure): void {
     h('div', { class: 'hint' }, users.length
       ? `It is used in level ${users.map(hex3).join(', ')}. The objects stay there but show nothing until a structure ${hex2(n)} is created again.`
       : 'It is not used in any level.'));
-  modal('Delete structure', body, [{ label: 'Cancel' }, { label: 'Delete', danger: true, onClick: () => { app.romEdit(`Structure ${hex2(n)} deleted`, () => writeStructure(app.rom, n, null)); } }]);
+  modal('Delete structure', body, [{ label: 'Cancel' }, { label: 'Delete', danger: true, onClick: () => { try { app.romEdit(`Structure ${hex2(n)} deleted`, () => writeStructure(app.rom, n, null)); } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); } } }]);
 }
 
 // small images of the sprites a block spawns, shown in the corner of a palette cell
