@@ -12,9 +12,17 @@ except for Asar, snes_spc and AddmusicK (included as WebAssembly).
 | [GPS](https://www.smwcentral.net/?p=section&a=details&id=31515) (Gopher Popcorn Stew) | Format of custom blocks, names and contracts of the standard routines | p4plus2; maintained by TheBiob, GHB, Arinsu; contributions by Majorflare, MarioFanGamer, Vitor Vilela; routines after Akaginite, Tattletale, imamelia |
 | [UberASM Tool](https://github.com/Fernap/UberASMTool) | Format and calling conventions of UberASM | Vitor Vilela, Fernap and others |
 | [Tauri](https://tauri.app) 2 (MIT/Apache-2.0) | Framework of the desktop app (`src-tauri/`): native window with the system's webview | Tauri Programme within The Commons Conservancy and contributors |
-| Lunar Magic | Formats of `.mwl`, `.map16`, ExGFX, size table of the sprite data (`$0EF30C`); separate layer 2 scroll rates of 3.40 (the byte per level at `$06FA00`, learned from what a Lunar Magic-saved ROM does, and the names of the rates) | FuSoYa |
+| Lunar Magic | Formats of `.mwl`, `.map16`, ExGFX, size table of the sprite data (`$0EF30C`); separate layer 2 scroll rates of 3.40 (the byte per level at `$06FA00`, learned from what a Lunar Magic-saved ROM does, and the names of the rates); level heights of 3.00 (the size byte `TB0MMMMM` and its 32 heights, screen jumps with a subscreen, the new sprite format, a `.mwl`'s level information byte 16 – learned from what a Lunar Magic-saved ROM does in the editor's emulator and from level files Lunar Magic 3.71 exported, not from Lunar Magic's code) | FuSoYa |
+| Dynamic Levels / level height hack, as built into Lunar Magic 3.00 | The idea of horizontal levels with another height whose screens share the game's level data (`levelheight.ts`) | Vitor Vilela |
+| [Lunar Magic/Custom Level Sizes](https://sneslab.net/wiki/Lunar_Magic/Custom_Level_Sizes) (SnesLab) | The table of the 32 level sizes, checked against Lunar Magic's code in the emulator | SnesLab contributors |
 | [SMW-Data: MWL File Format](https://github.com/Ankouno/SMW-Data/blob/master/Misc/MWL%20File%20Format.md) | Sections of the `.mwl` (level information, layers, sprites, palette) for sample levels | Ankouno |
 | [Level Data Format](https://www.smwspeedruns.com/Level_Data_Format) (SMW Speedrunning Wiki) | Lunar Magic's Direct Map16 objects 22/23/27/29 in sample levels; also the ExAnimation format | SMW speedrunning community |
+
+ROMs whose data the editor's formats were checked against (not part of the repository):
+
+| What | Used for | Authors |
+|---|---|---|
+| Journey to Kaizo v1.1 (a Lunar Magic-saved hack) | Levels `$046` and `$05C` with Lunar Magic's level heights: where the size byte is, what each size sets, how objects and sprites below row 31 are stored | *author still to be added* |
 
 Packages on which editor features were developed and tested (as test data in `test/fixtures/`):
 

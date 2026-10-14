@@ -448,6 +448,34 @@ Magic-saved ROM does in the editor's emulator, not from Lunar Magic's code. The 
 run the game's own code. The dialog shows what each setting does by letting the level run
 (`src/core/l2scroll.ts`, `tools/testl2scroll.ts`).
 
+### Level heights
+
+A horizontal level without layer 2 objects can be taller or shorter than the game's 27 rows, as in Lunar
+Magic 3.00 (Vitor Vilela's level height hack): *Level header → Level height* offers Lunar Magic's sizes 00–1B
+(28 to 448 rows; 1C–1F are left out: 1C needs Lunar Magic's swapped screen jump, extended object `$03`, which
+is the editor's structure, 1D–1F have more than 32 screens). The level data's 0x3800 bytes are shared by the
+screens, a screen taking as many bytes as the level is high in pixels: the taller the level, the fewer screens
+(size 0D: 56 rows, 16 screens; 1A: 298 rows, 3 screens). Heights the level's screens, objects or sprites don't
+fit in can't be chosen.
+
+The data is Lunar Magic's: a byte per level (`TB0MMMMM`, M the size; Lunar Magic's T and B are kept), here at
+`$06CA00` (Lunar Magic keeps its table next to its own code), also read from a `.mwl` (level information byte 16).
+Below row 31 objects are placed by screen jumps with a subscreen of 32 rows (`000HHHHH 0000VVVV 00000001`; the
+new screen flag keeps the subscreen), sprites in Lunar Magic's new format (header bit 5; `$FF V` sets the
+subscreen, `$FF $FE` ends the data, `$FF $FF` is a sprite starting with `$FF`). Only levels taller than 32
+rows use subscreens. The sprite memory is the header's bits 0–4. All of this was learned from a Lunar
+Magic-saved ROM in the editor's emulator (what Lunar Magic's code sets as the level's height per size, where
+it puts objects after a screen jump) and from level files Lunar Magic 3.71 exported, not from Lunar Magic's code.
+
+The patch makes the game's own level load build such a level, which is what the editor shows: the level's
+setup (`$05D928`) takes the screen size for the level's size, each object (`$0586BB`) its address from the
+screen, the subscreen and the high Y bit, and where objects go on to the next screen (`$0DA963`, `$0DA9D6`,
+`$0DA9EF`, the places Lunar Magic changes) they step by the level's screen size; Direct Map16 and
+structures too. After the load (`$058091`) the size is cleared, so loads without the setup (the credits) are
+the game's. Levels of the game's size run the game's code (`src/core/levelheight.ts`,
+`tools/testlevelheight.ts`). **Playing** a taller level (camera, sprites, interaction, `$13D7`) is not there
+yet: in test play the game still scrolls as in a level of 27 rows and loads no sprites after the first subscreen change.
+
 ## Level import (Lunar Magic)
 
 Graphics in SMWCentral's graphics section are Lunar Magic exports, as the submission rules
@@ -510,6 +538,7 @@ not compatible with the respective feature.
 | `$058551` | Music per level (SMWU) |
 | `$00AA50` | BG2/BG3 graphics slots (SMWG) |
 | `$05D915`, `$00F79D`, table `$06FA00` | Layer 2 scroll rates; RAM `$7F3660–$7F3665` |
+| `$05D928`, `$0586BB`, `$0DA963`, `$0DA9D6`, `$0DA9EF`, `$058091`, table `$06CA00` | Level heights; RAM `$7F3666–$7F3668` |
 | `$008A7F`, `$0087AD`, `$0085E3`, `$0580B0`, `$0580B4`, `$0580BF`, `$0580C3`, `$058730`, `$058770`, `$0587D4`, `$0587DB`, `$05880B`, `$058812` | VRAM patch (SMWV): tilemaps relocated; RAM `$7F0000–$7F3653` |
 | Ext. object table `$0DA118` (entry `$03`) | Structures (SMWS); empty in the original, no code hook |
 | `$05B20F` | Messages in free space (SMWM), only if the texts no longer fit |
