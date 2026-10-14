@@ -987,7 +987,7 @@ export class App {
     const stored = this.results.get<Layer2Motions>(key);
     if (stored) return stored;
     if (this.l2Run?.key === key) { this.l2Run.waiting.push(done); return null; }
-    const emu = this.l2Emu = this.auxEmu(this.l2Emu);
+    const emu = this.l2Emu = this.auxEmu(this.l2Emu), before = this.rom.data.slice();
     const run = this.l2Run = { key, waiting: [done] };
     const job = layer2MotionsJob(emu, this.level.number, this.buildOverrides());
     const step = () => {
@@ -995,7 +995,8 @@ export class App {
       const r = job.next();
       if (!r.done) { setTimeout(step, 0); return; }
       this.l2Run = null;
-      this.results.set(key, r.value.result, this.results.fp.deps(r.value.reads));
+      // (not kept when the ROM changed while it ran: measured with what it read before)
+      if (!r.value.reads.differ(before, this.rom.data)) this.results.set(key, r.value.result, this.results.fp.deps(r.value.reads));
       for (const f of run.waiting) f();
     };
     setTimeout(step, 0);

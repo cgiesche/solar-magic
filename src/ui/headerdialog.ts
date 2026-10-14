@@ -9,7 +9,7 @@ import { songHex } from '../core/music.ts';
 import { currentSongs, playButton } from './musicdialog.ts';
 import { musicPlayer } from './musicplayer.ts';
 import { LAYER3_KIND_TEXT } from '../core/layer3.ts';
-import { RATE_OPTIONS, hRate, withRates, motionText, type Layer2Motions } from '../core/l2scroll.ts';
+import { RATE_OPTIONS, hRate, withRates, motionText, type Layer2Motions, type LayerMotion } from '../core/l2scroll.ts';
 import { incompleteSprites, spriteMemText, SPRITE_MEM_HELP } from './spritemem.ts';
 
 function range(n: number, fmt: (i: number) => string = (i) => String(i)): [number, string][] {
@@ -100,16 +100,26 @@ export function openHeaderDialog(app: App): void {
     pairedSel.style.display = sepBox.checked ? 'none' : '';
     hRow.style.display = vRow.style.display = sepBox.checked ? '' : 'none';
   };
-  sepBox.addEventListener('change', () => {
-    // separate rates start where the paired setting was, when it is measured
-    const m = motions?.paired[sd.layer2Scroll];
-    const same = (axis: 'x' | 'y') => RATE_OPTIONS.findIndex((_, i) => motionText(motions!.separate[i][axis], axis) === motionText(m![axis], axis));
-    if (sepBox.checked && m && same('x') >= 0 && same('y') >= 0) {
-      hr = RATE_OPTIONS[same('x')]; vr = RATE_OPTIONS[same('y')];
-      hSel.value = String(hr); vSel.value = String(vr);
-    }
-    showSeparate();
-  });
+  // switching between paired and separate rates keeps what layer 2 does, once it is measured: the
+  // setting of the other kind that moves layer 2 alike (none alike: the setting stays)
+  const alike = (a: LayerMotion, b: LayerMotion, axis: 'x' | 'y') => motionText(a[axis], axis) === motionText(b[axis], axis);
+  const toSeparate = (m: Layer2Motions) => {
+    const p = m.paired[sd.layer2Scroll], h = m.separate.findIndex((s) => alike(s, p, 'x')), v = m.separate.findIndex((s) => alike(s, p, 'y'));
+    if (h < 0 || v < 0) return;
+    hr = RATE_OPTIONS[h]; vr = RATE_OPTIONS[v];
+    hSel.value = String(hr); vSel.value = String(vr);
+  };
+  const toPaired = (m: Layer2Motions) => {
+    const hs = m.separate[RATE_OPTIONS.indexOf(hr)], vs = m.separate[RATE_OPTIONS.indexOf(vr)];
+    const p = hs && vs ? m.paired.findIndex((q) => alike(q, hs, 'x') && alike(q, vs, 'y')) : -1;
+    if (p < 0) return;
+    sd.layer2Scroll = p; pairedSel.value = String(p);
+  };
+  // waits for the measurement: a switch made before it, the paired setting of a level with separate rates
+  let pending: ((m: Layer2Motions) => void) | null = sd.layer2Separate ? toPaired : null;
+  const follow = (f: (m: Layer2Motions) => void) => { if (motions) f(motions); else pending = f; };
+  sepBox.addEventListener('change', () => { follow(sepBox.checked ? toSeparate : toPaired); showSeparate(); });
+  for (const el of [hSel, vSel, pairedSel]) el.addEventListener('change', () => { pending = null; });
   showSeparate();
   const measured = () => {
     if (!open) return;
@@ -118,6 +128,8 @@ export function openHeaderDialog(app: App): void {
     setOpts(pairedSel, pairedOpts(), sd.layer2Scroll);
     setOpts(hSel, rateOpts('x', hr), hr);
     setOpts(vSel, rateOpts('y', vr), vr);
+    pending?.(motions);
+    pending = null;
   };
 
   let open = true;

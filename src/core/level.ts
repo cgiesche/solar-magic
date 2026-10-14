@@ -70,6 +70,7 @@ export interface SecondaryHeader {
   layer2Separate: number; // FA00 bit 7: separate horizontal and vertical layer 2 rates
   layer2HAuto: number; // FA00 bit 6: the horizontal rate (layer2Scroll) is an auto-scroll
   layer2V: number; // FA00 bits 4-0: the vertical rate
+  lmAutoScreens: number; // FA00 bit 5: Lunar Magic's "auto-set number of screens" (kept, not used)
 }
 
 export interface Level {
@@ -160,6 +161,7 @@ export function decodeSecondaryHeader([a, b, c, d, e = 0]: Iterable<number> & Ar
     layer2Separate: e >> 7,
     layer2HAuto: (e >> 6) & 1,
     layer2V: e & 0x1f,
+    lmAutoScreens: (e >> 5) & 1,
   };
 }
 export function encodeSecondaryHeader(s: SecondaryHeader): number[] {
@@ -168,7 +170,7 @@ export function encodeSecondaryHeader(s: SecondaryHeader): number[] {
     (s.layer3 << 6) | ((s.entranceAction & 7) << 3) | (s.entranceX & 7),
     (s.midwayScreen << 4) | ((s.fgInitY & 3) << 2) | (s.bgInitY & 3),
     (s.noYoshiIntro << 7) | ((s.verticalPositioning & 3) << 5) | (s.entranceScreen & 0x1f),
-    (s.layer2Separate << 7) | ((s.layer2HAuto & 1) << 6) | (s.layer2V & 0x1f),
+    (s.layer2Separate << 7) | ((s.layer2HAuto & 1) << 6) | ((s.lmAutoScreens & 1) << 5) | (s.layer2V & 0x1f),
   ];
 }
 export function readSecondaryHeader(rom: Rom, n: number): SecondaryHeader {

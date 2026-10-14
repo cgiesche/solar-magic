@@ -72,7 +72,8 @@ export function importLevelFile(rom: Rom, text: string, into: Level): LevelFileD
   try { j = JSON.parse(text); } catch { throw new Error('Not a valid level file (JSON)'); }
   if (j?.format !== 'smwe-level') throw new Error('Not an Solar Magic level file');
   if (j.version !== 1) throw new Error(`Unsupported version ${j.version}`);
-  if (!Array.isArray(j.secondary) || j.secondary.length !== SEC_HDR.length) throw new Error('Secondary header missing');
+  if (!Array.isArray(j.secondary)) throw new Error('Secondary header missing');
+  if (j.secondary.length !== SEC_HDR.length) throw new Error('Level file from an older editor version (secondary header without the layer 2 scroll byte) – not supported');
   const palette = j.palette ? fromHex(j.palette) : null;
   if (palette && palette.length !== 512) throw new Error('Palette in the level file is not 512 bytes');
   // structures: reuse an identical one of this ROM, else store under a free number

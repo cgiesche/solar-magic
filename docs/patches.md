@@ -440,7 +440,7 @@ The level header pairs a horizontal and a vertical layer 2 rate in one of 16 set
 a level can instead have **separate horizontal and vertical rates** (*Level header → Layer 2 scroll →
 Separate H/V*): None, Constant, Medium (1/2), Slow (1/32), Medium 2–4 (1/4, 1/8, 1/16), Slow 2 (1/64), Fast (1.2×),
 and auto-scrolls up/down or left/right (layer 2 follows layer 1 and moves on by 1/4 to 4 pixels per frame
-while the game runs). The data is Lunar Magic's: a byte per level at `$06FA00` (`SHC-VVVV`: S separate,
+while the game runs). The data is Lunar Magic's: a byte per level at `$06FA00` (`SHCVVVVV`: S separate,
 H the header's 4 bits are a horizontal auto-scroll, C Lunar Magic's "auto-set screens", V the vertical
 rate), also read from a `.mwl` (level information byte 17). The format was learned from what a Lunar
 Magic-saved ROM does in the editor's emulator, not from Lunar Magic's code. The patch hooks the level load

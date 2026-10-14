@@ -1,9 +1,9 @@
 // Layer 2 scroll rates. The game pairs a horizontal and a vertical rate in one setting (secondary
 // header $05F000 bits 7-4). Lunar Magic 3.40 added separate rates and more of them, in a byte per
-// level at $06FA00, SHC-VVVV (format observed in a Lunar Magic-saved ROM, see docs/patches.md):
+// level at $06FA00, SHCVVVVV (format observed in a Lunar Magic-saved ROM, see docs/patches.md):
 //  - S: separate rates; the header's 4 bits are then the horizontal rate, V the vertical one
 //  - H: the horizontal rate is an auto-scroll (0-5 left, 6-B right, Slow … Fast 4)
-//  - C: Lunar Magic's "auto-set number of screens" (an editor option, not read by the game)
+//  - C: Lunar Magic's "auto-set number of screens" (an editor option, not read by the game; kept)
 //  - V: rates 0-8 as the horizontal ones, 10-15 auto-scroll up, 16-1B down
 // The editor's patch (L2SCROLL_ASM) runs the game's own code while both rates are ones the game knows
 // (horizontal 0-2, vertical 0-3, which mean the same there): every level without S, unchanged.
@@ -24,7 +24,6 @@ export const L2_SCROLL_TABLE = 0x06fa00;
 export const L2_SCROLL_PATCH_NAME = 'Layer 2 scroll rates (Lunar Magic format)';
 export const L2_SCROLL_RAM: [number, number] = [0x7f3660, 6];
 const LOAD_HOOK = 0x05d915, SCROLL_HOOK = 0x00f79d;
-export const L2_SCROLL_HOOKS: [number, number][] = [[LOAD_HOOK, 14], [SCROLL_HOOK, 5]];
 
 // At the level load the game takes both rates from its pairs ($05D720 horizontal, $05D710
 // vertical, into $1413/$1414); with S the patch puts the level's own there: rates 0-8 as they are,
@@ -34,8 +33,8 @@ export const L2_SCROLL_HOOKS: [number, number][] = [[LOAD_HOOK, 14], [SCROLL_HOO
 // added, as the game does.
 export const L2SCROLL_ASM = `asar 1.90
 lorom
-!HAcc = $7F3660        ; auto-scroll distance: 1/256 pixels, then pixels (3 bytes each)
-!VAcc = $7F3663
+!HAcc = $${L2_SCROLL_RAM[0].toString(16).toUpperCase()}        ; auto-scroll distance: 1/256 pixels, then pixels (3 bytes each)
+!VAcc = !HAcc+3
 !Table = $${L2_SCROLL_TABLE.toString(16).toUpperCase()}
 
 org !Table
@@ -196,6 +195,7 @@ export function installL2ScrollPatch(rom: Rom): ApplyResult {
 // how layer 2 moves in one direction: layer 2 pixels per layer 1 pixel, and pixels per frame by itself
 // (positive: the layer's position grows, the picture moves left/up)
 export interface Motion { rate: number; drift: number }
+export interface LayerMotion { x: Motion; y: Motion }
 
 const STILL = 64, MOVE = 128;
 const VERTICAL_MODE = 0x0a; // the measuring level is vertical: room for the camera in both directions
@@ -204,14 +204,14 @@ const d16 = (a: number, b: number) => (((b - a) << 16) >> 16);
 
 // The level with its settings (ov: its secondary header and code) on an empty vertical layer 1 of 16
 // screens, without sprites; Mario is held in the air and moved, the camera follows him.
-export function layer2Motion(emu: LevelEmulator, level: number, ov: LevelOverride): { x: Motion; y: Motion } {
+export function layer2Motion(emu: LevelEmulator, level: number, ov: LevelOverride): LayerMotion {
   const rom = emu.rom, l1 = ov.layer1 ?? rom.bytes(rom.r24(L1_PTRS + level * 3), 5);
   const hdr = [(l1[0] & 0xe0) | 0x0f, (l1[1] & 0xe0) | VERTICAL_MODE, l1[2], l1[3], l1[4]];
   const r = emu.load(level, {
     ...ov, layer1: new Uint8Array([...hdr, 0xff]), layer2: undefined, bgData: undefined, layer2Pointer: rom.r24(L2_PTRS + 0x105 * 3),
     sprites: new Uint8Array([0, 0xff]), byteOwner: undefined,
   });
-  const none = { x: { rate: 0, drift: 0 }, y: { rate: 0, drift: 0 } };
+  const none: LayerMotion = { x: { rate: 0, drift: 0 }, y: { rate: 0, drift: 0 } };
   if (!r.ok) return none;
   const s = emu.snes, w = s.wram;
   let mx = 0x80, my = 0x300;
@@ -248,8 +248,8 @@ export function withRates(s: SecondaryHeader, h: number, v: number): SecondaryHe
 }
 
 export interface Layer2Motions {
-  paired: { x: Motion; y: Motion }[]; // the game's 16 settings
-  separate: { x: Motion; y: Motion }[]; // RATE_OPTIONS, each in both directions at once
+  paired: LayerMotion[]; // the game's 16 settings
+  separate: LayerMotion[]; // RATE_OPTIONS, each in both directions at once
 }
 
 // every setting measured (layer2Motion) in the level with its code (ov); yields between the settings
