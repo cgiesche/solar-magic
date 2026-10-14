@@ -554,7 +554,12 @@ PixiLoad:
   REP #$20 : LDA $CE : STA.l !PixiCE : SEP #$20
   LDX #$00 : LDY #$01
 .loop
-  LDA [$CE],y : CMP #$FF : BEQ .exit
+if read1($02A82E) == $22
+  JSL read3($02A82F) ; the level heights' entry: Lunar Magic's subscreen markers skipped (A = first byte, Z: end)
+else
+  LDA [$CE],y : CMP #$FF
+endif
+  BEQ .exit
   ASL #3 : AND #$10 : STA $02
   INY : LDA [$CE],y : AND #$0F : ORA $02 : CMP $01
   BCC .skip : BNE .exit

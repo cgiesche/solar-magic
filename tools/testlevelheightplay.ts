@@ -2,6 +2,7 @@
 // moved down into a taller level must play exactly like the game's – the same input gives Mario and every
 // sprite the same positions (moved down), the visible layer 1 tiles are the same whenever the cameras are,
 // a pipe in the moved part leads where the game's does, and an entrance in it puts Mario there.
+import { readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import {
@@ -9,11 +10,16 @@ import {
 } from '../src/core/level.ts';
 import { saveLevel } from '../src/core/save.ts';
 import { RAM, SPR, SPRITE_SLOTS, get16, marioX, marioY, cameraX, cameraY, spriteX, spriteY } from '../src/core/ram.ts';
+import { loadAsar } from '../src/core/asar.ts';
+import { uploadFiles, uploadFromFiles } from '../src/core/patchpkg.ts';
+import { planPixiUpload, applyPixiUpload } from '../src/core/pixipkg.ts';
+import { savePixiProject, parsePixiList } from '../src/core/pixi.ts';
+import { map16Tile, MAP_BASE } from '../src/core/ram.ts';
 import { editorImage } from './fixture.ts';
 
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
-const base = new Rom(await editorImage());
+let base = new Rom(await editorImage());
 
 // the level moved down by dy rows into a level of the given size; Mario starts at the game's entrance
 // (moved down), the camera as far above him as in the game (Lunar Magic's tile entrance, relative camera)
@@ -70,7 +76,7 @@ function visible(s: S): number[] {
 
 // the same input to the game's level and the moved one
 const input = (f: number) => 0x0100 | (f % 70 < 30 ? 0x8000 : 0) | (f % 200 > 150 ? 0x4000 : 0);
-for (const [n, size, dy] of [[0x105, 0x0e, 32], [0x106, 0x0e, 32], [0x001, 0x0e, 32], [0x002, 0x0e, 32], [0x10b, 0x0e, 32], [0x105, 0x13, 62], [0x106, 0x1a, 271]]) {
+function compare(n: number, size: number, dy: number, note = ''): void {
   const game = cut(n, size), tall = moved(game, size, dy);
   const rows = levelRows(tall.secondary);
   const a = play(game), b = play(tall), d = dy * 16;
@@ -85,11 +91,12 @@ for (const [n, size, dy] of [[0x105, 0x0e, 32], [0x106, 0x0e, 32], [0x001, 0x0e,
     still = cameraX(wa) === cameraX(wb) && cameraY(wa) + d === cameraY(wb) ? still + 1 : 0;
     if (still >= 2) { tiles++; if (tilesBad < 0 && visible(a).join() !== visible(b).join()) tilesBad = f; }
   }
-  const what = `level ${n.toString(16)} ${dy} rows lower (${rows} rows)`;
+  const what = `level ${n.toString(16)} ${dy} rows lower (${rows} rows)${note}`;
   check(state < 0 && frames > 100, `${what}: Mario and the sprites as in the game's level for ${frames} frames${state < 0 ? '' : ` – not from frame ${state}`}`);
   check(below > 0 || dy < 32, `${what}: sprites below the game's 32 rows (${below} sprite frames)`);
   check(tilesBad < 0 && tiles > 0, `${what}: the visible layer 1 tiles as in the game's level (${tiles} frames with the same camera)${tilesBad < 0 ? '' : ` – not in frame ${tilesBad}`}`);
 }
+for (const [n, size, dy] of [[0x105, 0x0e, 32], [0x106, 0x0e, 32], [0x001, 0x0e, 32], [0x002, 0x0e, 32], [0x10b, 0x0e, 32], [0x105, 0x13, 62], [0x106, 0x1a, 271]]) compare(n, size, dy);
 
 // a pipe in the moved part: level 105's exit pipe (screen 7) leads where the game's does; the exit leads to
 // a secondary entrance in the moved part of the level itself: Mario comes out at its tile, the camera above
@@ -118,6 +125,58 @@ for (const [n, size, dy] of [[0x105, 0x0e, 32], [0x106, 0x0e, 32], [0x001, 0x0e,
   check(gs.x === 0x250 && gs.y === 0x140 && ts.x === 0x250 && ts.y === 0x340, `secondary entrance at tile (5, 52) of screen 2: Mario at ${ts.x.toString(16)},${ts.y.toString(16)} (at row 20: ${gs.x.toString(16)},${gs.y.toString(16)})`);
   // the offset puts the camera 9 rows above him; it has moved a little by the time the level has faded in
   check(Math.abs(ts.y - ts.cam - 0x90) <= 0x10 && Math.abs(gs.y - gs.cam - 0x90) <= 0x10, `its camera about 9 rows above him: ${ts.cam.toString(16)} (at row 20: ${gs.cam.toString(16)})`);
+}
+
+// with custom sprites the editor's PIXI runtime loads the sprites (its own loop over the list): the same,
+// and a custom sprite in the moved part spawns there
+{
+  await loadAsar();
+  const rom = new Rom(base.data.slice());
+  const upload = uploadFromFiles('BrutalBill.zip', uploadFiles('BrutalBill.zip', new Uint8Array(readFileSync('test/fixtures/BrutalBill.zip'))));
+  const res = applyPixiUpload(rom, upload, planPixiUpload(rom, upload), new Set(), () => {});
+  check(res.ok, 'PIXI runtime installed (BrutalBill)');
+  base = rom;
+  compare(0x105, 0x0e, 32, ', PIXI\'s loader');
+  const lv = moved(cut(0x105, 0x0e), 0x0e, 32);
+  lv.sprites = [{ ...lv.sprites[0], num: 0x00, extra: 2, x: 0x0c, y: 0x34 }]; // custom sprite 00, row 52
+  const s = play(lv), w = s.wram;
+  let x = -1, y = -1;
+  for (let f = 0; f < 30 && x < 0; f++) { step(s, 0); for (let i = 0; i < SPRITE_SLOTS; i++) if (w[SPR.status + i]) { x = spriteX(w, i); y = spriteY(w, i); } }
+  check(Math.abs(x - 0xc0) < 8 && Math.abs(y - 0x340) < 8, `custom sprite at row 52 spawned there (${x.toString(16)},${y.toString(16)} in its first frame)`);
+}
+
+// PIXI's GetMap16/ChangeMap16 (the editor's) below row 31: block (3, 57) of level 105 moved 32 rows down is
+// the game's (3, 25); changed, it is in the level data at its place
+{
+  const code = `print "INIT ",pc
+  RTL
+print "MAIN ",pc
+  LDA $7FB0FF : BEQ + : RTL
++ LDA #$01 : STA $7FB0FF
+  STZ $1933
+  REP #$20 : LDA #$0390 : STA $98 : LDA #$0030 : STA $9A
+  %GetMap16() : STA $7FB020
+  LDA #$0130 : %ChangeMap16()
+  LDA #$0390 : STA $98 : LDA #$0030 : STA $9A
+  %GetMap16() : STA $7FB022
+  SEP #$20
+  RTL
+`;
+  const rom = new Rom((await editorImage()).slice());
+  const res = savePixiProject(rom, { files: new Map([
+    ['sprites/m16.cfg', new TextEncoder().encode('01\n36\n00 00 3B 80 00 00\n00 00\nm16.asm\n00:00\n')],
+    ['sprites/m16.asm', new TextEncoder().encode(code)],
+  ]), list: parsePixiList('00 m16.cfg\n') });
+  base = rom;
+  const lv = moved(cut(0x105, 0x0e), 0x0e, 32);
+  lv.sprites = [{ ...lv.sprites[0], num: 0x00, extra: 2, x: 6, y: 0x36 }];
+  const s = play(lv), w = s.wram;
+  for (let f = 0; f < 20; f++) step(s, 0);
+  const at = (a: number) => w[a - 0x7e0000] | (w[a - 0x7e0000 + 1] << 8);
+  const before = map16Tile(new LevelEmulator(new Rom((await editorImage()).slice())).load(0x105).wram, MAP_BASE + 3 + 25 * 16);
+  const here = map16Tile(w, MAP_BASE + 3 + 57 * 16);
+  check(res.ok && w[0x1b0ff] === 1 && at(0x7fb020) === before && at(0x7fb022) === 0x130 && here === 0x130,
+    `GetMap16 below row 31: ${at(0x7fb020).toString(16)} (the game's ${before.toString(16)}); after ChangeMap16 ${at(0x7fb022).toString(16)}, level data ${here.toString(16)}`);
 }
 
 console.log(bad ? `${bad} FAILED` : 'all ok');

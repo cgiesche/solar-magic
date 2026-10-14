@@ -17,7 +17,7 @@
 import type { Rom } from './rom.ts';
 import { LEVEL_SIZE_TABLE, LEVEL_HEIGHTS, SEC_HDR, SEC_ENT } from './level.ts';
 import { L2_SCROLL_TABLE } from './l2scroll.ts';
-import { LEVEL_HEIGHT_RAM, LEVEL_HEIGHT, SCREEN_PTRS } from './ram.ts';
+import { LEVEL_HEIGHT_RAM, LEVEL_HEIGHT, SCREEN_PTRS, LEVEL_MAX_Y, LEVEL_ROW_MASK } from './ram.ts';
 import { applyPatch, type ApplyResult } from './patchapply.ts';
 import { installEditorPatch } from './patches.ts';
 
@@ -31,8 +31,8 @@ lorom
 !Sub = !Size+2         ; subscreen of the objects that follow (screen jump)
 !Table = $${hx(LEVEL_SIZE_TABLE)}
 !MaxHi = !Size+3       ; playing: Y high bytes inside the level (the game's 2)
-!MaxY = !Size+4        ; changing a tile: positions inside the level (16-bit, the game's $200)
-!RowMask = !Size+6     ; and a position's row bits (the game's $01F0)
+!MaxY = $${hx(LEVEL_MAX_Y)}        ; changing a tile: positions inside the level (16-bit, the game's $200)
+!RowMask = $${hx(LEVEL_ROW_MASK)}     ; and a position's row bits (the game's $01F0)
 !NewSpr = !Size+8      ; the level's sprite data is in Lunar Magic's new format (header bit 5)
 !SprSub = !Size+9      ; loading sprites: the subscreen of the sprites that follow, * 2 (a Y high byte)
 !Level = !Size+10      ; the level being loaded (16-bit)
