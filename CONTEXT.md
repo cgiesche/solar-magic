@@ -23,6 +23,10 @@ A change of the open level in memory: its own undo step, written to the ROM when
 The height of a horizontal level without layer 2 objects, one of Lunar Magic 3.00's 32 sizes (the editor offers 00-1B); its screens share the game's level data, so a taller level has fewer screens. Objects and sprites below row 31 are placed by subscreens of 32 rows.
 _Avoid_: dimension, level mode (that is the header's)
 
+**Tile entrance**:
+An entrance that puts Mario at a tile of its screen (Lunar Magic's), instead of at one of the game's table positions, which don't reach a taller level's rows; its camera starts a number of rows above Mario. Entrances placed in a level with a size are tile entrances.
+_Avoid_: method 2, exact entrance
+
 ### Third-party content
 
 **Package**:

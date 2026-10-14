@@ -12,7 +12,21 @@
 //  - where an object goes on to the next or previous screen ($0DA963, $0DA9D6, $0DA9EF, the places
 //    Lunar Magic changes) the screen size instead of the game's $1B0;
 //  - after the load ($058091) the size is cleared again: loads without the setup (the credits) are the game's.
-// Playing such a level (camera, sprites, interaction) is not part of it yet.
+//
+// Playing it, as Lunar Magic does (the RAM where it keeps them, the places it changes, observed in a Lunar
+// Magic-saved ROM; the code is the editor's):
+//  - the setup also sets the height in pixels ($13D7, for every level; the game's $1B0) and the screens'
+//    Map16 addresses in bank 0's RAM ($0BF6-$0CF5); the game's mode tables of horizontal screen pointers
+//    point there, so the tilemap, changing a tile and code finding a block the game's way follow the height;
+//  - finding a block: the 27-row limit (CMP #$01B0) and the Y high byte limit (CMP #$02) follow the height,
+//    the screens' address tables are read from RAM (Mario, sprites, line guides, bounce blocks, the cape,
+//    extended sprites, wall-following sprites, sprites checking the block ahead); changing a tile ($00BEB0)
+//    below row 31; a sprite is erased below the height instead of row 27;
+//  - the camera goes down to the height less $F0;
+//  - sprites load from Lunar Magic's new format ($FF V: subscreen V), the subscreen in their Y high byte;
+//  - entrances: Mario at a tile (Lunar Magic's tile position) and the camera relative to him, the BG then
+//    bottom-aligned with the level (the BG's height) or relative to the FG (SEC_HDR, SEC_ENT).
+// The tilemap of such a level is SMWV's (vrampatch.ts): a window of 16 block rows built from the level data.
 
 import type { Rom } from './rom.ts';
 import { LEVEL_SIZE_TABLE, LEVEL_HEIGHTS, SEC_HDR, SEC_ENT } from './level.ts';

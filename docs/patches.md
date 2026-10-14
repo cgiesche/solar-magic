@@ -474,8 +474,45 @@ screen, the subscreen and the high Y bit, and where objects go on to the next sc
 structures too. Those three places are Lunar Magic's: a patch written for a Lunar Magic ROM that changes them is
 not compatible. After the load (`$058091`) the size is cleared, so loads without the setup (the credits) are
 the game's. Levels of the game's size run the game's code (`src/core/levelheight.ts`,
-`tools/testlevelheight.ts`). **Playing** a taller level (camera, sprites, interaction, `$13D7`) is not there
-yet: in test play the game still scrolls as in a level of 27 rows and loads no sprites after the first subscreen change.
+`tools/testlevelheight.ts`).
+
+**Playing** a taller level works as in Lunar Magic: the same RAM (`$13D7` the height in pixels, `$0BF6–$0CF5`
+the screens' Map16 addresses, which the game's mode tables of horizontal screen pointers now point to) and
+mostly the places Lunar Magic changes, learned from what a Lunar Magic-saved ROM does in the emulator; the
+code is the editor's.
+
+- Finding a block below row 26 – Mario, sprites, line guides, bounce blocks, the cape, extended sprites,
+  wall-following sprites and sprites checking the block ahead: the limits the game has (`CMP #$01B0`, a Y
+  high byte below 2) follow the height, the screens' addresses come from RAM. Changing a tile (`$00BEB0`, also
+  PIXI's `ChangeMap16`/`GetMap16`) works on every row; a sprite is erased below the level's height.
+- The camera goes down to the height less `$F0` (the game's `$C0`). Like Lunar Magic, the game's lower bound
+  of `$C0` while Mario hasn't scrolled the camera up stays, so the camera follows a jump where the game's
+  would stay at the bottom.
+- The tilemap (SMWV): a window of 16 block rows follows the camera; the rows entering it are built from the
+  level data each frame (at most two, 32 block columns around the camera, each block's tiles from the game's
+  renderer at `$058A66` or the code a patch put there, e.g. the Map16 extension's), columns are built from the
+  window's first row on.
+- Sprites load from Lunar Magic's new format (`$FF V` marks subscreen V) with the subscreen in their Y high
+  byte – normal sprites, shooters, generators and the groups the game spawns; the editor's PIXI runtime takes
+  the markers through the same code.
+- Entrances: the game's table positions don't reach a taller level's rows. Lunar Magic 3.00's entrances
+  can put Mario at a tile of the entrance screen (main entrance: `$05DE00` bit 5, X bits 4–3 there and bits
+  2–0 in `$05F200`, Y bits 9–4 in `$06FC00` and 3–0 in `$05F000`; secondary entrances: `$05FE00` bit 6,
+  X bits 4–3 there and 2–0 in `$05FC00`, Y bits 9–4 in a table of the editor's at `$06CC00` (Lunar Magic
+  keeps it with its code) and 3–0 in `$05FA00`). The camera can start relative to Mario (`$06FE00` / the
+  editor's `$06CE00` bit 7): 16 × the 5-bit signed offset made of `$06FC00` bit 6 (secondary: `$06CC00` bit 6)
+  and the FG/BG start Y bits, inside the level; the BG then shows its bottom when the camera is at the
+  level's (its height in rows − 1 in `$06FE00` bits 4–0) or, with `$06FC00` bit 7, starts at the FG + 16 ×
+  that offset (`$10`: at 0). The format is Lunar Magic's (the bit layout as the SMW speedrunning wiki's
+  *Level Data Format* gives it; what each value does as observed in a Lunar Magic-saved ROM). In a level with
+  a size the editor places entrances at tiles with the camera 10 rows above Mario. The level's own slippery,
+  water, face-left and midway bits of Lunar Magic are kept but not used.
+
+The emulation check (`tools/testlevelheightplay.ts`): levels of the game moved down into taller levels play
+exactly like the game's – Mario and every sprite at the same positions under the same input, the same visible
+tiles whenever the cameras are the same; a pipe in the moved part leads where the game's does, a secondary
+entrance there puts Mario at its tile. Still the game's: the BG of a level without the relative camera
+(it scrolls past its 27 rows), Lunar Magic's T and B bits of the size byte, the midway entrance of its own.
 
 ## Level import (Lunar Magic)
 
@@ -539,8 +576,8 @@ not compatible with the respective feature.
 | `$058551` | Music per level (SMWU) |
 | `$00AA50` | BG2/BG3 graphics slots (SMWG) |
 | `$05D915`, `$00F79D`, table `$06FA00` | Layer 2 scroll rates; RAM `$7F3660–$7F3665` |
-| `$05D928`, `$0586BB`, `$0DA963`, `$0DA9D6`, `$0DA9EF`, `$058091`, table `$06CA00` | Level heights; RAM `$7F3666–$7F3668` |
-| `$008A7F`, `$0087AD`, `$0085E3`, `$0580B0`, `$0580B4`, `$0580BF`, `$0580C3`, `$058730`, `$058770`, `$0587D4`, `$0587DB`, `$05880B`, `$058812` | VRAM patch (SMWV): tilemaps relocated; RAM `$7F0000–$7F3653` |
+| `$05D928`, `$0586BB`, `$0DA963`, `$0DA9D6`, `$0DA9EF`, `$058091`, tables `$06CA00`, `$05DE00`, `$06FC00`, `$06FE00`, `$06CC00`, `$06CE00`; finding a block `$00F478`, `$00F492`, `$00F49A`, `$0194D6`, `$019500`, `$019512`, `$01D97B`, `$01D981`, `$0292D9`, `$0292F9`, `$02930A`, `$0295C0`, `$0295EC`, `$0295FD`, `$02A6BA`, `$02A6CB`, `$02BA50`, `$02BA71`, `$02BA82`, `$02D15A`, `$02D18C`, `$02D19D`, `$03D793`; changing a tile `$00BEEC`, `$00BF41`, `$00C079`, `$00C0C6`, `$00C1B1`, `$00C3D3`; mode tables `$00BDA8`, `$00BDE8`, `$00BE28`, `$00BE68`; sprites `$02A82E`, `$02A968`, `$02AA5F`, `$02AB54`, `$02ABD0`, `$02AF3D`, `$02AFA7`, `$01AC3E`, `$02D038`, `$03B86A`; camera `$00F70D`; entrances `$05D7E0`, `$05DA17` | Level heights; RAM `$7F3666–$7F3675`, Lunar Magic's `$13D7`, `$0BF6–$0CF5` |
+| `$008A7F`, `$0087AD`, `$0085E3`, `$0580B0`, `$0580B4`, `$0580BF`, `$0580C3`, `$058730`, `$058770`, `$0587D4`, `$0587DB`, `$05880B`, `$058812`, `$0586F7`, `$058A3A` | VRAM patch (SMWV): tilemaps relocated, taller levels' rows; RAM `$7F0000–$7F3654` |
 | Ext. object table `$0DA118` (entry `$03`) | Structures (SMWS); empty in the original, no code hook |
 | `$05B20F` | Messages in free space (SMWM), only if the texts no longer fit |
 | `$00F545`, `$029328`, `$058A66`, `$058B46`, `$058C34`, `$058D2B`, `$00C096`, `$00C0E7`, `$00C176` | Map16 extension and custom blocks (SMWX) |
