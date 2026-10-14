@@ -21,39 +21,30 @@ export function screenBase(rom: Rom, layer: number, mode: number, s: number): nu
   return rom.r16(screenTable + s * 3);
 }
 
-// rows: the height of a horizontal level (levelRows); a level with a size has screens of rows * 16 bytes
-// one after the other (levelheight.ts)
+// rows: the height of a horizontal level (levelRows). A horizontal layer's screens lie one after the other,
+// rows * 16 bytes each, layer 2's from the 16th screen on (the game's tables for them are built in RAM
+// with the level, levelheight.ts); a vertical layer's come from the game's tables.
 export function layerGeom(rom: Rom, layer: number, mode: number, screens: number, rows = 27): LayerGeom {
   const vertical = layer === 0 ? isL1Vertical(rom, mode) : isL2Vertical(rom, mode);
-  if (!vertical && layer === 0 && rows !== 27) {
-    const w = screens * 16;
+  if (!vertical) {
+    const w = screens * 16, base = MAP_BASE + layer * 16 * rows * 16;
     return {
       vertical, width: w, height: rows,
       addr(x, y) {
         if (x < 0 || y < 0 || x >= w || y >= rows) return -1;
-        return MAP_BASE + (x >> 4) * rows * 16 + y * 16 + (x & 15);
+        return base + (x >> 4) * rows * 16 + y * 16 + (x & 15);
       },
     };
   }
   const bases: number[] = [];
   const maxScreens = 32;
   for (let s = 0; s < maxScreens; s++) bases.push(screenBase(rom, layer, mode, s));
-  if (vertical) {
-    const h = screens * 16;
-    return {
-      vertical, width: 32, height: h,
-      addr(x, y) {
-        if (x < 0 || y < 0 || x >= 32 || y >= h) return -1;
-        return bases[y >> 4] + ((x >> 4) << 8) + ((y & 15) << 4) + (x & 15);
-      },
-    };
-  }
-  const w = screens * 16;
+  const h = screens * 16;
   return {
-    vertical, width: w, height: 27,
+    vertical, width: 32, height: h,
     addr(x, y) {
-      if (x < 0 || y < 0 || x >= w || y >= 27) return -1;
-      return bases[x >> 4] + (y << 4) + (x & 15);
+      if (x < 0 || y < 0 || x >= 32 || y >= h) return -1;
+      return bases[y >> 4] + ((x >> 4) << 8) + ((y & 15) << 4) + (x & 15);
     },
   };
 }

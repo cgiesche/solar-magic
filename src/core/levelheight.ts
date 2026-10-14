@@ -16,7 +16,7 @@
 
 import type { Rom } from './rom.ts';
 import { LEVEL_SIZE_TABLE, LEVEL_HEIGHTS } from './level.ts';
-import { LEVEL_HEIGHT_RAM } from './ram.ts';
+import { LEVEL_HEIGHT_RAM, LEVEL_HEIGHT, SCREEN_PTRS } from './ram.ts';
 import { applyPatch, type ApplyResult } from './patchapply.ts';
 import { installEditorPatch } from './patches.ts';
 
@@ -29,9 +29,58 @@ lorom
 !Size = $${hx(LEVEL_HEIGHT_RAM[0])}      ; a screen's bytes in the level data (16-bit), 0: the game's
 !Sub = !Size+2         ; subscreen of the objects that follow (screen jump)
 !Table = $${hx(LEVEL_SIZE_TABLE)}
+!MaxHi = !Size+3       ; playing: Y high bytes inside the level (the game's 2)
+!Height = $${hx(LEVEL_HEIGHT)}       ; playing: the level's height in pixels, a screen's bytes (Lunar Magic's)
+!Ptr = $${hx(SCREEN_PTRS[0])}          ; per screen: 3-byte pointers to the low bytes (Lunar Magic's place)
+!PtrHi = !Ptr+$60      ; to the high bytes
+!Lo = !Ptr+$C0         ; the addresses' low bytes
+!Hi = !Ptr+$E0         ; and high bytes
 
 org !Table
   fillbyte $00 : fill 512
+
+; the game's mode tables of a horizontal layer's screen pointers (tilemap columns, changing a tile, and code
+; that finds a block the same way) point to the tables in RAM, which the setup builds for every level
+!m = 0
+while !m < 32
+  if read2($00BDA8+!m*2) == $BAD8
+    org $00BDA8+!m*2 : dw !Ptr
+    org $00BDE8+!m*2 : dw !Ptr+$30
+    org $00BE28+!m*2 : dw !PtrHi
+    org $00BE68+!m*2 : dw !PtrHi+$30
+  endif
+  !m #= !m+1
+endwhile
+
+; finding the block at a position: layer 1 of a horizontal level, below the game's 27 rows too
+org $00F478 : CMP.w !Height          ; Mario: CMP #$01B0
+org $00F492 : ADC.l !Lo,x
+org $00F49A : ADC.l !Hi,x
+org $0194D6 : CMP.w !Height          ; sprites
+org $019500 : LDA.l !Lo,x
+org $019512 : LDA.l !Hi,x
+org $01D97B : ADC.l !Lo,x            ; line-guided sprites
+org $01D981 : LDA.l !Hi,x
+org $0292D9 : JSL YHi02 : BCS $0292C9 ; bounce blocks (CMP #$02 : BCS : STA $02)
+org $0292F9 : LDA.l !Lo,x
+org $02930A : LDA.l !Hi,x
+org $0295C0 : JSL YHi02 : BCS $0295AD ; cape
+org $0295EC : LDA.l !Lo,x
+org $0295FD : LDA.l !Hi,x
+org $02A6BA : LDA.l !Lo,x            ; extended sprites (no Y limit)
+org $02A6CB : LDA.l !Hi,x
+org $02BA50 : JSL YHi0D : BCS $02BA47 ; wall-following sprites
+org $02BA71 : LDA.l !Lo,x
+org $02BA82 : LDA.l !Hi,x
+org $02D15A : JSL YHi02 : BCS $02D148 ; sprites that check the block in front of them
+org $02D18C : LDA.l !Lo,x
+org $02D19D : LDA.l !Hi,x
+org $03D793 : ADC.w !Height          ; a screen further on
+
+; the camera's lowest position in a horizontal level: the height less $F0 (the game's $C0)
+org $00F70D   ; LDA #$00C0 : JSR $F7F4 (A 16)
+  JSL CameraY
+  NOP #2
 
 org $${hx(SETUP_HOOK)}   ; LDA $F200,y : AND #$C0 : CLC : ASL : ROL : ROL : STA $1BE3 (A 8, X/Y 16, Y = level)
   JSL Setup
@@ -67,10 +116,49 @@ Setup:
   TYX
   LDA.l !Table,x : AND #$001F : ASL : TAX
   LDA.l Sizes,x : STA.l !Size
+  BNE + : LDA #$01B0 : +
+  STA !Height
+  CLC : ADC #$00FF : XBA : SEP #$20 : STA.l !MaxHi : REP #$20
+  JSR Screens
   PLA
   SEP #$20
   PLX
   LDA.w $F200,y : AND #$C0 : CLC : ASL : ROL : ROL : STA $1BE3   ; (data bank $05)
+  RTL
+
+; the screens' Map16 addresses in the level data, each !Height bytes after the one before (A 16, X/Y 16,
+; data bank $05: low RAM)
+Screens:
+  PHY
+  LDX #$0000 : TXY
+  LDA #$C800
+- STA !Ptr,x : STA !PtrHi,x
+  SEP #$20
+  STA !Lo,y : XBA : STA !Hi,y : XBA
+  PHA : LDA #$7E : STA !Ptr+2,x : INC : STA !PtrHi+2,x : PLA
+  REP #$20
+  CLC : ADC !Height
+  INX #3 : INY
+  CPY #$0020 : BCC -
+  PLY
+  RTS
+
+; A (8 bit) = the Y high byte of a position: carry set when it is below the level; stored as the game's
+; code does after its CMP #$02 (A 8)
+YHi02:
+  CMP.l !MaxHi : STA $02
+  RTL
+YHi0D:
+  CMP.l !MaxHi : STA $0D
+  RTL
+
+; A 16, X 8: the camera's lowest Y for the game's vertical scroll ($00F7F4, which ends with RTS)
+CameraY:
+  LDA.l $7E0000+!Height : SEC : SBC #$00F0
+  PHK : PEA.w .back-1
+  PEA.w $F7F3-1          ; RTL at $00F7F3
+  JML $00F7F4
+.back
   RTL
 
 Sizes:
@@ -138,5 +226,5 @@ Done:
 
 export function installLevelHeightPatch(rom: Rom): ApplyResult {
   installEditorPatch(rom);
-  return applyPatch(rom, { name: LEVEL_HEIGHT_PATCH_NAME, main: 'levelheight.asm', files: new Map([['levelheight.asm', LEVEL_HEIGHT_ASM]]), kind: 'levelheight', ram: [LEVEL_HEIGHT_RAM] });
+  return applyPatch(rom, { name: LEVEL_HEIGHT_PATCH_NAME, main: 'levelheight.asm', files: new Map([['levelheight.asm', LEVEL_HEIGHT_ASM]]), kind: 'levelheight', ram: [LEVEL_HEIGHT_RAM, [0x7e0000 | LEVEL_HEIGHT, 2], [0x7e0000 | SCREEN_PTRS[0], SCREEN_PTRS[1]]] });
 }
