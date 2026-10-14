@@ -48,6 +48,11 @@ export class AudioOut {
   private node: AudioWorkletNode | null = null;
   private pushed = 0; // sample pairs sent since start
   private start = 0; // ctx.currentTime when pushed was 0
+  // ctx.currentTime moves in steps of the system's audio quantum (up to ~43 ms when another app,
+  // e.g. a video call, raises it): between steps the position is carried on by wall-clock time
+  private clockAt = 0; // last seen ctx.currentTime
+  private clockSeen = 0; // performance.now() / 1000 when it was seen
+  private clockStep = 0; // size of the last step
   private volume = 1;
   muted = false;
   failed = false;
@@ -72,7 +77,7 @@ export class AudioOut {
         this.underruns++;
         this.lead = Math.min(MAX_LEAD, Math.max(this.lead, this.lead + APU_RATE / 60));
         this.pushed = 0;
-        this.start = ctx.currentTime;
+        this.start = this.now();
       };
       this.node.port.postMessage({ gain: this.muted ? 0 : this.volume });
       this.resync();
@@ -85,7 +90,19 @@ export class AudioOut {
   // sample pairs still queued (estimated from the audio clock)
   buffered(): number {
     if (!this.ctx || !this.node) return 0;
-    return Math.max(0, this.pushed - (this.ctx.currentTime - this.start) * this.rate());
+    return Math.max(0, this.pushed - (this.now() - this.start) * this.rate());
+  }
+
+  // playback position in seconds: ctx.currentTime, carried on between its steps by at most one step
+  private now(): number {
+    if (!this.ctx) return 0;
+    const t = this.ctx.currentTime, wall = performance.now() / 1000;
+    if (t !== this.clockAt) {
+      if (t > this.clockAt) this.clockStep = t - this.clockAt;
+      this.clockAt = t;
+      this.clockSeen = wall;
+    }
+    return t + Math.min(wall - this.clockSeen, this.clockStep);
   }
 
   private rate(): number { return this.ctx?.sampleRate ?? APU_RATE; }
@@ -94,7 +111,7 @@ export class AudioOut {
   resync(): void {
     if (!this.ctx) return;
     this.pushed = 0;
-    this.start = this.ctx.currentTime;
+    this.start = this.now();
     this.node?.port.postMessage({ clear: true });
   }
 
@@ -102,7 +119,7 @@ export class AudioOut {
     if (!this.node || !this.ctx) return;
     if (this.ctx.state !== 'running') { void this.ctx.resume().catch(() => undefined); return; }
     // queue ran dry (or never started): the clock went on without us
-    if (this.buffered() <= 0) { this.pushed = 0; this.start = this.ctx.currentTime; }
+    if (this.buffered() <= 0) { this.pushed = 0; this.start = this.now(); }
     const ratio = this.rate() / APU_RATE;
     let f: Float32Array;
     if (ratio === 1) {
