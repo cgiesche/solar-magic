@@ -4,7 +4,8 @@
 import type { App, Marker } from './app.ts';
 import { h, select, toast, choose } from './dom.ts';
 import { hex2, hex3, ENTRANCE_ACTIONS } from '../core/names.ts';
-import { newUid, readSecondaryEntrance, readSecondaryHeader, mainTranslevel } from '../core/level.ts';
+import { newUid, readSecondaryEntrance, readSecondaryHeader, mainTranslevel, mainSpot, secondarySpot, setSecondarySpot } from '../core/level.ts';
+import { spotText, cameraOptions, cameraValue, setCamera } from './entrancefields.ts';
 import { exitTarget, sameBank, type ExitRef } from '../core/exitgraph.ts';
 import { levelPicker } from './levelpicker.ts';
 import { openTestPlay } from './testplay.ts';
@@ -104,8 +105,8 @@ export function newEntranceIn(app: App, level: number): number | null {
   if (idx === null) { toast(`No free secondary entrance left in ${level & 0x100 ? '100–1FF' : '000–0FF'}.`, 'error'); return null; }
   const s = level === app.level.number ? app.level.secondary : readSecondaryHeader(app.rom, level);
   app.editSecondaryEntrance(idx, `Secondary entrance ${hex3(idx)} created`, (x) => {
-    x.destLevel = level & 0xff; x.screen = s.entranceScreen; x.entranceX = s.entranceX; x.entranceY = s.entranceY;
-    x.action = s.entranceAction; x.fgInitY = s.fgInitY; x.bgInitY = s.bgInitY;
+    x.destLevel = level & 0xff; setSecondarySpot(x, mainSpot(s));
+    x.action = s.entranceAction; x.fgInitY = s.fgInitY; x.bgInitY = s.bgInitY; x.cameraRelative = s.cameraRelative; x.cameraOffsetHi = s.cameraOffsetHi;
   });
   if (level !== app.level.number) toast(`Secondary entrance ${hex3(idx)} created in level ${hex3(level)} (at the main entrance) – go there with “Open target” and move it.`);
   return idx;
@@ -134,10 +135,13 @@ function secondaryPanel(app: App, body: HTMLElement, idx: number): void {
   const refs = app.exitGraph().usersOfEntrance(idx);
   body.append(
     h('div', { class: 'prop-title' }, `Secondary entrance ${hex3(idx)}`),
-    hint(`Screen ${hex2(e.screen)}, X ${e.entranceX}, Y ${e.entranceY} – drag the marker to move it`),
+    hint(`${spotText(secondarySpot(e))} – drag the marker to move it`),
     field('Action', select(actions(), e.action, (v) => set('Action', (x) => (x.action = v), 'a'))),
-    field('FG start Y', select(range(4), e.fgInitY, (v) => set('FG start Y', (x) => (x.fgInitY = v), 'f'))),
-    field('BG start Y', select(range(4), e.bgInitY, (v) => set('BG start Y', (x) => (x.bgInitY = v), 'b'))),
+    field('Camera start', select(cameraOptions(cameraValue(e)), cameraValue(e), (v) => set('Camera start', (x) => setCamera(x, v), 'c'))),
+    ...(e.cameraRelative ? [] : [
+      field('FG start Y', select(range(4), e.fgInitY, (v) => set('FG start Y', (x) => (x.fgInitY = v), 'f'))),
+      field('BG start Y', select(range(4), e.bgInitY, (v) => set('BG start Y', (x) => (x.bgInitY = v), 'b'))),
+    ]),
     users(app, refs, [], 'No exit yet. In another level, select a screen, choose “Create exit”, “Secondary entrance” and this level as the target.'),
     h('div', { class: 'row' },
       h('button', { title: 'Test play from this entrance', onclick: () => testAt(app, 'sec', idx) }, '▶ Test here'),
@@ -173,8 +177,9 @@ function mainPanel(app: App, body: HTMLElement, kind: 'main' | 'midway'): void {
   const extra = tl ? [h('div', { class: 'row' }, h('span', null, 'Overworld'), h('span', { class: 'lname' }, `(level tile, translevel ${hex2(tl)})`))] : [];
   body.append(
     h('div', { class: 'prop-title' }, 'Main entrance'),
-    hint(`Screen ${hex2(s.entranceScreen)}, X ${s.entranceX}, Y ${s.entranceY} – drag the marker to move it`),
+    hint(`${spotText(mainSpot(s))} – drag the marker to move it`),
     field('Action', select(actions(), s.entranceAction, (v) => upd(() => (s.entranceAction = v)))),
+    field('Camera start', select(cameraOptions(cameraValue(s)), cameraValue(s), (v) => upd(() => setCamera(s, v)))),
     users(app, g.exitsInto(n).filter((r) => !r.secondary), extra, 'No exit leads to the main entrance.'),
     h('div', { class: 'row' }, h('button', { title: 'Test play from the main entrance (T)', onclick: () => testAt(app, 'main', 0) }, '▶ Test here')),
     hint('More settings (scrolling, layer 3 …) in the header dialog (H).'),

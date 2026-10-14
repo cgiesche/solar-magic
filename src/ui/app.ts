@@ -5,7 +5,7 @@ import { LevelEmulator, OV_L1, OV_L2, type LevelRender, type LevelOverride, MAP_
 import {
   type Level, type LevelObject, type LevelSprite, type ScreenExit, type SecondaryEntrance, loadLevel, spriteLoadOrder, serializeLayer1, serializeLayer2, serializeSprites, serializeLevelSprites, spriteSizes, spriteId, spriteBytes,
   isL1Vertical, cloneLevel, newUid, hasLayer2Objects, hasObjects, L1_PTRS, L2_PTRS, SEC_HDR,
-  readSecondaryEntrance, writeSecondaryEntrance, decodeSecondaryEntrance, entrancePos, nearestEntrance, encodeSecondaryHeader, SPRITE_MEMORY, levelRows,
+  readSecondaryEntrance, writeSecondaryEntrance, decodeSecondaryEntrance, entrancePos, nearestEntrance, encodeSecondaryHeader, mainSpot, secondarySpot, sameSpot, setMainSpot, setSecondarySpot, cameraAtMario, isSized, SPRITE_MEMORY, levelRows,
 } from '../core/level.ts';
 import { hex, spriteName } from '../core/names.ts';
 import { loadPixiProject, customSpriteList, type CustomSprite } from '../core/pixi.ts';
@@ -388,38 +388,43 @@ export class App {
   markers(): Marker[] {
     const s = this.level.secondary;
     const vert = (s.verticalPositioning & 1) !== 0;
-    const main = entrancePos(this.rom, s.entranceScreen, s.entranceX, s.entranceY, vert);
-    const mid = entrancePos(this.rom, s.midwayScreen, s.entranceX, s.entranceY, vert);
+    const main = entrancePos(this.rom, mainSpot(s), vert);
+    const mid = entrancePos(this.rom, mainSpot(s, s.midwayScreen), vert);
     const out: Marker[] = [{ kind: 'midway', index: 0, ...mid }, { kind: 'main', index: 0, ...main }];
-    for (const i of this.secEntrances) {
-      const e = readSecondaryEntrance(this.rom, i);
-      out.push({ kind: 'sec', index: i, ...entrancePos(this.rom, e.screen, e.entranceX, e.entranceY, vert) });
-    }
+    for (const i of this.secEntrances) out.push({ kind: 'sec', index: i, ...entrancePos(this.rom, secondarySpot(readSecondaryEntrance(this.rom, i)), vert) });
     return out;
   }
 
-  // snaps a marker to the entrance setting nearest to Mario's top-left pixel (px, py);
-  // main/midway change the level (undoable), secondary entrances are written to the ROM directly.
-  // The midway point shares X/Y with the main entrance, only its screen can change.
+  // snaps a marker to the entrance setting nearest to Mario's top-left pixel (px, py) – in a level with a
+  // size the tile there (Lunar Magic's, the camera then relative to Mario); main/midway change the level
+  // (undoable), secondary entrances are written to the ROM directly. The midway point shares X/Y with the
+  // main entrance, only its screen can change.
   moveMarker(m: Marker, px: number, py: number): boolean {
     const s = this.level.secondary;
     const vert = (s.verticalPositioning & 1) !== 0;
     const maxScreen = this.level.header.screens - 1;
-    const p = nearestEntrance(this.rom, px, py, vert, m.kind === 'midway' ? Math.min(15, maxScreen) : maxScreen);
+    const p = nearestEntrance(this.rom, px, py, vert, m.kind === 'midway' ? Math.min(15, maxScreen) : maxScreen, this.entranceRows());
     if (m.kind === 'main') {
-      if (s.entranceScreen === p.screen && s.entranceX === p.ex && s.entranceY === p.ey) return false;
-      s.entranceScreen = p.screen; s.entranceX = p.ex; s.entranceY = p.ey;
+      if (sameSpot(mainSpot(s), p)) return false;
+      setMainSpot(s, p);
+      if (p.tile) cameraAtMario(s);
     } else if (m.kind === 'midway') {
       if (s.midwayScreen === p.screen) return false;
       s.midwayScreen = p.screen;
     } else {
       const e = readSecondaryEntrance(this.rom, m.index);
-      if (e.screen === p.screen && e.entranceX === p.ex && e.entranceY === p.ey) return false;
-      e.screen = p.screen; e.entranceX = p.ex; e.entranceY = p.ey;
+      if (sameSpot(secondarySpot(e), p)) return false;
+      setSecondarySpot(e, p);
+      if (p.tile) cameraAtMario(e);
       // ROM data: one undo step per marker (successive moves merge)
       this.romEdit(`Secondary entrance ${hex(m.index, 3)} moved`, () => writeSecondaryEntrance(this.rom, m.index, e), { key: `sec-entrance:${m.index}` });
     }
     return true;
+  }
+
+  // entrances are placed at tiles in a level with a size (the game's table positions don't reach its rows)
+  entranceRows(): number {
+    return isSized(this.level.secondary) ? levelRows(this.level.secondary) : 0;
   }
 
   // whether a screen has tiles that can be entered (pipes, doors); null while probes are pending
@@ -475,9 +480,11 @@ export class App {
     const n = this.level.number;
     const idx = this.exitGraph().freeEntrance(n);
     if (idx === null) { toast(`No free secondary entrance left in ${n & 0x100 ? '100–1FF' : '000–0FF'}.`, 'error'); return null; }
-    const p = nearestEntrance(this.rom, px, py, (this.level.secondary.verticalPositioning & 1) !== 0, this.level.header.screens - 1);
+    const p = nearestEntrance(this.rom, px, py, (this.level.secondary.verticalPositioning & 1) !== 0, this.level.header.screens - 1, this.entranceRows());
     this.editSecondaryEntrance(idx, `Secondary entrance ${hex(idx, 3)} created`, (e) => {
-      e.destLevel = n & 0xff; e.screen = p.screen; e.entranceX = p.ex; e.entranceY = p.ey;
+      e.destLevel = n & 0xff;
+      setSecondarySpot(e, p);
+      if (p.tile) cameraAtMario(e);
     });
     this.selectEntrance({ kind: 'sec', index: idx });
     return idx;

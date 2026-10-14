@@ -8,6 +8,7 @@ import { LevelEmulator, OV_L1 } from '../src/core/levelemu.ts';
 import {
   type Level, loadLevel, cloneLevel, serializeLayer1, serializeLevelSprites, serializeSprites, spriteSizes, parseLevelData, encodeSecondaryHeader, decodeSecondaryHeader,
   levelRows, maxScreens, isTall, insertScreen, hasLevelSize, newUid, SPRITE_MEMORY, LEVEL_SIZE_TABLE, readSecondaryHeader,
+  entrancePos, nearestEntrance, mainSpot, spotTile, cameraRows, setCameraRows,
 } from '../src/core/level.ts';
 import { renderLevel } from '../src/core/render.ts';
 import { DM16_EXT } from '../src/core/patches.ts';
@@ -158,6 +159,31 @@ check(readSecondaryHeader(rom, N).levelSize === 0 && rom.r8(LEVEL_SIZE_TABLE + 0
   mwl[info + 16] = 0x9a; // T set, size 1A
   const sec = decodeSecondaryHeader(mwlSections(mwl).secondary);
   check(sec.levelSize === 0x1a && sec.levelSizeFlags === 0x80, '.mwl: the size from level information byte 16, Lunar Magic\'s flags kept');
+  // Lunar Magic's entrance bytes ($05DE00 at 6, $06FC00 at 14, $06FE00 at 15), as a Lunar Magic-saved level of 298 rows has them
+  mwl[info + 6] = 0x20; mwl[info + 14] = 0x52; mwl[info + 15] = 0x9a;
+  const e = decodeSecondaryHeader(mwlSections(mwl).secondary);
+  const t = spotTile(mainSpot(e));
+  check(e.entranceTile === 1 && e.entranceYHi === 0x12 && e.cameraRelative === 1 && e.cameraOffsetHi === 1 && e.bgHeight === 26 && t.y === (0x12 << 4 | e.entranceY),
+    `.mwl: Lunar Magic's entrance at a tile (Y ${t.y}), the camera relative to Mario, the BG 27 rows`);
+  mwl[info + 6] = 0xff; mwl[info + 14] = 0xff; mwl[info + 15] = 0xff;
+  const f = decodeSecondaryHeader(mwlSections(mwl).secondary);
+  check(!f.entranceTile && !f.cameraRelative && !f.bgHeight, '.mwl from a ROM without Lunar Magic\'s tables ($FF): the game\'s entrance');
+}
+
+// entrances: Lunar Magic's tile positions (Mario's pixel: screen * 256 + X * 16, Y * 16; vertical levels
+// swap the axes) and where a dragged marker lands; the camera's rows above Mario in its 5-bit offset
+{
+  const p = { screen: 2, ex: 5, ey: 4, tile: 1, exHi: 1, eyHi: 3 }; // tile (13, 52)
+  const h = entrancePos(rom, p, false), v = entrancePos(rom, p, true);
+  check(h.x === 0x2d0 && h.y === 0x340 && v.x === 0xd0 && v.y === 0x540, `tile entrance: ${h.x.toString(16)},${h.y.toString(16)} (vertical ${v.x.toString(16)},${v.y.toString(16)})`);
+  const n = nearestEntrance(rom, 0x2d3, 0x33e, false, 9, 59);
+  check(n.tile === 1 && n.screen === 2 && spotTile(n).x === 13 && spotTile(n).y === 52, `a marker dropped there lands on tile ${spotTile(n).x},${spotTile(n).y} of screen ${n.screen}`);
+  const low = nearestEntrance(rom, 0x2d3, 0x900, false, 9, 59);
+  check(spotTile(low).y === 58, `below the level: its last row (${spotTile(low).y})`);
+  check(!nearestEntrance(rom, 0x2d3, 0x140, false, 9).tile, 'a level of the game\'s size: the game\'s positions');
+  const c = { cameraRelative: 0, cameraOffsetHi: 0, fgInitY: 0, bgInitY: 0 };
+  const rows = [0, 1, 10, 16, -15].map((r) => { setCameraRows(c, r); return cameraRows(c); });
+  check(rows.join() === '0,1,10,16,-15' && c.cameraRelative === 1, `camera rows above Mario: ${rows.join()}`);
 }
 
 // levels of the game's size: sprite data in the game's format, layer 1 stable (how the game loads them:

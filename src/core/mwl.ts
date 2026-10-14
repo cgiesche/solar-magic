@@ -4,9 +4,10 @@
 //
 // .mwl (Ankouno's "MWL File Format", SMW-Data): at 0x40 (offset, size) pairs of the sections
 //  - 0 level information: 2 bytes the level number, then the secondary header ($05F000, $05F200,
-//    $05F400, $05F600, …), at 16 the level size (Lunar Magic 3.00's TB0MMMMM, LEVEL_SIZE_TABLE; seen in
-//    level files Lunar Magic 3.71 exported), at 17 the layer 2 scroll byte ($06FA00, l2scroll.ts; $FF
-//    from a ROM without Lunar Magic's table: the paired setting);
+//    $05F400, $05F600, then at 6 Lunar Magic's $05DE00), at 14/15 Lunar Magic 3.00's entrance bytes ($06FC00,
+//    $06FE00; levelheight.ts), at 16 the level size (Lunar Magic 3.00's TB0MMMMM, LEVEL_SIZE_TABLE; seen in
+//    level files Lunar Magic 3.71 exported), at 17 the layer 2 scroll byte ($06FA00, l2scroll.ts); $FF in
+//    Lunar Magic's bytes: a ROM without its tables, the game's setting;
 //  - 1 layer 1, 2 layer 2, 3 sprites: 8 header bytes (layer 1: byte 0 bit 0 = custom palette), then the
 //    data as in the ROM; a BG tilemap as layer 2 is 0x800 bytes (bgpack.ts);
 //  - 4 palette: 8 header bytes, 256 colors and the back area color;
@@ -59,9 +60,11 @@ export function mwlSections(d: Uint8Array): MwlSections {
     palette[0] = pal[512]; palette[1] = pal[513] & 0x7f; // the back area color, as a custom palette holds it
   }
   const l1h = d.subarray(u32(d, 0x40 + 8), u32(d, 0x40 + 8) + 1);
+  // a byte of Lunar Magic's tables ($FF: a ROM without them, the game's setting)
+  const lm = (i: number) => (info.length > i && info[i] !== 0xff ? info[i] : 0);
   return {
     number: info[0] | (info[1] << 8),
-    secondary: [...info.subarray(2, 6), info.length > 17 && info[17] !== 0xff ? info[17] : 0, info.length > 16 ? info[16] : 0],
+    secondary: [...info.subarray(2, 6), lm(17), info.length > 16 ? info[16] : 0, lm(6), lm(14), lm(15)],
     layer1: l1,
     customPalette: (l1h[0] & 1) !== 0,
     layer2: l2 && l2.length ? l2 : null,

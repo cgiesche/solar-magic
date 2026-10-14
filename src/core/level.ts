@@ -574,25 +574,70 @@ export function writeSecondaryEntrance(rom: Rom, i: number, e: SecondaryEntrance
   rom.w8(SEC_ENT[5] + i, (e.cameraRelative << 7) | (e.lmRaw & 0x7f));
 }
 
-// ---- entrance positions (tables at $05D730/$05D740: Y, $05D750/$05D758: X; see $05D951) ----
-// The screen number replaces the high byte of the scroll axis: X in horizontal, Y in vertical levels.
-// Result is Mario's pixel position before the entrance action (pipe/water offsets) is applied.
-export function entrancePos(rom: Rom, screen: number, ex: number, ey: number, vertical: boolean): { x: number; y: number } {
-  const xt = rom.r8(0x05d750 + (ex & 7)) | (rom.r8(0x05d758 + (ex & 7)) << 8);
-  const yt = rom.r8(0x05d730 + (ey & 15)) | (rom.r8(0x05d740 + (ey & 15)) << 8);
-  return vertical ? { x: xt, y: ((screen & 0x1f) << 8) | (yt & 0xff) } : { x: ((screen & 0x1f) << 8) | (xt & 0xff), y: yt };
+// ---- entrance positions ----
+// The game's: tables at $05D730/$05D740 (Y), $05D750/$05D758 (X), see $05D951; the screen number replaces
+// the high byte of the scroll axis. Lunar Magic 3.00's (tile, levelheight.ts): tile X (0-31) and Y (0-1023)
+// of the screen, X/Y swapped in vertical levels. Either is Mario's pixel position before the entrance action
+// (pipe/water offsets) is applied.
+export interface EntranceSpot { screen: number; ex: number; ey: number; tile: number; exHi: number; eyHi: number }
+export const mainSpot = (s: SecondaryHeader, screen = s.entranceScreen): EntranceSpot =>
+  ({ screen, ex: s.entranceX, ey: s.entranceY, tile: s.entranceTile, exHi: s.entranceXHi, eyHi: s.entranceYHi });
+export const secondarySpot = (e: SecondaryEntrance): EntranceSpot =>
+  ({ screen: e.screen, ex: e.entranceX, ey: e.entranceY, tile: e.entranceTile, exHi: e.entranceXHi, eyHi: e.entranceYHi });
+export const sameSpot = (a: EntranceSpot, b: EntranceSpot) => a.screen === b.screen && a.ex === b.ex && a.ey === b.ey && a.tile === b.tile && a.exHi === b.exHi && a.eyHi === b.eyHi;
+export function setMainSpot(s: SecondaryHeader, p: EntranceSpot): void {
+  s.entranceScreen = p.screen; s.entranceX = p.ex; s.entranceY = p.ey; s.entranceTile = p.tile; s.entranceXHi = p.exHi; s.entranceYHi = p.eyHi;
+}
+export function setSecondarySpot(e: SecondaryEntrance, p: EntranceSpot): void {
+  e.screen = p.screen; e.entranceX = p.ex; e.entranceY = p.ey; e.entranceTile = p.tile; e.entranceXHi = p.exHi; e.entranceYHi = p.eyHi;
+}
+// the tile of a tile entrance (screen-relative along the scroll axis)
+export const spotTile = (p: EntranceSpot) => ({ x: (p.exHi << 3) | p.ex, y: (p.eyHi << 4) | p.ey });
+export function entrancePos(rom: Rom, p: EntranceSpot, vertical: boolean): { x: number; y: number } {
+  const s = (p.screen & 0x1f) << 8;
+  if (p.tile) {
+    const t = spotTile(p);
+    return vertical ? { x: t.x * 16, y: s + t.y * 16 } : { x: s + t.x * 16, y: t.y * 16 };
+  }
+  const xt = rom.r8(0x05d750 + (p.ex & 7)) | (rom.r8(0x05d758 + (p.ex & 7)) << 8);
+  const yt = rom.r8(0x05d730 + (p.ey & 15)) | (rom.r8(0x05d740 + (p.ey & 15)) << 8);
+  return vertical ? { x: xt, y: s | (yt & 0xff) } : { x: s | (xt & 0xff), y: yt };
 }
 
-// entrance settings whose position is closest to pixel (px, py)
-export function nearestEntrance(rom: Rom, px: number, py: number, vertical: boolean, maxScreen: number): { screen: number; ex: number; ey: number } {
+// the entrance closest to pixel (px, py): the game's table positions, or with `rows` (a level with a size,
+// where the tables don't reach) the tile there
+export function nearestEntrance(rom: Rom, px: number, py: number, vertical: boolean, maxScreen: number, rows = 0): EntranceSpot {
   const screen = Math.max(0, Math.min(maxScreen, Math.floor((vertical ? py : px) / 256)));
-  let best = { screen, ex: 0, ey: 0 }, bestD = Infinity;
+  if (rows) {
+    const x = Math.max(0, Math.min(31, Math.round((px - (vertical ? 0 : screen * 256)) / 16)));
+    const y = Math.max(0, Math.min(vertical ? 15 : rows - 1, Math.round((py - (vertical ? screen * 256 : 0)) / 16)));
+    return { screen, ex: x & 7, ey: y & 15, tile: 1, exHi: x >> 3, eyHi: y >> 4 };
+  }
+  let best: EntranceSpot = { screen, ex: 0, ey: 0, tile: 0, exHi: 0, eyHi: 0 }, bestD = Infinity;
   for (let ex = 0; ex < 8; ex++) for (let ey = 0; ey < 16; ey++) {
-    const p = entrancePos(rom, screen, ex, ey, vertical);
+    const spot = { screen, ex, ey, tile: 0, exHi: 0, eyHi: 0 };
+    const p = entrancePos(rom, spot, vertical);
     const d = (p.x - px) ** 2 + (p.y - py) ** 2;
-    if (d < bestD) { bestD = d; best = { screen, ex, ey }; }
+    if (d < bestD) { bestD = d; best = spot; }
   }
   return best;
+}
+
+// Lunar Magic's camera relative to Mario: it starts `rows` above him (the 5-bit offset is fgInitY, bgInitY and
+// bit 4; levelheight.ts); the main entrance's BG then shows its bottom at the level's (a BG of 27 rows)
+export interface CameraStart { cameraRelative: number; cameraOffsetHi: number; fgInitY: number; bgInitY: number }
+export const cameraRows = (c: CameraStart) => -((((c.cameraOffsetHi << 4) | (c.fgInitY << 2) | c.bgInitY) << 27) >> 27);
+export function setCameraRows(c: CameraStart, rows: number): void {
+  const v = -rows & 31;
+  c.cameraRelative = 1; c.cameraOffsetHi = v >> 4; c.fgInitY = (v >> 2) & 3; c.bgInitY = v & 3;
+}
+export const CAMERA_ROWS = 10; // the game's camera at the bottom has Mario standing on the ground 10 rows below its top
+// the camera relative to Mario (CAMERA_ROWS above him) unless it already is, as a tile entrance in a level
+// with a size needs; a main entrance's BG then 27 rows high unless it has a height
+export function cameraAtMario(c: CameraStart & { bgHeight?: number; bgRelative?: number }): void {
+  if (c.cameraRelative) return;
+  setCameraRows(c, CAMERA_ROWS);
+  if (c.bgHeight === 0 && !c.bgRelative) c.bgHeight = 26;
 }
 
 // ---- screen operations ----

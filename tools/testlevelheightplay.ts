@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import {
-  type Level, loadLevel, cloneLevel, maxScreens, entrancePos, levelRows, readSecondaryEntrance, writeSecondaryEntrance,
+  type Level, loadLevel, cloneLevel, maxScreens, entrancePos, mainSpot, levelRows, readSecondaryEntrance, writeSecondaryEntrance,
 } from '../src/core/level.ts';
 import { saveLevel } from '../src/core/save.ts';
 import { RAM, SPR, SPRITE_SLOTS, get16, marioX, marioY, cameraX, cameraY, spriteX, spriteY } from '../src/core/ram.ts';
@@ -28,7 +28,7 @@ function moved(game: Level, size: number, dy: number): Level {
   lv.secondary = { ...lv.secondary, levelSize: size };
   lv.objects = lv.objects.map((o) => ({ ...o, y: o.y + dy }));
   lv.sprites = lv.sprites.map((o) => ({ ...o, y: o.y + dy }));
-  const s = game.secondary, p = entrancePos(base, s.entranceScreen, s.entranceX, s.entranceY, false);
+  const s = game.secondary, p = entrancePos(base, mainSpot(s), false);
   const ty = (p.y >> 4) + dy, tx = (p.x & 0xff) >> 4, v = ((0xc0 - p.y) >> 4) & 31;
   lv.secondary = {
     ...lv.secondary, entranceTile: 1, entranceX: tx & 7, entranceXHi: tx >> 3, entranceY: ty & 15, entranceYHi: ty >> 4,

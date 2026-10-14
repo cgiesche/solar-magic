@@ -4,7 +4,8 @@ import type { App } from './app.ts';
 import { h, modal, clear, hexInput, select, toast, choose, emptyState } from './dom.ts';
 import { downloadBytes, pickFile } from './platform.ts';
 import { isBlank } from '../core/exitgraph.ts';
-import { readSecondaryEntrance, type SecondaryEntrance, loadLevel, cloneLevel, insertScreen, deleteScreen, clearLevel, spriteId } from '../core/level.ts';
+import { readSecondaryEntrance, type SecondaryEntrance, loadLevel, cloneLevel, insertScreen, deleteScreen, clearLevel, spriteId, mainSpot, secondarySpot, setSecondarySpot, spotTile } from '../core/level.ts';
+import { cameraOptions, cameraValue, setCamera } from './entrancefields.ts';
 import { exportLevelFile, importLevelFile, LEVEL_FILE_EXT } from '../core/levelfile.ts';
 import { ENTRANCE_ACTIONS, hex, objectName } from '../core/names.ts';
 import { saveLevel } from '../core/save.ts';
@@ -51,11 +52,19 @@ export function openEntrancesDialog(app: App): void {
       blank ? h('div', { class: 'hint' }, 'Free: no exit uses it.') : h('div', null, 'Leads to ', h('b', null, `level ${hex(to, 3)}`), ' ', h('span', { class: 'hint' }, g.name(to))),
       h('div', { class: 'prop' }, h('label', null, 'Target level (low digits)'), hexInput(e.destLevel, 2, (v) => set('Target level', (x) => (x.destLevel = v)))),
       h('div', { class: 'prop' }, h('label', null, 'Screen'), hexInput(e.screen, 2, (v) => set('Screen', (x) => (x.screen = v)), 0x1f)),
-      h('div', { class: 'prop' }, h('label', null, 'X position'), select(range(8), e.entranceX, (v) => set('X', (x) => (x.entranceX = v)))),
-      h('div', { class: 'prop' }, h('label', null, 'Y position'), select(range(16), e.entranceY, (v) => set('Y', (x) => (x.entranceY = v)))),
+      ...(e.entranceTile ? [
+        h('div', { class: 'prop' }, h('label', null, 'Tile X'), hexInput(spotTile(secondarySpot(e)).x, 2, (v) => set('X', (x) => { x.entranceX = v & 7; x.entranceXHi = v >> 3; }), 0x1f)),
+        h('div', { class: 'prop' }, h('label', null, 'Tile Y'), hexInput(spotTile(secondarySpot(e)).y, 3, (v) => set('Y', (x) => { x.entranceY = v & 15; x.entranceYHi = v >> 4; }), 0x3ff)),
+      ] : [
+        h('div', { class: 'prop' }, h('label', null, 'X position'), select(range(8), e.entranceX, (v) => set('X', (x) => (x.entranceX = v)))),
+        h('div', { class: 'prop' }, h('label', null, 'Y position'), select(range(16), e.entranceY, (v) => set('Y', (x) => (x.entranceY = v)))),
+      ]),
       h('div', { class: 'prop' }, h('label', null, 'Action'), select(ENTRANCE_ACTIONS.map((a, i) => [i, `${i} – ${a}`] as [number, string]), e.action, (v) => set('Action', (x) => (x.action = v)))),
-      h('div', { class: 'prop' }, h('label', null, 'FG start Y'), select(range(4), e.fgInitY, (v) => set('FG start Y', (x) => (x.fgInitY = v)))),
-      h('div', { class: 'prop' }, h('label', null, 'BG start Y'), select(range(4), e.bgInitY, (v) => set('BG start Y', (x) => (x.bgInitY = v)))),
+      h('div', { class: 'prop' }, h('label', null, 'Camera start'), select(cameraOptions(cameraValue(e)), cameraValue(e), (v) => set('Camera start', (x) => setCamera(x, v)))),
+      ...(e.cameraRelative ? [] : [
+        h('div', { class: 'prop' }, h('label', null, 'FG start Y'), select(range(4), e.fgInitY, (v) => set('FG start Y', (x) => (x.fgInitY = v)))),
+        h('div', { class: 'prop' }, h('label', null, 'BG start Y'), select(range(4), e.bgInitY, (v) => set('BG start Y', (x) => (x.bgInitY = v)))),
+      ]),
       h('div', { class: 'hint' }, users.length ? `Used by: ${users.map((u) => `${hex(u.from, 3)} (screen ${hex(u.screen, 2)})`).join(', ')}` : 'No exit uses this entrance.'),
       h('div', { class: 'row' },
         blank ? '' : h('button', { onclick: () => { dlg.close(true); openTarget(to); } }, `Open level ${hex(to, 3)}`),
@@ -75,7 +84,8 @@ export function openEntrancesDialog(app: App): void {
     if (idx === null) { toast('No free secondary entrance left.', 'error'); return; }
     const s = app.level.secondary;
     app.editSecondaryEntrance(idx, `Secondary entrance ${hex(idx, 3)} created`, (x) => {
-      x.destLevel = app.level.number & 0xff; x.screen = s.entranceScreen; x.entranceX = s.entranceX; x.entranceY = s.entranceY; x.action = s.entranceAction;
+      x.destLevel = app.level.number & 0xff; setSecondarySpot(x, mainSpot(s)); x.action = s.entranceAction;
+      x.cameraRelative = s.cameraRelative; x.cameraOffsetHi = s.cameraOffsetHi; x.fgInitY = s.fgInitY; x.bgInitY = s.bgInitY;
     });
     sel = idx;
     buildList();

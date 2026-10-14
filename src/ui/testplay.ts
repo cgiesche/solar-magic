@@ -6,7 +6,7 @@ import { h, modal } from './dom.ts';
 import { LevelEmulator } from '../core/levelemu.ts';
 import { PPU } from '../core/ppu.ts';
 import { hex } from '../core/names.ts';
-import { levelTranslevel, nearestEntrance, encodeSecondaryHeader } from '../core/level.ts';
+import { levelTranslevel, nearestEntrance, encodeSecondaryHeader, setMainSpot, cameraAtMario } from '../core/level.ts';
 import { Apu, apuReady, loadApu } from '../core/apu.ts';
 import { AudioOut } from './audio.ts';
 import { GM, RAM, set16 } from '../core/ram.ts';
@@ -75,8 +75,9 @@ function start(app: App, at: { tx: number; ty: number } | undefined, audio: Audi
   const start = at && { x: at.tx * 16, y: at.ty * 16 - 16 };
   if (start) {
     const sec = { ...lv.secondary };
-    const p = nearestEntrance(app.rom, start.x, start.y, (sec.verticalPositioning & 1) !== 0, lv.header.screens - 1);
-    sec.entranceScreen = p.screen; sec.entranceX = p.ex; sec.entranceY = p.ey;
+    const p = nearestEntrance(app.rom, start.x, start.y, (sec.verticalPositioning & 1) !== 0, lv.header.screens - 1, app.entranceRows());
+    setMainSpot(sec, p);
+    if (p.tile) cameraAtMario(sec);
     sec.entranceAction = 0;
     ov.secondaryHeader = encodeSecondaryHeader(sec);
   }
