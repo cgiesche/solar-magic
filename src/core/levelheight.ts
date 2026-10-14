@@ -30,6 +30,10 @@ lorom
 !Sub = !Size+2         ; subscreen of the objects that follow (screen jump)
 !Table = $${hx(LEVEL_SIZE_TABLE)}
 !MaxHi = !Size+3       ; playing: Y high bytes inside the level (the game's 2)
+!MaxY = !Size+4        ; changing a tile: positions inside the level (16-bit, the game's $200)
+!RowMask = !Size+6     ; and a position's row bits (the game's $01F0)
+!NewSpr = !Size+8      ; the level's sprite data is in Lunar Magic's new format (header bit 5)
+!SprSub = !Size+9      ; loading sprites: the subscreen of the sprites that follow, * 2 (a Y high byte)
 !Height = $${hx(LEVEL_HEIGHT)}       ; playing: the level's height in pixels, a screen's bytes (Lunar Magic's)
 !Ptr = $${hx(SCREEN_PTRS[0])}          ; per screen: 3-byte pointers to the low bytes (Lunar Magic's place)
 !PtrHi = !Ptr+$60      ; to the high bytes
@@ -52,6 +56,14 @@ while !m < 32
   !m #= !m+1
 endwhile
 
+; where the game's checks below branch to when a position is outside the level
+org $00BEBB : Out00BEBB:
+org $0292C9 : Out0292C9:
+org $0295AD : Out0295AD:
+org $02A84B : Out02A84B:
+org $02BA47 : Out02BA47:
+org $02D148 : Out02D148:
+
 ; finding the block at a position: layer 1 of a horizontal level, below the game's 27 rows too
 org $00F478 : CMP.w !Height          ; Mario: CMP #$01B0
 org $00F492 : ADC.l !Lo,x
@@ -61,21 +73,43 @@ org $019500 : LDA.l !Lo,x
 org $019512 : LDA.l !Hi,x
 org $01D97B : ADC.l !Lo,x            ; line-guided sprites
 org $01D981 : LDA.l !Hi,x
-org $0292D9 : JSL YHi02 : BCS $0292C9 ; bounce blocks (CMP #$02 : BCS : STA $02)
+org $0292D9 : JSL YHi02 : BCS Out0292C9 ; bounce blocks (CMP #$02 : BCS : STA $02)
 org $0292F9 : LDA.l !Lo,x
 org $02930A : LDA.l !Hi,x
-org $0295C0 : JSL YHi02 : BCS $0295AD ; cape
+org $0295C0 : JSL YHi02 : BCS Out0295AD ; cape
 org $0295EC : LDA.l !Lo,x
 org $0295FD : LDA.l !Hi,x
 org $02A6BA : LDA.l !Lo,x            ; extended sprites (no Y limit)
 org $02A6CB : LDA.l !Hi,x
-org $02BA50 : JSL YHi0D : BCS $02BA47 ; wall-following sprites
+org $02BA50 : JSL YHi0D : BCS Out02BA47 ; wall-following sprites
 org $02BA71 : LDA.l !Lo,x
 org $02BA82 : LDA.l !Hi,x
-org $02D15A : JSL YHi02 : BCS $02D148 ; sprites that check the block in front of them
+org $02D15A : JSL YHi02 : BCS Out02D148 ; sprites that check the block in front of them
 org $02D18C : LDA.l !Lo,x
 org $02D19D : LDA.l !Hi,x
 org $03D793 : ADC.w !Height          ; a screen further on
+
+; changing a tile ($00BEB0) below the game's 32 rows
+org $00BEEC : JSL TileBound : BCS Out00BEBB : NOP #2   ; CPY #$0200 : BCS : LDA $1933
+org $00C079 : JSL TileRow : NOP          ; LDA $98 : AND #$01F0 (A 16)
+org $00C0C6 : JSL TileRow : NOP
+org $00C1B1 : JSL TileRow : NOP
+org $00C3D3 : JSL TileRow : NOP
+
+; loading sprites from the level's data: Lunar Magic's new format ($FF V: the sprites that follow are in
+; subscreen V, $FF $FE: the end, $FF $FF: a sprite starting with $FF); a sprite's Y high byte gets the subscreen
+org $02A82E : JSL SprEntry : BEQ Out02A84B   ; LDA [$CE],y : CMP #$FF : BEQ (the list's end)
+org $02A968 : JSL SprY                     ; LDA $00 : STA $E4,x (after the Y high byte $14D4,x)
+org $02ABD0 : JSL ShooterY : NOP           ; AND #$01 : STA $1793,x
+org $02AB54 : JSL GroupY : NOP             ; AND #$01 : STA $0FB8,y
+org $02AA5F : JSL ClusterY : NOP           ; AND #$01 : STA $1E2A,x
+org $02AF3D : JSL GenY                     ; AND #$01 : STA $09
+org $02AFA7 : JSL GenY
+
+; a sprite below the level is erased: the game's copies of the off-screen check test Y + $50 >= $200
+org $01AC3E : JSL BelowLevel : NOP #8      ; LDA $D8,x : CLC : ADC #$50 : LDA $14D4,x : ADC #$00 : CMP #$02 (: BPL)
+org $02D038 : JSL BelowLevel : NOP #8
+org $03B86A : JSL BelowLevel : NOP #8
 
 ; the camera's lowest position in a horizontal level: the height less $F0 (the game's $C0)
 org $00F70D   ; LDA #$00C0 : JSR $F7F4 (A 16)
@@ -110,6 +144,7 @@ freecode
 Setup:
   PHX
   REP #$20 : PHA : SEP #$20   ; the game's high byte of A (the entrance code below takes X from TAX)
+  LDA $1692 : AND #$20 : STA.l !NewSpr
   LDA $1692 : AND #$1F : STA $1692
   LDA #$00 : STA.l !Sub
   REP #$20
@@ -119,6 +154,10 @@ Setup:
   BNE + : LDA #$01B0 : +
   STA !Height
   CLC : ADC #$00FF : XBA : SEP #$20 : STA.l !MaxHi : REP #$20
+  LDA #$0200 : STA.l !MaxY : LDA #$01F0 : STA.l !RowMask
+  LDA !Height : CMP #$0201 : BCC +
+  STA.l !MaxY : LDA #$FFF0 : STA.l !RowMask
++
   JSR Screens
   PLA
   SEP #$20
@@ -150,6 +189,67 @@ YHi02:
   RTL
 YHi0D:
   CMP.l !MaxHi : STA $0D
+  RTL
+
+; Y (16 bit) = the position along the screens' rows: carry set when it is outside the level; then the
+; game's LDA $1933 (A 8)
+TileBound:
+  REP #$20 : TYA : CMP.l !MaxY : SEP #$20
+  LDA.l $7E1933
+  RTL
+; the row bits of Y position $98 (A 16)
+TileRow:
+  LDA $98 : AND.l !RowMask
+  RTL
+
+; the sprite list's entry at Y (A/X/Y 8): A = its first byte (Z clear), or Z set at the end. Lunar Magic's
+; markers are skipped, a subscreen marker taken; the list's first entry (X 0, Y 1) starts in subscreen 0
+SprEntry:
+  CPY #$01 : BNE .read
+  CPX #$00 : BNE .read
+  LDA #$00 : STA.l !SprSub
+.read
+  LDA [$CE],y : CMP #$FF : BNE .r
+  LDA.l !NewSpr : BEQ .end
+  INY : LDA [$CE],y
+  CMP #$FE : BEQ .end
+  CMP #$FF : BEQ .r                        ; a sprite whose first byte is $FF (A = $FF, Z clear)
+  ASL : STA.l !SprSub
+  INY : BRA .read
+.end
+  LDA #$00
+.r
+  RTL
+
+; sprite X (A 8): A = 0 (N clear) when it is below the level, $80 otherwise (above it too)
+BelowLevel:
+  LDA $14D4,x : XBA : LDA $D8,x
+  REP #$20
+  BMI .no
+  CMP.l $7E0000+!Height : BCS .yes
+.no
+  SEP #$20 : LDA #$80
+  RTL
+.yes
+  SEP #$20 : LDA #$00
+  RTL
+
+; the spawned sprite's Y high byte from its subscreen, then the game's LDA $00 : STA $E4,x
+SprY:
+  LDA.l !SprSub : CLC : ADC $14D4,x : STA $14D4,x
+  LDA $00 : STA $E4,x
+  RTL
+ShooterY:
+  AND #$01 : CLC : ADC.l !SprSub : STA $1793,x
+  RTL
+GroupY:
+  AND #$01 : CLC : ADC.l !SprSub : STA $0FB8,y
+  RTL
+ClusterY:
+  AND #$01 : CLC : ADC.l !SprSub : STA $1E2A,x
+  RTL
+GenY:
+  AND #$01 : CLC : ADC.l !SprSub : STA $09
   RTL
 
 ; A 16, X 8: the camera's lowest Y for the game's vertical scroll ($00F7F4, which ends with RTS)
