@@ -60,12 +60,14 @@ org $${hx(DONE_HOOK)}   ; LDA $0100 : CMP #$22 (after the level load)
 freecode
 Setup:
   PHX
+  REP #$20 : PHA : SEP #$20   ; the game's high byte of A (the entrance code below takes X from TAX)
   LDA $1692 : AND #$1F : STA $1692
   LDA #$00 : STA.l !Sub
   REP #$20
   TYX
   LDA.l !Table,x : AND #$001F : ASL : TAX
   LDA.l Sizes,x : STA.l !Size
+  PLA
   SEP #$20
   PLX
   LDA.w $F200,y : AND #$C0 : CLC : ASL : ROL : ROL : STA $1BE3   ; (data bank $05)
