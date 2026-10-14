@@ -86,7 +86,7 @@ A Lunar Magic level file (`.mwl`) without code is a level import and does not be
 
 An **upload** is what you put in for a package: a single file (`.asm`, an AddmusicK song `.txt`)
 or a `.zip` – a download from SMWCentral as it is, or a whole folder of UberASM Tool, GPS
-or PIXI. After uploading, the editor (`src/core/packages.ts`, `src/core/pkgplan.ts`) detects which **parts** it
+or PIXI. After uploading, the editor (`src/core/packages.ts`, one adapter per part kind in `src/core/pkgparts.ts`) detects which **parts** it
 contains – each file on its own, by its folder, then its content, then its extension, never by which other files are
 in the upload (ADR 0002) – and shows them in a **preview** ("2 sprites, 1 UberASM file, 1 song"), each part with its
 kind. Nothing has been written yet: *Cancel* leaves the ROM unchanged. *Install* applies all parts at once

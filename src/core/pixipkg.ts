@@ -6,7 +6,7 @@
 
 import type { Rom } from './rom.ts';
 import { scanDefines, rewriteDefines, type Upload } from './patchpkg.ts';
-import { FOLDER, MISC_KINDS, numberRange, loadPixiProject, savePixiProject, parseCfg, parseJsonCfg, type PixiEntry, type PixiProject } from './pixi.ts';
+import { FOLDER, MISC_KINDS, numberRange, sharesNumbers, assignSprite, loadPixiProject, savePixiProject, parseCfg, parseJsonCfg, type PixiEntry, type PixiProject } from './pixi.ts';
 import type { ApplyResult } from './patchapply.ts';
 import type { SpriteFolder } from './pixirt.ts';
 
@@ -58,17 +58,19 @@ export function pixiParts(upload: Upload): Omit<PixiPlan, 'links'> {
   return { sprites, routines };
 }
 
-export function planPixiUpload(rom: Rom, upload: Upload): PixiPlan {
+// numbers for the sprites of an upload (those `keep` takes: the sprite parts) and the defines naming them
+export function planPixiUpload(rom: Rom, upload: Upload, keep: (file: string) => boolean = () => true): PixiPlan {
   const proj = loadPixiProject(rom) ?? { files: new Map(), list: [] };
-  const { sprites, routines } = pixiParts(upload);
+  const parts = pixiParts(upload);
+  const sprites = parts.sprites.filter((s) => keep(s.file)), routines = parts.routines;
   // numbers: a sprite file already in the project keeps its number, the others get the next free one
   for (const s of sprites) {
     const dest = destOf(upload, s);
     const have = proj.list.find((e) => e.kind === s.kind && e.file === dest);
     if (have) { s.num = have.num; continue; }
     const [lo, hi] = numberRange(s.kind);
-    const taken = new Set([...proj.list.filter((e) => e.kind === s.kind || (isLevelKind(e.kind) && isLevelKind(s.kind))).map((e) => e.num),
-      ...sprites.filter((o) => o !== s && o.num >= 0 && (o.kind === s.kind || (isLevelKind(o.kind) && isLevelKind(s.kind)))).map((o) => o.num)]);
+    const taken = new Set([...proj.list.filter((e) => sharesNumbers(e.kind, s.kind)).map((e) => e.num),
+      ...sprites.filter((o) => o !== s && o.num >= 0 && sharesNumbers(o.kind, s.kind)).map((o) => o.num)]);
     let n = lo;
     while (taken.has(n) && n < hi) n++;
     s.num = n;
@@ -90,7 +92,6 @@ export function planPixiUpload(rom: Rom, upload: Upload): PixiPlan {
   }
   return { sprites, links, routines };
 }
-const isLevelKind = (k: SpriteFolder) => k === 'sprites' || k === 'shooters' || k === 'generators';
 
 // where a sprite's file goes in the project: below the folder of its type, with the path inside the
 // package's folder for that type (or next to the file) kept
@@ -108,8 +109,8 @@ export function hexNum(n: number): string {
 }
 
 // adds the sprites to the ROM's PIXI project; `others`: files of the package's other parts (not taken
-// along from a sprite's folder)
-export function applyPixiUpload(rom: Rom, upload: Upload, plan: PixiPlan, others: Set<string> = new Set()): ApplyResult {
+// along from a sprite's folder); claim: every project file it writes (pkgreg.ts)
+export function applyPixiUpload(rom: Rom, upload: Upload, plan: PixiPlan, others: Set<string>, claim: (file: string) => void): ApplyResult {
   const proj: PixiProject = loadPixiProject(rom) ?? { files: new Map(), list: [] };
   // define values from the chosen numbers
   const defs = linkedDefines(plan);
@@ -127,12 +128,12 @@ export function applyPixiUpload(rom: Rom, upload: Upload, plan: PixiPlan, others
   for (const s of plan.sprites) {
     const dir = dirOf(s.file);
     const destDir = dirOf(FOLDER[s.kind] + relIn(s.file, s.kind));
-    for (const f of filesOf(s.file)) proj.files.set(destDir + f.slice(dir.length), content(f));
+    for (const f of filesOf(s.file)) { const to = destDir + f.slice(dir.length); proj.files.set(to, content(f)); claim(to); }
     const entry: PixiEntry = { kind: s.kind, num: s.num, file: FOLDER[s.kind] + relIn(s.file, s.kind) };
-    proj.list = proj.list.filter((e) => !(e.num === s.num && (e.kind === s.kind || (isLevelKind(e.kind) && isLevelKind(s.kind)))) && !(e.kind === s.kind && e.file === entry.file));
-    proj.list.push(entry);
+    proj.list = proj.list.filter((e) => !(e.kind === s.kind && e.file === entry.file)); // its file under one number
+    assignSprite(proj, entry);
   }
-  for (const f of plan.routines) proj.files.set(f.slice(f.search(/routines\//i)), content(f));
+  for (const f of plan.routines) { const to = f.slice(f.search(/routines\//i)); proj.files.set(to, content(f)); claim(to); }
   return savePixiProject(rom, proj);
 }
 

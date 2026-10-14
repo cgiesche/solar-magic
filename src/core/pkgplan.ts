@@ -13,7 +13,7 @@ import type { Rom } from './rom.ts';
 import type { Upload } from './patchpkg.ts';
 import type { ApplyResult } from './patchapply.ts';
 import { rewriteDefines } from './patchpkg.ts';
-import { parseBlockList, loadBlockProject, saveBlockProject, type BlockProject } from './blocks.ts';
+import { parseBlockList, loadBlockProject, saveBlockProject, assignBlock, type BlockProject } from './blocks.ts';
 import { parseMap16File, map16Targets, exgfxName, importGfxFile, type Map16File } from './map16file.ts';
 import { EXT_FIRST, EXT_TILES, DEFAULT_ACTS, extTileWords, actsLike, setExtTileWords, setActsLike } from './map16ext.ts';
 import { gfxEntry, VANILLA_GFX, levelGfx, setLevelGfx, levelExtGfx, setLevelExtGfx, GFX_SLOT_NAMES, EXT_GFX_SLOT_NAMES, customPalette, setCustomPalette } from './patches.ts';
@@ -44,17 +44,18 @@ export function actsComment(text: string): number | undefined {
 }
 
 const GPS_LINE = /^[0-9a-f]{3,4}(:[0-9a-f]{3})?\s+\S+\.asm/im;
-export const isGpsList = (path: string, text: string) => /(^|\/)list\.txt$/i.test(path) && GPS_LINE.test(text);
+// (not an UberASM Tool list, whose level lines look alike)
+export const isGpsList = (path: string, text: string) => /(^|\/)list\.txt$/i.test(path) && GPS_LINE.test(text) && !/^\s*(level|gamemode|overworld)\s*:/im.test(text);
 
 // a block of the upload; tile (and acts) when a GPS list.txt names it
 export interface DetectedBlock { file: string; tile?: number; acts?: number }
 
 // the blocks of an upload: those a GPS list.txt names, then every other file that is a block by its
-// content; `skip`: files of other parts
-export function detectBlocks(files: Map<string, Uint8Array>, skip: Set<string>): { blocks: DetectedBlock[]; list: string | null; missing: string[] } {
+// content
+export function detectBlocks(files: Map<string, Uint8Array>): { blocks: DetectedBlock[]; list: string | null; missing: string[] } {
   const blocks: DetectedBlock[] = [];
   const missing: string[] = [];
-  const list = [...files.keys()].find((p) => !skip.has(p) && isGpsList(p, dec.decode(files.get(p)!))) ?? null;
+  const list = [...files.keys()].find((p) => isGpsList(p, dec.decode(files.get(p)!))) ?? null;
   if (list) {
     const dir = dirOf(list);
     const find = (name: string) => {
@@ -70,7 +71,7 @@ export function detectBlocks(files: Map<string, Uint8Array>, skip: Set<string>):
     }
   }
   for (const [f, c] of [...files].sort(([a], [b]) => a.localeCompare(b))) {
-    if (!/\.asm$/i.test(f) || skip.has(f) || blocks.some((b) => b.file === f) || /(^|\/)routines\//i.test(f)) continue;
+    if (!/\.asm$/i.test(f) || blocks.some((b) => b.file === f) || /(^|\/)routines\//i.test(f)) continue;
     const text = dec.decode(c);
     if (isBlockText(text)) blocks.push({ file: f, acts: actsComment(text) });
   }
@@ -343,11 +344,9 @@ export function applyBlocks(rom: Rom, upload: Upload, blocks: PlannedBlock[], de
     const d = defines.get(f);
     return d ? enc.encode(rewriteDefines(dec.decode(upload.files.get(f)!), d).text) : upload.files.get(f)!;
   };
-  const tiles = new Set(blocks.flatMap((b) => b.tiles));
-  proj.list = proj.list.filter((b) => !tiles.has(b.tile));
   for (const b of blocks) {
     for (const [f, c] of blockFiles(upload, b.file, content)) { proj.files.set(f, c); claim(f); }
-    for (const t of b.tiles) proj.list.push({ tile: t, file: 'blocks/' + base(b.file), acts: b.acts });
+    for (const t of b.tiles) assignBlock(proj, { tile: t, file: 'blocks/' + base(b.file), acts: b.acts });
   }
   for (const r of routines) { const f = r.slice(r.search(/routines\//i)); proj.files.set(f, upload.files.get(r)!); claim(f); }
   const r = saveBlockProject(rom, proj);

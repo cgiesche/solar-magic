@@ -47,14 +47,14 @@ let a = track('A', () => {
   p.list.level.set(0x105, [{ file: 'level/a.asm', bytes: [] }]);
   ok(saveProject(rom, p));
 }, enc.encode('archive of A'));
-check(a.patches.length === 1 && a.uber.files.length === 2 && a.uber.calls.length === 1 && a.uber.calls[0][1] === 0x105, 'A: patch, UberASM files and call recorded');
+check(a.patches.length === 1 && a.uberasm.files.length === 2 && a.uberasm.calls.length === 1 && a.uberasm.calls[0][1] === 0x105, 'A: patch, UberASM files and call recorded');
 a = track('A', () => {
   const p: BlockProject = loadBlockProject(rom) ?? { files: new Map(), list: [] };
   p.files.set('blocks/a.asm', enc.encode(block(1)));
   p.list.push({ tile: 0x2a0, file: 'blocks/a.asm' });
   ok(saveBlockProject(rom, p));
 }, undefined, a);
-check(a.blocks.tiles.join() === '672' && a.patches.length === 1 && a.uber.files.length === 2, 'a part added later goes into the same record');
+check(a.block.tiles.join() === '672' && a.patches.length === 1 && a.uberasm.files.length === 2, 'a part added later goes into the same record');
 check(new TextDecoder().decode(packageArchive(rom, listPackages(rom)[0])!) === 'archive of A', 'package files kept in the ROM');
 
 // package B: shares library/shared.asm, has a block and an ExGFX file
@@ -72,7 +72,7 @@ const bId = track('B', () => {
   importGfxFile(rom, 0x80, gfx);
 }).id;
 const b = listPackages(rom).find((r) => r.id === bId)!;
-check(b.uber.files.includes('library/shared.asm') && b.gfx.join() === '128' && b.blocks.tiles.join() === '673' && !b.patches.length, 'B: changed shared file, block and ExGFX recorded');
+check(b.uberasm.files.includes('library/shared.asm') && b.gfx.join() === '128' && b.block.tiles.join() === '673' && !b.patches.length, 'B: changed shared file, block and ExGFX recorded');
 
 // every section of the record (its adapter): nothing is nothing, an unchanged ROM brings nothing
 for (const k of SECTION_KEYS) {
@@ -121,8 +121,8 @@ check(listPatches(rom).every((p) => p.kind === 'vram' || p.kind === 'exanim'), '
   check(none.result.ok && !none.pkg && same(before) && !listPackages(rom).length, 'nothing came in: no record');
 
   const c = track('C', () => addUber('library/common.asm', 'common:\n  RTL\n'));
-  const d = track('D', (claim) => { addUber('library/common.asm', 'common:\n  RTL\n'); claim('uber', 'library/common.asm'); addUber('level/d.asm', 'main:\n  RTL\n'); });
-  check(c.uber.files.join() === 'library/common.asm' && d.uber.files.includes('library/common.asm') && d.uber.files.includes('level/d.asm'), 'a claimed file that was there already belongs to the package');
+  const d = track('D', (claim) => { addUber('library/common.asm', 'common:\n  RTL\n'); claim('uberasm', 'library/common.asm'); addUber('level/d.asm', 'main:\n  RTL\n'); });
+  check(c.uberasm.files.join() === 'library/common.asm' && d.uberasm.files.includes('library/common.asm') && d.uberasm.files.includes('level/d.asm'), 'a claimed file that was there already belongs to the package');
   await uninstallPackage(rom, c.id, blank);
   check(loadProject(rom)?.files.has('library/common.asm') === true, '… and stays when the other package is removed');
   await uninstallPackage(rom, d.id, blank);

@@ -48,19 +48,19 @@ const block = 'db $42\nJMP Code : JMP Code : JMP Code : JMP Code : JMP Code : JM
 // a package bringing (at least) the section
 const samples: Record<SectionKey, () => Promise<Package | null> | Package | null> = {
   patches: () => record('patch', () => ok(applyPatch(rom, { files: new Map([['p.asm', 'org $00A1DA\n  db $EA\n']]), main: 'p.asm', name: 'P' }))),
-  uber: () => record('uber', () => {
+  uberasm: () => record('uberasm', () => {
     const p = loadProject(rom) ?? emptyProject();
     p.files.set('level/u.asm', enc.encode('main:\n  RTL\n'));
     p.list.level.set(0x105, [{ file: 'level/u.asm', bytes: [] }]);
     return ok(saveProject(rom, p));
   }),
-  blocks: () => record('blocks', () => {
+  block: () => record('block', () => {
     const p: BlockProject = loadBlockProject(rom) ?? { files: new Map(), list: [] };
     p.files.set('blocks/b.asm', enc.encode(block));
     p.list.push({ tile: 0x2a0, file: 'blocks/b.asm' });
     return ok(saveBlockProject(rom, p));
   }),
-  pixi: () => install('BrutalBill.zip', fixture('BrutalBill.zip')),
+  sprite: () => install('BrutalBill.zip', fixture('BrutalBill.zip')),
   gfx: () => record('gfx', () => { importGfxFile(rom, 0x90, new Uint8Array(0x1000).fill(0x33)); return { ok: true }; }),
   music: () => install('Song.zip', testSongZip()),
   map16: () => record('map16', () => { setExtTileWords(rom, EXT_FIRST + 0x40, [1, 2, 3, 4]); return { ok: true }; }),

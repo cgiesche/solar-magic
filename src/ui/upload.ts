@@ -22,9 +22,10 @@ export function openUploadPreview(app: App, p: ReadyPreview | ManualPreview, don
   if (p.status === 'manual') { openManual(app, p, done); return; }
   const lvl = hex(app.level.number, 3);
   const has = (k: PartKind) => p.parts.some((x) => x.kind === k);
-  let main = p.patch?.main ?? '';
+  const patch = p.parts.find((x) => x.kind === 'patch');
+  let main = patch?.file ?? '';
   const settingsBox = h('div');
-  let form = p.patch ? settingsForm(p.patch.upload, main, {}) : null;
+  let form = patch ? settingsForm(p.upload!, main, {}) : null;
   if (form) settingsBox.appendChild(form.el);
   const log = h('div');
   const src = map16Source(app.rom, app.render);
@@ -41,15 +42,15 @@ export function openUploadPreview(app: App, p: ReadyPreview | ManualPreview, don
     docsButton(p.name, p.files),
     p.unclaimed.length ? h('p', { class: 'hint' }, `Not installed: ${p.unclaimed.map((f) => f + (p.docs.includes(f) ? ' (manual)' : '')).join(', ')}.`) : '',
     defaults.length ? h('p', { class: 'hint' }, `Installing applies the whole package: ${defaults.join(', ')}. Assignments can be changed afterwards in the tabs.`) : '',
-    p.patch && p.patch.candidates.length > 1 ? h('div', { class: 'prop' }, h('label', null, 'Main file'),
-      h('select', { onchange: (e: Event) => { main = (e.target as HTMLSelectElement).value; form = settingsForm(p.patch!.upload, main, {}); clear(settingsBox).appendChild(form.el); } },
-        p.patch.candidates.map((f) => h('option', { value: f, selected: f === main }, f))),
+    patch && patch.candidates.length > 1 ? h('div', { class: 'prop' }, h('label', null, 'Main file'),
+      h('select', { onchange: (e: Event) => { main = (e.target as HTMLSelectElement).value; form = settingsForm(p.upload!, main, {}); clear(settingsBox).appendChild(form.el); } },
+        patch.candidates.map((f) => h('option', { value: f, selected: f === main }, f))),
       h('span', { class: 'hint' }, 'The upload has several .asm files – choose the patch file (see its readme).')) : '',
     place?.el ?? '',
-    p.patch ? [h('h3', null, 'Patch settings'), settingsBox] : '',
+    patch ? [h('h3', null, 'Patch settings'), settingsBox] : '',
     log,
   );
-  installDialog(app, p, body, log, has('music'), () => ({ patch: p.patch ? { main, values: form!.read() } : undefined, ...place?.read() }), done);
+  installDialog(app, p, body, log, has('music'), () => ({ patch: patch ? { main, values: form!.read() } : undefined, ...place?.read() }), done);
 }
 
 // a package to assign by hand: the assignment, prefilled with the suggestion

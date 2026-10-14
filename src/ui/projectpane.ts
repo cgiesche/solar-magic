@@ -11,6 +11,7 @@ import { listPackages, type Package } from '../core/pkgreg.ts';
 import type { ApplyResult } from '../core/patchapply.ts';
 import { definesButton, editButton } from './defineedit.ts';
 import { manualsRow } from './docview.ts';
+import type { ToolKind } from '../core/parts.ts';
 
 export interface Project { files: Map<string, Uint8Array> }
 
@@ -18,7 +19,7 @@ export interface PaneSpec<P extends Project> {
   title: string; // tab label, also in messages
   intro: string; // one line at the top
   format: string; // the file format, collapsed
-  tool: 'uber' | 'blocks' | 'pixi'; // the field of a package record listing this project's files
+  tool: ToolKind; // the part kind of the project's content (its field in a package record)
   load(): P | null; // the ROM's project, null: none installed
   empty(): P;
   save(p: P): ApplyResult;

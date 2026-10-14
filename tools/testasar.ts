@@ -99,7 +99,7 @@ check(diff === 0 && listPatches(rom).length === 0 && rom.scanRats().length === 0
   check(kind('p.asm', 'lorom\norg $00A1DA\nJSL Code\nfreecode\nCode:\nRTL\n')?.parts[0].kind === 'patch', 'detect: patch');
   check(kind('u.asm', '; resource\n!x = 1\nmain:\n  LDA $71\n  RTL\n')?.parts[0].kind === 'uberasm', 'detect: UberASM resource');
   const b = kind('b.asm', '; Act like 130\nprint "a block"\ndb $42\nJMP A : JMP A\nA: RTL\n');
-  check(b?.parts[0].kind === 'block' && b.blocks[0].acts === 0x130, 'detect: GPS block with acts like from its description');
+  check(b?.parts[0].kind === 'block' && b.parts[0].found[0].acts === 0x130, 'detect: GPS block with acts like from its description');
   check(kind('s.asm', 'print "INIT ",pc\nRTL\nprint "MAIN ",pc\nRTL\n')?.parts[0].kind === 'sprite', 'detect: PIXI sprite');
 }
 

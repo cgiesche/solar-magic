@@ -14,6 +14,7 @@ import { map16Source } from '../src/core/render.ts';
 import { RomHistory } from '../src/core/romhistory.ts';
 import { inspectUpload, installPackage, removePackage, defaultAssignment, partsSummary, packageManuals, type UploadPreview, type ReadyPreview, type InstallOptions } from '../src/core/packages.ts';
 import { listPackages } from '../src/core/pkgreg.ts';
+import type { ToolKind } from '../src/core/parts.ts';
 import { loadProject, saveProject } from '../src/core/uberproject.ts';
 import { ALL } from '../src/core/uberasm.ts';
 import { loadBlockProject, saveBlockProject } from '../src/core/blocks.ts';
@@ -58,7 +59,7 @@ for (const f of ['ghostbustersghosttrapjavamanhattanBG.zip', 'sonicmaniasszact1.
 // a sample level – a package, each file in its part, though it holds a Lunar Magic level
 const onoff = inspectUpload('On-Off Block.zip', fixture('On-Off Block.zip'));
 check(kinds(onoff) === 'block graphics graphics graphics graphics sprite', `On-Off Blocks: block, sprite and graphics, not a level import (${kinds(onoff)})`);
-check(onoff.status === 'ready' && onoff.unclaimed.join() === 'On-Off Blocks - Readme.txt' && onoff.graphics.mwl === 'SampleLevel.mwl', `On-Off Blocks: only the readme not installed, the .mwl its sample level (${onoff.status === 'ready' ? onoff.unclaimed.join() : ''})`);
+check(onoff.status === 'ready' && onoff.unclaimed.join() === 'On-Off Blocks - Readme.txt' && onoff.sample === 'SampleLevel.mwl', `On-Off Blocks: only the readme not installed, the .mwl its sample level (${onoff.status === 'ready' ? onoff.unclaimed.join() : ''})`);
 
 const patchAsm = 'org $00A1DA\n  db $EA\n';
 const uberAsm = 'load:\n  LDA #$11 : STA $7FB001\n  RTL\n';
@@ -68,7 +69,11 @@ check(kinds(inspectUpload('marker.asm', enc.encode(uberAsm))) === 'uberasm', 'si
 check(kinds(inspectUpload('solid.asm', enc.encode(blockAsm))) === 'block', 'single .asm: a block');
 check(kinds(inspectUpload('Square Test.zip', testSongZip())) === 'music', 'AddmusicK song');
 const two = inspectUpload('two.zip', zip({ 'a.asm': patchAsm, 'b.asm': patchAsm.replace('A1DA', 'A1DB') }));
-check(two.status === 'ready' && two.patch?.candidates.length === 2, 'two patch files: one patch, its main file to choose');
+check(two.status === 'ready' && two.parts[0].kind === 'patch' && two.parts[0].candidates.length === 2, 'two patch files: one patch, its main file to choose');
+
+// two misc sprites in one folder: each its own part (the folder goes with both)
+const misc = 'print "MAIN ",pc\n  RTL\n';
+check(kinds(inspectUpload('Two.zip', zip({ 'cluster/a.asm': misc, 'cluster/b.asm': misc, 'readme.txt': 'x' }))) === 'sprite sprite', 'two sprites in one folder: two parts');
 
 // a boss: sprites, UberASM code and its song – one package of three kinds
 const billFiles = unzipSync(fixture('BrutalBill.zip'));
@@ -116,7 +121,7 @@ const install = async (p: UploadPreview, o: Partial<InstallOptions> = {}) => {
 const mixed = inspectUpload('Mixed.zip', zip({ 'mixed.asm': patchAsm, 'level/marker.asm': uberAsm }));
 check(kinds(mixed) === 'patch uberasm', `patch and UberASM code (${kinds(mixed)})`);
 const r1 = await install(mixed);
-check(r1.ok && listPackages(rom).length === 1 && r1.pkg!.patches.length === 1 && r1.pkg!.uber.calls.length === 1, 'installed as one package with its patch and UberASM call');
+check(r1.ok && listPackages(rom).length === 1 && r1.pkg!.patches.length === 1 && r1.pkg!.uberasm.calls.length === 1, 'installed as one package with its patch and UberASM call');
 {
   const e = new LevelEmulator(rom); e.boot();
   const l5 = e.load(0x105), l6 = e.load(0x106);
@@ -132,6 +137,18 @@ await removePackage(rom, pa.pkg!.id, opts.blank);
 const up = loadProject(rom)!;
 check(!up.files.has('level/a.asm') && up.files.has('library/shared.asm') && up.files.has('level/b.asm'), 'removing A keeps the library file B uses');
 await removePackage(rom, pb.pkg!.id, opts.blank);
+
+// two packages bringing an identical sprite file: removing the first keeps it for the second
+{
+  const sprite = 'print "MAIN ",pc\n  RTL\n';
+  const sa = await install(inspectUpload('SA.zip', zip({ 'cluster/shared.asm': sprite, 'readme.txt': 'A' })));
+  const sb = await install(inspectUpload('SB.zip', zip({ 'cluster/shared.asm': sprite, 'cluster/own.asm': sprite, 'readme.txt': 'B' })));
+  check(sa.ok && sb.ok && sb.pkg!.sprite.files.includes('cluster/shared.asm'), `SB's record has the shared sprite file (${sb.pkg?.sprite.files.join()})`);
+  await removePackage(rom, sa.pkg!.id, opts.blank);
+  const pp = loadPixiProject(rom);
+  check(!!pp?.files.has('cluster/shared.asm') && pp.files.has('cluster/own.asm'), 'removing SA keeps the sprite file SB uses');
+  await removePackage(rom, sb.pkg!.id, opts.blank);
+}
 
 // its file assigned by hand elsewhere (all levels) and its own assignment dropped: removing it takes
 // the hand-made assignment along instead of leaving a call to a missing file
@@ -151,14 +168,14 @@ await removePackage(rom, pb.pkg!.id, opts.blank);
 {
   const withDocs = await install(inspectUpload('Docs.zip', zip({ 'level/d.asm': 'main:\n  RTL\n', 'readme.txt': 'How to use D' })));
   const without = await install(inspectUpload('NoDocs.zip', zip({ 'level/n.asm': 'main:\n  RTL\n' })), { level: 0x106 });
-  const names = (tool: 'uber' | 'blocks' | 'pixi') => packageManuals(rom, tool).map((m) => m.pkg.name).join();
-  check(withDocs.ok && without.ok && names('uber') === 'Docs' && !names('blocks') && !names('pixi'), `manuals: only the package with a readme, in the UberASM tab (${names('uber')})`);
-  check(packageManuals(rom, 'uber')[0]?.files.has('readme.txt') === true, 'manuals: with the package files');
+  const names = (tool: ToolKind) => packageManuals(rom, tool).map((m) => m.pkg.name).join();
+  check(withDocs.ok && without.ok && names('uberasm') === 'Docs' && !names('block') && !names('sprite'), `manuals: only the package with a readme, in the UberASM tab (${names('uberasm')})`);
+  check(packageManuals(rom, 'uberasm')[0]?.files.has('readme.txt') === true, 'manuals: with the package files');
   const before = rom.snapshot();
   await removePackage(rom, withDocs.pkg!.id, opts.blank);
-  check(!names('uber'), 'manuals: gone with the package');
+  check(!names('uberasm'), 'manuals: gone with the package');
   rom.restore(before);
-  check(names('uber') === 'Docs', 'manuals: back when the removal is undone');
+  check(names('uberasm') === 'Docs', 'manuals: back when the removal is undone');
   for (const r of [withDocs, without]) await removePackage(rom, r.pkg!.id, opts.blank);
 }
 
@@ -175,7 +192,7 @@ const ro = await install(onoff, { level: null });
   const sprite = loadPixiProject(rom)?.list.find((e) => e.kind === 'bounce' && /on_off_block/.test(e.file));
   const block = dec.decode(loadBlockProject(rom)?.files.get('blocks/on_off_block.asm'));
   const num = /^!bounce_num\s*=\s*\$([0-9A-F]+)/im.exec(block)?.[1];
-  check(ro.ok && ro.pkg!.blocks.tiles.length === 2 && ro.pkg!.map16!.length === 2 && ro.pkg!.gfx.length === 0, `On-Off Blocks: block on two Map16 tiles, no ExGFX (its only file is AN2, animation frames) (${ro.prints.join(' | ')})`);
+  check(ro.ok && ro.pkg!.block.tiles.length === 2 && ro.pkg!.map16!.length === 2 && ro.pkg!.gfx.length === 0, `On-Off Blocks: block on two Map16 tiles, no ExGFX (its only file is AN2, animation frames) (${ro.prints.join(' | ')})`);
   check(!!sprite && num !== undefined && parseInt(num, 16) === sprite.num, `On-Off Blocks: the block spawns bounce sprite ${sprite?.num.toString(16)} (!bounce_num = $${num})`);
 }
 for (const r of [ro, rs, rr, rb, r1]) await removePackage(rom, r.pkg!.id, opts.blank);
@@ -194,7 +211,7 @@ sameRom('tool folders removed');
 // the readme's list.txt lines
 {
   const r = await install(inspectUpload('No Overworld v1.3.zip', fixture('No Overworld v1.3.zip')));
-  const modes = r.pkg?.uber.calls.map(([ctx, num, f]) => `${ctx} ${num.toString(16)} ${f.replace(/^.*_/, '')}`).join(', ');
+  const modes = r.pkg?.uberasm.calls.map(([ctx, num, f]) => `${ctx} ${num.toString(16)} ${f.replace(/^.*_/, '')}`).join(', ');
   check(r.ok && modes === 'gamemode c gm0C.asm, gamemode 10 gm10.asm, gamemode 14 gm14.asm', `No Overworld: installed, game modes from the readme (${modes})`);
   check([...rom.data.slice(0x25c64, 0x25c67)].every((b) => b === 0xea), 'No Overworld: its hijack (NOP #3 at $04DC64)');
   await removePackage(rom, r.pkg!.id, opts.blank);
@@ -241,7 +258,7 @@ sameRom('song removed');
   const a = defaultAssignment(retry, 0x105);
   check(a.calls.length === 1 && a.calls[0].file === 'gamemode/retry_gm.asm', 'Retry: the assignment suggested (list.txt line from its readme)');
   const r = await installPackage(rom, retry, { ...opts, assignment: a });
-  check(r.ok && !!r.pkg && r.pkg.uber.calls.length === 1 && listPackages(rom).length === 1, 'Retry installed as one package ' + r.errors.slice(0, 2).join(' | '));
+  check(r.ok && !!r.pkg && r.pkg.uberasm.calls.length === 1 && listPackages(rom).length === 1, 'Retry installed as one package ' + r.errors.slice(0, 2).join(' | '));
   if (r.ok) {
     // falling into a pit: Retry respawns Mario in the level (vanilla: game over with 0 lives)
     const e = new LevelEmulator(rom); e.boot();
@@ -323,7 +340,7 @@ sameRom('song removed');
   check(r.ok && list?.slots.size === 2 && [...list.slots.values()].every((x) => x.trigger === 3 && usesAltFile(x)) && alt?.length === 0x200,
     `level setup: 2 ExAnimation slots in level 105, their 16 frame tiles (AN2 and GFX33 from RAM) in Anim graphic A (${alt?.length}; ${r.prints.filter((p) => /Level 105/.test(p)).join(' | ')})`);
   const lv = loadLevel(rom, 0x105);
-  lv.objects.push({ uid: newUid(), num: 0, ext: DM16_EXT, x: 4, y: 20, size: 0x00, tile: r.pkg!.blocks.tiles[0] });
+  lv.objects.push({ uid: newUid(), num: 0, ext: DM16_EXT, x: 4, y: 20, size: 0x00, tile: r.pkg!.block.tiles[0] });
   saveLevel(rom, lv);
   const vramAt = (sw: number) => {
     const e2 = new LevelEmulator(rom); e2.boot();
@@ -351,7 +368,7 @@ sameRom('song removed');
   const r = await installPackage(rom, ready(onoff), { level: 0x105, blank: s.fg(0x025), tileWords: (t) => s.fg(t), cgram: levelColors(l), wram: l.wram, sample: into });
   const lv = r.sample?.level;
   const dm = lv?.objects.filter((o) => o.tile !== undefined) ?? [];
-  check(r.ok && !!lv && dm.map((o) => `${o.x},${o.y}:${o.tile!.toString(16)}`).sort().join(' ') === '6,20:508 9,20:509' && r.pkg!.blocks.tiles.join() === [0x508, 0x509].join(),
+  check(r.ok && !!lv && dm.map((o) => `${o.x},${o.y}:${o.tile!.toString(16)}`).sort().join(' ') === '6,20:508 9,20:509' && r.pkg!.block.tiles.join() === [0x508, 0x509].join(),
     `sample level: its blocks on tiles 508/509, where the block went (${dm.map((o) => `${o.x},${o.y}:${o.tile!.toString(16)}`).join(' ')}; ${r.warnings.join(' | ')})`);
   const keys = [...(readLevelList(rom, 0x105)?.slots.keys() ?? [])].sort((a, b) => a - b).join();
   check(keys === '0,8', `sample level: its ExAnimation list in place of the level's (slots ${keys})`);
@@ -387,7 +404,7 @@ sameRom('song removed');
   setExtTileWords(rom, 0x508, s.fg(0x130));
   const r = await installPackage(rom, ready(onoff), { level: null, blank: s.fg(0x025), tileWords: (t) => s.fg(t), sample: loadLevel(rom, 0x105) });
   const tiles = (r.sample?.level.objects ?? []).filter((o) => o.tile !== undefined).map((o) => o.tile!).sort((a, b) => a - b);
-  check(r.ok && tiles.join() === r.pkg!.blocks.tiles.slice().sort((a, b) => a - b).join() && !tiles.includes(0x508), `508 taken: the sample level's blocks on ${tiles.map((t) => t.toString(16)).join(', ')}`);
+  check(r.ok && tiles.join() === r.pkg!.block.tiles.slice().sort((a, b) => a - b).join() && !tiles.includes(0x508), `508 taken: the sample level's blocks on ${tiles.map((t) => t.toString(16)).join(', ')}`);
 }
 
 // Lunar Magic's Direct Map16 objects: 22/23 (page 0/1), 27 with one tile, a block of tiles, a block

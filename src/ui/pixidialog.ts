@@ -8,7 +8,7 @@ import { projectPane, type Pane } from './projectpane.ts';
 import { hex } from '../core/names.ts';
 import { definesButton } from './defineedit.ts';
 import {
-  loadPixiProject, savePixiProject, projectToZip, spriteConfig, numberRange,
+  loadPixiProject, savePixiProject, projectToZip, spriteConfig, numberRange, assignSprite,
   FOLDER, KIND_LABEL, type PixiProject,
 } from '../core/pixi.ts';
 import type { SpriteFolder } from '../core/pixirt.ts';
@@ -38,9 +38,7 @@ export function pixiPane(app: App, changed: () => void): Pane {
     const add = () => {
       const [lo, hi] = numberRange(kind);
       if (num < lo || num > hi) { toast(`${KIND_LABEL[kind]}: number ${hex(lo, 2)}–${hex(hi, 2)}`, 'error'); return; }
-      const level = (k: SpriteFolder) => k === 'sprites' || k === 'shooters' || k === 'generators';
-      proj.list = proj.list.filter((e) => !(e.num === num && (e.kind === kind || (level(e.kind) && level(kind)))));
-      proj.list.push({ kind, num, file });
+      assignSprite(proj, { kind, num, file });
       change();
     };
     const label = (e: { kind: SpriteFolder; file: string }) => {
@@ -69,7 +67,7 @@ export function pixiPane(app: App, changed: () => void): Pane {
 
   return projectPane<PixiProject>(app, {
     title: 'Sprites',
-    tool: 'pixi',
+    tool: 'sprite',
     intro: 'Sprites, shooters, generators and the other sprite types of PIXI.',
     format: 'PIXI format: sprites (00–BF), shooters (C0–CF) and generators (D0–DF) with .json/.cfg, the other types as .asm. Shared routines like %GetDrawInfo() are built in; your own in routines/ take precedence.',
     load: () => loadPixiProject(app.rom),

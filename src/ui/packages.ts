@@ -7,7 +7,7 @@ import type { App } from './app.ts';
 import { h, clear, toast, choose, logTool } from './dom.ts';
 import { downloadBytes } from './platform.ts';
 import { listPatches, type PatchEntry } from '../core/patchreg.ts';
-import { listPackages, packageSummary, type Package } from '../core/pkgreg.ts';
+import { listPackages, packageSummary, packageRemoval, type Package } from '../core/pkgreg.ts';
 import { SECTIONS } from '../core/pkgsections.ts';
 import { removePackage, packageFiles } from '../core/packages.ts';
 import { loadMusicProject, songHex } from '../core/music.ts';
@@ -26,8 +26,6 @@ import { openDocs, packageDocs } from './docview.ts';
 import { gfxName } from './gfx/map16tab.ts';
 import { TOOL_KINDS, type ToolKind } from '../core/parts.ts';
 
-// the parts record's field of each tool (as stored in the ROM)
-const TOOL: Record<ToolKind, 'uber' | 'blocks' | 'pixi'> = { uberasm: 'uber', block: 'blocks', sprite: 'pixi' };
 const CTX_LABEL: Record<UberContext, string> = { level: 'Level', gamemode: 'Game Mode', overworld: 'Overworld map' };
 
 export interface PackagesHost {
@@ -88,7 +86,7 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
     const recs = items.map((i) => i.rec);
     const notes: [ToolKind, string][] = [];
     const count = (k: ToolKind, label: string) => {
-      const files = [...host.panes[k].project().files.keys()].filter((f) => f !== 'list.txt' && !recs.some((r) => r[TOOL[k]].files.includes(f)));
+      const files = [...host.panes[k].project().files.keys()].filter((f) => f !== 'list.txt' && !recs.some((r) => r[k].files.includes(f)));
       if (files.length) notes.push([k, `${label}: ${files.length} file(s)`]);
     };
     count('uberasm', 'UberASM'); count('block', 'Blocks'); count('sprite', 'Sprites');
@@ -164,11 +162,11 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
       intro ? h('p', { class: 'hint' }, intro) : '', ...body);
 
     // UberASM: where it runs, then its files
-    if (rec.uber.files.length || rec.uber.calls.length) {
+    if (rec.uberasm.files.length || rec.uberasm.calls.length) {
       const proj = host.panes.uberasm.project() as UberProject;
-      const calls = SECTIONS.uber.owned(rec.uber, proj);
+      const calls = SECTIONS.uberasm.owned(rec.uberasm, proj);
       const shown = new Set(calls.map((c) => c[2]));
-      const rest = rec.uber.files.filter((f) => !shown.has(f)).sort();
+      const rest = rec.uberasm.files.filter((f) => !shown.has(f)).sort();
       const where = ([ctx, num]: [UberContext, number, string]) => num === ALL ? `all ${CTX_LABEL[ctx].toLowerCase()}s` : `${CTX_LABEL[ctx]} ${hex(num, ctx === 'level' ? 3 : 2)}`;
       const unassign = (c: [UberContext, number, string]) => {
         const cs = proj.list[c[0]].get(c[1])?.filter((x) => x.file !== c[2]) ?? [];
@@ -184,10 +182,10 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
           h('table', { class: 'uber-table' }, rest.map((f) => fileRow('uberasm', proj.files, f)))) : ''));
     }
     // blocks
-    if (rec.blocks.tiles.length || rec.blocks.files.length) {
+    if (rec.block.tiles.length || rec.block.files.length) {
       const proj = host.panes.block.project() as BlockProject;
-      const blocks = SECTIONS.blocks.owned(rec.blocks, proj).sort((a, b) => a.tile - b.tile);
-      const rest = rec.blocks.files.filter((f) => !blocks.some((b) => b.file === f)).sort();
+      const blocks = SECTIONS.block.owned(rec.block, proj).sort((a, b) => a.tile - b.tile);
+      const rest = rec.block.files.filter((f) => !blocks.some((b) => b.file === f)).sort();
       out.push(section('block', 'Blocks', 'To place: palette → Map16, or a Direct Map16 object with the tile.',
         blocks.length ? h('table', { class: 'uber-table' }, h('tr', null, h('th', null, 'Tile'), h('th', null, 'Block'), h('th', null, 'acts like'), h('th')),
           blocks.map((b) => h('tr', null,
@@ -199,13 +197,13 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
           h('table', { class: 'uber-table' }, rest.map((f) => fileRow('block', proj.files, f)))) : ''));
     }
     // sprites
-    if (rec.pixi.list.length || rec.pixi.files.length) {
+    if (rec.sprite.list.length || rec.sprite.files.length) {
       const proj = host.panes.sprite.project() as PixiProject;
-      const sprites = SECTIONS.pixi.owned(rec.pixi, proj);
+      const sprites = SECTIONS.sprite.owned(rec.sprite, proj);
       const nameOf = (e: PixiProject['list'][number]) => { try { return spriteConfig(proj, e).names[0]?.name ?? ''; } catch { return ''; } };
       const asmOf = (e: PixiProject['list'][number]) => { try { return spriteConfig(proj, e).asm ?? e.file; } catch { return e.file; } };
       const used = new Set(sprites.flatMap((e) => [e.file, asmOf(e)]));
-      const rest = rec.pixi.files.filter((f) => !used.has(f)).sort();
+      const rest = rec.sprite.files.filter((f) => !used.has(f)).sort();
       out.push(section('sprite', 'Sprites', 'To insert: sprite mode, custom sprite with the number.',
         sprites.length ? h('table', { class: 'uber-table' }, h('tr', null, h('th', null, 'Type'), h('th', null, 'No.'), h('th', null, 'Name'), h('th')),
           sprites.map((e) => h('tr', null, h('td', null, SPRITE_KIND[e.kind]), h('td', { class: 'mono' }, hex(e.num, 2)), h('td', { title: e.file }, nameOf(e)),
@@ -288,18 +286,11 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
 
   async function remove(it: Item): Promise<void> {
     const rec = it.rec;
-    const parts: string[] = [];
-    if (rec.patches.length) parts.push(rec.patches.length > 1 ? `${rec.patches.length} patches` : 'the patch');
-    if (rec.uber.files.length) parts.push(`${rec.uber.files.length} UberASM file(s) with their assignments`);
-    if (rec.blocks.tiles.length) parts.push(`block(s) at ${rec.blocks.tiles.map((t) => hex(t, 3)).join(', ')}`);
-    if (rec.pixi.list.length) parts.push(`sprite(s) ${rec.pixi.list.map(([, n]) => hex(n, 2)).join(', ')}`);
-    if (rec.gfx.length) parts.push(rec.gfx.map(gfxName).join(', '));
-    if (rec.map16?.length || rec.bgMap16?.length) parts.push(`${(rec.map16?.length ?? 0) + (rec.bgMap16?.length ?? 0)} Map16 tile(s)`);
-    if (rec.music?.length) parts.push(`${rec.music.length > 1 ? 'songs' : 'the song'} (AddmusicK inserts the music again)`);
+    const parts = packageRemoval(rec);
     const i = await choose('Remove package', `Remove “${rec.name}” from the ROM completely: ${parts.join(', ')}. Files another package brought as well stay. Whatever is placed in levels stays in place.`,
       [{ label: 'Cancel' }, { label: 'Remove', danger: true }]);
     if (i !== 1) return;
-    const keys = TOOL_KINDS.filter((k) => rec[TOOL[k]].files.length);
+    const keys = TOOL_KINDS.filter((k) => rec[k].files.length);
     try {
       const blank = map16Source(app.rom, app.render).fg(0x025);
       const w = await app.romEditAsync(`Package “${rec.name}” removed`, () => removePackage(app.rom, rec.id, blank));

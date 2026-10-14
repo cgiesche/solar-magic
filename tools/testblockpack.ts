@@ -48,7 +48,9 @@ const zip = zipSync({
 
 const preview = inspectUpload('Pack.zip', zip);
 if (preview.status !== 'ready') throw new Error('Pack: ' + preview.status);
-check(preview.blocks.length === 2 && preview.blocks.every((b) => b.tile !== undefined) && preview.graphics.map16.length === 1 && preview.graphics.exgfx.length === 1, 'detected: 2 blocks of a list.txt, Map16 tiles and ExGFX');
+const found = preview.parts.flatMap((p) => (p.kind === 'block' ? p.found : []));
+const gfxOf = (t: string) => preview.parts.filter((p) => p.kind === 'graphics' && p.type === t).length;
+check(found.length === 2 && found.every((b) => b.tile !== undefined) && gfxOf('map16') === 1 && gfxOf('exgfx') === 1, 'detected: 2 blocks of a list.txt, Map16 tiles and ExGFX');
 check(preview.unclaimed.join() === 'readme.txt' && preview.docs.includes('readme.txt'), `not installed: the readme only (${preview.unclaimed.join(', ')})`);
 const m = parseMap16File(preview.files.get('Tiles.map16')!);
 check(m.width === 2 && m.tiles[1][0] === 0x1a01 && m.acts?.[0] === 0x25, '.map16 parsed');

@@ -18,6 +18,13 @@ export const BLOCKS_NAME = 'Custom Blocks';
 export interface BlockAssign { tile: number; file: string; acts?: number } // file relative to the project root
 export interface BlockProject { files: Map<string, Uint8Array>; list: BlockAssign[] }
 
+// puts a block on a Map16 tile, in place of the block that was on it (one block per tile) – for
+// installing and for the Blocks tab
+export function assignBlock(p: BlockProject, a: BlockAssign): void {
+  p.list = p.list.filter((b) => b.tile !== a.tile);
+  p.list.push(a);
+}
+
 const enc = new TextEncoder();
 const dec = new TextDecoder();
 

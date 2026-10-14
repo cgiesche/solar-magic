@@ -1,5 +1,5 @@
 // Installed packages ("SMWK"): what each added download put into the ROM – its Asar patches, files and
-// list.txt entries of the UberASM, block and PIXI projects, ExGFX files – so a package can be looked at,
+// list.txt entries of the UberASM, block and sprite (PIXI) projects, ExGFX files – so a package can be looked at,
 // configured and removed as one. Not declared by the add dialogs but observed: the ROM's projects are
 // compared before and after a package (or a part of it) was added. Kept in the ROM like the patch
 // registry: a RATS block holding "SMWK", a version byte and deflated JSON; the package's own files (zip)
@@ -9,17 +9,18 @@ import { deflateSync, inflateSync } from 'fflate';
 import { Rom, pcToSnes } from './rom.ts';
 import type { UberContext } from './uberasm.ts';
 import type { SpriteFolder } from './pixirt.ts';
+import { TOOL_KINDS, type ToolKind } from './parts.ts';
 import { SECTIONS, SECTION_KEYS, type SectionKey, type PartSection, type Other } from './pkgsections.ts';
 
 const MAGIC = [0x53, 0x4d, 0x57, 0x4b]; // "SMWK"
 const VERSION = 1;
 
-// what a package put into the ROM (field names as stored in the ROM: uber = UberASM, blocks, pixi = sprites)
+// what a package put into the ROM (the tool projects under their part kind)
 export interface PackageParts {
   patches: string[]; // ids of its Asar patches in the patch registry
-  uber: { files: string[]; calls: [UberContext, number, string][]; other: Partial<Record<Other, string>> };
-  blocks: { files: string[]; tiles: number[] };
-  pixi: { files: string[]; list: [SpriteFolder, number][] };
+  uberasm: { files: string[]; calls: [UberContext, number, string][]; other: Partial<Record<Other, string>> };
+  block: { files: string[]; tiles: number[] };
+  sprite: { files: string[]; list: [SpriteFolder, number][] };
   gfx: number[]; // ExGFX numbers it created
   music?: string[]; // songs it added to the music project (their .txt)
   map16?: number[]; // extended FG Map16 tiles it filled (graphics packages)
@@ -135,13 +136,19 @@ export function packageSummary(r: Package): string[] {
   return [...new Set(SECTION_KEYS.flatMap((k) => section(k).summary(c[k]) ?? []))];
 }
 
+// what removing the package takes out of the ROM ("the patch", "block(s) at 200, 201" …)
+export function packageRemoval(r: Package): string[] {
+  const c = complete(r) as unknown as Parts;
+  return SECTION_KEYS.flatMap((k) => section(k).removal(c[k]) ?? []);
+}
+
 // ---------- recording a change into a package ----------
 
 // an installed package getting more, or a new one (its files kept with the editor data)
 export type PackageTarget = Package | { name: string; fileName: string; archive?: Uint8Array };
 // a project file the change placed that was there already (same content, brought by another package
 // too): it belongs to the package as well, so removing the other one keeps it
-export type Claim = (tool: 'uber' | 'blocks' | 'pixi', file: string) => void;
+export type Claim = (tool: ToolKind, file: string) => void;
 // pkg: the saved record, null when nothing came in (nothing saved)
 export interface Recorded<R> { result: R; pkg: Package | null }
 
@@ -161,14 +168,14 @@ export async function recordPackageChangeAsync<R extends { ok: boolean }>(rom: R
 
 function startRecording(rom: Rom, target: PackageTarget) {
   const was = snapshot(rom);
-  const claimed: Record<'uber' | 'blocks' | 'pixi', Set<string>> = { uber: new Set(), blocks: new Set(), pixi: new Set() };
+  const claimed: Record<ToolKind, Set<string>> = { uberasm: new Set(), block: new Set(), sprite: new Set() };
   return {
     claim: ((tool, file) => { claimed[tool].add(file); }) as Claim,
     finish<R extends { ok: boolean }>(result: R): Recorded<R> {
       if (!result.ok) return { result, pkg: null };
       const now = snapshot(rom);
       const parts = partsBetween(was, now);
-      for (const tool of ['uber', 'blocks', 'pixi'] as const) for (const f of claimed[tool]) if (!parts[tool].files.includes(f)) parts[tool].files.push(f);
+      for (const tool of TOOL_KINDS) for (const f of claimed[tool]) if (!parts[tool].files.includes(f)) parts[tool].files.push(f);
       const old = 'id' in target ? target : null;
       // (nothing new, but the record may still change: a patch applied anew drops its old id)
       if (isEmptyParts(parts) && (!old || JSON.stringify(mergeParts(old, parts, now)) === JSON.stringify(complete(old)))) return { result, pkg: null };

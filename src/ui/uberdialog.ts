@@ -4,8 +4,8 @@
 
 import type { App } from './app.ts';
 import { h, toast, hexInput, select } from './dom.ts';
-import { loadProject, saveProject, emptyProject, projectToZip, type UberProject } from '../core/uberproject.ts';
-import { resourceFiles, ALL, CONTEXT_SIZE, type UberContext, type UberCall } from '../core/uberasm.ts';
+import { loadProject, saveProject, emptyProject, projectToZip, addCall, type UberProject } from '../core/uberproject.ts';
+import { resourceFiles, ALL, CONTEXT_SIZE, type UberContext } from '../core/uberasm.ts';
 import { hex } from '../core/names.ts';
 import { definesButton } from './defineedit.ts';
 import { projectPane, type Pane } from './projectpane.ts';
@@ -54,10 +54,7 @@ export function uberPane(app: App, changed: () => void): UberPane {
     const add = () => {
       let bytes: number[];
       try { bytes = parseBytes(bytesIn.value); } catch (e) { toast(String((e as Error).message), 'error'); return; }
-      const key = all ? ALL : num;
-      const calls: UberCall[] = map.get(key) ?? [];
-      calls.push({ file, bytes });
-      map.set(key, calls);
+      addCall(proj, ctx, all ? ALL : num, file, bytes);
       change();
     };
     return h('div', null,
@@ -91,7 +88,7 @@ export function uberPane(app: App, changed: () => void): UberPane {
 
   pane = projectPane<UberProject>(app, {
     title: 'UberASM',
-    tool: 'uber',
+    tool: 'uberasm',
     intro: 'Code that runs every frame per level, overworld map or game mode.',
     format: 'UberASM Tool 2.x format: labels init/main/end/load/nmi, libraries (library/), shared routines (routines/), extra bytes. An existing UberASM Tool folder is uploaded as a package (.zip); the sources are kept with the editor data (saved with “Save project”).',
     load: () => loadProject(app.rom),

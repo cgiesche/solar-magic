@@ -5,14 +5,14 @@
 
 import type { App } from './app.ts';
 import { h, modal, toast, logTool } from './dom.ts';
-import { reapplyPatch, type ApplyResult, type PatchSource } from '../core/patchapply.ts';
+import type { ApplyResult } from '../core/patchapply.ts';
 import { patchArchive, type PatchEntry } from '../core/patchreg.ts';
-import { uploadFromFiles, effectiveDefines, uploadSource, optionDefault, packUpload, unpackUpload, type StoredUpload, type Upload, type PatchOption } from '../core/patchpkg.ts';
-import { ensureRequirements } from '../core/packages.ts';
+import { uploadFromFiles, effectiveDefines, optionDefault, unpackUpload, type StoredUpload, type Upload, type PatchOption } from '../core/patchpkg.ts';
+import { reapplyPackagePatch as reapply } from '../core/packages.ts';
 import { definesForm } from './defineedit.ts';
 import { errorText } from './projectpane.ts';
 import type { ToolKind } from '../core/parts.ts';
-import { recordPackageChange, type Package } from '../core/pkgreg.ts';
+import type { Package } from '../core/pkgreg.ts';
 
 export type { StoredUpload };
 export async function storedUpload(app: App, p: PatchEntry): Promise<StoredUpload | undefined> {
@@ -70,26 +70,11 @@ function optionRow(o: PatchOption, value: string, inputs: [string, () => string]
 // applies the patch of an installed package (`rec`; null: none) anew with other settings, as one undoable
 // ROM edit with the package's record; the ROM changed when ok
 export function reapplyPackagePatch(app: App, upload: Upload, fileName: string, main: string, values: Record<string, string>, entry: PatchEntry, rec: Package | null): ApplyResult {
-  const fail = (e: unknown): ApplyResult => ({ ok: false, errors: [errorText(e)], warnings: [], prints: [] });
-  let src: PatchSource;
-  try { src = uploadSource(upload, main, effectiveDefines(upload, values)); } catch (e) { return fail(e); }
-  src.settings = values;
-  const stored: StoredUpload = { fileName, files: [...upload.files], main };
-  src.archive = packUpload(stored); // kept with the editor data, not in the ROM
-  let r: ApplyResult;
   try {
-    r = app.romEdit(`Patch “${upload.name}” reapplied`, () => {
-      const apply = () => {
-        ensureRequirements(upload);
-        return reapplyPatch(app.rom, entry.id, src);
-      };
-      if (rec) return recordPackageChange(app.rom, rec, apply).result; // the patch's new id goes into the record
-      return apply();
-    });
+    return app.romEdit(`Patch “${upload.name}” reapplied`, () => reapply(app.rom, entry.id, upload, fileName, main, values, rec));
   } catch (e) {
-    return fail(e);
+    return { ok: false, errors: [errorText(e)], warnings: [], prints: [] };
   }
-  return r;
 }
 
 export function patchDone(name: string, again: boolean, r: ApplyResult): void {

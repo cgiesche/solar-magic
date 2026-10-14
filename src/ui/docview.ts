@@ -2,6 +2,7 @@
 // the package (as blob URLs), links between its pages stay in the viewer, the pages' own scripts don't
 // run. The tool tabs list the manuals of the installed packages that brought their files.
 
+import type { ToolKind } from '../core/parts.ts';
 import { h, clear, modal } from './dom.ts';
 import { packageDocs } from '../core/pkgmap.ts';
 import { packageManuals } from '../core/packages.ts';
@@ -102,7 +103,7 @@ export function docsButton(title: string, files: Map<string, Uint8Array>): HTMLE
 
 // the manuals of the installed packages that brought files of a tool project (UberASM, blocks, sprites):
 // a button each, filled in once the package files are read
-export function manualsRow(rom: Rom, tool: 'uber' | 'blocks' | 'pixi'): HTMLElement {
+export function manualsRow(rom: Rom, tool: ToolKind): HTMLElement {
   const el = h('div', { class: 'row doc-row' });
   const all = packageManuals(rom, tool);
   if (all.length) el.append(h('span', { class: 'hint' }, 'Manuals:'), ...all.map(({ pkg, files }) => h('button', { onclick: () => openDocs(pkg.name, files) }, pkg.name)));
