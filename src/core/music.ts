@@ -424,7 +424,8 @@ function amkErrors(r: AmkResult): string[] {
   return r.errors.filter((l) => !/^\s*$/.test(l));
 }
 
-// Inserts the project with AddmusicK, replacing an earlier run; on failure the ROM is left as it was.
+// Inserts the project with AddmusicK, replacing an earlier run (ok false: failed, the edit session puts
+// the ROM back).
 // An empty project removes AddmusicK again.
 export async function saveMusicProject(rom: Rom, p: MusicProject): Promise<MusicResult> {
   const amkBefore = hasAmk(rom);
@@ -449,9 +450,8 @@ function remapLevelMusic(rom: Rom, before: Uint8Array): void {
 
 async function insertProject(rom: Rom, p: MusicProject): Promise<MusicResult> {
   const e = musicEntry(rom);
-  const snapshot = rom.snapshot();
   const warnings: string[] = [];
-  const fail = (errors: string[], log = ''): MusicResult => { rom.restore(snapshot); return { ok: false, errors, warnings, log }; };
+  const fail = (errors: string[], log = ''): MusicResult => ({ ok: false, errors, warnings, log });
   try {
     if (e) warnings.push(...uninstallPatch(rom, e.id));
   } catch (err) {

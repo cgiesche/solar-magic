@@ -110,13 +110,6 @@ export function hexNum(n: number): string {
 // adds the sprites to the ROM's PIXI project; `others`: files of the package's other parts (not taken
 // along from a sprite's folder)
 export function applyPixiUpload(rom: Rom, upload: Upload, plan: PixiPlan, others: Set<string> = new Set()): ApplyResult {
-  const snapshot = rom.snapshot();
-  const r = addUpload(rom, upload, plan, others);
-  if (!r.ok) rom.restore(snapshot); // all or nothing
-  return r;
-}
-
-function addUpload(rom: Rom, upload: Upload, plan: PixiPlan, others: Set<string>): ApplyResult {
   const proj: PixiProject = loadPixiProject(rom) ?? { files: new Map(), list: [] };
   // define values from the chosen numbers
   const defs = linkedDefines(plan);

@@ -302,14 +302,13 @@ export interface BgPackResult { ok: boolean; errors: string[]; notes: string[]; 
 const hx = (v: number, d: number) => v.toString(16).toUpperCase().padStart(d, '0');
 
 // A level import (see CONTEXT.md): what the plan takes from a Lunar Magic level file into level `lv` –
-// background, FG Map16 tiles, graphics slots, colors. All or nothing; it changes a level and is never
-// recorded as a package.
+// background, FG Map16 tiles, graphics slots, colors. Ok false when it failed (run it in an edit session,
+// romedit.ts, which puts the ROM back); it changes a level and is never recorded as a package.
 export function importLevelFile(rom: Rom, lv: Level, files: Map<string, Uint8Array>, plan: BgPackPlan, opt: BgPackOptions): BgPackResult {
   return applyBgPack(rom, lv, files, plan, opt);
 }
 
 export function applyBgPack(rom: Rom, lv: Level, files: Map<string, Uint8Array>, plan: BgPackPlan, opt: BgPackOptions): BgPackResult {
-  const snapshot = rom.snapshot();
   const notes: string[] = [];
   const lvl = lv.number;
   try {
@@ -386,7 +385,6 @@ export function applyBgPack(rom: Rom, lv: Level, files: Map<string, Uint8Array>,
     }
     return { ok: true, errors: [], notes: [...notes, ...plan.notes], bg };
   } catch (e) {
-    rom.restore(snapshot);
     return { ok: false, errors: [e instanceof Error ? e.message : String(e)], notes, bg: null };
   }
 }

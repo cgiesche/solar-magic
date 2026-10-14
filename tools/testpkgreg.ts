@@ -12,7 +12,8 @@ import { loadProject, saveProject, emptyProject } from '../src/core/uberproject.
 import { loadBlockProject, saveBlockProject, type BlockProject } from '../src/core/blocks.ts';
 import { importGfxFile } from '../src/core/map16file.ts';
 import { SECTIONS, SECTION_KEYS, type PartSection } from '../src/core/pkgsections.ts';
-import { recordPackageChange, listPackages, packageArchive, uninstallPackage, type Package, type PackageTarget, type Claim } from '../src/core/pkgreg.ts';
+import { recordPackageChange, listPackages, packageArchive, uninstallPackage, type Package, type PackageTarget, type Claim, type Recorded } from '../src/core/pkgreg.ts';
+import { allOrNothing } from '../src/core/romedit.ts';
 import { editorImage } from './fixture.ts';
 
 const EDITOR_IMAGE = await editorImage(); // the fixture as the editor opens it
@@ -100,7 +101,7 @@ check(listPatches(rom).every((p) => p.kind === 'vram' || p.kind === 'exanim'), '
   check(threw && rom.data.every((v, i) => v === before[i]), 'unknown package: error, ROM unchanged');
 }
 
-// recording a change: all or nothing, nothing new is no record, claimed files, a patch applied anew
+// recording a change: a failed one records nothing, nothing new is no record, claimed files, a patch applied anew
 {
   const same = (d: Uint8Array) => rom.data.length === d.length && rom.data.every((v, i) => v === d[i]);
   const target: PackageTarget = { name: 'F', fileName: 'F.zip', archive: enc.encode('archive of F') };
@@ -108,10 +109,12 @@ check(listPatches(rom).every((p) => p.kind === 'vram' || p.kind === 'exanim'), '
 
   const before = rom.data.slice();
   const extra = rom.extraSize;
-  const failed = recordPackageChange(rom, target, () => { addUber('level/f.asm', 'main:\n  RTL\n'); return { ok: false }; });
-  check(!failed.pkg && same(before) && rom.extraSize === extra && !listPackages(rom).length, 'failed change (ok false): ROM and records unchanged');
+  // (in an edit session, which puts the ROM back after a failure)
+  let failed: Recorded<{ ok: boolean }> | null = null;
+  allOrNothing(rom, () => (failed = recordPackageChange(rom, target, () => { addUber('level/f.asm', 'main:\n  RTL\n'); return { ok: false }; })).result);
+  check(!failed!.pkg && same(before) && rom.extraSize === extra && !listPackages(rom).length, 'failed change (ok false): nothing recorded, ROM and records unchanged');
   let threw = false;
-  try { recordPackageChange(rom, target, () => { addUber('level/f.asm', 'main:\n  RTL\n'); throw new Error('boom'); }); } catch { threw = true; }
+  try { allOrNothing(rom, () => recordPackageChange(rom, target, () => { addUber('level/f.asm', 'main:\n  RTL\n'); throw new Error('boom'); })); } catch { threw = true; }
   check(threw && same(before) && rom.extraSize === extra && !listPackages(rom).length, 'failed change (throws): error passed on, ROM and records unchanged');
 
   const none = recordPackageChange(rom, target, () => ({ ok: true }));

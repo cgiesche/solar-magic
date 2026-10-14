@@ -447,11 +447,9 @@ export function savePixiProject(rom: Rom, p: PixiProject): ApplyResult {
   } catch (err) {
     return { ok: false, errors: [err instanceof Error ? err.message : String(err)], warnings: [], prints: [] };
   }
-  const snapshot = rom.snapshot();
   try {
     return after(e ? reapplyPatch(rom, e.id, src) : applyPatch(rom, src));
   } catch (err) {
-    rom.restore(snapshot);
     return { ok: false, errors: [err instanceof Error ? err.message : String(err)], warnings: [], prints: [] };
   }
 }

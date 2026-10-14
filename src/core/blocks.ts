@@ -126,17 +126,15 @@ export function saveBlockProject(rom: Rom, p: BlockProject): ApplyResult {
     const warnings = e ? removeBlocks(rom) : [];
     return { ok: true, errors: [], warnings, prints: [] };
   }
-  const snapshot = rom.snapshot();
   let r: ApplyResult;
   try {
     const uber = listPatches(rom).find((x) => x.kind === 'uberasm');
     const src = buildBlockPatch(p, uber?.ram?.[0]?.[0]);
     r = e ? reapplyPatch(rom, e.id, src) : applyPatch(rom, src);
   } catch (err) {
-    rom.restore(snapshot);
     return { ok: false, errors: [err instanceof Error ? err.message : String(err)], warnings: [], prints: [] };
   }
-  if (!r.ok) { rom.restore(snapshot); return r; }
+  if (!r.ok) return r;
   // blocks are identified by their GpsB<n>_GpsBlock label, in the order of first use in the list
   const used = [...new Set(p.list.map((b) => b.file))];
   const labels = r.labels ?? {};
@@ -148,7 +146,7 @@ export function saveBlockProject(rom: Rom, p: BlockProject): ApplyResult {
     if (head !== 0x42 && head !== 0x37) errors.push(`${f}: does not start with “db $42” or “db $37” – not a GPS block`);
     else addrOf.set(f, { addr: a + 1, wall: head === 0x37 });
   });
-  if (errors.length) { rom.restore(snapshot); return { ok: false, errors, warnings: r.warnings, prints: r.prints }; }
+  if (errors.length) return { ok: false, errors, warnings: r.warnings, prints: r.prints };
   clearTable(rom);
   for (const b of p.list) {
     const x = addrOf.get(b.file)!;

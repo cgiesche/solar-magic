@@ -145,28 +145,27 @@ export type Claim = (tool: 'uber' | 'blocks' | 'pixi', file: string) => void;
 // pkg: the saved record, null when nothing came in (nothing saved)
 export interface Recorded<R> { result: R; pkg: Package | null }
 
-// runs `change` and records what it put into the ROM into the package, all or nothing: when it fails
-// (ok false or throws) or the record can't be saved, the ROM is as before (and the error thrown)
+// runs `change` and records what it put into the ROM into the package; when it fails (ok false) nothing
+// is recorded, when it throws (or the record can't be saved) the error is passed on. Run it in an edit
+// session (romedit.ts): that puts the ROM back after a failure.
 export function recordPackageChange<R extends { ok: boolean }>(rom: Rom, target: PackageTarget, change: (claim: Claim) => R): Recorded<R> {
   const rec = startRecording(rom, target);
-  try { return rec.finish(change(rec.claim)); } catch (e) { rec.undo(); throw e; }
+  return rec.finish(change(rec.claim));
 }
 
 // recordPackageChange for a change that awaits
 export async function recordPackageChangeAsync<R extends { ok: boolean }>(rom: Rom, target: PackageTarget, change: (claim: Claim) => Promise<R>): Promise<Recorded<R>> {
   const rec = startRecording(rom, target);
-  try { return rec.finish(await change(rec.claim)); } catch (e) { rec.undo(); throw e; }
+  return rec.finish(await change(rec.claim));
 }
 
 function startRecording(rom: Rom, target: PackageTarget) {
-  const romBefore = rom.snapshot();
   const was = snapshot(rom);
   const claimed: Record<'uber' | 'blocks' | 'pixi', Set<string>> = { uber: new Set(), blocks: new Set(), pixi: new Set() };
   return {
     claim: ((tool, file) => { claimed[tool].add(file); }) as Claim,
-    undo: () => rom.restore(romBefore),
     finish<R extends { ok: boolean }>(result: R): Recorded<R> {
-      if (!result.ok) { rom.restore(romBefore); return { result, pkg: null }; }
+      if (!result.ok) return { result, pkg: null };
       const now = snapshot(rom);
       const parts = partsBetween(was, now);
       for (const tool of ['uber', 'blocks', 'pixi'] as const) for (const f of claimed[tool]) if (!parts[tool].files.includes(f)) parts[tool].files.push(f);
@@ -182,25 +181,19 @@ function startRecording(rom: Rom, target: PackageTarget) {
 // ---------- removing a package ----------
 
 // removes everything the package put into the ROM (each section by its adapter, in their order) and
-// its record; what another package brought as well stays. All or nothing: throws, the ROM unchanged.
-// Returns warnings.
+// its record; what another package brought as well stays. Throws when it fails (run it in an edit session,
+// romedit.ts, which puts the ROM back). Returns warnings.
 export async function uninstallPackage(rom: Rom, id: string, blank: number[]): Promise<string[]> {
   const all = listPackages(rom);
   const rec = all.find((r) => r.id === id);
   if (!rec) throw new Error('Package is not installed');
   const mine = complete(rec) as unknown as Parts, others = all.filter((r) => r !== rec).map((r) => complete(r) as unknown as Parts);
-  const before = rom.snapshot();
   const warnings: string[] = [];
-  try {
-    for (const k of SECTION_KEYS) {
-      if (section(k).empty(mine[k])) continue;
-      warnings.push(...await section(k).remove(rom, mine[k], others.map((o) => o[k]), blank));
-    }
-    removePackageRecord(rom, id);
-  } catch (e) {
-    rom.restore(before);
-    throw e;
+  for (const k of SECTION_KEYS) {
+    if (section(k).empty(mine[k])) continue;
+    warnings.push(...await section(k).remove(rom, mine[k], others.map((o) => o[k]), blank));
   }
+  removePackageRecord(rom, id);
   return warnings;
 }
 

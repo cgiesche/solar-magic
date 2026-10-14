@@ -28,6 +28,7 @@ import { planBgPack, applyBgPack } from './bgpack.ts';
 import { parseSprites, spriteSizes, type Level } from './level.ts';
 import { ALL, type UberContext } from './uberasm.ts';
 import { recordPackageChangeAsync, listPackages, packageArchive, uninstallPackage, type Package, type Claim } from './pkgreg.ts';
+import { allOrNothing } from './romedit.ts';
 
 // one part as the preview lists it
 export interface PreviewPart { kind: PartKind; name: string; file: string }
@@ -287,7 +288,7 @@ function placeSample(rom: Rom, preview: ReadyPreview, ctx: InstallContext, into:
   if (mwl?.bg && !sample.level.layer2Objects) {
     try {
       const bp = planBgPack(rom, preview.name, preview.files, opt.blank);
-      const r = applyBgPack(rom, sample.level, preview.files, bp, { bg: true, fg: false, palettes: bp.palettes.map(() => false), cgram: opt.cgram ?? new Uint8Array(512), blank: opt.blank });
+      const r = allOrNothing(rom, () => applyBgPack(rom, sample.level, preview.files, bp, { bg: true, fg: false, palettes: bp.palettes.map(() => false), cgram: opt.cgram ?? new Uint8Array(512), blank: opt.blank }));
       if (r.ok) sample.level.bg = r.bg; else sample.notes.push(`Background not taken over: ${r.errors.join(' ')}`);
     } catch (e) { sample.notes.push(`Background not taken over: ${e instanceof Error ? e.message : e}`); }
   }
@@ -349,14 +350,14 @@ function placeFiles(preview: ReadyPreview, upload: Upload, main: string, mainTex
   return out;
 }
 
-// applies every part and records the package; on failure the ROM is as before
+// applies every part and records the package; ok false when it failed (run it in an edit session,
+// romedit.ts, which puts the ROM back)
 export async function installPackage(rom: Rom, preview: ReadyPreview | ManualPreview, opt: InstallOptions): Promise<InstallResult> {
   if (preview.status === 'manual') {
     const a = opt.assignment ?? defaultAssignment(preview, opt.level ?? 0x105);
     const ready: ReadyPreview = { ...preview, status: 'ready', parts: [], patch: null, steps: [{ kind: 'mapped', assignment: a }], blocks: [], graphics: { map16: [], exgfx: [], pal: [], palmask: [], mwl: null }, sprites: [], unclaimed: [], docs: [] };
     return installPackage(rom, ready, opt);
   }
-  const before = rom.snapshot();
   const warnings: string[] = [];
   const prints: string[] = [];
   let sample: SampleLevel | undefined;
@@ -389,7 +390,7 @@ export async function installPackage(rom: Rom, preview: ReadyPreview | ManualPre
       return done;
     });
     if (!result.ok) return failed(result.errors, warnings, prints);
-    if (!pkg) { rom.restore(before); return failed(['Nothing changed – everything in the package is already in the ROM.']); }
+    if (!pkg) return failed(['Nothing changed – everything in the package is already in the ROM.']);
     return { ok: true, errors: [], warnings, prints, pkg, sample };
   } catch (e) {
     return failed([e instanceof Error ? e.message : String(e)], warnings, prints);
