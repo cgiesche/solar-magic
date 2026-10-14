@@ -10,6 +10,15 @@ A browser-based editor for Super Mario World ROMs: levels, graphics and third-pa
 The editor's own ASM in the ROM (SMWE, SMWV, SMWG, SMWP, SMWB, SMWU, SMWX, SMWH, SMWS, the ExAnimation engine), installed into the clean ROM when it is opened; the editor relies on them and opens no other ROMs than the clean game and its own (ADR 0004). Only SMWM (message texts in free space) is installed when it is needed. Not third-party content and never part of a package.
 _Avoid_: Lunar Magic hacks, built-in patches
 
+### Editing
+
+**ROM edit**:
+One labelled change of the ROM (image and editor data), made through the edit session (romedit.ts): one undo step, all or nothing (one that fails changes nothing and records nothing), the open level saved before it; what it changed decides what the editor shows anew (the level reloaded, its header, structures). The overworld's save is the one ROM edit outside the undo history (the overworld editor has its own).
+_Avoid_: transaction, ROM write (for an edit)
+
+**Level edit**:
+A change of the open level in memory: its own undo step, written to the ROM when the level is saved (before every ROM edit, when another level is opened, or by hand).
+
 ### Third-party content
 
 **Package**:

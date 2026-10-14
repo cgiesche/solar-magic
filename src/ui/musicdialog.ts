@@ -15,7 +15,7 @@ import {
 } from '../core/music.ts';
 import { levelMusic, setLevelMusic, musicPatch, HEADER_MUSIC_TABLE } from '../core/patches.ts';
 import { musicPlayer } from './musicplayer.ts';
-import { patchesChanged, errorText, type Pane } from './projectpane.ts';
+import { errorText, type Pane } from './projectpane.ts';
 import { listPackages, type Package } from '../core/pkgreg.ts';
 import { strFromU8, strToU8 } from 'fflate';
 
@@ -75,7 +75,6 @@ export function playSong(app: App, s: SongInfo): void {
 // runs AddmusicK on the project, with a note while it works; `then`: further ROM changes of the same
 // undo step once inserted. true when inserted
 export async function insertMusic(app: App, p: MusicProject, what: string, then?: () => void): Promise<boolean> {
-  if (app.dirty) app.saveLevel(true);
   musicPlayer.stop();
   const wait = modal('Music', h('p', null, `${what} – AddmusicK is inserting the music …`), []);
   let r;
@@ -92,7 +91,6 @@ export async function insertMusic(app: App, p: MusicProject, what: string, then?
     toast(`${what}: AddmusicK failed – ${r.errors[0] ?? 'error'}`, 'error');
     return false;
   }
-  patchesChanged(app);
   toast(`${what}${r.warnings.length ? ` – ${r.warnings.join(' ')}` : ''}`);
   return true;
 }
@@ -256,7 +254,6 @@ export function musicPane(app: App, changed: () => void): Pane {
   const setForLevel = (num: number) => {
     try {
       app.romEdit(`Music of level ${hex(app.level.number, 3)}`, () => setLevelMusic(app.rom, app.level.number, levelMusic(app.rom, app.level.number) === num ? 0 : num));
-      patchesChanged(app);
     } catch (e) { toast(errorText(e), 'error'); return; }
     render();
   };

@@ -20,7 +20,7 @@ import type { UberProject } from '../core/uberproject.ts';
 import type { BlockProject } from '../core/blocks.ts';
 import { map16Source } from '../core/render.ts';
 import { storedUpload, toUpload, settingsForm, reapplyPackagePatch, patchDone, type PackagesTab } from './patchmanager.ts';
-import { patchesChanged, errorText, type Pane } from './projectpane.ts';
+import { errorText, type Pane } from './projectpane.ts';
 import { definesButton, editButton } from './defineedit.ts';
 import { openDocs, packageDocs } from './docview.ts';
 import { gfxName } from './gfx/map16tab.ts';
@@ -300,11 +300,9 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
       [{ label: 'Cancel' }, { label: 'Remove', danger: true }]);
     if (i !== 1) return;
     const keys = TOOL_KINDS.filter((k) => rec[TOOL[k]].files.length);
-    if (app.dirty) app.saveLevel(true);
     try {
       const blank = map16Source(app.rom, app.render).fg(0x025);
       const w = await app.romEditAsync(`Package “${rec.name}” removed`, () => removePackage(app.rom, rec.id, blank));
-      patchesChanged(app);
       toast(`“${rec.name}” removed${w.length ? ': ' + w.join(' ') : ''}`);
     } catch (e) { toast(errorText(e), 'error'); }
     for (const k of keys) host.panes[k].reload();

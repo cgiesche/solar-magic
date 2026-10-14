@@ -374,7 +374,6 @@ export class GfxTab implements WsPanel {
         if (s.ext) { const ex = levelExtGfx(app.rom, app.level.number); ex[s.k] = v; setLevelExtGfx(app.rom, app.level.number, ex); }
         else { const set = levelGfx(app.rom, app.level.number); set[s.k] = v; setLevelGfx(app.rom, app.level.number, set); }
       });
-      app.flushRomChange();
     } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
   }
 

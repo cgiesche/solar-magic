@@ -625,12 +625,14 @@ export class OverworldView {
   save(): void {
     const rom = this.app.rom;
     try {
-      // Layer 2 first: it is the only part that can fail (no free space)
-      const n = writeL2(rom, this.l2);
-      writeL1(rom, this.l1);
-      for (const [tl, code] of this.names) setNameCode(rom, tl, code);
+      // not a ROM undo step: the overworld editor has its own undo
+      const n = this.app.romEdit('Overworld saved', () => {
+        const n = writeL2(rom, this.l2);
+        writeL1(rom, this.l1);
+        for (const [tl, code] of this.names) setNameCode(rom, tl, code);
+        return n;
+      }, { record: false });
       this.names.clear();
-      this.app.romWritten();
       this.dirty = false;
       this.invalidate();
       this.redrawMap();

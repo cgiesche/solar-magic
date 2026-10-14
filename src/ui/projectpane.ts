@@ -38,17 +38,11 @@ export interface Pane {
   touch(): void; // the project was changed from outside the tab: applied to the ROM at once
 }
 
-// after a ROM edit by a patch, project or package (romEdit told the editors): the level is loaded again
-// from the ROM
-export function patchesChanged(app: App): void {
-  app.openLevel(app.level.number);
-}
-
 export function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-// changed: after this tab changed the ROM (and patchesChanged)
+// changed: after this tab changed the ROM
 export function projectPane<P extends Project>(app: App, spec: PaneSpec<P>, changed: () => void): Pane & { project(): P } {
   const el = h('div', { class: 'project-pane' });
   let proj: P;
@@ -81,17 +75,10 @@ export function projectPane<P extends Project>(app: App, spec: PaneSpec<P>, chan
   // the changed project into the ROM, one undo step with the editor data; a failed one leaves the ROM
   // as it was and the tab shows the ROM's project again
   const change = () => {
-    if (app.dirty) app.saveLevel(true); // the level save is not part of the undo step
     let r: ApplyResult;
     const text = spec.applied(proj);
     try {
-      r = app.romEdit(`${spec.title} changed`, () => {
-        const before = app.rom.snapshot();
-        let res: ApplyResult;
-        try { res = spec.save(proj); } catch (e) { res = { ok: false, errors: [errorText(e)], warnings: [], prints: [] }; }
-        if (!res.ok) app.rom.restore(before);
-        return res;
-      });
+      r = app.romEdit(`${spec.title} changed`, () => spec.save(proj));
     } catch (e) { r = { ok: false, errors: [errorText(e)], warnings: [], prints: [] }; }
     reload();
     logTool(spec.title, r);
@@ -99,7 +86,6 @@ export function projectPane<P extends Project>(app: App, spec: PaneSpec<P>, chan
       toast(`${spec.title}: not applied – ${r.errors[0] ?? 'error'}`, 'error');
       return;
     }
-    patchesChanged(app);
     changed();
     toast(`${text}${r.warnings.length ? ` – ${r.warnings.join(' ')}` : ''}`);
   };

@@ -10,7 +10,7 @@ import { patchArchive, type PatchEntry } from '../core/patchreg.ts';
 import { uploadFromFiles, effectiveDefines, uploadSource, optionDefault, packUpload, unpackUpload, type StoredUpload, type Upload, type PatchOption } from '../core/patchpkg.ts';
 import { ensureRequirements } from '../core/packages.ts';
 import { definesForm } from './defineedit.ts';
-import { patchesChanged, errorText } from './projectpane.ts';
+import { errorText } from './projectpane.ts';
 import type { ToolKind } from '../core/parts.ts';
 import { recordPackageChange, type Package } from '../core/pkgreg.ts';
 
@@ -76,7 +76,6 @@ export function reapplyPackagePatch(app: App, upload: Upload, fileName: string, 
   src.settings = values;
   const stored: StoredUpload = { fileName, files: [...upload.files], main };
   src.archive = packUpload(stored); // kept with the editor data, not in the ROM
-  if (app.dirty) app.saveLevel(true); // the level save is not part of the undo step
   let r: ApplyResult;
   try {
     r = app.romEdit(`Patch “${upload.name}” reapplied`, () => {
@@ -85,16 +84,11 @@ export function reapplyPackagePatch(app: App, upload: Upload, fileName: string, 
         return reapplyPatch(app.rom, entry.id, src);
       };
       if (rec) return recordPackageChange(app.rom, rec, apply).result; // the patch's new id goes into the record
-      const before = app.rom.snapshot();
-      const res = apply();
-      if (!res.ok) app.rom.restore(before);
-      return res;
+      return apply();
     });
   } catch (e) {
     return fail(e);
   }
-  if (!r.ok) return r;
-  patchesChanged(app);
   return r;
 }
 

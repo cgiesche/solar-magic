@@ -233,7 +233,6 @@ export class PaletteTab implements WsPanel {
     this.custom = 0;
     this.trace = null;
     this.headers = null;
-    app.flushRomChange();
     this.retrace();
     this.buildBar();
     this.paint();
@@ -246,7 +245,7 @@ export class PaletteTab implements WsPanel {
     if (locked && changes.length > 1) toast(`${locked} color${locked > 1 ? 's' : ''} set by the game skipped (only editable with an own palette)`);
     if (!ok.length) return;
     if (!(await this.allowed(ok.map(([i]) => i)))) { this.paint(); return; }
-    this.app.romEdit(label, () => { for (const [i, v] of ok) this.app.rom.w16(this.src(i), v & 0x7fff); }, key);
+    this.app.romEdit(label, () => { for (const [i, v] of ok) this.app.rom.w16(this.src(i), v & 0x7fff); }, { key });
     this.paint();
   }
 

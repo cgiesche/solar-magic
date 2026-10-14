@@ -110,7 +110,7 @@ export class AnimTab implements WsPanel {
     try {
       app.romEdit(`${this.global ? 'Global animation' : `Animation level ${hex(app.level.number, 3)}`}: ${label}`, () => {
         if (this.global) writeGlobalList(app.rom, list); else writeLevelList(app.rom, app.level.number, list);
-      }, key);
+      }, { key });
     } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
   }
   private async editSlot(fn: (s: ExSlot) => void, label: string, key: string | null = null): Promise<void> {

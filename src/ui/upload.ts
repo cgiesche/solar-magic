@@ -12,7 +12,7 @@ import type { PartKind } from '../core/parts.ts';
 import { map16Source } from '../core/render.ts';
 import { hex } from '../core/names.ts';
 import { settingsForm } from './patchmanager.ts';
-import { patchesChanged, errorText } from './projectpane.ts';
+import { errorText } from './projectpane.ts';
 import { docsButton } from './docview.ts';
 import { musicPlayer } from './musicplayer.ts';
 import { placementEditor } from './pkgplace.ts';
@@ -70,7 +70,6 @@ function installDialog(app: App, p: ReadyPreview | ManualPreview, body: HTMLElem
   const install = async () => {
     if (busy) return;
     busy = true;
-    if (app.dirty) app.saveLevel(true); // the level save is not part of the undo step
     if (music) musicPlayer.stop();
     clear(log).appendChild(h('p', { class: 'hint' }, music ? 'Installing – AddmusicK is inserting the music …' : 'Installing …'));
     const src = map16Source(app.rom, app.render);
@@ -84,7 +83,6 @@ function installDialog(app: App, p: ReadyPreview | ManualPreview, body: HTMLElem
     logTool(`Package “${p.name}”`, r);
     if (!r.ok || !r.pkg) return;
     dlg.close(true);
-    patchesChanged(app);
     // the sample level: a level edit of its own (not saved yet)
     const sample = r.sample;
     if (sample) {
@@ -92,8 +90,6 @@ function installDialog(app: App, p: ReadyPreview | ManualPreview, body: HTMLElem
       app.selection.clear();
       app.changed();
     }
-    app.emit('level-header'); // the level setup may have changed its graphics slots and colors
-    app.palettesChanged();
     toast(`“${p.name}” installed${r.warnings.length ? ` (${r.warnings.length} warning(s))` : ''}${sample ? `, its sample level in place of level ${hex(app.level.number, 3)} (not saved yet)` : ''} – Ctrl+Z undoes it.`);
     done(r.pkg);
   };

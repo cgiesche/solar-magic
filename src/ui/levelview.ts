@@ -752,7 +752,7 @@ export class LevelView {
       return;
     }
     if (d.kind === 'marker') {
-      if (!d.edit) { if (d.moved) app.romWritten(); this.paint(); return; }
+      if (!d.edit) { this.paint(); return; }
       if (!d.moved) { d.edit.cancel(); this.paint(); return; }
       d.edit.commit();
       return;

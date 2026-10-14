@@ -76,7 +76,6 @@ export function openLevelImportDialog(app: App, fileName: string, files: Map<str
       if (!r.ok) { logTool(`Level import “${name}”`, { errors: r.errors, warnings: [] }); return false; }
       const bg = r.bg;
       if (bg) app.editLevel(() => { app.level.bg = bg; });
-      app.emit('level-header');
       toast(`“${name}” imported into level ${lvl}: ${r.notes.join(' · ')}${r.bg ? ' – level not saved yet' : ''}`);
       return true;
     } },

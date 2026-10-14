@@ -128,7 +128,7 @@ export function openHeaderDialog(app: App): void {
       label: 'Apply', primary: true, onClick: () => {
         if (musicPlayer.label === 'header') musicPlayer.stop();
         if (levelSong !== levelMusic(app.rom, lv.number)) {
-          try { setLevelMusic(app.rom, lv.number, levelSong); app.romWritten(); } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
+          try { app.romEdit(`Music of level ${hex(lv.number, 3)}`, () => setLevelMusic(app.rom, lv.number, levelSong)); } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
         }
         app.editLevel(() => {
           const modeChangedL2 = hasLayer2Objects(hd.mode) !== hasLayer2Objects(lv.header.mode);

@@ -88,7 +88,7 @@ export function openEntrancesDialog(app: App): void {
   buildDetail();
   const dlg = modal(`Secondary entrances ${bank ? '100–1FF' : '000–0FF'}`, h('div', { class: 'ent-editor' },
     h('div', null, h('div', { class: 'row small' }, 'Show: ', filter, h('button', { title: 'Next free number, into the current level (at the main entrance)', onclick: newEntry }, '+ New')), list), detail),
-  [{ label: 'Close', primary: true }], () => { app.romWritten(); });
+  [{ label: 'Close', primary: true }]);
 }
 
 export function openRomInfo(app: App): void {
@@ -111,7 +111,7 @@ export function openExpandDialog(app: App): void {
     h('p', { class: 'hint' }, `Currently ${rom.size / 1024} KB. More room for levels, graphics, music etc. Saving expands automatically when needed. At most 4 MB (LoROM).`),
     h('div', { class: 'row' }, [0x100000, 0x200000, 0x400000].map((sz) => h('button', {
       disabled: rom.size >= sz,
-      onclick: () => { rom.expand(sz); app.romWritten(); toast(`ROM expanded to ${sz / 1048576} MB`); dlg.close(); },
+      onclick: () => { app.romEdit(`ROM expanded to ${sz / 1048576} MB`, () => rom.expand(sz)); toast(`ROM expanded to ${sz / 1048576} MB`); dlg.close(); },
     }, `${sz / 1048576} MB`))),
   );
   const dlg = modal('Expand ROM', body, [{ label: 'Cancel' }]);
@@ -169,8 +169,7 @@ function saveAs(app: App, target: number): void {
   // write into fresh space: pretend old data of target is the destination
   copy.l1Addr = dst.l1Addr; copy.l1Size = 0; copy.l2Size = 0; copy.sprAddr = dst.sprAddr; copy.sprSize = 0;
   try {
-    const log = saveLevel(app.rom, copy);
-    app.romWritten();
+    const log = app.romEdit(`Level ${hex(app.level.number, 3)} saved as ${hex(target, 3)}`, () => saveLevel(app.rom, copy));
     toast(`Saved as level ${hex(target, 3)}: ${log.join(' · ')}`);
     app.emit('level');
   } catch (e) {
@@ -183,18 +182,16 @@ export async function importLevel(app: App): Promise<boolean> {
   if (!f) return false;
   try {
     const rom = app.rom, n = app.level.number;
-    const data = importLevelFile(rom, await f.text(), app.level);
-    app.editLevel(() => { app.level = data.level; }, false);
-    // graphics slots and palette live in the ROM: an undoable ROM edit (Ctrl+Z takes them back first)
-    app.romEdit(`${f.name}: graphics slots/palette of level ${hex(n, 3)}`, () => {
-      setLevelGfx(rom, n, data.gfx ?? new Array(8).fill(0xff));
-      if (data.palette || customPalette(rom, n)) setCustomPalette(rom, n, data.palette);
+    const text = await f.text();
+    // structures, graphics slots and palette live in the ROM: an undoable ROM edit, then the level (not
+    // saved yet) as a level edit (Ctrl+Z takes that back first)
+    const data = app.romEdit(`${f.name}: structures, graphics slots/palette of level ${hex(n, 3)}`, () => {
+      const d = importLevelFile(rom, text, app.level);
+      setLevelGfx(rom, n, d.gfx ?? new Array(8).fill(0xff));
+      if (d.palette || customPalette(rom, n)) setCustomPalette(rom, n, d.palette);
+      return d;
     });
-    app.romWritten();
-    app.selection.clear();
-    app.changed();
-    app.emit('level-header');
-    app.palettesChanged();
+    app.editLevel(() => { app.level = data.level; app.selection.clear(); });
     toast(`${f.name} imported as level ${hex(n, 3)} (not saved yet).`);
     return true;
   } catch (e) {

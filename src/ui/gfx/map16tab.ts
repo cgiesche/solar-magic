@@ -154,7 +154,7 @@ export class Map16Tab implements WsPanel {
   }
 
   private edit(label: string, fn: () => void, key: string | null = null): void {
-    try { this.app.romEdit(label, fn, key); } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
+    try { this.app.romEdit(label, fn, { key }); } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
   }
 
   private writeWord(q: number, v: number, label: string): void {

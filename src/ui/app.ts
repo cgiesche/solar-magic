@@ -13,7 +13,7 @@ import { renderLevel, type LevelImages, composite } from '../core/render.ts';
 import { saveLevel } from '../core/save.ts';
 import { captureSprites, captureSpriteAt, type SpriteImage } from '../core/spritegfx.ts';
 import { spriteMemJob, usedSpriteMemory } from '../core/spritemem.ts';
-import { DM16_EXT, levelGfx, defaultGfx } from '../core/patches.ts';
+import { DM16_EXT, levelGfx, levelExtGfx, customPalette, levelMusic, defaultGfx } from '../core/patches.ts';
 import { gfxSkipMask, gfxFilesHash } from '../core/gfxpages.ts';
 import { STRUCT_EXT, STRUCT_MAX, TRANSPARENT, listStructures, readStructure, writeStructure, type Structure } from '../core/structs.ts';
 import type { Package } from '../core/pkgreg.ts';
@@ -23,7 +23,8 @@ import { bgFromWram, bgIndex, encodeBg } from '../core/bg.ts';
 import { toast, log as logMsg, modalsOpen, onModalsChange } from './dom.ts';
 import { musicPlayer } from './musicplayer.ts';
 import { ExitGraph, exitTarget } from '../core/exitgraph.ts';
-import { RomHistory, type RomEdit } from '../core/romhistory.ts';
+import type { RomHistory, RomEdit } from '../core/romhistory.ts';
+import { RomEditSession, type EditOptions } from '../core/romedit.ts';
 import { LevelHistory } from '../core/levelhistory.ts';
 import { resizeObjectSize, type ObjKind, type ObjKinds } from '../core/objkinds.ts';
 import { JumpArcs, ARC_SPEEDS, type JumpArc } from '../core/jumparcs.ts';
@@ -57,7 +58,7 @@ export type AppEvent =
   | 'level-header' // the level's header, GFX slots or palette changed
   | 'mode' // the edit mode (layer 1/2, sprites, BG, exits …) changed
   | 'render' // the level was emulated and drawn again
-  | 'rom-change' // the ROM was written (romWritten, romChanged)
+  | 'rom-change' // the ROM was written (a ROM edit, undo/redo, a level save)
   | 'probes' // the asked or the prefetched probes are done (block, collision, sprite, run speeds)
   | 'objkinds' // object kinds asked for are known (or failed)
   | 'level-scan' // the level scan of the level as edited is known
@@ -105,8 +106,9 @@ export class App {
   dirty = false;
   private levelHistory = new LevelHistory<Level>(cloneLevel);
   private editToken = 0; // the latest begun level edit (older handles do nothing)
-  // undo for ROM edits of the graphics workspace (palettes, Map16, GFX, slot assignments)
-  romHistory: RomHistory;
+  // every ROM edit goes through it (romEdit): one undo step, all or nothing, the follow-ups below
+  romEdits: RomEditSession;
+  get romHistory(): RomHistory { return this.romEdits.history; }
   wsTile = 0; // Map16 tile for 'open-map16' (opens the graphics workspace there)
   wsTileBg = false; // wsTile is a BG tile
   gfxImport: { file: File; into: Package | null } | null = null; // for 'import-gfx'
@@ -154,7 +156,20 @@ export class App {
     this.emu.boot();
     onModalsChange(() => { this.resumeBackground(); this.emit('busy'); });
     musicPlayer.onChange(() => { this.resumeBackground(); this.emit('busy'); });
-    this.romHistory = new RomHistory(rom);
+    this.romEdits = new RomEditSession(rom, {
+      prepare: () => { if (this.level && this.dirty) this.saveLevel(true); },
+      written: (w) => {
+        if (w.recorded) this.pushOrder('rom', this.romHistory.undoStack.length);
+        this.romChanged();
+      },
+      followUps: [
+        // the open level as stored (a patch rewrote its sprite data, a package its sample …): loaded again
+        { read: (r) => (this.level ? levelSignature(r, this.level.number) : ''), changed: () => this.reloadLevel() },
+        // its graphics slots, own palette or music: shown at once
+        { read: (r) => (this.level ? headerSignature(r, this.level.number) : ''), changed: () => { this.flushRomChange(); this.emit('level-header'); } },
+        { read: (r) => structuresSignature(r), changed: () => { this.flushRomChange(); this.emit('structs'); this.emit('change'); } },
+      ],
+    });
     this.results = new ResultCache(new RomFingerprint(rom));
     this.cacheReady = kvEntries<CacheEntry>(CACHE_PREFIX)
       .then((e) => this.results.load(e.map(([k, v]) => [k.slice(CACHE_PREFIX.length), v])))
@@ -398,7 +413,7 @@ export class App {
       if (e.screen === p.screen && e.entranceX === p.ex && e.entranceY === p.ey) return false;
       e.screen = p.screen; e.entranceX = p.ex; e.entranceY = p.ey;
       // ROM data: one undo step per marker (successive moves merge)
-      this.romEdit(`Secondary entrance ${hex(m.index, 3)} moved`, () => writeSecondaryEntrance(this.rom, m.index, e), `sec-entrance:${m.index}`);
+      this.romEdit(`Secondary entrance ${hex(m.index, 3)} moved`, () => writeSecondaryEntrance(this.rom, m.index, e), { key: `sec-entrance:${m.index}` });
     }
     return true;
   }
@@ -446,7 +461,7 @@ export class App {
   editSecondaryEntrance(idx: number, label: string, f: (e: SecondaryEntrance) => void, key: string | null = null): void {
     const e = readSecondaryEntrance(this.rom, idx);
     f(e);
-    this.romEdit(label, () => writeSecondaryEntrance(this.rom, idx, e), key);
+    this.romEdit(label, () => writeSecondaryEntrance(this.rom, idx, e), { key });
     this.findSecondaryEntrances();
     this.emit('change');
   }
@@ -1302,21 +1317,13 @@ export class App {
     return { x: x0, y: y0, w, h, tiles };
   }
 
-  // after the structure table changed: the emulator sees the new ROM, the level is drawn again
-  structuresChanged(): void {
-    this.romWritten();
-    this.refresh();
-    this.emit('structs');
-    this.emit('change');
-  }
-
   // stores the selection as structure n; replace: the selected objects become one structure object
   // (at the place of the last of them in the object list, so objects in between still cover it)
   saveSelectionAsStructure(n: number, name: string, replace: boolean): boolean {
     const r = this.structureFromSelection();
     if (typeof r === 'string') { toast(r, 'error'); return false; }
     try {
-      writeStructure(this.rom, n, { w: r.w, h: r.h, tiles: r.tiles, name });
+      this.romEdit(`Structure ${hex(n, 2)} saved`, () => writeStructure(this.rom, n, { w: r.w, h: r.h, tiles: r.tiles, name }));
     } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); return false; }
     if (replace) {
       this.editLevel(() => {
@@ -1326,10 +1333,9 @@ export class App {
         const res = [...all.slice(0, at + 1).filter((x) => !this.selection.has(x.uid)), o, ...all.slice(at + 1)];
         if (this.mode === 'l2') this.level.layer2Objects = res; else this.level.objects = res;
         this.selection = new Set([o.uid]);
-      }, false); // (drawn by structuresChanged)
+      });
     }
     this.paletteItem = { kind: 'obj', num: 0, ext: STRUCT_EXT, size: 0, struct: n };
-    this.structuresChanged();
     return true;
   }
 
@@ -1429,12 +1435,10 @@ export class App {
       const log = saveLevel(this.rom, this.level);
       this.dirty = false;
       const n = this.level.number;
-      // re-read to refresh addresses/sizes, keep selection by position
-      const sel = this.selection;
-      const mode = this.mode;
+      // re-read to refresh addresses/sizes; objects and sprites keep their ids (selection, markers)
+      const was = this.level;
       this.level = loadLevel(this.rom, n);
-      this.mode = mode;
-      this.selection = sel;
+      keepUids(was, this.level, this.vertical);
       this.romWritten();
       if (!silent) toast(`Level ${hex(n, 3)} saved. ${log.join(' · ')}`);
       else logMsg(`Level ${hex(n, 3)} saved automatically. ${log.join(' · ')}`);
@@ -1445,48 +1449,30 @@ export class App {
     }
   }
 
-  // ------------- ROM edits (graphics workspace) -------------
-  // runs an undoable ROM edit; the level is re-emulated shortly after the last one of a series
-  romEdit<T>(label: string, fn: () => T, key: string | null = null): T {
-    const h = this.romHistory, pushes = h.pushes;
-    try {
-      return h.edit(label, fn, key);
-    } finally {
-      if (!h.open) {
-        if (h.pushes !== pushes) this.pushOrder('rom', h.undoStack.length);
-        this.romChanged();
-      }
-    }
+  // ------------- ROM edits -------------
+  // One undoable ROM edit (see romedit.ts): a dirty level is saved before it; when fn throws or returns
+  // { ok: false } nothing changes and nothing is recorded; views, the level and the render follow by
+  // themselves. Edits with the same key in quick succession merge.
+  romEdit<T>(label: string, fn: () => T, opt: EditOptions = {}): T {
+    return this.romEdits.edit(label, fn, opt);
   }
 
   // romEdit for a change that awaits (AddmusicK inserting songs): one undo step for all of it
-  async romEditAsync<T>(label: string, fn: () => Promise<T>): Promise<T> {
-    const h = this.romHistory, pushes = h.pushes;
-    h.begin(label);
-    try {
-      return await fn();
-    } finally {
-      h.commit();
-      if (!h.open) {
-        if (h.pushes !== pushes) this.pushOrder('rom', h.undoStack.length);
-        this.romChanged();
-      }
-    }
+  romEditAsync<T>(label: string, fn: () => Promise<T>): Promise<T> {
+    return this.romEdits.editAsync(label, fn);
   }
 
-  // Whoever writes the ROM tells it with one of these two (emulators and caches follow rom.gen by
-  // themselves; this is for the editor's views and the copy in the browser):
-  // romWritten – written outside the ROM history (saving a level, the overworld, messages …): editors
-  // show it ('rom-change'), the copy in the browser is stored at once;
-  romWritten(): void {
+  // the level was saved (outside the ROM history): editors show it ('rom-change'), the copy in the
+  // browser is stored at once
+  private romWritten(): void {
     this.romNotice();
     clearTimeout(this.persistTimer);
     this.persistTimer = 0;
     this.persist();
   }
-  // romChanged – an undoable ROM edit (romEdit, undo/redo): editors show it at once, the level render and
-  // storing follow debounced (edits come in quick succession, e.g. graphics strokes)
-  romChanged(): void {
+  // a ROM edit or undo/redo: editors show it at once, the level render and storing follow debounced
+  // (edits come in quick succession, e.g. graphics strokes)
+  private romChanged(): void {
     this.romNotice();
     clearTimeout(this.romTimer);
     const run = () => {
@@ -1503,6 +1489,16 @@ export class App {
   private romNotice(): void {
     this.graph = null;
     this.emit('rom-change');
+  }
+
+  // the open level again from the ROM, after a ROM edit changed its stored data (unsaved changes are
+  // gone: an edit saves them first, an undo may take back what they were saved over)
+  private reloadLevel(): void {
+    clearTimeout(this.romTimer); // (openLevel draws it)
+    this.romTimer = 0;
+    this.dirty = false;
+    this.openLevel(this.level.number);
+    this.palettesChanged();
   }
 
   // a stroke ended: the re-emulation waits for a pause in drawing
@@ -1522,13 +1518,12 @@ export class App {
   private romStep(undo: boolean): boolean {
     let e: RomEdit | null;
     try {
-      e = undo ? this.romHistory.undo() : this.romHistory.redo();
+      e = undo ? this.romEdits.undo() : this.romEdits.redo();
     } catch (err) {
       toast(String(err instanceof Error ? err.message : err), 'error');
       return false;
     }
     if (!e) return false;
-    this.romChanged();
     toast(`${undo ? 'Undone' : 'Redone'}: ${e.label}`);
     return true;
   }
@@ -1568,6 +1563,29 @@ export class App {
 }
 
 export { hasLayer2Objects, SEC_HDR };
+
+// what the follow-ups of a ROM edit compare (see romEdits)
+const noUids = (k: string, v: unknown) => (k === 'uid' ? undefined : v);
+function levelSignature(rom: Rom, n: number): string {
+  try { return JSON.stringify(loadLevel(rom, n), noUids); } catch (e) { return String(e); }
+}
+function headerSignature(rom: Rom, n: number): string {
+  return JSON.stringify([levelGfx(rom, n), levelExtGfx(rom, n), customPalette(rom, n), levelMusic(rom, n)]);
+}
+function structuresSignature(rom: Rom): string {
+  try { return JSON.stringify([...listStructures(rom)]); } catch (e) { return String(e); }
+}
+
+// the ids of a level's objects and sprites onto the same level loaded again (sprites are stored in load
+// order); when the counts differ, the new ones stay
+function keepUids(from: Level, to: Level, vertical: boolean): void {
+  const copy = <T extends { uid: number }>(a: T[] | null, b: T[] | null) => {
+    if (a && b && a.length === b.length) a.forEach((x, i) => { b[i].uid = x.uid; });
+  };
+  copy(from.objects, to.objects);
+  copy(from.layer2Objects, to.layer2Objects);
+  copy(spriteLoadOrder(from.sprites, vertical), to.sprites);
+}
 
 function spriteCanvas(img: SpriteImage): HTMLCanvasElement {
   const c = document.createElement('canvas');
