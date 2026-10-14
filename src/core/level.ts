@@ -7,7 +7,8 @@ import { STRUCT_EXT } from './structs.ts';
 export const L1_PTRS = 0x05e000;
 export const L2_PTRS = 0x05e600;
 export const SPR_PTRS = 0x05ec00;
-export const SEC_HDR = [0x05f000, 0x05f200, 0x05f400, 0x05f600];
+// the secondary header: the game's four tables and Lunar Magic's layer 2 scroll byte ($06FA00, l2scroll.ts)
+export const SEC_HDR = [0x05f000, 0x05f200, 0x05f400, 0x05f600, 0x06fa00];
 export const SEC_ENT = [0x05f800, 0x05fa00, 0x05fc00, 0x05fe00];
 
 export interface LevelObject {
@@ -55,7 +56,7 @@ export interface PrimaryHeader {
 }
 
 export interface SecondaryHeader {
-  layer2Scroll: number; // F000 bits 7-4
+  layer2Scroll: number; // F000 bits 7-4: the paired setting, or with layer2Separate the horizontal rate
   entranceY: number; // F000 bits 3-0
   layer3: number; // F200 bits 7-6
   entranceAction: number; // F200 bits 5-3
@@ -66,6 +67,9 @@ export interface SecondaryHeader {
   noYoshiIntro: number; // F600 bit 7
   verticalPositioning: number; // F600 bits 6-5
   entranceScreen: number; // F600 bits 4-0
+  layer2Separate: number; // FA00 bit 7: separate horizontal and vertical layer 2 rates
+  layer2HAuto: number; // FA00 bit 6: the horizontal rate (layer2Scroll) is an auto-scroll
+  layer2V: number; // FA00 bits 4-0: the vertical rate
 }
 
 export interface Level {
@@ -140,7 +144,7 @@ export function encodePrimaryHeader(h: PrimaryHeader): Uint8Array {
   ]);
 }
 
-export function decodeSecondaryHeader([a, b, c, d]: Iterable<number> & ArrayLike<number>): SecondaryHeader {
+export function decodeSecondaryHeader([a, b, c, d, e = 0]: Iterable<number> & ArrayLike<number>): SecondaryHeader {
   return {
     layer2Scroll: a >> 4,
     entranceY: a & 0x0f,
@@ -153,6 +157,9 @@ export function decodeSecondaryHeader([a, b, c, d]: Iterable<number> & ArrayLike
     noYoshiIntro: d >> 7,
     verticalPositioning: (d >> 5) & 3,
     entranceScreen: d & 0x1f,
+    layer2Separate: e >> 7,
+    layer2HAuto: (e >> 6) & 1,
+    layer2V: e & 0x1f,
   };
 }
 export function encodeSecondaryHeader(s: SecondaryHeader): number[] {
@@ -161,6 +168,7 @@ export function encodeSecondaryHeader(s: SecondaryHeader): number[] {
     (s.layer3 << 6) | ((s.entranceAction & 7) << 3) | (s.entranceX & 7),
     (s.midwayScreen << 4) | ((s.fgInitY & 3) << 2) | (s.bgInitY & 3),
     (s.noYoshiIntro << 7) | ((s.verticalPositioning & 3) << 5) | (s.entranceScreen & 0x1f),
+    (s.layer2Separate << 7) | ((s.layer2HAuto & 1) << 6) | (s.layer2V & 0x1f),
   ];
 }
 export function readSecondaryHeader(rom: Rom, n: number): SecondaryHeader {

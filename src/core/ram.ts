@@ -21,7 +21,10 @@ export const RAM = {
   // camera: layer 1 position (16-bit) and its copy for the next frame, layer 3 position
   layer1X: 0x1a, layer1Y: 0x1c,
   layer1XNext: 0x1462, layer1YNext: 0x1464,
+  layer2X: 0x1e, layer2Y: 0x20,
   layer3X: 0x22, layer3Y: 0x24,
+  scrollH: 0x1411, scrollV: 0x1412, // the camera follows Mario horizontally / vertically
+  scrollUp: 0x1404, // the camera may scroll up (Mario flying, climbing …)
   screenMode: 0x5b, // vertical level / layer 2 interaction bits
 
   // Mario

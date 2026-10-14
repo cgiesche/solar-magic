@@ -4,7 +4,8 @@
 //
 // .mwl (Ankouno's "MWL File Format", SMW-Data): at 0x40 (offset, size) pairs of the sections
 //  - 0 level information: 2 bytes the level number, then the secondary header ($05F000, $05F200,
-//    $05F400, $05F600, …);
+//    $05F400, $05F600, …), at 17 the layer 2 scroll byte ($06FA00, l2scroll.ts; $FF from a ROM
+//    without Lunar Magic's table: the paired setting);
 //  - 1 layer 1, 2 layer 2, 3 sprites: 8 header bytes (layer 1: byte 0 bit 0 = custom palette), then the
 //    data as in the ROM; a BG tilemap as layer 2 is 0x800 bytes (bgpack.ts);
 //  - 4 palette: 8 header bytes, 256 colors and the back area color;
@@ -32,7 +33,7 @@ const hx = (v: number, d: number) => v.toString(16).toUpperCase().padStart(d, '0
 
 export interface MwlSections {
   number: number; // level it was exported from
-  secondary: number[]; // 4 bytes
+  secondary: number[]; // the bytes of SEC_HDR
   layer1: Uint8Array; // with the 5-byte primary header
   customPalette: boolean;
   layer2: Uint8Array | null; // object data (with header) or a BG tilemap (0x800 bytes)
@@ -59,7 +60,7 @@ export function mwlSections(d: Uint8Array): MwlSections {
   const l1h = d.subarray(u32(d, 0x40 + 8), u32(d, 0x40 + 8) + 1);
   return {
     number: info[0] | (info[1] << 8),
-    secondary: Array.from(info.subarray(2, 6)),
+    secondary: [...info.subarray(2, 6), info.length > 17 && info[17] !== 0xff ? info[17] : 0],
     layer1: l1,
     customPalette: (l1h[0] & 1) !== 0,
     layer2: l2 && l2.length ? l2 : null,
