@@ -237,7 +237,7 @@ export function placeInLevel(rom: Rom, level: number, g: LevelGraphics, state: L
     else if (slot === LT3_SLOT) {
       l3.lt3 = num; l3Set = true;
       if (g.lt3) { l3.dest = g.lt3.dest; l3.size = g.lt3.size; }
-      slots.push(`${slot} = ${hx(num, 2)} (${LT3_DESTS[l3.dest].toLowerCase()}, ${hx(LT3_SIZES[l3.size], 4)} bytes)`);
+      slots.push(`${slot} = ${hx(num, 2)} (${LT3_DESTS[l3.dest].toLowerCase()}, 0x${hx(LT3_SIZES[l3.size], 4)} bytes)`);
       continue;
     } else continue;
     slots.push(`${slot} = ${hx(num, 2)}`);

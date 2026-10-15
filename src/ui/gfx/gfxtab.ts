@@ -21,6 +21,7 @@ import {
 } from '../../core/patches.ts';
 import { importGfxFile, exgfxName } from '../../core/map16file.ts';
 import { freeGfx } from '../../core/levelgfx.ts';
+import { levelLayer3, setLevelLayer3, LG_SLOT_NAMES, LT3_SLOT, GAME_LAYER3_GFX, LT3_DESTS, LT3_SIZES } from '../../core/layer3gfx.ts';
 import { recordPackageChange, type Package } from '../../core/pkgreg.ts';
 import { parsePrimaryHeader, L1_PTRS } from '../../core/level.ts';
 import { map16Source } from '../../core/render.ts';
@@ -82,16 +83,22 @@ function storeGfx(rom: Rom, f: GfxFile): void {
   setGfxEntry(rom, f.num, f.addr, false);
 }
 
-// slots of a level: name, storage index (levelGfx order) or BG2/BG3 index, file, default file; first: the
-// first 8x8 tile number (Map16 tiles, or for SP1-SP4 the sprite tile number in OAM: 100-1FF = page 1)
-interface Slot { name: string; k: number; ext: boolean; file: number; def: number; custom: boolean; first: number; sprite: boolean }
+// slots of a level: name, where it is kept (the GFX bypass in levelGfx order, BG2/BG3, layer 3's LG1-LG4 or
+// LT3) and its index there, file, default file; first: the first 8x8 tile number (Map16 tiles, for SP1-SP4
+// the sprite tile number in OAM: 100-1FF = page 1, for LG1-LG4 the layer 3 tile number); map16: a layer
+// slot the Map16 tiles draw from
+type SlotKind = 'gfx' | 'ext' | 'lg' | 'lt3';
+interface Slot { name: string; kind: SlotKind; k: number; file: number; def: number; custom: boolean; first: number; sprite: boolean; map16: boolean }
 function slotsOf(app: App, level: number, tileset: number, spriteSet: number): Slot[] {
   const set = levelGfx(app.rom, level);
   const def = defaultGfx(app.rom, tileset, spriteSet);
   const order: [string, number, number][] = [['FG1', 7, 0], ['FG2', 6, 0x80], ['BG1', 5, 0x100], ['FG3', 4, 0x180], ['SP1', 3, 0x00], ['SP2', 2, 0x80], ['SP3', 1, 0x100], ['SP4', 0, 0x180]];
-  const out: Slot[] = order.map(([name, k, first]) => ({ name, k, ext: false, file: set[k] !== 0xff ? set[k] : def[k], def: def[k], custom: set[k] !== 0xff, first, sprite: name.startsWith('SP') }));
+  const out: Slot[] = order.map(([name, k, first]) => ({ name, kind: 'gfx', k, file: set[k] !== 0xff ? set[k] : def[k], def: def[k], custom: set[k] !== 0xff, first, sprite: name.startsWith('SP'), map16: !name.startsWith('SP') }));
   const ex = levelExtGfx(app.rom, level);
-  ['BG2', 'BG3'].forEach((name, k) => out.push({ name, k, ext: true, file: ex[k], def: 0xff, custom: ex[k] !== 0xff, first: 0x200 + k * 0x80, sprite: false }));
+  ['BG2', 'BG3'].forEach((name, k) => out.push({ name, kind: 'ext', k, file: ex[k], def: 0xff, custom: ex[k] !== 0xff, first: 0x200 + k * 0x80, sprite: false, map16: true }));
+  const l3 = levelLayer3(app.rom, level);
+  LG_SLOT_NAMES.forEach((name, k) => out.push({ name, kind: 'lg', k, file: l3.lg[k] !== 0xff ? l3.lg[k] : GAME_LAYER3_GFX + k, def: GAME_LAYER3_GFX + k, custom: l3.lg[k] !== 0xff, first: k * 0x80, sprite: false, map16: false }));
+  out.push({ name: LT3_SLOT, kind: 'lt3', k: 0, file: l3.lt3, def: 0xff, custom: l3.lt3 !== 0xff, first: 0, sprite: false, map16: false });
   return out;
 }
 
@@ -232,7 +239,7 @@ export class GfxTab implements WsPanel {
   private autoRows: Map<number, number> | null = null; // file -> row
   private autoRow(file: number): number {
     if (!this.autoRows) {
-      const slots = this.levelSlots().filter((x) => !x.sprite && x.file !== 0xff);
+      const slots = this.levelSlots().filter((x) => x.map16 && x.file !== 0xff);
       const count = slots.map(() => new Array(8).fill(0));
       const src = map16Source(this.app.rom, this.app.render);
       // tiles the level uses (else the standard pages)
@@ -273,22 +280,52 @@ export class GfxTab implements WsPanel {
     for (const s of slots) {
       const has = s.file !== 0xff;
       const thumb = h('canvas', { class: 'gt-card-img', width: 64, height: 16 });
-      if (has) this.thumb(thumb, s.file, s.sprite ? 9 : this.rowForSlot(s), 64, 16);
+      if (has && s.kind !== 'lt3') this.thumb(thumb, s.file, this.rowForSlot(s), 64, 16);
       // where a default comes from: the header's tileset (layers) or sprite set
       const from = s.sprite ? `sprite graphics ${hex(hd.spriteGfx, 2)}` : `tileset ${hex(hd.tileset, 1)}`;
       const status = s.custom ? h('span', { class: 'hint', title: 'Only in this level; “Swap” → “Default” takes the graphics from the header again' }, 'custom')
-        : has && !s.ext ? h('a', { href: '#', class: 'hint', title: `Comes from the level header (${from}); changing it there changes all default slots of this level`, onclick: (e: Event) => { e.preventDefault(); openHeaderDialog(app); } }, 'Default')
+        : has && s.kind === 'lg' ? h('span', { class: 'hint', title: 'The game\'s layer 3 graphics (status bar, messages, tides …)' }, 'Default')
+        : has && s.kind === 'gfx' ? h('a', { href: '#', class: 'hint', title: `Comes from the level header (${from}); changing it there changes all default slots of this level`, onclick: (e: Event) => { e.preventDefault(); openHeaderDialog(app); } }, 'Default')
         : h('span', { class: 'hint' }, 'empty');
       box.append(h('div', { class: `gt-card${has && s.file === this.cur ? ' active' : ''}${has ? '' : ' empty'}` },
         h('div', { class: 'gt-card-head' }, h('b', null, s.name), status),
         h('div', { class: 'gt-card-body', title: has ? `Open ${gfxName(s.file)}` : '', onclick: () => { if (has) this.select(s.file); } }, thumb, h('span', { class: 'mono' }, has ? gfxName(s.file) : '–')),
-        h('div', { class: 'hint gt-card-range', title: s.sprite ? 'Sprite tile numbers (as in patches and sprites); from 100 = second page (T bit), given there without the 1' : 'The Map16 tiles use these 8x8 tile numbers' }, s.sprite ? `Sprite tiles ${spriteRange(s.first)}` : `Tiles ${hex(s.first, 3)}–${hex(s.first + 0x7f, 3)}`),
+        h('div', { class: 'hint gt-card-range', title: this.rangeTitle(s) }, this.range(s)),
+        s.kind === 'lt3' && has ? this.lt3Settings() : '',
         h('button', { class: 'gt-card-btn', onclick: () => void this.swap(s) }, 'Swap …')));
     }
   }
 
   private rowForSlot(s: Slot): number {
-    return s.sprite ? 9 : this.autoRow(s.file);
+    return s.sprite ? 9 : s.map16 ? this.autoRow(s.file) : 0;
+  }
+
+  // the tile numbers a slot's file is loaded as
+  private range(s: Slot): string {
+    if (s.sprite) return `Sprite tiles ${spriteRange(s.first)}`;
+    if (s.kind === 'lg') return `Layer 3 tiles ${hex(s.first, 3)}–${hex(s.first + 0x7f, 3)}`;
+    if (s.kind === 'lt3') return 'Layer 3 tilemap';
+    return `Tiles ${hex(s.first, 3)}–${hex(s.first + 0x7f, 3)}`;
+  }
+  private rangeTitle(s: Slot): string {
+    if (s.sprite) return 'Sprite tile numbers (as in patches and sprites); from 100 = second page (T bit), given there without the 1';
+    if (s.kind === 'lg') return 'Layer 3 graphics (2bpp, 0x800 bytes): the 8x8 tile numbers of the layer 3 tilemap';
+    if (s.kind === 'lt3') return 'A file with layer 3 tilemap data, shown instead of the image of the layer 3 setting (its behaviour, e.g. a tide, stays)';
+    return 'The Map16 tiles use these 8x8 tile numbers';
+  }
+
+  // where the LT3 file goes in the layer 3 tilemap, and how much of it
+  private lt3Settings(): HTMLElement {
+    const app = this.app, n = app.level.number, g = levelLayer3(app.rom, n);
+    const set = (what: string, v: Partial<typeof g>) => {
+      try { app.romEdit(`LT3 of level ${hex(n, 3)}: ${what}`, () => setLevelLayer3(app.rom, n, { ...levelLayer3(app.rom, n), ...v })); }
+      catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
+    };
+    const sel = (opts: string[], cur: number, title: string, on: (v: number) => void) => h('select', { title, onchange: (e: Event) => on(Number((e.target as HTMLSelectElement).value)) },
+      opts.map((o, i) => h('option', { value: String(i), selected: i === cur }, o)));
+    return h('div', { class: 'gt-card-l3' },
+      sel(LT3_DESTS, g.dest, 'Where the file goes: “Under the status bar” keeps the status bar\'s tilemap, the others overwrite (part of) it', (v) => set(LT3_DESTS[v].toLowerCase(), { dest: v })),
+      sel(LT3_SIZES.map((b) => (b === 0x2000 ? '512×512' : b === 0x1000 ? '512×256' : '256×256')), g.size, 'How much of the file is copied: 512×512 pixels = 0x2000 bytes, 512×256 = 0x1000, 256×256 = 0x800', (v) => set(`0x${hex(LT3_SIZES[v], 4)} bytes`, { size: v })));
   }
 
   private thumb(c: HTMLCanvasElement, num: number, row: number, w: number, hh: number): void {
@@ -340,7 +377,8 @@ export class GfxTab implements WsPanel {
       class: `gt-gal-item${num === (s.custom ? s.file : -1) ? ' active' : ''}`,
       onclick: () => { done(num); dlg.close(); },
     }, img ?? h('div', { class: 'gt-gal-none' }, '—'), h('b', { class: 'mono' }, label), h('span', { class: 'hint' }, sub));
-    grid.append(item(-1, s.ext ? 'none' : `Default (${gfxName(s.def)})`, s.ext ? 'Leave slot empty' : s.sprite ? 'from the sprite graphics in the header' : 'from the tileset in the header'));
+    const empty = s.kind === 'ext' || s.kind === 'lt3';
+    grid.append(item(-1, empty ? 'none' : `Default (${gfxName(s.def)})`, s.kind === 'lt3' ? 'the layer 3 setting\'s image' : empty ? 'Leave slot empty' : s.kind === 'lg' ? 'the game\'s layer 3 graphics' : s.sprite ? 'from the sprite graphics in the header' : 'from the tileset in the header'));
     const extra = (code: number, label: string, sub: string) => h('div', { class: 'gt-gal-item gt-gal-new', onclick: () => { done(code); dlg.close(); } },
       h('div', { class: 'gt-gal-none' }, '+'), h('b', null, label), h('span', { class: 'hint' }, sub));
     if (this.freeExGfx() >= 0) grid.append(
@@ -359,7 +397,7 @@ export class GfxTab implements WsPanel {
     const pick = await result;
     if (pick === null) return;
     if (pick === NEW_FILE || pick === IMPORT_FILE) {
-      const n = pick === NEW_FILE ? this.newExGfx(false) : await this.importNew();
+      const n = pick === NEW_FILE ? this.newExGfx(false, s.kind === 'lg' ? 0x800 : s.kind === 'lt3' ? 0x2000 : 0x1000) : await this.importNew();
       if (n !== null) await this.assignSlot(s, n);
       return;
     }
@@ -372,8 +410,12 @@ export class GfxTab implements WsPanel {
     if (v === (s.custom ? s.file : 0xff)) return;
     try {
       app.romEdit(`${s.name} of level ${hex(app.level.number, 3)} → ${v === 0xff ? 'default' : gfxName(v)}`, () => {
-        if (s.ext) { const ex = levelExtGfx(app.rom, app.level.number); ex[s.k] = v; setLevelExtGfx(app.rom, app.level.number, ex); }
-        else { const set = levelGfx(app.rom, app.level.number); set[s.k] = v; setLevelGfx(app.rom, app.level.number, set); }
+        if (s.kind === 'ext') { const ex = levelExtGfx(app.rom, app.level.number); ex[s.k] = v; setLevelExtGfx(app.rom, app.level.number, ex); }
+        else if (s.kind === 'lg' || s.kind === 'lt3') {
+          const g = levelLayer3(app.rom, app.level.number);
+          if (s.kind === 'lt3') g.lt3 = v; else g.lg[s.k] = v;
+          setLevelLayer3(app.rom, app.level.number, g);
+        } else { const set = levelGfx(app.rom, app.level.number); set[s.k] = v; setLevelGfx(app.rom, app.level.number, set); }
       });
     } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
   }
@@ -425,14 +467,15 @@ export class GfxTab implements WsPanel {
   }
 
   // creates an empty 4bpp file in the first free number; null: none left / failed
-  private newExGfx(hint = true): number | null {
+  // size: 0x1000 (4bpp), 0x800 (2bpp, layer 3) or 0x2000 (a layer 3 tilemap)
+  private newExGfx(hint = true, size = 0x1000): number | null {
     const app = this.app;
     const n = this.freeExGfx();
     if (n < 0) { toast('No free ExGFX number left', 'error'); return null; }
     try {
-      app.romEdit(`${gfxName(n)} created`, () => setGfxEntry(app.rom, n, app.rom.allocWrite(new Uint8Array(0x1000)), true));
+      app.romEdit(`${gfxName(n)} created`, () => setGfxEntry(app.rom, n, app.rom.allocWrite(new Uint8Array(size)), true, size));
       this.select(n);
-      if (hint) toast(`${gfxName(n)} created (empty, 4bpp). “Use in slot” on the right puts it into this level.`);
+      if (hint) toast(`${gfxName(n)} created (empty, ${size === 0x800 ? '2' : '4'}bpp). “Use in slot” on the right puts it into this level.`);
       return n;
     } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); return null; }
   }
@@ -531,7 +574,7 @@ export class GfxTab implements WsPanel {
     const items: MenuItem[] = [{ heading: `Level ${hex(this.app.level.number, 3)}` }];
     for (const s of this.levelSlots()) {
       items.push({
-        label: `${s.name} – now ${s.file === 0xff ? 'empty' : gfxName(s.file)}${s.sprite ? ' (Sprites)' : ` (tiles ${hex(s.first, 3)}–${hex(s.first + 0x7f, 3)})`}`,
+        label: `${s.name} – now ${s.file === 0xff ? 'empty' : gfxName(s.file)} (${s.sprite ? 'Sprites' : this.range(s).replace(/^Tiles/, 'tiles')})`,
         disabled: () => s.file === num,
         onClick: () => void this.assignSlot(s, num),
       });
@@ -543,7 +586,7 @@ export class GfxTab implements WsPanel {
   private usageUi(): HTMLElement | string {
     const t = this.focusTile;
     if (t < 0 || !this.file || t >= this.file.tiles) return h('p', { class: 'hint' }, 'A click with the eyedropper (or Alt+click) also shows which Map16 tiles use the 8x8 tile.');
-    const slot = this.levelSlots().find((s) => s.file === this.cur && !s.sprite);
+    const slot = this.levelSlots().find((s) => s.file === this.cur && s.map16);
     const box = h('div', { class: 'gt-usage' }, h('div', { class: 'panel-title' }, `8x8 tile ${hex(t, 2)} of the file`));
     if (!slot) { box.append(h('div', { class: 'hint' }, "The file is in none of this level's layer slots.")); return box; }
     const num = slot.first + t;
@@ -701,14 +744,14 @@ export class GfxTab implements WsPanel {
     const anim = this.app.animated();
     if (!anim) return out;
     for (const s of this.levelSlots()) {
-      if (s.file !== this.cur || s.sprite) continue;
+      if (s.file !== this.cur || !s.map16) continue;
       for (let k = 0; k < 128; k++) if (anim.tiles.has(s.first + k)) out.add(k);
     }
     return out;
   }
   // Ctrl+click: the own animation that overwrites the tile, in the Animations tab
   private gotoAnim(t: number): void {
-    const slot = this.levelSlots().find((s) => s.file === this.cur && !s.sprite);
+    const slot = this.levelSlots().find((s) => s.file === this.cur && s.map16);
     const own = slot ? animsAt(this.app, slot.first + t) : [];
     if (own.length) { this.ws.showAnim(own[0].global, own[0].slot); return; }
     toast(this.animatedTiles().has(t) ? `Tile ${hex(t, 2)} is animated by the game itself, not by an own animation.` : `Tile ${hex(t, 2)} is not animated.`);

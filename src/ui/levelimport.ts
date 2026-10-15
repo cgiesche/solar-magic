@@ -60,7 +60,7 @@ export function openLevelImportDialog(app: App, fileName: string, files: Map<str
       h('span', null, 'from tile '), hexInput(fgAt, 3, (v) => (fgAt = v), 0xfff),
       h('span', { class: 'hint' }, fgAt !== plan.fg.from ? ` (from ${hex(plan.fg.from, 3)} in the level file, already in use here)` : '')) : '',
     plan.layer3 ? h('label', { class: 'row small' }, check(use3, (v) => (use3 = v)),
-      ` Layer 3: ${l3.map((g) => g.slot === 'LT3' ? 'the tilemap' : g.slot).join(', ')}${lt3 ? ` (tilemap: ${LT3_DESTS[plan.layer3.dest].toLowerCase()}, ${hex(LT3_SIZES[plan.layer3.size], 4)} bytes)` : ''}`) : '',
+      ` Layer 3: ${l3.map((g) => g.slot === 'LT3' ? 'the tilemap' : g.slot).join(', ')}${lt3 ? ` (tilemap: ${LT3_DESTS[plan.layer3.dest].toLowerCase()}, 0x${hex(LT3_SIZES[plan.layer3.size], 4)} bytes)` : ''}`) : '',
     ...plan.gfx.map((g) => g.file
       ? h('div', { class: 'prop' }, h('label', null, `${g.slot}: ${file(g.file)}`),
         h('span', null, 'as ExGFX '), hexInput(g.num, 2, (v) => (g.num = v), 0xfe),
