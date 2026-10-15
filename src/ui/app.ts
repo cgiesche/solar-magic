@@ -5,7 +5,7 @@ import { LevelEmulator, type LevelRender, type LevelOverride, MAP_BASE, MAP_SIZE
 import {
   type Level, type LevelObject, type LevelSprite, type ScreenExit, type SecondaryEntrance, loadLevel, spriteLoadOrder, serializeLayer1, serializeSprites, serializeLevelSprites, spriteSizes, spriteId, spriteBytes,
   isL1Vertical, cloneLevel, newUid, hasLayer2Objects, hasObjects, L2_PTRS, SEC_HDR,
-  readSecondaryEntrance, writeSecondaryEntrance, decodeSecondaryEntrance, entrancePos, nearestEntrance, encodeSecondaryHeader, mainSpot, secondarySpot, sameSpot, placeMain, placeSecondary, midwaySpot, nearestMidway, placeMidway, isSized, SPRITE_MEMORY, levelRows,
+  readSecondaryEntrance, writeSecondaryEntrance, decodeSecondaryEntrance, entrancePos, nearestEntrance, encodeSecondaryHeader, mainSpot, secondarySpot, sameSpot, placeMain, placeSecondary, midwaySpot, nearestMidway, placeMidway, exitToMidway, isSized, SPRITE_MEMORY, levelRows,
 } from '../core/level.ts';
 import { hex, spriteName } from '../core/names.ts';
 import { loadPixiProject, customSpriteList, type CustomSprite } from '../core/pixi.ts';
@@ -511,7 +511,8 @@ export class App {
     const t = exitTarget(this.rom, this.level.number, e);
     this.openLevel(t.to);
     this.mode = 'exit';
-    this.exitMarker = t.entrance >= 0 ? { kind: 'sec', index: t.entrance } : { kind: 'main', index: 0 };
+    this.exitMarker = t.entrance >= 0 ? { kind: 'sec', index: t.entrance }
+      : { kind: exitToMidway(e) && this.level.secondary.midwayOwn ? 'midway' : 'main', index: 0 };
     this.emit('mode');
     this.revealMarker();
   }

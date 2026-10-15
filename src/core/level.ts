@@ -57,9 +57,11 @@ export interface ScreenExit {
   secondary: boolean;
   flags: number; // the low nibble of byte 1, Lunar Magic's 0000wush (h: dest's high bit, s: secondary, u, w kept)
 }
-// a screen exit's w (Lunar Magic's): a secondary exit makes the level it leads to a water level (a standard
-// exit would lead to the midway entrance, which the editor's patch doesn't play)
-export const EXIT_WATER = 0x08;
+// a screen exit's w (Lunar Magic's): a secondary exit makes the level it leads to a water level, a standard
+// exit leads to the target's midway entrance – when that has its own settings, else to its main entrance
+// (levelheight.ts)
+export const EXIT_WATER = 0x08, EXIT_MIDWAY = EXIT_WATER;
+export const exitToMidway = (e: Pick<ScreenExit, 'secondary' | 'flags'>): boolean => !e.secondary && (e.flags & EXIT_MIDWAY) !== 0;
 // makes a screen exit secondary or standard; w means something else for the other kind, so a change drops it
 export function setExitSecondary(e: ScreenExit, secondary: boolean): void {
   if (e.secondary !== secondary) e.flags &= ~EXIT_WATER;

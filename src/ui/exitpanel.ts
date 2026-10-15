@@ -6,7 +6,7 @@ import { h, select, toast, choose, checkbox } from './dom.ts';
 import { hex2, hex3, ENTRANCE_ACTIONS } from '../core/names.ts';
 import {
   newUid, readSecondaryEntrance, readSecondaryHeader, mainTranslevel, mainSpot, secondarySpot, setSecondarySpot, copyCameraStart, hasRelativeCamera,
-  copyEntranceOptions, setExitSecondary, EXIT_WATER, midwaySpot, midwayEntrance, setMidwayEntrance, midwayStart, nearestMidway, placeMidway, entrancePos,
+  copyEntranceOptions, setExitSecondary, EXIT_WATER, EXIT_MIDWAY, exitToMidway, midwaySpot, midwayEntrance, setMidwayEntrance, midwayStart, nearestMidway, placeMidway, entrancePos,
   type MidwayEntrance,
 } from '../core/level.ts';
 import { spotText, cameraOptions, cameraValue, setCamera, cameraFields, optionFields } from './entrancefields.ts';
@@ -81,8 +81,10 @@ function exitPanel(app: App, body: HTMLElement): boolean {
       }, '+ New')),
       field('Options', checkbox('Water level', 'Mario swims in the whole target level when he comes through this exit (also when the entrance is no water level)',
         !!(e.flags & EXIT_WATER), (on) => upd(() => { e.flags = on ? e.flags | EXIT_WATER : e.flags & ~EXIT_WATER; }))));
-  } else if (e.flags & EXIT_WATER) {
-    body.append(hint('This exit has Lunar Magic\'s “go to the midway entrance” set (kept): the editor doesn\'t play it yet.'));
+  } else {
+    body.append(field('Options', checkbox('Go to midway entrance',
+      'Mario comes out at the midway entrance (Z) of the target level – when its midway point has its own position and settings, else at its main entrance (as in Lunar Magic)',
+      !!(e.flags & EXIT_MIDWAY), (on) => upd(() => { e.flags = on ? e.flags | EXIT_MIDWAY : e.flags & ~EXIT_MIDWAY; }))));
   }
   // where Mario arrives
   const arrive = e.secondary ? (() => {
@@ -92,7 +94,9 @@ function exitPanel(app: App, body: HTMLElement): boolean {
       : `Secondary entrance ${hex3(t.entrance)} is empty – “+ New” creates one.`;
   })() : (() => {
     const s = t.to === n ? lv.secondary : readSecondaryHeader(app.rom, t.to);
-    return `Main entrance: screen ${hex2(s.entranceScreen)}, ${ENTRANCE_ACTIONS[s.entranceAction]}`;
+    if (exitToMidway(e) && s.midwayOwn) return `Midway entrance: screen ${hex2(s.midwayScreen)}, ${ENTRANCE_ACTIONS[s.midwayAction]}`;
+    const main = `Main entrance: screen ${hex2(s.entranceScreen)}, ${ENTRANCE_ACTIONS[s.entranceAction]}`;
+    return exitToMidway(e) ? `${main} – the target's midway point has no own position and settings (give it them in its midway point's properties).` : main;
   })();
   body.append(
     h('div', { class: 'exit-target' },
@@ -190,6 +194,8 @@ function mainPanel(app: App, body: HTMLElement, kind: 'main' | 'midway'): void {
         hint('The midway point shares its position within the screen, its action, camera start and options with the main entrance (M); only the screen is its own. Dragging it gives it its own.'),
       ]),
       hint('It applies once Mario has touched the level\'s midway tape.'),
+      s.midwayOwn ? users(app, app.exitGraph().exitsInto(n).filter((r) => r.midway), [], 'No exit leads to the midway entrance.')
+        : hint('Exits set to “go to midway entrance” lead to the main entrance while it has no own settings.'),
       h('div', { class: 'row' }, h('button', { onclick: () => testAt(app, 'midway', 0) }, '▶ Test here')),
     );
     return;
@@ -203,7 +209,7 @@ function mainPanel(app: App, body: HTMLElement, kind: 'main' | 'midway'): void {
     field('Action', select(actions(), s.entranceAction, (v) => upd(() => (s.entranceAction = v)))),
     field('Camera start', select(cameraOptions(cameraValue(s), hasRelativeCamera(app.rom, lv.header.mode)), cameraValue(s), (v) => upd(() => setCamera(s, v)))),
     ...optionFields(s, (_, f) => upd(() => f(s))).map(([l, el]) => field(l, el)),
-    users(app, g.exitsInto(n).filter((r) => !r.secondary), extra, 'No exit leads to the main entrance.'),
+    users(app, g.exitsInto(n).filter((r) => !r.secondary && !(r.midway && s.midwayOwn)), extra, 'No exit leads to the main entrance.'),
     h('div', { class: 'row' }, h('button', { title: 'Test play from the main entrance (T)', onclick: () => testAt(app, 'main', 0) }, '▶ Test here')),
     hint('More settings (scrolling, layer 3 …) in the header dialog (H).'),
   );

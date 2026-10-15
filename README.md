@@ -79,7 +79,9 @@ When a level is displayed, it runs the ROM's **original loading routines** (~15 
   dragging (snaps to the possible entrance positions).
 * **Midway entrance** (Lunar Magic 3.00's): dragging the midway point (Z) gives it its own tile, with its own
   action, camera start and options (face left, water) in the exit panel; without them it shares the main
-  entrance's position within its screen, as in the game. Test play from it starts there.
+  entrance's position within its screen, as in the game. Test play from it starts there. A standard screen exit
+  can "go to midway entrance" (Lunar Magic's): Mario comes out there when the target's midway point has its
+  own settings, else at its main entrance.
 * **Insert by number** (Ins/I): object, extended object or sprite with size/extra bits.
 * Menu *View*: grid, screen boundaries, toggle layers; **inactive layer translucent** (the object layer not being edited is semi-transparent);
   view with switch palaces pressed or ON/OFF set to OFF; zoom 50–400 %.

@@ -2,13 +2,14 @@
 // overworld with its midway point touched puts Mario where the editor shows the midway marker – the main
 // entrance's position on the midway screen as in the game, or with its own settings at its tile, with its own
 // action, camera start and options; levels that never set it load as in the clean game. Test play from it
-// starts as entering it does. The bytes come back as they were.
+// starts as entering it does; a standard screen exit set to it leads there. The bytes come back as they were.
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import {
   type SecondaryHeader, readSecondaryHeader, encodeSecondaryHeader, decodeSecondaryHeader, entrancePos, midwaySpot, midwayStart, nearestMidway, placeMidway,
-  setCameraRows, startHeader, mainTranslevel, LEVEL_HEIGHTS,
+  setCameraRows, startHeader, mainTranslevel, loadLevel, cloneLevel, LEVEL_HEIGHTS, EXIT_WATER,
 } from '../src/core/level.ts';
+import { saveLevel } from '../src/core/save.ts';
 import { GM, RAM, marioX, marioY, cameraY, setMarioPos } from '../src/core/ram.ts';
 import { cleanImage, editorImage } from './fixture.ts';
 
@@ -123,6 +124,52 @@ const atMarker = (r: Entered, sec: SecondaryHeader) => { const p = marker(sec); 
     const left = w[RAM.marioDir] === 0, water = w[RAM.waterLevel] !== 0;
     check(left === g.left && water === g.water, `test play from the midway entrance (${name}): ${left ? 'left' : 'right'}${water ? ', water' : ''}, entered ${show(g)}`);
   }
+}
+
+// a standard screen exit with w (Lunar Magic's "go to midway entrance", 0000wush without s): entering level 105
+// through its exit pipe on screen 7, which leads back to 105, puts Mario at its midway entrance when it has its
+// own settings (Lunar Magic's: else the main entrance's); the game's midway flag ($13CF) stays clear
+function exitTo(sec: SecondaryHeader, flags: number) {
+  const r = new Rom(rom.data.slice());
+  const lv = cloneLevel(loadLevel(r, N));
+  lv.exits = lv.exits.map((x) => ({ ...x, dest: N, secondary: false, flags: flags | 1 }));
+  // Mario starts on the pipe (tile 8, 20 of screen 7)
+  lv.secondary = { ...sec, entranceScreen: 7, entranceTile: 1, entranceX: 0, entranceXHi: 1, entranceY: 0x14 & 15, entranceYHi: 0x14 >> 4 };
+  saveLevel(r, lv);
+  const em = new LevelEmulator(r);
+  em.load(N);
+  const s = em.snes, w = s.wram;
+  for (let f = 0; f < 300 && w[RAM.gameMode] !== GM.level; f++) s.runFrame();
+  w[RAM.marioX] = 0x88; // on the pipe's middle
+  let left = false;
+  for (let f = 0; f < 2000; f++) {
+    s.joy1 = 0x0400; s.runFrame();
+    if (w[RAM.gameMode] !== GM.level) left = true;
+    if (left && w[RAM.gameMode] === GM.level) break;
+  }
+  const entered = left && w[RAM.gameMode] === GM.level;
+  const at = { x: marioX(w), y: marioY(w), cam: cameraY(w), midway: w[RAM.midwayUsed] !== 0 };
+  const x0 = marioX(w);
+  s.joy1 = 0;
+  for (let f = 0; f < 60; f++) s.runFrame();
+  return { entered, ...at, screen: w[RAM.midwayScreen], left: w[RAM.marioDir] === 0, water: w[RAM.waterLevel] !== 0, dx: ((marioX(w) - x0) << 16) >> 16 };
+}
+{
+  const own: SecondaryHeader = {
+    ...sec0, faceLeft: 0, water: 0, entranceAction: 0,
+    midwayOwn: 1, midwayScreen: 1, midwayX: 8, midwayY: 0x10, midwayAction: 0, midwayFaceLeft: 1, midwayWater: 1, midwayCameraRelative: 0, midwayCamera: 0,
+  };
+  const main = { x: 7 * 256 + 0x80, y: 0x14 * 16 };
+  const near = (r: { x: number; y: number }, p: { x: number; y: number }) => Math.abs(r.x - p.x) < 16 && Math.abs(r.y - p.y) < 16;
+  const to = exitTo(own, EXIT_WATER);
+  check(to.entered && near(to, marker(own)) && !to.midway && to.left && to.water,
+    `standard exit "go to midway entrance": Mario at the target's midway entrance with its options, the game's midway flag clear (${show(to)})`);
+  const pipe = exitTo({ ...own, midwayAction: SLANTED, midwayFaceLeft: 0 }, EXIT_WATER);
+  check(pipe.entered && pipe.dx > 64, `… with its action: shot from a slanted pipe (${show(pipe)})`);
+  const shared = exitTo({ ...own, midwayOwn: 0 }, EXIT_WATER);
+  check(shared.entered && near(shared, main) && !shared.left && !shared.water, `… a target without its own midway settings: its main entrance, as in Lunar Magic (${show(shared)})`);
+  const plain = exitTo(own, 0);
+  check(plain.entered && near(plain, main) && !plain.left && !plain.water, `standard exit without it: the main entrance (${show(plain)})`);
 }
 
 // placing it: the tile nearest to the pixel, a horizontal level's X within its screen; the main entrance's

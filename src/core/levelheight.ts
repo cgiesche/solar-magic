@@ -29,7 +29,8 @@
 //  - Mario facing left and a water level, set for the main entrance, a secondary entrance or a secondary
 //    screen exit (its w), and a slanted pipe entrance shooting Mario out the way he faces; a screen keeps
 //    its exit's flags 0000wush ($19D8, which community code such as GPS's teleport routine writes too), and
-//    only s makes the level's exits secondary.
+//    only s makes the level's exits secondary;
+//  - a standard screen exit with w leads to the midway entrance of a level with its own settings.
 // The tilemap of such a level is SMWV's (vrampatch.ts): a window of 16 block rows built from the level data.
 
 import type { Rom } from './rom.ts';
@@ -56,7 +57,7 @@ lorom
 !Ent = !Size+12        ; the secondary entrance it is entered by (16-bit)
 !Tmp = !Size+14        ; (16-bit)
 !Align = !Size+16      ; the BG's bottom + $8000 for CameraY to align layer 2 with (16-bit, 0: none)
-!ExitFlags = $${hx(EXIT_FLAGS_RAM[0])}   ; the flags of the screen exit Mario left by (0000wush, w: water with s)
+!ExitFlags = $${hx(EXIT_FLAGS_RAM[0])}   ; the flags of the screen exit Mario left by (0000wush, w: water with s, else the midway entrance), bit 7: entered at the midway entrance by it
 !Ent1 = $${hx(SEC_HDR[6])}       ; per level, Lunar Magic's: IWPXXtTT (W: water, P: the entrance at tile X/Y, XX: X bits 4-3)
 !Ent2 = $${hx(SEC_HDR[7])}       ; OFYYYYYY (O: BG relative to FG, F: camera offset bit 4, Y: Y bits 9-4)
 !Ent3 = $${hx(SEC_HDR[8])}       ; RL-ooooo (R: camera relative to Mario, L: face left, o: BG height - 1, or with O its offset)
@@ -142,12 +143,19 @@ org $00C3D3 : JSL TileRow : NOP
 ; entrances (Lunar Magic's format): Mario at a tile (screen * 256 + X * 16, Y * 16), the camera relative to
 ; him (Y * 16 + offset * 16, the 5-bit offset from the FG and BG start settings), the BG then bottom-aligned
 ; with the level (or relative to the FG)
+org $05D7C5 : JSL ExitTaken : NOP #2       ; LDA $0DD6 : LSR #2 : TAY (X = the screen Mario left by)
 org $05D7E0 : JSL SecEntrance : NOP        ; LDY $0E : LDA $F800,y (Y = the secondary entrance)
 org $05DA17 : JSL Entrance : NOP           ; SEP #$30 : LDA $13BF (both entrances set up)
 ; the midway point (Lunar Magic's): its screen with bit 4 – also for its tape, which sets the checkpoint
 ; unless the screen is 0 ($00F2D8); with its own settings Mario goes to its screen as to the main entrance's
-; ($05D9EC, vertical levels too), Entrance puts him at its tile
-org $05D9BD : JSL MidwayScreen : NOP #5    ; LDA $02 : LSR #4 : STA $13CD (X/Y 16)
+; ($05D9EC, vertical levels too), Entrance puts him at its tile. A standard screen exit with w (Lunar Magic's
+; "go to midway entrance") leads to the midway entrance of a level with its own settings the same way (the
+; game's midway flag $13CF clear, as Lunar Magic leaves it), else to its main entrance as any other exit
+org $05D9EC : MainScreen:
+org $05D9B8
+  JSL ExitMidway                           ; LDA $141A : BNE $D9EC
+  BNE MainScreen
+  JSL MidwayScreen : NOP #4                ; LDA $02 : LSR #4 : STA $13CD (X/Y 16)
 org $05D9DE                                ; STA $13CF : LDA $02 : LSR #4 : STA $95 : JMP $DA17
   JSL Midway
   BCS +
@@ -280,10 +288,15 @@ TileRow:
   LDA $98 : AND.l !RowMask
   RTL
 
+; the flags of the screen exit Mario left by (A 8, X/Y 8, X = its screen), then the game's LDA $0DD6 : LSR #2 : TAY
+ExitTaken:
+  LDA.l $7E${hx(RAM.screenExitHi)},x : STA.l !ExitFlags
+  LDA $0DD6 : LSR #2 : TAY
+  RTL
+
 ; the secondary entrance (A 8, X/Y 16, data bank $05): kept, then the game's LDY $0E : LDA $F800,y. A's
 ; high byte stays the game's 0: its code takes table indexes with a 16-bit TAX
 SecEntrance:
-  LDA.l $7E${hx(RAM.screenExitHi)},x : STA.l !ExitFlags       ; X = the screen Mario left by
   LDY $0E
   REP #$20 : TYA : STA.l !Ent : LDA #$0000 : SEP #$20
   LDA $F800,y
@@ -314,12 +327,13 @@ Entrance:
   LDA.l $05FA00,x : AND #$0030 : LSR #2 : ORA.l !Tmp : STA.l !Tmp
   LDA.l $05FA00,x : AND #$00C0 : ASL #2 : XBA : ORA.l !Tmp
   JSR Relative
-  BRA .done
+  JMP .done
 .main
   LDA.l !Level : TAX
+  LDA.l !ExitFlags : AND #$0080 : BNE ++
   LDA $${hx(RAM.midwayUsed)} : AND #$00FF : BEQ +
   LDA.l !Mid1,x : AND #$0020 : BEQ +
-  JMP .midway
+++ JMP .midway
 +
   ; the main entrance: P, XX in !Ent1, xxx in $05F200, Y bits 9-4 in !Ent2, yyyy in $05F000
   LDA.l !Ent1,x : AND #$0020 : BEQ +
@@ -376,13 +390,7 @@ Midway:
   LDA.l !Level : TAX
   SEP #$20
   LDA.l !Mid1,x : AND #$20 : BEQ .game
-  LDA.l !Mid1,x : AND #$07 : STA $${hx(RAM.entranceAction)}
-  REP #$20
-  LDA.l !Mid3,x : AND #$0003 : TAY
-  LDA.l !Mid3,x : AND #$000C : LSR #2 : TAX
-  SEP #$20
-  LDA.w $D70C,y : STA $20                  ; the game's tables, as for the main entrance
-  LDA.w $D708,x : STA $1C
+  JSR MidwayOwn
   SEP #$10
   LDA $${hx(RAM.midwayScreen)}
   SEC
@@ -391,6 +399,38 @@ Midway:
   SEP #$10
   LDA $${hx(RAM.midwayScreen)}
   CLC
+  RTL
+
+; the midway entrance's own action and FG/BG start Y (A 8, X 16 = the level, data bank $05; X, Y changed)
+MidwayOwn:
+  LDA.l !Mid1,x : AND #$07 : STA $${hx(RAM.entranceAction)}
+  REP #$20
+  LDA.l !Mid3,x : AND #$0003 : TAY
+  LDA.l !Mid3,x : AND #$000C : LSR #2 : TAX
+  SEP #$20
+  LDA.w $D70C,y : STA $20                  ; the game's tables, as for the main entrance
+  LDA.w $D708,x : STA $1C
+  RTS
+
+; through a screen exit (A 8, X/Y 16, data bank $05; the game's LDA $141A : BNE $D9EC, its A and Z): a standard
+; one with w (0000wush) to a level whose midway entrance has its own settings goes there, marked in !ExitFlags
+; bit 7 for Entrance and Options, Mario's screen in $01 (the midway screen with bit 4: $02 = $05F400)
+ExitMidway:
+  LDA.l !ExitFlags : AND #$7F : STA.l !ExitFlags
+  LDA $141A : BEQ .done                    ; from the overworld
+  LDA $${hx(RAM.useSecondaryExit)} : BNE .exit
+  LDA.l !ExitFlags : AND #$0A : CMP #$08 : BNE .exit
+  PHX : PHY
+  REP #$20 : LDA.l !Level : TAX : SEP #$20
+  LDA.l !Mid1,x : AND #$20 : BEQ +
+  LDA.l !ExitFlags : ORA #$80 : STA.l !ExitFlags
+  LDA $02 : LSR #4 : STA $01
+  LDA.l !Mid1,x : AND #$10 : TSB $01
+  JSR MidwayOwn
++ PLY : PLX
+.exit
+  LDA #$01                                 ; on to $05D9EC
+.done
   RTL
 
 ; Mario faces left ($76 = 0) and the level is a water level ($85 = 1) as the entrance sets: the main
@@ -412,9 +452,10 @@ Options:
 .main
   LDA.l !Level : TAX
   SEP #$20
+  LDA.l !ExitFlags : BMI +
   LDA $${hx(RAM.midwayUsed)} : BEQ .entrance
   LDA.l !Mid1,x : AND #$20 : BEQ .entrance
-  LDA.l !Mid1,x : AND #$40 : BEQ +
++ LDA.l !Mid1,x : AND #$40 : BEQ +
   LDA #$01 : STA $${hx(RAM.waterLevel)}
 + LDA.l !Mid3,x
   BRA .face

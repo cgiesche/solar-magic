@@ -28,7 +28,7 @@ An entrance that puts Mario at a tile of its screen (Lunar Magic's), instead of 
 _Avoid_: method 2, exact entrance
 
 **Midway entrance**:
-Where Mario starts in a level once he has touched its midway tape (the midway point, Z): the main entrance's position and settings on the midway screen as in the game, or (Lunar Magic's) a tile of its own with its own action, camera start and options. Dragging it gives it its own.
+Where Mario starts in a level once he has touched its midway tape (the midway point, Z): the main entrance's position and settings on the midway screen as in the game, or (Lunar Magic's) a tile of its own with its own action, camera start and options. Dragging it gives it its own. A standard screen exit set to "go to midway entrance" leads there when it has its own settings.
 _Avoid_: checkpoint (that is the tape), midway screen (for the whole entrance)
 
 **Camera start**:

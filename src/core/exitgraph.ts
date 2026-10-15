@@ -4,7 +4,7 @@
 // the exit is in.
 
 import type { Rom } from './rom.ts';
-import { loadLevel, readSecondaryEntrance, mainTranslevel, SEC_ENT, type ScreenExit } from './level.ts';
+import { loadLevel, readSecondaryEntrance, mainTranslevel, exitToMidway, SEC_ENT, type ScreenExit } from './level.ts';
 import { levelName } from './overworld.ts';
 import { hex } from './names.ts';
 
@@ -12,6 +12,7 @@ export interface ExitRef {
   from: number; // level the exit is in
   screen: number;
   secondary: boolean;
+  midway: boolean; // a standard exit to the midway entrance (exitToMidway)
   entrance: number; // secondary entrance number (secondary exits), else -1
   to: number; // destination level
 }
@@ -40,7 +41,7 @@ export class ExitGraph {
       let exits: ScreenExit[];
       if (override && override.number === m) exits = override.exits;
       else try { exits = loadLevel(rom, m).exits; } catch { continue; }
-      for (const e of exits) this.exits.push({ from: m, screen: e.screen, secondary: e.secondary, ...exitTarget(rom, m, e) });
+      for (const e of exits) this.exits.push({ from: m, screen: e.screen, secondary: e.secondary, midway: exitToMidway(e), ...exitTarget(rom, m, e) });
     }
   }
 
