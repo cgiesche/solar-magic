@@ -20,8 +20,8 @@ for (const n of list) {
       const c = cloneLevel(lv);
       insertScreen(rom, c, s);
       deleteScreen(rom, c, s);
-      // the midway screen is clamped to 4 bits, entrance screens pushed past it may not come back
-      if (dump(c) !== ref && lv.secondary.midwayScreen < 15) { console.log(n.toString(16), 'screen insert/delete at', s, 'differs'); bad++; }
+      // the midway screen is clamped to 5 bits, a midway screen pushed past it may not come back
+      if (dump(c) !== ref && lv.secondary.midwayScreen < 31) { console.log(n.toString(16), 'screen insert/delete at', s, 'differs'); bad++; }
     }
   }
 }

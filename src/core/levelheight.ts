@@ -63,6 +63,10 @@ lorom
 !SecFE = $${hx(SEC_ENT[3])}       ; per secondary entrance: IPXXDAAA (P: at tile X/Y, XX: X bits 4-3)
 !SecY = $${hx(SEC_ENT[4])}        ; EFYYYYYY (Lunar Magic's, at a place of its own: F camera offset bit 4, Y: Y bits 9-4)
 !SecR = $${hx(SEC_ENT[5])}        ; RLW----- (R: camera relative to Mario, L: face left, W: water)
+!Mid1 = $${hx(SEC_HDR[9])}       ; per level, Lunar Magic's midway entrance: SWOHXAAA (W: water, O: own settings, H: screen bit 4, X: X bit 4, A: action)
+!Mid2 = $${hx(SEC_HDR[10])}       ; YYYYXXXX (tile Y bits 3-0, X bits 3-0)
+!Mid3 = $${hx(SEC_HDR[11])}       ; RL--ffbb (R: camera relative to Mario, L: face left, ffbb: FG/BG start Y or the camera offset bits 3-0)
+!Mid4 = $${hx(SEC_HDR[12])}       ; -FYYYYYY (F: camera offset bit 4, Y: Y bits 9-4)
 !Height = $${hx(LEVEL_HEIGHT)}       ; playing: the level's height in pixels, a screen's bytes (Lunar Magic's)
 !Ptr = $${hx(SCREEN_PTRS[0])}          ; per screen: 3-byte pointers to the low bytes (Lunar Magic's place)
 !PtrHi = !Ptr+$60      ; to the high bytes
@@ -76,6 +80,10 @@ org !Ent2 : fill 512
 org !Ent3 : fill 512
 org !SecY : fill 512
 org !SecR : fill 512
+org !Mid1 : fill 512
+org !Mid2 : fill 512
+org !Mid3 : fill 512
+org !Mid4 : fill 512
 
 ; the game's mode tables of a horizontal layer's screen pointers (tilemap columns, changing a tile, and code
 ; that finds a block the same way) point to the tables in RAM, which the setup builds for every level
@@ -136,6 +144,15 @@ org $00C3D3 : JSL TileRow : NOP
 ; with the level (or relative to the FG)
 org $05D7E0 : JSL SecEntrance : NOP        ; LDY $0E : LDA $F800,y (Y = the secondary entrance)
 org $05DA17 : JSL Entrance : NOP           ; SEP #$30 : LDA $13BF (both entrances set up)
+; the midway point (Lunar Magic's): its screen with bit 4; with its own settings Mario goes to its screen as
+; to the main entrance's ($05D9EC, vertical levels too), Entrance puts him at its tile
+org $05D9DE                                ; STA $13CF : LDA $02 : LSR #4 : STA $95 : JMP $DA17
+  JSL Midway
+  BCS +
+  STA $95
+  JMP $DA17
++ STA $01
+  NOP                                      ; on to $05D9EC
 
 ; a screen keeps its exit's flags 0000wush (the game's only h), and only s makes the level's exits secondary
 ; (the game's $0B >> 1 would make w or u do it too); the places Lunar Magic changes
@@ -297,8 +314,12 @@ Entrance:
   JSR Relative
   BRA .done
 .main
-  ; the main entrance: P, XX in !Ent1, xxx in $05F200, Y bits 9-4 in !Ent2, yyyy in $05F000
   LDA.l !Level : TAX
+  LDA $13CF : AND #$00FF : BEQ +
+  LDA.l !Mid1,x : AND #$0020 : BEQ +
+  JMP .midway
++
+  ; the main entrance: P, XX in !Ent1, xxx in $05F200, Y bits 9-4 in !Ent2, yyyy in $05F000
   LDA.l !Ent1,x : AND #$0020 : BEQ +
   LDA.l !Ent1,x : AND #$0018 : STA.l !Tmp
   LDA.l $05F200,x : AND #$0007 : ORA.l !Tmp : TAY
@@ -314,10 +335,51 @@ Entrance:
   PLP
   SEP #$30 : LDA $13BF
   RTL
+.midway
+  ; the midway entrance with its own settings: X bit 4 in !Mid1, xxxx and yyyy in !Mid2, Y bits 9-4 in !Mid4
+  LDA.l !Mid1,x : AND #$0008 : ASL : STA.l !Tmp
+  LDA.l !Mid2,x : AND #$000F : ORA.l !Tmp : TAY
+  LDA.l !Mid4,x : AND #$003F : ASL #4 : STA.l !Tmp
+  LDA.l !Mid2,x : AND #$00F0 : LSR #4 : ORA.l !Tmp
+  JSR TilePos
+  LDA.l !Mid3,x : AND #$0080 : BEQ .done
+  ; offset: F (!Mid4 bit 6), ffbb (!Mid3 bits 3-0)
+  LDA.l !Mid4,x : AND #$0040 : LSR #2 : STA.l !Tmp
+  LDA.l !Mid3,x : AND #$000F : ORA.l !Tmp
+  JSR Relative
+  BRA .done
+
+; the midway point (A = $40, the translevel's midway flag; A 8, X/Y 8, data bank $05; $02 = $05F400's byte):
+; the game's STA $13CF. A = its screen, carry set when it has its own settings (Lunar Magic's): then the
+; entrance action ($192A) and the FG/BG start Y from them
+Midway:
+  STA $13CF
+  REP #$30
+  LDA.l !Level : TAX
+  SEP #$20
+  LDA $02 : LSR #4 : STA.l !Tmp
+  LDA.l !Mid1,x : AND #$10 : ORA.l !Tmp : STA.l !Tmp
+  LDA.l !Mid1,x : AND #$20 : BEQ .game
+  LDA.l !Mid1,x : AND #$07 : STA $192A
+  REP #$20
+  LDA.l !Mid3,x : AND #$0003 : TAY
+  LDA.l !Mid3,x : AND #$000C : LSR #2 : TAX
+  SEP #$20
+  LDA.w $D70C,y : STA $20                  ; the game's tables, as for the main entrance
+  LDA.w $D708,x : STA $1C
+  SEP #$10
+  LDA.l !Tmp
+  SEC
+  RTL
+.game
+  SEP #$10
+  LDA.l !Tmp
+  CLC
+  RTL
 
 ; Mario faces left ($76 = 0) and the level is a water level ($85 = 1) as the entrance sets: the main
-; entrance's (also the midway point's), or a secondary entrance's or the screen exit's water (!Ent and
-; !ExitFlags from SecEntrance) (A 8, X/Y 8); then the game's LDA #$20 : STA $5E
+; entrance's (also the midway point's unless it has its own), or a secondary entrance's or the screen
+; exit's water (!Ent and !ExitFlags from SecEntrance) (A 8, X/Y 8); then the game's LDA #$20 : STA $5E
 Options:
   PHP
   REP #$30 : PHX
@@ -334,6 +396,13 @@ Options:
 .main
   LDA.l !Level : TAX
   SEP #$20
+  LDA $13CF : BEQ .entrance
+  LDA.l !Mid1,x : AND #$20 : BEQ .entrance
+  LDA.l !Mid1,x : AND #$40 : BEQ +
+  LDA #$01 : STA $${hx(RAM.waterLevel)}
++ LDA.l !Mid3,x
+  BRA .face
+.entrance
   LDA.l !Ent1,x : AND #$40 : BEQ +
   LDA #$01 : STA $${hx(RAM.waterLevel)}
 + LDA.l !Ent3,x

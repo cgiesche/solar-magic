@@ -58,6 +58,8 @@ export const RAM = {
   layer3Tide: 0x1403, // 1 rising and falling, 2 fixed
   layer3Setting: 0x1be3,
   sublevelCount: 0x141a,
+  levelFlags: 0x1ea2, // per translevel: bit 6 the midway point was touched
+  midwayUsed: 0x13cf, // the level was loaded at its midway point
   levelMusic: 0x0dda, // song of the level; the game doesn't restart it when the next level has the same
   screenExitLo: 0x19b8, screenExitHi: 0x19d8, // per screen
   useSecondaryExit: 0x1b93,

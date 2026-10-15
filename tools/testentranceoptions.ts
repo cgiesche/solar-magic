@@ -28,7 +28,7 @@ const sec0 = readSecondaryHeader(rom, N);
   for (let v = 0; v < 256; v++) {
     const b = [v, v ^ 0x5a, v, v ^ 0xa5, v, v ^ 0x3c, v, v ^ 0xc3, v];
     const s = decodeSecondaryHeader(b);
-    if (encodeSecondaryHeader(s).join() !== b.join()) wrong.push(`header ${v.toString(16)}`);
+    if (encodeSecondaryHeader(s).slice(0, b.length).join() !== b.join()) wrong.push(`header ${v.toString(16)}`);
     const r = new Rom(rom.data.slice());
     const e = [v, v ^ 0x5a, v ^ 0xa5, v, v ^ 0x3c, v ^ 0xc3];
     SEC_ENT.forEach((t, i) => r.w8(t + IDX, e[i]));

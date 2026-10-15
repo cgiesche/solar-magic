@@ -43,6 +43,7 @@ export interface LevelOverride {
   onOffSwitch?: boolean; // ON/OFF switch in the OFF state ($14AF)
   trackSources?: boolean; // record ROM provenance of CGRAM (slower)
   translevel?: number; // $13BF (messages, Yoshi coins); default: the level itself if it is a main level
+  midway?: boolean; // enter the translevel's level from the overworld with its midway point touched (a main level)
   trace?: boolean; // record per object what its routine reads and writes (see ObjectTrace)
   continueState?: boolean; // load from the emulator's current state (startGame) instead of the boot snapshot
   music?: number; // the song the level plays instead of its own (all header settings and the level's music patch entry)
@@ -177,6 +178,14 @@ export class LevelEmulator {
     // translevel $24 (Chocolate Island 2) makes the exit-based load pick a room by time/coins instead
     const tl = ov.translevel ?? mainTranslevel(level) ?? 0;
     w[RAM.translevel] = tl === 0x24 ? 0 : tl;
+    if (ov.midway) {
+      // from the overworld ($141A 0) the game takes the translevel from the overworld tile Mario is on ($05D84D)
+      const p = w[RAM.currentPlayer], tx = w[RAM.owPlayerTileX + p], ty = w[RAM.owPlayerTileY + p];
+      const i = (tx & 15) | ((tx & 16) << 4) | ((ty & 15) << 4) | ((ty & 16) << 5) | (w[RAM.submap + (p >> 2)] & 15 ? 0x400 : 0);
+      w[RAM.owTranslevels + i] = tl;
+      w[RAM.sublevelCount] = 0;
+      w[RAM.levelFlags + tl] |= 0x40;
+    }
     if (ov.switchPalaces) for (let i = 0; i < 4; i++) w[RAM.switchPalaces + i] = 1;
     if (ov.onOffSwitch) w[RAM.onOff] = 1;
     w[RAM.gameMode] = GM.levelLoad;

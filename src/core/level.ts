@@ -9,9 +9,10 @@ export const L1_PTRS = 0x05e000;
 export const L2_PTRS = 0x05e600;
 export const SPR_PTRS = 0x05ec00;
 // the secondary header: the game's four tables, Lunar Magic's layer 2 scroll byte ($06FA00, l2scroll.ts),
-// the level size byte (LEVEL_SIZE_TABLE) and Lunar Magic 3.00's three entrance bytes ($05DE00, $06FC00,
-// $06FE00: the entrance at a tile, the camera relative to Mario, the BG's height; levelheight.ts)
-export const SEC_HDR = [0x05f000, 0x05f200, 0x05f400, 0x05f600, 0x06fa00, 0x06ca00, 0x05de00, 0x06fc00, 0x06fe00];
+// the level size byte (LEVEL_SIZE_TABLE), Lunar Magic 3.00's three entrance bytes ($05DE00, $06FC00,
+// $06FE00: the entrance at a tile, the camera relative to Mario, the BG's height; levelheight.ts) and its
+// four of the midway entrance (Lunar Magic keeps them where its code is, the editor in free space of bank 7)
+export const SEC_HDR = [0x05f000, 0x05f200, 0x05f400, 0x05f600, 0x06fa00, 0x06ca00, 0x05de00, 0x06fc00, 0x06fe00, 0x07e800, 0x07ea00, 0x07ec00, 0x07ee00];
 
 // ----- level size (Lunar Magic 3.00's horizontal level heights, levelheight.ts) -----
 // A byte per level in Lunar Magic's format TB0MMMMM: M the size, T (layer 2 or 3) and B (show the bottom
@@ -57,7 +58,7 @@ export interface ScreenExit {
   flags: number; // the low nibble of byte 1, Lunar Magic's 0000wush (h: dest's high bit, s: secondary, u, w kept)
 }
 // a screen exit's w (Lunar Magic's): a secondary exit makes the level it leads to a water level (a standard
-// exit would lead to the midway entrance with separate settings, which the editor doesn't have)
+// exit would lead to the midway entrance, which the editor's patch doesn't play)
 export const EXIT_WATER = 0x08;
 // makes a screen exit secondary or standard; w means something else for the other kind, so a change drops it
 export function setExitSecondary(e: ScreenExit, secondary: boolean): void {
@@ -96,7 +97,7 @@ export interface SecondaryHeader {
   layer3: number; // F200 bits 7-6
   entranceAction: number; // F200 bits 5-3
   entranceX: number; // F200 bits 2-0
-  midwayScreen: number; // F400 bits 7-4
+  midwayScreen: number; // F400 bits 7-4, E800 bit 4 (Lunar Magic's bit 4)
   fgInitY: number; // F400 bits 3-2
   bgInitY: number; // F400 bits 1-0
   noYoshiIntro: number; // F600 bit 7
@@ -120,6 +121,16 @@ export interface SecondaryHeader {
   bgHeight: number; // FE00 bits 4-0: the BG's height in rows - 1 (or with bgRelative its offset)
   faceLeft: number; // FE00 bit 6: Mario faces left
   lmSpareBit: number; // FE00 bit 5 (unused in Lunar Magic's layout, kept)
+  // Lunar Magic 3.00's midway entrance with its own settings (levelheight.ts): a tile of the midway screen
+  midwayOwn: number; // E800 bit 5: the midway entrance has its own settings (else the main entrance's, but the screen)
+  midwayX: number; // EA00 bits 3-0, E800 bit 3: tile X (bit 4 only in vertical levels)
+  midwayY: number; // EA00 bits 7-4, EE00 bits 5-0: tile Y
+  midwayAction: number; // E800 bits 2-0
+  midwayWater: number; // E800 bit 6
+  midwayFaceLeft: number; // EC00 bit 6
+  midwayCameraRelative: number; // EC00 bit 7
+  midwayCamera: number; // EE00 bit 6, EC00 bits 3-0: the 5-bit camera offset (or FG/BG start Y), as the main entrance's
+  lmMidwayFlags: number; // E800 bit 7 (slippery), EC00 bits 5-4 (bit 5: to another level), EE00 bit 7 – kept, not used
 }
 
 export interface Level {
@@ -199,14 +210,14 @@ export function encodePrimaryHeader(h: PrimaryHeader): Uint8Array {
   ]);
 }
 
-export function decodeSecondaryHeader([a, b, c, d, e = 0, f = 0, g = 0, h = 0, i = 0]: Iterable<number> & ArrayLike<number>): SecondaryHeader {
+export function decodeSecondaryHeader([a, b, c, d, e = 0, f = 0, g = 0, h = 0, i = 0, m1 = 0, m2 = 0, m3 = 0, m4 = 0]: Iterable<number> & ArrayLike<number>): SecondaryHeader {
   return {
     layer2Scroll: a >> 4,
     entranceY: a & 0x0f,
     layer3: b >> 6,
     entranceAction: (b >> 3) & 7,
     entranceX: b & 7,
-    midwayScreen: c >> 4,
+    midwayScreen: (c >> 4) | (m1 & 0x10),
     fgInitY: (c >> 2) & 3,
     bgInitY: c & 3,
     noYoshiIntro: d >> 7,
@@ -229,19 +240,32 @@ export function decodeSecondaryHeader([a, b, c, d, e = 0, f = 0, g = 0, h = 0, i
     bgHeight: i & 0x1f,
     faceLeft: (i >> 6) & 1,
     lmSpareBit: i & 0x20,
+    midwayOwn: (m1 >> 5) & 1,
+    midwayX: ((m1 & 8) << 1) | (m2 & 0x0f),
+    midwayY: ((m4 & 0x3f) << 4) | (m2 >> 4),
+    midwayAction: m1 & 7,
+    midwayWater: (m1 >> 6) & 1,
+    midwayFaceLeft: (m3 >> 6) & 1,
+    midwayCameraRelative: m3 >> 7,
+    midwayCamera: ((m4 & 0x40) >> 2) | (m3 & 0x0f),
+    lmMidwayFlags: (m1 & 0x80) | (m3 & 0x30) | (m4 >> 7),
   };
 }
 export function encodeSecondaryHeader(s: SecondaryHeader): number[] {
   return [
     (s.layer2Scroll << 4) | (s.entranceY & 0x0f),
     (s.layer3 << 6) | ((s.entranceAction & 7) << 3) | (s.entranceX & 7),
-    (s.midwayScreen << 4) | ((s.fgInitY & 3) << 2) | (s.bgInitY & 3),
+    ((s.midwayScreen & 0x0f) << 4) | ((s.fgInitY & 3) << 2) | (s.bgInitY & 3),
     (s.noYoshiIntro << 7) | ((s.verticalPositioning & 3) << 5) | (s.entranceScreen & 0x1f),
     (s.layer2Separate << 7) | ((s.layer2HAuto & 1) << 6) | ((s.lmAutoScreens & 1) << 5) | (s.layer2V & 0x1f),
     (s.levelSizeFlags & 0xe0) | (s.levelSize & 0x1f),
     (s.lmEntranceFlags & 0x87) | ((s.water & 1) << 6) | ((s.entranceTile & 1) << 5) | ((s.entranceXHi & 3) << 3),
     (s.bgRelative << 7) | ((s.cameraOffsetHi & 1) << 6) | (s.entranceYHi & 0x3f),
     (s.cameraRelative << 7) | ((s.faceLeft & 1) << 6) | (s.lmSpareBit & 0x20) | (s.bgHeight & 0x1f),
+    (s.lmMidwayFlags & 0x80) | ((s.midwayWater & 1) << 6) | ((s.midwayOwn & 1) << 5) | (s.midwayScreen & 0x10) | ((s.midwayX & 0x10) >> 1) | (s.midwayAction & 7),
+    ((s.midwayY & 0x0f) << 4) | (s.midwayX & 0x0f),
+    (s.midwayCameraRelative << 7) | ((s.midwayFaceLeft & 1) << 6) | (s.lmMidwayFlags & 0x30) | (s.midwayCamera & 0x0f),
+    ((s.lmMidwayFlags & 1) << 7) | ((s.midwayCamera & 0x10) << 2) | ((s.midwayY >> 4) & 0x3f),
   ];
 }
 export function readSecondaryHeader(rom: Rom, n: number): SecondaryHeader {
@@ -715,6 +739,49 @@ export function startHeader(rom: Rom, s: SecondaryHeader, px: number, py: number
   return sec;
 }
 
+// ---- the midway entrance ----
+// Lunar Magic 3.00's (levelheight.ts): with its own settings Mario starts at a tile of the midway screen (X 0-15
+// in a horizontal level, 0-31 in a vertical one) with its own action, camera start and options; else at the
+// main entrance's position on the midway screen, with the main entrance's settings
+export const midwaySpot = (s: SecondaryHeader): EntranceSpot => (s.midwayOwn
+  ? { screen: s.midwayScreen, ex: s.midwayX & 7, exHi: s.midwayX >> 3, ey: s.midwayY & 15, eyHi: s.midwayY >> 4, tile: 1 }
+  : mainSpot(s, s.midwayScreen));
+// its own settings as an entrance's; the BG start is the level's (the main entrance's bytes)
+export type MidwayEntrance = StartEntrance & Pick<SecondaryHeader, 'bgRelative' | 'bgHeight'>;
+export function midwayEntrance(s: SecondaryHeader): MidwayEntrance {
+  const c = s.midwayCamera;
+  return {
+    action: s.midwayAction, faceLeft: s.midwayFaceLeft, water: s.midwayWater,
+    cameraRelative: s.midwayCameraRelative, cameraOffsetHi: c >> 4, fgInitY: (c >> 2) & 3, bgInitY: c & 3, bgRelative: s.bgRelative, bgHeight: s.bgHeight,
+  };
+}
+export function setMidwayEntrance(s: SecondaryHeader, m: MidwayEntrance): void {
+  s.midwayAction = m.action & 7; s.midwayFaceLeft = m.faceLeft; s.midwayWater = m.water;
+  s.midwayCameraRelative = m.cameraRelative; s.midwayCamera = ((m.cameraOffsetHi & 1) << 4) | ((m.fgInitY & 3) << 2) | (m.bgInitY & 3);
+  s.bgRelative = m.bgRelative; s.bgHeight = m.bgHeight;
+}
+// what test play from the midway entrance starts with (the game's $192A there is the main entrance's action
+// unless it has its own)
+export const midwayStart = (s: SecondaryHeader): StartEntrance => (s.midwayOwn ? midwayEntrance(s) : { ...s, action: s.entranceAction });
+// the midway entrance's tile nearest to Mario's top-left pixel (px, py); a horizontal level's X stays in its screen
+export function nearestMidway(rom: Rom, s: SecondaryHeader, px: number, py: number, maxScreen: number): EntranceSpot {
+  const vertical = (s.verticalPositioning & 1) !== 0;
+  const p = nearestEntrance(rom, px, py, vertical, maxScreen, levelRows(s));
+  if (!vertical && p.exHi > 1) {
+    if (p.screen < maxScreen) { p.screen++; p.exHi -= 2; } else { p.ex = 7; p.exHi = 1; }
+  }
+  return p;
+}
+// puts the midway entrance at a tile (dragged, placed); without its own settings yet it takes the main
+// entrance's (action, camera start, options) first. As placeMain: in a level with a size the camera starts
+// relative to Mario.
+export function placeMidway(s: SecondaryHeader, p: EntranceSpot): void {
+  if (!s.midwayOwn) setMidwayEntrance(s, { ...s, action: s.entranceAction });
+  const t = spotTile(p);
+  s.midwayOwn = 1; s.midwayScreen = p.screen; s.midwayX = t.x; s.midwayY = t.y;
+  if (isSized(s)) { const m = midwayEntrance(s); cameraAtMario(m); setMidwayEntrance(s, m); }
+}
+
 // ---- screen operations ----
 // Everything whose origin lies on screen >= s moves by one screen (items keep their position
 // within the screen). Objects that start on an earlier screen and reach into s are not cut.
@@ -729,7 +796,7 @@ function shiftScreens(rom: Rom, lv: Level, from: number, delta: number): void {
   for (const e of lv.exits) if (e.screen >= from) e.screen += delta;
   const sec = lv.secondary;
   if (sec.entranceScreen >= from) sec.entranceScreen = Math.max(0, sec.entranceScreen + delta);
-  if (sec.midwayScreen >= from) sec.midwayScreen = Math.max(0, Math.min(15, sec.midwayScreen + delta));
+  if (sec.midwayScreen >= from) sec.midwayScreen = Math.max(0, Math.min(31, sec.midwayScreen + delta));
 }
 
 export function insertScreen(rom: Rom, lv: Level, s: number): void {
