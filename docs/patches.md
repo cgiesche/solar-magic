@@ -499,7 +499,9 @@ code is the editor's.
   can put Mario at a tile of the entrance screen (main entrance: `$05DE00` bit 5, X bits 4–3 there and bits
   2–0 in `$05F200`, Y bits 9–4 in `$06FC00` and 3–0 in `$05F000`; secondary entrances: `$05FE00` bit 6,
   X bits 4–3 there and 2–0 in `$05FC00`, Y bits 9–4 in a table of the editor's at `$06CC00` (Lunar Magic
-  keeps it with its code) and 3–0 in `$05FA00`). The camera can start relative to Mario (`$06FE00` / the
+  keeps it with its code, at no fixed place; nothing reads it but the entrance code – no .mwl carries
+  secondary entrances, community code reads only the RAM – so the editor's own place costs nothing) and 3–0 in
+  `$05FA00`). The camera can start relative to Mario (`$06FE00` / the
   editor's `$06CE00` bit 7): 16 × the 5-bit signed offset made of `$06FC00` bit 6 (secondary: `$06CC00` bit 6)
   and the FG/BG start Y bits, inside the level; the BG then shows its bottom when the camera is at the
   level's (its height in rows − 1 in `$06FE00` bits 4–0) or, with `$06FC00` bit 7, starts at the FG + 16 ×
