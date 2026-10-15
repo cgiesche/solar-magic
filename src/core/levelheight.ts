@@ -245,10 +245,11 @@ TileRow:
   LDA $98 : AND.l !RowMask
   RTL
 
-; the secondary entrance (A 8, X/Y 16, data bank $05): kept, then the game's LDY $0E : LDA $F800,y
+; the secondary entrance (A 8, X/Y 16, data bank $05): kept, then the game's LDY $0E : LDA $F800,y. A's
+; high byte stays the game's 0: its code takes table indexes with a 16-bit TAX
 SecEntrance:
   LDY $0E
-  REP #$20 : TYA : STA.l !Ent : SEP #$20
+  REP #$20 : TYA : STA.l !Ent : LDA #$0000 : SEP #$20
   LDA $F800,y
   RTL
 

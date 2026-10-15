@@ -129,6 +129,24 @@ for (const [n, size, dy] of [[0x105, 0x0e, 32], [0x106, 0x0e, 32], [0x001, 0x0e,
   check(Math.abs(ts.y - ts.cam - 0x90) <= 0x10 && Math.abs(gs.y - gs.cam - 0x90) <= 0x10, `its camera about 9 rows above him: ${ts.cam.toString(16)} (at row 20: ${gs.cam.toString(16)})`);
 }
 
+// a secondary entrance numbered $100 and up, as the game has it: level 105's exit pipe to the game's $1CB (back
+// into level 105 by the pipe cannon of screen 8) shoots Mario out over screen 8 inside the level, the camera
+// at the game's lowest – the entrance code takes its tables' indexes with a 16-bit TAX, so a hook must leave
+// A's high byte 0 (Mario's Y was $65D8)
+{
+  const lv = moved(cut(0x105, 0), 0, 0);
+  lv.sprites = [];
+  lv.secondary = { ...lv.secondary, entranceScreen: 7, entranceX: 0, entranceXHi: 1, entranceY: 0x14 & 15, entranceYHi: 0x14 >> 4 };
+  lv.exits = lv.exits.map((x) => ({ ...x, dest: 0x1cb, secondary: true }));
+  const s = play(lv), w = s.wram;
+  w[RAM.marioX] = 0x88;
+  let left = false, f = 0;
+  for (; f < 400; f++) { step(s, 0x0400); if (w[RAM.gameMode] !== GM.level) left = true; if (left && w[RAM.gameMode] === GM.level) break; }
+  for (let n = 0; n < 60; n++) step(s, 0);
+  const x = marioX(w), y = marioY(w), at = `${x.toString(16)},${y.toString(16)} camera ${cameraX(w).toString(16)},${cameraY(w).toString(16)}`;
+  check(left && x >> 8 >= 8 && x >> 8 <= 9 && y < 0x1b0 && cameraY(w) === 0xc0, `secondary entrance $1CB: Mario shot out of the pipe cannon at ${at}`);
+}
+
 // the camera over the whole height: Mario starts at row 2 of a level of 89 rows, above level 105 moved to its
 // bottom, and falls onto its ground; the camera starts at the top, follows him down to the level's bottom
 // (its height less a screen) and shows the ground there as the game's level does at its bottom
