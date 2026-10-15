@@ -1,10 +1,10 @@
 // Application state and editing actions.
 
-import { Rom, snesToPc } from '../core/rom.ts';
-import { LevelEmulator, OV_L1, OV_L2, type LevelRender, type LevelOverride, MAP_BASE, MAP_SIZE } from '../core/levelemu.ts';
+import { Rom } from '../core/rom.ts';
+import { LevelEmulator, type LevelRender, type LevelOverride, MAP_BASE, MAP_SIZE } from '../core/levelemu.ts';
 import {
-  type Level, type LevelObject, type LevelSprite, type ScreenExit, type SecondaryEntrance, loadLevel, spriteLoadOrder, serializeLayer1, serializeLayer2, serializeSprites, serializeLevelSprites, spriteSizes, spriteId, spriteBytes,
-  isL1Vertical, cloneLevel, newUid, hasLayer2Objects, hasObjects, L1_PTRS, L2_PTRS, SEC_HDR,
+  type Level, type LevelObject, type LevelSprite, type ScreenExit, type SecondaryEntrance, loadLevel, spriteLoadOrder, serializeLayer1, serializeSprites, serializeLevelSprites, spriteSizes, spriteId, spriteBytes,
+  isL1Vertical, cloneLevel, newUid, hasLayer2Objects, hasObjects, L2_PTRS, SEC_HDR,
   readSecondaryEntrance, writeSecondaryEntrance, decodeSecondaryEntrance, entrancePos, nearestEntrance, encodeSecondaryHeader, mainSpot, secondarySpot, sameSpot, placeMain, placeSecondary, isSized, SPRITE_MEMORY, levelRows,
 } from '../core/level.ts';
 import { hex, spriteName } from '../core/names.ts';
@@ -38,6 +38,7 @@ import type { ProbeReply } from '../core/probehost.ts';
 import { ProbeClient } from '../core/probeclient.ts';
 import { map16Tile, bgTile } from '../core/ram.ts';
 import { exanimTiles, exanimColors } from '../core/exanim.ts';
+import { LevelUses, levelTilesOf, levelOverride, usedLevels, spriteUsage, type LevelTiles, type SpriteUser } from '../core/levelusage.ts';
 
 export type EditMode = 'l1' | 'l2' | 'spr' | 'exit' | 'bg' | 'l3';
 // the modes painted with a brush of tiles picked from the level or the palette: BG tiles, layer 3's 8x8 tiles
@@ -68,6 +69,8 @@ export type AppEvent =
   | 'probes' // the asked or the prefetched probes are done (block, collision, sprite, run speeds)
   | 'objkinds' // object kinds asked for are known (or failed)
   | 'level-scan' // the level scan of the level as edited is known
+  | 'level-uses' // more levels' Map16 tiles are known (levelTiles)
+  | 'palette-item' // a sprite was chosen in the palette
   | 'arcs' // jump arcs asked for are known
   | 'sprites' // sprite images were captured
   | 'sprite-mem' // the sprite memory check of the level is known
@@ -291,22 +294,12 @@ export class App {
   }
 
   buildOverrides(): LevelOverride {
-    const lv = this.level;
-    const owners1: number[] = [];
-    const l1 = serializeLayer1(this.rom, lv, owners1);
-    const owners2: number[] = [];
-    const l2 = serializeLayer2(this.rom, lv, owners2);
-    const byteOwner = new Int32Array(0x10000).fill(-1);
-    owners1.forEach((o, i) => (byteOwner[OV_L1 + i] = o));
-    owners2.forEach((o, i) => (byteOwner[OV_L2 + i] = o < 0 ? -1 : 0x8000 | o));
+    const lv = this.level, ov = levelOverride(this.rom, lv);
     return {
-      layer1: l1,
-      layer2: l2 ?? undefined,
-      layer2Pointer: l2 ? undefined : lv.layer2Pointer,
-      bgData: !l2 && lv.bg ? encodeBg(lv.bg) : undefined,
+      ...ov,
+      bgData: !ov.layer2 && lv.bg ? encodeBg(lv.bg) : undefined,
       layer3: lt3Override(this.rom, lv),
       sprites: serializeLevelSprites(this.rom, lv),
-      byteOwner,
       switchPalaces: this.switches.palaces,
       onOffSwitch: this.switches.onOff,
       secondaryHeader: encodeSecondaryHeader(lv.secondary),
@@ -527,6 +520,14 @@ export class App {
     this.emit('mode');
     this.selectScreen(screen);
     this.reveal = this.vertical ? { x: 128, y: screen * 256 + 128 } : { x: screen * 256 + 128, y: 200 };
+    this.emit('reveal');
+  }
+
+  // opens level n (unless it is open) and scrolls to a tile of it
+  showUse(n: number, at?: { x: number; y: number }): void {
+    if (n !== this.level.number) this.openLevel(n);
+    if (!at) return;
+    this.reveal = { x: at.x * 16 + 8, y: at.y * 16 + 8 };
     this.emit('reveal');
   }
 
@@ -1017,6 +1018,52 @@ export class App {
   private l2Run: { key: string; waiting: (() => void)[] } | null = null;
 
   // a background emulator (new for another ROM) set up from the main one's boot state
+  // The Map16 tiles of every level (levelusage.ts), the open one as edited: those known now, the others are
+  // learned in the background ('level-uses' as they come); pending: how many are still missing
+  levelTiles(): { levels: LevelTiles[]; pending: number } {
+    const idx = this.usesIndex ??= new LevelUses(this.rom, this.results, () => (this.usesEmu = this.auxEmu(this.usesEmu)));
+    if (this.currentTiles?.render !== this.render) this.currentTiles = { render: this.render, tiles: levelTilesOf(this.rom, this.level, this.render) };
+    const levels = [this.currentTiles.tiles];
+    let pending = 0;
+    for (const n of usedLevels(this.rom)) {
+      if (n === this.level.number) continue;
+      const t = idx.tiles(n);
+      if (t) levels.push(t); else pending++;
+    }
+    if (pending && !this.usesRun) this.learnLevelTiles(idx);
+    return { levels, pending };
+  }
+  // the levels with sprite id (spriteId), the open level as edited
+  spriteUsers(id: number): SpriteUser[] {
+    const n = this.level.number;
+    if (this.savedSprites?.level !== n) this.savedSprites = { level: n, uses: spriteUsage(this.rom, usedLevels(this.rom).filter((i) => i !== n)) };
+    const here = spriteUsage(this.rom, [n], () => this.level).get(id) ?? [];
+    return [...here, ...(this.savedSprites.uses.get(id) ?? [])].sort((a, b) => a.level - b.level);
+  }
+  private savedSprites: { level: number; uses: Map<number, SpriteUser[]> } | null = null;
+
+  private usesIndex: LevelUses | null = null;
+  private usesEmu: LevelEmulator | null = null;
+  private usesRun = false;
+  private currentTiles: { render: LevelRender; tiles: LevelTiles } | null = null;
+
+  private learnLevelTiles(idx: LevelUses): void {
+    this.usesRun = true;
+    const step = () => {
+      const t0 = performance.now();
+      let left: number[] = [];
+      try {
+        left = idx.missing(usedLevels(this.rom)).filter((n) => n !== this.level.number);
+        while (left.length && performance.now() - t0 < BG_SLICE) idx.scan(left.shift()!);
+      } catch (e) { console.error(e); left = []; }
+      this.emit('level-uses');
+      this.setBusy('uses', left.length ? `Uses in levels (${left.length})` : null);
+      if (left.length) this.later('level-uses', step); else this.usesRun = false;
+    };
+    this.setBusy('uses', 'Uses in levels');
+    void this.cacheReady.then(() => this.later('level-uses', step));
+  }
+
   private auxEmu(emu: LevelEmulator | null): LevelEmulator {
     if (!emu || emu.rom !== this.rom) {
       emu = new LevelEmulator(this.rom);
@@ -1578,6 +1625,7 @@ export class App {
   }
   private romNotice(): void {
     this.graph = null;
+    this.savedSprites = null;
     this.emit('rom-change');
   }
 
@@ -1644,11 +1692,7 @@ export class App {
 
   // vanilla levels plus anything relocated into expanded ROM space
   usedLevels(): Set<number> {
-    const used = new Set<number>();
-    for (let i = 0; i <= 0x24; i++) used.add(i);
-    for (let i = 0x101; i <= 0x13b; i++) used.add(i);
-    for (let i = 0; i < 512; i++) if (snesToPc(this.rom.r24(L1_PTRS + i * 3)) >= 0x80000) used.add(i);
-    return used;
+    return new Set(usedLevels(this.rom));
   }
 }
 

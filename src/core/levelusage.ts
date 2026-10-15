@@ -145,8 +145,9 @@ export class LevelUses {
   scan(n: number): LevelTiles {
     const i = this.input(n);
     if (!i) return this.tiles(n)!;
-    const emu = this.emu(), ov = levelOverride(this.rom, i.lv);
+    const emu = this.emu(), ov = levelOverride(this.rom, i.lv), gen = this.rom.gen;
     const run = emu.tracked(() => emu.load(n, ov));
+    if (this.inputs.gen === gen) this.inputs.gen = this.rom.gen; // (the load's temporary ROM patches are undone)
     const tiles = levelTilesOf(this.rom, i.lv, run.result);
     this.results.set(levelTilesKey(n), { data: i.data, tiles } satisfies Stored, this.results.fp.deps(run.reads));
     return tiles;
@@ -221,7 +222,8 @@ export function gfxSlots(rom: Rom, level: number, tileset: number, spriteSet: nu
   return out;
 }
 
-const savedHeader = (rom: Rom, n: number): PrimaryHeader => parsePrimaryHeader(rom.bytes(rom.r24(L1_PTRS + n * 3), 5));
+// the header of level n as saved
+export const savedHeader = (rom: Rom, n: number): PrimaryHeader => parsePrimaryHeader(rom.bytes(rom.r24(L1_PTRS + n * 3), 5));
 
 export interface GfxUser { level: number; slots: string[] }
 // file → the levels using it and in which slots (defaults included); `header`: a level's header when not

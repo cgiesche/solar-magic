@@ -23,6 +23,9 @@ import { cgramToRGBA } from '../../core/gfx.ts';
 import { map16Pointer } from '../../core/ram.ts';
 import { tileMatches, drawTileMatches } from '../tilesearch.ts';
 import { animsAt, animLinks } from './animtab.ts';
+import { fgTileUsers, bgTileUsers, tileLinks, unusedFgTiles, TILE_SOURCES } from '../../core/levelusage.ts';
+import { usedInList } from '../usedin.ts';
+import { map16Source } from '../../core/render.ts';
 
 const Z = 2; // sheet zoom
 const M = 34; // sheet margin for the ranges and row numbers
@@ -69,6 +72,9 @@ export class Map16Tab implements WsPanel {
   private quad = 0;
   private clip: Clip | null = null;
   private sameActs = false; // mark tiles that act like the selected one
+  private markUnused = false; // mark tiles 200-FFF defined but used nowhere
+  private unused: Set<number> | null = null; // (known once every level's tiles are)
+  private usesBox = h('div', { class: 'mt-uses' });
   private visible = false;
   private bar = h('div', { class: 'ws-bar' });
   // all pages of 256 tiles in one list, each drawn once it scrolls into view
@@ -99,11 +105,12 @@ export class Map16Tab implements WsPanel {
     this.attachSheet();
     this.attachSearch();
     this.attachGfx();
-    const redraw = () => { if (this.visible) this.redraw(); };
+    const redraw = () => { this.unused = null; if (this.visible) this.redraw(); };
     app.on('rom-change', redraw);
     app.on('render', redraw);
     app.on('probes', () => { if (this.visible) this.buildBuilder(); });
     app.on('animated', redraw);
+    app.on('level-uses', () => { this.unused = null; if (this.visible) { this.buildUses(); if (this.markUnused) this.drawSheet(); } });
   }
 
   previewHint(): string {
@@ -194,6 +201,9 @@ export class Map16Tab implements WsPanel {
       this.bg ? '' : h('label', { class: 'toggle', title: 'Mark all tiles that behave like the selected one' },
         (() => { const cb = h('input', { type: 'checkbox', checked: this.sameActs }); cb.addEventListener('change', () => { this.sameActs = cb.checked; this.drawSheet(); }); return cb; })(),
         'Mark same behavior'),
+      this.bg ? '' : h('label', { class: 'toggle', title: 'Mark the tiles 200–FFF that have graphics, a behavior or a block but are in no level and no structure' },
+        (() => { const cb = h('input', { type: 'checkbox', checked: this.markUnused }); cb.addEventListener('change', () => { this.markUnused = cb.checked; this.drawSheet(); }); return cb; })(),
+        'Mark unused'),
       h('span', { class: 'spacer' }),
       menuButton({ label: 'Import/Export', items: [
         { label: 'Import (.map16) …', title: 'Insert a Lunar Magic .map16 starting at the selected tile', onClick: () => void this.importMap16() },
@@ -289,6 +299,15 @@ export class Map16Tab implements WsPanel {
       const a = actsLike(this.app.rom, this.sel);
       ctx.fillStyle = 'rgba(255,176,0,0.35)';
       for (let t = 0; t < 256; t++) if (actsLike(this.app.rom, base + t) === a) ctx.fillRect(M + (t & 15) * 16 * Z, (t >> 4) * 16 * Z, 16 * Z, 16 * Z);
+    }
+    const unused = this.markUnused && !this.bg ? this.unusedTiles() : null;
+    if (unused) {
+      ctx.strokeStyle = 'rgba(255,90,90,0.9)';
+      ctx.lineWidth = 2;
+      for (let t = 0; t < 256; t++) if (unused.has(base + t)) {
+        const x = M + (t & 15) * 16 * Z, y = (t >> 4) * 16 * Z;
+        ctx.beginPath(); ctx.moveTo(x + 4, y + 4); ctx.lineTo(x + 16 * Z - 4, y + 16 * Z - 4); ctx.moveTo(x + 16 * Z - 4, y + 4); ctx.lineTo(x + 4, y + 16 * Z - 4); ctx.stroke();
+      }
     }
     drawTileMatches(ctx, this.match, base, 256, 16 * Z, M);
     // the selection may reach over several pages; each draws its part
@@ -397,6 +416,7 @@ export class Map16Tab implements WsPanel {
     const app = this.app;
     const b = this.builder;
     clear(b);
+    this.buildUses();
     const t = this.sel;
     const ws = this.words(t);
     const cache = this.tc();
@@ -492,6 +512,7 @@ export class Map16Tab implements WsPanel {
         toggle('Priority', PRIO, 'Drawn in front of sprites/Mario')),
       h('div', { class: 'mt-section' }, 'Tile'),
       this.bg ? '' : this.actsUi(t),
+      this.usesBox,
       h('details', { class: 'mt-adv' }, h('summary', null, 'Raw values'),
         h('div', { class: 'mono hint' }, ws.map((w, q) => `${['top left', 'bottom left', 'top right', 'bottom right'][q]} $${hex(w, 4)}`).join('  ')),
         h('div', { class: 'hint' }, this.tileAddr(t) < 0 ? 'Extended tile – created on the first change.' : `ROM $${hex(this.tileAddr(t), 6)}`)),
@@ -500,6 +521,40 @@ export class Map16Tab implements WsPanel {
   }
 
   private lastClick = { q: -1, t: 0 };
+
+  // the defined tiles 200-FFF used nowhere (null while not every level's tiles are known)
+  private unusedTiles(): Set<number> | null {
+    if (this.unused) return this.unused;
+    const app = this.app, { levels, pending } = app.levelTiles();
+    if (!pending) this.unused = new Set(unusedFgTiles(app.rom, levels, map16Source(app.rom, app.render).fg(0x025)));
+    return this.unused;
+  }
+
+  // "Used in levels": where the selected tile is placed (the open level as edited), what else refers to it
+  private buildUses(): void {
+    const app = this.app, t = this.sel, box = this.usesBox;
+    const { levels, pending } = app.levelTiles();
+    const link = (x: number) => h('a', { href: '#', class: 'mono', title: 'Show the tile', onclick: (e: Event) => { e.preventDefault(); this.select(x, this.bg); } }, hex(x, 3));
+    if (this.bg) {
+      const users = bgTileUsers(levels, t);
+      box.replaceChildren(usedInList(app, 'Used in levels', users.map((u) => ({ level: u.level, text: `${u.count}× in the BG` })), pending, 'In no level\'s background.'));
+      return;
+    }
+    const ts = app.level.header.tileset, tilesetTile = t >= 0x073 && t < 0x100;
+    const users = fgTileUsers(levels, t, ts);
+    const items = users.map((u) => ({
+      level: u.level, at: { x: u.uses[0].x, y: u.uses[0].y },
+      text: u.uses.map((q) => `${q.count}× ${TILE_SOURCES[q.source]}${q.layer === 2 ? ' (layer 2)' : ''}`).join(', '),
+    }));
+    const l = tileLinks(app.rom, t);
+    const unused = !users.length && !pending && !l.structures.length;
+    box.replaceChildren(
+      usedInList(app, tilesetTile ? `Used in levels of tileset ${hex(ts, 1)}` : 'Used in levels', items, pending, t >= EXT_FIRST && unused ? 'Placed in no level and no structure: unused.' : 'Placed in no level.'),
+      l.actsLike.length ? h('div', { class: 'hint' }, 'Acting like it: ', ...l.actsLike.slice(0, 24).flatMap((x, i) => [i ? ' ' : '', link(x)]), l.actsLike.length > 24 ? ` … (${l.actsLike.length})` : '') : '',
+      l.structures.length ? h('div', { class: 'hint' }, `In structure${l.structures.length > 1 ? 's' : ''} ${l.structures.map((n) => hex(n, 2)).join(', ')}`) : '',
+      l.blocks.length ? h('div', { class: 'hint' }, `Custom block on it: ${l.blocks.join(', ')}`) : '',
+    );
+  }
 
   // opens the quarter's 8x8 tile in the graphics tab, in the quarter's palette
   private editGfx(q: number): void {

@@ -7,6 +7,7 @@ import { objectVariant, withObjectVariant, type ObjKind } from '../core/objkinds
 import { objectThumbs, thumbCanvas, objKey, type ObjSpec } from './thumbs.ts';
 import { newUid, spriteId, spriteBytes, spriteSizes, type LevelObject } from '../core/level.ts';
 import { levelName } from '../core/overworld.ts';
+import { usedInList } from './usedin.ts';
 import { buildExitPanel } from './exitpanel.ts';
 import { DM16_EXT } from '../core/patches.ts';
 import { STRUCT_EXT, TRANSPARENT, freeStructureNumber, readStructure, writeStructure, STRUCT_COUNT, type Structure } from '../core/structs.ts';
@@ -50,7 +51,7 @@ export function blockEnter(app: App, tiles: number[]): string {
 }
 
 // ---------------- level list ----------------
-function nameOf(app: App, i: number): string {
+export function levelNameOf(app: App, i: number): string {
   const tl = i < 0x25 ? i : i >= 0x101 && i < 0x13c ? i - 0xdc : -1;
   return tl > 0 ? levelName(app.rom, tl) : '';
 }
@@ -93,9 +94,9 @@ export class LevelList {
     for (let i = 0; i < 0x200; i++) {
       if (this.onlyUsed.checked && !used.has(i)) continue;
       const label = hex3(i);
-      if (f && !label.toLowerCase().includes(f) && !nameOf(this.app, i).toLowerCase().includes(f)) continue;
+      if (f && !label.toLowerCase().includes(f) && !levelNameOf(this.app, i).toLowerCase().includes(f)) continue;
       const cur = this.app.level?.number === i;
-      const name = nameOf(this.app, i);
+      const name = levelNameOf(this.app, i);
       const el = h('div', { class: `level-item${cur ? ' current' : ''}${used.has(i) ? '' : ' unused'}`, title: name, onclick: () => this.app.openLevel(i) }, label, name ? h('span', { class: 'lname' }, ' ' + name) : '');
       this.list.appendChild(el);
       if (this.first < 0) this.first = i;
@@ -670,7 +671,7 @@ export class Palette {
         const img = app.spriteThumbs?.get(e.id);
         this.body.appendChild(h('div', {
           class: `pal-row${sel ? ' selected' : ''}`, title: e.title,
-          onclick: () => { app.paletteItem = e.item; if (app.mode !== 'spr') app.setMode('spr'); this.build(); },
+          onclick: () => { app.paletteItem = e.item; if (app.mode !== 'spr') app.setMode('spr'); this.build(); app.emit('palette-item'); },
         }, h('span', { class: 'pal-thumb-s' }, img ? cloneCanvas(img) : ''), h('span', { class: 'num' }, e.num), e.name, itemBadge(app, e.items, 'pal-items-row')));
       }
       if (!this.body.firstChild) this.body.append(emptyState('No sprite matches the search.'));
@@ -832,6 +833,7 @@ export class Properties {
     app.on('objkinds', () => this.build());
     app.on('probes', () => { if (this.probePending) this.build(); });
     app.on('rom-change', () => { if (app.mode === 'exit') this.build(); });
+    app.on('palette-item', () => { if (app.mode === 'spr' && !app.selectedSprites().length) this.build(); });
   }
 
   probePending = false; // the shown object's block behaviour is still being probed
@@ -863,7 +865,16 @@ export class Properties {
     }
     if (app.mode === 'spr') {
       const sel = app.selectedSprites();
-      if (!sel.length) { this.body.appendChild(emptyState(`${app.level.sprites.length} sprites – none selected.`)); return; }
+      if (!sel.length) {
+        this.body.appendChild(emptyState(`${app.level.sprites.length} sprites – none selected.`));
+        // the sprite chosen in the palette
+        const p = app.paletteItem;
+        if (p?.kind === 'spr') {
+          const id = spriteId(p);
+          this.body.append(usedInList(app, `Sprite ${hex2(p.num)} (${app.spriteLabel(id)}) used in levels`, app.spriteUsers(id).map((u) => ({ level: u.level, at: { x: u.x, y: u.y }, text: `${u.count}×` })), 0, 'In no level.'));
+        }
+        return;
+      }
       if (sel.length > 1) { this.body.append(h('div', { class: 'prop-title' }, `${sel.length} sprites selected`), this.actions(false)); return; }
       const s = sel[0];
       const upd = (f: () => void) => app.editLevel(f, false);
@@ -881,6 +892,7 @@ export class Properties {
         s.extra >= 2 ? h('div', { class: 'hint' }, custom ? 'Extra bits 2/3: custom sprite without/with extra bit.' : 'This custom sprite is not inserted (ROM → Packages …, Sprites); the game treats it like the original sprite with the same number.') : '',
         custom?.description ? h('div', { class: 'hint pre' }, custom.description) : '',
         this.actions(false),
+        usedInList(app, 'Used in levels', app.spriteUsers(id).map((u) => ({ level: u.level, at: { x: u.x, y: u.y }, text: `${u.count}×` })), 0, 'In no level.'),
       );
       // behaviour when hit from below or jumped on, at this position and in general (emulated)
       const p = app.probes.sprite(id);

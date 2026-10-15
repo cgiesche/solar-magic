@@ -64,6 +64,7 @@ export class LevelPreview {
     });
     app.on('render', () => this.update());
     app.on('anim-frame', () => this.update());
+    app.on('reveal', () => this.scrollTo(app.reveal.x >> 4, app.reveal.y >> 4));
   }
 
   // z: zoom factor; anchor: point in the scroller that stays put (default: the middle)
