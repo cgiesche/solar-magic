@@ -129,6 +129,28 @@ for (const [n, size, dy] of [[0x105, 0x0e, 32], [0x106, 0x0e, 32], [0x001, 0x0e,
   check(Math.abs(ts.y - ts.cam - 0x90) <= 0x10 && Math.abs(gs.y - gs.cam - 0x90) <= 0x10, `its camera about 9 rows above him: ${ts.cam.toString(16)} (at row 20: ${gs.cam.toString(16)})`);
 }
 
+// the camera over the whole height: Mario starts at row 2 of a level of 89 rows, above level 105 moved to its
+// bottom, and falls onto its ground; the camera starts at the top, follows him down to the level's bottom
+// (its height less a screen) and shows the ground there as the game's level does at its bottom
+{
+  const size = 0x13, dy = 62, game = cut(0x105, size), lv = moved(game, size, dy);
+  lv.sprites = [];
+  lv.secondary = { ...lv.secondary, entranceY: 2, entranceYHi: 0 };
+  const a = play(game), b = play(lv), wa = a.wram, wb = b.wram;
+  const top = cameraY(wb), bottom = (levelRows(lv.secondary) << 4) - 0xf0;
+  let max = 0, f = 0, landed = -1;
+  for (; f < 600 && landed < 0; f++) {
+    step(b, 0); max = Math.max(max, cameraY(wb));
+    if (wb[RAM.marioBlocked] & 4) landed = f;
+  }
+  for (let n = 0; n < 60; n++) { step(a, 0); step(b, 0); } // the cameras settle
+  const yA = marioY(wa), yB = marioY(wb);
+  check(top === 0, `taller level: the camera starts at the top with Mario at row 2 (${top.toString(16)})`);
+  check(landed >= 0 && yB === yA + dy * 16, `taller level: Mario falls onto the ground at the bottom (Y ${yB.toString(16)}, the game's ${yA.toString(16)} + ${(dy * 16).toString(16)}${landed < 0 ? ', not landed' : ''})`);
+  check(max === bottom && cameraY(wb) === cameraY(wa) + dy * 16, `taller level: the camera follows him to the bottom (${max.toString(16)} of ${bottom.toString(16)}; then ${cameraY(wb).toString(16)}, the game's ${cameraY(wa).toString(16)} + ${(dy * 16).toString(16)})`);
+  check(visible(a).join() === visible(b).join(), 'taller level: the visible layer 1 tiles at the bottom as the game\'s');
+}
+
 // with custom sprites the editor's PIXI runtime loads the sprites (its own loop over the list): the same,
 // and a custom sprite in the moved part spawns there
 {
