@@ -510,7 +510,13 @@ code is the editor's.
   camera update after the load, and sets layer 2's offset (`$1417`) from that – at every rate the BG shows its
   bottom there, without a copy of the rates. The format is Lunar Magic's (the bit layout as the SMW speedrunning wiki's
   *Level Data Format* gives it; what each value does as observed in a Lunar Magic-saved ROM). In a level with
-  a size the editor places entrances at tiles with the camera 10 rows above Mario. The level's own slippery,
+  a size the editor places entrances at tiles with the camera 10 rows above Mario. The level header dialog sets
+  the camera start (the FG/BG start Y, or rows above Mario – horizontal levels only, the patch ignores it in
+  vertical ones) and, for every horizontal level, the BG start of its relative entrances (bottom-aligned by the
+  BG's height, relative to the FG by −15 to +15 rows, or at 0, as Lunar Magic's *Change Layer 1/2 Settings*).
+  Moving an entrance, creating one and test play from a spot keep these settings (Lunar Magic 3.50's drag
+  without updating the FG/BG init); only a tile entrance with the game's camera gets the relative one.
+  `tools/testfgbginit.ts` checks by emulation that test play starts FG and BG where each setting puts them. The level's own slippery,
   water, face-left and midway bits of Lunar Magic are kept but not used.
 
 The emulation check (`tools/testlevelheightplay.ts`): levels of the game moved down into taller levels play

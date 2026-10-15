@@ -27,6 +27,10 @@ _Avoid_: dimension, level mode (that is the header's)
 An entrance that puts Mario at a tile of its screen (Lunar Magic's), instead of at one of the game's table positions, which don't reach a taller level's rows; its camera starts a number of rows above Mario. Entrances placed in a level with a size are tile entrances.
 _Avoid_: method 2, exact entrance
 
+**Camera start**:
+Where layer 1 (FG) and layer 2 (BG) start when Mario enters: the game's FG/BG start Y, or (Lunar Magic's, horizontal levels) a number of rows above Mario, the BG then by the level's BG start – its bottom at the level's bottom (by the BG's height), rows below the FG, or at 0. Moving an entrance keeps it.
+_Avoid_: FG/BG init (Lunar Magic's name), initial position
+
 ### Third-party content
 
 **Package**:
