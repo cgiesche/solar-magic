@@ -16,7 +16,7 @@ function fileRange(rom: Rom, i: number): [number, number] | null {
   if (!e) return null;
   const pc = snesToPc(e.addr);
   if (pc >= rom.data.length) return null;
-  try { return [pc, Math.min(rom.data.length, pc + (e.raw ? 0x1000 : lz2Decompress(rom.data, pc).size))]; } catch { return null; }
+  try { return [pc, Math.min(rom.data.length, pc + (e.raw ? e.size : lz2Decompress(rom.data, pc).size))]; } catch { return null; }
 }
 
 // 1 for every byte of GFX file data and ExAnimation data (and the checksum). Often built lazily inside a tracked computation: reading the

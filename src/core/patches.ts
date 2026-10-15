@@ -2,7 +2,8 @@
 //  - sprite data of each level may live in any bank (bank table, 512 entries)
 //  - the current level number is kept in $7E010B (as Lunar Magic does)
 //  - GFX pointer table with 256 entries (GFX 00-31 vanilla, 32-FF = ExGFX)
-//  - per-file format flag: 0 = LZ2 3bpp (vanilla), 1 = raw uncompressed 4bpp (DMA'd directly)
+//  - per-file format flag: 0 = LZ2 3bpp (vanilla), 1 = raw uncompressed 4bpp (DMA'd directly); raw files of
+//    other sizes (layer3gfx.ts): 2 = 0x800 bytes (2bpp layer 3 graphics), 3 = 0x2000 (a layer 3 tilemap)
 //  - per-level GFX bypass: 8 slots (SP4..SP1, FG3, BG1, FG2, FG1), $FF = tileset default
 //  - extended object $02 "Direct Map16": 6 bytes, places any Map16 tile as a rectangle
 //  - "edited" mark at $0FF0A0 where Lunar Magic keeps its version string (see markEdited)
@@ -283,19 +284,22 @@ export function setSpriteBank(rom: Rom, n: number, bank: number): void {
 
 // ---- GFX files ----
 export const VANILLA_GFX = 0x32;
-export interface GfxEntry { addr: number; raw: boolean }
+// raw: stored uncompressed, size bytes (0x1000 4bpp; 0x800, 0x2000 for layer 3)
+export interface GfxEntry { addr: number; raw: boolean; size: number }
+export const RAW_GFX_SIZES = [0x1000, 0x800, 0x2000]; // by format flag - 1
 export function gfxEntry(rom: Rom, i: number): GfxEntry | null {
   const p = editor(rom);
   const addr = rom.r8(p.gfxLo + i) | (rom.r8(p.gfxHi + i) << 8) | (rom.r8(p.gfxBank + i) << 16);
   if (addr === 0) return null;
-  return { addr, raw: rom.r8(p.gfxFlags + i) !== 0 };
+  const f = rom.r8(p.gfxFlags + i);
+  return { addr, raw: f !== 0, size: f ? RAW_GFX_SIZES[f - 1] ?? 0x1000 : 0 };
 }
-export function setGfxEntry(rom: Rom, i: number, addr: number, raw: boolean): void {
+export function setGfxEntry(rom: Rom, i: number, addr: number, raw: boolean, size = 0x1000): void {
   const p = editor(rom);
   rom.w8(p.gfxLo + i, addr & 0xff);
   rom.w8(p.gfxHi + i, (addr >> 8) & 0xff);
   rom.w8(p.gfxBank + i, (addr >> 16) & 0xff);
-  rom.w8(p.gfxFlags + i, raw ? 1 : 0);
+  rom.w8(p.gfxFlags + i, raw ? RAW_GFX_SIZES.indexOf(size) + 1 || 1 : 0);
 }
 
 // ---- per-level GFX bypass ----

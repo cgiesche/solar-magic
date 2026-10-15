@@ -53,10 +53,10 @@ export function loadGfx(rom: Rom, num: number, bppOverride: number | null = null
   const e = gfxEntry(rom, num);
   if (!e) return { num, addr: 0, raw: true, bpp: 4, auto: 4, packed: 0, pix: new Uint8Array(128 * 64), tiles: 128, empty: true };
   let data: Uint8Array, packed: number;
-  if (e.raw) { data = rom.bytes(e.addr, 0x1000); packed = 0x1000; }
+  if (e.raw) { data = rom.bytes(e.addr, e.size); packed = e.size; }
   else ({ data, size: packed } = lz2Decompress(rom.data, snesToPc(e.addr)));
-  const auto = e.raw ? 4 : defaultBpp(num, data.length);
-  const bpp = e.raw ? 4 : bppOverride ?? auto;
+  const auto = e.raw ? (e.size === 0x800 ? 2 : 4) : defaultBpp(num, data.length);
+  const bpp = e.raw ? auto : bppOverride ?? auto;
   const tiles = Math.max(1, Math.floor(data.length / (bpp * 8)));
   const pix = new Uint8Array(tiles * 64);
   for (let t = 0; t < tiles; t++) decodeTile(data, t * bpp * 8, bpp, pix, t * 64);

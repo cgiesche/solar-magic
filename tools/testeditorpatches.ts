@@ -10,6 +10,7 @@ import { map16Ext } from '../src/core/map16ext.ts';
 import { bgMap16Ext } from '../src/core/bgmap16.ts';
 import { structPatch } from '../src/core/structs.ts';
 import { messagePatch } from '../src/core/messages.ts';
+import { layer3Entry } from '../src/core/layer3gfx.ts';
 import { cleanImage } from './fixture.ts';
 
 let bad = 0;
@@ -29,6 +30,7 @@ check(!!map16Ext(rom)?.blocks, 'SMWX with custom blocks');
 check(!!bgMap16Ext(rom), 'SMWH');
 check(!!structPatch(rom), 'SMWS');
 check(exanimInstalled(rom) && exanimEntry(rom)?.kind === 'exanim', 'ExAnimation engine (kind exanim)');
+check(layer3Entry(rom)?.kind === 'layer3', 'layer 3 graphics (SMWL, kind layer3)');
 check(!messagePatch(rom), 'no SMWM');
 
 // a ROM the editor made: opened as it is (also as exported, with its header)

@@ -73,17 +73,19 @@ export function exgfxName(name: string): { num: number | null; slot: string | nu
 export function importGfxFile(rom: Rom, num: number, data: Uint8Array): string {
   if (num < 0 || num > 0xff) throw new Error('GFX number must be 00–FF');
   let raw: boolean, stored: Uint8Array, what: string;
-  if (data.length === 0x1000) { raw = true; stored = data; what = '4bpp uncompressed'; }
+  // uncompressed: 4bpp; 2bpp layer 3 graphics and layer 3 tilemaps (layer3gfx.ts) stay so too
+  const plain: Record<number, string> = { 0x1000: '4bpp', 0x800: '2bpp (layer 3)', 0x2000: 'layer 3 tilemap' };
+  if (plain[data.length]) { raw = true; stored = data; what = `${plain[data.length]} uncompressed`; }
   else if (data.length === 0xc00) { raw = false; stored = lz2Compress(data); what = '3bpp, LZ2-compressed'; }
   else {
     let un: Uint8Array;
     try { un = lz2Decompress(data, 0).data; } catch { throw new Error(`Unknown GFX format (${data.length} bytes)`); }
-    if (un.length === 0x1000) { raw = true; stored = un; what = '4bpp (decompressed)'; }
+    if (plain[un.length]) { raw = true; stored = un; what = `${plain[un.length]} (decompressed)`; }
     else if (un.length === 0xc00) { raw = false; stored = data; what = '3bpp, LZ2'; }
     else throw new Error(`Unknown GFX format (${data.length} bytes, decompressed ${un.length})`);
   }
   const old = gfxEntry(rom, num);
   if (old && num >= VANILLA_GFX) rom.freeAt(old.addr);
-  setGfxEntry(rom, num, rom.allocWrite(stored), raw);
+  setGfxEntry(rom, num, rom.allocWrite(stored), raw, stored.length);
   return what;
 }

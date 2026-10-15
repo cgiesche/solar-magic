@@ -94,6 +94,8 @@ export const LEVEL_HEIGHT_RAM: [number, number] = [0x7f3666, 18];
 // in it, for the editor's other code: a position's limit and row bits when a tile is changed (16-bit
 // each; the game's $0200 and $01F0)
 export const LEVEL_MAX_Y = LEVEL_HEIGHT_RAM[0] + 4, LEVEL_ROW_MASK = LEVEL_HEIGHT_RAM[0] + 6;
+// the layer 3 graphics patch's RAM (layer3gfx.ts): 1 while the layer 3 graphics in VRAM are a level's own
+export const LAYER3_GFX_RAM: [number, number] = [0x7f3678, 1];
 // Lunar Magic's RAM for a horizontal level's height, which community code reads too: the height in
 // pixels (also a screen's bytes in the level data), and the screens' Map16 addresses in bank 0's RAM
 // (the game's mode tables point there): 3-byte pointers to the low and the high bytes, then the
