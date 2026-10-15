@@ -16,6 +16,7 @@ export const GM = {
 
 export const RAM = {
   gameMode: 0x0100,
+  frameCounter: 0x14, // advances once per game frame (not in lag frames)
   introLevel: 0x0109, // level the game starts with instead of the overworld (0 = none)
 
   // camera: layer 1 position (16-bit) and its copy for the next frame, layer 3 position

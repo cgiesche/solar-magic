@@ -21,6 +21,9 @@ import { Rom } from './rom.ts';
 import { applyPatch, type ApplyResult } from './patchapply.ts';
 import { listPatches } from './patchreg.ts';
 import { setVramPatchCheck } from './patches.ts';
+import { LEVEL_HEIGHT } from './ram.ts';
+
+const hx = (v: number) => v.toString(16).toUpperCase();
 
 export const VRAM_PATCH_NAME = 'VRAM layout (SMWV)';
 
@@ -69,6 +72,7 @@ lorom
 !RX   = $7F0210
 !RA   = $7F0212
 !Row  = $7F0000      ; built rows: $100 bytes each, 64 tiles of the upper then the lower tile row
+!Height = $${hx(LEVEL_HEIGHT)}   ; the level's height in pixels (Lunar Magic's, set by the level heights patch)
 
 ; tilemap registers: set by the common PPU setup, switch on in the level load only
 org $008A7F
@@ -418,7 +422,7 @@ TallTarget:
   LDA $1C : BPL + : LDA #$0000
 + LSR #4 : DEC : BPL + : LDA #$0000
 + PHA
-  LDA $13D7 : LSR #4 : SEC : SBC #$0010 : BPL + : LDA #$0000
+  LDA !Height : LSR #4 : SEC : SBC #$0010 : BPL + : LDA #$0000
 + CMP $01,s : BCS +
   STA $01,s
 + PLA
@@ -518,7 +522,7 @@ TallColumn:
   LDA.l !Win1 : CMP #$FF : BNE +
   LDA #$00 : STA.l !Tall
   REP #$20
-  LDA $13D7 : CMP #$01B1 : BCC .first
+  LDA !Height : CMP #$01B1 : BCC .first
   SEP #$20 : LDA #$01 : STA.l !Tall
   REP #$30 : PHX : PHY : JSR TallTarget : PLY : PLX
   STA.l !TB0 : ASL : AND #$003F

@@ -9,7 +9,7 @@ import {
   type Level, loadLevel, cloneLevel, maxScreens, entrancePos, mainSpot, levelRows, readSecondaryEntrance, writeSecondaryEntrance,
 } from '../src/core/level.ts';
 import { saveLevel } from '../src/core/save.ts';
-import { RAM, SPR, SPRITE_SLOTS, get16, marioX, marioY, cameraX, cameraY, spriteX, spriteY } from '../src/core/ram.ts';
+import { GM, RAM, SPR, SPRITE_SLOTS, get16, marioX, marioY, cameraX, cameraY, spriteX, spriteY } from '../src/core/ram.ts';
 import { loadAsar } from '../src/core/asar.ts';
 import { uploadFiles, uploadFromFiles } from '../src/core/patchpkg.ts';
 import { planPixiUpload, applyPixiUpload } from '../src/core/pixipkg.ts';
@@ -52,15 +52,15 @@ function play(lv: Level, prepare?: (rom: Rom) => void) {
   const emu = new LevelEmulator(rom);
   emu.load(lv.number);
   const s = emu.snes;
-  for (let f = 0; f < 300 && s.wram[RAM.gameMode] !== 0x14; f++) s.runFrame();
+  for (let f = 0; f < 300 && s.wram[RAM.gameMode] !== GM.level; f++) s.runFrame();
   return s;
 }
 type S = ReturnType<typeof play>;
 // one game frame ($14 advances; a lag frame more or less doesn't count)
 function step(s: S, joy: number): void {
-  const f0 = s.wram[0x14];
+  const f0 = s.wram[RAM.frameCounter];
   s.joy1 = joy;
-  for (let n = 0; n < 10; n++) { s.runFrame(); if (s.wram[0x14] !== f0) break; }
+  for (let n = 0; n < 10; n++) { s.runFrame(); if (s.wram[RAM.frameCounter] !== f0) break; }
 }
 const sprites = (w: Uint8Array, dy: number) => Array.from({ length: SPRITE_SLOTS }, (_, i) =>
   w[SPR.status + i] ? `${w[SPR.num + i]}:${spriteX(w, i)},${(spriteY(w, i) + dy) & 0xffff}` : '').join('|');
@@ -82,7 +82,7 @@ function compare(n: number, size: number, dy: number, note = ''): void {
   const a = play(game), b = play(tall), d = dy * 16;
   let frames = 0, state = -1, tiles = 0, tilesBad = -1, below = 0;
   let still = 0; // frames the cameras have been the same (the tilemap follows a frame later)
-  for (let f = 0; f < 600 && a.wram[RAM.gameMode] === 0x14 && a.wram[RAM.marioAnim] !== 9; f++) {
+  for (let f = 0; f < 600 && a.wram[RAM.gameMode] === GM.level && a.wram[RAM.marioAnim] !== 9; f++) {
     step(a, input(f)); step(b, input(f)); frames++;
     const wa = a.wram, wb = b.wram;
     const same = marioX(wa) === marioX(wb) && marioY(wa) + d === marioY(wb) && sprites(wa, d) === sprites(wb, 0);
@@ -116,7 +116,7 @@ for (const [n, size, dy] of [[0x105, 0x0e, 32], [0x106, 0x0e, 32], [0x001, 0x0e,
     w[RAM.marioX] = 0x88; // on the pipe's middle
     const start = marioY(w);
     let left = false, f = 0;
-    for (; f < 400; f++) { step(s, 0x0400); if (w[RAM.gameMode] !== 0x14) left = true; if (left && w[RAM.gameMode] === 0x14) break; }
+    for (; f < 400; f++) { step(s, 0x0400); if (w[RAM.gameMode] !== GM.level) left = true; if (left && w[RAM.gameMode] === GM.level) break; }
     return { start, left, x: marioX(w), y: marioY(w), cam: get16(w, RAM.layer1Y) };
   };
   const g = run(0, 0, false), t = run(32, 0x0e, false);

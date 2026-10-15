@@ -591,6 +591,12 @@ export function setMainSpot(s: SecondaryHeader, p: EntranceSpot): void {
 export function setSecondarySpot(e: SecondaryEntrance, p: EntranceSpot): void {
   e.screen = p.screen; e.entranceX = p.ex; e.entranceY = p.ey; e.entranceTile = p.tile; e.entranceXHi = p.exHi; e.entranceYHi = p.eyHi;
 }
+// a tile entrance's tile X/Y in the game's X/Y and their high bits (fields of the main and the secondary entrances)
+export interface EntranceTileFields { entranceX: number; entranceY: number; entranceXHi: number; entranceYHi: number }
+export function setEntranceTile(c: EntranceTileFields, t: { x?: number; y?: number }): void {
+  if (t.x !== undefined) { c.entranceX = t.x & 7; c.entranceXHi = t.x >> 3; }
+  if (t.y !== undefined) { c.entranceY = t.y & 15; c.entranceYHi = t.y >> 4; }
+}
 // the tile of a tile entrance (screen-relative along the scroll axis)
 export const spotTile = (p: EntranceSpot) => ({ x: (p.exHi << 3) | p.ex, y: (p.eyHi << 4) | p.ey });
 export function entrancePos(rom: Rom, p: EntranceSpot, vertical: boolean): { x: number; y: number } {
@@ -630,6 +636,9 @@ export const cameraRows = (c: CameraStart) => -((((c.cameraOffsetHi << 4) | (c.f
 export function setCameraRows(c: CameraStart, rows: number): void {
   const v = -rows & 31;
   c.cameraRelative = 1; c.cameraOffsetHi = v >> 4; c.fgInitY = (v >> 2) & 3; c.bgInitY = v & 3;
+}
+export function copyCameraStart(to: CameraStart, from: CameraStart): void {
+  to.cameraRelative = from.cameraRelative; to.cameraOffsetHi = from.cameraOffsetHi; to.fgInitY = from.fgInitY; to.bgInitY = from.bgInitY;
 }
 export const CAMERA_ROWS = 10; // the game's camera at the bottom has Mario standing on the ground 10 rows below its top
 // the camera relative to Mario (CAMERA_ROWS above him) unless it already is, as a tile entrance in a level

@@ -313,7 +313,7 @@ TilePos:
   RTS
 
 ; the camera relative to Mario: Y + 16 * the 5-bit signed offset A, inside the level; the BG to match
-; (A/X/Y 16, X = the level for the BG settings when it is the main entrance, else !Level)
+; (A/X/Y 16; X = !Level after it: the BG settings are the level's, also for a secondary entrance)
 Relative:
   PHA
   LDA $5B : AND #$0003 : BEQ +                 ; horizontal levels only (layer 2 not vertical either)

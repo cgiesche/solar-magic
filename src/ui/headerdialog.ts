@@ -7,7 +7,7 @@ import {
   hasLayer2Objects, type PrimaryHeader, type SecondaryHeader, L2_PTRS, SPRITE_MEMORY, MAX_LEVEL_SIZE, SUBSCREEN_ROWS, levelRows, maxScreens, hasLevelSize,
   mainSpot, spotTile,
 } from '../core/level.ts';
-import { cameraOptions, cameraValue, setCamera } from './entrancefields.ts';
+import { cameraOptions, cameraValue, setCamera, tileFields } from './entrancefields.ts';
 import { bgBank, levelMusic, setLevelMusic, HEADER_MUSIC_TABLE } from '../core/patches.ts';
 import { songHex } from '../core/music.ts';
 import { currentSongs, playButton } from './musicdialog.ts';
@@ -200,10 +200,8 @@ export function openHeaderDialog(app: App): void {
     screensWarn,
     h('h3', null, 'Entrance & scrolling'),
     h('div', { class: 'grid2' },
-      ...(sd.entranceTile ? [
-        f('Entrance tile X', hexInput(spotTile(mainSpot(sd)).x, 2, (v) => { sd.entranceX = v & 7; sd.entranceXHi = v >> 3; }, 0x1f), 'Of the entrance screen (Lunar Magic\'s tile position)'),
-        f('Entrance tile Y', hexInput(spotTile(mainSpot(sd)).y, 3, (v) => { sd.entranceY = v & 15; sd.entranceYHi = v >> 4; }, 0x3ff)),
-      ] : [
+      ...(sd.entranceTile ? tileFields(spotTile(mainSpot(sd)), (_, e) => e(sd)).map(([l, el], i) =>
+        f(`Entrance ${l.toLowerCase()}`, el, i ? undefined : 'Of the entrance screen (Lunar Magic\'s tile position)')) : [
         f('Entrance X position', sel2('entranceX', range(8, (i) => hex(i, 1)))),
         f('Entrance Y position', sel2('entranceY', range(16, (i) => hex(i, 1)))),
       ]),
