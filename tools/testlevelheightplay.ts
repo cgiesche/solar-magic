@@ -96,7 +96,9 @@ function compare(n: number, size: number, dy: number, note = ''): void {
   check(below > 0 || dy < 32, `${what}: sprites below the game's 32 rows (${below} sprite frames)`);
   check(tilesBad < 0 && tiles > 0, `${what}: the visible layer 1 tiles as in the game's level (${tiles} frames with the same camera)${tilesBad < 0 ? '' : ` – not in frame ${tilesBad}`}`);
 }
-for (const [n, size, dy] of [[0x105, 0x0e, 32], [0x106, 0x0e, 32], [0x001, 0x0e, 32], [0x002, 0x0e, 32], [0x10b, 0x0e, 32], [0x105, 0x13, 62], [0x106, 0x1a, 271]]) compare(n, size, dy);
+// also the sizes shorter than 32 rows (28, 29 and 32); a level moves by an even number of rows where its
+// sprites look at their row: the bouncing Paratroopa jumps higher from an odd row ($01856C keeps Y bit 4)
+for (const [n, size, dy] of [[0x105, 0x0e, 32], [0x106, 0x0e, 32], [0x001, 0x0e, 32], [0x002, 0x0e, 32], [0x10b, 0x0e, 32], [0x105, 0x13, 62], [0x106, 0x1a, 271], [0x105, 0x01, 1], [0x106, 0x02, 2], [0x001, 0x01, 0], [0x002, 0x02, 2], [0x105, 0x03, 5]]) compare(n, size, dy);
 
 // a pipe in the moved part: level 105's exit pipe (screen 7) leads where the game's does; the exit leads to
 // a secondary entrance in the moved part of the level itself: Mario comes out at its tile, the camera above
