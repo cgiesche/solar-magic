@@ -125,6 +125,12 @@ When a level is displayed, it runs the ROM's **original loading routines** (~15 
   Import either LZ2-compressed (original format, 2/3/4bpp) or as uniform **uncompressed 4bpp**
   (16 colors, via DMA from the ROM – no more 3bpp detour).
   The editor's own LZ2 compressor produces smaller data than the original.
+* **Used in levels:** for the selected Map16 tile (FG or BG), GFX file or sprite, the levels using it, how often,
+  in which slots or by which kind of object (object, Direct Map16, structure) – a click opens the level at the first place.
+  The Map16 tab also names the tiles acting like the tile, structures and custom blocks on it, and *Mark unused*
+  crosses out tiles 200–FFF that are defined but placed nowhere; the Graphics tab marks inserted ExGFX that no level
+  loads. Which tiles a level places is learned by loading it in the emulator (in the background, kept while the ROM
+  and the level are unchanged), like Lunar Magic's "Analyze Resources in Levels".
 
 ### Overworld editor (O)
 * Main map and all submaps; paint layer 1 (paths/level tiles) and layer 2 (terrain, 8x8) – mouse buttons as
