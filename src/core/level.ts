@@ -648,6 +648,46 @@ export function cameraAtMario(c: CameraStart & { bgHeight?: number; bgRelative?:
   setCameraRows(c, CAMERA_ROWS);
   if (c.bgHeight === 0 && !c.bgRelative) c.bgHeight = 26;
 }
+// the camera starts relative to Mario in horizontal levels only (layer 2 not vertical either: levelheight.ts);
+// in others the entrance's bits are the game's FG/BG start Y
+export const hasRelativeCamera = (rom: Rom, mode: number): boolean => !isL1Vertical(rom, mode) && !isL2Vertical(rom, mode);
+export const levelMode = (rom: Rom, n: number): number => parsePrimaryHeader(rom.bytes(rom.r24(L1_PTRS + n * 3), 5)).mode;
+
+// where the BG starts for an entrance whose camera starts relative to Mario (the level's setting, Lunar
+// Magic's "Change Layer 1/2 Settings"): its bottom shown when the camera is at the level's bottom (a BG of
+// `rows` rows), `rows` rows below the FG (negative: above), or at 0 (layer 2 scroll sprites that want it)
+export type BgStart = { kind: 'bottom'; rows: number } | { kind: 'fg'; rows: number } | { kind: 'zero' };
+const BG_ZERO = 0x10; // with bgRelative: absolute 0 instead of an offset
+export function bgStart(s: Pick<SecondaryHeader, 'bgRelative' | 'bgHeight'>): BgStart {
+  const v = s.bgHeight & 0x1f;
+  if (!s.bgRelative) return { kind: 'bottom', rows: v + 1 };
+  return v === BG_ZERO ? { kind: 'zero' } : { kind: 'fg', rows: (v << 27) >> 27 };
+}
+export function setBgStart(s: Pick<SecondaryHeader, 'bgRelative' | 'bgHeight'>, b: BgStart): void {
+  s.bgRelative = b.kind === 'bottom' ? 0 : 1;
+  s.bgHeight = b.kind === 'zero' ? BG_ZERO : b.kind === 'bottom' ? Math.max(1, Math.min(32, b.rows)) - 1 : Math.max(-15, Math.min(15, b.rows)) & 0x1f;
+}
+
+// puts an entrance at a spot (dragged, created, test play from here); its camera start – the FG/BG start Y,
+// or the rows above Mario – stays as set (Lunar Magic 3.50's drag without updating the FG/BG init). Only a
+// tile entrance whose camera is the game's gets the relative one: the game's start positions don't reach a
+// taller level's rows.
+export function placeMain(s: SecondaryHeader, p: EntranceSpot): void {
+  setMainSpot(s, p);
+  if (p.tile) cameraAtMario(s);
+}
+export function placeSecondary(e: SecondaryEntrance, p: EntranceSpot): void {
+  setSecondarySpot(e, p);
+  if (p.tile) cameraAtMario(e);
+}
+// the secondary header test play starts with from Mario's top-left pixel (px, py): the main entrance at the
+// entrance setting nearest to it (rows: as nearestEntrance), without an entrance action
+export function startHeader(rom: Rom, s: SecondaryHeader, px: number, py: number, maxScreen: number, rows = 0): SecondaryHeader {
+  const sec = { ...s };
+  placeMain(sec, nearestEntrance(rom, px, py, (sec.verticalPositioning & 1) !== 0, maxScreen, rows));
+  sec.entranceAction = 0;
+  return sec;
+}
 
 // ---- screen operations ----
 // Everything whose origin lies on screen >= s moves by one screen (items keep their position

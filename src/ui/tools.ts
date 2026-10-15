@@ -4,7 +4,7 @@ import type { App } from './app.ts';
 import { h, modal, clear, hexInput, select, toast, choose, emptyState } from './dom.ts';
 import { downloadBytes, pickFile } from './platform.ts';
 import { isBlank } from '../core/exitgraph.ts';
-import { readSecondaryEntrance, type SecondaryEntrance, loadLevel, cloneLevel, insertScreen, deleteScreen, clearLevel, spriteId, mainSpot, secondarySpot, setSecondarySpot, spotTile, copyCameraStart } from '../core/level.ts';
+import { readSecondaryEntrance, type SecondaryEntrance, loadLevel, cloneLevel, insertScreen, deleteScreen, clearLevel, spriteId, mainSpot, secondarySpot, setSecondarySpot, spotTile, copyCameraStart, hasRelativeCamera, levelMode } from '../core/level.ts';
 import { tileFields, cameraFields } from './entrancefields.ts';
 import { exportLevelFile, importLevelFile, LEVEL_FILE_EXT } from '../core/levelfile.ts';
 import { ENTRANCE_ACTIONS, hex, objectName } from '../core/names.ts';
@@ -58,7 +58,7 @@ export function openEntrancesDialog(app: App): void {
         h('div', { class: 'prop' }, h('label', null, 'Y position'), select(range(16), e.entranceY, (v) => set('Y', (x) => (x.entranceY = v)))),
       ]),
       h('div', { class: 'prop' }, h('label', null, 'Action'), select(ENTRANCE_ACTIONS.map((a, i) => [i, `${i} – ${a}`] as [number, string]), e.action, (v) => set('Action', (x) => (x.action = v)))),
-      ...cameraFields(e, set).map(([l, el]) => prop(l, el)),
+      ...cameraFields(e, set, hasRelativeCamera(rom, to === app.level.number ? app.level.header.mode : levelMode(rom, to))).map(([l, el]) => prop(l, el)),
       h('div', { class: 'hint' }, users.length ? `Used by: ${users.map((u) => `${hex(u.from, 3)} (screen ${hex(u.screen, 2)})`).join(', ')}` : 'No exit uses this entrance.'),
       h('div', { class: 'row' },
         blank ? '' : h('button', { onclick: () => { dlg.close(true); openTarget(to); } }, `Open level ${hex(to, 3)}`),

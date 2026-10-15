@@ -5,9 +5,9 @@ import { h, select, hexInput, modal, toast } from './dom.ts';
 import { TILESETS, levelModeName, MUSIC, TIME_SETTINGS, VERTICAL_SCROLL, ENTRANCE_ACTIONS, layer2RateName, hex2, hex } from '../core/names.ts';
 import {
   hasLayer2Objects, type PrimaryHeader, type SecondaryHeader, L2_PTRS, SPRITE_MEMORY, MAX_LEVEL_SIZE, SUBSCREEN_ROWS, levelRows, maxScreens, hasLevelSize,
-  mainSpot, spotTile,
+  mainSpot, spotTile, hasRelativeCamera,
 } from '../core/level.ts';
-import { cameraOptions, cameraValue, setCamera, tileFields } from './entrancefields.ts';
+import { cameraOptions, cameraValue, setCamera, tileFields, bgStartFields } from './entrancefields.ts';
 import { bgBank, levelMusic, setLevelMusic, HEADER_MUSIC_TABLE } from '../core/patches.ts';
 import { songHex } from '../core/music.ts';
 import { currentSongs, playButton } from './musicdialog.ts';
@@ -158,15 +158,18 @@ export function openHeaderDialog(app: App): void {
   };
   sizeSel.addEventListener('change', () => { sd.levelSize = Number(sizeSel.value); screensSel.replaceChildren(...screenOpts()); });
 
-  // the camera's start: the game's FG/BG start Y, or relative to Mario, the BG then by its height
+  // the camera's start: the game's FG/BG start Y, or relative to Mario (horizontal levels), the BG then by the
+  // level's BG start (also for its secondary entrances): bottom-aligned by its height, relative to the FG, or 0
   const fgRow = f('FG start Y', sel2('fgInitY', range(4))), bgRow = f('BG start Y', sel2('bgInitY', range(4)));
-  const bgHeightRow = f('BG height', select(range(32, (i) => `${i + 1} rows`), sd.bgHeight, (v) => { sd.bgHeight = v; }), 'Mario at the level\'s bottom sees the BG\'s bottom');
+  const bgStartSel = bgStartFields(sd);
+  const bgStartRow = f('BG start', h('div', { class: 'row' }, bgStartSel.kind, bgStartSel.rows),
+    'For entrances whose camera starts relative to Mario: at the level\'s bottom Mario sees the BG\'s bottom (its height), or the BG starts at the FG plus rows, or at 0');
+  const relativeOk = () => hasRelativeCamera(rom, hd.mode);
   const showCamera = () => {
     fgRow.style.display = bgRow.style.display = sd.cameraRelative ? 'none' : '';
-    bgHeightRow.style.display = sd.cameraRelative && !sd.bgRelative ? '' : 'none';
+    bgStartRow.style.display = relativeOk() ? '' : 'none';
   };
-  const cameraSel = select(cameraOptions(cameraValue(sd)), cameraValue(sd), (v) => { setCamera(sd, v); showCamera(); });
-  showCamera();
+  const cameraSel = select(cameraOptions(cameraValue(sd), relativeOk()), cameraValue(sd), (v) => { setCamera(sd, v); bgStartSel.refresh(); showCamera(); });
 
   let open = true;
   const screensWarn = h('div', { class: 'hint warn-text' });
@@ -176,8 +179,12 @@ export function openHeaderDialog(app: App): void {
     sizeSel.replaceChildren(...sizeOpts());
   });
   const modeSel = sel('mode', modes);
-  modeSel.addEventListener('change', () => { sizeSel.replaceChildren(...sizeOpts()); showSize(); });
+  modeSel.addEventListener('change', () => {
+    sizeSel.replaceChildren(...sizeOpts()); showSize();
+    setOpts(cameraSel, cameraOptions(cameraValue(sd), relativeOk()), cameraValue(sd)); showCamera();
+  });
   showSize();
+  showCamera();
   const body = h('div', { class: 'header-dialog' },
     h('h3', null, 'General'),
     h('div', { class: 'grid2' },
@@ -209,8 +216,8 @@ export function openHeaderDialog(app: App): void {
       f('Entrance action', sel2('entranceAction', range(8, (i) => `${i} – ${ENTRANCE_ACTIONS[i]}`))),
       f('Midway screen', sel2('midwayScreen', range(16, hex2))),
       f('Layer 3', l3Sel, 'Depends on the tileset'),
-      f('Camera start', cameraSel, 'Where the camera starts: the FG/BG start Y, or relative to Mario (Lunar Magic; a taller level needs it)'),
-      fgRow, bgRow, bgHeightRow,
+      f('Camera start', cameraSel, 'Where the camera starts: the FG/BG start Y, or relative to Mario (Lunar Magic, horizontal levels; a taller level needs it)'),
+      fgRow, bgRow, bgStartRow,
       f('Vertical positioning', sel2('verticalPositioning', range(4))),
       f('Yoshi intro', sel2('noYoshiIntro', [[0, 'On'], [1, 'Off']])),
       // a row of its own: with separate rates the two dropdowns stay side by side

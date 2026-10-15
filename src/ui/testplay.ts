@@ -6,7 +6,7 @@ import { h, modal } from './dom.ts';
 import { LevelEmulator } from '../core/levelemu.ts';
 import { PPU } from '../core/ppu.ts';
 import { hex } from '../core/names.ts';
-import { levelTranslevel, nearestEntrance, encodeSecondaryHeader, setMainSpot, cameraAtMario } from '../core/level.ts';
+import { levelTranslevel, encodeSecondaryHeader, startHeader } from '../core/level.ts';
 import { Apu, apuReady, loadApu } from '../core/apu.ts';
 import { AudioOut } from './audio.ts';
 import { GM, RAM, set16 } from '../core/ram.ts';
@@ -70,17 +70,10 @@ function start(app: App, at: { tx: number; ty: number } | undefined, audio: Audi
   const emu = testEmu;
   const lv = app.level;
   const ov = app.buildOverrides();
-  // the start position: the nearest main entrance setting loads the level around it (camera, tilemap),
-  // in gameplay Mario is then moved to the exact pixel
+  // the start position: the nearest main entrance setting loads the level around it (camera, tilemap; FG and
+  // BG start as set), in gameplay Mario is then moved to the exact pixel
   const start = at && { x: at.tx * 16, y: at.ty * 16 - 16 };
-  if (start) {
-    const sec = { ...lv.secondary };
-    const p = nearestEntrance(app.rom, start.x, start.y, (sec.verticalPositioning & 1) !== 0, lv.header.screens - 1, app.entranceRows());
-    setMainSpot(sec, p);
-    if (p.tile) cameraAtMario(sec);
-    sec.entranceAction = 0;
-    ov.secondaryHeader = encodeSecondaryHeader(sec);
-  }
+  if (start) ov.secondaryHeader = encodeSecondaryHeader(startHeader(app.rom, lv.secondary, start.x, start.y, lv.header.screens - 1, app.entranceRows()));
   // a game in progress (lives, overworld with Mario on the level's tile): dying returns there
   const translevel = levelTranslevel(app.rom, lv.number);
   let r: ReturnType<LevelEmulator['load']>;

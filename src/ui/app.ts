@@ -5,7 +5,7 @@ import { LevelEmulator, OV_L1, OV_L2, type LevelRender, type LevelOverride, MAP_
 import {
   type Level, type LevelObject, type LevelSprite, type ScreenExit, type SecondaryEntrance, loadLevel, spriteLoadOrder, serializeLayer1, serializeLayer2, serializeSprites, serializeLevelSprites, spriteSizes, spriteId, spriteBytes,
   isL1Vertical, cloneLevel, newUid, hasLayer2Objects, hasObjects, L1_PTRS, L2_PTRS, SEC_HDR,
-  readSecondaryEntrance, writeSecondaryEntrance, decodeSecondaryEntrance, entrancePos, nearestEntrance, encodeSecondaryHeader, mainSpot, secondarySpot, sameSpot, setMainSpot, setSecondarySpot, cameraAtMario, isSized, SPRITE_MEMORY, levelRows,
+  readSecondaryEntrance, writeSecondaryEntrance, decodeSecondaryEntrance, entrancePos, nearestEntrance, encodeSecondaryHeader, mainSpot, secondarySpot, sameSpot, placeMain, placeSecondary, isSized, SPRITE_MEMORY, levelRows,
 } from '../core/level.ts';
 import { hex, spriteName } from '../core/names.ts';
 import { loadPixiProject, customSpriteList, type CustomSprite } from '../core/pixi.ts';
@@ -406,16 +406,14 @@ export class App {
     const p = nearestEntrance(this.rom, px, py, vert, m.kind === 'midway' ? Math.min(15, maxScreen) : maxScreen, this.entranceRows());
     if (m.kind === 'main') {
       if (sameSpot(mainSpot(s), p)) return false;
-      setMainSpot(s, p);
-      if (p.tile) cameraAtMario(s);
+      placeMain(s, p);
     } else if (m.kind === 'midway') {
       if (s.midwayScreen === p.screen) return false;
       s.midwayScreen = p.screen;
     } else {
       const e = readSecondaryEntrance(this.rom, m.index);
       if (sameSpot(secondarySpot(e), p)) return false;
-      setSecondarySpot(e, p);
-      if (p.tile) cameraAtMario(e);
+      placeSecondary(e, p);
       // ROM data: one undo step per marker (successive moves merge)
       this.romEdit(`Secondary entrance ${hex(m.index, 3)} moved`, () => writeSecondaryEntrance(this.rom, m.index, e), { key: `sec-entrance:${m.index}` });
     }
@@ -483,8 +481,7 @@ export class App {
     const p = nearestEntrance(this.rom, px, py, (this.level.secondary.verticalPositioning & 1) !== 0, this.level.header.screens - 1, this.entranceRows());
     this.editSecondaryEntrance(idx, `Secondary entrance ${hex(idx, 3)} created`, (e) => {
       e.destLevel = n & 0xff;
-      setSecondarySpot(e, p);
-      if (p.tile) cameraAtMario(e);
+      placeSecondary(e, p);
     });
     this.selectEntrance({ kind: 'sec', index: idx });
     return idx;

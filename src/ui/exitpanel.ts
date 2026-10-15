@@ -4,7 +4,7 @@
 import type { App, Marker } from './app.ts';
 import { h, select, toast, choose } from './dom.ts';
 import { hex2, hex3, ENTRANCE_ACTIONS } from '../core/names.ts';
-import { newUid, readSecondaryEntrance, readSecondaryHeader, mainTranslevel, mainSpot, secondarySpot, setSecondarySpot, copyCameraStart } from '../core/level.ts';
+import { newUid, readSecondaryEntrance, readSecondaryHeader, mainTranslevel, mainSpot, secondarySpot, setSecondarySpot, copyCameraStart, hasRelativeCamera } from '../core/level.ts';
 import { spotText, cameraOptions, cameraValue, setCamera, cameraFields } from './entrancefields.ts';
 import { exitTarget, sameBank, type ExitRef } from '../core/exitgraph.ts';
 import { levelPicker } from './levelpicker.ts';
@@ -136,7 +136,7 @@ function secondaryPanel(app: App, body: HTMLElement, idx: number): void {
     h('div', { class: 'prop-title' }, `Secondary entrance ${hex3(idx)}`),
     hint(`${spotText(secondarySpot(e))} – drag the marker to move it`),
     field('Action', select(actions(), e.action, (v) => set('Action', (x) => (x.action = v), 'a'))),
-    ...cameraFields(e, (l, f) => set(l, f, l)).map(([l, el]) => field(l, el)),
+    ...cameraFields(e, (l, f) => set(l, f, l), hasRelativeCamera(app.rom, app.level.header.mode)).map(([l, el]) => field(l, el)),
     users(app, refs, [], 'No exit yet. In another level, select a screen, choose “Create exit”, “Secondary entrance” and this level as the target.'),
     h('div', { class: 'row' },
       h('button', { title: 'Test play from this entrance', onclick: () => testAt(app, 'sec', idx) }, '▶ Test here'),
