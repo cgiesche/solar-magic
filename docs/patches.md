@@ -517,14 +517,25 @@ code is the editor's.
   Moving an entrance, creating one and test play from a spot keep these settings (as Lunar Magic 3.50 can
   drag entrances); only a tile entrance with the game's camera gets the relative one. Test play from a
   secondary entrance starts with its own camera start. `tools/testfgbginit.ts` checks by emulation that test
-  play starts FG and BG where each setting puts them. The level's own slippery, water, face-left and midway
-  bits of Lunar Magic are kept but not used.
+  play starts FG and BG where each setting puts them. The level's own slippery bit of Lunar Magic is kept but
+  not used.
+- The midway entrance (Lunar Magic 3.00's): four bytes per level in Lunar Magic's layout – `SWOHXAAA` (slippery,
+  water, own settings, the midway screen's bit 4, X bit 4, action), `YYYYXXXX` (tile Y and X bits 3–0),
+  `RL--ffbb` (camera relative to Mario, face left, the FG/BG start Y or offset bits 3–0; bit 5: Lunar Magic's
+  redirect to another level, kept but not played) and `-FYYYYYY` (offset bit 4, Y bits 9–4). Lunar Magic keeps
+  them with its code; the editor at `$07E800`, `$07EA00`, `$07EC00`, `$07EE00` (free in the game; nothing but
+  the entrance code reads them). Where the game puts Mario on the midway screen (`$05D9DE`) the patch adds bit 4
+  of the screen; with O set Mario goes to the screen as to the main entrance (`$05D9EC`, vertical levels too),
+  then to the tile, with the midway's action, camera start, face left and water instead of the main entrance's
+  (`$13CF` tells the entrance code the midway point was taken). Levels without them load as in the game;
+  `tools/testmidway.ts` checks by emulation that every main level entered at its midway point does, and where
+  own settings put Mario, the camera and his options.
 
 The emulation check (`tools/testlevelheightplay.ts`): levels of the game moved down into taller levels play
 exactly like the game's – Mario and every sprite at the same positions under the same input, the same visible
 tiles whenever the cameras are the same; a pipe in the moved part leads where the game's does, a secondary
 entrance there puts Mario at its tile. Still the game's: the BG of a level without the relative camera
-(it scrolls past its 27 rows), Lunar Magic's T and B bits of the size byte, the midway entrance of its own.
+(it scrolls past its 27 rows), Lunar Magic's T and B bits of the size byte.
 
 ### Layer 3 graphics per level
 
@@ -629,7 +640,7 @@ not compatible with the respective feature.
 | `$00AA50` | BG2/BG3 graphics slots (SMWG) |
 | `$00A9DA`, `$00A01F` | Layer 3 graphics per level (SMWL); RAM `$7F3678` |
 | `$05D915`, `$00F79D`, table `$06FA00` | Layer 2 scroll rates; RAM `$7F3660–$7F3665` |
-| `$05D928`, `$0586BB`, entrance options and screen exit flags `$009708`, `$0DA532`, `$0DA536`, the slanted pipe to the left `$00D2B2`, `$0DA963`, `$0DA9D6`, `$0DA9EF`, `$058091`, tables `$06CA00`, `$05DE00`, `$06FC00`, `$06FE00`, `$06CC00`, `$06CE00`; finding a block `$00F478`, `$00F492`, `$00F49A`, `$0194D6`, `$019500`, `$019512`, `$01D97B`, `$01D981`, `$0292D9`, `$0292F9`, `$02930A`, `$0295C0`, `$0295EC`, `$0295FD`, `$02A6BA`, `$02A6CB`, `$02BA50`, `$02BA71`, `$02BA82`, `$02D15A`, `$02D18C`, `$02D19D`, `$03D793`; changing a tile `$00BEEC`, `$00BF41`, `$00C079`, `$00C0C6`, `$00C1B1`, `$00C3D3`; mode tables `$00BDA8`, `$00BDE8`, `$00BE28`, `$00BE68`; sprites `$02A82E`, `$02A968`, `$02AA5F`, `$02AB54`, `$02ABD0`, `$02AF3D`, `$02AFA7`, `$01AC3E`, `$02D038`, `$03B86A`; camera `$00F70D`; entrances `$05D7E0`, `$05DA17` | Level heights (Lunar Magic 3.00's entrances, their options); RAM `$7F3666–$7F3677`, `$7F3679`, Lunar Magic's `$13D7`, `$0BF6–$0CF5` |
+| `$05D928`, `$0586BB`, entrance options and screen exit flags `$009708`, `$0DA532`, `$0DA536`, the slanted pipe to the left `$00D2B2`, the midway entrance `$05D9DE`, `$0DA963`, `$0DA9D6`, `$0DA9EF`, `$058091`, tables `$06CA00`, `$05DE00`, `$06FC00`, `$06FE00`, `$06CC00`, `$06CE00`, `$07E800`, `$07EA00`, `$07EC00`, `$07EE00`; finding a block `$00F478`, `$00F492`, `$00F49A`, `$0194D6`, `$019500`, `$019512`, `$01D97B`, `$01D981`, `$0292D9`, `$0292F9`, `$02930A`, `$0295C0`, `$0295EC`, `$0295FD`, `$02A6BA`, `$02A6CB`, `$02BA50`, `$02BA71`, `$02BA82`, `$02D15A`, `$02D18C`, `$02D19D`, `$03D793`; changing a tile `$00BEEC`, `$00BF41`, `$00C079`, `$00C0C6`, `$00C1B1`, `$00C3D3`; mode tables `$00BDA8`, `$00BDE8`, `$00BE28`, `$00BE68`; sprites `$02A82E`, `$02A968`, `$02AA5F`, `$02AB54`, `$02ABD0`, `$02AF3D`, `$02AFA7`, `$01AC3E`, `$02D038`, `$03B86A`; camera `$00F70D`; entrances `$05D7E0`, `$05DA17` | Level heights (Lunar Magic 3.00's entrances, their options); RAM `$7F3666–$7F3677`, `$7F3679`, Lunar Magic's `$13D7`, `$0BF6–$0CF5` |
 | `$008A7F`, `$0087AD`, `$0085E3`, `$0580B0`, `$0580B4`, `$0580BF`, `$0580C3`, `$058730`, `$058770`, `$0587D4`, `$0587DB`, `$05880B`, `$058812`, `$0586F7`, `$058A3A` | VRAM patch (SMWV): tilemaps relocated, taller levels' rows; RAM `$7F0000–$7F3654` |
 | Ext. object table `$0DA118` (entry `$03`) | Structures (SMWS); empty in the original, no code hook |
 | `$05B20F` | Messages in free space (SMWM), only if the texts no longer fit |

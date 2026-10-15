@@ -6,7 +6,8 @@ import { h, select, toast, choose, checkbox } from './dom.ts';
 import { hex2, hex3, ENTRANCE_ACTIONS } from '../core/names.ts';
 import {
   newUid, readSecondaryEntrance, readSecondaryHeader, mainTranslevel, mainSpot, secondarySpot, setSecondarySpot, copyCameraStart, hasRelativeCamera,
-  copyEntranceOptions, setExitSecondary, EXIT_WATER,
+  copyEntranceOptions, setExitSecondary, EXIT_WATER, midwaySpot, midwayEntrance, setMidwayEntrance, midwayStart, nearestMidway, placeMidway, entrancePos,
+  type MidwayEntrance,
 } from '../core/level.ts';
 import { spotText, cameraOptions, cameraValue, setCamera, cameraFields, optionFields } from './entrancefields.ts';
 import { exitTarget, sameBank, type ExitRef } from '../core/exitgraph.ts';
@@ -81,7 +82,7 @@ function exitPanel(app: App, body: HTMLElement): boolean {
       field('Options', checkbox('Water level', 'Mario swims in the whole target level when he comes through this exit (also when the entrance is no water level)',
         !!(e.flags & EXIT_WATER), (on) => upd(() => { e.flags = on ? e.flags | EXIT_WATER : e.flags & ~EXIT_WATER; }))));
   } else if (e.flags & EXIT_WATER) {
-    body.append(hint('This exit has Lunar Magic\'s “go to the midway entrance” set (kept): it needs separate midway entrance settings, which the editor doesn\'t have.'));
+    body.append(hint('This exit has Lunar Magic\'s “go to the midway entrance” set (kept): the editor doesn\'t play it yet.'));
   }
   // where Mario arrives
   const arrive = e.secondary ? (() => {
@@ -128,12 +129,11 @@ function users(app: App, refs: ExitRef[], extra: HTMLElement[], empty: string): 
 }
 
 // test play from a marker: a secondary entrance with its own camera start, options and action, the midway
-// point with the main entrance's (the game's $192A is the main entrance's there too)
+// point with its own or the main entrance's
 function testAt(app: App, kind: Marker['kind'], index: number): void {
   const m = app.markers().find((x) => x.kind === kind && x.index === index);
-  const s = app.level.secondary;
   if (kind === 'main' || !m) openTestPlay(app);
-  else openTestPlay(app, { tx: (m.x + 8) >> 4, ty: (m.y + 16) >> 4, entrance: kind === 'sec' ? readSecondaryEntrance(app.rom, index) : { ...s, action: s.entranceAction } });
+  else openTestPlay(app, { tx: (m.x + 8) >> 4, ty: (m.y + 16) >> 4, entrance: kind === 'sec' ? readSecondaryEntrance(app.rom, index) : midwayStart(app.level.secondary) });
 }
 
 // ---- secondary entrance ----
@@ -169,10 +169,27 @@ function mainPanel(app: App, body: HTMLElement, kind: 'main' | 'midway'): void {
   const lv = app.level, s = lv.secondary, n = lv.number;
   const upd = (f: () => void) => app.editLevel(f);
   if (kind === 'midway') {
+    // its own settings (Lunar Magic's midway entrance) through an entrance's fields; the BG start is the level's
+    const m = midwayEntrance(s);
+    const setOwn = (_: string, f: (x: MidwayEntrance) => void) => upd(() => { const x = midwayEntrance(s); f(x); setMidwayEntrance(s, x); });
+    const own = (on: boolean) => upd(() => {
+      if (!on) { s.midwayOwn = 0; return; }
+      const p = entrancePos(app.rom, midwaySpot(s), (s.verticalPositioning & 1) !== 0);
+      placeMidway(s, nearestMidway(app.rom, s, p.x, p.y, lv.header.screens - 1));
+    });
     body.append(
       h('div', { class: 'prop-title' }, 'Midway point'),
-      field('Screen', select(range(Math.min(16, lv.header.screens)).map(([v]) => [v, hex2(v)]), s.midwayScreen, (v) => upd(() => (s.midwayScreen = v)))),
-      hint('The midway point shares its height and position within the screen, and its options (face left, water), with the main entrance (M); only the screen is its own. It applies once Mario has touched the level\'s midway tape.'),
+      hint(`${spotText(midwaySpot(s))} – drag the marker to move it`),
+      field('Settings', checkbox('Own position and settings', 'Lunar Magic\'s midway entrance: its own tile, action, camera start and options instead of the main entrance\'s', !!s.midwayOwn, own)),
+      ...(s.midwayOwn ? [
+        field('Action', select(actions(), m.action, (v) => setOwn('Action', (x) => (x.action = v)))),
+        ...cameraFields(m, setOwn, hasRelativeCamera(app.rom, lv.header.mode)).map(([l, el]) => field(l, el)),
+        ...optionFields(m, setOwn).map(([l, el]) => field(l, el)),
+      ] : [
+        field('Screen', select(range(Math.min(32, lv.header.screens)).map(([v]) => [v, hex2(v)]), s.midwayScreen, (v) => upd(() => (s.midwayScreen = v)))),
+        hint('The midway point shares its position within the screen, its action, camera start and options with the main entrance (M); only the screen is its own. Dragging it gives it its own.'),
+      ]),
+      hint('It applies once Mario has touched the level\'s midway tape.'),
       h('div', { class: 'row' }, h('button', { onclick: () => testAt(app, 'midway', 0) }, '▶ Test here')),
     );
     return;

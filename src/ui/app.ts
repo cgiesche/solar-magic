@@ -5,7 +5,7 @@ import { LevelEmulator, type LevelRender, type LevelOverride, MAP_BASE, MAP_SIZE
 import {
   type Level, type LevelObject, type LevelSprite, type ScreenExit, type SecondaryEntrance, loadLevel, spriteLoadOrder, serializeLayer1, serializeSprites, serializeLevelSprites, spriteSizes, spriteId, spriteBytes,
   isL1Vertical, cloneLevel, newUid, hasLayer2Objects, hasObjects, L2_PTRS, SEC_HDR,
-  readSecondaryEntrance, writeSecondaryEntrance, decodeSecondaryEntrance, entrancePos, nearestEntrance, encodeSecondaryHeader, mainSpot, secondarySpot, sameSpot, placeMain, placeSecondary, isSized, SPRITE_MEMORY, levelRows,
+  readSecondaryEntrance, writeSecondaryEntrance, decodeSecondaryEntrance, entrancePos, nearestEntrance, encodeSecondaryHeader, mainSpot, secondarySpot, sameSpot, placeMain, placeSecondary, midwaySpot, nearestMidway, placeMidway, isSized, SPRITE_MEMORY, levelRows,
 } from '../core/level.ts';
 import { hex, spriteName } from '../core/names.ts';
 import { loadPixiProject, customSpriteList, type CustomSprite } from '../core/pixi.ts';
@@ -389,7 +389,7 @@ export class App {
     const s = this.level.secondary;
     const vert = (s.verticalPositioning & 1) !== 0;
     const main = entrancePos(this.rom, mainSpot(s), vert);
-    const mid = entrancePos(this.rom, mainSpot(s, s.midwayScreen), vert);
+    const mid = entrancePos(this.rom, midwaySpot(s), vert);
     const out: Marker[] = [{ kind: 'midway', index: 0, ...mid }, { kind: 'main', index: 0, ...main }];
     for (const i of this.secEntrances) out.push({ kind: 'sec', index: i, ...entrancePos(this.rom, secondarySpot(readSecondaryEntrance(this.rom, i)), vert) });
     return out;
@@ -397,19 +397,22 @@ export class App {
 
   // snaps a marker to the entrance setting nearest to Mario's top-left pixel (px, py) – in a level with a
   // size the tile there (Lunar Magic's, the camera then relative to Mario); main/midway change the level
-  // (undoable), secondary entrances are written to the ROM directly. The midway point shares X/Y with the
-  // main entrance, only its screen can change.
+  // (undoable), secondary entrances are written to the ROM directly. The midway point goes to the tile there
+  // with its own settings (Lunar Magic's midway entrance; the main entrance's at first).
   moveMarker(m: Marker, px: number, py: number): boolean {
     const s = this.level.secondary;
     const vert = (s.verticalPositioning & 1) !== 0;
     const maxScreen = this.level.header.screens - 1;
-    const p = nearestEntrance(this.rom, px, py, vert, m.kind === 'midway' ? Math.min(15, maxScreen) : maxScreen, this.entranceRows());
+    if (m.kind === 'midway') {
+      const p = nearestMidway(this.rom, s, px, py, maxScreen);
+      if (s.midwayOwn && sameSpot(midwaySpot(s), p)) return false;
+      placeMidway(s, p);
+      return true;
+    }
+    const p = nearestEntrance(this.rom, px, py, vert, maxScreen, this.entranceRows());
     if (m.kind === 'main') {
       if (sameSpot(mainSpot(s), p)) return false;
       placeMain(s, p);
-    } else if (m.kind === 'midway') {
-      if (s.midwayScreen === p.screen) return false;
-      s.midwayScreen = p.screen;
     } else {
       const e = readSecondaryEntrance(this.rom, m.index);
       if (sameSpot(secondarySpot(e), p)) return false;

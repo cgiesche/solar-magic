@@ -214,7 +214,7 @@ export function openHeaderDialog(app: App): void {
       ]),
       f('Entrance screen', sel2('entranceScreen', range(32, hex2))),
       f('Entrance action', sel2('entranceAction', range(8, (i) => `${i} – ${ENTRANCE_ACTIONS[i]}`))),
-      f('Midway screen', sel2('midwayScreen', range(16, hex2))),
+      f('Midway screen', sel2('midwayScreen', range(32, hex2))),
       f('Layer 3', l3Sel, 'Depends on the tileset'),
       f('Camera start', cameraSel, 'Where the camera starts: the FG/BG start Y, or relative to Mario (Lunar Magic, horizontal levels; a taller level needs it)'),
       fgRow, bgRow, bgStartRow,

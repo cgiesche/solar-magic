@@ -516,7 +516,7 @@ function showHelp(): void {
       ['BG: click/drag · right click/Shift+click', 'Pick up tile(s) as brush · paint'],
       ['Ctrl+click on a Map16/BG tile in “Insert”', 'Go to definition: the tile in the Map16 tab of the graphics area'],
       ['Ins / I', 'Insert object/sprite by number (at the mouse)'],
-      ['Drag M / Z / S marker', 'Move main entrance / midway screen / secondary entrance'],
+      ['Drag M / Z / S marker', 'Move main entrance / midway point / secondary entrance'],
       ['Entrances/Exits: click · right click', 'Choose entrance or screen (exit), edit on the right · new secondary entrance, create exit, entrance here'],
       ['Arrow keys · Alt+arrow keys', 'Move selection by 1 tile · resize'],
       ['+ / - · * / /', 'Change width · change height'],

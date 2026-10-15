@@ -33,7 +33,7 @@ const ARC_STYLE: Record<ArcSpeed, { color: string; label: string; dash?: boolean
 
 const MARKER_STYLE: Record<Marker['kind'], { color: string; label: string; title: string }> = {
   main: { color: 'rgba(255,40,40,0.9)', label: 'M', title: 'Main entrance' },
-  midway: { color: 'rgba(255,150,0,0.9)', label: 'Z', title: 'Midway point (screen)' },
+  midway: { color: 'rgba(255,150,0,0.9)', label: 'Z', title: 'Midway point' },
   sec: { color: 'rgba(40,120,255,0.9)', label: 'S', title: 'Secondary entrance' },
 };
 
@@ -907,7 +907,7 @@ export class LevelView {
       { heading: 'Entrances' },
       { label: 'New secondary entrance here', title: 'Creates an entrance with a free number that exits of other levels can point to', onClick: () => { app.newSecondaryEntrance(mx, my); } },
       { label: 'Main entrance here', onClick: () => app.placeEntrance('main', mx, my) },
-      { label: 'Midway point here (screen only)', disabled: () => scr > 15, onClick: () => app.placeEntrance('midway', mx, my) },
+      { label: 'Midway point here', title: 'Gives the midway point its own position (Lunar Magic\'s midway entrance)', onClick: () => app.placeEntrance('midway', mx, my) },
     ];
     if (mk?.kind === 'sec') items.push({ label: `Remove entrance ${hex3(mk.index)}`, onClick: () => app.removeSecondaryEntrance(mk.index) });
     items.push({ heading: `Screen ${hex2(scr)}` });

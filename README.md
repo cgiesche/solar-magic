@@ -70,13 +70,16 @@ When a level is displayed, it runs the ROM's **original loading routines** (~15 
   *Graphics* → slot cards ("Swap …") or "Use in slot" next to a file on the right.
 * Screen exits per screen (destination, secondary), **secondary entrances** (dialog).
 * **Entrance options** (Lunar Magic's): Mario faces left, water level (Mario swims) for the main entrance
-  (also the midway point) and each secondary entrance; "Water level" for a secondary screen exit. With face
+  (also the midway point unless it has its own) and each secondary entrance; "Water level" for a secondary screen exit. With face
   left the slanted pipe entrance shoots Mario out to the left. Test play from an entrance starts with them and
   with its entrance action.
 * **Menu *Level*:** save as, **insert/delete screen** (shifts everything after it), clear level;
   **menu *File*:** **export/import as a `.smwlevel` file** (objects, sprites, exits, header, graphics bypass, custom palette).
-* **Entrance markers** for the main entrance (M), midway screen (Z) and secondary entrances (S) – movable by
+* **Entrance markers** for the main entrance (M), midway point (Z) and secondary entrances (S) – movable by
   dragging (snaps to the possible entrance positions).
+* **Midway entrance** (Lunar Magic 3.00's): dragging the midway point (Z) gives it its own tile, with its own
+  action, camera start and options (face left, water) in the exit panel; without them it shares the main
+  entrance's position within its screen, as in the game. Test play from it starts there.
 * **Insert by number** (Ins/I): object, extended object or sprite with size/extra bits.
 * Menu *View*: grid, screen boundaries, toggle layers; **inactive layer translucent** (the object layer not being edited is semi-transparent);
   view with switch palaces pressed or ON/OFF set to OFF; zoom 50–400 %.
