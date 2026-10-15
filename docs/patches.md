@@ -526,6 +526,31 @@ tiles whenever the cameras are the same; a pipe in the moved part leads where th
 entrance there puts Mario at its tile. Still the game's: the BG of a level without the relative camera
 (it scrolls past its 27 rows), Lunar Magic's T and B bits of the size byte, the midway entrance of its own.
 
+### Layer 3 graphics per level
+
+As Lunar Magic's *Layer 3 GFX/Tilemap Bypass*, a level can have its own layer 3 graphics and tilemap
+(*Graphics → Graphics*, the cards LG1–LG4 and LT3):
+- **LG1–LG4** replace the game's layer 3 files 28–2B (2bpp, 0x800 bytes each, VRAM `$4000–$4FFF`; the
+  status bar, message text and tides use them too). The game uploads 28–2B only at boot; the patch uploads a
+  level's own at the graphics upload of its load (`$00A9DA`) and puts 28–2B back for the next level without
+  its own and for the overworld.
+- **LT3** is a file of layer 3 tilemap data, copied into the layer 3 tilemap (VRAM `$5000–$5FFF`, 64×64
+  tiles) instead of the image of the level's layer 3 setting (`$00A01F`, the place Lunar Magic changes);
+  what the setting does (a tide …) stays. Where it goes and how much of it, as in Lunar Magic: under the
+  status bar (`$50A0`, the file's first `$A0` words are skipped), the start of layer 3 (the status bar's
+  tile numbers are still written over it every frame), the status bar's last line (`$5080`), the bottom half
+  (`$5800`); 0x2000 bytes (512×512), 0x1000 (512×256) or 0x800 (256×256).
+
+The settings are Lunar Magic's: in its ExGFX table and a `.mwl`'s section 7 the LT3 word's high nibble
+`DDFF` (destination, size), AN2's bits for "layer 3 GFX" and "layer 3 tilemap" bypassed (the bit layout as the
+SMW speedrunning wiki's *Level Data Format* gives it). What each destination and size does was observed in a
+Lunar Magic-saved ROM in the editor's emulator, by changing the nibble and reading VRAM after the level load.
+The editor keeps them in a table of its own (LT3, LG1–LG4, `DDFF` per level, the patch "SMWL"; Lunar Magic's
+table is at no fixed place and holds the other slots too). ExGFX of 0x800 and 0x2000 bytes are stored
+uncompressed; a compressed LG file goes through the game's decompression, an LT3 file must be uncompressed.
+`tools/testlayer3gfx.ts` checks by emulation that levels without them load layer 3 as the clean game, that
+every slot, destination and size lands where it should, and that the game's files come back.
+
 ## Level import (Lunar Magic)
 
 Graphics in SMWCentral's graphics section are Lunar Magic exports, as the submission rules
@@ -557,10 +582,10 @@ belongs to the `.palmask` of the same name.
    part's own slots (a background does not change FG slots).
 4. **Colors**: per palette, the colors according to the `.palmask` and, if marked, the background color (from the
    `.mwl`) go into the level's custom palette. It is created from the current colors when needed.
-   Palettes with only colors 0–31 (the 2bpp palettes of layer 3) are not preselected.
-
-Layer 3 (in the `.mwl` the slots LT3 = tilemap file and LG1–LG4 = layer 3 graphics, Lunar Magic's
-layer 3 bypass) is not taken over yet; the dialog names the files.
+   Palettes with only colors 0–31 (the 2bpp palettes of layer 3) are preselected only with layer 3.
+5. **Layer 3** (in the `.mwl` the slots LT3 = tilemap file and LG1–LG4 = layer 3 graphics, Lunar Magic's
+   layer 3 bypass): the LG files that are not the game's 28–2B and the LT3 file with its destination and size
+   go into the level's layer 3 slots (see [Layer 3 graphics per level](#layer-3-graphics-per-level)).
 
 Undo: Ctrl+Z first reverts the tilemap, then the rest (Map16 tiles, ExGFX files, slots,
 palette).
@@ -587,6 +612,7 @@ not compatible with the respective feature.
 | `$058DE6` | BG Map16 extension, BG tiles 200–FFF (SMWH) |
 | `$058551` | Music per level (SMWU) |
 | `$00AA50` | BG2/BG3 graphics slots (SMWG) |
+| `$00A9DA`, `$00A01F` | Layer 3 graphics per level (SMWL); RAM `$7F3678` |
 | `$05D915`, `$00F79D`, table `$06FA00` | Layer 2 scroll rates; RAM `$7F3660–$7F3665` |
 | `$05D928`, `$0586BB`, `$0DA963`, `$0DA9D6`, `$0DA9EF`, `$058091`, tables `$06CA00`, `$05DE00`, `$06FC00`, `$06FE00`, `$06CC00`, `$06CE00`; finding a block `$00F478`, `$00F492`, `$00F49A`, `$0194D6`, `$019500`, `$019512`, `$01D97B`, `$01D981`, `$0292D9`, `$0292F9`, `$02930A`, `$0295C0`, `$0295EC`, `$0295FD`, `$02A6BA`, `$02A6CB`, `$02BA50`, `$02BA71`, `$02BA82`, `$02D15A`, `$02D18C`, `$02D19D`, `$03D793`; changing a tile `$00BEEC`, `$00BF41`, `$00C079`, `$00C0C6`, `$00C1B1`, `$00C3D3`; mode tables `$00BDA8`, `$00BDE8`, `$00BE28`, `$00BE68`; sprites `$02A82E`, `$02A968`, `$02AA5F`, `$02AB54`, `$02ABD0`, `$02AF3D`, `$02AFA7`, `$01AC3E`, `$02D038`, `$03B86A`; camera `$00F70D`; entrances `$05D7E0`, `$05DA17` | Level heights; RAM `$7F3666–$7F3677`, Lunar Magic's `$13D7`, `$0BF6–$0CF5` |
 | `$008A7F`, `$0087AD`, `$0085E3`, `$0580B0`, `$0580B4`, `$0580BF`, `$0580C3`, `$058730`, `$058770`, `$0587D4`, `$0587DB`, `$05880B`, `$058812`, `$0586F7`, `$058A3A` | VRAM patch (SMWV): tilemaps relocated, taller levels' rows; RAM `$7F0000–$7F3654` |
