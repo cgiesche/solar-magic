@@ -16,7 +16,7 @@
 import type { Rom } from './rom.ts';
 import { applyPatch, type ApplyResult } from './patchapply.ts';
 import { listPatches } from './patchreg.ts';
-import { installEditorPatch, editorPatch, missingPatch, gfxEntry } from './patches.ts';
+import { installEditorPatch, editorPatch, missingPatch, gfxEntry, VANILLA_GFX, RAW_GFX_SIZES } from './patches.ts';
 import { lz2Decompress } from './lz2.ts';
 import { snesToPc } from './rom.ts';
 import { LAYER3_GFX_RAM, RAM } from './ram.ts';
@@ -32,6 +32,7 @@ export const LT3_SIZES = [0x2000, 0x1000, 0x800];
 const GFX_HOOK = 0x00a9da, MAP_HOOK = 0x00a01f;
 const MAGIC = [0x53, 0x4d, 0x57, 0x4c]; // "SMWL"
 const hx = (n: number) => '$' + n.toString(16).toUpperCase();
+const hx4 = (n: number) => '$' + n.toString(16).toUpperCase().padStart(4, '0');
 
 // Tables (512 bytes each, by level): LT3 file ($FF none), LG1-LG4 ($FF the game's file), LT3's DDFF.
 // LG: at the start of the graphics upload ($00A9DA, LDA #$80 : STA $2115), in levels the four files
@@ -41,6 +42,7 @@ const hx = (n: number) => '$' + n.toString(16).toUpperCase();
 // place Lunar Magic changes); the image is skipped when the level has an LT3 file (stored raw).
 function asm(rom: Rom): string {
   const p = editorPatch(rom) ?? missingPatch('Editor patch (SMWE)');
+  const copies = Array.from({ length: 16 }, (_, v) => lt3Copy(fromLt3Nibble(v)));
   return `asar 1.90
 lorom
 !Own = ${hx(LAYER3_GFX_RAM[0])}   ; 1: the layer 3 graphics in VRAM are not the game's
@@ -167,11 +169,11 @@ Map:
 + RTL
 ; by DDFF: destination, the file's bytes skipped (the status bar's), the bytes copied (up to VRAM $6000)
 .vram
-  dw $50A0, $50A0, $50A0, $50A0, $5000, $5000, $5000, $5000, $5080, $5080, $5080, $5080, $5800, $5800, $5800, $5800
+  dw ${copies.map((c) => hx4(c.vram)).join(', ')}
 .skip
-  dw $0140, $0140, $0140, $0140, $0000, $0000, $0000, $0000, $0100, $0100, $0100, $0100, $0000, $0000, $0000, $0000
+  dw ${copies.map((c) => hx4(c.skip)).join(', ')}
 .len
-  dw $1EC0, $0EC0, $06C0, $1EC0, $2000, $1000, $0800, $2000, $1F00, $0F00, $0700, $1F00, $1000, $1000, $0800, $1000
+  dw ${copies.map((c) => hx4(c.len)).join(', ')}
 
 Tbl:
   fillbyte $FF : fill $A00
@@ -183,13 +185,14 @@ export function layer3Entry(rom: Rom) {
   return listPatches(rom).find((p) => p.kind === 'layer3') ?? null;
 }
 
-function table(rom: Rom): number {
+function findTable(rom: Rom): number | null {
   if (rom.r8(GFX_HOOK) === 0x22) {
     const base = rom.r24(GFX_HOOK + 1) - 8;
     if (MAGIC.every((m, i) => rom.r8(base + i) === m)) return rom.r24(base + 4);
   }
-  return missingPatch('Layer 3 graphics (SMWL)');
+  return null;
 }
+const table = (rom: Rom): number => findTable(rom) ?? missingPatch('Layer 3 graphics (SMWL)');
 
 // needs Asar (loadAsar) to be loaded
 export function installLayer3Patch(rom: Rom): ApplyResult {
@@ -215,7 +218,31 @@ export function setLevelLayer3(rom: Rom, n: number, g: Layer3Gfx): void {
   rom.w8(t + 0xa00 + n, lt3Nibble(g));
 }
 
+// the ROM bytes ([SNES address, value]) that make the uncompressed 0x2000-byte file at `addr` level n's LT3,
+// placed `place`: the emulator's temporary patches for an LT3 file not saved yet (levelemu.ts). The file
+// takes the level's LT3 number, or one without a file. None without the patch
+export function lt3Patches(rom: Rom, n: number, addr: number, place: Lt3Place): [number, number][] {
+  const t = findTable(rom), p = editorPatch(rom);
+  if (t === null || !p) return [];
+  let num = rom.r8(t + n);
+  if (num === 0xff) for (num = VANILLA_GFX; num < 0xff && gfxEntry(rom, num); num++);
+  if (num === 0xff) return [];
+  return [[t + n, num], [t + 0xa00 + n, lt3Nibble(place)],
+    [p.gfxLo + num, addr & 0xff], [p.gfxHi + num, (addr >> 8) & 0xff], [p.gfxBank + num, addr >> 16], [p.gfxFlags + num, RAW_GFX_SIZES.indexOf(0x2000) + 1]];
+}
+
 // Lunar Magic's DDFF of the LT3 word (its size 3 reads as 0x2000 bytes, as in its code), and back
+// how the patch copies an LT3 file: to VRAM word `vram`, the file's first `skip` bytes left out (the status
+// bar's part of the tilemap: the file is laid out as the whole tilemap from $5000, or from $5800 for the
+// bottom half), `len` bytes: the size less what is skipped, at most up to the tilemap's end ($6000)
+export const L3_MAP_START = 0x5000, L3_MAP_END = 0x6000;
+const LT3_VRAM = [0x50a0, 0x5000, 0x5080, 0x5800];
+const LT3_SKIP = [0x140, 0, 0x100, 0];
+export function lt3Copy(p: Lt3Place): { vram: number; skip: number; len: number } {
+  const vram = LT3_VRAM[p.dest], skip = LT3_SKIP[p.dest];
+  return { vram, skip, len: Math.min(LT3_SIZES[p.size] - skip, (L3_MAP_END - vram) * 2) };
+}
+
 export const lt3Nibble = (g: Lt3Place) => ((g.dest & 3) << 2) | (g.size & 3);
 export const fromLt3Nibble = (v: number): Lt3Place => ({ dest: (v >> 2) & 3, size: (v & 3) === 3 ? 0 : v & 3 });
 

@@ -7,6 +7,7 @@ import {
 } from './level.ts';
 import { setSpriteBank, bgBank, setBgBank } from './patches.ts';
 import { encodeBg } from './bg.ts';
+import { saveLayer3 } from './layer3map.ts';
 
 function countRefs(rom: Rom, table: number, stride: number, addr: number, bankFn?: (i: number) => number): number {
   let n = 0;
@@ -61,6 +62,8 @@ export function saveLevel(rom: Rom, lv: Level): string[] {
   }
   log.push(saveSprites(rom, lv));
   writeSecondaryHeader(rom, n, lv.secondary);
+  // the layer 3 tilemap is the LT3 file's, which the Graphics tab can change: saved once, then read from there
+  if (lv.layer3) { log.push(saveLayer3(rom, n, lv.layer3)); lv.layer3 = null; }
   return log;
 }
 

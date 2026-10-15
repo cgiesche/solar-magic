@@ -193,26 +193,35 @@ export function renderLevel(rom: Rom, r: LevelRender, mode: number, screens: num
   return { width, height, backdrop: backdropColor(r), layer1, layer2, layer3, geom1, geom2, tiles1, tiles2 };
 }
 
+// where the BG3 tilemap is on the level image at the end of the load: its VRAM byte address, size in pixels
+// (mw x mh, 32x32 tiles a screen), scroll against the camera; tile (tx, ty) is drawn at level pixel
+// (tx * 8 - dx, ty * 8 - dy), repeated every mw pixels horizontally
+export interface Layer3Geometry { base: number; wide: number; mw: number; mh: number; dx: number; dy: number }
+export const LAYER3_STATUS_ROWS = 5; // the status bar's tile rows (not drawn)
+export function layer3Geometry(r: LevelRender): Layer3Geometry {
+  const w = r.wram, sc = r.ppuRegs[0x09], wide = sc & 1, tall = (sc >> 1) & 1;
+  return { base: (sc & 0xfc) << 9, wide, mw: 256 << wide, mh: 256 << tall, dx: get16(w, RAM.layer3X) - cameraX(w), dy: get16(w, RAM.layer3Y) - cameraY(w) };
+}
+// VRAM byte address of tile (tx, ty)'s word
+export const layer3TileAddr = (g: Layer3Geometry, tx: number, ty: number): number =>
+  (g.base + ((tx >> 5) + (ty >> 5) * (g.wide ? 2 : 1)) * 0x800 + ((ty & 31) * 32 + (tx & 31)) * 2) & 0xffff;
+
 // BG3 tilemap (2bpp) placed like on screen at the end of the level load: layer 3 scroll ($22/$24)
 // relative to the camera ($1A/$1C), repeated horizontally. Approximation: layer 3 is assumed to
 // scroll along with the camera. The top 5 tile rows hold the status bar (incl. item box) and are skipped.
 export function renderLayer3(r: LevelRender, width: number, height: number): LevelImages['layer3'] {
-  const w = r.wram, p = r.ppuRegs;
+  const p = r.ppuRegs;
   if (!(p[0x2c] & 0x04) && !(p[0x2d] & 0x04)) return null;
-  const sc = p[0x09], base = (sc & 0xfc) << 9, wide = sc & 1, tall = (sc >> 1) & 1;
-  const mw = 256 << wide, mh = 256 << tall;
-  const dx = get16(w, RAM.layer3X) - cameraX(w);
-  const dy = get16(w, RAM.layer3Y) - cameraY(w);
+  const g = layer3Geometry(r), { mw, mh, dx, dy } = g;
   const tc = new TileCache(r.vram, r.cgram, (p[0x0c] & 0x0f) << 13);
   const back = new Uint32Array(width * height), front = new Uint32Array(width * height);
   const prioFront = (p[0x05] & 0x0f) === 0x09;
   let any = false;
-  for (let ty = 5; ty < mh / 8; ty++) {
+  for (let ty = LAYER3_STATUS_ROWS; ty < mh / 8; ty++) {
     const py = ty * 8 - dy;
     if (py + 8 <= 0 || py >= height) continue;
     for (let tx = 0; tx < mw / 8; tx++) {
-      const scr = (tx >> 5) + (ty >> 5) * (wide ? 2 : 1);
-      const a = (base + scr * 0x800 + ((ty & 31) * 32 + (tx & 31)) * 2) & 0xffff;
+      const a = layer3TileAddr(g, tx, ty);
       const word = r.vram[a] | (r.vram[a + 1] << 8);
       const t = tc.get(word, 2);
       if (!t.some((c) => c)) continue;

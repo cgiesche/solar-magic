@@ -6,6 +6,7 @@ import { Snes, type SnesState, type MemHook } from './snes.ts';
 import { Rom, snesToPc } from './rom.ts';
 import { L1_PTRS, L2_PTRS, SPR_PTRS, SEC_HDR, LEVEL_SIZE_TABLE, mainTranslevel } from './level.ts';
 import { editorPatch, musicPatch, BG_HOOK, HEADER_MUSIC_TABLE } from './patches.ts';
+import { lt3Patches, type Lt3Place } from './layer3gfx.ts';
 import { RomReads, updateBytePages, PAGE_SHIFT } from './romdeps.ts';
 import { GM, RAM, SPR, MAP_BASE, MAP_SIZE, MAP_HI, getS16, set16, setSpritePos } from './ram.ts';
 
@@ -15,6 +16,7 @@ export const OV_SPR = 0x8000;
 export const OV_BG = 0xa000; // edited BG tilemap (editor format, see bg.ts)
 const OV_BG_HOOK = 0xb000; // LDA #$FF : STA $6A : RTL (BG data bank = overlay)
 const OV_STUB = 0xc000; // JSL stub used to call game routines
+const OV_L3 = 0xd000; // an edited layer 3 tilemap as the level's LT3 file (0x2000 bytes, see layer3map.ts)
 const INIT_TABLES = 0x07f7d2; // game routine that sets up a new sprite's tables (tweakers), X = slot
 // where the level load calls the upload of the level music bank (JSR $8134, 3 bytes; AddmusicK's
 // patch makes it NOPs): it uploads when the level is entered from the overworld ($141A = 0). Loads
@@ -32,6 +34,7 @@ export interface LevelOverride {
   layer2?: Uint8Array; // layer 2 object data incl. header
   layer2Pointer?: number; // override pointer (BG tilemap) when layer2 not given
   bgData?: Uint8Array; // edited BG tilemap (bg.ts encodeBg), replaces layer2Pointer
+  layer3?: { data: Uint8Array; place: Lt3Place }; // edited layer 3 tilemap: the level's LT3 file (0x2000 bytes) and where it goes
   sprites?: Uint8Array;
   // objIndexOfByte maps overlay byte offset → object index (layer1: idx, layer2: 0x8000|idx)
   byteOwner?: Int32Array;
@@ -203,6 +206,10 @@ export class LevelEmulator {
       patch24(L2_PTRS + level * 3, 0xff0000 | (overlaySnes(OV_BG) & 0xffff));
       patch(BG_HOOK, 0x22);
       patch24(BG_HOOK + 1, overlaySnes(OV_BG_HOOK));
+    }
+    if (ov.layer3) {
+      this.overlay.set(ov.layer3.data, OV_L3);
+      for (const [a, v] of lt3Patches(rom, level, overlaySnes(OV_L3), ov.layer3.place)) patch(a, v);
     }
     if (ov.sprites) {
       this.overlay.set(ov.sprites, OV_SPR);
