@@ -41,7 +41,7 @@ export function openLevelImportDialog(app: App, fileName: string, files: Map<str
     return;
   }
   let at = plan.at, fgAt = plan.fgAt, useBg = canBg, useFg = !!plan.fg, use3 = !!plan.layer3;
-  // layer 3 colors (0-31) go with layer 3
+  // layer 3 colors (0-31) are offered with layer 3 and taken over only with it
   const usePal = plan.palettes.map((p) => !p.layer3 || use3);
   const l3 = plan.gfx.filter((g) => g.parts.includes('layer3')), lt3 = l3.find((g) => g.slot === 'LT3');
   const n16 = plan.map16 ? plan.map16.data.tiles.length : 0;
@@ -77,7 +77,7 @@ export function openLevelImportDialog(app: App, fileName: string, files: Map<str
       let r: BgPackResult;
       try {
         r = app.romEdit(`Level import “${name}” into level ${lvl}`, () =>
-          importLevelFile(app.rom, app.level, files, plan, { bg: useBg, fg: useFg, layer3: use3, at, fgAt, palettes: usePal, cgram: levelColors(app.render), wram: app.render.wram, blank }));
+          importLevelFile(app.rom, app.level, files, plan, { bg: useBg, fg: useFg, layer3: use3, at, fgAt, palettes: usePal.map((v, i) => v && (use3 || !plan.palettes[i].layer3)), cgram: levelColors(app.render), wram: app.render.wram, blank }));
       } catch (e) { r = { ok: false, errors: [errorText(e)], notes: [], bg: null }; }
       if (!r.ok) { logTool(`Level import “${name}”`, { errors: r.errors, warnings: [] }); return false; }
       const bg = r.bg;

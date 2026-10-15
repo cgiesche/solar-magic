@@ -18,7 +18,7 @@ import {
   EXT_GFX_SLOT_NAMES, customPalette, setCustomPalette,
 } from './patches.ts';
 import { sampleTiles } from './mwl.ts';
-import { LAYER3_SLOT_NAMES, LG_SLOT_NAMES, LT3_SLOT, LT3_DESTS, LT3_SIZES, levelLayer3, setLevelLayer3 } from './layer3gfx.ts';
+import { LAYER3_SLOT_NAMES, LG_SLOT_NAMES, LT3_SLOT, LT3_DESTS, LT3_SIZES, levelLayer3, setLevelLayer3, type Lt3Place } from './layer3gfx.ts';
 import { usesAltFile, addLevelSlots, localizeFrames, levelAltFile, altFileName, kindOf, AN2_FRAMES, AN2_FRAMES_END, ALT_FILE_MAX, type ExList, type ExSlot } from './exanim.ts';
 
 const base = (f: string) => f.slice(f.lastIndexOf('/') + 1);
@@ -203,7 +203,7 @@ export function storeGfx(rom: Rom, files: Map<string, Uint8Array>, gfx: { file: 
 // what goes into a level
 export interface LevelGraphics {
   slots: { slot: string | null; num: number }[]; // ExGFX for graphics slots (null, or a slot not in GFX_SLOTS: none)
-  lt3?: { dest: number; size: number } | null; // where an LT3 file goes in the layer 3 tilemap (default: the level's)
+  lt3?: Lt3Place | null; // where an LT3 file goes in the layer 3 tilemap (default: the level's)
   palettes: PackPalette[]; // colors to take over
   back: number | null; // the back area color of the level file, for palettes whose mask has it
   exanim: ExSlot[]; // ExAnimation slots to add to the level's list

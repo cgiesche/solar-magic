@@ -7,7 +7,8 @@ import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { importGfxFile } from '../src/core/map16file.ts';
 import { GM, RAM } from '../src/core/ram.ts';
-import { levelLayer3, setLevelLayer3, layer3Entry, LT3_SIZES, type Layer3Gfx } from '../src/core/layer3gfx.ts';
+import { levelLayer3, setLevelLayer3, layer3Entry, fitsLayer3Slot, lt3SizeFor, LT3_SIZES, type Layer3Gfx } from '../src/core/layer3gfx.ts';
+import { setGfxEntry } from '../src/core/patches.ts';
 import { cleanImage, editorImage } from './fixture.ts';
 
 let bad = 0;
@@ -63,6 +64,18 @@ const none: Layer3Gfx = { lt3: 0xff, dest: 0, size: 0, lg: [0xff, 0xff, 0xff, 0x
   s0.wram[RAM.gameMode] = GM.overworldLoad;
   for (let f = 0; f < 400 && s0.wram[RAM.gameMode] !== GM.overworld; f++) s0.runFrame();
   check(w[RAM.gameMode] === GM.overworld && !differ(s.vram, s0.vram, 0x4000, 0x5000), 'the overworld after it: layer 3 graphics 28-2B as in the clean game');
+}
+
+// which files the slots take: LG 2bpp graphics (uncompressed or the game's compressed ones), LT3 uncompressed
+// files at least as long as the size; another size can't be stored as uncompressed
+{
+  const rom = fresh();
+  importGfxFile(rom, 0x80, new Uint8Array(0x800)); importGfxFile(rom, 0x81, new Uint8Array(0x1000)); importGfxFile(rom, 0x82, new Uint8Array(0x2000));
+  check(fitsLayer3Slot(rom, 'LG1', 0x80) && fitsLayer3Slot(rom, 'LG1', 0x2b) && !fitsLayer3Slot(rom, 'LG1', 0x81) && !fitsLayer3Slot(rom, 'LG1', 0x14), 'LG: 2bpp files only');
+  check(fitsLayer3Slot(rom, 'LT3', 0x82, 0x2000) && !fitsLayer3Slot(rom, 'LT3', 0x81, 0x2000) && fitsLayer3Slot(rom, 'LT3', 0x81) && !fitsLayer3Slot(rom, 'LT3', 0x2b), 'LT3: uncompressed files of the size');
+  check(LT3_SIZES[lt3SizeFor(0x1000)] === 0x1000 && LT3_SIZES[lt3SizeFor(0x2000)] === 0x2000 && LT3_SIZES[lt3SizeFor(0x800)] === 0x800, 'LT3: the size a file has room for');
+  let thrown = false; try { setGfxEntry(rom, 0x83, 0x108000, true, 0x900); } catch { thrown = true; }
+  check(thrown, 'an uncompressed file of another size is refused');
 }
 
 // LT3: each destination and size; level 105 (no layer 3 image) and 01F (its setting has one, which the

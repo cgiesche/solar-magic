@@ -547,7 +547,8 @@ SMW speedrunning wiki's *Level Data Format* gives it). What each destination and
 Lunar Magic-saved ROM in the editor's emulator, by changing the nibble and reading VRAM after the level load.
 The editor keeps them in a table of its own (LT3, LG1–LG4, `DDFF` per level, the patch "SMWL"; Lunar Magic's
 table is at no fixed place and holds the other slots too). ExGFX of 0x800 and 0x2000 bytes are stored
-uncompressed; a compressed LG file goes through the game's decompression, an LT3 file must be uncompressed.
+uncompressed; a compressed LG file goes through the game's decompression, an LT3 file must be uncompressed and
+at least as long as its size (the slots offer only 2bpp files for LG and such files for LT3).
 `tools/testlayer3gfx.ts` checks by emulation that levels without them load layer 3 as the clean game, that
 every slot, destination and size lands where it should, and that the game's files come back.
 

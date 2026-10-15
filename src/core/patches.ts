@@ -299,7 +299,8 @@ export function setGfxEntry(rom: Rom, i: number, addr: number, raw: boolean, siz
   rom.w8(p.gfxLo + i, addr & 0xff);
   rom.w8(p.gfxHi + i, (addr >> 8) & 0xff);
   rom.w8(p.gfxBank + i, (addr >> 16) & 0xff);
-  rom.w8(p.gfxFlags + i, raw ? RAW_GFX_SIZES.indexOf(size) + 1 || 1 : 0);
+  if (raw && !RAW_GFX_SIZES.includes(size)) throw new Error(`No uncompressed GFX file has ${size} bytes`);
+  rom.w8(p.gfxFlags + i, raw ? RAW_GFX_SIZES.indexOf(size) + 1 : 0);
 }
 
 // ---- per-level GFX bypass ----

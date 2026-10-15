@@ -16,8 +16,10 @@
 import type { Rom } from './rom.ts';
 import { applyPatch, type ApplyResult } from './patchapply.ts';
 import { listPatches } from './patchreg.ts';
-import { installEditorPatch, editorPatch, missingPatch } from './patches.ts';
-import { LAYER3_GFX_RAM } from './ram.ts';
+import { installEditorPatch, editorPatch, missingPatch, gfxEntry } from './patches.ts';
+import { lz2Decompress } from './lz2.ts';
+import { snesToPc } from './rom.ts';
+import { LAYER3_GFX_RAM, RAM } from './ram.ts';
 
 export const LAYER3_PATCH_NAME = 'Layer 3 graphics per level (Lunar Magic format)';
 export const LG_SLOT_NAMES = ['LG1', 'LG2', 'LG3', 'LG4'];
@@ -42,6 +44,8 @@ function asm(rom: Rom): string {
   return `asar 1.90
 lorom
 !Own = ${hx(LAYER3_GFX_RAM[0])}   ; 1: the layer 3 graphics in VRAM are not the game's
+!GameMode = ${hx(0x7e0000 | RAM.gameMode)}
+!Setting = ${hx(RAM.layer3Setting)}   ; the level's layer 3 setting
 !GfxLo = ${hx(p.gfxLo)}
 !GfxHi = ${hx(p.gfxHi)}
 !GfxBk = ${hx(p.gfxBank)}
@@ -63,7 +67,7 @@ freecode
 Gfx:
   LDA #$80 : STA $2115
   PHP
-  LDA.l $7E0100
+  LDA.l !GameMode    ; (below $0B the title screen and file select, which load a level too)
   CMP #$0B : BCC .level
   CMP #$0F : BCC .game
 .level
@@ -124,7 +128,8 @@ Upload:
   RTS
 
 ; returns Z set: no image of the layer 3 setting (none, or the level's LT3 is there instead); else
-; A = the setting - 1, as the game's code goes on
+; A = the setting - 1, as the game's code goes on. The LT3 file is uncompressed and at least as long as its
+; size says (the editor offers only such); a compressed one is left out
 Map:
   PHP
   REP #$30
@@ -156,7 +161,7 @@ Map:
   PLX
 .game
   PLP
-  LDA $1BE3 : BEQ +
+  LDA !Setting : BEQ +
   DEC
   REP #$02
 + RTL
@@ -196,21 +201,32 @@ export function installLayer3Patch(rom: Rom): ApplyResult {
 
 // a level's layer 3 files: lt3 ($FF none) with its destination (0-3, LT3_DESTS) and size (0-2,
 // LT3_SIZES); lg: LG1-LG4 ($FF the game's file 28-2B)
-export interface Layer3Gfx { lt3: number; dest: number; size: number; lg: number[] }
+export interface Lt3Place { dest: number; size: number }
+export interface Layer3Gfx extends Lt3Place { lt3: number; lg: number[] }
 
 export function levelLayer3(rom: Rom, n: number): Layer3Gfx {
-  const t = table(rom), f = rom.r8(t + 0xa00 + n);
-  return { lt3: rom.r8(t + n), dest: (f >> 2) & 3, size: Math.min(f & 3, 2), lg: [1, 2, 3, 4].map((k) => rom.r8(t + k * 0x200 + n)) };
+  const t = table(rom);
+  return { lt3: rom.r8(t + n), ...fromLt3Nibble(rom.r8(t + 0xa00 + n)), lg: [1, 2, 3, 4].map((k) => rom.r8(t + k * 0x200 + n)) };
 }
 export function setLevelLayer3(rom: Rom, n: number, g: Layer3Gfx): void {
   const t = table(rom);
   rom.w8(t + n, g.lt3);
   g.lg.forEach((v, k) => rom.w8(t + (k + 1) * 0x200 + n, v));
-  rom.w8(t + 0xa00 + n, ((g.dest & 3) << 2) | (g.size & 3));
+  rom.w8(t + 0xa00 + n, lt3Nibble(g));
 }
 
-// the file each LG slot shows
-export const lgFile = (g: Layer3Gfx, k: number) => (g.lg[k] === 0xff ? GAME_LAYER3_GFX + k : g.lg[k]);
-// Lunar Magic's DDFF of the LT3 word, and back
-export const lt3Nibble = (g: Pick<Layer3Gfx, 'dest' | 'size'>) => (g.dest << 2) | g.size;
-export const fromLt3Nibble = (v: number) => ({ dest: (v >> 2) & 3, size: Math.min(v & 3, 2) });
+// Lunar Magic's DDFF of the LT3 word (its size 3 reads as 0x2000 bytes, as in its code), and back
+export const lt3Nibble = (g: Lt3Place) => ((g.dest & 3) << 2) | (g.size & 3);
+export const fromLt3Nibble = (v: number): Lt3Place => ({ dest: (v >> 2) & 3, size: (v & 3) === 3 ? 0 : v & 3 });
+
+// the files a slot can take: LG 2bpp graphics (0x800 bytes, uncompressed or not), LT3 an uncompressed file
+// at least `size` bytes long (any, without `size`)
+export function fitsLayer3Slot(rom: Rom, slot: string, num: number, size?: number): boolean {
+  const e = gfxEntry(rom, num);
+  if (!e) return false;
+  if (slot === LT3_SLOT) return e.raw && e.size >= (size ?? 0);
+  if (e.raw) return e.size === LG_SIZE;
+  try { return lz2Decompress(rom.data, snesToPc(e.addr)).data.length === LG_SIZE; } catch { return false; }
+}
+// the largest LT3 size (LT3_SIZES index) an uncompressed file of `bytes` has room for
+export const lt3SizeFor = (bytes: number) => Math.max(0, LT3_SIZES.findIndex((b) => b <= bytes));

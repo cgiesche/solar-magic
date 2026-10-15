@@ -21,7 +21,7 @@ import {
 } from '../../core/patches.ts';
 import { importGfxFile, exgfxName } from '../../core/map16file.ts';
 import { freeGfx } from '../../core/levelgfx.ts';
-import { levelLayer3, setLevelLayer3, LG_SLOT_NAMES, LT3_SLOT, GAME_LAYER3_GFX, LT3_DESTS, LT3_SIZES } from '../../core/layer3gfx.ts';
+import { levelLayer3, setLevelLayer3, fitsLayer3Slot, lt3SizeFor, LG_SLOT_NAMES, LT3_SLOT, GAME_LAYER3_GFX, LT3_DESTS, LT3_SIZES } from '../../core/layer3gfx.ts';
 import { recordPackageChange, type Package } from '../../core/pkgreg.ts';
 import { parsePrimaryHeader, L1_PTRS } from '../../core/level.ts';
 import { map16Source } from '../../core/render.ts';
@@ -316,16 +316,16 @@ export class GfxTab implements WsPanel {
 
   // where the LT3 file goes in the layer 3 tilemap, and how much of it
   private lt3Settings(): HTMLElement {
-    const app = this.app, n = app.level.number, g = levelLayer3(app.rom, n);
+    const app = this.app, n = app.level.number, g = levelLayer3(app.rom, n), bytes = gfxEntry(app.rom, g.lt3)?.size ?? 0;
     const set = (what: string, v: Partial<typeof g>) => {
       try { app.romEdit(`LT3 of level ${hex(n, 3)}: ${what}`, () => setLevelLayer3(app.rom, n, { ...levelLayer3(app.rom, n), ...v })); }
       catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
     };
-    const sel = (opts: string[], cur: number, title: string, on: (v: number) => void) => h('select', { title, onchange: (e: Event) => on(Number((e.target as HTMLSelectElement).value)) },
-      opts.map((o, i) => h('option', { value: String(i), selected: i === cur }, o)));
+    const sel = (opts: string[], cur: number, title: string, on: (v: number) => void, off: (i: number) => boolean = () => false) => h('select', { title, onchange: (e: Event) => on(Number((e.target as HTMLSelectElement).value)) },
+      opts.map((o, i) => h('option', { value: String(i), selected: i === cur, disabled: off(i) }, o)));
     return h('div', { class: 'gt-card-l3' },
       sel(LT3_DESTS, g.dest, 'Where the file goes: “Under the status bar” keeps the status bar\'s tilemap, the others overwrite (part of) it', (v) => set(LT3_DESTS[v].toLowerCase(), { dest: v })),
-      sel(LT3_SIZES.map((b) => (b === 0x2000 ? '512×512' : b === 0x1000 ? '512×256' : '256×256')), g.size, 'How much of the file is copied: 512×512 pixels = 0x2000 bytes, 512×256 = 0x1000, 256×256 = 0x800', (v) => set(`0x${hex(LT3_SIZES[v], 4)} bytes`, { size: v })));
+      sel(LT3_SIZES.map((b) => (b === 0x2000 ? '512×512' : b === 0x1000 ? '512×256' : '256×256')), g.size, 'How much of the file is copied: 512×512 pixels = 0x2000 bytes, 512×256 = 0x1000, 256×256 = 0x800', (v) => set(`0x${hex(LT3_SIZES[v], 4)} bytes`, { size: v }), (i) => LT3_SIZES[i] > bytes));
   }
 
   private thumb(c: HTMLCanvasElement, num: number, row: number, w: number, hh: number): void {
@@ -386,6 +386,8 @@ export class GfxTab implements WsPanel {
       extra(IMPORT_FILE, 'Import …', '.bin or .png into a free number, use here'));
     for (let i = 0; i < 0x100; i++) {
       if (!gfxEntry(app.rom, i)) continue;
+      // layer 3: only 2bpp graphics files for LG, only uncompressed tilemap files for LT3
+      if ((s.kind === 'lg' || s.kind === 'lt3') && !fitsLayer3Slot(app.rom, s.name, i)) continue;
       const c = h('canvas', { width: 128, height: 32, class: 'gt-gal-img' });
       this.thumb(c, i, row, 128, 32);
       const users = usage.get(i) ?? [];
@@ -413,7 +415,8 @@ export class GfxTab implements WsPanel {
         if (s.kind === 'ext') { const ex = levelExtGfx(app.rom, app.level.number); ex[s.k] = v; setLevelExtGfx(app.rom, app.level.number, ex); }
         else if (s.kind === 'lg' || s.kind === 'lt3') {
           const g = levelLayer3(app.rom, app.level.number);
-          if (s.kind === 'lt3') g.lt3 = v; else g.lg[s.k] = v;
+          // an LT3 file copies at most its own length
+          if (s.kind === 'lt3') { g.lt3 = v; const e = v !== 0xff ? gfxEntry(app.rom, v) : null; if (e) g.size = Math.max(g.size, lt3SizeFor(e.size)); } else g.lg[s.k] = v;
           setLevelLayer3(app.rom, app.level.number, g);
         } else { const set = levelGfx(app.rom, app.level.number); set[s.k] = v; setLevelGfx(app.rom, app.level.number, set); }
       });
@@ -575,7 +578,7 @@ export class GfxTab implements WsPanel {
     for (const s of this.levelSlots()) {
       items.push({
         label: `${s.name} – now ${s.file === 0xff ? 'empty' : gfxName(s.file)} (${s.sprite ? 'Sprites' : this.range(s).replace(/^Tiles/, 'tiles')})`,
-        disabled: () => s.file === num,
+        disabled: () => s.file === num || ((s.kind === 'lg' || s.kind === 'lt3') && !fitsLayer3Slot(this.app.rom, s.name, num)),
         onClick: () => void this.assignSlot(s, num),
       });
     }
@@ -991,7 +994,8 @@ export class GfxTab implements WsPanel {
       if (!c) return null;
       raw = c === 2;
     } else if ((await choose(`Overwrite ${gfxName(f.num)}?`, `The image replaces the contents of ${gfxName(f.num)}. Colors are mapped to palette ${hex(this.row(), 1)}. (Undo with Ctrl+Z.)`, [{ label: 'Cancel' }, { label: 'Overwrite', primary: true }])) !== 1) return null;
-    const bpp = raw ? 4 : f.empty ? 3 : f.bpp;
+    // an uncompressed file keeps its format (2bpp layer 3 graphics, 4bpp), a new one is 4bpp
+    const bpp = raw ? (f.raw && !f.empty ? f.bpp : 4) : f.empty ? 3 : f.bpp;
     const c = document.createElement('canvas');
     c.width = bmp.width; c.height = bmp.height;
     const ctx = c.getContext('2d')!;
@@ -1011,7 +1015,7 @@ export class GfxTab implements WsPanel {
       }
       return best;
     };
-    const tiles = f.num >= ANIM_FILE ? Math.min(0x400, Math.floor(bmp.height / 8) * 16) : raw ? 128 : Math.floor(bmp.height / 8) * 16;
+    const tiles = f.num >= ANIM_FILE ? Math.min(0x400, Math.floor(bmp.height / 8) * 16) : raw ? (f.raw && !f.empty ? f.tiles : 128) : Math.floor(bmp.height / 8) * 16;
     const pix = new Uint8Array(tiles * 64);
     for (let t = 0; t < tiles; t++) {
       const bx = (t & 15) * 8, by = (t >> 4) * 8;
@@ -1024,7 +1028,7 @@ export class GfxTab implements WsPanel {
         if (f.num >= ANIM_FILE) { writeAltFile(this.app.rom, f.num - ANIM_FILE, enc); return; }
         const payload = raw ? enc : lz2Compress(enc);
         if (!f.empty) this.app.rom.freeAt(f.addr);
-        setGfxEntry(this.app.rom, f.num, this.app.rom.allocWrite(payload), raw);
+        setGfxEntry(this.app.rom, f.num, this.app.rom.allocWrite(payload), raw, payload.length);
       });
       this.bppOverride = f.empty || raw ? null : bpp;
       this.reload();
