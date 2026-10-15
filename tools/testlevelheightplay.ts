@@ -151,6 +151,26 @@ for (const [n, size, dy] of [[0x105, 0x0e, 32], [0x106, 0x0e, 32], [0x001, 0x0e,
   check(visible(a).join() === visible(b).join(), 'taller level: the visible layer 1 tiles at the bottom as the game\'s');
 }
 
+// the BG with the camera relative to Mario: at the level's bottom it shows its own bottom (its height less a
+// screen), whatever layer 2's vertical rate – the game's 16 paired settings and the separate rates 0-8
+{
+  const size = 0x13, dy = 62, bgRows = 27, bgBottom = (bgRows << 4) - 0xf0;
+  const wrong: string[] = [];
+  const settings = [...Array.from({ length: 16 }, (_, i) => ({ layer2Scroll: i, layer2Separate: 0, layer2V: 0 })),
+    ...Array.from({ length: 9 }, (_, v) => ({ layer2Scroll: 1, layer2Separate: 1, layer2V: v }))];
+  for (const l2 of settings) {
+    const lv = moved(cut(0x105, size), size, dy);
+    lv.sprites = [];
+    lv.secondary = { ...lv.secondary, ...l2, layer2HAuto: 0, entranceY: 2, entranceYHi: 0, bgRelative: 0, bgHeight: bgRows - 1 };
+    const s = play(lv), w = s.wram;
+    for (let f = 0; f < 600 && !(w[RAM.marioBlocked] & 4); f++) step(s, 0);
+    for (let n = 0; n < 60; n++) step(s, 0);
+    const name = l2.layer2Separate ? `separate V ${l2.layer2V}` : `paired ${l2.layer2Scroll.toString(16)}`;
+    if (cameraY(w) !== (levelRows(lv.secondary) << 4) - 0xf0 || get16(w, RAM.layer2Y) !== bgBottom) wrong.push(`${name}: ${get16(w, RAM.layer2Y).toString(16)}`);
+  }
+  check(!wrong.length, `taller level: at its bottom the BG shows its bottom (${bgBottom.toString(16)}) at every vertical rate${wrong.length ? ` – not ${wrong.join(', ')}` : ''}`);
+}
+
 // with custom sprites the editor's PIXI runtime loads the sprites (its own loop over the list): the same,
 // and a custom sprite in the moved part spawns there
 {

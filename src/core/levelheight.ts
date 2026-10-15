@@ -30,7 +30,6 @@
 
 import type { Rom } from './rom.ts';
 import { LEVEL_SIZE_TABLE, LEVEL_HEIGHTS, SEC_HDR, SEC_ENT } from './level.ts';
-import { L2_SCROLL_TABLE } from './l2scroll.ts';
 import { LEVEL_HEIGHT_RAM, LEVEL_HEIGHT, SCREEN_PTRS, LEVEL_MAX_Y, LEVEL_ROW_MASK } from './ram.ts';
 import { applyPatch, type ApplyResult } from './patchapply.ts';
 import { installEditorPatch } from './patches.ts';
@@ -52,13 +51,13 @@ lorom
 !Level = !Size+10      ; the level being loaded (16-bit)
 !Ent = !Size+12        ; the secondary entrance it is entered by (16-bit)
 !Tmp = !Size+14        ; (16-bit)
+!Align = !Size+16      ; the BG's bottom + $8000 for CameraY to align layer 2 with (16-bit, 0: none)
 !Ent1 = $${hx(SEC_HDR[6])}       ; per level, Lunar Magic's: IWPXXtTT (P: the entrance at tile X/Y, XX: X bits 4-3)
 !Ent2 = $${hx(SEC_HDR[7])}       ; OFYYYYYY (O: BG relative to FG, F: camera offset bit 4, Y: Y bits 9-4)
 !Ent3 = $${hx(SEC_HDR[8])}       ; RL-ooooo (R: camera relative to Mario, L: face left, o: BG height - 1, or with O its offset)
 !SecFE = $${hx(SEC_ENT[3])}       ; per secondary entrance: IPXXDAAA (P: at tile X/Y, XX: X bits 4-3)
 !SecY = $${hx(SEC_ENT[4])}        ; EFYYYYYY (Lunar Magic's, at a place of its own: F camera offset bit 4, Y: Y bits 9-4)
 !SecR = $${hx(SEC_ENT[5])}        ; RLW----- (R: camera relative to Mario)
-!L2Table = $${hx(L2_SCROLL_TABLE)}     ; separate layer 2 rates (S, bit 7)
 !Height = $${hx(LEVEL_HEIGHT)}       ; playing: the level's height in pixels, a screen's bytes (Lunar Magic's)
 !Ptr = $${hx(SCREEN_PTRS[0])}          ; per screen: 3-byte pointers to the low bytes (Lunar Magic's place)
 !PtrHi = !Ptr+$60      ; to the high bytes
@@ -258,6 +257,7 @@ SecEntrance:
 Entrance:
   PHP
   REP #$30
+  LDA #$0000 : STA.l !Align
   LDA $1B93 : AND #$00FF : BNE +
   JMP .main
 +
@@ -325,8 +325,8 @@ Relative:
   PHA
   LDA !Height : SEC : SBC #$00F0 : CMP $01,s : BCS + : STA $01,s : +
   PLA : STA $1C
-  ; the BG: with O, the FG's position + 16 * the signed offset ($10: absolute 0); else so that it shows
-  ; its bottom (its height - $F0) when the camera is at the level's bottom
+  ; the BG: with O, the FG's position + 16 * the signed offset ($10: absolute 0); else it shows its bottom
+  ; (its height - $F0) when the camera is at the level's bottom: CameraY sets layer 2's offset for that
   LDA.l !Level : TAX
   LDA.l !Ent2,x : AND #$0080 : BEQ .bottom
   LDA.l !Ent3,x : AND #$001F : CMP #$0010 : BNE +
@@ -335,52 +335,8 @@ Relative:
   ASL #4 : CLC : ADC $1C : STA $20
   RTS
 .bottom
-  LDA !Height : SEC : SBC #$00F0 : SEC : SBC $1C   ; the camera's distance to the bottom
-  JSR L2Rate
-  STA.l !Tmp
   LDA.l !Ent3,x : AND #$001F : INC : ASL #4 : SEC : SBC #$00F0
-  SEC : SBC.l !Tmp : STA $20
-  RTS
-
-; A = a distance layer 1 moves: how far layer 2 moves vertically, by its rate $1414 (the game's paired
-; settings, or the separate rates of l2scroll.ts); none: 0 (A/X/Y 16, X = the level)
-L2Rate:
-  PHA
-  LDA $1414 : AND #$00FF : TAY
-  PLA
-  CPY #$0000 : BEQ .zero
-  CPY #$0001 : BEQ .r
-  CPY #$0002 : BEQ .s1
-  CPY #$0003 : BNE +
-  PHA : LDA.l !L2Table,x : AND #$0080 : BEQ .r16p
-  PLA : BRA .s5
-.r16p
-  PLA : BRA .s4
-+ CPY #$0004 : BEQ .s2
-  CPY #$0005 : BEQ .s3
-  CPY #$0006 : BEQ .s4
-  CPY #$0007 : BEQ .s6
-  CPY #$0008 : BEQ .fast
-.zero
-  LDA #$0000
-  RTS
-.s6
-  LSR
-  LSR
-.s5
-  LSR
-.s4
-  LSR
-.s3
-  LSR
-.s2
-  LSR
-.s1
-  LSR
-.r
-  RTS
-.fast
-  STA.l !Tmp : LSR #2 : CLC : ADC.l !Tmp       ; about 6/5 (5/4)
+  CLC : ADC #$8000 : STA.l !Align
   RTS
 
 ; the sprite list's entry at Y (A/X/Y 8): A = its first byte (Z clear), or Z set at the end. Lunar Magic's
@@ -435,6 +391,29 @@ GenY:
 
 ; A 16, X 8: the camera's lowest Y for the game's vertical scroll ($00F7F4, which ends with RTS)
 CameraY:
+  LDA.l !Align : BEQ .limit
+  ; the first time after the level load (the game has set layer 2's offset $1417, A796): layer 2's position
+  ; at the level's bottom with no offset, by the code that moves it each frame (the game's, or l2scroll.ts's
+  ; for its rates), gives the offset that puts the BG's bottom there
+  PHP
+  SEP #$10                                     ; X/Y 8, as the layer 2 code wants
+  LDA $1C : PHA
+  LDA $1462 : PHA : LDA $1464 : PHA : LDA $1466 : PHA : LDA $1468 : PHA
+  LDA $9D : PHA
+  SEP #$20 : LDA #$01 : STA $9D : REP #$20     ; paused: an auto-scroll doesn't move on
+  LDA.l $7E0000+!Height : SEC : SBC #$00F0 : STA $1C
+  STZ $1417
+  PHK : PEA.w .moved-1 : PHB
+  JML $00F79D                                  ; to its PLB : RTL at $00F7F2
+.moved
+  REP #$20
+  LDA.l !Align : SEC : SBC #$8000 : SEC : SBC $20 : STA $1417
+  LDA #$0000 : STA.l !Align
+  PLA : STA $9D
+  PLA : STA $1468 : PLA : STA $1466 : PLA : STA $1464 : PLA : STA $1462
+  PLA : STA $1C
+  PLP
+.limit
   LDA.l $7E0000+!Height : SEC : SBC #$00F0
   PHK : PEA.w .back-1
   PEA.w $F7F3-1          ; RTL at $00F7F3

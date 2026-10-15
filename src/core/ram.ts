@@ -90,7 +90,7 @@ export const MAP_HI = 0x10000; // from a low byte to its high byte
 // the level heights patch's RAM (levelheight.ts, SNES address, bytes): a screen's bytes in the level data
 // while a level with a size loads (16-bit, 0: the game's $1B0), the subscreen of the objects that follow,
 // then what playing the level needs (the Y high bytes inside the level, …)
-export const LEVEL_HEIGHT_RAM: [number, number] = [0x7f3666, 16];
+export const LEVEL_HEIGHT_RAM: [number, number] = [0x7f3666, 18];
 // in it, for the editor's other code: a position's limit and row bits when a tile is changed (16-bit
 // each; the game's $0200 and $01F0)
 export const LEVEL_MAX_Y = LEVEL_HEIGHT_RAM[0] + 4, LEVEL_ROW_MASK = LEVEL_HEIGHT_RAM[0] + 6;
