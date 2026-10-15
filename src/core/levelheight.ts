@@ -130,7 +130,7 @@ org $00C3D3 : JSL TileRow : NOP
 ; him (Y * 16 + offset * 16, the 5-bit offset from the FG and BG start settings), the BG then bottom-aligned
 ; with the level (or relative to the FG)
 org $05D7E0 : JSL SecEntrance : NOP        ; LDY $0E : LDA $F800,y (Y = the secondary entrance)
-org $05DA17 : JSL Entrance                 ; SEP #$30 : LDA $13BF (both entrances set up)
+org $05DA17 : JSL Entrance : NOP           ; SEP #$30 : LDA $13BF (both entrances set up)
 
 ; loading sprites from the level's data: Lunar Magic's new format ($FF V: the sprites that follow are in
 ; subscreen V, $FF $FE: the end, $FF $FF: a sprite starting with $FF); a sprite's Y high byte gets the subscreen
