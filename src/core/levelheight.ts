@@ -25,12 +25,15 @@
 //  - the camera goes down to the height less $F0;
 //  - sprites load from Lunar Magic's new format ($FF V: subscreen V), the subscreen in their Y high byte;
 //  - entrances: Mario at a tile (Lunar Magic's tile position) and the camera relative to him, the BG then
-//    bottom-aligned with the level (the BG's height) or relative to the FG (SEC_HDR, SEC_ENT).
+//    bottom-aligned with the level (the BG's height) or relative to the FG (SEC_HDR, SEC_ENT);
+//  - Mario facing left and a water level, set for the main entrance, a secondary entrance or a secondary
+//    screen exit (its w); a screen keeps its exit's flags 0000wush ($19D8, which community code such as
+//    GPS's teleport routine writes too), and only s makes the level's exits secondary.
 // The tilemap of such a level is SMWV's (vrampatch.ts): a window of 16 block rows built from the level data.
 
 import type { Rom } from './rom.ts';
 import { LEVEL_SIZE_TABLE, LEVEL_HEIGHTS, SEC_HDR, SEC_ENT } from './level.ts';
-import { LEVEL_HEIGHT_RAM, LEVEL_HEIGHT, SCREEN_PTRS, LEVEL_MAX_Y, LEVEL_ROW_MASK } from './ram.ts';
+import { RAM, LEVEL_HEIGHT_RAM, LEVEL_HEIGHT, SCREEN_PTRS, LEVEL_MAX_Y, LEVEL_ROW_MASK, EXIT_FLAGS_RAM } from './ram.ts';
 import { applyPatch, type ApplyResult } from './patchapply.ts';
 import { installEditorPatch } from './patches.ts';
 
@@ -52,12 +55,13 @@ lorom
 !Ent = !Size+12        ; the secondary entrance it is entered by (16-bit)
 !Tmp = !Size+14        ; (16-bit)
 !Align = !Size+16      ; the BG's bottom + $8000 for CameraY to align layer 2 with (16-bit, 0: none)
-!Ent1 = $${hx(SEC_HDR[6])}       ; per level, Lunar Magic's: IWPXXtTT (P: the entrance at tile X/Y, XX: X bits 4-3)
+!ExitFlags = $${hx(EXIT_FLAGS_RAM[0])}   ; the flags of the screen exit Mario left by (0000wush, w: water with s)
+!Ent1 = $${hx(SEC_HDR[6])}       ; per level, Lunar Magic's: IWPXXtTT (W: water, P: the entrance at tile X/Y, XX: X bits 4-3)
 !Ent2 = $${hx(SEC_HDR[7])}       ; OFYYYYYY (O: BG relative to FG, F: camera offset bit 4, Y: Y bits 9-4)
 !Ent3 = $${hx(SEC_HDR[8])}       ; RL-ooooo (R: camera relative to Mario, L: face left, o: BG height - 1, or with O its offset)
 !SecFE = $${hx(SEC_ENT[3])}       ; per secondary entrance: IPXXDAAA (P: at tile X/Y, XX: X bits 4-3)
 !SecY = $${hx(SEC_ENT[4])}        ; EFYYYYYY (Lunar Magic's, at a place of its own: F camera offset bit 4, Y: Y bits 9-4)
-!SecR = $${hx(SEC_ENT[5])}        ; RLW----- (R: camera relative to Mario)
+!SecR = $${hx(SEC_ENT[5])}        ; RLW----- (R: camera relative to Mario, L: face left, W: water)
 !Height = $${hx(LEVEL_HEIGHT)}       ; playing: the level's height in pixels, a screen's bytes (Lunar Magic's)
 !Ptr = $${hx(SCREEN_PTRS[0])}          ; per screen: 3-byte pointers to the low bytes (Lunar Magic's place)
 !PtrHi = !Ptr+$60      ; to the high bytes
@@ -131,6 +135,14 @@ org $00C3D3 : JSL TileRow : NOP
 ; with the level (or relative to the FG)
 org $05D7E0 : JSL SecEntrance : NOP        ; LDY $0E : LDA $F800,y (Y = the secondary entrance)
 org $05DA17 : JSL Entrance : NOP           ; SEP #$30 : LDA $13BF (both entrances set up)
+
+; a screen keeps its exit's flags 0000wush (the game's only h), and only s makes the level's exits secondary
+; (the game's $0B >> 1 would make w or u do it too); the places Lunar Magic changes
+org $0DA532 : db $0F                       ; LDA $0B : AND #$01 : STA $19D8,x
+org $0DA536 : AND #$02                     ; LDA $0B (then LSR : STA $1B93; A = $0B & $0F)
+; Mario's direction and the water level, once the game's entrance action has set them up ($00A635, which
+; clears $70-$93)
+org $009708 : JSL Options                  ; LDA #$20 : STA $5E
 
 ; loading sprites from the level's data: Lunar Magic's new format ($FF V: the sprites that follow are in
 ; subscreen V, $FF $FE: the end, $FF $FF: a sprite starting with $FF); a sprite's Y high byte gets the subscreen
@@ -248,6 +260,7 @@ TileRow:
 ; the secondary entrance (A 8, X/Y 16, data bank $05): kept, then the game's LDY $0E : LDA $F800,y. A's
 ; high byte stays the game's 0: its code takes table indexes with a 16-bit TAX
 SecEntrance:
+  LDA.l $7E${hx(RAM.screenExitHi)},x : STA.l !ExitFlags       ; X = the screen Mario left by
   LDY $0E
   REP #$20 : TYA : STA.l !Ent : LDA #$0000 : SEP #$20
   LDA $F800,y
@@ -296,6 +309,36 @@ Entrance:
 .done
   PLP
   SEP #$30 : LDA $13BF
+  RTL
+
+; Mario faces left ($76 = 0) and the level is a water level ($85 = 1) as the entrance sets: the main
+; entrance's (also the midway point's), or a secondary entrance's or the screen exit's water (!Ent and
+; !ExitFlags from SecEntrance) (A 8, X/Y 8); then the game's LDA #$20 : STA $5E
+Options:
+  PHP
+  REP #$30 : PHX
+  LDA.l $7E${hx(RAM.useSecondaryExit)} : AND #$00FF : BEQ .main
+  LDA.l !Ent : TAX
+  SEP #$20
+  LDA.l !ExitFlags : AND #$08 : BNE .water
+  LDA.l !SecR,x : AND #$20 : BEQ .dry
+.water
+  LDA #$01 : STA $${hx(RAM.waterLevel)}
+.dry
+  LDA.l !SecR,x
+  BRA .face
+.main
+  LDA.l !Level : TAX
+  SEP #$20
+  LDA.l !Ent1,x : AND #$40 : BEQ +
+  LDA #$01 : STA $${hx(RAM.waterLevel)}
++ LDA.l !Ent3,x
+.face
+  AND #$40 : BEQ +
+  STZ $${hx(RAM.marioDir)}
++ PLX
+  PLP
+  LDA #$20 : STA $5E
   RTL
 
 ; Mario at tile X = Y, Y = A of the entrance's screen ($95, or $97 in a vertical level) (A/X/Y 16; X kept)
@@ -487,5 +530,5 @@ Done:
 
 export function installLevelHeightPatch(rom: Rom): ApplyResult {
   installEditorPatch(rom);
-  return applyPatch(rom, { name: LEVEL_HEIGHT_PATCH_NAME, main: 'levelheight.asm', files: new Map([['levelheight.asm', LEVEL_HEIGHT_ASM]]), kind: 'levelheight', ram: [LEVEL_HEIGHT_RAM, [0x7e0000 | LEVEL_HEIGHT, 2], [0x7e0000 | SCREEN_PTRS[0], SCREEN_PTRS[1]]] });
+  return applyPatch(rom, { name: LEVEL_HEIGHT_PATCH_NAME, main: 'levelheight.asm', files: new Map([['levelheight.asm', LEVEL_HEIGHT_ASM]]), kind: 'levelheight', ram: [LEVEL_HEIGHT_RAM, EXIT_FLAGS_RAM, [0x7e0000 | LEVEL_HEIGHT, 2], [0x7e0000 | SCREEN_PTRS[0], SCREEN_PTRS[1]]] });
 }

@@ -6,7 +6,7 @@ import { h, modal } from './dom.ts';
 import { LevelEmulator } from '../core/levelemu.ts';
 import { PPU } from '../core/ppu.ts';
 import { hex } from '../core/names.ts';
-import { levelTranslevel, encodeSecondaryHeader, startHeader, type CameraStart } from '../core/level.ts';
+import { levelTranslevel, encodeSecondaryHeader, startHeader, type CameraStart, type EntranceOptions } from '../core/level.ts';
 import { Apu, apuReady, loadApu } from '../core/apu.ts';
 import { AudioOut } from './audio.ts';
 import { GM, RAM, set16 } from '../core/ram.ts';
@@ -50,9 +50,9 @@ function readPads(): { bits: number; pause: boolean; names: string[] } {
 let testEmu: LevelEmulator | null = null;
 let soundMuted = false; // kept between test runs
 
-// at: Mario's start tile (his feet stand in it) instead of the main entrance, with the camera start of the
-// entrance played from (a secondary entrance's; else the main entrance's)
-type Start = { tx: number; ty: number; camera?: CameraStart };
+// at: Mario's start tile (his feet stand in it) instead of the main entrance, with the camera start and options
+// (face left, water) of the entrance played from (a secondary entrance's; else the main entrance's)
+type Start = { tx: number; ty: number; entrance?: CameraStart & EntranceOptions };
 export function openTestPlay(app: App, at?: Start): void {
   // the sound emulator loads once; the audio context must start within the key press or click
   const audio = new AudioOut(AUDIO_LEAD);
@@ -75,7 +75,7 @@ function start(app: App, at: Start | undefined, audio: AudioOut): void {
   // the start position: the nearest main entrance setting loads the level around it (camera, tilemap; FG and
   // BG start as set), in gameplay Mario is then moved to the exact pixel
   const start = at && { x: at.tx * 16, y: at.ty * 16 - 16 };
-  if (start) ov.secondaryHeader = encodeSecondaryHeader(startHeader(app.rom, lv.secondary, start.x, start.y, lv.header.screens - 1, app.entranceRows(), at.camera));
+  if (start) ov.secondaryHeader = encodeSecondaryHeader(startHeader(app.rom, lv.secondary, start.x, start.y, lv.header.screens - 1, app.entranceRows(), at.entrance));
   // a game in progress (lives, overworld with Mario on the level's tile): dying returns there
   const translevel = levelTranslevel(app.rom, lv.number);
   let r: ReturnType<LevelEmulator['load']>;

@@ -4,8 +4,8 @@ import type { App } from './app.ts';
 import { h, modal, clear, hexInput, select, toast, choose, emptyState } from './dom.ts';
 import { downloadBytes, pickFile } from './platform.ts';
 import { isBlank } from '../core/exitgraph.ts';
-import { readSecondaryEntrance, type SecondaryEntrance, loadLevel, cloneLevel, insertScreen, deleteScreen, clearLevel, spriteId, mainSpot, secondarySpot, setSecondarySpot, spotTile, copyCameraStart, hasRelativeCamera, levelMode } from '../core/level.ts';
-import { tileFields, cameraFields } from './entrancefields.ts';
+import { readSecondaryEntrance, type SecondaryEntrance, loadLevel, cloneLevel, insertScreen, deleteScreen, clearLevel, spriteId, mainSpot, secondarySpot, setSecondarySpot, spotTile, copyCameraStart, copyEntranceOptions, hasRelativeCamera, levelMode } from '../core/level.ts';
+import { tileFields, cameraFields, optionFields } from './entrancefields.ts';
 import { exportLevelFile, importLevelFile, LEVEL_FILE_EXT } from '../core/levelfile.ts';
 import { ENTRANCE_ACTIONS, hex, objectName } from '../core/names.ts';
 import { saveLevel } from '../core/save.ts';
@@ -59,6 +59,7 @@ export function openEntrancesDialog(app: App): void {
       ]),
       h('div', { class: 'prop' }, h('label', null, 'Action'), select(ENTRANCE_ACTIONS.map((a, i) => [i, `${i} – ${a}`] as [number, string]), e.action, (v) => set('Action', (x) => (x.action = v)))),
       ...cameraFields(e, set, hasRelativeCamera(rom, to === app.level.number ? app.level.header.mode : levelMode(rom, to))).map(([l, el]) => prop(l, el)),
+      ...optionFields(e, set).map(([l, el]) => prop(l, el)),
       h('div', { class: 'hint' }, users.length ? `Used by: ${users.map((u) => `${hex(u.from, 3)} (screen ${hex(u.screen, 2)})`).join(', ')}` : 'No exit uses this entrance.'),
       h('div', { class: 'row' },
         blank ? '' : h('button', { onclick: () => { dlg.close(true); openTarget(to); } }, `Open level ${hex(to, 3)}`),
@@ -78,7 +79,7 @@ export function openEntrancesDialog(app: App): void {
     if (idx === null) { toast('No free secondary entrance left.', 'error'); return; }
     const s = app.level.secondary;
     app.editSecondaryEntrance(idx, `Secondary entrance ${hex(idx, 3)} created`, (x) => {
-      x.destLevel = app.level.number & 0xff; setSecondarySpot(x, mainSpot(s)); x.action = s.entranceAction; copyCameraStart(x, s);
+      x.destLevel = app.level.number & 0xff; setSecondarySpot(x, mainSpot(s)); x.action = s.entranceAction; copyCameraStart(x, s); copyEntranceOptions(x, s);
     });
     sel = idx;
     buildList();

@@ -59,6 +59,13 @@ export function hexInput(value: number, digits: number, onChange: (v: number) =>
   return inp;
 }
 
+// a checkbox with its label (title: the tooltip)
+export function checkbox(label: string, title: string, checked: boolean, onChange: (on: boolean) => void): HTMLLabelElement {
+  const c = h('input', { type: 'checkbox', checked });
+  c.addEventListener('change', () => onChange(c.checked));
+  return h('label', { class: 'row', title }, c, label);
+}
+
 export function select(options: [number, string][], value: number, onChange: (v: number) => void): HTMLSelectElement {
   const s = h('select', null, options.map(([v, l]) => h('option', { value: String(v), selected: v === value }, l)));
   s.addEventListener('change', () => onChange(Number(s.value)));

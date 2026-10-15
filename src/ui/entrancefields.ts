@@ -3,10 +3,10 @@
 // above Mario, which a level with a size needs: the game's start positions don't reach its rows).
 
 import { hex2 } from '../core/names.ts';
-import { h, hexInput, select } from './dom.ts';
+import { h, hexInput, select, checkbox } from './dom.ts';
 import {
   type EntranceSpot, type CameraStart, type EntranceTileFields, type SecondaryHeader, type BgStart, spotTile, cameraRows, setCameraRows, cameraAtMario,
-  setEntranceTile, bgStart, setBgStart, GAME_BG_ROWS,
+  setEntranceTile, bgStart, setBgStart, GAME_BG_ROWS, type EntranceOptions,
 } from '../core/level.ts';
 
 export function spotText(p: EntranceSpot): string {
@@ -83,4 +83,11 @@ export function cameraFields<T extends CameraStart>(c: T, set: Set<T>, relative:
       ['BG start Y', select(range4, c.bgInitY, (n) => set('BG start Y', (x) => (x.bgInitY = n)))],
     ] as Rows),
   ];
+}
+
+// an entrance's options (Lunar Magic's): Mario faces left, a water level
+export function optionFields<T extends EntranceOptions>(o: T, set: Set<T>): Rows {
+  return [['Options', h('div', { class: 'radio-col' },
+    checkbox('Mario faces left', 'Mario enters the level facing left', !!o.faceLeft, (on) => set('Face left', (x) => (x.faceLeft = on ? 1 : 0))),
+    checkbox('Water level', 'Mario swims in the whole level, as if it were filled with water', !!o.water, (on) => set('Water level', (x) => (x.water = on ? 1 : 0))))]];
 }

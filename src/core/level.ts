@@ -54,7 +54,15 @@ export interface ScreenExit {
   screen: number;
   dest: number; // destination level (or secondary entrance) number, 9 bit
   secondary: boolean;
-  flags: number; // raw low nibble of byte 1 (bit0 = hi bit, bit1 = secondary, others kept)
+  flags: number; // the low nibble of byte 1, Lunar Magic's 0000wush (h: dest's high bit, s: secondary, u, w kept)
+}
+// a screen exit's w (Lunar Magic's): a secondary exit makes the level it leads to a water level (a standard
+// exit would lead to the midway entrance with separate settings, which the editor doesn't have)
+export const EXIT_WATER = 0x08;
+// makes a screen exit secondary or standard; w means something else for the other kind, so a change drops it
+export function setExitSecondary(e: ScreenExit, secondary: boolean): void {
+  if (e.secondary !== secondary) e.flags &= ~EXIT_WATER;
+  e.secondary = secondary;
 }
 
 export interface LevelSprite {
@@ -104,12 +112,14 @@ export interface SecondaryHeader {
   entranceTile: number; // DE00 bit 5: Mario at tile X/Y of the entrance screen (entranceX/Y their low bits)
   entranceXHi: number; // DE00 bits 4-3: X bits 4-3
   entranceYHi: number; // FC00 bits 5-0: Y bits 9-4
-  lmEntranceFlags: number; // DE00 bits 7-6, 2-0: slippery, water, … (kept, not used)
+  water: number; // DE00 bit 6: a water level (Mario swims)
+  lmEntranceFlags: number; // DE00 bits 7, 2-0: slippery, the sprites' spawn range (kept, not used)
   cameraRelative: number; // FE00 bit 7: the camera starts relative to Mario (cameraOffset), the BG to match
   cameraOffsetHi: number; // FC00 bit 6: bit 4 of the offset (bits 3-0: fgInitY, bgInitY)
   bgRelative: number; // FC00 bit 7: with cameraRelative the BG starts at the FG + 16 * bgHeight (signed)
   bgHeight: number; // FE00 bits 4-0: the BG's height in rows - 1 (or with bgRelative its offset)
-  faceLeft: number; // FE00 bit 6: Mario faces left (kept, not used)
+  faceLeft: number; // FE00 bit 6: Mario faces left
+  lmSpareBit: number; // FE00 bit 5 (unused in Lunar Magic's layout, kept)
 }
 
 export interface Level {
@@ -211,12 +221,14 @@ export function decodeSecondaryHeader([a, b, c, d, e = 0, f = 0, g = 0, h = 0, i
     entranceTile: (g >> 5) & 1,
     entranceXHi: (g >> 3) & 3,
     entranceYHi: h & 0x3f,
-    lmEntranceFlags: g & 0xc7,
+    water: (g >> 6) & 1,
+    lmEntranceFlags: g & 0x87,
     cameraRelative: i >> 7,
     cameraOffsetHi: (h >> 6) & 1,
     bgRelative: h >> 7,
     bgHeight: i & 0x1f,
     faceLeft: (i >> 6) & 1,
+    lmSpareBit: i & 0x20,
   };
 }
 export function encodeSecondaryHeader(s: SecondaryHeader): number[] {
@@ -227,9 +239,9 @@ export function encodeSecondaryHeader(s: SecondaryHeader): number[] {
     (s.noYoshiIntro << 7) | ((s.verticalPositioning & 3) << 5) | (s.entranceScreen & 0x1f),
     (s.layer2Separate << 7) | ((s.layer2HAuto & 1) << 6) | ((s.lmAutoScreens & 1) << 5) | (s.layer2V & 0x1f),
     (s.levelSizeFlags & 0xe0) | (s.levelSize & 0x1f),
-    (s.lmEntranceFlags & 0xc7) | ((s.entranceTile & 1) << 5) | ((s.entranceXHi & 3) << 3),
+    (s.lmEntranceFlags & 0x87) | ((s.water & 1) << 6) | ((s.entranceTile & 1) << 5) | ((s.entranceXHi & 3) << 3),
     (s.bgRelative << 7) | ((s.cameraOffsetHi & 1) << 6) | (s.entranceYHi & 0x3f),
-    (s.cameraRelative << 7) | ((s.faceLeft & 1) << 6) | (s.bgHeight & 0x1f),
+    (s.cameraRelative << 7) | ((s.faceLeft & 1) << 6) | (s.lmSpareBit & 0x20) | (s.bgHeight & 0x1f),
   ];
 }
 export function readSecondaryHeader(rom: Rom, n: number): SecondaryHeader {
@@ -543,7 +555,9 @@ export interface SecondaryEntrance {
   entranceYHi: number; // CC00 bits 5-0
   cameraOffsetHi: number; // CC00 bit 6
   cameraRelative: number; // CE00 bit 7
-  lmRaw: number; // CC00 bit 7 (exit to the overworld), CE00 bits 6-0 (face left, water) – kept, not used
+  faceLeft: number; // CE00 bit 6: Mario faces left
+  water: number; // CE00 bit 5: a water level (Mario swims)
+  lmRaw: number; // CC00 bit 7 (exit to the overworld), CE00 bits 4-0 – kept, not used
 }
 export function readSecondaryEntrance(rom: Rom, i: number): SecondaryEntrance {
   return decodeSecondaryEntrance(SEC_ENT.map((t) => rom.r8(t + i)));
@@ -563,7 +577,9 @@ export function decodeSecondaryEntrance([a, b, c, d, e, f]: number[]): Secondary
     entranceYHi: e & 0x3f,
     cameraOffsetHi: (e >> 6) & 1,
     cameraRelative: f >> 7,
-    lmRaw: ((e & 0x80) << 1) | (f & 0x7f),
+    faceLeft: (f >> 6) & 1,
+    water: (f >> 5) & 1,
+    lmRaw: ((e & 0x80) << 1) | (f & 0x1f),
   };
 }
 export function writeSecondaryEntrance(rom: Rom, i: number, e: SecondaryEntrance): void {
@@ -572,7 +588,7 @@ export function writeSecondaryEntrance(rom: Rom, i: number, e: SecondaryEntrance
   rom.w8(SEC_ENT[2] + i, (e.entranceX << 5) | (e.screen & 0x1f));
   rom.w8(SEC_ENT[3] + i, (e.raw3 & 0x88) | ((e.entranceTile & 1) << 6) | ((e.entranceXHi & 3) << 4) | (e.action & 7));
   rom.w8(SEC_ENT[4] + i, ((e.lmRaw >> 1) & 0x80) | ((e.cameraOffsetHi & 1) << 6) | (e.entranceYHi & 0x3f));
-  rom.w8(SEC_ENT[5] + i, (e.cameraRelative << 7) | (e.lmRaw & 0x7f));
+  rom.w8(SEC_ENT[5] + i, (e.cameraRelative << 7) | ((e.faceLeft & 1) << 6) | ((e.water & 1) << 5) | (e.lmRaw & 0x1f));
 }
 
 // ---- entrance positions ----
@@ -642,6 +658,11 @@ export function setCameraRows(c: CameraStart, rows: number): void {
 export function copyCameraStart(to: CameraStart, from: CameraStart): void {
   to.cameraRelative = from.cameraRelative; to.cameraOffsetHi = from.cameraOffsetHi; to.fgInitY = from.fgInitY; to.bgInitY = from.bgInitY;
 }
+// what an entrance sets besides where Mario and the camera start (Lunar Magic's, main and secondary entrances)
+export type EntranceOptions = Pick<SecondaryEntrance, 'faceLeft' | 'water'>;
+export function copyEntranceOptions(to: EntranceOptions, from: EntranceOptions): void {
+  to.faceLeft = from.faceLeft; to.water = from.water;
+}
 export const GAME_BG_ROWS = 27; // the game's BGs
 export const CAMERA_ROWS = 10; // the game's camera at the bottom has Mario standing on the ground 10 rows below its top
 // the camera relative to Mario (CAMERA_ROWS above him) unless it already is, as a tile entrance in a level
@@ -683,11 +704,11 @@ export function placeSecondary(e: SecondaryEntrance, p: EntranceSpot): void {
   if (p.tile) cameraAtMario(e);
 }
 // the secondary header test play starts with from Mario's top-left pixel (px, py): the main entrance at the
-// entrance setting nearest to it (rows: as nearestEntrance), without an entrance action; `camera`: the
-// camera start of the entrance played from (a secondary entrance's own), else the main entrance's
-export function startHeader(rom: Rom, s: SecondaryHeader, px: number, py: number, maxScreen: number, rows = 0, camera?: CameraStart): SecondaryHeader {
+// entrance setting nearest to it (rows: as nearestEntrance), without an entrance action; `entrance`: the
+// camera start and options of the entrance played from (a secondary entrance's own), else the main entrance's
+export function startHeader(rom: Rom, s: SecondaryHeader, px: number, py: number, maxScreen: number, rows = 0, entrance?: CameraStart & EntranceOptions): SecondaryHeader {
   const sec = { ...s };
-  if (camera) copyCameraStart(sec, camera);
+  if (entrance) { copyCameraStart(sec, entrance); copyEntranceOptions(sec, entrance); }
   placeMain(sec, nearestEntrance(rom, px, py, (sec.verticalPositioning & 1) !== 0, maxScreen, rows));
   sec.entranceAction = 0;
   return sec;

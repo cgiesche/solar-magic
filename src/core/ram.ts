@@ -34,7 +34,8 @@ export const RAM = {
   marioInAir: 0x72,
   marioClimbing: 0x74,
   marioInWater: 0x75,
-  marioDir: 0x76,
+  marioDir: 0x76, // 0 left, 1 right
+  waterLevel: 0x85, // Mario swims everywhere
   marioBlocked: 0x77, // bits: 1 right, 2 left, 4 floor, 8 ceiling
   marioSpeedX: 0x7b, marioSpeedY: 0x7d,
   marioX: 0x94, marioY: 0x96, // 16-bit
@@ -96,6 +97,8 @@ export const LEVEL_HEIGHT_RAM: [number, number] = [0x7f3666, 18];
 export const LEVEL_MAX_Y = LEVEL_HEIGHT_RAM[0] + 4, LEVEL_ROW_MASK = LEVEL_HEIGHT_RAM[0] + 6;
 // the layer 3 graphics patch's RAM (layer3gfx.ts): 1 while the layer 3 graphics in VRAM are a level's own
 export const LAYER3_GFX_RAM: [number, number] = [0x7f3678, 1];
+// the level heights patch's too: the flags of the screen exit Mario left by (0000wush, Lunar Magic's)
+export const EXIT_FLAGS_RAM: [number, number] = [0x7f3679, 1];
 // Lunar Magic's RAM for a horizontal level's height, which community code reads too: the height in
 // pixels (also a screen's bytes in the level data), and the screens' Map16 addresses in bank 0's RAM
 // (the game's mode tables point there): 3-byte pointers to the low and the high bytes, then the
