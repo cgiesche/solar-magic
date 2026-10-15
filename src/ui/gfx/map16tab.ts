@@ -23,7 +23,7 @@ import { cgramToRGBA } from '../../core/gfx.ts';
 import { map16Pointer } from '../../core/ram.ts';
 import { tileMatches, drawTileMatches } from '../tilesearch.ts';
 import { animsAt, animLinks } from './animtab.ts';
-import { fgTileUsers, bgTileUsers, tileLinks, unusedFgTiles, TILE_SOURCES } from '../../core/levelusage.ts';
+import { fgTileUsers, bgTileUsers, tileLinks, unusedFgTiles, isTilesetTile, TILE_SOURCES } from '../../core/levelusage.ts';
 import { usedInList } from '../usedin.ts';
 import { map16Source } from '../../core/render.ts';
 
@@ -540,16 +540,15 @@ export class Map16Tab implements WsPanel {
       box.replaceChildren(usedInList(app, 'Used in levels', users.map((u) => ({ level: u.level, text: `${u.count}× in the BG` })), pending, 'In no level\'s background.'));
       return;
     }
-    const ts = app.level.header.tileset, tilesetTile = t >= 0x073 && t < 0x100;
+    const ts = app.level.header.tileset, tilesetTile = isTilesetTile(t);
     const users = fgTileUsers(levels, t, ts);
     const items = users.map((u) => ({
       level: u.level, at: { x: u.uses[0].x, y: u.uses[0].y },
       text: u.uses.map((q) => `${q.count}× ${TILE_SOURCES[q.source]}${q.layer === 2 ? ' (layer 2)' : ''}`).join(', '),
     }));
     const l = tileLinks(app.rom, t);
-    const unused = !users.length && !pending && !l.structures.length;
     box.replaceChildren(
-      usedInList(app, tilesetTile ? `Used in levels of tileset ${hex(ts, 1)}` : 'Used in levels', items, pending, t >= EXT_FIRST && unused ? 'Placed in no level and no structure: unused.' : 'Placed in no level.'),
+      usedInList(app, tilesetTile ? `Used in levels of tileset ${hex(ts, 1)}` : 'Used in levels', items, pending, this.unusedTiles()?.has(t) ? 'Defined, but placed in no level and no structure: unused.' : 'Placed in no level.'),
       l.actsLike.length ? h('div', { class: 'hint' }, 'Acting like it: ', ...l.actsLike.slice(0, 24).flatMap((x, i) => [i ? ' ' : '', link(x)]), l.actsLike.length > 24 ? ` … (${l.actsLike.length})` : '') : '',
       l.structures.length ? h('div', { class: 'hint' }, `In structure${l.structures.length > 1 ? 's' : ''} ${l.structures.map((n) => hex(n, 2)).join(', ')}`) : '',
       l.blocks.length ? h('div', { class: 'hint' }, `Custom block on it: ${l.blocks.join(', ')}`) : '',

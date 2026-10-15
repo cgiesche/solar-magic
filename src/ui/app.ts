@@ -1017,7 +1017,6 @@ export class App {
   private l2Emu: LevelEmulator | null = null;
   private l2Run: { key: string; waiting: (() => void)[] } | null = null;
 
-  // a background emulator (new for another ROM) set up from the main one's boot state
   // The Map16 tiles of every level (levelusage.ts), the open one as edited: those known now, the others are
   // learned in the background ('level-uses' as they come); pending: how many are still missing
   levelTiles(): { levels: LevelTiles[]; pending: number } {
@@ -1064,6 +1063,7 @@ export class App {
     void this.cacheReady.then(() => this.later('level-uses', step));
   }
 
+  // a background emulator (new for another ROM) set up from the main one's boot state
   private auxEmu(emu: LevelEmulator | null): LevelEmulator {
     if (!emu || emu.rom !== this.rom) {
       emu = new LevelEmulator(this.rom);

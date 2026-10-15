@@ -54,7 +54,7 @@ const sourceOf = (o: LevelObject | undefined): TileSource =>
 // The tiles of a level from its emulated load, which was given the level's objects with their owners
 // (LevelOverride.byteOwner: layer 1 object index, layer 2 0x8000 | index). Tiles no object wrote are left out.
 export function levelTilesOf(rom: Rom, lv: Level, r: LevelRender): LevelTiles {
-  const fg = new Map<number, TileUse>(), bg = new Map<number, BgTileUse>();
+  const fg = new Map<string, TileUse>(), bg = new Map<number, BgTileUse>();
   const rows = levelRows(lv.secondary);
   ([[1, lv.objects], [2, lv.layer2Objects]] as const).forEach(([layer, objs]) => {
     if (!objs) return;
@@ -64,7 +64,7 @@ export function levelTilesOf(rom: Rom, lv: Level, r: LevelRender): LevelTiles {
       const k = a < 0 ? -1 : r.owner[a - MAP_BASE];
       if (k < 0 || (k >= 0x8000 ? 2 : 1) !== layer) continue;
       const tile = map16Tile(r.wram, a), source = sourceOf(objs[k & 0x7fff]);
-      const id = (tile << 3) | (layer << 2) | Object.keys(TILE_SOURCES).indexOf(source);
+      const id = `${tile}:${layer}:${source}`;
       const u = fg.get(id);
       if (u) u.count++; else fg.set(id, { tile, layer, source, count: 1, x, y });
     }
@@ -89,18 +89,20 @@ export function levelOverride(rom: Rom, lv: Level): LevelOverride {
   return { layer1: l1, layer2: l2 ?? undefined, layer2Pointer: l2 ? undefined : lv.layer2Pointer, byteOwner };
 }
 
+// the level data a load is given, as a 64-bit hash (two 32-bit ones)
 function hashOf(ov: LevelOverride): string {
-  let h = 0x811c9dc5;
+  let a = 0x811c9dc5, c = 0x2545f491;
+  const add = (v: number) => { a = Math.imul(a ^ v, 0x01000193); c = Math.imul(c ^ v, 0xc2b2ae35) ^ (c >>> 13); };
   for (const b of [ov.layer1, ov.layer2, Uint8Array.of(ov.layer2Pointer ?? 0, (ov.layer2Pointer ?? 0) >> 8, (ov.layer2Pointer ?? 0) >> 16)]) {
-    if (!b) { h = Math.imul(h ^ 0xff, 0x01000193); continue; }
-    for (let i = 0; i < b.length; i++) h = Math.imul(h ^ b[i], 0x01000193);
-    h = Math.imul(h ^ b.length, 0x01000193);
+    if (!b) { add(0x100); continue; }
+    for (let i = 0; i < b.length; i++) add(b[i]);
+    add(0x200 | (b.length & 0xff)); add(b.length >> 8);
   }
-  return (h >>> 0).toString(16);
+  return `${(a >>> 0).toString(16)}.${(c >>> 0).toString(16)}`;
 }
 
 export const levelTilesKey = (n: number) => `lu1:${n}`;
-interface Stored { data: string; tiles: LevelTiles } // data: the level data it was learned from
+interface Stored { data: string; tiles: LevelTiles } // data: the hash of the level data it was learned from
 
 // The tiles of the ROM's levels as saved, learned a level at a time (scan) and kept in the result cache.
 export class LevelUses {
@@ -146,16 +148,18 @@ export class LevelUses {
     const i = this.input(n);
     if (!i) return this.tiles(n)!;
     const emu = this.emu(), ov = levelOverride(this.rom, i.lv), gen = this.rom.gen;
-    const run = emu.tracked(() => emu.load(n, ov));
-    if (this.inputs.gen === gen) this.inputs.gen = this.rom.gen; // (the load's temporary ROM patches are undone)
-    const tiles = levelTilesOf(this.rom, i.lv, run.result);
+    // (a level that can't be taken apart counts as not loading: kept too, so it isn't tried again and again)
+    const run = emu.tracked(() => { try { return levelTilesOf(this.rom, i.lv, emu.load(n, ov)); } catch (e) { console.error(e); return null; } });
+    // the load's temporary ROM patches are undone, so the levels read before still hold
+    if (this.inputs.gen === gen) this.inputs.gen = this.rom.gen;
+    const tiles = run.result ?? { level: n, tileset: i.lv.header.tileset, ok: false, fg: [], bg: [] };
     this.results.set(levelTilesKey(n), { data: i.data, tiles } satisfies Stored, this.results.fp.deps(run.reads));
     return tiles;
   }
 }
 
 export interface TileUser { level: number; uses: TileUse[] }
-const isTilesetTile = (t: number) => t >= 0x073 && t < 0x100;
+export const isTilesetTile = (t: number) => t >= 0x073 && t < 0x100;
 
 // levels placing FG Map16 tile t; tiles 073-0FF count in levels of `tileset` only (each tileset has its own)
 export function fgTileUsers(levels: Iterable<LevelTiles>, t: number, tileset: number): TileUser[] {

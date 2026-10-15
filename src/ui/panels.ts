@@ -50,6 +50,11 @@ export function blockEnter(app: App, tiles: number[]): string {
   return [...'↓↑←→'].filter((d) => dirs.has(d)).join('');
 }
 
+// the levels with sprite id, each opening at its first one
+function spriteUses(app: App, id: number, title: string): HTMLElement {
+  return usedInList(app, title, app.spriteUsers(id).map((u) => ({ level: u.level, at: { x: u.x, y: u.y }, text: `${u.count}×` })), 0, 'In no level.');
+}
+
 // ---------------- level list ----------------
 export function levelNameOf(app: App, i: number): string {
   const tl = i < 0x25 ? i : i >= 0x101 && i < 0x13c ? i - 0xdc : -1;
@@ -672,7 +677,9 @@ export class Palette {
         this.body.appendChild(h('div', {
           class: `pal-row${sel ? ' selected' : ''}`, title: e.title,
           onclick: () => { app.paletteItem = e.item; if (app.mode !== 'spr') app.setMode('spr'); this.build(); app.emit('palette-item'); },
-        }, h('span', { class: 'pal-thumb-s' }, img ? cloneCanvas(img) : ''), h('span', { class: 'num' }, e.num), e.name, itemBadge(app, e.items, 'pal-items-row')));
+        }, h('span', { class: 'pal-thumb-s' }, img ? cloneCanvas(img) : ''), h('span', { class: 'num' }, e.num), e.name,
+          e.id >= 0x200 && app.customSprite(e.id) && !app.spriteUsers(e.id).length ? h('span', { class: 'gt-unused', title: 'Inserted, but in no level' }, 'unused') : '',
+          itemBadge(app, e.items, 'pal-items-row')));
       }
       if (!this.body.firstChild) this.body.append(emptyState('No sprite matches the search.'));
       return;
@@ -871,7 +878,7 @@ export class Properties {
         const p = app.paletteItem;
         if (p?.kind === 'spr') {
           const id = spriteId(p);
-          this.body.append(usedInList(app, `Sprite ${hex2(p.num)} (${app.spriteLabel(id)}) used in levels`, app.spriteUsers(id).map((u) => ({ level: u.level, at: { x: u.x, y: u.y }, text: `${u.count}×` })), 0, 'In no level.'));
+          this.body.append(spriteUses(app, id, `Sprite ${hex2(p.num)} (${app.spriteLabel(id)}) used in levels`));
         }
         return;
       }
@@ -892,7 +899,7 @@ export class Properties {
         s.extra >= 2 ? h('div', { class: 'hint' }, custom ? 'Extra bits 2/3: custom sprite without/with extra bit.' : 'This custom sprite is not inserted (ROM → Packages …, Sprites); the game treats it like the original sprite with the same number.') : '',
         custom?.description ? h('div', { class: 'hint pre' }, custom.description) : '',
         this.actions(false),
-        usedInList(app, 'Used in levels', app.spriteUsers(id).map((u) => ({ level: u.level, at: { x: u.x, y: u.y }, text: `${u.count}×` })), 0, 'In no level.'),
+        spriteUses(app, id, 'Used in levels'),
       );
       // behaviour when hit from below or jumped on, at this position and in general (emulated)
       const p = app.probes.sprite(id);
