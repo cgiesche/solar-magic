@@ -47,10 +47,13 @@ When a level is displayed, it runs the ROM's **original loading routines** (~15 
 
 ### Level editor
 * All 512 levels; list with level names (from the overworld), filter by number/name.
-* **Layer 1 / Layer 2 (in L2 levels) / Sprites / Screen exits / BG** as editing modes (keys 1–5).
+* **Layer 1 / Layer 2 (in L2 levels) / Sprites / Screen exits / BG / Layer 3** as editing modes (keys 1–6).
 * **Painting the background (BG mode):** edit the BG tilemap (32×27 BG Map16 tiles 000–1FF, up to FFF with the BG Map16 extension) with a brush
   – just like the other modes: click/drag picks up a tile or a block as the brush (in the level
   or in the palette), right-click/Shift+click paints (dragging keeps painting); it is saved in free space (BG patch).
+* **Painting layer 3 (Layer 3 mode):** the level's layer 3 tilemap in 8×8 tiles over the level, with the same brush
+  (picked from the level or layer 3's 2bpp tiles), palette, priority, flips and erase; saved into the level's
+  layer 3 tilemap file (LT3, a new one when it has none).
 * Objects: select (also by rectangle, Ctrl+click), move (mouse/arrow keys), resize via handle/keys,
   insert (right-click/Shift+click with a palette entry), delete, copy/paste/duplicate,
   drawing order (PgUp/PgDn), undo/redo.

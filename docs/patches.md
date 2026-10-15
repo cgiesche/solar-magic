@@ -552,6 +552,20 @@ at least as long as its size (the slots offer only 2bpp files for LG and such fi
 `tools/testlayer3gfx.ts` checks by emulation that levels without them load layer 3 as the clean game, that
 every slot, destination and size lands where it should, and that the game's files come back.
 
+**Editing the tilemap** (the level editor's *Layer 3* mode, as Lunar Magic's "Load Layer 3 of Level" in its
+overworld editor, LM help `ov_file_load_layer3_level.htm`; `src/core/layer3map.ts`): the level's layer 3
+tilemap is painted over the level in 8×8 tiles where the level view draws layer 3 (its position at the end of
+the load – in the game it scrolls by its own rates). The edit is the whole tilemap (`$5000–$5FFF`, as the level
+loaded it) and a level edit; saving writes the part the level's LT3 file is copied to into that file (in place:
+other levels with the same file change too, the panel names them), or, for a level without one, into a new
+0x2000-byte file under the status bar. Before saving the emulator loads the level with the file as edited (its
+LT3 entry and the file's pointer pointed at the overlay), so the level view and test play show it. The status
+bar's rows are not edited (the game writes the status bar over them). Erasing puts in the first tile of layer 3's
+graphics without a visible pixel ($FC in the game's). Where the patch copies an LT3 file is one function
+(`lt3Copy`); the patch's tables are generated from it. `tools/testlayer3map.ts` checks by emulation that the
+edited tilemap shows for every destination and size, before and after saving, and that a level pixel names the
+entry drawn there.
+
 ## Level import (Lunar Magic)
 
 Graphics in SMWCentral's graphics section are Lunar Magic exports, as the submission rules
