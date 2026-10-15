@@ -1,7 +1,8 @@
 // Entrance and screen exit options (Lunar Magic 3.00's, levelheight.ts), checked by emulation: Mario faces
 // left, a water level, set for the main entrance ($05DE00 bit 6, $06FE00 bit 6), a secondary entrance (its
 // RLW----- byte) and a secondary screen exit (0000wush: w), each as Mario enters the level that way and as
-// test play starts it; the bytes the options don't own stay as they were.
+// test play starts it, and the slanted pipe entrance shooting Mario out the way he faces; the bytes the
+// options don't own stay as they were.
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import {
@@ -10,7 +11,7 @@ import {
   SEC_ENT, EXIT_WATER,
 } from '../src/core/level.ts';
 import { saveLevel } from '../src/core/save.ts';
-import { GM, RAM } from '../src/core/ram.ts';
+import { GM, RAM, marioX } from '../src/core/ram.ts';
 import { editorImage } from './fixture.ts';
 
 let bad = 0;
@@ -43,14 +44,16 @@ const sec0 = readSecondaryHeader(rom, N);
   check(back.map((x) => x.flags).join() === '15,5', `screen exit flags kept (w, u): ${back.map((x) => x.flags.toString(16)).join(', ')}`);
 }
 
-// Mario's direction ($76: 0 left) and the water level ($85), and whether he swims ($75), a second into the level
+// Mario's direction ($76: 0 left) and the water level ($85), and whether he swims ($75), a second into the level;
+// dx: how far he moved meanwhile (a slanted pipe shoots him out)
 function after(s: LevelEmulator['snes']) {
-  const w = s.wram;
+  const w = s.wram, x0 = marioX(w);
   s.joy1 = 0;
   for (let f = 0; f < 60; f++) s.runFrame();
-  return { left: w[RAM.marioDir] === 0, water: w[RAM.waterLevel] !== 0, swims: w[RAM.marioInWater] !== 0 };
+  return { left: w[RAM.marioDir] === 0, water: w[RAM.waterLevel] !== 0, swims: w[RAM.marioInWater] !== 0, dx: (((marioX(w) - x0) << 16) >> 16) };
 }
-const show = (r: ReturnType<typeof after>) => `${r.left ? 'left' : 'right'}${r.water ? ', water' : ''}${r.swims ? ', swimming' : ''}`;
+const show = (r: ReturnType<typeof after>) => `${r.left ? 'left' : 'right'}${r.water ? ', water' : ''}${r.swims ? ', swimming' : ''}${r.dx ? `, moved ${r.dx}` : ''}`;
+const SLANTED = 6; // the entrance action "shoot from slanted pipe" ($192A)
 // the level from its main entrance with this secondary header (as test play loads it)
 function start(sec: SecondaryHeader) {
   const emu = new LevelEmulator(rom);
@@ -64,6 +67,10 @@ function start(sec: SecondaryHeader) {
   check(!game.left && !game.water && !game.swims, `main entrance: Mario faces right, no water (${show(game)})`);
   check(left.left && !left.water, `main entrance, face left: Mario faces left (${show(left)})`);
   check(water.water && water.swims && !water.left, `main entrance, water level: Mario swims (${show(water)})`);
+  // the slanted pipe shoots him out the way he faces (Lunar Magic's), else to the right as in the game
+  const pipe = start({ ...sec0, entranceAction: SLANTED }), pipeLeft = start({ ...sec0, entranceAction: SLANTED, faceLeft: 1 });
+  check(!pipe.left && pipe.dx > 64, `main entrance, slanted pipe: Mario shoots right (${show(pipe)})`);
+  check(pipeLeft.left && pipeLeft.dx < -64, `main entrance, slanted pipe, face left: Mario shoots left (${show(pipeLeft)})`);
 }
 
 // entering level 105 through its exit pipe on screen 7, which leads to secondary entrance IDX (exit flags)
@@ -95,12 +102,17 @@ function enter(e: SecondaryEntrance, flags = 2) {
   check(left.entered && left.left && !left.water, `secondary entrance, face left: Mario faces left (${show(left)})`);
   check(water.entered && water.water && water.swims, `secondary entrance, water level: Mario swims (${show(water)})`);
   check(exitWater.entered && exitWater.water && exitWater.swims, `secondary exit with "water level": Mario swims (${show(exitWater)})`);
+  const pipe = enter({ ...base, action: SLANTED }), pipeLeft = enter({ ...base, action: SLANTED, faceLeft: 1 });
+  check(pipe.entered && !pipe.left && pipe.dx > 64, `secondary entrance, slanted pipe: Mario shoots right (${show(pipe)})`);
+  check(pipeLeft.entered && pipeLeft.left && pipeLeft.dx < -64, `secondary entrance, slanted pipe, face left: Mario shoots left (${show(pipeLeft)})`);
 
   // test play from the secondary entrance: as entering through it
   const p = entrancePos(rom, secondarySpot(base), false);
-  for (const [name, e] of [['face left', { ...base, faceLeft: 1 }], ['water level', { ...base, water: 1 }], ['neither', base]] as [string, SecondaryEntrance][]) {
+  for (const [name, e] of [['face left', { ...base, faceLeft: 1 }], ['water level', { ...base, water: 1 }], ['neither', base],
+    ['slanted pipe', { ...base, action: SLANTED }], ['slanted pipe, face left', { ...base, action: SLANTED, faceLeft: 1 }]] as [string, SecondaryEntrance][]) {
     const t = start(startHeader(rom, sec0, p.x, p.y, 9, 0, e)), g = enter(e);
-    check(t.left === g.left && t.water === g.water && t.swims === g.swims, `test play from a secondary entrance (${name}): ${show(t)}, entered ${show(g)}`);
+    check(t.left === g.left && t.water === g.water && t.swims === g.swims && Math.sign(t.dx) === Math.sign(g.dx) && Math.abs(t.dx - g.dx) < 16,
+      `test play from a secondary entrance (${name}): ${show(t)}, entered ${show(g)}`);
   }
 }
 

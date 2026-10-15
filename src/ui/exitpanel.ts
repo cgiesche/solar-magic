@@ -127,11 +127,13 @@ function users(app: App, refs: ExitRef[], extra: HTMLElement[], empty: string): 
   return h('div', { class: 'exit-users' }, h('div', { class: 'hint' }, 'Leading here:'), ...extra, ...rows, ...(rows.length || extra.length ? [] : [hint(empty)]));
 }
 
-// test play from a marker
+// test play from a marker: a secondary entrance with its own camera start, options and action, the midway
+// point with the main entrance's (the game's $192A is the main entrance's there too)
 function testAt(app: App, kind: Marker['kind'], index: number): void {
   const m = app.markers().find((x) => x.kind === kind && x.index === index);
+  const s = app.level.secondary;
   if (kind === 'main' || !m) openTestPlay(app);
-  else openTestPlay(app, { tx: (m.x + 8) >> 4, ty: (m.y + 16) >> 4, entrance: kind === 'sec' ? readSecondaryEntrance(app.rom, index) : undefined });
+  else openTestPlay(app, { tx: (m.x + 8) >> 4, ty: (m.y + 16) >> 4, entrance: kind === 'sec' ? readSecondaryEntrance(app.rom, index) : { ...s, action: s.entranceAction } });
 }
 
 // ---- secondary entrance ----

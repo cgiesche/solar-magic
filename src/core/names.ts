@@ -31,7 +31,7 @@ export function levelModeName(m: number): string {
 // originals of these names; e.g. Iggy's Castle has 3, the Yellow Switch Palace 7)
 export const MUSIC = ['Here We Go', 'Underground', 'Athletic', 'Castle', 'Ghost House', 'Water', 'Boss', 'Switch Palace'];
 export const ENTRANCE_ACTIONS = ['Normal / pipe up', 'Pipe right', 'Pipe left', 'Pipe down',
-  'Pipe up', 'Slide/walk in from the left', 'Door / jump up from below (water)', 'Normal (no Yoshi intro)'];
+  'Pipe up', 'Slide/walk in from the left', 'Shoot from slanted pipe', 'Normal (no Yoshi intro)'];
 export const TIME_SETTINGS = ['0 (none)', '200', '300', '400'];
 export const ITEM_MEMORY = ['0', '1', '2', '3'];
 // Lunar Magic's names of the layer 2 scroll rates (3.40, its "Change Layer 1/2 Settings" dialog): 0-8,

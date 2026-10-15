@@ -27,8 +27,9 @@
 //  - entrances: Mario at a tile (Lunar Magic's tile position) and the camera relative to him, the BG then
 //    bottom-aligned with the level (the BG's height) or relative to the FG (SEC_HDR, SEC_ENT);
 //  - Mario facing left and a water level, set for the main entrance, a secondary entrance or a secondary
-//    screen exit (its w); a screen keeps its exit's flags 0000wush ($19D8, which community code such as
-//    GPS's teleport routine writes too), and only s makes the level's exits secondary.
+//    screen exit (its w), and a slanted pipe entrance shooting Mario out the way he faces; a screen keeps
+//    its exit's flags 0000wush ($19D8, which community code such as GPS's teleport routine writes too), and
+//    only s makes the level's exits secondary.
 // The tilemap of such a level is SMWV's (vrampatch.ts): a window of 16 block rows built from the level data.
 
 import type { Rom } from './rom.ts';
@@ -143,6 +144,9 @@ org $0DA536 : AND #$02                     ; LDA $0B (then LSR : STA $1B93; A = 
 ; Mario's direction and the water level, once the game's entrance action has set them up ($00A635, which
 ; clears $70-$93)
 org $009708 : JSL Options                  ; LDA #$20 : STA $5E
+; the slanted pipe entrance (Mario's action $71 = 7) shoots him out the way he faces (Lunar Magic's: to the
+; left with face left), the game's always to the right
+org $00D2B2 : JSL SlantedPipe              ; LDA #$40 : STA $7B
 
 ; loading sprites from the level's data: Lunar Magic's new format ($FF V: the sprites that follow are in
 ; subscreen V, $FF $FE: the end, $FF $FF: a sprite starting with $FF); a sprite's Y high byte gets the subscreen
@@ -339,6 +343,14 @@ Options:
 + PLX
   PLP
   LDA #$20 : STA $5E
+  RTL
+
+; Mario's X speed out of the slanted pipe, every frame of it: the game's $40, or $C0 facing left (A 8)
+SlantedPipe:
+  LDA $${hx(RAM.marioDir)} : BEQ +
+  LDA #$40 : BRA ++
++ LDA #$C0
+++ STA $${hx(RAM.marioSpeedX)}
   RTL
 
 ; Mario at tile X = Y, Y = A of the entrance's screen ($95, or $97 in a vertical level) (A/X/Y 16; X kept)

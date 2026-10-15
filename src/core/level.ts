@@ -704,13 +704,14 @@ export function placeSecondary(e: SecondaryEntrance, p: EntranceSpot): void {
   if (p.tile) cameraAtMario(e);
 }
 // the secondary header test play starts with from Mario's top-left pixel (px, py): the main entrance at the
-// entrance setting nearest to it (rows: as nearestEntrance), without an entrance action; `entrance`: the
-// camera start and options of the entrance played from (a secondary entrance's own), else the main entrance's
-export function startHeader(rom: Rom, s: SecondaryHeader, px: number, py: number, maxScreen: number, rows = 0, entrance?: CameraStart & EntranceOptions): SecondaryHeader {
+// entrance setting nearest to it (rows: as nearestEntrance); `entrance`: the camera start, options and action
+// of the entrance played from (a secondary entrance's own), else the main entrance's without an action
+export type StartEntrance = CameraStart & EntranceOptions & Pick<SecondaryEntrance, 'action'>;
+export function startHeader(rom: Rom, s: SecondaryHeader, px: number, py: number, maxScreen: number, rows = 0, entrance?: StartEntrance): SecondaryHeader {
   const sec = { ...s };
   if (entrance) { copyCameraStart(sec, entrance); copyEntranceOptions(sec, entrance); }
   placeMain(sec, nearestEntrance(rom, px, py, (sec.verticalPositioning & 1) !== 0, maxScreen, rows));
-  sec.entranceAction = 0;
+  sec.entranceAction = entrance?.action ?? 0;
   return sec;
 }
 

@@ -70,8 +70,9 @@ When a level is displayed, it runs the ROM's **original loading routines** (~15 
   *Graphics* → slot cards ("Swap …") or "Use in slot" next to a file on the right.
 * Screen exits per screen (destination, secondary), **secondary entrances** (dialog).
 * **Entrance options** (Lunar Magic's): Mario faces left, water level (Mario swims) for the main entrance
-  (also the midway point) and each secondary entrance; "Water level" for a secondary screen exit. Test play
-  from an entrance starts with them.
+  (also the midway point) and each secondary entrance; "Water level" for a secondary screen exit. With face
+  left the slanted pipe entrance shoots Mario out to the left. Test play from an entrance starts with them and
+  with its entrance action.
 * **Menu *Level*:** save as, **insert/delete screen** (shifts everything after it), clear level;
   **menu *File*:** **export/import as a `.smwlevel` file** (objects, sprites, exits, header, graphics bypass, custom palette).
 * **Entrance markers** for the main entrance (M), midway screen (Z) and secondary entrances (S) – movable by
