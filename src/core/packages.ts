@@ -190,7 +190,7 @@ function placeSample(rom: Rom, preview: ReadyPreview, ctx: InstallContext, into:
   if (mwl?.bg && !sample.level.layer2Objects) {
     try {
       const bp = planBgPack(rom, preview.name, preview.files, opt.blank);
-      const r = allOrNothing(rom, () => applyBgPack(rom, sample.level, preview.files, bp, { bg: true, fg: false, palettes: bp.palettes.map(() => false), cgram: opt.cgram ?? null, blank: opt.blank }));
+      const r = allOrNothing(rom, () => applyBgPack(rom, sample.level, preview.files, bp, { bg: true, fg: false, layer3: false, palettes: bp.palettes.map(() => false), cgram: opt.cgram ?? null, blank: opt.blank }));
       if (r.ok) sample.level.bg = r.bg; else sample.notes.push(`Background not taken over: ${r.errors.join(' ')}`);
     } catch (e) { sample.notes.push(`Background not taken over: ${e instanceof Error ? e.message : e}`); }
   }

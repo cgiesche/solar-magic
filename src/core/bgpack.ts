@@ -11,8 +11,10 @@
 //  - 2: layer 2; a BG tilemap is 0x800 bytes = 0x400 tile words, two halves of 16 columns x 32 rows
 //    (of which the game uses 27);
 //  - 4: palette, 256 colors (BGR555) followed by the back area color;
-//  - 7 (no header): ExGFX numbers of the 16 GFX slots, in Lunar Magic's order (LM_SLOTS); LT3 is a
-//    layer 3 tilemap file, LG1-LG4 the layer 3 graphics (vanilla 28-2B).
+//  - 7 (no header): ExGFX numbers of the 16 GFX slots, in Lunar Magic's order (LM_SLOTS), 12 bits each;
+//    LT3 is a layer 3 tilemap file, LG1-LG4 the layer 3 graphics (vanilla 28-2B). The words' high nibbles
+//    are bypass settings: AN2's G3T- (the GFX, layer 3 GFX and layer 3 tilemap bypass on), LT3's DDFF
+//    (destination and size of the tilemap, layer3gfx.ts); the others' are layer 3 settings not read here.
 // .palmask: 256 bytes, nonzero = the color is the package's, byte 256 = the back area color is.
 
 import { Rom } from './rom.ts';
@@ -22,6 +24,7 @@ import { parseMap16File, exgfxName, type Map16File } from './map16file.ts';
 import { BG_EXT_FIRST, BG_EXT_TILES, bgTileWords } from './bgmap16.ts';
 import { EXT_FIRST, EXT_TILES } from './map16ext.ts';
 import { gfxEntry } from './patches.ts';
+import { LG_SLOT_NAMES, LT3_SLOT, GAME_LAYER3_GFX, fromLt3Nibble } from './layer3gfx.ts';
 import { mwlExAnim } from './mwl.ts';
 import { slotTiles, type ExSlot } from './exanim.ts';
 import { isSongText } from './music.ts';
@@ -31,13 +34,13 @@ import {
 } from './levelgfx.ts';
 
 export const LM_SLOTS = ['AN2', 'LT3', 'BG3', 'BG2', 'FG3', 'BG1', 'FG2', 'FG1', 'SP4', 'SP3', 'SP2', 'SP1', 'LG4', 'LG3', 'LG2', 'LG1'];
-const LAYER3_SLOTS = ['LT3', 'LG1', 'LG2', 'LG3', 'LG4'];
 
 export interface MwlLevel {
   bg: Uint16Array | null; // BG tiles in the editor's layout (bg.ts); null: layer 2 is not a BG tilemap
   palette: Uint16Array; // 256 colors
   back: number; // back area color
   gfx: Map<string, number>; // slot name → ExGFX number (Lunar Magic numbering, up to FFF)
+  layer3: { gfx: boolean; map: boolean; dest: number; size: number }; // the layer 3 bypass: LG on, LT3 on, LT3's place
 }
 
 const u32 = (d: Uint8Array, o: number) => (o + 4 <= d.length ? (d[o] | (d[o + 1] << 8) | (d[o + 2] << 16) | (d[o + 3] << 24)) >>> 0 : 0);
@@ -67,15 +70,17 @@ export function parseMwl(d: Uint8Array): MwlLevel {
   }
   const gfx = new Map<string, number>();
   const list = section(7, 0);
+  const high = (s: string) => (list && list.length >= 32 ? list[LM_SLOTS.indexOf(s) * 2 + 1] >> 4 : 0);
   if (list && list.length >= 32) LM_SLOTS.forEach((s, i) => gfx.set(s, (list[i * 2] | (list[i * 2 + 1] << 8)) & 0xfff));
-  return { bg, palette, back, gfx };
+  const an2 = high('AN2');
+  return { bg, palette, back, gfx, layer3: { gfx: !!(an2 & 4), map: !!(an2 & 2), ...fromLt3Nibble(high(LT3_SLOT)) } };
 }
 
-export type PackPart = 'fg' | 'bg';
+export type PackPart = 'fg' | 'bg' | 'layer3';
 
 export interface BgPackGfx {
   file: string | null; // file in the package, null = a GFX file the ROM already has (vanilla number)
-  slot: string; // FG1..BG3
+  slot: string; // FG1..BG3, LG1-LG4, LT3
   lmNum: number; // number in the package
   num: number; // ExGFX number it is stored as (00-FE)
   parts: PackPart[]; // the parts whose tiles use the slot
@@ -92,7 +97,7 @@ export interface BgPackPlan {
   palettes: PackPalette[];
   at: number; // suggested first BG tile for the BG Map16 tiles
   fgAt: number; // suggested first tile for the FG Map16 tiles
-  layer3: string[]; // the package's layer 3 files (not taken over)
+  layer3: { dest: number; size: number } | null; // layer 3 graphics or tilemap to take over, where LT3 goes
   exanim: { slot: ExSlot; parts: PackPart[] }[]; // ExAnimation slots writing tiles of the taken-over parts
   frames: FrameSources; // where they take their frames from
   notes: string[];
@@ -174,15 +179,27 @@ export function planBgPack(rom: Rom, name: string, files: Map<string, Uint8Array
   for (const ws of fg?.data.tiles ?? []) for (const w of ws) drawn.fg.add(w & 0x3ff);
   const list = mwlExAnim(files.get(mwl)!);
   for (const e of list?.slots.values() ?? []) {
-    const parts = (['bg', 'fg'] as PackPart[]).filter((p) => slotTiles(e).some((t) => drawn[p].has(t)));
+    const parts = (['bg', 'fg'] as const).filter((p) => slotTiles(e).some((t) => drawn[p].has(t)));
     if (parts.length) exanim.push({ slot: e, parts });
   }
   const an2File = bins.get(level.gfx.get('AN2') ?? -1), altFile = list ? bins.get(0x60 + list.altFile) : undefined;
   const frames = exanim.length ? frameSources(files, list, an2File, altFile, notes) : { an2: null, alt: null };
   const sources = [an2File, altFile].filter((f) => f && exanim.length);
-  // layer 3 (a tilemap file and its graphics, Lunar Magic's layer 3 bypass): not taken over
-  const layer3 = [...new Set(LAYER3_SLOTS.map((s) => bins.get(level.gfx.get(s) ?? -1)).filter((f): f is string => !!f))];
-  const unused = [...bins].filter(([n, f]) => !byNum.has(n) && !layer3.includes(f) && !sources.includes(f)).map(([, f]) => base(f));
+  // layer 3 (Lunar Magic's layer 3 bypass): the graphics files that are not the game's (LG1-LG4) and the
+  // tilemap file (LT3), with the package's file or the ROM's
+  const l3 = level.layer3;
+  const l3Slots = [...(l3.gfx ? LG_SLOT_NAMES.map((s, k) => [s, GAME_LAYER3_GFX + k] as const) : []), ...(l3.map ? [[LT3_SLOT, -1] as const] : [])];
+  for (const [slot, game] of l3Slots) {
+    const lmNum = level.gfx.get(slot);
+    if (lmNum === undefined || lmNum === game || lmNum === 0x7f) continue;
+    const file = bins.get(lmNum) ?? null;
+    if (!file) { if (lmNum <= 0xff && gfxEntry(rom, lmNum)) gfx.push({ file: null, slot, lmNum, num: lmNum, parts: ['layer3'] }); continue; }
+    let num = byNum.get(lmNum);
+    if (num === undefined) { num = gfxNumber(rom, lmNum, taken); byNum.set(lmNum, num); }
+    gfx.push({ file, slot, lmNum, num, parts: ['layer3'] });
+  }
+  const layer3 = gfx.some((g) => g.parts.includes('layer3')) ? { dest: l3.dest, size: l3.size } : null;
+  const unused = [...bins].filter(([n, f]) => !byNum.has(n) && !sources.includes(f)).map(([, f]) => base(f));
   if (unused.length) notes.push(`Not used (no graphics slot of the taken-over tiles): ${unused.join(', ')}`);
   const palettes = packPalettes(files, keys.filter((f) => /\.pal$/i.test(f)), keys.filter((f) => /\.palmask$/i.test(f)), notes);
   const at = map16 ? bgPlace(rom, map16.data, map16.from, BG_EXT_FIRST) : BG_EXT_FIRST;
@@ -194,10 +211,11 @@ export function planBgPack(rom: Rom, name: string, files: Map<string, Uint8Array
 
 export interface BgPackOptions {
   bg?: boolean; // take over the background (default: if the package has one)
+  layer3?: boolean; // take over the layer 3 graphics and tilemap (default: if the package has them)
   fg?: boolean; // take over the FG Map16 tiles (default: if the package has them)
   at?: number; // first BG tile for the BG .map16 tiles (default: the plan's)
   fgAt?: number; // first tile for the FG .map16 tiles (default: the plan's)
-  palettes?: boolean[]; // per plan palette: take over its colors (default: all but layer 3 ones)
+  palettes?: boolean[]; // per plan palette: take over its colors (default: all but layer 3 ones without layer 3)
   cgram: Uint8Array | null; // the level's current colors (levelColors), base for a new own palette (null: not known)
   wram?: Uint8Array; // the level's WRAM after its load: RAM frames of animations come along from it
   blank: number[]; // tile words of an empty FG Map16 tile
@@ -218,8 +236,8 @@ export function applyBgPack(rom: Rom, lv: Level, files: Map<string, Uint8Array>,
   const notes: string[] = [];
   const lvl = lv.number;
   try {
-    const withBg = !!plan.level.bg && opt.bg !== false, withFg = !!plan.fg && opt.fg !== false;
-    if (!withBg && !withFg) throw new Error('Nothing to take over');
+    const withBg = !!plan.level.bg && opt.bg !== false, withFg = !!plan.fg && opt.fg !== false, with3 = !!plan.layer3 && opt.layer3 !== false;
+    if (!withBg && !withFg && !with3) throw new Error('Nothing to take over');
     if (withBg && (lv.layer2Objects || hasLayer2Objects(lv.header.mode))) throw new Error(`Level ${hx(lvl, 3)} has layer 2 objects instead of a BG background`);
     // 1. BG Map16 tiles, the tilemap moved along
     let bg: Uint16Array | null = null;
@@ -245,12 +263,13 @@ export function applyBgPack(rom: Rom, lv: Level, files: Map<string, Uint8Array>,
     }
     // 3. graphics, then the level: its slots, animations and colors (each chosen package palette where
     // its mask says so)
-    const taken = (parts: PackPart[]) => parts.some((p) => (p === 'bg' ? withBg : withFg));
+    const taken = (parts: PackPart[]) => parts.some((p) => (p === 'bg' ? withBg : p === 'fg' ? withFg : with3));
     const gfx = plan.gfx.filter((g) => taken(g.parts));
     notes.push(...storeGfx(rom, files, gfx));
     const placed = placeInLevel(rom, lvl, {
       slots: gfx,
-      palettes: plan.palettes.filter((p, i) => opt.palettes?.[i] ?? !p.layer3),
+      lt3: plan.layer3,
+      palettes: plan.palettes.filter((p, i) => opt.palettes?.[i] ?? (!p.layer3 || with3)),
       back: plan.level.back,
       exanim: plan.exanim.filter((x) => taken(x.parts)).map((x) => x.slot),
       frames: plan.frames,

@@ -20,6 +20,7 @@ import { renderLevel, map16Source } from '../src/core/render.ts';
 import { extTileWords, actsLike } from '../src/core/map16ext.ts';
 import { listPackages } from '../src/core/pkgreg.ts';
 import { installVramPatch } from '../src/core/vrampatch.ts';
+import { levelLayer3 } from '../src/core/layer3gfx.ts';
 import { editorImage } from './fixture.ts';
 
 const EDITOR_IMAGE = await editorImage(); // the fixture as the editor opens it
@@ -143,7 +144,11 @@ const map16 = parseMap16File(files.get('ghostbustersghosttrapjavamanhattanBG.map
   check(!plan.gfx.some((g) => g.slot.startsWith('FG') && g.parts.join() === 'bg'), 'the background does not change FG slots');
   const pFg = plan.palettes.find((p) => p.file.endsWith('FG.pal'))!, pL3 = plan.palettes.find((p) => p.file.endsWith('L3.pal'))!;
   check(plan.palettes.length === 2 && pFg.colors.join() === Array.from({ length: 15 }, (_, i) => 33 + i).join() && !pFg.layer3 && pL3.colors.join() === '1,2,3,5,6' && pL3.layer3, 'palettes: FG colors 21-2F, layer 3 colors 1-6 (each .pal with its .palmask)');
-  check(plan.layer3.some((f) => f.endsWith('ExGFX3AB.bin')) && plan.layer3.some((f) => f.endsWith('ExGFX3AA.bin')), 'layer 3 files noted (LT3 tilemap 3AB, LG3 graphics 3AA)');
+  // layer 3 (Lunar Magic's layer 3 bypass): the tilemap 3AB at the start of layer 3, 0x2000 bytes (the LT3
+  // word's DDFF 01 00), the graphics 3AA in LG4; LG1-LG3 are the game's 28-2A
+  check(plan.layer3?.dest === 1 && plan.layer3.size === 0 && !!slots.LT3?.file?.endsWith('3AB.bin') && !!slots.LG4?.file?.endsWith('3AA.bin') && slots.LG4.parts.join() === 'layer3' && !slots.LG1 && !slots.LG2 && !slots.LG3,
+    'layer 3: LT3 tilemap 3AB (start of layer 3, 0x2000 bytes), LG4 graphics 3AA, LG1-LG3 the game\'s');
+  check(!plan.notes.some((n) => /3A[AB]/.test(n)), 'the layer 3 files are not "not used"');
   const lv = loadLevel(rom, LV);
   const r = importLevelFile(rom, lv, ssz, plan, { blank: BLANK, cgram: levelColors(before) });
   check(r.ok && !!r.bg, 'applied: ' + [...r.errors, ...r.notes].join(' | '));
@@ -158,7 +163,14 @@ const map16 = parseMap16File(files.get('ghostbustersghosttrapjavamanhattanBG.map
   const pal = ssz.get('sonicmaniasszact1FG.pal')!;
   const exp = (i: number) => (pal[i * 3] >> 3) | ((pal[i * 3 + 1] >> 3) << 5) | ((pal[i * 3 + 2] >> 3) << 10);
   check(after.ok && pFg.colors.every((i) => color(after.cgram, i) === exp(i)), 'FG colors in the game');
-  check([1, 2, 3, 5, 6].every((i) => color(after.cgram, i) === color(before.cgram, i)), 'layer 3 colors not taken over by default (layer 3 is not)');
+  const pal3 = ssz.get('sonicmaniasszact1BG-L3.pal')!;
+  const exp3 = (i: number) => (pal3[i * 3] >> 3) | ((pal3[i * 3 + 1] >> 3) << 5) | ((pal3[i * 3 + 2] >> 3) << 10);
+  check([1, 2, 3, 5, 6].every((i) => color(after.cgram, i) === exp3(i)), 'layer 3 colors taken over with layer 3');
+  const l3 = levelLayer3(rom, LV);
+  check(l3.lt3 === slots.LT3.num && l3.dest === 1 && l3.size === 0 && l3.lg.join() === [0xff, 0xff, 0xff, slots.LG4.num].join(), 'the level\'s layer 3 slots set');
+  const lg4 = ssz.get('ExGFX3AA.bin')!, lt3 = ssz.get('ExGFX3AB.bin')!;
+  check(lg4.every((b, i) => after.vram[0x9800 + i] === b), 'in the game: LG4 in VRAM $4C00');
+  check(lt3.subarray(0x140).every((b, i) => after.vram[0xa140 + i] === b), 'in the game: the layer 3 tilemap from VRAM $5000 (below the status bar)');
   check(listPackages(rom).length === 0, 'a level import creates no package record');
 }
 

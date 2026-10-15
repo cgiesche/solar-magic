@@ -18,6 +18,7 @@ import {
   EXT_GFX_SLOT_NAMES, customPalette, setCustomPalette,
 } from './patches.ts';
 import { sampleTiles } from './mwl.ts';
+import { LAYER3_SLOT_NAMES, LG_SLOT_NAMES, LT3_SLOT, LT3_DESTS, LT3_SIZES, levelLayer3, setLevelLayer3 } from './layer3gfx.ts';
 import { usesAltFile, addLevelSlots, localizeFrames, levelAltFile, altFileName, kindOf, AN2_FRAMES, AN2_FRAMES_END, ALT_FILE_MAX, type ExList, type ExSlot } from './exanim.ts';
 
 const base = (f: string) => f.slice(f.lastIndexOf('/') + 1);
@@ -30,8 +31,9 @@ const hx = (v: number, d: number) => v.toString(16).toUpperCase().padStart(d, '0
 // (BG2/BG3 with the VRAM patch, patches.ts)
 export const VRAM_SLOTS = ['FG1', 'FG2', 'BG1', 'FG3', 'BG2', 'BG3'];
 export const slotOfWord = (w: number) => VRAM_SLOTS[(w & 0x3ff) >> 7] ?? null;
-// the slots ExGFX can go in: the level's GFX bypass and the BG2/BG3 slots of the VRAM patch
-export const GFX_SLOTS = [...GFX_SLOT_NAMES, ...EXT_GFX_SLOT_NAMES];
+// the slots ExGFX can go in: the level's GFX bypass, the BG2/BG3 slots of the VRAM patch and layer 3's
+// (layer3gfx.ts)
+export const GFX_SLOTS = [...GFX_SLOT_NAMES, ...EXT_GFX_SLOT_NAMES, ...LAYER3_SLOT_NAMES];
 
 // first ExGFX number that is free and not taken by `taken` (80-FE first, as Lunar Magic suggests; FF is
 // a level slot's "none"), -1: none left
@@ -201,6 +203,7 @@ export function storeGfx(rom: Rom, files: Map<string, Uint8Array>, gfx: { file: 
 // what goes into a level
 export interface LevelGraphics {
   slots: { slot: string | null; num: number }[]; // ExGFX for graphics slots (null, or a slot not in GFX_SLOTS: none)
+  lt3?: { dest: number; size: number } | null; // where an LT3 file goes in the layer 3 tilemap (default: the level's)
   palettes: PackPalette[]; // colors to take over
   back: number | null; // the back area color of the level file, for palettes whose mask has it
   exanim: ExSlot[]; // ExAnimation slots to add to the level's list
@@ -225,16 +228,23 @@ export function levelFrames(rom: Rom, level: number, slots: ExSlot[], frames: Fr
 export function placeInLevel(rom: Rom, level: number, g: LevelGraphics, state: LevelState): Placed {
   const warnings: string[] = [], prints: string[] = [];
   const lv = `Level ${hx(level, 3)}`;
-  const std = levelGfx(rom, level), ext = levelExtGfx(rom, level);
-  let stdSet = false, extSet = false;
+  const std = levelGfx(rom, level), ext = levelExtGfx(rom, level), l3 = levelLayer3(rom, level);
+  let stdSet = false, extSet = false, l3Set = false;
   const slots: string[] = [];
   for (const { slot, num } of g.slots) {
-    const e = slot ? EXT_GFX_SLOT_NAMES.indexOf(slot) : -1, s = slot ? GFX_SLOT_NAMES.indexOf(slot) : -1;
-    if (e >= 0) { ext[e] = num; extSet = true; } else if (s >= 0) { std[s] = num; stdSet = true; } else continue;
+    const e = slot ? EXT_GFX_SLOT_NAMES.indexOf(slot) : -1, s = slot ? GFX_SLOT_NAMES.indexOf(slot) : -1, k = slot ? LG_SLOT_NAMES.indexOf(slot) : -1;
+    if (e >= 0) { ext[e] = num; extSet = true; } else if (s >= 0) { std[s] = num; stdSet = true; } else if (k >= 0) { l3.lg[k] = num; l3Set = true; }
+    else if (slot === LT3_SLOT) {
+      l3.lt3 = num; l3Set = true;
+      if (g.lt3) { l3.dest = g.lt3.dest; l3.size = g.lt3.size; }
+      slots.push(`${slot} = ${hx(num, 2)} (${LT3_DESTS[l3.dest].toLowerCase()}, ${hx(LT3_SIZES[l3.size], 4)} bytes)`);
+      continue;
+    } else continue;
     slots.push(`${slot} = ${hx(num, 2)}`);
   }
   if (stdSet) setLevelGfx(rom, level, std);
   if (extSet) setLevelExtGfx(rom, level, ext);
+  if (l3Set) setLevelLayer3(rom, level, l3);
   if (slots.length) prints.push(`${lv}: ${slots.join(', ')}`);
   if (g.exanim.length) {
     const f = levelFrames(rom, level, g.exanim, g.frames, state.wram);
