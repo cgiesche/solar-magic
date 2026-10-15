@@ -6,7 +6,7 @@ import { h, select, toast, choose, checkbox } from './dom.ts';
 import { hex2, hex3, ENTRANCE_ACTIONS } from '../core/names.ts';
 import {
   newUid, readSecondaryEntrance, readSecondaryHeader, mainTranslevel, mainSpot, secondarySpot, setSecondarySpot, copyCameraStart, hasRelativeCamera,
-  copyEntranceOptions, setExitSecondary, EXIT_WATER, EXIT_MIDWAY, exitToMidway, midwaySpot, midwayEntrance, setMidwayEntrance, midwayStart, nearestMidway, placeMidway, entrancePos,
+  copyEntranceOptions, setExitSecondary, EXIT_WATER, EXIT_MIDWAY, exitToMidway, exitLandsAtMidway, midwaySpot, midwayEntrance, setMidwayEntrance, midwayStart, nearestMidway, placeMidway, entrancePos,
   type MidwayEntrance,
 } from '../core/level.ts';
 import { spotText, cameraOptions, cameraValue, setCamera, cameraFields, optionFields } from './entrancefields.ts';
@@ -94,7 +94,7 @@ function exitPanel(app: App, body: HTMLElement): boolean {
       : `Secondary entrance ${hex3(t.entrance)} is empty – “+ New” creates one.`;
   })() : (() => {
     const s = t.to === n ? lv.secondary : readSecondaryHeader(app.rom, t.to);
-    if (exitToMidway(e) && s.midwayOwn) return `Midway entrance: screen ${hex2(s.midwayScreen)}, ${ENTRANCE_ACTIONS[s.midwayAction]}`;
+    if (exitLandsAtMidway(e, s)) return `Midway entrance: screen ${hex2(s.midwayScreen)}, ${ENTRANCE_ACTIONS[s.midwayAction]}`;
     const main = `Main entrance: screen ${hex2(s.entranceScreen)}, ${ENTRANCE_ACTIONS[s.entranceAction]}`;
     return exitToMidway(e) ? `${main} – the target's midway point has no own position and settings (give it them in its midway point's properties).` : main;
   })();

@@ -62,6 +62,9 @@ export interface ScreenExit {
 // (levelheight.ts)
 export const EXIT_WATER = 0x08, EXIT_MIDWAY = EXIT_WATER;
 export const exitToMidway = (e: Pick<ScreenExit, 'secondary' | 'flags'>): boolean => !e.secondary && (e.flags & EXIT_MIDWAY) !== 0;
+// whether Mario comes out at the midway entrance of the target (its secondary header) through such an exit
+export const exitLandsAtMidway = (e: Pick<ScreenExit, 'secondary' | 'flags'>, target: Pick<SecondaryHeader, 'midwayOwn'>): boolean =>
+  exitToMidway(e) && !!target.midwayOwn;
 // makes a screen exit secondary or standard; w means something else for the other kind, so a change drops it
 export function setExitSecondary(e: ScreenExit, secondary: boolean): void {
   if (e.secondary !== secondary) e.flags &= ~EXIT_WATER;

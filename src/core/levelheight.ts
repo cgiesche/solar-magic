@@ -291,7 +291,7 @@ TileRow:
 ; the flags of the screen exit Mario left by (A 8, X/Y 8, X = its screen), then the game's LDA $0DD6 : LSR #2 : TAY
 ExitTaken:
   LDA.l $7E${hx(RAM.screenExitHi)},x : STA.l !ExitFlags
-  LDA $0DD6 : LSR #2 : TAY
+  LDA $${hx(RAM.currentPlayer)} : LSR #2 : TAY
   RTL
 
 ; the secondary entrance (A 8, X/Y 16, data bank $05): kept, then the game's LDY $0E : LDA $F800,y. A's
@@ -417,8 +417,8 @@ MidwayOwn:
 ; bit 7 for Entrance and Options, Mario's screen in $01 (the midway screen with bit 4: $02 = $05F400)
 ExitMidway:
   LDA.l !ExitFlags : AND #$7F : STA.l !ExitFlags
-  LDA $141A : BEQ .done                    ; from the overworld
-  LDA $${hx(RAM.useSecondaryExit)} : BNE .exit
+  LDA $${hx(RAM.sublevelCount)} : BEQ .done                    ; from the overworld
+  LDA $${hx(RAM.useSecondaryExit)} : BNE .exit       ; (a secondary exit comes here too, $05D94C)
   LDA.l !ExitFlags : AND #$0A : CMP #$08 : BNE .exit
   PHX : PHY
   REP #$20 : LDA.l !Level : TAX : SEP #$20
