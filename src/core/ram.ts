@@ -60,6 +60,8 @@ export const RAM = {
   sublevelCount: 0x141a,
   levelFlags: 0x1ea2, // per translevel: bit 6 the midway point was touched
   midwayUsed: 0x13cf, // the level was loaded at its midway point
+  midwayScreen: 0x13cd, // the level's midway screen: its tape sets the checkpoint unless it is 0
+  entranceAction: 0x192a, // what Mario does when he enters (pipe, door, …)
   levelMusic: 0x0dda, // song of the level; the game doesn't restart it when the next level has the same
   screenExitLo: 0x19b8, screenExitHi: 0x19d8, // per screen
   useSecondaryExit: 0x1b93,

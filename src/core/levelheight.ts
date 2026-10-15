@@ -144,8 +144,10 @@ org $00C3D3 : JSL TileRow : NOP
 ; with the level (or relative to the FG)
 org $05D7E0 : JSL SecEntrance : NOP        ; LDY $0E : LDA $F800,y (Y = the secondary entrance)
 org $05DA17 : JSL Entrance : NOP           ; SEP #$30 : LDA $13BF (both entrances set up)
-; the midway point (Lunar Magic's): its screen with bit 4; with its own settings Mario goes to its screen as
-; to the main entrance's ($05D9EC, vertical levels too), Entrance puts him at its tile
+; the midway point (Lunar Magic's): its screen with bit 4 – also for its tape, which sets the checkpoint
+; unless the screen is 0 ($00F2D8); with its own settings Mario goes to its screen as to the main entrance's
+; ($05D9EC, vertical levels too), Entrance puts him at its tile
+org $05D9BD : JSL MidwayScreen : NOP #5    ; LDA $02 : LSR #4 : STA $13CD (X/Y 16)
 org $05D9DE                                ; STA $13CF : LDA $02 : LSR #4 : STA $95 : JMP $DA17
   JSL Midway
   BCS +
@@ -315,7 +317,7 @@ Entrance:
   BRA .done
 .main
   LDA.l !Level : TAX
-  LDA $13CF : AND #$00FF : BEQ +
+  LDA $${hx(RAM.midwayUsed)} : AND #$00FF : BEQ +
   LDA.l !Mid1,x : AND #$0020 : BEQ +
   JMP .midway
 +
@@ -336,8 +338,11 @@ Entrance:
   SEP #$30 : LDA $13BF
   RTL
 .midway
-  ; the midway entrance with its own settings: X bit 4 in !Mid1, xxxx and yyyy in !Mid2, Y bits 9-4 in !Mid4
-  LDA.l !Mid1,x : AND #$0008 : ASL : STA.l !Tmp
+  ; the midway entrance with its own settings: X bit 4 in !Mid1 (vertical levels only: a horizontal level's
+  ; screen takes its place, as in Lunar Magic), xxxx and yyyy in !Mid2, Y bits 9-4 in !Mid4
+  LDA $5B : AND #$0001 : BEQ +
+  LDA.l !Mid1,x : AND #$0008 : ASL
++ STA.l !Tmp
   LDA.l !Mid2,x : AND #$000F : ORA.l !Tmp : TAY
   LDA.l !Mid4,x : AND #$003F : ASL #4 : STA.l !Tmp
   LDA.l !Mid2,x : AND #$00F0 : LSR #4 : ORA.l !Tmp
@@ -349,18 +354,29 @@ Entrance:
   JSR Relative
   BRA .done
 
-; the midway point (A = $40, the translevel's midway flag; A 8, X/Y 8, data bank $05; $02 = $05F400's byte):
-; the game's STA $13CF. A = its screen, carry set when it has its own settings (Lunar Magic's): then the
-; entrance action ($192A) and the FG/BG start Y from them
+; the midway screen: $05F400 bits 7-4 ($02) and bit 4 in !Mid1 (A 8, X/Y 16; registers kept)
+MidwayScreen:
+  PHP
+  REP #$30 : PHA : PHX
+  LDA.l !Level : TAX
+  SEP #$20
+  LDA $02 : LSR #4 : STA $${hx(RAM.midwayScreen)}
+  LDA.l !Mid1,x : AND #$10 : TSB $${hx(RAM.midwayScreen)}
+  REP #$20
+  PLX : PLA
+  PLP
+  RTL
+
+; the midway point (A = $40, the translevel's midway flag; A 8, X/Y 8, data bank $05): the game's STA $13CF.
+; A = its screen (MidwayScreen's), carry set when it has its own settings (Lunar Magic's): then the entrance
+; action and the FG/BG start Y from them
 Midway:
-  STA $13CF
+  STA $${hx(RAM.midwayUsed)}
   REP #$30
   LDA.l !Level : TAX
   SEP #$20
-  LDA $02 : LSR #4 : STA.l !Tmp
-  LDA.l !Mid1,x : AND #$10 : ORA.l !Tmp : STA.l !Tmp
   LDA.l !Mid1,x : AND #$20 : BEQ .game
-  LDA.l !Mid1,x : AND #$07 : STA $192A
+  LDA.l !Mid1,x : AND #$07 : STA $${hx(RAM.entranceAction)}
   REP #$20
   LDA.l !Mid3,x : AND #$0003 : TAY
   LDA.l !Mid3,x : AND #$000C : LSR #2 : TAX
@@ -368,12 +384,12 @@ Midway:
   LDA.w $D70C,y : STA $20                  ; the game's tables, as for the main entrance
   LDA.w $D708,x : STA $1C
   SEP #$10
-  LDA.l !Tmp
+  LDA $${hx(RAM.midwayScreen)}
   SEC
   RTL
 .game
   SEP #$10
-  LDA.l !Tmp
+  LDA $${hx(RAM.midwayScreen)}
   CLC
   RTL
 
@@ -396,7 +412,7 @@ Options:
 .main
   LDA.l !Level : TAX
   SEP #$20
-  LDA $13CF : BEQ .entrance
+  LDA $${hx(RAM.midwayUsed)} : BEQ .entrance
   LDA.l !Mid1,x : AND #$20 : BEQ .entrance
   LDA.l !Mid1,x : AND #$40 : BEQ +
   LDA #$01 : STA $${hx(RAM.waterLevel)}

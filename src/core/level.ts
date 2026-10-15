@@ -760,9 +760,11 @@ export function setMidwayEntrance(s: SecondaryHeader, m: MidwayEntrance): void {
   s.midwayCameraRelative = m.cameraRelative; s.midwayCamera = ((m.cameraOffsetHi & 1) << 4) | ((m.fgInitY & 3) << 2) | (m.bgInitY & 3);
   s.bgRelative = m.bgRelative; s.bgHeight = m.bgHeight;
 }
+// the main entrance's settings as the midway entrance's
+const mainEntrance = (s: SecondaryHeader): MidwayEntrance => ({ ...s, action: s.entranceAction });
 // what test play from the midway entrance starts with (the game's $192A there is the main entrance's action
 // unless it has its own)
-export const midwayStart = (s: SecondaryHeader): StartEntrance => (s.midwayOwn ? midwayEntrance(s) : { ...s, action: s.entranceAction });
+export const midwayStart = (s: SecondaryHeader): StartEntrance => (s.midwayOwn ? midwayEntrance(s) : mainEntrance(s));
 // the midway entrance's tile nearest to Mario's top-left pixel (px, py); a horizontal level's X stays in its screen
 export function nearestMidway(rom: Rom, s: SecondaryHeader, px: number, py: number, maxScreen: number): EntranceSpot {
   const vertical = (s.verticalPositioning & 1) !== 0;
@@ -776,7 +778,7 @@ export function nearestMidway(rom: Rom, s: SecondaryHeader, px: number, py: numb
 // entrance's (action, camera start, options) first. As placeMain: in a level with a size the camera starts
 // relative to Mario.
 export function placeMidway(s: SecondaryHeader, p: EntranceSpot): void {
-  if (!s.midwayOwn) setMidwayEntrance(s, { ...s, action: s.entranceAction });
+  if (!s.midwayOwn) setMidwayEntrance(s, mainEntrance(s));
   const t = spotTile(p);
   s.midwayOwn = 1; s.midwayScreen = p.screen; s.midwayX = t.x; s.midwayY = t.y;
   if (isSized(s)) { const m = midwayEntrance(s); cameraAtMario(m); setMidwayEntrance(s, m); }
