@@ -20,6 +20,8 @@ import type { Package } from '../core/pkgreg.ts';
 import { kvEntries, kvWrite, saveRom } from './storage.ts';
 import { ResultCache, RomFingerprint, RomReads, type CacheEntry } from '../core/romdeps.ts';
 import { bgFromWram, bgIndex, encodeBg } from '../core/bg.ts';
+import { lt3Override, lt3Target, lt3Covers, layer3Map, layer3Grid, layer3Index, blankLayer3Tile, L3_MAP_VRAM } from '../core/layer3map.ts';
+import type { Layer3Geometry } from '../core/render.ts';
 import { toast, log as logMsg, modalsOpen, onModalsChange } from './dom.ts';
 import { musicPlayer } from './musicplayer.ts';
 import { ExitGraph, exitTarget } from '../core/exitgraph.ts';
@@ -37,7 +39,7 @@ import { ProbeClient } from '../core/probeclient.ts';
 import { map16Tile, bgTile } from '../core/ram.ts';
 import { exanimTiles, exanimColors } from '../core/exanim.ts';
 
-export type EditMode = 'l1' | 'l2' | 'spr' | 'exit' | 'bg';
+export type EditMode = 'l1' | 'l2' | 'spr' | 'exit' | 'bg' | 'l3';
 export type PaletteItem =
   // block: a rectangle of Map16 tiles from the palette sheet (tile + row * 16 + col), one Direct-Map16 object each
   // struct: structure number (extended object $03, see structs.ts)
@@ -70,7 +72,7 @@ export type AppEvent =
   | 'anim-frame' // the next frame of the level animation is shown
   | 'palettes' // the palettes changed (sprite images are captured again)
   | 'structs' // the structure table changed
-  | 'bgtile' // the BG brush changed (picked from the level)
+  | 'bgtile' // the BG or layer 3 brush changed (picked from the level)
   | 'reveal' // the level view scrolls to App.reveal
   | 'zoom' // the level view's zoom changed
   | 'busy' // background work (setBusy), a modal or the music player changed
@@ -100,6 +102,7 @@ export class App {
   paletteItem: PaletteItem | null = null;
   // BG mode brush: a w×h block of BG Map16 tiles (row-major), picked from the palette sheet or the level
   bgBrush: { w: number; h: number; tiles: number[] } = { w: 1, h: 1, tiles: [0] };
+  l3Brush: { w: number; h: number; tiles: number[] } = { w: 1, h: 1, tiles: [0] }; // layer 3 tilemap words
   zoom = 2;
   show = { layer1: true, layer2: true, layer3: true, sprites: true, grid: false, screens: true, exits: true, ghost: true, anim: false, items: true, collision: false, arcs: false };
   // view-only game state applied before the emulated level load
@@ -298,6 +301,7 @@ export class App {
       layer2: l2 ?? undefined,
       layer2Pointer: l2 ? undefined : lv.layer2Pointer,
       bgData: !l2 && lv.bg ? encodeBg(lv.bg) : undefined,
+      layer3: lt3Override(this.rom, lv),
       sprites: serializeLevelSprites(this.rom, lv),
       byteOwner,
       switchPalaces: this.switches.palaces,
@@ -330,9 +334,9 @@ export class App {
     this.emit('render');
   }
 
-  // the object layer not being edited is ghosted (only in levels with two object layers)
+  // the object layer not being edited is ghosted (only in levels with two object layers), editing layer 3 both
   compose(images = this.images): Uint32Array {
-    const ghost = !this.show.ghost ? 0 : this.mode === 'bg' ? 1 : this.level.layer2Objects ? (this.mode === 'l1' ? 2 : this.mode === 'l2' ? 1 : 0) : 0;
+    const ghost = !this.show.ghost ? 0 : this.mode === 'l3' ? 3 : this.mode === 'bg' ? 1 : this.level.layer2Objects ? (this.mode === 'l1' ? 2 : this.mode === 'l2' ? 1 : 0) : 0;
     return composite(images, this.show.layer1, this.show.layer2, ghost, this.show.layer3);
   }
 
@@ -1249,7 +1253,10 @@ export class App {
       toast('This level has layer 2 objects instead of a BG tilemap.');
       return;
     }
-    const recompose = (this.level.layer2Objects || m === 'bg' || this.mode === 'bg') && this.show.ghost && m !== this.mode;
+    // editing layer 3 shows it
+    const ghosts = this.level.layer2Objects || m === 'bg' || this.mode === 'bg' || m === 'l3' || this.mode === 'l3';
+    const recompose = m !== this.mode && ((ghosts && this.show.ghost) || (m === 'l3' && !this.show.layer3));
+    if (m === 'l3') this.show.layer3 = true;
     this.mode = m;
     this.selection = new Set(selection);
     if (recompose) this.recomposite();
@@ -1284,6 +1291,44 @@ export class App {
     const w = Math.min(Math.abs(x1 - x0) + 1, 32), h = Math.min(Math.abs(y1 - y0) + 1, 27);
     const x = Math.min(x0, x1), y = Math.min(y0, y1);
     this.bgBrush = { w, h, tiles: Array.from({ length: w * h }, (_, i) => this.bgAt(x + (i % w), y + Math.floor(i / w))) };
+    this.emit('bgtile');
+  }
+
+  // ------------- layer 3 tilemap (layer3map.ts) -------------
+  // cells (cx, cy) as layer 3 is drawn over the level
+  l3Grid(): Layer3Geometry {
+    return layer3Grid(this.render);
+  }
+  // the tilemap word of a cell, -1: no entry there (the status bar's rows)
+  l3At(cx: number, cy: number): number {
+    const i = layer3Index(this.l3Grid(), cx, cy);
+    if (i < 0) return -1;
+    return this.level.layer3 ? this.level.layer3[i] : this.render.vram[(L3_MAP_VRAM + i) * 2] | (this.render.vram[(L3_MAP_VRAM + i) * 2 + 1] << 8);
+  }
+  // a cell can be edited: its entry is in the part of the tilemap the level's LT3 file (or a new one) holds
+  l3Editable(cx: number, cy: number): boolean {
+    const i = layer3Index(this.l3Grid(), cx, cy);
+    return i >= 0 && lt3Covers(lt3Target(this.rom, this.level.number).place, i);
+  }
+  // stamps the brush with its top-left tile at cell (cx, cy); caller handles the level edit and refresh
+  paintL3Brush(cx: number, cy: number): boolean {
+    const b = this.l3Brush, g = this.l3Grid(), place = lt3Target(this.rom, this.level.number).place;
+    let changed = false;
+    for (let k = 0; k < b.tiles.length; k++) {
+      const i = layer3Index(g, cx + (k % b.w), cy + Math.floor(k / b.w));
+      if (i < 0 || !lt3Covers(place, i)) continue;
+      const map = this.level.layer3 ??= layer3Map(this.render.vram);
+      if (map[i] === b.tiles[k]) continue;
+      map[i] = b.tiles[k];
+      changed = true;
+    }
+    return changed;
+  }
+  // the level's layer 3 tiles in a rectangle of cells become the brush (blank where there is no entry)
+  pickL3(x0: number, y0: number, x1: number, y1: number): void {
+    const w = Math.min(Math.abs(x1 - x0) + 1, 32), h = Math.min(Math.abs(y1 - y0) + 1, 32);
+    const x = Math.min(x0, x1), y = Math.min(y0, y1), blank = blankLayer3Tile(this.render);
+    this.l3Brush = { w, h, tiles: Array.from({ length: w * h }, (_, i) => { const t = this.l3At(x + (i % w), y + Math.floor(i / w)); return t < 0 ? blank : t; }) };
     this.emit('bgtile');
   }
 

@@ -124,7 +124,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   // ---- level context bar: mode, view, zoom
   const modeBtn = (m: EditMode, label: string, key: string) => h('button', { class: 'mode', 'data-mode': m, title: `${label} (${key})`, onclick: () => app.setMode(m) }, label);
   const modes = h('div', { class: 'btn-group' },
-    modeBtn('l1', 'Layer 1', '1'), modeBtn('l2', 'Layer 2', '2'), modeBtn('spr', 'Sprites', '3'), modeBtn('exit', 'Entrances/Exits', '4'), modeBtn('bg', 'BG', '5'));
+    modeBtn('l1', 'Layer 1', '1'), modeBtn('l2', 'Layer 2', '2'), modeBtn('spr', 'Sprites', '3'), modeBtn('exit', 'Entrances/Exits', '4'), modeBtn('bg', 'BG', '5'), modeBtn('l3', 'Layer 3', '6'));
   const levelTitle = h('span', { class: 'level-title' });
   const zoomCtl = zoomControl(() => app.zoom, (z) => view.setZoom(z));
   const levelBar = h('div', { class: 'ctxbar' },
@@ -397,6 +397,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     else if (k === '3') app.setMode('spr');
     else if (k === '4') app.setMode('exit');
     else if (k === '5') app.setMode('bg');
+    else if (k === '6') app.setMode('l3');
     else if (k === 'h' || k === 'H') openHeaderDialog(app);
     else if ((k === 't' || k === 'T') && e.shiftKey) testHere();
     else if (k === 't' || k === 'T') openTestPlay(app);

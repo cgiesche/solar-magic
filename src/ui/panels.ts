@@ -12,6 +12,8 @@ import { DM16_EXT } from '../core/patches.ts';
 import { STRUCT_EXT, TRANSPARENT, freeStructureNumber, readStructure, writeStructure, STRUCT_COUNT, type Structure } from '../core/structs.ts';
 import { EXT_TILES } from '../core/map16ext.ts';
 import { TileCache, map16Source, drawMap16 } from '../core/render.ts';
+import { lt3Target, lt3Users, blankLayer3Tile } from '../core/layer3map.ts';
+import { LT3_DESTS } from '../core/layer3gfx.ts';
 import { probeable } from '../core/probeclient.ts';
 import { probeText, spritesOf, spriteProbeAt, enterText, enterSuffix } from '../core/blockprobe.ts';
 import { tileMatches, drawTileMatches } from './tilesearch.ts';
@@ -149,9 +151,9 @@ export class Palette {
     app.on('level', () => { this.ensureThumbs(); this.build(); });
     let t = 0;
     app.on('sprites', () => { if (this.tab !== 'm16' && !t) t = window.setTimeout(() => { t = 0; this.build(); }, 300); });
-    app.on('bgtile', () => { if (app.mode === 'bg') this.build(); });
+    app.on('bgtile', () => { if (app.mode === 'bg' || app.mode === 'l3') this.build(); });
     app.on('probes', () => { if (this.tab === 'm16') this.m16Tip(); else this.build(); });
-    app.on('render', () => { if (app.mode === 'bg') this.build(); });
+    app.on('render', () => { if (app.mode === 'bg' || app.mode === 'l3') this.build(); });
     app.on('change', () => { this.followSelection(); if (this.tab === 'str') this.build(); });
     app.on('structs', () => { if (this.tab === 'str') this.build(); });
     app.on('mode', () => {
@@ -415,6 +417,74 @@ export class Palette {
     this.body.append(c);
   }
 
+  // layer 3: its 8x8 tiles (2bpp, as in VRAM) as brush, with palette, priority and flips (tilemap word bits
+  // 10-12, 13, 14-15); a brush picked from the level keeps each tile's own
+  buildL3(): void {
+    const app = this.app, r = app.render, b = app.l3Brush, w0 = b.tiles[0];
+    const attr = w0 & 0xfc00, pal = (w0 >> 10) & 7;
+    const tc = new TileCache(r.vram, r.cgram, (r.ppuRegs[0x0c] & 0x0f) << 13);
+    const setBrush = (nb: typeof b) => { app.l3Brush = nb; this.build(); };
+    const each = (f: (w: number) => number) => setBrush({ ...b, tiles: b.tiles.map(f) });
+    const draw = (px: Uint32Array, width: number, word: number, x: number, y: number) => {
+      const t = tc.get(word, 2);
+      for (let k = 0; k < 64; k++) px[(y + (k >> 3)) * width + x + (k & 7)] = t[k] || 0xff282828;
+    };
+    // a brush that is a rectangle of the sheet (one palette, priority, no flips) is outlined there
+    const onSheet = !(attr & 0xc000) && (w0 & 0x3ff) < 0x200 && (w0 & 15) + b.w <= 16
+      && b.tiles.every((t, i) => t === w0 + Math.floor(i / b.w) * 16 + (i % b.w));
+    const S = 2;
+    const c = h('canvas', { width: 128 * S, height: 256 * S, class: 'm16-pick', title: 'Click/drag: tile(s) as brush' });
+    const ctx = c.getContext('2d')!;
+    ctx.imageSmoothingEnabled = false;
+    const sheet = document.createElement('canvas');
+    sheet.width = 128; sheet.height = 256;
+    const sctx = sheet.getContext('2d')!, img = sctx.createImageData(128, 256), px = new Uint32Array(img.data.buffer);
+    for (let t = 0; t < 0x200; t++) draw(px, 128, t | (pal << 10), (t & 15) * 8, (t >> 4) * 8);
+    sctx.putImageData(img, 0, 0);
+    const show = (x: number, y: number, w: number, hh: number) => {
+      ctx.drawImage(sheet, 0, 0, c.width, c.height);
+      if (x < 0) return;
+      ctx.strokeStyle = '#4cc2ff'; ctx.lineWidth = 2;
+      ctx.strokeRect(x * 8 * S, y * 8 * S, w * 8 * S, hh * 8 * S);
+    };
+    if (onSheet) show(w0 & 15, (w0 & 0x3ff) >> 4, b.w, b.h); else show(-1, 0, 0, 0);
+    attachRectPick(c, 16, 32, (q) => show(q.x, q.y, q.w, q.h), (q) =>
+      setBrush({ w: q.w, h: q.h, tiles: Array.from({ length: q.w * q.h }, (_, i) => ((q.y + Math.floor(i / q.w)) * 16 + q.x + (i % q.w)) | (attr & 0x3c00)) }));
+    const palSel = h('select', { title: 'Palette (colors 4 × n – 4 × n + 3)' }, Array.from({ length: 8 }, (_, i) => h('option', { value: String(i), selected: i === pal }, `Palette ${i}`)));
+    palSel.addEventListener('change', () => { const p = Number(palSel.value); each((w) => (w & ~0x1c00) | (p << 10)); });
+    const prio = h('input', { type: 'checkbox', checked: !!(w0 & 0x2000) }) as HTMLInputElement;
+    prio.addEventListener('change', () => each((w) => (prio.checked ? w | 0x2000 : w & ~0x2000)));
+    const flip = (bit: number) => setBrush({
+      w: b.w, h: b.h,
+      tiles: b.tiles.map((_, i) => {
+        const x = i % b.w, y = Math.floor(i / b.w);
+        return b.tiles[bit === 0x4000 ? y * b.w + (b.w - 1 - x) : (b.h - 1 - y) * b.w + x] ^ bit;
+      }),
+    });
+    const t = lt3Target(app.rom, app.level.number);
+    const others = t.file === null ? [] : lt3Users(app.rom, t.file).filter((n) => n !== app.level.number);
+    const where = t.file === null
+      ? 'Saved with the level into a new layer 3 tilemap file (ExGFX, LT3 in the Graphics tab), under the status bar.'
+      : `Saved with the level into its layer 3 tilemap file, ExGFX ${hex2(t.file)} (LT3: ${LT3_DESTS[t.place.dest].toLowerCase()})${others.length ? ` – also used by level${others.length > 1 ? 's' : ''} ${others.map((n) => hex3(n)).join(', ')}` : ''}.`;
+    const what = b.tiles.length > 1 ? `Block ${b.w}×${b.h}${onSheet ? ` from tile ${hex3(w0 & 0x3ff)}` : ' from the level'}` : `Tile ${hex3(w0 & 0x3ff)}`;
+    this.body.append(
+      h('div', { class: 'row' }, palSel, h('label', { class: 'row small', title: 'In front of layers 1 and 2 (tilemap priority)' }, prio, 'Priority'),
+        h('button', { title: 'Mirror the brush horizontally', onclick: () => flip(0x4000) }, 'Flip X'),
+        h('button', { title: 'Mirror the brush vertically', onclick: () => flip(0x8000) }, 'Flip Y'),
+        h('button', { title: 'Paint with a tile without visible pixels', onclick: () => setBrush({ w: 1, h: 1, tiles: [blankLayer3Tile(r)] }) }, 'Erase')),
+      h('div', { class: 'hint' }, `Brush: ${what} – click tiles here or in the level (drag: block). ${where} Layer 3 shows where it is when the level starts.`));
+    if (!onSheet) {
+      const p = h('canvas', { width: b.w * 8, height: b.h * 8, class: 'bg-brush' });
+      const pc = p.getContext('2d')!, pimg = pc.createImageData(b.w * 8, b.h * 8), ppx = new Uint32Array(pimg.data.buffer);
+      b.tiles.forEach((w, i) => draw(ppx, b.w * 8, w, (i % b.w) * 8, Math.floor(i / b.w) * 8));
+      pc.putImageData(pimg, 0, 0);
+      p.style.width = `${Math.min(b.w * 8 * S, 128 * S)}px`;
+      p.style.imageRendering = 'pixelated';
+      this.body.append(h('div', { class: 'row' }, p));
+    }
+    this.body.append(c);
+  }
+
   specs(): ObjSpec[] {
     const s: ObjSpec[] = [];
     for (let n = 1; n < 0x40; n++) {
@@ -578,11 +648,13 @@ export class Palette {
   build(): void {
     const app = this.app;
     clear(this.tabs);
-    const searchable = app.mode !== 'bg' && this.tab !== 'm16';
+    const brush = app.mode === 'bg' || app.mode === 'l3';
+    const searchable = !brush && this.tab !== 'm16';
     this.searchRow.style.display = searchable ? '' : 'none';
-    this.m16Bar.style.display = this.m16SearchRow.style.display = app.mode !== 'bg' && this.tab === 'm16' ? '' : 'none';
+    this.m16Bar.style.display = this.m16SearchRow.style.display = !brush && this.tab === 'm16' ? '' : 'none';
     this.search.placeholder = this.tab === 'spr' ? 'Search sprites (no., name) …' : this.tab === 'str' ? 'Search structures …' : 'Search (no., name, behavior) …';
     if (app.mode === 'bg') { clear(this.body); this.buildBg(); return; }
+    if (app.mode === 'l3') { clear(this.body); this.buildL3(); return; }
     if (this.body.querySelector('.m16-page-head')) this.m16Scroll = this.body.scrollTop; // the scroll event may still be pending
     const tabDefs: [typeof this.tab, string][] = [['obj', 'Objects'], ['ext', 'Extended'], ['m16', 'Map16'], ['str', 'Structures'], ['spr', 'Sprites']];
     for (const [t, l] of tabDefs) this.tabs.appendChild(h('button', { class: this.tab === t ? 'active' : '', onclick: () => { this.tab = t; this.build(); } }, l));

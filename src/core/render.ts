@@ -233,7 +233,7 @@ export function renderLayer3(r: LevelRender, width: number, height: number): Lev
   return any ? { back, front, blend: (p[0x31] & 0x04) !== 0 } : null;
 }
 
-// ghost: 1 or 2 draws that layer at 35 % opacity; layer 3 in front is drawn half transparent
+// ghost: 1 or 2 draws that layer at 35 % opacity, 3 both; layer 3 in front is drawn half transparent
 export function composite(li: LevelImages, show1 = true, show2 = true, ghost = 0, show3 = true): Uint32Array {
   const out = new Uint32Array(li.width * li.height).fill(li.backdrop);
   const put = (src: Uint32Array, faint: boolean) => {
@@ -244,8 +244,8 @@ export function composite(li: LevelImages, show1 = true, show2 = true, ghost = 0
   };
   const l3 = show3 ? li.layer3 : null;
   if (l3) put(l3.back, false);
-  if (show2) put(li.layer2, ghost === 2);
-  if (show1) put(li.layer1, ghost === 1);
+  if (show2) put(li.layer2, (ghost & 2) !== 0);
+  if (show1) put(li.layer1, (ghost & 1) !== 0);
   if (l3) {
     const f = l3.front;
     for (let i = 0; i < out.length; i++) if (f[i]) out[i] = l3.blend ? blend(f[i], out[i], 0.5) : f[i];
