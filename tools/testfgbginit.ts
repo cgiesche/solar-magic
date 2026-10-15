@@ -1,4 +1,4 @@
-// Where FG and BG start (Lunar Magic 3.00's FG/BG init, levelheight.ts), checked by emulation: test play loads
+// Where FG and BG start (the camera start, Lunar Magic 3.00's, levelheight.ts), checked by emulation: test play loads
 // the level with the header the editor made and shows layer 1 ($1C) and layer 2 ($20) at the first frame of
 // the level where the settings put them – the game's FG/BG start Y as in the clean game, the camera relative
 // to Mario, the BG bottom-aligned by its height, relative to the FG or at 0. Placing an entrance (dragging it,
@@ -8,7 +8,9 @@ import { LevelEmulator } from '../src/core/levelemu.ts';
 import {
   type SecondaryHeader, type SecondaryEntrance, type BgStart, readSecondaryHeader, encodeSecondaryHeader, readSecondaryEntrance, entrancePos, mainSpot,
   setCameraRows, bgStart, setBgStart, placeMain, placeSecondary, startHeader, nearestEntrance, hasRelativeCamera, levelMode, SEC_HDR, LEVEL_HEIGHTS,
+  writeSecondaryEntrance, secondarySpot, loadLevel, cloneLevel,
 } from '../src/core/level.ts';
+import { saveLevel } from '../src/core/save.ts';
 import { GM, RAM, get16, cameraY } from '../src/core/ram.ts';
 import { cleanImage, editorImage } from './fixture.ts';
 
@@ -127,6 +129,59 @@ const high = startHeader(rom, sec0, 0x40, 0xb0, sec0.entranceScreen);
   const sized = { ...game, levelSize: 0x13 };
   const tile = startHeader(rom, sized, 0x340, 0x400, 9, 62);
   check(tile.entranceTile === 1 && tile.cameraRelative === 1, 'a tile entrance in a taller level: the camera relative to Mario');
+}
+
+// test play from a secondary entrance starts FG and BG as entering the level through it does (level 105's
+// exit pipe on screen 7 leads to it): with its own camera start, not the main entrance's
+{
+  const idx = 0x1f0;
+  const enter = (e: SecondaryEntrance) => {
+    const r = new Rom(rom.data.slice());
+    writeSecondaryEntrance(r, idx, e);
+    const lv = cloneLevel(loadLevel(r, N));
+    lv.exits = lv.exits.map((x) => ({ ...x, dest: idx, secondary: true }));
+    // Mario starts on the pipe (tile 8, 20 of screen 7)
+    lv.secondary = { ...lv.secondary, entranceScreen: 7, entranceTile: 1, entranceX: 0, entranceXHi: 1, entranceY: 0x14 & 15, entranceYHi: 0x14 >> 4 };
+    saveLevel(r, lv);
+    const em = new LevelEmulator(r);
+    em.load(N);
+    const s = em.snes, w = s.wram;
+    for (let f = 0; f < 300 && w[RAM.gameMode] !== GM.level; f++) s.runFrame();
+    w[RAM.marioX] = 0x88; // on the pipe's middle
+    let left = false;
+    for (let f = 0; f < 2000; f++) {
+      s.joy1 = 0x0400; s.runFrame();
+      if (w[RAM.gameMode] !== GM.level) left = true;
+      if (left && w[RAM.gameMode] === GM.level) break;
+    }
+    return { left, ...settled(s) };
+  };
+  // the two ways into the level reach its first frame after different fades: compared once Mario has stood
+  // still for a second (the camera follows him the same way from the same start)
+  const settled = (s: LevelEmulator['snes']) => {
+    s.joy1 = 0;
+    for (let f = 0; f < 60; f++) s.runFrame();
+    const w = s.wram;
+    return { fg: cameraY(w), bg: get16(w, RAM.layer2Y) };
+  };
+  const wrong: string[] = [];
+  const base: SecondaryEntrance = { ...readSecondaryEntrance(rom, idx), destLevel: N & 0xff, screen: 2, entranceX: 3, entranceY: 6, entranceTile: 0, action: 0, raw3: 8 };
+  const cases: [string, SecondaryEntrance][] = [
+    ...[[0, 0], [1, 3], [2, 1], [3, 2]].map(([fg, bg]): [string, SecondaryEntrance] => [`FG/BG start Y ${fg}/${bg}`, { ...base, fgInitY: fg, bgInitY: bg, cameraRelative: 0, cameraOffsetHi: 0 }]),
+    ...[2, 7].map((rows): [string, SecondaryEntrance] => { const e = { ...base }; setCameraRows(e, rows); return [`${rows} rows above Mario`, e]; }),
+  ];
+  let entered = 0;
+  const bgs = new Set<number>(); // the main entrance's camera start would give one BG for all
+  for (const [name, e] of cases) {
+    const g = enter(e);
+    const p = entrancePos(rom, secondarySpot(e), false);
+    start(emu, N, startHeader(rom, { ...sec0, cameraRelative: 1, cameraOffsetHi: 1 }, p.x, p.y, 9, 0, e));
+    const t = settled(emu.snes);
+    if (g.left) entered++;
+    bgs.add(t.bg);
+    if (!g.left || g.fg !== t.fg || g.bg !== t.bg) wrong.push(`${name}: test play ${hx(t.fg)}/${hx(t.bg)}, entered ${hx(g.fg)}/${hx(g.bg)}`);
+  }
+  check(!wrong.length && entered === cases.length && bgs.size >= 4, `test play from a secondary entrance: FG and BG as when entering through it, BG ${[...bgs].map(hx).join('/')} (${cases.map(([n]) => n).join(', ')})${wrong.length ? ` – ${wrong.join('; ')}` : ''}`);
 }
 
 // the relative camera only in horizontal levels: in a vertical one the bits are the game's FG/BG start Y

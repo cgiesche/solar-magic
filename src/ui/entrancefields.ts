@@ -6,7 +6,7 @@ import { hex2 } from '../core/names.ts';
 import { h, hexInput, select } from './dom.ts';
 import {
   type EntranceSpot, type CameraStart, type EntranceTileFields, type SecondaryHeader, type BgStart, spotTile, cameraRows, setCameraRows, cameraAtMario,
-  setEntranceTile, bgStart, setBgStart,
+  setEntranceTile, bgStart, setBgStart, GAME_BG_ROWS,
 } from '../core/level.ts';
 
 export function spotText(p: EntranceSpot): string {
@@ -17,7 +17,7 @@ export function spotText(p: EntranceSpot): string {
 
 // GAME_CAMERA: the game's FG/BG start Y; n: n rows above Mario (horizontal levels only, `relative`)
 export const GAME_CAMERA = -100;
-export function cameraOptions(cur: number, relative = true): [number, string][] {
+export function cameraOptions(cur: number, relative: boolean): [number, string][] {
   const rows = (n: number): [number, string] => [n, n < 0 ? `${-n} rows below Mario` : `${n} rows above Mario`];
   const opts: [number, string][] = [[GAME_CAMERA, 'FG/BG start Y'], ...(relative ? Array.from({ length: 17 }, (_, i) => rows(i)) : [])];
   return opts.some(([v]) => v === cur) ? opts : [...opts, rows(cur)];
@@ -40,8 +40,8 @@ export function bgStartFields(s: Pick<SecondaryHeader, 'bgRelative' | 'bgHeight'
   };
   const kind = select(BG_KINDS, KIND_OF.indexOf(b.kind), (k) => {
     const c = bgStart(s), want = KIND_OF[k];
-    // the BG's height comes back when it was set, else 27 rows (the game's BG); offsets start at +0
-    setBgStart(s, want === 'bottom' ? { kind: want, rows: c.kind === 'bottom' ? c.rows : 27 } : want === 'fg' ? { kind: want, rows: 0 } : { kind: want });
+    // the BG's height comes back when it was set, else the game's BG height; offsets start at +0
+    setBgStart(s, want === 'bottom' ? { kind: want, rows: c.kind === 'bottom' ? c.rows : GAME_BG_ROWS } : want === 'fg' ? { kind: want, rows: 0 } : { kind: want });
     fill();
   });
   rows.addEventListener('change', () => {
@@ -74,7 +74,7 @@ export function tileFields<T extends EntranceTileFields>(t: { x: number; y: numb
 
 // the camera start and, unless it is relative to Mario, the FG/BG start Y; `relative`: the entrance's level is
 // horizontal (the camera can start relative to Mario)
-export function cameraFields<T extends CameraStart>(c: T, set: Set<T>, relative = true): Rows {
+export function cameraFields<T extends CameraStart>(c: T, set: Set<T>, relative: boolean): Rows {
   const v = cameraValue(c);
   return [
     ['Camera start', select(cameraOptions(v, relative), v, (n) => set('Camera start', (x) => setCamera(x, n)))],

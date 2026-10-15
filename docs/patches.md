@@ -514,10 +514,11 @@ code is the editor's.
   the camera start (the FG/BG start Y, or rows above Mario – horizontal levels only, the patch ignores it in
   vertical ones) and, for every horizontal level, the BG start of its relative entrances (bottom-aligned by the
   BG's height, relative to the FG by −15 to +15 rows, or at 0, as Lunar Magic's *Change Layer 1/2 Settings*).
-  Moving an entrance, creating one and test play from a spot keep these settings (Lunar Magic 3.50's drag
-  without updating the FG/BG init); only a tile entrance with the game's camera gets the relative one.
-  `tools/testfgbginit.ts` checks by emulation that test play starts FG and BG where each setting puts them. The level's own slippery,
-  water, face-left and midway bits of Lunar Magic are kept but not used.
+  Moving an entrance, creating one and test play from a spot keep these settings (as Lunar Magic 3.50 can
+  drag entrances); only a tile entrance with the game's camera gets the relative one. Test play from a
+  secondary entrance starts with its own camera start. `tools/testfgbginit.ts` checks by emulation that test
+  play starts FG and BG where each setting puts them. The level's own slippery, water, face-left and midway
+  bits of Lunar Magic are kept but not used.
 
 The emulation check (`tools/testlevelheightplay.ts`): levels of the game moved down into taller levels play
 exactly like the game's – Mario and every sprite at the same positions under the same input, the same visible

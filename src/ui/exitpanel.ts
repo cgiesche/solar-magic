@@ -124,7 +124,7 @@ function users(app: App, refs: ExitRef[], extra: HTMLElement[], empty: string): 
 function testAt(app: App, kind: Marker['kind'], index: number): void {
   const m = app.markers().find((x) => x.kind === kind && x.index === index);
   if (kind === 'main' || !m) openTestPlay(app);
-  else openTestPlay(app, { tx: (m.x + 8) >> 4, ty: (m.y + 16) >> 4 });
+  else openTestPlay(app, { tx: (m.x + 8) >> 4, ty: (m.y + 16) >> 4, camera: kind === 'sec' ? readSecondaryEntrance(app.rom, index) : undefined });
 }
 
 // ---- secondary entrance ----
@@ -174,7 +174,7 @@ function mainPanel(app: App, body: HTMLElement, kind: 'main' | 'midway'): void {
     h('div', { class: 'prop-title' }, 'Main entrance'),
     hint(`${spotText(mainSpot(s))} – drag the marker to move it`),
     field('Action', select(actions(), s.entranceAction, (v) => upd(() => (s.entranceAction = v)))),
-    field('Camera start', select(cameraOptions(cameraValue(s)), cameraValue(s), (v) => upd(() => setCamera(s, v)))),
+    field('Camera start', select(cameraOptions(cameraValue(s), hasRelativeCamera(app.rom, lv.header.mode)), cameraValue(s), (v) => upd(() => setCamera(s, v)))),
     users(app, g.exitsInto(n).filter((r) => !r.secondary), extra, 'No exit leads to the main entrance.'),
     h('div', { class: 'row' }, h('button', { title: 'Test play from the main entrance (T)', onclick: () => testAt(app, 'main', 0) }, '▶ Test here')),
     hint('More settings (scrolling, layer 3 …) in the header dialog (H).'),
