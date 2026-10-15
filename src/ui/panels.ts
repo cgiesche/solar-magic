@@ -1,6 +1,6 @@
 // Sidebar panels: level list, palette (objects / sprites), properties.
 
-import type { App, PaletteItem } from './app.ts';
+import { isBrushMode, type App, type PaletteItem } from './app.ts';
 import { h, clear, hexInput, attachRectPick, modal, toast, emptyState } from './dom.ts';
 import { objectName, spriteName, hex2, hex3 } from '../core/names.ts';
 import { objectVariant, withObjectVariant, type ObjKind } from '../core/objkinds.ts';
@@ -12,7 +12,7 @@ import { DM16_EXT } from '../core/patches.ts';
 import { STRUCT_EXT, TRANSPARENT, freeStructureNumber, readStructure, writeStructure, STRUCT_COUNT, type Structure } from '../core/structs.ts';
 import { EXT_TILES } from '../core/map16ext.ts';
 import { TileCache, map16Source, drawMap16 } from '../core/render.ts';
-import { lt3Target, lt3Users, blankLayer3Tile } from '../core/layer3map.ts';
+import { lt3Target, lt3Users, blankLayer3Tile, l3Palette, withL3Palette, L3_TILE, L3_PAL, L3_PRIO, L3_FLIP_X, L3_FLIP_Y } from '../core/layer3map.ts';
 import { LT3_DESTS } from '../core/layer3gfx.ts';
 import { probeable } from '../core/probeclient.ts';
 import { probeText, spritesOf, spriteProbeAt, enterText, enterSuffix } from '../core/blockprobe.ts';
@@ -151,9 +151,9 @@ export class Palette {
     app.on('level', () => { this.ensureThumbs(); this.build(); });
     let t = 0;
     app.on('sprites', () => { if (this.tab !== 'm16' && !t) t = window.setTimeout(() => { t = 0; this.build(); }, 300); });
-    app.on('bgtile', () => { if (app.mode === 'bg' || app.mode === 'l3') this.build(); });
+    app.on('bgtile', () => { if (isBrushMode(app.mode)) this.build(); });
     app.on('probes', () => { if (this.tab === 'm16') this.m16Tip(); else this.build(); });
-    app.on('render', () => { if (app.mode === 'bg' || app.mode === 'l3') this.build(); });
+    app.on('render', () => { if (isBrushMode(app.mode)) this.build(); });
     app.on('change', () => { this.followSelection(); if (this.tab === 'str') this.build(); });
     app.on('structs', () => { if (this.tab === 'str') this.build(); });
     app.on('mode', () => {
@@ -421,7 +421,7 @@ export class Palette {
   // 10-12, 13, 14-15); a brush picked from the level keeps each tile's own
   buildL3(): void {
     const app = this.app, r = app.render, b = app.l3Brush, w0 = b.tiles[0];
-    const attr = w0 & 0xfc00, pal = (w0 >> 10) & 7;
+    const attr = w0 & ~L3_TILE, pal = l3Palette(w0);
     const tc = new TileCache(r.vram, r.cgram, (r.ppuRegs[0x0c] & 0x0f) << 13);
     const setBrush = (nb: typeof b) => { app.l3Brush = nb; this.build(); };
     const each = (f: (w: number) => number) => setBrush({ ...b, tiles: b.tiles.map(f) });
@@ -430,7 +430,7 @@ export class Palette {
       for (let k = 0; k < 64; k++) px[(y + (k >> 3)) * width + x + (k & 7)] = t[k] || 0xff282828;
     };
     // a brush that is a rectangle of the sheet (one palette, priority, no flips) is outlined there
-    const onSheet = !(attr & 0xc000) && (w0 & 0x3ff) < 0x200 && (w0 & 15) + b.w <= 16
+    const onSheet = !(attr & (L3_FLIP_X | L3_FLIP_Y)) && (w0 & L3_TILE) < 0x200 && (w0 & 15) + b.w <= 16
       && b.tiles.every((t, i) => t === w0 + Math.floor(i / b.w) * 16 + (i % b.w));
     const S = 2;
     const c = h('canvas', { width: 128 * S, height: 256 * S, class: 'm16-pick', title: 'Click/drag: tile(s) as brush' });
@@ -447,18 +447,18 @@ export class Palette {
       ctx.strokeStyle = '#4cc2ff'; ctx.lineWidth = 2;
       ctx.strokeRect(x * 8 * S, y * 8 * S, w * 8 * S, hh * 8 * S);
     };
-    if (onSheet) show(w0 & 15, (w0 & 0x3ff) >> 4, b.w, b.h); else show(-1, 0, 0, 0);
+    if (onSheet) show(w0 & 15, (w0 & L3_TILE) >> 4, b.w, b.h); else show(-1, 0, 0, 0);
     attachRectPick(c, 16, 32, (q) => show(q.x, q.y, q.w, q.h), (q) =>
-      setBrush({ w: q.w, h: q.h, tiles: Array.from({ length: q.w * q.h }, (_, i) => ((q.y + Math.floor(i / q.w)) * 16 + q.x + (i % q.w)) | (attr & 0x3c00)) }));
+      setBrush({ w: q.w, h: q.h, tiles: Array.from({ length: q.w * q.h }, (_, i) => ((q.y + Math.floor(i / q.w)) * 16 + q.x + (i % q.w)) | (attr & (L3_PAL | L3_PRIO))) }));
     const palSel = h('select', { title: 'Palette (colors 4 × n – 4 × n + 3)' }, Array.from({ length: 8 }, (_, i) => h('option', { value: String(i), selected: i === pal }, `Palette ${i}`)));
-    palSel.addEventListener('change', () => { const p = Number(palSel.value); each((w) => (w & ~0x1c00) | (p << 10)); });
-    const prio = h('input', { type: 'checkbox', checked: !!(w0 & 0x2000) }) as HTMLInputElement;
-    prio.addEventListener('change', () => each((w) => (prio.checked ? w | 0x2000 : w & ~0x2000)));
+    palSel.addEventListener('change', () => { const p = Number(palSel.value); each((w) => withL3Palette(w, p)); });
+    const prio = h('input', { type: 'checkbox', checked: !!(w0 & L3_PRIO) }) as HTMLInputElement;
+    prio.addEventListener('change', () => each((w) => (prio.checked ? w | L3_PRIO : w & ~L3_PRIO)));
     const flip = (bit: number) => setBrush({
       w: b.w, h: b.h,
       tiles: b.tiles.map((_, i) => {
         const x = i % b.w, y = Math.floor(i / b.w);
-        return b.tiles[bit === 0x4000 ? y * b.w + (b.w - 1 - x) : (b.h - 1 - y) * b.w + x] ^ bit;
+        return b.tiles[bit === L3_FLIP_X ? y * b.w + (b.w - 1 - x) : (b.h - 1 - y) * b.w + x] ^ bit;
       }),
     });
     const t = lt3Target(app.rom, app.level.number);
@@ -466,11 +466,11 @@ export class Palette {
     const where = t.file === null
       ? 'Saved with the level into a new layer 3 tilemap file (ExGFX, LT3 in the Graphics tab), under the status bar.'
       : `Saved with the level into its layer 3 tilemap file, ExGFX ${hex2(t.file)} (LT3: ${LT3_DESTS[t.place.dest].toLowerCase()})${others.length ? ` – also used by level${others.length > 1 ? 's' : ''} ${others.map((n) => hex3(n)).join(', ')}` : ''}.`;
-    const what = b.tiles.length > 1 ? `Block ${b.w}×${b.h}${onSheet ? ` from tile ${hex3(w0 & 0x3ff)}` : ' from the level'}` : `Tile ${hex3(w0 & 0x3ff)}`;
+    const what = b.tiles.length > 1 ? `Block ${b.w}×${b.h}${onSheet ? ` from tile ${hex3(w0 & L3_TILE)}` : ' from the level'}` : `Tile ${hex3(w0 & L3_TILE)}`;
     this.body.append(
       h('div', { class: 'row' }, palSel, h('label', { class: 'row small', title: 'In front of layers 1 and 2 (tilemap priority)' }, prio, 'Priority'),
-        h('button', { title: 'Mirror the brush horizontally', onclick: () => flip(0x4000) }, 'Flip X'),
-        h('button', { title: 'Mirror the brush vertically', onclick: () => flip(0x8000) }, 'Flip Y'),
+        h('button', { title: 'Mirror the brush horizontally', onclick: () => flip(L3_FLIP_X) }, 'Flip X'),
+        h('button', { title: 'Mirror the brush vertically', onclick: () => flip(L3_FLIP_Y) }, 'Flip Y'),
         h('button', { title: 'Paint with a tile without visible pixels', onclick: () => setBrush({ w: 1, h: 1, tiles: [blankLayer3Tile(r)] }) }, 'Erase')),
       h('div', { class: 'hint' }, `Brush: ${what} – click tiles here or in the level (drag: block). ${where} Layer 3 shows where it is when the level starts.`));
     if (!onSheet) {
@@ -648,7 +648,7 @@ export class Palette {
   build(): void {
     const app = this.app;
     clear(this.tabs);
-    const brush = app.mode === 'bg' || app.mode === 'l3';
+    const brush = isBrushMode(app.mode);
     const searchable = !brush && this.tab !== 'm16';
     this.searchRow.style.display = searchable ? '' : 'none';
     this.m16Bar.style.display = this.m16SearchRow.style.display = !brush && this.tab === 'm16' ? '' : 'none';

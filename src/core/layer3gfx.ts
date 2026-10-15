@@ -231,7 +231,6 @@ export function lt3Patches(rom: Rom, n: number, addr: number, place: Lt3Place): 
     [p.gfxLo + num, addr & 0xff], [p.gfxHi + num, (addr >> 8) & 0xff], [p.gfxBank + num, addr >> 16], [p.gfxFlags + num, RAW_GFX_SIZES.indexOf(0x2000) + 1]];
 }
 
-// Lunar Magic's DDFF of the LT3 word (its size 3 reads as 0x2000 bytes, as in its code), and back
 // how the patch copies an LT3 file: to VRAM word `vram`, the file's first `skip` bytes left out (the status
 // bar's part of the tilemap: the file is laid out as the whole tilemap from $5000, or from $5800 for the
 // bottom half), `len` bytes: the size less what is skipped, at most up to the tilemap's end ($6000)
@@ -243,6 +242,7 @@ export function lt3Copy(p: Lt3Place): { vram: number; skip: number; len: number 
   return { vram, skip, len: Math.min(LT3_SIZES[p.size] - skip, (L3_MAP_END - vram) * 2) };
 }
 
+// Lunar Magic's DDFF of the LT3 word (its size 3 reads as 0x2000 bytes, as in its code), and back
 export const lt3Nibble = (g: Lt3Place) => ((g.dest & 3) << 2) | (g.size & 3);
 export const fromLt3Nibble = (v: number): Lt3Place => ({ dest: (v >> 2) & 3, size: (v & 3) === 3 ? 0 : v & 3 });
 

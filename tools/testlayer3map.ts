@@ -8,9 +8,9 @@ import { loadLevel } from '../src/core/level.ts';
 import { saveLevel } from '../src/core/save.ts';
 import { importGfxFile } from '../src/core/map16file.ts';
 import { gfxEntry } from '../src/core/patches.ts';
-import { renderLayer3 } from '../src/core/render.ts';
+import { renderLayer3, layer3Geometry } from '../src/core/render.ts';
 import { levelLayer3, setLevelLayer3, lt3Copy, type Lt3Place } from '../src/core/layer3gfx.ts';
-import { L3_MAP_VRAM, L3_MAP_WORDS, NEW_LT3, layer3Map, lt3File, lt3Covers, lt3Override, layer3Grid, layer3CellAt, layer3Index, blankLayer3Tile } from '../src/core/layer3map.ts';
+import { L3_MAP_VRAM, L3_MAP_WORDS, NEW_LT3, layer3Map, lt3File, lt3Covers, lt3Override, layer3CellAt, layer3Index, blankLayer3Tile } from '../src/core/layer3map.ts';
 import { editorImage } from './fixture.ts';
 
 let bad = 0;
@@ -114,7 +114,7 @@ const shown = (vram: Uint8Array, map: Uint16Array, place: Lt3Place) => {
   const emu = new LevelEmulator(rom); emu.boot();
   const r = emu.load(LEVEL), W = 512, H = 432;
   const img = renderLayer3(r, W, H)!;
-  const g = layer3Grid(r);
+  const g = layer3Geometry(r);
   let px = -1, py = -1;
   for (let i = 0; i < img.back.length && px < 0; i++) if (img.back[i] || img.front[i]) { px = i % W; py = Math.floor(i / W); }
   const c = layer3CellAt(g, px, py), at = layer3Index(g, c.cx, c.cy);

@@ -20,8 +20,8 @@ import type { Package } from '../core/pkgreg.ts';
 import { kvEntries, kvWrite, saveRom } from './storage.ts';
 import { ResultCache, RomFingerprint, RomReads, type CacheEntry } from '../core/romdeps.ts';
 import { bgFromWram, bgIndex, encodeBg } from '../core/bg.ts';
-import { lt3Override, lt3Target, lt3Covers, layer3Map, layer3Grid, layer3Index, blankLayer3Tile, L3_MAP_VRAM } from '../core/layer3map.ts';
-import type { Layer3Geometry } from '../core/render.ts';
+import { lt3Override, lt3Target, lt3Covers, layer3Map, layer3Word, layer3Index, blankLayer3Tile } from '../core/layer3map.ts';
+import { layer3Geometry, type Layer3Geometry } from '../core/render.ts';
 import { toast, log as logMsg, modalsOpen, onModalsChange } from './dom.ts';
 import { musicPlayer } from './musicplayer.ts';
 import { ExitGraph, exitTarget } from '../core/exitgraph.ts';
@@ -40,6 +40,9 @@ import { map16Tile, bgTile } from '../core/ram.ts';
 import { exanimTiles, exanimColors } from '../core/exanim.ts';
 
 export type EditMode = 'l1' | 'l2' | 'spr' | 'exit' | 'bg' | 'l3';
+// the modes painted with a brush of tiles picked from the level or the palette: BG tiles, layer 3's 8x8 tiles
+export const isBrushMode = (m: EditMode) => m === 'bg' || m === 'l3';
+export interface Brush { w: number; h: number; tiles: number[] }
 export type PaletteItem =
   // block: a rectangle of Map16 tiles from the palette sheet (tile + row * 16 + col), one Direct-Map16 object each
   // struct: structure number (extended object $03, see structs.ts)
@@ -101,8 +104,8 @@ export class App {
   selection = new Set<number>();
   paletteItem: PaletteItem | null = null;
   // BG mode brush: a w×h block of BG Map16 tiles (row-major), picked from the palette sheet or the level
-  bgBrush: { w: number; h: number; tiles: number[] } = { w: 1, h: 1, tiles: [0] };
-  l3Brush: { w: number; h: number; tiles: number[] } = { w: 1, h: 1, tiles: [0] }; // layer 3 tilemap words
+  bgBrush: Brush = { w: 1, h: 1, tiles: [0] };
+  l3Brush: Brush = { w: 1, h: 1, tiles: [0] }; // layer 3 tilemap words
   zoom = 2;
   show = { layer1: true, layer2: true, layer3: true, sprites: true, grid: false, screens: true, exits: true, ghost: true, anim: false, items: true, collision: false, arcs: false };
   // view-only game state applied before the emulated level load
@@ -1254,7 +1257,7 @@ export class App {
       return;
     }
     // editing layer 3 shows it
-    const ghosts = this.level.layer2Objects || m === 'bg' || this.mode === 'bg' || m === 'l3' || this.mode === 'l3';
+    const ghosts = this.level.layer2Objects || isBrushMode(m) || isBrushMode(this.mode);
     const recompose = m !== this.mode && ((ghosts && this.show.ghost) || (m === 'l3' && !this.show.layer3));
     if (m === 'l3') this.show.layer3 = true;
     this.mode = m;
@@ -1297,18 +1300,26 @@ export class App {
   // ------------- layer 3 tilemap (layer3map.ts) -------------
   // cells (cx, cy) as layer 3 is drawn over the level
   l3Grid(): Layer3Geometry {
-    return layer3Grid(this.render);
+    return layer3Geometry(this.render);
   }
   // the tilemap word of a cell, -1: no entry there (the status bar's rows)
   l3At(cx: number, cy: number): number {
     const i = layer3Index(this.l3Grid(), cx, cy);
     if (i < 0) return -1;
-    return this.level.layer3 ? this.level.layer3[i] : this.render.vram[(L3_MAP_VRAM + i) * 2] | (this.render.vram[(L3_MAP_VRAM + i) * 2 + 1] << 8);
+    return this.level.layer3 ? this.level.layer3[i] : layer3Word(this.render.vram, i);
   }
   // a cell can be edited: its entry is in the part of the tilemap the level's LT3 file (or a new one) holds
   l3Editable(cx: number, cy: number): boolean {
     const i = layer3Index(this.l3Grid(), cx, cy);
     return i >= 0 && lt3Covers(lt3Target(this.rom, this.level.number).place, i);
+  }
+  // a layer 3 edit begins: the tilemap is held in the level first, so the undo step has it as it was (a level
+  // without one reads it from the ROM, which after a save already holds the edit); cancelled, it lets go again
+  beginLayer3Edit(): LevelEdit {
+    const held = !!this.level.layer3;
+    this.level.layer3 ??= layer3Map(this.render.vram);
+    const e = this.beginLevelEdit();
+    return { commit: e.commit, cancel: (restore) => { e.cancel(restore); if (!held) this.level.layer3 = null; } };
   }
   // stamps the brush with its top-left tile at cell (cx, cy); caller handles the level edit and refresh
   paintL3Brush(cx: number, cy: number): boolean {

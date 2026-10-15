@@ -9,7 +9,7 @@
 import type { Rom } from './rom.ts';
 import type { Level } from './level.ts';
 import type { LevelRender } from './levelemu.ts';
-import { layer3Geometry, layer3TileAddr, LAYER3_STATUS_ROWS, type Layer3Geometry } from './render.ts';
+import { layer3TileAddr, LAYER3_STATUS_ROWS, type Layer3Geometry } from './render.ts';
 import { levelLayer3, setLevelLayer3, fitsLayer3Slot, lt3Copy, LT3_SIZES, LT3_SLOT, L3_MAP_START, L3_MAP_END, type Lt3Place } from './layer3gfx.ts';
 import { gfxEntry, setGfxEntry } from './patches.ts';
 import { freeGfx } from './levelgfx.ts';
@@ -19,10 +19,18 @@ export const NEW_LT3: Lt3Place = { dest: 0, size: 0 }; // under the status bar, 
 const NEW_SIZE = 0x2000;
 const hx = (n: number) => n.toString(16).toUpperCase().padStart(2, '0');
 
-// the layer 3 tilemap in VRAM
+// entry i of the layer 3 tilemap in VRAM, and the whole tilemap
+export const layer3Word = (vram: Uint8Array, i: number) => vram[(L3_MAP_VRAM + i) * 2] | (vram[(L3_MAP_VRAM + i) * 2 + 1] << 8);
 export function layer3Map(vram: Uint8Array): Uint16Array {
-  return Uint16Array.from({ length: L3_MAP_WORDS }, (_, i) => vram[(L3_MAP_VRAM + i) * 2] | (vram[(L3_MAP_VRAM + i) * 2 + 1] << 8));
+  return Uint16Array.from({ length: L3_MAP_WORDS }, (_, i) => layer3Word(vram, i));
 }
+
+// a tilemap word: tile number (bits 0-9), palette (10-12), priority, X and Y flip
+export const L3_TILE = 0x3ff, L3_PAL = 0x1c00, L3_PRIO = 0x2000, L3_FLIP_X = 0x4000, L3_FLIP_Y = 0x8000;
+export const l3Palette = (w: number) => (w & L3_PAL) >> 10;
+export const withL3Palette = (w: number, p: number) => (w & ~L3_PAL) | (p << 10);
+export const layer3WordText = (w: number) =>
+  `${(w & L3_TILE).toString(16).toUpperCase().padStart(3, '0')} pal ${l3Palette(w)}${w & L3_PRIO ? ' prio' : ''}${w & L3_FLIP_X ? ' X-flip' : ''}${w & L3_FLIP_Y ? ' Y-flip' : ''}`;
 
 // entry i of the tilemap is in the part an LT3 file placed `place` is copied to
 export function lt3Covers(place: Lt3Place, i: number): boolean {
@@ -78,9 +86,8 @@ export function lt3Users(rom: Rom, num: number): number[] {
   return Array.from({ length: 0x200 }, (_, i) => i).filter((i) => levelLayer3(rom, i).lt3 === num);
 }
 
-// The tilemap over the level: cell (cx, cy) is the 8x8 tile at level pixel (cx * 8 - dx, cy * 8 - dy), as
-// the level view draws layer 3 (render.ts renderLayer3)
-export const layer3Grid = (r: LevelRender): Layer3Geometry => layer3Geometry(r);
+// The tilemap over the level (render.ts layer3Geometry): cell (cx, cy) is the 8x8 tile at level pixel
+// (cx * 8 - dx, cy * 8 - dy), as the level view draws layer 3
 export const layer3CellAt = (g: Layer3Geometry, px: number, py: number) => ({ cx: Math.floor((px + g.dx) / 8), cy: Math.floor((py + g.dy) / 8) });
 // the tilemap entry of a cell, -1: none (the status bar's rows, below the tilemap, outside $5000-$5FFF)
 export function layer3Index(g: Layer3Geometry, cx: number, cy: number): number {

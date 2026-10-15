@@ -1,6 +1,6 @@
 // Scrollable, zoomable level canvas with editing interactions.
 
-import { App, type Marker, type LevelEdit } from './app.ts';
+import { App, isBrushMode, type Marker, type LevelEdit, type Brush } from './app.ts';
 import { h, attachPanZoom, toast } from './dom.ts';
 import { downloadBytes } from './platform.ts';
 import { objectName, hex2, hex3 } from '../core/names.ts';
@@ -8,7 +8,7 @@ import { resizeObjectSize } from '../core/objkinds.ts';
 import { probeAt, spriteProbeAt, enterText, collisionText, type PosProbe, type CollisionProbe } from '../core/blockprobe.ts';
 import { type LevelObject, type LevelSprite, newUid, serializeLayer1, serializeLayer2, serializeLevelSprites, spriteSizes, spriteId } from '../core/level.ts';
 import { composite } from '../core/render.ts';
-import { layer3CellAt } from '../core/layer3map.ts';
+import { layer3CellAt, layer3WordText } from '../core/layer3map.ts';
 import type { ArcSpeed } from '../core/jumparcs.ts';
 import { exitTarget } from '../core/exitgraph.ts';
 import { contextMenu, type MenuItem } from './menu.ts';
@@ -140,7 +140,7 @@ export class LevelView {
   // BG and layer 3 are painted with a brush on a grid of cells: BG tiles (16 px), layer 3's 8x8 tiles where
   // layer 3 is drawn (layer3map.ts)
   brushMode(): boolean {
-    return this.app.mode === 'bg' || this.app.mode === 'l3';
+    return isBrushMode(this.app.mode);
   }
   cellAt(px: number, py: number): { x: number; y: number } {
     if (this.app.mode !== 'l3') return { x: Math.floor(px / 16), y: Math.floor(py / 16) };
@@ -153,7 +153,7 @@ export class LevelView {
     const g = this.app.l3Grid();
     return [x * 8 - g.dx, y * 8 - g.dy, w * 8, h * 8];
   }
-  brush(): { w: number; h: number; tiles: number[] } {
+  brush(): Brush {
     return this.app.mode === 'l3' ? this.app.l3Brush : this.app.bgBrush;
   }
   paintCell(x: number, y: number): boolean {
@@ -630,7 +630,7 @@ export class LevelView {
       // insert palette item (BG: paint with the brush, dragging keeps painting)
       if (app.mode === 'exit') { if (e.button === 2) this.exitMenu(e, px, py, tx, ty); return; }
       if (this.brushMode()) {
-        const edit = app.beginLevelEdit(), c = this.cellAt(px, py);
+        const edit = app.mode === 'l3' ? app.beginLayer3Edit() : app.beginLevelEdit(), c = this.cellAt(px, py);
         this.drag = { kind: 'paint', edit, changed: this.paintCell(c.x, c.y), x0: c.x, y0: c.y, lastX: c.x, lastY: c.y };
         if (this.drag.changed) this.scheduleRefresh();
         return;
@@ -817,7 +817,7 @@ export class LevelView {
   idleStatus(): void {
     const m = this.app.mode;
     this.pos.textContent = '';
-    this.status.textContent = m === 'bg' || m === 'l3' ? 'Click/drag picks up tiles as brush · Right click/Shift+click paints'
+    this.status.textContent = isBrushMode(m) ? 'Click/drag picks up tiles as brush · Right click/Shift+click paints'
       : m === 'exit' ? 'Click an entrance (M, Z, S) or screen to select it – edit it on the right under “Properties” · Drag moves entrances · Right click: new entrance, create exit …'
         : 'Click selects, drag moves · Right click/Shift+click inserts the item chosen in “Insert” · Alt+click: item underneath';
   }
@@ -828,7 +828,7 @@ export class LevelView {
     this.pos.textContent = `X ${hex3(tx)}  Y ${hex3(ty)}  Screen ${hex2(app.vertical ? ty >> 4 : tx >> 4)}`;
     if (app.mode === 'l3') {
       const c = this.hover ? this.cellAt(this.hover.px, this.hover.py) : { x: 0, y: 0 }, t = app.l3At(c.x, c.y), b = app.l3Brush;
-      const tile = (w: number) => `${hex3(w & 0x3ff)} pal ${(w >> 10) & 7}${w & 0x2000 ? ' prio' : ''}${w & 0x4000 ? ' X-flip' : ''}${w & 0x8000 ? ' Y-flip' : ''}`;
+      const tile = layer3WordText;
       this.status.textContent = `${t < 0 ? 'Status bar (not editable)' : `Layer 3 tile ${tile(t)}${app.l3Editable(c.x, c.y) ? '' : ' (outside the level\'s layer 3 tilemap file)'}`}  ·  Brush ${b.tiles.length > 1 ? `${b.w}×${b.h}` : tile(b.tiles[0])}`;
       return;
     }
