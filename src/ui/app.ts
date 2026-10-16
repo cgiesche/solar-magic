@@ -24,7 +24,7 @@ import { lt3Override, lt3Target, lt3Covers, layer3Map, layer3Word, layer3Index, 
 import { layer3Geometry, type Layer3Geometry } from '../core/render.ts';
 import { toast, log as logMsg, modalsOpen, onModalsChange } from './dom.ts';
 import { musicPlayer } from './musicplayer.ts';
-import { ExitGraph, exitTarget } from '../core/exitgraph.ts';
+import { ExitGraph, exitTarget, isBlank } from '../core/exitgraph.ts';
 import type { RomHistory, RomEdit } from '../core/romhistory.ts';
 import { RomEditSession, type EditOptions } from '../core/romedit.ts';
 import { LevelHistory } from '../core/levelhistory.ts';
@@ -378,11 +378,11 @@ export class App {
   }
 
   // ------------- entrances -------------
-  // vanilla: entrance i leads to level F800[i] | (i & $100) (the high bit comes from the map, like the exit's)
+  // the secondary entrances into the current level, of either bank (blank ones: free)
   findSecondaryEntrances(): void {
     const n = this.level.number;
     this.secEntrances = [];
-    for (let i = n & 0x100; i < (n & 0x100) + 0x100; i++) if (readSecondaryEntrance(this.rom, i).destLevel === (n & 0xff)) this.secEntrances.push(i);
+    for (let i = 0; i < 0x200; i++) if (readSecondaryEntrance(this.rom, i).destLevel === n && !isBlank(this.rom, i)) this.secEntrances.push(i);
   }
 
   markers(): Marker[] {
@@ -479,11 +479,11 @@ export class App {
   // a new secondary entrance into the current level at the entrance setting nearest to (px, py)
   newSecondaryEntrance(px: number, py: number): number | null {
     const n = this.level.number;
-    const idx = this.exitGraph().freeEntrance(n);
-    if (idx === null) { toast(`No free secondary entrance left in ${n & 0x100 ? '100–1FF' : '000–0FF'}.`, 'error'); return null; }
+    const idx = this.exitGraph().freeEntrance();
+    if (idx === null) { toast('No free secondary entrance left.', 'error'); return null; }
     const p = nearestEntrance(this.rom, px, py, (this.level.secondary.verticalPositioning & 1) !== 0, this.level.header.screens - 1, this.entranceRows());
     this.editSecondaryEntrance(idx, `Secondary entrance ${hex(idx, 3)} created`, (e) => {
-      e.destLevel = n & 0xff;
+      e.destLevel = n;
       placeSecondary(e, p);
     });
     this.selectEntrance({ kind: 'sec', index: idx });

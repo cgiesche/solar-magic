@@ -38,6 +38,8 @@ export const maxScreens = (s: { levelSize: number }): number => Math.min(32, Mat
 // secondary entrances: the game's four tables, then Lunar Magic 3.00's two (EFYYYYYY, RLW-----; Lunar
 // Magic keeps them where its code is, the editor here)
 export const SEC_ENT = [0x05f800, 0x05fa00, 0x05fc00, 0x05fe00, 0x06cc00, 0x06ce00];
+// in SEC_ENT[3] (IPXXDAAA): D, bit 8 of the entrance's level (Lunar Magic's)
+export const SEC_LEVEL_HI = 0x08;
 
 export interface LevelObject {
   uid: number;
@@ -57,6 +59,14 @@ export interface ScreenExit {
   secondary: boolean;
   flags: number; // the low nibble of byte 1, Lunar Magic's 0000wush (h: dest's high bit, s: secondary, u, w kept)
 }
+// a screen exit's u (Lunar Magic's new-style exit, levelheight.ts): its own h is the target's high bit and its
+// own s makes it secondary. Without u the game's rule: the high bit from the overworld submap (the editor takes
+// the bank of the exit's level), the level's last exit's s for all its exits. A level's exits are read
+// new-style (parseLevelData) and always written so
+export const EXIT_NEW = 0x04;
+// the number an exit of level `from` leads to: a level, or a secondary entrance
+export const exitIndex = (from: number, e: Pick<ScreenExit, 'dest' | 'flags'>): number =>
+  e.flags & EXIT_NEW ? e.dest & 0x1ff : (e.dest & 0xff) | (from & 0x100);
 // a screen exit's w (Lunar Magic's): a secondary exit makes the level it leads to a water level, a standard
 // exit leads to the target's midway entrance – when that has its own settings, else to its main entrance
 // (levelheight.ts)
@@ -348,7 +358,7 @@ export function serializeObjects(objects: LevelObject[], exits: ScreenExit[], ve
   const out: number[] = [];
   const own = (n: number, v: number) => { if (owners) for (let i = 0; i < n; i++) owners.push(v); };
   for (const e of exits) {
-    const flags = (e.flags & 0x0c) | (e.secondary ? 2 : 0) | ((e.dest >> 8) & 1);
+    const flags = (e.flags & EXIT_WATER) | EXIT_NEW | (e.secondary ? 2 : 0) | ((e.dest >> 8) & 1);
     out.push(e.screen & 0x1f, flags, 0x00, e.dest & 0xff);
     own(4, -1);
   }
@@ -521,6 +531,13 @@ export function parseLevelData(rom: Rom, n: number, l1: Uint8Array, l2: Uint8Arr
     // exits in layer 2 data are unusual; keep them with layer 1
     p1.exits.push(...p2.exits);
   }
+  // new-style, leading where they lead in the game: an old-style exit secondary by the level's last exit
+  const lastSecondary = p1.exits.at(-1)?.secondary ?? false;
+  for (const e of p1.exits) {
+    if (!(e.flags & EXIT_NEW)) e.secondary = lastSecondary;
+    e.dest = exitIndex(n, e);
+    e.flags = (e.flags & EXIT_WATER) | EXIT_NEW | (e.secondary ? 2 : 0) | (e.dest >> 8);
+  }
   const ps = parseSprites(spr, 0, vert1, sizes);
   return {
     number: n,
@@ -570,14 +587,15 @@ export function cloneLevel(lv: Level): Level {
 
 // ---- secondary entrances ----
 export interface SecondaryEntrance {
-  destLevel: number; // low 8 bits (vanilla); high bit from bit 3 of FE00 when patched
+  destLevel: number; // F800, bit 8: FE00 bit 3 (Lunar Magic's D; the game's from the overworld submap, set for
+  // entrances 100-1FF when the clean game is patched, levelheight.ts)
   entranceY: number; // FA00 bits 3-0
   fgInitY: number; // FA00 bits 5-4
   bgInitY: number; // FA00 bits 7-6
   entranceX: number; // FC00 bits 7-5
   screen: number; // FC00 bits 4-0
   action: number; // FE00 bits 2-0
-  raw3: number; // FE00 bits 7 and 3 (Lunar Magic's, kept)
+  raw3: number; // FE00 bit 7 (Lunar Magic's, kept)
   // Lunar Magic 3.00's (levelheight.ts), as in the main entrance (SecondaryHeader)
   entranceTile: number; // FE00 bit 6
   entranceXHi: number; // FE00 bits 5-4
@@ -593,14 +611,14 @@ export function readSecondaryEntrance(rom: Rom, i: number): SecondaryEntrance {
 }
 export function decodeSecondaryEntrance([a, b, c, d, e, f]: number[]): SecondaryEntrance {
   return {
-    destLevel: a,
+    destLevel: a | ((d & SEC_LEVEL_HI) << 5),
     entranceY: b & 0x0f,
     fgInitY: (b >> 4) & 3,
     bgInitY: b >> 6,
     entranceX: c >> 5,
     screen: c & 0x1f,
     action: d & 7,
-    raw3: d & 0x88,
+    raw3: d & 0x80,
     entranceTile: (d >> 6) & 1,
     entranceXHi: (d >> 4) & 3,
     entranceYHi: e & 0x3f,
@@ -615,7 +633,7 @@ export function writeSecondaryEntrance(rom: Rom, i: number, e: SecondaryEntrance
   rom.w8(SEC_ENT[0] + i, e.destLevel & 0xff);
   rom.w8(SEC_ENT[1] + i, (e.bgInitY << 6) | ((e.fgInitY & 3) << 4) | (e.entranceY & 0x0f));
   rom.w8(SEC_ENT[2] + i, (e.entranceX << 5) | (e.screen & 0x1f));
-  rom.w8(SEC_ENT[3] + i, (e.raw3 & 0x88) | ((e.entranceTile & 1) << 6) | ((e.entranceXHi & 3) << 4) | (e.action & 7));
+  rom.w8(SEC_ENT[3] + i, (e.raw3 & 0x80) | ((e.entranceTile & 1) << 6) | ((e.entranceXHi & 3) << 4) | ((e.destLevel >> 5) & SEC_LEVEL_HI) | (e.action & 7));
   rom.w8(SEC_ENT[4] + i, ((e.lmRaw >> 1) & 0x80) | ((e.cameraOffsetHi & 1) << 6) | (e.entranceYHi & 0x3f));
   rom.w8(SEC_ENT[5] + i, (e.cameraRelative << 7) | ((e.faceLeft & 1) << 6) | ((e.water & 1) << 5) | (e.lmRaw & 0x1f));
 }
@@ -855,9 +873,8 @@ export function levelTranslevel(rom: Rom, n: number): number {
     let exits: ScreenExit[];
     try { exits = loadLevel(rom, m).exits; } catch { continue; }
     for (const e of exits) {
-      // the high bit of the destination (and of the secondary entrance number) comes from the level side
-      const idx = e.dest | (m & 0x100);
-      const d = e.secondary ? readSecondaryEntrance(rom, idx).destLevel | (m & 0x100) : idx;
+      const idx = exitIndex(m, e);
+      const d = e.secondary ? readSecondaryEntrance(rom, idx).destLevel : idx;
       if (seen.has(d)) continue;
       seen.set(d, seen.get(m)!);
       if (d === n) return seen.get(m)!;

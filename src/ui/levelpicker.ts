@@ -5,18 +5,18 @@ import { h, clear, emptyState } from './dom.ts';
 import { hex3 } from '../core/names.ts';
 import { closeMenus } from './menu.ts';
 
-// allowed: the levels that can be chosen (others are not listed); the list starts with "only used":
-// main levels, relocated ones and those an exit leads to
-export function levelPicker(app: App, value: number, allowed: (n: number) => boolean, onPick: (n: number) => void): HTMLElement {
+// any of the 0x200 levels; the list starts with "only used": main levels, relocated ones and those an exit
+// leads to
+export function levelPicker(app: App, value: number, onPick: (n: number) => void): HTMLElement {
   const g = app.exitGraph();
   const btn = h('button', { class: 'level-pick', title: 'Choose another level' }, h('span', { class: 'mono' }, hex3(value)), ' ', h('span', { class: 'lname' }, g.name(value)), h('span', { class: 'caret' }, ' ▾'));
-  btn.addEventListener('click', () => openPicker(app, btn, value, allowed, onPick));
+  btn.addEventListener('click', () => openPicker(app, btn, value, onPick));
   return btn;
 }
 
 let openPop: { anchor: HTMLElement; close: () => void } | null = null;
 
-function openPicker(app: App, anchor: HTMLElement, value: number, allowed: (n: number) => boolean, onPick: (n: number) => void): void {
+function openPicker(app: App, anchor: HTMLElement, value: number, onPick: (n: number) => void): void {
   closeMenus();
   const again = openPop?.anchor === anchor;
   openPop?.close();
@@ -35,7 +35,7 @@ function openPicker(app: App, anchor: HTMLElement, value: number, allowed: (n: n
     first = -1;
     const f = filter.value.trim().toLowerCase();
     for (let i = 0; i < 0x200; i++) {
-      if (!allowed(i) || (onlyUsed.checked && !used.has(i) && i !== value)) continue;
+      if (onlyUsed.checked && !used.has(i) && i !== value) continue;
       const name = g.name(i);
       if (f && !hex3(i).toLowerCase().includes(f) && !name.toLowerCase().includes(f)) continue;
       const el = h('div', { class: `level-item${i === value ? ' current' : ''}${used.has(i) ? '' : ' unused'}`, onclick: () => pick(i) }, hex3(i), h('span', { class: 'lname' }, ' ' + name));
@@ -51,7 +51,7 @@ function openPicker(app: App, anchor: HTMLElement, value: number, allowed: (n: n
     if (e.key === 'Escape') { close(); e.stopPropagation(); return; }
     if (e.key !== 'Enter') return;
     const v = filter.value.trim(), n = parseInt(v, 16);
-    if (/^[0-9a-f]{1,3}$/i.test(v) && n < 0x200 && allowed(n)) pick(n);
+    if (/^[0-9a-f]{1,3}$/i.test(v) && n < 0x200) pick(n);
     else if (first >= 0) pick(first);
   });
   build();

@@ -31,6 +31,10 @@ _Avoid_: method 2, exact entrance
 Where Mario starts in a level once he has touched its midway tape (the midway point, Z): the main entrance's position and settings on the midway screen as in the game, or (Lunar Magic's) a tile of its own with its own action, camera start and options. Dragging it gives it its own. A standard screen exit set to "go to midway entrance" leads there when it has its own settings.
 _Avoid_: checkpoint (that is the tape), midway screen (for the whole entrance)
 
+**New-style exit**:
+A screen exit with Lunar Magic's u flag: its own number (with the high bit) is the target level or secondary entrance, and it is secondary or standard on its own – so it leads into either bank (0xx/1xx). Every exit the editor writes is one; exits of levels it hasn't changed may still be old-style (the game's rule: the high bit from the overworld, the level's last exit deciding secondary).
+_Avoid_: LM exit, exit format 2
+
 **Camera start**:
 Where layer 1 (FG) and layer 2 (BG) start when Mario enters: the game's FG/BG start Y, or (Lunar Magic's, horizontal levels) a number of rows above Mario, the BG then by the level's BG start – its bottom at the level's bottom (by the BG's height), rows below the FG, or at 0. Moving an entrance keeps it.
 _Avoid_: FG/BG init (Lunar Magic's name), initial position

@@ -134,7 +134,7 @@ function exitTo(sec: SecondaryHeader, flags: number, to = N, toSec?: SecondaryHe
   const r = new Rom(rom.data.slice());
   if (toSec) { const t = cloneLevel(loadLevel(r, to)); t.secondary = toSec; saveLevel(r, t); }
   const lv = cloneLevel(loadLevel(r, N));
-  lv.exits = lv.exits.map((x) => ({ ...x, dest: to & 0xff, secondary: false, flags: flags | 1 }));
+  lv.exits = lv.exits.map((x) => ({ ...x, dest: to, secondary: false, flags }));
   // Mario starts on the pipe (tile 8, 20 of screen 7)
   lv.secondary = { ...sec, entranceScreen: 7, entranceTile: 1, entranceX: 0, entranceXHi: 1, entranceY: 0x14 & 15, entranceYHi: 0x14 >> 4 };
   saveLevel(r, lv);

@@ -165,7 +165,7 @@ const high = startHeader(rom, sec0, 0x40, 0xb0, sec0.entranceScreen);
     return { fg: cameraY(w), bg: get16(w, RAM.layer2Y) };
   };
   const wrong: string[] = [];
-  const base: SecondaryEntrance = { ...readSecondaryEntrance(rom, idx), destLevel: N & 0xff, screen: 2, entranceX: 3, entranceY: 6, entranceTile: 0, action: 0, raw3: 8 };
+  const base: SecondaryEntrance = { ...readSecondaryEntrance(rom, idx), destLevel: N, screen: 2, entranceX: 3, entranceY: 6, entranceTile: 0, action: 0, raw3: 0 };
   const cases: [string, SecondaryEntrance][] = [
     ...[[0, 0], [1, 3], [2, 1], [3, 2]].map(([fg, bg]): [string, SecondaryEntrance] => [`FG/BG start Y ${fg}/${bg}`, { ...base, fgInitY: fg, bgInitY: bg, cameraRelative: 0, cameraOffsetHi: 0 }]),
     ...[2, 7].map((rows): [string, SecondaryEntrance] => { const e = { ...base }; setCameraRows(e, rows); return [`${rows} rows above Mario`, e]; }),

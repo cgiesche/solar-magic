@@ -99,6 +99,8 @@ export const LEVEL_HEIGHT_RAM: [number, number] = [0x7f3666, 18];
 // in it, for the editor's other code: a position's limit and row bits when a tile is changed (16-bit
 // each; the game's $0200 and $01F0)
 export const LEVEL_MAX_Y = LEVEL_HEIGHT_RAM[0] + 4, LEVEL_ROW_MASK = LEVEL_HEIGHT_RAM[0] + 6;
+// and the level being loaded or played (16-bit, from the game's setup)
+export const LEVEL_LOADED = LEVEL_HEIGHT_RAM[0] + 10;
 // the layer 3 graphics patch's RAM (layer3gfx.ts): 1 while the layer 3 graphics in VRAM are a level's own
 export const LAYER3_GFX_RAM: [number, number] = [0x7f3678, 1];
 // the level heights patch's too: the flags of the screen exit Mario left by (0000wush, Lunar Magic's)

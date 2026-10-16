@@ -96,7 +96,7 @@ function enter(e: SecondaryEntrance, flags = 2) {
   return { entered: left && w[RAM.gameMode] === GM.level, ...after(s) };
 }
 {
-  const base: SecondaryEntrance = { ...readSecondaryEntrance(rom, IDX), destLevel: N & 0xff, screen: 2, entranceX: 3, entranceY: 6, entranceTile: 0, action: 0, raw3: 8, faceLeft: 0, water: 0 };
+  const base: SecondaryEntrance = { ...readSecondaryEntrance(rom, IDX), destLevel: N, screen: 2, entranceX: 3, entranceY: 6, entranceTile: 0, action: 0, raw3: 0, faceLeft: 0, water: 0 };
   const plain = enter(base), left = enter({ ...base, faceLeft: 1 }), water = enter({ ...base, water: 1 }), exitWater = enter(base, 2 | EXIT_WATER);
   check(plain.entered && !plain.left && !plain.water && !plain.swims, `secondary entrance: Mario faces right, no water (${show(plain)})`);
   check(left.entered && left.left && !left.water, `secondary entrance, face left: Mario faces left (${show(left)})`);

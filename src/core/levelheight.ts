@@ -30,12 +30,16 @@
 //    screen exit (its w), and a slanted pipe entrance shooting Mario out the way he faces; a screen keeps
 //    its exit's flags 0000wush ($19D8, which community code such as GPS's teleport routine writes too), and
 //    only s makes the level's exits secondary;
-//  - a standard screen exit with w leads to the midway entrance of a level with its own settings.
+//  - a standard screen exit with w leads to the midway entrance of a level with its own settings;
+//  - a screen exit with u (new-style) leads into either bank: its own h is the target's high bit (the game's
+//    from the overworld submap) and its own s makes it secondary (the game's: the level's last exit's); a
+//    secondary entrance's level has its own high bit (D of IPXXDAAA, the game's the entrance's), set for the
+//    game's entrances 100-1FF here.
 // The tilemap of such a level is SMWV's (vrampatch.ts): a window of 16 block rows built from the level data.
 
 import type { Rom } from './rom.ts';
 import { LEVEL_SIZE_TABLE, LEVEL_HEIGHTS, SEC_HDR, SEC_ENT } from './level.ts';
-import { RAM, LEVEL_HEIGHT_RAM, LEVEL_HEIGHT, SCREEN_PTRS, LEVEL_MAX_Y, LEVEL_ROW_MASK, EXIT_FLAGS_RAM } from './ram.ts';
+import { RAM, LEVEL_HEIGHT_RAM, LEVEL_HEIGHT, SCREEN_PTRS, LEVEL_MAX_Y, LEVEL_ROW_MASK, LEVEL_LOADED, EXIT_FLAGS_RAM } from './ram.ts';
 import { applyPatch, type ApplyResult } from './patchapply.ts';
 import { installEditorPatch } from './patches.ts';
 
@@ -53,7 +57,7 @@ lorom
 !RowMask = $${hx(LEVEL_ROW_MASK)}     ; and a position's row bits (the game's $01F0)
 !NewSpr = !Size+8      ; the level's sprite data is in Lunar Magic's new format (header bit 5)
 !SprSub = !Size+9      ; loading sprites: the subscreen of the sprites that follow, * 2 (a Y high byte)
-!Level = !Size+10      ; the level being loaded (16-bit)
+!Level = $${hx(LEVEL_LOADED)}      ; the level being loaded (16-bit)
 !Ent = !Size+12        ; the secondary entrance it is entered by (16-bit)
 !Tmp = !Size+14        ; (16-bit)
 !Align = !Size+16      ; the BG's bottom + $8000 for CameraY to align layer 2 with (16-bit, 0: none)
@@ -61,7 +65,7 @@ lorom
 !Ent1 = $${hx(SEC_HDR[6])}       ; per level, Lunar Magic's: IWPXXtTT (W: water, P: the entrance at tile X/Y, XX: X bits 4-3)
 !Ent2 = $${hx(SEC_HDR[7])}       ; OFYYYYYY (O: BG relative to FG, F: camera offset bit 4, Y: Y bits 9-4)
 !Ent3 = $${hx(SEC_HDR[8])}       ; RL-ooooo (R: camera relative to Mario, L: face left, o: BG height - 1, or with O its offset)
-!SecFE = $${hx(SEC_ENT[3])}       ; per secondary entrance: IPXXDAAA (P: at tile X/Y, XX: X bits 4-3)
+!SecFE = $${hx(SEC_ENT[3])}       ; per secondary entrance: IPXXDAAA (P: at tile X/Y, XX: X bits 4-3, D: the level's bit 8)
 !SecY = $${hx(SEC_ENT[4])}        ; EFYYYYYY (Lunar Magic's, at a place of its own: F camera offset bit 4, Y: Y bits 9-4)
 !SecR = $${hx(SEC_ENT[5])}        ; RLW----- (R: camera relative to Mario, L: face left, W: water)
 !Mid1 = $${hx(SEC_HDR[9])}       ; per level, Lunar Magic's midway entrance: SWOHXAAA (W: water, O: own settings, H: screen bit 4, X: X bit 4, A: action)
@@ -85,6 +89,12 @@ org !Mid1 : fill 512
 org !Mid2 : fill 512
 org !Mid3 : fill 512
 org !Mid4 : fill 512
+; the game's entrances 100-1FF lead into levels 1xx (their high bit from the submap, as the exits' to them)
+!i = $100
+while !i < $200
+  org !SecFE+!i : db read1(!SecFE+!i)|$08
+  !i #= !i+1
+endwhile
 
 ; the game's mode tables of a horizontal layer's screen pointers (tilemap columns, changing a tile, and code
 ; that finds a block the same way) point to the tables in RAM, which the setup builds for every level
@@ -144,7 +154,9 @@ org $00C3D3 : JSL TileRow : NOP
 ; him (Y * 16 + offset * 16, the 5-bit offset from the FG and BG start settings), the BG then bottom-aligned
 ; with the level (or relative to the FG)
 org $05D7C5 : JSL ExitTaken : NOP #2       ; LDA $0DD6 : LSR #2 : TAY (X = the screen Mario left by)
+org $05D7CE : JSL ExitBank                 ; BEQ + : LDA #$01 (A = the submap, then STA $0F: the target's high byte)
 org $05D7E0 : JSL SecEntrance : NOP        ; LDY $0E : LDA $F800,y (Y = the secondary entrance)
+org $05D836 : JSL SecLevel : NOP           ; AND #$07 : STA $192A (A = $05FE00,y)
 org $05DA17 : JSL Entrance : NOP           ; SEP #$30 : LDA $13BF (both entrances set up)
 ; the midway point (Lunar Magic's): its screen with bit 4 – also for its tape, which sets the checkpoint
 ; unless the screen is 0 ($00F2D8); with its own settings Mario goes to its screen as to the main entrance's
@@ -292,6 +304,29 @@ TileRow:
 ExitTaken:
   LDA.l $7E${hx(RAM.screenExitHi)},x : STA.l !ExitFlags
   LDA $${hx(RAM.currentPlayer)} : LSR #2 : TAY
+  RTL
+
+; the target's high byte (A 8 = the submap, its Z; X/Y 8, data bank $05): a new-style exit's (u in 0000wush)
+; own h, and its own s makes it secondary; else the game's (submap 0: 0xx, else 1xx)
+ExitBank:
+  PHA
+  LDA.l !ExitFlags : AND #$04 : BEQ .game
+  PLA
+  LDA.l !ExitFlags : AND #$02 : LSR : STA $${hx(RAM.useSecondaryExit)}
+  LDA.l !ExitFlags : AND #$01
+  RTL
+.game
+  PLA : BEQ +
+  LDA #$01
++ RTL
+
+; the secondary entrance's level (A 8 = its IPXXDAAA, X/Y 16): the high byte from D, then the game's
+; AND #$07 : STA $192A (the entrance action)
+SecLevel:
+  PHA
+  AND #$08 : LSR #3 : STA $0F
+  PLA
+  AND #$07 : STA $${hx(RAM.entranceAction)}
   RTL
 
 ; the secondary entrance (A 8, X/Y 16, data bank $05): kept, then the game's LDY $0E : LDA $F800,y. A's

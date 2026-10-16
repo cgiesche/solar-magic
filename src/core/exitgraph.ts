@@ -1,10 +1,9 @@
 // The exit graph: which screen exits lead where, which secondary entrances are used and which are free.
-// Convention (as levelTranslevel): the high bit of an exit's destination – the level number, or the
-// secondary entrance number and that entrance's level – comes from the bank (0xx/1xx) of the level
-// the exit is in.
+// An exit's target number is its own (new-style, exitIndex in level.ts), a secondary entrance's level its
+// own too (bit 8 in Lunar Magic's D): exits and entrances lead from and to either bank (0xx/1xx).
 
 import type { Rom } from './rom.ts';
-import { loadLevel, readSecondaryEntrance, mainTranslevel, exitToMidway, SEC_ENT, type ScreenExit } from './level.ts';
+import { loadLevel, readSecondaryEntrance, mainTranslevel, exitToMidway, exitIndex, SEC_ENT, SEC_LEVEL_HI, type ScreenExit } from './level.ts';
 import { levelName } from './overworld.ts';
 import { hex } from './names.ts';
 
@@ -18,16 +17,10 @@ export interface ExitRef {
 }
 
 // where an exit of level `from` leads
-export function exitTarget(rom: Rom, from: number, e: Pick<ScreenExit, 'dest' | 'secondary'>): { entrance: number; to: number } {
-  const bank = from & 0x100;
-  const idx = (e.dest & 0x1ff) | bank;
+export function exitTarget(rom: Rom, from: number, e: Pick<ScreenExit, 'dest' | 'secondary' | 'flags'>): { entrance: number; to: number } {
+  const idx = exitIndex(from, e);
   if (!e.secondary) return { entrance: -1, to: idx };
-  return { entrance: idx, to: readSecondaryEntrance(rom, idx).destLevel | bank };
-}
-
-// the levels an exit of level `from` can lead to, and the entrances it can use
-export function sameBank(a: number, b: number): boolean {
-  return (a & 0x100) === (b & 0x100);
+  return { entrance: idx, to: readSecondaryEntrance(rom, idx).destLevel };
 }
 
 export class ExitGraph {
@@ -53,21 +46,19 @@ export class ExitGraph {
     return this.exits.filter((e) => e.entrance === idx);
   }
 
-  // the secondary entrances leading into a level (those of its bank, see app.findSecondaryEntrances)
+  // the secondary entrances leading into a level (see app.findSecondaryEntrances)
   entrancesOf(level: number): number[] {
     const out: number[] = [];
-    const bank = level & 0x100;
-    for (let i = bank; i < bank + 0x100; i++) if (readSecondaryEntrance(this.rom, i).destLevel === (level & 0xff) && !isBlank(this.rom, i)) out.push(i);
-    // a blank entry leads to level x00 too; list it only where an exit uses it
-    if ((level & 0xff) === 0) for (const e of this.exits) if (e.entrance >= bank && e.entrance < bank + 0x100 && isBlank(this.rom, e.entrance) && !out.includes(e.entrance)) out.push(e.entrance);
+    for (let i = 0; i < 0x200; i++) if (readSecondaryEntrance(this.rom, i).destLevel === level && !isBlank(this.rom, i)) out.push(i);
+    // a blank entry leads to level 000 or 100 too; list it only where an exit uses it
+    for (const e of this.exits) if (e.entrance >= 0 && e.to === level && isBlank(this.rom, e.entrance) && !out.includes(e.entrance)) out.push(e.entrance);
     return out.sort((a, b) => a - b);
   }
 
-  // a free secondary entrance number in the bank of `level`: no exit uses it and all its bytes are 0
-  freeEntrance(level: number): number | null {
-    const bank = level & 0x100;
+  // a free secondary entrance number (for any level): no exit uses it and it is blank
+  freeEntrance(): number | null {
     const used = new Set(this.exits.map((e) => e.entrance));
-    for (let i = bank + 1; i < bank + 0x100; i++) if (!used.has(i) && isBlank(this.rom, i)) return i;
+    for (let i = 1; i < 0x200; i++) if (i !== 0x100 && !used.has(i) && isBlank(this.rom, i)) return i;
     return null;
   }
 
@@ -107,6 +98,7 @@ export class ExitGraph {
   }
 }
 
+// all its bytes 0, but for the level's bit 8 (D: an unused entrance 100-1FF of the game leads into level 100)
 export function isBlank(rom: Rom, idx: number): boolean {
-  return SEC_ENT.every((t) => rom.r8(t + idx) === 0);
+  return SEC_ENT.every((t, k) => (rom.r8(t + idx) & (k === 3 ? ~SEC_LEVEL_HI : 0xff)) === 0);
 }

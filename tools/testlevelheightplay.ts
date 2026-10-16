@@ -112,7 +112,7 @@ for (const [n, size, dy] of [[0x105, 0x0e, 32], [0x106, 0x0e, 32], [0x001, 0x0e,
     const idx = 0x1f0, ey = 20 + dy, v = -9 & 31;
     if (secondary) lv.exits = lv.exits.map((x) => ({ ...x, dest: idx, secondary: true }));
     const s = play(lv, (rom) => {
-      if (secondary) writeSecondaryEntrance(rom, idx, { ...readSecondaryEntrance(rom, idx), destLevel: 0x05, screen: 2, entranceX: 5, entranceXHi: 0, entranceY: ey & 15, entranceYHi: ey >> 4, entranceTile: 1, action: 0, cameraRelative: 1, cameraOffsetHi: v >> 4, fgInitY: (v >> 2) & 3, bgInitY: v & 3, raw3: 8 });
+      if (secondary) writeSecondaryEntrance(rom, idx, { ...readSecondaryEntrance(rom, idx), destLevel: 0x105, screen: 2, entranceX: 5, entranceXHi: 0, entranceY: ey & 15, entranceYHi: ey >> 4, entranceTile: 1, action: 0, cameraRelative: 1, cameraOffsetHi: v >> 4, fgInitY: (v >> 2) & 3, bgInitY: v & 3, raw3: 0 });
     });
     const w = s.wram;
     w[RAM.marioX] = 0x88; // on the pipe's middle
