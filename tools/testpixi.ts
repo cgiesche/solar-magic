@@ -7,20 +7,25 @@ import { exportLevelFile, importLevelFile } from '../src/core/levelfile.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { serializeLayer1, isL1Vertical } from '../src/core/level.ts';
 import { installEditorPatch, DM16_EXT } from '../src/core/patches.ts';
-import { setActsLike } from '../src/core/map16ext.ts';
+import { setActsLike, setExtTileWords } from '../src/core/map16ext.ts';
 import { captureSprites } from '../src/core/spritegfx.ts';
 import { loadAsar } from '../src/core/asar.ts';
 import { ROUTINES } from '../src/core/pixiroutines.ts';
 import { uploadFiles, uploadFromFiles } from '../src/core/patchpkg.ts';
 import { planPixiUpload, applyPixiUpload } from '../src/core/pixipkg.ts';
+import { inspectUpload, installPackage } from '../src/core/packages.ts';
 import { savePixiProject, removePixi, loadPixiProject, parsePixiList, parseCfg, parseJsonCfg, type PixiProject } from '../src/core/pixi.ts';
+import { editorImage, romDiff } from './fixture.ts';
+import { map16Source } from '../src/core/render.ts';
+
+const EDITOR_IMAGE = await editorImage(); // the fixture as the editor opens it
 
 await loadAsar();
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
 const same = (a: ArrayLike<number>, b: ArrayLike<number>) => a.length === b.length && Array.from(a).every((v, i) => v === b[i]);
 
-const rom = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
+const rom = new Rom(EDITOR_IMAGE.slice());
 
 // ---- level format with extra bytes
 check(spriteSizes(rom) === null, 'vanilla ROM: no size table');
@@ -50,7 +55,7 @@ const lv = loadLevel(rom, 0x105);
 lv.sprites.push(...sprites.slice(1, 3).map((s) => ({ ...s, uid: newUid() })));
 const file = exportLevelFile(rom, lv);
 check(JSON.parse(file).spriteSizes?.length === 0x800, 'level file carries the size table');
-const plain = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
+const plain = new Rom(EDITOR_IMAGE.slice());
 const imp = importLevelFile(plain, file, loadLevel(plain, 0x105)).level;
 const custom = imp.sprites.filter((s) => s.extra >= 2);
 check(imp.sprites.length === lv.sprites.length && custom.length === 2 && same(custom[0].bytes ?? [], [0xaa]),
@@ -99,7 +104,7 @@ const project: PixiProject = {
   }).map(([k, v]) => [k, new TextEncoder().encode(v)])),
   list: parsePixiList('10 marker.cfg\n11 kill.cfg\n'),
 };
-const prom = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
+const prom = new Rom(EDITOR_IMAGE.slice());
 const res = savePixiProject(prom, project);
 if (!res.ok) console.log(res.errors.join('\n'));
 check(res.ok, 'project assembled and applied');
@@ -143,7 +148,7 @@ pemu.snes.joy1 = 0;
 for (let i = 0; i < 4; i++) pemu.snes.runFrame();
 check(W(0x7fb000) === 0x11 && W(0x7fb002) === 0x77, 'a sprite past byte $80 of the sprite data loads with its extra byte');
 // vanilla sprites still work next to custom ones
-const vrom = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
+const vrom = new Rom(EDITOR_IMAGE.slice());
 const vemu = new LevelEmulator(vrom); vemu.boot();
 const vlv = loadLevel(vrom, 0x105);
 const a = vemu.load(0x105, { sprites: serializeSprites(vlv.sprites, vlv.spriteHeader, false) });
@@ -189,7 +194,7 @@ print "MAIN ",pc
 + DEY : BNE -
   RTL
 `;
-  const r3 = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
+  const r3 = new Rom(EDITOR_IMAGE.slice());
   const res3 = savePixiProject(r3, { files: new Map([
     ['sprites/math.cfg', new TextEncoder().encode('01\n36\n00 00 3B 80 00 00\n00 00\nmath.asm\n00:00\n')],
     ['sprites/math.asm', new TextEncoder().encode(math)],
@@ -215,7 +220,7 @@ print "MAIN ",pc
 // every built-in routine assembles (called from code that never runs)
 {
   const all = Object.keys(ROUTINES).filter((n) => !n.startsWith('Pixi'));
-  const r2 = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
+  const r2 = new Rom(EDITOR_IMAGE.slice());
   const res2 = savePixiProject(r2, { files: new Map([
     ['sprites/all.cfg', new TextEncoder().encode('01\n36\n00 00 3B 80 00 00\n00 00\nall.asm\n00:00\n')],
     ['sprites/all.asm', new TextEncoder().encode('print "INIT ",pc\nprint "MAIN ",pc\n  RTL\n' + all.map((n) => `  %${n}()`).join('\n') + '\n')],
@@ -226,14 +231,14 @@ print "MAIN ",pc
 
 // a downloaded package (test/fixtures): numbers, linked defines, applied
 {
-  const r4 = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
+  const r4 = new Rom(EDITOR_IMAGE.slice());
   const upload = uploadFromFiles('BrutalBill.zip', uploadFiles('BrutalBill.zip', new Uint8Array(readFileSync('test/fixtures/BrutalBill.zip'))));
   const plan = planPixiUpload(r4, upload);
   const desc = plan.sprites.map((q) => `${q.kind}:${q.num.toString(16)}`).sort().join(' ');
   check(desc === 'shooters:c0 sprites:0', `BrutalBill: sprite 00 and shooter C0 (${desc})`);
   const link = plan.links.find((l) => l.define === 'Sprite');
   check(!!link && plan.sprites[link.sprite].kind === 'sprites', 'BrutalBill: the shooter\'s !Sprite names the sprite');
-  const res4 = applyPixiUpload(r4, upload, plan, [0, 0, 0, 0], () => [0, 0, 0, 0]);
+  const res4 = applyPixiUpload(r4, upload, plan, new Set(), () => {});
   if (!res4.ok) console.log(res4.errors.join('\n'));
   check(res4.ok, 'BrutalBill applied');
   const shooter = new TextDecoder().decode(loadPixiProject(r4)?.files.get('shooters/BrutalBillShooter.asm'));
@@ -243,7 +248,7 @@ print "MAIN ",pc
 // custom shooters and generators: MAIN runs every frame, the shooter with its extra byte
 {
   const enc2 = new TextEncoder();
-  const r5 = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
+  const r5 = new Rom(EDITOR_IMAGE.slice());
   const res5 = savePixiProject(r5, { files: new Map([
     ['shooters/s.cfg', enc2.encode('01\n00\n00 00 00 00 00 00\n00 00\ns.asm\n01:01\n')],
     ['shooters/s.asm', enc2.encode('print "MAIN ",pc\n  LDA $7FB020 : INC : STA $7FB020\n  LDA !shooter_extra_byte_1,x : STA $7FB021\n  LDA !shoot_num,x : STA $7FB023\n  RTL\n')],
@@ -262,9 +267,9 @@ print "MAIN ",pc
   check(w5(0x7fb022) > 10, `custom generator runs (${w5(0x7fb022)} frames)`);
 }
 {
-  const r6 = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
+  const r6 = new Rom(EDITOR_IMAGE.slice());
   const upload = uploadFromFiles('BrutalBill.zip', uploadFiles('BrutalBill.zip', new Uint8Array(readFileSync('test/fixtures/BrutalBill.zip'))));
-  const res6 = applyPixiUpload(r6, upload, planPixiUpload(r6, upload), [0, 0, 0, 0], () => [0, 0, 0, 0]);
+  const res6 = applyPixiUpload(r6, upload, planPixiUpload(r6, upload), new Set(), () => {});
   const e6 = new LevelEmulator(r6); e6.boot();
   const l6 = loadLevel(r6, 0x105);
   l6.sprites = [{ uid: newUid(), num: 0xc0, x: 12, y: 0x17, extra: 2, bytes: [0x02] }];
@@ -307,7 +312,7 @@ print "MAIN ",pc
 print "MAIN ",pc
   RTL
 `;
-  const r7 = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
+  const r7 = new Rom(EDITOR_IMAGE.slice());
   const files = new Map<string, Uint8Array>([
     ['sprites/spawner.cfg', enc3.encode('01\n36\n00 00 3B 80 00 00\n00 00\nspawner.asm\n00:00\n')],
     ['sprites/spawner.asm', enc3.encode(spawner)],
@@ -335,20 +340,22 @@ print "MAIN ",pc
 // a package with a block that spawns its custom bounce sprite (Aftertouch Shatter, test/fixtures): the block
 // Mario stood on shatters once he has left it
 {
-  const r8 = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
+  const r8 = new Rom(EDITOR_IMAGE.slice());
   installEditorPatch(r8);
   const f = 'test/fixtures/Aftertouch Shatter.zip';
-  const upload = uploadFromFiles('Aftertouch Shatter.zip', uploadFiles('Aftertouch Shatter.zip', new Uint8Array(readFileSync(f))));
-  const plan = planPixiUpload(r8, upload);
-  check(plan.sprites.length === 1 && plan.sprites[0].kind === 'bounce' && plan.blocks.length === 1 && plan.links.some((l) => l.define === 'bounce_sprite'),
+  const preview = inspectUpload('Aftertouch Shatter.zip', new Uint8Array(readFileSync(f)));
+  if (preview.status !== 'ready') throw new Error('Shatter: ' + preview.status);
+  const plan = planPixiUpload(r8, preview.upload!);
+  const blocks = preview.parts.filter((p) => p.kind === 'block');
+  check(plan.sprites.length === 1 && plan.sprites[0].kind === 'bounce' && blocks.length === 1 && plan.links.some((l) => l.define === 'bounce_sprite' && blocks[0].file === l.file),
     'Shatter: a bounce sprite, a block and the block\'s !bounce_sprite');
   const e8 = new LevelEmulator(r8); e8.boot();
-  const blank = [0x1f8, 0x1f8, 0x1f8, 0x1f8];
-  const res8 = applyPixiUpload(r8, upload, plan, blank, () => [0x1f8, 0x1f8, 0x1f8, 0x1f8]);
+  const blank = map16Source(r8, e8.load(0x105)).fg(0x025);
+  const res8 = await installPackage(r8, preview, { level: null, blank, tileWords: () => blank });
   if (!res8.ok) console.log(res8.errors.join('\n'));
   check(res8.ok, 'Shatter applied (GPS routines spawn_bounce_sprite and change_map16 built in)');
-  setActsLike(r8, 0x601, 0x130, blank); // the package's cracked tile (!cracked_tile = $0601), solid
-  const tile = plan.blocks[0].tile;
+  setActsLike(r8, 0x601, 0x130); // the package's cracked tile (!cracked_tile = $0601), solid
+  const tile = res8.pkg!.block.tiles[0];
   const l8 = loadLevel(r8, 0x105);
   l8.objects.push({ uid: newUid(), num: 0, ext: DM16_EXT, x: 0, y: 24, size: 0x08, tile }); // floor of shatter blocks under Mario
   e8.load(0x105, { layer1: serializeLayer1(r8, l8), sprites: serializeSprites(l8.sprites, l8.spriteHeader, isL1Vertical(r8, l8.header.mode), spriteSizes(r8)) });
@@ -363,6 +370,19 @@ print "MAIN ",pc
   const after = at(2, 24);
   check(before === tile && bounced, `Shatter: the block spawns its bounce sprite (block ${before.toString(16)})`);
   check(after !== tile, `Shatter: the block is gone after Mario left it (now ${after.toString(16)})`);
+
+  // standing still: the block becomes the cracked tile (drawn with its own tile words, $00C0FB with a
+  // tile >= $200) and holds until Mario leaves
+  const cracked = [0x1c21, 0x1c31, 0x1c22, 0x1c32];
+  setExtTileWords(r8, 0x601, cracked);
+  e8.load(0x105, { layer1: serializeLayer1(r8, l8), sprites: serializeSprites(l8.sprites, l8.spriteHeader, isL1Vertical(r8, l8.header.mode), spriteSizes(r8)) });
+  g = 0; while (w8[0x100] !== 0x14 && g++ < 100) s8.runFrame();
+  const under = (w8[0x94] + 8) >> 4; // the block under Mario
+  for (let i = 0; i < 60; i++) s8.runFrame();
+  const vw = (wa: number) => s8.vram[wa * 2] | (s8.vram[wa * 2 + 1] << 8);
+  let shown = false;
+  for (let wa = 0; wa < 0x7fff && !shown; wa++) shown = vw(wa) === cracked[0] && vw(wa + 1) === cracked[2] && vw(wa + 32) === cracked[1] && vw(wa + 33) === cracked[3];
+  check(at(under, 24) === 0x601 && shown, `Shatter: Mario stands on the cracked tile, shown with its graphics (tile ${at(under, 24).toString(16)}, in VRAM: ${shown})`);
 }
 
 // a sprite that draws nothing and spawns the sprite of its extra byte on its tile and one above
@@ -378,7 +398,7 @@ print "MAIN ",pc
   PHX : TYX : JSL $07F7D2 : PLX
 +
 `;
-  const r9 = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
+  const r9 = new Rom(EDITOR_IMAGE.slice());
   const res9 = savePixiProject(r9, { files: new Map([
     ['sprites/stack.cfg', enc9.encode('01\n36\n00 00 00 00 00 00\n00 00\nstack.asm\n01:01\n')],
     ['sprites/stack.asm', enc9.encode(`print "INIT ",pc\n  RTL\nprint "MAIN ",pc\n  LDA !1534,x : BNE ++\n  INC !1534,x\n${spawn(0)}${spawn(0x10)}++\n  RTL\n`)],
@@ -398,9 +418,8 @@ print "MAIN ",pc
 // removing restores the ROM
 const w = removePixi(prom);
 check(w.length === 0 && spriteSizes(prom) === null, 'removed: no size table');
-const orig = new Uint8Array(readFileSync('test/fixtures/smw.smc'));
-let diff = 0;
-for (let i = 0; i < Math.min(orig.length - 512, prom.data.length); i++) if (prom.data[i] !== orig[i + 512] && i !== 0x7fd7) diff++; // ROM size: stays expanded
+const orig = EDITOR_IMAGE.slice();
+const diff = romDiff(prom.data.subarray(0, orig.length), orig, (i) => i === 0x7fd7); // ROM size: stays expanded
 check(diff === 0, `removed: ROM as before (${diff} bytes differ)`);
 
 console.log(bad ? `${bad} FAILED` : 'all ok');

@@ -81,8 +81,7 @@ export function openMessagesDialog(app: App): void {
       label: 'Apply', primary: true, onClick: () => {
         if (!changed) return;
         try {
-          const log = writeMessages(rom, msgs);
-          app.romWritten();
+          const log = app.romEdit('Messages changed', () => writeMessages(rom, msgs));
           toast(`Messages saved: ${log}`);
         } catch (e) {
           toast(String(e instanceof Error ? e.message : e), 'error');

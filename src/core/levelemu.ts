@@ -4,8 +4,9 @@
 
 import { Snes, type SnesState, type MemHook } from './snes.ts';
 import { Rom, snesToPc } from './rom.ts';
-import { L1_PTRS, L2_PTRS, SPR_PTRS, mainTranslevel } from './level.ts';
+import { L1_PTRS, L2_PTRS, SPR_PTRS, SEC_HDR, LEVEL_SIZE_TABLE, mainTranslevel } from './level.ts';
 import { editorPatch, musicPatch, BG_HOOK, HEADER_MUSIC_TABLE } from './patches.ts';
+import { lt3Patches, type Lt3Place } from './layer3gfx.ts';
 import { RomReads, updateBytePages, PAGE_SHIFT } from './romdeps.ts';
 import { GM, RAM, SPR, MAP_BASE, MAP_SIZE, MAP_HI, getS16, set16, setSpritePos } from './ram.ts';
 
@@ -15,6 +16,7 @@ export const OV_SPR = 0x8000;
 export const OV_BG = 0xa000; // edited BG tilemap (editor format, see bg.ts)
 const OV_BG_HOOK = 0xb000; // LDA #$FF : STA $6A : RTL (BG data bank = overlay)
 const OV_STUB = 0xc000; // JSL stub used to call game routines
+const OV_L3 = 0xd000; // an edited layer 3 tilemap as the level's LT3 file (0x2000 bytes, see layer3map.ts)
 const INIT_TABLES = 0x07f7d2; // game routine that sets up a new sprite's tables (tweakers), X = slot
 // where the level load calls the upload of the level music bank (JSR $8134, 3 bytes; AddmusicK's
 // patch makes it NOPs): it uploads when the level is entered from the overworld ($141A = 0). Loads
@@ -32,14 +34,16 @@ export interface LevelOverride {
   layer2?: Uint8Array; // layer 2 object data incl. header
   layer2Pointer?: number; // override pointer (BG tilemap) when layer2 not given
   bgData?: Uint8Array; // edited BG tilemap (bg.ts encodeBg), replaces layer2Pointer
+  layer3?: { data: Uint8Array; place: Lt3Place }; // edited layer 3 tilemap: the level's LT3 file (0x2000 bytes) and where it goes
   sprites?: Uint8Array;
   // objIndexOfByte maps overlay byte offset → object index (layer1: idx, layer2: 0x8000|idx)
   byteOwner?: Int32Array;
-  secondaryHeader?: number[]; // 4 bytes
+  secondaryHeader?: number[]; // the bytes of SEC_HDR (missing ones: 0)
   switchPalaces?: boolean; // treat all switch palaces as pressed
   onOffSwitch?: boolean; // ON/OFF switch in the OFF state ($14AF)
   trackSources?: boolean; // record ROM provenance of CGRAM (slower)
   translevel?: number; // $13BF (messages, Yoshi coins); default: the level itself if it is a main level
+  midway?: boolean; // enter the translevel's level from the overworld with its midway point touched (a main level)
   trace?: boolean; // record per object what its routine reads and writes (see ObjectTrace)
   continueState?: boolean; // load from the emulator's current state (startGame) instead of the boot snapshot
   music?: number; // the song the level plays instead of its own (all header settings and the level's music patch entry)
@@ -174,6 +178,14 @@ export class LevelEmulator {
     // translevel $24 (Chocolate Island 2) makes the exit-based load pick a room by time/coins instead
     const tl = ov.translevel ?? mainTranslevel(level) ?? 0;
     w[RAM.translevel] = tl === 0x24 ? 0 : tl;
+    if (ov.midway) {
+      // from the overworld ($141A 0) the game takes the translevel from the overworld tile Mario is on ($05D84D)
+      const p = w[RAM.currentPlayer], tx = w[RAM.owPlayerTileX + p], ty = w[RAM.owPlayerTileY + p];
+      const i = (tx & 15) | ((tx & 16) << 4) | ((ty & 15) << 4) | ((ty & 16) << 5) | (w[RAM.submap + (p >> 2)] & 15 ? 0x400 : 0);
+      w[RAM.owTranslevels + i] = tl;
+      w[RAM.sublevelCount] = 0;
+      w[RAM.levelFlags + tl] |= 0x40;
+    }
     if (ov.switchPalaces) for (let i = 0; i < 4; i++) w[RAM.switchPalaces + i] = 1;
     if (ov.onOffSwitch) w[RAM.onOff] = 1;
     w[RAM.gameMode] = GM.levelLoad;
@@ -204,20 +216,24 @@ export class LevelEmulator {
       patch(BG_HOOK, 0x22);
       patch24(BG_HOOK + 1, overlaySnes(OV_BG_HOOK));
     }
+    if (ov.layer3) {
+      this.overlay.set(ov.layer3.data, OV_L3);
+      for (const [a, v] of lt3Patches(rom, level, overlaySnes(OV_L3), ov.layer3.place)) patch(a, v);
+    }
     if (ov.sprites) {
       this.overlay.set(ov.sprites, OV_SPR);
       const a = overlaySnes(OV_SPR);
       patch(SPR_PTRS + level * 2, a & 0xff);
       patch(SPR_PTRS + level * 2 + 1, (a >> 8) & 0xff);
-      // force sprite data bank: vanilla code is LDA #$07 : STA $D0 at $05D8F5,
-      // patched ROMs have a bank table
+      // sprite data bank: the editor patch's bank table
       const p = editorPatch(rom);
       if (p) patch(p.sprBank + level, a >> 16);
-      else patch(0x05d8f6, a >> 16);
+      else patch(0x05d8f6, a >> 16); // a clean ROM (tests): vanilla LDA #$07 : STA $D0 at $05D8F5
     }
-    if (ov.secondaryHeader) {
-      for (let i = 0; i < 4; i++) patch(0x05f000 + i * 0x200 + level, ov.secondaryHeader[i]);
-    }
+    // bytes a secondary header leaves out are 0 (probes' test levels: the game's level size, paired
+    // layer 2 rates); layer 1 data without one is in the game's layout (the game's size)
+    if (ov.secondaryHeader) SEC_HDR.forEach((t, i) => patch(t + level, ov.secondaryHeader![i] ?? 0));
+    else if (ov.layer1) patch(LEVEL_SIZE_TABLE + level, 0);
     if (ov.music !== undefined) {
       for (let i = 0; i < 8; i++) patch(HEADER_MUSIC_TABLE + i, ov.music);
       const mp = musicPatch(rom);

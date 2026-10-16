@@ -31,9 +31,18 @@ export function levelModeName(m: number): string {
 // originals of these names; e.g. Iggy's Castle has 3, the Yellow Switch Palace 7)
 export const MUSIC = ['Here We Go', 'Underground', 'Athletic', 'Castle', 'Ghost House', 'Water', 'Boss', 'Switch Palace'];
 export const ENTRANCE_ACTIONS = ['Normal / pipe up', 'Pipe right', 'Pipe left', 'Pipe down',
-  'Pipe up', 'Slide/walk in from the left', 'Door / jump up from below (water)', 'Normal (no Yoshi intro)'];
+  'Pipe up', 'Slide/walk in from the left', 'Shoot from slanted pipe', 'Normal (no Yoshi intro)'];
 export const TIME_SETTINGS = ['0 (none)', '200', '300', '400'];
 export const ITEM_MEMORY = ['0', '1', '2', '3'];
+// Lunar Magic's names of the layer 2 scroll rates (3.40, its "Change Layer 1/2 Settings" dialog): 0-8,
+// then the auto-scrolls $10-$1B (up and down vertically, left and right horizontally)
+const L2_RATES = ['None', 'Constant', 'Medium', 'Slow', 'Medium 2', 'Medium 3', 'Medium 4', 'Slow 2', 'Fast'];
+const L2_AUTO = ['Slow', 'Medium', 'Fast', 'Fast 2', 'Fast 3', 'Fast 4'];
+export function layer2RateName(v: number, horizontal: boolean): string {
+  if (v < 0x10) return L2_RATES[v] ?? `Not used (${hex2(v)})`;
+  const i = v - 0x10, dirs = horizontal ? ['Left', 'Right'] : ['Up', 'Down'];
+  return i < 12 ? `Auto-Scroll ${dirs[i < 6 ? 0 : 1]} ${L2_AUTO[i % 6]}` : `Not used (${hex2(v)})`;
+}
 export const VERTICAL_SCROLL = ['Vertical scroll at will', 'No vertical scroll', 'Vertical scroll always', 'No scroll at all'];
 
 export function hex2(n: number): string {

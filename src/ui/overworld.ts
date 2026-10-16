@@ -1,7 +1,7 @@
 // Overworld editor view.
 
 import type { App } from './app.ts';
-import { h, toast, select, attachPanZoom, attachRectPick, choose, emptyState } from './dom.ts';
+import { h, toast, select, attachPanZoom, zoomControl, ZOOM_MIN, ZOOM_MAX, attachRectPick, choose, emptyState } from './dom.ts';
 import {
   OverworldEmulator, type OwRender, readL1, writeL1, readL2, writeL2, l1Index, l2Index, translevels, isLevelTile,
   translevelToLevel, nameCode, setNameCode, splitNameCode, joinNameCode, nameWord, NAME_PART_COUNTS, MAP_NAMES,
@@ -35,7 +35,6 @@ export class OverworldView {
   private props = h('div', { class: 'panel props' });
   private tlList = h('div', { class: 'level-list' });
   private tlCount = h('span', { class: 'hint' });
-  private zoomLabel = h('span', { class: 'zoom' });
   private roBadge = h('div', { class: 'ow-badge' }, 'Layer 1: view only (state after all events)');
   emu: OverworldEmulator;
   map = 0;
@@ -51,6 +50,7 @@ export class OverworldView {
   showEvents = false;
   showGrid = false;
   zoom = 2;
+  private zoomCtl = zoomControl(() => this.zoom, (z) => this.setZoom(z));
   brush: Brush = { kind: 'l1', w: 1, h: 1, entries: [0x56] };
   l2Pal = 0;
   hover: { x: number; y: number } | null = null;
@@ -64,6 +64,7 @@ export class OverworldView {
   // set by the host: dirty/undo state changed, open a level in the level editor
   onChange: () => void = () => {};
   onOpenLevel: (n: number) => void = () => {};
+  onNav: () => void = () => {};
 
   constructor(app: App) {
     this.app = app;
@@ -86,17 +87,17 @@ export class OverworldView {
     this.scroller.addEventListener('mouseleave', () => { if (!this.drag) { this.hover = null; this.updateStatus(); this.paint(); } });
     window.addEventListener('mousemove', (e) => this.onMove(e));
     window.addEventListener('mouseup', () => this.onUp());
-    attachPanZoom(this.scroller, () => this.zoom, (z, ax, ay) => this.setZoom(z, ax, ay), 1, 4);
+    attachPanZoom(this.scroller, () => this.zoom, (z, ax, ay) => this.setZoom(z, ax, ay));
   }
 
   setZoom(z: number, ax = this.scroller.clientWidth / 2, ay = this.scroller.clientHeight / 2): void {
-    z = Math.max(1, Math.min(4, z));
+    z = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z));
     const lx = (this.scroller.scrollLeft + ax) / this.zoom, ly = (this.scroller.scrollTop + ay) / this.zoom;
     this.zoom = z;
     this.layout();
     this.scroller.scrollLeft = lx * z - ax;
     this.scroller.scrollTop = ly * z - ay;
-    this.zoomLabel.textContent = `${Math.round(z * 100)}%`;
+    this.zoomCtl.update();
   }
 
   get region(): number {
@@ -402,6 +403,17 @@ export class OverworldView {
     this.statusText.textContent = t;
   }
 
+  setMap(n: number): void {
+    if (n === this.map) return;
+    this.map = n;
+    this.selectedTl = -1;
+    this.redrawMap();
+    this.buildBar();
+    this.buildSide();
+    this.buildLeft();
+    this.onNav();
+  }
+
   // ---------------- context bar (map, layer, view, zoom) ----------------
   buildBar(): void {
     const setMode = (m: 'l1' | 'l2') => {
@@ -415,9 +427,9 @@ export class OverworldView {
     };
     const view = (label: string, get: () => boolean, set: (v: boolean) => void, title?: string, shortcut?: string) =>
       ({ label, title, shortcut, checked: get, onToggle: (v: boolean) => { set(v); this.redrawMap(); this.updateStatus(); } });
-    this.zoomLabel.textContent = `${Math.round(this.zoom * 100)}%`;
+    this.zoomCtl.update();
     this.bar.replaceChildren(
-      h('label', { class: 'row' }, 'Map ', select(MAP_NAMES.map((n, i) => [i, n] as [number, string]), this.map, (v) => { this.map = v; this.selectedTl = -1; this.redrawMap(); this.buildSide(); this.buildLeft(); })),
+      h('label', { class: 'row' }, 'Map ', select(MAP_NAMES.map((n, i) => [i, n] as [number, string]), this.map, (v) => this.setMap(v))),
       h('span', { class: 'sep' }),
       h('div', { class: 'btn-group' },
         h('button', { class: this.mode === 'l1' ? 'active' : '', title: 'Layer 1 (1)', onclick: () => setMode('l1') }, 'Layer 1 (paths/levels)'),
@@ -433,9 +445,7 @@ export class OverworldView {
         view('After all events', () => this.showEvents, (v) => (this.showEvents = v), 'State after all events (view only, layer 1 then not editable)'),
       ] }),
       h('span', { class: 'sep' }),
-      h('div', { class: 'row zoom-ctl' },
-        h('button', { onclick: () => this.setZoom(this.zoom / 2), title: 'Zoom out (Ctrl+mouse wheel)' }, '−'), this.zoomLabel,
-        h('button', { onclick: () => this.setZoom(this.zoom * 2), title: 'Zoom in (Ctrl+mouse wheel)' }, '+')),
+      this.zoomCtl.root,
       h('span', { class: 'spacer' }),
       h('button', { onclick: () => void this.reload(), title: 'Reload the overworld from the ROM (discards unsaved changes)' }, 'Reload'),
     );
@@ -615,12 +625,14 @@ export class OverworldView {
   save(): void {
     const rom = this.app.rom;
     try {
-      // Layer 2 first: it is the only part that can fail (no free space)
-      const n = writeL2(rom, this.l2);
-      writeL1(rom, this.l1);
-      for (const [tl, code] of this.names) setNameCode(rom, tl, code);
+      // not a ROM undo step: the overworld editor has its own undo
+      const n = this.app.romEdit('Overworld saved', () => {
+        const n = writeL2(rom, this.l2);
+        writeL1(rom, this.l1);
+        for (const [tl, code] of this.names) setNameCode(rom, tl, code);
+        return n;
+      }, { record: false });
       this.names.clear();
-      this.app.romWritten();
       this.dirty = false;
       this.invalidate();
       this.redrawMap();

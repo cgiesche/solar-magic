@@ -1,9 +1,11 @@
-// The sections of a package record (pkgreg.ts), one adapter each: patches, UberASM, blocks, sprites
-// (PIXI), ExGFX files, songs, FG and BG Map16 tiles – the fields of PackageParts, as stored in the ROM.
-// An adapter knows what of the ROM its section observes (read), what came in between two reads
-// (added), how that goes into a record (merge), when there is nothing (empty) and how to take it out of
-// the ROM again (remove). pkgreg.ts loops over them instead of naming each section; the order of
-// SECTIONS is the order of removing (songs first: AddmusicK runs again; patches applied later first).
+// The sections of a package record (pkgreg.ts), one adapter each: patches, UberASM, blocks, sprites,
+// ExGFX files, songs, FG and BG Map16 tiles – the fields of PackageParts, as stored in the ROM (the tool
+// projects under their part kind: uberasm, block, sprite). An adapter knows what of the ROM its section
+// observes (read), what came in between two reads (added), how that goes into a record (merge), when
+// there is nothing (empty), how to take it out of the ROM again (remove) and how to say so (summary,
+// removal). pkgreg.ts loops over them instead of naming each section; the order of SECTIONS is the
+// order of removing (songs first: AddmusicK runs again; patches applied later first). The part adapters
+// of installing are in pkgparts.ts.
 
 import type { Rom } from './rom.ts';
 import { listPatches, hashBytes } from './patchreg.ts';
@@ -11,10 +13,11 @@ import { uninstallPatch } from './patchapply.ts';
 import { loadProject, saveProject, emptyProject, type UberProject } from './uberproject.ts';
 import { loadBlockProject, saveBlockProject, type BlockProject } from './blocks.ts';
 import { loadPixiProject, savePixiProject, type PixiProject } from './pixi.ts';
+import { hex } from './names.ts';
 import { gfxEntry, setGfxEntry, VANILLA_GFX, levelMusic, setLevelMusic } from './patches.ts';
 import { loadMusicProject, saveMusicProject, removeSong } from './music.ts';
-import { EXT_FIRST, EXT_TILES, DEFAULT_ACTS, map16Ext, extTileWords, actsLike, setExtTileWords, setActsLike } from './map16ext.ts';
-import { BG_EXT_FIRST, BG_EXT_TILES, bgMap16Ext, bgExtTileWords, setBgExtTileWords, vanillaBgWords } from './bgmap16.ts';
+import { EXT_FIRST, EXT_TILES, DEFAULT_ACTS, extTileWords, actsLike, setExtTileWords, setActsLike } from './map16ext.ts';
+import { BG_EXT_FIRST, BG_EXT_TILES, bgExtTileWords, setBgExtTileWords, vanillaBgWords } from './bgmap16.ts';
 import type { UberContext } from './uberasm.ts';
 import type { SpriteFolder } from './pixirt.ts';
 import type { PackageParts } from './pkgreg.ts';
@@ -34,6 +37,7 @@ export interface PartSection<S, P> {
   // (others: their sections) stays. Returns warnings, throws when it fails.
   remove(rom: Rom, mine: P, others: P[], blank: number[]): string[] | Promise<string[]>;
   summary(p: P): string | null; // in a few words ("2 blocks"), null when empty
+  removal(p: P): string | null; // what removing takes out ("block(s) at 200, 201"), null when empty
 }
 
 const count = (n: number, one: string, many: string) => (!n ? null : n > 1 ? `${n} ${many}` : one);
@@ -57,9 +61,10 @@ const union = <T>(a: T[], b: T[], key: (x: T) => string = String) => {
 };
 
 // a list of numbers or names: what is new in b
-function listSection<T>(read: (rom: Rom) => T[], remove: PartSection<T[], T[]>['remove'], summary: PartSection<T[], T[]>['summary'], key: (x: T) => string = String): PartSection<T[], T[]> {
+function listSection<T>(read: (rom: Rom) => T[], remove: PartSection<T[], T[]>['remove'], summary: PartSection<T[], T[]>['summary'], removal: PartSection<T[], T[]>['removal'], key: (x: T) => string = String): PartSection<T[], T[]> {
   return {
     summary,
+    removal,
     none: () => [],
     read,
     remove,
@@ -83,9 +88,10 @@ function changedTiles(a: string[], b: string[], first: number): number[] {
 }
 
 // extended Map16 tiles it filled (read: each tile's content, [] while the table is not installed)
-function tileSection(read: (rom: Rom) => string[], first: number, remove: PartSection<string[], number[]>['remove']): PartSection<string[], number[]> {
+function tileSection(label: string, read: (rom: Rom) => string[], first: number, remove: PartSection<string[], number[]>['remove']): PartSection<string[], number[]> {
   return {
     summary: (p) => (p.length ? 'Map16 tiles' : null),
+    removal: (p) => (p.length ? `${p.length} ${label} tile(s)` : null),
     none: () => [],
     read,
     remove,
@@ -101,14 +107,14 @@ const patches: PartSection<string[], string[]> = {
   ...listSection((rom) => listPatches(rom).filter((p) => !p.kind || p.kind === 'patch').map((p) => p.id), (rom, mine) => {
     const order = listPatches(rom).map((p) => p.id);
     return mine.filter((x) => order.includes(x)).sort((a, b) => order.indexOf(b) - order.indexOf(a)).flatMap((id) => uninstallPatch(rom, id));
-  }, (p) => count(p.length, 'Patch', 'patches')),
+  }, (p) => count(p.length, 'Patch', 'patches'), (p) => (!p.length ? null : p.length > 1 ? `${p.length} patches` : 'the patch')),
   merge: (r, p, now) => union(r.filter((id) => now.includes(id)), p),
 };
 
-type UberPart = PackageParts['uber'];
+type UberPart = PackageParts['uberasm'];
 interface UberRead { files: Map<string, number>; calls: Set<string>; other: Partial<Record<Other, string>> }
 // UberASM files (with their content), calls (ctx:num:file) and the other list.txt entries
-export const uber = {
+export const uberasm = {
   none: () => ({ files: [], calls: [], other: {} }),
   read(rom) {
     const p = tryLoad(() => loadProject(rom));
@@ -130,6 +136,7 @@ export const uber = {
   merge: (r, p) => ({ files: union(r.files, p.files), calls: union(r.calls, p.calls, (c) => c.join(':')), other: { ...r.other, ...p.other } }),
   empty: (p) => !p.files.length && !p.calls.length && !Object.keys(p.other).length,
   summary: (p) => (p.files.length || p.calls.length ? 'UberASM' : null),
+  removal: (p) => (p.files.length ? `${p.files.length} UberASM file(s) with their assignments` : null),
   // its calls still in the project
   owned: (mine: UberPart, p: UberProject) => mine.calls.filter(([ctx, num, file]) => p.list[ctx].get(num)?.some((c) => c.file === file)),
   remove(rom, mine, others) {
@@ -149,9 +156,9 @@ export const uber = {
   },
 } satisfies PartSection<UberRead, UberPart> & Owns;
 
-type BlocksPart = PackageParts['blocks'];
+type BlocksPart = PackageParts['block'];
 // block files and the Map16 tiles they are on (tile → file)
-export const blocks = {
+export const block = {
   none: () => ({ files: [], tiles: [] }),
   read(rom) {
     const p = tryLoad(() => loadBlockProject(rom));
@@ -161,21 +168,22 @@ export const blocks = {
   merge: (r, p) => ({ files: union(r.files, p.files), tiles: union(r.tiles, p.tiles) }),
   empty: (p) => !p.files.length && !p.tiles.length,
   summary: (p) => count(p.tiles.length, 'Block', 'blocks'),
+  removal: (p) => (p.tiles.length ? `block(s) at ${p.tiles.map((t) => hex(t, 3)).join(', ')}` : null),
   // its blocks in the project: on one of its tiles with one of its files
   owned: (mine: BlocksPart, p: BlockProject) => p.list.filter((b) => mine.tiles.includes(b.tile) && mine.files.includes(b.file)),
   remove(rom, mine, others, blank) {
     const p = loadBlockProject(rom);
     if (!p) return [];
-    const own = new Set(blocks.owned(mine, p));
+    const own = new Set(block.owned(mine, p));
     p.list = p.list.filter((b) => !own.has(b));
     for (const f of mine.files) if (!others.some((o) => o.files.includes(f))) p.files.delete(f);
-    return check(saveBlockProject(rom, p, blank), 'Custom Blocks');
+    return check(saveBlockProject(rom, p), 'Custom Blocks');
   },
 } satisfies PartSection<{ files: Map<string, number>; tiles: Map<number, string> }, BlocksPart> & Owns;
 
-type PixiPart = PackageParts['pixi'];
+type SpritePart = PackageParts['sprite'];
 // sprite files and the list entries (kind:num → file)
-export const pixi = {
+export const sprite = {
   none: () => ({ files: [], list: [] }),
   read(rom) {
     const p = tryLoad(() => loadPixiProject(rom));
@@ -188,20 +196,21 @@ export const pixi = {
   merge: (r, p) => ({ files: union(r.files, p.files), list: union(r.list, p.list, (e) => e.join(':')) }),
   empty: (p) => !p.files.length && !p.list.length,
   summary: (p) => count(p.list.length, 'Sprite', 'sprites'),
+  removal: (p) => (p.list.length ? `sprite(s) ${p.list.map(([, n]) => hex(n, 2)).join(', ')}` : null),
   // its sprites in the project: one of its kind/number entries with one of its files
-  owned(mine: PixiPart, p: PixiProject) {
+  owned(mine: SpritePart, p: PixiProject) {
     const keys = new Set(mine.list.map((e) => e.join(':')));
     return p.list.filter((e) => keys.has(`${e.kind}:${e.num}`) && mine.files.includes(e.file));
   },
   remove(rom, mine, others) {
     const p = loadPixiProject(rom);
     if (!p) return [];
-    const own = new Set(pixi.owned(mine, p));
+    const own = new Set(sprite.owned(mine, p));
     p.list = p.list.filter((e) => !own.has(e));
     for (const f of mine.files) if (!others.some((o) => o.files.includes(f))) p.files.delete(f);
     return check(savePixiProject(rom, p), 'Custom Sprites');
   },
-} satisfies PartSection<{ files: Map<string, number>; sprites: Map<string, string> }, PixiPart> & Owns;
+} satisfies PartSection<{ files: Map<string, number>; sprites: Map<string, string> }, SpritePart> & Owns;
 
 // ExGFX files it created (read: the file's address per number, 0 = none)
 const gfx: PartSection<number[], number[]> = {
@@ -211,6 +220,7 @@ const gfx: PartSection<number[], number[]> = {
   merge: (r, p) => union(r, p),
   empty: (p) => !p.length,
   summary: (p) => (p.length ? 'ExGFX' : null),
+  removal: (p) => (p.length ? p.map((n) => `ExGFX${hex(n, 2)}`).join(', ') : null),
   remove(rom, mine) {
     for (const n of mine) {
       const e = n >= VANILLA_GFX ? gfxEntry(rom, n) : null;
@@ -233,23 +243,23 @@ const music = listSection((rom) => (tryLoad(() => loadMusicProject(rom))?.songs 
   if (!r.ok) throw new Error(`Music: ${r.errors.join(' ')}`);
   for (let l = 0; l < 0x200; l++) if (nums.includes(levelMusic(rom, l)) && !p.songs.some((s) => s.num === levelMusic(rom, l))) setLevelMusic(rom, l, 0);
   return r.warnings;
-}, (p) => count(p.length, 'Song', 'songs'));
+}, (p) => count(p.length, 'Song', 'songs'), (p) => (!p.length ? null : `${p.length > 1 ? 'songs' : 'the song'} (AddmusicK inserts the music again)`));
 
 // emptied again, unless another package filled them too
-const map16 = tileSection((rom) => (map16Ext(rom) ? Array.from({ length: EXT_TILES - EXT_FIRST }, (_, i) => `${extTileWords(rom, EXT_FIRST + i)!.join()}:${actsLike(rom, EXT_FIRST + i)}`) : []), EXT_FIRST,
+const map16 = tileSection('FG Map16', (rom) => Array.from({ length: EXT_TILES - EXT_FIRST }, (_, i) => `${extTileWords(rom, EXT_FIRST + i)!.join()}:${actsLike(rom, EXT_FIRST + i)}`), EXT_FIRST,
   (rom, mine, others, blank) => {
-    for (const t of mine) if (map16Ext(rom) && !others.some((o) => o.includes(t))) { setExtTileWords(rom, t, blank, blank); setActsLike(rom, t, DEFAULT_ACTS, blank); }
+    for (const t of mine) if (!others.some((o) => o.includes(t))) { setExtTileWords(rom, t, blank); setActsLike(rom, t, DEFAULT_ACTS); }
     return [];
   });
-const bgMap16 = tileSection((rom) => (bgMap16Ext(rom) ? Array.from({ length: BG_EXT_TILES - BG_EXT_FIRST }, (_, i) => bgExtTileWords(rom, BG_EXT_FIRST + i)!.join()) : []), BG_EXT_FIRST,
+const bgMap16 = tileSection('BG Map16', (rom) => Array.from({ length: BG_EXT_TILES - BG_EXT_FIRST }, (_, i) => bgExtTileWords(rom, BG_EXT_FIRST + i)!.join()), BG_EXT_FIRST,
   (rom, mine, others) => {
     const fill = vanillaBgWords(rom, 0x025);
-    for (const t of mine) if (bgMap16Ext(rom) && !others.some((o) => o.includes(t))) setBgExtTileWords(rom, t, fill);
+    for (const t of mine) if (!others.some((o) => o.includes(t))) setBgExtTileWords(rom, t, fill);
     return [];
   });
 
 // every field of PackageParts has its adapter (the compiler checks it)
 type Sections = { [K in keyof PackageParts]-?: PartSection<any, NonNullable<PackageParts[K]>> };
-export const SECTIONS = { music, pixi, blocks, uber, patches, map16, bgMap16, gfx } satisfies Sections;
+export const SECTIONS = { music, sprite, block, uberasm, patches, map16, bgMap16, gfx } satisfies Sections;
 export type SectionKey = keyof typeof SECTIONS;
 export const SECTION_KEYS = Object.keys(SECTIONS) as SectionKey[];

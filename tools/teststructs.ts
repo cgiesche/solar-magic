@@ -10,10 +10,12 @@ import { saveLevel } from '../src/core/save.ts';
 import { exportLevelFile, importLevelFile } from '../src/core/levelfile.ts';
 import { loadAsar } from '../src/core/asar.ts';
 import { applyPatch, type PatchSource } from '../src/core/patchapply.ts';
+import { editorImage, cleanImage } from './fixture.ts';
 
-const file = 'test/fixtures/smw.smc';
-const orig = new Rom(new Uint8Array(readFileSync(file)));
-const rom = new Rom(new Uint8Array(readFileSync(file)));
+const EDITOR_IMAGE = await editorImage(); // the fixture as the editor opens it
+
+const orig = new Rom(cleanImage());
+const rom = new Rom(EDITOR_IMAGE.slice());
 let fail = 0;
 const check = (ok: boolean, what: string) => { if (!ok) { fail++; console.log('FAIL', what); } };
 
@@ -95,9 +97,9 @@ const back = loadLevel(rom, 0x105);
 const ss = back.objects.filter((o) => o.ext === STRUCT_EXT && o.num === 0);
 check(ss.length === 2 && ss[0].struct === 5 && ss[1].struct === 7 && ss[1].x === 0x50, 'save/load');
 
-// level file into a ROM without the patch: structures come along
+// level file into another ROM: structures come along
 const text = exportLevelFile(rom, back);
-const other = new Rom(new Uint8Array(readFileSync(file)));
+const other = new Rom(EDITOR_IMAGE.slice());
 writeStructure(other, 0, { w: 1, h: 1, tiles: [0x130], name: 'x' });
 const into = loadLevel(other, 0x106);
 const imp = importLevelFile(other, text, into);
@@ -114,7 +116,7 @@ await loadAsar();
 const src = (name: string, main: string): PatchSource => ({ name, main: 'main.asm', files: new Map([['main.asm', main]]) });
 const hit = applyPatch(rom, src('ExtObj03', 'lorom\norg $0DA118\ndl $0DA57B\n'));
 check(!hit.ok && hit.errors[0].includes('SMWS'), 'patch writing the slot rejected: ' + hit.errors[0]);
-const clean = new Rom(new Uint8Array(readFileSync(file)));
+const clean = new Rom(cleanImage());
 check(applyPatch(clean, src('ExtObj03', 'lorom\norg $0DA118\ndl $0DA57B\n')).ok, 'slot free for other patches without structures');
 let msg = '';
 try { installStructPatch(clean); } catch (e) { msg = (e as Error).message; }

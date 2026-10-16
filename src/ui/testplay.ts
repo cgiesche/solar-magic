@@ -6,10 +6,10 @@ import { h, modal } from './dom.ts';
 import { LevelEmulator } from '../core/levelemu.ts';
 import { PPU } from '../core/ppu.ts';
 import { hex } from '../core/names.ts';
-import { levelTranslevel, nearestEntrance, encodeSecondaryHeader } from '../core/level.ts';
+import { levelTranslevel, encodeSecondaryHeader, startHeader, entrancePos, mainSpot, type StartEntrance } from '../core/level.ts';
 import { Apu, apuReady, loadApu } from '../core/apu.ts';
 import { AudioOut } from './audio.ts';
-import { GM, RAM, set16 } from '../core/ram.ts';
+import { GM, RAM, marioX, marioY, setMarioPos } from '../core/ram.ts';
 
 const KEYMAP: Record<string, number> = {
   ArrowUp: 0x0800, ArrowDown: 0x0400, ArrowLeft: 0x0200, ArrowRight: 0x0100,
@@ -50,8 +50,11 @@ function readPads(): { bits: number; pause: boolean; names: string[] } {
 let testEmu: LevelEmulator | null = null;
 let soundMuted = false; // kept between test runs
 
-// at: Mario's start tile (his feet stand in it) instead of the main entrance
-export function openTestPlay(app: App, at?: { tx: number; ty: number }): void {
+// at: Mario's start tile (his feet stand in it) instead of the main entrance, with the camera start, options
+// (face left, water) and action of the entrance played from (a secondary entrance's; else the main entrance's
+// without an action)
+type Start = { tx: number; ty: number; entrance?: StartEntrance };
+export function openTestPlay(app: App, at?: Start): void {
   // the sound emulator loads once; the audio context must start within the key press or click
   const audio = new AudioOut(AUDIO_LEAD);
   if (!apuReady()) {
@@ -61,7 +64,7 @@ export function openTestPlay(app: App, at?: { tx: number; ty: number }): void {
   start(app, at, audio);
 }
 
-function start(app: App, at: { tx: number; ty: number } | undefined, audio: AudioOut): void {
+function start(app: App, at: Start | undefined, audio: AudioOut): void {
   if (!testEmu || testEmu.rom !== app.rom) {
     testEmu = new LevelEmulator(app.rom);
     if (apuReady()) testEmu.snes.apu = new Apu();
@@ -70,14 +73,15 @@ function start(app: App, at: { tx: number; ty: number } | undefined, audio: Audi
   const emu = testEmu;
   const lv = app.level;
   const ov = app.buildOverrides();
-  // the start position: the nearest main entrance setting loads the level around it (camera, tilemap),
-  // in gameplay Mario is then moved to the exact pixel
+  // the start position: the nearest main entrance setting loads the level around it (camera, tilemap; FG and
+  // BG start as set), in gameplay Mario is then moved to the exact pixel – with an entrance action by how far
+  // the setting is from it, keeping where the action put him (in the pipe, shot out of it)
   const start = at && { x: at.tx * 16, y: at.ty * 16 - 16 };
+  let move: { x: number; y: number } | undefined;
   if (start) {
-    const sec = { ...lv.secondary };
-    const p = nearestEntrance(app.rom, start.x, start.y, (sec.verticalPositioning & 1) !== 0, lv.header.screens - 1);
-    sec.entranceScreen = p.screen; sec.entranceX = p.ex; sec.entranceY = p.ey;
-    sec.entranceAction = 0;
+    const sec = startHeader(app.rom, lv.secondary, start.x, start.y, lv.header.screens - 1, app.entranceRows(), at.entrance);
+    const p = entrancePos(app.rom, mainSpot(sec), (sec.verticalPositioning & 1) !== 0);
+    if (sec.entranceAction) move = { x: start.x - p.x, y: start.y - p.y };
     ov.secondaryHeader = encodeSecondaryHeader(sec);
   }
   // a game in progress (lives, overworld with Mario on the level's tile): dying returns there
@@ -93,7 +97,8 @@ function start(app: App, at: { tx: number; ty: number } | undefined, audio: Audi
   if (start && r.ok) {
     try { for (let i = 0; i < 80 && s.wram[RAM.gameMode] !== GM.level; i++) s.runFrame(); } catch { /* shown when playing */ }
     const w = s.wram;
-    set16(w, RAM.marioX, start.x); set16(w, RAM.marioY, start.y);
+    if (move) setMarioPos(w, marioX(w) + move.x, marioY(w) + move.y);
+    else setMarioPos(w, start.x, start.y);
   }
   // sub-level loads keep the old timer; give the level its header time
   const hundreds = app.rom.r8(0x0584d7 + lv.header.time);

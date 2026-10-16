@@ -47,10 +47,13 @@ When a level is displayed, it runs the ROM's **original loading routines** (~15 
 
 ### Level editor
 * All 512 levels; list with level names (from the overworld), filter by number/name.
-* **Layer 1 / Layer 2 (in L2 levels) / Sprites / Screen exits / BG** as editing modes (keys 1–5).
+* **Layer 1 / Layer 2 (in L2 levels) / Sprites / Screen exits / BG / Layer 3** as editing modes (keys 1–6).
 * **Painting the background (BG mode):** edit the BG tilemap (32×27 BG Map16 tiles 000–1FF, up to FFF with the BG Map16 extension) with a brush
   – just like the other modes: click/drag picks up a tile or a block as the brush (in the level
   or in the palette), right-click/Shift+click paints (dragging keeps painting); it is saved in free space (BG patch).
+* **Painting layer 3 (Layer 3 mode):** the level's layer 3 tilemap in 8×8 tiles over the level, with the same brush
+  (picked from the level or layer 3's 2bpp tiles), palette, priority, flips and erase; saved into the level's
+  layer 3 tilemap file (LT3, a new one when it has none).
 * Objects: select (also by rectangle, Ctrl+click), move (mouse/arrow keys), resize via handle/keys,
   insert (right-click/Shift+click with a palette entry), delete, copy/paste/duplicate,
   drawing order (PgUp/PgDn), undo/redo.
@@ -66,10 +69,19 @@ When a level is displayed, it runs the ROM's **original loading routines** (~15 
   Which GFX/ExGFX files a level loads (graphics bypass) is set in the graphics section:
   *Graphics* → slot cards ("Swap …") or "Use in slot" next to a file on the right.
 * Screen exits per screen (destination, secondary), **secondary entrances** (dialog).
+* **Entrance options** (Lunar Magic's): Mario faces left, water level (Mario swims) for the main entrance
+  (also the midway point unless it has its own) and each secondary entrance; "Water level" for a secondary screen exit. With face
+  left the slanted pipe entrance shoots Mario out to the left. Test play from an entrance starts with them and
+  with its entrance action.
 * **Menu *Level*:** save as, **insert/delete screen** (shifts everything after it), clear level;
   **menu *File*:** **export/import as a `.smwlevel` file** (objects, sprites, exits, header, graphics bypass, custom palette).
-* **Entrance markers** for the main entrance (M), midway screen (Z) and secondary entrances (S) – movable by
+* **Entrance markers** for the main entrance (M), midway point (Z) and secondary entrances (S) – movable by
   dragging (snaps to the possible entrance positions).
+* **Midway entrance** (Lunar Magic 3.00's): dragging the midway point (Z) gives it its own tile, with its own
+  action, camera start and options (face left, water) in the exit panel; without them it shares the main
+  entrance's position within its screen, as in the game. Test play from it starts there. A standard screen exit
+  can "go to midway entrance" (Lunar Magic's): Mario comes out there when the target's midway point has its
+  own settings, else at its main entrance.
 * **Insert by number** (Ins/I): object, extended object or sprite with size/extra bits.
 * Menu *View*: grid, screen boundaries, toggle layers; **inactive layer translucent** (the object layer not being edited is semi-transparent);
   view with switch palaces pressed or ON/OFF set to OFF; zoom 50–400 %.
@@ -122,6 +134,12 @@ When a level is displayed, it runs the ROM's **original loading routines** (~15 
   Import either LZ2-compressed (original format, 2/3/4bpp) or as uniform **uncompressed 4bpp**
   (16 colors, via DMA from the ROM – no more 3bpp detour).
   The editor's own LZ2 compressor produces smaller data than the original.
+* **Used in levels:** for the selected Map16 tile (FG or BG), GFX file or sprite, the levels using it, how often,
+  in which slots or by which kind of object (object, Direct Map16, structure) – a click opens the level at the first place.
+  The Map16 tab also names the tiles acting like the tile, structures and custom blocks on it, and *Mark unused*
+  crosses out tiles 200–FFF that are defined but placed nowhere; the Graphics tab marks inserted ExGFX that no level
+  loads. Which tiles a level places is learned by loading it in the emulator (in the background, kept while the ROM
+  and the level are unchanged), like Lunar Magic's "Analyze Resources in Levels".
 
 ### Overworld editor (O)
 * Main map and all submaps; paint layer 1 (paths/level tiles) and layer 2 (terrain, 8x8) – mouse buttons as
@@ -145,8 +163,9 @@ When a level is displayed, it runs the ROM's **original loading routines** (~15 
 
 ## Custom ROM patch ("SMWE")
 
-Installed automatically when needed (or via *ROM → Install editor patch …*). It is assembled at runtime
-and changes only a few verified locations:
+Installed into the clean ROM when it is opened, together with the editor's other patches below (all but SMWM,
+which moves the message texts only when they no longer fit in place). The patches are assembled at runtime and
+change only a few verified locations:
 
 | Location | Purpose |
 |---|---|
@@ -162,12 +181,13 @@ and changes only a few verified locations:
 | `$00F545`, `$029328` ("SMWX") | Map16 "acts like" table for tiles 000–FFF (Mario, sprites, fireballs, blocks hit from below) |
 | `$058A66`, `$058B46`, `$058C34`, `$058D2B` | Tilemap building: tiles from 200 on come from the extended Map16 graphics table |
 | `$00C096`, `$00C0E7` | Tile replacement sets the page to 0/1 instead of only bit 0 (for tiles on page ≥ 2) |
+| `$00C176` | Tile replacement draws tiles from 200 on from the extended Map16 graphics table (blocks changing into such a tile) |
 | `$05B20F` ("SMWM") | Read message texts from free space (only if they no longer fit in place) |
 | `$058551` ("SMWU") | Music per level: song number from a table (512 levels) instead of the 8 header settings (`$0584DB`), 0 = header |
 | `$00AA50` ("SMWG") | BG2/BG3 graphics slots per level for Map16 tiles 200–2FF (as in Lunar Magic); requires the VRAM patch |
 | 13 locations ("SMWV") | VRAM patch: layer 1/2 tilemaps in levels 64×32 at `$3000`/`$3800` instead of 64×64 at `$2000`/`$3000` (like LM), so that BG2/BG3 have room; details in [docs/patches.md](docs/patches.md) |
 
-The tests check that all vanilla levels load identically with the patch installed.
+The tests check that all vanilla levels load identically with the patches installed.
 
 ## ASM patches, UberASM, custom blocks, custom sprites
 
@@ -194,8 +214,8 @@ Whose formats and interfaces the editor follows: [docs/credits.md](docs/credits.
   shift the numbers of subsequent levels.
 * Title screen and credits are not included.
 * ASM patches: LoROM only, no SA-1; patches that require Lunar Magic do not work.
-* Tested with the US ROM (`Super Mario World (U) [!]`, MD5 `cdd3c8c37322978ca8669b34bc89c804`). ROMs edited with
-  Lunar Magic use other hooks/formats and are not specifically supported.
+* Opens only the clean US ROM (`Super Mario World (U) [!]`, MD5 `cdd3c8c37322978ca8669b34bc89c804`, with or
+  without header) and ROMs/projects made with the editor; ROMs edited with Lunar Magic or other tools are not opened.
 
 ## Structure
 

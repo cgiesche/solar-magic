@@ -6,7 +6,7 @@ import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { PPU } from '../src/core/ppu.ts';
 import { loadAsar } from '../src/core/asar.ts';
-import { installVramPatch, uninstallVramPatch } from '../src/core/vrampatch.ts';
+import { installVramPatch } from '../src/core/vrampatch.ts';
 
 await loadAsar();
 let bad = 0;
@@ -92,9 +92,6 @@ console.log(`     lag frames: vanilla ${lagV}, patched ${lagP}`);
 check(tileBad === 0, `${compared} levels: visible tilemaps identical whenever the game state matches (${tileBad} levels differ)`);
 check(touching === 0, `no level writes VRAM $2000-$2FFF with the patch (${touching} do)`);
 
-uninstallVramPatch(rom);
-let diff = 0; for (let i = 0; i < file.length - 512 && i < rom.data.length; i++) if (rom.data[i] !== vanilla.data[i] && i !== 0x7fd7) diff++;
-check(diff === 0, `uninstall restores the ROM (${diff} bytes differ)`);
 
 console.log(bad ? `${bad} failures` : 'all ok');
 if (bad) process.exitCode = 1;

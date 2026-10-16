@@ -59,6 +59,13 @@ export function hexInput(value: number, digits: number, onChange: (v: number) =>
   return inp;
 }
 
+// a checkbox with its label (title: the tooltip)
+export function checkbox(label: string, title: string, checked: boolean, onChange: (on: boolean) => void): HTMLLabelElement {
+  const c = h('input', { type: 'checkbox', checked });
+  c.addEventListener('change', () => onChange(c.checked));
+  return h('label', { class: 'row', title }, c, label);
+}
+
 export function select(options: [number, string][], value: number, onChange: (v: number) => void): HTMLSelectElement {
   const s = h('select', null, options.map(([v, l]) => h('option', { value: String(v), selected: v === value }, l)));
   s.addEventListener('change', () => onChange(Number(s.value)));
@@ -66,7 +73,7 @@ export function select(options: [number, string][], value: number, onChange: (v:
 }
 
 // message log: every toast plus events that are worth knowing afterwards (shown in the log bar)
-export type LogKind = 'info' | 'error' | 'event';
+export type LogKind = 'info' | 'error' | 'warn' | 'output' | 'event';
 export interface LogEntry { time: Date; msg: string; kind: LogKind; count: number }
 export const logEntries: LogEntry[] = [];
 // listener gets the new/updated entry, or null when the log was cleared
@@ -87,6 +94,14 @@ export function log(msg: string, kind: LogKind = 'event'): void {
     if (logEntries.length > 500) logEntries.shift();
   }
   for (const fn of logListeners) fn(e, repeat);
+}
+// what a tool (Asar, UberASM, AddmusicK, PIXI …) reported: errors, warnings and its prints, each a line
+// of the log with the tool's name in front; `output`: everything the tool printed, as one entry
+export function logTool(tool: string, r: { errors: string[]; warnings: string[]; prints?: string[] }, output = ''): void {
+  for (const p of r.prints ?? []) log(`${tool}: ${p}`, 'output');
+  if (output.trim()) log(`${tool} output:\n${output.trimEnd()}`, 'output');
+  for (const w of r.warnings) log(`${tool}: ${w}`, 'warn');
+  for (const e of r.errors) log(`${tool}: ${e}`, 'error');
 }
 export function clearLog(): void {
   logEntries.length = 0;
@@ -147,10 +162,33 @@ export function modal(title: string, body: HTMLElement, buttons: { label: string
   return { close };
 }
 
-const ZOOM_STEPS = [0.5, 0.75, 1, 1.5, 2, 3, 4];
+// zoom levels of every view (1: one SNES pixel per screen pixel); a view uses a range of them
+// (the level, overworld and level preview 50–400%, the pixel editor up to 3200%)
+const ZOOM_STEPS = [0.5, 0.75, 1, 1.5, 2, 3, 4, 6, 8, 12, 16, 24, 32];
+export const ZOOM_MIN = 0.5, ZOOM_MAX = 4;
+
+// the next zoom level in or out (dir > 0: in) from z within [min, max], undefined at the end
+export function zoomStep(z: number, dir: number, min = ZOOM_MIN, max = ZOOM_MAX): number | undefined {
+  const steps = ZOOM_STEPS.filter((s) => s >= min && s <= max);
+  return dir > 0 ? steps.find((s) => s > z + 1e-6) : [...steps].reverse().find((s) => s < z - 1e-6);
+}
+
+// “− 100% +” of every view; update() shows the current zoom
+export function zoomControl(zoom: () => number, setZoom: (z: number) => void, min = ZOOM_MIN, max = ZOOM_MAX): { root: HTMLElement; update: () => void } {
+  const label = h('span', { class: 'zoom' });
+  const step = (dir: number) => { const z = zoomStep(zoom(), dir, min, max); if (z !== undefined) setZoom(z); };
+  const update = () => { label.textContent = `${Math.round(zoom() * 100)}%`; };
+  update();
+  return {
+    root: h('div', { class: 'row zoom-ctl' },
+      h('button', { onclick: () => step(-1), title: 'Zoom out (Ctrl+mouse wheel)' }, '−'), label,
+      h('button', { onclick: () => step(1), title: 'Zoom in (Ctrl+mouse wheel)' }, '+')),
+    update,
+  };
+}
 
 // Middle-button drag pans a scroll container; Ctrl+wheel zooms in steps around the cursor.
-export function attachPanZoom(scroller: HTMLElement, zoom: () => number, setZoom: (z: number, anchorX: number, anchorY: number) => void, min = 0.5, max = 4, zoomSteps = ZOOM_STEPS): void {
+export function attachPanZoom(scroller: HTMLElement, zoom: () => number, setZoom: (z: number, anchorX: number, anchorY: number) => void, min = ZOOM_MIN, max = ZOOM_MAX): void {
   let pan: { x: number; y: number; sl: number; st: number } | null = null;
   scroller.addEventListener('mousedown', (e) => {
     if (e.button !== 1) return;
@@ -178,9 +216,7 @@ export function attachPanZoom(scroller: HTMLElement, zoom: () => number, setZoom
     if (Math.abs(acc) < 50) return;
     const dir = acc < 0 ? 1 : -1;
     acc = 0;
-    const steps = zoomSteps.filter((s) => s >= min && s <= max);
-    const cur = zoom();
-    const next = dir > 0 ? steps.find((s) => s > cur + 1e-6) : [...steps].reverse().find((s) => s < cur - 1e-6);
+    const next = zoomStep(zoom(), dir, min, max);
     if (next === undefined) return;
     const rc = scroller.getBoundingClientRect();
     setZoom(next, e.clientX - rc.left, e.clientY - rc.top);
@@ -188,8 +224,9 @@ export function attachPanZoom(scroller: HTMLElement, zoom: () => number, setZoom
 }
 
 export type CellRect = { x: number; y: number; w: number; h: number };
-// palette sheets: a click picks a cell, dragging a rectangle of cells; show() previews the rectangle while dragging
-export function attachRectPick(c: HTMLElement, cols: number, rows: number, show: (r: CellRect) => void, done: (r: CellRect) => void): void {
+// palette sheets: a click picks a cell, dragging a rectangle of cells; show() previews the rectangle while dragging;
+// Ctrl+click goes to the cell's definition instead, if there is one (jump)
+export function attachRectPick(c: HTMLElement, cols: number, rows: number, show: (r: CellRect) => void, done: (r: CellRect) => void, jump?: (x: number, y: number) => void): void {
   const cellAt = (e: MouseEvent) => {
     const rc = c.getBoundingClientRect();
     return {
@@ -201,6 +238,7 @@ export function attachRectPick(c: HTMLElement, cols: number, rows: number, show:
     if (e.button !== 0) return;
     e.preventDefault();
     const a = cellAt(e);
+    if (jump && (e.ctrlKey || e.metaKey)) { jump(a.x, a.y); return; }
     let b = a;
     const rect = (): CellRect => ({ x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(a.x - b.x) + 1, h: Math.abs(a.y - b.y) + 1 });
     const move = (ev: MouseEvent) => {
@@ -233,6 +271,29 @@ export function choose(title: string, body: HTMLElement | string, options: { lab
 export function pickerOpen(el: HTMLElement): boolean {
   const a = document.activeElement;
   return a instanceof HTMLInputElement && a.type === 'color' && el.contains(a);
+}
+
+// eyedropper: the swatch of the hovered color next to the mouse (RGBA as packed by snesColorToRGBA,
+// null: transparent); hideColorLoupe() removes it. The pipette cursor is the CSS class 'pipette'.
+let loupe: { root: HTMLElement; sw: HTMLElement; text: HTMLElement } | null = null;
+export function showColorLoupe(e: MouseEvent, rgba: number | null, label = ''): void {
+  if (!loupe) {
+    const sw = h('span', { class: 'loupe-sw' }), text = h('span', { class: 'loupe-text' });
+    loupe = { root: h('div', { class: 'loupe' }, sw, text), sw, text };
+  }
+  if (!loupe.root.isConnected) document.body.append(loupe.root);
+  const r = rgba === null ? 0 : rgba & 0xff, g = rgba === null ? 0 : (rgba >> 8) & 0xff, b = rgba === null ? 0 : (rgba >> 16) & 0xff;
+  loupe.sw.classList.toggle('transp', rgba === null);
+  loupe.sw.style.background = rgba === null ? '' : `rgb(${r},${g},${b})`;
+  loupe.text.textContent = (label ? `${label} · ` : '') + (rgba === null ? 'transparent' : `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0').toUpperCase()}`);
+  // below right of the cursor; flipped at the window edges
+  const w = loupe.root.offsetWidth, hh = loupe.root.offsetHeight;
+  const x = e.clientX + 18 + w > innerWidth ? e.clientX - 10 - w : e.clientX + 18;
+  const y = e.clientY + 18 + hh > innerHeight ? e.clientY - 10 - hh : e.clientY + 18;
+  loupe.root.style.transform = `translate(${x}px, ${y}px)`;
+}
+export function hideColorLoupe(): void {
+  loupe?.root.remove();
 }
 
 // placeholder for an empty list or panel

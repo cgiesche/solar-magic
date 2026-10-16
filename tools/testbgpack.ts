@@ -7,36 +7,33 @@ import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadAsar } from '../src/core/asar.ts';
 import { uploadFiles } from '../src/core/patchpkg.ts';
-import { parseMwl, isLevelImport, planBgPack, applyBgPack, importLevelFile, levelColors } from '../src/core/bgpack.ts';
-import { bgTileWords, bgExtTileWords } from '../src/core/bgmap16.ts';
+import { parseMwl, isLevelImport, planBgPack, applyBgPack, importLevelFile } from '../src/core/bgpack.ts';
+import { levelColors } from '../src/core/levelgfx.ts';
+import { bgExtTileWords } from '../src/core/bgmap16.ts';
 import { parseMap16File } from '../src/core/map16file.ts';
 import { bgFromWram } from '../src/core/bg.ts';
-import { loadLevel, hasLayer2Objects } from '../src/core/level.ts';
+import { loadLevel, hasLayer2Objects, newUid } from '../src/core/level.ts';
+import { readLevelList, readAltFile, usesAltFile } from '../src/core/exanim.ts';
 import { saveLevel } from '../src/core/save.ts';
-import { levelGfx, levelExtGfx, GFX_SLOT_NAMES, gfxEntry, customPalette } from '../src/core/patches.ts';
+import { levelGfx, levelExtGfx, GFX_SLOT_NAMES, gfxEntry, customPalette, DM16_EXT } from '../src/core/patches.ts';
 import { renderLevel, map16Source } from '../src/core/render.ts';
 import { extTileWords, actsLike } from '../src/core/map16ext.ts';
 import { listPackages } from '../src/core/pkgreg.ts';
 import { installVramPatch } from '../src/core/vrampatch.ts';
+import { levelLayer3 } from '../src/core/layer3gfx.ts';
+import { editorImage } from './fixture.ts';
+
+const EDITOR_IMAGE = await editorImage(); // the fixture as the editor opens it
 
 await loadAsar();
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
 const same = (a: ArrayLike<number>, b: ArrayLike<number>) => a.length === b.length && Array.prototype.every.call(a, (v: number, i: number) => v === b[i]);
-const file = new Uint8Array(readFileSync('test/fixtures/smw.smc'));
+const file = EDITOR_IMAGE.slice();
 const LV = 0x105;
 let BLANK: number[] = [];
 { const rom = new Rom(file.slice()); const e = new LevelEmulator(rom); e.boot(); BLANK = map16Source(rom, e.load(LV)).fg(0x025); }
 
-// words of BG tile (x, y) in the layer 2 tilemap (VRAM, 64x64 cells without the VRAM patch): TL, BL, TR, BR
-const vramBg = (r: { vram: Uint8Array; ppuRegs: Uint8Array }, x: number, y: number) => {
-  const base = (r.ppuRegs[0x08] & 0xfc) << 8;
-  const cell = (cx: number, cy: number) => {
-    const wa = base + (cx >= 32 ? 0x400 : 0) + (cy >= 32 ? 0x800 : 0) + (cy & 31) * 32 + (cx & 31);
-    return r.vram[wa * 2] | (r.vram[wa * 2 + 1] << 8);
-  };
-  return [cell(2 * x, 2 * y), cell(2 * x, 2 * y + 1), cell(2 * x + 1, 2 * y), cell(2 * x + 1, 2 * y + 1)];
-};
 const bgAt = (bg: Uint16Array, x: number, y: number) => bg[(x >> 4) * 0x1b0 + y * 16 + (x & 15)];
 const color = (cg: Uint8Array, i: number) => cg[i * 2] | (cg[i * 2 + 1] << 8);
 
@@ -50,7 +47,7 @@ check(Math.min(...usedTiles) === 0x200 && Math.max(...usedTiles) === 0x257 && mw
 const map16 = parseMap16File(files.get('ghostbustersghosttrapjavamanhattanBG.map16')!);
 
 {
-  // without the VRAM patch: BG1 and the tiles, BG2/BG3 noted as not available
+  // BG1, the BG Map16 tiles and the colors (BG2/BG3: below)
   const rom = new Rom(file.slice());
   const emu0 = new LevelEmulator(rom); emu0.boot();
   const before = emu0.load(LV);
@@ -59,7 +56,6 @@ const map16 = parseMap16File(files.get('ghostbustersghosttrapjavamanhattanBG.map
   const lv = loadLevel(rom, LV);
   const r = applyBgPack(rom, lv, files, plan, { blank: BLANK, cgram: levelColors(before) });
   check(r.ok && !!r.bg, 'applied: ' + [...r.errors, ...r.notes].join(' | '));
-  check(r.notes.some((n) => n.includes('BG2 slot not available')), 'BG2/BG3 need the VRAM patch (noted)');
   check(map16.tiles.every((ws, i) => same(bgExtTileWords(rom, 0x200 + i)!, ws)), 'BG Map16 tiles 200-25F from the .map16');
   const bg1 = plan.gfx.find((g) => g.slot === 'BG1')!;
   check(levelGfx(rom, LV)[GFX_SLOT_NAMES.indexOf('BG1')] === bg1.num && !!gfxEntry(rom, bg1.num)?.raw, 'BG1 slot = the stored 4bpp ExGFX');
@@ -67,9 +63,6 @@ const map16 = parseMap16File(files.get('ghostbustersghosttrapjavamanhattanBG.map
   const emu = new LevelEmulator(rom); emu.boot();
   const after = emu.load(LV);
   check(after.ok && same(bgFromWram(after.wram), r.bg!), 'saved level loads the package BG');
-  let wrong = 0;
-  for (let y = 0; y < 27; y++) for (let x = 0; x < 32; x++) if (!same(vramBg(after, x, y), bgTileWords(rom, bgAt(r.bg!, x, y)))) wrong++;
-  check(!wrong, `game draws the package's BG tiles (${wrong} wrong)`);
   // the package's colors, the rest as before
   const pal = files.get('ghostbustersghosttrapjavamanhattanBG.pal')!;
   const exp = (i: number) => (pal[i * 3] >> 3) | ((pal[i * 3 + 1] >> 3) << 5) | ((pal[i * 3 + 2] >> 3) << 10);
@@ -82,10 +75,8 @@ const map16 = parseMap16File(files.get('ghostbustersghosttrapjavamanhattanBG.map
 }
 
 {
-  // with the VRAM patch: BG2/BG3 slots get the files, the game uploads them to VRAM $2000/$2800
+  // BG2/BG3 slots get the files, the game uploads them to VRAM $2000/$2800 (VRAM patch)
   const rom = new Rom(file.slice());
-  const v = installVramPatch(rom);
-  check(v.ok, 'VRAM patch installed ' + v.errors.join(' '));
   const emu0 = new LevelEmulator(rom); emu0.boot();
   const plan = planBgPack(rom, 'ghostbusters', files, BLANK);
   const lv = loadLevel(rom, LV);
@@ -153,7 +144,11 @@ const map16 = parseMap16File(files.get('ghostbustersghosttrapjavamanhattanBG.map
   check(!plan.gfx.some((g) => g.slot.startsWith('FG') && g.parts.join() === 'bg'), 'the background does not change FG slots');
   const pFg = plan.palettes.find((p) => p.file.endsWith('FG.pal'))!, pL3 = plan.palettes.find((p) => p.file.endsWith('L3.pal'))!;
   check(plan.palettes.length === 2 && pFg.colors.join() === Array.from({ length: 15 }, (_, i) => 33 + i).join() && !pFg.layer3 && pL3.colors.join() === '1,2,3,5,6' && pL3.layer3, 'palettes: FG colors 21-2F, layer 3 colors 1-6 (each .pal with its .palmask)');
-  check(plan.layer3.some((f) => f.endsWith('ExGFX3AB.bin')) && plan.layer3.some((f) => f.endsWith('ExGFX3AA.bin')), 'layer 3 files noted (LT3 tilemap 3AB, LG3 graphics 3AA)');
+  // layer 3 (Lunar Magic's layer 3 bypass): the tilemap 3AB at the start of layer 3, 0x2000 bytes (the LT3
+  // word's DDFF 01 00), the graphics 3AA in LG4; LG1-LG3 are the game's 28-2A
+  check(plan.layer3?.dest === 1 && plan.layer3.size === 0 && !!slots.LT3?.file?.endsWith('3AB.bin') && !!slots.LG4?.file?.endsWith('3AA.bin') && slots.LG4.parts.join() === 'layer3' && !slots.LG1 && !slots.LG2 && !slots.LG3,
+    'layer 3: LT3 tilemap 3AB (start of layer 3, 0x2000 bytes), LG4 graphics 3AA, LG1-LG3 the game\'s');
+  check(!plan.notes.some((n) => /3A[AB]/.test(n)), 'the layer 3 files are not "not used"');
   const lv = loadLevel(rom, LV);
   const r = importLevelFile(rom, lv, ssz, plan, { blank: BLANK, cgram: levelColors(before) });
   check(r.ok && !!r.bg, 'applied: ' + [...r.errors, ...r.notes].join(' | '));
@@ -168,8 +163,40 @@ const map16 = parseMap16File(files.get('ghostbustersghosttrapjavamanhattanBG.map
   const pal = ssz.get('sonicmaniasszact1FG.pal')!;
   const exp = (i: number) => (pal[i * 3] >> 3) | ((pal[i * 3 + 1] >> 3) << 5) | ((pal[i * 3 + 2] >> 3) << 10);
   check(after.ok && pFg.colors.every((i) => color(after.cgram, i) === exp(i)), 'FG colors in the game');
-  check([1, 2, 3, 5, 6].every((i) => color(after.cgram, i) === color(before.cgram, i)), 'layer 3 colors not taken over by default (layer 3 is not)');
+  const pal3 = ssz.get('sonicmaniasszact1BG-L3.pal')!;
+  const exp3 = (i: number) => (pal3[i * 3] >> 3) | ((pal3[i * 3 + 1] >> 3) << 5) | ((pal3[i * 3 + 2] >> 3) << 10);
+  check([1, 2, 3, 5, 6].every((i) => color(after.cgram, i) === exp3(i)), 'layer 3 colors taken over with layer 3');
+  const l3 = levelLayer3(rom, LV);
+  check(l3.lt3 === slots.LT3.num && l3.dest === 1 && l3.size === 0 && l3.lg.join() === [0xff, 0xff, 0xff, slots.LG4.num].join(), 'the level\'s layer 3 slots set');
+  const lg4 = ssz.get('ExGFX3AA.bin')!, lt3 = ssz.get('ExGFX3AB.bin')!;
+  check(lg4.every((b, i) => after.vram[0x9800 + i] === b), 'in the game: LG4 in VRAM $4C00');
+  check(lt3.subarray(0x140).every((b, i) => after.vram[0xa140 + i] === b), 'in the game: the layer 3 tilemap from VRAM $5000 (below the status bar)');
   check(listPackages(rom).length === 0, 'a level import creates no package record');
+}
+
+// Lunar Magic's AN2 and ExAnimation: On-Off Blocks' graphics without the code (a level import) – the FG
+// Map16 tiles and the two ExAnimation slots animating them come into the level, their frames from AN2
+// copied into Anim graphic A (with their GFX33 frames from RAM); in the game the tiles show AN2's frames by
+// the ON/OFF switch
+{
+  const all = uploadFiles('On-Off Block.zip', new Uint8Array(readFileSync('test/fixtures/On-Off Block.zip')));
+  const files = new Map([...all].filter(([k]) => !/\.(asm|txt)$/i.test(k)));
+  const rom = new Rom(file.slice());
+  const e = new LevelEmulator(rom); e.boot();
+  const l = e.load(LV);
+  const plan = planBgPack(rom, 'On-Off', files, BLANK);
+  const gfx = files.get('ExGraphics/ExGFX291.bin')!;
+  check(isLevelImport(files) && plan.frames.an2 === gfx && !plan.gfx.some((g) => g.file) && plan.exanim.length === 2 && plan.exanim.every((x) => x.parts.join() === 'fg') && !plan.notes.some((n) => /ExGFX291/.test(n)),
+    `plan: ExGFX291 the frames (AN2), not an ExGFX; 2 ExAnimation slots for the FG tiles (${plan.notes.join(' | ')})`);
+  const r = importLevelFile(rom, loadLevel(rom, LV), files, plan, { cgram: levelColors(l), wram: l.wram, blank: BLANK });
+  const list = readLevelList(rom, LV);
+  check(r.ok && list?.slots.size === 2 && [...list.slots.values()].every(usesAltFile) && readAltFile(rom, list.altFile)?.length === 0x200, `imported: the ExAnimation slots in level ${LV.toString(16)}, frames in its Anim graphic (${[...r.errors, ...r.notes].join(' | ')})`);
+  const lv = loadLevel(rom, LV);
+  lv.objects.push({ uid: newUid(), num: 0, ext: DM16_EXT, x: 4, y: 20, size: 0x00, tile: plan.fgAt });
+  saveLevel(rom, lv);
+  const vramAt = (off: boolean) => { const e2 = new LevelEmulator(rom); e2.boot(); e2.load(LV, { onOffSwitch: off }); for (let i = 0; i < 16; i++) e2.snes.runFrame(); return e2.snes.vram; };
+  const shows = (v: Uint8Array, at: number, from: number) => gfx.subarray(from, from + 0x80).every((x, i) => v[at + i] === x);
+  check(shows(vramAt(false), 0x4080, 0x80) && shows(vramAt(true), 0x4000, 0), 'in the game: the tiles show AN2\'s frames by the ON/OFF switch');
 }
 
 console.log(bad ? `${bad} FAILED` : 'all ok');

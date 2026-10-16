@@ -5,8 +5,7 @@ import { unzipSync, zipSync } from 'fflate';
 import { Rom } from './rom.ts';
 import { applyPatch, reapplyPatch, uninstallPatch, type ApplyResult } from './patchapply.ts';
 import { listPatches, patchArchive, missingSources, type PatchEntry } from './patchreg.ts';
-import { installEditorPatch } from './patches.ts';
-import { buildUberPatch, parseList, emptyList, writeList, type UberList } from './uberasm.ts';
+import { buildUberPatch, parseList, emptyList, writeList, type UberList, type UberContext } from './uberasm.ts';
 
 export interface UberProject { files: Map<string, Uint8Array>; list: UberList }
 
@@ -16,6 +15,17 @@ export function uberEntry(rom: Rom): PatchEntry | null {
 
 export function emptyProject(): UberProject {
   return { files: new Map(), list: emptyList() };
+}
+
+// an UberASM Tool list.txt: it has the sections of UberASM Tool
+export const isUberList = (text: string) => /^\s*(level|gamemode|overworld)\s*:/im.test(text);
+
+// assigns a file to a level, game mode or overworld map (num: ALL for every level), unless that call
+// (with these extra bytes) is there already – for installing and for the UberASM tab
+export function addCall(p: UberProject, ctx: UberContext, num: number, file: string, bytes: number[] = []): void {
+  const calls = p.list[ctx].get(num) ?? [];
+  if (!calls.some((c) => c.file === file && c.bytes.join() === bytes.join())) calls.push({ file, bytes });
+  p.list[ctx].set(num, calls);
 }
 
 // project from a zip/folder in UberASM Tool's layout (list.txt at the root or one folder down)
@@ -70,7 +80,6 @@ export function saveProject(rom: Rom, p: UberProject): ApplyResult {
     const warnings = e ? uninstallPatch(rom, e.id) : [];
     return { ok: true, errors: [], warnings, prints: [] };
   }
-  installEditorPatch(rom); // level resources use the level number in $7E010B
   const b = buildUberPatch(p.files, p.list);
   const r = e ? reapplyPatch(rom, e.id, b.source) : applyPatch(rom, b.source);
   r.warnings.unshift(...b.warnings);

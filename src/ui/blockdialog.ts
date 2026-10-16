@@ -4,9 +4,8 @@
 
 import type { App } from './app.ts';
 import { h, hexInput, select, type Child } from './dom.ts';
-import { loadBlockProject, saveBlockProject, projectToZip, blockFiles, blocksEntry, type BlockProject } from '../core/blocks.ts';
+import { loadBlockProject, saveBlockProject, projectToZip, blockFiles, blocksEntry, assignBlock, type BlockProject } from '../core/blocks.ts';
 import { EXT_FIRST, EXT_TILES } from '../core/map16ext.ts';
-import { map16Source } from '../core/render.ts';
 import { hex } from '../core/names.ts';
 import { definesButton } from './defineedit.ts';
 import { projectPane, type Pane } from './projectpane.ts';
@@ -40,8 +39,7 @@ export function blockPane(app: App, changed: () => void): BlockPane {
     actsIn.disabled = !ownActs;
     const actsBox = h('input', { type: 'checkbox', checked: ownActs, onchange: () => { ownActs = actsBox.checked; actsIn.disabled = !ownActs; } });
     const add = () => {
-      proj.list = proj.list.filter((b) => b.tile !== tile);
-      proj.list.push({ tile, file, acts: ownActs ? acts : undefined });
+      assignBlock(proj, { tile, file, acts: ownActs ? acts : undefined });
       change();
     };
     const rows = [...proj.list].sort((a, b) => a.tile - b.tile).map((b) => h('tr', { class: b.tile === tile ? 'selected' : '' },
@@ -64,12 +62,12 @@ export function blockPane(app: App, changed: () => void): BlockPane {
 
   pane = projectPane<BlockProject>(app, {
     title: 'Blocks',
-    tool: 'blocks',
+    tool: 'block',
     intro: 'Blocks with custom behavior, each assigned to a Map16 tile.',
     format: 'GPS format: “db $42”/“db $37” and a JMP table with MarioBelow, MarioAbove, MarioSide, SpriteV, SpriteH, MarioCape, MarioFireball, TopCorner, BodyInside, HeadInside [, WallFeet, WallBody]. Shared routines from routines/ are called as %name(); those of GPS are built in. “acts like” sets the behavior without custom code.',
     load: () => loadBlockProject(app.rom),
     empty: () => ({ files: new Map(), list: [] }),
-    save: (p) => { const r = saveBlockProject(app.rom, p, map16Source(app.rom, app.render).fg(0x025)); cache = null; return r; },
+    save: (p) => { const r = saveBlockProject(app.rom, p); cache = null; return r; },
     toZip: projectToZip,
     zipName: 'blocks.zip',
     content,

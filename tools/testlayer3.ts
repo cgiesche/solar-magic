@@ -6,10 +6,11 @@ import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadLevel, serializeLayer1, encodeSecondaryHeader, readSecondaryHeader } from '../src/core/level.ts';
 import { renderLevel } from '../src/core/render.ts';
 import { layer3Kind, layer3Kinds, tideRangeJob, layer3Top, type TideRange } from '../src/core/layer3.ts';
+import { editorImage } from './fixture.ts';
 
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
-const rom = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
+const rom = new Rom(await editorImage());
 const emu = new LevelEmulator(rom); emu.boot();
 
 const ovOf = (n: number, tileset?: number) => {

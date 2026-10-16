@@ -14,6 +14,7 @@ import { hex } from '../../core/names.ts';
 import { customPalette, setCustomPalette } from '../../core/patches.ts';
 import { parsePrimaryHeader, L1_PTRS, type PrimaryHeader } from '../../core/level.ts';
 import type { LevelRender } from '../../core/levelemu.ts';
+import { animLinks, colorAnimsAt } from './animtab.ts';
 
 // vanilla palette tables (bank $00)
 const BACK_AREA = 0x00b0a0;
@@ -72,6 +73,7 @@ function originName(o: Origin): string {
 export class PaletteTab implements WsPanel {
   root: HTMLElement;
   private app: App;
+  private ws: GfxWorkspace;
   private trace: LevelRender | null = null;
   private custom = 0;
   private sel = 0x21;
@@ -88,8 +90,9 @@ export class PaletteTab implements WsPanel {
   private rowLabels: HTMLElement[] = [];
   private visible = false;
 
-  constructor(app: App, _ws: GfxWorkspace) {
+  constructor(app: App, ws: GfxWorkspace) {
     this.app = app;
+    this.ws = ws;
     this.root = h('div', { class: 'pt' }, this.bar, h('div', { class: 'pt-main' }, h('div', { class: 'pt-left' }, this.rows, this.headerBox), this.detail));
     app.on('render', () => { if (this.visible) { this.retrace(); this.paint(); } });
     app.on('rom-change', () => {
@@ -116,6 +119,8 @@ export class PaletteTab implements WsPanel {
     this.paint();
   }
   hide(): void { this.visible = false; }
+
+  get selected(): number { return this.sel; }
 
   select(i: number): void {
     this.sel = this.selEnd = i & 0xff;
@@ -228,7 +233,6 @@ export class PaletteTab implements WsPanel {
     this.custom = 0;
     this.trace = null;
     this.headers = null;
-    app.flushRomChange();
     this.retrace();
     this.buildBar();
     this.paint();
@@ -241,7 +245,7 @@ export class PaletteTab implements WsPanel {
     if (locked && changes.length > 1) toast(`${locked} color${locked > 1 ? 's' : ''} set by the game skipped (only editable with an own palette)`);
     if (!ok.length) return;
     if (!(await this.allowed(ok.map(([i]) => i)))) { this.paint(); return; }
-    this.app.romEdit(label, () => { for (const [i, v] of ok) this.app.rom.w16(this.src(i), v & 0x7fff); }, key);
+    this.app.romEdit(label, () => { for (const [i, v] of ok) this.app.rom.w16(this.src(i), v & 0x7fff); }, { key });
     this.paint();
   }
 
@@ -283,6 +287,7 @@ export class PaletteTab implements WsPanel {
         const sw = h('div', { class: 'pt-sw' });
         sw.addEventListener('mousedown', (e) => {
           e.preventDefault();
+          if (e.button === 0 && (e.ctrlKey || e.metaKey)) { this.gotoAnim(i); return; }
           if (e.shiftKey && (this.sel >> 4) === row) this.selEnd = i;
           else this.sel = this.selEnd = i;
           this.paint();
@@ -307,7 +312,7 @@ export class PaletteTab implements WsPanel {
       const animated = !!this.app.animated()?.colors.has(i);
       sw.classList.toggle('locked', locked);
       sw.classList.toggle('animated', animated);
-      sw.title = `Color ${hex(i >> 4, 1)}·${hex(i & 15, 1)} – ${locked ? 'set by the game, not editable (only with an own palette)' : originName(this.origin(i))}${animated ? ' · animated: the game keeps rewriting it' : ''}`;
+      sw.title = `Color ${hex(i >> 4, 1)}·${hex(i & 15, 1)} – ${locked ? 'set by the game, not editable (only with an own palette)' : originName(this.origin(i))}${animated ? ' · animated: the game keeps rewriting it (Ctrl+click: open its animation)' : ''}`;
     }
     for (let row = 0; row < 16; row++) {
       const names: string[] = [];
@@ -334,11 +339,13 @@ export class PaletteTab implements WsPanel {
     const o = this.origin(i);
     const users = editable ? this.affected(i) : null;
     const others = users ? users.filter((n) => n !== this.app.level.number).length : 0;
+    const own = colorAnimsAt(this.app, i);
     d.append(
       h('div', { class: 'pt-big', style: { background: cssOf(c) } }),
       h('div', { class: 'prop-title' }, `Color ${hex(i >> 4, 1)}·${hex(i & 15, 1)}`, h('span', { class: 'hint' }, `  Palette ${hex(i >> 4, 1)}, color ${hex(i & 15, 1)}`)),
       h('div', { class: 'hint' }, editable ? `${originName(o)} · ${o.kind === 'own' ? 'applies to this level only' : others ? `also in ${others} other level${others === 1 ? '' : 's'}` : 'this level only'}` : ''),
-      this.app.animated()?.colors.has(i) ? h('div', { class: 'warn-box' }, 'Animated: the game keeps rewriting this color (flashing coins, ?-blocks etc.). A change here is barely or not at all visible in the game.') : '',
+      own.length ? h('div', { class: 'warn-box' }, 'Animated by ', animLinks(this.ws, own), ' – the level shows its colors instead of this one.')
+        : this.app.animated()?.colors.has(i) ? h('div', { class: 'warn-box' }, 'Animated: the game keeps rewriting this color (flashing coins, ?-blocks etc.). A change here is barely or not at all visible in the game.') : '',
     );
     if (!editable) {
       d.append(
@@ -462,17 +469,34 @@ export class PaletteTab implements WsPanel {
     toast(`${n} colors applied${n < 256 ? ' (the game sets the rest; “Own palette” makes all editable)' : ''}`);
   }
 
-  // pipette: the CGRAM entry with the clicked pixel's color (FG/BG rows first)
-  previewClick(px: number, py: number): void {
+  // pipette: the CGRAM entry with the pixel's color (FG/BG rows first), -1 if none has it
+  private entryAt(px: number, py: number): number {
     const im = this.app.images;
     const v = this.app.compositeImg[py * im.width + px];
     const pal = cgramToRGBA(this.app.render.cgram);
     const order = [2, 3, 4, 5, 6, 7, 0, 1, 8, 9, 10, 11, 12, 13, 14, 15];
     for (const row of order) for (let c = 1; c < 16; c++) {
-      if (pal[row * 16 + c] === v) { this.select(row * 16 + c); return; }
+      if (pal[row * 16 + c] === v) return row * 16 + c;
     }
-    if (pal[0] === v || (v >>> 0) === (im.backdrop >>> 0)) { this.select(0); return; }
-    toast('Color not found in the palette (blended/transparent?)');
+    return pal[0] === v || (v >>> 0) === (im.backdrop >>> 0) ? 0 : -1;
+  }
+
+  previewClick(px: number, py: number): void {
+    const i = this.entryAt(px, py);
+    if (i >= 0) this.select(i);
+    else toast('Color not found in the palette (blended/transparent?)');
+  }
+
+  previewColor(px: number, py: number): { rgba: number; label: string } {
+    const i = this.entryAt(px, py);
+    return { rgba: this.app.compositeImg[py * this.app.images.width + px], label: i >= 0 ? `Color ${hex(i >> 4, 1)}·${hex(i & 15, 1)}` : 'not in the palette' };
+  }
+
+  // Ctrl+click: the own animation that rewrites the color, in the Animations tab
+  private gotoAnim(i: number): void {
+    const own = colorAnimsAt(this.app, i);
+    if (own.length) { this.ws.showAnim(own[0].global, own[0].slot); return; }
+    toast(`Color ${hex(i >> 4, 1)}·${hex(i & 15, 1)} is ${this.app.animated()?.colors.has(i) ? 'animated by the game itself, not by an own animation' : 'not animated'}.`);
   }
 
   key(e: KeyboardEvent): boolean {
@@ -480,7 +504,7 @@ export class PaletteTab implements WsPanel {
     const k = e.key;
     if (ctrl && k.toLowerCase() === 'c') { this.copyRow(); return true; }
     if (ctrl && k.toLowerCase() === 'v') { this.pasteRow(); return true; }
-    if (!ctrl && (k === 'ArrowLeft' || k === 'ArrowRight' || k === 'ArrowUp' || k === 'ArrowDown')) {
+    if (!ctrl && !e.altKey && (k === 'ArrowLeft' || k === 'ArrowRight' || k === 'ArrowUp' || k === 'ArrowDown')) {
       const d = k === 'ArrowLeft' ? -1 : k === 'ArrowRight' ? 1 : k === 'ArrowUp' ? -16 : 16;
       this.select((this.sel + d + 256) & 0xff);
       return true;

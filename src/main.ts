@@ -1,25 +1,20 @@
 import './style.css';
 import { Rom } from './core/rom.ts';
-import { wrapLegacyPatches } from './core/packages.ts';
 import { openLevelImport } from './ui/levelimport.ts';
 import { createBps, crc32 } from './core/bps.ts';
-
-const SMW_CLEAN_CRC = 0xb19ed489; // Super Mario World (U), headerless
-import { disableUnsafeExtGfx, hasEditorPatch } from './core/patches.ts';
+import { prepareRom, SMW_CLEAN_CRC } from './core/editorpatches.ts';
 import { App, type EditMode } from './ui/app.ts';
-import { h, clear, toast, log, modal, choose } from './ui/dom.ts';
+import { h, clear, toast, log, modal, choose, zoomControl } from './ui/dom.ts';
 import { downloadBytes, pickFile, saveFile, filePath, fileName, desktop, guardClose } from './ui/platform.ts';
 import { LogBar } from './ui/logbar.ts';
 import { kvGet, kvSet, kvDel, kvClear, saveRom, romFromRecord, type RomRecord } from './ui/storage.ts';
-import { migratePatchSources } from './core/patchreg.ts';
-import { migratePackageFiles } from './core/pkgreg.ts';
-import { moveBrowserPackageFiles } from './ui/pkgtrack.ts';
 import { LevelView } from './ui/levelview.ts';
 import { LevelList, Palette, Properties } from './ui/panels.ts';
+import { openSearch } from './ui/search.ts';
 import { openHeaderDialog } from './ui/headerdialog.ts';
 import { hex } from './core/names.ts';
 import { GfxWorkspace, type WsTab } from './ui/gfxworkspace.ts';
-import { openEntrancesDialog, openRomInfo, openInsertDialog, openExpandDialog, installEditorPatchAction, openSaveAsDialog, exportLevel, importLevel, openScreenDialog, clearLevelConfirm } from './ui/tools.ts';
+import { openEntrancesDialog, openRomInfo, openInsertDialog, openExpandDialog, openSaveAsDialog, exportLevel, importLevel, openScreenDialog, clearLevelConfirm } from './ui/tools.ts';
 import { menuBar, closeMenus } from './ui/menu.ts';
 import { viewMenu } from './ui/viewmenu.ts';
 import { LEVEL_FILE_EXT } from './core/levelfile.ts';
@@ -28,6 +23,7 @@ import { OverworldView } from './ui/overworld.ts';
 import { openTestPlay } from './ui/testplay.ts';
 import { openMessagesDialog } from './ui/messagedialog.ts';
 import { map16Tile } from './core/ram.ts';
+import { NavHistory, fromHash, type NavLoc } from './ui/navhistory.ts';
 
 const root = document.getElementById('app')!;
 
@@ -55,7 +51,7 @@ async function openFile(f: File): Promise<void> {
   const data = new Uint8Array(await f.arrayBuffer());
   let rom: Rom;
   try { rom = Rom.fromFile(data); } catch (e) { toast(`Could not open “${f.name}”: ${e instanceof Error ? e.message : e}`, 'error'); return; }
-  startWith(rom, f.name);
+  if (!(await startWith(rom, f.name))) return;
   saveRom(f.name, rom).catch(() => {});
   const path = filePath(f);
   setProjectPath(path && /\.smwproj$/i.test(path) ? path : null);
@@ -68,38 +64,32 @@ function setProjectPath(path: string | null): void {
   (path ? kvSet('projectPath', path) : kvDel('projectPath')).catch(() => {});
 }
 
-function startWith(rom: Rom, name: string): void {
+// false if the ROM cannot be opened
+async function startWith(rom: Rom, name: string): Promise<boolean> {
   log(`ROM “${name}” loaded (${Math.round(rom.size / 1024)} KB${rom.smcHeader ? ', with header' : ''}${rom.extra.size ? `, editor data ${Math.round(rom.extraSize / 1024)} KB` : ''})`);
-  // sources older versions kept in the ROM go into the editor data, freeing the ROM space
+  // a clean ROM gets the editor's patches; anything but it and the editor's own ROMs is refused
   try {
-    const moved = [migratePatchSources(rom), migratePackageFiles(rom)].some(Boolean);
-    if (moved) { saveRom(name, rom).catch(() => {}); log('Sources of patches and packages moved out of the ROM into the editor data (saved with “Save project”).'); }
-  } catch (e) { console.warn('migrating sources', e); }
-  // patches applied before packages were tracked: a legacy package each
-  try {
-    const legacy = wrapLegacyPatches(rom);
-    if (legacy.length) { saveRom(name, rom).catch(() => {}); log(`${legacy.length} patch(es) applied before packages were tracked are now listed as legacy packages.`); }
-  } catch (e) { console.warn('legacy packages', e); }
-  if (disableUnsafeExtGfx(rom)) {
-    saveRom(name, rom).catch(() => {});
-    toast('BG2/BG3 graphics were turned off: they overwrote the layer 1 tilemap (broken background). The assignments stay saved and apply again once the VRAM patch is available.', 'error');
-  }
-  if (!rom.title().startsWith('SUPER MARIOWORLD')) {
-    toast(`Unexpected ROM title "${rom.title()}" – trying anyway.`, 'error');
+    if (await prepareRom(rom)) { saveRom(name, rom).catch(() => {}); log('Editor patches installed.'); }
+  } catch (e) {
+    toast(`Could not open “${name}”: ${e instanceof Error ? e.message : e}`, 'error');
+    return false;
   }
   let app: App;
   try {
     app = new App(rom, name);
   } catch (e) {
     toast(`Emulator start failed: ${e}`, 'error');
-    return;
+    return false;
   }
   (window as unknown as { app: App }).app = app;
-  buildUi(app);
-  app.openLevel(0x105);
-  // files of packages older versions kept in the browser go into the editor data
-  void moveBrowserPackageFiles(app).then((n) => { if (n) log(`Files of ${n} package(s) moved from the browser into the editor data (saved with “Save project”).`); })
-    .catch((e) => console.warn('moving package files', e));
+  const ui = buildUi(app);
+  // a reload stays where it was: the entry of the browser history, else the place in the URL
+  const st: unknown = history.state;
+  const at = st && typeof st === 'object' && 'nav' in st ? (st as { nav: NavLoc }).nav : fromHash(location.hash);
+  // a level is open before the UI starts: the workspaces and the restore read app.level
+  app.openLevel(at?.w === 'level' ? at.level : 0x105);
+  void ui.start(at);
+  return true;
 }
 
 // spinner pill for background analyses; shown after a short delay so quick jobs don't flicker,
@@ -118,7 +108,7 @@ function busyIndicator(app: App): HTMLElement {
   return el;
 }
 
-function buildUi(app: App): void {
+function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   clear(root);
   const status = h('div', { class: 'statusbar' });
   const view = new LevelView(app, status);
@@ -134,9 +124,9 @@ function buildUi(app: App): void {
   // ---- level context bar: mode, view, zoom
   const modeBtn = (m: EditMode, label: string, key: string) => h('button', { class: 'mode', 'data-mode': m, title: `${label} (${key})`, onclick: () => app.setMode(m) }, label);
   const modes = h('div', { class: 'btn-group' },
-    modeBtn('l1', 'Layer 1', '1'), modeBtn('l2', 'Layer 2', '2'), modeBtn('spr', 'Sprites', '3'), modeBtn('exit', 'Entrances/Exits', '4'), modeBtn('bg', 'BG', '5'));
+    modeBtn('l1', 'Layer 1', '1'), modeBtn('l2', 'Layer 2', '2'), modeBtn('spr', 'Sprites', '3'), modeBtn('exit', 'Entrances/Exits', '4'), modeBtn('bg', 'BG', '5'), modeBtn('l3', 'Layer 3', '6'));
   const levelTitle = h('span', { class: 'level-title' });
-  const zoomLabel = h('span', { class: 'zoom' });
+  const zoomCtl = zoomControl(() => app.zoom, (z) => view.setZoom(z));
   const levelBar = h('div', { class: 'ctxbar' },
     levelTitle,
     h('button', { onclick: () => openHeaderDialog(app), title: 'Level header (H)' }, 'Header …'),
@@ -145,13 +135,15 @@ function buildUi(app: App): void {
     h('span', { class: 'sep' }),
     viewMenu(app, () => view.paint()),
     h('span', { class: 'sep' }),
-    h('div', { class: 'row zoom-ctl' },
-      h('button', { onclick: () => view.setZoom(app.zoom / 2), title: 'Zoom out (Ctrl+mouse wheel)' }, '−'), zoomLabel,
-      h('button', { onclick: () => view.setZoom(app.zoom * 2), title: 'Zoom in (Ctrl+mouse wheel)' }, '+')),
+    zoomCtl.root,
   );
 
   // ---- app bar: menus, workspace switcher, main actions
   const testHere = () => { const hv = view.hover; openTestPlay(app, hv ? { tx: hv.tx, ty: hv.ty } : undefined); };
+  // central search (Ctrl+F): a result is shown in the level workspace
+  const search = () => openSearch(palette.searchProviders().map((p) => ({
+    ...p, search: (terms) => p.search(terms).map((r) => ({ ...r, pick: () => void setWorkspace('level').then((ok) => { if (ok) r.pick(); }) })),
+  })));
   const insertHere = () => { const hv = view.hover, c = view.centerTile(); openInsertDialog(app, hv ? hv.tx : c.tx, hv ? hv.ty : c.ty); };
   const menus = menuBar([
     { label: 'File', items: [
@@ -188,9 +180,11 @@ function buildUi(app: App): void {
       { label: 'Expand ROM …', disabled: () => app.rom.size >= 0x400000, onClick: () => openExpandDialog(app) },
       'sep',
       { label: 'Packages …', title: 'Third-party content: upload packages (patches, UberASM, blocks, sprites, music) and configure what they brought', onClick: () => openResources(app, 'packages') },
-      { label: 'Install editor patch …', disabled: () => hasEditorPatch(app.rom), onClick: () => installEditorPatchAction(app) },
       'sep',
       { label: 'Message boxes …', onClick: () => openMessagesDialog(app) },
+    ] },
+    { label: 'Search', items: [
+      { label: 'Search everywhere …', shortcut: 'Ctrl+F', title: 'Objects, extended objects, Map16 tiles, structures and sprites by number, name or behavior', onClick: search },
     ] },
     { label: 'Help', items: [
       { label: 'Keyboard shortcuts …', shortcut: '?', onClick: () => showHelp() },
@@ -199,17 +193,17 @@ function buildUi(app: App): void {
   ]);
   const wsBtn = (w: typeof workspace, label: string, key: string) => h('button', { 'data-ws': w, title: `${label} (${key})`, onclick: () => setWorkspace(w) }, label);
   const wsSwitch = h('div', { class: 'btn-group ws-switch' }, wsBtn('level', 'Level', 'Esc'), wsBtn('ow', 'Overworld', 'O'), wsBtn('gfx', 'Graphics', 'P / M / G / A'));
+  const backBtn = h('button', { onclick: () => history.back(), title: 'Back to the place before (Alt+←, mouse back button)', disabled: true }, '←');
+  const fwdBtn = h('button', { onclick: () => history.forward(), title: 'Forward (Alt+→, mouse forward button)', disabled: true }, '→');
   const undoBtn = h('button', { onclick: () => (workspace === 'ow' ? ow?.undo() : app.undo()), title: 'Undo (Ctrl+Z)' }, '↶');
   const redoBtn = h('button', { onclick: () => (workspace === 'ow' ? ow?.redo() : app.redo()), title: 'Redo (Ctrl+Y)' }, '↷');
   const saveBtn = h('button', { class: 'primary', onclick: () => (workspace === 'ow' ? ow?.save() : app.saveLevel()) });
   const testBtn = h('button', { onclick: () => openTestPlay(app), title: 'Test the level in the built-in emulator (T, Shift+T: from the mouse position)' }, '▶ Test');
   const appbar = h('header', { class: 'appbar' },
-    h('span', { class: 'brand' }, 'Solar Magic'),
-    menus,
-    h('span', { class: 'spacer' }),
+    // three columns, so nothing moves when the buttons on the right change their labels with the workspace
+    h('div', { class: 'appbar-l' }, h('span', { class: 'brand' }, 'Solar Magic'), menus, h('div', { class: 'btn-group' }, backBtn, fwdBtn)),
     wsSwitch,
-    h('span', { class: 'spacer' }),
-    undoBtn, redoBtn, saveBtn, testBtn,
+    h('div', { class: 'appbar-r' }, undoBtn, redoBtn, saveBtn, testBtn),
   );
 
   const updateToolbar = () => {
@@ -218,7 +212,7 @@ function buildUi(app: App): void {
     btnL2.disabled = !app.level?.layer2Objects;
     (modes.querySelector('[data-mode="bg"]') as HTMLButtonElement).disabled = !app.level || !app.canEditBg();
     if (app.level) levelTitle.textContent = `Level ${hex(app.level.number, 3)}${app.dirty ? ' *' : ''}`;
-    zoomLabel.textContent = `${Math.round(app.zoom * 100)}%`;
+    zoomCtl.update();
     for (const b of wsSwitch.querySelectorAll('button')) b.classList.toggle('active', b.dataset.ws === workspace);
     const inOw = workspace === 'ow' && ow;
     saveBtn.textContent = inOw ? `Save overworld${ow!.dirty ? ' *' : ''}` : `Save level${app.dirty ? ' *' : ''}`;
@@ -275,13 +269,14 @@ function buildUi(app: App): void {
         ow = new OverworldView(app);
         ow.onChange = updateToolbar;
         ow.onOpenLevel = async (n) => { if (await setWorkspace('level')) app.openLevel(n); };
+        ow.onNav = () => nav?.mark();
       }
       owRight.replaceChildren(ow.side);
       showLayout(ow.bar, ow.left, ow.root, owRight);
       layout.classList.add('ow-mode');
       ow.show();
     } else if (w === 'gfx') {
-      if (!ws) ws = new GfxWorkspace(app);
+      if (!ws) { ws = new GfxWorkspace(app); ws.onNav = (jump) => nav?.mark(jump); }
       showLayout(ws.bar, left, ws.root, ws.side);
       layout.classList.add('gfx-mode');
       // the level view is only up to date when coming from it
@@ -293,8 +288,64 @@ function buildUi(app: App): void {
       view.layout();
     }
     updateToolbar();
+    nav?.mark();
     return true;
   };
+
+  // ---- browser back/forward through the places (navhistory.ts)
+  let nav: NavHistory | null = null;
+  const capture = (): NavLoc => {
+    if (workspace === 'ow' && ow) return { w: 'ow', map: ow.map };
+    if (workspace === 'gfx' && ws) {
+      const t = ws.tab;
+      if (t === 'pal') return { w: 'gfx', tab: t, pal: ws.pal.selected };
+      if (t === 'map16') { const s = ws.map16.selected; return { w: 'gfx', tab: t, m16: s.tile, bg: s.bg }; }
+      if (t === 'gfx') return { w: 'gfx', tab: t, gfx: ws.gfx.selected };
+      return { w: 'gfx', tab: t, anim: ws.anim.selected };
+    }
+    // the view is only laid out while the level workspace is shown
+    const c = workspace === 'level' ? view.centerTile() : null;
+    return { w: 'level', level: app.level.number, mode: app.mode, ...(c ? { cx: c.tx, cy: c.ty } : {}) };
+  };
+  const restore = async (l: NavLoc): Promise<boolean> => {
+    if (!(await setWorkspace(l.w))) return false;
+    if (l.w === 'ow') ow!.setMap(l.map);
+    else if (l.w === 'gfx') {
+      if (l.tab === 'pal' && l.pal !== undefined) ws!.showPalette(l.pal >> 4, l.pal & 15);
+      else if (l.tab === 'map16' && l.m16 !== undefined) ws!.showMap16(l.m16, l.bg);
+      else if (l.tab === 'gfx' && l.gfx !== undefined) ws!.showGfx(l.gfx);
+      else if (l.tab === 'anim' && l.anim) ws!.showAnim(l.anim.global, l.anim.slot);
+      else ws!.open(l.tab);
+    } else {
+      if (l.level !== app.level.number) app.openLevel(l.level);
+      const m = l.mode;
+      if (m && m !== app.mode && (m !== 'l2' || app.level.layer2Objects) && (m !== 'bg' || app.canEditBg())) app.setMode(m);
+      if (l.cx !== undefined && l.cy !== undefined) {
+        // after the level image is laid out
+        await new Promise((r) => requestAnimationFrame(r));
+        view.scrollToTile(l.cx, l.cy);
+      }
+    }
+    return true;
+  };
+  const updateNav = () => {
+    backBtn.disabled = !nav?.canBack;
+    fwdBtn.disabled = !nav?.canForward;
+  };
+  app.on('level', () => nav?.mark());
+  // the desktop app has no browser that does it
+  if (desktop) {
+    window.addEventListener('keydown', (e) => {
+      if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || document.querySelector('.modal-back')) return;
+      const t = e.target as HTMLElement;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
+      if (workspace === 'level' && app.selection.size) return; // resizes the selection
+      if (e.key === 'ArrowLeft') { e.preventDefault(); history.back(); } else if (e.key === 'ArrowRight') { e.preventDefault(); history.forward(); }
+    });
+    window.addEventListener('mouseup', (e) => {
+      if (e.button === 3) { e.preventDefault(); history.back(); } else if (e.button === 4) { e.preventDefault(); history.forward(); }
+    });
+  }
   app.on('open-map16', () => setWorkspace('gfx', { tab: 'map16', tile: app.wsTile, bg: app.wsTileBg }));
   app.on('open-gfx', () => {
     const n = app.wsGfx;
@@ -310,6 +361,7 @@ function buildUi(app: App): void {
   });
 
   window.onkeydown = (e: KeyboardEvent) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f' && !e.altKey && !document.querySelector('.modal-back')) { e.preventDefault(); search(); return; }
     const t = e.target as HTMLElement;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
     if (document.querySelector('.modal-back')) return;
@@ -345,6 +397,7 @@ function buildUi(app: App): void {
     else if (k === '3') app.setMode('spr');
     else if (k === '4') app.setMode('exit');
     else if (k === '5') app.setMode('bg');
+    else if (k === '6') app.setMode('l3');
     else if (k === 'h' || k === 'H') openHeaderDialog(app);
     else if ((k === 't' || k === 'T') && e.shiftKey) testHere();
     else if (k === 't' || k === 'T') openTestPlay(app);
@@ -373,6 +426,15 @@ function buildUi(app: App): void {
   guardClose(() => app.dirty || !!ow?.dirty);
   updateToolbar();
   levels.build();
+  return {
+    // the first place: from a reload, else the level opened at the start
+    async start(at) {
+      if (at) await restore(at);
+      nav = new NavHistory(capture, restore, () => !!document.querySelector('.modal-back'));
+      nav.onChange = updateNav;
+      updateNav();
+    },
+  };
 }
 
 function hoverTile(app: App, tx: number, ty: number): number {
@@ -437,8 +499,10 @@ function showHelp(): void {
     ['General', [
       ['Ctrl+S', 'Save (level or overworld)'],
       ['Ctrl+Z / Ctrl+Y', 'Undo / Redo'],
+      ['Alt+← / Alt+→ · mouse back/forward buttons', 'Back / forward through the places opened (workspace, level, overworld map, graphics tab, Ctrl+click jumps)'],
       ['Esc / O / M · P · A', 'Workspace level / overworld / graphics (Map16, palettes, animations)'],
       ['Ctrl+mouse wheel · Middle mouse button drag', 'Zoom · Pan view'],
+      ['Ctrl+F', 'Search everywhere: objects, Map16 tiles, structures, sprites (Tab: only one group)'],
       ['? / F1', 'This overview'],
       ['L', 'Expand/collapse log (all messages with time)'],
       ['Menus: ↑ ↓ ← → / Enter / Esc', 'Choose entry, neighboring menu / run / close'],
@@ -450,8 +514,9 @@ function showHelp(): void {
       ['Handle at bottom right', 'Resize object'],
       ['Right click / Shift+click', 'Place the element chosen in “Insert”'],
       ['BG: click/drag · right click/Shift+click', 'Pick up tile(s) as brush · paint'],
+      ['Ctrl+click on a Map16/BG tile in “Insert”', 'Go to definition: the tile in the Map16 tab of the graphics area'],
       ['Ins / I', 'Insert object/sprite by number (at the mouse)'],
-      ['Drag M / Z / S marker', 'Move main entrance / midway screen / secondary entrance'],
+      ['Drag M / Z / S marker', 'Move main entrance / midway point / secondary entrance'],
       ['Entrances/Exits: click · right click', 'Choose entrance or screen (exit), edit on the right · new secondary entrance, create exit, entrance here'],
       ['Arrow keys · Alt+arrow keys', 'Move selection by 1 tile · resize'],
       ['+ / - · * / /', 'Change width · change height'],
@@ -472,6 +537,7 @@ function showHelp(): void {
     ['Graphics', [
       ['P / M / G / A', 'Tab palettes / Map16 tiles / graphics / animations; Esc back to the level'],
       ['Ctrl+C / Ctrl+V', 'Copy / paste palette, Map16 tiles or pixels'],
+      ['Ctrl+click', 'Go to definition: an animated tile or color opens its own animation, a Map16 quarter its 8x8 tile, a palette button its palette'],
       ['Palettes: arrow keys · Shift+click', 'Other color · mark a range (for “Gradient”)'],
       ['Map16: X / Y / 1–8 / Q', 'Flip quarter / palette 0–7 / next quarter; arrows: other tile'],
       ['Map16: double click · Ctrl+click on palette', 'Edit quarter in “Graphics” · open palette in “Palettes”'],
@@ -501,16 +567,14 @@ window.addEventListener('drop', (e) => {
     const res = await fetch(q);
     if (res.ok) {
       const data = new Uint8Array(await res.arrayBuffer());
-      startWith(Rom.fromFile(data), q.split('/').pop() ?? 'rom.smc');
-      return;
+      if (await startWith(Rom.fromFile(data), q.split('/').pop() ?? 'rom.smc')) return;
     }
   }
   try {
     const saved = await kvGet<RomRecord>('rom');
     if (saved?.data) {
       if (desktop) projectPath = (await kvGet<string>('projectPath')) ?? null;
-      startWith(romFromRecord(saved), saved.name);
-      return;
+      if (await startWith(romFromRecord(saved), saved.name)) return;
     }
   } catch (e) {
     console.warn(e);

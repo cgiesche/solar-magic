@@ -5,7 +5,7 @@
 // AddmusicK at once (music.ts), as one undoable ROM edit. Songs come with packages (upload them).
 
 import type { App } from './app.ts';
-import { h, clear, modal, toast, select } from './dom.ts';
+import { h, clear, modal, toast, select, logTool } from './dom.ts';
 import { downloadBytes } from './platform.ts';
 import { hex } from '../core/names.ts';
 import {
@@ -15,7 +15,7 @@ import {
 } from '../core/music.ts';
 import { levelMusic, setLevelMusic, musicPatch, HEADER_MUSIC_TABLE } from '../core/patches.ts';
 import { musicPlayer } from './musicplayer.ts';
-import { patchesChanged, errorText, type Pane } from './projectpane.ts';
+import { errorText, type Pane } from './projectpane.ts';
 import { listPackages, type Package } from '../core/pkgreg.ts';
 import { strFromU8, strToU8 } from 'fflate';
 
@@ -75,7 +75,6 @@ export function playSong(app: App, s: SongInfo): void {
 // runs AddmusicK on the project, with a note while it works; `then`: further ROM changes of the same
 // undo step once inserted. true when inserted
 export async function insertMusic(app: App, p: MusicProject, what: string, then?: () => void): Promise<boolean> {
-  if (app.dirty) app.saveLevel(true);
   musicPlayer.stop();
   const wait = modal('Music', h('p', null, `${what} – AddmusicK is inserting the music …`), []);
   let r;
@@ -87,13 +86,11 @@ export async function insertMusic(app: App, p: MusicProject, what: string, then?
     });
   } catch (e) { r = { ok: false, errors: [errorText(e)], warnings: [], log: '' }; }
   wait.close(true);
+  logTool('AddmusicK', r, r.log);
   if (!r.ok) {
-    modal('Music – AddmusicK failed', h('div', { class: 'patch-log' },
-      r.errors.map((e) => h('div', { class: 'err' }, e)),
-      r.log ? h('details', null, h('summary', null, 'AddmusicK output'), h('pre', { class: 'amk-log' }, r.log)) : ''), [{ label: 'OK', primary: true }]);
+    toast(`${what}: AddmusicK failed – ${r.errors[0] ?? 'error'}`, 'error');
     return false;
   }
-  patchesChanged(app);
   toast(`${what}${r.warnings.length ? ` – ${r.warnings.join(' ')}` : ''}`);
   return true;
 }
@@ -152,6 +149,7 @@ export function openSongSettings(proj: MusicProject, song: MusicSong, save: (s: 
     status.textContent = 'AddmusicK is compiling the song …';
     const p: MusicProject = { songs: [{ ...song, defines: v }], files: proj.files };
     void songSpcs(p, [song.file]).then((r) => {
+      if (r.errors.length) logTool('AddmusicK', { errors: r.errors, warnings: [] }, r.log);
       const spc = spcOf(r.spcs, song.file);
       status.textContent = spc ? '' : `AddmusicK could not compile the song: ${r.errors.join(' ') || 'no SPC'}`;
       if (spc) void musicPlayer.playSpc(spc, label);
@@ -256,7 +254,6 @@ export function musicPane(app: App, changed: () => void): Pane {
   const setForLevel = (num: number) => {
     try {
       app.romEdit(`Music of level ${hex(app.level.number, 3)}`, () => setLevelMusic(app.rom, app.level.number, levelMusic(app.rom, app.level.number) === num ? 0 : num));
-      patchesChanged(app);
     } catch (e) { toast(errorText(e), 'error'); return; }
     render();
   };

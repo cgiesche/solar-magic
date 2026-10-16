@@ -1,41 +1,49 @@
 // Application state and editing actions.
 
-import { Rom, snesToPc } from '../core/rom.ts';
-import { LevelEmulator, OV_L1, OV_L2, type LevelRender, type LevelOverride, MAP_BASE, MAP_SIZE } from '../core/levelemu.ts';
+import { Rom } from '../core/rom.ts';
+import { LevelEmulator, type LevelRender, type LevelOverride, MAP_BASE, MAP_SIZE } from '../core/levelemu.ts';
 import {
-  type Level, type LevelObject, type LevelSprite, type ScreenExit, type SecondaryEntrance, loadLevel, spriteLoadOrder, serializeLayer1, serializeLayer2, serializeSprites, spriteSizes, spriteId, spriteBytes,
-  isL1Vertical, cloneLevel, newUid, hasLayer2Objects, hasObjects, L1_PTRS, L2_PTRS, SEC_HDR,
-  readSecondaryEntrance, writeSecondaryEntrance, entrancePos, nearestEntrance, encodeSecondaryHeader,
+  type Level, type LevelObject, type LevelSprite, type ScreenExit, type SecondaryEntrance, loadLevel, spriteLoadOrder, serializeLayer1, serializeSprites, serializeLevelSprites, spriteSizes, spriteId, spriteBytes,
+  isL1Vertical, cloneLevel, newUid, hasLayer2Objects, hasObjects, L2_PTRS, SEC_HDR,
+  readSecondaryEntrance, writeSecondaryEntrance, decodeSecondaryEntrance, entrancePos, nearestEntrance, encodeSecondaryHeader, mainSpot, secondarySpot, sameSpot, placeMain, placeSecondary, midwaySpot, nearestMidway, placeMidway, exitLandsAtMidway, isSized, SPRITE_MEMORY, levelRows,
 } from '../core/level.ts';
 import { hex, spriteName } from '../core/names.ts';
 import { loadPixiProject, customSpriteList, type CustomSprite } from '../core/pixi.ts';
-import { renderLevel, type LevelImages, composite, map16Source } from '../core/render.ts';
-import { EXT_FIRST, map16Ext, installMap16Ext } from '../core/map16ext.ts';
+import { renderLevel, type LevelImages, composite } from '../core/render.ts';
 import { saveLevel } from '../core/save.ts';
 import { captureSprites, captureSpriteAt, type SpriteImage } from '../core/spritegfx.ts';
 import { spriteMemJob, usedSpriteMemory } from '../core/spritemem.ts';
-import { DM16_EXT, hasEditorPatch, installEditorPatch, levelGfx, defaultGfx } from '../core/patches.ts';
+import { DM16_EXT, levelGfx, levelExtGfx, customPalette, levelMusic, defaultGfx } from '../core/patches.ts';
 import { gfxSkipMask, gfxFilesHash } from '../core/gfxpages.ts';
 import { STRUCT_EXT, STRUCT_MAX, TRANSPARENT, listStructures, readStructure, writeStructure, type Structure } from '../core/structs.ts';
 import type { Package } from '../core/pkgreg.ts';
-import { kvEntries, kvKeys, kvWrite, saveRom } from './storage.ts';
+import { kvEntries, kvWrite, saveRom } from './storage.ts';
 import { ResultCache, RomFingerprint, RomReads, type CacheEntry } from '../core/romdeps.ts';
 import { bgFromWram, bgIndex, encodeBg } from '../core/bg.ts';
+import { lt3Override, lt3Target, lt3Covers, layer3Map, layer3Word, layer3Index, blankLayer3Tile } from '../core/layer3map.ts';
+import { layer3Geometry, type Layer3Geometry } from '../core/render.ts';
 import { toast, log as logMsg, modalsOpen, onModalsChange } from './dom.ts';
 import { musicPlayer } from './musicplayer.ts';
 import { ExitGraph, exitTarget } from '../core/exitgraph.ts';
-import { RomHistory, type RomEdit } from '../core/romhistory.ts';
+import type { RomHistory, RomEdit } from '../core/romhistory.ts';
+import { RomEditSession, type EditOptions } from '../core/romedit.ts';
 import { LevelHistory } from '../core/levelhistory.ts';
 import { resizeObjectSize, type ObjKind, type ObjKinds } from '../core/objkinds.ts';
 import { JumpArcs, ARC_SPEEDS, type JumpArc } from '../core/jumparcs.ts';
 import { scanKey, type ScanResult } from '../core/levelscan.ts';
 import { layer3Kinds, tideKind, layer3Top, type Layer3Kind } from '../core/layer3.ts';
+import { layer2MotionsJob, type Layer2Motions } from '../core/l2scroll.ts';
 import { variantOf, blockKey, spriteKey, type BlockProbe, type SpriteProbe } from '../core/blockprobe.ts';
 import type { ProbeReply } from '../core/probehost.ts';
 import { ProbeClient } from '../core/probeclient.ts';
 import { map16Tile, bgTile } from '../core/ram.ts';
+import { exanimTiles, exanimColors } from '../core/exanim.ts';
+import { LevelUses, levelTilesOf, levelOverride, usedLevels, spriteUsage, type LevelTiles, type SpriteUser } from '../core/levelusage.ts';
 
-export type EditMode = 'l1' | 'l2' | 'spr' | 'exit' | 'bg';
+export type EditMode = 'l1' | 'l2' | 'spr' | 'exit' | 'bg' | 'l3';
+// the modes painted with a brush of tiles picked from the level or the palette: BG tiles, layer 3's 8x8 tiles
+export const isBrushMode = (m: EditMode) => m === 'bg' || m === 'l3';
+export interface Brush { w: number; h: number; tiles: number[] }
 export type PaletteItem =
   // block: a rectangle of Map16 tiles from the palette sheet (tile + row * 16 + col), one Direct-Map16 object each
   // struct: structure number (extended object $03, see structs.ts)
@@ -57,10 +65,12 @@ export type AppEvent =
   | 'level-header' // the level's header, GFX slots or palette changed
   | 'mode' // the edit mode (layer 1/2, sprites, BG, exits …) changed
   | 'render' // the level was emulated and drawn again
-  | 'rom-change' // the ROM was written (romWritten, romChanged)
+  | 'rom-change' // the ROM was written (a ROM edit, undo/redo, a level save)
   | 'probes' // the asked or the prefetched probes are done (block, collision, sprite, run speeds)
   | 'objkinds' // object kinds asked for are known (or failed)
   | 'level-scan' // the level scan of the level as edited is known
+  | 'level-uses' // more levels' Map16 tiles are known (levelTiles)
+  | 'palette-item' // a sprite was chosen in the palette
   | 'arcs' // jump arcs asked for are known
   | 'sprites' // sprite images were captured
   | 'sprite-mem' // the sprite memory check of the level is known
@@ -68,7 +78,7 @@ export type AppEvent =
   | 'anim-frame' // the next frame of the level animation is shown
   | 'palettes' // the palettes changed (sprite images are captured again)
   | 'structs' // the structure table changed
-  | 'bgtile' // the BG brush changed (picked from the level)
+  | 'bgtile' // the BG or layer 3 brush changed (picked from the level)
   | 'reveal' // the level view scrolls to App.reveal
   | 'zoom' // the level view's zoom changed
   | 'busy' // background work (setBusy), a modal or the music player changed
@@ -97,7 +107,8 @@ export class App {
   selection = new Set<number>();
   paletteItem: PaletteItem | null = null;
   // BG mode brush: a w×h block of BG Map16 tiles (row-major), picked from the palette sheet or the level
-  bgBrush: { w: number; h: number; tiles: number[] } = { w: 1, h: 1, tiles: [0] };
+  bgBrush: Brush = { w: 1, h: 1, tiles: [0] };
+  l3Brush: Brush = { w: 1, h: 1, tiles: [0] }; // layer 3 tilemap words
   zoom = 2;
   show = { layer1: true, layer2: true, layer3: true, sprites: true, grid: false, screens: true, exits: true, ghost: true, anim: false, items: true, collision: false, arcs: false };
   // view-only game state applied before the emulated level load
@@ -105,8 +116,9 @@ export class App {
   dirty = false;
   private levelHistory = new LevelHistory<Level>(cloneLevel);
   private editToken = 0; // the latest begun level edit (older handles do nothing)
-  // undo for ROM edits of the graphics workspace (palettes, Map16, GFX, slot assignments)
-  romHistory: RomHistory;
+  // every ROM edit goes through it (romEdit): one undo step, all or nothing, the follow-ups below
+  romEdits: RomEditSession;
+  get romHistory(): RomHistory { return this.romEdits.history; }
   wsTile = 0; // Map16 tile for 'open-map16' (opens the graphics workspace there)
   wsTileBg = false; // wsTile is a BG tile
   gfxImport: { file: File; into: Package | null } | null = null; // for 'import-gfx'
@@ -154,12 +166,24 @@ export class App {
     this.emu.boot();
     onModalsChange(() => { this.resumeBackground(); this.emit('busy'); });
     musicPlayer.onChange(() => { this.resumeBackground(); this.emit('busy'); });
-    this.romHistory = new RomHistory(rom);
+    this.romEdits = new RomEditSession(rom, {
+      prepare: () => { if (this.level && this.dirty) this.saveLevel(true); },
+      written: (w) => {
+        if (w.recorded) this.pushOrder('rom', this.romHistory.undoStack.length);
+        this.romChanged();
+      },
+      followUps: [
+        // the open level as stored (a patch rewrote its sprite data, a package its sample …): loaded again
+        { read: (r) => (this.level ? levelSignature(r, this.level.number) : ''), changed: () => this.reloadLevel() },
+        // its graphics slots, own palette or music: shown at once
+        { read: (r) => (this.level ? headerSignature(r, this.level.number) : ''), changed: () => { this.flushRomChange(); this.emit('level-header'); } },
+        { read: (r) => structuresSignature(r), changed: () => { this.flushRomChange(); this.emit('structs'); this.emit('change'); } },
+      ],
+    });
     this.results = new ResultCache(new RomFingerprint(rom));
     this.cacheReady = kvEntries<CacheEntry>(CACHE_PREFIX)
       .then((e) => this.results.load(e.map(([k, v]) => [k.slice(CACHE_PREFIX.length), v])))
       .catch((e) => console.error(e));
-    // results of older formats
     this.probes = new ProbeClient({
       results: this.results,
       cacheReady: this.cacheReady,
@@ -180,13 +204,13 @@ export class App {
       ready: () => this.emit('probes'),
       kindsReady: () => this.emit('objkinds'),
     });
-    kvKeys('rc').then((k) => kvWrite([], k.filter((x) => !x.startsWith(CACHE_PREFIX)))).catch(() => {});
-    kvKeys('objkinds-').then((k) => kvWrite([], k)).catch(() => {}); // object kinds before they were in the result cache
-    kvKeys('docs:').then((k) => kvWrite([], k)).catch(() => {}); // copies of package manuals (they come from the packages now)
     this.results.onChange = () => {
       if (!this.cacheTimer && !this.closed) this.cacheTimer = window.setTimeout(() => this.storeResults(), 3000);
     };
-    window.addEventListener('pagehide', () => { if (this.cacheTimer && !this.closed) { clearTimeout(this.cacheTimer); this.storeResults(); } });
+    window.addEventListener('pagehide', () => {
+      if (this.cacheTimer && !this.closed) { clearTimeout(this.cacheTimer); this.storeResults(); }
+      if (this.persistTimer) { clearTimeout(this.persistTimer); this.persistTimer = 0; this.persist(); } // a ROM edit not stored yet
+    });
   }
 
   private storeResults(): void {
@@ -270,21 +294,12 @@ export class App {
   }
 
   buildOverrides(): LevelOverride {
-    const lv = this.level;
-    const owners1: number[] = [];
-    const l1 = serializeLayer1(this.rom, lv, owners1);
-    const owners2: number[] = [];
-    const l2 = serializeLayer2(this.rom, lv, owners2);
-    const byteOwner = new Int32Array(0x10000).fill(-1);
-    owners1.forEach((o, i) => (byteOwner[OV_L1 + i] = o));
-    owners2.forEach((o, i) => (byteOwner[OV_L2 + i] = o < 0 ? -1 : 0x8000 | o));
+    const lv = this.level, ov = levelOverride(this.rom, lv);
     return {
-      layer1: l1,
-      layer2: l2 ?? undefined,
-      layer2Pointer: l2 ? undefined : lv.layer2Pointer,
-      bgData: !l2 && lv.bg ? encodeBg(lv.bg) : undefined,
-      sprites: serializeSprites(lv.sprites, lv.spriteHeader, this.vertical, spriteSizes(this.rom)),
-      byteOwner,
+      ...ov,
+      bgData: !ov.layer2 && lv.bg ? encodeBg(lv.bg) : undefined,
+      layer3: lt3Override(this.rom, lv),
+      sprites: serializeLevelSprites(this.rom, lv),
       switchPalaces: this.switches.palaces,
       onOffSwitch: this.switches.onOff,
       secondaryHeader: encodeSecondaryHeader(lv.secondary),
@@ -300,7 +315,7 @@ export class App {
     this.renderError = r.ok ? null : r.error ?? 'Error';
     this.anim.snaps = this.show.anim && r.ok ? this.emu.animationFrames() : [];
     this.render = r;
-    this.images = renderLevel(this.rom, r, lv.header.mode, lv.header.screens);
+    this.images = renderLevel(this.rom, r, lv.header.mode, lv.header.screens, levelRows(lv.secondary));
     this.compositeImg = this.compose();
     this.buildOffsetMaps();
     this.findSecondaryEntrances();
@@ -315,9 +330,9 @@ export class App {
     this.emit('render');
   }
 
-  // the object layer not being edited is ghosted (only in levels with two object layers)
+  // the object layer not being edited is ghosted (only in levels with two object layers), editing layer 3 both
   compose(images = this.images): Uint32Array {
-    const ghost = !this.show.ghost ? 0 : this.mode === 'bg' ? 1 : this.level.layer2Objects ? (this.mode === 'l1' ? 2 : this.mode === 'l2' ? 1 : 0) : 0;
+    const ghost = !this.show.ghost ? 0 : this.mode === 'l3' ? 3 : this.mode === 'bg' ? 1 : this.level.layer2Objects ? (this.mode === 'l1' ? 2 : this.mode === 'l2' ? 1 : 0) : 0;
     return composite(images, this.show.layer1, this.show.layer2, ghost, this.show.layer3);
   }
 
@@ -334,7 +349,7 @@ export class App {
     const step = () => {
       if (gen !== a.gen) return;
       this.setBusy('anim', `Animations ${i + 1}/${snaps.length}`);
-      const li = renderLevel(this.rom, { ...this.render, vram: snaps[i].vram, cgram: snaps[i].cgram }, lv.header.mode, lv.header.screens);
+      const li = renderLevel(this.rom, { ...this.render, vram: snaps[i].vram, cgram: snaps[i].cgram }, lv.header.mode, lv.header.screens, levelRows(lv.secondary));
       const img = this.compose(li);
       const idx: number[] = [];
       for (let k = 0; k < img.length; k++) if (img[k] !== base[k]) idx.push(k);
@@ -373,38 +388,44 @@ export class App {
   markers(): Marker[] {
     const s = this.level.secondary;
     const vert = (s.verticalPositioning & 1) !== 0;
-    const main = entrancePos(this.rom, s.entranceScreen, s.entranceX, s.entranceY, vert);
-    const mid = entrancePos(this.rom, s.midwayScreen, s.entranceX, s.entranceY, vert);
+    const main = entrancePos(this.rom, mainSpot(s), vert);
+    const mid = entrancePos(this.rom, midwaySpot(s), vert);
     const out: Marker[] = [{ kind: 'midway', index: 0, ...mid }, { kind: 'main', index: 0, ...main }];
-    for (const i of this.secEntrances) {
-      const e = readSecondaryEntrance(this.rom, i);
-      out.push({ kind: 'sec', index: i, ...entrancePos(this.rom, e.screen, e.entranceX, e.entranceY, vert) });
-    }
+    for (const i of this.secEntrances) out.push({ kind: 'sec', index: i, ...entrancePos(this.rom, secondarySpot(readSecondaryEntrance(this.rom, i)), vert) });
     return out;
   }
 
-  // snaps a marker to the entrance setting nearest to Mario's top-left pixel (px, py);
-  // main/midway change the level (undoable), secondary entrances are written to the ROM directly.
-  // The midway point shares X/Y with the main entrance, only its screen can change.
+  // snaps a marker to the entrance setting nearest to Mario's top-left pixel (px, py) – in a level with a
+  // size the tile there (Lunar Magic's, the camera then relative to Mario); main/midway change the level
+  // (undoable), secondary entrances are written to the ROM directly. The midway point goes to the tile there
+  // with its own settings (Lunar Magic's midway entrance; the main entrance's at first).
   moveMarker(m: Marker, px: number, py: number): boolean {
     const s = this.level.secondary;
     const vert = (s.verticalPositioning & 1) !== 0;
     const maxScreen = this.level.header.screens - 1;
-    const p = nearestEntrance(this.rom, px, py, vert, m.kind === 'midway' ? Math.min(15, maxScreen) : maxScreen);
+    if (m.kind === 'midway') {
+      const p = nearestMidway(this.rom, s, px, py, maxScreen);
+      if (s.midwayOwn && sameSpot(midwaySpot(s), p)) return false;
+      placeMidway(s, p);
+      return true;
+    }
+    const p = nearestEntrance(this.rom, px, py, vert, maxScreen, this.entranceRows());
     if (m.kind === 'main') {
-      if (s.entranceScreen === p.screen && s.entranceX === p.ex && s.entranceY === p.ey) return false;
-      s.entranceScreen = p.screen; s.entranceX = p.ex; s.entranceY = p.ey;
-    } else if (m.kind === 'midway') {
-      if (s.midwayScreen === p.screen) return false;
-      s.midwayScreen = p.screen;
+      if (sameSpot(mainSpot(s), p)) return false;
+      placeMain(s, p);
     } else {
       const e = readSecondaryEntrance(this.rom, m.index);
-      if (e.screen === p.screen && e.entranceX === p.ex && e.entranceY === p.ey) return false;
-      e.screen = p.screen; e.entranceX = p.ex; e.entranceY = p.ey;
+      if (sameSpot(secondarySpot(e), p)) return false;
+      placeSecondary(e, p);
       // ROM data: one undo step per marker (successive moves merge)
-      this.romEdit(`Secondary entrance ${hex(m.index, 3)} moved`, () => writeSecondaryEntrance(this.rom, m.index, e), `sec-entrance:${m.index}`);
+      this.romEdit(`Secondary entrance ${hex(m.index, 3)} moved`, () => writeSecondaryEntrance(this.rom, m.index, e), { key: `sec-entrance:${m.index}` });
     }
     return true;
+  }
+
+  // entrances are placed at tiles in a level with a size (the game's table positions don't reach its rows)
+  entranceRows(): number {
+    return isSized(this.level.secondary) ? levelRows(this.level.secondary) : 0;
   }
 
   // whether a screen has tiles that can be entered (pipes, doors); null while probes are pending
@@ -450,7 +471,7 @@ export class App {
   editSecondaryEntrance(idx: number, label: string, f: (e: SecondaryEntrance) => void, key: string | null = null): void {
     const e = readSecondaryEntrance(this.rom, idx);
     f(e);
-    this.romEdit(label, () => writeSecondaryEntrance(this.rom, idx, e), key);
+    this.romEdit(label, () => writeSecondaryEntrance(this.rom, idx, e), { key });
     this.findSecondaryEntrances();
     this.emit('change');
   }
@@ -460,9 +481,10 @@ export class App {
     const n = this.level.number;
     const idx = this.exitGraph().freeEntrance(n);
     if (idx === null) { toast(`No free secondary entrance left in ${n & 0x100 ? '100–1FF' : '000–0FF'}.`, 'error'); return null; }
-    const p = nearestEntrance(this.rom, px, py, (this.level.secondary.verticalPositioning & 1) !== 0, this.level.header.screens - 1);
+    const p = nearestEntrance(this.rom, px, py, (this.level.secondary.verticalPositioning & 1) !== 0, this.level.header.screens - 1, this.entranceRows());
     this.editSecondaryEntrance(idx, `Secondary entrance ${hex(idx, 3)} created`, (e) => {
-      e.destLevel = n & 0xff; e.screen = p.screen; e.entranceX = p.ex; e.entranceY = p.ey;
+      e.destLevel = n & 0xff;
+      placeSecondary(e, p);
     });
     this.selectEntrance({ kind: 'sec', index: idx });
     return idx;
@@ -471,7 +493,7 @@ export class App {
   // clears a secondary entrance (all bytes 0: free again)
   removeSecondaryEntrance(idx: number): void {
     this.romEdit(`Secondary entrance ${hex(idx, 3)} removed`, () => {
-      writeSecondaryEntrance(this.rom, idx, { destLevel: 0, entranceY: 0, fgInitY: 0, bgInitY: 0, entranceX: 0, screen: 0, action: 0, raw3: 0 });
+      writeSecondaryEntrance(this.rom, idx, decodeSecondaryEntrance([0, 0, 0, 0, 0, 0]));
     });
     this.findSecondaryEntrances();
     if (this.exitMarker?.kind === 'sec' && this.exitMarker.index === idx) this.exitMarker = null;
@@ -489,7 +511,8 @@ export class App {
     const t = exitTarget(this.rom, this.level.number, e);
     this.openLevel(t.to);
     this.mode = 'exit';
-    this.exitMarker = t.entrance >= 0 ? { kind: 'sec', index: t.entrance } : { kind: 'main', index: 0 };
+    this.exitMarker = t.entrance >= 0 ? { kind: 'sec', index: t.entrance }
+      : { kind: exitLandsAtMidway(e, this.level.secondary) ? 'midway' : 'main', index: 0 };
     this.emit('mode');
     this.revealMarker();
   }
@@ -501,6 +524,14 @@ export class App {
     this.emit('mode');
     this.selectScreen(screen);
     this.reveal = this.vertical ? { x: 128, y: screen * 256 + 128 } : { x: screen * 256 + 128, y: 200 };
+    this.emit('reveal');
+  }
+
+  // opens level n (unless it is open) and scrolls to a tile of it
+  showUse(n: number, at?: { x: number; y: number }): void {
+    if (n !== this.level.number) this.openLevel(n);
+    if (!at) return;
+    this.reveal = { x: at.x * 16 + 8, y: at.y * 16 + 8 };
     this.emit('reveal');
   }
 
@@ -558,7 +589,7 @@ export class App {
     const hd = this.level.header;
     // sprite memory: a sprite whose OAM range is too small is captured as the game shows it
     const custom = this.customSprites().map((c) => c.id);
-    const key = `${hd.spriteGfx}-${hd.spritePalette}-${this.level.spriteHeader & 0x3f}-${gfxFilesHash(this.rom, this.spriteGfxFiles()).toString(36)}${custom.length ? '-' + custom.map((c) => c.toString(16)).join('.') : ''}`;
+    const key = `${hd.spriteGfx}-${hd.spritePalette}-${this.level.spriteHeader & SPRITE_MEMORY}-${gfxFilesHash(this.rom, this.spriteGfxFiles()).toString(36)}${custom.length ? '-' + custom.map((c) => c.toString(16)).join('.') : ''}`;
     if (key === this.spriteKey) return;
     this.spriteKey = key;
     this.variantQueue = [];
@@ -717,7 +748,7 @@ export class App {
   }
 
   private checkSpriteMem(): void {
-    const lv = this.level, mem = lv.spriteHeader & 0x3f, gen = this.editGen;
+    const lv = this.level, mem = lv.spriteHeader & SPRITE_MEMORY, gen = this.editGen;
     // canonical order: results are stored by index, uids differ between sessions
     const sprites = [...lv.sprites].sort((a, b) => a.x - b.x || a.y - b.y || a.num - b.num || a.extra - b.extra);
     if (this.usedMem.gen !== this.rom.gen) this.usedMem = { gen: this.rom.gen, list: usedSpriteMemory(this.rom) };
@@ -778,7 +809,7 @@ export class App {
 
   // sets the sprite memory value as an own undo step
   setSpriteMemory(m: number): void {
-    this.editLevel(() => { this.level.spriteHeader = (this.level.spriteHeader & 0xc0) | (m & 0x3f); });
+    this.editLevel(() => { this.level.spriteHeader = (this.level.spriteHeader & 0xc0) | (m & SPRITE_MEMORY); });
     this.emit('level-header');
     logMsg(`Sprite memory set to ${hex(m, 2)}`);
   }
@@ -788,7 +819,7 @@ export class App {
   private animInfo: { render: LevelRender | null; level: number; res: { tiles: Set<number>; colors: Set<number> } | null; timer: number } = { render: null, level: -1, res: null, timer: 0 };
   animated(): { tiles: Set<number>; colors: Set<number> } | null {
     const a = this.animInfo;
-    if (a.render === this.render) return a.res;
+    if (a.render === this.render) return this.withOwnAnims(a.res);
     if (!a.timer) a.timer = window.setTimeout(() => {
       a.timer = 0;
       const render = this.render;
@@ -810,7 +841,22 @@ export class App {
       a.level = this.level.number;
       this.emit('animated');
     }, 50);
-    return a.level === this.level.number ? a.res : null; // same level: the previous result until known
+    return a.level === this.level.number ? this.withOwnAnims(a.res) : null; // same level: the previous result until known
+  }
+  // plus the tiles and colors the ROM's own ExAnimation slots overwrite (their trigger may not fire in the
+  // emulated frames, e.g. on/off or manual), read from the lists as they are now
+  private ownAnim: { key: string; res: { tiles: Set<number>; colors: Set<number> } | null; out: { tiles: Set<number>; colors: Set<number> } | null } = { key: '', res: null, out: null };
+  private withOwnAnims(res: { tiles: Set<number>; colors: Set<number> } | null): { tiles: Set<number>; colors: Set<number> } | null {
+    if (!res) return null;
+    const o = this.ownAnim, charWord = (this.render.ppuRegs[0x0b] & 0x0f) << 12;
+    const key = `${this.rom.gen}:${this.level.number}:${charWord}`;
+    if (o.key !== key || o.res !== res) {
+      const tiles = exanimTiles(this.rom, this.level.number, charWord), colors = exanimColors(this.rom, this.level.number);
+      o.key = key;
+      o.res = res;
+      o.out = tiles.size || colors.size ? { tiles: new Set([...res.tiles, ...tiles.keys()]), colors: new Set([...res.colors, ...colors.keys()]) } : res;
+    }
+    return o.out;
   }
 
   palettesChanged(): void {
@@ -948,6 +994,78 @@ export class App {
   private tideCache: { images: LevelImages; range: unknown; value: ReturnType<App['tide']> } | null = null;
 
   private layer3Emu: LevelEmulator | null = null;
+
+  // What every layer 2 scroll setting does (l2scroll.ts), measured with the level's code on an own
+  // emulator a setting at a time; null while that runs, then `done` is called. Kept per level while
+  // the ROM it read is unchanged.
+  layer2Motions(done: () => void): Layer2Motions | null {
+    const key = `l2m1:${this.level.number}`;
+    const stored = this.results.get<Layer2Motions>(key);
+    if (stored) return stored;
+    if (this.l2Run?.key === key) { this.l2Run.waiting.push(done); return null; }
+    const emu = this.l2Emu = this.auxEmu(this.l2Emu), before = this.rom.data.slice();
+    const run = this.l2Run = { key, waiting: [done] };
+    const job = layer2MotionsJob(emu, this.level.number, this.buildOverrides());
+    const step = () => {
+      if (this.l2Run !== run) return;
+      const r = job.next();
+      if (!r.done) { setTimeout(step, 0); return; }
+      this.l2Run = null;
+      // (not kept when the ROM changed while it ran: measured with what it read before)
+      if (!r.value.reads.differ(before, this.rom.data)) this.results.set(key, r.value.result, this.results.fp.deps(r.value.reads));
+      for (const f of run.waiting) f();
+    };
+    setTimeout(step, 0);
+    return null;
+  }
+  private l2Emu: LevelEmulator | null = null;
+  private l2Run: { key: string; waiting: (() => void)[] } | null = null;
+
+  // The Map16 tiles of every level (levelusage.ts), the open one as edited: those known now, the others are
+  // learned in the background ('level-uses' as they come); pending: how many are still missing
+  levelTiles(): { levels: LevelTiles[]; pending: number } {
+    const idx = this.usesIndex ??= new LevelUses(this.rom, this.results, () => (this.usesEmu = this.auxEmu(this.usesEmu)));
+    if (this.currentTiles?.render !== this.render) this.currentTiles = { render: this.render, tiles: levelTilesOf(this.rom, this.level, this.render) };
+    const levels = [this.currentTiles.tiles];
+    let pending = 0;
+    for (const n of usedLevels(this.rom)) {
+      if (n === this.level.number) continue;
+      const t = idx.tiles(n);
+      if (t) levels.push(t); else pending++;
+    }
+    if (pending && !this.usesRun) this.learnLevelTiles(idx);
+    return { levels, pending };
+  }
+  // the levels with sprite id (spriteId), the open level as edited
+  spriteUsers(id: number): SpriteUser[] {
+    const n = this.level.number;
+    if (this.savedSprites?.level !== n) this.savedSprites = { level: n, uses: spriteUsage(this.rom, usedLevels(this.rom).filter((i) => i !== n)) };
+    const here = spriteUsage(this.rom, [n], () => this.level).get(id) ?? [];
+    return [...here, ...(this.savedSprites.uses.get(id) ?? [])].sort((a, b) => a.level - b.level);
+  }
+  private savedSprites: { level: number; uses: Map<number, SpriteUser[]> } | null = null;
+
+  private usesIndex: LevelUses | null = null;
+  private usesEmu: LevelEmulator | null = null;
+  private usesRun = false;
+  private currentTiles: { render: LevelRender; tiles: LevelTiles } | null = null;
+
+  private learnLevelTiles(idx: LevelUses): void {
+    this.usesRun = true;
+    const step = () => {
+      const t0 = performance.now();
+      let left: number[] = [];
+      try {
+        left = idx.missing(usedLevels(this.rom)).filter((n) => n !== this.level.number);
+        while (left.length && performance.now() - t0 < BG_SLICE) idx.scan(left.shift()!);
+      } catch (e) { console.error(e); left = []; }
+      this.emit('level-uses');
+      this.setBusy('uses', left.length ? `Uses in levels (${left.length})` : null);
+      if (left.length) this.later('level-uses', step); else this.usesRun = false;
+    };
+    this.setBusy('uses', 'Uses in levels');
+    void this.cacheReady.then(() => this.later('level-uses', step));
+  }
 
   // a background emulator (new for another ROM) set up from the main one's boot state
   private auxEmu(emu: LevelEmulator | null): LevelEmulator {
@@ -1189,7 +1307,10 @@ export class App {
       toast('This level has layer 2 objects instead of a BG tilemap.');
       return;
     }
-    const recompose = (this.level.layer2Objects || m === 'bg' || this.mode === 'bg') && this.show.ghost && m !== this.mode;
+    // editing layer 3 shows it
+    const ghosts = this.level.layer2Objects || isBrushMode(m) || isBrushMode(this.mode);
+    const recompose = m !== this.mode && ((ghosts && this.show.ghost) || (m === 'l3' && !this.show.layer3));
+    if (m === 'l3') this.show.layer3 = true;
     this.mode = m;
     this.selection = new Set(selection);
     if (recompose) this.recomposite();
@@ -1227,11 +1348,57 @@ export class App {
     this.emit('bgtile');
   }
 
+  // ------------- layer 3 tilemap (layer3map.ts) -------------
+  // cells (cx, cy) as layer 3 is drawn over the level
+  l3Grid(): Layer3Geometry {
+    return layer3Geometry(this.render);
+  }
+  // the tilemap word of a cell, -1: no entry there (the status bar's rows)
+  l3At(cx: number, cy: number): number {
+    const i = layer3Index(this.l3Grid(), cx, cy);
+    if (i < 0) return -1;
+    return this.level.layer3 ? this.level.layer3[i] : layer3Word(this.render.vram, i);
+  }
+  // a cell can be edited: its entry is in the part of the tilemap the level's LT3 file (or a new one) holds
+  l3Editable(cx: number, cy: number): boolean {
+    const i = layer3Index(this.l3Grid(), cx, cy);
+    return i >= 0 && lt3Covers(lt3Target(this.rom, this.level.number).place, i);
+  }
+  // a layer 3 edit begins: the tilemap is held in the level first, so the undo step has it as it was (a level
+  // without one reads it from the ROM, which after a save already holds the edit); cancelled, it lets go again
+  beginLayer3Edit(): LevelEdit {
+    const held = !!this.level.layer3;
+    this.level.layer3 ??= layer3Map(this.render.vram);
+    const e = this.beginLevelEdit();
+    return { commit: e.commit, cancel: (restore) => { e.cancel(restore); if (!held) this.level.layer3 = null; } };
+  }
+  // stamps the brush with its top-left tile at cell (cx, cy); caller handles the level edit and refresh
+  paintL3Brush(cx: number, cy: number): boolean {
+    const b = this.l3Brush, g = this.l3Grid(), place = lt3Target(this.rom, this.level.number).place;
+    let changed = false;
+    for (let k = 0; k < b.tiles.length; k++) {
+      const i = layer3Index(g, cx + (k % b.w), cy + Math.floor(k / b.w));
+      if (i < 0 || !lt3Covers(place, i)) continue;
+      const map = this.level.layer3 ??= layer3Map(this.render.vram);
+      if (map[i] === b.tiles[k]) continue;
+      map[i] = b.tiles[k];
+      changed = true;
+    }
+    return changed;
+  }
+  // the level's layer 3 tiles in a rectangle of cells become the brush (blank where there is no entry)
+  pickL3(x0: number, y0: number, x1: number, y1: number): void {
+    const w = Math.min(Math.abs(x1 - x0) + 1, 32), h = Math.min(Math.abs(y1 - y0) + 1, 32);
+    const x = Math.min(x0, x1), y = Math.min(y0, y1), blank = blankLayer3Tile(this.render);
+    this.l3Brush = { w, h, tiles: Array.from({ length: w * h }, (_, i) => { const t = this.l3At(x + (i % w), y + Math.floor(i / w)); return t < 0 ? blank : t; }) };
+    this.emit('bgtile');
+  }
+
   clampObject(o: { x: number; y: number }): void {
     const w = this.mode === 'l2' && this.images.geom2 ? this.images.geom2.width : this.levelWidthTiles();
     const hgt = this.mode === 'l2' && this.images.geom2 ? this.images.geom2.height : this.levelHeightTiles();
     o.x = Math.max(0, Math.min(w - 1, o.x));
-    o.y = Math.max(0, Math.min(Math.min(hgt, this.vertical ? 0x1ff : 0x1f + 1) - 1, o.y));
+    o.y = Math.max(0, Math.min((this.vertical ? Math.min(hgt, 0x1ff) : hgt) - 1, o.y));
   }
 
   insertAt(tx: number, ty: number, p: PaletteItem | null = this.paletteItem): void {
@@ -1240,14 +1407,7 @@ export class App {
   }
   private insert(tx: number, ty: number, p: PaletteItem): boolean {
     if (p.kind === 'obj' && (this.mode === 'l1' || this.mode === 'l2')) {
-      if (p.num === 0 && p.ext === DM16_EXT && !this.ensureEditorPatch()) return false;
       const cells = p.block ? Array.from({ length: p.block.w * p.block.h }, (_, i) => ({ dx: i % p.block!.w, dy: Math.floor(i / p.block!.w) })) : [{ dx: 0, dy: 0 }];
-      const lastTile = (p.tile ?? 0) + (p.block ? (p.block.h - 1) * 16 + p.block.w - 1 : 0);
-      if (p.num === 0 && p.ext === DM16_EXT && lastTile >= EXT_FIRST && !map16Ext(this.rom)) {
-        installMap16Ext(this.rom, map16Source(this.rom, this.render).fg(0x025));
-        this.romWritten();
-        toast('Map16 expansion installed (tiles 200–FFF).');
-      }
       this.selection = new Set();
       for (const { dx, dy } of cells) {
         const o: LevelObject = { uid: newUid(), num: p.num, ext: p.ext, x: tx + dx, y: ty + dy, size: p.size };
@@ -1265,17 +1425,6 @@ export class App {
       this.selection = new Set([s.uid]);
     } else return false;
     return true;
-  }
-
-  // Direct-Map16 objects need the editor patch; installs it, false if that is not possible
-  ensureEditorPatch(): boolean {
-    if (hasEditorPatch(this.rom)) return true;
-    try {
-      installEditorPatch(this.rom);
-      this.romWritten();
-      toast('Editor patch installed (for Direct Map16 objects).');
-      return true;
-    } catch (e) { toast(String(e), 'error'); return false; }
   }
 
   // ------------- structures (structs.ts) -------------
@@ -1309,21 +1458,13 @@ export class App {
     return { x: x0, y: y0, w, h, tiles };
   }
 
-  // after the structure table changed: the emulator sees the new ROM, the level is drawn again
-  structuresChanged(): void {
-    this.romWritten();
-    this.refresh();
-    this.emit('structs');
-    this.emit('change');
-  }
-
   // stores the selection as structure n; replace: the selected objects become one structure object
   // (at the place of the last of them in the object list, so objects in between still cover it)
   saveSelectionAsStructure(n: number, name: string, replace: boolean): boolean {
     const r = this.structureFromSelection();
     if (typeof r === 'string') { toast(r, 'error'); return false; }
     try {
-      writeStructure(this.rom, n, { w: r.w, h: r.h, tiles: r.tiles, name });
+      this.romEdit(`Structure ${hex(n, 2)} saved`, () => writeStructure(this.rom, n, { w: r.w, h: r.h, tiles: r.tiles, name }));
     } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); return false; }
     if (replace) {
       this.editLevel(() => {
@@ -1333,10 +1474,9 @@ export class App {
         const res = [...all.slice(0, at + 1).filter((x) => !this.selection.has(x.uid)), o, ...all.slice(at + 1)];
         if (this.mode === 'l2') this.level.layer2Objects = res; else this.level.objects = res;
         this.selection = new Set([o.uid]);
-      }, false); // (drawn by structuresChanged)
+      });
     }
     this.paletteItem = { kind: 'obj', num: 0, ext: STRUCT_EXT, size: 0, struct: n };
-    this.structuresChanged();
     return true;
   }
 
@@ -1355,8 +1495,6 @@ export class App {
   explodeStructure(o: LevelObject): void {
     const s = o.struct !== undefined ? readStructure(this.rom, o.struct) : null;
     if (!s) { toast('The structure does not exist (anymore).', 'error'); return; }
-    if (!this.ensureEditorPatch()) return;
-    if (s.tiles.some((t) => t >= EXT_FIRST) && !map16Ext(this.rom)) { toast('The structure uses tiles from 200 up, the Map16 expansion is missing.', 'error'); return; }
     this.editLevel(() => {
       const parts: LevelObject[] = [];
       s.tiles.forEach((t, i) => { if (t !== TRANSPARENT) parts.push({ uid: newUid(), num: 0, ext: DM16_EXT, x: o.x + (i % s.w), y: o.y + Math.floor(i / s.w), size: 0, tile: t }); });
@@ -1438,12 +1576,10 @@ export class App {
       const log = saveLevel(this.rom, this.level);
       this.dirty = false;
       const n = this.level.number;
-      // re-read to refresh addresses/sizes, keep selection by position
-      const sel = this.selection;
-      const mode = this.mode;
+      // re-read to refresh addresses/sizes; objects and sprites keep their ids (selection, markers)
+      const was = this.level;
       this.level = loadLevel(this.rom, n);
-      this.mode = mode;
-      this.selection = sel;
+      keepUids(was, this.level, this.vertical);
       this.romWritten();
       if (!silent) toast(`Level ${hex(n, 3)} saved. ${log.join(' · ')}`);
       else logMsg(`Level ${hex(n, 3)} saved automatically. ${log.join(' · ')}`);
@@ -1454,48 +1590,30 @@ export class App {
     }
   }
 
-  // ------------- ROM edits (graphics workspace) -------------
-  // runs an undoable ROM edit; the level is re-emulated shortly after the last one of a series
-  romEdit<T>(label: string, fn: () => T, key: string | null = null): T {
-    const h = this.romHistory, pushes = h.pushes;
-    try {
-      return h.edit(label, fn, key);
-    } finally {
-      if (!h.open) {
-        if (h.pushes !== pushes) this.pushOrder('rom', h.undoStack.length);
-        this.romChanged();
-      }
-    }
+  // ------------- ROM edits -------------
+  // One undoable ROM edit (see romedit.ts): a dirty level is saved before it; when fn throws or returns
+  // { ok: false } nothing changes and nothing is recorded; views, the level and the render follow by
+  // themselves. Edits with the same key in quick succession merge.
+  romEdit<T>(label: string, fn: () => T, opt: EditOptions = {}): T {
+    return this.romEdits.edit(label, fn, opt);
   }
 
   // romEdit for a change that awaits (AddmusicK inserting songs): one undo step for all of it
-  async romEditAsync<T>(label: string, fn: () => Promise<T>): Promise<T> {
-    const h = this.romHistory, pushes = h.pushes;
-    h.begin(label);
-    try {
-      return await fn();
-    } finally {
-      h.commit();
-      if (!h.open) {
-        if (h.pushes !== pushes) this.pushOrder('rom', h.undoStack.length);
-        this.romChanged();
-      }
-    }
+  romEditAsync<T>(label: string, fn: () => Promise<T>): Promise<T> {
+    return this.romEdits.editAsync(label, fn);
   }
 
-  // Whoever writes the ROM tells it with one of these two (emulators and caches follow rom.gen by
-  // themselves; this is for the editor's views and the copy in the browser):
-  // romWritten – written outside the ROM history (saving a level, the overworld, messages …): editors
-  // show it ('rom-change'), the copy in the browser is stored at once;
-  romWritten(): void {
+  // the level was saved (outside the ROM history): editors show it ('rom-change'), the copy in the
+  // browser is stored at once
+  private romWritten(): void {
     this.romNotice();
     clearTimeout(this.persistTimer);
     this.persistTimer = 0;
     this.persist();
   }
-  // romChanged – an undoable ROM edit (romEdit, undo/redo): editors show it at once, the level render and
-  // storing follow debounced (edits come in quick succession, e.g. graphics strokes)
-  romChanged(): void {
+  // a ROM edit or undo/redo: editors show it at once, the level render and storing follow debounced
+  // (edits come in quick succession, e.g. graphics strokes)
+  private romChanged(): void {
     this.romNotice();
     clearTimeout(this.romTimer);
     const run = () => {
@@ -1511,7 +1629,18 @@ export class App {
   }
   private romNotice(): void {
     this.graph = null;
+    this.savedSprites = null;
     this.emit('rom-change');
+  }
+
+  // the open level again from the ROM, after a ROM edit changed its stored data (unsaved changes are
+  // gone: an edit saves them first, an undo may take back what they were saved over)
+  private reloadLevel(): void {
+    clearTimeout(this.romTimer); // (openLevel draws it)
+    this.romTimer = 0;
+    this.dirty = false;
+    this.openLevel(this.level.number);
+    this.palettesChanged();
   }
 
   // a stroke ended: the re-emulation waits for a pause in drawing
@@ -1531,13 +1660,12 @@ export class App {
   private romStep(undo: boolean): boolean {
     let e: RomEdit | null;
     try {
-      e = undo ? this.romHistory.undo() : this.romHistory.redo();
+      e = undo ? this.romEdits.undo() : this.romEdits.redo();
     } catch (err) {
       toast(String(err instanceof Error ? err.message : err), 'error');
       return false;
     }
     if (!e) return false;
-    this.romChanged();
     toast(`${undo ? 'Undone' : 'Redone'}: ${e.label}`);
     return true;
   }
@@ -1568,15 +1696,34 @@ export class App {
 
   // vanilla levels plus anything relocated into expanded ROM space
   usedLevels(): Set<number> {
-    const used = new Set<number>();
-    for (let i = 0; i <= 0x24; i++) used.add(i);
-    for (let i = 0x101; i <= 0x13b; i++) used.add(i);
-    for (let i = 0; i < 512; i++) if (snesToPc(this.rom.r24(L1_PTRS + i * 3)) >= 0x80000) used.add(i);
-    return used;
+    return new Set(usedLevels(this.rom));
   }
 }
 
 export { hasLayer2Objects, SEC_HDR };
+
+// what the follow-ups of a ROM edit compare (see romEdits)
+const noUids = (k: string, v: unknown) => (k === 'uid' ? undefined : v);
+function levelSignature(rom: Rom, n: number): string {
+  try { return JSON.stringify(loadLevel(rom, n), noUids); } catch (e) { return String(e); }
+}
+function headerSignature(rom: Rom, n: number): string {
+  return JSON.stringify([levelGfx(rom, n), levelExtGfx(rom, n), customPalette(rom, n), levelMusic(rom, n)]);
+}
+function structuresSignature(rom: Rom): string {
+  try { return JSON.stringify([...listStructures(rom)]); } catch (e) { return String(e); }
+}
+
+// the ids of a level's objects and sprites onto the same level loaded again (sprites are stored in load
+// order); when the counts differ, the new ones stay
+function keepUids(from: Level, to: Level, vertical: boolean): void {
+  const copy = <T extends { uid: number }>(a: T[] | null, b: T[] | null) => {
+    if (a && b && a.length === b.length) a.forEach((x, i) => { b[i].uid = x.uid; });
+  };
+  copy(from.objects, to.objects);
+  copy(from.layer2Objects, to.layer2Objects);
+  copy(spriteLoadOrder(from.sprites, vertical), to.sprites);
+}
 
 function spriteCanvas(img: SpriteImage): HTMLCanvasElement {
   const c = document.createElement('canvas');

@@ -2,16 +2,26 @@
 //  - sprite data of each level may live in any bank (bank table, 512 entries)
 //  - the current level number is kept in $7E010B (as Lunar Magic does)
 //  - GFX pointer table with 256 entries (GFX 00-31 vanilla, 32-FF = ExGFX)
-//  - per-file format flag: 0 = LZ2 3bpp (vanilla), 1 = raw uncompressed 4bpp (DMA'd directly)
+//  - per-file format flag: 0 = LZ2 3bpp (vanilla), 1 = raw uncompressed 4bpp (DMA'd directly); raw files of
+//    other sizes (layer3gfx.ts): 2 = 0x800 bytes (2bpp layer 3 graphics), 3 = 0x2000 (a layer 3 tilemap)
 //  - per-level GFX bypass: 8 slots (SP4..SP1, FG3, BG1, FG2, FG1), $FF = tileset default
 //  - extended object $02 "Direct Map16": 6 bytes, places any Map16 tile as a rectangle
 //  - "edited" mark at $0FF0A0 where Lunar Magic keeps its version string (see markEdited)
 
-import { Rom, pcToSnes } from './rom.ts';
+import { Rom } from './rom.ts';
 import { Asm } from './asm.ts';
 import { ownerNote } from './patchreg.ts';
+import { LEVEL_HEIGHT_RAM } from './ram.ts';
 
 export const SPR_BANK_HOOK = 0x05d8f5;
+
+// object code (M=8): $6B/$6E on to the next screen of a horizontal level – the game's $1B0 bytes, or the
+// level's screen size while the level heights patch loads a level with a size (levelheight.ts)
+export function nextScreen(): number[] {
+  const [a] = LEVEL_HEIGHT_RAM;
+  return [0xc2, 0x20, 0xaf, a & 0xff, (a >> 8) & 0xff, a >> 16, 0xd0, 0x03, 0xa9, 0xb0, 0x01, // REP #$20 : LDA.l size : BNE + : LDA #$01B0
+    0x18, 0x65, 0x6b, 0x85, 0x6b, 0x85, 0x6e, 0xe2, 0x20]; // + CLC : ADC $6B : STA $6B : STA $6E : SEP #$20
+}
 const HOOK_GFXPTR = 0x00ba2c;
 const HOOK_UPLOAD = 0x00aa6b;
 const HOOK_SPRGFX = 0x00a9e1;
@@ -60,9 +70,11 @@ export function editorPatch(rom: Rom): PatchInfo | null {
   };
 }
 
-export function hasEditorPatch(rom: Rom): boolean {
-  return editorPatch(rom) !== null;
+// for the editor's patches that every opened ROM has (see editorpatches.ts)
+export function missingPatch(what: string): never {
+  throw new Error(`${what} is not installed in this ROM`);
 }
+const editor = (rom: Rom) => editorPatch(rom) ?? missingPatch('Editor patch (SMWE)');
 
 function build(): Asm {
   const a = new Asm();
@@ -174,7 +186,7 @@ function build(): Asm {
   a.br(0xd0, 'dmcol');
   a.b(0xa5, 0x0f);
   a.br(0xd0, 'dmvcross');
-  a.b(0xa5, 0x6b, 0x18, 0x69, 0xb0, 0x85, 0x6b, 0x85, 0x6e, 0xa5, 0x6c, 0x69, 0x01, 0x85, 0x6c, 0x85, 0x6f); // += $1B0
+  a.b(...nextScreen()); // += a screen
   a.br(0x80, 'dmcrossed');
   a.label('dmvcross');
   a.b(0xe6, 0x6c, 0xe6, 0x6f); // += $100
@@ -213,15 +225,19 @@ function hook(rom: Rom, at: number, target: number, len: number, braTo?: number)
   rom.writeBytes(at, Uint8Array.from(bytes));
 }
 
-// marks the ROM as edited (see EDITED_MARK) unless Lunar Magic (or anything else) already wrote there
+// marks the ROM as edited (see EDITED_MARK)
 function markEdited(rom: Rom): void {
-  for (let i = 0; i < EDITED_LEN; i++) if (rom.r8(EDITED_MARK + i) !== 0xff) return;
   for (let i = 0; i < EDITED_LEN; i++) rom.w8(EDITED_MARK + i, i < EDITED_TEXT.length ? EDITED_TEXT.charCodeAt(i) : 0);
+}
+// the editor's mark: a ROM it made
+export function madeByEditor(rom: Rom): boolean {
+  for (let i = 0; i < EDITED_LEN; i++) if (rom.r8(EDITED_MARK + i) !== (i < EDITED_TEXT.length ? EDITED_TEXT.charCodeAt(i) : 0)) return false;
+  return true;
 }
 
 export function installEditorPatch(rom: Rom): PatchInfo {
   const existing = editorPatch(rom);
-  if (existing) { markEdited(rom); return existing; }
+  if (existing) return existing;
   if (rom.r8(SPR_BANK_HOOK) !== 0xa9 || rom.r8(SPR_BANK_HOOK + 1) !== 0x07) throw new Error(`Unexpected code at $05D8F5${ownerNote(rom, SPR_BANK_HOOK, 4)} – patch not possible (ROM already modified otherwise?)`);
   if (rom.r8(HOOK_GFXPTR) !== 0xb9 || rom.r8(HOOK_UPLOAD) !== 0x22 || rom.r8(HOOK_SPRGFX) !== 0xad || rom.r8(HOOK_FGGFX) !== 0xad) {
     const note = ownerNote(rom, HOOK_GFXPTR, 15) || ownerNote(rom, HOOK_UPLOAD, 4) || ownerNote(rom, HOOK_SPRGFX, 15) || ownerNote(rom, HOOK_FGGFX, 15);
@@ -260,51 +276,41 @@ export function installEditorPatch(rom: Rom): PatchInfo {
 }
 
 export function spriteBankOf(rom: Rom, n: number): number {
-  const p = editorPatch(rom);
-  return p ? rom.r8(p.sprBank + n) : 0x07;
+  return rom.r8(editor(rom).sprBank + n);
 }
 export function setSpriteBank(rom: Rom, n: number, bank: number): void {
-  const p = installEditorPatch(rom);
-  rom.w8(p.sprBank + n, bank);
+  rom.w8(editor(rom).sprBank + n, bank);
 }
 
 // ---- GFX files ----
 export const VANILLA_GFX = 0x32;
-export interface GfxEntry { addr: number; raw: boolean }
+// raw: stored uncompressed, size bytes (0x1000 4bpp; 0x800, 0x2000 for layer 3)
+export interface GfxEntry { addr: number; raw: boolean; size: number }
+export const RAW_GFX_SIZES = [0x1000, 0x800, 0x2000]; // by format flag - 1
 export function gfxEntry(rom: Rom, i: number): GfxEntry | null {
-  const p = editorPatch(rom);
-  if (!p) {
-    if (i >= VANILLA_GFX) return null;
-    return { addr: rom.r8(0x00b992 + i) | (rom.r8(0x00b9c4 + i) << 8) | (rom.r8(0x00b9f6 + i) << 16), raw: false };
-  }
+  const p = editor(rom);
   const addr = rom.r8(p.gfxLo + i) | (rom.r8(p.gfxHi + i) << 8) | (rom.r8(p.gfxBank + i) << 16);
   if (addr === 0) return null;
-  return { addr, raw: rom.r8(p.gfxFlags + i) !== 0 };
+  const f = rom.r8(p.gfxFlags + i);
+  return { addr, raw: f !== 0, size: f ? RAW_GFX_SIZES[f - 1] ?? 0x1000 : 0 };
 }
-export function setGfxEntry(rom: Rom, i: number, addr: number, raw: boolean): void {
-  const p = i >= VANILLA_GFX || raw ? installEditorPatch(rom) : editorPatch(rom);
-  if (i < VANILLA_GFX) {
-    rom.w8(0x00b992 + i, addr & 0xff);
-    rom.w8(0x00b9c4 + i, (addr >> 8) & 0xff);
-    rom.w8(0x00b9f6 + i, (addr >> 16) & 0xff);
-  }
-  if (p) {
-    rom.w8(p.gfxLo + i, addr & 0xff);
-    rom.w8(p.gfxHi + i, (addr >> 8) & 0xff);
-    rom.w8(p.gfxBank + i, (addr >> 16) & 0xff);
-    rom.w8(p.gfxFlags + i, raw ? 1 : 0);
-  }
+export function setGfxEntry(rom: Rom, i: number, addr: number, raw: boolean, size = 0x1000): void {
+  const p = editor(rom);
+  rom.w8(p.gfxLo + i, addr & 0xff);
+  rom.w8(p.gfxHi + i, (addr >> 8) & 0xff);
+  rom.w8(p.gfxBank + i, (addr >> 16) & 0xff);
+  if (raw && !RAW_GFX_SIZES.includes(size)) throw new Error(`No uncompressed GFX file has ${size} bytes`);
+  rom.w8(p.gfxFlags + i, raw ? RAW_GFX_SIZES.indexOf(size) + 1 : 0);
 }
 
 // ---- per-level GFX bypass ----
 export const GFX_SLOT_NAMES = ['SP4', 'SP3', 'SP2', 'SP1', 'FG3', 'BG1', 'FG2', 'FG1'];
 export function levelGfx(rom: Rom, n: number): number[] {
-  const p = editorPatch(rom);
-  if (!p) return new Array(8).fill(0xff);
+  const p = editor(rom);
   return Array.from({ length: 8 }, (_, k) => rom.r8(p.levelGfx + n * 8 + k));
 }
 export function setLevelGfx(rom: Rom, n: number, slots: number[]): void {
-  const p = installEditorPatch(rom);
+  const p = editor(rom);
   slots.forEach((v, k) => rom.w8(p.levelGfx + n * 8 + k, v));
 }
 // defaults from the tileset / sprite set tables, in slot order
@@ -373,13 +379,12 @@ export function installCustomPalettePatch(rom: Rom): { base: number; table: numb
   return customPalettePatch(rom)!;
 }
 
+const palettes = (rom: Rom) => customPalettePatch(rom) ?? missingPatch('Level palettes (SMWP)');
 export function customPalette(rom: Rom, level: number): number {
-  const p = customPalettePatch(rom);
-  if (!p) return 0;
-  return rom.r24(p.table + level * 3);
+  return rom.r24(palettes(rom).table + level * 3);
 }
 export function setCustomPalette(rom: Rom, level: number, colors: Uint8Array | null): number {
-  const p = installCustomPalettePatch(rom);
+  const p = palettes(rom);
   const old = rom.r24(p.table + level * 3);
   if (old) rom.freeAt(old);
   if (!colors) { rom.w24(p.table + level * 3, 0); return 0; }
@@ -432,12 +437,12 @@ export function installBgPatch(rom: Rom): { table: number } {
 }
 
 // bank of the level's BG tilemap data if it was stored by the editor, else 0
+const bgBanks = (rom: Rom) => bgPatch(rom) ?? missingPatch('BG tilemaps (SMWB)');
 export function bgBank(rom: Rom, level: number): number {
-  const p = bgPatch(rom);
-  return p ? rom.r8(p.table + level) : 0;
+  return rom.r8(bgBanks(rom).table + level);
 }
 export function setBgBank(rom: Rom, level: number, bank: number): void {
-  rom.w8(installBgPatch(rom).table + level, bank);
+  rom.w8(bgBanks(rom).table + level, bank);
 }
 
 // ---------------------------------------------------------------------------
@@ -489,13 +494,12 @@ export function installMusicPatch(rom: Rom): { table: number } {
 }
 
 // the song a level plays instead of its header setting, 0 = none
+const musicTable = (rom: Rom) => (musicPatch(rom) ?? missingPatch('Music per level (SMWU)')).table;
 export function levelMusic(rom: Rom, level: number): number {
-  const p = musicPatch(rom);
-  return p ? rom.r8(p.table + level) : 0;
+  return rom.r8(musicTable(rom) + level);
 }
 export function setLevelMusic(rom: Rom, level: number, song: number): void {
-  if (!song && !musicPatch(rom)) return;
-  rom.w8(installMusicPatch(rom).table + level, song);
+  rom.w8(musicTable(rom) + level, song);
 }
 
 // ---------------------------------------------------------------------------
@@ -504,7 +508,7 @@ export function setLevelMusic(rom: Rom, level: number, song: number): void {
 // (BG3, tiles 280-2FF) - like Lunar Magic's BG2/BG3 slots. The upload uses the game's own routine
 // $00AA6B, so both LZ2 (3bpp) and raw 4bpp files work.
 // In the original game the layer 1 tilemap lives at VRAM $2000-$2FFF, so the slots need the tilemaps
-// moved out of the way first (VRAM patch, like LM's). Without it the hook stays off; the table is kept.
+// moved out of the way first (VRAM patch, like LM's).
 export const EXT_GFX_HOOK = 0x00aa50;
 export const EXT_GFX_HOOKS: [number, number][] = [[EXT_GFX_HOOK, 5]];
 const EXT_GFX_MAGIC = [0x53, 0x4d, 0x57, 0x47]; // "SMWG"
@@ -515,40 +519,17 @@ const EXT_GFX_ORIG = [0xa2, 0x03, 0xb5, 0x04, 0x9d, 0x05, 0x01, 0xca, 0x10, 0xf8
 export let vramPatchInstalled: (rom: Rom) => boolean = () => false;
 export function setVramPatchCheck(f: (rom: Rom) => boolean): void { vramPatchInstalled = f; }
 
-function extGfxBlock(rom: Rom): number {
-  if (rom.r8(EXT_GFX_HOOK) === 0x22) {
-    const base = rom.r24(EXT_GFX_HOOK + 1) - 8;
-    if (EXT_GFX_MAGIC.every((m, i) => rom.r8(base + i) === m)) return base;
-  }
-  for (const b of rom.scanRats()) if (EXT_GFX_MAGIC.every((m, i) => rom.data[b.start + 8 + i] === m)) return pcToSnes(b.start + 8);
-  return -1;
+export function extGfxPatch(rom: Rom): { table: number } | null {
+  if (rom.r8(EXT_GFX_HOOK) !== 0x22) return null;
+  const base = rom.r24(EXT_GFX_HOOK + 1) - 8;
+  if (!EXT_GFX_MAGIC.every((m, i) => rom.r8(base + i) === m)) return null;
+  return { table: rom.r24(base + 4) };
 }
 
-// the patch with its table; active = the hook at $00AA50 is in place
-export function extGfxPatch(rom: Rom): { table: number; active: boolean } | null {
-  const base = extGfxBlock(rom);
-  if (base < 0) return null;
-  return { table: rom.r24(base + 4), active: rom.r8(EXT_GFX_HOOK) === 0x22 && rom.r24(EXT_GFX_HOOK + 1) === base + 8 };
-}
-
-// turns the BG2/BG3 upload off where it would overwrite the layer 1 tilemap; true if it was on
-export function disableUnsafeExtGfx(rom: Rom): boolean {
-  const p = extGfxPatch(rom);
-  if (!p?.active || vramPatchInstalled(rom)) return false;
-  rom.writeBytes(EXT_GFX_HOOK, Uint8Array.from(EXT_GFX_ORIG.slice(0, 5)));
-  return true;
-}
-
-export function installExtGfxPatch(rom: Rom): { table: number; active: boolean } {
+export function installExtGfxPatch(rom: Rom): { table: number } {
   if (!vramPatchInstalled(rom)) throw new Error('BG2/BG3 graphics are not available yet: the layer tilemaps must first be moved in VRAM (VRAM patch).');
   const ex = extGfxPatch(rom);
-  if (ex?.active) return ex;
-  if (ex) {
-    // switched off earlier: the code block and its table are still there, just hook it in again
-    const base = extGfxBlock(rom) + 8;
-    rom.writeBytes(EXT_GFX_HOOK, Uint8Array.from([0x22, base & 0xff, (base >> 8) & 0xff, base >> 16, 0x60]));
-    return extGfxPatch(rom)!;
-  }
+  if (ex) return ex;
   installEditorPatch(rom); // level number in $010B, ExGFX pointers
   const orig = EXT_GFX_ORIG;
   for (let i = 0; i < orig.length; i++) if (rom.r8(EXT_GFX_HOOK + i) !== orig[i]) throw new Error(`Unexpected code at $00AA50${ownerNote(rom, EXT_GFX_HOOK, 5)} – BG2/BG3 graphics not possible`);
@@ -592,16 +573,13 @@ export function installExtGfxPatch(rom: Rom): { table: number; active: boolean }
 }
 
 // BG2/BG3 files of a level ($FF = none)
+const extGfxTable = (rom: Rom) => (extGfxPatch(rom) ?? missingPatch('BG2/BG3 graphics (SMWG)')).table;
 export function levelExtGfx(rom: Rom, n: number): number[] {
-  const p = extGfxPatch(rom);
-  return p?.active ? [rom.r8(p.table + n * 2), rom.r8(p.table + n * 2 + 1)] : [0xff, 0xff];
-}
-export function extGfxAvailable(rom: Rom): boolean {
-  return vramPatchInstalled(rom);
+  const t = extGfxTable(rom);
+  return [rom.r8(t + n * 2), rom.r8(t + n * 2 + 1)];
 }
 export function setLevelExtGfx(rom: Rom, n: number, slots: number[]): void {
-  if (!extGfxPatch(rom) && slots.every((s) => s === 0xff)) return;
-  const p = installExtGfxPatch(rom);
+  const p = { table: extGfxTable(rom) };
   rom.w8(p.table + n * 2, slots[0]);
   rom.w8(p.table + n * 2 + 1, slots[1]);
 }

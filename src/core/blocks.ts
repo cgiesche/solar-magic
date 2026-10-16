@@ -9,7 +9,7 @@ import { zipSync, unzipSync } from 'fflate';
 import { Rom } from './rom.ts';
 import { applyPatch, reapplyPatch, uninstallPatch, type ApplyResult, type PatchSource } from './patchapply.ts';
 import { listPatches, patchArchive, missingSources, type PatchEntry } from './patchreg.ts';
-import { enableBlocks, map16Ext, setBlock, setActsLike, EXT_TILES } from './map16ext.ts';
+import { setBlock, setActsLike, EXT_TILES } from './map16ext.ts';
 import { definesFile, DEFAULT_FREERAM } from './uberasm.ts';
 import { GPS_ROUTINES, GPS_DEFINES } from './gpsroutines.ts';
 
@@ -17,6 +17,13 @@ export const BLOCKS_NAME = 'Custom Blocks';
 
 export interface BlockAssign { tile: number; file: string; acts?: number } // file relative to the project root
 export interface BlockProject { files: Map<string, Uint8Array>; list: BlockAssign[] }
+
+// puts a block on a Map16 tile, in place of the block that was on it (one block per tile) – for
+// installing and for the Blocks tab
+export function assignBlock(p: BlockProject, a: BlockAssign): void {
+  p.list = p.list.filter((b) => b.tile !== a.tile);
+  p.list.push(a);
+}
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -115,31 +122,26 @@ export function loadBlockProject(rom: Rom): BlockProject | null {
 }
 
 function clearTable(rom: Rom): void {
-  const ex = map16Ext(rom);
-  if (!ex?.blocks) return;
   for (let t = 0; t < EXT_TILES; t++) setBlock(rom, t, 0, false);
 }
 
-// assembles the blocks and enters them into the block table; blank: tile words for new Map16 tiles. A
-// project without assignments keeps its files (to assign them again); without files too it is removed.
-export function saveBlockProject(rom: Rom, p: BlockProject, blank: number[]): ApplyResult {
+// assembles the blocks and enters them into the block table. A project without assignments keeps its
+// files (to assign them again); without files too it is removed.
+export function saveBlockProject(rom: Rom, p: BlockProject): ApplyResult {
   const e = blocksEntry(rom);
   if (!p.list.length && ![...p.files.keys()].some((f) => f !== 'list.txt')) {
     const warnings = e ? removeBlocks(rom) : [];
     return { ok: true, errors: [], warnings, prints: [] };
   }
-  const snapshot = rom.snapshot();
-  enableBlocks(rom, blank);
   let r: ApplyResult;
   try {
     const uber = listPatches(rom).find((x) => x.kind === 'uberasm');
     const src = buildBlockPatch(p, uber?.ram?.[0]?.[0]);
     r = e ? reapplyPatch(rom, e.id, src) : applyPatch(rom, src);
   } catch (err) {
-    rom.restore(snapshot);
     return { ok: false, errors: [err instanceof Error ? err.message : String(err)], warnings: [], prints: [] };
   }
-  if (!r.ok) { rom.restore(snapshot); return r; }
+  if (!r.ok) return r;
   // blocks are identified by their GpsB<n>_GpsBlock label, in the order of first use in the list
   const used = [...new Set(p.list.map((b) => b.file))];
   const labels = r.labels ?? {};
@@ -151,12 +153,12 @@ export function saveBlockProject(rom: Rom, p: BlockProject, blank: number[]): Ap
     if (head !== 0x42 && head !== 0x37) errors.push(`${f}: does not start with “db $42” or “db $37” – not a GPS block`);
     else addrOf.set(f, { addr: a + 1, wall: head === 0x37 });
   });
-  if (errors.length) { rom.restore(snapshot); return { ok: false, errors, warnings: r.warnings, prints: r.prints }; }
+  if (errors.length) return { ok: false, errors, warnings: r.warnings, prints: r.prints };
   clearTable(rom);
   for (const b of p.list) {
     const x = addrOf.get(b.file)!;
     setBlock(rom, b.tile, x.addr, x.wall);
-    if (b.acts !== undefined) setActsLike(rom, b.tile, b.acts, blank);
+    if (b.acts !== undefined) setActsLike(rom, b.tile, b.acts);
   }
   return r;
 }

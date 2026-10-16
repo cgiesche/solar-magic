@@ -2,12 +2,13 @@ import { readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadLevel, serializeLayer1, newUid } from '../src/core/level.ts';
-import { installEditorPatch, setGfxEntry, setLevelGfx, DM16_EXT } from '../src/core/patches.ts';
+import { editorPatch, setGfxEntry, setLevelGfx, DM16_EXT } from '../src/core/patches.ts';
 import { saveLevel } from '../src/core/save.ts';
+import { editorImage } from './fixture.ts';
 
 const orig = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
-const rom = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
-const p = installEditorPatch(rom);
+const rom = new Rom(await editorImage());
+const p = editorPatch(rom)!;
 console.log('patch at', p.base.toString(16), 'rom size', rom.size.toString(16));
 const e0 = new LevelEmulator(orig); e0.boot();
 const e1 = new LevelEmulator(rom); e1.boot();

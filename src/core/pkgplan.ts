@@ -1,0 +1,340 @@
+// Uploads detected per file and linked (ADR 0002): each file of an upload belongs to one part, decided
+// from the file alone (folder, then content, then extension), never by which other files are in the
+// upload. This module has the parts that are not a tool project of their own – blocks (named in a GPS
+// list.txt or found by their content) and graphics parts (Map16 tiles, ExGFX, palettes) – and the
+// links between parts:
+// - detectBlocks / detectGraphics: what an upload holds, without a ROM;
+// - planPackage: where it goes in a ROM – Map16 tiles and ExGFX keep the author's position or number
+//   when free, else the next free ones; which tiles show which block; which slot each ExGFX file is for;
+// - applyBlocks / applyGraphics / applyLevelSetup: the ROM side.
+// Graphics go where the level graphics placement (levelgfx.ts) says, as in a level import. The defines
+// naming a sprite of the package are linked by pixipkg.ts.
+
+import type { Rom } from './rom.ts';
+import type { Upload } from './patchpkg.ts';
+import type { ApplyResult } from './patchapply.ts';
+import { rewriteDefines } from './patchpkg.ts';
+import { parseBlockList, loadBlockProject, saveBlockProject, assignBlock, type BlockProject } from './blocks.ts';
+import { parseMap16File, map16Targets, exgfxName, type Map16File } from './map16file.ts';
+import { EXT_FIRST, EXT_TILES, setExtTileWords } from './map16ext.ts';
+import { slotTiles, type ExList, type ExSlot } from './exanim.ts';
+import { parseMwl, type MwlLevel } from './bgpack.ts';
+import {
+  GFX_SLOTS, slotOfWord, gfxNumber, usedFgTiles, freeRun, fgOrigin, packPalettes, frameSources, putFgTiles, storeGfx, placeInLevel,
+  type PackPalette, type FrameSources, type LevelState, type Placed,
+} from './levelgfx.ts';
+import { withIncludes } from './pkgmap.ts';
+import { isUberList } from './uberproject.ts';
+import { mwlExAnim } from './mwl.ts';
+
+const dec = new TextDecoder();
+const enc = new TextEncoder();
+const base = (f: string) => f.slice(f.lastIndexOf('/') + 1);
+const dirOf = (p: string) => (p.includes('/') ? p.slice(0, p.lastIndexOf('/') + 1) : '');
+const hx = (v: number, d: number) => v.toString(16).toUpperCase().padStart(d, '0');
+
+// ---------- detection (no ROM) ----------
+
+// a GPS block: its first real statement is db $42 / db $37
+export function isBlockText(text: string): boolean {
+  const first = text.split(/\r?\n/).map((l) => l.replace(/;.*$/, '').trim())
+    .find((l) => l && !/^(print|!|incsrc|incbin|if|endif|else|macro|endmacro|%)/i.test(l) && !/^[A-Za-z_.][A-Za-z0-9_.]*:$/.test(l));
+  return !!first && /^db\s+\$(42|37)\b/i.test(first);
+}
+
+// "act like 130" / "Acts like: $025" in a block's comments
+export function actsComment(text: string): number | undefined {
+  const m = /act(?:s)?\s*like[:\s]*\$?([0-9a-f]{1,3})\b/i.exec(text);
+  return m ? parseInt(m[1], 16) : undefined;
+}
+
+const GPS_LINE = /^[0-9a-f]{3,4}(:[0-9a-f]{3})?\s+\S+\.asm/im;
+// (not an UberASM Tool list, whose level lines look alike)
+export const isGpsList = (path: string, text: string) => /(^|\/)list\.txt$/i.test(path) && GPS_LINE.test(text) && !isUberList(text);
+
+// a block of the upload; tile (and acts) when a GPS list.txt names it
+export interface DetectedBlock { file: string; tile?: number; acts?: number }
+
+// the blocks of an upload: those a GPS list.txt names, then every other file that is a block by its
+// content
+export function detectBlocks(files: Map<string, Uint8Array>): { blocks: DetectedBlock[]; list: string | null; missing: string[] } {
+  const blocks: DetectedBlock[] = [];
+  const missing: string[] = [];
+  const list = [...files.keys()].find((p) => isGpsList(p, dec.decode(files.get(p)!))) ?? null;
+  if (list) {
+    const dir = dirOf(list);
+    const find = (name: string) => {
+      const n = name.replace(/\\/g, '/');
+      for (const c of [dir + n, dir + 'blocks/' + n]) if (files.has(c)) return c;
+      return [...files.keys()].find((f) => f.toLowerCase().endsWith('/' + n.toLowerCase()) || f.toLowerCase() === n.toLowerCase()) ?? null;
+    };
+    for (const b of parseBlockList(dec.decode(files.get(list)!))) {
+      const name = b.file.replace(/^blocks\//, '');
+      const f = find(name);
+      if (f && !blocks.some((x) => x.file === f && x.tile === b.tile)) blocks.push({ file: f, tile: b.tile, acts: b.acts ?? actsComment(dec.decode(files.get(f)!)) });
+      else if (!f) missing.push(name);
+    }
+  }
+  for (const [f, c] of [...files].sort(([a], [b]) => a.localeCompare(b))) {
+    if (!/\.asm$/i.test(f) || blocks.some((b) => b.file === f) || /(^|\/)routines\//i.test(f)) continue;
+    const text = dec.decode(c);
+    if (isBlockText(text)) blocks.push({ file: f, acts: actsComment(text) });
+  }
+  return { blocks, list, missing };
+}
+
+// the graphics parts of an upload, and its Lunar Magic level file (a sample level when the upload has
+// code, else a level import)
+export interface DetectedGraphics { map16: string[]; exgfx: string[]; pal: string[]; palmask: string[]; mwl: string | null }
+
+// `included`: files some .asm file includes (incbin data is code's, not graphics)
+export function detectGraphics(files: Map<string, Uint8Array>, included: Set<string>): DetectedGraphics {
+  const keys = [...files.keys()].sort();
+  const isGfx = (f: string) => {
+    if (!/\.bin$/i.test(f) || included.has(f)) return false;
+    const n = files.get(f)!.length;
+    return /gfx/i.test(base(f)) || n === 0x1000 || n === 0xc00;
+  };
+  return {
+    map16: keys.filter((f) => /\.map16$/i.test(f)),
+    exgfx: keys.filter(isGfx),
+    pal: keys.filter((f) => /\.pal$/i.test(f)),
+    palmask: keys.filter((f) => /\.palmask$/i.test(f)),
+    mwl: keys.find((f) => /\.mwl$/i.test(f)) ?? null,
+  };
+}
+
+export const graphicsFiles = (g: DetectedGraphics) => [...g.map16, ...g.exgfx, ...g.pal, ...g.palmask];
+
+// files the .asm files of an upload include (incsrc/incbin)
+export function includedFiles(files: Map<string, Uint8Array>): Set<string> {
+  const out = new Set<string>();
+  for (const [p, c] of files) {
+    if (!/\.(asm|asar)$/i.test(p)) continue;
+    for (const f of withIncludes(files, new Map([[p, c]])).keys()) if (f !== p) out.add(f);
+  }
+  return out;
+}
+
+// ---------- planning (where everything goes in a ROM) ----------
+
+export interface PlannedBlock { file: string; tiles: number[]; acts: number }
+// the package's FG .map16: from = the tile its top left was exported from (as far as known), at = where it goes
+export interface PlannedMap16 { file: string; data: Map16File; from: number; at: number }
+// an ExGFX file: lmNum = its number in the package (file name), num = the number it is stored as,
+// slot = the graphics slot it is for (null: none known – stored only)
+export interface PlannedGfx { file: string; lmNum: number | null; num: number; slot: string | null }
+
+export interface PackagePlan {
+  blocks: PlannedBlock[];
+  map16: PlannedMap16 | null;
+  gfx: PlannedGfx[];
+  palettes: PackPalette[];
+  sample: MwlLevel | null; // the sample level, parsed
+  exanim: ExSlot[]; // the sample level's ExAnimation slots that write tiles the package's Map16 tiles draw from
+  // where its slots take their frames from: Lunar Magic's AN2 file, its alternative file (ExGFX 60-63);
+  // the level setup copies them into the level's Anim graphic (exanim.ts localizeFrames)
+  frames: FrameSources;
+  notes: string[];
+}
+
+export interface PlanInput { files: Map<string, Uint8Array>; blocks: DetectedBlock[]; graphics: DetectedGraphics }
+
+export function planPackage(rom: Rom, input: PlanInput, blank: number[]): PackagePlan {
+  const { files, graphics } = input;
+  const notes: string[] = [];
+  let sample: MwlLevel | null = null;
+  if (graphics.mwl) {
+    try { sample = parseMwl(files.get(graphics.mwl)!); } catch (e) { notes.push(`${base(graphics.mwl)}: ${e instanceof Error ? e.message : e}`); }
+  }
+  // the FG .map16 (a BG one is for a sample level's background)
+  const maps = graphics.map16.flatMap((file) => {
+    try { return [{ file, data: parseMap16File(files.get(file)!) }]; } catch (e) { notes.push(`${base(file)}: ${e instanceof Error ? e.message : e}`); return []; }
+  });
+  const fgMap = maps.find((m) => !m.data.origin?.bg) ?? null;
+  for (const m of maps) if (m !== fgMap && !m.data.origin?.bg) notes.push(`${base(m.file)}: only one FG .map16 per package – not used`);
+  const used = usedFgTiles(rom, blank);
+  const taken = new Set<number>();
+  const isUsed = (t: number) => used(t) || taken.has(t);
+
+  // Map16 tiles: the author's position when free, else the next free one. With a list.txt, its tiles
+  // decide and the .map16 is placed to fit them (top left = the lowest block tile)
+  const listed = input.blocks.filter((b) => b.tile !== undefined);
+  let map16: PlannedMap16 | null = null;
+  let shift = 0; // list.txt tiles moved by this much (taken here)
+  if (fgMap) {
+    const from = fgOrigin(rom, fgMap.data, graphics.mwl ? files.get(graphics.mwl)! : null) ?? (listed.length ? Math.min(...listed.map((b) => b.tile!)) : EXT_FIRST);
+    const want = listed.length ? Math.min(...listed.map((b) => b.tile!)) : Math.max(from, EXT_FIRST);
+    const offsets = [...new Set([...map16Targets(fgMap.data, 0), ...listed.map((b) => b.tile! - want)])];
+    const at = freeRun(want, offsets, isUsed, Math.min(16, fgMap.data.width));
+    if (at < 0) throw new Error(`No room for the ${fgMap.data.tiles.length} Map16 tiles of ${base(fgMap.file)}`);
+    if (at !== want) notes.push(`Map16 tiles from ${hx(at, 3)} (${hx(want, 3)} is taken)`);
+    shift = listed.length ? at - want : 0;
+    map16 = { file: fgMap.file, data: fgMap.data, from, at };
+    for (const t of map16Targets(fgMap.data, at)) taken.add(t);
+  } else if (listed.length) {
+    const want = Math.min(...listed.map((b) => b.tile!));
+    const offsets = listed.map((b) => b.tile! - want);
+    const at = freeRun(want, offsets, isUsed, Math.max(...offsets.map((o) => (o & 15) + 1)));
+    if (at < 0) throw new Error('No room for the blocks of list.txt');
+    if (at !== want) notes.push(`Blocks from ${hx(at, 3)} (${hx(want, 3)} is taken)`);
+    shift = at - want;
+  }
+  for (const b of listed) taken.add(b.tile! + shift);
+
+  // blocks: list.txt tiles; else linked to the .map16 tiles (one block: all of them; as many blocks as
+  // tiles: in order); else the next free tile
+  const mapTiles = map16 ? map16Targets(map16.data, map16.at) : [];
+  const unlisted = input.blocks.filter((b) => b.tile === undefined);
+  const blocks: PlannedBlock[] = [];
+  const actsAt = (t: number) => { const i = mapTiles.indexOf(t); return i >= 0 ? map16!.data.acts?.[i] : undefined; };
+  for (const b of listed) {
+    const t = b.tile! + shift;
+    const have = blocks.find((x) => x.file === b.file);
+    if (have) { have.tiles.push(t); continue; }
+    blocks.push({ file: b.file, tiles: [t], acts: b.acts ?? actsAt(t) ?? 0x130 });
+  }
+  if (!listed.length && mapTiles.length && unlisted.length) {
+    if (unlisted.length === 1) blocks.push({ file: unlisted[0].file, tiles: [...mapTiles], acts: unlisted[0].acts ?? actsAt(mapTiles[0]) ?? 0x130 });
+    else unlisted.slice(0, mapTiles.length).forEach((b, i) => blocks.push({ file: b.file, tiles: [mapTiles[i]], acts: b.acts ?? actsAt(mapTiles[i]) ?? 0x130 }));
+  }
+  for (const b of unlisted) {
+    if (blocks.some((x) => x.file === b.file)) continue;
+    let t = EXT_FIRST;
+    while (t < EXT_TILES && isUsed(t)) t++;
+    if (t >= EXT_TILES) throw new Error('No free Map16 tile left for the blocks');
+    taken.add(t);
+    blocks.push({ file: b.file, tiles: [t], acts: b.acts ?? 0x130 });
+  }
+
+  // ExGFX: the slot from the file name or the sample level's slots
+  const named = graphics.exgfx.map((file) => {
+    const n = exgfxName(base(file));
+    const slot = n.slot ?? (sample && n.num !== null ? [...sample.gfx].find(([, v]) => v === n.num)?.[0] ?? null : null);
+    return { file, lmNum: n.num, slot };
+  });
+
+  // ExAnimation: the sample level's slots writing tiles the .map16 tiles draw from; the files they take
+  // frames from (AN2, the list's alternative file ExGFX 60-63) are frame sources, not ExGFX
+  const exanim: ExSlot[] = [];
+  let list: ExList | null = null;
+  if (graphics.mwl) try { list = mwlExAnim(files.get(graphics.mwl)!); } catch { /* not a list */ }
+  if (list && map16) {
+    const drawn = new Set(map16.data.tiles.flat().map((w) => w & 0x3ff));
+    for (const e of list.slots.values()) if (slotTiles(e).some((t) => drawn.has(t))) exanim.push(e);
+  }
+  const isAlt = (g: { lmNum: number | null; slot: string | null }) => !!list && g.lmNum === 0x60 + list.altFile && !g.slot;
+  const frames = frameSources(files, list, named.find((g) => g.slot === 'AN2')?.file, named.find(isAlt)?.file, notes);
+  const kept = named.filter((g) => g.slot !== 'AN2' && !isAlt(g));
+
+  // one file without a slot and one slot the tiles draw from that no other file is for: that one
+  const mapSlots = new Set((map16?.data.tiles ?? []).flat().map(slotOfWord).filter((s): s is string => !!s));
+  const open = kept.filter((g) => !g.slot);
+  const openSlots = [...mapSlots].filter((s) => GFX_SLOTS.includes(s) && !kept.some((g) => g.slot === s));
+  if (open.length === 1 && openSlots.length === 1) open[0].slot = openSlots[0];
+  for (const g of kept) if (g.slot && !GFX_SLOTS.includes(g.slot)) notes.push(`${base(g.file)} is for Lunar Magic's ${g.slot} slot – not supported, stored only`);
+  // the number: the author's when free (00-FE), else the next free one
+  const nums = new Set<number>();
+  const gfx: PlannedGfx[] = kept.map((g) => ({ ...g, num: gfxNumber(rom, g.lmNum, nums) }));
+
+  const palettes = packPalettes(files, graphics.pal, graphics.palmask, notes);
+  return { blocks, map16, gfx, palettes, sample, exanim, frames, notes };
+}
+
+// links changed in the preview: where the .map16 tiles go, which block each of them shows (null: none),
+// the tiles of blocks that are on none of them, the ExGFX numbers and slots
+export interface PlanEdits {
+  map16At?: number;
+  tileBlocks?: (string | null)[]; // per .map16 tile (in file order)
+  blockTiles?: Map<string, number[]>; // blocks off the .map16
+  gfx?: { num: number; slot: string | null }[]; // per plan.gfx
+}
+
+// the block on each .map16 tile of a plan (null: none)
+export function tileBlocks(plan: PackagePlan): (string | null)[] {
+  if (!plan.map16) return [];
+  return map16Targets(plan.map16.data, plan.map16.at).map((t) => plan.blocks.find((b) => b.tiles.includes(t))?.file ?? null);
+}
+
+// the plan with the edits; throws when two blocks end up on one tile or a tile is outside 200–FFF
+export function editPlan(plan: PackagePlan, e: PlanEdits): PackagePlan {
+  const old = plan.map16 ? map16Targets(plan.map16.data, plan.map16.at) : [];
+  const map16 = plan.map16 ? { ...plan.map16, at: e.map16At ?? plan.map16.at } : null;
+  const targets = map16 ? map16Targets(map16.data, map16.at) : [];
+  const links = e.tileBlocks ?? tileBlocks(plan);
+  const blocks = plan.blocks.map((b) => ({
+    ...b,
+    tiles: [...targets.filter((_, i) => links[i] === b.file), ...(e.blockTiles?.get(b.file) ?? b.tiles.filter((t) => !old.includes(t)))],
+  }));
+  const seen = new Set<number>();
+  for (const b of blocks) for (const t of b.tiles) {
+    if (t < EXT_FIRST || t >= EXT_TILES) throw new Error(`Tile ${hx(t, 3)} of ${base(b.file)} is outside 200–FFF`);
+    if (seen.has(t)) throw new Error(`Two blocks on tile ${hx(t, 3)}`);
+    seen.add(t);
+  }
+  if (map16 && ((map16.at & 15) + Math.min(16, map16.data.width) > 16 || map16.at < EXT_FIRST || targets[targets.length - 1] >= EXT_TILES)) throw new Error(`The .map16 tiles do not fit from ${hx(map16.at, 3)} on`);
+  const gfx = plan.gfx.map((g, i) => ({ ...g, ...(e.gfx?.[i] ?? {}) }));
+  if (new Set(gfx.map((g) => g.num)).size < gfx.length) throw new Error('Two ExGFX files under one number');
+  return { ...plan, map16, blocks: blocks.filter((b) => b.tiles.length), gfx };
+}
+
+// ---------- the ROM side ----------
+
+// the files of a block for the block project: its own file and what it includes (paths relative to its
+// folder), routines wherever they are in the upload
+function blockFiles(upload: Upload, file: string, text: (f: string) => Uint8Array): Map<string, Uint8Array> {
+  const out = new Map<string, Uint8Array>();
+  const dir = dirOf(file);
+  for (const f of withIncludes(upload.files, new Map([[file, upload.files.get(file)!]])).keys()) {
+    if (!/\.(asm|bin)$/i.test(f) || !upload.files.has(f)) continue;
+    out.set('blocks/' + (f.startsWith(dir) ? f.slice(dir.length) : base(f)), text(f));
+  }
+  return out;
+}
+
+// routines (GPS/PIXI routines/ folders) a set of files calls as %name()
+export function routinesCalled(upload: Upload, routines: string[], callers: string[]): string[] {
+  const texts = callers.map((f) => dec.decode(upload.files.get(f)!));
+  return routines.filter((r) => { const n = base(r).replace(/\.asm$/i, ''); return texts.some((t) => new RegExp(`%${n}\\s*\\(`, 'i').test(t)); });
+}
+
+// adds the blocks to the GPS project, each on its tiles; defines: per block file, defines to set (a
+// sprite's number); tileWords: graphics of a block's tile when the package has none for it (from its
+// acts like). Map16 graphics of the package come with applyGraphics.
+export function applyBlocks(rom: Rom, upload: Upload, blocks: PlannedBlock[], defines: Map<string, Record<string, string>>, routines: string[],
+  blank: number[], tileWords: (acts: number) => number[], drawn: Set<number>, claim: (file: string) => void): ApplyResult {
+  const proj: BlockProject = loadBlockProject(rom) ?? { files: new Map(), list: [] };
+  const content = (f: string) => {
+    const d = defines.get(f);
+    return d ? enc.encode(rewriteDefines(dec.decode(upload.files.get(f)!), d).text) : upload.files.get(f)!;
+  };
+  for (const b of blocks) {
+    for (const [f, c] of blockFiles(upload, b.file, content)) { proj.files.set(f, c); claim(f); }
+    for (const t of b.tiles) assignBlock(proj, { tile: t, file: 'blocks/' + base(b.file), acts: b.acts });
+  }
+  for (const r of routines) { const f = r.slice(r.search(/routines\//i)); proj.files.set(f, upload.files.get(r)!); claim(f); }
+  const r = saveBlockProject(rom, proj);
+  if (!r.ok) return { ...r, errors: r.errors.map((e) => 'Custom blocks: ' + e) };
+  for (const b of blocks) for (const t of b.tiles) if (!drawn.has(t)) setExtTileWords(rom, t, tileWords(b.acts));
+  return { ...r, prints: [...r.prints, `${blocks.length} block(s): ${blocks.map((b) => `${base(b.file)} on ${b.tiles.map((t) => hx(t, 3)).join(', ')}`).join('; ')}`] };
+}
+
+// the Map16 tiles (with their acts like where no block on them gives one) and the ExGFX files
+export function applyGraphics(rom: Rom, files: Map<string, Uint8Array>, plan: PackagePlan, blank: number[]): ApplyResult {
+  const prints: string[] = [];
+  if (plan.map16) {
+    const m = plan.map16;
+    const targets = putFgTiles(rom, m.data, m.from, m.at, new Set(plan.blocks.flatMap((b) => b.tiles)));
+    prints.push(`${targets.length} Map16 tile(s) from ${hx(m.at, 3)}`);
+  }
+  prints.push(...storeGfx(rom, files, plan.gfx));
+  return { ok: true, errors: [], warnings: [], prints };
+}
+
+// the level setup (see CONTEXT.md): the package's ExGFX in the level's slots, its ExAnimation slots in
+// the level's list (their frames copied into its Anim graphic), the masked colors in its palette
+export function applyLevelSetup(rom: Rom, level: number, plan: PackagePlan, state: LevelState): Placed {
+  return placeInLevel(rom, level, {
+    slots: plan.gfx, palettes: plan.palettes.filter((p) => !p.layer3), back: plan.sample?.back ?? null, exanim: plan.exanim, frames: plan.frames,
+  }, state);
+}

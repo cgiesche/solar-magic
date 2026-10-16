@@ -16,6 +16,7 @@ import {
   emptyMusicProject, songsFromZip, addSongs, saveMusicProject, loadMusicProject, musicEntry, hasAmk, romSongs,
   songSpcs, spcOf, removeSong, folders, songDefines, songWithDefines,
 } from '../src/core/music.ts';
+import { editorImage } from './fixture.ts';
 
 let fails = 0;
 const check = (ok: boolean, what: string) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if (!ok) fails++; };
@@ -23,8 +24,7 @@ const check = (ok: boolean, what: string) => { console.log(`${ok ? 'ok  ' : 'FAI
 const peak = (a: Int16Array) => a.reduce((m, v) => Math.max(m, Math.abs(v)), 0);
 
 await loadApu();
-const raw = readFileSync('test/fixtures/smw.smc');
-const vanilla = new Rom(new Uint8Array(raw.subarray(raw.length % 0x8000)));
+const vanilla = new Rom(await editorImage()); // the fixture as the editor opens it
 const rom = new Rom(vanilla.data.slice());
 
 // the download

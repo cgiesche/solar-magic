@@ -4,8 +4,11 @@ import { readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
 import { ExitGraph, exitTarget, isBlank } from '../src/core/exitgraph.ts';
 import { loadLevel, readSecondaryEntrance, writeSecondaryEntrance } from '../src/core/level.ts';
+import { editorImage } from './fixture.ts';
 
-const rom = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
+const EDITOR_IMAGE = await editorImage(); // the fixture as the editor opens it
+
+const rom = new Rom(EDITOR_IMAGE.slice());
 let bad = 0;
 const check = (ok: boolean, what: string) => { if (!ok) { console.log('FAIL', what); bad++; } };
 

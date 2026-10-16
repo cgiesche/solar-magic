@@ -3,7 +3,10 @@
 // tables are read from the ROM. Each routine is entered with JSL and ends with RTL; only macro-local
 // (?) labels, as the file is included inside a macro. DB is the caller's unless stated.
 
+import { LEVEL_MAX_Y, LEVEL_ROW_MASK } from './ram.ts';
+
 const r = (s: string) => '?main:\n' + s.replace(/^\n/, '');
+const hx = (v: number) => v.toString(16).toUpperCase();
 
 // a signed 8-bit offset added to a 16-bit position: lo/hi = where to store, off = offset, base = position (lo, hi)
 const addOff = (off: string, baseLo: string, baseHi: string, lo: string, hi: string) => `
@@ -1055,7 +1058,8 @@ ${subpixel('!spinning_coin_y_speed,x', '!spinning_coin_y_bits,x', '!spinning_coi
   LDA $9B : STA $00 : LDA $99 : STA $9B : LDA $00 : STA $99 ; vertical: x and y screens swapped
   LDY $0C
 ?.h:
-  CPY #$0200 : BCC ?.in
+  REP #$20 : TYA : CMP.l $${hx(LEVEL_MAX_Y)} : LDA #$0000 : SEP #$20 ; inside the level (taller ones too, levelheight.ts)
+  BCC ?.in
   REP #$30
   SEC
   RTL
@@ -1079,7 +1083,7 @@ ${subpixel('!spinning_coin_y_speed,x', '!spinning_coin_y_bits,x', '!spinning_coi
   BRA ?.vr
 ?.vh:
   LDA $9B : LSR
-  LDA $99
+  LDA $99 : AND #$01 ; the tilemap's rows modulo 64
 ?.vr:
   ROL : ASL #2 : ORA #$20 : STA $04
   CPX #$0000 : BEQ ?.l1v
@@ -1107,7 +1111,7 @@ ${subpixel('!spinning_coin_y_speed,x', '!spinning_coin_y_bits,x', '!spinning_coi
 ?.cs:
   STX $08 : STY $0A
   ; index in the screen's Map16 data
-  LDA $98 : AND #$01F0 : STA $04
+  LDA $98 : AND.l $${hx(LEVEL_ROW_MASK)} : STA $04
   LDA $9A : LSR #4 : AND #$000F : ORA $04 : TAY
   CLC
   RTL

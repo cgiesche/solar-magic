@@ -3,10 +3,13 @@
 import { h, logEntries, onLog, clearLog, type LogEntry } from './dom.ts';
 
 const PREF = 'smw-log-open';
-const KIND_LABEL = { info: 'Message', error: 'Error', event: 'Event' } as const;
+const KIND_LABEL = { info: 'Message', error: 'Error', warn: 'Warning', output: 'Tool output', event: 'Event' } as const;
 
-// commit of the build (set by the Docker build), shown at the right of the bar
+// version and commit of the build (set by the Docker and desktop builds), shown at the right of the bar
 const COMMIT = import.meta.env.VITE_COMMIT || '';
+const VERSION = import.meta.env.VITE_VERSION || '';
+const BUILD_LABEL = VERSION || (COMMIT ? COMMIT.slice(0, 7) : 'dev');
+const BUILD_TITLE = [VERSION && `Version ${VERSION}`, COMMIT && `built from commit ${COMMIT}`].filter(Boolean).join(', ') || 'Development build';
 
 const pad = (n: number) => String(n).padStart(2, '0');
 const timeStr = (d: Date) => `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
@@ -16,17 +19,15 @@ export class LogBar {
   private list = h('div', { class: 'log-list' });
   private latest = h('span', { class: 'log-latest' });
   private toggleBtn = h('button', { class: 'log-toggle', title: 'Expand/collapse log (L)' });
-  private errBadge = h('span', { class: 'log-badge', title: 'New errors since last expanded' });
   private rows = new Map<LogEntry, HTMLElement>();
-  private unseenErrors = 0;
   private open = false;
 
   constructor() {
     const copyBtn = h('button', { title: 'Copy log as text to the clipboard' }, 'Copy');
     copyBtn.onclick = () => this.copy(copyBtn);
     const clearBtn = h('button', { class: 'danger', title: 'Remove all entries', onclick: () => clearLog() }, 'Clear');
-    const head = h('div', { class: 'log-head' }, this.toggleBtn, this.errBadge, this.latest, h('span', { class: 'log-actions' }, copyBtn, clearBtn),
-      h('span', { class: 'log-build', title: COMMIT ? `Build from commit ${COMMIT}` : 'Development build' }, COMMIT ? COMMIT.slice(0, 7) : 'dev'));
+    const head = h('div', { class: 'log-head' }, this.toggleBtn, this.latest, h('span', { class: 'log-actions' }, copyBtn, clearBtn),
+      h('span', { class: 'log-build', title: BUILD_TITLE }, BUILD_LABEL));
     // clicking the collapsed line opens it, the buttons keep their own action
     head.addEventListener('click', (e) => { if (!(e.target as HTMLElement).closest('.log-actions, .log-build')) this.toggle(); });
     this.root = h('div', { class: 'logbar' }, head, this.list);
@@ -45,10 +46,7 @@ export class LogBar {
     this.root.classList.toggle('open', open);
     this.toggleBtn.textContent = open ? '▾ Log' : '▸ Log';
     try { localStorage.setItem(PREF, open ? '1' : '0'); } catch { /* no storage */ }
-    if (open) {
-      this.unseenErrors = 0;
-      this.list.scrollTop = this.list.scrollHeight;
-    }
+    if (open) this.list.scrollTop = this.list.scrollHeight;
     this.updateLatest();
   }
 
@@ -65,11 +63,9 @@ export class LogBar {
     if (!e) {
       this.list.replaceChildren();
       this.rows.clear();
-      this.unseenErrors = 0;
       this.updateLatest();
       return;
     }
-    const atEnd = this.list.scrollHeight - this.list.scrollTop - this.list.clientHeight < 4;
     const old = this.rows.get(e);
     if (repeat && old) {
       this.rows.delete(e);
@@ -83,9 +79,9 @@ export class LogBar {
         first.remove();
       }
     }
-    if (e.kind === 'error' && !this.open) this.unseenErrors++;
-    // follow new messages unless the user scrolled up to read older ones
-    if (atEnd) this.list.scrollTop = this.list.scrollHeight;
+    // an error opens the log, so it is seen even when the toast is gone
+    if (e.kind === 'error' && !this.open) this.setOpen(true);
+    this.list.scrollTop = this.list.scrollHeight;
     this.updateLatest();
   }
 
@@ -95,8 +91,6 @@ export class LogBar {
       ? [h('span', { class: 'log-time' }, timeStr(e.time)), h('span', { class: `log-msg ${e.kind}` }, e.msg), e.count > 1 ? h('span', { class: 'log-count' }, `×${e.count}`) : '']
       : [h('span', { class: 'hint' }, 'No messages yet')]));
     this.latest.style.visibility = this.open ? 'hidden' : '';
-    this.errBadge.textContent = this.unseenErrors ? `${this.unseenErrors} error${this.unseenErrors === 1 ? '' : 's'}` : '';
-    this.errBadge.hidden = !this.unseenErrors;
   }
 
   private copy(btn: HTMLButtonElement): void {

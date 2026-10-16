@@ -10,6 +10,7 @@
 import { Rom } from './rom.ts';
 import { Asm } from './asm.ts';
 import { ownerNote } from './patchreg.ts';
+import { missingPatch } from './patches.ts';
 
 export const BG_EXT_FIRST = 0x200;
 export const BG_EXT_TILES = 0x1000; // BG tiles $000-$FFF
@@ -78,29 +79,28 @@ export function installBgMap16Ext(rom: Rom): BgMap16Ext {
   return bgMap16Ext(rom)!;
 }
 
-// tile words of an extended BG tile, null if the patch is missing or t is not on pages 2-F
+const bgExt = (rom: Rom) => bgMap16Ext(rom) ?? missingPatch('Extended BG Map16 (SMWH)');
+// tile words of an extended BG tile, null if t is not on pages 2-F
 export function bgExtTileWords(rom: Rom, t: number): number[] | null {
-  const ex = bgMap16Ext(rom);
-  if (!ex || t < BG_EXT_FIRST || t >= BG_EXT_TILES) return null;
-  const a = ex.gfx + (t - BG_EXT_FIRST) * 8;
+  if (t < BG_EXT_FIRST || t >= BG_EXT_TILES) return null;
+  const a = bgExt(rom).gfx + (t - BG_EXT_FIRST) * 8;
   return [rom.r16(a), rom.r16(a + 2), rom.r16(a + 4), rom.r16(a + 6)];
 }
 
-// ROM address of a BG tile's 8 bytes (vanilla table or extension), installing the extension if needed
-export function bgTileAddr(rom: Rom, t: number, install = false): number | null {
+// ROM address of a BG tile's 8 bytes (vanilla table or extension)
+export function bgTileAddr(rom: Rom, t: number): number | null {
   if (t < BG_EXT_FIRST) return VANILLA + t * 8;
   if (t >= BG_EXT_TILES) return null;
-  const ex = install ? installBgMap16Ext(rom) : bgMap16Ext(rom);
-  return ex ? ex.gfx + (t - BG_EXT_FIRST) * 8 : null;
+  return bgExt(rom).gfx + (t - BG_EXT_FIRST) * 8;
 }
 
 export function setBgExtTileWords(rom: Rom, t: number, words: number[]): void {
-  const a = bgTileAddr(rom, t, true);
+  const a = bgTileAddr(rom, t);
   if (a === null) throw new Error(`BG tile ${t.toString(16).toUpperCase()} outside 000–FFF`);
   words.forEach((w, k) => rom.w16(a + k * 2, w));
 }
 
-// any BG tile: words from the vanilla table or the extension (tile $025 if missing)
+// any BG tile: words from the vanilla table or the extension (tile $025 outside 000-FFF)
 export function bgTileWords(rom: Rom, t: number): number[] {
   if (t < BG_EXT_FIRST) return vanillaBgWords(rom, t);
   return bgExtTileWords(rom, t) ?? vanillaBgWords(rom, 0x025);

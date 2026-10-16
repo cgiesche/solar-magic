@@ -59,8 +59,8 @@ for (const n of [0x105, 0x106, 0x001, 0x009, 0x10f, 0x0c]) {
 
 // 3. extended tile $2A0 = copy of $130 (cement block): same picture, same collision
 const EXT = 0x2a0, REF = 0x130;
-setExtTileWords(patched, EXT, map16Source(patched, ep.load(0x105)).fg(REF), blank);
-setActsLike(patched, EXT, REF, blank);
+setExtTileWords(patched, EXT, map16Source(patched, ep.load(0x105)).fg(REF));
+setActsLike(patched, EXT, REF);
 const withWall = (tile: number): LevelOverride => {
   const lv: Level = loadLevel(patched, 0x105);
   lv.objects.push({ uid: newUid(), num: 0, ext: DM16_EXT, x: 9, y: 14, size: 0x91, tile }); // 2×10 wall
@@ -84,7 +84,7 @@ const withWall = (tile: number): LevelOverride => {
 {
   const before = play(ep, 0x105, {}, 60, () => 0);
   const floor = new Rom(patched.data.slice());
-  for (let t = 0x100; t < 0x110; t++) setActsLike(floor, t, 0x025, blank);
+  for (let t = 0x100; t < 0x110; t++) setActsLike(floor, t, 0x025);
   const ef = new LevelEmulator(floor); ef.boot();
   const after = play(ef, 0x105, {}, 60, () => 0);
   const y = (tr: string) => Number(tr.split(',').at(-2));

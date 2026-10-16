@@ -13,13 +13,12 @@
 //    offset, 0 = unused); an entry: type, trigger, frames less one, 16-bit destination, 16-bit frames
 
 import { snesToPc, type Rom } from './rom.ts';
-import { applyPatch, uninstallPatch, type ApplyResult } from './patchapply.ts';
+import { applyPatch, type ApplyResult } from './patchapply.ts';
 import { listPatches } from './patchreg.ts';
 import { EXANIMATION_ASM, MEMORY_ASM } from './kobo/exanimation.ts';
 import { installEditorPatch } from './patches.ts';
 
 export const EXANIM_PATCH_NAME = 'ExAnimation (Lunar Magic format)';
-const EXANIM_PATCH_NAME_OLD = 'ExAnimation (Lunar-Magic-Format)'; // name in ROMs patched before the UI was English
 const LOAD_HOOK = 0x0583ad;
 const NMI_HOOK = 0x00a390;
 const TABLE_OFFSET = 0xea;
@@ -27,7 +26,7 @@ const GLOBAL_BANK = 0x5b;
 const GLOBAL_LOW = 0x65;
 export const SETTINGS = 0x03fe00;
 export const ALT_FILES = 0x03bcc0;
-export const ALT_FILE_MAX = 0x8000;
+export const ALT_FILE_MAX = 0x7fe0; // 1023 tiles: a RATS block within one bank
 export const SLOTS = 0x20;
 
 // settings bits (set = off)
@@ -73,6 +72,56 @@ export function tilesOf(type: number): number {
   if (type === 0x12) return 8;
   return 1;
 }
+// tile shape of a type: columns, rows (rows are $100 VRAM words = 16 tiles apart)
+export function shapeOf(type: number): { w: number; h: number } {
+  if (type === 0x10) return { w: 1, h: 2 };
+  if (type === 0x11) return { w: 2, h: 2 };
+  if (type === 0x12) return { w: 4, h: 2 };
+  return { w: tilesOf(type), h: 1 };
+}
+// VRAM tiles (numbers from the layer character base charWord) the tile slots of a level's list and
+// the global one overwrite, with the slots that do it
+export function exanimTiles(rom: Rom, level: number, charWord: number): Map<number, { global: boolean; slot: number }[]> {
+  const out = new Map<number, { global: boolean; slot: number }[]>();
+  const lists: [boolean, ExList | null][] = [[false, readLevelList(rom, level)], [true, readGlobalList(rom)]];
+  for (const [global, l] of lists) {
+    if (!l) continue;
+    for (const [slot, sl] of l.slots) {
+      if (kindOf(sl.type) !== 'tiles') continue;
+      const t0 = ((sl.dest & 0x7fff) - charWord) >> 4, shape = shapeOf(sl.type);
+      for (let y = 0; y < shape.h; y++) for (let x = 0; x < shape.w; x++) {
+        const t = t0 + y * 16 + x;
+        if (t < 0 || t >= 0x400) continue;
+        let a = out.get(t);
+        if (!a) out.set(t, a = []);
+        a.push({ global, slot });
+      }
+    }
+  }
+  return out;
+}
+// colors (CGRAM index) the color and rotation slots of a level's list and the global one rewrite,
+// with the slots that do it: the first color and the colors less one (bit 7: the alternative file),
+// the back area color (types 16, 17) is color 0
+export function exanimColors(rom: Rom, level: number): Map<number, { global: boolean; slot: number }[]> {
+  const out = new Map<number, { global: boolean; slot: number }[]>();
+  const lists: [boolean, ExList | null][] = [[false, readLevelList(rom, level)], [true, readGlobalList(rom)]];
+  for (const [global, l] of lists) {
+    if (!l) continue;
+    for (const [slot, sl] of l.slots) {
+      const kind = kindOf(sl.type);
+      if (kind !== 'colors' && kind !== 'rotation') continue;
+      const back = sl.type === 0x16 || sl.type === 0x17;
+      const first = back ? 0 : sl.dest & 0xff, n = back ? 1 : ((sl.dest >> 8) & 0x7f) + 1;
+      for (let c = first; c < Math.min(256, first + n); c++) {
+        let a = out.get(c);
+        if (!a) out.set(c, a = []);
+        a.push({ global, slot });
+      }
+    }
+  }
+  return out;
+}
 // whether a trigger has a second set of frames (shown while its condition holds)
 export function secondSet(trigger: number): boolean {
   return (trigger >= 1 && trigger <= 5) || trigger === 7 || (trigger >= 9 && trigger <= 0x0e) || (trigger >= 0x20 && trigger <= 0x2f);
@@ -106,6 +155,19 @@ export function triggerName(t: number): string {
 export function secondSetName(t: number): string {
   return ({ 1: 'P-switch active', 2: 'P-switch active', 3: 'Switch OFF', 4: 'Star active', 5: 'Time below 100', 7: '5 Dragon Coins collected' } as Record<number, string>)[t] ?? 'Trigger on';
 }
+
+// the 8x8 tiles (4bpp: VRAM word address / 16) a tile slot writes; types 10-12 write two rows, the
+// second $100 words below (tile_bytes in the engine). Colors and rotations: none.
+export function slotTiles(e: ExSlot): number[] {
+  if (kindOf(e.type) !== 'tiles' || e.type === 0x0f) return [];
+  const first = (e.dest & 0x7fff) >> 4;
+  const row = e.type === 0x10 ? 1 : e.type === 0x11 ? 2 : e.type === 0x12 ? 4 : tilesOf(e.type);
+  const out = Array.from({ length: row }, (_, i) => first + i);
+  if (e.type >= 0x10) out.push(...out.map((t) => t + 0x10));
+  return out;
+}
+// a slot whose frames come from the list's alternative file (ExGFX 60-63, shared by all levels)
+export const usesAltFile = (e: ExSlot) => kindOf(e.type) === 'tiles' ? (e.dest & 0x8000) !== 0 : kindOf(e.type) === 'colors' && e.type < 0x16 && ((e.dest >> 8) & 0x80) !== 0;
 
 // ---- list bytes ----
 export function parseList(b: Uint8Array): { list: ExList; length: number } {
@@ -177,13 +239,14 @@ export function installExAnim(rom: Rom): ApplyResult {
     return { ok: false, errors: ['The ROM already has an ExAnimation in an older Lunar Magic format (or another patch at $0583AD/$00A390) – not supported.'], warnings: [], prints: [] };
   }
   installEditorPatch(rom); // keeps the level number in $010B, which the engine reads (as Lunar Magic's does)
-  return applyPatch(rom, { name: EXANIM_PATCH_NAME, main: 'exanimation.asm', files: new Map([['exanimation.asm', EXANIMATION_ASM], ['memory.asm', MEMORY_ASM]]), ram: [[0x7fc003, 0xfd]] });
+  return applyPatch(rom, { name: EXANIM_PATCH_NAME, main: 'exanimation.asm', files: new Map([['exanimation.asm', EXANIMATION_ASM], ['memory.asm', MEMORY_ASM]]), kind: 'exanim', ram: [[0x7fc003, 0xfd]] });
 }
 
-export function uninstallExAnim(rom: Rom): string[] {
-  const e = listPatches(rom).find((p) => p.name === EXANIM_PATCH_NAME || p.name === EXANIM_PATCH_NAME_OLD);
-  return e ? uninstallPatch(rom, e.id) : [];
+// the registry entry of the engine
+export function exanimEntry(rom: Rom) {
+  return listPatches(rom).find((p) => p.kind === 'exanim') ?? null;
 }
+
 
 const listAt = (rom: Rom, addr: number): ExList | null => {
   try { return parseList(rom.bytes(addr, Math.min(0x8000 - (addr & 0x7fff), 0x4000))).list; } catch { return null; }
@@ -221,13 +284,8 @@ function freeList(rom: Rom, addr: number, level: number | null): void {
 
 const hasContent = (l: ExList | null) => !!l && (l.slots.size > 0 || l.manual.size > 0 || l.customSet !== 0 || l.customKeep !== 0xffff);
 
-// writes a level's list (null or empty: none); installs the engine if needed
+// writes a level's list (null or empty: none)
 export function writeLevelList(rom: Rom, level: number, list: ExList | null): void {
-  if (!exanimInstalled(rom)) {
-    if (!hasContent(list)) return;
-    const r = installExAnim(rom);
-    if (!r.ok) throw new Error(r.errors.join(' '));
-  }
   const l = exanimLayout(rom)!;
   const old = levelListAddr(rom, level);
   freeList(rom, old, level);
@@ -236,11 +294,6 @@ export function writeLevelList(rom: Rom, level: number, list: ExList | null): vo
 }
 
 export function writeGlobalList(rom: Rom, list: ExList | null): void {
-  if (!exanimInstalled(rom)) {
-    if (!hasContent(list)) return;
-    const r = installExAnim(rom);
-    if (!r.ok) throw new Error(r.errors.join(' '));
-  }
   const l = exanimLayout(rom)!;
   freeList(rom, globalListAddr(rom), null);
   const p = hasContent(list) ? rom.allocWrite(listBytes(list!)) : 0;
@@ -249,19 +302,14 @@ export function writeGlobalList(rom: Rom, list: ExList | null): void {
 }
 
 export function levelSettings(rom: Rom, level: number): number {
-  return exanimInstalled(rom) ? rom.r8(SETTINGS + level) : 0;
+  return rom.r8(SETTINGS + level);
 }
 export function setLevelSettings(rom: Rom, level: number, v: number): void {
-  if (!exanimInstalled(rom)) {
-    const r = installExAnim(rom);
-    if (!r.ok) throw new Error(r.errors.join(' '));
-  }
   rom.w8(SETTINGS + level, v & 0xf0);
 }
 
 // ---- alternative files ExGFX 60-63 ----
 export function altFileAddr(rom: Rom, n: number): number {
-  if (!exanimInstalled(rom)) return 0;
   const p = rom.r24(ALT_FILES + n * 3);
   return p === 0 || p === 0xffffff ? 0 : p;
 }
@@ -272,12 +320,7 @@ export function readAltFile(rom: Rom, n: number): Uint8Array | null {
   return size > 0 ? rom.bytes(a, size) : null;
 }
 export function writeAltFile(rom: Rom, n: number, data: Uint8Array | null): void {
-  if (data && data.length > ALT_FILE_MAX) throw new Error('Animation graphics too large (max. 32 KB)');
-  if (!exanimInstalled(rom)) {
-    if (!data) return;
-    const r = installExAnim(rom);
-    if (!r.ok) throw new Error(r.errors.join(' '));
-  }
+  if (data && data.length > ALT_FILE_MAX) throw new Error('Animation graphics too large (max. 1023 tiles)');
   const old = altFileAddr(rom, n);
   if (old && data && rom.isRatsAt(snesToPc(old) - 8) === data.length) { rom.writeBytes(old, data); return; } // same size: in place
   if (old) rom.freeAt(old);
@@ -311,4 +354,87 @@ export function exanimDataRanges(rom: Rom): [number, number][] {
     if (size > 0) add(a, size);
   }
   return out;
+}
+
+// adds slots to a level's list, in its free slots (its own slots stay); returns the slot numbers used
+export function addLevelSlots(rom: Rom, level: number, slots: ExSlot[]): number[] {
+  if (!slots.length) return [];
+  const list = readLevelList(rom, level) ?? emptyList();
+  const used: number[] = [];
+  for (const e of slots) {
+    let k = 0;
+    while (k < SLOTS && list.slots.has(k)) k++;
+    if (k >= SLOTS) throw new Error(`No free ExAnimation slot left in level ${level.toString(16).toUpperCase().padStart(3, '0')}`);
+    list.slots.set(k, { ...e, frames: [...e.frames] });
+    used.push(k);
+  }
+  list.count = slotsUsed(list);
+  writeLevelList(rom, level, list);
+  return used;
+}
+
+// ---- frames from elsewhere into an alternative file ----
+// Lunar Magic's AN2: a level's 4 KB ExGFX file in RAM from $7EAD00, where a slot's RAM frames point
+export const AN2_FRAMES = 0xad00, AN2_FRAMES_END = 0xbd00;
+export const altFileName = (n: number) => `Anim graphic ${'ABCD'[n]}`;
+const frameBytes = (type: number) => type === 0x0f ? 16 : tilesOf(type) * 32;
+const tileSlotFromAn2 = (e: ExSlot) => kindOf(e.type) === 'tiles' && !(e.dest & 0x8000) && e.frames.some((f) => f >= AN2_FRAMES && f < AN2_FRAMES_END);
+
+// the alternative file a level's tile slots take their frames from (its list's; 0 without one)
+export function levelAltFile(rom: Rom, level: number): number {
+  return readLevelList(rom, level)?.altFile ?? 0;
+}
+
+// the lists whose tile slots take frames from alternative file `n`: levels and the global list
+export function altFileUsers(rom: Rom, n: number): { levels: number[]; global: boolean } {
+  const uses = (l: ExList | null) => !!l && l.altFile === n && [...l.slots.values()].some((e) => kindOf(e.type) === 'tiles' && (e.dest & 0x8000) !== 0);
+  const levels: number[] = [];
+  for (let i = 0; i < 512; i++) if (uses(readLevelList(rom, i))) levels.push(i);
+  return { levels, global: uses(readGlobalList(rom)) };
+}
+
+// slots of another list (a level file's, or one reading AN2) taking their frames from alternative file
+// `file`: the frames they use from AN2 (`src.an2`) or from their own alternative file (`src.alt`) are
+// copied into it (a frame already there is used again) and the slots point there. A slot's other RAM
+// frames (the game's graphics, e.g. GFX33 from $7E7D00) come along from `src.ram`, the level's WRAM
+// after its load; slots without AN2 frames keep reading RAM unless `allRam`. Without `alt` the slots'
+// alternative file is `file` already and they stay. Per slot the new one, or null where its frames are
+// missing or do not fit (with a note).
+export function localizeFrames(rom: Rom, slots: ExSlot[], src: { an2?: Uint8Array | null; alt?: Uint8Array | null; ram?: Uint8Array | null }, file: number, allRam = false): { slots: (ExSlot | null)[]; notes: string[] } {
+  const foreign = 'alt' in src;
+  let data = readAltFile(rom, file) ?? new Uint8Array(0);
+  const start = data;
+  const out: (ExSlot | null)[] = [], notes: string[] = [];
+  const place = (b: Uint8Array): number => {
+    for (let o = 0; o + b.length <= data.length; o += Math.min(b.length, 32)) if (b.every((v, i) => data[o + i] === v)) return o;
+    const o = data.length, grown = new Uint8Array(o + ((b.length + 31) & ~31));
+    grown.set(data); grown.set(b, o);
+    data = grown;
+    return o;
+  };
+  for (const e of slots) {
+    out.push(null);
+    const tiles = kindOf(e.type) === 'tiles';
+    const fromAlt = foreign && usesAltFile(e), fromAn2 = tileSlotFromAn2(e) || (allRam && tiles && !(e.dest & 0x8000));
+    if (!fromAlt && !fromAn2) { out[out.length - 1] = { ...e, frames: [...e.frames] }; continue; }
+    if (fromAlt && !tiles) { notes.push('An ExAnimation slot takes colors from an alternative file (ExGFX 60-63) – left out'); continue; }
+    const len = frameBytes(e.type);
+    // the bytes of a frame, null when its source is missing
+    const bytes = (f: number): Uint8Array | null => {
+      const [from, at] = fromAlt ? [src.alt, f] : f >= AN2_FRAMES && f < AN2_FRAMES_END ? [src.an2, f - AN2_FRAMES] : [src.ram, f];
+      return from && at + len <= from.length ? from.subarray(at, at + len) : null;
+    };
+    const got = e.frames.map(bytes);
+    if (got.some((b) => !b)) {
+      const what = fromAlt ? 'an alternative file (ExGFX 60-63)' : e.frames.every((f) => f >= AN2_FRAMES && f < AN2_FRAMES_END) || !src.an2 ? 'AN2' : 'RAM';
+      notes.push(`An ExAnimation slot takes frames from ${what} that ${what === 'RAM' ? 'is not known here' : 'is missing'} – left out`);
+      continue;
+    }
+    const before = data;
+    const frames = got.map((b) => place(b!));
+    if (data.length > ALT_FILE_MAX) { data = before; notes.push(`${altFileName(file)} is full (1023 tiles) – an ExAnimation slot left out`); continue; }
+    out[out.length - 1] = { ...e, dest: e.dest | 0x8000, frames };
+  }
+  if (data !== start) writeAltFile(rom, file, data);
+  return { slots: out, notes };
 }

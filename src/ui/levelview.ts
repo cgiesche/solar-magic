@@ -1,13 +1,14 @@
 // Scrollable, zoomable level canvas with editing interactions.
 
-import { App, type Marker, type LevelEdit } from './app.ts';
+import { App, isBrushMode, type Marker, type LevelEdit, type Brush } from './app.ts';
 import { h, attachPanZoom, toast } from './dom.ts';
 import { downloadBytes } from './platform.ts';
 import { objectName, hex2, hex3 } from '../core/names.ts';
 import { resizeObjectSize } from '../core/objkinds.ts';
 import { probeAt, spriteProbeAt, enterText, collisionText, type PosProbe, type CollisionProbe } from '../core/blockprobe.ts';
-import { type LevelObject, type LevelSprite, newUid, serializeLayer1, serializeLayer2, serializeSprites, spriteSizes, spriteId } from '../core/level.ts';
+import { type LevelObject, type LevelSprite, newUid, serializeLayer1, serializeLayer2, serializeLevelSprites, spriteSizes, spriteId } from '../core/level.ts';
 import { composite } from '../core/render.ts';
+import { layer3CellAt, layer3WordText } from '../core/layer3map.ts';
 import type { ArcSpeed } from '../core/jumparcs.ts';
 import { exitTarget } from '../core/exitgraph.ts';
 import { contextMenu, type MenuItem } from './menu.ts';
@@ -20,8 +21,8 @@ type Drag =
   | { kind: 'resize'; edit: LevelEdit; startTx: number; startTy: number; origSize: Map<number, number>; lastDw: number; lastDh: number }
   | { kind: 'band'; x0: number; y0: number; x1: number; y1: number; add: boolean }
   | { kind: 'marker'; edit: LevelEdit | null; marker: Marker; offX: number; offY: number; moved: boolean } // (secondary entrances: not a level edit)
-  | { kind: 'paint'; edit: LevelEdit; changed: boolean; x0: number; y0: number; lastX: number; lastY: number } // BG brush, stamped on a grid from (x0, y0)
-  | { kind: 'pick'; x0: number; y0: number; x1: number; y1: number }; // BG tiles taken into the brush
+  | { kind: 'paint'; edit: LevelEdit; changed: boolean; x0: number; y0: number; lastX: number; lastY: number } // BG/layer 3 brush, stamped on a grid of cells from (x0, y0)
+  | { kind: 'pick'; x0: number; y0: number; x1: number; y1: number }; // BG/layer 3 cells taken into the brush
 
 const ARC_STYLE: Record<ArcSpeed, { color: string; label: string; dash?: boolean }> = {
   stand: { color: '#ffffff', label: 'from standing' },
@@ -32,7 +33,7 @@ const ARC_STYLE: Record<ArcSpeed, { color: string; label: string; dash?: boolean
 
 const MARKER_STYLE: Record<Marker['kind'], { color: string; label: string; title: string }> = {
   main: { color: 'rgba(255,40,40,0.9)', label: 'M', title: 'Main entrance' },
-  midway: { color: 'rgba(255,150,0,0.9)', label: 'Z', title: 'Midway point (screen)' },
+  midway: { color: 'rgba(255,150,0,0.9)', label: 'Z', title: 'Midway point' },
   sec: { color: 'rgba(40,120,255,0.9)', label: 'S', title: 'Secondary entrance' },
 };
 
@@ -44,7 +45,7 @@ export class LevelView {
   canvas: HTMLCanvasElement;
   ctx: CanvasRenderingContext2D;
   levelCanvas: HTMLCanvasElement;
-  hover: { tx: number; ty: number; px: number; py: number; top: number } | null = null;
+  hover: { tx: number; ty: number; px: number; py: number; top: number; cx: number; cy: number } | null = null; // cx/cy: the brush cell
   drag: Drag | null = null;
   status: HTMLSpanElement;
   stats: HTMLSpanElement;
@@ -134,6 +135,33 @@ export class LevelView {
   requestPaint(): void {
     if (this.pendingFrame) return;
     this.pendingFrame = requestAnimationFrame(() => { this.pendingFrame = 0; this.paint(); });
+  }
+
+  // BG and layer 3 are painted with a brush on a grid of cells: BG tiles (16 px), layer 3's 8x8 tiles where
+  // layer 3 is drawn (layer3map.ts)
+  brushMode(): boolean {
+    return isBrushMode(this.app.mode);
+  }
+  cellAt(px: number, py: number): { x: number; y: number } {
+    if (this.app.mode !== 'l3') return { x: Math.floor(px / 16), y: Math.floor(py / 16) };
+    const c = layer3CellAt(this.app.l3Grid(), px, py);
+    return { x: c.cx, y: c.cy };
+  }
+  // the pixel rectangle of w x h cells from (x, y)
+  cellBox(x: number, y: number, w: number, h: number): [number, number, number, number] {
+    if (this.app.mode !== 'l3') return [x * 16, y * 16, w * 16, h * 16];
+    const g = this.app.l3Grid();
+    return [x * 8 - g.dx, y * 8 - g.dy, w * 8, h * 8];
+  }
+  brush(): Brush {
+    return this.app.mode === 'l3' ? this.app.l3Brush : this.app.bgBrush;
+  }
+  paintCell(x: number, y: number): boolean {
+    return this.app.mode === 'l3' ? this.app.paintL3Brush(x, y) : this.app.paintBrush(x, y);
+  }
+  // the largest brush picked from the level
+  brushMax(): { w: number; h: number } {
+    return this.app.mode === 'l3' ? { w: 32, h: 32 } : { w: 32, h: 27 };
   }
 
   tileFromEvent(e: MouseEvent): { tx: number; ty: number; px: number; py: number } {
@@ -254,7 +282,7 @@ export class LevelView {
     // hover
     if (this.hover && !this.drag) {
       const { tx, ty } = this.hover;
-      const hits = app.mode === 'bg' ? [] : app.hitsAt(this.hover.px, this.hover.py);
+      const hits = this.brushMode() ? [] : app.hitsAt(this.hover.px, this.hover.py);
       const hit = hits.find((h) => h.mode === app.mode && app.selection.has(h.item.uid)) ?? hits[0];
       if (hit && !app.selection.has(hit.item.uid)) {
         if (hit.mode === 'spr') {
@@ -264,21 +292,23 @@ export class LevelView {
           ctx.strokeRect(b.x0, b.y0, b.x1 - b.x0, b.y1 - b.y0);
         } else this.outlineObject(ctx, hit.item as LevelObject, 'rgba(255,255,255,0.7)', lw);
       }
-      // BG mode: the area the brush would paint
-      const bw = app.mode === 'bg' ? app.bgBrush.w : 1, bh = app.mode === 'bg' ? app.bgBrush.h : 1;
+      // BG and layer 3: the area the brush would paint
       ctx.strokeStyle = 'rgba(255,255,0,0.9)';
       ctx.lineWidth = lw;
-      ctx.strokeRect(tx * 16, ty * 16, bw * 16, bh * 16);
+      if (this.brushMode()) {
+        const c = this.cellAt(this.hover.px, this.hover.py), b = this.brush();
+        ctx.strokeRect(...this.cellBox(c.x, c.y, b.w, b.h));
+      } else ctx.strokeRect(tx * 16, ty * 16, 16, 16);
     }
     if (this.drag?.kind === 'pick') {
       const d = this.drag;
-      const x = Math.min(d.x0, d.x1), y = Math.min(d.y0, d.y1);
-      const w = Math.min(Math.abs(d.x1 - d.x0) + 1, 32), hh = Math.min(Math.abs(d.y1 - d.y0) + 1, 27);
+      const m = this.brushMax();
+      const box = this.cellBox(Math.min(d.x0, d.x1), Math.min(d.y0, d.y1), Math.min(Math.abs(d.x1 - d.x0) + 1, m.w), Math.min(Math.abs(d.y1 - d.y0) + 1, m.h));
       ctx.strokeStyle = '#4cc2ff';
       ctx.fillStyle = 'rgba(76,194,255,0.15)';
       ctx.lineWidth = lw;
-      ctx.fillRect(x * 16, y * 16, w * 16, hh * 16);
-      ctx.strokeRect(x * 16, y * 16, w * 16, hh * 16);
+      ctx.fillRect(...box);
+      ctx.strokeRect(...box);
     }
     if (this.drag?.kind === 'band') {
       const d = this.drag;
@@ -599,9 +629,9 @@ export class LevelView {
     if (e.button === 2 || (e.button === 0 && e.shiftKey && !e.ctrlKey)) {
       // insert palette item (BG: paint with the brush, dragging keeps painting)
       if (app.mode === 'exit') { if (e.button === 2) this.exitMenu(e, px, py, tx, ty); return; }
-      if (app.mode === 'bg') {
-        const edit = app.beginLevelEdit();
-        this.drag = { kind: 'paint', edit, changed: app.paintBrush(tx, ty), x0: tx, y0: ty, lastX: tx, lastY: ty };
+      if (this.brushMode()) {
+        const edit = app.mode === 'l3' ? app.beginLayer3Edit() : app.beginLevelEdit(), c = this.cellAt(px, py);
+        this.drag = { kind: 'paint', edit, changed: this.paintCell(c.x, c.y), x0: c.x, y0: c.y, lastX: c.x, lastY: c.y };
         if (this.drag.changed) this.scheduleRefresh();
         return;
       }
@@ -616,9 +646,10 @@ export class LevelView {
       this.paint();
       return;
     }
-    if (app.mode === 'bg') {
+    if (this.brushMode()) {
       // click takes the tile into the brush, dragging a rectangle of tiles
-      this.drag = { kind: 'pick', x0: tx, y0: ty, x1: tx, y1: ty };
+      const c = this.cellAt(px, py);
+      this.drag = { kind: 'pick', x0: c.x, y0: c.y, x1: c.x, y1: c.y };
       this.paint();
       return;
     }
@@ -671,8 +702,10 @@ export class LevelView {
     if (inside || this.drag) {
       // sprite bodies are pixel-sized, so also repaint when the item under the cursor changes
       const top = app.hitsAt(px, py)[0]?.item.uid ?? -1;
-      const moved = !this.hover || this.hover.tx !== tx || this.hover.ty !== ty || this.hover.top !== top;
-      this.hover = { tx, ty, px, py, top };
+      const cell = this.brushMode() ? this.cellAt(px, py) : null;
+      const moved = !this.hover || this.hover.tx !== tx || this.hover.ty !== ty || this.hover.top !== top
+        || (!!cell && (cell.x !== this.hover.cx || cell.y !== this.hover.cy));
+      this.hover = { tx, ty, px, py, top, cx: cell?.x ?? tx, cy: cell?.y ?? ty };
       if (moved) {
         this.updateStatus(tx, ty);
         if (!(e.buttons & 4)) this.updateCursor(px, py, top); // middle button: panning sets its own cursor
@@ -685,13 +718,14 @@ export class LevelView {
       d.x1 = px; d.y1 = py;
       this.requestPaint();
     } else if (d.kind === 'paint') {
-      const b = app.bgBrush;
-      const x = d.x0 + Math.floor((tx - d.x0) / b.w) * b.w, y = d.y0 + Math.floor((ty - d.y0) / b.h) * b.h;
+      const b = this.brush(), c = this.cellAt(px, py);
+      const x = d.x0 + Math.floor((c.x - d.x0) / b.w) * b.w, y = d.y0 + Math.floor((c.y - d.y0) / b.h) * b.h;
       if (x === d.lastX && y === d.lastY) return;
       d.lastX = x; d.lastY = y;
-      if (app.paintBrush(x, y)) { d.changed = true; this.scheduleRefresh(); }
+      if (this.paintCell(x, y)) { d.changed = true; this.scheduleRefresh(); }
     } else if (d.kind === 'pick') {
-      if (d.x1 !== tx || d.y1 !== ty) { d.x1 = tx; d.y1 = ty; this.requestPaint(); }
+      const c = this.cellAt(px, py);
+      if (d.x1 !== c.x || d.y1 !== c.y) { d.x1 = c.x; d.y1 = c.y; this.requestPaint(); }
     } else if (d.kind === 'marker') {
       if (app.moveMarker(d.marker, px - d.offX, py - d.offY)) {
         d.moved = true;
@@ -746,13 +780,13 @@ export class LevelView {
       return;
     }
     if (d.kind === 'pick') {
-      app.pickBg(d.x0, d.y0, d.x1, d.y1);
-      this.updateStatus(d.x1, d.y1);
+      if (app.mode === 'l3') app.pickL3(d.x0, d.y0, d.x1, d.y1); else app.pickBg(d.x0, d.y0, d.x1, d.y1);
+      if (this.hover) this.updateStatus(this.hover.tx, this.hover.ty);
       this.paint();
       return;
     }
     if (d.kind === 'marker') {
-      if (!d.edit) { if (d.moved) app.romWritten(); this.paint(); return; }
+      if (!d.edit) { this.paint(); return; }
       if (!d.moved) { d.edit.cancel(); this.paint(); return; }
       d.edit.commit();
       return;
@@ -783,7 +817,7 @@ export class LevelView {
   idleStatus(): void {
     const m = this.app.mode;
     this.pos.textContent = '';
-    this.status.textContent = m === 'bg' ? 'Click/drag picks up tiles as brush · Right click/Shift+click paints'
+    this.status.textContent = isBrushMode(m) ? 'Click/drag picks up tiles as brush · Right click/Shift+click paints'
       : m === 'exit' ? 'Click an entrance (M, Z, S) or screen to select it – edit it on the right under “Properties” · Drag moves entrances · Right click: new entrance, create exit …'
         : 'Click selects, drag moves · Right click/Shift+click inserts the item chosen in “Insert” · Alt+click: item underneath';
   }
@@ -792,6 +826,12 @@ export class LevelView {
     const app = this.app;
     const g = app.images.geom1;
     this.pos.textContent = `X ${hex3(tx)}  Y ${hex3(ty)}  Screen ${hex2(app.vertical ? ty >> 4 : tx >> 4)}`;
+    if (app.mode === 'l3') {
+      const c = this.hover ? this.cellAt(this.hover.px, this.hover.py) : { x: 0, y: 0 }, t = app.l3At(c.x, c.y), b = app.l3Brush;
+      const tile = layer3WordText;
+      this.status.textContent = `${t < 0 ? 'Status bar (not editable)' : `Layer 3 tile ${tile(t)}${app.l3Editable(c.x, c.y) ? '' : ' (outside the level\'s layer 3 tilemap file)'}`}  ·  Brush ${b.tiles.length > 1 ? `${b.w}×${b.h}` : tile(b.tiles[0])}`;
+      return;
+    }
     let txt = '';
     const a = g.addr(tx, ty);
     if (a >= 0) {
@@ -847,7 +887,7 @@ export class LevelView {
     let c = '';
     if (d?.kind === 'resize') c = 'nwse-resize';
     else if (d?.kind === 'marker' || d?.kind === 'move') c = 'grabbing';
-    else if (app.mode === 'bg') c = 'crosshair';
+    else if (this.brushMode()) c = 'crosshair';
     else if (this.markerAt(px, py)) c = 'grab';
     else if (app.mode === 'exit') c = 'pointer';
     else if (this.handleAt(px, py)) c = 'nwse-resize';
@@ -867,7 +907,7 @@ export class LevelView {
       { heading: 'Entrances' },
       { label: 'New secondary entrance here', title: 'Creates an entrance with a free number that exits of other levels can point to', onClick: () => { app.newSecondaryEntrance(mx, my); } },
       { label: 'Main entrance here', onClick: () => app.placeEntrance('main', mx, my) },
-      { label: 'Midway point here (screen only)', disabled: () => scr > 15, onClick: () => app.placeEntrance('midway', mx, my) },
+      { label: 'Midway point here', title: 'Gives the midway point its own position (Lunar Magic\'s midway entrance)', onClick: () => app.placeEntrance('midway', mx, my) },
     ];
     if (mk?.kind === 'sec') items.push({ label: `Remove entrance ${hex3(mk.index)}`, onClick: () => app.removeSecondaryEntrance(mk.index) });
     items.push({ heading: `Screen ${hex2(scr)}` });
@@ -895,7 +935,7 @@ export class LevelView {
     const app = this.app, lv = app.level;
     if (!lv) return;
     const l1 = serializeLayer1(app.rom, lv).length, l2 = serializeLayer2(app.rom, lv)?.length;
-    const spr = serializeSprites(lv.sprites, lv.spriteHeader, app.vertical, spriteSizes(app.rom)).length;
+    const spr = serializeLevelSprites(app.rom, lv).length;
     const parts = [`Objects ${lv.objects.length}${lv.layer2Objects ? ' / L2 ' + lv.layer2Objects.length : ''}`, `Sprites ${lv.sprites.length}`,
       `Data: L1 ${l1}${l2 !== undefined ? ` · L2 ${l2}` : ''} · sprites ${spr} bytes`];
     this.stats.textContent = parts.join('  ·  ');

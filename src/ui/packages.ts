@@ -1,16 +1,13 @@
 // "Packages" tab of the patches dialog: the installed packages on the left, the chosen one on the right
 // with everything it brought – its patch with the settings, where its UberASM code runs, its blocks and
 // sprites with their files' settings, its ExGFX files – the graphics and other files in the package to
-// take later (import a graphic, add a part), and removing it with all of that. Patches applied before
-// packages were recorded are legacy packages (wrapped when the ROM is opened); the editor's VRAM patch is
-// listed on its own.
+// take later (import a graphic, add a part), and removing it with all of that.
 
 import type { App } from './app.ts';
-import { h, clear, toast, choose } from './dom.ts';
+import { h, clear, toast, choose, logTool } from './dom.ts';
 import { downloadBytes } from './platform.ts';
 import { listPatches, type PatchEntry } from '../core/patchreg.ts';
-import { uninstallVramPatch } from '../core/vrampatch.ts';
-import { listPackages, packageSummary, type Package } from '../core/pkgreg.ts';
+import { listPackages, packageSummary, packageRemoval, type Package } from '../core/pkgreg.ts';
 import { SECTIONS } from '../core/pkgsections.ts';
 import { removePackage, packageFiles } from '../core/packages.ts';
 import { loadMusicProject, songHex } from '../core/music.ts';
@@ -23,14 +20,12 @@ import type { UberProject } from '../core/uberproject.ts';
 import type { BlockProject } from '../core/blocks.ts';
 import { map16Source } from '../core/render.ts';
 import { storedUpload, toUpload, settingsForm, reapplyPackagePatch, patchDone, type PackagesTab } from './patchmanager.ts';
-import { patchesChanged, logView, errorText, type Pane } from './projectpane.ts';
+import { errorText, type Pane } from './projectpane.ts';
 import { definesButton, editButton } from './defineedit.ts';
 import { openDocs, packageDocs } from './docview.ts';
 import { gfxName } from './gfx/map16tab.ts';
 import { TOOL_KINDS, type ToolKind } from '../core/parts.ts';
 
-// the parts record's field of each tool (as stored in the ROM)
-const TOOL: Record<ToolKind, 'uber' | 'blocks' | 'pixi'> = { uberasm: 'uber', block: 'blocks', sprite: 'pixi' };
 const CTX_LABEL: Record<UberContext, string> = { level: 'Level', gamemode: 'Game Mode', overworld: 'Overworld map' };
 
 export interface PackagesHost {
@@ -41,7 +36,7 @@ export interface PackagesHost {
 }
 
 // one entry of the list: a package, or the editor's VRAM patch
-interface Item { key: string; name: string; rec: Package | null; patch: PatchEntry | null }
+interface Item { key: string; name: string; rec: Package }
 
 const GFX_SIZES = new Set([0x1000, 0xc00, 0x800, 0x2000]);
 // a .png 128 pixels wide (16 tiles, what the import takes; not the screenshots of the docs), or a .bin
@@ -68,12 +63,7 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
   function reload(): void {
     let recs: Package[] = [];
     try { recs = listPackages(app.rom); } catch (e) { toast(errorText(e), 'error'); }
-    const owned = new Set(recs.flatMap((r) => r.patches));
-    items = [
-      ...recs.map((r): Item => ({ key: r.id, name: r.name, rec: r, patch: null })),
-      ...listPatches(app.rom).filter((p) => p.kind === 'vram' && !owned.has(p.id))
-        .map((p): Item => ({ key: 'patch:' + p.id, name: p.name, rec: null, patch: p })),
-    ];
+    items = recs.map((r): Item => ({ key: r.id, name: r.name, rec: r }));
     // a package just added is shown
     const added = items.find((i) => known && !known.has(i.key));
     known = new Set(items.map((i) => i.key));
@@ -86,17 +76,17 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
   function renderList(): void {
     clear(list).append(...items.map((it) => h('button', { class: 'pkg-item' + (it.key === sel ? ' active' : ''), onclick: () => { sel = it.key; fileFilter = ''; renderList(); renderDetail(); } },
       h('div', { class: 'pkg-item-name' }, it.name),
-      h('div', { class: 'hint' }, it.rec ? [it.rec.legacy ? 'Legacy package' : '', ...packageSummary(it.rec)].filter(Boolean).join(' · ') : 'Editor patch'))),
+      h('div', { class: 'hint' }, packageSummary(it.rec).join(' · ')))),
     items.length ? '' : h('p', { class: 'hint' }, 'Nothing installed yet.'),
     orphans());
   }
 
   // content of the tool projects no package brought (added before packages were recorded, or by hand)
   function orphans(): HTMLElement | string {
-    const recs = items.flatMap((i) => (i.rec ? [i.rec] : []));
+    const recs = items.map((i) => i.rec);
     const notes: [ToolKind, string][] = [];
     const count = (k: ToolKind, label: string) => {
-      const files = [...host.panes[k].project().files.keys()].filter((f) => f !== 'list.txt' && !recs.some((r) => r[TOOL[k]].files.includes(f)));
+      const files = [...host.panes[k].project().files.keys()].filter((f) => f !== 'list.txt' && !recs.some((r) => r[k].files.includes(f)));
       if (files.length) notes.push([k, `${label}: ${files.length} file(s)`]);
     };
     count('uberasm', 'UberASM'); count('block', 'Blocks'); count('sprite', 'Sprites');
@@ -113,25 +103,23 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
       return;
     }
     const rec = it.rec;
-    const patches = rec ? rec.patches.flatMap((id) => listPatches(app.rom).filter((p) => p.id === id)) : [it.patch!];
+    const patches = rec.patches.flatMap((id) => listPatches(app.rom).filter((p) => p.id === id));
     const filesBox = h('div');
     const patchBox = h('div');
     clear(detail).append(
       h('div', { class: 'row pkg-head' },
         h('div', { class: 'grow' },
           h('div', { class: 'pkg-title' }, it.name, patches[0]?.version ? h('span', { class: 'hint' }, ` v${patches[0].version}`) : ''),
-          h('div', { class: 'hint' }, rec?.legacy ? `Legacy package: applied ${new Date(rec.added).toLocaleString()}, before packages were tracked`
-            : [rec ? `added ${new Date(rec.added).toLocaleString()}` : patches[0] ? `applied ${new Date(patches[0].applied).toLocaleString()}` : '', rec?.fileName].filter(Boolean).join(' · '))),
+          h('div', { class: 'hint' }, [`added ${new Date(rec.added).toLocaleString()}`, rec.fileName].filter(Boolean).join(' · '))),
         h('span', { class: 'pkg-docs' }),
         h('button', { class: 'danger', onclick: () => void remove(it) }, 'Remove …')),
       patchBox,
-      ...(rec ? toolSections(rec) : []),
+      ...toolSections(rec),
       filesBox,
     );
     for (const p of patches) void patchSection(p, rec, n).then((s) => { if (n === seq) patchBox.appendChild(s); });
     void (async () => {
-      // a legacy package's files are kept with its patch
-      const files = rec?.legacy ? new Map((patches[0] && (await storedUpload(app, patches[0]))?.files) || []) : rec ? packageFiles(app.rom, rec) : null;
+      const files = packageFiles(app.rom, rec);
       if (n !== seq || !files?.size) return;
       const docs = detail.querySelector('.pkg-docs')!;
       if (packageDocs(files).length) docs.appendChild(h('button', { onclick: () => openDocs(it.name, files) }, 'Manual …'));
@@ -146,8 +134,7 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
     const own = p.own.reduce((k, o) => k + Math.max(0, app.rom.isRatsAt(o)), 0);
     const box = h('section', { class: 'pkg-sec' },
       h('h3', null, rec && rec.patches.length > 1 ? `Patch ${p.name}` : 'Patch'),
-      h('p', { class: 'hint' }, p.kind === 'vram' ? 'Editor patch: tilemaps for BG2/BG3 moved.' : `${bytes} bytes changed · ${own < 1024 ? `${own} bytes` : `${(own / 1024).toFixed(1)} KB`} code/data`));
-    if (p.kind === 'vram') return box;
+      h('p', { class: 'hint' }, `${bytes} bytes changed · ${own < 1024 ? `${own} bytes` : `${(own / 1024).toFixed(1)} KB`} code/data`));
     const s = await storedUpload(app, p).catch(() => undefined);
     if (n !== seq) return box;
     if (!s) { box.appendChild(h('p', { class: 'hint' }, 'The source files are not in this ROM (exported without the editor data, or not kept) – settings cannot be changed. Open the project file (.smwproj) to change them.')); return box; }
@@ -155,14 +142,13 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
     const m = upload.manifest;
     if (m?.description) box.appendChild(h('p', null, m.description));
     const form = settingsForm(upload, s.main, p.defines);
-    const log = h('div');
     const again = () => {
       const r = reapplyPackagePatch(app, upload, s.fileName, s.main, form.read(), p, rec);
-      if (!r.ok) { clear(log).appendChild(logView(r)); return; }
+      if (!r.ok) { logTool(`Patch “${upload.name}”`, r); return; }
       patchDone(upload.name, true, r);
       host.changed();
     };
-    box.append(form.el, h('div', { class: 'row' }, h('button', { onclick: again, title: 'Reapply the patch with these settings' }, 'Reapply')), log);
+    box.append(form.el, h('div', { class: 'row' }, h('button', { onclick: again, title: 'Reapply the patch with these settings' }, 'Reapply')));
     return box;
   }
 
@@ -176,11 +162,11 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
       intro ? h('p', { class: 'hint' }, intro) : '', ...body);
 
     // UberASM: where it runs, then its files
-    if (rec.uber.files.length || rec.uber.calls.length) {
+    if (rec.uberasm.files.length || rec.uberasm.calls.length) {
       const proj = host.panes.uberasm.project() as UberProject;
-      const calls = SECTIONS.uber.owned(rec.uber, proj);
+      const calls = SECTIONS.uberasm.owned(rec.uberasm, proj);
       const shown = new Set(calls.map((c) => c[2]));
-      const rest = rec.uber.files.filter((f) => !shown.has(f)).sort();
+      const rest = rec.uberasm.files.filter((f) => !shown.has(f)).sort();
       const where = ([ctx, num]: [UberContext, number, string]) => num === ALL ? `all ${CTX_LABEL[ctx].toLowerCase()}s` : `${CTX_LABEL[ctx]} ${hex(num, ctx === 'level' ? 3 : 2)}`;
       const unassign = (c: [UberContext, number, string]) => {
         const cs = proj.list[c[0]].get(c[1])?.filter((x) => x.file !== c[2]) ?? [];
@@ -196,10 +182,10 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
           h('table', { class: 'uber-table' }, rest.map((f) => fileRow('uberasm', proj.files, f)))) : ''));
     }
     // blocks
-    if (rec.blocks.tiles.length || rec.blocks.files.length) {
+    if (rec.block.tiles.length || rec.block.files.length) {
       const proj = host.panes.block.project() as BlockProject;
-      const blocks = SECTIONS.blocks.owned(rec.blocks, proj).sort((a, b) => a.tile - b.tile);
-      const rest = rec.blocks.files.filter((f) => !blocks.some((b) => b.file === f)).sort();
+      const blocks = SECTIONS.block.owned(rec.block, proj).sort((a, b) => a.tile - b.tile);
+      const rest = rec.block.files.filter((f) => !blocks.some((b) => b.file === f)).sort();
       out.push(section('block', 'Blocks', 'To place: palette → Map16, or a Direct Map16 object with the tile.',
         blocks.length ? h('table', { class: 'uber-table' }, h('tr', null, h('th', null, 'Tile'), h('th', null, 'Block'), h('th', null, 'acts like'), h('th')),
           blocks.map((b) => h('tr', null,
@@ -211,13 +197,13 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
           h('table', { class: 'uber-table' }, rest.map((f) => fileRow('block', proj.files, f)))) : ''));
     }
     // sprites
-    if (rec.pixi.list.length || rec.pixi.files.length) {
+    if (rec.sprite.list.length || rec.sprite.files.length) {
       const proj = host.panes.sprite.project() as PixiProject;
-      const sprites = SECTIONS.pixi.owned(rec.pixi, proj);
+      const sprites = SECTIONS.sprite.owned(rec.sprite, proj);
       const nameOf = (e: PixiProject['list'][number]) => { try { return spriteConfig(proj, e).names[0]?.name ?? ''; } catch { return ''; } };
       const asmOf = (e: PixiProject['list'][number]) => { try { return spriteConfig(proj, e).asm ?? e.file; } catch { return e.file; } };
       const used = new Set(sprites.flatMap((e) => [e.file, asmOf(e)]));
-      const rest = rec.pixi.files.filter((f) => !used.has(f)).sort();
+      const rest = rec.sprite.files.filter((f) => !used.has(f)).sort();
       out.push(section('sprite', 'Sprites', 'To insert: sprite mode, custom sprite with the number.',
         sprites.length ? h('table', { class: 'uber-table' }, h('tr', null, h('th', null, 'Type'), h('th', null, 'No.'), h('th', null, 'Name'), h('th')),
           sprites.map((e) => h('tr', null, h('td', null, SPRITE_KIND[e.kind]), h('td', { class: 'mono' }, hex(e.num, 2)), h('td', { title: e.file }, nameOf(e)),
@@ -300,40 +286,17 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
 
   async function remove(it: Item): Promise<void> {
     const rec = it.rec;
-    if (!rec) return removeVramPatch(it.patch!);
-    const parts: string[] = [];
-    if (rec.patches.length) parts.push(rec.patches.length > 1 ? `${rec.patches.length} patches` : 'the patch');
-    if (rec.uber.files.length) parts.push(`${rec.uber.files.length} UberASM file(s) with their assignments`);
-    if (rec.blocks.tiles.length) parts.push(`block(s) at ${rec.blocks.tiles.map((t) => hex(t, 3)).join(', ')}`);
-    if (rec.pixi.list.length) parts.push(`sprite(s) ${rec.pixi.list.map(([, n]) => hex(n, 2)).join(', ')}`);
-    if (rec.gfx.length) parts.push(rec.gfx.map(gfxName).join(', '));
-    if (rec.map16?.length || rec.bgMap16?.length) parts.push(`${(rec.map16?.length ?? 0) + (rec.bgMap16?.length ?? 0)} Map16 tile(s)`);
-    if (rec.music?.length) parts.push(`${rec.music.length > 1 ? 'songs' : 'the song'} (AddmusicK inserts the music again)`);
+    const parts = packageRemoval(rec);
     const i = await choose('Remove package', `Remove “${rec.name}” from the ROM completely: ${parts.join(', ')}. Files another package brought as well stay. Whatever is placed in levels stays in place.`,
       [{ label: 'Cancel' }, { label: 'Remove', danger: true }]);
     if (i !== 1) return;
-    const keys = TOOL_KINDS.filter((k) => rec[TOOL[k]].files.length);
-    if (app.dirty) app.saveLevel(true);
+    const keys = TOOL_KINDS.filter((k) => rec[k].files.length);
     try {
       const blank = map16Source(app.rom, app.render).fg(0x025);
       const w = await app.romEditAsync(`Package “${rec.name}” removed`, () => removePackage(app.rom, rec.id, blank));
-      patchesChanged(app);
       toast(`“${rec.name}” removed${w.length ? ': ' + w.join(' ') : ''}`);
     } catch (e) { toast(errorText(e), 'error'); }
     for (const k of keys) host.panes[k].reload();
-    host.changed();
-  }
-
-  // the editor's VRAM patch (BG2/BG3 graphics)
-  async function removeVramPatch(p: PatchEntry): Promise<void> {
-    const i = await choose('Remove editor patch', `Remove “${p.name}” from the ROM? The bytes it changed are restored.`, [{ label: 'Cancel' }, { label: 'Remove', danger: true }]);
-    if (i !== 1) return;
-    if (app.dirty) app.saveLevel(true);
-    try {
-      const w = app.romEdit(`“${p.name}” removed`, () => uninstallVramPatch(app.rom));
-      patchesChanged(app);
-      toast(`Patch “${p.name}” removed${w.length ? ': ' + w.join(' ') : ''}`);
-    } catch (e) { toast(errorText(e), 'error'); }
     host.changed();
   }
 

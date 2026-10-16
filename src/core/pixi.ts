@@ -40,10 +40,20 @@ export function numberRange(kind: SpriteFolder): [number, number] {
   if (kind === 'generators') return [0xd0, 0xdf];
   return [0x00, MISC_MAX[kind]!];
 }
+// sprites, shooters and generators share one number space (00-DF); the other types have one each
+const isLevelKind = (k: SpriteFolder) => k === 'sprites' || k === 'shooters' || k === 'generators';
+export const sharesNumbers = (a: SpriteFolder, b: SpriteFolder) => a === b || (isLevelKind(a) && isLevelKind(b));
 const levelKind = (num: number): SpriteFolder => (num < 0xc0 ? 'sprites' : num < 0xd0 ? 'shooters' : 'generators');
 
 export interface PixiEntry { kind: SpriteFolder; num: number; file: string } // file relative to the project root
 export interface PixiProject { files: Map<string, Uint8Array>; list: PixiEntry[] }
+
+// assigns a sprite file to a number, in place of what had that number in its number space – for
+// installing and for the Sprites tab
+export function assignSprite(p: PixiProject, e: PixiEntry): void {
+  p.list = p.list.filter((x) => !(x.num === e.num && sharesNumbers(x.kind, e.kind)));
+  p.list.push(e);
+}
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -447,11 +457,9 @@ export function savePixiProject(rom: Rom, p: PixiProject): ApplyResult {
   } catch (err) {
     return { ok: false, errors: [err instanceof Error ? err.message : String(err)], warnings: [], prints: [] };
   }
-  const snapshot = rom.snapshot();
   try {
     return after(e ? reapplyPatch(rom, e.id, src) : applyPatch(rom, src));
   } catch (err) {
-    rom.restore(snapshot);
     return { ok: false, errors: [err instanceof Error ? err.message : String(err)], warnings: [], prints: [] };
   }
 }

@@ -22,10 +22,8 @@ export interface PatchEntry {
   backup: number[]; // SNES addresses of the RATS blocks holding the original bytes of segs
   own: number[]; // pc of the RATS tags of the patch's free space blocks
   check: number; // hash of the patched bytes of segs, to notice later edits
-  kind?: PartKind | 'vram'; // 'vram': the editor's own VRAM patch
+  kind?: PartKind | 'vram' | 'exanim' | 'l2scroll' | 'levelheight' | 'layer3'; // 'vram', 'exanim', 'l2scroll', 'levelheight', 'layer3': the editor's own VRAM patch, ExAnimation engine, layer 2 scroll rates, level heights and layer 3 graphics
   srcId?: string; // the sources (zip) in the editor data (rom.extra), if kept
-  src?: number[]; // older ROMs: SNES addresses of RATS blocks holding the sources (see migrateSources)
-  srcSize?: number;
   ram?: RamClaim[]; // free RAM the patch claims
   ramSeen?: [number, number][]; // [snes, size] written with long addressing by its code
 }
@@ -35,10 +33,6 @@ export interface PatchEntry {
 export type RamClaim = [number, number, number?];
 
 interface Registry { v: number; patches: PatchEntry[] }
-
-// kinds as stored in the ROM, where they differ from the part kind (kept so older editors read them)
-const STORED: Partial<Record<PartKind, string>> = { block: 'blocks', sprite: 'pixi' };
-const FROM_STORED: Partial<Record<string, PartKind>> = { blocks: 'block', pixi: 'sprite' };
 
 function findRegistry(rom: Rom): number {
   for (const b of rom.scanRats()) {
@@ -54,7 +48,6 @@ function read(rom: Rom): Registry {
   const size = rom.isRatsAt(p - 8);
   if (rom.data[p + 4] > VERSION) throw new Error('Patch registry in the ROM is from a newer editor version');
   const reg = JSON.parse(new TextDecoder().decode(rom.data.subarray(p + 5, p - 8 + 8 + size))) as Registry;
-  for (const e of reg.patches) if (e.kind) e.kind = FROM_STORED[e.kind] ?? e.kind;
   return reg;
 }
 
@@ -62,8 +55,7 @@ function write(rom: Rom, reg: Registry): void {
   const old = findRegistry(rom);
   if (old >= 0) rom.freeAt(pcToSnes(old));
   if (!reg.patches.length) return;
-  const stored = { ...reg, patches: reg.patches.map((e) => (e.kind && e.kind !== 'vram' && STORED[e.kind] ? { ...e, kind: STORED[e.kind] } : e)) };
-  const json = new TextEncoder().encode(JSON.stringify(stored));
+  const json = new TextEncoder().encode(JSON.stringify(reg));
   if (json.length + 5 > CHUNK) throw new Error('Patch registry is too large');
   const buf = new Uint8Array(json.length + 5);
   buf.set(MAGIC); buf[4] = VERSION; buf.set(json, 5);
@@ -121,7 +113,7 @@ export function readChunks(rom: Rom, addrs: number[], total: number): Uint8Array
 
 // adds an entry; original[i] holds the bytes of segs[i] before the patch (in the ROM, so a playable ROM can
 // still remove it); archive: sources to keep with the editor data
-export function addPatch(rom: Rom, entry: Omit<PatchEntry, 'backup' | 'src' | 'srcSize' | 'srcId'>, original: Uint8Array[], archive?: Uint8Array): PatchEntry {
+export function addPatch(rom: Rom, entry: Omit<PatchEntry, 'backup' | 'srcId'>, original: Uint8Array[], archive?: Uint8Array): PatchEntry {
   const reg = read(rom);
   const all = new Uint8Array(original.reduce((n, o) => n + o.length, 0));
   let o = 0;
@@ -144,32 +136,25 @@ export function missingSources(what: string): Error {
 
 // the sources stored with the patch, null if they are not there (not kept, or a playable ROM without the editor data)
 export function patchArchive(rom: Rom, p: PatchEntry): Uint8Array | null {
-  if (p.srcId) return rom.getBlob(p.srcId);
-  return p.src && p.srcSize ? readChunks(rom, p.src, p.srcSize) : null;
+  return p.srcId ? rom.getBlob(p.srcId) : null;
+}
+
+// changes the kind of an entry (older ROMs recorded the editor's own patches without one)
+export function setPatchKind(rom: Rom, id: string, kind: PatchEntry['kind']): void {
+  const reg = read(rom);
+  const p = reg.patches.find((e) => e.id === id);
+  if (!p || p.kind === kind) return;
+  p.kind = kind;
+  write(rom, reg);
 }
 
 export function removeEntry(rom: Rom, id: string): void {
   const reg = read(rom);
   const p = reg.patches.find((e) => e.id === id);
   if (!p) return;
-  for (const addr of [...p.backup, ...(p.src ?? [])]) rom.freeAt(addr);
+  for (const addr of p.backup) rom.freeAt(addr);
   if (p.srcId) rom.dropBlob(p.srcId);
   reg.patches = reg.patches.filter((e) => e.id !== id);
   write(rom, reg);
 }
 
-// Sources that older versions kept in the ROM go into the editor data, their RATS blocks are freed.
-// Returns whether anything moved.
-export function migratePatchSources(rom: Rom): boolean {
-  const reg = read(rom);
-  let moved = false;
-  for (const p of reg.patches) {
-    if (!p.src) continue;
-    if (p.srcSize) p.srcId = rom.putBlob(readChunks(rom, p.src, p.srcSize));
-    for (const a of p.src) rom.freeAt(a);
-    delete p.src; delete p.srcSize;
-    moved = true;
-  }
-  if (moved) write(rom, reg);
-  return moved;
-}

@@ -166,6 +166,15 @@ export class RomHistory {
     this.snapExtra = null;
   }
 
+  // closes the open edit (also when nested) and puts the ROM image and editor data back as they were at
+  // its begin; nothing is recorded
+  rollback(): void {
+    if (this.depth === 0) return;
+    this.rom.data = this.snap!;
+    this.rom.extra = this.snapExtra!;
+    this.cancel();
+  }
+
   edit<T>(label: string, fn: () => T, key: string | null = null): T {
     this.begin(label, key);
     try { return fn(); } finally { this.commit(); }

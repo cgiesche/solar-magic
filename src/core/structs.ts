@@ -10,6 +10,7 @@
 import { Rom } from './rom.ts';
 import { Asm } from './asm.ts';
 import { ownerNote } from './patchreg.ts';
+import { missingPatch, nextScreen } from './patches.ts';
 
 export const EXT_OBJ_TABLE = 0x0da10f;
 export const STRUCT_EXT = 0x03;
@@ -36,10 +37,7 @@ export function structPatch(rom: Rom): { base: number; table: number } | null {
   return { base, table: rom.r24(base + 5) };
 }
 
-// extended object $03 at 4 bytes: only where the patch is installed (elsewhere $03 is not ours)
-export function hasStructs(rom: Rom): boolean {
-  return structPatch(rom) !== null;
-}
+const structTable = (rom: Rom) => (structPatch(rom) ?? missingPatch('Structures (SMWS)')).table;
 
 function build(): Asm {
   const a = new Asm();
@@ -82,7 +80,7 @@ function build(): Asm {
   a.br(0xd0, 'col');
   a.b(0xa5, 0x0f);
   a.br(0xd0, 'vcross');
-  a.b(0xa5, 0x6b, 0x18, 0x69, 0xb0, 0x85, 0x6b, 0x85, 0x6e, 0xa5, 0x6c, 0x69, 0x01, 0x85, 0x6c, 0x85, 0x6f); // += $1B0
+  a.b(...nextScreen()); // += a screen
   a.br(0x80, 'crossed');
   a.label('vcross');
   a.b(0xe6, 0x6c, 0xe6, 0x6f); // += $100
@@ -131,9 +129,7 @@ function setPtr(rom: Rom, table: number, n: number, addr: number): void {
 }
 
 export function readStructure(rom: Rom, n: number): Structure | null {
-  const p = structPatch(rom);
-  if (!p) return null;
-  const a = ptrOf(rom, p.table, n);
+  const a = ptrOf(rom, structTable(rom), n);
   if (!(a >> 16)) return null;
   const w = rom.r8(a), h = rom.r8(a + 1);
   const tiles: number[] = [];
@@ -149,22 +145,19 @@ export function readStructure(rom: Rom, n: number): Structure | null {
 
 export function listStructures(rom: Rom): Map<number, Structure> {
   const out = new Map<number, Structure>();
-  if (!structPatch(rom)) return out;
   for (let n = 0; n < STRUCT_COUNT; n++) { const s = readStructure(rom, n); if (s) out.set(n, s); }
   return out;
 }
 
 export function freeStructureNumber(rom: Rom): number {
-  const p = structPatch(rom);
-  if (!p) return 0;
-  for (let n = 0; n < STRUCT_COUNT; n++) if (!(ptrOf(rom, p.table, n) >> 16)) return n;
+  const table = structTable(rom);
+  for (let n = 0; n < STRUCT_COUNT; n++) if (!(ptrOf(rom, table, n) >> 16)) return n;
   return -1;
 }
 
-// stores (or with null removes) structure n; installs the patch when needed
+// stores (or with null removes) structure n
 export function writeStructure(rom: Rom, n: number, s: Structure | null): void {
-  if (!s && !structPatch(rom)) return;
-  const p = installStructPatch(rom);
+  const p = { table: structTable(rom) };
   const old = ptrOf(rom, p.table, n);
   if (old >> 16) rom.freeAt(old);
   if (!s) { setPtr(rom, p.table, n, 0); return; }

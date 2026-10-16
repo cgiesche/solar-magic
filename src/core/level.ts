@@ -2,13 +2,42 @@
 
 import { Rom } from './rom.ts';
 import { spriteBankOf, DM16_EXT } from './patches.ts';
-import { STRUCT_EXT, hasStructs } from './structs.ts';
+import { STRUCT_EXT } from './structs.ts';
+import { MAP_SIZE } from './ram.ts';
 
 export const L1_PTRS = 0x05e000;
 export const L2_PTRS = 0x05e600;
 export const SPR_PTRS = 0x05ec00;
-export const SEC_HDR = [0x05f000, 0x05f200, 0x05f400, 0x05f600];
-export const SEC_ENT = [0x05f800, 0x05fa00, 0x05fc00, 0x05fe00];
+// the secondary header: the game's four tables, Lunar Magic's layer 2 scroll byte ($06FA00, l2scroll.ts),
+// the level size byte (LEVEL_SIZE_TABLE), Lunar Magic 3.00's three entrance bytes ($05DE00, $06FC00,
+// $06FE00: the entrance at a tile, the camera relative to Mario, the BG's height; levelheight.ts) and its
+// four of the midway entrance (Lunar Magic keeps them where its code is, the editor in free space of bank 7)
+export const SEC_HDR = [0x05f000, 0x05f200, 0x05f400, 0x05f600, 0x06fa00, 0x06ca00, 0x05de00, 0x06fc00, 0x06fe00, 0x07e800, 0x07ea00, 0x07ec00, 0x07ee00];
+
+// ----- level size (Lunar Magic 3.00's horizontal level heights, levelheight.ts) -----
+// A byte per level in Lunar Magic's format TB0MMMMM: M the size, T (layer 2 or 3) and B (show the bottom
+// row) Lunar Magic's own, kept. Lunar Magic keeps the table where its code is; the editor's is here.
+export const LEVEL_SIZE_TABLE = SEC_HDR[5];
+// the height in pixels per size (the 0x3800 bytes of level data shared by the screens); also a screen's
+// bytes in the level data. Measured: what Lunar Magic's code sets as the level's height ($13D7) per size.
+export const LEVEL_HEIGHTS = [
+  0x1b0, 0x1c0, 0x1d0, 0x200, 0x220, 0x250, 0x260, 0x280, 0x2a0, 0x2c0, 0x2f0, 0x310, 0x340, 0x380, 0x3b0, 0x400,
+  0x440, 0x4a0, 0x510, 0x590, 0x630, 0x700, 0x800, 0x950, 0xb30, 0xe00, 0x12a0, 0x1c00, 0x3800, 0x100, 0xf0, 0xe0,
+];
+// sizes the editor offers: 1C (one screen, 0x3800 pixels) needs Lunar Magic's swapped screen jump, extended
+// object $03, which is the editor's structure; 1D-1F have more than 32 screens
+export const MAX_LEVEL_SIZE = 0x1b;
+export const SUBSCREEN_ROWS = 32; // a taller level's object and sprite positions count in subscreens of 32 rows
+export const levelRows = (s: { levelSize: number }): number => LEVEL_HEIGHTS[s.levelSize & 0x1f] >> 4;
+// a level with subscreens: objects and sprites below row 31 (screen jumps with a subscreen, sprite data
+// in Lunar Magic's new format)
+export const isTall = (s: { levelSize: number }): boolean => levelRows(s) > SUBSCREEN_ROWS;
+// a level with a size: its screen jumps have a subscreen (as the patch reads them)
+export const isSized = (s: { levelSize: number }): boolean => (s.levelSize & 0x1f) !== 0;
+export const maxScreens = (s: { levelSize: number }): number => Math.min(32, Math.floor(MAP_SIZE / LEVEL_HEIGHTS[s.levelSize & 0x1f]));
+// secondary entrances: the game's four tables, then Lunar Magic 3.00's two (EFYYYYYY, RLW-----; Lunar
+// Magic keeps them where its code is, the editor here)
+export const SEC_ENT = [0x05f800, 0x05fa00, 0x05fc00, 0x05fe00, 0x06cc00, 0x06ce00];
 
 export interface LevelObject {
   uid: number;
@@ -26,7 +55,20 @@ export interface ScreenExit {
   screen: number;
   dest: number; // destination level (or secondary entrance) number, 9 bit
   secondary: boolean;
-  flags: number; // raw low nibble of byte 1 (bit0 = hi bit, bit1 = secondary, others kept)
+  flags: number; // the low nibble of byte 1, Lunar Magic's 0000wush (h: dest's high bit, s: secondary, u, w kept)
+}
+// a screen exit's w (Lunar Magic's): a secondary exit makes the level it leads to a water level, a standard
+// exit leads to the target's midway entrance – when that has its own settings, else to its main entrance
+// (levelheight.ts)
+export const EXIT_WATER = 0x08, EXIT_MIDWAY = EXIT_WATER;
+export const exitToMidway = (e: Pick<ScreenExit, 'secondary' | 'flags'>): boolean => !e.secondary && (e.flags & EXIT_MIDWAY) !== 0;
+// whether Mario comes out at the midway entrance of the target (its secondary header) through such an exit
+export const exitLandsAtMidway = (e: Pick<ScreenExit, 'secondary' | 'flags'>, target: Pick<SecondaryHeader, 'midwayOwn'>): boolean =>
+  exitToMidway(e) && !!target.midwayOwn;
+// makes a screen exit secondary or standard; w means something else for the other kind, so a change drops it
+export function setExitSecondary(e: ScreenExit, secondary: boolean): void {
+  if (e.secondary !== secondary) e.flags &= ~EXIT_WATER;
+  e.secondary = secondary;
 }
 
 export interface LevelSprite {
@@ -55,17 +97,45 @@ export interface PrimaryHeader {
 }
 
 export interface SecondaryHeader {
-  layer2Scroll: number; // F000 bits 7-4
+  layer2Scroll: number; // F000 bits 7-4: the paired setting, or with layer2Separate the horizontal rate
   entranceY: number; // F000 bits 3-0
   layer3: number; // F200 bits 7-6
   entranceAction: number; // F200 bits 5-3
   entranceX: number; // F200 bits 2-0
-  midwayScreen: number; // F400 bits 7-4
+  midwayScreen: number; // F400 bits 7-4, E800 bit 4 (Lunar Magic's bit 4)
   fgInitY: number; // F400 bits 3-2
   bgInitY: number; // F400 bits 1-0
   noYoshiIntro: number; // F600 bit 7
   verticalPositioning: number; // F600 bits 6-5
   entranceScreen: number; // F600 bits 4-0
+  layer2Separate: number; // FA00 bit 7: separate horizontal and vertical layer 2 rates
+  layer2HAuto: number; // FA00 bit 6: the horizontal rate (layer2Scroll) is an auto-scroll
+  layer2V: number; // FA00 bits 4-0: the vertical rate
+  lmAutoScreens: number; // FA00 bit 5: Lunar Magic's "auto-set number of screens" (kept, not used)
+  levelSize: number; // CA00 bits 4-0: the height of a horizontal level (LEVEL_HEIGHTS), 0 = the game's
+  levelSizeFlags: number; // CA00 bits 7-5: Lunar Magic's T and B (kept, not used)
+  // Lunar Magic 3.00's entrance (levelheight.ts)
+  entranceTile: number; // DE00 bit 5: Mario at tile X/Y of the entrance screen (entranceX/Y their low bits)
+  entranceXHi: number; // DE00 bits 4-3: X bits 4-3
+  entranceYHi: number; // FC00 bits 5-0: Y bits 9-4
+  water: number; // DE00 bit 6: a water level (Mario swims)
+  lmEntranceFlags: number; // DE00 bits 7, 2-0: slippery, the sprites' spawn range (kept, not used)
+  cameraRelative: number; // FE00 bit 7: the camera starts relative to Mario (cameraOffset), the BG to match
+  cameraOffsetHi: number; // FC00 bit 6: bit 4 of the offset (bits 3-0: fgInitY, bgInitY)
+  bgRelative: number; // FC00 bit 7: with cameraRelative the BG starts at the FG + 16 * bgHeight (signed)
+  bgHeight: number; // FE00 bits 4-0: the BG's height in rows - 1 (or with bgRelative its offset)
+  faceLeft: number; // FE00 bit 6: Mario faces left
+  lmSpareBit: number; // FE00 bit 5 (unused in Lunar Magic's layout, kept)
+  // Lunar Magic 3.00's midway entrance with its own settings (levelheight.ts): a tile of the midway screen
+  midwayOwn: number; // E800 bit 5: the midway entrance has its own settings (else the main entrance's, but the screen)
+  midwayX: number; // EA00 bits 3-0, E800 bit 3: tile X (bit 4 only in vertical levels)
+  midwayY: number; // EA00 bits 7-4, EE00 bits 5-0: tile Y
+  midwayAction: number; // E800 bits 2-0
+  midwayWater: number; // E800 bit 6
+  midwayFaceLeft: number; // EC00 bit 6
+  midwayCameraRelative: number; // EC00 bit 7
+  midwayCamera: number; // EE00 bit 6, EC00 bits 3-0: the 5-bit camera offset (or FG/BG start Y), as the main entrance's
+  lmMidwayFlags: number; // E800 bit 7 (slippery), EC00 bits 5-4 (bit 5: to another level), EE00 bit 7 – kept, not used
 }
 
 export interface Level {
@@ -79,6 +149,7 @@ export interface Level {
   layer2Header: Uint8Array | null; // 5 raw header bytes of L2 object data
   layer2Pointer: number; // original 24-bit pointer
   bg?: Uint16Array | null; // edited BG tilemap (bg.ts layout), saved on the next save
+  layer3?: Uint16Array | null; // edited layer 3 tilemap (layer3map.ts, VRAM $5000-$5FFF), saved into its LT3 file on the next save
   sprites: LevelSprite[];
   spriteHeader: number;
   // original locations (for in-place saving)
@@ -111,6 +182,10 @@ export function hasLayer2Objects(mode: number): boolean {
 export function hasObjects(mode: number): boolean {
   return ![0x09, 0x0b, 0x10].includes(mode);
 }
+// modes a level can have a size (a height) in: horizontal, with objects, layer 2 not of objects
+export function hasLevelSize(rom: Rom, mode: number): boolean {
+  return hasObjects(mode) && !hasLayer2Objects(mode) && !isL1Vertical(rom, mode);
+}
 
 // ----- header -----
 export function parsePrimaryHeader(b: Uint8Array): PrimaryHeader {
@@ -140,27 +215,62 @@ export function encodePrimaryHeader(h: PrimaryHeader): Uint8Array {
   ]);
 }
 
-export function decodeSecondaryHeader([a, b, c, d]: Iterable<number> & ArrayLike<number>): SecondaryHeader {
+export function decodeSecondaryHeader([a, b, c, d, e = 0, f = 0, g = 0, h = 0, i = 0, m1 = 0, m2 = 0, m3 = 0, m4 = 0]: Iterable<number> & ArrayLike<number>): SecondaryHeader {
   return {
     layer2Scroll: a >> 4,
     entranceY: a & 0x0f,
     layer3: b >> 6,
     entranceAction: (b >> 3) & 7,
     entranceX: b & 7,
-    midwayScreen: c >> 4,
+    midwayScreen: (c >> 4) | (m1 & 0x10),
     fgInitY: (c >> 2) & 3,
     bgInitY: c & 3,
     noYoshiIntro: d >> 7,
     verticalPositioning: (d >> 5) & 3,
     entranceScreen: d & 0x1f,
+    layer2Separate: e >> 7,
+    layer2HAuto: (e >> 6) & 1,
+    layer2V: e & 0x1f,
+    lmAutoScreens: (e >> 5) & 1,
+    levelSize: f & 0x1f,
+    levelSizeFlags: f & 0xe0,
+    entranceTile: (g >> 5) & 1,
+    entranceXHi: (g >> 3) & 3,
+    entranceYHi: h & 0x3f,
+    water: (g >> 6) & 1,
+    lmEntranceFlags: g & 0x87,
+    cameraRelative: i >> 7,
+    cameraOffsetHi: (h >> 6) & 1,
+    bgRelative: h >> 7,
+    bgHeight: i & 0x1f,
+    faceLeft: (i >> 6) & 1,
+    lmSpareBit: i & 0x20,
+    midwayOwn: (m1 >> 5) & 1,
+    midwayX: ((m1 & 8) << 1) | (m2 & 0x0f),
+    midwayY: ((m4 & 0x3f) << 4) | (m2 >> 4),
+    midwayAction: m1 & 7,
+    midwayWater: (m1 >> 6) & 1,
+    midwayFaceLeft: (m3 >> 6) & 1,
+    midwayCameraRelative: m3 >> 7,
+    midwayCamera: ((m4 & 0x40) >> 2) | (m3 & 0x0f),
+    lmMidwayFlags: (m1 & 0x80) | (m3 & 0x30) | (m4 >> 7),
   };
 }
 export function encodeSecondaryHeader(s: SecondaryHeader): number[] {
   return [
     (s.layer2Scroll << 4) | (s.entranceY & 0x0f),
     (s.layer3 << 6) | ((s.entranceAction & 7) << 3) | (s.entranceX & 7),
-    (s.midwayScreen << 4) | ((s.fgInitY & 3) << 2) | (s.bgInitY & 3),
+    ((s.midwayScreen & 0x0f) << 4) | ((s.fgInitY & 3) << 2) | (s.bgInitY & 3),
     (s.noYoshiIntro << 7) | ((s.verticalPositioning & 3) << 5) | (s.entranceScreen & 0x1f),
+    (s.layer2Separate << 7) | ((s.layer2HAuto & 1) << 6) | ((s.lmAutoScreens & 1) << 5) | (s.layer2V & 0x1f),
+    (s.levelSizeFlags & 0xe0) | (s.levelSize & 0x1f),
+    (s.lmEntranceFlags & 0x87) | ((s.water & 1) << 6) | ((s.entranceTile & 1) << 5) | ((s.entranceXHi & 3) << 3),
+    (s.bgRelative << 7) | ((s.cameraOffsetHi & 1) << 6) | (s.entranceYHi & 0x3f),
+    (s.cameraRelative << 7) | ((s.faceLeft & 1) << 6) | (s.lmSpareBit & 0x20) | (s.bgHeight & 0x1f),
+    (s.lmMidwayFlags & 0x80) | ((s.midwayWater & 1) << 6) | ((s.midwayOwn & 1) << 5) | (s.midwayScreen & 0x10) | ((s.midwayX & 0x10) >> 1) | (s.midwayAction & 7),
+    ((s.midwayY & 0x0f) << 4) | (s.midwayX & 0x0f),
+    (s.midwayCameraRelative << 7) | ((s.midwayFaceLeft & 1) << 6) | (s.lmMidwayFlags & 0x30) | (s.midwayCamera & 0x0f),
+    ((s.lmMidwayFlags & 1) << 7) | ((s.midwayCamera & 0x10) << 2) | ((s.midwayY >> 4) & 0x3f),
   ];
 }
 export function readSecondaryHeader(rom: Rom, n: number): SecondaryHeader {
@@ -177,12 +287,14 @@ export interface ParsedObjects {
   size: number; // bytes consumed including terminating $FF
 }
 
-// structs: extended object $03 is a structure (4 bytes), only where the structure patch is installed
-export function parseObjects(data: Uint8Array, start: number, vertical: boolean, structs = false): ParsedObjects {
+// extended object $03 is a structure (4 bytes, structure patch). In a level with a size (`sized`) the
+// screen jump's low nibble of the second byte is the subscreen (000HHHHH 0000VVVV 00000001): rows
+// V * 32 on; the new screen flag keeps it (observed: where the game puts objects in a Lunar Magic-saved ROM)
+export function parseObjects(data: Uint8Array, start: number, vertical: boolean, sized = false): ParsedObjects {
   const objects: LevelObject[] = [];
   const exits: ScreenExit[] = [];
   let p = start;
-  let screen = 0;
+  let screen = 0, sub = 0;
   while (p < data.length && data[p] !== 0xff) {
     const b0 = data[p], b1 = data[p + 1], b2 = data[p + 2];
     const num = ((b0 >> 1) & 0x30) | (b1 >> 4);
@@ -200,6 +312,7 @@ export function parseObjects(data: Uint8Array, start: number, vertical: boolean,
     }
     if (num === 0 && b2 === 1) {
       screen = b0 & 0x1f;
+      if (sized && !vertical) sub = b1 & 0x0f;
       p += 3;
       continue;
     }
@@ -211,14 +324,14 @@ export function parseObjects(data: Uint8Array, start: number, vertical: boolean,
       y = screen * 16 + f4;
     } else {
       x = screen * 16 + f4;
-      y = f5;
+      y = sub * SUBSCREEN_ROWS + f5;
     }
     if (dm16) {
       objects.push({ uid: newUid(), num, ext: b2, x, y, size: data[p + 5], tile: data[p + 3] | (data[p + 4] << 8) });
       p += 6;
       continue;
     }
-    if (structs && num === 0 && b2 === STRUCT_EXT) {
+    if (num === 0 && b2 === STRUCT_EXT) {
       objects.push({ uid: newUid(), num, ext: b2, x, y, size: 0, struct: data[p + 3] });
       p += 4;
       continue;
@@ -229,8 +342,9 @@ export function parseObjects(data: Uint8Array, start: number, vertical: boolean,
   return { objects, exits, size: p - start + 1 };
 }
 
-// owners (optional): receives, per output byte, the index of the object it belongs to (or -1)
-export function serializeObjects(objects: LevelObject[], exits: ScreenExit[], vertical: boolean, owners?: number[]): Uint8Array {
+// owners (optional): receives, per output byte, the index of the object it belongs to (or -1);
+// sized: a level with a size (subscreens, see parseObjects)
+export function serializeObjects(objects: LevelObject[], exits: ScreenExit[], vertical: boolean, owners?: number[], sized = false): Uint8Array {
   const out: number[] = [];
   const own = (n: number, v: number) => { if (owners) for (let i = 0; i < n; i++) owners.push(v); };
   for (const e of exits) {
@@ -238,17 +352,19 @@ export function serializeObjects(objects: LevelObject[], exits: ScreenExit[], ve
     out.push(e.screen & 0x1f, flags, 0x00, e.dest & 0xff);
     own(4, -1);
   }
-  let screen = 0;
+  let screen = 0, sub = 0;
   for (const o of objects) {
     const s = vertical ? o.y >> 4 : o.x >> 4;
+    const v = sized && !vertical ? Math.floor(o.y / SUBSCREEN_ROWS) : 0;
     let nflag = 0;
-    if (s === screen + 1) {
+    if (s === screen + 1 && v === sub) {
       nflag = 0x80;
       screen = s;
-    } else if (s !== screen) {
-      out.push(s & 0x1f, 0x00, 0x01);
+    } else if (s !== screen || v !== sub) {
+      out.push(s & 0x1f, v & 0x0f, 0x01);
       own(3, -1);
       screen = s;
+      sub = v;
     }
     const f5 = vertical ? o.x & 0x1f : o.y & 0x1f;
     const f4 = vertical ? o.y & 0x0f : o.x & 0x0f;
@@ -295,11 +411,26 @@ export function spriteId(s: { num: number; extra: number }): number {
 }
 export const isCustomId = (id: number) => id >= 0x200;
 
+// Lunar Magic's new sprite format (header bit 5, NEW_SPRITE_FORMAT): $FF starts a command, $FF $00-$7F
+// sets the subscreen of the sprites that follow (rows V * 32 on), $FF $FE ends the data, $FF $FF is a
+// sprite whose first byte is $FF (smwspeedruns' "Level Data Format"; seen in a Lunar Magic-saved ROM)
+export const NEW_SPRITE_FORMAT = 0x20;
+export const SPRITE_MEMORY = 0x1f; // the header's sprite memory (bits 4-0; bit 5 is the format)
+
 export function parseSprites(data: Uint8Array, start: number, vertical: boolean, sizes: SpriteSizes = null): { sprites: LevelSprite[]; header: number; size: number } {
   const header = data[start];
+  const newFormat = (header & NEW_SPRITE_FORMAT) !== 0;
   const sprites: LevelSprite[] = [];
-  let p = start + 1;
-  while (p < data.length && data[p] !== 0xff) {
+  let p = start + 1, sub = 0;
+  while (p < data.length) {
+    if (data[p] === 0xff) {
+      if (!newFormat) break;
+      const c = data[p + 1];
+      if (c === 0xfe || c === undefined) { p++; break; }
+      if (c < 0x80) { sub = c; p += 2; continue; }
+      p++;
+      if (c !== 0xff) { p++; continue; } // reserved commands: skipped
+    }
     const b0 = data[p], b1 = data[p + 1], b2 = data[p + 2];
     const screen = (b1 & 0x0f) | ((b0 & 2) << 3);
     const lo = b0 >> 4; // y within screen (or tile row)
@@ -311,7 +442,7 @@ export function parseSprites(data: Uint8Array, start: number, vertical: boolean,
       x = hi * 16 + col;
     } else {
       x = screen * 16 + col;
-      y = hi * 16 + lo;
+      y = sub * SUBSCREEN_ROWS + hi * 16 + lo;
     }
     const extra = (b0 >> 2) & 3;
     const len = spriteEntrySize(sizes, extra, b2);
@@ -328,20 +459,33 @@ export function spriteLoadOrder(sprites: LevelSprite[], vertical: boolean): Leve
   return [...sprites].sort((a, b) => (vertical ? a.y - b.y || a.x - b.x : a.x - b.x || a.y - b.y));
 }
 
-export function serializeSprites(sprites: LevelSprite[], header: number, vertical: boolean, sizes: SpriteSizes = null): Uint8Array {
+// tall: a level with subscreens (isTall), written in Lunar Magic's new format; others in the game's
+export function serializeSprites(sprites: LevelSprite[], header: number, vertical: boolean, sizes: SpriteSizes = null, tall = false): Uint8Array {
   const sorted = spriteLoadOrder(sprites, vertical);
-  const out: number[] = [header];
+  const out: number[] = [tall ? header | NEW_SPRITE_FORMAT : header & ~NEW_SPRITE_FORMAT];
+  let sub = 0;
   for (const s of sorted) {
+    if (tall) {
+      const v = Math.floor(s.y / SUBSCREEN_ROWS);
+      if (v !== sub) { out.push(0xff, v & 0x7f); sub = v; }
+    }
     let screen: number, lo: number, hi: number, col: number;
     if (vertical) {
       screen = s.y >> 4; lo = s.y & 15; hi = (s.x >> 4) & 1; col = s.x & 15;
     } else {
       screen = s.x >> 4; col = s.x & 15; hi = (s.y >> 4) & 1; lo = s.y & 15;
     }
-    out.push((lo << 4) | ((s.extra & 3) << 2) | ((screen & 0x10) >> 3) | hi, (col << 4) | (screen & 0x0f), s.num, ...spriteBytes(sizes, s));
+    const b0 = (lo << 4) | ((s.extra & 3) << 2) | ((screen & 0x10) >> 3) | hi;
+    if (tall && b0 === 0xff) out.push(0xff);
+    out.push(b0, (col << 4) | (screen & 0x0f), s.num, ...spriteBytes(sizes, s));
   }
-  out.push(0xff);
+  out.push(...(tall ? [0xff, 0xfe] : [0xff]));
   return new Uint8Array(out);
+}
+
+// the level's sprite data as the ROM keeps it
+export function serializeLevelSprites(rom: Rom, lv: Level): Uint8Array {
+  return serializeSprites(lv.sprites, lv.spriteHeader, isL1Vertical(rom, lv.header.mode), spriteSizes(rom), isTall(lv.secondary));
 }
 
 export function spriteBank(rom: Rom, n: number): number {
@@ -365,13 +509,13 @@ export function loadLevel(rom: Rom, n: number): Level {
 export function parseLevelData(rom: Rom, n: number, l1: Uint8Array, l2: Uint8Array | null, l2Pointer: number, spr: Uint8Array, secondary: SecondaryHeader, sizes: SpriteSizes = spriteSizes(rom)): Level {
   const header = parsePrimaryHeader(l1.subarray(0, 5));
   const vert1 = isL1Vertical(rom, header.mode);
-  const p1 = hasObjects(header.mode) ? parseObjects(l1, 5, vert1, hasStructs(rom)) : { objects: [], exits: [], size: 1 };
+  const p1 = hasObjects(header.mode) ? parseObjects(l1, 5, vert1, isSized(secondary)) : { objects: [], exits: [], size: 1 };
   let layer2Objects: LevelObject[] | null = null;
   let layer2Header: Uint8Array | null = null;
   let l2Size = 0;
   if (l2 && hasLayer2Objects(header.mode)) {
     layer2Header = l2.slice(0, 5);
-    const p2 = parseObjects(l2, 5, isL2Vertical(rom, header.mode), hasStructs(rom));
+    const p2 = parseObjects(l2, 5, isL2Vertical(rom, header.mode));
     layer2Objects = p2.objects;
     l2Size = 5 + p2.size;
     // exits in layer 2 data are unusual; keep them with layer 1
@@ -401,7 +545,7 @@ export function serializeLayer1(rom: Rom, lv: Level, owners?: number[]): Uint8Ar
   const hdr = encodePrimaryHeader(lv.header);
   if (owners) for (let i = 0; i < 5; i++) owners.push(-1);
   const body = hasObjects(lv.header.mode)
-    ? serializeObjects(lv.objects, lv.exits, isL1Vertical(rom, lv.header.mode), owners)
+    ? serializeObjects(lv.objects, lv.exits, isL1Vertical(rom, lv.header.mode), owners, isSized(lv.secondary))
     : new Uint8Array([0xff]);
   const out = new Uint8Array(hdr.length + body.length);
   out.set(hdr);
@@ -433,10 +577,21 @@ export interface SecondaryEntrance {
   entranceX: number; // FC00 bits 7-5
   screen: number; // FC00 bits 4-0
   action: number; // FE00 bits 2-0
-  raw3: number; // FE00 remaining bits
+  raw3: number; // FE00 bits 7 and 3 (Lunar Magic's, kept)
+  // Lunar Magic 3.00's (levelheight.ts), as in the main entrance (SecondaryHeader)
+  entranceTile: number; // FE00 bit 6
+  entranceXHi: number; // FE00 bits 5-4
+  entranceYHi: number; // CC00 bits 5-0
+  cameraOffsetHi: number; // CC00 bit 6
+  cameraRelative: number; // CE00 bit 7
+  faceLeft: number; // CE00 bit 6: Mario faces left
+  water: number; // CE00 bit 5: a water level (Mario swims)
+  lmRaw: number; // CC00 bit 7 (exit to the overworld), CE00 bits 4-0 – kept, not used
 }
 export function readSecondaryEntrance(rom: Rom, i: number): SecondaryEntrance {
-  const [a, b, c, d] = SEC_ENT.map((t) => rom.r8(t + i));
+  return decodeSecondaryEntrance(SEC_ENT.map((t) => rom.r8(t + i)));
+}
+export function decodeSecondaryEntrance([a, b, c, d, e, f]: number[]): SecondaryEntrance {
   return {
     destLevel: a,
     entranceY: b & 0x0f,
@@ -445,35 +600,193 @@ export function readSecondaryEntrance(rom: Rom, i: number): SecondaryEntrance {
     entranceX: c >> 5,
     screen: c & 0x1f,
     action: d & 7,
-    raw3: d & 0xf8,
+    raw3: d & 0x88,
+    entranceTile: (d >> 6) & 1,
+    entranceXHi: (d >> 4) & 3,
+    entranceYHi: e & 0x3f,
+    cameraOffsetHi: (e >> 6) & 1,
+    cameraRelative: f >> 7,
+    faceLeft: (f >> 6) & 1,
+    water: (f >> 5) & 1,
+    lmRaw: ((e & 0x80) << 1) | (f & 0x1f),
   };
 }
 export function writeSecondaryEntrance(rom: Rom, i: number, e: SecondaryEntrance): void {
   rom.w8(SEC_ENT[0] + i, e.destLevel & 0xff);
   rom.w8(SEC_ENT[1] + i, (e.bgInitY << 6) | ((e.fgInitY & 3) << 4) | (e.entranceY & 0x0f));
   rom.w8(SEC_ENT[2] + i, (e.entranceX << 5) | (e.screen & 0x1f));
-  rom.w8(SEC_ENT[3] + i, (e.raw3 & 0xf8) | (e.action & 7));
+  rom.w8(SEC_ENT[3] + i, (e.raw3 & 0x88) | ((e.entranceTile & 1) << 6) | ((e.entranceXHi & 3) << 4) | (e.action & 7));
+  rom.w8(SEC_ENT[4] + i, ((e.lmRaw >> 1) & 0x80) | ((e.cameraOffsetHi & 1) << 6) | (e.entranceYHi & 0x3f));
+  rom.w8(SEC_ENT[5] + i, (e.cameraRelative << 7) | ((e.faceLeft & 1) << 6) | ((e.water & 1) << 5) | (e.lmRaw & 0x1f));
 }
 
-// ---- entrance positions (tables at $05D730/$05D740: Y, $05D750/$05D758: X; see $05D951) ----
-// The screen number replaces the high byte of the scroll axis: X in horizontal, Y in vertical levels.
-// Result is Mario's pixel position before the entrance action (pipe/water offsets) is applied.
-export function entrancePos(rom: Rom, screen: number, ex: number, ey: number, vertical: boolean): { x: number; y: number } {
-  const xt = rom.r8(0x05d750 + (ex & 7)) | (rom.r8(0x05d758 + (ex & 7)) << 8);
-  const yt = rom.r8(0x05d730 + (ey & 15)) | (rom.r8(0x05d740 + (ey & 15)) << 8);
-  return vertical ? { x: xt, y: ((screen & 0x1f) << 8) | (yt & 0xff) } : { x: ((screen & 0x1f) << 8) | (xt & 0xff), y: yt };
+// ---- entrance positions ----
+// The game's: tables at $05D730/$05D740 (Y), $05D750/$05D758 (X), see $05D951; the screen number replaces
+// the high byte of the scroll axis. Lunar Magic 3.00's (tile, levelheight.ts): tile X (0-31) and Y (0-1023)
+// of the screen, X/Y swapped in vertical levels. Either is Mario's pixel position before the entrance action
+// (pipe/water offsets) is applied.
+export interface EntranceSpot { screen: number; ex: number; ey: number; tile: number; exHi: number; eyHi: number }
+export const mainSpot = (s: SecondaryHeader, screen = s.entranceScreen): EntranceSpot =>
+  ({ screen, ex: s.entranceX, ey: s.entranceY, tile: s.entranceTile, exHi: s.entranceXHi, eyHi: s.entranceYHi });
+export const secondarySpot = (e: SecondaryEntrance): EntranceSpot =>
+  ({ screen: e.screen, ex: e.entranceX, ey: e.entranceY, tile: e.entranceTile, exHi: e.entranceXHi, eyHi: e.entranceYHi });
+export const sameSpot = (a: EntranceSpot, b: EntranceSpot) => a.screen === b.screen && a.ex === b.ex && a.ey === b.ey && a.tile === b.tile && a.exHi === b.exHi && a.eyHi === b.eyHi;
+export function setMainSpot(s: SecondaryHeader, p: EntranceSpot): void {
+  s.entranceScreen = p.screen; s.entranceX = p.ex; s.entranceY = p.ey; s.entranceTile = p.tile; s.entranceXHi = p.exHi; s.entranceYHi = p.eyHi;
+}
+export function setSecondarySpot(e: SecondaryEntrance, p: EntranceSpot): void {
+  e.screen = p.screen; e.entranceX = p.ex; e.entranceY = p.ey; e.entranceTile = p.tile; e.entranceXHi = p.exHi; e.entranceYHi = p.eyHi;
+}
+// a tile entrance's tile X/Y in the game's X/Y and their high bits (fields of the main and the secondary entrances)
+export interface EntranceTileFields { entranceX: number; entranceY: number; entranceXHi: number; entranceYHi: number }
+export function setEntranceTile(c: EntranceTileFields, t: { x?: number; y?: number }): void {
+  if (t.x !== undefined) { c.entranceX = t.x & 7; c.entranceXHi = t.x >> 3; }
+  if (t.y !== undefined) { c.entranceY = t.y & 15; c.entranceYHi = t.y >> 4; }
+}
+// the tile of a tile entrance (screen-relative along the scroll axis)
+export const spotTile = (p: EntranceSpot) => ({ x: (p.exHi << 3) | p.ex, y: (p.eyHi << 4) | p.ey });
+export function entrancePos(rom: Rom, p: EntranceSpot, vertical: boolean): { x: number; y: number } {
+  const s = (p.screen & 0x1f) << 8;
+  if (p.tile) {
+    const t = spotTile(p);
+    return vertical ? { x: t.x * 16, y: s + t.y * 16 } : { x: s + t.x * 16, y: t.y * 16 };
+  }
+  const xt = rom.r8(0x05d750 + (p.ex & 7)) | (rom.r8(0x05d758 + (p.ex & 7)) << 8);
+  const yt = rom.r8(0x05d730 + (p.ey & 15)) | (rom.r8(0x05d740 + (p.ey & 15)) << 8);
+  return vertical ? { x: xt, y: s | (yt & 0xff) } : { x: s | (xt & 0xff), y: yt };
 }
 
-// entrance settings whose position is closest to pixel (px, py)
-export function nearestEntrance(rom: Rom, px: number, py: number, vertical: boolean, maxScreen: number): { screen: number; ex: number; ey: number } {
+// the entrance closest to pixel (px, py): the game's table positions, or with `rows` (a level with a size,
+// where the tables don't reach) the tile there
+export function nearestEntrance(rom: Rom, px: number, py: number, vertical: boolean, maxScreen: number, rows = 0): EntranceSpot {
   const screen = Math.max(0, Math.min(maxScreen, Math.floor((vertical ? py : px) / 256)));
-  let best = { screen, ex: 0, ey: 0 }, bestD = Infinity;
+  if (rows) {
+    const x = Math.max(0, Math.min(31, Math.round((px - (vertical ? 0 : screen * 256)) / 16)));
+    const y = Math.max(0, Math.min(vertical ? 15 : rows - 1, Math.round((py - (vertical ? screen * 256 : 0)) / 16)));
+    return { screen, ex: x & 7, ey: y & 15, tile: 1, exHi: x >> 3, eyHi: y >> 4 };
+  }
+  let best: EntranceSpot = { screen, ex: 0, ey: 0, tile: 0, exHi: 0, eyHi: 0 }, bestD = Infinity;
   for (let ex = 0; ex < 8; ex++) for (let ey = 0; ey < 16; ey++) {
-    const p = entrancePos(rom, screen, ex, ey, vertical);
+    const spot = { screen, ex, ey, tile: 0, exHi: 0, eyHi: 0 };
+    const p = entrancePos(rom, spot, vertical);
     const d = (p.x - px) ** 2 + (p.y - py) ** 2;
-    if (d < bestD) { bestD = d; best = { screen, ex, ey }; }
+    if (d < bestD) { bestD = d; best = spot; }
   }
   return best;
+}
+
+// Lunar Magic's camera relative to Mario: it starts `rows` above him (the 5-bit offset is fgInitY, bgInitY and
+// bit 4; levelheight.ts); the main entrance's BG then shows its bottom at the level's (a BG of 27 rows)
+export interface CameraStart { cameraRelative: number; cameraOffsetHi: number; fgInitY: number; bgInitY: number }
+const signed5 = (v: number) => ((v & 0x1f) << 27) >> 27;
+export const cameraRows = (c: CameraStart) => -signed5((c.cameraOffsetHi << 4) | (c.fgInitY << 2) | c.bgInitY);
+export function setCameraRows(c: CameraStart, rows: number): void {
+  const v = -rows & 31;
+  c.cameraRelative = 1; c.cameraOffsetHi = v >> 4; c.fgInitY = (v >> 2) & 3; c.bgInitY = v & 3;
+}
+export function copyCameraStart(to: CameraStart, from: CameraStart): void {
+  to.cameraRelative = from.cameraRelative; to.cameraOffsetHi = from.cameraOffsetHi; to.fgInitY = from.fgInitY; to.bgInitY = from.bgInitY;
+}
+// what an entrance sets besides where Mario and the camera start (Lunar Magic's, main and secondary entrances)
+export type EntranceOptions = Pick<SecondaryEntrance, 'faceLeft' | 'water'>;
+export function copyEntranceOptions(to: EntranceOptions, from: EntranceOptions): void {
+  to.faceLeft = from.faceLeft; to.water = from.water;
+}
+export const GAME_BG_ROWS = 27; // the game's BGs
+export const CAMERA_ROWS = 10; // the game's camera at the bottom has Mario standing on the ground 10 rows below its top
+// the camera relative to Mario (CAMERA_ROWS above him) unless it already is, as a tile entrance in a level
+// with a size needs; a main entrance's BG then 27 rows high unless it has a height
+export function cameraAtMario(c: CameraStart & { bgHeight?: number; bgRelative?: number }): void {
+  if (c.cameraRelative) return;
+  setCameraRows(c, CAMERA_ROWS);
+  if (c.bgHeight === 0 && !c.bgRelative) c.bgHeight = GAME_BG_ROWS - 1;
+}
+// the camera starts relative to Mario in horizontal levels only (layer 2 not vertical either: levelheight.ts);
+// in others the entrance's bits are the game's FG/BG start Y
+export const hasRelativeCamera = (rom: Rom, mode: number): boolean => !isL1Vertical(rom, mode) && !isL2Vertical(rom, mode);
+export const levelMode = (rom: Rom, n: number): number => parsePrimaryHeader(rom.bytes(rom.r24(L1_PTRS + n * 3), 5)).mode;
+
+// where the BG starts for an entrance whose camera starts relative to Mario (the level's setting, Lunar
+// Magic's "Change Layer 1/2 Settings"): its bottom shown when the camera is at the level's bottom (a BG of
+// `rows` rows), `rows` rows below the FG (negative: above), or at 0 (layer 2 scroll sprites that want it)
+export type BgStart = { kind: 'bottom'; rows: number } | { kind: 'fg'; rows: number } | { kind: 'zero' };
+const BG_ZERO = 0x10; // with bgRelative: absolute 0 instead of an offset
+export function bgStart(s: Pick<SecondaryHeader, 'bgRelative' | 'bgHeight'>): BgStart {
+  const v = s.bgHeight & 0x1f;
+  if (!s.bgRelative) return { kind: 'bottom', rows: v + 1 };
+  return v === BG_ZERO ? { kind: 'zero' } : { kind: 'fg', rows: signed5(v) };
+}
+export function setBgStart(s: Pick<SecondaryHeader, 'bgRelative' | 'bgHeight'>, b: BgStart): void {
+  s.bgRelative = b.kind === 'bottom' ? 0 : 1;
+  s.bgHeight = b.kind === 'zero' ? BG_ZERO : b.kind === 'bottom' ? Math.max(1, Math.min(32, b.rows)) - 1 : Math.max(-15, Math.min(15, b.rows)) & 0x1f;
+}
+
+// puts an entrance at a spot (dragged, created, test play from here); its camera start – the FG/BG start Y,
+// or the rows above Mario – stays as set (as Lunar Magic 3.50 can drag them). Only a tile entrance whose
+// camera is the game's gets the relative one: the game's start positions don't reach a taller level's rows.
+export function placeMain(s: SecondaryHeader, p: EntranceSpot): void {
+  setMainSpot(s, p);
+  if (p.tile) cameraAtMario(s);
+}
+export function placeSecondary(e: SecondaryEntrance, p: EntranceSpot): void {
+  setSecondarySpot(e, p);
+  if (p.tile) cameraAtMario(e);
+}
+// the secondary header test play starts with from Mario's top-left pixel (px, py): the main entrance at the
+// entrance setting nearest to it (rows: as nearestEntrance); `entrance`: the camera start, options and action
+// of the entrance played from (a secondary entrance's own), else the main entrance's without an action
+export type StartEntrance = CameraStart & EntranceOptions & Pick<SecondaryEntrance, 'action'>;
+export function startHeader(rom: Rom, s: SecondaryHeader, px: number, py: number, maxScreen: number, rows = 0, entrance?: StartEntrance): SecondaryHeader {
+  const sec = { ...s };
+  if (entrance) { copyCameraStart(sec, entrance); copyEntranceOptions(sec, entrance); }
+  placeMain(sec, nearestEntrance(rom, px, py, (sec.verticalPositioning & 1) !== 0, maxScreen, rows));
+  sec.entranceAction = entrance?.action ?? 0;
+  return sec;
+}
+
+// ---- the midway entrance ----
+// Lunar Magic 3.00's (levelheight.ts): with its own settings Mario starts at a tile of the midway screen (X 0-15
+// in a horizontal level, 0-31 in a vertical one) with its own action, camera start and options; else at the
+// main entrance's position on the midway screen, with the main entrance's settings
+export const midwaySpot = (s: SecondaryHeader): EntranceSpot => (s.midwayOwn
+  ? { screen: s.midwayScreen, ex: s.midwayX & 7, exHi: s.midwayX >> 3, ey: s.midwayY & 15, eyHi: s.midwayY >> 4, tile: 1 }
+  : mainSpot(s, s.midwayScreen));
+// its own settings as an entrance's; the BG start is the level's (the main entrance's bytes)
+export type MidwayEntrance = StartEntrance & Pick<SecondaryHeader, 'bgRelative' | 'bgHeight'>;
+export function midwayEntrance(s: SecondaryHeader): MidwayEntrance {
+  const c = s.midwayCamera;
+  return {
+    action: s.midwayAction, faceLeft: s.midwayFaceLeft, water: s.midwayWater,
+    cameraRelative: s.midwayCameraRelative, cameraOffsetHi: c >> 4, fgInitY: (c >> 2) & 3, bgInitY: c & 3, bgRelative: s.bgRelative, bgHeight: s.bgHeight,
+  };
+}
+export function setMidwayEntrance(s: SecondaryHeader, m: MidwayEntrance): void {
+  s.midwayAction = m.action & 7; s.midwayFaceLeft = m.faceLeft; s.midwayWater = m.water;
+  s.midwayCameraRelative = m.cameraRelative; s.midwayCamera = ((m.cameraOffsetHi & 1) << 4) | ((m.fgInitY & 3) << 2) | (m.bgInitY & 3);
+  s.bgRelative = m.bgRelative; s.bgHeight = m.bgHeight;
+}
+// the main entrance's settings as the midway entrance's
+const mainEntrance = (s: SecondaryHeader): MidwayEntrance => ({ ...s, action: s.entranceAction });
+// what test play from the midway entrance starts with (the game's $192A there is the main entrance's action
+// unless it has its own)
+export const midwayStart = (s: SecondaryHeader): StartEntrance => (s.midwayOwn ? midwayEntrance(s) : mainEntrance(s));
+// the midway entrance's tile nearest to Mario's top-left pixel (px, py); a horizontal level's X stays in its screen
+export function nearestMidway(rom: Rom, s: SecondaryHeader, px: number, py: number, maxScreen: number): EntranceSpot {
+  const vertical = (s.verticalPositioning & 1) !== 0;
+  const p = nearestEntrance(rom, px, py, vertical, maxScreen, levelRows(s));
+  if (!vertical && p.exHi > 1) {
+    if (p.screen < maxScreen) { p.screen++; p.exHi -= 2; } else { p.ex = 7; p.exHi = 1; }
+  }
+  return p;
+}
+// puts the midway entrance at a tile (dragged, placed); without its own settings yet it takes the main
+// entrance's (action, camera start, options) first. As placeMain: in a level with a size the camera starts
+// relative to Mario.
+export function placeMidway(s: SecondaryHeader, p: EntranceSpot): void {
+  if (!s.midwayOwn) setMidwayEntrance(s, mainEntrance(s));
+  const t = spotTile(p);
+  s.midwayOwn = 1; s.midwayScreen = p.screen; s.midwayX = t.x; s.midwayY = t.y;
+  if (isSized(s)) { const m = midwayEntrance(s); cameraAtMario(m); setMidwayEntrance(s, m); }
 }
 
 // ---- screen operations ----
@@ -490,11 +803,12 @@ function shiftScreens(rom: Rom, lv: Level, from: number, delta: number): void {
   for (const e of lv.exits) if (e.screen >= from) e.screen += delta;
   const sec = lv.secondary;
   if (sec.entranceScreen >= from) sec.entranceScreen = Math.max(0, sec.entranceScreen + delta);
-  if (sec.midwayScreen >= from) sec.midwayScreen = Math.max(0, Math.min(15, sec.midwayScreen + delta));
+  if (sec.midwayScreen >= from) sec.midwayScreen = Math.max(0, Math.min(31, sec.midwayScreen + delta));
 }
 
 export function insertScreen(rom: Rom, lv: Level, s: number): void {
-  if (lv.header.screens >= 32) throw new Error('The level already has 32 screens.');
+  const max = maxScreens(lv.secondary);
+  if (lv.header.screens >= max) throw new Error(`The level already has ${max} screens${max < 32 ? ', as many as its height allows' : ''}.`);
   shiftScreens(rom, lv, s, 1);
   lv.header.screens++;
 }

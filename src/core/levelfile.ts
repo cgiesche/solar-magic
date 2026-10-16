@@ -2,12 +2,12 @@
 
 import { Rom } from './rom.ts';
 import {
-  type Level, parseLevelData, serializeLayer1, serializeLayer2, serializeSprites, isL1Vertical, spriteSizes,
-  encodeSecondaryHeader, decodeSecondaryHeader,
+  type Level, parseLevelData, serializeLayer1, serializeLayer2, serializeLevelSprites, isL1Vertical, spriteSizes,
+  encodeSecondaryHeader, decodeSecondaryHeader, SEC_HDR,
 } from './level.ts';
-import { editorPatch, levelGfx, customPalette } from './patches.ts';
+import { levelGfx, customPalette } from './patches.ts';
 import { encodeBg, decodeBg } from './bg.ts';
-import { STRUCT_EXT, readStructure, listStructures, freeStructureNumber, writeStructure, installStructPatch, type Structure } from './structs.ts';
+import { STRUCT_EXT, readStructure, listStructures, freeStructureNumber, writeStructure, type Structure } from './structs.ts';
 
 export const LEVEL_FILE_EXT = '.smwlevel';
 
@@ -49,16 +49,14 @@ export function exportLevelFile(rom: Rom, lv: Level, bg: Uint16Array | null = lv
     layer1: toHex(serializeLayer1(rom, lv)),
     layer2: l2 ? toHex(l2) : null,
     layer2Pointer: lv.layer2Pointer,
-    sprites: toHex(serializeSprites(lv.sprites, lv.spriteHeader, isL1Vertical(rom, lv.header.mode), spriteSizes(rom))),
+    sprites: toHex(serializeLevelSprites(rom, lv)),
     secondary: encodeSecondaryHeader(lv.secondary),
   };
   // custom sprites with extra bytes: the size table the sprite data was written with
   const sizes = spriteSizes(rom);
   if (sizes && lv.sprites.some((q) => q.bytes?.length)) out.spriteSizes = toHex(sizes);
-  if (editorPatch(rom)) {
-    const g = levelGfx(rom, lv.number);
-    if (g.some((v) => v !== 0xff)) out.gfx = g;
-  }
+  const g = levelGfx(rom, lv.number);
+  if (g.some((v) => v !== 0xff)) out.gfx = g;
   const pal = customPalette(rom, lv.number);
   if (pal) out.palette = toHex(rom.bytes(pal, 512));
   if (bg && !l2) out.bg = toHex(encodeBg(bg));
@@ -74,13 +72,13 @@ export function importLevelFile(rom: Rom, text: string, into: Level): LevelFileD
   try { j = JSON.parse(text); } catch { throw new Error('Not a valid level file (JSON)'); }
   if (j?.format !== 'smwe-level') throw new Error('Not an Solar Magic level file');
   if (j.version !== 1) throw new Error(`Unsupported version ${j.version}`);
-  if (!Array.isArray(j.secondary) || j.secondary.length !== 4) throw new Error('Secondary header missing');
+  if (!Array.isArray(j.secondary)) throw new Error('Secondary header missing');
+  if (j.secondary.length !== SEC_HDR.length) throw new Error('Level file from an older editor version (secondary header without the layer 2 scroll or level size byte) – not supported');
   const palette = j.palette ? fromHex(j.palette) : null;
   if (palette && palette.length !== 512) throw new Error('Palette in the level file is not 512 bytes');
   // structures: reuse an identical one of this ROM, else store under a free number
   const remap = new Map<number, number>();
   if (j.structs?.length) {
-    installStructPatch(rom); // before parsing: extended object $03 is 4 bytes with the patch
     const have = listStructures(rom);
     const same = (a: Structure, b: Structure) => a.w === b.w && a.h === b.h && a.name === b.name && a.tiles.every((t, i) => t === b.tiles[i]);
     for (const s of j.structs) {

@@ -1,10 +1,10 @@
 // The upload preview of the Packages dialog: what was detected in an upload (each part with its kind,
-// the settings of a patch part) – or, when detection is ambiguous, the manual assignment prefilled with
+// the settings of a patch part, where blocks and graphics go – pkgplace.ts – and what is not installed) – or, when detection is ambiguous, the manual assignment prefilled with
 // the suggestion – and "Install", which applies the whole package as one undoable ROM edit. Cancel
 // leaves the ROM untouched.
 
 import type { App } from './app.ts';
-import { h, modal, clear, toast } from './dom.ts';
+import { h, modal, clear, toast, logTool } from './dom.ts';
 import { installPackage, partsSummary, partLabel, type ReadyPreview, type ManualPreview, type InstallOptions } from '../core/packages.ts';
 import { assignmentEditor } from './pkgmap.ts';
 import type { Package } from '../core/pkgreg.ts';
@@ -12,24 +12,27 @@ import type { PartKind } from '../core/parts.ts';
 import { map16Source } from '../core/render.ts';
 import { hex } from '../core/names.ts';
 import { settingsForm } from './patchmanager.ts';
-import { patchesChanged, logView, errorText } from './projectpane.ts';
+import { errorText } from './projectpane.ts';
 import { docsButton } from './docview.ts';
 import { musicPlayer } from './musicplayer.ts';
+import { placementEditor } from './pkgplace.ts';
 
 // done: after the package was installed
 export function openUploadPreview(app: App, p: ReadyPreview | ManualPreview, done: (pkg: Package) => void): void {
   if (p.status === 'manual') { openManual(app, p, done); return; }
   const lvl = hex(app.level.number, 3);
   const has = (k: PartKind) => p.parts.some((x) => x.kind === k);
-  let main = p.patch?.main ?? '';
+  const patch = p.parts.find((x) => x.kind === 'patch');
+  let main = patch?.file ?? '';
   const settingsBox = h('div');
-  let form = p.patch ? settingsForm(p.patch.upload, main, {}) : null;
+  let form = patch ? settingsForm(p.upload!, main, {}) : null;
   if (form) settingsBox.appendChild(form.el);
   const log = h('div');
+  const src = map16Source(app.rom, app.render);
+  const place = placementEditor(app, p, src.fg(0x025));
   const defaults = [
     has('uberasm') ? `UberASM code runs in level ${lvl}` : '',
     has('music') ? `songs get the next free numbers and play in level ${lvl}` : '',
-    has('block') ? 'blocks go on the next free Map16 tiles from 200' : '',
     has('sprite') ? 'sprites get the next free numbers' : '',
   ].filter(Boolean);
   const body = h('div', { class: 'patch-apply' },
@@ -37,15 +40,17 @@ export function openUploadPreview(app: App, p: ReadyPreview | ManualPreview, don
     h('table', { class: 'uber-table' }, h('tr', null, h('th', null, 'Part'), h('th', null, 'Name'), h('th', null, 'File')),
       p.parts.map((x) => h('tr', null, h('td', null, partLabel(x.kind)), h('td', null, x.name), h('td', { class: 'mono hint' }, x.file)))),
     docsButton(p.name, p.files),
+    p.unclaimed.length ? h('p', { class: 'hint' }, `Not installed: ${p.unclaimed.map((f) => f + (p.docs.includes(f) ? ' (manual)' : '')).join(', ')}.`) : '',
     defaults.length ? h('p', { class: 'hint' }, `Installing applies the whole package: ${defaults.join(', ')}. Assignments can be changed afterwards in the tabs.`) : '',
-    p.patch && p.patch.candidates.length > 1 ? h('div', { class: 'prop' }, h('label', null, 'Main file'),
-      h('select', { onchange: (e: Event) => { main = (e.target as HTMLSelectElement).value; form = settingsForm(p.patch!.upload, main, {}); clear(settingsBox).appendChild(form.el); } },
-        p.patch.candidates.map((f) => h('option', { value: f, selected: f === main }, f))),
+    patch && patch.candidates.length > 1 ? h('div', { class: 'prop' }, h('label', null, 'Main file'),
+      h('select', { onchange: (e: Event) => { main = (e.target as HTMLSelectElement).value; form = settingsForm(p.upload!, main, {}); clear(settingsBox).appendChild(form.el); } },
+        patch.candidates.map((f) => h('option', { value: f, selected: f === main }, f))),
       h('span', { class: 'hint' }, 'The upload has several .asm files – choose the patch file (see its readme).')) : '',
-    p.patch ? [h('h3', null, 'Patch settings'), settingsBox] : '',
+    place?.el ?? '',
+    patch ? [h('h3', null, 'Patch settings'), settingsBox] : '',
     log,
   );
-  installDialog(app, p, body, log, has('music'), () => ({ patch: p.patch ? { main, values: form!.read() } : undefined }), done);
+  installDialog(app, p, body, log, has('music'), () => ({ patch: patch ? { main, values: form!.read() } : undefined, ...place?.read() }), done);
 }
 
 // a package to assign by hand: the assignment, prefilled with the suggestion
@@ -61,12 +66,11 @@ function openManual(app: App, p: ManualPreview, done: (pkg: Package) => void): v
 
 // the preview dialog with Install / Cancel; `choices`: what the user set in it
 function installDialog(app: App, p: ReadyPreview | ManualPreview, body: HTMLElement, log: HTMLElement, music: boolean,
-  choices: () => Pick<InstallOptions, 'patch' | 'assignment'>, done: (pkg: Package) => void): void {
+  choices: () => Pick<InstallOptions, 'patch' | 'assignment' | 'plan' | 'setup' | 'cgram' | 'sample'>, done: (pkg: Package) => void): void {
   let busy = false;
   const install = async () => {
     if (busy) return;
     busy = true;
-    if (app.dirty) app.saveLevel(true); // the level save is not part of the undo step
     if (music) musicPlayer.stop();
     clear(log).appendChild(h('p', { class: 'hint' }, music ? 'Installing – AddmusicK is inserting the music …' : 'Installing …'));
     const src = map16Source(app.rom, app.render);
@@ -76,11 +80,18 @@ function installDialog(app: App, p: ReadyPreview | ManualPreview, body: HTMLElem
       r = await app.romEditAsync(`Package “${p.name}” installed`, () => installPackage(app.rom, p, opt));
     } catch (e) { r = { ok: false, errors: [errorText(e)], warnings: [], prints: [], pkg: null }; }
     busy = false;
-    if (!r.ok || !r.pkg) { clear(log).appendChild(logView(r)); return; }
+    clear(log);
+    logTool(`Package “${p.name}”`, r);
+    if (!r.ok || !r.pkg) return;
     dlg.close(true);
-    patchesChanged(app);
-    toast(`“${p.name}” installed${r.warnings.length ? ` (${r.warnings.length} warning(s))` : ''} – Ctrl+Z undoes it.`);
-    if (r.warnings.length) modal(`Output: ${p.name}`, logView({ ...r, prints: [] }), [{ label: 'OK', primary: true }]);
+    // the sample level: a level edit of its own (not saved yet)
+    const sample = r.sample;
+    if (sample) {
+      app.editLevel(() => { app.level = sample.level; }, false);
+      app.selection.clear();
+      app.changed();
+    }
+    toast(`“${p.name}” installed${r.warnings.length ? ` (${r.warnings.length} warning(s))` : ''}${sample ? `, its sample level in place of level ${hex(app.level.number, 3)} (not saved yet)` : ''} – Ctrl+Z undoes it.`);
     done(r.pkg);
   };
   const dlg = modal(`Upload: ${p.name}`, body, [

@@ -4,24 +4,21 @@
 // remove a patch. Installing goes through the upload preview (upload.ts, core/packages.ts).
 
 import type { App } from './app.ts';
-import { h, modal, toast } from './dom.ts';
-import { kvGet, kvDel } from './storage.ts';
-import { reapplyPatch, type ApplyResult, type PatchSource } from '../core/patchapply.ts';
+import { h, modal, toast, logTool } from './dom.ts';
+import type { ApplyResult } from '../core/patchapply.ts';
 import { patchArchive, type PatchEntry } from '../core/patchreg.ts';
-import { uploadFromFiles, effectiveDefines, uploadSource, optionDefault, packUpload, unpackUpload, type StoredUpload, type Upload, type PatchOption } from '../core/patchpkg.ts';
-import { ensureRequirements } from '../core/packages.ts';
-import { map16Source } from '../core/render.ts';
+import { uploadFromFiles, effectiveDefines, optionDefault, unpackUpload, type StoredUpload, type Upload, type PatchOption } from '../core/patchpkg.ts';
+import { reapplyPackagePatch as reapply } from '../core/packages.ts';
 import { definesForm } from './defineedit.ts';
-import { logView, patchesChanged, errorText } from './projectpane.ts';
+import { errorText } from './projectpane.ts';
 import type { ToolKind } from '../core/parts.ts';
-import { recordPackageChange, type Package } from '../core/pkgreg.ts';
+import type { Package } from '../core/pkgreg.ts';
 
 export type { StoredUpload };
 export async function storedUpload(app: App, p: PatchEntry): Promise<StoredUpload | undefined> {
   const a = patchArchive(app.rom, p);
-  return a ? unpackUpload(a) : kvGet<StoredUpload>(srcKey(p.id)); // older versions kept large sources in the browser
+  return a ? unpackUpload(a) : undefined;
 }
-const srcKey = (id: string) => `patch:${id}`;
 
 export function toUpload(s: StoredUpload): Upload {
   return { ...uploadFromFiles(s.fileName, new Map(s.files)), main: s.main };
@@ -73,38 +70,16 @@ function optionRow(o: PatchOption, value: string, inputs: [string, () => string]
 // applies the patch of an installed package (`rec`; null: none) anew with other settings, as one undoable
 // ROM edit with the package's record; the ROM changed when ok
 export function reapplyPackagePatch(app: App, upload: Upload, fileName: string, main: string, values: Record<string, string>, entry: PatchEntry, rec: Package | null): ApplyResult {
-  const fail = (e: unknown): ApplyResult => ({ ok: false, errors: [errorText(e)], warnings: [], prints: [] });
-  let src: PatchSource;
-  try { src = uploadSource(upload, main, effectiveDefines(upload, values)); } catch (e) { return fail(e); }
-  src.settings = values;
-  const stored: StoredUpload = { fileName, files: [...upload.files], main };
-  src.archive = packUpload(stored); // kept with the editor data, not in the ROM
-  if (app.dirty) app.saveLevel(true); // the level save is not part of the undo step
-  let r: ApplyResult;
   try {
-    r = app.romEdit(`Patch “${upload.name}” reapplied`, () => {
-      const apply = () => {
-        ensureRequirements(app.rom, upload, map16Source(app.rom, app.render).fg(0x025));
-        return reapplyPatch(app.rom, entry.id, src);
-      };
-      if (rec) return recordPackageChange(app.rom, rec, apply).result; // the patch's new id goes into the record
-      const before = app.rom.snapshot();
-      const res = apply();
-      if (!res.ok) app.rom.restore(before);
-      return res;
-    });
+    return app.romEdit(`Patch “${upload.name}” reapplied`, () => reapply(app.rom, entry.id, upload, fileName, main, values, rec));
   } catch (e) {
-    return fail(e);
+    return { ok: false, errors: [errorText(e)], warnings: [], prints: [] };
   }
-  if (!r.ok) return r;
-  kvDel(srcKey(entry.id)).catch(() => {}); // sources older versions kept in the browser
-  patchesChanged(app);
-  return r;
 }
 
 export function patchDone(name: string, again: boolean, r: ApplyResult): void {
   toast(`Patch “${name}” ${again ? 'reapplied' : 'applied'}${r.warnings.length ? ` (${r.warnings.length} warning(s))` : ''}`);
-  if (r.warnings.length || r.prints.length) modal(`Output: ${name}`, logView(r), [{ label: 'OK', primary: true }]);
+  logTool(`Patch “${name}”`, r);
 }
 
 // the tabs of the Packages dialog: the package list and the configuration view of each tool

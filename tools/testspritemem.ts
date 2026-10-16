@@ -6,8 +6,11 @@ import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadLevel, newUid } from '../src/core/level.ts';
 import { checkSpriteMemory, spriteWindows, suggestSpriteMemory, usedSpriteMemory } from '../src/core/spritemem.ts';
+import { editorImage } from './fixture.ts';
 
-const rom = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
+const EDITOR_IMAGE = await editorImage(); // the fixture as the editor opens it
+
+const rom = new Rom(EDITOR_IMAGE.slice());
 const emu = new LevelEmulator(rom);
 emu.boot();
 const bgOf = (p: number) => (p >> 16 === 0xff ? p : 0xffd900);

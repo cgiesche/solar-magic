@@ -1,9 +1,9 @@
 // UberASM-compatible code per level, game mode and overworld map, plus global and status bar code.
 // A project is a set of files in UberASM Tool's layout (level/, gamemode/, overworld/, library/,
 // routines/, other/) with its list.txt, so existing UberASM folders can be imported and exported as-is.
-// Unlike UberASM Tool, everything is one Asar patch: as there, each library file is assembled on its
-// own first (its labels are passed on as <file>_<label>), then one run with one free space block per
-// resource (namespace UberR<n>) with a small entry stub, and the dispatch code. The hijacks and calling conventions are those of UberASM Tool 2.x:
+// Unlike UberASM Tool, everything is one Asar patch: as there, each library file and then each resource
+// is assembled on its own (library labels are passed on as <file>_<label>; a resource gets one free space
+// block, namespace UberR<n>, with a small entry stub), then one run with the dispatch code. The hijacks and calling conventions are those of UberASM Tool 2.x:
 // labels init/main/end/load/nmi end in RTL, 8-bit A/X/Y, DBR = the resource's bank unless
 // ";>dbr off", extra bytes (";>bytes n" / ";>bytes any") pointed to by $00-$01.
 // The level number comes from $7E010B, set by the editor patch (SMWE).
@@ -360,16 +360,7 @@ export function buildUberPatch(files: Map<string, Uint8Array>, list: UberList): 
   const libs = [...files.keys()].filter((p) => p.startsWith('library/')).sort();
   for (const f of libs) if (!/\.asm$/i.test(f)) o('', 'freedata cleaned', `${libPrefix(f)}:`, `incbin "${f}"`);
 
-  // resources: entry stub (X = label offset) and extra bytes in the resource's bank
-  for (const r of res.values()) {
-    o('', 'freecode cleaned', `namespace UberR${r.id}`, `incsrc "${r.file}"`, '__UberCall:');
-    if (r.dbr) o('  PHB : PHK : PLB');
-    o('  PHK : PEA.w __UberRet-1', '  JMP (__UberTbl,x)', '__UberRet:');
-    if (r.dbr) o('  PLB');
-    o('  RTL', '__UberNone:', '  RTL', `__UberTbl: dw ${LABELS.map((l) => (r.labels.has(l) ? l : '__UberNone')).join(', ')}`);
-    r.uses.forEach((u, i) => o(`__UberB${i}: db ${u.map((v) => '$' + v.toString(16).padStart(2, '0')).join(',')}`));
-    o('namespace off');
-  }
+  // resources: each assembled in a run of its own (see below), the dispatch calls their entry stubs
 
   // dispatch
   o('', 'freecode cleaned', 'UberNoRes:', '  RTS');
@@ -463,34 +454,54 @@ export function buildUberPatch(files: Map<string, Uint8Array>, list: UberList): 
   const src = new Map<string, Uint8Array | string>(files);
   src.set('__uber_defines.asm', definesFile(list.freeram));
   src.set('__uber_main.asm', out.join('\n') + '\n');
-  // Like UberASM Tool, each library file is assembled on its own (so its labels and namespaces are
-  // its own) and its labels are passed on as <prefix>_<label> to the following runs.
+  // Like UberASM Tool, each library file and each resource is assembled on its own (so its labels,
+  // defines and macros are its own: resources may include the same file of defines and macros). Library
+  // labels are passed on as <prefix>_<label>, routines (%UberRoutine) as !UberRoutine_<name> and the
+  // resources' entry stubs as UberR<n>___UberCall to the following runs; the last one is the main file.
   const codeLibs = libs.filter((f) => /\.asm$/i.test(f));
   const libRun = (f: string) => [...head, 'incsrc "__uber_libs.asm"', 'freecode cleaned', `incsrc "${f}"`, ''].join('\n');
+  // a resource: entry stub (X = label offset) and extra bytes in the resource's bank
+  const resRun = (r: ResourceInfo) => {
+    const l = [...head, 'incsrc "__uber_libs.asm"', 'freecode cleaned', `namespace UberR${r.id}`, `incsrc "${r.file}"`, '__UberCall:'];
+    if (r.dbr) l.push('  PHB : PHK : PLB');
+    l.push('  PHK : PEA.w __UberRet-1', '  JMP (__UberTbl,x)', '__UberRet:');
+    if (r.dbr) l.push('  PLB');
+    l.push('  RTL', '__UberNone:', '  RTL', `__UberTbl: dw ${LABELS.map((x) => (r.labels.has(x) ? x : '__UberNone')).join(', ')}`);
+    r.uses.forEach((u, i) => l.push(`__UberB${i}: db ${u.map((v) => '$' + v.toString(16).padStart(2, '0')).join(',')}`));
+    l.push('namespace off', '');
+    return l.join('\n');
+  };
+  const runs = [...codeLibs.map((f) => ({ lib: f, text: libRun(f) })), ...[...res.values()].map((r) => ({ lib: null, text: resRun(r) }))];
   const exported: string[] = [];
   const known = new Set<string>();
+  const hex = (addr: number) => '$' + addr.toString(16).toUpperCase().padStart(6, '0');
   src.set('__uber_libs.asm', '');
-  if (codeLibs.length) src.set('__uber_lib.asm', libRun(codeLibs[0]));
+  if (runs.length) src.set('__uber_run.asm', runs[0].text);
   let step = 0;
   const next = (done: AsarResult[]) => {
-    if (step >= codeLibs.length) return null;
-    const prefix = libPrefix(codeLibs[step]);
+    if (step >= runs.length) return null;
+    const { lib } = runs[step];
     for (const [name, addr] of Object.entries(done[done.length - 1].labels)) {
-      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) || known.has(name)) continue;
-      const full = `${prefix}_${name}`;
-      known.add(full);
-      exported.push(`${full} = $${addr.toString(16).toUpperCase().padStart(6, '0')}`);
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) continue;
+      const routine = /^UberRoutine_(.+)$/.exec(name)?.[1];
+      const line = routine ? `!UberRoutine_${routine} = ${hex(addr)}`
+        : lib ? `${libPrefix(lib)}_${name} = ${hex(addr)}`
+        : /^UberR\d+___Uber(Call|B\d+)$/.test(name) ? `${name} = ${hex(addr)}` : null;
+      const key = line?.slice(0, line.indexOf(' = '));
+      if (!line || known.has(key!)) continue;
+      known.add(key!);
+      exported.push(line);
     }
     const libsFile = exported.join('\n') + '\n';
     step++;
-    if (step < codeLibs.length) return { main: '__uber_lib.asm', files: new Map([['__uber_libs.asm', libsFile], ['__uber_lib.asm', libRun(codeLibs[step])]]) };
+    if (step < runs.length) return { main: '__uber_run.asm', files: new Map([['__uber_libs.asm', libsFile], ['__uber_run.asm', runs[step].text]]) };
     return { main: '__uber_main.asm', files: new Map([['__uber_libs.asm', libsFile]]) };
   };
   const project = new Map(files);
   project.set('list.txt', new TextEncoder().encode(writeList(list)));
   const archive = zipSync(Object.fromEntries(project), { level: 9 });
   return {
-    source: { name: UBER_NAME, main: codeLibs.length ? '__uber_lib.asm' : '__uber_main.asm', files: src, kind: 'uberasm', archive, ram: [[list.freeram, 2]], ...(codeLibs.length ? { next } : {}) },
+    source: { name: UBER_NAME, main: runs.length ? '__uber_run.asm' : '__uber_main.asm', files: src, kind: 'uberasm', archive, ram: [[list.freeram, 2]], ...(runs.length ? { next } : {}) },
     resources: res.size, warnings,
   };
 }

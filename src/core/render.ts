@@ -21,27 +21,30 @@ export function screenBase(rom: Rom, layer: number, mode: number, s: number): nu
   return rom.r16(screenTable + s * 3);
 }
 
-export function layerGeom(rom: Rom, layer: number, mode: number, screens: number): LayerGeom {
+// rows: the height of a horizontal level (levelRows). A horizontal layer's screens lie one after the other,
+// rows * 16 bytes each, layer 2's from the 16th screen on (the game's tables for them are built in RAM
+// with the level, levelheight.ts); a vertical layer's come from the game's tables.
+export function layerGeom(rom: Rom, layer: number, mode: number, screens: number, rows = 27): LayerGeom {
   const vertical = layer === 0 ? isL1Vertical(rom, mode) : isL2Vertical(rom, mode);
-  const bases: number[] = [];
-  const maxScreens = 32;
-  for (let s = 0; s < maxScreens; s++) bases.push(screenBase(rom, layer, mode, s));
-  if (vertical) {
-    const h = screens * 16;
+  if (!vertical) {
+    const w = screens * 16, base = MAP_BASE + layer * 16 * rows * 16;
     return {
-      vertical, width: 32, height: h,
+      vertical, width: w, height: rows,
       addr(x, y) {
-        if (x < 0 || y < 0 || x >= 32 || y >= h) return -1;
-        return bases[y >> 4] + ((x >> 4) << 8) + ((y & 15) << 4) + (x & 15);
+        if (x < 0 || y < 0 || x >= w || y >= rows) return -1;
+        return base + (x >> 4) * rows * 16 + y * 16 + (x & 15);
       },
     };
   }
-  const w = screens * 16;
+  const bases: number[] = [];
+  const maxScreens = 32;
+  for (let s = 0; s < maxScreens; s++) bases.push(screenBase(rom, layer, mode, s));
+  const h = screens * 16;
   return {
-    vertical, width: w, height: 27,
+    vertical, width: 32, height: h,
     addr(x, y) {
-      if (x < 0 || y < 0 || x >= w || y >= 27) return -1;
-      return bases[x >> 4] + (y << 4) + (x & 15);
+      if (x < 0 || y < 0 || x >= 32 || y >= h) return -1;
+      return bases[y >> 4] + ((x >> 4) << 8) + ((y & 15) << 4) + (x & 15);
     },
   };
 }
@@ -141,9 +144,9 @@ export function backdropColor(r: LevelRender): number {
   return snesColorToRGBA(c);
 }
 
-export function renderLevel(rom: Rom, r: LevelRender, mode: number, screens: number): LevelImages {
+export function renderLevel(rom: Rom, r: LevelRender, mode: number, screens: number, rows = 27): LevelImages {
   const w = r.wram;
-  const geom1 = layerGeom(rom, 0, mode, screens);
+  const geom1 = layerGeom(rom, 0, mode, screens, rows);
   const width = geom1.width * 16, height = geom1.height * 16;
   const tc = new TileCache(r.vram, r.cgram, ((r.ppuRegs[0x0b] & 0x0f) << 13));
   const src = map16Source(rom, r);
@@ -190,26 +193,35 @@ export function renderLevel(rom: Rom, r: LevelRender, mode: number, screens: num
   return { width, height, backdrop: backdropColor(r), layer1, layer2, layer3, geom1, geom2, tiles1, tiles2 };
 }
 
+// where the BG3 tilemap is on the level image at the end of the load: its VRAM byte address, size in pixels
+// (mw x mh, 32x32 tiles a screen), scroll against the camera; tile (tx, ty) is drawn at level pixel
+// (tx * 8 - dx, ty * 8 - dy), repeated every mw pixels horizontally
+export interface Layer3Geometry { base: number; wide: number; mw: number; mh: number; dx: number; dy: number }
+export const LAYER3_STATUS_ROWS = 5; // the status bar's tile rows (not drawn)
+export function layer3Geometry(r: LevelRender): Layer3Geometry {
+  const w = r.wram, sc = r.ppuRegs[0x09], wide = sc & 1, tall = (sc >> 1) & 1;
+  return { base: (sc & 0xfc) << 9, wide, mw: 256 << wide, mh: 256 << tall, dx: get16(w, RAM.layer3X) - cameraX(w), dy: get16(w, RAM.layer3Y) - cameraY(w) };
+}
+// VRAM byte address of tile (tx, ty)'s word
+export const layer3TileAddr = (g: Layer3Geometry, tx: number, ty: number): number =>
+  (g.base + ((tx >> 5) + (ty >> 5) * (g.wide ? 2 : 1)) * 0x800 + ((ty & 31) * 32 + (tx & 31)) * 2) & 0xffff;
+
 // BG3 tilemap (2bpp) placed like on screen at the end of the level load: layer 3 scroll ($22/$24)
 // relative to the camera ($1A/$1C), repeated horizontally. Approximation: layer 3 is assumed to
 // scroll along with the camera. The top 5 tile rows hold the status bar (incl. item box) and are skipped.
 export function renderLayer3(r: LevelRender, width: number, height: number): LevelImages['layer3'] {
-  const w = r.wram, p = r.ppuRegs;
+  const p = r.ppuRegs;
   if (!(p[0x2c] & 0x04) && !(p[0x2d] & 0x04)) return null;
-  const sc = p[0x09], base = (sc & 0xfc) << 9, wide = sc & 1, tall = (sc >> 1) & 1;
-  const mw = 256 << wide, mh = 256 << tall;
-  const dx = get16(w, RAM.layer3X) - cameraX(w);
-  const dy = get16(w, RAM.layer3Y) - cameraY(w);
+  const g = layer3Geometry(r), { mw, mh, dx, dy } = g;
   const tc = new TileCache(r.vram, r.cgram, (p[0x0c] & 0x0f) << 13);
   const back = new Uint32Array(width * height), front = new Uint32Array(width * height);
   const prioFront = (p[0x05] & 0x0f) === 0x09;
   let any = false;
-  for (let ty = 5; ty < mh / 8; ty++) {
+  for (let ty = LAYER3_STATUS_ROWS; ty < mh / 8; ty++) {
     const py = ty * 8 - dy;
     if (py + 8 <= 0 || py >= height) continue;
     for (let tx = 0; tx < mw / 8; tx++) {
-      const scr = (tx >> 5) + (ty >> 5) * (wide ? 2 : 1);
-      const a = (base + scr * 0x800 + ((ty & 31) * 32 + (tx & 31)) * 2) & 0xffff;
+      const a = layer3TileAddr(g, tx, ty);
       const word = r.vram[a] | (r.vram[a + 1] << 8);
       const t = tc.get(word, 2);
       if (!t.some((c) => c)) continue;
@@ -221,7 +233,7 @@ export function renderLayer3(r: LevelRender, width: number, height: number): Lev
   return any ? { back, front, blend: (p[0x31] & 0x04) !== 0 } : null;
 }
 
-// ghost: 1 or 2 draws that layer at 35 % opacity; layer 3 in front is drawn half transparent
+// ghost: 1 or 2 draws that layer at 35 % opacity, 3 both; layer 3 in front is drawn half transparent
 export function composite(li: LevelImages, show1 = true, show2 = true, ghost = 0, show3 = true): Uint32Array {
   const out = new Uint32Array(li.width * li.height).fill(li.backdrop);
   const put = (src: Uint32Array, faint: boolean) => {
@@ -232,8 +244,8 @@ export function composite(li: LevelImages, show1 = true, show2 = true, ghost = 0
   };
   const l3 = show3 ? li.layer3 : null;
   if (l3) put(l3.back, false);
-  if (show2) put(li.layer2, ghost === 2);
-  if (show1) put(li.layer1, ghost === 1);
+  if (show2) put(li.layer2, (ghost & 2) !== 0);
+  if (show1) put(li.layer1, (ghost & 1) !== 0);
   if (l3) {
     const f = l3.front;
     for (let i = 0; i < out.length; i++) if (f[i]) out[i] = l3.blend ? blend(f[i], out[i], 0.5) : f[i];

@@ -16,12 +16,16 @@ export const GM = {
 
 export const RAM = {
   gameMode: 0x0100,
+  frameCounter: 0x14, // advances once per game frame (not in lag frames)
   introLevel: 0x0109, // level the game starts with instead of the overworld (0 = none)
 
   // camera: layer 1 position (16-bit) and its copy for the next frame, layer 3 position
   layer1X: 0x1a, layer1Y: 0x1c,
   layer1XNext: 0x1462, layer1YNext: 0x1464,
+  layer2X: 0x1e, layer2Y: 0x20,
   layer3X: 0x22, layer3Y: 0x24,
+  scrollH: 0x1411, scrollV: 0x1412, // the camera follows Mario horizontally / vertically
+  scrollUp: 0x1404, // the camera may scroll up (Mario flying, climbing …)
   screenMode: 0x5b, // vertical level / layer 2 interaction bits
 
   // Mario
@@ -30,7 +34,8 @@ export const RAM = {
   marioInAir: 0x72,
   marioClimbing: 0x74,
   marioInWater: 0x75,
-  marioDir: 0x76,
+  marioDir: 0x76, // 0 left, 1 right
+  waterLevel: 0x85, // Mario swims everywhere
   marioBlocked: 0x77, // bits: 1 right, 2 left, 4 floor, 8 ceiling
   marioSpeedX: 0x7b, marioSpeedY: 0x7d,
   marioX: 0x94, marioY: 0x96, // 16-bit
@@ -53,6 +58,10 @@ export const RAM = {
   layer3Tide: 0x1403, // 1 rising and falling, 2 fixed
   layer3Setting: 0x1be3,
   sublevelCount: 0x141a,
+  levelFlags: 0x1ea2, // per translevel: bit 6 the midway point was touched
+  midwayUsed: 0x13cf, // the level was loaded at its midway point
+  midwayScreen: 0x13cd, // the level's midway screen: its tape sets the checkpoint unless it is 0
+  entranceAction: 0x192a, // what Mario does when he enters (pipe, door, …)
   levelMusic: 0x0dda, // song of the level; the game doesn't restart it when the next level has the same
   screenExitLo: 0x19b8, screenExitHi: 0x19d8, // per screen
   useSecondaryExit: 0x1b93,
@@ -83,6 +92,23 @@ export const RAM = {
 export const MAP_BASE = 0xc800;
 export const MAP_SIZE = 0x3800;
 export const MAP_HI = 0x10000; // from a low byte to its high byte
+// the level heights patch's RAM (levelheight.ts, SNES address, bytes): a screen's bytes in the level data
+// while a level with a size loads (16-bit, 0: the game's $1B0), the subscreen of the objects that follow,
+// then what playing the level needs (the Y high bytes inside the level, …)
+export const LEVEL_HEIGHT_RAM: [number, number] = [0x7f3666, 18];
+// in it, for the editor's other code: a position's limit and row bits when a tile is changed (16-bit
+// each; the game's $0200 and $01F0)
+export const LEVEL_MAX_Y = LEVEL_HEIGHT_RAM[0] + 4, LEVEL_ROW_MASK = LEVEL_HEIGHT_RAM[0] + 6;
+// the layer 3 graphics patch's RAM (layer3gfx.ts): 1 while the layer 3 graphics in VRAM are a level's own
+export const LAYER3_GFX_RAM: [number, number] = [0x7f3678, 1];
+// the level heights patch's too: the flags of the screen exit Mario left by (0000wush, Lunar Magic's)
+export const EXIT_FLAGS_RAM: [number, number] = [0x7f3679, 1];
+// Lunar Magic's RAM for a horizontal level's height, which community code reads too: the height in
+// pixels (also a screen's bytes in the level data), and the screens' Map16 addresses in bank 0's RAM
+// (the game's mode tables point there): 3-byte pointers to the low and the high bytes, then the
+// addresses' low and high bytes
+export const LEVEL_HEIGHT = 0x13d7;
+export const SCREEN_PTRS: [number, number] = [0x0bf6, 0x100];
 
 // normal sprites: per-slot tables (address + slot)
 export const SPRITE_SLOTS = 12;

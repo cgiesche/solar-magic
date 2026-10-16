@@ -1,5 +1,5 @@
 // Installed packages ("SMWK"): what each added download put into the ROM – its Asar patches, files and
-// list.txt entries of the UberASM, block and PIXI projects, ExGFX files – so a package can be looked at,
+// list.txt entries of the UberASM, block and sprite (PIXI) projects, ExGFX files – so a package can be looked at,
 // configured and removed as one. Not declared by the add dialogs but observed: the ROM's projects are
 // compared before and after a package (or a part of it) was added. Kept in the ROM like the patch
 // registry: a RATS block holding "SMWK", a version byte and deflated JSON; the package's own files (zip)
@@ -7,20 +7,20 @@
 
 import { deflateSync, inflateSync } from 'fflate';
 import { Rom, pcToSnes } from './rom.ts';
-import { readChunks } from './patchreg.ts';
 import type { UberContext } from './uberasm.ts';
 import type { SpriteFolder } from './pixirt.ts';
+import { TOOL_KINDS, type ToolKind } from './parts.ts';
 import { SECTIONS, SECTION_KEYS, type SectionKey, type PartSection, type Other } from './pkgsections.ts';
 
 const MAGIC = [0x53, 0x4d, 0x57, 0x4b]; // "SMWK"
 const VERSION = 1;
 
-// what a package put into the ROM (field names as stored in the ROM: uber = UberASM, blocks, pixi = sprites)
+// what a package put into the ROM (the tool projects under their part kind)
 export interface PackageParts {
   patches: string[]; // ids of its Asar patches in the patch registry
-  uber: { files: string[]; calls: [UberContext, number, string][]; other: Partial<Record<Other, string>> };
-  blocks: { files: string[]; tiles: number[] };
-  pixi: { files: string[]; list: [SpriteFolder, number][] };
+  uberasm: { files: string[]; calls: [UberContext, number, string][]; other: Partial<Record<Other, string>> };
+  block: { files: string[]; tiles: number[] };
+  sprite: { files: string[]; list: [SpriteFolder, number][] };
   gfx: number[]; // ExGFX numbers it created
   music?: string[]; // songs it added to the music project (their .txt)
   map16?: number[]; // extended FG Map16 tiles it filled (graphics packages)
@@ -34,9 +34,6 @@ export interface Package extends PackageParts {
   fileName: string;
   added: string; // ISO date
   srcId?: string; // its files (zip) in the editor data (rom.extra)
-  src?: number[]; // older ROMs: SNES addresses of the RATS blocks holding its files (see migratePackageFiles)
-  srcSize?: number;
-  legacy?: boolean; // wraps a patch applied before packages were tracked (its files are kept with the patch)
 }
 
 export const emptyParts = (): PackageParts => Object.fromEntries(SECTION_KEYS.map((k) => [k, SECTIONS[k].none()])) as unknown as PackageParts;
@@ -74,7 +71,7 @@ function write(rom: Rom, all: Package[]): void {
 export function savePackage(rom: Rom, rec: Package, archive?: Uint8Array): Package {
   const all = listPackages(rom);
   const full = { ...rec };
-  if (archive && !full.src && !full.srcId) full.srcId = rom.putBlob(archive);
+  if (archive && !full.srcId) full.srcId = rom.putBlob(archive);
   const i = all.findIndex((r) => r.id === rec.id);
   if (i >= 0) all[i] = full; else all.push(full);
   write(rom, all);
@@ -85,31 +82,15 @@ export function removePackageRecord(rom: Rom, id: string): void {
   const all = listPackages(rom);
   const r = all.find((x) => x.id === id);
   if (!r) return;
-  for (const a of r.src ?? []) rom.freeAt(a);
   if (r.srcId) rom.dropBlob(r.srcId);
   write(rom, all.filter((x) => x.id !== id));
 }
 
 // the package's files, null if they are not kept
 export function packageArchive(rom: Rom, r: Package): Uint8Array | null {
-  if (r.srcId) return rom.getBlob(r.srcId);
-  return r.src && r.srcSize ? readChunks(rom, r.src, r.srcSize) : null;
+  return r.srcId ? rom.getBlob(r.srcId) : null;
 }
 
-// files older versions kept in the ROM go into the editor data; returns whether anything moved
-export function migratePackageFiles(rom: Rom): boolean {
-  const all = listPackages(rom);
-  let moved = false;
-  for (const r of all) {
-    if (!r.src) continue;
-    if (r.srcSize) r.srcId = rom.putBlob(readChunks(rom, r.src, r.srcSize));
-    for (const a of r.src) rom.freeAt(a);
-    delete r.src; delete r.srcSize;
-    moved = true;
-  }
-  if (moved) write(rom, all);
-  return moved;
-}
 
 // ---------- observing what a package adds ----------
 // (each section of the record by its adapter, see pkgsections.ts)
@@ -155,41 +136,46 @@ export function packageSummary(r: Package): string[] {
   return [...new Set(SECTION_KEYS.flatMap((k) => section(k).summary(c[k]) ?? []))];
 }
 
+// what removing the package takes out of the ROM ("the patch", "block(s) at 200, 201" …)
+export function packageRemoval(r: Package): string[] {
+  const c = complete(r) as unknown as Parts;
+  return SECTION_KEYS.flatMap((k) => section(k).removal(c[k]) ?? []);
+}
+
 // ---------- recording a change into a package ----------
 
 // an installed package getting more, or a new one (its files kept with the editor data)
 export type PackageTarget = Package | { name: string; fileName: string; archive?: Uint8Array };
 // a project file the change placed that was there already (same content, brought by another package
 // too): it belongs to the package as well, so removing the other one keeps it
-export type Claim = (tool: 'uber' | 'blocks' | 'pixi', file: string) => void;
+export type Claim = (tool: ToolKind, file: string) => void;
 // pkg: the saved record, null when nothing came in (nothing saved)
 export interface Recorded<R> { result: R; pkg: Package | null }
 
-// runs `change` and records what it put into the ROM into the package, all or nothing: when it fails
-// (ok false or throws) or the record can't be saved, the ROM is as before (and the error thrown)
+// runs `change` and records what it put into the ROM into the package; when it fails (ok false) nothing
+// is recorded, when it throws (or the record can't be saved) the error is passed on. Run it in an edit
+// session (romedit.ts): that puts the ROM back after a failure.
 export function recordPackageChange<R extends { ok: boolean }>(rom: Rom, target: PackageTarget, change: (claim: Claim) => R): Recorded<R> {
   const rec = startRecording(rom, target);
-  try { return rec.finish(change(rec.claim)); } catch (e) { rec.undo(); throw e; }
+  return rec.finish(change(rec.claim));
 }
 
 // recordPackageChange for a change that awaits
 export async function recordPackageChangeAsync<R extends { ok: boolean }>(rom: Rom, target: PackageTarget, change: (claim: Claim) => Promise<R>): Promise<Recorded<R>> {
   const rec = startRecording(rom, target);
-  try { return rec.finish(await change(rec.claim)); } catch (e) { rec.undo(); throw e; }
+  return rec.finish(await change(rec.claim));
 }
 
 function startRecording(rom: Rom, target: PackageTarget) {
-  const romBefore = rom.snapshot();
   const was = snapshot(rom);
-  const claimed: Record<'uber' | 'blocks' | 'pixi', Set<string>> = { uber: new Set(), blocks: new Set(), pixi: new Set() };
+  const claimed: Record<ToolKind, Set<string>> = { uberasm: new Set(), block: new Set(), sprite: new Set() };
   return {
     claim: ((tool, file) => { claimed[tool].add(file); }) as Claim,
-    undo: () => rom.restore(romBefore),
     finish<R extends { ok: boolean }>(result: R): Recorded<R> {
-      if (!result.ok) { rom.restore(romBefore); return { result, pkg: null }; }
+      if (!result.ok) return { result, pkg: null };
       const now = snapshot(rom);
       const parts = partsBetween(was, now);
-      for (const tool of ['uber', 'blocks', 'pixi'] as const) for (const f of claimed[tool]) if (!parts[tool].files.includes(f)) parts[tool].files.push(f);
+      for (const tool of TOOL_KINDS) for (const f of claimed[tool]) if (!parts[tool].files.includes(f)) parts[tool].files.push(f);
       const old = 'id' in target ? target : null;
       // (nothing new, but the record may still change: a patch applied anew drops its old id)
       if (isEmptyParts(parts) && (!old || JSON.stringify(mergeParts(old, parts, now)) === JSON.stringify(complete(old)))) return { result, pkg: null };
@@ -202,25 +188,19 @@ function startRecording(rom: Rom, target: PackageTarget) {
 // ---------- removing a package ----------
 
 // removes everything the package put into the ROM (each section by its adapter, in their order) and
-// its record; what another package brought as well stays. All or nothing: throws, the ROM unchanged.
-// Returns warnings.
+// its record; what another package brought as well stays. Throws when it fails (run it in an edit session,
+// romedit.ts, which puts the ROM back). Returns warnings.
 export async function uninstallPackage(rom: Rom, id: string, blank: number[]): Promise<string[]> {
   const all = listPackages(rom);
   const rec = all.find((r) => r.id === id);
   if (!rec) throw new Error('Package is not installed');
   const mine = complete(rec) as unknown as Parts, others = all.filter((r) => r !== rec).map((r) => complete(r) as unknown as Parts);
-  const before = rom.snapshot();
   const warnings: string[] = [];
-  try {
-    for (const k of SECTION_KEYS) {
-      if (section(k).empty(mine[k])) continue;
-      warnings.push(...await section(k).remove(rom, mine[k], others.map((o) => o[k]), blank));
-    }
-    removePackageRecord(rom, id);
-  } catch (e) {
-    rom.restore(before);
-    throw e;
+  for (const k of SECTION_KEYS) {
+    if (section(k).empty(mine[k])) continue;
+    warnings.push(...await section(k).remove(rom, mine[k], others.map((o) => o[k]), blank));
   }
+  removePackageRecord(rom, id);
   return warnings;
 }
 

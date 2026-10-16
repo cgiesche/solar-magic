@@ -11,9 +11,9 @@ This page describes the interface that resources see and how the editor implemen
 
 - **Upload:** *ROM → Packages … → Upload package …* with a download (`.zip` or `.asm`, also a whole
   PIXI folder). The editor recognizes
-  sprites (by `.json`/`.cfg`), misc sprites (`.asm` with `print "MAIN ",pc` in a folder of their type) and
-  included custom blocks. Each sprite gets the next free number of its type, each block the next
-  free Map16 tile from 200 on. Defines that refer to a sprite of the package are set to its number,
+  sprites (by `.json`/`.cfg`) and misc sprites (`.asm` with `print "MAIN ",pc` in a folder of their type);
+  custom blocks in the same upload are block parts of their own ([patches.md](patches.md)). Each sprite gets
+  the next free number of its type. Defines in any file of the package that refer to one of its sprites are set to its number,
   recognized by the file name in the comment (`!Sprite = $18 ; Sprite number of BrutalBill.json`)
   or by a misc type in the name (`!bounce_sprite`).
 - **Configure:** *Sprites* tab in the Packages dialog, a configuration view: assign and unassign entries of
