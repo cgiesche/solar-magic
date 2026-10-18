@@ -127,8 +127,8 @@ When a level is displayed, it runs the ROM's **original loading routines** (~15 
 
 ### Graphics, palettes, Map16
 * **Map16 editor** (M): FG and BG tiles of the current tileset, per quarter 8x8 tile, palette, flip, priority.
-  The builder shows the whole selection of the sheet (fitted into its column, whose width can be dragged;
-  Ctrl+wheel zooms, the middle button pans) and edits many tiles at once: mark quarters (click, drag, Ctrl+click/drag
+  The builder shows the whole selection of the sheet (fitted into its column; Ctrl+wheel zooms, the middle
+  button pans); so does the 8x8 graphics view, whose width can be dragged and edits many tiles at once: mark quarters (click, drag, Ctrl+click/drag
   adds or removes, Shift+click the whole 16x16 tile, Ctrl+A all, Esc none); palette, flips, priority (buttons or
   keys 1–8, X, Y) and a clicked 8x8 tile go into every marked quarter, mixed values are shown as mixed. Dragging a
   block of 8x8 tiles onto the builder stamps it there (tile numbers set, flips cleared, palettes kept; the overhang

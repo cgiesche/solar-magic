@@ -33,9 +33,9 @@ import { QuarterGrid, markRect, editMarked, setPalette, setBit, setTileNum, stam
 
 const Z = 2; // sheet zoom
 const M = 34; // sheet margin for the ranges and row numbers
-const GZ = 2; // 8x8 graphics zoom
 const BZ = 12; // largest fitted builder zoom
-const BUILDER_W = 'mt-builder-width'; // the builder column's width (localStorage)
+const GFX_W = 'mt-gfx-width'; // the graphics column's width (localStorage)
+const LABELS_W = 92; // the slot names left of the 8x8 graphics
 const QUARTER_NAMES = ['top left', 'bottom left', 'top right', 'bottom right'];
 
 interface Clip { w: number; h: number; words: number[][]; acts: number[] | null }
@@ -86,7 +86,9 @@ export class Map16Tab implements WsPanel {
   private marksOf = '';
   private hoverQ: number | null = null; // quarter under the mouse in the builder
   private bzoom: number | null = null; // builder zoom, null: fitted into the column
-  private builderW = 300;
+  private gfxW = 470;
+  private gzoom: number | null = null; // 8x8 graphics zoom, null: fitted into the column
+  private gzPx = 3; // the graphics canvas' pixels per SNES pixel (the zoom rounded up)
   private clip: Clip | null = null;
   private sameActs = false; // mark tiles that act like the selected one
   private markUnused = false; // mark tiles 200-FFF defined but used nowhere
@@ -108,13 +110,16 @@ export class Map16Tab implements WsPanel {
   private scrollPending = false; // selected while hidden: scroll there when shown
   private builder = h('div', { class: 'mt-builder' });
   private builderCol = h('div', { class: 'mt-col mt-builder-col' }, this.builder);
-  private bHead = h('div', { class: 'mt-builder' });
-  private bCtl = h('div', { class: 'mt-builder' });
+  private bHead = h('div', { class: 'mt-builder mt-builder-ctl' });
+  private bCtl = h('div', { class: 'mt-builder mt-builder-ctl' });
   private qInfo = h('div', { class: 'hint' });
   private bigCanvas = h('canvas', { class: 'mt-big' });
   private bigScroll = h('div', { class: 'mt-big-scroll' }, this.bigCanvas);
-  private gfxBox = h('div', { class: 'mt-gfx' });
+  private gfxTitle = h('div', { class: 'panel-title' });
+  private gfxLabels = h('div', { class: 'mt-gfx-labels' });
   private gfxCanvas = h('canvas', { class: 'mt-gfx-canvas' });
+  private gfxScroll = h('div', { class: 'mt-gfx-scroll' }, h('div', { class: 'mt-gfx-wrap' }, this.gfxLabels, this.gfxCanvas));
+  private gfxCol = h('div', { class: 'mt-col mt-gfx-col' }, this.gfxTitle, this.gfxScroll);
   private remapping: Remapping | null = null;
   // the visual mode: the marked source 8x8 tiles (cells of the graphics view), where they are dragged to
   private visualFrom: { x: number; y: number; w: number; h: number } | null = null;
@@ -128,7 +133,7 @@ export class Map16Tab implements WsPanel {
         h('div', { class: 'mt-col mt-sheet-col' }, this.scroll),
         this.builderCol,
         this.splitter(),
-        h('div', { class: 'mt-col mt-gfx-col' }, this.gfxBox)));
+        this.gfxCol));
     this.buildPages();
     this.attachSheet();
     this.attachSearch();
@@ -491,7 +496,6 @@ export class Map16Tab implements WsPanel {
     const b = this.builder;
     const col = this.builderCol;
     col.classList.toggle('mt-remap-col', !!this.remapping);
-    col.style.width = `${this.remapping ? Math.max(440, this.builderW) : this.builderW}px`;
     if (this.remapping) { if (b.firstChild !== this.remapping.box) b.replaceChildren(this.remapping.box); this.drawRemap(); return; }
     // the canvas stays in place, so its scroll position and zoom do
     if (b.firstChild !== this.bHead) b.replaceChildren(this.bHead, this.bigScroll, this.bCtl);
@@ -735,22 +739,24 @@ export class Map16Tab implements WsPanel {
     };
   }
 
-  // the handle between the builder and the graphics: drag to change the builder's width
+  // the handle between the builder and the graphics: drag to change the graphics column's width (the
+  // builder takes the rest)
   private splitter(): HTMLElement {
-    try { const v = Number(localStorage.getItem(BUILDER_W)); if (v >= 200 && v <= 1200) this.builderW = v; } catch { /* no storage */ }
-    const el = h('div', { class: 'mt-split', title: 'Drag: width of the builder' });
+    try { const v = Number(localStorage.getItem(GFX_W)); if (v >= 200 && v <= 1600) this.gfxW = v; } catch { /* no storage */ }
+    this.gfxCol.style.width = `${this.gfxW}px`;
+    const el = h('div', { class: 'mt-split', title: 'Drag: width of the builder and the 8x8 graphics' });
     el.addEventListener('mousedown', (e) => {
       if (e.button !== 0) return;
       e.preventDefault();
-      const x0 = e.clientX, w0 = this.builderCol.getBoundingClientRect().width;
+      const x0 = e.clientX, w0 = this.gfxCol.getBoundingClientRect().width;
       const move = (ev: MouseEvent) => {
-        this.builderW = Math.round(Math.max(200, Math.min(1200, w0 + ev.clientX - x0)));
-        this.builderCol.style.width = `${this.builderW}px`;
+        this.gfxW = Math.round(Math.max(200, Math.min(1600, w0 - (ev.clientX - x0))));
+        this.gfxCol.style.width = `${this.gfxW}px`;
       };
       const up = () => {
         window.removeEventListener('mousemove', move);
         window.removeEventListener('mouseup', up);
-        try { localStorage.setItem(BUILDER_W, String(this.builderW)); } catch { /* no storage */ }
+        try { localStorage.setItem(GFX_W, String(this.gfxW)); } catch { /* no storage */ }
       };
       window.addEventListener('mousemove', move);
       window.addEventListener('mouseup', up);
@@ -1053,14 +1059,15 @@ export class Map16Tab implements WsPanel {
   // ---------- 8x8 graphics ----------
   private drawGfx(): void {
     const app = this.app;
-    const box = this.gfxBox;
+    const z = this.gfxZoom();
+    this.gzPx = Math.ceil(z);
     const fq = this.focusQ(), fw = this.wordAt(fq);
     const pal = (fw >> 10) & 7;
     const slots = levelSlots(app);
     const rows = slots.length * 8;
     const W = 128, Hh = rows * 8;
     const c = this.gfxCanvas;
-    c.width = W * GZ; c.height = Hh * GZ;
+    c.width = W * this.gzPx; c.height = Hh * this.gzPx;
     const ctx = c.getContext('2d')!;
     const img = ctx.createImageData(W, Hh);
     const px = new Uint32Array(img.data.buffer);
@@ -1077,14 +1084,14 @@ export class Map16Tab implements WsPanel {
     off.width = W; off.height = Hh;
     off.getContext('2d')!.putImageData(img, 0, 0);
     ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(off, 0, 0, W * GZ, Hh * GZ);
+    ctx.drawImage(off, 0, 0, W * this.gzPx, Hh * this.gzPx);
     // the marked quarters' 8x8 tiles, the followed quarter's stronger
     const mark = (n: number, strong: boolean) => {
       const si = slots.findIndex((s) => n >= s.first && n < s.first + 0x80);
       if (si < 0) return;
       const k = n - slots[si].first;
       ctx.strokeStyle = strong ? '#ffb000' : 'rgba(255,176,0,0.55)'; ctx.lineWidth = strong ? 2 : 1;
-      ctx.strokeRect((k & 15) * 8 * GZ + 1, (si * 64 + (k >> 4) * 8) * GZ + 1, 8 * GZ - 2, 8 * GZ - 2);
+      ctx.strokeRect((k & 15) * 8 * this.gzPx + 1, (si * 64 + (k >> 4) * 8) * this.gzPx + 1, 8 * this.gzPx - 2, 8 * this.gzPx - 2);
     };
     const words = this.selWords(), g = this.grid();
     for (const n of new Set([...this.marked()].map((k) => { const { tile, q } = g.locate(k); return words[tile][q] & 0x3ff; }))) mark(n, false);
@@ -1096,8 +1103,8 @@ export class Map16Tab implements WsPanel {
       slots.forEach((s, si) => {
         for (let k = 0; k < 128; k++) {
           if (!anim.tiles.has(s.first + k)) continue;
-          const x = (k & 15) * 8 * GZ, y = (si * 64 + (k >> 4) * 8) * GZ;
-          ctx.beginPath(); ctx.moveTo(x + 8 * GZ, y); ctx.lineTo(x + 8 * GZ, y + 6); ctx.lineTo(x + 8 * GZ - 6, y); ctx.fill();
+          const x = (k & 15) * 8 * this.gzPx, y = (si * 64 + (k >> 4) * 8) * this.gzPx;
+          ctx.beginPath(); ctx.moveTo(x + 8 * this.gzPx, y); ctx.lineTo(x + 8 * this.gzPx, y + 6); ctx.lineTo(x + 8 * this.gzPx - 6, y); ctx.fill();
         }
       });
     }
@@ -1105,31 +1112,43 @@ export class Map16Tab implements WsPanel {
     if (this.drag) {
       const d = this.drag;
       ctx.strokeStyle = '#4cc2ff'; ctx.lineWidth = 2;
-      ctx.strokeRect(Math.min(d.a.x, d.b.x) * 8 * GZ + 1, Math.min(d.a.y, d.b.y) * 8 * GZ + 1, (Math.abs(d.a.x - d.b.x) + 1) * 8 * GZ - 2, (Math.abs(d.a.y - d.b.y) + 1) * 8 * GZ - 2);
+      ctx.strokeRect(Math.min(d.a.x, d.b.x) * 8 * this.gzPx + 1, Math.min(d.a.y, d.b.y) * 8 * this.gzPx + 1, (Math.abs(d.a.x - d.b.x) + 1) * 8 * this.gzPx - 2, (Math.abs(d.a.y - d.b.y) + 1) * 8 * this.gzPx - 2);
     }
-    clear(box);
-    const labels = h('div', { class: 'mt-gfx-labels' }, slots.map((s) => h('div', { class: 'mt-slot', style: { height: `${64 * GZ}px` } },
+    c.style.width = `${W * z}px`; c.style.height = `${Hh * z}px`;
+    this.gfxLabels.replaceChildren(...slots.map((s) => h('div', { class: 'mt-slot', style: { height: `${64 * z}px` } },
       h('span', { class: 'mt-slot-name' }, s.name),
       h('a', { href: '#', class: 'mt-slot-file', title: 'Open in the Graphics tab (to edit/draw)', onclick: (e: Event) => { e.preventDefault(); this.ws.showGfx(s.file); } }, gfxName(s.file)),
       s.custom ? h('span', { class: 'hint' }, 'custom') : '',
       h('span', { class: 'hint mono' }, `${hex(s.first, 3)}–${hex(s.first + 0x7f, 3)}`))));
-    box.append(
-      h('div', { class: 'panel-title' }, `8x8 graphics in palette ${pal}`, h('span', { class: 'hint' }, 'follows the quarter under the mouse, else the first marked')),
-      h('div', { class: 'mt-gfx-scroll' }, h('div', { class: 'mt-gfx-wrap' }, labels, c)),
-    );
+    this.gfxTitle.replaceChildren(`8x8 graphics in palette ${pal}`);
+    this.gfxTitle.title = 'The palette follows the quarter under the mouse, else the first marked · Ctrl+wheel: zoom · middle button: pan';
+  }
+
+  // zoom of the 8x8 graphics: as set by Ctrl+wheel, else 16 tiles fitted into the column
+  private gfxZoom(): number {
+    if (this.gzoom !== null) return this.gzoom;
+    return Math.max(1, Math.min(8, (this.gfxScroll.clientWidth - LABELS_W - 2) / 128));
+  }
+  private setGfxZoom(z: number, ax: number, ay: number): void {
+    const old = this.gfxZoom(), sc = this.gfxScroll;
+    const lx = (sc.scrollLeft + ax - LABELS_W) / old, ly = (sc.scrollTop + ay) / old;
+    this.gzoom = z;
+    this.drawGfx();
+    sc.scrollLeft = lx * z + LABELS_W - ax;
+    sc.scrollTop = ly * z - ay;
   }
 
   // remap: the list's sources (orange) and destinations (green), the visual mode's marked tiles (blue)
   // and where they are being dragged (dashed)
   private drawRemapMarks(ctx: CanvasRenderingContext2D, slots: { first: number }[]): void {
     const { remap } = this.remapping!.ed.parsed();
-    const at = (t: number) => { const si = slots.findIndex((s) => t >= s.first && t < s.first + 0x80); return si < 0 ? null : { x: ((t - slots[si].first) & 15) * 8 * GZ, y: (si * 8 + ((t - slots[si].first) >> 4)) * 8 * GZ }; };
-    const fill = (tiles: Iterable<number>, color: string) => { ctx.fillStyle = color; for (const t of tiles) { const p = at(t); if (p) ctx.fillRect(p.x, p.y, 8 * GZ, 8 * GZ); } };
+    const at = (t: number) => { const si = slots.findIndex((s) => t >= s.first && t < s.first + 0x80); return si < 0 ? null : { x: ((t - slots[si].first) & 15) * 8 * this.gzPx, y: (si * 8 + ((t - slots[si].first) >> 4)) * 8 * this.gzPx }; };
+    const fill = (tiles: Iterable<number>, color: string) => { ctx.fillStyle = color; for (const t of tiles) { const p = at(t); if (p) ctx.fillRect(p.x, p.y, 8 * this.gzPx, 8 * this.gzPx); } };
     fill(new Set([...remap.tiles.keys(), ...remap.tilePals.keys()]), 'rgba(255,176,0,0.35)');
     fill(new Set(remap.tiles.values()), 'rgba(80,220,120,0.35)');
     const box = (x: number, y: number, w: number, hh: number, dash: boolean) => {
       ctx.strokeStyle = '#4cc2ff'; ctx.lineWidth = 2; ctx.setLineDash(dash ? [4, 3] : []);
-      ctx.strokeRect(x * 8 * GZ + 1, y * 8 * GZ + 1, w * 8 * GZ - 2, hh * 8 * GZ - 2);
+      ctx.strokeRect(x * 8 * this.gzPx + 1, y * 8 * this.gzPx + 1, w * 8 * this.gzPx - 2, hh * 8 * this.gzPx - 2);
       ctx.setLineDash([]);
     };
     if (this.visualFrom) box(this.visualFrom.x, this.visualFrom.y, this.visualFrom.w, this.visualFrom.h, false);
@@ -1139,11 +1158,19 @@ export class Map16Tab implements WsPanel {
   private drag: { a: { x: number; y: number }; b: { x: number; y: number } } | null = null;
   private attachGfx(): void {
     const c = this.gfxCanvas;
+    attachPanZoom(this.gfxScroll, () => this.gfxZoom(), (z, ax, ay) => this.setGfxZoom(z, ax, ay), 1, 8);
+    let lastW = 0;
+    new ResizeObserver(() => {
+      const w = this.gfxScroll.clientWidth;
+      if (w === lastW) return;
+      lastW = w;
+      if (this.visible && this.gzoom === null) this.drawGfx();
+    }).observe(this.gfxScroll);
     const cell = (e: MouseEvent) => {
       const rc = c.getBoundingClientRect();
       return {
         x: Math.max(0, Math.min(15, Math.floor((e.clientX - rc.left) / (rc.width / 16)))),
-        y: Math.max(0, Math.min(c.height / (8 * GZ) - 1, Math.floor((e.clientY - rc.top) / (rc.height / (c.height / (8 * GZ)))))),
+        y: Math.max(0, Math.min(c.height / (8 * this.gzPx) - 1, Math.floor((e.clientY - rc.top) / (rc.height / (c.height / (8 * this.gzPx)))))),
       };
     };
     // 8x8 tile number at a cell of the grouped view
