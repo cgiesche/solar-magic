@@ -14,6 +14,7 @@ check(g.cols === 6 && g.rows === 4 && g.all().size === 24, '3x2 tiles: 6x4 quart
 check(g.at(0, 0).tile === 0 && g.at(0, 0).q === 0, 'top-left quarter: tile 0, word 0');
 check(g.at(0, 1).q === 1 && g.at(1, 0).q === 2 && g.at(1, 1).q === 3, 'word order TL, BL, TR, BR');
 check(g.at(3, 2).tile === 4 && g.at(3, 2).q === 2, 'quarter (3,2): tile 4 (second row, middle), its top right');
+check(g.locate(g.key(3, 2)).tile === 4 && g.locate(g.key(3, 2)).q === 2, 'locate: a key\'s tile and word');
 check(sorted(g.wholeTile(g.key(3, 3))) === sorted(new Set([g.key(2, 2), g.key(3, 2), g.key(2, 3), g.key(3, 3)])), 'Shift+click: the quarter\'s whole 16x16 tile');
 
 // ---- marking ----
@@ -72,7 +73,7 @@ st = stamp(g3, w3, { x: 3, y: 2 }, block(4, 4, 0x100));
 check(st.cut === 14 && st.changed.join() === '3', 'dropped on the last column: 14 of 16 cut off');
 check(st.words[3][2] === W(0x100, 3) && st.words[3][3] === W(0x110, 3) && st.words[3][0] === w3[3][0], 'the part inside lands from the drop quarter');
 st = stamp(g3, w3, { x: 1, y: 1 }, [[-1, 0x5], [0x6, 0x7]]);
-check(st.words[0][3] === w3[0][3] && st.words[1][1] === W(0x5, 1), 'a cell outside the graphics (-1) is left as it is');
+check(st.words[0][3] === w3[0][3] && st.words[1][1] === W(0x5, 1), 'an 8x8 tile outside the graphics (-1) leaves the quarter as it is');
 
 // ---- acts-like: wholly marked 16x16 tiles ----
 check(wholeTiles(g, g.all())!.join() === '0,1,2,3,4,5', 'everything marked: all tiles');

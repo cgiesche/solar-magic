@@ -24,17 +24,18 @@ export class QuarterGrid {
     this.rows = h * 2;
   }
   key(x: number, y: number): number { return y * this.cols + x; }
-  cell(key: number): { x: number; y: number } { return { x: key % this.cols, y: Math.floor(key / this.cols) }; }
+  pos(key: number): { x: number; y: number } { return { x: key % this.cols, y: Math.floor(key / this.cols) }; }
   // the tile (index in the selection) and the word of a quarter
   at(x: number, y: number): { tile: number; q: number } {
     return { tile: (y >> 1) * this.w + (x >> 1), q: (x & 1) * 2 + (y & 1) };
   }
+  locate(key: number): { tile: number; q: number } { const { x, y } = this.pos(key); return this.at(x, y); }
   all(): Set<number> {
     return new Set(Array.from({ length: this.cols * this.rows }, (_, i) => i));
   }
   // the four quarters of the 16x16 tile a quarter is in
   wholeTile(key: number): Set<number> {
-    const { x, y } = this.cell(key), x0 = x & ~1, y0 = y & ~1;
+    const { x, y } = this.pos(key), x0 = x & ~1, y0 = y & ~1;
     return new Set([this.key(x0, y0), this.key(x0 + 1, y0), this.key(x0, y0 + 1), this.key(x0 + 1, y0 + 1)]);
   }
 }
@@ -60,14 +61,14 @@ export interface QuarterEdit { words: number[][]; changed: number[] }
 export function editMarked(g: QuarterGrid, words: number[][], marks: Set<number>, fn: (w: number) => number): QuarterEdit {
   const out = words.map((ws) => [...ws]);
   for (const k of marks) {
-    const { x, y } = g.cell(k), { tile, q } = g.at(x, y);
+    const { tile, q } = g.locate(k);
     out[tile][q] = fn(out[tile][q]);
   }
   return { words: out, changed: changedTiles(words, out) };
 }
 
 // a block of 8x8 tile numbers (rows, -1: none) with its top-left corner on a quarter: the tile numbers are
-// set and the flips cleared, palette and priority stay; cut: the block's cells outside the grid
+// set and the flips cleared, palette and priority stay; cut: the block's 8x8 tiles outside the grid
 export function stamp(g: QuarterGrid, words: number[][], at: { x: number; y: number }, block: number[][]): QuarterEdit & { cut: number } {
   const out = words.map((ws) => [...ws]);
   let cut = 0;
@@ -88,7 +89,7 @@ function changedTiles(before: number[][], after: number[][]): number[] {
 // what the marked quarters have: every palette in use, each bit on, off or mixed
 export interface QuarterSummary { pals: Set<number>; flipX: BitState; flipY: BitState; prio: BitState }
 export function summary(g: QuarterGrid, words: number[][], marks: Set<number>): QuarterSummary {
-  const ws = [...marks].map((k) => { const { x, y } = g.cell(k), { tile, q } = g.at(x, y); return words[tile][q]; });
+  const ws = [...marks].map((k) => { const { tile, q } = g.locate(k); return words[tile][q]; });
   const bit = (b: number): BitState => {
     const on = ws.filter((w) => w & b).length;
     return on === 0 ? 'off' : on === ws.length ? 'on' : 'mixed';
@@ -100,7 +101,7 @@ export function summary(g: QuarterGrid, words: number[][], marks: Set<number>): 
 // null when nothing is marked or a tile is marked in part
 export function wholeTiles(g: QuarterGrid, marks: Set<number>): number[] | null {
   const count = new Map<number, number>();
-  for (const k of marks) { const { x, y } = g.cell(k), t = g.at(x, y).tile; count.set(t, (count.get(t) ?? 0) + 1); }
+  for (const k of marks) { const t = g.locate(k).tile; count.set(t, (count.get(t) ?? 0) + 1); }
   if (!count.size || [...count.values()].some((n) => n < 4)) return null;
   return [...count.keys()].sort((a, b) => a - b);
 }

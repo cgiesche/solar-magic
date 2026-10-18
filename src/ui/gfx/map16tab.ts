@@ -214,7 +214,7 @@ export class Map16Tab implements WsPanel {
     return this.hoverQ ?? (m.size ? Math.min(...m) : 0);
   }
   private wordAt(key: number): number {
-    const g = this.grid(), { x, y } = g.cell(key), { tile, q } = g.at(x, y);
+    const { tile, q } = this.grid().locate(key);
     return this.words(this.selection()[tile])[q];
   }
   private editLabel(n: number, what: string): string {
@@ -546,7 +546,7 @@ export class Map16Tab implements WsPanel {
     this.bCtl.replaceChildren(
       this.qInfo,
       animated ? h('div', { class: 'warn-box' },
-        `Animated: the game keeps overwriting ${animated === all.length ? 'all quarters' : 'the quarters marked with a corner'} with animation frames (e.g. ?-block, coin, water). Changes drawn on these 8x8 tiles are not visible in the game.`,
+        `Animated: the game keeps overwriting ${animated === all.length ? 'all quarters' : 'the quarters flagged with a pink corner'} with animation frames (e.g. ?-block, coin, water). Changes drawn on these 8x8 tiles are not visible in the game.`,
         own.length ? h('div', null, 'By ', animLinks(this.ws, own), '.') : '') : '',
       h('div', { class: 'hint' }, 'Palette (keys 1–8)'),
       h('div', { class: 'mt-pals' }, Array.from({ length: 8 }, (_, p) => palDot(p))),
@@ -566,7 +566,7 @@ export class Map16Tab implements WsPanel {
 
   // the line about the quarter the graphics view follows
   private updateQInfo(): void {
-    const g = this.grid(), k = this.focusQ(), { x, y } = g.cell(k), { tile, q } = g.at(x, y);
+    const k = this.focusQ(), { tile, q } = this.grid().locate(k);
     const w = this.wordAt(k), num8 = w & 0x3ff;
     const slot = levelSlots(this.app).find((s) => num8 >= s.first && num8 < s.first + 0x80);
     const where = this.selW * this.selH > 1 ? `${hex(this.selection()[tile], 3)} ` : '';
@@ -631,7 +631,7 @@ export class Map16Tab implements WsPanel {
       const a = Math.max(3, Math.min(16, sx / 3));
       ctx.fillStyle = '#ff4fd8';
       for (let k = 0; k < g.cols * g.rows; k++) {
-        const { x, y } = g.cell(k), { tile, q } = g.at(x, y);
+        const { x, y } = g.pos(k), { tile, q } = g.locate(k);
         if (!anim.tiles.has(words[tile][q] & 0x3ff)) continue;
         const rx = (x + 1) * sx, ry = y * sy;
         ctx.beginPath(); ctx.moveTo(rx, ry); ctx.lineTo(rx, ry + a); ctx.lineTo(rx - a, ry); ctx.fill();
@@ -639,13 +639,13 @@ export class Map16Tab implements WsPanel {
     }
     // marks: tinted, the outline of the marked area
     ctx.fillStyle = 'rgba(255,176,0,0.22)';
-    for (const k of marks) { const { x, y } = g.cell(k); ctx.fillRect(x * sx, y * sy, sx, sy); }
+    for (const k of marks) { const { x, y } = g.pos(k); ctx.fillRect(x * sx, y * sy, sx, sy); }
     ctx.strokeStyle = '#ffb000';
     ctx.lineWidth = 2;
     ctx.beginPath();
     const on = (x: number, y: number) => x >= 0 && y >= 0 && x < g.cols && y < g.rows && marks.has(g.key(x, y));
     for (const k of marks) {
-      const { x, y } = g.cell(k), x0 = x * sx + 1, y0 = y * sy + 1, x1 = (x + 1) * sx - 1, y1 = (y + 1) * sy - 1;
+      const { x, y } = g.pos(k), x0 = x * sx + 1, y0 = y * sy + 1, x1 = (x + 1) * sx - 1, y1 = (y + 1) * sy - 1;
       if (!on(x - 1, y)) { ctx.moveTo(x0, y0); ctx.lineTo(x0, y1 + 1); }
       if (!on(x + 1, y)) { ctx.moveTo(x1, y0 - 1); ctx.lineTo(x1, y1 + 1); }
       if (!on(x, y - 1)) { ctx.moveTo(x0 - 1, y0); ctx.lineTo(x1 + 1, y0); }
@@ -653,7 +653,7 @@ export class Map16Tab implements WsPanel {
     }
     ctx.stroke();
     if (this.hoverQ !== null && this.hoverQ < g.cols * g.rows) {
-      const { x, y } = g.cell(this.hoverQ);
+      const { x, y } = g.pos(this.hoverQ);
       const d = this.drag, bw = d ? Math.abs(d.a.x - d.b.x) + 1 : 1, bh = d ? Math.abs(d.a.y - d.b.y) + 1 : 1;
       ctx.strokeStyle = d ? '#4cc2ff' : 'rgba(255,255,255,0.8)';
       ctx.lineWidth = 2;
@@ -667,11 +667,10 @@ export class Map16Tab implements WsPanel {
   private attachBig(): void {
     const c = this.bigCanvas;
     c.dataset.drop = '1';
-    const cellAt = (e: MouseEvent) => this.bigCellAt(e);
-    c.addEventListener('mousedown', (e) => {
+        c.addEventListener('mousedown', (e) => {
       if (e.button !== 0) return;
       e.preventDefault();
-      const g = this.grid(), a = cellAt(e), base = this.marked();
+      const g = this.grid(), a = this.quarterUnder(e), base = this.marked();
       const ctrl = e.ctrlKey || e.metaKey, whole = e.shiftKey;
       const mode: MarkMode = ctrl ? (base.has(g.key(a.x, a.y)) ? 'remove' : 'add') : 'set';
       // Shift: whole 16x16 tiles
@@ -683,15 +682,15 @@ export class Map16Tab implements WsPanel {
       };
       mark(a);
       let last = a;
-      const move = (ev: MouseEvent) => { const n = cellAt(ev); if (n.x !== last.x || n.y !== last.y) { last = n; mark(n); } };
+      const move = (ev: MouseEvent) => { const n = this.quarterUnder(ev); if (n.x !== last.x || n.y !== last.y) { last = n; mark(n); } };
       const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); this.setMarks(this.marks); };
       window.addEventListener('mousemove', move);
       window.addEventListener('mouseup', up);
     });
-    c.addEventListener('dblclick', (e) => { const g = this.grid(), a = cellAt(e); this.editGfx(this.wordAt(g.key(a.x, a.y))); });
+    c.addEventListener('dblclick', (e) => { const g = this.grid(), a = this.quarterUnder(e); this.editGfx(this.wordAt(g.key(a.x, a.y))); });
     c.addEventListener('contextmenu', (e) => {
       e.preventDefault();
-      const g = this.grid(), a = cellAt(e), k = g.key(a.x, a.y), w = this.wordAt(k);
+      const g = this.grid(), a = this.quarterUnder(e), k = g.key(a.x, a.y), w = this.wordAt(k);
       const anim = this.bg ? undefined : animsAt(this.app, w & 0x3ff)[0];
       const items: MenuItem[] = [
         { label: `Edit 8x8 tile ${hex(w & 0x3ff, 3)} in the Graphics tab`, title: 'In this quarter\'s palette (double click)', onClick: () => this.editGfx(w) },
@@ -712,7 +711,7 @@ export class Map16Tab implements WsPanel {
       if (((this.wordAt(this.focusQ()) >> 10) & 7) !== pal || this.drag) this.drawGfx();
     };
     c.addEventListener('mousemove', (e) => {
-      const g = this.grid(), a = cellAt(e);
+      const g = this.grid(), a = this.quarterUnder(e);
       hover(g.key(a.x, a.y));
       c.title = 'Click/drag: mark quarters · Ctrl: add/remove · Shift: whole tile · Double click: edit the 8x8 tile in the Graphics tab · Right click: more';
     });
@@ -728,7 +727,7 @@ export class Map16Tab implements WsPanel {
     }).observe(this.bigScroll);
   }
   // the quarter under the mouse in the builder
-  private bigCellAt(e: MouseEvent): { x: number; y: number } {
+  private quarterUnder(e: MouseEvent): { x: number; y: number } {
     const g = this.grid(), rc = this.bigCanvas.getBoundingClientRect();
     return {
       x: Math.max(0, Math.min(g.cols - 1, Math.floor(((e.clientX - rc.left) / rc.width) * g.cols))),
@@ -1088,7 +1087,7 @@ export class Map16Tab implements WsPanel {
       ctx.strokeRect((k & 15) * 8 * GZ + 1, (si * 64 + (k >> 4) * 8) * GZ + 1, 8 * GZ - 2, 8 * GZ - 2);
     };
     const words = this.selWords(), g = this.grid();
-    for (const n of new Set([...this.marked()].map((k) => { const { x, y } = g.cell(k), { tile, q } = g.at(x, y); return words[tile][q] & 0x3ff; }))) mark(n, false);
+    for (const n of new Set([...this.marked()].map((k) => { const { tile, q } = g.locate(k); return words[tile][q] & 0x3ff; }))) mark(n, false);
     mark(fw & 0x3ff, true);
     // tiles the game animates: hatched corner
     const anim = app.animated();
@@ -1175,15 +1174,17 @@ export class Map16Tab implements WsPanel {
         const x0 = Math.min(d.a.x, d.b.x), y0 = Math.min(d.a.y, d.b.y), w = Math.abs(d.a.x - d.b.x) + 1, hh = Math.abs(d.a.y - d.b.y) + 1;
         const block = Array.from({ length: hh }, (_, y) => Array.from({ length: w }, (_, x) => tileOf({ x: x0 + x, y: y0 + y })));
         if (target === this.bigCanvas) {
-          // dropped onto the builder: stamped from the quarter under the mouse
-          this.stampAt(this.bigCellAt(ev), block);
+          // dropped onto the builder: stamped from the quarter under the mouse; a single 8x8 tile keeps the
+          // quarter's flips, as a click does
+          const at = this.quarterUnder(ev), g = this.grid();
+          if (w === 1 && hh === 1) { if (block[0][0] >= 0) this.writeTiles(editMarked(g, this.selWords(), new Set([g.key(at.x, at.y)]), setTileNum(block[0][0])), `8x8 tile ${hex(block[0][0], 3)}`); }
+          else this.stampAt(at, block);
         } else if (w === 1 && hh === 1) {
           if (block[0][0] >= 0) this.editQuarters(setTileNum(block[0][0]), `8x8 tile ${hex(block[0][0], 3)}`);
         } else {
           // a block: stamped from the first marked quarter
-          const m = [...this.marked()].map((k) => this.grid().cell(k));
-          if (!m.length) toast('Mark a quarter first, or drop the block onto the builder');
-          else this.stampAt({ x: Math.min(...m.map((p) => p.x)), y: Math.min(...m.map((p) => p.y)) }, block);
+          if (!this.marked().size) toast('Mark a quarter first, or drop the block onto the builder');
+          else this.stampAt(this.grid().pos(Math.min(...this.marked())), block);
         }
         this.redraw();
       };
@@ -1281,8 +1282,8 @@ export class Map16Tab implements WsPanel {
     if (k === 'y' || k === 'Y') { this.toggleBit(FLIP_Y, '↕ Flip'); return true; }
     if (k >= '1' && k <= '8') { const p = Number(k) - 1; this.editQuarters(setPalette(p), `Palette ${p}`); return true; }
     if (k === 'q' || k === 'Q') {
-      // only the next quarter of the followed quarter's tile (clockwise)
-      const g = this.grid(), { x, y } = g.cell(this.focusQ()), nq = [2, 3, 1, 0][g.at(x, y).q];
+      // only the next quarter of the followed quarter's tile (in reading order)
+      const g = this.grid(), { x, y } = g.pos(this.focusQ()), nq = [2, 3, 1, 0][g.at(x, y).q];
       this.hoverQ = null;
       this.setMarks(new Set([g.key((x & ~1) + (nq >> 1), (y & ~1) + (nq & 1))]));
       return true;
