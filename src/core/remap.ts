@@ -1,6 +1,6 @@
 // Remap lists: changing 8x8 tile numbers, palettes and acts-like settings in bulk, in Lunar Magic's syntax
 // (LM help: editor_16x16.htm, level_ex20_offset.htm), so its tutorials and habits carry over. A list is
-// pairs "source,destination", separated by commas or line breaks (values hex):
+// pairs "source,destination" separated by commas, one or more on a line (values hex):
 //   100,25          tile 100 becomes 25          100-101,25     both become 25
 //   100-101,+25     offset (also -25)            100-101,M125   moved to start at 125
 //   R100-111,M25    a rectangle (16 tiles a row) of 8x8 tiles
@@ -13,8 +13,17 @@
 import type { ExSlot } from './exanim.ts';
 import { kindOf, shapeOf } from './exanim.ts';
 
-const TILE_MAX = 0x3ff, PAL_MAX = 7, ACTS_MAX = 0x1ff, MAP16_MAX = 0xfff;
 const hex3 = (v: number) => v.toString(16).toUpperCase().padStart(3, '0');
+
+// what a list's values are, their limit and how a problem names it
+type Domain = 'tiles' | 'pals' | 'acts' | 'map16';
+const DOMAINS: Record<Domain, { max: number; name: string }> = {
+  tiles: { max: 0x3ff, name: '8x8 tiles go up to 3FF' },
+  pals: { max: 7, name: 'Palettes are 0–7' },
+  acts: { max: 0x1ff, name: 'Acts-like settings go up to 1FF' },
+  map16: { max: 0xfff, name: 'Map16 tiles go up to FFF' },
+};
+const TILE_MAX = DOMAINS.tiles.max;
 
 export interface Remap {
   tiles: Map<number, number>; // 8x8 tile number → new number
@@ -24,6 +33,8 @@ export interface Remap {
   tileActs: Map<number, number>; // Map16 tile → acts-like value
   offset: number; // added to every 8x8 tile number the list leaves alone
 }
+type Into = Exclude<keyof Remap, 'offset'>;
+const INTO_DOMAIN: Record<Into, Domain> = { tiles: 'tiles', pals: 'pals', tilePals: 'pals', acts: 'acts', tileActs: 'acts' };
 
 // a bad pair: where in the text (from/to: the token, line: 0-based) and why
 export interface RemapProblem { from: number; to: number; line: number; message: string }
@@ -36,59 +47,59 @@ export interface RemapOptions {
 
 interface Token { text: string; from: number; to: number; line: number }
 
-// tokens between commas and line breaks, spaces dropped, empty ones skipped
-function tokens(text: string): Token[] {
-  const out: Token[] = [];
-  let start = 0, line = 0, startLine = 0;
-  const push = (end: number) => {
-    const raw = text.slice(start, end), lead = raw.length - raw.trimStart().length;
-    const t = raw.trim();
-    if (t) out.push({ text: t.replace(/\s+/g, ''), from: start + lead, to: start + lead + t.length, line: startLine });
-  };
-  for (let i = 0; i <= text.length; i++) {
-    const c = text[i];
-    if (i === text.length || c === ',' || c === '\n') {
-      push(i);
-      if (c === '\n') line++;
-      start = i + 1;
-      startLine = line;
+// the tokens of each line, between commas; empty ones skipped
+function lineTokens(text: string): Token[][] {
+  let at = 0;
+  return text.split('\n').map((l, line) => {
+    const out: Token[] = [];
+    let start = 0;
+    for (const part of l.split(',')) {
+      const lead = part.length - part.trimStart().length, t = part.trim();
+      if (t) out.push({ text: t, from: at + start + lead, to: at + start + lead + t.length, line });
+      start += part.length + 1;
     }
-  }
-  return out;
+    at += l.length + 1;
+    return out;
+  });
 }
 
 const HEX = /^[0-9a-f]+$/i;
 
+// Unlike Lunar Magic, a pair never reaches over a line break: a line missing its destination is marked
+// alone instead of shifting every pair below it, and a space between two values is a problem rather than
+// one number.
 export function parseRemap(text: string, opt: RemapOptions = {}): { remap: Remap; problems: RemapProblem[] } {
   const remap: Remap = { tiles: new Map(), pals: new Map(), tilePals: new Map(), acts: new Map(), tileActs: new Map(), offset: opt.offset ?? 0 };
   const problems: RemapProblem[] = [];
-  const toks = tokens(text);
   const onlyTiles = opt.what === 'tiles';
-  for (let i = 0; i < toks.length; i += 2) {
-    const src = toks[i], dst = toks[i + 1];
-    const fail = (t: Token, message: string) => { problems.push({ from: t.from, to: t.to, line: t.line, message }); };
-    if (!dst) {
-      // a bad source says so, else the destination is what is missing
-      const alone = parsePair(src, { ...src, text: '0' }, onlyTiles);
-      fail(src, typeof alone === 'string' ? alone : 'The destination is missing (pairs are “source,destination”)');
-      break;
+  const fail = (t: Token, message: string) => { problems.push({ from: t.from, to: t.to, line: t.line, message }); };
+  for (const toks of lineTokens(text)) {
+    for (let i = 0; i < toks.length; i += 2) {
+      const src = toks[i], dst = toks[i + 1];
+      const spaced = [src, dst].find((t) => t && /\s/.test(t.text));
+      if (spaced) { fail(spaced, 'A space between two values: separate them with a comma'); continue; }
+      if (!dst) {
+        // a bad source says so, else the destination is what is missing
+        const alone = parsePair(src, { ...src, text: '0' }, onlyTiles);
+        fail(src, typeof alone === 'string' ? alone : 'The destination is missing on this line (pairs are “source,destination”)');
+        continue;
+      }
+      const pair = parsePair(src, dst, onlyTiles);
+      if (typeof pair === 'string') { fail(src, pair); continue; }
+      if ('dst' in pair) { fail(dst, pair.dst); continue; }
+      for (const [a, b] of pair.map) remap[pair.into].set(a, b);
     }
-    const pair = parsePair(src, dst, onlyTiles);
-    if (typeof pair === 'string') { fail(src, pair); continue; }
-    if ('dst' in pair) { fail(dst, pair.dst); continue; }
-    for (const [a, b] of pair.map) remap[pair.into].set(a, b);
   }
   return { remap, problems };
 }
-
-type Into = 'tiles' | 'pals' | 'tilePals' | 'acts' | 'tileActs';
 
 // one pair: the source values in order (a rectangle row by row, with each one's place in it) and what
 // they become; a string is a problem with the source, { dst } one with the destination
 function parsePair(src: Token, dst: Token, onlyTiles: boolean): string | { dst: string } | { map: [number, number][]; into: Into } {
   const s = src.text.toUpperCase(), d = dst.text.toUpperCase();
   const prefix = /^[PGR]/.test(s) ? s[0] : '';
-  if (onlyTiles && (prefix === 'P' || prefix === 'G')) return prefix === 'P' ? 'Palettes cannot be remapped here, only tile numbers' : 'Acts-like settings cannot be remapped here, only tile numbers';
+  const onlyTilesHere = 'cannot be remapped here, only tile numbers';
+  if (onlyTiles && (prefix === 'P' || prefix === 'G')) return `${prefix === 'P' ? 'Palettes' : 'Acts-like settings'} ${onlyTilesHere}`;
   const body = s.slice(prefix.length);
   const m = /^([^-]*)(?:-(.*))?$/.exec(body)!;
   const range = m[2] !== undefined;
@@ -103,13 +114,10 @@ function parsePair(src: Token, dst: Token, onlyTiles: boolean): string | { dst: 
   if (!dm) return { dst: `Not a destination: “${dst.text}” (a value, +n, -n, Mn${prefix === 'R' ? ', Sn' : ''}${prefix ? '' : ', Pn'})` };
   const op = dm[1], v = parseInt(dm[2], 16);
   if (op === 'S' && prefix !== 'R') return { dst: 'S (acts-like settings) needs a rectangle of Map16 tiles as source (e.g. R200-211,S25)' };
-  if (op === 'S' && onlyTiles) return { dst: 'Acts-like settings cannot be remapped here, only tile numbers' };
   if (op === 'P' && (prefix === 'P' || prefix === 'G')) return { dst: prefix === 'P' ? 'A palette becomes a palette: write the number alone (e.g. P5,7)' : 'P (palette) needs 8x8 tiles as source' };
-  if (op === 'P' && onlyTiles) return { dst: 'Palettes cannot be remapped here, only tile numbers' };
-  // the source's domain
-  const srcMax = prefix === 'P' ? PAL_MAX : prefix === 'G' ? ACTS_MAX : op === 'S' ? MAP16_MAX : TILE_MAX;
-  const srcName = prefix === 'P' ? 'Palettes are 0–7' : prefix === 'G' ? 'Acts-like settings go up to 1FF' : op === 'S' ? 'Map16 tiles go up to FFF' : '8x8 tiles go up to 3FF';
-  if (b > srcMax || a > srcMax) return srcName;
+  if (onlyTiles && (op === 'S' || op === 'P')) return { dst: `${op === 'P' ? 'Palettes' : 'Acts-like settings'} ${onlyTilesHere}` };
+  const from = DOMAINS[prefix === 'P' ? 'pals' : prefix === 'G' ? 'acts' : op === 'S' ? 'map16' : 'tiles'];
+  if (b > from.max || a > from.max) return from.name;
   if (b < a) return 'The range runs backwards (the smaller number first)';
   let cells: { v: number; k: number }[]; // source value, its offset from the source's start (rectangle: dy*16+dx)
   if (prefix === 'R') {
@@ -117,13 +125,11 @@ function parsePair(src: Token, dst: Token, onlyTiles: boolean): string | { dst: 
     cells = [];
     for (let y = a >> 4; y <= b >> 4; y++) for (let x = a & 15; x <= (b & 15); x++) cells.push({ v: y * 16 + x, k: (y - (a >> 4)) * 16 + x - (a & 15) });
   } else cells = Array.from({ length: b - a + 1 }, (_, k) => ({ v: a + k, k }));
-  // the destination's domain
   const into: Into = op === 'S' ? 'tileActs' : op === 'P' ? 'tilePals' : prefix === 'P' ? 'pals' : prefix === 'G' ? 'acts' : 'tiles';
-  const dstMax = op === 'P' || prefix === 'P' ? PAL_MAX : op === 'S' || prefix === 'G' ? ACTS_MAX : TILE_MAX;
-  const dstName = dstMax === PAL_MAX ? 'Palettes are 0–7' : dstMax === ACTS_MAX ? 'Acts-like settings go up to 1FF' : '8x8 tiles go up to 3FF';
-  const to = (c: { v: number; k: number }) => op === '+' ? c.v + v : op === '-' ? c.v - v : op === 'M' || op === 'S' ? v + c.k : v;
-  const map = cells.map((c): [number, number] => [c.v, to(c)]);
-  if (map.some(([, t]) => t < 0 || t > dstMax)) return { dst: `${dstName}: ${op === '-' ? 'below 0' : 'too far'}` };
+  const to = DOMAINS[INTO_DOMAIN[into]];
+  const value = (c: { v: number; k: number }) => op === '+' ? c.v + v : op === '-' ? c.v - v : op === 'M' || op === 'S' ? v + c.k : v;
+  const map = cells.map((c): [number, number] => [c.v, value(c)]);
+  if (map.some(([, t]) => t < 0 || t > to.max)) return { dst: `${to.name}: ${op === '-' ? 'below 0' : 'too far'}` };
   return { map, into };
 }
 

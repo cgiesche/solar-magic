@@ -316,26 +316,25 @@ export class AnimTab implements WsPanel {
     const what = { frames: true, target: true };
     const file = readAltFile(this.app.rom, l.altFile);
     const frameMax = (file ? file.length : ALT_FILE_MAX) / 32 - 1;
-    const cw = this.charWord();
+    const charWord = this.charWord();
     const preview = h('div', { class: 'at-remap-preview' });
     const result = () => {
       const { remap } = ed.parsed();
-      return tileSlots.filter(([n]) => chosen.has(n)).map(([n, x]) => ({ n, x, ...remapSlot(x, remap, cw, what, frameMax) }));
+      return tileSlots.filter(([n]) => chosen.has(n)).map(([n, x]) => ({ n, before: x, ...remapSlot(x, remap, charWord, what, frameMax) }));
     };
     const tile = (x: ExSlot, f: number) => (x.dest & ALT ? hex(f >> 5, 2) : `$${hex(f, 4)}`);
     const draw = () => {
-      const { problems, offsetBad } = ed.parsed();
-      if (problems.length || offsetBad) { preview.replaceChildren(h('div', { class: 'hint' }, 'Fix the marked lines first.')); return; }
+      if (!ed.valid()) { preview.replaceChildren(h('div', { class: 'hint' }, 'Fix the marked lines first.')); return; }
       const res = result();
       preview.replaceChildren(h('table', { class: 'at-remap-table' },
         h('tr', null, h('th', null, 'Slot'), h('th', null, 'Target'), h('th', null, 'Frames')),
-        res.map((r) => h('tr', { class: r.slot !== r.x ? 'changed' : '' },
+        res.map((r) => h('tr', { class: r.slot !== r.before ? 'changed' : '' },
           h('td', { class: 'mono' }, hex(r.n, 2)),
-          h('td', { class: 'mono' }, `${hex(this.targetTile(r.x), 3)}${r.slot.dest !== r.x.dest ? ` → ${hex(this.targetTile(r.slot), 3)}` : ''}`),
-          h('td', { class: 'mono' }, r.x.frames.map((f, i) => tile(r.x, f) + (r.slot.frames[i] !== f ? `→${tile(r.x, r.slot.frames[i])}` : '')).join(' '),
-            r.x.dest & ALT ? '' : h('span', { class: 'hint' }, ' (from RAM: stay)'),
+          h('td', { class: 'mono' }, `${hex(this.targetTile(r.before), 3)}${r.slot.dest !== r.before.dest ? ` → ${hex(this.targetTile(r.slot), 3)}` : ''}`),
+          h('td', { class: 'mono' }, r.before.frames.map((f, i) => tile(r.before, f) + (r.slot.frames[i] !== f ? `→${tile(r.before, r.slot.frames[i])}` : '')).join(' '),
+            r.before.dest & ALT ? '' : h('span', { class: 'hint' }, ' (from RAM: stay)'),
             r.out.length ? h('div', { class: 'rl-problems' }, `Out of range, stays: ${r.out.join(', ')}`) : '')))),
-        h('div', { class: 'hint' }, `${res.filter((r) => r.slot !== r.x).length} of ${res.length} slot${res.length === 1 ? '' : 's'} change.`));
+        h('div', { class: 'hint' }, `${res.filter((r) => r.slot !== r.before).length} of ${res.length} slot${res.length === 1 ? '' : 's'} change.`));
     };
     const ed = remapEditor('tiles', draw);
     const check = (label: string, on: boolean, set: (v: boolean) => void) => h('label', { class: 'toggle' }, h('input', { type: 'checkbox', checked: on, onchange: (e: Event) => { set((e.target as HTMLInputElement).checked); draw(); } }), label);
@@ -347,9 +346,8 @@ export class AnimTab implements WsPanel {
     draw();
     modal(`Remap ${this.global ? 'global' : `level ${hex(this.app.level.number, 3)}`} tile animations`, body, [
       { label: 'Apply', primary: true, onClick: () => {
-        const { problems, offsetBad } = ed.parsed();
-        if (problems.length || offsetBad) { toast('Fix the marked lines first', 'error'); return false; }
-        const res = result().filter((r) => r.slot !== r.x);
+        if (!ed.valid()) { toast('Fix the marked lines first', 'error'); return false; }
+        const res = result().filter((r) => r.slot !== r.before);
         if (!res.length) { toast('Nothing changes'); return false; }
         const nl = this.list();
         for (const r of res) nl.slots.set(r.n, r.slot);

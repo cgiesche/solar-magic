@@ -69,6 +69,10 @@ for (const [text, at, msg] of bads) {
 }
 const half = parseRemap('100,25\n101-100,7\n102,26');
 check(tiles(half.remap) === '100>25 102>26' && half.problems.length === 1 && half.problems[0].line === 1, 'a bad line leaves the others and says its line');
+const lone = parseRemap('100,25,101\n102,26\n103\n104,27');
+check(tiles(lone.remap) === '100>25 102>26 104>27' && lone.problems.map((q) => q.line).join() === '0,2', 'a line missing a destination is marked alone; the lines below still pair');
+const spaced = parseRemap('100 25\n101, 26 ');
+check(tiles(spaced.remap) === '101>26' && spaced.problems.length === 1 && /comma/i.test(spaced.problems[0].message), 'a space between two values is marked (not read as 10025); spaces around values are fine');
 const anim = parseRemap('P1,2\nG1,2\n100,25', { what: 'tiles' });
 check(anim.problems.length === 2 && tiles(anim.remap) === '100>25', 'tiles only (ExAnimation): palettes and acts-like are problems');
 

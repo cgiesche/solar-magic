@@ -29,7 +29,7 @@ import { gfxName, lmAnimName, ANIM_FILE, levelSlots as map16Slots } from './map1
 import { readAltFile, writeAltFile, altFileAddr, ALT_FILE_MAX } from '../../core/exanim.ts';
 import { openHeaderDialog } from '../headerdialog.ts';
 import { animsAt, animLinks } from './animtab.ts';
-import { gfxSlots, gfxUsage, unusedExGfx, savedHeader, type GfxSlot as Slot, type GfxUser } from '../../core/levelusage.ts';
+import { gfxSlots, gfxUsage, unusedExGfx, savedHeader, slotMove, type GfxSlot as Slot, type GfxUser } from '../../core/levelusage.ts';
 import { usedInList } from '../usedin.ts';
 import { slotRemapLine } from '../../core/remap.ts';
 
@@ -398,36 +398,21 @@ export class GfxTab implements WsPanel {
     if (s.map16) await this.offerRemap(s, before);
   }
 
-  // Map16 tiles made for another slot than their file is in now: the file that left this slot is still in
-  // another of the level's slots (moved), or the new file is where other levels have it in another slot.
-  // Offers to remap the tiles 200-FFF that draw from the old slot.
+  // Map16 tiles made for another slot than their file is in now (core: slotMove): offers to remap the
+  // tiles 200-FFF that draw from the old slot
   private async offerRemap(s: Slot, before: Slot[]): Promise<void> {
-    const app = this.app, now = this.levelSlots();
-    const v = now.find((x) => x.name === s.name)!.file;
-    const was = before.find((x) => x.name === s.name)!;
-    const moved = was.custom && was.file >= VANILLA_GFX && now.find((x) => x.map16 && x.name !== s.name && x.file === was.file);
-    let file: number, from: Slot | undefined, to: Slot, where: string;
-    if (moved) { file = was.file; from = was; to = moved; where = 'in this level'; }
-    else {
-      if (v === 0xff || v < VANILLA_GFX || now.some((x) => x.map16 && x.name !== s.name && x.file === v)) return; // also in another slot: its tiles still fit
-      const count = new Map<string, number>();
-      for (const u of this.usage().get(v) ?? []) if (u.level !== app.level.number) for (const n of u.slots) count.set(n, (count.get(n) ?? 0) + 1);
-      const best = [...count.entries()].filter(([n]) => now.some((x) => x.map16 && x.name === n)).sort((a, b) => b[1] - a[1])[0];
-      if (!best || best[0] === s.name) return;
-      file = v; from = now.find((x) => x.name === best[0]); to = s;
-      where = `in ${best[1]} other level${best[1] > 1 ? 's' : ''}`;
-    }
-    if (!from || from.first === to.first) return;
+    const m = slotMove(before, this.levelSlots(), s.name, this.usage(), this.app.level.number);
+    if (!m) return;
+    const { file, from, to } = m;
     const span = (x: Slot) => `${x.name} (${hex(x.first, 3)}–${hex(x.first + 0x7f, 3)})`;
     const line = slotRemapLine(from.first, to.first);
     const pick = await choose('Remap Map16 tiles?', h('div', { style: 'max-width:480px' },
-      h('p', null, moved ? `${gfxName(file)} moved from ${span(from)} to ${span(to)}.` : `${gfxName(file)} is ${where} in ${span(from)}, here in ${span(to)}.`,
+      h('p', null, !m.levels ? `${gfxName(file)} moved from ${span(from)} to ${span(to)}.` : `${gfxName(file)} is in ${span(from)} in ${m.levels} other level${m.levels > 1 ? 's' : ''}, here in ${span(to)}.`,
         ` Map16 tiles made for it still point at ${from.name}.`),
       h('p', { class: 'hint' }, `The Map16 tab's remap opens with ${line} for the tiles 200–FFF that use these 8x8 tiles; the preview shows them before anything changes. Map16 tiles are shared by all levels: one that keeps ${gfxName(file)} in ${from.name} then shows them wrong.`)),
       [{ label: 'Remap …', primary: true }, { label: 'Not now' }]);
     if (pick === 0) this.ws.showRemap({ line, scope: 'uses', bg: false });
   }
-
 
   // ---------- file list ----------
   private buildList(): void {

@@ -12,7 +12,7 @@ import { setActsLike, setExtTileWords, extTileWords } from '../src/core/map16ext
 import { ResultCache, RomFingerprint } from '../src/core/romdeps.ts';
 import { map16Source } from '../src/core/render.ts';
 import {
-  LevelUses, usedLevels, fgTileUsers, bgTileUsers, tileLinks, unusedFgTiles, gfxUsage, unusedExGfx, spriteUsage,
+  LevelUses, usedLevels, fgTileUsers, bgTileUsers, tileLinks, unusedFgTiles, gfxUsage, unusedExGfx, spriteUsage, slotMove, type GfxSlot,
 } from '../src/core/levelusage.ts';
 import { editorImage } from './fixture.ts';
 
@@ -125,6 +125,21 @@ check(uses.missing(levels).length === 0, 'every level known after scanning');
   const u = (usage.get(id) ?? []).find((x) => x.level === 0x105);
   const n = lv105.sprites.filter((q) => spriteId(q) === id).length;
   check(!!u && u.count === n && u.x === s.x && u.y === s.y, `sprite ${s.num.toString(16)}: level 105, ${n}×, first at ${s.x}/${s.y} (${JSON.stringify(u)})`);
+}
+
+// slotMove: where a level's Map16 tiles were made for when a file changes slots (the remap offer)
+{
+  const slot = (name: string, first: number, file: number, custom = true): GfxSlot => ({ name, kind: 'gfx', k: 0, file, def: 0x1b, custom, first, sprite: false, map16: true });
+  const lv = (bg1: number, bg2: number, bg1custom = true) => [slot('FG1', 0, 0x14, false), slot('BG1', 0x100, bg1, bg1custom), slot('BG2', 0x200, bg2, bg2 !== 0xff)];
+  const none = new Map();
+  let m = slotMove(lv(0x80, 0x80), lv(0x1b, 0x80, false), 'BG1', none, 0x105);
+  check(m?.file === 0x80 && m.from.name === 'BG1' && m.to.name === 'BG2' && m.levels === 0, 'ExGFX80 left BG1 and is still in BG2: moved from BG1 to BG2');
+  check(slotMove(lv(0x1b, 0xff, false), lv(0x1b, 0x80, false), 'BG2', none, 0x105) === null, 'a new file used nowhere else: nothing to offer');
+  check(slotMove(lv(0x80, 0xff), lv(0x80, 0x80), 'BG2', none, 0x105) === null, 'also still in BG1: its tiles still fit');
+  const usage = new Map([[0x80, [{ level: 0x106, slots: ['BG1'] }, { level: 0x107, slots: ['BG1'] }, { level: 0x105, slots: ['BG2'] }]]]);
+  m = slotMove(lv(0x1b, 0xff, false), lv(0x1b, 0x80, false), 'BG2', usage, 0x105);
+  check(m?.from.name === 'BG1' && m.to.name === 'BG2' && m.levels === 2, 'other levels have it in BG1: from BG1, 2 levels');
+  check(slotMove(lv(0x1b, 0xff, false), lv(0x1b, 0x13, false), 'BG2', new Map([[0x13, [{ level: 0x106, slots: ['BG1'] }]]]), 0x105) === null, 'vanilla GFX: no offer');
 }
 
 if (fail) { console.log(`${fail} failed`); process.exit(1); }

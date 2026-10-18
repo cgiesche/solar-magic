@@ -40,7 +40,12 @@ const quarterAt = (qx: number, qy: number) => qx * 2 + qy;
 interface Clip { w: number; h: number; words: number[][]; acts: number[] | null }
 // the remap panel: the list editor, which tiles it changes ('sel': the selected ones, 'uses': the
 // extended tiles 200-FFF that use one of the list's source 8x8 tiles)
-interface Remapping { ed: RemapEditor; scope: 'sel' | 'uses'; box: HTMLElement; scopes: HTMLElement; status: HTMLElement; preview: HTMLElement }
+export type RemapScope = 'sel' | 'uses';
+interface Remapping { ed: RemapEditor; scope: RemapScope; box: HTMLElement; scopes: HTMLElement; status: HTMLElement; preview: HTMLElement }
+// what an offer fills in when it opens the remap
+export interface RemapFill { line?: string; scope?: RemapScope; bg?: boolean }
+// a tile the remap changes: its words and acts-like before and after
+interface RemapRow { tile: number; words: number[]; acts: number | null; newWords: number[]; newActs: number | null; out: number[]; changed: boolean }
 type Cell = { x: number; y: number };
 
 // files 100-103: the ExAnimation alternative files (Lunar Magic's ExGFX 60-63)
@@ -100,8 +105,8 @@ export class Map16Tab implements WsPanel {
   private gfxCanvas = h('canvas', { class: 'mt-gfx-canvas' });
   private remapping: Remapping | null = null;
   // the visual mode: the marked source 8x8 tiles (cells of the graphics view), where they are dragged to
-  private vsrc: { x: number; y: number; w: number; h: number } | null = null;
-  private vdst: Cell | null = null;
+  private visualFrom: { x: number; y: number; w: number; h: number } | null = null;
+  private visualTo: Cell | null = null;
 
   constructor(app: App, ws: GfxWorkspace) {
     this.app = app;
@@ -206,20 +211,20 @@ export class Map16Tab implements WsPanel {
       this.pageBar,
       this.search,
       h('span', { class: 'sep' }),
-      h('button', { onclick: () => this.copy(), title: 'Copy the selected tiles, with behavior (Ctrl+C)' }, 'Copy'),
+      h('button', { onclick: () => this.copy(), title: 'Copy the selected tiles, with acts-like (Ctrl+C)' }, 'Copy'),
       h('button', { onclick: () => this.paste(), title: 'Paste starting at the selected tile (Ctrl+V)' }, 'Paste'),
       h('button', { class: this.remapping ? 'active' : '', onclick: () => (this.remapping ? this.closeRemap() : this.openRemap()),
-        title: 'Change the 8x8 tile numbers, palettes or behavior of tiles in bulk (Lunar Magic\'s Remap)' }, 'Remap …'),
-      this.bg ? '' : h('label', { class: 'toggle', title: 'Mark all tiles that behave like the selected one' },
+        title: 'Change the 8x8 tile numbers, palettes or acts-like of tiles in bulk (Lunar Magic\'s Remap)' }, 'Remap …'),
+      this.bg ? '' : h('label', { class: 'toggle', title: 'Mark all tiles that act like the selected one' },
         (() => { const cb = h('input', { type: 'checkbox', checked: this.sameActs }); cb.addEventListener('change', () => { this.sameActs = cb.checked; this.drawSheet(); }); return cb; })(),
-        'Mark same behavior'),
-      this.bg ? '' : h('label', { class: 'toggle', title: 'Mark the tiles 200–FFF that have graphics, a behavior or a block but are in no level and no structure' },
+        'Mark same acts-like'),
+      this.bg ? '' : h('label', { class: 'toggle', title: 'Mark the tiles 200–FFF that have graphics, an acts-like setting or a block but are in no level and no structure' },
         (() => { const cb = h('input', { type: 'checkbox', checked: this.markUnused }); cb.addEventListener('change', () => { this.markUnused = cb.checked; this.drawSheet(); }); return cb; })(),
         'Mark unused'),
       h('span', { class: 'spacer' }),
       menuButton({ label: 'Import/Export', items: [
         { label: 'Import (.map16) …', title: 'Insert a Lunar Magic .map16 starting at the selected tile', onClick: () => void this.importMap16() },
-        { label: 'Export (.map16)', title: 'Save the selected tiles (with behavior) as .map16', onClick: () => this.exportMap16() },
+        { label: 'Export (.map16)', title: 'Save the selected tiles (with acts-like) as .map16', onClick: () => this.exportMap16() },
       ] }),
     );
   }
@@ -593,10 +598,10 @@ export class Map16Tab implements WsPanel {
     thumb.getContext('2d')!.drawImage(renderMap16Sheet(app, false, a & ~0x1ff), (a & 15) * 16, ((a >> 4) & 31) * 16, 16, 16, 0, 0, 16, 16);
     const file = blockFileOf(app.rom, t);
     return h('div', { class: 'mt-acts' },
-      h('div', { class: 'panel-title' }, 'Behavior'),
+      h('div', { class: 'panel-title' }, 'Acts like'),
       h('div', { class: 'row' }, thumb,
         h('div', { class: 'grow' }, a === t ? 'like itself' : `like tile ${hex(a, 3)}`, h('div', { class: 'hint' }, info ? probeText(info) : 'determining …')),
-        h('button', { onclick: () => this.pickActs(), title: 'Take the behavior from another tile' }, 'Change …')),
+        h('button', { onclick: () => this.pickActs(), title: 'Act like another tile' }, 'Change …')),
       h('div', { class: 'row' }, h('span', { class: 'hint grow' }, file ? `Custom Block: ${file}` : 'No custom block'),
         h('button', { onclick: () => void openResources(app, 'block', { tile: t, onChange: () => this.redraw() }) }, 'Custom Blocks …')),
     );
@@ -613,7 +618,7 @@ export class Map16Tab implements WsPanel {
     const sheet = renderMap16Sheet(app, false, 0);
     const cur = actsLike(app.rom, this.sel);
     const scroll = h('div', { class: 'mt-acts-scroll' }, c);
-    const tip = 'Click a tile or type its number: the selected tile then behaves like this one.';
+    const tip = 'Click a tile or type its number: the selected tile then acts like this one.';
     const info = h('div', { class: 'hint mt-acts-info' }, tip);
     const say = (text: string) => { info.textContent = text; info.title = text; };
     const describe = (t: number) => { const p = app.probes.block(t); say(`Tile ${hex(t, 3)}: ${p ? probeText(p) : 'determining …'}`); };
@@ -642,10 +647,10 @@ export class Map16Tab implements WsPanel {
     };
     c.addEventListener('mousemove', (e) => describe(at(e)));
     c.addEventListener('mouseleave', update);
-    const dlg = modal(`Behavior for ${tiles.length > 1 ? `${tiles.length} Tiles` : this.tileName(this.sel)}`,
+    const dlg = modal(`Acts-like for ${tiles.length > 1 ? `${tiles.length} Tiles` : this.tileName(this.sel)}`,
       h('div', { class: 'mt-acts-dlg' }, input, info, scroll), [{ label: 'Cancel' }]);
     const take = (v: number) => {
-      this.edit(`Behavior like ${hex(v, 3)}`, () => { for (const t of tiles) setActsLike(app.rom, t, v); });
+      this.edit(`Acts like ${hex(v, 3)}`, () => { for (const t of tiles) setActsLike(app.rom, t, v); });
       dlg.close();
     };
     c.addEventListener('mousedown', (e) => take(at(e)));
@@ -661,13 +666,13 @@ export class Map16Tab implements WsPanel {
 
   // ---------- remap ----------
   // opens the remap panel; an offer fills in the list and may choose the tiles it changes
-  openRemap(fill: { line?: string; scope?: 'sel' | 'uses'; bg?: boolean } = {}): void {
+  openRemap(fill: RemapFill = {}): void {
     if (fill.bg !== undefined && fill.bg !== this.bg) { this.bg = fill.bg; this.sel &= 0x1ff; this.selW = this.selH = 1; }
     if (!this.remapping) {
       const preview = h('div', { class: 'mt-remap-preview' }), scopes = h('div', { class: 'mt-remap-scopes' }), status = h('div', { class: 'mt-remap' });
       const ed = remapEditor('map16', () => this.drawRemap());
       const box = h('div', { class: 'mt-remap' },
-        h('div', { class: 'prop-title' }, 'Remap tiles', h('span', { class: 'hint' }, '  8x8 tile numbers, palettes, behavior')),
+        h('div', { class: 'prop-title' }, 'Remap tiles', h('span', { class: 'hint' }, '  8x8 tile numbers, palettes, acts-like')),
         scopes, ed.root,
         h('div', { class: 'hint' }, 'Visual: mark source 8x8 tiles on the right, then drag them to where they are now – the list gets the line.'),
         status);
@@ -676,12 +681,12 @@ export class Map16Tab implements WsPanel {
     const r = this.remapping;
     if (fill.scope) r.scope = fill.scope;
     if (fill.line !== undefined) r.ed.setText(fill.line);
-    this.vsrc = this.vdst = null;
+    this.visualFrom = this.visualTo = null;
     if (this.visible) { this.buildBar(); this.redraw(); }
   }
   private closeRemap(): void {
     this.remapping = null;
-    this.vsrc = this.vdst = null;
+    this.visualFrom = this.visualTo = null;
     this.buildBar();
     this.redraw();
   }
@@ -699,30 +704,30 @@ export class Map16Tab implements WsPanel {
   }
 
   // each target before and after the remap
-  private remapResult(): { tile: number; words: number[]; acts: number | null; nw: number[]; na: number | null; out: number[] }[] {
+  private remapResult(): RemapRow[] {
     const { remap } = this.remapping!.ed.parsed();
     return this.remapTargets().map((t) => {
       const words = this.words(t), acts = this.bg ? null : actsLike(this.app.rom, t);
       const r = remapTile(words, acts, t, remap);
-      return { tile: t, words, acts, nw: r.words, na: r.acts, out: r.out };
+      return { tile: t, words, acts, newWords: r.words, newActs: r.acts, out: r.out, changed: r.words.some((w, q) => w !== words[q]) || r.acts !== acts };
     });
   }
 
   private drawRemap(): void {
     const r = this.remapping;
     if (!r) return;
-    const { remap, problems, offsetBad } = r.ed.parsed();
+    const { remap } = r.ed.parsed();
     const res = this.remapResult();
-    const changed = res.filter((x) => x.nw.some((w, q) => w !== x.words[q]) || x.na !== x.acts);
+    const changed = res.filter((x) => x.changed);
     const out = [...new Set(res.flatMap((x) => x.out))].sort((a, b) => a - b);
-    const scope = (v: 'sel' | 'uses', label: string, title: string) => h('label', { class: 'toggle', title },
+    const scope = (v: RemapScope, label: string, title: string) => h('label', { class: 'toggle', title },
       h('input', { type: 'radio', name: 'mt-remap-scope', checked: r.scope === v, onchange: () => { r.scope = v; this.drawRemap(); } }), label);
-    const bad = problems.length > 0 || offsetBad;
+    const bad = !r.ed.valid();
     r.scopes.replaceChildren(
       scope('sel', `Selected ${this.bg ? 'BG' : 'FG'} tiles (${this.selW * this.selH} from ${hex(this.sel, 3)})`, 'Select tiles in the sheet on the left'),
       scope('uses', `${this.bg ? 'BG' : 'FG'} tiles 200–FFF that use the list's source 8x8 tiles`, 'Every extended tile with a quarter the list changes'));
     r.status.replaceChildren(
-      this.bg && (remap.acts.size || remap.tileActs.size) ? h('div', { class: 'hint' }, 'BG tiles have no behavior: G and S pairs do nothing here.') : '',
+      this.bg && (remap.acts.size || remap.tileActs.size) ? h('div', { class: 'hint' }, 'BG tiles have no acts-like setting: G and S pairs do nothing here.') : '',
       r.preview,
       out.length ? h('div', { class: 'warn-box' }, `The offset takes 8x8 tile${out.length > 1 ? 's' : ''} ${out.slice(0, 8).map((t) => hex(t, 3)).join(', ')}${out.length > 8 ? ' …' : ''} out of 000–3FF: they stay.`) : '',
       h('div', { class: 'hint' }, bad ? 'Fix the marked lines first.' : `${changed.length} of ${res.length} tile${res.length === 1 ? '' : 's'} change.`),
@@ -730,19 +735,19 @@ export class Map16Tab implements WsPanel {
         h('button', { class: 'primary', disabled: bad || !changed.length, onclick: () => this.applyRemap() }, 'Apply'),
         h('button', { onclick: () => this.closeRemap() }, 'Close')),
     );
-    this.drawRemapPreview(res, new Set(changed.map((x) => x.tile)));
+    this.drawRemapPreview(res);
     this.drawGfx();
   }
 
   // the targets before and after, side by side (the selection in its shape, other tiles 8 a row)
-  private drawRemapPreview(res: { tile: number; words: number[]; nw: number[] }[], changed: Set<number>): void {
+  private drawRemapPreview(res: RemapRow[]): void {
     const r = this.remapping!;
     const MAX = 256, shown = res.slice(0, MAX);
     const cols = r.scope === 'sel' ? this.selW : Math.min(8, Math.max(1, shown.length));
     const rows = Math.ceil(shown.length / cols);
     const z = cols <= 8 ? 2 : 1;
     const cache = this.tc();
-    const grid = (pick: (x: { words: number[]; nw: number[] }) => number[], mark: boolean) => {
+    const grid = (pick: (x: RemapRow) => number[], mark: boolean) => {
       const c = h('canvas', { width: cols * 16 * z, height: Math.max(1, rows) * 16 * z, class: 'mt-remap-grid' });
       const ctx = c.getContext('2d')!;
       const img = ctx.createImageData(cols * 16, Math.max(1, rows) * 16);
@@ -762,7 +767,7 @@ export class Map16Tab implements WsPanel {
       ctx.drawImage(off, 0, 0, c.width, c.height);
       if (mark) {
         ctx.strokeStyle = '#ffb000'; ctx.lineWidth = 1;
-        shown.forEach((x, i) => { if (changed.has(x.tile)) ctx.strokeRect((i % cols) * 16 * z + 0.5, Math.floor(i / cols) * 16 * z + 0.5, 16 * z - 1, 16 * z - 1); });
+        shown.forEach((x, i) => { if (x.changed) ctx.strokeRect((i % cols) * 16 * z + 0.5, Math.floor(i / cols) * 16 * z + 0.5, 16 * z - 1, 16 * z - 1); });
       }
       c.title = 'Marked: tiles that change';
       return c;
@@ -770,18 +775,18 @@ export class Map16Tab implements WsPanel {
     r.preview.replaceChildren(!shown.length ? h('div', { class: 'hint' }, r.scope === 'uses' ? 'No tile 200–FFF uses the list\'s source 8x8 tiles.' : 'No tiles selected.') :
       h('div', { class: 'mt-remap-sides' },
         h('div', null, h('div', { class: 'hint' }, 'Before'), grid((x) => x.words, false)),
-        h('div', null, h('div', { class: 'hint' }, 'After'), grid((x) => x.nw, true))),
+        h('div', null, h('div', { class: 'hint' }, 'After'), grid((x) => x.newWords, true))),
       res.length > MAX ? h('div', { class: 'hint' }, `The first ${MAX} of ${res.length} tiles shown.`) : '');
   }
 
   // one undo step for all tiles
   private applyRemap(): void {
-    const res = this.remapResult().filter((x) => x.nw.some((w, q) => w !== x.words[q]) || x.na !== x.acts);
+    const res = this.remapResult().filter((x) => x.changed);
     if (!res.length) return;
     this.edit(`${res.length} ${this.bg ? 'BG' : 'FG'} tile${res.length > 1 ? 's' : ''} remapped`, () => {
       for (const x of res) {
-        if (x.nw.some((w, q) => w !== x.words[q])) this.setWords(x.tile, x.nw);
-        if (x.na !== null && x.na !== x.acts) setActsLike(this.app.rom, x.tile, x.na);
+        if (x.newWords.some((w, q) => w !== x.words[q])) this.setWords(x.tile, x.newWords);
+        if (x.newActs !== null && x.newActs !== x.acts) setActsLike(this.app.rom, x.tile, x.newActs);
       }
     });
     toast(`${res.length} tile${res.length > 1 ? 's' : ''} remapped – Ctrl+Z undoes it`);
@@ -791,7 +796,7 @@ export class Map16Tab implements WsPanel {
   // visual mode: a drag marks source 8x8 tiles; dragging the marked tiles drops them where they are now
   // and writes the list line (a rectangle of the view must be one of consecutive tile rows)
   private remapMouse(e: MouseEvent, cell: (e: MouseEvent) => Cell, tileOf: (p: Cell) => number): void {
-    const a = cell(e), v = this.vsrc;
+    const a = cell(e), v = this.visualFrom;
     const block = (x: number, y: number, w: number, hh: number) => {
       const t0 = tileOf({ x, y });
       for (let dy = 0; dy < hh; dy++) for (let dx = 0; dx < w; dx++) if (t0 < 0 || tileOf({ x: x + dx, y: y + dy }) !== t0 + dy * 16 + dx) return -1;
@@ -801,21 +806,21 @@ export class Map16Tab implements WsPanel {
     if (v && a.x >= v.x && a.x < v.x + v.w && a.y >= v.y && a.y < v.y + v.h) {
       // dragging the marked tiles
       const gx = a.x - v.x, gy = a.y - v.y;
-      move = (ev) => { const n = cell(ev); this.vdst = { x: n.x - gx, y: n.y - gy }; this.drawGfx(); };
+      move = (ev) => { const n = cell(ev); this.visualTo = { x: n.x - gx, y: n.y - gy }; this.drawGfx(); };
       up = () => {
-        const d = this.vdst;
-        this.vdst = null;
+        const d = this.visualTo;
+        this.visualTo = null;
         if (!d || (d.x === v.x && d.y === v.y)) { this.drawGfx(); return; }
         const from = block(v.x, v.y, v.w, v.h), to = d.x < 0 || d.x + v.w > 16 ? -1 : block(d.x, d.y, v.w, v.h);
         if (from < 0 || to < 0) { toast('Source and destination must each be tiles in consecutive rows (not across a gap between slots)'); this.drawGfx(); return; }
-        this.vsrc = null;
+        this.visualFrom = null;
         this.remapping?.ed.append(remapLine(from, v.w, v.h, to));
       };
     } else {
-      this.vsrc = { x: a.x, y: a.y, w: 1, h: 1 };
+      this.visualFrom = { x: a.x, y: a.y, w: 1, h: 1 };
       move = (ev) => {
         const n = cell(ev);
-        this.vsrc = { x: Math.min(a.x, n.x), y: Math.min(a.y, n.y), w: Math.abs(a.x - n.x) + 1, h: Math.abs(a.y - n.y) + 1 };
+        this.visualFrom = { x: Math.min(a.x, n.x), y: Math.min(a.y, n.y), w: Math.abs(a.x - n.x) + 1, h: Math.abs(a.y - n.y) + 1 };
         this.drawGfx();
       };
       up = () => this.drawGfx();
@@ -904,8 +909,8 @@ export class Map16Tab implements WsPanel {
       ctx.strokeRect(x * 8 * GZ + 1, y * 8 * GZ + 1, w * 8 * GZ - 2, hh * 8 * GZ - 2);
       ctx.setLineDash([]);
     };
-    if (this.vsrc) box(this.vsrc.x, this.vsrc.y, this.vsrc.w, this.vsrc.h, false);
-    if (this.vsrc && this.vdst) box(this.vdst.x, this.vdst.y, this.vsrc.w, this.vsrc.h, true);
+    if (this.visualFrom) box(this.visualFrom.x, this.visualFrom.y, this.visualFrom.w, this.visualFrom.h, false);
+    if (this.visualFrom && this.visualTo) box(this.visualTo.x, this.visualTo.y, this.visualFrom.w, this.visualFrom.h, true);
   }
 
   private drag: { a: { x: number; y: number }; b: { x: number; y: number } } | null = null;
@@ -1054,7 +1059,7 @@ export class Map16Tab implements WsPanel {
     if (ctrl && k.toLowerCase() === 'c') { this.copy(); return true; }
     if (ctrl && k.toLowerCase() === 'v') { this.paste(); return true; }
     if (ctrl || e.altKey) return false;
-    if (k === 'Escape' && this.remapping) { if (this.vsrc) { this.vsrc = null; this.drawGfx(); } else this.closeRemap(); return true; }
+    if (k === 'Escape' && this.remapping) { if (this.visualFrom) { this.visualFrom = null; this.drawGfx(); } else this.closeRemap(); return true; }
     const v = this.words(this.sel)[this.quad];
     if (k === 'x' || k === 'X') { this.writeWord(this.quad, v ^ FLIP_X, '↔ Flip'); return true; }
     if (k === 'y' || k === 'Y') { this.writeWord(this.quad, v ^ FLIP_Y, '↕ Flip'); return true; }

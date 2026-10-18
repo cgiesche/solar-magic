@@ -9,6 +9,7 @@ export interface RemapEditor {
   root: HTMLElement;
   // the remap as typed (problems: the list's and the offset's; a bad pair changes nothing)
   parsed(): { remap: Remap; problems: RemapProblem[]; offsetBad: boolean };
+  valid(): boolean; // neither the list nor the offset has a problem
   setText(text: string): void;
   append(line: string): void;
   setOffset(v: number): void;
@@ -83,6 +84,7 @@ export function remapEditor(what: 'map16' | 'tiles', onChange: () => void): Rema
       h('div', { class: 'rl-edit' }, back, area),
       list, examples),
     parsed: () => cur,
+    valid: () => !cur.problems.length && !cur.offsetBad,
     setText: (t) => { area.value = t; update(); },
     append: (line) => { const v = area.value.replace(/\s+$/, ''); area.value = v ? `${v}\n${line}` : line; update(); },
     setOffset: (v) => { offset.value = v ? (v < 0 ? '-' : '') + Math.abs(v).toString(16).toUpperCase() : ''; update(); },

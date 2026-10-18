@@ -248,6 +248,24 @@ export function gfxUsage(rom: Rom, levels: Iterable<number>, header: (n: number)
   return m;
 }
 
+// Where a level's Map16 tiles drawing from a file were made for, after its slot `name` changed (before →
+// now), when that is another layer slot: the ExGFX that left the slot is still in another one (moved), or
+// the new ExGFX is in another slot in other levels (`levels`: how many, 0 when moved). Null: the tiles fit.
+export interface SlotMove { file: number; from: GfxSlot; to: GfxSlot; levels: number }
+export function slotMove(before: GfxSlot[], now: GfxSlot[], name: string, usage: Map<number, GfxUser[]>, level: number): SlotMove | null {
+  const was = before.find((x) => x.name === name), is = now.find((x) => x.name === name);
+  if (!was || !is) return null;
+  const elsewhere = (file: number) => now.find((x) => x.map16 && x.name !== name && x.file === file);
+  const moved = was.custom && was.file >= VANILLA_GFX ? elsewhere(was.file) : undefined;
+  if (moved) return moved.first === was.first ? null : { file: was.file, from: was, to: moved, levels: 0 };
+  if (is.file === 0xff || is.file < VANILLA_GFX || elsewhere(is.file)) return null;
+  const count = new Map<string, number>();
+  for (const u of usage.get(is.file) ?? []) if (u.level !== level) for (const n of u.slots) count.set(n, (count.get(n) ?? 0) + 1);
+  const best = [...count.entries()].filter(([n]) => n !== name && now.some((x) => x.map16 && x.name === n)).sort((a, b) => b[1] - a[1])[0];
+  const from = best && now.find((x) => x.name === best[0]);
+  return from && from.first !== is.first ? { file: is.file, from, to: is, levels: best[1] } : null;
+}
+
 // ExGFX files in the ROM that no level's slot uses
 export function unusedExGfx(rom: Rom, levels: Iterable<number>, usage = gfxUsage(rom, levels)): number[] {
   const out: number[] = [];

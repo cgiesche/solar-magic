@@ -128,7 +128,7 @@ When a level is displayed, it runs the ROM's **original loading routines** (~15 
 ### Graphics, palettes, Map16
 * **Map16 editor** (M): FG and BG tiles of the current tileset, per quarter 8x8 tile, palette, flip, priority.
 * **Extended Map16 pages 2–F** (tiles 200–FFF, for all tilesets) and **"Acts like" per tile** – also for
-  vanilla tiles (e.g. ground that behaves like air). "Copy graphics + behavior" quickly creates new tiles;
+  vanilla tiles (e.g. ground that behaves like air). "Copy" (graphics + acts-like) quickly creates new tiles;
   they are placed via the Direct Map16 object (Palette → Map16 → page selection).
 * **Remap** (Map16 tab → *Remap …*, like Lunar Magic's Remap): changes the 8x8 tile numbers, palettes and "acts like"
   of the selected tiles (or of the tiles 200–FFF that use given 8x8 tiles) by an offset or a list in Lunar Magic's
