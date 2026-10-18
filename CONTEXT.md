@@ -24,6 +24,10 @@ _Avoid_: renumber (that is the level graphics placement's), move tiles
 One of the four 8x8 tiles of a Map16 tile, one 16-bit word: 8x8 tile number, palette, X/Y flip and priority (word order top-left, bottom-left, top-right, bottom-right). Acts-like is not a quarter's but the whole 16x16 tile's.
 _Avoid_: 8x8 field, cell, subtile
 
+**Marked quarters**:
+The set of quarters of the Map16 tab's selection that an edit in the builder changes (palette, flips, priority, an 8x8 tile). A new selection marks all. A **stamp** puts a block of 8x8 tiles onto the quarters where it lies, whatever is marked. Acts-like applies to the wholly marked 16x16 tiles only.
+_Avoid_: selected quarter (the sheet's selection is of whole tiles)
+
 **Level edit**:
 A change of the open level in memory: its own undo step, written to the ROM when the level is saved (before every ROM edit, when another level is opened, or by hand).
 

@@ -325,8 +325,14 @@ kbd { background: #181a1f; border: 1px solid var(--border); border-radius: 3px; 
 .mt-sheet { display: block; image-rendering: pixelated; cursor: crosshair; }
 .mt-builder-col { width: 300px; flex-shrink: 0; overflow-y: auto; }
 .mt-builder { display: flex; flex-direction: column; gap: 8px; }
-.mt-big { width: 192px; height: 192px; image-rendering: pixelated; cursor: pointer; border: 1px solid var(--border); border-radius: 4px; align-self: center; }
-body.mt-dragging .mt-big { outline: 2px dashed var(--accent); }
+.mt-big-scroll { overflow: auto; max-height: 55vh; flex-shrink: 0; }
+.mt-big { display: block; margin: 0 auto; image-rendering: pixelated; cursor: crosshair; border: 1px solid var(--border); }
+body.mt-dragging .mt-big { outline: 2px dashed var(--accent); outline-offset: -2px; }
+.mt-split { width: 6px; margin: 0 -9px; flex-shrink: 0; cursor: col-resize; border-radius: 3px; }
+.mt-split:hover { background: var(--border); }
+.mt-mixed { margin-left: 4px; font-size: 10px; color: var(--muted); }
+.mt-is-mixed { border-style: dashed; }
+.mt-off { opacity: 0.6; }
 .mt-pals { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px; }
 .mt-pal { display: flex; align-items: center; gap: 4px; padding: 3px 5px; font-size: 11px; }
 .mt-paldot { width: 42px; height: 10px; image-rendering: pixelated; border-radius: 2px; }

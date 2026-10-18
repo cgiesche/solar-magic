@@ -1,13 +1,14 @@
-// Map16 tab: the tile sheet (pages, labelled ranges, multi-selection, copy/paste), a builder for the
-// selected 16x16 tile (click a quarter, palette dots, flip/priority toggles) and the level's 8x8 graphics
-// grouped by GFX slot. The graphics view uses the palette of the selected quarter; clicking an 8x8 tile
-// puts it into that quarter, dragging a 2x2 block fills all four, dragging one onto the builder fills
-// the quarter it is dropped on.
+// Map16 tab: the tile sheet (pages, labelled ranges, multi-selection, copy/paste), a builder showing the
+// whole selection (quarters marked as a set; palette dots, flip/priority toggles and acts-like for the
+// marked ones; Ctrl+wheel zoom, middle button pan) and the level's 8x8 graphics grouped by GFX slot. The
+// graphics view uses the palette of the quarter under the mouse, else of the first marked one; clicking an
+// 8x8 tile puts it into every marked quarter, dragging a block of them stamps it where it lies (dropped
+// onto the builder: from the quarter under the mouse, else from the first marked one).
 
 import type { App } from '../app.ts';
 import type { GfxWorkspace, WsPanel } from '../gfxworkspace.ts';
-import { menuButton } from '../menu.ts';
-import { h, clear, toast, modal, choose } from '../dom.ts';
+import { menuButton, contextMenu, type MenuItem } from '../menu.ts';
+import { h, clear, toast, modal, choose, attachPanZoom } from '../dom.ts';
 import { pickFile, downloadBytes } from '../platform.ts';
 import { TileCache } from '../../core/render.ts';
 import { hex } from '../../core/names.ts';
@@ -28,14 +29,14 @@ import { usedInList } from '../usedin.ts';
 import { map16Source } from '../../core/render.ts';
 import { remapTile, remapLine, slotRemapLine } from '../../core/remap.ts';
 import { remapEditor, type RemapEditor } from '../remaplist.ts';
+import { QuarterGrid, markRect, editMarked, setPalette, setBit, setTileNum, stamp, summary, wholeTiles, FLIP_X, FLIP_Y, PRIO, type QuarterEdit, type MarkMode, type BitState } from '../../core/quarters.ts';
 
 const Z = 2; // sheet zoom
 const M = 34; // sheet margin for the ranges and row numbers
 const GZ = 2; // 8x8 graphics zoom
-const BZ = 12; // builder zoom
-const FLIP_X = 0x4000, FLIP_Y = 0x8000, PRIO = 0x2000;
-// quarter index (word order TL, BL, TR, BR) from its position
-const quarterAt = (qx: number, qy: number) => qx * 2 + qy;
+const BZ = 12; // largest fitted builder zoom
+const BUILDER_W = 'mt-builder-width'; // the builder column's width (localStorage)
+const QUARTER_NAMES = ['top left', 'bottom left', 'top right', 'bottom right'];
 
 interface Clip { w: number; h: number; words: number[][]; acts: number[] | null }
 // the remap panel: the list editor, which tiles it changes ('sel': the selected ones, 'uses': the
@@ -80,7 +81,12 @@ export class Map16Tab implements WsPanel {
   private sel = 0x130;
   private selW = 1;
   private selH = 1;
-  private quad = 0;
+  // the marked quarters (keys of the selection's QuarterGrid), for the selection marksOf names
+  private marks = new Set<number>();
+  private marksOf = '';
+  private hoverQ: number | null = null; // quarter under the mouse in the builder
+  private bzoom: number | null = null; // builder zoom, null: fitted into the column
+  private builderW = 300;
   private clip: Clip | null = null;
   private sameActs = false; // mark tiles that act like the selected one
   private markUnused = false; // mark tiles 200-FFF defined but used nowhere
@@ -101,6 +107,12 @@ export class Map16Tab implements WsPanel {
   private match: number[] | null = null;
   private scrollPending = false; // selected while hidden: scroll there when shown
   private builder = h('div', { class: 'mt-builder' });
+  private builderCol = h('div', { class: 'mt-col mt-builder-col' }, this.builder);
+  private bHead = h('div', { class: 'mt-builder' });
+  private bCtl = h('div', { class: 'mt-builder' });
+  private qInfo = h('div', { class: 'hint' });
+  private bigCanvas = h('canvas', { class: 'mt-big' });
+  private bigScroll = h('div', { class: 'mt-big-scroll' }, this.bigCanvas);
   private gfxBox = h('div', { class: 'mt-gfx' });
   private gfxCanvas = h('canvas', { class: 'mt-gfx-canvas' });
   private remapping: Remapping | null = null;
@@ -114,12 +126,14 @@ export class Map16Tab implements WsPanel {
     this.root = h('div', { class: 'mt' }, this.bar,
       h('div', { class: 'mt-main' },
         h('div', { class: 'mt-col mt-sheet-col' }, this.scroll),
-        h('div', { class: 'mt-col mt-builder-col' }, this.builder),
+        this.builderCol,
+        this.splitter(),
         h('div', { class: 'mt-col mt-gfx-col' }, this.gfxBox)));
     this.buildPages();
     this.attachSheet();
     this.attachSearch();
     this.attachGfx();
+    this.attachBig();
     const redraw = () => { this.unused = null; if (this.visible) this.redraw(); };
     app.on('rom-change', redraw);
     app.on('render', redraw);
@@ -146,7 +160,7 @@ export class Map16Tab implements WsPanel {
     this.bg = bg;
     this.sel = tile & (EXT_TILES - 1);
     this.selW = this.selH = 1;
-    this.quad = 0;
+    this.marksOf = '';
     if (this.visible) { this.buildBar(); this.redraw(); this.scrollToSel(); } else this.scrollPending = true;
   }
 
@@ -179,12 +193,55 @@ export class Map16Tab implements WsPanel {
     try { this.app.romEdit(label, fn, { key }); } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
   }
 
-  private writeWord(q: number, v: number, label: string): void {
-    const t = this.sel;
-    const ws = this.words(t);
-    if (ws[q] === v) return;
-    ws[q] = v;
-    this.edit(`${this.tileName(t)}: ${label}`, () => this.setWords(t, ws));
+  // ---------- marked quarters ----------
+  private grid(): QuarterGrid { return new QuarterGrid(this.selW, this.selH); }
+  // the marks; a new selection starts with every quarter marked and the builder fitted
+  private marked(): Set<number> {
+    const of = `${this.bg}:${this.sel}:${this.selW}x${this.selH}`;
+    if (of !== this.marksOf) { this.marksOf = of; this.marks = this.grid().all(); this.bzoom = null; this.hoverQ = null; }
+    return this.marks;
+  }
+  private setMarks(m: Set<number>): void {
+    this.marked();
+    this.marks = m;
+    this.buildBuilder();
+    this.drawGfx();
+  }
+  private selWords(): number[][] { return this.selection().map((t) => this.words(t)); }
+  // the quarter the graphics view follows: under the mouse, else the first marked (else the first)
+  private focusQ(): number {
+    const m = this.marked();
+    return this.hoverQ ?? (m.size ? Math.min(...m) : 0);
+  }
+  private wordAt(key: number): number {
+    const g = this.grid(), { x, y } = g.cell(key), { tile, q } = g.at(x, y);
+    return this.words(this.selection()[tile])[q];
+  }
+  private editLabel(n: number, what: string): string {
+    return n === 1 && this.selW * this.selH === 1 ? `${this.tileName(this.sel)}: ${what}` : `${n} ${this.bg ? 'BG' : 'FG'} tile${n > 1 ? 's' : ''}: ${what}`;
+  }
+  // the changed tiles in one ROM edit (one undo step)
+  private writeTiles(e: QuarterEdit, what: string): void {
+    if (!e.changed.length) return;
+    const tiles = this.selection();
+    this.edit(this.editLabel(e.changed.length, what), () => { for (const i of e.changed) this.setWords(tiles[i], e.words[i]); });
+  }
+  private editQuarters(fn: (w: number) => number, what: string): void {
+    const m = this.marked();
+    if (!m.size) { toast('Mark quarters first (click, drag or Ctrl+A in the builder)'); return; }
+    this.writeTiles(editMarked(this.grid(), this.selWords(), m, fn), what);
+  }
+  // a toggle: on for every marked quarter, off once all have it
+  private toggleBit(bit: number, what: string): void {
+    const s = summary(this.grid(), this.selWords(), this.marked());
+    const state = bit === FLIP_X ? s.flipX : bit === FLIP_Y ? s.flipY : s.prio;
+    this.editQuarters(setBit(bit, state !== 'on'), `${what} ${state === 'on' ? 'off' : 'on'}`);
+  }
+  private stampAt(at: { x: number; y: number }, block: number[][]): void {
+    const r = stamp(this.grid(), this.selWords(), at, block);
+    const n = block.length * (block[0]?.length ?? 0);
+    this.writeTiles(r, n === 1 ? `8x8 tile ${hex(block[0][0], 3)}` : `${block[0].length}×${block.length} graphics`);
+    if (r.cut) toast(`${r.cut} of ${n} 8x8 tiles were outside the selection and cut off`);
   }
 
   // ---------- UI ----------
@@ -361,7 +418,7 @@ export class Map16Tab implements WsPanel {
       };
       pick(a);
       const move = (ev: MouseEvent) => pick(this.cellAt(ev));
-      const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); this.quad = 0; this.redraw(); };
+      const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); this.marksOf = ''; this.redraw(); };
       window.addEventListener('mousemove', move);
       window.addEventListener('mouseup', up);
     });
@@ -389,7 +446,7 @@ export class Map16Tab implements WsPanel {
       e.preventDefault();
       this.sel = this.match[0];
       this.selW = this.selH = 1;
-      this.quad = 0;
+      this.marksOf = '';
       this.clearSearch();
       s.blur();
       this.redraw();
@@ -432,66 +489,24 @@ export class Map16Tab implements WsPanel {
   private buildBuilder(): void {
     const app = this.app;
     const b = this.builder;
-    this.builder.parentElement!.classList.toggle('mt-remap-col', !!this.remapping);
+    const col = this.builderCol;
+    col.classList.toggle('mt-remap-col', !!this.remapping);
+    col.style.width = `${this.remapping ? Math.max(440, this.builderW) : this.builderW}px`;
     if (this.remapping) { if (b.firstChild !== this.remapping.box) b.replaceChildren(this.remapping.box); this.drawRemap(); return; }
-    clear(b);
+    // the canvas stays in place, so its scroll position and zoom do
+    if (b.firstChild !== this.bHead) b.replaceChildren(this.bHead, this.bigScroll, this.bCtl);
     this.buildUses();
-    const t = this.sel;
+    const t = this.sel, one = this.selW * this.selH === 1;
+    const tiles = this.selection(), words = tiles.map((x) => this.words(x));
+    const g = this.grid(), marks = this.marked();
+    this.drawBig();
+    const s = summary(g, words, marks);
     const ws = this.words(t);
-    const cache = this.tc();
-    const cv = h('canvas', { width: 16 * BZ, height: 16 * BZ, class: 'mt-big' });
-    const ctx = cv.getContext('2d')!;
-    const img = ctx.createImageData(16, 16);
-    const px = new Uint32Array(img.data.buffer);
-    for (let q = 0; q < 4; q++) {
-      const tile = cache.get(ws[q]);
-      const ox = (q >> 1) * 8, oy = (q & 1) * 8;
-      for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) px[(oy + y) * 16 + ox + x] = tile[y * 8 + x] || ((x + y) & 4 ? 0xff2a2a2a : 0xff222222);
-    }
-    const off = document.createElement('canvas');
-    off.width = off.height = 16;
-    off.getContext('2d')!.putImageData(img, 0, 0);
-    ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(off, 0, 0, 16 * BZ, 16 * BZ);
-    ctx.strokeStyle = 'rgba(255,255,255,0.25)';
-    ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(8 * BZ + 0.5, 0); ctx.lineTo(8 * BZ + 0.5, 16 * BZ); ctx.moveTo(0, 8 * BZ + 0.5); ctx.lineTo(16 * BZ, 8 * BZ + 0.5); ctx.stroke();
-    const anim = this.bg ? null : app.animated();
-    for (let q = 0; q < 4; q++) {
-      if (!anim?.tiles.has(ws[q] & 0x3ff)) continue;
-      const x = (q >> 1) * 8 * BZ, y = (q & 1) * 8 * BZ;
-      ctx.fillStyle = '#ff4fd8';
-      ctx.beginPath(); ctx.moveTo(x + 8 * BZ, y); ctx.lineTo(x + 8 * BZ, y + 16); ctx.lineTo(x + 8 * BZ - 16, y); ctx.fill();
-    }
-    ctx.strokeStyle = '#ffb000';
-    ctx.lineWidth = 3;
-    ctx.strokeRect((this.quad >> 1) * 8 * BZ + 1.5, (this.quad & 1) * 8 * BZ + 1.5, 8 * BZ - 3, 8 * BZ - 3);
-    cv.title = 'Click: select quarter · Double click: edit the 8x8 tile in the Graphics tab · Ctrl+click: its own animation, if it has one, else the 8x8 tile';
-    cv.addEventListener('mousedown', (e) => {
-      const rc = cv.getBoundingClientRect();
-      const q = quarterAt(e.clientX - rc.left >= rc.width / 2 ? 1 : 0, e.clientY - rc.top >= rc.height / 2 ? 1 : 0);
-      // the canvas is rebuilt on every click, so a double click is two clicks on the same quarter
-      const now = performance.now();
-      const dbl = q === this.lastClick.q && now - this.lastClick.t < 400;
-      this.lastClick = { q, t: dbl ? 0 : now };
-      this.quad = q;
-      if (e.ctrlKey || e.metaKey) {
-        const a = this.bg ? undefined : animsAt(app, ws[q] & 0x3ff)[0];
-        if (a) this.ws.showAnim(a.global, a.slot); else this.editGfx(q);
-        return;
-      }
-      if (dbl) { this.editGfx(q); return; }
-      this.buildBuilder();
-      this.drawGfx();
-    });
-    cv.dataset.drop = '1';
-
-    const v = ws[this.quad];
-    const pal = (v >> 10) & 7;
-    const toggle = (label: string, bit: number, title: string) => h('button', {
-      class: v & bit ? 'active' : '', title,
-      onclick: () => this.writeWord(this.quad, v ^ bit, label),
-    }, label);
+    const mixed = (st: BitState) => (st === 'mixed' ? h('span', { class: 'mt-mixed' }, 'mixed') : '');
+    const toggle = (label: string, bit: number, st: BitState, title: string) => h('button', {
+      class: st === 'on' ? 'active' : st === 'mixed' ? 'mt-is-mixed' : '', title, disabled: !marks.size,
+      onclick: () => this.toggleBit(bit, label),
+    }, label, mixed(st));
     const allPal = cgramToRGBA(app.render.cgram);
     const palDot = (p: number) => {
       const c = h('canvas', { width: 7, height: 1, class: 'mt-paldot' });
@@ -501,45 +516,248 @@ export class Map16Tab implements WsPanel {
       for (let k = 0; k < 7; k++) pp[k] = allPal[p * 16 + 1 + k * 2] | 0xff000000;
       cx.putImageData(im, 0, 0);
       return h('button', {
-        class: `mt-pal${p === pal ? ' active' : ''}`, title: `Palette ${p} (key ${p + 1}) · Ctrl+click: open in the Palettes tab`,
+        class: `mt-pal${s.pals.has(p) ? ' active' : ''}`, title: `Palette ${p} (key ${p + 1}) · Ctrl+click: open in the Palettes tab`,
         onclick: (e: MouseEvent) => {
           if (e.ctrlKey || e.metaKey) { this.ws.showPalette(p, 1); return; }
-          this.writeWord(this.quad, (v & ~0x1c00) | (p << 10), `Palette ${p}`);
+          this.editQuarters(setPalette(p), `Palette ${p}`);
         },
       }, c, h('span', null, String(p)));
     };
     // own animations on the quarters, each once
-    const own = this.bg ? [] : ws.flatMap((w) => animsAt(app, w & 0x3ff)).filter((a, i, all) => all.findIndex((b) => b.global === a.global && b.slot === a.slot) === i);
-    const quarterNames = ['top left', 'bottom left', 'top right', 'bottom right'];
-    const num8 = v & 0x3ff;
-    const slot = levelSlots(app).find((s) => num8 >= s.first && num8 < s.first + 0x80);
-    const used = this.bg ? 0 : this.ws.preview.count(t);
-    b.append(
-      h('div', { class: 'prop-title' }, this.tileName(t), this.selW * this.selH > 1 ? h('span', { class: 'hint' }, `  (${this.selW}×${this.selH} selected)`) : ''),
-      h('div', { class: 'hint' }, this.rangeText(t), !this.bg ? ` · in the level ${used}×` : ''),
-      h('div', { class: 'mt-section' }, 'Quarter', h('span', { class: 'hint' }, 'Q: next')),
-      cv,
-      h('div', { class: 'hint' }, `Quarter ${quarterNames[this.quad]}: 8x8 tile ${hex(num8, 3)}${slot ? ` from ${slot.name} (${gfxName(slot.file)})` : ''}`),
-      !this.bg && ws.some((w) => app.animated()?.tiles.has(w & 0x3ff)) ? h('div', { class: 'warn-box' },
-        `Animated: the game keeps overwriting ${ws.filter((w) => app.animated()?.tiles.has(w & 0x3ff)).length === 4 ? 'all quarters' : 'the marked quarters'} with animation frames (e.g. ?-block, coin, water). Changes drawn on these 8x8 tiles are not visible in the game.`,
+    const all = words.flat();
+    const own = this.bg ? [] : all.flatMap((w) => animsAt(app, w & 0x3ff)).filter((a, i, l) => l.findIndex((x) => x.global === a.global && x.slot === a.slot) === i);
+    const animated = this.bg ? 0 : all.filter((w) => app.animated()?.tiles.has(w & 0x3ff)).length;
+    const used = this.bg || !one ? 0 : this.ws.preview.count(t);
+    const last = tiles[tiles.length - 1];
+    this.bHead.replaceChildren(
+      h('div', { class: 'prop-title' }, one ? this.tileName(t) : `${this.bg ? 'BG' : 'FG'} tiles ${hex(t, 3)}–${hex(last, 3)}`, one ? '' : h('span', { class: 'hint' }, `  (${this.selW}×${this.selH})`)),
+      h('div', { class: 'hint' }, this.rangeText(t), one && !this.bg ? ` · in the level ${used}×` : ''),
+      h('div', { class: 'mt-section' }, 'Quarters', h('span', { class: 'hint' }, `${marks.size} of ${g.cols * g.rows} marked`)),
+    );
+    this.updateQInfo();
+    let acts: HTMLElement | string = '';
+    if (!this.bg) {
+      const whole = wholeTiles(g, marks);
+      acts = whole ? this.actsUi(whole.map((i) => tiles[i])) : h('div', { class: 'mt-acts mt-off' },
+        h('div', { class: 'panel-title' }, 'Acts like'),
+        h('div', { class: 'row' }, h('span', { class: 'hint grow' }, marks.size ? 'Acts-like applies per 16x16 tile: mark whole tiles (Shift+click) to change it.' : 'Mark tiles to change their acts-like.'),
+          h('button', { disabled: true }, 'Change …')));
+    }
+    this.bCtl.replaceChildren(
+      this.qInfo,
+      animated ? h('div', { class: 'warn-box' },
+        `Animated: the game keeps overwriting ${animated === all.length ? 'all quarters' : 'the quarters marked with a corner'} with animation frames (e.g. ?-block, coin, water). Changes drawn on these 8x8 tiles are not visible in the game.`,
         own.length ? h('div', null, 'By ', animLinks(this.ws, own), '.') : '') : '',
       h('div', { class: 'hint' }, 'Palette (keys 1–8)'),
       h('div', { class: 'mt-pals' }, Array.from({ length: 8 }, (_, p) => palDot(p))),
       h('div', { class: 'row' },
-        toggle('↔ Flip', FLIP_X, 'Flip horizontally (X)'),
-        toggle('↕ Flip', FLIP_Y, 'Flip vertically (Y)'),
-        toggle('Priority', PRIO, 'Drawn in front of sprites/Mario')),
-      h('div', { class: 'mt-section' }, 'Tile'),
-      this.bg ? '' : this.actsUi(t),
+        toggle('↔ Flip', FLIP_X, s.flipX, 'Flip horizontally (X)'),
+        toggle('↕ Flip', FLIP_Y, s.flipY, 'Flip vertically (Y)'),
+        toggle('Priority', PRIO, s.prio, 'Drawn in front of sprites/Mario')),
+      h('div', { class: 'mt-section' }, one ? 'Tile' : 'Tiles'),
+      acts,
       this.usesBox,
-      h('details', { class: 'mt-adv' }, h('summary', null, 'Raw values'),
-        h('div', { class: 'mono hint' }, ws.map((w, q) => `${['top left', 'bottom left', 'top right', 'bottom right'][q]} $${hex(w, 4)}`).join('  ')),
+      h('details', { class: 'mt-adv' }, h('summary', null, one ? 'Raw values' : `Raw values of ${hex(t, 3)}`),
+        h('div', { class: 'mono hint' }, ws.map((w, q) => `${QUARTER_NAMES[q]} $${hex(w, 4)}`).join('  ')),
         h('div', { class: 'hint' }, this.tileAddr(t) < 0 ? 'Extended tile – created on the first change.' : `ROM $${hex(this.tileAddr(t), 6)}`)),
-      h('p', { class: 'hint' }, 'Click a quarter, then choose an 8x8 tile on the right or drag it onto a quarter; dragging 2×2 tiles fills all four.'),
+      h('p', { class: 'hint' }, 'Mark quarters (click, drag, Ctrl: add/remove, Shift: whole tile, Ctrl+A: all, Esc: none), then choose an 8x8 tile on the right; dragging a block of 8x8 tiles onto the quarters stamps it there.'),
     );
   }
 
-  private lastClick = { q: -1, t: 0 };
+  // the line about the quarter the graphics view follows
+  private updateQInfo(): void {
+    const g = this.grid(), k = this.focusQ(), { x, y } = g.cell(k), { tile, q } = g.at(x, y);
+    const w = this.wordAt(k), num8 = w & 0x3ff;
+    const slot = levelSlots(this.app).find((s) => num8 >= s.first && num8 < s.first + 0x80);
+    const where = this.selW * this.selH > 1 ? `${hex(this.selection()[tile], 3)} ` : '';
+    this.qInfo.textContent = `${this.hoverQ !== null ? 'Under the mouse' : 'Quarter'}: ${where}${QUARTER_NAMES[q]}, 8x8 tile ${hex(num8, 3)}${slot ? ` from ${slot.name} (${gfxName(slot.file)})` : ''}, palette ${(w >> 10) & 7}`;
+  }
+
+  // zoom of the builder: as set by Ctrl+wheel, else the selection fitted into the column (at most BZ)
+  private bigZoom(): number {
+    if (this.bzoom !== null) return this.bzoom;
+    const aw = Math.max(32, this.bigScroll.clientWidth - 4), ah = Math.max(96, window.innerHeight * 0.55 - 4);
+    return Math.min(BZ, aw / (16 * this.selW), ah / (16 * this.selH));
+  }
+  private setBigZoom(z: number, ax: number, ay: number): void {
+    const old = this.bigZoom(), sc = this.bigScroll;
+    const lx = (sc.scrollLeft + ax) / old, ly = (sc.scrollTop + ay) / old;
+    this.bzoom = z;
+    this.drawBig();
+    sc.scrollLeft = lx * z - ax;
+    sc.scrollTop = ly * z - ay;
+  }
+
+  // the selection's tiles, the quarters' grid, the marked quarters (orange), the one under the mouse and
+  // where a dragged block of 8x8 tiles would land (dashed)
+  private drawBig(): void {
+    const g = this.grid(), marks = this.marked(), z = this.bigZoom();
+    const words = this.selWords(), cache = this.tc();
+    const W = g.cols * 8, H = g.rows * 8;
+    const img = new ImageData(W, H);
+    const px = new Uint32Array(img.data.buffer);
+    words.forEach((ws, i) => ws.forEach((w, q) => {
+      const tile = cache.get(w);
+      const ox = (i % this.selW) * 16 + (q >> 1) * 8, oy = Math.floor(i / this.selW) * 16 + (q & 1) * 8;
+      for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) px[(oy + y) * W + ox + x] = tile[y * 8 + x] || ((x + y) & 4 ? 0xff2a2a2a : 0xff222222);
+    }));
+    const off = document.createElement('canvas');
+    off.width = W; off.height = H;
+    off.getContext('2d')!.putImageData(img, 0, 0);
+    const c = this.bigCanvas;
+    c.width = Math.max(1, Math.round(W * z)); c.height = Math.max(1, Math.round(H * z));
+    const ctx = c.getContext('2d')!;
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(off, 0, 0, c.width, c.height);
+    const sx = c.width / g.cols, sy = c.height / g.rows; // a quarter's size
+    // quarter lines faint, tile lines stronger
+    ctx.lineWidth = 1;
+    if (sx >= 6) {
+      ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+      ctx.beginPath();
+      for (let x = 1; x < g.cols; x += 2) { ctx.moveTo(Math.round(x * sx) + 0.5, 0); ctx.lineTo(Math.round(x * sx) + 0.5, c.height); }
+      for (let y = 1; y < g.rows; y += 2) { ctx.moveTo(0, Math.round(y * sy) + 0.5); ctx.lineTo(c.width, Math.round(y * sy) + 0.5); }
+      ctx.stroke();
+    }
+    if (sx >= 3) {
+      ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+      ctx.beginPath();
+      for (let x = 2; x < g.cols; x += 2) { ctx.moveTo(Math.round(x * sx) + 0.5, 0); ctx.lineTo(Math.round(x * sx) + 0.5, c.height); }
+      for (let y = 2; y < g.rows; y += 2) { ctx.moveTo(0, Math.round(y * sy) + 0.5); ctx.lineTo(c.width, Math.round(y * sy) + 0.5); }
+      ctx.stroke();
+    }
+    const anim = this.bg ? null : this.app.animated();
+    if (anim?.tiles.size) {
+      const a = Math.max(3, Math.min(16, sx / 3));
+      ctx.fillStyle = '#ff4fd8';
+      for (let k = 0; k < g.cols * g.rows; k++) {
+        const { x, y } = g.cell(k), { tile, q } = g.at(x, y);
+        if (!anim.tiles.has(words[tile][q] & 0x3ff)) continue;
+        const rx = (x + 1) * sx, ry = y * sy;
+        ctx.beginPath(); ctx.moveTo(rx, ry); ctx.lineTo(rx, ry + a); ctx.lineTo(rx - a, ry); ctx.fill();
+      }
+    }
+    // marks: tinted, the outline of the marked area
+    ctx.fillStyle = 'rgba(255,176,0,0.22)';
+    for (const k of marks) { const { x, y } = g.cell(k); ctx.fillRect(x * sx, y * sy, sx, sy); }
+    ctx.strokeStyle = '#ffb000';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    const on = (x: number, y: number) => x >= 0 && y >= 0 && x < g.cols && y < g.rows && marks.has(g.key(x, y));
+    for (const k of marks) {
+      const { x, y } = g.cell(k), x0 = x * sx + 1, y0 = y * sy + 1, x1 = (x + 1) * sx - 1, y1 = (y + 1) * sy - 1;
+      if (!on(x - 1, y)) { ctx.moveTo(x0, y0); ctx.lineTo(x0, y1 + 1); }
+      if (!on(x + 1, y)) { ctx.moveTo(x1, y0 - 1); ctx.lineTo(x1, y1 + 1); }
+      if (!on(x, y - 1)) { ctx.moveTo(x0 - 1, y0); ctx.lineTo(x1 + 1, y0); }
+      if (!on(x, y + 1)) { ctx.moveTo(x0 - 1, y1); ctx.lineTo(x1 + 1, y1); }
+    }
+    ctx.stroke();
+    if (this.hoverQ !== null && this.hoverQ < g.cols * g.rows) {
+      const { x, y } = g.cell(this.hoverQ);
+      const d = this.drag, bw = d ? Math.abs(d.a.x - d.b.x) + 1 : 1, bh = d ? Math.abs(d.a.y - d.b.y) + 1 : 1;
+      ctx.strokeStyle = d ? '#4cc2ff' : 'rgba(255,255,255,0.8)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash(d ? [4, 3] : []);
+      ctx.strokeRect(x * sx + 1, y * sy + 1, bw * sx - 2, bh * sy - 2);
+      ctx.setLineDash([]);
+    }
+  }
+
+  // the builder's mouse: marking quarters, the context menu, double click, hover, zoom and pan
+  private attachBig(): void {
+    const c = this.bigCanvas;
+    c.dataset.drop = '1';
+    const cellAt = (e: MouseEvent) => this.bigCellAt(e);
+    c.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      const g = this.grid(), a = cellAt(e), base = this.marked();
+      const ctrl = e.ctrlKey || e.metaKey, whole = e.shiftKey;
+      const mode: MarkMode = ctrl ? (base.has(g.key(a.x, a.y)) ? 'remove' : 'add') : 'set';
+      // Shift: whole 16x16 tiles
+      const mark = (b: { x: number; y: number }) => {
+        let x0 = Math.min(a.x, b.x), y0 = Math.min(a.y, b.y), x1 = Math.max(a.x, b.x), y1 = Math.max(a.y, b.y);
+        if (whole) { x0 &= ~1; y0 &= ~1; x1 |= 1; y1 |= 1; }
+        this.marks = markRect(g, base, { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 }, mode);
+        this.drawBig();
+      };
+      mark(a);
+      let last = a;
+      const move = (ev: MouseEvent) => { const n = cellAt(ev); if (n.x !== last.x || n.y !== last.y) { last = n; mark(n); } };
+      const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); this.setMarks(this.marks); };
+      window.addEventListener('mousemove', move);
+      window.addEventListener('mouseup', up);
+    });
+    c.addEventListener('dblclick', (e) => { const g = this.grid(), a = cellAt(e); this.editGfx(this.wordAt(g.key(a.x, a.y))); });
+    c.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      const g = this.grid(), a = cellAt(e), k = g.key(a.x, a.y), w = this.wordAt(k);
+      const anim = this.bg ? undefined : animsAt(this.app, w & 0x3ff)[0];
+      const items: MenuItem[] = [
+        { label: `Edit 8x8 tile ${hex(w & 0x3ff, 3)} in the Graphics tab`, title: 'In this quarter\'s palette (double click)', onClick: () => this.editGfx(w) },
+      ];
+      if (anim) items.push({ label: 'Open its animation', title: 'The animation that writes this 8x8 tile', onClick: () => this.ws.showAnim(anim.global, anim.slot) });
+      items.push('sep',
+        { label: 'Mark the whole tile', shortcut: 'Shift+click', onClick: () => this.setMarks(g.wholeTile(k)) },
+        { label: 'Mark all', shortcut: 'Ctrl+A', onClick: () => this.setMarks(g.all()) },
+        { label: 'Mark none', shortcut: 'Esc', onClick: () => this.setMarks(new Set()) });
+      contextMenu(e.clientX, e.clientY, items);
+    });
+    const hover = (k: number | null) => {
+      if (k === this.hoverQ) return;
+      const pal = (this.wordAt(this.focusQ()) >> 10) & 7;
+      this.hoverQ = k;
+      this.drawBig();
+      this.updateQInfo();
+      if (((this.wordAt(this.focusQ()) >> 10) & 7) !== pal || this.drag) this.drawGfx();
+    };
+    c.addEventListener('mousemove', (e) => {
+      const g = this.grid(), a = cellAt(e);
+      hover(g.key(a.x, a.y));
+      c.title = 'Click/drag: mark quarters · Ctrl: add/remove · Shift: whole tile · Double click: edit the 8x8 tile in the Graphics tab · Right click: more';
+    });
+    c.addEventListener('mouseleave', () => hover(null));
+    attachPanZoom(this.bigScroll, () => this.bigZoom(), (z, ax, ay) => this.setBigZoom(z, ax, ay), 0.5, 32);
+    // the column follows the window while fitted
+    let lastW = 0;
+    new ResizeObserver(() => {
+      const w = this.bigScroll.clientWidth;
+      if (w === lastW) return;
+      lastW = w;
+      if (this.visible && this.bzoom === null && !this.remapping) this.drawBig();
+    }).observe(this.bigScroll);
+  }
+  // the quarter under the mouse in the builder
+  private bigCellAt(e: MouseEvent): { x: number; y: number } {
+    const g = this.grid(), rc = this.bigCanvas.getBoundingClientRect();
+    return {
+      x: Math.max(0, Math.min(g.cols - 1, Math.floor(((e.clientX - rc.left) / rc.width) * g.cols))),
+      y: Math.max(0, Math.min(g.rows - 1, Math.floor(((e.clientY - rc.top) / rc.height) * g.rows))),
+    };
+  }
+
+  // the handle between the builder and the graphics: drag to change the builder's width
+  private splitter(): HTMLElement {
+    try { const v = Number(localStorage.getItem(BUILDER_W)); if (v >= 200 && v <= 1200) this.builderW = v; } catch { /* no storage */ }
+    const el = h('div', { class: 'mt-split', title: 'Drag: width of the builder' });
+    el.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      const x0 = e.clientX, w0 = this.builderCol.getBoundingClientRect().width;
+      const move = (ev: MouseEvent) => {
+        this.builderW = Math.round(Math.max(200, Math.min(1200, w0 + ev.clientX - x0)));
+        this.builderCol.style.width = `${this.builderW}px`;
+      };
+      const up = () => {
+        window.removeEventListener('mousemove', move);
+        window.removeEventListener('mouseup', up);
+        try { localStorage.setItem(BUILDER_W, String(this.builderW)); } catch { /* no storage */ }
+      };
+      window.addEventListener('mousemove', move);
+      window.addEventListener('mouseup', up);
+    });
+    return el;
+  }
 
   // the defined tiles 200-FFF used nowhere (null while not every level's tiles are known)
   private unusedTiles(): Set<number> | null {
@@ -574,9 +792,8 @@ export class Map16Tab implements WsPanel {
     );
   }
 
-  // opens the quarter's 8x8 tile in the graphics tab, in the quarter's palette
-  private editGfx(q: number): void {
-    const w = this.words(this.sel)[q];
+  // opens a quarter's 8x8 tile in the graphics tab, in the quarter's palette
+  private editGfx(w: number): void {
     const num = w & 0x3ff;
     const slot = levelSlots(this.app).find((s) => num >= s.first && num < s.first + 0x80);
     if (!slot) { toast(`8x8 tile ${hex(num, 3)} is in none of this level's graphics slots`); return; }
@@ -590,35 +807,38 @@ export class Map16Tab implements WsPanel {
     return 'standard tile (all tilesets)';
   }
 
-  private actsUi(t: number): HTMLElement {
-    const app = this.app;
-    const a = actsLike(app.rom, t);
+  // acts-like of the wholly marked tiles
+  private actsUi(tiles: number[]): HTMLElement {
+    const app = this.app, t = tiles[0];
+    const values = [...new Set(tiles.map((x) => actsLike(app.rom, x)))];
+    const a = values[0];
     const info = app.probes.block(a);
     const thumb = h('canvas', { width: 16, height: 16, class: 'mt-acts-thumb' });
-    thumb.getContext('2d')!.drawImage(renderMap16Sheet(app, false, a & ~0x1ff), (a & 15) * 16, ((a >> 4) & 31) * 16, 16, 16, 0, 0, 16, 16);
-    const file = blockFileOf(app.rom, t);
+    if (values.length === 1) thumb.getContext('2d')!.drawImage(renderMap16Sheet(app, false, a & ~0x1ff), (a & 15) * 16, ((a >> 4) & 31) * 16, 16, 16, 0, 0, 16, 16);
+    const of = tiles.length > 1 ? h('div', { class: 'hint' }, `of the ${tiles.length} marked tiles`) : '';
+    const file = tiles.length === 1 ? blockFileOf(app.rom, t) : null;
     return h('div', { class: 'mt-acts' },
       h('div', { class: 'panel-title' }, 'Acts like'),
       h('div', { class: 'row' }, thumb,
-        h('div', { class: 'grow' }, a === t ? 'like itself' : `like tile ${hex(a, 3)}`, h('div', { class: 'hint' }, info ? probeText(info) : 'determining …')),
-        h('button', { onclick: () => this.pickActs(), title: 'Act like another tile' }, 'Change …')),
-      h('div', { class: 'row' }, h('span', { class: 'hint grow' }, file ? `Custom Block: ${file}` : 'No custom block'),
-        h('button', { onclick: () => void openResources(app, 'block', { tile: t, onChange: () => this.redraw() }) }, 'Custom Blocks …')),
+        values.length > 1 ? h('div', { class: 'grow' }, `${values.length} different`, of)
+          : h('div', { class: 'grow' }, tiles.length === 1 && a === t ? 'like itself' : `like tile ${hex(a, 3)}`, of, h('div', { class: 'hint' }, info ? probeText(info) : 'determining …')),
+        h('button', { onclick: () => this.pickActs(tiles), title: `Act like another tile${tiles.length > 1 ? ' (all marked tiles)' : ''}` }, 'Change …')),
+      tiles.length === 1 ? h('div', { class: 'row' }, h('span', { class: 'hint grow' }, file ? `Custom Block: ${file}` : 'No custom block'),
+        h('button', { onclick: () => void openResources(app, 'block', { tile: t, onChange: () => this.redraw() }) }, 'Custom Blocks …')) : '',
     );
   }
 
   // picks the acts-like value from a sheet of the vanilla tiles, by click or by typing its number:
   // typing dims the tiles that do not match, Enter takes the tile once only one is left
-  private pickActs(): void {
+  private pickActs(tiles: number[]): void {
     const app = this.app;
-    const tiles = this.selection();
     const c = h('canvas', { width: 256 * 2, height: 512 * 2, class: 'mt-acts-pick' });
     const ctx = c.getContext('2d')!;
     ctx.imageSmoothingEnabled = false;
     const sheet = renderMap16Sheet(app, false, 0);
-    const cur = actsLike(app.rom, this.sel);
+    const cur = actsLike(app.rom, tiles[0]);
     const scroll = h('div', { class: 'mt-acts-scroll' }, c);
-    const tip = 'Click a tile or type its number: the selected tile then acts like this one.';
+    const tip = `Click a tile or type its number: the ${tiles.length > 1 ? 'marked tiles then act' : 'tile then acts'} like this one.`;
     const info = h('div', { class: 'hint mt-acts-info' }, tip);
     const say = (text: string) => { info.textContent = text; info.title = text; };
     const describe = (t: number) => { const p = app.probes.block(t); say(`Tile ${hex(t, 3)}: ${p ? probeText(p) : 'determining …'}`); };
@@ -647,7 +867,7 @@ export class Map16Tab implements WsPanel {
     };
     c.addEventListener('mousemove', (e) => describe(at(e)));
     c.addEventListener('mouseleave', update);
-    const dlg = modal(`Acts-like for ${tiles.length > 1 ? `${tiles.length} Tiles` : this.tileName(this.sel)}`,
+    const dlg = modal(`Acts-like for ${tiles.length > 1 ? `${tiles.length} Tiles` : this.tileName(tiles[0])}`,
       h('div', { class: 'mt-acts-dlg' }, input, info, scroll), [{ label: 'Cancel' }]);
     const take = (v: number) => {
       this.edit(`Acts like ${hex(v, 3)}`, () => { for (const t of tiles) setActsLike(app.rom, t, v); });
@@ -835,7 +1055,8 @@ export class Map16Tab implements WsPanel {
   private drawGfx(): void {
     const app = this.app;
     const box = this.gfxBox;
-    const pal = (this.words(this.sel)[this.quad] >> 10) & 7;
+    const fq = this.focusQ(), fw = this.wordAt(fq);
+    const pal = (fw >> 10) & 7;
     const slots = levelSlots(app);
     const rows = slots.length * 8;
     const W = 128, Hh = rows * 8;
@@ -858,14 +1079,17 @@ export class Map16Tab implements WsPanel {
     off.getContext('2d')!.putImageData(img, 0, 0);
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(off, 0, 0, W * GZ, Hh * GZ);
-    // current quarter's tile
-    const cur = this.words(this.sel)[this.quad] & 0x3ff;
-    const si = slots.findIndex((s) => cur >= s.first && cur < s.first + 0x80);
-    if (si >= 0) {
-      const k = cur - slots[si].first;
-      ctx.strokeStyle = '#ffb000'; ctx.lineWidth = 2;
+    // the marked quarters' 8x8 tiles, the followed quarter's stronger
+    const mark = (n: number, strong: boolean) => {
+      const si = slots.findIndex((s) => n >= s.first && n < s.first + 0x80);
+      if (si < 0) return;
+      const k = n - slots[si].first;
+      ctx.strokeStyle = strong ? '#ffb000' : 'rgba(255,176,0,0.55)'; ctx.lineWidth = strong ? 2 : 1;
       ctx.strokeRect((k & 15) * 8 * GZ + 1, (si * 64 + (k >> 4) * 8) * GZ + 1, 8 * GZ - 2, 8 * GZ - 2);
-    }
+    };
+    const words = this.selWords(), g = this.grid();
+    for (const n of new Set([...this.marked()].map((k) => { const { x, y } = g.cell(k), { tile, q } = g.at(x, y); return words[tile][q] & 0x3ff; }))) mark(n, false);
+    mark(fw & 0x3ff, true);
     // tiles the game animates: hatched corner
     const anim = app.animated();
     if (anim?.tiles.size) {
@@ -891,7 +1115,7 @@ export class Map16Tab implements WsPanel {
       s.custom ? h('span', { class: 'hint' }, 'custom') : '',
       h('span', { class: 'hint mono' }, `${hex(s.first, 3)}–${hex(s.first + 0x7f, 3)}`))));
     box.append(
-      h('div', { class: 'panel-title' }, `8x8 graphics in palette ${pal}`, h('span', { class: 'hint' }, 'follows the selected quarter')),
+      h('div', { class: 'panel-title' }, `8x8 graphics in palette ${pal}`, h('span', { class: 'hint' }, 'follows the quarter under the mouse, else the first marked')),
       h('div', { class: 'mt-gfx-scroll' }, h('div', { class: 'mt-gfx-wrap' }, labels, c)),
     );
   }
@@ -949,27 +1173,18 @@ export class Map16Tab implements WsPanel {
         this.drag = null;
         const target = ev.target as HTMLElement;
         const x0 = Math.min(d.a.x, d.b.x), y0 = Math.min(d.a.y, d.b.y), w = Math.abs(d.a.x - d.b.x) + 1, hh = Math.abs(d.a.y - d.b.y) + 1;
-        const ws = this.words(this.sel);
-        const keep = (q: number, num: number) => (ws[q] & 0xfc00) | num;
-        if (target.dataset?.drop) {
-          // dropped onto the builder: the quarter under the mouse
-          const rc = target.getBoundingClientRect();
-          const q = quarterAt(ev.clientX - rc.left >= rc.width / 2 ? 1 : 0, ev.clientY - rc.top >= rc.height / 2 ? 1 : 0);
-          const n = tileOf(d.a);
-          if (n >= 0) { this.quad = q; this.writeWord(q, keep(q, n), `8x8 tile ${hex(n, 3)}`); }
-        } else if (w === 2 && hh === 2) {
-          const nums = [tileOf({ x: x0, y: y0 }), tileOf({ x: x0, y: y0 + 1 }), tileOf({ x: x0 + 1, y: y0 }), tileOf({ x: x0 + 1, y: y0 + 1 })];
-          if (nums.every((n) => n >= 0) && (y0 >> 3) === ((y0 + 1) >> 3)) {
-            const t = this.sel;
-            const pal = ws[this.quad] & 0x1c00;
-            const nw = nums.map((n, q) => (ws[q] & 0xe000) | pal | n);
-            this.edit(`${this.tileName(t)}: 2×2 graphics`, () => this.setWords(t, nw));
-          }
+        const block = Array.from({ length: hh }, (_, y) => Array.from({ length: w }, (_, x) => tileOf({ x: x0 + x, y: y0 + y })));
+        if (target === this.bigCanvas) {
+          // dropped onto the builder: stamped from the quarter under the mouse
+          this.stampAt(this.bigCellAt(ev), block);
         } else if (w === 1 && hh === 1) {
-          const n = tileOf(d.a);
-          const q = this.quad;
-          if (n >= 0) this.writeWord(q, keep(q, n), `8x8 tile ${hex(n, 3)}`);
-        } else toast('Drag a single 8x8 tile or a 2×2 block');
+          if (block[0][0] >= 0) this.editQuarters(setTileNum(block[0][0]), `8x8 tile ${hex(block[0][0], 3)}`);
+        } else {
+          // a block: stamped from the first marked quarter
+          const m = [...this.marked()].map((k) => this.grid().cell(k));
+          if (!m.length) toast('Mark a quarter first, or drop the block onto the builder');
+          else this.stampAt({ x: Math.min(...m.map((p) => p.x)), y: Math.min(...m.map((p) => p.y)) }, block);
+        }
         this.redraw();
       };
       window.addEventListener('mousemove', move);
@@ -1058,13 +1273,20 @@ export class Map16Tab implements WsPanel {
     const k = e.key;
     if (ctrl && k.toLowerCase() === 'c') { this.copy(); return true; }
     if (ctrl && k.toLowerCase() === 'v') { this.paste(); return true; }
+    if (ctrl && k.toLowerCase() === 'a' && !this.remapping) { this.setMarks(this.grid().all()); return true; }
     if (ctrl || e.altKey) return false;
     if (k === 'Escape' && this.remapping) { if (this.visualFrom) { this.visualFrom = null; this.drawGfx(); } else this.closeRemap(); return true; }
-    const v = this.words(this.sel)[this.quad];
-    if (k === 'x' || k === 'X') { this.writeWord(this.quad, v ^ FLIP_X, '↔ Flip'); return true; }
-    if (k === 'y' || k === 'Y') { this.writeWord(this.quad, v ^ FLIP_Y, '↕ Flip'); return true; }
-    if (k >= '1' && k <= '8') { const p = Number(k) - 1; this.writeWord(this.quad, (v & ~0x1c00) | (p << 10), `Palette ${p}`); return true; }
-    if (k === 'q' || k === 'Q') { this.quad = [2, 3, 1, 0][this.quad]; this.buildBuilder(); this.drawGfx(); return true; }
+    if (k === 'Escape') { if (!this.marked().size) return false; this.setMarks(new Set()); return true; }
+    if (k === 'x' || k === 'X') { this.toggleBit(FLIP_X, '↔ Flip'); return true; }
+    if (k === 'y' || k === 'Y') { this.toggleBit(FLIP_Y, '↕ Flip'); return true; }
+    if (k >= '1' && k <= '8') { const p = Number(k) - 1; this.editQuarters(setPalette(p), `Palette ${p}`); return true; }
+    if (k === 'q' || k === 'Q') {
+      // only the next quarter of the followed quarter's tile (clockwise)
+      const g = this.grid(), { x, y } = g.cell(this.focusQ()), nq = [2, 3, 1, 0][g.at(x, y).q];
+      this.hoverQ = null;
+      this.setMarks(new Set([g.key((x & ~1) + (nq >> 1), (y & ~1) + (nq & 1))]));
+      return true;
+    }
     if (k === 'ArrowLeft' || k === 'ArrowRight' || k === 'ArrowUp' || k === 'ArrowDown') {
       const d = k === 'ArrowLeft' ? -1 : k === 'ArrowRight' ? 1 : k === 'ArrowUp' ? -16 : 16;
       const max = EXT_TILES;
