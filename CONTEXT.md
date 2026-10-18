@@ -20,6 +20,10 @@ _Avoid_: transaction, ROM write (for an edit)
 Changing 8x8 tile numbers, palettes or acts-like of chosen Map16 tiles (or the frames and targets of tile animations) in bulk, by an offset or a list in Lunar Magic's syntax (core/remap.ts); a list's sources are always the values before the remap. One ROM edit. It changes what tiles point at, never the graphics themselves.
 _Avoid_: renumber (that is the level graphics placement's), move tiles
 
+**Quarter**:
+One of the four 8x8 tiles of a Map16 tile, one 16-bit word: 8x8 tile number, palette, X/Y flip and priority (word order top-left, bottom-left, top-right, bottom-right). Acts-like is not a quarter's but the whole 16x16 tile's.
+_Avoid_: 8x8 field, cell, subtile
+
 **Level edit**:
 A change of the open level in memory: its own undo step, written to the ROM when the level is saved (before every ROM edit, when another level is opened, or by hand).
 
