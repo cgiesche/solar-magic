@@ -16,6 +16,10 @@ _Avoid_: Lunar Magic hacks, built-in patches
 One labelled change of the ROM (image and editor data), made through the edit session (romedit.ts): one undo step, all or nothing (one that fails changes nothing and records nothing), the open level saved before it; what it changed decides what the editor shows anew (the level reloaded, its header, structures). Outside the undo history: the overworld's save (the overworld editor has its own undo) and expanding the ROM.
 _Avoid_: transaction, ROM write (for an edit)
 
+**Remap**:
+Changing 8x8 tile numbers, palettes or acts-like of chosen Map16 tiles (or the frames and targets of tile animations) in bulk, by an offset or a list in Lunar Magic's syntax (core/remap.ts); a list's sources are always the values before the remap. One ROM edit. It changes what tiles point at, never the graphics themselves.
+_Avoid_: renumber (that is the level graphics placement's), move tiles
+
 **Level edit**:
 A change of the open level in memory: its own undo step, written to the ROM when the level is saved (before every ROM edit, when another level is opened, or by hand).
 

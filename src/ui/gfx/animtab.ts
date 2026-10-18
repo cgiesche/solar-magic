@@ -5,7 +5,7 @@
 
 import type { App } from '../app.ts';
 import type { GfxWorkspace, WsPanel } from '../gfxworkspace.ts';
-import { h, clear, toast, pickerOpen } from '../dom.ts';
+import { h, clear, toast, pickerOpen, modal } from '../dom.ts';
 import { menuButton, type MenuItem } from '../menu.ts';
 import { hex } from '../../core/names.ts';
 import { cgramToRGBA, decodeTile, snesColorToRGBA } from '../../core/gfx.ts';
@@ -14,10 +14,12 @@ import { EXT_TILES } from '../../core/map16ext.ts';
 import {
   type ExList, type ExSlot, emptyList, readLevelList, readGlobalList, writeLevelList, writeGlobalList, levelSettings, setLevelSettings,
   readAltFile, writeAltFile, kindOf, tilesOf, secondSet, secondSetName, triggerName, TYPE_NAMES, SLOTS,
-  NO_GAME_COLORS, NO_GAME_TILES, NO_LEVEL_LIST, NO_GLOBAL_LIST, altFileUsers, localizeFrames, shapeOf, exanimTiles, exanimColors,
+  NO_GAME_COLORS, NO_GAME_TILES, NO_LEVEL_LIST, NO_GLOBAL_LIST, altFileUsers, localizeFrames, shapeOf, exanimTiles, exanimColors, ALT_FILE_MAX,
 } from '../../core/exanim.ts';
 import { levelSlots, gfxName, lmAnimName, ANIM_FILE } from './map16tab.ts';
 import { cssOf, htmlOf } from './palettetab.ts';
+import { remapSlot } from '../../core/remap.ts';
+import { remapEditor } from '../remaplist.ts';
 
 const TILE_TYPES = [0x01, 0x02, 0x04, 0x08, 0x10, 0x11, 0x12, 0x03, 0x05, 0x06, 0x07, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e];
 const COLOR_TYPES = [0x14, 0x13, 0x15, 0x16, 0x17];
@@ -269,7 +271,9 @@ export class AnimTab implements WsPanel {
         h('button', { onclick: () => void this.add('colors') }, '+ Color animation')),
       h('div', { class: 'row' },
         h('button', { disabled: !this.slot(), onclick: () => void this.duplicate() }, 'Duplicate'),
-        h('button', { disabled: !this.slot(), onclick: () => void this.remove() }, 'Delete')));
+        h('button', { disabled: !this.slot(), onclick: () => void this.remove() }, 'Delete'),
+        h('button', { disabled: ![...l.slots.values()].some((x) => kindOf(x.type) === 'tiles'), title: 'Change the frames and targets of tile animations by an offset or a list (Lunar Magic\'s Remap)',
+          onclick: () => this.openRemap() }, 'Remap …')));
     this.animate();
   }
 
@@ -303,6 +307,58 @@ export class AnimTab implements WsPanel {
     this.sel = n;
     await this.save(l, `Slot ${hex(n, 2)} duplicated`);
   }
+  // Lunar Magic's ExAnimation Remap: the chosen tile slots' frames (tiles of the animation graphic) and
+  // targets (VRAM tiles) by the same list as the Map16 remap; one undo step
+  private openRemap(): void {
+    const l = this.list();
+    const tileSlots = [...l.slots.entries()].filter(([, x]) => kindOf(x.type) === 'tiles').sort((a, b) => a[0] - b[0]);
+    const chosen = new Set(tileSlots.some(([n]) => n === this.sel) ? [this.sel] : tileSlots.map(([n]) => n));
+    const what = { frames: true, target: true };
+    const file = readAltFile(this.app.rom, l.altFile);
+    const frameMax = (file ? file.length : ALT_FILE_MAX) / 32 - 1;
+    const cw = this.charWord();
+    const preview = h('div', { class: 'at-remap-preview' });
+    const result = () => {
+      const { remap } = ed.parsed();
+      return tileSlots.filter(([n]) => chosen.has(n)).map(([n, x]) => ({ n, x, ...remapSlot(x, remap, cw, what, frameMax) }));
+    };
+    const tile = (x: ExSlot, f: number) => (x.dest & ALT ? hex(f >> 5, 2) : `$${hex(f, 4)}`);
+    const draw = () => {
+      const { problems, offsetBad } = ed.parsed();
+      if (problems.length || offsetBad) { preview.replaceChildren(h('div', { class: 'hint' }, 'Fix the marked lines first.')); return; }
+      const res = result();
+      preview.replaceChildren(h('table', { class: 'at-remap-table' },
+        h('tr', null, h('th', null, 'Slot'), h('th', null, 'Target'), h('th', null, 'Frames')),
+        res.map((r) => h('tr', { class: r.slot !== r.x ? 'changed' : '' },
+          h('td', { class: 'mono' }, hex(r.n, 2)),
+          h('td', { class: 'mono' }, `${hex(this.targetTile(r.x), 3)}${r.slot.dest !== r.x.dest ? ` → ${hex(this.targetTile(r.slot), 3)}` : ''}`),
+          h('td', { class: 'mono' }, r.x.frames.map((f, i) => tile(r.x, f) + (r.slot.frames[i] !== f ? `→${tile(r.x, r.slot.frames[i])}` : '')).join(' '),
+            r.x.dest & ALT ? '' : h('span', { class: 'hint' }, ' (from RAM: stay)'),
+            r.out.length ? h('div', { class: 'rl-problems' }, `Out of range, stays: ${r.out.join(', ')}`) : '')))),
+        h('div', { class: 'hint' }, `${res.filter((r) => r.slot !== r.x).length} of ${res.length} slot${res.length === 1 ? '' : 's'} change.`));
+    };
+    const ed = remapEditor('tiles', draw);
+    const check = (label: string, on: boolean, set: (v: boolean) => void) => h('label', { class: 'toggle' }, h('input', { type: 'checkbox', checked: on, onchange: (e: Event) => { set((e.target as HTMLInputElement).checked); draw(); } }), label);
+    const body = h('div', { class: 'at-remap' },
+      h('div', { class: 'hint' }, 'Slots'),
+      h('div', { class: 'at-remap-slots' }, tileSlots.map(([n, x]) => check(`${hex(n, 2)} · tile ${hex(this.targetTile(x), 3)}`, chosen.has(n), (v) => { if (v) chosen.add(n); else chosen.delete(n); }))),
+      h('div', { class: 'row' }, check('Frames (tiles of the animation graphic)', true, (v) => { what.frames = v; }), check('Target (VRAM tiles)', true, (v) => { what.target = v; })),
+      ed.root, preview);
+    draw();
+    modal(`Remap ${this.global ? 'global' : `level ${hex(this.app.level.number, 3)}`} tile animations`, body, [
+      { label: 'Apply', primary: true, onClick: () => {
+        const { problems, offsetBad } = ed.parsed();
+        if (problems.length || offsetBad) { toast('Fix the marked lines first', 'error'); return false; }
+        const res = result().filter((r) => r.slot !== r.x);
+        if (!res.length) { toast('Nothing changes'); return false; }
+        const nl = this.list();
+        for (const r of res) nl.slots.set(r.n, r.slot);
+        void this.save(nl, `${res.length} slot${res.length > 1 ? 's' : ''} remapped`);
+      } },
+      { label: 'Cancel' },
+    ]);
+  }
+
   private async remove(): Promise<void> {
     const l = this.list();
     if (!l.slots.delete(this.sel)) return;

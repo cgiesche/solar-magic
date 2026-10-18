@@ -130,6 +130,15 @@ When a level is displayed, it runs the ROM's **original loading routines** (~15 
 * **Extended Map16 pages 2–F** (tiles 200–FFF, for all tilesets) and **"Acts like" per tile** – also for
   vanilla tiles (e.g. ground that behaves like air). "Copy graphics + behavior" quickly creates new tiles;
   they are placed via the Direct Map16 object (Palette → Map16 → page selection).
+* **Remap** (Map16 tab → *Remap …*, like Lunar Magic's Remap): changes the 8x8 tile numbers, palettes and "acts like"
+  of the selected tiles (or of the tiles 200–FFF that use given 8x8 tiles) by an offset or a list in Lunar Magic's
+  syntax (`100,25`, `100-101,+25`, `100-101,M125`, `R100-111,M25`, `P5-6,7`, `100-101,P7`, `G100-101,+25`,
+  `R200-211,S25`; sources are the tiles before the remap, so `100,25,25,100` swaps). Bad lines are marked where they
+  are while typing, a preview shows the tiles before and after, one undo step. Visually: mark 8x8 tiles in the
+  graphics view and drag them to where they are now – the list gets the line. Moving an ExGFX to another slot in the
+  Graphics tab, or importing a `.map16` whose tiles draw from a slot without ExGFX, offers the remap with the offset
+  filled in. The Animations tab remaps the frames and targets of chosen tile animations with the same list
+  (Lunar Magic's ExAnimation Remap).
 * **Palette editor** (P): edit colors directly at their ROM source, `.pal` import/export,
   optionally a **custom palette per level** (all 256 colors).
 * **Graphics:** view GFX00–31 and ExGFX 32–FF, export/import as PNG.

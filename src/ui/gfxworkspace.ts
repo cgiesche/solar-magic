@@ -230,6 +230,13 @@ export class GfxWorkspace {
     this.onNav(true);
   }
 
+  // the Map16 tab's remap panel, filled in by an offer
+  showRemap(fill: { line?: string; scope?: 'sel' | 'uses'; bg?: boolean }): void {
+    this.open('map16');
+    this.map16.openRemap(fill);
+    this.onNav(true);
+  }
+
   showGfx(file: number, tile?: number, palRow?: number): void {
     this.open('gfx');
     this.gfx.select(file, tile, palRow);
