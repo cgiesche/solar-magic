@@ -32,7 +32,8 @@ const SLANTED = 6; // the entrance action "shoot from slanted pipe"
   // own, screen bit 4, X bit 4, action 5 / Y 6, X 9 / camera relative, face left, offset bits 3-0 $A / offset bit 4, Y bits 9-4 $21
   const s = decodeSecondaryHeader([0, 0, 0x30, 0, 0, 0, 0, 0, 0, 0x3d, 0x69, 0xca, 0x61]);
   check(!wrong.length && s.midwayOwn === 1 && s.midwayScreen === 0x13 && s.midwayX === 0x19 && s.midwayY === 0x216 && s.midwayAction === 5
-    && s.midwayCameraRelative === 1 && s.midwayFaceLeft === 1 && s.midwayCamera === 0x1a && s.midwayWater === 0 && s.lmMidwayFlags === 0,
+    && s.midwayCameraRelative === 1 && s.midwayFaceLeft === 1 && s.midwayCamera === 0x1a && s.midwayWater === 0 && s.midwaySlippery === 0 && s.lmMidwayFlags === 0
+    && decodeSecondaryHeader([0, 0, 0, 0, 0, 0, 0, 0, 0, 0x80, 0, 0, 0]).midwaySlippery === 1 && decodeSecondaryHeader([0, 0, 0, 0, 0, 0, 0, 0, 0, 0x80, 0, 0, 0]).lmMidwayFlags === 0,
   `midway entrance bytes: kept as they were, the fields their own bits${wrong.length ? ` – not ${wrong.slice(0, 5).join(', ')}` : ''}`);
 }
 
@@ -47,10 +48,10 @@ function enter(r: Rom, n: number, sec?: SecondaryHeader) {
   const x0 = marioX(w);
   s.joy1 = 0;
   for (let f = 0; f < 60; f++) s.runFrame();
-  return { ...at, left: w[RAM.marioDir] === 0, water: w[RAM.waterLevel] !== 0, dx: ((marioX(w) - x0) << 16) >> 16 };
+  return { ...at, left: w[RAM.marioDir] === 0, water: w[RAM.waterLevel] !== 0, slippery: w[RAM.slippery] !== 0, dx: ((marioX(w) - x0) << 16) >> 16 };
 }
 type Entered = ReturnType<typeof enter>;
-const show = (r: Entered) => `${hx(r.x)},${hx(r.y)} camera ${hx(r.cam)}${r.left ? ', left' : ''}${r.water ? ', water' : ''}${r.dx ? `, moved ${r.dx}` : ''}`;
+const show = (r: Entered) => `${hx(r.x)},${hx(r.y)} camera ${hx(r.cam)}${r.left ? ', left' : ''}${r.water ? ', water' : ''}${r.slippery ? ', slippery' : ''}${r.dx ? `, moved ${r.dx}` : ''}`;
 const marker = (sec: SecondaryHeader) => entrancePos(rom, midwaySpot(sec), (sec.verticalPositioning & 1) !== 0);
 // (the marker is Mario before the entrance action: a water level's moves him a few pixels)
 const atMarker = (r: Entered, sec: SecondaryHeader) => { const p = marker(sec); return r.midway && Math.abs(r.x - p.x) < 16 && Math.abs(r.y - p.y) < 16; };
@@ -97,6 +98,8 @@ const atMarker = (r: Entered, sec: SecondaryHeader) => { const p = marker(sec); 
     `bytes without "own settings": the main entrance's (${show(ignored)}, without them ${show(plain)})`);
   const left = enter(rom, N, { ...own, faceLeft: 0, midwayFaceLeft: 1 }), water = enter(rom, N, { ...own, water: 0, midwayWater: 1 });
   check(left.left && !left.water && water.water, `own options: face left (${show(left)}), water level (${show(water)})`);
+  const slip = enter(rom, N, { ...own, slippery: 0, midwaySlippery: 1 }), mainSlip = enter(rom, N, { ...own, slippery: 1 }), shareSlip = enter(rom, N, { ...sec0, slippery: 1 });
+  check(slip.slippery && !mainSlip.slippery && shareSlip.slippery, `own slippery (${show(slip)}), the main entrance's ignored (${show(mainSlip)}), without own settings the main entrance's (${show(shareSlip)})`);
   const pipe = enter(rom, N, { ...own, midwayAction: SLANTED });
   check(pipe.dx > 64, `own action: shot from a slanted pipe (${show(pipe)})`);
 
@@ -113,7 +116,7 @@ const atMarker = (r: Entered, sec: SecondaryHeader) => { const p = marker(sec); 
 
   // test play from it (as testplay.ts: the level from the nearest main entrance setting, Mario then moved to
   // the marker): as entering it
-  for (const [name, sec] of [['own', own], ['own, face left', { ...own, midwayFaceLeft: 1 }], ['own, water', { ...own, midwayWater: 1 }], ['shared', { ...sec0, midwayScreen: 3 }]] as [string, SecondaryHeader][]) {
+  for (const [name, sec] of [['own', own], ['own, face left', { ...own, midwayFaceLeft: 1 }], ['own, water', { ...own, midwayWater: 1 }], ['own, slippery', { ...own, midwaySlippery: 1 }], ['shared', { ...sec0, midwayScreen: 3 }], ['shared, slippery', { ...sec0, midwayScreen: 3, slippery: 1 }]] as [string, SecondaryHeader][]) {
     const p = marker(sec), g = enter(rom, N, sec);
     const emu = new LevelEmulator(rom);
     emu.load(N, { secondaryHeader: encodeSecondaryHeader(startHeader(rom, sec, p.x, p.y, 9, 0, midwayStart(sec))) });
@@ -121,8 +124,9 @@ const atMarker = (r: Entered, sec: SecondaryHeader) => { const p = marker(sec); 
     for (let f = 0; f < 300 && w[RAM.gameMode] !== GM.level; f++) s.runFrame();
     setMarioPos(w, p.x, p.y);
     for (let f = 0; f < 60; f++) s.runFrame();
-    const left = w[RAM.marioDir] === 0, water = w[RAM.waterLevel] !== 0;
-    check(left === g.left && water === g.water, `test play from the midway entrance (${name}): ${left ? 'left' : 'right'}${water ? ', water' : ''}, entered ${show(g)}`);
+    const left = w[RAM.marioDir] === 0, water = w[RAM.waterLevel] !== 0, slippery = w[RAM.slippery] !== 0;
+    check(left === g.left && water === g.water && slippery === g.slippery,
+      `test play from the midway entrance (${name}): ${left ? 'left' : 'right'}${water ? ', water' : ''}${slippery ? ', slippery' : ''}, entered ${show(g)}`);
   }
 }
 
@@ -154,7 +158,7 @@ function exitTo(sec: SecondaryHeader, flags: number, to = N, toSec?: SecondaryHe
   const x0 = marioX(w);
   s.joy1 = 0;
   for (let f = 0; f < 60; f++) s.runFrame();
-  return { entered, ...at, screen: w[RAM.midwayScreen], left: w[RAM.marioDir] === 0, water: w[RAM.waterLevel] !== 0, dx: ((marioX(w) - x0) << 16) >> 16 };
+  return { entered, ...at, screen: w[RAM.midwayScreen], left: w[RAM.marioDir] === 0, water: w[RAM.waterLevel] !== 0, slippery: w[RAM.slippery] !== 0, dx: ((marioX(w) - x0) << 16) >> 16 };
 }
 {
   const own: SecondaryHeader = {
@@ -168,6 +172,8 @@ function exitTo(sec: SecondaryHeader, flags: number, to = N, toSec?: SecondaryHe
     `standard exit "go to midway entrance": Mario at the target's midway entrance with its options, the game's midway flag clear (${show(to)})`);
   const pipe = exitTo({ ...own, midwayAction: SLANTED, midwayFaceLeft: 0 }, EXIT_MIDWAY);
   check(pipe.entered && pipe.dx > 64, `… with its action: shot from a slanted pipe (${show(pipe)})`);
+  const slip = exitTo({ ...own, midwaySlippery: 1 }, EXIT_MIDWAY);
+  check(slip.entered && slip.slippery && !to.slippery, `… slippery: the level is slippery (${show(slip)})`);
   const shared = exitTo({ ...own, midwayOwn: 0 }, EXIT_MIDWAY);
   check(shared.entered && near(shared, main) && !shared.left && !shared.water, `… a target without its own midway settings: its main entrance, as in Lunar Magic (${show(shared)})`);
   // into another level, a vertical one: its midway entrance's tile on its screen
@@ -182,9 +188,9 @@ function exitTo(sec: SecondaryHeader, flags: number, to = N, toSec?: SecondaryHe
 // placing it: the tile nearest to the pixel, a horizontal level's X within its screen; the main entrance's
 // settings first
 {
-  const sec = { ...sec0, faceLeft: 1, water: 1, entranceAction: 3 };
+  const sec = { ...sec0, faceLeft: 1, water: 1, slippery: 1, entranceAction: 3 };
   placeMidway(sec, nearestMidway(rom, sec, 0x2f8, 0x100, 9));
-  check(sec.midwayOwn === 1 && sec.midwayScreen === 3 && sec.midwayX === 0 && sec.midwayY === 0x10 && sec.midwayFaceLeft === 1 && sec.midwayWater === 1 && sec.midwayAction === 3,
+  check(sec.midwayOwn === 1 && sec.midwayScreen === 3 && sec.midwayX === 0 && sec.midwayY === 0x10 && sec.midwayFaceLeft === 1 && sec.midwayWater === 1 && sec.midwaySlippery === 1 && sec.midwayAction === 3,
     `placed at pixel 2F8, 100: screen ${hx(sec.midwayScreen)}, tile ${sec.midwayX}, ${hx(sec.midwayY)}, the main entrance's options and action`);
   placeMidway(sec, nearestMidway(rom, sec, 0x9f8, 0x40, 9));
   check(sec.midwayScreen === 9 && sec.midwayX === 15, `at the last screen's right edge: screen ${sec.midwayScreen}, tile ${sec.midwayX}`);

@@ -38,6 +38,7 @@ export const RAM = {
   marioInWater: 0x75,
   marioDir: 0x76, // 0 left, 1 right
   waterLevel: 0x85, // Mario swims everywhere
+  slippery: 0x86, // a slippery level (the game's $80)
   marioBlocked: 0x77, // bits: 1 right, 2 left, 4 floor, 8 ceiling
   marioSpeedX: 0x7b, marioSpeedY: 0x7d,
   marioX: 0x94, marioY: 0x96, // 16-bit

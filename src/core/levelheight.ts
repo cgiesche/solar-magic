@@ -26,8 +26,8 @@
 //  - sprites load from Lunar Magic's new format ($FF V: subscreen V), the subscreen in their Y high byte;
 //  - entrances: Mario at a tile (Lunar Magic's tile position) and the camera relative to him, the BG then
 //    bottom-aligned with the level (the BG's height) or relative to the FG (SEC_HDR, SEC_ENT);
-//  - Mario facing left and a water level, set for the main entrance, a secondary entrance or a secondary
-//    screen exit (its w), and a slanted pipe entrance shooting Mario out the way he faces; a screen keeps
+//  - Mario facing left, a water level and a slippery level, set for the main entrance, a secondary entrance (a
+//    water level also by a secondary screen exit, its w), and a slanted pipe entrance shooting Mario out the way he faces; a screen keeps
 //    its exit's flags 0000wush ($19D8, which community code such as GPS's teleport routine writes too), and
 //    only s makes the level's exits secondary;
 //  - a standard screen exit with w leads to the midway entrance of a level with its own settings;
@@ -62,13 +62,13 @@ lorom
 !Tmp = !Size+14        ; (16-bit)
 !Align = !Size+16      ; the BG's bottom + $8000 for CameraY to align layer 2 with (16-bit, 0: none)
 !ExitFlags = $${hx(EXIT_FLAGS_RAM[0])}   ; the flags of the screen exit Mario left by (0000wush, w: water with s, else the midway entrance), bit 7: entered at the midway entrance by it
-!Ent1 = $${hx(SEC_HDR[6])}       ; per level, Lunar Magic's: IWPXXtTT (W: water, P: the entrance at tile X/Y, XX: X bits 4-3)
+!Ent1 = $${hx(SEC_HDR[6])}       ; per level, Lunar Magic's: IWPXXtTT (I: slippery, W: water, P: the entrance at tile X/Y, XX: X bits 4-3)
 !Ent2 = $${hx(SEC_HDR[7])}       ; OFYYYYYY (O: BG relative to FG, F: camera offset bit 4, Y: Y bits 9-4)
 !Ent3 = $${hx(SEC_HDR[8])}       ; RL-ooooo (R: camera relative to Mario, L: face left, o: BG height - 1, or with O its offset)
-!SecFE = $${hx(SEC_ENT[3])}       ; per secondary entrance: IPXXDAAA (P: at tile X/Y, XX: X bits 4-3, D: the level's bit 8)
+!SecFE = $${hx(SEC_ENT[3])}       ; per secondary entrance: IPXXDAAA (I: slippery, P: at tile X/Y, XX: X bits 4-3, D: the level's bit 8)
 !SecY = $${hx(SEC_ENT[4])}        ; EFYYYYYY (Lunar Magic's, at a place of its own: F camera offset bit 4, Y: Y bits 9-4)
 !SecR = $${hx(SEC_ENT[5])}        ; RLW----- (R: camera relative to Mario, L: face left, W: water)
-!Mid1 = $${hx(SEC_HDR[9])}       ; per level, Lunar Magic's midway entrance: SWOHXAAA (W: water, O: own settings, H: screen bit 4, X: X bit 4, A: action)
+!Mid1 = $${hx(SEC_HDR[9])}       ; per level, Lunar Magic's midway entrance: SWOHXAAA (S: slippery, W: water, O: own settings, H: screen bit 4, X: X bit 4, A: action)
 !Mid2 = $${hx(SEC_HDR[10])}       ; YYYYXXXX (tile Y bits 3-0, X bits 3-0)
 !Mid3 = $${hx(SEC_HDR[11])}       ; RL--ffbb (R: camera relative to Mario, L: face left, ffbb: FG/BG start Y or the camera offset bits 3-0)
 !Mid4 = $${hx(SEC_HDR[12])}       ; -FYYYYYY (F: camera offset bit 4, Y: Y bits 9-4)
@@ -180,8 +180,8 @@ org $05D9DE                                ; STA $13CF : LDA $02 : LSR #4 : STA 
 ; (the game's $0B >> 1 would make w or u do it too); the places Lunar Magic changes
 org $0DA532 : db $0F                       ; LDA $0B : AND #$01 : STA $19D8,x
 org $0DA536 : AND #$02                     ; LDA $0B (then LSR : STA $1B93; A = $0B & $0F)
-; Mario's direction and the water level, once the game's entrance action has set them up ($00A635, which
-; clears $70-$93)
+; Mario's direction, the water level and the slippery level, once the game's entrance action has set them up
+; ($00A635, which clears $70-$93; its action 5 makes the level slippery)
 org $009708 : JSL Options                  ; LDA #$20 : STA $5E
 ; the slanted pipe entrance (Mario's action $71 = 7) shoots him out the way he faces (Lunar Magic's: to the
 ; left with face left), the game's always to the right
@@ -468,15 +468,16 @@ ExitMidway:
 .done
   RTL
 
-; Mario faces left ($76 = 0) and the level is a water level ($85 = 1) as the entrance sets: the main
-; entrance's (also the midway point's unless it has its own), or a secondary entrance's or the screen
-; exit's water (!Ent and !ExitFlags from SecEntrance) (A 8, X/Y 8); then the game's LDA #$20 : STA $5E
+; Mario faces left ($76 = 0), the level is a water level ($85 = 1) and slippery ($86) as the entrance sets:
+; the main entrance's (also the midway point's unless it has its own), or a secondary entrance's or the
+; screen exit's water (!Ent and !ExitFlags from SecEntrance) (A 8, X/Y 8); then the game's LDA #$20 : STA $5E
 Options:
   PHP
   REP #$30 : PHX
   LDA.l $7E${hx(RAM.useSecondaryExit)} : AND #$00FF : BEQ .main
   LDA.l !Ent : TAX
   SEP #$20
+  LDA.l !SecFE,x : JSR Slippery
   LDA.l !ExitFlags : AND #$08 : BNE .water
   LDA.l !SecR,x : AND #$20 : BEQ .dry
 .water
@@ -490,11 +491,13 @@ Options:
   LDA.l !ExitFlags : BMI +
   LDA $${hx(RAM.midwayUsed)} : BEQ .entrance
   LDA.l !Mid1,x : AND #$20 : BEQ .entrance
-+ LDA.l !Mid1,x : AND #$40 : BEQ +
++ LDA.l !Mid1,x : JSR Slippery
+  LDA.l !Mid1,x : AND #$40 : BEQ +
   LDA #$01 : STA $${hx(RAM.waterLevel)}
 + LDA.l !Mid3,x
   BRA .face
 .entrance
+  LDA.l !Ent1,x : JSR Slippery
   LDA.l !Ent1,x : AND #$40 : BEQ +
   LDA #$01 : STA $${hx(RAM.waterLevel)}
 + LDA.l !Ent3,x
@@ -505,6 +508,13 @@ Options:
   PLP
   LDA #$20 : STA $5E
   RTL
+
+; the level is slippery when the entrance's bit 7 (A) is set: $86 as the game's entrance action 5 sets it;
+; else it stays as the game's action left it (A 8)
+Slippery:
+  BPL +
+  LDA #$80 : STA $${hx(RAM.slippery)}
++ RTS
 
 ; Mario's X speed out of the slanted pipe, every frame of it: the game's $40, or $C0 facing left (A 8)
 SlantedPipe:

@@ -133,7 +133,8 @@ export interface SecondaryHeader {
   entranceXHi: number; // DE00 bits 4-3: X bits 4-3
   entranceYHi: number; // FC00 bits 5-0: Y bits 9-4
   water: number; // DE00 bit 6: a water level (Mario swims)
-  lmEntranceFlags: number; // DE00 bits 7, 2-0: slippery, the sprites' spawn range (kept, not used)
+  slippery: number; // DE00 bit 7: a slippery level
+  lmEntranceFlags: number; // DE00 bits 2-0: the sprites' spawn range (kept, not used)
   cameraRelative: number; // FE00 bit 7: the camera starts relative to Mario (cameraOffset), the BG to match
   cameraOffsetHi: number; // FC00 bit 6: bit 4 of the offset (bits 3-0: fgInitY, bgInitY)
   bgRelative: number; // FC00 bit 7: with cameraRelative the BG starts at the FG + 16 * bgHeight (signed)
@@ -147,9 +148,10 @@ export interface SecondaryHeader {
   midwayAction: number; // E800 bits 2-0
   midwayWater: number; // E800 bit 6
   midwayFaceLeft: number; // EC00 bit 6
+  midwaySlippery: number; // E800 bit 7
   midwayCameraRelative: number; // EC00 bit 7
   midwayCamera: number; // EE00 bit 6, EC00 bits 3-0: the 5-bit camera offset (or FG/BG start Y), as the main entrance's
-  lmMidwayFlags: number; // E800 bit 7 (slippery), EC00 bits 5-4 (bit 5: to another level), EE00 bit 7 – kept, not used
+  lmMidwayFlags: number; // EC00 bits 5-4 (bit 5: to another level), EE00 bit 7 – kept, not used
 }
 
 export interface Level {
@@ -252,7 +254,8 @@ export function decodeSecondaryHeader([a, b, c, d, e = 0, f = 0, g = 0, h = 0, i
     entranceXHi: (g >> 3) & 3,
     entranceYHi: h & 0x3f,
     water: (g >> 6) & 1,
-    lmEntranceFlags: g & 0x87,
+    slippery: g >> 7,
+    lmEntranceFlags: g & 0x07,
     cameraRelative: i >> 7,
     cameraOffsetHi: (h >> 6) & 1,
     bgRelative: h >> 7,
@@ -265,9 +268,10 @@ export function decodeSecondaryHeader([a, b, c, d, e = 0, f = 0, g = 0, h = 0, i
     midwayAction: m1 & 7,
     midwayWater: (m1 >> 6) & 1,
     midwayFaceLeft: (m3 >> 6) & 1,
+    midwaySlippery: m1 >> 7,
     midwayCameraRelative: m3 >> 7,
     midwayCamera: ((m4 & 0x40) >> 2) | (m3 & 0x0f),
-    lmMidwayFlags: (m1 & 0x80) | (m3 & 0x30) | (m4 >> 7),
+    lmMidwayFlags: (m3 & 0x30) | (m4 >> 7),
   };
 }
 export function encodeSecondaryHeader(s: SecondaryHeader): number[] {
@@ -278,10 +282,10 @@ export function encodeSecondaryHeader(s: SecondaryHeader): number[] {
     (s.noYoshiIntro << 7) | ((s.verticalPositioning & 3) << 5) | (s.entranceScreen & 0x1f),
     (s.layer2Separate << 7) | ((s.layer2HAuto & 1) << 6) | ((s.lmAutoScreens & 1) << 5) | (s.layer2V & 0x1f),
     (s.levelSizeFlags & 0xe0) | (s.levelSize & 0x1f),
-    (s.lmEntranceFlags & 0x87) | ((s.water & 1) << 6) | ((s.entranceTile & 1) << 5) | ((s.entranceXHi & 3) << 3),
+    ((s.slippery & 1) << 7) | (s.lmEntranceFlags & 0x07) | ((s.water & 1) << 6) | ((s.entranceTile & 1) << 5) | ((s.entranceXHi & 3) << 3),
     (s.bgRelative << 7) | ((s.cameraOffsetHi & 1) << 6) | (s.entranceYHi & 0x3f),
     (s.cameraRelative << 7) | ((s.faceLeft & 1) << 6) | (s.lmSpareBit & 0x20) | (s.bgHeight & 0x1f),
-    (s.lmMidwayFlags & 0x80) | ((s.midwayWater & 1) << 6) | ((s.midwayOwn & 1) << 5) | (s.midwayScreen & 0x10) | ((s.midwayX & 0x10) >> 1) | (s.midwayAction & 7),
+    ((s.midwaySlippery & 1) << 7) | ((s.midwayWater & 1) << 6) | ((s.midwayOwn & 1) << 5) | (s.midwayScreen & 0x10) | ((s.midwayX & 0x10) >> 1) | (s.midwayAction & 7),
     ((s.midwayY & 0x0f) << 4) | (s.midwayX & 0x0f),
     (s.midwayCameraRelative << 7) | ((s.midwayFaceLeft & 1) << 6) | (s.lmMidwayFlags & 0x30) | (s.midwayCamera & 0x0f),
     ((s.lmMidwayFlags & 1) << 7) | ((s.midwayCamera & 0x10) << 2) | ((s.midwayY >> 4) & 0x3f),
@@ -617,7 +621,6 @@ export interface SecondaryEntrance {
   entranceX: number; // FC00 bits 7-5
   screen: number; // FC00 bits 4-0
   action: number; // FE00 bits 2-0
-  raw3: number; // FE00 bit 7 (Lunar Magic's, kept)
   // Lunar Magic 3.00's (levelheight.ts), as in the main entrance (SecondaryHeader)
   entranceTile: number; // FE00 bit 6
   entranceXHi: number; // FE00 bits 5-4
@@ -626,6 +629,7 @@ export interface SecondaryEntrance {
   cameraRelative: number; // CE00 bit 7
   faceLeft: number; // CE00 bit 6: Mario faces left
   water: number; // CE00 bit 5: a water level (Mario swims)
+  slippery: number; // FE00 bit 7: a slippery level
   lmRaw: number; // CC00 bit 7 (exit to the overworld), CE00 bits 4-0 – kept, not used
 }
 export function readSecondaryEntrance(rom: Rom, i: number): SecondaryEntrance {
@@ -640,7 +644,6 @@ export function decodeSecondaryEntrance([a, b, c, d, e, f]: number[]): Secondary
     entranceX: c >> 5,
     screen: c & 0x1f,
     action: d & 7,
-    raw3: d & 0x80,
     entranceTile: (d >> 6) & 1,
     entranceXHi: (d >> 4) & 3,
     entranceYHi: e & 0x3f,
@@ -648,6 +651,7 @@ export function decodeSecondaryEntrance([a, b, c, d, e, f]: number[]): Secondary
     cameraRelative: f >> 7,
     faceLeft: (f >> 6) & 1,
     water: (f >> 5) & 1,
+    slippery: d >> 7,
     lmRaw: ((e & 0x80) << 1) | (f & 0x1f),
   };
 }
@@ -655,7 +659,7 @@ export function writeSecondaryEntrance(rom: Rom, i: number, e: SecondaryEntrance
   rom.w8(SEC_ENT[0] + i, e.destLevel & 0xff);
   rom.w8(SEC_ENT[1] + i, (e.bgInitY << 6) | ((e.fgInitY & 3) << 4) | (e.entranceY & 0x0f));
   rom.w8(SEC_ENT[2] + i, (e.entranceX << 5) | (e.screen & 0x1f));
-  rom.w8(SEC_ENT[3] + i, (e.raw3 & 0x80) | ((e.entranceTile & 1) << 6) | ((e.entranceXHi & 3) << 4) | ((e.destLevel >> 5) & SEC_LEVEL_HI) | (e.action & 7));
+  rom.w8(SEC_ENT[3] + i, ((e.slippery & 1) << 7) | ((e.entranceTile & 1) << 6) | ((e.entranceXHi & 3) << 4) | ((e.destLevel >> 5) & SEC_LEVEL_HI) | (e.action & 7));
   rom.w8(SEC_ENT[4] + i, ((e.lmRaw >> 1) & 0x80) | ((e.cameraOffsetHi & 1) << 6) | (e.entranceYHi & 0x3f));
   rom.w8(SEC_ENT[5] + i, (e.cameraRelative << 7) | ((e.faceLeft & 1) << 6) | ((e.water & 1) << 5) | (e.lmRaw & 0x1f));
 }
@@ -728,9 +732,9 @@ export function copyCameraStart(to: CameraStart, from: CameraStart): void {
   to.cameraRelative = from.cameraRelative; to.cameraOffsetHi = from.cameraOffsetHi; to.fgInitY = from.fgInitY; to.bgInitY = from.bgInitY;
 }
 // what an entrance sets besides where Mario and the camera start (Lunar Magic's, main and secondary entrances)
-export type EntranceOptions = Pick<SecondaryEntrance, 'faceLeft' | 'water'>;
+export type EntranceOptions = Pick<SecondaryEntrance, 'faceLeft' | 'water' | 'slippery'>;
 export function copyEntranceOptions(to: EntranceOptions, from: EntranceOptions): void {
-  to.faceLeft = from.faceLeft; to.water = from.water;
+  to.faceLeft = from.faceLeft; to.water = from.water; to.slippery = from.slippery;
 }
 export const GAME_BG_ROWS = 27; // the game's BGs
 export const CAMERA_ROWS = 10; // the game's camera at the bottom has Mario standing on the ground 10 rows below its top
@@ -796,12 +800,12 @@ export type MidwayEntrance = StartEntrance & Pick<SecondaryHeader, 'bgRelative' 
 export function midwayEntrance(s: SecondaryHeader): MidwayEntrance {
   const c = s.midwayCamera;
   return {
-    action: s.midwayAction, faceLeft: s.midwayFaceLeft, water: s.midwayWater,
+    action: s.midwayAction, faceLeft: s.midwayFaceLeft, water: s.midwayWater, slippery: s.midwaySlippery,
     cameraRelative: s.midwayCameraRelative, cameraOffsetHi: c >> 4, fgInitY: (c >> 2) & 3, bgInitY: c & 3, bgRelative: s.bgRelative, bgHeight: s.bgHeight,
   };
 }
 export function setMidwayEntrance(s: SecondaryHeader, m: MidwayEntrance): void {
-  s.midwayAction = m.action & 7; s.midwayFaceLeft = m.faceLeft; s.midwayWater = m.water;
+  s.midwayAction = m.action & 7; s.midwayFaceLeft = m.faceLeft; s.midwayWater = m.water; s.midwaySlippery = m.slippery;
   s.midwayCameraRelative = m.cameraRelative; s.midwayCamera = ((m.cameraOffsetHi & 1) << 4) | ((m.fgInitY & 3) << 2) | (m.bgInitY & 3);
   s.bgRelative = m.bgRelative; s.bgHeight = m.bgHeight;
 }
