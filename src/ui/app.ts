@@ -38,7 +38,8 @@ import type { ProbeReply } from '../core/probehost.ts';
 import { ProbeClient } from '../core/probeclient.ts';
 import { map16Tile, bgTile } from '../core/ram.ts';
 import { exanimTiles, exanimColors } from '../core/exanim.ts';
-import { LevelUses, levelTilesOf, levelOverride, usedLevels, spriteUsage, type LevelTiles, type SpriteUser } from '../core/levelusage.ts';
+import { LevelUses, levelTilesOf, levelOverride, usedLevels, spriteUsage, isTilesetTile, type LevelTiles, type SpriteUser } from '../core/levelusage.ts';
+import { TILESETS, tilesetPointers, sharingTilesets } from '../core/tilesets.ts';
 
 export type EditMode = 'l1' | 'l2' | 'spr' | 'exit' | 'bg' | 'l3';
 // the modes painted with a brush of tiles picked from the level or the palette: BG tiles, layer 3's 8x8 tiles
@@ -1035,6 +1036,20 @@ export class App {
     }
     if (pending && !this.usesRun) this.learnLevelTiles(idx);
     return { levels, pending };
+  }
+  // the tilesets in which FG Map16 tile t is the open level's tile (all for the standard tiles): the
+  // pointers each tileset loads (tilesets.ts), learned once and kept in the result cache
+  tilesetsOf(t: number): number[] {
+    const all = Array.from({ length: TILESETS }, (_, i) => i);
+    if (!isTilesetTile(t)) return all;
+    const ptrs = all.map((ts) => {
+      const k = `tsp1:${ts}`, stored = this.results.get<number[]>(k);
+      if (stored) return stored;
+      const r = tilesetPointers(this.usesEmu = this.auxEmu(this.usesEmu), ts);
+      this.results.set(k, r.result, this.results.fp.deps(r.reads));
+      return r.result;
+    });
+    return sharingTilesets(ptrs, this.level.header.tileset, t);
   }
   // the levels with sprite id (spriteId), the open level as edited
   spriteUsers(id: number): SpriteUser[] {

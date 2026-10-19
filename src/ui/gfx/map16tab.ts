@@ -48,6 +48,8 @@ export interface RemapFill { line?: string; scope?: RemapScope; bg?: boolean }
 // a tile the remap changes: its words and acts-like before and after
 interface RemapRow { tile: number; words: number[]; acts: number | null; newWords: number[]; newActs: number | null; out: number[]; changed: boolean }
 type Cell = { x: number; y: number };
+// "tileset 1", "tilesets 0, 7, C"
+const tilesetNames = (ts: number[]) => `tileset${ts.length > 1 ? 's' : ''} ${ts.map((x) => hex(x, 1)).join(', ')}`;
 
 // files 100-103: the ExAnimation alternative files (Lunar Magic's ExGFX 60-63)
 export const ANIM_FILE = 0x100;
@@ -782,15 +784,15 @@ export class Map16Tab implements WsPanel {
       box.replaceChildren(usedInList(app, 'Used in levels', users.map((u) => ({ level: u.level, text: `${u.count}× in the BG` })), pending, 'In no level\'s background.'));
       return;
     }
-    const ts = app.level.header.tileset, tilesetTile = isTilesetTile(t);
-    const users = fgTileUsers(levels, t, ts);
+    const tilesets = app.tilesetsOf(t), tilesetTile = isTilesetTile(t);
+    const users = fgTileUsers(levels, t, tilesets);
     const items = users.map((u) => ({
       level: u.level, at: { x: u.uses[0].x, y: u.uses[0].y },
       text: u.uses.map((q) => `${q.count}× ${TILE_SOURCES[q.source]}${q.layer === 2 ? ' (layer 2)' : ''}`).join(', '),
     }));
     const l = tileLinks(app.rom, t);
     box.replaceChildren(
-      usedInList(app, tilesetTile ? `Used in levels of tileset ${hex(ts, 1)}` : 'Used in levels', items, pending, this.unusedTiles()?.has(t) ? 'Defined, but placed in no level and no structure: unused.' : 'Placed in no level.'),
+      usedInList(app, tilesetTile ? `Used in levels of ${tilesetNames(tilesets)}` : 'Used in levels', items, pending, this.unusedTiles()?.has(t) ? 'Defined, but placed in no level and no structure: unused.' : 'Placed in no level.'),
       l.actsLike.length ? h('div', { class: 'hint' }, 'Acting like it: ', ...l.actsLike.slice(0, 24).flatMap((x, i) => [i ? ' ' : '', link(x)]), l.actsLike.length > 24 ? ` … (${l.actsLike.length})` : '') : '',
       l.structures.length ? h('div', { class: 'hint' }, `In structure${l.structures.length > 1 ? 's' : ''} ${l.structures.map((n) => hex(n, 2)).join(', ')}`) : '',
       l.blocks.length ? h('div', { class: 'hint' }, `Custom block on it: ${l.blocks.join(', ')}`) : '',
@@ -808,7 +810,7 @@ export class Map16Tab implements WsPanel {
   private rangeText(t: number): string {
     if (this.bg) return t >= BG_EXT_FIRST ? 'extended background tile' : 'background tile';
     if (t >= EXT_FIRST) return 'extended tile (in the level via Direct Map16 object)';
-    if (t >= 0x073 && t <= 0x0ff) return `tileset tile (applies to tileset ${hex(this.app.level.header.tileset, 1)} only)`;
+    if (isTilesetTile(t)) { const ts = this.app.tilesetsOf(t); return `tileset tile (applies to ${tilesetNames(ts)}${ts.length > 1 ? '' : ' only'})`; }
     return 'standard tile (all tilesets)';
   }
 

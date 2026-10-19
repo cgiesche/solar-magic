@@ -43,27 +43,33 @@ const all = levels.map((n) => uses.tiles(n) ?? uses.scan(n));
 check(uses.missing(levels).length === 0, 'every level known after scanning');
 
 {
-  const u = fgTileUsers(all, 0x345, 0);
+  const u = fgTileUsers(all, 0x345, [0]);
   const r = u.find((x) => x.level === 0x105)?.uses ?? [];
   check(u.length === 1 && r.length === 1 && r[0].source === 'direct' && r[0].layer === 1 && r[0].count === 2 && r[0].x === 0x20 && r[0].y === 0x10,
     `Direct Map16 tile 345: level 105, 2×, at 20/10 (${JSON.stringify(u)})`);
-  const s = fgTileUsers(all, 0x346, 0)[0]?.uses ?? [];
+  const s = fgTileUsers(all, 0x346, [0])[0]?.uses ?? [];
   check(s.length === 1 && s[0].source === 'structure' && s[0].count === 1 && s[0].x === 0x30 && s[0].y === 0x12, `structure tile 346 at 30/12 (${JSON.stringify(s)})`);
 }
 
 // a standard tile of the game: objects in many levels, its first place is where it is in the level
 {
-  const u = fgTileUsers(all, 0x100, 0);
+  const u = fgTileUsers(all, 0x100, [0]);
   check(u.length > 10 && u.every((x) => x.uses.every((q) => q.source === 'object')), `tile 100 placed by objects in ${u.length} levels`);
   const lv105 = u.find((x) => x.level === 0x105);
   check(!!lv105 && lv105.uses[0].count > 50, `level 105: ${lv105?.uses[0].count}× tile 100`);
 }
 
-// tileset tiles (073-0FF) are another tile in each tileset: only levels of the given tileset count
+// tileset tiles (073-0FF) are another tile in each group of tilesets: only levels of the given tilesets count
 {
-  const ts0 = fgTileUsers(all, 0x080, 0), ts1 = fgTileUsers(all, 0x080, 1);
   const tilesetOf = (n: number) => all.find((t) => t.level === n)!.tileset;
-  check(ts0.every((x) => tilesetOf(x.level) === 0) && ts1.every((x) => tilesetOf(x.level) === 1), 'tileset tiles: levels of that tileset only');
+  const group = [2, 6, 8], mixed: number[] = [];
+  let only = true;
+  for (let t = 0x73; t < 0x100; t++) {
+    const u = fgTileUsers(all, t, group), one = fgTileUsers(all, t, [1]);
+    only &&= u.every((x) => group.includes(tilesetOf(x.level))) && one.every((x) => tilesetOf(x.level) === 1);
+    if (new Set(u.map((x) => tilesetOf(x.level))).size > 1) mixed.push(t);
+  }
+  check(only && mixed.length > 0, `tileset tiles: levels of those tilesets only (tiles in levels of several of 2, 6, 8: ${mixed.length})`);
 }
 
 // the BG tilemap's tiles
@@ -99,7 +105,7 @@ check(uses.missing(levels).length === 0, 'every level known after scanning');
   const m = uses.missing(levels);
   check(m.length === 1 && m[0] === 0x105, `after saving level 105 only it is scanned again (${m.map((x) => x.toString(16))})`);
   const again = uses.scan(0x105);
-  check(!fgTileUsers([again], 0x345, 0).length && !!before, 'the new scan no longer has tile 345');
+  check(!fgTileUsers([again], 0x345, [0]).length && !!before, 'the new scan no longer has tile 345');
   // a stored result is found again by a new index on the same cache
   check(new LevelUses(rom, results, () => emu).tiles(0x105) !== undefined, 'results come from the result cache');
 }

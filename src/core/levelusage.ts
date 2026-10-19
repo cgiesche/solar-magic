@@ -42,7 +42,7 @@ export interface TileUse { tile: number; layer: 1 | 2; source: TileSource; count
 export interface BgTileUse { tile: number; count: number; x: number; y: number }
 export interface LevelTiles {
   level: number;
-  tileset: number; // tiles 073-0FF are the tileset's
+  tileset: number; // tiles 073-0FF are the tileset's (shared with others, see tilesets.ts)
   ok: boolean; // false: the level did not load
   fg: TileUse[];
   bg: BgTileUse[];
@@ -161,11 +161,12 @@ export class LevelUses {
 export interface TileUser { level: number; uses: TileUse[] }
 export const isTilesetTile = (t: number) => t >= 0x073 && t < 0x100;
 
-// levels placing FG Map16 tile t; tiles 073-0FF count in levels of `tileset` only (each tileset has its own)
-export function fgTileUsers(levels: Iterable<LevelTiles>, t: number, tileset: number): TileUser[] {
+// levels placing FG Map16 tile t; tiles 073-0FF count in levels of `tilesets` only, those sharing the tile's
+// data (sharingTilesets)
+export function fgTileUsers(levels: Iterable<LevelTiles>, t: number, tilesets: number[]): TileUser[] {
   const out: TileUser[] = [];
   for (const l of levels) {
-    if (isTilesetTile(t) && l.tileset !== tileset) continue;
+    if (isTilesetTile(t) && !tilesets.includes(l.tileset)) continue;
     const uses = l.fg.filter((u) => u.tile === t);
     if (uses.length) out.push({ level: l.level, uses });
   }

@@ -133,7 +133,9 @@ When a level is displayed, it runs the ROM's **original loading routines** (~15 
   keys 1–8, X, Y) and a clicked 8x8 tile go into every marked quarter, mixed values are shown as mixed. Dragging a
   block of 8x8 tiles onto the builder stamps it there (tile numbers set, flips cleared, palettes kept; the overhang
   is cut off). Acts-like applies to the wholly marked tiles. Every change is one undo step. Double click or the
-  right-click menu opens a quarter's 8x8 tile in the Graphics tab.
+  right-click menu opens a quarter's 8x8 tile in the Graphics tab. Tileset tiles 073–0FF are shared by several
+  tilesets (in the game 0/7/C, 2/6/8, 3/9/A/B/E, 4/5/D – found by loading a level with each tileset in the emulator):
+  the tab names the tilesets a change applies to, and *Used in levels* lists the levels of all of them.
 * **Extended Map16 pages 2–F** (tiles 200–FFF, for all tilesets) and **"Acts like" per tile** – also for
   vanilla tiles (e.g. ground that behaves like air). "Copy" (graphics + acts-like) quickly creates new tiles;
   they are placed via the Direct Map16 object (Palette → Map16 → page selection).
