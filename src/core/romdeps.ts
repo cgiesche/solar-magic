@@ -13,7 +13,7 @@
 
 import type { Rom } from './rom.ts';
 import { snesToPc } from './rom.ts';
-import { editorPatch } from './patches.ts';
+import { editorPatch, GFX_FILES } from './patches.ts';
 import { exanimDataRanges } from './exanim.ts';
 
 export const PAGE_SHIFT = 8;
@@ -44,8 +44,8 @@ export function updateBytePages(rom: Rom): void {
     const p = editorPatch(rom);
     if (!p) return;
     const mark = (snes: number, len: number) => { const o = snesToPc(snes); markPc(o, o + len); };
-    mark(p.gfxLo, 0x100); mark(p.gfxHi, 0x100); mark(p.gfxBank, 0x100); mark(p.gfxFlags, 0x100);
-    mark(p.levelGfx, 0x200 * 8);
+    mark(p.gfxLo, GFX_FILES); mark(p.gfxHi, GFX_FILES); mark(p.gfxBank, GFX_FILES); mark(p.gfxFlags, GFX_FILES);
+    mark(p.levelGfx, 0x200 * 8); mark(p.levelGfxHi, 0x200 * 8);
     mark(p.sprBank, 0x200);
   } finally { rom.reads = reads; }
 }

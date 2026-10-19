@@ -16,6 +16,18 @@ _Avoid_: Lunar Magic hacks, built-in patches
 One labelled change of the ROM (image and editor data), made through the edit session (romedit.ts): one undo step, all or nothing (one that fails changes nothing and records nothing), the open level saved before it; what it changed decides what the editor shows anew (the level reloaded, its header, structures). Outside the undo history: the overworld's save (the overworld editor has its own undo) and expanding the ROM.
 _Avoid_: transaction, ROM write (for an edit)
 
+**Remap**:
+Changing 8x8 tile numbers, palettes or acts-like of chosen Map16 tiles (or the frames and targets of tile animations) in bulk, by an offset or a list in Lunar Magic's syntax (core/remap.ts); a list's sources are always the values before the remap. One ROM edit. It changes what tiles point at, never the graphics themselves.
+_Avoid_: renumber (that is the level graphics placement's), move tiles
+
+**Quarter**:
+One of the four 8x8 tiles of a Map16 tile, one 16-bit word: 8x8 tile number, palette, X/Y flip and priority (word order top-left, bottom-left, top-right, bottom-right). Acts-like is not a quarter's but the whole 16x16 tile's.
+_Avoid_: 8x8 field, cell, subtile
+
+**Marked quarters**:
+The set of quarters of the Map16 tab's selection that an edit in the builder changes (palette, flips, priority, an 8x8 tile). A new selection marks all. A **stamp** puts a block of 8x8 tiles onto the quarters where it lies, whatever is marked. Acts-like applies to the wholly marked 16x16 tiles only.
+_Avoid_: selected quarter (the sheet's selection is of whole tiles)
+
 **Level edit**:
 A change of the open level in memory: its own undo step, written to the ROM when the level is saved (before every ROM edit, when another level is opened, or by hand).
 
@@ -31,9 +43,17 @@ _Avoid_: method 2, exact entrance
 Where Mario starts in a level once he has touched its midway tape (the midway point, Z): the main entrance's position and settings on the midway screen as in the game, or (Lunar Magic's) a tile of its own with its own action, camera start and options. Dragging it gives it its own. A standard screen exit set to "go to midway entrance" leads there when it has its own settings.
 _Avoid_: checkpoint (that is the tape), midway screen (for the whole entrance)
 
+**New-style exit**:
+A screen exit with Lunar Magic's u flag: its own number (with the high bit) is the target level or secondary entrance, and it is secondary or standard on its own – so it leads into either bank (0xx/1xx). Every exit the editor writes is one, and the game's exits are made new-style when the clean game is patched, leading where the game leads them – an old-style exit (the game's rule) takes the high bit from the overworld submap Mario is on, the level's last exit deciding secondary.
+_Avoid_: LM exit, exit format 2
+
 **Camera start**:
 Where layer 1 (FG) and layer 2 (BG) start when Mario enters: the game's FG/BG start Y, or (Lunar Magic's, horizontal levels) a number of rows above Mario, the BG then by the level's BG start – its bottom at the level's bottom (by the BG's height), rows below the FG, or at 0. Moving an entrance keeps it.
 _Avoid_: FG/BG init (Lunar Magic's name), initial position
+
+**Game view frame**:
+A 256x224 frame over the level showing what the player sees there (Lunar Magic's Game View Screen), placed on the 8x8 grid inside the level and, once its camera reach is known, where the game lets the camera go; a view setting, not part of the level.
+_Avoid_: camera box, screen preview
 
 ### Third-party content
 
@@ -50,8 +70,12 @@ One typed piece of a package: a patch, an UberASM file, a block, a sprite, a son
 _Avoid_: Component, Item
 
 **Graphics part**:
-A part without code: Map16 tiles (.map16), an ExGFX file or a palette (.pal with its .palmask). Map16 tiles and ExGFX keep the author's tile or number if it is free, else they take the next free one.
+A part without code: Map16 tiles (.map16), an ExGFX file or a palette (.pal with its .palmask). Map16 tiles and ExGFX keep the author's tile or number (up to FFF) if it is free, else they take the next free one of the file's range (see ExGFX range).
 _Avoid_: Resource, asset
+
+**ExGFX range**:
+The part of the ExGFX numbers (000–FFF, Lunar Magic's) a file belongs in: ExGFX 80–DFF (then 32–7F) for graphics, E00–FFF for files kept "as is" – layer 3 graphics (2bpp), layer 3 tilemaps – which are never 3bpp. A file's range follows from the slot it is for (layer 3's: "as is") and its data (2bpp graphics and tilemaps "as is"; 3bpp graphics always ExGFX). FF is no file's number: it is a graphics slot's "none".
+_Avoid_: Super ExGFX, extended range
 
 **Link**:
 A connection between two parts of one package that the editor works out: a block on the Map16 tiles that show it, a sprite's number in the define of a block that spawns it, an ExGFX file in the graphics slot its tiles are drawn from.
@@ -88,3 +112,11 @@ _Avoid_: Cached value, generation (for validity)
 
 **Prefetch**:
 Probing what the palettes could show before anyone asks for it, after everything asked for directly.
+
+**Scroll bands**:
+Where Mario is on the game's screen while the camera scrolls in a direction, or follows him after L/R looked ahead; learned by moving him in the probe level with the open level's mode and vertical scroll setting (an emulated result); a setting that keeps the camera still has no band that way.
+_Avoid_: scroll zones, camera thresholds (they are not a table)
+
+**Camera reach**:
+What of the level the camera can show: where it goes with Mario carried along the level's top and bottom (vertical levels: its sides), standing as far as the camera is concerned; learned by the level scan (an emulated result), shown with the game view frame by darkening the rest; the game view frame is kept where the camera went (its range: from its first to its last place along the level, and where it went across there). The camera at one place (Mario standing there, the camera as the game puts it) places the game view frame by Mario.
+_Avoid_: camera path (it is not one route through the level), covered area

@@ -1,33 +1,83 @@
 // Test play within a game in progress: dying costs a life and returns to the level's overworld tile,
 // entering it again loads the same level (not translevel 0, the bonus game, from a title screen state).
+// The level is entered from its tile as in the game, so its midway tape counts: touched, Mario dies and
+// comes back at the midway point – in the clean game and with the editor's patches; a sub-level is entered
+// through its main level, which sets up the midway point the same way.
 import { readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { levelTranslevel } from '../src/core/level.ts';
+import { GM, RAM, MAP_BASE, MAP_SIZE, MAP_HI, marioX, setMarioPos } from '../src/core/ram.ts';
+import { editorImage } from './fixture.ts';
 
-const rom = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
-const emu = new LevelEmulator(rom);
-emu.boot();
 let bad = 0;
-// level → its submap ($1F11)
-for (const [level, sub] of [[0x105, 1], [0x001, 0], [0x10f, 4], [0x11a, 2]]) {
-  const tl = levelTranslevel(rom, level);
-  emu.startGame(tl);
-  const r = emu.load(level, { translevel: tl, continueState: true });
+const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
+const hx = (v: number) => v.toString(16);
+
+// dies, waits for the overworld and enters the tile again (B); whether the level is played again
+function dieAndReenter(emu: LevelEmulator): boolean {
   const s = emu.snes, w = s.wram;
-  for (let f = 0; f < 60; f++) s.runFrame();
-  const lives = w[0xdbe];
-  w[0x71] = 9; // death animation
-  let ow = false, f = 0;
-  for (; f < 1500 && !(ow && w[0x100] === 0x14); f++) {
-    if (w[0x100] === 0x0e) ow = true;
-    s.joy1 = w[0x100] === 0x0e && f % 20 < 3 ? 0x8000 : 0; // B: enter the level
+  w[RAM.marioAnim] = 9; // dying
+  let ow = false;
+  for (let f = 0; f < 1500 && !(ow && w[RAM.gameMode] === GM.level); f++) {
+    if (w[RAM.gameMode] === GM.overworld) ow = true;
+    s.joy1 = w[RAM.gameMode] === GM.overworld && f % 20 < 3 ? 0x8000 : 0;
     s.runFrame();
   }
   s.joy1 = 0;
-  const ok = r.ok && ow && w[0x100] === 0x14 && w[0x13bf] === tl && w[0x1f11] === sub && w[0xdbe] === lives - 1;
-  if (!ok) bad++;
-  console.log(`${ok ? 'ok  ' : 'FAIL'} level ${level.toString(16)}: died, re-entered translevel ${w[0x13bf].toString(16)} (want ${tl.toString(16)}), submap ${w[0x1f11]} (want ${sub}), lives ${lives} → ${w[0xdbe]}`);
+  return ow && w[RAM.gameMode] === GM.level;
+}
+
+{
+  const rom = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
+  const emu = new LevelEmulator(rom);
+  emu.boot();
+  // level → its submap ($1F11)
+  for (const [level, sub] of [[0x105, 1], [0x001, 0], [0x10f, 4], [0x11a, 2]]) {
+    const tl = levelTranslevel(rom, level);
+    emu.startGame(tl);
+    const r = emu.loadInGame(level, tl);
+    const s = emu.snes, w = s.wram;
+    for (let f = 0; f < 60; f++) s.runFrame();
+    const lives = w[RAM.lives];
+    const again = dieAndReenter(emu);
+    check(r.ok && again && w[RAM.translevel] === tl && w[RAM.submap] === sub && w[RAM.lives] === lives - 1,
+      `level ${hx(level)}: died, re-entered translevel ${hx(w[RAM.translevel])} (want ${hx(tl)}), submap ${w[RAM.submap]} (want ${sub}), lives ${lives} → ${w[RAM.lives]}`);
+  }
+}
+
+// the midway tape: Mario touches it (Map16 tile 38 in the level), dies and comes back at the midway point
+for (const [name, image] of [['clean game', new Uint8Array(readFileSync('test/fixtures/smw.smc'))], ['editor patches', await editorImage()]] as const) {
+  const rom = new Rom(image);
+  const emu = new LevelEmulator(rom);
+  emu.boot();
+  for (const level of [0x105, 0x001]) {
+    const tl = levelTranslevel(rom, level);
+    emu.startGame(tl);
+    emu.loadInGame(level, tl);
+    const s = emu.snes, w = s.wram;
+    for (let f = 0; f < 60; f++) s.runFrame();
+    const x0 = marioX(w);
+    let i = 0;
+    while (i < MAP_SIZE && !(w[MAP_BASE + i] === 0x38 && w[MAP_BASE + MAP_HI + i] === 0)) i++;
+    const tx = Math.floor(i / 0x1b0) * 16 + (i & 15), ty = (i % 0x1b0) >> 4;
+    for (let f = 0; f < 10; f++) { setMarioPos(w, tx * 16, ty * 16 - 16); s.runFrame(); }
+    const touched = w[RAM.midwayTouched] !== 0;
+    const again = dieAndReenter(emu);
+    check(i < MAP_SIZE && touched && again && w[RAM.midwayUsed] !== 0 && marioX(w) > x0 + 0x100,
+      `${name}, level ${hx(level)}: tape at ${hx(tx)}/${hx(ty)} touched (${touched}), died, re-entered at the midway point: ${w[RAM.midwayUsed] !== 0}, Mario at x ${hx(marioX(w))} (start ${hx(x0)})`);
+  }
+  // a sub-level: the midway point set up by its main level
+  const [sub, main] = [0xc3, 0x006];
+  const tl = main; // (the clean game's exits are old-style: levelTranslevel doesn't follow them)
+  emu.startGame(tl);
+  emu.loadInGame(main, tl);
+  const want = emu.snes.wram[RAM.midwayScreen];
+  emu.startGame(tl);
+  const r = emu.loadInGame(sub, tl);
+  const w = emu.snes.wram;
+  check(r.ok && want !== 0 && w[RAM.midwayScreen] === want && w[RAM.translevel] === tl && w[RAM.sublevelCount] !== 0,
+    `${name}, sub-level ${hx(sub)} of ${hx(main)}: midway screen ${hx(w[RAM.midwayScreen])} (want ${hx(want)}), translevel ${hx(w[RAM.translevel])}`);
 }
 console.log(bad ? `${bad} failed` : 'all ok');
 process.exit(bad ? 1 : 0);

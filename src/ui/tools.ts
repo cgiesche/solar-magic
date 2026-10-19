@@ -4,8 +4,9 @@ import type { App } from './app.ts';
 import { h, modal, clear, hexInput, select, toast, choose, emptyState } from './dom.ts';
 import { downloadBytes, pickFile } from './platform.ts';
 import { isBlank } from '../core/exitgraph.ts';
-import { readSecondaryEntrance, type SecondaryEntrance, loadLevel, cloneLevel, insertScreen, deleteScreen, clearLevel, spriteId, mainSpot, secondarySpot, setSecondarySpot, spotTile, copyCameraStart, copyEntranceOptions, hasRelativeCamera, levelMode } from '../core/level.ts';
+import { readSecondaryEntrance, type SecondaryEntrance, loadLevel, cloneLevel, insertScreen, deleteScreen, clearLevel, spriteId, secondarySpot, spotTile, hasRelativeCamera, levelMode } from '../core/level.ts';
 import { tileFields, cameraFields, optionFields } from './entrancefields.ts';
+import { newEntranceIn } from './exitpanel.ts';
 import { exportLevelFile, importLevelFile, LEVEL_FILE_EXT } from '../core/levelfile.ts';
 import { ENTRANCE_ACTIONS, hex, objectName } from '../core/names.ts';
 import { saveLevel } from '../core/save.ts';
@@ -13,10 +14,9 @@ import { DM16_EXT, setLevelGfx, customPalette, setCustomPalette, bgBank } from '
 import { bgFromWram } from '../core/bg.ts';
 import { STRUCT_EXT } from '../core/structs.ts';
 
-// overview of all secondary entrances of the current level's bank: where each leads, which exits use it
+// overview of all secondary entrances (000-1FF): where each leads, which exits use it
 export function openEntrancesDialog(app: App): void {
   const rom = app.rom;
-  const bank = app.level.number & 0x100;
   const filter = h('select', null, h('option', { value: 'level' }, 'into this level'), h('option', { value: 'set' }, 'all set up'), h('option', { value: 'all' }, 'all (including free)'));
   const list = h('div', { class: 'gfx-list', style: 'height: 420px; min-width: 360px' });
   const detail = h('div', { class: 'ent-detail' });
@@ -25,13 +25,13 @@ export function openEntrancesDialog(app: App): void {
     clear(list);
     const g = app.exitGraph();
     const mine = new Set(g.entrancesOf(app.level.number));
-    for (let i = bank; i < bank + 0x100; i++) {
+    for (let i = 0; i < 0x200; i++) {
       const e = readSecondaryEntrance(rom, i);
       const users = g.usersOfEntrance(i).length;
       const blank = isBlank(rom, i) && !users;
       if (filter.value === 'level' && !mine.has(i)) continue;
       if (filter.value === 'set' && blank) continue;
-      const to = e.destLevel | bank;
+      const to = e.destLevel;
       list.appendChild(h('div', { class: `level-item${i === sel ? ' current' : ''}${blank ? ' unused' : ''}`, onclick: () => { sel = i; buildList(); buildDetail(); } },
         `${hex(i, 3)} `, blank ? h('span', { class: 'lname' }, 'free') : h('span', null, `→ ${hex(to, 3)} `, h('span', { class: 'lname' }, `${g.name(to)} · ${users ? `${users} Exit${users > 1 ? 's' : ''}` : 'unused'}`))));
     }
@@ -42,7 +42,7 @@ export function openEntrancesDialog(app: App): void {
     if (sel < 0) { detail.append(h('div', { class: 'hint' }, 'Select an entry. Edit and move it directly in the level in “Entrances/Exits” mode (key 4).')); return; }
     const e = readSecondaryEntrance(rom, sel);
     const g = app.exitGraph();
-    const to = e.destLevel | bank;
+    const to = e.destLevel;
     const blank = isBlank(rom, sel);
     const set = (label: string, f: (x: SecondaryEntrance) => void) => { app.editSecondaryEntrance(sel, `Secondary entrance ${hex(sel, 3)}: ${label}`, f, `sec-entrance-dlg:${sel}`); buildList(); buildDetail(); };
     const range = (n: number): [number, string][] => Array.from({ length: n }, (_, i) => [i, String(i)]);
@@ -51,7 +51,7 @@ export function openEntrancesDialog(app: App): void {
     detail.append(
       h('div', { class: 'prop-title' }, `Secondary entrance ${hex(sel, 3)}`),
       blank ? h('div', { class: 'hint' }, 'Free: no exit uses it.') : h('div', null, 'Leads to ', h('b', null, `level ${hex(to, 3)}`), ' ', h('span', { class: 'hint' }, g.name(to))),
-      h('div', { class: 'prop' }, h('label', null, 'Target level (low digits)'), hexInput(e.destLevel, 2, (v) => set('Target level', (x) => (x.destLevel = v)))),
+      h('div', { class: 'prop' }, h('label', null, 'Target level'), hexInput(e.destLevel, 3, (v) => set('Target level', (x) => (x.destLevel = v)), 0x1ff)),
       h('div', { class: 'prop' }, h('label', null, 'Screen'), hexInput(e.screen, 2, (v) => set('Screen', (x) => (x.screen = v)), 0x1f)),
       ...(e.entranceTile ? tileFields(spotTile(secondarySpot(e)), set).map(([l, el]) => prop(l, el)) : [
         h('div', { class: 'prop' }, h('label', null, 'X position'), select(range(8), e.entranceX, (v) => set('X', (x) => (x.entranceX = v)))),
@@ -63,8 +63,8 @@ export function openEntrancesDialog(app: App): void {
       h('div', { class: 'hint' }, users.length ? `Used by: ${users.map((u) => `${hex(u.from, 3)} (screen ${hex(u.screen, 2)})`).join(', ')}` : 'No exit uses this entrance.'),
       h('div', { class: 'row' },
         blank ? '' : h('button', { onclick: () => { dlg.close(true); openTarget(to); } }, `Open level ${hex(to, 3)}`),
-        h('button', { onclick: () => set('to current level', (x) => (x.destLevel = app.level.number & 0xff)) }, `Set to current level (${hex(app.level.number, 3)})`)),
-      h('div', { class: 'hint' }, 'The high bit (0xx/1xx) comes from the level the exit is in. Changes can be undone with Ctrl+Z.'),
+        h('button', { onclick: () => set('to current level', (x) => (x.destLevel = app.level.number)) }, `Set to current level (${hex(app.level.number, 3)})`)),
+      h('div', { class: 'hint' }, 'Changes can be undone with Ctrl+Z.'),
     );
   };
   const openTarget = (to: number) => {
@@ -75,12 +75,8 @@ export function openEntrancesDialog(app: App): void {
     app.revealMarker();
   };
   const newEntry = () => {
-    const idx = app.exitGraph().freeEntrance(app.level.number);
-    if (idx === null) { toast('No free secondary entrance left.', 'error'); return; }
-    const s = app.level.secondary;
-    app.editSecondaryEntrance(idx, `Secondary entrance ${hex(idx, 3)} created`, (x) => {
-      x.destLevel = app.level.number & 0xff; setSecondarySpot(x, mainSpot(s)); x.action = s.entranceAction; copyCameraStart(x, s); copyEntranceOptions(x, s);
-    });
+    const idx = newEntranceIn(app, app.level.number);
+    if (idx === null) return;
     sel = idx;
     buildList();
     buildDetail();
@@ -90,7 +86,7 @@ export function openEntrancesDialog(app: App): void {
   if (sel < 0) filter.value = 'set';
   buildList();
   buildDetail();
-  const dlg = modal(`Secondary entrances ${bank ? '100–1FF' : '000–0FF'}`, h('div', { class: 'ent-editor' },
+  const dlg = modal('Secondary entrances', h('div', { class: 'ent-editor' },
     h('div', null, h('div', { class: 'row small' }, 'Show: ', filter, h('button', { title: 'Next free number, into the current level (at the main entrance)', onclick: newEntry }, '+ New')), list), detail),
   [{ label: 'Close', primary: true }]);
 }

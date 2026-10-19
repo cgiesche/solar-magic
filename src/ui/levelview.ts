@@ -6,7 +6,7 @@ import { downloadBytes } from './platform.ts';
 import { objectName, hex2, hex3 } from '../core/names.ts';
 import { resizeObjectSize } from '../core/objkinds.ts';
 import { probeAt, spriteProbeAt, enterText, collisionText, type PosProbe, type CollisionProbe } from '../core/blockprobe.ts';
-import { type LevelObject, type LevelSprite, newUid, serializeLayer1, serializeLayer2, serializeLevelSprites, spriteSizes, spriteId } from '../core/level.ts';
+import { type LevelObject, type LevelSprite, newUid, serializeLayer1, serializeLayer2, serializeLevelSprites, spriteSizes, spriteId, EXIT_NEW } from '../core/level.ts';
 import { composite } from '../core/render.ts';
 import { layer3CellAt, layer3WordText } from '../core/layer3map.ts';
 import type { ArcSpeed } from '../core/jumparcs.ts';
@@ -15,6 +15,8 @@ import { contextMenu, type MenuItem } from './menu.ts';
 import { incompleteSprites } from './spritemem.ts';
 import { problemsButton } from './problems.ts';
 import { map16Tile } from '../core/ram.ts';
+import { GAME_VIEW_W, GAME_VIEW_H, MARIO_W, MARIO_H, type CameraBands } from '../core/camerabands.ts';
+import { gameViewAt } from '../core/camerareach.ts';
 
 type Drag =
   | { kind: 'move'; edit: LevelEdit; startTx: number; startTy: number; lastDx: number; lastDy: number; orig: Map<number, { x: number; y: number }> }
@@ -22,13 +24,24 @@ type Drag =
   | { kind: 'band'; x0: number; y0: number; x1: number; y1: number; add: boolean }
   | { kind: 'marker'; edit: LevelEdit | null; marker: Marker; offX: number; offY: number; moved: boolean } // (secondary entrances: not a level edit)
   | { kind: 'paint'; edit: LevelEdit; changed: boolean; x0: number; y0: number; lastX: number; lastY: number } // BG/layer 3 brush, stamped on a grid of cells from (x0, y0)
-  | { kind: 'pick'; x0: number; y0: number; x1: number; y1: number }; // BG/layer 3 cells taken into the brush
+  | { kind: 'pick'; x0: number; y0: number; x1: number; y1: number } // BG/layer 3 cells taken into the brush
+  | { kind: 'gameView'; offX: number; offY: number }; // the game view frame, held at (offX, offY) inside it
 
 const ARC_STYLE: Record<ArcSpeed, { color: string; label: string; dash?: boolean }> = {
   stand: { color: '#ffffff', label: 'from standing' },
   walk: { color: '#7fe0ff', label: 'walking' },
   run: { color: '#ffd84c', label: 'running' },
   p: { color: '#ff6bd5', label: 'P-speed', dash: true },
+};
+
+// the game view's scroll bands: X bands are columns of the frame, Y bands rows; the look-ahead ones outlined
+const BAND_STYLE: Record<keyof CameraBands, { color: string; label: string; axis: 'x' | 'y'; look?: boolean }> = {
+  right: { color: '255,60,60', label: 'scrolling right', axis: 'x' },
+  left: { color: '60,220,90', label: 'scrolling left', axis: 'x' },
+  up: { color: '70,130,255', label: 'scrolling up', axis: 'y' },
+  down: { color: '190,80,255', label: 'scrolling down', axis: 'y' },
+  lookRight: { color: '255,200,40', label: 'after R (look ahead)', axis: 'x', look: true },
+  lookLeft: { color: '60,220,255', label: 'after L (look ahead)', axis: 'x', look: true },
 };
 
 const MARKER_STYLE: Record<Marker['kind'], { color: string; label: string; title: string }> = {
@@ -84,6 +97,7 @@ export class LevelView {
     app.on('mode', () => { if (!this.hover) this.idleStatus(); });
     app.on('rom-change', () => this.problems.update());
     app.on('arcs', () => this.requestPaint());
+    app.on('game-view', () => this.requestPaint());
     app.on('level-scan', () => { this.problems.update(); this.requestPaint(); });
     this.idleStatus();
     app.on('probes', () => { if (this.hover && !this.drag) this.updateStatus(this.hover.tx, this.hover.ty); this.requestPaint(); this.problems.update(); });
@@ -274,6 +288,7 @@ export class LevelView {
     if (app.show.sprites) this.paintSprites(ctx, z);
     if (app.show.sprites && app.show.items) this.paintSpriteItems(ctx);
     if (app.show.arcs) this.paintArcs(ctx);
+    if (app.show.gameView) this.paintGameView(ctx);
     // selection
     if (app.mode === 'l1' || app.mode === 'l2') {
       const sel = app.selectedObjects();
@@ -321,6 +336,7 @@ export class LevelView {
     }
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     if (app.show.arcs) this.paintArcLegend(ctx, dpr);
+    if (app.show.gameView) this.paintGameViewLegend(ctx, dpr);
     if (app.renderError) {
       ctx.fillStyle = 'rgba(200,30,30,0.85)';
       ctx.fillRect(0, 0, this.canvas.width, 22 * dpr);
@@ -416,6 +432,134 @@ export class LevelView {
       ctx.setLineDash([]);
       ctx.fillStyle = '#fff';
       ctx.fillText(k.label, x + 32 * dpr, ly + 4 * dpr);
+    });
+  }
+
+  // the game view frame's place: the camera at Mario when it is placed by him, else where it was put (first: the
+  // middle of the view), inside the level as it is now and where the game lets the camera go (a smaller level or
+  // a narrower camera range moves it only while it is open)
+  gameViewPos(): { x: number; y: number } {
+    const app = this.app, im = app.images, z = app.zoom, cam = app.gameViewMario?.camera;
+    if (cam) return cam;
+    app.gameView ??= gameViewAt((this.scroller.scrollLeft + this.scroller.clientWidth / 2) / z - GAME_VIEW_W / 2,
+      (this.scroller.scrollTop + this.scroller.clientHeight / 2) / z - GAME_VIEW_H / 2, im.width, im.height);
+    return gameViewAt(app.gameView.x, app.gameView.y, im.width, im.height, app.cameraReach());
+  }
+
+  // the label in the frame's top left corner (level pixels; it stays the same size on the screen)
+  private gameViewLabel(): { x: number; y: number; w: number; h: number; text: string } {
+    const p = this.gameViewPos(), z = this.app.zoom, m = this.app.gameViewMario;
+    const text = !m ? 'Game view' : m.camera === undefined ? 'Game view (emulating …)' : m.camera === null ? 'Game view (camera not found)' : 'Game view at Mario';
+    return { x: p.x, y: p.y, w: (10 + text.length * 6) / z, h: 14 / z, text };
+  }
+
+  // Shift+V: the game view frame placed by Mario with his feet in the tile under the mouse
+  placeGameViewByMario(): void {
+    if (!this.hover) return;
+    this.app.show.gameView = true;
+    this.app.placeGameViewByMario(this.hover.tx * 16, (this.hover.ty + 1) * 16 - MARIO_H);
+    this.paint();
+  }
+
+  // whether the pixel grabs the game view frame: its edge (a few screen pixels either side) or its label
+  gameViewGrab(px: number, py: number): boolean {
+    if (!this.app.show.gameView) return false;
+    const p = this.gameViewPos(), m = 4 / this.app.zoom, l = this.gameViewLabel();
+    const inX = px >= p.x - m && px <= p.x + GAME_VIEW_W + m, inY = py >= p.y - m && py <= p.y + GAME_VIEW_H + m;
+    const edge = (inX && (Math.abs(py - p.y) <= m || Math.abs(py - p.y - GAME_VIEW_H) <= m))
+      || (inY && (Math.abs(px - p.x) <= m || Math.abs(px - p.x - GAME_VIEW_W) <= m));
+    return edge || (px >= l.x && px <= l.x + l.w && py >= l.y && py <= l.y + l.h);
+  }
+
+  // The game view frame (camerabands.ts) over the level darkened where the camera never goes (camerareach.ts),
+  // with the scroll bands inside when they are shown, and Mario when it is placed by him
+  paintGameView(ctx: CanvasRenderingContext2D): void {
+    const app = this.app, p = this.gameViewPos(), z = app.zoom, lw = 1 / z;
+    this.paintCameraReach(ctx);
+    const m = app.gameViewMario;
+    if (m) {
+      ctx.fillStyle = 'rgba(255,60,60,0.45)';
+      ctx.fillRect(m.x, m.y, MARIO_W, MARIO_H);
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 1.5 * lw;
+      ctx.strokeRect(m.x, m.y, MARIO_W, MARIO_H);
+    }
+    const bands = app.show.scrollBands ? app.scrollBands() : undefined;
+    for (const [k, st] of Object.entries(BAND_STYLE) as [keyof CameraBands, (typeof BAND_STYLE)[keyof CameraBands]][]) {
+      const b = bands?.[k];
+      if (!b) continue;
+      const [x, y, w, bh] = st.axis === 'x' ? [p.x + b.from, p.y, b.to - b.from, GAME_VIEW_H] : [p.x, p.y + b.from, GAME_VIEW_W, b.to - b.from];
+      ctx.fillStyle = `rgba(${st.color},${st.look ? 0.12 : 0.22})`;
+      ctx.fillRect(x, y, w, bh);
+      if (st.look) {
+        ctx.strokeStyle = `rgba(${st.color},0.9)`;
+        ctx.lineWidth = 1.5 * lw;
+        ctx.setLineDash([4 * lw, 3 * lw]);
+        ctx.strokeRect(x, y, w, bh);
+        ctx.setLineDash([]);
+      }
+    }
+    ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+    ctx.lineWidth = 4 * lw;
+    ctx.strokeRect(p.x, p.y, GAME_VIEW_W, GAME_VIEW_H);
+    ctx.strokeStyle = this.drag?.kind === 'gameView' ? '#ffd800' : '#ffffff';
+    ctx.lineWidth = 2 * lw;
+    ctx.strokeRect(p.x, p.y, GAME_VIEW_W, GAME_VIEW_H);
+    const l = this.gameViewLabel();
+    ctx.fillStyle = 'rgba(0,0,0,0.65)';
+    ctx.fillRect(l.x, l.y, l.w, l.h);
+    ctx.fillStyle = '#fff';
+    ctx.font = `${11 / z}px sans-serif`;
+    ctx.fillText(l.text, l.x + 5 / z, l.y + 11 / z);
+  }
+
+  // the level darkened where the camera never shows it, a rectangle per run of columns (vertical levels: rows)
+  // with the same span
+  private paintCameraReach(ctx: CanvasRenderingContext2D): void {
+    const r = this.app.cameraReach(), im = this.app.images;
+    if (!r) return;
+    const across = r.vertical ? im.width : im.height;
+    const rect = (along: number, n: number, from: number, to: number) => {
+      if (to > from) { if (r.vertical) ctx.fillRect(from, along, to - from, n); else ctx.fillRect(along, from, n, to - from); }
+    };
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    for (let i = 0, j = 0; i < r.spans.length; i = j) {
+      const s = r.spans[i];
+      for (j = i + 1; j < r.spans.length && r.spans[j]?.[0] === s?.[0] && r.spans[j]?.[1] === s?.[1]; j++);
+      const [from, to] = s ?? [across, across];
+      rect(i * 16, (j - i) * 16, 0, from);
+      rect(i * 16, (j - i) * 16, to, across);
+    }
+  }
+
+  // what the overlays of the game view mean, in the top right corner of the view: where the camera never goes
+  // (once the level scan found it), the scroll bands when they are shown
+  paintGameViewLegend(ctx: CanvasRenderingContext2D, dpr: number): void {
+    const reach = this.app.cameraReach();
+    const rows: { label: string; fill?: string; title?: boolean }[] = [
+      { label: reach === undefined ? 'Camera reach (emulating …)' : reach === null ? 'Camera reach (not found)' : 'Camera reach', title: true },
+      { label: 'never on the screen', fill: 'rgba(0,0,0,0.8)' },
+    ];
+    if (this.app.show.scrollBands) {
+      const bands = this.app.scrollBands();
+      rows.push({ label: bands === undefined ? 'Scroll bands (emulating …)' : bands === null ? 'Scroll bands (not found)' : 'Scroll bands', title: true });
+      for (const k of Object.values(BAND_STYLE)) rows.push({ label: k.label, fill: `rgba(${k.color},0.8)` });
+    }
+    ctx.font = `${11 * dpr}px sans-serif`;
+    const w = 150 * dpr, lh = 15 * dpr, x = this.canvas.width - w - 8 * dpr, y = 8 * dpr;
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(x, y, w, lh * rows.length + 6 * dpr);
+    rows.forEach((r, i) => {
+      const ly = y + lh * (i + 1) - 3 * dpr;
+      if (r.fill) {
+        ctx.fillStyle = r.fill;
+        ctx.fillRect(x + 6 * dpr, ly - 9 * dpr, 20 * dpr, 10 * dpr);
+        ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+        ctx.lineWidth = dpr;
+        ctx.strokeRect(x + 6 * dpr, ly - 9 * dpr, 20 * dpr, 10 * dpr);
+      }
+      ctx.fillStyle = '#fff';
+      ctx.fillText(r.label, x + (r.fill ? 32 : 6) * dpr, ly);
     });
   }
 
@@ -639,6 +783,15 @@ export class LevelView {
       return;
     }
     if (e.button !== 0) return;
+    if (!e.ctrlKey && this.gameViewGrab(px, py)) {
+      const p = this.gameViewPos();
+      app.gameView = p;
+      app.gameViewMario = null; // (placed by hand from here)
+      this.drag = { kind: 'gameView', offX: px - p.x, offY: py - p.y };
+      this.updateCursor(px, py, -1);
+      this.paint();
+      return;
+    }
     const mk = this.markerAt(px, py);
     if (mk && !e.ctrlKey) {
       if (app.mode === 'exit') app.selectEntrance(mk);
@@ -717,6 +870,9 @@ export class LevelView {
     if (d.kind === 'band') {
       d.x1 = px; d.y1 = py;
       this.requestPaint();
+    } else if (d.kind === 'gameView') {
+      app.gameView = gameViewAt(px - d.offX, py - d.offY, app.images.width, app.images.height, app.cameraReach());
+      this.requestPaint();
     } else if (d.kind === 'paint') {
       const b = this.brush(), c = this.cellAt(px, py);
       const x = d.x0 + Math.floor((c.x - d.x0) / b.w) * b.w, y = d.y0 + Math.floor((c.y - d.y0) / b.h) * b.h;
@@ -779,6 +935,7 @@ export class LevelView {
       if (d.changed) d.edit.commit(); else d.edit.cancel();
       return;
     }
+    if (d.kind === 'gameView') { this.paint(); return; }
     if (d.kind === 'pick') {
       if (app.mode === 'l3') app.pickL3(d.x0, d.y0, d.x1, d.y1); else app.pickBg(d.x0, d.y0, d.x1, d.y1);
       if (this.hover) this.updateStatus(this.hover.tx, this.hover.ty);
@@ -886,7 +1043,8 @@ export class LevelView {
     const app = this.app, d = this.drag;
     let c = '';
     if (d?.kind === 'resize') c = 'nwse-resize';
-    else if (d?.kind === 'marker' || d?.kind === 'move') c = 'grabbing';
+    else if (d?.kind === 'marker' || d?.kind === 'move' || d?.kind === 'gameView') c = 'grabbing';
+    else if (this.gameViewGrab(px, py)) c = 'grab';
     else if (this.brushMode()) c = 'crosshair';
     else if (this.markerAt(px, py)) c = 'grab';
     else if (app.mode === 'exit') c = 'pointer';
@@ -915,7 +1073,7 @@ export class LevelView {
       items.push({ label: 'Edit exit', onClick: () => app.selectScreen(scr) });
       items.push({ label: '→ Open exit target', onClick: () => app.gotoExitTarget(ex) });
     } else {
-      items.push({ label: 'Create exit', onClick: () => { app.selectScreen(scr); app.editLevel(() => { app.level.exits.push({ uid: newUid(), screen: scr, dest: app.level.number & 0x1ff, secondary: false, flags: 0 }); }, false); } });
+      items.push({ label: 'Create exit', onClick: () => { app.selectScreen(scr); app.editLevel(() => { app.level.exits.push({ uid: newUid(), screen: scr, dest: app.level.number, secondary: false, flags: EXIT_NEW }); }, false); } });
     }
     contextMenu(e.clientX, e.clientY, items);
   }

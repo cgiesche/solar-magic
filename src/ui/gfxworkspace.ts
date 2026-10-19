@@ -6,7 +6,7 @@ import { h, attachPanZoom, zoomControl, showColorLoupe, hideColorLoupe } from '.
 import { viewMenu } from './viewmenu.ts';
 import { hex } from '../core/names.ts';
 import { PaletteTab } from './gfx/palettetab.ts';
-import { Map16Tab } from './gfx/map16tab.ts';
+import { Map16Tab, type RemapFill } from './gfx/map16tab.ts';
 import { GfxTab } from './gfx/gfxtab.ts';
 import { AnimTab } from './gfx/animtab.ts';
 
@@ -227,6 +227,13 @@ export class GfxWorkspace {
   showMap16(tile: number, bg = false): void {
     this.open('map16');
     this.map16.select(tile, bg);
+    this.onNav(true);
+  }
+
+  // the Map16 tab's remap panel, filled in by an offer
+  showRemap(fill: RemapFill): void {
+    this.open('map16');
+    this.map16.openRemap(fill);
     this.onNav(true);
   }
 

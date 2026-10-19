@@ -9,15 +9,17 @@
 //   appearing, or that stay stuck: they bump into blocks ($1588) in the direction they move, to
 //   both sides, without getting more than a tile away (inside a wall, trapped in a gap; bumping
 //   on one side only is often chasing Mario, who is somewhere else here).
-// Afterwards, in levels whose layer 3 tide rises and falls, how far it moves (layer3.ts).
+// Afterwards, in levels whose layer 3 tide rises and falls, how far it moves (layer3.ts), and what of
+// the level the camera can show (its reach, camerareach.ts).
 
-import type { LevelEmulator, LevelOverride } from './levelemu.ts';
+import { levelDataKey, type LevelEmulator, type LevelOverride } from './levelemu.ts';
+import { cameraReachJob, type CameraReach } from './camerareach.ts';
 import { tideRangeJob, type TideRange } from './layer3.ts';
 import { GM, RAM, SPR, SPRITE_SLOTS, getS16, set16, cameraX, cameraY, marioX } from './ram.ts';
 
 export interface ScreenLoad { screen: number; frames: number; lag: number; maxBusy: number }
 export interface SpriteFate { index: number; kind: 'fell' | 'stuck'; frame: number }
-export interface ScanResult { screens: ScreenLoad[]; sprites: SpriteFate[]; frames: number; ok: boolean; tide?: TideRange | null }
+export interface ScanResult { screens: ScreenLoad[]; sprites: SpriteFate[]; frames: number; ok: boolean; tide?: TideRange | null; camera?: CameraReach | null }
 
 export interface ScanLevel {
   number: number;
@@ -29,17 +31,7 @@ export interface ScanLevel {
 
 // The result cache key of a scan: the level and the level data it plays (as edited), so a stored
 // scan is found again for the same data; the ROM it read is checked by the cache.
-export function scanKey(level: number, ov: LevelOverride): string {
-  const l2 = ov.layer2Pointer ?? 0;
-  const bytes = [ov.layer1, ov.layer2, ov.bgData, ov.sprites, Uint8Array.from(ov.secondaryHeader ?? []), Uint8Array.from([l2, l2 >> 8, l2 >> 16, +!!ov.switchPalaces, +!!ov.onOffSwitch])];
-  let h = 0x811c9dc5;
-  for (const b of bytes) {
-    if (!b) { h = Math.imul(h ^ 0xff, 0x01000193); continue; }
-    for (let i = 0; i < b.length; i++) h = Math.imul(h ^ b[i], 0x01000193);
-    h = Math.imul(h ^ b.length, 0x01000193);
-  }
-  return `ls2:${level}:${(h >>> 0).toString(16)}`;
-}
+export function scanKey(level: number, ov: LevelOverride): string { return `ls4:${levelDataKey(level, ov)}`; }
 
 const STEP = 2; // pixels Mario is carried per frame
 const ABOVE = -48; // Mario's Y in horizontal levels: above the level (vertical levels: he keeps his X)
@@ -122,5 +114,7 @@ export function* levelScanJob(emu: LevelEmulator, lv: ScanLevel): Generator<void
   } catch { /* what was observed */ }
   let tide: TideRange | null = null;
   try { tide = yield* tideRangeJob(emu, lv.number, lv.ov); } catch { /* none */ }
-  return { screens: [...loads.values()].sort((a, b) => a.screen - b.screen), sprites: fates, frames: f, ok: true, tide };
+  let camera: CameraReach | null = null;
+  try { camera = yield* cameraReachJob(emu, lv); } catch { /* none */ }
+  return { screens: [...loads.values()].sort((a, b) => a.screen - b.screen), sprites: fates, frames: f, ok: true, tide, camera };
 }

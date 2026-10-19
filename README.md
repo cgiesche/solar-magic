@@ -68,23 +68,31 @@ When a level is displayed, it runs the ROM's **original loading routines** (~15 
   entrance & scrolling (entrance, midway point, layer 2/3 settings), sprite header, BG tilemap selection.
   Which GFX/ExGFX files a level loads (graphics bypass) is set in the graphics section:
   *Graphics* → slot cards ("Swap …") or "Use in slot" next to a file on the right.
-* Screen exits per screen (destination, secondary), **secondary entrances** (dialog).
-* **Entrance options** (Lunar Magic's): Mario faces left, water level (Mario swims) for the main entrance
+* Screen exits per screen (destination, secondary), **secondary entrances** (dialog). Exits lead into any of
+  the 0x200 levels and secondary entrances, also from 0xx into 1xx and back (Lunar Magic's new-style exits:
+  every exit the editor writes is one, and the game's are made so when a clean ROM is opened, leading where
+  the game leads them – so moving a level tile to another submap no longer changes where its exits lead); a
+  secondary entrance leads into a level of either bank.
+* **Entrance options** (Lunar Magic's): Mario faces left, water level (Mario swims), slippery for the main entrance
   (also the midway point unless it has its own) and each secondary entrance; "Water level" for a secondary screen exit. With face
-  left the slanted pipe entrance shoots Mario out to the left. Test play from an entrance starts with them and
-  with its entrance action.
+  left the slanted pipe entrance shoots Mario out to the left. Slippery comes from the entrance, so a level can be
+  slippery from one door and not from another: an exit says "arrives slippery" when its target entrance makes the
+  level slippery (by the option or, as in the game, its entrance action – which actions do is learned by
+  emulation), the main entrance's properties and the header dialog list the level's slippery entrances. Test play
+  from an entrance starts with them and with its entrance action.
 * **Menu *Level*:** save as, **insert/delete screen** (shifts everything after it), clear level;
   **menu *File*:** **export/import as a `.smwlevel` file** (objects, sprites, exits, header, graphics bypass, custom palette).
 * **Entrance markers** for the main entrance (M), midway point (Z) and secondary entrances (S) – movable by
   dragging (snaps to the possible entrance positions).
 * **Midway entrance** (Lunar Magic 3.00's): dragging the midway point (Z) gives it its own tile, with its own
-  action, camera start and options (face left, water) in the exit panel; without them it shares the main
+  action, camera start and options (face left, water, slippery) in the exit panel; without them it shares the main
   entrance's position within its screen, as in the game. Test play from it starts there. A standard screen exit
   can "go to midway entrance" (Lunar Magic's): Mario comes out there when the target's midway point has its
   own settings, else at its main entrance.
 * **Insert by number** (Ins/I): object, extended object or sprite with size/extra bits.
 * Menu *View*: grid, screen boundaries, toggle layers; **inactive layer translucent** (the object layer not being edited is semi-transparent);
   view with switch palaces pressed or ON/OFF set to OFF; zoom 50–400 %.
+* **Game view frame** (View → Game view frame, V; acts like Lunar Magic's Game View Screen): a 256x224 frame over the level showing what the player sees there, dragged by its edge or label onto the 8x8 grid; it keeps its place while editing. **Scroll bands** inside it: where Mario is on the screen while the camera scrolls right (red), left (green), up (blue) and down (purple), and after L/R looked ahead (dashed) – learned by moving Mario in the emulated game under the open level's mode and vertical scroll setting (walking, running, P-speed, turning around, climbing a vine and jumping up a staircase as he rises in the game, falling, L/R), so a ROM with other camera code and each setting show their own bands (no vertical scroll: no up/down bands). With the frame shown, the level is darkened where the camera never goes (its **reach**, found by the level scan: Mario carried along the level's top and bottom, the game's limits and the header's scroll settings deciding; the frame can't be dragged past where the camera goes, e.g. below Y $C0 in a horizontal level), and **Shift+V** puts Mario with his feet in the tile under the mouse and the frame where the game puts the camera then (emulated, learned again when the level changes); dragging the frame places it by hand again.
 * **Layer 3** (tides, layer 3 images) as a preview (scrolling approximated); the header dialog uses emulation to tell what the four layer 3 settings do in the chosen tileset (rising/falling or fixed tide, layer 3 image). With a rising/falling tide, the level view shows the highest and lowest water level (measured by the level scan), and the collision overlay shows the tide water in blue. **Animated tiles/palettes** (View → Animation).
 * Status bar with object/sprite count and data size (warning from 128 sprites); export the **level as PNG** (*File → Level as PNG*).
 * **Sprite memory check:** the editor runs the sprites that can be on screen at the same time in the game and
@@ -97,7 +105,7 @@ When a level is displayed, it runs the ROM's **original loading routines** (~15 
   overlaps arise.
 * **Message boxes** (*ROM → Message boxes*): edit all 25 message boxes with a preview in the game's font; if the texts
   no longer fit in their place, they are moved to free space.
-* **Test level (T):** play the level (including unsaved changes) in the built-in emulator, with keyboard or gamepad, with music and sound effects (M mutes the sound).
+* **Test level (T):** play the level in the built-in emulator (a changed level is saved first, so entering it again after dying plays the same), with keyboard or gamepad, with music and sound effects (M mutes the sound). It is played in a game in progress, entered from its overworld tile (a sub-level through its main level), so the midway tape counts: dying returns to the overworld, entering the level again starts at the midway point once touched.
 
 ### Music
 * **Import songs** (*ROM → Packages … → Upload package …*): songs in AddmusicK format (`.zip` from SMWCentral
@@ -125,12 +133,33 @@ When a level is displayed, it runs the ROM's **original loading routines** (~15 
 
 ### Graphics, palettes, Map16
 * **Map16 editor** (M): FG and BG tiles of the current tileset, per quarter 8x8 tile, palette, flip, priority.
+  The builder shows the whole selection of the sheet (fitted into its column; Ctrl+wheel zooms, the middle
+  button pans); so does the 8x8 graphics view, whose width can be dragged and edits many tiles at once: mark quarters (click, drag, Ctrl+click/drag
+  adds or removes, Shift+click the whole 16x16 tile, Ctrl+A all, Esc none); palette, flips, priority (buttons or
+  keys 1–8, X, Y) and a clicked 8x8 tile go into every marked quarter, mixed values are shown as mixed. Dragging a
+  block of 8x8 tiles onto the builder stamps it there (tile numbers set, flips cleared, palettes kept; the overhang
+  is cut off). Acts-like applies to the wholly marked tiles. Every change is one undo step. Double click or the
+  right-click menu opens a quarter's 8x8 tile in the Graphics tab. Tileset tiles 073–0FF are shared by several
+  tilesets (in the game 0/7/C, 2/6/8, 3/9/A/B/E, 4/5/D – found by loading a level with each tileset in the emulator):
+  the tab names the tilesets a change applies to, and *Used in levels* lists the levels of all of them.
 * **Extended Map16 pages 2–F** (tiles 200–FFF, for all tilesets) and **"Acts like" per tile** – also for
-  vanilla tiles (e.g. ground that behaves like air). "Copy graphics + behavior" quickly creates new tiles;
+  vanilla tiles (e.g. ground that behaves like air). "Copy" (graphics + acts-like) quickly creates new tiles;
   they are placed via the Direct Map16 object (Palette → Map16 → page selection).
+* **Remap** (Map16 tab → *Remap …*, like Lunar Magic's Remap): changes the 8x8 tile numbers, palettes and "acts like"
+  of the selected tiles (or of the tiles 200–FFF that use given 8x8 tiles) by an offset or a list in Lunar Magic's
+  syntax (`100,25`, `100-101,+25`, `100-101,M125`, `R100-111,M25`, `P5-6,7`, `100-101,P7`, `G100-101,+25`,
+  `R200-211,S25`; sources are the tiles before the remap, so `100,25,25,100` swaps). Bad lines are marked where they
+  are while typing, a preview shows the tiles before and after, one undo step. Visually: mark 8x8 tiles in the
+  graphics view and drag them to where they are now – the list gets the line. Moving an ExGFX to another slot in the
+  Graphics tab, or importing a `.map16` whose tiles draw from a slot without ExGFX, offers the remap with the offset
+  filled in. The Animations tab remaps the frames and targets of chosen tile animations with the same list
+  (Lunar Magic's ExAnimation Remap).
 * **Palette editor** (P): edit colors directly at their ROM source, `.pal` import/export,
   optionally a **custom palette per level** (all 256 colors).
-* **Graphics:** view GFX00–31 and ExGFX 32–FF, export/import as PNG.
+* **Graphics:** view GFX00–31 and ExGFX up to FFF (as Lunar Magic: ExGFX 80–DFF, and E00–FFF for files kept
+  "as is" – layer 3 graphics and tilemaps, never 3bpp), listed by range; export/import as PNG.
+  New files and imports ask for their number, with the next free one of their range suggested (an imported
+  file's own number when it fits); a 3bpp file numbered E00–FFF by its author goes to the next free ExGFX.
   Import either LZ2-compressed (original format, 2/3/4bpp) or as uniform **uncompressed 4bpp**
   (16 colors, via DMA from the ROM – no more 3bpp detour).
   The editor's own LZ2 compressor produces smaller data than the original.
@@ -170,9 +199,9 @@ change only a few verified locations:
 | Location | Purpose |
 |---|---|
 | `$05D8F5` | Sprite data in any bank (bank table for 512 levels); current level number in `$7E010B` (like Lunar Magic) |
-| `$00BA2C` | GFX pointer table with 256 entries (ExGFX) |
+| `$00BA2C` | GFX pointer table with 4096 entries (ExGFX 000–FFF); the high bytes of the slots' numbers in RAM `$7F367A`–`$7F3682` |
 | `$00AA6B` | Format selectable per file: LZ2/3bpp (original) or uncompressed 4bpp via DMA |
-| `$00A9E1`, `$00AA22` | Graphics bypass: 8 GFX slots per level (SP1–4, FG1–3, BG1) |
+| `$00A9E1`, `$00AA22` | Graphics bypass: 8 GFX slots per level (SP1–4, FG1–3, BG1), ExGFX up to FFF |
 | Ext. object `$02` | "Direct Map16": places any Map16 tile as a rectangle (6 bytes) |
 | Ext. object `$03` ("SMWS") | Structures: places a stored block of Map16 tiles (4 bytes, 4th byte = structure number 00–FF); only occupies entry `$03` of the extended object table, which is empty in the original, independent of the editor patch |
 | `$00922F` ("SMWP") | Custom 256-color palette per level |

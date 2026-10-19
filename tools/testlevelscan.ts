@@ -31,6 +31,7 @@ const fate = (lv: Level, r: ScanResult, uid: number) => {
 for (const n of [0x105, 0x106, 0x10b]) {
   const r = scan(loadLevel(rom, n));
   check(r.ok && !lagged(r).length && !r.sprites.length, `level ${n.toString(16)}: no slowdown, no sprite problems (${r.frames} frames; ${r.sprites.map((f) => `${f.kind} ${f.index}`).join(', ')})`);
+  check(!!r.camera && r.camera.spans.every((s) => !!s), `level ${n.toString(16)}: the camera's reach, every column shown`);
 }
 
 // eight Wigglers on screen 3 slow the game down there

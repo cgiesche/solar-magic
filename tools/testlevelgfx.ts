@@ -72,8 +72,8 @@ check(imp.ok && plan.fgAt === 0x508, `level import: Map16 tiles from 508, as the
 
 const a = result(p.rom, tiles), b = result(i.rom, [plan.fgAt, plan.fgAt + 1]);
 check(a.words.every((w, k) => same(w, b.words[k])), 'same Map16 tile graphics');
-check(same(a.std, b.std) && same(a.ext, b.ext) && a.ext[0] === 0x80 && same(a.stored(0x80), exgfx) && same(b.stored(0x80), exgfx),
-  `same graphics slots: BG2 = ExGFX ${a.ext[0]?.toString(16)} (8A2 renumbered), the same file`);
+check(same(a.std, b.std) && same(a.ext, b.ext) && a.ext[0] === 0x8a2 && same(a.stored(0x8a2), exgfx) && same(b.stored(0x8a2), exgfx),
+  `same graphics slots: BG2 = ExGFX ${a.ext[0]?.toString(16)} (8A2 kept), the same file`);
 check(!!a.list && a.list === b.list && same(a.alt, b.alt), 'same ExAnimation slots, same frames in the Anim graphic');
 check(!!a.pal && same(a.pal, b.pal), 'same colors');
 

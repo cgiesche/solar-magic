@@ -12,6 +12,7 @@ import { map16Targets } from '../core/map16file.ts';
 import { levelColors, GFX_SLOTS } from '../core/levelgfx.ts';
 import { altFileName, levelAltFile } from '../core/exanim.ts';
 import { errorText } from './projectpane.ts';
+import { gfxNumberField } from './gfxnum.ts';
 
 const file = (f: string) => f.split('/').pop()!;
 
@@ -69,12 +70,14 @@ export function placementEditor(app: App, p: ReadyPreview, blank: number[]): Pla
       h('span', null, 'on tile '), hexInput(tiles[0] ?? 0x200, 3, (v) => { edits.blockTiles!.set(f, [v, ...tiles.slice(1)]); refresh(); }, 0xfff),
       tiles.length > 1 ? h('span', { class: 'hint' }, ` and ${tiles.slice(1).map((t) => hex(t, 3)).join(', ')}`) : '')),
     plan.gfx.map((g, i) => h('div', { class: 'prop' }, h('label', { title: g.file }, file(g.file)),
-      h('span', null, 'as ExGFX '), hexInput(g.num, 2, (v) => { edits.gfx![i].num = v; refresh(); }, 0xfe),
+      h('span', null, 'as ExGFX '), gfxNumberField(app.rom, g.num, {
+        file: () => ({ slot: edits.gfx![i].slot, size: g.size }), taken: () => new Set(edits.gfx!.filter((_, k) => k !== i).map((o) => o.num)),
+        onChange: (v) => { edits.gfx![i].num = v; refresh(); }, author: g.lmNum, by: 'package' }),
       h('span', null, ' for '),
       h('select', { onchange: (e: Event) => { edits.gfx![i].slot = (e.target as HTMLSelectElement).value || null; refresh(); } },
         h('option', { value: '', selected: !g.slot }, '(no slot)'),
         ...[...GFX_SLOTS, ...(g.slot && !GFX_SLOTS.includes(g.slot) ? [g.slot] : [])].map((s) => h('option', { value: s, selected: s === g.slot }, GFX_SLOTS.includes(s) ? s : `${s} (not supported)`))),
-      g.lmNum !== null && g.lmNum !== g.num ? h('span', { class: 'hint' }, ` (${hex(g.lmNum, g.lmNum > 0xff ? 3 : 2)} in the package)`) : '')),
+    )),
     h('label', { class: 'row small' }, h('input', { type: 'checkbox', checked: true, onchange: (e: Event) => { setup = (e.target as HTMLInputElement).checked; } }), setupText),
     p.sample ? h('label', { class: 'row small' }, h('input', { type: 'checkbox', onchange: (e: Event) => { sample = (e.target as HTMLInputElement).checked; } }),
       ` Replace level ${lvl} by the sample level (${file(p.sample)}): layer 1, layer 2, sprites, header and colors, its tiles and sprites where the package's went; the screen exits of level ${lvl} stay`) : '',

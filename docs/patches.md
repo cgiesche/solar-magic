@@ -517,8 +517,10 @@ code is the editor's.
   Moving an entrance, creating one and test play from a spot keep these settings (as Lunar Magic 3.50 can
   drag entrances); only a tile entrance with the game's camera gets the relative one. Test play from a
   secondary entrance starts with its own camera start. `tools/testfgbginit.ts` checks by emulation that test
-  play starts FG and BG where each setting puts them. The level's own slippery bit of Lunar Magic is kept but
-  not used.
+  play starts FG and BG where each setting puts them. The entrance's slippery bit of Lunar Magic (I of the main
+  entrance's `IWPXXtTT` and the secondary entrance's `IPXXDAAA`) makes the level slippery: where the patch sets
+  face left and water (`$009708`, after the game's entrance action) it sets `$86` to `$80`, as the game's action 5
+  does (`$00A6DE`); without it `$86` stays as the action left it.
 - The midway entrance (Lunar Magic 3.00's): four bytes per level in Lunar Magic's layout – `SWOHXAAA` (slippery,
   water, own settings, the midway screen's bit 4, X bit 4, action), `YYYYXXXX` (tile Y and X bits 3–0),
   `RL--ffbb` (camera relative to Mario, face left, the FG/BG start Y or offset bits 3–0; bit 5: Lunar Magic's
@@ -526,7 +528,7 @@ code is the editor's.
   them with its code; the editor at `$07E800`, `$07EA00`, `$07EC00`, `$07EE00` (free in the game; nothing but
   the entrance code reads them). Where the game takes the midway screen (`$05D9BD`, into `$13CD`, which its
   tape needs nonzero to set the checkpoint) and puts Mario on it (`$05D9DE`) the patch adds bit 4 of the screen; with O set Mario goes to the screen as to the main entrance (`$05D9EC`, vertical levels too),
-  then to the tile, with the midway's action, camera start, face left and water instead of the main entrance's
+  then to the tile, with the midway's action, camera start, face left, water and slippery instead of the main entrance's
   (`$13CF` tells the entrance code the midway point was taken). Levels without them load as in the game;
   `tools/testmidway.ts` checks by emulation that every main level entered at its midway point does, and where
   own settings put Mario, the camera and his options.
@@ -538,6 +540,24 @@ code is the editor's.
   sublevel to its main entrance's screen (`$05D9B8`) such an exit goes to the midway screen instead, with the
   midway's action and FG/BG start; bit 7 of `$7F3679` then tells the entrance code to use the midway's tile,
   camera and options. `tools/testmidway.ts` checks it by going through a pipe.
+- A screen exit with u (`0000wush`, Lunar Magic's new-style exit) leads into either bank: where the game takes
+  the target's high byte from the overworld submap (`$05D7CE`) the patch takes the exit's own h, and its own s
+  decides whether it is secondary (into `$1B93`; the game's is the s of the level's last exit, set when the
+  exits are loaded). A secondary entrance's level has its own high bit, D of `IPXXDAAA` (`$05D836`, where the
+  game takes the entrance action; the game's is the entrance number's), set for the game's entrances 100–1FF
+  when the clean game is patched, so they lead where they did. Both places are Lunar Magic's (read from its
+  code in a Lunar Magic-saved ROM: its old-style exits take the high bit from the translevel instead). Exits
+  without u behave as in the game. The editor writes every exit with u, with the target's full number, and
+  the game's exits get u, their h and s when the clean game is patched (`newStyleExits` in `exitgraph.ts`):
+  h from the submap the game plays the level from – its overworld tile's (the main map is submap 0), on
+  through exits – and s of the level's last exit, so no exit depends on the overworld any more (moving a
+  level tile to another submap would change where an old-style exit leads). In the game every level is
+  played from a submap of its own bank, so they lead where they did. Community code that writes `$19B8`/
+  `$19D8` itself goes the same way: GPS's teleport routine writes u and h. `tools/testexitbank.ts` checks it
+  by emulation: every exit of the game taken from a game in progress (Mario on the level's overworld tile)
+  arrives where it does in the clean game, an old-style exit of a level played from the other bank's submap
+  is made new-style leading where the game leads it, old-style exits of a 0xx level on the main map
+  (standard, and secondary through an entrance 0xx), and a GPS block teleporting from 105 into 015.
 
 The emulation check (`tools/testlevelheightplay.ts`): levels of the game moved down into taller levels play
 exactly like the game's – Mario and every sprite at the same positions under the same input, the same visible
@@ -648,7 +668,7 @@ not compatible with the respective feature.
 | `$00AA50` | BG2/BG3 graphics slots (SMWG) |
 | `$00A9DA`, `$00A01F` | Layer 3 graphics per level (SMWL); RAM `$7F3678` |
 | `$05D915`, `$00F79D`, table `$06FA00` | Layer 2 scroll rates; RAM `$7F3660–$7F3665` |
-| `$05D928`, `$0586BB`, entrance options and screen exit flags `$009708`, `$0DA532`, `$0DA536`, the slanted pipe to the left `$00D2B2`, the midway entrance `$05D9B8`, `$05D9DE` (also by a screen exit, its flags `$05D7C5`), `$0DA963`, `$0DA9D6`, `$0DA9EF`, `$058091`, tables `$06CA00`, `$05DE00`, `$06FC00`, `$06FE00`, `$06CC00`, `$06CE00`, `$07E800`, `$07EA00`, `$07EC00`, `$07EE00`; finding a block `$00F478`, `$00F492`, `$00F49A`, `$0194D6`, `$019500`, `$019512`, `$01D97B`, `$01D981`, `$0292D9`, `$0292F9`, `$02930A`, `$0295C0`, `$0295EC`, `$0295FD`, `$02A6BA`, `$02A6CB`, `$02BA50`, `$02BA71`, `$02BA82`, `$02D15A`, `$02D18C`, `$02D19D`, `$03D793`; changing a tile `$00BEEC`, `$00BF41`, `$00C079`, `$00C0C6`, `$00C1B1`, `$00C3D3`; mode tables `$00BDA8`, `$00BDE8`, `$00BE28`, `$00BE68`; sprites `$02A82E`, `$02A968`, `$02AA5F`, `$02AB54`, `$02ABD0`, `$02AF3D`, `$02AFA7`, `$01AC3E`, `$02D038`, `$03B86A`; camera `$00F70D`; entrances `$05D7E0`, `$05DA17` | Level heights (Lunar Magic 3.00's entrances, their options); RAM `$7F3666–$7F3677`, `$7F3679`, Lunar Magic's `$13D7`, `$0BF6–$0CF5` |
+| `$05D928`, `$0586BB`, entrance options and screen exit flags `$009708`, `$0DA532`, `$0DA536`, the slanted pipe to the left `$00D2B2`, the midway entrance `$05D9B8`, `$05D9DE` (also by a screen exit, its flags `$05D7C5`), new-style exits `$05D7CE`, `$05D836`, `$0DA963`, `$0DA9D6`, `$0DA9EF`, `$058091`, tables `$06CA00`, `$05DE00`, `$06FC00`, `$06FE00`, `$06CC00`, `$06CE00`, `$07E800`, `$07EA00`, `$07EC00`, `$07EE00`; finding a block `$00F478`, `$00F492`, `$00F49A`, `$0194D6`, `$019500`, `$019512`, `$01D97B`, `$01D981`, `$0292D9`, `$0292F9`, `$02930A`, `$0295C0`, `$0295EC`, `$0295FD`, `$02A6BA`, `$02A6CB`, `$02BA50`, `$02BA71`, `$02BA82`, `$02D15A`, `$02D18C`, `$02D19D`, `$03D793`; changing a tile `$00BEEC`, `$00BF41`, `$00C079`, `$00C0C6`, `$00C1B1`, `$00C3D3`; mode tables `$00BDA8`, `$00BDE8`, `$00BE28`, `$00BE68`; sprites `$02A82E`, `$02A968`, `$02AA5F`, `$02AB54`, `$02ABD0`, `$02AF3D`, `$02AFA7`, `$01AC3E`, `$02D038`, `$03B86A`; camera `$00F70D`; entrances `$05D7E0`, `$05DA17` | Level heights (Lunar Magic 3.00's entrances, their options); RAM `$7F3666–$7F3677`, `$7F3679`, Lunar Magic's `$13D7`, `$0BF6–$0CF5` |
 | `$008A7F`, `$0087AD`, `$0085E3`, `$0580B0`, `$0580B4`, `$0580BF`, `$0580C3`, `$058730`, `$058770`, `$0587D4`, `$0587DB`, `$05880B`, `$058812`, `$0586F7`, `$058A3A` | VRAM patch (SMWV): tilemaps relocated, taller levels' rows; RAM `$7F0000–$7F3654` |
 | Ext. object table `$0DA118` (entry `$03`) | Structures (SMWS); empty in the original, no code hook |
 | `$05B20F` | Messages in free space (SMWM), only if the texts no longer fit |

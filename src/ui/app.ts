@@ -24,13 +24,15 @@ import { lt3Override, lt3Target, lt3Covers, layer3Map, layer3Word, layer3Index, 
 import { layer3Geometry, type Layer3Geometry } from '../core/render.ts';
 import { toast, log as logMsg, modalsOpen, onModalsChange } from './dom.ts';
 import { musicPlayer } from './musicplayer.ts';
-import { ExitGraph, exitTarget } from '../core/exitgraph.ts';
+import { ExitGraph, exitTarget, isBlank } from '../core/exitgraph.ts';
 import type { RomHistory, RomEdit } from '../core/romhistory.ts';
 import { RomEditSession, type EditOptions } from '../core/romedit.ts';
 import { LevelHistory } from '../core/levelhistory.ts';
 import { resizeObjectSize, type ObjKind, type ObjKinds } from '../core/objkinds.ts';
 import { JumpArcs, ARC_SPEEDS, type JumpArc } from '../core/jumparcs.ts';
-import { scanKey, type ScanResult } from '../core/levelscan.ts';
+import { scanKey, type ScanLevel, type ScanResult } from '../core/levelscan.ts';
+import { cameraAtKey, type CameraReach, type CameraAt } from '../core/camerareach.ts';
+import { MARIO_W, MARIO_H, type CameraBands } from '../core/camerabands.ts';
 import { layer3Kinds, tideKind, layer3Top, type Layer3Kind } from '../core/layer3.ts';
 import { layer2MotionsJob, type Layer2Motions } from '../core/l2scroll.ts';
 import { variantOf, blockKey, spriteKey, type BlockProbe, type SpriteProbe } from '../core/blockprobe.ts';
@@ -38,7 +40,9 @@ import type { ProbeReply } from '../core/probehost.ts';
 import { ProbeClient } from '../core/probeclient.ts';
 import { map16Tile, bgTile } from '../core/ram.ts';
 import { exanimTiles, exanimColors } from '../core/exanim.ts';
-import { LevelUses, levelTilesOf, levelOverride, usedLevels, spriteUsage, type LevelTiles, type SpriteUser } from '../core/levelusage.ts';
+import { LevelUses, levelTilesOf, levelOverride, usedLevels, spriteUsage, isTilesetTile, type LevelTiles, type SpriteUser } from '../core/levelusage.ts';
+import { TILESETS, tilesetPointers, sharingTilesets } from '../core/tilesets.ts';
+import { slipperyActions } from '../core/slippery.ts';
 
 export type EditMode = 'l1' | 'l2' | 'spr' | 'exit' | 'bg' | 'l3';
 // the modes painted with a brush of tiles picked from the level or the palette: BG tiles, layer 3's 8x8 tiles
@@ -69,6 +73,7 @@ export type AppEvent =
   | 'probes' // the asked or the prefetched probes are done (block, collision, sprite, run speeds)
   | 'objkinds' // object kinds asked for are known (or failed)
   | 'level-scan' // the level scan of the level as edited is known
+  | 'game-view' // the camera at Mario's place for the game view frame is known (or asked for)
   | 'level-uses' // more levels' Map16 tiles are known (levelTiles)
   | 'palette-item' // a sprite was chosen in the palette
   | 'arcs' // jump arcs asked for are known
@@ -110,7 +115,13 @@ export class App {
   bgBrush: Brush = { w: 1, h: 1, tiles: [0] };
   l3Brush: Brush = { w: 1, h: 1, tiles: [0] }; // layer 3 tilemap words
   zoom = 2;
-  show = { layer1: true, layer2: true, layer3: true, sprites: true, grid: false, screens: true, exits: true, ghost: true, anim: false, items: true, collision: false, arcs: false };
+  show = { layer1: true, layer2: true, layer3: true, sprites: true, grid: false, screens: true, exits: true, ghost: true, anim: false, items: true, collision: false, arcs: false, gameView: false, scrollBands: false };
+  // the game view frame's top left corner in level pixels (levelview.ts), kept while editing and between levels
+  gameView: { x: number; y: number } | null = null;
+  // the frame placed by Mario (Shift+V): his place (inside the level) and the camera the game puts there in the
+  // level as edited (key: its result cache key; camera undefined while it is played, null when it could not be);
+  // kept while editing and between levels, until the frame is dragged; asked for only while the frame is shown
+  gameViewMario: { x: number; y: number; key: string | null; camera?: CameraAt | null } | null = null;
   // view-only game state applied before the emulated level load
   switches = { palaces: false, onOff: false };
   dirty = false;
@@ -310,8 +321,8 @@ export class App {
     this.graph = null;
     this.arcCache.clear();
     this.arcLevel = null;
-    const lv = this.level;
-    const r = this.emu.load(lv.number, this.buildOverrides());
+    const lv = this.level, ov = this.buildOverrides();
+    const r = this.emu.load(lv.number, ov);
     this.renderError = r.ok ? null : r.error ?? 'Error';
     this.anim.snaps = this.show.anim && r.ok ? this.emu.animationFrames() : [];
     this.render = r;
@@ -322,6 +333,7 @@ export class App {
     this.startAnimation();
     this.emit('render');
     this.scheduleScan();
+    this.updateGameViewCamera(ov);
   }
 
   recomposite(): void {
@@ -378,11 +390,11 @@ export class App {
   }
 
   // ------------- entrances -------------
-  // vanilla: entrance i leads to level F800[i] | (i & $100) (the high bit comes from the map, like the exit's)
+  // the secondary entrances into the current level, of either bank (blank ones: free)
   findSecondaryEntrances(): void {
     const n = this.level.number;
     this.secEntrances = [];
-    for (let i = n & 0x100; i < (n & 0x100) + 0x100; i++) if (readSecondaryEntrance(this.rom, i).destLevel === (n & 0xff)) this.secEntrances.push(i);
+    for (let i = 0; i < 0x200; i++) if (readSecondaryEntrance(this.rom, i).destLevel === n && !isBlank(this.rom, i)) this.secEntrances.push(i);
   }
 
   markers(): Marker[] {
@@ -479,11 +491,11 @@ export class App {
   // a new secondary entrance into the current level at the entrance setting nearest to (px, py)
   newSecondaryEntrance(px: number, py: number): number | null {
     const n = this.level.number;
-    const idx = this.exitGraph().freeEntrance(n);
-    if (idx === null) { toast(`No free secondary entrance left in ${n & 0x100 ? '100–1FF' : '000–0FF'}.`, 'error'); return null; }
+    const idx = this.exitGraph().freeEntrance();
+    if (idx === null) { toast('No free secondary entrance left.', 'error'); return null; }
     const p = nearestEntrance(this.rom, px, py, (this.level.secondary.verticalPositioning & 1) !== 0, this.level.header.screens - 1, this.entranceRows());
     this.editSecondaryEntrance(idx, `Secondary entrance ${hex(idx, 3)} created`, (e) => {
-      e.destLevel = n & 0xff;
+      e.destLevel = n;
       placeSecondary(e, p);
     });
     this.selectEntrance({ kind: 'sec', index: idx });
@@ -960,7 +972,53 @@ export class App {
     const stored = this.results.get<ScanResult>(key);
     if (stored) { done(stored); return; }
     // played in the probe worker
-    this.probes.requestScan(run, key, { number: lv.number, ov, vertical, width: this.images.width, height: this.images.height }, (r) => { if (r) done(r); });
+    this.probes.requestScan(run, key, this.scanLevel(ov), (r) => { if (r) done(r); });
+  }
+
+  // the open level as edited (ov), to be played in the probe worker
+  private scanLevel(ov: LevelOverride): ScanLevel {
+    return { number: this.level.number, ov, vertical: this.vertical, width: this.images.width, height: this.images.height };
+  }
+
+  // What of the level the camera can show (camerareach.ts), from the level scan: undefined while the level has
+  // none yet, null when it could not be found
+  cameraReach(): CameraReach | null | undefined {
+    return this.levelScan?.level === this.level.number ? this.levelScan.result.camera ?? null : undefined;
+  }
+
+  // The game view's scroll bands (camerabands.ts) under the open level's mode and vertical scroll setting:
+  // undefined while emulating, null when they could not be found
+  scrollBands(): CameraBands | null | undefined {
+    const h = this.level.header;
+    return this.probes.cameraBands(h.mode, h.verticalScroll);
+  }
+
+  // ------------- the game view frame placed by Mario (see camerareach.ts) -------------
+  private cameraRun = 0;
+
+  // Mario standing at level pixel (x, y): the frame shows the camera the game puts there
+  placeGameViewByMario(x: number, y: number): void {
+    this.gameViewMario = { x, y, key: null }; // (not asked for yet)
+    this.updateGameViewCamera();
+  }
+
+  // the camera at Mario's place (kept inside the level) in the level as edited (ov), from the result cache or
+  // played in the probe worker; asked again when the cache dropped it (the ROM bytes it read changed)
+  updateGameViewCamera(ov?: LevelOverride): void {
+    const m = this.gameViewMario, im = this.images;
+    if (!m || !im || !this.show.gameView) return;
+    m.x = Math.max(0, Math.min(im.width - MARIO_W, m.x)); m.y = Math.max(0, Math.min(im.height - MARIO_H, m.y));
+    ov ??= this.buildOverrides();
+    const key = cameraAtKey(this.level.number, ov, m.x, m.y);
+    if (m.key === key && (m.camera === undefined || m.camera === null || this.results.get(key) !== undefined)) return;
+    m.key = key;
+    m.camera = this.results.get<CameraAt>(key);
+    if (m.camera === undefined) this.probes.requestCamera(++this.cameraRun, key, this.scanLevel(ov), m.x, m.y, (r) => {
+      if (this.gameViewMario !== m || m.key !== key) return;
+      m.camera = r;
+      this.emit('game-view');
+    });
+    this.emit('game-view');
   }
 
   // What the four layer 3 settings do in a tileset (see layer3.ts): the level as edited is loaded
@@ -1035,6 +1093,28 @@ export class App {
     }
     if (pending && !this.usesRun) this.learnLevelTiles(idx);
     return { levels, pending };
+  }
+  // the tilesets in which FG Map16 tile t is the open level's tile (all for the standard tiles): the
+  // pointers each tileset loads (tilesets.ts), learned once and kept in the result cache
+  tilesetsOf(t: number): number[] {
+    const all = Array.from({ length: TILESETS }, (_, i) => i);
+    if (!isTilesetTile(t)) return all;
+    const ptrs = all.map((ts) => {
+      const k = `tsp1:${ts}`, stored = this.results.get<number[]>(k);
+      if (stored) return stored;
+      const r = tilesetPointers(this.usesEmu = this.auxEmu(this.usesEmu), ts);
+      this.results.set(k, r.result, this.results.fp.deps(r.reads));
+      return r.result;
+    });
+    return sharingTilesets(ptrs, this.level.header.tileset, t);
+  }
+  // the entrance actions that make a level slippery (slippery.ts), learned once and kept in the result cache
+  slipperyActions(): number[] {
+    const k = 'slip1', stored = this.results.get<number[]>(k);
+    if (stored) return stored;
+    const r = slipperyActions(this.usesEmu = this.auxEmu(this.usesEmu));
+    this.results.set(k, r.result, this.results.fp.deps(r.reads));
+    return r.result;
   }
   // the levels with sprite id (spriteId), the open level as edited
   spriteUsers(id: number): SpriteUser[] {

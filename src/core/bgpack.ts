@@ -23,7 +23,7 @@ import { BG_SIZE } from './bg.ts';
 import { parseMap16File, exgfxName, type Map16File } from './map16file.ts';
 import { BG_EXT_FIRST, BG_EXT_TILES, bgTileWords } from './bgmap16.ts';
 import { EXT_FIRST, EXT_TILES } from './map16ext.ts';
-import { gfxEntry } from './patches.ts';
+import { gfxEntry, gfxDataSize } from './patches.ts';
 import { LG_SLOT_NAMES, LT3_SLOT, GAME_LAYER3_GFX, fromLt3Nibble, type Lt3Place } from './layer3gfx.ts';
 import { mwlExAnim } from './mwl.ts';
 import { slotTiles, type ExSlot } from './exanim.ts';
@@ -82,8 +82,9 @@ export interface BgPackGfx {
   file: string | null; // file in the package, null = a GFX file the ROM already has (vanilla number)
   slot: string; // FG1..BG3, LG1-LG4, LT3
   lmNum: number; // number in the package
-  num: number; // ExGFX number it is stored as (00-FE)
+  num: number; // ExGFX number it is stored as (the package's when free)
   parts: PackPart[]; // the parts whose tiles use the slot
+  size?: number; // the file's size unpacked (gfxDataSize), with `file`
 }
 
 export interface BgPackPlan {
@@ -158,15 +159,16 @@ export function planBgPack(rom: Rom, name: string, files: Map<string, Uint8Array
       // not in the package: the ROM's file, if it has it – only for the part's own slots (a background
       // does not change the level's FG graphics)
       const own = [...parts].filter((p) => slot.startsWith(p.toUpperCase()));
-      if (own.length && lmNum !== 0x7f && lmNum <= 0xff && gfxEntry(rom, lmNum)) gfx.push({ file: null, slot, lmNum, num: lmNum, parts: own });
+      if (own.length && lmNum !== 0x7f && gfxEntry(rom, lmNum)) gfx.push({ file: null, slot, lmNum, num: lmNum, parts: own });
       continue;
     }
+    const size = gfxDataSize(files.get(file)!);
     let num = byNum.get(lmNum);
     if (num === undefined) {
-      num = gfxNumber(rom, lmNum, taken);
+      num = gfxNumber(rom, lmNum, taken, { slot, size });
       byNum.set(lmNum, num);
     }
-    gfx.push({ file, slot, lmNum, num, parts: [...parts] });
+    gfx.push({ file, slot, lmNum, num, parts: [...parts], size });
   }
   // ExAnimation: the level file's slots writing tiles the taken-over parts draw from, and the files they
   // take frames from
@@ -194,10 +196,11 @@ export function planBgPack(rom: Rom, name: string, files: Map<string, Uint8Array
     const lmNum = level.gfx.get(slot);
     if (lmNum === undefined || lmNum === gameFile || lmNum === 0x7f) continue; // 7F: Lunar Magic's "no file"
     const file = bins.get(lmNum) ?? null;
-    if (!file) { if (lmNum <= 0xff && gfxEntry(rom, lmNum)) gfx.push({ file: null, slot, lmNum, num: lmNum, parts: ['layer3'] }); continue; }
+    if (!file) { if (gfxEntry(rom, lmNum)) gfx.push({ file: null, slot, lmNum, num: lmNum, parts: ['layer3'] }); continue; }
+    const size = gfxDataSize(files.get(file)!);
     let num = byNum.get(lmNum);
-    if (num === undefined) { num = gfxNumber(rom, lmNum, taken); byNum.set(lmNum, num); }
-    gfx.push({ file, slot, lmNum, num, parts: ['layer3'] });
+    if (num === undefined) { num = gfxNumber(rom, lmNum, taken, { slot, size }); byNum.set(lmNum, num); }
+    gfx.push({ file, slot, lmNum, num, parts: ['layer3'], size });
   }
   const layer3 = gfx.some((g) => g.parts.includes('layer3')) ? { dest: l3.dest, size: l3.size } : null;
   const unused = [...bins].filter(([n, f]) => !byNum.has(n) && !sources.includes(f)).map(([, f]) => base(f));

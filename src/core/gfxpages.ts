@@ -6,7 +6,7 @@
 // animation keeps the block probes (whose test level may be the level being animated).
 
 import { snesToPc, type Rom } from './rom.ts';
-import { gfxEntry } from './patches.ts';
+import { gfxEntry, GFX_FILES, GFX_NONE } from './patches.ts';
 import { lz2Decompress } from './lz2.ts';
 import { exanimDataRanges } from './exanim.ts';
 
@@ -26,7 +26,7 @@ export function gfxSkipMask(rom: Rom): Uint8Array {
   rom.reads = null;
   try {
     const mask = new Uint8Array(rom.data.length);
-    for (let i = 0; i < 0x100; i++) {
+    for (let i = 0; i < GFX_FILES; i++) {
       const r = fileRange(rom, i);
       if (r) mask.fill(1, r[0], r[1]);
     }
@@ -36,12 +36,12 @@ export function gfxSkipMask(rom: Rom): Uint8Array {
   } finally { rom.reads = reads; }
 }
 
-// content hash of some GFX files (0xFF = none)
+// content hash of some GFX files (0FF = none)
 export function gfxFilesHash(rom: Rom, files: number[]): number {
   let h = 0x811c9dc5;
   for (const f of files) {
     h = Math.imul(h ^ f, 0x01000193);
-    const r = f === 0xff ? null : fileRange(rom, f);
+    const r = f === GFX_NONE ? null : fileRange(rom, f);
     if (!r) continue;
     for (let o = r[0]; o < r[1]; o++) h = Math.imul(h ^ rom.data[o], 0x01000193);
   }

@@ -9,7 +9,7 @@
 
 import { Rom } from './rom.ts';
 import { lz2Decompress, lz2Compress } from './lz2.ts';
-import { gfxEntry, setGfxEntry, VANILLA_GFX } from './patches.ts';
+import { gfxEntry, setGfxEntry, gfxNumberProblem, VANILLA_GFX, GFX_3BPP } from './patches.ts';
 
 export interface Map16File {
   width: number; height: number; tiles: number[][]; acts: number[] | null;
@@ -70,8 +70,8 @@ export function exgfxName(name: string): { num: number | null; slot: string | nu
 
 // stores a GFX/ExGFX file: 4 KB = raw 4bpp (DMA'd directly), 3 KB = 3bpp (packed with LZ2),
 // otherwise LZ2 data as it is (like Lunar Magic's compressed ExGFX). Replaces a file in free space.
+// The number must fit the file (gfxNumberProblem: also one of the game's files, which it replaces).
 export function importGfxFile(rom: Rom, num: number, data: Uint8Array): string {
-  if (num < 0 || num > 0xff) throw new Error('GFX number must be 00–FF');
   let raw: boolean, stored: Uint8Array, what: string;
   // uncompressed: 4bpp; 2bpp layer 3 graphics and layer 3 tilemaps (layer3gfx.ts) stay so too
   const plain: Record<number, string> = { 0x1000: '4bpp', 0x800: '2bpp (layer 3)', 0x2000: 'layer 3 tilemap' };
@@ -84,6 +84,8 @@ export function importGfxFile(rom: Rom, num: number, data: Uint8Array): string {
     else if (un.length === 0xc00) { raw = false; stored = data; what = '3bpp, LZ2'; }
     else throw new Error(`Unknown GFX format (${data.length} bytes, decompressed ${un.length})`);
   }
+  const bad = gfxNumberProblem(num, { game: true, size: raw ? stored.length : GFX_3BPP });
+  if (bad) throw new Error(bad);
   const old = gfxEntry(rom, num);
   if (old && num >= VANILLA_GFX) rom.freeAt(old.addr);
   setGfxEntry(rom, num, rom.allocWrite(stored), raw, stored.length);

@@ -1,11 +1,10 @@
 // The exit graph: which screen exits lead where, which secondary entrances are used and which are free.
-// Convention (as levelTranslevel): the high bit of an exit's destination – the level number, or the
-// secondary entrance number and that entrance's level – comes from the bank (0xx/1xx) of the level
-// the exit is in.
+// An exit's target number is its own (new-style, exitIndex in level.ts), a secondary entrance's level its
+// own too (bit 8 in Lunar Magic's D): exits and entrances lead from and to either bank (0xx/1xx).
 
 import type { Rom } from './rom.ts';
-import { loadLevel, readSecondaryEntrance, mainTranslevel, exitToMidway, SEC_ENT, type ScreenExit } from './level.ts';
-import { levelName } from './overworld.ts';
+import { loadLevel, readSecondaryEntrance, mainTranslevel, exitToMidway, exitIndex, oldStyleSecondary, storedExits, SEC_ENT, SEC_LEVEL_HI, EXIT_NEW, type ScreenExit } from './level.ts';
+import { levelName, readL1, translevels, translevelToLevel } from './overworld.ts';
 import { hex } from './names.ts';
 
 export interface ExitRef {
@@ -18,16 +17,10 @@ export interface ExitRef {
 }
 
 // where an exit of level `from` leads
-export function exitTarget(rom: Rom, from: number, e: Pick<ScreenExit, 'dest' | 'secondary'>): { entrance: number; to: number } {
-  const bank = from & 0x100;
-  const idx = (e.dest & 0x1ff) | bank;
+export function exitTarget(rom: Rom, from: number, e: Pick<ScreenExit, 'dest' | 'secondary' | 'flags'>): { entrance: number; to: number } {
+  const idx = exitIndex(from, e);
   if (!e.secondary) return { entrance: -1, to: idx };
-  return { entrance: idx, to: readSecondaryEntrance(rom, idx).destLevel | bank };
-}
-
-// the levels an exit of level `from` can lead to, and the entrances it can use
-export function sameBank(a: number, b: number): boolean {
-  return (a & 0x100) === (b & 0x100);
+  return { entrance: idx, to: readSecondaryEntrance(rom, idx).destLevel };
 }
 
 export class ExitGraph {
@@ -53,21 +46,19 @@ export class ExitGraph {
     return this.exits.filter((e) => e.entrance === idx);
   }
 
-  // the secondary entrances leading into a level (those of its bank, see app.findSecondaryEntrances)
+  // the secondary entrances leading into a level (see app.findSecondaryEntrances)
   entrancesOf(level: number): number[] {
     const out: number[] = [];
-    const bank = level & 0x100;
-    for (let i = bank; i < bank + 0x100; i++) if (readSecondaryEntrance(this.rom, i).destLevel === (level & 0xff) && !isBlank(this.rom, i)) out.push(i);
-    // a blank entry leads to level x00 too; list it only where an exit uses it
-    if ((level & 0xff) === 0) for (const e of this.exits) if (e.entrance >= bank && e.entrance < bank + 0x100 && isBlank(this.rom, e.entrance) && !out.includes(e.entrance)) out.push(e.entrance);
+    for (let i = 0; i < 0x200; i++) if (readSecondaryEntrance(this.rom, i).destLevel === level && !isBlank(this.rom, i)) out.push(i);
+    // a blank entry leads to level 000 or 100 too; list it only where an exit uses it
+    for (const e of this.exits) if (e.entrance >= 0 && e.to === level && isBlank(this.rom, e.entrance) && !out.includes(e.entrance)) out.push(e.entrance);
     return out.sort((a, b) => a - b);
   }
 
-  // a free secondary entrance number in the bank of `level`: no exit uses it and all its bytes are 0
-  freeEntrance(level: number): number | null {
-    const bank = level & 0x100;
+  // a free secondary entrance number (for any level): no exit uses it and it is blank
+  freeEntrance(): number | null {
     const used = new Set(this.exits.map((e) => e.entrance));
-    for (let i = bank + 1; i < bank + 0x100; i++) if (!used.has(i) && isBlank(this.rom, i)) return i;
+    for (let i = 1; i < 0x200; i++) if (i !== 0x100 && !used.has(i) && isBlank(this.rom, i)) return i;
     return null;
   }
 
@@ -107,6 +98,51 @@ export class ExitGraph {
   }
 }
 
+// all its bytes 0, but for the level's bit 8 (D: an unused entrance 100-1FF of the game leads into level 100)
 export function isBlank(rom: Rom, idx: number): boolean {
-  return SEC_ENT.every((t) => rom.r8(t + idx) === 0);
+  return SEC_ENT.every((t, k) => (rom.r8(t + idx) & (k === 3 ? ~SEC_LEVEL_HI : 0xff)) === 0);
+}
+
+// The game's exits without u (old-style) take the target's high bit from the overworld submap Mario is on
+// ($05D7CB: submap 0 → 0xx, else 1xx), which stays while he goes on through the exits of the level he entered.
+// The banks each level is played from: its overworld tile's (submap 0 is the main map, the first 0x400 tiles
+// of layer 1; the game's translevel table $7ED000 numbers the tiles as translevels() does), then through
+// exits, breadth first. In the game every level is played from its own bank only (tools/testexitbank.ts)
+export function submapBanks(rom: Rom): Map<number, Set<number>> {
+  const banks = new Map<number, Set<number>>();
+  const queue: [number, number][] = [];
+  const reach = (level: number, bank: number) => {
+    const s = banks.get(level) ?? banks.set(level, new Set()).get(level)!;
+    if (!s.has(bank)) { s.add(bank); queue.push([level, bank]); }
+  };
+  translevels(readL1(rom)).forEach((t, i) => { if (t) reach(translevelToLevel(t), i >= 0x400 ? 1 : 0); });
+  while (queue.length) {
+    const [n, bank] = queue.shift()!;
+    let exits: ScreenExit[];
+    try { exits = storedExits(rom, n).exits; } catch { continue; }
+    const oldSecondary = oldStyleSecondary(exits);
+    for (const e of exits) {
+      const idx = exitIndex(n, e, bank);
+      const to = (e.flags & EXIT_NEW ? e.secondary : oldSecondary) ? readSecondaryEntrance(rom, idx).destLevel : idx;
+      reach(to, bank);
+    }
+  }
+  return banks;
+}
+
+// makes the game's old-style exits new-style (u, h, s; Lunar Magic's), leading where the game leads them: the
+// high bit of the bank the level is played from (submapBanks; a level not played: its own), secondary by the
+// level's last exit. So no exit depends on the overworld any more. When the clean game is patched; a level
+// played from both banks would keep its exits (the game has none)
+export function newStyleExits(rom: Rom): void {
+  const banks = submapBanks(rom);
+  for (let n = 0; n < 0x200; n++) {
+    const { exits, at } = storedExits(rom, n);
+    const b = banks.get(n) ?? new Set([n >> 8]);
+    if (b.size !== 1) continue;
+    const bank = [...b][0], s = oldStyleSecondary(exits) ? 2 : 0;
+    exits.forEach((e, i) => {
+      if (!(e.flags & EXIT_NEW)) rom.w8(at[i] + 1, (rom.r8(at[i] + 1) & 0xf8) | EXIT_NEW | s | bank);
+    });
+  }
 }

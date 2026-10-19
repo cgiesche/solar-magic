@@ -14,7 +14,7 @@ import { map16Targets, importGfxFile, type Map16File } from './map16file.ts';
 import { EXT_FIRST, EXT_TILES, DEFAULT_ACTS, extTileWords, actsLike, setExtTileWords, setActsLike } from './map16ext.ts';
 import { BG_EXT_TILES, bgExtTileWords, vanillaBgWords, setBgExtTileWords } from './bgmap16.ts';
 import {
-  gfxEntry, VANILLA_GFX, levelGfx, setLevelGfx, levelExtGfx, setLevelExtGfx, GFX_SLOT_NAMES,
+  gfxEntry, gfxHex, freeGfx, gfxRangeFor, gfxNumberProblem, type GfxFileKind, levelGfx, setLevelGfx, levelExtGfx, setLevelExtGfx, GFX_SLOT_NAMES,
   EXT_GFX_SLOT_NAMES, customPalette, setCustomPalette,
 } from './patches.ts';
 import { sampleTiles } from './mwl.ts';
@@ -35,19 +35,12 @@ export const slotOfWord = (w: number) => VRAM_SLOTS[(w & 0x3ff) >> 7] ?? null;
 // (layer3gfx.ts)
 export const GFX_SLOTS = [...GFX_SLOT_NAMES, ...EXT_GFX_SLOT_NAMES, ...LAYER3_SLOT_NAMES];
 
-// first ExGFX number that is free and not taken by `taken` (80-FE first, as Lunar Magic suggests; FF is
-// a level slot's "none"), -1: none left
-export function freeGfx(rom: Rom, taken: Set<number>): number {
-  const free = (i: number) => !taken.has(i) && !gfxEntry(rom, i);
-  for (let i = 0x80; i < 0xff; i++) if (free(i)) return i;
-  for (let i = VANILLA_GFX; i < 0x80; i++) if (free(i)) return i;
-  return -1;
-}
-
-// the number an ExGFX file is stored as: the author's (`want`) when free and not `taken`, else the next
-// free one; added to `taken`
-export function gfxNumber(rom: Rom, want: number | null, taken: Set<number>): number {
-  const num = want !== null && want >= VANILLA_GFX && want < 0xff && !taken.has(want) && !gfxEntry(rom, want) ? want : freeGfx(rom, taken);
+// the number the ExGFX file `f` is stored as: the author's (`want`, Lunar Magic's numbering up to FFF)
+// when it may hold the file, is free and not `taken`, else the next free one in the file's range
+// (gfxRangeFor: a 3bpp file numbered E00-FFF goes to 80-DFF); added to `taken`
+export function gfxNumber(rom: Rom, want: number | null, taken: Set<number>, f: GfxFileKind = {}): number {
+  const keep = want !== null && !gfxNumberProblem(want, f) && !taken.has(want) && !gfxEntry(rom, want);
+  const num = keep ? want : freeGfx(rom, taken, gfxRangeFor(f));
   if (num < 0) throw new Error('No free ExGFX number left');
   taken.add(num);
   return num;
@@ -193,7 +186,7 @@ export function storeGfx(rom: Rom, files: Map<string, Uint8Array>, gfx: { file: 
   for (const g of gfx) {
     if (!g.file || stored.has(g.file)) continue;
     stored.add(g.file);
-    prints.push(`${base(g.file)} as ExGFX ${hx(g.num, 2)} (${importGfxFile(rom, g.num, files.get(g.file)!)})`);
+    prints.push(`${base(g.file)} as ExGFX ${gfxHex(g.num)} (${importGfxFile(rom, g.num, files.get(g.file)!)})`);
   }
   return prints;
 }

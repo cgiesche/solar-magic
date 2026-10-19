@@ -1,5 +1,5 @@
 // Probe jobs (probehost.ts, run by the editor's probe worker): results as the prober's own, asked
-// jobs before prefetched ones, a changed ROM drops the queue; object kinds and level scan as
+// jobs before prefetched ones, a changed ROM drops the queue; object kinds, level scan and camera as
 // computed directly, in slices that let asked jobs go first.
 import { readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
@@ -9,6 +9,7 @@ import { ResultCache, RomFingerprint } from '../src/core/romdeps.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { ObjKindProbe, kindsKey, type ObjKinds } from '../src/core/objkinds.ts';
 import { levelScanJob, type ScanLevel } from '../src/core/levelscan.ts';
+import { cameraAtJob } from '../src/core/camerareach.ts';
 import { loadLevel, serializeLayer1, serializeSprites, L2_PTRS } from '../src/core/level.ts';
 import { editorImage } from './fixture.ts';
 import { gfxSkipMask } from '../src/core/gfxpages.ts';
@@ -66,6 +67,7 @@ const job = levelScanJob(emu, scanLevel);
 let scanned; for (;;) { const r = job.next(); if (r.done) { scanned = r.value; break; } }
 host.handle({ type: 'kinds', ts: 1, level: { number: lv.number, header: lv.header }, layer2Pointer: l2 });
 host.handle({ type: 'scan', id: 7, key: 'scan-key', level: scanLevel });
+host.handle({ type: 'camera', id: 9, key: 'camera-key', level: scanLevel, x: 0xbb8, y: 0x20 });
 const replies: ProbeReply[] = [];
 for (let i = 0; host.pending; i++) {
   if (i === 3) host.ask([{ ts: 1, k: 0x130 }]);
@@ -78,6 +80,9 @@ const kEntry = k?.type === 'kinds' ? k.put.find(([key]) => key === kindsKey(1))?
 check(k?.type === 'kinds' && k.ts === 1 && !k.failed && JSON.stringify([...(kEntry?.data as ObjKinds).kinds]) === JSON.stringify([...kinds.kinds]), 'object kinds as computed directly, in a result cache entry');
 check(!!kEntry && kEntry.deps.pages.length === 0 && kEntry.deps.bytes.length === kindProbe.reads().bytes.size && kEntry.deps.bytes.length > 0, 'object kinds depend on the single bytes the object routines read, no pages');
 check(sc?.type === 'scan' && sc.id === 7 && JSON.stringify(sc.result) === JSON.stringify(scanned) && sc.put.some(([key]) => key === 'scan-key'), 'level scan as played directly, with its cache entry');
+const cam = replies.find((d) => d.type === 'camera'), camAt = cameraAtJob(emu, scanLevel, 0xbb8, 0x20);
+let camera; for (;;) { const r = camAt.next(); if (r.done) { camera = r.value; break; } }
+check(cam?.type === 'camera' && cam.id === 9 && JSON.stringify(cam.result) === JSON.stringify(camera) && cam.put.some(([key]) => key === 'camera-key'), 'camera at a place as played directly, with its cache entry');
 host.handle({ type: 'scan', id: 8, key: 'scan-key', level: scanLevel });
 host.next();
 host.setRom(4, rom.data.slice());

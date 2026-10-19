@@ -18,7 +18,7 @@ import {
 import { layerGeom } from './render.ts';
 import { bgFromWram, BG_SIZE } from './bg.ts';
 import { map16Tile } from './ram.ts';
-import { DM16_EXT, VANILLA_GFX, gfxEntry, levelGfx, defaultGfx, levelExtGfx } from './patches.ts';
+import { DM16_EXT, VANILLA_GFX, GFX_FILES, gfxEntry, levelGfx, defaultGfx, levelExtGfx } from './patches.ts';
 import { STRUCT_EXT, listStructures } from './structs.ts';
 import { EXT_FIRST, EXT_TILES, actsLike, extTileWords, DEFAULT_ACTS } from './map16ext.ts';
 import { loadBlockProject } from './blocks.ts';
@@ -42,7 +42,7 @@ export interface TileUse { tile: number; layer: 1 | 2; source: TileSource; count
 export interface BgTileUse { tile: number; count: number; x: number; y: number }
 export interface LevelTiles {
   level: number;
-  tileset: number; // tiles 073-0FF are the tileset's
+  tileset: number; // tiles 073-0FF are the tileset's (shared with others, see tilesets.ts)
   ok: boolean; // false: the level did not load
   fg: TileUse[];
   bg: BgTileUse[];
@@ -161,11 +161,12 @@ export class LevelUses {
 export interface TileUser { level: number; uses: TileUse[] }
 export const isTilesetTile = (t: number) => t >= 0x073 && t < 0x100;
 
-// levels placing FG Map16 tile t; tiles 073-0FF count in levels of `tileset` only (each tileset has its own)
-export function fgTileUsers(levels: Iterable<LevelTiles>, t: number, tileset: number): TileUser[] {
+// levels placing FG Map16 tile t; tiles 073-0FF count in levels of `tilesets` only, those sharing the tile's
+// data (sharingTilesets)
+export function fgTileUsers(levels: Iterable<LevelTiles>, t: number, tilesets: number[]): TileUser[] {
   const out: TileUser[] = [];
   for (const l of levels) {
-    if (isTilesetTile(t) && l.tileset !== tileset) continue;
+    if (isTilesetTile(t) && !tilesets.includes(l.tileset)) continue;
     const uses = l.fg.filter((u) => u.tile === t);
     if (uses.length) out.push({ level: l.level, uses });
   }
@@ -248,10 +249,28 @@ export function gfxUsage(rom: Rom, levels: Iterable<number>, header: (n: number)
   return m;
 }
 
+// Where a level's Map16 tiles drawing from a file were made for, after its slot `name` changed (before →
+// now), when that is another layer slot: the ExGFX that left the slot is still in another one (moved), or
+// the new ExGFX is in another slot in other levels (`levels`: how many, 0 when moved). Null: the tiles fit.
+export interface SlotMove { file: number; from: GfxSlot; to: GfxSlot; levels: number }
+export function slotMove(before: GfxSlot[], now: GfxSlot[], name: string, usage: Map<number, GfxUser[]>, level: number): SlotMove | null {
+  const was = before.find((x) => x.name === name), is = now.find((x) => x.name === name);
+  if (!was || !is) return null;
+  const elsewhere = (file: number) => now.find((x) => x.map16 && x.name !== name && x.file === file);
+  const moved = was.custom && was.file >= VANILLA_GFX ? elsewhere(was.file) : undefined;
+  if (moved) return moved.first === was.first ? null : { file: was.file, from: was, to: moved, levels: 0 };
+  if (is.file === 0xff || is.file < VANILLA_GFX || elsewhere(is.file)) return null;
+  const count = new Map<string, number>();
+  for (const u of usage.get(is.file) ?? []) if (u.level !== level) for (const n of u.slots) count.set(n, (count.get(n) ?? 0) + 1);
+  const best = [...count.entries()].filter(([n]) => n !== name && now.some((x) => x.map16 && x.name === n)).sort((a, b) => b[1] - a[1])[0];
+  const from = best && now.find((x) => x.name === best[0]);
+  return from && from.first !== is.first ? { file: is.file, from, to: is, levels: best[1] } : null;
+}
+
 // ExGFX files in the ROM that no level's slot uses
 export function unusedExGfx(rom: Rom, levels: Iterable<number>, usage = gfxUsage(rom, levels)): number[] {
   const out: number[] = [];
-  for (let i = VANILLA_GFX; i < 0xff; i++) if (gfxEntry(rom, i) && !usage.has(i)) out.push(i);
+  for (let i = VANILLA_GFX; i < GFX_FILES; i++) if (gfxEntry(rom, i) && !usage.has(i)) out.push(i);
   return out;
 }
 

@@ -52,7 +52,7 @@ const map16 = parseMap16File(files.get('ghostbustersghosttrapjavamanhattanBG.map
   const emu0 = new LevelEmulator(rom); emu0.boot();
   const before = emu0.load(LV);
   const plan = planBgPack(rom, 'ghostbusters', files, BLANK);
-  check(plan.at === 0x200 && plan.gfx.length === 3 && plan.gfx.every((g) => g.num >= 0x80 && g.num < 0xff) && plan.palettes.length === 1 && plan.palettes[0].colors.join() === Array.from({ length: 14 }, (_, i) => 0x31 + i).join() && plan.palettes[0].back && !plan.fg && plan.map16?.data.origin?.bg === true, 'plan: tiles at 200 (BG .map16 by its header), ExGFX 8A1-8A3 renumbered, colors 31-3E + back area color');
+  check(plan.at === 0x200 && plan.gfx.length === 3 && plan.gfx.every((g) => g.num === g.lmNum) && plan.palettes.length === 1 && plan.palettes[0].colors.join() === Array.from({ length: 14 }, (_, i) => 0x31 + i).join() && plan.palettes[0].back && !plan.fg && plan.map16?.data.origin?.bg === true, 'plan: tiles at 200 (BG .map16 by its header), ExGFX 8A1-8A3 kept, colors 31-3E + back area color');
   const lv = loadLevel(rom, LV);
   const r = applyBgPack(rom, lv, files, plan, { blank: BLANK, cgram: levelColors(before) });
   check(r.ok && !!r.bg, 'applied: ' + [...r.errors, ...r.notes].join(' | '));

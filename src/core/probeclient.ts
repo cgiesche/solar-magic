@@ -1,14 +1,17 @@
-// The editor's side of the probes (probehost.ts): asks for block, collision and sprite probes and
-// Mario's run speeds in the current tileset, prefetches what the palettes can show, and runs the
-// object kinds and level scan, all in the probe worker. It sends the ROM again after a change
+// The editor's side of the probes (probehost.ts): asks for block, collision and sprite probes, Mario's
+// run speeds and the game view's scroll bands in the current tileset, prefetches what the palettes can
+// show, and runs the object kinds, the level scan and the camera at a place, all in the probe worker. It
+// sends the ROM again after a change
 // (the worker drops its queue then) together with everything still wanted, and falls back to
 // probing on the main thread in background slices when the worker fails. Results go to the
 // editor's ResultCache, also those from before a ROM change: they hold while the ROM bytes they read
 // are unchanged.
 
-import { ProbeHost, PROBE_SPRITE, PROBE_COLL, PROBE_RUNS, jobId, jobKey, type ProbeJob, type ProbeMessage, type ProbeDone, type ProbeReply, type KindsDone, type ScanDone } from './probehost.ts';
+import { ProbeHost, PROBE_SPRITE, PROBE_COLL, PROBE_RUNS, cameraJob, jobId, jobKey, type ProbeJob, type ProbeMessage, type ProbeDone, type ProbeReply, type KindsDone, type ScanDone, type CameraDone } from './probehost.ts';
 import type { ResultCache } from './romdeps.ts';
 import type { BlockProbe, CollisionProbe, SpriteProbe, RunStates } from './blockprobe.ts';
+import type { CameraBands } from './camerabands.ts';
+import type { CameraAt } from './camerareach.ts';
 import { kindsKey, type ObjKinds, type KindLevel } from './objkinds.ts';
 import type { ScanLevel, ScanResult } from './levelscan.ts';
 
@@ -26,7 +29,7 @@ export interface ProbeClientDeps {
   // starts the worker (replies go to reply, failed() once it broke down); null or a throw: none
   connect?(reply: (d: ProbeReply) => void, failed: () => void): Send | null;
   later(key: string, step: () => void): void; // a background slice on the main thread
-  setBusy(key: 'probe' | 'kinds' | 'scan', label: string | null): void;
+  setBusy(key: 'probe' | 'kinds' | Played, label: string | null): void;
   ready(): void; // the asked or the prefetched probes are all done
   kindsReady(): void; // object kinds asked for are known (or failed)
 }
@@ -39,7 +42,8 @@ export class ProbeClient {
   private failed = new Set<string>();
   private kindsWant: ProbeMessage & { type: 'kinds' } | null = null;
   private kindsFailed = new Set<number>(); // tilesets (until the ROM changes)
-  private scanWant: { msg: ProbeMessage & { type: 'scan' }; done: (r: ScanResult | null) => void } | null = null;
+  // the level scan and the camera at a place asked for, one of each
+  private playWant = new Map<Played, { msg: ProbeMessage & { type: Played }; done: (r: unknown) => void }>();
   private d: ProbeClientDeps;
 
   constructor(deps: ProbeClientDeps) { this.d = deps; }
@@ -52,9 +56,16 @@ export class ProbeClient {
     return probeable(num) ? this.probed(PROBE_SPRITE | num) : undefined;
   }
   // Mario's run speeds; null when they could not be found
-  runSpeeds(): RunStates | null | undefined {
-    const r = this.probed<RunStates>(PROBE_RUNS);
-    return r === undefined && this.failed.has(jobId({ ts: this.d.tileset(), k: PROBE_RUNS })) ? null : r;
+  runSpeeds(): RunStates | null | undefined { return this.probedOrFailed<RunStates>(PROBE_RUNS); }
+
+  // where Mario is on the screen while the camera scrolls (camerabands.ts) in a level of that mode and vertical
+  // scroll setting; null when they could not be found
+  cameraBands(mode: number, vscroll: number): CameraBands | null | undefined { return this.probedOrFailed<CameraBands>(cameraJob(mode, vscroll)); }
+
+  // a probe's result; null when it failed
+  private probedOrFailed<T>(k: number): T | null | undefined {
+    const r = this.probed<T>(k);
+    return r === undefined && this.failed.has(jobId({ ts: this.d.tileset(), k })) ? null : r;
   }
 
   private probed<T>(k: number): T | undefined {
@@ -124,16 +135,26 @@ export class ProbeClient {
 
   // A level scan (replaces one still running); its result goes to the cache under key too
   requestScan(id: number, key: string, level: ScanLevel, done: (r: ScanResult | null) => void): void {
-    this.sync(); // (first: after a ROM change it would send the scan wanted then)
-    this.scanWant = { msg: { type: 'scan', id, key, level }, done };
-    this.d.setBusy('scan', 'Level scan');
-    this.send?.(this.scanWant.msg);
+    this.play({ type: 'scan', id, key, level }, (r) => done(r as ScanResult | null), 'Level scan');
   }
 
   // the scan asked for is not wanted any more
   cancelScan(): void {
-    this.scanWant = null;
+    this.playWant.delete('scan');
     this.d.setBusy('scan', null);
+  }
+
+  // The camera at Mario standing at (x, y) in the level (camerareach.ts; replaces one still running); its
+  // result goes to the cache under key too
+  requestCamera(id: number, key: string, level: ScanLevel, x: number, y: number, done: (r: CameraAt | null) => void): void {
+    this.play({ type: 'camera', id, key, level, x, y }, (r) => done(r as CameraAt | null), 'Camera');
+  }
+
+  private play(msg: ProbeMessage & { type: Played }, done: (r: unknown) => void, label: string): void {
+    this.sync(); // (first: after a ROM change it would send what was wanted then)
+    this.playWant.set(msg.type, { msg, done });
+    this.d.setBusy(msg.type, label);
+    this.send?.(msg);
   }
 
   // Starts the worker, and sends it the ROM again after a change (it drops its queue then: the
@@ -149,7 +170,7 @@ export class ProbeClient {
     this.send({ type: 'rom', gen: this.gen, data: rom.data.slice() });
     if (this.asked.size) this.send({ type: 'ask', jobs: [...this.asked.values()] });
     if (this.kindsWant) this.send(this.kindsWant);
-    if (this.scanWant) this.send(this.scanWant.msg);
+    for (const w of this.playWant.values()) this.send(w.msg);
     this.d.later('probe-prefetch', () => this.prefetch()); // results that read changed ROM data are redone
   }
 
@@ -192,7 +213,7 @@ export class ProbeClient {
   private reply(d: ProbeReply): void {
     if (d.type === 'probe') this.probeDone(d);
     else if (d.type === 'kinds') this.kindsDone(d);
-    else this.scanDone(d);
+    else this.playDone(d);
   }
 
   // Results are kept whatever ROM they ran on: the cache checks them against the ROM bytes they
@@ -219,12 +240,13 @@ export class ProbeClient {
     this.d.kindsReady();
   }
 
-  private scanDone(d: ScanDone): void {
-    const want = this.scanWant;
+  // (as probeDone: a result from an older ROM counts while it holds)
+  private playDone(d: ScanDone | CameraDone): void {
+    const want = this.playWant.get(d.type);
     for (const [k, e] of d.put) this.d.results.set(k, e.data, e.deps);
     if (want?.msg.id !== d.id || (d.gen !== this.gen && this.d.results.get(want.msg.key) === undefined)) return;
-    this.scanWant = null;
-    this.d.setBusy('scan', null);
+    this.playWant.delete(d.type);
+    this.d.setBusy(d.type, null);
     want.done(d.result);
   }
 
@@ -233,6 +255,8 @@ export class ProbeClient {
     this.d.setBusy('probe', n ? `Block behavior (${n})` : null);
   }
 }
+
+type Played = 'scan' | 'camera'; // tasks that play a level
 
 // sprite ids (custom ones from 0x200) that can be probed: not shooters, generators, run-once
 export function probeable(num: number): boolean {
