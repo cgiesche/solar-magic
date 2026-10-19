@@ -43,7 +43,9 @@ export function layer2RateName(v: number, horizontal: boolean): string {
   const i = v - 0x10, dirs = horizontal ? ['Left', 'Right'] : ['Up', 'Down'];
   return i < 12 ? `Auto-Scroll ${dirs[i < 6 ? 0 : 1]} ${L2_AUTO[i % 6]}` : `Not used (${hex2(v)})`;
 }
-export const VERTICAL_SCROLL = ['Vertical scroll at will', 'No vertical scroll', 'Vertical scroll always', 'No scroll at all'];
+// the header's vertical scroll ($1412, $00F7F4): 1 follows Mario on the ground too, 2 only while he flies, climbs,
+// swims … (testcamerareach.ts); 3 neither way (no horizontal scrolling either)
+export const VERTICAL_SCROLL = ['No vertical scroll', 'Vertical scroll always', 'Vertical scroll while flying, climbing, swimming …', 'No scroll at all'];
 
 export function hex2(n: number): string {
   return n.toString(16).toUpperCase().padStart(2, '0');

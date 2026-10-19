@@ -6,8 +6,10 @@ import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { cameraReachJob, cameraAtJob, cameraAtKey, type CameraReach } from '../src/core/camerareach.ts';
 import type { ScanLevel } from '../src/core/levelscan.ts';
-import { loadLevel, serializeLayer1, serializeSprites, isL1Vertical, type Level } from '../src/core/level.ts';
-import { installEditorPatch } from '../src/core/patches.ts';
+import { loadLevel, serializeLayer1, serializeSprites, isL1Vertical, newUid, type Level } from '../src/core/level.ts';
+import { installEditorPatch, DM16_EXT } from '../src/core/patches.ts';
+import { GM, RAM, cameraY, setMarioPos } from '../src/core/ram.ts';
+import { VERTICAL_SCROLL } from '../src/core/names.ts';
 import { GAME_VIEW_W, GAME_VIEW_H } from '../src/core/camerabands.ts';
 
 let bad = 0;
@@ -53,6 +55,25 @@ const every = (r: CameraReach | null, f: (s: [number, number] | null) => boolean
   const r = reach(lv);
   check(every(r, (s) => !!s && s[0] === 0xc0 && s[1] === 0xc0 + GAME_VIEW_H), `105 without vertical scrolling: only the bottom of the level (${fmt(r)})`);
 }
+// what the header's vertical scroll settings do (their names, names.ts): Mario lands on a ledge high up, standing
+// or climbing; the camera follows him up where the setting lets it
+{
+  const camY = (v: number, climb: boolean) => {
+    const lv = loadLevel(rom, 0x105);
+    lv.header.verticalScroll = v;
+    lv.objects.push({ uid: newUid(), num: 0, ext: DM16_EXT, x: 0x20, y: 0x06, size: 0x0f, tile: 0x130 });
+    emu.load(0x105, { layer1: serializeLayer1(rom, lv), sprites: serializeSprites(lv.sprites, lv.spriteHeader, false) });
+    const s = emu.snes, w = s.wram;
+    for (let f = 0; f < 300 && !(w[RAM.gameMode] === GM.level && w[RAM.marioAnim] === 0 && !w[RAM.spritesLocked]); f++) s.runFrame();
+    setMarioPos(w, 0x220, 0x60 - 40);
+    for (let f = 0; f < 200; f++) { if (climb) w[RAM.marioClimbing] = 1; w[RAM.hurtTimer] = 0x40; s.runFrame(); }
+    return cameraY(w);
+  };
+  const follows = (v: number) => `${camY(v, false) < 0xc0 ? 'standing' : '-'}/${camY(v, true) < 0xc0 ? 'climbing' : '-'}`;
+  const got = [0, 1, 2, 3].map(follows);
+  check(JSON.stringify(got) === JSON.stringify(['-/-', 'standing/climbing', '-/climbing', '-/-']), `the camera follows Mario up: ${got.map((g, v) => `${VERTICAL_SCROLL[v]}: ${g}`).join('; ')}`);
+}
+
 // a vertical level: spans per row, across the level's width as far as the camera goes sideways
 {
   const lv = loadLevel(rom, 0x134), r = reach(lv);
