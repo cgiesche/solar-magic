@@ -70,7 +70,9 @@ When a level is displayed, it runs the ROM's **original loading routines** (~15 
   *Graphics* → slot cards ("Swap …") or "Use in slot" next to a file on the right.
 * Screen exits per screen (destination, secondary), **secondary entrances** (dialog). Exits lead into any of
   the 0x200 levels and secondary entrances, also from 0xx into 1xx and back (Lunar Magic's new-style exits:
-  every exit the editor writes is one); a secondary entrance leads into a level of either bank.
+  every exit the editor writes is one, and the game's are made so when a clean ROM is opened, leading where
+  the game leads them – so moving a level tile to another submap no longer changes where its exits lead); a
+  secondary entrance leads into a level of either bank.
 * **Entrance options** (Lunar Magic's): Mario faces left, water level (Mario swims) for the main entrance
   (also the midway point unless it has its own) and each secondary entrance; "Water level" for a secondary screen exit. With face
   left the slanted pipe entrance shoots Mario out to the left. Test play from an entrance starts with them and

@@ -44,7 +44,7 @@ Where Mario starts in a level once he has touched its midway tape (the midway po
 _Avoid_: checkpoint (that is the tape), midway screen (for the whole entrance)
 
 **New-style exit**:
-A screen exit with Lunar Magic's u flag: its own number (with the high bit) is the target level or secondary entrance, and it is secondary or standard on its own – so it leads into either bank (0xx/1xx). Every exit the editor writes is one; exits of levels it hasn't changed may still be old-style (the game's rule: the high bit from the overworld, the level's last exit deciding secondary).
+A screen exit with Lunar Magic's u flag: its own number (with the high bit) is the target level or secondary entrance, and it is secondary or standard on its own – so it leads into either bank (0xx/1xx). Every exit the editor writes is one, and the game's exits are made new-style when the clean game is patched, leading where the game leads them – an old-style exit (the game's rule) takes the high bit from the overworld submap Mario is on, the level's last exit deciding secondary.
 _Avoid_: LM exit, exit format 2
 
 **Camera start**:

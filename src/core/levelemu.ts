@@ -164,8 +164,9 @@ export class LevelEmulator {
     w[RAM.screenExitLo] = level & 0xff;
     w[RAM.screenExitHi] = (level >> 8) & 1;
     w[RAM.currentPlayer] = 0;
-    // level bank of screen exits; a game in progress keeps its submap where that already gives it
-    if (!ov.continueState || (w[RAM.submap] !== 0 ? 1 : 0) !== ((level >> 8) & 1)) w[RAM.submap] = (level >> 8) & 1;
+    // the submap (old-style screen exits take the target's high bit from it): the level's bank; a game in
+    // progress keeps its own
+    if (!ov.continueState) w[RAM.submap] = (level >> 8) & 1;
     w[RAM.useSecondaryExit] = 0;
     w[RAM.introLevel] = 0;
     // coming from the title screen or overworld, the game's call of the music bank upload sees $141A

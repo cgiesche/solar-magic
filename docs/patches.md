@@ -545,8 +545,17 @@ code is the editor's.
   game takes the entrance action; the game's is the entrance number's), set for the game's entrances 100–1FF
   when the clean game is patched, so they lead where they did. Both places are Lunar Magic's (read from its
   code in a Lunar Magic-saved ROM: its old-style exits take the high bit from the translevel instead). Exits
-  without u behave as in the game. The editor writes every exit with u, with the target's full number; a level
-  it does not change keeps its exits. `tools/testexitbank.ts` checks it by going through a pipe.
+  without u behave as in the game. The editor writes every exit with u, with the target's full number, and
+  the game's exits get u, their h and s when the clean game is patched (`newStyleExits` in `exitgraph.ts`):
+  h from the submap the game plays the level from – its overworld tile's (the main map is submap 0), on
+  through exits – and s of the level's last exit, so no exit depends on the overworld any more (moving a
+  level tile to another submap would change where an old-style exit leads). In the game every level is
+  played from a submap of its own bank, so they lead where they did. Community code that writes `$19B8`/
+  `$19D8` itself goes the same way: GPS's teleport routine writes u and h. `tools/testexitbank.ts` checks it
+  by emulation: every exit of the game taken from a game in progress (Mario on the level's overworld tile)
+  arrives where it does in the clean game, an old-style exit of a level played from the other bank's submap
+  is made new-style leading where the game leads it, old-style exits of a 0xx level on the main map
+  (standard, and secondary through an entrance 0xx), and a GPS block teleporting from 105 into 015.
 
 The emulation check (`tools/testlevelheightplay.ts`): levels of the game moved down into taller levels play
 exactly like the game's – Mario and every sprite at the same positions under the same input, the same visible

@@ -14,6 +14,7 @@ import { installLayer3Patch } from './layer3gfx.ts';
 import { installMap16Ext, enableBlocks } from './map16ext.ts';
 import { installBgMap16Ext } from './bgmap16.ts';
 import { installStructPatch } from './structs.ts';
+import { newStyleExits } from './exitgraph.ts';
 import { LevelEmulator } from './levelemu.ts';
 import { map16Source } from './render.ts';
 import type { ApplyResult } from './patchapply.ts';
@@ -47,6 +48,7 @@ export async function installEditorPatches(rom: Rom): Promise<void> {
   asar(installL2ScrollPatch(rom));
   asar(installLevelHeightPatch(rom));
   asar(installLayer3Patch(rom));
+  newStyleExits(rom);
   // new Map16 tiles start as the empty tile 025 of the ROM
   const blank = map16Source(rom, new LevelEmulator(rom).load(0x105)).fg(0x025);
   installMap16Ext(rom, blank);

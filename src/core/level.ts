@@ -60,13 +60,17 @@ export interface ScreenExit {
   flags: number; // the low nibble of byte 1, Lunar Magic's 0000wush (h: dest's high bit, s: secondary, u, w kept)
 }
 // a screen exit's u (Lunar Magic's new-style exit, levelheight.ts): its own h is the target's high bit and its
-// own s makes it secondary. Without u the game's rule: the high bit from the overworld submap (the editor takes
-// the bank of the exit's level), the level's last exit's s for all its exits. A level's exits are read
-// new-style (parseLevelData) and always written so
+// own s makes it secondary. Without u the game's rule: the high bit from the overworld submap, the level's
+// last exit's s for all its exits. The game's exits are made new-style when the clean game is patched
+// (newStyleExits in exitgraph.ts); a level's exits are read new-style (parseLevelData: an old-style one, from
+// elsewhere, by the bank of its level) and always written so
 export const EXIT_NEW = 0x04;
-// the number an exit of level `from` leads to: a level, or a secondary entrance
-export const exitIndex = (from: number, e: Pick<ScreenExit, 'dest' | 'flags'>): number =>
-  e.flags & EXIT_NEW ? e.dest & 0x1ff : (e.dest & 0xff) | (from & 0x100);
+// the number an exit of level `from` leads to: a level, or a secondary entrance (an old-style exit's high
+// bit: `bank`, the submap's; the editor's guess the level's)
+export const exitIndex = (from: number, e: Pick<ScreenExit, 'dest' | 'flags'>, bank = from >> 8): number =>
+  e.flags & EXIT_NEW ? e.dest & 0x1ff : (e.dest & 0xff) | ((bank & 1) << 8);
+// whether a level's old-style exits are secondary: its last exit's s (as stored, layer 1's then layer 2's)
+export const oldStyleSecondary = (stored: Pick<ScreenExit, 'secondary'>[]): boolean => stored.at(-1)?.secondary ?? false;
 // a screen exit's w (Lunar Magic's): a secondary exit makes the level it leads to a water level, a standard
 // exit leads to the target's midway entrance – when that has its own settings, else to its main entrance
 // (levelheight.ts)
@@ -299,8 +303,9 @@ export interface ParsedObjects {
 
 // extended object $03 is a structure (4 bytes, structure patch). In a level with a size (`sized`) the
 // screen jump's low nibble of the second byte is the subscreen (000HHHHH 0000VVVV 00000001): rows
-// V * 32 on; the new screen flag keeps it (observed: where the game puts objects in a Lunar Magic-saved ROM)
-export function parseObjects(data: Uint8Array, start: number, vertical: boolean, sized = false): ParsedObjects {
+// V * 32 on; the new screen flag keeps it (observed: where the game puts objects in a Lunar Magic-saved ROM).
+// `at` receives each exit's offset in `data`
+export function parseObjects(data: Uint8Array, start: number, vertical: boolean, sized = false, at?: number[]): ParsedObjects {
   const objects: LevelObject[] = [];
   const exits: ScreenExit[] = [];
   let p = start;
@@ -310,6 +315,7 @@ export function parseObjects(data: Uint8Array, start: number, vertical: boolean,
     const num = ((b0 >> 1) & 0x30) | (b1 >> 4);
     if (b0 & 0x80) screen++;
     if (num === 0 && b2 === 0) {
+      at?.push(p);
       exits.push({
         uid: newUid(),
         screen: b0 & 0x1f,
@@ -502,16 +508,32 @@ export function spriteBank(rom: Rom, n: number): number {
   return spriteBankOf(rom, n);
 }
 
+// a generous window of level data: up to the end of the bank
+const dataWindow = (rom: Rom, a: number) => rom.bytes(a, 0x8000 - (a & 0x7fff));
+
 export function loadLevel(rom: Rom, n: number): Level {
   const l1 = rom.r24(L1_PTRS + n * 3);
   const l2 = rom.r24(L2_PTRS + n * 3);
   const spr = (spriteBank(rom, n) << 16) | rom.r16(SPR_PTRS + n * 2);
-  // read generous windows of data (up to the end of the bank)
-  const win = (a: number) => rom.bytes(a, 0x8000 - (a & 0x7fff));
-  const lv = parseLevelData(rom, n, win(l1), (l2 >> 16) !== 0xff ? win(l2) : null, l2, win(spr), readSecondaryHeader(rom, n));
+  const lv = parseLevelData(rom, n, dataWindow(rom, l1), (l2 >> 16) !== 0xff ? dataWindow(rom, l2) : null, l2, dataWindow(rom, spr), readSecondaryHeader(rom, n));
   lv.l1Addr = l1;
   lv.sprAddr = spr;
   return lv;
+}
+
+// a level's exits as its data has them (old-style ones too, layer 1's then layer 2's) and where each is (SNES)
+export function storedExits(rom: Rom, n: number): { exits: ScreenExit[]; at: number[] } {
+  const exits: ScreenExit[] = [], at: number[] = [];
+  const l1 = rom.r24(L1_PTRS + n * 3), l2 = rom.r24(L2_PTRS + n * 3);
+  const d1 = dataWindow(rom, l1), header = parsePrimaryHeader(d1.subarray(0, 5));
+  const read = (a: number, d: Uint8Array, vertical: boolean, sized = false) => {
+    const offs: number[] = [];
+    exits.push(...parseObjects(d, 5, vertical, sized, offs).exits);
+    at.push(...offs.map((o) => a + o));
+  };
+  if (hasObjects(header.mode)) read(l1, d1, isL1Vertical(rom, header.mode), isSized(readSecondaryHeader(rom, n)));
+  if ((l2 >> 16) !== 0xff && hasLayer2Objects(header.mode)) read(l2, dataWindow(rom, l2), isL2Vertical(rom, header.mode));
+  return { exits, at };
 }
 
 // builds a level from raw data: layer 1 (with 5 byte header), layer 2 object data (with header) or null,
@@ -531,8 +553,8 @@ export function parseLevelData(rom: Rom, n: number, l1: Uint8Array, l2: Uint8Arr
     // exits in layer 2 data are unusual; keep them with layer 1
     p1.exits.push(...p2.exits);
   }
-  // new-style, leading where they lead in the game: an old-style exit secondary by the level's last exit
-  const lastSecondary = p1.exits.at(-1)?.secondary ?? false;
+  // new-style: an old-style exit secondary by the level's last exit, its high bit the level's bank
+  const lastSecondary = oldStyleSecondary(p1.exits);
   for (const e of p1.exits) {
     if (!(e.flags & EXIT_NEW)) e.secondary = lastSecondary;
     e.dest = exitIndex(n, e);

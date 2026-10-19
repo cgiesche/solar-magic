@@ -3,8 +3,8 @@
 // own too (bit 8 in Lunar Magic's D): exits and entrances lead from and to either bank (0xx/1xx).
 
 import type { Rom } from './rom.ts';
-import { loadLevel, readSecondaryEntrance, mainTranslevel, exitToMidway, exitIndex, SEC_ENT, SEC_LEVEL_HI, type ScreenExit } from './level.ts';
-import { levelName } from './overworld.ts';
+import { loadLevel, readSecondaryEntrance, mainTranslevel, exitToMidway, exitIndex, oldStyleSecondary, storedExits, SEC_ENT, SEC_LEVEL_HI, EXIT_NEW, type ScreenExit } from './level.ts';
+import { levelName, readL1, translevels, translevelToLevel } from './overworld.ts';
 import { hex } from './names.ts';
 
 export interface ExitRef {
@@ -101,4 +101,48 @@ export class ExitGraph {
 // all its bytes 0, but for the level's bit 8 (D: an unused entrance 100-1FF of the game leads into level 100)
 export function isBlank(rom: Rom, idx: number): boolean {
   return SEC_ENT.every((t, k) => (rom.r8(t + idx) & (k === 3 ? ~SEC_LEVEL_HI : 0xff)) === 0);
+}
+
+// The game's exits without u (old-style) take the target's high bit from the overworld submap Mario is on
+// ($05D7CB: submap 0 → 0xx, else 1xx), which stays while he goes on through the exits of the level he entered.
+// The banks each level is played from: its overworld tile's (submap 0 is the main map, the first 0x400 tiles
+// of layer 1; the game's translevel table $7ED000 numbers the tiles as translevels() does), then through
+// exits, breadth first. In the game every level is played from its own bank only (tools/testexitbank.ts)
+export function submapBanks(rom: Rom): Map<number, Set<number>> {
+  const banks = new Map<number, Set<number>>();
+  const queue: [number, number][] = [];
+  const reach = (level: number, bank: number) => {
+    const s = banks.get(level) ?? banks.set(level, new Set()).get(level)!;
+    if (!s.has(bank)) { s.add(bank); queue.push([level, bank]); }
+  };
+  translevels(readL1(rom)).forEach((t, i) => { if (t) reach(translevelToLevel(t), i >= 0x400 ? 1 : 0); });
+  while (queue.length) {
+    const [n, bank] = queue.shift()!;
+    let exits: ScreenExit[];
+    try { exits = storedExits(rom, n).exits; } catch { continue; }
+    const oldSecondary = oldStyleSecondary(exits);
+    for (const e of exits) {
+      const idx = exitIndex(n, e, bank);
+      const to = (e.flags & EXIT_NEW ? e.secondary : oldSecondary) ? readSecondaryEntrance(rom, idx).destLevel : idx;
+      reach(to, bank);
+    }
+  }
+  return banks;
+}
+
+// makes the game's old-style exits new-style (u, h, s; Lunar Magic's), leading where the game leads them: the
+// high bit of the bank the level is played from (submapBanks; a level not played: its own), secondary by the
+// level's last exit. So no exit depends on the overworld any more. When the clean game is patched; a level
+// played from both banks would keep its exits (the game has none)
+export function newStyleExits(rom: Rom): void {
+  const banks = submapBanks(rom);
+  for (let n = 0; n < 0x200; n++) {
+    const { exits, at } = storedExits(rom, n);
+    const b = banks.get(n) ?? new Set([n >> 8]);
+    if (b.size !== 1) continue;
+    const bank = [...b][0], s = oldStyleSecondary(exits) ? 2 : 0;
+    exits.forEach((e, i) => {
+      if (!(e.flags & EXIT_NEW)) rom.w8(at[i] + 1, (rom.r8(at[i] + 1) & 0xf8) | EXIT_NEW | s | bank);
+    });
+  }
 }
