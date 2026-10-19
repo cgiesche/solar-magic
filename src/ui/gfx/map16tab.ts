@@ -367,7 +367,10 @@ export class Map16Tab implements WsPanel {
     }
     else {
       band(0x000, 0x072, '#8b93a3', 'Standard');
-      band(0x073, 0x0ff, '#ffb000', `Tileset ${hex(this.app.level.header.tileset, 1)}`);
+      // (the tilesets sharing all of them)
+      let ts = this.app.tilesetsOf(0x073);
+      for (let t = 0x074; t <= 0x0ff; t++) { const of = this.app.tilesetsOf(t); ts = ts.filter((x) => of.includes(x)); }
+      band(0x073, 0x0ff, '#ffb000', `Tileset${ts.length > 1 ? 's' : ''} ${ts.map((x) => hex(x, 1)).join('/')}`);
       band(0x100, 0x1ff, '#8b93a3', 'Standard');
       band(0x200, EXT_TILES - 1, '#4cc2ff', 'Extended');
     }
