@@ -9,7 +9,7 @@
 
 import { Rom } from './rom.ts';
 import { lz2Decompress, lz2Compress } from './lz2.ts';
-import { gfxEntry, setGfxEntry, gfxNumberProblem, VANILLA_GFX } from './patches.ts';
+import { gfxEntry, setGfxEntry, gfxNumberProblem, VANILLA_GFX, GFX_3BPP } from './patches.ts';
 
 export interface Map16File {
   width: number; height: number; tiles: number[][]; acts: number[] | null;
@@ -84,7 +84,7 @@ export function importGfxFile(rom: Rom, num: number, data: Uint8Array): string {
     else if (un.length === 0xc00) { raw = false; stored = data; what = '3bpp, LZ2'; }
     else throw new Error(`Unknown GFX format (${data.length} bytes, decompressed ${un.length})`);
   }
-  const bad = gfxNumberProblem(num, { game: true, size: raw ? stored.length : 0xc00 });
+  const bad = gfxNumberProblem(num, { game: true, size: raw ? stored.length : GFX_3BPP });
   if (bad) throw new Error(bad);
   const old = gfxEntry(rom, num);
   if (old && num >= VANILLA_GFX) rom.freeAt(old.addr);

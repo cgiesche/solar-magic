@@ -10,9 +10,13 @@ import { freeGfx, gfxEntry, gfxHex, gfxRangeFor, gfxNumberProblem, VANILLA_GFX, 
 // shown with the reason while the field has another one
 export interface GfxNumberOptions { file: () => GfxFileKind; taken: () => Set<number>; onChange: (v: number) => void; author?: number | null; by?: string }
 
+// the fields on screen: one's change can change the others' hints ("another file of this upload")
+const fields = new Map<HTMLElement, () => void>();
+
 export function gfxNumberField(rom: Rom, value: number, o: GfxNumberOptions): HTMLElement {
-  const inp = hexInput(value, 3, (v) => { value = v; o.onChange(v); update(); }, MAX_GFX, (v) => gfxNumberProblem(v, o.file()) ?? true,
-    `hex ${gfxHex(VANILLA_GFX)}–${gfxHex(MAX_GFX)}, not FF (a graphics slot's “none”)`);
+  const changed = () => { for (const [el, up] of fields) if (el.isConnected) up(); else fields.delete(el); };
+  const inp = hexInput(value, 3, (v) => { value = v; o.onChange(v); update(); changed(); }, MAX_GFX, (v) => gfxNumberProblem(v, o.file()) ?? true,
+    `hex ${gfxHex(VANILLA_GFX)}–${gfxHex(MAX_GFX)}, not FF (a graphics slot's “none”), no 3bpp graphics in ${gfxHex(AS_IS_FIRST)}–${gfxHex(MAX_GFX)}`);
   const next = h('button', { class: 'gfxnum-next', type: 'button' });
   const hint = h('span', { class: 'hint' });
   let free = -1;
@@ -34,5 +38,7 @@ export function gfxNumberField(rom: Rom, value: number, o: GfxNumberOptions): HT
     inp.dispatchEvent(new Event('change'));
   });
   update();
-  return h('span', { class: 'gfxnum' }, inp, ' ', next, hint);
+  const el = h('span', { class: 'gfxnum' }, inp, ' ', next, hint);
+  fields.set(el, update);
+  return el;
 }

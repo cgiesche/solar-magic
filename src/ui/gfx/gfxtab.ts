@@ -1088,10 +1088,11 @@ export class GfxTab implements WsPanel {
     const file = given ?? await pickFile('.bin');
     if (!file) return null;
     let target = to ?? this.cur;
-    const n = to === undefined ? exgfxName(file.name).num : null;
-    // the file name names a number: Lunar Magic's ExGFX 60-63 can also mean the animation files
+    const n = exgfxName(file.name).num;
+    // the file name names a number (unless one was chosen): Lunar Magic's ExGFX 60-63 can also mean the
+    // animation files
     const targets: number[] = [];
-    if (n !== null && !gfxNumberProblem(n) && n !== this.cur) targets.push(n);
+    if (to === undefined && n !== null && !gfxNumberProblem(n) && n !== this.cur) targets.push(n);
     if (n !== null && n >= 0x60 && n <= 0x63 && ANIM_FILE + n - 0x60 !== this.cur) targets.push(ANIM_FILE + n - 0x60);
     const what = (t: number) => (t >= ANIM_FILE ? 'animation graphic' : 'layer/sprite graphics');
     if (targets.length) {

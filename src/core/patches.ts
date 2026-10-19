@@ -359,7 +359,7 @@ export const gfxRange = (n: number): GfxRange | null => (n < VANILLA_GFX ? null 
 export const LG_SLOT_NAMES = ['LG1', 'LG2', 'LG3', 'LG4'];
 export const LT3_SLOT = 'LT3';
 export const LAYER3_SLOT_NAMES = [...LG_SLOT_NAMES, LT3_SLOT];
-const GFX_3BPP = 0xc00;
+export const GFX_3BPP = 0xc00; // a 3bpp file's size unpacked
 // what is known of a file: the slot it is for, its size unpacked (gfxDataSize)
 export interface GfxFileKind { slot?: string | null; size?: number }
 // a GFX file's size unpacked: the LZ2 data's, else its own
