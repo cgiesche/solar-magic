@@ -2,8 +2,9 @@
 // can run in a Web Worker (ui/probeworker.ts) instead of the editor's main thread. Each finished
 // job hands back the result cache entries it made (key, data and the ROM pages it read); the
 // editor stores them in its own ResultCache, where they are checked against the ROM like any other.
-// Two longer tasks run here too, a slice at a time between the probes: the object kinds of a
-// tileset (objkinds.ts) and the level scan (levelscan.ts).
+// Longer tasks run here too, a slice at a time between the probes: the object kinds of a
+// tileset (objkinds.ts), the level scan (levelscan.ts) and the camera at Mario standing at a place
+// (camerareach.ts).
 
 import { Rom } from './rom.ts';
 import { BlockProber, blockKey, collisionKey, spriteKey, runsKey, cameraKey } from './blockprobe.ts';
@@ -12,6 +13,7 @@ import { RomReads, type CacheEntry } from './romdeps.ts';
 import { LevelEmulator } from './levelemu.ts';
 import { ObjKindProbe, kindsKey, type KindLevel } from './objkinds.ts';
 import { levelScanJob, type ScanLevel, type ScanResult } from './levelscan.ts';
+import { cameraAtJob } from './camerareach.ts';
 
 // job keys: Map16 tile; sprites as PROBE_SPRITE | num, collision as PROBE_COLL | tile, Mario's
 // run speeds as PROBE_RUNS, the game view's scroll bands as PROBE_CAMERA
@@ -34,7 +36,9 @@ export interface ProbeDone {
 export interface KindsDone { type: 'kinds'; gen: number; ts: number; failed: boolean; put: [string, CacheEntry][] }
 // a level scan (id: the editor's request; result null: it failed), with its result cache entry
 export interface ScanDone { type: 'scan'; gen: number; id: number; result: ScanResult | null; put: [string, CacheEntry][] }
-export type ProbeReply = ProbeDone | KindsDone | ScanDone;
+// the camera at Mario standing at a place (id: the editor's request; result null: it failed), with its result cache entry
+export interface CameraDone { type: 'camera'; gen: number; id: number; result: { x: number; y: number } | null; put: [string, CacheEntry][] }
+export type ProbeReply = ProbeDone | KindsDone | ScanDone | CameraDone;
 
 // what the editor sends: the ROM (again after each change), jobs asked for, the prefetch queue,
 // the longer tasks (a new one replaces the running one of its type)
@@ -43,9 +47,12 @@ export type ProbeMessage =
   | { type: 'ask'; jobs: ProbeJob[] }
   | { type: 'prefetch'; jobs: ProbeJob[] }
   | { type: 'kinds'; ts: number; level: KindLevel; layer2Pointer: number }
-  | { type: 'scan'; id: number; key: string; level: ScanLevel };
+  | { type: 'scan'; id: number; key: string; level: ScanLevel }
+  | { type: 'camera'; id: number; key: string; level: ScanLevel; x: number; y: number };
 
 export const jobId = (j: ProbeJob) => `${j.ts}:${j.k}`;
+
+type TaskType = 'kinds' | 'scan' | 'camera';
 
 // the result cache key of a job's result
 export function jobKey({ ts, k }: ProbeJob): string {
@@ -63,8 +70,8 @@ export class ProbeHost {
   private mask: { gen: number; mask: Uint8Array | null } = { gen: -1, mask: null };
   private asked = new Map<string, ProbeJob>(); // requested directly: first
   private prefetch = new Map<string, ProbeJob>();
-  private tasks = new Map<'kinds' | 'scan', Generator<void, ProbeReply>>(); // taking turns
-  private emus = new Map<'kinds' | 'scan', LevelEmulator>();
+  private tasks = new Map<TaskType, Generator<void, ProbeReply>>(); // taking turns
+  private emus = new Map<TaskType, LevelEmulator>();
 
   // the ROM changed (gen: the editor's count of changes); queued jobs are dropped
   setRom(gen: number, data: Uint8Array): void {
@@ -93,10 +100,11 @@ export class ProbeHost {
     else if (m.type === 'ask') this.ask(m.jobs);
     else if (m.type === 'prefetch') this.setPrefetch(m.jobs);
     else if (m.type === 'kinds') this.startTask('kinds', this.kindsTask(m.ts, m.level, m.layer2Pointer));
-    else this.startTask('scan', this.scanTask(m.id, m.key, m.level));
+    else if (m.type === 'scan') this.startTask('scan', this.scanTask(m.id, m.key, m.level));
+    else this.startTask('camera', this.cameraTask(m.id, m.key, m.level, m.x, m.y));
   }
 
-  private startTask(type: 'kinds' | 'scan', task: Generator<void, ProbeReply>): void {
+  private startTask(type: TaskType, task: Generator<void, ProbeReply>): void {
     if (!this.prober) return;
     this.tasks.delete(type);
     this.tasks.set(type, task);
@@ -104,7 +112,7 @@ export class ProbeHost {
 
   // an own emulator per task type (the prober's keeps its prepared probe levels), from the
   // prober's boot snapshot once there is one
-  private emu(type: 'kinds' | 'scan'): LevelEmulator {
+  private emu(type: TaskType): LevelEmulator {
     const p = this.prober!;
     let e = this.emus.get(type);
     if (!e) {
@@ -131,21 +139,34 @@ export class ProbeHost {
   }
 
   private *scanTask(id: number, key: string, level: ScanLevel): Generator<void, ProbeReply> {
-    const p = this.prober!, emu = this.emu('scan');
-    let result: ScanResult | null = null;
+    const result: ScanResult | null = yield* this.played('scan', key, (emu) => levelScanJob(emu, level));
+    return { type: 'scan', gen: this.gen, id, result, put: this.prober!.results.flush().put };
+  }
+
+  private *cameraTask(id: number, key: string, level: ScanLevel, x: number, y: number): Generator<void, ProbeReply> {
+    const result = yield* this.played('camera', key, (emu) => cameraAtJob(emu, level, x, y));
+    return { type: 'camera', gen: this.gen, id, result, put: this.prober!.results.flush().put };
+  }
+
+  // runs a job on the task type's emulator, its result (not null) into the result cache under key with the
+  // ROM bytes it read; null when it failed
+  private *played<T>(type: TaskType, key: string, make: (emu: LevelEmulator) => Generator<void, T | null>): Generator<void, T | null> {
+    const p = this.prober!, emu = this.emu(type);
     try {
-      const job = levelScanJob(emu, level), reads = new RomReads(this.rom!.data.length);
+      const job = make(emu), reads = new RomReads(this.rom!.data.length);
       for (;;) {
         const r = emu.tracked(() => job.next());
         reads.add(r.reads);
-        if (r.result.done) { result = r.result.value; break; }
+        if (r.result.done) {
+          if (r.result.value !== null) p.results.set(key, r.result.value, p.results.fp.deps(reads));
+          return r.result.value;
+        }
         yield;
       }
-      p.results.set(key, result, p.results.fp.deps(reads));
     } catch (e) {
       console.error(e);
+      return null;
     }
-    return { type: 'scan', gen: this.gen, id, result, put: p.results.flush().put };
   }
 
   // queues jobs asked for directly (before all prefetched ones)

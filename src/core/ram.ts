@@ -31,6 +31,7 @@ export const RAM = {
   // Mario
   powerup: 0x19,
   marioAnim: 0x71, // animation (9 = dying, 6 = a vertical pipe)
+  marioAnimTimer: 0x1496, // how long the animation goes on (dying: until the death music)
   pipeTimer: 0x88, pipeAction: 0x89, // a pipe animation's timer; its kind (below 4: going in, else coming out)
   levelDataPtr: 0x65, spriteDataPtr: 0xce, // 24-bit: the level's layer 1 data and sprite data being loaded
   marioInAir: 0x72,

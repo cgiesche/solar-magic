@@ -52,6 +52,19 @@ export interface LevelOverride {
   fadeHook?: () => MemHook; // watches the frames after GM $11 (level start, fade-in: sprites run their first frames there), made when GM $11 is done
 }
 
+// the level and a hash of its level data as edited, for result cache keys of what is learned by playing it
+export function levelDataKey(level: number, ov: LevelOverride): string {
+  const l2 = ov.layer2Pointer ?? 0;
+  const bytes = [ov.layer1, ov.layer2, ov.bgData, ov.sprites, Uint8Array.from(ov.secondaryHeader ?? []), Uint8Array.from([l2, l2 >> 8, l2 >> 16, +!!ov.switchPalaces, +!!ov.onOffSwitch])];
+  let h = 0x811c9dc5;
+  for (const b of bytes) {
+    if (!b) { h = Math.imul(h ^ 0xff, 0x01000193); continue; }
+    for (let i = 0; i < b.length; i++) h = Math.imul(h ^ b[i], 0x01000193);
+    h = Math.imul(h ^ b.length, 0x01000193);
+  }
+  return `${level}:${(h >>> 0).toString(16)}`;
+}
+
 // What the object routines did while the level loaded (analysis, see objkinds.ts).
 export interface ObjectTrace {
   code: Set<number>; // ROM offsets fetched as instructions
