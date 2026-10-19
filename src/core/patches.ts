@@ -1,17 +1,19 @@
 // The editor's ROM patch ("SMWE"), assembled on install:
 //  - sprite data of each level may live in any bank (bank table, 512 entries)
 //  - the current level number is kept in $7E010B (as Lunar Magic does)
-//  - GFX pointer table with 256 entries (GFX 00-31 vanilla, 32-FF = ExGFX)
+//  - GFX pointer table with 4096 entries (GFX 00-31 vanilla, 32-FFF = ExGFX, as Lunar Magic's ExGFX 80-FFF)
 //  - per-file format flag: 0 = LZ2 3bpp (vanilla), 1 = raw uncompressed 4bpp (DMA'd directly); raw files of
 //    other sizes (layer3gfx.ts): 2 = 0x800 bytes (2bpp layer 3 graphics), 3 = 0x2000 (a layer 3 tilemap)
-//  - per-level GFX bypass: 8 slots (SP4..SP1, FG3, BG1, FG2, FG1), $FF = tileset default
+//  - per-level GFX bypass: 8 slots (SP4..SP1, FG3, BG1, FG2, FG1), low bytes and a table of high bytes;
+//    0FF = tileset default. The game passes a file's low byte along (in $04-$07, Y); the high bytes of the
+//    slots being uploaded are kept in RAM (EXGFX_HI_RAM) and joined with it where the file is looked up
 //  - extended object $02 "Direct Map16": 6 bytes, places any Map16 tile as a rectangle
 //  - "edited" mark at $0FF0A0 where Lunar Magic keeps its version string (see markEdited)
 
 import { Rom } from './rom.ts';
 import { Asm } from './asm.ts';
 import { ownerNote } from './patchreg.ts';
-import { LEVEL_HEIGHT_RAM } from './ram.ts';
+import { LEVEL_HEIGHT_RAM, EXGFX_HI_RAM } from './ram.ts';
 
 export const SPR_BANK_HOOK = 0x05d8f5;
 
@@ -40,7 +42,19 @@ const EDITED_TEXT = 'Solar Magic';
 // the bytes the editor patch changes in the game (SNES address, length), protected from other patches (patchapply.ts)
 export const EDITOR_HOOKS: [number, number][] = [[SPR_BANK_HOOK, 4], [HOOK_GFXPTR, 15], [HOOK_UPLOAD, 4], [HOOK_SPRGFX, 15], [HOOK_FGGFX, 15], [DM16_SLOT, 3], [EDITED_MARK, EDITED_LEN]];
 const MAGIC = [0x53, 0x4d, 0x57, 0x45]; // "SMWE"
+const VERSION = 3;
 const HEADER = 32;
+// GFX file numbers: 000-FFF (Lunar Magic's range); 0FF in a slot is "none" (the default), so no file has it
+export const GFX_FILES = 0x1000;
+export const MAX_GFX = GFX_FILES - 1;
+export const GFX_NONE = 0xff;
+// the RAM of the high bytes: the 8 slots of the bypass as the game uploads them (sprite slots, then
+// FG/BG; uploaded again when one changes), then the one for the next upload by BG2/BG3 (EXT_UP_RET)
+const SLOT_HI = EXGFX_HI_RAM[0], UP_HI = EXGFX_HI_RAM[0] + 8;
+// the game's calls of its upload routine $00AA6B (their return addresses): the sprite and the FG/BG
+// slots' loops (X = slot); BG2/BG3 call it with this return address (the RTL at $0084CF)
+const SPR_UP_RET = 0xaa0a, FG_UP_RET = 0xaa4b, EXT_UP_RET = 0x84ce;
+const long = (v: number) => [v & 0xff, (v >> 8) & 0xff, v >> 16];
 
 export interface PatchInfo {
   base: number;
@@ -51,6 +65,8 @@ export interface PatchInfo {
   gfxBank: number;
   gfxFlags: number;
   levelGfx: number;
+  levelGfxHi: number;
+  decomp: number; // JSL (M=8, X=16): decompresses file X (16 bit) to $7EAD00 as the game's $00BA28 does
 }
 
 export function editorPatch(rom: Rom): PatchInfo | null {
@@ -58,6 +74,7 @@ export function editorPatch(rom: Rom): PatchInfo | null {
   const routine = rom.r24(SPR_BANK_HOOK + 1);
   const base = routine - HEADER;
   for (let i = 0; i < 4; i++) if (rom.r8(base + i) !== MAGIC[i]) return null;
+  if (rom.r8(base + 4) !== VERSION) return null; // an older editor's ROM (no migrations: not opened)
   return {
     base,
     version: rom.r8(base + 4),
@@ -67,6 +84,8 @@ export function editorPatch(rom: Rom): PatchInfo | null {
     gfxBank: rom.r24(base + 14),
     gfxFlags: rom.r24(base + 17),
     levelGfx: rom.r24(base + 20),
+    levelGfxHi: rom.r24(base + 23),
+    decomp: rom.r24(base + 26),
   };
 }
 
@@ -78,7 +97,7 @@ const editor = (rom: Rom) => editorPatch(rom) ?? missingPatch('Editor patch (SMW
 
 function build(): Asm {
   const a = new Asm();
-  a.b(...MAGIC, 2);
+  a.b(...MAGIC, VERSION);
   // data pointers (patched after link, see install)
   a.fill(HEADER - 5);
 
@@ -98,13 +117,31 @@ function build(): Asm {
   a.long(0xbf, 'GfxBk'); a.b(0x85, 0x8c);
   a.b(0xfa, 0x6b); // PLX RTL
 
-  // ---- GFX upload: raw 4bpp files are DMA'd straight from ROM ----
+  // ---- GFX upload (JSL from $00AA6B, M=8 X=8, Y = the file's low byte): its high byte by the caller;
+  // raw 4bpp files are DMA'd straight from ROM; compressed ones above FF are decompressed here and go on
+  // as file 80 (the game treats some of its own files, by number, differently: 01, 08, 1E) ----
   a.label('GfxUpload');
-  a.b(0xda, 0xbb); // PHX TYX
+  a.b(0xda, 0x08, 0xc2, 0x20, 0xa3, 0x06); // PHX PHP REP #$20 LDA 6,S (the caller's JSR return)
+  a.b(0xc9, ...long(SPR_UP_RET).slice(0, 2)); a.br(0xf0, 'uspr'); // CMP : BEQ
+  a.b(0xc9, ...long(FG_UP_RET).slice(0, 2)); a.br(0xf0, 'ufg');
+  a.b(0xc9, ...long(EXT_UP_RET).slice(0, 2)); a.br(0xf0, 'uext');
+  a.b(0xe2, 0x20, 0xa9, 0x00); a.br(0x80, 'uhi'); // SEP #$20 LDA #$00 BRA
+  a.label('uspr');
+  a.b(0xe2, 0x20, 0xbf, ...long(SLOT_HI)); a.br(0x80, 'uhi'); // SEP #$20 LDA.l SlotHi,x
+  a.label('ufg');
+  a.b(0xe2, 0x20, 0xbf, ...long(SLOT_HI + 4)); a.br(0x80, 'uhi');
+  a.label('uext');
+  a.b(0xe2, 0x20, 0xaf, ...long(UP_HI)); // SEP #$20 LDA.l UpHi
+  a.label('uhi');
+  a.b(0xeb, 0x98, 0xc2, 0x10, 0xaa); // XBA TYA REP #$10 TAX (X = file, 16 bit)
   a.long(0xbf, 'GfxFlags');
   a.br(0xd0, 'raw');
-  a.b(0xfa); // PLX
+  a.b(0xeb); a.br(0xd0, 'big'); // XBA : BNE (above FF)
+  a.b(0x28, 0xfa); // PLP PLX
   a.b(0x5c, 0x28, 0xba, 0x00); // JML $00BA28
+  a.label('big');
+  a.long(0x22, 'GfxDecomp');
+  a.b(0x28, 0xfa, 0xa0, 0x80, 0x6b); // PLP PLX LDY #$80 RTL (→ $00AA6F)
   a.label('raw');
   a.long(0xbf, 'GfxLo'); a.b(0x8f, 0x02, 0x43, 0x00);
   a.long(0xbf, 'GfxHi'); a.b(0x8f, 0x03, 0x43, 0x00);
@@ -114,8 +151,21 @@ function build(): Asm {
   a.b(0xa9, 0x00, 0x8f, 0x05, 0x43, 0x00);
   a.b(0xa9, 0x10, 0x8f, 0x06, 0x43, 0x00); // $1000 bytes
   a.b(0xa9, 0x01, 0x8f, 0x0b, 0x42, 0x00); // start
-  a.b(0xfa, 0x68, 0x68, 0x68); // PLX, drop JSL return
+  a.b(0x28, 0xfa, 0x68, 0x68, 0x68); // PLP PLX, drop JSL return
   a.b(0x5c, 0xd1, 0xa9, 0x00); // JML $00A9D1 (an RTS in bank 0)
+
+  // ---- decompression of any file (JSL, M=8 X=16, X = file): through the game's $00BA28 from where
+  // it has the file's pointer; X and Y's high byte are lost ----
+  a.label('GfxDecomp');
+  a.b(0x8b); // PHB
+  a.long(0xbf, 'GfxLo'); a.b(0x85, 0x8a);
+  a.long(0xbf, 'GfxHi'); a.b(0x85, 0x8b);
+  a.long(0xbf, 'GfxBk'); a.b(0x85, 0x8c);
+  a.b(0x08, 0xe2, 0x10, 0x4b); a.abs(0xf4, 'dret', -1); // PHP SEP #$10 PHK PEA.w dret-1 (for its RTL)
+  a.b(0x8b, 0x5a, 0xa9, 0x00, 0x48, 0xab); // PHB PHY (its PLY PLB) LDA #$00 PHA PLB
+  a.b(0x5c, 0x3b, 0xba, 0x00); // JML $00BA3B
+  a.label('dret');
+  a.b(0x28, 0xab, 0x6b); // PLP PLB RTL
 
   // ---- GFX slot selection with per-level bypass ----
   a.label('SprGfxSel');
@@ -136,31 +186,39 @@ function build(): Asm {
   a.abs(0x20, 'ApplyOvr');
   a.b(0x6b);
 
+  // A = slot base (0 sprite slots, 4 FG/BG), M=8 X=8, DB=$00: the level's files into $04-$07 (its low
+  // bytes; the high bytes to SlotHi), in levels only; a slot whose high byte is or was not 0 is uploaded
+  // again (the game's record of uploaded files, $0101-$0108, holds low bytes)
   a.label('ApplyOvr');
-  a.b(0x48); // PHA (slot base offset)
-  a.b(0xa5, 0x08, 0x48, 0xa5, 0x09, 0x48, 0xa5, 0x0a, 0x48, 0xa5, 0x0b, 0x48); // save scratch $08-$0B
-  a.b(0xa3, 0x05, 0x85, 0x0b); // LDA 5,S STA $0B
-  a.b(0xaf, 0x00, 0x01, 0x7e, 0xc9, 0x0b); // LDA.l $7E0100 CMP #$0B
-  a.br(0x90, 'ovok');
-  a.b(0xc9, 0x0f);
-  a.br(0x90, 'ovout');
-  a.label('ovok');
-  a.b(0xc2, 0x20); // REP #$20
-  a.b(0xaf, 0x0b, 0x01, 0x7e, 0x29, 0xff, 0x01, 0x0a, 0x0a, 0x0a, 0x18); // LDA.l $7E010B AND #$01FF ASL*3 CLC
-  a.abs(0x69, 'LevelGfx'); // ADC #LevelGfx
-  a.b(0x85, 0x08, 0xe2, 0x20); // STA $08 SEP #$20
-  a.bankImm(0xa9, 'LevelGfx'); a.b(0x85, 0x0a); // LDA #bank STA $0A
-  a.b(0xa4, 0x0b, 0xa2, 0x00); // LDY $0B LDX #$00
-  a.label('lp3');
-  a.b(0xb7, 0x08, 0xc9, 0xff); // LDA [$08],y CMP #$FF
-  a.br(0xf0, 'ovnx');
-  a.b(0x95, 0x04); // STA $04,x
-  a.label('ovnx');
-  a.b(0xc8, 0xe8, 0xe0, 0x04); // INY INX CPX #$04
-  a.br(0xd0, 'lp3');
-  a.label('ovout');
-  a.b(0x68, 0x85, 0x0b, 0x68, 0x85, 0x0a, 0x68, 0x85, 0x09, 0x68, 0x85, 0x08, 0x68); // restore scratch, drop base
-  a.b(0x60);
+  a.b(0x08, 0xc2, 0x30, 0x29, 0xff, 0x00, 0x48); // PHP REP #$30 AND #$00FF PHA (base: 7,S)
+  a.b(0xa5, 0x08, 0x48, 0xa5, 0x0a, 0x48, 0xa5, 0x0c, 0x48, 0x64, 0x0c); // save $08-$0D, STZ $0C (levels: 1)
+  a.b(0xaf, 0x00, 0x01, 0x7e, 0x29, 0xff, 0x00, 0xc9, 0x0b, 0x00); // LDA.l $7E0100 AND #$FF CMP #$0B
+  a.br(0x90, 'ovlv');
+  a.b(0xc9, 0x0f, 0x00); a.br(0x90, 'ovow'); // CMP #$0F : BCC (overworld)
+  a.label('ovlv');
+  a.b(0xe6, 0x0c, 0xaf, 0x0b, 0x01, 0x7e, 0x29, 0xff, 0x01, 0x0a, 0x0a, 0x0a); // INC $0C LDA.l $7E010B AND #$01FF ASL*3
+  a.br(0x80, 'ovrow');
+  a.label('ovow');
+  a.b(0xa9, 0x00, 0x00);
+  a.label('ovrow');
+  a.b(0x18, 0x63, 0x07, 0x85, 0x08, 0xa0, 0x00, 0x00); // CLC ADC 7,S STA $08 (level*8 + base) LDY #0
+  a.label('ovlp');
+  a.b(0x98, 0x18, 0x65, 0x08, 0xaa, 0xe2, 0x20, 0x64, 0x0a, 0xa5, 0x0c); // TYA CLC ADC $08 TAX SEP #$20 STZ $0A (hi) LDA $0C
+  a.br(0xf0, 'ovhi');
+  a.long(0xbf, 'LevelGfx'); a.b(0x85, 0x0b);
+  a.long(0xbf, 'LevelGfxHi'); a.b(0x85, 0x0a);
+  a.br(0xd0, 'ovset');
+  a.b(0xa5, 0x0b, 0xc9, 0xff); a.br(0xf0, 'ovhi'); // 0FF: the default
+  a.label('ovset');
+  a.b(0xa5, 0x0b, 0x99, 0x04, 0x00); // LDA $0B STA $0004,y
+  a.label('ovhi');
+  a.b(0xc2, 0x20, 0x8a, 0x29, 0x07, 0x00, 0xaa, 0xe2, 0x20); // REP #$20 TXA AND #7 TAX SEP #$20 (X = base + slot)
+  a.b(0xa5, 0x0a, 0x1f, ...long(SLOT_HI)); a.br(0xf0, 'ovsame'); // LDA $0A ORA.l SlotHi,x
+  a.b(0xb9, 0x04, 0x00, 0x49, 0xff, 0x9f, 0x01, 0x01, 0x7e); // LDA $0004,y EOR #$FF STA.l $7E0101,x
+  a.label('ovsame');
+  a.b(0xa5, 0x0a, 0x9f, ...long(SLOT_HI)); // STA.l SlotHi,x
+  a.b(0xc2, 0x20, 0xc8, 0xc0, 0x04, 0x00); a.br(0xd0, 'ovlp'); // REP #$20 INY CPY #4 BNE
+  a.b(0x68, 0x85, 0x0c, 0x68, 0x85, 0x0a, 0x68, 0x85, 0x08, 0x68, 0x28, 0x60); // restore, PLA PLP RTS
 
   // ---- extended object $02: Direct Map16 (M=8, X=8) ----
   a.label('DM16');
@@ -210,11 +268,12 @@ function build(): Asm {
 
   // ---- tables ----
   a.label('SprBankTbl'); a.fill(512, 0x07);
-  a.label('GfxLo'); a.fill(256);
-  a.label('GfxHi'); a.fill(256);
-  a.label('GfxBk'); a.fill(256);
-  a.label('GfxFlags'); a.fill(256);
+  a.label('GfxLo'); a.fill(GFX_FILES);
+  a.label('GfxHi'); a.fill(GFX_FILES);
+  a.label('GfxBk'); a.fill(GFX_FILES);
+  a.label('GfxFlags'); a.fill(GFX_FILES);
   a.label('LevelGfx'); a.fill(512 * 8, 0xff);
+  a.label('LevelGfxHi'); a.fill(512 * 8);
   return a;
 }
 
@@ -258,6 +317,8 @@ export function installEditorPatch(rom: Rom): PatchInfo {
   rom.w24(addr + 14, L('GfxBk'));
   rom.w24(addr + 17, L('GfxFlags'));
   rom.w24(addr + 20, L('LevelGfx'));
+  rom.w24(addr + 23, L('LevelGfxHi'));
+  rom.w24(addr + 26, L('GfxDecomp'));
   // copy vanilla GFX pointers
   for (let i = 0; i < 0x32; i++) {
     rom.w8(L('GfxLo') + i, rom.r8(0x00b992 + i));
@@ -287,8 +348,32 @@ export const VANILLA_GFX = 0x32;
 // raw: stored uncompressed, size bytes (0x1000 4bpp; 0x800, 0x2000 for layer 3)
 export interface GfxEntry { addr: number; raw: boolean; size: number }
 export const RAW_GFX_SIZES = [0x1000, 0x800, 0x2000]; // by format flag - 1
+// Lunar Magic's ranges (LM help: file_insert_exgfx.htm, level_super_bypass.htm): ExGFX 80-DFF, and E00-FFF
+// for files taken "as is", without its 3bpp/4bpp conversion (layer 3 graphics, layer 3 tilemaps, AN2).
+// 32-7F, which the game doesn't use, are ExGFX too.
+export const AS_IS_FIRST = 0xe00;
+export type GfxRange = 'exgfx' | 'asIs';
+export const gfxRange = (n: number): GfxRange | null => (n < VANILLA_GFX ? null : n >= AS_IS_FIRST ? 'asIs' : 'exgfx');
+// the first number of `range` that is free and not taken by `taken` (ExGFX: 80 on first, as Lunar Magic
+// suggests, then 32-7F; never 0FF, a slot's "none"), -1: none left
+export function freeGfx(rom: Rom, taken: Set<number>, range: GfxRange = 'exgfx'): number {
+  const free = (i: number) => i !== GFX_NONE && !taken.has(i) && !gfxEntry(rom, i);
+  const order = range === 'asIs' ? [[AS_IS_FIRST, GFX_FILES]] : [[0x80, AS_IS_FIRST], [VANILLA_GFX, 0x80]];
+  for (const [from, to] of order) for (let i = from; i < to; i++) if (free(i)) return i;
+  return -1;
+}
+
+// a GFX file number as text: two hex digits up to FF (as the game's and Lunar Magic's 80-FF), else three
+export const gfxHex = (n: number) => n.toString(16).toUpperCase().padStart(n > 0xff ? 3 : 2, '0');
+
+// a GFX file number (000-FFF), else an error
+export function gfxNum(n: number): number {
+  if (!Number.isInteger(n) || n < 0 || n > MAX_GFX) throw new Error(`GFX number must be 000–${MAX_GFX.toString(16).toUpperCase()}`);
+  return n;
+}
 export function gfxEntry(rom: Rom, i: number): GfxEntry | null {
   const p = editor(rom);
+  if (i < 0 || i > MAX_GFX) return null;
   const addr = rom.r8(p.gfxLo + i) | (rom.r8(p.gfxHi + i) << 8) | (rom.r8(p.gfxBank + i) << 16);
   if (addr === 0) return null;
   const f = rom.r8(p.gfxFlags + i);
@@ -296,6 +381,7 @@ export function gfxEntry(rom: Rom, i: number): GfxEntry | null {
 }
 export function setGfxEntry(rom: Rom, i: number, addr: number, raw: boolean, size = 0x1000): void {
   const p = editor(rom);
+  gfxNum(i);
   rom.w8(p.gfxLo + i, addr & 0xff);
   rom.w8(p.gfxHi + i, (addr >> 8) & 0xff);
   rom.w8(p.gfxBank + i, (addr >> 16) & 0xff);
@@ -307,11 +393,11 @@ export function setGfxEntry(rom: Rom, i: number, addr: number, raw: boolean, siz
 export const GFX_SLOT_NAMES = ['SP4', 'SP3', 'SP2', 'SP1', 'FG3', 'BG1', 'FG2', 'FG1'];
 export function levelGfx(rom: Rom, n: number): number[] {
   const p = editor(rom);
-  return Array.from({ length: 8 }, (_, k) => rom.r8(p.levelGfx + n * 8 + k));
+  return Array.from({ length: 8 }, (_, k) => rom.r8(p.levelGfx + n * 8 + k) | (rom.r8(p.levelGfxHi + n * 8 + k) << 8));
 }
 export function setLevelGfx(rom: Rom, n: number, slots: number[]): void {
   const p = editor(rom);
-  slots.forEach((v, k) => rom.w8(p.levelGfx + n * 8 + k, v));
+  slots.forEach((v, k) => { gfxNum(v); rom.w8(p.levelGfx + n * 8 + k, v & 0xff); rom.w8(p.levelGfxHi + n * 8 + k, v >> 8); });
 }
 // defaults from the tileset / sprite set tables, in slot order
 export function defaultGfx(rom: Rom, tileset: number, spriteSet: number): number[] {
@@ -545,25 +631,26 @@ export function installExtGfxPatch(rom: Rom): { table: number } {
   a.b(0xc9, 0x0f); a.br(0x90, 'out'); // CMP #$0F : BCC out
   a.label('lv');
   a.b(0xaf, 0x02, 0x36, 0x7f); a.br(0xf0, 'out'); // LDA.l $7F3602 (VRAM patch: layout active) : BEQ out
-  a.b(0xc2, 0x30, 0xaf, 0x0b, 0x01, 0x7e, 0x29, 0xff, 0x01, 0x0a, 0xaa); // REP #$30 : LDA.l $7E010B : AND #$01FF : ASL : TAX
-  a.long(0xbf, 'Tbl'); // LDA.l Tbl,x (BG2 | BG3 << 8)
-  a.b(0xe2, 0x30, 0xeb, 0x48, 0xeb); // SEP #$30 : XBA : PHA (BG3) : XBA
-  a.b(0xa0, 0x20); a.abs(0x20, 'Up'); // LDY #$20 : JSR Up (BG2 → VRAM $2000)
-  a.b(0x68, 0xa0, 0x28); a.abs(0x20, 'Up'); // PLA : LDY #$28 : JSR Up (BG3 → VRAM $2800)
+  a.b(0xc2, 0x30, 0xaf, 0x0b, 0x01, 0x7e, 0x29, 0xff, 0x01, 0x0a, 0x0a, 0xaa, 0xda); // REP #$30 : LDA.l $7E010B : AND #$01FF : ASL #2 : TAX : PHX
+  a.long(0xbf, 'Tbl'); // LDA.l Tbl,x (BG2)
+  a.b(0xa0, 0x20, 0x00); a.abs(0x20, 'Up'); // LDY #$0020 : JSR Up (BG2 → VRAM $2000)
+  a.b(0xfa, 0xe8, 0xe8); a.long(0xbf, 'Tbl'); // PLX : INX #2 : LDA.l Tbl,x (BG3)
+  a.b(0xa0, 0x28, 0x00); a.abs(0x20, 'Up'); // LDY #$0028 : JSR Up (BG3 → VRAM $2800)
   a.label('out');
   a.b(0xe2, 0x30, 0x6b); // SEP #$30 : RTL
-  // Up (M=8 X=8): A = file ($FF = none), Y = VRAM address high byte
+  // Up (M=16 X=16): A = file ($00FF = none), Y = VRAM address high byte; the file's high byte goes to the
+  // editor patch's UpHi, which its upload takes for a call with this return address (EXT_UP_RET)
   a.label('Up');
-  a.b(0xc9, 0xff); a.br(0xf0, 'upx'); // CMP #$FF : BEQ
+  a.b(0xc9, 0xff, 0x00); a.br(0xf0, 'upx'); // CMP #$00FF : BEQ
+  a.b(0xe2, 0x30, 0xeb, 0x8f, ...long(UP_HI), 0xeb); // SEP #$30 : XBA : STA.l UpHi : XBA
   a.b(0x9c, 0x16, 0x21, 0x8c, 0x17, 0x21, 0xa8); // STZ $2116 : STY $2117 : TAY (file)
-  a.b(0x4b); a.abs(0xf4, 'upr', -1); a.b(0xf4, 0xce, 0x84); // PHK : PEA.w upr-1 : PEA.w $84CF-1
+  a.b(0x4b); a.abs(0xf4, 'upr', -1); a.b(0xf4, EXT_UP_RET & 0xff, EXT_UP_RET >> 8); // PHK : PEA.w upr-1 : PEA.w $84CF-1
   a.b(0x5c, 0x6b, 0xaa, 0x00); // JML $00AA6B (ends with RTS → $0084CF RTL → upr)
   a.label('upr');
-  a.b(0xe2, 0x30); // SEP #$30
   a.label('upx');
-  a.b(0x60); // RTS
+  a.b(0xc2, 0x30, 0x60); // REP #$30 : RTS
   a.label('Tbl');
-  a.fill(512 * 2, 0xff);
+  for (let i = 0; i < 512 * 2; i++) a.w(GFX_NONE);
   const addr = rom.allocWrite(new Uint8Array(a.bytes.length));
   rom.writeBytes(addr, a.link(addr));
   rom.w24(addr + 4, a.addrOf('Tbl', addr));
@@ -572,14 +659,14 @@ export function installExtGfxPatch(rom: Rom): { table: number } {
   return extGfxPatch(rom)!;
 }
 
-// BG2/BG3 files of a level ($FF = none)
+// BG2/BG3 files of a level (0FF = none), a word each
 const extGfxTable = (rom: Rom) => (extGfxPatch(rom) ?? missingPatch('BG2/BG3 graphics (SMWG)')).table;
 export function levelExtGfx(rom: Rom, n: number): number[] {
   const t = extGfxTable(rom);
-  return [rom.r8(t + n * 2), rom.r8(t + n * 2 + 1)];
+  return [rom.r16(t + n * 4), rom.r16(t + n * 4 + 2)];
 }
 export function setLevelExtGfx(rom: Rom, n: number, slots: number[]): void {
-  const p = { table: extGfxTable(rom) };
-  rom.w8(p.table + n * 2, slots[0]);
-  rom.w8(p.table + n * 2 + 1, slots[1]);
+  const t = extGfxTable(rom);
+  rom.w16(t + n * 4, gfxNum(slots[0]));
+  rom.w16(t + n * 4 + 2, gfxNum(slots[1]));
 }

@@ -82,7 +82,7 @@ export interface BgPackGfx {
   file: string | null; // file in the package, null = a GFX file the ROM already has (vanilla number)
   slot: string; // FG1..BG3, LG1-LG4, LT3
   lmNum: number; // number in the package
-  num: number; // ExGFX number it is stored as (00-FE)
+  num: number; // ExGFX number it is stored as (the package's when free)
   parts: PackPart[]; // the parts whose tiles use the slot
 }
 
@@ -158,7 +158,7 @@ export function planBgPack(rom: Rom, name: string, files: Map<string, Uint8Array
       // not in the package: the ROM's file, if it has it – only for the part's own slots (a background
       // does not change the level's FG graphics)
       const own = [...parts].filter((p) => slot.startsWith(p.toUpperCase()));
-      if (own.length && lmNum !== 0x7f && lmNum <= 0xff && gfxEntry(rom, lmNum)) gfx.push({ file: null, slot, lmNum, num: lmNum, parts: own });
+      if (own.length && lmNum !== 0x7f && gfxEntry(rom, lmNum)) gfx.push({ file: null, slot, lmNum, num: lmNum, parts: own });
       continue;
     }
     let num = byNum.get(lmNum);
@@ -194,9 +194,9 @@ export function planBgPack(rom: Rom, name: string, files: Map<string, Uint8Array
     const lmNum = level.gfx.get(slot);
     if (lmNum === undefined || lmNum === gameFile || lmNum === 0x7f) continue; // 7F: Lunar Magic's "no file"
     const file = bins.get(lmNum) ?? null;
-    if (!file) { if (lmNum <= 0xff && gfxEntry(rom, lmNum)) gfx.push({ file: null, slot, lmNum, num: lmNum, parts: ['layer3'] }); continue; }
+    if (!file) { if (gfxEntry(rom, lmNum)) gfx.push({ file: null, slot, lmNum, num: lmNum, parts: ['layer3'] }); continue; }
     let num = byNum.get(lmNum);
-    if (num === undefined) { num = gfxNumber(rom, lmNum, taken); byNum.set(lmNum, num); }
+    if (num === undefined) { num = gfxNumber(rom, lmNum, taken, 'asIs'); byNum.set(lmNum, num); }
     gfx.push({ file, slot, lmNum, num, parts: ['layer3'] });
   }
   const layer3 = gfx.some((g) => g.parts.includes('layer3')) ? { dest: l3.dest, size: l3.size } : null;

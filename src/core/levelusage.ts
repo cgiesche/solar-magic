@@ -18,7 +18,7 @@ import {
 import { layerGeom } from './render.ts';
 import { bgFromWram, BG_SIZE } from './bg.ts';
 import { map16Tile } from './ram.ts';
-import { DM16_EXT, VANILLA_GFX, gfxEntry, levelGfx, defaultGfx, levelExtGfx } from './patches.ts';
+import { DM16_EXT, VANILLA_GFX, GFX_FILES, gfxEntry, levelGfx, defaultGfx, levelExtGfx } from './patches.ts';
 import { STRUCT_EXT, listStructures } from './structs.ts';
 import { EXT_FIRST, EXT_TILES, actsLike, extTileWords, DEFAULT_ACTS } from './map16ext.ts';
 import { loadBlockProject } from './blocks.ts';
@@ -270,7 +270,7 @@ export function slotMove(before: GfxSlot[], now: GfxSlot[], name: string, usage:
 // ExGFX files in the ROM that no level's slot uses
 export function unusedExGfx(rom: Rom, levels: Iterable<number>, usage = gfxUsage(rom, levels)): number[] {
   const out: number[] = [];
-  for (let i = VANILLA_GFX; i < 0xff; i++) if (gfxEntry(rom, i) && !usage.has(i)) out.push(i);
+  for (let i = VANILLA_GFX; i < GFX_FILES; i++) if (gfxEntry(rom, i) && !usage.has(i)) out.push(i);
   return out;
 }
 

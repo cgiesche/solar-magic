@@ -110,6 +110,9 @@ export const LEVEL_LOADED = LEVEL_HEIGHT_RAM[0] + 10;
 export const LAYER3_GFX_RAM: [number, number] = [0x7f3678, 1];
 // the level heights patch's too: the flags of the screen exit Mario left by (0000wush, Lunar Magic's)
 export const EXIT_FLAGS_RAM: [number, number] = [0x7f3679, 1];
+// the editor patch's (patches.ts): the high bytes of the ExGFX numbers in the graphics slots being uploaded
+// (8), then the one for the next upload of BG2/BG3
+export const EXGFX_HI_RAM: [number, number] = [0x7f367a, 9];
 // Lunar Magic's RAM for a horizontal level's height, which community code reads too: the height in
 // pixels (also a screen's bytes in the level data), and the screens' Map16 addresses in bank 0's RAM
 // (the game's mode tables point there): 3-byte pointers to the low and the high bytes, then the

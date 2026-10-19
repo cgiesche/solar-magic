@@ -14,7 +14,7 @@ import { loadProject, saveProject, emptyProject, type UberProject } from './uber
 import { loadBlockProject, saveBlockProject, type BlockProject } from './blocks.ts';
 import { loadPixiProject, savePixiProject, type PixiProject } from './pixi.ts';
 import { hex } from './names.ts';
-import { gfxEntry, setGfxEntry, VANILLA_GFX, levelMusic, setLevelMusic } from './patches.ts';
+import { gfxEntry, setGfxEntry, gfxHex, GFX_FILES, VANILLA_GFX, levelMusic, setLevelMusic } from './patches.ts';
 import { loadMusicProject, saveMusicProject, removeSong } from './music.ts';
 import { EXT_FIRST, EXT_TILES, DEFAULT_ACTS, extTileWords, actsLike, setExtTileWords, setActsLike } from './map16ext.ts';
 import { BG_EXT_FIRST, BG_EXT_TILES, bgExtTileWords, setBgExtTileWords, vanillaBgWords } from './bgmap16.ts';
@@ -215,12 +215,12 @@ export const sprite = {
 // ExGFX files it created (read: the file's address per number, 0 = none)
 const gfx: PartSection<number[], number[]> = {
   none: () => [],
-  read: (rom) => Array.from({ length: 0x100 }, (_, i) => (i >= VANILLA_GFX ? gfxEntry(rom, i)?.addr ?? 0 : 0)),
+  read: (rom) => Array.from({ length: GFX_FILES }, (_, i) => (i >= VANILLA_GFX ? gfxEntry(rom, i)?.addr ?? 0 : 0)),
   added: (a, b) => b.flatMap((addr, i) => (addr && !a[i] ? [i] : [])),
   merge: (r, p) => union(r, p),
   empty: (p) => !p.length,
   summary: (p) => (p.length ? 'ExGFX' : null),
-  removal: (p) => (p.length ? p.map((n) => `ExGFX${hex(n, 2)}`).join(', ') : null),
+  removal: (p) => (p.length ? p.map((n) => `ExGFX${gfxHex(n)}`).join(', ') : null),
   remove(rom, mine) {
     for (const n of mine) {
       const e = n >= VANILLA_GFX ? gfxEntry(rom, n) : null;

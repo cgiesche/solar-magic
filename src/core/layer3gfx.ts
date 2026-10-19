@@ -16,7 +16,7 @@
 import type { Rom } from './rom.ts';
 import { applyPatch, type ApplyResult } from './patchapply.ts';
 import { listPatches } from './patchreg.ts';
-import { installEditorPatch, editorPatch, missingPatch, gfxEntry, VANILLA_GFX, RAW_GFX_SIZES } from './patches.ts';
+import { installEditorPatch, editorPatch, missingPatch, gfxEntry, gfxNum, freeGfx, GFX_NONE, RAW_GFX_SIZES } from './patches.ts';
 import { lz2Decompress } from './lz2.ts';
 import { snesToPc } from './rom.ts';
 import { LAYER3_GFX_RAM, RAM } from './ram.ts';
@@ -31,13 +31,16 @@ export const LT3_DESTS = ['Under the status bar', 'Start of layer 3', 'Last line
 export const LT3_SIZES = [0x2000, 0x1000, 0x800];
 const GFX_HOOK = 0x00a9da, MAP_HOOK = 0x00a01f;
 const MAGIC = [0x53, 0x4d, 0x57, 0x4c]; // "SMWL"
+// the table's parts: LT3 and LG1-LG4 a word per level, then LT3's DDFF a byte per level
+const LT3_TBL = 0, LG_TBL = 0x400, DDFF_TBL = 0x1400;
 const hx = (n: number) => '$' + n.toString(16).toUpperCase();
 const hx4 = (n: number) => '$' + n.toString(16).toUpperCase().padStart(4, '0');
 
-// Tables (512 bytes each, by level): LT3 file ($FF none), LG1-LG4 ($FF the game's file), LT3's DDFF.
+// Tables (by level): LT3 file, LG1-LG4 (a word each, 0FF: none / the game's file), LT3's DDFF (a byte).
 // LG: at the start of the graphics upload ($00A9DA, LDA #$80 : STA $2115), in levels the four files
 // when one is the level's own, else 28-2B again when another level put its own there (!Own). A file
-// stored raw is copied from the ROM, a compressed one through the game's decompression ($00BA28).
+// stored raw is copied from the ROM, a compressed one through the game's decompression (the editor
+// patch's entry to $00BA28 for any file number).
 // LT3: where the game uploads the image of the layer 3 setting ($00A01F, LDA $1BE3 : BEQ : DEC, the
 // place Lunar Magic changes); the image is skipped when the level has an LT3 file (stored raw).
 function asm(rom: Rom): string {
@@ -52,6 +55,7 @@ lorom
 !GfxHi = ${hx(p.gfxHi)}
 !GfxBk = ${hx(p.gfxBank)}
 !GfxFlags = ${hx(p.gfxFlags)}
+!GfxDecomp = ${hx(p.decomp)}
 
 org ${hx(GFX_HOOK)}
   JSL Gfx
@@ -74,44 +78,49 @@ Gfx:
   CMP #$0F : BCC .game
 .level
   REP #$30
-  LDA.l $7E010B : AND #$01FF : TAX
+  LDA.l $7E010B : AND #$01FF : ASL : TAX
+  LDA.l Tbl+${hx(LG_TBL)},x : CMP #$00FF : BNE .own
+  LDA.l Tbl+${hx(LG_TBL + 0x400)},x : CMP #$00FF : BNE .own
+  LDA.l Tbl+${hx(LG_TBL + 0x800)},x : CMP #$00FF : BNE .own
+  LDA.l Tbl+${hx(LG_TBL + 0xc00)},x : CMP #$00FF : BNE .own
   SEP #$20
-  LDA.l Tbl+$200,x : AND.l Tbl+$400,x : AND.l Tbl+$600,x : AND.l Tbl+$800,x
-  CMP #$FF : BEQ .game
+  BRA .game
+.own
   LDY #$0000
 - PHY : PHX
-  LDA.l Tbl+$200,x
-  CMP #$FF : BNE +
-  TYA : CLC : ADC #${hx(GAME_LAYER3_GFX)}
+  LDA.l Tbl+${hx(LG_TBL)},x
+  CMP #$00FF : BNE +
+  TYA : CLC : ADC #${hx4(GAME_LAYER3_GFX)}
 + JSR Upload
   PLX : PLY
-  REP #$20 : TXA : CLC : ADC #$0200 : TAX : SEP #$20
+  TXA : CLC : ADC #$0400 : TAX
   INY : CPY #$0004 : BNE -
+  SEP #$20
   LDA #$01 : STA.l !Own
   PLP
   RTL
 .game
   LDA.l !Own : BEQ .done
-  REP #$10
+  REP #$30
   LDY #$0000
 - PHY
-  TYA : CLC : ADC #${hx(GAME_LAYER3_GFX)}
+  TYA : CLC : ADC #${hx4(GAME_LAYER3_GFX)}
   JSR Upload
   PLY : INY : CPY #$0004 : BNE -
+  SEP #$20
   LDA #$00 : STA.l !Own
 .done
   PLP
   RTL
 
-; A = file (8 bit), Y = slot 0-3 (X/Y 16 bit): its 0x800 bytes to VRAM $4000 + slot * $400
+; A = file, Y = slot 0-3 (A/X/Y 16 bit): its 0x800 bytes to VRAM $4000 + slot * $400
 Upload:
-  SEP #$30
-  PHA
+  TAX
+  SEP #$20
   STZ $2116
   TYA : ASL #2 : ORA #$40 : STA $2117
-  PLA : TAX : TAY
   LDA.l !GfxFlags,x : BNE .raw
-  JSL $00BA28        ; decompressed to [$00]
+  JSL !GfxDecomp     ; decompressed to [$00]
   LDA $00 : STA $4302
   LDA $01 : STA $4303
   LDA $02 : STA $4304
@@ -126,7 +135,7 @@ Upload:
   LDA #${hx(LG_SIZE & 0xff)} : STA $4305
   LDA #${hx(LG_SIZE >> 8)} : STA $4306
   LDA #$01 : STA $420B
-  REP #$10
+  REP #$30
   RTS
 
 ; returns Z set: no image of the layer 3 setting (none, or the level's LT3 is there instead); else
@@ -136,9 +145,10 @@ Map:
   PHP
   REP #$30
   LDA.l $7E010B : AND #$01FF : TAX
-  LDA.l Tbl,x : AND #$00FF
-  CMP #$00FF : BEQ .game
   PHX
+  ASL : TAX
+  LDA.l Tbl+${hx(LT3_TBL)},x
+  CMP #$00FF : BEQ .none
   TAX
   SEP #$20
   LDA.l !GfxFlags,x : BEQ .packed
@@ -146,8 +156,8 @@ Map:
   LDA.l !GfxHi,x : STA $4303
   LDA.l !GfxBk,x : STA $4304
   PLX
-  LDA.l Tbl+$A00,x : AND #$0F : ASL : TAX   ; DDFF * 2
   REP #$20
+  LDA.l Tbl+${hx(DDFF_TBL)},x : AND #$000F : ASL : TAX   ; DDFF * 2
   LDA.l .vram,x : STA $2116
   LDA.l .skip,x : CLC : ADC $4302 : STA $4302
   LDA.l .len,x : STA $4305
@@ -160,6 +170,7 @@ Map:
   SEP #$02
   RTL
 .packed
+.none
   PLX
 .game
   PLP
@@ -176,7 +187,7 @@ Map:
   dw ${copies.map((c) => hx4(c.len)).join(', ')}
 
 Tbl:
-  fillbyte $FF : fill $A00
+  fillword $00FF : fill ${hx(DDFF_TBL)}
   fillbyte $00 : fill $200
 `;
 }
@@ -209,13 +220,13 @@ export interface Layer3Gfx extends Lt3Place { lt3: number; lg: number[] }
 
 export function levelLayer3(rom: Rom, n: number): Layer3Gfx {
   const t = table(rom);
-  return { lt3: rom.r8(t + n), ...fromLt3Nibble(rom.r8(t + 0xa00 + n)), lg: [1, 2, 3, 4].map((k) => rom.r8(t + k * 0x200 + n)) };
+  return { lt3: rom.r16(t + LT3_TBL + n * 2), ...fromLt3Nibble(rom.r8(t + DDFF_TBL + n)), lg: [0, 1, 2, 3].map((k) => rom.r16(t + LG_TBL + k * 0x400 + n * 2)) };
 }
 export function setLevelLayer3(rom: Rom, n: number, g: Layer3Gfx): void {
   const t = table(rom);
-  rom.w8(t + n, g.lt3);
-  g.lg.forEach((v, k) => rom.w8(t + (k + 1) * 0x200 + n, v));
-  rom.w8(t + 0xa00 + n, lt3Nibble(g));
+  rom.w16(t + LT3_TBL + n * 2, gfxNum(g.lt3));
+  g.lg.forEach((v, k) => rom.w16(t + LG_TBL + k * 0x400 + n * 2, gfxNum(v)));
+  rom.w8(t + DDFF_TBL + n, lt3Nibble(g));
 }
 
 // the ROM bytes ([SNES address, value]) that make the uncompressed 0x2000-byte file at `addr` level n's LT3,
@@ -224,10 +235,11 @@ export function setLevelLayer3(rom: Rom, n: number, g: Layer3Gfx): void {
 export function lt3Patches(rom: Rom, n: number, addr: number, place: Lt3Place): [number, number][] {
   const t = findTable(rom), p = editorPatch(rom);
   if (t === null || !p) return [];
-  let num = rom.r8(t + n);
-  if (num === 0xff) for (num = VANILLA_GFX; num < 0xff && gfxEntry(rom, num); num++);
-  if (num === 0xff) return [];
-  return [[t + n, num], [t + 0xa00 + n, lt3Nibble(place)],
+  let num = rom.r16(t + LT3_TBL + n * 2);
+  if (num === GFX_NONE) num = freeGfx(rom, new Set(), 'asIs');
+  if (num < 0) return [];
+  const at = t + LT3_TBL + n * 2;
+  return [[at, num & 0xff], [at + 1, num >> 8], [t + DDFF_TBL + n, lt3Nibble(place)],
     [p.gfxLo + num, addr & 0xff], [p.gfxHi + num, (addr >> 8) & 0xff], [p.gfxBank + num, addr >> 16], [p.gfxFlags + num, RAW_GFX_SIZES.indexOf(0x2000) + 1]];
 }
 
