@@ -51,6 +51,10 @@ _Avoid_: LM exit, exit format 2
 Where layer 1 (FG) and layer 2 (BG) start when Mario enters: the game's FG/BG start Y, or (Lunar Magic's, horizontal levels) a number of rows above Mario, the BG then by the level's BG start – its bottom at the level's bottom (by the BG's height), rows below the FG, or at 0. Moving an entrance keeps it.
 _Avoid_: FG/BG init (Lunar Magic's name), initial position
 
+**Game view frame**:
+A 256x224 frame over the level showing what the player sees there (Lunar Magic's Game View Screen), placed on the 8x8 grid inside the level; a view setting, not part of the level.
+_Avoid_: camera box, screen preview
+
 ### Third-party content
 
 **Package**:
@@ -104,3 +108,7 @@ _Avoid_: Cached value, generation (for validity)
 
 **Prefetch**:
 Probing what the palettes could show before anyone asks for it, after everything asked for directly.
+
+**Scroll bands**:
+Where Mario is on the game's screen while the camera scrolls in a direction, or follows him after L/R looked ahead; learned by moving him in the probe level (an emulated result).
+_Avoid_: scroll zones, camera thresholds (they are not a table)

@@ -39,13 +39,13 @@ const PROBE_FRAMES = 24;
 const SPRITE_SLOT = 11; // slot of a probed sprite (items it spawns take lower free slots)
 const SPRITE_ROW = 6; // probed sprites go to rows 6-21 (Mario fits below them, the level has $1B rows)
 const PROBE_CAM_Y_MAX = 0x1b * 16 - 224;
-const PROBE_SCREENS = PROBE_HEADER[0] & 0x1f; // (+ 1: the last one stays empty)
+const PROBE_SCREENS = PROBE_HEADER[0] & 0x1f; // the level's screens but its last (it has one more)
 const MAX_VARIANTS = 16; // more X × Y combinations: Y is ignored
 const ENTER_FRAMES = 24;
 const COLLISION_VERSION = 2; // part of the result key: raise when the collision probe changes
 const SETTLE_FRAMES = 6; // frames Mario has to stand still before a probe stops early
 // joypad bits ($4218); Mario's offset to the tile for each enter direction
-export const PAD = { up: 0x0800, down: 0x0400, left: 0x0200, right: 0x0100, b: 0x8000, y: 0x4000 };
+export const PAD = { up: 0x0800, down: 0x0400, left: 0x0200, right: 0x0100, b: 0x8000, y: 0x4000, l: 0x0020, r: 0x0010 };
 const ENTER_DX = [-8, -4, 0, 4, 8]; // pipes only let Mario in within a few pixels of their middle
 
 // result cache keys (see ResultCache) of the probes in tileset ts

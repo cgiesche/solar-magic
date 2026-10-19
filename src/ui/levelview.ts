@@ -434,13 +434,12 @@ export class LevelView {
   }
 
   // the game view frame's place: where it was put (first: the middle of the view), inside the level as it is now
+  // (a smaller level moves it only while it is open)
   gameViewPos(): { x: number; y: number } {
     const app = this.app, im = app.images, z = app.zoom;
-    const want = app.gameView ?? {
-      x: (this.scroller.scrollLeft + this.scroller.clientWidth / 2) / z - GAME_VIEW_W / 2,
-      y: (this.scroller.scrollTop + this.scroller.clientHeight / 2) / z - GAME_VIEW_H / 2,
-    };
-    return (app.gameView = gameViewAt(want.x, want.y, im.width, im.height));
+    app.gameView ??= gameViewAt((this.scroller.scrollLeft + this.scroller.clientWidth / 2) / z - GAME_VIEW_W / 2,
+      (this.scroller.scrollTop + this.scroller.clientHeight / 2) / z - GAME_VIEW_H / 2, im.width, im.height);
+    return gameViewAt(app.gameView.x, app.gameView.y, im.width, im.height);
   }
 
   // the label in the frame's top left corner (level pixels; it stays the same size on the screen)
@@ -466,14 +465,14 @@ export class LevelView {
     for (const [k, st] of Object.entries(BAND_STYLE) as [keyof CameraBands, (typeof BAND_STYLE)[keyof CameraBands]][]) {
       const b = bands?.[k];
       if (!b) continue;
-      const [x, y, w, hh] = st.axis === 'x' ? [p.x + b.from, p.y, b.to - b.from, GAME_VIEW_H] : [p.x, p.y + b.from, GAME_VIEW_W, b.to - b.from];
+      const [x, y, w, bh] = st.axis === 'x' ? [p.x + b.from, p.y, b.to - b.from, GAME_VIEW_H] : [p.x, p.y + b.from, GAME_VIEW_W, b.to - b.from];
       ctx.fillStyle = `rgba(${st.color},${st.look ? 0.12 : 0.22})`;
-      ctx.fillRect(x, y, w, hh);
+      ctx.fillRect(x, y, w, bh);
       if (st.look) {
         ctx.strokeStyle = `rgba(${st.color},0.9)`;
         ctx.lineWidth = 1.5 * lw;
         ctx.setLineDash([4 * lw, 3 * lw]);
-        ctx.strokeRect(x, y, w, hh);
+        ctx.strokeRect(x, y, w, bh);
         ctx.setLineDash([]);
       }
     }

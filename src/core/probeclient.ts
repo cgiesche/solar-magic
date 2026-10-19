@@ -53,15 +53,15 @@ export class ProbeClient {
     return probeable(num) ? this.probed(PROBE_SPRITE | num) : undefined;
   }
   // Mario's run speeds; null when they could not be found
-  runSpeeds(): RunStates | null | undefined {
-    const r = this.probed<RunStates>(PROBE_RUNS);
-    return r === undefined && this.failed.has(jobId({ ts: this.d.tileset(), k: PROBE_RUNS })) ? null : r;
-  }
+  runSpeeds(): RunStates | null | undefined { return this.probedOrFailed<RunStates>(PROBE_RUNS); }
 
   // where Mario is on the screen while the camera scrolls (camerabands.ts); null when they could not be found
-  cameraBands(): CameraBands | null | undefined {
-    const r = this.probed<CameraBands>(PROBE_CAMERA);
-    return r === undefined && this.failed.has(jobId({ ts: this.d.tileset(), k: PROBE_CAMERA })) ? null : r;
+  cameraBands(): CameraBands | null | undefined { return this.probedOrFailed<CameraBands>(PROBE_CAMERA); }
+
+  // a probe's result; null when it failed
+  private probedOrFailed<T>(k: number): T | null | undefined {
+    const r = this.probed<T>(k);
+    return r === undefined && this.failed.has(jobId({ ts: this.d.tileset(), k })) ? null : r;
   }
 
   private probed<T>(k: number): T | undefined {

@@ -20,7 +20,6 @@ export interface CameraBands {
   lookRight: Band | null; lookLeft: Band | null; // walking right after R, left after L
 }
 
-const L = 0x0020, R = 0x0010; // joypad bits ($4218)
 const PAN_FRAMES = 100; // holding L/R until the screen has panned
 const WALK_FRAMES = 150, RUN_FRAMES = 240; // running: up to P-speed
 
@@ -55,7 +54,7 @@ export function measureCameraBands(start: BandStart): CameraBands {
     // from standing, and (not after L/R) turning around after walking the other way: the camera catches up then
     for (const turn of look ? [false] : [false, true]) for (const [pad, frames] of [[hold, WALK_FRAMES], [hold | PAD.y, RUN_FRAMES]]) {
       const s = start(dir === 'right' ? LEFT_X : RIGHT_X);
-      if (look) { const p = dir === 'right' ? R : L; run(s, PAN_FRAMES, (f) => (f < PAN_FRAMES - 10 ? p : 0), dir, []); }
+      if (look) { const p = dir === 'right' ? PAD.r : PAD.l; run(s, PAN_FRAMES, (f) => (f < PAN_FRAMES - 10 ? p : 0), dir, []); }
       if (turn) run(s, WALK_FRAMES, () => (dir === 'right' ? PAD.left : PAD.right), dir, []);
       run(s, frames, () => pad, dir, acc);
     }
