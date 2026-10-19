@@ -10,19 +10,20 @@
 
 import { levelDataKey, type LevelEmulator, type LevelOverride } from './levelemu.ts';
 import type { ScanLevel } from './levelscan.ts';
-import { GAME_VIEW_W, GAME_VIEW_H } from './camerabands.ts';
+import { GAME_VIEW_W, GAME_VIEW_H, MARIO_W, MARIO_H } from './camerabands.ts';
 import { GM, RAM, cameraX, cameraY, setMarioPos } from './ram.ts';
 
 // per column of the level (vertical levels: row), 16 pixels each: the pixels [from, to) down (across) it the
 // camera showed; null: never
 export interface CameraReach { vertical: boolean; spans: ([number, number] | null)[] }
+// the camera: layer 1's place in level pixels
+export interface CameraAt { x: number; y: number }
 
 const STEP = 4; // pixels Mario is carried per frame
 const LOAD_FRAMES = 300; // until Mario can move after the level loaded (an entrance in a pipe …)
 const REST = 16; // frames without the camera moving: it rests
 const SETTLE_FRAMES = 600; // at most
 const SLICE = 60; // frames between yields
-const MARIO_W = 16, MARIO_H = 32;
 
 // the result cache key of the camera at Mario standing at (x, y) in the level as edited
 export function cameraAtKey(level: number, ov: LevelOverride, x: number, y: number): string {
@@ -48,17 +49,18 @@ function stand(emu: LevelEmulator, x: number, y: number): boolean {
   return w[RAM.gameMode] === GM.level;
 }
 
-// Mario stands at (x, y) until the camera rests (yielding between slices); false when the level ended
-function* settle(emu: LevelEmulator, x: number, y: number): Generator<void, boolean> {
+// Mario stands at (x, y) until the camera rests (yielding between slices): whether it came to rest; null when
+// the level ended
+function* settle(emu: LevelEmulator, x: number, y: number): Generator<void, boolean | null> {
   const w = emu.snes.wram;
   let cx = -1, cy = -1, still = 0;
   for (let f = 0; f < SETTLE_FRAMES && still < REST; f++) {
-    if (!stand(emu, x, y)) return false;
+    if (!stand(emu, x, y)) return null;
     still = cameraX(w) === cx && cameraY(w) === cy ? still + 1 : 0;
     cx = cameraX(w); cy = cameraY(w);
     if (f % SLICE === SLICE - 1) yield;
   }
-  return true;
+  return still >= REST;
 }
 
 // The camera's reach in the level; null when it could not be played
@@ -79,9 +81,9 @@ export function* cameraReachJob(emu: LevelEmulator, lv: ScanLevel): Generator<vo
     yield;
     const w = emu.snes.wram;
     const at = (p: number): [number, number] => lv.vertical ? [side ? lv.width - MARIO_W * 2 : 0, p] : [p, side ? lv.height - MARIO_H - 16 : 0];
-    if (!(yield* settle(emu, ...at(0)))) continue;
+    if ((yield* settle(emu, ...at(0))) === null) continue;
     played = true;
-    for (let p = 0, f = 0; p <= size - MARIO_H; p += STEP, f++) {
+    for (let p = 0, f = 0; p <= size - (lv.vertical ? MARIO_H : MARIO_W); p += STEP, f++) {
       if (!stand(emu, ...at(p))) break; // the level ended (something the level does)
       if (lv.vertical) see(cameraY(w), cameraX(w)); else see(cameraX(w), cameraY(w));
       if (f % SLICE === SLICE - 1) yield;
@@ -91,8 +93,8 @@ export function* cameraReachJob(emu: LevelEmulator, lv: ScanLevel): Generator<vo
 }
 
 // The camera (layer 1's place) the game puts at Mario standing at (x, y), coming from the level's entrance;
-// null when the level could not be played
-export function* cameraAtJob(emu: LevelEmulator, lv: ScanLevel, x: number, y: number): Generator<void, { x: number; y: number } | null> {
+// null when the level could not be played or the camera never came to rest
+export function* cameraAtJob(emu: LevelEmulator, lv: ScanLevel, x: number, y: number): Generator<void, CameraAt | null> {
   if (!start(emu, lv)) return null;
   yield;
   if (!(yield* settle(emu, x, y))) return null;

@@ -15,7 +15,7 @@ import { contextMenu, type MenuItem } from './menu.ts';
 import { incompleteSprites } from './spritemem.ts';
 import { problemsButton } from './problems.ts';
 import { map16Tile } from '../core/ram.ts';
-import { gameViewAt, GAME_VIEW_W, GAME_VIEW_H, type CameraBands } from '../core/camerabands.ts';
+import { gameViewAt, GAME_VIEW_W, GAME_VIEW_H, MARIO_W, MARIO_H, type CameraBands } from '../core/camerabands.ts';
 
 type Drag =
   | { kind: 'move'; edit: LevelEdit; startTx: number; startTy: number; lastDx: number; lastDy: number; orig: Map<number, { x: number; y: number }> }
@@ -455,7 +455,7 @@ export class LevelView {
   placeGameViewByMario(): void {
     if (!this.hover) return;
     this.app.show.gameView = true;
-    this.app.placeGameViewByMario(this.hover.tx * 16, this.hover.ty * 16 - 16);
+    this.app.placeGameViewByMario(this.hover.tx * 16, this.hover.ty * 16 - MARIO_H);
     this.paint();
   }
 
@@ -477,10 +477,10 @@ export class LevelView {
     const m = app.gameViewMario;
     if (m) {
       ctx.fillStyle = 'rgba(255,60,60,0.45)';
-      ctx.fillRect(m.x, m.y, 16, 32);
+      ctx.fillRect(m.x, m.y, MARIO_W, MARIO_H);
       ctx.strokeStyle = '#ffffff';
       ctx.lineWidth = 1.5 * lw;
-      ctx.strokeRect(m.x, m.y, 16, 32);
+      ctx.strokeRect(m.x, m.y, MARIO_W, MARIO_H);
     }
     const bands = app.show.scrollBands ? app.probes.cameraBands() : undefined;
     for (const [k, st] of Object.entries(BAND_STYLE) as [keyof CameraBands, (typeof BAND_STYLE)[keyof CameraBands]][]) {

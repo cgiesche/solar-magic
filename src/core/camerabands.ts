@@ -10,7 +10,7 @@ import { RAM, getS16 } from './ram.ts';
 import { PAD } from './blockprobe.ts';
 
 export const GAME_VIEW_W = 256, GAME_VIEW_H = 224;
-const MARIO_W = 16, MARIO_H = 32; // big Mario's box from his position
+export const MARIO_W = 16, MARIO_H = 32; // big Mario's box from his position
 
 // screen pixels [from, to): X for right, left, lookRight and lookLeft, Y for up and down; null: the camera never
 // moved that way

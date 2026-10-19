@@ -31,7 +31,8 @@ import { LevelHistory } from '../core/levelhistory.ts';
 import { resizeObjectSize, type ObjKind, type ObjKinds } from '../core/objkinds.ts';
 import { JumpArcs, ARC_SPEEDS, type JumpArc } from '../core/jumparcs.ts';
 import { scanKey, type ScanLevel, type ScanResult } from '../core/levelscan.ts';
-import { cameraAtKey, type CameraReach } from '../core/camerareach.ts';
+import { cameraAtKey, type CameraReach, type CameraAt } from '../core/camerareach.ts';
+import { MARIO_W, MARIO_H } from '../core/camerabands.ts';
 import { layer3Kinds, tideKind, layer3Top, type Layer3Kind } from '../core/layer3.ts';
 import { layer2MotionsJob, type Layer2Motions } from '../core/l2scroll.ts';
 import { variantOf, blockKey, spriteKey, type BlockProbe, type SpriteProbe } from '../core/blockprobe.ts';
@@ -119,8 +120,8 @@ export class App {
   gameView: { x: number; y: number } | null = null;
   // the frame placed by Mario (Shift+V): his place (inside the level) and the camera the game puts there in the
   // level as edited (key: its result cache key; camera undefined while it is played, null when it could not be);
-  // kept while editing and between levels, until the frame is dragged
-  gameViewMario: { x: number; y: number; key: string; camera?: { x: number; y: number } | null } | null = null;
+  // kept while editing and between levels, until the frame is dragged; asked for only while the frame is shown
+  gameViewMario: { x: number; y: number; key: string | null; camera?: CameraAt | null } | null = null;
   // view-only game state applied before the emulated level load
   switches = { palaces: false, onOff: false };
   dirty = false;
@@ -990,20 +991,21 @@ export class App {
 
   // Mario standing at level pixel (x, y): the frame shows the camera the game puts there
   placeGameViewByMario(x: number, y: number): void {
-    this.gameViewMario = { x, y, key: '' };
+    this.gameViewMario = { x, y, key: null }; // (not asked for yet)
     this.updateGameViewCamera();
   }
 
-  // the camera at Mario's place in the level as edited (ov), from the result cache or played in the probe worker
-  private updateGameViewCamera(ov?: LevelOverride): void {
+  // the camera at Mario's place (kept inside the level) in the level as edited (ov), from the result cache or
+  // played in the probe worker; asked again when the cache dropped it (the ROM bytes it read changed)
+  updateGameViewCamera(ov?: LevelOverride): void {
     const m = this.gameViewMario, im = this.images;
-    if (!m || !im) return;
-    m.x = Math.max(0, Math.min(im.width - 16, m.x)); m.y = Math.max(0, Math.min(im.height - 32, m.y));
+    if (!m || !im || !this.show.gameView) return;
+    m.x = Math.max(0, Math.min(im.width - MARIO_W, m.x)); m.y = Math.max(0, Math.min(im.height - MARIO_H, m.y));
     ov ??= this.buildOverrides();
     const key = cameraAtKey(this.level.number, ov, m.x, m.y);
-    if (m.key === key) return;
+    if (m.key === key && (m.camera === undefined || m.camera === null || this.results.get(key) !== undefined)) return;
     m.key = key;
-    m.camera = this.results.get<{ x: number; y: number }>(key);
+    m.camera = this.results.get<CameraAt>(key);
     if (m.camera === undefined) this.probes.requestCamera(++this.cameraRun, key, this.scanLevel(ov), m.x, m.y, (r) => {
       if (this.gameViewMario !== m || m.key !== key) return;
       m.camera = r;

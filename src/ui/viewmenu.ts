@@ -10,6 +10,7 @@ export function viewMenu(app: App, paint: () => void, full = true): HTMLElement 
     onToggle: (v) => {
       app.show[k] = v;
       if (k === 'scrollBands' && v) app.show.gameView = true;
+      if (k === 'gameView' || k === 'scrollBands') app.updateGameViewCamera();
       if (k === 'anim') app.refresh();
       else if (k === 'layer1' || k === 'layer2' || k === 'layer3' || k === 'ghost') app.recomposite(); else paint();
     },

@@ -417,7 +417,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     else if (k === 'g' || k === 'G') { app.show.grid = !app.show.grid; view.paint(); }
     else if (k === 'c' || k === 'C') { app.show.collision = !app.show.collision; view.paint(); }
     else if ((k === 'v' || k === 'V') && e.shiftKey) view.placeGameViewByMario();
-    else if (k === 'v' || k === 'V') { app.show.gameView = !app.show.gameView; view.paint(); }
+    else if (k === 'v' || k === 'V') { app.show.gameView = !app.show.gameView; app.updateGameViewCamera(); view.paint(); }
     else if ((k === 'j' || k === 'J') && e.shiftKey) view.toggleArcPin();
     else if (k === 'j' || k === 'J') { app.show.arcs = !app.show.arcs; if (!app.show.arcs) view.arcPin = null; view.paint(); }
     else if (k === 'm' || k === 'M') setWorkspace('gfx', { tab: 'map16', tile: view.hover ? hoverTile(app, view.hover.tx, view.hover.ty) : undefined });

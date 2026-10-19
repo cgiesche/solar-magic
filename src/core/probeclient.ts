@@ -1,6 +1,7 @@
 // The editor's side of the probes (probehost.ts): asks for block, collision and sprite probes, Mario's
 // run speeds and the game view's scroll bands in the current tileset, prefetches what the palettes can
-// show, and runs the object kinds, the level scan and the camera at a place, all in the probe worker. It sends the ROM again after a change
+// show, and runs the object kinds, the level scan and the camera at a place, all in the probe worker. It
+// sends the ROM again after a change
 // (the worker drops its queue then) together with everything still wanted, and falls back to
 // probing on the main thread in background slices when the worker fails. Results go to the
 // editor's ResultCache, also those from before a ROM change: they hold while the ROM bytes they read
@@ -10,6 +11,7 @@ import { ProbeHost, PROBE_SPRITE, PROBE_COLL, PROBE_RUNS, PROBE_CAMERA, jobId, j
 import type { ResultCache } from './romdeps.ts';
 import type { BlockProbe, CollisionProbe, SpriteProbe, RunStates } from './blockprobe.ts';
 import type { CameraBands } from './camerabands.ts';
+import type { CameraAt } from './camerareach.ts';
 import { kindsKey, type ObjKinds, type KindLevel } from './objkinds.ts';
 import type { ScanLevel, ScanResult } from './levelscan.ts';
 
@@ -143,8 +145,8 @@ export class ProbeClient {
 
   // The camera at Mario standing at (x, y) in the level (camerareach.ts; replaces one still running); its
   // result goes to the cache under key too
-  requestCamera(id: number, key: string, level: ScanLevel, x: number, y: number, done: (r: { x: number; y: number } | null) => void): void {
-    this.play({ type: 'camera', id, key, level, x, y }, (r) => done(r as { x: number; y: number } | null), 'Camera');
+  requestCamera(id: number, key: string, level: ScanLevel, x: number, y: number, done: (r: CameraAt | null) => void): void {
+    this.play({ type: 'camera', id, key, level, x, y }, (r) => done(r as CameraAt | null), 'Camera');
   }
 
   private play(msg: ProbeMessage & { type: Played }, done: (r: unknown) => void, label: string): void {

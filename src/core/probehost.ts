@@ -13,7 +13,7 @@ import { RomReads, type CacheEntry } from './romdeps.ts';
 import { LevelEmulator } from './levelemu.ts';
 import { ObjKindProbe, kindsKey, type KindLevel } from './objkinds.ts';
 import { levelScanJob, type ScanLevel, type ScanResult } from './levelscan.ts';
-import { cameraAtJob } from './camerareach.ts';
+import { cameraAtJob, type CameraAt } from './camerareach.ts';
 
 // job keys: Map16 tile; sprites as PROBE_SPRITE | num, collision as PROBE_COLL | tile, Mario's
 // run speeds as PROBE_RUNS, the game view's scroll bands as PROBE_CAMERA
@@ -37,7 +37,7 @@ export interface KindsDone { type: 'kinds'; gen: number; ts: number; failed: boo
 // a level scan (id: the editor's request; result null: it failed), with its result cache entry
 export interface ScanDone { type: 'scan'; gen: number; id: number; result: ScanResult | null; put: [string, CacheEntry][] }
 // the camera at Mario standing at a place (id: the editor's request; result null: it failed), with its result cache entry
-export interface CameraDone { type: 'camera'; gen: number; id: number; result: { x: number; y: number } | null; put: [string, CacheEntry][] }
+export interface CameraDone { type: 'camera'; gen: number; id: number; result: CameraAt | null; put: [string, CacheEntry][] }
 export type ProbeReply = ProbeDone | KindsDone | ScanDone | CameraDone;
 
 // what the editor sends: the ROM (again after each change), jobs asked for, the prefetch queue,
