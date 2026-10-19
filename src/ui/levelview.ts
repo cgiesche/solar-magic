@@ -453,11 +453,11 @@ export class LevelView {
     return { x: p.x, y: p.y, w: (10 + text.length * 6) / z, h: 14 / z, text };
   }
 
-  // Shift+V: the game view frame placed by Mario standing on the tile under the mouse
+  // Shift+V: the game view frame placed by Mario with his feet in the tile under the mouse
   placeGameViewByMario(): void {
     if (!this.hover) return;
     this.app.show.gameView = true;
-    this.app.placeGameViewByMario(this.hover.tx * 16, this.hover.ty * 16 - MARIO_H);
+    this.app.placeGameViewByMario(this.hover.tx * 16, (this.hover.ty + 1) * 16 - MARIO_H);
     this.paint();
   }
 
