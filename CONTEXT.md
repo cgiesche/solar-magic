@@ -70,8 +70,12 @@ One typed piece of a package: a patch, an UberASM file, a block, a sprite, a son
 _Avoid_: Component, Item
 
 **Graphics part**:
-A part without code: Map16 tiles (.map16), an ExGFX file or a palette (.pal with its .palmask). Map16 tiles and ExGFX keep the author's tile or number if it is free, else they take the next free one.
+A part without code: Map16 tiles (.map16), an ExGFX file or a palette (.pal with its .palmask). Map16 tiles and ExGFX keep the author's tile or number (up to FFF) if it is free, else they take the next free one of the file's range (see ExGFX range).
 _Avoid_: Resource, asset
+
+**ExGFX range**:
+The part of the ExGFX numbers (000–FFF, Lunar Magic's) a file belongs in: ExGFX 80–DFF (then 32–7F) for graphics, E00–FFF for files kept "as is" – layer 3 graphics (2bpp), layer 3 tilemaps – which are never 3bpp. FF is no file's number: it is a graphics slot's "none".
+_Avoid_: Super ExGFX, extended range
 
 **Link**:
 A connection between two parts of one package that the editor works out: a block on the Map16 tiles that show it, a sprite's number in the define of a block that spawns it, an ExGFX file in the graphics slot its tiles are drawn from.

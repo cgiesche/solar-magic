@@ -156,7 +156,9 @@ When a level is displayed, it runs the ROM's **original loading routines** (~15 
   (Lunar Magic's ExAnimation Remap).
 * **Palette editor** (P): edit colors directly at their ROM source, `.pal` import/export,
   optionally a **custom palette per level** (all 256 colors).
-* **Graphics:** view GFX00–31 and ExGFX 32–FF, export/import as PNG.
+* **Graphics:** view GFX00–31 and ExGFX up to FFF (as Lunar Magic: ExGFX 80–DFF, and E00–FFF for files kept
+  "as is" – layer 3 graphics and tilemaps, never 3bpp), listed by range; export/import as PNG.
+  New files and imports take the next free number of their range; number fields suggest it.
   Import either LZ2-compressed (original format, 2/3/4bpp) or as uniform **uncompressed 4bpp**
   (16 colors, via DMA from the ROM – no more 3bpp detour).
   The editor's own LZ2 compressor produces smaller data than the original.
@@ -196,9 +198,9 @@ change only a few verified locations:
 | Location | Purpose |
 |---|---|
 | `$05D8F5` | Sprite data in any bank (bank table for 512 levels); current level number in `$7E010B` (like Lunar Magic) |
-| `$00BA2C` | GFX pointer table with 256 entries (ExGFX) |
+| `$00BA2C` | GFX pointer table with 4096 entries (ExGFX 000–FFF); the high bytes of the slots' numbers in RAM `$7F367A`–`$7F3682` |
 | `$00AA6B` | Format selectable per file: LZ2/3bpp (original) or uncompressed 4bpp via DMA |
-| `$00A9E1`, `$00AA22` | Graphics bypass: 8 GFX slots per level (SP1–4, FG1–3, BG1) |
+| `$00A9E1`, `$00AA22` | Graphics bypass: 8 GFX slots per level (SP1–4, FG1–3, BG1), ExGFX up to FFF |
 | Ext. object `$02` | "Direct Map16": places any Map16 tile as a rectangle (6 bytes) |
 | Ext. object `$03` ("SMWS") | Structures: places a stored block of Map16 tiles (4 bytes, 4th byte = structure number 00–FF); only occupies entry `$03` of the extended object table, which is empty in the original, independent of the editor patch |
 | `$00922F` ("SMWP") | Custom 256-color palette per level |
