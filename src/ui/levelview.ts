@@ -15,7 +15,8 @@ import { contextMenu, type MenuItem } from './menu.ts';
 import { incompleteSprites } from './spritemem.ts';
 import { problemsButton } from './problems.ts';
 import { map16Tile } from '../core/ram.ts';
-import { gameViewAt, GAME_VIEW_W, GAME_VIEW_H, MARIO_W, MARIO_H, type CameraBands } from '../core/camerabands.ts';
+import { GAME_VIEW_W, GAME_VIEW_H, MARIO_W, MARIO_H, type CameraBands } from '../core/camerabands.ts';
+import { gameViewAt } from '../core/camerareach.ts';
 
 type Drag =
   | { kind: 'move'; edit: LevelEdit; startTx: number; startTy: number; lastDx: number; lastDy: number; orig: Map<number, { x: number; y: number }> }
@@ -435,13 +436,20 @@ export class LevelView {
   }
 
   // the game view frame's place: the camera at Mario when it is placed by him, else where it was put (first: the
-  // middle of the view), inside the level as it is now (a smaller level moves it only while it is open)
+  // middle of the view), inside the level as it is now and where the game lets the camera go (a smaller level or
+  // a narrower camera range moves it only while it is open)
   gameViewPos(): { x: number; y: number } {
     const app = this.app, im = app.images, z = app.zoom, cam = app.gameViewMario?.camera;
     if (cam) return cam;
     app.gameView ??= gameViewAt((this.scroller.scrollLeft + this.scroller.clientWidth / 2) / z - GAME_VIEW_W / 2,
       (this.scroller.scrollTop + this.scroller.clientHeight / 2) / z - GAME_VIEW_H / 2, im.width, im.height);
-    return gameViewAt(app.gameView.x, app.gameView.y, im.width, im.height);
+    return gameViewAt(app.gameView.x, app.gameView.y, im.width, im.height, app.cameraReach());
+  }
+
+  // the scroll bands under the open level's mode and vertical scroll setting
+  private scrollBands(): CameraBands | null | undefined {
+    const h = this.app.level.header;
+    return this.app.probes.cameraBands(h.mode, h.verticalScroll);
   }
 
   // the label in the frame's top left corner (level pixels; it stays the same size on the screen)
@@ -482,7 +490,7 @@ export class LevelView {
       ctx.lineWidth = 1.5 * lw;
       ctx.strokeRect(m.x, m.y, MARIO_W, MARIO_H);
     }
-    const bands = app.show.scrollBands ? app.probes.cameraBands() : undefined;
+    const bands = app.show.scrollBands ? this.scrollBands() : undefined;
     for (const [k, st] of Object.entries(BAND_STYLE) as [keyof CameraBands, (typeof BAND_STYLE)[keyof CameraBands]][]) {
       const b = bands?.[k];
       if (!b) continue;
@@ -539,7 +547,7 @@ export class LevelView {
       { label: 'never on the screen', fill: 'rgba(0,0,0,0.8)' },
     ];
     if (this.app.show.scrollBands) {
-      const bands = this.app.probes.cameraBands();
+      const bands = this.scrollBands();
       rows.push({ label: bands === undefined ? 'Scroll bands (emulating …)' : bands === null ? 'Scroll bands (not found)' : 'Scroll bands', title: true });
       for (const k of Object.values(BAND_STYLE)) rows.push({ label: k.label, fill: `rgba(${k.color},0.8)` });
     }
@@ -869,7 +877,7 @@ export class LevelView {
       d.x1 = px; d.y1 = py;
       this.requestPaint();
     } else if (d.kind === 'gameView') {
-      app.gameView = gameViewAt(px - d.offX, py - d.offY, app.images.width, app.images.height);
+      app.gameView = gameViewAt(px - d.offX, py - d.offY, app.images.width, app.images.height, app.cameraReach());
       this.requestPaint();
     } else if (d.kind === 'paint') {
       const b = this.brush(), c = this.cellAt(px, py);

@@ -52,7 +52,7 @@ Where layer 1 (FG) and layer 2 (BG) start when Mario enters: the game's FG/BG st
 _Avoid_: FG/BG init (Lunar Magic's name), initial position
 
 **Game view frame**:
-A 256x224 frame over the level showing what the player sees there (Lunar Magic's Game View Screen), placed on the 8x8 grid inside the level; a view setting, not part of the level.
+A 256x224 frame over the level showing what the player sees there (Lunar Magic's Game View Screen), placed on the 8x8 grid inside the level and, once its camera reach is known, where the game lets the camera go; a view setting, not part of the level.
 _Avoid_: camera box, screen preview
 
 ### Third-party content
@@ -110,9 +110,9 @@ _Avoid_: Cached value, generation (for validity)
 Probing what the palettes could show before anyone asks for it, after everything asked for directly.
 
 **Scroll bands**:
-Where Mario is on the game's screen while the camera scrolls in a direction, or follows him after L/R looked ahead; learned by moving him in the probe level (an emulated result).
+Where Mario is on the game's screen while the camera scrolls in a direction, or follows him after L/R looked ahead; learned by moving him in the probe level with the open level's mode and vertical scroll setting (an emulated result); a setting that keeps the camera still has no band that way.
 _Avoid_: scroll zones, camera thresholds (they are not a table)
 
 **Camera reach**:
-What of the level the camera can show: where it goes with Mario carried along the level's top and bottom (vertical levels: its sides), standing as far as the camera is concerned; learned by the level scan (an emulated result), shown with the game view frame by darkening the rest. The camera at one place (Mario standing there, the camera as the game puts it) places the game view frame by Mario.
+What of the level the camera can show: where it goes with Mario carried along the level's top and bottom (vertical levels: its sides), standing as far as the camera is concerned; learned by the level scan (an emulated result), shown with the game view frame by darkening the rest; the game view frame is kept where the camera went (its range: from its first to its last place along the level, and where it went across there). The camera at one place (Mario standing there, the camera as the game puts it) places the game view frame by Mario.
 _Avoid_: camera path (it is not one route through the level), covered area

@@ -16,11 +16,15 @@ import { levelScanJob, type ScanLevel, type ScanResult } from './levelscan.ts';
 import { cameraAtJob, type CameraAt } from './camerareach.ts';
 
 // job keys: Map16 tile; sprites as PROBE_SPRITE | num, collision as PROBE_COLL | tile, Mario's
-// run speeds as PROBE_RUNS, the game view's scroll bands as PROBE_CAMERA
+// run speeds as PROBE_RUNS, the game view's scroll bands as cameraJob(mode, vscroll)
 export const PROBE_SPRITE = 0x10000;
 export const PROBE_COLL = 0x20000;
 export const PROBE_RUNS = 0x40000;
 export const PROBE_CAMERA = 0x80000;
+// the scroll bands' job in a level of that mode and vertical scroll setting
+export const cameraJob = (mode: number, vscroll: number) => PROBE_CAMERA | ((mode & 0x1f) << 2) | (vscroll & 3);
+// the mode and vertical scroll setting of a scroll bands' job
+const cameraJobLevel = (k: number): [number, number] => [(k >> 2) & 0x1f, k & 3];
 
 export interface ProbeJob { ts: number; k: number }
 
@@ -56,7 +60,7 @@ type TaskType = 'kinds' | 'scan' | 'camera';
 
 // the result cache key of a job's result
 export function jobKey({ ts, k }: ProbeJob): string {
-  if (k & PROBE_CAMERA) return cameraKey(ts);
+  if (k & PROBE_CAMERA) return cameraKey(ts, ...cameraJobLevel(k));
   if (k & PROBE_RUNS) return runsKey(ts);
   if (k & PROBE_SPRITE) return spriteKey(ts, k & 0x3ff);
   if (k & PROBE_COLL) return collisionKey(ts, k & 0xffff);
@@ -206,7 +210,7 @@ export class ProbeHost {
     try {
       p.use(job.ts);
       const k = job.k;
-      if (k & PROBE_CAMERA) p.cameraBands();
+      if (k & PROBE_CAMERA) p.cameraBands(...cameraJobLevel(k));
       else if (k & PROBE_RUNS) p.runStates();
       else if (k & PROBE_SPRITE) p.probeSprite(k & 0x3ff);
       else if (k & PROBE_COLL) p.probeCollision(k & 0xffff);

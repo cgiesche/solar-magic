@@ -1,9 +1,11 @@
 // The game view frame (Lunar Magic's Game View Screen): what the player sees, a 256x224 screen over the level,
 // with bands where Mario is on that screen while the camera scrolls right, left, up and down, and while it
-// follows him after L or R moved it ahead. The bands are learned by moving Mario in the probe level
-// (BlockProber.cameraBands) and reading his position on the screen in the frames the camera moves, not from a
-// table: walking, running and at P-speed for the horizontal ones, rising at two speeds and falling for the
-// vertical ones (the level scrolling vertically), walking on after L/R panned the screen for the look-ahead.
+// follows him after L or R moved it ahead. The bands are learned by moving Mario in a probe level with the open
+// level's mode and vertical scroll setting (BlockProber.cameraBands) and reading his position on the screen in
+// the frames the camera moves, not from a table: walking, running and at P-speed for the horizontal ones;
+// climbing a vine and jumping up a staircase (as he rises in the game), and falling onto a floor (from the top,
+// and after the climb) for the vertical ones; walking on after L/R panned the screen for the look-ahead. Where
+// the setting keeps the camera still, it never moves and there is no band.
 
 import type { Snes } from './snes.ts';
 import { RAM, getS16 } from './ram.ts';
@@ -20,25 +22,32 @@ export interface CameraBands {
   lookRight: Band | null; lookLeft: Band | null; // walking right after R, left after L
 }
 
+// The probe level the bands are learned in: empty, with the open level's mode and vertical scroll setting
+export interface BandStage {
+  width: number; height: number; // in pixels
+  floor: number; climb: number; // Map16 tiles Mario stands on and climbs in (found by trying); -1: none
+  // a fresh level: Mario (big) at pixel (x, y), in the air, the camera at (cx, cy) as far as the level lets it
+  start(x: number, y: number, cx: number, cy: number): Snes;
+  put(tx: number, ty: number, tile: number): void;
+}
+
 const PAN_FRAMES = 100; // holding L/R until the screen has panned
 const WALK_FRAMES = 150, RUN_FRAMES = 240; // running: up to P-speed
+const FALL_FRAMES = 240, CLIMB_FRAMES = 480, STAIRS_FRAMES = 600;
+const STEP_W = 4, STEP_H = 2; // the staircase: tiles across and up a step
 
-// The probe level for one measurement, in gameplay: Mario (big) at pixel X x with the camera's X around him,
-// standing on a floor across the level; or (air) in the air without one, screenY below the camera's top,
-// which is at the top (camTop) or the bottom of the level
-export type BandStart = (x: number, air?: { screenY: number; camTop: boolean }) => Snes;
+type Dir = 'right' | 'left' | 'up' | 'down';
 
-export function measureCameraBands(start: BandStart): CameraBands {
-  // runs frames with the joypad from pad(f) (and before(f) each frame), recording Mario's screen position in
-  // the frames the camera moved toward dir
-  const run = (s: Snes, frames: number, pad: (f: number) => number, dir: 'right' | 'left' | 'up' | 'down', acc: number[], before?: () => void) => {
+export function measureCameraBands(st: BandStage): CameraBands {
+  // runs frames with the joypad from pad(f), recording Mario's screen position in the frames the camera moved
+  // toward dir
+  const run = (s: Snes, frames: number, pad: (f: number) => number, dir: Dir, acc: number[]) => {
     const w = s.wram, axis = dir === 'right' || dir === 'left' ? RAM.layer1X : RAM.layer1Y, sign = dir === 'right' || dir === 'down' ? 1 : -1;
     const mario = axis === RAM.layer1X ? RAM.marioX : RAM.marioY;
     let cam = getS16(w, axis);
     try {
       for (let f = 0; f < frames; f++) {
         s.joy1 = pad(f);
-        before?.();
         s.runFrame();
         const c = getS16(w, axis);
         if ((c - cam) * sign > 0) acc.push(getS16(w, mario) - c);
@@ -48,46 +57,62 @@ export function measureCameraBands(start: BandStart): CameraBands {
     } finally { s.joy1 = 0; }
   };
   const band = (acc: number[], size: number): Band | null => (acc.length ? { from: Math.min(...acc), to: Math.max(...acc) + size } : null);
-  const LEFT_X = 0x300, RIGHT_X = 0x1000; // starting far from the level's ends both ways
+  const rows = st.height >> 4, cols = st.width >> 4, fy = rows - 2; // the floor's row, near the bottom
+  const groundY = fy * 16 - MARIO_H, bottom = st.height - GAME_VIEW_H;
+  const floor = (from = 0, to = cols) => { for (let c = from; c < to; c++) st.put(c, fy, st.floor); };
+  // starting far from the level's ends both ways, as far as it is wide
+  const margin = Math.min(0x300, (st.width - GAME_VIEW_W) >> 2) & ~15;
+  const fromX = (dir: 'right' | 'left') => (dir === 'right' ? margin : st.width - margin - MARIO_W);
+  const around = (x: number) => x - 0x70;
   const horizontal = (dir: 'right' | 'left', look: boolean): Band | null => {
     const acc: number[] = [], hold = dir === 'right' ? PAD.right : PAD.left;
     // from standing, and (not after L/R) turning around after walking the other way: the camera catches up then
     for (const turn of look ? [false] : [false, true]) for (const [pad, frames] of [[hold, WALK_FRAMES], [hold | PAD.y, RUN_FRAMES]]) {
-      const s = start(dir === 'right' ? LEFT_X : RIGHT_X);
+      // (L/R from the middle: at a level's end the camera may have no room to pan)
+      const x = look ? (st.width >> 1) & ~15 : fromX(dir), s = st.start(x, groundY, around(x), bottom);
+      floor();
+      run(s, 1, () => 0, dir, []); // (the game keeps the camera inside the level first)
       if (look) { const p = dir === 'right' ? PAD.r : PAD.l; run(s, PAN_FRAMES, (f) => (f < PAN_FRAMES - 10 ? p : 0), dir, []); }
       if (turn) run(s, WALK_FRAMES, () => (dir === 'right' ? PAD.left : PAD.right), dir, []);
       run(s, frames, () => pad, dir, acc);
     }
     return band(acc, MARIO_W);
   };
-  const vertical = (dir: 'up' | 'down'): Band | null => {
-    const acc: number[] = [];
-    if (dir === 'down') {
-      const s = start(LEFT_X, { screenY: 16, camTop: true });
-      setScrollAlways(s);
-      run(s, 1, () => 0, 'down', []);
-      run(s, 120, () => 0, 'down', acc);
-    } else for (const vy of [-0x20, -0x40]) {
-      const s = start(LEFT_X, { screenY: 160, camTop: false });
-      setScrollAlways(s);
-      run(s, 1, () => 0, 'up', []); // (the game keeps the camera inside the level first)
-      // the camera scrolls up only while the game lets it ($1404: Mario flying, climbing …)
-      run(s, 120, () => 0, 'up', acc, () => { s.wram[RAM.marioSpeedY] = vy & 0xff; s.wram[RAM.scrollUp] = 1; });
+  const x0 = fromX('right');
+  // rising as in the game, climbing a vine from the floor up to the top and jumping up a staircase; falling
+  // from the top of the level with the camera put there and, as in the game, after the climb, onto the floor
+  const upAcc: number[] = [], downAcc: number[] = [];
+  if (st.climb >= 0) {
+    const s = st.start(x0, groundY, around(x0), bottom);
+    floor();
+    for (let r = 0; r < fy; r++) st.put(x0 >> 4, r, st.climb);
+    run(s, 1, () => 0, 'up', []);
+    run(s, CLIMB_FRAMES, () => PAD.up, 'up', upAcc);
+    run(s, 10, (f) => (f < 2 ? PAD.b : 0), 'down', downAcc); // jumping off
+    run(s, FALL_FRAMES, () => 0, 'down', downAcc);
+  }
+  {
+    const s = st.start(x0, groundY, around(x0), bottom), w = s.wram, c0 = (x0 >> 4) + 3;
+    floor();
+    for (let c = c0; c < cols; c++) {
+      const top = fy - Math.floor((c - c0) / STEP_W + 1) * STEP_H;
+      if (top < 2) break;
+      for (let r = top; r < fy; r++) st.put(c, r, st.floor);
     }
-    return band(acc, MARIO_H);
-  };
+    run(s, 1, () => 0, 'up', []);
+    // walking right, B held in the air and let go a frame on the ground, so he jumps again
+    let held = 0;
+    run(s, STAIRS_FRAMES, () => PAD.right | (w[RAM.marioInAir] || !(held++ & 1) ? PAD.b : 0), 'up', upAcc);
+  }
+  {
+    const s = st.start(x0, 16, around(x0), 0);
+    floor();
+    run(s, 1, () => 0, 'down', []);
+    run(s, FALL_FRAMES, () => 0, 'down', downAcc);
+  }
   return {
     right: horizontal('right', false), left: horizontal('left', false),
-    up: vertical('up'), down: vertical('down'),
+    up: band(upAcc, MARIO_H), down: band(downAcc, MARIO_H),
     lookRight: horizontal('right', true), lookLeft: horizontal('left', true),
   };
-}
-
-// the level scrolls vertically all the time (the header's vertical scroll "always")
-function setScrollAlways(s: Snes): void { s.wram[RAM.scrollV] = 1; }
-
-// where the frame goes when it is put at level pixel (x, y): on the 8x8 grid, inside a level of w x h pixels
-export function gameViewAt(x: number, y: number, w: number, h: number): { x: number; y: number } {
-  const at = (v: number, max: number) => Math.max(0, Math.min(Math.max(0, max), Math.round(v / 8) * 8));
-  return { x: at(x, w - GAME_VIEW_W), y: at(y, h - GAME_VIEW_H) };
 }

@@ -7,7 +7,7 @@
 // editor's ResultCache, also those from before a ROM change: they hold while the ROM bytes they read
 // are unchanged.
 
-import { ProbeHost, PROBE_SPRITE, PROBE_COLL, PROBE_RUNS, PROBE_CAMERA, jobId, jobKey, type ProbeJob, type ProbeMessage, type ProbeDone, type ProbeReply, type KindsDone, type ScanDone, type CameraDone } from './probehost.ts';
+import { ProbeHost, PROBE_SPRITE, PROBE_COLL, PROBE_RUNS, cameraJob, jobId, jobKey, type ProbeJob, type ProbeMessage, type ProbeDone, type ProbeReply, type KindsDone, type ScanDone, type CameraDone } from './probehost.ts';
 import type { ResultCache } from './romdeps.ts';
 import type { BlockProbe, CollisionProbe, SpriteProbe, RunStates } from './blockprobe.ts';
 import type { CameraBands } from './camerabands.ts';
@@ -58,8 +58,9 @@ export class ProbeClient {
   // Mario's run speeds; null when they could not be found
   runSpeeds(): RunStates | null | undefined { return this.probedOrFailed<RunStates>(PROBE_RUNS); }
 
-  // where Mario is on the screen while the camera scrolls (camerabands.ts); null when they could not be found
-  cameraBands(): CameraBands | null | undefined { return this.probedOrFailed<CameraBands>(PROBE_CAMERA); }
+  // where Mario is on the screen while the camera scrolls (camerabands.ts) in a level of that mode and vertical
+  // scroll setting; null when they could not be found
+  cameraBands(mode: number, vscroll: number): CameraBands | null | undefined { return this.probedOrFailed<CameraBands>(cameraJob(mode, vscroll)); }
 
   // a probe's result; null when it failed
   private probedOrFailed<T>(k: number): T | null | undefined {

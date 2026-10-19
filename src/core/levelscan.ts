@@ -31,7 +31,7 @@ export interface ScanLevel {
 
 // The result cache key of a scan: the level and the level data it plays (as edited), so a stored
 // scan is found again for the same data; the ROM it read is checked by the cache.
-export function scanKey(level: number, ov: LevelOverride): string { return `ls3:${levelDataKey(level, ov)}`; }
+export function scanKey(level: number, ov: LevelOverride): string { return `ls4:${levelDataKey(level, ov)}`; }
 
 const STEP = 2; // pixels Mario is carried per frame
 const ABOVE = -48; // Mario's Y in horizontal levels: above the level (vertical levels: he keeps his X)

@@ -31,6 +31,8 @@ import type { SnesState } from './snes.ts';
 import { ResultCache, RomFingerprint, type RomDeps, type RomReads } from './romdeps.ts';
 import { spriteName, hex3 } from './names.ts';
 import { measureCameraBands, type CameraBands } from './camerabands.ts';
+import { layerGeom } from './render.ts';
+import { hasLayer2Objects, parsePrimaryHeader, encodePrimaryHeader } from './level.ts';
 import { GM, RAM, SPR, SPR_STATE, SPRITE_SLOTS, MAP_HI, marioY, map16Tile, spriteX, spriteY, cameraY, setCameraX, setCameraY, setMarioPos } from './ram.ts';
 
 const PROBE_LEVEL = 0x105; // horizontal level, loaded with PROBE_HEADER, without objects and sprites
@@ -53,7 +55,7 @@ export const blockKey = (ts: number, tile: number) => `b${ts}:${tile}`;
 export const collisionKey = (ts: number, tile: number) => `c${COLLISION_VERSION}.${ts}:${tile}`;
 export const spriteKey = (ts: number, num: number) => `s${ts}:${num}`;
 export const runsKey = (ts: number) => `r1.${ts}`;
-export const cameraKey = (ts: number) => `cam1.${ts}`;
+export const cameraKey = (ts: number, mode: number, vscroll: number) => `cam2.${ts}:${mode}.${vscroll}`;
 
 export interface HitResult {
   sprites: number[]; // sprite numbers that appeared
@@ -142,6 +144,7 @@ interface TilesetProbes {
   deps: RomDeps | null; // of marks, to notice when ready is outdated
   by: number; // block row in the probe level; the block goes to screen 1, column 0-15
   floorTile: number; // a tile Mario can stand on (found by trying), -1 = not searched yet, -2 = none found
+  climbTile: number; // a tile Mario climbs in (vines, nets), the same way
 }
 
 export class BlockProber {
@@ -165,7 +168,7 @@ export class BlockProber {
   // probe (and look up cached results) in tileset ts from now on
   use(ts: number): void {
     let t = this.sets.get(ts);
-    if (!t) this.sets.set(ts, (t = { ready: null, reads: null, deps: null, by: 0, floorTile: -1 }));
+    if (!t) this.sets.set(ts, (t = { ready: null, reads: null, deps: null, by: 0, floorTile: -1, climbTile: -1 }));
     this.tileset = ts;
     this.cur = t;
   }
@@ -174,7 +177,7 @@ export class BlockProber {
   // again; results are checked when used
   reset(): void {
     for (const t of this.sets.values()) {
-      if (t.deps && !this.results.fp.valid(t.deps)) Object.assign(t, { ready: null, reads: null, deps: null, by: 0, floorTile: -1 });
+      if (t.deps && !this.results.fp.valid(t.deps)) Object.assign(t, { ready: null, reads: null, deps: null, by: 0, floorTile: -1, climbTile: -1 });
     }
   }
 
@@ -235,23 +238,36 @@ export class BlockProber {
     });
   }
 
-  // where Mario is on the screen while the camera scrolls (camerabands.ts): on a floor across the probe level
-  // (the horizontal bands, L/R) or in the air without one
-  cameraBands(): CameraBands {
-    return this.results.get<CameraBands>(cameraKey(this.tileset)) ?? this.computed(cameraKey(this.tileset), () => {
-      const floor = this.floor();
+  // where Mario is on the screen while the camera scrolls (camerabands.ts), in the probe level with the
+  // open level's mode and vertical scroll setting (the header's, 0-3)
+  cameraBands(mode: number, vscroll: number): CameraBands {
+    const key = cameraKey(this.tileset, mode, vscroll);
+    return this.results.get<CameraBands>(key) ?? this.computed(key, () => {
+      const floor = this.floor(), climb = this.climbTile();
       if (floor < 0) throw new Error('no floor tile found');
-      return measureCameraBands((x, air) => {
-        const w = this.start(x >> 4, 1);
-        if (!air) {
-          for (let c = 0; c < PROBE_SCREENS * 16; c++) this.put(c, this.by + 1, floor);
-          this.placeMario(x, this.by * 16, -16, 0);
-          return this.emu.snes;
-        }
-        const cy = air.camTop ? 0 : PROBE_CAM_Y_MAX;
-        setCameraY(w, cy);
-        this.placeMario(x, cy + air.screenY, 0, 0);
-        return this.emu.snes;
+      const e = this.emu, h = parsePrimaryHeader(Uint8Array.from(PROBE_HEADER));
+      const header = Uint8Array.from([...encodePrimaryHeader({ ...h, mode, verticalScroll: vscroll, tileset: this.tileset }), 0xff]);
+      const screens = PROBE_SCREENS + 1, geom = layerGeom(this.rom, 0, mode, screens);
+      // (layer 2 holds objects in some modes: none then)
+      e.load(PROBE_LEVEL, { layer1: header, sprites: new Uint8Array([0, 0xff]), ...(hasLayer2Objects(mode) ? { layer2: Uint8Array.from([0, 0, 0, 0, 0, 0xff]) } : {}) });
+      const s = e.snes, w = s.wram;
+      for (let g = 0; w[RAM.gameMode] !== GM.level && g < 200; g++) s.runFrame();
+      for (let i = 0; i < 4; i++) s.runFrame();
+      const ready = s.saveState();
+      return measureCameraBands({
+        width: geom.width * 16, height: geom.height * 16, floor, climb,
+        start: (x, y, cx, cy) => {
+          s.loadState(ready);
+          setCameraX(w, cx); setCameraY(w, cy);
+          w[RAM.powerup] = 1;
+          setMarioPos(w, x, y);
+          w[RAM.marioSpeedX] = 0; w[RAM.marioSpeedY] = 0; w[RAM.marioInAir] = 0x0b;
+          return s;
+        },
+        put: (tx, ty, tile) => {
+          const a = geom.addr(tx, ty);
+          if (a >= 0) { w[a] = tile & 0xff; w[a + MAP_HI] = tile >> 8; }
+        },
       });
     });
   }
@@ -483,6 +499,34 @@ export class BlockProber {
       if (this.runHeld(0, 16)) continue;
       const off = MAP_BASE + (bx >> 4) * 0x1b0 + this.by * 16 + (bx & 15);
       if ((w[RAM.marioBlocked] & 4) && w[RAM.powerup] === 0 && map16Tile(w, off) === t) { c.floorTile = t; break; }
+    }
+  }
+
+  private climbTile(): number {
+    const c = this.cur;
+    if (c.climbTile === -1) {
+      const { reads } = this.emu.tracked(() => this.findClimb(), null);
+      if (c.reads) {
+        c.reads.add(reads);
+        c.deps = this.results.fp.deps(c.reads);
+      }
+    }
+    return c.climbTile;
+  }
+
+  // Mario inside a block of the tile, holding up, climbs
+  private findClimb(): void {
+    const c = this.cur, s = this.emu.snes, bx = 16;
+    c.climbTile = -2;
+    for (let t = 0; t < 0x200 && c.climbTile < 0; t++) {
+      const w = this.start(bx, 0);
+      for (let y = this.by - 1; y <= this.by + 1; y++) for (let x = bx - 1; x <= bx + 1; x++) this.put(x, y, t);
+      this.placeMario(bx * 16, this.by * 16, -16, 0);
+      try {
+        for (let f = 0; f < 8 && !w[RAM.marioClimbing]; f++) { s.joy1 = PAD.up; s.runFrame(); }
+        if (w[RAM.marioClimbing] && w[RAM.marioAnim] === 0) c.climbTile = t; // (climbing, not dying or entering)
+      } catch { /* not this one */ }
+      s.joy1 = 0;
     }
   }
 
