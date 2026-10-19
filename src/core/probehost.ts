@@ -6,7 +6,7 @@
 // tileset (objkinds.ts) and the level scan (levelscan.ts).
 
 import { Rom } from './rom.ts';
-import { BlockProber, blockKey, collisionKey, spriteKey, runsKey } from './blockprobe.ts';
+import { BlockProber, blockKey, collisionKey, spriteKey, runsKey, cameraKey } from './blockprobe.ts';
 import { gfxSkipMask } from './gfxpages.ts';
 import { RomReads, type CacheEntry } from './romdeps.ts';
 import { LevelEmulator } from './levelemu.ts';
@@ -14,10 +14,11 @@ import { ObjKindProbe, kindsKey, type KindLevel } from './objkinds.ts';
 import { levelScanJob, type ScanLevel, type ScanResult } from './levelscan.ts';
 
 // job keys: Map16 tile; sprites as PROBE_SPRITE | num, collision as PROBE_COLL | tile, Mario's
-// run speeds as PROBE_RUNS
+// run speeds as PROBE_RUNS, the game view's scroll bands as PROBE_CAMERA
 export const PROBE_SPRITE = 0x10000;
 export const PROBE_COLL = 0x20000;
 export const PROBE_RUNS = 0x40000;
+export const PROBE_CAMERA = 0x80000;
 
 export interface ProbeJob { ts: number; k: number }
 
@@ -48,6 +49,7 @@ export const jobId = (j: ProbeJob) => `${j.ts}:${j.k}`;
 
 // the result cache key of a job's result
 export function jobKey({ ts, k }: ProbeJob): string {
+  if (k & PROBE_CAMERA) return cameraKey(ts);
   if (k & PROBE_RUNS) return runsKey(ts);
   if (k & PROBE_SPRITE) return spriteKey(ts, k & 0x3ff);
   if (k & PROBE_COLL) return collisionKey(ts, k & 0xffff);
@@ -183,7 +185,8 @@ export class ProbeHost {
     try {
       p.use(job.ts);
       const k = job.k;
-      if (k & PROBE_RUNS) p.runStates();
+      if (k & PROBE_CAMERA) p.cameraBands();
+      else if (k & PROBE_RUNS) p.runStates();
       else if (k & PROBE_SPRITE) p.probeSprite(k & 0x3ff);
       else if (k & PROBE_COLL) p.probeCollision(k & 0xffff);
       else p.probe(k);

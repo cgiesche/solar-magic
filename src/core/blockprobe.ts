@@ -30,6 +30,7 @@ import { Rom } from './rom.ts';
 import type { SnesState } from './snes.ts';
 import { ResultCache, RomFingerprint, type RomDeps, type RomReads } from './romdeps.ts';
 import { spriteName, hex3 } from './names.ts';
+import { measureCameraBands, type CameraBands } from './camerabands.ts';
 import { GM, RAM, SPR, SPR_STATE, SPRITE_SLOTS, MAP_HI, marioY, map16Tile, spriteX, spriteY, cameraY, setCameraX, setCameraY, setMarioPos } from './ram.ts';
 
 const PROBE_LEVEL = 0x105; // horizontal level, loaded with PROBE_HEADER, without objects and sprites
@@ -38,6 +39,7 @@ const PROBE_FRAMES = 24;
 const SPRITE_SLOT = 11; // slot of a probed sprite (items it spawns take lower free slots)
 const SPRITE_ROW = 6; // probed sprites go to rows 6-21 (Mario fits below them, the level has $1B rows)
 const PROBE_CAM_Y_MAX = 0x1b * 16 - 224;
+const PROBE_SCREENS = PROBE_HEADER[0] & 0x1f; // (+ 1: the last one stays empty)
 const MAX_VARIANTS = 16; // more X × Y combinations: Y is ignored
 const ENTER_FRAMES = 24;
 const COLLISION_VERSION = 2; // part of the result key: raise when the collision probe changes
@@ -51,6 +53,7 @@ export const blockKey = (ts: number, tile: number) => `b${ts}:${tile}`;
 export const collisionKey = (ts: number, tile: number) => `c${COLLISION_VERSION}.${ts}:${tile}`;
 export const spriteKey = (ts: number, num: number) => `s${ts}:${num}`;
 export const runsKey = (ts: number) => `r1.${ts}`;
+export const cameraKey = (ts: number) => `cam1.${ts}`;
 
 export interface HitResult {
   sprites: number[]; // sprite numbers that appeared
@@ -229,6 +232,27 @@ export class BlockProber {
         run: run[fill > 0 ? fill - 1 : 40],
         p: run[Math.min(run.length - 1, (settled < 0 ? run.length - 1 : settled) + 8)],
       };
+    });
+  }
+
+  // where Mario is on the screen while the camera scrolls (camerabands.ts): on a floor across the probe level
+  // (the horizontal bands, L/R) or in the air without one
+  cameraBands(): CameraBands {
+    return this.results.get<CameraBands>(cameraKey(this.tileset)) ?? this.computed(cameraKey(this.tileset), () => {
+      const floor = this.floor();
+      if (floor < 0) throw new Error('no floor tile found');
+      return measureCameraBands((x, air) => {
+        const w = this.start(x >> 4, 1);
+        if (!air) {
+          for (let c = 0; c < PROBE_SCREENS * 16; c++) this.put(c, this.by + 1, floor);
+          this.placeMario(x, this.by * 16, -16, 0);
+          return this.emu.snes;
+        }
+        const cy = air.camTop ? 0 : PROBE_CAM_Y_MAX;
+        setCameraY(w, cy);
+        this.placeMario(x, cy + air.screenY, 0, 0);
+        return this.emu.snes;
+      });
     });
   }
 

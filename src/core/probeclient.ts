@@ -1,14 +1,15 @@
-// The editor's side of the probes (probehost.ts): asks for block, collision and sprite probes and
-// Mario's run speeds in the current tileset, prefetches what the palettes can show, and runs the
-// object kinds and level scan, all in the probe worker. It sends the ROM again after a change
+// The editor's side of the probes (probehost.ts): asks for block, collision and sprite probes, Mario's
+// run speeds and the game view's scroll bands in the current tileset, prefetches what the palettes can
+// show, and runs the object kinds and level scan, all in the probe worker. It sends the ROM again after a change
 // (the worker drops its queue then) together with everything still wanted, and falls back to
 // probing on the main thread in background slices when the worker fails. Results go to the
 // editor's ResultCache, also those from before a ROM change: they hold while the ROM bytes they read
 // are unchanged.
 
-import { ProbeHost, PROBE_SPRITE, PROBE_COLL, PROBE_RUNS, jobId, jobKey, type ProbeJob, type ProbeMessage, type ProbeDone, type ProbeReply, type KindsDone, type ScanDone } from './probehost.ts';
+import { ProbeHost, PROBE_SPRITE, PROBE_COLL, PROBE_RUNS, PROBE_CAMERA, jobId, jobKey, type ProbeJob, type ProbeMessage, type ProbeDone, type ProbeReply, type KindsDone, type ScanDone } from './probehost.ts';
 import type { ResultCache } from './romdeps.ts';
 import type { BlockProbe, CollisionProbe, SpriteProbe, RunStates } from './blockprobe.ts';
+import type { CameraBands } from './camerabands.ts';
 import { kindsKey, type ObjKinds, type KindLevel } from './objkinds.ts';
 import type { ScanLevel, ScanResult } from './levelscan.ts';
 
@@ -55,6 +56,12 @@ export class ProbeClient {
   runSpeeds(): RunStates | null | undefined {
     const r = this.probed<RunStates>(PROBE_RUNS);
     return r === undefined && this.failed.has(jobId({ ts: this.d.tileset(), k: PROBE_RUNS })) ? null : r;
+  }
+
+  // where Mario is on the screen while the camera scrolls (camerabands.ts); null when they could not be found
+  cameraBands(): CameraBands | null | undefined {
+    const r = this.probed<CameraBands>(PROBE_CAMERA);
+    return r === undefined && this.failed.has(jobId({ ts: this.d.tileset(), k: PROBE_CAMERA })) ? null : r;
   }
 
   private probed<T>(k: number): T | undefined {
