@@ -15,6 +15,7 @@ import { musicPlayer } from './musicplayer.ts';
 import { LAYER3_KIND_TEXT } from '../core/layer3.ts';
 import { RATE_OPTIONS, hRate, withRates, motionText, type Layer2Motions, type LayerMotion } from '../core/l2scroll.ts';
 import { incompleteSprites, spriteMemText, SPRITE_MEM_HELP } from './spritemem.ts';
+import { slipperyText } from './exitpanel.ts';
 
 function range(n: number, fmt: (i: number) => string = (i) => String(i)): [number, string][] {
   return Array.from({ length: n }, (_, i) => [i, fmt(i)]);
@@ -220,6 +221,7 @@ export function openHeaderDialog(app: App): void {
       fgRow, bgRow, bgStartRow,
       f('Vertical positioning', sel2('verticalPositioning', range(4))),
       f('Yoshi intro', sel2('noYoshiIntro', [[0, 'On'], [1, 'Off']])),
+      f('Slippery', h('span', { class: 'hint' }, slipperyText(app, sd)), 'Set per entrance (main, midway, secondary) in its properties (Entrances/Exits)'),
       // a row of its own: with separate rates the two dropdowns stay side by side
       h('div', { class: 'prop wide' }, h('label', null, 'Layer 2 scroll'),
         h('label', { class: 'row', title: 'Separate horizontal and vertical layer 2 rates, with more rates and auto-scrolls (as Lunar Magic 3.40)' }, sepBox, 'Separate H/V'),

@@ -517,8 +517,10 @@ code is the editor's.
   Moving an entrance, creating one and test play from a spot keep these settings (as Lunar Magic 3.50 can
   drag entrances); only a tile entrance with the game's camera gets the relative one. Test play from a
   secondary entrance starts with its own camera start. `tools/testfgbginit.ts` checks by emulation that test
-  play starts FG and BG where each setting puts them. The level's own slippery bit of Lunar Magic is kept but
-  not used.
+  play starts FG and BG where each setting puts them. The entrance's slippery bit of Lunar Magic (I of the main
+  entrance's `IWPXXtTT` and the secondary entrance's `IPXXDAAA`) makes the level slippery: where the patch sets
+  face left and water (`$009708`, after the game's entrance action) it sets `$86` to `$80`, as the game's action 5
+  does (`$00A6DE`); without it `$86` stays as the action left it.
 - The midway entrance (Lunar Magic 3.00's): four bytes per level in Lunar Magic's layout – `SWOHXAAA` (slippery,
   water, own settings, the midway screen's bit 4, X bit 4, action), `YYYYXXXX` (tile Y and X bits 3–0),
   `RL--ffbb` (camera relative to Mario, face left, the FG/BG start Y or offset bits 3–0; bit 5: Lunar Magic's
@@ -526,7 +528,7 @@ code is the editor's.
   them with its code; the editor at `$07E800`, `$07EA00`, `$07EC00`, `$07EE00` (free in the game; nothing but
   the entrance code reads them). Where the game takes the midway screen (`$05D9BD`, into `$13CD`, which its
   tape needs nonzero to set the checkpoint) and puts Mario on it (`$05D9DE`) the patch adds bit 4 of the screen; with O set Mario goes to the screen as to the main entrance (`$05D9EC`, vertical levels too),
-  then to the tile, with the midway's action, camera start, face left and water instead of the main entrance's
+  then to the tile, with the midway's action, camera start, face left, water and slippery instead of the main entrance's
   (`$13CF` tells the entrance code the midway point was taken). Levels without them load as in the game;
   `tools/testmidway.ts` checks by emulation that every main level entered at its midway point does, and where
   own settings put Mario, the camera and his options.

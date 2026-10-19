@@ -6,11 +6,12 @@ import { h, select, toast, choose, checkbox } from './dom.ts';
 import { hex2, hex3, ENTRANCE_ACTIONS } from '../core/names.ts';
 import {
   newUid, readSecondaryEntrance, readSecondaryHeader, mainTranslevel, mainSpot, secondarySpot, setSecondarySpot, copyCameraStart, hasRelativeCamera,
-  copyEntranceOptions, setExitSecondary, EXIT_WATER, EXIT_MIDWAY, EXIT_NEW, exitToMidway, exitLandsAtMidway, midwaySpot, midwayEntrance, setMidwayEntrance, midwayStart, nearestMidway, placeMidway, entrancePos,
-  type MidwayEntrance,
+  copyEntranceOptions, setExitSecondary, EXIT_WATER, EXIT_MIDWAY, EXIT_NEW, exitToMidway, exitLandsAtMidway, midwaySpot, midwayEntrance, mainEntrance, setMidwayEntrance, midwayStart, nearestMidway, placeMidway, entrancePos,
+  type MidwayEntrance, type SecondaryHeader,
 } from '../core/level.ts';
 import { spotText, cameraOptions, cameraValue, setCamera, cameraFields, optionFields } from './entrancefields.ts';
 import { exitTarget, type ExitRef } from '../core/exitgraph.ts';
+import { arrivesSlippery } from '../core/slippery.ts';
 import { levelPicker } from './levelpicker.ts';
 import { openTestPlay } from './testplay.ts';
 
@@ -86,16 +87,17 @@ function exitPanel(app: App, body: HTMLElement): boolean {
       'Mario comes out at the midway entrance (Z) of the target level – when its midway point has its own position and settings, else at its main entrance (as in Lunar Magic)',
       !!(e.flags & EXIT_MIDWAY), (on) => upd(() => { e.flags = on ? e.flags | EXIT_MIDWAY : e.flags & ~EXIT_MIDWAY; }))));
   }
-  // where Mario arrives
+  // where Mario arrives (and whether the entrance makes the level slippery)
+  const slippery = (x: Parameters<typeof arrivesSlippery>[0]) => (arrivesSlippery(x, app.slipperyActions()) ? ', arrives slippery' : '');
   const arrive = e.secondary ? (() => {
     const s = readSecondaryEntrance(app.rom, t.entrance);
     return g.entrancesOf(t.to).includes(t.entrance)
-      ? `Secondary entrance ${hex3(t.entrance)}: screen ${hex2(s.screen)}, ${ENTRANCE_ACTIONS[s.action]}`
+      ? `Secondary entrance ${hex3(t.entrance)}: screen ${hex2(s.screen)}, ${ENTRANCE_ACTIONS[s.action]}${slippery(s)}`
       : `Secondary entrance ${hex3(t.entrance)} is empty – “+ New” creates one.`;
   })() : (() => {
     const s = t.to === n ? lv.secondary : readSecondaryHeader(app.rom, t.to);
-    if (exitLandsAtMidway(e, s)) return `Midway entrance: screen ${hex2(s.midwayScreen)}, ${ENTRANCE_ACTIONS[s.midwayAction]}`;
-    const main = `Main entrance: screen ${hex2(s.entranceScreen)}, ${ENTRANCE_ACTIONS[s.entranceAction]}`;
+    if (exitLandsAtMidway(e, s)) return `Midway entrance: screen ${hex2(s.midwayScreen)}, ${ENTRANCE_ACTIONS[s.midwayAction]}${slippery(midwayEntrance(s))}`;
+    const main = `Main entrance: screen ${hex2(s.entranceScreen)}, ${ENTRANCE_ACTIONS[s.entranceAction]}${slippery(mainEntrance(s))}`;
     return exitToMidway(e) ? `${main} – the target's midway point has no own position and settings (give it them in its midway point's properties).` : main;
   })();
   body.append(
@@ -208,9 +210,22 @@ function mainPanel(app: App, body: HTMLElement, kind: 'main' | 'midway'): void {
     field('Action', select(actions(), s.entranceAction, (v) => upd(() => (s.entranceAction = v)))),
     field('Camera start', select(cameraOptions(cameraValue(s), hasRelativeCamera(app.rom, lv.header.mode)), cameraValue(s), (v) => upd(() => setCamera(s, v)))),
     ...optionFields(s, (_, f) => upd(() => f(s))).map(([l, el]) => field(l, el)),
+    hint(slipperyText(app, s)),
     users(app, g.exitsInto(n).filter((r) => !r.secondary && !(r.midway && s.midwayOwn)), extra, 'No exit leads to the main entrance.'),
     h('div', { class: 'row' }, h('button', { title: 'Test play from the main entrance (T)', onclick: () => testAt(app, 'main', 0) }, '▶ Test here')),
     hint('More settings (scrolling, layer 3 …) in the header dialog (H).'),
   );
 }
 
+
+// which entrances of the open level (s: its secondary header) make it slippery, by their option or their
+// action: it depends on the entrance, not on the level
+export function slipperyText(app: App, s: SecondaryHeader): string {
+  const acts = app.slipperyActions();
+  const names = [
+    ...(arrivesSlippery(mainEntrance(s), acts) ? [s.midwayOwn ? 'the main entrance' : 'the main entrance (also at the midway point)'] : []),
+    ...(s.midwayOwn && arrivesSlippery(midwayEntrance(s), acts) ? ['the midway entrance'] : []),
+    ...app.secEntrances.filter((i) => arrivesSlippery(readSecondaryEntrance(app.rom, i), acts)).map((i) => `secondary entrance ${hex3(i)}`),
+  ];
+  return names.length ? `The level is slippery when Mario enters it through ${names.join(', ')}.` : 'No entrance makes the level slippery.';
+}

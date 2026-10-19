@@ -85,9 +85,10 @@ export function cameraFields<T extends CameraStart>(c: T, set: Set<T>, relative:
   ];
 }
 
-// an entrance's options (Lunar Magic's): Mario faces left, a water level
+// an entrance's options (Lunar Magic's): Mario faces left, a water level, a slippery level
 export function optionFields<T extends EntranceOptions>(o: T, set: Set<T>): Rows {
   return [['Options', h('div', { class: 'radio-col' },
     checkbox('Mario faces left', 'Mario enters the level facing left', !!o.faceLeft, (on) => set('Face left', (x) => (x.faceLeft = on ? 1 : 0))),
-    checkbox('Water level', 'Mario swims in the whole level, as if it were filled with water', !!o.water, (on) => set('Water level', (x) => (x.water = on ? 1 : 0))))]];
+    checkbox('Water level', 'Mario swims in the whole level, as if it were filled with water', !!o.water, (on) => set('Water level', (x) => (x.water = on ? 1 : 0))),
+    checkbox('Slippery', 'The level is slippery (as ice) when Mario enters it through this entrance', !!o.slippery, (on) => set('Slippery', (x) => (x.slippery = on ? 1 : 0))))]];
 }

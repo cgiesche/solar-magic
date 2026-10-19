@@ -73,16 +73,19 @@ When a level is displayed, it runs the ROM's **original loading routines** (~15 
   every exit the editor writes is one, and the game's are made so when a clean ROM is opened, leading where
   the game leads them – so moving a level tile to another submap no longer changes where its exits lead); a
   secondary entrance leads into a level of either bank.
-* **Entrance options** (Lunar Magic's): Mario faces left, water level (Mario swims) for the main entrance
+* **Entrance options** (Lunar Magic's): Mario faces left, water level (Mario swims), slippery for the main entrance
   (also the midway point unless it has its own) and each secondary entrance; "Water level" for a secondary screen exit. With face
-  left the slanted pipe entrance shoots Mario out to the left. Test play from an entrance starts with them and
-  with its entrance action.
+  left the slanted pipe entrance shoots Mario out to the left. Slippery comes from the entrance, so a level can be
+  slippery from one door and not from another: an exit says "arrives slippery" when its target entrance makes the
+  level slippery (by the option or, as in the game, its entrance action – which actions do is learned by
+  emulation), the main entrance's properties and the header dialog list the level's slippery entrances. Test play
+  from an entrance starts with them and with its entrance action.
 * **Menu *Level*:** save as, **insert/delete screen** (shifts everything after it), clear level;
   **menu *File*:** **export/import as a `.smwlevel` file** (objects, sprites, exits, header, graphics bypass, custom palette).
 * **Entrance markers** for the main entrance (M), midway point (Z) and secondary entrances (S) – movable by
   dragging (snaps to the possible entrance positions).
 * **Midway entrance** (Lunar Magic 3.00's): dragging the midway point (Z) gives it its own tile, with its own
-  action, camera start and options (face left, water) in the exit panel; without them it shares the main
+  action, camera start and options (face left, water, slippery) in the exit panel; without them it shares the main
   entrance's position within its screen, as in the game. Test play from it starts there. A standard screen exit
   can "go to midway entrance" (Lunar Magic's): Mario comes out there when the target's midway point has its
   own settings, else at its main entrance.

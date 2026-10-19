@@ -810,7 +810,7 @@ export function setMidwayEntrance(s: SecondaryHeader, m: MidwayEntrance): void {
   s.bgRelative = m.bgRelative; s.bgHeight = m.bgHeight;
 }
 // the main entrance's settings as the midway entrance's
-const mainEntrance = (s: SecondaryHeader): MidwayEntrance => ({ ...s, action: s.entranceAction });
+export const mainEntrance = (s: SecondaryHeader): MidwayEntrance => ({ ...s, action: s.entranceAction });
 // what test play from the midway entrance starts with (the game's $192A there is the main entrance's action
 // unless it has its own)
 export const midwayStart = (s: SecondaryHeader): StartEntrance => (s.midwayOwn ? midwayEntrance(s) : mainEntrance(s));
