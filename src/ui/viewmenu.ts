@@ -9,6 +9,7 @@ export function viewMenu(app: App, paint: () => void, full = true): HTMLElement 
     label, title, shortcut, checked: () => app.show[k],
     onToggle: (v) => {
       app.show[k] = v;
+      if (k === 'scrollBands' && v) app.show.gameView = true;
       if (k === 'anim') app.refresh();
       else if (k === 'layer1' || k === 'layer2' || k === 'layer3' || k === 'ghost') app.recomposite(); else paint();
     },
@@ -33,6 +34,8 @@ export function viewMenu(app: App, paint: () => void, full = true): HTMLElement 
     show('items', 'Block contents', 'Contents of blocks (found by emulation) semi-transparent over the blocks, arrows at enterable blocks (pipes, doors)'),
     show('collision', 'Collision', 'How Mario collides with layer 1 (found by emulation): solid sides white, platforms dashed, slopes diagonal; red hurts, blue water, green climbable', 'C'),
     show('arcs', 'Jump arcs at the mouse', 'Where Mario gets jumping from the tile under the mouse (emulated): from standing, walking, running and at P-speed, to both sides; Shift+J pins them to the tile', 'J'),
+    show('gameView', 'Game view frame', 'What the player sees: a 256x224 screen over the level; drag it by its edge or label (snaps to 8x8)', 'V'),
+    show('scrollBands', 'Scroll bands', 'In the game view frame: where Mario is while the camera scrolls right, left, up and down, and after L/R looked ahead (found by emulation)'),
     anim,
     ...state,
   ] : [{ heading: 'Level preview' }, anim, ...state] });

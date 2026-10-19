@@ -112,7 +112,9 @@ export class App {
   bgBrush: Brush = { w: 1, h: 1, tiles: [0] };
   l3Brush: Brush = { w: 1, h: 1, tiles: [0] }; // layer 3 tilemap words
   zoom = 2;
-  show = { layer1: true, layer2: true, layer3: true, sprites: true, grid: false, screens: true, exits: true, ghost: true, anim: false, items: true, collision: false, arcs: false };
+  show = { layer1: true, layer2: true, layer3: true, sprites: true, grid: false, screens: true, exits: true, ghost: true, anim: false, items: true, collision: false, arcs: false, gameView: false, scrollBands: false };
+  // the game view frame's top left corner in level pixels (levelview.ts), kept while editing and between levels
+  gameView: { x: number; y: number } | null = null;
   // view-only game state applied before the emulated level load
   switches = { palaces: false, onOff: false };
   dirty = false;

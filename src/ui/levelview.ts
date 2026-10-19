@@ -15,6 +15,7 @@ import { contextMenu, type MenuItem } from './menu.ts';
 import { incompleteSprites } from './spritemem.ts';
 import { problemsButton } from './problems.ts';
 import { map16Tile } from '../core/ram.ts';
+import { gameViewAt, GAME_VIEW_W, GAME_VIEW_H, type CameraBands } from '../core/camerabands.ts';
 
 type Drag =
   | { kind: 'move'; edit: LevelEdit; startTx: number; startTy: number; lastDx: number; lastDy: number; orig: Map<number, { x: number; y: number }> }
@@ -22,13 +23,24 @@ type Drag =
   | { kind: 'band'; x0: number; y0: number; x1: number; y1: number; add: boolean }
   | { kind: 'marker'; edit: LevelEdit | null; marker: Marker; offX: number; offY: number; moved: boolean } // (secondary entrances: not a level edit)
   | { kind: 'paint'; edit: LevelEdit; changed: boolean; x0: number; y0: number; lastX: number; lastY: number } // BG/layer 3 brush, stamped on a grid of cells from (x0, y0)
-  | { kind: 'pick'; x0: number; y0: number; x1: number; y1: number }; // BG/layer 3 cells taken into the brush
+  | { kind: 'pick'; x0: number; y0: number; x1: number; y1: number } // BG/layer 3 cells taken into the brush
+  | { kind: 'gameView'; offX: number; offY: number }; // the game view frame, held at (offX, offY) inside it
 
 const ARC_STYLE: Record<ArcSpeed, { color: string; label: string; dash?: boolean }> = {
   stand: { color: '#ffffff', label: 'from standing' },
   walk: { color: '#7fe0ff', label: 'walking' },
   run: { color: '#ffd84c', label: 'running' },
   p: { color: '#ff6bd5', label: 'P-speed', dash: true },
+};
+
+// the game view's scroll bands: X bands are columns of the frame, Y bands rows; the look-ahead ones outlined
+const BAND_STYLE: Record<keyof CameraBands, { color: string; label: string; axis: 'x' | 'y'; look?: boolean }> = {
+  right: { color: '255,60,60', label: 'scrolling right', axis: 'x' },
+  left: { color: '60,220,90', label: 'scrolling left', axis: 'x' },
+  up: { color: '70,130,255', label: 'scrolling up', axis: 'y' },
+  down: { color: '190,80,255', label: 'scrolling down', axis: 'y' },
+  lookRight: { color: '255,200,40', label: 'after R (look ahead)', axis: 'x', look: true },
+  lookLeft: { color: '60,220,255', label: 'after L (look ahead)', axis: 'x', look: true },
 };
 
 const MARKER_STYLE: Record<Marker['kind'], { color: string; label: string; title: string }> = {
@@ -274,6 +286,7 @@ export class LevelView {
     if (app.show.sprites) this.paintSprites(ctx, z);
     if (app.show.sprites && app.show.items) this.paintSpriteItems(ctx);
     if (app.show.arcs) this.paintArcs(ctx);
+    if (app.show.gameView) this.paintGameView(ctx);
     // selection
     if (app.mode === 'l1' || app.mode === 'l2') {
       const sel = app.selectedObjects();
@@ -321,6 +334,7 @@ export class LevelView {
     }
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     if (app.show.arcs) this.paintArcLegend(ctx, dpr);
+    if (app.show.gameView && app.show.scrollBands) this.paintBandLegend(ctx, dpr);
     if (app.renderError) {
       ctx.fillStyle = 'rgba(200,30,30,0.85)';
       ctx.fillRect(0, 0, this.canvas.width, 22 * dpr);
@@ -414,6 +428,84 @@ export class LevelView {
       ctx.setLineDash(k.dash ? [4 * dpr, 3 * dpr] : []);
       ctx.beginPath(); ctx.moveTo(x + 6 * dpr, ly); ctx.lineTo(x + 26 * dpr, ly); ctx.stroke();
       ctx.setLineDash([]);
+      ctx.fillStyle = '#fff';
+      ctx.fillText(k.label, x + 32 * dpr, ly + 4 * dpr);
+    });
+  }
+
+  // the game view frame's place: where it was put (first: the middle of the view), inside the level as it is now
+  gameViewPos(): { x: number; y: number } {
+    const app = this.app, im = app.images, z = app.zoom;
+    const want = app.gameView ?? {
+      x: (this.scroller.scrollLeft + this.scroller.clientWidth / 2) / z - GAME_VIEW_W / 2,
+      y: (this.scroller.scrollTop + this.scroller.clientHeight / 2) / z - GAME_VIEW_H / 2,
+    };
+    return (app.gameView = gameViewAt(want.x, want.y, im.width, im.height));
+  }
+
+  // the label in the frame's top left corner (level pixels; it stays the same size on the screen)
+  private gameViewLabel(): { x: number; y: number; w: number; h: number } {
+    const p = this.gameViewPos(), z = this.app.zoom;
+    return { x: p.x, y: p.y, w: 70 / z, h: 14 / z };
+  }
+
+  // whether the pixel grabs the game view frame: its edge (a few screen pixels either side) or its label
+  gameViewGrab(px: number, py: number): boolean {
+    if (!this.app.show.gameView) return false;
+    const p = this.gameViewPos(), m = 4 / this.app.zoom, l = this.gameViewLabel();
+    const inX = px >= p.x - m && px <= p.x + GAME_VIEW_W + m, inY = py >= p.y - m && py <= p.y + GAME_VIEW_H + m;
+    const edge = (inX && (Math.abs(py - p.y) <= m || Math.abs(py - p.y - GAME_VIEW_H) <= m))
+      || (inY && (Math.abs(px - p.x) <= m || Math.abs(px - p.x - GAME_VIEW_W) <= m));
+    return edge || (px >= l.x && px <= l.x + l.w && py >= l.y && py <= l.y + l.h);
+  }
+
+  // The game view frame (camerabands.ts), with the scroll bands inside when they are shown
+  paintGameView(ctx: CanvasRenderingContext2D): void {
+    const app = this.app, p = this.gameViewPos(), z = app.zoom, lw = 1 / z;
+    const bands = app.show.scrollBands ? app.probes.cameraBands() : undefined;
+    for (const [k, st] of Object.entries(BAND_STYLE) as [keyof CameraBands, (typeof BAND_STYLE)[keyof CameraBands]][]) {
+      const b = bands?.[k];
+      if (!b) continue;
+      const [x, y, w, hh] = st.axis === 'x' ? [p.x + b.from, p.y, b.to - b.from, GAME_VIEW_H] : [p.x, p.y + b.from, GAME_VIEW_W, b.to - b.from];
+      ctx.fillStyle = `rgba(${st.color},${st.look ? 0.12 : 0.22})`;
+      ctx.fillRect(x, y, w, hh);
+      if (st.look) {
+        ctx.strokeStyle = `rgba(${st.color},0.9)`;
+        ctx.lineWidth = 1.5 * lw;
+        ctx.setLineDash([4 * lw, 3 * lw]);
+        ctx.strokeRect(x, y, w, hh);
+        ctx.setLineDash([]);
+      }
+    }
+    ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+    ctx.lineWidth = 4 * lw;
+    ctx.strokeRect(p.x, p.y, GAME_VIEW_W, GAME_VIEW_H);
+    ctx.strokeStyle = this.drag?.kind === 'gameView' ? '#ffd800' : '#ffffff';
+    ctx.lineWidth = 2 * lw;
+    ctx.strokeRect(p.x, p.y, GAME_VIEW_W, GAME_VIEW_H);
+    const l = this.gameViewLabel();
+    ctx.fillStyle = 'rgba(0,0,0,0.65)';
+    ctx.fillRect(l.x, l.y, l.w, l.h);
+    ctx.fillStyle = '#fff';
+    ctx.font = `${11 / z}px sans-serif`;
+    ctx.fillText('Game view', l.x + 5 / z, l.y + 11 / z);
+  }
+
+  // which band is which, in the top right corner of the view
+  paintBandLegend(ctx: CanvasRenderingContext2D, dpr: number): void {
+    const bands = this.app.probes.cameraBands();
+    const kinds = Object.values(BAND_STYLE);
+    const title = bands === undefined ? 'Scroll bands (emulating …)' : bands === null ? 'Scroll bands (not found)' : 'Scroll bands';
+    ctx.font = `${11 * dpr}px sans-serif`;
+    const w = 150 * dpr, lh = 15 * dpr, x = this.canvas.width - w - 8 * dpr, y = 8 * dpr;
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(x, y, w, lh * (kinds.length + 1) + 6 * dpr);
+    ctx.fillStyle = '#fff';
+    ctx.fillText(title, x + 6 * dpr, y + lh - 3 * dpr);
+    kinds.forEach((k, i) => {
+      const ly = y + lh * (i + 2) - 7 * dpr;
+      ctx.fillStyle = `rgba(${k.color},0.8)`;
+      ctx.fillRect(x + 6 * dpr, ly - 5 * dpr, 20 * dpr, 10 * dpr);
       ctx.fillStyle = '#fff';
       ctx.fillText(k.label, x + 32 * dpr, ly + 4 * dpr);
     });
@@ -639,6 +731,13 @@ export class LevelView {
       return;
     }
     if (e.button !== 0) return;
+    if (!e.ctrlKey && this.gameViewGrab(px, py)) {
+      const p = this.gameViewPos();
+      this.drag = { kind: 'gameView', offX: px - p.x, offY: py - p.y };
+      this.updateCursor(px, py, -1);
+      this.paint();
+      return;
+    }
     const mk = this.markerAt(px, py);
     if (mk && !e.ctrlKey) {
       if (app.mode === 'exit') app.selectEntrance(mk);
@@ -717,6 +816,9 @@ export class LevelView {
     if (d.kind === 'band') {
       d.x1 = px; d.y1 = py;
       this.requestPaint();
+    } else if (d.kind === 'gameView') {
+      app.gameView = gameViewAt(px - d.offX, py - d.offY, app.images.width, app.images.height);
+      this.requestPaint();
     } else if (d.kind === 'paint') {
       const b = this.brush(), c = this.cellAt(px, py);
       const x = d.x0 + Math.floor((c.x - d.x0) / b.w) * b.w, y = d.y0 + Math.floor((c.y - d.y0) / b.h) * b.h;
@@ -779,6 +881,7 @@ export class LevelView {
       if (d.changed) d.edit.commit(); else d.edit.cancel();
       return;
     }
+    if (d.kind === 'gameView') { this.paint(); return; }
     if (d.kind === 'pick') {
       if (app.mode === 'l3') app.pickL3(d.x0, d.y0, d.x1, d.y1); else app.pickBg(d.x0, d.y0, d.x1, d.y1);
       if (this.hover) this.updateStatus(this.hover.tx, this.hover.ty);
@@ -886,7 +989,8 @@ export class LevelView {
     const app = this.app, d = this.drag;
     let c = '';
     if (d?.kind === 'resize') c = 'nwse-resize';
-    else if (d?.kind === 'marker' || d?.kind === 'move') c = 'grabbing';
+    else if (d?.kind === 'marker' || d?.kind === 'move' || d?.kind === 'gameView') c = 'grabbing';
+    else if (this.gameViewGrab(px, py)) c = 'grab';
     else if (this.brushMode()) c = 'crosshair';
     else if (this.markerAt(px, py)) c = 'grab';
     else if (app.mode === 'exit') c = 'pointer';
