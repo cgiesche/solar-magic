@@ -446,12 +446,6 @@ export class LevelView {
     return gameViewAt(app.gameView.x, app.gameView.y, im.width, im.height, app.cameraReach());
   }
 
-  // the scroll bands under the open level's mode and vertical scroll setting
-  private scrollBands(): CameraBands | null | undefined {
-    const h = this.app.level.header;
-    return this.app.probes.cameraBands(h.mode, h.verticalScroll);
-  }
-
   // the label in the frame's top left corner (level pixels; it stays the same size on the screen)
   private gameViewLabel(): { x: number; y: number; w: number; h: number; text: string } {
     const p = this.gameViewPos(), z = this.app.zoom, m = this.app.gameViewMario;
@@ -490,7 +484,7 @@ export class LevelView {
       ctx.lineWidth = 1.5 * lw;
       ctx.strokeRect(m.x, m.y, MARIO_W, MARIO_H);
     }
-    const bands = app.show.scrollBands ? this.scrollBands() : undefined;
+    const bands = app.show.scrollBands ? app.scrollBands() : undefined;
     for (const [k, st] of Object.entries(BAND_STYLE) as [keyof CameraBands, (typeof BAND_STYLE)[keyof CameraBands]][]) {
       const b = bands?.[k];
       if (!b) continue;
@@ -547,7 +541,7 @@ export class LevelView {
       { label: 'never on the screen', fill: 'rgba(0,0,0,0.8)' },
     ];
     if (this.app.show.scrollBands) {
-      const bands = this.scrollBands();
+      const bands = this.app.scrollBands();
       rows.push({ label: bands === undefined ? 'Scroll bands (emulating …)' : bands === null ? 'Scroll bands (not found)' : 'Scroll bands', title: true });
       for (const k of Object.values(BAND_STYLE)) rows.push({ label: k.label, fill: `rgba(${k.color},0.8)` });
     }

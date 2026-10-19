@@ -32,7 +32,7 @@ import { resizeObjectSize, type ObjKind, type ObjKinds } from '../core/objkinds.
 import { JumpArcs, ARC_SPEEDS, type JumpArc } from '../core/jumparcs.ts';
 import { scanKey, type ScanLevel, type ScanResult } from '../core/levelscan.ts';
 import { cameraAtKey, type CameraReach, type CameraAt } from '../core/camerareach.ts';
-import { MARIO_W, MARIO_H } from '../core/camerabands.ts';
+import { MARIO_W, MARIO_H, type CameraBands } from '../core/camerabands.ts';
 import { layer3Kinds, tideKind, layer3Top, type Layer3Kind } from '../core/layer3.ts';
 import { layer2MotionsJob, type Layer2Motions } from '../core/l2scroll.ts';
 import { variantOf, blockKey, spriteKey, type BlockProbe, type SpriteProbe } from '../core/blockprobe.ts';
@@ -984,6 +984,13 @@ export class App {
   // none yet, null when it could not be found
   cameraReach(): CameraReach | null | undefined {
     return this.levelScan?.level === this.level.number ? this.levelScan.result.camera ?? null : undefined;
+  }
+
+  // The game view's scroll bands (camerabands.ts) under the open level's mode and vertical scroll setting:
+  // undefined while emulating, null when they could not be found
+  scrollBands(): CameraBands | null | undefined {
+    const h = this.level.header;
+    return this.probes.cameraBands(h.mode, h.verticalScroll);
   }
 
   // ------------- the game view frame placed by Mario (see camerareach.ts) -------------
