@@ -30,7 +30,8 @@ import { RomEditSession, type EditOptions } from '../core/romedit.ts';
 import { LevelHistory } from '../core/levelhistory.ts';
 import { resizeObjectSize, type ObjKind, type ObjKinds } from '../core/objkinds.ts';
 import { JumpArcs, ARC_SPEEDS, type JumpArc } from '../core/jumparcs.ts';
-import { scanKey, type ScanResult } from '../core/levelscan.ts';
+import { scanKey, type ScanLevel, type ScanResult } from '../core/levelscan.ts';
+import { cameraAtKey, type CameraReach } from '../core/camerareach.ts';
 import { layer3Kinds, tideKind, layer3Top, type Layer3Kind } from '../core/layer3.ts';
 import { layer2MotionsJob, type Layer2Motions } from '../core/l2scroll.ts';
 import { variantOf, blockKey, spriteKey, type BlockProbe, type SpriteProbe } from '../core/blockprobe.ts';
@@ -71,6 +72,7 @@ export type AppEvent =
   | 'probes' // the asked or the prefetched probes are done (block, collision, sprite, run speeds)
   | 'objkinds' // object kinds asked for are known (or failed)
   | 'level-scan' // the level scan of the level as edited is known
+  | 'game-view' // the camera at Mario's place for the game view frame is known (or asked for)
   | 'level-uses' // more levels' Map16 tiles are known (levelTiles)
   | 'palette-item' // a sprite was chosen in the palette
   | 'arcs' // jump arcs asked for are known
@@ -115,6 +117,10 @@ export class App {
   show = { layer1: true, layer2: true, layer3: true, sprites: true, grid: false, screens: true, exits: true, ghost: true, anim: false, items: true, collision: false, arcs: false, gameView: false, scrollBands: false };
   // the game view frame's top left corner in level pixels (levelview.ts), kept while editing and between levels
   gameView: { x: number; y: number } | null = null;
+  // the frame placed by Mario (Shift+V): his place (inside the level) and the camera the game puts there in the
+  // level as edited (key: its result cache key; camera undefined while it is played, null when it could not be);
+  // kept while editing and between levels, until the frame is dragged
+  gameViewMario: { x: number; y: number; key: string; camera?: { x: number; y: number } | null } | null = null;
   // view-only game state applied before the emulated level load
   switches = { palaces: false, onOff: false };
   dirty = false;
@@ -314,8 +320,8 @@ export class App {
     this.graph = null;
     this.arcCache.clear();
     this.arcLevel = null;
-    const lv = this.level;
-    const r = this.emu.load(lv.number, this.buildOverrides());
+    const lv = this.level, ov = this.buildOverrides();
+    const r = this.emu.load(lv.number, ov);
     this.renderError = r.ok ? null : r.error ?? 'Error';
     this.anim.snaps = this.show.anim && r.ok ? this.emu.animationFrames() : [];
     this.render = r;
@@ -326,6 +332,7 @@ export class App {
     this.startAnimation();
     this.emit('render');
     this.scheduleScan();
+    this.updateGameViewCamera(ov);
   }
 
   recomposite(): void {
@@ -964,7 +971,45 @@ export class App {
     const stored = this.results.get<ScanResult>(key);
     if (stored) { done(stored); return; }
     // played in the probe worker
-    this.probes.requestScan(run, key, { number: lv.number, ov, vertical, width: this.images.width, height: this.images.height }, (r) => { if (r) done(r); });
+    this.probes.requestScan(run, key, this.scanLevel(ov), (r) => { if (r) done(r); });
+  }
+
+  // the open level as edited (ov), to be played in the probe worker
+  private scanLevel(ov: LevelOverride): ScanLevel {
+    return { number: this.level.number, ov, vertical: this.vertical, width: this.images.width, height: this.images.height };
+  }
+
+  // What of the level the camera can show (camerareach.ts), from the level scan: undefined while the level has
+  // none yet, null when it could not be found
+  cameraReach(): CameraReach | null | undefined {
+    return this.levelScan?.level === this.level.number ? this.levelScan.result.camera ?? null : undefined;
+  }
+
+  // ------------- the game view frame placed by Mario (see camerareach.ts) -------------
+  private cameraRun = 0;
+
+  // Mario standing at level pixel (x, y): the frame shows the camera the game puts there
+  placeGameViewByMario(x: number, y: number): void {
+    this.gameViewMario = { x, y, key: '' };
+    this.updateGameViewCamera();
+  }
+
+  // the camera at Mario's place in the level as edited (ov), from the result cache or played in the probe worker
+  private updateGameViewCamera(ov?: LevelOverride): void {
+    const m = this.gameViewMario, im = this.images;
+    if (!m || !im) return;
+    m.x = Math.max(0, Math.min(im.width - 16, m.x)); m.y = Math.max(0, Math.min(im.height - 32, m.y));
+    ov ??= this.buildOverrides();
+    const key = cameraAtKey(this.level.number, ov, m.x, m.y);
+    if (m.key === key) return;
+    m.key = key;
+    m.camera = this.results.get<{ x: number; y: number }>(key);
+    if (m.camera === undefined) this.probes.requestCamera(++this.cameraRun, key, this.scanLevel(ov), m.x, m.y, (r) => {
+      if (this.gameViewMario !== m || m.key !== key) return;
+      m.camera = r;
+      this.emit('game-view');
+    });
+    this.emit('game-view');
   }
 
   // What the four layer 3 settings do in a tileset (see layer3.ts): the level as edited is loaded

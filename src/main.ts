@@ -416,6 +416,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     else if (k === 'PageDown') app.reorderSelection('back');
     else if (k === 'g' || k === 'G') { app.show.grid = !app.show.grid; view.paint(); }
     else if (k === 'c' || k === 'C') { app.show.collision = !app.show.collision; view.paint(); }
+    else if ((k === 'v' || k === 'V') && e.shiftKey) view.placeGameViewByMario();
     else if (k === 'v' || k === 'V') { app.show.gameView = !app.show.gameView; view.paint(); }
     else if ((k === 'j' || k === 'J') && e.shiftKey) view.toggleArcPin();
     else if (k === 'j' || k === 'J') { app.show.arcs = !app.show.arcs; if (!app.show.arcs) view.arcPin = null; view.paint(); }
@@ -526,7 +527,7 @@ function showHelp(): void {
       ['Ctrl+C / Ctrl+V / Ctrl+D', 'Copy / paste at the mouse / duplicate'],
       ['PgUp / PgDn', 'Bring to front / send to back (drawing order)'],
       ['H · G · C', 'Level header · grid on/off · collision overlay on/off'],
-      ['V · drag its edge', 'Game view frame on/off · move it'],
+      ['V · Shift+V · drag its edge', 'Game view frame on/off · placed by Mario at the mouse (the camera the game puts there) · move it'],
       ['T · Shift+T', 'Test level · Mario starts at the mouse'],
       ['J · Shift+J', 'Jump arcs at the mouse on/off · pin them to the tile / unpin'],
     ]],

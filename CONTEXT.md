@@ -112,3 +112,7 @@ Probing what the palettes could show before anyone asks for it, after everything
 **Scroll bands**:
 Where Mario is on the game's screen while the camera scrolls in a direction, or follows him after L/R looked ahead; learned by moving him in the probe level (an emulated result).
 _Avoid_: scroll zones, camera thresholds (they are not a table)
+
+**Camera reach**:
+What of the level the camera can show: where it goes with Mario carried along the level's top and bottom (vertical levels: its sides), standing as far as the camera is concerned; learned by the level scan (an emulated result), shown with the game view frame by darkening the rest. The camera at one place (Mario standing there, the camera as the game puts it) places the game view frame by Mario.
+_Avoid_: camera path (it is not one route through the level), covered area
