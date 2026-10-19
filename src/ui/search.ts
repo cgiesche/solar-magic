@@ -1,4 +1,4 @@
-// Central search (Ctrl+F), like "Search Everywhere" in IntelliJ or the quick open of VS Code: one input over
+// Central search (Ctrl+F or Ctrl+Space), like "Search Everywhere" in IntelliJ or the quick open of VS Code: one input over
 // everything the providers offer, the results grouped by provider. A row of groups above the list narrows the
 // search to one of them (Tab / Shift+Tab switch); choosing a result runs its pick(). For now the providers are
 // the tabs of the "Insert" palette (Palette.searchProviders).
@@ -133,7 +133,7 @@ export function openSearch(providers: SearchProvider[]): void {
     else if (k === 'Tab') {
       const ids = ['', ...providers.map((p) => p.id)];
       setGroup(ids[(ids.indexOf(group) + (e.shiftKey ? ids.length - 1 : 1)) % ids.length]);
-    } else if ((e.ctrlKey || e.metaKey) && k.toLowerCase() === 'f') close();
+    } else if ((e.ctrlKey || e.metaKey) && (k.toLowerCase() === 'f' || e.code === 'Space')) close();
     else return;
     e.preventDefault();
     e.stopPropagation();

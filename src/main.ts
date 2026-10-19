@@ -140,7 +140,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
 
   // ---- app bar: menus, workspace switcher, main actions
   const testHere = () => { const hv = view.hover; openTestPlay(app, hv ? { tx: hv.tx, ty: hv.ty } : undefined); };
-  // central search (Ctrl+F): a result is shown in the level workspace
+  // central search (Ctrl+F or Ctrl+Space): a result is shown in the level workspace
   const search = () => openSearch(palette.searchProviders().map((p) => ({
     ...p, search: (terms) => p.search(terms).map((r) => ({ ...r, pick: () => void setWorkspace('level').then((ok) => { if (ok) r.pick(); }) })),
   })));
@@ -184,7 +184,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
       { label: 'Message boxes …', onClick: () => openMessagesDialog(app) },
     ] },
     { label: 'Search', items: [
-      { label: 'Search everywhere …', shortcut: 'Ctrl+F', title: 'Objects, extended objects, Map16 tiles, structures and sprites by number, name or behavior', onClick: search },
+      { label: 'Search everywhere …', shortcut: 'Ctrl+F / Ctrl+Space', title: 'Objects, extended objects, Map16 tiles, structures and sprites by number, name or behavior', onClick: search },
     ] },
     { label: 'Help', items: [
       { label: 'Keyboard shortcuts …', shortcut: '?', onClick: () => showHelp() },
@@ -361,7 +361,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   });
 
   window.onkeydown = (e: KeyboardEvent) => {
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f' && !e.altKey && !document.querySelector('.modal-back')) { e.preventDefault(); search(); return; }
+    if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'f' || e.code === 'Space') && !e.altKey && !document.querySelector('.modal-back')) { e.preventDefault(); search(); return; }
     const t = e.target as HTMLElement;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
     if (document.querySelector('.modal-back')) return;
@@ -504,7 +504,7 @@ function showHelp(): void {
       ['Alt+← / Alt+→ · mouse back/forward buttons', 'Back / forward through the places opened (workspace, level, overworld map, graphics tab, Ctrl+click jumps)'],
       ['Esc / O / M · P · A', 'Workspace level / overworld / graphics (Map16, palettes, animations)'],
       ['Ctrl+mouse wheel · Middle mouse button drag', 'Zoom · Pan view'],
-      ['Ctrl+F', 'Search everywhere: objects, Map16 tiles, structures, sprites (Tab: only one group)'],
+      ['Ctrl+F · Ctrl+Space', 'Search everywhere: objects, Map16 tiles, structures, sprites (Tab: only one group)'],
       ['? / F1', 'This overview'],
       ['L', 'Expand/collapse log (all messages with time)'],
       ['Menus: ↑ ↓ ← → / Enter / Esc', 'Choose entry, neighboring menu / run / close'],
