@@ -158,7 +158,8 @@ When a level is displayed, it runs the ROM's **original loading routines** (~15 
   optionally a **custom palette per level** (all 256 colors).
 * **Graphics:** view GFX00–31 and ExGFX up to FFF (as Lunar Magic: ExGFX 80–DFF, and E00–FFF for files kept
   "as is" – layer 3 graphics and tilemaps, never 3bpp), listed by range; export/import as PNG.
-  New files and imports take the next free number of their range; number fields suggest it.
+  New files and imports ask for their number, with the next free one of their range suggested (an imported
+  file's own number when it fits); a 3bpp file numbered E00–FFF by its author goes to the next free ExGFX.
   Import either LZ2-compressed (original format, 2/3/4bpp) or as uniform **uncompressed 4bpp**
   (16 colors, via DMA from the ROM – no more 3bpp detour).
   The editor's own LZ2 compressor produces smaller data than the original.

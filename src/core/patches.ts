@@ -12,6 +12,7 @@
 
 import { Rom } from './rom.ts';
 import { Asm } from './asm.ts';
+import { lz2Decompress } from './lz2.ts';
 import { ownerNote } from './patchreg.ts';
 import { LEVEL_HEIGHT_RAM, EXGFX_HI_RAM } from './ram.ts';
 
@@ -354,10 +355,39 @@ export const RAW_GFX_SIZES = [0x1000, 0x800, 0x2000]; // by format flag - 1
 export const AS_IS_FIRST = 0xe00;
 export type GfxRange = 'exgfx' | 'asIs';
 export const gfxRange = (n: number): GfxRange | null => (n < VANILLA_GFX ? null : n >= AS_IS_FIRST ? 'asIs' : 'exgfx');
+// layer 3's slots (layer3gfx.ts): LG1-LG4 (2bpp graphics) and LT3 (a tilemap)
+export const LG_SLOT_NAMES = ['LG1', 'LG2', 'LG3', 'LG4'];
+export const LT3_SLOT = 'LT3';
+export const LAYER3_SLOT_NAMES = [...LG_SLOT_NAMES, LT3_SLOT];
+const GFX_3BPP = 0xc00;
+// what is known of a file: the slot it is for, its size unpacked (gfxDataSize)
+export interface GfxFileKind { slot?: string | null; size?: number }
+// a GFX file's size unpacked: the LZ2 data's, else its own
+export function gfxDataSize(data: Uint8Array): number {
+  if (RAW_GFX_SIZES.includes(data.length) || data.length === GFX_3BPP) return data.length;
+  try { return lz2Decompress(data, 0).data.length; } catch { return data.length; }
+}
+// the range a file belongs in: 3bpp graphics are ExGFX (the game converts them, so they can't be kept
+// "as is"); files for layer 3's slots, 2bpp layer 3 graphics and layer 3 tilemaps "as is" (as Lunar
+// Magic keeps them); other graphics ExGFX
+export function gfxRangeFor(f: GfxFileKind): GfxRange {
+  if (f.size === GFX_3BPP) return 'exgfx';
+  if (f.slot && LAYER3_SLOT_NAMES.includes(f.slot)) return 'asIs';
+  return f.size === 0x800 || f.size === 0x2000 ? 'asIs' : 'exgfx';
+}
+// why `n` can't hold the file `f`, null: it can – 000-FFF, not FF (a graphics slot's "none"), not the
+// game's files 00-31 unless `game` (replacing one), no 3bpp graphics in E00-FFF
+export function gfxNumberProblem(n: number, f: GfxFileKind & { game?: boolean } = {}): string | null {
+  if (!Number.isInteger(n) || n < 0 || n > MAX_GFX) return `GFX numbers go up to ${gfxHex(MAX_GFX)}`;
+  if (n === GFX_NONE) return `${gfxHex(GFX_NONE)} is a graphics slot's “none” and holds no file`;
+  if (n < VANILLA_GFX && !f.game) return `00–${gfxHex(VANILLA_GFX - 1)} are the game's graphics files`;
+  if (f.size === GFX_3BPP && gfxRange(n) === 'asIs') return `${gfxHex(n)} is in ${gfxHex(AS_IS_FIRST)}–${gfxHex(MAX_GFX)}, which hold files as they are (2bpp layer 3 graphics, layer 3 tilemaps); 3bpp graphics go in 80–${gfxHex(AS_IS_FIRST - 1)}`;
+  return null;
+}
 // the first number of `range` that is free and not taken by `taken` (ExGFX: 80 on first, as Lunar Magic
-// suggests, then 32-7F; never 0FF, a slot's "none"), -1: none left
+// suggests, then 32-7F), -1: none left
 export function freeGfx(rom: Rom, taken: Set<number>, range: GfxRange = 'exgfx'): number {
-  const free = (i: number) => i !== GFX_NONE && !taken.has(i) && !gfxEntry(rom, i);
+  const free = (i: number) => !gfxNumberProblem(i) && !taken.has(i) && !gfxEntry(rom, i);
   const order = range === 'asIs' ? [[AS_IS_FIRST, GFX_FILES]] : [[0x80, AS_IS_FIRST], [VANILLA_GFX, 0x80]];
   for (const [from, to] of order) for (let i = from; i < to; i++) if (free(i)) return i;
   return -1;

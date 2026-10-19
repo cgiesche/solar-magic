@@ -26,7 +26,7 @@ import {
 import { withIncludes } from './pkgmap.ts';
 import { isUberList } from './uberproject.ts';
 import { mwlExAnim } from './mwl.ts';
-import { LAYER3_SLOT_NAMES } from './layer3gfx.ts';
+import { gfxDataSize } from './patches.ts';
 
 const dec = new TextDecoder();
 const enc = new TextEncoder();
@@ -124,7 +124,8 @@ export interface PlannedBlock { file: string; tiles: number[]; acts: number }
 export interface PlannedMap16 { file: string; data: Map16File; from: number; at: number }
 // an ExGFX file: lmNum = its number in the package (file name), num = the number it is stored as,
 // slot = the graphics slot it is for (null: none known – stored only)
-export interface PlannedGfx { file: string; lmNum: number | null; num: number; slot: string | null }
+// size: the file's size unpacked (gfxDataSize)
+export interface PlannedGfx { file: string; lmNum: number | null; num: number; slot: string | null; size: number }
 
 export interface PackagePlan {
   blocks: PlannedBlock[];
@@ -234,9 +235,12 @@ export function planPackage(rom: Rom, input: PlanInput, blank: number[]): Packag
   const openSlots = [...mapSlots].filter((s) => GFX_SLOTS.includes(s) && !kept.some((g) => g.slot === s));
   if (open.length === 1 && openSlots.length === 1) open[0].slot = openSlots[0];
   for (const g of kept) if (g.slot && !GFX_SLOTS.includes(g.slot)) notes.push(`${base(g.file)} is for Lunar Magic's ${g.slot} slot – not supported, stored only`);
-  // the number: the author's when free, else the next free one (layer 3 files in E00-FFF, "as is")
+  // the number: the author's when it fits and is free, else the next free one of the file's range
   const nums = new Set<number>();
-  const gfx: PlannedGfx[] = kept.map((g) => ({ ...g, num: gfxNumber(rom, g.lmNum, nums, g.slot && LAYER3_SLOT_NAMES.includes(g.slot) ? 'asIs' : undefined) }));
+  const gfx: PlannedGfx[] = kept.map((g) => {
+    const size = gfxDataSize(files.get(g.file)!);
+    return { ...g, size, num: gfxNumber(rom, g.lmNum, nums, { slot: g.slot, size }) };
+  });
 
   const palettes = packPalettes(files, graphics.pal, graphics.palmask, notes);
   return { blocks, map16, gfx, palettes, sample, exanim, frames, notes };

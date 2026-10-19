@@ -74,7 +74,7 @@ A part without code: Map16 tiles (.map16), an ExGFX file or a palette (.pal with
 _Avoid_: Resource, asset
 
 **ExGFX range**:
-The part of the ExGFX numbers (000–FFF, Lunar Magic's) a file belongs in: ExGFX 80–DFF (then 32–7F) for graphics, E00–FFF for files kept "as is" – layer 3 graphics (2bpp), layer 3 tilemaps – which are never 3bpp. FF is no file's number: it is a graphics slot's "none".
+The part of the ExGFX numbers (000–FFF, Lunar Magic's) a file belongs in: ExGFX 80–DFF (then 32–7F) for graphics, E00–FFF for files kept "as is" – layer 3 graphics (2bpp), layer 3 tilemaps – which are never 3bpp. A file's range follows from the slot it is for (layer 3's: "as is") and its data (2bpp graphics and tilemaps "as is"; 3bpp graphics always ExGFX). FF is no file's number: it is a graphics slot's "none".
 _Avoid_: Super ExGFX, extended range
 
 **Link**:

@@ -42,20 +42,28 @@ export function clear(el: HTMLElement): HTMLElement {
   return el;
 }
 
-// `ok`: whether a value in range is allowed too; `expect`: the allowed values, for the tooltip and the error
-export function hexInput(value: number, digits: number, onChange: (v: number) => void, max = (1 << (digits * 4)) - 1, ok: (v: number) => boolean = () => true, expect = `hex 0–${max.toString(16).toUpperCase()}`): HTMLInputElement {
+// `ok`: whether a value in range is allowed too (text: not allowed, and why); `expect`: the allowed values,
+// for the tooltip and the error
+export function hexInput(value: number, digits: number, onChange: (v: number) => void, max = (1 << (digits * 4)) - 1, ok: (v: number) => boolean | string = () => true, expect = `hex 0–${max.toString(16).toUpperCase()}`): HTMLInputElement {
   const inp = h('input', {
     class: 'hex', value: value.toString(16).toUpperCase().padStart(digits, '0'), size: digits + 1, maxLength: digits,
     spellcheck: false, title: expect,
   });
-  const valid = () => { const v = parseInt(inp.value, 16); return /^[0-9a-f]+$/i.test(inp.value.trim()) && v <= max && ok(v) ? v : -1; };
+  let why = '';
+  const valid = () => {
+    const v = parseInt(inp.value, 16);
+    const r = /^[0-9a-f]+$/i.test(inp.value.trim()) && v <= max ? ok(v) : false;
+    why = typeof r === 'string' ? r : '';
+    return r === true ? v : -1;
+  };
   // invalid input is marked while typing and reset when leaving the field
-  inp.addEventListener('input', () => inp.classList.toggle('invalid', valid() < 0));
+  inp.addEventListener('input', () => { inp.classList.toggle('invalid', valid() < 0); inp.title = why || expect; });
   inp.addEventListener('change', () => {
     const v = valid();
     inp.classList.remove('invalid');
+    inp.title = expect;
     if (v >= 0) { value = v; onChange(v); }
-    else { inp.value = value.toString(16).toUpperCase().padStart(digits, '0'); toast(`Invalid: expected ${expect}`, 'error'); }
+    else { inp.value = value.toString(16).toUpperCase().padStart(digits, '0'); toast(why || `Invalid: expected ${expect}`, 'error'); }
   });
   return inp;
 }

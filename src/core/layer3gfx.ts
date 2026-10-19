@@ -16,15 +16,13 @@
 import type { Rom } from './rom.ts';
 import { applyPatch, type ApplyResult } from './patchapply.ts';
 import { listPatches } from './patchreg.ts';
-import { installEditorPatch, editorPatch, missingPatch, gfxEntry, gfxNum, freeGfx, GFX_NONE, RAW_GFX_SIZES } from './patches.ts';
+import { installEditorPatch, editorPatch, missingPatch, gfxEntry, gfxNum, freeGfx, gfxRangeFor, GFX_NONE, RAW_GFX_SIZES, LT3_SLOT } from './patches.ts';
 import { lz2Decompress } from './lz2.ts';
 import { snesToPc } from './rom.ts';
 import { LAYER3_GFX_RAM, RAM } from './ram.ts';
 
 export const LAYER3_PATCH_NAME = 'Layer 3 graphics per level (Lunar Magic format)';
-export const LG_SLOT_NAMES = ['LG1', 'LG2', 'LG3', 'LG4'];
-export const LT3_SLOT = 'LT3';
-export const LAYER3_SLOT_NAMES = [...LG_SLOT_NAMES, LT3_SLOT];
+export { LG_SLOT_NAMES, LT3_SLOT, LAYER3_SLOT_NAMES } from './patches.ts';
 export const GAME_LAYER3_GFX = 0x28; // the game's files 28-2B
 export const LG_SIZE = 0x800;
 export const LT3_DESTS = ['Under the status bar', 'Start of layer 3', 'Last line of the status bar', 'Bottom half of layer 3'];
@@ -236,7 +234,7 @@ export function lt3Patches(rom: Rom, n: number, addr: number, place: Lt3Place): 
   const t = findTable(rom), p = editorPatch(rom);
   if (t === null || !p) return [];
   let num = rom.r16(t + LT3_TBL + n * 2);
-  if (num === GFX_NONE) num = freeGfx(rom, new Set(), 'asIs');
+  if (num === GFX_NONE) num = freeGfx(rom, new Set(), gfxRangeFor({ slot: LT3_SLOT }));
   if (num < 0) return [];
   const at = t + LT3_TBL + n * 2;
   return [[at, num & 0xff], [at + 1, num >> 8], [t + DDFF_TBL + n, lt3Nibble(place)],

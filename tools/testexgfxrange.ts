@@ -8,8 +8,13 @@ import { LevelEmulator } from '../src/core/levelemu.ts';
 import { importGfxFile } from '../src/core/map16file.ts';
 import { GM, RAM } from '../src/core/ram.ts';
 import { levelLayer3, setLevelLayer3, type Layer3Gfx } from '../src/core/layer3gfx.ts';
-import { gfxEntry, setGfxEntry, freeGfx, levelGfx, setLevelGfx, levelExtGfx, setLevelExtGfx, GFX_SLOT_NAMES, MAX_GFX } from '../src/core/patches.ts';
+import { gfxEntry, setGfxEntry, freeGfx, levelGfx, setLevelGfx, levelExtGfx, setLevelExtGfx, GFX_SLOT_NAMES, MAX_GFX, gfxRangeFor, gfxNumberProblem, gfxDataSize, installEditorPatch } from '../src/core/patches.ts';
 import { gfxNumber } from '../src/core/levelgfx.ts';
+import { lz2Compress } from '../src/core/lz2.ts';
+import { loadAsar } from '../src/core/asar.ts';
+import { inspectUpload, installPackage, planUpload } from '../src/core/packages.ts';
+import { map16Source } from '../src/core/render.ts';
+import { zipSync } from 'fflate';
 import { editorImage } from './fixture.ts';
 
 let bad = 0;
@@ -33,15 +38,47 @@ check(MAX_GFX === 0xfff, 'ExGFX numbers go up to FFF');
   const taken = new Set<number>();
   for (let i = 0x80; i < 0xff; i++) taken.add(i);
   check(freeGfx(rom, taken) === 0x100, 'after 80-FE: 100 (FF skipped)');
-  check(gfxNumber(rom, 0x8a2, new Set()) === 0x8a2 && gfxNumber(rom, 0xe05, new Set()) === 0xe05, 'LM numbers 8A2 and E05 kept when free');
+  check(gfxNumber(rom, 0x8a2, new Set(), { size: 0xc00 }) === 0x8a2 && gfxNumber(rom, 0xe05, new Set(), { size: 0x800 }) === 0xe05, 'LM numbers 8A2 and E05 kept when free');
   importGfxFile(rom, 0xe05, pattern(0x800, 3));
-  check(gfxNumber(rom, 0xe05, new Set()) === 0xe00 && gfxNumber(rom, null, new Set(), 'asIs') === 0xe00, 'E05 taken: the next free "as is" number');
+  check(gfxNumber(rom, 0xe05, new Set(), { size: 0x800 }) === 0xe00 && gfxNumber(rom, null, new Set(), { slot: 'LG1' }) === 0xe00, 'E05 taken: the next free "as is" number');
+  check(gfxNumber(rom, 0xe20, new Set(), { size: 0xc00 }) === 0x80, 'a 3bpp file numbered E20: the next free ExGFX number (it can\'t be kept "as is")');
+  check(gfxNumber(rom, 0xe21, new Set(), { size: 0x1000 }) === 0xe21, 'a 4bpp file numbered E21 stays there');
   let refused = '';
   try { importGfxFile(rom, 0xe10, pattern(0xc00, 3)); } catch (e) { refused = (e as Error).message; }
   check(refused.includes('E00') && !gfxEntry(rom, 0xe10), 'a 3bpp file is not stored in E00-FFF');
   refused = '';
   try { importGfxFile(rom, 0xff, pattern(0x1000, 3)); } catch (e) { refused = (e as Error).message; }
   check(!!refused && !gfxEntry(rom, 0xff), 'no file under FF (a slot\'s "none")');
+}
+
+// one rule for a file's range: by the slot it is for, else by its size unpacked; 3bpp graphics never "as is"
+{
+  check(gfxRangeFor({ slot: 'LG1' }) === 'asIs' && gfxRangeFor({ slot: 'LT3' }) === 'asIs' && gfxRangeFor({ slot: 'FG1' }) === 'exgfx' && gfxRangeFor({ slot: 'BG2' }) === 'exgfx', 'by slot: layer 3\'s "as is", the others ExGFX');
+  check(gfxRangeFor({ size: 0x800 }) === 'asIs' && gfxRangeFor({ size: 0x2000 }) === 'asIs' && gfxRangeFor({ size: 0x1000 }) === 'exgfx' && gfxRangeFor({ size: 0xc00 }) === 'exgfx' && gfxRangeFor({}) === 'exgfx', 'by size: 2bpp and tilemaps "as is", 3bpp/4bpp ExGFX');
+  check(gfxRangeFor({ slot: 'LG1', size: 0xc00 }) === 'exgfx', 'a 3bpp file is ExGFX whatever its slot');
+  check(gfxDataSize(pattern(0xc00, 2)) === 0xc00 && gfxDataSize(lz2Compress(pattern(0x800, 2))) === 0x800 && gfxDataSize(new Uint8Array(5)) === 5, 'size unpacked: raw as is, LZ2 unpacked');
+  check(gfxNumberProblem(0x80) === null && gfxNumberProblem(0x32) === null && gfxNumberProblem(0xfff) === null && gfxNumberProblem(0xe10, { size: 0x1000 }) === null, 'numbers 32-FFF may hold a file');
+  check(!!gfxNumberProblem(0x10) && gfxNumberProblem(0x10, { game: true }) === null, 'the game\'s files: only when replacing them');
+  check(!!gfxNumberProblem(0xff) && !!gfxNumberProblem(0x1000) && !!gfxNumberProblem(-1) && !!gfxNumberProblem(128.5), 'not FF, not above FFF');
+  check(/80–DFF/.test(gfxNumberProblem(0xe10, { size: 0xc00 }) ?? ''), 'a 3bpp file not in E00-FFF, and why');
+}
+
+// a package's 3bpp file numbered E20 by its author: placed under the next free ExGFX number, installed
+{
+  await loadAsar();
+  const b3 = pattern(0xc00, 5);
+  const zip = zipSync({ 'Pack/ExGFXE20_FG3.bin': lz2Compress(b3) });
+  const preview = inspectUpload('Pack.zip', zip);
+  check(preview.status === 'ready', 'package with one ExGFX file: ready');
+  if (preview.status === 'ready') {
+    const rom = fresh(); installEditorPatch(rom);
+    const emu = new LevelEmulator(rom); emu.boot();
+    const blank = map16Source(rom, emu.load(LV)).fg(0x25);
+    const plan = planUpload(rom, preview, blank);
+    check(plan.gfx[0]?.num === 0x80 && plan.gfx[0]?.lmNum === 0xe20, `planned as ExGFX 80, not E20 (${plan.gfx[0]?.num.toString(16)})`);
+    const r = await installPackage(rom, preview, { blank, tileWords: () => blank, level: LV, setup: false });
+    check(r.ok && gfxEntry(rom, 0x80)?.raw === false && !gfxEntry(rom, 0xe20), 'installed: 3bpp under 80 ' + [...r.errors].join(' | '));
+  }
 }
 
 // a raw 4bpp file at 180 in FG1, a compressed 3bpp file at 11E in FG2 (and the same file at 81)
