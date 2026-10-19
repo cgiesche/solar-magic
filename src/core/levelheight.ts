@@ -26,10 +26,10 @@
 //  - sprites load from Lunar Magic's new format ($FF V: subscreen V), the subscreen in their Y high byte;
 //  - entrances: Mario at a tile (Lunar Magic's tile position) and the camera relative to him, the BG then
 //    bottom-aligned with the level (the BG's height) or relative to the FG (SEC_HDR, SEC_ENT);
-//  - Mario facing left, a water level and a slippery level, set for the main entrance, a secondary entrance (a
-//    water level also by a secondary screen exit, its w), and a slanted pipe entrance shooting Mario out the way he faces; a screen keeps
-//    its exit's flags 0000wush ($19D8, which community code such as GPS's teleport routine writes too), and
-//    only s makes the level's exits secondary;
+//  - Mario facing left, a water level and a slippery level, set for the main entrance, a secondary
+//    entrance (a water level also by a secondary screen exit, its w), and a slanted pipe entrance shooting
+//    Mario out the way he faces; a screen keeps its exit's flags 0000wush ($19D8, which community code such
+//    as GPS's teleport routine writes too), and only s makes the level's exits secondary;
 //  - a standard screen exit with w leads to the midway entrance of a level with its own settings;
 //  - a screen exit with u (new-style) leads into either bank: its own h is the target's high bit (the game's
 //    from the overworld submap) and its own s makes it secondary (the game's: the level's last exit's); a

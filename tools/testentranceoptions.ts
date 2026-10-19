@@ -11,7 +11,7 @@ import {
   writeSecondaryEntrance, decodeSecondaryEntrance, entrancePos, secondarySpot, startHeader, loadLevel, cloneLevel, parseObjects, serializeObjects,
   SEC_ENT, EXIT_WATER,
 } from '../src/core/level.ts';
-import { slipperyActions, arrivesSlippery } from '../src/core/slippery.ts';
+import { slipperyActions, arrivesSlippery, slipperyEntrances } from '../src/core/slippery.ts';
 import { saveLevel } from '../src/core/save.ts';
 import { GM, RAM, marioX } from '../src/core/ram.ts';
 import { editorImage } from './fixture.ts';
@@ -136,6 +136,14 @@ function enter(e: SecondaryEntrance, flags = 2) {
     if (r.slippery !== arrivesSlippery({ action: a, slippery }, acts)) wrong.push(`${a}${slippery ? ' slippery' : ''}: ${show(r)}`);
   }
   check(!wrong.length, `arrives slippery: as entering the level shows, by bit and action${wrong.length ? ` – not ${wrong.join('; ')}` : ''}`);
+  // a level's slippery entrances: the main entrance by its action, the own midway entrance by its bit, a
+  // secondary entrance by its bit
+  const r = new Rom(rom.data.slice());
+  writeSecondaryEntrance(r, IDX, { ...readSecondaryEntrance(r, IDX), destLevel: N, slippery: 1 });
+  writeSecondaryEntrance(r, IDX + 1, { ...readSecondaryEntrance(r, IDX + 1), destLevel: N, slippery: 0, action: 0 });
+  const list = (s: SecondaryHeader) => slipperyEntrances(r, s, [IDX, IDX + 1], acts).map((e) => (e.kind === 'sec' ? e.index.toString(16) : e.kind)).join();
+  const a = list({ ...sec0, entranceAction: 5, midwayOwn: 1, midwaySlippery: 1, midwayAction: 0 }), b = list({ ...sec0, entranceAction: 0, midwayOwn: 0, midwaySlippery: 1 });
+  check(a === 'main,midway,1f0' && b === '1f0', `slippery entrances of a level: ${a}; without own midway settings and action: ${b}`);
 }
 
 if (bad) { console.log(`${bad} FAILED`); process.exit(1); }

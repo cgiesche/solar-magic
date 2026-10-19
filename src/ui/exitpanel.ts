@@ -11,7 +11,7 @@ import {
 } from '../core/level.ts';
 import { spotText, cameraOptions, cameraValue, setCamera, cameraFields, optionFields } from './entrancefields.ts';
 import { exitTarget, type ExitRef } from '../core/exitgraph.ts';
-import { arrivesSlippery } from '../core/slippery.ts';
+import { arrivesSlippery, slipperyEntrances } from '../core/slippery.ts';
 import { levelPicker } from './levelpicker.ts';
 import { openTestPlay } from './testplay.ts';
 
@@ -221,11 +221,7 @@ function mainPanel(app: App, body: HTMLElement, kind: 'main' | 'midway'): void {
 // which entrances of the open level (s: its secondary header) make it slippery, by their option or their
 // action: it depends on the entrance, not on the level
 export function slipperyText(app: App, s: SecondaryHeader): string {
-  const acts = app.slipperyActions();
-  const names = [
-    ...(arrivesSlippery(mainEntrance(s), acts) ? [s.midwayOwn ? 'the main entrance' : 'the main entrance (also at the midway point)'] : []),
-    ...(s.midwayOwn && arrivesSlippery(midwayEntrance(s), acts) ? ['the midway entrance'] : []),
-    ...app.secEntrances.filter((i) => arrivesSlippery(readSecondaryEntrance(app.rom, i), acts)).map((i) => `secondary entrance ${hex3(i)}`),
-  ];
+  const names = slipperyEntrances(app.rom, s, app.secEntrances, app.slipperyActions()).map((e) => (e.kind === 'sec' ? `secondary entrance ${hex3(e.index)}`
+    : e.kind === 'midway' ? 'the midway entrance' : s.midwayOwn ? 'the main entrance' : 'the main entrance (also at the midway point)'));
   return names.length ? `The level is slippery when Mario enters it through ${names.join(', ')}.` : 'No entrance makes the level slippery.';
 }
