@@ -75,6 +75,16 @@ check(MAX_GFX === 0xfff, 'ExGFX numbers go up to FFF');
   check(w[RAM.gameMode] === GM.level && same(s.vram.subarray(0, 0x800), other.subarray(0, 0x800)), 'a sublevel with FG1 = 080 after FG1 = 180: ExGFX 080 in VRAM $0000');
 }
 
+// SP1 (the sprite slots' upload) from ExGFX 1C0: as the same file under 80
+{
+  const rom = fresh();
+  importGfxFile(rom, 0x80, pattern(0x1000, 17));
+  importGfxFile(rom, 0x1c0, pattern(0x1000, 17));
+  const at = (num: number) => { withSlot(rom, LV, 'SP1', num); const emu = new LevelEmulator(rom); emu.boot(); return emu.load(LV); };
+  const a = at(0x80), b = at(0x1c0), c = at(0xff);
+  check(a.ok && b.ok && same(a.vram, b.vram) && !same(a.vram, c.vram), 'SP1: ExGFX 1C0 as the same file under 80');
+}
+
 // BG2 (VRAM $2000) from ExGFX 2A0
 {
   const rom = fresh();

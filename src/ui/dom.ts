@@ -42,7 +42,7 @@ export function clear(el: HTMLElement): HTMLElement {
   return el;
 }
 
-// `ok`: further values to refuse (`expect` says which are taken)
+// `ok`: whether a value in range is allowed too; `expect`: the allowed values, for the tooltip and the error
 export function hexInput(value: number, digits: number, onChange: (v: number) => void, max = (1 << (digits * 4)) - 1, ok: (v: number) => boolean = () => true, expect = `hex 0–${max.toString(16).toUpperCase()}`): HTMLInputElement {
   const inp = h('input', {
     class: 'hex', value: value.toString(16).toUpperCase().padStart(digits, '0'), size: digits + 1, maxLength: digits,

@@ -30,6 +30,7 @@ export function isCleanRom(rom: Rom): boolean {
 export async function prepareRom(rom: Rom): Promise<boolean> {
   if (isCleanRom(rom)) { await installEditorPatches(rom); return true; }
   if (editorPatch(rom) && madeByEditor(rom)) return false;
+  if (madeByEditor(rom)) throw new Error('This ROM was made with an older version of Solar Magic, whose patches this version does not read. Open a clean Super Mario World (U) ROM.');
   throw new Error('Only a clean Super Mario World (U) ROM or a ROM made with Solar Magic can be opened.');
 }
 

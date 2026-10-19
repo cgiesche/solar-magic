@@ -434,7 +434,7 @@ export class GfxTab implements WsPanel {
         const e = gfxEntry(app.rom, i);
         const name = gfxName(i);
         // empty ExGFX numbers: via "+ New ExGFX", or found by their exact number
-        const exact = this.filter === hex(i, 2).toLowerCase() || this.filter === name.toLowerCase();
+        const exact = /^(exgfx)?[0-9a-f]{1,3}$/.test(this.filter) && parseInt(this.filter.replace('exgfx', ''), 16) === i;
         if (!e && i >= VANILLA_GFX && i !== this.cur && !exact) continue;
         if (i === GFX_NONE) continue;
         if (this.filter && !exact && !name.toLowerCase().includes(this.filter) && !hex(i, 2).toLowerCase().includes(this.filter)) continue;
