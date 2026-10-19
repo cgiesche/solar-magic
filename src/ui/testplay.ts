@@ -84,12 +84,13 @@ function start(app: App, at: Start | undefined, audio: AudioOut): void {
     if (sec.entranceAction) move = { x: start.x - p.x, y: start.y - p.y };
     ov.secondaryHeader = encodeSecondaryHeader(sec);
   }
-  // a game in progress (lives, overworld with Mario on the level's tile): dying returns there
+  // a game in progress (lives, overworld with Mario on the level's tile, entered from there so that the
+  // midway point counts): dying returns there
   const translevel = levelTranslevel(app.rom, lv.number);
   let r: ReturnType<LevelEmulator['load']>;
   try {
     emu.startGame(translevel);
-    r = emu.load(lv.number, { ...ov, translevel, continueState: true });
+    r = emu.loadInGame(lv.number, translevel, ov);
   } catch {
     r = emu.load(lv.number, { ...ov, translevel });
   }

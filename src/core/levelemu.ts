@@ -5,6 +5,7 @@
 import { Snes, type SnesState, type MemHook } from './snes.ts';
 import { Rom, snesToPc } from './rom.ts';
 import { L1_PTRS, L2_PTRS, SPR_PTRS, SEC_HDR, LEVEL_SIZE_TABLE, mainTranslevel } from './level.ts';
+import { translevelToLevel } from './overworld.ts';
 import { editorPatch, musicPatch, BG_HOOK, HEADER_MUSIC_TABLE } from './patches.ts';
 import { lt3Patches, type Lt3Place } from './layer3gfx.ts';
 import { RomReads, updateBytePages, PAGE_SHIFT } from './romdeps.ts';
@@ -44,6 +45,7 @@ export interface LevelOverride {
   trackSources?: boolean; // record ROM provenance of CGRAM (slower)
   translevel?: number; // $13BF (messages, Yoshi coins); default: the level itself if it is a main level
   midway?: boolean; // enter the translevel's level from the overworld with its midway point touched (a main level)
+  fromOverworld?: boolean; // enter the translevel's level from the overworld (a main level): only then the game sets up its midway point ($13CD)
   trace?: boolean; // record per object what its routine reads and writes (see ObjectTrace)
   continueState?: boolean; // load from the emulator's current state (startGame) instead of the boot snapshot
   music?: number; // the song the level plays instead of its own (all header settings and the level's music patch entry)
@@ -179,13 +181,13 @@ export class LevelEmulator {
     // translevel $24 (Chocolate Island 2) makes the exit-based load pick a room by time/coins instead
     const tl = ov.translevel ?? mainTranslevel(level) ?? 0;
     w[RAM.translevel] = tl === 0x24 ? 0 : tl;
-    if (ov.midway) {
+    if (ov.midway || ov.fromOverworld) {
       // from the overworld ($141A 0) the game takes the translevel from the overworld tile Mario is on ($05D84D)
       const p = w[RAM.currentPlayer], tx = w[RAM.owPlayerTileX + p], ty = w[RAM.owPlayerTileY + p];
       const i = (tx & 15) | ((tx & 16) << 4) | ((ty & 15) << 4) | ((ty & 16) << 5) | (w[RAM.submap + (p >> 2)] & 15 ? 0x400 : 0);
       w[RAM.owTranslevels + i] = tl;
       w[RAM.sublevelCount] = 0;
-      w[RAM.levelFlags + tl] |= 0x40;
+      if (ov.midway) w[RAM.levelFlags + tl] |= 0x40;
     }
     if (ov.switchPalaces) for (let i = 0; i < 4; i++) w[RAM.switchPalaces + i] = 1;
     if (ov.onOffSwitch) w[RAM.onOff] = 1;
@@ -367,6 +369,15 @@ export class LevelEmulator {
       set16(w, RAM.owPlayerTileX + o, tx); set16(w, RAM.owPlayerTileY + o, ty);
     }
     w[RAM.submap] = w[RAM.submap + 1] = sub;
+  }
+
+  // loads level n of translevel tl within the game startGame(tl) began: entered from the overworld tile as in
+  // the game – only then the game sets up the midway point ($13CD), so that its tape counts; a sub-level
+  // through its main level. (Translevel 0 is on no tile; $24 picks a room by time and coins.)
+  loadInGame(n: number, tl: number, ov: LevelOverride = {}): LevelRender {
+    const main = tl && tl !== 0x24 ? translevelToLevel(tl) : -1;
+    if (main >= 0 && main !== n) this.load(main, { translevel: tl, continueState: true, fromOverworld: true });
+    return this.load(n, { ...ov, translevel: tl, continueState: true, fromOverworld: main === n });
   }
 
   // runs a game routine (JSL addr, RTL) with X = x in 8-bit mode, then restores the CPU registers

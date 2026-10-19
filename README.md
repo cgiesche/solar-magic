@@ -104,7 +104,7 @@ When a level is displayed, it runs the ROM's **original loading routines** (~15 
   overlaps arise.
 * **Message boxes** (*ROM → Message boxes*): edit all 25 message boxes with a preview in the game's font; if the texts
   no longer fit in their place, they are moved to free space.
-* **Test level (T):** play the level (including unsaved changes) in the built-in emulator, with keyboard or gamepad, with music and sound effects (M mutes the sound).
+* **Test level (T):** play the level (including unsaved changes) in the built-in emulator, with keyboard or gamepad, with music and sound effects (M mutes the sound). It is played in a game in progress, entered from its overworld tile (a sub-level through its main level), so the midway tape counts: dying returns to the overworld, entering the level again starts at the midway point once touched.
 
 ### Music
 * **Import songs** (*ROM → Packages … → Upload package …*): songs in AddmusicK format (`.zip` from SMWCentral

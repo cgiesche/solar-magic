@@ -62,6 +62,7 @@ export const RAM = {
   layer3Setting: 0x1be3,
   sublevelCount: 0x141a,
   levelFlags: 0x1ea2, // per translevel: bit 6 the midway point was touched
+  midwayTouched: 0x13ce, // the midway tape was touched in this level (dying then marks the translevel's $1EA2 bit 6)
   midwayUsed: 0x13cf, // the level was loaded at its midway point
   midwayScreen: 0x13cd, // the level's midway screen: its tape sets the checkpoint unless it is 0
   entranceAction: 0x192a, // what Mario does when he enters (pipe, door, …)
