@@ -55,6 +55,8 @@ let soundMuted = false; // kept between test runs
 // without an action)
 type Start = { tx: number; ty: number; entrance?: StartEntrance };
 export function openTestPlay(app: App, at?: Start): void {
+  // saved first: the game loads the level from the ROM again when Mario dies and enters it again
+  if (app.dirty) app.saveLevel(true);
   // the sound emulator loads once; the audio context must start within the key press or click
   const audio = new AudioOut(AUDIO_LEAD);
   if (!apuReady()) {
@@ -179,7 +181,7 @@ function start(app: App, at: Start | undefined, audio: AudioOut): void {
   const m = modal(`Test level – ${hex(lv.number, 3)}${at ? ` from ${hex(at.tx, 2)}/${hex(at.ty, 2)}` : ''}${r.ok ? '' : ' (load error)'}`, h('div', { class: 'play' },
     canvas,
     info,
-    h('div', { class: 'hint' }, 'Controls: arrows · X = jump (B) · Z/Y = run/fire (Y) · S = spin jump · A = X button · Enter = Start · Shift = Select · Q/W = L/R · P = pause. Gamepad: d-pad/left stick, buttons by position as on the SNES pad (bottom = B, right = A, left = Y, top = X), shoulder buttons/triggers = L/R, Start/Select, Home = pause. M = sound on/off. Unsaved changes are included in the test.'),
+    h('div', { class: 'hint' }, 'Controls: arrows · X = jump (B) · Z/Y = run/fire (Y) · S = spin jump · A = X button · Enter = Start · Shift = Select · Q/W = L/R · P = pause. Gamepad: d-pad/left stick, buttons by position as on the SNES pad (bottom = B, right = A, left = Y, top = X), shoulder buttons/triggers = L/R, Start/Select, Home = pause. M = sound on/off. The level is saved before the test.'),
   ), [{ label: 'Restart', onClick: () => { setTimeout(() => openTestPlay(app, at), 0); } }, { label: 'Quit', primary: true }], stop);
   void m;
   canvas.focus();
