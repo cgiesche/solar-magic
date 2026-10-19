@@ -16,11 +16,10 @@ import { decodeTile, encodeTile, cgramToRGBA } from '../../core/gfx.ts';
 import { snesToPc, type Rom } from '../../core/rom.ts';
 import { hex } from '../../core/names.ts';
 import {
-  gfxEntry, setGfxEntry, VANILLA_GFX, levelGfx, setLevelGfx,
+  gfxEntry, setGfxEntry, freeGfx, gfxRange, gfxHex, VANILLA_GFX, AS_IS_FIRST, GFX_FILES, MAX_GFX, GFX_NONE, levelGfx, setLevelGfx, type GfxRange,
   levelExtGfx, setLevelExtGfx,
 } from '../../core/patches.ts';
-import { importGfxFile, exgfxName } from '../../core/map16file.ts';
-import { freeGfx } from '../../core/levelgfx.ts';
+import { importGfxFile, exgfxName, gfxRangeOf } from '../../core/map16file.ts';
 import { levelLayer3, setLevelLayer3, fitsLayer3Slot, lt3SizeFor, LT3_DESTS, LT3_SIZES } from '../../core/layer3gfx.ts';
 import { recordPackageChange, type Package } from '../../core/pkgreg.ts';
 import { map16Source } from '../../core/render.ts';
@@ -354,10 +353,13 @@ export class GfxTab implements WsPanel {
     grid.append(item(-1, empty ? 'none' : `Default (${gfxName(s.def)})`, s.kind === 'lt3' ? 'the layer 3 setting\'s image' : empty ? 'Leave slot empty' : s.kind === 'lg' ? 'the game\'s layer 3 graphics' : s.sprite ? 'from the sprite graphics in the header' : 'from the tileset in the header'));
     const extra = (code: number, label: string, sub: string) => h('div', { class: 'gt-gal-item gt-gal-new', onclick: () => { done(code); dlg.close(); } },
       h('div', { class: 'gt-gal-none' }, '+'), h('b', null, label), h('span', { class: 'hint' }, sub));
-    if (this.freeExGfx() >= 0) grid.append(
-      extra(NEW_FILE, 'New ExGFX', 'create empty and use here'),
-      extra(IMPORT_FILE, 'Import …', '.bin or .png into a free number, use here'));
-    for (let i = 0; i < 0x100; i++) {
+    // layer 3 files are kept "as is" (E00-FFF), as Lunar Magic does
+    const range: GfxRange = s.kind === 'lg' || s.kind === 'lt3' ? 'asIs' : 'exgfx';
+    const free = this.freeExGfx(range);
+    if (free >= 0) grid.append(
+      extra(NEW_FILE, `New ExGFX ${gfxHex(free)}`, 'create empty and use here'),
+      extra(IMPORT_FILE, 'Import …', `.bin or .png into ExGFX ${gfxHex(free)}, use here`));
+    for (let i = 0; i < GFX_FILES; i++) {
       if (!gfxEntry(app.rom, i)) continue;
       // layer 3: only 2bpp graphics files for LG, only uncompressed tilemap files for LT3
       if ((s.kind === 'lg' || s.kind === 'lt3') && !fitsLayer3Slot(app.rom, s.name, i)) continue;
@@ -372,7 +374,7 @@ export class GfxTab implements WsPanel {
     const pick = await result;
     if (pick === null) return;
     if (pick === NEW_FILE || pick === IMPORT_FILE) {
-      const n = pick === NEW_FILE ? this.newExGfx(false, s.kind === 'lg' ? 0x800 : s.kind === 'lt3' ? 0x2000 : 0x1000) : await this.importNew();
+      const n = pick === NEW_FILE ? this.newExGfx(false, s.kind === 'lg' ? 0x800 : s.kind === 'lt3' ? 0x2000 : 0x1000) : await this.importNew(undefined, undefined, range);
       if (n !== null) await this.assignSlot(s, n);
       return;
     }
@@ -420,19 +422,42 @@ export class GfxTab implements WsPanel {
     clear(this.list);
     const used = new Map(this.levelSlots().filter((s) => s.file !== 0xff).map((s) => [s.file, s.name] as [number, string]));
     const unused = new Set(unusedExGfx(app.rom, app.usedLevels(), this.usage()));
-    for (let i = 0; i < 0x100; i++) {
-      const e = gfxEntry(app.rom, i);
-      const name = gfxName(i);
-      if (this.filter && !name.toLowerCase().includes(this.filter) && !hex(i, 2).toLowerCase().includes(this.filter)) continue;
-      if (this.onlyLevel && !used.has(i)) continue;
-      if (!e && i >= VANILLA_GFX && !this.filter && !this.onlyLevel && i !== this.cur) continue; // empty ExGFX numbers: via "+ New ExGFX"
-      this.list.append(h('div', {
-        class: `level-item${i === this.cur ? ' current' : ''}${e ? '' : ' unused'}`,
-        onclick: () => this.select(i),
-      }, name, used.has(i) ? h('span', { class: 'gt-used' }, used.get(i)) : '',
-        unused.has(i) ? h('span', { class: 'gt-unused', title: 'Inserted, but in no level\'s graphics slots' }, 'unused') : ''));
+    // by range: the game's files, ExGFX, files kept "as is" (Lunar Magic's E00-FFF)
+    const groups: [number, number, string, string][] = [
+      [0, VANILLA_GFX, 'GFX', 'The game\'s graphics files'],
+      [VANILLA_GFX, AS_IS_FIRST, `ExGFX ${gfxHex(0x80)}–${gfxHex(AS_IS_FIRST - 1)}`, 'Own graphics files (also 32–7F); Lunar Magic converts these between 3bpp and 4bpp'],
+      [AS_IS_FIRST, GFX_FILES, `“As is” ${gfxHex(AS_IS_FIRST)}–${gfxHex(MAX_GFX)}`, 'Files Lunar Magic keeps as they are: 2bpp layer 3 graphics (LG1–LG4), layer 3 tilemaps (LT3)'],
+    ];
+    for (const [from, to, head, title] of groups) {
+      const items: HTMLElement[] = [];
+      for (let i = from; i < to; i++) {
+        const e = gfxEntry(app.rom, i);
+        const name = gfxName(i);
+        // empty ExGFX numbers: via "+ New ExGFX", or found by their exact number
+        const exact = this.filter === hex(i, 2).toLowerCase() || this.filter === name.toLowerCase();
+        if (!e && i >= VANILLA_GFX && i !== this.cur && !exact) continue;
+        if (i === GFX_NONE) continue;
+        if (this.filter && !exact && !name.toLowerCase().includes(this.filter) && !hex(i, 2).toLowerCase().includes(this.filter)) continue;
+        if (this.onlyLevel && !used.has(i)) continue;
+        items.push(this.listItem(i, e !== null, used.get(i), unused.has(i)));
+      }
+      if (items.length) this.list.append(h('div', { class: 'gt-list-head', title }, head), ...items);
     }
-    // ExAnimation sources (Lunar Magic's ExGFX 60-63)
+    this.buildAnimList();
+    this.list.querySelector('.current')?.scrollIntoView({ block: 'nearest' });
+  }
+
+  private listItem(i: number, exists: boolean, slot: string | undefined, unused: boolean): HTMLElement {
+    return h('div', {
+      class: `level-item${i === this.cur ? ' current' : ''}${exists ? '' : ' unused'}`,
+      onclick: () => this.select(i),
+    }, gfxName(i), slot ? h('span', { class: 'gt-used' }, slot) : '',
+      unused ? h('span', { class: 'gt-unused', title: 'Inserted, but in no level\'s graphics slots' }, 'unused') : '');
+  }
+
+  // ExAnimation sources (Lunar Magic's ExGFX 60-63)
+  private buildAnimList(): void {
+    const app = this.app;
     if (!this.onlyLevel || this.cur >= ANIM_FILE) {
       this.list.append(h('div', { class: 'gt-list-head', title: 'Frames for own tile animations (“Animations” tab); in Lunar Magic ExGFX60–63, uncompressed' }, 'Animation graphics'));
       for (let k = 0; k < 4; k++) {
@@ -446,7 +471,6 @@ export class GfxTab implements WsPanel {
         }, name));
       }
     }
-    this.list.querySelector('.current')?.scrollIntoView({ block: 'nearest' });
   }
 
   // creates an empty animation source file (4 KB, 128 tiles)
@@ -457,16 +481,16 @@ export class GfxTab implements WsPanel {
     } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
   }
 
-  // first free ExGFX number (levelgfx.ts), -1: none
-  private freeExGfx(): number {
-    return freeGfx(this.app.rom, new Set());
+  // first free ExGFX number of a range (patches.ts), -1: none
+  private freeExGfx(range: GfxRange = 'exgfx'): number {
+    return freeGfx(this.app.rom, new Set(), range);
   }
 
   // creates an empty 4bpp file in the first free number; null: none left / failed
-  // size: 0x1000 (4bpp), 0x800 (2bpp, layer 3) or 0x2000 (a layer 3 tilemap)
+  // size: 0x1000 (4bpp), 0x800 (2bpp, layer 3) or 0x2000 (a layer 3 tilemap): layer 3 files in E00-FFF
   private newExGfx(hint = true, size = 0x1000): number | null {
     const app = this.app;
-    const n = this.freeExGfx();
+    const n = this.freeExGfx(size === 0x1000 ? 'exgfx' : 'asIs');
     if (n < 0) { toast('No free ExGFX number left', 'error'); return null; }
     try {
       app.romEdit(`${gfxName(n)} created`, () => setGfxEntry(app.rom, n, app.rom.allocWrite(new Uint8Array(size)), true, size));
@@ -477,11 +501,12 @@ export class GfxTab implements WsPanel {
   }
 
   // import into the first free ExGFX number (from the slot gallery, or a file of a package: `into`, which
-  // the number goes to in the same undo step); the number it went to, null: cancelled
-  async importNew(given?: File, into?: Package): Promise<number | null> {
+  // the number goes to in the same undo step) of `range`, else of the range the file's data belongs in;
+  // the number it went to, null: cancelled
+  async importNew(given?: File, into?: Package, range?: GfxRange): Promise<number | null> {
     const file = given ?? await pickFile('.bin,.png,image/png');
     if (!file) return null;
-    const n = this.freeExGfx();
+    const n = this.freeExGfx(range ?? (/\.png$/i.test(file.name) ? 'exgfx' : gfxRangeOf(new Uint8Array(await file.arrayBuffer()))));
     if (n < 0) { toast('No free ExGFX number left', 'error'); return null; }
     this.select(n);
     return /\.png$/i.test(file.name) ? this.importPng(file, into) : this.importBin(file, into);
@@ -982,15 +1007,21 @@ export class GfxTab implements WsPanel {
     if (!file) return null;
     const bmp = await createImageBitmap(file);
     if (bmp.width !== 128) { toast('The image must be 128 pixels wide (16 tiles)', 'error'); return null; }
-    let raw = f.raw;
+    let raw = f.raw, newBpp = 4;
     if (f.empty && f.num >= ANIM_FILE) raw = true;
-    else if (f.empty) {
+    else if (f.empty && gfxRange(f.num) === 'asIs') {
+      // kept as it is: uncompressed, no 3bpp
+      const c = await choose(`Create ${gfxName(f.num)}`, 'Save in which format? (E00–FFF hold files as they are)', [{ label: 'Cancel' }, { label: '2bpp uncompressed (layer 3 graphics, 4 colors)' }, { label: '4bpp uncompressed (16 colors)', primary: true }]);
+      if (!c) return null;
+      raw = true;
+      newBpp = c === 1 ? 2 : 4;
+    } else if (f.empty) {
       const c = await choose(`Create ${gfxName(f.num)}`, 'Save in which format?', [{ label: 'Cancel' }, { label: 'LZ2 (like the original, 3bpp/8 colors)' }, { label: '4bpp uncompressed (16 colors)', primary: true }]);
       if (!c) return null;
       raw = c === 2;
     } else if ((await choose(`Overwrite ${gfxName(f.num)}?`, `The image replaces the contents of ${gfxName(f.num)}. Colors are mapped to palette ${hex(this.row(), 1)}. (Undo with Ctrl+Z.)`, [{ label: 'Cancel' }, { label: 'Overwrite', primary: true }])) !== 1) return null;
     // an uncompressed file keeps its format (2bpp layer 3 graphics, 4bpp), a new one is 4bpp
-    const bpp = raw ? (f.raw && !f.empty ? f.bpp : 4) : f.empty ? 3 : f.bpp;
+    const bpp = raw ? (f.raw && !f.empty ? f.bpp : newBpp) : f.empty ? 3 : f.bpp;
     const c = document.createElement('canvas');
     c.width = bmp.width; c.height = bmp.height;
     const ctx = c.getContext('2d')!;
@@ -1040,7 +1071,7 @@ export class GfxTab implements WsPanel {
     const n = exgfxName(file.name).num;
     // the file name names a number: Lunar Magic's ExGFX 60-63 can also mean the animation files
     const targets: number[] = [];
-    if (n !== null && n <= 0xff && n !== this.cur) targets.push(n);
+    if (n !== null && n <= MAX_GFX && n !== GFX_NONE && n !== this.cur) targets.push(n);
     if (n !== null && n >= 0x60 && n <= 0x63 && ANIM_FILE + n - 0x60 !== this.cur) targets.push(ANIM_FILE + n - 0x60);
     const what = (t: number) => (t >= ANIM_FILE ? 'animation graphic' : 'layer/sprite graphics');
     if (targets.length) {

@@ -42,19 +42,20 @@ export function clear(el: HTMLElement): HTMLElement {
   return el;
 }
 
-export function hexInput(value: number, digits: number, onChange: (v: number) => void, max = (1 << (digits * 4)) - 1): HTMLInputElement {
+// `ok`: further values to refuse (`expect` says which are taken)
+export function hexInput(value: number, digits: number, onChange: (v: number) => void, max = (1 << (digits * 4)) - 1, ok: (v: number) => boolean = () => true, expect = `hex 0–${max.toString(16).toUpperCase()}`): HTMLInputElement {
   const inp = h('input', {
     class: 'hex', value: value.toString(16).toUpperCase().padStart(digits, '0'), size: digits + 1, maxLength: digits,
-    spellcheck: false, title: `hex 0–${max.toString(16).toUpperCase()}`,
+    spellcheck: false, title: expect,
   });
-  const valid = () => { const v = parseInt(inp.value, 16); return /^[0-9a-f]+$/i.test(inp.value.trim()) && v <= max ? v : -1; };
+  const valid = () => { const v = parseInt(inp.value, 16); return /^[0-9a-f]+$/i.test(inp.value.trim()) && v <= max && ok(v) ? v : -1; };
   // invalid input is marked while typing and reset when leaving the field
   inp.addEventListener('input', () => inp.classList.toggle('invalid', valid() < 0));
   inp.addEventListener('change', () => {
     const v = valid();
     inp.classList.remove('invalid');
     if (v >= 0) { value = v; onChange(v); }
-    else { inp.value = value.toString(16).toUpperCase().padStart(digits, '0'); toast(`Invalid: expected hex 0–${max.toString(16).toUpperCase()}`, 'error'); }
+    else { inp.value = value.toString(16).toUpperCase().padStart(digits, '0'); toast(`Invalid: expected ${expect}`, 'error'); }
   });
   return inp;
 }

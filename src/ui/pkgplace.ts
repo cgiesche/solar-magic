@@ -12,6 +12,8 @@ import { map16Targets } from '../core/map16file.ts';
 import { levelColors, GFX_SLOTS } from '../core/levelgfx.ts';
 import { altFileName, levelAltFile } from '../core/exanim.ts';
 import { errorText } from './projectpane.ts';
+import { gfxNumberField } from './gfxnum.ts';
+import { LAYER3_SLOT_NAMES } from '../core/layer3gfx.ts';
 
 const file = (f: string) => f.split('/').pop()!;
 
@@ -69,7 +71,7 @@ export function placementEditor(app: App, p: ReadyPreview, blank: number[]): Pla
       h('span', null, 'on tile '), hexInput(tiles[0] ?? 0x200, 3, (v) => { edits.blockTiles!.set(f, [v, ...tiles.slice(1)]); refresh(); }, 0xfff),
       tiles.length > 1 ? h('span', { class: 'hint' }, ` and ${tiles.slice(1).map((t) => hex(t, 3)).join(', ')}`) : '')),
     plan.gfx.map((g, i) => h('div', { class: 'prop' }, h('label', { title: g.file }, file(g.file)),
-      h('span', null, 'as ExGFX '), hexInput(g.num, 2, (v) => { edits.gfx![i].num = v; refresh(); }, 0xfe),
+      h('span', null, 'as ExGFX '), gfxNumberField(app.rom, g.num, () => (edits.gfx![i].slot && LAYER3_SLOT_NAMES.includes(edits.gfx![i].slot!) ? 'asIs' : 'exgfx'), () => new Set(edits.gfx!.filter((_, k) => k !== i).map((o) => o.num)), (v) => { edits.gfx![i].num = v; refresh(); }),
       h('span', null, ' for '),
       h('select', { onchange: (e: Event) => { edits.gfx![i].slot = (e.target as HTMLSelectElement).value || null; refresh(); } },
         h('option', { value: '', selected: !g.slot }, '(no slot)'),

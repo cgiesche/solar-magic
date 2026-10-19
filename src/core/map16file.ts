@@ -9,7 +9,7 @@
 
 import { Rom } from './rom.ts';
 import { lz2Decompress, lz2Compress } from './lz2.ts';
-import { gfxEntry, setGfxEntry, gfxNum, gfxRange, VANILLA_GFX, GFX_NONE } from './patches.ts';
+import { gfxEntry, setGfxEntry, gfxNum, gfxRange, VANILLA_GFX, GFX_NONE, type GfxRange } from './patches.ts';
 
 export interface Map16File {
   width: number; height: number; tiles: number[][]; acts: number[] | null;
@@ -66,6 +66,14 @@ export function exgfxName(name: string): { num: number | null; slot: string | nu
   const m = /ExGFX([0-9a-f]{1,3})/i.exec(name);
   const s = /[_\-\s](BG[1-3]|FG[1-3]|SP[1-4])\b/i.exec(name);
   return { num: m ? parseInt(m[1], 16) : null, slot: s ? s[1].toUpperCase() : null };
+}
+
+// the range a GFX file's data belongs in (patches.ts): 2bpp layer 3 graphics and layer 3 tilemaps (0x800
+// and 0x2000 bytes, uncompressed or LZ2) are kept "as is", other graphics are ExGFX
+export function gfxRangeOf(data: Uint8Array): GfxRange {
+  let n = data.length;
+  if (n !== 0x800 && n !== 0x2000 && n !== 0x1000 && n !== 0xc00) try { n = lz2Decompress(data, 0).data.length; } catch { /* not LZ2 */ }
+  return n === 0x800 || n === 0x2000 ? 'asIs' : 'exgfx';
 }
 
 // stores a GFX/ExGFX file: 4 KB = raw 4bpp (DMA'd directly), 3 KB = 3bpp (packed with LZ2),

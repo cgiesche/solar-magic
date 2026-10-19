@@ -14,6 +14,8 @@ import { LT3_DESTS, LT3_SIZES } from '../core/layer3gfx.ts';
 import { uploadFiles } from '../core/patchpkg.ts';
 import { map16Source } from '../core/render.ts';
 import { errorText } from './projectpane.ts';
+import { gfxNumberField } from './gfxnum.ts';
+import { gfxHex } from '../core/patches.ts';
 
 // picks a level file (.mwl, or a .zip holding one) and opens the import for the current level
 export async function openLevelImport(app: App): Promise<void> {
@@ -63,8 +65,8 @@ export function openLevelImportDialog(app: App, fileName: string, files: Map<str
       ` Layer 3: ${l3.map((g) => g.slot === 'LT3' ? 'the tilemap' : g.slot).join(', ')}${lt3 ? ` (tilemap: ${LT3_DESTS[plan.layer3.dest].toLowerCase()}, 0x${hex(LT3_SIZES[plan.layer3.size], 4)} bytes)` : ''}`) : '',
     ...plan.gfx.map((g) => g.file
       ? h('div', { class: 'prop' }, h('label', null, `${g.slot}: ${file(g.file)}`),
-        h('span', null, 'as ExGFX '), hexInput(g.num, 2, (v) => (g.num = v), 0xfe),
-        g.lmNum > 0xff ? h('span', { class: 'hint' }, ` (Lunar Magic: ${hex(g.lmNum, 3)})`) : '')
+        h('span', null, 'as ExGFX '), gfxNumberField(app.rom, g.num, () => (g.parts.includes('layer3') ? 'asIs' : 'exgfx'), () => new Set(plan.gfx.filter((o) => o.file && o.file !== g.file).map((o) => o.num)), (v) => { for (const o of plan.gfx) if (o.file === g.file) o.num = v; }),
+        g.lmNum !== g.num ? h('span', { class: 'hint' }, ` (Lunar Magic: ${gfxHex(g.lmNum)}, already in use here)`) : '')
       : h('div', { class: 'prop' }, h('label', null, g.slot), h('span', { class: 'hint' }, `ROM graphics file ${hex(g.num, 2)}`))),
     ...plan.palettes.map((p, i) => h('label', { class: 'row small' }, check(usePal[i], (v) => (usePal[i] = v)),
       ` Colors from ${file(p.file)}: ${p.colors.length} color(s)${p.back ? ' and the background color' : ''} (custom palette for level ${lvl})`,
