@@ -41,7 +41,7 @@ import type { ProbeReply } from '../core/probehost.ts';
 import { ProbeClient } from '../core/probeclient.ts';
 import { map16Tile, bgTile } from '../core/ram.ts';
 import { exanimTiles, exanimColors, exanimPeriod, readLevelList, readGlobalList } from '../core/exanim.ts';
-import { emptyTriggerView, type TriggerView } from '../core/extrigger.ts';
+import { emptyTriggerView, usedTriggers, initTriggers, type TriggerView, type SlotRef } from '../core/extrigger.ts';
 import { LevelUses, levelTilesOf, levelTilesAll, levelOverride, usedLevels, spriteUsage, isTilesetTile, type LevelTiles, type SpriteUser } from '../core/levelusage.ts';
 import { TILESETS, tilesetPointers, sharingTilesets } from '../core/tilesets.ts';
 import { slipperyActions } from '../core/slippery.ts';
@@ -1543,6 +1543,22 @@ export class App {
   // the view's flags (and test play's): `flags` on or off, then the level loads anew with them
   setFlags(flags: Iterable<number>, on: boolean): void {
     for (const f of flags) if (on) this.cdm16.add(f); else this.cdm16.delete(f);
+    this.refresh();
+  }
+
+  // ------------- ExAnimation triggers (extrigger.ts) -------------
+  // the triggers the level's slots and the global ones use (and their Trigger Inits), with their slots
+  levelTriggers(): Map<number, SlotRef[]> {
+    return this.level ? usedTriggers(readLevelList(this.rom, this.level.number), readGlobalList(this.rom)) : new Map();
+  }
+  // the custom triggers and manual frames once the level has loaded (the global list's init, then the level's)
+  triggerInit(): { custom: number; manual: Map<number, number> } {
+    return initTriggers(readGlobalList(this.rom), this.level ? readLevelList(this.rom, this.level.number) : null);
+  }
+  // changes the view's triggers (and test play's); the level loads anew with them, its animation shown
+  setTriggers(fn: (v: TriggerView) => void): void {
+    fn(this.exTriggers);
+    this.show.anim = true;
     this.refresh();
   }
 

@@ -5,7 +5,7 @@
 
 import type { App } from '../app.ts';
 import type { GfxWorkspace, WsPanel } from '../gfxworkspace.ts';
-import { h, clear, toast, pickerOpen, modal } from '../dom.ts';
+import { h, clear, toast, pickerOpen, modal, hexInput } from '../dom.ts';
 import { menuButton, type MenuItem } from '../menu.ts';
 import { hex } from '../../core/names.ts';
 import { cgramToRGBA, decodeTile, snesColorToRGBA } from '../../core/gfx.ts';
@@ -22,12 +22,33 @@ import { cssOf, htmlOf } from './palettetab.ts';
 import { remapSlot } from '../../core/remap.ts';
 import { remapEditor } from '../remaplist.ts';
 import type { LevelRender } from '../../core/levelemu.ts';
+import {
+  triggersFor, maxFrames, triggerRam, triggerProblems, customInit, setCustomInit, isManual, isCustom, isOneShot, playsOnce, PRECISION, type CustomInit, type SlotRef,
+} from '../../core/extrigger.ts';
+import { triggerPanel } from '../triggerpanel.ts';
 
 const TILE_TYPES = [0x01, 0x02, 0x04, 0x08, 0x10, 0x11, 0x12, 0x03, 0x05, 0x06, 0x07, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e];
 const COLOR_TYPES = [0x14, 0x13, 0x15, 0x16, 0x17];
 const ROTATION_TYPES = [0x18, 0x1a, 0x19, 0x1b];
-const TRIGGERS = [0x00, 0x03, 0x01, 0x02, 0x04, 0x05, 0x07, 0x06, 0x08];
-const ROTATION_TRIGGERS = [0x00, 0x03, 0x01, 0x02, 0x04, 0x05, 0x07]; // the one-time ones are for frames
+// the trigger choice, grouped (extrigger.ts triggersFor: what the slot's kind can take)
+const TRIGGER_GROUPS: [string, (t: number) => boolean][] = [
+  ['Game', (t) => t < 0x10 && t !== PRECISION], ['Timing', (t) => t === PRECISION], ['Manual (frame set by code)', isManual],
+  ['Custom (switched by code)', isCustom], ['One shot (fired by code, plays once)', isOneShot],
+];
+function triggerSelect(kind: 'tiles' | 'colors' | 'rotation', current: number): HTMLSelectElement {
+  const all = [...new Set([...triggersFor(kind), current])];
+  const opt = (t: number) => h('option', { value: String(t), selected: t === current }, triggerName(t));
+  return h('select', null, TRIGGER_GROUPS.map(([label, of]) => h('optgroup', { label }, all.filter(of).map(opt))), all.filter((t) => !TRIGGER_GROUPS.some(([, of]) => of(t))).map(opt));
+}
+// what a trigger does for a slot, in a line
+function triggerHint(t: number, rotation: boolean): string {
+  if (t === PRECISION) return `Always runs, with the frame counter of the first slot of its 8 (slots 0, 8, 10, 18)${rotation ? ': rotations of one group share their delay – for speeds between the steps' : ''}.`;
+  if (isManual(t)) return 'Shows the frame your code sets and stays there; uploads only when it changes.';
+  if (isCustom(t)) return 'Your code switches it on and off.';
+  if (isOneShot(t)) return 'Holds until your code fires it, then plays once to the last frame and stays there (the engine clears the trigger). At most 255 frames.';
+  if (playsOnce(t)) return 'Plays once to the last frame as soon as the condition occurs, and stays there. At most 255 frames.';
+  return '';
+}
 const ALT = 0x8000;
 
 // own tile animations of the current level (its list and the global one) that overwrite a VRAM tile
@@ -65,6 +86,7 @@ export class AnimTab implements WsPanel {
   private timer = 0;
   private picking: 'target' | null = null;
   private triggerOn = false; // a rotation's preview as while its trigger holds
+  private triggers = false; // the side shows the trigger panel
   // the colors of the selected rotation the game keeps setting itself, from the emulated level (null: not known yet)
   private held: { key: string; render: LevelRender | null; colors: number[] | null; timer: number } = { key: '', render: null, colors: null, timer: 0 };
   private bar = h('div', { class: 'ws-bar' });
@@ -220,7 +242,10 @@ export class AnimTab implements WsPanel {
       scope(false, `Level ${hex(app.level.number, 3)}`, 'Animations that run only in this level'),
       scope(true, 'Global', 'Animations that run in all levels (a level can turn them off via “Play in level …”)')));
     if (this.flagsLevel !== app.level.number) { this.flagsMenu = this.levelFlagsMenu(); this.flagsLevel = app.level.number; }
-    b.append(h('span', { class: 'spacer' }), this.flagsMenu!);
+    const n = app.levelTriggers().size;
+    b.append(h('span', { class: 'spacer' }),
+      h('button', { class: this.triggers ? 'active' : '', title: 'Switch the triggers of this level\'s animations for the preview and test play; their RAM and ASM', onclick: () => { this.triggers = !this.triggers; this.picking = null; this.build(); } }, `Triggers${n ? ` (${n})` : ''}`),
+      this.flagsMenu!);
   }
 
   // the animation file all tile animations of the list take their frames from (one per list)
@@ -269,6 +294,9 @@ export class AnimTab implements WsPanel {
     const l = this.list();
     box.append(h('div', { class: 'panel-title' }, this.global ? 'Global animations' : `Animations of level ${hex(this.app.level.number, 3)}`, h('span', { class: 'hint' }, `${l.slots.size} of ${SLOTS}`)));
     box.append(this.sourceSelect(l));
+    for (const p of triggerProblems(readLevelList(this.app.rom, this.app.level.number), readGlobalList(this.app.rom))) {
+      box.append(h('div', { class: 'warn-box' }, p.text, ' ', p.slots.map((r, i) => h('span', null, i ? ', ' : '', h('a', { href: '#', onclick: (e: Event) => { e.preventDefault(); this.select(r.global, r.slot); } }, `${r.global ? 'global' : 'level'} ${hex(r.slot, 2)}`)))));
+    }
     const items = h('div', { class: 'at-slot-list' });
     for (const [n, s] of [...l.slots.entries()].sort((a, b) => a[0] - b[0])) {
       const c = h('canvas', { class: 'at-mini' });
@@ -290,7 +318,8 @@ export class AnimTab implements WsPanel {
         h('button', { disabled: !this.slot(), onclick: () => void this.duplicate() }, 'Duplicate'),
         h('button', { disabled: !this.slot(), onclick: () => void this.remove() }, 'Delete'),
         h('button', { disabled: ![...l.slots.values()].some((x) => kindOf(x.type) === 'tiles'), title: 'Change the frames and targets of tile animations by an offset or a list (Lunar Magic\'s Remap)',
-          onclick: () => this.openRemap() }, 'Remap …')));
+          onclick: () => this.openRemap() }, 'Remap …'),
+        h('button', { title: 'Custom triggers and manual frames set when the level loads (Lunar Magic\'s Trigger Init)', onclick: () => this.openTriggerInit() }, 'Trigger Init …')));
     this.animate();
   }
 
@@ -379,6 +408,36 @@ export class AnimTab implements WsPanel {
     ]);
   }
 
+  // Lunar Magic's Trigger Init: the custom triggers and manual frames this list sets when the level loads
+  // (the global list's first, the level's over them); one undo step
+  private openTriggerInit(): void {
+    const draft = this.list();
+    const g = this.global ? null : readGlobalList(this.app.rom);
+    const custom = h('div', { class: 'ti-grid' }, Array.from({ length: 16 }, (_, n) => {
+      const sel = h('select', { title: `${triggerName(0x20 + n)}: as it is (keep), or on / off when the level loads` },
+        (['keep', 'on', 'off'] as CustomInit[]).map((v) => h('option', { value: v, selected: customInit(draft, n) === v }, v === 'keep' ? (this.global ? 'keep' : `keep${g && customInit(g, n) !== 'keep' ? ` (global: ${customInit(g, n)})` : ''}`) : v)));
+      sel.addEventListener('change', () => setCustomInit(draft, n, sel.value as CustomInit));
+      return h('label', { class: 'ti-cell' }, h('span', { class: 'mono' }, `Custom ${hex(n, 1)}`), sel);
+    }));
+    const manual = h('div', { class: 'ti-grid' }, Array.from({ length: 16 }, (_, n) => {
+      const cur = draft.manual.get(n);
+      const frame = hexInput(cur === undefined || cur === 0xff ? 0 : cur, 2, (f) => { draft.manual.set(n, f); on.checked = true; }, 0xfe);
+      const on = h('input', { type: 'checkbox', checked: cur !== undefined, title: 'Set the frame when the level loads' });
+      on.addEventListener('change', () => { if (on.checked) draft.manual.set(n, Number.parseInt(frame.value, 16) || 0); else draft.manual.delete(n); });
+      const gf = g?.manual.get(n);
+      return h('label', { class: 'ti-cell', title: gf !== undefined ? `The global list sets frame ${hex(gf, 2)}` : '' }, on, h('span', { class: 'mono' }, `Manual ${hex(n, 1)}`), frame,
+        cur === 0xff ? h('span', { class: 'warn-box' }, 'was FF') : '', gf !== undefined && !this.global ? h('span', { class: 'hint' }, `global ${hex(gf, 2)}`) : '');
+    }));
+    const body = h('div', { class: 'ti' },
+      h('p', { class: 'hint' }, this.global ? 'Set in every level when it loads; a level\'s own Trigger Init overrides these.' : 'Set when this level loads, over the global list\'s (shown where it sets one). Also when the level\'s animations are turned off.'),
+      h('div', { class: 'panel-title' }, 'Custom triggers', h('span', { class: 'hint' }, 'keep: as before the level (the last level left it)')), custom,
+      h('div', { class: 'panel-title' }, 'Manual frames', h('span', { class: 'hint' }, '00–FE; FF is the engine\'s “nothing shown yet”')), manual);
+    modal(`Trigger Init – ${this.global ? 'global' : `level ${hex(this.app.level.number, 3)}`}`, body, [
+      { label: 'Apply', primary: true, onClick: () => { void this.save(draft, 'Trigger Init'); } },
+      { label: 'Cancel' },
+    ]);
+  }
+
   private async remove(): Promise<void> {
     const l = this.list();
     if (!l.slots.delete(this.sel)) return;
@@ -399,17 +458,22 @@ export class AnimTab implements WsPanel {
     const kind = kindOf(s.type);
     const typeSel = h('select', null, (kind === 'colors' ? COLOR_TYPES : kind === 'tiles' ? TILE_TYPES : ROTATION_TYPES).map((t) => h('option', { value: String(t), selected: t === s.type }, TYPE_NAMES[t] ?? hex(t, 2))));
     typeSel.addEventListener('change', () => void this.editSlot((x) => { x.type = Number(typeSel.value); }, `Type ${TYPE_NAMES[Number(typeSel.value)]}`));
-    const trig = h('select', null, [...new Set([...(kind === 'rotation' ? ROTATION_TRIGGERS : TRIGGERS), s.trigger])].map((t) => h('option', { value: String(t), selected: t === s.trigger }, triggerName(t))));
+    const trig = triggerSelect(kind!, s.trigger);
     trig.addEventListener('change', () => void this.editSlot((x) => {
       if (kind === 'rotation') { x.trigger = Number(trig.value); return; } // no frames
       const cols = this.columns(x);
       x.trigger = Number(trig.value);
+      const max = maxFrames(x.trigger);
+      if (cols.length > max) { cols.length = max; toast(`${triggerName(x.trigger)}: at most ${max} frames – the last ones left out`); }
       this.setColumns(x, cols);
     }, `Trigger ${triggerName(Number(trig.value))}`));
+    const ram = triggerRam(s.trigger), hint = triggerHint(s.trigger, kind === 'rotation');
     const trigger = [
       h('div', { class: 'prop' }, h('label', null, 'Trigger'), trig),
+      hint ? h('p', { class: 'hint' }, hint) : '',
+      ram?.asm ? h('div', { class: 'tp-asm' }, h('code', { class: 'mono', title: `${ram.ram}: ${ram.what}` }, ram.asm),
+        h('a', { href: '#', title: 'Switch it in the preview; RAM and ASM of all triggers', onclick: (e: Event) => { e.preventDefault(); this.triggers = true; this.picking = null; this.build(); } }, 'Triggers')) : '',
       secondSet(s.trigger) && kind !== 'rotation' ? h('p', { class: 'hint' }, `Two frame sequences: top normally, bottom while “${secondSetName(s.trigger)}”.`) : '',
-      s.trigger === 6 || s.trigger === 8 ? h('p', { class: 'hint' }, 'Runs once up to the last frame as soon as the condition occurs, and stays there.') : '',
     ];
     d.append(
       h('div', { class: 'prop-title' }, `Slot ${hex(this.sel, 2)}`, h('span', { class: 'hint' }, this.global ? ' · global' : ` · level ${hex(this.app.level.number, 3)}`)),
@@ -569,7 +633,7 @@ export class AnimTab implements WsPanel {
       h('div', { class: 'panel-title at-step' }, '1 · Target', h('span', { class: 'hint' }, 'which 8x8 tiles are replaced')),
       h('div', { class: 'prop' }, h('label', null, 'Target'),
         h('span', { class: 'mono' }, `8x8 tile ${hex(t, 3)}`), slot ? h('span', { class: 'hint' }, ` ${slot.name}`) : '',
-        h('button', { class: this.picking === 'target' ? 'active' : '', title: 'Click in the VRAM grid on the right or in the level preview', onclick: () => { this.picking = this.picking ? null : 'target'; this.buildSide(); this.buildDetail(); } }, 'Choose target')),
+        h('button', { class: this.picking === 'target' ? 'active' : '', title: 'Click in the VRAM grid on the right or in the level preview', onclick: () => { this.picking = this.picking ? null : 'target'; this.triggers = false; this.buildSide(); this.buildDetail(); } }, 'Choose target')),
       h('div', { class: 'hint' }, `${shape.w}×${shape.h} tiles`, slot ? h('span', null, ' · ', h('a', { href: '#', title: `Open ${gfxName(slot.file)} in the Graphics tab`, onclick: (e: Event) => { e.preventDefault(); this.ws.showGfx(slot.file, t - slot.first); } }, `view in ${gfxName(slot.file)}`)) : ''),
       users.length
         ? h('div', { class: 'gt-users' }, h('span', { class: 'hint' }, 'animates Map16:'), users.slice(0, 24).map((m) => h('a', { href: '#', class: 'mono', title: 'Open in the Map16 tab', onclick: (e: Event) => { e.preventDefault(); this.ws.showMap16(m); } }, hex(m, 3))), users.length > 24 ? h('span', { class: 'hint' }, `… (${users.length})`) : '')
@@ -591,7 +655,7 @@ export class AnimTab implements WsPanel {
         const cv = h('canvas', { class: 'at-frame-img' });
         this.drawFrame(cv, s, c[set]);
         row.append(h('div', { class: `at-frame${i === this.frame && set === this.set ? ' sel' : ''}`, title: `Frame ${i + 1}: ${s.dest & ALT ? `tile ${hex(c[set] >> 5, 3)} of the animation graphic` : `RAM $7E${hex(c[set], 4)}`}`,
-          onclick: () => { this.frame = i; this.set = set; this.buildDetail(); this.buildSide(); } }, cv, h('span', { class: 'hint mono' }, s.dest & ALT ? hex(c[set] >> 5, 2) : '$' + hex(c[set], 4))));
+          onclick: () => { this.frame = i; this.set = set; this.triggers = false; this.buildDetail(); this.buildSide(); } }, cv, h('span', { class: 'hint mono' }, s.dest & ALT ? hex(c[set] >> 5, 2) : '$' + hex(c[set], 4))));
       });
       strip.append(row);
     }
@@ -600,13 +664,14 @@ export class AnimTab implements WsPanel {
       h('div', { class: 'row' },
         h('button', { title: 'New frame after the selected one (next tiles of the graphic)', onclick: () => void this.editSlot((x) => {
           const cs = this.columns(x);
-          if (cs.length >= (secondSet(x.trigger) ? 0x80 : 0x100)) return;
+          if (cs.length >= maxFrames(x.trigger)) { toast(`At most ${maxFrames(x.trigger)} frames`); return; }
           cs.splice(this.frame + 1, 0, cs[this.frame].map((v) => v + step));
           this.setColumns(x, cs);
           this.frame++;
         }, 'Frame added') }, '+ Frame'),
         h('button', { title: 'Selected frame once more (shows it twice as long)', onclick: () => void this.editSlot((x) => {
           const cs = this.columns(x);
+          if (cs.length >= maxFrames(x.trigger)) { toast(`At most ${maxFrames(x.trigger)} frames`); return; }
           cs.splice(this.frame + 1, 0, cs[this.frame].slice());
           this.setColumns(x, cs);
         }, 'Frame lengthened') }, 'Longer'),
@@ -638,7 +703,7 @@ export class AnimTab implements WsPanel {
     if (!back) {
       const c = s.dest & 0xff;
       d.append(h('div', { class: 'prop' }, h('label', null, 'Color'), h('span', { class: 'mono' }, `${hex(c >> 4, 1)}·${hex(c & 15, 1)}`),
-        h('button', { class: this.picking === 'target' ? 'active' : '', onclick: () => { this.picking = this.picking ? null : 'target'; this.buildSide(); this.buildDetail(); } }, 'Choose color')));
+        h('button', { class: this.picking === 'target' ? 'active' : '', onclick: () => { this.picking = this.picking ? null : 'target'; this.triggers = false; this.buildSide(); this.buildDetail(); } }, 'Choose color')));
       d.append(this.colorUsers(Array.from({ length: Math.min(count, 256 - c) }, (_, i) => c + i)));
     } else d.append(h('div', { class: 'hint' }, 'Shows wherever no layer draws (the back area).'));
     if (count > 1) { d.append(h('p', { class: 'hint' }, `This animation sets ${count} colors at once (from data) – not editable here yet.`)); return; }
@@ -666,7 +731,7 @@ export class AnimTab implements WsPanel {
     sw.dataset.slot = String(this.sel);
     d.append(h('div', { class: 'at-big-wrap' }, sw, h('div', { class: 'hint' }, 'Preview')), strip,
       h('div', { class: 'row' },
-        h('button', { onclick: () => void this.editSlot((x) => { const cs = this.columns(x); cs.splice(this.frame + 1, 0, cs[this.frame].slice()); this.setColumns(x, cs); this.frame++; }, 'Frame added') }, '+ Frame'),
+        h('button', { onclick: () => void this.editSlot((x) => { const cs = this.columns(x); if (cs.length >= maxFrames(x.trigger)) { toast(`At most ${maxFrames(x.trigger)} frames`); return; } cs.splice(this.frame + 1, 0, cs[this.frame].slice()); this.setColumns(x, cs); this.frame++; }, 'Frame added') }, '+ Frame'),
         h('button', { disabled: cols.length < 2, onclick: () => void this.editSlot((x) => { const cs = this.columns(x); cs.splice(this.frame, 1); this.setColumns(x, cs); this.frame = Math.max(0, this.frame - 1); }, 'Frame removed') }, 'Remove')),
       h('p', { class: 'hint' }, 'Each frame shows for 8 game frames (≈0.13 s). The same color twice in a row shows it longer.'));
   }
@@ -676,7 +741,10 @@ export class AnimTab implements WsPanel {
     const box = this.side;
     clear(box);
     const s = this.slot();
-    if (!s) return;
+    if (this.triggers || !s) {
+      box.append(triggerPanel(this.app, (r: SlotRef) => this.select(r.global, r.slot)));
+      return;
+    }
     const kind = kindOf(s.type);
     if (kind === 'colors') {
       if (this.picking !== 'target') { box.append(h('p', { class: 'hint' }, 'Use “Choose color” to set the palette color that is animated.')); return; }

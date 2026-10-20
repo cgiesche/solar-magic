@@ -4,6 +4,7 @@ import type { App } from './app.ts';
 import { menuButton, type MenuItem } from './menu.ts';
 import { hex2 } from '../core/names.ts';
 import { COND_FLAGS, flagRam } from '../core/cdm16.ts';
+import { triggerMenu } from './triggerpanel.ts';
 
 // paint: redraws the level view (overlay toggles that need no new composite)
 export function viewMenu(app: App, paint: () => void, full = true): HTMLElement {
@@ -42,6 +43,7 @@ export function viewMenu(app: App, paint: () => void, full = true): HTMLElement 
     gameState('palaces', '!-blocks pressed', 'View: all switch palaces pressed'),
     gameState('onOff', 'ON/OFF set to OFF', 'View: ON/OFF switch set to OFF'),
     ...flags(),
+    ...triggerMenu(app),
   ];
   return menuButton({ label: 'View', items: () => full ? [
     { heading: 'Layers' },

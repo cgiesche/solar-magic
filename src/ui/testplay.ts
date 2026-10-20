@@ -10,7 +10,9 @@ import { levelTranslevel, encodeSecondaryHeader, startHeader, entrancePos, mainS
 import { Apu, apuReady, loadApu } from '../core/apu.ts';
 import { AudioOut } from './audio.ts';
 import { musicPlayer } from './musicplayer.ts';
-import { GM, RAM, marioX, marioY, setMarioPos } from '../core/ram.ts';
+import { GM, RAM, marioX, marioY, setMarioPos, EXTRIGGER_RAM } from '../core/ram.ts';
+import { applyTriggers, emptyTriggerView, isCustom, isManual, isOneShot, CUSTOM, MANUAL, ONE_SHOT } from '../core/extrigger.ts';
+import { triggerName } from '../core/exanim.ts';
 
 const KEYMAP: Record<string, number> = {
   ArrowUp: 0x0800, ArrowDown: 0x0400, ArrowLeft: 0x0200, ArrowRight: 0x0100,
@@ -122,6 +124,7 @@ function start(app: App, at: Start | undefined, audio: AudioOut): void {
   let padNames: string[] = [];
   audio.setMuted(soundMuted);
   const onKey = (down: boolean) => (e: KeyboardEvent) => {
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return; // the trigger's frame
     const bit = KEYMAP[e.key];
     if (e.key === 'p' || e.key === 'P') { if (down) setPaused(!paused); e.preventDefault(); return; }
     if (e.key === 'm' || e.key === 'M') { if (down) { soundMuted = !soundMuted; audio.setMuted(soundMuted); } e.preventDefault(); return; }
@@ -178,11 +181,42 @@ function start(app: App, at: Start | undefined, audio: AudioOut): void {
     window.removeEventListener('keydown', kd, true);
     window.removeEventListener('keyup', ku, true);
   };
+  const triggers = triggerControls(app, s.wram, () => canvas.focus());
   const m = modal(`Test level – ${hex(lv.number, 3)}${at ? ` from ${hex(at.tx, 2)}/${hex(at.ty, 2)}` : ''}${r.ok ? '' : ' (load error)'}`, h('div', { class: 'play' },
     canvas,
     info,
+    triggers,
     h('div', { class: 'hint' }, 'Controls: arrows · X = jump (B) · Z/Y = run/fire (Y) · S = spin jump · A = X button · Enter = Start · Shift = Select · Q/W = L/R · P = pause. Gamepad: d-pad/left stick, buttons by position as on the SNES pad (bottom = B, right = A, left = Y, top = X), shoulder buttons/triggers = L/R, Start/Select, Home = pause. M = sound on/off. The level is saved before the test.'),
   ), [{ label: 'Restart', onClick: () => { setTimeout(() => openTestPlay(app, at), 0); } }, { label: 'Quit', primary: true }], stop);
   void m;
   canvas.focus();
+}
+
+// fires one of the level's ExAnimation triggers in the running game (extrigger.ts): a one-shot plays once,
+// a custom trigger turns on or off, a manual one shows the frame, a game condition is set (the view's
+// triggers are set at the start already)
+function triggerControls(app: App, w: Uint8Array, done: () => void): HTMLElement | string {
+  const used = [...app.levelTriggers().keys()];
+  if (!used.length) return '';
+  const sel = h('select', { title: 'An animation trigger of this level' }, used.map((t) => h('option', { value: String(t) }, t === 0x05 ? 'Time below 100' : t === 0x07 ? '5 Dragon Coins' : t === 0x03 ? 'ON/OFF switch' : triggerName(t))));
+  const frame = h('input', { class: 'hex', value: '00', size: 3, maxLength: 2, spellcheck: false, title: 'The frame to show (hex 00–FE)' });
+  const btn = h('button');
+  const label = () => {
+    const t = Number(sel.value);
+    frame.style.display = isManual(t) ? '' : 'none';
+    btn.textContent = isManual(t) ? 'Show frame' : isCustom(t) || t === 0x03 ? 'Switch' : isOneShot(t) ? 'Fire' : 'Set';
+  };
+  sel.addEventListener('change', label);
+  btn.addEventListener('click', () => {
+    const t = Number(sel.value), v = emptyTriggerView();
+    if (isManual(t)) v.manual.set(t - MANUAL, Math.min(0xfe, parseInt(frame.value, 16) || 0));
+    else if (isCustom(t)) { const n = t - CUSTOM, a = EXTRIGGER_RAM.custom - 0x7e0000 + (n >> 3); v.custom.set(n, !(w[a] & (1 << (n & 7)))); }
+    else if (isOneShot(t)) v.oneShot.add(t - ONE_SHOT);
+    else if (t === 0x03) w[RAM.onOff] ^= 1;
+    else v.game.add(t);
+    applyTriggers(w, v);
+    done();
+  });
+  label();
+  return h('div', { class: 'row' }, h('span', { class: 'hint' }, 'Animation trigger'), sel, frame, btn);
 }
