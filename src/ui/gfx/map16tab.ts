@@ -1,13 +1,14 @@
 // Map16 tab: the tile sheet (pages, labelled ranges, multi-selection, copy/paste), a builder showing the
 // whole selection (quarters marked as a set; palette dots, flip/priority toggles and acts-like for the
 // marked ones; Ctrl+wheel zoom, middle button pan) and the level's 8x8 graphics grouped by GFX slot. The
-// graphics view uses the palette of the quarter under the mouse, else of the first marked one; clicking an
-// 8x8 tile puts it into every marked quarter, dragging a block of them stamps it where it lies (dropped
-// onto the builder: from the quarter under the mouse, else from the first marked one).
+// graphics view uses the palette of the quarter under the mouse, else of the first marked one. Clicking or
+// dragging there chooses 8x8 tiles; a right click in the builder puts them with their top-left corner on
+// the quarter under the mouse (right drag paints), as does dropping them there; Enter puts a single one
+// into every marked quarter, a block from the first marked one.
 
 import type { App } from '../app.ts';
 import type { GfxWorkspace, WsPanel } from '../gfxworkspace.ts';
-import { menuButton, contextMenu, type MenuItem } from '../menu.ts';
+import { menuButton } from '../menu.ts';
 import { h, clear, toast, modal, choose, attachPanZoom } from '../dom.ts';
 import { pickFile, downloadBytes } from '../platform.ts';
 import { TileCache } from '../../core/render.ts';
@@ -228,10 +229,10 @@ export class Map16Tab implements WsPanel {
     return n === 1 && this.selW * this.selH === 1 ? `${this.tileName(this.sel)}: ${what}` : `${n} ${this.bg ? 'BG' : 'FG'} tile${n > 1 ? 's' : ''}: ${what}`;
   }
   // the changed tiles in one ROM edit (one undo step)
-  private writeTiles(e: QuarterEdit, what: string): void {
+  private writeTiles(e: QuarterEdit, what: string, key: string | null = null): void {
     if (!e.changed.length) return;
     const tiles = this.selection();
-    this.edit(this.editLabel(e.changed.length, what), () => { for (const i of e.changed) this.setWords(tiles[i], e.words[i]); });
+    this.edit(this.editLabel(e.changed.length, what), () => { for (const i of e.changed) this.setWords(tiles[i], e.words[i]); }, key);
   }
   private editQuarters(fn: (w: number) => number, what: string): void {
     const m = this.marked();
@@ -244,11 +245,12 @@ export class Map16Tab implements WsPanel {
     const state = bit === FLIP_X ? s.flipX : bit === FLIP_Y ? s.flipY : s.prio;
     this.editQuarters(setBit(bit, state !== 'on'), `${what} ${state === 'on' ? 'off' : 'on'}`);
   }
-  private stampAt(at: { x: number; y: number }, block: number[][]): void {
+  // key: a stroke's edits merge into one undo step (and say nothing about cut off tiles)
+  private stampAt(at: { x: number; y: number }, block: number[][], key: string | null = null): void {
     const r = stamp(this.grid(), this.selWords(), at, block);
     const n = block.length * (block[0]?.length ?? 0);
-    this.writeTiles(r, n === 1 ? `8x8 tile ${hex(block[0][0], 3)}` : `${block[0].length}×${block.length} graphics`);
-    if (r.cut) toast(`${r.cut} of ${n} 8x8 tiles were outside the selection and cut off`);
+    this.writeTiles(r, n === 1 ? `8x8 tile ${hex(block[0][0], 3)}` : `${block[0].length}×${block.length} graphics`, key);
+    if (r.cut && !key) toast(`${r.cut} of ${n} 8x8 tiles were outside the selection and cut off`);
   }
 
   // ---------- UI ----------
@@ -569,7 +571,7 @@ export class Map16Tab implements WsPanel {
       h('details', { class: 'mt-adv' }, h('summary', null, one ? 'Raw values' : `Raw values of ${hex(t, 3)}`),
         h('div', { class: 'mono hint' }, ws.map((w, q) => `${QUARTER_NAMES[q]} $${hex(w, 4)}`).join('  ')),
         h('div', { class: 'hint' }, this.tileAddr(t) < 0 ? 'Extended tile – created on the first change.' : `ROM $${hex(this.tileAddr(t), 6)}`)),
-      h('p', { class: 'hint' }, 'Mark quarters (click, drag, Ctrl: add/remove, Shift: whole tile, Ctrl+A: all, Esc: none), then choose an 8x8 tile on the right; dragging a block of 8x8 tiles onto the quarters stamps it there.'),
+      h('p', { class: 'hint' }, 'Choose 8x8 tiles on the right (click or drag), then right-click a quarter to put them there (right drag: paint), or press Enter to put a single one into every marked quarter. Mark quarters for palette, flips and priority (click, drag, Ctrl: add/remove, Shift: whole tile, Ctrl+A: all, Esc: none).'),
     );
   }
 
@@ -598,7 +600,7 @@ export class Map16Tab implements WsPanel {
   }
 
   // the selection's tiles, the quarters' grid, the marked quarters (orange), the one under the mouse and
-  // where a dragged block of 8x8 tiles would land (dashed)
+  // where the chosen or dragged 8x8 tiles would land (dashed)
   private drawBig(): void {
     const g = this.grid(), marks = this.marked(), z = this.bigZoom();
     const words = this.selWords(), cache = this.tc();
@@ -663,16 +665,18 @@ export class Map16Tab implements WsPanel {
     ctx.stroke();
     if (this.hoverQ !== null && this.hoverQ < g.cols * g.rows) {
       const { x, y } = g.pos(this.hoverQ);
-      const d = this.drag, bw = d ? Math.abs(d.a.x - d.b.x) + 1 : 1, bh = d ? Math.abs(d.a.y - d.b.y) + 1 : 1;
-      ctx.strokeStyle = d ? '#4cc2ff' : 'rgba(255,255,255,0.8)';
+      // where a drop or a right click would put the 8x8 tiles
+      const d = this.drag, p = this.pick;
+      const bw = d ? Math.abs(d.a.x - d.b.x) + 1 : p?.w ?? 1, bh = d ? Math.abs(d.a.y - d.b.y) + 1 : p?.h ?? 1;
+      ctx.strokeStyle = d || p ? '#4cc2ff' : 'rgba(255,255,255,0.8)';
       ctx.lineWidth = 2;
-      ctx.setLineDash(d ? [4, 3] : []);
+      ctx.setLineDash(d || p ? [4, 3] : []);
       ctx.strokeRect(x * sx + 1, y * sy + 1, bw * sx - 2, bh * sy - 2);
       ctx.setLineDash([]);
     }
   }
 
-  // the builder's mouse: marking quarters, the context menu, double click, hover, zoom and pan
+  // the builder's mouse: marking quarters, putting 8x8 tiles, double click, hover, zoom and pan
   private attachBig(): void {
     const c = this.bigCanvas;
     c.dataset.drop = '1';
@@ -697,20 +701,25 @@ export class Map16Tab implements WsPanel {
       window.addEventListener('mouseup', up);
     });
     c.addEventListener('dblclick', (e) => { const g = this.grid(), a = this.quarterUnder(e); this.editGfx(this.wordAt(g.key(a.x, a.y))); });
-    c.addEventListener('contextmenu', (e) => {
+    // right button: puts the chosen 8x8 tiles; dragging paints them, one undo step
+    c.addEventListener('mousedown', (e) => {
+      if (e.button !== 2) return;
       e.preventDefault();
-      const g = this.grid(), a = this.quarterUnder(e), k = g.key(a.x, a.y), w = this.wordAt(k);
-      const anim = this.bg ? undefined : animsAt(this.app, w & 0x3ff)[0];
-      const items: MenuItem[] = [
-        { label: `Edit 8x8 tile ${hex(w & 0x3ff, 3)} in the Graphics tab`, title: 'In this quarter\'s palette (double click)', onClick: () => this.editGfx(w) },
-      ];
-      if (anim) items.push({ label: 'Open its animation', title: 'The animation that writes this 8x8 tile', onClick: () => this.ws.showAnim(anim.global, anim.slot) });
-      items.push('sep',
-        { label: 'Mark the whole tile', shortcut: 'Shift+click', onClick: () => this.setMarks(g.wholeTile(k)) },
-        { label: 'Mark all', shortcut: 'Ctrl+A', onClick: () => this.setMarks(g.all()) },
-        { label: 'Mark none', shortcut: 'Esc', onClick: () => this.setMarks(new Set()) });
-      contextMenu(e.clientX, e.clientY, items);
+      let last = this.quarterUnder(e);
+      const key = `m16-paint:${++this.paints}`;
+      if (!this.putPick(last, key)) return;
+      const move = (ev: MouseEvent) => {
+        if (ev.target !== c) return;
+        const n = this.quarterUnder(ev);
+        if (n.x === last.x && n.y === last.y) return;
+        last = n;
+        this.putPick(n, key);
+      };
+      const up = (ev: MouseEvent) => { if (ev.button !== 2) return; window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
+      window.addEventListener('mousemove', move);
+      window.addEventListener('mouseup', up);
     });
+    c.addEventListener('contextmenu', (e) => e.preventDefault());
     const hover = (k: number | null) => {
       if (k === this.hoverQ) return;
       const pal = (this.wordAt(this.focusQ()) >> 10) & 7;
@@ -722,7 +731,7 @@ export class Map16Tab implements WsPanel {
     c.addEventListener('mousemove', (e) => {
       const g = this.grid(), a = this.quarterUnder(e);
       hover(g.key(a.x, a.y));
-      c.title = 'Click/drag: mark quarters · Ctrl: add/remove · Shift: whole tile · Double click: edit the 8x8 tile in the Graphics tab · Right click: more';
+      c.title = 'Click/drag: mark quarters · Ctrl: add/remove · Shift: whole tile · Right click/drag: put the chosen 8x8 tiles · Double click: edit the 8x8 tile in the Graphics tab';
     });
     c.addEventListener('mouseleave', () => hover(null));
     attachPanZoom(this.bigScroll, () => this.bigZoom(), (z, ax, ay) => this.setBigZoom(z, ax, ay), 0.5, 32);
@@ -1114,10 +1123,11 @@ export class Map16Tab implements WsPanel {
       });
     }
     if (this.remapping) this.drawRemapMarks(ctx, slots);
-    if (this.drag) {
-      const d = this.drag;
+    // the chosen 8x8 tiles, or those being chosen
+    const d = this.drag, r = d ? { x: Math.min(d.a.x, d.b.x), y: Math.min(d.a.y, d.b.y), w: Math.abs(d.a.x - d.b.x) + 1, h: Math.abs(d.a.y - d.b.y) + 1 } : this.remapping ? null : this.pick;
+    if (r) {
       ctx.strokeStyle = '#4cc2ff'; ctx.lineWidth = 2;
-      ctx.strokeRect(Math.min(d.a.x, d.b.x) * 8 * this.gzPx + 1, Math.min(d.a.y, d.b.y) * 8 * this.gzPx + 1, (Math.abs(d.a.x - d.b.x) + 1) * 8 * this.gzPx - 2, (Math.abs(d.a.y - d.b.y) + 1) * 8 * this.gzPx - 2);
+      ctx.strokeRect(r.x * 8 * this.gzPx + 1, r.y * 8 * this.gzPx + 1, r.w * 8 * this.gzPx - 2, r.h * 8 * this.gzPx - 2);
     }
     c.style.width = `${W * z}px`; c.style.height = `${Hh * z}px`;
     this.gfxLabels.replaceChildren(...slots.map((s) => h('div', { class: 'mt-slot', style: { height: `${64 * z}px` } },
@@ -1160,7 +1170,41 @@ export class Map16Tab implements WsPanel {
     if (this.visualFrom && this.visualTo) box(this.visualTo.x, this.visualTo.y, this.visualFrom.w, this.visualFrom.h, true);
   }
 
-  private drag: { a: { x: number; y: number }; b: { x: number; y: number } } | null = null;
+  // 8x8 tile number at a cell of the grouped view (-1: none)
+  private gfxTileAt(p: Cell): number {
+    const s = levelSlots(this.app)[p.y >> 3];
+    return s ? s.first + (p.y & 7) * 16 + p.x : -1;
+  }
+  // the chosen 8x8 tiles as rows of tile numbers
+  private pickBlock(): number[][] | null {
+    const p = this.pick;
+    return p && Array.from({ length: p.h }, (_, y) => Array.from({ length: p.w }, (_, x) => this.gfxTileAt({ x: p.x + x, y: p.y + y })));
+  }
+  // puts the chosen 8x8 tiles with their top-left corner on a quarter; a single one keeps the quarter's
+  // flips. key: edits of one stroke merge into one undo step; false when nothing is chosen
+  private putPick(at: Cell, key: string | null = null): boolean {
+    const block = this.pickBlock();
+    if (!block) { toast('Choose 8x8 tiles on the right first'); return false; }
+    const n = block[0][0];
+    if (block.length === 1 && block[0].length === 1) {
+      if (n < 0) return true;
+      const g = this.grid();
+      this.writeTiles(editMarked(g, this.selWords(), new Set([g.key(at.x, at.y)]), setTileNum(n)), `8x8 tile ${hex(n, 3)}`, key);
+    } else this.stampAt(at, block, key);
+    return true;
+  }
+  // Enter: a single chosen 8x8 tile into every marked quarter, a block from the first marked one
+  private fillMarked(): void {
+    const block = this.pickBlock(), m = this.marked();
+    if (!block) { toast('Choose 8x8 tiles on the right first'); return; }
+    if (block.length === 1 && block[0].length === 1) { if (block[0][0] >= 0) this.editQuarters(setTileNum(block[0][0]), `8x8 tile ${hex(block[0][0], 3)}`); }
+    else if (!m.size) toast('Mark a quarter first');
+    else this.stampAt(this.grid().pos(Math.min(...m)), block);
+  }
+
+  private drag: { a: Cell; b: Cell } | null = null;
+  private pick: { x: number; y: number; w: number; h: number } | null = null; // the chosen 8x8 tiles (cells)
+  private paints = 0; // right-button strokes in the builder, for their undo keys
   private attachGfx(): void {
     const c = this.gfxCanvas;
     attachPanZoom(this.gfxScroll, () => this.gfxZoom(), (z, ax, ay) => this.setGfxZoom(z, ax, ay), 1, 8);
@@ -1178,11 +1222,7 @@ export class Map16Tab implements WsPanel {
         y: Math.max(0, Math.min(c.height / (8 * this.gzPx) - 1, Math.floor((e.clientY - rc.top) / (rc.height / (c.height / (8 * this.gzPx)))))),
       };
     };
-    // 8x8 tile number at a cell of the grouped view
-    const tileOf = (p: { x: number; y: number }) => {
-      const s = levelSlots(this.app)[p.y >> 3];
-      return s ? s.first + (p.y & 7) * 16 + p.x : -1;
-    };
+    const tileOf = (p: Cell) => this.gfxTileAt(p);
     c.addEventListener('mousedown', (e) => {
       if (e.button !== 0) return;
       e.preventDefault();
@@ -1202,22 +1242,9 @@ export class Map16Tab implements WsPanel {
         document.body.classList.remove('mt-dragging');
         const d = this.drag!;
         this.drag = null;
-        const target = ev.target as HTMLElement;
-        const x0 = Math.min(d.a.x, d.b.x), y0 = Math.min(d.a.y, d.b.y), w = Math.abs(d.a.x - d.b.x) + 1, hh = Math.abs(d.a.y - d.b.y) + 1;
-        const block = Array.from({ length: hh }, (_, y) => Array.from({ length: w }, (_, x) => tileOf({ x: x0 + x, y: y0 + y })));
-        if (target === this.bigCanvas) {
-          // dropped onto the builder: stamped from the quarter under the mouse; a single 8x8 tile keeps the
-          // quarter's flips, as a click does
-          const at = this.quarterUnder(ev), g = this.grid();
-          if (w === 1 && hh === 1) { if (block[0][0] >= 0) this.writeTiles(editMarked(g, this.selWords(), new Set([g.key(at.x, at.y)]), setTileNum(block[0][0])), `8x8 tile ${hex(block[0][0], 3)}`); }
-          else this.stampAt(at, block);
-        } else if (w === 1 && hh === 1) {
-          if (block[0][0] >= 0) this.editQuarters(setTileNum(block[0][0]), `8x8 tile ${hex(block[0][0], 3)}`);
-        } else {
-          // a block: stamped from the first marked quarter
-          if (!this.marked().size) toast('Mark a quarter first, or drop the block onto the builder');
-          else this.stampAt(this.grid().pos(Math.min(...this.marked())), block);
-        }
+        this.pick = { x: Math.min(d.a.x, d.b.x), y: Math.min(d.a.y, d.b.y), w: Math.abs(d.a.x - d.b.x) + 1, h: Math.abs(d.a.y - d.b.y) + 1 };
+        // dropped onto the builder: put where it lies
+        if (ev.target === this.bigCanvas) this.putPick(this.quarterUnder(ev));
         this.redraw();
       };
       window.addEventListener('mousemove', move);
@@ -1310,6 +1337,7 @@ export class Map16Tab implements WsPanel {
     if (ctrl || e.altKey) return false;
     if (k === 'Escape' && this.remapping) { if (this.visualFrom) { this.visualFrom = null; this.drawGfx(); } else this.closeRemap(); return true; }
     if (k === 'Escape') { if (!this.marked().size) return false; this.setMarks(new Set()); return true; }
+    if (k === 'Enter' && !this.remapping) { this.fillMarked(); return true; }
     if (k === 'x' || k === 'X') { this.toggleBit(FLIP_X, '↔ Flip'); return true; }
     if (k === 'y' || k === 'Y') { this.toggleBit(FLIP_Y, '↕ Flip'); return true; }
     if (k >= '1' && k <= '8') { const p = Number(k) - 1; this.editQuarters(setPalette(p), `Palette ${p}`); return true; }

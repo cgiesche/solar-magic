@@ -25,7 +25,7 @@ One of the four 8x8 tiles of a Map16 tile, one 16-bit word: 8x8 tile number, pal
 _Avoid_: 8x8 field, cell, subtile
 
 **Marked quarters**:
-The set of quarters of the Map16 tab's selection that an edit in the builder changes (palette, flips, priority, an 8x8 tile). A new selection marks all. A **stamp** puts a block of 8x8 tiles onto the quarters where it lies, whatever is marked. Acts-like applies to the wholly marked 16x16 tiles only.
+The set of quarters of the Map16 tab's selection that an edit in the builder changes (palette, flips, priority, a chosen 8x8 tile by Enter). A new selection marks all. A **stamp** puts the chosen block of 8x8 tiles onto the quarters where it lies (right click, right drag paints; or dropped there), whatever is marked. Acts-like applies to the wholly marked 16x16 tiles only.
 _Avoid_: selected quarter (the sheet's selection is of whole tiles)
 
 **Level edit**:
