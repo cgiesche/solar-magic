@@ -320,14 +320,49 @@ ExitBank:
   LDA #$01
 + RTL
 
-; the secondary entrance's level (A 8 = its IPXXDAAA, X/Y 16): the high byte from D, then the game's
-; AND #$07 : STA $192A (the entrance action)
+; the secondary entrance's level (A 8 = its IPXXDAAA, X/Y 16, Y = the entrance): the high byte from D, then the
+; game's AND #$07 : STA $192A (the entrance action); Lunar Magic's entrance to the overworld (E in !SecY) leaves
 SecLevel:
   PHA
   AND #$08 : LSR #3 : STA $0F
+  PHX : TYX
+  LDA.l !SecY,x : BMI .overworld
+  PLX
   PLA
   AND #$07 : STA $${hx(RAM.entranceAction)}
   RTL
+.overworld
+  PLX
+  PLA
+  JMP OverworldExit
+
+; Lunar Magic's secondary entrance to the overworld (A 8 = its --ETDAAA, X/Y 16, Y = the entrance), as Lunar
+; Magic plays it: instead of the level the game loads the overworld ($0100 = $0C, as after a level) with the
+; action's exit (AAA in $0DD5, 7: $80, the player's turn ends as when he dies; one passed sets $13CE and $1DE9),
+; with E the base event from $05FC00 (else the one of the tile Mario stood on, set when he entered the level),
+; with T Mario at the location $05FA00 (the game's star/pipe warp; owteleport.ts). The level load ($05D796, its
+; PHB) is left as the game mode's code ends ($0093F7: NMI on, RTS)
+OverworldExit:
+  PHA
+  TYX
+  LDA #$0C : STA $${hx(RAM.gameMode)}
+  STZ $0DAE : STZ $0DAF : STZ $0DB0
+  PLA : PHA : AND #$10 : BEQ +
+  LDA.l $05FA00,x : STA $${hx(RAM.owWarpIndex)}
+  INC $${hx(RAM.owWarp)}
++ PLA : PHA : AND #$20 : BEQ +
+  LDA.l $05FC00,x : STA $${hx(RAM.owEvent)}
++ PLA : AND #$07 : CMP #$07 : BNE +
+  LDA #$80
++ STA $${hx(RAM.levelExit)}
+  ASL : BEQ +
+  INC $${hx(RAM.midwayTouched)}
+  INC $${hx(RAM.levelBeaten)}
++ SEP #$30
+  PLA : PLA : PLA                          ; SecLevel's return
+  PLB                                      ; $05D796's PHB
+  PLA : PLA : PLA                          ; its return
+  JML $0093F7
 
 ; the secondary entrance (A 8, X/Y 16, data bank $05): kept, then the game's LDY $0E : LDA $F800,y. A's
 ; high byte stays the game's 0: its code takes table indexes with a 16-bit TAX

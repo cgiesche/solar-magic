@@ -249,7 +249,7 @@ export class LevelView {
         ctx.fillStyle = sel ? 'rgba(255,200,0,0.25)' : 'rgba(255,160,0,0.08)';
         ctx.fillRect(x, y, 256, vertical ? 256 : scrH);
         const t = exitTarget(app.rom, app.level.number, ex);
-        const ok = t.entrance < 0 || g.entrancesOf(t.to).includes(t.entrance);
+        const ok = t.entrance < 0 || t.overworld || g.entrancesOf(t.to).includes(t.entrance);
         ctx.font = `bold ${12 / app.zoom}px sans-serif`;
         const line = (txt: string, i: number) => {
           const ty = y + (12 + i * 14) / app.zoom;
@@ -258,7 +258,7 @@ export class LevelView {
           ctx.fillStyle = ok ? '#ffb000' : '#ff5050';
           ctx.fillText(txt, x + 20 / app.zoom, ty);
         };
-        line(`Exit → ${g.label(t.to)}`, 0);
+        line(t.overworld ? 'Exit → Overworld' : `Exit → ${g.label(t.to)}`, 0);
         if (t.entrance >= 0) line(ok ? `via sec. entrance ${hex3(t.entrance)}` : `sec. entrance ${hex3(t.entrance)} missing`, 1);
       }
     }

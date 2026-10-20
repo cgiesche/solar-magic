@@ -40,7 +40,7 @@ export function exitProblems(rom: Rom, level: Level, graph: ExitGraph, enterable
   for (const e of level.exits) {
     if (e.screen >= level.header.screens) continue; // reported by levelProblems
     const t = exitTarget(rom, level.number, e);
-    if (t.entrance >= 0 && !graph.entrancesOf(t.to).includes(t.entrance)) {
+    if (t.entrance >= 0 && !t.overworld && !graph.entrancesOf(t.to).includes(t.entrance)) {
       out.push({ key: `exit-target:${e.screen}`, severity: 'error', text: `Exit of screen ${hex2(e.screen)}: secondary entrance ${hex3(t.entrance)} is not set up`,
         where: { screen: e.screen, exit: true } });
     }

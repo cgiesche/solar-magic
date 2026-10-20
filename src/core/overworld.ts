@@ -109,6 +109,27 @@ export function levelName(rom: Rom, translevel: number): string {
   return (nameWord(rom, 0, a) + nameWord(rom, 1, b) + nameWord(rom, 2, c)).replace(/\s+/g, ' ').trim();
 }
 
+// ---- events ----
+// per translevel: the event its normal exit runs (the secret exit's the next one; $FF none), $1DEA (ram.ts)
+export const BASE_EVENTS = 0x05d608;
+export const OW_EVENTS = 0x78; // 15 bytes of event bits
+export const baseEvent = (rom: Rom, tl: number): number => rom.r8(BASE_EVENTS + tl);
+// the overworld's events by the level exits that run them ("105 Yoshi's Island 1 – normal exit"), of the levels
+// on the map; an event several exits run is named by the first, a normal exit before a secret one
+export function eventNames(rom: Rom): Map<number, string> {
+  const out = new Map<number, string>(), secret = new Map<number, string>();
+  const tls = [...new Set(translevels(readL1(rom)))].filter((t) => t).sort((a, b) => a - b);
+  for (const tl of tls) {
+    const b = baseEvent(rom, tl);
+    if (b >= OW_EVENTS) continue;
+    const name = `${translevelToLevel(tl).toString(16).toUpperCase().padStart(3, '0')} ${levelName(rom, tl)}`;
+    if (!out.has(b)) out.set(b, `${name} – normal exit`);
+    if (b + 1 < OW_EVENTS && !secret.has(b + 1)) secret.set(b + 1, `${name} – secret exit`);
+  }
+  for (const [e, n] of secret) if (!out.has(e)) out.set(e, n);
+  return out;
+}
+
 // ---- emulation: load the overworld to obtain VRAM / CGRAM / Map16 tables ----
 export interface OwRender {
   vram: Uint8Array;
