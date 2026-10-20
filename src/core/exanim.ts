@@ -14,7 +14,8 @@
 
 import { snesToPc, type Rom } from './rom.ts';
 import { applyPatch, type ApplyResult } from './patchapply.ts';
-import { listPatches } from './patchreg.ts';
+import { listPatches, type RamClaim } from './patchreg.ts';
+import { CDM16_FLAGS } from './ram.ts';
 import { EXANIMATION_ASM, MEMORY_ASM } from './kobo/exanimation.ts';
 import { installEditorPatch } from './patches.ts';
 
@@ -239,7 +240,11 @@ export function installExAnim(rom: Rom): ApplyResult {
     return { ok: false, errors: ['The ROM already has an ExAnimation in an older Lunar Magic format (or another patch at $0583AD/$00A390) – not supported.'], warnings: [], prints: [] };
   }
   installEditorPatch(rom); // keeps the level number in $010B, which the engine reads (as Lunar Magic's does)
-  return applyPatch(rom, { name: EXANIM_PATCH_NAME, main: 'exanimation.asm', files: new Map([['exanimation.asm', EXANIMATION_ASM], ['memory.asm', MEMORY_ASM]]), kind: 'exanim', ram: [[0x7fc003, 0xfd]] });
+  // the RAM of Lunar Magic's block at $7FC000 the engine uses, around the conditional Direct Map16 flags (shared:
+  // the editor patch reads them, community code sets them; cdm16.ts)
+  const [cf, cn] = CDM16_FLAGS;
+  const ram: RamClaim[] = [[0x7fc003, cf - 0x7fc003], [cf, cn, 1], [cf + cn, 0x7fc100 - cf - cn]];
+  return applyPatch(rom, { name: EXANIM_PATCH_NAME, main: 'exanimation.asm', files: new Map([['exanimation.asm', EXANIMATION_ASM], ['memory.asm', MEMORY_ASM]]), kind: 'exanim', ram });
 }
 
 // the registry entry of the engine

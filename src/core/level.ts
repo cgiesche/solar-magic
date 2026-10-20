@@ -3,6 +3,7 @@
 import { Rom } from './rom.ts';
 import { spriteBankOf, DM16_EXT } from './patches.ts';
 import { STRUCT_EXT } from './structs.ts';
+import { COND_MARK, condByte, condOf, type Dm16Cond } from './cdm16.ts';
 import { MAP_SIZE } from './ram.ts';
 
 export const L1_PTRS = 0x05e000;
@@ -49,6 +50,7 @@ export interface LevelObject {
   y: number;
   size: number; // settings byte for standard objects (and Direct Map16)
   tile?: number; // Direct Map16 tile number (extended object $02, editor patch)
+  cond?: Dm16Cond; // a Direct Map16 object's flag (cdm16.ts)
   struct?: number; // structure number (extended object $03 with the structure patch, see structs.ts)
 }
 
@@ -347,8 +349,11 @@ export function parseObjects(data: Uint8Array, start: number, vertical: boolean,
       y = sub * SUBSCREEN_ROWS + f5;
     }
     if (dm16) {
-      objects.push({ uid: newUid(), num, ext: b2, x, y, size: data[p + 5], tile: data[p + 3] | (data[p + 4] << 8) });
-      p += 6;
+      const t = data[p + 3] | (data[p + 4] << 8);
+      const o: LevelObject = { uid: newUid(), num, ext: b2, x, y, size: data[p + 5], tile: t & ~COND_MARK };
+      if (t & COND_MARK) o.cond = condOf(data[p + 6]);
+      objects.push(o);
+      p += o.cond ? 7 : 6;
       continue;
     }
     if (num === 0 && b2 === STRUCT_EXT) {
@@ -390,9 +395,10 @@ export function serializeObjects(objects: LevelObject[], exits: ScreenExit[], ve
     const f4 = vertical ? o.y & 0x0f : o.x & 0x0f;
     out.push(nflag | ((o.num & 0x30) << 1) | f5, ((o.num & 0x0f) << 4) | f4, o.num === 0 ? o.ext : o.size);
     if (o.num === 0 && o.ext === DM16_EXT) {
-      const t = o.tile ?? 0;
+      const t = (o.tile ?? 0) | (o.cond ? COND_MARK : 0);
       out.push(t & 0xff, (t >> 8) & 0xff, o.size & 0xff);
-      own(6, objects.indexOf(o));
+      if (o.cond) out.push(condByte(o.cond));
+      own(o.cond ? 7 : 6, objects.indexOf(o));
     } else if (o.num === 0 && o.ext === STRUCT_EXT && o.struct !== undefined) {
       out.push(o.struct & 0xff);
       own(4, objects.indexOf(o));

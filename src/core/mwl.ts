@@ -19,7 +19,9 @@
 //  - 27 (pages 00-3F) / 29 (40-7F): N10YYYYY 0111XXXX / 1001XXXX, then by the top bits of the 4th byte:
 //    00 HHHHWWWW 00BBBBBB bbbbbbbb (one tile, a rectangle), 01 hhhhwwww 01BBBBBB bbbbbbbb (a block of
 //    tiles from the base tile, unstretched), 10 HHHHWWWW 10BBBBBB bbbbbbbb hhhhwwww (the block repeated
-//    over the rectangle), 11 WWWWWWWW 11BBBBBB bbbbbbbb hhhhwwww HHHHHHHH (the same over screens).
+//    over the rectangle), 11 0WWWWWWW 11BBBBBB bbbbbbbb hhhhwwww HHHHHHHH (the same over screens), 11
+//    1WWWWWWW 11BBBBBB bbbbbbbb hhhhwwww HHHHHHHH ACCCCCCC (the same with a condition: Lunar Magic's
+//    conditional Direct Map16, cdm16.ts).
 
 import type { Rom } from './rom.ts';
 import {
@@ -27,6 +29,7 @@ import {
   hasLayer2Objects, hasObjects, parseSprites, spriteSizes, hasLevelSize, isSized, MAX_LEVEL_SIZE, SUBSCREEN_ROWS,
 } from './level.ts';
 import { DM16_EXT } from './patches.ts';
+import { condOf, type Dm16Cond } from './cdm16.ts';
 import { EXT_FIRST, EXT_TILES } from './map16ext.ts';
 import { parseList, type ExList } from './exanim.ts';
 
@@ -93,10 +96,11 @@ export function parseLmObjects(data: Uint8Array, start: number, vertical: boolea
     const f5 = b0 & 0x1f, f4 = b1 & 0x0f;
     return vertical ? { x: f5, y: screen * 16 + f4 } : { x: screen * 16 + f4, y: sub * SUBSCREEN_ROWS + f5 };
   };
-  const dm16 = (x: number, y: number, tile: number, size: number) => objects.push({ uid: newUid(), num: 0, ext: DM16_EXT, x, y, size, tile });
+  const dm16 = (x: number, y: number, tile: number, size: number, cond?: Dm16Cond) =>
+    objects.push({ uid: newUid(), num: 0, ext: DM16_EXT, x, y, size, tile, ...(cond ? { cond } : {}) });
   // a block of (ph+1)x(pw+1) tiles from `tile` (Map16 rows of 16) over (h+1)x(w+1) tiles
-  const pattern = (x: number, y: number, tile: number, h: number, w: number, ph: number, pw: number) => {
-    for (let r = 0; r <= h; r++) for (let c = 0; c <= w; c++) dm16(x + c, y + r, tile + (r % (ph + 1)) * 16 + (c % (pw + 1)), 0);
+  const pattern = (x: number, y: number, tile: number, h: number, w: number, ph: number, pw: number, cond?: Dm16Cond) => {
+    for (let r = 0; r <= h; r++) for (let c = 0; c <= w; c++) dm16(x + c, y + r, tile + (r % (ph + 1)) * 16 + (c % (pw + 1)), 0, cond);
   };
   while (p < data.length && data[p] !== 0xff) {
     const b0 = data[p], b1 = data[p + 1], b2 = data[p + 2];
@@ -112,12 +116,13 @@ export function parseLmObjects(data: Uint8Array, start: number, vertical: boolea
     if (num === 0x22 || num === 0x23) { dm16(x, y, ((num - 0x22) << 8) | data[p + 3], b2); p += 4; continue; }
     if (num === 0x27 || num === 0x29) {
       const b3 = data[p + 3], fmt = b3 >> 6, tile = ((b3 & 0x3f) << 8) | data[p + 4] | (num === 0x29 ? 0x4000 : 0);
-      const len = [5, 5, 6, 7][fmt];
+      const cond = fmt === 3 && b2 & 0x80 ? condOf(data[p + 7]) : undefined;
+      const len = cond ? 8 : [5, 5, 6, 7][fmt];
       if (tile >= EXT_TILES) { high++; p += len; continue; }
       if (fmt === 0) dm16(x, y, tile, b2);
       else if (fmt === 1) pattern(x, y, tile, b2 >> 4, b2 & 15, b2 >> 4, b2 & 15);
       else if (fmt === 2) pattern(x, y, tile, b2 >> 4, b2 & 15, data[p + 5] >> 4, data[p + 5] & 15);
-      else pattern(x, y, tile, data[p + 6], b2, data[p + 5] >> 4, data[p + 5] & 15);
+      else pattern(x, y, tile, data[p + 6], b2 & 0x7f, data[p + 5] >> 4, data[p + 5] & 15, cond);
       p += len;
       continue;
     }

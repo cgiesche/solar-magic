@@ -7,6 +7,7 @@ import {
 } from './level.ts';
 import { levelGfx, customPalette } from './patches.ts';
 import { encodeBg, decodeBg } from './bg.ts';
+import { condByte } from './cdm16.ts';
 import { STRUCT_EXT, readStructure, listStructures, freeStructureNumber, writeStructure, type Structure } from './structs.ts';
 
 export const LEVEL_FILE_EXT = '.smwlevel';
@@ -80,13 +81,14 @@ export function importLevelFile(rom: Rom, text: string, into: Level): LevelFileD
   const remap = new Map<number, number>();
   if (j.structs?.length) {
     const have = listStructures(rom);
-    const same = (a: Structure, b: Structure) => a.w === b.w && a.h === b.h && a.name === b.name && a.tiles.every((t, i) => t === b.tiles[i]);
+    const cond = (s: Structure, i: number) => { const c = s.conds?.[i]; return c ? condByte(c) : -1; };
+    const same = (a: Structure, b: Structure) => a.w === b.w && a.h === b.h && a.name === b.name && a.tiles.every((t, i) => t === b.tiles[i] && cond(a, i) === cond(b, i));
     for (const s of j.structs) {
       const hit = [...have].find(([, x]) => same(x, s));
       if (hit) { remap.set(s.n, hit[0]); continue; }
       const n = freeStructureNumber(rom);
       if (n < 0) throw new Error('No free slot for the structures of the level file (all 256 in use)');
-      const st: Structure = { w: s.w, h: s.h, tiles: s.tiles, name: s.name };
+      const st: Structure = { w: s.w, h: s.h, tiles: s.tiles, ...(s.conds ? { conds: s.conds } : {}), name: s.name };
       writeStructure(rom, n, st);
       have.set(n, st);
       remap.set(s.n, n);

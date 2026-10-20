@@ -7,14 +7,15 @@
 //  - per-level GFX bypass: 8 slots (SP4..SP1, FG3, BG1, FG2, FG1), low bytes and a table of high bytes;
 //    0FF = tileset default. The game passes a file's low byte along (in $04-$07, Y); the high bytes of the
 //    slots being uploaded are kept in RAM (EXGFX_HI_RAM) and joined with it where the file is looked up
-//  - extended object $02 "Direct Map16": 6 bytes, places any Map16 tile as a rectangle
+//  - extended object $02 "Direct Map16": 6 bytes, places any Map16 tile as a rectangle; 7 with a condition
+//    (Lunar Magic's conditional Direct Map16, cdm16.ts): bit 7 of the tile's high byte, then the condition byte
 //  - "edited" mark at $0FF0A0 where Lunar Magic keeps its version string (see markEdited)
 
 import { Rom } from './rom.ts';
 import { Asm } from './asm.ts';
 import { lz2Decompress } from './lz2.ts';
 import { ownerNote } from './patchreg.ts';
-import { LEVEL_HEIGHT_RAM, EXGFX_HI_RAM } from './ram.ts';
+import { LEVEL_HEIGHT_RAM, EXGFX_HI_RAM, CDM16_FLAGS } from './ram.ts';
 
 export const SPR_BANK_HOOK = 0x05d8f5;
 
@@ -43,7 +44,7 @@ const EDITED_TEXT = 'Solar Magic';
 // the bytes the editor patch changes in the game (SNES address, length), protected from other patches (patchapply.ts)
 export const EDITOR_HOOKS: [number, number][] = [[SPR_BANK_HOOK, 4], [HOOK_GFXPTR, 15], [HOOK_UPLOAD, 4], [HOOK_SPRGFX, 15], [HOOK_FGGFX, 15], [DM16_SLOT, 3], [EDITED_MARK, EDITED_LEN]];
 const MAGIC = [0x53, 0x4d, 0x57, 0x45]; // "SMWE"
-const VERSION = 3;
+const VERSION = 4; // 4: conditional Direct Map16
 const HEADER = 32;
 // GFX file numbers: 000-FFF (Lunar Magic's range); 0FF in a slot is "none" (the default), so no file has it
 export const GFX_FILES = 0x1000;
@@ -227,6 +228,19 @@ function build(): Asm {
   a.b(0xc8, 0xb7, 0x65, 0x85, 0x0d); // INY LDA [$65],y STA $0D
   a.b(0xc8, 0xb7, 0x65, 0x85, 0x0e); // INY LDA [$65],y STA $0E
   a.b(0xa5, 0x65, 0x18, 0x69, 0x03, 0x85, 0x65, 0xa5, 0x66, 0x69, 0x00, 0x85, 0x66); // $65 += 3
+  // conditional (cdm16.ts): bit 7 of the tile's high byte, the condition byte ACCCCCCC follows
+  a.b(0xa5, 0x0d); a.br(0x10, 'dmshow'); // LDA $0D : BPL
+  a.b(0x29, 0x7f, 0x85, 0x0d); // AND #$7F : STA $0D
+  a.b(0xa7, 0x65, 0x85, 0x0f, 0xe6, 0x65, 0xd0, 0x02, 0xe6, 0x66); // LDA [$65] : STA $0F : INC $65 : BNE + : INC $66
+  a.b(0x29, 0x07, 0xaa); a.long(0xbf, 'DM16Bits'); a.b(0x85, 0x00); // AND #7 : TAX : LDA.l bits,x : STA $00
+  a.b(0xa5, 0x0f, 0x4a, 0x4a, 0x4a, 0x29, 0x0f, 0xaa); // LDA $0F : LSR #3 : AND #$0F : TAX
+  a.b(0xbf, ...long(CDM16_FLAGS[0]), 0x25, 0x00); a.br(0xf0, 'dmoff'); // LDA.l flags,x : AND $00 : BEQ
+  a.b(0x24, 0x0f); a.br(0x10, 'dmshow'); // BIT $0F : BPL (flag on: shown)
+  a.b(0xe6, 0x0d); a.br(0x80, 'dmshow'); // INC $0D (always show, flag on: tiles + $100)
+  a.label('dmoff');
+  a.b(0x24, 0x0f); a.br(0x30, 'dmshow'); // BIT $0F : BMI (always show)
+  a.b(0x68, 0x68, 0x6b); // not drawn: drop JSR return, RTL
+  a.label('dmshow');
   a.b(0xa5, 0x5b, 0xac, 0x33, 0x19); // LDA $5B LDY $1933
   a.br(0xf0, 'dmv1');
   a.b(0x4a); // LSR
@@ -268,6 +282,7 @@ function build(): Asm {
   a.b(0x68, 0x68, 0x6b); // drop JSR return, RTL
 
   // ---- tables ----
+  a.label('DM16Bits'); a.b(0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80);
   a.label('SprBankTbl'); a.fill(512, 0x07);
   a.label('GfxLo'); a.fill(GFX_FILES);
   a.label('GfxHi'); a.fill(GFX_FILES);

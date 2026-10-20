@@ -113,6 +113,8 @@ export const EXIT_FLAGS_RAM: [number, number] = [0x7f3679, 1];
 // the editor patch's (patches.ts): the high bytes of the ExGFX numbers in the graphics slots being uploaded
 // (8), then the one for the next upload of BG2/BG3
 export const EXGFX_HI_RAM: [number, number] = [0x7f367a, 9];
+// Lunar Magic's conditional Direct Map16 flags (cdm16.ts), which community code sets: 128 bits, low to high
+export const CDM16_FLAGS: [number, number] = [0x7fc060, 16];
 // Lunar Magic's RAM for a horizontal level's height, which community code reads too: the height in
 // pixels (also a screen's bytes in the level data), and the screens' Map16 addresses in bank 0's RAM
 // (the game's mode tables point there): 3-byte pointers to the low and the high bytes, then the

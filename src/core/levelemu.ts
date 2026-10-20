@@ -9,7 +9,7 @@ import { translevelToLevel } from './overworld.ts';
 import { editorPatch, musicPatch, BG_HOOK, HEADER_MUSIC_TABLE } from './patches.ts';
 import { lt3Patches, type Lt3Place } from './layer3gfx.ts';
 import { RomReads, updateBytePages, PAGE_SHIFT } from './romdeps.ts';
-import { GM, RAM, SPR, MAP_BASE, MAP_SIZE, MAP_HI, getS16, set16, setSpritePos } from './ram.ts';
+import { GM, RAM, SPR, MAP_BASE, MAP_SIZE, MAP_HI, CDM16_FLAGS, getS16, set16, setSpritePos } from './ram.ts';
 
 export const OV_L1 = 0x0000; // overlay offsets
 export const OV_L2 = 0x4000;
@@ -42,6 +42,7 @@ export interface LevelOverride {
   secondaryHeader?: number[]; // the bytes of SEC_HDR (missing ones: 0)
   switchPalaces?: boolean; // treat all switch palaces as pressed
   onOffSwitch?: boolean; // ON/OFF switch in the OFF state ($14AF)
+  cdm16Flags?: Uint8Array; // the conditional Direct Map16 flags (CDM16_FLAGS, cdm16.ts flagBytes) the level loads with
   trackSources?: boolean; // record ROM provenance of CGRAM (slower)
   translevel?: number; // $13BF (messages, Yoshi coins); default: the level itself if it is a main level
   midway?: boolean; // enter the translevel's level from the overworld with its midway point touched (a main level)
@@ -55,7 +56,7 @@ export interface LevelOverride {
 // the level and a hash of its level data as edited, for result cache keys of what is learned by playing it
 export function levelDataKey(level: number, ov: LevelOverride): string {
   const l2 = ov.layer2Pointer ?? 0;
-  const bytes = [ov.layer1, ov.layer2, ov.bgData, ov.sprites, Uint8Array.from(ov.secondaryHeader ?? []), Uint8Array.from([l2, l2 >> 8, l2 >> 16, +!!ov.switchPalaces, +!!ov.onOffSwitch])];
+  const bytes = [ov.layer1, ov.layer2, ov.bgData, ov.sprites, Uint8Array.from(ov.secondaryHeader ?? []), Uint8Array.from([l2, l2 >> 8, l2 >> 16, +!!ov.switchPalaces, +!!ov.onOffSwitch]), ov.cdm16Flags];
   let h = 0x811c9dc5;
   for (const b of bytes) {
     if (!b) { h = Math.imul(h ^ 0xff, 0x01000193); continue; }
@@ -215,6 +216,7 @@ export class LevelEmulator {
     }
     if (ov.switchPalaces) for (let i = 0; i < 4; i++) w[RAM.switchPalaces + i] = 1;
     if (ov.onOffSwitch) w[RAM.onOff] = 1;
+    if (ov.cdm16Flags) w.set(ov.cdm16Flags.subarray(0, CDM16_FLAGS[1]), CDM16_FLAGS[0] - 0x7e0000);
     w[RAM.gameMode] = GM.levelLoad;
 
     // temporary pointer patches in the ROM image
