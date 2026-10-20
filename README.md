@@ -173,6 +173,10 @@ When a level is displayed, it runs the ROM's **original loading routines** (~15 
   load, the game's animation code runs –, with its RAM, ready ASM lines (e.g. `LDA $7FC0FC : ORA #$0200 :
   STA $7FC0FC`) and the slots using it; View → Animation triggers switches the same, and test play fires a chosen
   trigger while playing.
+  A tile animation's frames are previewed in the palette its target's Map16 tiles use, or one chosen for the
+  slot; when Map16 tiles show the target in another palette, the tab says which and **applies the chosen
+  palette** to their quarters showing the target on request (one undo step, the tiles of this level preselected,
+  each with the levels placing it) – never by itself: Map16 tiles are shared by every level.
 * **Palette editor** (P): edit colors directly at their ROM source, `.pal` import/export,
   optionally a **custom palette per level** (all 256 colors).
 * **Graphics:** view GFX00–31 and ExGFX up to FFF (as Lunar Magic: ExGFX 80–DFF, and E00–FFF for files kept

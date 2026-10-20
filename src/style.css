@@ -449,7 +449,15 @@ button.danger:hover:not(:disabled) { border-color: var(--danger); }
 .at-slot { display: flex; align-items: center; gap: 8px; padding: 5px 6px; cursor: pointer; border-bottom: 1px solid var(--border); }
 .at-slot:hover { background: var(--panel2); }
 .at-slot.sel { background: #1c2a36; outline: 1px solid var(--accent); }
-.at-slot-text { min-width: 0; font-size: 12px; }
+.at-slot-text { min-width: 0; font-size: 12px; flex: 1; }
+.at-slot-acts { display: flex; visibility: hidden; flex-shrink: 0; }
+.at-slot:hover .at-slot-acts, .at-slot.sel .at-slot-acts, .at-slot-acts:focus-within { visibility: visible; }
+.at-slot-acts .icon-btn { padding: 0 3px; color: var(--muted); }
+.at-slot-acts .icon-btn:hover { color: inherit; }
+.at-slot-bar { flex-wrap: nowrap; }
+.at-slot-bar .spacer { flex: 1; }
+.at-palfix { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 6px 8px; border: 1px solid var(--border); border-left: 3px solid #ffb000; border-radius: 4px; }
+.at-palapply { display: flex; flex-direction: column; gap: 6px; width: 560px; max-width: 80vw; max-height: 60vh; overflow-y: auto; }
 .at-mini { width: 32px; height: 32px; image-rendering: pixelated; object-fit: contain; background: #15171b; border-radius: 3px; flex-shrink: 0; }
 .at-detail { width: 380px; flex-shrink: 0; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; }
 .at-detail .prop label { width: 70px; }

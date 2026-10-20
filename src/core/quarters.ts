@@ -105,3 +105,11 @@ export function wholeTiles(g: QuarterGrid, marks: Set<number>): number[] | null 
   if (!count.size || [...count.values()].some((n) => n < 4)) return null;
   return [...count.keys()].sort((a, b) => a - b);
 }
+
+// a tile's words with every quarter that shows one of the 8x8 `tiles` (numbers) in palette p (an
+// animation's target drawn in the palette chosen for it); null when they all have it already
+export function paletteOn(words: number[], tiles: Set<number>, p: number): number[] | null {
+  let changed = false;
+  const out = words.map((w) => { if (!tiles.has(w & NUM) || ((w & PAL) >> 10) === p) return w; changed = true; return setPalette(p)(w); });
+  return changed ? out : null;
+}

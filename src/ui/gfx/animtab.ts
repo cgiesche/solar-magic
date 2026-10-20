@@ -9,7 +9,9 @@ import { h, clear, toast, pickerOpen, modal, hexInput } from '../dom.ts';
 import { menuButton, type MenuItem } from '../menu.ts';
 import { hex } from '../../core/names.ts';
 import { cgramToRGBA, decodeTile, snesColorToRGBA } from '../../core/gfx.ts';
-import { map16Source, levelColorUsers } from '../../core/render.ts';
+import { map16Source, levelColorUsers, setFgWords } from '../../core/render.ts';
+import { paletteOn } from '../../core/quarters.ts';
+import { fgTileUsers } from '../../core/levelusage.ts';
 import { EXT_TILES } from '../../core/map16ext.ts';
 import {
   type ExList, type ExSlot, emptyList, readLevelList, readGlobalList, writeLevelList, writeGlobalList, levelSettings, setLevelSettings,
@@ -82,7 +84,7 @@ export class AnimTab implements WsPanel {
   private sel = 0; // slot
   private frame = 0; // selected column
   private set = 0; // selected frame set (1: the trigger's second set)
-  private palRow = -1; // palette for tile previews (-1: from the target's Map16 use)
+  private palRows = new Map<string, number>(); // palette a tile slot's previews are drawn in (none: from the target's Map16 use)
   private visible = false;
   private tick = 0;
   private timer = 0;
@@ -113,6 +115,9 @@ export class AnimTab implements WsPanel {
   previewHint(): string {
     return 'Click: take the Map16 tile under the mouse as target (top left quarter)';
   }
+
+  private get palRow(): number { return this.palRows.get(`${this.global}:${this.sel}`) ?? -1; }
+  private set palRow(r: number) { const k = `${this.global}:${this.sel}`; if (r < 0) this.palRows.delete(k); else this.palRows.set(k, r); }
 
   get selected(): { global: boolean; slot: number } { return { global: this.global, slot: this.sel }; }
 
@@ -304,24 +309,31 @@ export class AnimTab implements WsPanel {
       const c = h('canvas', { class: 'at-mini' });
       this.previews.push({ c, slot: n });
       const kind = kindOf(s.type);
-      items.append(h('div', { class: `at-slot${n === this.sel ? ' sel' : ''}`, onclick: () => { this.sel = n; this.frame = 0; this.set = 0; this.build(); } },
+      const pick = () => { this.sel = n; this.frame = 0; this.set = 0; };
+      items.append(h('div', { class: `at-slot${n === this.sel ? ' sel' : ''}`, onclick: () => { pick(); this.build(); } },
         h('span', { class: 'mono hint' }, hex(n, 2)), c,
         h('div', { class: 'at-slot-text' },
           h('div', null, kind === 'tiles' ? `Tile ${hex(this.targetTile(s), 3)} · ${TYPE_NAMES[s.type] ?? ''}` : kind === 'colors' ? `Color ${hex(s.dest & 0xff, 2)} · ${TYPE_NAMES[s.type]}` : `Colors ${rangeName(s)} · ${TYPE_NAMES[s.type] ?? ''}`),
-          h('div', { class: 'hint' }, kind === 'rotation' ? `${triggerName(s.trigger)} · ${speedName(s.framesLess1 + 1)}` : `${triggerName(s.trigger)} · ${s.framesLess1 + 1} frame${s.framesLess1 ? 's' : ''}`))));
+          h('div', { class: 'hint' }, kind === 'rotation' ? `${triggerName(s.trigger)} · ${speedName(s.framesLess1 + 1)}` : `${triggerName(s.trigger)} · ${s.framesLess1 + 1} frame${s.framesLess1 ? 's' : ''}`)),
+        h('span', { class: 'at-slot-acts' },
+          h('button', { class: 'icon-btn', title: 'Duplicate (into the next free slot)', 'aria-label': 'Duplicate', onclick: (e: Event) => { e.stopPropagation(); pick(); void this.duplicate(); } }, '⧉'),
+          h('button', { class: 'icon-btn', title: 'Delete (Ctrl+Z brings it back)', 'aria-label': 'Delete', onclick: (e: Event) => { e.stopPropagation(); pick(); void this.remove(); } }, '✕'))));
     }
     if (!l.slots.size) items.append(h('p', { class: 'hint' }, 'No animations yet. A tile animation keeps replacing 8x8 tiles in VRAM with frames from an animation graphic – all Map16 tiles that use them animate along.'));
+    const noSlot = l.slots.size >= SLOTS;
     box.append(items,
-      h('div', { class: 'row' },
-        h('button', { onclick: () => void this.add('tiles') }, '+ Tile animation'),
-        h('button', { onclick: () => void this.add('colors') }, '+ Color animation'),
-        h('button', { title: 'Colors of the palette that move along by one, again and again', onclick: () => void this.add('rotation') }, '+ Color rotation')),
-      h('div', { class: 'row' },
-        h('button', { disabled: !this.slot(), onclick: () => void this.duplicate() }, 'Duplicate'),
-        h('button', { disabled: !this.slot(), onclick: () => void this.remove() }, 'Delete'),
-        h('button', { disabled: ![...l.slots.values()].some((x) => kindOf(x.type) === 'tiles'), title: 'Change the frames and targets of tile animations by an offset or a list (Lunar Magic\'s Remap)',
-          onclick: () => this.openRemap() }, 'Remap …'),
-        h('button', { title: 'Custom triggers and manual frames set when the level loads (Lunar Magic\'s Trigger Init)', onclick: () => this.openTriggerInit() }, 'Trigger Init …')));
+      h('div', { class: 'row at-slot-bar' },
+        menuButton({ label: '+ New', title: noSlot ? 'All 32 slots are in use' : 'A new animation in the next free slot', items: [
+          { label: 'Tile animation', title: '8x8 tiles in VRAM replaced by frames of the animation graphic', onClick: () => void this.add('tiles') },
+          { label: 'Color animation', title: 'A palette color set to the colors of its frames', onClick: () => void this.add('colors') },
+          { label: 'Color rotation', title: 'Colors of the palette that move along by one, again and again', onClick: () => void this.add('rotation') },
+        ] }),
+        h('span', { class: 'spacer' }),
+        menuButton({ label: 'List', title: 'Tools for the whole list', items: [
+          { label: 'Remap tile animations …', title: 'Change the frames and targets of tile animations by an offset or a list (Lunar Magic\'s Remap)',
+            disabled: () => ![...this.list().slots.values()].some((x) => kindOf(x.type) === 'tiles'), onClick: () => this.openRemap() },
+          { label: 'Trigger Init …', title: 'Custom triggers and manual frames set when the level loads (Lunar Magic\'s Trigger Init)', onClick: () => this.openTriggerInit() },
+        ] })));
     this.animate();
   }
 
@@ -614,12 +626,11 @@ export class AnimTab implements WsPanel {
   }
 
   // Map16 tiles that use one of the slot's target tiles (they animate with it)
-  private targetUsers(s: ExSlot): number[] {
+  private targetUsers(s: ExSlot, limit = 64): number[] {
     const tiles = new Set(this.targetTiles(s));
     const src = map16Source(this.app.rom, this.app.render);
-    const max = EXT_TILES;
     const users: number[] = [];
-    for (let m = 0; m < max && users.length < 64; m++) if (src.fg(m).some((w) => tiles.has(w & 0x3ff))) users.push(m);
+    for (let m = 0; m < EXT_TILES && users.length < limit; m++) if (src.fg(m).some((w) => tiles.has(w & 0x3ff))) users.push(m);
     return users;
   }
 
@@ -765,8 +776,76 @@ export class AnimTab implements WsPanel {
     const row = this.rowFor(s);
     const rows = h('div', { class: 'at-rows' }, Array.from({ length: 8 }, (_, r) => h('button', { class: r === row ? 'active' : '', onclick: () => { this.palRow = r; this.build(); } }, String(r))));
     box.append(h('div', { class: 'row' }, h('span', { class: 'hint' }, 'Palette'), rows, this.palRow >= 0 ? h('a', { href: '#', onclick: (e: Event) => { e.preventDefault(); this.palRow = -1; this.build(); } }, 'auto') : ''));
+    if (this.palRow >= 0) this.paletteMismatch(box, s, row);
     if (this.picking === 'target') { this.targetPicker(box, s, row); return; }
     this.sourcePicker(box, s, row);
+  }
+
+  // the Map16 tiles placed in the level (layer 1, layer 2 objects)
+  private placedTiles(): Set<number> {
+    const im = this.app.images;
+    return new Set([...(im?.tiles1 ?? []), ...(im?.tiles2 ?? [])]);
+  }
+  // Map16 tiles showing the slot's target in another palette than `row`, with the palettes they show it in
+  private offPalette(s: ExSlot, row: number): { tile: number; pals: number[] }[] {
+    const targets = new Set(this.targetTiles(s)), src = map16Source(this.app.rom, this.app.render);
+    return this.targetUsers(s, EXT_TILES).filter((m) => paletteOn(src.fg(m), targets, row)).map((tile) => ({
+      tile, pals: [...new Set(src.fg(tile).filter((w) => targets.has(w & 0x3ff)).map((w) => (w >> 10) & 7))].sort(),
+    }));
+  }
+
+  // a palette chosen for the previews that Map16 tiles do not draw the target in: said so, and offered
+  // to give them (never done by itself: the palette is the view's, the Map16 tiles are every level's)
+  private paletteMismatch(box: HTMLElement, s: ExSlot, row: number): void {
+    const off = this.offPalette(s, row);
+    if (!off.length) return;
+    const placed = this.placedTiles(), here = off.filter((o) => placed.has(o.tile));
+    const name = (o: { tile: number; pals: number[] }) => `${hex(o.tile, 3)} (palette ${o.pals.join(', ')})`;
+    const shown = here.length ? here : off;
+    box.append(h('div', { class: 'at-palfix' },
+      h('span', { class: 'hint' }, here.length
+        ? `${here.length === 1 ? 'Map16 tile' : `${here.length} Map16 tiles`} of this level show${here.length === 1 ? 's' : ''} the target in another palette: ${shown.slice(0, 6).map(name).join(', ')}${shown.length > 6 ? ' …' : ''}`
+        : `In this level every Map16 tile shows the target in this palette; ${off.length === 1 ? 'one tile not placed here does not' : `${off.length} tiles not placed here do not`}: ${shown.slice(0, 6).map(name).join(', ')}${shown.length > 6 ? ' …' : ''}`),
+      h('button', { title: 'Choose the Map16 tiles whose quarters showing the target take this palette', onclick: () => this.openApplyPalette(s, row) }, `Apply palette ${row} …`)));
+  }
+
+  // the chosen Map16 tiles' quarters that show the target take palette `row`: one undo step
+  private openApplyPalette(s: ExSlot, row: number): void {
+    const app = this.app, off = this.offPalette(s, row), placed = this.placedTiles();
+    const targets = new Set(this.targetTiles(s));
+    const { levels, pending } = app.levelTiles();
+    // the tiles of this level first; when none is placed here, the user asks for the others
+    const anyHere = off.some((o) => placed.has(o.tile));
+    const chosen = new Set(off.filter((o) => !anyHere || placed.has(o.tile)).map((o) => o.tile));
+    const where = (t: number) => {
+      const lv = fgTileUsers(levels, t, app.tilesetsOf(t)).map((u) => u.level).filter((n) => n !== app.level.number);
+      const here = placed.has(t) ? 'this level' : '';
+      const others = lv.length ? `${lv.length === 1 ? 'level' : 'levels'} ${lv.slice(0, 4).map((n) => hex(n, 3)).join(', ')}${lv.length > 4 ? ` and ${lv.length - 4} more` : ''}` : '';
+      return [here, others].filter(Boolean).join(', also ') || 'placed in no level';
+    };
+    const body = h('div', { class: 'at-palapply' },
+      h('p', { class: 'hint' }, `The quarters showing 8x8 tile${targets.size > 1 ? 's' : ''} ${[...targets].slice(0, 4).map((t) => hex(t, 3)).join(', ')}${targets.size > 4 ? ' …' : ''} take palette ${row}; the other quarters stay. Map16 tiles are shared: the change shows in every level placing them.`),
+      h('table', { class: 'at-remap-table' },
+        h('tr', null, h('th', null, ''), h('th', null, 'Map16'), h('th', null, 'Palette'), h('th', null, 'Placed in')),
+        off.map((o) => h('tr', null,
+          h('td', null, h('input', { type: 'checkbox', checked: chosen.has(o.tile), onchange: (e: Event) => { if ((e.target as HTMLInputElement).checked) chosen.add(o.tile); else chosen.delete(o.tile); } })),
+          h('td', { class: 'mono' }, hex(o.tile, 3)),
+          h('td', { class: 'mono' }, `${o.pals.join(', ')} → ${row}`),
+          h('td', { class: 'hint' }, where(o.tile))))),
+      pending ? h('p', { class: 'hint' }, `${pending} more level${pending > 1 ? 's are' : ' is'} still being looked through – they may place these tiles too.`) : '');
+    modal(`Palette ${row} for animation ${hex(this.sel, 2)}`, body, [
+      { label: 'Apply', primary: true, onClick: () => {
+        if (!chosen.size) { toast('No Map16 tile chosen'); return false; }
+        const src = map16Source(app.rom, app.render);
+        const tiles = off.map((o) => o.tile).filter((t) => chosen.has(t));
+        try {
+          app.romEdit(`${tiles.length === 1 ? `FG tile ${hex(tiles[0], 3)}` : `${tiles.length} FG tiles`}: palette ${row} (animation ${hex(this.sel, 2)})`, () => {
+            for (const t of tiles) { const w = paletteOn(src.fg(t), targets, row); if (w) setFgWords(app.rom, app.render, t, w); }
+          });
+        } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
+      } },
+      { label: 'Cancel' },
+    ]);
   }
 
   private sheet(tiles: number, get: (t: number) => Uint8Array | null, row: number, Z = 3): HTMLCanvasElement {
