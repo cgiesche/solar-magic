@@ -51,6 +51,10 @@ _Avoid_: checkpoint (that is the tape), midway screen (for the whole entrance)
 A screen exit with Lunar Magic's u flag: its own number (with the high bit) is the target level or secondary entrance, and it is secondary or standard on its own – so it leads into either bank (0xx/1xx). Every exit the editor writes is one, and the game's exits are made new-style when the clean game is patched, leading where the game leads them – an old-style exit (the game's rule) takes the high bit from the overworld submap Mario is on, the level's last exit deciding secondary.
 _Avoid_: LM exit, exit format 2
 
+**Exit to the overworld**:
+A secondary entrance that leads back to the overworld instead of into a level (Lunar Magic 3.00's): passing its level with the normal or the secret exit, or nothing, or ending the player's turn; optionally with another base event (the event of passing, + 1 for the secret exit) and teleporting Mario to a location of the overworld's star/pipe table (a star's or pipe's destination, or a location of its own). It belongs to a level, but is not one of its entrances.
+_Avoid_: overworld entrance (Mario leaves the level by it), warp
+
 **Camera start**:
 Where layer 1 (FG) and layer 2 (BG) start when Mario enters: the game's FG/BG start Y, or (Lunar Magic's, horizontal levels) a number of rows above Mario, the BG then by the level's BG start – its bottom at the level's bottom (by the BG's height), rows below the FG, or at 0. Moving an entrance keeps it.
 _Avoid_: FG/BG init (Lunar Magic's name), initial position
