@@ -6,6 +6,9 @@ import { STRUCT_EXT } from './structs.ts';
 import { COND_MARK, condByte, condOf, type Dm16Cond } from './cdm16.ts';
 import { MAP_SIZE } from './ram.ts';
 
+// the timer's hundreds per header time (the game's table, read when a level is entered from the overworld)
+export const TIME_TABLE = 0x0584d7;
+
 export const L1_PTRS = 0x05e000;
 export const L2_PTRS = 0x05e600;
 export const SPR_PTRS = 0x05ec00;
@@ -104,7 +107,7 @@ export interface PrimaryHeader {
   layer3Priority: number; // 1
   music: number; // 3
   spriteGfx: number; // 4
-  time: number; // 2
+  time: number; // 2: the hundreds of the timer from the game's table (TIME_TABLE)
   spritePalette: number; // 3
   fgPalette: number; // 3
   itemMemory: number; // 2

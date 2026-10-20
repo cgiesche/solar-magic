@@ -106,9 +106,6 @@ function start(app: App, at: Start | undefined, audio: AudioOut): void {
     if (move) setMarioPos(w, marioX(w) + move.x, marioY(w) + move.y);
     else setMarioPos(w, start.x, start.y);
   }
-  // sub-level loads keep the old timer; give the level its header time
-  const hundreds = app.rom.r8(0x0584d7 + lv.header.time);
-  s.wram[RAM.timer] = hundreds; s.wram[RAM.timer + 1] = 0; s.wram[RAM.timer + 2] = 0;
   const ppu = new PPU(s);
   s.ppu = ppu;
   const canvas = h('canvas', { width: 256, height: 224, class: 'play-canvas', tabIndex: 0 });

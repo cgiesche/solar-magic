@@ -9,6 +9,7 @@ import { translevelToLevel } from './overworld.ts';
 import { editorPatch, musicPatch, BG_HOOK, HEADER_MUSIC_TABLE } from './patches.ts';
 import { lt3Patches, type Lt3Place } from './layer3gfx.ts';
 import { RomReads, updateBytePages, PAGE_SHIFT } from './romdeps.ts';
+import { applyTriggers, type TriggerView } from './extrigger.ts';
 import { GM, RAM, SPR, MAP_BASE, MAP_SIZE, MAP_HI, CDM16_FLAGS, getS16, set16, setSpritePos } from './ram.ts';
 
 export const OV_L1 = 0x0000; // overlay offsets
@@ -43,6 +44,8 @@ export interface LevelOverride {
   switchPalaces?: boolean; // treat all switch palaces as pressed
   onOffSwitch?: boolean; // ON/OFF switch in the OFF state ($14AF)
   cdm16Flags?: Uint8Array; // the conditional Direct Map16 flags (CDM16_FLAGS, cdm16.ts flagBytes) the level loads with
+  timer?: number; // the timer's hundreds once the level has loaded (the game sets them only coming from the overworld)
+  exTriggers?: TriggerView; // ExAnimation triggers set once the level's load has set its own (extrigger.ts)
   trackSources?: boolean; // record ROM provenance of CGRAM (slower)
   translevel?: number; // $13BF (messages, Yoshi coins); default: the level itself if it is a main level
   midway?: boolean; // enter the translevel's level from the overworld with its midway point touched (a main level)
@@ -320,6 +323,8 @@ export class LevelEmulator {
       // the level music bank takes some 40 frames of it
       const loadLimit = musicCall >= 0 ? 120 : 30;
       while (w[RAM.gameMode] === GM.levelLoad && frames < loadLimit) { s.runFrame(); frames++; }
+      if (ov.timer !== undefined) { w[RAM.timer] = ov.timer; w[RAM.timer + 1] = 0; w[RAM.timer + 2] = 0; }
+      if (ov.exTriggers) applyTriggers(w, ov.exTriggers);
       s.hook = ov.fadeHook?.() ?? null;
       // with the sound unit emulated, the fade-in also waits for the song's upload (AddmusicK sends a
       // song with its samples then: well over 100 frames for big ones)

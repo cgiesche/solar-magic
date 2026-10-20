@@ -3,7 +3,10 @@
 // (Full text: LICENSE in this folder.)
 //
 // Lunar Magic compatible ExAnimation engine from Kobo (https://github.com/denley/kobo),
-// crates/kobo-core/asm/lunar-magic/exanimation.asm and memory.asm, commit 395083bbf7a8664d7c970ce465a5fb418002ab91, unchanged.
+// crates/kobo-core/asm/lunar-magic/exanimation.asm and memory.asm, commit 395083bbf7a8664d7c970ce465a5fb418002ab91.
+// Changed by Solar Magic (marked [Solar Magic]): the precision timer (trigger 0F) – a slot with it shares the
+// counter of the first slot of its 8 and a rotation with it always runs, as Lunar Magic's help describes
+// (level_ex20.htm); Kobo's runs it like "always".
 // Only this file is under the MPL; it is used as Asar source by ../exanim.ts.
 
 export const KOBO_COMMIT = '395083bbf7a8664d7c970ce465a5fb418002ab91';
@@ -591,9 +594,23 @@ run_slot:
     STA.l !OneShot,x
     RTS
 
-; X = the slot's counter's index; A = the counter.
+; X = the slot's counter's index; A = the counter. A slot with the precision
+; timer (trigger 0F) takes the counter of the first slot of its 8 (Lunar
+; Magic's help, level_ex20.htm). [Solar Magic]
 counter:
+    PHY
+    LDY !Slot
+    INY
+    LDA [!List],y               ; the trigger
+    PLY
+    CMP #$0F
+    BNE .own
     LDA !Index
+    AND #$18
+    BRA .index
+.own:
+    LDA !Index
+.index:
     CLC
     ADC !Counter
     REP #$20
@@ -909,6 +926,8 @@ rotation:
     BCS .holds
     CMP #$00
     BEQ .go                     ; none: always
+    CMP #$0F
+    BEQ .go                     ; the precision timer: always [Solar Magic]
     LDA 1,s
     CMP #$19
     BEQ .go

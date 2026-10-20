@@ -59,6 +59,9 @@ export const RAM = {
   // level
   translevel: 0x13bf,
   onOff: 0x14af,
+  blueP: 0x14ad, silverP: 0x14ae, // the P-switches' timers (running while not 0)
+  starTimer: 0x1490, // Mario has a star while not 0
+  dragonCoins: 0x1420, // Dragon Coins collected in the level
   layer3Tide: 0x1403, // 1 rising and falling, 2 fixed
   layer3Setting: 0x1be3,
   sublevelCount: 0x141a,
@@ -115,6 +118,9 @@ export const EXIT_FLAGS_RAM: [number, number] = [0x7f3679, 1];
 export const EXGFX_HI_RAM: [number, number] = [0x7f367a, 9];
 // Lunar Magic's conditional Direct Map16 flags (cdm16.ts), which community code sets: 128 bits, low to high
 export const CDM16_FLAGS: [number, number] = [0x7fc060, 16];
+// Lunar Magic's ExAnimation RAM (extrigger.ts), which community code sets and reads: the manual frames (16 bytes),
+// the slots' frame counters (level 32, then global 32), the one-shot triggers (32 bits), the custom ones (16 bits)
+export const EXTRIGGER_RAM = { manual: 0x7fc070, counters: 0x7fc080, oneShot: 0x7fc0f8, custom: 0x7fc0fc } as const;
 // Lunar Magic's RAM for a horizontal level's height, which community code reads too: the height in
 // pixels (also a screen's bytes in the level data), and the screens' Map16 addresses in bank 0's RAM
 // (the game's mode tables point there): 3-byte pointers to the low and the high bytes, then the

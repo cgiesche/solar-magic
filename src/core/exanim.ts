@@ -143,7 +143,7 @@ export const TYPE_NAMES: Record<number, string> = {
 export function triggerName(t: number): string {
   const fixed: Record<number, string> = {
     0x00: 'Always', 0x01: 'Blue P-switch', 0x02: 'Silver P-switch', 0x03: 'ON/OFF switch', 0x04: 'Star', 0x05: 'Time below 100',
-    0x06: 'Star (one-time)', 0x07: '5 Dragon Coins', 0x08: '5 Dragon Coins (one-time)', 0x0f: 'Precision timer',
+    0x06: 'Time below 100 (one shot)', 0x07: '5 Dragon Coins', 0x08: '5 Dragon Coins (one shot)', 0x0f: 'Precision timer',
   };
   if (fixed[t] !== undefined) return fixed[t];
   if (t >= 0x09 && t <= 0x0e) return `Reserved ${t.toString(16).toUpperCase()}`;
@@ -154,7 +154,7 @@ export function triggerName(t: number): string {
 }
 // what the second frame set means
 export function secondSetName(t: number): string {
-  return ({ 1: 'P-switch active', 2: 'P-switch active', 3: 'Switch OFF', 4: 'Star active', 5: 'Time below 100', 7: '5 Dragon Coins collected' } as Record<number, string>)[t] ?? 'Trigger on';
+  return ({ 1: 'P-switch active', 2: 'P-switch active', 3: 'Switch OFF', 4: 'Star active', 5: 'Time below 100', 7: '5 Dragon Coins collected' } as Record<number, string>)[t] ?? `${triggerName(t)} on`;
 }
 
 // ---- color rotations (types 18-1B, LM help: level_ex20.htm) ----
@@ -170,12 +170,12 @@ export function setRotationRange(e: ExSlot, first: number, count: number): void 
 export const reversesOnTrigger = (type: number) => type === 0x19 || type === 0x1b;
 export const stepsPerSecond = (delay: number) => 60 / 8 / delay;
 // the way a rotation turns while its trigger holds or not, null while it waits: right (18, 19) or left
-// (1A, 1B); 18 and 1A run only while their trigger holds (always without one), 19 and 1B turn the
-// other way while it holds (the engine's rotation)
+// (1A, 1B); 18 and 1A run only while their trigger holds (always without one or with the precision
+// timer, 0F), 19 and 1B turn the other way while it holds (the engine's rotation)
 export function rotationStep(type: number, trigger: number, holds: boolean): 'right' | 'left' | null {
-  const right = type < 0x1a;
-  if (!reversesOnTrigger(type)) return trigger === 0 || holds ? (right ? 'right' : 'left') : null;
-  return right !== (holds && trigger !== 0) ? 'right' : 'left';
+  const right = type < 0x1a, none = trigger === 0 || trigger === 0x0f;
+  if (!reversesOnTrigger(type)) return none || holds ? (right ? 'right' : 'left') : null;
+  return right !== (holds && !none) ? 'right' : 'left';
 }
 // colors after `steps` steps: right moves each to the next one, the last to the first
 export function rotated<T>(colors: T[], dir: 'right' | 'left', steps: number): T[] {
