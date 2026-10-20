@@ -598,7 +598,7 @@ export class GfxTab implements WsPanel {
       f.num >= ANIM_FILE ? h('div', { class: 'hint' }, `Frames for own tile animations (“Animations” tab). Lunar Magic: ${lmAnimName(f.num)}.`) : '',
       f.num >= ANIM_FILE && f.empty ? h('button', { onclick: () => void this.newAnimFile(f.num) }, 'Create (128 empty tiles)') : '',
       used.length ? h('div', { class: 'hint' }, `In the level as ${used.join(', ')}`) : h('div', { class: 'hint' }, 'Not used by the current level'),
-      f.num < ANIM_FILE && !f.empty ? this.nameField(f.num) : '',
+      f.num >= VANILLA_GFX && f.num < ANIM_FILE && !f.empty ? this.nameField(f.num) : '',
       f.num < ANIM_FILE && !f.empty ? this.assignMenu(f.num, used.length > 0) : '',
       f.num < ANIM_FILE && !f.empty ? usedInList(this.app, 'Used in levels', (this.usage().get(f.num) ?? []).map((u) => ({ level: u.level, text: u.slots.join(', ') })), 0,
         f.num >= VANILLA_GFX ? 'In no level\'s graphics slots: inserted, but unused.' : 'In no level\'s graphics slots.') : '',
@@ -1062,9 +1062,10 @@ export class GfxTab implements WsPanel {
           h('td', { class: 'mono' }, x.num === null ? '–' : gfxName(x.num)),
           h('td', { class: x.status === 'skip' ? 'err' : x.status === 'unchanged' ? 'hint' : '' }, result(x)))))));
     const go = () => {
+      const label = `${todo.length} graphics file${todo.length > 1 ? 's' : ''} imported`;
       try {
-        app.romEdit(`${todo.length} graphics file${todo.length > 1 ? 's' : ''} imported`, () => applyGfxBins(app.rom, plan));
-        toast(`${todo.length} graphics file${todo.length > 1 ? 's' : ''} imported`);
+        app.romEdit(label, () => applyGfxBins(app.rom, plan));
+        toast(label);
       } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
     };
     modal(`Import ${files.length} graphics file${files.length > 1 ? 's' : ''}`, body,
@@ -1177,7 +1178,7 @@ export class GfxTab implements WsPanel {
       const named = parseGfxBinName(file.name);
       const kind = this.importEdit(`${file.name} → ${gfxName(target)}`, into, () => {
         const what = storeGfxBin(this.app.rom, target, data);
-        if (named?.name && named.num === target) setGfxName(this.app.rom, target, named.name);
+        if (named?.name && named.num === target && target >= VANILLA_GFX) setGfxName(this.app.rom, target, named.name);
         return what;
       });
       this.select(target);

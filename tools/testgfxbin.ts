@@ -77,7 +77,7 @@ const pattern = (n: number, seed: number) => { const d = new Uint8Array(n); for 
   setGfxName(rom, 0x80, 'Ghost: house?');
   check(ownName(rom, 0x80) === 'Ghost: house?' && gfxBinName(rom, 0x80) === 'ExGFX80_Ghost house.bin', 'the user\'s name wins; characters a file name can\'t hold are left out');
   setGfxName(rom, 0x00, 'Ground');
-  check(gfxBinName(rom, 0x00) === 'GFX00_Ground.bin', 'the game\'s files can be named too');
+  check(gfxBinName(rom, 0x00) === 'GFX00.bin', 'the game\'s files keep Lunar Magic\'s plain GFX##.bin');
   setGfxName(rom, 0x80, '');
   check(ownName(rom, 0x80) === null && gfxBinName(rom, 0x80) === 'ExGFX80_Boo Ring.bin', 'an empty name removes it');
 }
@@ -89,6 +89,9 @@ const pattern = (n: number, seed: number) => { const d = new Uint8Array(n); for 
   check(p('Graphics/GFX1A.bin') === JSON.stringify({ num: 0x1a, game: true, name: '' }), 'Graphics/GFX1A.bin');
   check(p('ExGraphics/ExGFX100_Forest.bin') === JSON.stringify({ num: 0x100, game: false, name: 'Forest' }), 'ExGFX100_Forest.bin');
   check(p('exgfx80 Bush.BIN') === JSON.stringify({ num: 0x80, game: false, name: 'Bush' }), 'exgfx80 Bush.BIN (case, space)');
+  check(p('ExGFX80Forest.bin') === JSON.stringify({ num: 0x80, game: false, name: 'Forest' }) && p('ExGFXA0Cave.bin') === JSON.stringify({ num: 0xa0, game: false, name: 'Cave' }), 'ExGFX80Forest.bin, ExGFXA0Cave.bin (no separator: the name starts at the word)');
+  check(p('ExGFX80F.bin') === JSON.stringify({ num: 0x80f, game: false, name: '' }) && p('ExGFX10ADesert.bin') === JSON.stringify({ num: 0x10a, game: false, name: 'Desert' }), 'ExGFX80F.bin is 80F, ExGFX10ADesert.bin 10A');
+  check(p('ExGFX80_BG2.bin') === JSON.stringify({ num: 0x80, game: false, name: '' }), 'a slot suffix (ExGFX80_BG2) is no name');
   check(parseGfxBinName('AllGFX.bin') === null && parseGfxBinName('ExGFX80.png') === null && parseGfxBinName('readme.txt') === null, 'no number, no .bin: not a GFX file');
 }
 

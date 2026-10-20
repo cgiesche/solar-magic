@@ -68,20 +68,25 @@ export function storeGfxBin(rom: Rom, num: number, data: Uint8Array): string {
 const fileSafe = (s: string) => s.replace(/[\\/:*?"<>|\x00-\x1f]/g, '').replace(/\s+/g, ' ').trim().replace(/\.+$/, '');
 
 // the file name: GFX## for the game's files, ExGFX# for the others, then _Name when one is known
-// (label: gfxLabels, when naming many)
+// (Lunar Magic's descriptive names are the ExGFX's; label: gfxLabels, when naming many)
 export function gfxBinName(rom: Rom, num: number, label = gfxLabels(rom)): string {
+  if (num < VANILLA_GFX) return `GFX${gfxHex(num)}.bin`;
   const name = fileSafe(label(num) ?? '');
-  return `${num < VANILLA_GFX ? 'GFX' : 'ExGFX'}${gfxHex(num)}${name ? `_${name}` : ''}.bin`;
+  return `ExGFX${gfxHex(num)}${name ? `_${name}` : ''}.bin`;
 }
 
 const baseName = (path: string) => path.slice(Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')) + 1);
 
 // number and descriptive name from a file name (also in a folder); game: GFX## (one of the game's
-// files), else ExGFX; null: not a numbered .bin
+// files), else ExGFX; null: not a numbered .bin. A third hex digit followed by a lowercase letter starts
+// the name (ExGFX80Forest: 80, "Forest"; ExGFX10ADesert: 10A); a slot suffix of a package's file (ExGFX80_BG2) is no name.
 export function parseGfxBinName(path: string): { num: number; game: boolean; name: string } | null {
   const m = /^(ex)?gfx([0-9a-f]{1,3})(.*)\.bin$/i.exec(baseName(path));
   if (!m) return null;
-  return { num: parseInt(m[2], 16), game: !m[1], name: m[3].replace(/^[\s_-]+/, '').trim() };
+  let [digits, rest] = [m[2], m[3]];
+  if (digits.length === 3 && /^[a-f]/i.test(digits[2]) && /^[a-z]/.test(rest)) [digits, rest] = [digits.slice(0, 2), digits[2] + rest];
+  const name = rest.replace(/^[\s_-]+/, '').trim();
+  return { num: parseInt(digits, 16), game: !m[1], name: /^(BG[1-3]|FG[1-3]|SP[1-4])$/i.test(name) ? '' : name };
 }
 
 export interface BinFile { path: string; data: Uint8Array }
@@ -95,6 +100,8 @@ export function binFiles(path: string, data: Uint8Array): BinFile[] {
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([p, d]) => ({ path: p, data: d }));
 }
+
+const sameBytes = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((v, i) => v === b[i]);
 
 export type BinStatus = 'new' | 'replace' | 'unchanged' | 'skip';
 export interface BinPlanItem extends BinFile { num: number | null; name: string; status: BinStatus; why?: string }
@@ -113,7 +120,7 @@ export function planGfxBins(rom: Rom, files: BinFile[]): BinPlanItem[] {
     try { checkGfxNumber(p.num, binStorage(rom, p.num, f.data)); } catch (e) { return skip(e instanceof Error ? e.message : String(e)); }
     seen.set(p.num, f.path);
     const cur = gfxBinData(rom, p.num);
-    const status: BinStatus = !cur ? 'new' : cur.length === f.data.length && cur.every((v, i) => v === f.data[i]) ? 'unchanged' : 'replace';
+    const status: BinStatus = !cur ? 'new' : sameBytes(cur, f.data) ? 'unchanged' : 'replace';
     return { ...f, num: p.num, name: p.name, status };
   });
 }
@@ -125,7 +132,7 @@ export function applyGfxBins(rom: Rom, plan: BinPlanItem[]): number {
   for (const x of plan) {
     if ((x.status !== 'new' && x.status !== 'replace') || x.num === null) continue;
     storeGfxBin(rom, x.num, x.data);
-    if (x.name) names.set(x.num, x.name);
+    if (x.name && x.num >= VANILLA_GFX) names.set(x.num, x.name);
     n++;
   }
   if (names.size) setGfxNames(rom, names);

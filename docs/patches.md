@@ -708,6 +708,7 @@ again.
 * `src/core/bgpack.ts`, `src/ui/levelimport.ts`: level import (Lunar Magic).
 * `src/core/patchapply.ts`: applying, conflict checking, removing.
 * `src/core/patchreg.ts`: patch registry "SMWA" in the ROM.
+* `src/core/gfxnames.ts`: names of GFX/ExGFX files "SMWN" (the user's, or from an imported file's descriptive name).
 * `src/core/pkgreg.ts`, `src/ui/pkgtrack.ts`, `src/ui/packages.ts`: package registry "SMWK", observing,
   removing; the *Packages* tab.
 * `src/core/patchpkg.ts`: `.zip`, `patch.json`, defines.
