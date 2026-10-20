@@ -178,6 +178,14 @@ export function triggerProblems(level: ExList | null, global: ExList | null): { 
     }
     for (const [n, f] of l.manual) if (f !== 0xff && f >= (manualFrames.get(n) ?? 0x100)) out.push({ text: `${g ? 'Global' : 'Level'} Trigger Init: Manual ${hx(n, 1)} starts at frame ${hx(f, 2)}, but a slot using it has only ${manualFrames.get(n)} frames – it shows frame 00 there`, slots: [] });
     for (const [n, f] of l.manual) if (f === 0xff) out.push({ text: `${g ? 'Global' : 'Level'} Trigger Init: Manual ${hx(n, 1)} starts at frame FF – the engine takes FF for “nothing shown yet”, so the frame never shows; choose 00–FE`, slots: [] });
+    // the precision timer: its slots and the first of their 8 move one counter on, each at the frames it
+    // has (from 0 again past its last), so with different frame counts they skip frames
+    for (const first of [0x00, 0x08, 0x10, 0x18]) {
+      const group = [...l.slots].sort((a, b) => a[0] - b[0]).filter(([n, e]) => n >= first && n < first + 8 && kindOf(e.type) && (n === first || e.trigger === PRECISION));
+      if (!group.some(([n, e]) => n !== first && e.trigger === PRECISION) || !group.some(([, e]) => kindOf(e.type) !== 'rotation')) continue;
+      const frames = new Set(group.map(([, e]) => e.framesLess1));
+      if (frames.size > 1) out.push({ text: `Slots ${group.map(([slot]) => slotName({ global: g, slot })).join(', ')} share the counter of slot ${slotName({ global: g, slot: first })} (the precision timer), with different frame counts (${group.map(([, e]) => e.framesLess1 + 1).join(', ')}): each moves it on and back to 0 past its own last frame, so they skip frames`, slots: group.map(([slot]) => ({ global: g, slot })) });
+    }
   }
   for (const [t, refs] of shots) if (refs.length > 1) out.push({ text: `${triggerName(t)} is used by ${refs.length} slots (${refs.map(slotName).join(', ')}): the first to finish turns it off and pauses the others`, slots: refs });
   return out;

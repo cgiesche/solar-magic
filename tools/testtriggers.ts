@@ -156,6 +156,10 @@ check(triggerRam(0x04)?.ram === '$1490' && triggerRam(0x00) === null, 'star: the
   m.manual.set(3, 2);
   check(triggerProblems(m, null).some((x) => x.text.includes('Manual 3') && x.text.includes('only 2 frames')), 'a manual init frame past a slot\'s last is a problem');
   const r = listOf([0, { type: 0x18, trigger: 0x31, framesLess1: 0, dest: 0x0321, frames: [] }]);
+  const pt = listOf([0, tiles(T0, 0x00, [1, 2, 3, 4])], [4, tiles(T1, 0x0f, [1, 2])]);
+  check(triggerProblems(pt, null).some((x) => x.text.includes('precision timer') && x.text.includes('4, 2')), 'precision timer slots sharing a counter with different frame counts are a problem');
+  pt.slots.set(4, tiles(T1, 0x0f, [1, 2, 3, 4]));
+  check(triggerProblems(pt, null).length === 0, 'with the same frame count they are not');
   check(triggerProblems(r, null).some((x) => x.text.includes('Custom 1 instead')), 'a rotation with a one-shot trigger is a problem (the engine reads a custom bit)');
 }
 

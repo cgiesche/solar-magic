@@ -596,7 +596,8 @@ run_slot:
 
 ; X = the slot's counter's index; A = the counter. A slot with the precision
 ; timer (trigger 0F) takes the counter of the first slot of its 8 (Lunar
-; Magic's help, level_ex20.htm). [Solar Magic]
+; Magic's help, level_ex20.htm) and moves it on as well: with more of them it
+; runs faster, the help's speed trick for rotations. [Solar Magic]
 counter:
     PHY
     LDY !Slot
