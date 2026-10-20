@@ -10,9 +10,9 @@ import { levelTranslevel, encodeSecondaryHeader, startHeader, entrancePos, mainS
 import { Apu, apuReady, loadApu } from '../core/apu.ts';
 import { AudioOut } from './audio.ts';
 import { musicPlayer } from './musicplayer.ts';
-import { GM, RAM, marioX, marioY, setMarioPos, EXTRIGGER_RAM } from '../core/ram.ts';
-import { applyTriggers, emptyTriggerView, isCustom, isManual, isOneShot, CUSTOM, MANUAL, ONE_SHOT } from '../core/extrigger.ts';
-import { triggerName } from '../core/exanim.ts';
+import { GM, RAM, marioX, marioY, setMarioPos } from '../core/ram.ts';
+import { applyTriggers, emptyTriggerView, customOn, switchName, isCustom, isManual, isOneShot, CUSTOM, MANUAL, ONE_SHOT } from '../core/extrigger.ts';
+import { shownSwitches } from './triggerpanel.ts';
 
 const KEYMAP: Record<string, number> = {
   ArrowUp: 0x0800, ArrowDown: 0x0400, ArrowLeft: 0x0200, ArrowRight: 0x0100,
@@ -196,9 +196,9 @@ function start(app: App, at: Start | undefined, audio: AudioOut): void {
 // a custom trigger turns on or off, a manual one shows the frame, a game condition is set (the view's
 // triggers are set at the start already)
 function triggerControls(app: App, w: Uint8Array, done: () => void): HTMLElement | string {
-  const used = [...app.levelTriggers().keys()];
+  const used = [...shownSwitches(app).keys()];
   if (!used.length) return '';
-  const sel = h('select', { title: 'An animation trigger of this level' }, used.map((t) => h('option', { value: String(t) }, t === 0x05 ? 'Time below 100' : t === 0x07 ? '5 Dragon Coins' : t === 0x03 ? 'ON/OFF switch' : triggerName(t))));
+  const sel = h('select', { title: 'An animation trigger of this level' }, used.map((t) => h('option', { value: String(t) }, t === 0x03 ? 'ON/OFF switch' : switchName(t))));
   const frame = h('input', { class: 'hex', value: '00', size: 3, maxLength: 2, spellcheck: false, title: 'The frame to show (hex 00–FE)' });
   const btn = h('button');
   const label = () => {
@@ -210,7 +210,7 @@ function triggerControls(app: App, w: Uint8Array, done: () => void): HTMLElement
   btn.addEventListener('click', () => {
     const t = Number(sel.value), v = emptyTriggerView();
     if (isManual(t)) v.manual.set(t - MANUAL, Math.min(0xfe, parseInt(frame.value, 16) || 0));
-    else if (isCustom(t)) { const n = t - CUSTOM, a = EXTRIGGER_RAM.custom - 0x7e0000 + (n >> 3); v.custom.set(n, !(w[a] & (1 << (n & 7)))); }
+    else if (isCustom(t)) v.custom.set(t - CUSTOM, !customOn(w, t - CUSTOM));
     else if (isOneShot(t)) v.oneShot.add(t - ONE_SHOT);
     else if (t === 0x03) w[RAM.onOff] ^= 1;
     else v.game.add(t);

@@ -152,6 +152,11 @@ check(triggerRam(0x04)?.ram === '$1490' && triggerRam(0x00) === null, 'star: the
   check(p.some((x) => x.includes('Manual 3') && x.includes('FF')), 'a manual init frame FF is a problem');
   check(p.some((x) => x.includes('256 frames')), 'a one-shot slot of 0x100 frames is a problem');
   check(triggerProblems(listOf([0, tiles(T0, 0x33, [1])]), null).length === 0, 'none in a plain list');
+  const m = listOf([0, tiles(T0, 0x13, [1, 2])]);
+  m.manual.set(3, 2);
+  check(triggerProblems(m, null).some((x) => x.text.includes('Manual 3') && x.text.includes('only 2 frames')), 'a manual init frame past a slot\'s last is a problem');
+  const r = listOf([0, { type: 0x18, trigger: 0x31, framesLess1: 0, dest: 0x0321, frames: [] }]);
+  check(triggerProblems(r, null).some((x) => x.text.includes('Custom 1 instead')), 'a rotation with a one-shot trigger is a problem (the engine reads a custom bit)');
 }
 
 console.log(bad ? `${bad} failures` : 'triggers ok');

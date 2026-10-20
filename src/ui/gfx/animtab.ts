@@ -23,7 +23,7 @@ import { remapSlot } from '../../core/remap.ts';
 import { remapEditor } from '../remaplist.ts';
 import type { LevelRender } from '../../core/levelemu.ts';
 import {
-  triggersFor, maxFrames, triggerRam, triggerProblems, customInit, setCustomInit, isManual, isCustom, isOneShot, playsOnce, PRECISION, type CustomInit, type SlotRef,
+  triggersFor, maxFrames, triggerRam, triggerProblems, customInit, setCustomInit, isManual, isCustom, isOneShot, playsOnce, slotName, PRECISION, type CustomInit, type SlotRef,
 } from '../../core/extrigger.ts';
 import { triggerPanel } from '../triggerpanel.ts';
 
@@ -64,6 +64,8 @@ export function animLinks(ws: GfxWorkspace, own: { global: boolean; slot: number
   return own.map((a, i) => h('span', null, i ? ', ' : '', h('a', { href: '#', title: 'Open in the Animations tab (Ctrl+click on the tile or color does the same)', onclick: (e: Event) => { e.preventDefault(); ws.showAnim(a.global, a.slot); } }, `Animation ${hex(a.slot, 2)} (${a.global ? 'global' : 'level'})`)));
 }
 
+// a slot's frames at the trigger's limit (extrigger.ts maxFrames), said so
+const full = (x: ExSlot, cs: number[][]) => { const max = maxFrames(x.trigger); if (cs.length < max) return false; toast(`At most ${max} frames`); return true; };
 const fmt = (v: number) => String(+v.toFixed(3));
 const speedName = (delay: number) => `${fmt(stepsPerSecond(delay))} steps per second`;
 // a rotation's colors as row·column, first–last
@@ -295,7 +297,7 @@ export class AnimTab implements WsPanel {
     box.append(h('div', { class: 'panel-title' }, this.global ? 'Global animations' : `Animations of level ${hex(this.app.level.number, 3)}`, h('span', { class: 'hint' }, `${l.slots.size} of ${SLOTS}`)));
     box.append(this.sourceSelect(l));
     for (const p of triggerProblems(readLevelList(this.app.rom, this.app.level.number), readGlobalList(this.app.rom))) {
-      box.append(h('div', { class: 'warn-box' }, p.text, ' ', p.slots.map((r, i) => h('span', null, i ? ', ' : '', h('a', { href: '#', onclick: (e: Event) => { e.preventDefault(); this.select(r.global, r.slot); } }, `${r.global ? 'global' : 'level'} ${hex(r.slot, 2)}`)))));
+      box.append(h('div', { class: 'warn-box' }, p.text, ' ', p.slots.map((r, i) => h('span', null, i ? ', ' : '', h('a', { href: '#', onclick: (e: Event) => { e.preventDefault(); this.select(r.global, r.slot); } }, slotName(r))))));
     }
     const items = h('div', { class: 'at-slot-list' });
     for (const [n, s] of [...l.slots.entries()].sort((a, b) => a[0] - b[0])) {
@@ -664,14 +666,14 @@ export class AnimTab implements WsPanel {
       h('div', { class: 'row' },
         h('button', { title: 'New frame after the selected one (next tiles of the graphic)', onclick: () => void this.editSlot((x) => {
           const cs = this.columns(x);
-          if (cs.length >= maxFrames(x.trigger)) { toast(`At most ${maxFrames(x.trigger)} frames`); return; }
+          if (full(x, cs)) return;
           cs.splice(this.frame + 1, 0, cs[this.frame].map((v) => v + step));
           this.setColumns(x, cs);
           this.frame++;
         }, 'Frame added') }, '+ Frame'),
         h('button', { title: 'Selected frame once more (shows it twice as long)', onclick: () => void this.editSlot((x) => {
           const cs = this.columns(x);
-          if (cs.length >= maxFrames(x.trigger)) { toast(`At most ${maxFrames(x.trigger)} frames`); return; }
+          if (full(x, cs)) return;
           cs.splice(this.frame + 1, 0, cs[this.frame].slice());
           this.setColumns(x, cs);
         }, 'Frame lengthened') }, 'Longer'),
@@ -731,7 +733,7 @@ export class AnimTab implements WsPanel {
     sw.dataset.slot = String(this.sel);
     d.append(h('div', { class: 'at-big-wrap' }, sw, h('div', { class: 'hint' }, 'Preview')), strip,
       h('div', { class: 'row' },
-        h('button', { onclick: () => void this.editSlot((x) => { const cs = this.columns(x); if (cs.length >= maxFrames(x.trigger)) { toast(`At most ${maxFrames(x.trigger)} frames`); return; } cs.splice(this.frame + 1, 0, cs[this.frame].slice()); this.setColumns(x, cs); this.frame++; }, 'Frame added') }, '+ Frame'),
+        h('button', { onclick: () => void this.editSlot((x) => { const cs = this.columns(x); if (full(x, cs)) return; cs.splice(this.frame + 1, 0, cs[this.frame].slice()); this.setColumns(x, cs); this.frame++; }, 'Frame added') }, '+ Frame'),
         h('button', { disabled: cols.length < 2, onclick: () => void this.editSlot((x) => { const cs = this.columns(x); cs.splice(this.frame, 1); this.setColumns(x, cs); this.frame = Math.max(0, this.frame - 1); }, 'Frame removed') }, 'Remove')),
       h('p', { class: 'hint' }, 'Each frame shows for 8 game frames (≈0.13 s). The same color twice in a row shows it longer.'));
   }

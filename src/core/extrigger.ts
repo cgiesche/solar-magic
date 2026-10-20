@@ -46,6 +46,10 @@ export function switchOf(t: number): number | null {
 }
 
 const hx = (v: number, n: number) => v.toString(16).toUpperCase().padStart(n, '0');
+// a switch's name (the game's one-shot conditions switch with their condition)
+export const switchName = (sw: number) => ({ 0x03: 'ON/OFF switch OFF', 0x05: 'Time below 100', 0x07: '5 Dragon Coins' } as Record<number, string>)[sw] ?? triggerName(sw);
+// every switch the view can set: the game's conditions, manual, custom and one-shot triggers
+export const ALL_SWITCHES = [...GAME_HOLDS, ...range(MANUAL, 16), ...range(CUSTOM, 16), ...range(ONE_SHOT, 32)];
 const addr = (a: number) => `$${hx(a, a > 0xffff ? 6 : 4)}`;
 
 // where a trigger lives in RAM, what it holds there, and an ASM line that sets it (16-bit A for the bits,
@@ -126,8 +130,14 @@ export function applyTriggers(w: Uint8Array, v: TriggerView): void {
   for (const [n, f] of v.manual) w[W(EXTRIGGER_RAM.manual) + n] = f;
 }
 
+// whether custom trigger n is on in the game's RAM (bank $7E from 0)
+export function customOn(w: Uint8Array, n: number): boolean {
+  return !!(w[EXTRIGGER_RAM.custom - 0x7e0000 + (n >> 3)] & (1 << (n & 7)));
+}
+
 // ---- what a level uses ----
 export type SlotRef = { global: boolean; slot: number };
+export const slotName = (r: SlotRef) => `${r.global ? 'global' : 'level'} ${hx(r.slot, 2)}`;
 // the switches (switchOf) the slots of the level's and the global list use, with their slots; custom
 // triggers and manual frames a Trigger Init sets count too (without slots); ordered by switch
 export function usedTriggers(level: ExList | null, global: ExList | null): Map<number, SlotRef[]> {
@@ -150,17 +160,23 @@ export function usedTriggers(level: ExList | null, global: ExList | null): Map<n
 }
 
 // ---- problems ----
-const slotName = (r: SlotRef) => `${r.global ? 'global' : 'level'} ${hx(r.slot, 2)}`;
 export function triggerProblems(level: ExList | null, global: ExList | null): { text: string; slots: SlotRef[] }[] {
   const out: { text: string; slots: SlotRef[] }[] = [];
   // the same one-shot in several slots of the level (its own and the global ones run there)
   const shots = new Map<number, SlotRef[]>();
+  // a manual trigger's slots: their fewest frames (the engine shows frame 0 for a frame past a slot's last)
+  const manualFrames = new Map<number, number>();
+  for (const l of [level, global]) for (const e of l?.slots.values() ?? []) {
+    if (isManual(e.trigger)) manualFrames.set(e.trigger - MANUAL, Math.min(manualFrames.get(e.trigger - MANUAL) ?? 0x100, e.framesLess1 + 1));
+  }
   for (const [g, l] of [[false, level], [true, global]] as const) {
     if (!l) continue;
     for (const [slot, e] of l.slots) {
+      if (kindOf(e.type) === 'rotation' && (isManual(e.trigger) || isOneShot(e.trigger))) out.push({ text: `Slot ${slotName({ global: g, slot })} is a color rotation with ${triggerName(e.trigger)}: the engine never runs a rotation for it (${isOneShot(e.trigger) ? `it reads Custom ${hx((e.trigger - CUSTOM) & 15, 1)} instead` : 'it waits forever'}) – choose a custom trigger`, slots: [{ global: g, slot }] });
       if (isOneShot(e.trigger)) { const a = shots.get(e.trigger) ?? []; a.push({ global: g, slot }); shots.set(e.trigger, a); }
       if (playsOnce(e.trigger) && kindOf(e.type) !== 'rotation' && e.framesLess1 + 1 > 0xff) out.push({ text: `Slot ${slotName({ global: g, slot })} plays once (${triggerName(e.trigger)}) with 256 frames – at most 255: the engine never ends it`, slots: [{ global: g, slot }] });
     }
+    for (const [n, f] of l.manual) if (f !== 0xff && f >= (manualFrames.get(n) ?? 0x100)) out.push({ text: `${g ? 'Global' : 'Level'} Trigger Init: Manual ${hx(n, 1)} starts at frame ${hx(f, 2)}, but a slot using it has only ${manualFrames.get(n)} frames – it shows frame 00 there`, slots: [] });
     for (const [n, f] of l.manual) if (f === 0xff) out.push({ text: `${g ? 'Global' : 'Level'} Trigger Init: Manual ${hx(n, 1)} starts at frame FF – the engine takes FF for “nothing shown yet”, so the frame never shows; choose 00–FE`, slots: [] });
   }
   for (const [t, refs] of shots) if (refs.length > 1) out.push({ text: `${triggerName(t)} is used by ${refs.length} slots (${refs.map(slotName).join(', ')}): the first to finish turns it off and pauses the others`, slots: refs });

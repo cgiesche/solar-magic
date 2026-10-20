@@ -7,12 +7,27 @@ import type { App } from './app.ts';
 import { h, toast, hexInput } from './dom.ts';
 import type { MenuItem } from './menu.ts';
 import { hex } from '../core/names.ts';
-import { triggerName } from '../core/exanim.ts';
-import { triggerRam, isCustom, isManual, isOneShot, CUSTOM, MANUAL, ONE_SHOT, type SlotRef, type TriggerView } from '../core/extrigger.ts';
+import {
+  triggerRam, switchName, slotName, isCustom, isManual, isOneShot, ALL_SWITCHES, CUSTOM, MANUAL, ONE_SHOT, type SlotRef, type TriggerView,
+} from '../core/extrigger.ts';
 
-// a switch's name (the game's one-shot conditions switch with their condition)
-const switchName = (sw: number) => ({ 0x03: 'ON/OFF switch OFF', 0x05: 'Time below 100', 0x07: '5 Dragon Coins' } as Record<number, string>)[sw] ?? triggerName(sw);
-const slotName = (r: SlotRef) => `${r.global ? 'global' : 'level'} ${hex(r.slot, 2)}`;
+// the switches shown: those the level's and the global slots (and Trigger Inits) use, and those the view sets
+export function shownSwitches(app: App): Map<number, SlotRef[]> {
+  const out = app.levelTriggers(), v = app.exTriggers;
+  const add = (sw: number) => { if (!out.has(sw)) out.set(sw, []); };
+  v.game.forEach(add);
+  for (const n of v.custom.keys()) add(CUSTOM + n);
+  for (const n of v.manual.keys()) add(MANUAL + n);
+  for (const n of v.oneShot) add(ONE_SHOT + n);
+  return new Map([...out].sort((a, b) => a[0] - b[0]));
+}
+// a select of the switches not shown yet: picking one sets it in the view (Lunar Magic's view offers them all)
+function otherSwitch(app: App, shown: Map<number, SlotRef[]>): HTMLSelectElement {
+  const sel = h('select', { title: 'Switch a trigger no slot here uses yet (e.g. for code that sets it)' }, h('option', { value: '' }, 'Other trigger …'),
+    ALL_SWITCHES.filter((sw) => !shown.has(sw)).map((sw) => h('option', { value: String(sw) }, switchName(sw))));
+  sel.addEventListener('change', () => { if (sel.value) setSwitch(app, Number(sel.value), isManual(Number(sel.value)) ? 0 : true); });
+  return sel;
+}
 
 // a switch's state in the view: on / the manual frame (the level's init where the view sets none)
 export function switchState(app: App, sw: number): boolean | number {
@@ -37,10 +52,10 @@ const toggleTitle = (sw: number) => isOneShot(sw) ? 'Fired once the level has lo
   : isCustom(sw) ? 'On or off in the view (where it is not switched: as the Trigger Init sets it)' : 'Holds in the view';
 
 export function triggerPanel(app: App, openSlot: (r: SlotRef) => void): HTMLElement {
-  const used = app.levelTriggers();
+  const used = shownSwitches(app);
   const box = h('div', { class: 'tp' }, h('div', { class: 'panel-title' }, 'Triggers', h('span', { class: 'hint' }, 'view and test play')));
   if (!used.size) {
-    box.append(h('p', { class: 'hint' }, 'No animation of this level or the global list waits for a trigger.'));
+    box.append(h('p', { class: 'hint' }, 'No animation of this level or the global list waits for a trigger.'), otherSwitch(app, used));
     return box;
   }
   box.append(h('p', { class: 'hint' }, 'The level loads with its Trigger Init, then these are set and the game\'s animation code runs – the preview shows the result.'));
@@ -57,22 +72,22 @@ export function triggerPanel(app: App, openSlot: (r: SlotRef) => void): HTMLElem
       ram ? h('div', { class: 'hint' }, h('span', { class: 'mono' }, ram.ram), ` – ${ram.what}`) : '',
       ram?.asm ? h('div', { class: 'tp-asm' }, h('code', { class: 'mono' }, ram.asm), copy(ram.asm)) : '',
       ram?.off ? h('div', { class: 'tp-asm' }, h('code', { class: 'mono' }, ram.off), copy(ram.off)) : '',
-      h('div', { class: 'gt-users' }, h('span', { class: 'hint' }, slots.length ? 'used by' : 'set by the Trigger Init only'),
+      h('div', { class: 'gt-users' }, h('span', { class: 'hint' }, slots.length ? 'used by' : 'no slot uses it'),
         slots.map((r) => h('a', { href: '#', class: 'mono', title: 'Open the slot', onclick: (e: Event) => { e.preventDefault(); openSlot(r); } }, slotName(r))))));
   }
-  box.append(h('button', { title: 'Every trigger as the level\'s Trigger Init leaves it', onclick: () => { app.switches.onOff = false; app.setTriggers((v) => { v.game.clear(); v.custom.clear(); v.oneShot.clear(); v.manual.clear(); }); } }, 'Reset'));
+  box.append(otherSwitch(app, used), h('button', { title: 'Every trigger as the level\'s Trigger Init leaves it', onclick: () => { app.switches.onOff = false; app.setTriggers((v) => { v.game.clear(); v.custom.clear(); v.oneShot.clear(); v.manual.clear(); }); } }, 'Reset'));
   return box;
 }
 
 // the View menu's part: the level's triggers switched (Lunar Magic's View > ExAnimation Triggers); a manual
 // trigger steps to its next frame
 export function triggerMenu(app: App): MenuItem[] {
-  const used = [...app.levelTriggers().keys()].filter((sw) => sw !== 0x03); // ON/OFF: the game state's own item
-  if (!used.length) return [];
+  const used = [...shownSwitches(app).keys()].filter((sw) => sw !== 0x03); // ON/OFF: the game state's own item
   return [
     { heading: 'Animation triggers' },
     ...used.map((sw): MenuItem => isManual(sw)
       ? { label: `${switchName(sw)}: frame ${hex(Number(switchState(app, sw)), 2)}`, title: 'View and test play: the next frame (all of it in the Animations tab\'s trigger panel)', onClick: () => setSwitch(app, sw, (Number(switchState(app, sw)) + 1) % 0xff) }
       : { label: `${switchName(sw)}${isOneShot(sw) ? ' (fire)' : ''}`, title: `View and test play: ${toggleTitle(sw).toLowerCase()}`, checked: () => !!switchState(app, sw), onToggle: (v) => setSwitch(app, sw, v) }),
+    ...(used.length ? [] : [{ label: 'None used in this level', onClick: () => {}, disabled: () => true }]),
   ];
 }
