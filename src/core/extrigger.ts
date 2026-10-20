@@ -9,7 +9,7 @@
 // The view switches triggers after the level's load (applyTriggers, LevelOverride.exTriggers): the engine
 // then runs as in the game.
 
-import { kindOf, secondSet, triggerName, type ExList, type SlotKind } from './exanim.ts';
+import { kindOf, secondSet, triggerName, reversesOnTrigger, type ExList, type SlotKind } from './exanim.ts';
 import { RAM, EXTRIGGER_RAM } from './ram.ts';
 
 export { EXTRIGGER_RAM };
@@ -19,7 +19,7 @@ const GAME_HOLDS = [0x03, 0x01, 0x02, 0x04, 0x05, 0x07]; // ON/OFF, P-switches, 
 const range = (from: number, n: number) => Array.from({ length: n }, (_, i) => from + i);
 
 // the triggers a slot of a kind can take, in the order offered: rotations neither show frames once nor
-// manually (the engine never turns them for those)
+// manually (the engine has no such trigger for them: triggerProblems)
 export function triggersFor(kind: SlotKind): number[] {
   if (kind === 'rotation') return [0x00, ...GAME_HOLDS, PRECISION, ...range(CUSTOM, 16)];
   return [0x00, ...GAME_HOLDS, 0x06, 0x08, PRECISION, ...range(MANUAL, 16), ...range(CUSTOM, 16), ...range(ONE_SHOT, 32)];
@@ -172,7 +172,14 @@ export function triggerProblems(level: ExList | null, global: ExList | null): { 
   for (const [g, l] of [[false, level], [true, global]] as const) {
     if (!l) continue;
     for (const [slot, e] of l.slots) {
-      if (kindOf(e.type) === 'rotation' && (isManual(e.trigger) || isOneShot(e.trigger))) out.push({ text: `Slot ${slotName({ global: g, slot })} is a color rotation with ${triggerName(e.trigger)}: the engine never runs a rotation for it (${isOneShot(e.trigger) ? `it reads Custom ${hx((e.trigger - CUSTOM) & 15, 1)} instead` : 'it waits forever'}) – choose a custom trigger`, slots: [{ global: g, slot }] });
+      if (kindOf(e.type) === 'rotation' && (isManual(e.trigger) || isOneShot(e.trigger))) {
+        // the engine's rotation takes a manual trigger for one that never holds, a one-shot for the custom
+        // bit of its low 4 bits; 19 and 1B turn without it, the other way while it holds
+        const reverses = reversesOnTrigger(e.type), c = `Custom ${hx((e.trigger - CUSTOM) & 15, 1)}`;
+        const does = isManual(e.trigger) ? (reverses ? 'it always turns, never the other way' : 'it never turns')
+          : reverses ? `it turns the other way while ${c} is on` : `it turns only while ${c} is on`;
+        out.push({ text: `Slot ${slotName({ global: g, slot })} is a color rotation with ${triggerName(e.trigger)}: the engine has no manual or one-shot trigger for rotations – ${does}; choose a custom trigger`, slots: [{ global: g, slot }] });
+      }
       if (isOneShot(e.trigger)) { const a = shots.get(e.trigger) ?? []; a.push({ global: g, slot }); shots.set(e.trigger, a); }
       if (playsOnce(e.trigger) && kindOf(e.type) !== 'rotation' && e.framesLess1 + 1 > 0xff) out.push({ text: `Slot ${slotName({ global: g, slot })} plays once (${triggerName(e.trigger)}) with 256 frames – at most 255: the engine never ends it`, slots: [{ global: g, slot }] });
     }

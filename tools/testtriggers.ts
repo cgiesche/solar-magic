@@ -42,7 +42,7 @@ const listOf = (...slots: [number, ExSlot][]) => { const l = emptyList(); for (c
 // ---- names, choices, limits ----
 check(triggerName(0x06) === 'Time below 100 (one shot)' && triggerName(0x08) === '5 Dragon Coins (one shot)' && triggerName(0x0f) === 'Precision timer', 'the one-shot game triggers and the precision timer are named as in Lunar Magic');
 check(triggersFor('tiles').includes(0x2f) && triggersFor('tiles').includes(0x4f) && triggersFor('tiles').includes(0x1f) && triggersFor('tiles').includes(0x0f), 'tiles: custom, one-shot, manual and the precision timer to choose');
-check(!triggersFor('rotation').some((t) => t >= 0x10 && t < 0x20) && !triggersFor('rotation').some((t) => t >= 0x30) && triggersFor('rotation').includes(0x25) && triggersFor('rotation').includes(0x0f), 'rotations: no manual or one-shot triggers (the engine never runs them), custom and precision');
+check(!triggersFor('rotation').some((t) => t >= 0x10 && t < 0x20) && !triggersFor('rotation').some((t) => t >= 0x30) && triggersFor('rotation').includes(0x25) && triggersFor('rotation').includes(0x0f), 'rotations: no manual or one-shot triggers (the engine has none for them), custom and precision');
 check(maxFrames(0x30) === 0xff && maxFrames(0x06) === 0xff && maxFrames(0x20) === 0x80 && maxFrames(0x10) === 0x100, 'frames: 0xFF for one-shots, 0x80 with a second set, else 0x100');
 check(switchOf(0x06) === 0x05 && switchOf(0x08) === 0x07 && switchOf(0x00) === null && switchOf(0x0f) === null, 'the one-shot game triggers switch with their condition');
 
@@ -166,7 +166,17 @@ check(triggerRam(0x04)?.ram === '$1490' && triggerRam(0x00) === null, 'star: the
   check(triggerProblems(pt, null).some((x) => x.text.includes('precision timer') && x.text.includes('4, 2')), 'precision timer slots sharing a counter with different frame counts are a problem');
   pt.slots.set(4, tiles(T1, 0x0f, [1, 2, 3, 4]));
   check(triggerProblems(pt, null).length === 0, 'with the same frame count they are not');
-  check(triggerProblems(r, null).some((x) => x.text.includes('Custom 1 instead')), 'a rotation with a one-shot trigger is a problem (the engine reads a custom bit)');
+  check(triggerProblems(r, null).some((x) => x.text.includes('only while Custom 1 is on')), 'a rotation with a one-shot trigger is a problem (the engine reads a custom bit)');
+  const rm = listOf([0, { type: 0x19, trigger: 0x13, framesLess1: 0, dest: 0x0321, frames: [] }], [1, { type: 0x18, trigger: 0x13, framesLess1: 0, dest: 0x0331, frames: [] }]);
+  const pm = triggerProblems(rm, null).map((x) => x.text);
+  check(pm.some((x) => x.includes('level 00') && x.includes('always turns')) && pm.some((x) => x.includes('level 01') && x.includes('never turns')), 'a rotation with a manual trigger: 19 always turns, 18 never');
+  // as the engine does it
+  writeLevelList(rom, LEVEL, rm);
+  emu.load(LEVEL);
+  const fr = emu.animationFrames(3, 8), c16 = (cg: Uint8Array, k: number) => cg[2 * k] | (cg[2 * k + 1] << 8);
+  const turns = fr.map((f) => [c16(f.cgram, 0x21), c16(f.cgram, 0x31)]);
+  const distinct = new Set([0x31, 0x32, 0x33, 0x34].map((k) => c16(fr[0].cgram, k))).size > 1; // (else no turn would show)
+  check(new Set(turns.map((t) => t[0])).size > 1 && distinct && new Set(turns.map((t) => t[1])).size === 1, `in the engine: 19 with a manual trigger turns, 18 does not (${turns.map((t) => t.map((c) => c.toString(16)).join('/'))})`);
 }
 
 console.log(bad ? `${bad} failures` : 'triggers ok');
