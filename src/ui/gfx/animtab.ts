@@ -370,7 +370,8 @@ export class AnimTab implements WsPanel {
     const l = this.list();
     const s = l.slots.get(this.sel);
     const n = this.freeSlot(l);
-    if (!s || n < 0) return;
+    if (!s) return;
+    if (n < 0) { toast('All 32 slots are in use'); return; }
     l.slots.set(n, { ...s, frames: s.frames.slice() });
     const row = this.palRow;
     this.sel = n;
