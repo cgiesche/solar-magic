@@ -14,6 +14,9 @@ const START_FRAMES = 40; // frames run after the level has loaded, so the game s
 
 type Listener = (label: string | null) => void;
 
+// the label of the open level's music, looped by the app bar's toggle while editing
+export const LEVEL_MUSIC = 'level-music';
+
 class MusicPlayer {
   private audio: AudioOut | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -31,6 +34,9 @@ class MusicPlayer {
   private emit(): void { for (const l of this.listeners) l(this.label); }
 
   get playing(): boolean { return this.label !== null; }
+  // background work waits while something is listened to; not for the level's music, which plays on
+  // while editing (the work would wait until it is turned off)
+  get holdsBackground(): boolean { return this.playing && this.label !== LEVEL_MUSIC; }
 
   stop(): void {
     this.token++;

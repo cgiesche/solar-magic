@@ -258,7 +258,7 @@ export class App {
   // they would stall the dialog and make the sound crackle. The next slice of each job is parked by
   // its key and continues once nothing holds it.
   private parked = new Map<string, () => void>();
-  backgroundHeld(): boolean { return modalsOpen() > 0 || musicPlayer.playing; }
+  backgroundHeld(): boolean { return modalsOpen() > 0 || musicPlayer.holdsBackground; }
   later(key: string, step: () => void): void {
     if (this.backgroundHeld()) { this.parked.set(key, step); return; }
     const go = () => { if (this.backgroundHeld()) this.parked.set(key, step); else step(); };

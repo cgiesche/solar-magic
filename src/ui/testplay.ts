@@ -9,6 +9,7 @@ import { hex } from '../core/names.ts';
 import { levelTranslevel, encodeSecondaryHeader, startHeader, entrancePos, mainSpot, type StartEntrance } from '../core/level.ts';
 import { Apu, apuReady, loadApu } from '../core/apu.ts';
 import { AudioOut } from './audio.ts';
+import { musicPlayer } from './musicplayer.ts';
 import { GM, RAM, marioX, marioY, setMarioPos } from '../core/ram.ts';
 
 const KEYMAP: Record<string, number> = {
@@ -57,6 +58,8 @@ type Start = { tx: number; ty: number; entrance?: StartEntrance };
 export function openTestPlay(app: App, at?: Start): void {
   // saved first: the game loads the level from the ROM again when Mario dies and enters it again
   if (app.dirty) app.saveLevel(true);
+  // the game plays its own music
+  musicPlayer.stop();
   // the sound emulator loads once; the audio context must start within the key press or click
   const audio = new AudioOut(AUDIO_LEAD);
   if (!apuReady()) {

@@ -21,6 +21,7 @@ import { LEVEL_FILE_EXT } from './core/levelfile.ts';
 import { openResources } from './ui/resources.ts';
 import { OverworldView } from './ui/overworld.ts';
 import { openTestPlay } from './ui/testplay.ts';
+import { musicPlayer, LEVEL_MUSIC } from './ui/musicplayer.ts';
 import { openMessagesDialog } from './ui/messagedialog.ts';
 import { map16Tile } from './core/ram.ts';
 import { NavHistory, fromHash, type NavLoc } from './ui/navhistory.ts';
@@ -199,11 +200,26 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   const redoBtn = h('button', { onclick: () => (workspace === 'ow' ? ow?.redo() : app.redo()), title: 'Redo (Ctrl+Y)' }, '↷');
   const saveBtn = h('button', { class: 'primary', onclick: () => (workspace === 'ow' ? ow?.save() : app.saveLevel()) });
   const testBtn = h('button', { onclick: () => openTestPlay(app), title: 'Test the level in the built-in emulator (T, Shift+T: from the mouse position)' }, '▶ Test');
+  // loops the open level's music while editing; anything else that plays (test play, a song in a dialog) ends it
+  const musicTitle = 'Play the level\'s music in a loop while editing';
+  let musicOf = ''; // level and header music playing
+  const playLevelMusic = () => {
+    musicOf = `${app.level.number}:${app.level.header.music}`;
+    void musicPlayer.playLevel(app, app.level.number, LEVEL_MUSIC).then(() => {
+      if (musicPlayer.error) toast(`Could not play: ${musicPlayer.error}`, 'error');
+    });
+  };
+  const musicBtn = h('button', { title: musicTitle, onclick: () => { if (musicPlayer.label === LEVEL_MUSIC) musicPlayer.stop(); else playLevelMusic(); } }, '♪ Music');
+  musicPlayer.onChange((l) => musicBtn.classList.toggle('active', l === LEVEL_MUSIC));
+  // another level or other header music: its music
+  const followLevel = () => { if (musicPlayer.label === LEVEL_MUSIC && musicOf !== `${app.level.number}:${app.level.header.music}`) playLevelMusic(); };
+  app.on('level', followLevel);
+  app.on('level-header', followLevel);
   const appbar = h('header', { class: 'appbar' },
     // three columns, so nothing moves when the buttons on the right change their labels with the workspace
     h('div', { class: 'appbar-l' }, h('span', { class: 'brand' }, 'Solar Magic'), menus, h('div', { class: 'btn-group' }, backBtn, fwdBtn)),
     wsSwitch,
-    h('div', { class: 'appbar-r' }, undoBtn, redoBtn, saveBtn, testBtn),
+    h('div', { class: 'appbar-r' }, undoBtn, redoBtn, saveBtn, testBtn, musicBtn),
   );
 
   const updateToolbar = () => {
@@ -221,6 +237,9 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     redoBtn.disabled = inOw ? !ow!.canRedo : false;
     testBtn.disabled = workspace === 'ow';
     testBtn.title = workspace === 'ow' ? 'Test play is available in the level editor' : 'Test the level in the built-in emulator (T, Shift+T: from the mouse position)';
+    musicBtn.disabled = workspace === 'ow';
+    musicBtn.title = workspace === 'ow' ? 'The level\'s music plays in the level editor' : musicTitle;
+    if (workspace === 'ow' && musicPlayer.label === LEVEL_MUSIC) musicPlayer.stop();
     menus.refresh();
   };
   app.on('mode', updateToolbar);
