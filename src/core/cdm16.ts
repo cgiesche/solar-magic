@@ -21,6 +21,9 @@ export const COND_MARK = 0x8000;
 // "always show" adds this while the flag is on: the tile must stay below it
 export const COND_ADD = 0x100;
 
+// where flag f is in RAM, for the user ("$7FC060 bit 5")
+export const flagRam = (f: number): string => `$${(CDM16_FLAGS[0] + (f >> 3)).toString(16).toUpperCase()} bit ${f & 7}`;
+
 export const condByte = (c: Dm16Cond): number => (c.always ? 0x80 : 0) | (c.flag & 0x7f);
 export const condOf = (b: number): Dm16Cond => ({ flag: b & 0x7f, always: (b & 0x80) !== 0 });
 

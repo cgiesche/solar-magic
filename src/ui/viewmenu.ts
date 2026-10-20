@@ -3,8 +3,7 @@
 import type { App } from './app.ts';
 import { menuButton, type MenuItem } from './menu.ts';
 import { hex2 } from '../core/names.ts';
-import { COND_FLAGS } from '../core/cdm16.ts';
-import { CDM16_FLAGS } from '../core/ram.ts';
+import { COND_FLAGS, flagRam } from '../core/cdm16.ts';
 
 // paint: redraws the level view (overlay toggles that need no new composite)
 export function viewMenu(app: App, paint: () => void, full = true): HTMLElement {
@@ -31,7 +30,7 @@ export function viewMenu(app: App, paint: () => void, full = true): HTMLElement 
     return [
       { heading: 'Conditional Direct Map16' },
       ...[...used].map(([f, c]): MenuItem => ({
-        label: `Flag ${hex2(f)} on · ${n(c)}`, title: `View and test play: flag ${hex2(f)} on ($${(CDM16_FLAGS[0] + (f >> 3)).toString(16).toUpperCase()} bit ${f & 7}) – the level loads with it`,
+        label: `Flag ${hex2(f)} on · ${n(c)}`, title: `View and test play: flag ${hex2(f)} on (${flagRam(f)}) – the level loads with it`,
         checked: () => app.cdm16.has(f), onToggle: (v) => app.setFlags([f], v),
       })),
       { label: 'All flags on', title: 'View and test play: every flag on', onClick: () => app.setFlags(Array.from({ length: COND_FLAGS }, (_, i) => i), true) },

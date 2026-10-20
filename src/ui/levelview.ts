@@ -350,7 +350,7 @@ export class LevelView {
   }
 
   // conditional Direct Map16 (cdm16.ts): a flag badge on each object that depends on a flag (structures by their
-  // tiles' flags), green while the view shows it with the flag on; where one is hidden now, its tiles dashed
+  // tiles' flags), green while the view shows it with the flag on; where one left nothing in the level's load, its tiles dashed
   paintConds(ctx: CanvasRenderingContext2D, lw: number): void {
     const app = this.app;
     const structs = new Map<number, number[]>();
@@ -363,7 +363,7 @@ export class LevelView {
         flags = structs.get(o.struct)!;
       } else continue;
       if (!flags.length) continue;
-      if (isDm16(o) && o.cond && !o.cond.always && !app.cdm16.has(o.cond.flag)) {
+      if (isDm16(o) && o.cond && !app.objectDrawn(o)) {
         ctx.strokeStyle = 'rgba(255,190,60,0.8)';
         ctx.lineWidth = lw;
         ctx.setLineDash([3 * lw, 3 * lw]);

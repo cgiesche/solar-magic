@@ -206,7 +206,7 @@ themselves, external patches via `ram` in the `patch.json` (see below):
 | UberASM | `freeram` from the `list.txt` (2 bytes, default `$7FAC80`) |
 | Custom sprites | sprite tables `$7FAB10-$7FAB6F`, `$7FAB9E-$7FABA9`, `$7FAC00-$7FAC17` (interface, see below), `$7FAC18-$7FAC19` |
 | VRAM layout | `$7F0000-$7F3653` |
-| ExAnimation | `$7FC003-$7FC0FF` |
+| ExAnimation | `$7FC003-$7FC05F`, `$7FC070-$7FC0FF` (between them Lunar Magic's conditional Direct Map16 flags `$7FC060-$7FC06F`, shared: other code may write them) |
 
 - If two entries occupy the same RAM, the second is rejected ("RAM conflict with …").
 - In addition, the editor searches each patch's code for long writes (`STA $7Fxxxx`,
@@ -605,6 +605,31 @@ graphics without a visible pixel ($FC in the game's). Where the patch copies an 
 edited tilemap shows for every destination and size, before and after saving, and that a level pixel names the
 entry drawn there.
 
+### Conditional Direct Map16
+
+A Direct Map16 object (extended object `$02`) or a structure's tile can depend on a flag of Lunar Magic's
+table at `$7FC060–$7FC06F` (flag *n*: byte `$7FC060 + n/8`, bit `n%8`, bits low to high). While the flag is
+off it is not drawn; with "always show" it is drawn, with its tiles + 0x100 while the flag is on. Nothing
+in the game sets the flags and the editor doesn't clear them: that is up to your own code, e.g. UberASM
+before the level loads:
+
+```asm
+load:
+    LDA $7FC060     ; flag 00 on
+    ORA #$01
+    STA $7FC060
+    RTL
+```
+
+In the level data the condition is Lunar Magic's byte `ACCCCCCC` (A: always show, C: the flag 00–7F) after
+the tile it belongs to, which says so by its top bit: a Direct Map16 object is `00` object bytes, `$02`,
+the tile's low byte, its high byte with bit 7 set, the size byte, then the condition byte (7 bytes
+instead of 6); a structure's tile word has bit 15 set and the condition byte follows it. A `.mwl`'s objects
+27/29 in their conditional form keep the condition. The ExAnimation engine's RAM claim leaves the flags out
+as shared RAM, so code that writes them is no conflict. In the editor: the object's properties (one or
+several Direct Map16 objects at once), View → Conditional Direct Map16 (each flag the level uses, all on,
+all off; the level and test play load with them), a flag badge on each conditional object.
+
 ## Level import (Lunar Magic)
 
 Graphics in SMWCentral's graphics section are Lunar Magic exports, as the submission rules
@@ -660,7 +685,7 @@ not compatible with the respective feature.
 
 | Address | Feature |
 |---|---|
-| `$05D8F5`, `$00BA2C`, `$00AA6B`, `$00A9E1`, `$00AA22`, ext. object table `$0DA115` | Editor patch (SMWE) |
+| `$05D8F5`, `$00BA2C`, `$00AA6B`, `$00A9E1`, `$00AA22`, ext. object table `$0DA115` | Editor patch (SMWE); reads Lunar Magic's conditional Direct Map16 flags, RAM `$7FC060–$7FC06F` (set by other code) |
 | `$00922F` | Level palettes (SMWP) |
 | `$058060` | BG tilemaps (SMWB) |
 | `$058DE6` | BG Map16 extension, BG tiles 200–FFF (SMWH) |
@@ -715,7 +740,8 @@ again.
 * `src/core/uberasm.ts`, `src/core/uberproject.ts`: UberASM generator and project.
 * `src/core/blocks.ts`, `src/core/map16ext.ts`: custom blocks.
 * `src/core/structs.ts`: structures (extended object `$03`). Level data: `00` object bytes as for any
-  extended object with `$03`, then 1 byte structure number. Without SMWS, `$03` counts as an ordinary
+  extended object with `$03`, then 1 byte structure number.
+* `src/core/cdm16.ts`: conditional Direct Map16 (see above); test `tools/testcdm16.ts`. Without SMWS, `$03` counts as an ordinary
   3-byte object, so that patches that use `$03` themselves keep working.
 * Tests: `tools/testasar.ts`, `tools/testuberasm.ts`, `tools/testblocks.ts`, `tools/teststructs.ts`,
   `tools/testpkgreg.ts` (part of `npm test`).

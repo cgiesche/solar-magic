@@ -28,6 +28,10 @@ _Avoid_: 8x8 field, cell, subtile
 The set of quarters of the Map16 tab's selection that an edit in the builder changes (palette, flips, priority, a chosen 8x8 tile by Enter). A new selection marks all. A **stamp** puts the chosen block of 8x8 tiles onto the quarters where it lies (right click, right drag paints; or dropped there), whatever is marked. Acts-like applies to the wholly marked 16x16 tiles only.
 _Avoid_: selected quarter (the sheet's selection is of whole tiles)
 
+**Conditional Direct Map16**:
+A Direct Map16 object, or a tile of a structure, that depends on a flag of Lunar Magic's table at $7FC060–F (set by the user's own code, e.g. UberASM): drawn only while the flag is on, or with "always show" always, its tiles + 0x100 while it is on (cdm16.ts). The view's flags are a view setting that test play takes over, not part of the level.
+_Avoid_: CDM16 (in the UI), switch object
+
 **Level edit**:
 A change of the open level in memory: its own undo step, written to the ROM when the level is saved (before every ROM edit, when another level is opened, or by hand).
 

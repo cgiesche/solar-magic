@@ -926,6 +926,11 @@ export class App {
     return out;
   }
 
+  // whether the object wrote a tile in the level's load
+  objectDrawn(o: LevelObject): boolean {
+    return !!this.render.touched.get(this.objectKey(this.mode === 'l2', this.currentObjects().indexOf(o)))?.size;
+  }
+
   // Map16 tile numbers an object left in the level (tiles overwritten by later objects excluded)
   objectMap16(o: LevelObject): number[] {
     const l2 = this.mode === 'l2';
