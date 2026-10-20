@@ -72,22 +72,36 @@ export function exgfxName(name: string): { num: number | null; slot: string | nu
 // otherwise LZ2 data as it is (like Lunar Magic's compressed ExGFX). Replaces a file in free space.
 // The number must fit the file (gfxNumberProblem: also one of the game's files, which it replaces).
 export function importGfxFile(rom: Rom, num: number, data: Uint8Array): string {
-  let raw: boolean, stored: Uint8Array, what: string;
+  return writeGfxFile(rom, num, gfxStorage(data));
+}
+
+// how a file is stored: raw (uncompressed) or LZ2, the bytes, its size unpacked; what: as told to the user
+export interface GfxStorage { raw: boolean; stored: Uint8Array; size: number; what: string }
+
+// the storage of a file by its data alone (see importGfxFile); throws for an unknown format
+export function gfxStorage(data: Uint8Array): GfxStorage {
   // uncompressed: 4bpp; 2bpp layer 3 graphics and layer 3 tilemaps (layer3gfx.ts) stay so too
   const plain: Record<number, string> = { 0x1000: '4bpp', 0x800: '2bpp (layer 3)', 0x2000: 'layer 3 tilemap' };
-  if (plain[data.length]) { raw = true; stored = data; what = `${plain[data.length]} uncompressed`; }
-  else if (data.length === 0xc00) { raw = false; stored = lz2Compress(data); what = '3bpp, LZ2-compressed'; }
-  else {
-    let un: Uint8Array;
-    try { un = lz2Decompress(data, 0).data; } catch { throw new Error(`Unknown GFX format (${data.length} bytes)`); }
-    if (plain[un.length]) { raw = true; stored = un; what = `${plain[un.length]} (decompressed)`; }
-    else if (un.length === 0xc00) { raw = false; stored = data; what = '3bpp, LZ2'; }
-    else throw new Error(`Unknown GFX format (${data.length} bytes, decompressed ${un.length})`);
-  }
-  const bad = gfxNumberProblem(num, { game: true, size: raw ? stored.length : GFX_3BPP });
+  if (plain[data.length]) return { raw: true, stored: data, size: data.length, what: `${plain[data.length]} uncompressed` };
+  if (data.length === GFX_3BPP) return { raw: false, stored: lz2Compress(data), size: GFX_3BPP, what: '3bpp, LZ2-compressed' };
+  let un: Uint8Array;
+  try { un = lz2Decompress(data, 0).data; } catch { throw new Error(`Unknown GFX format (${data.length} bytes)`); }
+  if (plain[un.length]) return { raw: true, stored: un, size: un.length, what: `${plain[un.length]} (decompressed)` };
+  if (un.length === GFX_3BPP) return { raw: false, stored: data, size: GFX_3BPP, what: '3bpp, LZ2' };
+  throw new Error(`Unknown GFX format (${data.length} bytes, decompressed ${un.length})`);
+}
+
+// throws when `num` can't hold the file (gfxNumberProblem; one of the game's files may be replaced)
+export function checkGfxNumber(num: number, s: GfxStorage): void {
+  const bad = gfxNumberProblem(num, { game: true, size: s.size });
   if (bad) throw new Error(bad);
+}
+
+// stores a file under `num` (one of the game's replaced, an ExGFX's old data freed); what was stored
+export function writeGfxFile(rom: Rom, num: number, s: GfxStorage): string {
+  checkGfxNumber(num, s);
   const old = gfxEntry(rom, num);
   if (old && num >= VANILLA_GFX) rom.freeAt(old.addr);
-  setGfxEntry(rom, num, rom.allocWrite(stored), raw, stored.length);
-  return what;
+  setGfxEntry(rom, num, rom.allocWrite(s.stored), s.raw, s.stored.length);
+  return s.what;
 }
