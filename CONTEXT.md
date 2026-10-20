@@ -104,6 +104,10 @@ _Avoid_: background package, graphics import
 One of four graphics (A–D, Lunar Magic's ExGFX 60–63) that tile animations take their frames from; each animation list (a level's, the global one) uses one, and every list using it shares it. The only place animation frames come from: frames a package or level file keeps elsewhere (Lunar Magic's AN2, its own ExGFX 60–63, the game's graphics in RAM) are copied in when it is imported (ADR 0003).
 _Avoid_: AN2, alternative file, animation ExGFX
 
+**Color rotation**:
+An animation slot (types 18–1B) that moves a range of 2–128 palette colors along by one, right or left, every few animation frames; rotate right/left waits while its trigger does not hold, the "reverse on trigger" types always run and turn the other way while it holds. It has no frames: the colors are the level's own. Colors the game itself sets every frame (Mario's palette) do not rotate in the game; the Animations tab finds them in the emulated level.
+_Avoid_: palette rotate, palette cycling
+
 ### Emulated results
 
 **Probe**:

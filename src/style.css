@@ -477,6 +477,11 @@ button.danger:hover:not(:disabled) { border-color: var(--danger); }
 .at-palgrid { display: grid; grid-template-columns: repeat(16, 20px); gap: 2px; }
 .at-pal { width: 20px; height: 20px; border-radius: 2px; cursor: pointer; border: 1px solid #0008; }
 .at-pal.sel { outline: 2px solid #fff; }
+.at-pal.in { outline: 2px solid #ffb000; outline-offset: -1px; }
+.at-palgrid.rot { user-select: none; }
+.at-rot-strip { display: flex; height: 40px; max-width: 480px; flex: 1; border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
+.at-rot-strip > div { flex: 1; min-width: 2px; }
+.at-num { width: 72px; }
 .doc-view { width: 860px; max-width: 100%; display: flex; flex-direction: column; gap: 6px; }
 .doc-view select { flex: 1; min-width: 0; }
 .doc-frame { width: 100%; height: 62vh; border: 1px solid var(--border); border-radius: 6px; background: #fff; }

@@ -40,7 +40,7 @@ import { variantOf, blockKey, spriteKey, type BlockProbe, type SpriteProbe } fro
 import type { ProbeReply } from '../core/probehost.ts';
 import { ProbeClient } from '../core/probeclient.ts';
 import { map16Tile, bgTile } from '../core/ram.ts';
-import { exanimTiles, exanimColors } from '../core/exanim.ts';
+import { exanimTiles, exanimColors, exanimPeriod, readLevelList, readGlobalList } from '../core/exanim.ts';
 import { LevelUses, levelTilesOf, levelTilesAll, levelOverride, usedLevels, spriteUsage, isTilesetTile, type LevelTiles, type SpriteUser } from '../core/levelusage.ts';
 import { TILESETS, tilesetPointers, sharingTilesets } from '../core/tilesets.ts';
 import { slipperyActions } from '../core/slippery.ts';
@@ -328,7 +328,8 @@ export class App {
     const lv = this.level, ov = this.buildOverrides();
     const r = this.emu.load(lv.number, ov);
     this.renderError = r.ok ? null : r.error ?? 'Error';
-    this.anim.snaps = this.show.anim && r.ok ? this.emu.animationFrames() : [];
+    // as many steps as the level's own animations take to repeat (the game's repeat after 8)
+    this.anim.snaps = this.show.anim && r.ok ? this.emu.animationFrames(exanimPeriod([readLevelList(this.rom, lv.number), readGlobalList(this.rom)], 64, 8)) : [];
     this.render = r;
     this.images = renderLevel(this.rom, r, lv.header.mode, lv.header.screens, levelRows(lv.secondary));
     this.compositeImg = this.compose();
@@ -828,6 +829,12 @@ export class App {
     this.editLevel(() => { this.level.spriteHeader = (this.level.spriteHeader & 0xc0) | (m & SPRITE_MEMORY); });
     this.emit('level-header');
     logMsg(`Sprite memory set to ${hex(m, 2)}`);
+  }
+
+  // CGRAM every 8 game frames of the level as it is now, emulated (count images, none when it fails)
+  animationCgrams(count: number): Uint8Array[] {
+    const r = this.emu.load(this.level.number, this.buildOverrides());
+    return r.ok ? this.emu.animationFrames(count, 8).map((f) => f.cgram) : [];
   }
 
   // 8x8 tiles (layer 1 tile numbers) and colors the game keeps rewriting in this level (tile and

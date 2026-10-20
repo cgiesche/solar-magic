@@ -157,6 +157,12 @@ When a level is displayed, it runs the ROM's **original loading routines** (~15 
   Graphics tab, or importing a `.map16` whose tiles draw from a slot without ExGFX, offers the remap with the offset
   filled in. The Animations tab remaps the frames and targets of chosen tile animations with the same list
   (Lunar Magic's ExAnimation Remap).
+* **Animations tab** (Lunar Magic's ExAnimation, its format): tile animations, color animations and **color
+  rotations** per level and globally. A rotation's colors are chosen by dragging over the palette (2–128); its
+  type (rotate right or left, each also "reverse on trigger"), trigger and delay ("Frames", also shown as steps per
+  second) are set beside a strip that shows the colors rotating at that speed. Colors the game itself sets every
+  frame (Mario's palette) are named, as found in the emulated level; the level view (View → Animation) plays
+  the level's animations for as long as they take to repeat.
 * **Palette editor** (P): edit colors directly at their ROM source, `.pal` import/export,
   optionally a **custom palette per level** (all 256 colors).
 * **Graphics:** view GFX00–31 and ExGFX up to FFF (as Lunar Magic: ExGFX 80–DFF, and E00–FFF for files kept
