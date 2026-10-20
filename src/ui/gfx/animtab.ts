@@ -116,8 +116,10 @@ export class AnimTab implements WsPanel {
     return 'Click: take the Map16 tile under the mouse as target (top left quarter)';
   }
 
-  private get palRow(): number { return this.palRows.get(`${this.global}:${this.sel}`) ?? -1; }
-  private set palRow(r: number) { const k = `${this.global}:${this.sel}`; if (r < 0) this.palRows.delete(k); else this.palRows.set(k, r); }
+  // a slot's key there: the global list's, or the level's own
+  private palKey(slot = this.sel): string { return `${this.global ? 'global' : hex(this.app.level.number, 3)}:${slot}`; }
+  private get palRow(): number { return this.palRows.get(this.palKey()) ?? -1; }
+  private set palRow(r: number) { const k = this.palKey(); if (r < 0) this.palRows.delete(k); else this.palRows.set(k, r); }
 
   get selected(): { global: boolean; slot: number } { return { global: this.global, slot: this.sel }; }
 
@@ -358,6 +360,7 @@ export class AnimTab implements WsPanel {
       setRotationRange(e, 0x21, 4);
       l.slots.set(n, e);
     }
+    this.palRows.delete(this.palKey(n));
     this.sel = n;
     this.frame = 0;
     this.triggerOn = false;
@@ -369,7 +372,9 @@ export class AnimTab implements WsPanel {
     const n = this.freeSlot(l);
     if (!s || n < 0) return;
     l.slots.set(n, { ...s, frames: s.frames.slice() });
+    const row = this.palRow;
     this.sel = n;
+    this.palRow = row;
     await this.save(l, `Slot ${hex(n, 2)} duplicated`);
   }
   // Lunar Magic's ExAnimation Remap: the chosen tile slots' frames (tiles of the animation graphic) and
@@ -455,6 +460,7 @@ export class AnimTab implements WsPanel {
   private async remove(): Promise<void> {
     const l = this.list();
     if (!l.slots.delete(this.sel)) return;
+    this.palRow = -1;
     l.count = 0;
     await this.save(l, `Slot ${hex(this.sel, 2)} deleted`);
     toast(`Animation ${hex(this.sel, 2)} deleted – Ctrl+Z brings it back`);
