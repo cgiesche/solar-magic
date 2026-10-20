@@ -16,6 +16,7 @@ export function shownSwitches(app: App): Map<number, SlotRef[]> {
   const out = app.levelTriggers(), v = app.exTriggers;
   const add = (sw: number) => { if (!out.has(sw)) out.set(sw, []); };
   v.game.forEach(add);
+  if (app.switches.onOff) add(0x03); // (also switched in the View menu's game state: Reset turns it off)
   for (const n of v.custom.keys()) add(CUSTOM + n);
   for (const n of v.manual.keys()) add(MANUAL + n);
   for (const n of v.oneShot) add(ONE_SHOT + n);
@@ -75,7 +76,7 @@ export function triggerPanel(app: App, openSlot: (r: SlotRef) => void): HTMLElem
       h('div', { class: 'gt-users' }, h('span', { class: 'hint' }, slots.length ? 'used by' : 'no slot uses it'),
         slots.map((r) => h('a', { href: '#', class: 'mono', title: 'Open the slot', onclick: (e: Event) => { e.preventDefault(); openSlot(r); } }, slotName(r))))));
   }
-  box.append(otherSwitch(app, used), h('button', { title: 'Every trigger as the level\'s Trigger Init leaves it', onclick: () => { app.switches.onOff = false; app.setTriggers((v) => { v.game.clear(); v.custom.clear(); v.oneShot.clear(); v.manual.clear(); }); } }, 'Reset'));
+  box.append(otherSwitch(app, used), h('button', { title: 'Every trigger as the level\'s Trigger Init leaves it', onclick: () => { if (used.has(0x03)) app.switches.onOff = false; app.setTriggers((v) => { v.game.clear(); v.custom.clear(); v.oneShot.clear(); v.manual.clear(); }); } }, 'Reset'));
   return box;
 }
 
