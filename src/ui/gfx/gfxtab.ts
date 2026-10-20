@@ -7,10 +7,11 @@ import type { App } from '../app.ts';
 import type { GfxWorkspace, WsPanel } from '../gfxworkspace.ts';
 import { menuButton, type MenuItem } from '../menu.ts';
 import { h, clear, toast, modal, choose, attachPanZoom, zoomControl, zoomStep, showColorLoupe, hideColorLoupe } from '../dom.ts';
-import { downloadBytes, pickFile } from '../platform.ts';
+import { downloadBytes, pickFile, pickFiles } from '../platform.ts';
 
 const ZOOM_MIN = 1, ZOOM_MAX = 32; // of the shared zoom levels (dom.ts)
 const NEW_FILE = -2, IMPORT_FILE = -3; // gallery picks besides a file number (-1: default)
+const ORDER: BinPlanItem['status'][] = ['new', 'replace', 'skip', 'unchanged']; // rows of a bulk import's preview
 import { lz2Decompress, lz2Compress } from '../../core/lz2.ts';
 import { decodeTile, encodeTile, cgramToRGBA } from '../../core/gfx.ts';
 import { snesToPc, type Rom } from '../../core/rom.ts';
@@ -19,7 +20,9 @@ import {
   gfxEntry, setGfxEntry, freeGfx, gfxRange, gfxRangeFor, gfxDataSize, gfxNumberProblem, gfxHex, VANILLA_GFX, AS_IS_FIRST, GFX_FILES, MAX_GFX, GFX_NONE, levelGfx, setLevelGfx,
   levelExtGfx, setLevelExtGfx, type GfxFileKind,
 } from '../../core/patches.ts';
-import { importGfxFile, exgfxName } from '../../core/map16file.ts';
+import { exgfxName } from '../../core/map16file.ts';
+import { defaultBpp, gfxBinData, gfxBinName, storeGfxBin, parseGfxBinName, binFiles, planGfxBins, applyGfxBins, exportAllGfx, type BinFile, type BinPlanItem } from '../../core/gfxbin.ts';
+import { gfxLabels, gfxUserName, setGfxName, GFX_NAME_MAX } from '../../core/gfxnames.ts';
 import { gfxNumber } from '../../core/levelgfx.ts';
 import { gfxNumberField } from '../gfxnum.ts';
 import { levelLayer3, setLevelLayer3, fitsLayer3Slot, lt3SizeFor, LT3_DESTS, LT3_SIZES } from '../../core/layer3gfx.ts';
@@ -34,13 +37,6 @@ import { gfxSlots, gfxUsage, unusedExGfx, savedHeader, slotMove, type GfxSlot as
 import { usedInList } from '../usedin.ts';
 import { slotRemapLine } from '../../core/remap.ts';
 
-
-export function defaultBpp(i: number, size: number): number {
-  if ((i >= 0x28 && i <= 0x2b) || i === 0x2f) return 2;
-  if (size % 24 === 0 && size % 32 !== 0) return 3;
-  if (size === 0xc00 || size === 0x600) return 3;
-  return 4;
-}
 
 interface GfxFile { num: number; addr: number; raw: boolean; bpp: number; auto: number; packed: number; pix: Uint8Array; tiles: number; empty: boolean } // auto: the detected bpp
 
@@ -424,6 +420,7 @@ export class GfxTab implements WsPanel {
     clear(this.list);
     const used = new Map(this.levelSlots().filter((s) => s.file !== 0xff).map((s) => [s.file, s.name] as [number, string]));
     const unused = new Set(unusedExGfx(app.rom, app.usedLevels(), this.usage()));
+    const label = gfxLabels(app.rom);
     // by range: the game's files, ExGFX, files kept "as is" (Lunar Magic's E00-FFF)
     const groups: [number, number, string, string][] = [
       [0, VANILLA_GFX, 'GFX', 'The game\'s graphics files'],
@@ -434,14 +431,14 @@ export class GfxTab implements WsPanel {
       const items: HTMLElement[] = [];
       for (let i = from; i < to; i++) {
         const e = gfxEntry(app.rom, i);
-        const name = gfxName(i);
+        const name = gfxName(i), own = e ? label(i) : null;
         // empty ExGFX numbers: via "+ New ExGFX", or found by their exact number
         const exact = /^(exgfx)?[0-9a-f]{1,3}$/.test(this.filter) && parseInt(this.filter.replace('exgfx', ''), 16) === i;
         if (!e && i >= VANILLA_GFX && i !== this.cur && !exact) continue;
         if (i === GFX_NONE) continue;
-        if (this.filter && !exact && !name.toLowerCase().includes(this.filter) && !hex(i, 2).toLowerCase().includes(this.filter)) continue;
+        if (this.filter && !exact && !`${name} ${own ?? ''}`.toLowerCase().includes(this.filter) && !hex(i, 2).toLowerCase().includes(this.filter)) continue;
         if (this.onlyLevel && !used.has(i)) continue;
-        items.push(this.listItem(i, e !== null, used.get(i), unused.has(i)));
+        items.push(this.listItem(i, e !== null, used.get(i), unused.has(i), own));
       }
       if (items.length) this.list.append(h('div', { class: 'gt-list-head', title }, head), ...items);
     }
@@ -449,11 +446,11 @@ export class GfxTab implements WsPanel {
     this.list.querySelector('.current')?.scrollIntoView({ block: 'nearest' });
   }
 
-  private listItem(i: number, exists: boolean, slot: string | undefined, unused: boolean): HTMLElement {
+  private listItem(i: number, exists: boolean, slot: string | undefined, unused: boolean, name: string | null): HTMLElement {
     return h('div', {
       class: `level-item${i === this.cur ? ' current' : ''}${exists ? '' : ' unused'}`,
       onclick: () => this.select(i),
-    }, gfxName(i), slot ? h('span', { class: 'gt-used' }, slot) : '',
+    }, gfxName(i), name ? h('span', { class: 'lname gt-name', title: name }, name) : '', slot ? h('span', { class: 'gt-used' }, slot) : '',
       unused ? h('span', { class: 'gt-unused', title: 'Inserted, but in no level\'s graphics slots' }, 'unused') : '');
   }
 
@@ -559,8 +556,11 @@ export class GfxTab implements WsPanel {
       h('span', { class: 'spacer' }),
       menuButton({ label: 'Import/Export', items: [
         { label: 'Import (.png) …', title: 'PNG (128 pixels wide) into this file; colors are mapped to the selected palette', onClick: () => void this.importPng() },
-        { label: 'Import (.bin) …', title: 'Lunar Magic ExGFX (.bin)', onClick: () => void this.importBin() },
+        { label: 'Import (.bin) …', title: 'Lunar Magic GFX/ExGFX (.bin) into this file', onClick: () => void this.importBin() },
+        { label: 'Import several (.bin, .zip) …', title: 'GFX##.bin and ExGFX###.bin files (or a .zip of them), each to the number in its name; shows what changes first', onClick: () => void this.importMany() },
         { label: 'Export (.png)', title: 'File as PNG in the selected palette', onClick: () => this.exportPng() },
+        { label: 'Export (.bin)', title: 'File as Lunar Magic extracts it: unpacked, 3bpp as 4bpp, named GFX##.bin / ExGFX###_Name.bin', onClick: () => void this.exportBin() },
+        { label: 'Export all (.zip)', title: 'All GFX and ExGFX as .bin in Lunar Magic\'s folders (Graphics/, ExGraphics/)', onClick: () => void this.exportAll() },
       ] }),
     );
   }
@@ -598,6 +598,7 @@ export class GfxTab implements WsPanel {
       f.num >= ANIM_FILE ? h('div', { class: 'hint' }, `Frames for own tile animations (“Animations” tab). Lunar Magic: ${lmAnimName(f.num)}.`) : '',
       f.num >= ANIM_FILE && f.empty ? h('button', { onclick: () => void this.newAnimFile(f.num) }, 'Create (128 empty tiles)') : '',
       used.length ? h('div', { class: 'hint' }, `In the level as ${used.join(', ')}`) : h('div', { class: 'hint' }, 'Not used by the current level'),
+      f.num < ANIM_FILE && !f.empty ? this.nameField(f.num) : '',
       f.num < ANIM_FILE && !f.empty ? this.assignMenu(f.num, used.length > 0) : '',
       f.num < ANIM_FILE && !f.empty ? usedInList(this.app, 'Used in levels', (this.usage().get(f.num) ?? []).map((u) => ({ level: u.level, text: u.slots.join(', ') })), 0,
         f.num >= VANILLA_GFX ? 'In no level\'s graphics slots: inserted, but unused.' : 'In no level\'s graphics slots.') : '',
@@ -610,6 +611,19 @@ export class GfxTab implements WsPanel {
       rowSel,
       this.usageUi(),
     );
+  }
+
+  // the user's name of the file (exported as ExGFX###_Name.bin); without one, the package's
+  private nameField(num: number): HTMLElement {
+    const app = this.app, own = gfxUserName(app.rom, num) ?? '';
+    const inp = h('input', { value: own, maxlength: GFX_NAME_MAX, placeholder: gfxLabels(app.rom)(num) ?? 'none', title: 'Part of the file name when exported (ExGFX###_Name.bin); without one, the name of the package that brought the file' });
+    inp.addEventListener('change', () => {
+      const v = inp.value.trim();
+      if (v === own) return;
+      try { app.romEdit(v ? `${gfxName(num)} named “${v}”` : `${gfxName(num)}: name removed`, () => setGfxName(app.rom, num, v)); }
+      catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
+    });
+    return h('div', { class: 'prop' }, h('label', null, 'Name'), inp);
   }
 
   // "Use in slot": puts the open file into one of the level's slots (same as the card's "Swap")
@@ -1009,6 +1023,54 @@ export class GfxTab implements WsPanel {
     c.toBlob(async (b) => { if (b) { const name = `${f.num >= ANIM_FILE ? lmAnimName(f.num) : gfxName(f.num)}.png`; if (await downloadBytes(name, new Uint8Array(await b.arrayBuffer()), 'image/png')) toast(`${name} exported`); } }, 'image/png');
   }
 
+  // the file as Lunar Magic extracts it (animation graphics: as its ExGFX60-63)
+  private async exportBin(): Promise<void> {
+    const f = this.file;
+    if (!f || f.empty) { toast(f ? `${gfxName(f.num)} is empty – nothing to export` : 'Choose a file on the left first'); return; }
+    const rom = this.app.rom, anim = f.num >= ANIM_FILE;
+    const data = anim ? readAltFile(rom, f.num - ANIM_FILE) : gfxBinData(rom, f.num);
+    if (!data) return;
+    const name = anim ? `${lmAnimName(f.num)}.bin` : gfxBinName(rom, f.num);
+    if (await downloadBytes(name, data)) toast(`${name} exported`);
+  }
+
+  private async exportAll(): Promise<void> {
+    if (await downloadBytes('graphics.zip', exportAllGfx(this.app.rom), 'application/zip')) toast('graphics.zip exported (Graphics/, ExGraphics/)');
+  }
+
+  // several .bin files (or .zip files of them), each to the number in its name: what changes is shown
+  // first, then all of it is one ROM edit
+  private async importMany(): Promise<void> {
+    const app = this.app;
+    const picked = await pickFiles('.bin,.zip');
+    if (!picked.length) return;
+    const files: BinFile[] = [];
+    try { for (const f of picked) files.push(...binFiles(f.name, new Uint8Array(await f.arrayBuffer()))); }
+    catch (e) { toast(`Could not read the files: ${e instanceof Error ? e.message : e}`, 'error'); return; }
+    if (!files.length) { toast('No .bin files found'); return; }
+    const plan = planGfxBins(app.rom, files);
+    const todo = plan.filter((x) => x.status === 'new' || x.status === 'replace');
+    const count = (s: BinPlanItem['status']) => plan.filter((x) => x.status === s).length;
+    const result = (x: BinPlanItem) => x.status === 'new' ? 'new' : x.status === 'replace' ? 'replaces the file' : x.status === 'unchanged' ? 'unchanged' : `skipped: ${x.why}`;
+    const body = h('div', null,
+      h('p', null, `${count('new')} new, ${count('replace')} replaced, ${count('unchanged')} unchanged, ${count('skip')} skipped. A descriptive name in the file name (ExGFX80_Name.bin) becomes the file's name.`),
+      h('div', { style: 'max-height:60vh;overflow:auto' }, h('table', { class: 'uber-table' },
+        h('tr', null, h('th', null, 'File'), h('th', null, 'Into'), h('th', null, 'Result')),
+        // what changes first, what is unchanged last
+        [...plan].sort((a, b) => ORDER.indexOf(a.status) - ORDER.indexOf(b.status)).map((x) => h('tr', null,
+          h('td', { class: 'mono' }, x.path),
+          h('td', { class: 'mono' }, x.num === null ? '–' : gfxName(x.num)),
+          h('td', { class: x.status === 'skip' ? 'err' : x.status === 'unchanged' ? 'hint' : '' }, result(x)))))));
+    const go = () => {
+      try {
+        app.romEdit(`${todo.length} graphics file${todo.length > 1 ? 's' : ''} imported`, () => applyGfxBins(app.rom, plan));
+        toast(`${todo.length} graphics file${todo.length > 1 ? 's' : ''} imported`);
+      } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
+    };
+    modal(`Import ${files.length} graphics file${files.length > 1 ? 's' : ''}`, body,
+      todo.length ? [{ label: 'Cancel' }, { label: `Import ${todo.length}`, primary: true, onClick: go }] : [{ label: 'Close' }]);
+  }
+
   // writes an imported file as one undoable ROM edit; into: the package that gets the new number
   private importEdit<T>(label: string, into: Package | undefined, write: () => T): T {
     return this.app.romEdit(label, () => {
@@ -1112,7 +1174,12 @@ export class GfxTab implements WsPanel {
         toast(`${file.name} → ${gfxName(target)}`);
         return target;
       }
-      const kind = this.importEdit(`${file.name} → ${gfxName(target)}`, into, () => importGfxFile(this.app.rom, target, data));
+      const named = parseGfxBinName(file.name);
+      const kind = this.importEdit(`${file.name} → ${gfxName(target)}`, into, () => {
+        const what = storeGfxBin(this.app.rom, target, data);
+        if (named?.name && named.num === target) setGfxName(this.app.rom, target, named.name);
+        return what;
+      });
       this.select(target);
       toast(`${file.name} → ${gfxName(target)} (${kind})`);
       return target;

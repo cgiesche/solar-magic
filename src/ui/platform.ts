@@ -22,10 +22,19 @@ function extensions(accept: string): string[] {
 }
 
 export async function pickFile(accept: string): Promise<File | null> {
+  return (await pick(accept, false))[0] ?? null;
+}
+
+// several files at once (none: cancelled)
+export function pickFiles(accept: string): Promise<File[]> {
+  return pick(accept, true);
+}
+
+async function pick(accept: string, multiple: boolean): Promise<File[]> {
   if (!desktop) {
     return new Promise((resolve) => {
-      const inp = h('input', { type: 'file', accept, style: 'display:none' });
-      inp.addEventListener('change', () => { resolve(inp.files?.[0] ?? null); inp.remove(); });
+      const inp = h('input', { type: 'file', accept, multiple, style: 'display:none' });
+      inp.addEventListener('change', () => { resolve([...inp.files ?? []]); inp.remove(); });
       document.body.appendChild(inp);
       inp.click();
     });
@@ -33,14 +42,17 @@ export async function pickFile(accept: string): Promise<File | null> {
   const { open } = await import('@tauri-apps/plugin-dialog');
   const { readFile } = await import('@tauri-apps/plugin-fs');
   const ext = extensions(accept);
-  const path = await open({ multiple: false, directory: false, defaultPath: lastDir || undefined, filters: ext.length ? [{ name: ext.map((e) => `.${e}`).join(', '), extensions: ext }] : [] });
-  if (typeof path !== 'string') return null;
-  let data: Uint8Array;
-  try { data = await readFile(path); } catch (e) { toast(`Could not read “${path}”: ${e instanceof Error ? e.message : e}`, 'error'); return null; }
-  remember(path);
-  const f = new File([data as BlobPart], baseName(path));
-  paths.set(f, path);
-  return f;
+  const picked = await open({ multiple, directory: false, defaultPath: lastDir || undefined, filters: ext.length ? [{ name: ext.map((e) => `.${e}`).join(', '), extensions: ext }] : [] });
+  const files: File[] = [];
+  for (const path of typeof picked === 'string' ? [picked] : picked ?? []) {
+    let data: Uint8Array;
+    try { data = await readFile(path); } catch (e) { toast(`Could not read “${path}”: ${e instanceof Error ? e.message : e}`, 'error'); return []; }
+    remember(path);
+    const f = new File([data as BlobPart], baseName(path));
+    paths.set(f, path);
+    files.push(f);
+  }
+  return files;
 }
 
 // false: the save dialog was cancelled or writing failed (told in a toast)
