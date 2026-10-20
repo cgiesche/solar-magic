@@ -164,7 +164,15 @@ When a level is displayed, it runs the ROM's **original loading routines** (~15 
   the level's Map16 tiles that draw their colors (layer 1, layer 2, BG; marked in the level preview), say when no
   tile of the level does or the colors are sprite palettes, and name colors the game itself sets every
   frame (Mario's palette), as found in the emulated level; the level view (View → Animation) plays
-  the level's animations for as long as they take to repeat.
+  the level's animations for as long as they take to repeat. **Triggers** as in Lunar Magic – the game's
+  conditions (time below 100 and 5 Dragon Coins also as one-shots), the precision timer, manual 0–F, custom 0–F,
+  one-shot 00–1F – and each list's **Trigger Init** (custom triggers and manual frames set when the level loads,
+  the level's over the global's); a one-shot used by several slots, an init frame FF or 256 frames played once
+  are warned about. The **trigger panel** (Triggers, beside the level preview) lists every trigger the level's and
+  the global slots use and switches it for the preview and test play – set in the emulated game after the level's
+  load, the game's animation code runs –, with its RAM, ready ASM lines (e.g. `LDA $7FC0FC : ORA #$0200 :
+  STA $7FC0FC`) and the slots using it; View → Animation triggers switches the same, and test play fires a chosen
+  trigger while playing.
 * **Palette editor** (P): edit colors directly at their ROM source, `.pal` import/export,
   optionally a **custom palette per level** (all 256 colors).
 * **Graphics:** view GFX00–31 and ExGFX up to FFF (as Lunar Magic: ExGFX 80–DFF, and E00–FFF for files kept

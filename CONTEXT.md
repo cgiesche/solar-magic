@@ -108,6 +108,10 @@ _Avoid_: AN2, alternative file, animation ExGFX
 An animation slot (types 18–1B) that moves a range of 2–128 palette colors along by one, right or left, every few animation frames; rotate right/left waits while its trigger does not hold, the "reverse on trigger" types always run and turn the other way while it holds. It has no frames: the colors are the level's own. Like a color animation it shows wherever the level's tiles draw those colors (the Animations tab lists and marks the Map16 tiles); colors the game itself sets every frame (Mario's palette) do not rotate in the game, found in the emulated level.
 _Avoid_: palette rotate, palette cycling
 
+**Animation trigger**:
+What makes an animation slot run (Lunar Magic's ExAnimation triggers): a game condition (P-switches, ON/OFF, star, time below 100, 5 Dragon Coins – the last two also once), the precision timer (the slot shares the frame counter of the first slot of its 8), or one that the user's own code sets in the engine's RAM: a manual trigger (the frame to show), a custom trigger (on/off, a second frame set while on) or a one-shot (the slot plays once, then the engine turns it off). A list's **Trigger Init** sets custom triggers and manual frames when the level loads, the level's over the global list's. The view's triggers are a view setting that test play takes over (set after the level's load), not part of the level.
+_Avoid_: event, flag (those are Conditional Direct Map16's)
+
 ### Emulated results
 
 **Probe**:

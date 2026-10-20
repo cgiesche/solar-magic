@@ -630,6 +630,27 @@ as shared RAM, so code that writes them is no conflict. In the editor: the objec
 several Direct Map16 objects at once), View → Conditional Direct Map16 (each flag the level uses, all on,
 all off; the level and test play load with them), a flag badge on each conditional object.
 
+### ExAnimation triggers
+
+The engine (Kobo's, in Lunar Magic's layout) keeps Lunar Magic's trigger RAM, which your own code (blocks,
+sprites, UberASM) sets: the manual frames at `$7FC070–$7FC07F` (manual *n*: the frame its slots show, 00–FE;
+they upload it when it changes), the one-shot bits at `$7FC0F8–$7FC0FB` (one-shot *n*: set it, its slot plays
+once and the engine clears it) and the custom bits at `$7FC0FC–$7FC0FD` (custom *n*: on while set, the slot's
+second frame set shows). The slots' frame counters are at `$7FC080` (level) and `$7FC0A0` (global). E.g.
+custom 9 on and one-shot 01 fired (16-bit A):
+
+```asm
+    REP #$20
+    LDA $7FC0FC : ORA #$0200 : STA $7FC0FC
+    LDA $7FC0F8 : ORA #$0002 : STA $7FC0F8
+    SEP #$20
+```
+
+A list's Trigger Init sets custom triggers (kept, on or off) and manual frames when the level loads, the global
+list's first, then the level's; one-shots are always off then. A slot with the precision timer (trigger `0F`)
+shares the frame counter of the first slot of its 8 (slots 0, 8, 10, 18) – Lunar Magic's help describes it so,
+Kobo's engine ran it like "always": the editor's copy of the engine is changed for it (marked `[Solar Magic]`).
+
 ## Level import (Lunar Magic)
 
 Graphics in SMWCentral's graphics section are Lunar Magic exports, as the submission rules
