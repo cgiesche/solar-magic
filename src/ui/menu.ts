@@ -63,6 +63,9 @@ function dropdown(menu: Menu, bar?: HTMLElement): HTMLElement {
     wrap.append(list);
     // keep it on screen near the right edge
     if (list.getBoundingClientRect().right > window.innerWidth - 4) { list.style.left = 'auto'; list.style.right = '0'; }
+    // and near the bottom (a button at the foot of a panel): open upwards when it does not fit below but above
+    const r = list.getBoundingClientRect(), b = btn.getBoundingClientRect();
+    if (r.bottom > window.innerHeight - 4 && b.top - r.height - 3 >= 4) { list.style.top = 'auto'; list.style.bottom = 'calc(100% + 3px)'; }
     btn.classList.add('open');
     btn.setAttribute('aria-expanded', 'true');
     const outside = (ev: MouseEvent) => { if (!wrap.contains(ev.target as Node)) closeMenus(); };
