@@ -162,11 +162,11 @@ export class AnimTab implements WsPanel {
       }, { key });
     } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
   }
-  private async editSlot(fn: (s: ExSlot) => void, label: string, key: string | null = null): Promise<void> {
+  // the selected slot changed by `fn` and saved; nothing saved when it returns false
+  private async editSlot(fn: (s: ExSlot) => void | false, label: string, key: string | null = null): Promise<void> {
     const l = this.list();
     const s = l.slots.get(this.sel);
-    if (!s) return;
-    fn(s);
+    if (!s || fn(s) === false) return;
     await this.save(l, label, key);
   }
 
@@ -683,14 +683,14 @@ export class AnimTab implements WsPanel {
       h('div', { class: 'row' },
         h('button', { title: 'New frame after the selected one (next tiles of the graphic)', onclick: () => void this.editSlot((x) => {
           const cs = this.columns(x);
-          if (full(x, cs)) return;
+          if (full(x, cs)) return false;
           cs.splice(this.frame + 1, 0, cs[this.frame].map((v) => v + step));
           this.setColumns(x, cs);
           this.frame++;
         }, 'Frame added') }, '+ Frame'),
         h('button', { title: 'Selected frame once more (shows it twice as long)', onclick: () => void this.editSlot((x) => {
           const cs = this.columns(x);
-          if (full(x, cs)) return;
+          if (full(x, cs)) return false;
           cs.splice(this.frame + 1, 0, cs[this.frame].slice());
           this.setColumns(x, cs);
         }, 'Frame lengthened') }, 'Longer'),
@@ -750,7 +750,7 @@ export class AnimTab implements WsPanel {
     sw.dataset.slot = String(this.sel);
     d.append(h('div', { class: 'at-big-wrap' }, sw, h('div', { class: 'hint' }, 'Preview')), strip,
       h('div', { class: 'row' },
-        h('button', { onclick: () => void this.editSlot((x) => { const cs = this.columns(x); if (full(x, cs)) return; cs.splice(this.frame + 1, 0, cs[this.frame].slice()); this.setColumns(x, cs); this.frame++; }, 'Frame added') }, '+ Frame'),
+        h('button', { onclick: () => void this.editSlot((x) => { const cs = this.columns(x); if (full(x, cs)) return false; cs.splice(this.frame + 1, 0, cs[this.frame].slice()); this.setColumns(x, cs); this.frame++; }, 'Frame added') }, '+ Frame'),
         h('button', { disabled: cols.length < 2, onclick: () => void this.editSlot((x) => { const cs = this.columns(x); cs.splice(this.frame, 1); this.setColumns(x, cs); this.frame = Math.max(0, this.frame - 1); }, 'Frame removed') }, 'Remove')),
       h('p', { class: 'hint' }, 'Each frame shows for 8 game frames (≈0.13 s). The same color twice in a row shows it longer.'));
   }
