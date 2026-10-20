@@ -493,9 +493,11 @@ async function insertProject(rom: Rom, p: MusicProject): Promise<MusicResult> {
     else written.push([i, 1]);
   }
   const archive = projectToZip(p);
+  // most of it is data (the sound engine, samples, songs), whose bytes would read as long stores
+  // anywhere; the 65816 code of AddmusicK keeps to its free RAM and the game's sound ports
   const reg = registerChanges(rom, input, beforeRats, out, written, {
     name: 'AddmusicK (music)', version: '1.0.11', hash: hashBytes([archive]).toString(16).padStart(8, '0'),
-    settings: {}, kind: 'music', archive, ram: [AMK_FREERAM],
+    settings: {}, kind: 'music', archive, ram: [AMK_FREERAM], scanRam: false,
   });
   if (!reg.entry) return fail(reg.errors, r.log);
   warnings.push(...reg.warnings);
