@@ -284,6 +284,7 @@ export class LevelEmulator {
     const byteOwner = ov.byteOwner;
     const trace: ObjectTrace | undefined = ov.trace ? { code: new Set(), reads: new Map(), writes: new Map(), rom: new Set() } : undefined;
     const cpu = s.cpu;
+    let sublevels = 1; // $141A as the load set it, while the music call sees 0
     const skip = trace ? this.skipMask?.() ?? null : null; // not dependencies of the result (GFX, ExAnimation data)
     const put = (o: number, v: number, hi: boolean) => {
       let m = trace!.writes.get(current);
@@ -301,7 +302,10 @@ export class LevelEmulator {
         else if (a >= MAP_HI + MAP_BASE && a < MAP_HI + MAP_BASE + MAP_SIZE) { touch(current, a - MAP_HI - MAP_BASE); if (trace) put(a - MAP_HI - MAP_BASE, v, true); }
       },
       onRomRead: trace || musicCall >= 0 ? (ro: number) => {
-        if (cpu.inFetch && (ro === musicCall || ro === musicCall + 3)) w[RAM.sublevelCount] = ro === musicCall ? 0 : 1;
+        // after the call $141A is back as the load set it: 0 entered from the overworld, where the game decides
+        // by it whether a level's no-Yoshi intro plays its walk into the castle or ghost house
+        if (cpu.inFetch && ro === musicCall) { sublevels = w[RAM.sublevelCount]; w[RAM.sublevelCount] = 0; }
+        else if (cpu.inFetch && ro === musicCall + 3) w[RAM.sublevelCount] = sublevels;
         if (!trace) return;
         if (skip === null || skip[ro] !== 1) trace.rom.add(ro);
         if (cpu.inFetch) { trace.code.add(ro); return; }
