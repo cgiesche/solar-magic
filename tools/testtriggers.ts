@@ -94,6 +94,7 @@ check(triggerRam(0x04)?.ram === '$1490' && triggerRam(0x00) === null, 'star: the
 {
   // one-shot 03, frames 1-3: holds until fired, then plays once and stays on the last; the bit is cleared
   const l = listOf([0, tiles(T0, 0x33, [1, 2, 3])]);
+  emu.snes.wram[0x0f31] = 0; // (as a level with time 000 leaves it)
   const idle = play(l, T0, undefined);
   const v = emptyTriggerView(); v.oneShot.add(3);
   const fired = play(l, T0, v);
@@ -115,6 +116,11 @@ check(triggerRam(0x04)?.ram === '$1490' && triggerRam(0x00) === null, 'star: the
   const v = emptyTriggerView(); v.game.add(0x05);
   const once = play(l, T0, v);
   check(once.at(-1) === 0x12 && once.at(-2) === 0x12, `time below 100 (one shot): plays once (${once.map((b) => b.toString(16))})`);
+  // with the level's time (300) it waits from the load on: the engine's eight setup frames (GM 12) run
+  // after the editor sets it, even from a timer of 000
+  emu.snes.wram[0x0f31] = 0; // (as a level with time 000 leaves it)
+  const idle = play(l, T0, undefined);
+  check(idle.every((b) => b < 0x11 || b > 0x12) && emu.snes.wram[W(EXTRIGGER_RAM.counters)] === 0xff, `time below 100 (one shot): not started during the load (${idle.map((b) => b.toString(16))})`);
 }
 
 // ---- the precision timer: the counter of the first slot of its 8 ----
