@@ -795,9 +795,12 @@ export class AnimTab implements WsPanel {
   // Map16 tiles showing the slot's target in another palette than `row`, with the palettes they show it in
   private offPalette(s: ExSlot, row: number): { tile: number; pals: number[] }[] {
     const targets = new Set(this.targetTiles(s)), src = map16Source(this.app.rom, this.app.render);
-    return this.targetUsers(s, EXT_TILES).filter((m) => paletteOn(src.fg(m), targets, row)).map((tile) => ({
-      tile, pals: [...new Set(src.fg(tile).filter((w) => targets.has(w & 0x3ff)).map((w) => (w >> 10) & 7))].sort(),
-    }));
+    const out: { tile: number; pals: number[] }[] = [];
+    for (let tile = 0; tile < EXT_TILES; tile++) {
+      const words = src.fg(tile);
+      if (paletteOn(words, targets, row)) out.push({ tile, pals: [...new Set(words.filter((w) => targets.has(w & 0x3ff)).map((w) => (w >> 10) & 7))].sort() });
+    }
+    return out;
   }
 
   // a palette chosen for the previews that Map16 tiles do not draw the target in: said so, and offered
