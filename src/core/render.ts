@@ -4,7 +4,7 @@ import { Rom } from './rom.ts';
 import { decodeTile, cgramToRGBA, snesColorToRGBA } from './gfx.ts';
 import { isL1Vertical, isL2Vertical, hasLayer2Objects } from './level.ts';
 import { MAP_BASE, type LevelRender } from './levelemu.ts';
-import { EXT_FIRST, extTileWords, setExtTileWords } from './map16ext.ts';
+import { EXT_FIRST, extTileAddr, extTileWords, setExtTileWords } from './map16ext.ts';
 import { bgTileWords } from './bgmap16.ts';
 import { RAM, get16, map16Tile, bgTile, map16Pointer, cameraX, cameraY } from './ram.ts';
 
@@ -107,8 +107,7 @@ export function map16Source(rom: Rom, r: LevelRender): Map16Source {
   return {
     fg(t: number) {
       if (t >= EXT_FIRST) return extTileWords(rom, t) ?? this.fg(0x025);
-      const ptr = map16Pointer(w, t);
-      const base = 0x0d0000 | ptr;
+      const base = fgTileAddr(rom, r, t);
       return [rom.r16(base), rom.r16(base + 2), rom.r16(base + 4), rom.r16(base + 6)];
     },
     bg(t: number) {
@@ -117,10 +116,15 @@ export function map16Source(rom: Rom, r: LevelRender): Map16Source {
   };
 }
 
+// where FG Map16 tile t's 4 words are: the level's tileset's (its Map16 pointers in the level's WRAM),
+// an extended tile's in the extended Map16
+export function fgTileAddr(rom: Rom, r: LevelRender, t: number): number {
+  return t >= EXT_FIRST ? extTileAddr(rom, t) : 0x0d0000 | map16Pointer(r.wram, t);
+}
 // writes FG Map16 tile t's 4 words where map16Source reads them
 export function setFgWords(rom: Rom, r: LevelRender, t: number, words: number[]): void {
   if (t >= EXT_FIRST) { setExtTileWords(rom, t, words); return; }
-  const base = 0x0d0000 | map16Pointer(r.wram, t);
+  const base = fgTileAddr(rom, r, t);
   words.forEach((v, q) => rom.w16(base + q * 2, v));
 }
 

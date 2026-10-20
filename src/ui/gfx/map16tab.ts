@@ -13,7 +13,7 @@ import { h, clear, toast, modal, choose, attachPanZoom } from '../dom.ts';
 import { pickFile, downloadBytes } from '../platform.ts';
 import { TileCache } from '../../core/render.ts';
 import { hex } from '../../core/names.ts';
-import { EXT_FIRST, EXT_TILES, map16Ext, actsLike, setActsLike, setExtTileWords } from '../../core/map16ext.ts';
+import { EXT_FIRST, EXT_TILES, actsLike, setActsLike } from '../../core/map16ext.ts';
 import { BG_EXT_FIRST, bgTileAddr, bgTileWords, setBgExtTileWords } from '../../core/bgmap16.ts';
 import { blockFileOf } from '../blockdialog.ts';
 import { openResources } from '../resources.ts';
@@ -22,12 +22,11 @@ import { renderMap16Sheet } from '../panels.ts';
 import { probeText } from '../../core/blockprobe.ts';
 import { levelGfx, defaultGfx, levelExtGfx, VANILLA_GFX, GFX_FILES } from '../../core/patches.ts';
 import { cgramToRGBA } from '../../core/gfx.ts';
-import { map16Pointer } from '../../core/ram.ts';
 import { tileMatches, drawTileMatches } from '../tilesearch.ts';
 import { animsAt, animLinks } from './animtab.ts';
 import { fgTileUsers, bgTileUsers, tileLinks, unusedFgTiles, isTilesetTile, TILE_SOURCES } from '../../core/levelusage.ts';
 import { usedInList } from '../usedin.ts';
-import { map16Source } from '../../core/render.ts';
+import { map16Source, fgTileAddr, setFgWords } from '../../core/render.ts';
 import { remapTile, remapLine, slotRemapLine } from '../../core/remap.ts';
 import { remapEditor, type RemapEditor } from '../remaplist.ts';
 import { QuarterGrid, markRect, editMarked, setPalette, setBit, setTileNum, stamp, summary, wholeTiles, FLIP_X, FLIP_Y, PRIO, type QuarterEdit, type MarkMode, type BitState } from '../../core/quarters.ts';
@@ -174,10 +173,7 @@ export class Map16Tab implements WsPanel {
 
   // ---------- data ----------
   private tileAddr(t: number): number {
-    if (this.bg) return bgTileAddr(this.app.rom, t) ?? -1;
-    if (t >= EXT_FIRST) return map16Ext(this.app.rom)!.gfx + (t - EXT_FIRST) * 8;
-    const w = this.app.render.wram;
-    return 0x0d0000 | map16Pointer(w, t);
+    return this.bg ? bgTileAddr(this.app.rom, t) ?? -1 : fgTileAddr(this.app.rom, this.app.render, t);
   }
   words(t: number): number[] {
     const a = this.tileAddr(t);
@@ -185,8 +181,8 @@ export class Map16Tab implements WsPanel {
     return [0, 1, 2, 3].map((q) => this.app.rom.r16(a + q * 2));
   }
   private setWords(t: number, ws: number[]): void {
-    if (this.bg && t >= BG_EXT_FIRST) setBgExtTileWords(this.app.rom, t, ws);
-    else if (!this.bg && t >= EXT_FIRST) setExtTileWords(this.app.rom, t, ws);
+    if (!this.bg) setFgWords(this.app.rom, this.app.render, t, ws);
+    else if (t >= BG_EXT_FIRST) setBgExtTileWords(this.app.rom, t, ws);
     else { const a = this.tileAddr(t); ws.forEach((v, q) => this.app.rom.w16(a + q * 2, v)); }
   }
   private tc(): TileCache {
