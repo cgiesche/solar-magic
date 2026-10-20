@@ -495,8 +495,8 @@ button.danger:hover:not(:disabled) { border-color: var(--danger); }
 .tp-asm { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .tp-asm code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; padding: 2px 4px; background: #15171b; border-radius: 3px; }
 .tp-copy { padding: 1px 6px; font-size: 11px; }
-.ti { display: flex; flex-direction: column; gap: 6px; width: 620px; max-width: 85vw; }
-.ti-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px 12px; }
+.ti { display: flex; flex-direction: column; gap: 6px; width: min-content; min-width: 560px; } /* as wide as the grids; the texts wrap to them */
+.ti-grid { display: grid; grid-template-columns: repeat(4, auto); gap: 4px 12px; }
 .ti-cell { display: flex; align-items: center; gap: 4px; font-size: 12px; white-space: nowrap; }
 .tp > button { align-self: flex-start; }
 .at-rot-strip > div { flex: 1; min-width: 2px; }
