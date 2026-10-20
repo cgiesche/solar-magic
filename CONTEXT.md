@@ -105,7 +105,7 @@ One of four graphics (A–D, Lunar Magic's ExGFX 60–63) that tile animations t
 _Avoid_: AN2, alternative file, animation ExGFX
 
 **Color rotation**:
-An animation slot (types 18–1B) that moves a range of 2–128 palette colors along by one, right or left, every few animation frames; rotate right/left waits while its trigger does not hold, the "reverse on trigger" types always run and turn the other way while it holds. It has no frames: the colors are the level's own. Colors the game itself sets every frame (Mario's palette) do not rotate in the game; the Animations tab finds them in the emulated level.
+An animation slot (types 18–1B) that moves a range of 2–128 palette colors along by one, right or left, every few animation frames; rotate right/left waits while its trigger does not hold, the "reverse on trigger" types always run and turn the other way while it holds. It has no frames: the colors are the level's own. Like a color animation it shows wherever the level's tiles draw those colors (the Animations tab lists and marks the Map16 tiles); colors the game itself sets every frame (Mario's palette) do not rotate in the game, found in the emulated level.
 _Avoid_: palette rotate, palette cycling
 
 ### Emulated results

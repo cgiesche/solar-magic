@@ -9,7 +9,7 @@ import { h, clear, toast, pickerOpen, modal } from '../dom.ts';
 import { menuButton, type MenuItem } from '../menu.ts';
 import { hex } from '../../core/names.ts';
 import { cgramToRGBA, decodeTile, snesColorToRGBA } from '../../core/gfx.ts';
-import { map16Source } from '../../core/render.ts';
+import { map16Source, levelColorUsers } from '../../core/render.ts';
 import { EXT_TILES } from '../../core/map16ext.ts';
 import {
   type ExList, type ExSlot, emptyList, readLevelList, readGlobalList, writeLevelList, writeGlobalList, levelSettings, setLevelSettings,
@@ -392,7 +392,8 @@ export class AnimTab implements WsPanel {
     // an open native color picker closes when its input is replaced: rebuild once it is done (change)
     if (pickerOpen(d)) return;
     clear(d);
-    if (this.ws.preview.highlight.size) { this.ws.preview.highlight.clear(); this.ws.preview.drawHighlight(); }
+    const pv = this.ws.preview;
+    if (pv.highlight.size || pv.highlight2.size || pv.highlightBg.size) { pv.clearHighlight(); pv.drawHighlight(); }
     const s = this.slot();
     if (!s) { d.append(h('p', { class: 'hint' }, 'Select or create an animation on the left.')); return; }
     const kind = kindOf(s.type);
@@ -420,6 +421,27 @@ export class AnimTab implements WsPanel {
     else this.rotationDetail(d, s);
   }
 
+  // where colors show in the level: the Map16 tiles that draw them (links, marked in the preview), or
+  // that they are sprite palettes or drawn by no tile here
+  private colorUsers(colors: number[]): HTMLElement {
+    const app = this.app, im = app.images, pv = this.ws.preview;
+    const layers = colors.filter((c) => c < 0x80), sprites = colors.length - layers.length;
+    const u = im && layers.length ? levelColorUsers(app.rom, app.render, im, new Set(layers)) : { layer1: [], layer2: [], bg: [] };
+    pv.highlight = new Set(u.layer1);
+    pv.highlight2 = new Set(u.layer2);
+    pv.highlightBg = new Set(u.bg);
+    pv.drawHighlight();
+    const links = (label: string, tiles: number[], bg: boolean) => tiles.length
+      ? h('div', { class: 'gt-users' }, h('span', { class: 'hint' }, label), tiles.slice(0, 24).map((m) => h('a', { href: '#', class: 'mono', title: 'Open in the Map16 tab', onclick: (e: Event) => { e.preventDefault(); this.ws.showMap16(m, bg); } }, hex(m, 3))), tiles.length > 24 ? h('span', { class: 'hint' }, `… (${tiles.length})`) : '')
+      : '';
+    const none = layers.length && !u.layer1.length && !u.layer2.length && !u.bg.length;
+    return h('div', { class: 'at-users' },
+      links('shows on Map16 (layer 1):', u.layer1, false), links('layer 2:', u.layer2, false), links('BG:', u.bg, true),
+      none ? h('div', { class: 'hint' }, `No Map16 tile of this level draws ${layers.length === 1 ? 'this color' : 'these colors'} – not visible on its layers.`) : '',
+      sprites ? h('div', { class: 'hint' }, `${sprites === colors.length ? (colors.length === 1 ? 'This color is' : 'These colors are') : `${sprites} of the colors are`} in the sprite palettes (rows 8–F): ${sprites === 1 ? 'it shows' : 'they show'} on sprites that use them, not on Map16 tiles.`) : '',
+      u.layer1.length || u.layer2.length || u.bg.length ? h('div', { class: 'hint' }, 'Marked in the level preview.') : '');
+  }
+
   // a color rotation: its colors (dragged in the palette on the right), how often it turns, a strip
   // of the colors turning at that speed (as while the trigger holds, when asked)
   private rotationDetail(d: HTMLElement, s: ExSlot): void {
@@ -444,6 +466,7 @@ export class AnimTab implements WsPanel {
     const dir = rotationStep(s.type, s.trigger, this.triggerOn);
     d.append(
       h('div', { class: 'prop' }, h('label', null, 'Colors'), h('span', { class: 'mono' }, rangeName(s)), h('span', { class: 'hint' }, 'drag in the palette on the right')),
+      this.colorUsers(Array.from({ length: Math.min(count, 256 - first) }, (_, i) => first + i)),
       h('div', { class: 'prop' }, h('label', null, 'Count'), countIn),
       h('div', { class: 'prop' }, h('label', null, 'Frames'), delayIn, h('span', { class: 'hint' }, speedName(delay))),
       h('p', { class: 'hint' }, `A step every ${delay * 8} game frames; all ${count} colors go round in ${fmt(count * delay * 8 / 60)} s.`),
@@ -616,7 +639,8 @@ export class AnimTab implements WsPanel {
       const c = s.dest & 0xff;
       d.append(h('div', { class: 'prop' }, h('label', null, 'Color'), h('span', { class: 'mono' }, `${hex(c >> 4, 1)}·${hex(c & 15, 1)}`),
         h('button', { class: this.picking === 'target' ? 'active' : '', onclick: () => { this.picking = this.picking ? null : 'target'; this.buildSide(); this.buildDetail(); } }, 'Choose color')));
-    }
+      d.append(this.colorUsers(Array.from({ length: Math.min(count, 256 - c) }, (_, i) => c + i)));
+    } else d.append(h('div', { class: 'hint' }, 'Shows wherever no layer draws (the back area).'));
     if (count > 1) { d.append(h('p', { class: 'hint' }, `This animation sets ${count} colors at once (from data) – not editable here yet.`)); return; }
     const cols = this.columns(s);
     const sets = secondSet(s.trigger) ? 2 : 1;

@@ -137,6 +137,7 @@ export interface LevelImages {
   geom2: LayerGeom | null;
   tiles1: Uint16Array; // map16 numbers per tile (layer 1)
   tiles2: Uint16Array | null;
+  bgTiles: Uint16Array | null; // BG Map16 numbers of the BG tilemap (32 x 27, repeating), without layer 2 objects
 }
 
 export function backdropColor(r: LevelRender): number {
@@ -160,7 +161,7 @@ export function renderLevel(rom: Rom, r: LevelRender, mode: number, screens: num
   }
   const layer2 = new Uint32Array(width * height);
   let geom2: LayerGeom | null = null;
-  let tiles2: Uint16Array | null = null;
+  let tiles2: Uint16Array | null = null, bgTiles: Uint16Array | null = null;
   const tc2 = new TileCache(r.vram, r.cgram, ((r.ppuRegs[0x0b] >> 4) << 13));
   if (hasLayer2Objects(mode)) {
     geom2 = layerGeom(rom, 1, mode, screens);
@@ -174,23 +175,49 @@ export function renderLevel(rom: Rom, r: LevelRender, mode: number, screens: num
   } else {
     // BG tilemap: 32 x 27 tiles, repeating horizontally ($7EB900 / $7EBD00)
     const bgw = 32, bgh = 27;
-    const bgTiles: number[][] = [];
+    const bgRows: number[][] = [];
     for (let y = 0; y < bgh; y++) {
       const row: number[] = [];
       for (let x = 0; x < bgw; x++) {
         const o = (x >> 4) * 0x1b0 + y * 16 + (x & 15);
         row.push(bgTile(w, o));
       }
-      bgTiles.push(row);
+      bgRows.push(row);
     }
+    bgTiles = Uint16Array.from(bgRows.flat());
     const rows = Math.ceil(height / 16), cols = Math.ceil(width / 16);
     for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) {
-      const t = bgTiles[y % bgh][x % bgw];
+      const t = bgRows[y % bgh][x % bgw];
       drawMap16(layer2, width, height, tc2, src.bg(t), x * 16, y * 16);
     }
   }
   const layer3 = renderLayer3(r, width, height);
-  return { width, height, backdrop: backdropColor(r), layer1, layer2, layer3, geom1, geom2, tiles1, tiles2 };
+  return { width, height, backdrop: backdropColor(r), layer1, layer2, layer3, geom1, geom2, tiles1, tiles2, bgTiles };
+}
+
+// whether a Map16 tile's quarters (4bpp 8x8 tiles from charBase, palette rows 0-7) draw a pixel in one of
+// `colors` (CGRAM indices)
+function drawsColors(words: number[], vram: Uint8Array, charBase: number, colors: Set<number>, idx: Uint8Array): boolean {
+  for (const w of words) {
+    const row = ((w >> 10) & 7) * 16;
+    let any = false;
+    for (let v = 1; v < 16 && !any; v++) any = colors.has(row + v);
+    if (!any) continue;
+    decodeTile(vram, (charBase + (w & 0x3ff) * 32) & 0xffff, 4, idx);
+    for (const v of idx) if (v && colors.has(row + v)) return true;
+  }
+  return false;
+}
+
+// the level's Map16 tiles that draw one of `colors` (CGRAM indices): FG tiles of layer 1 and of layer 2
+// objects, BG tiles of the BG tilemap; sprite palettes (rows 8-F) are no layer's
+export function levelColorUsers(rom: Rom, r: LevelRender, im: LevelImages, colors: Set<number>): { layer1: number[]; layer2: number[]; bg: number[] } {
+  const src = map16Source(rom, r), idx = new Uint8Array(64);
+  const base1 = (r.ppuRegs[0x0b] & 0x0f) << 13, base2 = (r.ppuRegs[0x0b] >> 4) << 13;
+  const find = (tiles: Uint16Array | null, words: (t: number) => number[], base: number) =>
+    [...new Set(tiles ?? [])].filter((t) => drawsColors(words(t), r.vram, base, colors, idx));
+  const sorted = (a: number[]) => a.sort((x, y) => x - y);
+  return { layer1: sorted(find(im.tiles1, (t) => src.fg(t), base1)), layer2: sorted(find(im.tiles2, (t) => src.fg(t), base2)), bg: sorted(find(im.bgTiles, (t) => src.bg(t), base2)) };
 }
 
 // where the BG3 tilemap is on the level image at the end of the load: its VRAM byte address, size in pixels
