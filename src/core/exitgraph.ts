@@ -24,8 +24,9 @@ export function exitTarget(rom: Rom, from: number, e: Pick<ScreenExit, 'dest' | 
   const s = readSecondaryEntrance(rom, idx);
   return s.overworld ? { entrance: idx, to: -1, overworld: true } : { entrance: idx, to: s.destLevel, overworld: false };
 }
-// a secondary entrance to the overworld: of a level (its destLevel, Lunar Magic's "to Overworld [XXX]"), not into it
-export const isOverworldEntrance = (rom: Rom, idx: number): boolean => (rom.r8(SEC_ENT[4] + idx) & OW_EXIT) !== 0;
+// a secondary entrance that is an exit to the overworld: of a level (its destLevel, Lunar Magic's "to Overworld
+// [XXX]"), not into it
+export const isOverworldExit = (rom: Rom, idx: number): boolean => (rom.r8(SEC_ENT[4] + idx) & OW_EXIT) !== 0;
 
 export class ExitGraph {
   readonly rom: Rom;
@@ -53,10 +54,16 @@ export class ExitGraph {
   // the secondary entrances leading into a level (see app.findSecondaryEntrances)
   entrancesOf(level: number): number[] {
     const out: number[] = [];
-    for (let i = 0; i < 0x200; i++) if (readSecondaryEntrance(this.rom, i).destLevel === level && !isBlank(this.rom, i) && !isOverworldEntrance(this.rom, i)) out.push(i);
+    for (let i = 0; i < 0x200; i++) if (readSecondaryEntrance(this.rom, i).destLevel === level && !isBlank(this.rom, i) && !isOverworldExit(this.rom, i)) out.push(i);
     // a blank entry leads to level 000 or 100 too; list it only where an exit uses it
     for (const e of this.exits) if (e.entrance >= 0 && e.to === level && isBlank(this.rom, e.entrance) && !out.includes(e.entrance)) out.push(e.entrance);
     return out.sort((a, b) => a - b);
+  }
+
+  // an exit to the overworld of `level` no exit uses (to give an exit), or null
+  unusedOverworldExit(level: number): number | null {
+    for (let i = 0; i < 0x200; i++) if (isOverworldExit(this.rom, i) && readSecondaryEntrance(this.rom, i).destLevel === level && !this.usersOfEntrance(i).length) return i;
+    return null;
   }
 
   // a free secondary entrance number (for any level): no exit uses it and it is blank
@@ -128,7 +135,7 @@ export function submapBanks(rom: Rom): Map<number, Set<number>> {
     for (const e of exits) {
       const idx = exitIndex(n, e, bank);
       const secondary = e.flags & EXIT_NEW ? e.secondary : oldSecondary;
-      if (secondary && isOverworldEntrance(rom, idx)) continue;
+      if (secondary && isOverworldExit(rom, idx)) continue;
       reach(secondary ? readSecondaryEntrance(rom, idx).destLevel : idx, bank);
     }
   }

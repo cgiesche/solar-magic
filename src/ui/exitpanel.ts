@@ -11,7 +11,7 @@ import {
 } from '../core/level.ts';
 import { overworldFields, overworldLabel } from './owexit.ts';
 import { spotText, cameraOptions, cameraValue, setCamera, cameraFields, optionFields } from './entrancefields.ts';
-import { exitTarget, isOverworldEntrance, type ExitRef } from '../core/exitgraph.ts';
+import { exitTarget, isOverworldExit, type ExitRef } from '../core/exitgraph.ts';
 import { arrivesSlippery, slipperyEntrances } from '../core/slippery.ts';
 import { levelPicker } from './levelpicker.ts';
 import { openTestPlay } from './testplay.ts';
@@ -57,12 +57,12 @@ function exitPanel(app: App, body: HTMLElement): boolean {
     const idx = g.entrancesOf(level)[0] ?? newEntranceIn(app, level);
     if (idx !== null) upd(() => { setExitSecondary(e, true); e.dest = idx; });
   };
-  // to the overworld: through an entrance to the overworld of this level no exit uses, else a new one (passing
-  // the level with the normal exit)
+  // to the overworld: through an exit to the overworld of this level no exit uses, else a new one (passing the
+  // level with the normal exit)
   const toOverworld = () => {
-    const idx = Array.from({ length: 0x200 }, (_, i) => i).find((i) => isOverworldEntrance(app.rom, i) && readSecondaryEntrance(app.rom, i).destLevel === n && !g.usersOfEntrance(i).length) ?? g.freeEntrance();
+    const idx = g.unusedOverworldExit(n) ?? g.freeEntrance();
     if (idx === null) { toast('No free secondary entrance left.', 'error'); return; }
-    if (!isOverworldEntrance(app.rom, idx)) app.editSecondaryEntrance(idx, `Secondary entrance ${hex3(idx)} to the overworld created`, (x) => { x.destLevel = n; x.overworld = newOverworldExit(); });
+    if (!isOverworldExit(app.rom, idx)) app.editSecondaryEntrance(idx, `Secondary entrance ${hex3(idx)} to the overworld created`, (x) => { x.destLevel = n; x.overworld = newOverworldExit(); });
     upd(() => { setExitSecondary(e, true); e.dest = idx; });
   };
   const kind = !e.secondary ? 'main' : t.overworld ? 'overworld' : 'secondary';

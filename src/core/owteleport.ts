@@ -17,12 +17,14 @@ import { listPatches } from './patchreg.ts';
 import { installEditorPatch, missingPatch } from './patches.ts';
 import { RAM } from './ram.ts';
 import { MAP_NAMES, eventNames } from './overworld.ts';
-import { owActionName, OW_NOTHING, type OverworldExit } from './level.ts';
+import { owActionShort, type OverworldExit } from './level.ts';
+import { hex2 } from './names.ts';
 
 export const OW_TELEPORT_PATCH_NAME = 'Overworld teleports (Lunar Magic format)';
 export const TELEPORTS = 0x100;
-const FIND_HOOK = 0x048509, DEST_HOOK = 0x048543;
-const GAME_TABLES = [0x048431, 0x048467, 0x04849d, 0x0484d3], GAME_ENTRIES = 27;
+export const FIND_HOOK = 0x048509;
+const DEST_HOOK = 0x048543;
+export const GAME_TABLES = [0x048431, 0x048467, 0x04849d, 0x0484d3], GAME_ENTRIES = 27;
 const MAGIC = [0x53, 0x4d, 0x57, 0x4f]; // "SMWO"
 const NONE = 0xffff;
 const hx = (n: number) => '$' + n.toString(16).toUpperCase();
@@ -40,7 +42,7 @@ lorom
 !Count = ${hx(TELEPORTS)}
 
 ; the star/pipe tile Mario stands on (A/X/Y 8): Z set and $1DF6 the entry when the table has it (the game's
-; JSR $8509 : BNE)
+; JSR $8509 : BNE); as the game's, an entry's X word EOR the submap << 8 below $200, then equal to the tile X
 org ${hx(FIND_HOOK)}
   JSL Find
   RTS
@@ -154,7 +156,6 @@ export function locationFor(rom: Rom, tile: OwTile, keep: Set<number> = new Set(
   return free;
 }
 
-const hex2 = (n: number) => n.toString(16).toUpperCase().padStart(2, '0');
 export const tileText = (t: OwTile): string => `${MAP_NAMES[t.submap] ?? `Submap ${t.submap}`} ${hex2(t.x)},${hex2(t.y)}`;
 // where location `i` teleports to: "Main map 0C,09", "(location 1F not set up)"
 export function locationText(rom: Rom, i: number): string {
@@ -163,8 +164,9 @@ export function locationText(rom: Rom, i: number): string {
 }
 // what an exit through an entrance to the overworld does: "normal exit, event 12 – 105 …, teleport to Main map 0C,09"
 export function overworldExitText(rom: Rom, o: OverworldExit): string {
-  const parts = [o.action === OW_NOTHING && (o.teleport || o.ownEvent) ? 'nothing passed' : owActionName(o.action).replace(/^Pass the level \((.*)\)$/, '$1').toLowerCase()];
-  if (o.ownEvent) parts.push(`base event ${hex2(o.event)}${eventNames(rom).has(o.event) ? ` (${eventNames(rom).get(o.event)})` : ''}`);
+  const parts = [owActionShort(o.action)];
+  const name = o.ownEvent ? eventNames(rom).get(o.event) : undefined;
+  if (o.ownEvent) parts.push(`base event ${hex2(o.event)}${name ? ` (${name})` : ''}`);
   if (o.teleport) parts.push(`teleport to ${locationText(rom, o.location)}`);
   return parts.join(', ');
 }

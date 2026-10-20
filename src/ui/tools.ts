@@ -3,7 +3,7 @@
 import type { App } from './app.ts';
 import { h, modal, clear, hexInput, select, toast, choose, emptyState, checkbox } from './dom.ts';
 import { downloadBytes, pickFile } from './platform.ts';
-import { isBlank } from '../core/exitgraph.ts';
+import { isBlank, isOverworldExit } from '../core/exitgraph.ts';
 import {
   readSecondaryEntrance, readSecondaryHeader, type SecondaryEntrance, loadLevel, cloneLevel, insertScreen, deleteScreen, clearLevel, spriteId, secondarySpot, spotTile, hasRelativeCamera, levelMode,
   newOverworldExit, setSecondarySpot, mainSpot, copyCameraStart, copyEntranceOptions,
@@ -22,14 +22,15 @@ import { STRUCT_EXT } from '../core/structs.ts';
 // overview of all secondary entrances (000-1FF): where each leads, which exits use it
 export function openEntrancesDialog(app: App): void {
   const rom = app.rom;
-  const filter = h('select', null, h('option', { value: 'level' }, 'into this level'), h('option', { value: 'set' }, 'all set up'), h('option', { value: 'all' }, 'all (including free)'));
+  const filter = h('select', null, h('option', { value: 'level' }, 'of this level'), h('option', { value: 'set' }, 'all set up'), h('option', { value: 'all' }, 'all (including free)'));
   const list = h('div', { class: 'gfx-list', style: 'height: 420px; min-width: 360px' });
   const detail = h('div', { class: 'ent-detail' });
   let sel = -1;
   const buildList = () => {
     clear(list);
     const g = app.exitGraph();
-    const mine = new Set(g.entrancesOf(app.level.number));
+    // the level's own: its entrances and its exits to the overworld
+    const mine = new Set([...g.entrancesOf(app.level.number), ...Array.from({ length: 0x200 }, (_, i) => i).filter((i) => isOverworldExit(rom, i) && readSecondaryEntrance(rom, i).destLevel === app.level.number)]);
     for (let i = 0; i < 0x200; i++) {
       const e = readSecondaryEntrance(rom, i);
       const users = g.usersOfEntrance(i).length;
@@ -68,7 +69,7 @@ export function openEntrancesDialog(app: App): void {
       detail.append(
         h('div', { class: 'prop-title' }, `Secondary entrance ${hex(sel, 3)}`),
         h('div', null, 'Leads to the ', h('b', null, 'overworld'), ' ', h('span', { class: 'hint' }, overworldExitText(rom, e.overworld))),
-        h('div', { class: 'prop', title: 'The level it belongs to: the one it is saved and exported with' }, h('label', null, 'Level'), hexInput(e.destLevel, 3, (v) => set('Level', (x) => (x.destLevel = v)), 0x1ff)),
+        h('div', { class: 'prop', title: 'The level it belongs to (Lunar Magic: the level whose .mwl it is exported with)' }, h('label', null, 'Level'), hexInput(e.destLevel, 3, (v) => set('Level', (x) => (x.destLevel = v)), 0x1ff)),
         owSwitch,
         ...overworldFields(app, sel, e.overworld, (l, f) => set(l, (x) => f(x.overworld!)), () => { buildList(); buildDetail(); }).map(([l, el]) => prop(l, el)),
         used,

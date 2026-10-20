@@ -25,7 +25,7 @@ import { lt3Override, lt3Target, lt3Covers, layer3Map, layer3Word, layer3Index, 
 import { layer3Geometry, type Layer3Geometry } from '../core/render.ts';
 import { toast, log as logMsg, modalsOpen, onModalsChange } from './dom.ts';
 import { musicPlayer } from './musicplayer.ts';
-import { ExitGraph, exitTarget, isBlank, isOverworldEntrance } from '../core/exitgraph.ts';
+import { ExitGraph, exitTarget, isBlank, isOverworldExit } from '../core/exitgraph.ts';
 import type { RomHistory, RomEdit } from '../core/romhistory.ts';
 import { RomEditSession, type EditOptions } from '../core/romedit.ts';
 import { LevelHistory } from '../core/levelhistory.ts';
@@ -405,7 +405,7 @@ export class App {
   findSecondaryEntrances(): void {
     const n = this.level.number;
     this.secEntrances = [];
-    for (let i = 0; i < 0x200; i++) if (readSecondaryEntrance(this.rom, i).destLevel === n && !isBlank(this.rom, i) && !isOverworldEntrance(this.rom, i)) this.secEntrances.push(i);
+    for (let i = 0; i < 0x200; i++) if (readSecondaryEntrance(this.rom, i).destLevel === n && !isBlank(this.rom, i) && !isOverworldExit(this.rom, i)) this.secEntrances.push(i);
   }
 
   markers(): Marker[] {

@@ -39,7 +39,7 @@
 
 import type { Rom } from './rom.ts';
 import { LEVEL_SIZE_TABLE, LEVEL_HEIGHTS, SEC_HDR, SEC_ENT } from './level.ts';
-import { RAM, LEVEL_HEIGHT_RAM, LEVEL_HEIGHT, SCREEN_PTRS, LEVEL_MAX_Y, LEVEL_ROW_MASK, LEVEL_LOADED, EXIT_FLAGS_RAM } from './ram.ts';
+import { RAM, GM, LEVEL_HEIGHT_RAM, LEVEL_HEIGHT, SCREEN_PTRS, LEVEL_MAX_Y, LEVEL_ROW_MASK, LEVEL_LOADED, EXIT_FLAGS_RAM } from './ram.ts';
 import { applyPatch, type ApplyResult } from './patchapply.ts';
 import { installEditorPatch } from './patches.ts';
 
@@ -65,6 +65,8 @@ lorom
 !Ent1 = $${hx(SEC_HDR[6])}       ; per level, Lunar Magic's: IWPXXtTT (I: slippery, W: water, P: the entrance at tile X/Y, XX: X bits 4-3)
 !Ent2 = $${hx(SEC_HDR[7])}       ; OFYYYYYY (O: BG relative to FG, F: camera offset bit 4, Y: Y bits 9-4)
 !Ent3 = $${hx(SEC_HDR[8])}       ; RL-ooooo (R: camera relative to Mario, L: face left, o: BG height - 1, or with O its offset)
+!SecFA = $${hx(SEC_ENT[1])}       ; per secondary entrance: bbffyyyy, to the overworld its location index
+!SecFC = $${hx(SEC_ENT[2])}       ; xxxSSSSS, to the overworld its base event
 !SecFE = $${hx(SEC_ENT[3])}       ; per secondary entrance: IPXXDAAA (I: slippery, P: at tile X/Y, XX: X bits 4-3, D: the level's bit 8)
 !SecY = $${hx(SEC_ENT[4])}        ; EFYYYYYY (Lunar Magic's, at a place of its own: F camera offset bit 4, Y: Y bits 9-4)
 !SecR = $${hx(SEC_ENT[5])}        ; RLW----- (R: camera relative to Mario, L: face left, W: water)
@@ -321,7 +323,7 @@ ExitBank:
 + RTL
 
 ; the secondary entrance's level (A 8 = its IPXXDAAA, X/Y 16, Y = the entrance): the high byte from D, then the
-; game's AND #$07 : STA $192A (the entrance action); Lunar Magic's entrance to the overworld (E in !SecY) leaves
+; game's AND #$07 : STA $192A (the entrance action); an exit to the overworld (Lunar Magic's, E in !SecY) leaves
 SecLevel:
   PHA
   AND #$08 : LSR #3 : STA $0F
@@ -336,22 +338,23 @@ SecLevel:
   PLA
   JMP OverworldExit
 
-; Lunar Magic's secondary entrance to the overworld (A 8 = its --ETDAAA, X/Y 16, Y = the entrance), as Lunar
+; an exit to the overworld (Lunar Magic's secondary entrance, A 8 = its --ETDAAA, X/Y 16, Y = the entrance), as Lunar
 ; Magic plays it: instead of the level the game loads the overworld ($0100 = $0C, as after a level) with the
 ; action's exit (AAA in $0DD5, 7: $80, the player's turn ends as when he dies; one passed sets $13CE and $1DE9),
 ; with E the base event from $05FC00 (else the one of the tile Mario stood on, set when he entered the level),
 ; with T Mario at the location $05FA00 (the game's star/pipe warp; owteleport.ts). The level load ($05D796, its
-; PHB) is left as the game mode's code ends ($0093F7: NMI on, RTS)
+; PHB) is left as the game mode's code ends ($0093F7: NMI on, RTS): $05D836 is only reached from there, the
+; game mode's JSL $05D796 ($0096F4) with nothing else on the stack (the editor's hooks before it return)
 OverworldExit:
   PHA
   TYX
-  LDA #$0C : STA $${hx(RAM.gameMode)}
-  STZ $0DAE : STZ $0DAF : STZ $0DB0
+  LDA #$${hx(GM.overworldReturn)} : STA $${hx(RAM.gameMode)}
+  STZ $${hx(RAM.brightness)} : STZ $${hx(RAM.mosaicDir)} : STZ $${hx(RAM.mosaic)}
   PLA : PHA : AND #$10 : BEQ +
-  LDA.l $05FA00,x : STA $${hx(RAM.owWarpIndex)}
+  LDA.l !SecFA,x : STA $${hx(RAM.owWarpIndex)}
   INC $${hx(RAM.owWarp)}
 + PLA : PHA : AND #$20 : BEQ +
-  LDA.l $05FC00,x : STA $${hx(RAM.owEvent)}
+  LDA.l !SecFC,x : STA $${hx(RAM.owEvent)}
 + PLA : AND #$07 : CMP #$07 : BNE +
   LDA #$80
 + STA $${hx(RAM.levelExit)}

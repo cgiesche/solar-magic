@@ -663,6 +663,9 @@ export const OW_ACTIONS: [number, string][] = [
   [OW_NOTHING, 'Do nothing'], [OW_NORMAL, 'Pass the level (normal exit)'], [OW_SECRET, 'Pass the level (secret exit)'], [OW_END_TURN, 'End the turn'],
 ];
 export const owActionName = (a: number): string => OW_ACTIONS.find(([v]) => v === a)?.[1] ?? `Lunar Magic's action ${a}`;
+// the same in short (the exit's description)
+const OW_SHORT: Record<number, string> = { [OW_NOTHING]: 'nothing passed', [OW_NORMAL]: 'normal exit', [OW_SECRET]: 'secret exit', [OW_END_TURN]: 'end the turn' };
+export const owActionShort = (a: number): string => OW_SHORT[a] ?? `Lunar Magic's action ${a}`;
 export const OW_EXIT = 0x80; // E in CC00
 // a new entrance to the overworld: the level passed with the normal exit, from the tile Mario stood on
 export const newOverworldExit = (): OverworldExit => ({ action: OW_NORMAL, teleport: 0, location: 0, ownEvent: 0, event: 0, lmKept: 0 });

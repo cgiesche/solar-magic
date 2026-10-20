@@ -1,4 +1,4 @@
-// Secondary entrances to the overworld (Lunar Magic 3.00's, level.ts OverworldExit) in the exit panel and the
+// Exits to the overworld (Lunar Magic 3.00's secondary entrances, level.ts OverworldExit) in the exit panel and the
 // secondary entrances dialog: the action, another base event chosen by the level exit that runs it, and the
 // teleport location picked on the overworld map – the editor finds or assigns its index (owteleport.ts).
 
@@ -11,14 +11,14 @@ import { readTeleport, readTeleports, locationFor, locationText, tileText, overw
 import { drawOwMap, putImage } from './overworld.ts';
 
 type Rows = [string, HTMLElement][];
-type Set = (label: string, f: (x: OverworldExit) => void) => void;
+type Edit = (label: string, f: (x: OverworldExit) => void) => void;
 
 // "→ Overworld (normal exit, teleport to Main map 0C,09)"
 export const overworldLabel = (app: App, o: OverworldExit): string => `→ Overworld (${overworldExitText(app.rom, o)})`;
 
-// the rows of an entrance to the overworld: what passing it does, where Mario goes; `set` applies an edit of it,
+// the rows of an exit to the overworld: what passing it does, where Mario goes; `set` applies an edit of it,
 // `refresh` shows one made here (a teleport location picked, a pick cancelled)
-export function overworldFields(app: App, idx: number, o: OverworldExit, set: Set, refresh = () => {}): Rows {
+export function overworldFields(app: App, idx: number, o: OverworldExit, set: Edit, refresh = () => {}): Rows {
   const actions = OW_ACTIONS.some(([v]) => v === o.action) ? OW_ACTIONS : [...OW_ACTIONS, [o.action, owActionName(o.action)] as [number, string]];
   const names = eventNames(app.rom);
   const events = Array.from({ length: OW_EVENTS }, (_, e): [number, string] => [e, `${hex2(e)} – ${names.get(e) ?? '(no level exit)'}`]);

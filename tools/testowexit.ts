@@ -11,7 +11,8 @@ import {
   type OverworldExit,
 } from '../src/core/level.ts';
 import { ExitGraph } from '../src/core/exitgraph.ts';
-import { readTeleport, readTeleports, writeTeleport, locationFor, TELEPORTS, type OwTile } from '../src/core/owteleport.ts';
+import { readTeleport, readTeleports, writeTeleport, locationFor, TELEPORTS, FIND_HOOK, GAME_TABLES, GAME_ENTRIES, type OwTile } from '../src/core/owteleport.ts';
+import { BASE_EVENTS } from '../src/core/overworld.ts';
 import { GM, RAM, get16 } from '../src/core/ram.ts';
 import { editorImage, cleanImage } from './fixture.ts';
 
@@ -22,7 +23,6 @@ const hx = (v: number) => v.toString(16);
 const rom = new Rom(await editorImage());
 const clean = new Rom(cleanImage());
 const N = 0x105, TL = 0x29; // Yoshi's Island 1, its translevel
-const BASE_EVENTS = 0x05d608;
 
 // ---- the model ----
 {
@@ -52,12 +52,11 @@ const BASE_EVENTS = 0x05d608;
 
 // ---- the teleport table ----
 const gameEntry = (i: number) => {
-  const w = (a: number) => clean.r16(a + i * 2);
-  return [w(0x048431), w(0x048467), w(0x04849d), w(0x0484d3)];
+  return GAME_TABLES.map((a) => clean.r16(a + i * 2));
 };
 {
   const all = readTeleports(rom);
-  const first = Array.from({ length: 27 }, (_, i) => i).every((i) => {
+  const first = Array.from({ length: GAME_ENTRIES }, (_, i) => i).every((i) => {
     const [fx, fy, tx, ty] = gameEntry(i), e = all[i];
     return e.from && e.to && ((e.from.submap << 8) | e.from.x) === fx && e.from.y === fy && ((e.to.submap << 9) | (e.to.x * 16 + 8)) === tx && e.to.y * 16 + 8 === ty;
   });
@@ -158,7 +157,7 @@ const base = rom.r8(BASE_EVENTS + TL);
 // the game's star and pipe warps: the entry of each tile (found by the patch's search) and where it leads, as
 // in the clean game
 {
-  const find = rom.r24(0x048509 + 1);
+  const find = rom.r24(FIND_HOOK + 1);
   const ed = new LevelEmulator(rom), cl = new LevelEmulator(clean);
   const differ: string[] = [];
   const at = (e: LevelEmulator, sub: number, x: number, y: number) => {
@@ -203,7 +202,7 @@ const base = rom.r8(BASE_EVENTS + TL);
   const w = e.snes.wram;
   w[RAM.playerIndex] = 0; w[RAM.currentPlayer] = 0; w[RAM.submap] = 0;
   w[RAM.owPlayerTileX] = 0x0c; w[RAM.owPlayerTileY] = 0x09; w[RAM.owPlayerTileX + 1] = w[RAM.owPlayerTileY + 1] = 0;
-  e.call(r.r24(0x048509 + 1), 0);
+  e.call(r.r24(FIND_HOOK + 1), 0);
   const found = w[RAM.owWarpIndex];
   w[RAM.owWarp] = 1; w[RAM.gameMode] = GM.overworldLoad;
   for (let f = 0; f < 400 && w[RAM.gameMode] !== GM.overworld; f++) e.snes.runFrame();

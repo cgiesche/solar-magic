@@ -9,6 +9,7 @@
 export const GM = {
   title: 0x07, // title screen (waits for a button)
   overworldLoad: 0x0b, // fading into the overworld
+  overworldReturn: 0x0c, // loading the overworld after a level
   overworld: 0x0e,
   levelLoad: 0x11, // loading a level ("Mario Start!")
   level: 0x14,
@@ -100,6 +101,7 @@ export const RAM = {
   owWarp: 0x1b9c, // the overworld loads at the star/pipe table's destination $1DF6 (owteleport.ts)
   owWarpIndex: 0x1df6,
   playerIndex: 0x0db3, // 0 Mario, 1 Luigi
+  brightness: 0x0dae, mosaicDir: 0x0daf, mosaic: 0x0db0, // the screen's fade (the next game mode's start)
   twoPlayers: 0x0db2, // a 2-player game
   playerLives: 0x0db4, // per player (-1: out)
 } as const;
