@@ -107,12 +107,16 @@ export class LevelEmulator {
   }
 
   bootReads: RomReads | null = null; // ROM read while booting (every load starts from that state)
+  // the reads the boot's skipMask left out: GFX files uploaded on the title screen stay in VRAM, and a
+  // level with the same files doesn't upload them again – a change makes the snapshot stale as well
+  private bootMasked: RomReads | null = null;
   private bootRom: Uint8Array | null = null; // the ROM as it was booted
 
   // the boot snapshot of another emulator on the same ROM (saves booting again)
   adoptBoot(other: LevelEmulator): void {
     this.baseState = other.baseState;
     this.bootReads = other.bootReads;
+    this.bootMasked = other.bootMasked;
     this.bootRom = other.bootRom;
     this.romGen = -1; // it may be from an older ROM: checked with the next entry
   }
@@ -122,13 +126,18 @@ export class LevelEmulator {
     this.sync();
     const s = this.snes;
     s.powerOn();
-    this.bootReads = this.tracked(() => {
-      let f = 0;
-      while (s.wram[RAM.gameMode] !== GM.title) {
-        s.runFrame();
-        if (++f > 2000) throw new Error('boot did not reach title screen');
-      }
-    }).reads;
+    const masked = new RomReads(this.rom.data.length), outerMasked = s.romMasked;
+    s.romMasked = masked;
+    try {
+      this.bootReads = this.tracked(() => {
+        let f = 0;
+        while (s.wram[RAM.gameMode] !== GM.title) {
+          s.runFrame();
+          if (++f > 2000) throw new Error('boot did not reach title screen');
+        }
+      }).reads;
+    } finally { s.romMasked = outerMasked; }
+    this.bootMasked = masked;
     this.baseState = s.saveState();
     this.bootRom = this.rom.data.slice();
   }
@@ -160,9 +169,11 @@ export class LevelEmulator {
     if (this.romGen === this.rom.gen) return;
     this.romGen = this.rom.gen;
     updateBytePages(this.rom);
-    if (this.baseState && this.bootReads && this.bootRom && this.bootReads.differ(this.bootRom, this.rom.data)) {
+    if (this.baseState && this.bootReads && this.bootRom &&
+      (this.bootReads.differ(this.bootRom, this.rom.data) || this.bootMasked?.differ(this.bootRom, this.rom.data))) {
       this.baseState = null;
       this.bootReads = null;
+      this.bootMasked = null;
       this.bootRom = null;
     }
   }

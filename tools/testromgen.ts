@@ -1,10 +1,13 @@
 // ROM generation: the Rom counts every change of its image (rom.gen); emulators catch up by themselves
 // with the next entry – no syncing by the caller – and boot again only when what the boot read changed.
 import { readFileSync } from 'node:fs';
-import { Rom } from '../src/core/rom.ts';
+import { Rom, snesToPc } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { OverworldEmulator } from '../src/core/overworld.ts';
 import { RomFingerprint } from '../src/core/romdeps.ts';
+import { gfxSkipMask } from '../src/core/gfxpages.ts';
+import { installEditorPatch, gfxEntry } from '../src/core/patches.ts';
+import { lz2Decompress, lz2Compress } from '../src/core/lz2.ts';
 
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
@@ -78,6 +81,27 @@ const TITLE_BYTE = 0x7fc0; // the internal name: not read while booting
   const b = new LevelEmulator(rom); // created after the change
   b.adoptBoot(a);
   check(b.load(0x105).ok && b.baseState !== booted, 'adopted stale boot: booted again');
+}
+
+// GFX file data doesn't count for results (skipMask), but the title screen uploads files that stay in
+// VRAM for a level with the same ones: drawing in them again and again shows each time
+{
+  const rom = fresh();
+  installEditorPatch(rom);
+  const emu = new LevelEmulator(rom);
+  emu.skipMask = () => gfxSkipMask(rom);
+  const e = gfxEntry(rom, 0x14)!;
+  const { data } = lz2Decompress(rom.data, snesToPc(e.addr));
+  let prev = emu.load(0x105).vram.slice();
+  for (let i = 0; i < 3; i++) {
+    for (let k = 0; k < 24; k++) data[i * 24 + k] ^= 0xff;
+    const packed = lz2Compress(data);
+    rom.writeBytes(e.addr, packed);
+    const v = emu.load(0x105).vram;
+    check(v.some((b, j) => b !== prev[j]), `GFX14 drawn in (${i + 1}. time): shown in the level`);
+    prev = v.slice();
+  }
+  check(!emu.bootReads!.pages[snesToPc(e.addr) >> 8], 'GFX data still no dependency of results');
 }
 
 // the overworld emulator's title snapshot follows the same rule
