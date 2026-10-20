@@ -1,7 +1,7 @@
 // Sidebar panels: level list, palette (objects / sprites), properties.
 
 import { isBrushMode, type App, type PaletteItem } from './app.ts';
-import { h, clear, hexInput, attachRectPick, modal, toast, emptyState } from './dom.ts';
+import { h, clear, hexInput, checkbox, attachRectPick, modal, toast, emptyState } from './dom.ts';
 import { objectName, spriteName, hex2, hex3 } from '../core/names.ts';
 import { objectVariant, withObjectVariant, type ObjKind } from '../core/objkinds.ts';
 import { objectThumbs, thumbCanvas, objKey, type ObjSpec } from './thumbs.ts';
@@ -12,6 +12,8 @@ import { buildExitPanel } from './exitpanel.ts';
 import { DM16_EXT } from '../core/patches.ts';
 import { STRUCT_EXT, TRANSPARENT, freeStructureNumber, readStructure, writeStructure, STRUCT_COUNT, type Structure } from '../core/structs.ts';
 import { EXT_TILES } from '../core/map16ext.ts';
+import { COND_FLAGS, COND_ADD, condByte, isDm16, type Dm16Cond } from '../core/cdm16.ts';
+import { CDM16_FLAGS } from '../core/ram.ts';
 import { TileCache, map16Source, drawMap16 } from '../core/render.ts';
 import { lt3Target, lt3Users, blankLayer3Tile, l3Palette, withL3Palette, L3_TILE, L3_PAL, L3_PRIO, L3_FLIP_X, L3_FLIP_Y } from '../core/layer3map.ts';
 import { LT3_DESTS } from '../core/layer3gfx.ts';
@@ -845,6 +847,35 @@ export class Properties {
 
   probePending = false; // the shown object's block behaviour is still being probed
 
+  // the flag the Direct Map16 objects `objs` depend on (Lunar Magic's conditional Direct Map16, cdm16.ts), set for
+  // all of them at once, or removed
+  condFields(objs: LevelObject[]): HTMLElement[] {
+    if (!objs.length) return [];
+    const app = this.app;
+    const all = (f: (o: LevelObject) => void) => app.editLevel(() => { for (const o of objs) f(o); });
+    const first = objs.find((o) => o.cond)?.cond;
+    const many = objs.length > 1 ? ` of the ${objs.length} Direct Map16 objects` : '';
+    if (!first) {
+      return [this.field('Flag', h('button', { title: `Draw${many} only while a flag of $7FC060-F is on (set by ASM, e.g. UberASM)`, onclick: () => all((o) => (o.cond = { flag: 0, always: false })) }, 'Add flag check'))];
+    }
+    const mixed = new Set(objs.map((o) => (o.cond ? condByte(o.cond) : -1))).size > 1;
+    const set = (c: Partial<Dm16Cond>) => all((o) => (o.cond = { ...first, ...o.cond, ...c }));
+    // always show adds 100 to the tiles while the flag is on: they must stay in range
+    const tooHigh = objs.filter((o) => (o.tile ?? 0) + COND_ADD >= EXT_TILES).length;
+    const ram = `$${(CDM16_FLAGS[0] + (first.flag >> 3)).toString(16).toUpperCase()} bit ${first.flag & 7}`;
+    return [
+      this.field('Flag', hexInput(first.flag, 2, (v) => set({ flag: v }), COND_FLAGS - 1),
+        h('button', { title: `Remove the flag check${many}: always drawn as it is`, onclick: () => all((o) => delete o.cond) }, 'Remove flag check')),
+      h('div', { class: 'prop' }, h('label', null, ''), checkbox(' Always show', 'Drawn also while the flag is off; while it is on, its tiles + 100', first.always, (on) => {
+        if (on && tooHigh) { toast(`Always show adds 100 to the tiles while the flag is on: ${tooHigh} object${tooHigh > 1 ? 's have tiles' : ' has a tile'} from F00 on.`, 'error'); this.build(); return; }
+        set({ always: on });
+      })),
+      h('div', { class: 'hint' }, mixed ? 'The selected objects have different flag settings; a change here sets it for all of them. ' : '',
+        first.always ? `Drawn as it is while flag ${hex2(first.flag)} (${ram}) is off, with its tiles + 100 while it is on.` : `Drawn only while flag ${hex2(first.flag)} (${ram}) is on.`,
+        ' View → Conditional Direct Map16 shows the level with the flags.'),
+    ];
+  }
+
   field(label: string, input: HTMLElement, extra?: HTMLElement): HTMLElement {
     return h('div', { class: 'prop' }, h('label', null, label), input, extra);
   }
@@ -916,7 +947,7 @@ export class Properties {
       this.body.appendChild(emptyState(`${app.currentObjects().length} objects on ${app.mode === 'l2' ? 'layer 2' : 'layer 1'} – none selected.`));
       return;
     }
-    if (sel.length > 1) { this.body.append(h('div', { class: 'prop-title' }, `${sel.length} objects selected`), this.actions(true)); return; }
+    if (sel.length > 1) { this.body.append(h('div', { class: 'prop-title' }, `${sel.length} objects selected`), ...this.condFields(sel.filter(isDm16)), this.actions(true)); return; }
     const o = sel[0];
     const upd = (f: () => void) => app.editLevel(f);
     const idx = app.currentObjects().indexOf(o);
@@ -929,9 +960,10 @@ export class Properties {
       o.num === 0 && o.ext === STRUCT_EXT && o.struct !== undefined ? this.field('Structure', hexInput(o.struct, 2, (v) => upd(() => (o.struct = v)), 0xff)) : '',
       o.num === 0 && o.ext === STRUCT_EXT && o.struct !== undefined ? h('div', { class: 'hint' }, structInfo(app, o.struct), ' ',
         h('button', { title: 'Replace the structure here with single Direct Map16 objects (to edit it, then “Selection as structure” again)', onclick: () => app.explodeStructure(o) }, 'Break up')) : '',
-      o.num === 0 && o.ext === DM16_EXT ? this.field('Map16 tile', hexInput(o.tile ?? 0, 3, (v) => upd(() => (o.tile = v)), EXT_TILES - 1),
+      o.num === 0 && o.ext === DM16_EXT ? this.field('Map16 tile', hexInput(o.tile ?? 0, 3, (v) => upd(() => (o.tile = v)), EXT_TILES - 1 - (o.cond?.always ? COND_ADD : 0)),
         h('button', { title: 'Edit the tile in the graphics area', onclick: () => app.editMap16(o.tile ?? 0) }, 'Edit …')) : '',
       o.num === 0 && o.ext === DM16_EXT ? this.field('Size (hw)', hexInput(o.size, 2, (v) => upd(() => (o.size = v)))) : '',
+      ...this.condFields(isDm16(o) ? [o] : []),
       this.field('X', hexInput(o.x, 3, (v) => upd(() => (o.x = v)), app.levelWidthTiles() - 1)),
       this.field('Y', hexInput(o.y, 3, (v) => upd(() => (o.y = v)), app.levelHeightTiles() - 1)),
       o.num !== 0 && ov?.type ? this.field('Type', hexInput(objectVariant(ov, o.size), 1, (v) => upd(() => (o.size = withObjectVariant(ov, o.size, v))), ov.count - 1)) : '',
@@ -959,6 +991,7 @@ export class Properties {
 function fixStruct(o: LevelObject): void {
   if (o.num === 0 && o.ext === STRUCT_EXT) o.struct ??= 0;
   else delete o.struct;
+  if (!isDm16(o)) delete o.cond;
 }
 
 function structInfo(app: App, n: number): string {

@@ -17,6 +17,8 @@ import { problemsButton } from './problems.ts';
 import { map16Tile } from '../core/ram.ts';
 import { GAME_VIEW_W, GAME_VIEW_H, MARIO_W, MARIO_H, type CameraBands } from '../core/camerabands.ts';
 import { gameViewAt } from '../core/camerareach.ts';
+import { isDm16, dm16Tiles, structFlags } from '../core/cdm16.ts';
+import { STRUCT_EXT, readStructure } from '../core/structs.ts';
 
 type Drag =
   | { kind: 'move'; edit: LevelEdit; startTx: number; startTy: number; lastDx: number; lastDy: number; orig: Map<number, { x: number; y: number }> }
@@ -281,6 +283,7 @@ export class LevelView {
       ctx.fillText(st.label, m.x + 5, m.y + 27.5);
       if (m.kind === 'sec') ctx.fillText(hex3(m.index), m.x + 15, m.y + 27.5);
     }
+    if (app.mode === 'l2' ? app.show.layer2 : app.show.layer1) this.paintConds(ctx, lw);
     if (app.show.collision) this.paintCollision(ctx);
     if (app.show.collision || app.show.layer3) this.paintTide(ctx);
     if (app.show.items) this.paintItems(ctx);
@@ -343,6 +346,37 @@ export class LevelView {
       ctx.fillStyle = '#fff';
       ctx.font = `${12 * dpr}px sans-serif`;
       ctx.fillText(`Emulation: ${app.renderError}`, 8 * dpr, 15 * dpr);
+    }
+  }
+
+  // conditional Direct Map16 (cdm16.ts): a flag badge on each object that depends on a flag (structures by their
+  // tiles' flags), green while the view shows it with the flag on; where one is hidden now, its tiles dashed
+  paintConds(ctx: CanvasRenderingContext2D, lw: number): void {
+    const app = this.app;
+    const structs = new Map<number, number[]>();
+    ctx.font = 'bold 7px sans-serif';
+    for (const o of app.currentObjects()) {
+      let flags: number[];
+      if (isDm16(o)) flags = o.cond ? [o.cond.flag] : [];
+      else if (o.num === 0 && o.ext === STRUCT_EXT && o.struct !== undefined) {
+        if (!structs.has(o.struct)) structs.set(o.struct, structFlags(readStructure(app.rom, o.struct)));
+        flags = structs.get(o.struct)!;
+      } else continue;
+      if (!flags.length) continue;
+      if (isDm16(o) && o.cond && !o.cond.always && !app.cdm16.has(o.cond.flag)) {
+        ctx.strokeStyle = 'rgba(255,190,60,0.8)';
+        ctx.lineWidth = lw;
+        ctx.setLineDash([3 * lw, 3 * lw]);
+        for (const t of dm16Tiles(o)) ctx.strokeRect((t & 0xffff) * 16 + 0.5, (t >> 16) * 16 + 0.5, 15, 15);
+        ctx.setLineDash([]);
+      }
+      const on = flags.some((f) => app.cdm16.has(f));
+      const txt = `⚑${flags.slice(0, 2).map(hex2).join(',')}${flags.length > 2 ? '…' : ''}`;
+      const x = o.x * 16 + 1, y = o.y * 16 + 1, w = ctx.measureText(txt).width + 3;
+      ctx.fillStyle = on ? 'rgba(30,140,60,0.9)' : 'rgba(150,90,0,0.9)';
+      ctx.fillRect(x, y, w, 9);
+      ctx.fillStyle = '#fff';
+      ctx.fillText(txt, x + 1.5, y + 7.5);
     }
   }
 

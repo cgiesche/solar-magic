@@ -53,3 +53,16 @@ export function usedFlags(rom: Rom, lv: Pick<Level, 'objects' | 'layer2Objects'>
 export function structFlags(s: Structure | null): number[] {
   return [...new Set((s?.conds ?? []).flatMap((c) => (c ? [c.flag] : [])))].sort((a, b) => a - b);
 }
+
+// the tiles of a Direct Map16 object (its size byte HHHHWWWW: rows - 1, columns - 1), as packed y << 16 | x:
+// where a hidden one is (it leaves nothing in the level)
+export function dm16Tiles(o: LevelObject): number[] {
+  const out: number[] = [];
+  for (let r = 0; r <= o.size >> 4; r++) for (let c = 0; c <= (o.size & 15); c++) out.push(((o.y + r) << 16) | (o.x + c));
+  return out;
+}
+
+// the tiles a structure can place: its tiles, those with "always show" also + 0x100
+export function structTiles(s: Structure): number[] {
+  return s.tiles.flatMap((t, i) => (t < 0 ? [] : s.conds?.[i]?.always ? [t, t + COND_ADD] : [t]));
+}

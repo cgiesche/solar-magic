@@ -18,6 +18,7 @@ import {
 import { layerGeom } from './render.ts';
 import { bgFromWram, BG_SIZE } from './bg.ts';
 import { map16Tile } from './ram.ts';
+import { flagBytes, usedFlags, structTiles } from './cdm16.ts';
 import { DM16_EXT, VANILLA_GFX, GFX_FILES, gfxEntry, levelGfx, defaultGfx, levelExtGfx } from './patches.ts';
 import { STRUCT_EXT, listStructures } from './structs.ts';
 import { EXT_FIRST, EXT_TILES, actsLike, extTileWords, DEFAULT_ACTS } from './map16ext.ts';
@@ -77,6 +78,21 @@ export function levelTilesOf(rom: Rom, lv: Level, r: LevelRender): LevelTiles {
     }
   }
   return { level: lv.number, tileset: lv.header.tileset, ok: r.ok, fg: [...fg.values()], bg: [...bg.values()] };
+}
+
+// The tiles a level can place: loaded with its conditional Direct Map16 flags off and, when it has any (cdm16.ts),
+// once more with them all on – every conditional object shown in both of its states (`ov`: levelOverride's)
+export function levelTilesAll(rom: Rom, lv: Level, load: (ov: LevelOverride) => LevelRender, ov: LevelOverride): LevelTiles {
+  const off = levelTilesOf(rom, lv, load({ ...ov, cdm16Flags: flagBytes([]) }));
+  const flags = usedFlags(rom, lv);
+  return flags.size ? mergeTiles(off, levelTilesOf(rom, lv, load({ ...ov, cdm16Flags: flagBytes(flags.keys()) }))) : off;
+}
+// the uses of both (of a use in both, the first's, with the larger count)
+export function mergeTiles(a: LevelTiles, b: LevelTiles): LevelTiles {
+  const key = (u: TileUse) => `${u.tile}:${u.layer}:${u.source}`;
+  const fg = new Map(a.fg.map((u) => [key(u), { ...u }]));
+  for (const u of b.fg) { const v = fg.get(key(u)); if (v) v.count = Math.max(v.count, u.count); else fg.set(key(u), u); }
+  return { ...a, ok: a.ok && b.ok, fg: [...fg.values()] };
 }
 
 // the level's objects as the emulator loads them, with their owners
@@ -149,7 +165,7 @@ export class LevelUses {
     if (!i) return this.tiles(n)!;
     const emu = this.emu(), ov = levelOverride(this.rom, i.lv), gen = this.rom.gen;
     // (a level that can't be taken apart counts as not loading: kept too, so it isn't tried again and again)
-    const run = emu.tracked(() => { try { return levelTilesOf(this.rom, i.lv, emu.load(n, ov)); } catch (e) { console.error(e); return null; } });
+    const run = emu.tracked(() => { try { return levelTilesAll(this.rom, i.lv, (o) => emu.load(n, o), ov); } catch (e) { console.error(e); return null; } });
     // the load's temporary ROM patches are undone, so the levels read before still hold
     if (this.inputs.gen === gen) this.inputs.gen = this.rom.gen;
     const tiles = run.result ?? { level: n, tileset: i.lv.header.tileset, ok: false, fg: [], bg: [] };
@@ -184,7 +200,7 @@ export function bgTileUsers(levels: Iterable<LevelTiles>, t: number): (BgTileUse
 export function tileLinks(rom: Rom, t: number): { actsLike: number[]; structures: number[]; blocks: string[] } {
   const acts: number[] = [];
   for (let x = 0; x < EXT_TILES; x++) if (x !== t && actsLike(rom, x) === t) acts.push(x);
-  const structures = [...listStructures(rom)].filter(([, s]) => s.tiles.includes(t)).map(([n]) => n);
+  const structures = [...listStructures(rom)].filter(([, s]) => structTiles(s).includes(t)).map(([n]) => n);
   const blocks = (loadBlockProject(rom)?.list ?? []).filter((b) => b.tile === t).map((b) => b.file);
   return { actsLike: acts, structures, blocks };
 }
@@ -195,7 +211,7 @@ export function tileLinks(rom: Rom, t: number): { actsLike: number[]; structures
 export function unusedFgTiles(rom: Rom, levels: Iterable<LevelTiles>, blank: number[]): number[] {
   const used = new Set<number>();
   for (const l of levels) for (const u of l.fg) used.add(u.tile);
-  for (const [, s] of listStructures(rom)) for (const t of s.tiles) used.add(t);
+  for (const [, s] of listStructures(rom)) for (const t of structTiles(s)) used.add(t);
   const blocks = new Set((loadBlockProject(rom)?.list ?? []).map((b) => b.tile));
   const out: number[] = [];
   for (let t = EXT_FIRST; t < EXT_TILES; t++) {

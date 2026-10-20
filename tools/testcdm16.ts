@@ -8,7 +8,8 @@ import { LevelEmulator, type LevelRender } from '../src/core/levelemu.ts';
 import { loadLevel, serializeLayer1, parseObjects, serializeObjects, newUid, isL1Vertical, levelTranslevel, type LevelObject } from '../src/core/level.ts';
 import { DM16_EXT } from '../src/core/patches.ts';
 import { writeStructure, readStructure, STRUCT_EXT, TRANSPARENT } from '../src/core/structs.ts';
-import { flagBytes, usedFlags } from '../src/core/cdm16.ts';
+import { flagBytes, usedFlags, structTiles } from '../src/core/cdm16.ts';
+import { levelTilesAll, levelOverride } from '../src/core/levelusage.ts';
 import { parseLmObjects } from '../src/core/mwl.ts';
 import { saveLevel } from '../src/core/save.ts';
 import { exportLevelFile, importLevelFile } from '../src/core/levelfile.ts';
@@ -96,6 +97,16 @@ const so = (x: number, y: number, s: number): LevelObject => ({ uid: newUid(), n
   lv.objects.push(dm16(1, 1, 0x130, 0, { flag: 5, always: false }), dm16(2, 1, 0x130, 0, { flag: 5, always: true }), dm16(3, 1, 0x130, 0, { flag: 7, always: false }), so(4, 1, 9), so(8, 1, 9));
   const u = usedFlags(rom, lv);
   check(u.size === 3 && u.get(5) === 2 && u.get(7) === 1 && u.get(0x21) === 2, 'used flags: ' + JSON.stringify([...u]));
+}
+
+// tile usage: a level's tiles in both states of its conditional objects (hidden tiles, always show + 100)
+{
+  const lv = loadLevel(rom, 0x105);
+  lv.objects.push(dm16(0x40, 8, 0x3c1, 0, { flag: 1, always: false }), dm16(0x42, 8, 0x3c2, 0, { flag: 2, always: true }));
+  const u = levelTilesAll(rom, lv, (ov) => emu.load(0x105, ov), levelOverride(rom, lv));
+  const has = (t: number) => u.fg.some((x) => x.tile === t && x.source === 'direct');
+  check(u.ok && has(0x3c1) && has(0x3c2) && has(0x4c2), 'usage: hidden and both always-show tiles counted');
+  check(structTiles(readStructure(rom, 10)!).join() === [0x140, 0x240, 0x141].join(), 'structure tiles with always show');
 }
 
 // save, level file

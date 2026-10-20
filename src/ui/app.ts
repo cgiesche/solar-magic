@@ -15,6 +15,7 @@ import { captureSprites, captureSpriteAt, type SpriteImage } from '../core/sprit
 import { spriteMemJob, usedSpriteMemory } from '../core/spritemem.ts';
 import { DM16_EXT, levelGfx, levelExtGfx, customPalette, levelMusic, defaultGfx } from '../core/patches.ts';
 import { gfxSkipMask, gfxFilesHash } from '../core/gfxpages.ts';
+import { flagBytes, usedFlags, isDm16, dm16Tiles, type Dm16Cond } from '../core/cdm16.ts';
 import { STRUCT_EXT, STRUCT_MAX, TRANSPARENT, listStructures, readStructure, writeStructure, type Structure } from '../core/structs.ts';
 import type { Package } from '../core/pkgreg.ts';
 import { kvEntries, kvWrite, saveRom } from './storage.ts';
@@ -40,7 +41,7 @@ import type { ProbeReply } from '../core/probehost.ts';
 import { ProbeClient } from '../core/probeclient.ts';
 import { map16Tile, bgTile } from '../core/ram.ts';
 import { exanimTiles, exanimColors } from '../core/exanim.ts';
-import { LevelUses, levelTilesOf, levelOverride, usedLevels, spriteUsage, isTilesetTile, type LevelTiles, type SpriteUser } from '../core/levelusage.ts';
+import { LevelUses, levelTilesOf, levelTilesAll, levelOverride, usedLevels, spriteUsage, isTilesetTile, type LevelTiles, type SpriteUser } from '../core/levelusage.ts';
 import { TILESETS, tilesetPointers, sharingTilesets } from '../core/tilesets.ts';
 import { slipperyActions } from '../core/slippery.ts';
 
@@ -124,6 +125,8 @@ export class App {
   gameViewMario: { x: number; y: number; key: string | null; camera?: CameraAt | null } | null = null;
   // view-only game state applied before the emulated level load
   switches = { palaces: false, onOff: false };
+  // the conditional Direct Map16 flags on (cdm16.ts), in the view and in test play
+  cdm16 = new Set<number>();
   dirty = false;
   private levelHistory = new LevelHistory<Level>(cloneLevel);
   private editToken = 0; // the latest begun level edit (older handles do nothing)
@@ -313,6 +316,7 @@ export class App {
       sprites: serializeLevelSprites(this.rom, lv),
       switchPalaces: this.switches.palaces,
       onOffSwitch: this.switches.onOff,
+      cdm16Flags: flagBytes(this.cdm16),
       secondaryHeader: encodeSecondaryHeader(lv.secondary),
     };
   }
@@ -903,8 +907,9 @@ export class App {
       // tiles later overwritten by another object still belong to this one
       for (let i = objs.length - 1; i >= 0; i--) if (this.render.touched.get(this.objectKey(l2, i))?.has(off)) return objs[i];
     }
-    // fall back to object origins (objects that produce no visible tiles)
-    for (let i = objs.length - 1; i >= 0; i--) if (objs[i].x === tx && objs[i].y === ty) return objs[i];
+    // fall back to object origins (objects that produce no visible tiles), a hidden conditional Direct Map16 object's tiles
+    const at = (ty << 16) | tx;
+    for (let i = objs.length - 1; i >= 0; i--) if ((objs[i].x === tx && objs[i].y === ty) || (isDm16(objs[i]) && objs[i].cond && dm16Tiles(objs[i]).includes(at))) return objs[i];
     return null;
   }
 
@@ -917,7 +922,7 @@ export class App {
     const map = l2 ? this.offsetToTile2 : this.offsetToTile1;
     const out: number[] = [];
     if (set) for (const off of set) { const t = map[off]; if (t >= 0) out.push(t); }
-    if (!out.length) out.push((o.y << 16) | o.x);
+    if (!out.length) out.push(...(isDm16(o) && o.cond ? dm16Tiles(o) : [(o.y << 16) | o.x]));
     return out;
   }
 
@@ -1083,7 +1088,12 @@ export class App {
   // learned in the background ('level-uses' as they come); pending: how many are still missing
   levelTiles(): { levels: LevelTiles[]; pending: number } {
     const idx = this.usesIndex ??= new LevelUses(this.rom, this.results, () => (this.usesEmu = this.auxEmu(this.usesEmu)));
-    if (this.currentTiles?.render !== this.render) this.currentTiles = { render: this.render, tiles: levelTilesOf(this.rom, this.level, this.render) };
+    if (this.currentTiles?.render !== this.render) {
+      // a level with conditional Direct Map16 objects: in both of their states, whatever the view's flags
+      const emu = this.usesEmu = this.auxEmu(this.usesEmu);
+      const tiles = this.levelFlags().size ? levelTilesAll(this.rom, this.level, (o) => emu.load(this.level.number, o), this.buildOverrides()) : levelTilesOf(this.rom, this.level, this.render);
+      this.currentTiles = { render: this.render, tiles };
+    }
     const levels = [this.currentTiles.tiles];
     let pending = 0;
     for (const n of usedLevels(this.rom)) {
@@ -1507,35 +1517,53 @@ export class App {
     return true;
   }
 
+  // ------------- conditional Direct Map16 (cdm16.ts) -------------
+  // the flags the level's objects use, with the number of objects each
+  levelFlags(): Map<number, number> {
+    return this.level ? usedFlags(this.rom, this.level) : new Map();
+  }
+  // the view's flags (and test play's): `flags` on or off, then the level loads anew with them
+  setFlags(flags: Iterable<number>, on: boolean): void {
+    for (const f of flags) if (on) this.cdm16.add(f); else this.cdm16.delete(f);
+    this.refresh();
+  }
+
   // ------------- structures (structs.ts) -------------
   structures(): Map<number, Structure> {
     return listStructures(this.rom);
   }
 
   // what the selected objects left in the level as a block of tiles; cells of other objects are
-  // transparent, empty rows and columns at the border are cut off
-  structureFromSelection(): { x: number; y: number; w: number; h: number; tiles: number[] } | string {
+  // transparent, empty rows and columns at the border are cut off. A conditional Direct Map16 object gives its
+  // tiles with its condition whatever the view's flags (cdm16.ts); a cell holds one tile, the topmost
+  structureFromSelection(): { x: number; y: number; w: number; h: number; tiles: number[]; conds?: (Dm16Cond | null)[] } | string {
     const objs = this.selectedObjects();
     if (!objs.length || (this.mode !== 'l1' && this.mode !== 'l2')) return 'Select objects in the level first (layer 1 or 2).';
     const l2 = this.mode === 'l2';
     const g = l2 ? this.images.geom2 : this.images.geom1;
     if (!g) return 'Layer without objects';
     const all = this.currentObjects();
-    const keys = new Set(objs.map((o) => this.objectKey(l2, all.indexOf(o))));
     let x0 = Infinity, y0 = Infinity, x1 = -1, y1 = -1;
-    const cells = new Map<number, number>();
-    for (const o of objs) for (const t of this.objectTiles(o)) {
-      const x = t & 0xffff, y = t >> 16;
-      const a = g.addr(x, y);
-      if (a < 0 || !keys.has(this.render.owner[a - MAP_BASE])) continue;
-      cells.set(t, map16Tile(this.render.wram, a));
-      x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y);
+    const cells = new Map<number, { tile: number; cond?: Dm16Cond }>();
+    // in drawing order: each object's cells over those of the objects before it
+    for (const o of all) {
+      if (!this.selection.has(o.uid)) continue;
+      const cond = isDm16(o) ? o.cond : undefined, key = this.objectKey(l2, all.indexOf(o));
+      for (const t of cond ? dm16Tiles(o) : this.objectTiles(o)) {
+        const x = t & 0xffff, y = t >> 16;
+        const a = g.addr(x, y);
+        if (a < 0 || (!cond && this.render.owner[a - MAP_BASE] !== key)) continue;
+        cells.set(t, cond ? { tile: o.tile ?? 0, cond: { ...cond } } : { tile: map16Tile(this.render.wram, a) });
+        x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y);
+      }
     }
     if (x1 < 0) return 'The selected objects have no visible tiles.';
     const w = x1 - x0 + 1, h = y1 - y0 + 1;
     if (w > STRUCT_MAX || h > STRUCT_MAX) return `Selection is ${w}×${h} tiles, a structure can be at most ${STRUCT_MAX}×${STRUCT_MAX}.`;
-    const tiles = Array.from({ length: w * h }, (_, i) => cells.get(((y0 + Math.floor(i / w)) << 16) | (x0 + (i % w))) ?? TRANSPARENT);
-    return { x: x0, y: y0, w, h, tiles };
+    const cell = (i: number) => cells.get(((y0 + Math.floor(i / w)) << 16) | (x0 + (i % w)));
+    const tiles = Array.from({ length: w * h }, (_, i) => cell(i)?.tile ?? TRANSPARENT);
+    const conds = Array.from({ length: w * h }, (_, i) => cell(i)?.cond ?? null);
+    return { x: x0, y: y0, w, h, tiles, ...(conds.some((c) => c) ? { conds } : {}) };
   }
 
   // stores the selection as structure n; replace: the selected objects become one structure object
@@ -1544,7 +1572,7 @@ export class App {
     const r = this.structureFromSelection();
     if (typeof r === 'string') { toast(r, 'error'); return false; }
     try {
-      this.romEdit(`Structure ${hex(n, 2)} saved`, () => writeStructure(this.rom, n, { w: r.w, h: r.h, tiles: r.tiles, name }));
+      this.romEdit(`Structure ${hex(n, 2)} saved`, () => writeStructure(this.rom, n, { w: r.w, h: r.h, tiles: r.tiles, ...(r.conds ? { conds: r.conds } : {}), name }));
     } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); return false; }
     if (replace) {
       this.editLevel(() => {
@@ -1577,7 +1605,10 @@ export class App {
     if (!s) { toast('The structure does not exist (anymore).', 'error'); return; }
     this.editLevel(() => {
       const parts: LevelObject[] = [];
-      s.tiles.forEach((t, i) => { if (t !== TRANSPARENT) parts.push({ uid: newUid(), num: 0, ext: DM16_EXT, x: o.x + (i % s.w), y: o.y + Math.floor(i / s.w), size: 0, tile: t }); });
+      s.tiles.forEach((t, i) => {
+        const cond = s.conds?.[i];
+        if (t !== TRANSPARENT) parts.push({ uid: newUid(), num: 0, ext: DM16_EXT, x: o.x + (i % s.w), y: o.y + Math.floor(i / s.w), size: 0, tile: t, ...(cond ? { cond: { ...cond } } : {}) });
+      });
       const all = this.currentObjects();
       const at = all.indexOf(o);
       const res = [...all.slice(0, at), ...parts, ...all.slice(at + 1)];

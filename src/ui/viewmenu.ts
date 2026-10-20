@@ -2,6 +2,9 @@
 
 import type { App } from './app.ts';
 import { menuButton, type MenuItem } from './menu.ts';
+import { hex2 } from '../core/names.ts';
+import { COND_FLAGS } from '../core/cdm16.ts';
+import { CDM16_FLAGS } from '../core/ram.ts';
 
 // paint: redraws the level view (overlay toggles that need no new composite)
 export function viewMenu(app: App, paint: () => void, full = true): HTMLElement {
@@ -20,12 +23,28 @@ export function viewMenu(app: App, paint: () => void, full = true): HTMLElement 
     label, title, checked: () => app.switches[k], onToggle: (v) => { app.switches[k] = v; app.refresh(); },
   });
   const anim = show('anim', 'Animation', 'Play animated tiles and palettes (as in the game, custom animations too)');
-  const state: MenuItem[] = [
+  // the conditional Direct Map16 flags the level uses, each on or off (cdm16.ts; Lunar Magic: all at once)
+  const flags = (): MenuItem[] => {
+    const used = app.levelFlags();
+    if (!used.size) return [{ label: 'Conditional Direct Map16: none in this level', onClick: () => {}, disabled: () => true }];
+    const n = (c: number) => `${c} object${c > 1 ? 's' : ''}`;
+    return [
+      { heading: 'Conditional Direct Map16' },
+      ...[...used].map(([f, c]): MenuItem => ({
+        label: `Flag ${hex2(f)} on · ${n(c)}`, title: `View and test play: flag ${hex2(f)} on ($${(CDM16_FLAGS[0] + (f >> 3)).toString(16).toUpperCase()} bit ${f & 7}) – the level loads with it`,
+        checked: () => app.cdm16.has(f), onToggle: (v) => app.setFlags([f], v),
+      })),
+      { label: 'All flags on', title: 'View and test play: every flag on', onClick: () => app.setFlags(Array.from({ length: COND_FLAGS }, (_, i) => i), true) },
+      { label: 'All flags off', title: 'View and test play: every flag off', onClick: () => app.setFlags([...app.cdm16], false) },
+    ];
+  };
+  const state = (): MenuItem[] => [
     { heading: 'Game state' },
     gameState('palaces', '!-blocks pressed', 'View: all switch palaces pressed'),
     gameState('onOff', 'ON/OFF set to OFF', 'View: ON/OFF switch set to OFF'),
+    ...flags(),
   ];
-  return menuButton({ label: 'View', items: full ? [
+  return menuButton({ label: 'View', items: () => full ? [
     { heading: 'Layers' },
     show('layer1', 'Layer 1'), show('layer2', 'Layer 2 / BG'), show('layer3', 'Layer 3', 'Layer 3 (tides, layer 3 images) – preview, scrolling approximated'),
     show('sprites', 'Sprites'), show('exits', 'Exits'),
@@ -38,6 +57,6 @@ export function viewMenu(app: App, paint: () => void, full = true): HTMLElement 
     show('gameView', 'Game view frame', 'What the player sees: a 256x224 screen over the level; drag it by its edge or label (snaps to 8x8), or Shift+V puts Mario with his feet in the tile under the mouse and the frame where the game puts the camera then. The level is darkened where the camera never goes (found by the level scan)', 'V'),
     show('scrollBands', 'Scroll bands', 'In the game view frame: where Mario is while the camera scrolls right, left, up and down, and after L/R looked ahead, under the level\'s scroll settings (found by emulation)'),
     anim,
-    ...state,
-  ] : [{ heading: 'Level preview' }, anim, ...state] });
+    ...state(),
+  ] : [{ heading: 'Level preview' }, anim, ...state()] });
 }

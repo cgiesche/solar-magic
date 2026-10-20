@@ -24,6 +24,8 @@ const results = new ResultCache(new RomFingerprint(rom));
 const emu = new LevelEmulator(rom); emu.boot();
 const uses = new LevelUses(rom, results, () => emu);
 const blank = map16Source(rom, emu.load(0x105)).fg(0x025);
+// free space for an unrelated change later: a page of its own, which no level load reads (its RATS tag may share one)
+const spare = rom.allocWrite(new Uint8Array(0x300));
 
 // level 105 as saved: a Direct Map16 tile, a structure with another one, both on layer 1
 const lv = loadLevel(rom, 0x105);
@@ -96,7 +98,7 @@ check(uses.missing(levels).length === 0, 'every level known after scanning');
 
 // validity: saving level 105 again scans it anew, the other levels stay known; an unrelated ROM change keeps all
 {
-  rom.allocWrite(Uint8Array.of(1, 2, 3)); // into free space no level load reads
+  rom.w8(spare + 0x180, 1);
   check(uses.missing(levels).length === 0, 'an unrelated ROM change keeps every result');
   const before = extTileWords(rom, 0x345);
   const l2 = loadLevel(rom, 0x105);
