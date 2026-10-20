@@ -4,7 +4,7 @@ Browser-based editor for *Super Mario World* (US), modelled on the feature set o
 Runs entirely locally in the browser; the ROM is never uploaded anywhere (it is only cached in the browser's IndexedDB).
 
 Solar Magic is an unofficial fan tool, not affiliated with or endorsed by Nintendo. *Super Mario World* and Nintendo
-are trademarks of Nintendo. The editor contains no game data: it works on a ROM you supply yourself.
+are trademarks of Nintendo. The editor works on a ROM you supply yourself.
 
 ## Getting started
 
