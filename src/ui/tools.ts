@@ -1,10 +1,15 @@
 // Misc. dialogs and actions: secondary entrances, ROM info/expansion, level save as/file/screens.
 
 import type { App } from './app.ts';
-import { h, modal, clear, hexInput, select, toast, choose, emptyState } from './dom.ts';
+import { h, modal, clear, hexInput, select, toast, choose, emptyState, checkbox } from './dom.ts';
 import { downloadBytes, pickFile } from './platform.ts';
 import { isBlank } from '../core/exitgraph.ts';
-import { readSecondaryEntrance, type SecondaryEntrance, loadLevel, cloneLevel, insertScreen, deleteScreen, clearLevel, spriteId, secondarySpot, spotTile, hasRelativeCamera, levelMode } from '../core/level.ts';
+import {
+  readSecondaryEntrance, readSecondaryHeader, type SecondaryEntrance, loadLevel, cloneLevel, insertScreen, deleteScreen, clearLevel, spriteId, secondarySpot, spotTile, hasRelativeCamera, levelMode,
+  newOverworldExit, setSecondarySpot, mainSpot, copyCameraStart, copyEntranceOptions,
+} from '../core/level.ts';
+import { overworldFields } from './owexit.ts';
+import { overworldExitText } from '../core/owteleport.ts';
 import { tileFields, cameraFields, optionFields } from './entrancefields.ts';
 import { newEntranceIn } from './exitpanel.ts';
 import { exportLevelFile, importLevelFile, LEVEL_FILE_EXT } from '../core/levelfile.ts';
@@ -32,8 +37,11 @@ export function openEntrancesDialog(app: App): void {
       if (filter.value === 'level' && !mine.has(i)) continue;
       if (filter.value === 'set' && blank) continue;
       const to = e.destLevel;
+      const use = users ? `${users} Exit${users > 1 ? 's' : ''}` : 'unused';
       list.appendChild(h('div', { class: `level-item${i === sel ? ' current' : ''}${blank ? ' unused' : ''}`, onclick: () => { sel = i; buildList(); buildDetail(); } },
-        `${hex(i, 3)} `, blank ? h('span', { class: 'lname' }, 'free') : h('span', null, `→ ${hex(to, 3)} `, h('span', { class: 'lname' }, `${g.name(to)} · ${users ? `${users} Exit${users > 1 ? 's' : ''}` : 'unused'}`))));
+        `${hex(i, 3)} `, blank ? h('span', { class: 'lname' }, 'free')
+          : e.overworld ? h('span', null, `→ Overworld [${hex(to, 3)}] `, h('span', { class: 'lname' }, `${overworldExitText(rom, e.overworld)} · ${use}`))
+          : h('span', null, `→ ${hex(to, 3)} `, h('span', { class: 'lname' }, `${g.name(to)} · ${use}`))));
     }
     if (!list.firstChild) list.append(emptyState(filter.value === 'level' ? 'No secondary entrances into this level.' : 'No entries.'));
   };
@@ -48,10 +56,31 @@ export function openEntrancesDialog(app: App): void {
     const range = (n: number): [number, string][] => Array.from({ length: n }, (_, i) => [i, String(i)]);
     const prop = (label: string, el: HTMLElement) => h('div', { class: 'prop' }, h('label', null, label), el);
     const users = g.usersOfEntrance(sel);
+    // Lunar Magic's "Exit to overworld": on, passing the level with the normal exit; off, into its level at the main entrance
+    const toOverworld = (on: boolean) => set(on ? 'to the overworld' : 'into its level', (x) => {
+      if (on) { x.overworld = newOverworldExit(); return; }
+      const s = x.destLevel === app.level.number ? app.level.secondary : readSecondaryHeader(rom, x.destLevel);
+      x.overworld = null; setSecondarySpot(x, mainSpot(s)); x.action = s.entranceAction; copyCameraStart(x, s); copyEntranceOptions(x, s);
+    });
+    const used = h('div', { class: 'hint' }, users.length ? `Used by: ${users.map((u) => `${hex(u.from, 3)} (screen ${hex(u.screen, 2)})`).join(', ')}` : 'No exit uses this entrance.');
+    const owSwitch = h('div', { class: 'prop' }, h('label', null, 'Exit'), checkbox('To the overworld', 'Mario goes back to the overworld instead of into a level (Lunar Magic\'s “Exit to overworld”)', !!e.overworld, toOverworld));
+    if (e.overworld) {
+      detail.append(
+        h('div', { class: 'prop-title' }, `Secondary entrance ${hex(sel, 3)}`),
+        h('div', null, 'Leads to the ', h('b', null, 'overworld'), ' ', h('span', { class: 'hint' }, overworldExitText(rom, e.overworld))),
+        h('div', { class: 'prop', title: 'The level it belongs to: the one it is saved and exported with' }, h('label', null, 'Level'), hexInput(e.destLevel, 3, (v) => set('Level', (x) => (x.destLevel = v)), 0x1ff)),
+        owSwitch,
+        ...overworldFields(app, sel, e.overworld, (l, f) => set(l, (x) => f(x.overworld!)), () => { buildList(); buildDetail(); }).map(([l, el]) => prop(l, el)),
+        used,
+        h('div', { class: 'hint' }, 'Changes can be undone with Ctrl+Z.'),
+      );
+      return;
+    }
     detail.append(
       h('div', { class: 'prop-title' }, `Secondary entrance ${hex(sel, 3)}`),
       blank ? h('div', { class: 'hint' }, 'Free: no exit uses it.') : h('div', null, 'Leads to ', h('b', null, `level ${hex(to, 3)}`), ' ', h('span', { class: 'hint' }, g.name(to))),
       h('div', { class: 'prop' }, h('label', null, 'Target level'), hexInput(e.destLevel, 3, (v) => set('Target level', (x) => (x.destLevel = v)), 0x1ff)),
+      owSwitch,
       h('div', { class: 'prop' }, h('label', null, 'Screen'), hexInput(e.screen, 2, (v) => set('Screen', (x) => (x.screen = v)), 0x1f)),
       ...(e.entranceTile ? tileFields(spotTile(secondarySpot(e)), set).map(([l, el]) => prop(l, el)) : [
         h('div', { class: 'prop' }, h('label', null, 'X position'), select(range(8), e.entranceX, (v) => set('X', (x) => (x.entranceX = v)))),
@@ -60,7 +89,7 @@ export function openEntrancesDialog(app: App): void {
       h('div', { class: 'prop' }, h('label', null, 'Action'), select(ENTRANCE_ACTIONS.map((a, i) => [i, `${i} – ${a}`] as [number, string]), e.action, (v) => set('Action', (x) => (x.action = v)))),
       ...cameraFields(e, set, hasRelativeCamera(rom, to === app.level.number ? app.level.header.mode : levelMode(rom, to))).map(([l, el]) => prop(l, el)),
       ...optionFields(e, set).map(([l, el]) => prop(l, el)),
-      h('div', { class: 'hint' }, users.length ? `Used by: ${users.map((u) => `${hex(u.from, 3)} (screen ${hex(u.screen, 2)})`).join(', ')}` : 'No exit uses this entrance.'),
+      used,
       h('div', { class: 'row' },
         blank ? '' : h('button', { onclick: () => { dlg.close(true); openTarget(to); } }, `Open level ${hex(to, 3)}`),
         h('button', { onclick: () => set('to current level', (x) => (x.destLevel = app.level.number)) }, `Set to current level (${hex(app.level.number, 3)})`)),

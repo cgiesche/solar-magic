@@ -6,7 +6,8 @@ import { downloadBytes } from './platform.ts';
 import { objectName, hex2, hex3 } from '../core/names.ts';
 import { resizeObjectSize } from '../core/objkinds.ts';
 import { probeAt, spriteProbeAt, enterText, collisionText, type PosProbe, type CollisionProbe } from '../core/blockprobe.ts';
-import { type LevelObject, type LevelSprite, newUid, serializeLayer1, serializeLayer2, serializeLevelSprites, spriteSizes, spriteId, EXIT_NEW } from '../core/level.ts';
+import { type LevelObject, type LevelSprite, newUid, serializeLayer1, serializeLayer2, serializeLevelSprites, spriteSizes, spriteId, EXIT_NEW, readSecondaryEntrance } from '../core/level.ts';
+import { overworldExitText } from '../core/owteleport.ts';
 import { composite } from '../core/render.ts';
 import { layer3CellAt, layer3WordText } from '../core/layer3map.ts';
 import type { ArcSpeed } from '../core/jumparcs.ts';
@@ -259,7 +260,8 @@ export class LevelView {
           ctx.fillText(txt, x + 20 / app.zoom, ty);
         };
         line(t.overworld ? 'Exit → Overworld' : `Exit → ${g.label(t.to)}`, 0);
-        if (t.entrance >= 0) line(ok ? `via sec. entrance ${hex3(t.entrance)}` : `sec. entrance ${hex3(t.entrance)} missing`, 1);
+        if (t.overworld) line(overworldExitText(app.rom, readSecondaryEntrance(app.rom, t.entrance).overworld!), 1);
+        else if (t.entrance >= 0) line(ok ? `via sec. entrance ${hex3(t.entrance)}` : `sec. entrance ${hex3(t.entrance)} missing`, 1);
       }
     }
     // entrance markers (Mario's start position, drawn at his lower 16x16 half)

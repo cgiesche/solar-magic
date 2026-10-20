@@ -114,19 +114,25 @@ export function levelName(rom: Rom, translevel: number): string {
 export const BASE_EVENTS = 0x05d608;
 export const OW_EVENTS = 0x78; // 15 bytes of event bits
 export const baseEvent = (rom: Rom, tl: number): number => rom.r8(BASE_EVENTS + tl);
-// the overworld's events by the level exits that run them ("105 Yoshi's Island 1 – normal exit"), of the levels
-// on the map; an event several exits run is named by the first, a normal exit before a secret one
+// the overworld's events by the level exits that run them ("105 YOSHI'S ISLAND 1 – normal exit"), of the levels on
+// the map; an event no normal exit runs by the secret exits that do (the game numbers a level's events one after
+// the other: after one without a secret exit its next event is the next level's)
 export function eventNames(rom: Rom): Map<number, string> {
-  const out = new Map<number, string>(), secret = new Map<number, string>();
+  const normal = new Map<number, string[]>(), secret = new Map<number, string[]>();
+  const add = (m: Map<number, string[]>, e: number, n: string) => { if (e < OW_EVENTS) (m.get(e) ?? m.set(e, []).get(e)!).push(n); };
   const tls = [...new Set(translevels(readL1(rom)))].filter((t) => t).sort((a, b) => a - b);
   for (const tl of tls) {
     const b = baseEvent(rom, tl);
     if (b >= OW_EVENTS) continue;
     const name = `${translevelToLevel(tl).toString(16).toUpperCase().padStart(3, '0')} ${levelName(rom, tl)}`;
-    if (!out.has(b)) out.set(b, `${name} – normal exit`);
-    if (b + 1 < OW_EVENTS && !secret.has(b + 1)) secret.set(b + 1, `${name} – secret exit`);
+    add(normal, b, `${name} – normal exit`);
+    add(secret, b + 1, `${name} – secret exit`);
   }
-  for (const [e, n] of secret) if (!out.has(e)) out.set(e, n);
+  const out = new Map<number, string>();
+  for (let e = 0; e < OW_EVENTS; e++) {
+    const n = normal.get(e) ?? secret.get(e) ?? [];
+    if (n.length) out.set(e, n.join(' · '));
+  }
   return out;
 }
 

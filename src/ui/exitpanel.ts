@@ -7,10 +7,11 @@ import { hex2, hex3, ENTRANCE_ACTIONS } from '../core/names.ts';
 import {
   newUid, readSecondaryEntrance, readSecondaryHeader, mainTranslevel, mainSpot, secondarySpot, setSecondarySpot, copyCameraStart, hasRelativeCamera,
   copyEntranceOptions, setExitSecondary, EXIT_WATER, EXIT_MIDWAY, EXIT_NEW, exitToMidway, exitLandsAtMidway, midwaySpot, midwayEntrance, mainEntrance, setMidwayEntrance, midwayStart, nearestMidway, placeMidway, entrancePos,
-  type MidwayEntrance, type SecondaryHeader,
+  newOverworldExit, type MidwayEntrance, type SecondaryHeader, type OverworldExit,
 } from '../core/level.ts';
+import { overworldFields, overworldLabel } from './owexit.ts';
 import { spotText, cameraOptions, cameraValue, setCamera, cameraFields, optionFields } from './entrancefields.ts';
-import { exitTarget, type ExitRef } from '../core/exitgraph.ts';
+import { exitTarget, isOverworldEntrance, type ExitRef } from '../core/exitgraph.ts';
 import { arrivesSlippery, slipperyEntrances } from '../core/slippery.ts';
 import { levelPicker } from './levelpicker.ts';
 import { openTestPlay } from './testplay.ts';
@@ -49,20 +50,54 @@ function exitPanel(app: App, body: HTMLElement): boolean {
   const e = ex;
   const t = exitTarget(app.rom, n, e);
   const upd = (f: () => void) => app.editLevel(f, false);
+  // the level the exit leads into (to the overworld: choosing a level starts with this one)
+  const level = t.overworld ? n : t.to;
   // a secondary exit into `level`: its first entrance, or a new one at its main entrance
   const secondaryTo = (level: number) => {
     const idx = g.entrancesOf(level)[0] ?? newEntranceIn(app, level);
     if (idx !== null) upd(() => { setExitSecondary(e, true); e.dest = idx; });
   };
-  const radio = (secondary: boolean, label: string, title: string) => {
-    const r = h('input', { type: 'radio', name: 'exit-kind', checked: e.secondary === secondary });
-    r.addEventListener('change', () => { if (secondary) secondaryTo(t.to); else upd(() => { setExitSecondary(e, false); e.dest = t.to; }); });
+  // to the overworld: through an entrance to the overworld of this level no exit uses, else a new one (passing
+  // the level with the normal exit)
+  const toOverworld = () => {
+    const idx = Array.from({ length: 0x200 }, (_, i) => i).find((i) => isOverworldEntrance(app.rom, i) && readSecondaryEntrance(app.rom, i).destLevel === n && !g.usersOfEntrance(i).length) ?? g.freeEntrance();
+    if (idx === null) { toast('No free secondary entrance left.', 'error'); return; }
+    if (!isOverworldEntrance(app.rom, idx)) app.editSecondaryEntrance(idx, `Secondary entrance ${hex3(idx)} to the overworld created`, (x) => { x.destLevel = n; x.overworld = newOverworldExit(); });
+    upd(() => { setExitSecondary(e, true); e.dest = idx; });
+  };
+  const kind = !e.secondary ? 'main' : t.overworld ? 'overworld' : 'secondary';
+  const radio = (k: typeof kind, label: string, title: string) => {
+    const r = h('input', { type: 'radio', name: 'exit-kind', checked: kind === k });
+    r.addEventListener('change', () => {
+      if (k === 'secondary') secondaryTo(level);
+      else if (k === 'overworld') toOverworld();
+      else upd(() => { setExitSecondary(e, false); e.dest = level; });
+    });
     return h('label', { class: 'row', title }, r, label);
   };
   body.append(
     field('Leads to', h('div', { class: 'radio-col' },
-      radio(false, 'Main entrance of a level', 'Mario comes out at the main entrance (M) of the target level'),
-      radio(true, 'Secondary entrance', 'Mario comes out at a specific entrance (S) of the target level, e.g. at a pipe'))),
+      radio('main', 'Main entrance of a level', 'Mario comes out at the main entrance (M) of the target level'),
+      radio('secondary', 'Secondary entrance', 'Mario comes out at a specific entrance (S) of the target level, e.g. at a pipe'),
+      radio('overworld', 'Overworld', 'Mario goes back to the overworld, the level passed or not (Lunar Magic\'s secondary exit to the overworld)'))),
+  );
+  if (t.overworld) {
+    const o = readSecondaryEntrance(app.rom, t.entrance).overworld!;
+    const shared = g.usersOfEntrance(t.entrance).length;
+    const set = (label: string, f: (x: OverworldExit) => void) =>
+      app.editSecondaryEntrance(t.entrance, `Secondary entrance ${hex3(t.entrance)}: ${label}`, (x) => f(x.overworld!), `sec-entrance-${label}:${t.entrance}`);
+    body.append(
+      ...overworldFields(app, t.entrance, o, set).map(([l, el]) => field(l, el)),
+      h('div', { class: 'exit-target' },
+        h('div', null, 'Mario returns to the ', h('b', null, 'overworld')),
+        hint(`${overworldLabel(app, o)} – through secondary entrance ${hex3(t.entrance)}${shared > 1 ? `, which ${shared} exits share: a change applies to all of them` : ''}.`),
+        h('div', { class: 'row' },
+          h('button', { class: 'danger', onclick: () => { app.editLevel(() => { lv.exits = lv.exits.filter((x) => x !== e); }, false); } }, 'Delete exit'))),
+      hint(enter === false ? 'No pipes or doors were found on this screen.' : 'The exit applies to all pipes and doors of this screen.'),
+    );
+    return enter === null;
+  }
+  body.append(
     field('Target level', levelPicker(app, t.to, (m) => {
       if (e.secondary) secondaryTo(m); else upd(() => (e.dest = m));
     })),
