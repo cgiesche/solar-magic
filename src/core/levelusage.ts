@@ -124,13 +124,11 @@ interface Stored { data: string; tiles: LevelTiles } // data: the hash of the le
 export class LevelUses {
   private rom: Rom;
   private results: ResultCache;
-  private emu: () => LevelEmulator;
   private inputs = { gen: -1, of: new Map<number, { lv: Level; data: string } | null>() };
 
-  constructor(rom: Rom, results: ResultCache, emu: () => LevelEmulator) {
+  constructor(rom: Rom, results: ResultCache) {
     this.rom = rom;
     this.results = results;
-    this.emu = emu;
   }
 
   // the level as saved and its data's hash (null: it can't be read), once per ROM state
@@ -159,11 +157,11 @@ export class LevelUses {
     return [...levels].filter((n) => this.tiles(n) === undefined);
   }
 
-  // loads level n in the emulator and keeps what it placed
-  scan(n: number): LevelTiles {
+  // loads level n in emu and keeps what it placed
+  scan(n: number, emu: LevelEmulator): LevelTiles {
     const i = this.input(n);
     if (!i) return this.tiles(n)!;
-    const emu = this.emu(), ov = levelOverride(this.rom, i.lv), gen = this.rom.gen;
+    const ov = levelOverride(this.rom, i.lv), gen = this.rom.gen;
     // (a level that can't be taken apart counts as not loading: kept too, so it isn't tried again and again)
     const run = emu.tracked(() => { try { return levelTilesAll(this.rom, i.lv, (o) => emu.load(n, o), ov); } catch (e) { console.error(e); return null; } });
     // the load's temporary ROM patches are undone, so the levels read before still hold

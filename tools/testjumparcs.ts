@@ -3,6 +3,7 @@
 import { readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
 import { BlockProber } from '../src/core/blockprobe.ts';
+import { LevelEmulator } from '../src/core/levelemu.ts';
 import { JumpArcs, ARC_SPEEDS, type JumpArc } from '../src/core/jumparcs.ts';
 import { loadLevel, serializeLayer1, newUid } from '../src/core/level.ts';
 import { installEditorPatch, DM16_EXT } from '../src/core/patches.ts';
@@ -19,7 +20,9 @@ check(runs.walk.vx > 0 && runs.run.vx > runs.walk.vx && runs.p.vx > runs.run.vx 
 // level 105 with only a flat floor of cement blocks (row 24); Mario stands in row 23
 const lv = loadLevel(rom, 0x105);
 lv.objects = Array.from({ length: 8 }, (_, k) => ({ uid: newUid(), num: 0, ext: DM16_EXT, x: k * 16, y: 24, size: 0x0f, tile: 0x130 }));
-const arcs = new JumpArcs(rom, prober.emu);
+const arcEmu = new LevelEmulator(rom);
+if (prober.emu.baseState) arcEmu.adoptBoot(prober.emu);
+const arcs = new JumpArcs(arcEmu);
 const prepare = () => arcs.prepare(lv.number, { layer1: serializeLayer1(rom, lv) }, lv.spriteHeader, 27 * 16);
 check(prepare(), 'level 105 runs to gameplay');
 const TX = 0x40, TY = 23;

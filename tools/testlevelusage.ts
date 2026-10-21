@@ -23,7 +23,7 @@ const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL
 const rom = new Rom(await editorImage());
 const results = new ResultCache(new RomFingerprint(rom));
 const emu = new LevelEmulator(rom); emu.boot();
-const uses = new LevelUses(rom, results, () => emu);
+const uses = new LevelUses(rom, results);
 const blank = map16Source(rom, emu.load(0x105)).fg(0x025);
 // free space for an unrelated change later: a page of its own, which no level load reads (its RATS tag may share one)
 const spare = rom.allocWrite(new Uint8Array(0x300));
@@ -42,7 +42,7 @@ setActsLike(rom, 0x347, 0x130); // (acts like reaches the game's tiles 000-1FF)
 const levels = usedLevels(rom);
 check(levels.includes(0x105) && levels.includes(0x0) && levels.includes(0x13b), `used levels: ${levels.length}`);
 check(uses.tiles(0x105) === undefined, 'nothing known before scanning');
-const all = levels.map((n) => uses.tiles(n) ?? uses.scan(n));
+const all = levels.map((n) => uses.tiles(n) ?? uses.scan(n, emu));
 check(uses.missing(levels).length === 0, 'every level known after scanning');
 
 {
@@ -107,10 +107,10 @@ check(uses.missing(levels).length === 0, 'every level known after scanning');
   saveLevel(rom, l2);
   const m = uses.missing(levels);
   check(m.length === 1 && m[0] === 0x105, `after saving level 105 only it is scanned again (${m.map((x) => x.toString(16))})`);
-  const again = uses.scan(0x105);
+  const again = uses.scan(0x105, emu);
   check(!fgTileUsers([again], 0x345, [0]).length && !!before, 'the new scan no longer has tile 345');
   // a stored result is found again by a new index on the same cache
-  check(new LevelUses(rom, results, () => emu).tiles(0x105) !== undefined, 'results come from the result cache');
+  check(new LevelUses(rom, results).tiles(0x105) !== undefined, 'results come from the result cache');
 }
 
 // GFX files: the slots of each level (defaults of the tileset included), ExGFX inserted but in no slot

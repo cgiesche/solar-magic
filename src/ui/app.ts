@@ -18,7 +18,7 @@ import { flagBytes, usedFlags, isDm16, dm16Tiles, type Dm16Cond } from '../core/
 import { STRUCT_EXT, STRUCT_MAX, TRANSPARENT, listStructures, readStructure, writeStructure, type Structure } from '../core/structs.ts';
 import type { Package } from '../core/pkgreg.ts';
 import { kvEntries, kvWrite, saveRom } from './storage.ts';
-import { ResultCache, RomFingerprint, RomReads, type CacheEntry } from '../core/romdeps.ts';
+import { ResultCache, RomFingerprint, type CacheEntry } from '../core/romdeps.ts';
 import { bgFromWram, bgIndex, encodeBg } from '../core/bg.ts';
 import { lt3Override, lt3Target, lt3Covers, layer3Map, layer3Word, layer3Index, blankLayer3Tile } from '../core/layer3map.ts';
 import { layer3Geometry, type Layer3Geometry } from '../core/render.ts';
@@ -36,9 +36,10 @@ import { cameraAtKey, type CameraReach, type CameraAt } from '../core/camerareac
 import { MARIO_W, MARIO_H, type CameraBands } from '../core/camerabands.ts';
 import { layer3Kinds, tideKind, layer3Top, type Layer3Kind } from '../core/layer3.ts';
 import { layer2MotionsJob, type Layer2Motions } from '../core/l2scroll.ts';
-import { variantOf, blockKey, spriteKey, type BlockProbe, type SpriteProbe } from '../core/blockprobe.ts';
+import { variantOf, blockKey, type BlockProbe, type RunStates } from '../core/blockprobe.ts';
 import type { ProbeReply } from '../core/probehost.ts';
 import { ProbeClient } from '../core/probeclient.ts';
+import { ResultLearner } from '../core/learner.ts';
 import { map16Tile, bgTile } from '../core/ram.ts';
 import { exanimTiles, exanimColors, exanimPeriod, readLevelList, readGlobalList } from '../core/exanim.ts';
 import { emptyTriggerView, usedTriggers, initTriggers, type TriggerView, type SlotRef } from '../core/extrigger.ts';
@@ -90,7 +91,6 @@ export type AppEvent =
   | 'import-gfx'; // the graphics workspace imports App.gfxImport
 
 const CACHE_PREFIX = 'rc3:'; // IndexedDB keys of the result cache (bump when result formats change or old results may be wrong: rc3 after the stale boot snapshot fix)
-const BG_SLICE = 12; // ms a slice of background work runs before input and drawing get through
 
 // result of the sprite memory check (see App.checkSpriteMem); gen: the edit session's levelGen when it started
 export interface SpriteMemState { key: string; level: number; mem: number; gen: number; conflicts: Set<number>; suggestion: number | null }
@@ -155,12 +155,13 @@ export class App {
   // mode 'exit': the chosen entrance marker, else the screen exitScreen (and its exit)
   exitMarker: { kind: Marker['kind']; index: number } | null = null;
   spriteThumbs: Map<number, HTMLCanvasElement> | null = null;
-  variantQueue: number[] = []; // sprites whose variant images are captured next
   private canvases = new WeakMap<SpriteImage, HTMLCanvasElement>();
   // results found out by emulation, valid while the ROM they read is unchanged (see romdeps.ts);
   // stored in IndexedDB, loaded once at start (cacheReady)
   results: ResultCache;
   cacheReady: Promise<void>;
+  // learns the emulated results the probe worker doesn't, on the main thread (learner.ts)
+  private learner: ResultLearner;
   private cacheTimer = 0;
   private closed = false; // project closed: nothing is written to the browser any more
   reveal = { x: 0, y: 0 }; // pixel the level view scrolls to on 'reveal'
@@ -197,6 +198,12 @@ export class App {
     this.cacheReady = kvEntries<CacheEntry>(CACHE_PREFIX)
       .then((e) => this.results.load(e.map(([k, v]) => [k.slice(CACHE_PREFIX.length), v])))
       .catch((e) => console.error(e));
+    this.learner = new ResultLearner({
+      rom, results: this.results, cacheReady: this.cacheReady, main: this.emu,
+      later: (key, step) => this.later(key, step),
+      soon: (step) => setTimeout(step, 0),
+      setBusy: (key, label) => this.setBusy(key, label),
+    });
     this.probes = new ProbeClient({
       results: this.results,
       cacheReady: this.cacheReady,
@@ -324,6 +331,7 @@ export class App {
   refresh(): void {
     this.arcCache.clear();
     this.arcLevel = null;
+    this.learner.cancel('arcs');
     const lv = this.level, ov = this.buildOverrides();
     const r = this.emu.load(lv.number, ov);
     this.renderError = r.ok ? null : r.error ?? 'Error';
@@ -570,45 +578,34 @@ export class App {
     const key = `${hd.spriteGfx}-${hd.spritePalette}-${this.level.spriteHeader & SPRITE_MEMORY}-${gfxFilesHash(this.rom, this.spriteGfxFiles()).toString(36)}${custom.length ? '-' + custom.map((c) => c.toString(16)).join('.') : ''}`;
     if (key === this.spriteKey) return;
     this.spriteKey = key;
-    this.variantQueue = [];
+    this.learner.cancel('variants');
+    this.learner.cancel('bytes');
     const map = new Map<number, HTMLCanvasElement>();
     this.spriteThumbs = map;
+    const show = (images: Iterable<[number, SpriteImage]>) => { for (const [n, img] of images) map.set(n, this.spriteCanvas(img)); };
     const all = [...Array.from({ length: 0xe7 }, (_, i) => i), ...custom]; // as listed in the palette
     const lvNum = this.level.number;
     const bg = this.level.layer2Pointer >> 16 === 0xff ? this.level.layer2Pointer : 0xffd900;
     const header = { ...hd };
     const sh = this.level.spriteHeader;
-    const images: [number, SpriteImage][] = [];
-    const reads = new RomReads(this.rom.data.length);
-    let i = 0;
-    const step = () => {
-      if (this.spriteKey !== key) return;
-      if (i === 0) {
-        // i4: with the sprites from $C9 on (shells, groups), failed batches retried one by one; sprites
-        // that draw nothing shown by what they spawn
-        const stored = this.results.get<[number, SpriteImage][]>(`i4${key}`);
-        if (stored) {
-          for (const [n, img] of stored) map.set(n, this.spriteCanvas(img));
-          this.setBusy('sprites', null);
-          this.emit('sprites');
-          return;
-        }
+    // i4: with the sprites from $C9 on (shells, groups), failed batches retried one by one; sprites
+    // that draw nothing shown by what they spawn
+    const stored = this.learner.learn(`i4${key}`, function* (emu) {
+      const images: [number, SpriteImage][] = [];
+      for (let i = 0; i < all.length; i += 6) {
+        // one test level load (six sprite slots) per step
+        const r = captureSprites(emu, lvNum, header, sh, bg, all.slice(i, i + 6));
+        show(r);
+        images.push(...r);
+        yield `Sprite graphics ${Math.min(100, Math.round((i + 6) / all.length * 100))} %`;
       }
-      this.setBusy('sprites', `Sprite graphics ${Math.min(100, Math.round(i / all.length * 100))} %`);
-      const chunk = all.slice(i, i + 6); // one test level load (six sprite slots) per slice
-      i += 6;
-      const r = this.emu.tracked(() => captureSprites(this.emu, lvNum, header, sh, bg, chunk));
-      reads.add(r.reads);
-      for (const [n, img] of r.result) { map.set(n, this.spriteCanvas(img)); images.push([n, img]); }
-      this.emit('sprites');
-      if (i < all.length) this.later('sprites', step);
-      else {
-        this.results.set(`i4${key}`, images, this.results.fp.deps(reads));
-        this.setBusy('sprites', null);
-      }
-    };
-    this.setBusy('sprites', 'Sprite graphics');
-    this.cacheReady.then(() => this.later('sprites', step));
+      return images;
+    }, {
+      lane: 'sprites', replace: true, label: 'Sprite graphics',
+      slice: () => this.emit('sprites'),
+      done: (images) => { show(images); this.emit('sprites'); },
+    });
+    if (stored) { show(stored); this.emit('sprites'); }
   }
 
   // image of sprite id (see spriteId) at tile (x, y): sprites that start differently depending on their
@@ -616,49 +613,26 @@ export class App {
   // custom sprites with extra bytes other than 0 one per bytes
   spriteImage(id: number, x: number, y: number, bytes?: number[]): HTMLCanvasElement | undefined {
     const base = this.spriteThumbs?.get(id);
+    const lv = this.level, bg = lv.layer2Pointer >> 16 === 0xff ? lv.layer2Pointer : 0xffd900;
+    const shown = () => this.emit('sprites');
     if (bytes?.some((b) => b)) {
-      const img = this.results.get<SpriteImage | null>(this.bytesKey(id, bytes));
-      if (img === undefined) this.queueBytesImage(id, bytes);
+      const b = [...bytes];
+      const img = this.learner.learn(`b2${this.spriteKey}:${id}:${b.join(',')}`, function* (emu) {
+        return captureSprites(emu, lv.number, lv.header, lv.spriteHeader, bg, [id], undefined, b).get(id) ?? null;
+      }, { lane: 'bytes', done: shown });
       return img ? this.spriteCanvas(img) : base;
     }
     const p = this.probes.sprite(id);
     if (!p || p.variants.reps.length < 2) return base;
-    const img = this.results.get<SpriteImage | null>(this.variantKey(id, p.variants.reps[variantOf(p.variants, x, y)]));
-    if (img === undefined) this.queueVariantImages(id);
+    const at = p.variants.reps[variantOf(p.variants, x, y)];
+    const img = this.learner.learn<SpriteImage | null>(`v${this.spriteKey}:${id}:${at.x}:${at.y}`, function* (emu) {
+      return captureSpriteAt(emu, lv.number, lv.header, lv.spriteHeader, bg, id, at.x, at.y);
+    }, { lane: 'variants', label: (n) => `Sprite variants (${n})`, done: shown });
     return img ? this.spriteCanvas(img) : base;
   }
   // image of a placed sprite
   spriteImageOf(s: LevelSprite): HTMLCanvasElement | undefined {
     return this.spriteImage(spriteId(s), s.x, s.y, s.extra >= 2 ? s.bytes : undefined);
-  }
-
-  private bytesKey(id: number, bytes: number[]): string {
-    return `b2${this.spriteKey}:${id}:${bytes.join(',')}`;
-  }
-  private bytesQueue: { id: number; bytes: number[] }[] = [];
-  private queueBytesImage(id: number, bytes: number[]): void {
-    const k = this.bytesKey(id, bytes);
-    if (this.bytesQueue.some((q) => this.bytesKey(q.id, q.bytes) === k)) return;
-    this.bytesQueue.push({ id, bytes: [...bytes] });
-    if (this.bytesQueue.length > 1) return;
-    const queue = this.bytesQueue, key = this.spriteKey;
-    const step = () => {
-      if (queue !== this.bytesQueue || key !== this.spriteKey) return;
-      const q = queue[0];
-      const lv = this.level, bg = lv.layer2Pointer >> 16 === 0xff ? lv.layer2Pointer : 0xffd900;
-      try {
-        const r = this.emu.tracked(() => captureSprites(this.emu, lv.number, lv.header, lv.spriteHeader, bg, [q.id], undefined, q.bytes));
-        this.results.set(this.bytesKey(q.id, q.bytes), r.result.get(q.id) ?? null, this.results.fp.deps(r.reads));
-      } catch (e) { console.error(e); }
-      queue.shift();
-      this.emit('sprites');
-      if (queue.length) this.later('bytes', step);
-    };
-    this.later('bytes', step);
-  }
-
-  private variantKey(num: number, at: { x: number; y: number }): string {
-    return `v${this.spriteKey}:${num}:${at.x}:${at.y}`;
   }
 
   // ROM bytes of GFX file data: emulated results don't depend on them (graphics only reach VRAM);
@@ -681,33 +655,6 @@ export class App {
     let c = this.canvases.get(img);
     if (!c) this.canvases.set(img, (c = spriteCanvas(img)));
     return c;
-  }
-
-  private queueVariantImages(num: number): void {
-    if (this.variantQueue.includes(num)) return;
-    this.variantQueue.push(num);
-    if (this.variantQueue.length > 1) return;
-    const queue = this.variantQueue, key = this.spriteKey;
-    const step = () => {
-      if (queue !== this.variantQueue || key !== this.spriteKey) return;
-      const n = queue[0];
-      this.setBusy('variants', `Sprite variants (${queue.length})`);
-      const p = this.cachedSprite(n);
-      const lv = this.level, bg = lv.layer2Pointer >> 16 === 0xff ? lv.layer2Pointer : 0xffd900;
-      for (const at of p?.variants.reps ?? []) {
-        const k = this.variantKey(n, at);
-        if (this.results.get(k) !== undefined) continue;
-        try {
-          const r = this.emu.tracked(() => captureSpriteAt(this.emu, lv.number, lv.header, lv.spriteHeader, bg, n, at.x, at.y));
-          this.results.set(k, r.result, this.results.fp.deps(r.reads));
-        } catch (e) { console.error(e); }
-      }
-      queue.shift();
-      this.emit('sprites');
-      if (queue.length) this.later('variants', step);
-      else this.setBusy('variants', null);
-    };
-    this.later('variants', step);
   }
 
   // ------------- sprite memory (see spritemem.ts) -------------
@@ -735,7 +682,6 @@ export class App {
     const run = ++this.spriteMemRun;
     const done = (r: { lost: number[]; suggestion: number | null }) => {
       if (run !== this.spriteMemRun || this.level !== lv) return;
-      this.setBusy('spritemem', null);
       const cur = { key, level: lv.number, mem, gen, conflicts: new Set(r.lost.map((i) => sprites[i].uid)), suggestion: r.suggestion };
       this.spriteMem = cur;
       this.emit('sprite-mem');
@@ -744,31 +690,12 @@ export class App {
       this.spriteMemBase = cur;
       if (base) this.autoSpriteMem(base, cur);
     };
-    const stored = this.results.get<{ lost: number[]; suggestion: number | null }>(key);
-    if (stored) { done(stored); return; }
-    const bg = lv.layer2Pointer >> 16 === 0xff ? lv.layer2Pointer : 0xffd900;
-    const job = spriteMemJob({ emu: this.emu, level: lv.number, header: { ...lv.header }, bgPointer: bg }, mem, candidates, sprites);
-    const reads = new RomReads(this.rom.data.length);
-    const step = () => {
-      if (run !== this.spriteMemRun || this.level !== lv) return;
-      const t0 = performance.now();
-      try {
-        for (;;) {
-          const r = this.emu.tracked(() => job.next());
-          reads.add(r.reads);
-          if (r.result.done) {
-            const res = { lost: [...r.result.value.check.conflicts].map((u) => sprites.findIndex((q) => q.uid === u)), suggestion: r.result.value.suggestion };
-            this.results.set(key, res, this.results.fp.deps(reads));
-            done(res);
-            return;
-          }
-          if (performance.now() - t0 > BG_SLICE) break;
-        }
-      } catch (e) { console.error(e); this.setBusy('spritemem', null); return; }
-      this.later('spritemem', step);
-    };
-    this.setBusy('spritemem', 'Checking sprite memory');
-    this.later('spritemem', step);
+    const bg = lv.layer2Pointer >> 16 === 0xff ? lv.layer2Pointer : 0xffd900, header = { ...lv.header };
+    const stored = this.learner.learn(key, function* (emu) {
+      const r = yield* spriteMemJob({ emu, level: lv.number, header, bgPointer: bg }, mem, candidates, sprites);
+      return { lost: [...r.check.conflicts].map((u) => sprites.findIndex((q) => q.uid === u)), suggestion: r.suggestion };
+    }, { lane: 'spritemem', replace: true, label: 'Checking sprite memory', done });
+    if (stored) done(stored);
   }
 
   // An edit (committed since the previous check, same sprite memory) that makes further sprites
@@ -916,9 +843,6 @@ export class App {
   cachedBlock(tile: number): BlockProbe | undefined {
     return this.results.get(blockKey(this.level.header.tileset, tile));
   }
-  cachedSprite(num: number): SpriteProbe | undefined {
-    return this.results.get(spriteKey(this.level.header.tileset, num));
-  }
 
   // ------------- level scan (see levelscan.ts) -------------
   // slowdown and sprite problems found by playing the level through, in the background a while
@@ -1001,15 +925,11 @@ export class App {
   // What the four layer 3 settings do in a tileset (see layer3.ts): the level as edited is loaded
   // with each of them on an own emulator; kept per tileset while the ROM it read is unchanged
   layer3Kinds(tileset: number): Layer3Kind[] {
-    const key = `l3k1:${tileset}`;
-    const stored = this.results.get<Layer3Kind[]>(key);
-    if (stored) return stored;
-    const lv = this.level, ov = this.buildOverrides();
-    if (tileset !== lv.header.tileset) ov.layer1 = serializeLayer1(this.rom, { ...lv, header: { ...lv.header, tileset } });
-    const emu = this.layer3Emu = this.auxEmu(this.layer3Emu);
-    const { result, reads } = emu.tracked(() => layer3Kinds(emu, lv.number, ov));
-    this.results.set(key, result, this.results.fp.deps(reads));
-    return result;
+    return this.learner.now(`l3k1:${tileset}`, (emu) => {
+      const lv = this.level, ov = this.buildOverrides();
+      if (tileset !== lv.header.tileset) ov.layer1 = serializeLayer1(this.rom, { ...lv, header: { ...lv.header, tileset } });
+      return emu.tracked(() => layer3Kinds(emu, lv.number, ov));
+    });
   }
 
   // Water line of a layer 3 tide in level pixels: the surface where the level view draws layer 3
@@ -1028,41 +948,22 @@ export class App {
   }
   private tideCache: { images: LevelImages; range: unknown; value: ReturnType<App['tide']> } | null = null;
 
-  private layer3Emu: LevelEmulator | null = null;
-
   // What every layer 2 scroll setting does (l2scroll.ts), measured with the level's code on an own
   // emulator a setting at a time; null while that runs, then `done` is called. Kept per level while
   // the ROM it read is unchanged.
   layer2Motions(done: () => void): Layer2Motions | null {
-    const key = `l2m1:${this.level.number}`;
-    const stored = this.results.get<Layer2Motions>(key);
-    if (stored) return stored;
-    if (this.l2Run?.key === key) { this.l2Run.waiting.push(done); return null; }
-    const emu = this.l2Emu = this.auxEmu(this.l2Emu), before = this.rom.data.slice();
-    const run = this.l2Run = { key, waiting: [done] };
-    const job = layer2MotionsJob(emu, this.level.number, this.buildOverrides());
-    const step = () => {
-      if (this.l2Run !== run) return;
-      const r = job.next();
-      if (!r.done) { setTimeout(step, 0); return; }
-      this.l2Run = null;
-      // (not kept when the ROM changed while it ran: measured with what it read before)
-      if (!r.value.reads.differ(before, this.rom.data)) this.results.set(key, r.value.result, this.results.fp.deps(r.value.reads));
-      for (const f of run.waiting) f();
-    };
-    setTimeout(step, 0);
-    return null;
+    const n = this.level.number, ov = this.buildOverrides();
+    // (urgent: the header dialog shows them)
+    return this.learner.learn(`l2m1:${n}`, function* (emu) { return (yield* layer2MotionsJob(emu, n, ov)).result; }, { lane: 'l2', replace: true, urgent: true, done }) ?? null;
   }
-  private l2Emu: LevelEmulator | null = null;
-  private l2Run: { key: string; waiting: (() => void)[] } | null = null;
 
   // The Map16 tiles of every level (levelusage.ts), the open one as edited: those known now, the others are
   // learned in the background ('level-uses' as they come); pending: how many are still missing
   levelTiles(): { levels: LevelTiles[]; pending: number } {
-    const idx = this.usesIndex ??= new LevelUses(this.rom, this.results, () => (this.usesEmu = this.auxEmu(this.usesEmu)));
+    const idx = this.usesIndex ??= new LevelUses(this.rom, this.results);
     if (this.currentTiles?.render !== this.render) {
       // a level with conditional Direct Map16 objects: in both of their states, whatever the view's flags
-      const emu = this.usesEmu = this.auxEmu(this.usesEmu);
+      const emu = this.learner.emu();
       const tiles = this.levelFlags().size ? levelTilesAll(this.rom, this.level, (o) => emu.load(this.level.number, o), this.buildOverrides()) : levelTilesOf(this.rom, this.level, this.render);
       this.currentTiles = { render: this.render, tiles };
     }
@@ -1073,7 +974,7 @@ export class App {
       const t = idx.tiles(n);
       if (t) levels.push(t); else pending++;
     }
-    if (pending && !this.usesRun) this.learnLevelTiles(idx);
+    if (pending) this.learnLevelTiles(idx);
     return { levels, pending };
   }
   // the tilesets in which FG Map16 tile t is the open level's tile (all for the standard tiles): the
@@ -1081,22 +982,12 @@ export class App {
   tilesetsOf(t: number): number[] {
     const all = Array.from({ length: TILESETS }, (_, i) => i);
     if (!isTilesetTile(t)) return all;
-    const ptrs = all.map((ts) => {
-      const k = `tsp1:${ts}`, stored = this.results.get<number[]>(k);
-      if (stored) return stored;
-      const r = tilesetPointers(this.usesEmu = this.auxEmu(this.usesEmu), ts);
-      this.results.set(k, r.result, this.results.fp.deps(r.reads));
-      return r.result;
-    });
+    const ptrs = all.map((ts) => this.learner.now(`tsp1:${ts}`, (emu) => tilesetPointers(emu, ts)));
     return sharingTilesets(ptrs, this.level.header.tileset, t);
   }
   // the entrance actions that make a level slippery (slippery.ts), learned once and kept in the result cache
   slipperyActions(): number[] {
-    const k = 'slip1', stored = this.results.get<number[]>(k);
-    if (stored) return stored;
-    const r = slipperyActions(this.usesEmu = this.auxEmu(this.usesEmu));
-    this.results.set(k, r.result, this.results.fp.deps(r.reads));
-    return r.result;
+    return this.learner.now('slip1', slipperyActions);
   }
   // the levels with sprite id (spriteId), the open level as edited
   spriteUsers(id: number): SpriteUser[] {
@@ -1108,94 +999,56 @@ export class App {
   private savedSprites: { level: number; uses: Map<number, SpriteUser[]> } | null = null;
 
   private usesIndex: LevelUses | null = null;
-  private usesEmu: LevelEmulator | null = null;
-  private usesRun = false;
   private currentTiles: { render: LevelRender; tiles: LevelTiles } | null = null;
 
+  // the other levels' tiles not known (each stored by LevelUses), 'level-uses' as they come
   private learnLevelTiles(idx: LevelUses): void {
-    this.usesRun = true;
-    const step = () => {
-      const t0 = performance.now();
-      let left: number[] = [];
-      try {
-        left = idx.missing(usedLevels(this.rom)).filter((n) => n !== this.level.number);
-        while (left.length && performance.now() - t0 < BG_SLICE) idx.scan(left.shift()!);
-      } catch (e) { console.error(e); left = []; }
-      this.emit('level-uses');
-      this.setBusy('uses', left.length ? `Uses in levels (${left.length})` : null);
-      if (left.length) this.later('level-uses', step); else this.usesRun = false;
-    };
-    this.setBusy('uses', 'Uses in levels');
-    void this.cacheReady.then(() => this.later('level-uses', step));
-  }
-
-  // a background emulator (new for another ROM) set up from the main one's boot state
-  private auxEmu(emu: LevelEmulator | null): LevelEmulator {
-    if (!emu || emu.rom !== this.rom) {
-      emu = new LevelEmulator(this.rom);
-      emu.skipMask = () => this.gfxSkipMask();
-    }
-    emu.adoptBoot(this.emu);
-    return emu;
+    const rom = this.rom, open = () => this.level.number;
+    this.learner.learn('uses', function* (emu) {
+      for (let left = idx.missing(usedLevels(rom)).filter((n) => n !== open()); left.length; left = idx.missing(usedLevels(rom)).filter((n) => n !== open())) {
+        while (left.length) { idx.scan(left.shift()!, emu); yield `Uses in levels (${left.length})`; }
+      }
+    }, { keep: false, label: 'Uses in levels', slice: () => this.emit('level-uses'), done: () => this.emit('level-uses') });
   }
 
   // ------------- jump arcs (see jumparcs.ts) -------------
   // arcs from a tile of the current level as edited, by tile (ty << 16 | tx); emulated in the
-  // background on an own emulator, the latest request first; 'arcs' when some are ready
+  // background, the latest request only; 'arcs' when some are ready
   arcCache = new Map<number, JumpArc[]>();
   private arcs: JumpArcs | null = null;
   private arcLevel: Level | null = null; // the level state the arc emulator is prepared for
-  private arcWant: { tx: number; ty: number; done: JumpArc[] } | null = null;
   private arcsWaiting = false; // for the run speeds probe
 
   jumpArcs(tx: number, ty: number): JumpArc[] | undefined {
     const k = (ty << 16) | tx, c = this.arcCache.get(k);
     if (c) return c;
-    if (this.arcWant?.tx !== tx || this.arcWant.ty !== ty) this.arcWant = { tx, ty, done: [] };
-    this.later('arcs', () => this.runArcs());
+    const found = (arcs: JumpArc[]) => { this.arcCache.set(k, arcs); this.emit('arcs'); };
+    // Mario's run speeds in this tileset: probed first, the arcs are asked for again on 'probes'
+    const runs = this.probes.runSpeeds();
+    if (runs === null) { console.error('run speeds not found'); found([]); return []; }
+    if (!runs) {
+      if (!this.arcsWaiting) {
+        this.arcsWaiting = true;
+        this.once('probes', () => { this.arcsWaiting = false; this.emit('arcs'); });
+      }
+      return undefined;
+    }
+    this.learner.learn(`arcs:${k}`, (emu) => this.arcJob(emu, tx, ty, runs), { lane: 'arcs', replace: true, keep: false, label: 'Jump arcs', done: found, failed: () => found([]) });
     return undefined;
   }
 
-  private runArcs(): void {
-    const want = this.arcWant;
-    if (!want) return;
-    const t0 = performance.now();
-    try {
-      if (!this.arcs || this.arcs.emu.rom !== this.rom) {
-        this.arcs = new JumpArcs(this.rom, this.emu);
-        this.arcs.emu.skipMask = () => this.gfxSkipMask();
-      }
-      if (this.arcLevel !== this.level) {
-        this.setBusy('arcs', 'Jump arcs');
-        const lv = this.level;
-        this.arcLevel = this.arcs.prepare(lv.number, this.buildOverrides(), lv.spriteHeader, this.images.height) ? lv : null;
-        if (!this.arcLevel) throw new Error('level did not reach gameplay');
-      }
-      // Mario's run speeds in this tileset: probed first, the arcs continue on 'probes'
-      const runs = this.probes.runSpeeds();
-      if (runs === null) throw new Error('run speeds not found');
-      if (!runs) {
-        this.setBusy('arcs', 'Jump arcs');
-        if (!this.arcsWaiting) {
-          this.arcsWaiting = true;
-          this.once('probes', () => { this.arcsWaiting = false; this.later('arcs', () => this.runArcs()); });
-        }
-        return;
-      }
-      const all = ARC_SPEEDS.flatMap((sp) => [{ sp, dir: 1 as const }, { sp, dir: -1 as const }]);
-      while (want.done.length < all.length && performance.now() - t0 < BG_SLICE) {
-        const { sp, dir } = all[want.done.length];
-        want.done.push(this.arcs.arc(want.tx, want.ty, sp, dir, runs));
-      }
-      if (want.done.length < all.length) { this.setBusy('arcs', 'Jump arcs'); this.later('arcs', () => this.runArcs()); return; }
-      this.arcCache.set((want.ty << 16) | want.tx, want.done);
-    } catch (e) {
-      console.error(e);
-      this.arcCache.set((want.ty << 16) | want.tx, []);
+  private *arcJob(emu: LevelEmulator, tx: number, ty: number, runs: RunStates): Generator<void, JumpArc[]> {
+    if (this.arcs?.emu !== emu) { this.arcs = new JumpArcs(emu); this.arcLevel = null; }
+    const arcs = this.arcs;
+    if (this.arcLevel !== this.level) {
+      const lv = this.level;
+      this.arcLevel = arcs.prepare(lv.number, this.buildOverrides(), lv.spriteHeader, this.images.height) ? lv : null;
+      if (!this.arcLevel) throw new Error('level did not reach gameplay');
+      yield;
     }
-    if (this.arcWant === want) this.arcWant = null;
-    this.setBusy('arcs', null);
-    this.emit('arcs');
+    const out: JumpArc[] = [];
+    for (const sp of ARC_SPEEDS) for (const dir of [1, -1] as const) { out.push(arcs.arc(tx, ty, sp, dir, runs)); yield; }
+    return out;
   }
 
   // kind of a standard object in the current tileset; null while unknown (then treated as plain)
