@@ -11,7 +11,7 @@ import {
   mainSpot, secondarySpot, setSecondarySpot, sameSpot, placeSecondary, entrancePos, nearestEntrance, copyCameraStart, copyEntranceOptions,
   newOverworldExit, hasRelativeCamera, levelMode, isSized, levelRows, SEC_ENT,
 } from './level.ts';
-import { ExitGraph, isBlank, isOverworldExit } from './exitgraph.ts';
+import { ExitGraph, entrancesInto, isOverworldExit } from './exitgraph.ts';
 import { locationFor, tileText, type OwTile } from './owteleport.ts';
 import { hex } from './names.ts';
 
@@ -40,11 +40,7 @@ export class SecondaryEntrances {
   // the secondary entrances into the open level, of either bank (not blank ones, not its exits to the overworld)
   inOpenLevel(): number[] {
     const n = this.session.level.number, key = `${this.rom.gen}/${n}`;
-    if (this.into?.key !== key) {
-      const list: number[] = [];
-      for (let i = 0; i < ENTRANCES; i++) if (readSecondaryEntrance(this.rom, i).destLevel === n && !isBlank(this.rom, i) && !isOverworldExit(this.rom, i)) list.push(i);
-      this.into = { key, list };
-    }
+    if (this.into?.key !== key) this.into = { key, list: entrancesInto(this.rom, n) };
     return this.into.list;
   }
 
@@ -117,7 +113,7 @@ export class SecondaryEntrances {
       if (on) { e.overworld = newOverworldExit(); return; }
       e.overworld = null;
       this.likeMain(e);
-    }, `sec-entrance-dlg:${idx}`);
+    }, `sec-entrance-overworld:${idx}`);
   }
 
   // an exit to the overworld of `level` for an exit: one no exit uses, else a new one; null when none is free

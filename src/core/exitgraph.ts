@@ -51,10 +51,9 @@ export class ExitGraph {
     return this.exits.filter((e) => e.entrance === idx);
   }
 
-  // the secondary entrances leading into a level (entrances.ts inOpenLevel lists only set-up ones)
+  // the secondary entrances leading into a level
   entrancesOf(level: number): number[] {
-    const out: number[] = [];
-    for (let i = 0; i < 0x200; i++) if (readSecondaryEntrance(this.rom, i).destLevel === level && !isBlank(this.rom, i) && !isOverworldExit(this.rom, i)) out.push(i);
+    const out = entrancesInto(this.rom, level);
     // a blank entry leads to level 000 or 100 too; list it only where an exit uses it
     for (const e of this.exits) if (e.entrance >= 0 && e.to === level && isBlank(this.rom, e.entrance) && !out.includes(e.entrance)) out.push(e.entrance);
     return out.sort((a, b) => a - b);
@@ -107,6 +106,13 @@ export class ExitGraph {
     const p = this.parentOf(level);
     return p === null ? '(unreachable)' : `(from ${hex(p, 3)} ${levelName(this.rom, mainTranslevel(p)!)})`;
   }
+}
+
+// the set-up secondary entrances leading into a level (not blank ones, not its exits to the overworld)
+export function entrancesInto(rom: Rom, level: number): number[] {
+  const out: number[] = [];
+  for (let i = 0; i < 0x200; i++) if (readSecondaryEntrance(rom, i).destLevel === level && !isBlank(rom, i) && !isOverworldExit(rom, i)) out.push(i);
+  return out;
 }
 
 // all its bytes 0, but for the level's bit 8 (D: an unused entrance 100-1FF of the game leads into level 100)

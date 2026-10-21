@@ -463,7 +463,7 @@ export class App {
     this.emit('change');
   }
 
-  // a new secondary entrance into the current level at the entrance setting nearest to (px, py), chosen
+  // a new secondary entrance into the open level at the entrance setting nearest to (px, py), then chosen
   newSecondaryEntrance(px: number, py: number): number | null {
     const idx = this.entrances.createAt(px, py);
     if (idx === null) { toast('No free secondary entrance left.', 'error'); return null; }
