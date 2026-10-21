@@ -7,7 +7,7 @@ import { hex2, hex3, ENTRANCE_ACTIONS } from '../core/names.ts';
 import {
   newUid, readSecondaryEntrance, readSecondaryHeader, mainTranslevel, mainSpot, secondarySpot, setSecondarySpot, copyCameraStart, hasRelativeCamera,
   copyEntranceOptions, setExitSecondary, EXIT_WATER, EXIT_MIDWAY, EXIT_NEW, exitToMidway, exitLandsAtMidway, midwaySpot, midwayEntrance, mainEntrance, setMidwayEntrance, midwayStart, nearestMidway, placeMidway, entrancePos,
-  newOverworldExit, type ScreenExit, type MidwayEntrance, type SecondaryHeader, type OverworldExit,
+  newOverworldExit, type Level, type ScreenExit, type MidwayEntrance, type SecondaryHeader, type OverworldExit,
 } from '../core/level.ts';
 import { overworldFields, overworldLabel } from './owexit.ts';
 import { spotText, cameraOptions, cameraValue, setCamera, cameraFields, optionFields } from './entrancefields.ts';
@@ -214,12 +214,12 @@ function secondaryPanel(app: App, body: HTMLElement, idx: number): void {
 function mainPanel(app: App, body: HTMLElement, kind: 'main' | 'midway'): void {
   const lv = app.level, s = lv.secondary, n = lv.number;
   // changes the secondary header of the open level
-  const upd = (f: (s: SecondaryHeader) => void) => app.editLevel((lv) => f(lv.secondary));
+  const upd = (f: (s: SecondaryHeader, lv: Level) => void) => app.editLevel((lv) => f(lv.secondary, lv));
   if (kind === 'midway') {
     // its own settings (Lunar Magic's midway entrance) through an entrance's fields; the BG start is the level's
     const m = midwayEntrance(s);
     const setOwn = (_: string, f: (x: MidwayEntrance) => void) => upd((s) => { const x = midwayEntrance(s); f(x); setMidwayEntrance(s, x); });
-    const own = (on: boolean) => upd((s) => {
+    const own = (on: boolean) => upd((s, lv) => {
       if (!on) { s.midwayOwn = 0; return; }
       const p = entrancePos(app.rom, midwaySpot(s), (s.verticalPositioning & 1) !== 0);
       placeMidway(s, nearestMidway(app.rom, s, p.x, p.y, lv.header.screens - 1));
