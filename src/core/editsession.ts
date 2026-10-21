@@ -153,11 +153,11 @@ export class EditSession {
         if (r?.kind === 'rom') this.redoOrder.push('rom');
         return r;
       }
-      this.levelUndo();
+      this.levelStep(true);
       this.redoOrder.push('level');
       return { kind: 'level' };
     }
-    return this.levelUndo() ? { kind: 'level' } : null;
+    return this.levelStep(true) ? { kind: 'level' } : null;
   }
 
   redo(): StepResult | null {
@@ -171,11 +171,11 @@ export class EditSession {
         return r;
       }
       if (!this.levelHistory.redoSize) continue;
-      this.levelRedo();
+      this.levelStep(false);
       this.undoOrder.push({ kind: 'level', n: this.levelHistory.undoSize });
       return { kind: 'level' };
     }
-    return this.levelRedo() ? { kind: 'level' } : null;
+    return this.levelStep(false) ? { kind: 'level' } : null;
   }
 
   private commitLevelEdit(): void {
@@ -193,18 +193,10 @@ export class EditSession {
     this.redoOrder = [];
   }
 
-  private levelUndo(): boolean {
-    const prev = this.levelHistory.undo(this.level);
-    if (!prev) return false;
-    this.level = prev;
-    this.changed(true);
-    return true;
-  }
-
-  private levelRedo(): boolean {
-    const next = this.levelHistory.redo(this.level);
-    if (!next) return false;
-    this.level = next;
+  private levelStep(undo: boolean): boolean {
+    const lv = undo ? this.levelHistory.undo(this.level) : this.levelHistory.redo(this.level);
+    if (!lv) return false;
+    this.level = lv;
     this.changed(true);
     return true;
   }

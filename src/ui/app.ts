@@ -175,7 +175,7 @@ export class App {
     this.emu.boot();
     onModalsChange(() => { this.resumeBackground(); this.emit('busy'); });
     musicPlayer.onChange(() => { this.resumeBackground(); this.emit('busy'); });
-    // every ROM edit goes through it (romEdit): one undo step, all or nothing, the follow-ups below
+    // level edits and ROM edits (romEdit: one undo step, all or nothing, the follow-ups below)
     this.edits = new EditSession(rom, {
       changed: (rerender) => this.levelChanged(rerender),
       saved: (log, silent) => this.levelSaved(log, silent),
