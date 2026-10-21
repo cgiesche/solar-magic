@@ -26,6 +26,9 @@ const LAYOUT: { name: string; kind: SlotKind; k: number; first: number }[] = [
   { name: LT3_SLOT, kind: 'lt3', k: 0, first: 0 },
 ];
 
+// the slots' names: those a file can be put into
+export const GFX_SLOTS = LAYOUT.map((l) => l.name);
+
 // all slots of level `level`; `header`: its tileset and sprite set (the open level's as edited)
 export function levelSlots(rom: Rom, level: number, header: { tileset: number; spriteGfx: number }): GfxSlot[] {
   const set = levelGfx(rom, level), ex = levelExtGfx(rom, level), l3 = levelLayer3(rom, level);

@@ -20,7 +20,7 @@ import {
   rotationRange, setRotationRange, rotationStep, rotated, stepsPerSecond, heldColors, reversesOnTrigger, ROTATION_MAX,
 } from '../../core/exanim.ts';
 import { gfxName, lmAnimName, ANIM_FILE } from './map16tab.ts';
-import { levelSlots, layerSlots, slotOfTile } from '../../core/gfxslots.ts';
+import { levelSlots, layerSlots, slotOfTile, type GfxSlot } from '../../core/gfxslots.ts';
 import { cssOf, htmlOf } from './palettetab.ts';
 import { remapSlot } from '../../core/remap.ts';
 import { remapEditor } from '../remaplist.ts';
@@ -151,6 +151,12 @@ export class AnimTab implements WsPanel {
     const rom = this.app.rom;
     return (this.global ? readGlobalList(rom) : readLevelList(rom, this.app.level.number)) ?? emptyList();
   }
+  // the open level's graphics slots
+  private gfxSlots(): GfxSlot[] {
+    const lv = this.app.level;
+    return levelSlots(this.app.rom, lv.number, lv.header);
+  }
+
   private slot(): ExSlot | null {
     return this.view.slots.get(this.sel) ?? null;
   }
@@ -645,7 +651,7 @@ export class AnimTab implements WsPanel {
   private tileDetail(d: HTMLElement, s: ExSlot, trigger: (HTMLElement | string)[]): void {
     const t = this.targetTile(s);
     const shape = shapeOf(s.type);
-    const slot = slotOfTile(levelSlots(this.app.rom, this.app.level.number, this.app.level.header), t);
+    const slot = slotOfTile(this.gfxSlots(), t);
     const users = this.targetUsers(s);
     // places in the level: marked in the preview
     this.ws.preview.highlight = new Set(users);
@@ -938,7 +944,7 @@ export class AnimTab implements WsPanel {
     const app = this.app;
     const base = this.charWord() * 2;
     const vram = app.render.vram;
-    const slots = layerSlots(levelSlots(app.rom, app.level.number, app.level.header));
+    const slots = layerSlots(this.gfxSlots());
     const shape = shapeOf(s.type);
     box.append(h('div', { class: 'panel-title' }, 'Choose target in VRAM'), h('div', { class: 'hint' }, `Click a tile (top left of the ${shape.w}×${shape.h} tiles). A click into the level preview works too.`));
     for (const sl of slots) {

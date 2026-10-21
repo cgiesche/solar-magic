@@ -20,9 +20,10 @@ import { EXT_FIRST, EXT_TILES, setExtTileWords } from './map16ext.ts';
 import { slotTiles, type ExList, type ExSlot } from './exanim.ts';
 import { parseMwl, type MwlLevel } from './bgpack.ts';
 import {
-  GFX_SLOTS, slotOfWord, gfxNumber, usedFgTiles, freeRun, fgOrigin, packPalettes, frameSources, putFgTiles, storeGfx, placeInLevel,
+  slotOfWord, gfxNumber, usedFgTiles, freeRun, fgOrigin, packPalettes, frameSources, putFgTiles, storeGfx, placeInLevel,
   type PackPalette, type FrameSources, type LevelState, type Placed,
 } from './levelgfx.ts';
+import { GFX_SLOTS } from './gfxslots.ts';
 import { withIncludes } from './pkgmap.ts';
 import { isUberList } from './uberproject.ts';
 import { mwlExAnim } from './mwl.ts';

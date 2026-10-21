@@ -116,7 +116,7 @@ export class Map16Tab implements WsPanel {
   private visualTo: Cell | null = null;
 
   // the open level's graphics slots
-  private slots(): GfxSlot[] {
+  private gfxSlots(): GfxSlot[] {
     const lv = this.app.level;
     return levelSlots(this.app.rom, lv.number, lv.header);
   }
@@ -569,7 +569,7 @@ export class Map16Tab implements WsPanel {
   private updateQInfo(): void {
     const k = this.focusQ(), { tile, q } = this.grid().locate(k);
     const w = this.wordAt(k), num8 = w & 0x3ff;
-    const slot = slotOfTile(this.slots(), num8);
+    const slot = slotOfTile(this.gfxSlots(), num8);
     const where = this.selW * this.selH > 1 ? `${hex(this.selection()[tile], 3)} ` : '';
     this.qInfo.textContent = `${this.hoverQ !== null ? 'Under the mouse' : 'Quarter'}: ${where}${QUARTER_NAMES[q]}, 8x8 tile ${hex(num8, 3)}${slot ? ` from ${slot.name} (${gfxName(slot.file)})` : ''}, palette ${(w >> 10) & 7}`;
   }
@@ -804,7 +804,7 @@ export class Map16Tab implements WsPanel {
   // opens a quarter's 8x8 tile in the graphics tab, in the quarter's palette
   private editGfx(w: number): void {
     const num = w & 0x3ff;
-    const slot = slotOfTile(this.slots(), num);
+    const slot = slotOfTile(this.gfxSlots(), num);
     if (!slot) { toast(`8x8 tile ${hex(num, 3)} is in none of this level's graphics slots`); return; }
     this.ws.showGfx(slot.file, num - slot.first, (w >> 10) & 7);
   }
@@ -1067,7 +1067,7 @@ export class Map16Tab implements WsPanel {
     this.gzPx = Math.ceil(z);
     const fq = this.focusQ(), fw = this.wordAt(fq);
     const pal = (fw >> 10) & 7;
-    const slots = layerSlots(this.slots());
+    const slots = layerSlots(this.gfxSlots());
     const rows = slots.length * 8;
     const W = 128, Hh = rows * 8;
     const c = this.gfxCanvas;
@@ -1162,7 +1162,7 @@ export class Map16Tab implements WsPanel {
 
   // 8x8 tile number at a cell of the grouped view (-1: none)
   private gfxTileAt(p: Cell): number {
-    const s = layerSlots(this.slots())[p.y >> 3];
+    const s = layerSlots(this.gfxSlots())[p.y >> 3];
     return s ? s.first + (p.y & 7) * 16 + p.x : -1;
   }
   // the chosen 8x8 tiles as rows of tile numbers
@@ -1292,7 +1292,7 @@ export class Map16Tab implements WsPanel {
   // imported tiles that draw from a slot holding no ExGFX in this level, while ExGFX the tiles don't use
   // are in other slots: their graphics are likely there. Offers the remap with that slot's offset.
   private async offerImportRemap(): Promise<void> {
-    const slots = layerSlots(this.slots());
+    const slots = layerSlots(this.gfxSlots());
     const count = new Map<number, number>(); // 128-tile region → quarters drawing from it
     for (const t of this.selection()) for (const w of this.words(t)) count.set((w & 0x3ff) >> 7, (count.get((w & 0x3ff) >> 7) ?? 0) + 1);
     const main = [...count.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];

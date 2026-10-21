@@ -14,12 +14,11 @@ import { map16Targets, importGfxFile, type Map16File } from './map16file.ts';
 import { EXT_FIRST, EXT_TILES, DEFAULT_ACTS, extTileWords, actsLike, setExtTileWords, setActsLike } from './map16ext.ts';
 import { BG_EXT_TILES, bgExtTileWords, vanillaBgWords, setBgExtTileWords } from './bgmap16.ts';
 import {
-  gfxEntry, gfxHex, freeGfx, gfxRangeFor, gfxNumberProblem, type GfxFileKind, GFX_SLOT_NAMES,
-  EXT_GFX_SLOT_NAMES, customPalette, setCustomPalette,
+  gfxEntry, gfxHex, freeGfx, gfxRangeFor, gfxNumberProblem, type GfxFileKind, customPalette, setCustomPalette,
 } from './patches.ts';
 import { sampleTiles } from './mwl.ts';
-import { LAYER3_SLOT_NAMES, LT3_SLOT, LT3_DESTS, LT3_SIZES, levelLayer3, type Lt3Place } from './layer3gfx.ts';
-import { assignSlot } from './gfxslots.ts';
+import { LT3_SLOT, LT3_DESTS, LT3_SIZES, levelLayer3, type Lt3Place } from './layer3gfx.ts';
+import { assignSlot, GFX_SLOTS } from './gfxslots.ts';
 import { usesAltFile, addLevelSlots, localizeFrames, levelAltFile, altFileName, kindOf, AN2_FRAMES, AN2_FRAMES_END, ALT_FILE_MAX, type ExList, type ExSlot } from './exanim.ts';
 
 const base = (f: string) => f.slice(f.lastIndexOf('/') + 1);
@@ -32,9 +31,6 @@ const hx = (v: number, d: number) => v.toString(16).toUpperCase().padStart(d, '0
 // (BG2/BG3 with the VRAM patch, patches.ts)
 export const VRAM_SLOTS = ['FG1', 'FG2', 'BG1', 'FG3', 'BG2', 'BG3'];
 export const slotOfWord = (w: number) => VRAM_SLOTS[(w & 0x3ff) >> 7] ?? null;
-// the slots ExGFX can go in: the level's GFX bypass, the BG2/BG3 slots of the VRAM patch and layer 3's
-// (layer3gfx.ts)
-export const GFX_SLOTS = [...GFX_SLOT_NAMES, ...EXT_GFX_SLOT_NAMES, ...LAYER3_SLOT_NAMES];
 
 // the number the ExGFX file `f` is stored as: the author's (`want`, Lunar Magic's numbering up to FFF)
 // when it may hold the file, is free and not `taken`, else the next free one in the file's range
