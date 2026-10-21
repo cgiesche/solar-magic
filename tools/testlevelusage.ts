@@ -12,8 +12,9 @@ import { setActsLike, setExtTileWords, extTileWords } from '../src/core/map16ext
 import { ResultCache, RomFingerprint } from '../src/core/romdeps.ts';
 import { map16Source } from '../src/core/render.ts';
 import {
-  LevelUses, usedLevels, fgTileUsers, bgTileUsers, tileLinks, unusedFgTiles, gfxUsage, unusedExGfx, spriteUsage, slotMove, type GfxSlot,
+  LevelUses, usedLevels, fgTileUsers, bgTileUsers, tileLinks, unusedFgTiles, gfxUsage, unusedExGfx, spriteUsage, slotMove,
 } from '../src/core/levelusage.ts';
+import type { GfxSlot } from '../src/core/gfxslots.ts';
 import { editorImage } from './fixture.ts';
 
 let fail = 0;

@@ -6,7 +6,7 @@
 //   of its BG tilemap. Kept in the result cache per level, valid while the ROM bytes the load read and
 //   the level's data (fed to the load as an overlay, see LevelOverride) are unchanged.
 // - Links of a tile outside the levels: tiles acting like it, structures holding it, blocks on it.
-// - GFX slots and sprites are read from the ROM.
+// - GFX slots (gfxslots.ts) and sprites are read from the ROM.
 
 import { snesToPc, type Rom } from './rom.ts';
 import type { ResultCache } from './romdeps.ts';
@@ -19,11 +19,11 @@ import { layerGeom } from './render.ts';
 import { bgFromWram, BG_SIZE } from './bg.ts';
 import { map16Tile } from './ram.ts';
 import { flagBytes, usedFlags, structTiles } from './cdm16.ts';
-import { DM16_EXT, VANILLA_GFX, GFX_FILES, gfxEntry, levelGfx, defaultGfx, levelExtGfx } from './patches.ts';
+import { DM16_EXT, VANILLA_GFX, GFX_FILES, gfxEntry } from './patches.ts';
 import { STRUCT_EXT, listStructures } from './structs.ts';
 import { EXT_FIRST, EXT_TILES, actsLike, extTileWords, DEFAULT_ACTS } from './map16ext.ts';
 import { loadBlockProject } from './blocks.ts';
-import { levelLayer3, LG_SLOT_NAMES, LT3_SLOT, GAME_LAYER3_GFX } from './layer3gfx.ts';
+import { levelSlots, type GfxSlot } from './gfxslots.ts';
 
 // levels with data of their own: the game's (000-024, 101-13B) and those whose layer 1 data was moved
 // into the expanded ROM
@@ -224,25 +224,6 @@ export function unusedFgTiles(rom: Rom, levels: Iterable<LevelTiles>, blank: num
 
 // ---------- GFX files (from the ROM) ----------
 
-// slots of a level: name, where it is kept (the GFX bypass in levelGfx order, BG2/BG3, layer 3's LG1-LG4 or
-// LT3) and its index there, file, default file; first: the first 8x8 tile number (Map16 tiles, for SP1-SP4
-// the sprite tile number in OAM: 100-1FF = page 1, for LG1-LG4 the layer 3 tile number); map16: a layer
-// slot the Map16 tiles draw from
-export type SlotKind = 'gfx' | 'ext' | 'lg' | 'lt3';
-export interface GfxSlot { name: string; kind: SlotKind; k: number; file: number; def: number; custom: boolean; first: number; sprite: boolean; map16: boolean }
-export function gfxSlots(rom: Rom, level: number, tileset: number, spriteSet: number): GfxSlot[] {
-  const set = levelGfx(rom, level);
-  const def = defaultGfx(rom, tileset, spriteSet);
-  const order: [string, number, number][] = [['FG1', 7, 0], ['FG2', 6, 0x80], ['BG1', 5, 0x100], ['FG3', 4, 0x180], ['SP1', 3, 0x00], ['SP2', 2, 0x80], ['SP3', 1, 0x100], ['SP4', 0, 0x180]];
-  const out: GfxSlot[] = order.map(([name, k, first]) => ({ name, kind: 'gfx', k, file: set[k] !== 0xff ? set[k] : def[k], def: def[k], custom: set[k] !== 0xff, first, sprite: name.startsWith('SP'), map16: !name.startsWith('SP') }));
-  const ex = levelExtGfx(rom, level);
-  ['BG2', 'BG3'].forEach((name, k) => out.push({ name, kind: 'ext', k, file: ex[k], def: 0xff, custom: ex[k] !== 0xff, first: 0x200 + k * 0x80, sprite: false, map16: true }));
-  const l3 = levelLayer3(rom, level);
-  LG_SLOT_NAMES.forEach((name, k) => out.push({ name, kind: 'lg', k, file: l3.lg[k] !== 0xff ? l3.lg[k] : GAME_LAYER3_GFX + k, def: GAME_LAYER3_GFX + k, custom: l3.lg[k] !== 0xff, first: k * 0x80, sprite: false, map16: false }));
-  out.push({ name: LT3_SLOT, kind: 'lt3', k: 0, file: l3.lt3, def: 0xff, custom: l3.lt3 !== 0xff, first: 0, sprite: false, map16: false });
-  return out;
-}
-
 // the header of level n as saved
 export const savedHeader = (rom: Rom, n: number): PrimaryHeader => parsePrimaryHeader(rom.bytes(rom.r24(L1_PTRS + n * 3), 5));
 
@@ -254,7 +235,7 @@ export function gfxUsage(rom: Rom, levels: Iterable<number>, header: (n: number)
   for (const n of levels) {
     let hd;
     try { hd = header(n); } catch { continue; }
-    for (const s of gfxSlots(rom, n, hd.tileset, hd.spriteGfx)) {
+    for (const s of levelSlots(rom, n, hd)) {
       if (s.file === 0xff) continue;
       const l = m.get(s.file) ?? [];
       const u = l.find((x) => x.level === n);

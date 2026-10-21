@@ -19,7 +19,8 @@ import {
   NO_GAME_COLORS, NO_GAME_TILES, NO_LEVEL_LIST, NO_GLOBAL_LIST, altFileUsers, localizeFrames, shapeOf, exanimTiles, exanimColors, ALT_FILE_MAX,
   rotationRange, setRotationRange, rotationStep, rotated, stepsPerSecond, heldColors, reversesOnTrigger, ROTATION_MAX,
 } from '../../core/exanim.ts';
-import { levelSlots, gfxName, lmAnimName, ANIM_FILE } from './map16tab.ts';
+import { gfxName, lmAnimName, ANIM_FILE } from './map16tab.ts';
+import { levelSlots, layerSlots, slotOfTile } from '../../core/gfxslots.ts';
 import { cssOf, htmlOf } from './palettetab.ts';
 import { remapSlot } from '../../core/remap.ts';
 import { remapEditor } from '../remaplist.ts';
@@ -644,7 +645,7 @@ export class AnimTab implements WsPanel {
   private tileDetail(d: HTMLElement, s: ExSlot, trigger: (HTMLElement | string)[]): void {
     const t = this.targetTile(s);
     const shape = shapeOf(s.type);
-    const slot = levelSlots(this.app).find((x) => t >= x.first && t < x.first + 0x80);
+    const slot = slotOfTile(levelSlots(this.app.rom, this.app.level.number, this.app.level.header), t);
     const users = this.targetUsers(s);
     // places in the level: marked in the preview
     this.ws.preview.highlight = new Set(users);
@@ -937,7 +938,7 @@ export class AnimTab implements WsPanel {
     const app = this.app;
     const base = this.charWord() * 2;
     const vram = app.render.vram;
-    const slots = levelSlots(app);
+    const slots = layerSlots(levelSlots(app.rom, app.level.number, app.level.header));
     const shape = shapeOf(s.type);
     box.append(h('div', { class: 'panel-title' }, 'Choose target in VRAM'), h('div', { class: 'hint' }, `Click a tile (top left of the ${shape.w}×${shape.h} tiles). A click into the level preview works too.`));
     for (const sl of slots) {
