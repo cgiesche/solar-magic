@@ -24,7 +24,8 @@ export interface ObjThumb { key: string; w: number; h: number; px: Uint32Array; 
 // settings they depend on and the objects
 export function objectThumbs(app: App, specs: ObjSpec[]): ObjThumb[] {
   const h = app.level.header;
-  const key = `o${h.tileset}-${h.fgPalette}-${h.bgPalette}:${hashStr(specs.map((s) => `${s.num}.${s.ext}.${s.size}`).join())}`;
+  // (o2: since batches whose load failed are no longer kept)
+  const key = `o2${h.tileset}-${h.fgPalette}-${h.bgPalette}:${hashStr(specs.map((s) => `${s.num}.${s.ext}.${s.size}`).join())}`;
   const stored = app.results.get<ObjThumb[]>(key);
   if (stored) return stored;
   const r = app.emu.tracked(() => renderObjectThumbs(app.rom, app.emu, app.level, specs, (s) => objKey(s, app.objectKind(s.num))));
