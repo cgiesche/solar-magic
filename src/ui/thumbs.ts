@@ -1,8 +1,9 @@
 // Object preview thumbnails, rendered by emulating a test level that contains the objects.
 
 import type { App } from './app.ts';
-import { OV_L1 } from '../core/levelemu.ts';
-import { encodePrimaryHeader, serializeObjects, type LevelObject, newUid, L2_PTRS } from '../core/level.ts';
+import type { Rom } from '../core/rom.ts';
+import { OV_L1, type LevelEmulator } from '../core/levelemu.ts';
+import { encodePrimaryHeader, serializeObjects, type Level, type LevelObject, newUid, L2_PTRS } from '../core/level.ts';
 import { renderLevel, layerGeom } from '../core/render.ts';
 import { MAP_BASE, map16Tile } from '../core/ram.ts';
 import { objectVariant, type ObjKind } from '../core/objkinds.ts';
@@ -26,7 +27,7 @@ export function objectThumbs(app: App, specs: ObjSpec[]): ObjThumb[] {
   const key = `o${h.tileset}-${h.fgPalette}-${h.bgPalette}:${hashStr(specs.map((s) => `${s.num}.${s.ext}.${s.size}`).join())}`;
   const stored = app.results.get<ObjThumb[]>(key);
   if (stored) return stored;
-  const r = app.emu.tracked(() => renderObjectThumbs(app, specs));
+  const r = app.emu.tracked(() => renderObjectThumbs(app.rom, app.emu, app.level, specs, (s) => objKey(s, app.objectKind(s.num))));
   app.results.set(key, r.result, app.results.fp.deps(r.reads));
   return r.result;
 }
@@ -47,14 +48,14 @@ function hashStr(s: string): string {
   return (a >>> 0).toString(36);
 }
 
-function renderObjectThumbs(app: App, specs: ObjSpec[]): ObjThumb[] {
+// in batches of 32 test levels; a batch whose load fails (some objects together break the game, like two of
+// tileset 7's object 33) is rendered in halves, an object that fails alone gets no thumbnail
+export function renderObjectThumbs(rom: Rom, emu: LevelEmulator, level: Level, specs: ObjSpec[], keyOf: (s: ObjSpec) => string): ObjThumb[] {
   const out: ObjThumb[] = [];
   const PER = 32;
-  const rom = app.rom;
-  for (let b = 0; b < specs.length; b += PER) {
-    const batch = specs.slice(b, b + PER);
+  const render = (batch: ObjSpec[]): void => {
     const objs: LevelObject[] = batch.map((s, i) => ({ uid: newUid(), num: s.num, ext: s.ext, size: s.size, x: i * 16 + 3, y: 12 }));
-    const hdr = { ...app.level.header, screens: 32, mode: 0 };
+    const hdr = { ...level.header, screens: 32, mode: 0 };
     const owners: number[] = [-1, -1, -1, -1, -1];
     const body = serializeObjects(objs, [], false, owners);
     const l1 = new Uint8Array(5 + body.length);
@@ -62,12 +63,16 @@ function renderObjectThumbs(app: App, specs: ObjSpec[]): ObjThumb[] {
     l1.set(body, 5);
     const byteOwner = new Int32Array(0x10000).fill(-1);
     owners.forEach((o, i) => (byteOwner[OV_L1 + i] = o));
-    const r = app.emu.load(app.level.number, {
+    const r = emu.load(level.number, {
       layer1: l1,
-      layer2Pointer: app.level.layer2Objects ? rom.r24(L2_PTRS + 0x105 * 3) : app.level.layer2Pointer,
+      layer2Pointer: level.layer2Objects ? rom.r24(L2_PTRS + 0x105 * 3) : level.layer2Pointer,
       sprites: new Uint8Array([0, 0xff]),
       byteOwner,
     });
+    if (!r.ok) {
+      if (batch.length > 1) { render(batch.slice(0, batch.length >> 1)); render(batch.slice(batch.length >> 1)); }
+      return;
+    }
     const im = renderLevel(rom, r, 0, 32);
     const g = layerGeom(rom, 0, 0, 32);
     const inv = new Map<number, number>();
@@ -93,8 +98,9 @@ function renderObjectThumbs(app: App, specs: ObjSpec[]): ObjThumb[] {
       }
       const m16 = new Set<number>();
       for (const off of set!) m16.add(map16Tile(r.wram, MAP_BASE + off));
-      out.push({ key: objKey(s, app.objectKind(s.num)), w, h: hh, px, m16: [...m16].sort((a, b) => a - b) });
+      out.push({ key: keyOf(s), w, h: hh, px, m16: [...m16].sort((a, b) => a - b) });
     });
-  }
+  };
+  for (let b = 0; b < specs.length; b += PER) render(specs.slice(b, b + PER));
   return out;
 }
