@@ -1326,7 +1326,8 @@ export class App {
     this.graph = null;
     if (rerender) this.refresh();
     this.emit('change');
-    this.ensureSpriteImages(); // sprite memory may have changed
+    // sprite memory may have changed (not while dragging: the commit checks it)
+    if (!this.edits.editing) this.ensureSpriteImages();
     this.scheduleSpriteMem();
     if (this.layerGone()) this.setMode('l1'); // (its header changed, an edit undone)
   }

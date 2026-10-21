@@ -922,7 +922,7 @@ export class LevelView {
       if (app.moveMarker(d.marker, px - d.offX, py - d.offY)) {
         d.moved = true;
         if (d.marker.kind !== 'sec') app.changed(false);
-        else app.emit('change');
+        else app.emit('change'); // (a secondary entrance is a ROM edit when dropped, not part of the level)
       }
     } else if (d.kind === 'move') {
       const dx = tx - d.startTx, dy = ty - d.startTy;

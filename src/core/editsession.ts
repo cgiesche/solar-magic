@@ -41,8 +41,8 @@ export interface SessionHooks {
 export class EditSession {
   readonly rom: Rom;
   readonly romEdits: RomEditSession;
-  private openLevel!: Level;
-  private unsaved = false;
+  private current!: Level;
+  private dirtyFlag = false;
   levelGen = 0; // counts committed level edits (not undo/redo/loading)
   private levelHistory = new LevelHistory<Level>(cloneLevel);
   private editToken = 0; // the latest begun level edit (older handles do nothing)
@@ -65,8 +65,10 @@ export class EditSession {
   }
 
   // the open level and whether it has unsaved changes: changed only through the session's operations
-  get level(): Level { return this.openLevel; }
-  get dirty(): boolean { return this.unsaved; }
+  get level(): Level { return this.current; }
+  get dirty(): boolean { return this.dirtyFlag; }
+  // a level edit is begun and not yet committed or cancelled (dragging)
+  get editing(): boolean { return this.levelHistory.editing; }
   get romHistory(): RomHistory { return this.romEdits.history; }
   // the kind of the latest step undo would take back
   get lastStep(): 'level' | 'rom' | null { return this.undoOrder[this.undoOrder.length - 1]?.kind ?? null; }
@@ -74,18 +76,18 @@ export class EditSession {
   // opens level n (the dirty one saved first, or its changes dropped with discard) with a new level history
   open(n: number, discard = false): void {
     if (this.level && this.dirty && !discard) this.save(true);
-    this.openLevel = loadLevel(this.rom, n);
+    this.current = loadLevel(this.rom, n);
     this.levelHistory.clear();
-    this.unsaved = false;
+    this.dirtyFlag = false;
   }
 
   // saves the open level and loads it again (addresses and sizes); objects and sprites keep their ids
   save(silent = false): boolean {
     try {
       const log = saveLevel(this.rom, this.level);
-      this.unsaved = false;
+      this.dirtyFlag = false;
       const was = this.level;
-      this.openLevel = loadLevel(this.rom, was.number);
+      this.current = loadLevel(this.rom, was.number);
       keepUids(was, this.level, isL1Vertical(this.rom, this.level.header.mode));
       this.hooks.saved?.(log, silent);
       return true;
@@ -112,7 +114,7 @@ export class EditSession {
       cancel: (restore = false) => {
         if (!live()) return;
         const was = this.levelHistory.cancel();
-        if (restore && was) { this.openLevel = was; this.changed(true); }
+        if (restore && was) { this.current = was; this.changed(true); }
       },
     };
   }
@@ -131,12 +133,12 @@ export class EditSession {
   // A level edit putting lv in place of the open level (a level import, a package's sample level): one
   // undo step. True when committed.
   replaceLevel(lv: Level, rerender = true): boolean {
-    return this.editLevel(() => { this.openLevel = lv; }, rerender);
+    return this.editLevel(() => { this.current = lv; }, rerender);
   }
 
   // the open level changed (outside an edit too, e.g. as part of the latest step or while dragging)
   changed(rerender: boolean): void {
-    this.unsaved = true;
+    this.dirtyFlag = true;
     this.hooks.changed?.(rerender);
   }
 
@@ -206,7 +208,7 @@ export class EditSession {
   private levelStep(undo: boolean): boolean {
     const lv = undo ? this.levelHistory.undo(this.level) : this.levelHistory.redo(this.level);
     if (!lv) return false;
-    this.openLevel = lv;
+    this.current = lv;
     this.changed(true);
     return true;
   }
