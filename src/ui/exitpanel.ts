@@ -5,12 +5,13 @@ import type { App, Marker } from './app.ts';
 import { h, select, toast, choose, checkbox } from './dom.ts';
 import { hex2, hex3, ENTRANCE_ACTIONS } from '../core/names.ts';
 import {
-  newUid, mainTranslevel, mainSpot, secondarySpot, hasRelativeCamera, setExitSecondary, EXIT_WATER, EXIT_MIDWAY, EXIT_NEW, exitToMidway, exitLandsAtMidway, midwaySpot, midwayEntrance, mainEntrance, setMidwayEntrance, midwayStart, nearestMidway, placeMidway, entrancePos,
+  newUid, mainTranslevel, mainSpot, secondarySpot, hasRelativeCamera, EXIT_WATER, EXIT_MIDWAY, EXIT_NEW, exitToMidway, exitLandsAtMidway, midwaySpot, midwayEntrance, mainEntrance, setMidwayEntrance, midwayStart, nearestMidway, placeMidway, entrancePos,
   type Level, type ScreenExit, type MidwayEntrance, type SecondaryHeader, type OverworldExit,
 } from '../core/level.ts';
 import { overworldFields, overworldLabel } from './owexit.ts';
 import { spotText, cameraOptions, cameraValue, setCamera, cameraFields, optionFields } from './entrancefields.ts';
 import { exitTarget, type ExitRef } from '../core/exitgraph.ts';
+import { NO_FREE_ENTRANCE, type ExitLeadsTo } from '../core/entrances.ts';
 import { arrivesSlippery, slipperyEntrances } from '../core/slippery.ts';
 import { levelPicker } from './levelpicker.ts';
 import { openTestPlay } from './testplay.ts';
@@ -57,26 +58,17 @@ function exitPanel(app: App, body: HTMLElement): boolean {
   const remove = () => app.editLevel((lv) => { lv.exits = lv.exits.filter((x) => x.screen !== scr); }, false);
   // the level the exit leads into (to the overworld: choosing a level starts with this one)
   const level = t.overworld ? n : t.to;
-  // a secondary exit into `level`: its first entrance, or a new one at its main entrance
-  const secondaryTo = (level: number) => {
-    const idx = g.entrancesOf(level)[0] ?? newEntranceIn(app, level);
-    if (idx !== null) upd((e) => { setExitSecondary(e, true); e.dest = idx; });
-  };
-  // to the overworld: through an exit to the overworld of this level no exit uses, else a new one (passing the
-  // level with the normal exit)
-  const toOverworld = () => {
-    const idx = app.entrances.overworldExit(n);
-    if (idx === null) { toast('No free secondary entrance left.', 'error'); return; }
-    upd((e) => { setExitSecondary(e, true); e.dest = idx; });
+  // where the exit leads; a new entrance into another level gets a toast, a failure an error toast
+  const lead = (to: ExitLeadsTo) => {
+    try {
+      const idx = app.entrances.leadExit(scr, to);
+      if (idx !== null && to.kind === 'secondary') createdIn(app, idx, to.level);
+    } catch (err) { toast(err instanceof Error ? err.message : String(err), 'error'); }
   };
   const kind = !e.secondary ? 'main' : t.overworld ? 'overworld' : 'secondary';
   const radio = (k: typeof kind, label: string, title: string) => {
     const r = h('input', { type: 'radio', name: 'exit-kind', checked: kind === k });
-    r.addEventListener('change', () => {
-      if (k === 'secondary') secondaryTo(level);
-      else if (k === 'overworld') toOverworld();
-      else upd((e) => { setExitSecondary(e, false); e.dest = level; });
-    });
+    r.addEventListener('change', () => lead(k === 'overworld' ? { kind: k } : { kind: k, level }));
     return h('label', { class: 'row', title }, r, label);
   };
   body.append(
@@ -102,9 +94,7 @@ function exitPanel(app: App, body: HTMLElement): boolean {
     return enter === null;
   }
   body.append(
-    field('Target level', levelPicker(app, t.to, (m) => {
-      if (e.secondary) secondaryTo(m); else upd((e) => (e.dest = m));
-    })),
+    field('Target level', levelPicker(app, t.to, (m) => lead({ kind: e.secondary ? 'secondary' : 'main', level: m }))),
   );
   if (e.secondary) {
     const ents = g.entrancesOf(t.to);
@@ -114,10 +104,10 @@ function exitPanel(app: App, body: HTMLElement): boolean {
       return g.entrancesOf(t.to).includes(i) ? `${hex3(i)} · Screen ${hex2(s.screen)} · ${ENTRANCE_ACTIONS[s.action]}` : `${hex3(i)} (empty)`;
     };
     body.append(field('Entrance',
-      select(ents.map((i) => [i, label(i)]), t.entrance, (v) => upd((e) => (e.dest = v))),
+      select(ents.map((i) => [i, label(i)]), t.entrance, (v) => lead({ kind: 'secondary', level: t.to, entrance: v })),
       h('button', {
         title: 'Create a new secondary entrance in the target level (at the main entrance, move it afterwards)',
-        onclick: () => { const idx = newEntranceIn(app, t.to); if (idx !== null) upd((e) => (e.dest = idx)); },
+        onclick: () => lead({ kind: 'secondary', level: t.to, entrance: 'new' }),
       }, '+ New')),
       field('Options', checkbox('Water level', 'Mario swims in the whole target level when he comes through this exit (also when the entrance is no water level)',
         !!(e.flags & EXIT_WATER), (on) => upd((e) => { e.flags = on ? e.flags | EXIT_WATER : e.flags & ~EXIT_WATER; }))));
@@ -154,9 +144,14 @@ function exitPanel(app: App, body: HTMLElement): boolean {
 // a new secondary entrance into `level`, placed like its main entrance
 export function newEntranceIn(app: App, level: number): number | null {
   const idx = app.entrances.create(level);
-  if (idx === null) { toast('No free secondary entrance left.', 'error'); return null; }
-  if (level !== app.level.number) toast(`Secondary entrance ${hex3(idx)} created in level ${hex3(level)} (at the main entrance) – go there with “Open target” and move it.`);
+  if (idx === null) { toast(NO_FREE_ENTRANCE, 'error'); return null; }
+  createdIn(app, idx, level);
   return idx;
+}
+
+// a toast for a new entrance into another level than the open one (not in view)
+function createdIn(app: App, idx: number, level: number): void {
+  if (level !== app.level.number) toast(`Secondary entrance ${hex3(idx)} created in level ${hex3(level)} (at the main entrance) – go there with “Open target” and move it.`);
 }
 
 // ---- who leads here ----

@@ -1,6 +1,7 @@
 // Secondary entrances over the ROM and the open level as edited (the edit session's): the entrances into a
 // level, a new one (placed like its level's main entrance, or at a spot of the open level), moved, removed,
-// switched to an exit to the overworld and back, its teleport destination. Every change is one ROM edit.
+// switched to an exit to the overworld and back, its teleport destination, where an exit of the open level leads.
+// Every change of an entrance is one ROM edit.
 // The entrances into the open level and the exit graph are kept current here: they are worked out again
 // whenever the ROM or the open level's exits differ from when they were, so also after undo/redo.
 
@@ -9,21 +10,31 @@ import type { EditSession } from './editsession.ts';
 import {
   type SecondaryEntrance, type SecondaryHeader, readSecondaryEntrance, writeSecondaryEntrance, decodeSecondaryEntrance, readSecondaryHeader,
   mainSpot, secondarySpot, setSecondarySpot, sameSpot, placeSecondary, entrancePos, nearestEntrance, copyCameraStart, copyEntranceOptions,
-  newOverworldExit, hasRelativeCamera, levelMode, isSized, levelRows, SEC_ENT,
+  newOverworldExit, hasRelativeCamera, levelMode, isSized, levelRows, setExitSecondary, SEC_ENT,
 } from './level.ts';
 import { ExitGraph, entrancesInto, isOverworldExit } from './exitgraph.ts';
 import { locationFor, tileText, type OwTile } from './owteleport.ts';
 import { hex } from './names.ts';
 
 const ENTRANCES = 0x200;
+export const NO_FREE_ENTRANCE = 'No free secondary entrance left.';
 const label = (idx: number, what: string) => `Secondary entrance ${hex(idx, 3)}${what}`;
 
+// where an exit leads: a level's main entrance, a secondary entrance into a level (its first one, a chosen one or
+// a new one), the overworld
+export type ExitLeadsTo =
+  | { kind: 'main'; level: number }
+  | { kind: 'secondary'; level: number; entrance?: number | 'new' }
+  | { kind: 'overworld' };
+
+type Session = Pick<EditSession, 'rom' | 'level' | 'romEdit' | 'editLevel'>;
+
 export class SecondaryEntrances {
-  private readonly session: Pick<EditSession, 'rom' | 'level' | 'romEdit'>;
+  private readonly session: Session;
   private into: { key: string; list: number[] } | null = null;
   private exits: { key: string; graph: ExitGraph } | null = null;
 
-  constructor(session: Pick<EditSession, 'rom' | 'level' | 'romEdit'>) {
+  constructor(session: Session) {
     this.session = session;
   }
 
@@ -125,6 +136,33 @@ export class SecondaryEntrances {
     if (idx === null) return null;
     this.write(idx, ' to the overworld created', (e) => { e.destLevel = level; e.overworld = newOverworldExit(); });
     return idx;
+  }
+
+  // the open level's exit on `screen` leads to `to`: into a secondary entrance, the level's first one unless one
+  // is chosen, else a new one placed like its main entrance; to the overworld through an exit to the overworld
+  // of the open level no exit uses, else a new one (passing the level with the normal exit). Returns the entrance
+  // it created (a ROM edit before the level edit), else null; throws when it needs one and none is free.
+  leadExit(screen: number, to: ExitLeadsTo): number | null {
+    if (!this.session.level.exits.some((e) => e.screen === screen)) throw new Error(`No exit on screen ${hex(screen, 2)}.`);
+    const { dest, created } = this.destOf(to);
+    this.session.editLevel((lv) => {
+      const e = lv.exits.find((e) => e.screen === screen)!;
+      setExitSecondary(e, to.kind !== 'main');
+      e.dest = dest;
+    }, false);
+    return created;
+  }
+
+  // the exit's destination for `to`: a level, or the entrance (created ones told)
+  private destOf(to: ExitLeadsTo): { dest: number; created: number | null } {
+    if (to.kind === 'main') return { dest: to.level, created: null };
+    const n = this.session.level.number;
+    const found = to.kind === 'overworld' ? this.graph().unusedOverworldExit(n)
+      : to.entrance === 'new' ? null : to.entrance ?? this.graph().entrancesOf(to.level)[0] ?? null;
+    if (found !== null) return { dest: found, created: null };
+    const created = to.kind === 'overworld' ? this.overworldExit(n) : this.create(to.level);
+    if (created === null) throw new Error(NO_FREE_ENTRANCE);
+    return { dest: created, created };
   }
 
   // an exit to the overworld teleports to `tile`: the location index leading there, or a new one (one ROM edit);

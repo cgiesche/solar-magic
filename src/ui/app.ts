@@ -25,7 +25,7 @@ import { layer3Geometry, type Layer3Geometry } from '../core/render.ts';
 import { toast, log as logMsg, modalsOpen, onModalsChange } from './dom.ts';
 import { musicPlayer } from './musicplayer.ts';
 import { exitTarget } from '../core/exitgraph.ts';
-import { SecondaryEntrances, entranceTables } from '../core/entrances.ts';
+import { SecondaryEntrances, NO_FREE_ENTRANCE, entranceTables } from '../core/entrances.ts';
 import type { RomHistory } from '../core/romhistory.ts';
 import type { EditOptions } from '../core/romedit.ts';
 import { EditSession, type LevelEdit, type StepResult } from '../core/editsession.ts';
@@ -466,7 +466,7 @@ export class App {
   // a new secondary entrance into the open level at the entrance setting nearest to (px, py), then chosen
   newSecondaryEntrance(px: number, py: number): number | null {
     const idx = this.entrances.createAt(px, py);
-    if (idx === null) { toast('No free secondary entrance left.', 'error'); return null; }
+    if (idx === null) { toast(NO_FREE_ENTRANCE, 'error'); return null; }
     this.selectEntrance({ kind: 'sec', index: idx });
     return idx;
   }

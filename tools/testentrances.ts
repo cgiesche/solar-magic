@@ -139,6 +139,56 @@ const camera = (e: SecondaryEntrance) => [e.cameraRelative, e.cameraOffsetHi, e.
   check(all.length > 0 && ents.create(N) === null && ents.createAt(0, 0) === null, 'none free: create returns null');
 }
 
+// where an exit leads: main entrance, secondary entrance, overworld – picking or creating the entrance
+{
+  const SCR = 9;
+  const setupExit = () => {
+    const x = setup();
+    x.s.editLevel((lv) => { lv.exits.push({ uid: 999997, screen: SCR, dest: N, secondary: false, flags: 0 }); });
+    return { ...x, exit: () => x.s.level.exits.find((e) => e.screen === SCR)! };
+  };
+  {
+    const { ents, exit } = setupExit();
+    const into = ents.graph().entrancesOf(OTHER);
+    check(ents.leadExit(SCR, { kind: 'secondary', level: OTHER }) === (into.length ? null : exit().dest), 'leadExit secondary: created only when the level has none');
+    const idx = exit().dest;
+    check(exit().secondary && ents.get(idx).destLevel === OTHER && (!into.length || idx === into[0]), 'leadExit secondary: the level\'s first entrance, else a new one');
+    check(ents.leadExit(SCR, { kind: 'main', level: OTHER }) === null && !exit().secondary && exit().dest === OTHER, 'leadExit main: to the main entrance of the level');
+  }
+  {
+    const { s, ents, exit } = setupExit();
+    const lvl = 0x1f;
+    check(!ents.graph().entrancesOf(lvl).length, 'fixture: level 01F has no secondary entrance');
+    const created = ents.leadExit(SCR, { kind: 'secondary', level: lvl });
+    const e = ents.get(exit().dest);
+    check(created === exit().dest && e.destLevel === lvl && sameSpot(secondarySpot(e), mainSpot(ents.headerOf(lvl))), 'leadExit secondary: a new entrance at the main entrance of a level without one');
+    const steps = s.romHistory.undoStack.length;
+    const again = ents.leadExit(SCR, { kind: 'secondary', level: lvl, entrance: 'new' })!;
+    check(again !== created && exit().dest === again && s.romHistory.undoStack.length === steps + 1, 'leadExit secondary, new: another entrance, one more ROM edit');
+    ents.leadExit(SCR, { kind: 'secondary', level: lvl, entrance: created! });
+    check(exit().dest === created, 'leadExit secondary: a chosen entrance');
+  }
+  {
+    const { ents, exit } = setupExit();
+    const created = ents.leadExit(SCR, { kind: 'overworld' });
+    const idx = exit().dest, o = ents.get(idx);
+    check(created === idx && exit().secondary && !!o.overworld && o.overworld.action === OW_NORMAL && o.destLevel === N, 'leadExit overworld: a new exit to the overworld, passing the level with the normal exit');
+    ents.leadExit(SCR, { kind: 'main', level: N });
+    check(ents.leadExit(SCR, { kind: 'overworld' }) === null && exit().dest === idx, 'leadExit overworld: the level\'s unused exit to the overworld reused');
+  }
+  {
+    const { rom, s, ents } = setupExit();
+    for (let i; (i = ents.graph().freeEntrance()) !== null;) rom.w8(0x05f800 + i, 1);
+    const before = JSON.stringify(s.level.exits);
+    let err = '';
+    try { ents.leadExit(SCR, { kind: 'overworld' }); } catch (e) { err = (e as Error).message; }
+    check(/free secondary entrance/.test(err) && JSON.stringify(s.level.exits) === before, 'leadExit overworld, none free: an error, the exit unchanged');
+    err = '';
+    try { ents.leadExit(SCR, { kind: 'secondary', level: 0x1f }); } catch (e) { err = (e as Error).message; }
+    check(/free secondary entrance/.test(err), 'leadExit secondary, none free: an error');
+  }
+}
+
 check(readSecondaryEntrance(new Rom(image.slice()), 0x1cb).destLevel === N, 'fixture: entrance 1CB into 105');
 if (bad) { console.log(`${bad} failed`); process.exit(1); }
 console.log('all ok');
