@@ -25,11 +25,11 @@ export interface LearnOptions<T> {
   lane?: string; // the lane (default: the key), also the key of its slices and of its busy label
   replace?: boolean; // drops the lane's other jobs (they are not wanted any more), also when the result is known
   keep?: boolean; // the result goes to the result cache (default); false: to done only
-  urgent?: boolean; // runs while a dialog is open (one that shows the result)
+  urgent?: boolean; // runs while a dialog is open (one that shows the result); the same for all jobs of a lane
   label?: string | ((queued: number) => string); // busy label (queued: the lane's jobs); a job's yielded string replaces it
-  done?: (result: T) => void;
+  done?: (result: T) => void; // (a callback already waiting for the key isn't added again)
   failed?: () => void; // the job threw
-  slice?: () => void; // after each slice that didn't finish it (results come in as it runs)
+  progress?: () => void; // after each slice that didn't finish it (results come in as it runs)
 }
 
 // a job: a step per next(), the result as its return value; a yielded string is its busy label from then on
@@ -85,8 +85,9 @@ export class ResultLearner {
       run = { key, start, opts: opts as LearnOptions<unknown>, done: [], failed: [], job: null, reads: new RomReads(0), rom: this.snap.data, label: null };
       lane.runs.push(run);
     }
-    if (opts.done) run.done.push(opts.done as (r: unknown) => void);
-    if (opts.failed) run.failed.push(opts.failed);
+    const done = opts.done as ((r: unknown) => void) | undefined;
+    if (done && !run.done.includes(done)) run.done.push(done);
+    if (opts.failed && !run.failed.includes(opts.failed)) run.failed.push(opts.failed);
     this.busy(name, lane);
     this.schedule(name, lane);
     return undefined;
@@ -151,7 +152,7 @@ export class ResultLearner {
         if (performance.now() - t0 > SLICE) break;
       }
     } catch (e) { this.fail(name, lane, run, e); return; }
-    if (lane.runs[0] === run) run.opts.slice?.();
+    if (lane.runs[0] === run) run.opts.progress?.();
     this.busy(name, lane);
     this.schedule(name, lane);
   }

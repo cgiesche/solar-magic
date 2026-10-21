@@ -67,6 +67,17 @@ function* sum(n: number): Generator<void, number> {
   check(results.get('s') === 0 && learner.learn('s', () => sum(4)) === 0 && runs === 1, 'the result is kept');
 }
 
+// the same callback asked twice for a key in flight: called once
+{
+  const { learner, drain } = editor();
+  let once = 0;
+  const f = () => once++;
+  learner.learn('t', () => sum(2), { done: f });
+  learner.learn('t', () => sum(2), { done: f });
+  await drain();
+  check(once === 1, 'the same callback asked twice is called once');
+}
+
 // a ROM write to bytes the job read, while it runs: nothing kept from that run, learned again with the new bytes
 {
   const { results, learner, drain } = editor();

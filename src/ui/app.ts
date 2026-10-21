@@ -332,6 +332,7 @@ export class App {
     this.arcCache.clear();
     this.arcLevel = null;
     this.learner.cancel('arcs');
+    this.arcWant = -1;
     const lv = this.level, ov = this.buildOverrides();
     const r = this.emu.load(lv.number, ov);
     this.renderError = r.ok ? null : r.error ?? 'Error';
@@ -602,7 +603,7 @@ export class App {
       return images;
     }, {
       lane: 'sprites', replace: true, label: 'Sprite graphics',
-      slice: () => this.emit('sprites'),
+      progress: () => this.emit('sprites'),
       done: (images) => { show(images); this.emit('sprites'); },
     });
     if (stored) { show(stored); this.emit('sprites'); }
@@ -614,7 +615,7 @@ export class App {
   spriteImage(id: number, x: number, y: number, bytes?: number[]): HTMLCanvasElement | undefined {
     const base = this.spriteThumbs?.get(id);
     const lv = this.level, bg = lv.layer2Pointer >> 16 === 0xff ? lv.layer2Pointer : 0xffd900;
-    const shown = () => this.emit('sprites');
+    const shown = this.spritesShown;
     if (bytes?.some((b) => b)) {
       const b = [...bytes];
       const img = this.learner.learn(`b2${this.spriteKey}:${id}:${b.join(',')}`, function* (emu) {
@@ -630,6 +631,7 @@ export class App {
     }, { lane: 'variants', label: (n) => `Sprite variants (${n})`, done: shown });
     return img ? this.spriteCanvas(img) : base;
   }
+  private spritesShown = () => this.emit('sprites');
   // image of a placed sprite
   spriteImageOf(s: LevelSprite): HTMLCanvasElement | undefined {
     return this.spriteImage(spriteId(s), s.x, s.y, s.extra >= 2 ? s.bytes : undefined);
@@ -1003,13 +1005,14 @@ export class App {
 
   // the other levels' tiles not known (each stored by LevelUses), 'level-uses' as they come
   private learnLevelTiles(idx: LevelUses): void {
-    const rom = this.rom, open = () => this.level.number;
+    const missing = () => idx.missing(usedLevels(this.rom)).filter((n) => n !== this.level.number);
     this.learner.learn('uses', function* (emu) {
-      for (let left = idx.missing(usedLevels(rom)).filter((n) => n !== open()); left.length; left = idx.missing(usedLevels(rom)).filter((n) => n !== open())) {
+      for (let left = missing(); left.length; left = missing()) {
         while (left.length) { idx.scan(left.shift()!, emu); yield `Uses in levels (${left.length})`; }
       }
-    }, { keep: false, label: 'Uses in levels', slice: () => this.emit('level-uses'), done: () => this.emit('level-uses') });
+    }, { keep: false, label: 'Uses in levels', progress: this.usesLearned, done: this.usesLearned });
   }
+  private usesLearned = () => this.emit('level-uses');
 
   // ------------- jump arcs (see jumparcs.ts) -------------
   // arcs from a tile of the current level as edited, by tile (ty << 16 | tx); emulated in the
@@ -1018,6 +1021,7 @@ export class App {
   private arcs: JumpArcs | null = null;
   private arcLevel: Level | null = null; // the level state the arc emulator is prepared for
   private arcsWaiting = false; // for the run speeds probe
+  private arcWant = -1; // the tile whose arcs are learned
 
   jumpArcs(tx: number, ty: number): JumpArc[] | undefined {
     const k = (ty << 16) | tx, c = this.arcCache.get(k);
@@ -1029,11 +1033,16 @@ export class App {
     if (!runs) {
       if (!this.arcsWaiting) {
         this.arcsWaiting = true;
-        this.once('probes', () => { this.arcsWaiting = false; this.emit('arcs'); });
+        this.setBusy('arcs-wait', 'Jump arcs');
+        this.once('probes', () => { this.arcsWaiting = false; this.setBusy('arcs-wait', null); this.emit('arcs'); });
       }
       return undefined;
     }
-    this.learner.learn(`arcs:${k}`, (emu) => this.arcJob(emu, tx, ty, runs), { lane: 'arcs', replace: true, keep: false, label: 'Jump arcs', done: found, failed: () => found([]) });
+    // (asked for on every paint: once while it is learned)
+    if (this.arcWant === k) return undefined;
+    this.arcWant = k;
+    const end = (arcs: JumpArc[]) => { if (this.arcWant === k) this.arcWant = -1; found(arcs); };
+    this.learner.learn(`arcs:${k}`, (emu) => this.arcJob(emu, tx, ty, runs), { lane: 'arcs', replace: true, keep: false, label: 'Jump arcs', done: end, failed: () => end([]) });
     return undefined;
   }
 
