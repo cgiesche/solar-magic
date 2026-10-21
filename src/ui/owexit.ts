@@ -5,9 +5,9 @@
 import type { App } from './app.ts';
 import { h, modal, select, checkbox, toast } from './dom.ts';
 import { hex2, hex3 } from '../core/names.ts';
-import { readSecondaryEntrance, writeSecondaryEntrance, OW_ACTIONS, owActionName, type OverworldExit } from '../core/level.ts';
+import { OW_ACTIONS, owActionName, type OverworldExit } from '../core/level.ts';
 import { OverworldEmulator, MAP_NAMES, OW_EVENTS, eventNames, readL1, readL2, translevels, translevelToLevel, l1Index } from '../core/overworld.ts';
-import { readTeleport, readTeleports, locationFor, locationText, tileText, overworldExitText, type OwTile } from '../core/owteleport.ts';
+import { readTeleport, readTeleports, locationText, tileText, overworldExitText, type OwTile } from '../core/owteleport.ts';
 import { drawOwMap, putImage } from './overworld.ts';
 
 type Rows = [string, HTMLElement][];
@@ -44,18 +44,9 @@ export function overworldFields(app: App, idx: number, o: OverworldExit, set: Ed
   ];
 }
 
-// entrance idx teleports to `tile`: the location index leading there, or a new one (one ROM edit)
+// entrance idx teleports to `tile` (one ROM edit)
 function teleportTo(app: App, idx: number, tile: OwTile): void {
-  try {
-    app.romEdit(`Secondary entrance ${hex3(idx)}: teleport to ${tileText(tile)}`, () => {
-      const loc = locationFor(app.rom, tile);
-      if (loc === null) throw new Error('All 256 locations of the overworld\'s star/pipe table are in use.');
-      const e = readSecondaryEntrance(app.rom, idx);
-      e.overworld = { ...e.overworld!, teleport: 1, location: loc };
-      writeSecondaryEntrance(app.rom, idx, e);
-    });
-  } catch (err) { toast(err instanceof Error ? err.message : String(err), 'error'); return; }
-  app.findSecondaryEntrances();
+  try { app.entrances.teleport(idx, tile); } catch (err) { toast(err instanceof Error ? err.message : String(err), 'error'); }
 }
 
 // a tile of an overworld map, clicked; the tiles teleports lead to are marked with their location index, `cur`

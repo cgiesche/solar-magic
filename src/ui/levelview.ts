@@ -6,7 +6,7 @@ import { downloadBytes } from './platform.ts';
 import { objectName, hex2, hex3 } from '../core/names.ts';
 import { resizeObjectSize } from '../core/objkinds.ts';
 import { probeAt, spriteProbeAt, enterText, collisionText, type PosProbe, type CollisionProbe } from '../core/blockprobe.ts';
-import { type LevelObject, type LevelSprite, newUid, serializeLayer1, serializeLayer2, serializeLevelSprites, spriteSizes, spriteId, EXIT_NEW, readSecondaryEntrance } from '../core/level.ts';
+import { type LevelObject, type LevelSprite, newUid, serializeLayer1, serializeLayer2, serializeLevelSprites, spriteSizes, spriteId, EXIT_NEW } from '../core/level.ts';
 import { overworldExitText } from '../core/owteleport.ts';
 import { composite } from '../core/render.ts';
 import { layer3CellAt, layer3WordText } from '../core/layer3map.ts';
@@ -243,7 +243,7 @@ export class LevelView {
         ctx.lineWidth = 2 / app.zoom;
         ctx.strokeRect(x + 1 / app.zoom, y + 1 / app.zoom, 256 - 2 / app.zoom, (vertical ? 256 : scrH) - 2 / app.zoom);
       }
-      const g = app.exitGraph();
+      const g = app.entrances.graph();
       for (const ex of app.level.exits) {
         const x = vertical ? 0 : ex.screen * 256, y = vertical ? ex.screen * 256 : 0;
         const sel = app.mode === 'exit' && !app.exitMarker && app.exitScreen === ex.screen;
@@ -260,7 +260,7 @@ export class LevelView {
           ctx.fillText(txt, x + 20 / app.zoom, ty);
         };
         line(t.overworld ? 'Exit → Overworld' : `Exit → ${g.label(t.to)}`, 0);
-        if (t.overworld) line(overworldExitText(app.rom, readSecondaryEntrance(app.rom, t.entrance).overworld!), 1);
+        if (t.overworld) line(overworldExitText(app.rom, app.entrances.get(t.entrance).overworld!), 1);
         else if (t.entrance >= 0) line(ok ? `via sec. entrance ${hex3(t.entrance)}` : `sec. entrance ${hex3(t.entrance)} missing`, 1);
       }
     }
@@ -921,8 +921,7 @@ export class LevelView {
     } else if (d.kind === 'marker') {
       if (app.moveMarker(d.marker, px - d.offX, py - d.offY)) {
         d.moved = true;
-        if (d.marker.kind !== 'sec') app.changed(false);
-        else app.emit('change'); // (a secondary entrance is a ROM edit when dropped, not part of the level)
+        if (d.marker.kind !== 'sec') app.changed(false); // (a secondary entrance is a ROM edit, shown by its follow-up)
       }
     } else if (d.kind === 'move') {
       const dx = tx - d.startTx, dy = ty - d.startTy;

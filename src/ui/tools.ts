@@ -3,10 +3,9 @@
 import type { App } from './app.ts';
 import { h, modal, clear, hexInput, select, toast, choose, emptyState, checkbox } from './dom.ts';
 import { downloadBytes, pickFile } from './platform.ts';
-import { isBlank, isOverworldExit } from '../core/exitgraph.ts';
+import { isBlank } from '../core/exitgraph.ts';
 import {
-  readSecondaryEntrance, readSecondaryHeader, type SecondaryEntrance, loadLevel, cloneLevel, insertScreen, deleteScreen, clearLevel, spriteId, secondarySpot, spotTile, hasRelativeCamera, levelMode,
-  newOverworldExit, setSecondarySpot, mainSpot, copyCameraStart, copyEntranceOptions,
+  type SecondaryEntrance, loadLevel, cloneLevel, insertScreen, deleteScreen, clearLevel, spriteId, secondarySpot, spotTile,
 } from '../core/level.ts';
 import { overworldFields } from './owexit.ts';
 import { overworldExitText } from '../core/owteleport.ts';
@@ -28,11 +27,10 @@ export function openEntrancesDialog(app: App): void {
   let sel = -1;
   const buildList = () => {
     clear(list);
-    const g = app.exitGraph();
-    // the level's own: its entrances and its exits to the overworld
-    const mine = new Set([...g.entrancesOf(app.level.number), ...Array.from({ length: 0x200 }, (_, i) => i).filter((i) => isOverworldExit(rom, i) && readSecondaryEntrance(rom, i).destLevel === app.level.number)]);
+    const g = app.entrances.graph();
+    const mine = new Set(app.entrances.ownedBy(app.level.number));
     for (let i = 0; i < 0x200; i++) {
-      const e = readSecondaryEntrance(rom, i);
+      const e = app.entrances.get(i);
       const users = g.usersOfEntrance(i).length;
       const blank = isBlank(rom, i) && !users;
       if (filter.value === 'level' && !mine.has(i)) continue;
@@ -49,20 +47,16 @@ export function openEntrancesDialog(app: App): void {
   const buildDetail = () => {
     clear(detail);
     if (sel < 0) { detail.append(h('div', { class: 'hint' }, 'Select an entry. Edit and move it directly in the level in “Entrances/Exits” mode (key 4).')); return; }
-    const e = readSecondaryEntrance(rom, sel);
-    const g = app.exitGraph();
+    const e = app.entrances.get(sel);
+    const g = app.entrances.graph();
     const to = e.destLevel;
     const blank = isBlank(rom, sel);
-    const set = (label: string, f: (x: SecondaryEntrance) => void) => { app.editSecondaryEntrance(sel, `Secondary entrance ${hex(sel, 3)}: ${label}`, f, `sec-entrance-dlg:${sel}`); buildList(); buildDetail(); };
+    const set = (label: string, f: (x: SecondaryEntrance) => void) => { app.entrances.edit(sel, label, f, 'dlg'); buildList(); buildDetail(); };
     const range = (n: number): [number, string][] => Array.from({ length: n }, (_, i) => [i, String(i)]);
     const prop = (label: string, el: HTMLElement) => h('div', { class: 'prop' }, h('label', null, label), el);
     const users = g.usersOfEntrance(sel);
     // Lunar Magic's "Exit to overworld": on, passing the level with the normal exit; off, into its level at the main entrance
-    const toOverworld = (on: boolean) => set(on ? 'to the overworld' : 'into its level', (x) => {
-      if (on) { x.overworld = newOverworldExit(); return; }
-      const s = x.destLevel === app.level.number ? app.level.secondary : readSecondaryHeader(rom, x.destLevel);
-      x.overworld = null; setSecondarySpot(x, mainSpot(s)); x.action = s.entranceAction; copyCameraStart(x, s); copyEntranceOptions(x, s);
-    });
+    const toOverworld = (on: boolean) => { app.entrances.setOverworld(sel, on); buildList(); buildDetail(); };
     const used = h('div', { class: 'hint' }, users.length ? `Used by: ${users.map((u) => `${hex(u.from, 3)} (screen ${hex(u.screen, 2)})`).join(', ')}` : 'No exit uses this entrance.');
     const owSwitch = h('div', { class: 'prop' }, h('label', null, 'Exit'), checkbox('To the overworld', 'Mario goes back to the overworld instead of into a level (Lunar Magic\'s “Exit to overworld”)', !!e.overworld, toOverworld));
     if (e.overworld) {
@@ -88,7 +82,7 @@ export function openEntrancesDialog(app: App): void {
         h('div', { class: 'prop' }, h('label', null, 'Y position'), select(range(16), e.entranceY, (v) => set('Y', (x) => (x.entranceY = v)))),
       ]),
       h('div', { class: 'prop' }, h('label', null, 'Action'), select(ENTRANCE_ACTIONS.map((a, i) => [i, `${i} – ${a}`] as [number, string]), e.action, (v) => set('Action', (x) => (x.action = v)))),
-      ...cameraFields(e, set, hasRelativeCamera(rom, to === app.level.number ? app.level.header.mode : levelMode(rom, to))).map(([l, el]) => prop(l, el)),
+      ...cameraFields(e, set, app.entrances.relativeCamera(to)).map(([l, el]) => prop(l, el)),
       ...optionFields(e, set).map(([l, el]) => prop(l, el)),
       used,
       h('div', { class: 'row' },
@@ -112,7 +106,7 @@ export function openEntrancesDialog(app: App): void {
     buildDetail();
   };
   filter.addEventListener('change', buildList);
-  sel = app.exitGraph().entrancesOf(app.level.number)[0] ?? -1;
+  sel = app.entrances.graph().entrancesOf(app.level.number)[0] ?? -1;
   if (sel < 0) filter.value = 'set';
   buildList();
   buildDetail();

@@ -51,7 +51,7 @@ export class ExitGraph {
     return this.exits.filter((e) => e.entrance === idx);
   }
 
-  // the secondary entrances leading into a level (see app.findSecondaryEntrances)
+  // the secondary entrances leading into a level (entrances.ts inOpenLevel lists only set-up ones)
   entrancesOf(level: number): number[] {
     const out: number[] = [];
     for (let i = 0; i < 0x200; i++) if (readSecondaryEntrance(this.rom, i).destLevel === level && !isBlank(this.rom, i) && !isOverworldExit(this.rom, i)) out.push(i);

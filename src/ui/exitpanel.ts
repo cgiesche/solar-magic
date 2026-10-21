@@ -5,13 +5,12 @@ import type { App, Marker } from './app.ts';
 import { h, select, toast, choose, checkbox } from './dom.ts';
 import { hex2, hex3, ENTRANCE_ACTIONS } from '../core/names.ts';
 import {
-  newUid, readSecondaryEntrance, readSecondaryHeader, mainTranslevel, mainSpot, secondarySpot, setSecondarySpot, copyCameraStart, hasRelativeCamera,
-  copyEntranceOptions, setExitSecondary, EXIT_WATER, EXIT_MIDWAY, EXIT_NEW, exitToMidway, exitLandsAtMidway, midwaySpot, midwayEntrance, mainEntrance, setMidwayEntrance, midwayStart, nearestMidway, placeMidway, entrancePos,
-  newOverworldExit, type Level, type ScreenExit, type MidwayEntrance, type SecondaryHeader, type OverworldExit,
+  newUid, mainTranslevel, mainSpot, secondarySpot, hasRelativeCamera, setExitSecondary, EXIT_WATER, EXIT_MIDWAY, EXIT_NEW, exitToMidway, exitLandsAtMidway, midwaySpot, midwayEntrance, mainEntrance, setMidwayEntrance, midwayStart, nearestMidway, placeMidway, entrancePos,
+  type Level, type ScreenExit, type MidwayEntrance, type SecondaryHeader, type OverworldExit,
 } from '../core/level.ts';
 import { overworldFields, overworldLabel } from './owexit.ts';
 import { spotText, cameraOptions, cameraValue, setCamera, cameraFields, optionFields } from './entrancefields.ts';
-import { exitTarget, isOverworldExit, type ExitRef } from '../core/exitgraph.ts';
+import { exitTarget, type ExitRef } from '../core/exitgraph.ts';
 import { arrivesSlippery, slipperyEntrances } from '../core/slippery.ts';
 import { levelPicker } from './levelpicker.ts';
 import { openTestPlay } from './testplay.ts';
@@ -24,7 +23,7 @@ const actions = (): [number, string][] => ENTRANCE_ACTIONS.map((a, i) => [i, `${
 // returns true while the screen's block behaviour (pipes, doors) is still being probed
 export function buildExitPanel(app: App, body: HTMLElement): boolean {
   const sel = app.exitMarker;
-  if (sel?.kind === 'sec' && !app.secEntrances.includes(sel.index)) app.exitMarker = null;
+  if (sel?.kind === 'sec' && !app.entrances.inOpenLevel().includes(sel.index)) app.exitMarker = null;
   else if (sel?.kind === 'sec') { secondaryPanel(app, body, sel.index); return false; }
   else if (sel) { mainPanel(app, body, sel.kind); return false; }
   return exitPanel(app, body);
@@ -33,7 +32,7 @@ export function buildExitPanel(app: App, body: HTMLElement): boolean {
 // ---- screen exit ----
 function exitPanel(app: App, body: HTMLElement): boolean {
   const lv = app.level, n = lv.number, scr = app.exitScreen;
-  const g = app.exitGraph();
+  const g = app.entrances.graph();
   const enter = app.enterableOn(scr);
   const ex = lv.exits.find((e) => e.screen === scr);
   body.append(h('div', { class: 'prop-title' }, `Screen ${hex2(scr)} – Exit`));
@@ -66,9 +65,8 @@ function exitPanel(app: App, body: HTMLElement): boolean {
   // to the overworld: through an exit to the overworld of this level no exit uses, else a new one (passing the
   // level with the normal exit)
   const toOverworld = () => {
-    const idx = g.unusedOverworldExit(n) ?? g.freeEntrance();
+    const idx = app.entrances.overworldExit(n);
     if (idx === null) { toast('No free secondary entrance left.', 'error'); return; }
-    if (!isOverworldExit(app.rom, idx)) app.editSecondaryEntrance(idx, `Secondary entrance ${hex3(idx)} to the overworld created`, (x) => { x.destLevel = n; x.overworld = newOverworldExit(); });
     upd((e) => { setExitSecondary(e, true); e.dest = idx; });
   };
   const kind = !e.secondary ? 'main' : t.overworld ? 'overworld' : 'secondary';
@@ -88,10 +86,10 @@ function exitPanel(app: App, body: HTMLElement): boolean {
       radio('overworld', 'Overworld', 'Mario goes back to the overworld, the level passed or not (Lunar Magic\'s secondary exit to the overworld)'))),
   );
   if (t.overworld) {
-    const o = readSecondaryEntrance(app.rom, t.entrance).overworld!;
+    const o = app.entrances.get(t.entrance).overworld!;
     const shared = g.usersOfEntrance(t.entrance).length;
     const set = (label: string, f: (x: OverworldExit) => void) =>
-      app.editSecondaryEntrance(t.entrance, `Secondary entrance ${hex3(t.entrance)}: ${label}`, (x) => f(x.overworld!), `sec-entrance-${label}:${t.entrance}`);
+      app.entrances.edit(t.entrance, label, (x) => f(x.overworld!), label);
     body.append(
       ...overworldFields(app, t.entrance, o, set).map(([l, el]) => field(l, el)),
       h('div', { class: 'exit-target' },
@@ -112,7 +110,7 @@ function exitPanel(app: App, body: HTMLElement): boolean {
     const ents = g.entrancesOf(t.to);
     if (!ents.includes(t.entrance)) ents.unshift(t.entrance);
     const label = (i: number) => {
-      const s = readSecondaryEntrance(app.rom, i);
+      const s = app.entrances.get(i);
       return g.entrancesOf(t.to).includes(i) ? `${hex3(i)} · Screen ${hex2(s.screen)} · ${ENTRANCE_ACTIONS[s.action]}` : `${hex3(i)} (empty)`;
     };
     body.append(field('Entrance',
@@ -131,12 +129,12 @@ function exitPanel(app: App, body: HTMLElement): boolean {
   // where Mario arrives (and whether the entrance makes the level slippery)
   const slippery = (x: Parameters<typeof arrivesSlippery>[0]) => (arrivesSlippery(x, app.slipperyActions()) ? ', arrives slippery' : '');
   const arrive = e.secondary ? (() => {
-    const s = readSecondaryEntrance(app.rom, t.entrance);
+    const s = app.entrances.get(t.entrance);
     return g.entrancesOf(t.to).includes(t.entrance)
       ? `Secondary entrance ${hex3(t.entrance)}: screen ${hex2(s.screen)}, ${ENTRANCE_ACTIONS[s.action]}${slippery(s)}`
       : `Secondary entrance ${hex3(t.entrance)} is empty – “+ New” creates one.`;
   })() : (() => {
-    const s = t.to === n ? lv.secondary : readSecondaryHeader(app.rom, t.to);
+    const s = app.entrances.headerOf(t.to);
     if (exitLandsAtMidway(e, s)) return `Midway entrance: screen ${hex2(s.midwayScreen)}, ${ENTRANCE_ACTIONS[s.midwayAction]}${slippery(midwayEntrance(s))}`;
     const main = `Main entrance: screen ${hex2(s.entranceScreen)}, ${ENTRANCE_ACTIONS[s.entranceAction]}${slippery(mainEntrance(s))}`;
     return exitToMidway(e) ? `${main} – the target's midway point has no own position and settings (give it them in its midway point's properties).` : main;
@@ -155,19 +153,15 @@ function exitPanel(app: App, body: HTMLElement): boolean {
 
 // a new secondary entrance into `level`, placed like its main entrance
 export function newEntranceIn(app: App, level: number): number | null {
-  const idx = app.exitGraph().freeEntrance();
+  const idx = app.entrances.create(level);
   if (idx === null) { toast('No free secondary entrance left.', 'error'); return null; }
-  const s = level === app.level.number ? app.level.secondary : readSecondaryHeader(app.rom, level);
-  app.editSecondaryEntrance(idx, `Secondary entrance ${hex3(idx)} created`, (x) => {
-    x.destLevel = level; setSecondarySpot(x, mainSpot(s)); x.action = s.entranceAction; copyCameraStart(x, s); copyEntranceOptions(x, s);
-  });
   if (level !== app.level.number) toast(`Secondary entrance ${hex3(idx)} created in level ${hex3(level)} (at the main entrance) – go there with “Open target” and move it.`);
   return idx;
 }
 
 // ---- who leads here ----
 function users(app: App, refs: ExitRef[], extra: HTMLElement[], empty: string): HTMLElement {
-  const g = app.exitGraph();
+  const g = app.entrances.graph();
   const rows = refs.map((r) => h('div', { class: 'row' },
     h('span', { class: 'mono' }, `${hex3(r.from)}`), h('span', { class: 'lname' }, g.name(r.from)), `· screen ${hex2(r.screen)}`,
     h('button', { class: 'link-btn', title: 'Open the level and select the screen with this exit', onclick: () => app.gotoExit(r.from, r.screen) }, 'open')));
@@ -179,14 +173,14 @@ function users(app: App, refs: ExitRef[], extra: HTMLElement[], empty: string): 
 function testAt(app: App, kind: Marker['kind'], index: number): void {
   const m = app.markers().find((x) => x.kind === kind && x.index === index);
   if (kind === 'main' || !m) openTestPlay(app);
-  else openTestPlay(app, { tx: (m.x + 8) >> 4, ty: (m.y + 16) >> 4, entrance: kind === 'sec' ? readSecondaryEntrance(app.rom, index) : midwayStart(app.level.secondary) });
+  else openTestPlay(app, { tx: (m.x + 8) >> 4, ty: (m.y + 16) >> 4, entrance: kind === 'sec' ? app.entrances.get(index) : midwayStart(app.level.secondary) });
 }
 
 // ---- secondary entrance ----
 function secondaryPanel(app: App, body: HTMLElement, idx: number): void {
-  const e = readSecondaryEntrance(app.rom, idx);
-  const set = (label: string, f: (x: typeof e) => void, key: string) => app.editSecondaryEntrance(idx, `Secondary entrance ${hex3(idx)}: ${label}`, f, `sec-entrance-${key}:${idx}`);
-  const refs = app.exitGraph().usersOfEntrance(idx);
+  const e = app.entrances.get(idx);
+  const set = (label: string, f: (x: typeof e) => void, key: string) => app.entrances.edit(idx, label, f, key);
+  const refs = app.entrances.graph().usersOfEntrance(idx);
   body.append(
     h('div', { class: 'prop-title' }, `Secondary entrance ${hex3(idx)}`),
     hint(`${spotText(secondarySpot(e))} – drag the marker to move it`),
@@ -237,13 +231,13 @@ function mainPanel(app: App, body: HTMLElement, kind: 'main' | 'midway'): void {
         hint('The midway point shares its position within the screen, its action, camera start and options with the main entrance (M); only the screen is its own. Dragging it gives it its own.'),
       ]),
       hint('It applies once Mario has touched the level\'s midway tape.'),
-      s.midwayOwn ? users(app, app.exitGraph().exitsInto(n).filter((r) => r.midway), [], 'No exit leads to the midway entrance.')
+      s.midwayOwn ? users(app, app.entrances.graph().exitsInto(n).filter((r) => r.midway), [], 'No exit leads to the midway entrance.')
         : hint('Exits set to “go to midway entrance” lead to the main entrance while it has no own settings.'),
       h('div', { class: 'row' }, h('button', { onclick: () => testAt(app, 'midway', 0) }, '▶ Test here')),
     );
     return;
   }
-  const g = app.exitGraph();
+  const g = app.entrances.graph();
   const tl = mainTranslevel(n);
   const extra = tl ? [h('div', { class: 'row' }, h('span', null, 'Overworld'), h('span', { class: 'lname' }, `(level tile, translevel ${hex2(tl)})`))] : [];
   body.append(
@@ -263,7 +257,7 @@ function mainPanel(app: App, body: HTMLElement, kind: 'main' | 'midway'): void {
 // which entrances of the open level (s: its secondary header) make it slippery, by their option or their
 // action: it depends on the entrance, not on the level
 export function slipperyText(app: App, s: SecondaryHeader): string {
-  const names = slipperyEntrances(app.rom, s, app.secEntrances, app.slipperyActions()).map((e) => (e.kind === 'sec' ? `secondary entrance ${hex3(e.index)}`
+  const names = slipperyEntrances(app.rom, s, app.entrances.inOpenLevel(), app.slipperyActions()).map((e) => (e.kind === 'sec' ? `secondary entrance ${hex3(e.index)}`
     : e.kind === 'midway' ? 'the midway entrance' : s.midwayOwn ? 'the main entrance' : 'the main entrance (also at the midway point)'));
   return names.length ? `The level is slippery when Mario enters it through ${names.join(', ')}.` : 'No entrance makes the level slippery.';
 }

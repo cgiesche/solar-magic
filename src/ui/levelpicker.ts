@@ -8,7 +8,7 @@ import { closeMenus } from './menu.ts';
 // any of the 0x200 levels; the list starts with "only used": main levels, relocated ones and those an exit
 // leads to
 export function levelPicker(app: App, value: number, onPick: (n: number) => void): HTMLElement {
-  const g = app.exitGraph();
+  const g = app.entrances.graph();
   const btn = h('button', { class: 'level-pick', title: 'Choose another level' }, h('span', { class: 'mono' }, hex3(value)), ' ', h('span', { class: 'lname' }, g.name(value)), h('span', { class: 'caret' }, ' ▾'));
   btn.addEventListener('click', () => openPicker(app, btn, value, onPick));
   return btn;
@@ -21,7 +21,7 @@ function openPicker(app: App, anchor: HTMLElement, value: number, onPick: (n: nu
   const again = openPop?.anchor === anchor;
   openPop?.close();
   if (again) return;
-  const g = app.exitGraph();
+  const g = app.entrances.graph();
   const used = app.usedLevels();
   for (const e of g.exits) used.add(e.to);
   const filter = h('input', { class: 'filter', placeholder: 'No. (hex) or name …', spellcheck: false });
