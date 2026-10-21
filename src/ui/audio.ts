@@ -3,8 +3,12 @@
 // is still queued, so a player runs frames until enough is buffered instead of by wall-clock time.
 // Each time the queue runs dry (the page was busy) the output fades out instead of breaking off, and
 // the lead (how much a player keeps queued) grows a little, up to MAX_LEAD.
+// A player can instead hand the worklet a feed (feed()): a port it asks for samples itself, so that
+// what plays doesn't depend on the page (musicworker.ts answers it from a worker).
 
 import { APU_RATE } from '../core/apu.ts';
+
+const MAX_LEAD = APU_RATE / 6; // sample pairs
 
 const WORKLET = `
 class SmweOut extends AudioWorkletProcessor {
@@ -13,27 +17,45 @@ class SmweOut extends AudioWorkletProcessor {
     this.q = []; this.pos = 0; this.len = 0; this.gain = 1;
     this.l = 0; this.r = 0; // last output, faded out when the queue runs dry
     this.armed = false; // data came since the last clear: running dry is an underrun
+    this.feed = null; this.lead = 0; this.asked = 0; // a feed: sample pairs to keep queued, asked for and not yet come
     this.port.onmessage = (e) => {
       const d = e.data;
       if (d.clear) { this.q = []; this.pos = 0; this.len = 0; this.armed = false; return; }
       if (d.gain !== undefined) { this.gain = d.gain; return; }
-      this.q.push(d); this.len += d.length / 2; this.armed = true;
-      // far behind (a hidden tab, a stall): drop the oldest instead of lagging forever
-      while (this.len > ${APU_RATE / 2} && this.q.length > 1) { const x = this.q.shift(); this.len -= x.length / 2 - this.pos / 2; this.pos = 0; }
+      if (d.feed) {
+        this.feed = d.feed; this.lead = d.lead; this.asked = 0;
+        this.feed.onmessage = (e) => { this.asked = Math.max(0, this.asked - e.data.length / 2); this.add(e.data); };
+        this.ask();
+        return;
+      }
+      this.add(d);
     };
+  }
+  add(d) {
+    this.q.push(d); this.len += d.length / 2; this.armed = true;
+    // far behind (a hidden tab, a stall): drop the oldest instead of lagging forever
+    while (this.len > ${APU_RATE / 2} && this.q.length > 1) { const x = this.q.shift(); this.len -= x.length / 2 - this.pos / 2; this.pos = 0; }
+  }
+  ask() {
+    const n = this.lead - this.len - this.asked;
+    if (this.feed && n >= 128) { this.asked += n; this.feed.postMessage(n); }
   }
   process(inputs, outputs) {
     const out = outputs[0], l = out[0], r = out[1] ?? out[0], g = this.gain;
     for (let i = 0; i < l.length; i++) {
       const b = this.q[0];
       if (!b) {
-        if (this.armed) { this.armed = false; this.port.postMessage('underrun'); }
+        if (this.armed) {
+          this.armed = false; this.port.postMessage('underrun');
+          this.lead = Math.min(${MAX_LEAD}, this.lead + ${APU_RATE / 60});
+        }
         this.l *= 0.97; this.r *= 0.97; l[i] = this.l; r[i] = this.r; continue;
       }
       l[i] = this.l = b[this.pos] * g; r[i] = this.r = b[this.pos + 1] * g;
       this.pos += 2; this.len--;
       if (this.pos >= b.length) { this.q.shift(); this.pos = 0; }
     }
+    this.ask();
     return true;
   }
 }
@@ -41,7 +63,27 @@ registerProcessor('smwe-out', SmweOut);
 `;
 
 let workletUrl: string | null = null;
-const MAX_LEAD = APU_RATE / 6; // sample pairs
+
+// samples of the sound unit (32 kHz, stereo interleaved) as output samples at rate
+export function toOutput(samples: Int16Array, rate: number): Float32Array {
+  const ratio = rate / APU_RATE;
+  if (ratio === 1) {
+    const f = new Float32Array(samples.length);
+    for (let i = 0; i < samples.length; i++) f[i] = samples[i] / 32768;
+    return f;
+  }
+  // the context refused 32 kHz: resample linearly
+  const n = Math.floor(samples.length / 2 * ratio);
+  const f = new Float32Array(n * 2);
+  for (let i = 0; i < n; i++) {
+    const x = i / ratio, j = Math.floor(x), t = x - j;
+    const j1 = Math.min(j + 1, samples.length / 2 - 1);
+    f[i * 2] = (samples[j * 2] * (1 - t) + samples[j1 * 2] * t) / 32768;
+    f[i * 2 + 1] = (samples[j * 2 + 1] * (1 - t) + samples[j1 * 2 + 1] * t) / 32768;
+  }
+  return f;
+}
+
 
 export class AudioOut {
   private ctx: AudioContext | null = null;
@@ -120,25 +162,20 @@ export class AudioOut {
     if (this.ctx.state !== 'running') { void this.ctx.resume().catch(() => undefined); return; }
     // queue ran dry (or never started): the clock went on without us
     if (this.buffered() <= 0) { this.pushed = 0; this.start = this.now(); }
-    const ratio = this.rate() / APU_RATE;
-    let f: Float32Array;
-    if (ratio === 1) {
-      f = new Float32Array(samples.length);
-      for (let i = 0; i < samples.length; i++) f[i] = samples[i] / 32768;
-    } else {
-      // the context refused 32 kHz: resample linearly
-      const n = Math.floor(samples.length / 2 * ratio);
-      f = new Float32Array(n * 2);
-      for (let i = 0; i < n; i++) {
-        const x = i / ratio, j = Math.floor(x), t = x - j;
-        const j1 = Math.min(j + 1, samples.length / 2 - 1);
-        f[i * 2] = (samples[j * 2] * (1 - t) + samples[j1 * 2] * t) / 32768;
-        f[i * 2 + 1] = (samples[j * 2 + 1] * (1 - t) + samples[j1 * 2 + 1] * t) / 32768;
-      }
-    }
+    const f = toOutput(samples, this.rate());
     this.pushed += f.length / 2;
     this.node.port.postMessage(f, [f.buffer]);
   }
+
+  // from now on the worklet asks port for samples itself (sample pairs at the output rate, a number),
+  // keeping lead of them (at the output rate) queued; push() isn't used any more
+  feed(port: MessagePort): boolean {
+    if (!this.node || !this.ctx) return false;
+    this.node.port.postMessage({ feed: port, lead: Math.round(this.lead * this.rate() / APU_RATE) }, [port]);
+    return true;
+  }
+
+  get sampleRate(): number { return this.rate(); }
 
   setMuted(m: boolean): void {
     this.muted = m;
