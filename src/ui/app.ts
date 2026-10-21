@@ -1306,9 +1306,9 @@ export class App {
   beginLevelEdit(): LevelEdit {
     return this.edits.beginLevelEdit();
   }
-  // A level edit at once: f changes the level, returns false when it changed nothing (cancelled);
-  // when it throws, the level is as before and the error passed on. True when committed.
-  editLevel(f: () => boolean | void, rerender = true): boolean {
+  // A level edit at once: f changes the open level it is given (see EditSession.editLevel), returns false
+  // when it changed nothing (cancelled); when it throws, the level is as before and the error passed on.
+  editLevel(f: (lv: Level) => boolean | void, rerender = true): boolean {
     return this.edits.editLevel(f, rerender);
   }
   // the level changed (outside a level edit too: as part of the latest step)

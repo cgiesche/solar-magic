@@ -117,6 +117,21 @@ const setMem = (s: EditSession, m: number) => s.editLevel(() => { s.level.sprite
   check(s.undo() === null && rom.r16(A) === 1, 'beyond the limit: the ROM edit no longer in the order');
 }
 
+// a level edit gets the open level: after a ROM edit saved the dirty level (a new object), a caller that
+// held the level before changes the open one through it (#58)
+{
+  const { rom, s } = setup();
+  const m0 = mem(s);
+  setMem(s, m0 ^ 1);
+  const held = s.level;
+  s.romEdit('Color', () => rom.w16(A, 1));
+  check(s.level !== held, 'ROM edit with a dirty level: the open level is a new object');
+  s.editLevel((lv) => { lv.spriteHeader = (lv.spriteHeader & ~SPRITE_MEMORY) | (m0 ^ 3); });
+  check(mem(s) === (m0 ^ 3) && s.lastStep === 'level', 'the passed level is the open one, the edit an undo step');
+  const u = s.undo();
+  check(u?.kind === 'level' && mem(s) === (m0 ^ 1) && rom.r16(A) === 1, 'undo: the level edit reverted, the ROM edit stays');
+}
+
 // opening a level saves the dirty one and starts a new level history
 {
   const { rom, s, runs } = setup();

@@ -252,8 +252,7 @@ export function openHeaderDialog(app: App): void {
         if (levelSong !== levelMusic(app.rom, lv.number)) {
           try { app.romEdit(`Music of level ${hex(lv.number, 3)}`, () => setLevelMusic(app.rom, lv.number, levelSong)); } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
         }
-        app.editLevel(() => {
-          const lv = app.level; // (the music edit saves a changed level first: a new object)
+        app.editLevel((lv) => {
           const modeChangedL2 = hasLayer2Objects(hd.mode) !== hasLayer2Objects(lv.header.mode);
           lv.header = hd;
           if (!hasLevelSize(rom, hd.mode)) sd.levelSize = 0;

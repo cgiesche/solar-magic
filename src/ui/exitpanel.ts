@@ -7,7 +7,7 @@ import { hex2, hex3, ENTRANCE_ACTIONS } from '../core/names.ts';
 import {
   newUid, readSecondaryEntrance, readSecondaryHeader, mainTranslevel, mainSpot, secondarySpot, setSecondarySpot, copyCameraStart, hasRelativeCamera,
   copyEntranceOptions, setExitSecondary, EXIT_WATER, EXIT_MIDWAY, EXIT_NEW, exitToMidway, exitLandsAtMidway, midwaySpot, midwayEntrance, mainEntrance, setMidwayEntrance, midwayStart, nearestMidway, placeMidway, entrancePos,
-  newOverworldExit, type MidwayEntrance, type SecondaryHeader, type OverworldExit,
+  newOverworldExit, type ScreenExit, type MidwayEntrance, type SecondaryHeader, type OverworldExit,
 } from '../core/level.ts';
 import { overworldFields, overworldLabel } from './owexit.ts';
 import { spotText, cameraOptions, cameraValue, setCamera, cameraFields, optionFields } from './entrancefields.ts';
@@ -42,20 +42,26 @@ function exitPanel(app: App, body: HTMLElement): boolean {
       hint(enter ? 'This screen has pipes or doors but no exit yet – they lead nowhere.' : 'No exit on this screen.'),
       h('button', {
         class: 'primary',
-        onclick: () => { app.editLevel(() => { lv.exits.push({ uid: newUid(), screen: scr, dest: n, secondary: false, flags: EXIT_NEW }); }, false); },
+        onclick: () => { app.editLevel((lv) => { lv.exits.push({ uid: newUid(), screen: scr, dest: n, secondary: false, flags: EXIT_NEW }); }, false); },
       }, 'Create exit'),
       hint('An exit applies to all pipes and doors of this screen. Click another screen in the level view to select it, likewise entrances (M, Z, S).'));
     return enter === null;
   }
   const e = ex;
   const t = exitTarget(app.rom, n, e);
-  const upd = (f: () => void) => app.editLevel(f, false);
+  // changes the screen's exit of the open level (a ROM edit before, e.g. a new entrance, may have loaded it anew)
+  const upd = (f: (e: ScreenExit) => void) => app.editLevel((lv) => {
+    const x = lv.exits.find((x) => x.screen === scr);
+    if (!x) return false;
+    f(x);
+  }, false);
+  const remove = () => app.editLevel((lv) => { lv.exits = lv.exits.filter((x) => x.screen !== scr); }, false);
   // the level the exit leads into (to the overworld: choosing a level starts with this one)
   const level = t.overworld ? n : t.to;
   // a secondary exit into `level`: its first entrance, or a new one at its main entrance
   const secondaryTo = (level: number) => {
     const idx = g.entrancesOf(level)[0] ?? newEntranceIn(app, level);
-    if (idx !== null) upd(() => { setExitSecondary(e, true); e.dest = idx; });
+    if (idx !== null) upd((e) => { setExitSecondary(e, true); e.dest = idx; });
   };
   // to the overworld: through an exit to the overworld of this level no exit uses, else a new one (passing the
   // level with the normal exit)
@@ -63,7 +69,7 @@ function exitPanel(app: App, body: HTMLElement): boolean {
     const idx = g.unusedOverworldExit(n) ?? g.freeEntrance();
     if (idx === null) { toast('No free secondary entrance left.', 'error'); return; }
     if (!isOverworldExit(app.rom, idx)) app.editSecondaryEntrance(idx, `Secondary entrance ${hex3(idx)} to the overworld created`, (x) => { x.destLevel = n; x.overworld = newOverworldExit(); });
-    upd(() => { setExitSecondary(e, true); e.dest = idx; });
+    upd((e) => { setExitSecondary(e, true); e.dest = idx; });
   };
   const kind = !e.secondary ? 'main' : t.overworld ? 'overworld' : 'secondary';
   const radio = (k: typeof kind, label: string, title: string) => {
@@ -71,7 +77,7 @@ function exitPanel(app: App, body: HTMLElement): boolean {
     r.addEventListener('change', () => {
       if (k === 'secondary') secondaryTo(level);
       else if (k === 'overworld') toOverworld();
-      else upd(() => { setExitSecondary(e, false); e.dest = level; });
+      else upd((e) => { setExitSecondary(e, false); e.dest = level; });
     });
     return h('label', { class: 'row', title }, r, label);
   };
@@ -92,14 +98,14 @@ function exitPanel(app: App, body: HTMLElement): boolean {
         h('div', null, 'Mario returns to the ', h('b', null, 'overworld')),
         hint(`${overworldLabel(app, o)} – through secondary entrance ${hex3(t.entrance)}${shared > 1 ? `, which ${shared} exits share: a change applies to all of them` : ''}.`),
         h('div', { class: 'row' },
-          h('button', { class: 'danger', onclick: () => { app.editLevel(() => { lv.exits = lv.exits.filter((x) => x !== e); }, false); } }, 'Delete exit'))),
+          h('button', { class: 'danger', onclick: remove }, 'Delete exit'))),
       hint(enter === false ? 'No pipes or doors were found on this screen.' : 'The exit applies to all pipes and doors of this screen.'),
     );
     return enter === null;
   }
   body.append(
     field('Target level', levelPicker(app, t.to, (m) => {
-      if (e.secondary) secondaryTo(m); else upd(() => (e.dest = m));
+      if (e.secondary) secondaryTo(m); else upd((e) => (e.dest = m));
     })),
   );
   if (e.secondary) {
@@ -110,17 +116,17 @@ function exitPanel(app: App, body: HTMLElement): boolean {
       return g.entrancesOf(t.to).includes(i) ? `${hex3(i)} · Screen ${hex2(s.screen)} · ${ENTRANCE_ACTIONS[s.action]}` : `${hex3(i)} (empty)`;
     };
     body.append(field('Entrance',
-      select(ents.map((i) => [i, label(i)]), t.entrance, (v) => upd(() => (e.dest = v))),
+      select(ents.map((i) => [i, label(i)]), t.entrance, (v) => upd((e) => (e.dest = v))),
       h('button', {
         title: 'Create a new secondary entrance in the target level (at the main entrance, move it afterwards)',
-        onclick: () => { const idx = newEntranceIn(app, t.to); if (idx !== null) upd(() => (e.dest = idx)); },
+        onclick: () => { const idx = newEntranceIn(app, t.to); if (idx !== null) upd((e) => (e.dest = idx)); },
       }, '+ New')),
       field('Options', checkbox('Water level', 'Mario swims in the whole target level when he comes through this exit (also when the entrance is no water level)',
-        !!(e.flags & EXIT_WATER), (on) => upd(() => { e.flags = on ? e.flags | EXIT_WATER : e.flags & ~EXIT_WATER; }))));
+        !!(e.flags & EXIT_WATER), (on) => upd((e) => { e.flags = on ? e.flags | EXIT_WATER : e.flags & ~EXIT_WATER; }))));
   } else {
     body.append(field('Options', checkbox('Go to midway entrance',
       'Mario comes out at the midway entrance (Z) of the target level – when its midway point has its own position and settings, else at its main entrance (as in Lunar Magic)',
-      !!(e.flags & EXIT_MIDWAY), (on) => upd(() => { e.flags = on ? e.flags | EXIT_MIDWAY : e.flags & ~EXIT_MIDWAY; }))));
+      !!(e.flags & EXIT_MIDWAY), (on) => upd((e) => { e.flags = on ? e.flags | EXIT_MIDWAY : e.flags & ~EXIT_MIDWAY; }))));
   }
   // where Mario arrives (and whether the entrance makes the level slippery)
   const slippery = (x: Parameters<typeof arrivesSlippery>[0]) => (arrivesSlippery(x, app.slipperyActions()) ? ', arrives slippery' : '');
@@ -141,7 +147,7 @@ function exitPanel(app: App, body: HTMLElement): boolean {
       hint(arrive),
       h('div', { class: 'row' },
         h('button', { title: 'Open the target level and select the entrance', onclick: () => app.gotoExitTarget(e) }, '→ Open target'),
-        h('button', { class: 'danger', onclick: () => { app.editLevel(() => { lv.exits = lv.exits.filter((x) => x !== e); }, false); } }, 'Delete exit'))),
+        h('button', { class: 'danger', onclick: remove }, 'Delete exit'))),
     hint(enter === false ? 'No pipes or doors were found on this screen.' : 'The exit applies to all pipes and doors of this screen.'),
   );
   return enter === null;
@@ -207,12 +213,13 @@ function secondaryPanel(app: App, body: HTMLElement, idx: number): void {
 // ---- main entrance / midway point ----
 function mainPanel(app: App, body: HTMLElement, kind: 'main' | 'midway'): void {
   const lv = app.level, s = lv.secondary, n = lv.number;
-  const upd = (f: () => void) => app.editLevel(f);
+  // changes the secondary header of the open level
+  const upd = (f: (s: SecondaryHeader) => void) => app.editLevel((lv) => f(lv.secondary));
   if (kind === 'midway') {
     // its own settings (Lunar Magic's midway entrance) through an entrance's fields; the BG start is the level's
     const m = midwayEntrance(s);
-    const setOwn = (_: string, f: (x: MidwayEntrance) => void) => upd(() => { const x = midwayEntrance(s); f(x); setMidwayEntrance(s, x); });
-    const own = (on: boolean) => upd(() => {
+    const setOwn = (_: string, f: (x: MidwayEntrance) => void) => upd((s) => { const x = midwayEntrance(s); f(x); setMidwayEntrance(s, x); });
+    const own = (on: boolean) => upd((s) => {
       if (!on) { s.midwayOwn = 0; return; }
       const p = entrancePos(app.rom, midwaySpot(s), (s.verticalPositioning & 1) !== 0);
       placeMidway(s, nearestMidway(app.rom, s, p.x, p.y, lv.header.screens - 1));
@@ -226,7 +233,7 @@ function mainPanel(app: App, body: HTMLElement, kind: 'main' | 'midway'): void {
         ...cameraFields(m, setOwn, hasRelativeCamera(app.rom, lv.header.mode)).map(([l, el]) => field(l, el)),
         ...optionFields(m, setOwn).map(([l, el]) => field(l, el)),
       ] : [
-        field('Screen', select(range(Math.min(32, lv.header.screens)).map(([v]) => [v, hex2(v)]), s.midwayScreen, (v) => upd(() => (s.midwayScreen = v)))),
+        field('Screen', select(range(Math.min(32, lv.header.screens)).map(([v]) => [v, hex2(v)]), s.midwayScreen, (v) => upd((s) => (s.midwayScreen = v)))),
         hint('The midway point shares its position within the screen, its action, camera start and options with the main entrance (M); only the screen is its own. Dragging it gives it its own.'),
       ]),
       hint('It applies once Mario has touched the level\'s midway tape.'),
@@ -242,9 +249,9 @@ function mainPanel(app: App, body: HTMLElement, kind: 'main' | 'midway'): void {
   body.append(
     h('div', { class: 'prop-title' }, 'Main entrance'),
     hint(`${spotText(mainSpot(s))} – drag the marker to move it`),
-    field('Action', select(actions(), s.entranceAction, (v) => upd(() => (s.entranceAction = v)))),
-    field('Camera start', select(cameraOptions(cameraValue(s), hasRelativeCamera(app.rom, lv.header.mode)), cameraValue(s), (v) => upd(() => setCamera(s, v)))),
-    ...optionFields(s, (_, f) => upd(() => f(s))).map(([l, el]) => field(l, el)),
+    field('Action', select(actions(), s.entranceAction, (v) => upd((s) => (s.entranceAction = v)))),
+    field('Camera start', select(cameraOptions(cameraValue(s), hasRelativeCamera(app.rom, lv.header.mode)), cameraValue(s), (v) => upd((s) => setCamera(s, v)))),
+    ...optionFields(s, (_, f) => upd((s) => f(s))).map(([l, el]) => field(l, el)),
     hint(slipperyText(app, s)),
     users(app, g.exitsInto(n).filter((r) => !r.secondary && !(r.midway && s.midwayOwn)), extra, 'No exit leads to the main entrance.'),
     h('div', { class: 'row' }, h('button', { title: 'Test play from the main entrance (T)', onclick: () => testAt(app, 'main', 0) }, '▶ Test here')),

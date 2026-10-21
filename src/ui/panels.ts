@@ -5,7 +5,7 @@ import { h, clear, hexInput, checkbox, attachRectPick, modal, toast, emptyState 
 import { objectName, spriteName, hex2, hex3 } from '../core/names.ts';
 import { objectVariant, withObjectVariant, type ObjKind } from '../core/objkinds.ts';
 import { objectThumbs, thumbCanvas, objKey, type ObjSpec } from './thumbs.ts';
-import { newUid, spriteId, spriteBytes, spriteSizes, type LevelObject } from '../core/level.ts';
+import { newUid, spriteId, spriteBytes, spriteSizes, type LevelObject, type LevelSprite } from '../core/level.ts';
 import { levelName } from '../core/overworld.ts';
 import { usedInList } from './usedin.ts';
 import { buildExitPanel } from './exitpanel.ts';
@@ -851,7 +851,7 @@ export class Properties {
   condFields(objs: LevelObject[]): HTMLElement[] {
     if (!objs.length) return [];
     const app = this.app;
-    const all = (f: (o: LevelObject) => void) => app.editLevel(() => { for (const o of objs) f(o); });
+    const all = (f: (o: LevelObject) => void) => app.editLevel(() => { for (const o of liveObjects(app, objs)) f(o); });
     const first = objs.find((o) => o.cond)?.cond;
     const many = objs.length > 1 ? ` of the ${objs.length} Direct Map16 objects` : '';
     if (!first) {
@@ -916,18 +916,23 @@ export class Properties {
       }
       if (sel.length > 1) { this.body.append(h('div', { class: 'prop-title' }, `${sel.length} sprites selected`), this.actions(false)); return; }
       const s = sel[0];
-      const upd = (f: () => void) => app.editLevel(f, false);
+      // changes the sprite in the open level (a ROM edit saves a changed level: it is loaded anew, the ids kept)
+      const upd = (f: (s: LevelSprite) => void) => app.editLevel((lv) => {
+        const x = lv.sprites.find((x) => x.uid === s.uid);
+        if (!x) return false;
+        f(x);
+      }, false);
       const id = spriteId(s), custom = app.customSprite(id);
       // custom sprites: their extra bytes (as many as the size table says for number and extra bit)
       const nBytes = s.extra >= 2 ? spriteBytes(spriteSizes(app.rom), s).length : 0;
-      const resize = () => { const b = spriteBytes(spriteSizes(app.rom), s); if (b.length) s.bytes = b; else delete s.bytes; };
+      const resize = (s: LevelSprite) => { const b = spriteBytes(spriteSizes(app.rom), s); if (b.length) s.bytes = b; else delete s.bytes; };
       this.body.append(
         h('div', { class: 'prop-title' }, `${s.extra >= 2 ? 'Custom Sprite' : 'Sprite'} ${hex2(s.num)}: ${app.spriteLabel(id)}`),
-        this.field('Number', hexInput(s.num, 2, (v) => upd(() => { s.num = v; resize(); }))),
-        this.field('X', hexInput(s.x, 3, (v) => upd(() => (s.x = v)), app.levelWidthTiles() - 1)),
-        this.field('Y', hexInput(s.y, 3, (v) => upd(() => (s.y = v)), app.levelHeightTiles() - 1)),
-        this.field('Extra bits', hexInput(s.extra, 1, (v) => upd(() => { s.extra = v; resize(); }), 3)),
-        ...Array.from({ length: nBytes }, (_, i) => this.field(`Extra byte ${i + 1}`, hexInput(s.bytes?.[i] ?? 0, 2, (v) => upd(() => { resize(); if (s.bytes) s.bytes[i] = v; })))),
+        this.field('Number', hexInput(s.num, 2, (v) => upd((s) => { s.num = v; resize(s); }))),
+        this.field('X', hexInput(s.x, 3, (v) => upd((s) => (s.x = v)), app.levelWidthTiles() - 1)),
+        this.field('Y', hexInput(s.y, 3, (v) => upd((s) => (s.y = v)), app.levelHeightTiles() - 1)),
+        this.field('Extra bits', hexInput(s.extra, 1, (v) => upd((s) => { s.extra = v; resize(s); }), 3)),
+        ...Array.from({ length: nBytes }, (_, i) => this.field(`Extra byte ${i + 1}`, hexInput(s.bytes?.[i] ?? 0, 2, (v) => upd((s) => { resize(s); if (s.bytes) s.bytes[i] = v; })))),
         s.extra >= 2 ? h('div', { class: 'hint' }, custom ? 'Extra bits 2/3: custom sprite without/with extra bit.' : 'This custom sprite is not inserted (ROM → Packages …, Sprites); the game treats it like the original sprite with the same number.') : '',
         custom?.description ? h('div', { class: 'hint pre' }, custom.description) : '',
         this.actions(false),
@@ -950,25 +955,30 @@ export class Properties {
     }
     if (sel.length > 1) { this.body.append(h('div', { class: 'prop-title' }, `${sel.length} objects selected`), ...this.condFields(sel.filter(isDm16)), this.actions(true)); return; }
     const o = sel[0];
-    const upd = (f: () => void) => app.editLevel(f);
+    // changes the object in the open level (see the sprite's)
+    const upd = (f: (o: LevelObject) => void) => app.editLevel(() => {
+      const [x] = liveObjects(app, [o]);
+      if (!x) return false;
+      f(x);
+    });
     const idx = app.currentObjects().indexOf(o);
     const ov = app.objectKind(o.num);
     this.body.append(
       h('div', { class: 'prop-title' }, `${o.num ? 'Object ' + hex2(o.num) : 'Ext. object ' + hex2(o.ext)}: ${objectName(o.num, o.ext)}`),
       h('div', { class: 'hint' }, `No. ${idx + 1} of ${app.currentObjects().length} (drawing order)`),
-      this.field('Object', hexInput(o.num, 2, (v) => upd(() => { o.num = v; fixStruct(o); }), 0x3f)),
-      o.num === 0 ? this.field('Ext. object', hexInput(o.ext, 2, (v) => upd(() => { o.ext = v; fixStruct(o); }), 0xff)) : '',
-      o.num === 0 && o.ext === STRUCT_EXT && o.struct !== undefined ? this.field('Structure', hexInput(o.struct, 2, (v) => upd(() => (o.struct = v)), 0xff)) : '',
+      this.field('Object', hexInput(o.num, 2, (v) => upd((o) => { o.num = v; fixStruct(o); }), 0x3f)),
+      o.num === 0 ? this.field('Ext. object', hexInput(o.ext, 2, (v) => upd((o) => { o.ext = v; fixStruct(o); }), 0xff)) : '',
+      o.num === 0 && o.ext === STRUCT_EXT && o.struct !== undefined ? this.field('Structure', hexInput(o.struct, 2, (v) => upd((o) => (o.struct = v)), 0xff)) : '',
       o.num === 0 && o.ext === STRUCT_EXT && o.struct !== undefined ? h('div', { class: 'hint' }, structInfo(app, o.struct), ' ',
         h('button', { title: 'Replace the structure here with single Direct Map16 objects (to edit it, then “Selection as structure” again)', onclick: () => app.explodeStructure(o) }, 'Break up')) : '',
-      o.num === 0 && o.ext === DM16_EXT ? this.field('Map16 tile', hexInput(o.tile ?? 0, 3, (v) => upd(() => (o.tile = v)), EXT_TILES - 1 - (o.cond?.always ? COND_ADD : 0)),
+      o.num === 0 && o.ext === DM16_EXT ? this.field('Map16 tile', hexInput(o.tile ?? 0, 3, (v) => upd((o) => (o.tile = v)), EXT_TILES - 1 - (o.cond?.always ? COND_ADD : 0)),
         h('button', { title: 'Edit the tile in the graphics area', onclick: () => app.editMap16(o.tile ?? 0) }, 'Edit …')) : '',
-      o.num === 0 && o.ext === DM16_EXT ? this.field('Size (hw)', hexInput(o.size, 2, (v) => upd(() => (o.size = v)))) : '',
+      o.num === 0 && o.ext === DM16_EXT ? this.field('Size (hw)', hexInput(o.size, 2, (v) => upd((o) => (o.size = v)))) : '',
       ...this.condFields(isDm16(o) ? [o] : []),
-      this.field('X', hexInput(o.x, 3, (v) => upd(() => (o.x = v)), app.levelWidthTiles() - 1)),
-      this.field('Y', hexInput(o.y, 3, (v) => upd(() => (o.y = v)), app.levelHeightTiles() - 1)),
-      o.num !== 0 && ov?.type ? this.field('Type', hexInput(objectVariant(ov, o.size), 1, (v) => upd(() => (o.size = withObjectVariant(ov, o.size, v))), ov.count - 1)) : '',
-      o.num !== 0 ? this.field('Size (byte)', hexInput(o.size, 2, (v) => upd(() => (o.size = v)))) : '',
+      this.field('X', hexInput(o.x, 3, (v) => upd((o) => (o.x = v)), app.levelWidthTiles() - 1)),
+      this.field('Y', hexInput(o.y, 3, (v) => upd((o) => (o.y = v)), app.levelHeightTiles() - 1)),
+      o.num !== 0 && ov?.type ? this.field('Type', hexInput(objectVariant(ov, o.size), 1, (v) => upd((o) => (o.size = withObjectVariant(ov, o.size, v))), ov.count - 1)) : '',
+      o.num !== 0 ? this.field('Size (byte)', hexInput(o.size, 2, (v) => upd((o) => (o.size = v)))) : '',
       o.num !== 0 ? h('div', { class: 'hint' }, `${nibbleText(ov)} · Keys: + / - width, * / / height, Alt+arrows`) : '',
       this.actions(true),
     );
@@ -986,6 +996,12 @@ export class Properties {
   buildExit(): void {
     this.probePending = buildExitPanel(this.app, this.body);
   }
+}
+
+// the objects (of the current layer) with the ids of `objs` in the open level
+function liveObjects(app: App, objs: LevelObject[]): LevelObject[] {
+  const ids = new Set(objs.map((o) => o.uid));
+  return app.currentObjects().filter((o) => ids.has(o.uid));
 }
 
 // extended object $03 always carries a structure number (its 4th byte)

@@ -114,12 +114,13 @@ export class EditSession {
     };
   }
 
-  // A level edit at once: f changes the level, returns false when it changed nothing (cancelled);
-  // when it throws, the level is as before and the error passed on. True when committed.
-  editLevel(f: () => boolean | void, rerender = true): boolean {
+  // A level edit at once: f changes the open level it is given (not one held from before: a ROM edit saves a
+  // changed level, which loads it anew), returns false when it changed nothing (cancelled); when it throws,
+  // the level is as before and the error passed on. True when committed.
+  editLevel(f: (lv: Level) => boolean | void, rerender = true): boolean {
     const e = this.beginLevelEdit();
     let ok: boolean;
-    try { ok = f() !== false; } catch (err) { e.cancel(true); throw err; }
+    try { ok = f(this.level) !== false; } catch (err) { e.cancel(true); throw err; }
     if (ok) e.commit(rerender); else e.cancel();
     return ok;
   }
