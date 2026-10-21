@@ -10,7 +10,8 @@
 import type { Rom } from './rom.ts';
 import { RAM } from './ram.ts';
 import { loadBlockProject } from './blocks.ts';
-import { map16Targets, importGfxFile, type Map16File } from './map16file.ts';
+import { map16Targets, type Map16File } from './map16file.ts';
+import { importGfxFile } from './gfxfiles.ts';
 import { EXT_FIRST, EXT_TILES, DEFAULT_ACTS, extTileWords, actsLike, setExtTileWords, setActsLike } from './map16ext.ts';
 import { BG_EXT_TILES, bgExtTileWords, vanillaBgWords, setBgExtTileWords } from './bgmap16.ts';
 import {

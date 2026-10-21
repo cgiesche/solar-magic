@@ -10,7 +10,7 @@ import { applyPatch, reapplyPatch } from '../src/core/patchapply.ts';
 import { listPatches } from '../src/core/patchreg.ts';
 import { loadProject, saveProject, emptyProject } from '../src/core/uberproject.ts';
 import { loadBlockProject, saveBlockProject, type BlockProject } from '../src/core/blocks.ts';
-import { importGfxFile } from '../src/core/map16file.ts';
+import { importGfxFile } from '../src/core/gfxfiles.ts';
 import { SECTIONS, SECTION_KEYS, type PartSection } from '../src/core/pkgsections.ts';
 import { recordPackageChange, listPackages, packageArchive, uninstallPackage, type Package, type PackageTarget, type Claim, type Recorded } from '../src/core/pkgreg.ts';
 import { allOrNothing } from '../src/core/romedit.ts';

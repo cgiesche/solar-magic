@@ -6,7 +6,7 @@ import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadLevel } from '../src/core/level.ts';
 import { saveLevel } from '../src/core/save.ts';
-import { importGfxFile } from '../src/core/map16file.ts';
+import { importGfxFile } from '../src/core/gfxfiles.ts';
 import { gfxEntry } from '../src/core/patches.ts';
 import { renderLayer3, layer3Geometry } from '../src/core/render.ts';
 import { levelLayer3, setLevelLayer3, lt3Copy, type Lt3Place } from '../src/core/layer3gfx.ts';

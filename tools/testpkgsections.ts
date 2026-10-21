@@ -10,7 +10,7 @@ import { map16Source } from '../src/core/render.ts';
 import { applyPatch } from '../src/core/patchapply.ts';
 import { loadProject, saveProject, emptyProject } from '../src/core/uberproject.ts';
 import { loadBlockProject, saveBlockProject, type BlockProject } from '../src/core/blocks.ts';
-import { importGfxFile } from '../src/core/map16file.ts';
+import { importGfxFile } from '../src/core/gfxfiles.ts';
 import { installEditorPatch, setLevelMusic } from '../src/core/patches.ts';
 import { enableBlocks, setExtTileWords, EXT_FIRST } from '../src/core/map16ext.ts';
 import { installBgMap16Ext, setBgExtTileWords, BG_EXT_FIRST } from '../src/core/bgmap16.ts';

@@ -6,20 +6,11 @@
 // are planned first – new, replaced, unchanged, skipped – then applied together.
 
 import { unzipSync, zipSync } from 'fflate';
-import { Rom, snesToPc } from './rom.ts';
-import { lz2Compress, lz2Decompress } from './lz2.ts';
+import { Rom } from './rom.ts';
 import { decodeTile, encodeTile } from './gfx.ts';
-import { gfxEntry, gfxHex, gfxNumberProblem, VANILLA_GFX, GFX_FILES } from './patches.ts';
-import { gfxStorage, writeGfxFile, checkGfxNumber, type GfxStorage } from './map16file.ts';
+import { gfxHex, gfxNumberProblem, VANILLA_GFX, GFX_FILES } from './patches.ts';
+import { gfxBytes, gfxStorage, lz2Storage, storeGfxFile, checkGfxNumber, defaultBpp, type GfxStorage } from './gfxfiles.ts';
 import { gfxLabels, setGfxNames } from './gfxnames.ts';
-
-// how the game reads a file of `size` bytes unpacked under number i (2bpp: its layer 3 files)
-export function defaultBpp(i: number, size: number): number {
-  if ((i >= 0x28 && i <= 0x2b) || i === 0x2f) return 2;
-  if (size % 24 === 0 && size % 32 !== 0) return 3;
-  if (size === 0xc00 || size === 0x600) return 3;
-  return 4;
-}
 
 function convert(data: Uint8Array, from: number, to: number): Uint8Array {
   const tiles = data.length / (from * 8), pix = new Uint8Array(64), out = new Uint8Array(tiles * to * 8);
@@ -33,15 +24,9 @@ function only3bpp(d: Uint8Array): boolean {
   return true;
 }
 
-function unpacked(rom: Rom, num: number): { raw: boolean; data: Uint8Array } | null {
-  const e = gfxEntry(rom, num);
-  if (!e) return null;
-  return e.raw ? { raw: true, data: rom.bytes(e.addr, e.size).slice() } : { raw: false, data: lz2Decompress(rom.data, snesToPc(e.addr)).data };
-}
-
 // the file as .bin (null: no file under the number)
 export function gfxBinData(rom: Rom, num: number): Uint8Array | null {
-  const f = unpacked(rom, num);
+  const f = gfxBytes(rom, num);
   if (!f) return null;
   return !f.raw && defaultBpp(num, f.data.length) === 3 ? convert(f.data, 3, 4) : f.data;
 }
@@ -49,11 +34,11 @@ export function gfxBinData(rom: Rom, num: number): Uint8Array | null {
 // how a .bin goes under `num`: in the format the number's file has (an LZ2 file of the same size; a 3bpp
 // file's 4bpp form back to 3bpp when its 4th bitplane is empty), else by the data (gfxStorage)
 function binStorage(rom: Rom, num: number, data: Uint8Array): GfxStorage {
-  const f = unpacked(rom, num);
+  const f = gfxBytes(rom, num);
   if (f && !f.raw) {
-    if (data.length === f.data.length) return { raw: false, stored: lz2Compress(data), size: data.length, what: 'LZ2, as before' };
+    if (data.length === f.data.length) return lz2Storage(data, 'LZ2, as before');
     if (defaultBpp(num, f.data.length) === 3 && data.length === (f.data.length / 3) * 4 && only3bpp(data)) {
-      return { raw: false, stored: lz2Compress(convert(data, 4, 3)), size: f.data.length, what: '3bpp, as before' };
+      return lz2Storage(convert(data, 4, 3), '3bpp, as before');
     }
   }
   return gfxStorage(data);
@@ -61,7 +46,7 @@ function binStorage(rom: Rom, num: number, data: Uint8Array): GfxStorage {
 
 // stores a .bin under `num`; what it was stored as. Throws for a format unknown there or a bad number.
 export function storeGfxBin(rom: Rom, num: number, data: Uint8Array): string {
-  return writeGfxFile(rom, num, binStorage(rom, num, data));
+  return storeGfxFile(rom, num, binStorage(rom, num, data));
 }
 
 // a name as part of a file name: without characters file systems refuse

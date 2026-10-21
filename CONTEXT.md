@@ -35,6 +35,10 @@ _Avoid_: CDM16 (in the UI), switch object
 **Level edit**:
 A change of the open level in memory: its own undo step, written to the ROM when the level is saved (before every ROM edit, when another level is opened, or by hand).
 
+**Graphics file**:
+One of the files 000–FFF (the game's GFX 00–31 and the ExGFX) or an Anim graphic (A–D, numbered past them), read, written, created and imported through one interface (core/gfxfiles.ts): stored raw or LZ2, written in place when the new data fits its place, else moved to free space and the old place freed.
+_Avoid_: ExGFX (for all of them), GFX entry (that is the file table's)
+
 **Graphics slot**:
 One of a level's places for a graphics file (core/gfxslots.ts): FG1–FG3, BG1 and SP1–SP4 (the header's tileset and sprite set by default), BG2/BG3, layer 3's LG1–LG4 (the game's 28–2B by default) and LT3 (none by default; an LT3 file copies at most its own length). FF puts the default back. Changing one is a ROM edit of that level only.
 _Avoid_: GFX bypass (Lunar Magic's table), slot (alone, where an animation slot could be meant)

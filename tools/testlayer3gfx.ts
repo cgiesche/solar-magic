@@ -5,7 +5,7 @@
 // the image of the level's layer 3 setting.
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
-import { importGfxFile } from '../src/core/map16file.ts';
+import { importGfxFile } from '../src/core/gfxfiles.ts';
 import { GM, RAM } from '../src/core/ram.ts';
 import { levelLayer3, setLevelLayer3, layer3Entry, fitsLayer3Slot, lt3SizeFor, LT3_SIZES, type Layer3Gfx } from '../src/core/layer3gfx.ts';
 import { setGfxEntry } from '../src/core/patches.ts';

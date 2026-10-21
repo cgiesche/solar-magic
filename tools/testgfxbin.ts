@@ -4,7 +4,7 @@
 import { Rom } from '../src/core/rom.ts';
 import { RomEditSession } from '../src/core/romedit.ts';
 import { gfxEntry, VANILLA_GFX } from '../src/core/patches.ts';
-import { importGfxFile } from '../src/core/map16file.ts';
+import { importGfxFile } from '../src/core/gfxfiles.ts';
 import { lz2Compress } from '../src/core/lz2.ts';
 import { savePackage, emptyParts } from '../src/core/pkgreg.ts';
 import { gfxBinData, storeGfxBin, gfxBinName, parseGfxBinName, binFiles, planGfxBins, applyGfxBins, exportAllGfx } from '../src/core/gfxbin.ts';

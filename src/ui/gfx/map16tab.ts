@@ -20,7 +20,8 @@ import { openResources } from '../resources.ts';
 import { parseMap16File, map16Targets, writeMap16File } from '../../core/map16file.ts';
 import { renderMap16Sheet } from '../panels.ts';
 import { probeText } from '../../core/blockprobe.ts';
-import { VANILLA_GFX, GFX_FILES } from '../../core/patches.ts';
+import { VANILLA_GFX } from '../../core/patches.ts';
+import { ANIM_FILE } from '../../core/gfxfiles.ts';
 import { levelSlots, layerSlots, slotOfTile, type GfxSlot } from '../../core/gfxslots.ts';
 import { cgramToRGBA } from '../../core/gfx.ts';
 import { tileMatches, drawTileMatches } from '../tilesearch.ts';
@@ -52,8 +53,7 @@ type Cell = { x: number; y: number };
 // "tileset 1", "tilesets 0, 7, C"
 const tilesetNames = (ts: number[]) => `tileset${ts.length > 1 ? 's' : ''} ${ts.map((x) => hex(x, 1)).join(', ')}`;
 
-// files 1000-1003, past the ExGFX numbers: the ExAnimation alternative files (Lunar Magic's ExGFX 60-63)
-export const ANIM_FILE = GFX_FILES;
+// a file's name; the Anim graphics are numbered past the ExGFX (gfxfiles.ts)
 export function gfxName(n: number): string {
   if (n >= ANIM_FILE) return `Anim graphic ${'ABCD'[n - ANIM_FILE]}`;
   return `${n < VANILLA_GFX ? 'GFX' : 'ExGFX'}${hex(n, 2)}`;

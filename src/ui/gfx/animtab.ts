@@ -15,16 +15,18 @@ import { fgTileUsers } from '../../core/levelusage.ts';
 import { EXT_TILES } from '../../core/map16ext.ts';
 import {
   type ExList, type ExSlot, emptyList, readLevelList, readGlobalList, writeLevelList, writeGlobalList, levelSettings, setLevelSettings,
-  readAltFile, writeAltFile, kindOf, tilesOf, secondSet, secondSetName, triggerName, TYPE_NAMES, SLOTS,
+  kindOf, tilesOf, secondSet, secondSetName, triggerName, TYPE_NAMES, SLOTS,
   NO_GAME_COLORS, NO_GAME_TILES, NO_LEVEL_LIST, NO_GLOBAL_LIST, altFileUsers, localizeFrames, shapeOf, exanimTiles, exanimColors, ALT_FILE_MAX,
   rotationRange, setRotationRange, rotationStep, rotated, stepsPerSecond, heldColors, reversesOnTrigger, ROTATION_MAX,
 } from '../../core/exanim.ts';
-import { gfxName, lmAnimName, ANIM_FILE } from './map16tab.ts';
+import { gfxName, lmAnimName } from './map16tab.ts';
+import { gfxBytes, hasGfx, createGfx, ANIM_FILE } from '../../core/gfxfiles.ts';
 import { levelSlots, layerSlots, slotOfTile, type GfxSlot } from '../../core/gfxslots.ts';
 import { cssOf, htmlOf } from './palettetab.ts';
 import { remapSlot } from '../../core/remap.ts';
 import { remapEditor } from '../remaplist.ts';
 import type { LevelRender } from '../../core/levelemu.ts';
+import type { Rom } from '../../core/rom.ts';
 import {
   triggersFor, maxFrames, triggerRam, triggerProblems, customInit, setCustomInit, isManual, isCustom, isOneShot, playsOnce, slotName, PRECISION, type CustomInit, type SlotRef,
 } from '../../core/extrigger.ts';
@@ -53,6 +55,8 @@ function triggerHint(t: number, rotation: boolean): string {
   return '';
 }
 const ALT = 0x8000;
+// the bytes of Anim graphic k (A–D), null: none yet
+const animBytes = (rom: Rom, k: number) => gfxBytes(rom, ANIM_FILE + k)?.data ?? null;
 
 // own tile animations of the current level (its list and the global one) that overwrite a VRAM tile
 export function animsAt(app: App, tile: number): { global: boolean; slot: number }[] {
@@ -243,7 +247,7 @@ export class AnimTab implements WsPanel {
   // ---------- UI ----------
   private build(): void {
     this.view = this.list();
-    this.altBytes = readAltFile(this.app.rom, this.view.altFile);
+    this.altBytes = animBytes(this.app.rom, this.view.altFile);
     this.buildBar();
     this.buildSlots();
     this.buildDetail();
@@ -268,7 +272,7 @@ export class AnimTab implements WsPanel {
   private sourceSelect(l: ExList): HTMLElement {
     const app = this.app;
     const alt = h('select', { title: 'One animation graphic per list: changing it affects all tile animations of this list' },
-      [0, 1, 2, 3].map((k) => h('option', { value: String(k), selected: l.altFile === k }, `${gfxName(ANIM_FILE + k)} (${lmAnimName(ANIM_FILE + k)})${readAltFile(app.rom, k) ? '' : ' – empty'}`)));
+      [0, 1, 2, 3].map((k) => h('option', { value: String(k), selected: l.altFile === k }, `${gfxName(ANIM_FILE + k)} (${lmAnimName(ANIM_FILE + k)})${hasGfx(app.rom, ANIM_FILE + k) ? '' : ' – empty'}`)));
     alt.addEventListener('change', () => { const nl = this.list(); nl.altFile = Number(alt.value); void this.save(nl, `Frames from ${gfxName(ANIM_FILE + nl.altFile)}`); });
     const n = [...l.slots.values()].filter((s) => kindOf(s.type) === 'tiles' && s.dest & ALT).length;
     // the graphic is shared: other lists animating from it change along when it is drawn on
@@ -356,8 +360,8 @@ export class AnimTab implements WsPanel {
     const n = this.freeSlot(l);
     if (n < 0) { toast('All 32 slots are in use'); return; }
     if (kind === 'tiles') {
-      if (!readAltFile(this.app.rom, l.altFile)) {
-        this.app.romEdit(`${gfxName(ANIM_FILE + l.altFile)} created`, () => writeAltFile(this.app.rom, l.altFile, new Uint8Array(0x1000)));
+      if (!hasGfx(this.app.rom, ANIM_FILE + l.altFile)) {
+        this.app.romEdit(`${gfxName(ANIM_FILE + l.altFile)} created`, () => createGfx(this.app.rom, ANIM_FILE + l.altFile));
       }
       l.slots.set(n, { type: 0x01, trigger: 0, framesLess1: 1, dest: ALT | (this.charWord() + 0x60 * 16), frames: [0x00, 0x20] });
     } else if (kind === 'colors') {
@@ -392,7 +396,7 @@ export class AnimTab implements WsPanel {
     const tileSlots = [...l.slots.entries()].filter(([, x]) => kindOf(x.type) === 'tiles').sort((a, b) => a[0] - b[0]);
     const chosen = new Set(tileSlots.some(([n]) => n === this.sel) ? [this.sel] : tileSlots.map(([n]) => n));
     const what = { frames: true, target: true };
-    const file = readAltFile(this.app.rom, l.altFile);
+    const file = animBytes(this.app.rom, l.altFile);
     const frameMax = (file ? file.length : ALT_FILE_MAX) / 32 - 1;
     const charWord = this.charWord();
     const preview = h('div', { class: 'at-remap-preview' });
@@ -890,7 +894,7 @@ export class AnimTab implements WsPanel {
 
   private sourcePicker(box: HTMLElement, s: ExSlot, row: number): void {
     const l = this.list();
-    const file = readAltFile(this.app.rom, l.altFile);
+    const file = animBytes(this.app.rom, l.altFile);
     if (!(s.dest & ALT)) {
       box.append(h('p', { class: 'hint' }, 'This slot takes its frames from RAM (the game\'s graphics, e.g. from a Lunar Magic ROM). Copied into the animation graphic, they can be picked and drawn here.'),
         h('button', { onclick: () => void this.copyRamFrames() }, `Copy frames into ${gfxName(ANIM_FILE + l.altFile)}`));
@@ -936,7 +940,7 @@ export class AnimTab implements WsPanel {
   }
 
   private async createAltFile(k: number): Promise<void> {
-    try { this.app.romEdit(`${gfxName(ANIM_FILE + k)} created`, () => writeAltFile(this.app.rom, k, new Uint8Array(0x1000))); }
+    try { this.app.romEdit(`${gfxName(ANIM_FILE + k)} created`, () => createGfx(this.app.rom, ANIM_FILE + k)); }
     catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
   }
 

@@ -5,7 +5,7 @@
 // (same low byte) from one level to the next gets the new file.
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
-import { importGfxFile } from '../src/core/map16file.ts';
+import { importGfxFile } from '../src/core/gfxfiles.ts';
 import { GM, RAM } from '../src/core/ram.ts';
 import { levelLayer3, setLevelLayer3, type Layer3Gfx } from '../src/core/layer3gfx.ts';
 import { gfxEntry, setGfxEntry, freeGfx, levelGfx, setLevelGfx, levelExtGfx, setLevelExtGfx, GFX_SLOT_NAMES, MAX_GFX, gfxRangeFor, gfxNumberProblem, gfxDataSize, installEditorPatch } from '../src/core/patches.ts';
