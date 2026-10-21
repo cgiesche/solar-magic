@@ -104,14 +104,14 @@ export class App {
   // the open level, its dirty flag, level and ROM edits and their undo (editsession.ts)
   edits: EditSession;
   get level(): Level { return this.edits.level; }
-  set level(lv: Level) { this.edits.level = lv; }
   get dirty(): boolean { return this.edits.dirty; }
-  set dirty(d: boolean) { this.edits.dirty = d; }
   get romHistory(): RomHistory { return this.edits.romHistory; }
   render!: LevelRender;
   images!: LevelImages;
   compositeImg!: Uint32Array;
-  mode: EditMode = 'l1';
+  // the edit mode: changed through setMode (or App's own level opening and exit jumps)
+  private editMode: EditMode = 'l1';
+  get mode(): EditMode { return this.editMode; }
   selection = new Set<number>();
   paletteItem: PaletteItem | null = null;
   // BG mode brush: a w×h block of BG Map16 tiles (row-major), picked from the palette sheet or the level
@@ -280,12 +280,13 @@ export class App {
   }
 
   // ------------- level loading / rendering -------------
-  openLevel(n: number): void {
-    this.edits.open(n);
+  // opens level n (the open one saved first, or its unsaved changes dropped with discard)
+  openLevel(n: number, discard = false): void {
+    this.edits.open(n, discard);
     this.selection.clear();
     this.exitScreen = 0;
     this.exitMarker = null;
-    if ((this.mode === 'l2' && !this.level.layer2Objects) || (this.mode === 'bg' && !this.canEditBg())) this.mode = 'l1';
+    if (this.layerGone()) this.editMode = 'l1';
     this.spriteMem = this.spriteMemBase = null;
     this.refresh();
     this.emit('level');
@@ -523,7 +524,7 @@ export class App {
     const t = exitTarget(this.rom, this.level.number, e);
     if (t.overworld) return;
     this.openLevel(t.to);
-    this.mode = 'exit';
+    this.editMode = 'exit';
     this.exitMarker = t.entrance >= 0 ? { kind: 'sec', index: t.entrance }
       : { kind: exitLandsAtMidway(e, this.level.secondary) ? 'midway' : 'main', index: 0 };
     this.emit('mode');
@@ -533,7 +534,7 @@ export class App {
   // opens a level and chooses the screen of one of its exits
   gotoExit(level: number, screen: number): void {
     if (level !== this.level.number) this.openLevel(level);
-    this.mode = 'exit';
+    this.editMode = 'exit';
     this.emit('mode');
     this.selectScreen(screen);
     this.reveal = this.vertical ? { x: 128, y: screen * 256 + 128 } : { x: screen * 256 + 128, y: 200 };
@@ -1311,7 +1312,13 @@ export class App {
   editLevel(f: (lv: Level) => boolean | void, rerender = true): boolean {
     return this.edits.editLevel(f, rerender);
   }
-  // the level changed (outside a level edit too: as part of the latest step)
+  // A level edit putting lv in place of the open level (a level import, a package's sample level): one
+  // undo step, the selection cleared
+  replaceLevel(lv: Level): boolean {
+    this.selection.clear();
+    return this.edits.replaceLevel(lv);
+  }
+  // the level changed (outside a level edit too: as part of the latest step, or while dragging)
   changed(rerender = true): void {
     this.edits.changed(rerender);
   }
@@ -1321,6 +1328,11 @@ export class App {
     this.emit('change');
     this.ensureSpriteImages(); // sprite memory may have changed
     this.scheduleSpriteMem();
+    if (this.layerGone()) this.setMode('l1'); // (its header changed, an edit undone)
+  }
+  // the open level has no layer for the edit mode (layer 2 objects, BG tilemap)
+  private layerGone(): boolean {
+    return (this.mode === 'l2' && !this.level.layer2Objects) || (this.mode === 'bg' && !this.canEditBg());
   }
   // undoes the latest level or ROM edit
   undo(): void {
@@ -1350,7 +1362,7 @@ export class App {
     const ghosts = this.level.layer2Objects || isBrushMode(m) || isBrushMode(this.mode);
     const recompose = m !== this.mode && ((ghosts && this.show.ghost) || (m === 'l3' && !this.show.layer3));
     if (m === 'l3') this.show.layer3 = true;
-    this.mode = m;
+    this.editMode = m;
     this.selection = new Set(selection);
     if (recompose) this.recomposite();
     this.emit('mode');
@@ -1708,8 +1720,7 @@ export class App {
   private reloadLevel(): void {
     clearTimeout(this.romTimer); // (openLevel draws it)
     this.romTimer = 0;
-    this.dirty = false;
-    this.openLevel(this.level.number);
+    this.openLevel(this.level.number, true);
     this.palettesChanged();
   }
 

@@ -267,9 +267,7 @@ export function openHeaderDialog(app: App): void {
               if (lv.layer2Pointer >> 16 !== 0xff) lv.layer2Pointer = app.rom.r24(L2_PTRS + 0x105 * 3);
             }
           }
-          if (app.mode === 'l2' && !lv.layer2Objects) app.mode = 'l1';
-          if (app.mode === 'bg' && lv.layer2Objects) app.mode = 'l1';
-        });
+        }); // (an edit mode whose layer is gone switches back to layer 1)
         app.emit('level-header');
       },
     },

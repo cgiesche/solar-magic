@@ -142,5 +142,24 @@ const setMem = (s: EditSession, m: number) => s.editLevel(() => { s.level.sprite
   check(s.undo() === null && loadLevel(rom, N).spriteHeader === s0, 'open: the old level\'s steps are gone');
 }
 
+// replacing the open level (a level import, a package's sample level): one undo step (#59)
+{
+  const { rom, s, runs } = setup();
+  const before = s.level, other = loadLevel(rom, 0x106);
+  check(s.replaceLevel(other) && s.level === other && s.dirty && runs.changed === 1 && s.lastStep === 'level', 'replaceLevel: the open level, dirty, an undo step');
+  const u = s.undo();
+  check(u?.kind === 'level' && s.level.number === before.number && s.level.objects.length === before.objects.length, 'replaceLevel undone: the level before');
+  check(s.redo()?.kind === 'level' && s.level.number === 0x106, 'replaceLevel redone');
+}
+
+// opening a level with discard: its unsaved changes are dropped, not saved (#59)
+{
+  const { rom, s, runs } = setup();
+  const m0 = mem(s);
+  setMem(s, m0 ^ 1);
+  s.open(N, true);
+  check(runs.saved === 0 && !s.dirty && mem(s) === m0 && (loadLevel(rom, N).spriteHeader & SPRITE_MEMORY) === m0, 'open(discard): unsaved changes dropped');
+}
+
 if (bad) { console.log(`${bad} FAILED`); process.exit(1); }
 console.log('all ok');

@@ -222,7 +222,7 @@ export async function importLevel(app: App): Promise<boolean> {
       if (d.palette || customPalette(rom, n)) setCustomPalette(rom, n, d.palette);
       return d;
     });
-    app.editLevel(() => { app.level = data.level; app.selection.clear(); });
+    app.replaceLevel(data.level);
     toast(`${f.name} imported as level ${hex(n, 3)} (not saved yet).`);
     return true;
   } catch (e) {

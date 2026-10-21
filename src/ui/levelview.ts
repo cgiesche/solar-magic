@@ -921,8 +921,8 @@ export class LevelView {
     } else if (d.kind === 'marker') {
       if (app.moveMarker(d.marker, px - d.offX, py - d.offY)) {
         d.moved = true;
-        if (d.marker.kind !== 'sec') app.dirty = true;
-        app.emit('change');
+        if (d.marker.kind !== 'sec') app.changed(false);
+        else app.emit('change');
       }
     } else if (d.kind === 'move') {
       const dx = tx - d.startTx, dy = ty - d.startTy;
@@ -935,7 +935,7 @@ export class LevelView {
         o.x = or.x + dx; o.y = or.y + dy;
         app.clampObject(o);
       }
-      if (app.mode === 'spr') { app.dirty = true; app.emit('change'); }
+      if (app.mode === 'spr') app.changed(false);
       else this.scheduleRefresh();
     } else if (d.kind === 'resize') {
       const dw = tx - d.startTx, dh = ty - d.startTy;
@@ -955,9 +955,7 @@ export class LevelView {
     if (this.refreshTimer) return;
     this.refreshTimer = requestAnimationFrame(() => {
       this.refreshTimer = 0;
-      this.app.dirty = true;
-      this.app.refresh();
-      this.app.emit('change');
+      this.app.changed();
     });
   }
 
