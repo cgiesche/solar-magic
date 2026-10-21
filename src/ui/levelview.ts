@@ -225,12 +225,15 @@ export class LevelView {
       else for (let x = 256; x < im.width; x += 256) { ctx.moveTo(x, 0); ctx.lineTo(x, im.height); }
       ctx.stroke();
       ctx.setLineDash([]);
+      // on a dark box like the exit labels, readable on light backgrounds too
       ctx.font = `${11 / app.zoom}px sans-serif`;
-      ctx.fillStyle = 'rgba(255,255,255,0.8)';
       const n = app.level.header.screens;
       for (let s = 0; s < n; s++) {
-        const x = vertical ? 2 : s * 256 + 2, y = vertical ? s * 256 + 11 / app.zoom : 11 / app.zoom;
-        ctx.fillText(hex2(s), x, y);
+        const x = vertical ? 0 : s * 256, y = vertical ? s * 256 : 0, txt = hex2(s);
+        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        ctx.fillRect(x, y, ctx.measureText(txt).width + 4 / app.zoom, 14 / app.zoom);
+        ctx.fillStyle = '#fff';
+        ctx.fillText(txt, x + 2 / app.zoom, y + 11 / app.zoom);
       }
     }
     // exits

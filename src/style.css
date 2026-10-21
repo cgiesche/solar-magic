@@ -94,7 +94,7 @@ input.invalid, input.invalid:focus { outline: 1px solid var(--danger); border-co
 .pal-enter { padding: 0 2px; font-size: 11px; font-weight: bold; line-height: 13px; color: #fff; background: rgba(0, 0, 0, 0.7); border-radius: 3px; }
 .pal-items-row { margin-left: auto; display: flex; gap: 1px; }
 .pal-items-row canvas { max-width: 16px; max-height: 16px; image-rendering: pixelated; }
-.pal-img canvas { max-width: 100%; max-height: 52px; image-rendering: pixelated; object-fit: contain; }
+.pal-img canvas { max-width: 100%; max-height: 52px; image-rendering: pixelated; object-fit: contain; background: var(--level-backdrop, #15171b); }
 .pal-label { font-family: ui-monospace, monospace; font-size: 11px; color: var(--muted); }
 .pal-name { font-size: 10px; line-height: 1.2; color: var(--muted); width: 100%; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pal-cell.selected .pal-name { color: var(--text); }
@@ -110,7 +110,7 @@ input.invalid, input.invalid:focus { outline: 1px solid var(--danger); border-co
 .m16-pages button { min-width: 0; font-family: ui-monospace, monospace; }
 .pal-row.selected .num { color: #fff; }
 .pal-thumb-s { width: 32px; height: 24px; display: inline-flex; align-items: center; justify-content: center; }
-.pal-thumb-s canvas { max-width: 32px; max-height: 24px; image-rendering: pixelated; }
+.pal-thumb-s canvas { max-width: 32px; max-height: 24px; image-rendering: pixelated; background: var(--level-backdrop, #15171b); }
 .pal-thumb-s.struct { width: 48px; height: 36px; }
 .pal-thumb-s.struct canvas { max-width: 48px; max-height: 36px; }
 .pal-row .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

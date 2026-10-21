@@ -340,6 +340,9 @@ export class App {
     this.anim.snaps = this.show.anim && r.ok ? this.emu.animationFrames(exanimPeriod([readLevelList(this.rom, lv.number), readGlobalList(this.rom)], 64, 8)) : [];
     this.render = r;
     this.images = renderLevel(this.rom, r, lv.header.mode, lv.header.screens, levelRows(lv.secondary));
+    // palette thumbnails are transparent: shown on the level's backdrop as in the game
+    const c = this.images.backdrop;
+    document.documentElement.style.setProperty('--level-backdrop', `rgb(${c & 0xff},${(c >> 8) & 0xff},${(c >> 16) & 0xff})`);
     this.compositeImg = this.compose();
     this.buildOffsetMaps();
     this.startAnimation();
