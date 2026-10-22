@@ -81,7 +81,6 @@ export type AppEvent =
   | 'sprite-mem' // the sprite memory check of the level is known
   | 'animated' // which tiles and colors of the level animate is known
   | 'anim-frame' // the next frame of the level animation is shown
-  | 'palettes' // the palettes changed (sprite images are captured again)
   | 'structs' // the structure table changed
   | 'bgtile' // the BG or layer 3 brush changed (picked from the level)
   | 'reveal' // the level view scrolls to App.reveal
@@ -155,7 +154,7 @@ export class App {
   exitScreen = 0;
   // mode 'exit': the chosen entrance marker, else the screen exitScreen (and its exit)
   exitMarker: { kind: Marker['kind']; index: number } | null = null;
-  spriteThumbs: Map<number, HTMLCanvasElement> | null = null;
+  spriteThumbs = new Map<number, HTMLCanvasElement>(); // sprite images by sprite id (ensureSpriteImages)
   private canvases = new WeakMap<SpriteImage, HTMLCanvasElement>();
   // results found out by emulation, valid while the ROM they read is unchanged (see romdeps.ts);
   // stored in IndexedDB, loaded once at start (cacheReady)
@@ -177,6 +176,9 @@ export class App {
     this.emu.skipMask = () => this.gfxSkipMask();
     this.emu.boot();
     onModalsChange(() => { this.resumeBackground(); this.emit('busy'); });
+    // sprite images: learned again when what they depend on changed (the learner decides)
+    this.on('render', () => this.ensureSpriteImages());
+    this.on('rom-change', () => this.ensureSpriteImages());
     musicPlayer.onChange(() => { this.resumeBackground(); this.emit('busy'); });
     // level edits and ROM edits (romEdit: one undo step, all or nothing, the follow-ups below)
     this.edits = new EditSession(rom, {
@@ -303,7 +305,6 @@ export class App {
     this.refresh();
     this.emit('level');
     logMsg(`Level ${hex(n, 3)} opened`);
-    this.ensureSpriteImages();
     this.scheduleSpriteMem();
     this.probes.prefetch();
   }
@@ -559,8 +560,7 @@ export class App {
 
   // ------------- sprite images (captured from the running game) -------------
   // kept in the result cache like the probes: all images of a sprite GFX/palette setting together,
-  // variant images by sprite and position
-  spriteKey = '';
+  // variant images by sprite and position; their input (spriteInput) the rest of what they depend on
   // custom sprites of the ROM's PIXI project (see pixi.ts), by sprite id ($2xx / $3xx with the extra bit)
   private customMemo: { gen: number; list: CustomSprite[] } = { gen: -1, list: [] };
   customSprites(): CustomSprite[] {
@@ -582,26 +582,17 @@ export class App {
     return this.customSprite(id)?.name ?? `Custom Sprite ${hex(id & 0xff, 2)}${id & 0x100 ? ' (extra bit)' : ''} – not inserted`;
   }
 
+  // the images of all sprites (spriteThumbs, 'sprites' as they come), learned unless known: asked for on every
+  // render and ROM change
   ensureSpriteImages(): void {
-    const hd = this.level.header;
-    // sprite memory: a sprite whose OAM range is too small is captured as the game shows it
-    const custom = this.customSprites().map((c) => c.id);
-    const key = `${hd.spriteGfx}-${hd.spritePalette}-${this.level.spriteHeader & SPRITE_MEMORY}-${gfxFilesHash(this.rom, this.spriteGfxFiles()).toString(36)}${custom.length ? '-' + custom.map((c) => c.toString(16)).join('.') : ''}`;
-    if (key === this.spriteKey) return;
-    this.spriteKey = key;
-    this.learner.cancel('variants');
-    this.learner.cancel('bytes');
-    const map = new Map<number, HTMLCanvasElement>();
-    this.spriteThumbs = map;
-    const show = (images: Iterable<[number, SpriteImage]>) => { for (const [n, img] of images) map.set(n, this.spriteCanvas(img)); };
-    const all = [...Array.from({ length: 0xe7 }, (_, i) => i), ...custom]; // as listed in the palette
-    const lvNum = this.level.number;
-    const bg = this.level.layer2Pointer >> 16 === 0xff ? this.level.layer2Pointer : 0xffd900;
-    const header = { ...hd };
-    const sh = this.level.spriteHeader;
-    // i4: with the sprites from $C9 on (shells, groups), failed batches retried one by one; sprites
+    const lv = this.level, hd = lv.header, show = this.showSprites;
+    const all = [...Array.from({ length: 0xe7 }, (_, i) => i), ...this.customSprites().map((c) => c.id)]; // as listed in the palette
+    const lvNum = lv.number, bg = lv.layer2Pointer >> 16 === 0xff ? lv.layer2Pointer : 0xffd900;
+    const header = { ...hd }, sh = lv.spriteHeader;
+    // i5: with the input; sprites from $C9 on (shells, groups), failed batches retried one by one, sprites
     // that draw nothing shown by what they spawn
-    const stored = this.learner.learn(`i4${key}`, function* (emu) {
+    const stored = this.learner.learn(`i5${hd.spriteGfx}-${hd.spritePalette}`, function* (emu) {
+      show(null);
       const images: [number, SpriteImage][] = [];
       for (let i = 0; i < all.length; i += 6) {
         // one test level load (six sprite slots) per step
@@ -611,34 +602,53 @@ export class App {
         yield `Sprite graphics ${Math.min(100, Math.round((i + 6) / all.length * 100))} %`;
       }
       return images;
-    }, {
-      lane: 'sprites', replace: true, label: 'Sprite graphics',
-      progress: () => this.emit('sprites'),
-      done: (images) => { show(images); this.emit('sprites'); },
-    });
-    if (stored) { show(stored); this.emit('sprites'); }
+    }, { input: this.spriteInput(), lane: 'sprites', replace: true, label: 'Sprite graphics', progress: this.spritesShown, done: this.spritesLearned });
+    if (stored && stored !== this.spritesFrom) this.spritesLearned(stored);
   }
+  private spritesFrom: [number, SpriteImage][] | null = null; // the images spriteThumbs shows
+  private spritesLearned = (images: [number, SpriteImage][]) => {
+    this.showSprites(null);
+    this.showSprites(images);
+    this.spritesFrom = images;
+    this.emit('sprites');
+  };
+  // adds images to spriteThumbs (null: clears it)
+  private showSprites = (images: Iterable<[number, SpriteImage]> | null) => {
+    if (!images) { this.spriteThumbs.clear(); this.spritesFrom = null; return; }
+    for (const [n, img] of images) this.spriteThumbs.set(n, this.spriteCanvas(img));
+  };
+
+  // What sprite images depend on besides the ROM bytes they read: the level's sprite settings (sprite memory:
+  // a sprite whose OAM range is too small is captured as the game shows it), the content of its sprite
+  // graphics files (graphics data isn't among the bytes read, see gfxSkipMask) and the custom sprites
+  private spriteInput(): unknown {
+    const lv = this.level, hd = lv.header, files = this.spriteGfxFiles();
+    const m = this.spriteFiles;
+    if (m.gen !== this.rom.gen || m.files !== files.join()) { m.gen = this.rom.gen; m.files = files.join(); m.hash = gfxFilesHash(this.rom, files); }
+    return { gfx: hd.spriteGfx, palette: hd.spritePalette, memory: lv.spriteHeader & SPRITE_MEMORY, files: m.hash, custom: this.customSprites().map((c) => c.id) };
+  }
+  private spriteFiles = { gen: -1, files: '', hash: 0 }; // the hash of the sprite graphics files
 
   // image of sprite id (see spriteId) at tile (x, y): sprites that start differently depending on their
   // position (see SpriteVariants) get an own image per variant, captured in the background once known;
   // custom sprites with extra bytes other than 0 one per bytes
   spriteImage(id: number, x: number, y: number, bytes?: number[]): HTMLCanvasElement | undefined {
-    const base = this.spriteThumbs?.get(id);
+    const base = this.spriteThumbs.get(id);
     const lv = this.level, bg = lv.layer2Pointer >> 16 === 0xff ? lv.layer2Pointer : 0xffd900;
-    const shown = this.spritesShown;
+    const shown = this.spritesShown, set = `${lv.header.spriteGfx}-${lv.header.spritePalette}`;
     if (bytes?.some((b) => b)) {
       const b = [...bytes];
-      const img = this.learner.learn(`b2${this.spriteKey}:${id}:${b.join(',')}`, function* (emu) {
+      const img = this.learner.learn(`b3${set}:${id}:${b.join(',')}`, function* (emu) {
         return captureSprites(emu, lv.number, lv.header, lv.spriteHeader, bg, [id], undefined, b).get(id) ?? null;
-      }, { lane: 'bytes', done: shown });
+      }, { input: this.spriteInput(), lane: 'bytes', done: shown });
       return img ? this.spriteCanvas(img) : base;
     }
     const p = this.probes.sprite(id);
     if (!p || p.variants.reps.length < 2) return base;
     const at = p.variants.reps[variantOf(p.variants, x, y)];
-    const img = this.learner.learn<SpriteImage | null>(`v${this.spriteKey}:${id}:${at.x}:${at.y}`, function* (emu) {
+    const img = this.learner.learn<SpriteImage | null>(`v5${set}:${id}:${at.x}:${at.y}`, function* (emu) {
       return captureSpriteAt(emu, lv.number, lv.header, lv.spriteHeader, bg, id, at.x, at.y);
-    }, { lane: 'variants', label: (n) => `Sprite variants (${n})`, done: shown });
+    }, { input: this.spriteInput(), lane: 'variants', label: (n) => `Sprite variants (${n})`, done: shown });
     return img ? this.spriteCanvas(img) : base;
   }
   private spritesShown = () => this.emit('sprites');
@@ -648,7 +658,7 @@ export class App {
   }
 
   // ROM bytes of GFX file data: emulated results don't depend on them (graphics only reach VRAM);
-  // sprite images name the sprite files' content in their key instead
+  // sprite images and object thumbnails have the files' content in their input instead
   private gfxMaskMemo: { gen: number; mask: Uint8Array | null } = { gen: -1, mask: null };
   gfxSkipMask(): Uint8Array | null {
     const m = this.gfxMaskMemo;
@@ -779,12 +789,6 @@ export class App {
       o.out = tiles.size || colors.size ? { tiles: new Set([...res.tiles, ...tiles.keys()]), colors: new Set([...res.colors, ...colors.keys()]) } : res;
     }
     return o.out;
-  }
-
-  palettesChanged(): void {
-    this.spriteKey = '';
-    this.ensureSpriteImages();
-    this.emit('palettes');
   }
 
   // ------------- queries -------------
@@ -1164,8 +1168,6 @@ export class App {
   private levelChanged(rerender: boolean): void {
     if (rerender) this.refresh();
     this.emit('change');
-    // sprite memory may have changed (not while dragging: the commit checks it)
-    if (!this.edits.editing) this.ensureSpriteImages();
     this.scheduleSpriteMem();
     if (this.layerGone()) this.setMode('l1'); // (its header changed, an edit undone)
   }
@@ -1542,7 +1544,6 @@ export class App {
       if (wait > 0) { this.romTimer = window.setTimeout(run, wait); return; }
       this.romTimer = 0;
       this.refresh();
-      setTimeout(() => this.palettesChanged(), 0); // separate task: input gets through in between
     };
     this.romTimer = window.setTimeout(run, 150);
     clearTimeout(this.persistTimer);
@@ -1559,7 +1560,6 @@ export class App {
     clearTimeout(this.romTimer); // (openLevel draws it)
     this.romTimer = 0;
     this.openLevel(this.level.number, true);
-    this.palettesChanged();
   }
 
   // a stroke ended: the re-emulation waits for a pause in drawing
@@ -1573,7 +1573,6 @@ export class App {
     clearTimeout(this.romTimer);
     this.romTimer = 0;
     this.refresh();
-    this.palettesChanged();
   }
 
   // the graphics workspace on a GFX/ExGFX file
