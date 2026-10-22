@@ -45,7 +45,7 @@ import { levelInput, inputHash } from '../core/inputs.ts';
 import { map16Tile, bgTile } from '../core/ram.ts';
 import { exanimTiles, exanimColors, exanimPeriod, readLevelList, readGlobalList } from '../core/exanim.ts';
 import { emptyTriggerView, usedTriggers, initTriggers, type TriggerView, type SlotRef } from '../core/extrigger.ts';
-import { LevelUses, levelTilesOf, levelTilesAll, levelOverride, usedLevels, spriteUsage, isTilesetTile, type LevelTiles, type SpriteUser } from '../core/levelusage.ts';
+import { LevelUses, levelTilesAll, levelOverride, usedLevels, spriteUsage, isTilesetTile, type LevelTiles, type SpriteUser } from '../core/levelusage.ts';
 import { TILESETS, tilesetPointers, sharingTilesets } from '../core/tilesets.ts';
 import { slipperyActions } from '../core/slippery.ts';
 
@@ -716,12 +716,15 @@ export class App {
     const sprites = [...lv.sprites].sort((a, b) => a.x - b.x || a.y - b.y || a.num - b.num || a.extra - b.extra);
     if (this.usedMem.gen !== this.rom.gen) this.usedMem = { gen: this.rom.gen, list: usedSpriteMemory(this.rom) };
     const candidates = this.usedMem.list;
-    const key = `sm2${lv.number}:${mem}:${JSON.stringify(lv.header)}:${candidates.join(',')}:${sprites.map((q) => `${q.num}.${q.x}.${q.y}.${q.extra}${q.bytes?.length ? '.' + q.bytes.join('-') : ''}`).join(' ')}`;
-    if (this.spriteMem?.key === key) return;
+    const bg = lv.layer2Pointer >> 16 === 0xff ? lv.layer2Pointer : 0xffd900, header = { ...lv.header };
+    // the test level it plays: the level's header and BG, its sprites
+    const input = { header, bg, candidates, sprites: sprites.map((q) => [q.num, q.x, q.y, q.extra, q.bytes ?? []]) };
+    const key = `sm3:${lv.number}`, checked = `${key}#${inputHash(input)}`;
+    if (this.spriteMem?.key === checked) return;
     const run = ++this.spriteMemRun;
     const done = (r: { lost: number[]; suggestion: number | null }) => {
       if (run !== this.spriteMemRun || this.level !== lv) return;
-      const cur = { key, level: lv.number, mem, gen, conflicts: new Set(r.lost.map((i) => sprites[i].uid)), suggestion: r.suggestion };
+      const cur = { key: checked, level: lv.number, mem, gen, conflicts: new Set(r.lost.map((i) => sprites[i].uid)), suggestion: r.suggestion };
       this.spriteMem = cur;
       this.emit('sprite-mem');
       if (gen !== this.edits.levelGen) return; // edited meanwhile: checked again
@@ -729,11 +732,10 @@ export class App {
       this.spriteMemBase = cur;
       if (base) this.autoSpriteMem(base, cur);
     };
-    const bg = lv.layer2Pointer >> 16 === 0xff ? lv.layer2Pointer : 0xffd900, header = { ...lv.header };
     const stored = this.learner.learn(key, function* (emu) {
       const r = yield* spriteMemJob({ emu, level: lv.number, header, bgPointer: bg }, mem, candidates, sprites);
       return { lost: [...r.check.conflicts].map((u) => sprites.findIndex((q) => q.uid === u)), suggestion: r.suggestion };
-    }, { lane: 'spritemem', replace: true, label: 'Checking sprite memory', done });
+    }, { input, lane: 'spritemem', replace: true, label: 'Checking sprite memory', done });
     if (stored) done(stored);
   }
 
@@ -976,13 +978,11 @@ export class App {
   // learned in the background ('level-uses' as they come); pending: how many are still missing
   levelTiles(): { levels: LevelTiles[]; pending: number } {
     const idx = this.usesIndex ??= new LevelUses(this.rom, this.results);
-    if (this.currentTiles?.render !== this.render) {
-      // a level with conditional Direct Map16 objects: in both of their states, whatever the view's flags
-      const emu = this.learner.emu();
-      const tiles = this.levelFlags().size ? levelTilesAll(this.rom, this.level, (o) => emu.load(this.level.number, o), this.buildOverrides()) : levelTilesOf(this.rom, this.level, this.render);
-      this.currentTiles = { render: this.render, tiles };
-    }
-    const levels = [this.currentTiles.tiles];
+    // the open level's (kept in memory with the level as edited as their input); a level with conditional
+    // Direct Map16 objects in both of their states, whatever the view's flags
+    const rom = this.rom, lv = this.level, ov = this.buildOverrides();
+    const here = this.learner.now(`lt:${lv.number}`, (emu) => emu.tracked(() => levelTilesAll(rom, lv, (o) => emu.load(lv.number, o), ov)), { input: this.levelInput(ov), keep: 'memory' });
+    const levels = [here];
     let pending = 0;
     for (const n of usedLevels(this.rom)) {
       if (n === this.level.number) continue;
@@ -1018,7 +1018,6 @@ export class App {
   private savedSprites: { level: number; uses: Map<number, SpriteUser[]> } | null = null;
 
   private usesIndex: LevelUses | null = null;
-  private currentTiles: { render: LevelRender; tiles: LevelTiles } | null = null;
 
   // the other levels' tiles not known (each stored by LevelUses), 'level-uses' as they come
   private learnLevelTiles(idx: LevelUses): void {
