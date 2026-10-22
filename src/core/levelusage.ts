@@ -18,6 +18,7 @@ import {
 import { layerGeom } from './render.ts';
 import { bgFromWram, BG_SIZE } from './bg.ts';
 import { map16Tile } from './ram.ts';
+import { inputHash, levelInput } from './inputs.ts';
 import { flagBytes, usedFlags, structTiles } from './cdm16.ts';
 import { DM16_EXT, VANILLA_GFX, GFX_FILES, gfxEntry } from './patches.ts';
 import { STRUCT_EXT, listStructures } from './structs.ts';
@@ -105,40 +106,27 @@ export function levelOverride(rom: Rom, lv: Level): LevelOverride {
   return { layer1: l1, layer2: l2 ?? undefined, layer2Pointer: l2 ? undefined : lv.layer2Pointer, byteOwner };
 }
 
-// the level data a load is given, as a 64-bit hash (two 32-bit ones)
-function hashOf(ov: LevelOverride): string {
-  let a = 0x811c9dc5, c = 0x2545f491;
-  const add = (v: number) => { a = Math.imul(a ^ v, 0x01000193); c = Math.imul(c ^ v, 0xc2b2ae35) ^ (c >>> 13); };
-  for (const b of [ov.layer1, ov.layer2, Uint8Array.of(ov.layer2Pointer ?? 0, (ov.layer2Pointer ?? 0) >> 8, (ov.layer2Pointer ?? 0) >> 16)]) {
-    if (!b) { add(0x100); continue; }
-    for (let i = 0; i < b.length; i++) add(b[i]);
-    add(0x200 | (b.length & 0xff)); add(b.length >> 8);
-  }
-  return `${(a >>> 0).toString(16)}.${(c >>> 0).toString(16)}`;
-}
-
-export const levelTilesKey = (n: number) => `lu1:${n}`;
-interface Stored { data: string; tiles: LevelTiles } // data: the hash of the level data it was learned from
+export const levelTilesKey = (n: number) => `lu2:${n}`; // (its input: the level as saved, inputs.ts)
 
 // The tiles of the ROM's levels as saved, learned a level at a time (scan) and kept in the result cache.
 export class LevelUses {
   private rom: Rom;
   private results: ResultCache;
-  private inputs = { gen: -1, of: new Map<number, { lv: Level; data: string } | null>() };
+  private inputs = { gen: -1, of: new Map<number, { lv: Level; input: string } | null>() };
 
   constructor(rom: Rom, results: ResultCache) {
     this.rom = rom;
     this.results = results;
   }
 
-  // the level as saved and its data's hash (null: it can't be read), once per ROM state
-  private input(n: number): { lv: Level; data: string } | null {
+  // the level as saved and the hash of its input (null: it can't be read), once per ROM state
+  private input(n: number): { lv: Level; input: string } | null {
     if (this.inputs.gen !== this.rom.gen) this.inputs = { gen: this.rom.gen, of: new Map() };
     let v = this.inputs.of.get(n);
     if (v === undefined) {
       const reads = this.rom.reads;
-      this.rom.reads = null; // (reading the level isn't part of an emulated result: its data is checked by the hash)
-      try { const lv = loadLevel(this.rom, n); v = { lv, data: hashOf(levelOverride(this.rom, lv)) }; } catch { v = null; } finally { this.rom.reads = reads; }
+      this.rom.reads = null; // (reading the level isn't part of an emulated result: it is its input)
+      try { const lv = loadLevel(this.rom, n); v = { lv, input: inputHash(levelInput(n, levelOverride(this.rom, lv))) }; } catch { v = null; } finally { this.rom.reads = reads; }
       this.inputs.of.set(n, v);
     }
     return v;
@@ -148,8 +136,7 @@ export class LevelUses {
   tiles(n: number): LevelTiles | undefined {
     const i = this.input(n);
     if (!i) return { level: n, tileset: 0, ok: false, fg: [], bg: [] };
-    const s = this.results.get<Stored>(levelTilesKey(n));
-    return s?.data === i.data ? s.tiles : undefined;
+    return this.results.get<LevelTiles>(levelTilesKey(n), i.input);
   }
 
   // the levels whose tiles are not known
@@ -167,7 +154,7 @@ export class LevelUses {
     // the load's temporary ROM patches are undone, so the levels read before still hold
     if (this.inputs.gen === gen) this.inputs.gen = this.rom.gen;
     const tiles = run.result ?? { level: n, tileset: i.lv.header.tileset, ok: false, fg: [], bg: [] };
-    this.results.set(levelTilesKey(n), { data: i.data, tiles } satisfies Stored, this.results.fp.deps(run.reads));
+    this.results.set(levelTilesKey(n), tiles, this.results.fp.deps(run.reads), i.input);
     return tiles;
   }
 }
