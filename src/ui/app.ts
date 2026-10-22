@@ -40,6 +40,7 @@ import { variantOf, blockKey, type BlockProbe, type RunStates } from '../core/bl
 import type { ProbeReply } from '../core/probehost.ts';
 import { ProbeClient } from '../core/probeclient.ts';
 import { ResultLearner } from '../core/learner.ts';
+import { levelInput } from '../core/inputs.ts';
 import { map16Tile, bgTile } from '../core/ram.ts';
 import { exanimTiles, exanimColors, exanimPeriod, readLevelList, readGlobalList } from '../core/exanim.ts';
 import { emptyTriggerView, usedTriggers, initTriggers, type TriggerView, type SlotRef } from '../core/extrigger.ts';
@@ -326,6 +327,12 @@ export class App {
       exTriggers: this.exTriggers,
       secondaryHeader: encodeSecondaryHeader(lv.secondary),
     };
+  }
+
+  // What every result learned from the level as edited depends on outside the ROM (inputs.ts): its data and the
+  // view settings, as a load is given them (ov); the learner's input for such results
+  levelInput(ov = this.buildOverrides()): ReturnType<typeof levelInput> {
+    return levelInput(this.level.number, ov);
   }
 
   refresh(): void {

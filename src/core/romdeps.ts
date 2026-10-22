@@ -153,10 +153,12 @@ export class RomFingerprint {
 export interface CacheEntry {
   deps: RomDeps;
   data: unknown;
+  input?: string; // the hash of the result's input (inputs.ts), if it has one
 }
 
 // results by key, checked against the ROM once per fingerprint generation; changed and dropped
-// keys are collected for storing (see flush())
+// keys are collected for storing (see flush()). A result with an input holds for that input only (one
+// result per key: another input's replaces it).
 export class ResultCache {
   fp: RomFingerprint;
   private entries = new Map<string, CacheEntry & { gen: number }>();
@@ -168,9 +170,9 @@ export class ResultCache {
     this.fp = fp;
   }
 
-  get<T>(key: string): T | undefined {
+  get<T>(key: string, input?: string): T | undefined {
     const e = this.entries.get(key);
-    if (!e) return undefined;
+    if (!e || e.input !== input) return undefined;
     this.fp.sync();
     if (e.gen !== this.fp.gen) {
       if (!this.fp.valid(e.deps)) {
@@ -187,13 +189,13 @@ export class ResultCache {
 
   // the entry under key, if it holds for the current ROM
   entry(key: string): CacheEntry | undefined {
-    if (this.get(key) === undefined) return undefined;
-    const e = this.entries.get(key)!;
-    return { deps: e.deps, data: e.data };
+    const e = this.entries.get(key);
+    if (!e || this.get(key, e.input) === undefined) return undefined;
+    return { deps: e.deps, data: e.data, input: e.input };
   }
 
-  set(key: string, data: unknown, deps: RomDeps): void {
-    this.entries.set(key, { deps, data, gen: this.fp.gen });
+  set(key: string, data: unknown, deps: RomDeps, input?: string): void {
+    this.entries.set(key, { deps, data, input, gen: this.fp.gen });
     this.dropped.delete(key);
     this.dirty.add(key);
     this.onChange?.();
@@ -207,7 +209,7 @@ export class ResultCache {
   // changed entries to store and dropped keys to delete since the last call
   flush(): { put: [string, CacheEntry][]; del: string[] } {
     const put: [string, CacheEntry][] = [];
-    for (const k of this.dirty) { const e = this.entries.get(k); if (e) put.push([k, { deps: e.deps, data: e.data }]); }
+    for (const k of this.dirty) { const e = this.entries.get(k); if (e) put.push([k, { deps: e.deps, data: e.data, input: e.input }]); }
     const del = [...this.dropped];
     this.dirty.clear();
     this.dropped.clear();

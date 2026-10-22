@@ -1,10 +1,12 @@
 // Learning emulated results on the main thread (learner.ts): a result the cache holds comes back without
 // running anything; two requests for one key run its job once; a sliced job during which the ROM bytes it
-// read change keeps nothing and is learned again.
+// read change keeps nothing and is learned again. A result with an input (inputs.ts) is learned again when
+// the input or a byte it read changes, and reused when neither does; one kept in memory isn't stored.
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { ResultCache, RomFingerprint } from '../src/core/romdeps.ts';
 import { ResultLearner } from '../src/core/learner.ts';
+import { inputHash, levelInput } from '../src/core/inputs.ts';
 import { editorImage } from './fixture.ts';
 
 let fail = 0;
@@ -108,6 +110,57 @@ function* sum(n: number): Generator<void, number> {
   await drain();
   check(runs === 1 && results.get('u') === 0, 'a write elsewhere keeps the result');
   rom.w8(spare + 0x200, 0);
+}
+
+// inputs: hashed canonically (not by identity or key order), the level as edited without what only records a load
+{
+  const a = { x: 1, s: new Set([1, 2]), m: new Map([[1, 'a']]), b: Uint8Array.of(1, 2) };
+  const b = { b: Uint8Array.of(1, 2), m: new Map([[1, 'a']]), s: new Set([2, 1]), x: 1, f: () => 0, u: undefined };
+  check(inputHash(a) === inputHash(b), 'equal inputs hash alike');
+  check(inputHash({ ...a, x: 2 }) !== inputHash(a) && inputHash({ ...a, b: Uint8Array.of(1, 3) }) !== inputHash(a)
+    && inputHash({ ...a, s: new Set([1]) }) !== inputHash(a) && inputHash([1, 2]) !== inputHash([2, 1]), 'a changed field changes the hash');
+  const ov = { layer1: Uint8Array.of(1, 2, 3), sprites: Uint8Array.of(0, 0xff) };
+  check(inputHash(levelInput(0x105, { ...ov, byteOwner: new Int32Array(4) })) === inputHash(levelInput(0x105, ov)), 'the level input leaves out what records a load');
+  check(inputHash(levelInput(0x105, { ...ov, switchPalaces: true })) !== inputHash(levelInput(0x105, ov))
+    && inputHash(levelInput(0x106, ov)) !== inputHash(levelInput(0x105, ov)), 'a view setting or another level changes it');
+}
+
+// a result with an input, learned at once and sliced: reused for the same input, learned again for another one
+// or when a byte it read changed
+for (const keep of [true, 'memory'] as const) {
+  const { results, learner, drain } = editor();
+  const what = keep === true ? 'stored' : 'kept in memory';
+  runs = 0;
+  const run = (emu: LevelEmulator) => emu.tracked(() => { runs++; return rom.r8(spare) + 1; });
+  learner.now('i', run, { input: { a: 1 }, keep });
+  learner.now('i', run, { input: { a: 1 }, keep });
+  check(runs === 1, `${what}: the same input reuses the result (${runs} runs)`);
+  learner.now('i', run, { input: { a: 2 }, keep });
+  check(runs === 2, `${what}: another input learns it again`);
+  rom.w8(spare, 4);
+  check(learner.now('i', run, { input: { a: 2 }, keep }) === 5 && runs === 3, `${what}: a changed byte it read learns it again`);
+  rom.w8(spare, 0);
+  runs = 0;
+  const heard: number[] = [];
+  learner.learn('j', () => sum(2), { input: 'x', keep, done: (r) => heard.push(r) });
+  await drain();
+  check(learner.learn('j', () => sum(2), { input: 'x', keep }) === 0 && runs === 1, `${what}, sliced: the same input reuses it`);
+  check(learner.learn('j', () => sum(2), { input: 'y', keep }) === undefined, `${what}, sliced: another input learns it again`);
+  await drain();
+  check(runs === 2 && learner.learn('j', () => sum(2), { input: 'y', keep }) === 0, `${what}, sliced: learned for the new input`);
+  const stored = results.flush().put.map(([k]) => k);
+  check(keep === true ? stored.includes('i') && stored.includes('j') : !stored.length, `${what}: ${keep === true ? 'in' : 'not in'} the result cache (${stored})`);
+}
+
+// two inputs asked for in one lane with replace: only the latest is learned
+{
+  const { learner, drain } = editor();
+  runs = 0;
+  const heard: string[] = [];
+  learner.learn('r', () => sum(3), { input: 1, keep: 'memory', lane: 'l', replace: true, done: () => heard.push('1') });
+  learner.learn('r', () => sum(3), { input: 2, keep: 'memory', lane: 'l', replace: true, done: () => heard.push('2') });
+  await drain();
+  check(heard.join() === '2', `replace drops the request for another input (${heard})`);
 }
 
 if (fail) { console.log(`${fail} failed`); process.exit(1); }
