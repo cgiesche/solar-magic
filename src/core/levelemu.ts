@@ -216,13 +216,15 @@ export class LevelEmulator {
     if (ov.cdm16Flags) w.set(ov.cdm16Flags.subarray(0, CDM16_FLAGS[1]), CDM16_FLAGS[0] - 0x7e0000);
     w[RAM.gameMode] = GM.levelLoad;
 
-    // temporary pointer patches in the ROM image
+    // temporary pointer patches in the ROM image, taken back after the load: written past rom.w8, as they are
+    // no change of the ROM (rom.gen) – the probe worker would be sent it again, dropping its queue
     const rom = this.rom;
     const saved: [number, number][] = [];
     const patch = (snes: number, v: number) => {
-      saved.push([snes, rom.data[snesToPc(snes)]]);
-      s.romSkip.add(snesToPc(snes)); // their content doesn't matter: reads don't count for romPages
-      rom.w8(snes, v);
+      const o = snesToPc(snes);
+      saved.push([o, rom.data[o]]);
+      s.romSkip.add(o); // their content doesn't matter: reads don't count for romPages
+      rom.data[o] = v & 0xff;
     };
     const patch24 = (snes: number, v: number) => { patch(snes, v); patch(snes + 1, v >> 8); patch(snes + 2, v >> 16); };
     if (ov.layer1) {
@@ -336,7 +338,7 @@ export class LevelEmulator {
     } finally {
       s.hook = null;
       s.taintOn = false;
-      for (let i = saved.length - 1; i >= 0; i--) rom.w8(saved[i][0], saved[i][1]);
+      for (let i = saved.length - 1; i >= 0; i--) rom.data[saved[i][0]] = saved[i][1];
       s.romSkip.clear();
     }
     return {

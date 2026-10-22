@@ -39,6 +39,18 @@ const TITLE_BYTE = 0x7fc0; // the internal name: not read while booting
   check(rom.gen === g, 'reads don\'t count');
 }
 
+// a load's temporary pointer patches (the level as edited, a start header …) are no change of the ROM: the
+// probe worker isn't sent it again (dropping its queue and the level scan running) after a test play or render
+{
+  const rom = fresh(), emu = new LevelEmulator(rom);
+  emu.load(0x105);
+  const before = rom.data.slice(), g = rom.gen;
+  const r = emu.load(0x105, { layer1: new Uint8Array([0, 0, 0, 0, 0, 0xff]), sprites: new Uint8Array([0, 0xff]), secondaryHeader: [0, 0, 0, 0], music: 1 });
+  check(r.ok, 'load with overrides');
+  check(rom.gen === g, 'temporary patches don\'t count as a change');
+  check(rom.data.every((b, i) => b === before[i]), 'and are taken back');
+}
+
 // a byte the boot read changed: the next load boots again; any other change keeps the boot snapshot
 {
   const rom = fresh(), emu = new LevelEmulator(rom);
