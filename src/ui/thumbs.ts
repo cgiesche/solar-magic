@@ -27,7 +27,7 @@ export interface ObjThumb { key: string; w: number; h: number; px: Uint32Array; 
 export function thumbsKey(level: Level, specs: ObjSpec[], keyOf: (s: ObjSpec) => string): string {
   const h = level.header;
   // (o3: with the level they are drawn in as their input)
-  return `o3${h.tileset}-${h.fgPalette}-${h.bgPalette}:${hashStr(specs.map((s) => `${s.num}.${s.ext}.${s.size}=${keyOf(s)}`).join())}`;
+  return `o3${h.tileset}-${h.fgPalette}-${h.bgPalette}:${inputHash(specs.map((s) => `${s.num}.${s.ext}.${s.size}=${keyOf(s)}`))}`;
 }
 
 // what they depend on outside the ROM bytes they read: the level they are drawn in as edited (its number
@@ -36,7 +36,14 @@ export function thumbsKey(level: Level, specs: ObjSpec[], keyOf: (s: ObjSpec) =>
 // has its own.
 export function thumbsInput(rom: Rom, level: Level): unknown {
   const files = layerSlots(levelSlots(rom, level.number, level.header)).map((s) => s.file);
-  return { level: level.number, header: { ...level.header, screens: 0, mode: 0 }, gfx: gfxFilesHash(rom, files) };
+  return { level: level.number, header: { ...level.header, screens: 0, mode: 0 }, gfx: filesHash(rom, files) };
+}
+// (once per ROM state and files)
+const filesMemo = { rom: null as Rom | null, gen: -1, files: '', hash: 0 };
+function filesHash(rom: Rom, files: number[]): number {
+  const m = filesMemo;
+  if (m.rom !== rom || m.gen !== rom.gen || m.files !== files.join()) Object.assign(m, { rom, gen: rom.gen, files: files.join(), hash: gfxFilesHash(rom, files) });
+  return m.hash;
 }
 
 export function thumbCanvas(t: ObjThumb): HTMLCanvasElement {
@@ -47,12 +54,6 @@ export function thumbCanvas(t: ObjThumb): HTMLCanvasElement {
   new Uint32Array(id.data.buffer).set(t.px);
   ctx.putImageData(id, 0, 0);
   return c;
-}
-
-function hashStr(s: string): string {
-  let a = 0x811c9dc5;
-  for (let i = 0; i < s.length; i++) a = Math.imul(a ^ s.charCodeAt(i), 0x01000193);
-  return (a >>> 0).toString(36);
 }
 
 // all at once (see objectThumbsJob)

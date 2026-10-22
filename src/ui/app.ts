@@ -40,6 +40,7 @@ import { variantOf, blockKey, type BlockProbe, type RunStates } from '../core/bl
 import type { ProbeReply } from '../core/probehost.ts';
 import { ProbeClient } from '../core/probeclient.ts';
 import { ResultLearner } from '../core/learner.ts';
+import type { RomReads } from '../core/romdeps.ts';
 import { objectThumbsJob, thumbsKey, thumbsInput, objKey, type ObjSpec, type ObjThumb } from './thumbs.ts';
 import { levelInput, inputHash } from '../core/inputs.ts';
 import { map16Tile, bgTile } from '../core/ram.ts';
@@ -683,6 +684,20 @@ export class App {
     return m.mask;
   }
 
+  // the content of the bytes gfxSkipMask leaves out of the bytes read (graphics and ExAnimation data), for
+  // results that depend on them; once per ROM state
+  private maskedHash(): number {
+    const m = this.maskedMemo;
+    if (m.gen !== this.rom.gen) {
+      const mask = this.gfxSkipMask(), d = this.rom.data;
+      let h = 0x811c9dc5;
+      if (mask) for (let i = 0; i < d.length; i++) if (mask[i]) h = Math.imul(h ^ d[i], 0x01000193);
+      m.gen = this.rom.gen; m.hash = h >>> 0;
+    }
+    return m.hash;
+  }
+  private maskedMemo = { gen: -1, hash: 0 };
+
   // GFX files in the level's sprite slots (sprite images depend on these only)
   private spriteGfxFiles(): number[] {
     const hd = this.level.header;
@@ -718,7 +733,7 @@ export class App {
     const candidates = this.usedMem.list;
     const bg = lv.layer2Pointer >> 16 === 0xff ? lv.layer2Pointer : 0xffd900, header = { ...lv.header };
     // the test level it plays: the level's header and BG, its sprites
-    const input = { header, bg, candidates, sprites: sprites.map((q) => [q.num, q.x, q.y, q.extra, q.bytes ?? []]) };
+    const input = { mem, header, bg, candidates, sprites: sprites.map((q) => [q.num, q.x, q.y, q.extra, q.bytes ?? []]) };
     const key = `sm3:${lv.number}`, checked = `${key}#${inputHash(input)}`;
     if (this.spriteMem?.key === checked) return;
     const run = ++this.spriteMemRun;
@@ -771,7 +786,7 @@ export class App {
   animated(): { tiles: Set<number>; colors: Set<number> } | null {
     const n = this.level.number, ov = this.buildOverrides();
     const res = this.learner.learn(`anim:${n}`, function* (emu) { return animatedIn(emu, n, ov); },
-      { input: this.levelInput(ov), keep: 'memory', lane: 'animated', replace: true, done: this.animatedLearned });
+      { input: { level: this.levelInput(ov), masked: this.maskedHash() }, keep: 'memory', lane: 'animated', replace: true, done: this.animatedLearned });
     if (res) this.animatedShown = { level: n, res };
     return this.withOwnAnims(res ?? (this.animatedShown?.level === n ? this.animatedShown.res : null));
   }
@@ -1035,6 +1050,7 @@ export class App {
   // memory with the level as edited as their input; 'arcs' when some are ready
   private arcs: JumpArcs | null = null;
   private arcsFor = ''; // the ROM and level state the arc emulator is prepared for
+  private arcsLoad: RomReads | null = null; // what preparing it read
   private arcsWaiting = false; // for the run speeds probe
 
   jumpArcs(tx: number, ty: number): JumpArc[] | undefined {
@@ -1052,20 +1068,23 @@ export class App {
     const lv = this.level, ov = this.buildOverrides(), height = this.images.height;
     const level = inputHash({ level: this.levelInput(ov), spriteHeader: lv.spriteHeader, height });
     // (asked for on every paint: joins the job while it is learned)
-    return this.learner.learn(`arcs:${tx},${ty}`, (emu) => this.arcJob(emu, level, () => [lv.number, ov, lv.spriteHeader, height], tx, ty, runs),
+    return this.learner.learn(`arcs:${tx},${ty}`, (emu) => this.arcJob(emu, level, [lv.number, ov, lv.spriteHeader, height], tx, ty, runs),
       { input: { level, runs }, keep: 'memory', lane: 'arcs', replace: true, label: 'Jump arcs', done: this.arcsLearned });
   }
   private arcsLearned = () => this.emit('arcs');
 
-  // (none when the level doesn't reach gameplay)
-  private *arcJob(emu: LevelEmulator, level: string, prepare: () => Parameters<JumpArcs['prepare']>, tx: number, ty: number, runs: RunStates): Generator<void, JumpArc[]> {
+  // (none when the level doesn't reach gameplay); levelHash: the hash of the level state prepared with
+  private *arcJob(emu: LevelEmulator, levelHash: string, prepare: Parameters<JumpArcs['prepare']>, tx: number, ty: number, runs: RunStates): Generator<void, JumpArc[]> {
     if (this.arcs?.emu !== emu) { this.arcs = new JumpArcs(emu); this.arcsFor = ''; }
-    const arcs = this.arcs, state = `${this.rom.gen}:${level}`;
+    const arcs = this.arcs, state = `${this.rom.gen}:${levelHash}`;
     if (this.arcsFor !== state) {
-      this.arcsFor = arcs.prepare(...prepare()) ? state : '';
+      const r = emu.tracked(() => arcs.prepare(...prepare));
+      this.arcsFor = r.result ? state : '';
+      this.arcsLoad = r.reads;
       if (!this.arcsFor) { console.error('jump arcs: the level did not reach gameplay'); return []; }
       yield;
-    }
+    } else this.rom.reads?.add(this.arcsLoad!); // the arcs depend on the level's load they start from too
+
     const out: JumpArc[] = [];
     for (const sp of ARC_SPEEDS) for (const dir of [1, -1] as const) { out.push(arcs.arc(tx, ty, sp, dir, runs)); yield; }
     return out;
