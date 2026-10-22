@@ -14,6 +14,7 @@ import { openSearch } from './ui/search.ts';
 import { openHeaderDialog } from './ui/headerdialog.ts';
 import { hex } from './core/names.ts';
 import { GfxWorkspace, type WsTab } from './ui/gfxworkspace.ts';
+import { openRemapUses } from './ui/tileuses.ts';
 import { openEntrancesDialog, openRomInfo, openInsertDialog, openExpandDialog, openSaveAsDialog, exportLevel, importLevel, openScreenDialog, clearLevelConfirm } from './ui/tools.ts';
 import { menuBar, closeMenus } from './ui/menu.ts';
 import { viewMenu } from './ui/viewmenu.ts';
@@ -172,6 +173,8 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
       { label: 'Insert screen …', disabled: () => app.level.header.screens >= 32, onClick: () => openScreenDialog(app, 'insert') },
       { label: 'Delete screen …', disabled: () => app.level.header.screens <= 1, onClick: () => openScreenDialog(app, 'delete') },
       { label: 'Clear level …', onClick: () => clearLevelConfirm(app) },
+      { label: 'Remap Direct Map16 …', title: 'Which Map16 tiles the Direct Map16 objects of this level or all levels place (Lunar Magic\'s list syntax); the tiles themselves stay', onClick: () => openRemapUses(app, 'fg') },
+      { label: 'Remap Background Tiles …', title: 'Which BG Map16 tiles the BG tilemaps of this level or all levels use (Lunar Magic\'s list syntax); the tiles themselves stay', onClick: () => openRemapUses(app, 'bg') },
       { label: 'Import LM level file …', title: 'A Lunar Magic level file (.mwl, or a .zip with one): its background, Map16 tiles, graphics slots and colors into this level', onClick: () => void openLevelImport(app) },
       'sep',
       { label: 'Secondary entrances …', onClick: () => openEntrancesDialog(app) },

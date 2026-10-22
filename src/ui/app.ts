@@ -982,6 +982,10 @@ export class App {
     if (pending) this.learnLevelTiles(idx);
     return { levels, pending };
   }
+  // a level's BG tilemap from its load (the open one as shown), where it is the game's own (tilemove.ts)
+  loadedBg(n: number): Uint16Array {
+    return bgFromWram(n === this.level.number ? this.render.wram : this.learner.emu().load(n).wram);
+  }
   // the tilesets in which FG Map16 tile t is the open level's tile (all for the standard tiles): the
   // pointers each tileset loads (tilesets.ts), learned once and kept in the result cache
   tilesetsOf(t: number): number[] {

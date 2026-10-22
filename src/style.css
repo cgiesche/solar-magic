@@ -369,6 +369,7 @@ body.mt-dragging .mt-big { outline: 2px dashed var(--accent); outline-offset: -2
 .at-remap-table { border-collapse: collapse; font-size: 12px; }
 .at-remap-table th, .at-remap-table td { text-align: left; padding: 2px 8px 2px 0; vertical-align: top; }
 .at-remap-table tr.changed td:first-child { color: #ffb000; }
+.ru { display: flex; flex-direction: column; gap: 6px; width: 560px; max-width: 80vw; }
 .rl { display: flex; flex-direction: column; gap: 5px; }
 .rl-offset { width: 6em; text-transform: uppercase; }
 .rl-edit { position: relative; }

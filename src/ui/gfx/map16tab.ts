@@ -4,7 +4,8 @@
 // graphics view uses the palette of the quarter under the mouse, else of the first marked one. Clicking or
 // dragging there chooses 8x8 tiles; a right click in the builder puts them with their top-left corner on
 // the quarter under the mouse (right drag paints), as does dropping them there; Enter puts a single one
-// into every marked quarter, a block from the first marked one.
+// into every marked quarter, a block from the first marked one. Move takes the selected tiles to other
+// numbers with every use (tilemove.ts); dragging the selection in the sheet chooses where.
 
 import type { App } from '../app.ts';
 import type { GfxWorkspace, WsPanel } from '../gfxworkspace.ts';
@@ -17,7 +18,7 @@ import { EXT_FIRST, EXT_TILES, actsLike, setActsLike } from '../../core/map16ext
 import { BG_EXT_FIRST, bgTileAddr, bgTileWords, setBgExtTileWords } from '../../core/bgmap16.ts';
 import { blockFileOf } from '../blockdialog.ts';
 import { openResources } from '../resources.ts';
-import { parseMap16File, map16Targets, writeMap16File } from '../../core/map16file.ts';
+import { parseMap16File, map16Targets, writeMap16File, type Map16File } from '../../core/map16file.ts';
 import { renderMap16Sheet } from '../panels.ts';
 import { probeText } from '../../core/blockprobe.ts';
 import { VANILLA_GFX } from '../../core/patches.ts';
@@ -26,11 +27,15 @@ import { levelSlots, layerSlots, slotOfTile, type GfxSlot } from '../../core/gfx
 import { cgramToRGBA } from '../../core/gfx.ts';
 import { tileMatches, drawTileMatches } from '../tilesearch.ts';
 import { animsAt, animLinks } from './animtab.ts';
-import { fgTileUsers, bgTileUsers, tileLinks, unusedFgTiles, isTilesetTile, TILE_SOURCES } from '../../core/levelusage.ts';
+import { fgTileUsers, bgTileUsers, tileLinks, unusedFgTiles, isTilesetTile, usedLevels, TILE_SOURCES } from '../../core/levelusage.ts';
 import { usedInList } from '../usedin.ts';
 import { map16Source, fgTileAddr, setFgWords } from '../../core/render.ts';
-import { remapTile, remapLine, slotRemapLine } from '../../core/remap.ts';
+import { remapTile, remapLine, slotRemapLine, parseRemap } from '../../core/remap.ts';
 import { remapEditor, type RemapEditor } from '../remaplist.ts';
+import { planMove, applyMove, planRemap, rectMap, type MovePlan, type MoveSource } from '../../core/tilemove.ts';
+import { loadLevel } from '../../core/level.ts';
+import { levelSource, planList, openRemapUses } from '../tileuses.ts';
+import { loadAsar } from '../../core/asar.ts';
 import { QuarterGrid, markRect, editMarked, setPalette, setBit, setTileNum, stamp, summary, wholeTiles, FLIP_X, FLIP_Y, PRIO, type QuarterEdit, type MarkMode, type BitState } from '../../core/quarters.ts';
 
 const Z = 2; // sheet zoom
@@ -47,6 +52,8 @@ export type RemapScope = 'sel' | 'uses';
 interface Remapping { ed: RemapEditor; scope: RemapScope; box: HTMLElement; scopes: HTMLElement; status: HTMLElement; preview: HTMLElement }
 // what an offer fills in when it opens the remap
 export interface RemapFill { line?: string; scope?: RemapScope; bg?: boolean }
+// the move panel: where the selection's top left tile goes (-1: not a valid number), the plan for it
+interface Moving { to: number; box: HTMLElement; input: HTMLInputElement; status: HTMLElement; plan: { plan: MovePlan; src: MoveSource } | null }
 // a tile the remap changes: its words and acts-like before and after
 interface RemapRow { tile: number; words: number[]; acts: number | null; newWords: number[]; newActs: number | null; out: number[]; changed: boolean }
 type Cell = { x: number; y: number };
@@ -111,6 +118,7 @@ export class Map16Tab implements WsPanel {
   private gfxScroll = h('div', { class: 'mt-gfx-scroll' }, h('div', { class: 'mt-gfx-wrap' }, this.gfxLabels, this.gfxCanvas));
   private gfxCol = h('div', { class: 'mt-col mt-gfx-col' }, this.gfxTitle, this.gfxScroll);
   private remapping: Remapping | null = null;
+  private moving: Moving | null = null;
   // the visual mode: the marked source 8x8 tiles (cells of the graphics view), where they are dragged to
   private visualFrom: { x: number; y: number; w: number; h: number } | null = null;
   private visualTo: Cell | null = null;
@@ -271,6 +279,8 @@ export class Map16Tab implements WsPanel {
       h('button', { onclick: () => this.paste(), title: 'Paste starting at the selected tile (Ctrl+V)' }, 'Paste'),
       h('button', { class: this.remapping ? 'active' : '', onclick: () => (this.remapping ? this.closeRemap() : this.openRemap()),
         title: 'Change the 8x8 tile numbers, palettes or acts-like of tiles in bulk (Lunar Magic\'s Remap)' }, 'Remap …'),
+      h('button', { class: this.moving ? 'active' : '', onclick: () => (this.moving ? this.closeMove() : this.openMove()),
+        title: 'Move the selected tiles to other numbers, with every level, structure and block using them' }, 'Move …'),
       this.bg ? '' : h('label', { class: 'toggle', title: 'Mark all tiles that act like the selected one' },
         (() => { const cb = h('input', { type: 'checkbox', checked: this.sameActs }); cb.addEventListener('change', () => { this.sameActs = cb.checked; this.drawSheet(); }); return cb; })(),
         'Mark same acts-like'),
@@ -393,6 +403,14 @@ export class Map16Tab implements WsPanel {
       ctx.lineWidth = 2;
       ctx.strokeRect(M + (this.sel & 15) * 16 * Z + 1, row * 16 * Z + 1, this.selW * 16 * Z - 2, this.selH * 16 * Z - 2);
     }
+    const to = this.moving?.to ?? -1, toRow = (to >> 4) - p * 16;
+    if (to >= 0 && toRow < 16 && toRow + this.selH > 0) {
+      ctx.strokeStyle = '#ffb000';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 4]);
+      ctx.strokeRect(M + (to & 15) * 16 * Z + 1, toRow * 16 * Z + 1, this.selW * 16 * Z - 2, this.selH * 16 * Z - 2);
+      ctx.setLineDash([]);
+    }
   }
 
   // tile column and row (over all pages) under the mouse; between pages: the page above
@@ -412,6 +430,7 @@ export class Map16Tab implements WsPanel {
       if (e.button !== 0 || !(e.target instanceof HTMLCanvasElement)) return;
       e.preventDefault();
       const a = this.cellAt(e);
+      if (this.moving && this.inSelection(a)) { this.dragMove(a); return; }
       const pick = (b: { x: number; y: number }) => {
         this.sel = Math.min(a.y, b.y) * 16 + Math.min(a.x, b.x);
         this.selW = Math.abs(a.x - b.x) + 1;
@@ -492,8 +511,9 @@ export class Map16Tab implements WsPanel {
     const app = this.app;
     const b = this.builder;
     const col = this.builderCol;
-    col.classList.toggle('mt-remap-col', !!this.remapping);
+    col.classList.toggle('mt-remap-col', !!this.remapping || !!this.moving);
     if (this.remapping) { if (b.firstChild !== this.remapping.box) b.replaceChildren(this.remapping.box); this.drawRemap(); return; }
+    if (this.moving) { if (b.firstChild !== this.moving.box) b.replaceChildren(this.moving.box); this.drawMove(); return; }
     // the canvas stays in place, so its scroll position and zoom do
     if (b.firstChild !== this.bHead) b.replaceChildren(this.bHead, this.bigScroll, this.bCtl);
     this.buildUses();
@@ -893,9 +913,105 @@ export class Map16Tab implements WsPanel {
     input.focus();
   }
 
+  // ---------- move ----------
+  private inSelection(c: Cell): boolean {
+    return c.x >= (this.sel & 15) && c.x < (this.sel & 15) + this.selW && c.y >= this.sel >> 4 && c.y < (this.sel >> 4) + this.selH;
+  }
+  // the move panel: the selection goes to the typed number or where it is dragged in the sheet
+  openMove(): void {
+    if (this.remapping) this.closeRemap();
+    if (!this.moving) {
+      const input = h('input', { type: 'text', class: 'hex', size: 4, maxLength: 3, spellcheck: false, autocomplete: 'off', title: 'The new number of the top left tile (hex)' });
+      input.addEventListener('input', () => { const v = /^[0-9a-f]{1,3}$/i.test(input.value.trim()) ? parseInt(input.value, 16) : -1; this.setMoveTo(v, false); });
+      input.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') void this.applyMove(); if (e.key === 'Escape') this.closeMove(); });
+      const status = h('div', { class: 'mt-remap' });
+      const box = h('div', { class: 'mt-remap' },
+        h('div', { class: 'prop-title' }, 'Move tiles', h('span', { class: 'hint' }, '  with every use')),
+        h('div', { class: 'row' }, h('label', { class: 'hint', title: 'Or drag the selection in the sheet' }, 'Top left tile to'), input),
+        h('div', { class: 'hint' }, 'Or drag the selection in the sheet. Levels, structures and blocks using the tiles are rewritten, so every level looks as before.'),
+        status);
+      this.moving = { to: -1, box, input, status, plan: null };
+    }
+    if (this.visible) { this.buildBar(); this.redraw(); }
+    this.moving.input.focus();
+  }
+  private closeMove(): void {
+    this.moving = null;
+    this.buildBar();
+    this.redraw();
+  }
+  private setMoveTo(to: number, typed = true): void {
+    const m = this.moving!;
+    m.to = to;
+    if (typed) m.input.value = to < 0 ? '' : hex(to, 3);
+    this.drawSheet();
+    this.drawMove();
+  }
+  // dragging the selection in the sheet chooses its destination
+  private dragMove(a: Cell): void {
+    const move = (ev: MouseEvent) => {
+      const b = this.cellAt(ev), x = (this.sel & 15) + b.x - a.x, y = (this.sel >> 4) + b.y - a.y;
+      const to = x >= 0 && x + this.selW <= 16 && y >= 0 ? y * 16 + x : -1;
+      if (to !== this.moving?.to) this.setMoveTo(to);
+    };
+    const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+  }
+
+  // the plan for the selection's move, with what it rewrites and why it can't be done
+  private drawMove(): void {
+    const m = this.moving;
+    if (!m) return;
+    m.plan = null;
+    const app = this.app, n = this.selW * this.selH, last = m.to + (this.selH - 1) * 16 + this.selW - 1;
+    const what = `${n} ${this.bg ? 'BG' : 'FG'} tile${n > 1 ? 's' : ''} from ${hex(this.sel, 3)}`;
+    if (m.to < 0 || (m.to & 15) + this.selW > 16 || last >= EXT_TILES || m.to === this.sel) {
+      m.status.replaceChildren(h('div', { class: 'hint' }, m.to < 0 || m.to === this.sel ? `Where do the ${what} go?` : 'The tiles do not fit on the page there.'));
+      return;
+    }
+    const map = rectMap(this.sel, this.selW, this.selH, m.to);
+    const { levels: index, pending } = app.levelTiles();
+    const src: MoveSource = { ...levelSource(app, map), blank: map16Source(app.rom, app.render).fg(0x025), index };
+    const plan = planMove(app.rom, this.bg ? 'bg' : 'fg', map, src);
+    m.plan = { plan, src };
+    const ok = !plan.problems.length;
+    m.status.replaceChildren(
+      ...plan.problems.map((q) => h('div', { class: 'warn-box' }, q)),
+      ok && plan.overwrite.length ? h('div', { class: 'warn-box' }, `Tile${plan.overwrite.length > 1 ? 's' : ''} ${plan.overwrite.slice(0, 8).map((t) => hex(t, 3)).join(', ')}${plan.overwrite.length > 8 ? ' …' : ''} ${plan.overwrite.length > 1 ? 'have' : 'has'} graphics, acts-like or a block of ${plan.overwrite.length > 1 ? 'their' : 'its'} own, used nowhere: overwritten (asked first).`) : '',
+      ok ? planList(app, plan, 'No level places these tiles.') : '',
+      ok && pending && !this.bg ? h('div', { class: 'hint' }, `${pending} level${pending > 1 ? 's are' : ' is'} still being looked through for tiles placed by objects' code.`) : '',
+      h('div', { class: 'row' },
+        h('button', { class: 'primary', disabled: !ok, onclick: () => void this.applyMove() }, `Move to ${hex(m.to, 3)}`),
+        h('button', { onclick: () => this.closeMove() }, 'Close')),
+    );
+  }
+
+  // one undo step; a block among the tiles assembles the blocks again
+  private async applyMove(): Promise<void> {
+    const m = this.moving, p = m?.plan;
+    if (!m || !p || p.plan.problems.length) return;
+    const { plan, src } = p, to = m.to, from = this.sel, layer = this.bg ? 'bg' : 'fg';
+    if (plan.overwrite.length && await choose('Overwrite tiles?', `Tile${plan.overwrite.length > 1 ? 's' : ''} ${plan.overwrite.map((t) => hex(t, 3)).join(', ')} ${plan.overwrite.length > 1 ? 'have' : 'has'} contents of ${plan.overwrite.length > 1 ? 'their' : 'its'} own (used nowhere). Overwrite with the moved tiles?`,
+      [{ label: 'Cancel' }, { label: 'Overwrite', danger: true }]) !== 1) return;
+    try {
+      if (plan.blocks.length) await loadAsar();
+      const n = plan.map.size;
+      this.app.romEdit(`${n} ${layer.toUpperCase()} tile${n > 1 ? 's' : ''} moved from ${hex(from, 3)} to ${hex(to, 3)}`, () => applyMove(this.app.rom, layer, plan, src));
+      const l = plan.levels.length;
+      toast(`${n} tile${n > 1 ? 's' : ''} moved${l ? `, ${l} level${l > 1 ? 's' : ''} rewritten` : ''} – Ctrl+Z undoes it`);
+    } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); return; }
+    this.moving = null;
+    this.sel = to;
+    this.buildBar();
+    this.redraw();
+    this.scrollToSel();
+  }
+
   // ---------- remap ----------
   // opens the remap panel; an offer fills in the list and may choose the tiles it changes
   openRemap(fill: RemapFill = {}): void {
+    if (this.moving) this.moving = null;
     if (fill.bg !== undefined && fill.bg !== this.bg) { this.bg = fill.bg; this.sel &= 0x1ff; this.selW = this.selH = 1; }
     if (!this.remapping) {
       const preview = h('div', { class: 'mt-remap-preview' }), scopes = h('div', { class: 'mt-remap-scopes' }), status = h('div', { class: 'mt-remap' });
@@ -1273,13 +1389,14 @@ export class Map16Tab implements WsPanel {
   private async importMap16(): Promise<void> {
     const f = await pickFile('.map16');
     if (!f) return;
+    let m: Map16File;
     try {
-      const m = parseMap16File(new Uint8Array(await f.arrayBuffer()));
+      m = parseMap16File(new Uint8Array(await f.arrayBuffer()));
       const targets = map16Targets(m, this.sel);
       if (targets.some((t) => t >= EXT_TILES)) throw new Error('The tiles no longer fit on the Map16 pages from here');
       this.edit(`${f.name} imported`, () => targets.forEach((t, i) => {
         this.setWords(t, m.tiles[i]);
-        if (m.acts && !this.bg) setActsLike(this.app.rom, t, m.acts[i]);
+        if (m.acts && !this.bg) setActsLike(this.app.rom, t, m.acts![i]);
       }));
       this.selW = Math.min(16, m.width); this.selH = m.height;
       toast(`${m.tiles.length} tile(s) from ${f.name} imported at ${hex(this.sel, 3)}`);
@@ -1287,6 +1404,24 @@ export class Map16Tab implements WsPanel {
     this.buildBar();
     this.redraw();
     await this.offerImportRemap();
+    await this.offerUsesRemap(m);
+  }
+
+  // A .map16 imported elsewhere than it was exported from: the levels using the tiles at their old numbers
+  // may be rewritten to the new ones (Remap Direct Map16 / Background Tiles with the list filled in)
+  private async offerUsesRemap(m: Map16File): Promise<void> {
+    const o = m.origin, layer = this.bg ? 'bg' : 'fg';
+    if (!o || o.bg !== this.bg || o.tile === this.sel) return;
+    const w = Math.min(16, m.width), line = remapLine(o.tile, w, m.height, this.sel);
+    const { remap } = parseRemap(line, { what: 'numbers' });
+    const users = planRemap(this.app.rom, layer, remap.tiles, { levels: usedLevels(this.app.rom), level: (n) => (n === this.app.level.number ? this.app.level : loadLevel(this.app.rom, n)) }).levels;
+    if (!users.length) return;
+    const span = `${hex(o.tile, 3)}–${hex(o.tile + (m.height - 1) * 16 + w - 1, 3)}`;
+    const pick = await choose('Rewrite the levels using these tiles?', h('div', { style: 'max-width:480px' },
+      h('p', null, `The file's tiles were exported from ${span}. ${users.length} level${users.length > 1 ? 's' : ''} here ${users.length > 1 ? 'use' : 'uses'} tiles at those numbers (e.g. ${hex(users[0].level, 3)}).`),
+      h('p', { class: 'hint' }, `${layer === 'fg' ? 'Remap Direct Map16' : 'Remap Background Tiles'} opens with the list filled in; it shows every level it rewrites before anything changes.`)),
+      [{ label: 'Rewrite …', primary: true }, { label: 'Not now' }]);
+    if (pick === 0) openRemapUses(this.app, layer, { line, all: true });
   }
 
   // imported tiles that draw from a slot holding no ExGFX in this level, while ExGFX the tiles don't use
@@ -1325,6 +1460,7 @@ export class Map16Tab implements WsPanel {
     if (ctrl && k.toLowerCase() === 'v') { this.paste(); return true; }
     if (ctrl && k.toLowerCase() === 'a' && !this.remapping) { this.setMarks(this.grid().all()); return true; }
     if (ctrl || e.altKey) return false;
+    if (k === 'Escape' && this.moving) { this.closeMove(); return true; }
     if (k === 'Escape' && this.remapping) { if (this.visualFrom) { this.visualFrom = null; this.drawGfx(); } else this.closeRemap(); return true; }
     if (k === 'Escape') { if (!this.marked().size) return false; this.setMarks(new Set()); return true; }
     if (k === 'Enter' && !this.remapping) { this.fillMarked(); return true; }
