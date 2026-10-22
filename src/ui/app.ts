@@ -41,7 +41,7 @@ import type { ProbeReply } from '../core/probehost.ts';
 import { ProbeClient } from '../core/probeclient.ts';
 import { ResultLearner } from '../core/learner.ts';
 import { objectThumbsJob, thumbsKey, thumbsInput, objKey, type ObjSpec, type ObjThumb } from './thumbs.ts';
-import { levelInput } from '../core/inputs.ts';
+import { levelInput, inputHash } from '../core/inputs.ts';
 import { map16Tile, bgTile } from '../core/ram.ts';
 import { exanimTiles, exanimColors, exanimPeriod, readLevelList, readGlobalList } from '../core/exanim.ts';
 import { emptyTriggerView, usedTriggers, initTriggers, type TriggerView, type SlotRef } from '../core/extrigger.ts';
@@ -93,6 +93,25 @@ export type AppEvent =
   | 'import-gfx'; // the graphics workspace imports App.gfxImport
 
 const CACHE_PREFIX = 'rc3:'; // IndexedDB keys of the result cache (bump when result formats change or old results may be wrong: rc3 after the stale boot snapshot fix)
+
+// the 8x8 tiles (layer 1 tile numbers) and colors that change in level n (ov) over 16 times 4 frames (none
+// when it fails)
+function animatedIn(emu: LevelEmulator, n: number, ov: LevelOverride): { tiles: Set<number>; colors: Set<number> } {
+  const tiles = new Set<number>(), colors = new Set<number>();
+  try {
+    const r = emu.load(n, ov);
+    const frames = emu.animationFrames(16, 4);
+    const base = (r.ppuRegs[0x0b] & 0x0f) << 13;
+    for (const f of frames) {
+      for (let t = 0; t < 0x400; t++) {
+        const o = (base + t * 32) & 0xffff;
+        for (let b = 0; b < 32; b++) if (f.vram[o + b] !== r.vram[o + b]) { tiles.add(t); break; }
+      }
+      for (let c = 0; c < 256; c++) if (f.cgram[c * 2] !== r.cgram[c * 2] || f.cgram[c * 2 + 1] !== r.cgram[c * 2 + 1]) colors.add(c);
+    }
+  } catch (e) { console.error(e); return { tiles: new Set(), colors: new Set() }; }
+  return { tiles, colors };
+}
 
 // result of the sprite memory check (see App.checkSpriteMem); gen: the edit session's levelGen when it started
 export interface SpriteMemState { key: string; level: number; mem: number; gen: number; conflicts: Set<number>; suggestion: number | null }
@@ -339,10 +358,6 @@ export class App {
   }
 
   refresh(): void {
-    this.arcCache.clear();
-    this.arcLevel = null;
-    this.learner.cancel('arcs');
-    this.arcWant = -1;
     const lv = this.level, ov = this.buildOverrides();
     const r = this.emu.load(lv.number, ov);
     this.renderError = r.ok ? null : r.error ?? 'Error';
@@ -749,34 +764,17 @@ export class App {
   }
 
   // 8x8 tiles (layer 1 tile numbers) and colors the game keeps rewriting in this level (tile and
-  // palette animation), found by emulating some frames; null until known ('animated' when done)
-  private animInfo: { render: LevelRender | null; level: number; res: { tiles: Set<number>; colors: Set<number> } | null; timer: number } = { render: null, level: -1, res: null, timer: 0 };
+  // palette animation), found by emulating some frames in the background, kept in memory with the level as
+  // edited as their input; null until known ('animated' when done), the level's previous ones meanwhile
   animated(): { tiles: Set<number>; colors: Set<number> } | null {
-    const a = this.animInfo;
-    if (a.render === this.render) return this.withOwnAnims(a.res);
-    if (!a.timer) a.timer = window.setTimeout(() => {
-      a.timer = 0;
-      const render = this.render;
-      try {
-        const r = this.emu.load(this.level.number, this.buildOverrides());
-        const frames = this.emu.animationFrames(16, 4);
-        const base = (r.ppuRegs[0x0b] & 0x0f) << 13;
-        const tiles = new Set<number>(), colors = new Set<number>();
-        for (const f of frames) {
-          for (let t = 0; t < 0x400; t++) {
-            const o = (base + t * 32) & 0xffff;
-            for (let b = 0; b < 32; b++) if (f.vram[o + b] !== r.vram[o + b]) { tiles.add(t); break; }
-          }
-          for (let c = 0; c < 256; c++) if (f.cgram[c * 2] !== r.cgram[c * 2] || f.cgram[c * 2 + 1] !== r.cgram[c * 2 + 1]) colors.add(c);
-        }
-        a.res = { tiles, colors };
-      } catch (e) { console.error(e); a.res = { tiles: new Set(), colors: new Set() }; }
-      a.render = render;
-      a.level = this.level.number;
-      this.emit('animated');
-    }, 50);
-    return a.level === this.level.number ? this.withOwnAnims(a.res) : null; // same level: the previous result until known
+    const n = this.level.number, ov = this.buildOverrides();
+    const res = this.learner.learn(`anim:${n}`, function* (emu) { return animatedIn(emu, n, ov); },
+      { input: this.levelInput(ov), keep: 'memory', lane: 'animated', replace: true, done: this.animatedLearned });
+    if (res) this.animatedShown = { level: n, res };
+    return this.withOwnAnims(res ?? (this.animatedShown?.level === n ? this.animatedShown.res : null));
   }
+  private animatedShown: { level: number; res: { tiles: Set<number>; colors: Set<number> } } | null = null;
+  private animatedLearned = () => this.emit('animated');
   // plus the tiles and colors the ROM's own ExAnimation slots overwrite (their trigger may not fire in the
   // emulated frames, e.g. on/off or manual), read from the lists as they are now
   private ownAnim: { key: string; res: { tiles: Set<number>; colors: Set<number> } | null; out: { tiles: Set<number>; colors: Set<number> } | null } = { key: '', res: null, out: null };
@@ -1034,21 +1032,16 @@ export class App {
   private usesLearned = () => this.emit('level-uses');
 
   // ------------- jump arcs (see jumparcs.ts) -------------
-  // arcs from a tile of the current level as edited, by tile (ty << 16 | tx); emulated in the
-  // background, the latest request only; 'arcs' when some are ready
-  arcCache = new Map<number, JumpArc[]>();
+  // arcs from a tile of the level as edited: emulated in the background, the latest request only, kept in
+  // memory with the level as edited as their input; 'arcs' when some are ready
   private arcs: JumpArcs | null = null;
-  private arcLevel: Level | null = null; // the level state the arc emulator is prepared for
+  private arcsFor = ''; // the ROM and level state the arc emulator is prepared for
   private arcsWaiting = false; // for the run speeds probe
-  private arcWant = -1; // the tile whose arcs are learned
 
   jumpArcs(tx: number, ty: number): JumpArc[] | undefined {
-    const k = (ty << 16) | tx, c = this.arcCache.get(k);
-    if (c) return c;
-    const found = (arcs: JumpArc[]) => { this.arcCache.set(k, arcs); this.emit('arcs'); };
     // Mario's run speeds in this tileset: probed first, the arcs are asked for again on 'probes'
     const runs = this.probes.runSpeeds();
-    if (runs === null) { console.error('run speeds not found'); found([]); return []; }
+    if (runs === null) { console.error('run speeds not found'); return []; }
     if (!runs) {
       if (!this.arcsWaiting) {
         this.arcsWaiting = true;
@@ -1057,21 +1050,21 @@ export class App {
       }
       return undefined;
     }
-    // (asked for on every paint: once while it is learned)
-    if (this.arcWant === k) return undefined;
-    this.arcWant = k;
-    const end = (arcs: JumpArc[]) => { if (this.arcWant === k) this.arcWant = -1; found(arcs); };
-    this.learner.learn(`arcs:${k}`, (emu) => this.arcJob(emu, tx, ty, runs), { lane: 'arcs', replace: true, keep: false, label: 'Jump arcs', done: end, failed: () => end([]) });
-    return undefined;
+    const lv = this.level, ov = this.buildOverrides(), height = this.images.height;
+    const level = inputHash({ level: this.levelInput(ov), spriteHeader: lv.spriteHeader, height });
+    // (asked for on every paint: joins the job while it is learned)
+    return this.learner.learn(`arcs:${tx},${ty}`, (emu) => this.arcJob(emu, level, () => [lv.number, ov, lv.spriteHeader, height], tx, ty, runs),
+      { input: { level, runs }, keep: 'memory', lane: 'arcs', replace: true, label: 'Jump arcs', done: this.arcsLearned });
   }
+  private arcsLearned = () => this.emit('arcs');
 
-  private *arcJob(emu: LevelEmulator, tx: number, ty: number, runs: RunStates): Generator<void, JumpArc[]> {
-    if (this.arcs?.emu !== emu) { this.arcs = new JumpArcs(emu); this.arcLevel = null; }
-    const arcs = this.arcs;
-    if (this.arcLevel !== this.level) {
-      const lv = this.level;
-      this.arcLevel = arcs.prepare(lv.number, this.buildOverrides(), lv.spriteHeader, this.images.height) ? lv : null;
-      if (!this.arcLevel) throw new Error('level did not reach gameplay');
+  // (none when the level doesn't reach gameplay)
+  private *arcJob(emu: LevelEmulator, level: string, prepare: () => Parameters<JumpArcs['prepare']>, tx: number, ty: number, runs: RunStates): Generator<void, JumpArc[]> {
+    if (this.arcs?.emu !== emu) { this.arcs = new JumpArcs(emu); this.arcsFor = ''; }
+    const arcs = this.arcs, state = `${this.rom.gen}:${level}`;
+    if (this.arcsFor !== state) {
+      this.arcsFor = arcs.prepare(...prepare()) ? state : '';
+      if (!this.arcsFor) { console.error('jump arcs: the level did not reach gameplay'); return []; }
       yield;
     }
     const out: JumpArc[] = [];
