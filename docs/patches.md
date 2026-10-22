@@ -206,7 +206,7 @@ themselves, external patches via `ram` in the `patch.json` (see below):
 | UberASM | `freeram` from the `list.txt` (2 bytes, default `$7FAC80`) |
 | Custom sprites | sprite tables `$7FAB10-$7FAB6F`, `$7FAB9E-$7FABA9`, `$7FAC00-$7FAC17` (interface, see below), `$7FAC18-$7FAC19` |
 | VRAM layout | `$7F0000-$7F3653` |
-| ExAnimation | `$7FC003-$7FC0FF` |
+| ExAnimation | `$7FC003-$7FC05F`, `$7FC070-$7FC0FF` (between them Lunar Magic's conditional Direct Map16 flags `$7FC060-$7FC06F`, shared: other code may write them) |
 
 - If two entries occupy the same RAM, the second is rejected ("RAM conflict with …").
 - In addition, the editor searches each patch's code for long writes (`STA $7Fxxxx`,
@@ -558,12 +558,40 @@ code is the editor's.
   arrives where it does in the clean game, an old-style exit of a level played from the other bank's submap
   is made new-style leading where the game leads it, old-style exits of a 0xx level on the main map
   (standard, and secondary through an entrance 0xx), and a GPS block teleporting from 105 into 015.
+- A secondary entrance can lead back to the **overworld** (Lunar Magic 3.00's "Exit to overworld"; *Entrances/
+  Exits → Leads to → Overworld*, or the secondary entrances dialog). The format is Lunar Magic's (the SMW
+  speedrunning wiki's *Level Data Format*): E (bit 7 of the editor's `$06CC00`) set, `$05FA00` is the location
+  index, `$05FC00` the base event, `$05FE00` `--ETDAAA` (E another base event, T teleport to the location, D the
+  level's bit 8, AAA the action), `$05F800` the level it belongs to. Where the game takes the entrance action
+  (`$05D836`, the place Lunar Magic changes) the patch loads the overworld instead of the level, as Lunar
+  Magic plays it (read from its code in a ROM Lunar Magic 3.71 saved such an entrance in): game mode `$0C` with
+  the action's exit in `$0DD5` (0 nothing passed, 1 the normal exit, 2 the secret exit, 7 → `$80`: the turn
+  ends, in a 2-player game the other player's turn; a passed level also sets `$13CE` and `$1DE9`), with E the
+  base event in `$1DEA` (else the one of the tile Mario entered the level from; the event run is it, + 1 for
+  the secret exit), with T the game's star/pipe warp to the location (`$1DF6`, `$1B9C`). Lunar Magic's actions
+  3–6 (its secret exits 2 and 3) are kept but not offered: the overworld runs them as the normal exit. The
+  base event is chosen by the level exit that runs it (the game's base events per translevel, `$05D608`), the
+  teleport destination by clicking the tile on the overworld map: the editor uses the index of a star, pipe or
+  location leading there, or gives the tile a location of its own. `tools/testowexit.ts` checks every action,
+  base event and teleport by emulation (they did the same in a Lunar Magic-saved ROM).
 
 The emulation check (`tools/testlevelheightplay.ts`): levels of the game moved down into taller levels play
 exactly like the game's – Mario and every sprite at the same positions under the same input, the same visible
 tiles whenever the cameras are the same; a pipe in the moved part leads where the game's does, a secondary
 entrance there puts Mario at its tile. Still the game's: the BG of a level without the relative camera
 (it scrolls past its 27 rows), Lunar Magic's T and B bits of the size byte.
+
+### Overworld teleports
+
+The overworld's star/pipe table has 0x100 entries, as in Lunar Magic 3.00 (LM help
+`ov_overworld_locationteleport.htm`): the game's four tables of 27 words (`$048431` the tile an entry is taken
+from, X with the submap in the high byte, `$048467` its Y, `$04849D` the destination's pixel X with the submap
+in bits 9–12, `$0484D3` its pixel Y) move to free space with 256 entries each, the game's copied into the
+first ones; an entry without a tile (`$FFFF`) is a location only teleports lead to. Where the game searches
+the tile Mario stands on (`$048509`, from the last entry down) and puts him at the destination (`$048543`) the
+patch reads its tables; `$1DF6` holds the entry's number instead of its word offset, as in Lunar Magic, whose
+secondary entrances to the overworld put their location index there. `tools/testowexit.ts` checks that the
+game's star and pipe tiles warp as in the clean game.
 
 ### Layer 3 graphics per level
 
@@ -604,6 +632,52 @@ graphics without a visible pixel ($FC in the game's). Where the patch copies an 
 (`lt3Copy`); the patch's tables are generated from it. `tools/testlayer3map.ts` checks by emulation that the
 edited tilemap shows for every destination and size, before and after saving, and that a level pixel names the
 entry drawn there.
+
+### Conditional Direct Map16
+
+A Direct Map16 object (extended object `$02`) or a structure's tile can depend on a flag of Lunar Magic's
+table at `$7FC060–$7FC06F` (flag *n*: byte `$7FC060 + n/8`, bit `n%8`, bits low to high). While the flag is
+off it is not drawn; with "always show" it is drawn, with its tiles + 0x100 while the flag is on. Nothing
+in the game sets the flags and the editor doesn't clear them: that is up to your own code, e.g. UberASM
+before the level loads:
+
+```asm
+load:
+    LDA $7FC060     ; flag 00 on
+    ORA #$01
+    STA $7FC060
+    RTL
+```
+
+In the level data the condition is Lunar Magic's byte `ACCCCCCC` (A: always show, C: the flag 00–7F) after
+the tile it belongs to, which says so by its top bit: a Direct Map16 object is `00` object bytes, `$02`,
+the tile's low byte, its high byte with bit 7 set, the size byte, then the condition byte (7 bytes
+instead of 6); a structure's tile word has bit 15 set and the condition byte follows it. A `.mwl`'s objects
+27/29 in their conditional form keep the condition. The ExAnimation engine's RAM claim leaves the flags out
+as shared RAM, so code that writes them is no conflict. In the editor: the object's properties (one or
+several Direct Map16 objects at once), View → Conditional Direct Map16 (each flag the level uses, all on,
+all off; the level and test play load with them), a flag badge on each conditional object.
+
+### ExAnimation triggers
+
+The engine (Kobo's, in Lunar Magic's layout) keeps Lunar Magic's trigger RAM, which your own code (blocks,
+sprites, UberASM) sets: the manual frames at `$7FC070–$7FC07F` (manual *n*: the frame its slots show, 00–FE;
+they upload it when it changes), the one-shot bits at `$7FC0F8–$7FC0FB` (one-shot *n*: set it, its slot plays
+once and the engine clears it) and the custom bits at `$7FC0FC–$7FC0FD` (custom *n*: on while set, the slot's
+second frame set shows). The slots' frame counters are at `$7FC080` (level) and `$7FC0A0` (global). E.g.
+custom 9 on and one-shot 01 fired (16-bit A):
+
+```asm
+    REP #$20
+    LDA $7FC0FC : ORA #$0200 : STA $7FC0FC
+    LDA $7FC0F8 : ORA #$0002 : STA $7FC0F8
+    SEP #$20
+```
+
+A list's Trigger Init sets custom triggers (kept, on or off) and manual frames when the level loads, the global
+list's first, then the level's; one-shots are always off then. A slot with the precision timer (trigger `0F`)
+shares the frame counter of the first slot of its 8 (slots 0, 8, 10, 18) – Lunar Magic's help describes it so,
+Kobo's engine ran it like "always": the editor's copy of the engine is changed for it (marked `[Solar Magic]`).
 
 ## Level import (Lunar Magic)
 
@@ -660,7 +734,7 @@ not compatible with the respective feature.
 
 | Address | Feature |
 |---|---|
-| `$05D8F5`, `$00BA2C`, `$00AA6B`, `$00A9E1`, `$00AA22`, ext. object table `$0DA115` | Editor patch (SMWE) |
+| `$05D8F5`, `$00BA2C`, `$00AA6B`, `$00A9E1`, `$00AA22`, ext. object table `$0DA115` | Editor patch (SMWE); reads Lunar Magic's conditional Direct Map16 flags, RAM `$7FC060–$7FC06F` (set by other code) |
 | `$00922F` | Level palettes (SMWP) |
 | `$058060` | BG tilemaps (SMWB) |
 | `$058DE6` | BG Map16 extension, BG tiles 200–FFF (SMWH) |
@@ -668,8 +742,9 @@ not compatible with the respective feature.
 | `$00AA50` | BG2/BG3 graphics slots (SMWG) |
 | `$00A9DA`, `$00A01F` | Layer 3 graphics per level (SMWL); RAM `$7F3678` |
 | `$05D915`, `$00F79D`, table `$06FA00` | Layer 2 scroll rates; RAM `$7F3660–$7F3665` |
-| `$05D928`, `$0586BB`, entrance options and screen exit flags `$009708`, `$0DA532`, `$0DA536`, the slanted pipe to the left `$00D2B2`, the midway entrance `$05D9B8`, `$05D9DE` (also by a screen exit, its flags `$05D7C5`), new-style exits `$05D7CE`, `$05D836`, `$0DA963`, `$0DA9D6`, `$0DA9EF`, `$058091`, tables `$06CA00`, `$05DE00`, `$06FC00`, `$06FE00`, `$06CC00`, `$06CE00`, `$07E800`, `$07EA00`, `$07EC00`, `$07EE00`; finding a block `$00F478`, `$00F492`, `$00F49A`, `$0194D6`, `$019500`, `$019512`, `$01D97B`, `$01D981`, `$0292D9`, `$0292F9`, `$02930A`, `$0295C0`, `$0295EC`, `$0295FD`, `$02A6BA`, `$02A6CB`, `$02BA50`, `$02BA71`, `$02BA82`, `$02D15A`, `$02D18C`, `$02D19D`, `$03D793`; changing a tile `$00BEEC`, `$00BF41`, `$00C079`, `$00C0C6`, `$00C1B1`, `$00C3D3`; mode tables `$00BDA8`, `$00BDE8`, `$00BE28`, `$00BE68`; sprites `$02A82E`, `$02A968`, `$02AA5F`, `$02AB54`, `$02ABD0`, `$02AF3D`, `$02AFA7`, `$01AC3E`, `$02D038`, `$03B86A`; camera `$00F70D`; entrances `$05D7E0`, `$05DA17` | Level heights (Lunar Magic 3.00's entrances, their options); RAM `$7F3666–$7F3677`, `$7F3679`, Lunar Magic's `$13D7`, `$0BF6–$0CF5` |
+| `$05D928`, `$0586BB`, entrance options and screen exit flags `$009708`, `$0DA532`, `$0DA536`, the slanted pipe to the left `$00D2B2`, the midway entrance `$05D9B8`, `$05D9DE` (also by a screen exit, its flags `$05D7C5`), new-style exits `$05D7CE`, `$05D836`, `$0DA963`, `$0DA9D6`, `$0DA9EF`, `$058091`, tables `$06CA00`, `$05DE00`, `$06FC00`, `$06FE00`, `$06CC00`, `$06CE00`, `$07E800`, `$07EA00`, `$07EC00`, `$07EE00`; finding a block `$00F478`, `$00F492`, `$00F49A`, `$0194D6`, `$019500`, `$019512`, `$01D97B`, `$01D981`, `$0292D9`, `$0292F9`, `$02930A`, `$0295C0`, `$0295EC`, `$0295FD`, `$02A6BA`, `$02A6CB`, `$02BA50`, `$02BA71`, `$02BA82`, `$02D15A`, `$02D18C`, `$02D19D`, `$03D793`; changing a tile `$00BEEC`, `$00BF41`, `$00C079`, `$00C0C6`, `$00C1B1`, `$00C3D3`; mode tables `$00BDA8`, `$00BDE8`, `$00BE28`, `$00BE68`; sprites `$02A82E`, `$02A968`, `$02AA5F`, `$02AB54`, `$02ABD0`, `$02AF3D`, `$02AFA7`, `$01AC3E`, `$02D038`, `$03B86A`; camera `$00F70D`; entrances `$05D7E0`, `$05DA17`; secondary entrances to the overworld `$05D836` | Level heights (Lunar Magic 3.00's entrances, their options); RAM `$7F3666–$7F3677`, `$7F3679`, Lunar Magic's `$13D7`, `$0BF6–$0CF5` |
 | `$008A7F`, `$0087AD`, `$0085E3`, `$0580B0`, `$0580B4`, `$0580BF`, `$0580C3`, `$058730`, `$058770`, `$0587D4`, `$0587DB`, `$05880B`, `$058812`, `$0586F7`, `$058A3A` | VRAM patch (SMWV): tilemaps relocated, taller levels' rows; RAM `$7F0000–$7F3654` |
+| `$048509`, `$048543` | Overworld teleports (the star/pipe table with 0x100 entries) |
 | Ext. object table `$0DA118` (entry `$03`) | Structures (SMWS); empty in the original, no code hook |
 | `$05B20F` | Messages in free space (SMWM), only if the texts no longer fit |
 | `$00F545`, `$029328`, `$058A66`, `$058B46`, `$058C34`, `$058D2B`, `$00C096`, `$00C0E7`, `$00C176` | Map16 extension and custom blocks (SMWX) |
@@ -708,13 +783,15 @@ again.
 * `src/core/bgpack.ts`, `src/ui/levelimport.ts`: level import (Lunar Magic).
 * `src/core/patchapply.ts`: applying, conflict checking, removing.
 * `src/core/patchreg.ts`: patch registry "SMWA" in the ROM.
+* `src/core/gfxnames.ts`: names of GFX/ExGFX files "SMWN" (the user's, or from an imported file's descriptive name).
 * `src/core/pkgreg.ts`, `src/ui/pkgtrack.ts`, `src/ui/packages.ts`: package registry "SMWK", observing,
   removing; the *Packages* tab.
 * `src/core/patchpkg.ts`: `.zip`, `patch.json`, defines.
 * `src/core/uberasm.ts`, `src/core/uberproject.ts`: UberASM generator and project.
 * `src/core/blocks.ts`, `src/core/map16ext.ts`: custom blocks.
 * `src/core/structs.ts`: structures (extended object `$03`). Level data: `00` object bytes as for any
-  extended object with `$03`, then 1 byte structure number. Without SMWS, `$03` counts as an ordinary
+  extended object with `$03`, then 1 byte structure number.
+* `src/core/cdm16.ts`: conditional Direct Map16 (see above); test `tools/testcdm16.ts`. Without SMWS, `$03` counts as an ordinary
   3-byte object, so that patches that use `$03` themselves keep working.
 * Tests: `tools/testasar.ts`, `tools/testuberasm.ts`, `tools/testblocks.ts`, `tools/teststructs.ts`,
   `tools/testpkgreg.ts` (part of `npm test`).

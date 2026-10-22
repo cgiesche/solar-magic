@@ -8,6 +8,7 @@ import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { levelTranslevel } from '../src/core/level.ts';
 import { GM, RAM, MAP_BASE, MAP_SIZE, MAP_HI, marioX, setMarioPos } from '../src/core/ram.ts';
+import { Apu, loadApu } from '../src/core/apu.ts';
 import { editorImage } from './fixture.ts';
 
 let bad = 0;
@@ -78,6 +79,26 @@ for (const [name, image] of [['clean game', new Uint8Array(readFileSync('test/fi
   const w = emu.snes.wram;
   check(r.ok && want !== 0 && w[RAM.midwayScreen] === want && w[RAM.translevel] === tl && w[RAM.sublevelCount] !== 0,
     `${name}, sub-level ${hx(sub)} of ${hx(main)}: midway screen ${hx(w[RAM.midwayScreen])} (want ${hx(want)}), translevel ${hx(w[RAM.translevel])}`);
+}
+// a level with the no-Yoshi intro, test played with the sound unit (its music call sees $141A 0): Mario walks
+// into the castle or ghost house (animation $0A) and the level loads after it
+{
+  await loadApu();
+  const rom = new Rom(await editorImage());
+  const emu = new LevelEmulator(rom);
+  emu.snes.apu = new Apu();
+  emu.boot();
+  for (const level of [0x101, 0x004]) {
+    const tl = levelTranslevel(rom, level);
+    emu.startGame(tl);
+    const r = emu.loadInGame(level, tl);
+    const s = emu.snes, w = s.wram;
+    const walk = w[RAM.marioAnim];
+    let f = 0;
+    for (; f < 900 && !(w[RAM.introShown] && w[RAM.gameMode] === GM.level); f++) s.runFrame();
+    check(r.ok && walk === 0x0a && w[RAM.introShown] === 1 && w[RAM.gameMode] === GM.level,
+      `level ${hx(level)} with sound: intro walk (animation ${hx(walk)}), then the level (after ${f} frames, game mode ${hx(w[RAM.gameMode])})`);
+  }
 }
 console.log(bad ? `${bad} failed` : 'all ok');
 process.exit(bad ? 1 : 0);

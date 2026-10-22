@@ -6,8 +6,7 @@
 // jump, and his position is recorded every frame until he lands, dies or time runs out. Walls,
 // ceilings, slopes and platforms of the level stop or catch him as in the game.
 
-import { LevelEmulator, type LevelOverride } from './levelemu.ts';
-import type { Rom } from './rom.ts';
+import type { LevelEmulator, LevelOverride } from './levelemu.ts';
 import type { SnesState } from './snes.ts';
 import { PAD, type RunStates, type RunState } from './blockprobe.ts';
 import { GM, RAM, setCameraX, setCameraY, marioX, getS16, marioY, setMarioPos } from './ram.ts';
@@ -32,9 +31,9 @@ export class JumpArcs {
   private ready: SnesState | null = null;
   private height = 0; // level height in pixels (falling below ends an arc)
 
-  constructor(rom: Rom, boot?: LevelEmulator) {
-    this.emu = new LevelEmulator(rom);
-    if (boot?.baseState) this.emu.adoptBoot(boot);
+  // emu: booted, or set up from a booted one's snapshot (adoptBoot); prepare loads the level there
+  constructor(emu: LevelEmulator) {
+    this.emu = emu;
   }
 
   // Loads the level (overrides as for rendering; sprites are left out) and runs it to gameplay.

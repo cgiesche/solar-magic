@@ -86,11 +86,7 @@ function installDialog(app: App, p: ReadyPreview | ManualPreview, body: HTMLElem
     dlg.close(true);
     // the sample level: a level edit of its own (not saved yet)
     const sample = r.sample;
-    if (sample) {
-      app.editLevel(() => { app.level = sample.level; }, false);
-      app.selection.clear();
-      app.changed();
-    }
+    if (sample) app.replaceLevel(sample.level);
     toast(`“${p.name}” installed${r.warnings.length ? ` (${r.warnings.length} warning(s))` : ''}${sample ? `, its sample level in place of level ${hex(app.level.number, 3)} (not saved yet)` : ''} – Ctrl+Z undoes it.`);
     done(r.pkg);
   };

@@ -6,7 +6,7 @@
 //   of its BG tilemap. Kept in the result cache per level, valid while the ROM bytes the load read and
 //   the level's data (fed to the load as an overlay, see LevelOverride) are unchanged.
 // - Links of a tile outside the levels: tiles acting like it, structures holding it, blocks on it.
-// - GFX slots and sprites are read from the ROM.
+// - GFX slots (gfxslots.ts) and sprites are read from the ROM.
 
 import { snesToPc, type Rom } from './rom.ts';
 import type { ResultCache } from './romdeps.ts';
@@ -18,11 +18,13 @@ import {
 import { layerGeom } from './render.ts';
 import { bgFromWram, BG_SIZE } from './bg.ts';
 import { map16Tile } from './ram.ts';
-import { DM16_EXT, VANILLA_GFX, GFX_FILES, gfxEntry, levelGfx, defaultGfx, levelExtGfx } from './patches.ts';
+import { inputHash, levelInput } from './inputs.ts';
+import { flagBytes, usedFlags, structTiles } from './cdm16.ts';
+import { DM16_EXT, VANILLA_GFX, GFX_FILES, gfxEntry } from './patches.ts';
 import { STRUCT_EXT, listStructures } from './structs.ts';
 import { EXT_FIRST, EXT_TILES, actsLike, extTileWords, DEFAULT_ACTS } from './map16ext.ts';
 import { loadBlockProject } from './blocks.ts';
-import { levelLayer3, LG_SLOT_NAMES, LT3_SLOT, GAME_LAYER3_GFX } from './layer3gfx.ts';
+import { levelSlots, type GfxSlot } from './gfxslots.ts';
 
 // levels with data of their own: the game's (000-024, 101-13B) and those whose layer 1 data was moved
 // into the expanded ROM
@@ -79,6 +81,21 @@ export function levelTilesOf(rom: Rom, lv: Level, r: LevelRender): LevelTiles {
   return { level: lv.number, tileset: lv.header.tileset, ok: r.ok, fg: [...fg.values()], bg: [...bg.values()] };
 }
 
+// The tiles a level can place: loaded with its conditional Direct Map16 flags off and, when it has any (cdm16.ts),
+// once more with them all on – every conditional object shown in both of its states (`ov`: levelOverride's)
+export function levelTilesAll(rom: Rom, lv: Level, load: (ov: LevelOverride) => LevelRender, ov: LevelOverride): LevelTiles {
+  const off = levelTilesOf(rom, lv, load({ ...ov, cdm16Flags: flagBytes([]) }));
+  const flags = usedFlags(rom, lv);
+  return flags.size ? mergeTiles(off, levelTilesOf(rom, lv, load({ ...ov, cdm16Flags: flagBytes(flags.keys()) }))) : off;
+}
+// the uses of both (of a use in both, the first's, with the larger count)
+export function mergeTiles(a: LevelTiles, b: LevelTiles): LevelTiles {
+  const key = (u: TileUse) => `${u.tile}:${u.layer}:${u.source}`;
+  const fg = new Map(a.fg.map((u) => [key(u), { ...u }]));
+  for (const u of b.fg) { const v = fg.get(key(u)); if (v) v.count = Math.max(v.count, u.count); else fg.set(key(u), u); }
+  return { ...a, ok: a.ok && b.ok, fg: [...fg.values()] };
+}
+
 // the level's objects as the emulator loads them, with their owners
 export function levelOverride(rom: Rom, lv: Level): LevelOverride {
   const owners1: number[] = [], owners2: number[] = [];
@@ -89,42 +106,27 @@ export function levelOverride(rom: Rom, lv: Level): LevelOverride {
   return { layer1: l1, layer2: l2 ?? undefined, layer2Pointer: l2 ? undefined : lv.layer2Pointer, byteOwner };
 }
 
-// the level data a load is given, as a 64-bit hash (two 32-bit ones)
-function hashOf(ov: LevelOverride): string {
-  let a = 0x811c9dc5, c = 0x2545f491;
-  const add = (v: number) => { a = Math.imul(a ^ v, 0x01000193); c = Math.imul(c ^ v, 0xc2b2ae35) ^ (c >>> 13); };
-  for (const b of [ov.layer1, ov.layer2, Uint8Array.of(ov.layer2Pointer ?? 0, (ov.layer2Pointer ?? 0) >> 8, (ov.layer2Pointer ?? 0) >> 16)]) {
-    if (!b) { add(0x100); continue; }
-    for (let i = 0; i < b.length; i++) add(b[i]);
-    add(0x200 | (b.length & 0xff)); add(b.length >> 8);
-  }
-  return `${(a >>> 0).toString(16)}.${(c >>> 0).toString(16)}`;
-}
-
-export const levelTilesKey = (n: number) => `lu1:${n}`;
-interface Stored { data: string; tiles: LevelTiles } // data: the hash of the level data it was learned from
+export const levelTilesKey = (n: number) => `lu2:${n}`; // (its input: the level as saved, inputs.ts)
 
 // The tiles of the ROM's levels as saved, learned a level at a time (scan) and kept in the result cache.
 export class LevelUses {
   private rom: Rom;
   private results: ResultCache;
-  private emu: () => LevelEmulator;
-  private inputs = { gen: -1, of: new Map<number, { lv: Level; data: string } | null>() };
+  private inputs = { gen: -1, of: new Map<number, { lv: Level; input: string } | null>() };
 
-  constructor(rom: Rom, results: ResultCache, emu: () => LevelEmulator) {
+  constructor(rom: Rom, results: ResultCache) {
     this.rom = rom;
     this.results = results;
-    this.emu = emu;
   }
 
-  // the level as saved and its data's hash (null: it can't be read), once per ROM state
-  private input(n: number): { lv: Level; data: string } | null {
+  // the level as saved and the hash of its input (null: it can't be read), once per ROM state
+  private input(n: number): { lv: Level; input: string } | null {
     if (this.inputs.gen !== this.rom.gen) this.inputs = { gen: this.rom.gen, of: new Map() };
     let v = this.inputs.of.get(n);
     if (v === undefined) {
       const reads = this.rom.reads;
-      this.rom.reads = null; // (reading the level isn't part of an emulated result: its data is checked by the hash)
-      try { const lv = loadLevel(this.rom, n); v = { lv, data: hashOf(levelOverride(this.rom, lv)) }; } catch { v = null; } finally { this.rom.reads = reads; }
+      this.rom.reads = null; // (reading the level isn't part of an emulated result: it is its input)
+      try { const lv = loadLevel(this.rom, n); v = { lv, input: inputHash(levelInput(n, levelOverride(this.rom, lv))) }; } catch { v = null; } finally { this.rom.reads = reads; }
       this.inputs.of.set(n, v);
     }
     return v;
@@ -134,8 +136,7 @@ export class LevelUses {
   tiles(n: number): LevelTiles | undefined {
     const i = this.input(n);
     if (!i) return { level: n, tileset: 0, ok: false, fg: [], bg: [] };
-    const s = this.results.get<Stored>(levelTilesKey(n));
-    return s?.data === i.data ? s.tiles : undefined;
+    return this.results.get<LevelTiles>(levelTilesKey(n), i.input);
   }
 
   // the levels whose tiles are not known
@@ -143,17 +144,17 @@ export class LevelUses {
     return [...levels].filter((n) => this.tiles(n) === undefined);
   }
 
-  // loads level n in the emulator and keeps what it placed
-  scan(n: number): LevelTiles {
+  // loads level n in emu and keeps what it placed
+  scan(n: number, emu: LevelEmulator): LevelTiles {
     const i = this.input(n);
     if (!i) return this.tiles(n)!;
-    const emu = this.emu(), ov = levelOverride(this.rom, i.lv), gen = this.rom.gen;
+    const ov = levelOverride(this.rom, i.lv), gen = this.rom.gen;
     // (a level that can't be taken apart counts as not loading: kept too, so it isn't tried again and again)
-    const run = emu.tracked(() => { try { return levelTilesOf(this.rom, i.lv, emu.load(n, ov)); } catch (e) { console.error(e); return null; } });
+    const run = emu.tracked(() => { try { return levelTilesAll(this.rom, i.lv, (o) => emu.load(n, o), ov); } catch (e) { console.error(e); return null; } });
     // the load's temporary ROM patches are undone, so the levels read before still hold
     if (this.inputs.gen === gen) this.inputs.gen = this.rom.gen;
     const tiles = run.result ?? { level: n, tileset: i.lv.header.tileset, ok: false, fg: [], bg: [] };
-    this.results.set(levelTilesKey(n), { data: i.data, tiles } satisfies Stored, this.results.fp.deps(run.reads));
+    this.results.set(levelTilesKey(n), tiles, this.results.fp.deps(run.reads), i.input);
     return tiles;
   }
 }
@@ -184,7 +185,7 @@ export function bgTileUsers(levels: Iterable<LevelTiles>, t: number): (BgTileUse
 export function tileLinks(rom: Rom, t: number): { actsLike: number[]; structures: number[]; blocks: string[] } {
   const acts: number[] = [];
   for (let x = 0; x < EXT_TILES; x++) if (x !== t && actsLike(rom, x) === t) acts.push(x);
-  const structures = [...listStructures(rom)].filter(([, s]) => s.tiles.includes(t)).map(([n]) => n);
+  const structures = [...listStructures(rom)].filter(([, s]) => structTiles(s).includes(t)).map(([n]) => n);
   const blocks = (loadBlockProject(rom)?.list ?? []).filter((b) => b.tile === t).map((b) => b.file);
   return { actsLike: acts, structures, blocks };
 }
@@ -195,7 +196,7 @@ export function tileLinks(rom: Rom, t: number): { actsLike: number[]; structures
 export function unusedFgTiles(rom: Rom, levels: Iterable<LevelTiles>, blank: number[]): number[] {
   const used = new Set<number>();
   for (const l of levels) for (const u of l.fg) used.add(u.tile);
-  for (const [, s] of listStructures(rom)) for (const t of s.tiles) used.add(t);
+  for (const [, s] of listStructures(rom)) for (const t of structTiles(s)) used.add(t);
   const blocks = new Set((loadBlockProject(rom)?.list ?? []).map((b) => b.tile));
   const out: number[] = [];
   for (let t = EXT_FIRST; t < EXT_TILES; t++) {
@@ -208,25 +209,6 @@ export function unusedFgTiles(rom: Rom, levels: Iterable<LevelTiles>, blank: num
 
 // ---------- GFX files (from the ROM) ----------
 
-// slots of a level: name, where it is kept (the GFX bypass in levelGfx order, BG2/BG3, layer 3's LG1-LG4 or
-// LT3) and its index there, file, default file; first: the first 8x8 tile number (Map16 tiles, for SP1-SP4
-// the sprite tile number in OAM: 100-1FF = page 1, for LG1-LG4 the layer 3 tile number); map16: a layer
-// slot the Map16 tiles draw from
-export type SlotKind = 'gfx' | 'ext' | 'lg' | 'lt3';
-export interface GfxSlot { name: string; kind: SlotKind; k: number; file: number; def: number; custom: boolean; first: number; sprite: boolean; map16: boolean }
-export function gfxSlots(rom: Rom, level: number, tileset: number, spriteSet: number): GfxSlot[] {
-  const set = levelGfx(rom, level);
-  const def = defaultGfx(rom, tileset, spriteSet);
-  const order: [string, number, number][] = [['FG1', 7, 0], ['FG2', 6, 0x80], ['BG1', 5, 0x100], ['FG3', 4, 0x180], ['SP1', 3, 0x00], ['SP2', 2, 0x80], ['SP3', 1, 0x100], ['SP4', 0, 0x180]];
-  const out: GfxSlot[] = order.map(([name, k, first]) => ({ name, kind: 'gfx', k, file: set[k] !== 0xff ? set[k] : def[k], def: def[k], custom: set[k] !== 0xff, first, sprite: name.startsWith('SP'), map16: !name.startsWith('SP') }));
-  const ex = levelExtGfx(rom, level);
-  ['BG2', 'BG3'].forEach((name, k) => out.push({ name, kind: 'ext', k, file: ex[k], def: 0xff, custom: ex[k] !== 0xff, first: 0x200 + k * 0x80, sprite: false, map16: true }));
-  const l3 = levelLayer3(rom, level);
-  LG_SLOT_NAMES.forEach((name, k) => out.push({ name, kind: 'lg', k, file: l3.lg[k] !== 0xff ? l3.lg[k] : GAME_LAYER3_GFX + k, def: GAME_LAYER3_GFX + k, custom: l3.lg[k] !== 0xff, first: k * 0x80, sprite: false, map16: false }));
-  out.push({ name: LT3_SLOT, kind: 'lt3', k: 0, file: l3.lt3, def: 0xff, custom: l3.lt3 !== 0xff, first: 0, sprite: false, map16: false });
-  return out;
-}
-
 // the header of level n as saved
 export const savedHeader = (rom: Rom, n: number): PrimaryHeader => parsePrimaryHeader(rom.bytes(rom.r24(L1_PTRS + n * 3), 5));
 
@@ -238,7 +220,7 @@ export function gfxUsage(rom: Rom, levels: Iterable<number>, header: (n: number)
   for (const n of levels) {
     let hd;
     try { hd = header(n); } catch { continue; }
-    for (const s of gfxSlots(rom, n, hd.tileset, hd.spriteGfx)) {
+    for (const s of levelSlots(rom, n, hd)) {
       if (s.file === 0xff) continue;
       const l = m.get(s.file) ?? [];
       const u = l.find((x) => x.level === n);

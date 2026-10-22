@@ -9,7 +9,8 @@ export type MenuItem =
   | { heading: string }
   | 'sep';
 
-export type Menu = { label: string; items: MenuItem[]; disabled?: () => boolean; title?: string };
+// items: a function for a menu whose items change (made anew whenever it opens)
+export type Menu = { label: string; items: MenuItem[] | (() => MenuItem[]); disabled?: () => boolean; title?: string };
 
 let current: { close: () => void; owner: HTMLElement } | null = null;
 
@@ -26,7 +27,7 @@ function dropdown(menu: Menu, bar?: HTMLElement): HTMLElement {
     closeMenus();
     const list = h('div', { class: 'menu', role: 'menu' });
     const entries: HTMLButtonElement[] = [];
-    for (const it of menu.items) {
+    for (const it of typeof menu.items === 'function' ? menu.items() : menu.items) {
       if (it === 'sep') { list.append(h('div', { class: 'menu-sep', role: 'separator' })); continue; }
       if ('heading' in it) { list.append(h('div', { class: 'menu-heading' }, it.heading)); continue; }
       const disabled = it.disabled?.() ?? false;
@@ -62,6 +63,9 @@ function dropdown(menu: Menu, bar?: HTMLElement): HTMLElement {
     wrap.append(list);
     // keep it on screen near the right edge
     if (list.getBoundingClientRect().right > window.innerWidth - 4) { list.style.left = 'auto'; list.style.right = '0'; }
+    // and near the bottom (a button at the foot of a panel): open upwards when it does not fit below but above
+    const r = list.getBoundingClientRect(), b = btn.getBoundingClientRect();
+    if (r.bottom > window.innerHeight - 4 && b.top - r.height - 3 >= 4) { list.style.top = 'auto'; list.style.bottom = 'calc(100% + 3px)'; }
     btn.classList.add('open');
     btn.setAttribute('aria-expanded', 'true');
     const outside = (ev: MouseEvent) => { if (!wrap.contains(ev.target as Node)) closeMenus(); };

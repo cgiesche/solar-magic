@@ -5,26 +5,58 @@
 
 import type { App } from '../app.ts';
 import type { GfxWorkspace, WsPanel } from '../gfxworkspace.ts';
-import { h, clear, toast, pickerOpen, modal } from '../dom.ts';
+import { h, clear, toast, pickerOpen, modal, hexInput } from '../dom.ts';
 import { menuButton, type MenuItem } from '../menu.ts';
 import { hex } from '../../core/names.ts';
 import { cgramToRGBA, decodeTile, snesColorToRGBA } from '../../core/gfx.ts';
-import { map16Source } from '../../core/render.ts';
+import { map16Source, levelColorUsers, setFgWords } from '../../core/render.ts';
+import { paletteOn } from '../../core/quarters.ts';
+import { fgTileUsers } from '../../core/levelusage.ts';
 import { EXT_TILES } from '../../core/map16ext.ts';
 import {
   type ExList, type ExSlot, emptyList, readLevelList, readGlobalList, writeLevelList, writeGlobalList, levelSettings, setLevelSettings,
-  readAltFile, writeAltFile, kindOf, tilesOf, secondSet, secondSetName, triggerName, TYPE_NAMES, SLOTS,
+  kindOf, tilesOf, secondSet, secondSetName, triggerName, TYPE_NAMES, SLOTS,
   NO_GAME_COLORS, NO_GAME_TILES, NO_LEVEL_LIST, NO_GLOBAL_LIST, altFileUsers, localizeFrames, shapeOf, exanimTiles, exanimColors, ALT_FILE_MAX,
+  rotationRange, setRotationRange, rotationStep, rotated, stepsPerSecond, heldColors, reversesOnTrigger, ROTATION_MAX,
 } from '../../core/exanim.ts';
-import { levelSlots, gfxName, lmAnimName, ANIM_FILE } from './map16tab.ts';
+import { gfxName, lmAnimName } from './map16tab.ts';
+import { gfxBytes, hasGfx, createGfx, ANIM_FILE } from '../../core/gfxfiles.ts';
+import { levelSlots, layerSlots, slotOfTile, type GfxSlot } from '../../core/gfxslots.ts';
 import { cssOf, htmlOf } from './palettetab.ts';
 import { remapSlot } from '../../core/remap.ts';
 import { remapEditor } from '../remaplist.ts';
+import type { LevelRender } from '../../core/levelemu.ts';
+import type { Rom } from '../../core/rom.ts';
+import {
+  triggersFor, maxFrames, triggerRam, triggerProblems, customInit, setCustomInit, isManual, isCustom, isOneShot, playsOnce, slotName, PRECISION, type CustomInit, type SlotRef,
+} from '../../core/extrigger.ts';
+import { triggerPanel } from '../triggerpanel.ts';
 
 const TILE_TYPES = [0x01, 0x02, 0x04, 0x08, 0x10, 0x11, 0x12, 0x03, 0x05, 0x06, 0x07, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e];
 const COLOR_TYPES = [0x14, 0x13, 0x15, 0x16, 0x17];
-const TRIGGERS = [0x00, 0x03, 0x01, 0x02, 0x04, 0x05, 0x07, 0x06, 0x08];
+const ROTATION_TYPES = [0x18, 0x1a, 0x19, 0x1b];
+// the trigger choice, grouped (extrigger.ts triggersFor: what the slot's kind can take)
+const TRIGGER_GROUPS: [string, (t: number) => boolean][] = [
+  ['Game', (t) => t < 0x10 && t !== PRECISION], ['Timing', (t) => t === PRECISION], ['Manual (frame set by code)', isManual],
+  ['Custom (switched by code)', isCustom], ['One shot (fired by code, plays once)', isOneShot],
+];
+function triggerSelect(kind: 'tiles' | 'colors' | 'rotation', current: number): HTMLSelectElement {
+  const all = [...new Set([...triggersFor(kind), current])];
+  const opt = (t: number) => h('option', { value: String(t), selected: t === current }, triggerName(t));
+  return h('select', null, TRIGGER_GROUPS.map(([label, of]) => h('optgroup', { label }, all.filter(of).map(opt))), all.filter((t) => !TRIGGER_GROUPS.some(([, of]) => of(t))).map(opt));
+}
+// what a trigger does for a slot, in a line
+function triggerHint(t: number, rotation: boolean): string {
+  if (t === PRECISION) return `Always runs, with the frame counter of the first slot of its 8 (slots 0, 8, 10, 18)${rotation ? ': rotations of one group share their delay – for speeds between the steps' : ''}.`;
+  if (isManual(t)) return 'Shows the frame your code sets and stays there; uploads only when it changes.';
+  if (isCustom(t)) return 'Your code switches it on and off.';
+  if (isOneShot(t)) return 'Holds until your code fires it, then plays once to the last frame and stays there (the engine clears the trigger). At most 255 frames.';
+  if (playsOnce(t)) return 'Plays once to the last frame as soon as the condition occurs, and stays there. At most 255 frames.';
+  return '';
+}
 const ALT = 0x8000;
+// the bytes of Anim graphic k (A–D), null: none yet
+const animBytes = (rom: Rom, k: number) => gfxBytes(rom, ANIM_FILE + k)?.data ?? null;
 
 // own tile animations of the current level (its list and the global one) that overwrite a VRAM tile
 export function animsAt(app: App, tile: number): { global: boolean; slot: number }[] {
@@ -39,6 +71,16 @@ export function animLinks(ws: GfxWorkspace, own: { global: boolean; slot: number
   return own.map((a, i) => h('span', null, i ? ', ' : '', h('a', { href: '#', title: 'Open in the Animations tab (Ctrl+click on the tile or color does the same)', onclick: (e: Event) => { e.preventDefault(); ws.showAnim(a.global, a.slot); } }, `Animation ${hex(a.slot, 2)} (${a.global ? 'global' : 'level'})`)));
 }
 
+// a slot's frames at the trigger's limit (extrigger.ts maxFrames), said so
+const full = (x: ExSlot, cs: number[][]) => { const max = maxFrames(x.trigger); if (cs.length < max) return false; toast(`At most ${max} frames`); return true; };
+const fmt = (v: number) => String(+v.toFixed(3));
+const speedName = (delay: number) => `${fmt(stepsPerSecond(delay))} steps per second`;
+// a rotation's colors as row·column, first–last
+const rangeName = (s: ExSlot) => {
+  const { first, count } = rotationRange(s), last = Math.min(255, first + count - 1);
+  return `${hex(first >> 4, 1)}·${hex(first & 15, 1)}–${hex(last >> 4, 1)}·${hex(last & 15, 1)} (${count})`;
+};
+
 export class AnimTab implements WsPanel {
   root: HTMLElement;
   private app: App;
@@ -47,11 +89,15 @@ export class AnimTab implements WsPanel {
   private sel = 0; // slot
   private frame = 0; // selected column
   private set = 0; // selected frame set (1: the trigger's second set)
-  private palRow = -1; // palette for tile previews (-1: from the target's Map16 use)
+  private palRows = new Map<string, number>(); // palette a tile slot's previews are drawn in (none: from the target's Map16 use)
   private visible = false;
   private tick = 0;
   private timer = 0;
   private picking: 'target' | null = null;
+  private triggerOn = false; // a rotation's preview as while its trigger holds
+  private triggers = false; // the side shows the trigger panel
+  // the colors of the selected rotation the game keeps setting itself, from the emulated level (null: not known yet)
+  private held: { key: string; render: LevelRender | null; colors: number[] | null; timer: number } = { key: '', render: null, colors: null, timer: 0 };
   private bar = h('div', { class: 'ws-bar' });
   private slotsBox = h('div', { class: 'at-slots' });
   private detail = h('div', { class: 'at-detail' });
@@ -75,6 +121,11 @@ export class AnimTab implements WsPanel {
     return 'Click: take the Map16 tile under the mouse as target (top left quarter)';
   }
 
+  // a slot's key there: the global list's, or the level's own
+  private palKey(slot = this.sel): string { return `${this.global ? 'global' : hex(this.app.level.number, 3)}:${slot}`; }
+  private get palRow(): number { return this.palRows.get(this.palKey()) ?? -1; }
+  private set palRow(r: number) { const k = this.palKey(); if (r < 0) this.palRows.delete(k); else this.palRows.set(k, r); }
+
   get selected(): { global: boolean; slot: number } { return { global: this.global, slot: this.sel }; }
 
   // opens a slot of the level's or the global list
@@ -84,6 +135,7 @@ export class AnimTab implements WsPanel {
     this.frame = 0;
     this.set = 0;
     this.picking = null;
+    this.triggerOn = false;
     if (this.visible) this.build();
   }
 
@@ -103,6 +155,12 @@ export class AnimTab implements WsPanel {
     const rom = this.app.rom;
     return (this.global ? readGlobalList(rom) : readLevelList(rom, this.app.level.number)) ?? emptyList();
   }
+  // the open level's graphics slots
+  private gfxSlots(): GfxSlot[] {
+    const lv = this.app.level;
+    return levelSlots(this.app.rom, lv.number, lv.header);
+  }
+
   private slot(): ExSlot | null {
     return this.view.slots.get(this.sel) ?? null;
   }
@@ -115,11 +173,11 @@ export class AnimTab implements WsPanel {
       }, { key });
     } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
   }
-  private async editSlot(fn: (s: ExSlot) => void, label: string, key: string | null = null): Promise<void> {
+  // the selected slot changed by `fn` and saved; nothing saved when it returns false
+  private async editSlot(fn: (s: ExSlot) => void | false, label: string, key: string | null = null): Promise<void> {
     const l = this.list();
     const s = l.slots.get(this.sel);
-    if (!s) return;
-    fn(s);
+    if (!s || fn(s) === false) return;
     await this.save(l, label, key);
   }
 
@@ -189,7 +247,7 @@ export class AnimTab implements WsPanel {
   // ---------- UI ----------
   private build(): void {
     this.view = this.list();
-    this.altBytes = readAltFile(this.app.rom, this.view.altFile);
+    this.altBytes = animBytes(this.app.rom, this.view.altFile);
     this.buildBar();
     this.buildSlots();
     this.buildDetail();
@@ -204,14 +262,17 @@ export class AnimTab implements WsPanel {
       scope(false, `Level ${hex(app.level.number, 3)}`, 'Animations that run only in this level'),
       scope(true, 'Global', 'Animations that run in all levels (a level can turn them off via “Play in level …”)')));
     if (this.flagsLevel !== app.level.number) { this.flagsMenu = this.levelFlagsMenu(); this.flagsLevel = app.level.number; }
-    b.append(h('span', { class: 'spacer' }), this.flagsMenu!);
+    const n = app.levelTriggers().size;
+    b.append(h('span', { class: 'spacer' }),
+      h('button', { class: this.triggers ? 'active' : '', title: 'Switch the triggers of this level\'s animations for the preview and test play; their RAM and ASM', onclick: () => { this.triggers = !this.triggers; this.picking = null; this.build(); } }, `Triggers${n ? ` (${n})` : ''}`),
+      this.flagsMenu!);
   }
 
   // the animation file all tile animations of the list take their frames from (one per list)
   private sourceSelect(l: ExList): HTMLElement {
     const app = this.app;
     const alt = h('select', { title: 'One animation graphic per list: changing it affects all tile animations of this list' },
-      [0, 1, 2, 3].map((k) => h('option', { value: String(k), selected: l.altFile === k }, `${gfxName(ANIM_FILE + k)} (${lmAnimName(ANIM_FILE + k)})${readAltFile(app.rom, k) ? '' : ' – empty'}`)));
+      [0, 1, 2, 3].map((k) => h('option', { value: String(k), selected: l.altFile === k }, `${gfxName(ANIM_FILE + k)} (${lmAnimName(ANIM_FILE + k)})${hasGfx(app.rom, ANIM_FILE + k) ? '' : ' – empty'}`)));
     alt.addEventListener('change', () => { const nl = this.list(); nl.altFile = Number(alt.value); void this.save(nl, `Frames from ${gfxName(ANIM_FILE + nl.altFile)}`); });
     const n = [...l.slots.values()].filter((s) => kindOf(s.type) === 'tiles' && s.dest & ALT).length;
     // the graphic is shared: other lists animating from it change along when it is drawn on
@@ -253,27 +314,39 @@ export class AnimTab implements WsPanel {
     const l = this.list();
     box.append(h('div', { class: 'panel-title' }, this.global ? 'Global animations' : `Animations of level ${hex(this.app.level.number, 3)}`, h('span', { class: 'hint' }, `${l.slots.size} of ${SLOTS}`)));
     box.append(this.sourceSelect(l));
+    for (const p of triggerProblems(readLevelList(this.app.rom, this.app.level.number), readGlobalList(this.app.rom))) {
+      box.append(h('div', { class: 'warn-box' }, p.text, ' ', p.slots.map((r, i) => h('span', null, i ? ', ' : '', h('a', { href: '#', onclick: (e: Event) => { e.preventDefault(); this.select(r.global, r.slot); } }, slotName(r))))));
+    }
     const items = h('div', { class: 'at-slot-list' });
     for (const [n, s] of [...l.slots.entries()].sort((a, b) => a[0] - b[0])) {
       const c = h('canvas', { class: 'at-mini' });
       this.previews.push({ c, slot: n });
       const kind = kindOf(s.type);
-      items.append(h('div', { class: `at-slot${n === this.sel ? ' sel' : ''}`, onclick: () => { this.sel = n; this.frame = 0; this.set = 0; this.build(); } },
+      const pick = () => { this.sel = n; this.frame = 0; this.set = 0; };
+      items.append(h('div', { class: `at-slot${n === this.sel ? ' sel' : ''}`, onclick: () => { pick(); this.build(); } },
         h('span', { class: 'mono hint' }, hex(n, 2)), c,
         h('div', { class: 'at-slot-text' },
-          h('div', null, kind === 'tiles' ? `Tile ${hex(this.targetTile(s), 3)} · ${TYPE_NAMES[s.type] ?? ''}` : kind === 'colors' ? `Color ${hex(s.dest & 0xff, 2)} · ${TYPE_NAMES[s.type]}` : TYPE_NAMES[s.type] ?? ''),
-          h('div', { class: 'hint' }, `${triggerName(s.trigger)} · ${s.framesLess1 + 1} frame${s.framesLess1 ? 's' : ''}`))));
+          h('div', null, kind === 'tiles' ? `Tile ${hex(this.targetTile(s), 3)} · ${TYPE_NAMES[s.type] ?? ''}` : kind === 'colors' ? `Color ${hex(s.dest & 0xff, 2)} · ${TYPE_NAMES[s.type]}` : `Colors ${rangeName(s)} · ${TYPE_NAMES[s.type] ?? ''}`),
+          h('div', { class: 'hint' }, kind === 'rotation' ? `${triggerName(s.trigger)} · ${speedName(s.framesLess1 + 1)}` : `${triggerName(s.trigger)} · ${s.framesLess1 + 1} frame${s.framesLess1 ? 's' : ''}`)),
+        h('span', { class: 'at-slot-acts' },
+          h('button', { class: 'icon-btn', title: 'Duplicate (into the next free slot)', 'aria-label': 'Duplicate', onclick: (e: Event) => { e.stopPropagation(); pick(); void this.duplicate(); } }, '⧉'),
+          h('button', { class: 'icon-btn', title: 'Delete (Ctrl+Z brings it back)', 'aria-label': 'Delete', onclick: (e: Event) => { e.stopPropagation(); pick(); void this.remove(); } }, '✕'))));
     }
     if (!l.slots.size) items.append(h('p', { class: 'hint' }, 'No animations yet. A tile animation keeps replacing 8x8 tiles in VRAM with frames from an animation graphic – all Map16 tiles that use them animate along.'));
+    const noSlot = l.slots.size >= SLOTS;
     box.append(items,
-      h('div', { class: 'row' },
-        h('button', { onclick: () => void this.add('tiles') }, '+ Tile animation'),
-        h('button', { onclick: () => void this.add('colors') }, '+ Color animation')),
-      h('div', { class: 'row' },
-        h('button', { disabled: !this.slot(), onclick: () => void this.duplicate() }, 'Duplicate'),
-        h('button', { disabled: !this.slot(), onclick: () => void this.remove() }, 'Delete'),
-        h('button', { disabled: ![...l.slots.values()].some((x) => kindOf(x.type) === 'tiles'), title: 'Change the frames and targets of tile animations by an offset or a list (Lunar Magic\'s Remap)',
-          onclick: () => this.openRemap() }, 'Remap …')));
+      h('div', { class: 'row at-slot-bar' },
+        menuButton({ label: '+ New', title: noSlot ? 'All 32 slots are in use' : 'A new animation in the next free slot', items: [
+          { label: 'Tile animation', title: '8x8 tiles in VRAM replaced by frames of the animation graphic', onClick: () => void this.add('tiles') },
+          { label: 'Color animation', title: 'A palette color set to the colors of its frames', onClick: () => void this.add('colors') },
+          { label: 'Color rotation', title: 'Colors of the palette that move along by one, again and again', onClick: () => void this.add('rotation') },
+        ] }),
+        h('span', { class: 'spacer' }),
+        menuButton({ label: 'List', title: 'Tools for the whole list', items: [
+          { label: 'Remap tile animations …', title: 'Change the frames and targets of tile animations by an offset or a list (Lunar Magic\'s Remap)',
+            disabled: () => ![...this.list().slots.values()].some((x) => kindOf(x.type) === 'tiles'), onClick: () => this.openRemap() },
+          { label: 'Trigger Init …', title: 'Custom triggers and manual frames set when the level loads (Lunar Magic\'s Trigger Init)', onClick: () => this.openTriggerInit() },
+        ] })));
     this.animate();
   }
 
@@ -282,29 +355,38 @@ export class AnimTab implements WsPanel {
     return -1;
   }
 
-  private async add(kind: 'tiles' | 'colors'): Promise<void> {
+  private async add(kind: 'tiles' | 'colors' | 'rotation'): Promise<void> {
     const l = this.list();
     const n = this.freeSlot(l);
     if (n < 0) { toast('All 32 slots are in use'); return; }
     if (kind === 'tiles') {
-      if (!readAltFile(this.app.rom, l.altFile)) {
-        this.app.romEdit(`${gfxName(ANIM_FILE + l.altFile)} created`, () => writeAltFile(this.app.rom, l.altFile, new Uint8Array(0x1000)));
+      if (!hasGfx(this.app.rom, ANIM_FILE + l.altFile)) {
+        this.app.romEdit(`${gfxName(ANIM_FILE + l.altFile)} created`, () => createGfx(this.app.rom, ANIM_FILE + l.altFile));
       }
       l.slots.set(n, { type: 0x01, trigger: 0, framesLess1: 1, dest: ALT | (this.charWord() + 0x60 * 16), frames: [0x00, 0x20] });
-    } else {
+    } else if (kind === 'colors') {
       l.slots.set(n, { type: 0x14, trigger: 0, framesLess1: 1, dest: 0x21, frames: [0x001f, 0x7c00] });
+    } else {
+      const e: ExSlot = { type: 0x18, trigger: 0, framesLess1: 0, dest: 0, frames: [] };
+      setRotationRange(e, 0x21, 4);
+      l.slots.set(n, e);
     }
+    this.palRows.delete(this.palKey(n));
     this.sel = n;
     this.frame = 0;
-    await this.save(l, kind === 'tiles' ? 'new tile animation' : 'new color animation');
+    this.triggerOn = false;
+    await this.save(l, kind === 'tiles' ? 'new tile animation' : kind === 'colors' ? 'new color animation' : 'new color rotation');
   }
   private async duplicate(): Promise<void> {
     const l = this.list();
     const s = l.slots.get(this.sel);
     const n = this.freeSlot(l);
-    if (!s || n < 0) return;
+    if (!s) return;
+    if (n < 0) { toast('All 32 slots are in use'); return; }
     l.slots.set(n, { ...s, frames: s.frames.slice() });
+    const row = this.palRow;
     this.sel = n;
+    this.palRow = row;
     await this.save(l, `Slot ${hex(n, 2)} duplicated`);
   }
   // Lunar Magic's ExAnimation Remap: the chosen tile slots' frames (tiles of the animation graphic) and
@@ -314,7 +396,7 @@ export class AnimTab implements WsPanel {
     const tileSlots = [...l.slots.entries()].filter(([, x]) => kindOf(x.type) === 'tiles').sort((a, b) => a[0] - b[0]);
     const chosen = new Set(tileSlots.some(([n]) => n === this.sel) ? [this.sel] : tileSlots.map(([n]) => n));
     const what = { frames: true, target: true };
-    const file = readAltFile(this.app.rom, l.altFile);
+    const file = animBytes(this.app.rom, l.altFile);
     const frameMax = (file ? file.length : ALT_FILE_MAX) / 32 - 1;
     const charWord = this.charWord();
     const preview = h('div', { class: 'at-remap-preview' });
@@ -357,9 +439,40 @@ export class AnimTab implements WsPanel {
     ]);
   }
 
+  // Lunar Magic's Trigger Init: the custom triggers and manual frames this list sets when the level loads
+  // (the global list's first, the level's over them); one undo step
+  private openTriggerInit(): void {
+    const draft = this.list();
+    const g = this.global ? null : readGlobalList(this.app.rom);
+    const custom = h('div', { class: 'ti-grid' }, Array.from({ length: 16 }, (_, n) => {
+      const sel = h('select', { title: `${triggerName(0x20 + n)}: as it is (keep), or on / off when the level loads` },
+        (['keep', 'on', 'off'] as CustomInit[]).map((v) => h('option', { value: v, selected: customInit(draft, n) === v }, v === 'keep' ? (this.global ? 'keep' : `keep${g && customInit(g, n) !== 'keep' ? ` (global: ${customInit(g, n)})` : ''}`) : v)));
+      sel.addEventListener('change', () => setCustomInit(draft, n, sel.value as CustomInit));
+      return h('label', { class: 'ti-cell' }, h('span', { class: 'mono' }, `Custom ${hex(n, 1)}`), sel);
+    }));
+    const manual = h('div', { class: 'ti-grid' }, Array.from({ length: 16 }, (_, n) => {
+      const cur = draft.manual.get(n);
+      const frame = hexInput(cur === undefined || cur === 0xff ? 0 : cur, 2, (f) => { draft.manual.set(n, f); on.checked = true; }, 0xfe);
+      const on = h('input', { type: 'checkbox', checked: cur !== undefined, title: 'Set the frame when the level loads' });
+      on.addEventListener('change', () => { if (on.checked) draft.manual.set(n, Number.parseInt(frame.value, 16) || 0); else draft.manual.delete(n); });
+      const gf = g?.manual.get(n);
+      return h('label', { class: 'ti-cell', title: gf !== undefined ? `The global list sets frame ${hex(gf, 2)}` : '' }, on, h('span', { class: 'mono' }, `Manual ${hex(n, 1)}`), frame,
+        cur === 0xff ? h('span', { class: 'warn-box' }, 'was FF') : '', gf !== undefined && !this.global ? h('span', { class: 'hint' }, `global ${hex(gf, 2)}`) : '');
+    }));
+    const body = h('div', { class: 'ti' },
+      h('p', { class: 'hint' }, this.global ? 'Set in every level when it loads; a level\'s own Trigger Init overrides these.' : 'Set when this level loads, over the global list\'s (shown where it sets one). Also when the level\'s animations are turned off.'),
+      h('div', { class: 'panel-title' }, 'Custom triggers', h('span', { class: 'hint' }, 'keep: as before the level (the last level left it)')), custom,
+      h('div', { class: 'panel-title' }, 'Manual frames', h('span', { class: 'hint' }, '00–FE; FF is the engine\'s “nothing shown yet”')), manual);
+    modal(`Trigger Init – ${this.global ? 'global' : `level ${hex(this.app.level.number, 3)}`}`, body, [
+      { label: 'Apply', primary: true, onClick: () => { void this.save(draft, 'Trigger Init'); } },
+      { label: 'Cancel' },
+    ]);
+  }
+
   private async remove(): Promise<void> {
     const l = this.list();
     if (!l.slots.delete(this.sel)) return;
+    this.palRow = -1;
     l.count = 0;
     await this.save(l, `Slot ${hex(this.sel, 2)} deleted`);
     toast(`Animation ${hex(this.sel, 2)} deleted – Ctrl+Z brings it back`);
@@ -370,22 +483,29 @@ export class AnimTab implements WsPanel {
     // an open native color picker closes when its input is replaced: rebuild once it is done (change)
     if (pickerOpen(d)) return;
     clear(d);
-    if (this.ws.preview.highlight.size) { this.ws.preview.highlight.clear(); this.ws.preview.drawHighlight(); }
+    const pv = this.ws.preview;
+    if (pv.highlight.size || pv.highlight2.size || pv.highlightBg.size) { pv.clearHighlight(); pv.drawHighlight(); }
     const s = this.slot();
     if (!s) { d.append(h('p', { class: 'hint' }, 'Select or create an animation on the left.')); return; }
     const kind = kindOf(s.type);
-    const typeSel = h('select', null, (kind === 'colors' ? COLOR_TYPES : kind === 'tiles' ? TILE_TYPES : [s.type]).map((t) => h('option', { value: String(t), selected: t === s.type }, TYPE_NAMES[t] ?? hex(t, 2))));
+    const typeSel = h('select', null, (kind === 'colors' ? COLOR_TYPES : kind === 'tiles' ? TILE_TYPES : ROTATION_TYPES).map((t) => h('option', { value: String(t), selected: t === s.type }, TYPE_NAMES[t] ?? hex(t, 2))));
     typeSel.addEventListener('change', () => void this.editSlot((x) => { x.type = Number(typeSel.value); }, `Type ${TYPE_NAMES[Number(typeSel.value)]}`));
-    const trig = h('select', null, [...new Set([...TRIGGERS, s.trigger])].map((t) => h('option', { value: String(t), selected: t === s.trigger }, triggerName(t))));
+    const trig = triggerSelect(kind!, s.trigger);
     trig.addEventListener('change', () => void this.editSlot((x) => {
+      if (kind === 'rotation') { x.trigger = Number(trig.value); return; } // no frames
       const cols = this.columns(x);
       x.trigger = Number(trig.value);
+      const max = maxFrames(x.trigger);
+      if (cols.length > max) { cols.length = max; toast(`${triggerName(x.trigger)}: at most ${max} frames – the last ones left out`); }
       this.setColumns(x, cols);
     }, `Trigger ${triggerName(Number(trig.value))}`));
+    const ram = triggerRam(s.trigger), hint = triggerHint(s.trigger, kind === 'rotation');
     const trigger = [
       h('div', { class: 'prop' }, h('label', null, 'Trigger'), trig),
-      secondSet(s.trigger) ? h('p', { class: 'hint' }, `Two frame sequences: top normally, bottom while “${secondSetName(s.trigger)}”.`) : '',
-      s.trigger === 6 || s.trigger === 8 ? h('p', { class: 'hint' }, 'Runs once up to the last frame as soon as the condition occurs, and stays there.') : '',
+      hint ? h('p', { class: 'hint' }, hint) : '',
+      ram?.asm ? h('div', { class: 'tp-asm' }, h('code', { class: 'mono', title: `${ram.ram}: ${ram.what}` }, ram.asm),
+        h('a', { href: '#', title: 'Switch it in the preview; RAM and ASM of all triggers', onclick: (e: Event) => { e.preventDefault(); this.triggers = true; this.picking = null; this.build(); } }, 'Triggers')) : '',
+      secondSet(s.trigger) && kind !== 'rotation' ? h('p', { class: 'hint' }, `Two frame sequences: top normally, bottom while “${secondSetName(s.trigger)}”.`) : '',
     ];
     d.append(
       h('div', { class: 'prop-title' }, `Slot ${hex(this.sel, 2)}`, h('span', { class: 'hint' }, this.global ? ' · global' : ` · level ${hex(this.app.level.number, 3)}`)),
@@ -394,7 +514,125 @@ export class AnimTab implements WsPanel {
     if (kind === 'tiles') { this.tileDetail(d, s, trigger); return; }
     d.append(...trigger);
     if (kind === 'colors') this.colorDetail(d, s);
-    else d.append(h('p', { class: 'hint' }, 'Color rotations cannot be edited here yet (created in Lunar Magic).'));
+    else this.rotationDetail(d, s);
+  }
+
+  // where colors show in the level: the Map16 tiles that draw them (links, marked in the preview), or
+  // that they are sprite palettes or drawn by no tile here
+  private colorUsers(colors: number[]): HTMLElement {
+    const app = this.app, im = app.images, pv = this.ws.preview;
+    const layers = colors.filter((c) => c < 0x80), sprites = colors.length - layers.length;
+    const u = im && layers.length ? levelColorUsers(app.rom, app.render, im, new Set(layers)) : { layer1: [], layer2: [], bg: [] };
+    pv.highlight = new Set(u.layer1);
+    pv.highlight2 = new Set(u.layer2);
+    pv.highlightBg = new Set(u.bg);
+    pv.drawHighlight();
+    const links = (label: string, tiles: number[], bg: boolean) => tiles.length
+      ? h('div', { class: 'gt-users' }, h('span', { class: 'hint' }, label), tiles.slice(0, 24).map((m) => h('a', { href: '#', class: 'mono', title: 'Open in the Map16 tab', onclick: (e: Event) => { e.preventDefault(); this.ws.showMap16(m, bg); } }, hex(m, 3))), tiles.length > 24 ? h('span', { class: 'hint' }, `… (${tiles.length})`) : '')
+      : '';
+    const none = layers.length && !u.layer1.length && !u.layer2.length && !u.bg.length;
+    return h('div', { class: 'at-users' },
+      links('shows on Map16 (layer 1):', u.layer1, false), links('layer 2:', u.layer2, false), links('BG:', u.bg, true),
+      none ? h('div', { class: 'hint' }, `No Map16 tile of this level draws ${layers.length === 1 ? 'this color' : 'these colors'} – not visible on its layers.`) : '',
+      sprites ? h('div', { class: 'hint' }, `${sprites === colors.length ? (colors.length === 1 ? 'This color is' : 'These colors are') : `${sprites} of the colors are`} in the sprite palettes (rows 8–F): ${sprites === 1 ? 'it shows' : 'they show'} on sprites that use them, not on Map16 tiles.`) : '',
+      u.layer1.length || u.layer2.length || u.bg.length ? h('div', { class: 'hint' }, 'Marked in the level preview.') : '');
+  }
+
+  // a color rotation: its colors (dragged in the palette on the right), how often it turns, a strip
+  // of the colors turning at that speed (as while the trigger holds, when asked)
+  private rotationDetail(d: HTMLElement, s: ExSlot): void {
+    const { first, count } = rotationRange(s), delay = s.framesLess1 + 1;
+    const reversible = reversesOnTrigger(s.type);
+    d.append(h('p', { class: 'hint' }, s.trigger === 0
+      ? (reversible ? 'Runs always (without a trigger it never turns the other way).' : 'Runs always.')
+      : reversible ? `Runs always and turns the other way while “${secondSetName(s.trigger)}”.` : `Runs only while “${secondSetName(s.trigger)}” – otherwise the colors stay.`));
+    const num = (value: number, min: number, max: number, title: string, set: (v: number) => void) => {
+      const i = h('input', { type: 'number', min: String(min), max: String(max), value: String(value), title, class: 'at-num' });
+      i.addEventListener('change', () => {
+        const v = Math.round(Number(i.value));
+        if (!Number.isFinite(v) || v < min || v > max) { toast(`${min}–${max}`); i.value = String(value); return; }
+        set(v);
+      });
+      return i;
+    };
+    const countIn = num(count, 2, Math.min(ROTATION_MAX, 256 - first), 'Number of colors (2–128, drag in the palette on the right)', (v) => void this.editSlot((x) => setRotationRange(x, first, v), `${v} colors`));
+    const delayIn = num(delay, 1, 256, 'Frames per step: 1 = every animation frame (8 game frames), 2 = every 2nd …', (v) => void this.editSlot((x) => { x.framesLess1 = v - 1; }, `Delay ${v}`));
+    const strip = h('div', { class: 'at-rot-strip' });
+    strip.dataset.slot = String(this.sel);
+    const dir = rotationStep(s.type, s.trigger, this.triggerOn);
+    d.append(
+      h('div', { class: 'prop' }, h('label', null, 'Colors'), h('span', { class: 'mono' }, rangeName(s)), h('span', { class: 'hint' }, 'drag in the palette on the right')),
+      this.colorUsers(Array.from({ length: Math.min(count, 256 - first) }, (_, i) => first + i)),
+      h('div', { class: 'prop' }, h('label', null, 'Count'), countIn),
+      h('div', { class: 'prop' }, h('label', null, 'Frames'), delayIn, h('span', { class: 'hint' }, speedName(delay))),
+      h('p', { class: 'hint' }, `A step every ${delay * 8} game frames; all ${count} colors go round in ${fmt(count * delay * 8 / 60)} s.`),
+      h('div', { class: 'at-big-wrap' }, strip, h('div', { class: 'hint' }, dir ? `Preview (${dir})` : 'Preview: waits for its trigger')),
+      s.trigger ? h('label', { class: 'toggle' }, h('input', { type: 'checkbox', checked: this.triggerOn, onchange: (e: Event) => { this.triggerOn = (e.target as HTMLInputElement).checked; this.buildDetail(); } }), `Preview while “${secondSetName(s.trigger)}”`) : '',
+    );
+    const held = this.heldColors(s);
+    if (held?.length) {
+      const name = (c: number) => `${hex(c >> 4, 1)}·${hex(c & 15, 1)}`;
+      const runs: number[][] = [];
+      for (const c of held) { const r = runs.at(-1); if (r && r[1] === c - 1) r[1] = c; else runs.push([c, c]); }
+      const names = runs.map(([a, b]) => (a === b ? name(a) : `${name(a)}–${name(b)}`)).join(', ');
+      d.append(h('p', { class: 'warn-box' }, `In the game, ${held.length === 1 ? `color ${names} does` : `colors ${names} do`} not rotate: the game sets ${held.length === 1 ? 'it' : 'them'} itself every frame (seen in the emulated level).`));
+    }
+    this.animate();
+  }
+
+  // the colors of a rotation that do not turn in the emulated level (the game sets them itself), found
+  // in the background once per level render and slot; null until known or when it waits for its trigger
+  private heldColors(s: ExSlot): number[] | null {
+    const app = this.app, { first, count } = rotationRange(s), delay = s.framesLess1 + 1;
+    const key = `${this.global}:${app.level.number}:${this.sel}:${s.type}:${s.trigger}:${s.dest}:${delay}`;
+    const hd = this.held;
+    if (hd.key === key && hd.render === app.render) return hd.colors;
+    const dir = rotationStep(s.type, s.trigger, false);
+    if (!dir || delay > 32) return null; // not a step in the 64 the check takes
+    clearTimeout(hd.timer);
+    hd.timer = window.setTimeout(() => {
+      hd.timer = 0;
+      const render = app.render;
+      let colors: number[] = [];
+      try { colors = heldColors(app.animationCgrams(Math.min(64, count * delay) + 1), first, count, dir, delay); } catch (e) { console.error(e); }
+      Object.assign(hd, { key, render, colors });
+      if (this.visible && this.slot() && hd.key === key) this.buildDetail();
+    }, 50);
+    return null;
+  }
+
+  // the palette on the right for a rotation: drag over it for its colors; a click moves them there
+  private rotationPicker(box: HTMLElement, s: ExSlot): void {
+    const { first, count } = rotationRange(s);
+    const pal = cgramToRGBA(this.app.render.cgram);
+    const grid = h('div', { class: 'at-palgrid rot' });
+    const cells: HTMLElement[] = [];
+    let from = -1, to = -1;
+    const range = (): [number, number] => {
+      const a = Math.min(from, to), b = Math.max(from, to);
+      return b - a + 1 > ROTATION_MAX ? (to > from ? [from, from + ROTATION_MAX - 1] : [from - ROTATION_MAX + 1, from]) : [a, b];
+    };
+    const mark = (a: number, b: number) => cells.forEach((c, i) => c.classList.toggle('in', i >= a && i <= b));
+    const up = () => {
+      window.removeEventListener('mouseup', up);
+      if (from < 0) return;
+      const [a, b] = range();
+      from = -1;
+      // a click (no drag) moves the colors there, as many as before
+      const [f, n] = a === b ? [Math.min(a, 256 - count), count] : [a, b - a + 1];
+      if (f === first && n === count) { mark(first, first + count - 1); return; }
+      void this.editSlot((x) => setRotationRange(x, f, n), `Colors ${hex(f, 2)}–${hex(f + n - 1, 2)}`);
+    };
+    for (let i = 0; i < 256; i++) {
+      const v = pal[i];
+      const c = h('div', { class: 'at-pal', title: `Color ${hex(i >> 4, 1)}·${hex(i & 15, 1)}`, style: { background: `rgb(${v & 255},${(v >> 8) & 255},${(v >> 16) & 255})` },
+        onmousedown: (e: MouseEvent) => { if (e.button) return; e.preventDefault(); from = to = i; mark(i, i); window.addEventListener('mouseup', up); },
+        onmouseenter: () => { if (from < 0) return; to = i; mark(...range()); } });
+      cells.push(c);
+      grid.append(c);
+    }
+    mark(first, first + count - 1);
+    box.append(h('div', { class: 'panel-title' }, 'Colors', h('span', { class: 'hint' }, 'drag over the palette (2–128 colors)')), grid);
   }
 
   // 8x8 tiles (VRAM numbers) a tile slot overwrites
@@ -406,19 +644,18 @@ export class AnimTab implements WsPanel {
   }
 
   // Map16 tiles that use one of the slot's target tiles (they animate with it)
-  private targetUsers(s: ExSlot): number[] {
+  private targetUsers(s: ExSlot, limit = 64): number[] {
     const tiles = new Set(this.targetTiles(s));
     const src = map16Source(this.app.rom, this.app.render);
-    const max = EXT_TILES;
     const users: number[] = [];
-    for (let m = 0; m < max && users.length < 64; m++) if (src.fg(m).some((w) => tiles.has(w & 0x3ff))) users.push(m);
+    for (let m = 0; m < EXT_TILES && users.length < limit; m++) if (src.fg(m).some((w) => tiles.has(w & 0x3ff))) users.push(m);
     return users;
   }
 
   private tileDetail(d: HTMLElement, s: ExSlot, trigger: (HTMLElement | string)[]): void {
     const t = this.targetTile(s);
     const shape = shapeOf(s.type);
-    const slot = levelSlots(this.app).find((x) => t >= x.first && t < x.first + 0x80);
+    const slot = slotOfTile(this.gfxSlots(), t);
     const users = this.targetUsers(s);
     // places in the level: marked in the preview
     this.ws.preview.highlight = new Set(users);
@@ -427,7 +664,7 @@ export class AnimTab implements WsPanel {
       h('div', { class: 'panel-title at-step' }, '1 · Target', h('span', { class: 'hint' }, 'which 8x8 tiles are replaced')),
       h('div', { class: 'prop' }, h('label', null, 'Target'),
         h('span', { class: 'mono' }, `8x8 tile ${hex(t, 3)}`), slot ? h('span', { class: 'hint' }, ` ${slot.name}`) : '',
-        h('button', { class: this.picking === 'target' ? 'active' : '', title: 'Click in the VRAM grid on the right or in the level preview', onclick: () => { this.picking = this.picking ? null : 'target'; this.buildSide(); this.buildDetail(); } }, 'Choose target')),
+        h('button', { class: this.picking === 'target' ? 'active' : '', title: 'Click in the VRAM grid on the right or in the level preview', onclick: () => { this.picking = this.picking ? null : 'target'; this.triggers = false; this.buildSide(); this.buildDetail(); } }, 'Choose target')),
       h('div', { class: 'hint' }, `${shape.w}×${shape.h} tiles`, slot ? h('span', null, ' · ', h('a', { href: '#', title: `Open ${gfxName(slot.file)} in the Graphics tab`, onclick: (e: Event) => { e.preventDefault(); this.ws.showGfx(slot.file, t - slot.first); } }, `view in ${gfxName(slot.file)}`)) : ''),
       users.length
         ? h('div', { class: 'gt-users' }, h('span', { class: 'hint' }, 'animates Map16:'), users.slice(0, 24).map((m) => h('a', { href: '#', class: 'mono', title: 'Open in the Map16 tab', onclick: (e: Event) => { e.preventDefault(); this.ws.showMap16(m); } }, hex(m, 3))), users.length > 24 ? h('span', { class: 'hint' }, `… (${users.length})`) : '')
@@ -449,7 +686,7 @@ export class AnimTab implements WsPanel {
         const cv = h('canvas', { class: 'at-frame-img' });
         this.drawFrame(cv, s, c[set]);
         row.append(h('div', { class: `at-frame${i === this.frame && set === this.set ? ' sel' : ''}`, title: `Frame ${i + 1}: ${s.dest & ALT ? `tile ${hex(c[set] >> 5, 3)} of the animation graphic` : `RAM $7E${hex(c[set], 4)}`}`,
-          onclick: () => { this.frame = i; this.set = set; this.buildDetail(); this.buildSide(); } }, cv, h('span', { class: 'hint mono' }, s.dest & ALT ? hex(c[set] >> 5, 2) : '$' + hex(c[set], 4))));
+          onclick: () => { this.frame = i; this.set = set; this.triggers = false; this.buildDetail(); this.buildSide(); } }, cv, h('span', { class: 'hint mono' }, s.dest & ALT ? hex(c[set] >> 5, 2) : '$' + hex(c[set], 4))));
       });
       strip.append(row);
     }
@@ -458,13 +695,14 @@ export class AnimTab implements WsPanel {
       h('div', { class: 'row' },
         h('button', { title: 'New frame after the selected one (next tiles of the graphic)', onclick: () => void this.editSlot((x) => {
           const cs = this.columns(x);
-          if (cs.length >= (secondSet(x.trigger) ? 0x80 : 0x100)) return;
+          if (full(x, cs)) return false;
           cs.splice(this.frame + 1, 0, cs[this.frame].map((v) => v + step));
           this.setColumns(x, cs);
           this.frame++;
         }, 'Frame added') }, '+ Frame'),
         h('button', { title: 'Selected frame once more (shows it twice as long)', onclick: () => void this.editSlot((x) => {
           const cs = this.columns(x);
+          if (full(x, cs)) return false;
           cs.splice(this.frame + 1, 0, cs[this.frame].slice());
           this.setColumns(x, cs);
         }, 'Frame lengthened') }, 'Longer'),
@@ -496,8 +734,9 @@ export class AnimTab implements WsPanel {
     if (!back) {
       const c = s.dest & 0xff;
       d.append(h('div', { class: 'prop' }, h('label', null, 'Color'), h('span', { class: 'mono' }, `${hex(c >> 4, 1)}·${hex(c & 15, 1)}`),
-        h('button', { class: this.picking === 'target' ? 'active' : '', onclick: () => { this.picking = this.picking ? null : 'target'; this.buildSide(); this.buildDetail(); } }, 'Choose color')));
-    }
+        h('button', { class: this.picking === 'target' ? 'active' : '', onclick: () => { this.picking = this.picking ? null : 'target'; this.triggers = false; this.buildSide(); this.buildDetail(); } }, 'Choose color')));
+      d.append(this.colorUsers(Array.from({ length: Math.min(count, 256 - c) }, (_, i) => c + i)));
+    } else d.append(h('div', { class: 'hint' }, 'Shows wherever no layer draws (the back area).'));
     if (count > 1) { d.append(h('p', { class: 'hint' }, `This animation sets ${count} colors at once (from data) – not editable here yet.`)); return; }
     const cols = this.columns(s);
     const sets = secondSet(s.trigger) ? 2 : 1;
@@ -523,7 +762,7 @@ export class AnimTab implements WsPanel {
     sw.dataset.slot = String(this.sel);
     d.append(h('div', { class: 'at-big-wrap' }, sw, h('div', { class: 'hint' }, 'Preview')), strip,
       h('div', { class: 'row' },
-        h('button', { onclick: () => void this.editSlot((x) => { const cs = this.columns(x); cs.splice(this.frame + 1, 0, cs[this.frame].slice()); this.setColumns(x, cs); this.frame++; }, 'Frame added') }, '+ Frame'),
+        h('button', { onclick: () => void this.editSlot((x) => { const cs = this.columns(x); if (full(x, cs)) return false; cs.splice(this.frame + 1, 0, cs[this.frame].slice()); this.setColumns(x, cs); this.frame++; }, 'Frame added') }, '+ Frame'),
         h('button', { disabled: cols.length < 2, onclick: () => void this.editSlot((x) => { const cs = this.columns(x); cs.splice(this.frame, 1); this.setColumns(x, cs); this.frame = Math.max(0, this.frame - 1); }, 'Frame removed') }, 'Remove')),
       h('p', { class: 'hint' }, 'Each frame shows for 8 game frames (≈0.13 s). The same color twice in a row shows it longer.'));
   }
@@ -533,7 +772,10 @@ export class AnimTab implements WsPanel {
     const box = this.side;
     clear(box);
     const s = this.slot();
-    if (!s) return;
+    if (this.triggers || !s) {
+      box.append(triggerPanel(this.app, (r: SlotRef) => this.select(r.global, r.slot)));
+      return;
+    }
     const kind = kindOf(s.type);
     if (kind === 'colors') {
       if (this.picking !== 'target') { box.append(h('p', { class: 'hint' }, 'Use “Choose color” to set the palette color that is animated.')); return; }
@@ -547,12 +789,84 @@ export class AnimTab implements WsPanel {
       box.append(h('div', { class: 'panel-title' }, 'Choose color'), grid);
       return;
     }
+    if (kind === 'rotation') { this.rotationPicker(box, s); return; }
     if (kind !== 'tiles') return;
     const row = this.rowFor(s);
     const rows = h('div', { class: 'at-rows' }, Array.from({ length: 8 }, (_, r) => h('button', { class: r === row ? 'active' : '', onclick: () => { this.palRow = r; this.build(); } }, String(r))));
     box.append(h('div', { class: 'row' }, h('span', { class: 'hint' }, 'Palette'), rows, this.palRow >= 0 ? h('a', { href: '#', onclick: (e: Event) => { e.preventDefault(); this.palRow = -1; this.build(); } }, 'auto') : ''));
+    if (this.palRow >= 0) this.paletteMismatch(box, s, row);
     if (this.picking === 'target') { this.targetPicker(box, s, row); return; }
     this.sourcePicker(box, s, row);
+  }
+
+  // the Map16 tiles placed in the level (layer 1, layer 2 objects)
+  private placedTiles(): Set<number> {
+    const im = this.app.images;
+    return new Set([...(im?.tiles1 ?? []), ...(im?.tiles2 ?? [])]);
+  }
+  // Map16 tiles showing the slot's target in another palette than `row`, with the palettes they show it in
+  private offPalette(s: ExSlot, row: number): { tile: number; pals: number[] }[] {
+    const targets = new Set(this.targetTiles(s)), src = map16Source(this.app.rom, this.app.render);
+    const out: { tile: number; pals: number[] }[] = [];
+    for (let tile = 0; tile < EXT_TILES; tile++) {
+      const words = src.fg(tile);
+      if (paletteOn(words, targets, row)) out.push({ tile, pals: [...new Set(words.filter((w) => targets.has(w & 0x3ff)).map((w) => (w >> 10) & 7))].sort() });
+    }
+    return out;
+  }
+
+  // a palette chosen for the previews that Map16 tiles do not draw the target in: said so, and offered
+  // to give them (never done by itself: the palette is the view's, the Map16 tiles are every level's)
+  private paletteMismatch(box: HTMLElement, s: ExSlot, row: number): void {
+    const off = this.offPalette(s, row);
+    if (!off.length) return;
+    const placed = this.placedTiles(), here = off.filter((o) => placed.has(o.tile));
+    const name = (o: { tile: number; pals: number[] }) => `${hex(o.tile, 3)} (palette ${o.pals.join(', ')})`;
+    const shown = here.length ? here : off;
+    box.append(h('div', { class: 'at-palfix' },
+      h('span', { class: 'hint' }, here.length
+        ? `${here.length === 1 ? 'Map16 tile' : `${here.length} Map16 tiles`} of this level show${here.length === 1 ? 's' : ''} the target in another palette: ${shown.slice(0, 6).map(name).join(', ')}${shown.length > 6 ? ' …' : ''}`
+        : `In this level every Map16 tile shows the target in this palette; ${off.length === 1 ? 'one tile not placed here does not' : `${off.length} tiles not placed here do not`}: ${shown.slice(0, 6).map(name).join(', ')}${shown.length > 6 ? ' …' : ''}`),
+      h('button', { title: 'Choose the Map16 tiles whose quarters showing the target take this palette', onclick: () => this.openApplyPalette(s, row) }, `Apply palette ${row} …`)));
+  }
+
+  // the chosen Map16 tiles' quarters that show the target take palette `row`: one undo step
+  private openApplyPalette(s: ExSlot, row: number): void {
+    const app = this.app, off = this.offPalette(s, row), placed = this.placedTiles();
+    const targets = new Set(this.targetTiles(s));
+    const { levels, pending } = app.levelTiles();
+    // the tiles of this level first; when none is placed here, the user asks for the others
+    const anyHere = off.some((o) => placed.has(o.tile));
+    const chosen = new Set(off.filter((o) => !anyHere || placed.has(o.tile)).map((o) => o.tile));
+    const where = (t: number) => {
+      const lv = fgTileUsers(levels, t, app.tilesetsOf(t)).map((u) => u.level).filter((n) => n !== app.level.number);
+      const here = placed.has(t) ? 'this level' : '';
+      const others = lv.length ? `${lv.length === 1 ? 'level' : 'levels'} ${lv.slice(0, 4).map((n) => hex(n, 3)).join(', ')}${lv.length > 4 ? ` and ${lv.length - 4} more` : ''}` : '';
+      return [here, others].filter(Boolean).join(', also ') || 'placed in no level';
+    };
+    const body = h('div', { class: 'at-palapply' },
+      h('p', { class: 'hint' }, `The quarters showing 8x8 tile${targets.size > 1 ? 's' : ''} ${[...targets].slice(0, 4).map((t) => hex(t, 3)).join(', ')}${targets.size > 4 ? ' …' : ''} take palette ${row}; the other quarters stay. Map16 tiles are shared: the change shows in every level placing them.`),
+      h('table', { class: 'at-remap-table' },
+        h('tr', null, h('th', null, ''), h('th', null, 'Map16'), h('th', null, 'Palette'), h('th', null, 'Placed in')),
+        off.map((o) => h('tr', null,
+          h('td', null, h('input', { type: 'checkbox', checked: chosen.has(o.tile), onchange: (e: Event) => { if ((e.target as HTMLInputElement).checked) chosen.add(o.tile); else chosen.delete(o.tile); } })),
+          h('td', { class: 'mono' }, hex(o.tile, 3)),
+          h('td', { class: 'mono' }, `${o.pals.join(', ')} → ${row}`),
+          h('td', { class: 'hint' }, where(o.tile))))),
+      pending ? h('p', { class: 'hint' }, `${pending} more level${pending > 1 ? 's are' : ' is'} still being looked through – they may place these tiles too.`) : '');
+    modal(`Palette ${row} for animation ${hex(this.sel, 2)}`, body, [
+      { label: 'Apply', primary: true, onClick: () => {
+        if (!chosen.size) { toast('No Map16 tile chosen'); return false; }
+        const src = map16Source(app.rom, app.render);
+        const tiles = off.map((o) => o.tile).filter((t) => chosen.has(t));
+        try {
+          app.romEdit(`${tiles.length === 1 ? `FG tile ${hex(tiles[0], 3)}` : `${tiles.length} FG tiles`}: palette ${row} (animation ${hex(this.sel, 2)})`, () => {
+            for (const t of tiles) { const w = paletteOn(src.fg(t), targets, row); if (w) setFgWords(app.rom, app.render, t, w); }
+          });
+        } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
+      } },
+      { label: 'Cancel' },
+    ]);
   }
 
   private sheet(tiles: number, get: (t: number) => Uint8Array | null, row: number, Z = 3): HTMLCanvasElement {
@@ -580,7 +894,7 @@ export class AnimTab implements WsPanel {
 
   private sourcePicker(box: HTMLElement, s: ExSlot, row: number): void {
     const l = this.list();
-    const file = readAltFile(this.app.rom, l.altFile);
+    const file = animBytes(this.app.rom, l.altFile);
     if (!(s.dest & ALT)) {
       box.append(h('p', { class: 'hint' }, 'This slot takes its frames from RAM (the game\'s graphics, e.g. from a Lunar Magic ROM). Copied into the animation graphic, they can be picked and drawn here.'),
         h('button', { onclick: () => void this.copyRamFrames() }, `Copy frames into ${gfxName(ANIM_FILE + l.altFile)}`));
@@ -626,7 +940,7 @@ export class AnimTab implements WsPanel {
   }
 
   private async createAltFile(k: number): Promise<void> {
-    try { this.app.romEdit(`${gfxName(ANIM_FILE + k)} created`, () => writeAltFile(this.app.rom, k, new Uint8Array(0x1000))); }
+    try { this.app.romEdit(`${gfxName(ANIM_FILE + k)} created`, () => createGfx(this.app.rom, ANIM_FILE + k)); }
     catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
   }
 
@@ -634,7 +948,7 @@ export class AnimTab implements WsPanel {
     const app = this.app;
     const base = this.charWord() * 2;
     const vram = app.render.vram;
-    const slots = levelSlots(app);
+    const slots = layerSlots(this.gfxSlots());
     const shape = shapeOf(s.type);
     box.append(h('div', { class: 'panel-title' }, 'Choose target in VRAM'), h('div', { class: 'hint' }, `Click a tile (top left of the ${shape.w}×${shape.h} tiles). A click into the level preview works too.`));
     for (const sl of slots) {
@@ -683,13 +997,32 @@ export class AnimTab implements WsPanel {
       if (!s) continue;
       if (kindOf(s.type) === 'tiles') this.drawFrame(p.c, s, frameOf(s, 0));
       else if (kindOf(s.type) === 'colors') { p.c.width = p.c.height = 1; const ctx = p.c.getContext('2d')!; const v = snesColorToRGBA(frameOf(s, 0) ?? 0); ctx.fillStyle = `rgb(${v & 255},${(v >> 8) & 255},${(v >> 16) & 255})`; ctx.fillRect(0, 0, 1, 1); }
+      else {
+        const c = this.rotationColors(s, rotationStep(s.type, s.trigger, false));
+        p.c.width = c.length; p.c.height = 1;
+        const ctx = p.c.getContext('2d')!;
+        c.forEach((v, i) => { ctx.fillStyle = cssOf(v); ctx.fillRect(i, 0, 1, 1); });
+      }
     }
     const s = this.slot();
     if (!s) return;
+    const strip = this.detail.querySelector<HTMLElement>('.at-rot-strip');
+    if (strip && kindOf(s.type) === 'rotation') {
+      const c = this.rotationColors(s, rotationStep(s.type, s.trigger, this.triggerOn));
+      if (strip.childElementCount !== c.length) strip.replaceChildren(...c.map(() => h('div')));
+      c.forEach((v, i) => { (strip.children[i] as HTMLElement).style.background = cssOf(v); });
+    }
     const big = this.detail.querySelector<HTMLCanvasElement>('.at-big');
     if (big) this.drawFrame(big, s, frameOf(s, this.set));
     const cb = this.detail.querySelector<HTMLElement>('.at-color-big');
     if (cb) cb.style.background = cssOf(frameOf(s, this.set) ?? 0);
+  }
+
+  // a rotation's colors (SNES words, from the level's palette) at the current tick, turned `dir`
+  private rotationColors(s: ExSlot, dir: 'right' | 'left' | null): number[] {
+    const { first, count } = rotationRange(s), cg = this.app.render.cgram;
+    const c = Array.from({ length: Math.min(count, 256 - first) }, (_, i) => cg[(first + i) * 2] | (cg[(first + i) * 2 + 1] << 8));
+    return dir ? rotated(c, dir, Math.floor(this.tick / (s.framesLess1 + 1))) : c;
   }
 
   key(e: KeyboardEvent): boolean {

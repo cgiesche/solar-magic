@@ -10,6 +10,7 @@ import { TileCache, blit8 } from '../core/render.ts';
 import { hex } from '../core/names.ts';
 import { menuButton } from './menu.ts';
 import { RAM, map16Pointer } from '../core/ram.ts';
+import type { Rom } from '../core/rom.ts';
 
 // a w×h block of L1 tiles (16x16) or L2 tilemap entries (8x8), row-major
 type Brush = { kind: 'l1' | 'l2'; w: number; h: number; entries: number[] };
@@ -18,6 +19,36 @@ type Drag =
   | { kind: 'pick'; x0: number; y0: number; x1: number; y1: number }; // map cells taken into the brush
 
 type Snapshot = { l1: Uint8Array; l2: Uint16Array; names: Map<number, number> };
+
+// the 512x512 image of a map region (0 the main map, 1 the submaps): layer 2 (`l2`), then layer 1 (`l1`, null: the
+// state after the events in `r`); undefined leaves a layer out
+export function drawOwMap(rom: Rom, r: OwRender, region: number, l1: Uint8Array | null | undefined, l2: Uint16Array | undefined): Uint32Array {
+  const W = 512;
+  const img = new Uint32Array(W * W);
+  const tc = new TileCache(r.vram, r.cgram, 0);
+  if (l2) for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) blit8(img, W, W, tc.get(l2[l2Index(region, x, y)]), x * 8, y * 8);
+  if (l1 !== undefined) {
+    const src = l1 ?? r.wram.subarray(RAM.owLayer1, RAM.owLayer1End);
+    for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) drawL1Tile(rom, img, tc, r, src[l1Index(region, x, y)], x * 16, y * 16);
+  }
+  return img;
+}
+export function putImage(canvas: HTMLCanvasElement, img: Uint32Array, W = 512): void {
+  canvas.width = W; canvas.height = img.length / W;
+  const ctx = canvas.getContext('2d')!;
+  const id = ctx.createImageData(W, img.length / W);
+  const px = new Uint32Array(id.data.buffer);
+  for (let i = 0; i < px.length; i++) px[i] = img[i] || 0xff000000;
+  ctx.putImageData(id, 0, 0);
+}
+function drawL1Tile(rom: Rom, img: Uint32Array, tc: TileCache, r: OwRender, t: number, px: number, py: number, W = 512, H = 512): void {
+  const p = map16Pointer(r.wram, t);
+  const w = [0, 1, 2, 3].map((q) => rom.r16(0x050000 | (p + q * 2)));
+  blit8(img, W, H, tc.get(w[0]), px, py);
+  blit8(img, W, H, tc.get(w[1]), px, py + 8);
+  blit8(img, W, H, tc.get(w[2]), px + 8, py);
+  blit8(img, W, H, tc.get(w[3]), px + 8, py + 8);
+}
 
 export class OverworldView {
   app: App;
@@ -119,36 +150,13 @@ export class OverworldView {
 
   // ---------------- drawing ----------------
   redrawMap(): void {
-    const r = this.render();
-    const W = 512;
-    const img = new Uint32Array(W * W);
-    const tc = new TileCache(r.vram, r.cgram, 0);
-    if (this.showL2) {
-      for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) blit8(img, W, W, tc.get(this.l2[l2Index(this.region, x, y)]), x * 8, y * 8);
-    }
-    if (this.showL1) {
-      const src = this.showEvents ? r.wram.subarray(RAM.owLayer1, RAM.owLayer1End) : this.l1;
-      for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) this.drawL1Tile(img, tc, r, src[l1Index(this.region, x, y)], x * 16, y * 16);
-    }
-    this.mapCanvas.width = W; this.mapCanvas.height = W;
-    const ctx = this.mapCanvas.getContext('2d')!;
-    const id = ctx.createImageData(W, W);
-    const px = new Uint32Array(id.data.buffer);
-    for (let i = 0; i < px.length; i++) px[i] = img[i] || 0xff000000;
-    ctx.putImageData(id, 0, 0);
+    const img = drawOwMap(this.app.rom, this.render(), this.region, this.showL1 ? (this.showEvents ? null : this.l1) : undefined, this.showL2 ? this.l2 : undefined);
+    putImage(this.mapCanvas, img);
     this.paint();
   }
 
-  l1Words(r: OwRender, t: number): number[] {
-    const p = map16Pointer(r.wram, t);
-    return [0, 1, 2, 3].map((q) => this.app.rom.r16(0x050000 | (p + q * 2)));
-  }
   drawL1Tile(img: Uint32Array, tc: TileCache, r: OwRender, t: number, px: number, py: number, W = 512, H = 512): void {
-    const w = this.l1Words(r, t);
-    blit8(img, W, H, tc.get(w[0]), px, py);
-    blit8(img, W, H, tc.get(w[1]), px, py + 8);
-    blit8(img, W, H, tc.get(w[2]), px + 8, py);
-    blit8(img, W, H, tc.get(w[3]), px + 8, py + 8);
+    drawL1Tile(this.app.rom, img, tc, r, t, px, py, W, H);
   }
 
   layout(): void {

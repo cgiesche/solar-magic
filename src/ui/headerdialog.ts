@@ -252,8 +252,7 @@ export function openHeaderDialog(app: App): void {
         if (levelSong !== levelMusic(app.rom, lv.number)) {
           try { app.romEdit(`Music of level ${hex(lv.number, 3)}`, () => setLevelMusic(app.rom, lv.number, levelSong)); } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
         }
-        app.editLevel(() => {
-          const lv = app.level; // (the music edit saves a changed level first: a new object)
+        app.editLevel((lv) => {
           const modeChangedL2 = hasLayer2Objects(hd.mode) !== hasLayer2Objects(lv.header.mode);
           lv.header = hd;
           if (!hasLevelSize(rom, hd.mode)) sd.levelSize = 0;
@@ -268,9 +267,7 @@ export function openHeaderDialog(app: App): void {
               if (lv.layer2Pointer >> 16 !== 0xff) lv.layer2Pointer = app.rom.r24(L2_PTRS + 0x105 * 3);
             }
           }
-          if (app.mode === 'l2' && !lv.layer2Objects) app.mode = 'l1';
-          if (app.mode === 'bg' && lv.layer2Objects) app.mode = 'l1';
-        });
+        }); // (an edit mode whose layer is gone switches back to layer 1)
         app.emit('level-header');
       },
     },

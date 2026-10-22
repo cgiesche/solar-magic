@@ -11,7 +11,8 @@ import type { Level } from './level.ts';
 import type { LevelRender } from './levelemu.ts';
 import { layer3TileAddr, LAYER3_STATUS_ROWS, type Layer3Geometry } from './render.ts';
 import { levelLayer3, setLevelLayer3, fitsLayer3Slot, lt3Copy, LT3_SIZES, LT3_SLOT, L3_MAP_START, L3_MAP_END, type Lt3Place } from './layer3gfx.ts';
-import { gfxEntry, setGfxEntry, freeGfx, gfxRangeFor } from './patches.ts';
+import { freeGfx, gfxRangeFor } from './patches.ts';
+import { gfxBytes, importGfxFile } from './gfxfiles.ts';
 
 export const L3_MAP_VRAM = L3_MAP_START, L3_MAP_WORDS = L3_MAP_END - L3_MAP_START;
 export const NEW_LT3: Lt3Place = { dest: 0, size: 0 }; // under the status bar, 0x2000 bytes
@@ -59,9 +60,9 @@ export function lt3Target(rom: Rom, n: number): { file: number | null; place: Lt
 // the level's LT3 file with its edited tilemap, for the emulator (levelemu.ts; padded to 0x2000 bytes)
 export function lt3Override(rom: Rom, lv: Level): { data: Uint8Array; place: Lt3Place } | undefined {
   if (!lv.layer3) return undefined;
-  const t = lt3Target(rom, lv.number), e = t.file !== null ? gfxEntry(rom, t.file) : null;
+  const t = lt3Target(rom, lv.number), f = t.file !== null ? gfxBytes(rom, t.file) : null;
   const base = new Uint8Array(NEW_SIZE);
-  if (e) base.set(rom.bytes(e.addr, e.size).subarray(0, NEW_SIZE));
+  if (f) base.set(f.data.subarray(0, NEW_SIZE));
   return { data: lt3File(lv.layer3, t.place, base), place: t.place };
 }
 
@@ -69,13 +70,12 @@ export function lt3Override(rom: Rom, lv: Level): { data: Uint8Array; place: Lt3
 export function saveLayer3(rom: Rom, n: number, map: Uint16Array): string {
   const t = lt3Target(rom, n);
   if (t.file !== null) {
-    const e = gfxEntry(rom, t.file)!;
-    rom.writeBytes(e.addr, lt3File(map, t.place, rom.bytes(e.addr, e.size)));
+    importGfxFile(rom, t.file, lt3File(map, t.place, gfxBytes(rom, t.file)!.data));
     return `Layer 3: ExGFX ${hx(t.file)}`;
   }
   const num = freeGfx(rom, new Set(), gfxRangeFor({ slot: LT3_SLOT }));
   if (num < 0) throw new Error('No free ExGFX number left for the layer 3 tilemap');
-  setGfxEntry(rom, num, rom.allocWrite(lt3File(map, NEW_LT3)), true, NEW_SIZE);
+  importGfxFile(rom, num, lt3File(map, NEW_LT3));
   setLevelLayer3(rom, n, { ...levelLayer3(rom, n), lt3: num, ...NEW_LT3 });
   return `Layer 3: new ExGFX ${hx(num)}`;
 }

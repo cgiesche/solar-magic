@@ -5,12 +5,15 @@
 // Code block: "SMWS", version, pointer to the structure table, code. The table holds a 24-bit
 // pointer per structure (0 = none, the object then places nothing). Each structure is its own
 // RATS block: width, height, width*height tile words row by row ($FFFF = transparent, the tile
-// below stays), then its name (UTF-8, zero-terminated).
+// below stays; with the top bit, COND_MARK, its condition byte follows: Lunar Magic's conditional Direct
+// Map16, cdm16.ts), then its name (UTF-8, zero-terminated).
 
 import { Rom } from './rom.ts';
 import { Asm } from './asm.ts';
 import { ownerNote } from './patchreg.ts';
 import { missingPatch, nextScreen } from './patches.ts';
+import { CDM16_FLAGS } from './ram.ts';
+import { COND_MARK, condByte, condOf, type Dm16Cond } from './cdm16.ts';
 
 export const EXT_OBJ_TABLE = 0x0da10f;
 export const STRUCT_EXT = 0x03;
@@ -26,6 +29,7 @@ export interface Structure {
   w: number;
   h: number;
   tiles: number[]; // row-major, TRANSPARENT = keep the tile below
+  conds?: (Dm16Cond | null)[]; // per tile: its flag (missing: none)
   name: string;
 }
 
@@ -41,7 +45,7 @@ const structTable = (rom: Rom) => (structPatch(rom) ?? missingPatch('Structures 
 
 function build(): Asm {
   const a = new Asm();
-  a.b(...MAGIC, 1);
+  a.b(...MAGIC, 2); // 2: conditional tiles
   a.fill(HEADER - 5); // +5: table pointer
   // entry (M=8, X=8) from the extended object dispatcher; [$65] points behind the 3 object bytes
   a.label('Obj');
@@ -69,10 +73,14 @@ function build(): Asm {
   a.b(0xa5, 0x0c, 0x3a, 0x85, 0x00); // cols-1
   a.b(0xa4, 0x57); // LDY $57
   a.label('col');
-  a.b(0xc2, 0x20, 0xa7, 0x08, 0xe6, 0x08, 0xe6, 0x08); // REP #$20 : LDA [$08] : INC $08 : INC $08
+  a.b(0xc2, 0x20, 0xa7, 0x08, 0xe6, 0x08, 0xe6, 0x08, 0x85, 0x06); // REP #$20 : LDA [$08] : INC $08 : INC $08 : STA $06
   a.b(0xc9, 0xff, 0xff, 0xe2, 0x20); // CMP #$FFFF : SEP #$20 (keeps Z)
   a.br(0xf0, 'skip');
-  a.b(0x97, 0x6b, 0xeb, 0x97, 0x6e); // STA [$6B],y : XBA : STA [$6E],y
+  // conditional (the word's top bit): drawn or not by its condition byte
+  a.b(0xa5, 0x07); a.br(0x10, 'put'); // LDA $07 : BPL
+  a.abs(0x20, 'Cond'); a.br(0x90, 'skip'); // JSR Cond : BCC
+  a.label('put');
+  a.b(0xa5, 0x06, 0x97, 0x6b, 0xa5, 0x07, 0x97, 0x6e); // LDA $06 : STA [$6B],y : LDA $07 : STA [$6E],y
   a.label('skip');
   a.b(0xc6, 0x00); // DEC $00
   a.br(0x30, 'coldone');
@@ -99,8 +107,25 @@ function build(): Asm {
   a.b(0xa5, 0x6c, 0x18, 0x69, 0x02, 0x85, 0x6c, 0x85, 0x6f);
   a.label('norow');
   a.b(0xc6, 0x01); // DEC $01
-  a.br(0x10, 'row');
+  a.br(0x30, 'done'); a.abs(0x4c, 'row'); // BMI : JMP row (out of a branch's reach)
+  a.label('done');
   a.b(0x68, 0x68, 0x6b); // drop JSR return, RTL
+  // the condition byte ACCCCCCC after the tile (cdm16.ts), A = the tile's high byte: carry set when the tile
+  // is drawn ($06/$07, +$100 with always show and the flag on)
+  a.label('Cond');
+  a.b(0x29, 0x7f, 0x85, 0x07); // AND #$7F : STA $07
+  a.b(0xa7, 0x08, 0x85, 0x0b, 0xc2, 0x20, 0xe6, 0x08, 0xe2, 0x20); // LDA [$08] : STA $0B : REP #$20 : INC $08 : SEP #$20
+  a.b(0x29, 0x07, 0xaa); a.long(0xbf, 'Bits'); a.b(0x85, 0x0e); // AND #7 : TAX : LDA.l bits,x : STA $0E
+  a.b(0xa5, 0x0b, 0x4a, 0x4a, 0x4a, 0x29, 0x0f, 0xaa); // LDA $0B : LSR #3 : AND #$0F : TAX
+  a.b(0xbf, CDM16_FLAGS[0] & 0xff, (CDM16_FLAGS[0] >> 8) & 0xff, CDM16_FLAGS[0] >> 16, 0x25, 0x0e); a.br(0xf0, 'off'); // LDA.l flags,x : AND $0E : BEQ
+  a.b(0x24, 0x0b); a.br(0x10, 'on'); // BIT $0B : BPL (flag on: drawn)
+  a.b(0xe6, 0x07); // INC $07 (always show, flag on: tile + $100)
+  a.label('on');
+  a.b(0x38, 0x60); // SEC : RTS
+  a.label('off');
+  a.b(0x24, 0x0b); a.br(0x30, 'on'); // BIT $0B : BMI (always show)
+  a.b(0x18, 0x60); // CLC : RTS (not drawn: the tile below stays)
+  a.label('Bits'); a.b(0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80);
   a.label('TblW'); a.fill(STRUCT_COUNT * 2);
   a.label('TblB'); a.fill(STRUCT_COUNT);
   return a;
@@ -132,15 +157,19 @@ export function readStructure(rom: Rom, n: number): Structure | null {
   const a = ptrOf(rom, structTable(rom), n);
   if (!(a >> 16)) return null;
   const w = rom.r8(a), h = rom.r8(a + 1);
-  const tiles: number[] = [];
-  for (let i = 0; i < w * h; i++) {
-    const t = rom.r16(a + 2 + i * 2);
-    tiles.push(t === 0xffff ? TRANSPARENT : t);
+  const tiles: number[] = [], conds: (Dm16Cond | null)[] = [];
+  let p = a + 2;
+  for (let i = 0; i < w * h; i++, p += 2) {
+    const t = rom.r16(p);
+    const c = t !== 0xffff && (t & COND_MARK) !== 0;
+    tiles.push(t === 0xffff ? TRANSPARENT : t & ~COND_MARK);
+    conds.push(c ? condOf(rom.r8(p + 2)) : null);
+    if (c) p++;
   }
-  const nameAt = a + 2 + w * h * 2;
+  const nameAt = p;
   const bytes: number[] = [];
   for (let i = 0; i < 64; i++) { const c = rom.r8(nameAt + i); if (!c) break; bytes.push(c); }
-  return { w, h, tiles, name: new TextDecoder().decode(Uint8Array.from(bytes)) };
+  return { w, h, tiles, ...(conds.some((c) => c) ? { conds } : {}), name: new TextDecoder().decode(Uint8Array.from(bytes)) };
 }
 
 export function listStructures(rom: Rom): Map<number, Structure> {
@@ -163,9 +192,15 @@ export function writeStructure(rom: Rom, n: number, s: Structure | null): void {
   if (!s) { setPtr(rom, p.table, n, 0); return; }
   if (s.w < 1 || s.h < 1 || s.w > STRUCT_MAX || s.h > STRUCT_MAX || s.tiles.length !== s.w * s.h) throw new Error(`Structure ${s.w}×${s.h} invalid (at most ${STRUCT_MAX}×${STRUCT_MAX})`);
   const name = new TextEncoder().encode(s.name).slice(0, 63);
-  const buf = new Uint8Array(2 + s.tiles.length * 2 + name.length + 1);
-  buf[0] = s.w; buf[1] = s.h;
-  s.tiles.forEach((t, i) => { const v = t < 0 ? 0xffff : t; buf[2 + i * 2] = v & 0xff; buf[3 + i * 2] = v >> 8; });
-  buf.set(name, 2 + s.tiles.length * 2);
+  const data = [s.w, s.h];
+  s.tiles.forEach((t, i) => {
+    const c = t < 0 ? null : s.conds?.[i] ?? null;
+    const v = t < 0 ? 0xffff : t | (c ? COND_MARK : 0);
+    data.push(v & 0xff, v >> 8);
+    if (c) data.push(condByte(c));
+  });
+  const buf = new Uint8Array(data.length + name.length + 1);
+  buf.set(data);
+  buf.set(name, data.length);
   setPtr(rom, p.table, n, rom.allocWrite(buf));
 }

@@ -3,7 +3,11 @@
 import { Rom } from './rom.ts';
 import { spriteBankOf, DM16_EXT } from './patches.ts';
 import { STRUCT_EXT } from './structs.ts';
+import { COND_MARK, condByte, condOf, type Dm16Cond } from './cdm16.ts';
 import { MAP_SIZE } from './ram.ts';
+
+// the timer's hundreds per header time (the game's table, read when a level is entered from the overworld)
+export const TIME_TABLE = 0x0584d7;
 
 export const L1_PTRS = 0x05e000;
 export const L2_PTRS = 0x05e600;
@@ -35,8 +39,8 @@ export const isTall = (s: { levelSize: number }): boolean => levelRows(s) > SUBS
 // a level with a size: its screen jumps have a subscreen (as the patch reads them)
 export const isSized = (s: { levelSize: number }): boolean => (s.levelSize & 0x1f) !== 0;
 export const maxScreens = (s: { levelSize: number }): number => Math.min(32, Math.floor(MAP_SIZE / LEVEL_HEIGHTS[s.levelSize & 0x1f]));
-// secondary entrances: the game's four tables, then Lunar Magic 3.00's two (EFYYYYYY, RLW-----; Lunar
-// Magic keeps them where its code is, the editor here)
+// secondary entrances: the game's four tables, then Lunar Magic 3.00's two (EFYYYYYY, RLW-----, E: to the
+// overworld, OverworldExit; Lunar Magic keeps them where its code is, the editor here)
 export const SEC_ENT = [0x05f800, 0x05fa00, 0x05fc00, 0x05fe00, 0x06cc00, 0x06ce00];
 // in SEC_ENT[3] (IPXXDAAA): D, bit 8 of the entrance's level (Lunar Magic's)
 export const SEC_LEVEL_HI = 0x08;
@@ -49,6 +53,7 @@ export interface LevelObject {
   y: number;
   size: number; // settings byte for standard objects (and Direct Map16)
   tile?: number; // Direct Map16 tile number (extended object $02, editor patch)
+  cond?: Dm16Cond; // a Direct Map16 object's flag (cdm16.ts)
   struct?: number; // structure number (extended object $03 with the structure patch, see structs.ts)
 }
 
@@ -102,7 +107,7 @@ export interface PrimaryHeader {
   layer3Priority: number; // 1
   music: number; // 3
   spriteGfx: number; // 4
-  time: number; // 2
+  time: number; // 2: the hundreds of the timer from the game's table (TIME_TABLE)
   spritePalette: number; // 3
   fgPalette: number; // 3
   itemMemory: number; // 2
@@ -347,8 +352,11 @@ export function parseObjects(data: Uint8Array, start: number, vertical: boolean,
       y = sub * SUBSCREEN_ROWS + f5;
     }
     if (dm16) {
-      objects.push({ uid: newUid(), num, ext: b2, x, y, size: data[p + 5], tile: data[p + 3] | (data[p + 4] << 8) });
-      p += 6;
+      const t = data[p + 3] | (data[p + 4] << 8);
+      const o: LevelObject = { uid: newUid(), num, ext: b2, x, y, size: data[p + 5], tile: t & ~COND_MARK };
+      if (t & COND_MARK) o.cond = condOf(data[p + 6]);
+      objects.push(o);
+      p += o.cond ? 7 : 6;
       continue;
     }
     if (num === 0 && b2 === STRUCT_EXT) {
@@ -390,9 +398,10 @@ export function serializeObjects(objects: LevelObject[], exits: ScreenExit[], ve
     const f4 = vertical ? o.y & 0x0f : o.x & 0x0f;
     out.push(nflag | ((o.num & 0x30) << 1) | f5, ((o.num & 0x0f) << 4) | f4, o.num === 0 ? o.ext : o.size);
     if (o.num === 0 && o.ext === DM16_EXT) {
-      const t = o.tile ?? 0;
+      const t = (o.tile ?? 0) | (o.cond ? COND_MARK : 0);
       out.push(t & 0xff, (t >> 8) & 0xff, o.size & 0xff);
-      own(6, objects.indexOf(o));
+      if (o.cond) out.push(condByte(o.cond));
+      own(o.cond ? 7 : 6, objects.indexOf(o));
     } else if (o.num === 0 && o.ext === STRUCT_EXT && o.struct !== undefined) {
       out.push(o.struct & 0xff);
       own(4, objects.indexOf(o));
@@ -630,8 +639,36 @@ export interface SecondaryEntrance {
   faceLeft: number; // CE00 bit 6: Mario faces left
   water: number; // CE00 bit 5: a water level (Mario swims)
   slippery: number; // FE00 bit 7: a slippery level
-  lmRaw: number; // CC00 bit 7 (exit to the overworld), CE00 bits 4-0 – kept, not used
+  lmRaw: number; // CE00 bits 4-0 – kept, not used
+  // CC00 bit 7 (Lunar Magic 3.00's E): the entrance leads back to the overworld instead of into a level, its
+  // other bytes in another format (OverworldExit); destLevel the level it belongs to
+  overworld: OverworldExit | null;
 }
+// Lunar Magic 3.00's secondary entrance to the overworld (LM help level_second_entrance.htm; the layout as the
+// SMW speedrunning wiki's "Level Data Format" gives it: F800 the level, FA00 LLLLLLLL, FC00 BBBBBBBB, FE00
+// --ETDAAA, CC00 1-------; what each does observed in a Lunar Magic-saved ROM, levelheight.ts): the game goes
+// to the overworld with the level passed by the action's exit (the event: the base event, + 1 for the secret
+// exit), from the overworld tile Mario stood on or a teleport location (owteleport.ts)
+export interface OverworldExit {
+  action: number; // AAA (OW_ACTIONS); 3-6 Lunar Magic's other exits, kept
+  teleport: number; // T: to the location (an index of the star/pipe table)
+  location: number; // FA00
+  ownEvent: number; // E: the base event is `event`, else the one of the tile Mario stood on
+  event: number; // FC00
+  lmKept: number; // FE00 bits 7-6, CC00 bits 6-0 (<< 8), CE00 (<< 16) – unused, kept
+}
+export const OW_NOTHING = 0, OW_NORMAL = 1, OW_SECRET = 2, OW_END_TURN = 7;
+// the actions the editor offers (Lunar Magic's "Overworld Action"; its secret exits 2 and 3 are left out)
+export const OW_ACTIONS: [number, string][] = [
+  [OW_NOTHING, 'Do nothing'], [OW_NORMAL, 'Pass the level (normal exit)'], [OW_SECRET, 'Pass the level (secret exit)'], [OW_END_TURN, 'End the turn'],
+];
+export const owActionName = (a: number): string => OW_ACTIONS.find(([v]) => v === a)?.[1] ?? `Lunar Magic's action ${a}`;
+// the same in short (the exit's description)
+const OW_SHORT: Record<number, string> = { [OW_NOTHING]: 'nothing passed', [OW_NORMAL]: 'normal exit', [OW_SECRET]: 'secret exit', [OW_END_TURN]: 'end the turn' };
+export const owActionShort = (a: number): string => OW_SHORT[a] ?? `Lunar Magic's action ${a}`;
+export const OW_EXIT = 0x80; // E in CC00
+// a new entrance to the overworld: the level passed with the normal exit, from the tile Mario stood on
+export const newOverworldExit = (): OverworldExit => ({ action: OW_NORMAL, teleport: 0, location: 0, ownEvent: 0, event: 0, lmKept: 0 });
 export function readSecondaryEntrance(rom: Rom, i: number): SecondaryEntrance {
   return decodeSecondaryEntrance(SEC_ENT.map((t) => rom.r8(t + i)));
 }
@@ -652,15 +689,25 @@ export function decodeSecondaryEntrance([a, b, c, d, e, f]: number[]): Secondary
     faceLeft: (f >> 6) & 1,
     water: (f >> 5) & 1,
     slippery: d >> 7,
-    lmRaw: ((e & 0x80) << 1) | (f & 0x1f),
+    lmRaw: f & 0x1f,
+    overworld: e & OW_EXIT ? { action: d & 7, teleport: (d >> 4) & 1, location: b, ownEvent: (d >> 5) & 1, event: c, lmKept: (d & 0xc0) | ((e & 0x7f) << 8) | (f << 16) } : null,
   };
 }
 export function writeSecondaryEntrance(rom: Rom, i: number, e: SecondaryEntrance): void {
   rom.w8(SEC_ENT[0] + i, e.destLevel & 0xff);
+  const o = e.overworld;
+  if (o) {
+    rom.w8(SEC_ENT[1] + i, o.location & 0xff);
+    rom.w8(SEC_ENT[2] + i, o.event & 0xff);
+    rom.w8(SEC_ENT[3] + i, (o.lmKept & 0xc0) | ((o.ownEvent & 1) << 5) | ((o.teleport & 1) << 4) | ((e.destLevel >> 5) & SEC_LEVEL_HI) | (o.action & 7));
+    rom.w8(SEC_ENT[4] + i, OW_EXIT | ((o.lmKept >> 8) & 0x7f));
+    rom.w8(SEC_ENT[5] + i, (o.lmKept >> 16) & 0xff);
+    return;
+  }
   rom.w8(SEC_ENT[1] + i, (e.bgInitY << 6) | ((e.fgInitY & 3) << 4) | (e.entranceY & 0x0f));
   rom.w8(SEC_ENT[2] + i, (e.entranceX << 5) | (e.screen & 0x1f));
   rom.w8(SEC_ENT[3] + i, ((e.slippery & 1) << 7) | ((e.entranceTile & 1) << 6) | ((e.entranceXHi & 3) << 4) | ((e.destLevel >> 5) & SEC_LEVEL_HI) | (e.action & 7));
-  rom.w8(SEC_ENT[4] + i, ((e.lmRaw >> 1) & 0x80) | ((e.cameraOffsetHi & 1) << 6) | (e.entranceYHi & 0x3f));
+  rom.w8(SEC_ENT[4] + i, ((e.cameraOffsetHi & 1) << 6) | (e.entranceYHi & 0x3f));
   rom.w8(SEC_ENT[5] + i, (e.cameraRelative << 7) | ((e.faceLeft & 1) << 6) | ((e.water & 1) << 5) | (e.lmRaw & 0x1f));
 }
 

@@ -193,6 +193,7 @@ export interface RegisterMeta {
   kind?: PatchEntry['kind'];
   ram?: RamClaim[];
   archive?: Uint8Array;
+  scanRam?: boolean; // false: no search for long stores (data, not code: its RAM is all in `ram`)
 }
 
 // Records the change from `before` to `out` as one patch: new RATS blocks are its own free space, the
@@ -233,7 +234,7 @@ export function registerChanges(rom: Rom, before: Uint8Array, beforeRats: RatsBl
     }
   }
   const ram = (meta.ram ?? []).map(([a, n, sh]): RamClaim => { const w = wramAddr(a) < 0 ? a : wramAddr(a); return sh ? [w, n, sh] : [w, n]; });
-  const ramSeen = longWrites(out, [...own.map((b): [number, number] => [b.start + 8, b.size]), ...segs]);
+  const ramSeen = meta.scanRam === false ? [] : longWrites(out, [...own.map((b): [number, number] => [b.start + 8, b.size]), ...segs]);
   const rc = ramConflicts(ram, ramSeen, others);
   errors.push(...rc.errors);
   warnings.push(...rc.warnings);

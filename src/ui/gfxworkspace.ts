@@ -34,7 +34,9 @@ export class LevelPreview {
   private info = h('div', { class: 'ws-prev-info hint' });
   zoom = 1;
   private zoomCtl = zoomControl(() => this.zoom, (z) => this.setZoom(z));
-  highlight = new Set<number>();
+  highlight = new Set<number>(); // Map16 tiles of layer 1
+  highlight2 = new Set<number>(); // of layer 2 objects
+  highlightBg = new Set<number>(); // BG Map16 tiles of the BG tilemap
   onClick: ((px: number, py: number, e: MouseEvent) => void) | null = null;
   colorAt: ((px: number, py: number) => { rgba: number; label: string }) | null = null;
   hint = '';
@@ -124,16 +126,22 @@ export class LevelPreview {
     const ctx = this.over.getContext('2d')!;
     ctx.clearRect(0, 0, this.over.width, this.over.height);
     const im = this.app.images;
-    if (!im || !this.highlight.size) return;
-    const g = im.geom1;
+    if (!im || !this.highlight.size && !this.highlight2.size && !this.highlightBg.size) return;
     ctx.strokeStyle = '#ffb000';
     ctx.lineWidth = 1;
     ctx.fillStyle = 'rgba(255,176,0,0.4)';
-    for (let y = 0; y < g.height; y++) for (let x = 0; x < g.width; x++) {
-      if (!this.highlight.has(im.tiles1[y * g.width + x])) continue;
-      ctx.fillRect(x * 16, y * 16, 16, 16);
-      ctx.strokeRect(x * 16 + 0.5, y * 16 + 0.5, 15, 15);
-    }
+    const mark = (x: number, y: number) => { ctx.fillRect(x * 16, y * 16, 16, 16); ctx.strokeRect(x * 16 + 0.5, y * 16 + 0.5, 15, 15); };
+    const g = im.geom1;
+    for (let y = 0; y < g.height; y++) for (let x = 0; x < g.width; x++) if (this.highlight.has(im.tiles1[y * g.width + x])) mark(x, y);
+    const g2 = im.geom2;
+    if (g2 && im.tiles2 && this.highlight2.size) for (let y = 0; y < g2.height; y++) for (let x = 0; x < g2.width; x++) if (this.highlight2.has(im.tiles2[y * g2.width + x])) mark(x, y);
+    // the BG tilemap (32 x 27) repeats over the level
+    if (im.bgTiles && this.highlightBg.size) for (let y = 0; y < im.height / 16; y++) for (let x = 0; x < im.width / 16; x++) if (this.highlightBg.has(im.bgTiles[(y % 27) * 32 + (x % 32)])) mark(x, y);
+  }
+  clearHighlight(): void {
+    this.highlight.clear();
+    this.highlight2.clear();
+    this.highlightBg.clear();
   }
 
   // number of places of the tile in layer 1
@@ -196,7 +204,7 @@ export class GfxWorkspace {
     this.tab = t;
     for (const b of this.bar.querySelectorAll('button')) b.classList.toggle('active', (b as HTMLElement).dataset.tab === t);
     this.body.replaceChildren(this.panel().root);
-    this.preview.highlight.clear();
+    this.preview.clearHighlight();
     this.preview.setHint(this.panel().previewHint?.() ?? '');
     const p = this.panel();
     this.preview.colorAt = p.previewColor ? (px, py) => p.previewColor!(px, py) : null;

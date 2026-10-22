@@ -3,7 +3,7 @@
 // own too (bit 8 in Lunar Magic's D): exits and entrances lead from and to either bank (0xx/1xx).
 
 import type { Rom } from './rom.ts';
-import { loadLevel, readSecondaryEntrance, mainTranslevel, exitToMidway, exitIndex, oldStyleSecondary, storedExits, SEC_ENT, SEC_LEVEL_HI, EXIT_NEW, type ScreenExit } from './level.ts';
+import { loadLevel, readSecondaryEntrance, mainTranslevel, exitToMidway, exitIndex, oldStyleSecondary, storedExits, SEC_ENT, SEC_LEVEL_HI, EXIT_NEW, OW_EXIT, type ScreenExit } from './level.ts';
 import { levelName, readL1, translevels, translevelToLevel } from './overworld.ts';
 import { hex } from './names.ts';
 
@@ -13,15 +13,20 @@ export interface ExitRef {
   secondary: boolean;
   midway: boolean; // a standard exit to the midway entrance (exitToMidway)
   entrance: number; // secondary entrance number (secondary exits), else -1
-  to: number; // destination level
+  to: number; // destination level, -1: the overworld
+  overworld: boolean; // through a secondary entrance to the overworld (Lunar Magic's, level.ts OverworldExit)
 }
 
 // where an exit of level `from` leads
-export function exitTarget(rom: Rom, from: number, e: Pick<ScreenExit, 'dest' | 'secondary' | 'flags'>): { entrance: number; to: number } {
+export function exitTarget(rom: Rom, from: number, e: Pick<ScreenExit, 'dest' | 'secondary' | 'flags'>): { entrance: number; to: number; overworld: boolean } {
   const idx = exitIndex(from, e);
-  if (!e.secondary) return { entrance: -1, to: idx };
-  return { entrance: idx, to: readSecondaryEntrance(rom, idx).destLevel };
+  if (!e.secondary) return { entrance: -1, to: idx, overworld: false };
+  const s = readSecondaryEntrance(rom, idx);
+  return s.overworld ? { entrance: idx, to: -1, overworld: true } : { entrance: idx, to: s.destLevel, overworld: false };
 }
+// a secondary entrance that is an exit to the overworld: of a level (its destLevel, Lunar Magic's "to Overworld
+// [XXX]"), not into it
+export const isOverworldExit = (rom: Rom, idx: number): boolean => (rom.r8(SEC_ENT[4] + idx) & OW_EXIT) !== 0;
 
 export class ExitGraph {
   readonly rom: Rom;
@@ -46,13 +51,18 @@ export class ExitGraph {
     return this.exits.filter((e) => e.entrance === idx);
   }
 
-  // the secondary entrances leading into a level (see app.findSecondaryEntrances)
+  // the secondary entrances leading into a level
   entrancesOf(level: number): number[] {
-    const out: number[] = [];
-    for (let i = 0; i < 0x200; i++) if (readSecondaryEntrance(this.rom, i).destLevel === level && !isBlank(this.rom, i)) out.push(i);
+    const out = entrancesInto(this.rom, level);
     // a blank entry leads to level 000 or 100 too; list it only where an exit uses it
     for (const e of this.exits) if (e.entrance >= 0 && e.to === level && isBlank(this.rom, e.entrance) && !out.includes(e.entrance)) out.push(e.entrance);
     return out.sort((a, b) => a - b);
+  }
+
+  // an exit to the overworld of `level` no exit uses (to give an exit), or null
+  unusedOverworldExit(level: number): number | null {
+    for (let i = 0; i < 0x200; i++) if (isOverworldExit(this.rom, i) && readSecondaryEntrance(this.rom, i).destLevel === level && !this.usersOfEntrance(i).length) return i;
+    return null;
   }
 
   // a free secondary entrance number (for any level): no exit uses it and it is blank
@@ -76,7 +86,7 @@ export class ExitGraph {
       while (queue.length) {
         const m = queue.shift()!;
         for (const e of from.get(m) ?? []) {
-          if (parent.has(e.to)) continue;
+          if (e.overworld || parent.has(e.to)) continue;
           parent.set(e.to, parent.get(m)!);
           queue.push(e.to);
         }
@@ -96,6 +106,13 @@ export class ExitGraph {
     const p = this.parentOf(level);
     return p === null ? '(unreachable)' : `(from ${hex(p, 3)} ${levelName(this.rom, mainTranslevel(p)!)})`;
   }
+}
+
+// the set-up secondary entrances leading into a level (not blank ones, not its exits to the overworld)
+export function entrancesInto(rom: Rom, level: number): number[] {
+  const out: number[] = [];
+  for (let i = 0; i < 0x200; i++) if (readSecondaryEntrance(rom, i).destLevel === level && !isBlank(rom, i) && !isOverworldExit(rom, i)) out.push(i);
+  return out;
 }
 
 // all its bytes 0, but for the level's bit 8 (D: an unused entrance 100-1FF of the game leads into level 100)
@@ -123,8 +140,9 @@ export function submapBanks(rom: Rom): Map<number, Set<number>> {
     const oldSecondary = oldStyleSecondary(exits);
     for (const e of exits) {
       const idx = exitIndex(n, e, bank);
-      const to = (e.flags & EXIT_NEW ? e.secondary : oldSecondary) ? readSecondaryEntrance(rom, idx).destLevel : idx;
-      reach(to, bank);
+      const secondary = e.flags & EXIT_NEW ? e.secondary : oldSecondary;
+      if (secondary && isOverworldExit(rom, idx)) continue;
+      reach(secondary ? readSecondaryEntrance(rom, idx).destLevel : idx, bank);
     }
   }
   return banks;

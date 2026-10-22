@@ -7,8 +7,9 @@
 //   P5-6,7          palettes 5-6 become 7        100-101,P7     these 8x8 tiles get palette 7
 //   G100-101,+25    acts-like 100-101 of the tiles (also M, a value)
 //   R200-211,S25    a rectangle of Map16 tiles gets a rectangle of acts-like settings from 25
+// The same list of Map16 tile numbers (000-FFF, no P, G or S) rewrites where levels use tiles (tilemove.ts).
 // Sources always mean the values before the remap (100,25,25,100 swaps); a later pair for the same
-// source supersedes an earlier one. Used by the Map16 tab and the Animations tab.
+// source supersedes an earlier one. Used by the Map16 tab, the Animations tab and the remaps of uses.
 
 import type { ExSlot } from './exanim.ts';
 import { kindOf, shapeOf } from './exanim.ts';
@@ -39,10 +40,12 @@ const INTO_DOMAIN: Record<Into, Domain> = { tiles: 'tiles', pals: 'pals', tilePa
 // a bad pair: where in the text (from/to: the token, line: 0-based) and why
 export interface RemapProblem { from: number; to: number; line: number; message: string }
 
+export type RemapWhat = 'map16' | 'tiles' | 'numbers';
 export interface RemapOptions {
   offset?: number;
-  // 'map16': everything; 'tiles': 8x8 tile numbers only (ExAnimation frames and targets)
-  what?: 'map16' | 'tiles';
+  // 'map16': everything; 'tiles': 8x8 tile numbers only (ExAnimation frames and targets); 'numbers': Map16
+  // tile numbers only (Remap Direct Map16 / Background Tiles)
+  what?: RemapWhat;
 }
 
 interface Token { text: string; from: number; to: number; line: number }
@@ -71,7 +74,7 @@ const HEX = /^[0-9a-f]+$/i;
 export function parseRemap(text: string, opt: RemapOptions = {}): { remap: Remap; problems: RemapProblem[] } {
   const remap: Remap = { tiles: new Map(), pals: new Map(), tilePals: new Map(), acts: new Map(), tileActs: new Map(), offset: opt.offset ?? 0 };
   const problems: RemapProblem[] = [];
-  const onlyTiles = opt.what === 'tiles';
+  const what = opt.what ?? 'map16';
   const fail = (t: Token, message: string) => { problems.push({ from: t.from, to: t.to, line: t.line, message }); };
   for (const toks of lineTokens(text)) {
     for (let i = 0; i < toks.length; i += 2) {
@@ -80,11 +83,11 @@ export function parseRemap(text: string, opt: RemapOptions = {}): { remap: Remap
       if (spaced) { fail(spaced, 'A space between two values: separate them with a comma'); continue; }
       if (!dst) {
         // a bad source says so, else the destination is what is missing
-        const alone = parsePair(src, { ...src, text: '0' }, onlyTiles);
+        const alone = parsePair(src, { ...src, text: '0' }, what);
         fail(src, typeof alone === 'string' ? alone : 'The destination is missing on this line (pairs are “source,destination”)');
         continue;
       }
-      const pair = parsePair(src, dst, onlyTiles);
+      const pair = parsePair(src, dst, what);
       if (typeof pair === 'string') { fail(src, pair); continue; }
       if ('dst' in pair) { fail(dst, pair.dst); continue; }
       for (const [a, b] of pair.map) remap[pair.into].set(a, b);
@@ -95,7 +98,8 @@ export function parseRemap(text: string, opt: RemapOptions = {}): { remap: Remap
 
 // one pair: the source values in order (a rectangle row by row, with each one's place in it) and what
 // they become; a string is a problem with the source, { dst } one with the destination
-function parsePair(src: Token, dst: Token, onlyTiles: boolean): string | { dst: string } | { map: [number, number][]; into: Into } {
+function parsePair(src: Token, dst: Token, what: RemapWhat): string | { dst: string } | { map: [number, number][]; into: Into } {
+  const onlyTiles = what !== 'map16', numbers: Domain = what === 'numbers' ? 'map16' : 'tiles';
   const s = src.text.toUpperCase(), d = dst.text.toUpperCase();
   const prefix = /^[PGR]/.test(s) ? s[0] : '';
   const onlyTilesHere = 'cannot be remapped here, only tile numbers';
@@ -105,18 +109,18 @@ function parsePair(src: Token, dst: Token, onlyTiles: boolean): string | { dst: 
   const range = m[2] !== undefined;
   if (!HEX.test(m[1]) || (range && !HEX.test(m[2]))) {
     if (range && (m[1] === '' || m[2] === '')) return 'Incomplete range (e.g. 100-10F)';
-    return `Not a source: “${src.text}” (hex values like 100, 100-10F, R100-11F, P5, G130)`;
+    return `Not a source: “${src.text}” (hex values like 100, 100-10F, R100-11F${onlyTiles ? '' : ', P5, G130'})`;
   }
   const a = parseInt(m[1], 16), b = range ? parseInt(m[2], 16) : a;
   if (prefix === 'R' && !range) return 'A rectangle needs its top left and lower right tile (e.g. R100-111)';
   // destinations
   const dm = /^([+\-MPS]?)([0-9A-F]+)$/.exec(d);
-  if (!dm) return { dst: `Not a destination: “${dst.text}” (a value, +n, -n, Mn${prefix === 'R' ? ', Sn' : ''}${prefix ? '' : ', Pn'})` };
+  if (!dm) return { dst: `Not a destination: “${dst.text}” (a value, +n, -n, Mn${onlyTiles ? '' : `${prefix === 'R' ? ', Sn' : ''}${prefix ? '' : ', Pn'}`})` };
   const op = dm[1], v = parseInt(dm[2], 16);
   if (op === 'S' && prefix !== 'R') return { dst: 'S (acts-like settings) needs a rectangle of Map16 tiles as source (e.g. R200-211,S25)' };
   if (op === 'P' && (prefix === 'P' || prefix === 'G')) return { dst: prefix === 'P' ? 'A palette becomes a palette: write the number alone (e.g. P5,7)' : 'P (palette) needs 8x8 tiles as source' };
   if (onlyTiles && (op === 'S' || op === 'P')) return { dst: `${op === 'P' ? 'Palettes' : 'Acts-like settings'} ${onlyTilesHere}` };
-  const from = DOMAINS[prefix === 'P' ? 'pals' : prefix === 'G' ? 'acts' : op === 'S' ? 'map16' : 'tiles'];
+  const from = DOMAINS[prefix === 'P' ? 'pals' : prefix === 'G' ? 'acts' : op === 'S' ? 'map16' : numbers];
   if (b > from.max || a > from.max) return from.name;
   if (b < a) return 'The range runs backwards (the smaller number first)';
   let cells: { v: number; k: number }[]; // source value, its offset from the source's start (rectangle: dy*16+dx)
@@ -126,7 +130,7 @@ function parsePair(src: Token, dst: Token, onlyTiles: boolean): string | { dst: 
     for (let y = a >> 4; y <= b >> 4; y++) for (let x = a & 15; x <= (b & 15); x++) cells.push({ v: y * 16 + x, k: (y - (a >> 4)) * 16 + x - (a & 15) });
   } else cells = Array.from({ length: b - a + 1 }, (_, k) => ({ v: a + k, k }));
   const into: Into = op === 'S' ? 'tileActs' : op === 'P' ? 'tilePals' : prefix === 'P' ? 'pals' : prefix === 'G' ? 'acts' : 'tiles';
-  const to = DOMAINS[INTO_DOMAIN[into]];
+  const to = DOMAINS[into === 'tiles' ? numbers : INTO_DOMAIN[into]];
   const value = (c: { v: number; k: number }) => op === '+' ? c.v + v : op === '-' ? c.v - v : op === 'M' || op === 'S' ? v + c.k : v;
   const map = cells.map((c): [number, number] => [c.v, value(c)]);
   if (map.some(([, t]) => t < 0 || t > to.max)) return { dst: `${to.name}: ${op === '-' ? 'below 0' : 'too far'}` };

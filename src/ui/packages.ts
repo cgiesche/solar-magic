@@ -12,7 +12,7 @@ import { SECTIONS } from '../core/pkgsections.ts';
 import { removePackage, packageFiles } from '../core/packages.ts';
 import { loadMusicProject, songHex } from '../core/music.ts';
 import { playButton, playSong, currentSongs } from './musicdialog.ts';
-import { lz2Decompress } from '../core/lz2.ts';
+import { isGfxData } from '../core/gfxfiles.ts';
 import { hex } from '../core/names.ts';
 import { ALL, type UberContext } from '../core/uberasm.ts';
 import { KIND_LABEL as SPRITE_KIND, spriteConfig, type PixiProject } from '../core/pixi.ts';
@@ -38,14 +38,12 @@ export interface PackagesHost {
 // one entry of the list: a package, or the editor's VRAM patch
 interface Item { key: string; name: string; rec: Package }
 
-const GFX_SIZES = new Set([0x1000, 0xc00, 0x800, 0x2000]);
 // a .png 128 pixels wide (16 tiles, what the import takes; not the screenshots of the docs), or a .bin
 // that is a graphics file (4bpp/3bpp, plain or LZ2)
 function isGfxFile(path: string, data: Uint8Array): boolean {
   if (/\.png$/i.test(path)) return data.length > 24 && ((data[16] << 24) | (data[17] << 16) | (data[18] << 8) | data[19]) === 128;
   if (!/\.bin$/i.test(path)) return false;
-  if (GFX_SIZES.has(data.length) || /(^|\/)(ex)?gfx[^/]*$/i.test(path)) return true;
-  try { return GFX_SIZES.has(lz2Decompress(data, 0).data.length); } catch { return false; }
+  return /(^|\/)(ex)?gfx[^/]*$/i.test(path) || isGfxData(data);
 }
 const base = (p: string) => p.split('/').pop()!;
 

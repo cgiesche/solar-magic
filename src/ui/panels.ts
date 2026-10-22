@@ -1,17 +1,18 @@
 // Sidebar panels: level list, palette (objects / sprites), properties.
 
 import { isBrushMode, type App, type PaletteItem } from './app.ts';
-import { h, clear, hexInput, attachRectPick, modal, toast, emptyState } from './dom.ts';
+import { h, clear, hexInput, checkbox, attachRectPick, modal, toast, emptyState } from './dom.ts';
 import { objectName, spriteName, hex2, hex3 } from '../core/names.ts';
 import { objectVariant, withObjectVariant, type ObjKind } from '../core/objkinds.ts';
-import { objectThumbs, thumbCanvas, objKey, type ObjSpec } from './thumbs.ts';
-import { newUid, spriteId, spriteBytes, spriteSizes, type LevelObject } from '../core/level.ts';
+import { thumbCanvas, objKey, type ObjSpec, type ObjThumb } from './thumbs.ts';
+import { newUid, spriteId, spriteBytes, spriteSizes, type LevelObject, type LevelSprite } from '../core/level.ts';
 import { levelName } from '../core/overworld.ts';
 import { usedInList } from './usedin.ts';
 import { buildExitPanel } from './exitpanel.ts';
 import { DM16_EXT } from '../core/patches.ts';
 import { STRUCT_EXT, TRANSPARENT, freeStructureNumber, readStructure, writeStructure, STRUCT_COUNT, type Structure } from '../core/structs.ts';
 import { EXT_TILES } from '../core/map16ext.ts';
+import { COND_FLAGS, COND_ADD, condByte, flagRam, isDm16, type Dm16Cond } from '../core/cdm16.ts';
 import { TileCache, map16Source, drawMap16 } from '../core/render.ts';
 import { lt3Target, lt3Users, blankLayer3Tile, l3Palette, withL3Palette, L3_TILE, L3_PAL, L3_PRIO, L3_FLIP_X, L3_FLIP_Y } from '../core/layer3map.ts';
 import { LT3_DESTS } from '../core/layer3gfx.ts';
@@ -121,7 +122,7 @@ export class Palette {
   tab: 'obj' | 'ext' | 'm16' | 'str' | 'spr' = 'obj';
   thumbs = new Map<string, HTMLCanvasElement>();
   thumbTiles = new Map<string, number[]>(); // Map16 tiles per object key
-  thumbsFor = '';
+  thumbsFrom: ObjThumb[] | undefined; // the thumbnails shown (undefined: placeholders while they are learned)
   tabs: HTMLDivElement;
   search: HTMLInputElement;
   searchRow: HTMLDivElement;
@@ -153,8 +154,9 @@ export class Palette {
       this.build();
       this.scrollToSelected();
     });
-    app.on('objkinds', () => this.invalidate());
     app.on('level', () => { this.ensureThumbs(); this.build(); });
+    // the thumbnails of the level as edited: asked for whenever they may have changed, the learner decides
+    for (const ev of ['objkinds', 'level-header', 'render', 'rom-change', 'thumbs'] as const) app.on(ev, () => { if (this.ensureThumbs() && (this.tab === 'obj' || this.tab === 'ext')) this.build(); });
     let t = 0;
     app.on('sprites', () => { if (this.tab !== 'm16' && !t) t = window.setTimeout(() => { t = 0; this.build(); }, 300); });
     app.on('bgtile', () => { if (isBrushMode(app.mode)) this.build(); });
@@ -502,30 +504,19 @@ export class Palette {
     return s;
   }
 
-  ensureThumbs(): void {
-    const h0 = this.app.level.header;
-    const key = `${h0.tileset}-${h0.fgPalette}-${h0.bgPalette}-${h0.spriteGfx}-${this.app.level.number}`;
-    const tsKey = `${h0.tileset}-${h0.fgPalette}-${h0.bgPalette}-${this.app.tilesetKinds() ? 1 : 0}`;
-    if (this.thumbsFor === tsKey) return;
-    this.thumbsFor = tsKey;
-    void key;
-    try {
-      this.thumbTiles = new Map();
-      this.thumbs = new Map();
-      for (const t of objectThumbs(this.app, this.specs())) {
-        this.thumbs.set(t.key, thumbCanvas(t));
-        this.thumbTiles.set(t.key, t.m16);
-      }
-      this.app.probes.prefetch([...this.thumbTiles.values()].flat());
-    } catch (e) {
-      console.error(e);
+  // the thumbnails as known now; whether they changed
+  ensureThumbs(): boolean {
+    const thumbs = this.app.objectThumbs(this.specs());
+    if (thumbs === this.thumbsFrom) return false;
+    this.thumbsFrom = thumbs;
+    this.thumbTiles = new Map();
+    this.thumbs = new Map();
+    for (const t of thumbs ?? []) {
+      this.thumbs.set(t.key, thumbCanvas(t));
+      this.thumbTiles.set(t.key, t.m16);
     }
-  }
-
-  invalidate(): void {
-    this.thumbsFor = '';
-    this.ensureThumbs();
-    this.build();
+    if (thumbs) this.app.probes.prefetch([...this.thumbTiles.values()].flat());
+    return true;
   }
 
   // the standard objects (with their types) or the extended objects as listed in the tab; `text` is what the
@@ -545,7 +536,7 @@ export class Palette {
       const info = (tiles.length ? `\nMap16 ${tiles.slice(0, 8).map(hex3).join(' ')}${tiles.length > 8 ? ' …' : ''}` : '')
         + (sum === undefined ? '\n(determining behavior …)' : sum.map((x) => '\n' + x).join(''));
       const th = this.thumbs.get(objKey(s, kind));
-      if (!th && ext) continue; // invalid ext objects produce nothing
+      if (!th && ext && this.thumbsFrom) continue; // invalid ext objects produce nothing
       out.push({
         s, vt, label, name, th, title: `${label}: ${name}${info}`, behavior: sum?.join(' · ') ?? '', text: `${label} ${name} ${info}`.toLowerCase(),
         items: blockSprites(app, tiles), enter: blockEnter(app, tiles),
@@ -845,6 +836,37 @@ export class Properties {
 
   probePending = false; // the shown object's block behaviour is still being probed
 
+  // the flag the Direct Map16 objects `objs` depend on (Lunar Magic's conditional Direct Map16, cdm16.ts), set for
+  // all of them at once, or removed
+  condFields(objs: LevelObject[]): HTMLElement[] {
+    if (!objs.length) return [];
+    const app = this.app;
+    const all = (f: (o: LevelObject) => void) => app.editLevel(() => { for (const o of liveObjects(app, objs)) f(o); });
+    const first = objs.find((o) => o.cond)?.cond;
+    const many = objs.length > 1 ? ` of the ${objs.length} Direct Map16 objects` : '';
+    if (!first) {
+      return [this.field('Flag', h('button', { title: `Draw${many} only while a flag of $7FC060-F is on (set by ASM, e.g. UberASM)`, onclick: () => all((o) => (o.cond = { flag: 0, always: false })) }, 'Add flag check'))];
+    }
+    const mixed = new Set(objs.map((o) => (o.cond ? condByte(o.cond) : -1))).size > 1;
+    // always show adds 100 to the tiles while the flag is on: they must stay in range
+    const tooHigh = objs.filter((o) => (o.tile ?? 0) + COND_ADD >= EXT_TILES).length;
+    // the flag and always show as shown here, for all of them
+    const set = (c: Partial<Dm16Cond>) => {
+      const cond = { ...first, ...c };
+      if (cond.always && tooHigh) { toast(`Always show adds 100 to the tiles while the flag is on: ${tooHigh} object${tooHigh > 1 ? 's have tiles' : ' has a tile'} from F00 on.`, 'error'); this.build(); return; }
+      all((o) => (o.cond = { ...cond }));
+    };
+    const ram = flagRam(first.flag);
+    return [
+      this.field('Flag', hexInput(first.flag, 2, (v) => set({ flag: v }), COND_FLAGS - 1),
+        h('button', { title: `Remove the flag check${many}: always drawn as it is`, onclick: () => all((o) => delete o.cond) }, 'Remove flag check')),
+      h('div', { class: 'prop' }, h('label', null, ''), checkbox(' Always show', 'Drawn also while the flag is off; while it is on, its tiles + 100', first.always, (on) => set({ always: on }))),
+      h('div', { class: 'hint' }, mixed ? 'The selected objects have different flag settings; a change here sets flag and always show for all of them. ' : '',
+        first.always ? `Drawn as it is while flag ${hex2(first.flag)} (${ram}) is off, with its tiles + 100 while it is on.` : `Drawn only while flag ${hex2(first.flag)} (${ram}) is on.`,
+        ' View → Conditional Direct Map16 shows the level with the flags.'),
+    ];
+  }
+
   field(label: string, input: HTMLElement, extra?: HTMLElement): HTMLElement {
     return h('div', { class: 'prop' }, h('label', null, label), input, extra);
   }
@@ -884,18 +906,23 @@ export class Properties {
       }
       if (sel.length > 1) { this.body.append(h('div', { class: 'prop-title' }, `${sel.length} sprites selected`), this.actions(false)); return; }
       const s = sel[0];
-      const upd = (f: () => void) => app.editLevel(f, false);
+      // changes the sprite in the open level (a ROM edit saves a changed level: it is loaded anew, the ids kept)
+      const upd = (f: (s: LevelSprite) => void) => app.editLevel((lv) => {
+        const x = lv.sprites.find((x) => x.uid === s.uid);
+        if (!x) return false;
+        f(x);
+      }, false);
       const id = spriteId(s), custom = app.customSprite(id);
       // custom sprites: their extra bytes (as many as the size table says for number and extra bit)
       const nBytes = s.extra >= 2 ? spriteBytes(spriteSizes(app.rom), s).length : 0;
-      const resize = () => { const b = spriteBytes(spriteSizes(app.rom), s); if (b.length) s.bytes = b; else delete s.bytes; };
+      const resize = (s: LevelSprite) => { const b = spriteBytes(spriteSizes(app.rom), s); if (b.length) s.bytes = b; else delete s.bytes; };
       this.body.append(
         h('div', { class: 'prop-title' }, `${s.extra >= 2 ? 'Custom Sprite' : 'Sprite'} ${hex2(s.num)}: ${app.spriteLabel(id)}`),
-        this.field('Number', hexInput(s.num, 2, (v) => upd(() => { s.num = v; resize(); }))),
-        this.field('X', hexInput(s.x, 3, (v) => upd(() => (s.x = v)), app.levelWidthTiles() - 1)),
-        this.field('Y', hexInput(s.y, 3, (v) => upd(() => (s.y = v)), app.levelHeightTiles() - 1)),
-        this.field('Extra bits', hexInput(s.extra, 1, (v) => upd(() => { s.extra = v; resize(); }), 3)),
-        ...Array.from({ length: nBytes }, (_, i) => this.field(`Extra byte ${i + 1}`, hexInput(s.bytes?.[i] ?? 0, 2, (v) => upd(() => { resize(); if (s.bytes) s.bytes[i] = v; })))),
+        this.field('Number', hexInput(s.num, 2, (v) => upd((s) => { s.num = v; resize(s); }))),
+        this.field('X', hexInput(s.x, 3, (v) => upd((s) => (s.x = v)), app.levelWidthTiles() - 1)),
+        this.field('Y', hexInput(s.y, 3, (v) => upd((s) => (s.y = v)), app.levelHeightTiles() - 1)),
+        this.field('Extra bits', hexInput(s.extra, 1, (v) => upd((s) => { s.extra = v; resize(s); }), 3)),
+        ...Array.from({ length: nBytes }, (_, i) => this.field(`Extra byte ${i + 1}`, hexInput(s.bytes?.[i] ?? 0, 2, (v) => upd((s) => { resize(s); if (s.bytes) s.bytes[i] = v; })))),
         s.extra >= 2 ? h('div', { class: 'hint' }, custom ? 'Extra bits 2/3: custom sprite without/with extra bit.' : 'This custom sprite is not inserted (ROM → Packages …, Sprites); the game treats it like the original sprite with the same number.') : '',
         custom?.description ? h('div', { class: 'hint pre' }, custom.description) : '',
         this.actions(false),
@@ -916,26 +943,32 @@ export class Properties {
       this.body.appendChild(emptyState(`${app.currentObjects().length} objects on ${app.mode === 'l2' ? 'layer 2' : 'layer 1'} – none selected.`));
       return;
     }
-    if (sel.length > 1) { this.body.append(h('div', { class: 'prop-title' }, `${sel.length} objects selected`), this.actions(true)); return; }
+    if (sel.length > 1) { this.body.append(h('div', { class: 'prop-title' }, `${sel.length} objects selected`), ...this.condFields(sel.filter(isDm16)), this.actions(true)); return; }
     const o = sel[0];
-    const upd = (f: () => void) => app.editLevel(f);
+    // changes the object in the open level (see the sprite's)
+    const upd = (f: (o: LevelObject) => void) => app.editLevel(() => {
+      const [x] = liveObjects(app, [o]);
+      if (!x) return false;
+      f(x);
+    });
     const idx = app.currentObjects().indexOf(o);
     const ov = app.objectKind(o.num);
     this.body.append(
       h('div', { class: 'prop-title' }, `${o.num ? 'Object ' + hex2(o.num) : 'Ext. object ' + hex2(o.ext)}: ${objectName(o.num, o.ext)}`),
       h('div', { class: 'hint' }, `No. ${idx + 1} of ${app.currentObjects().length} (drawing order)`),
-      this.field('Object', hexInput(o.num, 2, (v) => upd(() => { o.num = v; fixStruct(o); }), 0x3f)),
-      o.num === 0 ? this.field('Ext. object', hexInput(o.ext, 2, (v) => upd(() => { o.ext = v; fixStruct(o); }), 0xff)) : '',
-      o.num === 0 && o.ext === STRUCT_EXT && o.struct !== undefined ? this.field('Structure', hexInput(o.struct, 2, (v) => upd(() => (o.struct = v)), 0xff)) : '',
+      this.field('Object', hexInput(o.num, 2, (v) => upd((o) => { o.num = v; fixStruct(o); }), 0x3f)),
+      o.num === 0 ? this.field('Ext. object', hexInput(o.ext, 2, (v) => upd((o) => { o.ext = v; fixStruct(o); }), 0xff)) : '',
+      o.num === 0 && o.ext === STRUCT_EXT && o.struct !== undefined ? this.field('Structure', hexInput(o.struct, 2, (v) => upd((o) => (o.struct = v)), 0xff)) : '',
       o.num === 0 && o.ext === STRUCT_EXT && o.struct !== undefined ? h('div', { class: 'hint' }, structInfo(app, o.struct), ' ',
         h('button', { title: 'Replace the structure here with single Direct Map16 objects (to edit it, then “Selection as structure” again)', onclick: () => app.explodeStructure(o) }, 'Break up')) : '',
-      o.num === 0 && o.ext === DM16_EXT ? this.field('Map16 tile', hexInput(o.tile ?? 0, 3, (v) => upd(() => (o.tile = v)), EXT_TILES - 1),
+      o.num === 0 && o.ext === DM16_EXT ? this.field('Map16 tile', hexInput(o.tile ?? 0, 3, (v) => upd((o) => (o.tile = v)), EXT_TILES - 1 - (o.cond?.always ? COND_ADD : 0)),
         h('button', { title: 'Edit the tile in the graphics area', onclick: () => app.editMap16(o.tile ?? 0) }, 'Edit …')) : '',
-      o.num === 0 && o.ext === DM16_EXT ? this.field('Size (hw)', hexInput(o.size, 2, (v) => upd(() => (o.size = v)))) : '',
-      this.field('X', hexInput(o.x, 3, (v) => upd(() => (o.x = v)), app.levelWidthTiles() - 1)),
-      this.field('Y', hexInput(o.y, 3, (v) => upd(() => (o.y = v)), app.levelHeightTiles() - 1)),
-      o.num !== 0 && ov?.type ? this.field('Type', hexInput(objectVariant(ov, o.size), 1, (v) => upd(() => (o.size = withObjectVariant(ov, o.size, v))), ov.count - 1)) : '',
-      o.num !== 0 ? this.field('Size (byte)', hexInput(o.size, 2, (v) => upd(() => (o.size = v)))) : '',
+      o.num === 0 && o.ext === DM16_EXT ? this.field('Size (hw)', hexInput(o.size, 2, (v) => upd((o) => (o.size = v)))) : '',
+      ...this.condFields(isDm16(o) ? [o] : []),
+      this.field('X', hexInput(o.x, 3, (v) => upd((o) => (o.x = v)), app.levelWidthTiles() - 1)),
+      this.field('Y', hexInput(o.y, 3, (v) => upd((o) => (o.y = v)), app.levelHeightTiles() - 1)),
+      o.num !== 0 && ov?.type ? this.field('Type', hexInput(objectVariant(ov, o.size), 1, (v) => upd((o) => (o.size = withObjectVariant(ov, o.size, v))), ov.count - 1)) : '',
+      o.num !== 0 ? this.field('Size (byte)', hexInput(o.size, 2, (v) => upd((o) => (o.size = v)))) : '',
       o.num !== 0 ? h('div', { class: 'hint' }, `${nibbleText(ov)} · Keys: + / - width, * / / height, Alt+arrows`) : '',
       this.actions(true),
     );
@@ -955,10 +988,17 @@ export class Properties {
   }
 }
 
+// the objects (of the current layer) with the ids of `objs` in the open level
+function liveObjects(app: App, objs: LevelObject[]): LevelObject[] {
+  const ids = new Set(objs.map((o) => o.uid));
+  return app.currentObjects().filter((o) => ids.has(o.uid));
+}
+
 // extended object $03 always carries a structure number (its 4th byte)
 function fixStruct(o: LevelObject): void {
   if (o.num === 0 && o.ext === STRUCT_EXT) o.struct ??= 0;
   else delete o.struct;
+  if (!isDm16(o)) delete o.cond;
 }
 
 function structInfo(app: App, n: number): string {

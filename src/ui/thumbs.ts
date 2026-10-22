@@ -1,11 +1,15 @@
-// Object preview thumbnails, rendered by emulating a test level that contains the objects.
+// Object preview thumbnails, rendered by emulating a test level that contains the objects (learned in the
+// background by App.objectThumbs).
 
-import type { App } from './app.ts';
-import { OV_L1 } from '../core/levelemu.ts';
-import { encodePrimaryHeader, serializeObjects, type LevelObject, newUid, L2_PTRS } from '../core/level.ts';
+import type { Rom } from '../core/rom.ts';
+import { OV_L1, type LevelEmulator } from '../core/levelemu.ts';
+import { encodePrimaryHeader, serializeObjects, type Level, type LevelObject, newUid, L2_PTRS } from '../core/level.ts';
 import { renderLevel, layerGeom } from '../core/render.ts';
 import { MAP_BASE, map16Tile } from '../core/ram.ts';
 import { objectVariant, type ObjKind } from '../core/objkinds.ts';
+import { levelSlots, layerSlots } from '../core/gfxslots.ts';
+import { gfxFilesHash } from '../core/gfxpages.ts';
+import { inputHash } from '../core/inputs.ts';
 
 export interface ObjSpec { num: number; ext: number; size: number }
 
@@ -19,16 +23,27 @@ export function objKey(s: { num: number; ext: number; size: number }, kind: ObjK
 // a rendered object: its pixels and the distinct Map16 tiles it produced
 export interface ObjThumb { key: string; w: number; h: number; px: Uint32Array; m16: number[] }
 
-// the thumbnails from the result cache (see romdeps.ts) or rendered; keyed by the level header
-// settings they depend on and the objects
-export function objectThumbs(app: App, specs: ObjSpec[]): ObjThumb[] {
-  const h = app.level.header;
-  const key = `o${h.tileset}-${h.fgPalette}-${h.bgPalette}:${hashStr(specs.map((s) => `${s.num}.${s.ext}.${s.size}`).join())}`;
-  const stored = app.results.get<ObjThumb[]>(key);
-  if (stored) return stored;
-  const r = app.emu.tracked(() => renderObjectThumbs(app, specs));
-  app.results.set(key, r.result, app.results.fp.deps(r.reads));
-  return r.result;
+// their result cache key: the tileset and palettes (kept side by side) and the objects
+export function thumbsKey(level: Level, specs: ObjSpec[], keyOf: (s: ObjSpec) => string): string {
+  const h = level.header;
+  // (o3: with the level they are drawn in as their input)
+  return `o3${h.tileset}-${h.fgPalette}-${h.bgPalette}:${inputHash(specs.map((s) => `${s.num}.${s.ext}.${s.size}=${keyOf(s)}`))}`;
+}
+
+// what they depend on outside the ROM bytes they read: the level they are drawn in as edited (its number
+// decides its graphics slots) and the content of the graphics files they draw from (graphics data isn't among
+// the bytes read, see App.gfxSkipMask). Not its BG: they show layer 1; nor its size and mode: the test level
+// has its own.
+export function thumbsInput(rom: Rom, level: Level): unknown {
+  const files = layerSlots(levelSlots(rom, level.number, level.header)).map((s) => s.file);
+  return { level: level.number, header: { ...level.header, screens: 0, mode: 0 }, gfx: filesHash(rom, files) };
+}
+// (once per ROM state and files)
+const filesMemo = { rom: null as Rom | null, gen: -1, files: '', hash: 0 };
+function filesHash(rom: Rom, files: number[]): number {
+  const m = filesMemo;
+  if (m.rom !== rom || m.gen !== rom.gen || m.files !== files.join()) Object.assign(m, { rom, gen: rom.gen, files: files.join(), hash: gfxFilesHash(rom, files) });
+  return m.hash;
 }
 
 export function thumbCanvas(t: ObjThumb): HTMLCanvasElement {
@@ -41,20 +56,20 @@ export function thumbCanvas(t: ObjThumb): HTMLCanvasElement {
   return c;
 }
 
-function hashStr(s: string): string {
-  let a = 0x811c9dc5;
-  for (let i = 0; i < s.length; i++) a = Math.imul(a ^ s.charCodeAt(i), 0x01000193);
-  return (a >>> 0).toString(36);
+// all at once (see objectThumbsJob)
+export function renderObjectThumbs(rom: Rom, emu: LevelEmulator, level: Level, specs: ObjSpec[], keyOf: (s: ObjSpec) => string): ObjThumb[] {
+  const job = objectThumbsJob(rom, emu, level, specs, keyOf);
+  for (;;) { const r = job.next(); if (r.done) return r.value; }
 }
 
-function renderObjectThumbs(app: App, specs: ObjSpec[]): ObjThumb[] {
+// in batches of 32 test levels, a step each; a batch whose load fails (some objects together break the game,
+// like two of tileset 7's object 33) is rendered in halves, an object that fails alone gets no thumbnail
+export function* objectThumbsJob(rom: Rom, emu: LevelEmulator, level: Level, specs: ObjSpec[], keyOf: (s: ObjSpec) => string): Generator<void, ObjThumb[]> {
   const out: ObjThumb[] = [];
   const PER = 32;
-  const rom = app.rom;
-  for (let b = 0; b < specs.length; b += PER) {
-    const batch = specs.slice(b, b + PER);
+  const render = (batch: ObjSpec[]): void => {
     const objs: LevelObject[] = batch.map((s, i) => ({ uid: newUid(), num: s.num, ext: s.ext, size: s.size, x: i * 16 + 3, y: 12 }));
-    const hdr = { ...app.level.header, screens: 32, mode: 0 };
+    const hdr = { ...level.header, screens: 32, mode: 0 };
     const owners: number[] = [-1, -1, -1, -1, -1];
     const body = serializeObjects(objs, [], false, owners);
     const l1 = new Uint8Array(5 + body.length);
@@ -62,12 +77,16 @@ function renderObjectThumbs(app: App, specs: ObjSpec[]): ObjThumb[] {
     l1.set(body, 5);
     const byteOwner = new Int32Array(0x10000).fill(-1);
     owners.forEach((o, i) => (byteOwner[OV_L1 + i] = o));
-    const r = app.emu.load(app.level.number, {
+    const r = emu.load(level.number, {
       layer1: l1,
-      layer2Pointer: app.level.layer2Objects ? rom.r24(L2_PTRS + 0x105 * 3) : app.level.layer2Pointer,
+      layer2Pointer: level.layer2Objects ? rom.r24(L2_PTRS + 0x105 * 3) : level.layer2Pointer,
       sprites: new Uint8Array([0, 0xff]),
       byteOwner,
     });
+    if (!r.ok) {
+      if (batch.length > 1) { render(batch.slice(0, batch.length >> 1)); render(batch.slice(batch.length >> 1)); }
+      return;
+    }
     const im = renderLevel(rom, r, 0, 32);
     const g = layerGeom(rom, 0, 0, 32);
     const inv = new Map<number, number>();
@@ -93,8 +112,9 @@ function renderObjectThumbs(app: App, specs: ObjSpec[]): ObjThumb[] {
       }
       const m16 = new Set<number>();
       for (const off of set!) m16.add(map16Tile(r.wram, MAP_BASE + off));
-      out.push({ key: objKey(s, app.objectKind(s.num)), w, h: hh, px, m16: [...m16].sort((a, b) => a - b) });
+      out.push({ key: keyOf(s), w, h: hh, px, m16: [...m16].sort((a, b) => a - b) });
     });
-  }
+  };
+  for (let b = 0; b < specs.length; b += PER) { render(specs.slice(b, b + PER)); yield; }
   return out;
 }

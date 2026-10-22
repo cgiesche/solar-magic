@@ -3,7 +3,8 @@
 // 80–DFF, or E00–FFF for files kept "as is"), one click takes it.
 import type { Rom } from '../core/rom.ts';
 import { h, hexInput } from './dom.ts';
-import { freeGfx, gfxEntry, gfxHex, gfxRangeFor, gfxNumberProblem, VANILLA_GFX, AS_IS_FIRST, MAX_GFX, type GfxFileKind } from '../core/patches.ts';
+import { freeGfx, gfxHex, gfxRangeFor, gfxNumberProblem, VANILLA_GFX, AS_IS_FIRST, MAX_GFX, type GfxFileKind } from '../core/patches.ts';
+import { hasGfx } from '../core/gfxfiles.ts';
 
 // `file`: what is known of the file (asked when the suggestion is made); `taken`: numbers other files of
 // the same upload go to; `author`: the number the file has where it comes from (`by`: e.g. "Lunar Magic"),
@@ -28,8 +29,8 @@ export function gfxNumberField(rom: Rom, value: number, o: GfxNumberOptions): HT
     next.hidden = free < 0 || free === value;
     const a = o.author ?? null;
     const misfit = a !== null && a !== value ? gfxNumberProblem(a, f) : null;
-    const from = a === null || a === value ? '' : ` (${o.by ?? 'author'}: ${gfxHex(a)}${misfit ? ', not possible for this file' : others.has(a) || gfxEntry(rom, a) ? ', already in use here' : ''})`;
-    hint.textContent = (others.has(value) ? ' – another file of this upload has this number' : gfxEntry(rom, value) ? ' – replaces the file there' : '') + from;
+    const from = a === null || a === value ? '' : ` (${o.by ?? 'author'}: ${gfxHex(a)}${misfit ? ', not possible for this file' : others.has(a) || hasGfx(rom, a) ? ', already in use here' : ''})`;
+    hint.textContent = (others.has(value) ? ' – another file of this upload has this number' : hasGfx(rom, value) ? ' – replaces the file there' : '') + from;
     hint.title = misfit ?? '';
   };
   next.addEventListener('click', () => {

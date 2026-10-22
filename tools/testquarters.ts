@@ -1,7 +1,7 @@
 // Quarters of a Map16 tile selection (core/quarters.ts): marking them as a set (click, rectangle, Ctrl to add
 // or remove, a whole 16x16 tile, all), editing every marked quarter, stamping a block of 8x8 tiles, what
 // the marked quarters have in common, and which 16x16 tiles are wholly marked (acts-like).
-import { QuarterGrid, markRect, editMarked, setPalette, setBit, setTileNum, stamp, summary, wholeTiles, FLIP_X, FLIP_Y, PRIO } from '../src/core/quarters.ts';
+import { QuarterGrid, markRect, editMarked, setPalette, setBit, setTileNum, stamp, summary, wholeTiles, paletteOn, FLIP_X, FLIP_Y, PRIO } from '../src/core/quarters.ts';
 
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
@@ -82,6 +82,14 @@ check(wholeTiles(g, two)!.join() === '0,5', 'two whole tiles');
 two.add(g.key(2, 0));
 check(wholeTiles(g, two) === null, 'a partly marked tile: none');
 check(wholeTiles(g, new Set()) === null, 'nothing marked: none');
+
+// ---- an animation's palette: the quarters showing its target tiles ----
+const tw = [W(0x60, 2), W(0x70, 2, FLIP_X), W(0x61, 4), W(0x12, 2)];
+const pt = paletteOn(tw, new Set([0x60, 0x61, 0x70]), 4)!;
+check(pt[0] === W(0x60, 4) && pt[1] === W(0x70, 4, FLIP_X) && pt[2] === tw[2], 'target quarters take the palette, flips kept');
+check(pt[3] === tw[3], 'other quarters stay');
+check(paletteOn(pt, new Set([0x60, 0x61, 0x70]), 4) === null, 'all in the palette already: nothing changes');
+check(paletteOn(tw, new Set([0x99]), 4) === null, 'no quarter shows the target: nothing changes');
 
 console.log(bad ? `${bad} FAILED` : 'all ok');
 if (bad) process.exit(1);

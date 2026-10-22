@@ -9,6 +9,7 @@
 export const GM = {
   title: 0x07, // title screen (waits for a button)
   overworldLoad: 0x0b, // fading into the overworld
+  overworldReturn: 0x0c, // loading the overworld after a level
   overworld: 0x0e,
   levelLoad: 0x11, // loading a level ("Mario Start!")
   level: 0x14,
@@ -59,9 +60,13 @@ export const RAM = {
   // level
   translevel: 0x13bf,
   onOff: 0x14af,
+  blueP: 0x14ad, silverP: 0x14ae, // the P-switches' timers (running while not 0)
+  starTimer: 0x1490, // Mario has a star while not 0
+  dragonCoins: 0x1420, // Dragon Coins collected in the level
   layer3Tide: 0x1403, // 1 rising and falling, 2 fixed
   layer3Setting: 0x1be3,
   sublevelCount: 0x141a,
+  introShown: 0x141d, // the level's no-Yoshi intro has played (the level itself loads next)
   levelFlags: 0x1ea2, // per translevel: bit 6 the midway point was touched
   midwayTouched: 0x13ce, // the midway tape was touched in this level (dying then marks the translevel's $1EA2 bit 6)
   midwayUsed: 0x13cf, // the level was loaded at its midway point
@@ -91,6 +96,15 @@ export const RAM = {
   switchPalaces: 0x1f27, // 4
   owLayer1: 0xc800, owLayer1End: 0xd000, // overworld layer 1 tilemap (with events applied)
   owTranslevels: 0xd000, owTranslevelsEnd: 0xd800, // translevel per overworld tile
+  levelExit: 0x0dd5, // how the level was left: 1 the normal exit, 2 the secret exit, $80 the player's turn ends (died)
+  levelBeaten: 0x1de9, // set with a passed level (the overworld then runs its event)
+  owEvent: 0x1dea, // the event the overworld runs for the level passed (the translevel's base event, $05D608; + 1 for the secret exit)
+  owWarp: 0x1b9c, // the overworld loads at the star/pipe table's destination $1DF6 (owteleport.ts)
+  owWarpIndex: 0x1df6,
+  playerIndex: 0x0db3, // 0 Mario, 1 Luigi
+  brightness: 0x0dae, mosaicDir: 0x0daf, mosaic: 0x0db0, // the screen's fade (the next game mode's start)
+  twoPlayers: 0x0db2, // a 2-player game
+  playerLives: 0x0db4, // per player (-1: out)
 } as const;
 
 // level data: Map16 tile numbers, low bytes at MAP_BASE, high bytes in bank $7F
@@ -113,6 +127,11 @@ export const EXIT_FLAGS_RAM: [number, number] = [0x7f3679, 1];
 // the editor patch's (patches.ts): the high bytes of the ExGFX numbers in the graphics slots being uploaded
 // (8), then the one for the next upload of BG2/BG3
 export const EXGFX_HI_RAM: [number, number] = [0x7f367a, 9];
+// Lunar Magic's conditional Direct Map16 flags (cdm16.ts), which community code sets: 128 bits, low to high
+export const CDM16_FLAGS: [number, number] = [0x7fc060, 16];
+// Lunar Magic's ExAnimation RAM (extrigger.ts), which community code sets and reads: the manual frames (16 bytes),
+// the slots' frame counters (level 32, then global 32), the one-shot triggers (32 bits), the custom ones (16 bits)
+export const EXTRIGGER_RAM = { manual: 0x7fc070, counters: 0x7fc080, oneShot: 0x7fc0f8, custom: 0x7fc0fc } as const;
 // Lunar Magic's RAM for a horizontal level's height, which community code reads too: the height in
 // pixels (also a screen's bytes in the level data), and the screens' Map16 addresses in bank 0's RAM
 // (the game's mode tables point there): 3-byte pointers to the low and the high bytes, then the

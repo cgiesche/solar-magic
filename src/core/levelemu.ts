@@ -9,7 +9,9 @@ import { translevelToLevel } from './overworld.ts';
 import { editorPatch, musicPatch, BG_HOOK, HEADER_MUSIC_TABLE } from './patches.ts';
 import { lt3Patches, type Lt3Place } from './layer3gfx.ts';
 import { RomReads, updateBytePages, PAGE_SHIFT } from './romdeps.ts';
-import { GM, RAM, SPR, MAP_BASE, MAP_SIZE, MAP_HI, getS16, set16, setSpritePos } from './ram.ts';
+import { applyTriggers, type TriggerView } from './extrigger.ts';
+import { inputHash, levelInput } from './inputs.ts';
+import { GM, RAM, SPR, MAP_BASE, MAP_SIZE, MAP_HI, CDM16_FLAGS, getS16, set16, setSpritePos } from './ram.ts';
 
 export const OV_L1 = 0x0000; // overlay offsets
 export const OV_L2 = 0x4000;
@@ -42,6 +44,9 @@ export interface LevelOverride {
   secondaryHeader?: number[]; // the bytes of SEC_HDR (missing ones: 0)
   switchPalaces?: boolean; // treat all switch palaces as pressed
   onOffSwitch?: boolean; // ON/OFF switch in the OFF state ($14AF)
+  cdm16Flags?: Uint8Array; // the conditional Direct Map16 flags (CDM16_FLAGS, cdm16.ts flagBytes) the level loads with
+  timer?: number; // the timer's hundreds once the level has loaded (the game sets them only coming from the overworld)
+  exTriggers?: TriggerView; // ExAnimation triggers set once the level's load has set its own (extrigger.ts)
   trackSources?: boolean; // record ROM provenance of CGRAM (slower)
   translevel?: number; // $13BF (messages, Yoshi coins); default: the level itself if it is a main level
   midway?: boolean; // enter the translevel's level from the overworld with its midway point touched (a main level)
@@ -52,17 +57,10 @@ export interface LevelOverride {
   fadeHook?: () => MemHook; // watches the frames after GM $11 (level start, fade-in: sprites run their first frames there), made when GM $11 is done
 }
 
-// the level and a hash of its level data as edited, for result cache keys of what is learned by playing it
+// the level and a hash of the level as edited (its input, inputs.ts), for result cache keys of what is learned
+// by playing it
 export function levelDataKey(level: number, ov: LevelOverride): string {
-  const l2 = ov.layer2Pointer ?? 0;
-  const bytes = [ov.layer1, ov.layer2, ov.bgData, ov.sprites, Uint8Array.from(ov.secondaryHeader ?? []), Uint8Array.from([l2, l2 >> 8, l2 >> 16, +!!ov.switchPalaces, +!!ov.onOffSwitch])];
-  let h = 0x811c9dc5;
-  for (const b of bytes) {
-    if (!b) { h = Math.imul(h ^ 0xff, 0x01000193); continue; }
-    for (let i = 0; i < b.length; i++) h = Math.imul(h ^ b[i], 0x01000193);
-    h = Math.imul(h ^ b.length, 0x01000193);
-  }
-  return `${level}:${(h >>> 0).toString(16)}`;
+  return `${level}:${inputHash(levelInput(level, ov))}`;
 }
 
 // What the object routines did while the level loaded (analysis, see objkinds.ts).
@@ -107,12 +105,16 @@ export class LevelEmulator {
   }
 
   bootReads: RomReads | null = null; // ROM read while booting (every load starts from that state)
+  // the reads the boot's skipMask left out: GFX files uploaded on the title screen stay in VRAM, and a
+  // level with the same files doesn't upload them again – a change makes the snapshot stale as well
+  private bootMasked: RomReads | null = null;
   private bootRom: Uint8Array | null = null; // the ROM as it was booted
 
   // the boot snapshot of another emulator on the same ROM (saves booting again)
   adoptBoot(other: LevelEmulator): void {
     this.baseState = other.baseState;
     this.bootReads = other.bootReads;
+    this.bootMasked = other.bootMasked;
     this.bootRom = other.bootRom;
     this.romGen = -1; // it may be from an older ROM: checked with the next entry
   }
@@ -122,13 +124,18 @@ export class LevelEmulator {
     this.sync();
     const s = this.snes;
     s.powerOn();
-    this.bootReads = this.tracked(() => {
-      let f = 0;
-      while (s.wram[RAM.gameMode] !== GM.title) {
-        s.runFrame();
-        if (++f > 2000) throw new Error('boot did not reach title screen');
-      }
-    }).reads;
+    const masked = new RomReads(this.rom.data.length), outerMasked = s.romMasked;
+    s.romMasked = masked;
+    try {
+      this.bootReads = this.tracked(() => {
+        let f = 0;
+        while (s.wram[RAM.gameMode] !== GM.title) {
+          s.runFrame();
+          if (++f > 2000) throw new Error('boot did not reach title screen');
+        }
+      }).reads;
+    } finally { s.romMasked = outerMasked; }
+    this.bootMasked = masked;
     this.baseState = s.saveState();
     this.bootRom = this.rom.data.slice();
   }
@@ -160,9 +167,11 @@ export class LevelEmulator {
     if (this.romGen === this.rom.gen) return;
     this.romGen = this.rom.gen;
     updateBytePages(this.rom);
-    if (this.baseState && this.bootReads && this.bootRom && this.bootReads.differ(this.bootRom, this.rom.data)) {
+    if (this.baseState && this.bootReads && this.bootRom &&
+      (this.bootReads.differ(this.bootRom, this.rom.data) || this.bootMasked?.differ(this.bootRom, this.rom.data))) {
       this.baseState = null;
       this.bootReads = null;
+      this.bootMasked = null;
       this.bootRom = null;
     }
   }
@@ -204,15 +213,18 @@ export class LevelEmulator {
     }
     if (ov.switchPalaces) for (let i = 0; i < 4; i++) w[RAM.switchPalaces + i] = 1;
     if (ov.onOffSwitch) w[RAM.onOff] = 1;
+    if (ov.cdm16Flags) w.set(ov.cdm16Flags.subarray(0, CDM16_FLAGS[1]), CDM16_FLAGS[0] - 0x7e0000);
     w[RAM.gameMode] = GM.levelLoad;
 
-    // temporary pointer patches in the ROM image
+    // temporary pointer patches in the ROM image, taken back after the load: written past rom.w8, as they are
+    // no change of the ROM (rom.gen) – the probe worker would be sent it again, dropping its queue
     const rom = this.rom;
     const saved: [number, number][] = [];
     const patch = (snes: number, v: number) => {
-      saved.push([snes, rom.data[snesToPc(snes)]]);
-      s.romSkip.add(snesToPc(snes)); // their content doesn't matter: reads don't count for romPages
-      rom.w8(snes, v);
+      const o = snesToPc(snes);
+      saved.push([o, rom.data[o]]);
+      s.romSkip.add(o); // their content doesn't matter: reads don't count for romPages
+      rom.data[o] = v & 0xff;
     };
     const patch24 = (snes: number, v: number) => { patch(snes, v); patch(snes + 1, v >> 8); patch(snes + 2, v >> 16); };
     if (ov.layer1) {
@@ -268,6 +280,7 @@ export class LevelEmulator {
     const byteOwner = ov.byteOwner;
     const trace: ObjectTrace | undefined = ov.trace ? { code: new Set(), reads: new Map(), writes: new Map(), rom: new Set() } : undefined;
     const cpu = s.cpu;
+    let sublevels = 1; // $141A as the load set it, while the music call sees 0
     const skip = trace ? this.skipMask?.() ?? null : null; // not dependencies of the result (GFX, ExAnimation data)
     const put = (o: number, v: number, hi: boolean) => {
       let m = trace!.writes.get(current);
@@ -285,7 +298,10 @@ export class LevelEmulator {
         else if (a >= MAP_HI + MAP_BASE && a < MAP_HI + MAP_BASE + MAP_SIZE) { touch(current, a - MAP_HI - MAP_BASE); if (trace) put(a - MAP_HI - MAP_BASE, v, true); }
       },
       onRomRead: trace || musicCall >= 0 ? (ro: number) => {
-        if (cpu.inFetch && (ro === musicCall || ro === musicCall + 3)) w[RAM.sublevelCount] = ro === musicCall ? 0 : 1;
+        // after the call $141A is back as the load set it: 0 entered from the overworld, where the game decides
+        // by it whether a level's no-Yoshi intro plays its walk into the castle or ghost house
+        if (cpu.inFetch && ro === musicCall) { sublevels = w[RAM.sublevelCount]; w[RAM.sublevelCount] = 0; }
+        else if (cpu.inFetch && ro === musicCall + 3) w[RAM.sublevelCount] = sublevels;
         if (!trace) return;
         if (skip === null || skip[ro] !== 1) trace.rom.add(ro);
         if (cpu.inFetch) { trace.code.add(ro); return; }
@@ -307,6 +323,8 @@ export class LevelEmulator {
       // the level music bank takes some 40 frames of it
       const loadLimit = musicCall >= 0 ? 120 : 30;
       while (w[RAM.gameMode] === GM.levelLoad && frames < loadLimit) { s.runFrame(); frames++; }
+      if (ov.timer !== undefined) { w[RAM.timer] = ov.timer; w[RAM.timer + 1] = 0; w[RAM.timer + 2] = 0; }
+      if (ov.exTriggers) applyTriggers(w, ov.exTriggers);
       s.hook = ov.fadeHook?.() ?? null;
       // with the sound unit emulated, the fade-in also waits for the song's upload (AddmusicK sends a
       // song with its samples then: well over 100 frames for big ones)
@@ -320,7 +338,7 @@ export class LevelEmulator {
     } finally {
       s.hook = null;
       s.taintOn = false;
-      for (let i = saved.length - 1; i >= 0; i--) rom.w8(saved[i][0], saved[i][1]);
+      for (let i = saved.length - 1; i >= 0; i--) rom.data[saved[i][0]] = saved[i][1];
       s.romSkip.clear();
     }
     return {

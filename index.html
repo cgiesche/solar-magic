@@ -1,12 +1,124 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="booting">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Solar Magic</title>
+  <title>Solar Magic – Super Mario World Level Editor in Your Browser</title>
+  <meta name="description" content="Solar Magic is a free Super Mario World (SMW) level editor that runs in your browser. Edit levels, the overworld, graphics, palettes and music, then play-test your ROM hack instantly – no installation needed." />
+  <meta name="keywords" content="Super Mario World level editor, SMW level editor, SMW editor, SMW hacking, Super Mario World ROM hack, Mario level editor, SNES level editor, Lunar Magic alternative, online level editor" />
+  <meta name="robots" content="index, follow" />
+  <link rel="canonical" href="https://smw.traumwald.net/" />
+  <meta name="theme-color" content="#1e2026" />
+  <link rel="icon" type="image/png" href="/favicon.png" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Solar Magic" />
+  <meta property="og:url" content="https://smw.traumwald.net/" />
+  <meta property="og:image" content="https://smw.traumwald.net/og-image.jpg" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="The Solar Magic level editor showing Yoshi's Island 1" />
+  <meta property="og:title" content="Solar Magic – Super Mario World Level Editor in Your Browser" />
+  <meta property="og:description" content="Create your own Super Mario World levels and ROM hacks right in your browser. Free, no installation, play-test instantly." />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Solar Magic – Super Mario World Level Editor" />
+  <meta name="twitter:description" content="Create your own Super Mario World levels and ROM hacks right in your browser. Free, no installation, play-test instantly." />
+  <meta name="twitter:image" content="https://smw.traumwald.net/og-image.jpg" />
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "Solar Magic",
+    "url": "https://smw.traumwald.net/",
+    "image": "https://smw.traumwald.net/og-image.jpg",
+    "applicationCategory": "GameApplication",
+    "applicationSubCategory": "Level editor",
+    "operatingSystem": "Web browser, Windows, macOS, Linux",
+    "description": "A free level editor for Super Mario World (SNES) that runs in the browser: edit levels, the overworld, graphics, palettes and music, and play-test ROM hacks instantly.",
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+    "featureList": ["Level editing", "Overworld editing", "Graphics and palette editing", "Instant play-testing with sound", "Custom music, blocks and sprites", "Patches"]
+  }
+  </script>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      { "@type": "Question", "name": "What is Solar Magic?", "acceptedAnswer": { "@type": "Answer", "text": "Solar Magic is a free level editor for Super Mario World. It runs in your web browser and lets you build your own levels and ROM hacks without installing anything." } },
+      { "@type": "Question", "name": "Do I need to install anything?", "acceptedAnswer": { "@type": "Answer", "text": "No. Solar Magic runs in any modern web browser. A desktop app is available as well." } },
+      { "@type": "Question", "name": "Where do I get a ROM?", "acceptedAnswer": { "@type": "Answer", "text": "Solar Magic does not come with the game. You open a Super Mario World (US) ROM that you made from your own copy of the game." } },
+      { "@type": "Question", "name": "Is my ROM uploaded anywhere?", "acceptedAnswer": { "@type": "Answer", "text": "No. Your ROM and your work stay on your own computer. Nothing is sent to a server." } },
+      { "@type": "Question", "name": "I know Lunar Magic. Will I feel at home?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. Solar Magic covers what you know from Lunar Magic and adds things like play-testing right inside the editor." } }
+    ]
+  }
+  </script>
+  <style>
+    /* until the editor knows whether a project is waiting, the start page stays invisible (no flash before the editor) */
+    .booting .landing { visibility: hidden; }
+  </style>
 </head>
 <body>
-  <div id="app"></div>
+  <div id="app">
+    <main class="landing">
+      <header class="landing-hero">
+        <img class="landing-logo" src="/apple-touch-icon.png" width="96" height="96" alt="" />
+        <h1>Solar Magic</h1>
+        <p class="landing-tagline">The Super Mario World level editor that runs in your browser.</p>
+        <p class="landing-lead">Build your own levels, reshape the overworld, paint new graphics and play your creation the moment you made it – free and without installing anything.</p>
+        <div class="landing-actions">
+          <button type="button" class="primary big" id="landing-open-rom">Open ROM …</button>
+          <button type="button" class="big" id="landing-open-project">Open project …</button>
+        </div>
+        <p class="hint">Or simply drop your Super Mario World ROM or project file onto this page.</p>
+        <noscript><p class="landing-noscript">Solar Magic needs JavaScript. Please enable it to start editing.</p></noscript>
+      </header>
+
+      <section class="landing-section" aria-labelledby="what">
+        <h2 id="what">What is Solar Magic?</h2>
+        <p>Solar Magic is a level editor for <strong>Super Mario World</strong> on the Super Nintendo. Open your copy of the game, change anything from a single block to whole worlds, and save the result as your own ROM hack to play on an emulator or share as a patch with friends.</p>
+        <p>Everything you see in the editor looks exactly like it will in the game, so there are no surprises when you press play.</p>
+      </section>
+
+      <section class="landing-section" aria-labelledby="features">
+        <h2 id="features">What you can do</h2>
+        <ul class="landing-features">
+          <li><h3>Design levels</h3><p>Place ground, pipes, enemies and power-ups, set up doors and pipes between areas, and paint backgrounds.</p></li>
+          <li><h3>Edit the overworld</h3><p>Reshape the map, connect your levels and decide where every path leads.</p></li>
+          <li><h3>Play right away</h3><p>Try your level instantly inside the editor – with music and sound effects.</p></li>
+          <li><h3>Graphics &amp; colors</h3><p>Repaint tiles, change palettes and bring things to life with animations.</p></li>
+          <li><h3>Music</h3><p>Add your own songs and listen to every level's music in the editor.</p></li>
+          <li><h3>Custom content</h3><p>Use custom blocks, sprites and patches made by the Super Mario World hacking community.</p></li>
+        </ul>
+      </section>
+
+      <section class="landing-section" aria-labelledby="how">
+        <h2 id="how">Get started in three steps</h2>
+        <ol class="landing-steps">
+          <li><strong>Open your ROM.</strong> Choose a Super Mario World (US) ROM made from your own copy of the game.</li>
+          <li><strong>Make it yours.</strong> Pick a level and start building.</li>
+          <li><strong>Play and share.</strong> Test your changes, then save your ROM or a patch to share.</li>
+        </ol>
+      </section>
+
+      <section class="landing-section" aria-labelledby="faq">
+        <h2 id="faq">Questions</h2>
+        <dl class="landing-faq">
+          <dt>Do I need to install anything?</dt>
+          <dd>No. Solar Magic runs in any modern web browser. A desktop app is available as well.</dd>
+          <dt>Where do I get a ROM?</dt>
+          <dd>Solar Magic does not come with the game. You open a Super Mario World (US) ROM that you made from your own copy.</dd>
+          <dt>Is my ROM uploaded anywhere?</dt>
+          <dd>No. Your ROM and your work stay on your own computer. Nothing is sent to a server.</dd>
+          <dt>I know Lunar Magic. Will I feel at home?</dt>
+          <dd>Yes. Solar Magic covers what you know from Lunar Magic and adds things like play-testing right inside the editor.</dd>
+        </dl>
+      </section>
+
+      <footer class="landing-footer">
+        <p>Solar Magic is an unofficial fan project and is not affiliated with or endorsed by Nintendo. Super Mario World and Nintendo are trademarks of Nintendo.</p>
+      </footer>
+    </main>
+  </div>
   <script type="module" src="/src/main.ts"></script>
 </body>
 </html>

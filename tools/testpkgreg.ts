@@ -10,7 +10,7 @@ import { applyPatch, reapplyPatch } from '../src/core/patchapply.ts';
 import { listPatches } from '../src/core/patchreg.ts';
 import { loadProject, saveProject, emptyProject } from '../src/core/uberproject.ts';
 import { loadBlockProject, saveBlockProject, type BlockProject } from '../src/core/blocks.ts';
-import { importGfxFile } from '../src/core/map16file.ts';
+import { importGfxFile } from '../src/core/gfxfiles.ts';
 import { SECTIONS, SECTION_KEYS, type PartSection } from '../src/core/pkgsections.ts';
 import { recordPackageChange, listPackages, packageArchive, uninstallPackage, type Package, type PackageTarget, type Claim, type Recorded } from '../src/core/pkgreg.ts';
 import { allOrNothing } from '../src/core/romedit.ts';
@@ -91,7 +91,7 @@ check(listPackages(rom).map((r) => r.id).join() === bId, 'A: record removed' + (
 // removing B too: projects and ExGFX gone, the ROM as before both packages
 await uninstallPackage(rom, bId, blank);
 check(!loadProject(rom) && !loadBlockProject(rom) && !gfxEntry(rom, 0x80) && !listPackages(rom).length, 'B: UberASM, blocks and ExGFX removed');
-check(listPatches(rom).every((p) => p.kind === 'vram' || p.kind === 'exanim' || p.kind === 'l2scroll' || p.kind === 'levelheight' || p.kind === 'layer3'), 'no registry entries left but the editor\'s own');
+check(listPatches(rom).every((p) => p.kind === 'vram' || p.kind === 'exanim' || p.kind === 'l2scroll' || p.kind === 'levelheight' || p.kind === 'layer3' || p.kind === 'owteleport'), 'no registry entries left but the editor\'s own');
 
 // a failing removal leaves the ROM unchanged
 {

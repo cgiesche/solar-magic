@@ -300,13 +300,15 @@ export function setActsLike(rom: Rom, t: number, v: number): void {
 }
 
 // tile words (TL, BL, TR, BR) of an extended tile; null for tiles outside 200-FFF
+// where extended tile t's 4 words are
+export const extTileAddr = (rom: Rom, t: number) => ext(rom).gfx + (t - EXT_FIRST) * 8;
 export function extTileWords(rom: Rom, t: number): number[] | null {
   if (t < EXT_FIRST || t >= EXT_TILES) return null;
-  const a = ext(rom).gfx + (t - EXT_FIRST) * 8;
+  const a = extTileAddr(rom, t);
   return [rom.r16(a), rom.r16(a + 2), rom.r16(a + 4), rom.r16(a + 6)];
 }
 export function setExtTileWords(rom: Rom, t: number, words: number[]): void {
   if (t < EXT_FIRST || t >= EXT_TILES) throw new Error(`Tile ${t.toString(16)} is not an extended Map16 tile`);
-  const a = ext(rom).gfx + (t - EXT_FIRST) * 8;
+  const a = extTileAddr(rom, t);
   words.forEach((w, k) => rom.w16(a + k * 2, w));
 }

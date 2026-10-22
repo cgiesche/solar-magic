@@ -7,6 +7,7 @@ import { objectName, hex2, hex3 } from '../core/names.ts';
 import { resizeObjectSize } from '../core/objkinds.ts';
 import { probeAt, spriteProbeAt, enterText, collisionText, type PosProbe, type CollisionProbe } from '../core/blockprobe.ts';
 import { type LevelObject, type LevelSprite, newUid, serializeLayer1, serializeLayer2, serializeLevelSprites, spriteSizes, spriteId, EXIT_NEW } from '../core/level.ts';
+import { overworldExitText } from '../core/owteleport.ts';
 import { composite } from '../core/render.ts';
 import { layer3CellAt, layer3WordText } from '../core/layer3map.ts';
 import type { ArcSpeed } from '../core/jumparcs.ts';
@@ -17,6 +18,8 @@ import { problemsButton } from './problems.ts';
 import { map16Tile } from '../core/ram.ts';
 import { GAME_VIEW_W, GAME_VIEW_H, MARIO_W, MARIO_H, type CameraBands } from '../core/camerabands.ts';
 import { gameViewAt } from '../core/camerareach.ts';
+import { isDm16, dm16Tiles, structFlags } from '../core/cdm16.ts';
+import { STRUCT_EXT, readStructure } from '../core/structs.ts';
 
 type Drag =
   | { kind: 'move'; edit: LevelEdit; startTx: number; startTy: number; lastDx: number; lastDy: number; orig: Map<number, { x: number; y: number }> }
@@ -222,12 +225,15 @@ export class LevelView {
       else for (let x = 256; x < im.width; x += 256) { ctx.moveTo(x, 0); ctx.lineTo(x, im.height); }
       ctx.stroke();
       ctx.setLineDash([]);
+      // on a dark box like the exit labels, readable on light backgrounds too
       ctx.font = `${11 / app.zoom}px sans-serif`;
-      ctx.fillStyle = 'rgba(255,255,255,0.8)';
       const n = app.level.header.screens;
       for (let s = 0; s < n; s++) {
-        const x = vertical ? 2 : s * 256 + 2, y = vertical ? s * 256 + 11 / app.zoom : 11 / app.zoom;
-        ctx.fillText(hex2(s), x, y);
+        const x = vertical ? 0 : s * 256, y = vertical ? s * 256 : 0, txt = hex2(s);
+        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        ctx.fillRect(x, y, ctx.measureText(txt).width + 4 / app.zoom, 14 / app.zoom);
+        ctx.fillStyle = '#fff';
+        ctx.fillText(txt, x + 2 / app.zoom, y + 11 / app.zoom);
       }
     }
     // exits
@@ -240,14 +246,14 @@ export class LevelView {
         ctx.lineWidth = 2 / app.zoom;
         ctx.strokeRect(x + 1 / app.zoom, y + 1 / app.zoom, 256 - 2 / app.zoom, (vertical ? 256 : scrH) - 2 / app.zoom);
       }
-      const g = app.exitGraph();
+      const g = app.entrances.graph();
       for (const ex of app.level.exits) {
         const x = vertical ? 0 : ex.screen * 256, y = vertical ? ex.screen * 256 : 0;
         const sel = app.mode === 'exit' && !app.exitMarker && app.exitScreen === ex.screen;
         ctx.fillStyle = sel ? 'rgba(255,200,0,0.25)' : 'rgba(255,160,0,0.08)';
         ctx.fillRect(x, y, 256, vertical ? 256 : scrH);
         const t = exitTarget(app.rom, app.level.number, ex);
-        const ok = t.entrance < 0 || g.entrancesOf(t.to).includes(t.entrance);
+        const ok = t.entrance < 0 || t.overworld || g.entrancesOf(t.to).includes(t.entrance);
         ctx.font = `bold ${12 / app.zoom}px sans-serif`;
         const line = (txt: string, i: number) => {
           const ty = y + (12 + i * 14) / app.zoom;
@@ -256,8 +262,9 @@ export class LevelView {
           ctx.fillStyle = ok ? '#ffb000' : '#ff5050';
           ctx.fillText(txt, x + 20 / app.zoom, ty);
         };
-        line(`Exit → ${g.label(t.to)}`, 0);
-        if (t.entrance >= 0) line(ok ? `via sec. entrance ${hex3(t.entrance)}` : `sec. entrance ${hex3(t.entrance)} missing`, 1);
+        line(t.overworld ? 'Exit → Overworld' : `Exit → ${g.label(t.to)}`, 0);
+        if (t.overworld) line(overworldExitText(app.rom, app.entrances.get(t.entrance).overworld!), 1);
+        else if (t.entrance >= 0) line(ok ? `via sec. entrance ${hex3(t.entrance)}` : `sec. entrance ${hex3(t.entrance)} missing`, 1);
       }
     }
     // entrance markers (Mario's start position, drawn at his lower 16x16 half)
@@ -281,6 +288,7 @@ export class LevelView {
       ctx.fillText(st.label, m.x + 5, m.y + 27.5);
       if (m.kind === 'sec') ctx.fillText(hex3(m.index), m.x + 15, m.y + 27.5);
     }
+    if (app.mode === 'l2' ? app.show.layer2 : app.show.layer1) this.paintConds(ctx, lw);
     if (app.show.collision) this.paintCollision(ctx);
     if (app.show.collision || app.show.layer3) this.paintTide(ctx);
     if (app.show.items) this.paintItems(ctx);
@@ -343,6 +351,37 @@ export class LevelView {
       ctx.fillStyle = '#fff';
       ctx.font = `${12 * dpr}px sans-serif`;
       ctx.fillText(`Emulation: ${app.renderError}`, 8 * dpr, 15 * dpr);
+    }
+  }
+
+  // conditional Direct Map16 (cdm16.ts): a flag badge on each object that depends on a flag (structures by their
+  // tiles' flags), green while the view shows it with the flag on; where one left nothing in the level's load, its tiles dashed
+  paintConds(ctx: CanvasRenderingContext2D, lw: number): void {
+    const app = this.app;
+    const structs = new Map<number, number[]>();
+    ctx.font = 'bold 7px sans-serif';
+    for (const o of app.currentObjects()) {
+      let flags: number[];
+      if (isDm16(o)) flags = o.cond ? [o.cond.flag] : [];
+      else if (o.num === 0 && o.ext === STRUCT_EXT && o.struct !== undefined) {
+        if (!structs.has(o.struct)) structs.set(o.struct, structFlags(readStructure(app.rom, o.struct)));
+        flags = structs.get(o.struct)!;
+      } else continue;
+      if (!flags.length) continue;
+      if (isDm16(o) && o.cond && !app.objectDrawn(o)) {
+        ctx.strokeStyle = 'rgba(255,190,60,0.8)';
+        ctx.lineWidth = lw;
+        ctx.setLineDash([3 * lw, 3 * lw]);
+        for (const t of dm16Tiles(o)) ctx.strokeRect((t & 0xffff) * 16 + 0.5, (t >> 16) * 16 + 0.5, 15, 15);
+        ctx.setLineDash([]);
+      }
+      const on = flags.some((f) => app.cdm16.has(f));
+      const txt = `⚑${flags.slice(0, 2).map(hex2).join(',')}${flags.length > 2 ? '…' : ''}`;
+      const x = o.x * 16 + 1, y = o.y * 16 + 1, w = ctx.measureText(txt).width + 3;
+      ctx.fillStyle = on ? 'rgba(30,140,60,0.9)' : 'rgba(150,90,0,0.9)';
+      ctx.fillRect(x, y, w, 9);
+      ctx.fillStyle = '#fff';
+      ctx.fillText(txt, x + 1.5, y + 7.5);
     }
   }
 
@@ -705,10 +744,15 @@ export class LevelView {
     ctx.globalAlpha = a;
   }
 
+  // sprites are translucent like the ghosted layers while the background or layer 3 is edited
+  spriteAlpha(): number {
+    return this.app.show.ghost && isBrushMode(this.app.mode) ? 0.35 : 1;
+  }
+
   // the same for sprites that give items (flying ? blocks …), drawn over the sprite images
   paintSpriteItems(ctx: CanvasRenderingContext2D): void {
     const app = this.app;
-    ctx.globalAlpha = 0.65;
+    ctx.globalAlpha = 0.65 * this.spriteAlpha();
     for (const s of app.level.sprites) {
       const p = app.probes.sprite(spriteId(s));
       if (p?.summary) this.drawItem(ctx, spriteProbeAt(p, s.x, s.y), s.x * 16, s.y * 16);
@@ -732,15 +776,16 @@ export class LevelView {
     const app = this.app;
     const active = app.mode === 'spr';
     ctx.font = `bold ${9 / app.zoom * 1.2}px monospace`;
-    const incomplete = new Set(incompleteSprites(app));
+    const incomplete = new Set(incompleteSprites(app)), a = this.spriteAlpha();
+    ctx.globalAlpha = a;
     for (const s of app.level.sprites) {
       const x = s.x * 16, y = s.y * 16;
       const sel = app.selection.has(s.uid) && active;
       const img = app.spriteImageOf(s);
       if (img) {
-        ctx.globalAlpha = active ? 1 : 0.85;
+        ctx.globalAlpha = (active ? 1 : 0.85) * a;
         ctx.drawImage(img, x + Number(img.dataset.ox), y + Number(img.dataset.oy));
-        ctx.globalAlpha = 1;
+        ctx.globalAlpha = a;
       }
       ctx.fillStyle = sel ? 'rgba(255,80,200,0.45)' : active ? 'rgba(255,80,200,0.22)' : 'rgba(255,80,200,0.12)';
       if (!img) ctx.fillRect(x, y, 16, 16);
@@ -757,6 +802,7 @@ export class LevelView {
         ctx.fillText(hex2(s.num), x + 1, y + 8);
       }
     }
+    ctx.globalAlpha = 1;
   }
 
   // ---------------- interactions ----------------
@@ -885,8 +931,7 @@ export class LevelView {
     } else if (d.kind === 'marker') {
       if (app.moveMarker(d.marker, px - d.offX, py - d.offY)) {
         d.moved = true;
-        if (d.marker.kind !== 'sec') app.dirty = true;
-        app.emit('change');
+        if (d.marker.kind !== 'sec') app.changed(false); // (a secondary entrance is a ROM edit, shown by its follow-up)
       }
     } else if (d.kind === 'move') {
       const dx = tx - d.startTx, dy = ty - d.startTy;
@@ -899,7 +944,7 @@ export class LevelView {
         o.x = or.x + dx; o.y = or.y + dy;
         app.clampObject(o);
       }
-      if (app.mode === 'spr') { app.dirty = true; app.emit('change'); }
+      if (app.mode === 'spr') app.changed(false);
       else this.scheduleRefresh();
     } else if (d.kind === 'resize') {
       const dw = tx - d.startTx, dh = ty - d.startTy;
@@ -919,9 +964,7 @@ export class LevelView {
     if (this.refreshTimer) return;
     this.refreshTimer = requestAnimationFrame(() => {
       this.refreshTimer = 0;
-      this.app.dirty = true;
-      this.app.refresh();
-      this.app.emit('change');
+      this.app.changed();
     });
   }
 

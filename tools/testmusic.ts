@@ -16,6 +16,8 @@ import {
   emptyMusicProject, songsFromZip, addSongs, saveMusicProject, loadMusicProject, musicEntry, hasAmk, romSongs,
   songSpcs, spcOf, removeSong, folders, songDefines, songWithDefines,
 } from '../src/core/music.ts';
+import { installVramPatch } from '../src/core/vrampatch.ts';
+import { loadAsar } from '../src/core/asar.ts';
 import { editorImage } from './fixture.ts';
 
 let fails = 0;
@@ -268,6 +270,21 @@ check(diff === 0, `original ROM area restored, apart from size and checksum (${d
   emu.snes.apu = new Apu();
   const lr = emu.load(0x11a, { music: 0x29 });
   check(sb.ok && lr.ok, `level loads with a big song (${sb.errors.join(' ')}${lr.error ?? ''})`);
+}
+
+// a sample whose bytes read as a long store into another patch's RAM (STA $7F1800 in the VRAM
+// patch's): song data is no code, so no RAM warning
+{
+  await loadAsar();
+  const rv = new Rom(vanilla.data.slice());
+  check(installVramPatch(rv).ok, 'VRAM patch installed');
+  const z = unzipSync(testSongZip());
+  const brr = z['Square Test/samples/testsong/square.brr'];
+  brr.set([0x8f, 0x00, 0x18, 0x7f], 2 + 9 + 1);
+  const pv = emptyMusicProject();
+  addSongs(pv, songsFromZip('Store.zip', zipSync(z)));
+  const sv = await saveMusicProject(rv, pv);
+  check(sv.ok && !sv.warnings.some((w) => w.includes('RAM')), `no RAM warning from sample data (${sv.errors.join(' ')}${sv.warnings.join(' ')})`);
 }
 
 console.log(fails ? `${fails} failed` : 'all ok');

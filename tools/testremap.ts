@@ -75,6 +75,11 @@ const spaced = parseRemap('100 25\n101, 26 ');
 check(tiles(spaced.remap) === '101>26' && spaced.problems.length === 1 && /comma/i.test(spaced.problems[0].message), 'a space between two values is marked (not read as 10025); spaces around values are fine');
 const anim = parseRemap('P1,2\nG1,2\n100,25', { what: 'tiles' });
 check(anim.problems.length === 2 && tiles(anim.remap) === '100>25', 'tiles only (ExAnimation): palettes and acts-like are problems');
+// Map16 tile numbers (Remap Direct Map16 / Background Tiles, tilemove.ts): 000-FFF, no palettes or acts-like
+const num = parseRemap('200-2FF,+100\nR500-511,MF00\n345,FFF', { what: 'numbers' });
+check(!num.problems.length && num.remap.tiles.get(0x2ff) === 0x3ff && num.remap.tiles.get(0x511) === 0xf11 && num.remap.tiles.get(0x345) === 0xfff, 'Map16 numbers: ranges, rectangles and values up to FFF');
+const numBad = parseRemap('P1,2\nG1,2\n100,P3\nF00,+100\n100,1000\nR200-211,S25', { what: 'numbers' });
+check(numBad.problems.map((q) => q.line).join() === '0,1,2,3,4,5', `Map16 numbers: palettes, acts-like and numbers past FFF are problems (${numBad.problems.map((q) => q.message).join(' | ')})`);
 
 // ---- written by the visual mode / an offer ----
 const line = (from: number, w: number, h: number, to: number) => remapLine(from, w, h, to);

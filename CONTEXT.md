@@ -13,23 +13,39 @@ _Avoid_: Lunar Magic hacks, built-in patches
 ### Editing
 
 **ROM edit**:
-One labelled change of the ROM (image and editor data), made through the edit session (romedit.ts): one undo step, all or nothing (one that fails changes nothing and records nothing), the open level saved before it; what it changed decides what the editor shows anew (the level reloaded, its header, structures). Outside the undo history: the overworld's save (the overworld editor has its own undo) and expanding the ROM.
+One labelled change of the ROM (image and editor data), made through the edit session (editsession.ts, which leaves the write itself to romedit.ts): one undo step, all or nothing (one that fails changes nothing and records nothing), the open level saved before it; what it changed decides what the editor shows anew (the level reloaded, its header, structures). Outside the undo history: the overworld's save (the overworld editor has its own undo) and expanding the ROM.
 _Avoid_: transaction, ROM write (for an edit)
 
 **Remap**:
 Changing 8x8 tile numbers, palettes or acts-like of chosen Map16 tiles (or the frames and targets of tile animations) in bulk, by an offset or a list in Lunar Magic's syntax (core/remap.ts); a list's sources are always the values before the remap. One ROM edit. It changes what tiles point at, never the graphics themselves.
-_Avoid_: renumber (that is the level graphics placement's), move tiles
+_Avoid_: renumber (that is the level graphics placement's), move tiles (that is a tile move)
+
+**Tile move**:
+Map16 tiles 200–FFF taken to other numbers with their graphics, acts-like and block, every use rewritten (Direct Map16 objects of all levels, structures, BG tilemaps, the blocks' list) so the levels look as before (core/tilemove.ts); one ROM edit. Rewriting the uses alone, the tiles staying, is Lunar Magic's Remap Direct Map16 / Remap Background Tiles (a remap of uses, with a list of Map16 numbers).
+_Avoid_: remap (for a move), renumber
 
 **Quarter**:
 One of the four 8x8 tiles of a Map16 tile, one 16-bit word: 8x8 tile number, palette, X/Y flip and priority (word order top-left, bottom-left, top-right, bottom-right). Acts-like is not a quarter's but the whole 16x16 tile's.
 _Avoid_: 8x8 field, cell, subtile
 
 **Marked quarters**:
-The set of quarters of the Map16 tab's selection that an edit in the builder changes (palette, flips, priority, an 8x8 tile). A new selection marks all. A **stamp** puts a block of 8x8 tiles onto the quarters where it lies, whatever is marked. Acts-like applies to the wholly marked 16x16 tiles only.
+The set of quarters of the Map16 tab's selection that an edit in the builder changes (palette, flips, priority, a chosen 8x8 tile by Enter). A new selection marks all. A **stamp** puts the chosen block of 8x8 tiles onto the quarters where it lies (right click, right drag paints; or dropped there), whatever is marked. Acts-like applies to the wholly marked 16x16 tiles only.
 _Avoid_: selected quarter (the sheet's selection is of whole tiles)
+
+**Conditional Direct Map16**:
+A Direct Map16 object, or a tile of a structure, that depends on a flag of Lunar Magic's table at $7FC060–F (set by the user's own code, e.g. UberASM): drawn only while the flag is on, or with "always show" always, its tiles + 0x100 while it is on (cdm16.ts). The view's flags are a view setting that test play takes over, not part of the level.
+_Avoid_: CDM16 (in the UI), switch object
 
 **Level edit**:
 A change of the open level in memory: its own undo step, written to the ROM when the level is saved (before every ROM edit, when another level is opened, or by hand).
+
+**Graphics file**:
+One of the files 000–FFF (the game's GFX 00–31 and the ExGFX) or an Anim graphic (A–D, numbered past them), read, written, created and imported through one interface (core/gfxfiles.ts): stored raw or LZ2, written in place when the new data fits its place, else moved to free space and the old place freed.
+_Avoid_: ExGFX (for all of them), GFX entry (that is the file table's)
+
+**Graphics slot**:
+One of a level's places for a graphics file (core/gfxslots.ts): FG1–FG3, BG1 and SP1–SP4 (the header's tileset and sprite set by default), BG2/BG3, layer 3's LG1–LG4 (the game's 28–2B by default) and LT3 (none by default; an LT3 file copies at most its own length). FF puts the default back. Changing one is a ROM edit of that level only.
+_Avoid_: GFX bypass (Lunar Magic's table), slot (alone, where an animation slot could be meant)
 
 **Level size**:
 The height of a horizontal level without layer 2 objects, one of Lunar Magic 3.00's 32 sizes (the editor offers 00-1B); its screens share the game's level data, so a taller level has fewer screens. Objects and sprites below row 31 are placed by subscreens of 32 rows.
@@ -46,6 +62,10 @@ _Avoid_: checkpoint (that is the tape), midway screen (for the whole entrance)
 **New-style exit**:
 A screen exit with Lunar Magic's u flag: its own number (with the high bit) is the target level or secondary entrance, and it is secondary or standard on its own – so it leads into either bank (0xx/1xx). Every exit the editor writes is one, and the game's exits are made new-style when the clean game is patched, leading where the game leads them – an old-style exit (the game's rule) takes the high bit from the overworld submap Mario is on, the level's last exit deciding secondary.
 _Avoid_: LM exit, exit format 2
+
+**Exit to the overworld**:
+A secondary entrance that leads back to the overworld instead of into a level (Lunar Magic 3.00's): passing its level with the normal or the secret exit, or nothing, or ending the player's turn; optionally with another base event (the event of passing, + 1 for the secret exit) and teleporting Mario to a location of the overworld's star/pipe table (a star's or pipe's destination, or a location of its own). It belongs to a level, but is not one of its entrances.
+_Avoid_: overworld entrance (Mario leaves the level by it), warp
 
 **Camera start**:
 Where layer 1 (FG) and layer 2 (BG) start when Mario enters: the game's FG/BG start Y, or (Lunar Magic's, horizontal levels) a number of rows above Mario, the BG then by the level's BG start – its bottom at the level's bottom (by the BG's height), rows below the FG, or at 0. Moving an entrance keeps it.
@@ -100,6 +120,14 @@ _Avoid_: background package, graphics import
 One of four graphics (A–D, Lunar Magic's ExGFX 60–63) that tile animations take their frames from; each animation list (a level's, the global one) uses one, and every list using it shares it. The only place animation frames come from: frames a package or level file keeps elsewhere (Lunar Magic's AN2, its own ExGFX 60–63, the game's graphics in RAM) are copied in when it is imported (ADR 0003).
 _Avoid_: AN2, alternative file, animation ExGFX
 
+**Color rotation**:
+An animation slot (types 18–1B) that moves a range of 2–128 palette colors along by one, right or left, every few animation frames; rotate right/left waits while its trigger does not hold, the "reverse on trigger" types always run and turn the other way while it holds. It has no frames: the colors are the level's own. Like a color animation it shows wherever the level's tiles draw those colors (the Animations tab lists and marks the Map16 tiles); colors the game itself sets every frame (Mario's palette) do not rotate in the game, found in the emulated level.
+_Avoid_: palette rotate, palette cycling
+
+**Animation trigger**:
+What makes an animation slot run (Lunar Magic's ExAnimation triggers): a game condition (P-switches, ON/OFF, star, time below 100, 5 Dragon Coins – the last two also once), the precision timer (the slot shares the frame counter of the first slot of its 8), or one that the user's own code sets in the engine's RAM: a manual trigger (the frame to show), a custom trigger (on/off, a second frame set while on) or a one-shot (the slot plays once, then the engine turns it off). A list's **Trigger Init** sets custom triggers and manual frames when the level loads, the level's over the global list's. The view's triggers are a view setting that test play takes over (set after the level's load), not part of the level.
+_Avoid_: event, flag (those are Conditional Direct Map16's)
+
 ### Emulated results
 
 **Probe**:
@@ -107,8 +135,16 @@ Finding out how something behaves in the game by running the game's own code on 
 _Avoid_: Test, check, lookup table
 
 **Emulated result**:
-Anything the editor learned by emulation (a probe's outcome, the kinds of a tileset's objects, a level scan). It stays valid as long as the ROM bytes it read are unchanged, and is learned again otherwise.
+Anything the editor learned by emulation (a probe's outcome, the kinds of a tileset's objects, a level scan, sprite images, object thumbnails, jump arcs). It stays valid as long as its inputs and the ROM bytes it read are unchanged, and is learned again otherwise (on the main thread by the result learner, core/learner.ts: a key, an input, the bytes read).
 _Avoid_: Cached value, generation (for validity)
+
+**Input**:
+State outside the ROM that an emulated result depends on: the level as edited (one input for everything learned from it, with the view settings – switches, conditional Direct Map16 flags, animation triggers), the content of graphics files (their bytes don't count as read). Given next to the result's key and compared by its hash (core/inputs.ts), never by object identity.
+_Avoid_: cache key (for what belongs in the input), dependency (that is a ROM byte read)
+
+**Derived ROM data**:
+What the editor reads out of the ROM without emulating (the custom sprite list, the graphics mask, the sprite memory values in use, a level as saved): memoized per ROM generation, not an emulated result.
+_Avoid_: emulated result, cache
 
 **Prefetch**:
 Probing what the palettes could show before anyone asks for it, after everything asked for directly.

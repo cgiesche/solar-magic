@@ -14,7 +14,8 @@
 
 import { snesToPc, type Rom } from './rom.ts';
 import { applyPatch, type ApplyResult } from './patchapply.ts';
-import { listPatches } from './patchreg.ts';
+import { listPatches, type RamClaim } from './patchreg.ts';
+import { CDM16_FLAGS } from './ram.ts';
 import { EXANIMATION_ASM, MEMORY_ASM } from './kobo/exanimation.ts';
 import { installEditorPatch } from './patches.ts';
 
@@ -136,13 +137,13 @@ export const TYPE_NAMES: Record<number, string> = {
   0x09: '12 tiles', 0x0a: '16 tiles', 0x0b: '20 tiles', 0x0c: '24 tiles', 0x0d: '28 tiles', 0x0e: '32 tiles', 0x0f: '1 tile (2bpp, layer 3)',
   0x10: '2 tiles stacked (8×16)', 0x11: '16×16 (2×2 tiles)', 0x12: '32×16 (4×2 tiles)',
   0x13: 'Colors (CGRAM only)', 0x14: 'Colors (palette, fades along)', 0x15: 'Colors (until level end)', 0x16: 'Background color', 0x17: 'Background color (until level end)',
-  0x18: 'Rotate colors right', 0x19: 'Rotate colors right (reversible)', 0x1a: 'Rotate colors left', 0x1b: 'Rotate colors left (reversible)',
+  0x18: 'Rotate colors right', 0x19: 'Rotate colors right, reverse on trigger', 0x1a: 'Rotate colors left', 0x1b: 'Rotate colors left, reverse on trigger',
 };
 
 export function triggerName(t: number): string {
   const fixed: Record<number, string> = {
     0x00: 'Always', 0x01: 'Blue P-switch', 0x02: 'Silver P-switch', 0x03: 'ON/OFF switch', 0x04: 'Star', 0x05: 'Time below 100',
-    0x06: 'Star (one-time)', 0x07: '5 Dragon Coins', 0x08: '5 Dragon Coins (one-time)', 0x0f: 'Precision timer',
+    0x06: 'Time below 100 (one shot)', 0x07: '5 Dragon Coins', 0x08: '5 Dragon Coins (one shot)', 0x0f: 'Precision timer',
   };
   if (fixed[t] !== undefined) return fixed[t];
   if (t >= 0x09 && t <= 0x0e) return `Reserved ${t.toString(16).toUpperCase()}`;
@@ -153,7 +154,64 @@ export function triggerName(t: number): string {
 }
 // what the second frame set means
 export function secondSetName(t: number): string {
-  return ({ 1: 'P-switch active', 2: 'P-switch active', 3: 'Switch OFF', 4: 'Star active', 5: 'Time below 100', 7: '5 Dragon Coins collected' } as Record<number, string>)[t] ?? 'Trigger on';
+  return ({ 1: 'P-switch active', 2: 'P-switch active', 3: 'Switch OFF', 4: 'Star active', 5: 'Time below 100', 7: '5 Dragon Coins collected' } as Record<number, string>)[t] ?? `${triggerName(t)} on`;
+}
+
+// ---- color rotations (types 18-1B, LM help: level_ex20.htm) ----
+// The colors first .. first + count - 1 (2-0x80), the destination's low byte and the colors less one;
+// a step every delay (frames less one + 1) runs of the slot, which runs every 8 game frames.
+export const ROTATION_MAX = 0x80;
+export function rotationRange(e: ExSlot): { first: number; count: number } {
+  return { first: e.dest & 0xff, count: ((e.dest >> 8) & 0x7f) + 1 };
+}
+export function setRotationRange(e: ExSlot, first: number, count: number): void {
+  e.dest = (first & 0xff) | ((Math.max(2, Math.min(ROTATION_MAX, count)) - 1) << 8);
+}
+export const reversesOnTrigger = (type: number) => type === 0x19 || type === 0x1b;
+export const stepsPerSecond = (delay: number) => 60 / 8 / delay;
+// the way a rotation turns while its trigger holds or not, null while it waits: right (18, 19) or left
+// (1A, 1B); 18 and 1A run only while their trigger holds (always without one or with the precision
+// timer, 0F), 19 and 1B turn the other way while it holds (the engine's rotation)
+export function rotationStep(type: number, trigger: number, holds: boolean): 'right' | 'left' | null {
+  const right = type < 0x1a, none = trigger === 0 || trigger === 0x0f;
+  if (!reversesOnTrigger(type)) return none || holds ? (right ? 'right' : 'left') : null;
+  return right !== (holds && !none) ? 'right' : 'left';
+}
+// colors after `steps` steps: right moves each to the next one, the last to the first
+export function rotated<T>(colors: T[], dir: 'right' | 'left', steps: number): T[] {
+  const n = colors.length;
+  if (!n) return [];
+  const k = ((dir === 'right' ? -steps : steps) % n + n) % n;
+  return colors.map((_, i) => colors[(i + k) % n]);
+}
+
+// the colors of a rotation's range that never change in CGRAM images taken every 8 game frames while
+// it runs `dir` with `delay`, though the rotation would have brought other colors there: the game
+// sets them itself, so they do not turn there
+export function heldColors(cgrams: Uint8Array[], first: number, count: number, dir: 'right' | 'left', delay: number): number[] {
+  const word = (cg: Uint8Array, c: number) => cg[c * 2] | (cg[c * 2 + 1] << 8);
+  const n = Math.min(count, 256 - first), out: number[] = [];
+  if (!cgrams.length) return [];
+  const start = Array.from({ length: n }, (_, i) => word(cgrams[0], first + i));
+  const expect = cgrams.map((_, k) => rotated(start, dir, Math.floor(k / delay)));
+  for (let i = 0; i < n; i++) {
+    const held = cgrams.every((cg) => word(cg, first + i) === start[i]);
+    if (held && expect.some((e) => e[i] !== start[i])) out.push(first + i);
+  }
+  return out;
+}
+
+// 8-frame steps after which the slots of the lists show the same again, a multiple of `base` (at most
+// `max`); a rotation waiting for its trigger counts as running
+export function exanimPeriod(lists: (ExList | null)[], max = 64, base = 1): number {
+  const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a);
+  let p = base;
+  for (const l of lists) for (const e of l?.slots.values() ?? []) {
+    const n = kindOf(e.type) === 'rotation' ? rotationRange(e).count * (e.framesLess1 + 1) : e.framesLess1 + 1;
+    p = p / gcd(p, n) * n;
+    if (p >= max) return max;
+  }
+  return p;
 }
 
 // the 8x8 tiles (4bpp: VRAM word address / 16) a tile slot writes; types 10-12 write two rows, the
@@ -239,7 +297,11 @@ export function installExAnim(rom: Rom): ApplyResult {
     return { ok: false, errors: ['The ROM already has an ExAnimation in an older Lunar Magic format (or another patch at $0583AD/$00A390) – not supported.'], warnings: [], prints: [] };
   }
   installEditorPatch(rom); // keeps the level number in $010B, which the engine reads (as Lunar Magic's does)
-  return applyPatch(rom, { name: EXANIM_PATCH_NAME, main: 'exanimation.asm', files: new Map([['exanimation.asm', EXANIMATION_ASM], ['memory.asm', MEMORY_ASM]]), kind: 'exanim', ram: [[0x7fc003, 0xfd]] });
+  // the RAM of Lunar Magic's block at $7FC000 the engine uses, around the conditional Direct Map16 flags (shared:
+  // the editor patch reads them, community code sets them; cdm16.ts)
+  const [cf, cn] = CDM16_FLAGS;
+  const ram: RamClaim[] = [[0x7fc003, cf - 0x7fc003], [cf, cn, 1], [cf + cn, 0x7fc100 - cf - cn]];
+  return applyPatch(rom, { name: EXANIM_PATCH_NAME, main: 'exanimation.asm', files: new Map([['exanimation.asm', EXANIMATION_ASM], ['memory.asm', MEMORY_ASM]]), kind: 'exanim', ram });
 }
 
 // the registry entry of the engine

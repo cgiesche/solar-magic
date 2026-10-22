@@ -33,7 +33,7 @@ const SLICE = 60; // frames between yields
 
 // the result cache key of the camera at Mario standing at (x, y) in the level as edited
 export function cameraAtKey(level: number, ov: LevelOverride, x: number, y: number): string {
-  return `cam1:${levelDataKey(level, ov)}:${x},${y}`;
+  return `cam2:${levelDataKey(level, ov)}:${x},${y}`;
 }
 
 // The level loaded and ready for Mario; false when it failed or ended right away

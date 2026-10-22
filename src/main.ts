@@ -14,6 +14,7 @@ import { openSearch } from './ui/search.ts';
 import { openHeaderDialog } from './ui/headerdialog.ts';
 import { hex } from './core/names.ts';
 import { GfxWorkspace, type WsTab } from './ui/gfxworkspace.ts';
+import { openRemapUses } from './ui/tileuses.ts';
 import { openEntrancesDialog, openRomInfo, openInsertDialog, openExpandDialog, openSaveAsDialog, exportLevel, importLevel, openScreenDialog, clearLevelConfirm } from './ui/tools.ts';
 import { menuBar, closeMenus } from './ui/menu.ts';
 import { viewMenu } from './ui/viewmenu.ts';
@@ -21,6 +22,7 @@ import { LEVEL_FILE_EXT } from './core/levelfile.ts';
 import { openResources } from './ui/resources.ts';
 import { OverworldView } from './ui/overworld.ts';
 import { openTestPlay } from './ui/testplay.ts';
+import { musicPlayer, LEVEL_MUSIC } from './ui/musicplayer.ts';
 import { openMessagesDialog } from './ui/messagedialog.ts';
 import { map16Tile } from './core/ram.ts';
 import { NavHistory, fromHash, type NavLoc } from './ui/navhistory.ts';
@@ -31,20 +33,18 @@ const root = document.getElementById('app')!;
 window.addEventListener('error', (e) => log(`Unexpected error: ${e.message}`, 'error'));
 window.addEventListener('unhandledrejection', (e) => log(`Unexpected error: ${e.reason instanceof Error ? e.reason.message : e.reason}`, 'error'));
 
+// the start page is static HTML in index.html (readable for search engines); kept to show it again after “Close project”
+const landing = root.querySelector<HTMLElement>('.landing')!;
+landing.querySelector('#landing-open-rom')!.addEventListener('click', openRomFile);
+landing.querySelector('#landing-open-project')!.addEventListener('click', openProjectFile);
+
 function welcome(): void {
   clear(root);
-  const drop = h('div', { class: 'welcome' },
-    h('h1', null, 'Solar Magic'),
-    h('p', null, 'Import a Super Mario World ROM (US, .smc/.sfc, with or without header), open a project (.smwproj) or drop either here.'),
-    h('div', { class: 'row welcome-actions' },
-      h('button', { class: 'primary big', onclick: importRomFile }, 'Import ROM …'),
-      h('button', { class: 'big', onclick: openProjectFile }, 'Open project …')),
-    h('p', { class: 'hint' }, 'The ROM stays local in the browser (IndexedDB). Nothing is uploaded.'),
-  );
-  root.appendChild(drop);
+  root.appendChild(landing);
+  document.documentElement.classList.remove('booting');
 }
 
-async function importRomFile(): Promise<void> { const f = await pickFile('.smc,.sfc,.bin'); if (f) openFile(f); }
+async function openRomFile(): Promise<void> { const f = await pickFile('.smc,.sfc,.bin'); if (f) openFile(f); }
 async function openProjectFile(): Promise<void> { const f = await pickFile('.smwproj'); if (f) openFile(f); }
 
 async function openFile(f: File): Promise<void> {
@@ -151,7 +151,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
       { label: 'Save project', title: 'The ROM with the editor data: sources of patches, packages, UberASM, blocks, sprites and music – to keep editing it later or elsewhere', onClick: () => { if (ow?.dirty) ow.save(); exportProject(app); } },
       ...(desktop ? [{ label: 'Save project as …', title: 'Save the project to another file and keep working on that one', onClick: () => { if (ow?.dirty) ow.save(); exportProject(app, true); } }] : []),
       'sep',
-      { label: 'Import ROM …', title: 'Start from a ROM (.smc/.sfc) – clean or already modified', onClick: importRomFile },
+      { label: 'Open ROM …', title: 'Start from a ROM (.smc/.sfc) – clean or already modified', onClick: openRomFile },
       { label: 'Export ROM', title: 'Download the playable ROM with all saved changes (without the editor data)', onClick: () => { if (ow?.dirty) ow.save(); exportRom(app); } },
       { label: 'Export patch …', title: 'A BPS patch (for Floating IPS / Flips) from a clean ROM you choose to the playable ROM with all saved changes', onClick: () => { if (ow?.dirty) ow.save(); exportPatch(app); } },
       'sep',
@@ -171,6 +171,8 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
       { label: 'Insert screen …', disabled: () => app.level.header.screens >= 32, onClick: () => openScreenDialog(app, 'insert') },
       { label: 'Delete screen …', disabled: () => app.level.header.screens <= 1, onClick: () => openScreenDialog(app, 'delete') },
       { label: 'Clear level …', onClick: () => clearLevelConfirm(app) },
+      { label: 'Remap Direct Map16 …', title: 'Which Map16 tiles the Direct Map16 objects of this level or all levels place (Lunar Magic\'s list syntax); the tiles themselves stay', onClick: () => openRemapUses(app, 'fg') },
+      { label: 'Remap Background Tiles …', title: 'Which BG Map16 tiles the BG tilemaps of this level or all levels use (Lunar Magic\'s list syntax); the tiles themselves stay', onClick: () => openRemapUses(app, 'bg') },
       { label: 'Import LM level file …', title: 'A Lunar Magic level file (.mwl, or a .zip with one): its background, Map16 tiles, graphics slots and colors into this level', onClick: () => void openLevelImport(app) },
       'sep',
       { label: 'Secondary entrances …', onClick: () => openEntrancesDialog(app) },
@@ -199,11 +201,26 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   const redoBtn = h('button', { onclick: () => (workspace === 'ow' ? ow?.redo() : app.redo()), title: 'Redo (Ctrl+Y)' }, '↷');
   const saveBtn = h('button', { class: 'primary', onclick: () => (workspace === 'ow' ? ow?.save() : app.saveLevel()) });
   const testBtn = h('button', { onclick: () => openTestPlay(app), title: 'Test the level in the built-in emulator (T, Shift+T: from the mouse position)' }, '▶ Test');
+  // loops the open level's music while editing; anything else that plays (test play, a song in a dialog) ends it
+  const musicTitle = 'Play the level\'s music in a loop while editing';
+  let musicOf = ''; // level and header music playing
+  const playLevelMusic = () => {
+    musicOf = `${app.level.number}:${app.level.header.music}`;
+    void musicPlayer.playLevel(app, app.level.number, LEVEL_MUSIC).then(() => {
+      if (musicPlayer.error) toast(`Could not play: ${musicPlayer.error}`, 'error');
+    });
+  };
+  const musicBtn = h('button', { title: musicTitle, onclick: () => { if (musicPlayer.label === LEVEL_MUSIC) musicPlayer.stop(); else playLevelMusic(); } }, '♪ Music');
+  musicPlayer.onChange((l) => musicBtn.classList.toggle('active', l === LEVEL_MUSIC));
+  // another level or other header music: its music
+  const followLevel = () => { if (musicPlayer.label === LEVEL_MUSIC && musicOf !== `${app.level.number}:${app.level.header.music}`) playLevelMusic(); };
+  app.on('level', followLevel);
+  app.on('level-header', followLevel);
   const appbar = h('header', { class: 'appbar' },
     // three columns, so nothing moves when the buttons on the right change their labels with the workspace
     h('div', { class: 'appbar-l' }, h('span', { class: 'brand' }, 'Solar Magic'), menus, h('div', { class: 'btn-group' }, backBtn, fwdBtn)),
     wsSwitch,
-    h('div', { class: 'appbar-r' }, undoBtn, redoBtn, saveBtn, testBtn),
+    h('div', { class: 'appbar-r' }, undoBtn, redoBtn, saveBtn, testBtn, musicBtn),
   );
 
   const updateToolbar = () => {
@@ -221,14 +238,15 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     redoBtn.disabled = inOw ? !ow!.canRedo : false;
     testBtn.disabled = workspace === 'ow';
     testBtn.title = workspace === 'ow' ? 'Test play is available in the level editor' : 'Test the level in the built-in emulator (T, Shift+T: from the mouse position)';
+    musicBtn.disabled = workspace === 'ow';
+    musicBtn.title = workspace === 'ow' ? 'The level\'s music plays in the level editor' : musicTitle;
+    if (workspace === 'ow' && musicPlayer.label === LEVEL_MUSIC) musicPlayer.stop();
     menus.refresh();
   };
   app.on('mode', updateToolbar);
   app.on('change', updateToolbar);
   app.on('level', updateToolbar);
   app.on('zoom', updateToolbar);
-  app.on('level-header', () => { palette.invalidate(); app.ensureSpriteImages(); });
-  app.on('palettes', () => palette.invalidate());
 
   const left = h('div', { class: 'left' }, levels.root);
   const center = h('div', { class: 'center' }, view.root, status);

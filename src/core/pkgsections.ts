@@ -14,7 +14,8 @@ import { loadProject, saveProject, emptyProject, type UberProject } from './uber
 import { loadBlockProject, saveBlockProject, type BlockProject } from './blocks.ts';
 import { loadPixiProject, savePixiProject, type PixiProject } from './pixi.ts';
 import { hex } from './names.ts';
-import { gfxEntry, setGfxEntry, gfxHex, GFX_FILES, VANILLA_GFX, levelMusic, setLevelMusic } from './patches.ts';
+import { removeGfx } from './gfxfiles.ts';
+import { gfxEntry, gfxHex, GFX_FILES, VANILLA_GFX, levelMusic, setLevelMusic } from './patches.ts';
 import { loadMusicProject, saveMusicProject, removeSong } from './music.ts';
 import { EXT_FIRST, EXT_TILES, DEFAULT_ACTS, extTileWords, actsLike, setExtTileWords, setActsLike } from './map16ext.ts';
 import { BG_EXT_FIRST, BG_EXT_TILES, bgExtTileWords, setBgExtTileWords, vanillaBgWords } from './bgmap16.ts';
@@ -222,12 +223,7 @@ const gfx: PartSection<number[], number[]> = {
   summary: (p) => (p.length ? 'ExGFX' : null),
   removal: (p) => (p.length ? p.map((n) => `ExGFX${gfxHex(n)}`).join(', ') : null),
   remove(rom, mine) {
-    for (const n of mine) {
-      const e = n >= VANILLA_GFX ? gfxEntry(rom, n) : null;
-      if (!e) continue;
-      rom.freeAt(e.addr);
-      setGfxEntry(rom, n, 0, false);
-    }
+    for (const n of mine) if (n >= VANILLA_GFX) removeGfx(rom, n);
     return [];
   },
 };

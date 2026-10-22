@@ -10,7 +10,7 @@ import { incompleteSprites, spriteMemDialog, spriteMemText, SPRITE_MEM_HELP } fr
 // everything known about the current level; reveal: shows sprites (selects them in sprite mode)
 export function collectProblems(app: App, reveal: (uids: number[]) => void): Problem[] {
   if (!app.level || !app.images) return [];
-  const out = [...levelProblems(app.level, app.vertical), ...exitProblems(app.rom, app.level, app.exitGraph(), (s) => app.enterableOn(s))];
+  const out = [...levelProblems(app.level, app.vertical), ...exitProblems(app.rom, app.level, app.entrances.graph(), (s) => app.enterableOn(s))];
   const sc = app.levelScan;
   if (sc && sc.level === app.level.number) out.push(...scanProblems(app.level, sc.result, sc.uids));
   const inc = incompleteSprites(app);

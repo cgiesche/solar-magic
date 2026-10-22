@@ -3,6 +3,9 @@
 Browser-based editor for *Super Mario World* (US), modelled on the feature set of Lunar Magic.
 Runs entirely locally in the browser; the ROM is never uploaded anywhere (it is only cached in the browser's IndexedDB).
 
+Solar Magic is an unofficial fan tool, not affiliated with or endorsed by Nintendo. *Super Mario World* and Nintendo
+are trademarks of Nintendo. The editor works on a ROM you supply yourself.
+
 ## Getting started
 
 ```sh
@@ -154,6 +157,39 @@ When a level is displayed, it runs the ROM's **original loading routines** (~15 
   Graphics tab, or importing a `.map16` whose tiles draw from a slot without ExGFX, offers the remap with the offset
   filled in. The Animations tab remaps the frames and targets of chosen tile animations with the same list
   (Lunar Magic's ExAnimation Remap).
+* **Move tiles with their uses** (Map16 tab → *Move …*): the selected tiles 200–FFF go to other numbers – type the
+  new top left tile or drag the selection in the sheet – with graphics, "acts like" and custom block, and every use
+  is rewritten: Direct Map16 objects in all levels (both layers), structures, BG tilemaps, the blocks' `list.txt`.
+  Every level looks as before; the panel lists what it rewrites first. Moving onto a tile something places, a tile
+  placed by an object's code, or only one of an "always show" pair (tile and tile + 100) is refused; defined but
+  unused tiles there are overwritten after asking. One undo step. (Lunar Magic only rewrites the uses, below.)
+* **Remap Direct Map16 / Remap Background Tiles** (Level menu, Lunar Magic's): rewrites which Map16 tiles the
+  Direct Map16 objects or the BG tilemaps use, with a list of Map16 numbers in the same syntax (`200-2FF,+300`,
+  `R200-231,M500`, swaps), for this level or all levels, the levels it rewrites listed before applying; the tiles
+  themselves stay. A Direct Map16 object fills its rectangle with one tile, so it moves as a whole. Each BG tile
+  keeps its own page, so unlike Lunar Magic there is no BG bank to change and a BG may mix pages; a game BG is
+  stored by the editor once rewritten. Importing a `.map16` elsewhere than it was exported from offers this remap
+  for the levels using the old numbers.
+* **Animations tab** (Lunar Magic's ExAnimation, its format): tile animations, color animations and **color
+  rotations** per level and globally. A rotation's colors are chosen by dragging over the palette (2–128); its
+  type (rotate right or left, each also "reverse on trigger"), trigger and delay ("Frames", also shown as steps per
+  second) are set beside a strip that shows the colors rotating at that speed. Color animations and rotations list
+  the level's Map16 tiles that draw their colors (layer 1, layer 2, BG; marked in the level preview), say when no
+  tile of the level does or the colors are sprite palettes, and name colors the game itself sets every
+  frame (Mario's palette), as found in the emulated level; the level view (View → Animation) plays
+  the level's animations for as long as they take to repeat. **Triggers** as in Lunar Magic – the game's
+  conditions (time below 100 and 5 Dragon Coins also as one-shots), the precision timer, manual 0–F, custom 0–F,
+  one-shot 00–1F – and each list's **Trigger Init** (custom triggers and manual frames set when the level loads,
+  the level's over the global's); a one-shot used by several slots, an init frame FF or 256 frames played once
+  are warned about. The **trigger panel** (Triggers, beside the level preview) lists every trigger the level's and
+  the global slots use and switches it for the preview and test play – set in the emulated game after the level's
+  load, the game's animation code runs –, with its RAM, ready ASM lines (e.g. `LDA $7FC0FC : ORA #$0200 :
+  STA $7FC0FC`) and the slots using it; View → Animation triggers switches the same, and test play fires a chosen
+  trigger while playing.
+  A tile animation's frames are previewed in the palette its target's Map16 tiles use, or one chosen for the
+  slot; when Map16 tiles show the target in another palette, the tab says which and **applies the chosen
+  palette** to their quarters showing the target on request (one undo step, the tiles of this level preselected,
+  each with the levels placing it) – never by itself: Map16 tiles are shared by every level.
 * **Palette editor** (P): edit colors directly at their ROM source, `.pal` import/export,
   optionally a **custom palette per level** (all 256 colors).
 * **Graphics:** view GFX00–31 and ExGFX up to FFF (as Lunar Magic: ExGFX 80–DFF, and E00–FFF for files kept

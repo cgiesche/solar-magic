@@ -49,6 +49,7 @@ export class Snes implements Bus {
   romReads: RomReads | null = null; // records the ROM reads (see romdeps.ts)
   romSkip = new Set<number>(); // ROM offsets whose reads aren't recorded
   romSkipMask: Uint8Array | null = null; // the same per byte (1 = not recorded), e.g. GFX file data
+  romMasked: RomReads | null = null; // when set: records the reads romSkipMask leaves out
   // data provenance tracking (ROM offset each WRAM/CGRAM byte was copied from)
   taintOn = false;
   taint = new Int32Array(0x20000).fill(-1);
@@ -162,7 +163,8 @@ export class Snes implements Bus {
 
   // first read of a ROM page (or a read in a byte page) while reads are recorded
   private recordRead(ro: number): void {
-    if (this.romSkip.has(ro) || (this.romSkipMask !== null && this.romSkipMask[ro] === 1)) return;
+    if (this.romSkip.has(ro)) return;
+    if (this.romSkipMask !== null && this.romSkipMask[ro] === 1) { this.romMasked?.read(ro); return; }
     if (BYTE_PAGES[ro >> 8]) this.romReads!.bytes.add(ro); else this.romReads!.pages[ro >> 8] = 1;
   }
 
