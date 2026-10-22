@@ -7,6 +7,9 @@ import { encodePrimaryHeader, serializeObjects, type Level, type LevelObject, ne
 import { renderLevel, layerGeom } from '../core/render.ts';
 import { MAP_BASE, map16Tile } from '../core/ram.ts';
 import { objectVariant, type ObjKind } from '../core/objkinds.ts';
+import { levelSlots, layerSlots } from '../core/gfxslots.ts';
+import { gfxFilesHash } from '../core/gfxpages.ts';
+import { inputHash } from '../core/inputs.ts';
 
 export interface ObjSpec { num: number; ext: number; size: number }
 
@@ -20,17 +23,30 @@ export function objKey(s: { num: number; ext: number; size: number }, kind: ObjK
 // a rendered object: its pixels and the distinct Map16 tiles it produced
 export interface ObjThumb { key: string; w: number; h: number; px: Uint32Array; m16: number[] }
 
-// the thumbnails from the result cache (see romdeps.ts) or rendered; keyed by the level header
-// settings they depend on and the objects
+// the thumbnails from the result cache (see romdeps.ts) or rendered
 export function objectThumbs(app: App, specs: ObjSpec[]): ObjThumb[] {
-  const h = app.level.header;
-  // (o2: since batches whose load failed are no longer kept)
-  const key = `o2${h.tileset}-${h.fgPalette}-${h.bgPalette}:${hashStr(specs.map((s) => `${s.num}.${s.ext}.${s.size}`).join())}`;
-  const stored = app.results.get<ObjThumb[]>(key);
+  const lv = app.level, keyOf = (s: ObjSpec) => objKey(s, app.objectKind(s.num));
+  const key = thumbsKey(lv, specs, keyOf), input = inputHash(thumbsInput(app.rom, lv));
+  const stored = app.results.get<ObjThumb[]>(key, input);
   if (stored) return stored;
-  const r = app.emu.tracked(() => renderObjectThumbs(app.rom, app.emu, app.level, specs, (s) => objKey(s, app.objectKind(s.num))));
-  app.results.set(key, r.result, app.results.fp.deps(r.reads));
+  const r = app.emu.tracked(() => renderObjectThumbs(app.rom, app.emu, lv, specs, keyOf));
+  app.results.set(key, r.result, app.results.fp.deps(r.reads), input);
   return r.result;
+}
+
+// their result cache key: the tileset and palettes (kept side by side) and the objects
+export function thumbsKey(level: Level, specs: ObjSpec[], keyOf: (s: ObjSpec) => string): string {
+  const h = level.header;
+  // (o3: with the level they are drawn in as their input)
+  return `o3${h.tileset}-${h.fgPalette}-${h.bgPalette}:${hashStr(specs.map((s) => `${s.num}.${s.ext}.${s.size}=${keyOf(s)}`).join())}`;
+}
+
+// what they depend on outside the ROM bytes they read: the level they are drawn in as edited (its number
+// decides its graphics slots) and the content of the graphics files they draw from (graphics data isn't among
+// the bytes read, see App.gfxSkipMask). Not its BG: they show layer 1.
+export function thumbsInput(rom: Rom, level: Level): unknown {
+  const files = layerSlots(levelSlots(rom, level.number, level.header)).map((s) => s.file);
+  return { level: level.number, header: level.header, gfx: gfxFilesHash(rom, files) };
 }
 
 export function thumbCanvas(t: ObjThumb): HTMLCanvasElement {

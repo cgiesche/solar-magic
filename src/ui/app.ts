@@ -935,13 +935,12 @@ export class App {
   }
 
   // What the four layer 3 settings do in a tileset (see layer3.ts): the level as edited is loaded
-  // with each of them on an own emulator; kept per tileset while the ROM it read is unchanged
+  // with each of them on an own emulator; kept per tileset while the level as edited and the ROM it read
+  // are unchanged
   layer3Kinds(tileset: number): Layer3Kind[] {
-    return this.learner.now(`l3k1:${tileset}`, (emu) => {
-      const lv = this.level, ov = this.buildOverrides();
-      if (tileset !== lv.header.tileset) ov.layer1 = serializeLayer1(this.rom, { ...lv, header: { ...lv.header, tileset } });
-      return emu.tracked(() => layer3Kinds(emu, lv.number, ov));
-    });
+    const lv = this.level, ov = this.buildOverrides(), input = this.levelInput(ov);
+    if (tileset !== lv.header.tileset) ov.layer1 = serializeLayer1(this.rom, { ...lv, header: { ...lv.header, tileset } });
+    return this.learner.now(`l3k2:${tileset}`, (emu) => emu.tracked(() => layer3Kinds(emu, lv.number, ov)), { input });
   }
 
   // Water line of a layer 3 tide in level pixels: the surface where the level view draws layer 3
@@ -962,11 +961,11 @@ export class App {
 
   // What every layer 2 scroll setting does (l2scroll.ts), measured with the level's code on an own
   // emulator a setting at a time; null while that runs, then `done` is called. Kept per level while
-  // the ROM it read is unchanged.
+  // the level as edited and the ROM it read are unchanged.
   layer2Motions(done: () => void): Layer2Motions | null {
     const n = this.level.number, ov = this.buildOverrides();
     // (urgent: the header dialog shows them)
-    return this.learner.learn(`l2m1:${n}`, function* (emu) { return (yield* layer2MotionsJob(emu, n, ov)).result; }, { lane: 'l2', replace: true, urgent: true, done }) ?? null;
+    return this.learner.learn(`l2m2:${n}`, function* (emu) { return (yield* layer2MotionsJob(emu, n, ov)).result; }, { input: this.levelInput(ov), lane: 'l2', replace: true, urgent: true, done }) ?? null;
   }
 
   // The Map16 tiles of every level (levelusage.ts), the open one as edited: those known now, the others are
