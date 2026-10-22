@@ -33,20 +33,18 @@ const root = document.getElementById('app')!;
 window.addEventListener('error', (e) => log(`Unexpected error: ${e.message}`, 'error'));
 window.addEventListener('unhandledrejection', (e) => log(`Unexpected error: ${e.reason instanceof Error ? e.reason.message : e.reason}`, 'error'));
 
+// the start page is static HTML in index.html (readable for search engines); kept to show it again after “Close project”
+const landing = root.querySelector<HTMLElement>('.landing')!;
+landing.querySelector('#landing-open-rom')!.addEventListener('click', openRomFile);
+landing.querySelector('#landing-open-project')!.addEventListener('click', openProjectFile);
+
 function welcome(): void {
   clear(root);
-  const drop = h('div', { class: 'welcome' },
-    h('h1', null, 'Solar Magic'),
-    h('p', null, 'Import a Super Mario World ROM (US, .smc/.sfc, with or without header), open a project (.smwproj) or drop either here.'),
-    h('div', { class: 'row welcome-actions' },
-      h('button', { class: 'primary big', onclick: importRomFile }, 'Import ROM …'),
-      h('button', { class: 'big', onclick: openProjectFile }, 'Open project …')),
-    h('p', { class: 'hint' }, 'The ROM stays local in the browser (IndexedDB). Nothing is uploaded.'),
-  );
-  root.appendChild(drop);
+  root.appendChild(landing);
+  document.documentElement.classList.remove('booting');
 }
 
-async function importRomFile(): Promise<void> { const f = await pickFile('.smc,.sfc,.bin'); if (f) openFile(f); }
+async function openRomFile(): Promise<void> { const f = await pickFile('.smc,.sfc,.bin'); if (f) openFile(f); }
 async function openProjectFile(): Promise<void> { const f = await pickFile('.smwproj'); if (f) openFile(f); }
 
 async function openFile(f: File): Promise<void> {
@@ -153,7 +151,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
       { label: 'Save project', title: 'The ROM with the editor data: sources of patches, packages, UberASM, blocks, sprites and music – to keep editing it later or elsewhere', onClick: () => { if (ow?.dirty) ow.save(); exportProject(app); } },
       ...(desktop ? [{ label: 'Save project as …', title: 'Save the project to another file and keep working on that one', onClick: () => { if (ow?.dirty) ow.save(); exportProject(app, true); } }] : []),
       'sep',
-      { label: 'Import ROM …', title: 'Start from a ROM (.smc/.sfc) – clean or already modified', onClick: importRomFile },
+      { label: 'Open ROM …', title: 'Start from a ROM (.smc/.sfc) – clean or already modified', onClick: openRomFile },
       { label: 'Export ROM', title: 'Download the playable ROM with all saved changes (without the editor data)', onClick: () => { if (ow?.dirty) ow.save(); exportRom(app); } },
       { label: 'Export patch …', title: 'A BPS patch (for Floating IPS / Flips) from a clean ROM you choose to the playable ROM with all saved changes', onClick: () => { if (ow?.dirty) ow.save(); exportPatch(app); } },
       'sep',
