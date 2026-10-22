@@ -1,2 +1,4 @@
 User-agent: *
 Allow: /
+
+Sitemap: https://smw.traumwald.net/sitemap.xml
