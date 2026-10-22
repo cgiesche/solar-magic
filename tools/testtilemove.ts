@@ -114,6 +114,14 @@ check(rom.data.every((b, i) => b === image[i]), 'undone: the ROM as before');
 s.edit('tiles only', () => applyMove(rom, 'fg', planMove(rom, 'fg', map, { levels: [], blank }), { levels: [], blank }));
 check(look(0x106) !== before.get(0x106), 'tiles moved without rewriting the level: it looks different');
 s.undo();
+// onto a tile with a block of its own (asked first): that block is gone, from list.txt too
+{
+  const p = planMove(rom, 'fg', new Map([[0x345, 0x347]]), { levels: [], blank });
+  check(p.overwrite.join() === String(0x347) && p.blocks.join() === String(0x347), 'a destination\'s own block: overwritten, the block list rewritten');
+  s.edit('onto a block', () => applyMove(rom, 'fg', p, { levels: [], blank }));
+  check(!blockOf(rom, 0x347) && !loadBlockProject(rom)?.list.length, 'the overwritten block left list.txt');
+  s.undo();
+}
 // overlapping: 345-347 one tile on, 346 and 347 are moved away from themselves
 s.edit('overlap', () => applyMove(rom, 'fg', planMove(rom, 'fg', rectMap(0x345, 3, 1, 0x346), { levels, blank }), { levels, blank }));
 check(look(0x105) === before.get(0x105) && extTileWords(rom, 0x346)!.join() === '1,2,3,4' && extTileWords(rom, 0x345)!.join() === blank.join(), 'an overlapping move');

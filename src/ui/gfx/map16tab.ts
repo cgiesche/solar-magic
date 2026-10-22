@@ -27,13 +27,12 @@ import { levelSlots, layerSlots, slotOfTile, type GfxSlot } from '../../core/gfx
 import { cgramToRGBA } from '../../core/gfx.ts';
 import { tileMatches, drawTileMatches } from '../tilesearch.ts';
 import { animsAt, animLinks } from './animtab.ts';
-import { fgTileUsers, bgTileUsers, tileLinks, unusedFgTiles, isTilesetTile, usedLevels, TILE_SOURCES } from '../../core/levelusage.ts';
+import { fgTileUsers, bgTileUsers, tileLinks, unusedFgTiles, isTilesetTile, TILE_SOURCES } from '../../core/levelusage.ts';
 import { usedInList } from '../usedin.ts';
 import { map16Source, fgTileAddr, setFgWords } from '../../core/render.ts';
 import { remapTile, remapLine, slotRemapLine, parseRemap } from '../../core/remap.ts';
 import { remapEditor, type RemapEditor } from '../remaplist.ts';
 import { planMove, applyMove, planRemap, rectMap, type MovePlan, type MoveSource } from '../../core/tilemove.ts';
-import { loadLevel } from '../../core/level.ts';
 import { levelSource, planList, openRemapUses } from '../tileuses.ts';
 import { loadAsar } from '../../core/asar.ts';
 import { QuarterGrid, markRect, editMarked, setPalette, setBit, setTileNum, stamp, summary, wholeTiles, FLIP_X, FLIP_Y, PRIO, type QuarterEdit, type MarkMode, type BitState } from '../../core/quarters.ts';
@@ -53,7 +52,8 @@ interface Remapping { ed: RemapEditor; scope: RemapScope; box: HTMLElement; scop
 // what an offer fills in when it opens the remap
 export interface RemapFill { line?: string; scope?: RemapScope; bg?: boolean }
 // the move panel: where the selection's top left tile goes (-1: not a valid number), the plan for it
-interface Moving { to: number; box: HTMLElement; input: HTMLInputElement; status: HTMLElement; plan: { plan: MovePlan; src: MoveSource } | null }
+// (pending: levels the usage index has not looked through yet for tiles placed by objects' code)
+interface Moving { to: number; box: HTMLElement; input: HTMLInputElement; status: HTMLElement; plan: { plan: MovePlan; src: MoveSource; pending: number } | null }
 // a tile the remap changes: its words and acts-like before and after
 interface RemapRow { tile: number; words: number[]; acts: number | null; newWords: number[]; newActs: number | null; out: number[]; changed: boolean }
 type Cell = { x: number; y: number };
@@ -974,13 +974,13 @@ export class Map16Tab implements WsPanel {
     const { levels: index, pending } = app.levelTiles();
     const src: MoveSource = { ...levelSource(app, map), blank: map16Source(app.rom, app.render).fg(0x025), index };
     const plan = planMove(app.rom, this.bg ? 'bg' : 'fg', map, src);
-    m.plan = { plan, src };
+    m.plan = { plan, src, pending: this.bg ? 0 : pending };
     const ok = !plan.problems.length;
     m.status.replaceChildren(
       ...plan.problems.map((q) => h('div', { class: 'warn-box' }, q)),
       ok && plan.overwrite.length ? h('div', { class: 'warn-box' }, `Tile${plan.overwrite.length > 1 ? 's' : ''} ${plan.overwrite.slice(0, 8).map((t) => hex(t, 3)).join(', ')}${plan.overwrite.length > 8 ? ' …' : ''} ${plan.overwrite.length > 1 ? 'have' : 'has'} graphics, acts-like or a block of ${plan.overwrite.length > 1 ? 'their' : 'its'} own, used nowhere: overwritten (asked first).`) : '',
       ok ? planList(app, plan, 'No level places these tiles.') : '',
-      ok && pending && !this.bg ? h('div', { class: 'hint' }, `${pending} level${pending > 1 ? 's are' : ' is'} still being looked through for tiles placed by objects' code.`) : '',
+      ok && m.plan.pending ? h('div', { class: 'warn-box' }, `${pending} level${pending > 1 ? 's are' : ' is'} still being looked through for tiles placed by objects' code, which can't be rewritten.`) : '',
       h('div', { class: 'row' },
         h('button', { class: 'primary', disabled: !ok, onclick: () => void this.applyMove() }, `Move to ${hex(m.to, 3)}`),
         h('button', { onclick: () => this.closeMove() }, 'Close')),
@@ -992,6 +992,8 @@ export class Map16Tab implements WsPanel {
     const m = this.moving, p = m?.plan;
     if (!m || !p || p.plan.problems.length) return;
     const { plan, src } = p, to = m.to, from = this.sel, layer = this.bg ? 'bg' : 'fg';
+    if (p.pending && await choose('Move now?', `${p.pending} level${p.pending > 1 ? 's have' : ' has'} not been looked through yet for these tiles placed by objects' code (custom objects), which a move can't rewrite. Wait for the look-through, or move now?`,
+      [{ label: 'Wait' }, { label: 'Move now' }]) !== 1) return;
     if (plan.overwrite.length && await choose('Overwrite tiles?', `Tile${plan.overwrite.length > 1 ? 's' : ''} ${plan.overwrite.map((t) => hex(t, 3)).join(', ')} ${plan.overwrite.length > 1 ? 'have' : 'has'} contents of ${plan.overwrite.length > 1 ? 'their' : 'its'} own (used nowhere). Overwrite with the moved tiles?`,
       [{ label: 'Cancel' }, { label: 'Overwrite', danger: true }]) !== 1) return;
     try {
@@ -1011,7 +1013,7 @@ export class Map16Tab implements WsPanel {
   // ---------- remap ----------
   // opens the remap panel; an offer fills in the list and may choose the tiles it changes
   openRemap(fill: RemapFill = {}): void {
-    if (this.moving) this.moving = null;
+    if (this.moving) this.closeMove();
     if (fill.bg !== undefined && fill.bg !== this.bg) { this.bg = fill.bg; this.sel &= 0x1ff; this.selW = this.selH = 1; }
     if (!this.remapping) {
       const preview = h('div', { class: 'mt-remap-preview' }), scopes = h('div', { class: 'mt-remap-scopes' }), status = h('div', { class: 'mt-remap' });
@@ -1414,7 +1416,7 @@ export class Map16Tab implements WsPanel {
     if (!o || o.bg !== this.bg || o.tile === this.sel) return;
     const w = Math.min(16, m.width), line = remapLine(o.tile, w, m.height, this.sel);
     const { remap } = parseRemap(line, { what: 'numbers' });
-    const users = planRemap(this.app.rom, layer, remap.tiles, { levels: usedLevels(this.app.rom), level: (n) => (n === this.app.level.number ? this.app.level : loadLevel(this.app.rom, n)) }).levels;
+    const users = planRemap(this.app.rom, layer, remap.tiles, levelSource(this.app, remap.tiles)).levels;
     if (!users.length) return;
     const span = `${hex(o.tile, 3)}–${hex(o.tile + (m.height - 1) * 16 + w - 1, 3)}`;
     const pick = await choose('Rewrite the levels using these tiles?', h('div', { style: 'max-width:480px' },

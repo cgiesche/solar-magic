@@ -15,6 +15,7 @@
 // code (custom objects, as the usage index levelusage.ts knows them) can't be rewritten: moving one is refused.
 
 import type { Rom } from './rom.ts';
+import { hex } from './names.ts';
 import { L2_PTRS, loadLevel, type Level, type LevelObject } from './level.ts';
 import { saveLevel } from './save.ts';
 import { bgBank } from './patches.ts';
@@ -41,6 +42,7 @@ export interface MoveSource extends LevelSource {
 }
 
 // the uses rewritten: per level its Direct Map16 objects and BG tiles; the structures; the tiles with a block
+// (moved, or overwritten)
 export interface LevelChange { level: number; objects: number; bg: number }
 export interface UsesPlan { levels: LevelChange[]; structures: number[]; blocks: number[] }
 export interface MovePlan extends UsesPlan {
@@ -49,8 +51,8 @@ export interface MovePlan extends UsesPlan {
   overwrite: number[]; // destinations with contents of their own (graphics, acts-like, a block): ask first
 }
 
-const hex3 = (n: number) => n.toString(16).toUpperCase().padStart(3, '0');
-const list = (ns: number[], w = 3) => ns.slice(0, 8).map((n) => n.toString(16).toUpperCase().padStart(w, '0')).join(', ') + (ns.length > 8 ? ' …' : '');
+const hex3 = (n: number) => hex(n, 3);
+const list = (ns: number[]) => ns.slice(0, 8).map(hex3).join(', ') + (ns.length > 8 ? ' …' : '');
 
 // a w×h rectangle of tiles (16 a row) from `from` to `to`
 export function rectMap(from: number, w: number, h: number, to: number): TileMap {
@@ -175,11 +177,11 @@ export function planMove(rom: Rom, layer: Layer, map: TileMap, src: MoveSource):
   }
   if (layer === 'fg') {
     for (const [k, s] of listStructures(rom)) {
-      for (const t of structTiles(s)) place(t, `structure ${hex3(k).slice(1)}`);
-      s.tiles.forEach((t, i) => { if (t >= 0 && s.conds?.[i]?.always) pair(t, `structure ${hex3(k).slice(1)}`); });
+      for (const t of structTiles(s)) place(t, `structure ${hex(k, 2)}`);
+      s.tiles.forEach((t, i) => { if (t >= 0 && s.conds?.[i]?.always) pair(t, `structure ${hex(k, 2)}`); });
       if (s.tiles.some((t) => t >= 0 && moves(map, t))) plan.structures.push(k);
     }
-    for (const t of map.keys()) if (blockOf(rom, t)) plan.blocks.push(t);
+    for (const t of [...map.keys(), ...onto]) if (blockOf(rom, t)) plan.blocks.push(t);
     const code = new Map<number, number[]>();
     for (const l of src.index ?? []) for (const u of l.fg) {
       if (u.source === 'object' && (map.has(u.tile) || onto.has(u.tile))) code.set(u.tile, [...(code.get(u.tile) ?? []), l.level]);
@@ -211,7 +213,8 @@ export function applyMove(rom: Rom, layer: Layer, plan: MovePlan, src: MoveSourc
   for (const [k, s] of listStructures(rom)) if (s.tiles.some((t) => t >= 0 && moves(map, t))) writeStructure(rom, k, mappedStructure(s, map));
   const p = plan.blocks.length ? loadBlockProject(rom) : null;
   if (p) {
-    p.list = p.list.map((b) => (map.has(b.tile) ? { ...b, tile: map.get(b.tile)! } : b));
+    // (a destination's own block is overwritten)
+    p.list = p.list.filter((b) => map.has(b.tile) || !dests.has(b.tile)).map((b) => (map.has(b.tile) ? { ...b, tile: map.get(b.tile)! } : b));
     const r = saveBlockProject(rom, p);
     if (!r.ok) throw new Error(`Custom blocks: ${r.errors.join(' ')}`);
   }
