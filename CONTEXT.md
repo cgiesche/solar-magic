@@ -18,7 +18,11 @@ _Avoid_: transaction, ROM write (for an edit)
 
 **Remap**:
 Changing 8x8 tile numbers, palettes or acts-like of chosen Map16 tiles (or the frames and targets of tile animations) in bulk, by an offset or a list in Lunar Magic's syntax (core/remap.ts); a list's sources are always the values before the remap. One ROM edit. It changes what tiles point at, never the graphics themselves.
-_Avoid_: renumber (that is the level graphics placement's), move tiles
+_Avoid_: renumber (that is the level graphics placement's), move tiles (that is a tile move)
+
+**Tile move**:
+Map16 tiles 200–FFF taken to other numbers with their graphics, acts-like and block, every use rewritten (Direct Map16 objects of all levels, structures, BG tilemaps, the blocks' list) so the levels look as before (core/tilemove.ts); one ROM edit. Rewriting the uses alone, the tiles staying, is Lunar Magic's Remap Direct Map16 / Remap Background Tiles (a remap of uses, with a list of Map16 numbers).
+_Avoid_: remap (for a move), renumber
 
 **Quarter**:
 One of the four 8x8 tiles of a Map16 tile, one 16-bit word: 8x8 tile number, palette, X/Y flip and priority (word order top-left, bottom-left, top-right, bottom-right). Acts-like is not a quarter's but the whole 16x16 tile's.

@@ -157,6 +157,19 @@ When a level is displayed, it runs the ROM's **original loading routines** (~15 
   Graphics tab, or importing a `.map16` whose tiles draw from a slot without ExGFX, offers the remap with the offset
   filled in. The Animations tab remaps the frames and targets of chosen tile animations with the same list
   (Lunar Magic's ExAnimation Remap).
+* **Move tiles with their uses** (Map16 tab → *Move …*): the selected tiles 200–FFF go to other numbers – type the
+  new top left tile or drag the selection in the sheet – with graphics, "acts like" and custom block, and every use
+  is rewritten: Direct Map16 objects in all levels (both layers), structures, BG tilemaps, the blocks' `list.txt`.
+  Every level looks as before; the panel lists what it rewrites first. Moving onto a tile something places, a tile
+  placed by an object's code, or only one of an "always show" pair (tile and tile + 100) is refused; defined but
+  unused tiles there are overwritten after asking. One undo step. (Lunar Magic only rewrites the uses, below.)
+* **Remap Direct Map16 / Remap Background Tiles** (Level menu, Lunar Magic's): rewrites which Map16 tiles the
+  Direct Map16 objects or the BG tilemaps use, with a list of Map16 numbers in the same syntax (`200-2FF,+300`,
+  `R200-231,M500`, swaps), for this level or all levels, the levels it rewrites listed before applying; the tiles
+  themselves stay. A Direct Map16 object fills its rectangle with one tile, so it moves as a whole. Each BG tile
+  keeps its own page, so unlike Lunar Magic there is no BG bank to change and a BG may mix pages; a game BG is
+  stored by the editor once rewritten. Importing a `.map16` elsewhere than it was exported from offers this remap
+  for the levels using the old numbers.
 * **Animations tab** (Lunar Magic's ExAnimation, its format): tile animations, color animations and **color
   rotations** per level and globally. A rotation's colors are chosen by dragging over the palette (2–128); its
   type (rotate right or left, each also "reverse on trigger"), trigger and delay ("Frames", also shown as steps per
