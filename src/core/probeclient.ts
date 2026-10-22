@@ -39,9 +39,11 @@ export class ProbeClient {
   private gen = -1; // ROM generation the worker probes on
   private asked = new Map<string, ProbeJob>(); // asked for and not done yet
   private prefetched = new Map<string, ProbeJob>(); // the same, probed after the asked ones
+  // probes and tilesets whose object kinds failed, forgotten whenever the ROM changes: a deliberate exception
+  // to emulated results holding by the bytes they read (a failure is rare and cheap to try again)
   private failed = new Set<string>();
   private kindsWant: ProbeMessage & { type: 'kinds' } | null = null;
-  private kindsFailed = new Set<number>(); // tilesets (until the ROM changes)
+  private kindsFailed = new Set<number>(); // tilesets
   // the level scan and the camera at a place asked for, one of each
   private playWant = new Map<Played, { msg: ProbeMessage & { type: Played }; done: (r: unknown) => void }>();
   private d: ProbeClientDeps;

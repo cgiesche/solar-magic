@@ -135,8 +135,16 @@ Finding out how something behaves in the game by running the game's own code on 
 _Avoid_: Test, check, lookup table
 
 **Emulated result**:
-Anything the editor learned by emulation (a probe's outcome, the kinds of a tileset's objects, a level scan). It stays valid as long as the ROM bytes it read are unchanged, and is learned again otherwise.
+Anything the editor learned by emulation (a probe's outcome, the kinds of a tileset's objects, a level scan, sprite images, object thumbnails, jump arcs). It stays valid as long as its inputs and the ROM bytes it read are unchanged, and is learned again otherwise (on the main thread by the result learner, core/learner.ts: a key, an input, the bytes read).
 _Avoid_: Cached value, generation (for validity)
+
+**Input**:
+State outside the ROM that an emulated result depends on: the level as edited (one input for everything learned from it, with the view settings – switches, conditional Direct Map16 flags, animation triggers), the content of graphics files (their bytes don't count as read). Given next to the result's key and compared by its hash (core/inputs.ts), never by object identity.
+_Avoid_: cache key (for what belongs in the input), dependency (that is a ROM byte read)
+
+**Derived ROM data**:
+What the editor reads out of the ROM without emulating (the custom sprite list, the graphics mask, the sprite memory values in use, a level as saved): memoized per ROM generation, not an emulated result.
+_Avoid_: emulated result, cache
 
 **Prefetch**:
 Probing what the palettes could show before anyone asks for it, after everything asked for directly.
