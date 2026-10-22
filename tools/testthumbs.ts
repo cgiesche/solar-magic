@@ -5,7 +5,7 @@ import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadLevel, L2_PTRS } from '../src/core/level.ts';
 import { ObjKindProbe, withObjectVariant } from '../src/core/objkinds.ts';
 import { TileCache, map16Source, drawMap16 } from '../src/core/render.ts';
-import { renderObjectThumbs, objKey, type ObjSpec } from '../src/ui/thumbs.ts';
+import { renderObjectThumbs, objectThumbsJob, objKey, type ObjSpec } from '../src/ui/thumbs.ts';
 import { editorImage } from './fixture.ts';
 
 let fail = 0;
@@ -43,6 +43,12 @@ const emu = new LevelEmulator(rom); emu.boot();
   const has = new Set(thumbs.map((t) => t.key));
   const missing = specs.filter((s) => s.num >= 0x1f && s.num <= 0x32 && !has.has(objKey(s, kinds.get(s.num) ?? null))).map((s) => hex(s.num));
   check(missing.length === 0, `105: objects 1F-32 (in the batch with object 33) have thumbnails ${missing.join(' ')}`);
+
+  // learned in the background: a step per batch of 32, the same thumbnails
+  const job = objectThumbsJob(rom, emu, lv, specs, (s) => objKey(s, kinds.get(s.num) ?? null));
+  let steps = 0, r2 = job.next();
+  for (; !r2.done; r2 = job.next()) steps++;
+  check(steps === Math.ceil(specs.length / 32) && JSON.stringify(r2.value.map((t) => t.key)) === JSON.stringify(thumbs.map((t) => t.key)), `105: in ${steps} steps, the same thumbnails`);
 }
 
 console.log(fail ? `${fail} FAILED` : 'all ok');

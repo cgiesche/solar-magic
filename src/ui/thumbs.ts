@@ -1,6 +1,6 @@
-// Object preview thumbnails, rendered by emulating a test level that contains the objects.
+// Object preview thumbnails, rendered by emulating a test level that contains the objects (learned in the
+// background by App.objectThumbs).
 
-import type { App } from './app.ts';
 import type { Rom } from '../core/rom.ts';
 import { OV_L1, type LevelEmulator } from '../core/levelemu.ts';
 import { encodePrimaryHeader, serializeObjects, type Level, type LevelObject, newUid, L2_PTRS } from '../core/level.ts';
@@ -23,17 +23,6 @@ export function objKey(s: { num: number; ext: number; size: number }, kind: ObjK
 // a rendered object: its pixels and the distinct Map16 tiles it produced
 export interface ObjThumb { key: string; w: number; h: number; px: Uint32Array; m16: number[] }
 
-// the thumbnails from the result cache (see romdeps.ts) or rendered
-export function objectThumbs(app: App, specs: ObjSpec[]): ObjThumb[] {
-  const lv = app.level, keyOf = (s: ObjSpec) => objKey(s, app.objectKind(s.num));
-  const key = thumbsKey(lv, specs, keyOf), input = inputHash(thumbsInput(app.rom, lv));
-  const stored = app.results.get<ObjThumb[]>(key, input);
-  if (stored) return stored;
-  const r = app.emu.tracked(() => renderObjectThumbs(app.rom, app.emu, lv, specs, keyOf));
-  app.results.set(key, r.result, app.results.fp.deps(r.reads), input);
-  return r.result;
-}
-
 // their result cache key: the tileset and palettes (kept side by side) and the objects
 export function thumbsKey(level: Level, specs: ObjSpec[], keyOf: (s: ObjSpec) => string): string {
   const h = level.header;
@@ -43,10 +32,11 @@ export function thumbsKey(level: Level, specs: ObjSpec[], keyOf: (s: ObjSpec) =>
 
 // what they depend on outside the ROM bytes they read: the level they are drawn in as edited (its number
 // decides its graphics slots) and the content of the graphics files they draw from (graphics data isn't among
-// the bytes read, see App.gfxSkipMask). Not its BG: they show layer 1.
+// the bytes read, see App.gfxSkipMask). Not its BG: they show layer 1; nor its size and mode: the test level
+// has its own.
 export function thumbsInput(rom: Rom, level: Level): unknown {
   const files = layerSlots(levelSlots(rom, level.number, level.header)).map((s) => s.file);
-  return { level: level.number, header: level.header, gfx: gfxFilesHash(rom, files) };
+  return { level: level.number, header: { ...level.header, screens: 0, mode: 0 }, gfx: gfxFilesHash(rom, files) };
 }
 
 export function thumbCanvas(t: ObjThumb): HTMLCanvasElement {
@@ -65,9 +55,15 @@ function hashStr(s: string): string {
   return (a >>> 0).toString(36);
 }
 
-// in batches of 32 test levels; a batch whose load fails (some objects together break the game, like two of
-// tileset 7's object 33) is rendered in halves, an object that fails alone gets no thumbnail
+// all at once (see objectThumbsJob)
 export function renderObjectThumbs(rom: Rom, emu: LevelEmulator, level: Level, specs: ObjSpec[], keyOf: (s: ObjSpec) => string): ObjThumb[] {
+  const job = objectThumbsJob(rom, emu, level, specs, keyOf);
+  for (;;) { const r = job.next(); if (r.done) return r.value; }
+}
+
+// in batches of 32 test levels, a step each; a batch whose load fails (some objects together break the game,
+// like two of tileset 7's object 33) is rendered in halves, an object that fails alone gets no thumbnail
+export function* objectThumbsJob(rom: Rom, emu: LevelEmulator, level: Level, specs: ObjSpec[], keyOf: (s: ObjSpec) => string): Generator<void, ObjThumb[]> {
   const out: ObjThumb[] = [];
   const PER = 32;
   const render = (batch: ObjSpec[]): void => {
@@ -118,6 +114,6 @@ export function renderObjectThumbs(rom: Rom, emu: LevelEmulator, level: Level, s
       out.push({ key: keyOf(s), w, h: hh, px, m16: [...m16].sort((a, b) => a - b) });
     });
   };
-  for (let b = 0; b < specs.length; b += PER) render(specs.slice(b, b + PER));
+  for (let b = 0; b < specs.length; b += PER) { render(specs.slice(b, b + PER)); yield; }
   return out;
 }

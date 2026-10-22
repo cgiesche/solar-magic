@@ -40,6 +40,7 @@ import { variantOf, blockKey, type BlockProbe, type RunStates } from '../core/bl
 import type { ProbeReply } from '../core/probehost.ts';
 import { ProbeClient } from '../core/probeclient.ts';
 import { ResultLearner } from '../core/learner.ts';
+import { objectThumbsJob, thumbsKey, thumbsInput, objKey, type ObjSpec, type ObjThumb } from './thumbs.ts';
 import { levelInput } from '../core/inputs.ts';
 import { map16Tile, bgTile } from '../core/ram.ts';
 import { exanimTiles, exanimColors, exanimPeriod, readLevelList, readGlobalList } from '../core/exanim.ts';
@@ -78,6 +79,7 @@ export type AppEvent =
   | 'palette-item' // a sprite was chosen in the palette
   | 'arcs' // jump arcs asked for are known
   | 'sprites' // sprite images were captured
+  | 'thumbs' // object thumbnails asked for are known
   | 'sprite-mem' // the sprite memory check of the level is known
   | 'animated' // which tiles and colors of the level animate is known
   | 'anim-frame' // the next frame of the level animation is shown
@@ -1076,6 +1078,16 @@ export class App {
     for (const sp of ARC_SPEEDS) for (const dir of [1, -1] as const) { out.push(arcs.arc(tx, ty, sp, dir, runs)); yield; }
     return out;
   }
+
+  // The object palette's thumbnails of specs in the level as edited (thumbs.ts): undefined while they are
+  // learned in the background ('thumbs' when done)
+  objectThumbs(specs: ObjSpec[]): ObjThumb[] | undefined {
+    const rom = this.rom, lv = this.level, keys = new Map(specs.map((s) => [s, objKey(s, this.objectKind(s.num))]));
+    const keyOf = (s: ObjSpec) => keys.get(s)!, level = { ...lv, header: { ...lv.header } };
+    return this.learner.learn(thumbsKey(lv, specs, keyOf), (emu) => objectThumbsJob(rom, emu, level, specs, keyOf),
+      { input: thumbsInput(rom, lv), lane: 'thumbs', replace: true, label: 'Object thumbnails', done: this.thumbsLearned });
+  }
+  private thumbsLearned = () => this.emit('thumbs');
 
   // kind of a standard object in the current tileset; null while unknown (then treated as plain)
   objectKind(num: number): ObjKind | null {

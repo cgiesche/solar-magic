@@ -249,11 +249,6 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   app.on('change', updateToolbar);
   app.on('level', updateToolbar);
   app.on('zoom', updateToolbar);
-  app.on('level-header', () => palette.invalidate());
-  // the object thumbnails again once the level is drawn after a ROM change
-  let romChanged = false;
-  app.on('rom-change', () => { romChanged = true; });
-  app.on('render', () => { if (romChanged) { romChanged = false; palette.invalidate(); } });
 
   const left = h('div', { class: 'left' }, levels.root);
   const center = h('div', { class: 'center' }, view.root, status);

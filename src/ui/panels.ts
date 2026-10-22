@@ -4,7 +4,7 @@ import { isBrushMode, type App, type PaletteItem } from './app.ts';
 import { h, clear, hexInput, checkbox, attachRectPick, modal, toast, emptyState } from './dom.ts';
 import { objectName, spriteName, hex2, hex3 } from '../core/names.ts';
 import { objectVariant, withObjectVariant, type ObjKind } from '../core/objkinds.ts';
-import { objectThumbs, thumbCanvas, objKey, type ObjSpec } from './thumbs.ts';
+import { thumbCanvas, objKey, type ObjSpec, type ObjThumb } from './thumbs.ts';
 import { newUid, spriteId, spriteBytes, spriteSizes, type LevelObject, type LevelSprite } from '../core/level.ts';
 import { levelName } from '../core/overworld.ts';
 import { usedInList } from './usedin.ts';
@@ -122,7 +122,7 @@ export class Palette {
   tab: 'obj' | 'ext' | 'm16' | 'str' | 'spr' = 'obj';
   thumbs = new Map<string, HTMLCanvasElement>();
   thumbTiles = new Map<string, number[]>(); // Map16 tiles per object key
-  thumbsFor = '';
+  thumbsFrom: ObjThumb[] | undefined; // the thumbnails shown (undefined: placeholders while they are learned)
   tabs: HTMLDivElement;
   search: HTMLInputElement;
   searchRow: HTMLDivElement;
@@ -154,8 +154,9 @@ export class Palette {
       this.build();
       this.scrollToSelected();
     });
-    app.on('objkinds', () => this.invalidate());
     app.on('level', () => { this.ensureThumbs(); this.build(); });
+    // the thumbnails of the level as edited: asked for whenever they may have changed, the learner decides
+    for (const ev of ['objkinds', 'level-header', 'render', 'rom-change', 'thumbs'] as const) app.on(ev, () => { if (this.ensureThumbs() && (this.tab === 'obj' || this.tab === 'ext')) this.build(); });
     let t = 0;
     app.on('sprites', () => { if (this.tab !== 'm16' && !t) t = window.setTimeout(() => { t = 0; this.build(); }, 300); });
     app.on('bgtile', () => { if (isBrushMode(app.mode)) this.build(); });
@@ -503,30 +504,19 @@ export class Palette {
     return s;
   }
 
-  ensureThumbs(): void {
-    const h0 = this.app.level.header;
-    const key = `${h0.tileset}-${h0.fgPalette}-${h0.bgPalette}-${h0.spriteGfx}-${this.app.level.number}`;
-    const tsKey = `${h0.tileset}-${h0.fgPalette}-${h0.bgPalette}-${this.app.tilesetKinds() ? 1 : 0}`;
-    if (this.thumbsFor === tsKey) return;
-    this.thumbsFor = tsKey;
-    void key;
-    try {
-      this.thumbTiles = new Map();
-      this.thumbs = new Map();
-      for (const t of objectThumbs(this.app, this.specs())) {
-        this.thumbs.set(t.key, thumbCanvas(t));
-        this.thumbTiles.set(t.key, t.m16);
-      }
-      this.app.probes.prefetch([...this.thumbTiles.values()].flat());
-    } catch (e) {
-      console.error(e);
+  // the thumbnails as known now; whether they changed
+  ensureThumbs(): boolean {
+    const thumbs = this.app.objectThumbs(this.specs());
+    if (thumbs === this.thumbsFrom) return false;
+    this.thumbsFrom = thumbs;
+    this.thumbTiles = new Map();
+    this.thumbs = new Map();
+    for (const t of thumbs ?? []) {
+      this.thumbs.set(t.key, thumbCanvas(t));
+      this.thumbTiles.set(t.key, t.m16);
     }
-  }
-
-  invalidate(): void {
-    this.thumbsFor = '';
-    this.ensureThumbs();
-    this.build();
+    if (thumbs) this.app.probes.prefetch([...this.thumbTiles.values()].flat());
+    return true;
   }
 
   // the standard objects (with their types) or the extended objects as listed in the tab; `text` is what the
@@ -546,7 +536,7 @@ export class Palette {
       const info = (tiles.length ? `\nMap16 ${tiles.slice(0, 8).map(hex3).join(' ')}${tiles.length > 8 ? ' …' : ''}` : '')
         + (sum === undefined ? '\n(determining behavior …)' : sum.map((x) => '\n' + x).join(''));
       const th = this.thumbs.get(objKey(s, kind));
-      if (!th && ext) continue; // invalid ext objects produce nothing
+      if (!th && ext && this.thumbsFrom) continue; // invalid ext objects produce nothing
       out.push({
         s, vt, label, name, th, title: `${label}: ${name}${info}`, behavior: sum?.join(' · ') ?? '', text: `${label} ${name} ${info}`.toLowerCase(),
         items: blockSprites(app, tiles), enter: blockEnter(app, tiles),
