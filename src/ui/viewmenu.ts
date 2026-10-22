@@ -51,7 +51,7 @@ export function viewMenu(app: App, paint: () => void, full = true): HTMLElement 
     show('sprites', 'Sprites'), show('exits', 'Exits'),
     { heading: 'Overlays' },
     show('screens', 'Screen boundaries'), show('grid', 'Grid', undefined, 'G'),
-    show('ghost', 'Inactive layer translucent', 'Object layer not being edited shown semi-transparent (only levels with layer 2 objects)'),
+    show('ghost', 'Inactive layer translucent', 'Object layer not being edited shown semi-transparent (only levels with layer 2 objects); while editing the BG or layer 3, layer 1 and the sprites too'),
     show('items', 'Block contents', 'Contents of blocks (found by emulation) semi-transparent over the blocks, arrows at enterable blocks (pipes, doors)'),
     show('collision', 'Collision', 'How Mario collides with layer 1 (found by emulation): solid sides white, platforms dashed, slopes diagonal; red hurts, blue water, green climbable', 'C'),
     show('arcs', 'Jump arcs at the mouse', 'Where Mario gets jumping from the tile under the mouse (emulated): from standing, walking, running and at P-speed, to both sides; Shift+J pins them to the tile', 'J'),

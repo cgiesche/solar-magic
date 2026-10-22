@@ -744,10 +744,15 @@ export class LevelView {
     ctx.globalAlpha = a;
   }
 
+  // sprites are translucent like the ghosted layers while the background or layer 3 is edited
+  spriteAlpha(): number {
+    return this.app.show.ghost && isBrushMode(this.app.mode) ? 0.35 : 1;
+  }
+
   // the same for sprites that give items (flying ? blocks …), drawn over the sprite images
   paintSpriteItems(ctx: CanvasRenderingContext2D): void {
     const app = this.app;
-    ctx.globalAlpha = 0.65;
+    ctx.globalAlpha = 0.65 * this.spriteAlpha();
     for (const s of app.level.sprites) {
       const p = app.probes.sprite(spriteId(s));
       if (p?.summary) this.drawItem(ctx, spriteProbeAt(p, s.x, s.y), s.x * 16, s.y * 16);
@@ -771,15 +776,16 @@ export class LevelView {
     const app = this.app;
     const active = app.mode === 'spr';
     ctx.font = `bold ${9 / app.zoom * 1.2}px monospace`;
-    const incomplete = new Set(incompleteSprites(app));
+    const incomplete = new Set(incompleteSprites(app)), a = this.spriteAlpha();
+    ctx.globalAlpha = a;
     for (const s of app.level.sprites) {
       const x = s.x * 16, y = s.y * 16;
       const sel = app.selection.has(s.uid) && active;
       const img = app.spriteImageOf(s);
       if (img) {
-        ctx.globalAlpha = active ? 1 : 0.85;
+        ctx.globalAlpha = (active ? 1 : 0.85) * a;
         ctx.drawImage(img, x + Number(img.dataset.ox), y + Number(img.dataset.oy));
-        ctx.globalAlpha = 1;
+        ctx.globalAlpha = a;
       }
       ctx.fillStyle = sel ? 'rgba(255,80,200,0.45)' : active ? 'rgba(255,80,200,0.22)' : 'rgba(255,80,200,0.12)';
       if (!img) ctx.fillRect(x, y, 16, 16);
@@ -796,6 +802,7 @@ export class LevelView {
         ctx.fillText(hex2(s.num), x + 1, y + 8);
       }
     }
+    ctx.globalAlpha = 1;
   }
 
   // ---------------- interactions ----------------
