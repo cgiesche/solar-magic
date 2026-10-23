@@ -621,7 +621,7 @@ export class OverworldView {
     let dragged = -1;
     const chip = (k: number) => {
       const p = steps[k];
-      const el = h('div', { class: 'ow-step', draggable: true, title: `Step ${k + 1}: a ${isBig(ev.data, p.at) ? '6×6' : '2×2'} piece – drag to change the order`, ...hover(false, k),
+      const el = h('div', { class: 'ow-step', draggable: true, title: `Step ${k + 1}: ${isBig(ev.data, p.at) ? '6×6' : '2×2'} tiles – drag to change the order`, ...hover(false, k),
         ondragstart: (de: DragEvent) => { dragged = k; de.dataTransfer?.setData('text/plain', String(k)); },
         ondragover: (de: DragEvent) => { de.preventDefault(); el.classList.add('drop'); },
         ondragleave: () => el.classList.remove('drop'),
@@ -647,7 +647,7 @@ export class OverworldView {
         h('span', { class: 'hint' }, steps.length ? `Steps on ${where}:` : `No steps on ${where}`),
         ...steps.map((_, k) => chip(k)),
         silent.length ? h('span', { class: 'hint' }, ' Silent (other submaps):') : null,
-        ...silent.map((s, k) => h('div', { class: 'ow-step silent', title: `Written at once when the event ends (a ${isBig(ev.data, s.tile) ? '6×6' : '2×2'} piece on another submap)`, ...hover(true, k) }, '·'))),
+        ...silent.map((s, k) => h('div', { class: 'ow-step silent', title: `Written at once when the event ends (${isBig(ev.data, s.tile) ? '6×6' : '2×2'} tiles on another submap)`, ...hover(true, k) }, '·'))),
     );
   }
 
@@ -670,7 +670,7 @@ export class OverworldView {
   }
 
   // the steps shown as the game does: the map before the event, each step fading in after the one before (about
-  // 14 frames each, as measured in the game), the silent ones at the end
+  // 14 frames each, as measured in the game; silent ones are on other submaps)
   play(): void {
     const ev = this.ev;
     if (!ev) return;
@@ -702,7 +702,6 @@ export class OverworldView {
       }
     };
     steps.forEach((p, k) => { if (t > k) show(p, t - k); });
-    if (t > steps.length) for (const s of ev.data.silent[this.event]) if (s.layer === 2) show({ at: s.tile, pos: s.loc }, 1);
     ctx.globalAlpha = 1;
   }
 

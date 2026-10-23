@@ -76,8 +76,6 @@ export function pieceCells(pos: number, big: boolean): number[] {
   }
   return out;
 }
-// the position of the piece whose top left tile is l2 index i
-export const piecePos = (i: number): number => i * 2;
 
 // LC_RLE1 as the game's $04DD57: a control byte n, bit 7 set: the next byte (n & $7F) + 1 times, else n + 1 bytes;
 // a word $FFFF where a control byte would be ends it
@@ -149,8 +147,7 @@ export interface EventPlace { views: (Rect | null)[]; from: { region: number; x:
 
 const W = 64; // tiles per row of a region
 // a layer 2 tile's region and position (readL2 index; l2Index's inverse)
-export const l2XY = (i: number): { r: number; x: number; y: number } => cellXY(i);
-const cellXY = (i: number) => { const r = i >> 12, k = i & 0xfff, q = k >> 10; return { r, x: (q & 1) * 32 + (k & 31), y: (q >> 1) * 32 + ((k >> 5) & 31) }; };
+export const l2XY = (i: number): { r: number; x: number; y: number } => { const r = i >> 12, k = i & 0xfff, q = k >> 10; return { r, x: (q & 1) * 32 + (k & 31), y: (q >> 1) * 32 + ((k >> 5) & 31) }; };
 const cellAt = (r: number, x: number, y: number) => (r << 12) | (((y >> 5) * 2 + (x >> 5)) << 10) | ((y & 31) << 5) | (x & 31);
 const inRect = (v: Rect, x: number, y: number) => x >= v.x && y >= v.y && x < v.x + v.w && y < v.y + v.h;
 
@@ -165,7 +162,8 @@ function usedStorage(d: EventData, skip: number): Uint8Array {
 // order), as pieces: 6x6 where one covers at least a third changed tiles and no tile another event writes, else
 // 2x2 (the fewest such tiles); each placed in the storage where the same tiles are, else in free places (6x6
 // below the 6x6 area, 2x2 above it). A piece in its region's view is a step, shown in order along the path from
-// `from` (reversed: towards it; undefined: as the event's steps were), else silent. Layer 1 silent steps stay.
+// `from` (reversed: towards it; undefined: as the event's steps were) – those the event had in the order they had –,
+// else silent. Layer 1 silent steps stay.
 export function paintEvent(d: EventData, base: Uint16Array, e: number, after: Uint16Array, place: EventPlace, reversed?: boolean): EventData {
   const before = applyEvents(base, d, 0, e);
   const changed = new Uint8Array(0x2000);
@@ -242,17 +240,20 @@ export function paintEvent(d: EventData, base: Uint16Array, e: number, after: Ui
         if (score > best) { best = score; bx = x; by = y; }
       }
       if (best < 0) break;
-      if (!take(r, bx, by, 2)) throw new Error(`The event tiles are full (${STORAGE_MAX} places)`);
+      if (!take(r, bx, by, 2)) throw new Error(`The event storage is full (${STORAGE_MAX} places)`);
     }
   }
   // steps in the view, in order along the path; the rest silent
   const shown = pieces.filter((p) => {
-    const c = cellXY(p.cells[0]), v = place.views[c.r], n = Math.sqrt(p.cells.length) / 2;
+    const c = l2XY(p.cells[0]), v = place.views[c.r], n = Math.sqrt(p.cells.length) / 2;
     return v !== null && v !== undefined && inRect(v, c.x + n, c.y + n);
   });
-  const order = pathOrder(shown.map((p) => p.cells.filter((i) => changed[i])), place);
-  const steps = order.map((k) => shown[k]);
+  const steps = pathOrder(shown.map((p) => p.cells.filter((i) => changed[i])), place).map((k) => shown[k]);
   if (reversed) steps.reverse();
+  // steps the event had keep their order among each other (the user's), new ones take their places along the path
+  const was = (p: { pos: number; cells: number[] }) => d.steps[e].findIndex((o) => o.pos === p.pos && isBig(d, o.at) === (p.cells.length === PIECE6));
+  const kept = steps.filter((p) => was(p) >= 0).sort((a, b) => was(a) - was(b));
+  for (let k = 0, j = 0; k < steps.length; k++) if (was(steps[k]) >= 0) steps[k] = kept[j++];
   const out: EventData = { area6: d.area6, storage: Uint16Array.from(storage), steps: d.steps.slice(), silent: d.silent.slice() };
   out.steps[e] = steps.map((p) => ({ at: p.at, pos: p.pos }));
   out.silent[e] = [...d.silent[e].filter((s) => s.layer === 1), ...pieces.filter((p) => !shown.includes(p)).map((p) => ({ layer: 2 as const, tile: p.at, loc: p.pos }))];
@@ -272,7 +273,7 @@ function trimStorage(d: EventData): EventData {
 function pathOrder(pieces: number[][], place: EventPlace): number[] {
   const cells = new Set(pieces.flat()), dist = new Map<number, number>();
   const src = place.from;
-  const far = (i: number) => { const c = cellXY(i); return src ? (c.r === src.region ? Math.hypot(c.x - src.x, c.y - src.y) : 1e6) : c.y * W + c.x; };
+  const far = (i: number) => { const c = l2XY(i); return src ? (c.r === src.region ? Math.hypot(c.x - src.x, c.y - src.y) : 1e6) : c.y * W + c.x; };
   let base = 0;
   while (dist.size < cells.size) {
     const start = [...cells].filter((i) => !dist.has(i)).reduce((a, b) => (far(b) < far(a) ? b : a));
@@ -280,7 +281,7 @@ function pathOrder(pieces: number[][], place: EventPlace): number[] {
     dist.set(start, base);
     let maxD = base;
     for (let q = 0; q < queue.length; q++) {
-      const i = queue[q], c = cellXY(i), di = dist.get(i)!;
+      const i = queue[q], c = l2XY(i), di = dist.get(i)!;
       maxD = Math.max(maxD, di);
       for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
         const x = c.x + dx, y = c.y + dy;
@@ -300,7 +301,7 @@ function pathOrder(pieces: number[][], place: EventPlace): number[] {
 function isReversed(steps: Piece[], d: EventData, place: EventPlace): boolean {
   const src = place.from;
   if (!src || steps.length < 2) return false;
-  const far = (p: Piece) => { const c = cellXY(p.pos >> 1), n = isBig(d, p.at) ? 3 : 1; return c.r === src.region ? Math.hypot(c.x + n - src.x, c.y + n - src.y) : 1e6; };
+  const far = (p: Piece) => { const c = l2XY(p.pos >> 1), n = isBig(d, p.at) ? 3 : 1; return c.r === src.region ? Math.hypot(c.x + n - src.x, c.y + n - src.y) : 1e6; };
   return far(steps[0]) > far(steps[steps.length - 1]);
 }
 

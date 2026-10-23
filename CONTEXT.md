@@ -102,7 +102,7 @@ One of the overworld's 0x78 changes run once when a level is passed (its base ev
 _Avoid_: path reveal (that is part of one), trigger
 
 **Event step**:
-One piece an event changes on layer 2 (a 6x6 or 2x2 block of 8x8 tiles): **animated** (shown with the path fade, in order, on the submap of the level running the event) or **silent** (written at once, on other submaps). The user paints the map as it looks after the event; the editor finds its steps – which tiles changed to the map before it, the pieces, animated or silent, the order along the path from the level tile – and the user changes only their order on the timeline (ADR 0005).
+A 6x6 or 2x2 block of 8x8 tiles an event changes on layer 2: **animated** (shown with the path fade, in order, on the submap of the level running the event) or **silent** (written at once, on other submaps). The user paints the map as it looks after the event; the editor finds its steps – which tiles changed to the map before it, the blocks, animated or silent, the order along the path from the level tile – and the user changes only their order on the timeline (ADR 0005).
 _Avoid_: event tile (Lunar Magic's), piece
 
 **Event progress**:

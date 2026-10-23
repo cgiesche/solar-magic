@@ -109,8 +109,29 @@ const n = d1.steps[e].length, d2 = reorderSteps(readEvents(rom), e, Array.from({
 s.edit('Event: order', () => writeEvents(rom, d2));
 const rev = pass(rom), revFrames = rev ? stepFrames(rev, d2) : [];
 check(revFrames.length === frames.length && revFrames.every((f, k) => f >= 0 && (!k || f > revFrames[k - 1])), `reordered: the game follows the new order (frames ${revFrames.join(' ')})`);
+// an order the user chose stays when the event is painted again: the steps it had keep theirs, a new one joins
+{
+  const dd = readEvents(rom), k = dd.steps[e].length, swapped = reorderSteps(dd, e, [1, 0, ...Array.from({ length: k - 2 }, (_, i) => i + 2)]);
+  const more = applyEvents(base, swapped, 0, e + 1);
+  more[l2Index(1, v.x + 20, v.y + 20)] = word;
+  const again = paintEvent(swapped, base, e, more, place);
+  const key = (p: { pos: number }) => p.pos;
+  const old = swapped.steps[e].map(key), now = again.steps[e].map(key).filter((p) => old.includes(p));
+  check(again.steps[e].length === k + 1 && now.every((p, i) => p === old[i]), `painted again after a reorder: the ${k} steps keep the order chosen, the new one joins (${again.steps[e].length})`);
+}
 s.undo(); s.undo();
 check(romDiff(image, rom.data) === 0, 'undone: the ROM as before');
+
+// events 70–77 (Lunar Magic's 0x78): painted, the game shows them from their event progress on
+{
+  const r2 = new Rom(image.slice()), d0 = readEvents(r2), b0 = readL2(r2), ev = 0x75;
+  const after = applyEvents(b0, d0, 0, ev + 1), cells = [l2Index(0, 30, 30), l2Index(0, 31, 30), l2Index(0, 30, 31), l2Index(0, 31, 31)];
+  for (const i of cells) after[i] = word;
+  writeEvents(r2, paintEvent(d0, b0, ev, after, eventPlace(eventRunners(r2), views, ev, 0)));
+  const em = new OverworldEmulator(r2), at = (n: number) => gameL2(em.load(0, n));
+  check(cells.every((i) => at(ev + 1)[i] === word && at(OW_EVENTS)[i] === word) && cells.every((i) => at(ev)[i] !== word),
+    `event ${hx(ev)}: shown from event progress ${hx(ev + 1)} on, not at ${hx(ev)} (emulated)`);
+}
 
 if (bad) { console.log(`${bad} failed`); process.exit(1); }
 console.log('event painting ok');
