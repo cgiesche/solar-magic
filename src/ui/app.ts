@@ -358,14 +358,31 @@ export class App {
     return levelInput(this.level.number, ov);
   }
 
+  // what the render was made from: its inputs, the ROM generation and the ROM bytes it read
+  private rendered: { key: string; gen: number; reads: RomReads } | null = null;
+
+  // the level emulated and drawn anew – unless its inputs and the ROM bytes the last render read are unchanged
+  // (a ROM edit elsewhere: the overworld, another level's data)
   refresh(): void {
     const lv = this.level, ov = this.buildOverrides();
-    const r = this.emu.load(lv.number, ov);
-    this.renderError = r.ok ? null : r.error ?? 'Error';
-    // as many steps as the level's own animations take to repeat (the game's repeat after 8)
-    this.anim.snaps = this.show.anim && r.ok ? this.emu.animationFrames(exanimPeriod([readLevelList(this.rom, lv.number), readGlobalList(this.rom)], 64, 8)) : [];
-    this.render = r;
-    this.images = renderLevel(this.rom, r, lv.header.mode, lv.header.screens, levelRows(lv.secondary));
+    const key = inputHash({ level: lv.number, ov, header: lv.header, secondary: lv.secondary, show: this.show, mode: this.mode });
+    const was = this.rendered, changes = was?.key === key ? this.rom.changesSince(was.gen) : null;
+    if (was && changes && !was.reads.touches(changes)) {
+      was.gen = this.rom.gen;
+      this.scheduleScan();
+      this.updateGameViewCamera(ov);
+      return;
+    }
+    const gen = this.rom.gen;
+    const { reads } = this.emu.recordAll(() => {
+      const r = this.emu.load(lv.number, ov);
+      this.renderError = r.ok ? null : r.error ?? 'Error';
+      // as many steps as the level's own animations take to repeat (the game's repeat after 8)
+      this.anim.snaps = this.show.anim && r.ok ? this.emu.animationFrames(exanimPeriod([readLevelList(this.rom, lv.number), readGlobalList(this.rom)], 64, 8)) : [];
+      this.render = r;
+      this.images = renderLevel(this.rom, r, lv.header.mode, lv.header.screens, levelRows(lv.secondary));
+    });
+    this.rendered = { key, gen, reads };
     // palette thumbnails are transparent: shown on the level's backdrop as in the game
     const c = this.images.backdrop;
     document.documentElement.style.setProperty('--level-backdrop', `rgb(${c & 0xff},${(c >> 8) & 0xff},${(c >> 16) & 0xff})`);
@@ -902,7 +919,7 @@ export class App {
       this.levelScan = { key, level: lv.number, result, uids };
       this.emit('level-scan');
     };
-    if (this.levelScan?.key === key) { done(this.levelScan.result); return; }
+    // (the scan of the level as it is: also the one shown while it holds for the ROM)
     const stored = this.results.get<ScanResult>(key);
     if (stored) { done(stored); return; }
     // played in the probe worker

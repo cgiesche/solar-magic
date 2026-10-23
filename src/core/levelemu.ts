@@ -158,6 +158,20 @@ export class LevelEmulator {
     }
   }
 
+  // runs fn recording every ROM byte it and the boot it starts from read, those skipMask leaves out too: what
+  // fn's outcome depends on (a render shows GFX file data)
+  recordAll<T>(fn: () => T): { result: T; reads: RomReads } {
+    const s = this.snes, outer = s.romMasked, masked = new RomReads(this.rom.data.length);
+    s.romMasked = masked;
+    try {
+      const r = this.tracked(fn);
+      r.reads.add(masked);
+      if (this.bootReads) r.reads.add(this.bootReads);
+      if (this.bootMasked) r.reads.add(this.bootMasked);
+      return r;
+    } finally { s.romMasked = outer; }
+  }
+
   // Every entry (boot, load, startGame, call, animationFrames) first catches up with a changed ROM
   // (rom.gen): the data array may be replaced (expansion), and a change of what the boot read (a
   // patch's power-on code, e.g. Retry System's RAM setup) makes the boot snapshot stale: boot again

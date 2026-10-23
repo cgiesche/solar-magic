@@ -156,6 +156,28 @@ const TITLE_BYTE = 0x7fc0; // the internal name: not read while booting
   check(!emu.bootReads!.pages[snesToPc(e.addr) >> 8], 'GFX data still no dependency of results');
 }
 
+// what a level load read, GFX file data and the boot included (App.refresh draws the level anew only when one
+// of those bytes changed): overworld data isn't among them, a GFX file the level uses is
+{
+  const rom = fresh();
+  installEditorPatch(rom);
+  const emu = new LevelEmulator(rom);
+  emu.skipMask = () => gfxSkipMask(rom);
+  const { reads } = emu.recordAll(() => emu.load(0x105));
+  let g = rom.gen;
+  for (const [snes, n] of [[0x0cf7df, 0x800], [0x04a533, 0x40], [0x04c02b, 0x40], [0x04d85d, 0x10]]) {
+    rom.writeAt(snesToPc(snes), rom.data.slice(snesToPc(snes), snesToPc(snes) + n).map((b) => b ^ 0x5a));
+  }
+  check(!reads.touches(rom.changesSince(g)!), 'level load: overworld data not read');
+  const e = gfxEntry(rom, 0x14)!, o = snesToPc(e.addr);
+  g = rom.gen;
+  rom.writeAt(o + 8, Uint8Array.of(rom.data[o + 8] ^ 0xff));
+  check(reads.touches(rom.changesSince(g)!), 'level load: a GFX file it uploads is read (though no dependency of results)');
+  g = rom.gen;
+  rom.writeAt(BOOT_BYTE, Uint8Array.of(rom.data[BOOT_BYTE] ^ 0xff));
+  check(reads.touches(rom.changesSince(g)!), 'level load: what the boot read counts');
+}
+
 // the overworld emulator's title snapshot follows the same rule
 {
   const rom = fresh(), ow = new OverworldEmulator(rom);
