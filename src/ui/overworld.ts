@@ -3,17 +3,19 @@
 import type { App } from './app.ts';
 import { h, toast, select, attachPanZoom, zoomControl, ZOOM_MIN, ZOOM_MAX, attachRectPick, emptyState } from './dom.ts';
 import {
-  OverworldEmulator, type OwRender, readL1, writeL1, readL2, writeL2, l1Index, l2Index, translevels, isLevelTile,
-  translevelToLevel, nameCode, setNameCode, splitNameCode, joinNameCode, nameWord, levelName, NAME_PART_COUNTS, MAP_NAMES,
+  OverworldEmulator, type OwRender, readL1, writeL1, readL2, writeL2, l1Index, l2Index, isLevelTile, readTranslevels, writeTranslevels,
+  placeTile, sharedTranslevels, enterableLevels, translevelToLevel, nameCode, setNameCode, splitNameCode, joinNameCode, nameWord, levelName, NAME_PART_COUNTS, MAP_NAMES,
 } from '../core/overworld.ts';
 import { TileCache, blit8 } from '../core/render.ts';
 import { hex } from '../core/names.ts';
 import { menuButton } from './menu.ts';
+import { levelPicker } from './levelpicker.ts';
 import { RAM, map16Pointer } from '../core/ram.ts';
 import type { Rom } from '../core/rom.ts';
 
-// a w×h block of L1 tiles (16x16) or L2 tilemap entries (8x8), row-major
-type Brush = { kind: 'l1' | 'l2'; w: number; h: number; entries: number[] };
+// a w×h block of L1 tiles (16x16) or L2 tilemap entries (8x8), row-major; L1 tiles picked up from the map carry
+// their translevels (`tls`, 0 none), so a level tile placed with them enters the same level
+type Brush = { kind: 'l1' | 'l2'; w: number; h: number; entries: number[]; tls?: number[] };
 type Drag =
   | { kind: 'paint'; layer: 'l1' | 'l2'; x0: number; y0: number; lastX: number; lastY: number } // brush stamped on a grid from (x0, y0)
   | { kind: 'pick'; x0: number; y0: number; x1: number; y1: number }; // map cells taken into the brush
@@ -48,6 +50,9 @@ function drawL1Tile(rom: Rom, img: Uint32Array, tc: TileCache, r: OwRender, t: n
   blit8(img, W, H, tc.get(w[3]), px + 8, py + 8);
 }
 
+// a layer 1 tile's position on its 512x512 map
+const tileXY = (i: number) => ({ x: ((i >> 8) & 1) * 16 + (i & 15), y: ((i >> 9) & 1) * 16 + ((i >> 4) & 15) });
+
 export class OverworldView {
   app: App;
   root: HTMLDivElement;
@@ -68,9 +73,11 @@ export class OverworldView {
   emu: OverworldEmulator;
   map = 0;
   renders = new Map<string, OwRender>();
-  // the maps as in the ROM, with the stroke being painted (written to the ROM when it ends)
+  // the maps as in the ROM, with the stroke being painted (written to the ROM when it ends); tls: the translevel
+  // of each layer 1 tile
   l1: Uint8Array;
   l2: Uint16Array;
+  tls: Uint8Array;
   mode: 'l1' | 'l2' = 'l1';
   showL1 = true;
   showL2 = true;
@@ -82,9 +89,8 @@ export class OverworldView {
   l2Pal = 0;
   hover: { x: number; y: number } | null = null;
   drag: Drag | null = null;
-  selectedTl = -1;
+  selected = -1; // the level tile shown in the properties (l1Index)
   mapCanvas = document.createElement('canvas');
-  private warnedTl = false;
   // set by the host: open a level in the level editor
   onOpenLevel: (n: number) => void = () => {};
   onNav: () => void = () => {};
@@ -94,6 +100,7 @@ export class OverworldView {
     this.emu = new OverworldEmulator(app.rom);
     this.l1 = readL1(app.rom);
     this.l2 = readL2(app.rom);
+    this.tls = readTranslevels(app.rom);
     this.canvas = h('canvas', { class: 'level-canvas' });
     this.sizer = h('div', { class: 'level-sizer' });
     this.scroller = h('div', { class: 'level-scroller', tabIndex: 0 }, this.canvas, this.sizer);
@@ -189,17 +196,16 @@ export class OverworldView {
       for (let i = 0; i <= 512; i += step) { ctx.moveTo(i, 0); ctx.lineTo(i, 512); ctx.moveTo(0, i); ctx.lineTo(512, i); }
       ctx.stroke();
     }
-    // level tile labels
-    const tl = translevels(this.l1);
+    // level tile labels: the level each enters (in orange where another tile enters it too)
+    const shared = sharedTranslevels(this.l1, this.tls);
     ctx.font = `bold ${8}px monospace`;
     for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
-      const i = l1Index(this.region, x, y);
-      if (!tl[i]) continue;
-      const sel = tl[i] === this.selectedTl;
-      ctx.fillStyle = sel ? 'rgba(76,194,255,0.85)' : 'rgba(0,0,0,0.6)';
+      const i = l1Index(this.region, x, y), tl = this.tls[i];
+      if (!isLevelTile(this.l1[i])) continue;
+      ctx.fillStyle = i === this.selected ? 'rgba(76,194,255,0.85)' : shared.has(tl) || !tl ? 'rgba(230,120,0,0.85)' : 'rgba(0,0,0,0.6)';
       ctx.fillRect(x * 16, y * 16 + 10, 16, 7);
       ctx.fillStyle = '#fff';
-      ctx.fillText(hex(translevelToLevel(tl[i]), 3), x * 16 + 1, y * 16 + 16);
+      ctx.fillText(tl ? hex(translevelToLevel(tl), 3) : '---', x * 16 + 1, y * 16 + 16);
     }
     const s = this.mode === 'l1' ? 16 : 8;
     if (this.drag?.kind === 'pick') {
@@ -275,15 +281,27 @@ export class OverworldView {
     return { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
   }
 
-  // a stroke is one ROM edit, written when it ends (layer 1 where it changed, layer 2 in place when it fits)
+  // a stroke is one ROM edit, written when it ends (layer 1 where it changed with the translevels of its level tiles,
+  // layer 2 in place when it fits)
   endStroke(layer: 'l1' | 'l2'): void {
     const rom = this.app.rom;
+    const before = layer === 'l1' ? sharedTranslevels(readL1(rom), readTranslevels(rom)) : new Map<number, number[]>();
+    const l1 = this.l1, tls = this.tls;
     try {
-      this.app.romEdit(layer === 'l1' ? 'Paint layer 1' : 'Paint layer 2', () => (layer === 'l1' ? writeL1(rom, this.l1) : writeL2(rom, this.l2)));
+      this.app.romEdit(layer === 'l1' ? 'Paint layer 1' : 'Paint layer 2', () => {
+        if (layer === 'l2') { writeL2(rom, this.l2); return; }
+        writeL1(rom, l1);
+        writeTranslevels(rom, tls);
+      });
     } catch (e) {
       toast(`Not painted: ${e instanceof Error ? e.message : e}`, 'error');
       this.sync();
+      return;
     }
+    if (layer !== 'l1') return;
+    const added = [...sharedTranslevels(l1, tls)].filter(([tl, at]) => (before.get(tl)?.length ?? 0) < at.length);
+    if (added.length) toast(`${added.map(([tl, at]) => `Level ${hex(translevelToLevel(tl), 3)} is entered from ${at.length} tiles`).join(', ')} – to move a level tile, paint over the old one.`);
+    if (l1.some((v, i) => isLevelTile(v) && !tls[i])) toast('Every level (001–024, 101–13B) is already entered from a level tile – the new level tile enters none; choose its level in the properties.');
   }
 
   readOnly(): boolean {
@@ -300,13 +318,10 @@ export class OverworldView {
       if (xx < 0 || yy < 0 || xx >= n || yy >= n) continue;
       const v = b.entries[dy * b.w + dx];
       if (this.mode === 'l1') {
-        const i = l1Index(this.region, xx, yy);
-        if (this.l1[i] === v) continue;
-        if (!this.warnedTl && (isLevelTile(this.l1[i]) || isLevelTile(v))) {
-          this.warnedTl = true;
-          toast('Note: level tiles (56–80) get their translevel number in scan order – adding or removing level tiles shifts the numbers of all following ones.');
-        }
-        this.l1[i] = v; changed = true;
+        const i = l1Index(this.region, xx, yy), carried = b.tls?.[dy * b.w + dx] ?? 0;
+        if (this.l1[i] === v && (!carried || this.tls[i] === carried)) continue;
+        placeTile(this.l1, this.tls, i, v, carried);
+        changed = true;
       } else {
         const i = l2Index(this.region, xx, yy);
         if (this.l2[i] !== v) { this.l2[i] = v; changed = true; }
@@ -320,29 +335,27 @@ export class OverworldView {
   pick(r: { x: number; y: number; w: number; h: number }): void {
     const src = this.mode === 'l2' ? this.l2 : this.showEvents ? this.render().wram.subarray(RAM.owLayer1, RAM.owLayer1End) : this.l1;
     const idx = this.mode === 'l2' ? l2Index : l1Index;
-    const entries = Array.from({ length: r.w * r.h }, (_, i) => src[idx(this.region, r.x + (i % r.w), r.y + Math.floor(i / r.w))]);
-    this.brush = { kind: this.mode, w: r.w, h: r.h, entries };
+    const at = Array.from({ length: r.w * r.h }, (_, i) => idx(this.region, r.x + (i % r.w), r.y + Math.floor(i / r.w)));
+    const entries = at.map((i) => src[i]);
+    this.brush = { kind: this.mode, w: r.w, h: r.h, entries, tls: this.mode === 'l1' ? at.map((i, k) => (isLevelTile(entries[k]) ? this.tls[i] : 0)) : undefined };
     this.buildSide();
     this.paint();
   }
 
   info(x: number, y: number): void {
     if (this.mode !== 'l1') { toast('Level info is available on layer 1 (paths/levels)'); return; }
-    const tl = translevels(this.l1)[l1Index(this.region, x, y)];
-    if (!tl) toast('Not a level tile');
-    this.selectTl(tl || -1, false);
+    const i = l1Index(this.region, x, y);
+    if (!isLevelTile(this.l1[i])) toast('Not a level tile');
+    this.selectTile(isLevelTile(this.l1[i]) ? i : -1, false);
   }
 
-  // selects a translevel (list, Alt/Ctrl+click); center: scroll the map to its tile
-  selectTl(tl: number, center: boolean): void {
-    this.selectedTl = tl;
-    if (center && tl > 0) {
-      const t = translevels(this.l1);
-      for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
-        if (t[l1Index(this.region, x, y)] !== tl) continue;
-        this.scroller.scrollLeft = (x * 16 + 8) * this.zoom - this.scroller.clientWidth / 2;
-        this.scroller.scrollTop = (y * 16 + 8) * this.zoom - this.scroller.clientHeight / 2;
-      }
+  // selects a level tile (list, Alt/Ctrl+click; l1Index); center: scroll the map to it
+  selectTile(i: number, center: boolean): void {
+    this.selected = i;
+    if (center && i >= 0) {
+      const { x, y } = tileXY(i);
+      this.scroller.scrollLeft = (x * 16 + 8) * this.zoom - this.scroller.clientWidth / 2;
+      this.scroller.scrollTop = (y * 16 + 8) * this.zoom - this.scroller.clientHeight / 2;
     }
     this.buildProps();
     this.buildLeft();
@@ -363,8 +376,8 @@ export class OverworldView {
       if (c.x >= 0 && c.y >= 0 && c.x < 32 && c.y < 32) {
         const i = l1Index(this.region, c.x, c.y);
         t += `  ·  Tile ${hex(this.l1[i], 2)}`;
-        const tl = translevels(this.l1)[i];
-        if (tl) t += `  ·  Translevel ${hex(tl, 2)} → Level ${hex(translevelToLevel(tl), 3)} “${levelName(this.app.rom, tl)}”`;
+        const tl = this.tls[i];
+        if (isLevelTile(this.l1[i])) t += tl ? `  ·  Level ${hex(translevelToLevel(tl), 3)} “${levelName(this.app.rom, tl)}”` : '  ·  Enters no level';
       }
     } else if (c.x >= 0 && c.y >= 0 && c.x < 64 && c.y < 64) t += `  ·  Entry ${hex(this.l2[l2Index(this.region, c.x, c.y)], 4)}`;
     this.statusText.textContent = t;
@@ -373,7 +386,7 @@ export class OverworldView {
   setMap(n: number): void {
     if (n === this.map) return;
     this.map = n;
-    this.selectedTl = -1;
+    this.selected = -1;
     this.redrawMap();
     this.buildBar();
     this.buildSide();
@@ -427,18 +440,16 @@ export class OverworldView {
 
   // ---------------- left: level tiles of the map ----------------
   buildLeft(): void {
-    const t = translevels(this.l1);
-    const seen = new Set<number>();
+    const shared = sharedTranslevels(this.l1, this.tls);
     const items: HTMLElement[] = [];
     for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
-      const tl = t[l1Index(this.region, x, y)];
-      if (!tl || seen.has(tl)) continue;
-      seen.add(tl);
-      const lvl = translevelToLevel(tl), name = levelName(this.app.rom, tl);
-      const cur = tl === this.selectedTl;
-      const el = h('div', { class: `level-item${cur ? ' current' : ''}`, title: `${name}\nClick: select · Double click: open in the level editor`,
-        onclick: () => this.selectTl(tl, true), ondblclick: () => this.onOpenLevel(lvl) },
-        hex(lvl, 3), h('span', { class: 'lname' }, ` ${name}`));
+      const i = l1Index(this.region, x, y), tl = this.tls[i];
+      if (!isLevelTile(this.l1[i])) continue;
+      const lvl = translevelToLevel(tl), name = tl ? levelName(this.app.rom, tl) : '(enters no level)';
+      const cur = i === this.selected, warn = shared.has(tl) || !tl;
+      const el = h('div', { class: `level-item${cur ? ' current' : ''}`, title: `${name}\n${warn && tl ? 'Another level tile enters this level too\n' : ''}Click: select · Double click: open in the level editor`,
+        onclick: () => this.selectTile(i, true), ondblclick: () => { if (tl) this.onOpenLevel(lvl); } },
+        tl ? hex(lvl, 3) : '---', h('span', { class: 'lname' }, ` ${name}`), warn ? h('span', { class: 'warn-text' }, ' ⚠') : null);
       items.push(el);
       if (cur) setTimeout(() => el.scrollIntoView({ block: 'nearest' }), 0);
     }
@@ -459,21 +470,37 @@ export class OverworldView {
   }
 
   buildProps(): void {
-    const tl = this.selectedTl;
     this.props.replaceChildren(h('div', { class: 'panel-title' }, 'Properties'),
-      tl > 0 ? this.levelInfo(tl) : emptyState('Select a level tile in the list on the left or with Alt/Ctrl+click on the map.'));
+      this.selected >= 0 ? this.levelInfo(this.selected) : emptyState('Select a level tile in the list on the left or with Alt/Ctrl+click on the map.'));
   }
 
-  levelInfo(tl: number): HTMLElement {
-    const rom = this.app.rom;
+  // the level tile at i: the level it enters (chosen from the levels; the translevel only shown), its name
+  levelInfo(i: number): HTMLElement {
+    const rom = this.app.rom, tl = this.tls[i], { x, y } = tileXY(i);
+    const where = (k: number) => { const p = tileXY(k); return `${k >= 0x400 ? 'submaps' : 'main map'} ${hex(p.x, 2)},${hex(p.y, 2)}`; };
+    const others = this.tls.reduce<number[]>((a, v, k) => (v && v === tl && k !== i && isLevelTile(this.l1[k]) ? [...a, k] : a), []);
+    const onMap = (t: number) => this.tls.findIndex((v, k) => v === t && k !== i && isLevelTile(this.l1[k]));
+    const levels = enterableLevels();
+    const choose = levelPicker(this.app, tl ? translevelToLevel(tl) : levels[0].level, (lvl) => {
+      const t = levels.find((l) => l.level === lvl)!.translevel;
+      if (t === tl) return;
+      const next = this.tls.slice();
+      next[i] = t;
+      this.app.romEdit(`Level tile ${hex(x, 2)},${hex(y, 2)}: level ${hex(lvl, 3)}`, () => writeTranslevels(rom, next));
+    }, { levels: levels.map((l) => l.level), note: (lvl) => { const k = onMap(levels.find((l) => l.level === lvl)!.translevel); return k >= 0 ? `on ${where(k)}` : ''; } });
+    const head = [
+      h('div', { class: 'prop' }, h('label', null, 'Enters level'), choose),
+      h('div', { class: 'hint' }, `Tile ${hex(x, 2)},${hex(y, 2)}${tl ? ` · translevel ${hex(tl, 2)}` : ''}`),
+      ...others.map((k) => h('div', { class: 'hint warn-text' }, `⚠ The level tile at ${where(k)} enters this level too.`)),
+    ];
+    if (!tl) return h('div', { class: 'ow-info' }, ...head, h('div', { class: 'hint warn-text' }, '⚠ This level tile enters no level.'));
     const parts = splitNameCode(nameCode(rom, tl));
     const lvl = translevelToLevel(tl);
     const sel = (k: number) => select(Array.from({ length: NAME_PART_COUNTS[k] }, (_, i) => [i, `${hex(i, 2)}: ${nameWord(rom, k, i).trim() || '(empty)'}`] as [number, string]), parts[k], (v) => {
       parts[k] = v;
       this.app.romEdit(`Level name ${hex(lvl, 3)}`, () => setNameCode(rom, tl, joinNameCode(parts)));
     });
-    return h('div', { class: 'ow-info' },
-      h('div', { class: 'prop-title' }, `Translevel ${hex(tl, 2)} → Level ${hex(lvl, 3)}`),
+    return h('div', { class: 'ow-info' }, ...head,
       h('div', null, `“${levelName(this.app.rom, tl)}”`),
       h('div', { class: 'prop' }, h('label', null, 'Name part 1'), sel(0)),
       h('div', { class: 'prop' }, h('label', null, 'Name part 2'), sel(1)),
@@ -584,8 +611,9 @@ export class OverworldView {
   sync(): void {
     this.l1 = readL1(this.app.rom);
     this.l2 = readL2(this.app.rom);
+    this.tls = readTranslevels(this.app.rom);
     this.invalidate();
-    if (this.selectedTl > 0 && !translevels(this.l1).includes(this.selectedTl)) this.selectedTl = -1;
+    if (this.selected >= 0 && !isLevelTile(this.l1[this.selected])) this.selected = -1;
     this.buildSide();
     this.buildLeft();
     this.redrawMap();

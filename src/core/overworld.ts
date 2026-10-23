@@ -5,6 +5,8 @@ import { Snes, type SnesState } from './snes.ts';
 import { RomReads, updateBytePages } from './romdeps.ts';
 import { rleDecode, rleEncode } from './rle.ts';
 import { GM, RAM } from './ram.ts';
+import { assemble } from './asar.ts';
+import { lz2Compress, lz2Decompress } from './lz2.ts';
 
 export const OW_L1 = 0x0cf7df; // 0x800 bytes: 2 maps × 32×32 16x16 tiles (quadrant layout)
 const L2_TILE_PTR = 0x04dc72; // LDA #$A533 operand
@@ -86,11 +88,20 @@ export function writeL2(rom: Rom, entries: Uint16Array): number {
   return t.length + a.length;
 }
 
-// vanilla: level tiles ($56-$80) get translevel numbers in scan order
+// ---- level tiles and their translevels ----
+// Level tiles and the translevel each enters, stored per tile in Lunar Magic's translevel table (ADR 0005): the
+// game numbers the level tiles by scanning layer 1 ($04D7F2, scanTranslevels), so placing one shifts every later
+// level's number, name, base event and flags. Lunar Magic replaces the scan with a table of the 0x800 tiles'
+// translevels, LC_LZ2 compressed and decompressed to $7ED000 (its pointer at $04D803, bank at $04D808 –
+// Ankouno's OverworldTables.asm); the patch writes its own code there in that layout. The rest of the game's
+// routine stays: each level tile's initial flags ($04D678 by translevel) to $7ED800, then the passed events.
+// Translevel 0 is no level (the scan starts at 1); a level tile has one, any other tile 0.
+
 export function isLevelTile(t: number): boolean {
   return t >= 0x56 && t < 0x81;
 }
-export function translevels(l1: Uint8Array): Uint8Array {
+// the game's numbering: the level tiles in scan order from 1
+export function scanTranslevels(l1: Uint8Array): Uint8Array {
   const out = new Uint8Array(0x800);
   let n = 1;
   for (let i = 0; i < 0x800; i++) if (isLevelTile(l1[i])) out[i] = n++;
@@ -99,6 +110,111 @@ export function translevels(l1: Uint8Array): Uint8Array {
 export function translevelToLevel(t: number): number {
   return t < 0x25 ? t : t + 0xdc;
 }
+
+const HOOK = 0x04d7f2, HOOK_END = 0x04d85d;
+const PTR = 0x04d803; // LDA #$xxxx operand: the table's address
+const BANK = 0x04d808; // LDA #$xx operand: its bank
+export const TILES = 0x800;
+export const MAX_TRANSLEVEL = 0x5f; // level 13B
+const SLACK = 0x40; // free bytes after the table in its block, so that later changes still fit
+
+const asm = `lorom
+org $${HOOK.toString(16)}
+  PHB
+  SEP #$20 : REP #$10
+  LDY #$D000 : STY $00 : LDA #$7E : STA $02     ; to $7ED000
+  REP #$20
+  assert pc() == $04D802
+  LDA.w #$0000 : STA $8A                       ; the table (written by the editor)
+  assert pc() == $04D807
+  LDA.w #$0000 : STA $8C
+  SEP #$20
+  LDA #$00 : PHA : PLB
+  PHK : PEA.w Decompressed-1 : PEA.w $804C     ; the game's decompression (RTS) through an RTL of bank 0
+  JML $00B8DE
+Decompressed:
+  PLB
+  REP #$30 : LDA #$0000 : SEP #$20
+  LDA #$00 : STA $0A : LDA #$D8 : STA $0B : LDA #$7E : STA $0C   ; $7ED800 as the game's
+  LDY #$07FF
+- TYX
+  LDA.l $7ED000,x : BEQ +
+  TAX : LDA.l $04D678,x                        ; the translevel's initial flags
++ STA [$0A],y
+  DEY : BPL -
+  STZ $0F                                      ; the passed events, as the game's
+- JSR $DA49
+  INC $0F : LDA $0F : CMP #$6F : BNE -
+  RTS
+warnpc $${HOOK_END.toString(16)}
+`;
+
+export function hasTranslevelTable(rom: Rom): boolean {
+  return rom.r8(PTR - 1) === 0xa9 && rom.r8(BANK - 1) === 0xa9;
+}
+const tableAt = (rom: Rom) => (rom.r8(BANK) << 16) | rom.r16(PTR);
+
+// the translevel of every layer 1 tile (l1Index order); a ROM without the table numbers them as the game does
+export function readTranslevels(rom: Rom): Uint8Array {
+  if (!hasTranslevelTable(rom)) return scanTranslevels(readL1(rom));
+  const out = new Uint8Array(TILES);
+  out.set(lz2Decompress(rom.data, snesToPc(tableAt(rom))).data.subarray(0, TILES));
+  return out;
+}
+
+// writes the table where it is when it fits its block, else to free space; unchanged: nothing written
+export function writeTranslevels(rom: Rom, t: Uint8Array): void {
+  const at = tableAt(rom); // 0: the patch being installed
+  if (at && readTranslevels(rom).every((v, i) => v === t[i])) return;
+  const packed = lz2Compress(t);
+  const room = at && snesToPc(at) >= 0x80008 ? rom.isRatsAt(snesToPc(at) - 8) : -1;
+  if (packed.length <= room) { rom.writeBytes(at, packed); return; }
+  if (at) rom.freeAt(at);
+  const payload = new Uint8Array(packed.length + SLACK);
+  payload.set(packed);
+  const addr = rom.allocWrite(payload);
+  rom.w16(PTR, addr & 0xffff);
+  rom.w8(BANK, addr >> 16);
+}
+
+// needs Asar (loadAsar) to be loaded; every level tile gets the translevel the game's scan gives it
+export function installTranslevelPatch(rom: Rom): void {
+  if (hasTranslevelTable(rom)) return;
+  const t = scanTranslevels(readL1(rom));
+  const r = assemble(rom.data, new Map([['translevels.asm', asm]]), 'translevels.asm');
+  if (!r.ok) throw new Error(r.errors.map((e) => e.message).join(' '));
+  rom.writeAt(snesToPc(HOOK), r.rom.subarray(snesToPc(HOOK), snesToPc(HOOK_END)));
+  writeTranslevels(rom, t);
+}
+
+// the lowest translevel no tile enters (0: all are entered)
+export function freeTranslevel(t: Uint8Array): number {
+  const used = new Set(t);
+  for (let n = 1; n <= MAX_TRANSLEVEL; n++) if (!used.has(n)) return n;
+  return 0;
+}
+
+// paints tile v at i (l1 and t changed): a level tile takes `carried` (the translevel it was picked up from the
+// map with), else keeps the one there (a level tile painted over), else gets a free one; any other tile none,
+// so the translevel of a level tile painted over is free again
+export function placeTile(l1: Uint8Array, t: Uint8Array, i: number, v: number, carried = 0): void {
+  l1[i] = v;
+  if (!isLevelTile(v)) t[i] = 0;
+  else if (carried) t[i] = carried;
+  else if (!t[i]) t[i] = freeTranslevel(t);
+}
+
+// the translevels more than one level tile enters, with their tiles
+export function sharedTranslevels(l1: Uint8Array, t: Uint8Array): Map<number, number[]> {
+  const tiles = new Map<number, number[]>();
+  t.forEach((n, i) => { if (n && isLevelTile(l1[i])) (tiles.get(n) ?? tiles.set(n, []).get(n)!).push(i); });
+  for (const [n, l] of tiles) if (l.length < 2) tiles.delete(n);
+  return tiles;
+}
+
+// the levels a level tile can enter (001–024, 101–13B), by translevel
+export const enterableLevels = (): { translevel: number; level: number }[] =>
+  Array.from({ length: MAX_TRANSLEVEL }, (_, k) => ({ translevel: k + 1, level: translevelToLevel(k + 1) }));
 
 // ---- level names ----
 const CHARMAP: Record<number, string> = { 0x1f: ' ', 0x5d: "'", 0x5a: '#', 0x1c: '-', 0x1b: '!', 0x1d: '.' };
@@ -145,7 +261,7 @@ export const baseEvent = (rom: Rom, tl: number): number => rom.r8(BASE_EVENTS + 
 export function eventNames(rom: Rom): Map<number, string> {
   const normal = new Map<number, string[]>(), secret = new Map<number, string[]>();
   const add = (m: Map<number, string[]>, e: number, n: string) => { if (e < OW_EVENTS) (m.get(e) ?? m.set(e, []).get(e)!).push(n); };
-  const tls = [...new Set(translevels(readL1(rom)))].filter((t) => t).sort((a, b) => a - b);
+  const tls = [...new Set(readTranslevels(rom))].filter((t) => t).sort((a, b) => a - b);
   for (const tl of tls) {
     const b = baseEvent(rom, tl);
     if (b >= OW_EVENTS) continue;

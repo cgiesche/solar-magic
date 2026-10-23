@@ -6,7 +6,7 @@ import type { App } from './app.ts';
 import { h, modal, select, checkbox, toast } from './dom.ts';
 import { hex2, hex3 } from '../core/names.ts';
 import { OW_ACTIONS, owActionName, type OverworldExit } from '../core/level.ts';
-import { OverworldEmulator, MAP_NAMES, OW_EVENTS, eventNames, readL1, readL2, translevels, translevelToLevel, l1Index } from '../core/overworld.ts';
+import { OverworldEmulator, MAP_NAMES, OW_EVENTS, eventNames, readL1, readL2, readTranslevels, translevelToLevel, l1Index } from '../core/overworld.ts';
 import { readTeleport, readTeleports, locationText, tileText, overworldExitText, type OwTile } from '../core/owteleport.ts';
 import { drawOwMap, putImage } from './overworld.ts';
 
@@ -53,7 +53,7 @@ function teleportTo(app: App, idx: number, tile: OwTile): void {
 // framed. The map as in the ROM
 export function pickOverworldTile(app: App, cur: OwTile | null): Promise<OwTile | null> {
   return new Promise((resolve) => {
-    const rom = app.rom, emu = new OverworldEmulator(rom), l1 = readL1(rom), l2 = readL2(rom), tls = translevels(l1);
+    const rom = app.rom, emu = new OverworldEmulator(rom), l1 = readL1(rom), l2 = readL2(rom), tls = readTranslevels(rom);
     const images = new Map<number, HTMLCanvasElement>();
     let map = cur?.submap ?? 0, hover: { x: number; y: number } | null = null, done = false;
     const canvas = h('canvas', { width: 512, height: 512, class: 'ow-pick' });

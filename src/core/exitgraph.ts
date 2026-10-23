@@ -4,7 +4,7 @@
 
 import type { Rom } from './rom.ts';
 import { loadLevel, readSecondaryEntrance, mainTranslevel, exitToMidway, exitIndex, oldStyleSecondary, storedExits, SEC_ENT, SEC_LEVEL_HI, EXIT_NEW, OW_EXIT, type ScreenExit } from './level.ts';
-import { levelName, readL1, translevels, translevelToLevel } from './overworld.ts';
+import { levelName, readTranslevels, translevelToLevel } from './overworld.ts';
 import { hex } from './names.ts';
 
 export interface ExitRef {
@@ -123,7 +123,7 @@ export function isBlank(rom: Rom, idx: number): boolean {
 // The game's exits without u (old-style) take the target's high bit from the overworld submap Mario is on
 // ($05D7CB: submap 0 → 0xx, else 1xx), which stays while he goes on through the exits of the level he entered.
 // The banks each level is played from: its overworld tile's (submap 0 is the main map, the first 0x400 tiles
-// of layer 1; the game's translevel table $7ED000 numbers the tiles as translevels() does), then through
+// of layer 1; the game's translevel table $7ED000 is readTranslevels()), then through
 // exits, breadth first. In the game every level is played from its own bank only (tools/testexitbank.ts)
 export function submapBanks(rom: Rom): Map<number, Set<number>> {
   const banks = new Map<number, Set<number>>();
@@ -132,7 +132,7 @@ export function submapBanks(rom: Rom): Map<number, Set<number>> {
     const s = banks.get(level) ?? banks.set(level, new Set()).get(level)!;
     if (!s.has(bank)) { s.add(bank); queue.push([level, bank]); }
   };
-  translevels(readL1(rom)).forEach((t, i) => { if (t) reach(translevelToLevel(t), i >= 0x400 ? 1 : 0); });
+  readTranslevels(rom).forEach((t, i) => { if (t) reach(translevelToLevel(t), i >= 0x400 ? 1 : 0); });
   while (queue.length) {
     const [n, bank] = queue.shift()!;
     let exits: ScreenExit[];

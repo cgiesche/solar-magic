@@ -376,6 +376,14 @@ export class LevelEmulator {
   // the tile again loads the level. Tiles of submaps get the submap whose camera view (from loading
   // each submap) is centered nearest to them. Not found on the overworld: Mario stays at the start.
   startGame(tl: number): void {
+    this.startOn((w) => (tl > 0 ? w.subarray(RAM.owTranslevels, RAM.owTranslevelsEnd).indexOf(tl) : -1));
+  }
+  // as startGame, Mario on layer 1 tile i (l1Index order)
+  startGameAt(i: number): void {
+    this.startOn(() => i);
+  }
+  // tile: Mario's layer 1 tile on the overworld the new game reached (< 0: he stays at the start)
+  private startOn(tile: (wram: Uint8Array) => number): void {
     this.sync();
     if (!this.baseState) this.boot();
     const s = this.snes, w = s.wram;
@@ -389,7 +397,7 @@ export class LevelEmulator {
     }
     s.joy1 = 0;
     for (let i = 0; i < 3; i++) s.runFrame();
-    const i = tl > 0 ? w.subarray(RAM.owTranslevels, RAM.owTranslevelsEnd).indexOf(tl) : -1;
+    const i = tile(w);
     if (i < 0) return;
     const tx = ((i >> 8) & 1) * 16 + (i & 15), ty = ((i >> 9) & 1) * 16 + ((i >> 4) & 15);
     // pixel position: like the start position relative to its tile
