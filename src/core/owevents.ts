@@ -148,6 +148,8 @@ export interface Rect { x: number; y: number; w: number; h: number }
 export interface EventPlace { views: (Rect | null)[]; from: { region: number; x: number; y: number } | null }
 
 const W = 64; // tiles per row of a region
+// a layer 2 tile's region and position (readL2 index; l2Index's inverse)
+export const l2XY = (i: number): { r: number; x: number; y: number } => cellXY(i);
 const cellXY = (i: number) => { const r = i >> 12, k = i & 0xfff, q = k >> 10; return { r, x: (q & 1) * 32 + (k & 31), y: (q >> 1) * 32 + ((k >> 5) & 31) }; };
 const cellAt = (r: number, x: number, y: number) => (r << 12) | (((y >> 5) * 2 + (x >> 5)) << 10) | ((y & 31) << 5) | (x & 31);
 const inRect = (v: Rect, x: number, y: number) => x >= v.x && y >= v.y && x < v.x + v.w && y < v.y + v.h;

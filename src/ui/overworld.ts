@@ -9,6 +9,10 @@ import {
   initialFlags, setInitialFlags, FLAG, DIR_FLAGS, OW_EVENTS, revealEvents, setRevealEvents, revealAt, revealedTile, revealEventCount,
 } from '../core/overworld.ts';
 import { messageSlots } from '../core/messages.ts';
+import {
+  readEvents, writeEvents, applyEvents, paintEvent, reorderSteps, eventRunners, eventTitle, submapViews, eventPlace, submapOf, pieceTiles, isBig, l2XY,
+  type EventData, type EventRunner, type Rect,
+} from '../core/owevents.ts';
 import { isPathKind, PATH_KIND_NAMES, type PathKind } from '../core/owpaths.ts';
 import { TileCache, blit8 } from '../core/render.ts';
 import { hex } from '../core/names.ts';
@@ -97,6 +101,13 @@ export class OverworldView {
   showL2 = true;
   // event progress: the map shown with events 0 … progress-1 passed (a view setting kept per ROM, not in the ROM)
   progress = 0;
+  // the event being painted (layer 2 shown and painted as after it), -1 none: the map before events
+  event = -1;
+  private ev: { data: EventData; before: Uint16Array; after: Uint16Array; runners: Map<number, EventRunner[]> } | null = null;
+  private views: Rect[] | null = null; // the submaps' views (emulated once)
+  private hoverStep: { silent: boolean; k: number } | null = null;
+  private playing: { start: number; before: HTMLCanvasElement } | null = null;
+  private timeline = h('div', { class: 'ow-timeline' });
   showGrid = false;
   showPaths = false;
   zoom = 2;
@@ -127,7 +138,7 @@ export class OverworldView {
     this.bar = h('div', { class: 'ctxbar' });
     this.left = h('div', { class: 'left' }, h('div', { class: 'panel levels' },
       h('div', { class: 'panel-title' }, 'Level tiles', this.tlCount), this.tlList));
-    this.root = h('div', { class: 'center' }, h('div', { class: 'level-view' }, this.scroller, this.eventsBadge), this.status);
+    this.root = h('div', { class: 'center' }, h('div', { class: 'level-view' }, this.scroller, this.eventsBadge), this.timeline, this.status);
     this.scroller.addEventListener('scroll', () => this.paint());
     new ResizeObserver(() => this.layout()).observe(this.scroller);
     this.scroller.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -181,7 +192,7 @@ export class OverworldView {
     const r = this.render(), base = this.region * 0x1000, game1 = gameL1(r), game2 = gameL2(r);
     this.shown = {
       l1: this.l1.map((t, i) => (t !== this.rom.l1[i] ? t : game1[i])),
-      l2: this.l2.map((t, i) => (t !== this.rom.l2[i] || i < base || i >= base + 0x1000 ? t : game2[i - base])),
+      l2: this.ev ? this.ev.after : this.l2.map((t, i) => (t !== this.rom.l2[i] || i < base || i >= base + 0x1000 ? t : game2[i - base])),
     };
     const img = drawOwMap(this.app.rom, r, this.region, this.showL1 ? this.shown.l1 : undefined, this.showL2 ? this.shown.l2 : undefined);
     putImage(this.mapCanvas, img);
@@ -214,8 +225,9 @@ export class OverworldView {
     ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
     ctx.imageSmoothingEnabled = false;
     ctx.setTransform(z, 0, 0, z, -this.scroller.scrollLeft * dpr, -this.scroller.scrollTop * dpr);
-    ctx.drawImage(this.mapCanvas, 0, 0);
     const lw = 1 / z;
+    if (this.playing) this.paintPlay(ctx);
+    else ctx.drawImage(this.mapCanvas, 0, 0);
     if (this.showGrid) {
       const step = this.mode === 'l1' ? 16 : 8;
       ctx.strokeStyle = 'rgba(255,255,255,0.12)';
@@ -237,6 +249,7 @@ export class OverworldView {
     }
     if (this.showPaths) this.paintPaths(lw);
     this.paintSelected(lw);
+    this.paintStep(lw);
     const s = this.mode === 'l1' ? 16 : 8;
     if (this.drag?.kind === 'pick') {
       const r = this.pickRect(this.drag);
@@ -400,6 +413,7 @@ export class OverworldView {
   // layer 2 in place when it fits)
   endStroke(layer: 'l1' | 'l2'): void {
     const rom = this.app.rom;
+    if (layer === 'l2' && this.ev) { this.endEventStroke(); return; }
     const before = layer === 'l1' ? sharedTranslevels(readL1(rom), readTranslevels(rom)) : new Map<number, number[]>();
     const l1 = this.l1, l2 = this.l2, tls = this.tls, old = this.rom;
     try {
@@ -438,8 +452,8 @@ export class OverworldView {
         placeTile(this.l1, this.tls, i, v, carried, (tl) => translevelUse(this.app.rom, tl));
         changed = true;
       } else {
-        const i = l2Index(this.region, xx, yy);
-        if (this.l2[i] !== v) { this.l2[i] = v; changed = true; }
+        const i = l2Index(this.region, xx, yy), into = this.ev ? this.ev.after : this.l2;
+        if (into[i] !== v) { into[i] = v; changed = true; }
       }
     }
     if (!changed) return;
@@ -482,7 +496,9 @@ export class OverworldView {
     this.scroller.title = ''; // the kind of the path tile under the mouse
     this.statusStats.textContent = b.kind === this.mode ? `Brush ${b.w}×${b.h}` : '';
     if (!c) {
-      this.statusText.textContent = 'Click/drag picks up tiles · Right click/Shift+click paints · Alt/Ctrl+click: tile settings';
+      this.statusText.textContent = this.ev && this.mode === 'l2'
+        ? `Painting layer 2 as after ${eventTitle(this.ev.runners, this.event)} · Click/drag picks up tiles · Right click/Shift+click paints · Esc: the map before events`
+        : 'Click/drag picks up tiles · Right click/Shift+click paints · Alt/Ctrl+click: tile settings';
       return;
     }
     let t = `X ${hex(c.x, 2)}  Y ${hex(c.y, 2)}`;
@@ -499,7 +515,8 @@ export class OverworldView {
     } else if (c.x >= 0 && c.y >= 0 && c.x < 64 && c.y < 64) {
       const i = l2Index(this.region, c.x, c.y), shown = this.shown.l2[i];
       t += `  ·  Entry ${hex(shown, 4)}`;
-      if (shown !== this.l2[i]) t += ` (by events, ${hex(this.l2[i], 4)} before)`;
+      if (this.ev) { if (shown !== this.ev.before[i]) t += ` (by this event, ${hex(this.ev.before[i], 4)} before)`; }
+      else if (shown !== this.l2[i]) t += ` (by events, ${hex(this.l2[i], 4)} before)`;
     }
     this.statusText.textContent = t;
   }
@@ -509,6 +526,7 @@ export class OverworldView {
   setProgress(n: number): void {
     n = clampProgress(n);
     if (n === this.progress) return;
+    if (this.event >= 0) { this.event = -1; this.syncEvent(); this.buildBar(); }
     this.progress = n;
     storeProgress(this.app.romName, n);
     this.showProgress();
@@ -526,6 +544,166 @@ export class OverworldView {
     this.eventsLabel.title = last;
     this.eventsBadge.textContent = `Event progress: ${n === OW_EVENTS ? 'all' : `up to ${hex(e, 2)}`}`;
     this.eventsBadge.classList.toggle('show', n > 0);
+  }
+
+  // ---------------- painting an event ----------------
+  // event e painted (-1: none): layer 2 shown and painted as after it, the event progress just after it
+  setEvent(e: number): void {
+    this.stopPlay();
+    this.event = e;
+    this.hoverStep = null;
+    if (e >= 0) {
+      this.mode = 'l2';
+      if (this.brush.kind !== 'l2') this.brush = { kind: 'l2', w: 1, h: 1, entries: [0] };
+      this.progress = e + 1;
+      storeProgress(this.app.romName, this.progress);
+    }
+    this.syncEvent();
+    this.buildBar();
+    this.buildSide();
+    this.redrawMap();
+    this.updateStatus();
+  }
+  // the event's steps, the maps before and after it, from the ROM
+  private syncEvent(): void {
+    const e = this.event;
+    if (e < 0) { this.ev = null; this.buildTimeline(); return; }
+    const rom = this.app.rom, data = readEvents(rom), base = readL2(rom), before = applyEvents(base, data, 0, e);
+    this.ev = { data, before, after: applyEvents(before, data, e, e + 1), runners: eventRunners(rom) };
+    this.buildTimeline();
+  }
+  private place(e: number) {
+    this.views ??= submapViews(this.emu);
+    return eventPlace(this.ev!.runners, this.views, e, this.map);
+  }
+  // the events by the level exit that runs them (by level, then exit), those no level on the map runs by number
+  eventPicker(): HTMLSelectElement {
+    const runners = eventRunners(this.app.rom);
+    const first = (e: number) => runners.get(e)?.[0];
+    const events = Array.from({ length: OW_EVENTS }, (_, e) => e).sort((a, b) => {
+      const ra = first(a), rb = first(b);
+      if (!ra || !rb) return ra ? -1 : rb ? 1 : a - b;
+      return translevelToLevel(ra.tl) - translevelToLevel(rb.tl) || ra.exit - rb.exit;
+    });
+    const s = select([[-1, 'Map before events'], ...events.map((e) => [e, first(e) ? `${eventTitle(runners, e)} (${hex(e, 2)})` : eventTitle(runners, e)] as [number, string])],
+      this.event, (v) => this.setEvent(v));
+    s.classList.add('ow-event-pick');
+    return s;
+  }
+  // a stroke on layer 2 while an event is painted: its steps found again, one ROM edit
+  endEventStroke(): void {
+    const rom = this.app.rom, e = this.event, after = this.ev!.after;
+    try {
+      this.app.romEdit(`${eventTitle(this.ev!.runners, e)}: paint`, () => writeEvents(rom, paintEvent(readEvents(rom), readL2(rom), e, after, this.place(e))));
+    } catch (err) {
+      toast(`Not painted: ${err instanceof Error ? err.message : err}`, 'error');
+      this.sync();
+    }
+  }
+  private editSteps(what: string, order: number[]): void {
+    const rom = this.app.rom, e = this.event;
+    this.app.romEdit(`${eventTitle(this.ev!.runners, e)}: ${what}`, () => writeEvents(rom, reorderSteps(readEvents(rom), e, order)));
+  }
+
+  // the steps under the map: the animated ones in their order (drag to reorder), the silent ones; hovering one
+  // outlines its tiles
+  buildTimeline(): void {
+    const ev = this.ev, e = this.event;
+    this.timeline.classList.toggle('show', !!ev);
+    if (!ev) { this.timeline.replaceChildren(); return; }
+    const steps = ev.data.steps[e], silent = ev.data.silent[e].filter((s) => s.layer === 2);
+    this.views ??= submapViews(this.emu);
+    const run = ev.runners.get(e)?.[0], where = MAP_NAMES[run ? submapOf(this.views, run.tile) : this.map];
+    const hover = (silent: boolean, k: number) => ({
+      onmouseenter: () => { this.hoverStep = { silent, k }; this.paint(); },
+      onmouseleave: () => { this.hoverStep = null; this.paint(); },
+    });
+    let dragged = -1;
+    const chip = (k: number) => {
+      const p = steps[k];
+      const el = h('div', { class: 'ow-step', draggable: true, title: `Step ${k + 1}: a ${isBig(ev.data, p.at) ? '6×6' : '2×2'} piece – drag to change the order`, ...hover(false, k),
+        ondragstart: (de: DragEvent) => { dragged = k; de.dataTransfer?.setData('text/plain', String(k)); },
+        ondragover: (de: DragEvent) => { de.preventDefault(); el.classList.add('drop'); },
+        ondragleave: () => el.classList.remove('drop'),
+        ondrop: (de: DragEvent) => {
+          de.preventDefault();
+          el.classList.remove('drop');
+          if (dragged < 0 || dragged === k) return;
+          const order = steps.map((_, i) => i).filter((i) => i !== dragged);
+          order.splice(order.indexOf(k) + (dragged < k ? 1 : 0), 0, dragged);
+          this.editSteps('step order', order);
+        } }, String(k + 1), h('span', { class: 'hint' }, isBig(ev.data, p.at) ? ' 6×6' : ' 2×2'));
+      return el;
+    };
+    this.timeline.replaceChildren(
+      h('div', { class: 'ow-timeline-head' },
+        h('b', null, eventTitle(ev.runners, e)), h('span', { class: 'hint' }, ` · event ${hex(e, 2)} · the map as after it – the editor finds its steps`),
+        h('span', { class: 'grow' }),
+        h('button', { title: 'Show the steps as the game does (path fade)', disabled: !steps.length, onclick: () => this.play() }, '▶ Play'),
+        h('button', { title: 'The steps in the opposite order (from the other end of the path)', disabled: steps.length < 2,
+          onclick: () => this.editSteps('steps reversed', steps.map((_, i) => steps.length - 1 - i)) }, '⇄ Reverse'),
+        h('button', { title: 'Back to the map before events (Esc)', onclick: () => this.setEvent(-1) }, 'Done')),
+      h('div', { class: 'ow-steps' },
+        h('span', { class: 'hint' }, steps.length ? `Steps on ${where}:` : `No steps on ${where}`),
+        ...steps.map((_, k) => chip(k)),
+        silent.length ? h('span', { class: 'hint' }, ' Silent (other submaps):') : null,
+        ...silent.map((s, k) => h('div', { class: 'ow-step silent', title: `Written at once when the event ends (a ${isBig(ev.data, s.tile) ? '6×6' : '2×2'} piece on another submap)`, ...hover(true, k) }, '·'))),
+    );
+  }
+
+  // the tiles of the step hovered in the timeline, outlined
+  paintStep(lw: number): void {
+    const ev = this.ev, s = this.hoverStep;
+    if (!ev || !s) return;
+    const p = s.silent ? (() => { const v = ev.data.silent[this.event].filter((x) => x.layer === 2)[s.k]; return v && { at: v.tile, pos: v.loc }; })() : ev.data.steps[this.event][s.k];
+    if (!p) return;
+    const ctx = this.canvas.getContext('2d')!;
+    ctx.strokeStyle = '#ffd34c';
+    ctx.fillStyle = 'rgba(255,211,76,0.25)';
+    ctx.lineWidth = 1.5 * lw;
+    for (const i of pieceTiles(ev.data, p)) {
+      const c = l2XY(i);
+      if (c.r !== this.region) continue;
+      ctx.fillRect(c.x * 8, c.y * 8, 8, 8);
+      ctx.strokeRect(c.x * 8, c.y * 8, 8, 8);
+    }
+  }
+
+  // the steps shown as the game does: the map before the event, each step fading in after the one before (about
+  // 14 frames each, as measured in the game), the silent ones at the end
+  play(): void {
+    const ev = this.ev;
+    if (!ev) return;
+    const before = document.createElement('canvas');
+    putImage(before, drawOwMap(this.app.rom, this.render(), this.region, this.showL1 ? this.shown.l1 : undefined, this.showL2 ? ev.before : undefined));
+    this.playing = { start: performance.now(), before };
+    const tick = () => {
+      if (!this.playing) return;
+      this.paint();
+      if (performance.now() - this.playing.start > (ev.data.steps[this.event].length + 2) * STEP_MS) this.stopPlay();
+      else requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }
+  stopPlay(): void {
+    if (!this.playing) return;
+    this.playing = null;
+    this.paint();
+  }
+  paintPlay(ctx: CanvasRenderingContext2D): void {
+    const ev = this.ev!, pl = this.playing!, t = (performance.now() - pl.start) / STEP_MS;
+    ctx.drawImage(pl.before, 0, 0);
+    const steps = ev.data.steps[this.event];
+    const show = (p: { at: number; pos: number }, alpha: number) => {
+      ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+      for (const i of pieceTiles(ev.data, p)) {
+        const c = l2XY(i);
+        if (c.r === this.region) ctx.drawImage(this.mapCanvas, c.x * 8, c.y * 8, 8, 8, c.x * 8, c.y * 8, 8, 8);
+      }
+    };
+    steps.forEach((p, k) => { if (t > k) show(p, t - k); });
+    if (t > steps.length) for (const s of ev.data.silent[this.event]) if (s.layer === 2) show({ at: s.tile, pos: s.loc }, 1);
+    ctx.globalAlpha = 1;
   }
 
   setMap(n: number): void {
@@ -573,6 +751,8 @@ export class OverworldView {
       h('span', { class: 'sep' }),
       h('label', { class: 'row', title: 'Event progress: the overworld as after loading a save in which the events up to this one passed, applied in their number order as the game does (a view setting, not in the ROM) – painting changes the map before events · , and . : one event back/further' },
         'Events ', this.eventsSlider, this.eventsLabel),
+      h('label', { class: 'row', title: 'Paint an event: layer 2 as it looks after the event – the editor finds its steps (animated on the submap of the level running it, silent elsewhere); the map before it is the event progress just below it' },
+        'Paint ', this.eventPicker()),
       h('span', { class: 'sep' }),
       this.zoomCtl.root,
     );
@@ -582,6 +762,7 @@ export class OverworldView {
   key(e: KeyboardEvent): boolean {
     const k = e.key.toLowerCase();
     if (e.ctrlKey || e.metaKey || e.altKey) return false;
+    if (k === 'escape' && this.event >= 0) { this.setEvent(-1); return true; }
     if (k === 'g') { this.showGrid = !this.showGrid; this.paint(); return true; }
     if (k === ',' || k === '.') { this.setProgress(this.progress + (k === ',' ? -1 : 1)); return true; }
     if (k === '1' || k === '2') { (this.bar.querySelectorAll('.btn-group button')[k === '1' ? 0 : 1] as HTMLButtonElement).click(); return true; }
@@ -834,6 +1015,8 @@ export class OverworldView {
     this.l2 = readL2(this.app.rom);
     this.rom = { l1: this.l1.slice(), l2: this.l2.slice() };
     this.tls = readTranslevels(this.app.rom);
+    this.stopPlay();
+    this.syncEvent();
     this.invalidate();
     this.buildSide();
     this.buildLeft();
@@ -843,6 +1026,8 @@ export class OverworldView {
 
   show(): void {
     this.emu.rom = this.app.rom;
+    this.views = null;
+    this.event = -1;
     this.progress = loadProgress(this.app.romName);
     this.buildBar();
     this.sync();
@@ -851,6 +1036,7 @@ export class OverworldView {
 }
 
 const RENDERS_KEPT = 16; // emulated overworlds kept (map and event progress)
+const STEP_MS = 14 * 1000 / 60; // a step's path fade
 
 // the event progress kept per ROM (by its name) in the browser
 const PROGRESS_PREF = 'ow-event-progress:';

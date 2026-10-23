@@ -229,6 +229,16 @@ kbd { background: #181a1f; border: 1px solid var(--border); border-radius: 3px; 
 .ow-badge.show { display: block; }
 .ow-events { width: 160px; vertical-align: middle; }
 .ow-events-name { display: inline-block; width: 260px; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; margin-left: 6px; color: var(--muted); }
+.ow-event-pick { max-width: 240px; }
+.ow-timeline { display: none; flex: 0 0 auto; padding: 5px 8px; background: var(--panel); border-top: 1px solid var(--border); }
+.ow-timeline.show { display: block; }
+.ow-timeline-head { display: flex; align-items: center; gap: 6px; }
+.ow-timeline-head .grow { flex: 1; }
+.ow-steps { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 5px; max-height: 64px; overflow-y: auto; }
+.ow-step { padding: 1px 7px; border: 1px solid var(--border); border-radius: 4px; background: var(--panel2); font-family: ui-monospace, monospace; cursor: grab; user-select: none; }
+.ow-step:hover { border-color: #ffd34c; }
+.ow-step.drop { border-color: var(--accent); box-shadow: -3px 0 0 var(--accent); }
+.ow-step.silent { cursor: default; color: var(--muted); }
 .empty { color: var(--muted); font-size: 12px; font-style: italic; padding: 10px 6px; text-align: center; }
 .ow-pal { width: 288px; image-rendering: pixelated; cursor: crosshair; }
 .ow-pal8 { width: 256px; image-rendering: pixelated; cursor: crosshair; display: block; }

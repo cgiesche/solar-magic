@@ -622,14 +622,46 @@ Settings", LM help `ov_overworld_modify_level.htm`), all per translevel except t
   (`$049001`). Places and bits as SMW Central's hijack map gives them and Lunar Magic's code in a ROM it saved
   uses; the editor's code is its own. As there, the prompt comes when passing the level runs its event (the
   game's save tiles prompt on every pass). Always installed: a level without the two flags plays as in the game.
-- **revealed on events** (any layer 1 tile): the game's table of the tile each event reveals (`$04D85D`, an
-  `$7EC800` offset per event, 0 none, events 00–6F – the next table follows at `$04D93D`); revealed, the tile
-  becomes its counterpart in the game's reveal list (`$04DA1D` → `$04DA33`).
+- **revealed on events** (any layer 1 tile): the table of the tile each event reveals (the game's `$04D85D`, an
+  `$7EC800` offset per event, 0 none; moved by the event steps patch, its pointer at `$04DA74`); revealed, the
+  tile becomes its counterpart in the game's reveal list (`$04DA1D` → `$04DA33`).
 
 `tools/testleveltilesettings.ts` checks by emulation that a new game starts with the clean game's flags and
 those set, that passing Yoshi's Island 1 with each of its four exits enables the direction set, that *no
 entry* and *save prompt* work (a castle still prompts without the flag) and that a tile set to be revealed by
 an event is.
+
+### Event steps
+
+An event changes layer 2 in **steps**: a 6x6 or 2x2 piece of the event tile storage written at a position of
+the layer 2 tilemap (`$7F4000`, the game's `$04E4A9`); its standard steps fade in one after the other on the
+submap Mario is on, its silent ones are written at once when it ends. The patch brings the clean game into
+Lunar Magic's layout, as Ankouno's `OverworldTables.asm` and SMW Central's hijack map describe it and Lunar
+Magic's code in the ROMs it saved does (the editor's code is its own):
+- the steps (4 bytes: storage index, tilemap position) in free space, their pointer the operands at `$04E49F`,
+  `$04E709`, `$04EE5A` (+ 2 at `$04E4A4`, `$04E710`, `$04EE3F`); an event's steps by the dividers at `$04E359`;
+- the storage in free space: tile numbers (`$04E4B0`/`$04E4BB`, `$04EAF5`), their YXPCCCTT in LC_RLE1
+  (`$04DD45`/`$04DD4A`, decompressed to `$7F0000`); indexes below `$0900` (`$04E4C0`, `$04E745`, `$04EAD8`,
+  `$04EE5E`) are 6x6 pieces;
+- the silent steps: a JSL at `$04E9F7` with a divider per event (the code's `+$0D`), 16-bit tiles (`+$22`: a
+  storage index on layer 2, a Map16 tile on layer 1), positions (`+$28`) and layers (`+$34`); a JSL at
+  `$04DCA5` writes the layer 2 ones of each passed event when a file is loaded, after its standard steps;
+- 0x78 events: the loops at `$04D859` (the translevel patch's) and `$04DCAA`, the reveal tables moved and
+  extended (`$04DA74`, `$04EC8C`, `$04ECBA`, `$04ECC5`, `$04ED97`, `$04EDBE`; VRAM `$04EDB8`).
+
+The translevel patch decompresses the YXPCCCTT again on every overworld load (`$04DD40`): in a level `$7F0000`
+is the VRAM patch's, and an event after a level would fade in with wrong palettes.
+
+The user paints an event as the map after it (*Overworld*, *Paint*: the event by the level exit that runs it).
+The editor finds its steps: the tiles that changed to the map before it (the events before it in number order),
+as 6x6 pieces where one covers at least a third changed tiles and no tile another event writes, else 2x2; each
+where the storage has the same tiles, else in free places. Pieces on the submap of the level running the event
+(the camera the game sets there) are steps, ordered along the path from the level tile; the rest are silent.
+The timeline under the map shows the steps: dragging one changes the order, *Reverse* turns it round, *Play*
+shows the path fade. `tools/testevents.ts` checks that the patched ROM shows every event progress as the clean
+game; `tools/testeventpaint.ts` that every clean event painted as it is keeps every progress, and that a change
+painted for Yoshi's Island 1 appears in the game step by step in its order when the level is passed (silently
+on the main map), also reordered.
 
 ### Layer 3 graphics per level
 
@@ -785,6 +817,7 @@ not compatible with the respective feature.
 | `$048509`, `$048543` | Overworld teleports (the star/pipe table with 0x100 entries) |
 | `$04D7F2–$04D85C` | Translevels per level tile (Lunar Magic's table) |
 | `$009F19`, `$048F8A`, `$049001`, `$049199`; code `$05DD80`, `$03BA10`, `$03BA50`, table `$05DDA0` | Initial level flags, no entry if passed, save prompt (Lunar Magic's places) |
+| `$04E9F7`, `$04DCA5`, `$04DCAA`, `$04D859`; pointers `$04E49F`, `$04E4A4`, `$04E709`, `$04E710`, `$04EE3F`, `$04EE5A`, `$04E4B0`, `$04E4BB`, `$04EAF5`, `$04DD45`, `$04DD4A`, `$04DA74`, `$04EC8C`, `$04ECBA`, `$04ECC5`, `$04ED97`, `$04EDBE`, `$04EDB8` | Event steps, silent events, 0x78 events (Lunar Magic's places) |
 | Ext. object table `$0DA118` (entry `$03`) | Structures (SMWS); empty in the original, no code hook |
 | `$05B20F` | Messages in free space (SMWM), only if the texts no longer fit |
 | `$00F545`, `$029328`, `$058A66`, `$058B46`, `$058C34`, `$058D2B`, `$00C096`, `$00C0E7`, `$00C176` | Map16 extension and custom blocks (SMWX) |
