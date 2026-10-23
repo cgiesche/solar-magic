@@ -1,17 +1,18 @@
 // Overworld editor view.
 
 import type { App } from './app.ts';
-import { h, toast, select, checkbox, attachPanZoom, zoomControl, ZOOM_MIN, ZOOM_MAX, attachRectPick, emptyState } from './dom.ts';
+import { h, toast, select, checkbox, hexInput, attachPanZoom, zoomControl, ZOOM_MIN, ZOOM_MAX, attachRectPick, emptyState } from './dom.ts';
 import {
   OverworldEmulator, type OwRender, gameL1, gameL2, readL1, writeL1, readL2, writeL2, l1Index, l1XY, l2Index, isLevelTile, readTranslevels, writeTranslevels,
   placeTile, sharedTranslevels, enterableLevels, translevelToLevel, nameCode, setNameCode, splitNameCode, joinNameCode, nameWord, levelName, NAME_PART_COUNTS, MAP_NAMES,
   translevelUse, resetTranslevel, baseEvent, setBaseEvent, eventNames, exitDirections, setExitDirection, DIR_ARROWS, DIR_NAMES, EXIT_NAMES, NO_EVENT, isNameless,
   initialFlags, setInitialFlags, FLAG, DIR_FLAGS, OW_EVENTS, revealEvents, setRevealEvents, revealAt, revealedTile, revealEventCount,
+  readRevealList, writeRevealList, destroyEffects, destroyedAt, destroyEvent, setDestroyEvent, readDestroyList, freeTranslevel,
 } from '../core/overworld.ts';
 import { messageSlots } from '../core/messages.ts';
 import {
   readEvents, writeEvents, applyEvents, paintEvent, reorderSteps, eventRunners, eventTitle, submapViews, eventPlace, submapOf, pieceTiles, isBig, l2XY,
-  type EventData, type EventRunner, type Rect,
+  paintEventL1, layer1Without, eventL1Tiles, type EventData, type EventRunner, type Rect,
 } from '../core/owevents.ts';
 import { isPathKind, PATH_KIND_NAMES, type PathKind } from '../core/owpaths.ts';
 import { TileCache, blit8 } from '../core/render.ts';
@@ -101,11 +102,12 @@ export class OverworldView {
   showL2 = true;
   // event progress: the map shown with events 0 … progress-1 passed (a view setting kept per ROM, not in the ROM)
   progress = 0;
-  // the event being painted (layer 2 shown and painted as after it), -1 none: the map before events
+  // the event being painted (both layers shown and painted as after it), -1 none: the map before events
   event = -1;
-  private ev: { data: EventData; before: Uint16Array; after: Uint16Array; runners: Map<number, EventRunner[]> } | null = null;
+  // l1: layer 1 as after it (the game's at the event progress just after it), with the stroke being painted
+  private ev: { data: EventData; before: Uint16Array; after: Uint16Array; l1: Uint8Array | null; runners: Map<number, EventRunner[]> } | null = null;
   private views: Rect[] | null = null; // the submaps' views (emulated once)
-  private hoverStep: { silent: boolean; k: number } | null = null;
+  private hoverStep: { kind: 'step' | 'silent' | 'l1'; k: number } | null = null;
   private playing: { start: number; before: HTMLCanvasElement } | null = null;
   private timeline = h('div', { class: 'ow-timeline' });
   showGrid = false;
@@ -190,8 +192,9 @@ export class OverworldView {
   // ---------------- drawing ----------------
   redrawMap(): void {
     const r = this.render(), base = this.region * 0x1000, game1 = gameL1(r), game2 = gameL2(r);
+    if (this.ev && !this.ev.l1) this.ev.l1 = game1.slice();
     this.shown = {
-      l1: this.l1.map((t, i) => (t !== this.rom.l1[i] ? t : game1[i])),
+      l1: this.ev ? this.ev.l1! : this.l1.map((t, i) => (t !== this.rom.l1[i] ? t : game1[i])),
       l2: this.ev ? this.ev.after : this.l2.map((t, i) => (t !== this.rom.l2[i] || i < base || i >= base + 0x1000 ? t : game2[i - base])),
     };
     const img = drawOwMap(this.app.rom, r, this.region, this.showL1 ? this.shown.l1 : undefined, this.showL2 ? this.shown.l2 : undefined);
@@ -414,6 +417,7 @@ export class OverworldView {
   endStroke(layer: 'l1' | 'l2'): void {
     const rom = this.app.rom;
     if (layer === 'l2' && this.ev) { this.endEventStroke(); return; }
+    if (layer === 'l1' && this.ev) { this.endEventL1Stroke(); return; }
     const before = layer === 'l1' ? sharedTranslevels(readL1(rom), readTranslevels(rom)) : new Map<number, number[]>();
     const l1 = this.l1, l2 = this.l2, tls = this.tls, old = this.rom;
     try {
@@ -446,7 +450,14 @@ export class OverworldView {
       const xx = x + dx, yy = y + dy;
       if (xx < 0 || yy < 0 || xx >= n || yy >= n) continue;
       const v = b.entries[dy * b.w + dx];
-      if (this.mode === 'l1') {
+      if (this.mode === 'l1' && this.ev?.l1) {
+        // as after the event: the translevels stay, a level tile where none is gets one
+        const i = l1Index(this.region, xx, yy), into = this.ev.l1;
+        if (into[i] === v) continue;
+        into[i] = v;
+        if (isLevelTile(v) && !this.tls[i]) this.tls[i] = b.tls?.[dy * b.w + dx] || freeTranslevel(this.tls, (tl) => translevelUse(this.app.rom, tl));
+        changed = true;
+      } else if (this.mode === 'l1') {
         const i = l1Index(this.region, xx, yy), carried = b.tls?.[dy * b.w + dx] ?? 0;
         if (this.l1[i] === v && (!carried || this.tls[i] === carried)) continue;
         placeTile(this.l1, this.tls, i, v, carried, (tl) => translevelUse(this.app.rom, tl));
@@ -496,8 +507,8 @@ export class OverworldView {
     this.scroller.title = ''; // the kind of the path tile under the mouse
     this.statusStats.textContent = b.kind === this.mode ? `Brush ${b.w}×${b.h}` : '';
     if (!c) {
-      this.statusText.textContent = this.ev && this.mode === 'l2'
-        ? `Painting layer 2 as after ${eventTitle(this.ev.runners, this.event)} · Click/drag picks up tiles · Right click/Shift+click paints · Esc: the map before events`
+      this.statusText.textContent = this.ev
+        ? `Painting layer ${this.mode === 'l1' ? 1 : 2} as after ${eventTitle(this.ev.runners, this.event)} · Click/drag picks up tiles · Right click/Shift+click paints · Esc: the map before events`
         : 'Click/drag picks up tiles · Right click/Shift+click paints · Alt/Ctrl+click: tile settings';
       return;
     }
@@ -506,7 +517,8 @@ export class OverworldView {
       if (c.x >= 0 && c.y >= 0 && c.x < 32 && c.y < 32) {
         const i = l1Index(this.region, c.x, c.y), shown = this.shown.l1[i];
         t += `  ·  Tile ${hex(shown, 2)}`;
-        if (shown !== this.l1[i]) t += ` (by events, ${hex(this.l1[i], 2)} before)`;
+        if (this.ev && eventL1Tiles(this.ev.data, this.event).includes(i)) t += ' (by this event)';
+        else if (shown !== this.l1[i]) t += ` (by events, ${hex(this.l1[i], 2)} before)`;
         const tl = this.tls[i];
         if (isLevelTile(this.l1[i])) t += tl ? `  ·  Level ${hex(translevelToLevel(tl), 3)} “${levelName(this.app.rom, tl)}”` : '  ·  Enters no level';
         const k = this.showPaths ? this.pathKinds()?.[shown] : undefined;
@@ -553,8 +565,6 @@ export class OverworldView {
     this.event = e;
     this.hoverStep = null;
     if (e >= 0) {
-      this.mode = 'l2';
-      if (this.brush.kind !== 'l2') this.brush = { kind: 'l2', w: 1, h: 1, entries: [0] };
       this.progress = e + 1;
       storeProgress(this.app.romName, this.progress);
     }
@@ -569,7 +579,7 @@ export class OverworldView {
     const e = this.event;
     if (e < 0) { this.ev = null; this.buildTimeline(); return; }
     const rom = this.app.rom, data = readEvents(rom), base = readL2(rom), before = applyEvents(base, data, 0, e);
-    this.ev = { data, before, after: applyEvents(before, data, e, e + 1), runners: eventRunners(rom) };
+    this.ev = { data, before, after: applyEvents(before, data, e, e + 1), l1: null, runners: eventRunners(rom) };
     this.buildTimeline();
   }
   private place(e: number) {
@@ -600,13 +610,28 @@ export class OverworldView {
       this.sync();
     }
   }
+  // a stroke on layer 1 while an event is painted: its layer 1 changes found again (the map after it without them
+  // emulated), with the translevels of level tiles it placed where none was; one ROM edit
+  endEventL1Stroke(): void {
+    const rom = this.app.rom, e = this.event, after = this.ev!.l1!, game = gameL1(this.render()), tls = this.tls;
+    const painted = new Set([...after.keys()].filter((i) => after[i] !== game[i]));
+    try {
+      this.app.romEdit(`${eventTitle(this.ev!.runners, e)}: paint layer 1`, () => {
+        writeEvents(rom, paintEventL1(readEvents(rom), e, after, layer1Without(rom, e), painted));
+        writeTranslevels(rom, tls);
+      });
+    } catch (err) {
+      toast(`Not painted: ${err instanceof Error ? err.message : err}`, 'error');
+      this.sync();
+    }
+  }
   private editSteps(what: string, order: number[]): void {
     const rom = this.app.rom, e = this.event;
     this.app.romEdit(`${eventTitle(this.ev!.runners, e)}: ${what}`, () => writeEvents(rom, reorderSteps(readEvents(rom), e, order)));
   }
 
-  // the steps under the map: the animated ones in their order (drag to reorder), the silent ones; hovering one
-  // outlines its tiles
+  // the steps under the map: the animated ones in their order (drag to reorder), the silent ones, the layer 1
+  // changes; hovering one outlines its tiles
   buildTimeline(): void {
     const ev = this.ev, e = this.event;
     this.timeline.classList.toggle('show', !!ev);
@@ -614,14 +639,15 @@ export class OverworldView {
     const steps = ev.data.steps[e], silent = ev.data.silent[e].filter((s) => s.layer === 2);
     this.views ??= submapViews(this.emu);
     const run = ev.runners.get(e)?.[0], where = MAP_NAMES[run ? submapOf(this.views, run.tile) : this.map];
-    const hover = (silent: boolean, k: number) => ({
-      onmouseenter: () => { this.hoverStep = { silent, k }; this.paint(); },
+    const l1 = eventL1Tiles(ev.data, e), l1Here = l1.filter((i) => (i >= 0x400) === (this.region === 1)).length;
+    const hover = (kind: 'step' | 'silent' | 'l1', k: number) => ({
+      onmouseenter: () => { this.hoverStep = { kind, k }; this.paint(); },
       onmouseleave: () => { this.hoverStep = null; this.paint(); },
     });
     let dragged = -1;
     const chip = (k: number) => {
       const p = steps[k];
-      const el = h('div', { class: 'ow-step', draggable: true, title: `Step ${k + 1}: ${isBig(ev.data, p.at) ? '6×6' : '2×2'} tiles – drag to change the order`, ...hover(false, k),
+      const el = h('div', { class: 'ow-step', draggable: true, title: `Step ${k + 1}: ${isBig(ev.data, p.at) ? '6×6' : '2×2'} tiles – drag to change the order`, ...hover('step', k),
         ondragstart: (de: DragEvent) => { dragged = k; de.dataTransfer?.setData('text/plain', String(k)); },
         ondragover: (de: DragEvent) => { de.preventDefault(); el.classList.add('drop'); },
         ondragleave: () => el.classList.remove('drop'),
@@ -647,7 +673,10 @@ export class OverworldView {
         h('span', { class: 'hint' }, steps.length ? `Steps on ${where}:` : `No steps on ${where}`),
         ...steps.map((_, k) => chip(k)),
         silent.length ? h('span', { class: 'hint' }, ' Silent (other submaps):') : null,
-        ...silent.map((s, k) => h('div', { class: 'ow-step silent', title: `Written at once when the event ends (${isBig(ev.data, s.tile) ? '6×6' : '2×2'} tiles on another submap)`, ...hover(true, k) }, '·'))),
+        ...silent.map((s, k) => h('div', { class: 'ow-step silent', title: `Written at once when the event ends (${isBig(ev.data, s.tile) ? '6×6' : '2×2'} tiles on another submap)`, ...hover('silent', k) }, '·')),
+        l1.length ? h('div', { class: 'ow-step silent', ...hover('l1', 0),
+          title: 'Layer 1 tiles the event changes (paint layer 1 while the event is chosen): written at once when it ends, shown when the map is loaded again – for other submaps and tiles not seen (paths)' },
+        `Layer 1: ${l1.length} tile${l1.length > 1 ? 's' : ''}${l1Here < l1.length ? ` (${l1Here} here)` : ''}`) : null),
     );
   }
 
@@ -655,12 +684,21 @@ export class OverworldView {
   paintStep(lw: number): void {
     const ev = this.ev, s = this.hoverStep;
     if (!ev || !s) return;
-    const p = s.silent ? (() => { const v = ev.data.silent[this.event].filter((x) => x.layer === 2)[s.k]; return v && { at: v.tile, pos: v.loc }; })() : ev.data.steps[this.event][s.k];
-    if (!p) return;
     const ctx = this.canvas.getContext('2d')!;
     ctx.strokeStyle = '#ffd34c';
     ctx.fillStyle = 'rgba(255,211,76,0.25)';
     ctx.lineWidth = 1.5 * lw;
+    if (s.kind === 'l1') {
+      for (const i of eventL1Tiles(ev.data, this.event)) {
+        if ((i >= 0x400) !== (this.region === 1)) continue;
+        const { x, y } = l1XY(i);
+        ctx.fillRect(x * 16, y * 16, 16, 16);
+        ctx.strokeRect(x * 16, y * 16, 16, 16);
+      }
+      return;
+    }
+    const p = s.kind === 'silent' ? (() => { const v = ev.data.silent[this.event].filter((x) => x.layer === 2)[s.k]; return v && { at: v.tile, pos: v.loc }; })() : ev.data.steps[this.event][s.k];
+    if (!p) return;
     for (const i of pieceTiles(ev.data, p)) {
       const c = l2XY(i);
       if (c.r !== this.region) continue;
@@ -750,7 +788,7 @@ export class OverworldView {
       h('span', { class: 'sep' }),
       h('label', { class: 'row', title: 'Event progress: the overworld as after loading a save in which the events up to this one passed, applied in their number order as the game does (a view setting, not in the ROM) – painting changes the map before events · , and . : one event back/further' },
         'Events ', this.eventsSlider, this.eventsLabel),
-      h('label', { class: 'row', title: 'Paint an event: layer 2 as it looks after the event – the editor finds its steps (animated on the submap of the level running it, silent elsewhere); the map before it is the event progress just below it' },
+      h('label', { class: 'row', title: 'Paint an event: the map as it looks after the event – the editor finds its steps (layer 2 animated on the submap of the level running it, silent elsewhere; layer 1 silent); the map before it is the event progress just below it' },
         'Paint ', this.eventPicker()),
       h('span', { class: 'sep' }),
       this.zoomCtl.root,
@@ -797,9 +835,38 @@ export class OverworldView {
     this.buildProps();
   }
 
+  private revealListOpen = false;
   buildProps(): void {
     this.props.replaceChildren(h('div', { class: 'panel-title' }, 'Properties'),
-      this.selected >= 0 ? this.tileInfo(this.selected) : emptyState('Select a level tile in the list on the left, or any tile with Alt/Ctrl+click on the map.'));
+      this.selected >= 0 ? this.tileInfo(this.selected) : emptyState('Select a level tile in the list on the left, or any tile with Alt/Ctrl+click on the map.'),
+      this.revealList());
+  }
+
+  // a layer 1 tile drawn (16x16) for the lists
+  private tileImage(t: number): HTMLCanvasElement {
+    const r = this.render(), c = h('canvas', { width: 16, height: 16, class: 'ow-tile' }), ctx = c.getContext('2d')!;
+    const id = ctx.createImageData(16, 16), px = new Uint32Array(id.data.buffer);
+    px.fill(0xff181818);
+    this.drawL1Tile(px, new TileCache(r.vram, r.cgram, 0), r, t, 0, 0, 16, 16);
+    ctx.putImageData(id, 0, 0);
+    return c;
+  }
+
+  // the overworld's reveal list (Lunar Magic's "Edit Reveal Tile List"): which tile a revealed tile becomes; the
+  // selected tile's entry marked
+  revealList(): HTMLElement {
+    const rom = this.app.rom, list = readRevealList(rom), sel = this.selected >= 0 ? this.l1[this.selected] : -1;
+    const set = (k: number, p: { from?: number; to?: number }) =>
+      this.app.romEdit('Reveal list', () => writeRevealList(rom, list.map((q, n) => (n === k ? { ...q, ...p } : q))));
+    const last = (t: number) => { for (let k = list.length - 1; k >= 0; k--) if (list[k].from === t) return k; return -1; };
+    const d = h('details', { class: 'ow-reveals', open: this.revealListOpen, ontoggle: () => (this.revealListOpen = d.open) },
+      h('summary', null, 'Reveal list', h('span', { class: 'hint' }, ' · which tile a revealed tile becomes')),
+      h('div', { class: 'ow-reveal-rows' }, ...list.map((p, k) => h('div', {
+        class: `row ow-reveal${k === last(sel) ? ' current' : ''}`,
+        title: last(p.from) !== k ? `Tile ${hex(p.from, 2)} has a later entry: this one is not used` : `A tile ${hex(p.from, 2)} an event reveals becomes ${hex(p.to, 2)}`,
+      }, this.tileImage(p.from), hexInput(p.from, 2, (v) => set(k, { from: v })), '→', this.tileImage(p.to), hexInput(p.to, 2, (v) => set(k, { to: v })),
+      last(p.from) !== k ? h('span', { class: 'hint warn-text' }, '⚠') : null))));
+    return d;
   }
 
   // the level tile at i: the level it enters (chosen from the levels; the translevel only shown), its name
@@ -850,7 +917,7 @@ export class OverworldView {
   tileInfo(i: number): HTMLElement {
     const { x, y } = l1XY(i), t = this.l1[i];
     const info = isLevelTile(t) ? this.levelInfo(i) : h('div', { class: 'ow-info' }, h('div', { class: 'hint' }, `Tile ${hex(x, 2)},${hex(y, 2)} · ${hex(t, 2)} (not a level tile)`));
-    info.append(...this.revealSettings(i));
+    info.append(...this.revealSettings(i), ...this.destroySettings(i));
     return info;
   }
 
@@ -908,6 +975,35 @@ export class OverworldView {
       ...(!evs.length ? [] : [into < 0 ? h('div', { class: 'hint warn-text' }, `⚠ Tile ${hex(t, 2)} is not in the reveal list: revealing it changes nothing.`)
         : h('div', { class: 'hint' }, `Revealed, tile ${hex(t, 2)} becomes ${hex(into, 2)}.`)]),
     ];
+  }
+
+  // the event destroying tile i (Lunar Magic's "Destroy Level Tile Settings") – on a tile the game destroys (what it
+  // does learned by emulation), also on the level tile below a castle's top; one tile per event
+  destroySettings(i: number): HTMLElement[] {
+    const rom = this.app.rom, effects = destroyEffects(rom), names = eventNames(rom);
+    // as the game sees it when an event runs: the map before events, revealed, at the event progress
+    const revealed = this.l1.map((t) => { const r = revealedTile(rom, t); return r >= 0 ? r : t; });
+    let j = destroyEvent(rom, i) !== NO_EVENT ? i : -1;
+    for (const l1 of [this.l1, revealed, this.shown.l1]) if (j < 0) j = destroyedAt(effects, l1, i);
+    if (j < 0) return [];
+    const t = [this.l1, revealed, this.shown.l1].map((l) => l[j]).find((v) => effects[v].length);
+    const { x, y } = l1XY(j), ev = destroyEvent(rom, j);
+    const where = (k: number) => { const p = l1XY(k); return `${k >= 0x400 ? 'submaps' : 'main map'} ${hex(p.x, 2)},${hex(p.y, 2)}`; };
+    const other = new Map(readDestroyList(rom).filter((d) => d.event !== NO_EVENT && d.tile !== j).map((d) => [d.event, d.tile]));
+    const pick = select([[NO_EVENT, 'No event'], ...Array.from({ length: OW_EVENTS }, (_, e) => [e, `${this.eventLabel(names, e)}${other.has(e) ? ` (destroys ${where(other.get(e)!)})` : ''}`] as [number, string])], ev, (v) => {
+      try {
+        this.app.romEdit(`Tile ${hex(x, 2)},${hex(y, 2)}: destroyed on event`, () => setDestroyEvent(rom, j, v));
+      } catch (err) { toast(`Not set: ${err instanceof Error ? err.message : err}`, 'error'); this.buildProps(); }
+    });
+    pick.title = 'The event that destroys this tile when it passes (as castles and fortresses): an event destroys one tile, one destroying another moves here';
+    const side = (c: { dx: number; dy: number }) => (c.dy > 0 ? 'below' : c.dy < 0 ? 'above' : c.dx > 0 ? 'right of it' : 'left of it');
+    const changes = t === undefined ? [] : effects[t].map((c) => `${c.dx || c.dy ? `the tile ${side(c)} ` : ''}becomes ${hex(c.tile, 2)}`);
+    return [
+      h('div', { class: 'prop' }, h('label', null, 'Destroyed on'), pick),
+      j !== i ? h('div', { class: 'hint' }, `The setting of the tile at ${where(j)}, whose destroy changes this one too (a castle's top).`) : null,
+      ev !== NO_EVENT && t !== undefined ? h('div', { class: 'hint' }, `Destroyed, tile ${hex(t, 2)} ${changes.join(', ')}.`) : null,
+      ev !== NO_EVENT && t === undefined ? h('div', { class: 'hint warn-text' }, '⚠ The game destroys no such tile: destroying it changes nothing.') : null,
+    ].filter((v): v is HTMLDivElement => !!v);
   }
 
   // palette sheet with the brush outlined (when it is a rectangle of the sheet) and rectangle picking;
@@ -1015,8 +1111,8 @@ export class OverworldView {
     this.rom = { l1: this.l1.slice(), l2: this.l2.slice() };
     this.tls = readTranslevels(this.app.rom);
     this.stopPlay();
-    this.syncEvent();
     this.invalidate();
+    this.syncEvent();
     this.buildSide();
     this.buildLeft();
     this.redrawMap();

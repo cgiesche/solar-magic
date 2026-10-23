@@ -663,6 +663,32 @@ game; `tools/testeventpaint.ts` that every clean event painted as it is keeps ev
 painted for Yoshi's Island 1 appears in the game step by step in its order when the level is passed (silently
 on the main map), also reordered.
 
+### Layer 1 events, reveals, destroyed level tiles
+
+The rest of what an event changes, painted and set without a mode of its own:
+- **layer 1 changes**: silent steps on layer 1 (the event steps patch's tables, layer 0: a Map16 tile at a
+  `$7EC800` offset), written when the event ends and on every overworld load after it, VRAM not refreshed (Lunar
+  Magic's layer 1 event editor: for other submaps and tiles not seen). The user paints layer 1 while the event is
+  chosen; its changes are the tiles that differ from layer 1 as after it without them (emulated on a copy of the
+  ROM). A level tile painted where no tile entered a level gets a free translevel.
+- the **reveal list** (*Overworld*, properties, *Reveal list*; Lunar Magic's "Edit Reveal Tile List"): the game's
+  0x16 pairs in place (`$04DA1D` → `$04DA33`), also those for tiles 52–54 the game doesn't use.
+- **destroyed level tiles** (a tile's properties, *Destroyed on*; Lunar Magic's "Destroy Level Tile Settings"):
+  the game has 0x10 entries of an event and a tile (`$04E5D6`, `$04E5B6`; its loop at `$04E677` reads 0x18, the
+  rest being the next tables); as in Lunar Magic, the patch moves them to free space with 0x18 (pointers
+  `$04E67C`, `$04E69C`; event `$FF` none). One tile per event. Where the game destroys a castle's top, it writes
+  the tile below it at offset + `$10`, which on a 16x16 block's bottom row (rows F and 2F) is the block to its
+  right; a JSL at `$04E6C5` finds the tile below there too. `$04DA98` turns off the game's unused second tile
+  of a revealed tile 54, as Lunar Magic does. What destroying a tile does is learned by running the game's code
+  on a map holding it; the setting is shown on such a tile and on the level tile below a castle's top.
+  Places as SMW Central's hijack map gives them and Lunar Magic's code in the ROMs it saved uses; the editor's
+  code is its own.
+
+`tools/testl1events.ts` checks that the patched ROM shows layer 1 at every event progress as the clean game, that
+a layer 1 change, a reveal list entry and a destroyed tile show when level 105 is passed and when a save after it
+is loaded, that a castle top on row F destroys the tile below it (the clean game the one to its right), and that
+the clean game's layer 1 changes painted as they are change no byte.
+
 ### Layer 3 graphics per level
 
 As Lunar Magic's *Layer 3 GFX/Tilemap Bypass*, a level can have its own layer 3 graphics and tilemap
@@ -818,6 +844,7 @@ not compatible with the respective feature.
 | `$04D7F2–$04D85C` | Translevels per level tile (Lunar Magic's table) |
 | `$009F19`, `$048F8A`, `$049001`, `$049199`; code `$05DD80`, `$03BA10`, `$03BA50`, table `$05DDA0` | Initial level flags, no entry if passed, save prompt (Lunar Magic's places) |
 | `$04E9F7`, `$04DCA5`, `$04DCAA`, `$04D859`; pointers `$04E49F`, `$04E4A4`, `$04E709`, `$04E710`, `$04EE3F`, `$04EE5A`, `$04E4B0`, `$04E4BB`, `$04EAF5`, `$04DD45`, `$04DD4A`, `$04DA74`, `$04EC8C`, `$04ECBA`, `$04ECC5`, `$04ED97`, `$04EDBE`, `$04EDB8` | Event steps, silent events, 0x78 events (Lunar Magic's places) |
+| `$04E6C5`, `$04DA98`; pointers `$04E67C`, `$04E69C` | Destroyed level tiles, 0x18 entries (Lunar Magic's places) |
 | Ext. object table `$0DA118` (entry `$03`) | Structures (SMWS); empty in the original, no code hook |
 | `$05B20F` | Messages in free space (SMWM), only if the texts no longer fit |
 | `$00F545`, `$029328`, `$058A66`, `$058B46`, `$058C34`, `$058D2B`, `$00C096`, `$00C0E7`, `$00C176` | Map16 extension and custom blocks (SMWX) |

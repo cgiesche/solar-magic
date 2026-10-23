@@ -112,6 +112,14 @@ _Avoid_: events passed, after all events
 **Reveal**:
 A layer 1 tile that changes into another when an event passes over it (Lunar Magic's reveal list: which tile becomes which). An event reveals at most one tile, a tile can be revealed by several events; set on the tile, any layer 1 tile.
 
+**Destroyed level tile**:
+A layer 1 tile an event destroys when it passes (a castle, fortress or switch palace collapsing; a castle's top and the tile below it). One tile per event, 0x18 in all; set on the tile it destroys. What destroying a tile does is the game's code's.
+_Avoid_: collapse (that is the animation), destruction event
+
+**Layer 1 change**:
+A layer 1 tile an event writes when it ends (a silent step on layer 1, shown when the map is loaded again: for other submaps and tiles not seen). Painted as layer 1 after the event, as event steps are.
+_Avoid_: layer 1 event (Lunar Magic's mode)
+
 **Overworld link**:
 A star, pipe or exit path tile leading to another place of the overworld (one-way or both ways), or a location that an exit to the overworld teleports to; one entry of the star/pipe or exit path table, up to 0x100 as in Lunar Magic.
 _Avoid_: link (that is a part's), warp, teleport (for the tile)
