@@ -75,6 +75,43 @@ _Avoid_: FG/BG init (Lunar Magic's name), initial position
 A 256x224 frame over the level showing what the player sees there (Lunar Magic's Game View Screen), placed on the 8x8 grid inside the level and, once its camera reach is known, where the game lets the camera go; a view setting, not part of the level.
 _Avoid_: camera box, screen preview
 
+### Overworld
+
+**Submap**:
+One of the overworld's 7 maps: the main map (0) on the first 512x512 map, and Yoshi's Island, Vanilla Dome, Forest of Illusion, Valley of Bowser, Special World and Star World (1–6) sharing the second, each a fixed camera window there. Graphics, palettes, music and UberASM are per submap.
+_Avoid_: world (that is the player's notion), map (alone, where the 512x512 map could be meant)
+
+**Level tile**:
+A layer 1 tile of the overworld that enters a level (tiles 56–80, and with Lunar Magic 82–86); its settings (translevel, base event, the directions each exit reveals, the initial flags) belong to the tile and move with it.
+_Avoid_: level dot, node
+
+**Translevel**:
+The number the overworld knows a level by (0–24 for levels 0–24, 25–5F for 101–13B), the index of everything per level on the overworld (names, base events, flags, saved progress). Stored per tile in Lunar Magic's table, not found by scanning the map, so placing a level tile shifts no other level's number.
+_Avoid_: level number (for the overworld's), OW level
+
+**Path tile**:
+A layer 1 tile Mario walks, climbs or swims along, or stops or exits on; invisible in the game, drawn by the editor as an overlay. The game's 5 hardcoded paths are not tiles.
+_Avoid_: road, Mario path (Lunar Magic's view name)
+
+**Event**:
+One of the overworld's 0x78 changes run once when a level is passed (its base event, + 1…3 for its secret exits) or by a teleport or the user's own code: layer 2 steps, layer 1 changes, reveals and destroyed level tiles. Chosen by the level and exit that runs it; its number shown only for those that run otherwise.
+_Avoid_: path reveal (that is part of one), trigger
+
+**Event step**:
+One piece an event changes on layer 2: **animated** (shown with the path fade, in order, on the submap Mario is on) or **silent** (written at once, on other submaps). The user paints the map as it looks after the event; the editor finds its steps (ADR 0005).
+_Avoid_: event tile (Lunar Magic's), piece
+
+**Event progress**:
+Up to which event the overworld is shown as passed (events applied in their number order, as the game does when it loads a save); a view setting that test play from the overworld takes over, not part of the ROM.
+_Avoid_: events passed, after all events
+
+**Reveal**:
+A layer 1 tile that changes into another when an event passes over it (Lunar Magic's reveal list: which tile becomes which).
+
+**Overworld link**:
+A star, pipe or exit path tile leading to another place of the overworld (one-way or both ways), or a location that an exit to the overworld teleports to; one entry of the star/pipe or exit path table, up to 0x100 as in Lunar Magic.
+_Avoid_: link (that is a part's), warp, teleport (for the tile)
+
 ### Third-party content
 
 **Package**:
