@@ -1,14 +1,14 @@
 // Path tiles (owpaths.ts): the kind of every layer 1 tile – walk, climb, swim, exit, stop, level or none –
 // learned by moving Mario onto it in the emulator. Checked against the clean game's own tables (read here
-// as the test's independent knowledge, the editor reads none of them): its path tiles 01–55 by the pose
-// each gives Mario ($049FEB: bit 3 swimming, bit 4 climbing) and its list of exit tiles ($049426); a
+// as the test's independent knowledge, the editor reads none of them): its path tiles 01–51 by the pose
+// each gives Mario ($049FEB: bit 3 swimming, bit 4 climbing; 52–55 read past it) and its list of exit tiles ($049426); a
 // patched game's tile shows what it does there; editing the overworld's data keeps the result.
 import { Rom, snesToPc } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { RomReads } from '../src/core/romdeps.ts';
 import { pathKindsJob, PATH_KINDS, type PathKind } from '../src/core/owpaths.ts';
 import {
-  readL1, writeL1, readL2, writeL2, readTranslevels, writeTranslevels, setInitialFlags, setExitDirection, setNameCode,
+  readL1, writeL1, readL2, writeL2, readTranslevels, writeTranslevels, setInitialFlags, setExitDirection, setNameCode, FLAG, MAX_TRANSLEVEL,
 } from '../src/core/overworld.ts';
 import { editorImage, cleanImage } from './fixture.ts';
 
@@ -66,6 +66,14 @@ check(kinds.length === 0x100, '256 tiles');
   writeL1(r, l1); writeL2(r, l2); writeTranslevels(r, tls);
   setInitialFlags(r, 0x29, 0x8f); setExitDirection(r, 0x29, 0, 3); setNameCode(r, 0x29, 0x0123);
   check(!reads.differ(before, r.data), 'layer 1, layer 2, translevels, initial flags, exit directions, a name changed: the kinds hold');
+}
+
+// ---- the probe's own translevel isn't taken from the map ----
+{
+  const r = new Rom(rom.data.slice());
+  for (let tl = 0; tl <= MAX_TRANSLEVEL; tl++) setInitialFlags(r, tl, FLAG.passed | FLAG.noEntry);
+  const k = learn(r).kinds;
+  check(k.every((v, t) => v === kinds[t]), 'every level passed with "no entry" from the start: the same kinds');
 }
 
 // ---- a patched game ----

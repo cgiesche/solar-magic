@@ -9,7 +9,7 @@
 
 import type { LevelEmulator } from './levelemu.ts';
 import type { Job } from './learner.ts';
-import { l1Index, overworldDataRanges } from './overworld.ts';
+import { l1Index, overworldDataRanges, OW_L1, DIR_FLAGS } from './overworld.ts';
 import { RAM, GM, get16 } from './ram.ts';
 import { PAD } from './blockprobe.ts';
 
@@ -41,15 +41,16 @@ function* probeAll(emu: LevelEmulator, end: () => void): Generator<string | void
     const map = w[RAM.submap] ? 1 : 0, tx = get16(w, RAM.owPlayerTileX), ty = get16(w, RAM.owPlayerTileY);
     const dx = tx + 2 < 32 ? 1 : -1, pad = dx > 0 ? PAD.right : PAD.left;
     const at = (k: number, dy = 0) => l1Index(map, tx + k * dx, ty + dy);
-    // the way: his tile (any direction open), the probed tile, a stop tile (his own), nothing around
-    const home = at(0), tl = w[RAM.owTranslevels + home] || 1;
+    // the way: his tile (translevel 1, every direction open), the probed tile (the same translevel), a stop tile
+    // (his own, read: what is painted there matters), nothing around
+    const home = at(0), tl = 1, stop = emu.rom.r8(OW_L1 + home);
     for (let dy = -1; dy <= 1; dy++) for (let k = -1; k <= 3; k++) {
       const y = ty + dy, x = tx + k * dx;
       if ((k || dy) && x >= 0 && x < 32 && y >= 0 && y < 32) w[RAM.owLayer1 + at(k, dy)] = w[RAM.owTranslevels + at(k, dy)] = 0;
     }
-    if (tx + 2 * dx >= 0 && tx + 2 * dx < 32) w[RAM.owLayer1 + at(2)] = w[RAM.owLayer1 + home];
+    w[RAM.owLayer1 + at(2)] = stop;
     w[RAM.owTranslevels + home] = w[RAM.owTranslevels + at(1)] = tl; // (the probed tile enters a level if it can)
-    w[RAM.levelFlags + tl] |= 0x0f;
+    w[RAM.levelFlags + tl] = DIR_FLAGS.reduce<number>((a, b) => a | b, 0); // (not passed: no "no entry")
     const standing = w[RAM.owProcess], start = s.saveState();
     const kinds: PathKind[] = [];
     for (let t = 0; t < 0x100; t++) {
@@ -78,11 +79,11 @@ function probe(emu: LevelEmulator, t: number, tx: number, dx: number, pad: numbe
     }
     if (tileX() === 2) return pose & 0x10 ? 'climb' : pose & 0x08 ? 'swim' : 'walk';
     if (pose >= 0 && w[RAM.owProcess] === standing) break; // stopped on t
-    if (walking < 0 && f > 8) return 'none';
+    if (walking < 0 && f > 8) return 'none'; // (he starts at once when he can)
   }
   if (pose < 0 || tileX() !== 1) return 'none';
   for (let f = 0; f < ENTER_FRAMES; f++) {
-    s.joy1 = f % 8 < 2 ? PAD.a : 0;
+    s.joy1 = f % 8 < 2 ? PAD.a : 0; // (pressed again and again)
     s.runFrame();
     if (w[RAM.gameMode] === GM.levelLoad) return 'level';
   }

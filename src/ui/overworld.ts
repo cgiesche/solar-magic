@@ -237,7 +237,7 @@ export class OverworldView {
 
   // the layer 1 tiles shown, as the game sees them (null while their kinds are learned)
   private kinds: { gen: number; kinds: PathKind[] } | null = null;
-  private kindsLearned = () => this.paint();
+  private kindsLearned = () => { this.paint(); this.updateStatus(); };
   pathKinds(): PathKind[] | null {
     const gen = this.app.rom.gen;
     if (this.kinds?.gen !== gen) {
@@ -475,11 +475,11 @@ export class OverworldView {
     let t = `X ${hex(c.x, 2)}  Y ${hex(c.y, 2)}`;
     if (this.mode === 'l1') {
       if (c.x >= 0 && c.y >= 0 && c.x < 32 && c.y < 32) {
-        const i = l1Index(this.region, c.x, c.y);
-        t += `  ·  Tile ${hex(this.l1[i], 2)}`;
+        const i = l1Index(this.region, c.x, c.y), shown = this.shownL1()[i];
+        t += `  ·  Tile ${hex(shown, 2)}`;
         const tl = this.tls[i];
         if (isLevelTile(this.l1[i])) t += tl ? `  ·  Level ${hex(translevelToLevel(tl), 3)} “${levelName(this.app.rom, tl)}”` : '  ·  Enters no level';
-        const k = this.showPaths ? this.pathKinds()?.[this.shownL1()[i]] : undefined;
+        const k = this.showPaths ? this.pathKinds()?.[shown] : undefined;
         if (k && isPathKind(k)) { t += `  ·  ${PATH_KIND_NAMES[k]}`; this.scroller.title = PATH_KIND_NAMES[k]; }
       }
     } else if (c.x >= 0 && c.y >= 0 && c.x < 64 && c.y < 64) t += `  ·  Entry ${hex(this.l2[l2Index(this.region, c.x, c.y)], 4)}`;
