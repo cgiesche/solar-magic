@@ -12,7 +12,7 @@
 // pages holding ExAnimation data.
 
 import type { Rom } from './rom.ts';
-import { snesToPc } from './rom.ts';
+import { snesToPc, type RomRange } from './rom.ts';
 import { editorPatch, GFX_FILES } from './patches.ts';
 import { exanimDataRanges } from './exanim.ts';
 
@@ -76,6 +76,15 @@ export class RomReads {
       if (!this.pages[p]) continue;
       for (let i = p * size, end = i + size; i < end; i++) if (then[i] !== now[i]) return true;
     }
+    return false;
+  }
+
+  // any byte read lies in one of the ranges
+  touches(ranges: RomRange[]): boolean {
+    for (const [start, end] of ranges) {
+      for (let p = start >> PAGE_SHIFT, e = Math.min(this.pages.length, ((end - 1) >> PAGE_SHIFT) + 1); p < e; p++) if (this.pages[p]) return true;
+    }
+    for (const b of this.bytes) for (const [start, end] of ranges) if (b >= start && b < end) return true;
     return false;
   }
 

@@ -5,8 +5,10 @@
 // Longer tasks run here too, a slice at a time between the probes: the object kinds of a
 // tileset (objkinds.ts), the level scan (levelscan.ts) and the camera at Mario standing at a place
 // (camerareach.ts).
+// After the first copy of the ROM the editor sends the ranges a change wrote: queued jobs stay, a running
+// task starts over only when it read a changed byte, results are checked against the ROM as always.
 
-import { Rom } from './rom.ts';
+import { Rom, type RomRange } from './rom.ts';
 import { BlockProber, blockKey, collisionKey, spriteKey, runsKey, cameraKey } from './blockprobe.ts';
 import { gfxSkipMask } from './gfxpages.ts';
 import { RomReads, type CacheEntry } from './romdeps.ts';
@@ -44,10 +46,12 @@ export interface ScanDone { type: 'scan'; gen: number; id: number; result: ScanR
 export interface CameraDone { type: 'camera'; gen: number; id: number; result: CameraAt | null; put: [string, CacheEntry][] }
 export type ProbeReply = ProbeDone | KindsDone | ScanDone | CameraDone;
 
-// what the editor sends: the ROM (again after each change), jobs asked for, the prefetch queue,
-// the longer tasks (a new one replaces the running one of its type)
+// what the editor sends: the ROM (the whole of it, or the bytes a change wrote at their offsets and the new
+// size), jobs asked for, the prefetch queue, the longer tasks (a new one replaces the running one of its
+// type, unless it asks for the same result)
 export type ProbeMessage =
   | { type: 'rom'; gen: number; data: Uint8Array }
+  | { type: 'edit'; gen: number; size: number; edits: [number, Uint8Array][] }
   | { type: 'ask'; jobs: ProbeJob[] }
   | { type: 'prefetch'; jobs: ProbeJob[] }
   | { type: 'kinds'; ts: number; level: KindLevel; layer2Pointer: number }
@@ -55,8 +59,14 @@ export type ProbeMessage =
   | { type: 'camera'; id: number; key: string; level: ScanLevel; x: number; y: number };
 
 export const jobId = (j: ProbeJob) => `${j.ts}:${j.k}`;
+// the result cache key of a task's result
+const taskKey = (m: TaskMessage) => (m.type === 'kinds' ? kindsKey(m.ts) : m.key);
 
 type TaskType = 'kinds' | 'scan' | 'camera';
+type TaskMessage = ProbeMessage & { type: TaskType };
+
+// a longer task: what was asked, its slices (the result; null: failed) and the ROM bytes it read so far
+interface Task { msg: TaskMessage; run: Generator<void, unknown>; reads: () => RomReads | null }
 
 // the result cache key of a job's result
 export function jobKey({ ts, k }: ProbeJob): string {
@@ -74,10 +84,11 @@ export class ProbeHost {
   private mask: { gen: number; mask: Uint8Array | null } = { gen: -1, mask: null };
   private asked = new Map<string, ProbeJob>(); // requested directly: first
   private prefetch = new Map<string, ProbeJob>();
-  private tasks = new Map<TaskType, Generator<void, ProbeReply>>(); // taking turns
+  private tasks = new Map<TaskType, Task>(); // taking turns
   private emus = new Map<TaskType, LevelEmulator>();
+  started = 0; // tasks (re)started
 
-  // the ROM changed (gen: the editor's count of changes); queued jobs are dropped
+  // a new ROM (gen: the editor's count of changes); queued jobs and tasks are dropped
   setRom(gen: number, data: Uint8Array): void {
     this.gen = gen;
     this.asked.clear();
@@ -99,19 +110,66 @@ export class ProbeHost {
     this.prober.reset(); // probe levels that read changed pages are prepared again
   }
 
-  handle(m: ProbeMessage): void {
-    if (m.type === 'rom') this.setRom(m.gen, m.data);
-    else if (m.type === 'ask') this.ask(m.jobs);
-    else if (m.type === 'prefetch') this.setPrefetch(m.jobs);
-    else if (m.type === 'kinds') this.startTask('kinds', this.kindsTask(m.ts, m.level, m.layer2Pointer));
-    else if (m.type === 'scan') this.startTask('scan', this.scanTask(m.id, m.key, m.level));
-    else this.startTask('camera', this.cameraTask(m.id, m.key, m.level, m.x, m.y));
+  // The ROM changed (gen) by the bytes written at these offsets, to this size: queued jobs stay, a task that read
+  // a changed byte starts over. A new size is a new ROM (the emulators would go on with the old one).
+  edit(gen: number, size: number, edits: [number, Uint8Array][]): void {
+    const rom = this.rom;
+    if (!rom || !this.prober) return;
+    if (rom.size !== size) {
+      const data = new Uint8Array(size);
+      data.set(rom.data.subarray(0, Math.min(size, rom.size)));
+      for (const [at, b] of edits) data.set(b.subarray(0, Math.max(0, size - at)), at);
+      this.setRom(gen, data);
+      return;
+    }
+    this.gen = gen;
+    const ranges: RomRange[] = [];
+    for (const [at, b] of edits) {
+      rom.writeAt(at, b);
+      ranges.push([at, at + b.length]);
+    }
+    for (const t of this.tasks.values()) if (t.reads()?.touches(ranges)) this.begin(t);
+    this.prober.reset();
   }
 
-  private startTask(type: TaskType, task: Generator<void, ProbeReply>): void {
+  handle(m: ProbeMessage): void {
+    if (m.type === 'rom') this.setRom(m.gen, m.data);
+    else if (m.type === 'edit') this.edit(m.gen, m.size, m.edits);
+    else if (m.type === 'ask') this.ask(m.jobs);
+    else if (m.type === 'prefetch') this.setPrefetch(m.jobs);
+    else this.startTask(m);
+  }
+
+  // a task asked for: replaces the running one of its type, unless that one finds the same result (it answers
+  // this request then)
+  private startTask(msg: TaskMessage): void {
     if (!this.prober) return;
-    this.tasks.delete(type);
-    this.tasks.set(type, task);
+    const t = this.tasks.get(msg.type);
+    if (t && taskKey(t.msg) === taskKey(msg)) { t.msg = msg; return; }
+    const task: Task = { msg, run: undefined!, reads: () => null };
+    this.begin(task);
+    this.tasks.delete(msg.type);
+    this.tasks.set(msg.type, task);
+  }
+
+  // (re)starts a task's slices
+  private begin(t: Task): void {
+    const m = t.msg;
+    t.reads = () => null;
+    t.run = m.type === 'kinds' ? this.kindsTask(t, m.ts, m.level, m.layer2Pointer)
+      : m.type === 'scan' ? this.played(t, (emu) => levelScanJob(emu, m.level))
+      : this.played(t, (emu) => cameraAtJob(emu, m.level, m.x, m.y));
+    this.started++;
+  }
+
+  // a finished task's reply, with its result cache entry
+  private taskDone(t: Task, result: unknown): ProbeReply {
+    const p = this.prober!, m = t.msg, key = taskKey(m), put = p.results.flush().put;
+    const e = result !== null && !put.some(([k]) => k === key) ? p.results.entry(key) : undefined;
+    if (e) put.push([key, e]);
+    if (m.type === 'kinds') return { type: 'kinds', gen: this.gen, ts: m.ts, failed: result === null, put };
+    if (m.type === 'scan') return { type: 'scan', gen: this.gen, id: m.id, result: result as ScanResult | null, put };
+    return { type: 'camera', gen: this.gen, id: m.id, result: result as CameraAt | null, put };
   }
 
   // an own emulator per task type (the prober's keeps its prepared probe levels), from the
@@ -128,36 +186,32 @@ export class ProbeHost {
     return e;
   }
 
-  private *kindsTask(ts: number, level: KindLevel, layer2Pointer: number): Generator<void, ProbeReply> {
-    const p = this.prober!;
-    let failed = true;
+  // the object kinds of tileset ts (a stored result while it holds); null when they could not be found
+  private *kindsTask(t: Task, ts: number, level: KindLevel, layer2Pointer: number): Generator<void, unknown> {
+    const p = this.prober!, key = kindsKey(ts), known = p.results.get(key);
+    if (known !== undefined) return known;
     try {
       const probe = new ObjKindProbe(this.emu('kinds'), { ...level, header: { ...level.header, tileset: ts } }, layer2Pointer);
+      t.reads = () => probe.reads();
       while (!probe.done) { probe.step(); yield; }
-      p.results.set(kindsKey(ts), probe.result(), p.results.fp.deps(probe.reads()));
-      failed = false;
+      const r = probe.result();
+      p.results.set(key, r, p.results.fp.deps(probe.reads()));
+      return r;
     } catch (e) {
       console.error(e);
+      return null;
     }
-    return { type: 'kinds', gen: this.gen, ts, failed, put: p.results.flush().put };
   }
 
-  private *scanTask(id: number, key: string, level: ScanLevel): Generator<void, ProbeReply> {
-    const result: ScanResult | null = yield* this.played('scan', key, (emu) => levelScanJob(emu, level));
-    return { type: 'scan', gen: this.gen, id, result, put: this.prober!.results.flush().put };
-  }
-
-  private *cameraTask(id: number, key: string, level: ScanLevel, x: number, y: number): Generator<void, ProbeReply> {
-    const result = yield* this.played('camera', key, (emu) => cameraAtJob(emu, level, x, y));
-    return { type: 'camera', gen: this.gen, id, result, put: this.prober!.results.flush().put };
-  }
-
-  // runs a job on the task type's emulator, its result (not null) into the result cache under key with the
-  // ROM bytes it read; null when it failed
-  private *played<T>(type: TaskType, key: string, make: (emu: LevelEmulator) => Generator<void, T | null>): Generator<void, T | null> {
-    const p = this.prober!, emu = this.emu(type);
+  // runs a job on the task type's emulator, its result (not null) into the result cache under the task's key
+  // with the ROM bytes it read; a stored result while it holds; null when it failed
+  private *played<T>(t: Task, make: (emu: LevelEmulator) => Generator<void, T | null>): Generator<void, unknown> {
+    const p = this.prober!, key = taskKey(t.msg), known = p.results.get(key);
+    if (known !== undefined) return known;
+    const emu = this.emu(t.msg.type);
     try {
       const job = make(emu), reads = new RomReads(this.rom!.data.length);
+      t.reads = () => reads;
       for (;;) {
         const r = emu.tracked(() => job.next());
         reads.add(r.reads);
@@ -196,8 +250,8 @@ export class ProbeHost {
     if (!this.asked.size && this.tasks.size) {
       const [type, task] = this.tasks.entries().next().value!;
       this.tasks.delete(type);
-      const r = task.next();
-      if (r.done) return r.value;
+      const r = task.run.next();
+      if (r.done) return this.taskDone(task, r.value);
       this.tasks.set(type, task); // (the other task's turn next)
       return null;
     }

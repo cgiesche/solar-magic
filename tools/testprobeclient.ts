@@ -1,6 +1,7 @@
 // The editor's probe client (probeclient.ts) against a probe host (probehost.ts) in a stand-in
 // worker the test runs by hand: a reply from before a ROM change does not make it ask again and
-// again, results come in after it, and one still valid is kept; a broken worker hands everything
+// again, results come in after it, and one still valid is kept; after the first copy of the ROM it gets the
+// ranges a change wrote; a broken worker hands everything
 // wanted to the main thread; a failed probe is not asked again until the ROM changes; the
 // prefetch follows the tileset; object kinds are kept while the bytes they read are unchanged.
 import { readFileSync } from 'node:fs';
@@ -18,8 +19,8 @@ const EDITOR_IMAGE = await editorImage(); // the fixture as the editor opens it
 
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
-// a write that changes no byte: a new ROM generation that nothing a probe read differs in
-const touch = (rom: Rom) => rom.writeAt(0, rom.data.slice(0, 1));
+// a new ROM generation that nothing a probe read differs in (the internal name)
+const touch = (rom: Rom) => rom.writeAt(0x7fc0, Uint8Array.of(rom.data[0x7fc0] ^ 1));
 const file = EDITOR_IMAGE.slice();
 const direct = new BlockProber(new Rom(file));
 const settle = () => new Promise((r) => setTimeout(r, 0)); // (stored results are awaited first)
@@ -61,7 +62,7 @@ function editor(worker: Worker | null) {
   };
   e.client = new ProbeClient({
     results: e.results, cacheReady: Promise.resolve(),
-    rom: () => ({ gen: rom.gen, data: rom.data }), tileset: () => e.ts,
+    rom: () => rom, tileset: () => e.ts,
     connect: worker ? worker.connect : undefined,
     later: (key, step) => steps.push([key, step]),
     setBusy: (key, label) => { if (label === null) e.busy.delete(key); else e.busy.set(key, label); },
@@ -102,10 +103,32 @@ function editor(worker: Worker | null) {
   touch(e.rom);
   e.client.block(0x130); // (the client sees the change: sends the new ROM and the job again)
   await settle();
-  check(old?.type === 'probe' && old.gen !== e.rom.gen && w.sent.some((m) => m.type === 'rom' && m.gen === e.rom.gen), 'reply from the generation before');
+  check(old?.type === 'probe' && old.gen !== e.rom.gen && w.sent.some((m) => m.type === 'edit' && m.gen === e.rom.gen), 'reply from the generation before');
   w.reply(old!);
   check(JSON.stringify(e.client.block(0x130)) === JSON.stringify(direct.probe(0x130)), 'its result is kept: still valid');
   check(e.ready === 1 && !e.busy.has('probe'), "job done: 'ready' told, nothing busy");
+}
+
+// after the first copy of the ROM the worker gets the ranges a change wrote; the whole ROM again (with what is
+// still wanted) only when the ROM's log of changes doesn't reach back that far
+{
+  const w = new Worker(), e = editor(w);
+  e.client.block(0x130);
+  await settle();
+  e.rom.writeAt(0x7fc0, Uint8Array.of(0x41, 0x42));
+  e.client.block(0x131);
+  await settle();
+  const roms = w.sent.filter((m) => m.type === 'rom'), edits = w.sent.filter((m) => m.type === 'edit');
+  check(roms.length === 1 && edits.length === 1, 'one copy of the ROM, then an edit');
+  const ed = edits[0];
+  check(ed?.type === 'edit' && ed.size === e.rom.size && ed.edits.length === 1 && ed.edits[0][0] === 0x7fc0 && ed.edits[0][1].join() === '65,66', 'the edit: the changed bytes at their offset');
+  check(w.sent.filter((m) => m.type === 'ask' && m.jobs.some((j) => j.k === 0x130)).length === 1, 'jobs asked before the edit: not sent again');
+  for (let i = 0; i < 9000; i++) e.rom.w8(0x00ffc0, i);
+  e.client.block(0x132);
+  await settle();
+  check(w.sent.filter((m) => m.type === 'rom').length === 2 && w.asks(0x130) === 2, 'the log does not reach back: the whole ROM, the asked jobs again');
+  w.run();
+  check(JSON.stringify(e.client.block(0x130)) === JSON.stringify(direct.probe(0x130)), 'block 130 as probed directly');
 }
 
 // the worker breaks down: asked probes and object kinds go to the main thread

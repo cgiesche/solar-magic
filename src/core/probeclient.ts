@@ -1,14 +1,15 @@
 // The editor's side of the probes (probehost.ts): asks for block, collision and sprite probes, Mario's
 // run speeds and the game view's scroll bands in the current tileset, prefetches what the palettes can
 // show, and runs the object kinds, the level scan and the camera at a place, all in the probe worker. It
-// sends the ROM again after a change
-// (the worker drops its queue then) together with everything still wanted, and falls back to
-// probing on the main thread in background slices when the worker fails. Results go to the
-// editor's ResultCache, also those from before a ROM change: they hold while the ROM bytes they read
-// are unchanged.
+// sends the ROM once, then the ranges each change wrote (the worker keeps its queue and restarts only tasks
+// that read a changed byte; the whole ROM again, with everything still wanted, when the ROM's log of changes
+// doesn't reach back), and falls back to probing on the main thread in background slices when the worker
+// fails. Results go to the editor's ResultCache, also those from before a ROM change: they hold while the ROM
+// bytes they read are unchanged.
 
 import { ProbeHost, PROBE_SPRITE, PROBE_COLL, PROBE_RUNS, cameraJob, jobId, jobKey, type ProbeJob, type ProbeMessage, type ProbeDone, type ProbeReply, type KindsDone, type ScanDone, type CameraDone } from './probehost.ts';
 import type { ResultCache } from './romdeps.ts';
+import type { Rom } from './rom.ts';
 import type { BlockProbe, CollisionProbe, SpriteProbe, RunStates } from './blockprobe.ts';
 import type { CameraBands } from './camerabands.ts';
 import type { CameraAt } from './camerareach.ts';
@@ -23,7 +24,7 @@ type Send = (m: ProbeMessage) => void;
 export interface ProbeClientDeps {
   results: ResultCache;
   cacheReady: Promise<void>; // stored results are loaded
-  rom(): { gen: number; data: Uint8Array }; // the current ROM and its count of changes
+  rom(): Pick<Rom, 'gen' | 'data' | 'changesSince'>; // the current ROM, its count of changes and what they wrote
   tileset(): number; // the tileset probes are asked for
   kindLevel(): { level: KindLevel; layer2Pointer: number }; // the level object kinds are found with
   // starts the worker (replies go to reply, failed() once it broke down); null or a throw: none
@@ -154,25 +155,39 @@ export class ProbeClient {
 
   private play(msg: ProbeMessage & { type: Played }, done: (r: unknown) => void, label: string): void {
     this.sync(); // (first: after a ROM change it would send what was wanted then)
-    this.playWant.set(msg.type, { msg, done });
+    const want = { msg, done };
+    this.playWant.set(msg.type, want);
     this.d.setBusy(msg.type, label);
-    this.send?.(msg);
+    // (a stored result while it holds)
+    this.d.cacheReady.then(() => {
+      if (this.playWant.get(msg.type) !== want) return;
+      const known = this.d.results.get(msg.key);
+      if (known === undefined) this.send?.(msg);
+      else this.playDone({ type: msg.type, gen: this.gen, id: msg.id, result: known, put: [] } as ScanDone | CameraDone);
+    });
   }
 
-  // Starts the worker, and sends it the ROM again after a change (it drops its queue then: the
-  // asked jobs are sent again, the prefetch is made anew).
+  // Starts the worker, and sends it what a ROM change wrote: the ranges, or the whole ROM when they aren't known
+  // (it drops its queue then: the asked jobs and tasks are sent again). The prefetch is made anew.
   private sync(): void {
     if (!this.send) this.send = this.start();
     const rom = this.d.rom();
     if (this.gen === rom.gen) return;
+    const changes = this.gen < 0 ? null : rom.changesSince(this.gen);
     this.gen = rom.gen;
     this.failed.clear();
     this.kindsFailed.clear();
     this.prefetched.clear();
-    this.send({ type: 'rom', gen: this.gen, data: rom.data.slice() });
-    if (this.asked.size) this.send({ type: 'ask', jobs: [...this.asked.values()] });
-    if (this.kindsWant) this.send(this.kindsWant);
-    for (const w of this.playWant.values()) this.send(w.msg);
+    if (changes) {
+      const size = rom.data.length;
+      const edits = changes.filter(([a]) => a < size).map(([a, e]): [number, Uint8Array] => [a, rom.data.slice(a, Math.min(e, size))]);
+      this.send({ type: 'edit', gen: this.gen, size, edits });
+    } else {
+      this.send({ type: 'rom', gen: this.gen, data: rom.data.slice() });
+      if (this.asked.size) this.send({ type: 'ask', jobs: [...this.asked.values()] });
+      if (this.kindsWant) this.send(this.kindsWant);
+      for (const w of this.playWant.values()) this.send(w.msg);
+    }
     this.d.later('probe-prefetch', () => this.prefetch()); // results that read changed ROM data are redone
   }
 
@@ -219,12 +234,15 @@ export class ProbeClient {
   }
 
   // Results are kept whatever ROM they ran on: the cache checks them against the ROM bytes they
-  // read. A job that ran on an older ROM is done only if its result still holds (otherwise the
-  // worker, which got the jobs again with the new ROM, answers it once more).
+  // read. A job that ran on an older ROM is done only if its result still holds (otherwise it is
+  // asked for once more: the worker has the new ROM by now).
   private probeDone(d: ProbeDone): void {
     for (const [k, e] of d.put) this.d.results.set(k, e.data, e.deps);
     const id = jobId(d.job);
-    if (d.gen !== this.gen && this.d.results.get(jobKey(d.job)) === undefined) return;
+    if (d.gen !== this.gen && this.d.results.get(jobKey(d.job)) === undefined) {
+      if (this.asked.has(id)) this.send?.({ type: 'ask', jobs: [d.job] });
+      return;
+    }
     if (d.failed && d.gen === this.gen) this.failed.add(id);
     const asked = this.asked.delete(id), prefetched = this.prefetched.delete(id);
     this.busy();
@@ -235,7 +253,7 @@ export class ProbeClient {
   private kindsDone(d: KindsDone): void {
     for (const [k, e] of d.put) this.d.results.set(k, e.data, e.deps);
     if (this.kindsWant?.ts !== d.ts) return;
-    if (d.gen !== this.gen && this.d.results.get(kindsKey(d.ts)) === undefined) return;
+    if (d.gen !== this.gen && this.d.results.get(kindsKey(d.ts)) === undefined) { this.send?.(this.kindsWant); return; }
     if (d.failed) this.kindsFailed.add(d.ts);
     this.kindsWant = null;
     this.d.setBusy('kinds', null);
@@ -246,7 +264,8 @@ export class ProbeClient {
   private playDone(d: ScanDone | CameraDone): void {
     const want = this.playWant.get(d.type);
     for (const [k, e] of d.put) this.d.results.set(k, e.data, e.deps);
-    if (want?.msg.id !== d.id || (d.gen !== this.gen && this.d.results.get(want.msg.key) === undefined)) return;
+    if (want?.msg.id !== d.id) return;
+    if (d.gen !== this.gen && this.d.results.get(want.msg.key) === undefined) { this.send?.(want.msg); return; }
     this.playWant.delete(d.type);
     this.d.setBusy(d.type, null);
     want.done(d.result);

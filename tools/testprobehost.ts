@@ -1,8 +1,9 @@
 // Probe jobs (probehost.ts, run by the editor's probe worker): results as the prober's own, asked
-// jobs before prefetched ones, a changed ROM drops the queue; object kinds, level scan and camera as
-// computed directly, in slices that let asked jobs go first.
+// jobs before prefetched ones, a new ROM drops the queue; object kinds, level scan and camera as
+// computed directly, in slices that let asked jobs go first. A ROM change sent as the ranges it wrote keeps
+// the queue and the tasks, restarting only a task that read a changed byte (overworld edits restart nothing).
 import { readFileSync } from 'node:fs';
-import { Rom } from '../src/core/rom.ts';
+import { Rom, snesToPc } from '../src/core/rom.ts';
 import { BlockProber, blockKey, spriteKey } from '../src/core/blockprobe.ts';
 import { ProbeHost, PROBE_SPRITE, PROBE_RUNS, jobKey, type ProbeDone, type ProbeReply } from '../src/core/probehost.ts';
 import { ResultCache, RomFingerprint } from '../src/core/romdeps.ts';
@@ -86,7 +87,71 @@ check(cam?.type === 'camera' && cam.id === 9 && JSON.stringify(cam.result) === J
 host.handle({ type: 'scan', id: 8, key: 'scan-key', level: scanLevel });
 host.next();
 host.setRom(4, rom.data.slice());
-check(host.pending === 0, 'changed ROM: tasks dropped');
+check(host.pending === 0, 'new ROM: tasks dropped');
+
+// a ROM change by ranges while a level scan runs: overworld data (layer 1, layer 2 tiles and attributes, bank 04
+// event tables) restarts nothing and drops no result; the scan still gives what it gives on the ROM
+{
+  const r = new Rom(file), h = new ProbeHost(), ed = new ResultCache(new RomFingerprint(r));
+  h.setRom(1, r.data.slice());
+  const keep = (d: ProbeReply | null) => { for (const [k, e] of d?.put ?? []) ed.set(k, e.data, e.deps); return d; };
+  h.ask([{ ts: 0, k: 0x130 }, { ts: 0, k: PROBE_SPRITE | 0x0d }]);
+  h.handle({ type: 'kinds', ts: 1, level: { number: lv.number, header: lv.header }, layer2Pointer: l2 });
+  while (h.pending) keep(h.next());
+  h.handle({ type: 'scan', id: 1, key: 'scan-ow', level: scanLevel });
+  for (let i = 0; i < 4; i++) keep(h.next());
+  const started = h.started, g = r.gen;
+  for (const [snes, n] of [[0x0cf7df, 0x800], [0x04a533, 0x40], [0x04c02b, 0x40], [0x04d85d, 0x10], [0x04d93d, 0x10], [0x04dd8d, 0x10]]) {
+    r.writeAt(snesToPc(snes), r.data.slice(snesToPc(snes), snesToPc(snes) + n).map((b) => b ^ 0x5a));
+  }
+  h.handle({ type: 'edit', gen: 2, size: r.size, edits: r.changesSince(g)!.map(([a, e]) => [a, r.data.slice(a, e)]) });
+  check(h.pending === 1, 'overworld edit: the scan still runs');
+  let sc: ProbeReply | null = null;
+  while (h.pending) { const d = keep(h.next()); if (d?.type === 'scan') sc = d; }
+  check(h.started === started, 'overworld edit: the scan was not restarted');
+  check(sc?.type === 'scan' && sc.gen === 2 && JSON.stringify(sc.result) === JSON.stringify(scanned), 'overworld edit: the scan as played directly');
+  const held = [blockKey(0, 0x130), spriteKey(0, 0x0d), kindsKey(1), 'scan-ow'].filter((k) => ed.get(k) !== undefined);
+  check(held.length === 4, `overworld edit: block, sprite, kinds and scan results still hold (${held.join(', ')})`);
+
+  // the same scan asked for again: its stored result at once
+  h.handle({ type: 'scan', id: 2, key: 'scan-ow', level: scanLevel });
+  const again = h.next();
+  check(again?.type === 'scan' && again.id === 2 && again.put.some(([k]) => k === 'scan-ow'), 'a scan asked for again: the stored result, with its entry');
+}
+
+// a change of a byte a running task read restarts that task only: the queue and the other tasks go on
+{
+  const r = new Rom(file), h = new ProbeHost();
+  h.setRom(1, r.data.slice());
+  h.handle({ type: 'scan', id: 1, key: 'scan-re', level: scanLevel });
+  h.handle({ type: 'kinds', ts: 2, level: { number: lv.number, header: lv.header }, layer2Pointer: l2 });
+  h.next(); h.next();
+  h.setPrefetch([{ ts: 0, k: 0x131 }, { ts: 0, k: 0x132 }]);
+  const started = h.started, pending = h.pending;
+  // a byte the boot read (the scan counts it from its first slice; object kinds don't depend on it): changed, and
+  // changed back before the restarted scan read anything (no second restart)
+  const page = emu.bootReads!.pages.indexOf(1), o = page << 8;
+  const flip = (gen: number) => { r.writeAt(o, Uint8Array.of(r.data[o] ^ 1)); h.handle({ type: 'edit', gen, size: r.size, edits: [[o, r.data.slice(o, o + 1)]] }); };
+  flip(2); flip(3);
+  check(h.started === started + 1 && h.pending === pending, 'a byte the scan read: the scan restarted once, the kinds and the queue go on');
+  // the same scan asked for again (the same key): the running one answers it
+  h.handle({ type: 'scan', id: 5, key: 'scan-re', level: scanLevel });
+  check(h.started === started + 1, 'the same scan asked for again while it runs: not restarted');
+  const replies: ProbeReply[] = [];
+  while (h.pending) { const d = h.next(); if (d) replies.push(d); }
+  const sc = replies.find((d) => d.type === 'scan');
+  check(sc?.type === 'scan' && sc.id === 5 && JSON.stringify(sc.result) === JSON.stringify(scanned), 'restarted scan as played directly, answering the latest request');
+  check(replies.some((d) => d.type === 'kinds' && !d.failed) && replies.filter((d) => d.type === 'probe').length === 2, 'the kinds and the queued probes done');
+}
+
+// a new size: a new ROM (queue dropped)
+{
+  const r = new Rom(file), h = new ProbeHost();
+  h.setRom(1, r.data.slice());
+  h.handle({ type: 'scan', id: 1, key: 'scan-sz', level: scanLevel });
+  h.edit(2, r.size * 2, []);
+  check(h.pending === 0, 'a new size: tasks dropped');
+}
 
 console.log(bad ? `${bad} failures` : 'all ok');
 if (bad) process.exitCode = 1;

@@ -232,7 +232,7 @@ export class App {
     this.probes = new ProbeClient({
       results: this.results,
       cacheReady: this.cacheReady,
-      rom: () => ({ gen: this.rom.gen, data: this.rom.data }),
+      rom: () => this.rom,
       tileset: () => this.level.header.tileset,
       kindLevel: () => {
         const lv = this.level;
@@ -242,7 +242,7 @@ export class App {
         const w = new Worker(new URL('./probeworker.ts', import.meta.url), { type: 'module' });
         w.onmessage = (e: MessageEvent<ProbeReply>) => reply(e.data);
         w.onerror = (e) => { console.error(e); w.terminate(); failed(); };
-        return (m) => w.postMessage(m, m.type === 'rom' ? [m.data.buffer] : []);
+        return (m) => w.postMessage(m, m.type === 'rom' ? [m.data.buffer] : m.type === 'edit' ? m.edits.map(([, b]) => b.buffer) : []);
       },
       later: (key, step) => this.later(key, step),
       setBusy: (key, label) => this.setBusy(key, label),
