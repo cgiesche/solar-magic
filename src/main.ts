@@ -547,6 +547,7 @@ function showHelp(): void {
       ['Click/drag · right click/Shift+click', 'Pick up tile(s) as brush · paint'],
       ['Alt+click / Ctrl+click', 'Level info of the level tile'],
       ['G', 'Grid on/off'],
+      [', / .', 'Event progress: one event back / further'],
     ]],
     ['Graphics', [
       ['P / M / G / A', 'Tab palettes / Map16 tiles / graphics / animations; Esc back to the level'],

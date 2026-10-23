@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
-import { readL2, writeL2, OverworldEmulator, l2Index, l1Index, levelName, translevelToLevel } from '../src/core/overworld.ts';
+import { readL2, writeL2, OverworldEmulator, l2Index, l1Index, levelName, translevelToLevel, OW_EVENTS } from '../src/core/overworld.ts';
 import { TileCache } from '../src/core/render.ts';
 import { writePng } from './png.ts';
 import { RAM } from '../src/core/ram.ts';
@@ -12,7 +12,7 @@ const l2b = readL2(copy);
 console.log('L2 roundtrip', l2.every((v, i) => v === l2b[i]), 'compressed', size, 'orig approx', 0x04cb56 - 0x04a533);
 const emu = new OverworldEmulator(rom);
 const t0 = Date.now();
-const r = emu.load(0, true);
+const r = emu.load(0, OW_EVENTS);
 console.log('ow load ms', Date.now() - t0, r.ok);
 // render L2 from data
 const tc = new TileCache(r.vram, r.cgram, 0);

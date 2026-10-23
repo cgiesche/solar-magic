@@ -218,7 +218,11 @@ When a level is displayed, it runs the ROM's **original loading routines** (~15 
 ### Overworld editor (O)
 * Main map and all submaps; paint layer 1 (paths/level tiles) and layer 2 (terrain, 8x8) – mouse buttons as
   in the level editor: click/drag picks up a tile or a block as the brush (map or palette),
-  right-click/Shift+click paints; X/Y flip for layer 2 blocks; optional "all events unlocked" view.
+  right-click/Shift+click paints; X/Y flip for layer 2 blocks.
+* Event progress: a slider shows the overworld – both layers – as after loading a save in which the events up to
+  one have run (none to all, in their number order as the game applies them; Lunar Magic's "Change Events
+  Passed"), the event named by the level exit that runs it; `,`/`.` step through them. Both layers stay editable –
+  painting changes the map before events. A view setting kept per ROM (by its name), not in the ROM, not undone.
 * Level tiles show translevel → level number; on the left, the list of the map's level tiles (click selects and
   centers, double-click opens the level); level names can be composed from the three name parts.
 * Undo/redo as in the level editor (also for names); when leaving with unsaved changes:
@@ -283,8 +287,7 @@ Whose formats and interfaces the editor follows: [docs/credits.md](docs/credits.
   sound effects and the music of the overworld maps/special songs (title, credits) cannot be set. A ROM into which
   AddmusicK was inserted outside the editor cannot get additional songs.
 * **Test emulator:** no Mode 7 (boss levels); window/HDMA effects are ignored.
-* **Overworld:** events, overworld sprites and path settings are not editable (the "all events" view
-  is read-only). Translevel numbers follow the scan order as in vanilla – new level tiles
+* **Overworld:** events, overworld sprites and path settings are not editable. Translevel numbers follow the scan order as in vanilla – new level tiles
   shift the numbers of subsequent levels.
 * Title screen and credits are not included.
 * ASM patches: LoROM only, no SA-1; patches that require Lunar Magic do not work.

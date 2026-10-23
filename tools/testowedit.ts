@@ -88,14 +88,14 @@ const diff = (a: Uint8Array, b: Uint8Array) => { const out: number[] = []; for (
 {
   const { rom } = fresh();
   const emu = new OverworldEmulator(rom);
-  const r0 = emu.load(0, false);
+  const r0 = emu.load(0, 0);
   const l1 = readL1(rom), l2 = readL2(rom);
   const i1 = l1Index(0, 7, 9), i2 = l2Index(0, 21, 40);
   l1[i1] = l1[i1] === 0x56 ? 0x57 : 0x56;
   l2[i2] = l2[i2] === 0x0123 ? 0x0124 : 0x0123;
   writeL1(rom, l1);
   writeL2(rom, l2);
-  const r = emu.load(0, false);
+  const r = emu.load(0, 0);
   check(r0.ok && r.ok, 'overworld loads');
   check(r.wram[RAM.owLayer1 + i1] === l1[i1], 'the game\'s layer 1 has the painted tile');
   const base = (r.ppuRegs[0x08] & 0xfc) << 9; // BG2SC: the layer 2 tilemap

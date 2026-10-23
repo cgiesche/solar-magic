@@ -60,7 +60,7 @@ export function pickOverworldTile(app: App, cur: OwTile | null): Promise<OwTile 
     const status = h('div', { class: 'hint' }, 'Click a tile: Mario comes out there.');
     const image = (m: number) => {
       let c = images.get(m);
-      if (!c) { c = document.createElement('canvas'); putImage(c, drawOwMap(rom, emu.load(m, false), m > 0 ? 1 : 0, l1, l2)); images.set(m, c); }
+      if (!c) { c = document.createElement('canvas'); putImage(c, drawOwMap(rom, emu.load(m, 0), m > 0 ? 1 : 0, l1, l2)); images.set(m, c); }
       return c;
     };
     const paint = () => {

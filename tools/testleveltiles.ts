@@ -9,7 +9,7 @@ import { RomEditSession } from '../src/core/romedit.ts';
 import {
   OverworldEmulator, readL1, writeL1, isLevelTile, readTranslevels, writeTranslevels, hasTranslevelTable,
   placeTile, freeTranslevel, sharedTranslevels, translevelUse, resetTranslevel, levelName, nameCode, setNameCode, baseEvent,
-  exitDirections, translevelToLevel, BASE_EVENTS, NO_EVENT,
+  exitDirections, translevelToLevel, BASE_EVENTS, NO_EVENT, OW_EVENTS,
 } from '../src/core/overworld.ts';
 import { messageSlots } from '../src/core/messages.ts';
 import { L1_PTRS } from '../src/core/level.ts';
@@ -25,7 +25,7 @@ const clean = new Rom(cleanImage());
 const image = await editorImage();
 const patched = new Rom(image.slice());
 // the translevel the clean game gives each tile (its scan, $7ED000 after loading the overworld)
-const gameTranslevels = (rom: Rom) => new OverworldEmulator(rom).load(0, false).wram.slice(RAM.owTranslevels, RAM.owTranslevelsEnd);
+const gameTranslevels = (rom: Rom) => new OverworldEmulator(rom).load(0, 0).wram.slice(RAM.owTranslevels, RAM.owTranslevelsEnd);
 const cleanTl = gameTranslevels(clean);
 const tiles = [...cleanTl.keys()].filter((i) => cleanTl[i]);
 
@@ -37,9 +37,9 @@ check(same(readTranslevels(patched), cleanTl), `every level tile has the transle
 {
   const a = new OverworldEmulator(clean), b = new OverworldEmulator(patched);
   for (const all of [false, true]) {
-    const ra = a.load(0, all), rb = b.load(0, all);
+    const ra = a.load(0, all ? OW_EVENTS : 0), rb = b.load(0, all ? OW_EVENTS : 0);
     const part = (r: { wram: Uint8Array }) => r.wram.subarray(RAM.owLayer1, RAM.owTileFlagsEnd);
-    check(ra.ok && rb.ok && same(part(ra), part(rb)), `overworld ${all ? 'after all events' : 'of a new game'}: layer 1, translevels ($7ED000) and flags ($7ED800) as in the clean game`);
+    check(ra.ok && rb.ok && same(part(ra), part(rb)), `overworld ${all ? 'with every event passed' : 'of a new game'}: layer 1, translevels ($7ED000) and flags ($7ED800) as in the clean game`);
   }
 }
 

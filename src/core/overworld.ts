@@ -187,7 +187,7 @@ export function writeTranslevels(rom: Rom, t: Uint8Array): void {
 // needs Asar (loadAsar) to be loaded; every tile gets the translevel the game gives it (its table in WRAM, emulated)
 export function installTranslevelPatch(rom: Rom): void {
   if (hasTranslevelTable(rom)) return;
-  const game = new OverworldEmulator(rom).load(0, false);
+  const game = new OverworldEmulator(rom).load(0, 0);
   if (!game.ok) throw new Error('The overworld did not load – translevel table not installed');
   const t = game.wram.slice(RAM.owTranslevels, RAM.owTranslevelsEnd);
   const r = assemble(rom.data, new Map([['translevels.asm', translevelAsm()]]), 'translevels.asm');
@@ -353,7 +353,7 @@ export function setInitialFlags(rom: Rom, tl: number, v: number): void {
 // needs Asar (loadAsar) to be loaded; the table starts as the flags of the game's new file (emulated)
 export function installLevelFlagsPatch(rom: Rom): void {
   if (hasLevelFlagsPatch(rom)) return;
-  const game = new OverworldEmulator(rom).load(0, false);
+  const game = new OverworldEmulator(rom).load(0, 0);
   if (!game.ok) throw new Error('The overworld did not load – initial level flags not installed');
   const flags = game.wram.slice(RAM.levelFlags, RAM.levelFlags + MAX_TRANSLEVEL + 1);
   const r = assemble(rom.data, new Map([['levelflags.asm', levelFlagsAsm()]]), 'levelflags.asm');
@@ -423,6 +423,13 @@ export function levelName(rom: Rom, translevel: number): string {
 // per translevel: the event its normal exit runs (the secret exit's the next one; $FF none), $1DEA (ram.ts)
 export const BASE_EVENTS = 0x05d608;
 export const OW_EVENTS = 0x78; // 15 bytes of event bits
+// the event bits ($1F02) of a game in which events 0 … n-1 passed: event e is bit $80 >> e%8 of byte e/8 (the
+// game's masks at $04E44B)
+export function eventBits(n: number): Uint8Array {
+  const b = new Uint8Array(OW_EVENTS / 8);
+  for (let e = 0; e < Math.min(n, OW_EVENTS); e++) b[e >> 3] |= 0x80 >> (e & 7);
+  return b;
+}
 export const baseEvent = (rom: Rom, tl: number): number => rom.r8(BASE_EVENTS + tl);
 export function setBaseEvent(rom: Rom, tl: number, e: number): void {
   rom.w8(BASE_EVENTS + tl, e);
@@ -502,6 +509,14 @@ export interface OwRender {
   ppuRegs: Uint8Array;
   ok: boolean;
 }
+// layer 1 as the game shows it, its events applied (l1Index order)
+export const gameL1 = (r: OwRender): Uint8Array => r.wram.subarray(RAM.owLayer1, RAM.owLayer1End);
+// layer 2 of the loaded map's region as the game shows it, its events applied: the BG2 tilemap in VRAM (64x64 at
+// BG2SC, $2108; l2Index order within the region)
+export function gameL2(r: OwRender): Uint16Array {
+  const at = (r.ppuRegs[0x08] & 0xfc) << 9;
+  return Uint16Array.from({ length: 0x1000 }, (_, k) => r.vram[at + k * 2] | (r.vram[at + k * 2 + 1] << 8));
+}
 
 export class OverworldEmulator {
   rom: Rom;
@@ -522,7 +537,10 @@ export class OverworldEmulator {
     this.romGen = this.rom.gen;
     if (this.title?.reads.differ(this.title.rom, this.rom.data)) { this.titleState = null; this.title = null; }
   }
-  load(map: number, allEvents: boolean): OwRender {
+  // map `map` at event progress `progress` (events 0 … progress-1 passed), as after loading a save: the game draws
+  // their layer 2 tiles when the file is loaded (file select) and applies them to layer 1 in their number order
+  // while it loads the overworld (a new file's events are set again there)
+  load(map: number, progress: number): OwRender {
     this.sync();
     const s = this.snes;
     if (!this.titleState) {
@@ -541,11 +559,12 @@ export class OverworldEmulator {
     let n = 0;
     try {
       while (w[RAM.gameMode] !== GM.overworld && n < 1500) {
+        if (w[RAM.gameMode] === GM.fileSelect) w.set(eventBits(progress), RAM.owEvents);
         if (w[RAM.gameMode] === GM.overworldLoad) {
           w[RAM.introLevel] = 0;
           w[RAM.submap] = map;
           w[RAM.submap + 1] = map;
-          if (allEvents) for (let i = 0; i < 15; i++) w[RAM.owEvents + i] = 0xff;
+          w.set(eventBits(progress), RAM.owEvents);
         }
         s.joy1 = (n % 16) < 4 ? (w[RAM.gameMode] === GM.title ? 0x1000 : 0x0080) : 0;
         s.runFrame();

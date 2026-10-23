@@ -3,7 +3,7 @@
 import type { App } from './app.ts';
 import { h, toast, select, checkbox, attachPanZoom, zoomControl, ZOOM_MIN, ZOOM_MAX, attachRectPick, emptyState } from './dom.ts';
 import {
-  OverworldEmulator, type OwRender, readL1, writeL1, readL2, writeL2, l1Index, l1XY, l2Index, isLevelTile, readTranslevels, writeTranslevels,
+  OverworldEmulator, type OwRender, gameL1, gameL2, readL1, writeL1, readL2, writeL2, l1Index, l1XY, l2Index, isLevelTile, readTranslevels, writeTranslevels,
   placeTile, sharedTranslevels, enterableLevels, translevelToLevel, nameCode, setNameCode, splitNameCode, joinNameCode, nameWord, levelName, NAME_PART_COUNTS, MAP_NAMES,
   translevelUse, resetTranslevel, baseEvent, setBaseEvent, eventNames, exitDirections, setExitDirection, DIR_ARROWS, DIR_NAMES, EXIT_NAMES, NO_EVENT, isNameless,
   initialFlags, setInitialFlags, FLAG, DIR_FLAGS, OW_EVENTS, revealEvents, setRevealEvents, revealAt, revealedTile, REVEAL_EVENTS,
@@ -78,19 +78,25 @@ export class OverworldView {
   private props = h('div', { class: 'panel props' });
   private tlList = h('div', { class: 'level-list' });
   private tlCount = h('span', { class: 'hint' });
-  private roBadge = h('div', { class: 'ow-badge' }, 'Layer 1: view only (state after all events)');
+  private eventsBadge = h('div', { class: 'ow-badge' });
+  private eventsSlider = h('input', { type: 'range', class: 'ow-events', min: 0, max: OW_EVENTS, step: 1 });
+  private eventsLabel = h('span', { class: 'ow-events-name' });
   emu: OverworldEmulator;
   map = 0;
   renders = new Map<string, OwRender>();
   // the maps as in the ROM, with the stroke being painted (written to the ROM when it ends); tls: the translevel
-  // of each layer 1 tile
+  // of each layer 1 tile; rom: the maps as in the ROM; shown: as the game shows them at the event progress, the
+  // tiles of the stroke being painted as painted (it goes to the map before events)
   l1: Uint8Array;
   l2: Uint16Array;
+  rom: { l1: Uint8Array; l2: Uint16Array };
+  shown: { l1: Uint8Array; l2: Uint16Array };
   tls: Uint8Array;
   mode: 'l1' | 'l2' = 'l1';
   showL1 = true;
   showL2 = true;
-  showEvents = false;
+  // event progress: the map shown with events 0 … progress-1 passed (a view setting kept per ROM, not in the ROM)
+  progress = 0;
   showGrid = false;
   showPaths = false;
   zoom = 2;
@@ -110,6 +116,8 @@ export class OverworldView {
     this.emu = new OverworldEmulator(app.rom);
     this.l1 = readL1(app.rom);
     this.l2 = readL2(app.rom);
+    this.rom = { l1: this.l1.slice(), l2: this.l2.slice() };
+    this.shown = this.rom;
     this.tls = readTranslevels(app.rom);
     this.canvas = h('canvas', { class: 'level-canvas' });
     this.sizer = h('div', { class: 'level-sizer' });
@@ -119,7 +127,7 @@ export class OverworldView {
     this.bar = h('div', { class: 'ctxbar' });
     this.left = h('div', { class: 'left' }, h('div', { class: 'panel levels' },
       h('div', { class: 'panel-title' }, 'Level tiles', this.tlCount), this.tlList));
-    this.root = h('div', { class: 'center' }, h('div', { class: 'level-view' }, this.scroller, this.roBadge), this.status);
+    this.root = h('div', { class: 'center' }, h('div', { class: 'level-view' }, this.scroller, this.eventsBadge), this.status);
     this.scroller.addEventListener('scroll', () => this.paint());
     new ResizeObserver(() => this.layout()).observe(this.scroller);
     this.scroller.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -128,6 +136,8 @@ export class OverworldView {
     window.addEventListener('mousemove', (e) => this.onMove(e));
     window.addEventListener('mouseup', () => this.onUp());
     attachPanZoom(this.scroller, () => this.zoom, (z, ax, ay) => this.setZoom(z, ax, ay));
+    this.eventsSlider.addEventListener('input', () => this.setProgress(+this.eventsSlider.value));
+    this.eventsSlider.addEventListener('change', () => this.eventsSlider.blur()); // the keys step on
     // a ROM edit (a stroke ended, a name chosen) or undo/redo: shown as in the ROM (a stroke being painted is dropped)
     app.on('rom-change', () => {
       if (!this.root.isConnected) return;
@@ -151,12 +161,15 @@ export class OverworldView {
   }
 
   render(): OwRender {
-    const key = `${this.map}-${this.showEvents ? 1 : 0}`;
+    const key = `${this.map}-${this.progress}`;
     let r = this.renders.get(key);
-    if (!r) {
-      r = this.emu.load(this.map, this.showEvents);
-      this.renders.set(key, r);
+    if (r) this.renders.delete(key);
+    else {
+      r = this.emu.load(this.map, this.progress);
+      // the latest used (a slider moved through every progress)
+      if (this.renders.size >= RENDERS_KEPT) this.renders.delete(this.renders.keys().next().value!);
     }
+    this.renders.set(key, r);
     return r;
   }
   invalidate(): void {
@@ -165,7 +178,12 @@ export class OverworldView {
 
   // ---------------- drawing ----------------
   redrawMap(): void {
-    const img = drawOwMap(this.app.rom, this.render(), this.region, this.showL1 ? (this.showEvents ? null : this.l1) : undefined, this.showL2 ? this.l2 : undefined);
+    const r = this.render(), base = this.region * 0x1000, game1 = gameL1(r), game2 = gameL2(r);
+    this.shown = {
+      l1: this.l1.map((t, i) => (t !== this.rom.l1[i] ? t : game1[i])),
+      l2: this.l2.map((t, i) => (t !== this.rom.l2[i] || i < base || i >= base + 0x1000 ? t : game2[i - base])),
+    };
+    const img = drawOwMap(this.app.rom, r, this.region, this.showL1 ? this.shown.l1 : undefined, this.showL2 ? this.shown.l2 : undefined);
     putImage(this.mapCanvas, img);
     this.paint();
   }
@@ -247,16 +265,13 @@ export class OverworldView {
     }
     return this.kinds.kinds;
   }
-  shownL1(): Uint8Array {
-    return this.showEvents ? this.render().wram.subarray(RAM.owLayer1, RAM.owLayer1End) : this.l1;
-  }
 
   // the path tiles of the map shown, a mark per kind (as Lunar Magic's "Layer 1 Mario Paths"): walk green, climb
   // green with rungs, swim blue, exit red, stop a cross
   paintPaths(lw: number): void {
     const kinds = this.pathKinds();
     if (!kinds) return;
-    const ctx = this.canvas.getContext('2d')!, l1 = this.shownL1();
+    const ctx = this.canvas.getContext('2d')!, l1 = this.shown.l1;
     const fill = { walk: 'rgba(90,230,100,0.7)', climb: 'rgba(90,230,100,0.7)', swim: 'rgba(60,140,255,0.75)', exit: 'rgba(235,60,60,0.8)' } as Record<PathKind, string>;
     for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
       const k = kinds[l1[l1Index(this.region, x, y)]];
@@ -340,7 +355,6 @@ export class OverworldView {
     if (e.clientX - rc.left > this.scroller.clientWidth || e.clientY - rc.top > this.scroller.clientHeight) return;
     const c = this.cell(e);
     if (e.button === 2 || (e.button === 0 && e.shiftKey && !e.ctrlKey)) {
-      if (this.readOnly()) { toast('Layer 1 shows the state after all events and is view only here – turn off “After all events” in the View menu.'); return; }
       this.drag = { kind: 'paint', layer: this.mode, x0: c.x, y0: c.y, lastX: c.x, lastY: c.y };
       this.paintAt(c.x, c.y);
       return;
@@ -387,7 +401,7 @@ export class OverworldView {
   endStroke(layer: 'l1' | 'l2'): void {
     const rom = this.app.rom;
     const before = layer === 'l1' ? sharedTranslevels(readL1(rom), readTranslevels(rom)) : new Map<number, number[]>();
-    const l1 = this.l1, tls = this.tls;
+    const l1 = this.l1, l2 = this.l2, tls = this.tls, old = this.rom;
     try {
       this.app.romEdit(layer === 'l1' ? 'Paint layer 1' : 'Paint layer 2', () => {
         if (layer === 'l2') { writeL2(rom, this.l2); return; }
@@ -399,14 +413,14 @@ export class OverworldView {
       this.sync();
       return;
     }
+    // shown again at the event progress: painted tiles an event changes are on the map before events only
+    const covered = layer === 'l1' ? l1.filter((v, i) => v !== old.l1[i] && this.shown.l1[i] !== v).length
+      : l2.filter((v, i) => v !== old.l2[i] && this.shown.l2[i] !== v).length;
+    if (covered) toast(`${covered} painted tile${covered > 1 ? 's are' : ' is'} changed by events at this event progress – painting changes the map before events (fewer events: ,)`);
     if (layer !== 'l1') return;
     const added = [...sharedTranslevels(l1, tls)].filter(([tl, at]) => (before.get(tl)?.length ?? 0) < at.length);
     if (added.length) toast(`${added.map(([tl, at]) => `Level ${hex(translevelToLevel(tl), 3)} is entered from ${at.length} tiles`).join(', ')} – to move a level tile, paint over the old one.`);
     if (l1.some((v, i) => isLevelTile(v) && !tls[i])) toast('Every level (001–024, 101–13B) is already entered from a level tile – the new level tile enters none; choose its level in the properties.');
-  }
-
-  readOnly(): boolean {
-    return this.showEvents && this.mode === 'l1';
   }
 
   paintAt(x: number, y: number): void {
@@ -434,7 +448,7 @@ export class OverworldView {
   }
 
   pick(r: { x: number; y: number; w: number; h: number }): void {
-    const src = this.mode === 'l2' ? this.l2 : this.showEvents ? this.render().wram.subarray(RAM.owLayer1, RAM.owLayer1End) : this.l1;
+    const src = this.mode === 'l2' ? this.shown.l2 : this.shown.l1;
     const idx = this.mode === 'l2' ? l2Index : l1Index;
     const at = Array.from({ length: r.w * r.h }, (_, i) => idx(this.region, r.x + (i % r.w), r.y + Math.floor(i / r.w)));
     const entries = at.map((i) => src[i]);
@@ -468,22 +482,50 @@ export class OverworldView {
     this.scroller.title = ''; // the kind of the path tile under the mouse
     this.statusStats.textContent = b.kind === this.mode ? `Brush ${b.w}×${b.h}` : '';
     if (!c) {
-      this.statusText.textContent = this.readOnly() ? 'Layer 1 view only – turn off “After all events” to edit'
-        : 'Click/drag picks up tiles · Right click/Shift+click paints · Alt/Ctrl+click: tile settings';
+      this.statusText.textContent = 'Click/drag picks up tiles · Right click/Shift+click paints · Alt/Ctrl+click: tile settings';
       return;
     }
     let t = `X ${hex(c.x, 2)}  Y ${hex(c.y, 2)}`;
     if (this.mode === 'l1') {
       if (c.x >= 0 && c.y >= 0 && c.x < 32 && c.y < 32) {
-        const i = l1Index(this.region, c.x, c.y), shown = this.shownL1()[i];
+        const i = l1Index(this.region, c.x, c.y), shown = this.shown.l1[i];
         t += `  ·  Tile ${hex(shown, 2)}`;
+        if (shown !== this.l1[i]) t += ` (by events, ${hex(this.l1[i], 2)} before)`;
         const tl = this.tls[i];
         if (isLevelTile(this.l1[i])) t += tl ? `  ·  Level ${hex(translevelToLevel(tl), 3)} “${levelName(this.app.rom, tl)}”` : '  ·  Enters no level';
         const k = this.showPaths ? this.pathKinds()?.[shown] : undefined;
         if (k && isPathKind(k)) { t += `  ·  ${PATH_KIND_NAMES[k]}`; this.scroller.title = PATH_KIND_NAMES[k]; }
       }
-    } else if (c.x >= 0 && c.y >= 0 && c.x < 64 && c.y < 64) t += `  ·  Entry ${hex(this.l2[l2Index(this.region, c.x, c.y)], 4)}`;
+    } else if (c.x >= 0 && c.y >= 0 && c.x < 64 && c.y < 64) {
+      const i = l2Index(this.region, c.x, c.y), shown = this.shown.l2[i];
+      t += `  ·  Entry ${hex(shown, 4)}`;
+      if (shown !== this.l2[i]) t += ` (by events, ${hex(this.l2[i], 4)} before)`;
+    }
     this.statusText.textContent = t;
+  }
+
+  // ---------------- event progress ----------------
+  // events 0 … n-1 passed (clamped to none … all), kept for the ROM
+  setProgress(n: number): void {
+    n = clampProgress(n);
+    if (n === this.progress) return;
+    this.progress = n;
+    storeProgress(this.app.romName, n);
+    this.showProgress();
+    this.redrawMap();
+    this.updateStatus();
+  }
+  private names: { gen: number; names: Map<number, string> } | null = null;
+  // the slider, the last event passed with the exit that runs it, the badge on the map
+  showProgress(): void {
+    const rom = this.app.rom, n = this.progress;
+    if (this.names?.gen !== rom.gen) this.names = { gen: rom.gen, names: eventNames(rom) };
+    const e = n - 1, last = n ? `${hex(e, 2)} ${this.names.names.get(e) ?? '(run by no level exit)'}` : '';
+    this.eventsSlider.value = String(n);
+    this.eventsLabel.textContent = n === 0 ? 'none' : n === OW_EVENTS ? 'all' : `up to ${last}`;
+    this.eventsLabel.title = last;
+    this.eventsBadge.textContent = `Event progress: ${n === OW_EVENTS ? 'all' : `up to ${hex(e, 2)}`}`;
+    this.eventsBadge.classList.toggle('show', n > 0);
   }
 
   setMap(n: number): void {
@@ -511,6 +553,7 @@ export class OverworldView {
     const view = (label: string, get: () => boolean, set: (v: boolean) => void, title?: string, shortcut?: string) =>
       ({ label, title, shortcut, checked: get, onToggle: (v: boolean) => { set(v); this.redrawMap(); this.updateStatus(); } });
     this.zoomCtl.update();
+    this.showProgress();
     this.bar.replaceChildren(
       h('label', { class: 'row' }, 'Map ', select(MAP_NAMES.map((n, i) => [i, n] as [number, string]), this.map, (v) => this.setMap(v))),
       h('span', { class: 'sep' }),
@@ -526,9 +569,10 @@ export class OverworldView {
         view('Grid', () => this.showGrid, (v) => (this.showGrid = v), undefined, 'G'),
         view('Path tiles', () => this.showPaths, (v) => (this.showPaths = v),
           'Layer 1 tiles Mario walks, climbs (rungs) or swims along (blue), exits to another submap on (red) or stops on without entering a level (cross) – invisible in the game; what each does is learned from the game\'s code'),
-        { heading: 'Game state' },
-        view('After all events', () => this.showEvents, (v) => (this.showEvents = v), 'State after all events (view only, layer 1 then not editable)'),
       ] }),
+      h('span', { class: 'sep' }),
+      h('label', { class: 'row', title: 'Event progress: the overworld as after loading a save in which the events up to this one passed, applied in their number order as the game does (a view setting, not in the ROM) – painting changes the map before events · , and . : one event back/further' },
+        'Events ', this.eventsSlider, this.eventsLabel),
       h('span', { class: 'sep' }),
       this.zoomCtl.root,
     );
@@ -539,6 +583,7 @@ export class OverworldView {
     const k = e.key.toLowerCase();
     if (e.ctrlKey || e.metaKey || e.altKey) return false;
     if (k === 'g') { this.showGrid = !this.showGrid; this.paint(); return true; }
+    if (k === ',' || k === '.') { this.setProgress(this.progress + (k === ',' ? -1 : 1)); return true; }
     if (k === '1' || k === '2') { (this.bar.querySelectorAll('.btn-group button')[k === '1' ? 0 : 1] as HTMLButtonElement).click(); return true; }
     return false;
   }
@@ -569,8 +614,6 @@ export class OverworldView {
       h('div', { class: 'panel-title' }, 'Paint', h('span', { class: 'hint' }, 'Right click/Shift+click paints')),
       this.mode === 'l1' ? this.l1Palette() : this.l2Palette());
     this.palPanel.scrollTop = scroll;
-    this.roBadge.classList.toggle('show', this.readOnly());
-    this.scroller.classList.toggle('readonly', this.readOnly());
     this.buildProps();
   }
 
@@ -789,6 +832,7 @@ export class OverworldView {
   sync(): void {
     this.l1 = readL1(this.app.rom);
     this.l2 = readL2(this.app.rom);
+    this.rom = { l1: this.l1.slice(), l2: this.l2.slice() };
     this.tls = readTranslevels(this.app.rom);
     this.invalidate();
     this.buildSide();
@@ -799,10 +843,23 @@ export class OverworldView {
 
   show(): void {
     this.emu.rom = this.app.rom;
+    this.progress = loadProgress(this.app.romName);
     this.buildBar();
     this.sync();
     this.layout();
   }
+}
+
+const RENDERS_KEPT = 16; // emulated overworlds kept (map and event progress)
+
+// the event progress kept per ROM (by its name) in the browser
+const PROGRESS_PREF = 'ow-event-progress:';
+const clampProgress = (n: number) => Math.max(0, Math.min(OW_EVENTS, n));
+function loadProgress(rom: string): number {
+  try { return clampProgress(Number(localStorage.getItem(PROGRESS_PREF + rom)) || 0); } catch { return 0; }
+}
+function storeProgress(rom: string, n: number): void {
+  try { if (n) localStorage.setItem(PROGRESS_PREF + rom, String(n)); else localStorage.removeItem(PROGRESS_PREF + rom); } catch { /* no storage */ }
 }
 
 export { isLevelTile };

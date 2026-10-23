@@ -9,7 +9,7 @@ import { LevelEmulator } from '../src/core/levelemu.ts';
 import { RomEditSession } from '../src/core/romedit.ts';
 import {
   OverworldEmulator, readL1, readTranslevels, hasLevelFlagsPatch, initialFlags, setInitialFlags, exitDirections, setExitDirection,
-  baseEvent, setBaseEvent, revealEvents, setRevealEvents, revealAt, revealedTile, resetTranslevel, translevelUse, FLAG, DIR_FLAGS, MAX_TRANSLEVEL,
+  baseEvent, setBaseEvent, revealEvents, setRevealEvents, revealAt, revealedTile, resetTranslevel, translevelUse, FLAG, DIR_FLAGS, MAX_TRANSLEVEL, OW_EVENTS,
 } from '../src/core/overworld.ts';
 import { GM, RAM } from '../src/core/ram.ts';
 import { cleanImage, editorImage } from './fixture.ts';
@@ -25,7 +25,7 @@ const TL = 0x29; // Yoshi's Island 1
 const tile = readTranslevels(new Rom(image.slice())).indexOf(TL);
 
 // the flags of every translevel in a new game ($1EA2 on the overworld)
-const newGameFlags = (rom: Rom) => new OverworldEmulator(rom).load(0, false).wram.slice(RAM.levelFlags, RAM.levelFlags + MAX_TRANSLEVEL + 1);
+const newGameFlags = (rom: Rom) => new OverworldEmulator(rom).load(0, 0).wram.slice(RAM.levelFlags, RAM.levelFlags + MAX_TRANSLEVEL + 1);
 
 // the translevel ($13BF) the game enters from tile i in a new game (A pressed on it); null: none entered
 function enter(emu: LevelEmulator, i: number): number | null {
@@ -132,7 +132,7 @@ function pass(rom: Rom, i: number, exit: number): { before: number; after: numbe
   const rom = new Rom(image.slice());
   const l1 = readL1(rom);
   const used = new Set(Array.from({ length: 0x70 }, (_, e) => revealAt(rom, e)));
-  const all = new OverworldEmulator(rom).load(0, true).wram;
+  const all = new OverworldEmulator(rom).load(0, OW_EVENTS).wram;
   const at = [...l1.keys()].find((i) => i && i < 0x400 && revealedTile(rom, l1[i]) >= 0 && !used.has(i) && all[RAM.owLayer1 + i] === l1[i])!;
   const ev = Array.from({ length: 0x6f }, (_, e) => e).find((e) => !revealAt(rom, e))!;
   check(at !== undefined && ev !== undefined, `tile ${hx(at)} (${hx(l1[at])} → ${hx(revealedTile(rom, l1[at]))}), event ${hx(ev)} reveals none`);
@@ -140,7 +140,7 @@ function pass(rom: Rom, i: number, exit: number): { before: number; after: numbe
   const s = new RomEditSession(rom);
   s.edit('Reveal', () => setRevealEvents(rom, at, [ev]));
   check(same(revealEvents(rom, at), [ev]), 'written and read back');
-  const after = new OverworldEmulator(rom).load(0, true).wram[RAM.owLayer1 + at];
+  const after = new OverworldEmulator(rom).load(0, OW_EVENTS).wram[RAM.owLayer1 + at];
   check(game === l1[at] && after === revealedTile(rom, l1[at]), `after all events: tile ${hx(game)} as before, ${hx(after)} revealed by event ${hx(ev)} (emulated)`);
   // another tile on the same event takes it over; the event list emptied removes it
   const other = [...l1.keys()].find((i) => i > at && !used.has(i))!;

@@ -181,13 +181,13 @@ const TITLE_BYTE = 0x7fc0; // the internal name: not read while booting
 // the overworld emulator's title snapshot follows the same rule
 {
   const rom = fresh(), ow = new OverworldEmulator(rom);
-  ow.load(0, false);
+  ow.load(0, 0);
   const title = ow.titleState;
   rom.writeAt(TITLE_BYTE, Uint8Array.of(0x20));
-  ow.load(0, false);
+  ow.load(0, 0);
   check(ow.titleState === title, 'overworld: unrelated change keeps the title snapshot');
   rom.writeAt(BOOT_BYTE, Uint8Array.of(rom.data[BOOT_BYTE] ^ 0xff));
-  ow.load(0, false);
+  ow.load(0, 0);
   check(ow.titleState !== title && ow.titleState !== null, 'overworld: change of what the title read: reached again');
 }
 

@@ -8,6 +8,7 @@
 // game modes ($0100)
 export const GM = {
   title: 0x07, // title screen (waits for a button)
+  fileSelect: 0x0a, // choosing the save file and the players; a loaded file's layer 2 events are drawn here
   overworldLoad: 0x0b, // fading into the overworld
   overworldReturn: 0x0c, // loading the overworld after a level
   overworld: 0x0e,

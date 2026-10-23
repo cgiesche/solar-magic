@@ -39,7 +39,7 @@ writeL1(rom, l1); writeL2(rom, l2);
 const l2b = readL2(rom), l1b = readL1(rom);
 console.log('ow roundtrip', l2b[5] === 0x1234 && l1b[10] === 0x56);
 const oe = new OverworldEmulator(rom);
-console.log('ow loads', oe.load(0, false).ok);
+console.log('ow loads', oe.load(0, 0).ok);
 // checksum
 const out = rom.output(false);
 let sum = 0; for (const b of out) sum += b; 
