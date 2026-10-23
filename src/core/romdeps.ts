@@ -31,7 +31,7 @@ BYTE_PAGES.fill(1, 0x2e000 >> PAGE_SHIFT, 0x30000 >> PAGE_SHIFT);
 BYTE_PAGES[0x7f00 >> PAGE_SHIFT] = 1;
 const FIXED_BYTE_PAGES = BYTE_PAGES.slice();
 
-// adds the byte pages of this ROM's editor patch tables and ExAnimation data (call when the ROM
+// adds the byte pages of this ROM's editor patch tables, its free space blocks' edges and ExAnimation data (call when the ROM
 // may have changed); the ExAnimation data isn't recorded at all (see gfxSkipMask), byte pages keep
 // the rest of their pages from counting it (an animation list next to code that is run)
 export function updateBytePages(rom: Rom): void {
@@ -41,6 +41,9 @@ export function updateBytePages(rom: Rom): void {
   try {
     const markPc = (o: number, end: number) => BYTE_PAGES.fill(1, o >> PAGE_SHIFT, ((end - 1) >> PAGE_SHIFT) + 1);
     for (const [a, b] of exanimDataRanges(rom)) markPc(a, b);
+    // the pages a block in free space shares with the free space around it, which a save fills (code and tables
+    // every level reads next to a level's data)
+    for (const b of rom.scanRats()) { markPc(b.start, b.start + 1); markPc(b.start + 7 + b.size, b.start + 8 + b.size); }
     const p = editorPatch(rom);
     if (!p) return;
     const mark = (snes: number, len: number) => { const o = snesToPc(snes); markPc(o, o + len); };

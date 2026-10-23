@@ -5,7 +5,7 @@ import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { RomEditSession } from '../src/core/romedit.ts';
 import {
-  OverworldEmulator, readL1, writeL1, l1Index, isLevelTile, scanTranslevels, readTranslevels, writeTranslevels, hasTranslevelTable,
+  OverworldEmulator, readL1, writeL1, isLevelTile, readTranslevels, writeTranslevels, hasTranslevelTable,
   placeTile, freeTranslevel, sharedTranslevels,
 } from '../src/core/overworld.ts';
 import { GM, RAM } from '../src/core/ram.ts';
@@ -19,7 +19,9 @@ const hx = (v: number) => v.toString(16).toUpperCase();
 const clean = new Rom(cleanImage());
 const image = await editorImage();
 const patched = new Rom(image.slice());
-const cleanTl = scanTranslevels(readL1(clean));
+// the translevel the clean game gives each tile (its scan, $7ED000 after loading the overworld)
+const gameTranslevels = (rom: Rom) => new OverworldEmulator(rom).load(0, false).wram.slice(RAM.owTranslevels, RAM.owTranslevelsEnd);
+const cleanTl = gameTranslevels(clean);
 const tiles = [...cleanTl.keys()].filter((i) => cleanTl[i]);
 
 // ---- the table ----
@@ -31,7 +33,7 @@ check(same(readTranslevels(patched), cleanTl), `every level tile has the transle
   const a = new OverworldEmulator(clean), b = new OverworldEmulator(patched);
   for (const all of [false, true]) {
     const ra = a.load(0, all), rb = b.load(0, all);
-    const part = (r: { wram: Uint8Array }) => r.wram.subarray(RAM.owLayer1, RAM.owTranslevels + 0x1000);
+    const part = (r: { wram: Uint8Array }) => r.wram.subarray(RAM.owLayer1, RAM.owTileFlagsEnd);
     check(ra.ok && rb.ok && same(part(ra), part(rb)), `overworld ${all ? 'after all events' : 'of a new game'}: layer 1, translevels ($7ED000) and flags ($7ED800) as in the clean game`);
   }
 }
@@ -60,7 +62,7 @@ function enter(emu: LevelEmulator, i: number): number | null {
     if (a) entered++;
     if (a !== b) differ.push(`${hx(i)}: ${a === null ? '-' : hx(a)} / ${b === null ? '-' : hx(b)}`);
   }
-  check(!differ.length && entered > tiles.length / 2, `every level tile enters the same translevel as in the clean game (${entered} of ${tiles.length} entered from a new game) ${differ.join(', ')}`);
+  check(!differ.length && entered === tiles.length, `every level tile enters the same translevel as in the clean game (${entered} of ${tiles.length} entered from a new game) ${differ.join(', ')}`);
 }
 
 // ---- placing level tiles ----
@@ -73,6 +75,13 @@ function enter(emu: LevelEmulator, i: number): number | null {
   placeTile(l1, t, at, 0x56);
   check(free > 0 && t[at] === free && !cleanTl.includes(free), `a new level tile gets a free translevel (${hx(free)})`);
   check(tiles.every((i) => t[i] === before[i]), 'no other tile\'s translevel changed');
+  // anywhere: a new level tile on every other tile changes no level tile's translevel
+  const moving = [...l1.keys()].filter((i) => !isLevelTile(l1[i]) && i !== at).filter((i) => {
+    const m = l1.slice(), n = before.slice();
+    placeTile(m, n, i, 0x56);
+    return tiles.some((k) => n[k] !== before[k]);
+  });
+  check(!moving.length, `a new level tile on any of the ${0x800 - tiles.length} other tiles changes no other level tile (${moving.length})`);
   // painted over: freed
   placeTile(l1, t, at, 0x00);
   check(t[at] === 0 && freeTranslevel(t) === free, 'a level tile painted over: its translevel free again');
@@ -98,7 +107,9 @@ function enter(emu: LevelEmulator, i: number): number | null {
   check(moved === cleanTl[mv], `the game enters translevel ${hx(cleanTl[mv])} from the moved tile (${moved === null ? "-" : hx(moved)})`);
   check(other === cleanTl[first], `the game enters translevel ${hx(cleanTl[first])} from the first level tile as before (${other === null ? "-" : hx(other)})`);
   check(added === free, `the game enters the new tile's translevel ${hx(free)} (${added === null ? "-" : hx(added)})`);
-  check(scanTranslevels(l1)[first] !== cleanTl[first], '(the game\'s scan would have shifted it)');
+  const scanned = new Rom(cleanImage());
+  writeL1(scanned, l1);
+  check(gameTranslevels(scanned)[first] !== cleanTl[first], '(the clean game\'s scan shifts it, emulated)');
   s.undo();
   check(same(rom.data, was), 'undone');
   // unchanged: nothing written

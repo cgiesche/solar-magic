@@ -96,6 +96,7 @@ export const RAM = {
   switchPalaces: 0x1f27, // 4
   owLayer1: 0xc800, owLayer1End: 0xd000, // overworld layer 1 tilemap (with events applied)
   owTranslevels: 0xd000, owTranslevelsEnd: 0xd800, // translevel per overworld tile
+  owTileFlags: 0xd800, owTileFlagsEnd: 0xe000, // per overworld tile: its translevel's initial flags ($04D678)
   levelExit: 0x0dd5, // how the level was left: 1 the normal exit, 2 the secret exit, $80 the player's turn ends (died)
   levelBeaten: 0x1de9, // set with a passed level (the overworld then runs its event)
   owEvent: 0x1dea, // the event the overworld runs for the level passed (the translevel's base event, $05D608; + 1 for the secret exit)

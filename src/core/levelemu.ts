@@ -5,7 +5,7 @@
 import { Snes, type SnesState, type MemHook } from './snes.ts';
 import { Rom, snesToPc } from './rom.ts';
 import { L1_PTRS, L2_PTRS, SPR_PTRS, SEC_HDR, LEVEL_SIZE_TABLE, mainTranslevel } from './level.ts';
-import { translevelToLevel } from './overworld.ts';
+import { translevelToLevel, l1XY } from './overworld.ts';
 import { editorPatch, musicPatch, BG_HOOK, HEADER_MUSIC_TABLE } from './patches.ts';
 import { lt3Patches, type Lt3Place } from './layer3gfx.ts';
 import { RomReads, updateBytePages, PAGE_SHIFT } from './romdeps.ts';
@@ -399,7 +399,7 @@ export class LevelEmulator {
     for (let i = 0; i < 3; i++) s.runFrame();
     const i = tile(w);
     if (i < 0) return;
-    const tx = ((i >> 8) & 1) * 16 + (i & 15), ty = ((i >> 9) & 1) * 16 + ((i >> 4) & 15);
+    const { x: tx, y: ty } = l1XY(i);
     // pixel position: like the start position relative to its tile
     const px = tx * 16 + (w[RAM.owPlayerX] - w[RAM.owPlayerTileX] * 16), py = ty * 16 + (w[RAM.owPlayerY] - w[RAM.owPlayerTileY] * 16);
     let sub = 0;

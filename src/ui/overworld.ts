@@ -3,13 +3,14 @@
 import type { App } from './app.ts';
 import { h, toast, select, attachPanZoom, zoomControl, ZOOM_MIN, ZOOM_MAX, attachRectPick, emptyState } from './dom.ts';
 import {
-  OverworldEmulator, type OwRender, readL1, writeL1, readL2, writeL2, l1Index, l2Index, isLevelTile, readTranslevels, writeTranslevels,
+  OverworldEmulator, type OwRender, readL1, writeL1, readL2, writeL2, l1Index, l1XY, l2Index, isLevelTile, readTranslevels, writeTranslevels,
   placeTile, sharedTranslevels, enterableLevels, translevelToLevel, nameCode, setNameCode, splitNameCode, joinNameCode, nameWord, levelName, NAME_PART_COUNTS, MAP_NAMES,
 } from '../core/overworld.ts';
 import { TileCache, blit8 } from '../core/render.ts';
 import { hex } from '../core/names.ts';
 import { menuButton } from './menu.ts';
 import { levelPicker } from './levelpicker.ts';
+import { mainTranslevel } from '../core/level.ts';
 import { RAM, map16Pointer } from '../core/ram.ts';
 import type { Rom } from '../core/rom.ts';
 
@@ -49,9 +50,6 @@ function drawL1Tile(rom: Rom, img: Uint32Array, tc: TileCache, r: OwRender, t: n
   blit8(img, W, H, tc.get(w[2]), px + 8, py);
   blit8(img, W, H, tc.get(w[3]), px + 8, py + 8);
 }
-
-// a layer 1 tile's position on its 512x512 map
-const tileXY = (i: number) => ({ x: ((i >> 8) & 1) * 16 + (i & 15), y: ((i >> 9) & 1) * 16 + ((i >> 4) & 15) });
 
 export class OverworldView {
   app: App;
@@ -353,7 +351,7 @@ export class OverworldView {
   selectTile(i: number, center: boolean): void {
     this.selected = i;
     if (center && i >= 0) {
-      const { x, y } = tileXY(i);
+      const { x, y } = l1XY(i);
       this.scroller.scrollLeft = (x * 16 + 8) * this.zoom - this.scroller.clientWidth / 2;
       this.scroller.scrollTop = (y * 16 + 8) * this.zoom - this.scroller.clientHeight / 2;
     }
@@ -476,18 +474,18 @@ export class OverworldView {
 
   // the level tile at i: the level it enters (chosen from the levels; the translevel only shown), its name
   levelInfo(i: number): HTMLElement {
-    const rom = this.app.rom, tl = this.tls[i], { x, y } = tileXY(i);
-    const where = (k: number) => { const p = tileXY(k); return `${k >= 0x400 ? 'submaps' : 'main map'} ${hex(p.x, 2)},${hex(p.y, 2)}`; };
+    const rom = this.app.rom, tl = this.tls[i], { x, y } = l1XY(i);
+    const where = (k: number) => { const p = l1XY(k); return `${k >= 0x400 ? 'submaps' : 'main map'} ${hex(p.x, 2)},${hex(p.y, 2)}`; };
     const others = this.tls.reduce<number[]>((a, v, k) => (v && v === tl && k !== i && isLevelTile(this.l1[k]) ? [...a, k] : a), []);
     const onMap = (t: number) => this.tls.findIndex((v, k) => v === t && k !== i && isLevelTile(this.l1[k]));
     const levels = enterableLevels();
-    const choose = levelPicker(this.app, tl ? translevelToLevel(tl) : levels[0].level, (lvl) => {
-      const t = levels.find((l) => l.level === lvl)!.translevel;
+    const choose = levelPicker(this.app, tl ? translevelToLevel(tl) : levels[0], (lvl) => {
+      const t = mainTranslevel(lvl)!;
       if (t === tl) return;
       const next = this.tls.slice();
       next[i] = t;
       this.app.romEdit(`Level tile ${hex(x, 2)},${hex(y, 2)}: level ${hex(lvl, 3)}`, () => writeTranslevels(rom, next));
-    }, { levels: levels.map((l) => l.level), note: (lvl) => { const k = onMap(levels.find((l) => l.level === lvl)!.translevel); return k >= 0 ? `on ${where(k)}` : ''; } });
+    }, { levels, note: (lvl) => { const k = onMap(mainTranslevel(lvl)!); return k >= 0 ? `on ${where(k)}` : ''; } });
     const head = [
       h('div', { class: 'prop' }, h('label', null, 'Enters level'), choose),
       h('div', { class: 'hint' }, `Tile ${hex(x, 2)},${hex(y, 2)}${tl ? ` · translevel ${hex(tl, 2)}` : ''}`),
