@@ -238,25 +238,147 @@ export const enterableLevels = (): number[] => Array.from({ length: MAX_TRANSLEV
 // first passed, copied per tile to $7ED800 by the patch; every value is a direction (0 up, 1 down, 2 left, 3 right)
 export const EXIT_DIRS = 0x04d678;
 export const DIR_ARROWS = ['↑', '↓', '←', '→'];
+export const DIR_NAMES = ['up', 'down', 'left', 'right'];
+export const EXIT_NAMES = ['Normal exit', 'Secret exit 1', 'Secret exit 2', 'Secret exit 3'];
 export const exitDirections = (rom: Rom, tl: number): number[] => [6, 4, 2, 0].map((b) => (rom.r8(EXIT_DIRS + tl) >> b) & 3);
+// exit 0 normal, 1–3 the secret exits ($0DD5 - 1)
+export function setExitDirection(rom: Rom, tl: number, exit: number, dir: number): void {
+  const b = 6 - exit * 2;
+  rom.w8(EXIT_DIRS + tl, (rom.r8(EXIT_DIRS + tl) & ~(3 << b)) | ((dir & 3) << b));
+}
 
 export const NO_EVENT = 0xff; // a base event no exit runs (the clean game's Top Secret Area, Star Roads)
 export const NO_NAME = 0x0000; // blank in the game; $FFFF (the unused translevels') shows RAM as letters
 export const isNameless = (code: number): boolean => code === 0x0000 || code === 0xffff;
+
+// ---- initial level flags (Lunar Magic's) ----
+// The flags ($1EA2, ram.ts levelFlags) each translevel starts a new game with: the directions Mario may walk
+// from its tiles, passed, midway, and Lunar Magic's "no entry if passed" and "save prompt". The game sets 8 of
+// them from a list ($009EE0); as Lunar Magic, the patch copies a table of all 0x60 into the new file instead
+// ($05DDA0, at $009F19 by a JSL to $05DD80), and checks the two flags of its own where the game enters a level
+// ($049199, $03BA50) and decides on the save prompt after one passed ($048F8A, $03BA10) – the places and bits
+// SMW Central's hijack map gives and Lunar Magic's code in a ROM it saved uses; the editor's code is its own.
+export const LEVEL_FLAGS = 0x05dda0;
+export const FLAG = { right: 0x01, left: 0x02, down: 0x04, up: 0x08, savePrompt: 0x10, noEntry: 0x20, midway: 0x40, passed: 0x80 } as const;
+// the flag of each direction (DIR_NAMES order) – the game's joypad bits
+export const DIR_FLAGS = [FLAG.up, FLAG.down, FLAG.left, FLAG.right];
+const LF_INIT_HOOK = 0x009f19, LF_INIT = 0x05dd80;
+const LF_SAVE_HOOK = 0x048f8a, LF_SAVE_LOOP = 0x049001, LF_SAVE = 0x03ba10;
+const LF_ENTER_HOOK = 0x049199, LF_ENTER = 0x03ba50, LF_END = 0x03bae6;
+const SAVE_TILES = 0x048f7f; // the game's 8 layer 1 tiles that bring up the save prompt when passed
+
+const levelFlagsAsm = () => `lorom
+; a new file: the initial flags of every translevel (the game's loop of 8 has run once)
+org ${hx(LF_INIT_HOOK)}
+  JSL InitFlags
+org ${hx(LF_INIT)}
+InitFlags:
+  PHP
+  REP #$30
+  LDX #$005E
+- LDA.l ${hx(LEVEL_FLAGS)},x : STA.l $7E${hx(RAM.fileLevelFlags).slice(1)},x
+  DEX : DEX : BPL -
+  PLP
+  RTL
+warnpc ${hx(LEVEL_FLAGS)}
+
+; a level passed (A/X/Y 8, $04 Mario's tile): the tile the game looks up in its list of save tiles – the
+; list's last one when the translevel's save prompt flag is set; the list's loop goes on with A
+org ${hx(LF_SAVE_HOOK)}
+  JSL SavePrompt : NOP
+org ${hx(LF_SAVE_LOOP)}
+  db $10, ${hx((LF_SAVE_HOOK + 5 - (LF_SAVE_LOOP + 2)) & 0xff)}        ; BPL to the CMP after the hook
+org ${hx(LF_SAVE)}
+SavePrompt:
+  PHP
+  REP #$30
+  LDX $04
+  LDA.l $7E${hx(RAM.owTranslevels).slice(1)},x : AND #$00FF : TAX
+  SEP #$20
+  LDA.l $7E${hx(RAM.levelFlags).slice(1)},x : AND #${hx(FLAG.savePrompt)} : BEQ +
+  LDA.l ${hx(SAVE_TILES + 7)}
+  BRA ++
++ LDA.l $7E${hx(RAM.owTile).slice(1)}
+++ LDX.w #$0007
+  PLP
+  RTL
+warnpc ${hx(LF_ENTER)}
+
+; A pressed on a tile (A 8 = the tile): carry set when Mario doesn't enter – a tile above $80, as the game's
+; CMP #$81 : BEQ/BCS, or a translevel passed with its no entry flag set
+org ${hx(LF_ENTER_HOOK)}
+  JSL NoEntry
+org ${hx(LF_ENTER)}
+NoEntry:
+  PHP
+  REP #$30
+  PHX : PHY
+  LDX ${hx(RAM.currentPlayer)}
+  ; Mario's layer 1 tile, as the game's $049885
+  LDA ${hx(RAM.owPlayerTileX)},x : AND #$000F : PHA
+  LDA ${hx(RAM.owPlayerTileX)},x : AND #$0010 : ASL #4 : ORA 1,s : STA 1,s
+  LDA ${hx(RAM.owPlayerTileY)},x : ASL #4 : AND #$00FF : ORA 1,s : STA 1,s
+  LDA ${hx(RAM.owPlayerTileY)},x : AND #$0010 : ASL #5 : ORA 1,s : STA 1,s
+  TXA : LSR #2 : TAX
+  LDA ${hx(RAM.submap)},x : AND #$00FF : BEQ +
+  LDA #$0400 : ORA 1,s : STA 1,s
++ PLX
+  LDA.l $7E${hx(RAM.owTranslevels).slice(1)},x : AND #$00FF : TAX
+  LDA.l $7E${hx(RAM.levelFlags).slice(1)},x : AND.w #${hx(FLAG.passed | FLAG.noEntry)} : CMP.w #${hx(FLAG.passed | FLAG.noEntry)}
+  PLY : PLX
+  SEP #$20
+  BCC +
+  LDA #$FF
+  BRA ++
++ LDA.l $7E${hx(RAM.owTile).slice(1)}
+++ PLP
+  CMP #$81
+  RTL
+warnpc ${hx(LF_END)}
+`;
+
+// detected as OverworldTables.asm does
+export function hasLevelFlagsPatch(rom: Rom): boolean {
+  return rom.r8(LF_INIT_HOOK) === 0x22;
+}
+export function initialFlags(rom: Rom, tl: number): number {
+  if (!hasLevelFlagsPatch(rom)) missingPatch('Initial level flags');
+  return rom.r8(LEVEL_FLAGS + tl);
+}
+export function setInitialFlags(rom: Rom, tl: number, v: number): void {
+  if (!hasLevelFlagsPatch(rom)) missingPatch('Initial level flags');
+  rom.w8(LEVEL_FLAGS + tl, v);
+}
+
+// needs Asar (loadAsar) to be loaded; the table starts as the flags of the game's new file (emulated)
+export function installLevelFlagsPatch(rom: Rom): void {
+  if (hasLevelFlagsPatch(rom)) return;
+  const game = new OverworldEmulator(rom).load(0, false);
+  if (!game.ok) throw new Error('The overworld did not load – initial level flags not installed');
+  const flags = game.wram.slice(RAM.levelFlags, RAM.levelFlags + MAX_TRANSLEVEL + 1);
+  const r = assemble(rom.data, new Map([['levelflags.asm', levelFlagsAsm()]]), 'levelflags.asm');
+  if (!r.ok) throw new Error(r.errors.map((e) => e.message).join(' '));
+  for (const [a, n] of [[LF_INIT_HOOK, 4], [LF_INIT, LEVEL_FLAGS - LF_INIT], [LF_SAVE_HOOK, 5], [LF_SAVE_LOOP, 2], [LF_ENTER_HOOK, 4], [LF_SAVE, LF_END - LF_SAVE]]) {
+    rom.writeAt(snesToPc(a), r.rom.subarray(snesToPc(a), snesToPc(a) + n));
+  }
+  rom.writeBytes(LEVEL_FLAGS, flags);
+}
 
 // how much a translevel no tile enters would bring along to a new one: 0 nothing (no name, base event or message
 // slot, the level's data the game's blank one), 1 settings resetTranslevel resets, 2 a level of its own
 export type TranslevelUse = 0 | 1 | 2;
 export function translevelUse(rom: Rom, tl: number): TranslevelUse {
   if (hasOwnContent(rom, translevelToLevel(tl))) return 2;
-  return !isNameless(nameCode(rom, tl)) || baseEvent(rom, tl) !== NO_EVENT || messageSlots(rom, tl).length ? 1 : 0;
+  return !isNameless(nameCode(rom, tl)) || baseEvent(rom, tl) !== NO_EVENT || messageSlots(rom, tl).length || initialFlags(rom, tl) ? 1 : 0;
 }
 
-// the settings of translevel tl as the game's unused ones: no name, no base event, every exit revealing up, no message
+// the settings of translevel tl as the game's unused ones: no name, no base event, every exit revealing up, no
+// message, no initial flags
 export function resetTranslevel(rom: Rom, tl: number): void {
   setNameCode(rom, tl, NO_NAME);
   rom.w8(BASE_EVENTS + tl, NO_EVENT);
   rom.w8(EXIT_DIRS + tl, 0);
+  setInitialFlags(rom, tl, 0);
   for (const s of messageSlots(rom, tl)) unassignMessageSlot(rom, s.slot);
 }
 
@@ -302,6 +424,34 @@ export function levelName(rom: Rom, translevel: number): string {
 export const BASE_EVENTS = 0x05d608;
 export const OW_EVENTS = 0x78; // 15 bytes of event bits
 export const baseEvent = (rom: Rom, tl: number): number => rom.r8(BASE_EVENTS + tl);
+export function setBaseEvent(rom: Rom, tl: number, e: number): void {
+  rom.w8(BASE_EVENTS + tl, e);
+}
+
+// ---- reveals ----
+// per event ($04D85D, the game's 0x70 events 00–6F; the next table follows): the layer 1 tile (l1Index, 0 none) it
+// reveals – turned into its counterpart of the game's reveal list ($04DA1D → $04DA33, 0x16 tiles) when the event
+// passes. One tile per event, a tile by any number of events (Lunar Magic's "reveal this level tile on events").
+export const REVEAL_AT = 0x04d85d, REVEAL_EVENTS = 0x70;
+const REVEAL_FROM = 0x04da1d, REVEAL_TO = 0x04da33, REVEALS = 0x16;
+export const revealAt = (rom: Rom, e: number): number => rom.r16(REVEAL_AT + e * 2);
+// the events that reveal tile i (none for tile 0, which stands for none)
+export function revealEvents(rom: Rom, i: number): number[] {
+  if (!i) return [];
+  return Array.from({ length: REVEAL_EVENTS }, (_, e) => e).filter((e) => revealAt(rom, e) === i);
+}
+// tile i revealed on exactly `events` (each then reveals only it)
+export function setRevealEvents(rom: Rom, i: number, events: number[]): void {
+  for (let e = 0; e < REVEAL_EVENTS; e++) {
+    if (events.includes(e)) rom.w16(REVEAL_AT + e * 2, i);
+    else if (revealAt(rom, e) === i) rom.w16(REVEAL_AT + e * 2, 0);
+  }
+}
+// the tile layer 1 tile t turns into when revealed, -1: it has none (a reveal does nothing)
+export function revealedTile(rom: Rom, t: number): number {
+  for (let k = REVEALS - 1; k >= 0; k--) if (rom.r8(REVEAL_FROM + k) === t) return rom.r8(REVEAL_TO + k);
+  return -1;
+}
 // the overworld's events by the level exits that run them ("105 YOSHI'S ISLAND 1 – normal exit"), of the levels on
 // the map; an event no normal exit runs by the secret exits that do (the game numbers a level's events one after
 // the other: after one without a secret exit its next event is the next level's)

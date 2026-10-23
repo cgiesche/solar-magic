@@ -67,7 +67,7 @@ export const RAM = {
   layer3Setting: 0x1be3,
   sublevelCount: 0x141a,
   introShown: 0x141d, // the level's no-Yoshi intro has played (the level itself loads next)
-  levelFlags: 0x1ea2, // per translevel: bit 6 the midway point was touched
+  levelFlags: 0x1ea2, // per translevel: bits 0-3 the directions Mario may walk from its tiles (right, left, down, up), 4 save prompt and 5 no entry once passed (Lunar Magic's), 6 the midway point was touched, 7 passed
   midwayTouched: 0x13ce, // the midway tape was touched in this level (dying then marks the translevel's $1EA2 bit 6)
   midwayUsed: 0x13cf, // the level was loaded at its midway point
   midwayScreen: 0x13cd, // the level's midway screen: its tape sets the checkpoint unless it is 0
@@ -102,6 +102,9 @@ export const RAM = {
   owEvent: 0x1dea, // the event the overworld runs for the level passed (the translevel's base event, $05D608; + 1 for the secret exit)
   owWarp: 0x1b9c, // the overworld loads at the star/pipe table's destination $1DF6 (owteleport.ts)
   owWarpIndex: 0x1df6,
+  owTile: 0x13c1, // the layer 1 tile Mario stands on
+  savePrompt: 0x13ca, // set when the overworld is to show the save prompt
+  fileLevelFlags: 0x1f49, // the save file's copy of levelFlags, filled with the initial flags when a new file is made
   playerIndex: 0x0db3, // 0 Mario, 1 Luigi
   brightness: 0x0dae, mosaicDir: 0x0daf, mosaic: 0x0db0, // the screen's fade (the next game mode's start)
   twoPlayers: 0x0db2, // a 2-player game
