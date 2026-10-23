@@ -593,6 +593,17 @@ patch reads its tables; `$1DF6` holds the entry's number instead of its word off
 secondary entrances to the overworld put their location index there. `tools/testowexit.ts` checks that the
 game's star and pipe tiles warp as in the clean game.
 
+### Translevels per level tile
+
+The game numbers the overworld's level tiles by scanning layer 1 (`$04D7F2`): the n-th level tile enters
+translevel n, so a level tile placed or removed shifts every later level's number, and with it its name, base
+event and flags. As in Lunar Magic, the patch replaces the scan with a table of the 0x800 layer 1 tiles'
+translevels, LC_LZ2 compressed in free space and decompressed to `$7ED000` (its address the operand at
+`$04D803`, its bank at `$04D808`, where Ankouno's `OverworldTables.asm` finds Lunar Magic's); the rest of the
+game's routine stays (the initial flags `$04D678` of each tile's translevel to `$7ED800`, the passed events).
+The clean game's tiles get the translevels its scan gives them; `tools/testleveltiles.ts` enters every level
+tile by emulation and compares the translevel with the clean game.
+
 ### Layer 3 graphics per level
 
 As Lunar Magic's *Layer 3 GFX/Tilemap Bypass*, a level can have its own layer 3 graphics and tilemap
@@ -745,6 +756,7 @@ not compatible with the respective feature.
 | `$05D928`, `$0586BB`, entrance options and screen exit flags `$009708`, `$0DA532`, `$0DA536`, the slanted pipe to the left `$00D2B2`, the midway entrance `$05D9B8`, `$05D9DE` (also by a screen exit, its flags `$05D7C5`), new-style exits `$05D7CE`, `$05D836`, `$0DA963`, `$0DA9D6`, `$0DA9EF`, `$058091`, tables `$06CA00`, `$05DE00`, `$06FC00`, `$06FE00`, `$06CC00`, `$06CE00`, `$07E800`, `$07EA00`, `$07EC00`, `$07EE00`; finding a block `$00F478`, `$00F492`, `$00F49A`, `$0194D6`, `$019500`, `$019512`, `$01D97B`, `$01D981`, `$0292D9`, `$0292F9`, `$02930A`, `$0295C0`, `$0295EC`, `$0295FD`, `$02A6BA`, `$02A6CB`, `$02BA50`, `$02BA71`, `$02BA82`, `$02D15A`, `$02D18C`, `$02D19D`, `$03D793`; changing a tile `$00BEEC`, `$00BF41`, `$00C079`, `$00C0C6`, `$00C1B1`, `$00C3D3`; mode tables `$00BDA8`, `$00BDE8`, `$00BE28`, `$00BE68`; sprites `$02A82E`, `$02A968`, `$02AA5F`, `$02AB54`, `$02ABD0`, `$02AF3D`, `$02AFA7`, `$01AC3E`, `$02D038`, `$03B86A`; camera `$00F70D`; entrances `$05D7E0`, `$05DA17`; secondary entrances to the overworld `$05D836` | Level heights (Lunar Magic 3.00's entrances, their options); RAM `$7F3666–$7F3677`, `$7F3679`, Lunar Magic's `$13D7`, `$0BF6–$0CF5` |
 | `$008A7F`, `$0087AD`, `$0085E3`, `$0580B0`, `$0580B4`, `$0580BF`, `$0580C3`, `$058730`, `$058770`, `$0587D4`, `$0587DB`, `$05880B`, `$058812`, `$0586F7`, `$058A3A` | VRAM patch (SMWV): tilemaps relocated, taller levels' rows; RAM `$7F0000–$7F3654` |
 | `$048509`, `$048543` | Overworld teleports (the star/pipe table with 0x100 entries) |
+| `$04D7F2–$04D85C` | Translevels per level tile (Lunar Magic's table) |
 | Ext. object table `$0DA118` (entry `$03`) | Structures (SMWS); empty in the original, no code hook |
 | `$05B20F` | Messages in free space (SMWM), only if the texts no longer fit |
 | `$00F545`, `$029328`, `$058A66`, `$058B46`, `$058C34`, `$058D2B`, `$00C096`, `$00C0E7`, `$00C176` | Map16 extension and custom blocks (SMWX) |
