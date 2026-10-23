@@ -1,5 +1,5 @@
 // The quarters of a rectangle of Map16 tiles as one grid (two columns and two rows of quarters per tile),
-// marked as a set: edits apply to every marked quarter, a block of 8x8 tiles is stamped onto it where it
+// marked as a set: edits apply to every marked quarter, a flip mirrors the marked quarters as one picture, a block of 8x8 tiles is stamped onto it where it
 // lies, acts-like applies to the wholly marked 16x16 tiles. Words of the tiles in the selection's order
 // (row by row), each in the quarter order TL, BL, TR, BR.
 
@@ -63,6 +63,22 @@ export function editMarked(g: QuarterGrid, words: number[][], marks: Set<number>
   for (const k of marks) {
     const { tile, q } = g.locate(k);
     out[tile][q] = fn(out[tile][q]);
+  }
+  return { words: out, changed: changedTiles(words, out) };
+}
+
+// the marked quarters mirrored as one picture (bit FLIP_X: left to right across the marks' bounding box,
+// FLIP_Y: top to bottom): each takes the word of its mirror quarter with the flip toggled, across tile
+// borders; a single quarter just toggles its flip. null when the marks are not symmetric to that axis
+export function mirror(g: QuarterGrid, words: number[][], marks: Set<number>, bit: number): QuarterEdit | null {
+  const ps = [...marks].map((k) => g.pos(k));
+  const lo = Math.min(...ps.map((p) => (bit === FLIP_X ? p.x : p.y))), hi = Math.max(...ps.map((p) => (bit === FLIP_X ? p.x : p.y)));
+  const other = (p: { x: number; y: number }) => (bit === FLIP_X ? { x: lo + hi - p.x, y: p.y } : { x: p.x, y: lo + hi - p.y });
+  if (ps.some((p) => { const o = other(p); return !marks.has(g.key(o.x, o.y)); })) return null;
+  const out = words.map((ws) => [...ws]);
+  for (const p of ps) {
+    const { tile, q } = g.at(p.x, p.y), o = other(p), from = g.at(o.x, o.y);
+    out[tile][q] = words[from.tile][from.q] ^ bit;
   }
   return { words: out, changed: changedTiles(words, out) };
 }

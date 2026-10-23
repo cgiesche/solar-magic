@@ -1,7 +1,7 @@
 // Quarters of a Map16 tile selection (core/quarters.ts): marking them as a set (click, rectangle, Ctrl to add
 // or remove, a whole 16x16 tile, all), editing every marked quarter, stamping a block of 8x8 tiles, what
-// the marked quarters have in common, and which 16x16 tiles are wholly marked (acts-like).
-import { QuarterGrid, markRect, editMarked, setPalette, setBit, setTileNum, stamp, summary, wholeTiles, paletteOn, FLIP_X, FLIP_Y, PRIO } from '../src/core/quarters.ts';
+// the marked quarters have in common, mirroring them as one picture, and which 16x16 tiles are wholly marked (acts-like).
+import { QuarterGrid, markRect, editMarked, setPalette, setBit, setTileNum, stamp, mirror, summary, wholeTiles, paletteOn, FLIP_X, FLIP_Y, PRIO } from '../src/core/quarters.ts';
 
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
@@ -59,6 +59,33 @@ check(e.words[0][0] === W(0x10, 1) && e.words[0][1] === W(0x11, 2), 'all flipped
 check(summary(g2, words, new Set()).flipX === 'off' && summary(g2, words, new Set()).pals.size === 0, 'nothing marked: nothing in use');
 e = editMarked(g2, words, tl, setBit(FLIP_Y, true));
 check(e.words[0][0] === W(0x10, 1, FLIP_Y), 'flip Y');
+
+// ---- flips mirror the marked quarters as one picture ----
+// one 16x16 tile wholly marked: X swaps its columns, every quarter's flip toggled
+const g1 = new QuarterGrid(1, 1);
+const w1 = [[W(0x10, 1), W(0x11, 2), W(0x12, 3, FLIP_X), W(0x13, 4, PRIO)]];
+let mi = mirror(g1, w1, g1.all(), FLIP_X)!;
+check(mi.words[0].join() === [W(0x12, 3), W(0x13, 4, FLIP_X | PRIO), W(0x10, 1, FLIP_X), W(0x11, 2, FLIP_X)].join(), 'X on a whole tile: columns swapped, flips toggled, palette and priority with the picture');
+mi = mirror(g1, w1, g1.all(), FLIP_Y)!;
+check(mi.words[0].join() === [W(0x11, 2, FLIP_Y), W(0x10, 1, FLIP_Y), W(0x13, 4, FLIP_Y | PRIO), W(0x12, 3, FLIP_X | FLIP_Y)].join(), 'Y on a whole tile: rows swapped');
+check(mirror(g1, mirror(g1, w1, g1.all(), FLIP_X)!.words, g1.all(), FLIP_X)!.words[0].join() === w1[0].join(), 'flipping twice: as before');
+// a single quarter: its flip toggled only
+mi = mirror(g1, w1, new Set([g1.key(1, 0)]), FLIP_X)!;
+check(mi.words[0].join() === [w1[0][0], w1[0][1], W(0x12, 3), w1[0][3]].join(), 'a single quarter: just its flip');
+// 2x1 tiles (a pipe) wholly marked: the picture crosses the tile border
+mi = mirror(g2, words, g2.all(), FLIP_X)!;
+check(mi.changed.join() === '0,1', 'both tiles of 2x1 change');
+check(mi.words[0].join() === [W(0x22, 7, FLIP_X | PRIO), W(0x23, 0, FLIP_X), W(0x20, 5, FLIP_X), W(0x21, 6, FLIP_X)].join()
+  && mi.words[1].join() === [W(0x12, 3, FLIP_X), W(0x13, 4, FLIP_X), W(0x10, 1, FLIP_X), W(0x11, 2)].join(), 'X across 2x1: the right tile\'s quarters on the left, mirrored');
+// marks inside: the axis is their bounding box, not the selection
+mi = mirror(g2, words, left, FLIP_X)!;
+check(mi.words[0][0] === words[0][0] && mi.words[1][2] === words[1][2], 'quarters outside the marks stay');
+check(mi.words[0][2] === W(0x20, 5, FLIP_X) && mi.words[1][0] === W(0x12, 3, FLIP_X), 'the middle columns swap');
+// not symmetric to the axis: nothing
+const ell = markRect(g2, new Set([g2.key(0, 1)]), { x: 0, y: 0, w: 2, h: 1 }, 'add'); // an L
+check(mirror(g2, words, ell, FLIP_X) === null && mirror(g2, words, ell, FLIP_Y) === null, 'an L: not mirrored');
+const gap = new Set([g2.key(0, 0), g2.key(3, 0)]);
+check(mirror(g2, words, gap, FLIP_X) !== null, 'two quarters apart, symmetric: mirrored');
 
 // ---- stamping a block of 8x8 tiles ----
 // a 4x4 block onto a 2x2 tile selection (4x4 quarters) at its top left: fills it, flips cleared, palettes kept

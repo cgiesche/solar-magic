@@ -1,6 +1,6 @@
 // Map16 tab: the tile sheet (pages, labelled ranges, multi-selection, copy/paste), a builder showing the
-// whole selection (quarters marked as a set; palette dots, flip/priority toggles and acts-like for the
-// marked ones; Ctrl+wheel zoom, middle button pan) and the level's 8x8 graphics grouped by GFX slot. The
+// whole selection (quarters marked as a set; palette dots, flips mirroring them as one picture, the priority
+// toggle and acts-like for the marked ones; Ctrl+wheel zoom, middle button pan) and the level's 8x8 graphics grouped by GFX slot. The
 // graphics view uses the palette of the quarter under the mouse, else of the first marked one. Clicking or
 // dragging there chooses 8x8 tiles; a right click in the builder puts them with their top-left corner on
 // the quarter under the mouse (right drag paints), as does dropping them there; Enter puts a single one
@@ -35,7 +35,7 @@ import { remapEditor, type RemapEditor } from '../remaplist.ts';
 import { planMove, applyMove, planRemap, rectMap, type MovePlan, type MoveSource } from '../../core/tilemove.ts';
 import { levelSource, planList, openRemapUses } from '../tileuses.ts';
 import { loadAsar } from '../../core/asar.ts';
-import { QuarterGrid, markRect, editMarked, setPalette, setBit, setTileNum, stamp, summary, wholeTiles, FLIP_X, FLIP_Y, PRIO, type QuarterEdit, type MarkMode, type BitState } from '../../core/quarters.ts';
+import { QuarterGrid, markRect, editMarked, setPalette, setBit, setTileNum, stamp, mirror, summary, wholeTiles, FLIP_X, FLIP_Y, PRIO, type QuarterEdit, type MarkMode, type BitState } from '../../core/quarters.ts';
 
 const Z = 2; // sheet zoom
 const M = 34; // sheet margin for the ranges and row numbers
@@ -237,11 +237,18 @@ export class Map16Tab implements WsPanel {
     if (!m.size) { toast('Mark quarters first (click, drag or Ctrl+A in the builder)'); return; }
     this.writeTiles(editMarked(this.grid(), this.selWords(), m, fn), what);
   }
-  // a toggle: on for every marked quarter, off once all have it
-  private toggleBit(bit: number, what: string): void {
-    const s = summary(this.grid(), this.selWords(), this.marked());
-    const state = bit === FLIP_X ? s.flipX : bit === FLIP_Y ? s.flipY : s.prio;
-    this.editQuarters(setBit(bit, state !== 'on'), `${what} ${state === 'on' ? 'off' : 'on'}`);
+  // priority toggles: on for every marked quarter, off once all have it
+  private togglePrio(): void {
+    const state = summary(this.grid(), this.selWords(), this.marked()).prio;
+    this.editQuarters(setBit(PRIO, state !== 'on'), `Priority ${state === 'on' ? 'off' : 'on'}`);
+  }
+  // the marked quarters mirrored as one picture (acts-like stays with its tile)
+  private flip(bit: number, what: string): void {
+    const m = this.marked();
+    if (!m.size) { toast('Mark quarters first (click, drag or Ctrl+A in the builder)'); return; }
+    const e = mirror(this.grid(), this.selWords(), m, bit);
+    if (!e) { toast(`Mark a rectangle (or a shape symmetric to the ${bit === FLIP_X ? 'vertical' : 'horizontal'} axis) to flip it`); return; }
+    this.writeTiles(e, what);
   }
   // key: a stroke's edits merge into one undo step (and say nothing about cut off tiles)
   private stampAt(at: { x: number; y: number }, block: number[][], key: string | null = null): void {
@@ -523,11 +530,11 @@ export class Map16Tab implements WsPanel {
     this.drawBig();
     const s = summary(g, words, marks);
     const ws = this.words(t);
-    const mixed = (st: BitState) => (st === 'mixed' ? h('span', { class: 'mt-mixed' }, 'mixed') : '');
-    const toggle = (label: string, bit: number, st: BitState, title: string) => h('button', {
-      class: st === 'on' ? 'active' : st === 'mixed' ? 'mt-is-mixed' : '', title, disabled: !marks.size,
-      onclick: () => this.toggleBit(bit, label),
-    }, label, mixed(st));
+    const prio = (st: BitState) => h('button', {
+      class: st === 'on' ? 'active' : st === 'mixed' ? 'mt-is-mixed' : '', title: 'Drawn in front of sprites/Mario', disabled: !marks.size,
+      onclick: () => this.togglePrio(),
+    }, 'Priority', st === 'mixed' ? h('span', { class: 'mt-mixed' }, 'mixed') : '');
+    const flip = (label: string, bit: number, title: string) => h('button', { title, disabled: !marks.size, onclick: () => this.flip(bit, label) }, label);
     const allPal = cgramToRGBA(app.render.cgram);
     const palDot = (p: number) => {
       const c = h('canvas', { width: 7, height: 1, class: 'mt-paldot' });
@@ -572,16 +579,16 @@ export class Map16Tab implements WsPanel {
       h('div', { class: 'hint' }, 'Palette (keys 1–8)'),
       h('div', { class: 'mt-pals' }, Array.from({ length: 8 }, (_, p) => palDot(p))),
       h('div', { class: 'row' },
-        toggle('↔ Flip', FLIP_X, s.flipX, 'Flip horizontally (X)'),
-        toggle('↕ Flip', FLIP_Y, s.flipY, 'Flip vertically (Y)'),
-        toggle('Priority', PRIO, s.prio, 'Drawn in front of sprites/Mario')),
+        flip('↔ Flip', FLIP_X, 'Mirror the marked quarters horizontally as one picture (X)'),
+        flip('↕ Flip', FLIP_Y, 'Mirror the marked quarters vertically as one picture (Y)'),
+        prio(s.prio)),
       h('div', { class: 'mt-section' }, one ? 'Tile' : 'Tiles'),
       acts,
       this.usesBox,
       h('details', { class: 'mt-adv' }, h('summary', null, one ? 'Raw values' : `Raw values of ${hex(t, 3)}`),
         h('div', { class: 'mono hint' }, ws.map((w, q) => `${QUARTER_NAMES[q]} $${hex(w, 4)}`).join('  ')),
         h('div', { class: 'hint' }, this.tileAddr(t) < 0 ? 'Extended tile – created on the first change.' : `ROM $${hex(this.tileAddr(t), 6)}`)),
-      h('p', { class: 'hint' }, 'Choose 8x8 tiles on the right (click or drag), then right-click a quarter to put them there (right drag: paint), or press Enter to put a single one into every marked quarter. Mark quarters for palette, flips and priority (click, drag, Ctrl: add/remove, Shift: whole tile, Ctrl+A: all, Esc: none).'),
+      h('p', { class: 'hint' }, 'Choose 8x8 tiles on the right (click or drag), then right-click a quarter to put them there (right drag: paint), or press Enter to put a single one into every marked quarter. Mark quarters for palette, flips (mirroring them as one picture) and priority (click, drag, Ctrl: add/remove, Shift: whole tile, Ctrl+A: all, Esc: none).'),
     );
   }
 
@@ -1466,8 +1473,8 @@ export class Map16Tab implements WsPanel {
     if (k === 'Escape' && this.remapping) { if (this.visualFrom) { this.visualFrom = null; this.drawGfx(); } else this.closeRemap(); return true; }
     if (k === 'Escape') { if (!this.marked().size) return false; this.setMarks(new Set()); return true; }
     if (k === 'Enter' && !this.remapping) { this.fillMarked(); return true; }
-    if (k === 'x' || k === 'X') { this.toggleBit(FLIP_X, '↔ Flip'); return true; }
-    if (k === 'y' || k === 'Y') { this.toggleBit(FLIP_Y, '↕ Flip'); return true; }
+    if (k === 'x' || k === 'X') { this.flip(FLIP_X, '↔ Flip'); return true; }
+    if (k === 'y' || k === 'Y') { this.flip(FLIP_Y, '↕ Flip'); return true; }
     if (k >= '1' && k <= '8') { const p = Number(k) - 1; this.editQuarters(setPalette(p), `Palette ${p}`); return true; }
     if (k === 'q' || k === 'Q') {
       // only the next quarter of the followed quarter's tile (in reading order)
