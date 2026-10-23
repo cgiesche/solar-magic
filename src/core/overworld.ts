@@ -6,6 +6,7 @@ import { RomReads, updateBytePages } from './romdeps.ts';
 import { rleDecode, rleEncode } from './rle.ts';
 import { GM, RAM } from './ram.ts';
 import { assemble } from './asar.ts';
+import { missingPatch } from './patches.ts';
 import { lz2Compress, lz2Decompress } from './lz2.ts';
 
 export const OW_L1 = 0x0cf7df; // 0x800 bytes: 2 maps × 32×32 16x16 tiles (quadrant layout)
@@ -164,6 +165,7 @@ export function readTranslevels(rom: Rom): Uint8Array {
 
 // writes the table where it is when it fits its block, else to free space; unchanged: nothing written
 export function writeTranslevels(rom: Rom, t: Uint8Array): void {
+  if (!hasTranslevelTable(rom)) missingPatch('Translevels per level tile');
   const at = tableAt(rom); // 0: the patch being installed
   if (at && readTranslevels(rom).every((v, i) => v === t[i])) return;
   const packed = lz2Compress(t);
