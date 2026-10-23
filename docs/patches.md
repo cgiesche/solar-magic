@@ -604,6 +604,32 @@ game's routine stays (the initial flags `$04D678` of each tile's translevel to `
 The clean game's tiles get the translevels its scan gives them; `tools/testleveltiles.ts` enters every level
 tile by emulation and compares the translevel with the clean game.
 
+### Level tile settings
+
+A level's settings on the overworld (*Overworld*, a level tile selected; Lunar Magic's "Modify Level Tile
+Settings", LM help `ov_overworld_modify_level.htm`), all per translevel except the reveals:
+- the **base event** (`$05D608`): its normal exit runs it, secret exit n the event n after it;
+- the **direction each exit enables** (`$04D678`, normal exit bits 7–6, secret exits 1–3 bits 5–4, 3–2, 1–0;
+  0 up, 1 down, 2 left, 3 right): passing the level with it enables walking that way from the tile (the
+  game's own code, all four exits; a flag of `$1EA2`, the joypad's bits right, left, down, up);
+- the **initial flags**, `$1EA2` of a new game: the directions, passed, midway point, and Lunar Magic's
+  *no entry if passed* (bit 5) and *save prompt* (bit 4). The game sets 8 translevels' flags from a list
+  (`$009EE0`); as in Lunar Magic, the patch copies a table of all 0x60 into the new file instead (`$05DDA0`,
+  by a JSL at `$009F19` to `$05DD80`), its contents the flags of the clean game's new file (emulated). Where
+  the game enters a level (`$049199`, code at `$03BA50`) a passed level with *no entry* isn't entered; where it
+  decides on the save prompt after a level (`$048F8A`, code at `$03BA10`) a level with *save prompt* counts as
+  the last tile of the game's list of save tiles (`$048F7F`), whose loop then goes on from the compare
+  (`$049001`). Places and bits as SMW Central's hijack map gives them and Lunar Magic's code in a ROM it saved
+  uses; the editor's code is its own.
+- **revealed on events** (any layer 1 tile): the game's table of the tile each event reveals (`$04D85D`, an
+  `$7EC800` offset per event, 0 none, events 00–6F – the next table follows at `$04D93D`); revealed, the tile
+  becomes its counterpart in the game's reveal list (`$04DA1D` → `$04DA33`).
+
+`tools/testleveltilesettings.ts` checks by emulation that a new game starts with the clean game's flags and
+those set, that passing Yoshi's Island 1 with each of its four exits enables the direction set, that *no
+entry* and *save prompt* work (a castle still prompts without the flag) and that a tile set to be revealed by
+an event is.
+
 ### Layer 3 graphics per level
 
 As Lunar Magic's *Layer 3 GFX/Tilemap Bypass*, a level can have its own layer 3 graphics and tilemap
@@ -757,6 +783,7 @@ not compatible with the respective feature.
 | `$008A7F`, `$0087AD`, `$0085E3`, `$0580B0`, `$0580B4`, `$0580BF`, `$0580C3`, `$058730`, `$058770`, `$0587D4`, `$0587DB`, `$05880B`, `$058812`, `$0586F7`, `$058A3A` | VRAM patch (SMWV): tilemaps relocated, taller levels' rows; RAM `$7F0000–$7F3654` |
 | `$048509`, `$048543` | Overworld teleports (the star/pipe table with 0x100 entries) |
 | `$04D7F2–$04D85C` | Translevels per level tile (Lunar Magic's table) |
+| `$009F19`, `$048F8A`, `$049001`, `$049199`; code `$05DD80`, `$03BA10`, `$03BA50`, table `$05DDA0` | Initial level flags, no entry if passed, save prompt (Lunar Magic's places) |
 | Ext. object table `$0DA118` (entry `$03`) | Structures (SMWS); empty in the original, no code hook |
 | `$05B20F` | Messages in free space (SMWM), only if the texts no longer fit |
 | `$00F545`, `$029328`, `$058A66`, `$058B46`, `$058C34`, `$058D2B`, `$00C096`, `$00C0E7`, `$00C176` | Map16 extension and custom blocks (SMWX) |

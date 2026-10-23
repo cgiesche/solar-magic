@@ -82,7 +82,7 @@ One of the overworld's 7 maps: the main map (0) on the first 512x512 map, and Yo
 _Avoid_: world (that is the player's notion), map (alone, where the 512x512 map could be meant)
 
 **Level tile**:
-A layer 1 tile of the overworld that enters a level (tiles 56–80, and with Lunar Magic 82–86). Its translevel belongs to the tile and moves with it; the level's settings (name, base event, the directions its exits reveal – in the ROM the "initial flags" byte – and message boxes) belong to the translevel: tiles entering the same level share them, a tile painted over leaves them with the level, a new tile entering it shows them. Free translevels that bring nothing along are given out first; the settings are reset only when asked.
+A layer 1 tile of the overworld that enters a level (tiles 56–80, and with Lunar Magic 82–86). Its translevel belongs to the tile and moves with it; the level's settings (name, base event, the directions its exits reveal – in the ROM the "initial flags" byte –, the initial level flags of a new game – Lunar Magic's, with "no entry if passed" and "save prompt" – and message boxes) belong to the translevel: tiles entering the same level share them, a tile painted over leaves them with the level, a new tile entering it shows them. Free translevels that bring nothing along are given out first; the settings are reset only when asked.
 _Avoid_: level dot, node
 
 **Translevel**:
@@ -106,7 +106,7 @@ Up to which event the overworld is shown as passed (events applied in their numb
 _Avoid_: events passed, after all events
 
 **Reveal**:
-A layer 1 tile that changes into another when an event passes over it (Lunar Magic's reveal list: which tile becomes which).
+A layer 1 tile that changes into another when an event passes over it (Lunar Magic's reveal list: which tile becomes which). An event reveals at most one tile, a tile can be revealed by several events; set on the tile, any layer 1 tile.
 
 **Overworld link**:
 A star, pipe or exit path tile leading to another place of the overworld (one-way or both ways), or a location that an exit to the overworld teleports to; one entry of the star/pipe or exit path table, up to 0x100 as in Lunar Magic.
