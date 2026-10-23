@@ -24,7 +24,8 @@ import { snesToPc, type Rom } from './rom.ts';
 import { assemble } from './asar.ts';
 import { rleEncode } from './rle.ts';
 import { missingPatch } from './patches.ts';
-import { OW_EVENTS } from './overworld.ts';
+import { OW_EVENTS, OverworldEmulator, readL1, readTranslevels, isLevelTile, baseEvent, translevelToLevel, l1XY } from './overworld.ts';
+import { RAM, getS16 } from './ram.ts';
 
 const DIVIDERS = 0x04e359; // 0x79 words: the first step of each event, the end
 const STEP_OPS = [0x04e49f, 0x04e709, 0x04ee5a], STEP_OPS2 = [0x04e4a4, 0x04e710, 0x04ee3f];
@@ -137,6 +138,233 @@ export function applyEvents(l2: Uint16Array, d: EventData, from: number, to: num
   for (let e = from; e < to; e++) for (const p of eventPieces(d, e)) drawPiece(out, d, p);
   return out;
 }
+
+// ---- painting an event: the map after it, its steps found ----
+
+// where an event is shown, per region (0 the main map, 1 the submaps): `view` the part of the region (8x8 tiles) the
+// game shows when it runs there, null none (its steps there are silent); `from` the tile the path starts at (the
+// level tile running it), null none
+export interface Rect { x: number; y: number; w: number; h: number }
+export interface EventPlace { views: (Rect | null)[]; from: { region: number; x: number; y: number } | null }
+
+const W = 64; // tiles per row of a region
+const cellXY = (i: number) => { const r = i >> 12, k = i & 0xfff, q = k >> 10; return { r, x: (q & 1) * 32 + (k & 31), y: (q >> 1) * 32 + ((k >> 5) & 31) }; };
+const cellAt = (r: number, x: number, y: number) => (r << 12) | (((y >> 5) * 2 + (x >> 5)) << 10) | ((y & 31) << 5) | (x & 31);
+const inRect = (v: Rect, x: number, y: number) => x >= v.x && y >= v.y && x < v.x + v.w && y < v.y + v.h;
+
+// the storage places pieces use (other than `skip`'s), as a set of indexes
+function usedStorage(d: EventData, skip: number): Uint8Array {
+  const used = new Uint8Array(STORAGE_MAX);
+  d.steps.forEach((s, e) => { if (e !== skip) for (const p of eventPieces(d, e)) used.fill(1, p.at, p.at + (isBig(d, p.at) ? PIECE6 : PIECE2)); });
+  return used;
+}
+
+// The changes of `after` (the map as it is to look after event e) to the map before it (events 0 … e-1 in number
+// order), as pieces: 6x6 where one covers at least a third changed tiles and no tile another event writes, else
+// 2x2 (the fewest such tiles); each placed in the storage where the same tiles are, else in free places (6x6
+// below the 6x6 area, 2x2 above it). A piece in its region's view is a step, shown in order along the path from
+// `from` (reversed: towards it; undefined: as the event's steps were), else silent. Layer 1 silent steps stay.
+export function paintEvent(d: EventData, base: Uint16Array, e: number, after: Uint16Array, place: EventPlace, reversed?: boolean): EventData {
+  const before = applyEvents(base, d, 0, e);
+  const changed = new Uint8Array(0x2000);
+  for (let i = 0; i < 0x2000; i++) if (after[i] !== before[i]) changed[i] = 1;
+  // tiles another event writes
+  const others = new Uint8Array(0x2000);
+  d.steps.forEach((_, k) => { if (k !== e) for (const p of eventPieces(d, k)) for (const i of pieceCells(p.pos, isBig(d, p.at))) if (i >= 0) others[i] = 1; });
+  if (reversed === undefined) reversed = isReversed(d.steps[e], d, place);
+  const used = usedStorage(d, e);
+  const storage = Array.from(d.storage);
+  const starts = new Map<string, number>(); // content → a storage index holding it
+  const key = (big: boolean, words: number[]) => `${big ? 6 : 2}:${words.join(',')}`;
+  d.steps.forEach((_, k) => {
+    if (k === e) return;
+    for (const p of eventPieces(d, k)) {
+      const big = isBig(d, p.at), kk = key(big, storage.slice(p.at, p.at + (big ? PIECE6 : PIECE2)));
+      if (!starts.has(kk)) starts.set(kk, p.at);
+    }
+  });
+  const alloc = (big: boolean, words: number[]): number => {
+    const kk = key(big, words), have = starts.get(kk);
+    if (have !== undefined) return have;
+    const n = big ? PIECE6 : PIECE2, lo = big ? 0 : d.area6, hi = big ? d.area6 : STORAGE_MAX;
+    for (let k = lo; k + n <= hi; k++) {
+      if (used.subarray(k, k + n).some((v) => v)) continue;
+      while (storage.length < k + n) storage.push(0);
+      storage.splice(k, n, ...words);
+      used.fill(1, k, k + n);
+      starts.set(kk, k);
+      return k;
+    }
+    return -1;
+  };
+  const pieces: { at: number; pos: number; cells: number[] }[] = [];
+  const left = changed.slice();
+  const take = (r: number, x: number, y: number, n: number): boolean => {
+    const cells: number[] = [];
+    for (let dy = 0; dy < n; dy++) for (let dx = 0; dx < n; dx++) cells.push(cellAt(r, x + dx, y + dy));
+    const at = alloc(n === 6, cells.map((i) => after[i]));
+    if (at < 0) return false;
+    for (const i of cells) left[i] = 0;
+    pieces.push({ at, pos: cellAt(r, x, y) * 2, cells });
+    return true;
+  };
+  for (let r = 0; r < 2; r++) {
+    // 6x6: the window with the most changed tiles left, while it has a third of its tiles to change
+    const full = new Set<string>();
+    for (;;) {
+      let best = 0, bx = 0, by = 0;
+      for (let y = 0; y + 6 <= W; y++) for (let x = 0; x + 6 <= W; x++) {
+        if (full.has(`${x},${y}`)) continue;
+        let n = 0, bad = false;
+        for (let dy = 0; dy < 6 && !bad; dy++) for (let dx = 0; dx < 6; dx++) {
+          const i = cellAt(r, x + dx, y + dy);
+          if (left[i]) n++;
+          else if (!changed[i] && others[i]) { bad = true; break; }
+        }
+        if (!bad && n > best) { best = n; bx = x; by = y; }
+      }
+      if (best < PIECE6 / 3) break;
+      if (!take(r, bx, by, 6)) { full.add(`${bx},${by}`); if (full.size > 64) break; }
+    }
+    // 2x2 for the rest: the most changed tiles left, then the fewest tiles of other events
+    for (;;) {
+      let best = -1, bx = 0, by = 0;
+      for (let y = 0; y + 2 <= W; y++) for (let x = 0; x + 2 <= W; x++) {
+        let n = 0, o = 0;
+        for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++) {
+          const i = cellAt(r, x + dx, y + dy);
+          if (left[i]) n++;
+          else if (!changed[i] && others[i]) o++;
+        }
+        const score = n ? n * 8 - o : -1;
+        if (score > best) { best = score; bx = x; by = y; }
+      }
+      if (best < 0) break;
+      if (!take(r, bx, by, 2)) throw new Error(`The event tiles are full (${STORAGE_MAX} places)`);
+    }
+  }
+  // steps in the view, in order along the path; the rest silent
+  const shown = pieces.filter((p) => {
+    const c = cellXY(p.cells[0]), v = place.views[c.r], n = Math.sqrt(p.cells.length) / 2;
+    return v !== null && v !== undefined && inRect(v, c.x + n, c.y + n);
+  });
+  const order = pathOrder(shown.map((p) => p.cells.filter((i) => changed[i])), place);
+  const steps = order.map((k) => shown[k]);
+  if (reversed) steps.reverse();
+  const out: EventData = { area6: d.area6, storage: Uint16Array.from(storage), steps: d.steps.slice(), silent: d.silent.slice() };
+  out.steps[e] = steps.map((p) => ({ at: p.at, pos: p.pos }));
+  out.silent[e] = [...d.silent[e].filter((s) => s.layer === 1), ...pieces.filter((p) => !shown.includes(p)).map((p) => ({ layer: 2 as const, tile: p.at, loc: p.pos }))];
+  return trimStorage(out);
+}
+
+// the storage without the places no piece uses at its end (not below the 6x6 area)
+function trimStorage(d: EventData): EventData {
+  const used = usedStorage(d, -1);
+  let end = d.storage.length;
+  while (end > d.area6 && !used[end - 1]) end--;
+  return end === d.storage.length ? d : { ...d, storage: d.storage.slice(0, end) };
+}
+
+// the order of pieces (their changed tiles) along the path: by the steps it takes from the tile nearest `from` over
+// changed tiles (8 ways), each further part of the path from its tile nearest to it, after the parts before
+function pathOrder(pieces: number[][], place: EventPlace): number[] {
+  const cells = new Set(pieces.flat()), dist = new Map<number, number>();
+  const src = place.from;
+  const far = (i: number) => { const c = cellXY(i); return src ? (c.r === src.region ? Math.hypot(c.x - src.x, c.y - src.y) : 1e6) : c.y * W + c.x; };
+  let base = 0;
+  while (dist.size < cells.size) {
+    const start = [...cells].filter((i) => !dist.has(i)).reduce((a, b) => (far(b) < far(a) ? b : a));
+    const queue = [start];
+    dist.set(start, base);
+    let maxD = base;
+    for (let q = 0; q < queue.length; q++) {
+      const i = queue[q], c = cellXY(i), di = dist.get(i)!;
+      maxD = Math.max(maxD, di);
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const x = c.x + dx, y = c.y + dy;
+        if (x < 0 || y < 0 || x >= W || y >= W) continue;
+        const j = cellAt(c.r, x, y);
+        if (cells.has(j) && !dist.has(j)) { dist.set(j, di + 1); queue.push(j); }
+      }
+    }
+    base = maxD + 1;
+  }
+  const keyOf = (p: number[]) => (p.length ? Math.min(...p.map((i) => dist.get(i)!)) : Infinity);
+  const tie = (p: number[]) => (p.length ? Math.min(...p.map(far)) : Infinity);
+  return pieces.map((_, k) => k).sort((a, b) => keyOf(pieces[a]) - keyOf(pieces[b]) || tie(pieces[a]) - tie(pieces[b]));
+}
+
+// whether an event's steps run towards the path's start: the first is farther from it than the last
+function isReversed(steps: Piece[], d: EventData, place: EventPlace): boolean {
+  const src = place.from;
+  if (!src || steps.length < 2) return false;
+  const far = (p: Piece) => { const c = cellXY(p.pos >> 1), n = isBig(d, p.at) ? 3 : 1; return c.r === src.region ? Math.hypot(c.x + n - src.x, c.y + n - src.y) : 1e6; };
+  return far(steps[0]) > far(steps[steps.length - 1]);
+}
+
+// ---- which level runs an event, where it is shown ----
+
+// a level exit that runs an event: the translevel, the exit (0 normal, 1–3 the secret exits: the base event + it),
+// a layer 1 tile entering the level (l1Index)
+export interface EventRunner { tl: number; exit: number; tile: number }
+export function eventRunners(rom: Rom): Map<number, EventRunner[]> {
+  const l1 = readL1(rom), tls = readTranslevels(rom), out = new Map<number, EventRunner[]>();
+  const tileOf = new Map<number, number>();
+  tls.forEach((tl, i) => { if (tl && isLevelTile(l1[i]) && !tileOf.has(tl)) tileOf.set(tl, i); });
+  for (const [tl, tile] of [...tileOf].sort((a, b) => a[0] - b[0])) {
+    const b = baseEvent(rom, tl);
+    for (let exit = 0; exit < 4 && b + exit < OW_EVENTS; exit++) (out.get(b + exit) ?? out.set(b + exit, []).get(b + exit)!).push({ tl, exit, tile });
+  }
+  // the normal exits first
+  for (const l of out.values()) l.sort((a, b) => a.exit - b.exit || a.tl - b.tl);
+  return out;
+}
+const EXIT_SHORT = ['normal exit', 'secret exit 1', 'secret exit 2', 'secret exit 3'];
+const hex3 = (n: number) => n.toString(16).toUpperCase().padStart(3, '0');
+// "Level 105 · secret exit 1", "Event 4A" for one no level exit on the map runs
+export function eventTitle(runners: Map<number, EventRunner[]>, e: number): string {
+  const r = runners.get(e)?.[0];
+  return r ? `Level ${hex3(translevelToLevel(r.tl))} · ${EXIT_SHORT[r.exit]}` : `Event ${e.toString(16).toUpperCase().padStart(2, '0')}`;
+}
+
+// the part of the submaps' region each submap shows (8x8 tiles; the camera the game sets there, emulated), index
+// 1–6; the main map scrolls over all of region 0
+export function submapViews(emu: OverworldEmulator): Rect[] {
+  return Array.from({ length: 7 }, (_, k) => {
+    if (!k) return { x: 0, y: 0, w: W, h: W };
+    const w = emu.load(k, 0).wram;
+    return { x: Math.round(getS16(w, RAM.layer2X) / 8), y: Math.round(getS16(w, RAM.layer2Y) / 8), w: 32, h: 28 };
+  });
+}
+// the submap a layer 1 tile is on: 0 on the main map, else the one whose view's center is nearest (as LevelEmulator's)
+export function submapOf(views: Rect[], tile: number): number {
+  if (tile < 0x400) return 0;
+  const { x, y } = l1XY(tile), cx = x * 2 + 1, cy = y * 2 + 1;
+  let best = 1, bd = Infinity;
+  for (let k = 1; k < views.length; k++) {
+    const v = views[k], d = Math.max(Math.abs(v.x + v.w / 2 - cx), Math.abs(v.y + v.h / 2 - cy));
+    if (d < bd) { bd = d; best = k; }
+  }
+  return best;
+}
+// where event e is shown: on the submap of the level tile running it (else `submap`, the one being edited), its
+// path starting at that tile
+export function eventPlace(runners: Map<number, EventRunner[]>, views: Rect[], e: number, submap: number): EventPlace {
+  const r = runners.get(e)?.[0];
+  const sub = r ? submapOf(views, r.tile) : submap;
+  const from = r ? (() => { const { x, y } = l1XY(r.tile); return { region: r.tile >= 0x400 ? 1 : 0, x: x * 2 + 1, y: y * 2 + 1 }; })() : null;
+  return { views: sub ? [null, views[sub]] : [views[0], null], from };
+}
+
+// event e's steps in the order `order` (indexes of its steps)
+export function reorderSteps(d: EventData, e: number, order: number[]): EventData {
+  const steps = d.steps.slice();
+  steps[e] = order.map((k) => d.steps[e][k]);
+  return { ...d, steps };
+}
+
+// the tiles (readL2 indexes) a step or silent step writes
+export const pieceTiles = (d: EventData, p: Piece): number[] => pieceCells(p.pos, isBig(d, p.at)).filter((i) => i >= 0);
 
 // ---- writing ----
 

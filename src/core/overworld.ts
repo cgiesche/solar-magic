@@ -102,7 +102,8 @@ export function writeL2(rom: Rom, entries: Uint16Array): number {
 // level's number, name, base event and flags. Lunar Magic replaces the scan with a table of the 0x800 tiles'
 // translevels, LC_LZ2 compressed and decompressed to $7ED000 (its pointer at $04D803, bank at $04D808 –
 // Ankouno's OverworldTables.asm); the patch writes its own code there in that layout. The rest of the game's
-// routine stays: each level tile's initial flags ($04D678 by translevel) to $7ED800, then the passed events.
+// routine stays: each level tile's initial flags ($04D678 by translevel) to $7ED800, then the passed events; before
+// them the event tiles' YXPCCCTT are decompressed again ($04DD40), $7F0000 being the VRAM patch's in a level.
 // Translevel 0 is no level (the scan starts at 1); a level tile has one, any other tile 0.
 
 export function isLevelTile(t: number): boolean {
@@ -143,6 +144,7 @@ Decompressed:
   TAX : LDA.l $04D678,x                        ; the translevel's initial flags
 + STA [$0A],y
   DEY : BPL -
+  JSR $DD40                                    ; the event tiles' YXPCCCTT to $7F0000 again: in a level it is the VRAM patch's
   STZ $0F                                      ; the passed events, as the game's
 - JSR $DA49
   INC $0F : LDA $0F
