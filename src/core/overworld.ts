@@ -562,10 +562,10 @@ export function destroyEffects(rom: Rom): DestroyChange[][] {
   if (memo?.gen === rom.gen) return memo.effects;
   const probe = new Rom(rom.data.slice()), at = l1Index(0, 4, 4), RET = 0x8000;
   writeDestroyList(probe, Array.from({ length: DESTROYS }, (_, k) => (k ? { event: NO_EVENT, tile: 0 } : { event: 0, tile: at })));
-  const s = new Snes(probe.data), cpu = s.cpu, w = s.wram, map = w.subarray(RAM.owLayer1, RAM.owLayer1End);
+  const s = new Snes(probe.data), cpu = s.cpu, w = s.wram, map = w.subarray(RAM.owLayer1, RAM.owLayer1End), fresh = s.saveState();
   const effects: DestroyChange[][] = [];
   for (let t = 0; t < 0x100; t++) {
-    map.fill(0);
+    s.loadState(fresh);
     map[at] = t;
     const before = map.slice();
     // JSR $04E677 with the event in A, its RTS to RET
@@ -589,6 +589,17 @@ export function destroyedAt(effects: DestroyChange[][], l1: ArrayLike<number>, i
     if (effects[l1[j]].some((c) => c.dx === dx && c.dy === dy)) return j;
   }
   return -1;
+}
+
+// the tile whose destroy setting tile i shows (destroyedAt), -1 none: one set there, else by the tile as the game
+// may see it when an event runs – on the map before events (l1), revealed, as shown (at the event progress) – and
+// that tile's value
+export function destroySettingAt(rom: Rom, l1: Uint8Array, shown: Uint8Array, i: number): { at: number; tile: number | undefined } {
+  const effects = destroyEffects(rom), revealed = l1.map((t) => { const r = revealedTile(rom, t); return r >= 0 ? r : t; });
+  const maps = [l1, revealed, shown];
+  let at = destroyEvent(rom, i) !== NO_EVENT ? i : -1;
+  for (const m of maps) if (at < 0) at = destroyedAt(effects, m, i);
+  return { at, tile: at < 0 ? undefined : maps.map((m) => m[at]).find((v) => effects[v].length) };
 }
 
 // the overworld's events by the level exits that run them ("105 YOSHI'S ISLAND 1 – normal exit"), of the levels on
