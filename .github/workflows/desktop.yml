@@ -1,6 +1,6 @@
 # The desktop app (Tauri) for Linux, Windows and macOS, on every push to master and by hand
 # (Actions → Desktop → Run workflow). The installers are the run's artifacts; on master they are also
-# published as a GitHub release v<version> (tools/version.ts: 0.1.<build number>) under fixed names, so
+# published as a GitHub release v<version> (tools/version.ts: <major>.<minor>.<build number>) under fixed names, so
 # releases/latest/download/solar-magic-windows-x64-setup.exe etc. always point to the newest one.
 name: Desktop
 

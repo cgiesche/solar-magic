@@ -1,6 +1,7 @@
 // Version of a build: MAJOR.MINOR from src-tauri/tauri.conf.json, the build number (commits up to HEAD) as
-// the third part, e.g. 0.1.232. The same commit gives the same number in the desktop release and the
-// Docker image. Needs the full history (actions/checkout with fetch-depth: 0).
+// the third part, e.g. 0.2.405. The same commit gives the same number in the desktop release and the
+// Docker image; master is fast-forwarded to develop (README: release), so a release keeps the number of its develop
+// build. Needs the full history (actions/checkout with fetch-depth: 0).
 import { readFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 

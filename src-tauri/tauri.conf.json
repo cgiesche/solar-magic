@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Solar Magic",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "identifier": "net.traumwald.solarmagic",
   "build": {
     "frontendDist": "../dist",

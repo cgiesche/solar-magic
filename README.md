@@ -29,6 +29,15 @@ Requires Rust and, on Linux, WebKitGTK 4.1 (`webkit2gtk-4.1`). Same code as in t
 `.smwproj`, and closing with unsaved changes asks first. Installers for Linux/Windows/macOS are built by the
 *Desktop* workflow (on push to master or manually).
 
+A release is a fast-forward of master to a tested develop commit, never a merge:
+
+```sh
+git push origin develop:master
+```
+
+So the release has the same commit as its develop build: the same version (`tools/version.ts`) and the same
+`sha-<commit>` Docker image tag. A merge commit would count as one more commit and get its own hash.
+
 ## Core idea: the game renders itself
 
 Instead of reimplementing SMW's roughly 250 object routines, the editor contains a 65816 CPU emulator
