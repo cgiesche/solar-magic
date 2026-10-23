@@ -10,6 +10,7 @@ import { missingPatch } from './patches.ts';
 import { lz2Compress, lz2Decompress } from './lz2.ts';
 import { hasOwnContent } from './level.ts';
 import { messageSlots, unassignMessageSlot } from './messages.ts';
+import { eventDataRanges } from './owevents.ts';
 
 export const OW_L1 = 0x0cf7df; // 0x800 bytes: 2 maps × 32×32 16x16 tiles (quadrant layout)
 const L2_TILE_PTR = 0x04dc72; // LDA #$A533 operand
@@ -144,9 +145,11 @@ Decompressed:
   DEY : BPL -
   STZ $0F                                      ; the passed events, as the game's
 - JSR $DA49
-  INC $0F : LDA $0F : CMP #$6F : BNE -
+  INC $0F : LDA $0F
+  padbyte $EA : pad $04D858                    ; the count where Lunar Magic's is (owevents.ts: 0x78)
+  CMP #$6F : BNE -
   RTS
-warnpc ${hx(TL_HOOK_END)}
+assert pc() == ${hx(TL_HOOK_END)}
 `;
 
 // Lunar Magic's hijack, detected as OverworldTables.asm does
@@ -436,22 +439,27 @@ export function setBaseEvent(rom: Rom, tl: number, e: number): void {
 }
 
 // ---- reveals ----
-// per event ($04D85D, the game's 0x70 events 00–6F; the next table follows): the layer 1 tile (l1Index, 0 none) it
+// per event (the game's $04D85D, 0x70 events 00–6F, the next table follows; with the event steps patch Lunar
+// Magic's place in free space, all 0x78 – its pointer at $04DA74): the layer 1 tile (l1Index, 0 none) it
 // reveals – turned into its counterpart of the game's reveal list ($04DA1D → $04DA33, 0x16 tiles) when the event
 // passes. One tile per event, a tile by any number of events (Lunar Magic's "reveal this level tile on events").
-export const REVEAL_AT = 0x04d85d, REVEAL_EVENTS = 0x70;
+const REVEAL_PTR = 0x04da74, GAME_REVEAL_AT = 0x04d85d;
 const REVEAL_FROM = 0x04da1d, REVEAL_TO = 0x04da33, REVEALS = 0x16;
-export const revealAt = (rom: Rom, e: number): number => rom.r16(REVEAL_AT + e * 2);
+const revealTable = (rom: Rom) => rom.r24(REVEAL_PTR);
+// the events a tile can be revealed on (0x70 in the game)
+export const revealEventCount = (rom: Rom): number => (revealTable(rom) === GAME_REVEAL_AT ? 0x70 : OW_EVENTS);
+export const revealAt = (rom: Rom, e: number): number => rom.r16(revealTable(rom) + e * 2);
 // the events that reveal tile i (none for tile 0, which stands for none)
 export function revealEvents(rom: Rom, i: number): number[] {
   if (!i) return [];
-  return Array.from({ length: REVEAL_EVENTS }, (_, e) => e).filter((e) => revealAt(rom, e) === i);
+  return Array.from({ length: revealEventCount(rom) }, (_, e) => e).filter((e) => revealAt(rom, e) === i);
 }
 // tile i revealed on exactly `events` (each then reveals only it)
 export function setRevealEvents(rom: Rom, i: number, events: number[]): void {
-  for (let e = 0; e < REVEAL_EVENTS; e++) {
-    if (events.includes(e)) rom.w16(REVEAL_AT + e * 2, i);
-    else if (revealAt(rom, e) === i) rom.w16(REVEAL_AT + e * 2, 0);
+  const at = revealTable(rom);
+  for (let e = 0; e < revealEventCount(rom); e++) {
+    if (events.includes(e)) rom.w16(at + e * 2, i);
+    else if (revealAt(rom, e) === i) rom.w16(at + e * 2, 0);
   }
 }
 // the tile layer 1 tile t turns into when revealed, -1: it has none (a reveal does nothing)
@@ -482,7 +490,8 @@ export function eventNames(rom: Rom): Map<number, string> {
 }
 
 // The ROM bytes (PC offsets, [start, end)) of the overworld's data that the editor writes: layer 1, layer 2 with its
-// pointers, the translevel table with its pointer, per translevel the exit directions, initial flags and name.
+// pointers, the translevel table with its pointer, per translevel the exit directions, initial flags and name, the
+// reveals and the event steps.
 // Learned results that load the overworld without depending on what is painted there leave them out (owpaths.ts).
 export function overworldDataRanges(rom: Rom): [number, number][] {
   const at = (snes: number, len: number): [number, number] => [snesToPc(snes), snesToPc(snes) + len];
@@ -498,6 +507,7 @@ export function overworldDataRanges(rom: Rom): [number, number][] {
   const tl = translevelTableBlock(rom);
   if (tl) out.push(at(tl.snes, tl.size), at(TL_PTR, 2), at(TL_BANK, 1));
   if (hasLevelFlagsPatch(rom)) out.push(at(LEVEL_FLAGS, MAX_TRANSLEVEL + 1));
+  out.push(at(revealTable(rom), revealEventCount(rom) * 2), ...eventDataRanges(rom));
   return out;
 }
 

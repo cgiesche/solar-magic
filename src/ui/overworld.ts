@@ -6,7 +6,7 @@ import {
   OverworldEmulator, type OwRender, gameL1, gameL2, readL1, writeL1, readL2, writeL2, l1Index, l1XY, l2Index, isLevelTile, readTranslevels, writeTranslevels,
   placeTile, sharedTranslevels, enterableLevels, translevelToLevel, nameCode, setNameCode, splitNameCode, joinNameCode, nameWord, levelName, NAME_PART_COUNTS, MAP_NAMES,
   translevelUse, resetTranslevel, baseEvent, setBaseEvent, eventNames, exitDirections, setExitDirection, DIR_ARROWS, DIR_NAMES, EXIT_NAMES, NO_EVENT, isNameless,
-  initialFlags, setInitialFlags, FLAG, DIR_FLAGS, OW_EVENTS, revealEvents, setRevealEvents, revealAt, revealedTile, REVEAL_EVENTS,
+  initialFlags, setInitialFlags, FLAG, DIR_FLAGS, OW_EVENTS, revealEvents, setRevealEvents, revealAt, revealedTile, revealEventCount,
 } from '../core/overworld.ts';
 import { messageSlots } from '../core/messages.ts';
 import { isPathKind, PATH_KIND_NAMES, type PathKind } from '../core/owpaths.ts';
@@ -717,7 +717,7 @@ export class OverworldView {
     const evs = revealEvents(rom, i);
     const set = (list: number[]) => this.app.romEdit(`Tile ${hex(x, 2)},${hex(y, 2)}: revealed on events`, () => setRevealEvents(rom, i, list));
     const where = (k: number) => { const p = l1XY(k); return `${k >= 0x400 ? 'submaps' : 'main map'} ${hex(p.x, 2)},${hex(p.y, 2)}`; };
-    const add = select([[-1, 'Add an event…'], ...Array.from({ length: REVEAL_EVENTS }, (_, e) => e).filter((e) => !evs.includes(e))
+    const add = select([[-1, 'Add an event…'], ...Array.from({ length: revealEventCount(rom) }, (_, e) => e).filter((e) => !evs.includes(e))
       .map((e) => { const k = revealAt(rom, e); return [e, `${this.eventLabel(names, e)}${k ? ` (reveals ${where(k)})` : ''}`] as [number, string]; })], -1,
     (e) => { if (e >= 0) set([...evs, e].sort((a, b) => a - b)); });
     add.title = 'An event reveals one tile: one that reveals another tile moves here';
