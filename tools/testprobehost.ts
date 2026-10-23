@@ -14,6 +14,7 @@ import { cameraAtJob } from '../src/core/camerareach.ts';
 import { loadLevel, serializeLayer1, serializeSprites, L2_PTRS } from '../src/core/level.ts';
 import { editorImage } from './fixture.ts';
 import { gfxSkipMask } from '../src/core/gfxpages.ts';
+import { readL1, writeL1, readL2, writeL2, l1Index, l2Index, l2Pointers } from '../src/core/overworld.ts';
 
 const EDITOR_IMAGE = await editorImage(); // the fixture as the editor opens it
 
@@ -112,6 +113,26 @@ check(host.pending === 0, 'new ROM: tasks dropped');
   check(sc?.type === 'scan' && sc.gen === 2 && JSON.stringify(sc.result) === JSON.stringify(scanned), 'overworld edit: the scan as played directly');
   const held = [blockKey(0, 0x130), spriteKey(0, 0x0d), kindsKey(1), 'scan-ow'].filter((k) => ed.get(k) !== undefined);
   check(held.length === 4, `overworld edit: block, sprite, kinds and scan results still hold (${held.join(', ')})`);
+
+  // painting on the overworld as the editor writes it: layer 1, layer 2 in place, layer 2 moved to free space
+  h.handle({ type: 'scan', id: 3, key: 'scan-paint', level: scanLevel });
+  for (let i = 0; i < 4; i++) keep(h.next());
+  const started2 = h.started, g2 = r.gen;
+  const ow1 = readL1(r), ow2 = readL2(r);
+  ow1[l1Index(0, 5, 5)] ^= 1;
+  writeL1(r, ow1);
+  ow2[l2Index(0, 5, 5)] ^= 1;
+  writeL2(r, ow2);
+  for (let k = 0; k < 0x1000; k++) ow2[k] = (k * 7919) & 0x3fff;
+  const at = l2Pointers(r).tiles;
+  writeL2(r, ow2);
+  check(l2Pointers(r).tiles !== at, 'painting: layer 2 moved');
+  h.handle({ type: 'edit', gen: 3, size: r.size, edits: r.changesSince(g2)!.map(([a, e]) => [a, r.data.slice(a, e)]) });
+  check(h.pending === 1, 'painting: the scan still runs');
+  while (h.pending) keep(h.next());
+  check(h.started === started2, 'painting: the scan was not restarted');
+  const held2 = [blockKey(0, 0x130), spriteKey(0, 0x0d), kindsKey(1), 'scan-ow', 'scan-paint'].filter((k) => ed.get(k) !== undefined);
+  check(held2.length === 5, `painting: block, sprite, kinds and scan results still hold (${held2.join(', ')})`);
 
   // the same scan asked for again: its stored result at once
   h.handle({ type: 'scan', id: 2, key: 'scan-ow', level: scanLevel });

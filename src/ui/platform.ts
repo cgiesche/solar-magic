@@ -96,7 +96,7 @@ export function guardClose(isUnsaved: () => boolean): void {
   import('@tauri-apps/api/window').then(({ getCurrentWindow }) => getCurrentWindow().onCloseRequested(async (e) => {
     if (!unsaved()) return;
     e.preventDefault();
-    const r = await choose('Quit', 'There are unsaved changes in the level or overworld. Quit anyway?', [{ label: 'Cancel' }, { label: 'Quit', danger: true }]);
+    const r = await choose('Quit', 'There are unsaved changes in the level. Quit anyway?', [{ label: 'Cancel' }, { label: 'Quit', danger: true }]);
     if (r === 1) await getCurrentWindow().destroy();
   }));
 }

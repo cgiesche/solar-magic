@@ -50,7 +50,7 @@ function teleportTo(app: App, idx: number, tile: OwTile): void {
 }
 
 // a tile of an overworld map, clicked; the tiles teleports lead to are marked with their location index, `cur`
-// framed. The map as in the ROM (the overworld editor's unsaved changes not yet)
+// framed. The map as in the ROM
 export function pickOverworldTile(app: App, cur: OwTile | null): Promise<OwTile | null> {
   return new Promise((resolve) => {
     const rom = app.rom, emu = new OverworldEmulator(rom), l1 = readL1(rom), l2 = readL2(rom), tls = translevels(l1);

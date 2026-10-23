@@ -27,7 +27,7 @@ export interface EditHooks {
 
 export interface EditOptions {
   key?: string | null; // quick edits with the same key merge into one step (slider drags, strokes)
-  record?: boolean; // false: not undoable (written outside the history, e.g. the overworld's own save)
+  record?: boolean; // false: not undoable (written outside the history, e.g. expanding the ROM)
 }
 
 // what an edit function reports as failure

@@ -1,10 +1,10 @@
 // Overworld editor view.
 
 import type { App } from './app.ts';
-import { h, toast, select, attachPanZoom, zoomControl, ZOOM_MIN, ZOOM_MAX, attachRectPick, choose, emptyState } from './dom.ts';
+import { h, toast, select, attachPanZoom, zoomControl, ZOOM_MIN, ZOOM_MAX, attachRectPick, emptyState } from './dom.ts';
 import {
   OverworldEmulator, type OwRender, readL1, writeL1, readL2, writeL2, l1Index, l2Index, translevels, isLevelTile,
-  translevelToLevel, nameCode, setNameCode, splitNameCode, joinNameCode, nameWord, NAME_PART_COUNTS, MAP_NAMES,
+  translevelToLevel, nameCode, setNameCode, splitNameCode, joinNameCode, nameWord, levelName, NAME_PART_COUNTS, MAP_NAMES,
 } from '../core/overworld.ts';
 import { TileCache, blit8 } from '../core/render.ts';
 import { hex } from '../core/names.ts';
@@ -15,10 +15,8 @@ import type { Rom } from '../core/rom.ts';
 // a w×h block of L1 tiles (16x16) or L2 tilemap entries (8x8), row-major
 type Brush = { kind: 'l1' | 'l2'; w: number; h: number; entries: number[] };
 type Drag =
-  | { kind: 'paint'; x0: number; y0: number; lastX: number; lastY: number } // brush stamped on a grid from (x0, y0)
+  | { kind: 'paint'; layer: 'l1' | 'l2'; x0: number; y0: number; lastX: number; lastY: number } // brush stamped on a grid from (x0, y0)
   | { kind: 'pick'; x0: number; y0: number; x1: number; y1: number }; // map cells taken into the brush
-
-type Snapshot = { l1: Uint8Array; l2: Uint16Array; names: Map<number, number> };
 
 // the 512x512 image of a map region (0 the main map, 1 the submaps): layer 2 (`l2`), then layer 1 (`l1`, null: the
 // state after the events in `r`); undefined leaves a layer out
@@ -70,11 +68,9 @@ export class OverworldView {
   emu: OverworldEmulator;
   map = 0;
   renders = new Map<string, OwRender>();
+  // the maps as in the ROM, with the stroke being painted (written to the ROM when it ends)
   l1: Uint8Array;
   l2: Uint16Array;
-  // level name codes edited here, written to the ROM on save
-  names = new Map<number, number>();
-  dirty = false;
   mode: 'l1' | 'l2' = 'l1';
   showL1 = true;
   showL2 = true;
@@ -88,12 +84,8 @@ export class OverworldView {
   drag: Drag | null = null;
   selectedTl = -1;
   mapCanvas = document.createElement('canvas');
-  undoStack: Snapshot[] = [];
-  redoStack: Snapshot[] = [];
-  private pending: Snapshot | null = null;
   private warnedTl = false;
-  // set by the host: dirty/undo state changed, open a level in the level editor
-  onChange: () => void = () => {};
+  // set by the host: open a level in the level editor
   onOpenLevel: (n: number) => void = () => {};
   onNav: () => void = () => {};
 
@@ -119,6 +111,12 @@ export class OverworldView {
     window.addEventListener('mousemove', (e) => this.onMove(e));
     window.addEventListener('mouseup', () => this.onUp());
     attachPanZoom(this.scroller, () => this.zoom, (z, ax, ay) => this.setZoom(z, ax, ay));
+    // a ROM edit (a stroke ended, a name chosen) or undo/redo: shown as in the ROM (a stroke being painted is dropped)
+    app.on('rom-change', () => {
+      if (!this.root.isConnected) return;
+      if (this.drag?.kind === 'paint') this.drag = null;
+      this.sync();
+    });
   }
 
   setZoom(z: number, ax = this.scroller.clientWidth / 2, ay = this.scroller.clientHeight / 2): void {
@@ -236,8 +234,7 @@ export class OverworldView {
     const c = this.cell(e);
     if (e.button === 2 || (e.button === 0 && e.shiftKey && !e.ctrlKey)) {
       if (this.readOnly()) { toast('Layer 1 shows the state after all events and is view only here – turn off “After all events” in the View menu.'); return; }
-      this.begin();
-      this.drag = { kind: 'paint', x0: c.x, y0: c.y, lastX: c.x, lastY: c.y };
+      this.drag = { kind: 'paint', layer: this.mode, x0: c.x, y0: c.y, lastX: c.x, lastY: c.y };
       this.paintAt(c.x, c.y);
       return;
     }
@@ -267,7 +264,7 @@ export class OverworldView {
     if (!d) return;
     this.drag = null;
     if (d.kind === 'pick') this.pick(this.pickRect(d));
-    else this.commit();
+    else this.endStroke(d.layer);
   }
 
   // the picked rectangle, clamped to the map (32x32 L1 tiles, 64x64 L2 tiles)
@@ -278,44 +275,15 @@ export class OverworldView {
     return { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
   }
 
-  // ---------------- history (L1, L2, level names) ----------------
-  private snapshot(): Snapshot {
-    return { l1: this.l1.slice(), l2: this.l2.slice(), names: new Map(this.names) };
-  }
-  private restore(sn: Snapshot): void {
-    this.l1 = sn.l1; this.l2 = sn.l2; this.names = sn.names;
-  }
-  // an edit starts: commit() records it when something changed
-  begin(): void {
-    this.pending = this.snapshot();
-  }
-  commit(): void {
-    const p = this.pending;
-    this.pending = null;
-    if (!p) return;
-    const same = p.l1.every((v, i) => v === this.l1[i]) && p.l2.every((v, i) => v === this.l2[i])
-      && p.names.size === this.names.size && [...p.names].every(([k, v]) => this.names.get(k) === v);
-    if (same) return;
-    this.undoStack.push(p);
-    if (this.undoStack.length > 200) this.undoStack.shift();
-    this.redoStack = [];
-    this.dirty = true;
-    this.onChange();
-  }
-  get canUndo(): boolean { return this.undoStack.length > 0; }
-  get canRedo(): boolean { return this.redoStack.length > 0; }
-  undo(): void { this.step(this.undoStack, this.redoStack); }
-  redo(): void { this.step(this.redoStack, this.undoStack); }
-  private step(from: Snapshot[], to: Snapshot[]): void {
-    const sn = from.pop();
-    if (!sn) return;
-    to.push(this.snapshot());
-    this.restore(sn);
-    this.dirty = true;
-    this.redrawMap();
-    this.buildSide();
-    this.buildLeft();
-    this.onChange();
+  // a stroke is one ROM edit, written when it ends (layer 1 where it changed, layer 2 in place when it fits)
+  endStroke(layer: 'l1' | 'l2'): void {
+    const rom = this.app.rom;
+    try {
+      this.app.romEdit(layer === 'l1' ? 'Paint layer 1' : 'Paint layer 2', () => (layer === 'l1' ? writeL1(rom, this.l1) : writeL2(rom, this.l2)));
+    } catch (e) {
+      toast(`Not painted: ${e instanceof Error ? e.message : e}`, 'error');
+      this.sync();
+    }
   }
 
   readOnly(): boolean {
@@ -381,15 +349,6 @@ export class OverworldView {
     this.paint();
   }
 
-  nameCodeOf(tl: number): number {
-    return this.names.get(tl) ?? nameCode(this.app.rom, tl);
-  }
-  nameOf(tl: number): string {
-    const [a, b, c] = splitNameCode(this.nameCodeOf(tl));
-    const rom = this.app.rom;
-    return (nameWord(rom, 0, a) + nameWord(rom, 1, b) + nameWord(rom, 2, c)).replace(/\s+/g, ' ').trim();
-  }
-
   updateStatus(): void {
     const c = this.hover;
     const b = this.brush;
@@ -405,7 +364,7 @@ export class OverworldView {
         const i = l1Index(this.region, c.x, c.y);
         t += `  ·  Tile ${hex(this.l1[i], 2)}`;
         const tl = translevels(this.l1)[i];
-        if (tl) t += `  ·  Translevel ${hex(tl, 2)} → Level ${hex(translevelToLevel(tl), 3)} “${this.nameOf(tl)}”`;
+        if (tl) t += `  ·  Translevel ${hex(tl, 2)} → Level ${hex(translevelToLevel(tl), 3)} “${levelName(this.app.rom, tl)}”`;
       }
     } else if (c.x >= 0 && c.y >= 0 && c.x < 64 && c.y < 64) t += `  ·  Entry ${hex(this.l2[l2Index(this.region, c.x, c.y)], 4)}`;
     this.statusText.textContent = t;
@@ -454,18 +413,13 @@ export class OverworldView {
       ] }),
       h('span', { class: 'sep' }),
       this.zoomCtl.root,
-      h('span', { class: 'spacer' }),
-      h('button', { onclick: () => void this.reload(), title: 'Reload the overworld from the ROM (discards unsaved changes)' }, 'Reload'),
     );
   }
 
   // keys while the overworld is shown; false: not handled
   key(e: KeyboardEvent): boolean {
-    const k = e.key.toLowerCase(), ctrl = e.ctrlKey || e.metaKey;
-    if (ctrl && k === 'z') { if (e.shiftKey) this.redo(); else this.undo(); return true; }
-    if (ctrl && k === 'y') { this.redo(); return true; }
-    if (ctrl && k === 's') { this.save(); return true; }
-    if (ctrl || e.altKey) return false;
+    const k = e.key.toLowerCase();
+    if (e.ctrlKey || e.metaKey || e.altKey) return false;
     if (k === 'g') { this.showGrid = !this.showGrid; this.paint(); return true; }
     if (k === '1' || k === '2') { (this.bar.querySelectorAll('.btn-group button')[k === '1' ? 0 : 1] as HTMLButtonElement).click(); return true; }
     return false;
@@ -480,7 +434,7 @@ export class OverworldView {
       const tl = t[l1Index(this.region, x, y)];
       if (!tl || seen.has(tl)) continue;
       seen.add(tl);
-      const lvl = translevelToLevel(tl), name = this.nameOf(tl);
+      const lvl = translevelToLevel(tl), name = levelName(this.app.rom, tl);
       const cur = tl === this.selectedTl;
       const el = h('div', { class: `level-item${cur ? ' current' : ''}`, title: `${name}\nClick: select · Double click: open in the level editor`,
         onclick: () => this.selectTl(tl, true), ondblclick: () => this.onOpenLevel(lvl) },
@@ -512,19 +466,15 @@ export class OverworldView {
 
   levelInfo(tl: number): HTMLElement {
     const rom = this.app.rom;
-    const parts = splitNameCode(this.nameCodeOf(tl));
+    const parts = splitNameCode(nameCode(rom, tl));
+    const lvl = translevelToLevel(tl);
     const sel = (k: number) => select(Array.from({ length: NAME_PART_COUNTS[k] }, (_, i) => [i, `${hex(i, 2)}: ${nameWord(rom, k, i).trim() || '(empty)'}`] as [number, string]), parts[k], (v) => {
       parts[k] = v;
-      this.begin();
-      this.names.set(tl, joinNameCode(parts));
-      this.commit();
-      this.buildProps();
-      this.buildLeft();
+      this.app.romEdit(`Level name ${hex(lvl, 3)}`, () => setNameCode(rom, tl, joinNameCode(parts)));
     });
-    const lvl = translevelToLevel(tl);
     return h('div', { class: 'ow-info' },
       h('div', { class: 'prop-title' }, `Translevel ${hex(tl, 2)} → Level ${hex(lvl, 3)}`),
-      h('div', null, `“${this.nameOf(tl)}”`),
+      h('div', null, `“${levelName(this.app.rom, tl)}”`),
       h('div', { class: 'prop' }, h('label', null, 'Name part 1'), sel(0)),
       h('div', { class: 'prop' }, h('label', null, 'Name part 2'), sel(1)),
       h('div', { class: 'prop' }, h('label', null, 'Name part 3'), sel(2)),
@@ -630,64 +580,23 @@ export class OverworldView {
       pal);
   }
 
-  save(): void {
-    const rom = this.app.rom;
-    try {
-      // not a ROM undo step: the overworld editor has its own undo
-      const n = this.app.romEdit('Overworld saved', () => {
-        const n = writeL2(rom, this.l2);
-        writeL1(rom, this.l1);
-        for (const [tl, code] of this.names) setNameCode(rom, tl, code);
-        return n;
-      }, { record: false });
-      this.names.clear();
-      this.dirty = false;
-      this.invalidate();
-      this.redrawMap();
-      this.onChange();
-      toast(`Overworld saved (layer 2: ${n} bytes RLE).`);
-    } catch (e) {
-      toast(`Overworld not saved: ${e instanceof Error ? e.message : e}`, 'error');
-    }
-  }
-
-  // drops unsaved changes (they are re-read from the ROM)
-  discard(): void {
+  // the maps again from the ROM
+  sync(): void {
     this.l1 = readL1(this.app.rom);
     this.l2 = readL2(this.app.rom);
-    this.names.clear();
-    this.undoStack = [];
-    this.redoStack = [];
-    this.dirty = false;
-    this.onChange();
-  }
-
-  async reload(): Promise<void> {
-    if (this.dirty && (await choose('Reload overworld', 'Discard unsaved changes to the overworld?', [{ label: 'Cancel' }, { label: 'Discard', danger: true }])) !== 1) return;
-    this.show();
-    toast('Overworld reloaded');
-  }
-
-  // leaving: save, discard or stay; false = stay
-  async confirmLeave(): Promise<boolean> {
-    if (!this.dirty) return true;
-    const r = await choose('Leave overworld', 'The overworld has unsaved changes.', [{ label: 'Cancel' }, { label: 'Discard' }, { label: 'Save', primary: true }]);
-    if (r === 2) { this.save(); return !this.dirty; }
-    if (r === 1) { this.discard(); return true; }
-    return false;
+    this.invalidate();
+    if (this.selectedTl > 0 && !translevels(this.l1).includes(this.selectedTl)) this.selectedTl = -1;
+    this.buildSide();
+    this.buildLeft();
+    this.redrawMap();
+    this.updateStatus();
   }
 
   show(): void {
     this.emu.rom = this.app.rom;
-    this.discard();
-    this.invalidate();
-    if (this.selectedTl > 0 && !translevels(this.l1).includes(this.selectedTl)) this.selectedTl = -1;
     this.buildBar();
-    this.buildSide();
-    this.buildLeft();
-    this.redrawMap();
+    this.sync();
     this.layout();
-    this.updateStatus();
   }
 }
 

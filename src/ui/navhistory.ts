@@ -87,7 +87,7 @@ export class NavHistory {
   private blocked: () => boolean;
   onChange: () => void = () => {};
 
-  // capture: the place shown now; restore: show a place (false: the user stayed, e.g. unsaved overworld);
+  // capture: the place shown now; restore: show a place (false: the user stayed);
   // blocked: no navigation now (a dialog is open)
   constructor(capture: () => NavLoc, restore: (l: NavLoc) => Promise<boolean>, blocked: () => boolean) {
     this.capture = capture;

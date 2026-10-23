@@ -148,12 +148,12 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   const menus = menuBar([
     { label: 'File', items: [
       { label: 'Open project …', title: 'A project file (.smwproj) saved with “Save project”', onClick: openProjectFile },
-      { label: 'Save project', title: 'The ROM with the editor data: sources of patches, packages, UberASM, blocks, sprites and music – to keep editing it later or elsewhere', onClick: () => { if (ow?.dirty) ow.save(); exportProject(app); } },
-      ...(desktop ? [{ label: 'Save project as …', title: 'Save the project to another file and keep working on that one', onClick: () => { if (ow?.dirty) ow.save(); exportProject(app, true); } }] : []),
+      { label: 'Save project', title: 'The ROM with the editor data: sources of patches, packages, UberASM, blocks, sprites and music – to keep editing it later or elsewhere', onClick: () => exportProject(app) },
+      ...(desktop ? [{ label: 'Save project as …', title: 'Save the project to another file and keep working on that one', onClick: () => exportProject(app, true) }] : []),
       'sep',
       { label: 'Open ROM …', title: 'Start from a ROM (.smc/.sfc) – clean or already modified', onClick: openRomFile },
-      { label: 'Export ROM', title: 'Download the playable ROM with all saved changes (without the editor data)', onClick: () => { if (ow?.dirty) ow.save(); exportRom(app); } },
-      { label: 'Export patch …', title: 'A BPS patch (for Floating IPS / Flips) from a clean ROM you choose to the playable ROM with all saved changes', onClick: () => { if (ow?.dirty) ow.save(); exportPatch(app); } },
+      { label: 'Export ROM', title: 'Download the playable ROM with all saved changes (without the editor data)', onClick: () => exportRom(app) },
+      { label: 'Export patch …', title: 'A BPS patch (for Floating IPS / Flips) from a clean ROM you choose to the playable ROM with all saved changes', onClick: () => exportPatch(app) },
       'sep',
       { label: 'Import level file …', title: 'Replaces the current level (undoable; palette/graphics bypass are written to the ROM directly)', disabled: () => !inLevel(), onClick: () => importLevel(app) },
       { label: 'Export level file …', title: `Level as ${LEVEL_FILE_EXT} file (objects, sprites, exits, header, graphics bypass, custom palette)`, disabled: () => !inLevel(), onClick: () => exportLevel(app) },
@@ -197,9 +197,9 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   const wsSwitch = h('div', { class: 'btn-group ws-switch' }, wsBtn('level', 'Level', 'Esc'), wsBtn('ow', 'Overworld', 'O'), wsBtn('gfx', 'Graphics', 'P / M / G / A'));
   const backBtn = h('button', { onclick: () => history.back(), title: 'Back to the place before (Alt+←, mouse back button)', disabled: true }, '←');
   const fwdBtn = h('button', { onclick: () => history.forward(), title: 'Forward (Alt+→, mouse forward button)', disabled: true }, '→');
-  const undoBtn = h('button', { onclick: () => (workspace === 'ow' ? ow?.undo() : app.undo()), title: 'Undo (Ctrl+Z)' }, '↶');
-  const redoBtn = h('button', { onclick: () => (workspace === 'ow' ? ow?.redo() : app.redo()), title: 'Redo (Ctrl+Y)' }, '↷');
-  const saveBtn = h('button', { class: 'primary', onclick: () => (workspace === 'ow' ? ow?.save() : app.saveLevel()) });
+  const undoBtn = h('button', { onclick: () => app.undo(), title: 'Undo (Ctrl+Z)' }, '↶');
+  const redoBtn = h('button', { onclick: () => app.redo(), title: 'Redo (Ctrl+Y)' }, '↷');
+  const saveBtn = h('button', { class: 'primary', onclick: () => app.saveLevel(), title: 'Write level to ROM (Ctrl+S)' });
   const testBtn = h('button', { onclick: () => openTestPlay(app), title: 'Test the level in the built-in emulator (T, Shift+T: from the mouse position)' }, '▶ Test');
   // loops the open level's music while editing; anything else that plays (test play, a song in a dialog) ends it
   const musicTitle = 'Play the level\'s music in a loop while editing';
@@ -231,11 +231,9 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     if (app.level) levelTitle.textContent = `Level ${hex(app.level.number, 3)}${app.dirty ? ' *' : ''}`;
     zoomCtl.update();
     for (const b of wsSwitch.querySelectorAll('button')) b.classList.toggle('active', b.dataset.ws === workspace);
-    const inOw = workspace === 'ow' && ow;
-    saveBtn.textContent = inOw ? `Save overworld${ow!.dirty ? ' *' : ''}` : `Save level${app.dirty ? ' *' : ''}`;
-    saveBtn.title = inOw ? 'Write overworld to ROM (Ctrl+S)' : 'Write level to ROM (Ctrl+S)';
-    undoBtn.disabled = inOw ? !ow!.canUndo : false;
-    redoBtn.disabled = inOw ? !ow!.canRedo : false;
+    saveBtn.textContent = `Save level${app.dirty ? ' *' : ''}`;
+    // (the overworld's changes are ROM edits: nothing to save; hidden, so nothing else moves)
+    saveBtn.style.visibility = workspace === 'ow' ? 'hidden' : '';
     testBtn.disabled = workspace === 'ow';
     testBtn.title = workspace === 'ow' ? 'Test play is available in the level editor' : 'Test the level in the built-in emulator (T, Shift+T: from the mouse position)';
     musicBtn.disabled = workspace === 'ow';
@@ -260,7 +258,6 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
 
   // switches between the level editor, the overworld editor and the graphics workspace (palettes, Map16, GFX);
   // gfx: tab to open (default: the last one), Map16 tile to show
-  // false: the user chose to stay (unsaved overworld)
   const setWorkspace = async (w: typeof workspace, gfx?: { tab?: WsTab; tile?: number; bg?: boolean }): Promise<boolean> => {
     closeMenus();
     if (w === workspace) {
@@ -272,7 +269,6 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     }
     // leave the current workspace
     if (workspace === 'ow') {
-      if (ow && !(await ow.confirmLeave())) return false;
       layout.classList.remove('ow-mode');
     } else if (workspace === 'gfx') {
       ws!.leave();
@@ -285,7 +281,6 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
       if (app.dirty) app.saveLevel(true);
       if (!ow) {
         ow = new OverworldView(app);
-        ow.onChange = updateToolbar;
         ow.onOpenLevel = async (n) => { if (await setWorkspace('level')) app.openLevel(n); };
         ow.onNav = () => nav?.mark();
       }
@@ -388,10 +383,11 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     if (k === 'F1' || k === '?') { e.preventDefault(); showHelp(); return; }
     if (k === 'o' || k === 'O') { setWorkspace(workspace === 'ow' ? 'level' : 'ow'); return; }
     if ((k === 'l' || k === 'L') && !ctrl && !e.altKey) { logBar.toggle(); return; }
+    // one undo history in every workspace
+    if (ctrl && k.toLowerCase() === 's') { e.preventDefault(); app.saveLevel(); return; }
+    if (ctrl && k.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) app.redo(); else app.undo(); return; }
+    if (ctrl && k.toLowerCase() === 'y') { e.preventDefault(); app.redo(); return; }
     if (workspace === 'gfx' && ws) {
-      if (ctrl && k.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) app.redo(); else app.undo(); return; }
-      if (ctrl && k.toLowerCase() === 'y') { e.preventDefault(); app.redo(); return; }
-      if (ctrl && k.toLowerCase() === 's') { e.preventDefault(); app.saveLevel(); return; }
       if (ws.key(e)) { e.preventDefault(); return; }
       if (k === 'Escape') setWorkspace('level');
       return;
@@ -401,9 +397,6 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
       else if (k === 'Escape') void setWorkspace('level');
       return;
     }
-    if (ctrl && k.toLowerCase() === 's') { e.preventDefault(); app.saveLevel(); return; }
-    if (ctrl && k.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) app.redo(); else app.undo(); return; }
-    if (ctrl && k.toLowerCase() === 'y') { e.preventDefault(); app.redo(); return; }
     if (ctrl && k.toLowerCase() === 'c') { app.copy(); return; }
     if (ctrl && k.toLowerCase() === 'v') { const hv = view.hover; if (hv) app.paste(hv.tx, hv.ty); return; }
     if (ctrl && k.toLowerCase() === 'd') { e.preventDefault(); app.duplicateSelection(); return; }
@@ -442,8 +435,8 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     else if (k === 'p' || k === 'P') setWorkspace('gfx', { tab: 'pal' });
     else if (k === 'a' || k === 'A') setWorkspace('gfx', { tab: 'anim' });
   };
-  window.onbeforeunload = (e) => { if (app.dirty || ow?.dirty) { e.preventDefault(); } };
-  guardClose(() => app.dirty || !!ow?.dirty);
+  window.onbeforeunload = (e) => { if (app.dirty) { e.preventDefault(); } };
+  guardClose(() => app.dirty);
   updateToolbar();
   levels.build();
   return {
@@ -517,7 +510,7 @@ async function exportProject(app: App, askWhere = false): Promise<void> {
 function showHelp(): void {
   const sections: [string, [string, string][]][] = [
     ['General', [
-      ['Ctrl+S', 'Save (level or overworld)'],
+      ['Ctrl+S', 'Save the level'],
       ['Ctrl+Z / Ctrl+Y', 'Undo / Redo'],
       ['Alt+← / Alt+→ · mouse back/forward buttons', 'Back / forward through the places opened (workspace, level, overworld map, graphics tab, Ctrl+click jumps)'],
       ['Esc / O / M · P · A', 'Workspace level / overworld / graphics (Map16, palettes, animations)'],

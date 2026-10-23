@@ -46,19 +46,44 @@ export function readL2(rom: Rom): Uint16Array {
   return out;
 }
 
+// free space a moved layer 2 gets between its two streams, so that later strokes still fit in its block
+const L2_SLACK = 0x200;
+
+// Writes layer 2 where it is when it fits: a stream that didn't change keeps its bytes, one that did is written in
+// its own space (the tile stream up to the attribute stream, the attribute stream up to the end of its RATS block or
+// its old length); else both go to the space from the tile stream on (the attributes at its end), else to free space.
+// Returns the bytes of the two streams.
 export function writeL2(rom: Rom, entries: Uint16Array): number {
-  const t = rleEncode(Array.from(entries, (v) => v & 0xff));
-  const a = rleEncode(Array.from(entries, (v) => v >> 8));
-  const payload = new Uint8Array(t.length + a.length);
-  payload.set(t);
-  payload.set(a, t.length);
-  const old = l2Pointers(rom);
-  rom.freeAt(old.tiles);
-  const addr = rom.allocWrite(payload);
-  rom.w16(L2_TILE_PTR, addr & 0xffff);
-  rom.w16(L2_ATTR_PTR, (addr + t.length) & 0xffff);
-  rom.w8(L2_BANK, addr >> 16);
-  return payload.length;
+  const old = l2Pointers(rom), d = rom.data;
+  const oldT = new Uint16Array(0x2000), oldA = new Uint16Array(0x2000);
+  const tLen = rleDecode(d, snesToPc(old.tiles), oldT, 0, 0x2000);
+  const aLen = rleDecode(d, snesToPc(old.attrs), oldA, 0, 0x2000);
+  const stream = (shift: number, was: Uint16Array, at: number, len: number) => {
+    const v = Array.from(entries, (e) => (e >> shift) & 0xff);
+    return v.every((b, i) => b === was[i]) ? d.slice(snesToPc(at), snesToPc(at) + len) : Uint8Array.from(rleEncode(v));
+  };
+  const t = stream(0, oldT, old.tiles, tLen), a = stream(8, oldA, old.attrs, aLen);
+  const rats = old.attrs > old.tiles ? rom.isRatsAt(snesToPc(old.tiles) - 8) : -1;
+  const end = rats > 0 ? old.tiles + rats : old.attrs + aLen;
+  const tRoom = old.attrs > old.tiles ? old.attrs - old.tiles : tLen;
+  if (t.length <= tRoom && a.length <= end - old.attrs) {
+    rom.writeBytes(old.tiles, t);
+    rom.writeBytes(old.attrs, a);
+  } else if (old.attrs > old.tiles && t.length + a.length <= end - old.tiles) {
+    rom.writeBytes(old.tiles, t);
+    rom.writeBytes(end - a.length, a);
+    rom.w16(L2_ATTR_PTR, (end - a.length) & 0xffff);
+  } else {
+    const payload = new Uint8Array(t.length + L2_SLACK + a.length);
+    payload.set(t);
+    payload.set(a, t.length + L2_SLACK);
+    rom.freeAt(old.tiles);
+    const addr = rom.allocWrite(payload);
+    rom.w16(L2_TILE_PTR, addr & 0xffff);
+    rom.w16(L2_ATTR_PTR, (addr + t.length + L2_SLACK) & 0xffff);
+    rom.w8(L2_BANK, addr >> 16);
+  }
+  return t.length + a.length;
 }
 
 // vanilla: level tiles ($56-$80) get translevel numbers in scan order
