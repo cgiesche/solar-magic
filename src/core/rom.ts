@@ -36,7 +36,7 @@ export interface RatsBlock {
 // a range of the ROM image by file offset (PC), end exclusive
 export type RomRange = [start: number, end: number];
 
-// changes the log keeps (older ones are forgotten: changesSince can't reach back further then)
+// changes the log keeps (older ones are forgotten: changesSince can't reach back further than that)
 const LOG_MAX = 8192;
 // equal bytes between two changed runs of one write that still make one range
 const RUN_GAP = 16;

@@ -38,6 +38,7 @@ export interface ProbeClientDeps {
 export class ProbeClient {
   private send: Send | null = null;
   private gen = -1; // ROM generation the worker probes on
+  private size = -1; // and the ROM's size
   private asked = new Map<string, ProbeJob>(); // asked for and not done yet
   private prefetched = new Map<string, ProbeJob>(); // the same, probed after the asked ones
   // probes and tilesets whose object kinds failed, forgotten whenever the ROM changes: a deliberate exception
@@ -168,20 +169,21 @@ export class ProbeClient {
   }
 
   // Starts the worker, and sends it what a ROM change wrote: the ranges, or the whole ROM when they aren't known
-  // (it drops its queue then: the asked jobs and tasks are sent again). The prefetch is made anew.
+  // or the size changed (it drops its queue then: the asked jobs and tasks are sent again). The prefetch is made anew.
   private sync(): void {
     if (!this.send) this.send = this.start();
     const rom = this.d.rom();
     if (this.gen === rom.gen) return;
-    const changes = this.gen < 0 ? null : rom.changesSince(this.gen);
+    // (a new size is a new ROM to the worker: it starts anew)
+    const changes = this.gen < 0 || rom.data.length !== this.size ? null : rom.changesSince(this.gen);
     this.gen = rom.gen;
+    this.size = rom.data.length;
     this.failed.clear();
     this.kindsFailed.clear();
     this.prefetched.clear();
     if (changes) {
-      const size = rom.data.length;
-      const edits = changes.filter(([a]) => a < size).map(([a, e]): [number, Uint8Array] => [a, rom.data.slice(a, Math.min(e, size))]);
-      this.send({ type: 'edit', gen: this.gen, size, edits });
+      const edits = changes.map(([a, e]): [number, Uint8Array] => [a, rom.data.slice(a, e)]);
+      this.send({ type: 'edit', gen: this.gen, size: this.size, edits });
     } else {
       this.send({ type: 'rom', gen: this.gen, data: rom.data.slice() });
       if (this.asked.size) this.send({ type: 'ask', jobs: [...this.asked.values()] });

@@ -129,6 +129,15 @@ function editor(worker: Worker | null) {
   check(w.sent.filter((m) => m.type === 'rom').length === 2 && w.asks(0x130) === 2, 'the log does not reach back: the whole ROM, the asked jobs again');
   w.run();
   check(JSON.stringify(e.client.block(0x130)) === JSON.stringify(direct.probe(0x130)), 'block 130 as probed directly');
+  // a new size: the whole ROM (the worker starts anew), with what is still wanted
+  e.client.block(0x133);
+  await settle();
+  e.rom.expand(e.rom.size * 2);
+  e.client.block(0x134);
+  await settle();
+  check(w.sent.filter((m) => m.type === 'rom').length === 3 && w.asks(0x133) === 2, 'a new size: the whole ROM, the asked jobs again');
+  w.run();
+  check(e.client.block(0x133) !== undefined && !e.busy.has('probe'), '… and answered');
 }
 
 // the worker breaks down: asked probes and object kinds go to the main thread

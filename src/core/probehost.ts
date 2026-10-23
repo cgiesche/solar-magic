@@ -146,20 +146,25 @@ export class ProbeHost {
     if (!this.prober) return;
     const t = this.tasks.get(msg.type);
     if (t && taskKey(t.msg) === taskKey(msg)) { t.msg = msg; return; }
-    const task: Task = { msg, run: undefined!, reads: () => null };
-    this.begin(task);
+    const task: Task = { msg, run: this.run(msg, () => task), reads: () => null };
+    this.started++;
     this.tasks.delete(msg.type);
     this.tasks.set(msg.type, task);
   }
 
   // (re)starts a task's slices
   private begin(t: Task): void {
-    const m = t.msg;
     t.reads = () => null;
-    t.run = m.type === 'kinds' ? this.kindsTask(t, m.ts, m.level, m.layer2Pointer)
-      : m.type === 'scan' ? this.played(t, (emu) => levelScanJob(emu, m.level))
-      : this.played(t, (emu) => cameraAtJob(emu, m.level, m.x, m.y));
+    t.run = this.run(t.msg, () => t);
     this.started++;
+  }
+
+  // a task's slices (the task, for what it read so far, is taken when they start)
+  private *run(m: TaskMessage, task: () => Task): Generator<void, unknown> {
+    const t = task();
+    return m.type === 'kinds' ? yield* this.kindsTask(t, m.ts, m.level, m.layer2Pointer)
+      : m.type === 'scan' ? yield* this.played(t, (emu) => levelScanJob(emu, m.level))
+      : yield* this.played(t, (emu) => cameraAtJob(emu, m.level, m.x, m.y));
   }
 
   // a finished task's reply, with its result cache entry
