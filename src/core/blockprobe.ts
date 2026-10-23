@@ -47,7 +47,7 @@ const ENTER_FRAMES = 24;
 const COLLISION_VERSION = 2; // part of the result key: raise when the collision probe changes
 const SETTLE_FRAMES = 6; // frames Mario has to stand still before a probe stops early
 // joypad bits ($4218); Mario's offset to the tile for each enter direction
-export const PAD = { up: 0x0800, down: 0x0400, left: 0x0200, right: 0x0100, b: 0x8000, y: 0x4000, l: 0x0020, r: 0x0010 };
+export const PAD = { up: 0x0800, down: 0x0400, left: 0x0200, right: 0x0100, b: 0x8000, y: 0x4000, a: 0x0080, l: 0x0020, r: 0x0010 };
 const ENTER_DX = [-8, -4, 0, 4, 8]; // pipes only let Mario in within a few pixels of their middle
 
 // result cache keys (see ResultCache) of the probes in tileset ts

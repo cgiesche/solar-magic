@@ -474,6 +474,26 @@ export function eventNames(rom: Rom): Map<number, string> {
   return out;
 }
 
+// The ROM bytes (PC offsets, [start, end)) of the overworld's data that the editor writes: layer 1, layer 2 with its
+// pointers, the translevel table with its pointer, per translevel the exit directions, initial flags and name.
+// Learned results that load the overworld without depending on what is painted there leave them out (owpaths.ts).
+export function overworldDataRanges(rom: Rom): [number, number][] {
+  const at = (snes: number, len: number): [number, number] => [snesToPc(snes), snesToPc(snes) + len];
+  const p = l2Pointers(rom), d = rom.data, scratch = new Uint16Array(0x2000);
+  const out = [
+    at(OW_L1, 0x800),
+    at(p.tiles, rleDecode(d, snesToPc(p.tiles), scratch, 0, 0x2000)),
+    at(p.attrs, rleDecode(d, snesToPc(p.attrs), scratch, 8, 0x2000)),
+    at(L2_TILE_PTR, 2), at(L2_BANK, 1), at(L2_ATTR_PTR, 2),
+    at(EXIT_DIRS, MAX_TRANSLEVEL + 1),
+    at(NAME_CODES, (MAX_TRANSLEVEL + 1) * 2),
+  ];
+  const tl = translevelTableBlock(rom);
+  if (tl) out.push(at(tl.snes, tl.size), at(TL_PTR, 2), at(TL_BANK, 1));
+  if (hasLevelFlagsPatch(rom)) out.push(at(LEVEL_FLAGS, MAX_TRANSLEVEL + 1));
+  return out;
+}
+
 // ---- emulation: load the overworld to obtain VRAM / CGRAM / Map16 tables ----
 export interface OwRender {
   vram: Uint8Array;

@@ -103,6 +103,8 @@ export const RAM = {
   owWarp: 0x1b9c, // the overworld loads at the star/pipe table's destination $1DF6 (owteleport.ts)
   owWarpIndex: 0x1df6,
   owTile: 0x13c1, // the layer 1 tile Mario stands on
+  owProcess: 0x13d9, // what the overworld is doing: Mario standing, walking, switching submaps …
+  owPose: 0x1f13, // per player (2 bytes apart): Mario's pose on the overworld – bit 3 swimming, bit 4 climbing
   savePrompt: 0x13ca, // set when the overworld is to show the save prompt
   fileLevelFlags: 0x1f49, // the save file's copy of levelFlags, filled with the initial flags when a new file is made
   playerIndex: 0x0db3, // 0 Mario, 1 Luigi

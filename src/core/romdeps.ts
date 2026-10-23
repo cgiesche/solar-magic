@@ -9,12 +9,14 @@
 // are recorded, so saving a level (another one, or fixing the checksum) doesn't drop anything.
 // The same for the editor patch's tables (GFX file pointers, per-level GFX and sprite bank): a new
 // ExGFX file or another level's GFX setting only drops what read that entry. The same for the
-// pages holding ExAnimation data.
+// pages holding ExAnimation data and the overworld's data (painting the overworld only drops what
+// read the tiles painted, a level's initial flags what read them).
 
 import type { Rom } from './rom.ts';
 import { snesToPc, type RomRange } from './rom.ts';
 import { editorPatch, GFX_FILES } from './patches.ts';
 import { exanimDataRanges } from './exanim.ts';
+import { overworldDataRanges } from './overworld.ts';
 
 export const PAGE_SHIFT = 8;
 
@@ -31,9 +33,9 @@ BYTE_PAGES.fill(1, 0x2e000 >> PAGE_SHIFT, 0x30000 >> PAGE_SHIFT);
 BYTE_PAGES[0x7f00 >> PAGE_SHIFT] = 1;
 const FIXED_BYTE_PAGES = BYTE_PAGES.slice();
 
-// adds the byte pages of this ROM's editor patch tables, its free space blocks' edges and ExAnimation data (call when the ROM
-// may have changed); the ExAnimation data isn't recorded at all (see gfxSkipMask), byte pages keep
-// the rest of their pages from counting it (an animation list next to code that is run)
+// adds the byte pages of this ROM's editor patch tables, its free space blocks' edges, ExAnimation data and overworld
+// data (call when the ROM may have changed); the ExAnimation data isn't recorded at all (see gfxSkipMask), byte pages
+// keep the rest of their pages from counting it (an animation list next to code that is run)
 export function updateBytePages(rom: Rom): void {
   BYTE_PAGES.set(FIXED_BYTE_PAGES);
   const reads = rom.reads;
@@ -41,6 +43,7 @@ export function updateBytePages(rom: Rom): void {
   try {
     const markPc = (o: number, end: number) => BYTE_PAGES.fill(1, o >> PAGE_SHIFT, ((end - 1) >> PAGE_SHIFT) + 1);
     for (const [a, b] of exanimDataRanges(rom)) markPc(a, b);
+    for (const [a, b] of overworldDataRanges(rom)) markPc(a, b);
     // the pages a block in free space shares with the free space around it, which a save fills (code and tables
     // every level reads next to a level's data)
     for (const b of rom.scanRats()) { markPc(b.start, b.start + 1); markPc(b.start + 7 + b.size, b.start + 8 + b.size); }
