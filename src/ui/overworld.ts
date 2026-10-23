@@ -1,11 +1,12 @@
 // Overworld editor view.
 
 import type { App } from './app.ts';
-import { h, toast, select, attachPanZoom, zoomControl, ZOOM_MIN, ZOOM_MAX, attachRectPick, emptyState } from './dom.ts';
+import { h, toast, select, checkbox, attachPanZoom, zoomControl, ZOOM_MIN, ZOOM_MAX, attachRectPick, emptyState } from './dom.ts';
 import {
   OverworldEmulator, type OwRender, readL1, writeL1, readL2, writeL2, l1Index, l1XY, l2Index, isLevelTile, readTranslevels, writeTranslevels,
   placeTile, sharedTranslevels, enterableLevels, translevelToLevel, nameCode, setNameCode, splitNameCode, joinNameCode, nameWord, levelName, NAME_PART_COUNTS, MAP_NAMES,
-  translevelUse, resetTranslevel, baseEvent, eventNames, exitDirections, DIR_ARROWS, NO_EVENT, isNameless,
+  translevelUse, resetTranslevel, baseEvent, setBaseEvent, eventNames, exitDirections, setExitDirection, DIR_ARROWS, DIR_NAMES, EXIT_NAMES, NO_EVENT, isNameless,
+  initialFlags, setInitialFlags, FLAG, OW_EVENTS, revealEvents, setRevealEvents, revealAt, revealedTile, REVEAL_EVENTS,
 } from '../core/overworld.ts';
 import { messageSlots } from '../core/messages.ts';
 import { TileCache, blit8 } from '../core/render.ts';
@@ -96,7 +97,7 @@ export class OverworldView {
   l2Pal = 0;
   hover: { x: number; y: number } | null = null;
   drag: Drag | null = null;
-  selected = -1; // the level tile shown in the properties (l1Index)
+  selected = -1; // the layer 1 tile shown in the properties (l1Index)
   mapCanvas = document.createElement('canvas');
   // set by the host: open a level in the level editor
   onOpenLevel: (n: number) => void = () => {};
@@ -214,6 +215,7 @@ export class OverworldView {
       ctx.fillStyle = '#fff';
       ctx.fillText(tl ? hex(translevelToLevel(tl), 3) : '---', x * 16 + 1, y * 16 + 16);
     }
+    this.paintSelected(lw);
     const s = this.mode === 'l1' ? 16 : 8;
     if (this.drag?.kind === 'pick') {
       const r = this.pickRect(this.drag);
@@ -228,6 +230,44 @@ export class OverworldView {
       ctx.lineWidth = lw;
       ctx.strokeRect(this.hover.x * s, this.hover.y * s, this.brush.w * s, this.brush.h * s);
     }
+  }
+
+  // the selected tile outlined; a level tile's exits as arrows in the directions they reveal (labelled N, 1–3)
+  paintSelected(lw: number): void {
+    const i = this.selected;
+    if (i < 0 || (i >= 0x400) !== (this.region === 1)) return;
+    const ctx = this.canvas.getContext('2d')!, { x, y } = l1XY(i), cx = x * 16 + 8, cy = y * 16 + 8;
+    ctx.strokeStyle = '#4cc2ff';
+    ctx.lineWidth = 2 * lw;
+    ctx.strokeRect(x * 16, y * 16, 16, 16);
+    const tl = this.tls[i];
+    if (!isLevelTile(this.l1[i]) || !tl) return;
+    const dirs = exitDirections(this.app.rom, tl);
+    const step = [[0, -1], [0, 1], [-1, 0], [1, 0]];
+    ctx.font = 'bold 7px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (let d = 0; d < 4; d++) {
+      const exits = dirs.flatMap((v, k) => (v === d ? [k ? String(k) : 'N'] : []));
+      if (!exits.length) continue;
+      const [dx, dy] = step[d], px = -dy, py = dx; // (px, py) across the arrow
+      const x0 = cx + dx * 9, y0 = cy + dy * 9, x1 = cx + dx * 24, y1 = cy + dy * 24;
+      for (const [c, w] of [['rgba(0,0,0,0.7)', 4], ['#ffd34c', 2]] as [string, number][]) {
+        ctx.strokeStyle = c;
+        ctx.lineWidth = w * lw;
+        ctx.beginPath();
+        ctx.moveTo(x0, y0); ctx.lineTo(x1, y1);
+        ctx.moveTo(x1 - dx * 4 + px * 3, y1 - dy * 4 + py * 3); ctx.lineTo(x1, y1); ctx.lineTo(x1 - dx * 4 - px * 3, y1 - dy * 4 - py * 3);
+        ctx.stroke();
+      }
+      const label = exits.join(''), tx = cx + dx * 17 + px * 6, ty = cy + dy * 17 + py * 6;
+      ctx.fillStyle = 'rgba(0,0,0,0.7)';
+      ctx.fillRect(tx - label.length * 2.2 - 1, ty - 4, label.length * 4.4 + 2, 8);
+      ctx.fillStyle = '#ffd34c';
+      ctx.fillText(label, tx, ty);
+    }
+    ctx.textAlign = 'start';
+    ctx.textBaseline = 'alphabetic';
   }
 
   // ---------------- interaction ----------------
@@ -350,13 +390,12 @@ export class OverworldView {
   }
 
   info(x: number, y: number): void {
-    if (this.mode !== 'l1') { toast('Level info is available on layer 1 (paths/levels)'); return; }
-    const i = l1Index(this.region, x, y);
-    if (!isLevelTile(this.l1[i])) toast('Not a level tile');
-    this.selectTile(isLevelTile(this.l1[i]) ? i : -1, false);
+    if (this.mode !== 'l1') { toast('Tile settings are available on layer 1 (paths/levels)'); return; }
+    if (x < 0 || y < 0 || x >= 32 || y >= 32) return;
+    this.selectTile(l1Index(this.region, x, y), false);
   }
 
-  // selects a level tile (list, Alt/Ctrl+click; l1Index); center: scroll the map to it
+  // selects a layer 1 tile (a level tile in the list, any tile by Alt/Ctrl+click; l1Index); center: scroll the map to it
   selectTile(i: number, center: boolean): void {
     this.selected = i;
     if (center && i >= 0) {
@@ -375,7 +414,7 @@ export class OverworldView {
     this.statusStats.textContent = b.kind === this.mode ? `Brush ${b.w}×${b.h}` : '';
     if (!c) {
       this.statusText.textContent = this.readOnly() ? 'Layer 1 view only – turn off “After all events” to edit'
-        : 'Click/drag picks up tiles · Right click/Shift+click paints · Alt/Ctrl+click: level info';
+        : 'Click/drag picks up tiles · Right click/Shift+click paints · Alt/Ctrl+click: tile settings';
       return;
     }
     let t = `X ${hex(c.x, 2)}  Y ${hex(c.y, 2)}`;
@@ -478,7 +517,7 @@ export class OverworldView {
 
   buildProps(): void {
     this.props.replaceChildren(h('div', { class: 'panel-title' }, 'Properties'),
-      this.selected >= 0 ? this.levelInfo(this.selected) : emptyState('Select a level tile in the list on the left or with Alt/Ctrl+click on the map.'));
+      this.selected >= 0 ? this.tileInfo(this.selected) : emptyState('Select a level tile in the list on the left, or any tile with Alt/Ctrl+click on the map.'));
   }
 
   // the level tile at i: the level it enters (chosen from the levels; the translevel only shown), its name
@@ -515,15 +554,78 @@ export class OverworldView {
       h('div', { class: 'prop' }, h('label', null, 'Name part 2'), sel(1)),
       h('div', { class: 'prop' }, h('label', null, 'Name part 3'), sel(2)),
       // the level's other settings (kept when its tiles are painted over, shown to every new tile entering it)
-      h('div', { class: 'prop' }, h('label', null, 'Base event'), h('span', { title: eventNames(rom).get(ev) ?? '' }, ev === NO_EVENT ? 'none' : hex(ev, 2))),
-      h('div', { class: 'prop' }, h('label', null, 'Exits reveal'), h('span', { title: 'Normal exit, secret exits 1–3' }, exitDirections(rom, tl).map((d) => DIR_ARROWS[d]).join(' '))),
+      ...this.levelSettings(tl),
       h('div', { class: 'prop' }, h('label', null, 'Message box'), h('span', null, msgs.length ? msgs.map((m) => `${hex(m.slot, 2)} (message ${m.msg})`).join(', ') : 'none')),
       h('div', { class: 'row' },
         h('button', { onclick: () => this.onOpenLevel(lvl), title: 'Open in the level editor (also by double click in the list)' }, `Edit level ${hex(lvl, 3)}`),
-        !isNameless(code) || code === 0xffff || ev !== NO_EVENT || msgs.length || exitDirections(rom, tl).some((d) => d)
+        !isNameless(code) || code === 0xffff || ev !== NO_EVENT || msgs.length || exitDirections(rom, tl).some((d) => d) || initialFlags(rom, tl)
           ? h('button', { onclick: () => this.app.romEdit(`Level ${hex(lvl, 3)}: settings reset`, () => resetTranslevel(rom, tl)),
-            title: 'No name, no base event, every exit revealing up, no message box – the level\'s data stays' }, 'Reset settings') : null),
+            title: 'No name, no base event, every exit revealing up, no message box, no initial flags – the level\'s data stays' }, 'Reset settings') : null),
     );
+  }
+
+  // the selected tile: a level tile's settings, and for every tile the events that reveal it
+  tileInfo(i: number): HTMLElement {
+    const { x, y } = l1XY(i), t = this.l1[i];
+    const info = isLevelTile(t) ? this.levelInfo(i) : h('div', { class: 'ow-info' }, h('div', { class: 'hint' }, `Tile ${hex(x, 2)},${hex(y, 2)} · ${hex(t, 2)} (not a level tile)`));
+    info.append(...this.revealSettings(i));
+    return info;
+  }
+
+  // the events by the level exit that runs them, the number as detail
+  private eventLabel(names: Map<number, string>, e: number): string {
+    return `${names.get(e) ?? 'No level runs it'} · ${hex(e, 2)}`;
+  }
+
+  // the base event, the direction each exit reveals, the initial flags of translevel tl (each change one ROM edit)
+  levelSettings(tl: number): HTMLElement[] {
+    const rom = this.app.rom, lvl = hex(translevelToLevel(tl), 3), ev = baseEvent(rom, tl), names = eventNames(rom);
+    const edit = (what: string, f: () => void) => this.app.romEdit(`Level ${lvl}: ${what}`, f);
+    const events = select([[NO_EVENT, 'No event'], ...Array.from({ length: OW_EVENTS }, (_, e) => [e, this.eventLabel(names, e)] as [number, string])], ev,
+      (v) => edit('base event', () => setBaseEvent(rom, tl, v)));
+    events.title = 'The event passing the level runs: its normal exit this one, secret exit n the one n after it';
+    const dirs = exitDirections(rom, tl);
+    const exits = EXIT_NAMES.map((name, k) => {
+      const run = ev === NO_EVENT ? 'no event' : ev + k < OW_EVENTS ? `event ${hex(ev + k, 2)}` : 'no event (past the last)';
+      const s = select(DIR_NAMES.map((n, d) => [d, `${DIR_ARROWS[d]} ${n}`] as [number, string]), dirs[k], (v) => edit(`${name.toLowerCase()} direction`, () => setExitDirection(rom, tl, k, v)));
+      s.title = `${name}: runs ${run} and enables walking in this direction from the tile`;
+      return h('div', { class: 'prop' }, h('label', { title: `Runs ${run}` }, name), s);
+    });
+    const flags = initialFlags(rom, tl);
+    const flag = (label: string, bit: number, title: string) => checkbox(label, title, (flags & bit) !== 0,
+      (on) => edit('initial flags', () => setInitialFlags(rom, tl, on ? flags | bit : flags & ~bit)));
+    return [
+      h('div', { class: 'prop' }, h('label', null, 'Base event'), events),
+      h('div', { class: 'hint' }, 'Direction each exit enables (arrows on the map):'),
+      ...exits,
+      h('div', { class: 'hint' }, 'At the start of a new game:'),
+      h('div', { class: 'grid4' },
+        ...(['up', 'down', 'left', 'right'] as const).map((d) => flag(`${DIR_ARROWS[DIR_NAMES.indexOf(d)]}`, FLAG[d], `Mario may walk ${d} from the tile from the start`))),
+      flag('Passed', FLAG.passed, 'The level counts as passed: Start+Select leaves it, "no entry" applies – runs no event'),
+      flag('Midway point obtained', FLAG.midway, 'The level starts at its midway entrance'),
+      flag('No entry once passed', FLAG.noEntry, 'Once passed, the level can\'t be entered again'),
+      flag('Save prompt when passed', FLAG.savePrompt, 'Passing the level brings up the save prompt (as castles and switch palaces do)'),
+    ];
+  }
+
+  // the events that reveal layer 1 tile i (Lunar Magic's "reveal this tile on events"): one tile per event
+  revealSettings(i: number): HTMLElement[] {
+    const rom = this.app.rom, { x, y } = l1XY(i), t = this.l1[i], into = revealedTile(rom, t), names = eventNames(rom);
+    if (!i) return [h('div', { class: 'hint' }, 'The top left tile of the main map can\'t be revealed (0 stands for none).')];
+    const evs = revealEvents(rom, i);
+    const set = (list: number[]) => this.app.romEdit(`Tile ${hex(x, 2)},${hex(y, 2)}: revealed on events`, () => setRevealEvents(rom, i, list));
+    const where = (k: number) => { const p = l1XY(k); return `${k >= 0x400 ? 'submaps' : 'main map'} ${hex(p.x, 2)},${hex(p.y, 2)}`; };
+    const add = select([[-1, 'Add an event…'], ...Array.from({ length: REVEAL_EVENTS }, (_, e) => e).filter((e) => !evs.includes(e))
+      .map((e) => { const k = revealAt(rom, e); return [e, `${this.eventLabel(names, e)}${k ? ` (reveals ${where(k)})` : ''}`] as [number, string]; })], -1,
+    (e) => { if (e >= 0) set([...evs, e].sort((a, b) => a - b)); });
+    add.title = 'An event reveals one tile: one that reveals another tile moves here';
+    return [
+      h('div', { class: 'prop' }, h('label', null, 'Revealed on'), add),
+      ...evs.map((e) => h('div', { class: 'row' }, h('span', { class: 'hint' }, this.eventLabel(names, e)),
+        h('button', { title: 'This event no longer reveals the tile', onclick: () => set(evs.filter((v) => v !== e)) }, '×'))),
+      ...(!evs.length ? [] : [into < 0 ? h('div', { class: 'hint warn-text' }, `⚠ Tile ${hex(t, 2)} is not in the reveal list: revealing it changes nothing.`)
+        : h('div', { class: 'hint' }, `Revealed, tile ${hex(t, 2)} becomes ${hex(into, 2)}.`)]),
+    ];
   }
 
   // palette sheet with the brush outlined (when it is a rectangle of the sheet) and rectangle picking;
@@ -630,7 +732,6 @@ export class OverworldView {
     this.l2 = readL2(this.app.rom);
     this.tls = readTranslevels(this.app.rom);
     this.invalidate();
-    if (this.selected >= 0 && !isLevelTile(this.l1[this.selected])) this.selected = -1;
     this.buildSide();
     this.buildLeft();
     this.redrawMap();
