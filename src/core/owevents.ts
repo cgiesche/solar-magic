@@ -20,11 +20,11 @@
 // space, the silent event hook, 0x78 events (the loops at $04D859 and $04DCAA, the reveal tables moved and
 // extended, $04DA74 …). The editor's code is its own; its table operands are where Lunar Magic's are.
 
-import { snesToPc, type Rom } from './rom.ts';
+import { snesToPc, Rom } from './rom.ts';
 import { assemble } from './asar.ts';
 import { rleEncode } from './rle.ts';
 import { missingPatch } from './patches.ts';
-import { OW_EVENTS, OverworldEmulator, readL1, readTranslevels, isLevelTile, baseEvent, translevelToLevel, l1XY } from './overworld.ts';
+import { OW_EVENTS, OverworldEmulator, gameL1, readL1, readTranslevels, isLevelTile, baseEvent, translevelToLevel, l1XY } from './overworld.ts';
 import { RAM, getS16 } from './ram.ts';
 
 const DIVIDERS = 0x04e359; // 0x79 words: the first step of each event, the end
@@ -259,6 +259,29 @@ export function paintEvent(d: EventData, base: Uint16Array, e: number, after: Ui
   out.silent[e] = [...d.silent[e].filter((s) => s.layer === 1), ...pieces.filter((p) => !shown.includes(p)).map((p) => ({ layer: 2 as const, tile: p.at, loc: p.pos }))];
   return trimStorage(out);
 }
+
+// Event e's layer 1 changes (Lunar Magic's layer 1 event editor: silent steps, VRAM not refreshed – for other
+// submaps and invisible tiles): the tiles where `after` (layer 1 as it is to look after the event) differs from
+// `without` (as after it without them, layer1Without) – a step kept where its tile stays, new ones at the end in
+// tile order. A step writing the tile already there is kept unless `painted` (the tiles painted) has it: when
+// events pass in another order than their numbers it may not be. Its layer 2 steps stay.
+export function paintEventL1(d: EventData, e: number, after: ArrayLike<number>, without: ArrayLike<number>, painted: ReadonlySet<number> = new Set()): EventData {
+  const keep = (s: Silent) => s.layer === 2 || (s.loc < 0x800 && (s.tile & 0xff) === after[s.loc] && (after[s.loc] !== without[s.loc] || !painted.has(s.loc)));
+  const kept = d.silent[e].filter(keep), have = new Set(kept.filter((s) => s.layer === 1).map((s) => s.loc)), added: Silent[] = [];
+  for (let i = 0; i < 0x800; i++) if (after[i] !== without[i] && !have.has(i)) added.push({ layer: 1, tile: after[i], loc: i });
+  const silent = d.silent.slice();
+  silent[e] = [...kept, ...added];
+  return { ...d, silent };
+}
+// layer 1 as after events 0 … e passed without event e's layer 1 changes (emulated, on a copy of the ROM)
+export function layer1Without(rom: Rom, e: number): Uint8Array {
+  const copy = new Rom(rom.data.slice()), d = readEvents(copy), silent = d.silent.slice();
+  silent[e] = silent[e].filter((s) => s.layer === 2);
+  writeEvents(copy, { ...d, silent });
+  return gameL1(new OverworldEmulator(copy).load(0, e + 1)).slice();
+}
+// the layer 1 tiles (l1Index) event e changes
+export const eventL1Tiles = (d: EventData, e: number): number[] => d.silent[e].filter((s) => s.layer === 1).map((s) => s.loc);
 
 // the storage without the places no piece uses at its end (not below the 6x6 area)
 function trimStorage(d: EventData): EventData {

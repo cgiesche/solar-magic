@@ -469,6 +469,128 @@ export function revealedTile(rom: Rom, t: number): number {
   for (let k = REVEALS - 1; k >= 0; k--) if (rom.r8(REVEAL_FROM + k) === t) return rom.r8(REVEAL_TO + k);
   return -1;
 }
+// The reveal list (Lunar Magic's "Edit Reveal Tile List"): which layer 1 tile a revealed tile becomes, 0x16 pairs
+// in the game's place ($04DA1D → $04DA33; also those for tiles 52–54, which the game doesn't use). The game looks
+// it through from the last pair down.
+export interface RevealPair { from: number; to: number }
+export const readRevealList = (rom: Rom): RevealPair[] =>
+  Array.from({ length: REVEALS }, (_, k) => ({ from: rom.r8(REVEAL_FROM + k), to: rom.r8(REVEAL_TO + k) }));
+export function writeRevealList(rom: Rom, list: RevealPair[]): void {
+  if (list.length !== REVEALS) throw new Error(`The reveal list has ${REVEALS} entries`);
+  rom.writeBytes(REVEAL_FROM, Uint8Array.from(list, (p) => p.from));
+  rom.writeBytes(REVEAL_TO, Uint8Array.from(list, (p) => p.to));
+}
+
+// ---- destroyed level tiles ----
+// Lunar Magic's "Destroy Level Tile Settings": 0x18 entries of an event and the layer 1 tile ($7EC800 offset) it
+// destroys – the game's own code ($04E677, when the event passes and on every overworld load after it) turns the
+// tile into its destroyed one (a castle's top and the tile below it). The game has 0x10 entries ($04E5D6 events,
+// $04E5B6 tiles; its loop reads 0x18, the rest being the next tables); as in Lunar Magic, the patch moves both
+// to free space with 0x18 entries (pointers $04E67C, $04E69C; event FF none), finds the tile below a castle's top
+// on a 16x16 block's bottom row (rows F and 2F: the game adds $10, landing in the block to the right; a JSL at
+// $04E6C5) and turns off the game's unused second tile of a revealed tile 54 ($04DA98) – the places SMW Central's
+// hijack map gives and Lunar Magic's code in the ROMs it saved uses; the editor's code is its own.
+export const DESTROYS = 0x18;
+const DESTROY_EV_OP = 0x04e67c, DESTROY_LOC_OP = 0x04e69c, DESTROY_FIX = 0x04e6c5, REVEAL54 = 0x04da98;
+const GAME_DESTROYS = 0x10, DESTROY_CALL = 0x04e677;
+export interface Destroy { event: number; tile: number }
+
+const destroyAsm = (code: number) => `lorom
+org ${hx(DESTROY_FIX)}
+  JSL Below
+org ${hx(REVEAL54)}
+  db $80                                       ; BRA: a revealed tile 54 is one tile
+org ${hx(code)}
+Below:                                         ; A (16) a tile's offset: the tile below it, across a block's bottom row too
+  PHA : AND.w #$00F0 : CMP.w #$00F0 : PLA
+  BCC +
+  ADC.w #$00FF                                 ; (carry set) the block below
++ CLC : ADC.w #$0010
+  RTL
+`;
+const DESTROY_CODE_SIZE = 0x18;
+
+export const hasDestroyPatch = (rom: Rom): boolean => rom.r8(DESTROY_FIX) === 0x22;
+const destroyTables = (rom: Rom) => { if (!hasDestroyPatch(rom)) missingPatch('Destroyed level tiles (Lunar Magic format)'); return { ev: rom.r24(DESTROY_EV_OP), loc: rom.r24(DESTROY_LOC_OP) }; };
+export function readDestroyList(rom: Rom): Destroy[] {
+  const t = destroyTables(rom);
+  return Array.from({ length: DESTROYS }, (_, k) => ({ event: rom.r8(t.ev + k), tile: rom.r16(t.loc + k * 2) }));
+}
+function writeDestroyList(rom: Rom, list: Destroy[]): void {
+  const t = destroyTables(rom);
+  rom.writeBytes(t.ev, Uint8Array.from(list, (d) => d.event));
+  rom.writeBytes(t.loc, Uint8Array.from(list.flatMap((d) => [d.tile & 0xff, d.tile >> 8])));
+}
+// the event destroying layer 1 tile i, NO_EVENT none (of several the last entry's, as the game looks)
+export function destroyEvent(rom: Rom, i: number): number {
+  const l = readDestroyList(rom);
+  for (let k = l.length - 1; k >= 0; k--) if (l[k].event !== NO_EVENT && l[k].tile === i) return l[k].event;
+  return NO_EVENT;
+}
+// tile i destroyed by event e (NO_EVENT: by none); an event destroys one tile: one it destroyed before isn't
+export function setDestroyEvent(rom: Rom, i: number, e: number): void {
+  const l = readDestroyList(rom).map((d) => (d.event !== NO_EVENT && (d.tile === i || d.event === e) ? { event: NO_EVENT, tile: 0 } : d));
+  if (e !== NO_EVENT) {
+    const k = l.findIndex((d) => d.event === NO_EVENT);
+    if (k < 0) throw new Error(`Every one of the ${DESTROYS} destroyed level tiles is used`);
+    l[k] = { event: e, tile: i };
+  }
+  writeDestroyList(rom, l);
+}
+
+// needs Asar (loadAsar) to be loaded; the game's 0x10 entries, 8 more none
+export function installDestroyPatch(rom: Rom): void {
+  if (hasDestroyPatch(rom)) return;
+  const ev = new Uint8Array(DESTROYS).fill(NO_EVENT), loc = new Uint8Array(DESTROYS * 2);
+  ev.set(rom.bytes(rom.r24(DESTROY_EV_OP), GAME_DESTROYS));
+  loc.set(rom.bytes(rom.r24(DESTROY_LOC_OP), GAME_DESTROYS * 2));
+  rom.w24(DESTROY_EV_OP, rom.allocWrite(ev));
+  rom.w24(DESTROY_LOC_OP, rom.allocWrite(loc));
+  const code = rom.allocWrite(new Uint8Array(DESTROY_CODE_SIZE));
+  const r = assemble(rom.data, new Map([['destroy.asm', destroyAsm(code)]]), 'destroy.asm');
+  if (!r.ok) throw new Error(r.errors.map((e) => e.message).join(' '));
+  for (const [a, n] of [[DESTROY_FIX, 4], [REVEAL54, 1], [code, DESTROY_CODE_SIZE]]) rom.writeAt(snesToPc(a), r.rom.subarray(snesToPc(a), snesToPc(a) + n));
+}
+
+// a tile a destroy changes, relative to the destroyed one (16x16 tiles on its map)
+export interface DestroyChange { dx: number; dy: number; tile: number }
+const effectsMemo = new WeakMap<Rom, { gen: number; effects: DestroyChange[][] }>();
+// what destroying each layer 1 tile 00–FF does (the changes, [] none): learned by running the game's code on a map
+// holding the tile, an entry destroying it
+export function destroyEffects(rom: Rom): DestroyChange[][] {
+  const memo = effectsMemo.get(rom);
+  if (memo?.gen === rom.gen) return memo.effects;
+  const probe = new Rom(rom.data.slice()), at = l1Index(0, 4, 4), RET = 0x8000;
+  writeDestroyList(probe, Array.from({ length: DESTROYS }, (_, k) => (k ? { event: NO_EVENT, tile: 0 } : { event: 0, tile: at })));
+  const s = new Snes(probe.data), cpu = s.cpu, w = s.wram, map = w.subarray(RAM.owLayer1, RAM.owLayer1End);
+  const effects: DestroyChange[][] = [];
+  for (let t = 0; t < 0x100; t++) {
+    map.fill(0);
+    map[at] = t;
+    const before = map.slice();
+    // JSR $04E677 with the event in A, its RTS to RET
+    Object.assign(cpu, { e: false, p: 0x30, d: 0, dbr: 0, pbr: DESTROY_CALL >> 16, pc: DESTROY_CALL & 0xffff, a: 0, s: 0x1fd, waiting: false, stopped: false });
+    w[0x1fe] = (RET - 1) & 0xff; w[0x1ff] = (RET - 1) >> 8;
+    for (let n = 0; n < 5000 && cpu.pc !== RET; n++) cpu.step();
+    const o = l1XY(at);
+    effects.push([...map.keys()].filter((i) => map[i] !== before[i]).map((i) => { const p = l1XY(i); return { dx: p.x - o.x, dy: p.y - o.y, tile: map[i] }; }));
+  }
+  effectsMemo.set(rom, { gen: rom.gen, effects });
+  return effects;
+}
+// the layer 1 tile whose destroy changes tile i (l1: the tiles; i itself first, else a neighbour), -1 none
+export function destroyedAt(effects: DestroyChange[][], l1: ArrayLike<number>, i: number): number {
+  if (effects[l1[i]].length) return i;
+  const { x, y } = l1XY(i), base = i & 0x400;
+  for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+    const jx = x - dx, jy = y - dy;
+    if ((!dx && !dy) || jx < 0 || jy < 0 || jx >= 32 || jy >= 32) continue;
+    const j = base + l1Index(0, jx, jy);
+    if (effects[l1[j]].some((c) => c.dx === dx && c.dy === dy)) return j;
+  }
+  return -1;
+}
+
 // the overworld's events by the level exits that run them ("105 YOSHI'S ISLAND 1 – normal exit"), of the levels on
 // the map; an event no normal exit runs by the secret exits that do (the game numbers a level's events one after
 // the other: after one without a secret exit its next event is the next level's)
@@ -493,7 +615,7 @@ export function eventNames(rom: Rom): Map<number, string> {
 
 // The ROM bytes (PC offsets, [start, end)) of the overworld's data that the editor writes: layer 1, layer 2 with its
 // pointers, the translevel table with its pointer, per translevel the exit directions, initial flags and name, the
-// reveals and the event steps.
+// reveals with the reveal list, the destroyed level tiles and the event steps.
 // Learned results that load the overworld without depending on what is painted there leave them out (owpaths.ts).
 export function overworldDataRanges(rom: Rom): [number, number][] {
   const at = (snes: number, len: number): [number, number] => [snesToPc(snes), snesToPc(snes) + len];
@@ -509,7 +631,8 @@ export function overworldDataRanges(rom: Rom): [number, number][] {
   const tl = translevelTableBlock(rom);
   if (tl) out.push(at(tl.snes, tl.size), at(TL_PTR, 2), at(TL_BANK, 1));
   if (hasLevelFlagsPatch(rom)) out.push(at(LEVEL_FLAGS, MAX_TRANSLEVEL + 1));
-  out.push(at(revealTable(rom), revealEventCount(rom) * 2), ...eventDataRanges(rom));
+  out.push(at(revealTable(rom), revealEventCount(rom) * 2), at(REVEAL_FROM, REVEALS), at(REVEAL_TO, REVEALS), ...eventDataRanges(rom));
+  if (hasDestroyPatch(rom)) out.push(at(rom.r24(DESTROY_EV_OP), DESTROYS), at(rom.r24(DESTROY_LOC_OP), DESTROYS * 2));
   return out;
 }
 
