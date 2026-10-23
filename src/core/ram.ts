@@ -67,7 +67,7 @@ export const RAM = {
   layer3Setting: 0x1be3,
   sublevelCount: 0x141a,
   introShown: 0x141d, // the level's no-Yoshi intro has played (the level itself loads next)
-  levelFlags: 0x1ea2, // per translevel: bits 0-3 the directions Mario may walk from its tiles (right, left, down, up), 4 save prompt and 5 no entry once passed (Lunar Magic's), 6 the midway point was touched, 7 passed
+  levelFlags: 0x1ea2, // per translevel: bits 0-3 the directions Mario may walk from its tiles (right, left, down, up), 4 save prompt and 5 no entry if passed (Lunar Magic's), 6 the midway point was touched, 7 passed
   midwayTouched: 0x13ce, // the midway tape was touched in this level (dying then marks the translevel's $1EA2 bit 6)
   midwayUsed: 0x13cf, // the level was loaded at its midway point
   midwayScreen: 0x13cd, // the level's midway screen: its tape sets the checkpoint unless it is 0

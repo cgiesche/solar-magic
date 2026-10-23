@@ -116,6 +116,12 @@ function pass(rom: Rom, i: number, exit: number): { before: number; after: numbe
   check(enter(e, tile) === TL, 'passed without "no entry": entered');
   setInitialFlags(rom, TL, FLAG.noEntry);
   check(enter(e, tile) === TL, '"no entry" not yet passed: entered');
+  // on a submap (Mario's tile found with the submap's + $400)
+  const sub = tls.findIndex((v, i) => v > 0 && i >= 0x400), stl = tls[sub];
+  setInitialFlags(rom, stl, FLAG.passed);
+  const subIn = enter(e, sub);
+  setInitialFlags(rom, stl, FLAG.passed | FLAG.noEntry);
+  check(subIn === stl && enter(e, sub) === null, `a submap's level tile (${hx(sub)}, translevel ${hx(stl)}): entered, with "no entry" once passed not`);
   // every other level tile still entered as without the patch's check
   const missed = [...tls.keys()].filter((i) => tls[i] && i % 7 === 0).filter((i) => enter(e, i) !== tls[i]);
   check(!missed.length, `other level tiles entered as before (${missed.map(hx).join(' ')})`);

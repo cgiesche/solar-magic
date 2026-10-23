@@ -6,7 +6,7 @@ import {
   OverworldEmulator, type OwRender, readL1, writeL1, readL2, writeL2, l1Index, l1XY, l2Index, isLevelTile, readTranslevels, writeTranslevels,
   placeTile, sharedTranslevels, enterableLevels, translevelToLevel, nameCode, setNameCode, splitNameCode, joinNameCode, nameWord, levelName, NAME_PART_COUNTS, MAP_NAMES,
   translevelUse, resetTranslevel, baseEvent, setBaseEvent, eventNames, exitDirections, setExitDirection, DIR_ARROWS, DIR_NAMES, EXIT_NAMES, NO_EVENT, isNameless,
-  initialFlags, setInitialFlags, FLAG, OW_EVENTS, revealEvents, setRevealEvents, revealAt, revealedTile, REVEAL_EVENTS,
+  initialFlags, setInitialFlags, FLAG, DIR_FLAGS, OW_EVENTS, revealEvents, setRevealEvents, revealAt, revealedTile, REVEAL_EVENTS,
 } from '../core/overworld.ts';
 import { messageSlots } from '../core/messages.ts';
 import { TileCache, blit8 } from '../core/render.ts';
@@ -232,7 +232,7 @@ export class OverworldView {
     }
   }
 
-  // the selected tile outlined; a level tile's exits as arrows in the directions they reveal (labelled N, 1–3)
+  // the selected tile outlined; a level tile's exits as arrows in the directions they enable (labelled N, 1–3)
   paintSelected(lw: number): void {
     const i = this.selected;
     if (i < 0 || (i >= 0x400) !== (this.region === 1)) return;
@@ -560,7 +560,7 @@ export class OverworldView {
         h('button', { onclick: () => this.onOpenLevel(lvl), title: 'Open in the level editor (also by double click in the list)' }, `Edit level ${hex(lvl, 3)}`),
         !isNameless(code) || code === 0xffff || ev !== NO_EVENT || msgs.length || exitDirections(rom, tl).some((d) => d) || initialFlags(rom, tl)
           ? h('button', { onclick: () => this.app.romEdit(`Level ${hex(lvl, 3)}: settings reset`, () => resetTranslevel(rom, tl)),
-            title: 'No name, no base event, every exit revealing up, no message box, no initial flags – the level\'s data stays' }, 'Reset settings') : null),
+            title: 'No name, no base event, every exit enabling up, no message box, no initial flags – the level\'s data stays' }, 'Reset settings') : null),
     );
   }
 
@@ -577,7 +577,7 @@ export class OverworldView {
     return `${names.get(e) ?? 'No level runs it'} · ${hex(e, 2)}`;
   }
 
-  // the base event, the direction each exit reveals, the initial flags of translevel tl (each change one ROM edit)
+  // the base event, the direction each exit enables, the initial flags of translevel tl (each change one ROM edit)
   levelSettings(tl: number): HTMLElement[] {
     const rom = this.app.rom, lvl = hex(translevelToLevel(tl), 3), ev = baseEvent(rom, tl), names = eventNames(rom);
     const edit = (what: string, f: () => void) => this.app.romEdit(`Level ${lvl}: ${what}`, f);
@@ -600,10 +600,10 @@ export class OverworldView {
       ...exits,
       h('div', { class: 'hint' }, 'At the start of a new game:'),
       h('div', { class: 'grid4' },
-        ...(['up', 'down', 'left', 'right'] as const).map((d) => flag(`${DIR_ARROWS[DIR_NAMES.indexOf(d)]}`, FLAG[d], `Mario may walk ${d} from the tile from the start`))),
+        ...DIR_NAMES.map((d, k) => flag(DIR_ARROWS[k], DIR_FLAGS[k], `Mario may walk ${d} from the tile from the start`))),
       flag('Passed', FLAG.passed, 'The level counts as passed: Start+Select leaves it, "no entry" applies – runs no event'),
       flag('Midway point obtained', FLAG.midway, 'The level starts at its midway entrance'),
-      flag('No entry once passed', FLAG.noEntry, 'Once passed, the level can\'t be entered again'),
+      flag('No entry if passed', FLAG.noEntry, 'Once passed, the level can\'t be entered again'),
       flag('Save prompt when passed', FLAG.savePrompt, 'Passing the level brings up the save prompt (as castles and switch palaces do)'),
     ];
   }

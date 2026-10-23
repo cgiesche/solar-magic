@@ -372,7 +372,7 @@ export function translevelUse(rom: Rom, tl: number): TranslevelUse {
   return !isNameless(nameCode(rom, tl)) || baseEvent(rom, tl) !== NO_EVENT || messageSlots(rom, tl).length || initialFlags(rom, tl) ? 1 : 0;
 }
 
-// the settings of translevel tl as the game's unused ones: no name, no base event, every exit revealing up, no
+// the settings of translevel tl as the game's unused ones: no name, no base event, every exit enabling up, no
 // message, no initial flags
 export function resetTranslevel(rom: Rom, tl: number): void {
   setNameCode(rom, tl, NO_NAME);

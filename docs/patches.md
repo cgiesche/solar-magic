@@ -620,7 +620,8 @@ Settings", LM help `ov_overworld_modify_level.htm`), all per translevel except t
   decides on the save prompt after a level (`$048F8A`, code at `$03BA10`) a level with *save prompt* counts as
   the last tile of the game's list of save tiles (`$048F7F`), whose loop then goes on from the compare
   (`$049001`). Places and bits as SMW Central's hijack map gives them and Lunar Magic's code in a ROM it saved
-  uses; the editor's code is its own.
+  uses; the editor's code is its own. As there, the prompt comes when passing the level runs its event (the
+  game's save tiles prompt on every pass). Always installed: a level without the two flags plays as in the game.
 - **revealed on events** (any layer 1 tile): the game's table of the tile each event reveals (`$04D85D`, an
   `$7EC800` offset per event, 0 none, events 00–6F – the next table follows at `$04D93D`); revealed, the tile
   becomes its counterpart in the game's reveal list (`$04DA1D` → `$04DA33`).
