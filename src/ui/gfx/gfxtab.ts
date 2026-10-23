@@ -38,7 +38,6 @@ import { openHeaderDialog } from '../headerdialog.ts';
 import { animsAt, animLinks } from './animtab.ts';
 import { gfxUsage, unusedExGfx, savedHeader, slotMove, type GfxUser } from '../../core/levelusage.ts';
 import { levelSlots, layerSlots, slotOfTile, assignSlot, type GfxSlot as Slot } from '../../core/gfxslots.ts';
-import { usedInList } from '../usedin.ts';
 import { slotRemapLine } from '../../core/remap.ts';
 
 
@@ -598,8 +597,6 @@ export class GfxTab implements WsPanel {
       used.length ? h('div', { class: 'hint' }, `In the level as ${used.join(', ')}`) : h('div', { class: 'hint' }, 'Not used by the current level'),
       f.num >= VANILLA_GFX && f.num < ANIM_FILE && !f.empty ? this.nameField(f.num) : '',
       f.num < ANIM_FILE && !f.empty ? this.assignMenu(f.num, used.length > 0) : '',
-      f.num < ANIM_FILE && !f.empty ? usedInList(this.app, 'Used in levels', (this.usage().get(f.num) ?? []).map((u) => ({ level: u.level, text: u.slots.join(', ') })), 0,
-        f.num >= VANILLA_GFX ? 'In no level\'s graphics slots: inserted, but unused.' : 'In no level\'s graphics slots.') : '',
       f.raw || f.empty ? '' : h('div', { class: 'prop' }, h('label', { title: 'How the file is read; drawing saves it in this format' }, 'Read as'),
         h('span', { class: 'btn-group' }, [2, 3, 4].map((b) => h('button', { class: f.bpp === b ? 'active' : '', title: b === f.auto ? 'Detected format' : 'Only choose if the graphics look wrong', onclick: () => { this.bppOverride = b === f.auto ? null : b; this.reload(); } }, `${b}bpp`)))),
       !f.raw && !f.empty && f.bpp !== f.auto ? h('div', { class: 'warn-box' }, `Detected: ${f.auto}bpp. Drawing here saves the file as ${f.bpp}bpp – the game then reads it that way.`) : '',
