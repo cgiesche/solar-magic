@@ -49,6 +49,7 @@ import { emptyTriggerView, usedTriggers, initTriggers, type TriggerView, type Sl
 import { LevelUses, levelTilesAll, levelOverride, usedLevels, spriteUsage, isTilesetTile, type LevelTiles, type SpriteUser } from '../core/levelusage.ts';
 import { TILESETS, tilesetPointers, sharingTilesets } from '../core/tilesets.ts';
 import { slipperyActions } from '../core/slippery.ts';
+import { pathKindsJob, type PathKind } from '../core/owpaths.ts';
 
 export type EditMode = 'l1' | 'l2' | 'spr' | 'exit' | 'bg' | 'l3';
 // the modes painted with a brush of tiles picked from the level or the palette: BG tiles, layer 3's 8x8 tiles
@@ -1039,6 +1040,11 @@ export class App {
   // the entrance actions that make a level slippery (slippery.ts), learned once and kept in the result cache
   slipperyActions(): number[] {
     return this.learner.now('slip1', slipperyActions);
+  }
+  // what Mario does on each overworld layer 1 tile 00–FF (owpaths.ts): learned in the background once and kept in
+  // the result cache while the game's code is unchanged; null while that runs, then `done` is called
+  pathKinds(done: () => void): PathKind[] | null {
+    return this.learner.learn('owpk1', pathKindsJob, { label: 'Path tiles', done }) ?? null;
   }
   // the levels with sprite id (spriteId), the open level as edited
   spriteUsers(id: number): SpriteUser[] {

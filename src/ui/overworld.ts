@@ -9,6 +9,7 @@ import {
   initialFlags, setInitialFlags, FLAG, DIR_FLAGS, OW_EVENTS, revealEvents, setRevealEvents, revealAt, revealedTile, REVEAL_EVENTS,
 } from '../core/overworld.ts';
 import { messageSlots } from '../core/messages.ts';
+import { isPathKind, PATH_KIND_NAMES, type PathKind } from '../core/owpaths.ts';
 import { TileCache, blit8 } from '../core/render.ts';
 import { hex } from '../core/names.ts';
 import { menuButton } from './menu.ts';
@@ -91,6 +92,7 @@ export class OverworldView {
   showL2 = true;
   showEvents = false;
   showGrid = false;
+  showPaths = false;
   zoom = 2;
   private zoomCtl = zoomControl(() => this.zoom, (z) => this.setZoom(z));
   brush: Brush = { kind: 'l1', w: 1, h: 1, entries: [0x56] };
@@ -215,6 +217,7 @@ export class OverworldView {
       ctx.fillStyle = '#fff';
       ctx.fillText(tl ? hex(translevelToLevel(tl), 3) : '---', x * 16 + 1, y * 16 + 16);
     }
+    if (this.showPaths) this.paintPaths(lw);
     this.paintSelected(lw);
     const s = this.mode === 'l1' ? 16 : 8;
     if (this.drag?.kind === 'pick') {
@@ -229,6 +232,57 @@ export class OverworldView {
       ctx.strokeStyle = 'rgba(255,255,0,0.9)';
       ctx.lineWidth = lw;
       ctx.strokeRect(this.hover.x * s, this.hover.y * s, this.brush.w * s, this.brush.h * s);
+    }
+  }
+
+  // the layer 1 tiles shown, as the game sees them (null while their kinds are learned)
+  private kinds: { gen: number; kinds: PathKind[] } | null = null;
+  private kindsLearned = () => this.paint();
+  pathKinds(): PathKind[] | null {
+    const gen = this.app.rom.gen;
+    if (this.kinds?.gen !== gen) {
+      const kinds = this.app.pathKinds(this.kindsLearned);
+      if (!kinds) return null;
+      this.kinds = { gen, kinds };
+    }
+    return this.kinds.kinds;
+  }
+  shownL1(): Uint8Array {
+    return this.showEvents ? this.render().wram.subarray(RAM.owLayer1, RAM.owLayer1End) : this.l1;
+  }
+
+  // the path tiles of the map shown, a mark per kind (as Lunar Magic's "Layer 1 Mario Paths"): walk green, climb
+  // green with rungs, swim blue, exit red, stop a cross
+  paintPaths(lw: number): void {
+    const kinds = this.pathKinds();
+    if (!kinds) return;
+    const ctx = this.canvas.getContext('2d')!, l1 = this.shownL1();
+    const fill = { walk: 'rgba(90,230,100,0.7)', climb: 'rgba(90,230,100,0.7)', swim: 'rgba(60,140,255,0.75)', exit: 'rgba(235,60,60,0.8)' } as Record<PathKind, string>;
+    for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
+      const k = kinds[l1[l1Index(this.region, x, y)]];
+      if (!isPathKind(k)) continue;
+      const px = x * 16, py = y * 16;
+      if (k === 'stop') {
+        for (const [c, w] of [['rgba(0,0,0,0.8)', 4], ['#fff', 2]] as [string, number][]) {
+          ctx.strokeStyle = c;
+          ctx.lineWidth = w * lw;
+          ctx.beginPath();
+          ctx.moveTo(px + 4, py + 4); ctx.lineTo(px + 12, py + 12); ctx.moveTo(px + 12, py + 4); ctx.lineTo(px + 4, py + 12);
+          ctx.stroke();
+        }
+        continue;
+      }
+      ctx.fillStyle = fill[k];
+      ctx.fillRect(px + 2, py + 2, 12, 12);
+      ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+      ctx.lineWidth = 1.5 * lw;
+      ctx.strokeRect(px + 2, py + 2, 12, 12);
+      if (k === 'climb') {
+        ctx.lineWidth = 2 * lw;
+        ctx.beginPath();
+        for (const ry of [5, 8, 11]) { ctx.moveTo(px + 2, py + ry); ctx.lineTo(px + 14, py + ry); }
+        ctx.stroke();
+      }
     }
   }
 
@@ -411,6 +465,7 @@ export class OverworldView {
   updateStatus(): void {
     const c = this.hover;
     const b = this.brush;
+    this.scroller.title = ''; // the kind of the path tile under the mouse
     this.statusStats.textContent = b.kind === this.mode ? `Brush ${b.w}×${b.h}` : '';
     if (!c) {
       this.statusText.textContent = this.readOnly() ? 'Layer 1 view only – turn off “After all events” to edit'
@@ -424,6 +479,8 @@ export class OverworldView {
         t += `  ·  Tile ${hex(this.l1[i], 2)}`;
         const tl = this.tls[i];
         if (isLevelTile(this.l1[i])) t += tl ? `  ·  Level ${hex(translevelToLevel(tl), 3)} “${levelName(this.app.rom, tl)}”` : '  ·  Enters no level';
+        const k = this.showPaths ? this.pathKinds()?.[this.shownL1()[i]] : undefined;
+        if (k && isPathKind(k)) { t += `  ·  ${PATH_KIND_NAMES[k]}`; this.scroller.title = PATH_KIND_NAMES[k]; }
       }
     } else if (c.x >= 0 && c.y >= 0 && c.x < 64 && c.y < 64) t += `  ·  Entry ${hex(this.l2[l2Index(this.region, c.x, c.y)], 4)}`;
     this.statusText.textContent = t;
@@ -467,6 +524,8 @@ export class OverworldView {
         view('Layer 2', () => this.showL2, (v) => (this.showL2 = v)),
         { heading: 'Guides' },
         view('Grid', () => this.showGrid, (v) => (this.showGrid = v), undefined, 'G'),
+        view('Path tiles', () => this.showPaths, (v) => (this.showPaths = v),
+          'Layer 1 tiles Mario walks, climbs (rungs) or swims along (blue), exits to another submap on (red) or stops on without entering a level (cross) – invisible in the game; what each does is learned from the game\'s code'),
         { heading: 'Game state' },
         view('After all events', () => this.showEvents, (v) => (this.showEvents = v), 'State after all events (view only, layer 1 then not editable)'),
       ] }),
