@@ -5,7 +5,9 @@ import { h, toast, select, attachPanZoom, zoomControl, ZOOM_MIN, ZOOM_MAX, attac
 import {
   OverworldEmulator, type OwRender, readL1, writeL1, readL2, writeL2, l1Index, l1XY, l2Index, isLevelTile, readTranslevels, writeTranslevels,
   placeTile, sharedTranslevels, enterableLevels, translevelToLevel, nameCode, setNameCode, splitNameCode, joinNameCode, nameWord, levelName, NAME_PART_COUNTS, MAP_NAMES,
+  translevelUse, resetTranslevel, baseEvent, eventNames, exitDirections, DIR_ARROWS, NO_EVENT, isNameless,
 } from '../core/overworld.ts';
+import { messageSlots } from '../core/messages.ts';
 import { TileCache, blit8 } from '../core/render.ts';
 import { hex } from '../core/names.ts';
 import { menuButton } from './menu.ts';
@@ -49,6 +51,13 @@ function drawL1Tile(rom: Rom, img: Uint32Array, tc: TileCache, r: OwRender, t: n
   blit8(img, W, H, tc.get(w[1]), px, py + 8);
   blit8(img, W, H, tc.get(w[2]), px + 8, py);
   blit8(img, W, H, tc.get(w[3]), px + 8, py + 8);
+}
+
+// the level picker's note for a level no tile enters: what a tile choosing it gets (translevelUse)
+function freeNote(rom: Rom, tl: number): string {
+  if (translevelUse(rom, tl) === 2) return 'free · has a level';
+  const has = [!isNameless(nameCode(rom, tl)) && 'name', baseEvent(rom, tl) !== NO_EVENT && 'event', messageSlots(rom, tl).length > 0 && 'message'].filter(Boolean);
+  return has.length ? `free · has ${has.join(', ')}` : 'free';
 }
 
 export class OverworldView {
@@ -318,7 +327,7 @@ export class OverworldView {
       if (this.mode === 'l1') {
         const i = l1Index(this.region, xx, yy), carried = b.tls?.[dy * b.w + dx] ?? 0;
         if (this.l1[i] === v && (!carried || this.tls[i] === carried)) continue;
-        placeTile(this.l1, this.tls, i, v, carried);
+        placeTile(this.l1, this.tls, i, v, carried, (tl) => translevelUse(this.app.rom, tl));
         changed = true;
       } else {
         const i = l2Index(this.region, xx, yy);
@@ -485,25 +494,35 @@ export class OverworldView {
       const next = this.tls.slice();
       next[i] = t;
       this.app.romEdit(`Level tile ${hex(x, 2)},${hex(y, 2)}: level ${hex(lvl, 3)}`, () => writeTranslevels(rom, next));
-    }, { levels, note: (lvl) => { const k = onMap(mainTranslevel(lvl)!); return k >= 0 ? `on ${where(k)}` : ''; } });
+    }, { levels, note: (lvl) => { const t = mainTranslevel(lvl)!, k = onMap(t); return k >= 0 ? `on ${where(k)}` : t === tl ? '' : freeNote(rom, t); } });
     const head = [
       h('div', { class: 'prop' }, h('label', null, 'Enters level'), choose),
       h('div', { class: 'hint' }, `Tile ${hex(x, 2)},${hex(y, 2)}${tl ? ` · translevel ${hex(tl, 2)}` : ''}`),
       ...others.map((k) => h('div', { class: 'hint warn-text' }, `⚠ The level tile at ${where(k)} enters this level too.`)),
     ];
     if (!tl) return h('div', { class: 'ow-info' }, ...head, h('div', { class: 'hint warn-text' }, '⚠ This level tile enters no level.'));
-    const parts = splitNameCode(nameCode(rom, tl));
+    const code = nameCode(rom, tl), parts = splitNameCode(code);
     const lvl = translevelToLevel(tl);
+    const ev = baseEvent(rom, tl), msgs = messageSlots(rom, tl);
     const sel = (k: number) => select(Array.from({ length: NAME_PART_COUNTS[k] }, (_, i) => [i, `${hex(i, 2)}: ${nameWord(rom, k, i).trim() || '(empty)'}`] as [number, string]), parts[k], (v) => {
       parts[k] = v;
       this.app.romEdit(`Level name ${hex(lvl, 3)}`, () => setNameCode(rom, tl, joinNameCode(parts)));
     });
     return h('div', { class: 'ow-info' }, ...head,
       h('div', null, `“${levelName(this.app.rom, tl)}”`),
+      code === 0xffff ? h('div', { class: 'hint warn-text' }, '⚠ The game shows garbage as this name – choose one or reset the settings.') : null,
       h('div', { class: 'prop' }, h('label', null, 'Name part 1'), sel(0)),
       h('div', { class: 'prop' }, h('label', null, 'Name part 2'), sel(1)),
       h('div', { class: 'prop' }, h('label', null, 'Name part 3'), sel(2)),
-      h('div', { class: 'row' }, h('button', { onclick: () => this.onOpenLevel(lvl), title: 'Open in the level editor (also by double click in the list)' }, `Edit level ${hex(lvl, 3)}`)),
+      // the level's other settings (kept when its tiles are painted over, shown to every new tile entering it)
+      h('div', { class: 'prop' }, h('label', null, 'Base event'), h('span', { title: eventNames(rom).get(ev) ?? '' }, ev === NO_EVENT ? 'none' : hex(ev, 2))),
+      h('div', { class: 'prop' }, h('label', null, 'Exits reveal'), h('span', { title: 'Normal exit, secret exits 1–3' }, exitDirections(rom, tl).map((d) => DIR_ARROWS[d]).join(' '))),
+      h('div', { class: 'prop' }, h('label', null, 'Message box'), h('span', null, msgs.length ? msgs.map((m) => `${hex(m.slot, 2)} (message ${m.msg})`).join(', ') : 'none')),
+      h('div', { class: 'row' },
+        h('button', { onclick: () => this.onOpenLevel(lvl), title: 'Open in the level editor (also by double click in the list)' }, `Edit level ${hex(lvl, 3)}`),
+        !isNameless(code) || code === 0xffff || ev !== NO_EVENT || msgs.length || exitDirections(rom, tl).some((d) => d)
+          ? h('button', { onclick: () => this.app.romEdit(`Level ${hex(lvl, 3)}: settings reset`, () => resetTranslevel(rom, tl)),
+            title: 'No name, no base event, every exit revealing up, no message box – the level\'s data stays' }, 'Reset settings') : null),
     );
   }
 

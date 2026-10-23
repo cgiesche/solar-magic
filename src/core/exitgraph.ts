@@ -102,7 +102,7 @@ export class ExitGraph {
 
   name(level: number): string {
     const t = mainTranslevel(level);
-    if (t) return levelName(this.rom, t) || 'Level';
+    if (t) return levelName(this.rom, t);
     const p = this.parentOf(level);
     return p === null ? '(unreachable)' : `(from ${hex(p, 3)} ${levelName(this.rom, mainTranslevel(p)!)})`;
   }

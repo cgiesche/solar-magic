@@ -86,6 +86,20 @@ function encodeMessage(m: Message): number[] {
   return out;
 }
 
+// the message slots (1..$16) that show a message in translevel tl, with which of its two messages
+export function messageSlots(rom: Rom, tl: number): { slot: number; msg: number }[] {
+  const out: { slot: number; msg: number }[] = [];
+  for (let x = 1; x <= 0x16; x++) {
+    const v = rom.r8(MSG_INDEX + x);
+    if ((v & 0x7f) === tl) out.push({ slot: x, msg: (v >> 7) + 1 });
+  }
+  return out;
+}
+// a slot showing its message in no level (translevel 0, as the clean game's slot 4)
+export function unassignMessageSlot(rom: Rom, slot: number): void {
+  rom.w8(MSG_INDEX + slot, 0);
+}
+
 // which translevel/message uses each entry (for labels)
 export function messageUsers(rom: Rom): { translevel: number; msg: number }[][] {
   const users: { translevel: number; msg: number }[][] = Array.from({ length: MSG_COUNT }, () => []);

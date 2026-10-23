@@ -82,7 +82,7 @@ One of the overworld's 7 maps: the main map (0) on the first 512x512 map, and Yo
 _Avoid_: world (that is the player's notion), map (alone, where the 512x512 map could be meant)
 
 **Level tile**:
-A layer 1 tile of the overworld that enters a level (tiles 56–80, and with Lunar Magic 82–86); its settings (translevel, base event, the directions each exit reveals, the initial flags) belong to the tile and move with it.
+A layer 1 tile of the overworld that enters a level (tiles 56–80, and with Lunar Magic 82–86). Its translevel belongs to the tile and moves with it; the level's settings (name, base event, the directions its exits reveal – in the ROM the "initial flags" byte – and message boxes) belong to the translevel: tiles entering the same level share them, a tile painted over leaves them with the level, a new tile entering it shows them. Free translevels that bring nothing along are given out first; the settings are reset only when asked.
 _Avoid_: level dot, node
 
 **Translevel**:

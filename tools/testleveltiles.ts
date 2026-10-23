@@ -1,13 +1,18 @@
 // Translevels stored per tile in Lunar Magic's table (overworld.ts, ADR 0005): the patched clean game enters every
 // level from the same tile as before (by emulation, over all level tiles); placing a level tile anywhere changes no
 // other tile's level, a new one gets a free translevel, one painted over frees its own, one moved keeps its own.
+// A translevel's settings stay with its level: a new tile gets a free one that brings nothing along first, and the
+// settings are reset only when asked.
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { RomEditSession } from '../src/core/romedit.ts';
 import {
   OverworldEmulator, readL1, writeL1, isLevelTile, readTranslevels, writeTranslevels, hasTranslevelTable,
-  placeTile, freeTranslevel, sharedTranslevels,
+  placeTile, freeTranslevel, sharedTranslevels, translevelUse, resetTranslevel, levelName, nameCode, setNameCode, baseEvent,
+  exitDirections, translevelToLevel, BASE_EVENTS, NO_EVENT,
 } from '../src/core/overworld.ts';
+import { messageSlots } from '../src/core/messages.ts';
+import { L1_PTRS } from '../src/core/level.ts';
 import { GM, RAM } from '../src/core/ram.ts';
 import { cleanImage, editorImage } from './fixture.ts';
 
@@ -116,6 +121,37 @@ function enter(emu: LevelEmulator, i: number): number | null {
   const gen = rom.gen;
   writeTranslevels(rom, readTranslevels(rom));
   check(rom.gen === gen, 'an unchanged table: nothing written');
+}
+
+// ---- a translevel's settings ----
+{
+  const rom = new Rom(image.slice()), s = new RomEditSession(rom);
+  const use = (tl: number) => translevelUse(rom, tl);
+  const free = [0x5d, 0x5e, 0x5f];
+  check(free.every((tl) => !cleanTl.includes(tl) && use(tl) === 0), 'the clean game\'s free translevels (139–13B) bring nothing along');
+  check(levelName(rom, 0x5d) === '(no name)' && nameCode(rom, 0x5d) === 0xffff, 'name $FFFF: "(no name)"');
+  check(tiles.every((i) => use(cleanTl[i]) > 0), 'every entered level has settings or data of its own');
+  // painted over: its level keeps its settings, a new tile prefers one that brings nothing
+  const l1 = readL1(rom), t = readTranslevels(rom), del = tiles[0], tl = t[del];
+  const name = nameCode(rom, tl), ev = baseEvent(rom, tl);
+  placeTile(l1, t, del, 0x00, 0, use);
+  s.edit('Paint layer 1', () => { writeL1(rom, l1); writeTranslevels(rom, t); });
+  check(nameCode(rom, tl) === name && baseEvent(rom, tl) === ev && use(tl) === 2, `painted over: level ${hx(translevelToLevel(tl))} keeps its name and base event`);
+  check(freeTranslevel(t) === tl && freeTranslevel(t, use) === 0x5d, `a new tile gets 5D, not the lower ${hx(tl)} with a level`);
+  // the order: nothing, then settings only, then a level of its own
+  setNameCode(rom, 0x5d, 0x0123); rom.w8(BASE_EVENTS + 0x5e, 0x10);
+  check(use(0x5d) === 1 && use(0x5e) === 1 && freeTranslevel(t, use) === 0x5f, 'a name or base event: 5F first');
+  setNameCode(rom, 0x5f, 0x0123);
+  check(freeTranslevel(t, use) === 0x5d, 'all with settings: the lowest of them before a level of its own');
+  // reset: as the clean game's unused ones, the level's data stays
+  const msg = [...Array(0x60).keys()].find((n) => n && cleanTl.includes(n) && messageSlots(rom, n).length)!;
+  const l1Ptr = rom.r24(L1_PTRS + translevelToLevel(msg) * 3), was = rom.data.slice();
+  s.edit('Reset', () => resetTranslevel(rom, msg));
+  check(nameCode(rom, msg) === 0 && baseEvent(rom, msg) === NO_EVENT && exitDirections(rom, msg).every((d) => d === 0) && !messageSlots(rom, msg).length,
+    `reset ${hx(msg)}: no name, no base event, exits revealing up, no message box`);
+  check(rom.r24(L1_PTRS + translevelToLevel(msg) * 3) === l1Ptr && use(msg) === 2, 'reset: the level\'s data stays');
+  s.undo();
+  check(same(rom.data, was), 'reset undone');
 }
 
 // ---- the table moves to free space when it outgrows its block ----

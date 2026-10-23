@@ -8,6 +8,8 @@ import { GM, RAM } from './ram.ts';
 import { assemble } from './asar.ts';
 import { missingPatch } from './patches.ts';
 import { lz2Compress, lz2Decompress } from './lz2.ts';
+import { hasOwnContent } from './level.ts';
+import { messageSlots, unassignMessageSlot } from './messages.ts';
 
 export const OW_L1 = 0x0cf7df; // 0x800 bytes: 2 maps × 32×32 16x16 tiles (quadrant layout)
 const L2_TILE_PTR = 0x04dc72; // LDA #$A533 operand
@@ -194,21 +196,26 @@ export function installTranslevelPatch(rom: Rom): void {
   writeTranslevels(rom, t);
 }
 
-// the lowest translevel no tile enters (0: all are entered)
-export function freeTranslevel(t: Uint8Array): number {
+// the translevel no tile enters that `rank` (lower first, translevelUse) prefers, the lowest of equals (0: all are entered)
+export function freeTranslevel(t: Uint8Array, rank: (tl: number) => number = () => 0): number {
   const used = new Set(t);
-  for (let n = 1; n <= MAX_TRANSLEVEL; n++) if (!used.has(n)) return n;
-  return 0;
+  let best = 0, bestRank = Infinity;
+  for (let n = 1; n <= MAX_TRANSLEVEL; n++) {
+    if (used.has(n)) continue;
+    const r = rank(n);
+    if (r < bestRank) { best = n; bestRank = r; }
+  }
+  return best;
 }
 
 // paints tile v at i (l1 and t changed): a level tile takes `carried` (the translevel it was picked up from the
-// map with), else keeps the one there (a level tile painted over), else gets a free one; any other tile none,
-// so the translevel of a level tile painted over is free again
-export function placeTile(l1: Uint8Array, t: Uint8Array, i: number, v: number, carried = 0): void {
+// map with), else keeps the one there (a level tile painted over), else gets a free one (as freeTranslevel); any
+// other tile none, so the translevel of a level tile painted over is free again (its level keeps its settings)
+export function placeTile(l1: Uint8Array, t: Uint8Array, i: number, v: number, carried = 0, rank?: (tl: number) => number): void {
   l1[i] = v;
   if (!isLevelTile(v)) t[i] = 0;
   else if (carried) t[i] = carried;
-  else if (!t[i]) t[i] = freeTranslevel(t);
+  else if (!t[i]) t[i] = freeTranslevel(t, rank);
 }
 
 // the translevels more than one level tile enters, with their tiles
@@ -221,6 +228,37 @@ export function sharedTranslevels(l1: Uint8Array, t: Uint8Array): Map<number, nu
 
 // the levels a level tile can enter (001–024, 101–13B: translevels 1–5F)
 export const enterableLevels = (): number[] => Array.from({ length: MAX_TRANSLEVEL }, (_, k) => translevelToLevel(k + 1));
+
+// ---- a translevel's settings ----
+// The name, base event, exit reveal directions and message slots belong to the level (its translevel), not to a
+// tile: a level tile painted over leaves them, a new one entering the level shows them. The editor resets them only
+// when asked (resetTranslevel), never the level's data.
+
+// per translevel ($04D678): the direction each exit (normal, secret 1–3; bits 7-6 … 1-0) reveals the path in when
+// first passed, copied per tile to $7ED800 by the patch; every value is a direction (0 up, 1 down, 2 left, 3 right)
+export const EXIT_DIRS = 0x04d678;
+export const DIR_ARROWS = ['↑', '↓', '←', '→'];
+export const exitDirections = (rom: Rom, tl: number): number[] => [6, 4, 2, 0].map((b) => (rom.r8(EXIT_DIRS + tl) >> b) & 3);
+
+export const NO_EVENT = 0xff; // a base event no exit runs (the clean game's Top Secret Area, Star Roads)
+export const NO_NAME = 0x0000; // blank in the game; $FFFF (the unused translevels') shows RAM as letters
+export const isNameless = (code: number): boolean => code === 0x0000 || code === 0xffff;
+
+// how much a translevel no tile enters would bring along to a new one: 0 nothing (no name, base event or message
+// slot, the level's data the game's blank one), 1 settings resetTranslevel resets, 2 a level of its own
+export type TranslevelUse = 0 | 1 | 2;
+export function translevelUse(rom: Rom, tl: number): TranslevelUse {
+  if (hasOwnContent(rom, translevelToLevel(tl))) return 2;
+  return !isNameless(nameCode(rom, tl)) || baseEvent(rom, tl) !== NO_EVENT || messageSlots(rom, tl).length ? 1 : 0;
+}
+
+// the settings of translevel tl as the game's unused ones: no name, no base event, every exit revealing up, no message
+export function resetTranslevel(rom: Rom, tl: number): void {
+  setNameCode(rom, tl, NO_NAME);
+  rom.w8(BASE_EVENTS + tl, NO_EVENT);
+  rom.w8(EXIT_DIRS + tl, 0);
+  for (const s of messageSlots(rom, tl)) unassignMessageSlot(rom, s.slot);
+}
 
 // ---- level names ----
 const CHARMAP: Record<number, string> = { 0x1f: ' ', 0x5d: "'", 0x5a: '#', 0x1c: '-', 0x1b: '!', 0x1d: '.' };
@@ -251,8 +289,11 @@ export function splitNameCode(code: number): [number, number, number] {
 export function joinNameCode(p: [number, number, number]): number {
   return ((p[0] & 0x7f) << 8) | ((p[1] & 15) << 4) | (p[2] & 15);
 }
+// "(no name)" for $0000 and $FFFF
 export function levelName(rom: Rom, translevel: number): string {
-  const [a, b, c] = splitNameCode(nameCode(rom, translevel));
+  const code = nameCode(rom, translevel);
+  if (isNameless(code)) return '(no name)';
+  const [a, b, c] = splitNameCode(code);
   return (nameWord(rom, 0, a) + nameWord(rom, 1, b) + nameWord(rom, 2, c)).replace(/\s+/g, ' ').trim();
 }
 

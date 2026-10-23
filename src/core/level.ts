@@ -12,6 +12,11 @@ export const TIME_TABLE = 0x0584d7;
 export const L1_PTRS = 0x05e000;
 export const L2_PTRS = 0x05e600;
 export const SPR_PTRS = 0x05ec00;
+// the game's blank level, shared by its unused levels (as 025, 139–13B): a level with all three pointers
+// there has no data of its own
+const BLANK_L1 = 0x068000, BLANK_L2 = 0xffd900, BLANK_SPR = 0xe76d;
+export const hasOwnContent = (rom: Rom, n: number): boolean =>
+  rom.r24(L1_PTRS + n * 3) !== BLANK_L1 || rom.r24(L2_PTRS + n * 3) !== BLANK_L2 || rom.r16(SPR_PTRS + n * 2) !== BLANK_SPR;
 // the secondary header: the game's four tables, Lunar Magic's layer 2 scroll byte ($06FA00, l2scroll.ts),
 // the level size byte (LEVEL_SIZE_TABLE), Lunar Magic 3.00's three entrance bytes ($05DE00, $06FC00,
 // $06FE00: the entrance at a tile, the camera relative to Mario, the BG's height; levelheight.ts) and its
