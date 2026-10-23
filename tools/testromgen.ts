@@ -1,5 +1,6 @@
-// ROM generation: the Rom counts every change of its image (rom.gen); emulators catch up by themselves
-// with the next entry – no syncing by the caller – and boot again only when what the boot read changed.
+// ROM generation: the Rom counts every change of its image (rom.gen) and knows the ranges each changed; a write
+// of the bytes already there is no change. Emulators catch up by themselves with the next entry – no syncing by
+// the caller – and boot again only when what the boot read changed; the fingerprint rehashes changed pages only.
 import { readFileSync } from 'node:fs';
 import { Rom, snesToPc } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
@@ -25,7 +26,7 @@ const TITLE_BYTE = 0x7fc0; // the internal name: not read while booting
   counts('w16', () => rom.w16(0x00ffc0, 0x4142));
   counts('w24', () => rom.w24(0x00ffc0, 0x414243));
   counts('writeBytes', () => rom.writeBytes(0x00ffc0, Uint8Array.of(1, 2)));
-  counts('writeAt', () => rom.writeAt(TITLE_BYTE, Uint8Array.of(1)));
+  counts('writeAt', () => rom.writeAt(TITLE_BYTE, Uint8Array.of(3)));
   counts('fillAt', () => rom.fillAt(TITLE_BYTE, 2));
   const snap = rom.snapshot();
   counts('restore', () => rom.restore(snap));
@@ -37,6 +38,45 @@ const TITLE_BYTE = 0x7fc0; // the internal name: not read while booting
   const g = rom.gen;
   rom.r8(0x008000); rom.r16(0x008000); rom.bytes(0x008000, 4);
   check(rom.gen === g, 'reads don\'t count');
+}
+
+// writing the bytes already there is no change
+{
+  const rom = fresh();
+  const same = (what: string, f: () => void) => { const g = rom.gen; f(); check(rom.gen === g, `${what} of the same bytes: no new generation`); };
+  same('w8', () => rom.w8(0x00ffc0, rom.r8(0x00ffc0)));
+  same('w16', () => rom.w16(0x00ffc0, rom.r16(0x00ffc0)));
+  same('w24', () => rom.w24(0x00ffc0, rom.r24(0x00ffc0)));
+  same('writeAt', () => rom.writeAt(0x10000, rom.data.slice(0x10000, 0x18000)));
+  rom.fillAt(0x7ff00, 0x40);
+  same('fillAt', () => rom.fillAt(0x7ff00, 0x40));
+  rom.fixChecksum();
+  same('fixChecksum', () => rom.fixChecksum());
+}
+
+// the ranges a write changed: only the bytes that differ (runs close together as one range)
+{
+  const rom = fresh(), g = rom.gen;
+  const b = rom.data.slice(0x20000, 0x20100);
+  b[0x10] ^= 1; b[0x12] ^= 1; b[0xf0] ^= 1;
+  rom.writeAt(0x20000, b);
+  check(JSON.stringify(rom.changesSince(g)) === JSON.stringify([[0x20010, 0x20013], [0x200f0, 0x200f1]]), 'changed ranges of one write');
+  const g2 = rom.gen;
+  rom.w8(0x0cf7df, rom.r8(0x0cf7df) ^ 1);
+  check(JSON.stringify(rom.changesSince(g2)) === JSON.stringify([[snesToPc(0x0cf7df), snesToPc(0x0cf7df) + 1]]), 'since a generation: its later changes only');
+  check(rom.changesSince(g)!.length === 3, 'since an older one: all of them');
+  check(rom.changesSince(rom.gen)!.length === 0, 'since the current one: none');
+  check(rom.changesSince(-1) === null, 'before the log: not known');
+  const g3 = rom.gen, snap = rom.snapshot();
+  rom.w8(0x008000, rom.r8(0x008000) ^ 1);
+  rom.restore(snap);
+  check(rom.gen > g3 && JSON.stringify(rom.changesSince(g3)) === JSON.stringify([[0, 1]]) && rom.data[0] === snap.data[0], 'restore: the restored bytes changed (twice)');
+  const g4 = rom.gen, len = rom.size;
+  rom.expand(len * 2);
+  const ch = rom.changesSince(g4)!;
+  check(ch.some(([a, e]) => a <= 0x7fd7 && e > 0x7fd7) && ch.some(([a, e]) => a <= len && e >= len * 2), 'expand: the new part and the size byte');
+  for (let i = 0; i < 9000; i++) rom.w8(0x008000, i);
+  check(rom.changesSince(g4) === null && rom.changesSince(rom.gen - 10)!.length === 1, 'an old generation the log forgot: not known; a recent one still');
 }
 
 // a load's temporary pointer patches (the level as edited, a start header …) are no change of the ROM: the
@@ -138,7 +178,14 @@ const TITLE_BYTE = 0x7fc0; // the internal name: not read while booting
   check(fp.gen === g, 'fingerprint: same ROM, not recomputed');
   rom.writeAt(TITLE_BYTE, Uint8Array.of(0x20));
   fp.sync();
-  check(fp.gen !== g, 'fingerprint: recomputed after a write');
+  check(fp.gen !== g && fp.rehashed === 1, 'fingerprint: recomputed after a write, only the changed page');
+  const g2 = fp.gen;
+  rom.writeAt(TITLE_BYTE, Uint8Array.of(0x20));
+  fp.sync();
+  check(fp.gen === g2, 'fingerprint: the same bytes written again, not recomputed');
+  rom.expand(0x100000);
+  fp.sync();
+  check(fp.rehashed === 0x100000 >> 8, 'fingerprint: a new size, all pages');
 }
 
 if (bad) { console.log(`${bad} FAILED`); process.exit(1); }

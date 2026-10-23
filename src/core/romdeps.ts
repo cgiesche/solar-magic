@@ -86,9 +86,10 @@ export class RomReads {
   }
 }
 
-// hashes of all pages of the current ROM, recomputed when the ROM's generation changes
+// hashes of all pages of the current ROM, rehashed where the ROM changed (Rom.changesSince) when its generation does
 export class RomFingerprint {
-  gen = 0; // counts recomputations; cached validity checks are redone when it changes
+  gen = 0; // counts recomputations that changed a page; cached validity checks are redone when it changes
+  rehashed = 0; // pages hashed by the last recomputation
   private rom: Rom;
   private romGen = -1;
   private hashes = new Uint32Array(0);
@@ -99,12 +100,14 @@ export class RomFingerprint {
 
   sync(): void {
     if (this.romGen === this.rom.gen) return;
-    this.romGen = this.rom.gen;
     const d = this.rom.data, n = d.length >> PAGE_SHIFT;
+    const changes = this.hashes.length === n * 2 ? this.rom.changesSince(this.romGen) : null;
+    this.romGen = this.rom.gen;
+    if (changes?.length === 0) return;
     const words = d.byteOffset & 3 ? new Uint32Array(d.slice().buffer, 0, d.length >> 2) : new Uint32Array(d.buffer, d.byteOffset, d.length >> 2);
-    const h = new Uint32Array(n * 2);
+    const h = changes ? this.hashes : new Uint32Array(n * 2);
     const per = 1 << (PAGE_SHIFT - 2);
-    for (let p = 0; p < n; p++) {
+    const hash = (p: number) => {
       let a = 0x811c9dc5, b = 0x2545f491;
       for (let i = p * per, e = i + per; i < e; i++) {
         const v = words[i];
@@ -112,8 +115,15 @@ export class RomFingerprint {
         b = Math.imul(b ^ v, 0x5bd1e995) ^ (b >>> 15);
       }
       h[p * 2] = a; h[p * 2 + 1] = b;
+    };
+    let count = 0, next = 0; // (ranges are sorted: a page shared by two is hashed once)
+    if (!changes) for (; count < n; count++) hash(count);
+    else for (const [start, end] of changes) {
+      for (let p = Math.max(next, start >> PAGE_SHIFT), e = Math.min(n, ((end - 1) >> PAGE_SHIFT) + 1); p < e; p++, count++) hash(p);
+      next = Math.max(next, ((end - 1) >> PAGE_SHIFT) + 1);
     }
     this.hashes = h;
+    this.rehashed = count;
     this.gen++;
   }
 

@@ -33,14 +33,34 @@ export interface RatsBlock {
   size: number; // payload size
 }
 
+// a range of the ROM image by file offset (PC), end exclusive
+export type RomRange = [start: number, end: number];
+
+// changes the log keeps (older ones are forgotten: changesSince can't reach back further then)
+const LOG_MAX = 8192;
+// equal bytes between two changed runs of one write that still make one range
+const RUN_GAP = 16;
+
 export class Rom {
-  // counts changes of the ROM image: every write through these methods and every new `data` (the editor
-  // data doesn't count). Emulators and caches compare it to see the ROM changed, so the image is only
-  // written through Rom – never into `data` directly.
+  // counts changes of the ROM image: every write through these methods that changes a byte and every new
+  // `data` (the editor data doesn't count). Emulators and caches compare it to see the ROM changed, and ask
+  // changesSince what changed, so the image is only written through Rom – never into `data` directly.
   gen = 0;
   private image: Uint8Array;
+  // the ranges each generation changed (in order), back to generation logFrom
+  private log: { gen: number; start: number; end: number }[] = [];
+  private logFrom = 0;
   get data(): Uint8Array { return this.image; }
-  set data(d: Uint8Array) { this.image = d; this.gen++; }
+  // a new image: the ranges differing from the old one (a size change counts as changed from the shorter size on)
+  set data(d: Uint8Array) {
+    const old = this.image;
+    this.image = d;
+    this.gen++;
+    if (old === d) { this.record(0, d.length); return; }
+    const n = Math.min(old.length, d.length);
+    this.diff(old, 0, d, 0, n);
+    if (old.length !== d.length) this.record(n, Math.max(old.length, d.length));
+  }
   smcHeader: Uint8Array | null;
   reads: RomReads | null = null; // records reads through r8/r16/r24/bytes (see romdeps.ts)
   extra = new Map<string, Uint8Array>(); // editor data by id, not part of the ROM image (blobs are never changed in place)
@@ -49,6 +69,56 @@ export class Rom {
     const hdr = file.length % 0x8000;
     this.smcHeader = hdr === 512 ? file.slice(0, 512) : null;
     this.image = file.slice(hdr);
+  }
+
+  // The ranges of the image changed since generation `since` (sorted, merged; may reach past the current size
+  // when the image shrank); null when the log doesn't reach back that far.
+  changesSince(since: number): RomRange[] | null {
+    if (since < this.logFrom) return null;
+    const out: RomRange[] = [];
+    for (let i = this.log.length - 1; i >= 0 && this.log[i].gen > since; i--) out.push([this.log[i].start, this.log[i].end]);
+    out.sort((a, b) => a[0] - b[0]);
+    let k = 0;
+    for (const r of out) {
+      if (k && r[0] <= out[k - 1][1]) out[k - 1][1] = Math.max(out[k - 1][1], r[1]);
+      else out[k++] = r;
+    }
+    out.length = k;
+    return out;
+  }
+
+  private record(start: number, end: number): void {
+    this.log.push({ gen: this.gen, start, end });
+    if (this.log.length > LOG_MAX) {
+      // (a generation partly dropped is the oldest one changesSince can't answer for)
+      const drop = this.log.length >> 1;
+      this.logFrom = this.log[drop - 1].gen;
+      this.log = this.log.slice(drop);
+    }
+  }
+
+  // records the runs where a[ao..] and b[bo..] differ (n bytes, as offsets from bo) as changed; whether any did
+  private diff(a: Uint8Array, ao: number, b: Uint8Array, bo: number, n: number): boolean {
+    let any = false;
+    for (let i = 0; i < n; i++) {
+      if (a[ao + i] === b[bo + i]) continue;
+      let last = i;
+      for (let j = i + 1; j < n && j - last <= RUN_GAP; j++) if (a[ao + j] !== b[bo + j]) last = j;
+      this.record(bo + i, bo + last + 1);
+      any = true;
+      i = last;
+    }
+    return any;
+  }
+
+  // writes b at pc; a new generation only when a byte changes
+  private put(pc: number, b: Uint8Array): void {
+    const d = this.image;
+    if (pc < 0 || pc + b.length > d.length) { d.set(b, pc); this.gen++; this.record(pc, pc + b.length); return; } // (throws)
+    const gen = this.gen;
+    this.gen++;
+    if (!this.diff(b, 0, d, pc, b.length)) { this.gen = gen; return; }
+    d.set(b, pc);
   }
 
   // a ROM file or a project file (ROM + editor data)
@@ -107,21 +177,13 @@ export class Rom {
     return this.data[o] | (this.data[o + 1] << 8) | (this.data[o + 2] << 16);
   }
   w8(snes: number, v: number): void {
-    this.data[snesToPc(snes)] = v & 0xff;
-    this.gen++;
+    this.put(snesToPc(snes), Uint8Array.of(v & 0xff));
   }
   w16(snes: number, v: number): void {
-    const o = snesToPc(snes);
-    this.gen++;
-    this.data[o] = v & 0xff;
-    this.data[o + 1] = (v >> 8) & 0xff;
+    this.put(snesToPc(snes), Uint8Array.of(v & 0xff, (v >> 8) & 0xff));
   }
   w24(snes: number, v: number): void {
-    const o = snesToPc(snes);
-    this.gen++;
-    this.data[o] = v & 0xff;
-    this.data[o + 1] = (v >> 8) & 0xff;
-    this.data[o + 2] = (v >> 16) & 0xff;
+    this.put(snesToPc(snes), Uint8Array.of(v & 0xff, (v >> 8) & 0xff, (v >> 16) & 0xff));
   }
   bytes(snes: number, len: number): Uint8Array {
     const o = snesToPc(snes);
@@ -133,12 +195,10 @@ export class Rom {
   }
   // by file offset (PC)
   writeAt(pc: number, b: Uint8Array): void {
-    this.data.set(b, pc);
-    this.gen++;
+    this.put(pc, b);
   }
   fillAt(pc: number, len: number, v = 0): void {
-    this.data.fill(v, pc, pc + len);
-    this.gen++;
+    this.put(pc, new Uint8Array(len).fill(v));
   }
 
   title(): string {
@@ -155,18 +215,18 @@ export class Rom {
     // header ROM size byte: 2^n KB
     let n = 0;
     while ((1 << n) * 1024 < newSize) n++;
-    this.data[0x7fd7] = n;
+    this.writeAt(0x7fd7, Uint8Array.of(n));
   }
 
   fixChecksum(): void {
     const d = this.data;
-    this.gen++;
-    // SNES checksum: sum of all bytes; non power-of-two sizes mirror the upper part
+    // SNES checksum: sum of all bytes (the checksum and its complement counted as $FFFF, $0000); non power-of-two
+    // sizes mirror the upper part
     let pow = 1;
     while (pow * 2 <= d.length) pow *= 2;
     let sum = 0;
-    d[0x7fdc] = 0xff; d[0x7fdd] = 0xff; d[0x7fde] = 0; d[0x7fdf] = 0;
     for (let i = 0; i < pow; i++) sum += d[i];
+    sum += 0xff + 0xff - d[0x7fdc] - d[0x7fdd] - d[0x7fde] - d[0x7fdf];
     if (pow < d.length) {
       const rest = d.length - pow;
       let part = 0;
@@ -174,8 +234,7 @@ export class Rom {
       sum += part * (pow / rest);
     }
     sum &= 0xffff;
-    d[0x7fde] = sum & 0xff; d[0x7fdf] = sum >> 8;
-    d[0x7fdc] = ~sum & 0xff; d[0x7fdd] = (~sum >> 8) & 0xff;
+    this.writeAt(0x7fdc, Uint8Array.of(~sum & 0xff, (~sum >> 8) & 0xff, sum & 0xff, sum >> 8));
   }
 
   // the playable ROM (without the editor data)
