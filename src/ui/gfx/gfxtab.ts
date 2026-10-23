@@ -1,7 +1,9 @@
 // Graphics tab: the level's GFX slots as cards (swap a file from a gallery with previews and usage),
-// the list of GFX/ExGFX files and a pixel editor (pen, fill, pipette, selection with move, copy/paste,
-// flip/rotate) drawing with the colors of a palette row. Each stroke is one undoable ROM edit:
-// the file is encoded again and written in place when it fits, otherwise moved to free space.
+// the list of GFX/ExGFX files, the file's sheet as a navigator (picks 8x8 tiles and pastes them, as the
+// other editors do) and the pixel editor beside it, the only place pixels are painted (pen, eraser, fill,
+// pipette, selection with move, copy/paste, flip/rotate) with the colors of a palette row, after
+// Lunar Magic's 8x8 tile editor and Aseprite. Each stroke is one undoable ROM edit: the file is encoded
+// again and written in place when it fits, otherwise moved to free space.
 
 import type { App } from '../app.ts';
 import type { GfxWorkspace, WsPanel } from '../gfxworkspace.ts';
@@ -10,6 +12,9 @@ import { h, clear, toast, modal, choose, attachPanZoom, zoomControl, zoomStep, s
 import { downloadBytes, pickFile, pickFiles } from '../platform.ts';
 
 const ZOOM_MIN = 1, ZOOM_MAX = 32; // of the shared zoom levels (dom.ts)
+const SHEET_FIT = 3; // largest zoom the sheet is fitted to
+const PANE_MAX = 8; // tiles the pixel editor shows at most each way when picked on the sheet
+const PANE_ZOOM_MAX = 48;
 const NEW_FILE = -2, IMPORT_FILE = -3; // gallery picks besides a file number (-1: default)
 const ORDER: BinPlanItem['status'][] = ['new', 'replace', 'skip', 'unchanged']; // rows of a bulk import's preview
 import { cgramToRGBA } from '../../core/gfx.ts';
@@ -41,9 +46,31 @@ const spriteRange = (first: number) => first < 0x100 ? `${hex(first, 2)}–${hex
 // sprite tile number of tile t of a sprite slot, as patches write it
 const spriteTile = (first: number, t: number) => first + t < 0x100 ? hex(first + t, 2) : `${hex(first + t, 3)} (page 2: ${hex((first + t) & 0xff, 2)} with T bit)`;
 
-type Tool = 'pen' | 'fill' | 'pick' | 'select';
-interface Sel { x: number; y: number; w: number; h: number }
-interface Float { x: number; y: number; w: number; h: number; pix: Uint8Array } // pixels lifted out of the sheet
+type Tool = 'pen' | 'erase' | 'fill' | 'pick' | 'select';
+interface Rect { x: number; y: number; w: number; h: number }
+interface Float extends Rect { pix: Uint8Array; label: string } // pixels lifted out of the sheet, the edit's name when put down
+
+// the lines between pixels
+function pixelGrid(ctx: CanvasRenderingContext2D, w: number, hh: number, z: number): void {
+  ctx.strokeStyle = 'rgba(128,128,128,0.35)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let x = 1; x < w; x++) { ctx.moveTo(x * z + 0.5, 0); ctx.lineTo(x * z + 0.5, hh * z); }
+  for (let y = 1; y < hh; y++) { ctx.moveTo(0, y * z + 0.5); ctx.lineTo(w * z, y * z + 0.5); }
+  ctx.stroke();
+}
+// lines every `step` pixels of the file (the image starts at ox, oy): a dark and a light line next to
+// each other stay visible on any color
+function gridLines(ctx: CanvasRenderingContext2D, w: number, hh: number, z: number, step: number, ox: number, oy: number, dark: string, light: string): void {
+  ctx.lineWidth = 1;
+  for (const [col, d] of [[dark, 0.5], [light, 1.5]] as [string, number][]) {
+    ctx.strokeStyle = col;
+    ctx.beginPath();
+    for (let x = 1; x < w; x++) if ((ox + x) % step === 0) { ctx.moveTo(x * z - 1 + d, 0); ctx.lineTo(x * z - 1 + d, hh * z); }
+    for (let y = 1; y < hh; y++) if ((oy + y) % step === 0) { ctx.moveTo(0, y * z - 1 + d); ctx.lineTo(w * z, y * z - 1 + d); }
+    ctx.stroke();
+  }
+}
 
 export class GfxTab implements WsPanel {
   root: HTMLElement;
@@ -54,15 +81,17 @@ export class GfxTab implements WsPanel {
   private bppOverride: number | null = null;
   private bppOk = -1; // file confirmed to be edited in a format other than the detected one
   private palRow = -1; // -1: automatic for the file
-  private color = 1;
-  private tool: Tool = 'pen';
-  private zoom = 4;
+  private fg = 1; // color of the left button
+  private bg = 0; // of the right button
+  private tool: Tool = 'select'; // also after every jump here and file change: the first click selects
+  private zoom = 2;
   private zoomCtl = zoomControl(() => this.zoom, (z) => this.setZoom(z), ZOOM_MIN, ZOOM_MAX);
   private fitted = false; // zoomed to fit once on first show
-  private zoomFixed = false; // opened at a tile: no fitting
   private grid: 0 | 8 | 16 = 8;
-  private sel: Sel | null = null;
+  private area: Rect = { x: 0, y: 0, w: 1, h: 1 }; // tiles of the sheet in the pixel editor
+  private sel: Rect | null = null; // pixels selected in the pixel editor
   private float: Float | null = null;
+  private lastPt: { x: number; y: number } | null = null; // for Shift+click lines
   private clip: { w: number; h: number; pix: Uint8Array } | null = null;
   private focusTile = -1; // tile shown under "Usage"
   private filter = '';
@@ -72,8 +101,11 @@ export class GfxTab implements WsPanel {
   private ownEdit = false;
   private cards = h('div', { class: 'gt-cards' });
   private list = h('div', { class: 'gt-list' });
-  private canvas = h('canvas', { class: 'gt-canvas', 'data-tool': 'pen' });
+  private canvas = h('canvas', { class: 'gt-canvas' });
   private view = h('div', { class: 'gt-view' }, this.canvas);
+  private pane = h('canvas', { class: 'gt-pane-canvas', 'data-tool': 'select' });
+  private paneView = h('div', { class: 'gt-pane-view' }, this.pane);
+  private paneHead = h('div', { class: 'ws-bar gt-pane-head' });
   private side = h('div', { class: 'gt-side' });
   private tools = h('div', { class: 'ws-bar' });
 
@@ -91,8 +123,11 @@ export class GfxTab implements WsPanel {
         h('div', { class: 'gt-files' }, search, h('label', { class: 'toggle' }, only, 'only used by the level'), this.list,
           h('button', { onclick: () => void this.newExGfx(), title: 'Create an empty 4bpp file; the next free ExGFX number is suggested' }, '+ New ExGFX')),
         this.view,
+        h('div', { class: 'gt-pane' }, this.paneHead, this.paneView),
         this.side));
-    this.attachCanvas();
+    this.attachSheet();
+    this.attachPane();
+    new ResizeObserver(() => { if (this.visible) this.requestPresent(); }).observe(this.paneView);
     attachPanZoom(this.view, () => this.zoom, (z, ax, ay) => {
       const rc = this.view.getBoundingClientRect();
       this.setZoom(z, rc.left + ax, rc.top + ay);
@@ -105,7 +140,7 @@ export class GfxTab implements WsPanel {
   }
 
   previewHint(): string {
-    return 'Click: show the 8x8 graphics of the tile under the mouse (top left quarter)';
+    return 'Click: the 8x8 graphics of the tile under the mouse (top left quarter) in the pixel editor';
   }
 
   previewClick(px: number, py: number): void {
@@ -121,7 +156,7 @@ export class GfxTab implements WsPanel {
   show(): void {
     this.visible = true;
     this.reload();
-    if (!this.fitted) { this.fitted = true; requestAnimationFrame(() => { if (!this.zoomFixed) this.fit(); }); }
+    if (!this.fitted) { this.fitted = true; requestAnimationFrame(() => { this.fit(); this.scrollToTile(this.area.y * 16 + this.area.x); }); }
   }
   hide(): void {
     this.dropFloat();
@@ -132,14 +167,15 @@ export class GfxTab implements WsPanel {
   get selected(): number { return this.cur; }
 
   select(file: number, tile?: number, palRow?: number): void {
-    if (file !== this.cur) { this.dropFloat(); this.cur = file; this.bppOverride = null; this.palRow = -1; this.sel = null; }
+    if (file !== this.cur) { this.dropFloat(); this.cur = file; this.bppOverride = null; this.palRow = -1; this.sel = null; this.tool = 'select'; this.lastPt = null; }
     if (palRow !== undefined) this.palRow = palRow;
     if (tile !== undefined) {
+      // the tile in the pixel editor; the first click there selects, it doesn't paint
+      this.dropFloat();
       this.focusTile = tile;
-      // zoom in on the tile (at least 12x), select it for flip/rotate
-      this.sel = { x: (tile & 15) * 8, y: (tile >> 4) * 8, w: 8, h: 8 };
-      this.fitted = this.zoomFixed = true;
-      if (this.zoom < 12) this.zoom = 12;
+      this.area = { x: tile & 15, y: tile >> 4, w: 1, h: 1 };
+      this.sel = null;
+      this.tool = 'select';
     }
     if (this.visible) this.reload();
     if (tile !== undefined) this.scrollToTile(tile);
@@ -157,8 +193,14 @@ export class GfxTab implements WsPanel {
   private reload(): void {
     this.autoRows = null;
     this.file = readGfx(this.app.rom, this.cur, this.bppOverride);
+    this.clampArea();
+    // the colors the file has (a 2bpp file: 4)
+    const n = 1 << this.file.bpp;
+    if (this.fg >= n) this.fg = n - 1;
+    if (this.bg >= n) this.bg = 0;
     this.buildCards();
     this.buildTools();
+    this.buildPaneHead();
     this.buildList();
     this.draw();
     this.buildSide();
@@ -476,21 +518,9 @@ export class GfxTab implements WsPanel {
   private buildTools(): void {
     const b = this.tools;
     clear(b);
-    const tool = (t: Tool, label: string, key: string, title: string) => h('button', { class: this.tool === t ? 'active' : '', title: `${title} (${key})`, onclick: () => this.setTool(t) }, label);
     const gridBtn = (g: 0 | 8 | 16, label: string) => h('button', { class: this.grid === g ? 'active' : '', onclick: () => { this.grid = g; this.buildTools(); this.draw(); } }, label);
     b.append(
-      h('span', { class: 'btn-group' },
-        tool('pen', '✎ Pen', 'B', 'Draw; right click draws transparent'),
-        tool('fill', '▧ Fill', 'F', 'Fill an area of the same color'),
-        tool('pick', '⌖ Eyedropper', 'I', 'Take a color from the image (also Alt+click)'),
-        tool('select', '⬚ Select', 'S', 'Select an area; dragging inside moves it, Enter/Esc drops it')),
-      h('span', { class: 'btn-group' },
-        h('button', { onclick: () => this.transform('h'), title: 'Flip the selection (or the tile under the last selection) horizontally' }, '↔'),
-        h('button', { onclick: () => this.transform('v'), title: 'Flip vertically' }, '↕'),
-        h('button', { onclick: () => this.transform('r'), title: 'Rotate by 90° (square selection only)' }, '⟳')),
-      h('span', { class: 'sep' }),
-      h('button', { onclick: () => this.copySel(), title: 'Copy selection (Ctrl+C)' }, 'Copy'),
-      h('button', { onclick: () => this.pasteSel(), title: 'Paste at the selection, movable afterwards (Ctrl+V)' }, 'Paste'),
+      h('span', { class: 'hint' }, 'Sheet: click/drag picks 8x8 tiles for the pixel editor, right click pastes them'),
       h('span', { class: 'sep' }),
       h('span', { class: 'gt-viewctl' },
         h('span', { class: 'hint' }, 'Grid'), h('span', { class: 'btn-group' }, gridBtn(0, 'off'), gridBtn(8, '8'), gridBtn(16, '16')),
@@ -508,11 +538,33 @@ export class GfxTab implements WsPanel {
     );
   }
 
+  // the pixel editor's tools, above it
+  private buildPaneHead(): void {
+    const b = this.paneHead;
+    clear(b);
+    const tool = (t: Tool, label: string, key: string, title: string) => h('button', { class: this.tool === t ? 'active' : '', title: `${title} (${key})`, onclick: () => this.setTool(t) }, label);
+    const a = this.area, first = a.y * 16 + a.x, last = (a.y + a.h - 1) * 16 + a.x + a.w - 1;
+    b.append(
+      h('b', { class: 'mono' }, a.w * a.h === 1 ? `Tile ${hex(first, 2)}` : `Tiles ${hex(first, 2)}–${hex(last, 2)} (${a.w}×${a.h})`),
+      h('span', { class: 'btn-group' },
+        tool('select', '⬚ Select', 'S', 'Select pixels; dragging inside moves them, Enter puts them down, Esc cancels'),
+        tool('pen', '✎ Pen', 'B', 'Draw: left button with the left color, right button with the right color; Shift+click: line from the last point'),
+        tool('erase', '⌫ Eraser', 'E', 'Draw transparent'),
+        tool('fill', '▧ Fill', 'F', 'Fill an area of the same color (inside the selection, else these tiles)'),
+        tool('pick', '⌖ Eyedropper', 'I', 'Take a color for the button clicked with (also Alt+click)')),
+      h('span', { class: 'btn-group' },
+        h('button', { onclick: () => this.transform('h'), title: 'Flip the selection (else these tiles) horizontally' }, '↔'),
+        h('button', { onclick: () => this.transform('v'), title: 'Flip vertically' }, '↕'),
+        h('button', { onclick: () => this.transform('r'), title: 'Rotate by 90° (square selection only)' }, '⟳')),
+      h('button', { onclick: () => this.copySel(), title: 'Copy the selection, else these tiles (Ctrl+C)' }, 'Copy'),
+      h('button', { onclick: () => this.pasteSel(), title: 'Paste at the selection, movable afterwards (Ctrl+V)' }, 'Paste'));
+    this.pane.dataset.tool = this.tool;
+  }
+
   private setTool(t: Tool): void {
     if (t !== 'select') this.dropFloat();
     this.tool = t;
-    this.buildTools();
-    this.canvas.dataset.tool = t;
+    this.buildPaneHead();
   }
 
   // ---------- side panel ----------
@@ -530,10 +582,13 @@ export class GfxTab implements WsPanel {
       onclick: () => { this.palRow = r; this.draw(); this.buildSide(); },
     }, h('span', { class: 'mono' }, hex(r, 1)), h('span', { class: 'gt-row-strip' }, Array.from({ length: 15 }, (_, k) => h('i', { style: { background: css(all[r * 16 + 1 + k]) } }))))));
     const sw = h('div', { class: 'gt-colors' }, Array.from(cols, (v, k) => h('div', {
-      class: `gt-color${k === this.color ? ' sel' : ''}${k === 0 ? ' transp' : ''}`, title: k === 0 ? 'Color 0: transparent' : `Color ${k}`,
+      class: `gt-color${k === this.fg ? ' sel' : ''}${k === this.bg ? ' bg' : ''}${k === 0 ? ' transp' : ''}`,
+      title: `${k === 0 ? 'Color 0: transparent' : `Color ${k}`} – click: left button's color, right click: right button's`,
       style: k ? { background: css(v) } : {},
-      onclick: () => { this.color = k; this.buildSide(); },
+      onclick: () => { this.fg = k; this.buildSide(); },
+      oncontextmenu: (e: Event) => { e.preventDefault(); this.bg = k; this.buildSide(); },
     }, String(k))));
+    const chip = (k: number, label: string) => h('span', { class: 'gt-fgbg-chip' }, h('i', { class: `gt-color${k === 0 ? ' transp' : ''}`, style: k ? { background: css(cols[k] ?? 0) } : {} }), `${label} ${k}`);
     const used = this.gfxSlots().filter((x) => x.file === f.num).map((x) => x.name);
     s.append(
       h('div', { class: 'prop-title' }, gfxName(f.num), f.empty ? h('span', { class: 'hint' }, ' (empty)') : ''),
@@ -548,7 +603,8 @@ export class GfxTab implements WsPanel {
       f.raw || f.empty ? '' : h('div', { class: 'prop' }, h('label', { title: 'How the file is read; drawing saves it in this format' }, 'Read as'),
         h('span', { class: 'btn-group' }, [2, 3, 4].map((b) => h('button', { class: f.bpp === b ? 'active' : '', title: b === f.auto ? 'Detected format' : 'Only choose if the graphics look wrong', onclick: () => { this.bppOverride = b === f.auto ? null : b; this.reload(); } }, `${b}bpp`)))),
       !f.raw && !f.empty && f.bpp !== f.auto ? h('div', { class: 'warn-box' }, `Detected: ${f.auto}bpp. Drawing here saves the file as ${f.bpp}bpp – the game then reads it that way.`) : '',
-      h('div', { class: 'panel-title' }, 'Color', h('span', { class: 'hint' }, 'right click paints transparent')),
+      h('div', { class: 'panel-title' }, 'Color', h('span', { class: 'hint' }, 'X swaps')),
+      h('div', { class: 'gt-fgbg' }, chip(this.fg, 'Left'), chip(this.bg, 'Right')),
       sw,
       h('div', { class: 'panel-title' }, 'Palette', h('span', { class: 'hint' }, this.palRow < 0 ? 'automatic' : h('a', { href: '#', onclick: (e: Event) => { e.preventDefault(); this.palRow = -1; this.draw(); this.buildSide(); } }, 'automatic'))),
       rowSel,
@@ -585,7 +641,7 @@ export class GfxTab implements WsPanel {
   // Map16 tiles that use the focused 8x8 tile (when the file is in one of the level's layer slots)
   private usageUi(): HTMLElement | string {
     const t = this.focusTile;
-    if (t < 0 || !this.file || t >= this.file.tiles) return h('p', { class: 'hint' }, 'A click with the eyedropper (or Alt+click) also shows which Map16 tiles use the 8x8 tile.');
+    if (t < 0 || !this.file || t >= this.file.tiles) return h('p', { class: 'hint' }, 'A click on a tile of the sheet shows which Map16 tiles use it.');
     const slot = this.gfxSlots().find((s) => s.file === this.cur && s.map16);
     const box = h('div', { class: 'gt-usage' }, h('div', { class: 'panel-title' }, `8x8 tile ${hex(t, 2)} of the file`));
     if (!slot) { box.append(h('div', { class: 'hint' }, "The file is in none of this level's layer slots.")); return box; }
@@ -624,6 +680,23 @@ export class GfxTab implements WsPanel {
     this.file!.pix[i] = v;
     if (this.px && !this.float) this.px[y * this.W() + x] = this.rgba(x, y, v);
   }
+  // pen, eraser and fill only reach the pixel selection, else the pixel editor's tiles (as in Aseprite)
+  private limit(): Rect { return this.sel ?? this.paneRect(); }
+  private paint(x: number, y: number, v: number): void {
+    const r = this.limit();
+    if (x >= r.x && y >= r.y && x < r.x + r.w && y < r.y + r.h) this.set(x, y, v);
+  }
+
+  // the tiles of the sheet the pixel editor shows, kept inside the file
+  private clampArea(): void {
+    const rows = this.H() >> 3, a = this.area;
+    const w = Math.max(1, Math.min(16, a.w)), hh = Math.max(1, Math.min(rows, a.h));
+    this.area = { x: Math.max(0, Math.min(16 - w, a.x)), y: Math.max(0, Math.min(rows - hh, a.y)), w, h: hh };
+  }
+  private paneRect(): Rect {
+    const a = this.area;
+    return { x: a.x * 8, y: a.y * 8, w: a.w * 8, h: a.h * 8 };
+  }
 
   // persistent 1:1 image of the sheet; drawing updates single pixels and presents once per frame
   private off = document.createElement('canvas');
@@ -657,63 +730,78 @@ export class GfxTab implements WsPanel {
   }
 
   private present(): void {
-    const f = this.file;
-    if (!f || !this.img) return;
+    if (!this.file || !this.img) return;
+    this.off.getContext('2d')!.putImageData(this.img, 0, 0);
+    this.presentSheet();
+    this.presentPane();
+  }
+
+  // the whole file: the navigator
+  private presentSheet(): void {
+    const f = this.file!;
     const W = this.W(), H = this.H(), z = this.zoom;
     const c = this.canvas;
     const cw = Math.round(W * z), ch = Math.round(H * z);
     if (c.width !== cw || c.height !== ch) { c.width = cw; c.height = ch; }
     const ctx = c.getContext('2d')!;
-    this.off.getContext('2d')!.putImageData(this.img, 0, 0);
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(this.off, 0, 0, W * z, H * z);
-    // grids: a dark and a light line next to each other stay visible on any color
-    const lines = (step: number, dark: string, light: string) => {
-      ctx.lineWidth = 1;
-      for (const [col, d] of [[dark, 0.5], [light, 1.5]] as [string, number][]) {
-        ctx.strokeStyle = col;
-        ctx.beginPath();
-        for (let x = step; x < W; x += step) { ctx.moveTo(x * z - 1 + d, 0); ctx.lineTo(x * z - 1 + d, H * z); }
-        for (let y = step; y < H; y += step) { ctx.moveTo(0, y * z - 1 + d); ctx.lineTo(W * z, y * z - 1 + d); }
-        ctx.stroke();
-      }
-    };
-    if (this.grid && z >= 8) {
-      ctx.strokeStyle = 'rgba(128,128,128,0.35)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      for (let x = 1; x < W; x++) { ctx.moveTo(x * z + 0.5, 0); ctx.lineTo(x * z + 0.5, H * z); }
-      for (let y = 1; y < H; y++) { ctx.moveTo(0, y * z + 0.5); ctx.lineTo(W * z, y * z + 0.5); }
-      ctx.stroke();
-    }
-    if (this.grid === 8) lines(8, 'rgba(0,0,0,0.7)', 'rgba(255,255,255,0.55)');
-    if (this.grid) lines(16, 'rgba(0,0,0,0.85)', 'rgba(76,194,255,0.9)');
-    // tiles the game animates in this level: magenta corner
-    const anim = this.animatedTiles();
-    if (anim.size) {
-      ctx.fillStyle = '#ff4fd8';
-      const m = Math.max(5, z * 2);
-      for (const t of anim) {
-        const x = ((t & 15) + 1) * 8 * z, y = (t >> 4) * 8 * z;
-        ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y + m); ctx.lineTo(x - m, y); ctx.fill();
-      }
-    }
-    if (this.focusTile >= 0 && this.focusTile < f.tiles) {
+    if (this.grid && z >= 8) pixelGrid(ctx, W, H, z);
+    if (this.grid === 8) gridLines(ctx, W, H, z, 8, 0, 0, 'rgba(0,0,0,0.7)', 'rgba(255,255,255,0.55)');
+    if (this.grid) gridLines(ctx, W, H, z, 16, 0, 0, 'rgba(0,0,0,0.85)', 'rgba(76,194,255,0.9)');
+    this.animCorners(ctx, z, { x: 0, y: 0, w: 16, h: H >> 3 });
+    const a = this.area;
+    if (this.focusTile >= 0 && this.focusTile < f.tiles && a.w * a.h > 1) {
       ctx.strokeStyle = '#ffb000';
-      ctx.lineWidth = 3;
-      ctx.strokeRect((this.focusTile & 15) * 8 * z - 1.5, (this.focusTile >> 4) * 8 * z - 1.5, 8 * z + 3, 8 * z + 3);
+      ctx.lineWidth = 2;
+      ctx.strokeRect((this.focusTile & 15) * 8 * z + 1, (this.focusTile >> 4) * 8 * z + 1, 8 * z - 2, 8 * z - 2);
     }
-    const r = this.float ?? this.sel;
-    if (r) {
+    ctx.strokeStyle = '#4cc2ff';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(a.x * 8 * z - 1.5, a.y * 8 * z - 1.5, a.w * 8 * z + 3, a.h * 8 * z + 3);
+  }
+
+  // the pixel editor: the area of the sheet, as large as its view allows
+  private paneZoom(): number {
+    const r = this.paneRect(), v = this.paneView;
+    return Math.max(1, Math.min(PANE_ZOOM_MAX, Math.floor(Math.min((v.clientWidth - 4) / r.w, (v.clientHeight - 4) / r.h))));
+  }
+  private presentPane(): void {
+    const r = this.paneRect(), z = this.paneZoom();
+    const c = this.pane;
+    if (c.width !== r.w * z || c.height !== r.h * z) { c.width = r.w * z; c.height = r.h * z; }
+    const ctx = c.getContext('2d')!;
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(this.off, r.x, r.y, r.w, r.h, 0, 0, r.w * z, r.h * z);
+    if (this.grid && z >= 6) pixelGrid(ctx, r.w, r.h, z);
+    gridLines(ctx, r.w, r.h, z, 8, r.x, r.y, 'rgba(0,0,0,0.7)', 'rgba(255,255,255,0.55)');
+    if (this.grid === 16) gridLines(ctx, r.w, r.h, z, 16, r.x, r.y, 'rgba(0,0,0,0.85)', 'rgba(76,194,255,0.9)');
+    this.animCorners(ctx, z, this.area);
+    const s = this.float ?? this.sel;
+    if (s) {
       ctx.setLineDash([4, 3]);
       ctx.strokeStyle = '#4cc2ff';
       ctx.lineWidth = 2;
-      ctx.strokeRect(r.x * z + 1, r.y * z + 1, r.w * z - 2, r.h * z - 2);
+      ctx.strokeRect((s.x - r.x) * z + 1, (s.y - r.y) * z + 1, s.w * z - 2, s.h * z - 2);
       ctx.setLineDash([]);
     }
   }
 
-  // zoom around a point of the view (client coordinates; default: its center)
+  // tiles of `area` (in tiles) the game animates in this level: magenta corner
+  private animCorners(ctx: CanvasRenderingContext2D, z: number, area: Rect): void {
+    const anim = this.animatedTiles();
+    if (!anim.size) return;
+    ctx.fillStyle = '#ff4fd8';
+    const m = Math.max(5, z * 2);
+    for (const t of anim) {
+      const tx = (t & 15) - area.x, ty = (t >> 4) - area.y;
+      if (tx < 0 || ty < 0 || tx >= area.w || ty >= area.h) continue;
+      const x = (tx + 1) * 8 * z, y = ty * 8 * z;
+      ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y + m); ctx.lineTo(x - m, y); ctx.fill();
+    }
+  }
+
+  // zoom of the sheet around a point of the view (client coordinates; default: its center)
   setZoom(z: number, ax?: number, ay?: number): void {
     z = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z));
     const old = this.zoom;
@@ -728,10 +816,9 @@ export class GfxTab implements WsPanel {
     v.scrollTop = ly * z - cy;
     this.syncZoomUi();
   }
+  // the largest zoom level at which the whole file's height fits, at most SHEET_FIT (an overview, as Lunar Magic's 2x)
   private fit(): void {
-    const v = this.view;
-    // the largest zoom level at which the whole file fits
-    const fits = Math.min((v.clientWidth - 4) / this.W(), (v.clientHeight - 4) / this.H());
+    const fits = Math.min(SHEET_FIT, (this.view.clientHeight - 4) / this.H());
     this.setZoom(zoomStep(fits + 1e-5, -1, ZOOM_MIN, ZOOM_MAX) ?? ZOOM_MIN);
   }
   private syncZoomUi(): void {
@@ -766,6 +853,22 @@ export class GfxTab implements WsPanel {
     toast(`Tile ${hex(t, 2)} is animated in the game: the game keeps overwriting it with animation frames, so the change does not show there.`, 'error');
   }
 
+  // false (with a hint or a question) when the file can't be drawn on yet
+  private canWrite(): boolean {
+    const f = this.file;
+    if (!f) return false;
+    if (f.empty) { toast(f.num >= ANIM_FILE ? 'The file does not exist yet – “Create” on the right' : 'This number is empty – “+ New ExGFX” creates a file'); return false; }
+    if (f.bpp !== f.auto && this.bppOk !== f.num) {
+      void choose(`Save ${gfxName(f.num)} as ${f.bpp}bpp?`, `The file was detected as ${f.auto}bpp and is currently read as ${f.bpp}bpp. Drawing saves it in this format. That is only right if the detection was wrong.`,
+        [{ label: 'Cancel' }, { label: `Back to ${f.auto}bpp` }, { label: `Edit as ${f.bpp}bpp`, primary: true }]).then((c) => {
+        if (c === 1) { this.bppOverride = null; this.reload(); }
+        if (c === 2) this.bppOk = f.num;
+      });
+      return false;
+    }
+    return true;
+  }
+
   private commit(label: string): void {
     const f = this.file;
     if (!f || f.empty) { toast(f ? `${gfxName(f.num)} is empty – nothing to export` : 'Choose a file on the left first'); return; }
@@ -779,11 +882,11 @@ export class GfxTab implements WsPanel {
   private fill(x: number, y: number, v: number): void {
     const from = this.get(x, y);
     if (from === v) return;
-    const W = this.W(), H = this.H();
+    const r = this.limit();
     const st = [[x, y]];
     while (st.length) {
       const [cx, cy] = st.pop()!;
-      if (cx < 0 || cy < 0 || cx >= W || cy >= H || this.get(cx, cy) !== from) continue;
+      if (cx < r.x || cy < r.y || cx >= r.x + r.w || cy >= r.y + r.h || this.get(cx, cy) !== from) continue;
       this.set(cx, cy, v);
       st.push([cx + 1, cy], [cx - 1, cy], [cx, cy + 1], [cx, cy - 1]);
     }
@@ -791,115 +894,207 @@ export class GfxTab implements WsPanel {
 
   private line(x0: number, y0: number, x1: number, y1: number, v: number): void {
     const dx = Math.abs(x1 - x0), dy = Math.abs(y1 - y0), n = Math.max(dx, dy, 1);
-    for (let i = 0; i <= n; i++) this.set(Math.round(x0 + ((x1 - x0) * i) / n), Math.round(y0 + ((y1 - y0) * i) / n), v);
+    for (let i = 0; i <= n; i++) this.paint(Math.round(x0 + ((x1 - x0) * i) / n), Math.round(y0 + ((y1 - y0) * i) / n), v);
   }
 
-  private attachCanvas(): void {
+  // The sheet follows the rules of the other editors: click/drag picks 8x8 tiles (shown in the pixel
+  // editor), right click/Shift+click pastes them at the mouse, dragging pastes on (one undo step),
+  // Ctrl+click opens a tile's animation. A plain click never changes the file.
+  private attachSheet(): void {
     const c = this.canvas;
     c.addEventListener('contextmenu', (e) => e.preventDefault());
-    const pos = (e: MouseEvent) => {
-      const rc = c.getBoundingClientRect();
-      return { x: Math.floor(((e.clientX - rc.left) / rc.width) * this.W()), y: Math.floor(((e.clientY - rc.top) / rc.height) * this.H()) };
+    const tileAt = (e: MouseEvent) => {
+      const rc = c.getBoundingClientRect(), rows = this.H() >> 3;
+      return {
+        x: Math.max(0, Math.min(15, Math.floor(((e.clientX - rc.left) / rc.width) * 16))),
+        y: Math.max(0, Math.min(rows - 1, Math.floor(((e.clientY - rc.top) / rc.height) * rows))),
+      };
     };
     c.addEventListener('mousedown', (e) => {
-      const f = this.file;
-      if (!f || (e.button !== 0 && e.button !== 2)) return;
+      if (!this.file || (e.button !== 0 && e.button !== 2)) return;
       e.preventDefault();
-      const p = pos(e);
-      if (e.button === 0 && (e.ctrlKey || e.metaKey)) { this.gotoAnim((p.y >> 3) * 16 + (p.x >> 3)); return; }
-      const tool: Tool = e.altKey ? 'pick' : this.tool;
-      if (tool === 'pick') {
-        this.color = this.get(p.x, p.y);
-        this.focusTile = (p.y >> 3) * 16 + (p.x >> 3);
-        this.draw(); this.buildSide();
-        return;
-      }
-      if (f.empty) { toast(f.num >= ANIM_FILE ? 'The file does not exist yet – “Create” on the right' : 'This number is empty – “+ New ExGFX” creates a file'); return; }
-      if (f.bpp !== f.auto && this.bppOk !== f.num) {
-        void choose(`Save ${gfxName(f.num)} as ${f.bpp}bpp?`, `The file was detected as ${f.auto}bpp and is currently read as ${f.bpp}bpp. Drawing saves it in this format. That is only right if the detection was wrong.`,
-          [{ label: 'Cancel' }, { label: `Back to ${f.auto}bpp` }, { label: `Edit as ${f.bpp}bpp`, primary: true }]).then((c) => {
-          if (c === 1) { this.bppOverride = null; this.reload(); }
-          if (c === 2) this.bppOk = f.num;
-        });
-        return;
-      }
-      const v = e.button === 2 ? 0 : this.color;
-      if (tool === 'pen' || tool === 'fill') this.warnAnimated(p.x, p.y);
-      if (tool === 'fill') { this.fill(p.x, p.y, v); this.draw(); this.app.renderPause(); this.commit('Fill'); return; }
-      let last = p;
-      let move: (ev: MouseEvent) => void;
-      let label = 'Draw';
-      if (tool === 'pen') {
-        this.stroke = true;
-        this.set(p.x, p.y, v);
-        this.app.holdRender = true;
-        move = (ev) => { const n = pos(ev); if (n.x === last.x && n.y === last.y) return; this.line(last.x, last.y, n.x, n.y, v); last = n; this.requestPresent(); };
-      } else {
-        // selection: drag inside moves (lifting the pixels), outside starts a new rectangle
-        const r = this.float ?? this.sel;
-        if (r && p.x >= r.x && p.y >= r.y && p.x < r.x + r.w && p.y < r.y + r.h) {
-          if (!this.float) this.lift();
-          this.stroke = true;
-          label = 'Move';
-          move = (ev) => {
-            const n = pos(ev);
-            this.float!.x += n.x - last.x; this.float!.y += n.y - last.y;
-            last = n; this.draw();
-          };
-        } else {
-          this.dropFloat();
-          this.sel = { x: p.x, y: p.y, w: 1, h: 1 };
-          move = (ev) => {
-            const n = pos(ev);
-            const x0 = Math.max(0, Math.min(p.x, n.x)), y0 = Math.max(0, Math.min(p.y, n.y));
-            const x1 = Math.min(this.W() - 1, Math.max(p.x, n.x)), y1 = Math.min(this.H() - 1, Math.max(p.y, n.y));
-            this.sel = { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
-            this.requestPresent();
-          };
-          label = '';
-        }
-      }
-      if (tool === 'pen') this.requestPresent(); else this.draw();
+      const a = tileAt(e);
+      if (e.button === 0 && (e.ctrlKey || e.metaKey)) { this.gotoAnim(a.y * 16 + a.x); return; }
+      if (e.button === 2 || e.shiftKey) { this.stamp(a, tileAt); return; }
+      this.dropFloat();
+      this.sel = null;
+      this.focusTile = a.y * 16 + a.x;
+      // at most PANE_MAX tiles each way, from the tile the drag started at
+      const pick = (b: { x: number; y: number }) => {
+        const bx = Math.max(a.x - PANE_MAX + 1, Math.min(a.x + PANE_MAX - 1, b.x)), by = Math.max(a.y - PANE_MAX + 1, Math.min(a.y + PANE_MAX - 1, b.y));
+        this.area = { x: Math.min(a.x, bx), y: Math.min(a.y, by), w: Math.abs(bx - a.x) + 1, h: Math.abs(by - a.y) + 1 };
+        this.buildPaneHead();
+        this.requestPresent();
+      };
+      pick(a);
+      const move = (ev: MouseEvent) => pick(tileAt(ev));
       const up = () => {
         window.removeEventListener('mousemove', move);
         window.removeEventListener('mouseup', up);
-        this.app.holdRender = false;
-        this.app.renderPause();
-        if (this.stroke) {
-          this.stroke = false;
-          if (label === 'Draw') this.commit(label);
-        }
+        this.buildSide();
       };
       window.addEventListener('mousemove', move);
       window.addEventListener('mouseup', up);
     });
     let lastHover = -1;
     c.addEventListener('mousemove', (e) => {
-      if (this.stroke) return;
+      if (this.stroke || !this.file) return;
+      const p = tileAt(e), t = p.y * 16 + p.x;
+      if (t === lastHover) return;
+      lastHover = t;
+      c.title = `${this.tileTitle(t)}\nClick/drag: edit in the pixel editor · right click: paste the tiles shown there`;
+    });
+  }
+
+  private tileTitle(t: number): string {
+    const spr = t < 0x80 ? this.gfxSlots().filter((s) => s.sprite && s.file === this.cur).map((s) => ` · sprite tile ${spriteTile(s.first, t)}`).join('') : '';
+    return `Tile ${hex(t, 2)}${spr}${this.animatedTiles().has(t) ? ' (animated – Ctrl+click: open its animation)' : ''}`;
+  }
+
+  // right drag on the sheet: pastes the pixel editor's tiles with their top left at each tile under the mouse
+  private stamp(a: { x: number; y: number }, tileAt: (e: MouseEvent) => { x: number; y: number }): void {
+    if (!this.canWrite()) return;
+    this.dropFloat();
+    const r = this.paneRect();
+    const pix = new Uint8Array(r.w * r.h);
+    for (let y = 0; y < r.h; y++) for (let x = 0; x < r.w; x++) pix[y * r.w + x] = this.get(r.x + x, r.y + y);
+    this.stroke = true;
+    this.app.holdRender = true;
+    let last = -1;
+    const put = (t: { x: number; y: number }) => {
+      if (t.y * 16 + t.x === last) return;
+      last = t.y * 16 + t.x;
+      for (let y = 0; y < r.h; y += 8) for (let x = 0; x < r.w; x += 8) if (t.x * 8 + x < this.W()) this.warnAnimated(t.x * 8 + x, t.y * 8 + y);
+      for (let y = 0; y < r.h; y++) for (let x = 0; x < r.w; x++) if (t.x * 8 + x < this.W()) this.set(t.x * 8 + x, t.y * 8 + y, pix[y * r.w + x]);
+      this.requestPresent();
+    };
+    put(a);
+    const move = (ev: MouseEvent) => put(tileAt(ev));
+    const up = () => {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+      this.stroke = false;
+      this.app.holdRender = false;
+      this.app.renderPause();
+      this.commit(this.area.w * this.area.h > 1 ? 'Tiles pasted' : 'Tile pasted');
+    };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+  }
+
+  // The pixel editor paints as Aseprite does: left with the left color, right with the right color, Alt
+  // picks a color for that button, Shift+click draws a line from the last point. Each stroke is one ROM edit.
+  private attachPane(): void {
+    const c = this.pane;
+    c.addEventListener('contextmenu', (e) => e.preventDefault());
+    const pos = (e: MouseEvent) => {
+      const rc = c.getBoundingClientRect(), r = this.paneRect();
+      return { x: r.x + Math.floor(((e.clientX - rc.left) / rc.width) * r.w), y: r.y + Math.floor(((e.clientY - rc.top) / rc.height) * r.h) };
+    };
+    c.addEventListener('mousedown', (e) => {
+      if (!this.file || (e.button !== 0 && e.button !== 2)) return;
+      e.preventDefault();
+      const p = pos(e);
+      if (e.button === 0 && (e.ctrlKey || e.metaKey)) { this.gotoAnim((p.y >> 3) * 16 + (p.x >> 3)); return; }
+      const tool: Tool = e.altKey ? 'pick' : this.tool;
+      const right = e.button === 2;
+      if (tool === 'pick') {
+        if (right) this.bg = this.get(p.x, p.y); else this.fg = this.get(p.x, p.y);
+        this.focusTile = (p.y >> 3) * 16 + (p.x >> 3);
+        this.buildSide();
+        this.requestPresent();
+        return;
+      }
+      if (tool === 'select') { this.selectDrag(p, pos); return; }
+      if (!this.canWrite()) return;
+      const v = tool === 'erase' ? 0 : right ? this.bg : this.fg;
+      this.warnAnimated(p.x, p.y);
+      if (tool === 'fill') { this.fill(p.x, p.y, v); this.requestPresent(); this.app.renderPause(); this.commit('Fill'); return; }
+      this.stroke = true;
+      this.app.holdRender = true;
+      if (e.shiftKey && this.lastPt) this.line(this.lastPt.x, this.lastPt.y, p.x, p.y, v); else this.paint(p.x, p.y, v);
+      let last = p;
+      this.lastPt = p;
+      this.requestPresent();
+      const move = (ev: MouseEvent) => {
+        const n = pos(ev);
+        if (n.x === last.x && n.y === last.y) return;
+        this.line(last.x, last.y, n.x, n.y, v);
+        last = this.lastPt = n;
+        this.requestPresent();
+      };
+      const up = () => {
+        window.removeEventListener('mousemove', move);
+        window.removeEventListener('mouseup', up);
+        this.stroke = false;
+        this.app.holdRender = false;
+        this.app.renderPause();
+        this.commit(tool === 'erase' ? 'Erase' : 'Draw');
+      };
+      window.addEventListener('mousemove', move);
+      window.addEventListener('mouseup', up);
+    });
+    let lastHover = -1;
+    c.addEventListener('mousemove', (e) => {
+      if (this.stroke || !this.file) return;
       const p = pos(e);
       // eyedropper (tool or Alt held): pipette cursor and the color under it
       const picking = this.tool === 'pick' || e.altKey;
       c.classList.toggle('pipette', picking);
-      if (picking && this.file && p.x >= 0 && p.y >= 0 && p.x < this.W() && p.y < this.H()) {
-        const v = this.get(p.x, p.y);
-        showColorLoupe(e, v ? this.colors()[v] : null, `Color ${v}`);
-      } else hideColorLoupe();
-      const t = (p.y >> 3) * 16 + (p.x >> 3);
+      if (picking) { const v = this.get(p.x, p.y); showColorLoupe(e, v ? this.colors()[v] : null, `Color ${v}`); } else hideColorLoupe();
       if (p.y * 128 + p.x === lastHover) return;
       lastHover = p.y * 128 + p.x;
-      const spr = t < 0x80 ? this.gfxSlots().filter((s) => s.sprite && s.file === this.cur).map((s) => ` · sprite tile ${spriteTile(s.first, t)}`).join('') : '';
-      c.title = `Tile ${hex(t, 2)}${spr}${this.animatedTiles().has(t) ? ' (animated – Ctrl+click: open its animation)' : ''} · pixel ${p.x & 7},${p.y & 7} · color ${this.file ? this.get(Math.max(0, p.x), Math.max(0, p.y)) : ''}`;
+      c.title = `${this.tileTitle((p.y >> 3) * 16 + (p.x >> 3))} · pixel ${p.x & 7},${p.y & 7} · color ${this.get(p.x, p.y)}`;
     });
     c.addEventListener('mouseleave', () => { c.classList.remove('pipette'); hideColorLoupe(); });
   }
 
+  // selection tool: dragging inside the selection moves it (lifting the pixels), outside draws a new one,
+  // a click outside deselects; all inside the pixel editor
+  private selectDrag(p: { x: number; y: number }, pos: (e: MouseEvent) => { x: number; y: number }): void {
+    const r = this.float ?? this.sel, pr = this.paneRect();
+    const clampX = (x: number, w: number) => Math.max(pr.x, Math.min(pr.x + pr.w - w, x));
+    const clampY = (y: number, hh: number) => Math.max(pr.y, Math.min(pr.y + pr.h - hh, y));
+    let move: (ev: MouseEvent) => void;
+    let up = () => {};
+    if (r && p.x >= r.x && p.y >= r.y && p.x < r.x + r.w && p.y < r.y + r.h) {
+      if (!this.float && !this.canWrite()) return;
+      if (!this.float) this.lift('Selection moved');
+      const fl = this.float!, ox = p.x - fl.x, oy = p.y - fl.y;
+      this.stroke = true;
+      move = (ev) => {
+        const n = pos(ev);
+        fl.x = clampX(n.x - ox, fl.w); fl.y = clampY(n.y - oy, fl.h);
+        this.draw();
+      };
+      up = () => { this.stroke = false; };
+    } else {
+      this.dropFloat();
+      const a = { x: clampX(p.x, 1), y: clampY(p.y, 1) };
+      this.sel = null;
+      move = (ev) => {
+        const n = pos(ev), b = { x: clampX(n.x, 1), y: clampY(n.y, 1) };
+        this.sel = { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(a.x - b.x) + 1, h: Math.abs(a.y - b.y) + 1 };
+        this.requestPresent();
+      };
+    }
+    this.draw();
+    const done = () => {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', done);
+      up();
+    };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', done);
+  }
+
   // lifts the selected pixels into a floating block (the place becomes transparent)
-  private lift(): void {
+  private lift(label: string): void {
     const s = this.sel;
     if (!s) return;
     const pix = new Uint8Array(s.w * s.h);
     for (let y = 0; y < s.h; y++) for (let x = 0; x < s.w; x++) { pix[y * s.w + x] = this.get(s.x + x, s.y + y); this.set(s.x + x, s.y + y, 0); }
-    this.float = { ...s, pix };
+    this.float = { ...s, pix, label };
   }
 
   // puts a floating block down and stores the file
@@ -911,34 +1106,54 @@ export class GfxTab implements WsPanel {
       const v = fl.pix[y * fl.w + x];
       if (v !== 255) this.set(fl.x + x, fl.y + y, v);
     }
-    this.sel = { x: Math.max(0, fl.x), y: Math.max(0, fl.y), w: fl.w, h: fl.h };
-    this.commit('Selection moved');
+    this.sel = { x: fl.x, y: fl.y, w: fl.w, h: fl.h };
+    this.commit(fl.label);
+    this.draw();
+  }
+
+  // Esc: the floating block goes away, the file is as in the ROM again (nothing written)
+  private cancelFloat(): void {
+    this.float = null;
+    this.sel = null;
+    this.file = readGfx(this.app.rom, this.cur, this.bppOverride);
     this.draw();
   }
 
   private copySel(): void {
-    const r = this.float ?? this.sel;
-    if (!r) { toast('First select an area with the selection tool (S)'); return; }
+    const r = this.float ?? this.sel ?? this.paneRect();
     const pix = new Uint8Array(r.w * r.h);
     for (let y = 0; y < r.h; y++) for (let x = 0; x < r.w; x++) pix[y * r.w + x] = this.get(r.x + x, r.y + y);
     this.clip = { w: r.w, h: r.h, pix };
     toast(`${r.w}×${r.h} pixels copied`);
   }
+  // pastes as a floating block in the pixel editor (grown to hold it), at the selection or its top left
   private pasteSel(): void {
     const c = this.clip;
     if (!c) { toast('Copy something first'); return; }
+    if (!this.canWrite()) return;
     this.dropFloat();
-    const at = this.sel ?? { x: 0, y: 0 };
-    this.float = { x: at.x, y: at.y, w: c.w, h: c.h, pix: c.pix.slice() };
+    const a = this.area;
+    if (c.w > a.w * 8 || c.h > a.h * 8) {
+      this.area = { ...a, w: Math.max(a.w, Math.ceil(c.w / 8)), h: Math.max(a.h, Math.ceil(c.h / 8)) };
+      this.clampArea();
+      this.sel = null;
+    }
+    const r = this.paneRect(), at = this.sel ?? r;
+    this.float = { x: Math.max(r.x, Math.min(r.x + r.w - c.w, at.x)), y: Math.max(r.y, Math.min(r.y + r.h - c.h, at.y)), w: c.w, h: c.h, pix: c.pix.slice(), label: 'Pasted' };
     this.tool = 'select';
-    this.buildTools();
+    this.buildPaneHead();
     this.draw();
   }
 
+  // flips/rotates the floating block, the pixel selection or else the pixel editor's tiles
   private transform(kind: 'h' | 'v' | 'r'): void {
-    if (!this.float) { if (!this.sel) { toast('First select an area with the selection tool (S)'); return; } this.lift(); }
+    const r = this.float ?? this.sel ?? this.paneRect();
+    if (kind === 'r' && r.w !== r.h) { toast('Rotating only works with a square selection'); return; }
+    if (!this.canWrite()) return;
+    const had = this.sel || this.float;
+    if (!this.float) { this.sel = r; this.lift(''); }
     const fl = this.float!;
-    if (kind === 'r' && fl.w !== fl.h) { toast('Rotating only works with a square selection'); return; }
+    fl.label = kind === 'r' ? 'Rotated' : 'Flipped';
     const out = new Uint8Array(fl.pix.length);
     for (let y = 0; y < fl.h; y++) for (let x = 0; x < fl.w; x++) {
       const v = fl.pix[y * fl.w + x];
@@ -948,6 +1163,7 @@ export class GfxTab implements WsPanel {
     }
     fl.pix = out;
     this.dropFloat();
+    if (!had) { this.sel = null; this.present(); }
   }
 
   // ---------- files ----------
@@ -1130,12 +1346,16 @@ export class GfxTab implements WsPanel {
     if (ctrl && k === 'v') { this.pasteSel(); return true; }
     if (ctrl || e.altKey) return false;
     if (k === 'b') { this.setTool('pen'); return true; }
+    if (k === 'e') { this.setTool('erase'); return true; }
     if (k === 'f') { this.setTool('fill'); return true; }
     if (k === 'i') { this.setTool('pick'); return true; }
     if (k === 's') { this.setTool('select'); return true; }
-    if (e.key === 'Escape' && (this.float || this.sel)) { this.dropFloat(); this.sel = null; this.draw(); return true; }
+    if (k === 'x') { [this.fg, this.bg] = [this.bg, this.fg]; this.buildSide(); return true; }
+    // Esc cancels a floating selection (nothing written), else deselects; Enter puts it down
+    if (e.key === 'Escape' && this.float) { this.cancelFloat(); return true; }
+    if (e.key === 'Escape' && this.sel) { this.sel = null; this.present(); return true; }
     if (e.key === 'Enter' && this.float) { this.dropFloat(); return true; }
-    if (/^[0-9]$/.test(k) && this.file && Number(k) < (1 << this.file.bpp)) { this.color = Number(k); this.buildSide(); return true; }
+    if (/^[0-9]$/.test(k) && this.file && Number(k) < (1 << this.file.bpp)) { this.fg = Number(k); this.buildSide(); return true; }
     return false;
   }
 }

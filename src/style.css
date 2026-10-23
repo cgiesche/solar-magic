@@ -423,15 +423,23 @@ body.mt-dragging .mt-big { outline: 2px dashed var(--accent); outline-offset: -2
 .gt-list .level-item { display: flex; justify-content: space-between; align-items: baseline; }
 .gt-used { font-size: 10px; padding: 0 4px; border-radius: 6px; background: var(--accent2); color: #fff; }
 .gt-name { flex: 1; min-width: 0; margin: 0 4px; overflow: hidden; text-overflow: ellipsis; }
-.gt-view { flex: 1; min-width: 0; overflow: auto; border: 1px solid var(--border); background: #15171b; }
-.gt-canvas { display: block; image-rendering: pixelated; cursor: crosshair; }
-.gt-canvas[data-tool="select"] { cursor: cell; }
-.gt-canvas[data-tool="pick"], .gt-canvas[data-tool].pipette { cursor: var(--pipette); }
+.gt-view { flex: 0 0 auto; max-width: 45%; overflow: auto; border: 1px solid var(--border); background: #15171b; }
+.gt-canvas { display: block; image-rendering: pixelated; cursor: cell; }
+.gt-pane { flex: 1; min-width: 220px; display: flex; flex-direction: column; gap: 4px; min-height: 0; }
+.gt-pane-head { flex-wrap: wrap; }
+.gt-pane-view { flex: 1; min-height: 0; overflow: hidden; display: flex; align-items: center; justify-content: center; border: 1px solid var(--border); background: #15171b; }
+.gt-pane-canvas { display: block; image-rendering: pixelated; cursor: crosshair; }
+.gt-pane-canvas[data-tool="select"] { cursor: cell; }
+.gt-pane-canvas[data-tool="pick"], .gt-pane-canvas[data-tool].pipette { cursor: var(--pipette); }
 .gt-side { width: 270px; flex-shrink: 0; display: flex; flex-direction: column; gap: 7px; overflow-y: auto; }
 .gt-colors { display: grid; grid-template-columns: repeat(8, 1fr); gap: 3px; }
 .gt-color { height: 26px; border-radius: 3px; border: 1px solid #0009; cursor: pointer; font-size: 10px; display: flex; align-items: flex-end; justify-content: flex-end; padding: 1px 3px; color: #fff; text-shadow: 0 0 2px #000; }
 .gt-color.transp { background: repeating-conic-gradient(#2b2e35 0 25%, #23262c 0 50%) 0 0 / 10px 10px; }
 .gt-color.sel { outline: 2px solid #fff; outline-offset: 1px; }
+.gt-color.bg { box-shadow: inset 0 0 0 2px #fff, inset 0 0 0 3px #000; }
+.gt-fgbg { display: flex; gap: 10px; font-size: 11px; }
+.gt-fgbg-chip { display: inline-flex; align-items: center; gap: 4px; }
+.gt-fgbg-chip .gt-color { width: 18px; height: 18px; padding: 0; cursor: default; }
 .gt-rows { display: flex; flex-direction: column; gap: 2px; }
 .gt-row { display: flex; align-items: center; gap: 6px; padding: 2px 4px; }
 .gt-row-strip { display: flex; flex: 1; height: 10px; }

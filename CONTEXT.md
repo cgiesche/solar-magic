@@ -47,6 +47,10 @@ _Avoid_: ExGFX (for all of them), GFX entry (that is the file table's)
 One of a level's places for a graphics file (core/gfxslots.ts): FG1–FG3, BG1 and SP1–SP4 (the header's tileset and sprite set by default), BG2/BG3, layer 3's LG1–LG4 (the game's 28–2B by default) and LT3 (none by default; an LT3 file copies at most its own length). FF puts the default back. Changing one is a ROM edit of that level only.
 _Avoid_: GFX bypass (Lunar Magic's table), slot (alone, where an animation slot could be meant)
 
+**Pixel editor**:
+The zoomed view beside a graphics file's sheet in the Graphics tab, showing the 8x8 tiles picked on the sheet (at most 8x8 of them): the only place pixels are painted. The sheet itself picks tiles (left) and pastes them (right), as the other editors do.
+_Avoid_: canvas, paint dialog
+
 **Level size**:
 The height of a horizontal level without layer 2 objects, one of Lunar Magic 3.00's 32 sizes (the editor offers 00-1B); its screens share the game's level data, so a taller level has fewer screens. Objects and sprites below row 31 are placed by subscreens of 32 rows.
 _Avoid_: dimension, level mode (that is the header's)
