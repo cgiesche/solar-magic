@@ -295,7 +295,7 @@ const block: PartAdapter<'block'> = {
   },
   apply(rom, _mine, { preview, opt, plan, sprites }, claim) {
     const defines = sprites ? linkedDefines(sprites) : new Map<string, Record<string, string>>();
-    const drawn = new Set(plan.map16 ? map16Targets(plan.map16.data, plan.map16.at) : []);
+    const drawn = new Set([...(plan.map16 ? map16Targets(plan.map16.data, plan.map16.at) : []), ...(plan.romMap16?.fg.values() ?? [])]);
     const extra = preview.callisto ? toolFiles(preview.callisto, preview.files) : undefined;
     return applyBlocks(rom, preview.upload!, plan.blocks, defines, partRoutines(preview, 'block'), opt.blank, opt.tileWords, drawn, (f) => claim('block', f), extra);
   },
@@ -394,8 +394,9 @@ function previewGraphics(p: ReadyPreview): DetectedGraphics {
 }
 
 // where the package's blocks, Map16 tiles and ExGFX would go in this ROM, and how they link up
-export function planUpload(rom: Rom, preview: ReadyPreview, blank: number[]): PackagePlan {
-  return planPackage(rom, { files: preview.files, blocks: partsOf(preview, 'block').flatMap((b) => b.found), graphics: previewGraphics(preview) }, blank);
+// (tilesets: this ROM's words of FG tiles 000-1FF per tileset, see PlanInput)
+export function planUpload(rom: Rom, preview: ReadyPreview, blank: number[], tilesets?: number[][][]): PackagePlan {
+  return planPackage(rom, { files: preview.files, blocks: partsOf(preview, 'block').flatMap((b) => b.found), graphics: previewGraphics(preview), tilesets }, blank);
 }
 
 // where every part goes in this ROM

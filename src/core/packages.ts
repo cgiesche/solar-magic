@@ -187,9 +187,9 @@ export function defaultAssignment(p: ManualPreview, level: number): ManualAssign
 // sample: the sample level to put in place of the current one (a level edit, not saved yet)
 export interface InstallResult extends ApplyResult { pkg: Package | null; sample?: SampleLevel }
 
-// the sample level with the package's parts where they landed: Map16 tiles by the plan, custom sprites
-// when certain (one level sprite of that type in the package and one number of it in the level, or a
-// PIXI list.txt of the package naming the number); its background with the package's BG Map16 tiles,
+// the sample level with the package's parts where they landed: Map16 tiles by the plan (a whole-ROM
+// .map16's too), custom sprites when certain (one level sprite of that type in the package and one
+// number of it in the level, or a PIXI list.txt of the package naming the number); its background with the package's BG Map16 tiles,
 // its own colors, the package's ExGFX in its slots (the level setup)
 function placeSample(rom: Rom, preview: ReadyPreview, ctx: InstallContext, into: Level, opt: InstallOptions): SampleLevel {
   const d = preview.files.get(preview.sample!)!;
@@ -201,7 +201,7 @@ function placeSample(rom: Rom, preview: ReadyPreview, ctx: InstallContext, into:
   const used = parseSprites(sec.sprites, 0, false, spriteSizes(rom)).sprites.filter((q) => q.extra & 2);
   const listed = pixiListNumbers(preview);
   const sample = sampleLevel(rom, d, into, {
-    tile: (t) => { const i = from.indexOf(t); return i >= 0 ? to[i] : null; },
+    tile: (t) => { const i = from.indexOf(t); return i >= 0 ? to[i] : ctx.plan.romMap16?.fg.get(t) ?? null; },
     sprite: (num) => {
       const file = listed.get(num);
       const byList = file ? sprites.find((x) => x.file === file) : undefined;

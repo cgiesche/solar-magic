@@ -154,7 +154,7 @@ One typed piece of a package: a patch, an UberASM file, a block, a sprite, a son
 _Avoid_: Component, Item
 
 **Graphics part**:
-A part without code: Map16 tiles (.map16), an ExGFX file, a palette (.pal with its .palmask), the shared palettes' colors it changes (only those differing from the clean game's; set back when the package is removed), a global GFX file it edits (GFX00–33, only those differing from the clean game's; set back when the package is removed) or global animation slots (put in free slots of the global list, their frames in its Anim graphic). Map16 tiles and ExGFX keep the author's tile or number (up to FFF) if it is free, else they take the next free one of the file's range (see ExGFX range).
+A part without code: Map16 tiles (.map16), an ExGFX file, a palette (.pal with its .palmask), the shared palettes' colors it changes (only those differing from the clean game's; set back when the package is removed), a global GFX file it edits (GFX00–33, only those differing from the clean game's; set back when the package is removed) or global animation slots (put in free slots of the global list, their frames in its Anim graphic). Map16 tiles and ExGFX keep the author's tile or number (up to FFF) if it is free, else they take the next free one of the file's range (see ExGFX range). From an export of all Map16 (Lunar Magic's whole-ROM .map16) only the FG and BG tiles differing from the clean game are the package's, each page kept together; a tile acting like a block's tile shows that block. Its tileset pages 00–01 are the game's: differences are reported, not taken over.
 _Avoid_: Resource, asset
 
 **ExGFX range**:

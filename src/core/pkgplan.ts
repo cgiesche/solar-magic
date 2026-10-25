@@ -16,12 +16,12 @@ import type { Upload } from './patchpkg.ts';
 import type { ApplyResult } from './patchapply.ts';
 import { rewriteDefines } from './patchpkg.ts';
 import { parseBlockList, loadBlockProject, saveBlockProject, assignBlock, type BlockProject } from './blocks.ts';
-import { parseMap16File, map16Targets, exgfxName, type Map16File } from './map16file.ts';
+import { parseMap16File, parseRomMap16, romActsLike, map16Targets, exgfxName, type Map16File, type RomMap16 } from './map16file.ts';
 import { EXT_FIRST, EXT_TILES, setExtTileWords } from './map16ext.ts';
 import { slotTiles, type ExList, type ExSlot } from './exanim.ts';
 import { parseMwl, type MwlLevel } from './bgpack.ts';
 import {
-  slotOfWord, gfxNumber, usedFgTiles, freeRun, fgOrigin, packPalettes, frameSources, putFgTiles, storeGfx, placeInLevel,
+  slotOfWord, gfxNumber, usedFgTiles, freeRun, fgOrigin, packPalettes, frameSources, putFgTiles, putRomMap16, placeRomMap16, storeGfx, placeInLevel,
   type PackPalette, type FrameSources, type LevelState, type Placed,
 } from './levelgfx.ts';
 import { GFX_SLOTS } from './gfxslots.ts';
@@ -126,6 +126,9 @@ export function includedFiles(files: Map<string, Uint8Array>): Set<string> {
 export interface PlannedBlock { file: string; tiles: number[]; acts: number }
 // the package's FG .map16: from = the tile its top left was exported from (as far as known), at = where it goes
 export interface PlannedMap16 { file: string; data: Map16File; from: number; at: number }
+// the package's whole-ROM .map16 (an export of all Map16): its tiles that differ from the clean game,
+// file tile → tile here (FG and BG; levelgfx.ts placeRomMap16)
+export interface PlannedRomMap16 { file: string; data: RomMap16; fg: Map<number, number>; bg: Map<number, number> }
 // an ExGFX file: lmNum = its number in the package (file name), num = the number it is stored as,
 // slot = the graphics slot it is for (null: none known – stored only)
 // size: the file's size unpacked (gfxDataSize)
@@ -134,6 +137,7 @@ export interface PlannedGfx { file: string; lmNum: number | null; num: number; s
 export interface PackagePlan {
   blocks: PlannedBlock[];
   map16: PlannedMap16 | null;
+  romMap16: PlannedRomMap16 | null; // instead of map16
   gfx: PlannedGfx[];
   palettes: PackPalette[];
   sample: MwlLevel | null; // the sample level, parsed
@@ -144,7 +148,9 @@ export interface PackagePlan {
   notes: string[];
 }
 
-export interface PlanInput { files: Map<string, Uint8Array>; blocks: DetectedBlock[]; graphics: DetectedGraphics }
+// tilesets: this ROM's words of FG tiles 000-1FF per tileset (tilesets.ts tilesetWords), when known: a
+// whole-ROM .map16's tileset pages differing from them are reported
+export interface PlanInput { files: Map<string, Uint8Array>; blocks: DetectedBlock[]; graphics: DetectedGraphics; tilesets?: number[][][] }
 
 export function planPackage(rom: Rom, input: PlanInput, blank: number[]): PackagePlan {
   const { files, graphics } = input;
@@ -153,8 +159,11 @@ export function planPackage(rom: Rom, input: PlanInput, blank: number[]): Packag
   if (graphics.mwl) {
     try { sample = parseMwl(files.get(graphics.mwl)!); } catch (e) { notes.push(`${base(graphics.mwl)}: ${e instanceof Error ? e.message : e}`); }
   }
-  // the FG .map16 (a BG one is for a sample level's background)
-  const maps = graphics.map16.flatMap((file) => {
+  // an export of all Map16 has all of the package's; else the FG .map16 (a BG one is for a sample level's
+  // background)
+  const whole = graphics.map16.map((file) => ({ file, data: parseRomMap16(files.get(file)!) })).find((m) => m.data) ?? null;
+  for (const f of whole ? graphics.map16.filter((f) => f !== whole.file) : []) notes.push(`${base(f)}: not used – ${base(whole!.file)} has all of the package's Map16`);
+  const maps = whole ? [] : graphics.map16.flatMap((file) => {
     try { return [{ file, data: parseMap16File(files.get(file)!) }]; } catch (e) { notes.push(`${base(file)}: ${e instanceof Error ? e.message : e}`); return []; }
   });
   const fgMap = maps.find((m) => !m.data.origin?.bg) ?? null;
@@ -163,9 +172,20 @@ export function planPackage(rom: Rom, input: PlanInput, blank: number[]): Packag
   const taken = new Set<number>();
   const isUsed = (t: number) => used(t) || taken.has(t);
 
+  let listed = input.blocks.filter((b) => b.tile !== undefined);
+  // the whole-ROM .map16 page by page, the list.txt blocks on its pages moving with them
+  let romMap16: PlannedRomMap16 | null = null;
+  const pageShift = new Map<number, number>();
+  if (whole) {
+    const p = placeRomMap16(rom, whole.data!, blank, isUsed, listed.map((b) => b.tile!), input.tilesets, notes);
+    romMap16 = { file: whole.file, data: whole.data!, fg: p.fg, bg: p.bg };
+    for (const t of p.fg.values()) taken.add(t);
+    for (const [pg, d] of p.shift) pageShift.set(pg, d);
+  }
+  const onPage = input.blocks.filter((b) => b.tile !== undefined && pageShift.has(b.tile >> 8));
+  listed = listed.filter((b) => !onPage.includes(b));
   // Map16 tiles: the author's position when free, else the next free one. With a list.txt, its tiles
   // decide and the .map16 is placed to fit them (top left = the lowest block tile)
-  const listed = input.blocks.filter((b) => b.tile !== undefined);
   let map16: PlannedMap16 | null = null;
   let shift = 0; // list.txt tiles moved by this much (taken here)
   if (fgMap) {
@@ -187,18 +207,37 @@ export function planPackage(rom: Rom, input: PlanInput, blank: number[]): Packag
     shift = at - want;
   }
   for (const b of listed) taken.add(b.tile! + shift);
+  const tileOf = (b: DetectedBlock) => b.tile! + (pageShift.get(b.tile! >> 8) ?? shift);
+  for (const b of onPage) taken.add(tileOf(b));
 
   // blocks: list.txt tiles; else linked to the .map16 tiles (one block: all of them; as many blocks as
   // tiles: in order); else the next free tile
   const mapTiles = map16 ? map16Targets(map16.data, map16.at) : [];
   const unlisted = input.blocks.filter((b) => b.tile === undefined);
   const blocks: PlannedBlock[] = [];
-  const actsAt = (t: number) => { const i = mapTiles.indexOf(t); return i >= 0 ? map16!.data.acts?.[i] : undefined; };
-  for (const b of listed) {
-    const t = b.tile! + shift;
+  const fromTile = new Map([...(romMap16?.fg ?? [])].map(([f, t]) => [t, f]));
+  const actsAt = (t: number) => {
+    const f = fromTile.get(t);
+    if (f !== undefined) return romActsLike(romMap16!.data, f) ?? undefined;
+    const i = mapTiles.indexOf(t);
+    return i >= 0 ? map16!.data.acts?.[i] : undefined;
+  };
+  for (const b of [...onPage, ...listed]) {
+    const t = tileOf(b);
     const have = blocks.find((x) => x.file === b.file);
     if (have) { have.tiles.push(t); continue; }
     blocks.push({ file: b.file, tiles: [t], acts: b.acts ?? actsAt(t) ?? 0x130 });
+  }
+  // a tile of the whole-ROM .map16 acting like a block's tile shows that block (Lunar Magic runs the
+  // block's code for it): the block goes on it too
+  if (romMap16) {
+    const blockAt = new Map(onPage.map((b) => [b.tile!, blocks.find((x) => x.file === b.file)!]));
+    const on = new Set(blocks.flatMap((b) => b.tiles));
+    for (const [f, t] of romMap16.fg) {
+      const a = romActsLike(romMap16.data, f, (x) => blockAt.has(x));
+      const b = a !== null ? blockAt.get(a) : undefined;
+      if (b && !on.has(t)) { b.tiles.push(t); on.add(t); }
+    }
   }
   if (!listed.length && mapTiles.length && unlisted.length) {
     if (unlisted.length === 1) blocks.push({ file: unlisted[0].file, tiles: [...mapTiles], acts: unlisted[0].acts ?? actsAt(mapTiles[0]) ?? 0x130 });
@@ -247,7 +286,7 @@ export function planPackage(rom: Rom, input: PlanInput, blank: number[]): Packag
   });
 
   const palettes = packPalettes(files, graphics.pal, graphics.palmask, notes);
-  return { blocks, map16, gfx, palettes, sample, exanim, frames, notes };
+  return { blocks, map16, romMap16, gfx, palettes, sample, exanim, frames, notes };
 }
 
 // links changed in the preview: where the .map16 tiles go, which block each of them shows (null: none),
@@ -336,6 +375,14 @@ export function applyGraphics(rom: Rom, files: Map<string, Uint8Array>, plan: Pa
     const m = plan.map16;
     const targets = putFgTiles(rom, m.data, m.from, m.at, new Set(plan.blocks.flatMap((b) => b.tiles)));
     prints.push(`${targets.length} Map16 tile(s) from ${hx(m.at, 3)}`);
+  }
+  if (plan.romMap16) {
+    const m = plan.romMap16;
+    putRomMap16(rom, m.data, m, new Set(plan.blocks.flatMap((b) => b.tiles)));
+    // its pages, those moved with the tile they start at
+    const pages = (to: Map<number, number>, bg: number) => [...new Map([...to].map(([f, t]) => [f >> 8, t - f]))]
+      .map(([p, d]) => `${hx(p + bg, 2)}${d ? ` at ${hx((p << 8) + d, 3)}` : ''}`).join(', ');
+    prints.push(`${m.fg.size} FG Map16 tile(s) (pages ${pages(m.fg, 0)}) and ${m.bg.size} BG tile(s) (pages ${pages(m.bg, 0x80)}) from ${base(m.file)}`);
   }
   prints.push(...storeGfx(rom, files, plan.gfx));
   return { ok: true, errors: [], warnings: [], prints };

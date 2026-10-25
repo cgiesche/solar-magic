@@ -1035,10 +1035,12 @@ export class App {
   // the tilesets in which FG Map16 tile t is the open level's tile (all for the standard tiles): the
   // pointers each tileset loads (tilesets.ts), learned once and kept in the result cache
   tilesetsOf(t: number): number[] {
-    const all = Array.from({ length: TILESETS }, (_, i) => i);
-    if (!isTilesetTile(t)) return all;
-    const ptrs = all.map((ts) => this.learner.now(`tsp1:${ts}`, (emu) => tilesetPointers(emu, ts)));
-    return sharingTilesets(ptrs, this.level.header.tileset, t);
+    if (!isTilesetTile(t)) return Array.from({ length: TILESETS }, (_, i) => i);
+    return sharingTilesets(this.tilesetPointers(), this.level.header.tileset, t);
+  }
+  // per tileset the pointers of FG Map16 tiles 000-1FF (tilesets.ts), learned once and kept in the result cache
+  tilesetPointers(): number[][] {
+    return Array.from({ length: TILESETS }, (_, ts) => this.learner.now(`tsp1:${ts}`, (emu) => tilesetPointers(emu, ts)));
   }
   // the entrance actions that make a level slippery (slippery.ts), learned once and kept in the result cache
   slipperyActions(): number[] {

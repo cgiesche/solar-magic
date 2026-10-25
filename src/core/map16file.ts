@@ -34,6 +34,54 @@ export function parseMap16File(d: Uint8Array): Map16File {
   return origin ? { width, height, tiles, acts, origin } : { width, height, tiles, acts };
 }
 
+// Lunar Magic's export of all Map16 (as Callisto keeps it, export/all_map16.map16; seen in Lunar Magic
+// 3.63's): the same header, its section table (at 0x10, 8 entries) has
+// 0: all tiles, FG then BG; 1: the FG tiles' acts like (2 bytes per tile); 2: FG tiles 0000–7FFF (pages
+// 00–7F, 00–01 left empty: they are the tilesets'); 3: BG tiles 0000–7FFF (pages 80–FF); 5: pages 00–01
+// of tilesets 0–E (0x200 tiles each); then two tables of page 00–01 tiles kept apart from the tilesets:
+// 6 (0x100 bytes) the vertical pipe's end and body in palettes 3, 5, 6, 7, 7 (0x40 bytes) tiles
+// 1C4–1C7 and 1EC–1EF (the clean game's at $0D:8A70). Neither is taken over: they are pages 00–01.
+// Tile words 4 per tile (TL, BL, TR, BR) in fg, bg and each tileset.
+export const ROM_MAP16_TILES = 0x8000;
+export const ROM_MAP16_TILESET_TILES = 0x200;
+export interface RomMap16 { fg: Uint16Array; acts: Uint16Array; bg: Uint16Array; tilesets: Uint16Array[] }
+
+// the words of tile t of fg, bg or a tileset
+export const romTileWords = (a: Uint16Array, t: number): number[] => Array.from(a.subarray(t * 4, t * 4 + 4));
+
+// the tile FG tile t acts like, followed while that acts like another of 200 on (Lunar Magic's acts
+// like may name any tile) – until `stop` says so, else to one of pages 00–01; null when it leads
+// nowhere (a loop)
+export function romActsLike(m: RomMap16, t: number, stop: (t: number) => boolean = () => false): number | null {
+  let a = m.acts[t];
+  for (let n = 0; a >= ROM_MAP16_TILESET_TILES && !stop(a); n++) {
+    if (n >= 64 || a >= ROM_MAP16_TILES) return null;
+    a = m.acts[a];
+  }
+  return a;
+}
+
+// null when the file is no export of all Map16
+export function parseRomMap16(d: Uint8Array): RomMap16 | null {
+  if (d.length < 0x20 || String.fromCharCode(...d.subarray(0, 4)) !== 'LM16') return null;
+  const u32 = (o: number) => (o + 4 <= d.length ? (d[o] | (d[o + 1] << 8) | (d[o + 2] << 16) | (d[o + 3] << 24)) >>> 0 : 0);
+  const table = u32(0x10);
+  const section = (i: number, size: number): Uint16Array | null => {
+    const off = u32(table + i * 8);
+    if (u32(table + i * 8 + 4) !== size || !off || off + size > d.length) return null;
+    const out = new Uint16Array(size / 2);
+    for (let k = 0; k < out.length; k++) out[k] = d[off + k * 2] | (d[off + k * 2 + 1] << 8);
+    return out;
+  };
+  if (u32(0x14) < 6 * 8) return null;
+  const fg = section(2, ROM_MAP16_TILES * 8), bg = section(3, ROM_MAP16_TILES * 8), acts = section(1, ROM_MAP16_TILES * 2);
+  if (!fg || !bg || !acts) return null;
+  const size = u32(table + 5 * 8 + 4), per = ROM_MAP16_TILESET_TILES * 8;
+  const all = size && !(size % per) ? section(5, size) : null;
+  const tilesets = all ? Array.from({ length: size / per }, (_, i) => all.subarray(i * per / 2, (i + 1) * per / 2)) : [];
+  return { fg, acts, bg, tilesets };
+}
+
 // writes the same layout: header (magic, section table offset at 0x10, width/height at 0x18/0x1C),
 // section table (tiles, acts like), data
 export function writeMap16File(f: Map16File): Uint8Array {

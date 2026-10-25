@@ -41,3 +41,8 @@ export function sharingTilesets(ptrs: number[][], ts: number, t: number): number
   const p = ptrs[ts][t];
   return ptrs.flatMap((q, i) => (q[t] === p ? [i] : []));
 }
+
+// the words of FG Map16 tiles 000-1FF by a tileset's pointers (tilesetPointers)
+export function tilesetWords(rom: Rom, ptrs: number[]): number[][] {
+  return ptrs.map((p) => [0, 1, 2, 3].map((k) => rom.r16((0x0d0000 | p) + k * 2)));
+}

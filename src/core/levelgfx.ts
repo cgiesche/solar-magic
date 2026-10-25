@@ -10,10 +10,10 @@
 import type { Rom } from './rom.ts';
 import { RAM } from './ram.ts';
 import { loadBlockProject } from './blocks.ts';
-import { map16Targets, type Map16File } from './map16file.ts';
+import { map16Targets, romTileWords, romActsLike, ROM_MAP16_TILES, type Map16File, type RomMap16 } from './map16file.ts';
 import { importGfxFile } from './gfxfiles.ts';
 import { EXT_FIRST, EXT_TILES, DEFAULT_ACTS, extTileWords, actsLike, setExtTileWords, setActsLike } from './map16ext.ts';
-import { BG_EXT_TILES, bgExtTileWords, vanillaBgWords, setBgExtTileWords } from './bgmap16.ts';
+import { BG_EXT_FIRST, BG_EXT_TILES, bgExtTileWords, vanillaBgWords, setBgExtTileWords } from './bgmap16.ts';
 import {
   gfxEntry, gfxHex, freeGfx, gfxRangeFor, gfxNumberProblem, type GfxFileKind, customPalette, setCustomPalette,
 } from './patches.ts';
@@ -84,6 +84,16 @@ export function fgPlace(rom: Rom, f: Map16File, want: number, blank: number[]): 
   return freeRun(Math.max(want, EXT_FIRST), map16Targets(f, 0), usedFgTiles(rom, blank), Math.min(16, f.width));
 }
 
+// BG Map16 tiles the ROM already uses: outside 200-FFF or holding other than the fill tile
+export function usedBgTiles(rom: Rom): (t: number) => boolean {
+  const fill = vanillaBgWords(rom, 0x025);
+  return (t) => {
+    if (t < BG_EXT_FIRST || t >= BG_EXT_TILES) return true;
+    const w = bgExtTileWords(rom, t);
+    return !!w && w.some((v, k) => v !== fill[k]);
+  };
+}
+
 // tiles at..at+n-1 of the extended BG Map16 still hold the fill tile
 function freeBgTiles(rom: Rom, at: number, n: number): boolean {
   const fill = vanillaBgWords(rom, 0x025);
@@ -102,6 +112,70 @@ export function bgPlace(rom: Rom, f: Map16File, want: number, first: number): nu
   if (freeBgTiles(rom, want, n)) return want;
   for (let a = first; a + n <= BG_EXT_TILES; a += 16) if (freeBgTiles(rom, a, n)) return a;
   return want;
+}
+
+// a whole-ROM .map16 (map16file.ts parseRomMap16) placed: its tiles that differ from the clean game,
+// file tile → tile here (FG and BG); shift: by how much each of its FG pages moved
+export interface RomMap16Place { fg: Map<number, number>; bg: Map<number, number>; shift: Map<number, number> }
+
+// the key most of `keys` have
+function mostCommon(keys: string[]): string {
+  const n = new Map<string, number>();
+  for (const k of keys) n.set(k, (n.get(k) ?? 0) + 1);
+  return [...n].reduce((m, e) => (e[1] > m[1] ? e : m))[0];
+}
+
+// The tiles of a whole-ROM .map16 that differ from the clean game: on FG pages 02-7F those holding other
+// than the file's fill (the tile most of them hold, Lunar Magic's for unused tiles) and other than an
+// empty tile (`blank`, acting like air), on BG pages 82-FF likewise. Each page stays together: on its
+// own tiles when they – and `also`, tiles of it the package needs as well (its blocks') – are free, else
+// on the next free ones of 200-FFF, its rows kept. Pages 00-01 of the tilesets and BG pages 80-81 are the
+// game's: the tiles differing from this ROM's (`tilesets`: its words of tiles 000-1FF per tileset, when
+// known) go into `notes`, not taken over. Throws when a page finds no room.
+export function placeRomMap16(rom: Rom, m: RomMap16, blank: number[], usedFg: (t: number) => boolean, also: number[], tilesets: number[][][] | undefined, notes: string[]): RomMap16Place {
+  const range = (a: number, b: number) => Array.from({ length: b - a }, (_, i) => a + i);
+  const fgKey = (t: number) => `${romTileWords(m.fg, t).join()}:${m.acts[t]}`;
+  const fgFill = mostCommon(range(EXT_FIRST, ROM_MAP16_TILES).map(fgKey)), empty = `${blank.join()}:${DEFAULT_ACTS}`;
+  const fg = range(EXT_FIRST, ROM_MAP16_TILES).filter((t) => { const k = fgKey(t); return k !== fgFill && k !== empty; });
+  const bgKey = (t: number) => romTileWords(m.bg, t).join();
+  const bgFill = mostCommon(range(BG_EXT_FIRST, ROM_MAP16_TILES).map(bgKey)), bgEmpty = vanillaBgWords(rom, 0x025).join();
+  const bg = range(BG_EXT_FIRST, ROM_MAP16_TILES).filter((t) => { const k = bgKey(t); return k !== bgFill && k !== bgEmpty; });
+  const fgPlace = placePages(fg, also, usedFg, 'FG', notes);
+  const bgPlace = placePages(bg, [], usedBgTiles(rom), 'BG', notes);
+
+  const differing = new Set<number>();
+  m.tilesets.forEach((ts, i) => { for (let t = 0; t < EXT_FIRST; t++) if (tilesets?.[i] && romTileWords(ts, t).join() !== tilesets[i][t].join()) differing.add(t); });
+  if (differing.size) notes.push(`Tiles ${[...differing].sort((a, b) => a - b).map((t) => hx(t, 3)).join(', ')} of the tilesets' pages 00–01 differ from this ROM's – not taken over`);
+  const bgDiffering = range(0, BG_EXT_FIRST).filter((t) => bgKey(t) !== vanillaBgWords(rom, t).join());
+  if (bgDiffering.length) notes.push(`BG tiles ${bgDiffering.map((t) => hx(t, 3)).join(', ')} (pages 80–81) differ from this ROM's – not taken over`);
+  return { fg: fgPlace.to, bg: bgPlace.to, shift: fgPlace.shift };
+}
+
+// tiles placed page by page (see placeRomMap16): first the pages that stay on their own tiles, then the
+// others; freeRun's range 200-FFF is the BG's too
+function placePages(tiles: number[], also: number[], used: (t: number) => boolean, what: string, notes: string[]): { to: Map<number, number>; shift: Map<number, number> } {
+  const taken = new Set<number>();
+  const isUsed = (t: number) => used(t) || taken.has(t);
+  const pages = [...new Set(tiles.map((t) => t >> 8))].map((p) => {
+    const own = tiles.filter((t) => t >> 8 === p);
+    return { p, first: p << 8, own, offsets: [...new Set([...own, ...also.filter((t) => t >> 8 === p)])].map((t) => t - (p << 8)) };
+  });
+  const at = new Map<number, number>();
+  const put = (x: (typeof pages)[number], a: number) => { at.set(x.p, a); for (const o of x.offsets) taken.add(a + o); };
+  for (const x of pages) if (x.offsets.every((o) => !isUsed(x.first + o))) put(x, x.first);
+  for (const x of pages.filter((x) => !at.has(x.p))) {
+    const a = freeRun(x.first, x.offsets, isUsed, 16);
+    if (a < 0) throw new Error(`No room for the ${x.own.length} tiles of ${what} Map16 page ${hx(x.p, 2)}`);
+    notes.push(`${what} Map16 page ${hx(x.p, 2)} from ${hx(a, 3)} (${x.first >= EXT_TILES ? 'the editor has tiles up to FFF' : `${hx(x.first, 3)} is taken`})`);
+    put(x, a);
+  }
+  const to = new Map<number, number>(), shift = new Map<number, number>();
+  for (const x of pages) {
+    const d = at.get(x.p)! - x.first;
+    shift.set(x.p, d);
+    for (const t of x.own) to.set(t, t + d);
+  }
+  return { to, shift };
 }
 
 export interface PackPalette {
@@ -170,6 +244,17 @@ export function putFgTiles(rom: Rom, f: Map16File, from: number, at: number, kee
     if (a !== undefined && !keepActs.has(t)) { const k = src.indexOf(a); setActsLike(rom, t, k >= 0 ? targets[k] : a); }
   });
   return targets;
+}
+
+// a whole-ROM .map16's tiles where `place` puts them, acting like the tile of pages 00–01 their acts like
+// leads to (the editor's acts like is one of them). Tiles in `keepActs` keep theirs (a block on them
+// gives it).
+export function putRomMap16(rom: Rom, m: RomMap16, place: Pick<RomMap16Place, 'fg' | 'bg'>, keepActs: Set<number> = new Set()): void {
+  for (const [f, t] of place.fg) {
+    setExtTileWords(rom, t, romTileWords(m.fg, f));
+    if (!keepActs.has(t)) setActsLike(rom, t, romActsLike(m, f) ?? DEFAULT_ACTS);
+  }
+  for (const [f, t] of place.bg) setBgExtTileWords(rom, t, romTileWords(m.bg, f));
 }
 
 // the BG .map16's tiles from BG tile `at` on

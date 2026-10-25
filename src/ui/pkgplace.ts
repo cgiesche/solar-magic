@@ -10,12 +10,14 @@ import { planUpload, type ReadyPreview, type InstallOptions } from '../core/pack
 import { editPlan, tileBlocks, type PackagePlan, type PlanEdits } from '../core/pkgplan.ts';
 import { map16Targets } from '../core/map16file.ts';
 import { levelColors } from '../core/levelgfx.ts';
+import { tilesetWords } from '../core/tilesets.ts';
 import { GFX_SLOTS } from '../core/gfxslots.ts';
 import { altFileName, levelAltFile } from '../core/exanim.ts';
 import { errorText } from './projectpane.ts';
 import { gfxNumberField } from './gfxnum.ts';
 
 const file = (f: string) => f.split('/').pop()!;
+const hasMap16 = (p: ReadyPreview) => p.parts.some((x) => x.kind === 'graphics' && x.type === 'map16');
 
 export interface Placement {
   el: HTMLElement;
@@ -28,13 +30,15 @@ export function placementEditor(app: App, p: ReadyPreview, blank: number[]): Pla
   if (!p.parts.some((x) => x.kind === 'block' || (x.kind === 'graphics' && x.type !== 'palmask')) && !p.sample) return null;
   const lvl = hex(app.level.number, 3);
   let plan: PackagePlan;
-  try { plan = planUpload(app.rom, p, blank); } catch (e) {
+  // (the tilesets' tiles 000-1FF, which a whole-ROM .map16's are compared with, only when it has one)
+  const tilesets = () => app.tilesetPointers().map((ptrs) => tilesetWords(app.rom, ptrs));
+  try { plan = planUpload(app.rom, p, blank, hasMap16(p) ? tilesets() : undefined); } catch (e) {
     const msg = errorText(e);
     return { el: h('p', { class: 'hint error' }, `Cannot place the package: ${msg}`), read: () => { throw new Error(msg); } };
   }
   const edits: PlanEdits = { map16At: plan.map16?.at, tileBlocks: tileBlocks(plan), blockTiles: new Map(), gfx: plan.gfx.map((g) => ({ num: g.num, slot: g.slot })) };
-  // blocks (also) on tiles off the .map16
-  const mapTiles = plan.map16 ? map16Targets(plan.map16.data, plan.map16.at) : [];
+  // blocks (also) on tiles off the .map16 (those on a whole-ROM .map16's tiles go with them)
+  const mapTiles = [...(plan.map16 ? map16Targets(plan.map16.data, plan.map16.at) : []), ...(plan.romMap16?.fg.values() ?? [])];
   for (const b of plan.blocks) { const off = b.tiles.filter((t) => !mapTiles.includes(t)); if (off.length) edits.blockTiles!.set(b.file, off); }
   let setup = true, sample = false;
   const status = h('div');
@@ -67,6 +71,8 @@ export function placementEditor(app: App, p: ReadyPreview, blank: number[]): Pla
           return h('tr', null, cell, h('td', null, h('select', { onchange: (e: Event) => { edits.tileBlocks![i] = (e.target as HTMLSelectElement).value || null; refresh(); } }, blockOptions(edits.tileBlocks![i]))));
         })) : '',
     ] : '',
+    plan.romMap16 ? h('div', { class: 'prop' }, h('label', { title: plan.romMap16.file }, 'Map16 tiles'),
+      h('span', null, `${plan.romMap16.fg.size} FG and ${plan.romMap16.bg.size} BG tile(s) from ${file(plan.romMap16.file)}, the blocks on the tiles showing them`)) : '',
     [...edits.blockTiles!].map(([f, tiles]) => h('div', { class: 'prop' }, h('label', { title: f }, file(f)),
       h('span', null, 'on tile '), hexInput(tiles[0] ?? 0x200, 3, (v) => { edits.blockTiles!.set(f, [v, ...tiles.slice(1)]); refresh(); }, 0xfff),
       tiles.length > 1 ? h('span', { class: 'hint' }, ` and ${tiles.slice(1).map((t) => hex(t, 3)).join(', ')}`) : '')),

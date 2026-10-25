@@ -72,11 +72,12 @@ const order = (files: Record<string, Uint8Array>) => [...dec.decode(files['tools
     'callisto.asm: the version the project pins (0.6.2), its callisto_header');
 }
 
-// installs – without what other issues of #96 bring: the graphics (#98–#100)
+// installs – with its Map16 (testrommap16.ts), without what other issues of #96 bring: the other graphics
+// (#99, #100, #107) and the sample levels (#101)
 {
   const files = unzipSync(baserom);
   const keep: Record<string, Uint8Array> = {};
-  for (const [k, v] of Object.entries(files)) if (!/^(export\/|resources\/(map16|palettes|original_graphics)\/|workspace\/)/.test(k)) keep[k] = v;
+  for (const [k, v] of Object.entries(files)) if (!/^(export\/(?!all_map16\.map16$)|resources\/(palettes|original_graphics)\/|workspace\/)/.test(k)) keep[k] = v;
   const p = ready(inspectUpload('baserom.zip', zip(keep)));
   const { rom, opt } = await target();
   const before = listPatches(rom).length;
@@ -86,15 +87,16 @@ const order = (files: Record<string, Uint8Array>) => [...dec.decode(files['tools
   const want = order(keep).map(base);
   check(r.ok && reg.slice(0, want.length).join() === want.join(), `installed, its ${want.length} patches applied in patches.toml's order`);
   const pkg = listPackages(rom);
-  check(pkg.length === 1 && pkg[0].patches.length === want.length && pkg[0].uberasm.calls.length === 9 && pkg[0].block.tiles.length === 140 && pkg[0].sprite.files.length > 0,
-    'one package: the patches, the UberASM calls, the block tiles and the sprite');
+  // the 140 tiles of its GPS list and the 65 more of its Map16 acting like them
+  check(pkg.length === 1 && pkg[0].patches.length === want.length && pkg[0].uberasm.calls.length === 9 && pkg[0].block.tiles.length === 205 && pkg[0].sprite.files.length > 0
+    && pkg[0].map16?.length === 956 && pkg[0].bgMap16?.length === 100, `one package: the patches, the UberASM calls, the block tiles, the sprite, the Map16 tiles (${pkg[0]?.block.tiles.length} block tiles, ${pkg[0]?.map16?.length} FG, ${pkg[0]?.bgMap16?.length} BG)`);
   const uber = loadProject(rom);
   const gm = uber?.list.gamemode;
   check(!!uber?.files.has('callisto.asm') && !!uber.files.has('callisto/shared/freeram.asm') && gm?.get(0x14)?.some((c) => c.file === 'gamemode/screen_scrolling_pipes.asm') === true && gm.get(-1)?.[0].file === 'gamemode/retry_gm.asm',
     'UberASM built: its code including callisto.asm, Retry in every game mode');
   const gps = loadBlockProject(rom);
   const pipes = gps?.list.filter((b) => /pipe_cap|pass_if_in_pipe|turn_/.test(b.file)) ?? [];
-  check(!!gps?.files.has('callisto.asm') && pipes.length > 20 && gps.list.length === 140, `GPS built: ${gps?.list.length} tiles, ${pipes.length} of them screen scrolling pipes (including callisto.asm)`);
+  check(!!gps?.files.has('callisto.asm') && pipes.length > 20 && gps.list.length === 205, `GPS built: ${gps?.list.length} tiles, ${pipes.length} of them screen scrolling pipes (including callisto.asm)`);
   const emu = new LevelEmulator(rom); emu.boot();
   emu.load(0x105);
   const s = emu.snes;
