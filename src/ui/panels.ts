@@ -139,7 +139,7 @@ export class Palette {
       this.searchRow, this.m16SearchRow, this.m16Bar, this.body);
     this.body.addEventListener('scroll', () => this.m16Scrolled());
     this.m16Search.addEventListener('input', () => {
-      this.m16Match = tileMatches(this.m16Search.value, EXT_TILES);
+      this.m16Match = tileMatches(this.m16Search.value, EXT_TILES, blockFilesByTile(app.rom));
       this.build();
       if (this.m16Match?.length) this.scrollToM16Tile(this.m16Match[0]);
     });
@@ -239,8 +239,9 @@ export class Palette {
   m16Page = 0; // page at the top of the list
   m16Scroll = 0; // scroll position of the list, kept across rebuilds and tab changes
   m16Bar: HTMLDivElement = h('div', { class: 'tabs seg m16-pages' });
-  // search by tile number: the other tiles are dimmed, the list goes to the first match, Enter takes a single match
-  m16Search: HTMLInputElement = h('input', { class: 'filter', placeholder: 'Tile no. (hex) …', spellcheck: false, autocomplete: 'off',
+  // search by tile number or block file: the other tiles are dimmed, the list goes to the first match, Enter
+  // takes a single match
+  m16Search: HTMLInputElement = h('input', { class: 'filter', placeholder: 'Tile no. (hex) or block file …', spellcheck: false, autocomplete: 'off',
     title: 'Dims the tiles that do not match; Enter takes the tile once only one is left' });
   m16SearchRow: HTMLDivElement = h('div', { class: 'row' }, this.m16Search);
   m16Match: number[] | null = null;

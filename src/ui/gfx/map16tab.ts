@@ -16,7 +16,7 @@ import { TileCache } from '../../core/render.ts';
 import { hex } from '../../core/names.ts';
 import { EXT_FIRST, EXT_TILES, actsLike, setActsLike } from '../../core/map16ext.ts';
 import { BG_EXT_FIRST, bgTileAddr, bgTileWords, setBgExtTileWords } from '../../core/bgmap16.ts';
-import { blockFileOf } from '../blockdialog.ts';
+import { blockFileOf, blockFilesByTile } from '../blockdialog.ts';
 import { openResources } from '../resources.ts';
 import { parseMap16File, map16Targets, writeMap16File, type Map16File } from '../../core/map16file.ts';
 import { renderMap16Sheet } from '../panels.ts';
@@ -101,7 +101,7 @@ export class Map16Tab implements WsPanel {
   private dirty = new Set<number>(); // pages to draw once they come near the view
   private topPage = 0; // page at the top of the list
   private pageBar = h('span', { class: 'btn-group m16-pages' });
-  private search = h('input', { type: 'text', class: 'mt-search', placeholder: 'Tile no. (hex) …', spellcheck: false, autocomplete: 'off',
+  private search = h('input', { type: 'text', class: 'mt-search', placeholder: 'Tile no. (hex) or block file …', spellcheck: false, autocomplete: 'off',
     title: 'Dims the tiles that do not match; Enter selects the tile once only one is left' });
   private match: number[] | null = null;
   private scrollPending = false; // selected while hidden: scroll there when shown
@@ -459,12 +459,12 @@ export class Map16Tab implements WsPanel {
     });
   }
 
-  // search by tile number: the other tiles are dimmed, the list goes to the first match, Enter selects a
-  // single match
+  // search by tile number or block file: the other tiles are dimmed, the list goes to the first match, Enter
+  // selects a single match
   private attachSearch(): void {
     const s = this.search;
     s.addEventListener('input', () => {
-      this.match = tileMatches(s.value, EXT_TILES);
+      this.match = tileMatches(s.value, EXT_TILES, blockFilesByTile(this.app.rom));
       this.drawSheet();
       if (this.match?.length) this.scrollToTile(this.match[0]);
     });
