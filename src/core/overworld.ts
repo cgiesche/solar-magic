@@ -11,6 +11,8 @@ import { lz2Compress, lz2Decompress } from './lz2.ts';
 import { hasOwnContent } from './level.ts';
 import { messageSlots, unassignMessageSlot } from './messages.ts';
 import { eventDataRanges } from './owevents.ts';
+import { teleportDataRanges } from './owteleport.ts';
+import { KOOPA_X, KOOPA_Y, KOOPAS } from './owlinks.ts';
 
 export const OW_L1 = 0x0cf7df; // 0x800 bytes: 2 maps × 32×32 16x16 tiles (quadrant layout)
 const L2_TILE_PTR = 0x04dc72; // LDA #$A533 operand
@@ -626,7 +628,8 @@ export function eventNames(rom: Rom): Map<number, string> {
 
 // The ROM bytes (PC offsets, [start, end)) of the overworld's data that the editor writes: layer 1, layer 2 with its
 // pointers, the translevel table with its pointer, per translevel the exit directions, initial flags and name, the
-// reveals with the reveal list, the destroyed level tiles and the event steps.
+// reveals with the reveal list, the destroyed level tiles, the event steps and the links (star/pipe, exit path and
+// Koopa Kid tables).
 // Learned results that load the overworld without depending on what is painted there leave them out (owpaths.ts).
 export function overworldDataRanges(rom: Rom): [number, number][] {
   const at = (snes: number, len: number): [number, number] => [snesToPc(snes), snesToPc(snes) + len];
@@ -644,6 +647,7 @@ export function overworldDataRanges(rom: Rom): [number, number][] {
   if (hasLevelFlagsPatch(rom)) out.push(at(LEVEL_FLAGS, MAX_TRANSLEVEL + 1));
   out.push(at(revealTable(rom), revealEventCount(rom) * 2), at(REVEAL_FROM, REVEALS), at(REVEAL_TO, REVEALS), ...eventDataRanges(rom));
   if (hasDestroyPatch(rom)) out.push(at(rom.r24(DESTROY_EV_OP), DESTROYS), at(rom.r24(DESTROY_LOC_OP), DESTROYS * 2));
+  out.push(...teleportDataRanges(rom), at(KOOPA_X, KOOPAS * 2), at(KOOPA_Y, KOOPAS * 2));
   return out;
 }
 

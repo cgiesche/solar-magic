@@ -10,8 +10,15 @@
 // and keeps the found entry's word offset in $1DF6; Lunar Magic keeps the entry's number there (its location
 // indexes go there directly, observed in a Lunar Magic-saved ROM), and so does the patch. The tables are the
 // editor's, in free space; the game's 27 entries are copied into the first ones.
+//
+// The exit path table with 0x80 entries, as Lunar Magic 2.40 extends it: walking onto an exit path tile ($04961C)
+// the game looks for the entry of Mario's pixel position and submap (from the last entry down; $049A24, 14
+// entries) and puts him at its destination on another submap, walking on. An entry is 5 bytes where Mario is (pixel
+// Y, pixel X, submap), 5 where he goes (the same) and 2 the tile he goes to (Y, X; $1F21, $1F1F). The patch's
+// routine, at a JSL at $049A35, keeps its tables' addresses at +$11, +$2C, +$48 as Lunar Magic's does (where
+// Ankouno's OverworldTables.asm finds them).
 
-import type { Rom } from './rom.ts';
+import { type Rom, snesToPc } from './rom.ts';
 import { applyPatch, type ApplyResult } from './patchapply.ts';
 import { listPatches } from './patchreg.ts';
 import { installEditorPatch, missingPatch } from './patches.ts';
@@ -25,6 +32,10 @@ export const TELEPORTS = 0x100;
 export const FIND_HOOK = 0x048509;
 const DEST_HOOK = 0x048543;
 export const GAME_TABLES = [0x048431, 0x048467, 0x04849d, 0x0484d3], GAME_ENTRIES = 27;
+export const EXIT_PATHS = 0x80;
+export const EXIT_HOOK = 0x049a35;
+export const GAME_EXIT_TABLES = [0x049964, 0x0499aa, 0x0499f0], GAME_EXITS = 14;
+const EXIT_PTRS = [0x11, 0x2c, 0x48]; // the tables' addresses in the routine (Lunar Magic's places)
 const MAGIC = [0x53, 0x4d, 0x57, 0x4f]; // "SMWO"
 const NONE = 0xffff;
 const hx = (n: number) => '$' + n.toString(16).toUpperCase();
@@ -37,9 +48,11 @@ export interface Teleport { from: OwTile | null; to: OwTile | null }
 function asm(): string {
   const w = (a: number, i: number) => `read2(${hx(a + i * 2)})`;
   const game = (t: number) => Array.from({ length: GAME_ENTRIES }, (_, i) => w(GAME_TABLES[t], i)).join(', ');
+  const exits = (t: number, size: number) => Array.from({ length: GAME_EXITS * size }, (_, i) => `read1(${hx(GAME_EXIT_TABLES[t] + i)})`).join(', ');
   return `asar 1.90
 lorom
 !Count = ${hx(TELEPORTS)}
+!ExitCount = ${hx(EXIT_PATHS)}
 
 ; the star/pipe tile Mario stands on (A/X/Y 8): Z set and $1DF6 the entry when the table has it (the game's
 ; JSR $8509 : BNE); as the game's, an entry's X word EOR the submap << 8 below $200, then equal to the tile X
@@ -87,6 +100,51 @@ Dest:
   PLA : LSR : XBA : AND #$000F
   SEP #$10
   RTL
+
+; the exit path Mario walks onto (A 16, X/Y 8, $13C3 his submap): the entry of his position, its destination
+org ${hx(EXIT_HOOK)}
+  JSL Exits
+  RTS
+
+freecode
+Exits:
+  LDY ${hx(RAM.currentPlayer)}
+  REP #$10
+  LDX.w #(!ExitCount-1)*5
+  LDA.w #(!ExitCount-1)*2 : STA $02
+.loop
+  LDA ${hx(RAM.owPlayerY)},y
+  assert (pc()-Exits)&$FFFF == ${hx(EXIT_PTRS[0] - 1)}
+  CMP.l ExitFrom,x : BNE .next
+  LDA ${hx(RAM.owPlayerX)},y : CMP.l ExitFrom+2,x : BNE .next
+  LDA.l ExitFrom+4,x : AND #$00FF : CMP ${hx(RAM.owSubmap)} : BNE .next
+  assert (pc()-Exits)&$FFFF == ${hx(EXIT_PTRS[1] - 1)}
+  LDA.l ExitTo,x : STA ${hx(RAM.owPlayerY)},y
+  LDA.l ExitTo+2,x : STA ${hx(RAM.owPlayerX)},y
+  LDA.l ExitTo+4,x : AND #$00FF : STA ${hx(RAM.owSubmap)}
+  LDX $02
+  SEP #$20
+  assert (pc()-Exits)&$FFFF == ${hx(EXIT_PTRS[2] - 1)}
+  LDA.l ExitTile,x : STA ${hx(RAM.owPlayerTileY)},y
+  LDA.l ExitTile+1,x : STA ${hx(RAM.owPlayerTileX)},y
+  LDA #$00 : STA ${hx(RAM.owPlayerTileY + 1)},y : STA ${hx(RAM.owPlayerTileX + 1)},y
+  BRA .done
+.next
+  DEC $02 : DEC $02
+  TXA : SEC : SBC.w #5 : TAX : BPL .loop
+.done
+  SEP #$30
+  RTL
+
+ExitFrom:
+  db ${exits(0, 5)}
+  fillbyte $00 : fill (!ExitCount-${GAME_EXITS})*5
+ExitTo:
+  db ${exits(1, 5)}
+  fillbyte $00 : fill (!ExitCount-${GAME_EXITS})*5
+ExitTile:
+  db ${exits(2, 2)}
+  fillbyte $00 : fill (!ExitCount-${GAME_EXITS})*2
 
 Tbl:
 .fromX
@@ -141,6 +199,39 @@ export function writeTeleport(rom: Rom, i: number, e: Teleport): void {
   w(3, e.to ? e.to.y * 16 + 8 : 0);
 }
 export const readTeleports = (rom: Rom): Teleport[] => Array.from({ length: TELEPORTS }, (_, i) => readTeleport(rom, i));
+
+// ---- exit paths ----
+// a pixel position of an overworld map (Mario's, 16-bit; on a tile he stands at its 16x16 block's +8,+8)
+export interface OwPos { submap: number; x: number; y: number }
+// an entry: where Mario is when he leaves, where he goes and the tile he is on there (null: unused, all 0)
+export interface ExitPath { from: OwPos; to: OwPos; tile: { x: number; y: number } }
+
+function exitTables(rom: Rom): number[] {
+  if (rom.r8(EXIT_HOOK) !== 0x22) missingPatch('Overworld exit paths (SMWO)');
+  const code = rom.r24(EXIT_HOOK + 1);
+  return EXIT_PTRS.map((o) => rom.r24(code + o));
+}
+export function readExitPath(rom: Rom, i: number): ExitPath | null {
+  const [f, t, k] = exitTables(rom), pos = (a: number): OwPos => ({ y: rom.r16(a), x: rom.r16(a + 2), submap: rom.r8(a + 4) });
+  if (rom.bytes(f + i * 5, 5).every((b) => !b) && rom.bytes(t + i * 5, 5).every((b) => !b) && !rom.r16(k + i * 2)) return null;
+  return { from: pos(f + i * 5), to: pos(t + i * 5), tile: { y: rom.r8(k + i * 2), x: rom.r8(k + i * 2 + 1) } };
+}
+export function writeExitPath(rom: Rom, i: number, e: ExitPath | null): void {
+  const [f, t, k] = exitTables(rom), pos = (a: number, p: OwPos | undefined) => { rom.w16(a, p?.y ?? 0); rom.w16(a + 2, p?.x ?? 0); rom.w8(a + 4, p?.submap ?? 0); };
+  pos(f + i * 5, e?.from);
+  pos(t + i * 5, e?.to);
+  rom.w8(k + i * 2, e?.tile.y ?? 0);
+  rom.w8(k + i * 2 + 1, e?.tile.x ?? 0);
+}
+export const readExitPaths = (rom: Rom): (ExitPath | null)[] => Array.from({ length: EXIT_PATHS }, (_, i) => readExitPath(rom, i));
+// the bytes of the tables (PC offsets, [start, end)): of the star/pipe table and the exit path table
+export function teleportDataRanges(rom: Rom): [number, number][] {
+  const at = (snes: number, len: number): [number, number] => [snesToPc(snes), snesToPc(snes) + len];
+  const out: [number, number][] = [];
+  if (rom.r8(FIND_HOOK) === 0x22) out.push(at(table(rom), PART * 4));
+  if (rom.r8(EXIT_HOOK) === 0x22) { const [f, t, k] = exitTables(rom); out.push(at(f, EXIT_PATHS * 5), at(t, EXIT_PATHS * 5), at(k, EXIT_PATHS * 2)); }
+  return out;
+}
 
 const sameTile = (a: OwTile, b: OwTile) => a.submap === b.submap && a.x === b.x && a.y === b.y;
 // the location index that teleports to a tile: an entry leading there (a star's or pipe's, or a location), else

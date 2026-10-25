@@ -104,6 +104,9 @@ export const RAM = {
   owWarp: 0x1b9c, // the overworld loads at the star/pipe table's destination $1DF6 (owteleport.ts)
   owWarpIndex: 0x1df6,
   owTile: 0x13c1, // the layer 1 tile Mario stands on
+  owSubmap: 0x13c3, // the submap the overworld is drawing (an exit path changes it)
+  koopaKid: 0x0ef6, // the Koopa Kid of tiles 49–4B Mario met (0–2, owlinks.ts)
+  koopaKidSlot: 0x0ef7, // $80 | its overworld sprite slot while it is there, 0 none
   owProcess: 0x13d9, // what the overworld is doing: Mario standing, walking, switching submaps …
   owPose: 0x1f13, // per player (2 bytes apart): Mario's pose on the overworld – bit 3 swimming, bit 4 climbing
   savePrompt: 0x13ca, // set when the overworld is to show the save prompt
