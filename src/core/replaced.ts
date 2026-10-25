@@ -1,5 +1,5 @@
 // Replaced patches (CONTEXT.md): known third-party patches whose work an editor patch already does.
-// An upload leaves them out with a note instead of installing them. They are recognised by what their
+// An upload leaves them out with a note instead of installing them. They are recognized by what their
 // code does (the places it patches, the code it checks for), not by their file name.
 
 export interface ReplacedPatch {

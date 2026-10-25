@@ -12,7 +12,7 @@ import { installL2ScrollPatch } from './l2scroll.ts';
 import { installLevelHeightPatch } from './levelheight.ts';
 import { installLayer3Patch } from './layer3gfx.ts';
 import { installOwTeleportPatch } from './owteleport.ts';
-import { installScrollFix } from './scrollfix.ts';
+import { installScrollFixPatch } from './scrollfix.ts';
 import { installTranslevelPatch, installLevelFlagsPatch, installDestroyPatch } from './overworld.ts';
 import { installEventPatch } from './owevents.ts';
 import { installMap16Ext, enableBlocks } from './map16ext.ts';
@@ -54,7 +54,7 @@ export async function installEditorPatches(rom: Rom): Promise<void> {
   asar(installLevelHeightPatch(rom));
   asar(installLayer3Patch(rom));
   asar(installOwTeleportPatch(rom));
-  asar(installScrollFix(rom));
+  asar(installScrollFixPatch(rom));
   installTranslevelPatch(rom);
   installLevelFlagsPatch(rom);
   installEventPatch(rom);

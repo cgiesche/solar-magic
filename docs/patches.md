@@ -495,7 +495,8 @@ moved left by hand while Mario holds right on the screen's right side – the cl
 edge, the editor's ROM the sprites it passes).
 
 The original refuses ROMs without Lunar Magic's VRAM patch: `read1($0FFFE6)` is Lunar Magic's own setting of
-it (00 none, 01 normal, 02/03 widescreen; SMW Central's hijack map), which no other known patch reads – the
+it (00 none, 01 normal, 02/03 widescreen; SMW Central's hijack map – 01 in ROMs Lunar Magic 3.31 and 3.40 saved,
+FF in one of 2.53), which no other known patch reads – the
 baserom's 88 patches and Retry test `$0FF0A0` and `$0FF0B4` for Lunar Magic instead. Its code doesn't need the
 VRAM patch (the newer release reads Lunar Magic's previous camera position `$7F831F` instead of its own RAM).
 The editor writes nothing at `$0FFFE6` – Lunar Magic and other tools would take it for its VRAM patch – and has the

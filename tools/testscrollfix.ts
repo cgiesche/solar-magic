@@ -10,7 +10,7 @@ import { Rom } from '../src/core/rom.ts';
 import { loadAsar } from '../src/core/asar.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadLevel } from '../src/core/level.ts';
-import { GM, RAM, SPR, SPRITE_SLOTS, setCameraX, setMarioPos, get16 } from '../src/core/ram.ts';
+import { GM, RAM, SPR, SPRITE_SLOTS, SCROLL_FIX_RAM, setCameraX, setMarioPos, get16 } from '../src/core/ram.ts';
 import { inspectUpload } from '../src/core/packages.ts';
 import { cleanImage, editorImage } from './fixture.ts';
 
@@ -56,6 +56,22 @@ function scrollLeft(rom: Rom, from: number, frames: number): { seen: Set<number>
     `the clean game: the camera moving left, Mario on the right – $55 = ${clean.dir} (right), the sprites the left edge passes stay (${names(clean)})`);
   check(fixed.cam === 0x700 && fixed.dir === 0 && passed.every((i) => fixed.seen.has(i)),
     `the editor's ROM: $55 = ${fixed.dir} (left), the sprites the left edge passes spawn (${names(fixed)})`);
+}
+
+// the position of the frame before is the level's own from its first frame on (the level load runs the
+// camera code): RAM left over from before (another level, power-on garbage) doesn't set $55
+{
+  const emu = new LevelEmulator(new Rom(await editorImage())); emu.boot();
+  const s = emu.snes, w = s.wram;
+  const prev = SCROLL_FIX_RAM[0] - 0x7e0000;
+  emu.load(0x105);
+  w[prev] = 0x34; w[prev + 1] = 0x12; w[prev + 2] = 0x34; w[prev + 3] = 0x12;
+  emu.load(0x105, { continueState: true });
+  let g = 0; while (w[RAM.gameMode] !== GM.level && g++ < 200) s.runFrame();
+  w[RAM.scrollDir] = 0x55; // (no direction: shows whether the first frame sets one)
+  s.runFrame();
+  check(w[RAM.scrollDir] === 0x55 && get16(w, prev) === get16(w, RAM.layer1XNext),
+    `a level's first frame: $55 left as it is (${hx(w[RAM.scrollDir])}), the camera's position kept (${hx(get16(w, prev))})`);
 }
 
 // ---------- replaced patches ----------

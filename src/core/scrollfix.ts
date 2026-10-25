@@ -70,7 +70,7 @@ export function scrollFixEntry(rom: Rom) {
 }
 
 // needs Asar (loadAsar) to be loaded
-export function installScrollFix(rom: Rom): ApplyResult {
+export function installScrollFixPatch(rom: Rom): ApplyResult {
   const e = scrollFixEntry(rom);
   if (e) return { ok: true, errors: [], warnings: [], prints: [], entry: e };
   return applyPatch(rom, { name: SCROLL_FIX_PATCH_NAME, main: 'scrollfix.asm', files: new Map([['scrollfix.asm', SCROLL_FIX_ASM]]), kind: 'scrollfix', ram: [SCROLL_FIX_RAM] });
