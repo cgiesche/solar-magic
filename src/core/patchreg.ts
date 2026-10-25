@@ -1,14 +1,16 @@
 // Registry of applied ASM patches ("SMWA"), kept in the ROM so a patch can be removed again
-// even without its sources: a RATS block holding "SMWA", a version byte and JSON. For each patch it
+// even without its sources: a RATS block holding "SMWA", a version byte and JSON (deflated since version 2,
+// for packages of many patches). For each patch it
 // lists the bytes it changed outside its own free space (with the original bytes, stored in
 // separate RATS blocks) and the free space blocks it created, and the free RAM it uses: claimed
 // ranges (`ram`) and the RAM its code writes with long addressing (`ramSeen`, found in its code).
 
+import { deflateSync, inflateSync } from 'fflate';
 import { Rom, pcToSnes, snesToPc } from './rom.ts';
 import type { PartKind } from './parts.ts';
 
 const MAGIC = [0x53, 0x4d, 0x57, 0x41]; // "SMWA"
-const VERSION = 1;
+const VERSION = 2; // 1: plain JSON
 const CHUNK = 0x7f00; // backup bytes per RATS block
 
 export interface PatchEntry {
@@ -47,15 +49,15 @@ function read(rom: Rom): Registry {
   if (p < 0) return { v: VERSION, patches: [] };
   const size = rom.isRatsAt(p - 8);
   if (rom.data[p + 4] > VERSION) throw new Error('Patch registry in the ROM is from a newer editor version');
-  const reg = JSON.parse(new TextDecoder().decode(rom.data.subarray(p + 5, p - 8 + 8 + size))) as Registry;
-  return reg;
+  const raw = rom.data.subarray(p + 5, p - 8 + 8 + size);
+  return JSON.parse(new TextDecoder().decode(rom.data[p + 4] < 2 ? raw : inflateSync(raw))) as Registry;
 }
 
 function write(rom: Rom, reg: Registry): void {
   const old = findRegistry(rom);
   if (old >= 0) rom.freeAt(pcToSnes(old));
   if (!reg.patches.length) return;
-  const json = new TextEncoder().encode(JSON.stringify(reg));
+  const json = deflateSync(new TextEncoder().encode(JSON.stringify(reg)), { level: 9 });
   if (json.length + 5 > CHUNK) throw new Error('Patch registry is too large');
   const buf = new Uint8Array(json.length + 5);
   buf.set(MAGIC); buf[4] = VERSION; buf.set(json, 5);

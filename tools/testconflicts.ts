@@ -1,10 +1,11 @@
 // Conflicts between the kinds of patches: an external patch against the hooks of UberASM and the
 // custom sprites (both orders), free RAM claimed twice, long writes into RAM another patch claims,
-// the editor patch's extended object slot, and repeated re-applying leaves no RATS blocks behind.
+// the editor patch's extended object slot, two patches with the same fix (no conflict, removed in order),
+// and repeated re-applying leaves no RATS blocks behind.
 import { readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
 import { loadAsar } from '../src/core/asar.ts';
-import { applyPatch, type PatchSource } from '../src/core/patchapply.ts';
+import { applyPatch, uninstallPatch, type PatchSource } from '../src/core/patchapply.ts';
 import { listPatches } from '../src/core/patchreg.ts';
 import { installEditorPatch } from '../src/core/patches.ts';
 import { uploadSource, uploadFromFiles } from '../src/core/patchpkg.ts';
@@ -129,6 +130,20 @@ const blocks: BlockProject = { files: files({ 'blocks/b.asm': 'db $42\nJMP A : J
   let msg = '';
   try { installEditorPatch(rom); } catch (e) { msg = (e as Error).message; }
   check(msg.includes('ExtObj'), 'editor patch refuses the taken slot and names the patch: ' + msg);
+}
+
+// 3b. two patches with the same fix (the baserom's tweaks and Retry both put RTS at $05B31B): the second
+// writing the bytes as they are is no conflict, one changing them is; the first can't be removed before it
+{
+  const rom = fresh();
+  const a = applyPatch(rom, src('Tweaks', 'lorom\norg $05B31B\ndb $60\n'));
+  const same = applyPatch(rom, src('Retry', `lorom\norg $05B31B\ndb $60,$${rom.r8(0x05b31c).toString(16)}\n`));
+  check(a.ok && same.ok, 'the same bytes written again: no conflict ' + same.errors.join(' '));
+  const other = applyPatch(rom, src('Other', 'lorom\norg $05B31B\ndb $6B\n'));
+  check(!other.ok && other.errors.some((e) => e.includes('Tweaks')), 'other bytes there: conflict ' + other.errors.join(' '));
+  let msg = '';
+  try { uninstallPatch(rom, a.entry!.id); } catch (e) { msg = (e as Error).message; }
+  check(msg.includes('Retry'), 'the first patch is removed only after the second: ' + msg);
 }
 
 // 4. re-applying again and again leaves the number of RATS blocks as it is

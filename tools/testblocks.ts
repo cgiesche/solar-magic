@@ -1,5 +1,7 @@
 // Custom blocks (GPS format): block code runs for the right offsets, can change its acts-like
-// (Y:$1693), an old SMWX install is upgraded, and removing the blocks restores normal behaviour.
+// (Y:$1693), an old SMWX install is upgraded, and removing the blocks restores normal behaviour. Built as
+// GPS builds them: each block on its own, a shared routine once (with the defines of the first block
+// using it); list.txt with tile ranges and Lunar Magic's tile descriptions (@dsc).
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator, type LevelOverride } from '../src/core/levelemu.ts';
 import { loadLevel, serializeLayer1, serializeSprites, isL1Vertical, newUid, type Level } from '../src/core/level.ts';
@@ -91,6 +93,31 @@ check(blockOf(rom, WALL) === null && play(PASS, 120, REF, false).x === refRun.x,
   const res = saveBlockProject(r2, { files: new Map([['blocks/all.asm', enc.encode(all)]]), list: parseBlockList('2C0 all.asm\n') });
   if (!res.ok) console.log(res.errors.join('\n'));
   check(res.ok, `all ${names.length} GPS routines assemble`);
+}
+
+// as GPS builds: blocks defining the same macro; a routine with sublabels, one using a define of the
+// block calling it, and a block's sublabel after a routine call
+{
+  const r2 = new Rom(EDITOR_IMAGE.slice());
+  installEditorPatch(r2);
+  const head = ['db $42', ...OFFS.map((o) => `JMP ${o}`), ...OFFS.filter((o) => o !== 'MarioAbove').map((o) => `${o}:`), '  RTL'].join('\n');
+  const withMacro = (n: number) => `macro say(x)\n  print "<x>"\nendmacro\n%say(${n})\n!pipe_dir = $7FB0${n}0\n${head}\nMarioAbove:\n  %count()\n  %dir()\n  BRA .done\n.done\n  RTL\n`;
+  const p2: BlockProject = {
+    files: new Map(Object.entries({
+      'blocks/a.asm': withMacro(1), 'blocks/b.asm': withMacro(2),
+      'routines/count.asm': 'LDX #$05\n.loop\n  DEX\n  BPL .loop\nRTL\n',
+      'routines/dir.asm': 'LDA !pipe_dir\nRTL\n',
+    }).map(([k, v]) => [k, enc.encode(v)])),
+    list: parseBlockList('2C0-2C1 a.asm\n2C2 b.asm\n\n; descriptions\n@dsc\n2C0 0 Some block.\n'),
+  };
+  check(p2.list.map((b) => b.tile.toString(16)).join() === '2c0,2c1,2c2', 'list.txt: a tile range, the @dsc section not read');
+  const res = saveBlockProject(r2, p2);
+  check(res.ok && res.prints.join() === '1,2', 'blocks defining the same macro, each assembled on its own ' + res.errors.join(' | '));
+  const runs = res.steps ?? [];
+  const at = (n: string) => runs.map((x) => x.labels[`GpsRoutine_${n}`]).filter((x) => x !== undefined);
+  // the routine reading !pipe_dir is put with block a (its define $7FB010), block b calls it there
+  const dir = at('dir')[0];
+  check(at('count').length === 1 && at('dir').length === 1 && dir !== undefined && r2.r8(dir) === 0xaf && r2.r8(dir + 1) === 0x10 && r2.r8(dir + 2) === 0xb0, 'shared routines put once, with the first block\'s defines');
 }
 
 console.log(bad ? `${bad} failures` : 'all ok');

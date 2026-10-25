@@ -219,10 +219,16 @@ export function registerChanges(rom: Rom, before: Uint8Array, beforeRats: RatsBl
   const errors: string[] = [];
   const warnings = [...warn];
   const others = listPatches(rom);
+  // bytes of another patch the write leaves as they are (two patches with the same fix) are no conflict:
+  // they become this patch's too, so the other one can't be removed before it
+  const changes = (t: [number, number], s: [number, number]) => {
+    for (let i = Math.max(t[0], s[0]), e = Math.min(t[0] + t[1], s[0] + s[1]); i < e; i++) if (out[i] !== before[i]) return true;
+    return false;
+  };
   for (const s of segs) {
     const where = `${pcHex(s[0])} (${s[1]} bytes)`;
     if (s[0] + s[1] > RESERVED_TOP) { errors.push(`The patch writes at ${where} to banks $7E/$7F, which are reserved for the editor.`); continue; }
-    const p = others.find((o) => o.segs.some((t) => overlaps(t, s)) || o.own.some((t) => overlaps([t, (rom.isRatsAt(t) + 8)], s)));
+    const p = others.find((o) => [...o.segs, ...o.own.map((t): [number, number] => [t, rom.isRatsAt(t) + 8])].some((t) => overlaps(t, s) && changes(t, s)));
     if (p) { errors.push(`Conflict with patch “${p.name}” at ${where}.`); continue; }
     const hit = beforeRats.find((b) => overlaps([b.start, b.size + 8], s));
     if (hit) { errors.push(`The patch overwrites protected data (RATS block at ${pcHex(hit.start)}) at ${where}.`); continue; }
