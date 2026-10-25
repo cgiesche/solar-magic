@@ -124,6 +124,13 @@ _Avoid_: layer 1 event (Lunar Magic's mode)
 A star, pipe or exit path tile leading to another place of the overworld (one-way or both ways: an entry leading back), a location that an exit to the overworld teleports to, or the place a Koopa Kid puts Mario; an entry of the star/pipe table (0x100) or the exit path table (0x80), as in Lunar Magic. Made by dragging from the tile, drawn as an arrow.
 _Avoid_: link (that is a part's), warp, teleport (for the tile)
 
+**Overworld sprite**:
+One of the game's 13 sprite slots of the overworld (Lakitu, bird, fish, Piranha Plant, cloud, Koopa Kid, smoke, Bowser sign, Bowser, Boos): a sprite and a position, the same on every submap – the sprite's own code decides where and when it shows; drawn as the game shows it at the event progress (emulated). Lunar Magic's custom overworld sprites (BOWSIE's) are another table.
+_Avoid_: event sprite, OW object
+
+**Start position**:
+Where Mario and Luigi stand when a new game begins: a submap and a tile each.
+
 ### Third-party content
 
 **Package**:
