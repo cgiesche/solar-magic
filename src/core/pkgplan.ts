@@ -33,7 +33,7 @@ import { gfxDataSize } from './patches.ts';
 import { isSharedPalettes, changedColors, setSharedColor, sharedColorNames } from './sharedpal.ts';
 import { isGlobalAnimBps, globalAnimList } from './globalanim.ts';
 import { cleanGameBytes } from './cleangame.ts';
-import { globalGfxNum, globalGfxName, cleanGlobalGfx, fromBin, isCleanGlobalGfx, setGlobalGfx } from './globalgfx.ts';
+import { globalGfxNum, globalGfxName, cleanGlobalGfx, fromBin, isCleanGlobalGfx, setGlobalGfx, same } from './globalgfx.ts';
 import { listPackages } from './pkgreg.ts';
 
 const dec = new TextDecoder();
@@ -345,7 +345,7 @@ function planGlobalGfx(rom: Rom, files: Map<string, Uint8Array>, found: string[]
     if (!clean) { notes.push(`${base(file)}: the clean game's ${name} is not known in this ROM – not taken over`); continue; }
     const data = fromBin(clean, files.get(file)!);
     if (!data) { notes.push(`${base(file)}: ${files.get(file)!.length} bytes – not a form of ${name} (${clean.length} bytes unpacked), not taken over`); continue; }
-    if (data.every((v, i) => v === clean[i])) unchanged.push(num);
+    if (same(data, clean)) unchanged.push(num);
     else out.push({ file, num, data });
   }
   if (unchanged.length) notes.push(`${unchanged.map(globalGfxName).join(', ')}: the clean game's – not part of the package`);

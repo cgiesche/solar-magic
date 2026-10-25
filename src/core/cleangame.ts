@@ -1,9 +1,9 @@
 // What the editor knows of the clean game once it has changed the ROM: a CRC32 of each 256-byte block of
 // it ("SMWF"), kept when it opens the clean game. A byte of this ROM is still the clean game's while its
-// block's CRC is the clean one's; the few bytes the editor's own patches leave unchanged in blocks they
-// change, but that are read later, are kept as they are (KEPT). Lunar Magic data exported as BPS from the clean game (Callisto's global
-// ExAnimation, its overworld) takes some of its bytes from the clean game; those are read from this ROM
-// where it still has them.
+// block's CRC is the clean one's; a few bytes read later in blocks that change are kept as they are
+// (KEPT). Lunar Magic data exported as BPS from the clean game (Callisto's global ExAnimation, its
+// overworld) takes some of its bytes from the clean game; those are read from this ROM where it still
+// has them.
 
 import { Rom, pcToSnes, snesToPc } from './rom.ts';
 import { crc32, bpsReader } from './bps.ts';
@@ -16,9 +16,10 @@ const BLOCKS = CLEAN_SIZE / BLOCK;
 
 const MAGIC = [0x53, 0x4d, 0x57, 0x46]; // "SMWF"
 const VERSION = 2; // 2: KEPT
-// clean bytes kept as they are (SNES address, length): the game's GFX table, in the block of the editor
-// patch's hook at $00BA2C (globalgfx.ts)
-const KEPT: [number, number][] = [[0x00b992, 0x96]];
+// clean bytes kept as they are (SNES address, length), read by globalgfx.ts: the game's GFX table, in the
+// block of the editor patch's GFX hook at $00BA2C (patches.ts), and the operands of the game's GFX32/33
+// loader, changed when a package replaces one of them
+const KEPT: [number, number][] = [[0x00b992, 0x96], [0x00b88b, 2], [0x00b890, 1], [0x00b8d8, 2]];
 const KEPT_SIZE = KEPT.reduce((n, [, l]) => n + l, 0);
 const SIZE = 5 + BLOCKS * 4 + KEPT_SIZE;
 

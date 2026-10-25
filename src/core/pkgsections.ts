@@ -10,7 +10,7 @@
 
 import type { Rom } from './rom.ts';
 import { listPatches, hashBytes } from './patchreg.ts';
-import { GLOBAL_GFX, globalGfxData, globalGfxName, cleanGlobalGfx, setGlobalGfx } from './globalgfx.ts';
+import { GLOBAL_GFX, globalGfxHash, globalGfxName, cleanGlobalGfx, setGlobalGfx } from './globalgfx.ts';
 import { uninstallPatch } from './patchapply.ts';
 import { loadProject, saveProject, emptyProject, type UberProject } from './uberproject.ts';
 import { loadBlockProject, saveBlockProject, type BlockProject } from './blocks.ts';
@@ -326,7 +326,7 @@ const globalAnim: PartSection<{ slots: string[]; sizes: number[] }, GlobalAnimPa
 // applyGraphics). read: each file's hash
 const globalGfx: PartSection<number[], [number, number][]> = {
   none: () => [],
-  read: (rom) => Array.from({ length: GLOBAL_GFX }, (_, n) => hashBytes([globalGfxData(rom, n) ?? new Uint8Array()])),
+  read: (rom) => Array.from({ length: GLOBAL_GFX }, (_, n) => globalGfxHash(rom, n)),
   added: (a, b) => b.flatMap((h, n): [number, number][] => (h !== a[n] ? [[n, h]] : [])),
   merge: (r, p) => [...r.filter(([n]) => !p.some(([m]) => m === n)), ...p],
   empty: (p) => !p.length,
@@ -336,7 +336,7 @@ const globalGfx: PartSection<number[], [number, number][]> = {
     const warnings: string[] = [];
     for (const [n, h] of mine) {
       const clean = cleanGlobalGfx(rom, n);
-      if (hashBytes([globalGfxData(rom, n) ?? new Uint8Array()]) !== h) warnings.push(`${globalGfxName(n)} was changed since the package was installed – left as it is`);
+      if (globalGfxHash(rom, n) !== h) warnings.push(`${globalGfxName(n)} was changed since the package was installed – left as it is`);
       else if (!clean) warnings.push(`${globalGfxName(n)}: the clean game's file is not known in this ROM – left as it is`);
       else setGlobalGfx(rom, n, clean);
     }

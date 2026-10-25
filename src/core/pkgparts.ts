@@ -418,14 +418,14 @@ export function sfxLinkedFiles(preview: ReadyPreview, plan: SfxPlan): Map<string
 
 const GRAPHICS_TYPES: GraphicsType[] = ['map16', 'exgfx', 'pal', 'palmask', 'sharedpal', 'globalanim', 'globalgfx'];
 // a Callisto project's global GFX files are those of the Graphics folder next to its output ROM
-const projectFile = (d: Detection, type: GraphicsType, f: string) => type !== 'globalgfx' || !d.callisto?.graphics || f.startsWith(d.callisto.graphics);
+const inProjectGraphics = (d: Detection, type: GraphicsType, f: string) => type !== 'globalgfx' || !d.callisto?.graphics || f.startsWith(d.callisto.graphics);
 
 const graphics: PartAdapter<'graphics'> = {
   kind: 'graphics',
   // Map16 tiles, ExGFX, palettes, shared palettes, global animation and global GFX files; the Lunar Magic level files go with the package (its sample levels)
   // (in a Callisto project not those in a tool's folder, which are its code's data)
   claims: (d) => [
-    ...GRAPHICS_TYPES.flatMap((type) => d.graphics[type].filter((f) => !inToolFolder(d, f) && projectFile(d, type, f)).map((f): FileClaim => ({ file: f, rank: RANK.type, part: { kind: 'graphics', name: base(f), file: f, type } }))),
+    ...GRAPHICS_TYPES.flatMap((type) => d.graphics[type].filter((f) => !inToolFolder(d, f) && inProjectGraphics(d, type, f)).map((f): FileClaim => ({ file: f, rank: RANK.type, part: { kind: 'graphics', name: base(f), file: f, type } }))),
     ...d.graphics.mwls.map((file) => ({ file, rank: RANK.type })),
   ],
   apply: (rom, _mine, { preview, opt, plan }) => applyGraphics(rom, preview.files, plan, opt.blank),

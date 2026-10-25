@@ -27,6 +27,8 @@ export function nextScreen(): number[] {
     0x18, 0x65, 0x6b, 0x85, 0x6b, 0x85, 0x6e, 0xe2, 0x20]; // + CLC : ADC $6B : STA $6B : STA $6E : SEP #$20
 }
 const HOOK_GFXPTR = 0x00ba2c;
+// the game's table of GFX00–31: low, high and bank bytes (replaced by the editor's file table)
+export const GAME_GFX_TABLE = [0x00b992, 0x00b9c4, 0x00b9f6];
 const HOOK_UPLOAD = 0x00aa6b;
 const HOOK_SPRGFX = 0x00a9e1;
 const HOOK_FGGFX = 0x00aa22;
@@ -337,9 +339,9 @@ export function installEditorPatch(rom: Rom): PatchInfo {
   rom.w24(addr + 26, L('GfxDecomp'));
   // copy vanilla GFX pointers
   for (let i = 0; i < 0x32; i++) {
-    rom.w8(L('GfxLo') + i, rom.r8(0x00b992 + i));
-    rom.w8(L('GfxHi') + i, rom.r8(0x00b9c4 + i));
-    rom.w8(L('GfxBk') + i, rom.r8(0x00b9f6 + i));
+    rom.w8(L('GfxLo') + i, rom.r8(GAME_GFX_TABLE[0] + i));
+    rom.w8(L('GfxHi') + i, rom.r8(GAME_GFX_TABLE[1] + i));
+    rom.w8(L('GfxBk') + i, rom.r8(GAME_GFX_TABLE[2] + i));
   }
   // hooks
   hook(rom, SPR_BANK_HOOK, L('SprBank'), 4);

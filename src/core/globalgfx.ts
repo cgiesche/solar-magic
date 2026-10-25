@@ -9,21 +9,20 @@
 
 import { snesToPc, type Rom } from './rom.ts';
 import { lz2Compress, lz2Decompress } from './lz2.ts';
-import { cleanGameBytes, NotKnown } from './cleangame.ts';
-import { gfxEntry, setGfxEntry, gfxHex, VANILLA_GFX } from './patches.ts';
+import { cleanGameBytes, known, NotKnown } from './cleangame.ts';
+import { gfxEntry, setGfxEntry, gfxHex, VANILLA_GFX, GAME_GFX_TABLE } from './patches.ts';
 import { gfxBytes, lz2Storage, storeGfxFile } from './gfxfiles.ts';
 import { convertBpp, parseGfxBinName } from './gfxbin.ts';
+import { hashBytes } from './patchreg.ts';
 
 export const GLOBAL_GFX = 0x34; // GFX00–33
 export const GFX32 = 0x32, GFX33 = 0x33;
 
-// the game's table of GFX00–31 (low, high, bank bytes)
-const TABLE = [0x00b992, 0x00b9c4, 0x00b9f6];
 // the operands of the game's code loading GFX33 and GFX32 ($00:B888: LDY #lo33 … LDA #bank … then
 // LDA #lo32 for GFX32 from the same bank)
 const LO33 = 0x00b88b, BANK = 0x00b890, LO32 = 0x00b8d8;
-// where the clean game has them
-const CLEAN_33 = 0x08bfc0, CLEAN_32 = 0x088000;
+const lowOf = (n: number) => (n === GFX33 ? LO33 : LO32);
+const otherOf = (n: number) => (n === GFX33 ? GFX32 : GFX33);
 
 export const globalGfxName = (n: number) => `GFX${gfxHex(n)}`;
 
@@ -33,7 +32,7 @@ export function globalGfxNum(path: string): number | null {
   return p?.game && p.num < GLOBAL_GFX ? p.num : null;
 }
 
-const same = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((v, i) => v === b[i]);
+export const same = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((v, i) => v === b[i]);
 
 // ---------- the clean game's ----------
 
@@ -43,11 +42,11 @@ export function cleanGlobalGfx(rom: Rom, n: number): Uint8Array | null {
   return at === null ? null : cleanStream(rom, at)?.data ?? null;
 }
 
+// where the clean game has the file: its table's entry, GFX32/33 by their loader's operands
 function cleanAddr(rom: Rom, n: number): number | null {
-  if (n === GFX32) return CLEAN_32;
-  if (n === GFX33) return CLEAN_33;
   const clean = cleanGameBytes(rom);
-  const b = TABLE.map((t) => clean?.(snesToPc(t + n)) ?? null);
+  const at = n < VANILLA_GFX ? GAME_GFX_TABLE.map((t) => t + n) : [lowOf(n), lowOf(n) + 1, BANK];
+  const b = at.map((a) => clean?.(snesToPc(a)) ?? null);
   return b.some((v) => v === null) ? null : b[0]! | (b[1]! << 8) | (b[2]! << 16);
 }
 
@@ -57,13 +56,8 @@ function cleanStream(rom: Rom, addr: number): { data: Uint8Array; stored: Uint8A
   if (!clean) return null;
   const pc = snesToPc(addr);
   const src = new Proxy({}, { get: (_, k) => { const v = clean(Number(k)); if (v === null) throw new NotKnown(); return v; } });
-  try {
-    const r = lz2Decompress(src, pc);
-    return { data: r.data, stored: rom.data.slice(pc, pc + r.size) };
-  } catch (e) {
-    if (e instanceof NotKnown) return null;
-    throw e;
-  }
+  const r = known(() => lz2Decompress(src, pc));
+  return r === 'not known' ? null : { data: r.data, stored: rom.data.slice(pc, pc + r.size) };
 }
 
 // a .bin in the format of the clean game's file (Lunar Magic extracts 3bpp files as 4bpp: back to 3bpp,
@@ -78,7 +72,7 @@ export function fromBin(clean: Uint8Array, bin: Uint8Array): Uint8Array | null {
 
 // the ROM's GFX32 or GFX33: its address and stored bytes
 function pairFile(rom: Rom, n: number): { addr: number; data: Uint8Array; stored: Uint8Array } {
-  const addr = (rom.r8(BANK) << 16) | rom.r16(n === GFX33 ? LO33 : LO32);
+  const addr = (rom.r8(BANK) << 16) | rom.r16(lowOf(n));
   const r = lz2Decompress(rom.data, snesToPc(addr));
   return { addr, data: r.data, stored: rom.bytes(addr, r.size).slice() };
 }
@@ -87,6 +81,9 @@ function pairFile(rom: Rom, n: number): { addr: number; data: Uint8Array; stored
 export function globalGfxData(rom: Rom, n: number): Uint8Array | null {
   return n < VANILLA_GFX ? gfxBytes(rom, n)?.data ?? null : pairFile(rom, n).data;
 }
+
+// a hash of the file as the ROM has it (a package's record tells by it whether it changed since)
+export const globalGfxHash = (rom: Rom, n: number) => hashBytes([globalGfxData(rom, n) ?? new Uint8Array()]);
 
 // puts the file (unpacked, in the clean game's format) into the ROM; the clean game's file points at the
 // game's own bytes again. Throws when the clean game's file is not known.
@@ -102,11 +99,11 @@ export function setGlobalGfx(rom: Rom, n: number, data: Uint8Array): void {
     return;
   }
   // GFX32 and GFX33: both from one bank – the clean game's, else together in free space (GFX33 first)
-  const other = n === GFX33 ? GFX32 : GFX33;
+  const other = otherOf(n);
   const o = pairFile(rom, other), old = pairFile(rom, GFX33).addr;
   const otherClean = same(o.data, cleanGlobalGfx(rom, other) ?? new Uint8Array());
   rom.freeAt(old);
-  if (isClean && otherClean) { writePair(rom, CLEAN_33, CLEAN_32); return; }
+  if (isClean && otherClean) { writePair(rom, cleanAddr(rom, GFX33)!, cleanAddr(rom, GFX32)!); return; }
   const mine = isClean ? clean.stored : lz2Compress(data);
   const [s33, s32] = n === GFX33 ? [mine, o.stored] : [o.stored, mine];
   const block = new Uint8Array(s33.length + s32.length);
