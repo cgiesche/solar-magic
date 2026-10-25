@@ -732,7 +732,8 @@ Magic's code in the ROMs it saved does (the editor's code is its own):
   extended (`$04DA74`, `$04EC8C`, `$04ECBA`, `$04ECC5`, `$04ED97`, `$04EDBE`; VRAM `$04EDB8`).
 
 The translevel patch decompresses the YXPCCCTT again on every overworld load (`$04DD40`): in a level `$7F0000`
-is the VRAM patch's, and an event after a level would fade in with wrong palettes.
+is the VRAM patch's, and an event after a level would fade in with wrong palettes. It calls the routine long and
+drops the bank an RTS leaves: Free $7F0000 (the Romhack Races baserom's `free_up_ram.asm`) ends it with an RTL.
 
 The user paints an event as the map after it (*Overworld*, *Paint*: the event by the level exit that runs it).
 The editor finds its steps: the tiles that changed to the map before it (the events before it in number order),

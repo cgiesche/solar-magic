@@ -12,6 +12,7 @@ import { loadAsar } from '../src/core/asar.ts';
 import { Apu, loadApu } from '../src/core/apu.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { PPU } from '../src/core/ppu.ts';
+import { OverworldEmulator } from '../src/core/overworld.ts';
 import { map16Source } from '../src/core/render.ts';
 import { installEditorPatch } from '../src/core/patches.ts';
 import { enableBlocks } from '../src/core/map16ext.ts';
@@ -110,6 +111,8 @@ const order = (files: Record<string, Uint8Array>) => [...dec.decode(files['tools
   for (let f = 0; f < 120; f++) { s.joy1 = 0x0100; s.runFrame(); }
   const x1 = s.wram[0x94] | (s.wram[0x95] << 8);
   check(s.wram[0x100] === 0x14 && x1 > x0 + 32, `the game plays: level 105, Mario runs right (${x0} → ${x1})`);
+  // Free $7F0000 (free_up_ram.asm) ends $04DD40 with an RTL, which the editor's translevel patch also calls
+  check(new OverworldEmulator(rom).load(0, 0).ok, 'the overworld loads (Free $7F0000 with the translevel patch)');
   // a tile the game changes (a coin collected, a block hit) changes on screen: the first solid tile in view
   // made blank by the game's routine ($00BEB0) – its Map16 and its picture
   {

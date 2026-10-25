@@ -140,15 +140,18 @@ org ${hx(TL_HOOK)}
   JML $00B8DE
 Decompressed:
   PLB
-  REP #$30 : LDA #$0000 : SEP #$20
-  LDA #${hx(RAM.owTileFlags & 0xff)} : STA $0A : LDA #${hx(RAM.owTileFlags >> 8)} : STA $0B : LDA #$7E : STA $0C   ; the flags, as the game's
+  REP #$30 : TDC : SEP #$20
+  LDX #${hx(RAM.owTileFlags)} : STX $0A : LDA #$7E : STA $0C   ; the flags, as the game's
   LDY #$07FF
 - TYX
   LDA.l $7E${hx(RAM.owTranslevels).slice(1)},x : BEQ +
   TAX : LDA.l $04D678,x                        ; the translevel's initial flags
 + STA [$0A],y
   DEY : BPL -
-  JSR $DD40                                    ; the event tiles' YXPCCCTT to $7F0000 again: in a level it is the VRAM patch's
+  TSC : STA $0E                                ; the event tiles' YXPCCCTT to $7F0000 again: in a level it is the VRAM patch's;
+  JSL $04DD40                                  ; called long, its end an RTS or an RTL (Free $7F0000 makes it one), the
+  TSC : CMP $0E : BEQ + : PLA                  ; bank an RTS leaves dropped
++
   STZ $0F                                      ; the passed events, as the game's
 - JSR $DA49
   INC $0F : LDA $0F
