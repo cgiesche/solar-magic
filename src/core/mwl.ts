@@ -1,6 +1,7 @@
 // A package's sample level (see CONTEXT.md): its Lunar Magic level file (.mwl) as a level of this ROM,
-// replacing the current one, with the Map16 tiles, ExGFX and custom sprites rewritten to where the
-// package's parts landed. A level edit, not part of the package.
+// replacing the current one – or, when the package brings several, the level of its own number – with the
+// Map16 tiles, ExGFX and custom sprites rewritten to where the package's parts landed. A level edit, not
+// part of the package.
 //
 // .mwl (Ankouno's "MWL File Format", SMW-Data): at 0x40 (offset, size) pairs of the sections
 //  - 0 level information: 2 bytes the level number, then the secondary header ($05F000, $05F200,
@@ -88,19 +89,23 @@ export function mwlExAnim(d: Uint8Array): ExList | null {
 
 // layer 1/2 objects with Lunar Magic's Direct Map16 objects as the editor's; `notes`: what is left out
 // sized: a level with a size, whose screen jumps have a subscreen (parseObjects)
-export function parseLmObjects(data: Uint8Array, start: number, vertical: boolean, notes: string[], sized = false): { objects: LevelObject[]; exits: ScreenExit[] } {
+// tile: the Map16 tile a Direct Map16 tile of the file is here (default: the same); one from 1000 on is left out
+export function parseLmObjects(data: Uint8Array, start: number, vertical: boolean, notes: string[], sized = false, tile: (t: number) => number = (t) => t): { objects: LevelObject[]; exits: ScreenExit[] } {
   const objects: LevelObject[] = [];
   const exits: ScreenExit[] = [];
-  let p = start, screen = 0, sub = 0, custom = 0, high = 0;
+  let p = start, screen = 0, sub = 0, custom = 0, high = 0, cut = false;
   const at = (b0: number, b1: number) => {
     const f5 = b0 & 0x1f, f4 = b1 & 0x0f;
     return vertical ? { x: f5, y: screen * 16 + f4 } : { x: screen * 16 + f4, y: sub * SUBSCREEN_ROWS + f5 };
   };
-  const dm16 = (x: number, y: number, tile: number, size: number, cond?: Dm16Cond) =>
-    objects.push({ uid: newUid(), num: 0, ext: DM16_EXT, x, y, size, tile, ...(cond ? { cond } : {}) });
-  // a block of (ph+1)x(pw+1) tiles from `tile` (Map16 rows of 16) over (h+1)x(w+1) tiles
-  const pattern = (x: number, y: number, tile: number, h: number, w: number, ph: number, pw: number, cond?: Dm16Cond) => {
-    for (let r = 0; r <= h; r++) for (let c = 0; c <= w; c++) dm16(x + c, y + r, tile + (r % (ph + 1)) * 16 + (c % (pw + 1)), 0, cond);
+  const dm16 = (x: number, y: number, t: number, size: number, cond?: Dm16Cond) => {
+    const here = tile(t);
+    if (here >= EXT_TILES) { cut = true; return; }
+    objects.push({ uid: newUid(), num: 0, ext: DM16_EXT, x, y, size, tile: here, ...(cond ? { cond } : {}) });
+  };
+  // a block of (ph+1)x(pw+1) tiles from `first` (Map16 rows of 16) over (h+1)x(w+1) tiles
+  const pattern = (x: number, y: number, first: number, h: number, w: number, ph: number, pw: number, cond?: Dm16Cond) => {
+    for (let r = 0; r <= h; r++) for (let c = 0; c <= w; c++) dm16(x + c, y + r, first + (r % (ph + 1)) * 16 + (c % (pw + 1)), 0, cond);
   };
   while (p < data.length && data[p] !== 0xff) {
     const b0 = data[p], b1 = data[p + 1], b2 = data[p + 2];
@@ -113,16 +118,17 @@ export function parseLmObjects(data: Uint8Array, start: number, vertical: boolea
     }
     if (num === 0 && b2 === 1) { screen = b0 & 0x1f; if (sized && !vertical) sub = b1 & 0x0f; p += 3; continue; }
     const { x, y } = at(b0, b1);
-    if (num === 0x22 || num === 0x23) { dm16(x, y, ((num - 0x22) << 8) | data[p + 3], b2); p += 4; continue; }
+    cut = false;
+    if (num === 0x22 || num === 0x23) { dm16(x, y, ((num - 0x22) << 8) | data[p + 3], b2); if (cut) high++; p += 4; continue; }
     if (num === 0x27 || num === 0x29) {
-      const b3 = data[p + 3], fmt = b3 >> 6, tile = ((b3 & 0x3f) << 8) | data[p + 4] | (num === 0x29 ? 0x4000 : 0);
+      const b3 = data[p + 3], fmt = b3 >> 6, t = ((b3 & 0x3f) << 8) | data[p + 4] | (num === 0x29 ? 0x4000 : 0);
       const cond = fmt === 3 && b2 & 0x80 ? condOf(data[p + 7]) : undefined;
       const len = cond ? 8 : [5, 5, 6, 7][fmt];
-      if (tile >= EXT_TILES) { high++; p += len; continue; }
-      if (fmt === 0) dm16(x, y, tile, b2);
-      else if (fmt === 1) pattern(x, y, tile, b2 >> 4, b2 & 15, b2 >> 4, b2 & 15);
-      else if (fmt === 2) pattern(x, y, tile, b2 >> 4, b2 & 15, data[p + 5] >> 4, data[p + 5] & 15);
-      else pattern(x, y, tile, data[p + 6], b2 & 0x7f, data[p + 5] >> 4, data[p + 5] & 15, cond);
+      if (fmt === 0) dm16(x, y, t, b2);
+      else if (fmt === 1) pattern(x, y, t, b2 >> 4, b2 & 15, b2 >> 4, b2 & 15);
+      else if (fmt === 2) pattern(x, y, t, b2 >> 4, b2 & 15, data[p + 5] >> 4, data[p + 5] & 15);
+      else pattern(x, y, t, data[p + 6], b2 & 0x7f, data[p + 5] >> 4, data[p + 5] & 15, cond);
+      if (cut) high++;
       p += len;
       continue;
     }
@@ -151,9 +157,10 @@ export interface SampleMapping {
 
 export interface SampleLevel { level: Level; palette: Uint8Array | null; exanim: ExList | null; exanimSettings: number; notes: string[] }
 
-// the sample level as level `into.number` (ROM locations for saving in place from `into`); the current
-// level keeps its screen exits (those on screens the sample level has)
-export function sampleLevel(rom: Rom, d: Uint8Array, into: Level, map: SampleMapping): SampleLevel {
+// the sample level as level `into.number` (ROM locations for saving in place from `into`); `own`: at its
+// own level number, with its own screen exits – else the current level keeps its (those on screens the
+// sample level has)
+export function sampleLevel(rom: Rom, d: Uint8Array, into: Level, map: SampleMapping, own = false): SampleLevel {
   const s = mwlSections(d);
   const notes: string[] = [];
   const header = parsePrimaryHeader(s.layer1.subarray(0, 5));
@@ -161,17 +168,19 @@ export function sampleLevel(rom: Rom, d: Uint8Array, into: Level, map: SampleMap
   if (secondary.levelSize > MAX_LEVEL_SIZE) throw new Error(`The level file's level size ${hx(secondary.levelSize, 2)} (Lunar Magic) is not supported – the editor has sizes up to ${hx(MAX_LEVEL_SIZE, 2)}`);
   if (secondary.levelSize && !hasLevelSize(rom, header.mode)) throw new Error(`The level file's level has a size (Lunar Magic) in a level mode (${hx(header.mode, 2)}) the editor has no sizes for`);
   const vert1 = isL1Vertical(rom, header.mode);
-  const l1 = hasObjects(header.mode) ? parseLmObjects(s.layer1, 5, vert1, notes, isSized(secondary)) : { objects: [], exits: [] };
+  // Direct Map16 tiles where the package's went (also those from 1000 on that went below it)
+  const others = new Set<number>();
+  const tile = (t: number) => {
+    const here = map.tile(t);
+    if (here !== null) return here;
+    if (t >= EXT_FIRST) others.add(t);
+    return t;
+  };
+  const l1 = hasObjects(header.mode) ? parseLmObjects(s.layer1, 5, vert1, notes, isSized(secondary), tile) : { objects: [], exits: [] };
   let layer2Objects: LevelObject[] | null = null, layer2Header: Uint8Array | null = null;
   if (s.layer2 && hasLayer2Objects(header.mode) && s.layer2.length !== 0x800) {
     layer2Header = s.layer2.slice(0, 5);
-    layer2Objects = parseLmObjects(s.layer2, 5, isL2Vertical(rom, header.mode), notes).objects;
-  }
-  const others = new Set<number>();
-  for (const o of [...l1.objects, ...(layer2Objects ?? [])]) {
-    if (o.tile === undefined) continue;
-    const t = map.tile(o.tile);
-    if (t === null) { if (o.tile >= EXT_FIRST) others.add(o.tile); } else o.tile = t;
+    layer2Objects = parseLmObjects(s.layer2, 5, isL2Vertical(rom, header.mode), notes, false, tile).objects;
   }
   if (others.size) notes.push(`Uses Map16 tiles the package does not bring: ${[...others].map((t) => hx(t, 3)).join(', ')}`);
   const ps = parseSprites(s.sprites, 0, vert1, spriteSizes(rom));
@@ -185,8 +194,8 @@ export function sampleLevel(rom: Rom, d: Uint8Array, into: Level, map: SampleMap
   });
   if (dropped) notes.push(`${dropped} custom sprite(s) left out: which sprite of the package they are is not certain`);
   // the current level's screen exits, as far as the sample level has their screens
-  const exits = into.exits.filter((x) => x.screen < header.screens).map((x) => ({ ...x }));
-  if (exits.length < into.exits.length) notes.push(`${into.exits.length - exits.length} screen exit(s) of level ${hx(into.number, 3)} dropped: the sample level has ${header.screens} screen(s)`);
+  const exits = own ? l1.exits : into.exits.filter((x) => x.screen < header.screens).map((x) => ({ ...x }));
+  if (!own && exits.length < into.exits.length) notes.push(`${into.exits.length - exits.length} screen exit(s) of level ${hx(into.number, 3)} dropped: the sample level has ${header.screens} screen(s)`);
   const level: Level = {
     number: into.number,
     header,

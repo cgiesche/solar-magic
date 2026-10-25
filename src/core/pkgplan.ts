@@ -28,6 +28,7 @@ import { GFX_SLOTS } from './gfxslots.ts';
 import { withIncludes } from './pkgmap.ts';
 import { isUberList } from './uberproject.ts';
 import { mwlExAnim } from './mwl.ts';
+import { planSamples, type PlannedSample } from './pkgsamples.ts';
 import { gfxDataSize } from './patches.ts';
 import { isSharedPalettes, changedColors, setSharedColor, sharedColorNames } from './sharedpal.ts';
 import { isGlobalAnimBps, globalAnimList } from './globalanim.ts';
@@ -92,11 +93,11 @@ export function detectBlocks(files: Map<string, Uint8Array>, gps?: ToolFolder | 
   return { blocks, list, missing };
 }
 
-// the graphics parts of an upload, and its Lunar Magic level file (a sample level when the upload has
+// the graphics parts of an upload, and its Lunar Magic level files (sample levels when the upload has
 // code, else a level import)
 // (sharedpal: Lunar Magic's shared palettes, sharedpal.ts; globalanim: its global ExAnimation as a BPS,
 // globalanim.ts)
-export interface DetectedGraphics { map16: string[]; exgfx: string[]; pal: string[]; palmask: string[]; sharedpal: string[]; globalanim: string[]; mwl: string | null }
+export interface DetectedGraphics { map16: string[]; exgfx: string[]; pal: string[]; palmask: string[]; sharedpal: string[]; globalanim: string[]; mwls: string[] }
 
 // `included`: files some .asm file includes (incbin data is code's, not graphics)
 export function detectGraphics(files: Map<string, Uint8Array>, included: Set<string>): DetectedGraphics {
@@ -113,7 +114,7 @@ export function detectGraphics(files: Map<string, Uint8Array>, included: Set<str
     palmask: keys.filter((f) => /\.palmask$/i.test(f)),
     sharedpal: keys.filter((f) => /\.pal$/i.test(f) && isSharedPalettes(files.get(f)!)),
     globalanim: keys.filter((f) => /\.bps$/i.test(f) && isGlobalAnimBps(files.get(f)!)),
-    mwl: keys.find((f) => /\.mwl$/i.test(f)) ?? null,
+    mwls: keys.filter((f) => /\.mwl$/i.test(f)),
   };
 }
 
@@ -155,7 +156,8 @@ export interface PackagePlan {
   palettes: PackPalette[];
   sharedPal: PlannedSharedPal | null;
   globalAnim: PlannedGlobalAnim | null;
-  sample: MwlLevel | null; // the sample level, parsed
+  samples: PlannedSample[]; // the sample levels: offered as which level, or why not (pkgsamples.ts)
+  sample: MwlLevel | null; // the first offered, parsed (the level setup's back area color)
   exanim: ExSlot[]; // the sample level's ExAnimation slots that write tiles the package's Map16 tiles draw from
   // where its slots take their frames from: Lunar Magic's AN2 file, its alternative file (ExGFX 60-63);
   // the level setup copies them into the level's Anim graphic (exanim.ts localizeFrames)
@@ -170,10 +172,12 @@ export interface PlanInput { files: Map<string, Uint8Array>; blocks: DetectedBlo
 export function planPackage(rom: Rom, input: PlanInput, blank: number[]): PackagePlan {
   const { files, graphics } = input;
   const notes: string[] = [];
-  let sample: MwlLevel | null = null;
-  if (graphics.mwl) {
-    try { sample = parseMwl(files.get(graphics.mwl)!); } catch (e) { notes.push(`${base(graphics.mwl)}: ${e instanceof Error ? e.message : e}`); }
-  }
+  const samples = planSamples(rom, files, graphics.mwls);
+  // the offered ones, parsed; the first stands for the package's level (its Map16 origin, animations)
+  const offered = samples.filter((x) => !x.left).flatMap((x) => {
+    try { return [{ file: x.file, level: parseMwl(files.get(x.file)!) }]; } catch (e) { notes.push(`${base(x.file)}: ${e instanceof Error ? e.message : e}`); return []; }
+  });
+  const mwl = offered[0]?.file ?? null, sample = offered[0]?.level ?? null;
   // an export of all Map16 has all of the package's; else the FG .map16 (a BG one is for a sample level's
   // background)
   const whole = graphics.map16.map((file) => ({ file, data: parseRomMap16(files.get(file)!) })).find((m) => m.data) ?? null;
@@ -204,7 +208,7 @@ export function planPackage(rom: Rom, input: PlanInput, blank: number[]): Packag
   let map16: PlannedMap16 | null = null;
   let shift = 0; // list.txt tiles moved by this much (taken here)
   if (fgMap) {
-    const from = fgOrigin(rom, fgMap.data, graphics.mwl ? files.get(graphics.mwl)! : null) ?? (listed.length ? Math.min(...listed.map((b) => b.tile!)) : EXT_FIRST);
+    const from = fgOrigin(rom, fgMap.data, mwl ? files.get(mwl)! : null) ?? (listed.length ? Math.min(...listed.map((b) => b.tile!)) : EXT_FIRST);
     const want = listed.length ? Math.min(...listed.map((b) => b.tile!)) : Math.max(from, EXT_FIRST);
     const offsets = [...new Set([...map16Targets(fgMap.data, 0), ...listed.map((b) => b.tile! - want)])];
     const at = freeRun(want, offsets, isUsed, Math.min(16, fgMap.data.width));
@@ -267,10 +271,10 @@ export function planPackage(rom: Rom, input: PlanInput, blank: number[]): Packag
     blocks.push({ file: b.file, tiles: [t], acts: b.acts ?? 0x130 });
   }
 
-  // ExGFX: the slot from the file name or the sample level's slots
+  // ExGFX: the slot from the file name or the first sample level having it in one
   const named = graphics.exgfx.map((file) => {
     const n = exgfxName(base(file));
-    const slot = n.slot ?? (sample && n.num !== null ? [...sample.gfx].find(([, v]) => v === n.num)?.[0] ?? null : null);
+    const slot = n.slot ?? (n.num === null ? null : offered.map((o) => [...o.level.gfx].find(([, v]) => v === n.num)?.[0]).find((x) => x) ?? null);
     return { file, lmNum: n.num, slot };
   });
 
@@ -278,7 +282,7 @@ export function planPackage(rom: Rom, input: PlanInput, blank: number[]): Packag
   // frames from (AN2, the list's alternative file ExGFX 60-63) are frame sources, not ExGFX
   const exanim: ExSlot[] = [];
   let list: ExList | null = null;
-  if (graphics.mwl) try { list = mwlExAnim(files.get(graphics.mwl)!); } catch { /* not a list */ }
+  if (mwl) try { list = mwlExAnim(files.get(mwl)!); } catch { /* not a list */ }
   if (list && map16) {
     const drawn = new Set(map16.data.tiles.flat().map((w) => w & 0x3ff));
     for (const e of list.slots.values()) if (slotTiles(e).some((t) => drawn.has(t))) exanim.push(e);
@@ -304,7 +308,7 @@ export function planPackage(rom: Rom, input: PlanInput, blank: number[]): Packag
   });
 
   const palettes = packPalettes(files, graphics.pal, graphics.palmask, notes);
-  return { blocks, map16, romMap16, gfx, palettes, sharedPal: planSharedPal(rom, files, graphics.sharedpal, notes), globalAnim, sample, exanim, frames, notes };
+  return { blocks, map16, romMap16, gfx, palettes, sharedPal: planSharedPal(rom, files, graphics.sharedpal, notes), globalAnim, samples, sample, exanim, frames, notes };
 }
 
 // the FG Map16 tiles a plan's .map16 (or whole-ROM .map16) draws

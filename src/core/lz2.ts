@@ -1,6 +1,7 @@
 // Nintendo LC_LZ2 compression as used by Super Mario World (GFX files, BG tilemaps, ...).
 
-export function lz2Decompress(src: Uint8Array, offset: number): { data: Uint8Array; size: number } {
+// (src: any indexable bytes, e.g. a ROM read through a patch)
+export function lz2Decompress(src: { readonly [i: number]: number }, offset: number): { data: Uint8Array; size: number } {
   const out: number[] = [];
   let p = offset;
   for (;;) {

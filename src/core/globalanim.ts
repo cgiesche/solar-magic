@@ -7,37 +7,17 @@
 // global list (levelgfx.ts placeGlobalSlots).
 
 import { snesToPc } from './rom.ts';
-import { bpsReader } from './bps.ts';
-import { SMW_CLEAN_CRC, CLEAN_SIZE } from './cleangame.ts';
+import { cleanGameBps, known, NotKnown } from './cleangame.ts';
 import { exanimLayout, globalListAddr, parseList, listMaxLength, type ExList, type RomRead } from './exanim.ts';
 
 type Source = (o: number) => number | null;
 const none: Source = () => null;
 
-// a byte of the target depends on a byte of the clean game this ROM does not have
-class NotKnown extends Error {}
-
-// the Lunar Magic ROM a BPS from the clean game makes, read through it (bytes not known throw NotKnown),
-// and its global list's address (0: none); null when it is no such patch or has no ExAnimation
+// the Lunar Magic ROM a BPS from the clean game makes and its global list's address (0: none); null when
+// it is no such patch or has no ExAnimation
 function lmRom(data: Uint8Array, clean: Source): { rom: RomRead; byte: (pc: number) => number | null; list: number } | null {
-  const r = bpsReader(data);
-  if (!r || r.sourceSize !== CLEAN_SIZE || r.sourceCrc !== SMW_CLEAN_CRC) return null;
-  const byte = (pc: number) => r.byte(pc, clean);
-  const r8 = (a: number) => {
-    const v = byte(snesToPc(a));
-    if (v === null) throw new NotKnown();
-    return v;
-  };
-  const rom: RomRead = { r8, r16: (a) => r8(a) | (r8(a + 1) << 8), r24: (a) => r8(a) | (r8(a + 1) << 8) | (r8(a + 2) << 16) };
-  return exanimLayout(rom) ? { rom, byte, list: globalListAddr(rom) } : null;
-}
-
-// runs `read`; 'not known' when it needs a byte that is not known
-function known<T>(read: () => T): T | 'not known' {
-  try { return read(); } catch (e) {
-    if (e instanceof NotKnown) return 'not known';
-    throw e;
-  }
+  const rom = cleanGameBps(data, clean);
+  return rom && exanimLayout(rom) ? { rom, byte: rom.byte, list: globalListAddr(rom) } : null;
 }
 
 // whether a file is such a patch with global animation slots, told from the patch alone: its list's

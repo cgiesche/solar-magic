@@ -59,7 +59,7 @@ for (const f of ['ghostbustersghosttrapjavamanhattanBG.zip', 'sonicmaniasszact1.
 // a sample level – a package, each file in its part, though it holds a Lunar Magic level
 const onoff = inspectUpload('On-Off Block.zip', fixture('On-Off Block.zip'));
 check(kinds(onoff) === 'block graphics graphics graphics graphics sprite', `On-Off Blocks: block, sprite and graphics, not a level import (${kinds(onoff)})`);
-check(onoff.status === 'ready' && onoff.unclaimed.join() === 'On-Off Blocks - Readme.txt' && onoff.sample === 'SampleLevel.mwl', `On-Off Blocks: only the readme not installed, the .mwl its sample level (${onoff.status === 'ready' ? onoff.unclaimed.join() : ''})`);
+check(onoff.status === 'ready' && onoff.unclaimed.join() === 'On-Off Blocks - Readme.txt' && onoff.samples.join() === 'SampleLevel.mwl', `On-Off Blocks: only the readme not installed, the .mwl its sample level (${onoff.status === 'ready' ? onoff.unclaimed.join() : ''})`);
 
 const patchAsm = 'org $00A1DA\n  db $EA\n';
 const uberAsm = 'load:\n  LDA #$11 : STA $7FB001\n  RTL\n';

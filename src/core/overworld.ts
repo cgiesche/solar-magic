@@ -8,6 +8,7 @@ import { GM, RAM } from './ram.ts';
 import { assemble } from './asar.ts';
 import { missingPatch } from './patches.ts';
 import { lz2Compress, lz2Decompress } from './lz2.ts';
+import type { RomRead } from './exanim.ts';
 import { hasOwnContent } from './level.ts';
 import { messageSlots, unassignMessageSlot } from './messages.ts';
 import { eventDataRanges } from './owevents.ts';
@@ -174,6 +175,22 @@ export function readTranslevels(rom: Rom): Uint8Array {
   if (!hasTranslevelTable(rom)) missingPatch('Translevels per level tile');
   const out = new Uint8Array(0x800);
   out.set(lz2Decompress(rom.data, snesToPc(tableAt(rom))).data.subarray(0, 0x800));
+  return out;
+}
+
+// the level each level tile enters (l1Index → level number) in a ROM read through `r` – another than the
+// open one, e.g. the Lunar Magic ROM a BPS makes (cleangame.ts), whose reads may throw; null without
+// Lunar Magic's translevel table
+export function levelTileLevels(r: RomRead): Map<number, number> | null {
+  if (r.r8(TL_BANK - 1) !== 0xa9) return null;
+  const at = (r.r8(TL_BANK) << 16) | r.r16(TL_PTR);
+  const packed = new Proxy({} as { readonly [i: number]: number }, { get: (_, k) => r.r8(at + Number(k)) });
+  const t = lz2Decompress(packed, 0).data;
+  const out = new Map<number, number>();
+  for (let i = 0; i < 0x800; i++) {
+    const tile = r.r8(OW_L1 + i);
+    if (isLevelTile(tile) && t[i]) out.set(i, translevelToLevel(t[i]));
+  }
   return out;
 }
 

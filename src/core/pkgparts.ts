@@ -49,7 +49,7 @@ export interface ReadyPreview extends PreviewBase {
   status: 'ready';
   parts: PreviewPart[];
   upload: Upload | null; // the upload's code (null: it has no .asm)
-  sample: string | null; // its sample level (.mwl)
+  samples: string[]; // its sample levels (.mwl)
   unclaimed: string[]; // files no part takes: not installed
   docs: string[]; // the package's manuals (readme)
   callisto: CallistoProject | null; // the Callisto project it is
@@ -89,6 +89,7 @@ export interface InstallOptions {
   cgram?: Uint8Array; // the colors of `level` now (levelColors), base of its own palette for the setup
   wram?: Uint8Array; // the WRAM of `level` after its load: RAM frames of animations come along from it
   sample?: Level; // replace this level (the current one, number `level`) by the package's sample level
+  samples?: string[]; // of several sample levels: these (their files) as the levels the plan offers them as
 }
 
 // what the adapters apply: the preview, the options and where the parts go in this ROM
@@ -363,11 +364,11 @@ const GRAPHICS_TYPES: GraphicsType[] = ['map16', 'exgfx', 'pal', 'palmask', 'sha
 
 const graphics: PartAdapter<'graphics'> = {
   kind: 'graphics',
-  // Map16 tiles, ExGFX, palettes, shared palettes and global animation; the Lunar Magic level file goes with the package (its sample level)
+  // Map16 tiles, ExGFX, palettes, shared palettes and global animation; the Lunar Magic level files go with the package (its sample levels)
   // (in a Callisto project not those in a tool's folder, which are its code's data)
   claims: (d) => [
     ...GRAPHICS_TYPES.flatMap((type) => d.graphics[type].filter((f) => !inToolFolder(d, f)).map((f): FileClaim => ({ file: f, rank: RANK.type, part: { kind: 'graphics', name: base(f), file: f, type } }))),
-    ...(d.graphics.mwl ? [{ file: d.graphics.mwl, rank: RANK.type }] : []),
+    ...d.graphics.mwls.map((file) => ({ file, rank: RANK.type })),
   ],
   apply: (rom, _mine, { preview, opt, plan }) => applyGraphics(rom, preview.files, plan, opt.blank),
 };
@@ -385,9 +386,9 @@ export const INSTALL_ORDER: PartKind[] = ['patch', 'music', 'uberasm', 'sprite',
 // the order of the preview's list
 export const PART_ORDER: PartKind[] = ['patch', 'uberasm', 'block', 'sprite', 'music', 'graphics'];
 
-// the graphics parts and the sample level of a preview, as pkgplan.ts takes them
+// the graphics parts and the sample levels of a preview, as pkgplan.ts takes them
 function previewGraphics(p: ReadyPreview): DetectedGraphics {
-  const g: DetectedGraphics = { map16: [], exgfx: [], pal: [], palmask: [], sharedpal: [], globalanim: [], mwl: p.sample };
+  const g: DetectedGraphics = { map16: [], exgfx: [], pal: [], palmask: [], sharedpal: [], globalanim: [], mwls: p.samples };
   for (const x of partsOf(p, 'graphics')) g[x.type].push(x.file);
   return g;
 }

@@ -170,7 +170,7 @@ An upload with a Lunar Magic level file (.mwl) and no code or songs, applied to 
 _Avoid_: Graphics package, background package
 
 **Sample level**:
-The .mwl of a package that also has code: an example of the package in use. Optionally replaces the current level – or, when the package brings several, each its own level number –, with its Map16 tiles, ExGFX and (where certain) sprite numbers rewritten to where the package's parts landed. A level edit, not part of the package.
+The .mwl of a package that also has code: an example of the package in use. Optionally replaces the current level – or, when the package brings several, each the level of its own number, with its screen exits and graphics slots –, with its Map16 tiles, ExGFX and (where certain) sprite numbers rewritten to where the package's parts landed. Of several, those belonging to what is not part of the package are not offered: the title screen's level (the one the game loads for it) and a level the package's overworld moved (a level tile entering it where this ROM's enters another). A level edit (one at its own number written with the install and undone with it), not part of the package.
 _Avoid_: Demo level, test level
 
 **Level setup**:

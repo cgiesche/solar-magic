@@ -484,3 +484,17 @@ export class LevelEmulator {
     return out;
   }
 }
+
+// the level the game loads for its title screen (the entry of the layer 1 pointer table it reads while
+// booting), null when it reads none; emulated once per ROM state
+const titleLevels = new WeakMap<Rom, { gen: number; level: number | null }>();
+export function titleScreenLevel(rom: Rom): number | null {
+  const had = titleLevels.get(rom);
+  if (had?.gen === rom.gen) return had.level;
+  const e = new LevelEmulator(rom), table = snesToPc(L1_PTRS);
+  let level: number | null = null;
+  e.snes.hook = { onRomRead: (o) => { if (level === null && o >= table && o < table + 0x200 * 3) level = Math.floor((o - table) / 3); } };
+  try { e.boot(); } catch { level = null; }
+  titleLevels.set(rom, { gen: rom.gen, level });
+  return level;
+}

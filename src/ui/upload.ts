@@ -70,7 +70,7 @@ function openManual(app: App, p: ManualPreview, done: (pkg: Package) => void): v
 
 // the preview dialog with Install / Cancel; `choices`: what the user set in it
 function installDialog(app: App, p: ReadyPreview | ManualPreview, body: HTMLElement, log: HTMLElement, music: boolean,
-  choices: () => Pick<InstallOptions, 'patch' | 'assignment' | 'plan' | 'setup' | 'cgram' | 'sample'>, done: (pkg: Package) => void): void {
+  choices: () => Pick<InstallOptions, 'patch' | 'assignment' | 'plan' | 'setup' | 'cgram' | 'sample' | 'samples'>, done: (pkg: Package) => void): void {
   let busy = false;
   const install = async () => {
     if (busy) return;
@@ -91,7 +91,8 @@ function installDialog(app: App, p: ReadyPreview | ManualPreview, body: HTMLElem
     // the sample level: a level edit of its own (not saved yet)
     const sample = r.sample;
     if (sample) app.replaceLevel(sample.level);
-    toast(`“${p.name}” installed${r.warnings.length ? ` (${r.warnings.length} warning(s))` : ''}${sample ? `, its sample level in place of level ${hex(app.level.number, 3)} (not saved yet)` : ''} – Ctrl+Z undoes it.`);
+    const own = r.samples?.length ? `, its sample level(s) as level ${r.samples.map((n) => hex(n, 3)).join(', ')}` : '';
+    toast(`“${p.name}” installed${r.warnings.length ? ` (${r.warnings.length} warning(s))` : ''}${sample ? `, its sample level in place of level ${hex(app.level.number, 3)} (not saved yet)` : ''}${own} – Ctrl+Z undoes it.`);
     done(r.pkg);
   };
   const dlg = modal(`Upload: ${p.name}`, body, [

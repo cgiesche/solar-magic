@@ -1,11 +1,12 @@
 // What the editor knows of the clean game once it has changed the ROM: a CRC32 of each 256-byte block of
 // it ("SMWF"), kept when it opens the clean game. A byte of this ROM is still the clean game's while its
 // block's CRC is the clean one's. Lunar Magic data exported as BPS from the clean game (Callisto's global
-// ExAnimation) takes some of its bytes from the clean game; those are read from this ROM where it still
-// has them.
+// ExAnimation, its overworld) takes some of its bytes from the clean game; those are read from this ROM
+// where it still has them.
 
-import { Rom, pcToSnes } from './rom.ts';
-import { crc32 } from './bps.ts';
+import { Rom, pcToSnes, snesToPc } from './rom.ts';
+import { crc32, bpsReader } from './bps.ts';
+import type { RomRead } from './exanim.ts';
 
 export const SMW_CLEAN_CRC = 0xb19ed489; // Super Mario World (U), headerless
 export const CLEAN_SIZE = 0x80000;
@@ -57,4 +58,31 @@ export function cleanGameBytes(rom: Rom): ((o: number) => number | null) | null 
     if (s === undefined) same.set(k, s = blockCrc(rom.data, k) === v.getUint32(k * 4, true));
     return s ? rom.data[o] : null;
   };
+}
+
+// a byte of a patch's target depends on a byte of the clean game this ROM does not have
+export class NotKnown extends Error {}
+
+// the ROM a BPS from the clean game makes (Lunar Magic data Callisto exports), read through it without
+// applying it: `byte` is null and r8 throws NotKnown where it needs a byte `clean` does not have (see
+// cleanGameBytes); null when it is no BPS from the clean game
+export interface BpsRom extends RomRead { byte(pc: number): number | null }
+export function cleanGameBps(data: Uint8Array, clean: (o: number) => number | null): BpsRom | null {
+  const r = bpsReader(data);
+  if (!r || r.sourceSize !== CLEAN_SIZE || r.sourceCrc !== SMW_CLEAN_CRC) return null;
+  const byte = (pc: number) => r.byte(pc, clean);
+  const r8 = (a: number) => {
+    const v = byte(snesToPc(a));
+    if (v === null) throw new NotKnown();
+    return v;
+  };
+  return { byte, r8, r16: (a) => r8(a) | (r8(a + 1) << 8), r24: (a) => r8(a) | (r8(a + 1) << 8) | (r8(a + 2) << 16) };
+}
+
+// runs `read`; 'not known' when it needs a byte that is not known
+export function known<T>(read: () => T): T | 'not known' {
+  try { return read(); } catch (e) {
+    if (e instanceof NotKnown) return 'not known';
+    throw e;
+  }
 }

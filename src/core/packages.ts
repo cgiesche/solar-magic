@@ -21,9 +21,12 @@ import { setCustomPalette } from './patches.ts';
 import { map16Targets } from './map16file.ts';
 import { mwlSections, sampleLevel, type SampleLevel } from './mwl.ts';
 import { writeLevelList, setLevelSettings, levelSettings } from './exanim.ts';
-import { planBgPack, applyBgPack, isLevelImport } from './bgpack.ts';
+import { planBgPack, applyBgPack, isLevelImport, parseMwl } from './bgpack.ts';
 import { levelFrames } from './levelgfx.ts';
-import { parseSprites, spriteSizes, type Level } from './level.ts';
+import { parseSprites, spriteSizes, loadLevel, type Level } from './level.ts';
+import { saveLevel } from './save.ts';
+import { sampleSlots } from './pkgsamples.ts';
+import { assignSlot } from './gfxslots.ts';
 import { recordPackageChange, recordPackageChangeAsync, listPackages, packageArchive, uninstallPackage, type Package } from './pkgreg.ts';
 import { allOrNothing } from './romedit.ts';
 import { callistoProject, includesCallistoHeader, sharedCode, type CallistoProject } from './callisto.ts';
@@ -44,6 +47,7 @@ export type UploadPreview =
   | PreviewBase & { status: 'failed'; reason: string };
 
 const dec = new TextDecoder();
+const hx = (v: number) => v.toString(16).toUpperCase().padStart(3, '0');
 const nameOf = (fileName: string) => fileName.replace(/\.[^.]*$/, '').split(/[\\/]/).pop()!;
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : one.endsWith('h') ? 'es' : 's'}`;
 
@@ -96,7 +100,7 @@ export function inspectFiles(fileName: string, files: Map<string, Uint8Array>): 
     // a patch with a manifest is one patch, whatever else it holds
     if (upload.manifest) {
       const main = upload.manifest.main;
-      return { ...head, name: upload.name, status: 'ready', parts: [{ kind: 'patch', name: upload.name, file: main, candidates: [main] }], upload, sample: null, unclaimed: [], docs, callisto: null, notes: [] };
+      return { ...head, name: upload.name, status: 'ready', parts: [{ kind: 'patch', name: upload.name, file: main, candidates: [main] }], upload, samples: [], unclaimed: [], docs, callisto: null, notes: [] };
     }
   }
   const d: Detection = { files, paths, upload, included, docs, graphics, callisto };
@@ -137,7 +141,7 @@ export function inspectFiles(fileName: string, files: Map<string, Uint8Array>): 
   const notes = [...left.map((l) => `Not part of the package: ${l.file} – ${l.what}.`), ...replaced.values()];
   const shared = new Set(callisto ? sharedCode(callisto, files) : []);
   const unclaimed = paths.filter((p) => !won.files.has(p) && !replaced.has(p) && !included.has(p) && !shared.has(p) && !left.some((l) => l.file === p) && !(upload && SHARED_CODE.test(p) && /\.(asm|asar)$/i.test(p))).sort();
-  return { ...head, status: 'ready', parts, upload, sample: graphics.mwl, unclaimed, docs, callisto, notes };
+  return { ...head, status: 'ready', parts, upload, samples: graphics.mwls, unclaimed, docs, callisto, notes };
 }
 
 // every file to its best claim: lowest rank, then the adapter first in DETECT_ORDER, a part before a
@@ -184,15 +188,18 @@ export function defaultAssignment(p: ManualPreview, level: number): ManualAssign
   return { rules, calls };
 }
 
-// sample: the sample level to put in place of the current one (a level edit, not saved yet)
-export interface InstallResult extends ApplyResult { pkg: Package | null; sample?: SampleLevel }
+// sample: the sample level to put in place of the current one (a level edit, not saved yet); samples: the
+// levels sample levels were written as (InstallOptions.samples)
+export interface InstallResult extends ApplyResult { pkg: Package | null; sample?: SampleLevel; samples?: number[] }
 
-// the sample level with the package's parts where they landed: Map16 tiles by the plan (a whole-ROM
-// .map16's too), custom sprites when certain (one level sprite of that type in the package and one
-// number of it in the level, or a PIXI list.txt of the package naming the number); its background with
-// the package's BG Map16 tiles, its own colors, the package's ExGFX in its slots (the level setup)
-function placeSample(rom: Rom, preview: ReadyPreview, ctx: InstallContext, into: Level, opt: InstallOptions): SampleLevel {
-  const d = preview.files.get(preview.sample!)!;
+// the sample level `file` as level `into` – the current one, or (`own`) the level of its own number with
+// its screen exits and graphics slots – with the package's parts where they landed: Map16 tiles by the plan
+// (a whole-ROM .map16's too), custom sprites when certain (one level sprite of that type in the package and
+// one number of it in the level, or a PIXI list.txt of the package naming the number); its background with
+// the package's BG Map16 tiles, its own colors and animations. The current level's slots are the level
+// setup's.
+function placeSample(rom: Rom, preview: ReadyPreview, ctx: InstallContext, file: string, into: Level, opt: InstallOptions, own: boolean): SampleLevel {
+  const d = preview.files.get(file)!;
   const m = ctx.plan.map16;
   const from = m ? map16Targets(m.data, m.from) : [], to = m ? map16Targets(m.data, m.at) : [];
   const sprites = ctx.sprites?.sprites ?? [];
@@ -209,28 +216,34 @@ function placeSample(rom: Rom, preview: ReadyPreview, ctx: InstallContext, into:
       const k = kindOf(num), mine = sprites.filter((x) => x.kind === k);
       return mine.length === 1 && new Set(used.filter((q) => kindOf(q.num) === k).map((q) => q.num)).size === 1 ? mine[0].num : null;
     },
-  });
-  // the background: the BG tilemap, BG Map16 tiles of the package moved along
-  const mwl = ctx.plan.sample;
-  if (mwl?.bg && !sample.level.layer2Objects) {
-    try {
-      const bp = planBgPack(rom, preview.name, preview.files, opt.blank);
-      const r = allOrNothing(rom, () => applyBgPack(rom, sample.level, preview.files, bp, { bg: true, fg: false, layer3: false, palettes: bp.palettes.map(() => false), cgram: opt.cgram ?? null, blank: opt.blank }));
+  }, own);
+  // the background: the BG tilemap, BG Map16 tiles of the package moved along (a whole-ROM .map16's where
+  // they went, else the level file's .map16 as a level import places it)
+  const mwl = parseMwl(d);
+  const rm = ctx.plan.romMap16;
+  if (mwl.bg && !sample.level.layer2Objects) {
+    if (rm) sample.level.bg = mwl.bg.map((t) => rm.bg.get(t) ?? t);
+    else try {
+      const files = new Map([...preview.files].filter(([f]) => f === file || !/\.mwl$/i.test(f)));
+      const bp = planBgPack(rom, preview.name, files, opt.blank);
+      const r = allOrNothing(rom, () => applyBgPack(rom, sample.level, files, bp, { bg: true, fg: false, layer3: false, palettes: bp.palettes.map(() => false), cgram: opt.cgram ?? null, blank: opt.blank }));
       if (r.ok) sample.level.bg = r.bg; else sample.notes.push(`Background not taken over: ${r.errors.join(' ')}`);
     } catch (e) { sample.notes.push(`Background not taken over: ${e instanceof Error ? e.message : e}`); }
   }
-  if (sample.palette) setCustomPalette(rom, into.number, sample.palette);
+  const n = into.number;
+  if (own) for (const { slot, num } of sampleSlots(rom, n, sample.level.header, mwl, ctx.plan.gfx, sample.notes)) assignSlot(rom, n, slot, num);
+  if (sample.palette || own) setCustomPalette(rom, n, sample.palette);
   // its ExAnimation in place of the level's (the level setup's slots of the package included), its frames
   // copied into the level's Anim graphic
   if (sample.exanim) {
     const slots = [...sample.exanim.slots];
-    const f = levelFrames(rom, into.number, slots.map(([, e]) => e), ctx.plan.frames, opt.wram);
+    const f = levelFrames(rom, n, slots.map(([, e]) => e), ctx.plan.frames, opt.wram);
     sample.notes.push(...f.notes);
     sample.exanim.slots = new Map(slots.flatMap(([k], i) => f.slots[i] ? [[k, f.slots[i]!] as const] : []));
     sample.exanim.altFile = f.file;
   }
-  writeLevelList(rom, into.number, sample.exanim);
-  if (sample.exanim || levelSettings(rom, into.number)) setLevelSettings(rom, into.number, sample.exanimSettings);
+  writeLevelList(rom, n, sample.exanim);
+  if (sample.exanim || levelSettings(rom, n)) setLevelSettings(rom, n, sample.exanimSettings);
   return sample;
 }
 
@@ -258,6 +271,7 @@ export async function installPackage(rom: Rom, preview: ReadyPreview | ManualPre
   const warnings: string[] = [];
   const prints: string[] = [];
   let sample: SampleLevel | undefined;
+  const samples: number[] = [];
   try {
     const archive = zipSync(Object.fromEntries(preview.files), { level: 9 });
     const target = { name: preview.name, fileName: preview.fileName, archive };
@@ -280,16 +294,26 @@ export async function installPackage(rom: Rom, preview: ReadyPreview | ManualPre
           warnings.push(...s.warnings);
           prints.push(...s.prints);
         }
-        if (opt.sample && preview.sample) {
-          sample = placeSample(rom, preview, ctx, opt.sample, opt);
+        if (opt.sample && preview.samples.length === 1) {
+          sample = placeSample(rom, preview, ctx, preview.samples[0], opt.sample, opt, false);
           warnings.push(...sample.notes);
+        }
+        // sample levels at their own numbers: written (level edits of levels not open)
+        for (const f of opt.samples ?? []) {
+          const at = ctx.plan.samples.find((x) => x.file === f && !x.left)?.level ?? null;
+          if (at === null) { warnings.push(`${f}: not offered as a sample level – left out`); continue; }
+          const s = placeSample(rom, preview, ctx, f, loadLevel(rom, at), opt, true);
+          saveLevel(rom, s.level);
+          warnings.push(...s.notes.map((t) => `Level ${hx(at)}: ${t}`));
+          prints.push(`Level ${hx(at)}: the sample level ${f.split('/').pop()}`);
+          samples.push(at);
         }
         return r;
       });
     }
     if (!rec.result.ok) return failed(rec.result.errors, warnings, prints);
     if (!rec.pkg) return failed(['Nothing changed – everything in the package is already in the ROM.']);
-    return { ok: true, errors: [], warnings, prints, pkg: rec.pkg, sample };
+    return { ok: true, errors: [], warnings, prints, pkg: rec.pkg, sample, ...(samples.length ? { samples } : {}) };
   } catch (e) {
     return failed([e instanceof Error ? e.message : String(e)], warnings, prints);
   }
