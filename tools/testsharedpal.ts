@@ -12,7 +12,7 @@ import { LevelEmulator } from '../src/core/levelemu.ts';
 import { map16Source } from '../src/core/render.ts';
 import { SHARED_PALETTES, SHARED_PAL_SIZE, cleanSharedPalettes, sharedColorNames } from '../src/core/sharedpal.ts';
 import { inspectUpload, installPackage, removePackage, planUpload, type UploadPreview, type ReadyPreview, type InstallOptions } from '../src/core/packages.ts';
-import { listPackages, packageRemoval } from '../src/core/pkgreg.ts';
+import { listPackages, packageRemoval, packageSummary } from '../src/core/pkgreg.ts';
 import { cleanImage, editorImage, romDiff } from './fixture.ts';
 
 await loadAsar();
@@ -58,6 +58,13 @@ check(sharedColorNames(OTHERS).join('; ') === 'Back area color 0; BG palette 0: 
 // ---------- the package ----------
 
 {
+  // the whole baserom (a Callisto project): the file is its shared palettes, no other part's
+  const p = ready(inspectUpload('rhr-baserom-5.15.zip', new Uint8Array(readFileSync('test/fixtures/rhr-baserom-5.15.zip'))));
+  const part = p.parts.find((x) => x.file.endsWith(FILE));
+  check(part?.kind === 'graphics' && part.type === 'sharedpal', `the baserom brings it as its shared palettes (${part?.kind ?? 'not a part'})`);
+}
+
+{
   const p = upload('baserom-palettes', { [FILE]: file });
   const part = p.parts.find((x) => x.file.endsWith('shared_palettes.pal'));
   check(part?.kind === 'graphics' && part.type === 'sharedpal', `a graphics part of its own (${part?.kind} ${part?.kind === 'graphics' ? part.type : ''})`);
@@ -76,6 +83,7 @@ check(sharedColorNames(OTHERS).join('; ') === 'Back area color 0; BG palette 0: 
   check(color(rom, 0x20) === 0x1234, 'the hand-edited color not its own stays');
   const pkg = listPackages(rom)[0];
   check(packageRemoval(pkg).some((s) => s.includes('BG palette 0: colors 14–16')), `removal says so: ${packageRemoval(pkg).join('; ')}`);
+  check(packageSummary(pkg).includes('Shared palettes (BG palette 0: colors 14–16)'), `the package names them: ${packageSummary(pkg).join(', ')}`);
 
   // a second package changing one of them (and one other)
   const other = clean.bytes(SHARED_PALETTES, SHARED_PAL_SIZE);

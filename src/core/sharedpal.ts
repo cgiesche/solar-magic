@@ -90,6 +90,8 @@ export function sharedColorNames(colors: number[]): string[] {
 
 // ---------- the colors ----------
 
+const wordAt = (d: Uint8Array, i: number) => d[i * 2] | (d[i * 2 + 1] << 8);
+
 // a Lunar Magic shared palettes file: a raw copy of the block
 export const isSharedPalettes = (data: Uint8Array) => data.length === SHARED_PAL_SIZE;
 
@@ -131,7 +133,7 @@ export function cleanSharedPalettes(rom: Rom): Uint16Array | null {
   if (p < 0) return null;
   if (rom.data[p + 4] > VERSION) throw new Error('The clean game\'s palettes in the ROM are from a newer editor version');
   const d = rom.data.subarray(p + 5, p + 5 + SHARED_PAL_SIZE);
-  return Uint16Array.from({ length: SHARED_COLORS }, (_, i) => d[i * 2] | (d[i * 2 + 1] << 8));
+  return Uint16Array.from({ length: SHARED_COLORS }, (_, i) => wordAt(d, i));
 }
 
 // the colors of a shared palettes file differing from the clean game's (index → color); null when the
@@ -141,7 +143,7 @@ export function changedColors(rom: Rom, data: Uint8Array): Map<number, number> |
   if (!clean) return null;
   const out = new Map<number, number>();
   for (let i = 0; i < SHARED_COLORS; i++) {
-    const c = data[i * 2] | (data[i * 2 + 1] << 8);
+    const c = wordAt(data, i);
     if (c !== clean[i]) out.set(i, c);
   }
   return out;

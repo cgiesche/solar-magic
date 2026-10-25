@@ -263,7 +263,7 @@ const sharedPal: PartSection<number[], [number, number][]> = {
   added: (a, b) => b.flatMap((c, i): [number, number][] => (c !== a[i] ? [[i, a[i]]] : [])),
   merge: (r, p) => union(r, p, ([i]) => String(i)),
   empty: (p) => !p.length,
-  summary: (p) => (p.length ? 'Shared palettes' : null),
+  summary: (p) => (p.length ? `Shared palettes (${sharedColorNames(p.map(([i]) => i)).join('; ')})` : null),
   removal: (p) => (p.length ? `shared palette colors (${sharedColorNames(p.map(([i]) => i)).join('; ')}), set back` : null),
   remove(rom, mine) {
     for (const [i, c] of mine) setSharedColor(rom, i, c);
