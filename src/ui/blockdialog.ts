@@ -13,15 +13,18 @@ import type { Rom } from '../core/rom.ts';
 
 // block file per tile of the ROM's block project (cached per registry entry)
 let cache: { id: string; tiles: Map<number, string> } | null = null;
-export function blockFileOf(rom: Rom, tile: number): string | null {
+export function blockFilesByTile(rom: Rom): Map<number, string> {
   const e = blocksEntry(rom);
-  if (!e) return null;
+  if (!e) return new Map();
   if (cache?.id !== e.id) {
     let p = null;
     try { p = loadBlockProject(rom); } catch { /* sources missing: no file names */ }
     cache = { id: e.id, tiles: new Map((p?.list ?? []).map((b) => [b.tile, b.file.replace(/^blocks\//, '')])) };
   }
-  return cache.tiles.get(tile) ?? null;
+  return cache.tiles;
+}
+export function blockFileOf(rom: Rom, tile: number): string | null {
+  return blockFilesByTile(rom).get(tile) ?? null;
 }
 
 export type BlockPane = Pane & { tile(): number; setTile(t: number): void };

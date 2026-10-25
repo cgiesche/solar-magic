@@ -20,6 +20,7 @@ import { probeable } from '../core/probeclient.ts';
 import { probeText, spritesOf, spriteProbeAt, enterText, enterSuffix } from '../core/blockprobe.ts';
 import { tileMatches, drawTileMatches } from './tilesearch.ts';
 import { matchesAll, type SearchProvider, type SearchResult } from './search.ts';
+import { blockFilesByTile } from './blockdialog.ts';
 
 // behaviour of the given Map16 tiles when hit from below or entered (only tiles with an effect);
 // undefined while probes are still pending
@@ -592,20 +593,23 @@ export class Palette {
         }));
       },
     });
-    // Map16 tiles by number (the rules of the tab's tile search) or by what they do (finished probes only)
+    // Map16 tiles by number (the rules of the tab's tile search), by what they do (finished probes only) or by
+    // the file of the custom block on them
     const map16: SearchProvider = {
       id: 'm16', label: 'Map16',
       search: (terms) => {
         const nums = terms.map((t) => new Set(tileMatches(t, EXT_TILES) ?? []));
         const sheets = new Map<number, HTMLCanvasElement>();
+        const files = blockFilesByTile(app.rom);
         const out: SearchResult[] = [];
         for (let t = 0; t < EXT_TILES; t++) {
           const p = app.cachedBlock(t);
           const text = p ? probeText(p) : '';
-          const low = text.toLowerCase();
+          const file = files.get(t);
+          const low = `${text} ${file ?? ''}`.toLowerCase();
           if (!terms.every((x, i) => nums[i].has(t) || low.includes(x))) continue;
           out.push({
-            label: hex3(t), name: text, title: `Tile ${hex3(t)}${text ? `: ${text}` : ''}`,
+            label: hex3(t), name: text, detail: file ?? undefined, title: `Tile ${hex3(t)}${text ? `: ${text}` : ''}${file ? `\nCustom block: ${file}` : ''}`,
             thumb: () => {
               const page = t >> 8;
               if (!sheets.has(page)) sheets.set(page, renderMap16Sheet(app, false, page * 256, 256));
