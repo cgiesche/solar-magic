@@ -1,6 +1,7 @@
 // What the editor knows of the clean game once it has changed the ROM: a CRC32 of each 256-byte block of
 // it ("SMWF"), kept when it opens the clean game. A byte of this ROM is still the clean game's while its
-// block's CRC is the clean one's. Lunar Magic data exported as BPS from the clean game (Callisto's global
+// block's CRC is the clean one's; the few bytes the editor's own patches leave unchanged in blocks they
+// change, but that are read later, are kept as they are (KEPT). Lunar Magic data exported as BPS from the clean game (Callisto's global
 // ExAnimation, its overworld) takes some of its bytes from the clean game; those are read from this ROM
 // where it still has them.
 
@@ -14,8 +15,12 @@ const BLOCK = 0x100;
 const BLOCKS = CLEAN_SIZE / BLOCK;
 
 const MAGIC = [0x53, 0x4d, 0x57, 0x46]; // "SMWF"
-const VERSION = 1;
-const SIZE = 5 + BLOCKS * 4;
+const VERSION = 2; // 2: KEPT
+// clean bytes kept as they are (SNES address, length): the game's GFX table, in the block of the editor
+// patch's hook at $00BA2C (globalgfx.ts)
+const KEPT: [number, number][] = [[0x00b992, 0x96]];
+const KEPT_SIZE = KEPT.reduce((n, [, l]) => n + l, 0);
+const SIZE = 5 + BLOCKS * 4 + KEPT_SIZE;
 
 function find(rom: Rom): number {
   for (const b of rom.scanRats()) {
@@ -39,6 +44,8 @@ export function keepCleanGame(rom: Rom): void {
   buf.set(MAGIC); buf[4] = VERSION;
   const v = new DataView(buf.buffer);
   for (let k = 0; k < BLOCKS; k++) v.setUint32(5 + k * 4, blockCrc(rom.data, k), true);
+  let at = 5 + BLOCKS * 4;
+  for (const [a, l] of KEPT) { buf.set(rom.data.subarray(snesToPc(a), snesToPc(a) + l), at); at += l; }
   rom.allocWrite(buf);
 }
 
@@ -51,12 +58,18 @@ export function cleanGameBytes(rom: Rom): ((o: number) => number | null) | null 
   if (rom.data[p + 4] > VERSION) throw new Error('The clean game\'s fingerprint in the ROM is from a newer editor version');
   const v = new DataView(rom.data.buffer, rom.data.byteOffset + p + 5, BLOCKS * 4);
   const same = new Map<number, boolean>();
+  // kept bytes: ROM offset → their place in the block
+  const kept = new Map<number, number>();
+  let at = p + 5 + BLOCKS * 4;
+  for (const [a, l] of KEPT) for (let i = 0; i < l; i++) kept.set(snesToPc(a) + i, at++);
   return (o) => {
     if (o < 0 || o >= CLEAN_SIZE) return null;
     const k = Math.floor(o / BLOCK);
     let s = same.get(k);
     if (s === undefined) same.set(k, s = blockCrc(rom.data, k) === v.getUint32(k * 4, true));
-    return s ? rom.data[o] : null;
+    if (s) return rom.data[o];
+    const c = kept.get(o);
+    return c === undefined ? null : rom.data[c];
   };
 }
 

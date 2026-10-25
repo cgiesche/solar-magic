@@ -12,7 +12,8 @@ import { gfxHex, gfxNumberProblem, VANILLA_GFX, GFX_FILES } from './patches.ts';
 import { gfxBytes, gfxStorage, lz2Storage, storeGfxFile, checkGfxNumber, defaultBpp, type GfxStorage } from './gfxfiles.ts';
 import { gfxLabels, setGfxNames } from './gfxnames.ts';
 
-function convert(data: Uint8Array, from: number, to: number): Uint8Array {
+// the tiles of `data` from one bpp to another (to 3bpp: the 4th bitplane dropped)
+export function convertBpp(data: Uint8Array, from: number, to: number): Uint8Array {
   const tiles = data.length / (from * 8), pix = new Uint8Array(64), out = new Uint8Array(tiles * to * 8);
   for (let t = 0; t < tiles; t++) { decodeTile(data, t * from * 8, from, pix); encodeTile(pix, 0, to, out, t * to * 8); }
   return out;
@@ -28,7 +29,7 @@ function only3bpp(d: Uint8Array): boolean {
 export function gfxBinData(rom: Rom, num: number): Uint8Array | null {
   const f = gfxBytes(rom, num);
   if (!f) return null;
-  return !f.raw && defaultBpp(num, f.data.length) === 3 ? convert(f.data, 3, 4) : f.data;
+  return !f.raw && defaultBpp(num, f.data.length) === 3 ? convertBpp(f.data, 3, 4) : f.data;
 }
 
 // how a .bin goes under `num`: in the format the number's file has (an LZ2 file of the same size; a 3bpp
@@ -38,7 +39,7 @@ function binStorage(rom: Rom, num: number, data: Uint8Array): GfxStorage {
   if (f && !f.raw) {
     if (data.length === f.data.length) return lz2Storage(data, 'LZ2, as before');
     if (defaultBpp(num, f.data.length) === 3 && data.length === (f.data.length / 3) * 4 && only3bpp(data)) {
-      return lz2Storage(convert(data, 4, 3), '3bpp, as before');
+      return lz2Storage(convertBpp(data, 4, 3), '3bpp, as before');
     }
   }
   return gfxStorage(data);
