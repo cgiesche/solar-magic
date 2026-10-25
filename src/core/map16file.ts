@@ -51,11 +51,12 @@ export const romTileWords = (a: Uint16Array, t: number): number[] => Array.from(
 
 // the tile FG tile t acts like, followed while that acts like another of 200 on (Lunar Magic's acts
 // like may name any tile) – until `stop` says so, else to one of pages 00–01; null when it leads
-// nowhere (a loop)
+// nowhere (a loop: more steps than any chain of distinct tiles needs in practice)
+const ACTS_CHAIN_MAX = 64;
 export function romActsLike(m: RomMap16, t: number, stop: (t: number) => boolean = () => false): number | null {
   let a = m.acts[t];
   for (let n = 0; a >= ROM_MAP16_TILESET_TILES && !stop(a); n++) {
-    if (n >= 64 || a >= ROM_MAP16_TILES) return null;
+    if (n >= ACTS_CHAIN_MAX || a >= ROM_MAP16_TILES) return null;
     a = m.acts[a];
   }
   return a;

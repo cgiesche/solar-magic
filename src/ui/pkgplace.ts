@@ -7,8 +7,8 @@ import type { App } from './app.ts';
 import { h, clear, hexInput } from './dom.ts';
 import { hex } from '../core/names.ts';
 import { planUpload, type ReadyPreview, type InstallOptions } from '../core/packages.ts';
-import { editPlan, tileBlocks, type PackagePlan, type PlanEdits } from '../core/pkgplan.ts';
-import { map16Targets } from '../core/map16file.ts';
+import { editPlan, tileBlocks, plannedFgTiles, type PackagePlan, type PlanEdits } from '../core/pkgplan.ts';
+import { map16Targets, parseRomMap16 } from '../core/map16file.ts';
 import { levelColors } from '../core/levelgfx.ts';
 import { tilesetWords } from '../core/tilesets.ts';
 import { GFX_SLOTS } from '../core/gfxslots.ts';
@@ -17,7 +17,7 @@ import { errorText } from './projectpane.ts';
 import { gfxNumberField } from './gfxnum.ts';
 
 const file = (f: string) => f.split('/').pop()!;
-const hasMap16 = (p: ReadyPreview) => p.parts.some((x) => x.kind === 'graphics' && x.type === 'map16');
+const hasRomMap16 = (p: ReadyPreview) => p.parts.some((x) => x.kind === 'graphics' && x.type === 'map16' && !!parseRomMap16(p.files.get(x.file)!));
 
 export interface Placement {
   el: HTMLElement;
@@ -31,14 +31,14 @@ export function placementEditor(app: App, p: ReadyPreview, blank: number[]): Pla
   const lvl = hex(app.level.number, 3);
   let plan: PackagePlan;
   // (the tilesets' tiles 000-1FF, which a whole-ROM .map16's are compared with, only when it has one)
-  const tilesets = () => app.tilesetPointers().map((ptrs) => tilesetWords(app.rom, ptrs));
-  try { plan = planUpload(app.rom, p, blank, hasMap16(p) ? tilesets() : undefined); } catch (e) {
+  const tilesets = () => app.tilesetPointerTable().map((ptrs) => tilesetWords(app.rom, ptrs));
+  try { plan = planUpload(app.rom, p, blank, hasRomMap16(p) ? tilesets() : undefined); } catch (e) {
     const msg = errorText(e);
     return { el: h('p', { class: 'hint error' }, `Cannot place the package: ${msg}`), read: () => { throw new Error(msg); } };
   }
   const edits: PlanEdits = { map16At: plan.map16?.at, tileBlocks: tileBlocks(plan), blockTiles: new Map(), gfx: plan.gfx.map((g) => ({ num: g.num, slot: g.slot })) };
   // blocks (also) on tiles off the .map16 (those on a whole-ROM .map16's tiles go with them)
-  const mapTiles = [...(plan.map16 ? map16Targets(plan.map16.data, plan.map16.at) : []), ...(plan.romMap16?.fg.values() ?? [])];
+  const mapTiles = plannedFgTiles(plan);
   for (const b of plan.blocks) { const off = b.tiles.filter((t) => !mapTiles.includes(t)); if (off.length) edits.blockTiles!.set(b.file, off); }
   let setup = true, sample = false;
   const status = h('div');

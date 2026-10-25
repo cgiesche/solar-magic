@@ -16,6 +16,7 @@ import { tilesetPointers, tilesetWords, TILESETS } from '../src/core/tilesets.ts
 import { parseRomMap16, parseMap16File } from '../src/core/map16file.ts';
 import { inspectUpload, installPackage, removePackage, planUpload, type UploadPreview, type ReadyPreview, type InstallOptions } from '../src/core/packages.ts';
 import { loadBlockProject } from '../src/core/blocks.ts';
+import { editPlan } from '../src/core/pkgplan.ts';
 import { listPackages } from '../src/core/pkgreg.ts';
 import { editorImage, romDiff } from './fixture.ts';
 
@@ -103,6 +104,10 @@ const preview = ready(inspectUpload('rhr-baserom-5.15.zip', zipSync(baserom)));
   check(d !== 0 && !(d & 15) && [...fg].filter(([f]) => page(f) === 2).every(([f, t]) => t === f + d) && ![...fg.values()].includes(0x2c1), `page 02 moves to ${hx(0x200 + d)} (2C1 is taken)`);
   const onPage2 = plan.blocks.flatMap((b) => b.tiles).filter((t) => t >= 0x200 + d && t < 0x300 + d);
   check(onPage2.length > 0 && onPage2.every((t) => fg.get(t - d) === t || !fg.has(t - d)), `its ${onPage2.length} block tiles move along`);
+  // a block moved by hand off the whole-ROM tiles keeps those it has on them
+  const b = plan.blocks.find((x) => x.tiles.length > 1)!;
+  const edited = editPlan(plan, { blockTiles: new Map([[b.file, [0xf00]]]) }).blocks.find((x) => x.file === b.file)!;
+  check(edited.tiles.includes(0xf00) && b.tiles.every((t) => edited.tiles.includes(t)), `a block put on F00 by hand keeps its tiles on the Map16 (${b.tiles.length})`);
 }
 
 // ---------- installed and removed ----------
@@ -124,7 +129,7 @@ const preview = ready(inspectUpload('rhr-baserom-5.15.zip', zipSync(baserom)));
   check([...plan.romMap16!.bg].every(([f, t]) => bgExtTileWords(rom, t)!.join() === bgWords(f).join()), 'its BG tiles');
   check(loadBlockProject(rom)?.list.some((b) => b.tile === 0x2c0) === true && extTileWords(rom, 0x2c0)!.join() === fgWords(0x2c0).join(), 'the block on tile 2C0, which shows it');
   const pkg = listPackages(rom)[0];
-  check(!!pkg && (pkg.map16?.length ?? 0) >= fg.length - 1 && pkg.bgMap16?.length === 100, `the package's Map16 tiles recorded (${pkg?.map16?.length} FG, ${pkg?.bgMap16?.length} BG)`);
+  check(!!pkg && pkg.map16?.length === fg.length && pkg.bgMap16?.length === 100, `the package's Map16 tiles recorded (${pkg?.map16?.length} FG, ${pkg?.bgMap16?.length} BG)`);
   const warnings = await removePackage(rom, r.pkg!.id, opt.blank);
   check(!listPackages(rom).length && romDiff(before, rom.data) === 0, `removed: the Map16 as before (${romDiff(before, rom.data)} bytes differ) ${warnings.join(' ')}`);
 }

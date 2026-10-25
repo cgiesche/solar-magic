@@ -189,8 +189,8 @@ export interface InstallResult extends ApplyResult { pkg: Package | null; sample
 
 // the sample level with the package's parts where they landed: Map16 tiles by the plan (a whole-ROM
 // .map16's too), custom sprites when certain (one level sprite of that type in the package and one
-// number of it in the level, or a PIXI list.txt of the package naming the number); its background with the package's BG Map16 tiles,
-// its own colors, the package's ExGFX in its slots (the level setup)
+// number of it in the level, or a PIXI list.txt of the package naming the number); its background with
+// the package's BG Map16 tiles, its own colors, the package's ExGFX in its slots (the level setup)
 function placeSample(rom: Rom, preview: ReadyPreview, ctx: InstallContext, into: Level, opt: InstallOptions): SampleLevel {
   const d = preview.files.get(preview.sample!)!;
   const m = ctx.plan.map16;

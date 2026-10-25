@@ -1036,10 +1036,10 @@ export class App {
   // pointers each tileset loads (tilesets.ts), learned once and kept in the result cache
   tilesetsOf(t: number): number[] {
     if (!isTilesetTile(t)) return Array.from({ length: TILESETS }, (_, i) => i);
-    return sharingTilesets(this.tilesetPointers(), this.level.header.tileset, t);
+    return sharingTilesets(this.tilesetPointerTable(), this.level.header.tileset, t);
   }
   // per tileset the pointers of FG Map16 tiles 000-1FF (tilesets.ts), learned once and kept in the result cache
-  tilesetPointers(): number[][] {
+  tilesetPointerTable(): number[][] {
     return Array.from({ length: TILESETS }, (_, ts) => this.learner.now(`tsp1:${ts}`, (emu) => tilesetPointers(emu, ts)));
   }
   // the entrance actions that make a level slippery (slippery.ts), learned once and kept in the result cache

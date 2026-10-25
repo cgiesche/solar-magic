@@ -175,12 +175,12 @@ export function planPackage(rom: Rom, input: PlanInput, blank: number[]): Packag
   let listed = input.blocks.filter((b) => b.tile !== undefined);
   // the whole-ROM .map16 page by page, the list.txt blocks on its pages moving with them
   let romMap16: PlannedRomMap16 | null = null;
-  const pageShift = new Map<number, number>();
+  let pageShift = new Map<number, number>();
   if (whole) {
     const p = placeRomMap16(rom, whole.data!, blank, isUsed, listed.map((b) => b.tile!), input.tilesets, notes);
     romMap16 = { file: whole.file, data: whole.data!, fg: p.fg, bg: p.bg };
     for (const t of p.fg.values()) taken.add(t);
-    for (const [pg, d] of p.shift) pageShift.set(pg, d);
+    pageShift = p.shift;
   }
   const onPage = input.blocks.filter((b) => b.tile !== undefined && pageShift.has(b.tile >> 8));
   listed = listed.filter((b) => !onPage.includes(b));
@@ -289,6 +289,10 @@ export function planPackage(rom: Rom, input: PlanInput, blank: number[]): Packag
   return { blocks, map16, romMap16, gfx, palettes, sample, exanim, frames, notes };
 }
 
+// the FG Map16 tiles a plan's .map16 (or whole-ROM .map16) draws
+export const plannedFgTiles = (plan: Pick<PackagePlan, 'map16' | 'romMap16'>): number[] =>
+  [...(plan.map16 ? map16Targets(plan.map16.data, plan.map16.at) : []), ...(plan.romMap16?.fg.values() ?? [])];
+
 // links changed in the preview: where the .map16 tiles go, which block each of them shows (null: none),
 // the tiles of blocks that are on none of them, the ExGFX numbers and slots
 export interface PlanEdits {
@@ -310,9 +314,12 @@ export function editPlan(plan: PackagePlan, e: PlanEdits): PackagePlan {
   const map16 = plan.map16 ? { ...plan.map16, at: e.map16At ?? plan.map16.at } : null;
   const targets = map16 ? map16Targets(map16.data, map16.at) : [];
   const links = e.tileBlocks ?? tileBlocks(plan);
+  // (a whole-ROM .map16's tiles keep their blocks)
+  const whole = new Set(plan.romMap16?.fg.values() ?? []);
   const blocks = plan.blocks.map((b) => ({
     ...b,
-    tiles: [...targets.filter((_, i) => links[i] === b.file), ...(e.blockTiles?.get(b.file) ?? b.tiles.filter((t) => !old.includes(t)))],
+    tiles: [...targets.filter((_, i) => links[i] === b.file), ...b.tiles.filter((t) => whole.has(t)),
+      ...(e.blockTiles?.get(b.file) ?? b.tiles.filter((t) => !old.includes(t) && !whole.has(t)))],
   }));
   const seen = new Set<number>();
   for (const b of blocks) for (const t of b.tiles) {

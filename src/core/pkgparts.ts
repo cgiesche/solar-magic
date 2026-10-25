@@ -22,10 +22,9 @@ import { suggestCalls, placed, type PkgRules } from './pkgmap.ts';
 import { isSongText, songsFromFiles, loadMusicProject, emptyMusicProject, addSongs, nextFreeSong, folders as musicFolders, saveMusicProject, hasAmk, musicEntry } from './music.ts';
 import { pixiParts, planPixiUpload, applyPixiUpload, linkedDefines, type PixiPlan } from './pixipkg.ts';
 import { parseCfg, parseJsonCfg } from './pixi.ts';
-import { detectBlocks, applyBlocks, applyGraphics, routinesCalled, planPackage, type DetectedBlock, type DetectedGraphics, type PackagePlan } from './pkgplan.ts';
+import { detectBlocks, applyBlocks, applyGraphics, routinesCalled, planPackage, plannedFgTiles, type DetectedBlock, type DetectedGraphics, type PackagePlan } from './pkgplan.ts';
 import { loadProject, saveProject, emptyProject, projectFromFiles, addCall, isUberList, type UberProject } from './uberproject.ts';
 import { setLevelMusic } from './patches.ts';
-import { map16Targets } from './map16file.ts';
 import { ALL, type UberContext } from './uberasm.ts';
 import type { Claim } from './pkgreg.ts';
 import type { Level } from './level.ts';
@@ -295,7 +294,7 @@ const block: PartAdapter<'block'> = {
   },
   apply(rom, _mine, { preview, opt, plan, sprites }, claim) {
     const defines = sprites ? linkedDefines(sprites) : new Map<string, Record<string, string>>();
-    const drawn = new Set([...(plan.map16 ? map16Targets(plan.map16.data, plan.map16.at) : []), ...(plan.romMap16?.fg.values() ?? [])]);
+    const drawn = new Set(plannedFgTiles(plan));
     const extra = preview.callisto ? toolFiles(preview.callisto, preview.files) : undefined;
     return applyBlocks(rom, preview.upload!, plan.blocks, defines, partRoutines(preview, 'block'), opt.blank, opt.tileWords, drawn, (f) => claim('block', f), extra);
   },
