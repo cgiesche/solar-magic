@@ -20,11 +20,12 @@ import { installBgMap16Ext } from './bgmap16.ts';
 import { installStructPatch } from './structs.ts';
 import { newStyleExits } from './exitgraph.ts';
 import { keepCleanSharedPalettes } from './sharedpal.ts';
+import { keepCleanGame, SMW_CLEAN_CRC } from './cleangame.ts';
 import { LevelEmulator } from './levelemu.ts';
 import { map16Source } from './render.ts';
 import type { ApplyResult } from './patchapply.ts';
 
-export const SMW_CLEAN_CRC = 0xb19ed489; // Super Mario World (U), headerless
+export { SMW_CLEAN_CRC };
 
 export function isCleanRom(rom: Rom): boolean {
   return rom.size === 0x80000 && crc32(rom.data) === SMW_CLEAN_CRC;
@@ -42,6 +43,8 @@ export async function prepareRom(rom: Rom): Promise<boolean> {
 export async function installEditorPatches(rom: Rom): Promise<void> {
   await loadAsar();
   const asar = (r: ApplyResult) => { if (!r.ok) throw new Error(r.errors.join(' ')); };
+  // (bytes of the clean game that Lunar Magic data exported as BPS takes are read where the ROM still has them)
+  keepCleanGame(rom);
   // (what a package's shared palettes change is told by the clean game's)
   keepCleanSharedPalettes(rom);
   installEditorPatch(rom);

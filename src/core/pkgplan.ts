@@ -1,8 +1,8 @@
 // Uploads detected per file and linked (ADR 0002): each file of an upload belongs to one part, decided
 // from the file alone (folder, then content, then extension), never by which other files are in the
 // upload. This module has the parts that are not a tool project of their own – blocks (named in a GPS
-// list.txt or found by their content) and graphics parts (Map16 tiles, ExGFX, palettes, shared palettes) –
-// and the links between parts:
+// list.txt or found by their content) and graphics parts (Map16 tiles, ExGFX, palettes, shared palettes,
+// global animation slots) – and the links between parts:
 // - detectBlocks / detectGraphics: what an upload holds, without a ROM;
 // - planPackage: where it goes in a ROM – Map16 tiles and ExGFX keep the author's position or number
 //   when free, else the next free ones; which tiles show which block; which slot each ExGFX file is for;
@@ -21,7 +21,7 @@ import { EXT_FIRST, EXT_TILES, setExtTileWords } from './map16ext.ts';
 import { slotTiles, type ExList, type ExSlot } from './exanim.ts';
 import { parseMwl, type MwlLevel } from './bgpack.ts';
 import {
-  slotOfWord, gfxNumber, usedFgTiles, freeRun, fgOrigin, packPalettes, frameSources, putFgTiles, putRomMap16, placeRomMap16, storeGfx, placeInLevel,
+  slotOfWord, gfxNumber, usedFgTiles, freeRun, fgOrigin, packPalettes, frameSources, putFgTiles, putRomMap16, placeRomMap16, storeGfx, placeInLevel, placeGlobalSlots,
   type PackPalette, type FrameSources, type LevelState, type Placed,
 } from './levelgfx.ts';
 import { GFX_SLOTS } from './gfxslots.ts';
@@ -30,6 +30,8 @@ import { isUberList } from './uberproject.ts';
 import { mwlExAnim } from './mwl.ts';
 import { gfxDataSize } from './patches.ts';
 import { isSharedPalettes, changedColors, setSharedColor, sharedColorNames } from './sharedpal.ts';
+import { isGlobalAnimBps, globalAnimList } from './globalanim.ts';
+import { cleanGameBytes } from './cleangame.ts';
 import { listPackages } from './pkgreg.ts';
 
 const dec = new TextDecoder();
@@ -92,8 +94,9 @@ export function detectBlocks(files: Map<string, Uint8Array>, gps?: ToolFolder | 
 
 // the graphics parts of an upload, and its Lunar Magic level file (a sample level when the upload has
 // code, else a level import)
-// (sharedpal: Lunar Magic's shared palettes, sharedpal.ts)
-export interface DetectedGraphics { map16: string[]; exgfx: string[]; pal: string[]; palmask: string[]; sharedpal: string[]; mwl: string | null }
+// (sharedpal: Lunar Magic's shared palettes, sharedpal.ts; globalanim: its global ExAnimation as a BPS,
+// globalanim.ts)
+export interface DetectedGraphics { map16: string[]; exgfx: string[]; pal: string[]; palmask: string[]; sharedpal: string[]; globalanim: string[]; mwl: string | null }
 
 // `included`: files some .asm file includes (incbin data is code's, not graphics)
 export function detectGraphics(files: Map<string, Uint8Array>, included: Set<string>): DetectedGraphics {
@@ -109,11 +112,12 @@ export function detectGraphics(files: Map<string, Uint8Array>, included: Set<str
     pal: keys.filter((f) => /\.pal$/i.test(f) && !isSharedPalettes(files.get(f)!)),
     palmask: keys.filter((f) => /\.palmask$/i.test(f)),
     sharedpal: keys.filter((f) => /\.pal$/i.test(f) && isSharedPalettes(files.get(f)!)),
+    globalanim: keys.filter((f) => /\.bps$/i.test(f) && isGlobalAnimBps(files.get(f)!)),
     mwl: keys.find((f) => /\.mwl$/i.test(f)) ?? null,
   };
 }
 
-export const graphicsFiles = (g: DetectedGraphics) => [...g.map16, ...g.exgfx, ...g.pal, ...g.palmask, ...g.sharedpal];
+export const graphicsFiles = (g: DetectedGraphics) => [...g.map16, ...g.exgfx, ...g.pal, ...g.palmask, ...g.sharedpal, ...g.globalanim];
 
 // files the .asm files of an upload include (incsrc/incbin)
 export function includedFiles(files: Map<string, Uint8Array>): Set<string> {
@@ -140,6 +144,9 @@ export interface PlannedGfx { file: string; lmNum: number | null; num: number; s
 
 // the package's shared palettes: the colors differing from the clean game's (index in the block → color)
 export interface PlannedSharedPal { file: string; colors: Map<number, number> }
+// the package's global animation slots and where they take their frames from (its ExGFX 60-63 file of
+// their list's alternative file); they go into free slots of the global list (levelgfx.ts placeGlobalSlots)
+export interface PlannedGlobalAnim { file: string; slots: ExSlot[]; frames: FrameSources }
 export interface PackagePlan {
   blocks: PlannedBlock[];
   map16: PlannedMap16 | null;
@@ -147,6 +154,7 @@ export interface PackagePlan {
   gfx: PlannedGfx[];
   palettes: PackPalette[];
   sharedPal: PlannedSharedPal | null;
+  globalAnim: PlannedGlobalAnim | null;
   sample: MwlLevel | null; // the sample level, parsed
   exanim: ExSlot[]; // the sample level's ExAnimation slots that write tiles the package's Map16 tiles draw from
   // where its slots take their frames from: Lunar Magic's AN2 file, its alternative file (ExGFX 60-63);
@@ -275,9 +283,14 @@ export function planPackage(rom: Rom, input: PlanInput, blank: number[]): Packag
     const drawn = new Set(map16.data.tiles.flat().map((w) => w & 0x3ff));
     for (const e of list.slots.values()) if (slotTiles(e).some((t) => drawn.has(t))) exanim.push(e);
   }
-  const isAlt = (g: { lmNum: number | null; slot: string | null }) => !!list && g.lmNum === 0x60 + list.altFile && !g.slot;
+  const isAltOf = (l: ExList | null) => (g: { lmNum: number | null; slot: string | null }) => !!l && g.lmNum === 0x60 + l.altFile && !g.slot;
+  const isAlt = isAltOf(list);
   const frames = frameSources(files, list, named.find((g) => g.slot === 'AN2')?.file, named.find(isAlt)?.file, notes);
-  const kept = named.filter((g) => g.slot !== 'AN2' && !isAlt(g));
+  // the global animation slots: their alternative file is a frame source too
+  const global = planGlobalAnim(rom, files, graphics.globalanim, notes);
+  const isGlobalAlt = isAltOf(global?.list ?? null);
+  const globalAnim = global && { file: global.file, slots: [...global.list.slots.values()], frames: frameSources(files, global.list, undefined, named.find(isGlobalAlt)?.file, notes) };
+  const kept = named.filter((g) => g.slot !== 'AN2' && !isAlt(g) && !isGlobalAlt(g));
 
   // one file without a slot and one slot the tiles draw from that no other file is for: that one
   const mapSlots = new Set((map16?.data.tiles ?? []).flat().map(slotOfWord).filter((s): s is string => !!s));
@@ -293,7 +306,7 @@ export function planPackage(rom: Rom, input: PlanInput, blank: number[]): Packag
   });
 
   const palettes = packPalettes(files, graphics.pal, graphics.palmask, notes);
-  return { blocks, map16, romMap16, gfx, palettes, sharedPal: planSharedPal(rom, files, graphics.sharedpal, notes), sample, exanim, frames, notes };
+  return { blocks, map16, romMap16, gfx, palettes, sharedPal: planSharedPal(rom, files, graphics.sharedpal, notes), globalAnim, sample, exanim, frames, notes };
 }
 
 // the FG Map16 tiles a plan's .map16 (or whole-ROM .map16) draws
@@ -310,6 +323,19 @@ function planSharedPal(rom: Rom, files: Map<string, Uint8Array>, found: string[]
   if (!colors) { notes.push(`${base(file)}: the clean game's shared palettes are not known in this ROM – not taken over`); return null; }
   if (!colors.size) { notes.push(`${base(file)}: the clean game's shared palettes – nothing to take over`); return null; }
   return { file, colors };
+}
+
+// the global animation list (the first file; more are not used), read where its bytes are known (some
+// come from the clean game, cleangame.ts)
+function planGlobalAnim(rom: Rom, files: Map<string, Uint8Array>, found: string[], notes: string[]): { file: string; list: ExList } | null {
+  if (!found.length) return null;
+  const file = found[0];
+  for (const f of found.slice(1)) notes.push(`${base(f)}: not used – ${base(file)} has the package's global animation`);
+  const list = globalAnimList(files.get(file)!, cleanGameBytes(rom));
+  if (list === 'not known') { notes.push(`${base(file)}: needs bytes of the clean game this ROM no longer has – the global animation is not taken over`); return null; }
+  if (!list?.slots.size) { notes.push(`${base(file)}: no global animation slots`); return null; }
+  if (list.manual.size || list.customSet || list.customKeep !== 0xffff) notes.push(`${base(file)}: the global list's Trigger Init is not taken over`);
+  return { file, list };
 }
 
 // links changed in the preview: where the .map16 tiles go, which block each of them shows (null: none),
@@ -394,10 +420,10 @@ export function applyBlocks(rom: Rom, upload: Upload, blocks: PlannedBlock[], de
   return { ...r, prints: [...r.prints, `${blocks.length} block(s): ${blocks.map((b) => `${base(b.file)} on ${b.tiles.map((t) => hx(t, 3)).join(', ')}`).join('; ')}`] };
 }
 
-// the shared palettes' colors, the Map16 tiles (with their acts like where no block on them gives one) and
-// the ExGFX files
+// the shared palettes' colors, the Map16 tiles (with their acts like where no block on them gives one), the
+// ExGFX files and the global animation slots
 export function applyGraphics(rom: Rom, files: Map<string, Uint8Array>, plan: PackagePlan, blank: number[]): ApplyResult {
-  const prints: string[] = [];
+  const prints: string[] = [], warnings: string[] = [];
   if (plan.sharedPal) {
     const { file, colors } = plan.sharedPal;
     // a color another package changed is a conflict
@@ -423,7 +449,12 @@ export function applyGraphics(rom: Rom, files: Map<string, Uint8Array>, plan: Pa
     prints.push(`${m.fg.size} FG Map16 tile(s) (pages ${pages(m.fg, 0)}) and ${m.bg.size} BG tile(s) (pages ${pages(m.bg, 0x80)}) from ${base(m.file)}`);
   }
   prints.push(...storeGfx(rom, files, plan.gfx));
-  return { ok: true, errors: [], warnings: [], prints };
+  if (plan.globalAnim) {
+    const g = placeGlobalSlots(rom, plan.globalAnim.slots, plan.globalAnim.frames);
+    warnings.push(...g.warnings.map((w) => `${base(plan.globalAnim!.file)}: ${w}`));
+    prints.push(...g.prints.map((p) => `${p} from ${base(plan.globalAnim!.file)}`));
+  }
+  return { ok: true, errors: [], warnings, prints };
 }
 
 // the level setup (see CONTEXT.md): the package's ExGFX in the level's slots, its ExAnimation slots in

@@ -28,18 +28,20 @@ const same = (a: Uint8Array, at: number, b: Uint8Array, from: number, n: number)
     tiles4([0x9100]), // RAM only (the game's graphics): stays
     tiles4([0x9100, 0xad00]), // RAM and AN2: both come along
     { ...tiles4([0x40]), dest: 0x8400 }, // the level file's own alternative file
-    { type: 0x14, trigger: 0, framesLess1: 0, dest: 0x8021, frames: [0x1f] }, // colors from the alternative file
+    { type: 0x14, trigger: 0, framesLess1: 2, dest: 0x8121, frames: [0x104, 0x100, 0x108] }, // 2 colors from the alternative file
+    { type: 0x14, trigger: 0, framesLess1: 0, dest: 0x8022, frames: [0x1f] }, // one color: the frame is the color
   ];
   const r = localizeFrames(rom, slots, { an2, alt, ram }, 0);
   const f = readAltFile(rom, 0)!;
-  const [a, b, c, d, e, col] = r.slots;
-  check(!!f && f.length === 0x80 * 4, `Anim graphic A: 4 distinct frames of 4 tiles (${f?.length.toString(16)})`);
+  const [a, b, c, d, e, col, one] = r.slots;
+  check(!!f && f.length === 0x80 * 4 + 0x20, `Anim graphic A: 4 distinct frames of 4 tiles, the colors (${f?.length.toString(16)})`);
   check(!!a && usesAltFile(a) && same(f, a.frames[0], an2, 0, 0x80) && same(f, a.frames[1], an2, 0x80, 0x80), 'AN2 frames copied, the slot reads the Anim graphic');
   check(!!b && b.frames[0] === a!.frames[1], 'the same frame stored once');
   check(!!c && c.dest === 0x0400 && c.frames[0] === 0x9100, 'a slot with RAM frames only stays');
   check(!!d && usesAltFile(d) && same(f, d.frames[0], ram, 0x9100, 0x80) && d.frames[1] === a!.frames[0], 'RAM frames of a slot with AN2 frames come from WRAM');
   check(!!e && same(f, e.frames[0], alt, 0x40, 0x80) && (e.dest & 0x7fff) === 0x0400, 'frames from the level file\'s alternative file');
-  check(col === null && r.notes.some((n) => /colors from an alternative file/.test(n)), 'colors from an alternative file left out with a note');
+  check(!!col && col.dest === 0x8121 && col.frames.join() === [0x204, 0x200, 0x208].join() && same(f, 0x200, alt, 0x100, 0xc), 'colors from an alternative file: the part the frames read copied together');
+  check(!!one && one.frames.join() === '31' && !r.notes.length, `one color stays as it is (${r.notes.join(' ')})`);
   const again = localizeFrames(rom, slots.slice(0, 2), { an2, alt, ram }, 0);
   check(readAltFile(rom, 0)!.length === f.length && again.slots[0]!.frames.join() === a!.frames.join(), 'importing again adds nothing');
   const missing = localizeFrames(rom, [tiles4([0xad00])], { alt: null }, 0);

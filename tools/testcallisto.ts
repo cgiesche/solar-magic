@@ -72,12 +72,12 @@ const order = (files: Record<string, Uint8Array>) => [...dec.decode(files['tools
     'callisto.asm: the version the project pins (0.6.2), its callisto_header');
 }
 
-// installs – with its Map16 (testrommap16.ts), without what other issues of #96 bring: the other graphics
-// (#99, #100, #107) and the sample levels (#101)
+// installs – with its Map16 (testrommap16.ts) and global animation (testglobalanim.ts), without what other
+// issues of #96 bring: the other graphics (#99, #107) and the sample levels (#101)
 {
   const files = unzipSync(baserom);
   const keep: Record<string, Uint8Array> = {};
-  for (const [k, v] of Object.entries(files)) if (!/^(export\/(?!all_map16\.map16$)|resources\/(palettes|original_graphics)\/|workspace\/)/.test(k)) keep[k] = v;
+  for (const [k, v] of Object.entries(files)) if (!/^(export\/(?!all_map16\.map16$|global\/exanimation\.bps$)|resources\/(palettes|original_graphics)\/|workspace\/(?!ExGraphics\/ExGFX61\.bin$))/.test(k)) keep[k] = v;
   const p = ready(inspectUpload('baserom.zip', zip(keep)));
   const { rom, opt } = await target();
   const before = listPatches(rom).length;
@@ -89,7 +89,8 @@ const order = (files: Record<string, Uint8Array>) => [...dec.decode(files['tools
   const pkg = listPackages(rom);
   // the 140 tiles of its GPS list and the 65 more of its Map16 acting like them
   check(pkg.length === 1 && pkg[0].patches.length === want.length && pkg[0].uberasm.calls.length === 9 && pkg[0].block.tiles.length === 205 && pkg[0].sprite.files.length > 0
-    && pkg[0].map16?.length === 956 && pkg[0].bgMap16?.length === 100, `one package: the patches, the UberASM calls, the block tiles, the sprite, the Map16 tiles (${pkg[0]?.block.tiles.length} block tiles, ${pkg[0]?.map16?.length} FG, ${pkg[0]?.bgMap16?.length} BG)`);
+    && pkg[0].map16?.length === 956 && pkg[0].bgMap16?.length === 100 && pkg[0].globalAnim?.slots.length === 7,
+    `one package: the patches, the UberASM calls, the block tiles, the sprite, the Map16 tiles, the global animation (${pkg[0]?.block.tiles.length} block tiles, ${pkg[0]?.map16?.length} FG, ${pkg[0]?.bgMap16?.length} BG, ${pkg[0]?.globalAnim?.slots.length} slots)`);
   const uber = loadProject(rom);
   const gm = uber?.list.gamemode;
   check(!!uber?.files.has('callisto.asm') && !!uber.files.has('callisto/shared/freeram.asm') && gm?.get(0x14)?.some((c) => c.file === 'gamemode/screen_scrolling_pipes.asm') === true && gm.get(-1)?.[0].file === 'gamemode/retry_gm.asm',
@@ -105,6 +106,10 @@ const order = (files: Record<string, Uint8Array>) => [...dec.decode(files['tools
   for (let f = 0; f < 120; f++) { s.joy1 = 0x0100; s.runFrame(); }
   const x1 = s.wram[0x94] | (s.wram[0x95] << 8);
   check(s.wram[0x100] === 0x14 && x1 > x0 + 32, `the game plays: level 105, Mario runs right (${x0} → ${x1})`);
+  // its ON/OFF blocks' tiles (2F0–2FF) show the ON frame of ExGFX61.bin
+  emu.load(0x105);
+  const on = emu.animationFrames(4, 8).at(-1)!.vram.subarray(0x2f0 * 32, 0x300 * 32);
+  check(on.every((b, i) => b === files['workspace/ExGraphics/ExGFX61.bin'][0xc00 + i]), 'its global animation runs: the ON/OFF blocks\' tiles show the ON frame');
 }
 
 // ---------- a made-up project: the header in a patch, UberASM code and a block ----------

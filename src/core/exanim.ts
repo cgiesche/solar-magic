@@ -277,8 +277,10 @@ export function listBytes(l: ExList): Uint8Array {
 
 // ---- tables in the ROM ----
 export interface ExLayout { target: number; table: number }
+// (also a ROM read otherwise than from its image: Lunar Magic's in a BPS, globalanim.ts)
+export type RomRead = Pick<Rom, 'r8' | 'r16' | 'r24'>;
 
-export function exanimLayout(rom: Rom): ExLayout | null {
+export function exanimLayout(rom: RomRead): ExLayout | null {
   if (rom.r8(LOAD_HOOK) !== 0x22) return null;
   const target = rom.r24(LOAD_HOOK + 1);
   const table = rom.r24(target + TABLE_OFFSET);
@@ -324,7 +326,7 @@ export function readLevelList(rom: Rom, level: number): ExList | null {
   const a = levelListAddr(rom, level);
   return a ? listAt(rom, a) : null;
 }
-export function globalListAddr(rom: Rom): number {
+export function globalListAddr(rom: RomRead): number {
   const l = exanimLayout(rom);
   if (!l) return 0;
   const bank = rom.r16(l.target + GLOBAL_BANK);
@@ -435,6 +437,23 @@ export function addLevelSlots(rom: Rom, level: number, slots: ExSlot[]): number[
   return used;
 }
 
+// adds slots to the global list, in its free slots (its own slots stay); per slot the number used, null
+// when no slot was free
+export function addGlobalSlots(rom: Rom, slots: ExSlot[]): (number | null)[] {
+  if (!slots.length) return [];
+  const list = readGlobalList(rom) ?? emptyList();
+  const used = slots.map((e) => {
+    let k = 0;
+    while (k < SLOTS && list.slots.has(k)) k++;
+    if (k >= SLOTS) return null;
+    list.slots.set(k, { ...e, frames: [...e.frames] });
+    return k;
+  });
+  list.count = slotsUsed(list);
+  writeGlobalList(rom, list);
+  return used;
+}
+
 // ---- frames from elsewhere into an alternative file ----
 // Lunar Magic's AN2: a level's 4 KB ExGFX file in RAM from $7EAD00, where a slot's RAM frames point
 export const AN2_FRAMES = 0xad00, AN2_FRAMES_END = 0xbd00;
@@ -455,8 +474,26 @@ export function altFileUsers(rom: Rom, n: number): { levels: number[]; global: b
   return { levels, global: uses(readGlobalList(rom)) };
 }
 
+// the end of what the slots of all lists (levels and the global one, or `global` in its place) read from
+// alternative file `n`
+export function altFileExtent(rom: Rom, n: number, global: ExList | null = readGlobalList(rom)): number {
+  let end = 0;
+  const lists = [...Array.from({ length: 512 }, (_, i) => readLevelList(rom, i)), global];
+  for (const l of lists) {
+    if (!l || l.altFile !== n) continue;
+    for (const e of l.slots.values()) {
+      if (!usesAltFile(e) || !e.frames.length) continue;
+      const colors = ((e.dest >> 8) & 0x7f) + 1;
+      if (kindOf(e.type) === 'colors' && colors === 1) continue;
+      end = Math.max(end, Math.max(...e.frames) + (kindOf(e.type) === 'tiles' ? frameBytes(e.type) : colors * 2));
+    }
+  }
+  return end;
+}
+
 // slots of another list (a level file's, or one reading AN2) taking their frames from alternative file
-// `file`: the frames they use from AN2 (`src.an2`) or from their own alternative file (`src.alt`) are
+// `file`: the frames they use from AN2 (`src.an2`) or from their own alternative file (`src.alt`, also
+// colors) are
 // copied into it (a frame already there is used again) and the slots point there. A slot's other RAM
 // frames (the game's graphics, e.g. GFX33 from $7E7D00) come along from `src.ram`, the level's WRAM
 // after its load; slots without AN2 frames keep reading RAM unless `allRam`. Without `alt` the slots'
@@ -479,7 +516,18 @@ export function localizeFrames(rom: Rom, slots: ExSlot[], src: { an2?: Uint8Arra
     const tiles = kindOf(e.type) === 'tiles';
     const fromAlt = foreign && usesAltFile(e), fromAn2 = tileSlotFromAn2(e) || (allRam && tiles && !(e.dest & 0x8000));
     if (!fromAlt && !fromAn2) { out[out.length - 1] = { ...e, frames: [...e.frames] }; continue; }
-    if (fromAlt && !tiles) { notes.push('An ExAnimation slot takes colors from an alternative file (ExGFX 60-63) – left out'); continue; }
+    if (fromAlt && !tiles) {
+      // colors: the part of the file the frames read, kept together (one color is the frame itself)
+      const n = ((e.dest >> 8) & 0x7f) + 1;
+      if (n === 1) { out[out.length - 1] = { ...e, frames: [...e.frames] }; continue; }
+      const lo = Math.min(...e.frames), hi = Math.max(...e.frames) + n * 2;
+      if (!src.alt || hi > src.alt.length) { notes.push('An ExAnimation slot takes colors from an alternative file (ExGFX 60-63) that is missing – left out'); continue; }
+      const before = data;
+      const at = place(src.alt.subarray(lo, hi));
+      if (data.length > ALT_FILE_MAX) { data = before; notes.push(`${altFileName(file)} is full (1023 tiles) – an ExAnimation slot left out`); continue; }
+      out[out.length - 1] = { ...e, frames: e.frames.map((f) => at + f - lo) };
+      continue;
+    }
     const len = frameBytes(e.type);
     // the bytes of a frame, null when its source is missing
     const bytes = (f: number): Uint8Array | null => {

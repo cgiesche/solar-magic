@@ -119,6 +119,73 @@ export function createBps(source: Uint8Array, target: Uint8Array, metadata = '')
   return Uint8Array.from(out);
 }
 
+// a BPS patch's target read byte by byte without applying it, for a patch whose source is not at hand
+// as a whole: byte(o, source) asks `source` for the bytes the patch takes from the source (null: not
+// known) and is null when the target's byte depends on one of those. Null when it is no BPS patch.
+export interface BpsReader {
+  sourceSize: number;
+  targetSize: number;
+  sourceCrc: number;
+  byte(o: number, source: (o: number) => number | null): number | null;
+}
+export function bpsReader(patch: Uint8Array): BpsReader | null {
+  if (patch.length < 19 || String.fromCharCode(...patch.subarray(0, 4)) !== 'BPS1') return null;
+  let p = 4;
+  const num = () => {
+    let v = 0, shift = 1;
+    for (;;) {
+      if (p >= patch.length) throw new Error('BPS patch truncated');
+      const x = patch[p++];
+      v += (x & 0x7f) * shift;
+      if (x & 0x80) return v;
+      shift *= 128;
+      v += shift;
+    }
+  };
+  const end = patch.length - 12;
+  // per action: the target offset it starts at, its kind and where it reads (patch offset for
+  // TargetRead, source offset for SourceCopy, target offset for TargetCopy)
+  const starts: number[] = [], kinds: number[] = [], froms: number[] = [];
+  let sourceSize: number, targetSize: number;
+  try {
+    sourceSize = num(); targetSize = num();
+    const meta = num();
+    p += meta;
+    let o = 0, srcRel = 0, tgtRel = 0;
+    while (p < end) {
+      const d = num(), len = (d >> 2) + 1, kind = d & 3;
+      let from = o;
+      if (kind === 1) { from = p; p += len; }
+      if (kind === 2) { const r = num(); srcRel += (r & 1 ? -1 : 1) * (r >> 1); from = srcRel; srcRel += len; }
+      if (kind === 3) { const r = num(); tgtRel += (r & 1 ? -1 : 1) * (r >> 1); from = tgtRel; tgtRel += len; }
+      starts.push(o); kinds.push(kind); froms.push(from);
+      o += len;
+    }
+    if (o !== targetSize || p !== end) return null;
+  } catch { return null; }
+  const rd = (q: number) => (patch[q] | patch[q + 1] << 8 | patch[q + 2] << 16 | patch[q + 3] << 24) >>> 0;
+  return {
+    sourceSize, targetSize, sourceCrc: rd(end),
+    byte(o, source) {
+      if (o < 0 || o >= targetSize) return null;
+      for (;;) {
+        let lo = 0, hi = starts.length - 1;
+        while (lo < hi) { const m = (lo + hi + 1) >> 1; if (starts[m] <= o) lo = m; else hi = m - 1; }
+        const k = o - starts[lo];
+        switch (kinds[lo]) {
+          case 0: return source(o);
+          case 1: return patch[froms[lo] + k];
+          case 2: return source(froms[lo] + k);
+          // (a copy overlapping itself repeats the bytes before it)
+          default:
+            if (froms[lo] >= starts[lo]) return null;
+            o = froms[lo] + k % (starts[lo] - froms[lo]);
+        }
+      }
+    },
+  };
+}
+
 // applies a BPS patch (used to check created patches)
 export function applyBps(source: Uint8Array, patch: Uint8Array): Uint8Array {
   let p = 4;

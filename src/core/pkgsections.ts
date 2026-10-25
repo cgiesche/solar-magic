@@ -1,5 +1,5 @@
 // The sections of a package record (pkgreg.ts), one adapter each: patches, UberASM, blocks, sprites,
-// ExGFX files, songs, FG and BG Map16 tiles, shared palette colors – the fields of PackageParts, as stored in the ROM (the tool
+// ExGFX files, songs, FG and BG Map16 tiles, shared palette colors, global animation slots – the fields of PackageParts, as stored in the ROM (the tool
 // projects under their part kind: uberasm, block, sprite). An adapter knows what of the ROM its section
 // observes (read), what came in between two reads (added), how that goes into a record (merge), when
 // there is nothing (empty), how to take it out of the ROM again (remove) and how to say so (summary,
@@ -21,8 +21,9 @@ import { EXT_FIRST, EXT_TILES, DEFAULT_ACTS, extTileWords, actsLike, setExtTileW
 import { BG_EXT_FIRST, BG_EXT_TILES, bgExtTileWords, setBgExtTileWords, vanillaBgWords } from './bgmap16.ts';
 import type { UberContext } from './uberasm.ts';
 import type { SpriteFolder } from './pixirt.ts';
-import type { PackageParts } from './pkgreg.ts';
+import type { PackageParts, GlobalAnimPart } from './pkgreg.ts';
 import { sharedColors, setSharedColor, sharedColorNames } from './sharedpal.ts';
+import { readGlobalList, writeGlobalList, readAltFile, writeAltFile, altFileExtent, altFileName } from './exanim.ts';
 
 const CONTEXTS: UberContext[] = ['level', 'gamemode', 'overworld'];
 export const OTHER = ['global', 'statusbar', 'macrolib'] as const;
@@ -271,8 +272,45 @@ const sharedPal: PartSection<number[], [number, number][]> = {
   },
 };
 
+// global animation slots it filled, emptied again unless another package filled them too; the Anim graphic
+// its frames went into gets its size before back while no list reads frames past it (read: each slot's
+// entry, '' when free, and the size of each Anim graphic)
+const globalAnim: PartSection<{ slots: string[]; sizes: number[] }, GlobalAnimPart> = {
+  none: () => ({ slots: [] }),
+  read: (rom) => {
+    const l = readGlobalList(rom);
+    return {
+      slots: Array.from({ length: 0x20 }, (_, k) => { const e = l?.slots.get(k); return e ? JSON.stringify(e) : ''; }),
+      sizes: [0, 1, 2, 3].map((n) => readAltFile(rom, n)?.length ?? 0),
+    };
+  },
+  added: (a, b) => {
+    const n = b.sizes.findIndex((v, i) => v > a.sizes[i]);
+    return { slots: b.slots.flatMap((e, k) => (e && e !== a.slots[k] ? [k] : [])), ...(n >= 0 ? { graphic: [n, a.sizes[n]] as [number, number] } : {}) };
+  },
+  merge: (r, p) => ({ slots: union(r.slots, p.slots), ...(r.graphic ?? p.graphic ? { graphic: r.graphic ?? p.graphic } : {}) }),
+  empty: (p) => !p.slots.length,
+  summary: (p) => (p.slots.length ? 'Global animation' : null),
+  removal: (p) => (p.slots.length ? `global animation slot(s) ${p.slots.map((k) => hex(k, 2)).join(', ')}${p.graphic ? ` and their frames in ${altFileName(p.graphic[0])}` : ''}` : null),
+  remove(rom, mine, others) {
+    const l = readGlobalList(rom);
+    if (l) {
+      for (const k of mine.slots) if (!others.some((o) => o.slots.includes(k))) l.slots.delete(k);
+      l.count = Math.max(0, ...[...l.slots.keys()].map((k) => k + 1));
+    }
+    // (both freed, then the graphic written before the list: back where they were)
+    if (l) writeGlobalList(rom, null);
+    if (mine.graphic) {
+      const [n, size] = mine.graphic, data = readAltFile(rom, n);
+      if (data && data.length > size && altFileExtent(rom, n, l) <= size) writeAltFile(rom, n, size ? data.slice(0, size) : null);
+    }
+    if (l) writeGlobalList(rom, l);
+    return [];
+  },
+};
+
 // every field of PackageParts has its adapter (the compiler checks it)
 type Sections = { [K in keyof PackageParts]-?: PartSection<any, NonNullable<PackageParts[K]>> };
-export const SECTIONS = { music, sprite, block, uberasm, patches, map16, bgMap16, gfx, sharedPal } satisfies Sections;
+export const SECTIONS = { music, sprite, block, uberasm, patches, map16, bgMap16, gfx, sharedPal, globalAnim } satisfies Sections;
 export type SectionKey = keyof typeof SECTIONS;
 export const SECTION_KEYS = Object.keys(SECTIONS) as SectionKey[];

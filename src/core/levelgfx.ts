@@ -6,6 +6,7 @@
 // - the ROM side: Map16 tiles with their acts like moved along, ExGFX files under their numbers;
 // - the level side: ExGFX in its graphics slots (gfxslots.ts), ExAnimation slots with their frames in its
 //   Anim graphic (ADR 0003), masked colors in its palette – never a palette made up without the level's colors.
+// A package's global animation slots go into the global list the same way (placeGlobalSlots).
 
 import type { Rom } from './rom.ts';
 import { RAM } from './ram.ts';
@@ -20,7 +21,7 @@ import {
 import { sampleTiles } from './mwl.ts';
 import { LT3_SLOT, LT3_DESTS, LT3_SIZES, levelLayer3, type Lt3Place } from './layer3gfx.ts';
 import { assignSlot, GFX_SLOTS } from './gfxslots.ts';
-import { usesAltFile, addLevelSlots, localizeFrames, levelAltFile, altFileName, kindOf, AN2_FRAMES, AN2_FRAMES_END, ALT_FILE_MAX, type ExList, type ExSlot } from './exanim.ts';
+import { usesAltFile, addLevelSlots, addGlobalSlots, readGlobalList, localizeFrames, levelAltFile, altFileName, kindOf, AN2_FRAMES, AN2_FRAMES_END, ALT_FILE_MAX, type ExList, type ExSlot } from './exanim.ts';
 
 const base = (f: string) => f.slice(f.lastIndexOf('/') + 1);
 const stem = (f: string) => f.replace(/\.[^./]*$/, '').toLowerCase();
@@ -218,10 +219,10 @@ export function frameSources(files: Map<string, Uint8Array>, list: ExList | null
     if (d.length & 31 || d.length > ALT_FILE_MAX) { notes.push(`${base(f)} is not uncompressed 4bpp graphics – the animation frames from it are left out`); return null; }
     return d;
   };
-  const tiles = [...(list?.slots.values() ?? [])].filter((e) => kindOf(e.type) === 'tiles');
+  const slots = [...(list?.slots.values() ?? [])], tiles = slots.filter((e) => kindOf(e.type) === 'tiles');
   return {
     an2: tiles.some((e) => !usesAltFile(e) && e.frames.some((f) => f >= AN2_FRAMES && f < AN2_FRAMES_END)) ? pick(an2File) : null,
-    alt: tiles.some(usesAltFile) ? pick(altFile) : null,
+    alt: slots.some(usesAltFile) ? pick(altFile) : null,
   };
 }
 
@@ -297,6 +298,20 @@ export interface Placed { warnings: string[]; prints: string[] }
 export function levelFrames(rom: Rom, level: number, slots: ExSlot[], frames: FrameSources, wram: Uint8Array | null | undefined): { slots: (ExSlot | null)[]; file: number; notes: string[] } {
   const file = levelAltFile(rom, level);
   return { ...localizeFrames(rom, slots, { ...frames, ram: wram ?? null }, file), file };
+}
+
+// global animation slots (a package's, globalanim.ts) in free slots of the global list, their frames
+// copied into its Anim graphic (ADR 0003)
+export function placeGlobalSlots(rom: Rom, slots: ExSlot[], frames: FrameSources): Placed {
+  const file = readGlobalList(rom)?.altFile ?? 0;
+  const f = localizeFrames(rom, slots, { ...frames, ram: null }, file);
+  const warnings = [...f.notes], prints: string[] = [];
+  const used = addGlobalSlots(rom, f.slots.filter((e): e is ExSlot => !!e));
+  const left = used.filter((k) => k === null).length;
+  if (left) warnings.push(`No free slot left in the global animation list – ${left} slot(s) left out`);
+  const put = used.filter((k): k is number => k !== null);
+  if (put.length) prints.push(`Global animation slot(s) ${put.map((k) => hx(k, 2)).join(', ')}, frames in ${altFileName(file)}`);
+  return { warnings, prints };
 }
 
 // the graphics in level `level`: ExGFX in its slots, the ExAnimation slots in its list, the colors in its
