@@ -175,6 +175,11 @@ export class OverworldView {
     this.zoomCtl.update();
   }
 
+  // the map cells of the mode: layer 2's 8x8 tiles, else layer 1's 16x16
+  get cellSize(): number {
+    return this.mode === 'l2' ? 8 : 16;
+  }
+
   get region(): number {
     return this.map > 0 ? 1 : 0;
   }
@@ -238,7 +243,7 @@ export class OverworldView {
     if (this.playing) this.paintPlay(ctx);
     else ctx.drawImage(this.mapCanvas, 0, 0);
     if (this.showGrid) {
-      const step = this.mode === 'l2' ? 8 : 16;
+      const step = this.cellSize;
       ctx.strokeStyle = 'rgba(255,255,255,0.12)';
       ctx.lineWidth = lw;
       ctx.beginPath();
@@ -260,7 +265,7 @@ export class OverworldView {
     if (this.mode === 'links' || this.showLinks) this.links.paint(ctx, lw);
     if (this.mode !== 'links') this.paintSelected(lw);
     this.paintStep(lw);
-    const s = this.mode === 'l2' ? 8 : 16;
+    const s = this.cellSize;
     if (this.mode === 'links') {
       if (this.hover) {
         ctx.strokeStyle = 'rgba(255,255,0,0.9)';
@@ -373,7 +378,7 @@ export class OverworldView {
     const rc = this.scroller.getBoundingClientRect();
     const px = (e.clientX - rc.left + this.scroller.scrollLeft) / this.zoom;
     const py = (e.clientY - rc.top + this.scroller.scrollTop) / this.zoom;
-    const s = this.mode === 'l2' ? 8 : 16;
+    const s = this.cellSize;
     return { x: Math.floor(px / s), y: Math.floor(py / s) };
   }
 
@@ -523,8 +528,8 @@ export class OverworldView {
     const b = this.brush;
     this.scroller.title = ''; // the kind of the path tile under the mouse
     this.statusStats.textContent = b.kind === this.mode ? `Brush ${b.w}×${b.h}` : '';
-    if (!c && this.mode === 'links') {
-      this.statusText.textContent = 'Drag from a star, pipe or exit path tile to where it leads · Click: select · Drag an end of the selected arrow to move it · Delete removes it';
+    if (this.mode === 'links' && (this.links.status() || !c)) {
+      this.statusText.textContent = this.links.status() ?? 'Drag from a star, pipe or exit path tile to where it leads · Click: select · Drag an end of the selected arrow to move it · Delete removes it';
       return;
     }
     if (!c) {
@@ -796,7 +801,7 @@ export class OverworldView {
       h('div', { class: 'btn-group' },
         h('button', { class: this.mode === 'l1' ? 'active' : '', title: 'Layer 1 (1)', onclick: () => setMode('l1') }, 'Layer 1 (paths/levels)'),
         h('button', { class: this.mode === 'l2' ? 'active' : '', title: 'Layer 2 (2)', onclick: () => setMode('l2') }, 'Layer 2 (terrain)'),
-        h('button', { class: this.mode === 'links' ? 'active' : '', title: 'Links (3): stars, pipes and exit paths leading elsewhere, drawn as arrows; drag from a tile to where it leads', onclick: () => setMode('links') }, 'Links')),
+        h('button', { class: this.mode === 'links' ? 'active' : '', title: 'Overworld links (3): stars, pipes and exit paths leading elsewhere, drawn as arrows; drag from a tile to where it leads', onclick: () => setMode('links') }, 'Overworld links')),
       h('span', { class: 'sep' }),
       menuButton({ label: 'View', items: [
         { heading: 'Layers' },
@@ -806,8 +811,8 @@ export class OverworldView {
         view('Grid', () => this.showGrid, (v) => (this.showGrid = v), undefined, 'G'),
         view('Path tiles', () => this.showPaths, (v) => (this.showPaths = v),
           'Layer 1 tiles Mario walks, climbs (rungs) or swims along (blue), exits to another submap on (red) or stops on without entering a level (cross) – invisible in the game; what each does is learned from the game\'s code'),
-        view('Links', () => this.showLinks, (v) => (this.showLinks = v),
-          'Stars, pipes and exit paths leading elsewhere as arrows (always shown in the Links mode), the places exits to the overworld and Koopa Kids teleport to dashed'),
+        view('Overworld links', () => this.showLinks, (v) => (this.showLinks = v),
+          'Stars, pipes and exit paths leading elsewhere as arrows (always shown in the Overworld links mode), the locations exits to the overworld teleport to and the Koopa Kids\' places dashed'),
       ] }),
       h('span', { class: 'sep' }),
       h('label', { class: 'row', title: 'Event progress: the overworld as after loading a save in which the events up to this one passed, applied in their number order as the game does (a view setting, not in the ROM) – painting changes the map before events · , and . : one event back/further' },
@@ -823,6 +828,7 @@ export class OverworldView {
   key(e: KeyboardEvent): boolean {
     const k = e.key.toLowerCase();
     if (e.ctrlKey || e.metaKey || e.altKey) return false;
+    if (k === 'escape' && this.mode === 'links' && this.links.cancelPending()) return true;
     if (k === 'escape' && this.event >= 0) { this.setEvent(-1); return true; }
     if (k === 'g') { this.showGrid = !this.showGrid; this.paint(); return true; }
     if (k === ',' || k === '.') { this.setProgress(this.progress + (k === ',' ? -1 : 1)); return true; }
@@ -853,7 +859,7 @@ export class OverworldView {
   // ---------------- right: palette, properties ----------------
   buildSide(): void {
     const scroll = this.palPanel.scrollTop;
-    this.palPanel.replaceChildren(...(this.mode === 'links' ? [h('div', { class: 'panel-title' }, 'Links'), this.linkLegend()] : [
+    this.palPanel.replaceChildren(...(this.mode === 'links' ? [h('div', { class: 'panel-title' }, 'Overworld links'), this.linkLegend()] : [
       h('div', { class: 'panel-title' }, 'Paint', h('span', { class: 'hint' }, 'Right click/Shift+click paints')),
       this.mode === 'l1' ? this.l1Palette() : this.l2Palette()]));
     this.palPanel.scrollTop = scroll;
@@ -862,18 +868,18 @@ export class OverworldView {
 
   private revealListOpen = false;
   buildProps(): void {
-    if (this.mode === 'links') { this.props.replaceChildren(h('div', { class: 'panel-title' }, 'Link'), this.links.props()); return; }
+    if (this.mode === 'links') { this.props.replaceChildren(h('div', { class: 'panel-title' }, 'Overworld link'), this.links.props()); return; }
     this.props.replaceChildren(h('div', { class: 'panel-title' }, 'Properties'),
       this.selected >= 0 ? this.tileInfo(this.selected) : emptyState('Select a level tile in the list on the left, or any tile with Alt/Ctrl+click on the map.'),
       this.revealList());
   }
 
-  // what the links mode's arrows mean
+  // what the overworld links mode's arrows mean
   private linkLegend(): HTMLElement {
     const row = (color: string, text: string, dashed = false) => h('div', { class: 'row' },
       h('span', { class: 'ow-legend', style: `border-top: 2px ${dashed ? 'dashed' : 'solid'} ${color}` }), text);
     return h('div', { class: 'ow-info' },
-      row('#c58cff', 'Star / pipe warp'), row('#ff6b6b', 'Exit path to another submap'),
+      row('#c58cff', 'Star / pipe'), row('#ff6b6b', 'Exit path to another submap'),
       row('#4cc2ff', 'Location an exit to the overworld teleports to', true), row('#ffa94c', 'Where a Koopa Kid puts Mario', true),
       h('div', { class: 'hint' }, 'One head: one-way, two heads: both ways.'));
   }

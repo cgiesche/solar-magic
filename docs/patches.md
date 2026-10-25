@@ -603,13 +603,17 @@ search instead; its tables' addresses are at the routine's `+$11`, `+$2C`, `+$48
 The **Koopa Kids' places** (`$048E49` X, `$048E4F` Y, 3 entries): Mario meeting a Koopa Kid on tile 49, 4A or
 4B and losing to it is put there on his submap afterwards (`$048EBD`); set in place.
 
-**Overworld links** (*Overworld*, *Links*): every star/pipe and exit path entry is drawn as an arrow, one that the
-target leads back from as one arrow both ways. Dragging from a tile to another links them – an exit path tile by an
-exit path (`owpaths.ts` tells which tiles are), with the side its path goes on found from the path tiles around
-it, a Koopa Kid's tile by its place, any other tile by a star/pipe warp; the editor takes the entries the tiles
-had, else unused ones. As all 14 of the game's do, Mario leaves an exit path tile when he is half a tile before
+**Overworld links** (*Overworld*, *Overworld links*): every star/pipe and exit path entry is drawn as an arrow,
+one that the target leads back from as one arrow both ways. Dragging from a tile to another links them – an exit
+path tile (`owpaths.ts` tells which tiles are, and one an exit path already starts at, as the game's cave) by an
+exit path, with the side its path goes on found from the path tiles around it, a tile Mario stops on by a
+star/pipe link, a Koopa Kid's tile by its place (on the submap of its tile); a tile on the other map region is
+chosen after the source. The editor takes the entries the tiles had, else unused ones; a star/pipe entry that
+exits to the overworld teleport to stays their location where it is (the star gets another entry, and moving the
+location leaves the star leading where it did). As all 14 of the game's do, Mario leaves an exit path tile when he is half a tile before
 it on its path's side and comes out half a tile outside the target, on the side away from its path. The locations
-exits to the overworld teleport to are drawn dashed from their levels' tiles and moved by dragging.
+exits to the overworld teleport to are drawn dashed from the tiles of the levels whose exits lead through them,
+and moved by dragging.
 `tools/testowlinks.ts` checks that the clean game's links made again change no byte, that the game's exit path
 routine puts Mario where the clean game does and at each link's target, that an exit path in the table's last
 entry and one made both ways lead to their targets, that walking onto the main map's exit to Yoshi's Island

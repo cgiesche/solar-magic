@@ -1,5 +1,6 @@
 // Overworld links (CONTEXT.md "Overworld link"): a star, pipe or exit path tile leading to another place of the
-// overworld, one-way or both ways, and the locations exits to the overworld teleport to. Lunar Magic links two
+// overworld, one-way or both ways, the locations exits to the overworld teleport to and the Koopa Kids' places.
+// Lunar Magic links two
 // tiles by Alt+click and a dialog of table indexes; here a link is two tiles (and for an exit path tile the side
 // its path goes on), the editor finds or assigns the entries (owteleport.ts: the star/pipe table, 0x100 entries,
 // and the exit path table, 0x80). A link both ways is two entries, each leading to the other's tile.
@@ -14,11 +15,13 @@
 
 import type { Rom } from './rom.ts';
 import {
-  readTeleports, writeTeleport, readExitPaths, writeExitPath, TELEPORTS, EXIT_PATHS, type OwTile, type OwPos, type ExitPath, type Teleport,
+  readTeleports, writeTeleport, readExitPaths, writeExitPath, sameTile as same, TELEPORTS, EXIT_PATHS, type OwTile, type OwPos, type ExitPath, type Teleport,
 } from './owteleport.ts';
 import { readSecondaryEntrance } from './level.ts';
 
-export type LinkKind = 'warp' | 'exit';
+const SECONDARY_ENTRANCES = 0x200;
+
+export type LinkKind = 'star' | 'exit'; // a star/pipe entry, an exit path entry
 // a linked tile; for an exit path tile the side its path goes on (0 up, 1 down, 2 left, 3 right: DIR_NAMES)
 export interface LinkEnd extends OwTile { side?: number }
 // a → b, both: also b → a; entries: the table entries it is made of (a → b first)
@@ -26,7 +29,6 @@ export interface OwLink { kind: LinkKind; a: LinkEnd; b: LinkEnd; both: boolean;
 
 export const SIDES = [[0, -1], [0, 1], [-1, 0], [1, 0]] as const;
 export const opposite = (side: number): number => side ^ 1;
-const same = (a: OwTile, b: OwTile) => a.submap === b.submap && a.x === b.x && a.y === b.y;
 const samePos = (a: OwPos, b: OwPos) => a.submap === b.submap && a.x === b.x && a.y === b.y;
 
 // ---- exit path entries ↔ tiles ----
@@ -47,8 +49,8 @@ function ends(p: OwPos, toward: boolean): [LinkEnd, LinkEnd] | null {
   }
   return null;
 }
-// where an exit path entry leads: its tile, the side Mario comes from (the tile's path on the other); null: the
-// position isn't half a tile outside it (not one the editor makes – drawn at the tile)
+// where an exit path entry leads: its tile with the side its path goes on (Mario comes out on the other); without a
+// side where the position isn't half a tile outside it (not one the editor makes)
 function exitTarget(e: ExitPath): LinkEnd {
   const at = ends(e.to, false)?.find((c) => c.x === e.tile.x && c.y === e.tile.y);
   return at ?? { submap: e.to.submap, x: e.tile.x, y: e.tile.y };
@@ -65,7 +67,7 @@ export function readLinks(rom: Rom, isExit: (t: OwTile) => boolean = () => false
     const back = warps.findIndex((v, j) => j !== i && !done.has(j) && v.from && v.to && same(v.from, w.to!) && same(v.to, w.from!));
     done.add(i);
     if (back >= 0) done.add(back);
-    out.push({ kind: 'warp', a: { ...w.from }, b: { ...w.to }, both: back >= 0, entries: back >= 0 ? [i, back] : [i] });
+    out.push({ kind: 'star', a: { ...w.from }, b: { ...w.to }, both: back >= 0, entries: back >= 0 ? [i, back] : [i] });
   });
   const targets = exits.map((e) => e && exitTarget(e));
   const source = (i: number): LinkEnd => {
@@ -86,31 +88,30 @@ export function readLinks(rom: Rom, isExit: (t: OwTile) => boolean = () => false
 }
 
 // the star/pipe entries secondary entrances to the overworld teleport to (Lunar Magic's location indexes), with the
-// levels the entrances belong to
+// entrances
 export function locationUses(rom: Rom): Map<number, number[]> {
   const out = new Map<number, number[]>();
-  for (let i = 0; i < 0x200; i++) {
-    const s = readSecondaryEntrance(rom, i), o = s.overworld;
-    if (!o?.teleport) continue;
-    const l = out.get(o.location) ?? out.set(o.location, []).get(o.location)!;
-    if (!l.includes(s.destLevel)) l.push(s.destLevel);
+  for (let i = 0; i < SECONDARY_ENTRANCES; i++) {
+    const o = readSecondaryEntrance(rom, i).overworld;
+    if (o?.teleport) (out.get(o.location) ?? out.set(o.location, []).get(o.location)!).push(i);
   }
   return out;
 }
 
 // Links a to b (both: also b to a), replacing what a led to (and b, both ways): the entries a (and b) are taken from,
-// else unused ones – star/pipe entries kept for the locations entrances teleport to (locationUses) aren't. Returns
-// the link; throws when the table is full.
+// else unused ones. A star/pipe entry entrances teleport to (locationUses) stays their location where it was: the
+// tile gets another entry. Returns the link; throws when the table is full.
 export function makeLink(rom: Rom, kind: LinkKind, a: LinkEnd, b: LinkEnd, both: boolean): OwLink {
   if (same(a, b)) throw new Error('A link leads to another tile');
-  const entries = kind === 'warp' ? linkWarps(rom, a, b, both) : linkExits(rom, a, b, both);
+  const entries = kind === 'star' ? linkStars(rom, a, b, both) : linkExits(rom, a, b, both);
   return { kind, a: { ...a }, b: { ...b }, both, entries };
 }
 
-function linkWarps(rom: Rom, a: OwTile, b: OwTile, both: boolean): number[] {
+function linkStars(rom: Rom, a: OwTile, b: OwTile, both: boolean): number[] {
   const all = readTeleports(rom), kept = locationUses(rom), taken = new Set<number>();
   const write = (from: OwTile, to: OwTile): number => {
     let i = all.findIndex((t, k) => !taken.has(k) && t.from && same(t.from, from));
+    if (i >= 0 && kept.has(i) && !same(all[i].to!, to)) { writeTeleport(rom, i, { from: null, to: all[i].to }); all[i] = { from: null, to: all[i].to }; i = -1; }
     if (i < 0) i = all.findIndex((t, k) => !taken.has(k) && !t.from && !t.to && !kept.has(k));
     if (i < 0) throw new Error(`Every one of the ${TELEPORTS} star/pipe entries is used`);
     taken.add(i);
@@ -143,10 +144,10 @@ function linkExits(rom: Rom, a: LinkEnd, b: LinkEnd, both: boolean): number[] {
 
 // removes a link: its entries unused, a star/pipe entry an entrance teleports to kept as that location
 export function removeLink(rom: Rom, l: OwLink): void {
-  const kept = l.kind === 'warp' ? locationUses(rom) : new Map<number, number[]>();
+  const kept = l.kind === 'star' ? locationUses(rom) : new Map<number, number[]>(), all = l.kind === 'star' ? readTeleports(rom) : [];
   for (const i of l.entries) {
     if (l.kind === 'exit') writeExitPath(rom, i, null);
-    else writeTeleport(rom, i, { from: null, to: kept.has(i) ? readTeleports(rom)[i].to : null });
+    else writeTeleport(rom, i, { from: null, to: kept.has(i) ? all[i].to : null });
   }
 }
 
@@ -168,16 +169,22 @@ export function pathSide(t: OwTile, isPath: (x: number, y: number) => boolean): 
 }
 
 // ---- the locations exits to the overworld teleport to ----
-// moves location i (an entry of the star/pipe table) to tile `to`: a star or pipe leading there leads there too
+// moves location i (an entry of the star/pipe table) to tile `to`; a star or pipe whose entry it is keeps leading
+// where it did, in another entry (throws when the table is full)
 export function moveLocation(rom: Rom, i: number, to: OwTile): void {
-  const t = readTeleports(rom)[i];
-  writeTeleport(rom, i, { from: t.from, to: { submap: to.submap, x: to.x, y: to.y } });
+  const all = readTeleports(rom), t = all[i];
+  if (t.from && t.to) {
+    const kept = locationUses(rom), k = all.findIndex((e, n) => !e.from && !e.to && !kept.has(n));
+    if (k < 0) throw new Error(`Every one of the ${TELEPORTS} star/pipe entries is used`);
+    writeTeleport(rom, k, t);
+  }
+  writeTeleport(rom, i, { from: null, to: { submap: to.submap, x: to.x, y: to.y } });
 }
 
 // ---- Koopa Kids ----
 export const KOOPA_X = 0x048e49, KOOPA_Y = 0x048e4f, KOOPAS = 3;
 export const KOOPA_TILE = 0x49; // the tile of the first; the others the next ones
-// where Mario is put after losing to Koopa Kid k, a tile of his submap (null: none, the game's 0,0)
+// where Mario is put after losing to Koopa Kid k, a tile of his submap – the one of its tile (null: none, the game's 0,0)
 export function koopaTeleport(rom: Rom, k: number): { x: number; y: number } | null {
   const x = rom.r16(KOOPA_X + k * 2), y = rom.r16(KOOPA_Y + k * 2);
   return x || y ? { x: x >> 4, y: y >> 4 } : null;

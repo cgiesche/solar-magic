@@ -233,7 +233,7 @@ export function teleportDataRanges(rom: Rom): [number, number][] {
   return out;
 }
 
-const sameTile = (a: OwTile, b: OwTile) => a.submap === b.submap && a.x === b.x && a.y === b.y;
+export const sameTile = (a: OwTile, b: OwTile) => a.submap === b.submap && a.x === b.x && a.y === b.y;
 // the location index that teleports to a tile: an entry leading there (a star's or pipe's, or a location), else
 // a new location in an unused entry (written), else null (all 0x100 in use); `keep`: entries in use that may look
 // unused (a teleport not set up yet)

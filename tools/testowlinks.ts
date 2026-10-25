@@ -2,11 +2,11 @@
 // entries (owteleport.ts) and the Koopa Kids' teleports. Checked on the model – the clean game's entries read as
 // links (both ways where an entry leads back) and written again unchanged – and by emulation: Mario walking through
 // each of the game's exit paths arrives where he does in the clean game, through a link made in the editor (also in
-// the table's last entry) where it leads, warps by a star link made, and is put at a Koopa Kid's place set.
+// the table's last entry) where it leads, stars by a star link made, and is put at a Koopa Kid's place set.
 import { Rom, snesToPc } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
-import { readExitPaths, readExitPath, writeExitPath, readTeleports, writeTeleport, EXIT_PATHS, FIND_HOOK, GAME_EXIT_TABLES, GAME_EXITS, type OwTile, type OwPos } from '../src/core/owteleport.ts';
-import { readLinks, makeLink, removeLink, setBothWays, exitEntry, pathSide, koopaTeleport, setKoopaTeleport, opposite, SIDES, type LinkEnd, type OwLink } from '../src/core/owlinks.ts';
+import { readExitPaths, readExitPath, writeExitPath, readTeleports, writeTeleport, EXIT_PATHS, EXIT_HOOK, FIND_HOOK, GAME_EXIT_TABLES, GAME_EXITS, type OwTile, type OwPos } from '../src/core/owteleport.ts';
+import { readLinks, makeLink, removeLink, setBothWays, moveLocation, exitEntry, pathSide, koopaTeleport, setKoopaTeleport, opposite, SIDES, KOOPA_X, type LinkEnd, type OwLink } from '../src/core/owlinks.ts';
 import { l1Index, overworldDataRanges } from '../src/core/overworld.ts';
 import { readSecondaryEntrance, writeSecondaryEntrance, newOverworldExit } from '../src/core/level.ts';
 import { GM, RAM, get16, set16 } from '../src/core/ram.ts';
@@ -25,7 +25,7 @@ const links = readLinks(rom);
 
 // ---- the clean game's links ----
 {
-  const exits = links.filter((l) => l.kind === 'exit'), warps = links.filter((l) => l.kind === 'warp');
+  const exits = links.filter((l) => l.kind === 'exit'), stars = links.filter((l) => l.kind === 'star');
   check(readExitPaths(rom).filter(Boolean).length === GAME_EXITS && readExitPaths(rom).length === EXIT_PATHS, `${GAME_EXITS} exit paths of the game, ${EXIT_PATHS} entries`);
   const game = Array.from({ length: GAME_EXITS }, (_, i) => {
     const b = (t: number, n: number) => clean.bytes(GAME_EXIT_TABLES[t] + i * n, n).join();
@@ -37,8 +37,8 @@ const links = readLinks(rom);
   check(exits.length === 7 && exits.every((l) => l.both && l.a.side !== undefined && l.b.side !== undefined), `7 exit paths both ways: ${exits.map(show).join(' ')}`);
   const yi = exits.find((l) => l.a.submap === 0 && l.a.x === 2 && l.a.y === 0x14);
   check(!!yi && yi.a.side === 0 && yi.b.submap === 1 && yi.b.x === 4 && yi.b.y === 0 && yi.b.side === 1, `main map 02,14 (path up) ↔ Yoshi's Island 04,00 (path down): ${yi && show(yi)}`);
-  console.log(`     star/pipe: ${warps.map(show).join(' ')}`);
-  check(warps.reduce((n, l) => n + l.entries.length, 0) === 27, 'the 27 star/pipe entries in links');
+  console.log(`     star/pipe: ${stars.map(show).join(' ')}`);
+  check(stars.reduce((n, l) => n + l.entries.length, 0) === 27, 'the 27 star/pipe entries in links');
   // every link made again as it is: no byte changes
   const r = new Rom(rom.data.slice());
   for (const l of links) makeLink(r, l.kind, l.a, l.b, l.both);
@@ -49,17 +49,17 @@ const links = readLinks(rom);
   kp.forEach((t, k) => setKoopaTeleport(kr, k, t));
   check(romDiff(rom.data, kr.data) === 0, 'Koopa Kid teleports written again unchanged');
   const ranges = overworldDataRanges(rom), inside = (snes: number) => ranges.some(([a, b]) => snesToPc(snes) >= a && snesToPc(snes) < b);
-  check(inside(0x048e49) && inside(rom.r24(rom.r24(0x049a36) + 0x11)) && inside(rom.r24(rom.r24(0x049a36) + 0x48)), 'the tables are overworld data');
+  check(inside(KOOPA_X) && inside(rom.r24(rom.r24(EXIT_HOOK + 1) + 0x11)) && inside(rom.r24(rom.r24(EXIT_HOOK + 1) + 0x48)), 'the tables are overworld data');
 }
 
 // ---- the model: making, changing and removing links ----
 {
   const r = new Rom(rom.data.slice());
   const a: LinkEnd = { submap: 0, x: 0x0c, y: 0x09 }, b: LinkEnd = { submap: 2, x: 5, y: 6 };
-  const l = makeLink(r, 'warp', a, b, true);
+  const l = makeLink(r, 'star', a, b, true);
   const t = readTeleports(r);
   check(l.entries.length === 2 && l.entries.every((i) => i >= 27) && JSON.stringify(t[l.entries[1]].to) === JSON.stringify({ submap: 0, x: 0x0c, y: 0x09 }), `a star link both ways: entries ${l.entries}`);
-  const found = readLinks(r).find((k) => k.kind === 'warp' && k.a.x === 0x0c && k.a.y === 9);
+  const found = readLinks(r).find((k) => k.kind === 'star' && k.a.x === 0x0c && k.a.y === 9);
   check(!!found && found.both && JSON.stringify(found.entries) === JSON.stringify(l.entries), 'read back as one link both ways');
   const one = setBothWays(r, l, false);
   check(!one.both && !readTeleports(r)[l.entries[1]].from && !readTeleports(r)[l.entries[1]].to, 'made one-way: the entry back unused');
@@ -69,8 +69,19 @@ const links = readLinks(rom);
   writeSecondaryEntrance(r, 0x40, { ...s, destLevel: 0x105, overworld: { ...newOverworldExit(), teleport: 1, location: idx } });
   removeLink(r, one);
   check(!readTeleports(r)[idx].from && JSON.stringify(readTeleports(r)[idx].to) === JSON.stringify({ submap: 2, x: 5, y: 6 }), 'removed: an entry an entrance teleports to stays a location');
-  const again = makeLink(r, 'warp', { submap: 0, x: 0x0d, y: 0x09 }, b, false);
+  const again = makeLink(r, 'star', { submap: 0, x: 0x0d, y: 0x09 }, b, false);
   check(again.entries[0] !== idx, `a new link doesn't take the location (${again.entries[0]})`);
+  // the star of a location's entry led elsewhere, a location moved: the other keeps leading where it did
+  const r2 = new Rom(r.data.slice()), star = makeLink(r2, 'star', a, b, false);
+  writeSecondaryEntrance(r2, 0x40, { ...s, destLevel: 0x105, overworld: { ...newOverworldExit(), teleport: 1, location: star.entries[0] } });
+  const moved = makeLink(r2, 'star', a, { submap: 3, x: 1, y: 2 }, false), t2 = readTeleports(r2);
+  check(moved.entries[0] !== star.entries[0] && !t2[star.entries[0]].from && JSON.stringify(t2[star.entries[0]].to) === JSON.stringify(b),
+    `a star led elsewhere takes another entry (${moved.entries[0]}), its old one stays the location`);
+  const r3 = new Rom(r.data.slice()), shared = makeLink(r3, 'star', a, b, false);
+  moveLocation(r3, shared.entries[0], { submap: 3, x: 1, y: 2 });
+  const l3 = readLinks(r3).find((k) => k.kind === 'star' && k.a.x === a.x && k.a.y === a.y);
+  check(!!l3 && JSON.stringify(l3.b) === JSON.stringify(b) && JSON.stringify(readTeleports(r3)[shared.entries[0]]) === JSON.stringify({ from: null, to: { submap: 3, x: 1, y: 2 } }),
+    `a location moved: the star of its entry still leads to ${l3 && JSON.stringify(l3.b)}`);
   // exit paths: from a tile whose path goes on, to a tile's other side
   const ea: LinkEnd = { submap: 0, x: 2, y: 0x14, side: 0 }, eb: LinkEnd = { submap: 2, x: 5, y: 0x14, side: 0 };
   const e = exitEntry(ea, eb);
@@ -152,7 +163,7 @@ function yiLink(): OwLink { return links.find((l) => l.kind === 'exit' && l.a.su
   // a star made to warp: Mario on its tile, the patch's search finds the entry, the overworld loads at its target
   const r = new Rom(rom.data.slice());
   const from: OwTile = { submap: 0, x: 0x0c, y: 0x09 }, to: OwTile = { submap: 4, x: 7, y: 8 };
-  const l = makeLink(r, 'warp', from, to, false);
+  const l = makeLink(r, 'star', from, to, false);
   const e = new LevelEmulator(r);
   e.startGame(0);
   const w = e.snes.wram;
@@ -163,7 +174,7 @@ function yiLink(): OwLink { return links.find((l) => l.kind === 'exit' && l.a.su
   w[RAM.owWarp] = 1; w[RAM.gameMode] = GM.overworldLoad;
   for (let f = 0; f < 400 && w[RAM.gameMode] !== GM.overworld; f++) e.snes.runFrame();
   check(found === l.entries[0] && w[RAM.submap] === 4 && get16(w, RAM.owPlayerTileX) === 7 && get16(w, RAM.owPlayerTileY) === 8,
-    `a star link warps: entry ${found}, Mario on submap ${w[RAM.submap]} at ${get16(w, RAM.owPlayerTileX)},${get16(w, RAM.owPlayerTileY)}`);
+    `a star link stars: entry ${found}, Mario on submap ${w[RAM.submap]} at ${get16(w, RAM.owPlayerTileX)},${get16(w, RAM.owPlayerTileY)}`);
 }
 {
   // losing to Koopa Kid 1 (a level of Yoshi's Island left by dying while it is there): Mario at its place
