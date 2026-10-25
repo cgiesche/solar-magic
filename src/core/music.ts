@@ -1,5 +1,5 @@
-// The ROM's music project: custom songs in AddmusicK's format (MML .txt with their BRR samples),
-// inserted by AddmusicK itself (amk.ts). Like the UberASM project it lives in the patch registry: one
+// The ROM's music project: custom songs in AddmusicK's format (MML .txt with their BRR samples) and
+// custom sound effects (sfx.ts), inserted by AddmusicK itself (amk.ts). Like the UberASM project it lives in the patch registry: one
 // entry (kind 'music') whose changes are the AddmusicK run – its hijacks with their original bytes and
 // its free space – and whose stored sources are the project (zip). Saving removes the old run and
 // inserts all songs anew, so the entry can always be removed again completely.
@@ -17,6 +17,7 @@ import { HEADER_MUSIC_TABLE, levelMusic, setLevelMusic } from './patches.ts';
 import { MUSIC } from './names.ts';
 import { runAmk, type AmkResult } from './amk.ts';
 import { AMK_ORIGINALS } from '../vendor/amk/originals.ts';
+import { sfxListText, sfxName, SFX_LIST, type SoundEffect, type SfxBank } from './sfx.ts';
 
 export const FIRST_CUSTOM = 0x29;
 // AddmusicK's !FreeRAM ($7FB000 in asm/SNES/patch.asm of 1.0.11), up to 1032 bytes (its sample table)
@@ -34,6 +35,8 @@ export interface MusicSong {
 export interface MusicProject {
   songs: MusicSong[];
   files: Map<string, Uint8Array>; // relative to AddmusicK's music folder: the songs and their samples
+  sfx: SoundEffect[];
+  sfxFiles: Map<string, Uint8Array>; // "<bank>/<file>" of each sound effect
 }
 
 export interface SongInfo {
@@ -43,7 +46,7 @@ export interface SongInfo {
   file?: string; // custom songs: their .txt
 }
 
-export const emptyMusicProject = (): MusicProject => ({ songs: [], files: new Map() });
+export const emptyMusicProject = (): MusicProject => ({ songs: [], files: new Map(), sfx: [], sfxFiles: new Map() });
 
 export const originalName = (file: string) => file.replace(/^originals\/\d+ /, '').replace(/\.txt$/i, '');
 
@@ -204,6 +207,31 @@ export function removeSong(p: MusicProject, num: number): void {
 
 export const folders = (p: MusicProject) => new Set([...p.files.keys()].map((f) => f.slice(0, f.indexOf('/')).toLowerCase()));
 
+// ---------- sound effects ----------
+
+export const sfxKey = (s: SoundEffect) => `${s.bank}/${s.file}`;
+
+// adds sound effects of an upload (`name`) with their numbers, in a folder of their own in each bank's
+// folder; returns them
+export function addSfx(p: MusicProject, name: string, sfx: { bank: SfxBank; rel: string; num: number; data: Uint8Array }[]): SoundEffect[] {
+  const taken = new Set(p.sfx.map((s) => s.file.slice(0, s.file.indexOf('/')).toLowerCase()));
+  let folder = name.replace(/\.(zip|txt)$/i, '').replace(/[\\/:*?"<>|]/g, '_').trim() || 'sfx';
+  for (let i = 2; taken.has(folder.toLowerCase()); i++) folder = `${folder.replace(/ \(\d+\)$/, '')} (${i})`;
+  const added = sfx.map((x) => ({ bank: x.bank, num: x.num, file: `${folder}/${x.rel}`, name: sfxName(x.rel) }));
+  for (const [i, s] of added.entries()) {
+    p.sfx = p.sfx.filter((o) => !(o.bank === s.bank && o.num === s.num));
+    p.sfx.push(s);
+    p.sfxFiles.set(sfxKey(s), sfx[i].data);
+  }
+  p.sfx.sort((a, b) => a.bank.localeCompare(b.bank) || a.num - b.num);
+  return added;
+}
+
+export function removeSfx(p: MusicProject, key: string): void {
+  p.sfx = p.sfx.filter((s) => sfxKey(s) !== key);
+  p.sfxFiles.delete(key);
+}
+
 // ---------- the project in the ROM ----------
 
 export function musicEntry(rom: Rom): PatchEntry | null {
@@ -216,17 +244,21 @@ export function hasAmk(rom: Rom): boolean {
 }
 
 export function projectToZip(p: MusicProject): Uint8Array {
-  const z: Record<string, Uint8Array> = { 'project.json': strToU8(JSON.stringify({ songs: p.songs })) };
+  const z: Record<string, Uint8Array> = { 'project.json': strToU8(JSON.stringify({ songs: p.songs, sfx: p.sfx })) };
   for (const [f, c] of p.files) z['music/' + f] = c;
+  for (const [f, c] of p.sfxFiles) z['sfx/' + f] = c;
   return zipSync(z, { level: 9 });
 }
 
 export function projectFromZip(data: Uint8Array): MusicProject {
   const z = unzipSync(data);
-  const meta = JSON.parse(strFromU8(z['project.json'])) as { songs: MusicSong[] };
-  const files = new Map<string, Uint8Array>();
-  for (const [p, c] of Object.entries(z)) if (p.startsWith('music/')) files.set(p.slice(6), c);
-  return { songs: meta.songs, files };
+  const meta = JSON.parse(strFromU8(z['project.json'])) as { songs: MusicSong[]; sfx: SoundEffect[] };
+  const files = new Map<string, Uint8Array>(), sfxFiles = new Map<string, Uint8Array>();
+  for (const [p, c] of Object.entries(z)) {
+    if (p.startsWith('music/')) files.set(p.slice(6), c);
+    else if (p.startsWith('sfx/')) sfxFiles.set(p.slice(4), c);
+  }
+  return { songs: meta.songs, files, sfx: meta.sfx, sfxFiles };
 }
 
 export function loadMusicProject(rom: Rom): MusicProject | null {
@@ -407,6 +439,9 @@ export function amkFiles(p: MusicProject): Map<string, Uint8Array | string> {
   // sample groups the songs brought along (runAmk adds them to AddmusicK's own)
   const groups = [...p.files].filter(([f]) => f.endsWith('/' + SAMPLE_GROUPS)).map(([, c]) => strFromU8(c, true));
   if (groups.length) files.set(SAMPLE_GROUPS, strToU8(groups.join('\n'), true));
+  // the sound effects in their banks' folders (runAmk adds them to AddmusicK's own list)
+  for (const [f, c] of p.sfxFiles) files.set(f, c);
+  if (p.sfx.length) files.set(SFX_LIST, sfxListText(p.sfx));
   return files;
 }
 
@@ -426,7 +461,7 @@ function amkErrors(r: AmkResult): string[] {
 
 // Inserts the project with AddmusicK, replacing an earlier run (ok false: failed, the edit session puts
 // the ROM back).
-// An empty project removes AddmusicK again.
+// An empty project (no songs, no sound effects) removes AddmusicK again.
 export async function saveMusicProject(rom: Rom, p: MusicProject): Promise<MusicResult> {
   const amkBefore = hasAmk(rom);
   const table = rom.data.slice(snesToPc(HEADER_MUSIC_TABLE), snesToPc(HEADER_MUSIC_TABLE) + 8);
@@ -457,7 +492,7 @@ async function insertProject(rom: Rom, p: MusicProject): Promise<MusicResult> {
   } catch (err) {
     return fail([String((err as Error).message ?? err)]);
   }
-  if (!p.songs.length) return { ok: true, errors: [], warnings, log: '' };
+  if (!p.songs.length && !p.sfx.length) return { ok: true, errors: [], warnings, log: '' };
   if (hasAmk(rom)) return fail(['AddmusicK is already in this ROM, but not through the editor – it cannot be inserted again here.']);
   const before = rom.data;
   const beforeRats = rom.scanRats();

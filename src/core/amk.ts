@@ -38,9 +38,16 @@ function dotDotDirs(text: string): string[] {
   return [...dirs];
 }
 
-// files: paths relative to AddmusicK's folder ("music/…", "Addmusic_list.txt") → contents, written
-// over AddmusicK's own – except "Addmusic_sample groups.txt", whose groups are added to AddmusicK's
-// own; args: its command line without the ROM name
+// AddmusicK's own list of sound effects with more lines in each bank (`add` in the list's format)
+function withSfx(own: string, add: string): string {
+  const lines = (t: string, bank: string) => (new RegExp(`SFX${bank}:([^]*?)(?=SFX1DF|$)`).exec(t)?.[1] ?? '').trim();
+  return ['1DF9', '1DFC'].map((b) => `SFX${b}:\n${[lines(own, b), lines(add, b)].filter(Boolean).join('\n')}\n`).join('\n');
+}
+
+// files: paths relative to AddmusicK's folder ("music/…", "1DFC/…", "Addmusic_list.txt") → contents,
+// written over AddmusicK's own – except "Addmusic_sample groups.txt", whose groups are added to
+// AddmusicK's own, and "Addmusic_sound effects.txt", whose sound effects are; args: its command line
+// without the ROM name
 export async function runAmk(rom: Uint8Array | null, files: Map<string, Uint8Array | string>, args: string[] = []): Promise<AmkResult> {
   await loadAmk();
   const out: string[] = [], err: string[] = [];
@@ -55,6 +62,9 @@ export async function runAmk(rom: Uint8Array | null, files: Map<string, Uint8Arr
       const all = new Uint8Array(own.length + 2 + add.length);
       all.set(own); all.set([10, 10], own.length); all.set(add, own.length + 2);
       fs.writeFile('/amk/' + p, all);
+    } else if (p === 'Addmusic_sound effects.txt') {
+      const dec = (b: Uint8Array) => new TextDecoder('latin1').decode(b);
+      fs.writeFile('/amk/' + p, withSfx(dec(fs.readFile('/amk/' + p)).replace(/\r/g, ''), typeof c === 'string' ? c : dec(c)));
     } else fs.writeFile('/amk/' + p, c);
     if (dir.startsWith('music/') && /\.txt$/i.test(p)) for (const d of dotDotDirs(typeof c === 'string' ? c : new TextDecoder('latin1').decode(c))) {
       fs.mkdirTree(`/amk/${dir}/${d}`);

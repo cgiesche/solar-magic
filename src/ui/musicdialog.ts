@@ -147,7 +147,7 @@ export function openSongSettings(proj: MusicProject, song: MusicSong, save: (s: 
     const v = values();
     if (!v) return;
     status.textContent = 'AddmusicK is compiling the song …';
-    const p: MusicProject = { songs: [{ ...song, defines: v }], files: proj.files };
+    const p: MusicProject = { ...proj, songs: [{ ...song, defines: v }] };
     void songSpcs(p, [song.file]).then((r) => {
       if (r.errors.length) logTool('AddmusicK', { errors: r.errors, warnings: [] }, r.log);
       const spc = spcOf(r.spcs, song.file);
@@ -218,7 +218,7 @@ export function musicPane(app: App, changed: () => void): Pane {
   // loudness of a custom song (its global volume scaled when AddmusicK inserts it)
   const VOLUMES = [25, 35, 50, 70, 85, 100, 120, 140, 170, 200, 250, 300];
   const setVolume = async (num: number, volume: number) => {
-    const p: MusicProject = { songs: proj.songs.map((x) => (x.num === num ? { ...x, volume } : x)), files: proj.files };
+    const p: MusicProject = { ...proj, songs: proj.songs.map((x) => (x.num === num ? { ...x, volume } : x)) };
     if (await insertMusic(app, p, `Song ${songHex(num)} at ${volume}% volume`)) changed();
     reload();
   };
@@ -226,14 +226,14 @@ export function musicPane(app: App, changed: () => void): Pane {
   // a custom song under another number; levels playing it keep playing it
   const setNumber = async (num: number, to: number) => {
     const users = levelsBySong(app).get(num) ?? [];
-    const p: MusicProject = { songs: proj.songs.map((x) => (x.num === num ? { ...x, num: to } : x)), files: proj.files };
+    const p: MusicProject = { ...proj, songs: proj.songs.map((x) => (x.num === num ? { ...x, num: to } : x)) };
     if (await insertMusic(app, p, `Song ${songHex(num)} is now song ${songHex(to)}`, () => { for (const l of users) setLevelMusic(app.rom, l, to); })) changed();
     reload();
   };
 
   // a song with new settings, or its file as new text: inserted again
   const saveSong = async (next: MusicSong, what: string, files = proj.files) => {
-    const p: MusicProject = { songs: proj.songs.map((x) => (x.num === next.num ? next : x)), files };
+    const p: MusicProject = { ...proj, songs: proj.songs.map((x) => (x.num === next.num ? next : x)), files };
     if (await insertMusic(app, p, what)) changed();
     reload();
   };
