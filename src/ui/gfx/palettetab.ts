@@ -15,15 +15,9 @@ import { customPalette, setCustomPalette } from '../../core/patches.ts';
 import { parsePrimaryHeader, L1_PTRS, type PrimaryHeader } from '../../core/level.ts';
 import type { LevelRender } from '../../core/levelemu.ts';
 import { animLinks, colorAnimsAt } from './animtab.ts';
+import { BACK_AREA, BG_PALS, FG_PALS, SPR_PALS, tableOf, tableName, type TableKind } from '../../core/sharedpal.ts';
 
-// vanilla palette tables (bank $00)
-const BACK_AREA = 0x00b0a0;
-const BG_PALS = 0x00b0b0;
-const FG_PALS = 0x00b190;
-const SPR_PALS = 0x00b318;
-const PAL_SIZE = 0x18; // 12 colors: two rows of 6 (colors 2-7)
-
-type Kind = 'back' | 'bg' | 'fg' | 'spr' | 'l3' | 'mario' | 'global' | 'own' | 'none';
+type Kind = TableKind | 'own' | 'none';
 interface Origin { kind: Kind; num: number }
 
 export function rgbOf(c: number): [number, number, number] {
@@ -45,29 +39,13 @@ function parseHtml(s: string): number | null {
 }
 
 function originOf(addr: number): Origin {
-  if (addr < 0) return { kind: 'none', num: 0 };
-  const inTable = (base: number, n: number, size: number) => addr >= base && addr < base + n * size;
-  if (inTable(BACK_AREA, 8, 2)) return { kind: 'back', num: (addr - BACK_AREA) >> 1 };
-  if (inTable(BG_PALS, 8, PAL_SIZE)) return { kind: 'bg', num: Math.floor((addr - BG_PALS) / PAL_SIZE) };
-  if (addr >= 0x00b170 && addr < 0x00b190) return { kind: 'l3', num: 0 };
-  if (inTable(FG_PALS, 8, PAL_SIZE)) return { kind: 'fg', num: Math.floor((addr - FG_PALS) / PAL_SIZE) };
-  if (addr >= 0x00b2c8 && addr < SPR_PALS) return { kind: 'mario', num: 0 };
-  if (inTable(SPR_PALS, 8, PAL_SIZE)) return { kind: 'spr', num: Math.floor((addr - SPR_PALS) / PAL_SIZE) };
-  return { kind: 'global', num: 0 };
+  return addr < 0 ? { kind: 'none', num: 0 } : tableOf(addr);
 }
 
 function originName(o: Origin): string {
-  switch (o.kind) {
-    case 'back': return `Back area color ${o.num}`;
-    case 'bg': return `BG palette ${o.num}`;
-    case 'fg': return `FG palette ${o.num}`;
-    case 'spr': return `Sprite palette ${o.num}`;
-    case 'l3': return 'Layer 3 / status bar';
-    case 'mario': return 'Mario';
-    case 'global': return 'Global';
-    case 'own': return 'Own palette';
-    default: return 'set by the game';
-  }
+  if (o.kind === 'own') return 'Own palette';
+  if (o.kind === 'none') return 'set by the game';
+  return tableName({ kind: o.kind, num: o.num });
 }
 
 export class PaletteTab implements WsPanel {

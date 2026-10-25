@@ -12,6 +12,7 @@ import { map16Targets, parseRomMap16 } from '../core/map16file.ts';
 import { levelColors } from '../core/levelgfx.ts';
 import { tilesetWords } from '../core/tilesets.ts';
 import { GFX_SLOTS } from '../core/gfxslots.ts';
+import { sharedColorNames } from '../core/sharedpal.ts';
 import { altFileName, levelAltFile } from '../core/exanim.ts';
 import { errorText } from './projectpane.ts';
 import { gfxNumberField } from './gfxnum.ts';
@@ -73,6 +74,8 @@ export function placementEditor(app: App, p: ReadyPreview, blank: number[]): Pla
     ] : '',
     plan.romMap16 ? h('div', { class: 'prop' }, h('label', { title: plan.romMap16.file }, 'Map16 tiles'),
       h('span', null, `${plan.romMap16.fg.size} FG and ${plan.romMap16.bg.size} BG tile(s) from ${file(plan.romMap16.file)}, the blocks on the tiles showing them`)) : '',
+    plan.sharedPal ? h('div', { class: 'prop' }, h('label', { title: plan.sharedPal.file }, 'Shared palettes'),
+      h('span', null, `${plan.sharedPal.colors.size} color(s) differing from the clean game: ${sharedColorNames([...plan.sharedPal.colors.keys()]).join('; ')}`)) : '',
     [...edits.blockTiles!].map(([f, tiles]) => h('div', { class: 'prop' }, h('label', { title: f }, file(f)),
       h('span', null, 'on tile '), hexInput(tiles[0] ?? 0x200, 3, (v) => { edits.blockTiles!.set(f, [v, ...tiles.slice(1)]); refresh(); }, 0xfff),
       tiles.length > 1 ? h('span', { class: 'hint' }, ` and ${tiles.slice(1).map((t) => hex(t, 3)).join(', ')}`) : '')),

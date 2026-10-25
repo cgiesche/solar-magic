@@ -33,7 +33,7 @@ import { callistoAsm, toolFiles, PATCH_DEFINES, type CallistoProject } from './c
 // ---------- what the adapters detect ----------
 
 interface PartBase<K extends PartKind> { kind: K; name: string; file: string }
-export type GraphicsType = 'map16' | 'exgfx' | 'pal' | 'palmask';
+export type GraphicsType = 'map16' | 'exgfx' | 'pal' | 'palmask' | 'sharedpal';
 // one part of an upload; file: its main file (path in the upload)
 export type PreviewPart =
   | PartBase<'patch'> & { candidates: string[] } // the main files to choose from (the upload doesn't say which)
@@ -359,11 +359,11 @@ const music: PartAdapter<'music'> = {
 
 // ---------- graphics ----------
 
-const GRAPHICS_TYPES: GraphicsType[] = ['map16', 'exgfx', 'pal', 'palmask'];
+const GRAPHICS_TYPES: GraphicsType[] = ['map16', 'exgfx', 'pal', 'palmask', 'sharedpal'];
 
 const graphics: PartAdapter<'graphics'> = {
   kind: 'graphics',
-  // Map16 tiles, ExGFX and palettes; the Lunar Magic level file goes with the package (its sample level)
+  // Map16 tiles, ExGFX, palettes and shared palettes; the Lunar Magic level file goes with the package (its sample level)
   // (in a Callisto project not those in a tool's folder, which are its code's data)
   claims: (d) => [
     ...GRAPHICS_TYPES.flatMap((type) => d.graphics[type].filter((f) => !inToolFolder(d, f)).map((f): FileClaim => ({ file: f, rank: RANK.type, part: { kind: 'graphics', name: base(f), file: f, type } }))),
@@ -387,7 +387,7 @@ export const PART_ORDER: PartKind[] = ['patch', 'uberasm', 'block', 'sprite', 'm
 
 // the graphics parts and the sample level of a preview, as pkgplan.ts takes them
 function previewGraphics(p: ReadyPreview): DetectedGraphics {
-  const g: DetectedGraphics = { map16: [], exgfx: [], pal: [], palmask: [], mwl: p.sample };
+  const g: DetectedGraphics = { map16: [], exgfx: [], pal: [], palmask: [], sharedpal: [], mwl: p.sample };
   for (const x of partsOf(p, 'graphics')) g[x.type].push(x.file);
   return g;
 }

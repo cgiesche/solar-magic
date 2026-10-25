@@ -1,5 +1,5 @@
 // The sections of a package record (pkgreg.ts), one adapter each: patches, UberASM, blocks, sprites,
-// ExGFX files, songs, FG and BG Map16 tiles – the fields of PackageParts, as stored in the ROM (the tool
+// ExGFX files, songs, FG and BG Map16 tiles, shared palette colors – the fields of PackageParts, as stored in the ROM (the tool
 // projects under their part kind: uberasm, block, sprite). An adapter knows what of the ROM its section
 // observes (read), what came in between two reads (added), how that goes into a record (merge), when
 // there is nothing (empty), how to take it out of the ROM again (remove) and how to say so (summary,
@@ -22,6 +22,7 @@ import { BG_EXT_FIRST, BG_EXT_TILES, bgExtTileWords, setBgExtTileWords, vanillaB
 import type { UberContext } from './uberasm.ts';
 import type { SpriteFolder } from './pixirt.ts';
 import type { PackageParts } from './pkgreg.ts';
+import { sharedColors, setSharedColor, sharedColorNames } from './sharedpal.ts';
 
 const CONTEXTS: UberContext[] = ['level', 'gamemode', 'overworld'];
 export const OTHER = ['global', 'statusbar', 'macrolib'] as const;
@@ -254,8 +255,24 @@ const bgMap16 = tileSection('BG Map16', (rom) => Array.from({ length: BG_EXT_TIL
     return [];
   });
 
+// shared palette colors it changed, with the color each had before: set back to it (two packages never
+// change the same color, see pkgplan.ts applyGraphics)
+const sharedPal: PartSection<number[], [number, number][]> = {
+  none: () => [],
+  read: sharedColors,
+  added: (a, b) => b.flatMap((c, i): [number, number][] => (c !== a[i] ? [[i, a[i]]] : [])),
+  merge: (r, p) => union(r, p, ([i]) => String(i)),
+  empty: (p) => !p.length,
+  summary: (p) => (p.length ? 'Shared palettes' : null),
+  removal: (p) => (p.length ? `shared palette colors (${sharedColorNames(p.map(([i]) => i)).join('; ')}), set back` : null),
+  remove(rom, mine) {
+    for (const [i, c] of mine) setSharedColor(rom, i, c);
+    return [];
+  },
+};
+
 // every field of PackageParts has its adapter (the compiler checks it)
 type Sections = { [K in keyof PackageParts]-?: PartSection<any, NonNullable<PackageParts[K]>> };
-export const SECTIONS = { music, sprite, block, uberasm, patches, map16, bgMap16, gfx } satisfies Sections;
+export const SECTIONS = { music, sprite, block, uberasm, patches, map16, bgMap16, gfx, sharedPal } satisfies Sections;
 export type SectionKey = keyof typeof SECTIONS;
 export const SECTION_KEYS = Object.keys(SECTIONS) as SectionKey[];

@@ -17,6 +17,7 @@ import { installBgMap16Ext, setBgExtTileWords, BG_EXT_FIRST } from '../src/core/
 import { recordPackageChange, uninstallPackage, listPackages, packageSummary, type Package } from '../src/core/pkgreg.ts';
 import { SECTIONS, SECTION_KEYS, type SectionKey, type PartSection } from '../src/core/pkgsections.ts';
 import { inspectUpload, installPackage, type InstallOptions, type ReadyPreview } from '../src/core/packages.ts';
+import { setSharedColor } from '../src/core/sharedpal.ts';
 import { testSongZip } from './testsong.ts';
 import { editorImage, romDiff } from './fixture.ts';
 
@@ -65,6 +66,7 @@ const samples: Record<SectionKey, () => Promise<Package | null> | Package | null
   music: () => install('Song.zip', testSongZip()),
   map16: () => record('map16', () => { setExtTileWords(rom, EXT_FIRST + 0x40, [1, 2, 3, 4]); return { ok: true }; }),
   bgMap16: () => record('bgMap16', () => { setBgExtTileWords(rom, BG_EXT_FIRST + 0x40, [5, 6, 7, 8]); return { ok: true }; }),
+  sharedPal: () => record('sharedPal', () => { setSharedColor(rom, 0x10, 0x1234); return { ok: true }; }),
 };
 
 for (const k of SECTION_KEYS) {

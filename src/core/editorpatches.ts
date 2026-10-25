@@ -19,6 +19,7 @@ import { installMap16Ext, enableBlocks } from './map16ext.ts';
 import { installBgMap16Ext } from './bgmap16.ts';
 import { installStructPatch } from './structs.ts';
 import { newStyleExits } from './exitgraph.ts';
+import { keepCleanSharedPalettes } from './sharedpal.ts';
 import { LevelEmulator } from './levelemu.ts';
 import { map16Source } from './render.ts';
 import type { ApplyResult } from './patchapply.ts';
@@ -41,6 +42,8 @@ export async function prepareRom(rom: Rom): Promise<boolean> {
 export async function installEditorPatches(rom: Rom): Promise<void> {
   await loadAsar();
   const asar = (r: ApplyResult) => { if (!r.ok) throw new Error(r.errors.join(' ')); };
+  // (what a package's shared palettes change is told by the clean game's)
+  keepCleanSharedPalettes(rom);
   installEditorPatch(rom);
   asar(installVramPatch(rom));
   installExtGfxPatch(rom);

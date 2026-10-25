@@ -1,8 +1,8 @@
 // Uploads detected per file and linked (ADR 0002): each file of an upload belongs to one part, decided
 // from the file alone (folder, then content, then extension), never by which other files are in the
 // upload. This module has the parts that are not a tool project of their own – blocks (named in a GPS
-// list.txt or found by their content) and graphics parts (Map16 tiles, ExGFX, palettes) – and the
-// links between parts:
+// list.txt or found by their content) and graphics parts (Map16 tiles, ExGFX, palettes, shared palettes) –
+// and the links between parts:
 // - detectBlocks / detectGraphics: what an upload holds, without a ROM;
 // - planPackage: where it goes in a ROM – Map16 tiles and ExGFX keep the author's position or number
 //   when free, else the next free ones; which tiles show which block; which slot each ExGFX file is for;
@@ -29,6 +29,8 @@ import { withIncludes } from './pkgmap.ts';
 import { isUberList } from './uberproject.ts';
 import { mwlExAnim } from './mwl.ts';
 import { gfxDataSize } from './patches.ts';
+import { isSharedPalettes, changedColors, setSharedColor, sharedColorNames } from './sharedpal.ts';
+import { listPackages } from './pkgreg.ts';
 
 const dec = new TextDecoder();
 const enc = new TextEncoder();
@@ -90,7 +92,8 @@ export function detectBlocks(files: Map<string, Uint8Array>, gps?: ToolFolder | 
 
 // the graphics parts of an upload, and its Lunar Magic level file (a sample level when the upload has
 // code, else a level import)
-export interface DetectedGraphics { map16: string[]; exgfx: string[]; pal: string[]; palmask: string[]; mwl: string | null }
+// (sharedpal: Lunar Magic's shared palettes, sharedpal.ts)
+export interface DetectedGraphics { map16: string[]; exgfx: string[]; pal: string[]; palmask: string[]; sharedpal: string[]; mwl: string | null }
 
 // `included`: files some .asm file includes (incbin data is code's, not graphics)
 export function detectGraphics(files: Map<string, Uint8Array>, included: Set<string>): DetectedGraphics {
@@ -103,13 +106,14 @@ export function detectGraphics(files: Map<string, Uint8Array>, included: Set<str
   return {
     map16: keys.filter((f) => /\.map16$/i.test(f)),
     exgfx: keys.filter(isGfx),
-    pal: keys.filter((f) => /\.pal$/i.test(f)),
+    pal: keys.filter((f) => /\.pal$/i.test(f) && !isSharedPalettes(files.get(f)!)),
     palmask: keys.filter((f) => /\.palmask$/i.test(f)),
+    sharedpal: keys.filter((f) => /\.pal$/i.test(f) && isSharedPalettes(files.get(f)!)),
     mwl: keys.find((f) => /\.mwl$/i.test(f)) ?? null,
   };
 }
 
-export const graphicsFiles = (g: DetectedGraphics) => [...g.map16, ...g.exgfx, ...g.pal, ...g.palmask];
+export const graphicsFiles = (g: DetectedGraphics) => [...g.map16, ...g.exgfx, ...g.pal, ...g.palmask, ...g.sharedpal];
 
 // files the .asm files of an upload include (incsrc/incbin)
 export function includedFiles(files: Map<string, Uint8Array>): Set<string> {
@@ -134,12 +138,15 @@ export interface PlannedRomMap16 { file: string; data: RomMap16; fg: Map<number,
 // size: the file's size unpacked (gfxDataSize)
 export interface PlannedGfx { file: string; lmNum: number | null; num: number; slot: string | null; size: number }
 
+// the package's shared palettes: the colors differing from the clean game's (index in the block → color)
+export interface PlannedSharedPal { file: string; colors: Map<number, number> }
 export interface PackagePlan {
   blocks: PlannedBlock[];
   map16: PlannedMap16 | null;
   romMap16: PlannedRomMap16 | null; // instead of map16
   gfx: PlannedGfx[];
   palettes: PackPalette[];
+  sharedPal: PlannedSharedPal | null;
   sample: MwlLevel | null; // the sample level, parsed
   exanim: ExSlot[]; // the sample level's ExAnimation slots that write tiles the package's Map16 tiles draw from
   // where its slots take their frames from: Lunar Magic's AN2 file, its alternative file (ExGFX 60-63);
@@ -286,12 +293,24 @@ export function planPackage(rom: Rom, input: PlanInput, blank: number[]): Packag
   });
 
   const palettes = packPalettes(files, graphics.pal, graphics.palmask, notes);
-  return { blocks, map16, romMap16, gfx, palettes, sample, exanim, frames, notes };
+  return { blocks, map16, romMap16, gfx, palettes, sharedPal: planSharedPal(rom, files, graphics.sharedpal, notes), sample, exanim, frames, notes };
 }
 
 // the FG Map16 tiles a plan's .map16 (or whole-ROM .map16) draws
 export const plannedFgTiles = (plan: Pick<PackagePlan, 'map16' | 'romMap16'>): number[] =>
   [...(plan.map16 ? map16Targets(plan.map16.data, plan.map16.at) : []), ...(plan.romMap16?.fg.values() ?? [])];
+
+// the shared palettes (the first file; more are not used): only the colors differing from the clean
+// game's are the package's
+function planSharedPal(rom: Rom, files: Map<string, Uint8Array>, found: string[], notes: string[]): PlannedSharedPal | null {
+  if (!found.length) return null;
+  const file = found[0];
+  for (const f of found.slice(1)) notes.push(`${base(f)}: not used – ${base(file)} has the package's shared palettes`);
+  const colors = changedColors(rom, files.get(file)!);
+  if (!colors) { notes.push(`${base(file)}: the clean game's shared palettes are not known in this ROM – not taken over`); return null; }
+  if (!colors.size) { notes.push(`${base(file)}: the clean game's shared palettes – nothing to take over`); return null; }
+  return { file, colors };
+}
 
 // links changed in the preview: where the .map16 tiles go, which block each of them shows (null: none),
 // the tiles of blocks that are on none of them, the ExGFX numbers and slots
@@ -375,9 +394,21 @@ export function applyBlocks(rom: Rom, upload: Upload, blocks: PlannedBlock[], de
   return { ...r, prints: [...r.prints, `${blocks.length} block(s): ${blocks.map((b) => `${base(b.file)} on ${b.tiles.map((t) => hx(t, 3)).join(', ')}`).join('; ')}`] };
 }
 
-// the Map16 tiles (with their acts like where no block on them gives one) and the ExGFX files
+// the shared palettes' colors, the Map16 tiles (with their acts like where no block on them gives one) and
+// the ExGFX files
 export function applyGraphics(rom: Rom, files: Map<string, Uint8Array>, plan: PackagePlan, blank: number[]): ApplyResult {
   const prints: string[] = [];
+  if (plan.sharedPal) {
+    const { file, colors } = plan.sharedPal;
+    // a color another package changed is a conflict
+    const errors = listPackages(rom).flatMap((p) => {
+      const both = (p.sharedPal ?? []).map(([i]) => i).filter((i) => colors.has(i));
+      return both.length ? [`Conflict with package “${p.name}”: both change the shared palettes' ${sharedColorNames(both).join('; ')}.`] : [];
+    });
+    if (errors.length) return { ok: false, errors, warnings: [], prints };
+    for (const [i, c] of colors) setSharedColor(rom, i, c);
+    prints.push(`${colors.size} shared palette color(s) from ${base(file)}: ${sharedColorNames([...colors.keys()]).join('; ')}`);
+  }
   if (plan.map16) {
     const m = plan.map16;
     const targets = putFgTiles(rom, m.data, m.from, m.at, new Set(plan.blocks.flatMap((b) => b.tiles)));
