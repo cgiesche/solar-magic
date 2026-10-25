@@ -1,5 +1,5 @@
 // The part adapters (see CONTEXT.md: Part): one per part kind – patch, UberASM file, block, sprite, song,
-// graphics part – all with the same shape:
+// sound effect, graphics part – all with the same shape:
 // - claims: what of an upload it would take, file by file: a part's main file, or a file going with one
 //   part (`of`) or with the package (a GPS list.txt, the sample level). Each claim has a rank: by file
 //   type, by folder (a tool folder's list.txt), by content (a block, a sprite and its folder), as code
@@ -17,14 +17,15 @@ import type { Rom } from './rom.ts';
 import type { ApplyResult, PatchSource } from './patchapply.ts';
 import { applyPatch } from './patchapply.ts';
 import type { PartKind } from './parts.ts';
-import { uploadSource, effectiveDefines, packUpload, type Upload } from './patchpkg.ts';
+import { uploadSource, effectiveDefines, packUpload, rewriteDefines, type Upload } from './patchpkg.ts';
 import { suggestCalls, placed, type PkgRules } from './pkgmap.ts';
-import { isSongText, songsFromFiles, loadMusicProject, emptyMusicProject, addSongs, nextFreeSong, folders as musicFolders, saveMusicProject, hasAmk, musicEntry } from './music.ts';
-import { pixiParts, planPixiUpload, applyPixiUpload, linkedDefines, type PixiPlan } from './pixipkg.ts';
+import { isSongText, songsFromFiles, loadMusicProject, emptyMusicProject, addSongs, addSfx, nextFreeSong, folders as musicFolders, saveMusicProject, hasAmk, musicEntry } from './music.ts';
+import { pixiParts, planPixiUpload, applyPixiUpload, linkedDefines, hexNum, type PixiPlan } from './pixipkg.ts';
 import { parseCfg, parseJsonCfg } from './pixi.ts';
 import { detectBlocks, applyBlocks, applyGraphics, routinesCalled, planPackage, plannedFgTiles, type DetectedBlock, type DetectedGraphics, type PackagePlan } from './pkgplan.ts';
 import { loadProject, saveProject, emptyProject, projectFromFiles, addCall, isUberList, type UberProject } from './uberproject.ts';
 import { setLevelMusic } from './patches.ts';
+import { findSfx, sfxNumbers, sfxLinks, isSfxList, sfxName, type FoundSfx, type SfxBank, type SfxLink } from './sfx.ts';
 import { ALL, type UberContext } from './uberasm.ts';
 import type { Claim } from './pkgreg.ts';
 import type { Level } from './level.ts';
@@ -41,6 +42,7 @@ export type PreviewPart =
   | PartBase<'block'> & { found: DetectedBlock[] } // one per tile a GPS list.txt puts it on, else one without a tile
   | PartBase<'sprite'>
   | PartBase<'music'>
+  | PartBase<'sfx'> & { bank: SfxBank; rel: string; author: number | null } // rel: its path below the bank's folder; author: its number in the upload's list
   | PartBase<'graphics'> & { type: GraphicsType };
 export type PartOf<K extends PartKind> = Extract<PreviewPart, { kind: K }>;
 
@@ -98,7 +100,11 @@ export interface InstallContext {
   opt: InstallOptions;
   plan: PackagePlan; // blocks, Map16 tiles, ExGFX and their links
   sprites: PixiPlan | null; // the sprites' numbers and the defines naming them
+  sfx: SfxPlan; // the sound effects' numbers and the defines playing them
 }
+
+// the numbers of an upload's sound effects (-1: none free) and the defines of its code playing them
+export interface SfxPlan { sfx: (FoundSfx & { num: number })[]; links: SfxLink[] }
 
 export interface PartAdapter<K extends PartKind> {
   kind: K;
@@ -336,27 +342,77 @@ const sprite: PartAdapter<'sprite'> = {
   },
 };
 
-// ---------- songs ----------
+// ---------- songs and sound effects ----------
+
+// the songs and sound effects of the package go into the music project together: one AddmusicK run –
+// songs with the next free numbers, the first playing in the current level, sound effects as planned
+async function applyAmk(rom: Rom, { preview, opt, sfx }: InstallContext): Promise<ApplyResult> {
+  if (hasAmk(rom) && !musicEntry(rom)) return { ...ok, ok: false, errors: ['AddmusicK was inserted by another tool – songs and sound effects cannot be added here.'] };
+  const proj = loadMusicProject(rom) ?? emptyMusicProject();
+  const songs = partsOf(preview, 'music').length ? songsFromFiles(preview.fileName, preview.files, musicFolders(proj)) : null;
+  let first: number | null = null;
+  if (songs) {
+    const num = nextFreeSong(proj);
+    if (num < 0) return { ...ok, ok: false, errors: ['All song numbers up to FF are used.'] };
+    first = addSongs(proj, songs, num)[0].num;
+  }
+  const full = sfx.sfx.filter((x) => x.num < 0);
+  if (full.length) return { ...ok, ok: false, errors: full.map((x) => `${x.rel}: all sound effect numbers of ${x.bank} up to FF are used.`) };
+  if (sfx.sfx.length) addSfx(proj, preview.name, sfx.sfx.map((x) => ({ ...x, data: preview.files.get(x.file)! })));
+  const r = await saveMusicProject(rom, proj);
+  const prints = r.log.trim() ? [`AddmusicK output:\n${r.log.trimEnd()}`] : [];
+  if (!r.ok) return { ok: false, errors: r.errors, warnings: r.warnings, prints };
+  if (first !== null && opt.level !== null) setLevelMusic(rom, opt.level, first);
+  const moved = sfx.sfx.filter((x) => x.author !== null && x.author !== x.num).map((x) => `Sound effect ${sfxName(x.rel)}: ${x.bank} ${hexNum(x.num)} instead of the author's ${hexNum(x.author!)}, which is taken${sfx.links.some((l) => sfx.sfx[l.sfx] === x) ? '' : ' – no define of the package\'s code found to set to it'}.`);
+  return { ...ok, prints, warnings: [...r.warnings, ...(songs?.missing ?? []).map((m) => `Missing sample: ${m}`), ...moved] };
+}
 
 const music: PartAdapter<'music'> = {
   kind: 'music',
   claims: (d) => d.paths.filter((p) => /\.txt$/i.test(p) && isSongText(dec.decode(d.files.get(p)!)))
     .map((p) => ({ file: p, rank: RANK.type, part: { kind: 'music', name: base(p).replace(/\.txt$/i, ''), file: p } })),
-  // the next free numbers, the first song playing in the current level
-  async apply(rom, _mine, { preview, opt }) {
-    if (hasAmk(rom) && !musicEntry(rom)) return { ...ok, ok: false, errors: ['AddmusicK was inserted by another tool – songs cannot be added here.'] };
-    const proj = loadMusicProject(rom) ?? emptyMusicProject();
-    const sf = songsFromFiles(preview.fileName, preview.files, musicFolders(proj));
-    const num = nextFreeSong(proj);
-    if (num < 0) return { ...ok, ok: false, errors: ['All song numbers up to FF are used.'] };
-    const added = addSongs(proj, sf, num);
-    const r = await saveMusicProject(rom, proj);
-    const prints = r.log.trim() ? [`AddmusicK output:\n${r.log.trimEnd()}`] : [];
-    if (!r.ok) return { ok: false, errors: r.errors, warnings: r.warnings, prints };
-    if (opt.level !== null) setLevelMusic(rom, opt.level, added[0].num);
-    return { ...ok, prints, warnings: [...r.warnings, ...sf.missing.map((m) => `Missing sample: ${m}`)] };
-  },
+  apply: (rom, _mine, ctx) => applyAmk(rom, ctx),
 };
+
+const sfx: PartAdapter<'sfx'> = {
+  kind: 'sfx',
+  // the .txt files in a folder 1DF9 or 1DFC (AddmusicK's), with the list numbering them
+  claims(d) {
+    const found = findSfx(d.files);
+    if (!found.length) return [];
+    return [
+      ...found.map((s): FileClaim => ({ file: s.file, rank: RANK.type, part: { kind: 'sfx', name: sfxName(s.rel), file: s.file, bank: s.bank, rel: s.rel, author: s.author } })),
+      ...d.paths.filter(isSfxList).map((file) => ({ file, rank: RANK.type })),
+    ];
+  },
+  // (with songs: inserted with them)
+  apply: (rom, _mine, ctx) => (partsOf(ctx.preview, 'music').length ? ok : applyAmk(rom, ctx)),
+};
+
+// numbers for the package's sound effects in this ROM and the defines of its code playing them
+export function planSfx(rom: Rom, preview: ReadyPreview): SfxPlan {
+  const found = partsOf(preview, 'sfx').map(({ file, bank, rel, author }) => ({ file, bank, rel, author }));
+  if (!found.length) return { sfx: [], links: [] };
+  let proj = null;
+  try { proj = loadMusicProject(rom); } catch { /* its sources are missing: inserting says so */ }
+  const nums = sfxNumbers(proj?.sfx ?? [], found);
+  return { sfx: found.map((f, i) => ({ ...f, num: nums[i] })), links: sfxLinks(preview.files, found) };
+}
+
+// the files of the package whose defines play one of its sound effects under another number than the
+// author's, with them set to its number (null: none)
+export function sfxLinkedFiles(preview: ReadyPreview, plan: SfxPlan): Map<string, Uint8Array> | null {
+  const byFile = new Map<string, Record<string, string>>();
+  for (const l of plan.links) {
+    const s = plan.sfx[l.sfx];
+    if (s.num < 0 || s.num === s.author) continue;
+    byFile.set(l.file, { ...byFile.get(l.file), [l.define]: hexNum(s.num) });
+  }
+  if (!byFile.size) return null;
+  const files = new Map(preview.files);
+  for (const [f, defs] of byFile) files.set(f, new TextEncoder().encode(rewriteDefines(dec.decode(files.get(f)!), defs).text));
+  return files;
+}
 
 // ---------- graphics ----------
 
@@ -375,16 +431,17 @@ const graphics: PartAdapter<'graphics'> = {
 
 // ---------- all of them ----------
 
-export const PART_ADAPTERS: { [K in PartKind]: PartAdapter<K> } = { patch, uberasm, block, sprite, music, graphics };
+export const PART_ADAPTERS: { [K in PartKind]: PartAdapter<K> } = { patch, uberasm, block, sprite, music, sfx, graphics };
 // an adapter by its kind, for loops over all kinds
 export const partAdapter = (k: PartKind) => PART_ADAPTERS[k] as PartAdapter<PartKind>;
 // who wins a file at equal rank
-export const DETECT_ORDER: PartKind[] = ['graphics', 'music', 'uberasm', 'block', 'sprite', 'patch'];
+export const DETECT_ORDER: PartKind[] = ['graphics', 'sfx', 'music', 'uberasm', 'block', 'sprite', 'patch'];
 // the order of applying: the patch first, the sprites' numbers before the blocks spawning them, the
-// Map16 tiles after the blocks on them
-export const INSTALL_ORDER: PartKind[] = ['patch', 'music', 'uberasm', 'sprite', 'block', 'graphics'];
+// Map16 tiles after the blocks on them; AddmusicK after the UberASM code (as Callisto has it: it fits its
+// NMI changes to a hijack of UberASM's that is there)
+export const INSTALL_ORDER: PartKind[] = ['patch', 'uberasm', 'sprite', 'block', 'music', 'sfx', 'graphics'];
 // the order of the preview's list
-export const PART_ORDER: PartKind[] = ['patch', 'uberasm', 'block', 'sprite', 'music', 'graphics'];
+export const PART_ORDER: PartKind[] = ['patch', 'uberasm', 'block', 'sprite', 'music', 'sfx', 'graphics'];
 
 // the graphics parts and the sample levels of a preview, as pkgplan.ts takes them
 function previewGraphics(p: ReadyPreview): DetectedGraphics {
@@ -406,6 +463,7 @@ export function planInstall(rom: Rom, preview: ReadyPreview, opt: InstallOptions
     preview, opt,
     plan: opt.plan ?? planUpload(rom, preview, opt.blank),
     sprites: sprites.length && preview.upload ? planPixiUpload(rom, preview.upload, (f) => sprites.includes(f)) : null,
+    sfx: planSfx(rom, preview),
   };
 }
 

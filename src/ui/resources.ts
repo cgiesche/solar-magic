@@ -121,7 +121,7 @@ export async function openResources(app: App, tab: ResourceTab = 'packages', opt
   clear(body).append(
     h('div', { class: 'row res-top' },
       h('button', { class: 'primary', onclick: () => void pickAndUpload() }, 'Upload package …'),
-      h('span', { class: 'hint' }, 'or drop a file here: .asm, .zip (e.g. from SMWCentral, or a whole UberASM Tool, GPS or PIXI folder) or an AddmusicK song – everything it contains is installed as one package.')),
+      h('span', { class: 'hint' }, 'or drop a file here: .asm, .zip (e.g. from SMWCentral, or a whole UberASM Tool, GPS or PIXI folder), an AddmusicK song or sound effects (in folders 1DF9/1DFC) – everything it contains is installed as one package.')),
     tabBar,
     content,
   );

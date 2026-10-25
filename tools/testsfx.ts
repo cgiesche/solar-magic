@@ -8,6 +8,11 @@ import { LevelEmulator } from '../src/core/levelemu.ts';
 import { Apu, loadApu } from '../src/core/apu.ts';
 import { findSfx, sfxNumbers, sfxLinks, parseSfxList } from '../src/core/sfx.ts';
 import { emptyMusicProject, addSfx, removeSfx, sfxKey, saveMusicProject, loadMusicProject, hasAmk, musicEntry } from '../src/core/music.ts';
+import { loadAsar } from '../src/core/asar.ts';
+import { loadProject } from '../src/core/uberproject.ts';
+import { inspectUpload, installPackage, removePackage, type ReadyPreview } from '../src/core/packages.ts';
+import { listPackages } from '../src/core/pkgreg.ts';
+import { zipSync } from 'fflate';
 import { editorImage, romDiff } from './fixture.ts';
 
 let fails = 0;
@@ -84,6 +89,48 @@ const r2 = await saveMusicProject(rom, p);
 // (but the size it grew to and the checksum)
 const diff = romDiff(vanilla.data, rom.data.subarray(0, vanilla.data.length), (i) => i === 0x7fd7 || (i >= 0x7fdc && i < 0x7fe0));
 check(r2.ok && !hasAmk(rom) && diff === 0, `removed: AddmusicK out again, the ROM as before (${r2.errors.join(' ')}${diff} bytes differ)`);
+
+// ---------- in packages ----------
+
+// a package playing its sound effect from UberASM code (when $7FB800 is set), the author's 38 taken by
+// another package: it gets 39 and the define of the code is set to it
+{
+  await loadAsar();
+  const rp = new Rom(vanilla.data.slice());
+  const opt = { level: 0x105, blank: [0, 0, 0, 0], tileWords: () => [0, 0, 0, 0], setup: false };
+  const z = (o: Record<string, string>) => zipSync(Object.fromEntries(Object.entries(o).map(([k, v]) => [k, enc.encode(v)])));
+  const first = await installPackage(rp, inspectUpload('Other.zip', z({ '1DFC/Other.txt': PRELUDE })) as ReadyPreview, opt);
+  check(first.ok && loadMusicProject(rp)?.sfx[0]?.num === 0x38, `a package without a list: the lowest free number, 38 (${first.errors.join(' ')})`);
+  const preview = inspectUpload('Retry.zip', z({
+    '1DFC/Death Prelude.txt': PRELUDE,
+    'Addmusic_sound effects.txt': 'SFX1DF9:\n\nSFX1DFC:\n38  Death Prelude.txt\n',
+    'gamemode/play.asm': '!death_sfx = $38\n!death_sfx_addr = $1DFC\nmain:\n  LDA $7FB800 : BEQ +\n  LDA #$00 : STA $7FB800\n  LDA #!death_sfx : STA !death_sfx_addr\n+ RTL\n',
+  })) as ReadyPreview;
+  check(preview.status === 'ready' && preview.parts.map((x) => `${x.kind}:${x.name}`).join() === 'uberasm:play.asm,sfx:Death Prelude' && !preview.unclaimed.length,
+    `the upload: UberASM code and the sound effect, its list going with it (${preview.status === 'ready' ? preview.parts.map((x) => x.kind).join() + ' / ' + preview.unclaimed.join() : preview.status})`);
+  const r = await installPackage(rp, preview, opt);
+  const mine = loadMusicProject(rp)?.sfx.find((x) => x.name === 'Death Prelude');
+  const code = new TextDecoder().decode(loadProject(rp)?.files.get('gamemode/play.asm'));
+  check(r.ok && mine?.num === 0x39 && code.includes('!death_sfx = $39') && r.warnings.some((w) => w.includes('39 instead of the author\'s $38')),
+    `the author's 38 taken: 39, the code's define set to it (${r.errors.join(' ')}${r.warnings.join(' ')})`);
+  check(listPackages(rp).find((x) => x.id === r.pkg?.id)?.sfx?.join() === '1DFC/Retry/Death Prelude.txt', 'recorded with the package');
+  // the code plays it: 39 sent to $1DFC's port
+  const emu = new LevelEmulator(rp);
+  const apu = emu.snes.apu = new Apu();
+  const write = apu.write.bind(apu);
+  const sent: number[] = [];
+  apu.write = (t, port, v) => { if (port === 3 && v) sent.push(v); write(t, port, v); };
+  emu.boot();
+  emu.load(0x105);
+  for (let f = 0; f < 30; f++) emu.snes.runFrame();
+  sent.length = 0;
+  emu.snes.wram[0x1b800] = 1;
+  let pk = 0;
+  for (let f = 0; f < 30; f++) { emu.snes.runFrame(); pk = Math.max(pk, peak(emu.snes.audio!)); }
+  check(sent.includes(0x39) && pk > 1000, `the code plays it: ${[...new Set(sent)].map((v) => v.toString(16)).join()} sent to $1DFC (peak ${pk})`);
+  await removePackage(rp, r.pkg!.id, opt.blank);
+  check(loadMusicProject(rp)?.sfx.map((x) => x.name).join() === 'Other', 'removing the package takes its sound effect, the other package\'s stays');
+}
 
 console.log(fails ? `${fails} failed` : 'all ok');
 process.exit(fails ? 1 : 0);

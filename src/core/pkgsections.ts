@@ -1,10 +1,10 @@
 // The sections of a package record (pkgreg.ts), one adapter each: patches, UberASM, blocks, sprites,
-// ExGFX files, songs, FG and BG Map16 tiles, shared palette colors, global animation slots – the fields of PackageParts, as stored in the ROM (the tool
+// ExGFX files, songs, sound effects, FG and BG Map16 tiles, shared palette colors, global animation slots – the fields of PackageParts, as stored in the ROM (the tool
 // projects under their part kind: uberasm, block, sprite). An adapter knows what of the ROM its section
 // observes (read), what came in between two reads (added), how that goes into a record (merge), when
 // there is nothing (empty), how to take it out of the ROM again (remove) and how to say so (summary,
 // removal). pkgreg.ts loops over them instead of naming each section; the order of SECTIONS is the
-// order of removing (songs first: AddmusicK runs again; patches applied later first). The part adapters
+// order of removing (songs and sound effects first: AddmusicK runs again; patches applied later first). The part adapters
 // of installing are in pkgparts.ts.
 
 import type { Rom } from './rom.ts';
@@ -16,7 +16,7 @@ import { loadPixiProject, savePixiProject, type PixiProject } from './pixi.ts';
 import { hex } from './names.ts';
 import { removeGfx } from './gfxfiles.ts';
 import { gfxEntry, gfxHex, GFX_FILES, VANILLA_GFX, levelMusic, setLevelMusic } from './patches.ts';
-import { loadMusicProject, saveMusicProject, removeSong } from './music.ts';
+import { loadMusicProject, saveMusicProject, removeSong, removeSfx, sfxKey } from './music.ts';
 import { EXT_FIRST, EXT_TILES, DEFAULT_ACTS, extTileWords, actsLike, setExtTileWords, setActsLike } from './map16ext.ts';
 import { BG_EXT_FIRST, BG_EXT_TILES, bgExtTileWords, setBgExtTileWords, vanillaBgWords } from './bgmap16.ts';
 import type { UberContext } from './uberasm.ts';
@@ -243,6 +243,16 @@ const music = listSection((rom) => (tryLoad(() => loadMusicProject(rom))?.songs 
   return r.warnings;
 }, (p) => count(p.length, 'Song', 'songs'), (p) => (!p.length ? null : `${p.length > 1 ? 'songs' : 'the song'} (AddmusicK inserts the music again)`));
 
+// sound effects it added to the music project ("<bank>/<file>"; AddmusicK inserts the rest again)
+const sfx = listSection((rom) => (tryLoad(() => loadMusicProject(rom))?.sfx ?? []).map(sfxKey), async (rom, mine) => {
+  const p = loadMusicProject(rom);
+  if (!p) return [];
+  for (const k of mine) removeSfx(p, k);
+  const r = await saveMusicProject(rom, p);
+  if (!r.ok) throw new Error(`Sound effects: ${r.errors.join(' ')}`);
+  return r.warnings;
+}, (p) => count(p.length, 'Sound effect', 'sound effects'), (p) => (!p.length ? null : `${p.length > 1 ? 'sound effects' : 'the sound effect'} (AddmusicK inserts the music again)`));
+
 // emptied again, unless another package filled them too
 const map16 = tileSection('FG Map16', (rom) => Array.from({ length: EXT_TILES - EXT_FIRST }, (_, i) => `${extTileWords(rom, EXT_FIRST + i)!.join()}:${actsLike(rom, EXT_FIRST + i)}`), EXT_FIRST,
   (rom, mine, others, blank) => {
@@ -311,6 +321,6 @@ const globalAnim: PartSection<{ slots: string[]; sizes: number[] }, GlobalAnimPa
 
 // every field of PackageParts has its adapter (the compiler checks it)
 type Sections = { [K in keyof PackageParts]-?: PartSection<any, NonNullable<PackageParts[K]>> };
-export const SECTIONS = { music, sprite, block, uberasm, patches, map16, bgMap16, gfx, sharedPal, globalAnim } satisfies Sections;
+export const SECTIONS = { music, sfx, sprite, block, uberasm, patches, map16, bgMap16, gfx, sharedPal, globalAnim } satisfies Sections;
 export type SectionKey = keyof typeof SECTIONS;
 export const SECTION_KEYS = Object.keys(SECTIONS) as SectionKey[];

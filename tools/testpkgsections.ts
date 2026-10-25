@@ -20,6 +20,7 @@ import { inspectUpload, installPackage, type InstallOptions, type ReadyPreview }
 import { setSharedColor } from '../src/core/sharedpal.ts';
 import { placeGlobalSlots } from '../src/core/levelgfx.ts';
 import { testSongZip } from './testsong.ts';
+import { zipSync } from 'fflate';
 import { editorImage, romDiff } from './fixture.ts';
 
 const EDITOR_IMAGE = await editorImage(); // the fixture as the editor opens it
@@ -65,6 +66,7 @@ const samples: Record<SectionKey, () => Promise<Package | null> | Package | null
   sprite: () => install('BrutalBill.zip', fixture('BrutalBill.zip')),
   gfx: () => record('gfx', () => { importGfxFile(rom, 0x90, new Uint8Array(0x1000).fill(0x33)); return { ok: true }; }),
   music: () => install('Song.zip', testSongZip()),
+  sfx: () => install('Sfx.zip', zipSync({ '1DFC/Death Prelude.txt': enc.encode('$DA $02 $04 $30 $B4 $B2 $B4') })),
   map16: () => record('map16', () => { setExtTileWords(rom, EXT_FIRST + 0x40, [1, 2, 3, 4]); return { ok: true }; }),
   bgMap16: () => record('bgMap16', () => { setBgExtTileWords(rom, BG_EXT_FIRST + 0x40, [5, 6, 7, 8]); return { ok: true }; }),
   sharedPal: () => record('sharedPal', () => { setSharedColor(rom, 0x10, 0x1234); return { ok: true }; }),

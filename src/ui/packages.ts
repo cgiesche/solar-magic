@@ -10,7 +10,7 @@ import { listPatches, type PatchEntry } from '../core/patchreg.ts';
 import { listPackages, packageSummary, packageRemoval, type Package } from '../core/pkgreg.ts';
 import { SECTIONS } from '../core/pkgsections.ts';
 import { removePackage, packageFiles } from '../core/packages.ts';
-import { loadMusicProject, songHex } from '../core/music.ts';
+import { loadMusicProject, songHex, sfxKey } from '../core/music.ts';
 import { playButton, playSong, currentSongs } from './musicdialog.ts';
 import { isGfxData } from '../core/gfxfiles.ts';
 import { hex } from '../core/names.ts';
@@ -97,7 +97,7 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
     const it = items.find((i) => i.key === sel);
     const n = ++seq;
     if (!it) {
-      clear(detail).append(h('p', { class: 'hint' }, '“Upload package …” above takes an upload (.asm or .zip, e.g. from SMWCentral) or an AddmusicK song. What it brings – patches, UberASM code, blocks, sprites, songs, graphics – is installed as one package and shows up here with all its parts.'));
+      clear(detail).append(h('p', { class: 'hint' }, '“Upload package …” above takes an upload (.asm or .zip, e.g. from SMWCentral) or an AddmusicK song. What it brings – patches, UberASM code, blocks, sprites, songs, sound effects, graphics – is installed as one package and shows up here with all its parts.'));
       return;
     }
     const rec = it.rec;
@@ -239,6 +239,17 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
           h('td', null, playButton(`song:${x.num}`, () => playSong(app, x))), h('td', { class: 'mono' }, songHex(x.num)), h('td', null, x.name), h('td', { class: 'mono hint' }, x.file ?? ''))))
           : h('p', { class: 'hint' }, 'The music project is not in the ROM any more.'),
         h('p', { class: 'hint' }, 'To use: level header → Music, or “Level” in the Music tab.')));
+    }
+    // sound effects it added to the music project
+    if (rec.sfx?.length) {
+      let proj = null;
+      try { proj = loadMusicProject(app.rom); } catch { /* shown in the Music tab */ }
+      const sfx = proj?.sfx.filter((x) => rec.sfx!.includes(sfxKey(x))) ?? [];
+      out.push(h('section', { class: 'pkg-sec' }, h('h3', null, 'Sound effects'),
+        proj ? h('table', { class: 'uber-table' }, sfx.map((x) => h('tr', null,
+          h('td', { class: 'mono' }, `$${x.bank}`), h('td', { class: 'mono' }, songHex(x.num)), h('td', null, x.name), h('td', { class: 'mono hint' }, x.file))))
+          : h('p', { class: 'hint' }, 'The music project is not in the ROM any more.'),
+        h('p', { class: 'hint' }, 'Played by writing the number to the address – the package’s code does.')));
     }
     return out;
   }

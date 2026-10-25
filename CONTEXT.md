@@ -150,19 +150,23 @@ A known third-party patch whose work an editor patch already does (e.g. a faster
 _Avoid_: redundant patch, built-in patch (that is an editor patch)
 
 **Part**:
-One typed piece of a package: a patch, an UberASM file, a block, a sprite, a song or a graphics part. A package's kind is simply the set of its parts. Which part a file belongs to is decided per file (folder, then content, then extension), never by which other files are in the upload.
+One typed piece of a package: a patch, an UberASM file, a block, a sprite, a song, a sound effect or a graphics part. A package's kind is simply the set of its parts. Which part a file belongs to is decided per file (folder, then content, then extension), never by which other files are in the upload.
 _Avoid_: Component, Item
 
 **Graphics part**:
 A part without code: Map16 tiles (.map16), an ExGFX file, a palette (.pal with its .palmask), the shared palettes' colors it changes (Lunar Magic's shared_palettes.pal: only those differing from the clean game's, which the editor keeps a copy of when it opens it; set back when the package is removed; two packages changing one color are a conflict), a global GFX file it edits (GFX00–33, only those differing from the clean game's; set back when the package is removed) or global animation slots (Lunar Magic's global ExAnimation as Callisto exports it, a BPS from the clean game to a whole Lunar Magic ROM, its list read from that ROM – the bytes the BPS takes from the clean game where this ROM still has them, told by the fingerprint of the clean game the editor keeps when it opens it; put in free slots of the global list, their frames in its Anim graphic; removed with the package, their frames too while no list reads them). Map16 tiles and ExGFX keep the author's tile or number (up to FFF) if it is free, else they take the next free one of the file's range (see ExGFX range). From an export of all Map16 (Lunar Magic's whole-ROM .map16) only the FG and BG tiles differing from the clean game are the package's, each page kept together; a tile acting like a block's tile shows that block. Its tileset pages 00–01 are the game's: differences are reported, not taken over.
 _Avoid_: Resource, asset
 
+**Sound effect**:
+A custom AddmusicK sound effect a package brings: a text file in a folder 1DF9 or 1DFC (its bank, the address code writes its number to to play it), numbered by the package's `Addmusic_sound effects.txt`. It keeps the author's number if it is free (not one of AddmusicK's own, not another package's), else takes the lowest free one of its bank; code of the package playing it by a define then gets that number (see Link). Kept in the music project, inserted by AddmusicK with the songs; removed with the package.
+_Avoid_: SFX (in the UI), sample (that is a song's sound)
+
 **ExGFX range**:
 The part of the ExGFX numbers (000–FFF, Lunar Magic's) a file belongs in: ExGFX 80–DFF (then 32–7F) for graphics, E00–FFF for files kept "as is" – layer 3 graphics (2bpp), layer 3 tilemaps – which are never 3bpp. A file's range follows from the slot it is for (layer 3's: "as is") and its data (2bpp graphics and tilemaps "as is"; 3bpp graphics always ExGFX). FF is no file's number: it is a graphics slot's "none".
 _Avoid_: Super ExGFX, extended range
 
 **Link**:
-A connection between two parts of one package that the editor works out: a block on the Map16 tiles that show it, a sprite's number in the define of a block that spawns it, an ExGFX file in the graphics slot its tiles are drawn from.
+A connection between two parts of one package that the editor works out: a block on the Map16 tiles that show it, a sprite's number in the define of a block that spawns it, a sound effect's number in the define of code that plays it (one whose comment names it, or one named like a sound effect set to the author's number – of the bank a define next to it names), an ExGFX file in the graphics slot its tiles are drawn from.
 _Avoid_: Dependency, binding
 
 **Level import**:

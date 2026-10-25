@@ -63,9 +63,9 @@ export function uploadFiles(fileName: string, data: Uint8Array): Map<string, Uin
       if (files.size >= MAX_FILES || total > MAX_TOTAL) throw new Error('The archive is too large');
       files.set(path.replace(/\\/g, '/'), content);
     }
-    // strip one common top-level folder
+    // strip one common top-level folder (not a bank of AddmusicK's sound effects: it says what they are)
     const tops = new Set([...files.keys()].map((p) => (p.includes('/') ? p.split('/')[0] : '')));
-    if (tops.size === 1 && !tops.has('')) {
+    if (tops.size === 1 && !tops.has('') && !/^1DF[9C]$/i.test([...tops][0])) {
       const cut = [...tops][0].length + 1;
       files = new Map([...files].map(([p, c]) => [p.slice(cut), c]));
     }

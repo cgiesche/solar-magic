@@ -31,7 +31,7 @@ import { recordPackageChange, recordPackageChangeAsync, listPackages, packageArc
 import { allOrNothing } from './romedit.ts';
 import { callistoProject, includesCallistoHeader, sharedCode, type CallistoProject } from './callisto.ts';
 import { replacedPatch, replacedNote } from './replaced.ts';
-import { partAdapter, DETECT_ORDER, PART_ORDER, SHARED_CODE, planInstall, planUpload, applyParts, applyAssignment, patchSource, partsOf,
+import { partAdapter, DETECT_ORDER, PART_ORDER, SHARED_CODE, planInstall, planUpload, applyParts, applyAssignment, patchSource, partsOf, sfxLinkedFiles,
   type PreviewPart, type PreviewBase, type ReadyPreview, type Detection, type FileClaim, type InstallOptions, type InstallContext, type ManualAssignment } from './pkgparts.ts';
 
 export type { PreviewPart, ReadyPreview, InstallOptions, ManualAssignment };
@@ -52,7 +52,7 @@ const nameOf = (fileName: string) => fileName.replace(/\.[^.]*$/, '').split(/[\\
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : one.endsWith('h') ? 'es' : 's'}`;
 
 // "2 sprites, 1 UberASM file, 1 song"
-const COUNT_NOUN: Record<PartKind, string> = { patch: 'patch', uberasm: 'UberASM file', block: 'block', sprite: 'sprite', music: 'song', graphics: 'graphics file' };
+const COUNT_NOUN: Record<PartKind, string> = { patch: 'patch', uberasm: 'UberASM file', block: 'block', sprite: 'sprite', music: 'song', sfx: 'sound effect', graphics: 'graphics file' };
 export function partsSummary(parts: PreviewPart[]): string {
   const n = new Map<PartKind, number>();
   for (const p of parts) n.set(p.kind, (n.get(p.kind) ?? 0) + 1);
@@ -282,7 +282,14 @@ export async function installPackage(rom: Rom, preview: ReadyPreview | ManualPre
       warnings.push(...rec.result.warnings);
       prints.push(...rec.result.prints);
     } else {
-      const ctx = planInstall(rom, preview, opt);
+      let ctx = planInstall(rom, preview, opt);
+      // code playing a sound effect of the package that gets another number than the author's: its
+      // define set to that number (the package's parts read anew from those files)
+      const linked = sfxLinkedFiles(preview, ctx.sfx);
+      if (linked) {
+        const again = inspectFiles(preview.fileName, linked);
+        if (again.status === 'ready') ctx = { ...planInstall(rom, again, opt), sfx: ctx.sfx };
+      }
       rec = await recordPackageChangeAsync(rom, target, async (claim) => {
         const r = await applyParts(rom, ctx, claim);
         warnings.push(...r.warnings);

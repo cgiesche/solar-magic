@@ -36,6 +36,7 @@ export function openUploadPreview(app: App, p: ReadyPreview | ManualPreview, don
     has('uberasm') ? `UberASM code runs in level ${lvl}` : '',
     has('music') ? `songs get the next free numbers and play in level ${lvl}` : '',
     has('sprite') ? 'sprites get the next free numbers' : '',
+    has('sfx') ? 'sound effects keep the author’s numbers where free, else get the next free ones (the package’s code playing them follows)' : '',
   ].filter(Boolean);
   const body = h('div', { class: 'patch-apply' },
     h('p', null, `Found: ${partsSummary(p.parts)}.`),
@@ -54,7 +55,7 @@ export function openUploadPreview(app: App, p: ReadyPreview | ManualPreview, don
     patch ? [h('h3', null, 'Patch settings'), settingsBox] : '',
     log,
   );
-  installDialog(app, p, body, log, has('music'), () => ({ patch: patch ? { main, values: form!.read() } : undefined, ...place?.read() }), done);
+  installDialog(app, p, body, log, has('music') || has('sfx'), () => ({ patch: patch ? { main, values: form!.read() } : undefined, ...place?.read() }), done);
 }
 
 // a package to assign by hand: the assignment, prefilled with the suggestion

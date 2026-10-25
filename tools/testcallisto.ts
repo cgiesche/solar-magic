@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 import { unzipSync, zipSync } from 'fflate';
 import { Rom } from '../src/core/rom.ts';
 import { loadAsar } from '../src/core/asar.ts';
-import { loadApu } from '../src/core/apu.ts';
+import { Apu, loadApu } from '../src/core/apu.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { map16Source } from '../src/core/render.ts';
 import { installEditorPatch } from '../src/core/patches.ts';
@@ -20,6 +20,7 @@ import { listPatches } from '../src/core/patchreg.ts';
 import { loadProject } from '../src/core/uberproject.ts';
 import { loadBlockProject } from '../src/core/blocks.ts';
 import { listPackages } from '../src/core/pkgreg.ts';
+import { loadMusicProject, hasAmk } from '../src/core/music.ts';
 import { editorImage, romDiff } from './fixture.ts';
 
 await loadAsar();
@@ -110,6 +111,43 @@ const order = (files: Record<string, Uint8Array>) => [...dec.decode(files['tools
   emu.load(0x105);
   const on = emu.animationFrames(4, 8).at(-1)!.vram.subarray(0x2f0 * 32, 0x300 * 32);
   check(on.every((b, i) => b === files['workspace/ExGraphics/ExGFX61.bin'][0xc00 + i]), 'its global animation runs: the ON/OFF blocks\' tiles show the ON frame');
+  // its sound effect: Death Prelude of the Retry System, 1DFC 38 as its list says
+  const sfx = loadMusicProject(rom)?.sfx ?? [];
+  check(pkg[0].sfx?.length === 1 && sfx.length === 1 && sfx[0].bank === '1DFC' && sfx[0].num === 0x38 && sfx[0].name === 'Death Prelude',
+    `its sound effect: Death Prelude at 1DFC 38 (${sfx.map((x) => `${x.bank} ${x.num.toString(16)} ${x.name}`).join(', ')})`);
+  // dying in a level with Retry's prompt (as its object B1 sets it): the game sends 38 to $1DFC's port as
+  // Mario dies and the prompt opens, and the sound effects' voice sounds – much louder than without it
+  // (the run again with that write held back; the song's voices muted, which share that voice too)
+  const dying = (send: boolean) => {
+    const e = new LevelEmulator(rom);
+    const apu = e.snes.apu = new Apu();
+    const write = apu.write.bind(apu);
+    let sent = -1, f = -1;
+    apu.write = (t, port, v) => { if (port === 3 && v === 0x38 && f >= 0) { if (sent < 0) sent = f; if (!send) v = 0; } write(t, port, v); };
+    e.boot();
+    e.load(0x105);
+    const sn = e.snes;
+    let w = 0; while (sn.wram[0x100] !== 0x14 && w++ < 200) sn.runFrame();
+    sn.wram[0x1b411] = 0x02; // !retry_ram_prompt_override ($7FB411): prompt, the death SFX instead of the song
+    for (let i = 0; i < 30; i++) sn.runFrame();
+    apu.mute(0x7f);
+    sn.wram[0x96] = 0xf0; sn.wram[0x97] = 0x01; // into the pit
+    let dead = -1, prompt = -1, peak = 0;
+    for (f = 0; f < 12; f++) {
+      sn.runFrame();
+      if (dead < 0 && sn.wram[0x71] === 0x09) dead = f;
+      if (prompt < 0 && sn.wram[0x1b40c]) prompt = f; // !retry_ram_prompt_phase
+      peak = Math.max(peak, ...sn.audio!.map(Math.abs));
+    }
+    return { dead, sent, prompt, peak, song: sn.wram[0x1dfb] };
+  };
+  {
+    const d = dying(true), held = dying(false);
+    check(d.dead === 0 && d.sent === d.dead && d.prompt === d.dead && d.peak > 2 * held.peak && d.peak > 2000,
+      `Mario dies (frame ${d.dead}), the prompt opens (frame ${d.prompt}), Death Prelude plays: 38 sent to $1DFC (frame ${d.sent}), its voice at ${d.peak} (${held.peak} without)`);
+  }
+  const removed = await removePackage(rom, pkg[0].id, opt.blank);
+  check(!hasAmk(rom), `removed with the package: its sound effect, AddmusicK with it ${removed.join(' ')}`);
 }
 
 // ---------- a made-up project: the header in a patch, UberASM code and a block ----------
