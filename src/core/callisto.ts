@@ -18,10 +18,12 @@ export interface CallistoProject {
   patches: string[]; // patches.toml in its order (upload paths)
   missing: string[]; // listed patches the upload lacks
   header: string | null; // the project's callisto_header (upload path)
-  tools: Record<CallistoTool, { folder: string; list: string | null } | null>; // tool folder, its list file
+  tools: Record<CallistoTool, ToolFolder | null>;
   left: { file: string; what: string }[]; // files of the project that are not part of the package
 }
 export type CallistoTool = 'uberasm' | 'gps' | 'pixi';
+// a tool's folder in the upload and its list file
+export interface ToolFolder { folder: string; list: string | null }
 
 // the version followed when the project doesn't name one
 const FOLLOWED: [number, number, number] = [0, 6, 2];
@@ -101,6 +103,7 @@ export function parseToml(text: string, into = new Map<string, Value>()): Map<st
       const arrayTable = text[i + 1] === '[';
       i += arrayTable ? 2 : 1;
       table = key();
+      if (!text.startsWith(arrayTable ? ']]' : ']', i)) throw new Error(`TOML: “]” expected after [${table}`);
       i += arrayTable ? 2 : 1;
       continue;
     }

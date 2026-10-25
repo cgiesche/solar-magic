@@ -129,6 +129,9 @@ const mini: Record<string, string> = {
   const p = ready(inspectUpload('mini.zip', zip(mini)));
   check(p.parts.filter((x) => x.kind === 'patch').map((x) => x.file).join() === 'asm/second.asm,asm/first.asm', 'patches in patches.toml\'s order, not by name');
   check(p.notes.length === 1 && p.notes[0].includes('sa1.bps'), 'the initial patch left out: ' + p.notes.join(' '));
+  check(p.callisto!.version.join('.') === '0.6.2', 'no version pinned: the one followed, 0.6.2');
+  const pinned = ready(inspectUpload('pinned.zip', zip({ ...mini, 'setup/tools.json': '{"url": "https://github.com/Underrout/callisto/releases/download/v0.7.1/callisto-v0.7.1.zip"}' })));
+  check(callistoAsm(pinned.callisto!).includes('!CALLISTO_VERSION = "0.7.1"'), 'the version the setup downloads: 0.7.1');
   const { rom, opt } = await target();
   const vanilla = rom.data.slice();
   const r = await installPackage(rom, p, opt);

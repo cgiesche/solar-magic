@@ -10,6 +10,7 @@
 // Graphics go where the level graphics placement (levelgfx.ts) says, as in a level import. The defines
 // naming a sprite of the package are linked by pixipkg.ts.
 
+import type { ToolFolder } from './callisto.ts';
 import type { Rom } from './rom.ts';
 import type { Upload } from './patchpkg.ts';
 import type { ApplyResult } from './patchapply.ts';
@@ -50,7 +51,7 @@ export function actsComment(text: string): number | undefined {
   return m ? parseInt(m[1], 16) : undefined;
 }
 
-const GPS_LINE = /^[0-9a-f]{3,4}(:[0-9a-f]{3,4})?\s+\S+\.asm/im;
+const GPS_LINE = /^[0-9a-f]{3,4}(-[0-9a-f]{3,4})?(:[0-9a-f]{3,4})?\s+\S+\.asm/im;
 // (not an UberASM Tool list, whose level lines look alike)
 export const isGpsListText = (text: string) => GPS_LINE.test(text) && !isUberList(text);
 export const isGpsList = (path: string, text: string) => /(^|\/)list\.txt$/i.test(path) && isGpsListText(text);
@@ -60,7 +61,7 @@ export interface DetectedBlock { file: string; tile?: number; acts?: number }
 
 // the blocks of an upload: those a GPS list.txt names, then every other file that is a block by its
 // content; gps: the GPS folder and its list when the upload says where they are (a Callisto project)
-export function detectBlocks(files: Map<string, Uint8Array>, gps?: { folder: string; list: string | null } | null): { blocks: DetectedBlock[]; list: string | null; missing: string[] } {
+export function detectBlocks(files: Map<string, Uint8Array>, gps?: ToolFolder | null): { blocks: DetectedBlock[]; list: string | null; missing: string[] } {
   const blocks: DetectedBlock[] = [];
   const missing: string[] = [];
   const list = gps ? gps.list : [...files.keys()].find((p) => isGpsList(p, dec.decode(files.get(p)!))) ?? null;

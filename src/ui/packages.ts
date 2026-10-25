@@ -135,7 +135,7 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
       h('p', { class: 'hint' }, `${bytes} bytes changed · ${own < 1024 ? `${own} bytes` : `${(own / 1024).toFixed(1)} KB`} code/data`));
     const s = await storedUpload(app, p).catch(() => undefined);
     if (n !== seq) return box;
-    if (!s && !p.srcId) { box.appendChild(h('p', { class: 'hint' }, 'Applied as its package’s files have it (a patch of a Callisto project) – no settings of its own.')); return box; }
+    if (!s && !p.srcId) { box.appendChild(h('p', { class: 'hint' }, 'Its sources are not kept with it but with its package (e.g. a patch of a Callisto project, applied as the project’s files have it) – no settings to change.')); return box; }
     if (!s) { box.appendChild(h('p', { class: 'hint' }, 'The source files are not in this ROM (exported without the editor data) – settings cannot be changed. Open the project file (.smwproj) to change them.')); return box; }
     const upload = toUpload(s);
     const m = upload.manifest;
