@@ -20,7 +20,7 @@ import type { PartKind } from './parts.ts';
 import { uploadSource, effectiveDefines, packUpload, rewriteDefines, type Upload } from './patchpkg.ts';
 import { suggestCalls, placed, type PkgRules } from './pkgmap.ts';
 import { isSongText, songsFromFiles, loadMusicProject, emptyMusicProject, addSongs, addSfx, nextFreeSong, folders as musicFolders, saveMusicProject, hasAmk, musicEntry } from './music.ts';
-import { pixiParts, planPixiUpload, applyPixiUpload, linkedDefines, hexNum, type PixiPlan } from './pixipkg.ts';
+import { pixiParts, planPixiUpload, applyPixiUpload, linkedDefines, hexNum, listedNumbers, type PixiPlan } from './pixipkg.ts';
 import { parseCfg, parseJsonCfg } from './pixi.ts';
 import { detectBlocks, applyBlocks, applyGraphics, routinesCalled, planPackage, plannedFgTiles, type DetectedBlock, type DetectedGraphics, type PackagePlan } from './pkgplan.ts';
 import { loadProject, saveProject, emptyProject, projectFromFiles, addCall, isUberList, type UberProject } from './uberproject.ts';
@@ -464,9 +464,15 @@ export function planInstall(rom: Rom, preview: ReadyPreview, opt: InstallOptions
   return {
     preview, opt,
     plan: opt.plan ?? planUpload(rom, preview, opt.blank),
-    sprites: sprites.length && preview.upload ? planPixiUpload(rom, preview.upload, (f) => sprites.includes(f)) : null,
+    sprites: sprites.length && preview.upload ? planPixiUpload(rom, preview.upload, (f) => sprites.includes(f), pixiListed(preview)) : null,
     sfx: planSfx(rom, preview),
   };
+}
+
+// the numbers a Callisto project's PIXI list gives its sprites
+function pixiListed(preview: ReadyPreview): Map<string, number> | undefined {
+  const pixi = preview.callisto?.tools.pixi;
+  return pixi?.list ? listedNumbers(preview.upload!, pixi.list, pixi.folder) : undefined;
 }
 
 // applies every part of the preview (run it in a package recording, pkgreg.ts, which gets `claim`);

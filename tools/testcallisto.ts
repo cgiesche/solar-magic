@@ -21,6 +21,7 @@ import { loadProject } from '../src/core/uberproject.ts';
 import { loadBlockProject } from '../src/core/blocks.ts';
 import { listPackages } from '../src/core/pkgreg.ts';
 import { loadMusicProject, hasAmk } from '../src/core/music.ts';
+import { loadPixiProject } from '../src/core/pixi.ts';
 import { editorImage, romDiff } from './fixture.ts';
 
 await loadAsar();
@@ -107,6 +108,22 @@ const order = (files: Record<string, Uint8Array>) => [...dec.decode(files['tools
   for (let f = 0; f < 120; f++) { s.joy1 = 0x0100; s.runFrame(); }
   const x1 = s.wram[0x94] | (s.wram[0x95] << 8);
   check(s.wram[0x100] === 0x14 && x1 > x0 + 32, `the game plays: level 105, Mario runs right (${x0} → ${x1})`);
+  // its PIXI sprite at the number its list gives it (A0), which its donut block (29D) spawns: Mario on
+  // the block makes it fall, the game goes on
+  const donut = loadPixiProject(rom)?.list.find((e) => e.file === 'sprites/donut_sprite.cfg');
+  emu.load(0x105);
+  while (s.wram[0x100] !== 0x14) s.runFrame();
+  for (let f = 0; f < 30; f++) s.runFrame();
+  const feet = (s.wram[0x94] + 8) >> 4 | ((s.wram[0x95] & 0x0f) << 4), row = ((s.wram[0x96] | (s.wram[0x97] << 8)) + 32) >> 4;
+  const at = (feet >> 4) * 0x1b0 + row * 16 + (feet & 15);
+  s.wram[0xc800 + at] = 0x9d; s.wram[0x1c800 + at] = 0x02;
+  let spawned = false, live = 0;
+  for (let f = 0; f < 60; f++) {
+    s.runFrame();
+    if (s.wram[0x100] === 0x14) live++;
+    for (let i = 0; i < 12; i++) if (s.wram[0x14c8 + i] && s.wram[0x7fab9e - 0x7e0000 + i] === 0xa0) spawned = true;
+  }
+  check(donut?.num === 0xa0 && spawned && live === 60, `its sprite at A0 as list_pixi.txt has it (${donut?.num.toString(16)}): Mario on its donut block spawns it, the game goes on (${live} of 60 frames)`);
   // its ON/OFF blocks' tiles (2F0–2FF) show the ON frame of ExGFX61.bin
   emu.load(0x105);
   const on = emu.animationFrames(4, 8).at(-1)!.vram.subarray(0x2f0 * 32, 0x300 * 32);

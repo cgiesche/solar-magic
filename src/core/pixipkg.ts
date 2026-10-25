@@ -6,7 +6,7 @@
 
 import type { Rom } from './rom.ts';
 import { scanDefines, rewriteDefines, type Upload } from './patchpkg.ts';
-import { FOLDER, MISC_KINDS, numberRange, sharesNumbers, assignSprite, loadPixiProject, savePixiProject, parseCfg, parseJsonCfg, type PixiEntry, type PixiProject } from './pixi.ts';
+import { FOLDER, MISC_KINDS, numberRange, sharesNumbers, assignSprite, loadPixiProject, savePixiProject, parseCfg, parseJsonCfg, parsePixiList, type PixiEntry, type PixiProject } from './pixi.ts';
 import type { ApplyResult } from './patchapply.ts';
 import type { SpriteFolder } from './pixirt.ts';
 
@@ -58,21 +58,42 @@ export function pixiParts(upload: Upload): Omit<PixiPlan, 'links'> {
   return { sprites, routines };
 }
 
-// numbers for the sprites of an upload (those `keep` takes: the sprite parts) and the defines naming them
-export function planPixiUpload(rom: Rom, upload: Upload, keep: (file: string) => boolean = () => true): PixiPlan {
+// the numbers a PIXI list of the upload gives its sprites (`folder`: the PIXI folder the list's paths are
+// in), by the sprite's file in the upload
+export function listedNumbers(upload: Upload, list: string, folder: string): Map<string, number> {
+  const out = new Map<string, number>();
+  const data = upload.files.get(list);
+  if (!data) return out;
+  let entries: PixiEntry[];
+  try { entries = parsePixiList(dec.decode(data)); } catch { return out; }
+  for (const e of entries) out.set(folder + e.file, e.num);
+  return out;
+}
+
+// numbers for the sprites of an upload (those `keep` takes: the sprite parts) and the defines naming them;
+// `listed`: the numbers the package's PIXI list gives them (listedNumbers), taken when free
+export function planPixiUpload(rom: Rom, upload: Upload, keep: (file: string) => boolean = () => true, listed = new Map<string, number>()): PixiPlan {
   const proj = loadPixiProject(rom) ?? { files: new Map(), list: [] };
   const parts = pixiParts(upload);
   const sprites = parts.sprites.filter((s) => keep(s.file)), routines = parts.routines;
-  // numbers: a sprite file already in the project keeps its number, the others get the next free one
+  // numbers: a sprite file already in the project keeps its number, the others get the list's when free,
+  // else the next free one
+  const taken = (s: PixiPlanSprite) => new Set([...proj.list.filter((e) => sharesNumbers(e.kind, s.kind)).map((e) => e.num),
+    ...sprites.filter((o) => o !== s && o.num >= 0 && sharesNumbers(o.kind, s.kind)).map((o) => o.num)]);
   for (const s of sprites) {
-    const dest = destOf(upload, s);
-    const have = proj.list.find((e) => e.kind === s.kind && e.file === dest);
-    if (have) { s.num = have.num; continue; }
-    const [lo, hi] = numberRange(s.kind);
-    const taken = new Set([...proj.list.filter((e) => sharesNumbers(e.kind, s.kind)).map((e) => e.num),
-      ...sprites.filter((o) => o !== s && o.num >= 0 && sharesNumbers(o.kind, s.kind)).map((o) => o.num)]);
+    const have = proj.list.find((e) => e.kind === s.kind && e.file === destOf(upload, s));
+    if (have) s.num = have.num;
+  }
+  for (const s of sprites) {
+    const [lo, hi] = numberRange(s.kind), want = listed.get(s.file);
+    if (s.num >= 0 || want === undefined || want < lo || want > hi || taken(s).has(want)) continue;
+    s.num = want;
+  }
+  for (const s of sprites) {
+    if (s.num >= 0) continue;
+    const [lo, hi] = numberRange(s.kind), t = taken(s);
     let n = lo;
-    while (taken.has(n) && n < hi) n++;
+    while (t.has(n) && n < hi) n++;
     s.num = n;
   }
   // defines naming a sprite of the package
@@ -82,6 +103,12 @@ export function planPixiUpload(rom: Rom, upload: Upload, keep: (file: string) =>
     for (const d of scanDefines(dec.decode(data))) {
       const byFile = sprites.findIndex((s) => d.comment.toLowerCase().includes(base(s.file).toLowerCase()));
       let i = byFile;
+      // a sprite define holding the number the list gives a sprite (a block spawning it): it follows the sprite
+      if (i < 0 && /sprite|num|number/i.test(d.name + ' ' + d.comment)) {
+        const v = defineNumber(d.value);
+        const byNum = v === null ? [] : sprites.map((s, j) => [s, j] as const).filter(([s]) => listed.get(s.file) === v);
+        if (byNum.length === 1) i = byNum[0][1];
+      }
       if (i < 0) {
         const kinds = MISC_KINDS.filter((k) => d.name.toLowerCase().replace(/_/g, '').includes(k === 'spinningcoin' ? 'coin' : k === 'minorextended' ? 'minor' : k));
         const cand = sprites.map((s, j) => [s, j] as const).filter(([s]) => kinds.includes(s.kind));
@@ -102,6 +129,13 @@ function relIn(f: string, kind: SpriteFolder): string {
   const parts = f.split('/');
   for (let i = parts.length - 2; i >= 0; i--) if (folderKind(parts.slice(0, i + 1).join('/') + '/x') === kind) return parts.slice(i + 1).join('/');
   return base(f);
+}
+
+// a define's value as a number ($hex or decimal), else null
+function defineNumber(v: string): number | null {
+  const m = /^\$([0-9a-f]{1,2})$/i.exec(v.trim()) ?? null;
+  if (m) return parseInt(m[1], 16);
+  return /^\d{1,3}$/.test(v.trim()) ? parseInt(v.trim(), 10) : null;
 }
 
 export function hexNum(n: number): string {

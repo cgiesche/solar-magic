@@ -12,7 +12,7 @@ import { captureSprites } from '../src/core/spritegfx.ts';
 import { loadAsar } from '../src/core/asar.ts';
 import { ROUTINES } from '../src/core/pixiroutines.ts';
 import { uploadFiles, uploadFromFiles } from '../src/core/patchpkg.ts';
-import { planPixiUpload, applyPixiUpload } from '../src/core/pixipkg.ts';
+import { planPixiUpload, applyPixiUpload, listedNumbers } from '../src/core/pixipkg.ts';
 import { inspectUpload, installPackage } from '../src/core/packages.ts';
 import { savePixiProject, removePixi, loadPixiProject, parsePixiList, parseCfg, parseJsonCfg, type PixiProject } from '../src/core/pixi.ts';
 import { editorImage, romDiff } from './fixture.ts';
@@ -243,6 +243,26 @@ print "MAIN ",pc
   check(res4.ok, 'BrutalBill applied');
   const shooter = new TextDecoder().decode(loadPixiProject(r4)?.files.get('shooters/BrutalBillShooter.asm'));
   check(/^!Sprite\s*=\s*\$00/m.test(shooter), 'BrutalBill: the shooter spawns sprite $00');
+}
+
+// the numbers a package's PIXI list gives its sprites: taken when free; a block's define holding that
+// number follows its sprite when it is taken
+{
+  const e = new TextEncoder();
+  const upload = uploadFromFiles('list.zip', new Map([
+    ['pixi/sprites/donut.cfg', e.encode('01\n36\n00 15 22 AA 89 00\n00 00\ndonut.asm\n00:00\n')],
+    ['pixi/sprites/donut.asm', e.encode('print "INIT ",pc\nprint "MAIN ",pc\n  RTL\n')],
+    ['pixi/list.txt', e.encode('SPRITE:\nA0 donut.cfg\n')],
+    ['blocks/donut_lift.asm', e.encode('!Sprite = $A0\ndb $42\n')],
+  ]));
+  const listed = listedNumbers(upload, 'pixi/list.txt', 'pixi/');
+  const r7 = new Rom(EDITOR_IMAGE.slice());
+  const free = planPixiUpload(r7, upload, () => true, listed);
+  check(free.sprites[0].num === 0xa0, `the list's number when free: A0 (${free.sprites[0].num.toString(16)})`);
+  savePixiProject(r7, { files: new Map([['sprites/other.cfg', e.encode('01\n36\n00 00 00 00 00 00\n00 00\nother.asm\n00:00\n')], ['sprites/other.asm', e.encode('print "INIT ",pc\nprint "MAIN ",pc\n  RTL\n')]]), list: parsePixiList('A0 other.cfg\n') });
+  const taken = planPixiUpload(r7, upload, () => true, listed);
+  const link = taken.links.find((l) => l.file === 'blocks/donut_lift.asm');
+  check(taken.sprites[0].num === 0x00 && link?.define === 'Sprite' && link.sprite === 0, `A0 taken: the next free number (${taken.sprites[0].num.toString(16)}), the block's !Sprite = $A0 linked to it`);
 }
 
 // custom shooters and generators: MAIN runs every frame, the shooter with its extra byte
