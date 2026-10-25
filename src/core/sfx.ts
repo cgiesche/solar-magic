@@ -4,7 +4,7 @@
 // upload with the author's numbers, choosing free numbers, the defines of code playing one (a link), and
 // the list lines AddmusicK gets.
 
-import { scanDefines } from './patchpkg.ts';
+import { scanDefines, parseNum } from './patchpkg.ts';
 import { AMK_SFX } from '../vendor/amk/originals.ts';
 
 export type SfxBank = '1DF9' | '1DFC';
@@ -76,15 +76,14 @@ export function sfxNumbers(project: SoundEffect[], found: FoundSfx[]): number[] 
 // a define in a file of the upload playing sfx[sfx] (by its author's number)
 export interface SfxLink { file: string; define: string; sfx: number }
 
-const num = (v: string) => {
-  const m = /^#?(?:\$([0-9a-f]+)|0x([0-9a-f]+)|(\d+))$/i.exec(v.trim());
-  return m ? parseInt(m[1] ?? m[2] ?? m[3], m[3] ? 10 : 16) : null;
-};
+// a define's value as a number ("#$38" too)
+const num = (v: string) => parseNum(v.trim().replace(/^#/, ''));
 
 // The defines of the upload's code that play one of its sound effects: one whose comment names the
-// sound effect's file, or one named like a sound effect (sfx, sound) set to the author's number – of the
-// bank a define next to it names (e.g. !death_sfx = $38 with !death_sfx_addr = $1DFC), or with no such
-// define, of the only sound effect with that number.
+// sound effect's file (set to its author's number, or named like a sound effect: sfx, sound), or one
+// named like a sound effect set to the author's number – of the bank a define next to it names (e.g.
+// !death_sfx = $38 with !death_sfx_addr = $1DFC), or with no such define, of the only sound effect with
+// that number.
 export function sfxLinks(files: Map<string, Uint8Array>, found: FoundSfx[]): SfxLink[] {
   const links: SfxLink[] = [];
   if (!found.length) return links;
@@ -93,8 +92,9 @@ export function sfxLinks(files: Map<string, Uint8Array>, found: FoundSfx[]): Sfx
     const defs = scanDefines(dec.decode(c));
     for (const d of defs) {
       const n = num(d.value);
-      let i = found.findIndex((s) => d.comment.toLowerCase().includes(sfxName(s.rel).toLowerCase()));
-      if (i < 0 && n !== null && /sfx|sound/i.test(d.name)) {
+      const named = /sfx|sound/i.test(d.name);
+      let i = found.findIndex((s) => (named || (n !== null && s.author === n)) && d.comment.toLowerCase().includes(sfxName(s.rel).toLowerCase()));
+      if (i < 0 && n !== null && named) {
         const bankDef = defs.find((o) => o !== d && o.name.toLowerCase().startsWith(d.name.toLowerCase()) && (num(o.value) === 0x1df9 || num(o.value) === 0x1dfc));
         const cands = found.map((s, j) => [s, j] as const).filter(([s]) => s.author === n && (!bankDef || num(bankDef.value) === parseInt(s.bank, 16)));
         if (cands.length === 1) i = cands[0][1];
@@ -107,6 +107,5 @@ export function sfxLinks(files: Map<string, Uint8Array>, found: FoundSfx[]): Sfx
 
 // the lines of the project's sound effects for AddmusicK's list
 export function sfxListText(sfx: SoundEffect[]): string {
-  const hex = (n: number) => n.toString(16).toUpperCase().padStart(2, '0');
-  return SFX_BANKS.map((b) => `SFX${b}:\n${sfx.filter((s) => s.bank === b).map((s) => `${hex(s.num)}  ${s.file}\n`).join('')}`).join('\n');
+  return SFX_BANKS.map((b) => `SFX${b}:\n${sfx.filter((s) => s.bank === b).map((s) => `${s.num.toString(16).toUpperCase().padStart(2, '0')}  ${s.file}\n`).join('')}`).join('\n');
 }

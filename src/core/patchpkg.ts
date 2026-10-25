@@ -179,7 +179,7 @@ export function manifestRam(upload: Upload, mainText: string, defines: Record<st
   return out;
 }
 
-function parseNum(s: string): number | null {
+export function parseNum(s: string): number | null {
   const m = /^(?:\$|0x)([0-9a-f]+)$/i.exec(s);
   if (m) return parseInt(m[1], 16);
   return /^\d+$/.test(s) ? parseInt(s, 10) : null;

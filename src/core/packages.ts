@@ -288,7 +288,8 @@ export async function installPackage(rom: Rom, preview: ReadyPreview | ManualPre
       const linked = sfxLinkedFiles(preview, ctx.sfx);
       if (linked) {
         const again = inspectFiles(preview.fileName, linked);
-        if (again.status === 'ready') ctx = { ...planInstall(rom, again, opt), sfx: ctx.sfx };
+        if (again.status !== 'ready') return failed([`The package with its sound effects' numbers set: ${again.status === 'failed' ? again.reason : again.status}`]);
+        ctx = { ...planInstall(rom, again, opt), sfx: ctx.sfx };
       }
       rec = await recordPackageChangeAsync(rom, target, async (claim) => {
         const r = await applyParts(rom, ctx, claim);

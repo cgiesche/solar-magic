@@ -27,7 +27,7 @@ const upload = files({
   'tools/AddmusicK/1DFC/Death Prelude.txt': PRELUDE,
   'tools/AddmusicK/1DF9/Boing.txt': '$DA $00 $10 $A4',
   'setup/lists/Addmusic_sound effects.txt': 'SFX1DF9:\n1\t01 Hit head.txt\n30  Boing.txt\n\nSFX1DFC:\n1\t01 Coin.txt\n1B *\t1A Grinder click 1.txt\n38  Death Prelude.txt\n',
-  'settings.asm': '!death_sfx = $38\n!death_sfx_addr = $1DFC\n!option_sfx = $01\n!option_sfx_addr = $1DFC\n!other_sfx = $38\n!other_sfx_addr = $1DF9\n!boing = $00 ; plays Boing\n!count = $38\n',
+  'settings.asm': '!death_sfx = $38\n!death_sfx_addr = $1DFC\n!option_sfx = $01\n!option_sfx_addr = $1DFC\n!other_sfx = $38\n!other_sfx_addr = $1DF9\n!boing_sound = $00 ; plays Boing\n!count = $38\n!boings = 50 ; Boing count\n',
 });
 
 // ---------- in an upload ----------
@@ -51,8 +51,8 @@ const upload = files({
 
   // the defines of code playing them
   const links = sfxLinks(upload, found).map((l) => `${l.define}:${found[l.sfx].rel}`);
-  check(links.join() === 'death_sfx:Death Prelude.txt,boing:Boing.txt',
-    `linked: the define set to its number with its bank next to it, one naming it in its comment – not one of another bank, nor one not named like a sound effect (${links.join(', ')})`);
+  check(links.join() === 'death_sfx:Death Prelude.txt,boing_sound:Boing.txt',
+    `linked: the define set to its number with its bank next to it, one named like a sound effect naming it in its comment – not one of another bank, nor one not named like a sound effect (by its value or its comment) (${links.join(', ')})`);
 }
 
 // ---------- inserted with AddmusicK ----------
