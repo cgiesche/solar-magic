@@ -216,6 +216,11 @@ export function exanimPeriod(lists: (ExList | null)[], max = 64, base = 1): numb
 
 // the 8x8 tiles (4bpp: VRAM word address / 16) a tile slot writes; types 10-12 write two rows, the
 // second $100 words below (tile_bytes in the engine). Colors and rotations: none.
+// the colors a color slot writes (destination's high byte: the colors less one)
+export const slotColors = (e: ExSlot) => ((e.dest >> 8) & 0x7f) + 1;
+// the bytes a list at `addr` may take: the rest of its bank, at most 16 KB
+export const listMaxLength = (addr: number) => Math.min(0x8000 - (addr & 0x7fff), 0x4000);
+
 export function slotTiles(e: ExSlot): number[] {
   if (kindOf(e.type) !== 'tiles' || e.type === 0x0f) return [];
   const first = (e.dest & 0x7fff) >> 4;
@@ -313,7 +318,7 @@ export function exanimEntry(rom: Rom) {
 
 
 const listAt = (rom: Rom, addr: number): ExList | null => {
-  try { return parseList(rom.bytes(addr, Math.min(0x8000 - (addr & 0x7fff), 0x4000))).list; } catch { return null; }
+  try { return parseList(rom.bytes(addr, listMaxLength(addr))).list; } catch { return null; }
 };
 
 export function levelListAddr(rom: Rom, level: number): number {
@@ -410,7 +415,7 @@ export function exanimDataRanges(rom: Rom): [number, number][] {
   const g = globalListAddr(rom);
   if (g) lists.add(g);
   for (const a of lists) {
-    try { add(a, parseList(rom.bytes(a, Math.min(0x8000 - (a & 0x7fff), 0x4000))).length); } catch { /* not a list */ }
+    try { add(a, parseList(rom.bytes(a, listMaxLength(a))).length); } catch { /* not a list */ }
   }
   for (let n = 0; n < 4; n++) {
     const a = altFileAddr(rom, n);
@@ -475,7 +480,7 @@ export function altFileUsers(rom: Rom, n: number): { levels: number[]; global: b
 }
 
 // the end of what the slots of all lists (levels and the global one, or `global` in its place) read from
-// alternative file `n`
+// Anim graphic `n`
 export function altFileExtent(rom: Rom, n: number, global: ExList | null = readGlobalList(rom)): number {
   let end = 0;
   const lists = [...Array.from({ length: 512 }, (_, i) => readLevelList(rom, i)), global];
@@ -483,7 +488,7 @@ export function altFileExtent(rom: Rom, n: number, global: ExList | null = readG
     if (!l || l.altFile !== n) continue;
     for (const e of l.slots.values()) {
       if (!usesAltFile(e) || !e.frames.length) continue;
-      const colors = ((e.dest >> 8) & 0x7f) + 1;
+      const colors = slotColors(e);
       if (kindOf(e.type) === 'colors' && colors === 1) continue;
       end = Math.max(end, Math.max(...e.frames) + (kindOf(e.type) === 'tiles' ? frameBytes(e.type) : colors * 2));
     }
@@ -492,8 +497,8 @@ export function altFileExtent(rom: Rom, n: number, global: ExList | null = readG
 }
 
 // slots of another list (a level file's, or one reading AN2) taking their frames from alternative file
-// `file`: the frames they use from AN2 (`src.an2`) or from their own alternative file (`src.alt`, also
-// colors) are
+// `file`: the frames they use from AN2 (`src.an2`) or from their own alternative file (`src.alt`; also a
+// color slot's, the part of the file its frames read kept together) are
 // copied into it (a frame already there is used again) and the slots point there. A slot's other RAM
 // frames (the game's graphics, e.g. GFX33 from $7E7D00) come along from `src.ram`, the level's WRAM
 // after its load; slots without AN2 frames keep reading RAM unless `allRam`. Without `alt` the slots'
@@ -518,7 +523,7 @@ export function localizeFrames(rom: Rom, slots: ExSlot[], src: { an2?: Uint8Arra
     if (!fromAlt && !fromAn2) { out[out.length - 1] = { ...e, frames: [...e.frames] }; continue; }
     if (fromAlt && !tiles) {
       // colors: the part of the file the frames read, kept together (one color is the frame itself)
-      const n = ((e.dest >> 8) & 0x7f) + 1;
+      const n = slotColors(e);
       if (n === 1) { out[out.length - 1] = { ...e, frames: [...e.frames] }; continue; }
       const lo = Math.min(...e.frames), hi = Math.max(...e.frames) + n * 2;
       if (!src.alt || hi > src.alt.length) { notes.push('An ExAnimation slot takes colors from an alternative file (ExGFX 60-63) that is missing – left out'); continue; }

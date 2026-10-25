@@ -24,6 +24,10 @@ function find(rom: Rom): number {
   return -1;
 }
 
+export function isCleanRom(rom: Rom): boolean {
+  return rom.size === CLEAN_SIZE && crc32(rom.data) === SMW_CLEAN_CRC;
+}
+
 const blockCrc = (d: Uint8Array, k: number) => crc32(d.subarray(k * BLOCK, (k + 1) * BLOCK));
 
 // keeps the clean game's fingerprint (run when the clean game is opened, before anything changes it)
@@ -42,7 +46,7 @@ export function keepCleanGame(rom: Rom): void {
 // read of the ROM as it is)
 export function cleanGameBytes(rom: Rom): ((o: number) => number | null) | null {
   const p = find(rom);
-  if (p < 0) return rom.size === CLEAN_SIZE && crc32(rom.data) === SMW_CLEAN_CRC ? (o) => (o >= 0 && o < CLEAN_SIZE ? rom.data[o] : null) : null;
+  if (p < 0) return isCleanRom(rom) ? (o) => (o >= 0 && o < CLEAN_SIZE ? rom.data[o] : null) : null;
   if (rom.data[p + 4] > VERSION) throw new Error('The clean game\'s fingerprint in the ROM is from a newer editor version');
   const v = new DataView(rom.data.buffer, rom.data.byteOffset + p + 5, BLOCKS * 4);
   const same = new Map<number, boolean>();

@@ -18,6 +18,7 @@ import { isGlobalAnimBps, globalAnimList } from '../src/core/globalanim.ts';
 import { readGlobalList, writeGlobalList, readAltFile, writeAltFile, emptyList, exanimTiles, altFileName } from '../src/core/exanim.ts';
 import { inspectUpload, installPackage, removePackage, planUpload, type UploadPreview, type ReadyPreview, type InstallOptions } from '../src/core/packages.ts';
 import { listPackages, packageRemoval, packageSummary } from '../src/core/pkgreg.ts';
+import { setExtTileWords } from '../src/core/map16ext.ts';
 import { cleanImage, editorImage, romDiff } from './fixture.ts';
 
 await loadAsar();
@@ -81,6 +82,8 @@ const upload = () => ready(inspectUpload('baserom-anim.zip', zipSync({ [BPS]: bp
   own.slots.set(0, { type: 0x01, trigger: 0, framesLess1: 0, dest: 0x8000 | 0x0700, frames: [0] });
   writeAltFile(rom, 0, new Uint8Array(0x20).fill(0x5a));
   writeGlobalList(rom, own);
+  // pages 02 and 03 taken: the package's Map16 pages there move
+  setExtTileWords(rom, 0x200, [1, 2, 3, 4]); setExtTileWords(rom, 0x300, [1, 2, 3, 4]);
   const before = rom.data.slice();
   const p = upload();
   const plan = planUpload(rom, p, opt.blank);
@@ -98,12 +101,13 @@ const upload = () => ready(inspectUpload('baserom-anim.zip', zipSync({ [BPS]: bp
   const pkg = listPackages(rom)[0];
   check(packageSummary(pkg).includes('Global animation') && packageRemoval(pkg).some((s) => s.includes('global animation slot(s) 01, 02, 03, 04, 05, 06, 07')), `the package names them: ${packageRemoval(pkg).join('; ')}`);
 
-  // the tiles they animate: the 8x8 tiles of the baserom's Map16 tiles (wherever those landed) – the ON/OFF
-  // block's tiles draw tiles 2F0–2FF
+  // the tiles they animate: the 8x8 tiles of the baserom's Map16 tiles, which keep them wherever they landed
+  // – the ON/OFF block's tiles draw tiles 2F0–2FF
   const anims = exanimTiles(rom, 0x105, 0);
   const fg = map16Source(rom, new LevelEmulator(rom).load(0x105)).fg;
   const drawn = (plan.romMap16 ? [...plan.romMap16.fg.values()] : []).filter((t) => fg(t).some((x) => (x & 0x3ff) >= 0x2f0 && (x & 0x3ff) < 0x300));
-  check(drawn.length > 0 && anims.get(0x2f0)?.[0].global === true, `the package's Map16 tiles drawing 2F0–2FF (${drawn.length}) show the global slot`);
+  const moved = [...plan.romMap16?.fg ?? []].filter(([f]) => (f >> 8) === 2 || (f >> 8) === 3).every(([f, t]) => t !== f);
+  check(moved && drawn.length > 0 && anims.get(0x2f0)?.[0].global === true, `the package's Map16 tiles drawing 2F0–2FF (${drawn.length}, pages 02–03 moved) show the global slot`);
 
   // in the editor: the ON/OFF blocks' tiles show the ON or the OFF frame, colors 78–79 cycle
   const emu = new LevelEmulator(rom);

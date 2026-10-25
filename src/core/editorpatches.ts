@@ -3,7 +3,6 @@
 // space), which breaks VWF dialog patches and is installed only when the texts outgrow their place.
 
 import type { Rom } from './rom.ts';
-import { crc32 } from './bps.ts';
 import { loadAsar } from './asar.ts';
 import { editorPatch, madeByEditor, installEditorPatch, installCustomPalettePatch, installBgPatch, installMusicPatch, installExtGfxPatch } from './patches.ts';
 import { installVramPatch } from './vrampatch.ts';
@@ -20,16 +19,11 @@ import { installBgMap16Ext } from './bgmap16.ts';
 import { installStructPatch } from './structs.ts';
 import { newStyleExits } from './exitgraph.ts';
 import { keepCleanSharedPalettes } from './sharedpal.ts';
-import { keepCleanGame, SMW_CLEAN_CRC } from './cleangame.ts';
+import { keepCleanGame, isCleanRom } from './cleangame.ts';
 import { LevelEmulator } from './levelemu.ts';
 import { map16Source } from './render.ts';
 import type { ApplyResult } from './patchapply.ts';
 
-export { SMW_CLEAN_CRC };
-
-export function isCleanRom(rom: Rom): boolean {
-  return rom.size === 0x80000 && crc32(rom.data) === SMW_CLEAN_CRC;
-}
 
 // makes a ROM ready to edit: a clean one gets the patches (true), one made by the editor stays as it is
 // (false); any other ROM throws

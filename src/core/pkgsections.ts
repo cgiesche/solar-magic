@@ -23,7 +23,7 @@ import type { UberContext } from './uberasm.ts';
 import type { SpriteFolder } from './pixirt.ts';
 import type { PackageParts, GlobalAnimPart } from './pkgreg.ts';
 import { sharedColors, setSharedColor, sharedColorNames } from './sharedpal.ts';
-import { readGlobalList, writeGlobalList, readAltFile, writeAltFile, altFileExtent, altFileName } from './exanim.ts';
+import { readGlobalList, writeGlobalList, readAltFile, writeAltFile, altFileExtent, altFileName, slotsUsed, SLOTS } from './exanim.ts';
 
 const CONTEXTS: UberContext[] = ['level', 'gamemode', 'overworld'];
 export const OTHER = ['global', 'statusbar', 'macrolib'] as const;
@@ -280,8 +280,8 @@ const globalAnim: PartSection<{ slots: string[]; sizes: number[] }, GlobalAnimPa
   read: (rom) => {
     const l = readGlobalList(rom);
     return {
-      slots: Array.from({ length: 0x20 }, (_, k) => { const e = l?.slots.get(k); return e ? JSON.stringify(e) : ''; }),
-      sizes: [0, 1, 2, 3].map((n) => readAltFile(rom, n)?.length ?? 0),
+      slots: Array.from({ length: SLOTS }, (_, k) => { const e = l?.slots.get(k); return e ? JSON.stringify(e) : ''; }),
+      sizes: Array.from({ length: 4 }, (_, n) => readAltFile(rom, n)?.length ?? 0), // Anim graphics A-D
     };
   },
   added: (a, b) => {
@@ -296,7 +296,7 @@ const globalAnim: PartSection<{ slots: string[]; sizes: number[] }, GlobalAnimPa
     const l = readGlobalList(rom);
     if (l) {
       for (const k of mine.slots) if (!others.some((o) => o.slots.includes(k))) l.slots.delete(k);
-      l.count = Math.max(0, ...[...l.slots.keys()].map((k) => k + 1));
+      l.count = slotsUsed({ ...l, count: 0 });
     }
     // (both freed, then the graphic written before the list: back where they were)
     if (l) writeGlobalList(rom, null);

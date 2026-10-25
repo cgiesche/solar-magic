@@ -144,9 +144,9 @@ export interface PlannedGfx { file: string; lmNum: number | null; num: number; s
 
 // the package's shared palettes: the colors differing from the clean game's (index in the block → color)
 export interface PlannedSharedPal { file: string; colors: Map<number, number> }
-// the package's global animation slots and where they take their frames from (its ExGFX 60-63 file of
-// their list's alternative file); they go into free slots of the global list (levelgfx.ts placeGlobalSlots)
-export interface PlannedGlobalAnim { file: string; slots: ExSlot[]; frames: FrameSources }
+// the package's global animation slots and where they take their frames from (frameFile: its ExGFX 60-63
+// file of their list's Anim graphic); they go into free slots of the global list (levelgfx.ts placeGlobalSlots)
+export interface PlannedGlobalAnim { file: string; slots: ExSlot[]; frames: FrameSources; frameFile: string | null }
 export interface PackagePlan {
   blocks: PlannedBlock[];
   map16: PlannedMap16 | null;
@@ -286,11 +286,9 @@ export function planPackage(rom: Rom, input: PlanInput, blank: number[]): Packag
   const isAltOf = (l: ExList | null) => (g: { lmNum: number | null; slot: string | null }) => !!l && g.lmNum === 0x60 + l.altFile && !g.slot;
   const isAlt = isAltOf(list);
   const frames = frameSources(files, list, named.find((g) => g.slot === 'AN2')?.file, named.find(isAlt)?.file, notes);
-  // the global animation slots: their alternative file is a frame source too
-  const global = planGlobalAnim(rom, files, graphics.globalanim, notes);
-  const isGlobalAlt = isAltOf(global?.list ?? null);
-  const globalAnim = global && { file: global.file, slots: [...global.list.slots.values()], frames: frameSources(files, global.list, undefined, named.find(isGlobalAlt)?.file, notes) };
-  const kept = named.filter((g) => g.slot !== 'AN2' && !isAlt(g) && !isGlobalAlt(g));
+  // the global animation slots: their ExGFX 60-63 file is a frame source too
+  const globalAnim = planGlobalAnim(rom, files, graphics.globalanim, (l) => named.find(isAltOf(l))?.file ?? null, notes);
+  const kept = named.filter((g) => g.slot !== 'AN2' && !isAlt(g) && g.file !== globalAnim?.frameFile);
 
   // one file without a slot and one slot the tiles draw from that no other file is for: that one
   const mapSlots = new Set((map16?.data.tiles ?? []).flat().map(slotOfWord).filter((s): s is string => !!s));
@@ -326,8 +324,8 @@ function planSharedPal(rom: Rom, files: Map<string, Uint8Array>, found: string[]
 }
 
 // the global animation list (the first file; more are not used), read where its bytes are known (some
-// come from the clean game, cleangame.ts)
-function planGlobalAnim(rom: Rom, files: Map<string, Uint8Array>, found: string[], notes: string[]): { file: string; list: ExList } | null {
+// come from the clean game, cleangame.ts); frameFile: the package's ExGFX 60-63 file of a list's Anim graphic
+function planGlobalAnim(rom: Rom, files: Map<string, Uint8Array>, found: string[], frameFile: (l: ExList) => string | null, notes: string[]): PlannedGlobalAnim | null {
   if (!found.length) return null;
   const file = found[0];
   for (const f of found.slice(1)) notes.push(`${base(f)}: not used – ${base(file)} has the package's global animation`);
@@ -335,7 +333,8 @@ function planGlobalAnim(rom: Rom, files: Map<string, Uint8Array>, found: string[
   if (list === 'not known') { notes.push(`${base(file)}: needs bytes of the clean game this ROM no longer has – the global animation is not taken over`); return null; }
   if (!list?.slots.size) { notes.push(`${base(file)}: no global animation slots`); return null; }
   if (list.manual.size || list.customSet || list.customKeep !== 0xffff) notes.push(`${base(file)}: the global list's Trigger Init is not taken over`);
-  return { file, list };
+  const from = frameFile(list);
+  return { file, slots: [...list.slots.values()], frames: frameSources(files, list, undefined, from ?? undefined, notes), frameFile: from };
 }
 
 // links changed in the preview: where the .map16 tiles go, which block each of them shows (null: none),
