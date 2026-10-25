@@ -4,8 +4,8 @@
 //   submap, the pixel position (Mario on a tile at its 16x16 block's +8,+8) and the tile
 // - 13 sprite slots ($04F625, 5 bytes each: the sprite, pixel X, pixel Y; loaded into slots 3–15 at $04F678 when
 //   the overworld loads), the same on every submap: each sprite's own code decides where it shows
-// - the places the Koopa Kids jump out at when Mario stands on their tiles 49–4B ($04FB88 X low, $04FB8B X high,
-//   $04FB8E Y low, $04FB91 Y high; $04FB9D)
+// - where the Koopa Kids jump out when Mario stands on their tiles 49–4B ($04FB88 X low, $04FB8B X high, $04FB8E
+//   Y low, $04FB91 Y high; the tile checked at $04FBA1)
 // What the sprites look like at an event progress is learned by emulation (owSpriteImages): the overworld loaded,
 // each slot shown alone with the camera on it (on the main map it follows Mario), its OAM tiles those the game adds.
 
@@ -40,7 +40,7 @@ export function writeStart(rom: Rom, player: number, p: StartPos): void {
 export interface OwSprite { num: number; x: number; y: number } // pixels
 export function readOwSprite(rom: Rom, k: number): OwSprite {
   const a = OW_SPRITES + k * 5;
-  return { num: rom.r8(a), x: rom.r8(a + 1) | (rom.r8(a + 2) << 8), y: rom.r8(a + 3) | (rom.r8(a + 4) << 8) };
+  return { num: rom.r8(a), x: rom.r16(a + 1), y: rom.r16(a + 3) };
 }
 export function writeOwSprite(rom: Rom, k: number, s: OwSprite): void {
   const a = OW_SPRITES + k * 5;
@@ -67,8 +67,11 @@ export function owSpriteImages(emu: OverworldEmulator, map: number, progress: nu
   emu.load(map, progress);
   const s = emu.snes, w = s.wram, start = s.saveState(), sprites = readOwSprites(emu.rom);
   const nums = (keep: number) => { for (let k = 0; k < OW_SPRITE_SLOTS; k++) if (k !== keep) w[RAM.owSpriteNum + FIRST_SLOT + k] = 0; };
-  // the frames with slot `keep` (-1 none) and the camera on (x, y) on the main map: the OAM tiles on the map
-  const show = (keep: number, x: number, y: number) => {
+  // the frames with slot `keep` (-1 none) and the camera on (x, y) on the main map: the OAM tiles on the map; without
+  // a slot on a submap (its camera doesn't move) once
+  let bare: ReturnType<typeof run> | null = null;
+  const show = (keep: number, x: number, y: number) => (keep < 0 && map ? (bare ??= run(keep, x, y)) : run(keep, x, y));
+  const run = (keep: number, x: number, y: number) => {
     s.loadState(start);
     nums(keep);
     if (!map) { set16(w, RAM.owPlayerX, x); set16(w, RAM.owPlayerY, y); }

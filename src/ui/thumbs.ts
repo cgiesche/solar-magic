@@ -46,7 +46,7 @@ function filesHash(rom: Rom, files: number[]): number {
   return m.hash;
 }
 
-export function thumbCanvas(t: ObjThumb): HTMLCanvasElement {
+export function thumbCanvas(t: Pick<ObjThumb, 'w' | 'h' | 'px'>): HTMLCanvasElement {
   const c = document.createElement('canvas');
   c.width = t.w; c.height = t.h;
   const ctx = c.getContext('2d')!;

@@ -1,11 +1,13 @@
 // The overworld's sprites on the map (the overworld view's "Sprites" mode, as the level editor's sprites: select,
 // drag, properties): the 13 sprite slots drawn as the game shows them at the map and event progress (learned by
 // emulation, owsprites.ts; a slot the game doesn't show there is a dashed box), Mario's and Luigi's start positions
-// and the places the Koopa Kids jump out at. Dragging moves a sprite or a Koopa Kid's place in 8px steps (1px with
-// Shift), a start position by tiles; each change is one ROM edit.
+// and where the Koopa Kids jump out. Dragging moves a sprite or where a Koopa Kid jumps out in 8px steps on the map's
+// grid (1px with Shift), a start position by tiles; a click without a drag selects the next thing under the mouse
+// (Luigi's start under Mario's). Each change is one ROM edit.
 
 import type { OverworldView } from './overworld.ts';
 import { h, select, hexInput, emptyState } from './dom.ts';
+import { thumbCanvas } from './thumbs.ts';
 import {
   readOwSprites, writeOwSprite, readStart, writeStart, koopaKidPos, setKoopaKidPos, owSpriteImages, OW_SPRITE_NAMES, OW_SPRITE_SLOTS, KOOPA_KIDS,
   type OwSpriteView,
@@ -15,7 +17,7 @@ import { l1Index, MAP_NAMES } from '../core/overworld.ts';
 import { submapOf, submapViews } from '../core/owevents.ts';
 import { hex } from '../core/names.ts';
 
-// what is selected or dragged: a sprite slot, a player's start, a Koopa Kid's place
+// what is selected or dragged: a sprite slot, a player's start, where a Koopa Kid jumps out
 type Item = { kind: 'sprite'; k: number } | { kind: 'start'; player: number } | { kind: 'koopa'; k: number };
 type Drag = { item: Item; x0: number; y0: number; dx: number; dy: number };
 const PLAYERS = ['Mario', 'Luigi'];
@@ -26,6 +28,7 @@ export class SpriteLayer {
   drag: Drag | null = null;
   showShadows = false; // a shadow on the ground under each sprite
   showHeights = true; // a line from a sprite's position up to it at its height
+  private clicked = false; // the last mouse press was a click on the selection (the next one cycles)
   private views: { key: string; views: OwSpriteView[]; canvases: (HTMLCanvasElement | null)[] } | null = null;
   constructor(private view: OverworldView) {}
 
@@ -35,13 +38,7 @@ export class SpriteLayer {
     const key = `${this.rom.gen}/${this.view.map}/${this.view.progress}`;
     if (this.views?.key !== key) {
       const views = owSpriteImages(this.view.emu, this.view.map, this.view.progress);
-      this.views = { key, views, canvases: views.map((v) => {
-        if (!v.image) return null;
-        const c = h('canvas', { width: v.image.w, height: v.image.h }), ctx = c.getContext('2d')!, id = ctx.createImageData(v.image.w, v.image.h);
-        new Uint32Array(id.data.buffer).set(v.image.rgba);
-        ctx.putImageData(id, 0, 0);
-        return c;
-      }) };
+      this.views = { key, views, canvases: views.map((v) => (v.image ? thumbCanvas({ w: v.image.w, h: v.image.h, px: v.image.rgba }) : null)) };
     }
     return this.views;
   }
@@ -101,24 +98,44 @@ export class SpriteLayer {
   }
 
   // ---- interaction (pixels of the map) ----
+  // the things under the map's pixel, the topmost first
+  private hits(x: number, y: number): Item[] {
+    return this.items().reverse().filter((it) => { const b = this.box(it); return !!b && x >= b.x && y >= b.y && x < b.x + b.w && y < b.y + b.h; });
+  }
   down(x: number, y: number): void {
-    const hit = (it: Item) => { const b = this.box(it); return !!b && x >= b.x && y >= b.y && x < b.x + b.w && y < b.y + b.h; };
-    const its = this.items().reverse(), it = (this.sel && hit(this.sel) ? this.sel : null) ?? its.find(hit) ?? null;
+    const hits = this.hits(x, y), it = hits.find((i) => same(this.sel, i)) ?? hits[0] ?? null;
+    if (!it || !same(this.sel, it)) this.clicked = false;
     this.sel = it;
     this.drag = it ? { item: it, x0: x, y0: y, dx: 0, dy: 0 } : null;
     this.view.paint();
     this.view.buildProps();
   }
+  // where an item is (pixels; a start: its tile's)
+  private pos(it: Item): { x: number; y: number } {
+    if (it.kind === 'start') { const s = readStart(this.rom, it.player); return { x: s.x * 16, y: s.y * 16 }; }
+    return it.kind === 'koopa' ? koopaKidPos(this.rom, it.k) : readOwSprites(this.rom)[it.k];
+  }
   move(x: number, y: number, fine: boolean): void {
     const d = this.drag;
     if (!d) return;
-    const step = d.item.kind === 'start' ? 16 : fine ? 1 : 8, snap = (v: number) => Math.round(v / step) * step;
-    d.dx = snap(x - d.x0); d.dy = snap(y - d.y0);
+    // on the grid of the step (a start's 16, else 8; 1 with Shift)
+    const step = d.item.kind === 'start' ? 16 : fine ? 1 : 8, p = this.pos(d.item), snap = (v: number) => Math.round(v / step) * step;
+    d.dx = snap(p.x + x - d.x0) - p.x; d.dy = snap(p.y + y - d.y0) - p.y;
     this.view.paint();
   }
-  up(): void {
+  up(x: number, y: number): void {
     const d = this.drag;
     this.drag = null;
+    if (d && !d.dx && !d.dy && Math.abs(x - d.x0) < 2 && Math.abs(y - d.y0) < 2) {
+      // a click on the selected one: the next one under it
+      const hits = this.hits(x, y), k = hits.findIndex((i) => same(d.item, i));
+      if (hits.length > 1 && same(this.sel, d.item) && this.clicked) this.sel = hits[(k + 1) % hits.length];
+      this.clicked = true;
+      this.view.paint();
+      this.view.buildProps();
+      return;
+    }
+    this.clicked = false;
     if (!d || (!d.dx && !d.dy)) { this.view.paint(); return; }
     const it = d.item, rom = this.rom;
     if (it.kind === 'sprite') {
@@ -126,7 +143,7 @@ export class SpriteLayer {
       this.edit(`Overworld sprite ${it.k + 1}: moved`, () => writeOwSprite(rom, it.k, { ...s, x: (s.x + d.dx) & 0xffff, y: (s.y + d.dy) & 0xffff }));
     } else if (it.kind === 'koopa') {
       const p = koopaKidPos(rom, it.k);
-      this.edit(`Koopa Kid ${it.k + 1}: moved`, () => setKoopaKidPos(rom, it.k, { x: (p.x + d.dx) & 0xffff, y: (p.y + d.dy) & 0xffff }));
+      this.edit(`Koopa Kid ${it.k + 1}: jumps out elsewhere`, () => setKoopaKidPos(rom, it.k, { x: (p.x + d.dx) & 0xffff, y: (p.y + d.dy) & 0xffff }));
     } else {
       const s = readStart(rom, it.player), x = Math.max(0, Math.min(31, s.x + d.dx / 16)), y = Math.max(0, Math.min(31, s.y + d.dy / 16));
       this.view.views ??= submapViews(this.view.emu);
@@ -147,7 +164,7 @@ export class SpriteLayer {
   // ---- properties ----
   props(): HTMLElement {
     const s = this.sel, rom = this.rom;
-    if (!s) return h('div', { class: 'ow-info' }, emptyState('Click a sprite, a start position (M, L) or a Koopa Kid\'s place (K1–K3) to select it; drag to move it (8 pixels, 1 with Shift). The sprite slots are the same on every submap: each sprite shows where its code lets it.'));
+    if (!s) return h('div', { class: 'ow-info' }, emptyState('Click a sprite, a start position (M, L) or where a Koopa Kid jumps out (K1–K3) to select it – again for the next one under it; drag to move it (8 pixels, 1 with Shift). The sprite slots are the same on every submap: each sprite shows where its code lets it.'));
     const pos = (x: number, y: number, set: (x: number, y: number) => void) => h('div', { class: 'row' },
       h('label', null, 'X '), hexInput(x, 4, (v) => set(v, y)), h('label', null, ' Y '), hexInput(y, 4, (v) => set(x, v)));
     if (s.kind === 'sprite') {
@@ -164,13 +181,15 @@ export class SpriteLayer {
       const p = koopaKidPos(rom, s.k);
       return h('div', { class: 'ow-info' },
         h('div', null, h('b', null, `Koopa Kid ${s.k + 1}`), h('span', { class: 'hint' }, ` · tile ${hex(KOOPA_TILE + s.k, 2)}`)),
-        h('div', { class: 'hint' }, `Jumps out here when Mario stands on its tile (paint tile ${hex(KOOPA_TILE + s.k, 2)} on layer 1); where Mario goes after losing to it is set in the Overworld links mode.`),
-        pos(p.x, p.y, (x, y) => this.edit(`Koopa Kid ${s.k + 1}: moved`, () => setKoopaKidPos(rom, s.k, { x, y }))));
+        h('div', { class: 'hint' }, `Jumps out here when Mario stands on its tile (paint tile ${hex(KOOPA_TILE + s.k, 2)} on layer 1); its place, where Mario goes after losing to it, is set in the Overworld links mode.`),
+        pos(p.x, p.y, (x, y) => this.edit(`Koopa Kid ${s.k + 1}: jumps out elsewhere`, () => setKoopaKidPos(rom, s.k, { x, y }))));
     }
-    const st = readStart(rom, s.player);
+    const st = readStart(rom, s.player), set = (p: Partial<typeof st>) => this.edit(`${PLAYERS[s.player]}'s start: moved`, () => writeStart(rom, s.player, { ...st, ...p }));
     return h('div', { class: 'ow-info' },
       h('div', null, h('b', null, `${PLAYERS[s.player]}'s start`)),
-      h('div', { class: 'hint' }, `A new game starts on ${MAP_NAMES[st.submap] ?? `submap ${st.submap}`} at ${hex(st.x, 2)},${hex(st.y, 2)} – drag it to another tile.`));
+      h('div', { class: 'prop' }, h('label', null, 'Submap'), select(MAP_NAMES.map((n, i) => [i, n] as [number, string]), st.submap, (v) => set({ submap: v }))),
+      h('div', { class: 'row' }, h('label', null, 'Tile X '), hexInput(st.x, 2, (v) => set({ x: v }), 0x1f), h('label', null, ' Y '), hexInput(st.y, 2, (v) => set({ y: v }), 0x1f)),
+      h('div', { class: 'hint' }, 'A new game starts here – drag it to another tile (its submap then the one the tile is on).'));
   }
 }
 

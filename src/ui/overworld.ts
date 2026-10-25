@@ -160,7 +160,7 @@ export class OverworldView {
     this.scroller.addEventListener('dblclick', (e) => this.onDouble(e));
     this.scroller.addEventListener('mouseleave', () => { if (!this.drag) { this.hover = null; this.updateStatus(); this.paint(); } });
     window.addEventListener('mousemove', (e) => this.onMove(e));
-    window.addEventListener('mouseup', () => this.onUp());
+    window.addEventListener('mouseup', (e) => this.onUp(e));
     attachPanZoom(this.scroller, () => this.zoom, (z, ax, ay) => this.setZoom(z, ax, ay));
     this.eventsSlider.addEventListener('input', () => this.setProgress(+this.eventsSlider.value));
     this.eventsSlider.addEventListener('change', () => this.eventsSlider.blur()); // the keys step on
@@ -439,12 +439,9 @@ export class OverworldView {
     return { x: Math.floor((e.clientX - rc.left + this.scroller.scrollLeft) / this.zoom), y: Math.floor((e.clientY - rc.top + this.scroller.scrollTop) / this.zoom) };
   }
 
-  cell(e: MouseEvent): { x: number; y: number } {
-    const rc = this.scroller.getBoundingClientRect();
-    const px = (e.clientX - rc.left + this.scroller.scrollLeft) / this.zoom;
-    const py = (e.clientY - rc.top + this.scroller.scrollTop) / this.zoom;
-    const s = this.cellSize;
-    return { x: Math.floor(px / s), y: Math.floor(py / s) };
+  cell(e: MouseEvent, s = this.cellSize): { x: number; y: number } {
+    const p = this.point(e);
+    return { x: Math.floor(p.x / s), y: Math.floor(p.y / s) };
   }
 
   // same buttons as in the level editor: click/drag takes tiles into the brush, right-click/Shift+click paints
@@ -470,8 +467,7 @@ export class OverworldView {
   // tiles are layer 1's 16x16 cells in every mode
   onDouble(e: MouseEvent): void {
     if (e.target !== this.scroller && e.target !== this.canvas) return;
-    const rc = this.scroller.getBoundingClientRect();
-    const x = Math.floor((e.clientX - rc.left + this.scroller.scrollLeft) / this.zoom / 16), y = Math.floor((e.clientY - rc.top + this.scroller.scrollTop) / this.zoom / 16);
+    const { x, y } = this.cell(e, 16);
     if (x < 0 || y < 0 || x >= 32 || y >= 32) return;
     const i = l1Index(this.region, x, y), tl = this.tls[i];
     if (!isLevelTile(this.l1[i]) || !tl) return;
@@ -497,9 +493,9 @@ export class OverworldView {
     this.paint();
   }
 
-  onUp(): void {
+  onUp(e: MouseEvent): void {
     if (this.links.drag) { this.links.up(); return; }
-    if (this.sprites.drag) { this.sprites.up(); return; }
+    if (this.sprites.drag) { const p = this.point(e); this.sprites.up(p.x, p.y); return; }
     const d = this.drag;
     if (!d) return;
     this.drag = null;

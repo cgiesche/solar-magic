@@ -106,6 +106,7 @@ export const RAM = {
   owTile: 0x13c1, // the layer 1 tile Mario stands on
   owSubmap: 0x13c3, // the submap the overworld is drawing (an exit path changes it)
   owSpriteNum: 0x0de5, owSpriteZ: 0x0e55, // per overworld sprite slot (16): the sprite, its height (low byte)
+  owSpriteXLo: 0x0e35, owSpriteXHi: 0x0e65, owSpriteYLo: 0x0e45, owSpriteYHi: 0x0e75, // per slot: its pixel position
   koopaKid: 0x0ef6, // the Koopa Kid of tiles 49–4B Mario met (0–2, owlinks.ts)
   koopaKidSlot: 0x0ef7, // $80 | its overworld sprite slot while it is there, 0 none
   owProcess: 0x13d9, // what the overworld is doing: Mario standing, walking, switching submaps …

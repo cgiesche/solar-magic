@@ -52,7 +52,7 @@ const rom = new Rom(await editorImage());
   writeOwSprite(r, 10, { ...boo, x: boo.x + 0x40, y: boo.y - 0x18 });
   writeOwSprite(r, 9, { num: boo.num, x: 0x100, y: 0x100 });
   const w = emu.load(0, 0).wram;
-  const slot = (k: number) => ({ num: w[RAM.owSpriteNum + 3 + k], x: w[0x0e35 + 3 + k] | (w[0x0e65 + 3 + k] << 8), y: w[0x0e45 + 3 + k] | (w[0x0e75 + 3 + k] << 8) });
+  const slot = (k: number) => ({ num: w[RAM.owSpriteNum + 3 + k], x: w[RAM.owSpriteXLo + 3 + k] | (w[RAM.owSpriteXHi + 3 + k] << 8), y: w[RAM.owSpriteYLo + 3 + k] | (w[RAM.owSpriteYHi + 3 + k] << 8) });
   check(JSON.stringify(slot(10)) === JSON.stringify({ ...boo, x: boo.x + 0x40, y: boo.y - 0x18 }) && JSON.stringify(slot(9)) === JSON.stringify({ num: boo.num, x: 0x100, y: 0x100 }),
     `loaded where set: slot 10 ${JSON.stringify(slot(10))}, slot 9 ${JSON.stringify(slot(9))}`);
   const after = owSpriteImages(emu, 0, 0);
