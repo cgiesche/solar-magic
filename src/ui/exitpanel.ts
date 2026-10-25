@@ -15,7 +15,7 @@ import { NO_FREE_ENTRANCE, type ExitLeadsTo } from '../core/entrances.ts';
 import { arrivesSlippery, slipperyEntrances } from '../core/slippery.ts';
 import { levelPicker } from './levelpicker.ts';
 import { openTestPlay } from './testplay.ts';
-import { readL1, readTranslevels, isLevelTile, l1XY, translevelToLevel } from '../core/overworld.ts';
+import { readL1, readTranslevels, levelTilesOf, l1XY, translevelToLevel } from '../core/overworld.ts';
 
 const field = (label: string, ...input: (HTMLElement | string)[]) => h('div', { class: 'prop' }, h('label', null, label), ...input);
 const hint = (...txt: (HTMLElement | string)[]) => h('div', { class: 'hint' }, ...txt);
@@ -158,10 +158,10 @@ function createdIn(app: App, idx: number, level: number): void {
 // ---- who leads here ----
 // the overworld's level tiles entering level n (a sub-level: its main level's), each opening the overworld there
 function levelTileRows(app: App, n: number): HTMLElement[] {
-  const tl = mainTranslevel(n) ?? levelTranslevel(app.rom, n);
+  const main = mainTranslevel(n), tl = main ?? levelTranslevel(app.rom, n);
   if (!tl) return [];
-  const l1 = readL1(app.rom), tls = readTranslevels(app.rom), via = mainTranslevel(n) === null ? ` (through level ${hex3(translevelToLevel(tl))})` : '';
-  return [...tls.keys()].filter((i) => tls[i] === tl && isLevelTile(l1[i])).map((i) => {
+  const via = main === null ? ` (through level ${hex3(translevelToLevel(tl))})` : '';
+  return levelTilesOf(readL1(app.rom), readTranslevels(app.rom), tl).map((i) => {
     const { x, y } = l1XY(i);
     return h('div', { class: 'row' }, h('span', null, 'Overworld'), h('span', { class: 'lname' }, `level tile ${i >= 0x400 ? 'submaps' : 'main map'} ${hex2(x)},${hex2(y)}${via}`),
       h('button', { class: 'link-btn', title: 'Show the level tile on the overworld (back returns here)', onclick: () => app.gotoOverworldTile(i) }, 'open'));

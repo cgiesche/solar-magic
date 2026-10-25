@@ -233,6 +233,13 @@ export function sharedTranslevels(l1: Uint8Array, t: Uint8Array): Map<number, nu
   return tiles;
 }
 
+// the layer 1 tiles (l1Index) entering translevel tl
+export function levelTilesOf(l1: ArrayLike<number>, t: ArrayLike<number>, tl: number): number[] {
+  const out: number[] = [];
+  for (let i = 0; i < t.length; i++) if (tl && t[i] === tl && isLevelTile(l1[i])) out.push(i);
+  return out;
+}
+
 // the levels a level tile can enter (001–024, 101–13B: translevels 1–5F)
 export const enterableLevels = (): number[] => Array.from({ length: MAX_TRANSLEVEL }, (_, k) => translevelToLevel(k + 1));
 

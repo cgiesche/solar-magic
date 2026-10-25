@@ -282,7 +282,6 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
       if (!ow) {
         ow = new OverworldView(app);
         ow.onOpenLevel = async (n) => { if (await setWorkspace('level')) app.openLevel(n); };
-
         ow.onNav = () => nav?.mark();
       }
       owRight.replaceChildren(ow.side);

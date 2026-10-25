@@ -7,7 +7,7 @@ import {
   placeTile, sharedTranslevels, enterableLevels, translevelToLevel, nameCode, setNameCode, splitNameCode, joinNameCode, nameWord, levelName, NAME_PART_COUNTS, MAP_NAMES,
   translevelUse, resetTranslevel, baseEvent, setBaseEvent, eventNames, exitDirections, setExitDirection, DIR_ARROWS, DIR_NAMES, EXIT_NAMES, NO_EVENT, isNameless,
   initialFlags, setInitialFlags, FLAG, DIR_FLAGS, OW_EVENTS, revealEvents, setRevealEvents, revealAt, revealedTile, revealEventCount,
-  readRevealList, writeRevealList, destroyEffects, destroySettingAt, destroyEvent, setDestroyEvent, readDestroyList, freeTranslevel,
+  readRevealList, writeRevealList, destroyEffects, destroySettingAt, destroyEvent, setDestroyEvent, readDestroyList, freeTranslevel, levelTilesOf,
 } from '../core/overworld.ts';
 import { messageSlots } from '../core/messages.ts';
 import {
@@ -18,8 +18,7 @@ import { isPathKind, PATH_KIND_NAMES, type PathKind } from '../core/owpaths.ts';
 import { LinkLayer } from './owlinkview.ts';
 import { levelTeleports, locationUses, type LevelTeleport } from '../core/owlinks.ts';
 import { tileText } from '../core/owteleport.ts';
-import { ExitGraph } from '../core/exitgraph.ts';
-import { OW_ACTIONS } from '../core/level.ts';
+import { owActionShort } from '../core/level.ts';
 import { TileCache, blit8 } from '../core/render.ts';
 import { hex } from '../core/names.ts';
 import { menuButton } from './menu.ts';
@@ -380,12 +379,13 @@ export class OverworldView {
   }
 
   // what passing the selected level's exits does (per ROM change): the tiles each exit's event changes, the
-  // locations its exits to the overworld teleport to (the levels' exits read only when a location is used)
+  // locations its exits to the overworld teleport to (the levels' exits as the level editor knows them, its open
+  // level as edited; read only when a location is used)
   private exitInfo: { gen: number; tl: number; changes: ExitChanges[]; teleports: LevelTeleport[] } | null = null;
   exitResults(tl: number): { changes: ExitChanges[]; teleports: LevelTeleport[] } {
     const rom = this.app.rom;
     if (this.exitInfo?.gen !== rom.gen || this.exitInfo.tl !== tl) {
-      const teleports = locationUses(rom).size ? levelTeleports(rom, new ExitGraph(rom), tl) : [];
+      const teleports = locationUses(rom).size ? levelTeleports(rom, this.app.entrances.graph(), tl) : [];
       this.exitInfo = { gen: rom.gen, tl, changes: exitChanges(rom, tl), teleports };
     }
     return this.exitInfo;
@@ -453,7 +453,8 @@ export class OverworldView {
     this.paint();
   }
 
-  // a double click on a level tile opens its level (the overworld's entry in the navigation keeps the tile)
+  // a double click on a level tile opens its level (the overworld's entry in the navigation keeps the tile); level
+  // tiles are layer 1's 16x16 cells in every mode
   onDouble(e: MouseEvent): void {
     if (e.target !== this.scroller && e.target !== this.canvas) return;
     const rc = this.scroller.getBoundingClientRect();
@@ -920,7 +921,7 @@ export class OverworldView {
       const lvl = translevelToLevel(tl), name = tl ? levelName(this.app.rom, tl) : '(enters no level)';
       const cur = i === this.selected, warn = shared.has(tl) || !tl;
       const el = h('div', { class: `level-item${cur ? ' current' : ''}`, title: `${name}\n${warn && tl ? 'Another level tile enters this level too\n' : ''}Click: select · Double click: open in the level editor`,
-        onclick: () => this.selectTile(i, true), ondblclick: () => { if (tl) this.onOpenLevel(lvl); } },
+        onclick: () => this.selectTile(i, true), ondblclick: () => { if (tl) { this.selectTile(i, false); this.onOpenLevel(lvl); } } },
         tl ? hex(lvl, 3) : '---', h('span', { class: 'lname' }, ` ${name}`), warn ? h('span', { class: 'warn-text' }, ' ⚠') : null);
       items.push(el);
       if (cur) setTimeout(() => el.scrollIntoView({ block: 'nearest' }), 0);
@@ -988,7 +989,7 @@ export class OverworldView {
   levelInfo(i: number): HTMLElement {
     const rom = this.app.rom, tl = this.tls[i], { x, y } = l1XY(i);
     const where = (k: number) => { const p = l1XY(k); return `${k >= 0x400 ? 'submaps' : 'main map'} ${hex(p.x, 2)},${hex(p.y, 2)}`; };
-    const others = this.tls.reduce<number[]>((a, v, k) => (v && v === tl && k !== i && isLevelTile(this.l1[k]) ? [...a, k] : a), []);
+    const others = levelTilesOf(this.l1, this.tls, tl).filter((k) => k !== i);
     const onMap = (t: number) => this.tls.findIndex((v, k) => v === t && k !== i && isLevelTile(this.l1[k]));
     const levels = enterableLevels();
     const choose = levelPicker(this.app, tl ? translevelToLevel(tl) : levels[0], (lvl) => {
@@ -1037,7 +1038,7 @@ export class OverworldView {
     return [
       h('div', { class: 'hint' }, 'Passing it (outlined on the map):'),
       ...changes.map((c) => h('div', { class: 'hint' }, `${EXIT_NAMES[c.exit]}: event ${hex(c.event, 2)} changes ${c.l1.length + c.l2.length ? `${c.l1.length ? `${c.l1.length} layer 1` : ''}${c.l1.length && c.l2.length ? ' and ' : ''}${c.l2.length ? `${c.l2.length} layer 2` : ''} tiles (${where(c.l1, c.l2)})` : 'nothing'}`)),
-      ...teleports.map((t) => h('div', { class: 'hint' }, `Exit to the overworld (entrance ${hex(t.entrance, 3)}, ${(OW_ACTIONS.find(([a]) => a === t.action)?.[1] ?? 'action ' + t.action).toLowerCase()}): teleports to ${tileText(t.to)} (dashed)`)),
+      ...teleports.map((t) => h('div', { class: 'hint' }, `Exit to the overworld (entrance ${hex(t.entrance, 3)}, ${owActionShort(t.action)}): teleports to ${tileText(t.to)} (dashed)`)),
     ];
   }
 
