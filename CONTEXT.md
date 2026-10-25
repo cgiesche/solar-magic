@@ -141,12 +141,20 @@ _Avoid_: Patch (for the whole thing), Resource, Download, Project
 The files the user hands in for one package (a single file or a .zip), before anything is installed.
 _Avoid_: Download, patch package
 
+**Callisto project**:
+An upload that is a project of Underrout's build tool Callisto (it has `tools/Callisto/*.toml`), e.g. the Romhack Races baserom: one package with all its parts, its patches applied in the project's order, and the header Callisto generates (`callisto.asm`) provided for its code. Its data meant for a Lunar Magic ROM (BPS of the overworld, title screen, credits) is not part of it.
+_Avoid_: baserom (that is one Callisto project), project import
+
+**Replaced patch**:
+A known third-party patch whose work an editor patch already does (e.g. a faster graphics upload for Lunar Magic's loader); skipped with a note when uploaded instead of installed.
+_Avoid_: redundant patch, built-in patch (that is an editor patch)
+
 **Part**:
 One typed piece of a package: a patch, an UberASM file, a block, a sprite, a song or a graphics part. A package's kind is simply the set of its parts. Which part a file belongs to is decided per file (folder, then content, then extension), never by which other files are in the upload.
 _Avoid_: Component, Item
 
 **Graphics part**:
-A part without code: Map16 tiles (.map16), an ExGFX file or a palette (.pal with its .palmask). Map16 tiles and ExGFX keep the author's tile or number (up to FFF) if it is free, else they take the next free one of the file's range (see ExGFX range).
+A part without code: Map16 tiles (.map16), an ExGFX file, a palette (.pal with its .palmask), the shared palettes' colors it changes (only those differing from the clean game's; set back when the package is removed) or global animation slots (put in free slots of the global list, their frames in its Anim graphic). Map16 tiles and ExGFX keep the author's tile or number (up to FFF) if it is free, else they take the next free one of the file's range (see ExGFX range).
 _Avoid_: Resource, asset
 
 **ExGFX range**:
@@ -162,7 +170,7 @@ An upload with a Lunar Magic level file (.mwl) and no code or songs, applied to 
 _Avoid_: Graphics package, background package
 
 **Sample level**:
-The .mwl of a package that also has code: an example of the package in use. Optionally replaces the current level, with its Map16 tiles, ExGFX and (where certain) sprite numbers rewritten to where the package's parts landed. A level edit, not part of the package.
+The .mwl of a package that also has code: an example of the package in use. Optionally replaces the current level – or, when the package brings several, each its own level number –, with its Map16 tiles, ExGFX and (where certain) sprite numbers rewritten to where the package's parts landed. A level edit, not part of the package.
 _Avoid_: Demo level, test level
 
 **Level setup**:
