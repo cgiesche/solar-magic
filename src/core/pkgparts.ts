@@ -20,7 +20,7 @@ import type { PartKind } from './parts.ts';
 import { uploadSource, effectiveDefines, packUpload, rewriteDefines, type Upload } from './patchpkg.ts';
 import { suggestCalls, placed, type PkgRules } from './pkgmap.ts';
 import { isSongText, songsFromFiles, loadMusicProject, emptyMusicProject, addSongs, addSfx, nextFreeSong, folders as musicFolders, saveMusicProject, hasAmk, musicEntry } from './music.ts';
-import { pixiParts, planPixiUpload, applyPixiUpload, linkedDefines, hexNum, listedNumbers, type PixiPlan } from './pixipkg.ts';
+import { pixiParts, planPixiUpload, applyPixiUpload, linkedDefines, hexNum, type PixiPlan } from './pixipkg.ts';
 import { parseCfg, parseJsonCfg } from './pixi.ts';
 import { detectBlocks, applyBlocks, applyGraphics, routinesCalled, planPackage, plannedFgTiles, type DetectedBlock, type DetectedGraphics, type PackagePlan } from './pkgplan.ts';
 import { loadProject, saveProject, emptyProject, projectFromFiles, addCall, isUberList, type UberProject } from './uberproject.ts';
@@ -469,10 +469,23 @@ export function planInstall(rom: Rom, preview: ReadyPreview, opt: InstallOptions
   };
 }
 
-// the numbers a Callisto project's PIXI list gives its sprites
-function pixiListed(preview: ReadyPreview): Map<string, number> | undefined {
+// the numbers the package's PIXI list gives its sprites, by the sprite's file: a Callisto project's list
+// of its PIXI folder, else any list.txt
+export function pixiListed(preview: ReadyPreview): Map<string, number> {
+  const out = new Map<string, number>();
+  const sprites = partsOf(preview, 'sprite').map((s) => s.file);
   const pixi = preview.callisto?.tools.pixi;
-  return pixi?.list ? listedNumbers(preview.upload!, pixi.list, pixi.folder) : undefined;
+  const lists = pixi ? (pixi.list ? [pixi.list] : []) : [...preview.files.keys()].filter((f) => /(^|\/)list\.txt$/i.test(f));
+  for (const f of lists) {
+    const dir = pixi ? pixi.folder + 'sprites/' : dirOf(f);
+    for (const line of dec.decode(preview.files.get(f)!).split(/\r?\n/)) {
+      const m = /^\s*([0-9a-f]{1,2})\s+(\S+\.(?:json|cfg|asm))\s*$/i.exec(line);
+      if (!m) continue;
+      const file = sprites.find((s) => s === dir + m[2] || s.endsWith('/' + m[2]));
+      if (file && !out.has(file)) out.set(file, parseInt(m[1], 16));
+    }
+  }
+  return out;
 }
 
 // applies every part of the preview (run it in a package recording, pkgreg.ts, which gets `claim`);

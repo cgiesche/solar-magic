@@ -31,7 +31,7 @@ import { recordPackageChange, recordPackageChangeAsync, listPackages, packageArc
 import { allOrNothing } from './romedit.ts';
 import { callistoProject, includesCallistoHeader, sharedCode, type CallistoProject } from './callisto.ts';
 import { replacedPatch, replacedNote } from './replaced.ts';
-import { partAdapter, DETECT_ORDER, PART_ORDER, SHARED_CODE, planInstall, planUpload, applyParts, applyAssignment, patchSource, partsOf, sfxLinkedFiles,
+import { partAdapter, DETECT_ORDER, PART_ORDER, SHARED_CODE, planInstall, planUpload, applyParts, pixiListed, applyAssignment, patchSource, partsOf, sfxLinkedFiles,
   type PreviewPart, type PreviewBase, type ReadyPreview, type Detection, type FileClaim, type InstallOptions, type InstallContext, type ManualAssignment } from './pkgparts.ts';
 
 export type { PreviewPart, ReadyPreview, InstallOptions, ManualAssignment };
@@ -206,7 +206,7 @@ function placeSample(rom: Rom, preview: ReadyPreview, ctx: InstallContext, file:
   const kindOf = (num: number) => (num < 0xc0 ? 'sprites' : num < 0xd0 ? 'shooters' : 'generators');
   const sec = mwlSections(d);
   const used = parseSprites(sec.sprites, 0, false, spriteSizes(rom)).sprites.filter((q) => q.extra & 2);
-  const listed = pixiListNumbers(preview);
+  const listed = new Map([...pixiListed(preview)].map(([f, num]) => [num, f]));
   const sample = sampleLevel(rom, d, into, {
     tile: (t) => { const i = from.indexOf(t); return i >= 0 ? to[i] : ctx.plan.romMap16?.fg.get(t) ?? null; },
     sprite: (num) => {
@@ -245,22 +245,6 @@ function placeSample(rom: Rom, preview: ReadyPreview, ctx: InstallContext, file:
   writeLevelList(rom, n, sample.exanim);
   if (sample.exanim || levelSettings(rom, n)) setLevelSettings(rom, n, sample.exanimSettings);
   return sample;
-}
-
-// a PIXI list.txt in the package: number → the sprite file it names
-function pixiListNumbers(preview: ReadyPreview): Map<number, string> {
-  const out = new Map<number, string>();
-  for (const [f, c] of preview.files) {
-    if (!/(^|\/)list\.txt$/i.test(f)) continue;
-    const dir = f.slice(0, f.length - 'list.txt'.length);
-    for (const line of dec.decode(c).split(/\r?\n/)) {
-      const m = /^\s*([0-9a-f]{1,2})\s+(\S+\.(?:json|cfg|asm))\s*$/i.exec(line);
-      if (!m) continue;
-      const file = partsOf(preview, 'sprite').map((s) => s.file).find((s) => s === dir + m[2] || s.endsWith('/' + m[2]));
-      if (file) out.set(parseInt(m[1], 16), file);
-    }
-  }
-  return out;
 }
 
 const failed = (errors: string[], warnings: string[] = [], prints: string[] = []): InstallResult => ({ ok: false, errors, warnings, prints, pkg: null });

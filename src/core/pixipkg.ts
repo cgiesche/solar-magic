@@ -6,7 +6,7 @@
 
 import type { Rom } from './rom.ts';
 import { scanDefines, rewriteDefines, type Upload } from './patchpkg.ts';
-import { FOLDER, MISC_KINDS, numberRange, sharesNumbers, assignSprite, loadPixiProject, savePixiProject, parseCfg, parseJsonCfg, parsePixiList, type PixiEntry, type PixiProject } from './pixi.ts';
+import { FOLDER, MISC_KINDS, numberRange, sharesNumbers, assignSprite, loadPixiProject, savePixiProject, parseCfg, parseJsonCfg, type PixiEntry, type PixiProject } from './pixi.ts';
 import type { ApplyResult } from './patchapply.ts';
 import type { SpriteFolder } from './pixirt.ts';
 
@@ -58,20 +58,8 @@ export function pixiParts(upload: Upload): Omit<PixiPlan, 'links'> {
   return { sprites, routines };
 }
 
-// the numbers a PIXI list of the upload gives its sprites (`folder`: the PIXI folder the list's paths are
-// in), by the sprite's file in the upload
-export function listedNumbers(upload: Upload, list: string, folder: string): Map<string, number> {
-  const out = new Map<string, number>();
-  const data = upload.files.get(list);
-  if (!data) return out;
-  let entries: PixiEntry[];
-  try { entries = parsePixiList(dec.decode(data)); } catch { return out; }
-  for (const e of entries) out.set(folder + e.file, e.num);
-  return out;
-}
-
 // numbers for the sprites of an upload (those `keep` takes: the sprite parts) and the defines naming them;
-// `listed`: the numbers the package's PIXI list gives them (listedNumbers), taken when free
+// `listed`: the numbers the package's PIXI list gives them (by file), taken when free
 export function planPixiUpload(rom: Rom, upload: Upload, keep: (file: string) => boolean = () => true, listed = new Map<string, number>()): PixiPlan {
   const proj = loadPixiProject(rom) ?? { files: new Map(), list: [] };
   const parts = pixiParts(upload);
