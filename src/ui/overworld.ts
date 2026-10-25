@@ -15,6 +15,7 @@ import {
   paintEventL1, layer1Without, eventL1Tiles, type EventData, type EventRunner, type Rect,
 } from '../core/owevents.ts';
 import { isPathKind, PATH_KIND_NAMES, type PathKind } from '../core/owpaths.ts';
+import { LinkLayer } from './owlinkview.ts';
 import { TileCache, blit8 } from '../core/render.ts';
 import { hex } from '../core/names.ts';
 import { menuButton } from './menu.ts';
@@ -100,16 +101,18 @@ export class OverworldView {
   rom: { l1: Uint8Array; l2: Uint16Array };
   shown: { l1: Uint8Array; l2: Uint16Array };
   tls: Uint8Array;
-  mode: 'l1' | 'l2' = 'l1';
+  mode: 'l1' | 'l2' | 'links' = 'l1';
   showL1 = true;
   showL2 = true;
+  showLinks = false; // the links' arrows also while painting (always in the links mode)
+  links = new LinkLayer(this);
   // event progress: the map shown with events 0 … progress-1 passed (a view setting kept per ROM, not in the ROM)
   progress = 0;
   // the event being painted (both layers shown and painted as after it), -1 none: the map before events
   event = -1;
   // l1: layer 1 as after it (the game's at the event progress just after it), with the stroke being painted
   private ev: { data: EventData; before: Uint16Array; after: Uint16Array; l1: Uint8Array | null; runners: Map<number, EventRunner[]> } | null = null;
-  private views: Rect[] | null = null; // the submaps' views (emulated once)
+  views: Rect[] | null = null; // the submaps' views (emulated once)
   private hoverStep: { kind: StepKind; k: number } | null = null;
   private playing: { start: number; before: HTMLCanvasElement } | null = null;
   private timeline = h('div', { class: 'ow-timeline' });
@@ -235,7 +238,7 @@ export class OverworldView {
     if (this.playing) this.paintPlay(ctx);
     else ctx.drawImage(this.mapCanvas, 0, 0);
     if (this.showGrid) {
-      const step = this.mode === 'l1' ? 16 : 8;
+      const step = this.mode === 'l2' ? 8 : 16;
       ctx.strokeStyle = 'rgba(255,255,255,0.12)';
       ctx.lineWidth = lw;
       ctx.beginPath();
@@ -254,10 +257,17 @@ export class OverworldView {
       ctx.fillText(tl ? hex(translevelToLevel(tl), 3) : '---', x * 16 + 1, y * 16 + 16);
     }
     if (this.showPaths) this.paintPaths(lw);
-    this.paintSelected(lw);
+    if (this.mode === 'links' || this.showLinks) this.links.paint(ctx, lw);
+    if (this.mode !== 'links') this.paintSelected(lw);
     this.paintStep(lw);
-    const s = this.mode === 'l1' ? 16 : 8;
-    if (this.drag?.kind === 'pick') {
+    const s = this.mode === 'l2' ? 8 : 16;
+    if (this.mode === 'links') {
+      if (this.hover) {
+        ctx.strokeStyle = 'rgba(255,255,0,0.9)';
+        ctx.lineWidth = lw;
+        ctx.strokeRect(this.hover.x * 16, this.hover.y * 16, 16, 16);
+      }
+    } else if (this.drag?.kind === 'pick') {
       const r = this.pickRect(this.drag);
       ctx.strokeStyle = '#4cc2ff';
       ctx.fillStyle = 'rgba(76,194,255,0.15)';
@@ -363,7 +373,7 @@ export class OverworldView {
     const rc = this.scroller.getBoundingClientRect();
     const px = (e.clientX - rc.left + this.scroller.scrollLeft) / this.zoom;
     const py = (e.clientY - rc.top + this.scroller.scrollTop) / this.zoom;
-    const s = this.mode === 'l1' ? 16 : 8;
+    const s = this.mode === 'l2' ? 8 : 16;
     return { x: Math.floor(px / s), y: Math.floor(py / s) };
   }
 
@@ -373,6 +383,7 @@ export class OverworldView {
     const rc = this.scroller.getBoundingClientRect();
     if (e.clientX - rc.left > this.scroller.clientWidth || e.clientY - rc.top > this.scroller.clientHeight) return;
     const c = this.cell(e);
+    if (this.mode === 'links') { if (e.button === 0) this.links.down(c.x, c.y); return; }
     if (e.button === 2 || (e.button === 0 && e.shiftKey && !e.ctrlKey)) {
       this.drag = { kind: 'paint', layer: this.mode, x0: c.x, y0: c.y, lastX: c.x, lastY: c.y };
       this.paintAt(c.x, c.y);
@@ -387,11 +398,12 @@ export class OverworldView {
   onMove(e: MouseEvent): void {
     const inside = e.target === this.scroller || e.target === this.canvas;
     const d = this.drag;
-    if (!inside && !d) return;
+    if (!inside && !d && !this.links.drag) return;
     const c = this.cell(e);
     if (this.hover && this.hover.x === c.x && this.hover.y === c.y) return;
     this.hover = c;
     this.updateStatus();
+    if (this.links.drag) { this.links.move(c.x, c.y); return; }
     if (d?.kind === 'paint') {
       const x = d.x0 + Math.floor((c.x - d.x0) / this.brush.w) * this.brush.w, y = d.y0 + Math.floor((c.y - d.y0) / this.brush.h) * this.brush.h;
       if (x !== d.lastX || y !== d.lastY) { d.lastX = x; d.lastY = y; this.paintAt(x, y); return; }
@@ -400,6 +412,7 @@ export class OverworldView {
   }
 
   onUp(): void {
+    if (this.links.drag) { this.links.up(); return; }
     const d = this.drag;
     if (!d) return;
     this.drag = null;
@@ -481,7 +494,7 @@ export class OverworldView {
     const idx = this.mode === 'l2' ? l2Index : l1Index;
     const at = Array.from({ length: r.w * r.h }, (_, i) => idx(this.region, r.x + (i % r.w), r.y + Math.floor(i / r.w)));
     const entries = at.map((i) => src[i]);
-    this.brush = { kind: this.mode, w: r.w, h: r.h, entries, tls: this.mode === 'l1' ? at.map((i, k) => (isLevelTile(entries[k]) ? this.tls[i] : 0)) : undefined };
+    this.brush = { kind: this.mode === 'l2' ? 'l2' : 'l1', w: r.w, h: r.h, entries, tls: this.mode === 'l1' ? at.map((i, k) => (isLevelTile(entries[k]) ? this.tls[i] : 0)) : undefined };
     this.buildSide();
     this.paint();
   }
@@ -510,6 +523,10 @@ export class OverworldView {
     const b = this.brush;
     this.scroller.title = ''; // the kind of the path tile under the mouse
     this.statusStats.textContent = b.kind === this.mode ? `Brush ${b.w}×${b.h}` : '';
+    if (!c && this.mode === 'links') {
+      this.statusText.textContent = 'Drag from a star, pipe or exit path tile to where it leads · Click: select · Drag an end of the selected arrow to move it · Delete removes it';
+      return;
+    }
     if (!c) {
       this.statusText.textContent = this.ev
         ? `Painting layer ${this.mode === 'l1' ? 1 : 2} as after ${eventTitle(this.ev.runners, this.event)} · Click/drag picks up tiles · Right click/Shift+click paints · Esc: the map before events`
@@ -517,7 +534,7 @@ export class OverworldView {
       return;
     }
     let t = `X ${hex(c.x, 2)}  Y ${hex(c.y, 2)}`;
-    if (this.mode === 'l1') {
+    if (this.mode !== 'l2') {
       if (c.x >= 0 && c.y >= 0 && c.x < 32 && c.y < 32) {
         const i = l1Index(this.region, c.x, c.y), shown = this.shown.l1[i];
         t += `  ·  Tile ${hex(shown, 2)}`;
@@ -760,10 +777,10 @@ export class OverworldView {
 
   // ---------------- context bar (map, layer, view, zoom) ----------------
   buildBar(): void {
-    const setMode = (m: 'l1' | 'l2') => {
+    const setMode = (m: 'l1' | 'l2' | 'links') => {
       if (this.mode === m) return;
       this.mode = m;
-      if (this.brush.kind !== m) this.brush = { kind: m, w: 1, h: 1, entries: [m === 'l1' ? 0x56 : 0] };
+      if (m !== 'links' && this.brush.kind !== m) this.brush = { kind: m, w: 1, h: 1, entries: [m === 'l1' ? 0x56 : 0] };
       this.buildBar();
       this.buildSide();
       this.updateStatus();
@@ -778,7 +795,8 @@ export class OverworldView {
       h('span', { class: 'sep' }),
       h('div', { class: 'btn-group' },
         h('button', { class: this.mode === 'l1' ? 'active' : '', title: 'Layer 1 (1)', onclick: () => setMode('l1') }, 'Layer 1 (paths/levels)'),
-        h('button', { class: this.mode === 'l2' ? 'active' : '', title: 'Layer 2 (2)', onclick: () => setMode('l2') }, 'Layer 2 (terrain)')),
+        h('button', { class: this.mode === 'l2' ? 'active' : '', title: 'Layer 2 (2)', onclick: () => setMode('l2') }, 'Layer 2 (terrain)'),
+        h('button', { class: this.mode === 'links' ? 'active' : '', title: 'Links (3): stars, pipes and exit paths leading elsewhere, drawn as arrows; drag from a tile to where it leads', onclick: () => setMode('links') }, 'Links')),
       h('span', { class: 'sep' }),
       menuButton({ label: 'View', items: [
         { heading: 'Layers' },
@@ -788,6 +806,8 @@ export class OverworldView {
         view('Grid', () => this.showGrid, (v) => (this.showGrid = v), undefined, 'G'),
         view('Path tiles', () => this.showPaths, (v) => (this.showPaths = v),
           'Layer 1 tiles Mario walks, climbs (rungs) or swims along (blue), exits to another submap on (red) or stops on without entering a level (cross) – invisible in the game; what each does is learned from the game\'s code'),
+        view('Links', () => this.showLinks, (v) => (this.showLinks = v),
+          'Stars, pipes and exit paths leading elsewhere as arrows (always shown in the Links mode), the places exits to the overworld and Koopa Kids teleport to dashed'),
       ] }),
       h('span', { class: 'sep' }),
       h('label', { class: 'row', title: 'Event progress: the overworld as after loading a save in which the events up to this one passed, applied in their number order as the game does (a view setting, not in the ROM) – painting changes the map before events · , and . : one event back/further' },
@@ -806,7 +826,8 @@ export class OverworldView {
     if (k === 'escape' && this.event >= 0) { this.setEvent(-1); return true; }
     if (k === 'g') { this.showGrid = !this.showGrid; this.paint(); return true; }
     if (k === ',' || k === '.') { this.setProgress(this.progress + (k === ',' ? -1 : 1)); return true; }
-    if (k === '1' || k === '2') { (this.bar.querySelectorAll('.btn-group button')[k === '1' ? 0 : 1] as HTMLButtonElement).click(); return true; }
+    if (k === '1' || k === '2' || k === '3') { (this.bar.querySelectorAll('.btn-group button')[+k - 1] as HTMLButtonElement).click(); return true; }
+    if ((k === 'delete' || k === 'backspace') && this.mode === 'links') return this.links.remove();
     return false;
   }
 
@@ -832,18 +853,29 @@ export class OverworldView {
   // ---------------- right: palette, properties ----------------
   buildSide(): void {
     const scroll = this.palPanel.scrollTop;
-    this.palPanel.replaceChildren(
+    this.palPanel.replaceChildren(...(this.mode === 'links' ? [h('div', { class: 'panel-title' }, 'Links'), this.linkLegend()] : [
       h('div', { class: 'panel-title' }, 'Paint', h('span', { class: 'hint' }, 'Right click/Shift+click paints')),
-      this.mode === 'l1' ? this.l1Palette() : this.l2Palette());
+      this.mode === 'l1' ? this.l1Palette() : this.l2Palette()]));
     this.palPanel.scrollTop = scroll;
     this.buildProps();
   }
 
   private revealListOpen = false;
   buildProps(): void {
+    if (this.mode === 'links') { this.props.replaceChildren(h('div', { class: 'panel-title' }, 'Link'), this.links.props()); return; }
     this.props.replaceChildren(h('div', { class: 'panel-title' }, 'Properties'),
       this.selected >= 0 ? this.tileInfo(this.selected) : emptyState('Select a level tile in the list on the left, or any tile with Alt/Ctrl+click on the map.'),
       this.revealList());
+  }
+
+  // what the links mode's arrows mean
+  private linkLegend(): HTMLElement {
+    const row = (color: string, text: string, dashed = false) => h('div', { class: 'row' },
+      h('span', { class: 'ow-legend', style: `border-top: 2px ${dashed ? 'dashed' : 'solid'} ${color}` }), text);
+    return h('div', { class: 'ow-info' },
+      row('#c58cff', 'Star / pipe warp'), row('#ff6b6b', 'Exit path to another submap'),
+      row('#4cc2ff', 'Location an exit to the overworld teleports to', true), row('#ffa94c', 'Where a Koopa Kid puts Mario', true),
+      h('div', { class: 'hint' }, 'One head: one-way, two heads: both ways.'));
   }
 
   // a layer 1 tile drawn (16x16) for the lists
@@ -1028,7 +1060,7 @@ export class OverworldView {
     }
     draw(at);
     attachRectPick(c, cols, rows, draw, (r) => {
-      this.brush = { kind: this.mode, w: r.w, h: r.h, entries: Array.from({ length: r.w * r.h }, (_, j) => sheetValue(r.x + (j % r.w), r.y + Math.floor(j / r.w))) };
+      this.brush = { kind: this.mode === 'l2' ? 'l2' : 'l1', w: r.w, h: r.h, entries: Array.from({ length: r.w * r.h }, (_, j) => sheetValue(r.x + (j % r.w), r.y + Math.floor(j / r.w))) };
       this.buildSide();
     });
     const out = h('div', null);

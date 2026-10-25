@@ -593,6 +593,29 @@ patch reads its tables; `$1DF6` holds the entry's number instead of its word off
 secondary entrances to the overworld put their location index there. `tools/testowexit.ts` checks that the
 game's star and pipe tiles warp as in the clean game.
 
+The **exit path** table has 0x80 entries, as in Lunar Magic 2.40: walking onto an exit path tile (`$04961C`) the
+game looks for the entry of Mario's pixel position and submap (`$049A24`, 14 entries from the last down: 5 bytes
+where he is – Y, X, submap –, 5 where he goes, 2 the tile he goes to) and puts him there on the other submap,
+walking on. A JSL at `$049A35` (the place SMW Central's hijack map gives for Lunar Magic's) runs the patch's
+search instead; its tables' addresses are at the routine's `+$11`, `+$2C`, `+$48`, where Ankouno's
+`OverworldTables.asm` finds Lunar Magic's (the entries' layout is the game's). The game's 14 entries are copied.
+
+The **Koopa Kids' places** (`$048E49` X, `$048E4F` Y, 3 entries): Mario meeting a Koopa Kid on tile 49, 4A or
+4B and losing to it is put there on his submap afterwards (`$048EBD`); set in place.
+
+**Overworld links** (*Overworld*, *Links*): every star/pipe and exit path entry is drawn as an arrow, one that the
+target leads back from as one arrow both ways. Dragging from a tile to another links them – an exit path tile by an
+exit path (`owpaths.ts` tells which tiles are), with the side its path goes on found from the path tiles around
+it, a Koopa Kid's tile by its place, any other tile by a star/pipe warp; the editor takes the entries the tiles
+had, else unused ones. As all 14 of the game's do, Mario leaves an exit path tile when he is half a tile before
+it on its path's side and comes out half a tile outside the target, on the side away from its path. The locations
+exits to the overworld teleport to are drawn dashed from their levels' tiles and moved by dragging.
+`tools/testowlinks.ts` checks that the clean game's links made again change no byte, that the game's exit path
+routine puts Mario where the clean game does and at each link's target, that an exit path in the table's last
+entry and one made both ways lead to their targets, that walking onto the main map's exit to Yoshi's Island
+arrives as in the clean game, that a star link made warps and that losing to a Koopa Kid puts Mario at its
+place.
+
 ### Translevels per level tile
 
 The game numbers the overworld's level tiles by scanning layer 1 (`$04D7F2`): the n-th level tile enters

@@ -1,0 +1,303 @@
+// The overworld's links on the map (the overworld view's "Links" mode): every star, pipe and exit path link drawn as
+// an arrow (one head one-way, two heads both ways), the locations exits to the overworld teleport to and the Koopa
+// Kids' places as dashed arrows from the tiles they belong to. Dragging from a tile to another links them (an exit
+// path tile by an exit path, the side its path goes on found from the path tiles around it; a Koopa Kid's tile sets
+// its place; any other tile by a star/pipe warp), dragging an end of the selected arrow, a location or a Koopa Kid's
+// place moves it; Delete removes the selected link. Each change is one ROM edit (owlinks.ts).
+
+import type { OverworldView } from './overworld.ts';
+import { h, toast, checkbox, select, emptyState } from './dom.ts';
+import {
+  readLinks, makeLink, removeLink, setBothWays, moveLocation, locationUses, pathSide, koopaTeleport, setKoopaTeleport, opposite,
+  KOOPAS, KOOPA_TILE, type OwLink, type LinkEnd,
+} from '../core/owlinks.ts';
+import { readTeleports, tileText, type OwTile } from '../core/owteleport.ts';
+import { l1Index, l1XY, isLevelTile, DIR_NAMES, DIR_ARROWS } from '../core/overworld.ts';
+import { submapOf, submapViews } from '../core/owevents.ts';
+import { isPathKind } from '../core/owpaths.ts';
+import { levelTranslevel } from '../core/level.ts';
+import { hex } from '../core/names.ts';
+
+// what is selected: a link, a location (a star/pipe entry exits to the overworld teleport to), a Koopa Kid's place
+type Sel = { kind: 'link'; link: OwLink } | { kind: 'location'; i: number } | { kind: 'koopa'; k: number };
+// a drag: a new link from a tile, or moving an end (of the selected link: `b` its target, else its source)
+type Drag = { kind: 'new'; from: number; to: number } | { kind: 'move'; what: Sel; b: boolean; to: number };
+
+const COLORS = { warp: '#c58cff', exit: '#ff6b6b', location: '#4cc2ff', koopa: '#ffa94c' };
+
+export class LinkLayer {
+  sel: Sel | null = null;
+  drag: Drag | null = null;
+  both = true; // new links both ways
+  private data: { gen: number; links: OwLink[]; uses: Map<number, number[]> } | null = null;
+  constructor(private view: OverworldView) {}
+
+  private get rom() { return this.view.app.rom; }
+  // the links of the ROM, the locations entrances teleport to (read again after a ROM change)
+  info(): { links: OwLink[]; uses: Map<number, number[]> } {
+    const gen = this.rom.gen;
+    if (this.data?.gen !== gen) {
+      const kinds = this.view.pathKinds();
+      const isExit = (t: OwTile) => kinds?.[this.view.shown.l1[this.index(t)]] === 'exit';
+      this.data = { gen, links: readLinks(this.rom, isExit), uses: locationUses(this.rom) };
+      // the selection follows the ROM (undo, another change): the link with the same entries, else none
+      const s = this.sel;
+      if (s?.kind === 'link') {
+        const l = this.data.links.find((k) => k.kind === s.link.kind && k.entries[0] === s.link.entries[0]);
+        this.sel = l ? { kind: 'link', link: l } : null;
+      }
+    }
+    return this.data;
+  }
+
+  // ---- tiles ----
+  private index(t: OwTile): number { return l1Index(t.submap ? 1 : 0, t.x, t.y); }
+  private tile(i: number): OwTile {
+    const { x, y } = l1XY(i);
+    this.view.views ??= submapViews(this.view.emu);
+    return { submap: submapOf(this.view.views, i), x, y };
+  }
+  private shown(t: OwTile): boolean { return (t.submap ? 1 : 0) === this.view.region; }
+  private isExitTile(i: number): boolean {
+    const kinds = this.view.pathKinds();
+    if (kinds) return kinds[this.view.shown.l1[i]] === 'exit';
+    return this.info().links.some((l) => l.kind === 'exit' && (this.index(l.a) === i || this.index(l.b) === i));
+  }
+  // an exit path tile's end: the side its path goes on (toward a path tile around it)
+  private exitEnd(i: number): LinkEnd {
+    const t = this.tile(i), kinds = this.view.pathKinds(), region = i >= 0x400 ? 1 : 0;
+    const side = pathSide(t, (x, y) => { const k = kinds?.[this.view.shown.l1[l1Index(region, x, y)]]; return !!k && (isPathKind(k) || k === 'level') && k !== 'exit'; });
+    return { ...t, side };
+  }
+  // the Koopa Kid whose tile i is (-1 none)
+  private koopaAt(i: number): number { const k = this.view.shown.l1[i] - KOOPA_TILE; return k >= 0 && k < KOOPAS ? k : -1; }
+  // the tiles of the shown region each location is teleported to from: the level tiles of the levels whose entrances
+  // teleport there
+  private locationSources(levels: number[]): number[] {
+    const tls = new Set(levels.map((l) => levelTranslevel(this.rom, l)).filter((t) => t > 0)), base = this.view.region * 0x400, out: number[] = [];
+    for (let i = base; i < base + 0x400; i++) if (tls.has(this.view.tls[i]) && isLevelTile(this.view.l1[i])) out.push(i);
+    return out;
+  }
+
+  // ---- drawing ----
+  paint(ctx: CanvasRenderingContext2D, lw: number): void {
+    const { links, uses } = this.info(), sel = this.sel, d = this.drag;
+    const c = (t: { x: number; y: number }) => ({ x: t.x * 16 + 8, y: t.y * 16 + 8 });
+    for (const l of links) {
+      const on = sel?.kind === 'link' && sel.link === l;
+      if (d?.kind === 'move' && d.what.kind === 'link' && d.what.link === l) continue;
+      this.link(ctx, lw, l.a, l.b, COLORS[l.kind], l.both, on, false);
+    }
+    const teleports = readTeleports(this.rom);
+    for (const [i, levels] of uses) {
+      const to = teleports[i].to;
+      if (!to) continue;
+      const on = sel?.kind === 'location' && sel.i === i, moving = d?.kind === 'move' && d.what.kind === 'location' && d.what.i === i;
+      const at = moving ? this.tile(d.to) : to;
+      if (!this.shown(at)) continue;
+      for (const s of this.locationSources(levels)) arrow(ctx, lw, c(l1XY(s)), c(at), COLORS.location, false, true, on, true);
+      marker(ctx, lw, c(at), COLORS.location, on);
+    }
+    for (let k = 0; k < KOOPAS; k++) {
+      const moving = d?.kind === 'move' && d.what.kind === 'koopa' && d.what.k === k;
+      const place = moving ? l1XY(d.to) : koopaTeleport(this.rom, k), on = sel?.kind === 'koopa' && sel.k === k;
+      if (!place) continue;
+      const base = this.view.region * 0x400, from = Array.from({ length: 0x400 }, (_, j) => base + j).filter((j) => this.koopaAt(j) === k);
+      if (!from.length) continue;
+      for (const s of from) arrow(ctx, lw, c(l1XY(s)), c(place), COLORS.koopa, false, true, on, true);
+      marker(ctx, lw, c(place), COLORS.koopa, on);
+    }
+    if (d?.kind === 'new' && d.to !== d.from) {
+      const kind = this.koopaAt(d.from) >= 0 ? 'koopa' : this.isExitTile(d.from) ? 'exit' : 'warp';
+      arrow(ctx, lw, c(l1XY(d.from)), c(l1XY(d.to)), COLORS[kind], this.both && kind !== 'koopa', true, true, kind === 'koopa');
+    } else if (d?.kind === 'move' && d.what.kind === 'link') {
+      const l = d.what.link, to = this.tile(d.to);
+      this.link(ctx, lw, d.b ? l.a : to, d.b ? to : l.b, COLORS[l.kind], l.both, true, false);
+    }
+  }
+  // a link's arrow; an end on the other region shown as a short arrow off its tile, labelled with where it leads
+  private link(ctx: CanvasRenderingContext2D, lw: number, a: OwTile, b: OwTile, color: string, both: boolean, on: boolean, dashed: boolean): void {
+    const c = (t: { x: number; y: number }) => ({ x: t.x * 16 + 8, y: t.y * 16 + 8 });
+    if (this.shown(a) && this.shown(b)) { arrow(ctx, lw, c(a), c(b), color, both, true, on, dashed); return; }
+    const [here, there, out] = this.shown(a) ? [a, b, true] : this.shown(b) ? [b, a, both] : [null, null, false];
+    if (!here || !there) return;
+    const p = c(here), q = { x: p.x + 18, y: p.y - 18 };
+    if (out) arrow(ctx, lw, p, q, color, false, true, on, dashed);
+    else arrow(ctx, lw, q, p, color, false, true, on, dashed);
+    label(ctx, `${both ? '↔' : out ? '→' : '←'} ${tileText(there)}`, q.x + 2, q.y - 2, color);
+  }
+
+  // ---- interaction (cells of layer 1) ----
+  down(x: number, y: number): void {
+    if (x < 0 || y < 0 || x >= 32 || y >= 32) return;
+    const i = l1Index(this.view.region, x, y), s = this.sel;
+    // an end of the selected link, the selected location or Koopa Kid's place: moved
+    if (s?.kind === 'link' && this.shown(s.link.b) && this.index(s.link.b) === i) this.drag = { kind: 'move', what: s, b: true, to: i };
+    else if (s?.kind === 'link' && this.shown(s.link.a) && this.index(s.link.a) === i) this.drag = { kind: 'move', what: s, b: false, to: i };
+    else {
+      const loc = this.locationAt(i), koopa = this.koopaPlaceAt(i), source = this.info().links.some((l) => (this.shown(l.a) && this.index(l.a) === i) || (l.both && this.shown(l.b) && this.index(l.b) === i));
+      if (!source && loc >= 0) { this.sel = { kind: 'location', i: loc }; this.drag = { kind: 'move', what: this.sel, b: true, to: i }; }
+      else if (!source && koopa >= 0) { this.sel = { kind: 'koopa', k: koopa }; this.drag = { kind: 'move', what: this.sel, b: true, to: i }; }
+      else this.drag = { kind: 'new', from: i, to: i };
+    }
+    this.view.paint();
+  }
+  move(x: number, y: number): void {
+    if (!this.drag || x < 0 || y < 0 || x >= 32 || y >= 32) return;
+    this.drag.to = l1Index(this.view.region, x, y);
+    this.view.paint();
+  }
+  up(): void {
+    const d = this.drag;
+    this.drag = null;
+    if (!d) return;
+    if (d.kind === 'new' && d.to === d.from) { this.select(d.from); return; }
+    if (d.kind === 'move' && d.to === this.startOf(d)) { this.view.paint(); this.view.buildProps(); return; }
+    try {
+      if (d.kind === 'new') this.make(d.from, d.to);
+      else this.moveEnd(d);
+    } catch (e) {
+      toast(`Not linked: ${e instanceof Error ? e.message : e}`, 'error');
+    }
+    this.view.paint();
+    this.view.buildProps();
+  }
+  private startOf(d: Extract<Drag, { kind: 'move' }>): number {
+    const w = d.what;
+    if (w.kind === 'link') return this.index(d.b ? w.link.b : w.link.a);
+    if (w.kind === 'location') { const t = readTeleports(this.rom)[w.i].to; return t ? this.index(t) : -1; }
+    const p = koopaTeleport(this.rom, w.k);
+    return p ? l1Index(this.view.region, p.x, p.y) : -1;
+  }
+  // a click: the link, location or Koopa Kid's place at tile i selected (a link's source first)
+  private select(i: number): void {
+    const { links } = this.info();
+    const l = links.find((k) => this.shown(k.a) && this.index(k.a) === i) ?? links.find((k) => this.shown(k.b) && this.index(k.b) === i);
+    const loc = this.locationAt(i), koopa = this.koopaPlaceAt(i) >= 0 ? this.koopaPlaceAt(i) : this.koopaAt(i);
+    this.sel = l ? { kind: 'link', link: l } : loc >= 0 ? { kind: 'location', i: loc } : koopa >= 0 && koopaTeleport(this.rom, koopa) ? { kind: 'koopa', k: koopa } : null;
+    this.view.paint();
+    this.view.buildProps();
+  }
+  private locationAt(i: number): number {
+    const t = readTeleports(this.rom);
+    for (const [k] of this.info().uses) { const to = t[k].to; if (to && this.shown(to) && this.index(to) === i) return k; }
+    return -1;
+  }
+  private koopaPlaceAt(i: number): number {
+    for (let k = 0; k < KOOPAS; k++) { const p = koopaTeleport(this.rom, k); if (p && l1Index(this.view.region, p.x, p.y) === i) return k; }
+    return -1;
+  }
+  private edit(what: string, f: () => void): void { this.view.app.romEdit(what, f); }
+
+  // a new link from tile i to tile j
+  private make(i: number, j: number): void {
+    const a = this.tile(i), b = this.tile(j), k = this.koopaAt(i);
+    if (k >= 0) { this.edit(`Koopa Kid ${k + 1}: place`, () => setKoopaTeleport(this.rom, k, b)); this.sel = { kind: 'koopa', k }; return; }
+    const exit = this.isExitTile(i);
+    const ea: LinkEnd = exit ? this.exitEnd(i) : a, eb: LinkEnd = exit ? this.exitEnd(j) : b;
+    let made: OwLink | null = null;
+    this.edit(`Link ${tileText(a)} ${this.both ? '↔' : '→'} ${tileText(b)}`, () => { made = makeLink(this.rom, exit ? 'exit' : 'warp', ea, eb, this.both); });
+    if (made) this.sel = { kind: 'link', link: made };
+  }
+  // an end moved to tile d.to
+  private moveEnd(d: Extract<Drag, { kind: 'move' }>): void {
+    const w = d.what, to = this.tile(d.to);
+    if (w.kind === 'location') { this.edit(`Location ${hex(w.i, 2)}: moved`, () => moveLocation(this.rom, w.i, to)); return; }
+    if (w.kind === 'koopa') { this.edit(`Koopa Kid ${w.k + 1}: place`, () => setKoopaTeleport(this.rom, w.k, to)); return; }
+    const l = w.link, end: LinkEnd = l.kind === 'exit' ? this.exitEnd(d.to) : to;
+    let made: OwLink | null = null;
+    this.edit(`Link ${tileText(d.b ? l.a : end)} ${l.both ? '↔' : '→'} ${tileText(d.b ? end : l.b)}`, () => {
+      removeLink(this.rom, l);
+      made = makeLink(this.rom, l.kind, d.b ? l.a : end, d.b ? end : l.b, l.both);
+    });
+    if (made) this.sel = { kind: 'link', link: made };
+  }
+  // removes the selected link, or clears the selected Koopa Kid's place
+  remove(): boolean {
+    const s = this.sel;
+    if (!s) return false;
+    if (s.kind === 'location') { toast('A location exits to the overworld teleport to is set in their entrance (level editor) – drag it to move it'); return true; }
+    if (s.kind === 'koopa') this.edit(`Koopa Kid ${s.k + 1}: no place`, () => setKoopaTeleport(this.rom, s.k, null));
+    else this.edit(`Link ${tileText(s.link.a)} removed`, () => removeLink(this.rom, s.link));
+    this.sel = null;
+    this.view.buildProps();
+    return true;
+  }
+
+  // ---- properties ----
+  props(): HTMLElement {
+    const s = this.sel, rom = this.rom;
+    const both = checkbox('New links both ways', 'A link made by dragging leads back too (two entries)', this.both, (on) => (this.both = on));
+    if (!s) return h('div', { class: 'ow-info' }, both, emptyState('Drag from a star, pipe or exit path tile (or a Koopa Kid\'s tile 49–4B) to where it leads. Click an arrow\'s tile to select it, drag its ends to move them, Delete removes it.'));
+    if (s.kind === 'location') {
+      const to = readTeleports(rom)[s.i].to, levels = this.info().uses.get(s.i) ?? [];
+      return h('div', { class: 'ow-info' },
+        h('div', null, h('b', null, `Location ${hex(s.i, 2)}`), ` · ${to ? tileText(to) : 'not set up'}`),
+        h('div', { class: 'hint' }, `Exits to the overworld of level${levels.length > 1 ? 's' : ''} ${levels.map((l) => hex(l, 3)).join(', ')} teleport here (set in the level's entrance) – drag it to move it.`),
+        readTeleports(rom)[s.i].from ? h('div', { class: 'hint' }, 'A star or pipe leads here too: it moves with it.') : null, both);
+    }
+    if (s.kind === 'koopa') {
+      const p = koopaTeleport(rom, s.k);
+      return h('div', { class: 'ow-info' },
+        h('div', null, h('b', null, `Koopa Kid ${s.k + 1}`), ` · tile ${hex(KOOPA_TILE + s.k, 2)}`),
+        h('div', { class: 'hint' }, `Losing to it puts Mario at ${p ? `${hex(p.x, 2)},${hex(p.y, 2)} of his submap` : 'no place (the game\'s 0,0)'} – drag the place to move it.`),
+        h('div', { class: 'row' }, h('button', { onclick: () => this.remove() }, 'No place')), both);
+    }
+    const l = s.link, name = l.kind === 'exit' ? 'Exit path' : 'Star/pipe';
+    const side = (end: 'a' | 'b') => {
+      const e = l[end];
+      return h('div', { class: 'prop' }, h('label', { title: 'The side of the tile its path goes on: Mario leaves the tile walking from there and comes out on the other side' }, `Path at ${tileText(e)}`),
+        select(DIR_NAMES.map((n, d) => [d, `${DIR_ARROWS[d]} ${n}`] as [number, string]), e.side ?? 0, (v) => {
+          this.edit(`${name}: path side`, () => { removeLink(rom, l); this.sel = { kind: 'link', link: makeLink(rom, l.kind, end === 'a' ? { ...l.a, side: v } : l.a, end === 'b' ? { ...l.b, side: v } : l.b, l.both) }; });
+        }));
+    };
+    return h('div', { class: 'ow-info' },
+      h('div', null, h('b', null, name), ` · ${tileText(l.a)} ${l.both ? '↔' : '→'} ${tileText(l.b)}`),
+      h('div', { class: 'hint' }, `Entr${l.entries.length > 1 ? 'ies' : 'y'} ${l.entries.map((i) => hex(i, 2)).join(', ')} of the ${l.kind === 'exit' ? 'exit path' : 'star/pipe'} table`),
+      checkbox('Both ways', 'The target leads back to this tile', l.both, (on) => this.edit(`${name}: ${on ? 'both ways' : 'one-way'}`, () => { this.sel = { kind: 'link', link: setBothWays(rom, l, on) }; })),
+      l.kind === 'exit' ? side('a') : null, l.kind === 'exit' ? side('b') : null,
+      l.kind === 'exit' ? h('div', { class: 'hint' }, `Mario comes out ${DIR_NAMES[opposite(l.b.side ?? 0)]} of the target, walking on.`) : null,
+      h('div', { class: 'row' }, h('button', { title: 'Remove the link (Delete)', onclick: () => this.remove() }, 'Remove link')),
+      both);
+  }
+}
+
+// an arrow from p to q (heads at q, and at p with `both`), drawn over a dark outline; `on`: selected
+function arrow(ctx: CanvasRenderingContext2D, lw: number, p: { x: number; y: number }, q: { x: number; y: number }, color: string, both: boolean, head: boolean, on: boolean, dashed: boolean): void {
+  const dx = q.x - p.x, dy = q.y - p.y, len = Math.hypot(dx, dy);
+  if (len < 1) return;
+  const ux = dx / len, uy = dy / len, s = 4, inset = 5;
+  const a = { x: p.x + ux * (both ? inset : 2), y: p.y + uy * (both ? inset : 2) }, b = { x: q.x - ux * inset, y: q.y - uy * inset };
+  const headAt = (t: { x: number; y: number }, vx: number, vy: number) => { ctx.moveTo(t.x - vx * s - vy * s * 0.7, t.y - vy * s + vx * s * 0.7); ctx.lineTo(t.x, t.y); ctx.lineTo(t.x - vx * s + vy * s * 0.7, t.y - vy * s - vx * s * 0.7); };
+  for (const [c, w] of [['rgba(0,0,0,0.75)', on ? 5 : 3.5], [on ? '#fff' : color, on ? 2.5 : 1.5]] as [string, number][]) {
+    ctx.strokeStyle = c;
+    ctx.lineWidth = w * lw;
+    ctx.setLineDash(dashed ? [4 * lw * 2, 3 * lw * 2] : []);
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    if (head) headAt(b, ux, uy);
+    if (both) headAt(a, -ux, -uy);
+    ctx.stroke();
+  }
+}
+// a place teleported to: a ring on its tile
+function marker(ctx: CanvasRenderingContext2D, lw: number, p: { x: number; y: number }, color: string, on: boolean): void {
+  for (const [c, w] of [['rgba(0,0,0,0.75)', 4], [on ? '#fff' : color, 2]] as [string, number][]) {
+    ctx.strokeStyle = c;
+    ctx.lineWidth = w * lw;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+}
+function label(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, color: string): void {
+  ctx.font = 'bold 7px monospace';
+  const w = ctx.measureText(text).width;
+  ctx.fillStyle = 'rgba(0,0,0,0.75)';
+  ctx.fillRect(x - 1, y - 7, w + 2, 9);
+  ctx.fillStyle = color;
+  ctx.fillText(text, x, y);
+}
