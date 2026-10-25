@@ -12,6 +12,9 @@
 //  - 1 layer 1, 2 layer 2, 3 sprites: 8 header bytes (layer 1: byte 0 bit 0 = custom palette), then the
 //    data as in the ROM; a BG tilemap as layer 2 is 0x800 bytes (bgpack.ts);
 //  - 4 palette: 8 header bytes, 256 colors and the back area color;
+//  - 5 the secondary entrances into the level: 8 header bytes, then 8 bytes each – the entrance's number
+//    (16 bit), its bytes of $05FA00, $05FC00, $05FE00 and of Lunar Magic's two further tables (SEC_ENT 4/5),
+//    one unused byte; its level ($05F800, the high bit in $05FE00) is the level's own;
 //  - 6 ExAnimation: 8 header bytes (byte 0: the settings byte, $03FE00), then the list (exanim.ts);
 //  - 7 ExGFX numbers of the slots (bgpack.ts).
 // Lunar Magic's Direct Map16 objects in layer 1/2 (smwspeedruns' "Level Data Format") become the
@@ -47,6 +50,7 @@ export interface MwlSections {
   palette: Uint8Array | null; // 512 bytes (BGR555 words), color 0 = the back area color
   exanim: ExList | null; // its ExAnimation list
   exanimSettings: number; // its ExAnimation settings byte ($03FE00)
+  entrances: { idx: number; bytes: number[] }[]; // its secondary entrances: number, the bytes of SEC_ENT 1-5
 }
 
 export function mwlSections(d: Uint8Array): MwlSections {
@@ -56,7 +60,7 @@ export function mwlSections(d: Uint8Array): MwlSections {
     if (!off || size < header || off + size > d.length) return null;
     return d.subarray(off + header, off + size);
   };
-  const info = sec(0, 0), l1 = sec(1, 8), l2 = sec(2, 8), spr = sec(3, 8), pal = sec(4, 8), ex = sec(6, 8), exh = sec(6, 0);
+  const info = sec(0, 0), l1 = sec(1, 8), l2 = sec(2, 8), spr = sec(3, 8), pal = sec(4, 8), ent = sec(5, 8), ex = sec(6, 8), exh = sec(6, 0);
   if (!info || info.length < 6 || !l1 || l1.length < 6 || !spr || !spr.length) throw new Error('Lunar Magic level file without level data');
   let palette: Uint8Array | null = null;
   if (pal && pal.length >= 514) {
@@ -76,6 +80,7 @@ export function mwlSections(d: Uint8Array): MwlSections {
     palette,
     exanim: ex && ex.some((b) => b !== 0) ? parseList(ex).list : null,
     exanimSettings: exh && exh.length ? exh[0] & 0xf0 : 0,
+    entrances: ent ? Array.from({ length: ent.length >> 3 }, (_, i) => ({ idx: (ent[i * 8] | (ent[i * 8 + 1] << 8)) & 0x1ff, bytes: [...ent.subarray(i * 8 + 2, i * 8 + 7)] })) : [],
   };
 }
 

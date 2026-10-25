@@ -5,8 +5,10 @@
 // there by the package's overworld (its BPS has the level tile entering 105 here enter 112) – both left out
 // with a note. Accepted, they are written at their numbers with the Map16 tiles and ExGFX numbers where the
 // package's parts landed, their graphics slots, colors and screen exits their own; 13B's ObjecTool objects
-// draw (emulated, ObjecTool installed with the package). Removing the package keeps them (a sample level is
-// not part of it). One .mwl alone stays the sample level replacing the current level.
+// draw (emulated, ObjecTool installed with the package). Their secondary entrances come along: 13B's exit
+// on screen 7 leads into its own entrance 150, which its teleport block (2A4) takes Mario to – at another
+// free number when the ROM uses 150. Removing the package keeps them (a sample level is not part of it).
+// One .mwl alone stays the sample level replacing the current level.
 import { readFileSync } from 'node:fs';
 import { unzipSync, zipSync } from 'fflate';
 import { Rom } from '../src/core/rom.ts';
@@ -16,7 +18,8 @@ import { LevelEmulator, titleScreenLevel } from '../src/core/levelemu.ts';
 import { map16Source } from '../src/core/render.ts';
 import { installEditorPatch, customPalette } from '../src/core/patches.ts';
 import { enableBlocks } from '../src/core/map16ext.ts';
-import { loadLevel, type Level } from '../src/core/level.ts';
+import { loadLevel, readSecondaryEntrance, writeSecondaryEntrance, exitIndex, type Level } from '../src/core/level.ts';
+import { renderLevel } from '../src/core/render.ts';
 import { levelSlots } from '../src/core/gfxslots.ts';
 import { mwlSections, parseLmObjects } from '../src/core/mwl.ts';
 import { DM16_EXT } from '../src/core/patches.ts';
@@ -47,6 +50,23 @@ async function target(): Promise<{ rom: Rom; opt: InstallOptions }> {
   installEditorPatch(rom);
   enableBlocks(rom, blank);
   return { rom, opt: { level: 0x106, blank, tileWords: (t) => src.fg(t), setup: false } };
+}
+
+// the level Mario is in after touching the teleport block (2A4) of level 13B: the tileset and screens the
+// game loaded tell 13B (tileset 7, 14 screens); null when he went elsewhere
+function teleport(rom: Rom): number | null {
+  const emu = new LevelEmulator(rom); emu.boot();
+  const lv = loadLevel(rom, 0x13b);
+  const im = renderLevel(rom, emu.load(0x13b), lv.header.mode, lv.header.screens);
+  const at = [...im.tiles1].indexOf(0x2a4), w = im.geom1.width;
+  const s = emu.snes;
+  emu.load(0x13b);
+  while (s.wram[0x100] !== 0x14) s.runFrame();
+  const px = (at % w) * 16, py = Math.floor(at / w) * 16 - 16;
+  s.wram[0x94] = px & 255; s.wram[0x95] = px >> 8; s.wram[0x96] = py & 255; s.wram[0x97] = py >> 8;
+  let left = false;
+  for (let f = 0; f < 400; f++) { s.runFrame(); if (s.wram[0x100] !== 0x14) left = true; else if (left) break; }
+  return left && s.wram[0x1931] === lv.header.tileset && s.wram[0x5d] === lv.header.screens && s.wram[0x95] === 7 ? 0x13b : null;
 }
 
 // ---------- which are offered ----------
@@ -139,9 +159,29 @@ async function target(): Promise<{ rom: Rom; opt: InstallOptions }> {
   const ran = tool.filter((o) => lr.wram[0x1a400 + ((o.ext - 0x98) >> 3)] & (1 << ((o.ext - 0x98) & 7)));
   check(lr.ok && tool.length > 0 && ran.length === tool.length, `13B: its ${tool.length} ObjecTool objects (${tool.map((o) => o.ext.toString(16).toUpperCase()).join(', ')}) run ObjecTool's code, emulated (${ran.length})`);
 
+  // 13B's secondary entrance 150 (the level file's): its exit on screen 7 leads there, and its teleport
+  // block on that screen takes Mario there (screen 7 of 13B)
+  const ent = l13b.exits.find((x) => x.screen === 7)!;
+  const into = readSecondaryEntrance(rom, exitIndex(0x13b, ent));
+  check(ent.secondary && exitIndex(0x13b, ent) === 0x150 && into.destLevel === 0x13b && into.screen === 7 && into.entranceTile === 1 && into.faceLeft === 1,
+    `13B: its exit on screen 7 into its own secondary entrance 150 (level ${hx(into.destLevel)}, screen ${into.screen})`);
+  check(teleport(rom) === 0x13b, `13B: its teleport block takes Mario into 13B (${hx(teleport(rom) ?? 0)})`);
+
   // removed: the sample levels stay
   await removePackage(rom, listPackages(rom)[0].id, opt.blank);
   check(!listPackages(rom).length && same(loadLevel(rom, 0x105), l105) && same(loadLevel(rom, 0x13b), l13b), 'package removed: 105 and 13B stay (not part of it)');
+}
+
+{
+  // entrance 150 already leads elsewhere in this ROM: 13B's gets a free number, its exit leads there
+  const { rom, opt } = await target();
+  const other = readSecondaryEntrance(rom, 0x1cb);
+  writeSecondaryEntrance(rom, 0x150, other);
+  const r = await installPackage(rom, baserom, { ...opt, plan: planUpload(rom, baserom, opt.blank), samples: [L('13B')] });
+  const ent = loadLevel(rom, 0x13b).exits.find((x) => x.screen === 7)!;
+  const idx = exitIndex(0x13b, ent);
+  check(r.ok && idx !== 0x150 && readSecondaryEntrance(rom, idx).destLevel === 0x13b && JSON.stringify(readSecondaryEntrance(rom, 0x150)) === JSON.stringify(other)
+    && teleport(rom) === 0x13b, `150 taken: 13B's entrance at ${hx(idx)}, its exit and teleport block lead there, 150 kept`);
 }
 
 if (bad) { console.log(`${bad} failed`); process.exit(1); }

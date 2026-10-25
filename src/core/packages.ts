@@ -19,11 +19,13 @@ import { suggestMapping, placed, suggestCalls, packageDocs, type PkgSuggestion }
 import { detectGraphics, includedFiles, applyLevelSetup } from './pkgplan.ts';
 import { setCustomPalette } from './patches.ts';
 import { map16Targets } from './map16file.ts';
-import { mwlSections, sampleLevel, type SampleLevel } from './mwl.ts';
+import { mwlSections, sampleLevel, type SampleLevel, type MwlSections } from './mwl.ts';
 import { writeLevelList, setLevelSettings, levelSettings } from './exanim.ts';
 import { planBgPack, applyBgPack, isLevelImport, parseMwl } from './bgpack.ts';
 import { levelFrames } from './levelgfx.ts';
-import { parseSprites, spriteSizes, loadLevel, type Level } from './level.ts';
+import { parseSprites, spriteSizes, loadLevel, readSecondaryEntrance, writeSecondaryEntrance, decodeSecondaryEntrance, exitIndex, SEC_LEVEL_HI, type Level } from './level.ts';
+import { ExitGraph, isBlank, isOverworldExit } from './exitgraph.ts';
+import { NO_FREE_ENTRANCE } from './entrances.ts';
 import { saveLevel } from './save.ts';
 import { sampleSlots } from './pkgsamples.ts';
 import { assignSlot } from './gfxslots.ts';
@@ -244,7 +246,26 @@ function placeSample(rom: Rom, preview: ReadyPreview, ctx: InstallContext, file:
   }
   writeLevelList(rom, n, sample.exanim);
   if (sample.exanim || levelSettings(rom, n)) setLevelSettings(rom, n, sample.exanimSettings);
+  if (own) placeEntrances(rom, sample, sec.entrances);
   return sample;
+}
+
+// the level file's secondary entrances into a sample level at its own number: at their numbers where those
+// are free (blank, no other level's exit using them) or lead into the level already, else at free ones with
+// the level's exits into them following
+function placeEntrances(rom: Rom, sample: SampleLevel, entrances: MwlSections['entrances']): void {
+  const lv = sample.level, n = lv.number;
+  for (const { idx, bytes: [b, c, d, e, f] } of entrances) {
+    const graph = new ExitGraph(rom, lv);
+    const othersUse = graph.usersOfEntrance(idx).some((x) => x.from !== n);
+    const at = readSecondaryEntrance(rom, idx).destLevel === n && !isBlank(rom, idx) && !isOverworldExit(rom, idx) ? idx
+      : isBlank(rom, idx) && !othersUse ? idx : graph.freeEntrance();
+    if (at === null) { sample.notes.push(`Its secondary entrance ${hx(idx)} not taken over: ${NO_FREE_ENTRANCE}`); continue; }
+    writeSecondaryEntrance(rom, at, decodeSecondaryEntrance([n & 0xff, b, c, (d & ~SEC_LEVEL_HI) | (n & 0x100 ? SEC_LEVEL_HI : 0), e, f]));
+    if (at === idx) continue;
+    for (const x of lv.exits) if (x.secondary && exitIndex(n, x) === idx) x.dest = at;
+    sample.notes.push(`Its secondary entrance ${hx(idx)} is ${hx(at)} here (${hx(idx)} is used)`);
+  }
 }
 
 const failed = (errors: string[], warnings: string[] = [], prints: string[] = []): InstallResult => ({ ok: false, errors, warnings, prints, pkg: null });
