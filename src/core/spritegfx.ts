@@ -194,11 +194,14 @@ export class SlotTracker {
   snapLost = this.lost;
   private hook: MemHook;
   private status = new Uint8Array(SPRITE_SLOTS); // as before the write the hook sees
+  // each OAM entry's Y as before the write the hook sees (the hook comes after the write, and a sprite
+  // may write its Y first)
+  private ys = new Uint8Array(128);
   private s: Snes;
   constructor(s: Snes) {
     this.s = s;
     this.snapOam = s.wram.slice(RAM.oam, RAM.oamEnd);
-    const status = this.status;
+    const status = this.status, ys = this.ys;
     let cur = -1, s0 = 0;
     this.hook = {
       onWramWrite: (a: number, v: number) => {
@@ -226,10 +229,14 @@ export class SlotTracker {
           const e = (a - RAM.oam) >> 2, prev = this.owner[e];
           if (cur >= 0 && prev >= 0 && prev !== cur) {
             this.conflicts.add(prev); this.conflicts.add(cur);
-            const y = s.wram[RAM.oam + 1 + e * 4]; // still the overwritten tile's: the first write of cur
+            // the overwritten tile's Y: a tile the previous sprite left hidden (only its number written, as
+            // the line-guided platforms do) is no loss – No More Sprite Tile Limits gives the next sprite
+            // the entries after the last one shown
+            const y = ys[e];
             if (y < 0xe0 || y >= 0xf8) { this.lost.add(prev); this.lost.add(cur); }
           }
           this.owner[e] = cur;
+          if ((a - RAM.oam) % 4 === 1) ys[e] = v;
         }
       },
     };
@@ -243,6 +250,7 @@ export class SlotTracker {
     this.snapConflicts = this.conflicts = new Set();
     this.snapLost = this.lost = new Set();
     this.status.set(this.s.wram.subarray(SPR.status, SPR.status + SPRITE_SLOTS));
+    for (let e = 0; e < 128; e++) this.ys[e] = this.s.wram[RAM.oam + 1 + e * 4];
     return this.hook;
   };
 }

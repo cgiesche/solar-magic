@@ -1,7 +1,12 @@
 // Sprite memory check (src/core/spritemem.ts): $E0 (three platforms on chains) in level 00C with
 // its sprite memory 00 loses tiles, a suggested value shows all of them; levels keep their
-// own value free of conflicts (no false alarms). Usage: node tools/testspritemem.ts [levels,hex]
+// own value free of conflicts (no false alarms). With No More Sprite Tile Limits (the Romhack Races
+// baserom's) two line-guided platforms ($62) next to each other lose nothing: the next sprite's tiles
+// go where the first wrote only tile numbers of hidden tiles. Usage: node tools/testspritemem.ts [levels,hex]
 import { readFileSync } from 'node:fs';
+import { unzipSync } from 'fflate';
+import { applyPatch } from '../src/core/patchapply.ts';
+import { loadAsar } from '../src/core/asar.ts';
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadLevel, newUid } from '../src/core/level.ts';
@@ -34,6 +39,21 @@ console.log('used sprite memory', candidates.map((m) => m.toString(16)).join(' '
     if (c.conflicts.size || c.live[0] < base.live[0]) fail(`00C: suggestion ${s.toString(16)} does not help`);
     console.log(`00C $E0: ${m.toString(16)} → ${s.toString(16)}`);
   }
+}
+
+// two $62 with No More Sprite Tile Limits: its OAM slots are given out one after the other
+{
+  await loadAsar();
+  const nmstl = new Rom(EDITOR_IMAGE.slice());
+  const zip = unzipSync(new Uint8Array(readFileSync('test/fixtures/rhr-baserom-5.15.zip')));
+  const r = applyPatch(nmstl, { name: 'nmstl', main: 'nmstl.asm', files: new Map([['nmstl.asm', zip['resources/patches/other/no_more_sprite_tile_limits.asm']]]) });
+  if (r.errors.length) fail(`No More Sprite Tile Limits not applied: ${r.errors.join(' ')}`);
+  const e = new LevelEmulator(nmstl); e.boot();
+  const lv = loadLevel(nmstl, 0x105);
+  const wins = [[{ uid: newUid(), num: 0x62, x: 3, y: 4, extra: 0 }, { uid: newUid(), num: 0x62, x: 14, y: 9, extra: 0 }]];
+  const c = checkSpriteMemory({ emu: e, level: 0x105, header: lv.header, bgPointer: bgOf(lv.layer2Pointer) }, 0x08, wins);
+  if (c.conflicts.size || c.live[0] !== 2) fail(`No More Sprite Tile Limits: two $62 with conflicts (${c.conflicts.size}) or not both alive (${c.live[0]})`);
+  else console.log('No More Sprite Tile Limits: two $62, no conflicts');
 }
 
 // levels with their own sprite memory
