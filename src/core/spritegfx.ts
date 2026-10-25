@@ -15,7 +15,7 @@ export interface SpriteImage {
   rgba: Uint32Array;
 }
 
-interface OamTile { i: number; x: number; y: number; tile: number; attr: number; big: boolean }
+export interface OamTile { i: number; x: number; y: number; tile: number; attr: number; big: boolean }
 
 // the game's OAM buffer (copy of $0200-$049F): $0200-$03FF (4 bytes per tile), $0420+i (size/x-high)
 function readOamBuffer(buf: Uint8Array): OamTile[] {
@@ -33,7 +33,7 @@ function readOamBuffer(buf: Uint8Array): OamTile[] {
 }
 
 // tiles the PPU shows (OAM after the last frame's DMA)
-function readPpuOam(oam: Uint8Array): OamTile[] {
+export function readPpuOam(oam: Uint8Array): OamTile[] {
   const out: OamTile[] = [];
   for (let i = 0; i < 128; i++) {
     const hi = (oam[0x200 + (i >> 2)] >> ((i & 3) * 2)) & 3;
@@ -45,7 +45,7 @@ function readPpuOam(oam: Uint8Array): OamTile[] {
   }
   return out;
 }
-const tileKey = (t: OamTile) => `${t.x},${t.y},${t.tile},${t.attr},${t.big}`;
+export const tileKey = (t: OamTile) => `${t.x},${t.y},${t.tile},${t.attr},${t.big}`;
 
 // nums: sprite ids (see spriteId; custom sprites $2xx/$3xx); bytes: extra bytes of custom sprites (else 0)
 export function captureSprites(
@@ -122,7 +122,7 @@ export function captureSprites(
     }
     if (solo && !groups.size && baseline) {
       const extra = readPpuOam(s.oam).filter((t) => !baseline!.has(tileKey(t)));
-      const img = extra.length ? drawTiles(emu, extra) : null;
+      const img = extra.length ? drawTiles(emu.snes, extra) : null;
       const p = placed[0];
       if (img) result.set(p.id, { ...img, ox: img.ox + cx - p.tx * 16, oy: img.oy + cy - p.ty * 16 });
     }
@@ -132,7 +132,7 @@ export function captureSprites(
       // partly off screen or sharing OAM entries with another sprite: retry alone in the first slot
       if (batch.length > 1 && ([...snapConflicts].some((c) => shownBy(c) === i) || w[SPR.offScreenH + i] || w[SPR.offScreenV + i]
         || g.some(t => t.x < 0 || t.x + (t.big ? 16 : 8) > 256 || t.y + (t.big ? 16 : 8) > 224))) return;
-      const img = drawTiles(emu, g);
+      const img = drawTiles(emu.snes, g);
       // offset relative to the spawn tile, compensating for movement since spawn
       if (img) result.set(l.n, { ...img, ox: img.ox + cx - l.x, oy: img.oy + cy - l.y });
     });
@@ -267,8 +267,7 @@ export function rootSlot(spawner: Int8Array, slot: number): number {
 }
 
 // image of OAM tiles; ox/oy: its top-left on the screen
-function drawTiles(emu: LevelEmulator, g: OamTile[]): SpriteImage | null {
-  const s = emu.snes;
+export function drawTiles(s: Snes, g: OamTile[]): SpriteImage | null {
   const obsel = s.ppuRegs[0x01];
   const base = (obsel & 7) << 14;
   const gap = (((obsel >> 3) & 3) + 1) << 13;
@@ -332,7 +331,7 @@ export function captureSpriteAt(
   const rec = record(emu, 3);
   if (!rec || !w[SPR.status + slot] || (num >= 0x200 ? w[SPR.customNum + slot] !== (num & 0xff) : w[SPR.num + slot] !== num)) return null;
   const g = readOamBuffer(rec.snapOam).filter((t) => rec.snapOwner[t.i] === slot);
-  const img = g.length ? drawTiles(emu, g) : null;
+  const img = g.length ? drawTiles(emu.snes, g) : null;
   if (!img) return null;
   // offset relative to the sprite's position (it may have moved), the camera may have scrolled
   const sx = spriteX(w, slot), sy = spriteY(w, slot);
