@@ -104,3 +104,8 @@ function installDialog(app: App, p: ReadyPreview | ManualPreview, body: HTMLElem
 export function showUploadFailure(name: string, reason: string): void {
   modal(`Upload: ${name}`, h('div', null, h('p', null, 'This upload cannot be installed.'), h('p', { class: 'hint' }, reason)), [{ label: 'OK', primary: true }]);
 }
+
+// an upload of replaced patches only: the editor already does their work
+export function showReplaced(name: string, notes: string[]): void {
+  modal(`Upload: ${name}`, h('div', null, h('p', null, 'Nothing to install – the editor already does what this upload does.'), notes.map((n) => h('p', { class: 'hint' }, n))), [{ label: 'OK', primary: true }]);
+}

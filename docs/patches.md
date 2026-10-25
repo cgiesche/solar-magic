@@ -116,6 +116,15 @@ with code it is the package's sample level. Graphics without code and without an
 no part takes (a readme, unknown formats) are listed in the preview as not installed. If nothing at all is
 recognized, the preview says what was found and what is missing.
 
+**Replaced patches:** a known patch whose work an editor patch already does is not installed; the preview notes
+it instead (an upload of nothing else installs nothing). It is recognized by its code, not its file name
+(`src/core/replaced.ts`):
+
+| Patch | Why it is replaced |
+|---|---|
+| Level graphics loading optimization (freeplay; checks `read2($00AACD)` for Lunar Magic's 4bpp loader and replaces its upload loop at `$00AA80` with one DMA) | the editor already uploads level graphics straight to VRAM by DMA |
+| Sprite Scroll Fix (HammerBrother, SMW Central 13675/40600; `$00F713`, `$00F7F4`, `$00F728`, `$00F80C`) | the editor's [sprite scroll fix](#sprite-scroll-fix) is this patch |
+
 **Callisto projects:** an upload with `tools/Callisto/*.toml` – a project of Underrout's build tool
 [Callisto](https://github.com/Underrout/callisto), like the Romhack Races baserom – is one package as its
 configuration says (`src/core/callisto.ts`):
@@ -472,6 +481,25 @@ Magic-saved ROM does in the editor's emulator, not from Lunar Magic's code. The 
 (`$05D915`) and the layer 2 scroll (`$00F79D`, the place Lunar Magic hooks); levels without separate rates
 run the game's own code. The dialog shows what each setting does by letting the level run
 (`src/core/l2scroll.ts`, `tools/testl2scroll.ts`).
+
+### Sprite scroll fix
+
+The game sets `$55`/`$56`, the side new tiles and sprites load on, by where Mario is on the screen (`$00F721`,
+`$00F805`) – and not at all while the camera doesn't follow him (`$1411`/`$1412` clear). Code that moves the camera
+itself (`$1462`/`$1464`: scrolling pipes, auto-scroll UberASM) then has sprites spawn on the side the camera moves
+away from, or not at all. The editor patch, after HammerBrother's *Sprite Scroll Fix*, sets them by the way the
+camera really moved since the frame before (kept while it stands still): hooks at `$00F713` (horizontal levels)
+and `$00F7F4` (the vertical scroll, both kinds of levels), the game's stores at `$00F728`/`$00F80C` skipped; the
+camera's last position in `$7F3683–$7F3686` (`src/core/scrollfix.ts`, `tools/testscrollfix.ts`: the camera
+moved left by hand while Mario holds right on the screen's right side – the clean game spawns nothing at the left
+edge, the editor's ROM the sprites it passes).
+
+The original refuses ROMs without Lunar Magic's VRAM patch: `read1($0FFFE6)` is Lunar Magic's own setting of
+it (00 none, 01 normal, 02/03 widescreen; SMW Central's hijack map), which no other known patch reads – the
+baserom's 88 patches and Retry test `$0FF0A0` and `$0FF0B4` for Lunar Magic instead. Its code doesn't need the
+VRAM patch (the newer release reads Lunar Magic's previous camera position `$7F831F` instead of its own RAM).
+The editor writes nothing at `$0FFFE6` – Lunar Magic and other tools would take it for its VRAM patch – and has the
+fix as its own patch; the original is a replaced patch.
 
 ### Level heights
 
@@ -890,6 +918,7 @@ not compatible with the respective feature.
 | `$00AA50` | BG2/BG3 graphics slots (SMWG) |
 | `$00A9DA`, `$00A01F` | Layer 3 graphics per level (SMWL); RAM `$7F3678` |
 | `$05D915`, `$00F79D`, table `$06FA00` | Layer 2 scroll rates; RAM `$7F3660–$7F3665` |
+| `$00F713`, `$00F728`, `$00F7F4`, `$00F80C` | Sprite scroll fix; RAM `$7F3683–$7F3686` |
 | `$05D928`, `$0586BB`, entrance options and screen exit flags `$009708`, `$0DA532`, `$0DA536`, the slanted pipe to the left `$00D2B2`, the midway entrance `$05D9B8`, `$05D9DE` (also by a screen exit, its flags `$05D7C5`), new-style exits `$05D7CE`, `$05D836`, `$0DA963`, `$0DA9D6`, `$0DA9EF`, `$058091`, tables `$06CA00`, `$05DE00`, `$06FC00`, `$06FE00`, `$06CC00`, `$06CE00`, `$07E800`, `$07EA00`, `$07EC00`, `$07EE00`; finding a block `$00F478`, `$00F492`, `$00F49A`, `$0194D6`, `$019500`, `$019512`, `$01D97B`, `$01D981`, `$0292D9`, `$0292F9`, `$02930A`, `$0295C0`, `$0295EC`, `$0295FD`, `$02A6BA`, `$02A6CB`, `$02BA50`, `$02BA71`, `$02BA82`, `$02D15A`, `$02D18C`, `$02D19D`, `$03D793`; changing a tile `$00BEEC`, `$00BF41`, `$00C079`, `$00C0C6`, `$00C1B1`, `$00C3D3`; mode tables `$00BDA8`, `$00BDE8`, `$00BE28`, `$00BE68`; sprites `$02A82E`, `$02A968`, `$02AA5F`, `$02AB54`, `$02ABD0`, `$02AF3D`, `$02AFA7`, `$01AC3E`, `$02D038`, `$03B86A`; camera `$00F70D`; entrances `$05D7E0`, `$05DA17`; secondary entrances to the overworld `$05D836` | Level heights (Lunar Magic 3.00's entrances, their options); RAM `$7F3666–$7F3677`, `$7F3679`, Lunar Magic's `$13D7`, `$0BF6–$0CF5` |
 | `$008A7F`, `$0087AD`, `$0085E3`, `$0580B0`, `$0580B4`, `$0580BF`, `$0580C3`, `$058730`, `$058770`, `$0587D4`, `$0587DB`, `$05880B`, `$058812`, `$0586F7`, `$058A3A` | VRAM patch (SMWV): tilemaps relocated, taller levels' rows; RAM `$7F0000–$7F3654` |
 | `$048509`, `$048543` | Overworld teleports (the star/pipe table with 0x100 entries) |

@@ -1,7 +1,7 @@
 // Callisto projects (core/callisto.ts): the Romhack Races baserom (test/fixtures/rhr-baserom-5.15.zip)
-// uploads as one package – its patches in patches.toml's order, its UberASM Tool and GPS folders with
-// their lists from setup/lists/, Callisto's initial patch and Lunar Magic BPS left out with a note –
-// and installs: the patches in that order, the UberASM files and GPS blocks including callisto.asm
+// uploads as one package – its patches in patches.toml's order (the two replaced patches left out with a
+// note), its UberASM Tool and GPS folders with their lists from setup/lists/, Callisto's initial patch
+// and Lunar Magic BPS left out with a note – and installs: the patches in that order, the UberASM files and GPS blocks including callisto.asm
 // built, the game still plays. A small made-up project shows the generated header (defines, macros, the
 // project's callisto_header) in a patch, UberASM code and a block, the defines Callisto passes to
 // patches, and removing the package. A lone file including callisto.asm is refused.
@@ -53,12 +53,14 @@ async function target(): Promise<{ rom: Rom; opt: InstallOptions }> {
 // ---------- the Romhack Races baserom ----------
 
 const baserom = new Uint8Array(readFileSync('test/fixtures/rhr-baserom-5.15.zip'));
-const order = (files: Record<string, Uint8Array>) => [...dec.decode(files['tools/Callisto/patches.toml']).matchAll(/"\{patches_folder\}\/([^"]+)"/g)].map((m) => 'resources/patches/' + m[1]);
+// patches.toml's patches but the replaced ones (the GFX load optimization and the sprite scroll fix, replaced.ts)
+const order = (files: Record<string, Uint8Array>) => [...dec.decode(files['tools/Callisto/patches.toml']).matchAll(/"\{patches_folder\}\/([^"]+)"/g)]
+  .map((m) => 'resources/patches/' + m[1]).filter((f) => !/level_gfxload_optimization|sprite_scroll_fix/.test(f));
 {
   const p = ready(inspectUpload('rhr-baserom-5.15.zip', baserom));
   const files = unzipSync(baserom);
   const patches = p.parts.filter((x) => x.kind === 'patch').map((x) => x.file);
-  check(!!p.callisto && patches.length === 88 && patches.join() === order(files).join(), `one package, its 88 patches in patches.toml's order (${patches.length})`);
+  check(!!p.callisto && patches.length === 86 && patches.join() === order(files).join(), `one package, its 86 patches in patches.toml's order (${patches.length})`);
   check(p.parts.some((x) => x.kind === 'uberasm' && x.file === 'tools/UberASMTool/gamemode/retry_gm.asm' && x.folder?.list.gamemode.size === 6), 'its UberASM Tool folder, the list from setup/lists/');
   const blocks = p.parts.filter((x) => x.kind === 'block');
   check(blocks.length === 77 && blocks.every((b) => b.file.startsWith('tools/GPS/blocks/')), `its GPS blocks, those of setup/lists/list_gps.txt (${blocks.length})`);
@@ -70,13 +72,11 @@ const order = (files: Record<string, Uint8Array>) => [...dec.decode(files['tools
     'callisto.asm: the version the project pins (0.6.2), its callisto_header');
 }
 
-// installs – without what other issues of #96 bring: the two patches needing Lunar Magic (#97) and the
-// graphics (#98–#100)
+// installs – without what other issues of #96 bring: the graphics (#98–#100)
 {
   const files = unzipSync(baserom);
   const keep: Record<string, Uint8Array> = {};
   for (const [k, v] of Object.entries(files)) if (!/^(export\/|resources\/(map16|palettes|original_graphics)\/|workspace\/)/.test(k)) keep[k] = v;
-  keep['tools/Callisto/patches.toml'] = enc.encode(dec.decode(files['tools/Callisto/patches.toml']).split('\n').filter((l) => !/sprite_scroll_fix|level_gfxload_optimization/.test(l)).join('\n'));
   const p = ready(inspectUpload('baserom.zip', zip(keep)));
   const { rom, opt } = await target();
   const before = listPatches(rom).length;

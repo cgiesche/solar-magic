@@ -27,6 +27,7 @@ import { parseSprites, spriteSizes, type Level } from './level.ts';
 import { recordPackageChange, recordPackageChangeAsync, listPackages, packageArchive, uninstallPackage, type Package } from './pkgreg.ts';
 import { allOrNothing } from './romedit.ts';
 import { callistoProject, includesCallistoHeader, sharedCode, type CallistoProject } from './callisto.ts';
+import { replacedPatch, replacedNote } from './replaced.ts';
 import { partAdapter, DETECT_ORDER, PART_ORDER, SHARED_CODE, planInstall, planUpload, applyParts, applyAssignment, patchSource, partsOf,
   type PreviewPart, type PreviewBase, type ReadyPreview, type Detection, type FileClaim, type InstallOptions, type InstallContext, type ManualAssignment } from './pkgparts.ts';
 
@@ -39,6 +40,7 @@ export type UploadPreview =
   | ReadyPreview
   | ManualPreview
   | PreviewBase & { status: 'level-import' } // a Lunar Magic level (.mwl): not a package
+  | PreviewBase & { status: 'replaced'; notes: string[] } // only replaced patches: nothing to install
   | PreviewBase & { status: 'failed'; reason: string };
 
 const dec = new TextDecoder();
@@ -109,20 +111,32 @@ export function inspectFiles(fileName: string, files: Map<string, Uint8Array>): 
     found.set(k, kept);
     parts.push(...kept);
   }
+  // patches whose work an editor patch already does: left out with a note
+  const replaced = new Map<string, string>();
+  parts = parts.flatMap((p): PreviewPart[] => {
+    if (p.kind !== 'patch') return [p];
+    const keep = p.candidates.filter((f) => {
+      const r = replacedPatch(dec.decode(files.get(f)!));
+      if (r) replaced.set(f, replacedNote(f, r));
+      return !r;
+    });
+    return keep.length ? [{ ...p, file: keep.includes(p.file) ? p.file : keep[0], candidates: keep }] : [];
+  });
   // the main files of parts left out are not installed
   const mains = new Set(parts.flatMap((p) => (p.kind === 'patch' ? p.candidates : [p.file])));
   for (const p of won.parts) if (!mains.has(p.file)) won.files.delete(p.file);
   parts = PART_ORDER.flatMap((k) => parts.filter((p) => p.kind === k));
   if (!parts.length) {
+    if (replaced.size) return { ...head, status: 'replaced', notes: [...replaced.values()] };
     if (!asm.length) return { ...head, status: 'failed', reason: `Found ${describe(paths)}, but no .asm file (patch, UberASM code, block or sprite), no AddmusicK song (.txt), no graphics and no Lunar Magic level (.mwl).` };
     return { ...head, status: 'failed', reason: `Found ${describe(paths)}, but nothing to install: the .asm files are only included by each other.` };
   }
   // shared code goes with the parts using it; what is left is not installed; a Callisto project's Lunar
   // Magic data and initial patch with a note
   const left = callisto?.left.filter((l) => files.has(l.file)) ?? [];
-  const notes = left.map((l) => `Not part of the package: ${l.file} – ${l.what}.`);
+  const notes = [...left.map((l) => `Not part of the package: ${l.file} – ${l.what}.`), ...replaced.values()];
   const shared = new Set(callisto ? sharedCode(callisto, files) : []);
-  const unclaimed = paths.filter((p) => !won.files.has(p) && !included.has(p) && !shared.has(p) && !left.some((l) => l.file === p) && !(upload && SHARED_CODE.test(p) && /\.(asm|asar)$/i.test(p))).sort();
+  const unclaimed = paths.filter((p) => !won.files.has(p) && !replaced.has(p) && !included.has(p) && !shared.has(p) && !left.some((l) => l.file === p) && !(upload && SHARED_CODE.test(p) && /\.(asm|asar)$/i.test(p))).sort();
   return { ...head, status: 'ready', parts, upload, sample: graphics.mwl, unclaimed, docs, callisto, notes };
 }
 

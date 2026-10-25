@@ -24,7 +24,7 @@ export interface PatchEntry {
   backup: number[]; // SNES addresses of the RATS blocks holding the original bytes of segs
   own: number[]; // pc of the RATS tags of the patch's free space blocks
   check: number; // hash of the patched bytes of segs, to notice later edits
-  kind?: PartKind | 'vram' | 'exanim' | 'l2scroll' | 'levelheight' | 'layer3' | 'owteleport'; // 'vram', 'exanim', 'l2scroll', 'levelheight', 'layer3', 'owteleport': the editor's own VRAM patch, ExAnimation engine, layer 2 scroll rates, level heights, layer 3 graphics and overworld teleports
+  kind?: PartKind | 'vram' | 'exanim' | 'l2scroll' | 'levelheight' | 'layer3' | 'owteleport' | 'scrollfix'; // 'vram', 'exanim', 'l2scroll', 'levelheight', 'layer3', 'owteleport', 'scrollfix': the editor's own VRAM patch, ExAnimation engine, layer 2 scroll rates, level heights, layer 3 graphics, overworld teleports and sprite scroll fix
   srcId?: string; // the sources (zip) in the editor data (rom.extra), if kept
   ram?: RamClaim[]; // free RAM the patch claims
   ramSeen?: [number, number][]; // [snes, size] written with long addressing by its code

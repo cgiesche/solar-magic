@@ -28,6 +28,7 @@ export const RAM = {
   layer3X: 0x22, layer3Y: 0x24,
   scrollH: 0x1411, scrollV: 0x1412, // the camera follows Mario horizontally / vertically
   scrollUp: 0x1404, // the camera may scroll up (Mario flying, climbing …)
+  scrollDir: 0x55, // the side new tiles and sprites load on: 0 left/up, 2 right/down ($56 the same)
   screenMode: 0x5b, // vertical level / layer 2 interaction bits
 
   // Mario
@@ -49,6 +50,7 @@ export const RAM = {
   spritesLocked: 0x9d,
   pMeter: 0x13e4,
   hurtTimer: 0x1497, // invulnerable while not 0
+  noLayer1Contact: 0x185c, // Mario passes through layer 1 while not 0
 
   // player status
   lives: 0x0dbe,
@@ -139,6 +141,8 @@ export const EXIT_FLAGS_RAM: [number, number] = [0x7f3679, 1];
 // the editor patch's (patches.ts): the high bytes of the ExGFX numbers in the graphics slots being uploaded
 // (8), then the one for the next upload of BG2/BG3
 export const EXGFX_HI_RAM: [number, number] = [0x7f367a, 9];
+// the sprite scroll fix's (scrollfix.ts): the camera's position the frame before, X and Y (16-bit each)
+export const SCROLL_FIX_RAM: [number, number] = [0x7f3683, 4];
 // Lunar Magic's conditional Direct Map16 flags (cdm16.ts), which community code sets: 128 bits, low to high
 export const CDM16_FLAGS: [number, number] = [0x7fc060, 16];
 // Lunar Magic's ExAnimation RAM (extrigger.ts), which community code sets and reads: the manual frames (16 bytes),

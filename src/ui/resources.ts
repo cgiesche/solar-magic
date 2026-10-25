@@ -13,7 +13,7 @@ import { loadAsar } from '../core/asar.ts';
 import type { PackagesTab } from './patchmanager.ts';
 import { packagesPane } from './packages.ts';
 import { inspectUpload } from '../core/packages.ts';
-import { openUploadPreview, showUploadFailure } from './upload.ts';
+import { openUploadPreview, showUploadFailure, showReplaced } from './upload.ts';
 import { uberPane } from './uberdialog.ts';
 import { blockPane } from './blockdialog.ts';
 import { pixiPane } from './pixidialog.ts';
@@ -87,6 +87,7 @@ export async function openResources(app: App, tab: ResourceTab = 'packages', opt
     const files = new Uint8Array(await f.arrayBuffer());
     const pv = inspectUpload(f.name, files);
     if (pv.status === 'failed') { showUploadFailure(pv.name, pv.reason); return; }
+    if (pv.status === 'replaced') { showReplaced(pv.name, pv.notes); return; }
     if (pv.status === 'level-import') {
       // not a package: imported into a level from the level editor
       const i = await choose(`Upload: ${pv.name}`, `“${pv.name}” is a Lunar Magic level file (.mwl): a level import, not a package. It changes a level, so it is imported in the level editor – Level → Import LM level file …`,
