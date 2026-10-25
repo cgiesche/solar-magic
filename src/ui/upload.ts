@@ -22,7 +22,9 @@ export function openUploadPreview(app: App, p: ReadyPreview | ManualPreview, don
   if (p.status === 'manual') { openManual(app, p, done); return; }
   const lvl = hex(app.level.number, 3);
   const has = (k: PartKind) => p.parts.some((x) => x.kind === k);
-  const patch = p.parts.find((x) => x.kind === 'patch');
+  // settings for a package's one patch (a Callisto project's are applied as its configuration has them)
+  const patches = p.parts.filter((x) => x.kind === 'patch');
+  const patch = patches.length === 1 && !p.callisto ? patches[0] : undefined;
   let main = patch?.file ?? '';
   const settingsBox = h('div');
   let form = patch ? settingsForm(p.upload!, main, {}) : null;
@@ -40,6 +42,8 @@ export function openUploadPreview(app: App, p: ReadyPreview | ManualPreview, don
     h('table', { class: 'uber-table' }, h('tr', null, h('th', null, 'Part'), h('th', null, 'Name'), h('th', null, 'File')),
       p.parts.map((x) => h('tr', null, h('td', null, partLabel(x.kind)), h('td', null, x.name), h('td', { class: 'mono hint' }, x.file)))),
     docsButton(p.name, p.files),
+    p.callisto ? h('p', { class: 'hint' }, `A Callisto project: its ${patches.length} patches are applied in the order of its patches.toml.`) : '',
+    p.notes.map((n) => h('p', { class: 'hint' }, n)),
     p.unclaimed.length ? h('p', { class: 'hint' }, `Not installed: ${p.unclaimed.map((f) => f + (p.docs.includes(f) ? ' (manual)' : '')).join(', ')}.`) : '',
     defaults.length ? h('p', { class: 'hint' }, `Installing applies the whole package: ${defaults.join(', ')}. Assignments can be changed afterwards in the tabs.`) : '',
     patch && patch.candidates.length > 1 ? h('div', { class: 'prop' }, h('label', null, 'Main file'),

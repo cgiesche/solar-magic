@@ -111,7 +111,8 @@ export function projectToZip(p: BlockProject): Uint8Array {
 export function projectFromZip(data: Uint8Array): BlockProject {
   const raw = new Map<string, Uint8Array>();
   for (const [k, v] of Object.entries(unzipSync(data))) if (!k.endsWith('/') && !k.startsWith('__MACOSX/')) raw.set(k.replace(/\\/g, '/'), v);
-  // a GPS folder may sit one level down; the tool's own files are not needed
+  // a GPS folder may sit one level down; the tool's own files are not needed (callisto.asm and callisto/:
+  // a Callisto project's header and shared code, see callisto.ts)
   let root = '';
   if (!raw.has('list.txt')) {
     const l = [...raw.keys()].find((k) => /^[^/]+\/list\.txt$/i.test(k));
@@ -121,7 +122,7 @@ export function projectFromZip(data: Uint8Array): BlockProject {
   for (const [k, v] of raw) {
     if (!k.startsWith(root)) continue;
     const rel = k.slice(root.length);
-    if (/^(blocks|routines)\//.test(rel)) files.set(rel, v);
+    if (/^(blocks|routines|callisto)\/|^callisto\.asm$/.test(rel)) files.set(rel, v);
   }
   const lt = raw.get(root + 'list.txt');
   return { files, list: lt ? parseBlockList(dec.decode(lt)) : [] };

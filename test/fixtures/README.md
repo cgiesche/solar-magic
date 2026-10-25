@@ -11,3 +11,6 @@ The ROM is **not** in the repository and must be placed here by hand:
 The CI workflow (`.github/workflows/ci.yml`) downloads it from the URL in the secret `SMW_ROM_URL`.
 
 The packages here are third-party resources used as test cases; their authors are listed in `docs/credits.md`.
+`rhr-baserom-5.15.zip` is the Romhack Races baserom 5.15 as released
+(https://github.com/romhackraces/baserom/releases/tag/5.15, `rhr-baserom-5.15.zip`); it has no license, the rights
+stay with the authors of its resources.

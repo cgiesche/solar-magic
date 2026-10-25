@@ -50,21 +50,22 @@ export function actsComment(text: string): number | undefined {
   return m ? parseInt(m[1], 16) : undefined;
 }
 
-const GPS_LINE = /^[0-9a-f]{3,4}(:[0-9a-f]{3})?\s+\S+\.asm/im;
+const GPS_LINE = /^[0-9a-f]{3,4}(:[0-9a-f]{3,4})?\s+\S+\.asm/im;
 // (not an UberASM Tool list, whose level lines look alike)
-export const isGpsList = (path: string, text: string) => /(^|\/)list\.txt$/i.test(path) && GPS_LINE.test(text) && !isUberList(text);
+export const isGpsListText = (text: string) => GPS_LINE.test(text) && !isUberList(text);
+export const isGpsList = (path: string, text: string) => /(^|\/)list\.txt$/i.test(path) && isGpsListText(text);
 
 // a block of the upload; tile (and acts) when a GPS list.txt names it
 export interface DetectedBlock { file: string; tile?: number; acts?: number }
 
 // the blocks of an upload: those a GPS list.txt names, then every other file that is a block by its
-// content
-export function detectBlocks(files: Map<string, Uint8Array>): { blocks: DetectedBlock[]; list: string | null; missing: string[] } {
+// content; gps: the GPS folder and its list when the upload says where they are (a Callisto project)
+export function detectBlocks(files: Map<string, Uint8Array>, gps?: { folder: string; list: string | null } | null): { blocks: DetectedBlock[]; list: string | null; missing: string[] } {
   const blocks: DetectedBlock[] = [];
   const missing: string[] = [];
-  const list = [...files.keys()].find((p) => isGpsList(p, dec.decode(files.get(p)!))) ?? null;
+  const list = gps ? gps.list : [...files.keys()].find((p) => isGpsList(p, dec.decode(files.get(p)!))) ?? null;
   if (list) {
-    const dir = dirOf(list);
+    const dir = gps?.folder ?? dirOf(list);
     const find = (name: string) => {
       const n = name.replace(/\\/g, '/');
       for (const c of [dir + n, dir + 'blocks/' + n]) if (files.has(c)) return c;
@@ -77,6 +78,7 @@ export function detectBlocks(files: Map<string, Uint8Array>): { blocks: Detected
       else if (!f) missing.push(name);
     }
   }
+  if (gps?.list) return { blocks, list, missing }; // (a project's list names all its blocks)
   for (const [f, c] of [...files].sort(([a], [b]) => a.localeCompare(b))) {
     if (!/\.asm$/i.test(f) || blocks.some((b) => b.file === f) || /(^|\/)routines\//i.test(f)) continue;
     const text = dec.decode(c);
@@ -306,10 +308,11 @@ export function routinesCalled(upload: Upload, routines: string[], callers: stri
 
 // adds the blocks to the GPS project, each on its tiles; defines: per block file, defines to set (a
 // sprite's number); tileWords: graphics of a block's tile when the package has none for it (from its
-// acts like). Map16 graphics of the package come with applyGraphics.
+// acts like); extra: further files for the project (a Callisto project's header and shared code). Map16 graphics of the package come with applyGraphics.
 export function applyBlocks(rom: Rom, upload: Upload, blocks: PlannedBlock[], defines: Map<string, Record<string, string>>, routines: string[],
-  blank: number[], tileWords: (acts: number) => number[], drawn: Set<number>, claim: (file: string) => void): ApplyResult {
+  blank: number[], tileWords: (acts: number) => number[], drawn: Set<number>, claim: (file: string) => void, extra?: Map<string, Uint8Array>): ApplyResult {
   const proj: BlockProject = loadBlockProject(rom) ?? { files: new Map(), list: [] };
+  for (const [f, c] of extra ?? []) { proj.files.set(f, c); claim(f); }
   const content = (f: string) => {
     const d = defines.get(f);
     return d ? enc.encode(rewriteDefines(dec.decode(upload.files.get(f)!), d).text) : upload.files.get(f)!;

@@ -26,6 +26,7 @@ import { levelFrames } from './levelgfx.ts';
 import { parseSprites, spriteSizes, type Level } from './level.ts';
 import { recordPackageChange, recordPackageChangeAsync, listPackages, packageArchive, uninstallPackage, type Package } from './pkgreg.ts';
 import { allOrNothing } from './romedit.ts';
+import { callistoProject, includesCallistoHeader, sharedCode, type CallistoProject } from './callisto.ts';
 import { partAdapter, DETECT_ORDER, PART_ORDER, SHARED_CODE, planInstall, planUpload, applyParts, applyAssignment, patchSource, partsOf,
   type PreviewPart, type PreviewBase, type ReadyPreview, type Detection, type FileClaim, type InstallOptions, type InstallContext, type ManualAssignment } from './pkgparts.ts';
 
@@ -70,12 +71,18 @@ export function inspectFiles(fileName: string, files: Map<string, Uint8Array>): 
   if (!files.size) return { ...head, status: 'failed', reason: 'The upload is empty.' };
   const paths = [...files.keys()];
   const asm = paths.filter((p) => /\.(asm|asar)$/i.test(p));
+  // a Callisto project: one package as its configuration says; code of one without it can't be built
+  let callisto: CallistoProject | null;
+  try { callisto = callistoProject(files); } catch (e) { return { ...head, status: 'failed', reason: `Callisto configuration: ${e instanceof Error ? e.message : e}` }; }
+  if (callisto?.missing.length) return { ...head, status: 'failed', reason: `The Callisto project’s patches.toml lists ${callisto.missing.join(', ')}, which the upload lacks.` };
+  const lone = callisto ? undefined : asm.find((p) => includesCallistoHeader(dec.decode(files.get(p)!)) && !files.has(p.replace(/[^/]*$/, '') + 'callisto.asm') && !files.has('callisto.asm'));
+  if (lone) return { ...head, status: 'failed', reason: `“${lone}” is part of a Callisto project (it includes the callisto.asm Callisto generates) – upload the whole project.` };
   const included = includedFiles(files);
   const graphics = detectGraphics(files, included);
   // a Lunar Magic level without code or songs: a level import, not a package
   if (isLevelImport(files)) return { ...head, status: 'level-import' };
   // UberASM Tool folders whose code includes folders next to them: placed by hand (from the suggestion)
-  const sug = asm.length ? suggestMapping(files) : null;
+  const sug = asm.length && !callisto ? suggestMapping(files) : null;
   if (sug?.extra.length) return { ...head, status: 'manual', suggestion: sug };
 
   const docs = packageDocs(files);
@@ -87,10 +94,10 @@ export function inspectFiles(fileName: string, files: Map<string, Uint8Array>): 
     // a patch with a manifest is one patch, whatever else it holds
     if (upload.manifest) {
       const main = upload.manifest.main;
-      return { ...head, name: upload.name, status: 'ready', parts: [{ kind: 'patch', name: upload.name, file: main, candidates: [main] }], upload, sample: null, unclaimed: [], docs };
+      return { ...head, name: upload.name, status: 'ready', parts: [{ kind: 'patch', name: upload.name, file: main, candidates: [main] }], upload, sample: null, unclaimed: [], docs, callisto: null, notes: [] };
     }
   }
-  const d: Detection = { files, paths, upload, included, docs, graphics };
+  const d: Detection = { files, paths, upload, included, docs, graphics, callisto };
   const won = resolveClaims(d);
   // each adapter's parts: those whose main file it won, the ones it keeps
   const found = new Map(DETECT_ORDER.map((k) => [k, won.parts.filter((p) => p.kind === k)]));
@@ -110,9 +117,13 @@ export function inspectFiles(fileName: string, files: Map<string, Uint8Array>): 
     if (!asm.length) return { ...head, status: 'failed', reason: `Found ${describe(paths)}, but no .asm file (patch, UberASM code, block or sprite), no AddmusicK song (.txt), no graphics and no Lunar Magic level (.mwl).` };
     return { ...head, status: 'failed', reason: `Found ${describe(paths)}, but nothing to install: the .asm files are only included by each other.` };
   }
-  // shared code goes with the parts using it; what is left is not installed
-  const unclaimed = paths.filter((p) => !won.files.has(p) && !included.has(p) && !(upload && SHARED_CODE.test(p) && /\.(asm|asar)$/i.test(p))).sort();
-  return { ...head, status: 'ready', parts, upload, sample: graphics.mwl, unclaimed, docs };
+  // shared code goes with the parts using it; what is left is not installed; a Callisto project's Lunar
+  // Magic data and initial patch with a note
+  const left = callisto?.left.filter((l) => files.has(l.file)) ?? [];
+  const notes = left.map((l) => `Not part of the package: ${l.file} – ${l.what}.`);
+  const shared = new Set(callisto ? sharedCode(callisto, files) : []);
+  const unclaimed = paths.filter((p) => !won.files.has(p) && !included.has(p) && !shared.has(p) && !left.some((l) => l.file === p) && !(upload && SHARED_CODE.test(p) && /\.(asm|asar)$/i.test(p))).sort();
+  return { ...head, status: 'ready', parts, upload, sample: graphics.mwl, unclaimed, docs, callisto, notes };
 }
 
 // every file to its best claim: lowest rank, then the adapter first in DETECT_ORDER, a part before a

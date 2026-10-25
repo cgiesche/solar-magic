@@ -29,6 +29,7 @@ import { map16Targets } from './map16file.ts';
 import { ALL, type UberContext } from './uberasm.ts';
 import type { Claim } from './pkgreg.ts';
 import type { Level } from './level.ts';
+import { callistoAsm, toolFiles, PATCH_DEFINES, type CallistoProject } from './callisto.ts';
 
 // ---------- what the adapters detect ----------
 
@@ -52,6 +53,8 @@ export interface ReadyPreview extends PreviewBase {
   sample: string | null; // its sample level (.mwl)
   unclaimed: string[]; // files no part takes: not installed
   docs: string[]; // the package's manuals (readme)
+  callisto: CallistoProject | null; // the Callisto project it is
+  notes: string[]; // what of it is left out, and why
 }
 
 // what every adapter's claims start from (worked out once per upload)
@@ -62,6 +65,7 @@ export interface Detection {
   included: Set<string>; // files some .asm file includes
   docs: string[];
   graphics: DetectedGraphics;
+  callisto: CallistoProject | null; // a Callisto project: its patches and tool folders are as it says
 }
 
 // how sure a claim is, best first; equal ranks go to the adapter first in DETECT_ORDER, a part before a
@@ -109,7 +113,10 @@ const dirOf = (p: string) => (p.includes('/') ? p.slice(0, p.lastIndexOf('/') + 
 const ok: ApplyResult = { ok: true, errors: [], warnings: [], prints: [] };
 // shared code: goes with the parts using it
 export const SHARED_CODE = /(^|\/)(library|routines|other)\//i;
-const loose = (d: Detection) => d.upload?.asmFiles.filter((p) => !d.included.has(p) && !SHARED_CODE.test(p)) ?? [];
+// (in a Callisto project, code is a patch by patches.toml or in a tool's folder)
+const loose = (d: Detection) => d.callisto ? [] : d.upload?.asmFiles.filter((p) => !d.included.has(p) && !SHARED_CODE.test(p)) ?? [];
+// a file in one of a Callisto project's tool folders (UberASM Tool, GPS, PIXI): that tool's
+const inToolFolder = (d: Detection, f: string) => !!d.callisto && Object.values(d.callisto.tools).some((t) => t && f.startsWith(t.folder));
 export const partsOf = <K extends PartKind>(p: ReadyPreview, k: K) => p.parts.filter((x): x is PartOf<K> => x.kind === k);
 
 // ---------- patch ----------
@@ -128,19 +135,41 @@ export function patchSource(upload: Upload, fileName: string, main: string, valu
   return src;
 }
 
+// a patch of a Callisto project: its files with the header Callisto generates, the defines it passes
+function callistoPatch(upload: Upload, p: CallistoProject, main: string): PatchSource {
+  const files = new Map<string, Uint8Array | string>(upload.files);
+  files.set('callisto.asm', callistoAsm(p));
+  return { name: base(main).replace(/\.(asm|asar)$/i, ''), main, files, defines: { ...PATCH_DEFINES }, settings: {} };
+}
+
 const patch: PartAdapter<'patch'> = {
   kind: 'patch',
-  // every .asm that nothing includes and isn't shared code, when no other part takes it
-  claims: (d) => loose(d).map((p) => ({ file: p, rank: RANK.fallback, part: { kind: 'patch', name: d.upload!.name, file: p, candidates: [p] } })),
-  // one patch at most: the main file of the upload, or – when it has no other parts – one to choose
+  // every .asm that nothing includes and isn't shared code, when no other part takes it; a Callisto
+  // project's: those of its patches.toml
+  claims: (d) => d.callisto
+    ? d.callisto.patches.map((p) => ({ file: p, rank: RANK.folder, part: { kind: 'patch', name: base(p).replace(/\.(asm|asar)$/i, ''), file: p, candidates: [p] } }))
+    : loose(d).map((p) => ({ file: p, rank: RANK.fallback, part: { kind: 'patch', name: d.upload!.name, file: p, candidates: [p] } })),
+  // one patch at most: the main file of the upload, or – when it has no other parts – one to choose; a
+  // Callisto project's all, in its order
   finish(mine, others, d) {
+    if (d.callisto) { const order = d.callisto.patches; return mine.sort((a, b) => order.indexOf(a.file) - order.indexOf(b.file)); }
     const files = mine.map((p) => p.file);
     const main = d.upload?.main && files.includes(d.upload.main) ? d.upload.main : files.length === 1 ? files[0] : null;
     if (main) return [{ ...mine.find((p) => p.file === main)!, candidates: [main] }];
     return mine.length && !others.length ? [{ ...mine[0], candidates: files }] : [];
   },
-  apply(rom, [p], { preview, opt }) {
-    return applyPatch(rom, patchSource(preview.upload!, preview.fileName, opt.patch?.main ?? p.file, opt.patch?.values ?? {}));
+  apply(rom, mine, { preview, opt }) {
+    const c = preview.callisto;
+    if (!c) return applyPatch(rom, patchSource(preview.upload!, preview.fileName, opt.patch?.main ?? mine[0].file, opt.patch?.values ?? {}));
+    // a Callisto project's one after the other (their sources are the package's)
+    const warnings: string[] = [], prints: string[] = [];
+    for (const p of mine) {
+      const r = applyPatch(rom, callistoPatch(preview.upload!, c, p.file));
+      warnings.push(...r.warnings.map((w) => `${p.file}: ${w}`));
+      prints.push(...r.prints);
+      if (!r.ok) return { ok: false, errors: r.errors.map((e) => `${p.file}: ${e}`), warnings, prints };
+    }
+    return { ...ok, warnings, prints };
   },
 };
 
@@ -179,12 +208,15 @@ const uberasm: PartAdapter<'uberasm'> = {
   claims(d) {
     if (!d.upload) return [];
     const out: FileClaim[] = [];
-    // an UberASM Tool folder (its list.txt has the sections of UberASM Tool): all its files
-    const list = d.paths.find((p) => /^([^/]+\/)?list\.txt$/i.test(p));
+    // an UberASM Tool folder (its list.txt has the sections of UberASM Tool): all its files; a Callisto
+    // project's where it says, its list maybe elsewhere
+    const tool = d.callisto?.tools.uberasm;
+    const list = tool ? tool.list : d.paths.find((p) => /^([^/]+\/)?list\.txt$/i.test(p));
     if (list && isUberList(dec.decode(d.files.get(list)!))) {
       try {
-        const folder = projectFromFiles(d.files);
-        const root = list.slice(0, list.length - 'list.txt'.length);
+        const root = tool ? tool.folder : list.slice(0, list.length - 'list.txt'.length);
+        const folder = projectFromFiles(tool ? new Map([...d.paths.filter((p) => p.startsWith(root)).map((p) => [p.slice(root.length), d.files.get(p)!] as const), ['list.txt', d.files.get(list)!]]) : d.files);
+        if (tool) out.push({ file: list, rank: RANK.folder });
         const mains = new Map([...folder.files.keys()].flatMap((f) => {
           const m = /^(level|gamemode|overworld)\/[^/]+\.asm$/i.exec(f);
           return m ? [[root + f, m[1].toLowerCase() as UberContext] as const] : [];
@@ -210,6 +242,8 @@ const uberasm: PartAdapter<'uberasm'> = {
       for (const ctx of CONTEXTS) for (const [num, cs] of folder.list[ctx]) for (const c of cs) addCall(proj, ctx, num, c.file, c.bytes);
       for (const k of ['global', 'statusbar', 'macrolib'] as const) proj.list[k] ??= folder.list[k];
     }
+    // a Callisto project's code: its header and the shared code it includes
+    if (preview.callisto) for (const [f, c] of toolFiles(preview.callisto, preview.files)) { proj.files.set(f, c); claim('uberasm', f); }
     // a file: into the folder of its context, with what it needs; level code in the level chosen, game
     // mode and overworld map as the docs say ("0C file.asm"), else 14 and the main map
     for (const p of mine) {
@@ -254,7 +288,7 @@ const block: PartAdapter<'block'> = {
   // named in a GPS list.txt or found by their content
   claims(d) {
     if (!d.upload) return [];
-    const found = detectBlocks(d.files);
+    const found = detectBlocks(d.files, d.callisto?.tools.gps);
     const out: FileClaim[] = found.list ? [{ file: found.list, rank: RANK.content }] : [];
     for (const f of new Set(found.blocks.map((b) => b.file))) out.push({ file: f, rank: RANK.content, part: { kind: 'block', name: base(f), file: f, found: found.blocks.filter((b) => b.file === f) } });
     return out;
@@ -262,7 +296,8 @@ const block: PartAdapter<'block'> = {
   apply(rom, _mine, { preview, opt, plan, sprites }, claim) {
     const defines = sprites ? linkedDefines(sprites) : new Map<string, Record<string, string>>();
     const drawn = new Set(plan.map16 ? map16Targets(plan.map16.data, plan.map16.at) : []);
-    return applyBlocks(rom, preview.upload!, plan.blocks, defines, partRoutines(preview, 'block'), opt.blank, opt.tileWords, drawn, (f) => claim('block', f));
+    const extra = preview.callisto ? toolFiles(preview.callisto, preview.files) : undefined;
+    return applyBlocks(rom, preview.upload!, plan.blocks, defines, partRoutines(preview, 'block'), opt.blank, opt.tileWords, drawn, (f) => claim('block', f), extra);
   },
 };
 
@@ -284,7 +319,9 @@ const sprite: PartAdapter<'sprite'> = {
   claims(d) {
     if (!d.upload) return [];
     const out: FileClaim[] = [];
+    const pixi = d.callisto?.tools.pixi;
     for (const s of pixiParts(d.upload).sprites) {
+      if (d.callisto && !(pixi && s.file.startsWith(pixi.folder))) continue; // (a Callisto project's are in its PIXI folder)
       out.push({ file: s.file, rank: RANK.content, part: { kind: 'sprite', name: s.name, file: s.file } });
       const dir = dirOf(s.file);
       if (dir) for (const p of d.paths) if (p !== s.file && p.startsWith(dir) && !d.docs.includes(p)) out.push({ file: p, rank: RANK.content, of: s.file });
@@ -328,8 +365,9 @@ const GRAPHICS_TYPES: GraphicsType[] = ['map16', 'exgfx', 'pal', 'palmask'];
 const graphics: PartAdapter<'graphics'> = {
   kind: 'graphics',
   // Map16 tiles, ExGFX and palettes; the Lunar Magic level file goes with the package (its sample level)
+  // (in a Callisto project not those in a tool's folder, which are its code's data)
   claims: (d) => [
-    ...GRAPHICS_TYPES.flatMap((type) => d.graphics[type].map((f): FileClaim => ({ file: f, rank: RANK.type, part: { kind: 'graphics', name: base(f), file: f, type } }))),
+    ...GRAPHICS_TYPES.flatMap((type) => d.graphics[type].filter((f) => !inToolFolder(d, f)).map((f): FileClaim => ({ file: f, rank: RANK.type, part: { kind: 'graphics', name: base(f), file: f, type } }))),
     ...(d.graphics.mwl ? [{ file: d.graphics.mwl, rank: RANK.type }] : []),
   ],
   apply: (rom, _mine, { preview, opt, plan }) => applyGraphics(rom, preview.files, plan, opt.blank),

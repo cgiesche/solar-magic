@@ -116,6 +116,28 @@ with code it is the package's sample level. Graphics without code and without an
 no part takes (a readme, unknown formats) are listed in the preview as not installed. If nothing at all is
 recognized, the preview says what was found and what is missing.
 
+**Callisto projects:** an upload with `tools/Callisto/*.toml` – a project of Underrout's build tool
+[Callisto](https://github.com/Underrout/callisto), like the Romhack Races baserom – is one package as its
+configuration says (`src/core/callisto.ts`):
+* its patches are those of `patches.toml`, applied in that order; other `.asm` files outside the tool folders are
+  shared code;
+* its UberASM Tool, GPS and PIXI folders are those of `tools.toml`; a list missing from such a folder is the
+  upload's only list of that tool elsewhere (the baserom keeps them in `setup/lists/`); only the blocks the GPS list
+  names are blocks;
+* `incsrc "callisto.asm"` gets the header Callisto generates (as Callisto 0.6.2's
+  `Builder::generateCallistoAsmFile` writes it): `!CALLISTO_INCLUDED`, `!CALLISTO_ASSEMBLING`,
+  `!CALLISTO_VERSION` (the version the project's setup downloads, else 0.6.2) with `_MAJOR/_MINOR/_PATCH`,
+  `!CALLISTO_ROOT`, `!CALLISTO_PATH`, `!CALLISTO_MODULES`, the macros `%incsrc_file`, `%incbin_file`,
+  `%include_module`, `%call_module`, `%require_callisto_version`, and the project's `callisto_header`
+  (`!CALLISTO_HEADER`). Patches get it with the defines Callisto passes them (`CALLISTO_ASSEMBLING=1`,
+  `CALLISTO_INSERTION_TYPE=Patch`); the UberASM and block projects keep it as `callisto.asm` with the project's
+  shared code in `callisto/`, so they build again later;
+* Callisto's initial patch (FastROM/SA-1) and its BPS of the overworld, title screen and credits (Lunar Magic data)
+  are not part of the package; the preview says so.
+
+A single file including `callisto.asm` without its project (and without a `callisto.asm` of its own) is refused:
+it is part of a Callisto project, upload the whole project.
+
 **Placement:** for blocks and graphics the preview shows where they go in this ROM and how they link up – the
 first tile of the `.map16`, which block each of its tiles shows, the tiles of blocks off the `.map16`, each ExGFX
 file's number and slot – and lets you change all of it before installing. Two blocks on one tile are refused.
@@ -357,12 +379,15 @@ MarioSide:
   then applies. Example: `LDY #$00 : LDA #$25 : STA $1693` turns the block into air for this contact.
 * **X** is the caller's X (sprite index for `SpriteV/H`, fireball index for `MarioFireball`). It
   is restored afterwards.
-* Shared routines from `routines/` are called as `%name()` and inserted only once. The
+* Each block is assembled on its own, as GPS does it (two blocks may define the same macro).
+* Shared routines from `routines/` are called as `%name()` and inserted only once: with the first block
+  using them (after its code, with its defines); later blocks call them there. The
   standard routines of GPS 1.4.5 are built in (`change_map16`, `get_map16`, `spawn_bounce_sprite`,
   `spawn_sprite`, `shatter_block`, `glitter`, `teleport` …, with the same inputs and outputs, written after the game's
   routines); files of the same name in `routines/` take precedence. Likewise the additional defines
   of GPS (`!sprite_extra_bits`, `!bounce_map16_low` … for the custom bounce block patch).
-* `list.txt` as in GPS: `200 block.asm` or `200:130 block.asm` (tile, optionally "acts like").
+* `list.txt` as in GPS: `200 block.asm` or `200:130 block.asm` (tile, optionally "acts like"), a range
+  `332-335:130 block.asm`; GPS's `@dsc` section (Lunar Magic's tile descriptions) is not read.
   Assigning also works in the Map16 editor: *Custom Blocks …* opens the *Blocks* tab with the selected tile.
 
 The blocks depend on the Map16 extension (SMWX), which every ROM the editor opens has. Custom blocks
