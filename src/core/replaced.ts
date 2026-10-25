@@ -23,6 +23,13 @@ export const REPLACED_PATCHES: ReplacedPatch[] = [
     why: 'the editor’s sprite scroll fix, after this patch, already sets the side sprites spawn on by the way the camera moves',
     matches: (c) => ['00f713', '00f7f4', '00f728', '00f80c'].every((a) => org(c, a)),
   },
+  {
+    // moves Lunar Magic's stripe remapping out of NMI: its own at the end of the game loop ($008072), LM's
+    // hijack at $008751 undone; it writes LM's tilemap addresses, which the editor's VRAM layout maps again
+    name: 'VRAM Patch optimization (KevinM)',
+    why: 'the editor’s VRAM layout maps single tile changes itself; this patch’s remapping is Lunar Magic’s and would send them to the wrong tilemap',
+    matches: (c) => org(c, '008072') && org(c, '008751'),
+  },
 ];
 
 // the replaced patch a patch's source is, if any

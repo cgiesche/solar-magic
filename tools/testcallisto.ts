@@ -1,5 +1,5 @@
 // Callisto projects (core/callisto.ts): the Romhack Races baserom (test/fixtures/rhr-baserom-5.15.zip)
-// uploads as one package – its patches in patches.toml's order (the two replaced patches left out with a
+// uploads as one package – its patches in patches.toml's order (the three replaced patches left out with a
 // note), its UberASM Tool and GPS folders with their lists from setup/lists/, Callisto's initial patch
 // and Lunar Magic BPS left out with a note – and installs: the patches in that order, the UberASM files and GPS blocks including callisto.asm
 // built, the game still plays. A small made-up project shows the generated header (defines, macros, the
@@ -11,6 +11,7 @@ import { Rom } from '../src/core/rom.ts';
 import { loadAsar } from '../src/core/asar.ts';
 import { Apu, loadApu } from '../src/core/apu.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
+import { PPU } from '../src/core/ppu.ts';
 import { map16Source } from '../src/core/render.ts';
 import { installEditorPatch } from '../src/core/patches.ts';
 import { enableBlocks } from '../src/core/map16ext.ts';
@@ -55,14 +56,15 @@ async function target(): Promise<{ rom: Rom; opt: InstallOptions }> {
 // ---------- the Romhack Races baserom ----------
 
 const baserom = new Uint8Array(readFileSync('test/fixtures/rhr-baserom-5.15.zip'));
-// patches.toml's patches but the replaced ones (the GFX load optimization and the sprite scroll fix, replaced.ts)
+// patches.toml's patches but the replaced ones (the GFX load optimization, the sprite scroll fix and the VRAM
+// Patch optimization, replaced.ts)
 const order = (files: Record<string, Uint8Array>) => [...dec.decode(files['tools/Callisto/patches.toml']).matchAll(/"\{patches_folder\}\/([^"]+)"/g)]
-  .map((m) => 'resources/patches/' + m[1]).filter((f) => !/level_gfxload_optimization|sprite_scroll_fix/.test(f));
+  .map((m) => 'resources/patches/' + m[1]).filter((f) => !/level_gfxload_optimization|sprite_scroll_fix|vram_optimize/.test(f));
 {
   const p = ready(inspectUpload('rhr-baserom-5.15.zip', baserom));
   const files = unzipSync(baserom);
   const patches = p.parts.filter((x) => x.kind === 'patch').map((x) => x.file);
-  check(!!p.callisto && patches.length === 86 && patches.join() === order(files).join(), `one package, its 86 patches in patches.toml's order (${patches.length})`);
+  check(!!p.callisto && patches.length === 85 && patches.join() === order(files).join(), `one package, its 85 patches in patches.toml's order (${patches.length})`);
   check(p.parts.some((x) => x.kind === 'uberasm' && x.file === 'tools/UberASMTool/gamemode/retry_gm.asm' && x.folder?.list.gamemode.size === 6), 'its UberASM Tool folder, the list from setup/lists/');
   const blocks = p.parts.filter((x) => x.kind === 'block');
   check(blocks.length === 77 && blocks.every((b) => b.file.startsWith('tools/GPS/blocks/')), `its GPS blocks, those of setup/lists/list_gps.txt (${blocks.length})`);
@@ -108,6 +110,25 @@ const order = (files: Record<string, Uint8Array>) => [...dec.decode(files['tools
   for (let f = 0; f < 120; f++) { s.joy1 = 0x0100; s.runFrame(); }
   const x1 = s.wram[0x94] | (s.wram[0x95] << 8);
   check(s.wram[0x100] === 0x14 && x1 > x0 + 32, `the game plays: level 105, Mario runs right (${x0} → ${x1})`);
+  // a tile the game changes (a coin collected, a block hit) changes on screen: the first solid tile in view
+  // made blank by the game's routine ($00BEB0) – its Map16 and its picture
+  {
+    const w = s.wram;
+    const ppu = s.ppu = new PPU(s);
+    for (let f = 0; f < 3; f++) s.runFrame(); // (the scroll registers written)
+    const cx = w[0x1a] | (w[0x1b] << 8), cy = w[0x1c] | (w[0x1d] << 8);
+    const at = (x: number, y: number) => (x >> 8) * 0x1b0 + (y >> 4) * 16 + ((x >> 4) & 15);
+    const tile = (x: number, y: number) => w[0xc800 + at(x, y)] | (w[0x1c800 + at(x, y)] << 8);
+    let tx = -1, ty = -1;
+    for (let y = (cy + 64) & ~15; y < cy + 192 && tx < 0; y += 16) for (let x = (cx + 32) & ~15; x < cx + 224; x += 16) if (tile(x, y) === 0x3f) { tx = x; ty = y; break; }
+    const pic = () => { let p = ''; for (let y = 0; y < 16; y++) p += ppu.frame.subarray((ty - cy - 1 + y) * 256 + tx - cx, (ty - cy - 1 + y) * 256 + tx - cx + 16).join(); return p; };
+    const before = pic();
+    w[0x9a] = tx & 0xff; w[0x9b] = tx >> 8; w[0x98] = ty & 0xff; w[0x99] = ty >> 8; w[0x9c] = 0x02; // blank
+    emu.call(0x00beb0, 0);
+    for (let f = 0; f < 3; f++) s.runFrame();
+    s.ppu = null;
+    check(tx >= 0 && tile(tx, ty) === 0x25 && pic() !== before, `a tile the game changes changes on screen (tile 3F at ${tx},${ty} → ${tile(tx, ty).toString(16)})`);
+  }
   // its PIXI sprite at the number its list gives it (A0), which its donut block (29D) spawns: Mario on
   // the block makes it fall, the game goes on
   const donut = loadPixiProject(rom)?.list.find((e) => e.file === 'sprites/donut_sprite.cfg');

@@ -81,6 +81,7 @@ const dec = new TextDecoder();
 const baserom = unzipSync(new Uint8Array(readFileSync('test/fixtures/rhr-baserom-5.15.zip')));
 const GFXLOAD = 'resources/patches/optimizations/level_gfxload_optimization.asm';
 const SCROLLFIX = 'resources/patches/fixes/sprite_scroll_fix.asm';
+const VRAMOPT = 'resources/patches/optimizations/vram_optimize.asm';
 {
   // by its content, not its name
   const p = inspectUpload('faster.asm', baserom[GFXLOAD]);
@@ -92,14 +93,16 @@ const SCROLLFIX = 'resources/patches/fixes/sprite_scroll_fix.asm';
   check(q.status === 'replaced' && q.notes[0].includes('SpriteScrollFix.asm'), 'the sprite scroll fix uploaded alone: replaced – ' + (q.status === 'replaced' ? q.notes[0] : q.status));
   const other = inspectUpload('fix.asm', enc.encode('org $00F713\n  db $EA\n'));
   check(other.status === 'ready', 'another patch at one of its places: a patch');
+  const v = inspectUpload('vram_optimize.asm', baserom[VRAMOPT]);
+  check(v.status === 'replaced' && v.notes[0].includes('VRAM Patch optimization'), 'the VRAM Patch optimization uploaded alone: replaced – ' + (v.status === 'replaced' ? v.notes[0] : v.status));
 }
 {
   const p = inspectUpload('rhr-baserom-5.15.zip', new Uint8Array(readFileSync('test/fixtures/rhr-baserom-5.15.zip')));
   const patches = p.status === 'ready' ? p.parts.filter((x) => x.kind === 'patch').map((x) => x.file) : [];
   const notes = p.status === 'ready' ? p.notes : [];
-  check(patches.length === 86 && !patches.includes(GFXLOAD) && !patches.includes(SCROLLFIX), `the baserom: both left out of its patches (${patches.length})`);
-  check([GFXLOAD, SCROLLFIX].every((f) => notes.some((n) => n.includes(f)) && !(p.status === 'ready' && p.unclaimed.includes(f))),
-    'each with a note:\n       ' + notes.filter((n) => /gfxload|scroll_fix/.test(n)).join('\n       '));
+  check(patches.length === 85 && ![GFXLOAD, SCROLLFIX, VRAMOPT].some((f) => patches.includes(f)), `the baserom: all three left out of its patches (${patches.length})`);
+  check([GFXLOAD, SCROLLFIX, VRAMOPT].every((f) => notes.some((n) => n.includes(f)) && !(p.status === 'ready' && p.unclaimed.includes(f))),
+    'each with a note:\n       ' + notes.filter((n) => /gfxload|scroll_fix|vram_optimize/.test(n)).join('\n       '));
 }
 
 console.log(bad ? `${bad} failures` : 'all ok');

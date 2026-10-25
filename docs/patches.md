@@ -124,6 +124,7 @@ it instead (an upload of nothing else installs nothing). It is recognized by its
 |---|---|
 | Level graphics loading optimization (freeplay; checks `read2($00AACD)` for Lunar Magic's 4bpp loader and replaces its upload loop at `$00AA80` with one DMA) | the editor already uploads level graphics straight to VRAM by DMA |
 | Sprite Scroll Fix (HammerBrother, SMW Central 13675/40600; `$00F713`, `$00F7F4`, `$00F728`, `$00F80C`) | the editor's [sprite scroll fix](#sprite-scroll-fix) is this patch |
+| VRAM Patch optimization (KevinM; moves Lunar Magic's stripe remapping from NMI to `$008072`, undoes its hijack at `$008751`) | the editor's VRAM layout maps single tile changes itself; this patch's remapping is Lunar Magic's and would send them to the wrong tilemap (a collected coin stays on screen) |
 
 **Callisto projects:** an upload with `tools/Callisto/*.toml` – a project of Underrout's build tool
 [Callisto](https://github.com/Underrout/callisto), like the Romhack Races baserom – is one package as its
