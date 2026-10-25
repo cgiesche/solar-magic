@@ -159,10 +159,10 @@ assert pc() == ${hx(TL_HOOK_END)}
 `;
 
 // Lunar Magic's hijack, detected as OverworldTables.asm does
-export function hasTranslevelTable(rom: Rom): boolean {
+export function hasTranslevelTable(rom: RomRead): boolean {
   return rom.r8(TL_BANK - 1) === 0xa9;
 }
-const tableAt = (rom: Rom) => (rom.r8(TL_BANK) << 16) | rom.r16(TL_PTR);
+const tableAt = (rom: RomRead) => (rom.r8(TL_BANK) << 16) | rom.r16(TL_PTR);
 // the table's block in free space (its payload with the room after it), null: none
 export function translevelTableBlock(rom: Rom): { snes: number; size: number } | null {
   const at = hasTranslevelTable(rom) ? tableAt(rom) : 0;
@@ -182,8 +182,8 @@ export function readTranslevels(rom: Rom): Uint8Array {
 // open one, e.g. the Lunar Magic ROM a BPS makes (cleangame.ts), whose reads may throw; null without
 // Lunar Magic's translevel table
 export function levelTileLevels(r: RomRead): Map<number, number> | null {
-  if (r.r8(TL_BANK - 1) !== 0xa9) return null;
-  const at = (r.r8(TL_BANK) << 16) | r.r16(TL_PTR);
+  if (!hasTranslevelTable(r)) return null;
+  const at = tableAt(r);
   const packed = new Proxy({} as { readonly [i: number]: number }, { get: (_, k) => r.r8(at + Number(k)) });
   const t = lz2Decompress(packed, 0).data;
   const out = new Map<number, number>();

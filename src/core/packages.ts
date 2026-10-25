@@ -302,8 +302,11 @@ export async function installPackage(rom: Rom, preview: ReadyPreview | ManualPre
         for (const f of opt.samples ?? []) {
           const at = ctx.plan.samples.find((x) => x.file === f && !x.left)?.level ?? null;
           if (at === null) { warnings.push(`${f}: not offered as a sample level – left out`); continue; }
-          const s = placeSample(rom, preview, ctx, f, loadLevel(rom, at), opt, true);
-          saveLevel(rom, s.level);
+          // (one that cannot be taken over leaves the others and the package)
+          let s: SampleLevel;
+          try {
+            s = allOrNothing(rom, () => { const x = placeSample(rom, preview, ctx, f, loadLevel(rom, at), opt, true); saveLevel(rom, x.level); return x; });
+          } catch (e) { warnings.push(`Level ${hx(at)}: the sample level ${f.split('/').pop()} not taken over – ${e instanceof Error ? e.message : e}`); continue; }
           warnings.push(...s.notes.map((t) => `Level ${hx(at)}: ${t}`));
           prints.push(`Level ${hx(at)}: the sample level ${f.split('/').pop()}`);
           samples.push(at);

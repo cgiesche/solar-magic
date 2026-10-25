@@ -84,6 +84,21 @@ async function target(): Promise<{ rom: Rom; opt: InstallOptions }> {
 // ---------- installed ----------
 
 {
+  // a sample level the editor cannot take (a level size it has none of): left out with a warning, the
+  // package and the other installed
+  const { rom, opt } = await target();
+  const bad = files[L('13B')].slice();
+  const info = bad[0x40] | (bad[0x41] << 8) | (bad[0x42] << 16);
+  bad[info + 16] = 0x1f;
+  const block = 'db $42\nJML Return\nJML Return\nJML Return\nJML Return\nJML Return\nJML Return\nJML Return\nReturn:\nRTL\n';
+  const p = ready(inspectUpload('two.zip', zipSync({ 'blk.asm': new TextEncoder().encode(block), 'a.mwl': files[L('105')], 'b.mwl': bad })));
+  const before = loadLevel(rom, 0x13b);
+  const r = await installPackage(rom, p, { ...opt, samples: ['a.mwl', 'b.mwl'] });
+  check(r.ok && r.samples?.join() === String(0x105) && r.warnings.some((w) => w.startsWith('Level 13B: the sample level b.mwl not taken over'))
+    && JSON.stringify(loadLevel(rom, 0x13b).objects.length) === JSON.stringify(before.objects.length), `one that fails: a warning, the rest installed (${r.errors.join(' ') || r.warnings.find((w) => w.startsWith('Level 13B'))})`);
+}
+
+{
   const { rom, opt } = await target();
   const plan = planUpload(rom, baserom, opt.blank);
   const before = { c7: loadLevel(rom, 0xc7), l112: loadLevel(rom, 0x112), l106: loadLevel(rom, 0x106) };
