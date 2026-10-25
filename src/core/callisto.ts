@@ -20,6 +20,7 @@ export interface CallistoProject {
   header: string | null; // the project's callisto_header (upload path)
   tools: Record<CallistoTool, ToolFolder | null>;
   left: { file: string; what: string }[]; // files of the project that are not part of the package
+  graphics: string | null; // the folder of its global GFX files: Graphics/ next to the output ROM (upload path)
 }
 export type CallistoTool = 'uberasm' | 'gps' | 'pixi';
 // a tool's folder in the upload and its list file
@@ -187,7 +188,10 @@ export function callistoProject(files: Map<string, Uint8Array>): CallistoProject
     const p = path(conf.get(`resources.${k}`));
     if (p) left.push({ file: p, what });
   }
-  return { root, version: pinnedVersion(files), patches, missing, header, tools, left };
+  // Lunar Magic inserts the global GFX files from the folder Graphics/ next to the ROM
+  const output = path(conf.get('output.output_rom'));
+  const graphics = output === null ? null : output.slice(0, output.lastIndexOf('/') + 1) + 'Graphics/';
+  return { root, version: pinnedVersion(files), patches, missing, header, tools, left, graphics };
 }
 
 // the Callisto version the project's setup downloads (".../callisto/releases/download/v0.6.2/..."), else

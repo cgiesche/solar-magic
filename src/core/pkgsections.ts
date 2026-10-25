@@ -1,5 +1,6 @@
 // The sections of a package record (pkgreg.ts), one adapter each: patches, UberASM, blocks, sprites,
-// ExGFX files, songs, sound effects, FG and BG Map16 tiles, shared palette colors, global animation slots – the fields of PackageParts, as stored in the ROM (the tool
+// ExGFX files, songs, sound effects, FG and BG Map16 tiles, shared palette colors, global animation slots,
+// global GFX files – the fields of PackageParts, as stored in the ROM (the tool
 // projects under their part kind: uberasm, block, sprite). An adapter knows what of the ROM its section
 // observes (read), what came in between two reads (added), how that goes into a record (merge), when
 // there is nothing (empty), how to take it out of the ROM again (remove) and how to say so (summary,
@@ -9,6 +10,7 @@
 
 import type { Rom } from './rom.ts';
 import { listPatches, hashBytes } from './patchreg.ts';
+import { GLOBAL_GFX, globalGfxData, globalGfxName, cleanGlobalGfx, setGlobalGfx } from './globalgfx.ts';
 import { uninstallPatch } from './patchapply.ts';
 import { loadProject, saveProject, emptyProject, type UberProject } from './uberproject.ts';
 import { loadBlockProject, saveBlockProject, type BlockProject } from './blocks.ts';
@@ -319,8 +321,31 @@ const globalAnim: PartSection<{ slots: string[]; sizes: number[] }, GlobalAnimPa
   },
 };
 
+// global GFX files it replaced, with the hash of its file: set back to the clean game's – unless changed
+// since, which is reported and left as it is (two packages never change the same file, see pkgplan.ts
+// applyGraphics). read: each file's hash
+const globalGfx: PartSection<number[], [number, number][]> = {
+  none: () => [],
+  read: (rom) => Array.from({ length: GLOBAL_GFX }, (_, n) => hashBytes([globalGfxData(rom, n) ?? new Uint8Array()])),
+  added: (a, b) => b.flatMap((h, n): [number, number][] => (h !== a[n] ? [[n, h]] : [])),
+  merge: (r, p) => [...r.filter(([n]) => !p.some(([m]) => m === n)), ...p],
+  empty: (p) => !p.length,
+  summary: (p) => (p.length ? `Global GFX (${p.map(([n]) => globalGfxName(n)).join(', ')})` : null),
+  removal: (p) => (p.length ? `${p.map(([n]) => globalGfxName(n)).join(', ')}, set back to the clean game's` : null),
+  remove(rom, mine) {
+    const warnings: string[] = [];
+    for (const [n, h] of mine) {
+      const clean = cleanGlobalGfx(rom, n);
+      if (hashBytes([globalGfxData(rom, n) ?? new Uint8Array()]) !== h) warnings.push(`${globalGfxName(n)} was changed since the package was installed – left as it is`);
+      else if (!clean) warnings.push(`${globalGfxName(n)}: the clean game's file is not known in this ROM – left as it is`);
+      else setGlobalGfx(rom, n, clean);
+    }
+    return warnings;
+  },
+};
+
 // every field of PackageParts has its adapter (the compiler checks it)
 type Sections = { [K in keyof PackageParts]-?: PartSection<any, NonNullable<PackageParts[K]>> };
-export const SECTIONS = { music, sfx, sprite, block, uberasm, patches, map16, bgMap16, gfx, sharedPal, globalAnim } satisfies Sections;
+export const SECTIONS = { music, sfx, sprite, block, uberasm, patches, map16, bgMap16, gfx, globalGfx, sharedPal, globalAnim } satisfies Sections;
 export type SectionKey = keyof typeof SECTIONS;
 export const SECTION_KEYS = Object.keys(SECTIONS) as SectionKey[];

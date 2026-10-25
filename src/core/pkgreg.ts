@@ -1,5 +1,5 @@
 // Installed packages ("SMWK"): what each added download put into the ROM – its Asar patches, files and
-// list.txt entries of the UberASM, block and sprite (PIXI) projects, songs and sound effects, ExGFX files, shared palette colors, global animation slots – so a package can be looked at,
+// list.txt entries of the UberASM, block and sprite (PIXI) projects, songs and sound effects, ExGFX files, global GFX files, shared palette colors, global animation slots – so a package can be looked at,
 // configured and removed as one. Not declared by the add dialogs but observed: the ROM's projects are
 // compared before and after a package (or a part of it) was added. Kept in the ROM like the patch
 // registry: a RATS block holding "SMWK", a version byte and deflated JSON; the package's own files (zip)
@@ -28,6 +28,7 @@ export interface PackageParts {
   bgMap16?: number[]; // extended BG Map16 tiles it filled
   sharedPal?: [number, number][]; // shared palette colors it changed (index in the block, the color before)
   globalAnim?: GlobalAnimPart; // global animation slots it filled
+  globalGfx?: [number, number][]; // global GFX files it replaced (GFX00–33, the hash of its file unpacked)
 }
 // slots of the global animation list; graphic: the Anim graphic its frames went into and its size before
 export interface GlobalAnimPart { slots: number[]; graphic?: [number, number] }

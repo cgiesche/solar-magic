@@ -72,5 +72,71 @@ const animRam = (rom: Rom) => new LevelEmulator(rom).load(0x105).wram.slice(0x7d
   check(romDiff(before, rom.data) === 0, `set back: the ROM as before (${romDiff(before, rom.data)} bytes differ)`);
 }
 
+// ---------- the package ----------
+
+const GFX = (n: number) => `GFX${hx(n)}`;
+{
+  // the whole baserom (a Callisto project): the files of workspace/Graphics/ (next to its output ROM)
+  const p = ready(inspectUpload('rhr-baserom-5.15.zip', ZIP));
+  const global = p.parts.filter((x) => x.kind === 'graphics' && x.type === 'globalgfx').map((x) => x.file);
+  check(global.length === GLOBAL_GFX && global.every((f) => f.startsWith('workspace/Graphics/')), `the baserom brings workspace/Graphics/GFX00–33 (${global.length} files)`);
+  check(!p.parts.some((x) => x.kind === 'graphics' && /(^|\/)GFX[0-9A-F]{2}\.bin$/i.test(x.file) && x.type !== 'globalgfx'), 'no GFX##.bin becomes an ExGFX file');
+  check(!p.parts.some((x) => x.file.startsWith('resources/original_graphics/')), 'resources/original_graphics/ is not part of the package');
+  const { rom, opt } = await target();
+  const plan = planUpload(rom, p, opt.blank);
+  check(plan.globalGfx.map((g) => g.num).join() === EDITED.join(), `planned: the files differing from the clean game (${plan.globalGfx.map((g) => hx(g.num)).join(', ')})`);
+  check(plan.notes.some((n) => n.includes('GFX17') && n.includes('GFX32') && /clean game's/.test(n)), 'the others noted as the clean game\'s');
+}
+
+// the baserom's Graphics folder as a package of its own
+const graphicsUpload = (name: string) => upload(name, Object.fromEntries(Array.from({ length: GLOBAL_GFX }, (_, n) => [`Graphics/${GFX(n)}.bin`, bin(n)])));
+// SP2 (GFX01) in VRAM, as 3bpp (the game's upload sets the 4th bitplane itself)
+const tiles01 = (rom: Rom) => convertBpp(new LevelEmulator(rom).load(0x105).vram.slice(0xd000, 0xe000), 4, 3);
+{
+  const p = graphicsUpload('baserom-graphics');
+  const { rom, opt } = await target();
+  const before = rom.data.slice(), vram = tiles01(rom);
+  const r = await installPackage(rom, p, opt);
+  check(r.ok, `installed ${r.errors.join(' ')}`);
+  const plan = planUpload(new Rom(await editorImage()), p, opt.blank);
+  check(plan.globalGfx.every((g) => same(globalGfxData(rom, g.num), g.data)), 'its files are in the ROM');
+  check(Array.from({ length: GLOBAL_GFX }, (_, n) => n).filter((n) => !EDITED.includes(n)).every((n) => same(globalGfxData(rom, n), cleanGlobalGfx(rom, n))), 'the others are the clean game\'s');
+  // the poison mushroom: in GFX01 (SP2), loaded by every level
+  const g01 = plan.globalGfx.find((g) => g.num === 1)!.data, vram2 = tiles01(rom);
+  check(!same(vram, vram2) && same(vram2, g01), 'the game loads the baserom\'s GFX01 (the poison mushroom) into VRAM');
+  const pkg = listPackages(rom)[0];
+  check(packageSummary(pkg).some((s) => s.startsWith('Global GFX (GFX00, GFX01')), `the package names them: ${packageSummary(pkg).join(', ')}`);
+  check(packageRemoval(pkg).some((s) => s.includes('GFX33') && /clean game's/.test(s)), `removal says so: ${packageRemoval(pkg).join('; ')}`);
+
+  // a second package changing one of them
+  const other = cleanGlobalGfx(rom, 0x14)!.slice(); other[0] ^= 0xff;
+  const r2 = await installPackage(rom, upload('other-gfx', { 'GFX14.bin': convertBpp(other, 3, 4), 'GFX15.bin': bin(0x15) }), opt);
+  check(!r2.ok && r2.errors.some((e) => /conflict/i.test(e) && e.includes('baserom-graphics') && e.includes('GFX14')), `a second package changing one: conflict (${r2.errors.join(' ')})`);
+  check(listPackages(rom).length === 1, 'not installed');
+
+  const warnings = await removePackage(rom, pkg.id, opt.blank);
+  check(!warnings.length && !listPackages(rom).length && romDiff(before, rom.data) === 0, `removed: the ROM as before (${romDiff(before, rom.data)} bytes differ) ${warnings.join(' ')}`);
+  check(same(tiles01(rom), vram), 'the game loads the clean GFX01 again');
+}
+
+// ---------- changed before and since ----------
+
+{
+  const p = graphicsUpload('baserom-graphics');
+  const { rom, opt } = await target();
+  // GFX03 edited in this ROM before
+  const mine = cleanGlobalGfx(rom, 3)!.map((v) => v ^ 0x0f);
+  setGlobalGfx(rom, 3, mine);
+  const r = await installPackage(rom, p, opt);
+  check(r.ok && r.warnings.some((w) => w.includes('GFX03') && /own changes/.test(w)), `a file this ROM changed before: replaced, said so (${r.warnings.join(' ')})`);
+  // GFX01 edited after
+  const after = globalGfxData(rom, 1)!.map((v) => v ^ 0xf0);
+  setGlobalGfx(rom, 1, after);
+  const warnings = await removePackage(rom, listPackages(rom)[0].id, opt.blank);
+  check(warnings.some((w) => w.includes('GFX01') && /changed since/.test(w)), `changed since: reported (${warnings.join(' ')})`);
+  check(same(globalGfxData(rom, 1), after), '… and left as it is');
+  check([0, 2, 3, GFX33].every((n) => same(globalGfxData(rom, n), cleanGlobalGfx(rom, n))), 'the others set back to the clean game\'s');
+}
+
 console.log(bad ? `${bad} failures` : 'all ok');
 if (bad) process.exitCode = 1;

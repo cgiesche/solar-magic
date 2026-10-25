@@ -34,7 +34,7 @@ import { callistoAsm, toolFiles, PATCH_DEFINES, type CallistoProject } from './c
 // ---------- what the adapters detect ----------
 
 interface PartBase<K extends PartKind> { kind: K; name: string; file: string }
-export type GraphicsType = 'map16' | 'exgfx' | 'pal' | 'palmask' | 'sharedpal' | 'globalanim';
+export type GraphicsType = 'map16' | 'exgfx' | 'pal' | 'palmask' | 'sharedpal' | 'globalanim' | 'globalgfx';
 // one part of an upload; file: its main file (path in the upload)
 export type PreviewPart =
   | PartBase<'patch'> & { candidates: string[] } // the main files to choose from (the upload doesn't say which)
@@ -416,14 +416,16 @@ export function sfxLinkedFiles(preview: ReadyPreview, plan: SfxPlan): Map<string
 
 // ---------- graphics ----------
 
-const GRAPHICS_TYPES: GraphicsType[] = ['map16', 'exgfx', 'pal', 'palmask', 'sharedpal', 'globalanim'];
+const GRAPHICS_TYPES: GraphicsType[] = ['map16', 'exgfx', 'pal', 'palmask', 'sharedpal', 'globalanim', 'globalgfx'];
+// a Callisto project's global GFX files are those of the Graphics folder next to its output ROM
+const projectFile = (d: Detection, type: GraphicsType, f: string) => type !== 'globalgfx' || !d.callisto?.graphics || f.startsWith(d.callisto.graphics);
 
 const graphics: PartAdapter<'graphics'> = {
   kind: 'graphics',
-  // Map16 tiles, ExGFX, palettes, shared palettes and global animation; the Lunar Magic level files go with the package (its sample levels)
+  // Map16 tiles, ExGFX, palettes, shared palettes, global animation and global GFX files; the Lunar Magic level files go with the package (its sample levels)
   // (in a Callisto project not those in a tool's folder, which are its code's data)
   claims: (d) => [
-    ...GRAPHICS_TYPES.flatMap((type) => d.graphics[type].filter((f) => !inToolFolder(d, f)).map((f): FileClaim => ({ file: f, rank: RANK.type, part: { kind: 'graphics', name: base(f), file: f, type } }))),
+    ...GRAPHICS_TYPES.flatMap((type) => d.graphics[type].filter((f) => !inToolFolder(d, f) && projectFile(d, type, f)).map((f): FileClaim => ({ file: f, rank: RANK.type, part: { kind: 'graphics', name: base(f), file: f, type } }))),
     ...d.graphics.mwls.map((file) => ({ file, rank: RANK.type })),
   ],
   apply: (rom, _mine, { preview, opt, plan }) => applyGraphics(rom, preview.files, plan, opt.blank),
@@ -445,7 +447,7 @@ export const PART_ORDER: PartKind[] = ['patch', 'uberasm', 'block', 'sprite', 'm
 
 // the graphics parts and the sample levels of a preview, as pkgplan.ts takes them
 function previewGraphics(p: ReadyPreview): DetectedGraphics {
-  const g: DetectedGraphics = { map16: [], exgfx: [], pal: [], palmask: [], sharedpal: [], globalanim: [], mwls: p.samples };
+  const g: DetectedGraphics = { map16: [], exgfx: [], pal: [], palmask: [], sharedpal: [], globalanim: [], globalgfx: [], mwls: p.samples };
   for (const x of partsOf(p, 'graphics')) g[x.type].push(x.file);
   return g;
 }

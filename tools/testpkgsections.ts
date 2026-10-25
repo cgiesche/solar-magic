@@ -18,6 +18,7 @@ import { recordPackageChange, uninstallPackage, listPackages, packageSummary, ty
 import { SECTIONS, SECTION_KEYS, type SectionKey, type PartSection } from '../src/core/pkgsections.ts';
 import { inspectUpload, installPackage, type InstallOptions, type ReadyPreview } from '../src/core/packages.ts';
 import { setSharedColor } from '../src/core/sharedpal.ts';
+import { setGlobalGfx, cleanGlobalGfx } from '../src/core/globalgfx.ts';
 import { placeGlobalSlots } from '../src/core/levelgfx.ts';
 import { testSongZip } from './testsong.ts';
 import { zipSync } from 'fflate';
@@ -69,6 +70,7 @@ const samples: Record<SectionKey, () => Promise<Package | null> | Package | null
   sfx: () => install('Sfx.zip', zipSync({ '1DFC/Death Prelude.txt': enc.encode('$DA $02 $04 $30 $B4 $B2 $B4') })),
   map16: () => record('map16', () => { setExtTileWords(rom, EXT_FIRST + 0x40, [1, 2, 3, 4]); return { ok: true }; }),
   bgMap16: () => record('bgMap16', () => { setBgExtTileWords(rom, BG_EXT_FIRST + 0x40, [5, 6, 7, 8]); return { ok: true }; }),
+  globalGfx: () => record('globalGfx', () => { setGlobalGfx(rom, 0x33, cleanGlobalGfx(rom, 0x33)!.map((v) => v ^ 0xff)); return { ok: true }; }),
   sharedPal: () => record('sharedPal', () => { setSharedColor(rom, 0x10, 0x1234); return { ok: true }; }),
   // a tile slot with its frame copied into the global list's Anim graphic
   globalAnim: () => record('globalAnim', () => {

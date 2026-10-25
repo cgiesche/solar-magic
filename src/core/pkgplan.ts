@@ -2,7 +2,7 @@
 // from the file alone (folder, then content, then extension), never by which other files are in the
 // upload. This module has the parts that are not a tool project of their own – blocks (named in a GPS
 // list.txt or found by their content) and graphics parts (Map16 tiles, ExGFX, palettes, shared palettes,
-// global animation slots) – and the links between parts:
+// global animation slots, global GFX files) – and the links between parts:
 // - detectBlocks / detectGraphics: what an upload holds, without a ROM;
 // - planPackage: where it goes in a ROM – Map16 tiles and ExGFX keep the author's position or number
 //   when free, else the next free ones; which tiles show which block; which slot each ExGFX file is for;
@@ -33,6 +33,7 @@ import { gfxDataSize } from './patches.ts';
 import { isSharedPalettes, changedColors, setSharedColor, sharedColorNames } from './sharedpal.ts';
 import { isGlobalAnimBps, globalAnimList } from './globalanim.ts';
 import { cleanGameBytes } from './cleangame.ts';
+import { globalGfxNum, globalGfxName, cleanGlobalGfx, fromBin, isCleanGlobalGfx, setGlobalGfx } from './globalgfx.ts';
 import { listPackages } from './pkgreg.ts';
 
 const dec = new TextDecoder();
@@ -96,14 +97,14 @@ export function detectBlocks(files: Map<string, Uint8Array>, gps?: ToolFolder | 
 // the graphics parts of an upload, and its Lunar Magic level files (sample levels when the upload has
 // code, else a level import)
 // (sharedpal: Lunar Magic's shared palettes, sharedpal.ts; globalanim: its global ExAnimation as a BPS,
-// globalanim.ts)
-export interface DetectedGraphics { map16: string[]; exgfx: string[]; pal: string[]; palmask: string[]; sharedpal: string[]; globalanim: string[]; mwls: string[] }
+// globalanim.ts; globalgfx: the game's GFX00–33 as Lunar Magic's GFX##.bin, globalgfx.ts)
+export interface DetectedGraphics { map16: string[]; exgfx: string[]; pal: string[]; palmask: string[]; sharedpal: string[]; globalanim: string[]; globalgfx: string[]; mwls: string[] }
 
 // `included`: files some .asm file includes (incbin data is code's, not graphics)
 export function detectGraphics(files: Map<string, Uint8Array>, included: Set<string>): DetectedGraphics {
   const keys = [...files.keys()].sort();
   const isGfx = (f: string) => {
-    if (!/\.bin$/i.test(f) || included.has(f)) return false;
+    if (!/\.bin$/i.test(f) || included.has(f) || globalGfxNum(f) !== null) return false;
     const n = files.get(f)!.length;
     return /gfx/i.test(base(f)) || n === 0x1000 || n === 0xc00;
   };
@@ -114,11 +115,12 @@ export function detectGraphics(files: Map<string, Uint8Array>, included: Set<str
     palmask: keys.filter((f) => /\.palmask$/i.test(f)),
     sharedpal: keys.filter((f) => /\.pal$/i.test(f) && isSharedPalettes(files.get(f)!)),
     globalanim: keys.filter((f) => /\.bps$/i.test(f) && isGlobalAnimBps(files.get(f)!)),
+    globalgfx: keys.filter((f) => !included.has(f) && globalGfxNum(f) !== null),
     mwls: keys.filter((f) => /\.mwl$/i.test(f)),
   };
 }
 
-export const graphicsFiles = (g: DetectedGraphics) => [...g.map16, ...g.exgfx, ...g.pal, ...g.palmask, ...g.sharedpal, ...g.globalanim];
+export const graphicsFiles = (g: DetectedGraphics) => [...g.map16, ...g.exgfx, ...g.pal, ...g.palmask, ...g.sharedpal, ...g.globalanim, ...g.globalgfx];
 
 // files the .asm files of an upload include (incsrc/incbin)
 export function includedFiles(files: Map<string, Uint8Array>): Set<string> {
@@ -148,6 +150,8 @@ export interface PlannedSharedPal { file: string; colors: Map<number, number> }
 // the package's global animation slots and where they take their frames from (frameFile: its ExGFX 60-63
 // file of their list's Anim graphic); they go into free slots of the global list (levelgfx.ts placeGlobalSlots)
 export interface PlannedGlobalAnim { file: string; slots: ExSlot[]; frames: FrameSources; frameFile: string | null }
+// a global GFX file differing from the clean game's: its number and data (unpacked, in the clean game's format)
+export interface PlannedGlobalGfx { file: string; num: number; data: Uint8Array }
 export interface PackagePlan {
   blocks: PlannedBlock[];
   map16: PlannedMap16 | null;
@@ -156,6 +160,7 @@ export interface PackagePlan {
   palettes: PackPalette[];
   sharedPal: PlannedSharedPal | null;
   globalAnim: PlannedGlobalAnim | null;
+  globalGfx: PlannedGlobalGfx[];
   samples: PlannedSample[]; // the sample levels: offered as which level, or why not (pkgsamples.ts)
   sample: MwlLevel | null; // the first offered, parsed (the level setup's back area color)
   exanim: ExSlot[]; // the sample level's ExAnimation slots that write tiles the package's Map16 tiles draw from
@@ -308,7 +313,8 @@ export function planPackage(rom: Rom, input: PlanInput, blank: number[]): Packag
   });
 
   const palettes = packPalettes(files, graphics.pal, graphics.palmask, notes);
-  return { blocks, map16, romMap16, gfx, palettes, sharedPal: planSharedPal(rom, files, graphics.sharedpal, notes), globalAnim, samples, sample, exanim, frames, notes };
+  return { blocks, map16, romMap16, gfx, palettes, sharedPal: planSharedPal(rom, files, graphics.sharedpal, notes), globalAnim,
+    globalGfx: planGlobalGfx(rom, files, graphics.globalgfx, notes), samples, sample, exanim, frames, notes };
 }
 
 // the FG Map16 tiles a plan's .map16 (or whole-ROM .map16) draws
@@ -325,6 +331,25 @@ function planSharedPal(rom: Rom, files: Map<string, Uint8Array>, found: string[]
   if (!colors) { notes.push(`${base(file)}: the clean game's shared palettes are not known in this ROM – not taken over`); return null; }
   if (!colors.size) { notes.push(`${base(file)}: the clean game's shared palettes – nothing to take over`); return null; }
   return { file, colors };
+}
+
+// the global GFX files (the first file of each number; more are not used): only those differing from the
+// clean game's are the package's
+function planGlobalGfx(rom: Rom, files: Map<string, Uint8Array>, found: string[], notes: string[]): PlannedGlobalGfx[] {
+  const out: PlannedGlobalGfx[] = [], first = new Map<number, string>(), unchanged: number[] = [];
+  for (const file of found) {
+    const num = globalGfxNum(file)!, name = globalGfxName(num);
+    if (first.has(num)) { notes.push(`${base(file)}: not used – ${first.get(num)} is the package's ${name}`); continue; }
+    first.set(num, file);
+    const clean = cleanGlobalGfx(rom, num);
+    if (!clean) { notes.push(`${base(file)}: the clean game's ${name} is not known in this ROM – not taken over`); continue; }
+    const data = fromBin(clean, files.get(file)!);
+    if (!data) { notes.push(`${base(file)}: ${files.get(file)!.length} bytes – not a form of ${name} (${clean.length} bytes unpacked), not taken over`); continue; }
+    if (data.every((v, i) => v === clean[i])) unchanged.push(num);
+    else out.push({ file, num, data });
+  }
+  if (unchanged.length) notes.push(`${unchanged.map(globalGfxName).join(', ')}: the clean game's – not part of the package`);
+  return out;
 }
 
 // the global animation list (the first file; more are not used), read where its bytes are known (some
@@ -424,7 +449,7 @@ export function applyBlocks(rom: Rom, upload: Upload, blocks: PlannedBlock[], de
 }
 
 // the shared palettes' colors, the Map16 tiles (with their acts like where no block on them gives one), the
-// ExGFX files and the global animation slots
+// global GFX files, the ExGFX files and the global animation slots
 export function applyGraphics(rom: Rom, files: Map<string, Uint8Array>, plan: PackagePlan, blank: number[]): ApplyResult {
   const prints: string[] = [], warnings: string[] = [];
   if (plan.sharedPal) {
@@ -450,6 +475,20 @@ export function applyGraphics(rom: Rom, files: Map<string, Uint8Array>, plan: Pa
     const pages = (to: Map<number, number>, bg: number) => [...new Map([...to].map(([f, t]) => [f >> 8, t - f]))]
       .map(([p, d]) => `${hx(p + bg, 2)}${d ? ` at ${hx((p << 8) + d, 3)}` : ''}`).join(', ');
     prints.push(`${m.fg.size} FG Map16 tile(s) (pages ${pages(m.fg, 0)}) and ${m.bg.size} BG tile(s) (pages ${pages(m.bg, 0x80)}) from ${base(m.file)}`);
+  }
+  if (plan.globalGfx.length) {
+    // a file another package changed is a conflict
+    const nums = new Set(plan.globalGfx.map((g) => g.num));
+    const errors = listPackages(rom).flatMap((p) => {
+      const both = (p.globalGfx ?? []).map(([n]) => n).filter((n) => nums.has(n));
+      return both.length ? [`Conflict with package “${p.name}”: both change ${both.map(globalGfxName).join(', ')}.`] : [];
+    });
+    if (errors.length) return { ok: false, errors, warnings, prints };
+    for (const g of plan.globalGfx) {
+      if (isCleanGlobalGfx(rom, g.num) === false) warnings.push(`${globalGfxName(g.num)}: this ROM's own changes are replaced by ${base(g.file)} (removing the package sets back the clean game's)`);
+      setGlobalGfx(rom, g.num, g.data);
+    }
+    prints.push(`${plan.globalGfx.length} global GFX file(s): ${plan.globalGfx.map((g) => globalGfxName(g.num)).join(', ')}`);
   }
   prints.push(...storeGfx(rom, files, plan.gfx));
   if (plan.globalAnim) {
