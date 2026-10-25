@@ -7,7 +7,7 @@ import type { WsTab } from './gfxworkspace.ts';
 
 export type NavLoc =
   | { w: 'level'; level: number; mode?: EditMode; cx?: number; cy?: number } // cx/cy: tile in the middle of the view
-  | { w: 'ow'; map: number }
+  | { w: 'ow'; map: number; tile?: number } // tile: the selected layer 1 tile (l1Index)
   | { w: 'gfx'; tab: WsTab; pal?: number; m16?: number; bg?: boolean; gfx?: number; anim?: { global: boolean; slot: number } };
 
 const hx = (n: number) => n.toString(16).toUpperCase();

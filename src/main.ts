@@ -282,6 +282,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
       if (!ow) {
         ow = new OverworldView(app);
         ow.onOpenLevel = async (n) => { if (await setWorkspace('level')) app.openLevel(n); };
+
         ow.onNav = () => nav?.mark();
       }
       owRight.replaceChildren(ow.side);
@@ -305,10 +306,12 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     return true;
   };
 
+  app.gotoOverworldTile = async (i) => { if (await setWorkspace('ow')) ow!.showTile(i); };
+
   // ---- browser back/forward through the places (navhistory.ts)
   let nav: NavHistory | null = null;
   const capture = (): NavLoc => {
-    if (workspace === 'ow' && ow) return { w: 'ow', map: ow.map };
+    if (workspace === 'ow' && ow) return { w: 'ow', map: ow.map, ...(ow.selected >= 0 ? { tile: ow.selected } : {}) };
     if (workspace === 'gfx' && ws) {
       const t = ws.tab;
       if (t === 'pal') return { w: 'gfx', tab: t, pal: ws.pal.selected };
@@ -322,7 +325,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   };
   const restore = async (l: NavLoc): Promise<boolean> => {
     if (!(await setWorkspace(l.w))) return false;
-    if (l.w === 'ow') ow!.setMap(l.map);
+    if (l.w === 'ow') { ow!.setMap(l.map); if (l.tile !== undefined) ow!.selectTile(l.tile, true); }
     else if (l.w === 'gfx') {
       if (l.tab === 'pal' && l.pal !== undefined) ws!.showPalette(l.pal >> 4, l.pal & 15);
       else if (l.tab === 'map16' && l.m16 !== undefined) ws!.showMap16(l.m16, l.bg);

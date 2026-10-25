@@ -17,7 +17,8 @@ import type { Rom } from './rom.ts';
 import {
   readTeleports, writeTeleport, readExitPaths, writeExitPath, sameTile as same, TELEPORTS, EXIT_PATHS, type OwTile, type OwPos, type ExitPath, type Teleport,
 } from './owteleport.ts';
-import { readSecondaryEntrance } from './level.ts';
+import { readSecondaryEntrance, levelTranslevel } from './level.ts';
+import type { ExitGraph } from './exitgraph.ts';
 
 const SECONDARY_ENTRANCES = 0x200;
 
@@ -179,6 +180,22 @@ export function moveLocation(rom: Rom, i: number, to: OwTile): void {
     writeTeleport(rom, k, t);
   }
   writeTeleport(rom, i, { from: null, to: { submap: to.submap, x: to.x, y: to.y } });
+}
+
+// the locations the exits of translevel tl's levels (it and its sub-levels) teleport to through entrances to the
+// overworld: the location, where it is, the entrance and its action (level.ts OW_ACTIONS)
+export interface LevelTeleport { location: number; to: OwTile; entrance: number; action: number }
+export function levelTeleports(rom: Rom, graph: ExitGraph, tl: number): LevelTeleport[] {
+  const all = readTeleports(rom), tlOf = new Map<number, number>(), out: LevelTeleport[] = [];
+  for (const [location, ents] of locationUses(rom)) {
+    const to = all[location].to;
+    if (!to) continue;
+    for (const entrance of ents) {
+      const ours = graph.usersOfEntrance(entrance).some((r) => (tlOf.get(r.from) ?? tlOf.set(r.from, levelTranslevel(rom, r.from)).get(r.from)) === tl);
+      if (ours) out.push({ location, to, entrance, action: readSecondaryEntrance(rom, entrance).overworld!.action });
+    }
+  }
+  return out;
 }
 
 // ---- Koopa Kids ----

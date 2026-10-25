@@ -12,10 +12,14 @@ import {
 import { messageSlots } from '../core/messages.ts';
 import {
   readEvents, writeEvents, applyEvents, paintEvent, reorderSteps, eventRunners, eventTitle, submapViews, eventPlace, submapOf, pieceTiles, isBig, l2XY,
-  paintEventL1, layer1Without, eventL1Tiles, type EventData, type EventRunner, type Rect,
+  paintEventL1, layer1Without, eventL1Tiles, exitChanges, type EventData, type EventRunner, type Rect, type ExitChanges,
 } from '../core/owevents.ts';
 import { isPathKind, PATH_KIND_NAMES, type PathKind } from '../core/owpaths.ts';
 import { LinkLayer } from './owlinkview.ts';
+import { levelTeleports, locationUses, type LevelTeleport } from '../core/owlinks.ts';
+import { tileText } from '../core/owteleport.ts';
+import { ExitGraph } from '../core/exitgraph.ts';
+import { OW_ACTIONS } from '../core/level.ts';
 import { TileCache, blit8 } from '../core/render.ts';
 import { hex } from '../core/names.ts';
 import { menuButton } from './menu.ts';
@@ -151,6 +155,7 @@ export class OverworldView {
     new ResizeObserver(() => this.layout()).observe(this.scroller);
     this.scroller.addEventListener('contextmenu', (e) => e.preventDefault());
     this.scroller.addEventListener('mousedown', (e) => this.onDown(e));
+    this.scroller.addEventListener('dblclick', (e) => this.onDouble(e));
     this.scroller.addEventListener('mouseleave', () => { if (!this.drag) { this.hover = null; this.updateStatus(); this.paint(); } });
     window.addEventListener('mousemove', (e) => this.onMove(e));
     window.addEventListener('mouseup', () => this.onUp());
@@ -345,6 +350,7 @@ export class OverworldView {
     ctx.strokeRect(x * 16, y * 16, 16, 16);
     const tl = this.tls[i];
     if (!isLevelTile(this.l1[i]) || !tl) return;
+    this.paintExitResults(ctx, lw, i, tl);
     const dirs = exitDirections(this.app.rom, tl);
     const step = [[0, -1], [0, 1], [-1, 0], [1, 0]];
     ctx.font = 'bold 7px monospace';
@@ -373,6 +379,53 @@ export class OverworldView {
     ctx.textBaseline = 'alphabetic';
   }
 
+  // what passing the selected level's exits does (per ROM change): the tiles each exit's event changes, the
+  // locations its exits to the overworld teleport to (the levels' exits read only when a location is used)
+  private exitInfo: { gen: number; tl: number; changes: ExitChanges[]; teleports: LevelTeleport[] } | null = null;
+  exitResults(tl: number): { changes: ExitChanges[]; teleports: LevelTeleport[] } {
+    const rom = this.app.rom;
+    if (this.exitInfo?.gen !== rom.gen || this.exitInfo.tl !== tl) {
+      const teleports = locationUses(rom).size ? levelTeleports(rom, new ExitGraph(rom), tl) : [];
+      this.exitInfo = { gen: rom.gen, tl, changes: exitChanges(rom, tl), teleports };
+    }
+    return this.exitInfo;
+  }
+  // the selected level tile's exits on the map: the tiles each one's event changes outlined (labelled N, 1–3 at
+  // the first), the teleports of its exits to the overworld as dashed arrows
+  paintExitResults(ctx: CanvasRenderingContext2D, lw: number, i: number, tl: number): void {
+    const { changes, teleports } = this.exitResults(tl), region = this.region;
+    const colors = ['#ffd34c', '#ff8c4c', '#ff6bd5', '#8cff6b'];
+    ctx.font = 'bold 7px monospace';
+    for (const c of changes) {
+      const color = colors[c.exit], name = c.exit ? String(c.exit) : 'N';
+      ctx.strokeStyle = color;
+      ctx.fillStyle = color + '33';
+      ctx.lineWidth = lw;
+      const l1 = c.l1.filter((k) => (k >= 0x400) === (region === 1)), l2 = c.l2.filter((k) => k >> 12 === region);
+      for (const k of l1) { const p = l1XY(k); ctx.fillRect(p.x * 16, p.y * 16, 16, 16); ctx.strokeRect(p.x * 16 + 0.5, p.y * 16 + 0.5, 15, 15); }
+      for (const k of l2) { const p = l2XY(k); ctx.fillRect(p.x * 8, p.y * 8, 8, 8); }
+      const first = l1.length ? (() => { const p = l1XY(l1[0]); return { x: p.x * 16, y: p.y * 16 }; })() : l2.length ? (() => { const p = l2XY(l2[0]); return { x: p.x * 8, y: p.y * 8 }; })() : null;
+      if (!first) continue;
+      ctx.fillStyle = 'rgba(0,0,0,0.75)';
+      ctx.fillRect(first.x, first.y - 8, 7, 8);
+      ctx.fillStyle = color;
+      ctx.fillText(name, first.x + 1, first.y - 1);
+    }
+    const from = l1XY(i);
+    for (const t of teleports) {
+      if ((t.to.submap ? 1 : 0) !== region) continue;
+      const x0 = from.x * 16 + 8, y0 = from.y * 16 + 8, x1 = t.to.x * 16 + 8, y1 = t.to.y * 16 + 8;
+      for (const [c, w] of [['rgba(0,0,0,0.75)', 3.5], ['#4cc2ff', 1.5]] as [string, number][]) {
+        ctx.strokeStyle = c;
+        ctx.lineWidth = w * lw;
+        ctx.setLineDash([8 * lw, 6 * lw]);
+        ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.beginPath(); ctx.arc(x1, y1, 5, 0, Math.PI * 2); ctx.stroke();
+      }
+    }
+  }
+
   // ---------------- interaction ----------------
   cell(e: MouseEvent): { x: number; y: number } {
     const rc = this.scroller.getBoundingClientRect();
@@ -398,6 +451,19 @@ export class OverworldView {
     if (e.altKey || (this.mode === 'l1' && e.ctrlKey)) { this.info(c.x, c.y); return; }
     this.drag = { kind: 'pick', x0: c.x, y0: c.y, x1: c.x, y1: c.y };
     this.paint();
+  }
+
+  // a double click on a level tile opens its level (the overworld's entry in the navigation keeps the tile)
+  onDouble(e: MouseEvent): void {
+    if (e.target !== this.scroller && e.target !== this.canvas) return;
+    const rc = this.scroller.getBoundingClientRect();
+    const x = Math.floor((e.clientX - rc.left + this.scroller.scrollLeft) / this.zoom / 16), y = Math.floor((e.clientY - rc.top + this.scroller.scrollTop) / this.zoom / 16);
+    if (x < 0 || y < 0 || x >= 32 || y >= 32) return;
+    const i = l1Index(this.region, x, y), tl = this.tls[i];
+    if (!isLevelTile(this.l1[i]) || !tl) return;
+    this.drag = null;
+    this.selectTile(i, false);
+    this.onOpenLevel(translevelToLevel(tl));
   }
 
   onMove(e: MouseEvent): void {
@@ -508,6 +574,13 @@ export class OverworldView {
     if (this.mode !== 'l1') { toast('Tile settings are available on layer 1 (paths/levels)'); return; }
     if (x < 0 || y < 0 || x >= 32 || y >= 32) return;
     this.selectTile(l1Index(this.region, x, y), false);
+  }
+
+  // shows layer 1 tile i (l1Index) selected, on the submap it is on
+  showTile(i: number): void {
+    this.views ??= submapViews(this.emu);
+    this.setMap(submapOf(this.views, i));
+    this.selectTile(i, true);
   }
 
   // selects a layer 1 tile (a level tile in the list, any tile by Alt/Ctrl+click; l1Index); center: scroll the map to it
@@ -946,6 +1019,7 @@ export class OverworldView {
       h('div', { class: 'prop' }, h('label', null, 'Name part 3'), sel(2)),
       // the level's other settings (kept when its tiles are painted over, shown to every new tile entering it)
       ...this.levelSettings(tl),
+      ...this.exitResultRows(tl),
       h('div', { class: 'prop' }, h('label', null, 'Message box'), h('span', null, msgs.length ? msgs.map((m) => `${hex(m.slot, 2)} (message ${m.msg})`).join(', ') : 'none')),
       h('div', { class: 'row' },
         h('button', { onclick: () => this.onOpenLevel(lvl), title: 'Open in the level editor (also by double click in the list)' }, `Edit level ${hex(lvl, 3)}`),
@@ -953,6 +1027,18 @@ export class OverworldView {
           ? h('button', { onclick: () => this.app.romEdit(`Level ${hex(lvl, 3)}: settings reset`, () => resetTranslevel(rom, tl)),
             title: 'No name, no base event, every exit enabling up, no message box, no initial flags – the level\'s data stays' }, 'Reset settings') : null),
     );
+  }
+
+  // what the level's exits do on the map (drawn there): the tiles each exit's event changes, its teleports
+  exitResultRows(tl: number): HTMLElement[] {
+    const { changes, teleports } = this.exitResults(tl);
+    if (!changes.length && !teleports.length) return [];
+    const where = (l1: number[], l2: number[]) => [...new Set([...l1.map((k) => (k >= 0x400 ? 1 : 0)), ...l2.map((k) => k >> 12)])].map((r) => (r ? 'submaps' : 'main map')).join(', ');
+    return [
+      h('div', { class: 'hint' }, 'Passing it (outlined on the map):'),
+      ...changes.map((c) => h('div', { class: 'hint' }, `${EXIT_NAMES[c.exit]}: event ${hex(c.event, 2)} changes ${c.l1.length + c.l2.length ? `${c.l1.length ? `${c.l1.length} layer 1` : ''}${c.l1.length && c.l2.length ? ' and ' : ''}${c.l2.length ? `${c.l2.length} layer 2` : ''} tiles (${where(c.l1, c.l2)})` : 'nothing'}`)),
+      ...teleports.map((t) => h('div', { class: 'hint' }, `Exit to the overworld (entrance ${hex(t.entrance, 3)}, ${(OW_ACTIONS.find(([a]) => a === t.action)?.[1] ?? 'action ' + t.action).toLowerCase()}): teleports to ${tileText(t.to)} (dashed)`)),
+    ];
   }
 
   // the selected tile: a level tile's settings, and for every tile the events that reveal it

@@ -5,7 +5,7 @@ import type { App, Marker } from './app.ts';
 import { h, select, toast, choose, checkbox } from './dom.ts';
 import { hex2, hex3, ENTRANCE_ACTIONS } from '../core/names.ts';
 import {
-  newUid, mainTranslevel, mainSpot, secondarySpot, hasRelativeCamera, EXIT_WATER, EXIT_MIDWAY, EXIT_NEW, exitToMidway, exitLandsAtMidway, midwaySpot, midwayEntrance, mainEntrance, setMidwayEntrance, midwayStart, nearestMidway, placeMidway, entrancePos,
+  newUid, mainTranslevel, levelTranslevel, mainSpot, secondarySpot, hasRelativeCamera, EXIT_WATER, EXIT_MIDWAY, EXIT_NEW, exitToMidway, exitLandsAtMidway, midwaySpot, midwayEntrance, mainEntrance, setMidwayEntrance, midwayStart, nearestMidway, placeMidway, entrancePos,
   type Level, type ScreenExit, type MidwayEntrance, type SecondaryHeader, type OverworldExit,
 } from '../core/level.ts';
 import { overworldFields, overworldLabel } from './owexit.ts';
@@ -15,6 +15,7 @@ import { NO_FREE_ENTRANCE, type ExitLeadsTo } from '../core/entrances.ts';
 import { arrivesSlippery, slipperyEntrances } from '../core/slippery.ts';
 import { levelPicker } from './levelpicker.ts';
 import { openTestPlay } from './testplay.ts';
+import { readL1, readTranslevels, isLevelTile, l1XY, translevelToLevel } from '../core/overworld.ts';
 
 const field = (label: string, ...input: (HTMLElement | string)[]) => h('div', { class: 'prop' }, h('label', null, label), ...input);
 const hint = (...txt: (HTMLElement | string)[]) => h('div', { class: 'hint' }, ...txt);
@@ -155,6 +156,18 @@ function createdIn(app: App, idx: number, level: number): void {
 }
 
 // ---- who leads here ----
+// the overworld's level tiles entering level n (a sub-level: its main level's), each opening the overworld there
+function levelTileRows(app: App, n: number): HTMLElement[] {
+  const tl = mainTranslevel(n) ?? levelTranslevel(app.rom, n);
+  if (!tl) return [];
+  const l1 = readL1(app.rom), tls = readTranslevels(app.rom), via = mainTranslevel(n) === null ? ` (through level ${hex3(translevelToLevel(tl))})` : '';
+  return [...tls.keys()].filter((i) => tls[i] === tl && isLevelTile(l1[i])).map((i) => {
+    const { x, y } = l1XY(i);
+    return h('div', { class: 'row' }, h('span', null, 'Overworld'), h('span', { class: 'lname' }, `level tile ${i >= 0x400 ? 'submaps' : 'main map'} ${hex2(x)},${hex2(y)}${via}`),
+      h('button', { class: 'link-btn', title: 'Show the level tile on the overworld (back returns here)', onclick: () => app.gotoOverworldTile(i) }, 'open'));
+  });
+}
+
 function users(app: App, refs: ExitRef[], extra: HTMLElement[], empty: string): HTMLElement {
   const g = app.entrances.graph();
   const rows = refs.map((r) => h('div', { class: 'row' },
@@ -233,8 +246,7 @@ function mainPanel(app: App, body: HTMLElement, kind: 'main' | 'midway'): void {
     return;
   }
   const g = app.entrances.graph();
-  const tl = mainTranslevel(n);
-  const extra = tl ? [h('div', { class: 'row' }, h('span', null, 'Overworld'), h('span', { class: 'lname' }, `(level tile, translevel ${hex2(tl)})`))] : [];
+  const extra = levelTileRows(app, n);
   body.append(
     h('div', { class: 'prop-title' }, 'Main entrance'),
     hint(`${spotText(mainSpot(s))} – drag the marker to move it`),

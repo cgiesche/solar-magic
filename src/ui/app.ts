@@ -551,6 +551,9 @@ export class App {
     this.revealMarker();
   }
 
+  // set by the host: shows the overworld with layer 1 tile i (l1Index) selected
+  gotoOverworldTile: (i: number) => void = () => {};
+
   // opens a level and chooses the screen of one of its exits
   gotoExit(level: number, screen: number): void {
     if (level !== this.level.number) this.openLevel(level);

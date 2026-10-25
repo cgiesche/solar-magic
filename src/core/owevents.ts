@@ -24,7 +24,10 @@ import { snesToPc, Rom } from './rom.ts';
 import { assemble } from './asar.ts';
 import { rleEncode } from './rle.ts';
 import { missingPatch } from './patches.ts';
-import { OW_EVENTS, OverworldEmulator, gameL1, readL1, readTranslevels, isLevelTile, baseEvent, translevelToLevel, l1XY } from './overworld.ts';
+import {
+  OW_EVENTS, OverworldEmulator, gameL1, readL1, readTranslevels, isLevelTile, baseEvent, translevelToLevel, l1XY, revealAt, revealEventCount, readDestroyList,
+  destroyEffects, l1Index,
+} from './overworld.ts';
 import { RAM, getS16 } from './ram.ts';
 
 const DIVIDERS = 0x04e359; // 0x79 words: the first step of each event, the end
@@ -343,6 +346,26 @@ export function eventRunners(rom: Rom): Map<number, EventRunner[]> {
   }
   // the normal exits first
   for (const l of out.values()) l.sort((a, b) => a.exit - b.exit || a.tl - b.tl);
+  return out;
+}
+// What passing translevel tl changes on the overworld, per exit (0 normal, 1–3 the secret exits) whose event is the
+// level's (no other level's normal exit runs it, as eventRunners orders them): the event, the layer 1 tiles (l1Index)
+// it writes, reveals and destroys (with those destroying the tile on the map before events changes), the layer 2
+// tilemap entries (readL2 indexes) its steps write.
+export interface ExitChanges { exit: number; event: number; l1: number[]; l2: number[] }
+export function exitChanges(rom: Rom, tl: number, d: EventData = readEvents(rom), runners = eventRunners(rom)): ExitChanges[] {
+  const b = baseEvent(rom, tl), destroys = readDestroyList(rom), effects = destroyEffects(rom), map = readL1(rom), out: ExitChanges[] = [];
+  for (let exit = 0; exit < 4 && b + exit < OW_EVENTS; exit++) {
+    const e = b + exit, r = runners.get(e)?.[0];
+    if (r?.tl !== tl || r.exit !== exit) continue;
+    const reveal = e < revealEventCount(rom) ? revealAt(rom, e) : 0;
+    const destroyed = destroys.filter((x) => x.event === e).flatMap((x) => {
+      const { x: tx, y: ty } = l1XY(x.tile), base = x.tile & 0x400;
+      return [x.tile, ...effects[map[x.tile]].map((c) => base + l1Index(0, tx + c.dx, ty + c.dy))];
+    });
+    const l1 = new Set([...eventL1Tiles(d, e), ...(reveal ? [reveal] : []), ...destroyed]);
+    out.push({ exit, event: e, l1: [...l1], l2: [...new Set(eventPieces(d, e).flatMap((p) => pieceTiles(d, p)))] });
+  }
   return out;
 }
 const EXIT_SHORT = ['normal exit', 'secret exit 1', 'secret exit 2', 'secret exit 3'];
