@@ -102,7 +102,7 @@ export class Map16Tab implements WsPanel {
   private dirty = new Set<number>(); // pages to draw once they come near the view
   private topPage = 0; // page at the top of the list
   private pageBar = h('span', { class: 'btn-group m16-pages' });
-  private search = h('input', { type: 'text', class: 'mt-search', placeholder: 'Tile no. (hex) or block file …', spellcheck: false, autocomplete: 'off',
+  private search = h('input', { type: 'text', class: 'mt-search', placeholder: 'Tile no. (hex), name or block file …', spellcheck: false, autocomplete: 'off',
     title: 'Dims the tiles that do not match; Enter selects the tile once only one is left' });
   private match: number[] | null = null;
   private scrollPending = false; // selected while hidden: scroll there when shown
@@ -507,12 +507,12 @@ export class Map16Tab implements WsPanel {
     });
   }
 
-  // search by tile number or block file: the other tiles are dimmed, the list goes to the first match, Enter
-  // selects a single match
+  // search by tile number, name or block file: the other tiles are dimmed, the list goes to the first match,
+  // Enter selects a single match
   private attachSearch(): void {
     const s = this.search;
     s.addEventListener('input', () => {
-      this.match = tileMatches(s.value, EXT_TILES, blockFilesByTile(this.app.rom));
+      this.match = tileMatches(s.value, EXT_TILES, [blockFilesByTile(this.app.rom), namesOf(this.app.rom, this.kind())]);
       this.drawSheet();
       if (this.match?.length) this.scrollToTile(this.match[0]);
     });
@@ -914,8 +914,8 @@ export class Map16Tab implements WsPanel {
     );
   }
 
-  // picks the acts-like value from a sheet of the vanilla tiles, by click or by typing its number:
-  // typing dims the tiles that do not match, Enter takes the tile once only one is left
+  // picks the acts-like value from a sheet of the vanilla tiles, by click or by typing its number or
+  // name: typing dims the tiles that do not match, Enter takes the tile once only one is left
   private pickActs(tiles: number[]): void {
     const app = this.app;
     const c = h('canvas', { width: 256 * 2, height: 512 * 2, class: 'mt-acts-pick' });
@@ -924,11 +924,11 @@ export class Map16Tab implements WsPanel {
     const sheet = renderMap16Sheet(app, false, 0);
     const cur = actsLike(app.rom, tiles[0]);
     const scroll = h('div', { class: 'mt-acts-scroll' }, c);
-    const tip = `Click a tile or type its number: the ${tiles.length > 1 ? 'marked tiles then act' : 'tile then acts'} like this one.`;
+    const tip = `Click a tile or type its number or name: the ${tiles.length > 1 ? 'marked tiles then act' : 'tile then acts'} like this one.`;
     const info = h('div', { class: 'hint mt-acts-info' }, tip);
     const say = (text: string) => { info.textContent = text; info.title = text; };
     const describe = (t: number) => { const p = app.probes.block(t); say(`Tile ${hex(t, 3)}: ${p ? probeText(p) : 'determining …'}`); };
-    const input = h('input', { type: 'text', class: 'mt-acts-input', placeholder: 'Tile number (hex), e.g. 130', spellcheck: false, autocomplete: 'off' });
+    const input = h('input', { type: 'text', class: 'mt-acts-input', placeholder: 'Tile number (hex) or name, e.g. 130', spellcheck: false, autocomplete: 'off' });
     let matches: number[] | null = null;
     const draw = () => {
       ctx.drawImage(sheet, 0, 0, 512, 1024);
@@ -938,7 +938,7 @@ export class Map16Tab implements WsPanel {
       drawTileMatches(ctx, matches, 0, 0x200, 32);
     };
     const update = () => {
-      matches = tileMatches(input.value, 0x200);
+      matches = tileMatches(input.value, 0x200, [namesOf(app.rom, 'fg')]);
       draw();
       if (matches?.length === 1) describe(matches[0]);
       else say(!matches ? tip : matches.length ? `${matches.length} tiles match.` : 'No tile 000–1FF matches.');

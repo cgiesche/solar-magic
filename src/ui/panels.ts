@@ -3,6 +3,7 @@
 import { isBrushMode, type App, type PaletteItem } from './app.ts';
 import { h, clear, hexInput, checkbox, attachRectPick, modal, toast, emptyState } from './dom.ts';
 import { objectName, spriteName, hex2, hex3 } from '../core/names.ts';
+import { nameOf, namesOf } from '../core/usernames.ts';
 import { objectVariant, withObjectVariant, type ObjKind } from '../core/objkinds.ts';
 import { thumbCanvas, objKey, type ObjSpec, type ObjThumb } from './thumbs.ts';
 import { newUid, spriteId, spriteBytes, spriteSizes, type LevelObject, type LevelSprite } from '../core/level.ts';
@@ -150,7 +151,7 @@ export class Palette {
       this.searchRow, this.m16SearchRow, this.m16Bar, this.body);
     this.body.addEventListener('scroll', () => this.m16Scrolled());
     this.m16Search.addEventListener('input', () => {
-      this.m16Match = tileMatches(this.m16Search.value, EXT_TILES, blockFilesByTile(app.rom));
+      this.m16Match = tileMatches(this.m16Search.value, EXT_TILES, [blockFilesByTile(app.rom), namesOf(app.rom, 'fg')]);
       this.build();
       if (this.m16Match?.length) this.scrollToM16Tile(this.m16Match[0]);
     });
@@ -250,9 +251,9 @@ export class Palette {
   m16Observer?: IntersectionObserver;
   m16Page = 0; // page at the top of the list
   m16Bar: HTMLDivElement = h('div', { class: 'tabs seg m16-pages' });
-  // search by tile number or block file: the other tiles are dimmed, the list goes to the first match, Enter
-  // takes a single match
-  m16Search: HTMLInputElement = h('input', { class: 'filter', placeholder: 'Tile no. (hex) or block file …', spellcheck: false, autocomplete: 'off',
+  // search by tile number, name or block file: the other tiles are dimmed, the list goes to the first match,
+  // Enter takes a single match
+  m16Search: HTMLInputElement = h('input', { class: 'filter', placeholder: 'Tile no. (hex), name or block file …', spellcheck: false, autocomplete: 'off',
     title: 'Dims the tiles that do not match; Enter takes the tile once only one is left' });
   m16SearchRow: HTMLDivElement = h('div', { class: 'row' }, this.m16Search);
   m16Match: number[] | null = null;
@@ -291,11 +292,11 @@ export class Palette {
       : 'Click a tile (or drag for several), then right click in the level to place it. Requires the editor patch (installed automatically).');
     this.body.append(h('div', { class: 'row' },
       h('button', { title: 'Edit the chosen tile in the graphics area (also create tiles from 200 on)', onclick: () => app.editMap16(curTile >= 0 ? curTile : this.m16Page * 256) }, 'Edit …')), label);
-    // tooltip: tile number and behaviour when hit from below
+    // tooltip: tile number, name and behaviour when hit from below
     let hoverTile = -1, hoverCanvas: HTMLCanvasElement | null = null;
     const tip = () => {
-      const p = app.probes.block(hoverTile);
-      if (hoverCanvas) hoverCanvas.title = `Tile ${hex3(hoverTile)}: ${p ? probeText(p) : 'determining behavior …'}\nCtrl+click: edit in the Map16 tab`;
+      const p = app.probes.block(hoverTile), name = nameOf(app.rom, 'fg', hoverTile);
+      if (hoverCanvas) hoverCanvas.title = `Tile ${hex3(hoverTile)}${name ? ` “${name}”` : ''}: ${p ? probeText(p) : 'determining behavior …'}\nCtrl+click: edit in the Map16 tab`;
     };
     this.m16Tip = () => { if (hoverTile >= 0 && hoverCanvas?.isConnected) tip(); };
     // a page is drawn once it scrolls into view

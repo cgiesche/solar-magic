@@ -1,13 +1,14 @@
-// Search by tile number (hex) on the Map16 sheets (palette, Map16 tab, behavior picker), or by the file of
-// the custom block on a tile: the tiles that do not match are dimmed, a single match is framed and taken
-// with Enter.
+// Search by tile number (hex) on the Map16 sheets (palette, Map16 tab, behavior picker), or by part of the
+// file of the custom block on a tile or of the tile's name: the tiles that do not match are dimmed, a single
+// match is framed and taken with Enter.
 
 import { hex } from '../core/names.ts';
 
 // tiles 0..count-1 matching the typed number, null for an empty input. A leading zero or all digits compare
 // from the left of the full number, otherwise the number as typed is the start ("25" is 025 and 250–25F,
-// "025" only 025). With `files` (block file per tile), also the tiles whose file name holds the input.
-export function tileMatches(input: string, count: number, files?: Map<number, string>): number[] | null {
+// "025" only 025). Also the tiles one of whose `texts` (block file, name … per tile) holds the input, in
+// any case.
+export function tileMatches(input: string, count: number, texts: Map<number, string>[] = []): number[] | null {
   const text = input.trim().toLowerCase();
   const q = text.toUpperCase().replace(/^(\$|0X)/, '');
   if (!q) return null;
@@ -16,7 +17,7 @@ export function tileMatches(input: string, count: number, files?: Map<number, st
   const padded = q.length === digits || q[0] === '0';
   const out: number[] = [];
   for (let t = 0; t < count; t++) {
-    if ((num && (padded ? hex(t, digits) : t.toString(16).toUpperCase()).startsWith(q)) || files?.get(t)?.toLowerCase().includes(text)) out.push(t);
+    if ((num && (padded ? hex(t, digits) : t.toString(16).toUpperCase()).startsWith(q)) || texts.some((m) => m.get(t)?.toLowerCase().includes(text))) out.push(t);
   }
   return out;
 }
