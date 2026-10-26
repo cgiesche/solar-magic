@@ -560,6 +560,7 @@ function showHelp(): void {
       ['Ctrl+click', 'Go to definition: an animated tile or color opens its own animation, a Map16 quarter its 8x8 tile, a palette button its palette'],
       ['Palettes: arrow keys · Shift+click', 'Other color · mark a range (for “Gradient”)'],
       ['Map16: X / Y / 1–8 / Q', 'Flip quarter / palette 0–7 / next quarter; arrows: other tile'],
+      ['Map16: F2', 'Name the selected tiles (to find them by later)'],
       ['Map16: double click · Ctrl+click on palette', 'Edit quarter in “Graphics” · open palette in “Palettes”'],
       ['Graphics sheet: click/drag · right click/Shift+click', 'Pick 8x8 tiles for the pixel editor · paste them at the mouse'],
       ['Pixel editor: S / B / E / F / I', 'Selection / pencil / eraser / fill / eyedropper'],

@@ -35,6 +35,7 @@ import { remapEditor, type RemapEditor } from '../remaplist.ts';
 import { planMove, applyMove, planRemap, rectMap, type MovePlan, type MoveSource } from '../../core/tilemove.ts';
 import { levelSource, planList, openRemapUses } from '../tileuses.ts';
 import { loadAsar } from '../../core/asar.ts';
+import { NAME_MAX, namesOf, setName, cleanName } from '../../core/usernames.ts';
 import { QuarterGrid, markRect, editMarked, setPalette, setBit, setTileNum, stamp, mirror, summary, wholeTiles, FLIP_X, FLIP_Y, PRIO, type QuarterEdit, type MarkMode, type BitState } from '../../core/quarters.ts';
 
 const Z = 2; // sheet zoom
@@ -110,6 +111,10 @@ export class Map16Tab implements WsPanel {
   private bHead = h('div', { class: 'mt-builder mt-builder-ctl' });
   private bCtl = h('div', { class: 'mt-builder mt-builder-ctl' });
   private qInfo = h('div', { class: 'hint' });
+  // the selection's name (F2); kept while it has the focus, so a redraw does not take what is typed
+  private nameInput = h('input', { type: 'text', size: 1, maxLength: NAME_MAX, spellcheck: false, autocomplete: 'off',
+    title: 'A name to find the tiles by later; all selected tiles get it, empty removes it (F2) – kept in the project file, not in the ROM' });
+  private naming: { bg: boolean; tiles: number[]; was: string } | null = null; // the tiles the field names while it has the focus
   private bigCanvas = h('canvas', { class: 'mt-big' });
   private bigScroll = h('div', { class: 'mt-big-scroll' }, this.bigCanvas);
   private gfxTitle = h('div', { class: 'panel-title' });
@@ -143,6 +148,7 @@ export class Map16Tab implements WsPanel {
     this.attachSearch();
     this.attachGfx();
     this.attachBig();
+    this.attachName();
     const redraw = () => { this.unused = null; if (this.visible) this.redraw(); };
     app.on('rom-change', redraw);
     app.on('render', redraw);
@@ -193,6 +199,42 @@ export class Map16Tab implements WsPanel {
   }
   private tileName(t: number): string {
     return `${this.bg ? 'BG' : 'FG'} tile ${hex(t, 3)}`;
+  }
+
+  // the selection's shared name ('' : none), null: the tiles have different ones
+  private selName(): string | null {
+    const names = namesOf(this.app.rom, this.bg ? 'bg' : 'fg');
+    const all = new Set(this.selection().map((t) => names.get(t) ?? ''));
+    return all.size === 1 ? [...all][0] : null;
+  }
+  private showName(): void {
+    if (document.activeElement === this.nameInput) return;
+    const v = this.selName();
+    this.nameInput.value = v ?? '';
+    this.nameInput.placeholder = v === null ? 'Several names' : 'No name';
+  }
+  // the field names the tiles selected when it got the focus (a click on the sheet blurs it after selecting)
+  private attachName(): void {
+    const f = this.nameInput;
+    f.addEventListener('focus', () => { this.naming = { bg: this.bg, tiles: this.selection(), was: f.value }; });
+    f.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); f.blur(); }
+      if (e.key === 'Escape') { e.preventDefault(); if (this.naming) f.value = this.naming.was; f.blur(); }
+    });
+    f.addEventListener('blur', () => {
+      const n = this.naming;
+      this.naming = null;
+      if (n && f.value !== n.was) this.rename(n.bg, n.tiles, f.value);
+      this.showName();
+    });
+  }
+  private rename(bg: boolean, tiles: number[], name: string): void {
+    const v = cleanName(name), kind = bg ? 'bg' : 'fg', names = namesOf(this.app.rom, kind);
+    const changed = tiles.filter((t) => (names.get(t) ?? '') !== v);
+    if (!changed.length) return;
+    const what = v ? `named “${v}”` : 'name removed';
+    const label = tiles.length === 1 ? `${bg ? 'BG' : 'FG'} tile ${hex(tiles[0], 3)}: ${what}` : `${tiles.length} ${bg ? 'BG' : 'FG'} tiles: ${what}`;
+    this.edit(label, () => setName(this.app.rom, kind, tiles, v));
   }
 
   private edit(label: string, fn: () => void, key: string | null = null): void {
@@ -455,7 +497,8 @@ export class Map16Tab implements WsPanel {
       const p = this.cellAt(e);
       const t = p.y * 16 + p.x;
       const info = this.bg ? undefined : this.app.probes.block(actsLike(this.app.rom, t));
-      e.target.title = `${this.tileName(t)}${this.bg ? '' : ` – ${info ? probeText(info) : 'determining behavior …'}`}`;
+      const name = namesOf(this.app.rom, this.bg ? 'bg' : 'fg').get(t);
+      e.target.title = `${this.tileName(t)}${name ? ` “${name}”` : ''}${this.bg ? '' : ` – ${info ? probeText(info) : 'determining behavior …'}`}`;
     });
   }
 
@@ -560,9 +603,11 @@ export class Map16Tab implements WsPanel {
     this.bHead.replaceChildren(
       h('div', { class: 'prop-title' }, one ? this.tileName(t) : `${this.bg ? 'BG' : 'FG'} tiles ${hex(t, 3)}–${hex(last, 3)}`, one ? '' : h('span', { class: 'hint' }, `  (${this.selW}×${this.selH})`)),
       h('div', { class: 'hint' }, this.rangeText(t), one && !this.bg ? ` · in the level ${used}×` : ''),
+      h('div', { class: 'row mt-name' }, h('span', { class: 'hint' }, 'Name'), this.nameInput),
       h('div', { class: 'mt-section' }, 'Quarters', h('span', { class: 'hint' }, `${marks.size} of ${g.cols * g.rows} marked`)),
     );
     this.updateQInfo();
+    this.showName();
     let acts: HTMLElement | string = '';
     if (!this.bg) {
       const whole = wholeTiles(g, marks);
@@ -1473,6 +1518,7 @@ export class Map16Tab implements WsPanel {
     if (k === 'Escape' && this.remapping) { if (this.visualFrom) { this.visualFrom = null; this.drawGfx(); } else this.closeRemap(); return true; }
     if (k === 'Escape') { if (!this.marked().size) return false; this.setMarks(new Set()); return true; }
     if (k === 'Enter' && !this.remapping) { this.fillMarked(); return true; }
+    if (k === 'F2' && !this.remapping && !this.moving) { this.nameInput.focus(); this.nameInput.select(); return true; }
     if (k === 'x' || k === 'X') { this.flip(FLIP_X, '↔ Flip'); return true; }
     if (k === 'y' || k === 'Y') { this.flip(FLIP_Y, '↕ Flip'); return true; }
     if (k >= '1' && k <= '8') { const p = Number(k) - 1; this.editQuarters(setPalette(p), `Palette ${p}`); return true; }

@@ -21,12 +21,16 @@ Changing 8x8 tile numbers, palettes or acts-like of chosen Map16 tiles (or the f
 _Avoid_: renumber (that is the level graphics placement's), move tiles (that is a tile move)
 
 **Tile move**:
-Map16 tiles 200–FFF taken to other numbers with their graphics, acts-like and block, every use rewritten (Direct Map16 objects of all levels, prefabs, BG tilemaps, the blocks' list) so the levels look as before (core/tilemove.ts); one ROM edit. Rewriting the uses alone, the tiles staying, is Lunar Magic's Remap Direct Map16 / Remap Background Tiles (a remap of uses, with a list of Map16 numbers).
+Map16 tiles 200–FFF taken to other numbers with their graphics, acts-like, block and name, every use rewritten (Direct Map16 objects of all levels, prefabs, BG tilemaps, the blocks' list) so the levels look as before (core/tilemove.ts); one ROM edit. Rewriting the uses alone, the tiles staying, is Lunar Magic's Remap Direct Map16 / Remap Background Tiles (a remap of uses, with a list of Map16 numbers).
 _Avoid_: remap (for a move), renumber
 
 **Quarter**:
 One of the four 8x8 tiles of a Map16 tile, one 16-bit word: 8x8 tile number, palette, X/Y flip and priority (word order top-left, bottom-left, top-right, bottom-right). Acts-like is not a quarter's but the whole 16x16 tile's.
 _Avoid_: 8x8 field, cell, subtile
+
+**Tile name**:
+What the user calls an FG or BG Map16 tile, to find it by later (usernames.ts; other things, e.g. graphics files or levels, are meant to be named the same way). At most 64 characters, one per tile; several tiles share a name to name a thing of several tiles. Editor data: kept with the project file, never in the playable ROM nor in a `.smwlevel` file. Belongs to the tile number: a paste or clear leaves it, a remap too; a tile move takes it along.
+_Avoid_: label, tag, description
 
 **Marked quarters**:
 The set of quarters of the Map16 tab's selection that an edit in the builder changes (palette, flips, priority, a chosen 8x8 tile by Enter). A new selection marks all. A **stamp** puts the chosen block of 8x8 tiles onto the quarters where it lies (right click, right drag paints; or dropped there), whatever is marked. A **flip** mirrors the marked quarters as one picture (across tile borders, each quarter's flip toggled); the marks must be symmetric to the axis. Acts-like applies to the wholly marked 16x16 tiles only and stays with its tile on a flip.

@@ -387,6 +387,7 @@ body.mt-dragging .mt-big { outline: 2px dashed var(--accent); outline-offset: -2
 .mt-paldot { width: 42px; height: 10px; image-rendering: pixelated; border-radius: 2px; }
 .mt-acts { display: flex; flex-direction: column; gap: 5px; padding-top: 6px; border-top: 1px solid var(--border); }
 .mt-acts .grow { flex: 1; min-width: 0; }
+.mt-name input { flex: 1; min-width: 0; }
 .mt-acts-thumb { width: 32px; height: 32px; image-rendering: pixelated; border: 1px solid var(--border); }
 .mt-adv summary { cursor: pointer; color: var(--muted); }
 .mt-acts-dlg { display: flex; flex-direction: column; gap: 6px; }

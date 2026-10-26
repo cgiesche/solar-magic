@@ -21,6 +21,7 @@ import { loadAsar } from '../src/core/asar.ts';
 import { saveBlockProject, loadBlockProject } from '../src/core/blocks.ts';
 import type { LevelTiles } from '../src/core/levelusage.ts';
 import { planMove, applyMove, planRemap, applyRemap, rectMap, storedBg } from '../src/core/tilemove.ts';
+import { setName, nameOf } from '../src/core/usernames.ts';
 import { editorImage } from './fixture.ts';
 
 let fail = 0;
@@ -99,6 +100,8 @@ const before = new Map(levels.map((n) => [n, look(n)]));
 const s = new RomEditSession(rom);
 const image = rom.data.slice();
 const map = new Map([...rectMap(0x345, 3, 1, 0x545), [0x350, 0x650], [0x450, 0x750]]);
+setName(rom, 'fg', [0x345], 'Door');
+setName(rom, 'bg', [0x2a0], 'Hill');
 s.edit('move', () => applyMove(rom, 'fg', planMove(rom, 'fg', map, { levels, blank }), { levels, blank }));
 s.edit('move BG', () => applyMove(rom, 'bg', planMove(rom, 'bg', new Map([[0x2a0, 0x3a0]]), { levels, blank }), { levels, blank }));
 check(s.history.undoStack.length === 2, 'each move one undo step');
@@ -107,8 +110,10 @@ check(!!blockOf(rom, 0x547) && !blockOf(rom, 0x347) && loadBlockProject(rom)!.li
 check(readPrefab(rom, 7)!.tiles.join() === [0x546, TRANSPARENT].join(), 'the prefab\'s tile');
 check(loadLevel(rom, 0x106).objects.some((o) => o.tile === 0x545), 'level 106\'s Direct Map16 object');
 check(bgTileWords(rom, 0x3a0).join() === '5,6,7,8' && storedBg(rom, loadLevel(rom, 0x105))![bgIndex(3, 20)] === 0x3a0, 'the BG tile and the BG tilemap');
+check(nameOf(rom, 'fg', 0x545) === 'Door' && nameOf(rom, 'fg', 0x345) === null && nameOf(rom, 'bg', 0x3a0) === 'Hill' && nameOf(rom, 'bg', 0x2a0) === null, 'the names moved along');
 for (const n of levels) check(look(n) === before.get(n), `level ${hx(n)} looks the same after the moves`);
 s.undo(); s.undo();
+check(nameOf(rom, 'fg', 0x345) === 'Door' && nameOf(rom, 'fg', 0x545) === null, 'undone: the names as before');
 check(rom.data.every((b, i) => b === image[i]), 'undone: the ROM as before');
 // (the comparison sees a level whose uses were not rewritten)
 s.edit('tiles only', () => applyMove(rom, 'fg', planMove(rom, 'fg', map, { levels: [], blank }), { levels: [], blank }));

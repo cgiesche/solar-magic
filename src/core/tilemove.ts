@@ -22,6 +22,7 @@ import { bgBank } from './patches.ts';
 import { decodeBg } from './bg.ts';
 import { isDm16, prefabTiles, COND_ADD } from './cdm16.ts';
 import { listPrefabs, writePrefab, type Prefab } from './prefabs.ts';
+import { moveNames } from './usernames.ts';
 import { EXT_FIRST, EXT_TILES, DEFAULT_ACTS, extTileWords, setExtTileWords, actsLike, setActsLike, blockOf, setBlock } from './map16ext.ts';
 import { BG_EXT_FIRST, BG_EXT_TILES, bgExtTileWords, setBgExtTileWords, vanillaBgWords } from './bgmap16.ts';
 import { loadBlockProject, saveBlockProject } from './blocks.ts';
@@ -199,7 +200,7 @@ export function planMove(rom: Rom, layer: Layer, map: TileMap, src: MoveSource):
   return plan;
 }
 
-// Moves the tiles of a plan without problems: graphics, acts-like and block to the new numbers, the tiles
+// Moves the tiles of a plan without problems: graphics, acts-like, block and name to the new numbers, the tiles
 // moved away from empty; every use rewritten (the levels as saved: the ROM edit saves an open level first).
 export function applyMove(rom: Rom, layer: Layer, plan: MovePlan, src: MoveSource): void {
   if (plan.problems.length) throw new Error(plan.problems[0]);
@@ -208,6 +209,7 @@ export function applyMove(rom: Rom, layer: Layer, plan: MovePlan, src: MoveSourc
   const empty = emptyTile(rom, layer, src.blank), dests = new Set(map.values());
   for (const t of map.keys()) if (!dests.has(t)) setTileData(rom, layer, t, empty);
   for (const [t, d] of map) setTileData(rom, layer, d, data.get(t)!);
+  moveNames(rom, layer, map);
   applyRemap(rom, layer, map, src);
   if (layer === 'bg') return;
   for (const [k, s] of listPrefabs(rom)) if (s.tiles.some((t) => t >= 0 && moves(map, t))) writePrefab(rom, k, mappedPrefab(s, map));

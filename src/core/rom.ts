@@ -142,6 +142,10 @@ export class Rom {
   dropBlob(id: string): void {
     this.extra.delete(id);
   }
+  // an entry under the editor's own fixed id (null: none)
+  setBlob(id: string, data: Uint8Array | null): void {
+    if (data) this.extra.set(id, data); else this.extra.delete(id);
+  }
   get extraSize(): number {
     let n = 0;
     for (const b of this.extra.values()) n += b.length;

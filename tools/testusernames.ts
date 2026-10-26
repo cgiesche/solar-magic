@@ -1,0 +1,79 @@
+// The user's names of things (usernames.ts), for now FG and BG Map16 tiles: at most 64 characters, trimmed,
+// an empty name removes it, several tiles may share one. Kept as editor data (outside the ROM image): saved
+// with the project file, never in the playable ROM; one ROM edit is one undo step.
+import { Rom } from '../src/core/rom.ts';
+import { RomEditSession } from '../src/core/romedit.ts';
+import { NAME_MAX, nameOf, namesOf, setName, moveNames } from '../src/core/usernames.ts';
+import { cleanImage } from './fixture.ts';
+
+let bad = 0;
+const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
+const same = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((v, i) => v === b[i]);
+
+// set, share, remove, rules
+{
+  const rom = new Rom(cleanImage());
+  check(nameOf(rom, 'fg', 0x200) === null && namesOf(rom, 'fg').size === 0, 'no names at first');
+  setName(rom, 'fg', [0x200], 'Bush');
+  check(nameOf(rom, 'fg', 0x200) === 'Bush', 'a tile named');
+  check(nameOf(rom, 'bg', 0x200) === null, 'FG and BG tiles are named apart');
+  setName(rom, 'fg', [0x210, 0x211, 0x220, 0x221], '  Big  bush ');
+  check([0x210, 0x211, 0x220, 0x221].every((t) => nameOf(rom, 'fg', t) === 'Big  bush'), 'several tiles share a name, trimmed, inner spaces kept');
+  setName(rom, 'fg', [0x211], 'Other');
+  check(nameOf(rom, 'fg', 0x211) === 'Other' && nameOf(rom, 'fg', 0x210) === 'Big  bush', 'one name per tile: renaming one leaves the others');
+  setName(rom, 'fg', [0x200], '   ');
+  check(nameOf(rom, 'fg', 0x200) === null && namesOf(rom, 'fg').size === 4, 'an empty name removes it');
+  setName(rom, 'bg', [0x400], 'x'.repeat(100));
+  check(nameOf(rom, 'bg', 0x400) === 'x'.repeat(NAME_MAX) && NAME_MAX === 64, 'at most 64 characters');
+  setName(rom, 'bg', [0x401], '🍄'.repeat(70));
+  check([...nameOf(rom, 'bg', 0x401)!].length === 64, 'characters, not UTF-16 units');
+  setName(rom, 'bg', [0x402], 'ÄÖÜ <tag> "q"');
+  check(nameOf(rom, 'bg', 0x402) === 'ÄÖÜ <tag> "q"', 'any text, stored as typed');
+  for (const k of ['fg', 'bg'] as const) setName(rom, k, [...namesOf(rom, k).keys()], '');
+  check(!rom.extra.size, 'no names: no editor data entry');
+}
+
+// the playable ROM is unchanged; the project file keeps them
+{
+  const rom = new Rom(cleanImage());
+  const before = rom.output(false);
+  setName(rom, 'fg', [0x300, 0x301], 'Pipe');
+  setName(rom, 'bg', [0x0a0], 'Hill');
+  check(same(rom.output(false), before), 'the playable ROM is unchanged by names');
+  const back = Rom.fromFile(rom.outputProject(false));
+  check(nameOf(back, 'fg', 0x301) === 'Pipe' && nameOf(back, 'bg', 0x0a0) === 'Hill' && namesOf(back, 'fg').size === 2, 'names survive the project file');
+  const plain = Rom.fromFile(rom.output(false));
+  check(namesOf(plain, 'fg').size === 0, 'a plain ROM has none');
+}
+
+// one ROM edit is one undo step
+{
+  const rom = new Rom(cleanImage());
+  const s = new RomEditSession(rom);
+  s.edit('Name', () => setName(rom, 'fg', [0x200, 0x201], 'Door'));
+  s.edit('Rename', () => setName(rom, 'fg', [0x200, 0x201], 'Gate'));
+  check(s.history.undoStack.length === 2, 'each naming is one undo step');
+  s.undo();
+  check(nameOf(rom, 'fg', 0x200) === 'Door' && nameOf(rom, 'fg', 0x201) === 'Door', 'undo restores the names');
+  s.undo();
+  check(nameOf(rom, 'fg', 0x200) === null, 'undo of the first removes them');
+  s.redo(); s.redo();
+  check(nameOf(rom, 'fg', 0x201) === 'Gate', 'redo restores them');
+}
+
+// a tile move takes the names along (swaps work, destinations get the moved tile's name or none)
+{
+  const rom = new Rom(cleanImage());
+  setName(rom, 'fg', [0x200], 'A');
+  setName(rom, 'fg', [0x201], 'B');
+  setName(rom, 'fg', [0x300], 'Overwritten');
+  moveNames(rom, 'fg', new Map([[0x200, 0x201], [0x201, 0x200], [0x202, 0x300]]));
+  check(nameOf(rom, 'fg', 0x200) === 'B' && nameOf(rom, 'fg', 0x201) === 'A', 'swapped names');
+  check(nameOf(rom, 'fg', 0x300) === null && nameOf(rom, 'fg', 0x202) === null, 'a destination takes the moved tile\'s none');
+  setName(rom, 'bg', [0x500], 'Cloud');
+  moveNames(rom, 'bg', new Map([[0x500, 0x600]]));
+  check(nameOf(rom, 'bg', 0x600) === 'Cloud' && nameOf(rom, 'bg', 0x500) === null, 'the moved-away tile is left without');
+}
+
+console.log(bad ? `${bad} FAILED` : 'all ok');
+if (bad) process.exit(1);
