@@ -2,10 +2,10 @@
 // Lunar Magic's "Analyze Resources in Levels", LM help: file_analyze_levels.htm), and what is defined or
 // inserted but used nowhere.
 // - The Map16 tiles a level places are learned by loading it in the emulator (an emulated result): its
-//   layer 1/2 tiles with the object that put each there (object, Direct Map16, structure) and the tiles
+//   layer 1/2 tiles with the object that put each there (object, Direct Map16, prefab) and the tiles
 //   of its BG tilemap. Kept in the result cache per level, valid while the ROM bytes the load read and
 //   the level's data (fed to the load as an overlay, see LevelOverride) are unchanged.
-// - Links of a tile outside the levels: tiles acting like it, structures holding it, blocks on it.
+// - Links of a tile outside the levels: tiles acting like it, prefabs holding it, blocks on it.
 // - GFX slots (gfxslots.ts) and sprites are read from the ROM.
 
 import { snesToPc, type Rom } from './rom.ts';
@@ -19,9 +19,9 @@ import { layerGeom } from './render.ts';
 import { bgFromWram, BG_SIZE } from './bg.ts';
 import { map16Tile } from './ram.ts';
 import { inputHash, levelInput } from './inputs.ts';
-import { flagBytes, usedFlags, structTiles } from './cdm16.ts';
+import { flagBytes, usedFlags, prefabTiles } from './cdm16.ts';
 import { DM16_EXT, VANILLA_GFX, GFX_FILES, gfxEntry } from './patches.ts';
-import { STRUCT_EXT, listStructures } from './structs.ts';
+import { PREFAB_EXT, listPrefabs } from './prefabs.ts';
 import { EXT_FIRST, EXT_TILES, actsLike, extTileWords, DEFAULT_ACTS } from './map16ext.ts';
 import { loadBlockProject } from './blocks.ts';
 import { levelSlots, type GfxSlot } from './gfxslots.ts';
@@ -36,8 +36,8 @@ export function usedLevels(rom: Rom): number[] {
 
 // ---------- Map16 tiles in levels (emulated) ----------
 
-export type TileSource = 'object' | 'direct' | 'structure';
-export const TILE_SOURCES: Record<TileSource, string> = { object: 'object', direct: 'Direct Map16', structure: 'structure' };
+export type TileSource = 'object' | 'direct' | 'prefab';
+export const TILE_SOURCES: Record<TileSource, string> = { object: 'object', direct: 'Direct Map16', prefab: 'prefab' };
 // a tile placed in a layer by one kind of object: how often, and its first place (level tile, columns first)
 export interface TileUse { tile: number; layer: 1 | 2; source: TileSource; count: number; x: number; y: number }
 // a tile of the BG tilemap (32×27 tiles)
@@ -51,7 +51,7 @@ export interface LevelTiles {
 }
 
 const sourceOf = (o: LevelObject | undefined): TileSource =>
-  o?.num === 0 && o.ext === DM16_EXT ? 'direct' : o?.num === 0 && o.ext === STRUCT_EXT ? 'structure' : 'object';
+  o?.num === 0 && o.ext === DM16_EXT ? 'direct' : o?.num === 0 && o.ext === PREFAB_EXT ? 'prefab' : 'object';
 
 // The tiles of a level from its emulated load, which was given the level's objects with their owners
 // (LevelOverride.byteOwner: layer 1 object index, layer 2 0x8000 | index). Tiles no object wrote are left out.
@@ -181,22 +181,22 @@ export function bgTileUsers(levels: Iterable<LevelTiles>, t: number): (BgTileUse
   return out;
 }
 
-// what refers to FG tile t outside the levels: tiles acting like it, structures holding it, custom blocks on it
-export function tileLinks(rom: Rom, t: number): { actsLike: number[]; structures: number[]; blocks: string[] } {
+// what refers to FG tile t outside the levels: tiles acting like it, prefabs holding it, custom blocks on it
+export function tileLinks(rom: Rom, t: number): { actsLike: number[]; prefabs: number[]; blocks: string[] } {
   const acts: number[] = [];
   for (let x = 0; x < EXT_TILES; x++) if (x !== t && actsLike(rom, x) === t) acts.push(x);
-  const structures = [...listStructures(rom)].filter(([, s]) => structTiles(s).includes(t)).map(([n]) => n);
+  const prefabs = [...listPrefabs(rom)].filter(([, s]) => prefabTiles(s).includes(t)).map(([n]) => n);
   const blocks = (loadBlockProject(rom)?.list ?? []).filter((b) => b.tile === t).map((b) => b.file);
-  return { actsLike: acts, structures, blocks };
+  return { actsLike: acts, prefabs, blocks };
 }
 
 // Map16 tiles of the ROM's own (200-FFF) that are defined – graphics or acts like other than the empty
-// tile's (`blank`: its tile words), or a block on them – but placed in no level and held by no structure
+// tile's (`blank`: its tile words), or a block on them – but placed in no level and held by no prefab
 // (acts like only reaches the game's tiles 000-1FF)
 export function unusedFgTiles(rom: Rom, levels: Iterable<LevelTiles>, blank: number[]): number[] {
   const used = new Set<number>();
   for (const l of levels) for (const u of l.fg) used.add(u.tile);
-  for (const [, s] of listStructures(rom)) for (const t of structTiles(s)) used.add(t);
+  for (const [, s] of listPrefabs(rom)) for (const t of prefabTiles(s)) used.add(t);
   const blocks = new Set((loadBlockProject(rom)?.list ?? []).map((b) => b.tile));
   const out: number[] = [];
   for (let t = EXT_FIRST; t < EXT_TILES; t++) {

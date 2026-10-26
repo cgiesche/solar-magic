@@ -527,7 +527,7 @@ The patch makes the game's own level load build such a level, which is what the 
 setup (`$05D928`) takes the screen size for the level's size, each object (`$0586BB`) its address from the
 screen, the subscreen and the high Y bit, and where objects go on to the next screen (`$0DA963`, `$0DA9D6`,
 `$0DA9EF`, the places Lunar Magic changes) they step by the level's screen size; Direct Map16 and
-structures too. Those three places are Lunar Magic's: a patch written for a Lunar Magic ROM that changes them is
+prefabs too. Those three places are Lunar Magic's: a patch written for a Lunar Magic ROM that changes them is
 not compatible. After the load (`$058091`) the size is cleared, so loads without the setup (the credits) are
 the game's. Levels of the game's size run the game's code (`src/core/levelheight.ts`,
 `tools/testlevelheight.ts`).
@@ -815,7 +815,7 @@ entry drawn there.
 
 ### Conditional Direct Map16
 
-A Direct Map16 object (extended object `$05`) or a structure's tile can depend on a flag of Lunar Magic's
+A Direct Map16 object (extended object `$05`) or a prefab's tile can depend on a flag of Lunar Magic's
 table at `$7FC060–$7FC06F` (flag *n*: byte `$7FC060 + n/8`, bit `n%8`, bits low to high). While the flag is
 off it is not drawn; with "always show" it is drawn, with its tiles + 0x100 while the flag is on. Nothing
 in the game sets the flags and the editor doesn't clear them: that is up to your own code, e.g. UberASM
@@ -832,7 +832,7 @@ load:
 In the level data the condition is Lunar Magic's byte `ACCCCCCC` (A: always show, C: the flag 00–7F) after
 the tile it belongs to, which says so by its top bit: a Direct Map16 object is `00` object bytes, `$05`,
 the tile's low byte, its high byte with bit 7 set, the size byte, then the condition byte (7 bytes
-instead of 6); a structure's tile word has bit 15 set and the condition byte follows it. A `.mwl`'s objects
+instead of 6); a prefab's tile word has bit 15 set and the condition byte follows it. A `.mwl`'s objects
 27/29 in their conditional form keep the condition. The ExAnimation engine's RAM claim leaves the flags out
 as shared RAM, so code that writes them is no conflict. In the editor: the object's properties (one or
 several Direct Map16 objects at once), View → Conditional Direct Map16 (each flag the level uses, all on,
@@ -930,7 +930,7 @@ not compatible with the respective feature.
 | `$009F19`, `$048F8A`, `$049001`, `$049199`; code `$05DD80`, `$03BA10`, `$03BA50`, table `$05DDA0` | Initial level flags, no entry if passed, save prompt (Lunar Magic's places) |
 | `$04E9F7`, `$04DCA5`, `$04DCAA`, `$04D859`; pointers `$04E49F`, `$04E4A4`, `$04E709`, `$04E710`, `$04EE3F`, `$04EE5A`, `$04E4B0`, `$04E4BB`, `$04EAF5`, `$04DD45`, `$04DD4A`, `$04DA74`, `$04EC8C`, `$04ECBA`, `$04ECC5`, `$04ED97`, `$04EDBE`, `$04EDB8` | Event steps, silent events, 0x78 events (Lunar Magic's places) |
 | `$04E6C5`, `$04DA98`; pointers `$04E67C`, `$04E69C` | Destroyed level tiles, 0x18 entries (Lunar Magic's places) |
-| Ext. object table `$0DA11B` (entry `$04`) | Structures (SMWS); empty in the original and in Lunar Magic, no code hook |
+| Ext. object table `$0DA11B` (entry `$04`) | Prefabs (SMWS); empty in the original and in Lunar Magic, no code hook |
 | `$05B20F` | Messages in free space (SMWM), only if the texts no longer fit |
 | `$00F545`, `$029328`, `$058A66`, `$058B46`, `$058C34`, `$058D2B`, `$00C096`, `$00C0E7`, `$00C176` | Map16 extension and custom blocks (SMWX) |
 | `$05808C`, `$00A5EE`, `$00A242`, `$00A295`, `$00A2EE` | UberASM: level `load`/`init`/`main`/`end` |
@@ -974,13 +974,13 @@ again.
 * `src/core/patchpkg.ts`: `.zip`, `patch.json`, defines.
 * `src/core/uberasm.ts`, `src/core/uberproject.ts`: UberASM generator and project.
 * `src/core/blocks.ts`, `src/core/map16ext.ts`: custom blocks.
-* `src/core/structs.ts`: structures (extended object `$04`). Level data: `00` object bytes as for any
-  extended object with `$04`, then 1 byte structure number. `$04` because it is empty in the clean game and in
+* `src/core/prefabs.ts`: prefabs (extended object `$04`). Level data: `00` object bytes as for any
+  extended object with `$04`, then 1 byte prefab number. `$04` because it is empty in the clean game and in
   Lunar Magic. Lunar Magic's `$03` is its swapped screen jump (level height 1C, the level height patch's too), a 3-byte object, so a
-  structure there would put Lunar Magic's level load out of step. Found by emulation (`tools/extobjprobe.ts`,
-  [research note](research/lunar-magic-extended-object-03.md), #117). Levels saved with structures at `$03`
+  prefab there would put Lunar Magic's level load out of step. Found by emulation (`tools/extobjprobe.ts`,
+  [research note](research/lunar-magic-extended-object-03.md), #117). Levels saved with prefabs at `$03`
   are not converted (no migration).
 * `src/core/cdm16.ts`: conditional Direct Map16 (see above); test `tools/testcdm16.ts`. The level data reads `$04` as a
-  structure (4 bytes) always: SMWS is installed when the editor opens the ROM (ADR 0004).
-* Tests: `tools/testasar.ts`, `tools/testuberasm.ts`, `tools/testblocks.ts`, `tools/teststructs.ts`,
+  prefab (4 bytes) always: SMWS is installed when the editor opens the ROM (ADR 0004).
+* Tests: `tools/testasar.ts`, `tools/testuberasm.ts`, `tools/testblocks.ts`, `tools/testprefabs.ts`,
   `tools/testpkgreg.ts` (part of `npm test`).

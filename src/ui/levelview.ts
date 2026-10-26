@@ -18,8 +18,8 @@ import { problemsButton } from './problems.ts';
 import { map16Tile } from '../core/ram.ts';
 import { GAME_VIEW_W, GAME_VIEW_H, MARIO_W, MARIO_H, type CameraBands } from '../core/camerabands.ts';
 import { gameViewAt } from '../core/camerareach.ts';
-import { isDm16, dm16Tiles, structFlags } from '../core/cdm16.ts';
-import { STRUCT_EXT, readStructure } from '../core/structs.ts';
+import { isDm16, dm16Tiles, prefabFlags } from '../core/cdm16.ts';
+import { PREFAB_EXT, readPrefab } from '../core/prefabs.ts';
 
 type Drag =
   | { kind: 'move'; edit: LevelEdit; startTx: number; startTy: number; lastDx: number; lastDy: number; orig: Map<number, { x: number; y: number }> }
@@ -354,18 +354,18 @@ export class LevelView {
     }
   }
 
-  // conditional Direct Map16 (cdm16.ts): a flag badge on each object that depends on a flag (structures by their
+  // conditional Direct Map16 (cdm16.ts): a flag badge on each object that depends on a flag (prefabs by their
   // tiles' flags), green while the view shows it with the flag on; where one left nothing in the level's load, its tiles dashed
   paintConds(ctx: CanvasRenderingContext2D, lw: number): void {
     const app = this.app;
-    const structs = new Map<number, number[]>();
+    const prefabs = new Map<number, number[]>();
     ctx.font = 'bold 7px sans-serif';
     for (const o of app.currentObjects()) {
       let flags: number[];
       if (isDm16(o)) flags = o.cond ? [o.cond.flag] : [];
-      else if (o.num === 0 && o.ext === STRUCT_EXT && o.struct !== undefined) {
-        if (!structs.has(o.struct)) structs.set(o.struct, structFlags(readStructure(app.rom, o.struct)));
-        flags = structs.get(o.struct)!;
+      else if (o.num === 0 && o.ext === PREFAB_EXT && o.prefab !== undefined) {
+        if (!prefabs.has(o.prefab)) prefabs.set(o.prefab, prefabFlags(readPrefab(app.rom, o.prefab)));
+        flags = prefabs.get(o.prefab)!;
       } else continue;
       if (!flags.length) continue;
       if (isDm16(o) && o.cond && !app.objectDrawn(o)) {

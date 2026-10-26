@@ -1,5 +1,5 @@
 // Where Map16 tiles, GFX files and sprites are used across the ROM's levels (levelusage.ts): the tiles a
-// level places (by object, Direct Map16, structure; its BG tilemap) are learned by loading it in the
+// level places (by object, Direct Map16, prefab; its BG tilemap) are learned by loading it in the
 // emulator and stay valid while the ROM bytes and level data they came from are unchanged; GFX slots
 // and sprites are read from the ROM.
 import { Rom } from '../src/core/rom.ts';
@@ -7,7 +7,7 @@ import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadLevel, newUid, spriteId } from '../src/core/level.ts';
 import { saveLevel } from '../src/core/save.ts';
 import { DM16_EXT, setGfxEntry, levelGfx, setLevelGfx } from '../src/core/patches.ts';
-import { STRUCT_EXT, writeStructure, TRANSPARENT } from '../src/core/structs.ts';
+import { PREFAB_EXT, writePrefab, TRANSPARENT } from '../src/core/prefabs.ts';
 import { setActsLike, setExtTileWords, extTileWords } from '../src/core/map16ext.ts';
 import { ResultCache, RomFingerprint } from '../src/core/romdeps.ts';
 import { map16Source } from '../src/core/render.ts';
@@ -28,11 +28,11 @@ const blank = map16Source(rom, emu.load(0x105)).fg(0x025);
 // free space for an unrelated change later: a page of its own, which no level load reads (its RATS tag may share one)
 const spare = rom.allocWrite(new Uint8Array(0x300));
 
-// level 105 as saved: a Direct Map16 tile, a structure with another one, both on layer 1
+// level 105 as saved: a Direct Map16 tile, a prefab with another one, both on layer 1
 const lv = loadLevel(rom, 0x105);
-writeStructure(rom, 7, { w: 2, h: 1, tiles: [0x346, TRANSPARENT], name: 'test' });
+writePrefab(rom, 7, { w: 2, h: 1, tiles: [0x346, TRANSPARENT], name: 'test' });
 lv.objects.push({ uid: newUid(), num: 0, ext: DM16_EXT, x: 0x20, y: 0x10, size: 0x01, tile: 0x345 }); // 2×1
-lv.objects.push({ uid: newUid(), num: 0, ext: STRUCT_EXT, x: 0x30, y: 0x12, size: 0, struct: 7 });
+lv.objects.push({ uid: newUid(), num: 0, ext: PREFAB_EXT, x: 0x30, y: 0x12, size: 0, prefab: 7 });
 saveLevel(rom, lv);
 setExtTileWords(rom, 0x345, [1, 2, 3, 4]);
 setExtTileWords(rom, 0x346, [1, 2, 3, 5]);
@@ -51,7 +51,7 @@ check(uses.missing(levels).length === 0, 'every level known after scanning');
   check(u.length === 1 && r.length === 1 && r[0].source === 'direct' && r[0].layer === 1 && r[0].count === 2 && r[0].x === 0x20 && r[0].y === 0x10,
     `Direct Map16 tile 345: level 105, 2×, at 20/10 (${JSON.stringify(u)})`);
   const s = fgTileUsers(all, 0x346, [0])[0]?.uses ?? [];
-  check(s.length === 1 && s[0].source === 'structure' && s[0].count === 1 && s[0].x === 0x30 && s[0].y === 0x12, `structure tile 346 at 30/12 (${JSON.stringify(s)})`);
+  check(s.length === 1 && s[0].source === 'prefab' && s[0].count === 1 && s[0].x === 0x30 && s[0].y === 0x12, `prefab tile 346 at 30/12 (${JSON.stringify(s)})`);
 }
 
 // a standard tile of the game: objects in many levels, its first place is where it is in the level
@@ -83,11 +83,11 @@ check(uses.missing(levels).length === 0, 'every level known after scanning');
   check(bgTileUsers(all, b.tile).some((u) => u.level === 0x105 && u.count === b.count), `BG tile ${b.tile.toString(16)} used in level 105`);
 }
 
-// links: the tiles acting like it, structures holding it, blocks on it
+// links: the tiles acting like it, prefabs holding it, blocks on it
 {
   const l = tileLinks(rom, 0x130);
   check(l.actsLike.includes(0x347) && !l.actsLike.includes(0x130), `tile 347 acts like 130 (${l.actsLike.map((x) => x.toString(16))})`);
-  check(tileLinks(rom, 0x346).structures.includes(7), 'structure 07 holds tile 346');
+  check(tileLinks(rom, 0x346).prefabs.includes(7), 'prefab 07 holds tile 346');
   check(Array.isArray(l.blocks), 'blocks on the tile');
 }
 

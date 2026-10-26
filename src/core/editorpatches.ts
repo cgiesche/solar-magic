@@ -16,7 +16,7 @@ import { installTranslevelPatch, installLevelFlagsPatch, installDestroyPatch } f
 import { installEventPatch } from './owevents.ts';
 import { installMap16Ext, enableBlocks } from './map16ext.ts';
 import { installBgMap16Ext } from './bgmap16.ts';
-import { installStructPatch } from './structs.ts';
+import { installPrefabPatch } from './prefabs.ts';
 import { newStyleExits } from './exitgraph.ts';
 import { keepCleanSharedPalettes } from './sharedpal.ts';
 import { keepCleanGame, isCleanRom } from './cleangame.ts';
@@ -48,7 +48,7 @@ export async function installEditorPatches(rom: Rom): Promise<void> {
   installBgPatch(rom);
   installMusicPatch(rom);
   installBgMap16Ext(rom);
-  installStructPatch(rom);
+  installPrefabPatch(rom);
   asar(installExAnim(rom));
   asar(installL2ScrollPatch(rom));
   asar(installLevelHeightPatch(rom));

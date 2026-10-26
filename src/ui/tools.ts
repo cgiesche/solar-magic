@@ -16,7 +16,7 @@ import { ENTRANCE_ACTIONS, hex, objectName } from '../core/names.ts';
 import { saveLevel } from '../core/save.ts';
 import { DM16_EXT, setLevelGfx, customPalette, setCustomPalette, bgBank } from '../core/patches.ts';
 import { bgFromWram } from '../core/bg.ts';
-import { STRUCT_EXT } from '../core/structs.ts';
+import { PREFAB_EXT } from '../core/prefabs.ts';
 
 // overview of all secondary entrances (000-1FF): where each leads, which exits use it
 export function openEntrancesDialog(app: App): void {
@@ -208,9 +208,9 @@ export async function importLevel(app: App): Promise<boolean> {
   try {
     const rom = app.rom, n = app.level.number;
     const text = await f.text();
-    // structures, graphics slots and palette live in the ROM: an undoable ROM edit, then the level (not
+    // prefabs, graphics slots and palette live in the ROM: an undoable ROM edit, then the level (not
     // saved yet) as a level edit (Ctrl+Z takes that back first)
-    const data = app.romEdit(`${f.name}: structures, graphics slots/palette of level ${hex(n, 3)}`, () => {
+    const data = app.romEdit(`${f.name}: prefabs, graphics slots/palette of level ${hex(n, 3)}`, () => {
       const d = importLevelFile(rom, text, app.level);
       setLevelGfx(rom, n, d.gfx ?? new Array(8).fill(0xff));
       if (d.palette || customPalette(rom, n)) setCustomPalette(rom, n, d.palette);
@@ -260,7 +260,7 @@ export function openInsertDialog(app: App, tx: number, ty: number): void {
       if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1');
       if (kind === 0 && num === 0) { toast('There is no object 00 – use “Extended object” for extended objects.', 'error'); return false; }
       if (kind === 1 && num === DM16_EXT) { toast('Please place Direct Map16 via the palette\'s Map16 tab.', 'error'); return false; }
-      if (kind === 1 && num === STRUCT_EXT) { toast('Please place structures via the palette\'s Structures tab.', 'error'); return false; }
+      if (kind === 1 && num === PREFAB_EXT) { toast('Please place prefabs via the palette\'s Prefabs tab.', 'error'); return false; }
       app.insertAt(tx, ty, kind === 0 ? { kind: 'obj', num, ext: 0, size } : { kind: 'obj', num: 0, ext: num, size: 0 });
     }
   };

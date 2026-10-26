@@ -3,16 +3,16 @@
 // dispatcher hook at $0DA106). Level 105 is loaded in the emulator with its own header and a marker object (coins,
 // 2x2, at x=2 y=10), then again with extended object N in front of the marker, as 3 to 6 bytes (00 00 N, then
 // zeros). "k bytes": with k bytes the map is the marker's alone – the load took k bytes for N and N placed nothing
-// (a structure of 4 bytes where the load takes 3 puts the level data out of step: its number is read as the next
+// (a prefab of 4 bytes where the load takes 3 puts the level data out of step: its number is read as the next
 // object). "failed": every length failed to load; "other": N placed something or ran code without a handler (an
 // empty pointer runs whatever is at $00:0000).
-//   node tools/extobjprobe.ts [rom ...]   (default: the clean game and the editor's ROM with structures)
+//   node tools/extobjprobe.ts [rom ...]   (default: the clean game and the editor's ROM with prefabs)
 import { readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator, MAP_BASE, MAP_SIZE } from '../src/core/levelemu.ts';
 import { MAP_HI } from '../src/core/ram.ts';
 import { L1_PTRS } from '../src/core/level.ts';
-import { installStructPatch, EXT_OBJ_TABLE } from '../src/core/structs.ts';
+import { installPrefabPatch, EXT_OBJ_TABLE } from '../src/core/prefabs.ts';
 import { cleanImage, editorImage } from './fixture.ts';
 
 const LEVEL = 0x105;
@@ -52,6 +52,6 @@ if (files.length) {
 else {
   probe('clean game', new Rom(cleanImage()));
   const ed = new Rom(await editorImage());
-  installStructPatch(ed);
-  probe('editor ROM with structures', ed);
+  installPrefabPatch(ed);
+  probe('editor ROM with prefabs', ed);
 }

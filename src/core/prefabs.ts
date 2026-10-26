@@ -1,10 +1,10 @@
-// Structures ("SMWS"): user-made blocks of Map16 tiles, placed as one level object.
-// Extended object $04 takes one extra byte, the structure number (00-FF). The only change to the
+// Prefabs ("SMWS"): user-made blocks of Map16 tiles, placed as one level object.
+// Extended object $04 takes one extra byte, the prefab number (00-FF). The only change to the
 // original game is the pointer for extended object $04 in the extended object table (empty in the
 // original game), so no code of the game or of other patches is hooked. $04 is free in the clean game and
 // in Lunar Magic, whose $03 is its swapped screen jump, a 3-byte object (#117, tools/extobjprobe.ts).
-// Code block: "SMWS", version, pointer to the structure table, code. The table holds a 24-bit
-// pointer per structure (0 = none, the object then places nothing). Each structure is its own
+// Code block: "SMWS", version, pointer to the prefab table, code. The table holds a 24-bit
+// pointer per prefab (0 = none, the object then places nothing). Each prefab is its own
 // RATS block: width, height, width*height tile words row by row ($FFFF = transparent, the tile
 // below stays; with the top bit, COND_MARK, its condition byte follows: Lunar Magic's conditional Direct
 // Map16, cdm16.ts), then its name (UTF-8, zero-terminated).
@@ -17,16 +17,16 @@ import { CDM16_FLAGS } from './ram.ts';
 import { COND_MARK, condByte, condOf, type Dm16Cond } from './cdm16.ts';
 
 export const EXT_OBJ_TABLE = 0x0da10f;
-export const STRUCT_EXT = 0x04;
-export const STRUCT_SLOT = EXT_OBJ_TABLE + STRUCT_EXT * 3;
-export const STRUCT_HOOKS: [number, number][] = [[STRUCT_SLOT, 3]];
-export const STRUCT_COUNT = 256;
-export const STRUCT_MAX = 64; // width/height limit (the row/column counters are signed bytes)
+export const PREFAB_EXT = 0x04;
+export const PREFAB_SLOT = EXT_OBJ_TABLE + PREFAB_EXT * 3;
+export const PREFAB_HOOKS: [number, number][] = [[PREFAB_SLOT, 3]];
+export const PREFAB_COUNT = 256;
+export const PREFAB_MAX = 64; // width/height limit (the row/column counters are signed bytes)
 export const TRANSPARENT = -1;
 const MAGIC = [0x53, 0x4d, 0x57, 0x53]; // "SMWS"
 const HEADER = 8;
 
-export interface Structure {
+export interface Prefab {
   w: number;
   h: number;
   tiles: number[]; // row-major, TRANSPARENT = keep the tile below
@@ -34,15 +34,15 @@ export interface Structure {
   name: string;
 }
 
-export function structPatch(rom: Rom): { base: number; table: number } | null {
-  const code = rom.r24(STRUCT_SLOT);
+export function prefabPatch(rom: Rom): { base: number; table: number } | null {
+  const code = rom.r24(PREFAB_SLOT);
   if (!code) return null;
   const base = code - HEADER;
   if ((base & 0xffff) < 0x8000 || !MAGIC.every((m, i) => rom.r8(base + i) === m)) return null;
   return { base, table: rom.r24(base + 5) };
 }
 
-const structTable = (rom: Rom) => (structPatch(rom) ?? missingPatch('Structures (SMWS)')).table;
+const prefabTable = (rom: Rom) => (prefabPatch(rom) ?? missingPatch('Prefabs (SMWS)')).table;
 
 function build(): Asm {
   const a = new Asm();
@@ -50,14 +50,14 @@ function build(): Asm {
   a.fill(HEADER - 5); // +5: table pointer
   // entry (M=8, X=8) from the extended object dispatcher; [$65] points behind the 3 object bytes
   a.label('Obj');
-  a.b(0xa7, 0x65); // LDA [$65] (structure number)
+  a.b(0xa7, 0x65); // LDA [$65] (prefab number)
   a.b(0xe6, 0x65, 0xd0, 0x02, 0xe6, 0x66); // INC $65 : BNE + : INC $66
   a.b(0xc2, 0x30, 0x29, 0xff, 0x00, 0x0a, 0xaa); // REP #$30 : AND #$00FF : ASL : TAX
   a.long(0xbf, 'TblW'); a.b(0x85, 0x08); // LDA.l TblW,x : STA $08
   a.b(0x8a, 0x4a, 0xaa, 0xe2, 0x20); // TXA : LSR : TAX : SEP #$20
   a.long(0xbf, 'TblB'); a.b(0x85, 0x0a); // LDA.l TblB,x : STA $0A
   a.b(0xe2, 0x10); // SEP #$10
-  a.br(0xd0, 'have'); // bank 0: no structure
+  a.br(0xd0, 'have'); // bank 0: no prefab
   a.b(0x68, 0x68, 0x6b); // drop JSR return, RTL
   a.label('have');
   a.b(0xa7, 0x08, 0x85, 0x0c); // LDA [$08] : STA $0C (width)
@@ -127,35 +127,35 @@ function build(): Asm {
   a.b(0x24, 0x0b); a.br(0x30, 'on'); // BIT $0B : BMI (always show)
   a.b(0x18, 0x60); // CLC : RTS (not drawn: the tile below stays)
   a.label('Bits'); a.b(0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80);
-  a.label('TblW'); a.fill(STRUCT_COUNT * 2);
-  a.label('TblB'); a.fill(STRUCT_COUNT);
+  a.label('TblW'); a.fill(PREFAB_COUNT * 2);
+  a.label('TblB'); a.fill(PREFAB_COUNT);
   return a;
 }
 
-export function installStructPatch(rom: Rom): { base: number; table: number } {
-  const ex = structPatch(rom);
+export function installPrefabPatch(rom: Rom): { base: number; table: number } {
+  const ex = prefabPatch(rom);
   if (ex) return ex;
-  if (rom.r24(STRUCT_SLOT) !== 0) throw new Error(`Extended object $${STRUCT_EXT.toString(16).padStart(2, '0')} is already in use${ownerNote(rom, STRUCT_SLOT, 3)} – structures not possible`);
+  if (rom.r24(PREFAB_SLOT) !== 0) throw new Error(`Extended object $${PREFAB_EXT.toString(16).padStart(2, '0')} is already in use${ownerNote(rom, PREFAB_SLOT, 3)} – prefabs not possible`);
   const a = build();
   const addr = rom.allocWrite(new Uint8Array(a.bytes.length));
   rom.writeBytes(addr, a.link(addr));
   rom.w24(addr + 5, a.addrOf('TblW', addr));
-  rom.w24(STRUCT_SLOT, a.addrOf('Obj', addr));
-  return structPatch(rom)!;
+  rom.w24(PREFAB_SLOT, a.addrOf('Obj', addr));
+  return prefabPatch(rom)!;
 }
 
 // the table: word part, then bank part
 function ptrOf(rom: Rom, table: number, n: number): number {
-  return rom.r16(table + n * 2) | (rom.r8(table + STRUCT_COUNT * 2 + n) << 16);
+  return rom.r16(table + n * 2) | (rom.r8(table + PREFAB_COUNT * 2 + n) << 16);
 }
 function setPtr(rom: Rom, table: number, n: number, addr: number): void {
   rom.w8(table + n * 2, addr & 0xff);
   rom.w8(table + n * 2 + 1, (addr >> 8) & 0xff);
-  rom.w8(table + STRUCT_COUNT * 2 + n, (addr >> 16) & 0xff);
+  rom.w8(table + PREFAB_COUNT * 2 + n, (addr >> 16) & 0xff);
 }
 
-export function readStructure(rom: Rom, n: number): Structure | null {
-  const a = ptrOf(rom, structTable(rom), n);
+export function readPrefab(rom: Rom, n: number): Prefab | null {
+  const a = ptrOf(rom, prefabTable(rom), n);
   if (!(a >> 16)) return null;
   const w = rom.r8(a), h = rom.r8(a + 1);
   const tiles: number[] = [], conds: (Dm16Cond | null)[] = [];
@@ -173,25 +173,25 @@ export function readStructure(rom: Rom, n: number): Structure | null {
   return { w, h, tiles, ...(conds.some((c) => c) ? { conds } : {}), name: new TextDecoder().decode(Uint8Array.from(bytes)) };
 }
 
-export function listStructures(rom: Rom): Map<number, Structure> {
-  const out = new Map<number, Structure>();
-  for (let n = 0; n < STRUCT_COUNT; n++) { const s = readStructure(rom, n); if (s) out.set(n, s); }
+export function listPrefabs(rom: Rom): Map<number, Prefab> {
+  const out = new Map<number, Prefab>();
+  for (let n = 0; n < PREFAB_COUNT; n++) { const s = readPrefab(rom, n); if (s) out.set(n, s); }
   return out;
 }
 
-export function freeStructureNumber(rom: Rom): number {
-  const table = structTable(rom);
-  for (let n = 0; n < STRUCT_COUNT; n++) if (!(ptrOf(rom, table, n) >> 16)) return n;
+export function freePrefabNumber(rom: Rom): number {
+  const table = prefabTable(rom);
+  for (let n = 0; n < PREFAB_COUNT; n++) if (!(ptrOf(rom, table, n) >> 16)) return n;
   return -1;
 }
 
-// stores (or with null removes) structure n
-export function writeStructure(rom: Rom, n: number, s: Structure | null): void {
-  const p = { table: structTable(rom) };
+// stores (or with null removes) prefab n
+export function writePrefab(rom: Rom, n: number, s: Prefab | null): void {
+  const p = { table: prefabTable(rom) };
   const old = ptrOf(rom, p.table, n);
   if (old >> 16) rom.freeAt(old);
   if (!s) { setPtr(rom, p.table, n, 0); return; }
-  if (s.w < 1 || s.h < 1 || s.w > STRUCT_MAX || s.h > STRUCT_MAX || s.tiles.length !== s.w * s.h) throw new Error(`Structure ${s.w}×${s.h} invalid (at most ${STRUCT_MAX}×${STRUCT_MAX})`);
+  if (s.w < 1 || s.h < 1 || s.w > PREFAB_MAX || s.h > PREFAB_MAX || s.tiles.length !== s.w * s.h) throw new Error(`Prefab ${s.w}×${s.h} invalid (at most ${PREFAB_MAX}×${PREFAB_MAX})`);
   const name = new TextEncoder().encode(s.name).slice(0, 63);
   const data = [s.w, s.h];
   s.tiles.forEach((t, i) => {

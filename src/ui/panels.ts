@@ -10,7 +10,7 @@ import { levelName } from '../core/overworld.ts';
 import { usedInList } from './usedin.ts';
 import { buildExitPanel } from './exitpanel.ts';
 import { DM16_EXT } from '../core/patches.ts';
-import { STRUCT_EXT, TRANSPARENT, freeStructureNumber, readStructure, writeStructure, STRUCT_COUNT, type Structure } from '../core/structs.ts';
+import { PREFAB_EXT, TRANSPARENT, freePrefabNumber, readPrefab, writePrefab, PREFAB_COUNT, type Prefab } from '../core/prefabs.ts';
 import { EXT_TILES } from '../core/map16ext.ts';
 import { COND_FLAGS, COND_ADD, condByte, flagRam, isDm16, type Dm16Cond } from '../core/cdm16.ts';
 import { TileCache, map16Source, drawMap16 } from '../core/render.ts';
@@ -120,7 +120,7 @@ export class Palette {
   app: App;
   root: HTMLDivElement;
   body: HTMLDivElement;
-  tab: 'obj' | 'ext' | 'm16' | 'str' | 'spr' = 'obj';
+  tab: 'obj' | 'ext' | 'm16' | 'pre' | 'spr' = 'obj';
   thumbs = new Map<string, HTMLCanvasElement>();
   thumbTiles = new Map<string, number[]>(); // Map16 tiles per object key
   thumbsFrom: ObjThumb[] | undefined; // the thumbnails shown (undefined: placeholders while they are learned)
@@ -163,8 +163,8 @@ export class Palette {
     app.on('bgtile', () => { if (isBrushMode(app.mode)) this.build(); });
     app.on('probes', () => { if (this.tab === 'm16') this.m16Tip(); else this.build(); });
     app.on('render', () => { if (isBrushMode(app.mode)) this.build(); });
-    app.on('change', () => { this.followSelection(); if (this.tab === 'str') this.build(); });
-    app.on('structs', () => { if (this.tab === 'str') this.build(); });
+    app.on('change', () => { this.followSelection(); if (this.tab === 'pre') this.build(); });
+    app.on('prefabs', () => { if (this.tab === 'pre') this.build(); });
     app.on('mode', () => {
       if (app.mode === 'spr') this.tab = 'spr';
       else if (this.tab === 'spr') this.tab = 'obj';
@@ -192,9 +192,9 @@ export class Palette {
       if (o.num === 0 && o.ext === DM16_EXT) {
         item = { kind: 'obj', num: 0, ext: DM16_EXT, size: 0, tile: o.tile ?? 0 };
         this.tab = 'm16';
-      } else if (o.num === 0 && o.ext === STRUCT_EXT && o.struct !== undefined) {
-        item = { kind: 'obj', num: 0, ext: STRUCT_EXT, size: 0, struct: o.struct };
-        this.tab = 'str';
+      } else if (o.num === 0 && o.ext === PREFAB_EXT && o.prefab !== undefined) {
+        item = { kind: 'obj', num: 0, ext: PREFAB_EXT, size: 0, prefab: o.prefab };
+        this.tab = 'pre';
       } else if (o.num === 0) {
         item = { kind: 'obj', num: 0, ext: o.ext, size: 0 };
         this.tab = 'ext';
@@ -347,35 +347,35 @@ export class Palette {
     this.m16Scrolled();
   }
 
-  // structures: blocks of Map16 tiles stored in the ROM, placed as one object each (structs.ts)
-  buildStructs(): void {
+  // prefabs: blocks of Map16 tiles stored in the ROM, placed as one object each (prefabs.ts)
+  buildPrefabs(): void {
     const app = this.app;
     const cur = app.paletteItem;
-    const curN = cur?.kind === 'obj' && cur.num === 0 && cur.ext === STRUCT_EXT ? cur.struct ?? -1 : -1;
+    const curN = cur?.kind === 'obj' && cur.num === 0 && cur.ext === PREFAB_EXT ? cur.prefab ?? -1 : -1;
     const sel = (app.mode === 'l1' || app.mode === 'l2') ? app.selectedObjects().length : 0;
     const f = this.search.value.trim().toLowerCase();
     this.body.append(
       h('div', { class: 'row' },
-        h('button', { disabled: !sel, title: 'Save the tiles of the selected objects as a structure', onclick: () => openSaveStructure(app) }, 'Selection as structure …')),
-      h('div', { class: 'hint' }, sel ? `${sel} object${sel > 1 ? 's' : ''} selected.` : 'Select objects in the level (also Direct Map16 blocks), then “Selection as structure”. In the level, a structure is a single object; changes to it apply in all levels.'),
+        h('button', { disabled: !sel, title: 'Save the tiles of the selected objects as a prefab', onclick: () => openSavePrefab(app) }, 'Selection as prefab …')),
+      h('div', { class: 'hint' }, sel ? `${sel} object${sel > 1 ? 's' : ''} selected.` : 'Select objects in the level (also Direct Map16 blocks), then “Selection as prefab”. In the level, a prefab is a single object; changes to it apply in all levels.'),
     );
-    const all = app.structures();
-    if (!all.size) { this.body.append(emptyState('No structures yet.')); return; }
-    const sheet = structTileSource(app);
+    const all = app.prefabs();
+    if (!all.size) { this.body.append(emptyState('No prefabs yet.')); return; }
+    const sheet = prefabTileSource(app);
     let shown = 0;
     for (const [n, st] of all) {
       if (f && !`${hex2(n)} ${st.name}`.toLowerCase().includes(f)) continue;
       const row = h('div', {
-        class: `pal-row${n === curN ? ' selected' : ''}`, title: `Structure ${hex2(n)}: ${st.name || '(unnamed)'}, ${st.w}×${st.h}`,
-        onclick: () => { app.paletteItem = { kind: 'obj', num: 0, ext: STRUCT_EXT, size: 0, struct: n }; if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1'); this.build(); },
-      }, h('span', { class: 'pal-thumb-s struct' }, structCanvas(sheet, st)), h('span', { class: 'num' }, hex2(n)),
+        class: `pal-row${n === curN ? ' selected' : ''}`, title: `Prefab ${hex2(n)}: ${st.name || '(unnamed)'}, ${st.w}×${st.h}`,
+        onclick: () => { app.paletteItem = { kind: 'obj', num: 0, ext: PREFAB_EXT, size: 0, prefab: n }; if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1'); this.build(); },
+      }, h('span', { class: 'pal-thumb-s prefab' }, prefabCanvas(sheet, st)), h('span', { class: 'num' }, hex2(n)),
         h('span', { class: 'grow' }, st.name || '(unnamed)', h('span', { class: 'hint' }, ` ${st.w}×${st.h}`)),
-        h('button', { class: 'icon-btn', title: 'Rename', 'aria-label': 'Rename', onclick: (e: Event) => { e.stopPropagation(); renameStructure(app, n, st); } }, '✎'),
-        h('button', { class: 'icon-btn', title: 'Delete', 'aria-label': 'Delete', onclick: (e: Event) => { e.stopPropagation(); deleteStructure(app, n, st); } }, '✕'));
+        h('button', { class: 'icon-btn', title: 'Rename', 'aria-label': 'Rename', onclick: (e: Event) => { e.stopPropagation(); renamePrefab(app, n, st); } }, '✎'),
+        h('button', { class: 'icon-btn', title: 'Delete', 'aria-label': 'Delete', onclick: (e: Event) => { e.stopPropagation(); deletePrefab(app, n, st); } }, '✕'));
       this.body.appendChild(row);
       shown++;
     }
-    if (!shown) this.body.append(emptyState('No structure matches the search.'));
+    if (!shown) this.body.append(emptyState('No prefab matches the search.'));
   }
 
   // BG Map16 tiles for painting the level background (BG mode); pages 2-F with the extended BG Map16
@@ -625,14 +625,14 @@ export class Palette {
         return out;
       },
     };
-    const structs: SearchProvider = {
-      id: 'str', label: 'Structures',
+    const prefabs: SearchProvider = {
+      id: 'pre', label: 'Prefabs',
       search: (terms) => {
-        const sheet = structTileSource(app);
-        return [...app.structures()].filter(([n, st]) => matchesAll(`${hex2(n)} ${st.name}`.toLowerCase(), terms)).map(([n, st]) => ({
-          label: hex2(n), name: `${st.name || '(unnamed)'} ${st.w}×${st.h}`, title: `Structure ${hex2(n)}: ${st.name || '(unnamed)'}, ${st.w}×${st.h}`,
-          thumb: () => structCanvas(sheet, st),
-          pick: () => this.choose('str', { kind: 'obj', num: 0, ext: STRUCT_EXT, size: 0, struct: n }),
+        const sheet = prefabTileSource(app);
+        return [...app.prefabs()].filter(([n, st]) => matchesAll(`${hex2(n)} ${st.name}`.toLowerCase(), terms)).map(([n, st]) => ({
+          label: hex2(n), name: `${st.name || '(unnamed)'} ${st.w}×${st.h}`, title: `Prefab ${hex2(n)}: ${st.name || '(unnamed)'}, ${st.w}×${st.h}`,
+          thumb: () => prefabCanvas(sheet, st),
+          pick: () => this.choose('pre', { kind: 'obj', num: 0, ext: PREFAB_EXT, size: 0, prefab: n }),
         }));
       },
     };
@@ -644,7 +644,7 @@ export class Palette {
         pick: () => this.choose('spr', e.item),
       })),
     };
-    return [objects('obj', 'Objects'), objects('ext', 'Extended'), map16, structs, sprites];
+    return [objects('obj', 'Objects'), objects('ext', 'Extended'), map16, prefabs, sprites];
   }
 
   build(): void {
@@ -654,11 +654,11 @@ export class Palette {
     const searchable = !brush && this.tab !== 'm16';
     this.searchRow.style.display = searchable ? '' : 'none';
     this.m16Bar.style.display = this.m16SearchRow.style.display = !brush && this.tab === 'm16' ? '' : 'none';
-    this.search.placeholder = this.tab === 'spr' ? 'Search sprites (no., name) …' : this.tab === 'str' ? 'Search structures …' : 'Search (no., name, behavior) …';
+    this.search.placeholder = this.tab === 'spr' ? 'Search sprites (no., name) …' : this.tab === 'pre' ? 'Search prefabs …' : 'Search (no., name, behavior) …';
     if (app.mode === 'bg') { clear(this.body); this.buildBg(); return; }
     if (app.mode === 'l3') { clear(this.body); this.buildL3(); return; }
     if (this.body.querySelector('.m16-page-head')) this.m16Scroll = this.body.scrollTop; // the scroll event may still be pending
-    const tabDefs: [typeof this.tab, string][] = [['obj', 'Objects'], ['ext', 'Extended'], ['m16', 'Map16'], ['str', 'Structures'], ['spr', 'Sprites']];
+    const tabDefs: [typeof this.tab, string][] = [['obj', 'Objects'], ['ext', 'Extended'], ['m16', 'Map16'], ['pre', 'Prefabs'], ['spr', 'Sprites']];
     for (const [t, l] of tabDefs) this.tabs.appendChild(h('button', { class: this.tab === t ? 'active' : '', onclick: () => { this.tab = t; this.build(); } }, l));
     clear(this.body);
     const f = this.search.value.trim().toLowerCase();
@@ -681,7 +681,7 @@ export class Palette {
       return;
     }
     if (this.tab === 'm16') { this.buildMap16(); return; }
-    if (this.tab === 'str') { this.buildStructs(); return; }
+    if (this.tab === 'pre') { this.buildPrefabs(); return; }
     const grid = h('div', { class: 'pal-grid' });
     for (const e of this.objectEntries(this.tab === 'ext')) {
       if (f && !e.text.includes(f)) continue;
@@ -702,8 +702,8 @@ export class Palette {
   }
 }
 
-// ---------------- structures ----------------
-function structTileSource(app: App): (t: number) => HTMLCanvasElement | null {
+// ---------------- prefabs ----------------
+function prefabTileSource(app: App): (t: number) => HTMLCanvasElement | null {
   const r = app.render;
   const tc = new TileCache(r.vram, r.cgram, (r.ppuRegs[0x0b] & 0x0f) << 13);
   const src = map16Source(app.rom, r);
@@ -723,8 +723,8 @@ function structTileSource(app: App): (t: number) => HTMLCanvasElement | null {
   };
 }
 
-// image of a structure in the current level's graphics; transparent cells stay empty
-export function structCanvas(tile: (t: number) => HTMLCanvasElement | null, st: Structure): HTMLCanvasElement {
+// image of a prefab in the current level's graphics; transparent cells stay empty
+export function prefabCanvas(tile: (t: number) => HTMLCanvasElement | null, st: Prefab): HTMLCanvasElement {
   const c = document.createElement('canvas');
   c.width = st.w * 16; c.height = st.h * 16;
   const ctx = c.getContext('2d')!;
@@ -732,63 +732,63 @@ export function structCanvas(tile: (t: number) => HTMLCanvasElement | null, st: 
   return c;
 }
 
-// the selected objects as a new structure, or over an existing one
-function openSaveStructure(app: App): void {
-  const r = app.structureFromSelection();
+// the selected objects as a new prefab, or over an existing one
+function openSavePrefab(app: App): void {
+  const r = app.prefabFromSelection();
   if (typeof r === 'string') { toast(r, 'error'); return; }
-  const free = freeStructureNumber(app.rom);
-  const all = app.structures();
+  const free = freePrefabNumber(app.rom);
+  const all = app.prefabs();
   const name = h('input', { value: '', placeholder: 'Name', spellcheck: false });
   const target = h('select', null,
-    free >= 0 ? h('option', { value: String(free) }, `New structure ${hex2(free)}`) : '',
+    free >= 0 ? h('option', { value: String(free) }, `New prefab ${hex2(free)}`) : '',
     ...[...all].map(([n, st]) => h('option', { value: String(n) }, `Replace ${hex2(n)}: ${st.name || '(unnamed)'}`)));
   const replace = h('input', { type: 'checkbox', checked: true });
-  const preview = structCanvas(structTileSource(app), { ...r, name: '' });
+  const preview = prefabCanvas(prefabTileSource(app), { ...r, name: '' });
   preview.style.cssText = `width:${Math.min(r.w * 32, 320)}px;image-rendering:pixelated;background:repeating-conic-gradient(#333 0 25%,#222 0 50%) 0 0/16px 16px`;
   const note = h('div', { class: 'hint' });
   const upd = () => {
     const n = Number(target.value);
-    const users = all.has(n) ? app.structureUsers(n) : [];
-    note.textContent = all.has(n) ? `The structure changes everywhere it is used${users.length ? ` (level ${users.map(hex3).join(', ')})` : ''}.` : '';
+    const users = all.has(n) ? app.prefabUsers(n) : [];
+    note.textContent = all.has(n) ? `The prefab changes everywhere it is used${users.length ? ` (level ${users.map(hex3).join(', ')})` : ''}.` : '';
     if (all.has(n) && !name.value) name.value = all.get(n)!.name;
   };
   target.addEventListener('change', upd);
-  if (free < 0 && !all.size) { toast(`All ${STRUCT_COUNT} structures are in use.`, 'error'); return; }
+  if (free < 0 && !all.size) { toast(`All ${PREFAB_COUNT} prefabs are in use.`, 'error'); return; }
   upd();
-  const save = () => app.saveSelectionAsStructure(Number(target.value), name.value.trim(), replace.checked);
+  const save = () => app.saveSelectionAsPrefab(Number(target.value), name.value.trim(), replace.checked);
   const body = h('div', null,
     h('div', { class: 'row' }, preview),
     h('div', { class: 'hint' }, `${r.w}×${r.h} tiles, ${r.tiles.filter((t) => t === TRANSPARENT).length} of them transparent (tiles of other objects are kept there).`),
     h('div', { class: 'prop' }, h('label', null, 'Name'), name),
     h('div', { class: 'prop' }, h('label', null, 'Save as'), target),
-    h('label', { class: 'row small' }, replace, ' Replace the selection in the level with the structure'),
+    h('label', { class: 'row small' }, replace, ' Replace the selection in the level with the prefab'),
     note,
-    h('div', { class: 'hint' }, 'Structures (SMWS) only use extended object 04 (free in the game and in Lunar Magic) and change no game code.'));
-  const dlg = modal('Selection as structure', body, [{ label: 'Cancel' }, { label: 'Save', primary: true, onClick: save }]);
+    h('div', { class: 'hint' }, 'Prefabs (SMWS) only use extended object 04 (free in the game and in Lunar Magic) and change no game code.'));
+  const dlg = modal('Selection as prefab', body, [{ label: 'Cancel' }, { label: 'Save', primary: true, onClick: save }]);
   name.addEventListener('keydown', (e) => { if (e.key === 'Enter' && save()) dlg.close(); });
   setTimeout(() => name.focus(), 0);
 }
 
-function renameStructure(app: App, n: number, st: Structure): void {
+function renamePrefab(app: App, n: number, st: Prefab): void {
   const name = h('input', { value: st.name, spellcheck: false });
   const save = () => {
-    const cur = readStructure(app.rom, n);
+    const cur = readPrefab(app.rom, n);
     if (!cur) return;
-    try { app.romEdit(`Structure ${hex2(n)} renamed`, () => writeStructure(app.rom, n, { ...cur, name: name.value.trim() })); } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
+    try { app.romEdit(`Prefab ${hex2(n)} renamed`, () => writePrefab(app.rom, n, { ...cur, name: name.value.trim() })); } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
   };
-  const dlg = modal(`Rename structure ${hex2(n)}`, h('div', null, h('div', { class: 'prop' }, h('label', null, 'Name'), name)),
+  const dlg = modal(`Rename prefab ${hex2(n)}`, h('div', null, h('div', { class: 'prop' }, h('label', null, 'Name'), name)),
     [{ label: 'Cancel' }, { label: 'OK', primary: true, onClick: save }]);
   name.addEventListener('keydown', (e) => { if (e.key === 'Enter') { save(); dlg.close(); } });
   setTimeout(() => name.select(), 0);
 }
 
-function deleteStructure(app: App, n: number, st: Structure): void {
-  const users = app.structureUsers(n);
-  const body = h('div', null, h('div', null, `Delete structure ${hex2(n)} “${st.name || '(unnamed)'}”?`),
+function deletePrefab(app: App, n: number, st: Prefab): void {
+  const users = app.prefabUsers(n);
+  const body = h('div', null, h('div', null, `Delete prefab ${hex2(n)} “${st.name || '(unnamed)'}”?`),
     h('div', { class: 'hint' }, users.length
-      ? `It is used in level ${users.map(hex3).join(', ')}. The objects stay there but show nothing until a structure ${hex2(n)} is created again.`
+      ? `It is used in level ${users.map(hex3).join(', ')}. The objects stay there but show nothing until a prefab ${hex2(n)} is created again.`
       : 'It is not used in any level.'));
-  modal('Delete structure', body, [{ label: 'Cancel' }, { label: 'Delete', danger: true, onClick: () => { try { app.romEdit(`Structure ${hex2(n)} deleted`, () => writeStructure(app.rom, n, null)); } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); } } }]);
+  modal('Delete prefab', body, [{ label: 'Cancel' }, { label: 'Delete', danger: true, onClick: () => { try { app.romEdit(`Prefab ${hex2(n)} deleted`, () => writePrefab(app.rom, n, null)); } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); } } }]);
 }
 
 // small images of the sprites a block spawns, shown in the corner of a palette cell
@@ -883,7 +883,7 @@ export class Properties {
       h('button', { title: 'Duplicate (Ctrl+D)', onclick: () => app.duplicateSelection() }, 'Duplicate'),
       objects ? h('button', { title: 'To front – drawn last (PgUp)', onclick: () => app.reorderSelection('front') }, 'To front') : '',
       objects ? h('button', { title: 'To back – drawn first (PgDn)', onclick: () => app.reorderSelection('back') }, 'To back') : '',
-      objects ? h('button', { title: 'Save the tiles of the selection as a structure', onclick: () => openSaveStructure(app) }, 'As structure …') : '',
+      objects ? h('button', { title: 'Save the tiles of the selection as a prefab', onclick: () => openSavePrefab(app) }, 'As prefab …') : '',
       h('button', { class: 'danger', title: 'Delete (Del)', onclick: () => app.deleteSelection() }, 'Delete'));
   }
 
@@ -961,11 +961,11 @@ export class Properties {
     this.body.append(
       h('div', { class: 'prop-title' }, `${o.num ? 'Object ' + hex2(o.num) : 'Ext. object ' + hex2(o.ext)}: ${objectName(o.num, o.ext)}`),
       h('div', { class: 'hint' }, `No. ${idx + 1} of ${app.currentObjects().length} (drawing order)`),
-      this.field('Object', hexInput(o.num, 2, (v) => upd((o) => { o.num = v; fixStruct(o); }), 0x3f)),
-      o.num === 0 ? this.field('Ext. object', hexInput(o.ext, 2, (v) => upd((o) => { o.ext = v; fixStruct(o); }), 0xff)) : '',
-      o.num === 0 && o.ext === STRUCT_EXT && o.struct !== undefined ? this.field('Structure', hexInput(o.struct, 2, (v) => upd((o) => (o.struct = v)), 0xff)) : '',
-      o.num === 0 && o.ext === STRUCT_EXT && o.struct !== undefined ? h('div', { class: 'hint' }, structInfo(app, o.struct), ' ',
-        h('button', { title: 'Replace the structure here with single Direct Map16 objects (to edit it, then “Selection as structure” again)', onclick: () => app.explodeStructure(o) }, 'Break up')) : '',
+      this.field('Object', hexInput(o.num, 2, (v) => upd((o) => { o.num = v; fixPrefab(o); }), 0x3f)),
+      o.num === 0 ? this.field('Ext. object', hexInput(o.ext, 2, (v) => upd((o) => { o.ext = v; fixPrefab(o); }), 0xff)) : '',
+      o.num === 0 && o.ext === PREFAB_EXT && o.prefab !== undefined ? this.field('Prefab', hexInput(o.prefab, 2, (v) => upd((o) => (o.prefab = v)), 0xff)) : '',
+      o.num === 0 && o.ext === PREFAB_EXT && o.prefab !== undefined ? h('div', { class: 'hint' }, prefabInfo(app, o.prefab), ' ',
+        h('button', { title: 'Replace the prefab here with single Direct Map16 objects (to edit it, then “Selection as prefab” again)', onclick: () => app.explodePrefab(o) }, 'Break up')) : '',
       o.num === 0 && o.ext === DM16_EXT ? this.field('Map16 tile', hexInput(o.tile ?? 0, 3, (v) => upd((o) => (o.tile = v)), EXT_TILES - 1 - (o.cond?.always ? COND_ADD : 0)),
         h('button', { title: 'Edit the tile in the graphics area', onclick: () => app.editMap16(o.tile ?? 0) }, 'Edit …')) : '',
       o.num === 0 && o.ext === DM16_EXT ? this.field('Size (hw)', hexInput(o.size, 2, (v) => upd((o) => (o.size = v)))) : '',
@@ -999,16 +999,16 @@ function liveObjects(app: App, objs: LevelObject[]): LevelObject[] {
   return app.currentObjects().filter((o) => ids.has(o.uid));
 }
 
-// extended object $04 always carries a structure number (its 4th byte)
-function fixStruct(o: LevelObject): void {
-  if (o.num === 0 && o.ext === STRUCT_EXT) o.struct ??= 0;
-  else delete o.struct;
+// extended object $04 always carries a prefab number (its 4th byte)
+function fixPrefab(o: LevelObject): void {
+  if (o.num === 0 && o.ext === PREFAB_EXT) o.prefab ??= 0;
+  else delete o.prefab;
   if (!isDm16(o)) delete o.cond;
 }
 
-function structInfo(app: App, n: number): string {
-  const st = readStructure(app.rom, n);
-  return st ? `${st.name || '(unnamed)'}, ${st.w}×${st.h}` : 'This structure does not exist – the object places nothing.';
+function prefabInfo(app: App, n: number): string {
+  const st = readPrefab(app.rom, n);
+  return st ? `${st.name || '(unnamed)'}, ${st.w}×${st.h}` : 'This prefab does not exist – the object places nothing.';
 }
 
 // what the nibbles of a standard object's settings byte do (emulated, see objkinds.ts)

@@ -1,6 +1,6 @@
 // Moving Map16 tiles with their uses, and rewriting the uses alone (tilemove.ts): a move of tiles 200-FFF
 // takes their graphics, acts-like and block along and rewrites the Direct Map16 objects of every level, the
-// structures, the BG tilemaps and the block list, so the levels look the same before and after; moving
+// prefabs, the BG tilemaps and the block list, so the levels look the same before and after; moving
 // onto a tile in use, a tile placed by code, half of a conditional "always show" pair or outside 200-FFF
 // is refused, onto a defined tile asked first. Lunar Magic's Remap Direct Map16 / Background Tiles rewrite
 // the uses only (current level or all), a game BG becoming the editor's. One ROM edit is one undo step.
@@ -9,7 +9,7 @@ import { LevelEmulator, type LevelRender } from '../src/core/levelemu.ts';
 import { loadLevel, newUid, levelRows, type Level, type LevelObject } from '../src/core/level.ts';
 import { saveLevel } from '../src/core/save.ts';
 import { DM16_EXT, bgBank } from '../src/core/patches.ts';
-import { STRUCT_EXT, writeStructure, readStructure, TRANSPARENT } from '../src/core/structs.ts';
+import { PREFAB_EXT, writePrefab, readPrefab, TRANSPARENT } from '../src/core/prefabs.ts';
 import { setActsLike, setExtTileWords, extTileWords, actsLike, blockOf, DEFAULT_ACTS } from '../src/core/map16ext.ts';
 import { setBgExtTileWords, bgTileWords } from '../src/core/bgmap16.ts';
 import { bgFromWram, bgIndex } from '../src/core/bg.ts';
@@ -34,15 +34,15 @@ const blank = map16Source(rom, emu.load(0x105)).fg(0x025);
 const dm16 = (x: number, y: number, tile: number, size = 0, cond?: LevelObject['cond']): LevelObject =>
   ({ uid: newUid(), num: 0, ext: DM16_EXT, x, y, size, tile, ...(cond ? { cond } : {}) });
 
-// level 105: Direct Map16 objects (a 2×1 one of 345, a conditional "always show" one of 350), a structure with
+// level 105: Direct Map16 objects (a 2×1 one of 345, a conditional "always show" one of 350), a prefab with
 // 346, an edited BG with BG tile 2A0; level 106: a Direct Map16 object of 345 too; a block on 347
 const FLAG = 5;
 {
   const lv = loadLevel(rom, 0x105);
   check(!lv.layer2Objects, 'level 105 has a BG tilemap');
-  writeStructure(rom, 7, { w: 2, h: 1, tiles: [0x346, TRANSPARENT], name: 'test' });
+  writePrefab(rom, 7, { w: 2, h: 1, tiles: [0x346, TRANSPARENT], name: 'test' });
   lv.objects.push(dm16(0x20, 0x10, 0x345, 0x01), dm16(0x24, 0x10, 0x350, 0, { flag: FLAG, always: true }));
-  lv.objects.push({ uid: newUid(), num: 0, ext: STRUCT_EXT, x: 0x30, y: 0x12, size: 0, struct: 7 });
+  lv.objects.push({ uid: newUid(), num: 0, ext: PREFAB_EXT, x: 0x30, y: 0x12, size: 0, prefab: 7 });
   lv.bg = bgFromWram(emu.load(0x105).wram);
   lv.bg[bgIndex(3, 20)] = 0x2a0;
   saveLevel(rom, lv);
@@ -79,9 +79,9 @@ const before = new Map(levels.map((n) => [n, look(n)]));
   const p = planMove(rom, 'fg', rectMap(0x345, 3, 1, 0x545), { levels, blank });
   check(!p.problems.length, `a move to free tiles: no problems ${p.problems.join(' | ')}`);
   check(p.levels.map((l) => `${hx(l.level)}:${l.objects}`).join() === '105:1,106:1', `the levels whose objects change: ${p.levels.map((l) => `${hx(l.level)}:${l.objects}`).join()}`);
-  check(p.structures.join() === '7' && p.blocks.join() === String(0x347) && !p.overwrite.length, 'the structure, the block, nothing overwritten');
+  check(p.prefabs.join() === '7' && p.blocks.join() === String(0x347) && !p.overwrite.length, 'the prefab, the block, nothing overwritten');
   const onUsed = planMove(rom, 'fg', new Map([[0x345, 0x346]]), { levels, blank });
-  check(onUsed.problems.some((q) => q.includes('346') && q.includes('structure')), `onto a tile in use: refused (${onUsed.problems.join(' | ')})`);
+  check(onUsed.problems.some((q) => q.includes('346') && q.includes('prefab')), `onto a tile in use: refused (${onUsed.problems.join(' | ')})`);
   const onDefined = planMove(rom, 'fg', new Map([[0x345, 0x5a0]]), { levels, blank });
   check(!onDefined.problems.length && onDefined.overwrite.join() === String(0x5a0), 'onto a defined tile: asked first');
   check(planMove(rom, 'fg', new Map([[0x130, 0x530]]), { levels, blank }).problems.length === 1, 'tiles 000-1FF are not moved');
@@ -104,7 +104,7 @@ s.edit('move BG', () => applyMove(rom, 'bg', planMove(rom, 'bg', new Map([[0x2a0
 check(s.history.undoStack.length === 2, 'each move one undo step');
 check(extTileWords(rom, 0x545)!.join() === '1,2,3,4' && actsLike(rom, 0x545) === 0x130 && extTileWords(rom, 0x345)!.join() === blank.join() && actsLike(rom, 0x345) === DEFAULT_ACTS, 'graphics and acts-like moved, the old tile blank');
 check(!!blockOf(rom, 0x547) && !blockOf(rom, 0x347) && loadBlockProject(rom)!.list.map((b) => b.tile).join() === String(0x547), 'the block moved, list.txt along');
-check(readStructure(rom, 7)!.tiles.join() === [0x546, TRANSPARENT].join(), 'the structure\'s tile');
+check(readPrefab(rom, 7)!.tiles.join() === [0x546, TRANSPARENT].join(), 'the prefab\'s tile');
 check(loadLevel(rom, 0x106).objects.some((o) => o.tile === 0x545), 'level 106\'s Direct Map16 object');
 check(bgTileWords(rom, 0x3a0).join() === '5,6,7,8' && storedBg(rom, loadLevel(rom, 0x105))![bgIndex(3, 20)] === 0x3a0, 'the BG tile and the BG tilemap');
 for (const n of levels) check(look(n) === before.get(n), `level ${hx(n)} looks the same after the moves`);

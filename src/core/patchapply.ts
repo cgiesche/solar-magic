@@ -12,7 +12,7 @@ import { editorPatch, customPalettePatch, bgPatch, extGfxPatch, musicPatch, EDIT
 import { messagePatch, MSG_HOOKS } from './messages.ts';
 import { map16Ext, MAP16X_HOOKS } from './map16ext.ts';
 import { bgMap16Ext, BGMAP16_HOOKS } from './bgmap16.ts';
-import { structPatch, STRUCT_HOOKS } from './structs.ts';
+import { prefabPatch, PREFAB_HOOKS } from './prefabs.ts';
 import { listPatches, addPatch, removeEntry, backupBytes, patchedHash, hashBytes, overlaps, type PatchEntry, type RamClaim } from './patchreg.ts';
 
 // hook sites of the editor's own patches (SNES address, length)
@@ -24,7 +24,7 @@ export const BUILTINS: Builtin[] = [
   { name: 'Music per level (SMWU)', installed: (r) => !!musicPatch(r), hooks: MUSIC_HOOKS },
   { name: 'BG2/BG3 graphics (SMWG)', installed: (r) => !!extGfxPatch(r), hooks: EXT_GFX_HOOKS },
   { name: 'Messages (SMWM)', installed: (r) => !!messagePatch(r), hooks: MSG_HOOKS },
-  { name: 'Structures (SMWS)', installed: (r) => !!structPatch(r), hooks: STRUCT_HOOKS },
+  { name: 'Prefabs (SMWS)', installed: (r) => !!prefabPatch(r), hooks: PREFAB_HOOKS },
   { name: 'Extended Map16 (SMWX)', installed: (r) => !!map16Ext(r), hooks: MAP16X_HOOKS },
   { name: 'Extended BG Map16 (SMWH)', installed: (r) => !!bgMap16Ext(r), hooks: BGMAP16_HOOKS },
 ];

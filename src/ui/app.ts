@@ -15,7 +15,7 @@ import { spriteMemJob, usedSpriteMemory } from '../core/spritemem.ts';
 import { DM16_EXT, levelGfx, levelExtGfx, customPalette, levelMusic, defaultGfx } from '../core/patches.ts';
 import { gfxSkipMask, gfxFilesHash } from '../core/gfxpages.ts';
 import { flagBytes, usedFlags, isDm16, dm16Tiles, type Dm16Cond } from '../core/cdm16.ts';
-import { STRUCT_EXT, STRUCT_MAX, TRANSPARENT, listStructures, readStructure, writeStructure, type Structure } from '../core/structs.ts';
+import { PREFAB_EXT, PREFAB_MAX, TRANSPARENT, listPrefabs, readPrefab, writePrefab, type Prefab } from '../core/prefabs.ts';
 import type { Package } from '../core/pkgreg.ts';
 import { kvEntries, kvWrite, saveRom } from './storage.ts';
 import { ResultCache, RomFingerprint, type CacheEntry } from '../core/romdeps.ts';
@@ -57,8 +57,8 @@ export const isBrushMode = (m: EditMode) => m === 'bg' || m === 'l3';
 export interface Brush { w: number; h: number; tiles: number[] }
 export type PaletteItem =
   // block: a rectangle of Map16 tiles from the palette sheet (tile + row * 16 + col), one Direct-Map16 object each
-  // struct: structure number (extended object $04, see structs.ts)
-  | { kind: 'obj'; num: number; ext: number; size: number; tile?: number; block?: { w: number; h: number }; struct?: number }
+  // prefab: prefab number (extended object $04, see prefabs.ts)
+  | { kind: 'obj'; num: number; ext: number; size: number; tile?: number; block?: { w: number; h: number }; prefab?: number }
   | { kind: 'spr'; num: number; extra: number };
 
 type Listener = () => void;
@@ -85,7 +85,7 @@ export type AppEvent =
   | 'sprite-mem' // the sprite memory check of the level is known
   | 'animated' // which tiles and colors of the level animate is known
   | 'anim-frame' // the next frame of the level animation is shown
-  | 'structs' // the structure table changed
+  | 'prefabs' // the prefab table changed
   | 'bgtile' // the BG or layer 3 brush changed (picked from the level)
   | 'reveal' // the level view scrolls to App.reveal
   | 'zoom' // the level view's zoom changed
@@ -214,7 +214,7 @@ export class App {
         { read: (r) => (this.level ? levelSignature(r, this.level.number) : ''), changed: () => this.reloadLevel() },
         // its graphics slots, own palette or music: shown at once
         { read: (r) => (this.level ? headerSignature(r, this.level.number) : ''), changed: () => { this.flushRomChange(); this.emit('level-header'); } },
-        { read: (r) => structuresSignature(r), changed: () => { this.flushRomChange(); this.emit('structs'); this.emit('change'); } },
+        { read: (r) => prefabsSignature(r), changed: () => { this.flushRomChange(); this.emit('prefabs'); this.emit('change'); } },
         // the secondary entrances (markers, the exit panel): shown at once, also after undo/redo
         { read: (r) => entranceTables(r), changed: () => this.emit('change') },
       ],
@@ -1355,7 +1355,7 @@ export class App {
       for (const { dx, dy } of cells) {
         const o: LevelObject = { uid: newUid(), num: p.num, ext: p.ext, x: tx + dx, y: ty + dy, size: p.size };
         if (p.tile !== undefined) o.tile = p.tile + dy * 16 + dx;
-        if (p.struct !== undefined) o.struct = p.struct;
+        if (p.prefab !== undefined) o.prefab = p.prefab;
         this.clampObject(o);
         this.currentObjects().push(o);
         this.selection.add(o.uid);
@@ -1397,15 +1397,15 @@ export class App {
     this.refresh();
   }
 
-  // ------------- structures (structs.ts) -------------
-  structures(): Map<number, Structure> {
-    return listStructures(this.rom);
+  // ------------- prefabs (prefabs.ts) -------------
+  prefabs(): Map<number, Prefab> {
+    return listPrefabs(this.rom);
   }
 
   // what the selected objects left in the level as a block of tiles; cells of other objects are
   // transparent, empty rows and columns at the border are cut off. A conditional Direct Map16 object gives its
   // tiles with its condition whatever the view's flags (cdm16.ts); a cell holds one tile, the topmost
-  structureFromSelection(): { x: number; y: number; w: number; h: number; tiles: number[]; conds?: (Dm16Cond | null)[] } | string {
+  prefabFromSelection(): { x: number; y: number; w: number; h: number; tiles: number[]; conds?: (Dm16Cond | null)[] } | string {
     const objs = this.selectedObjects();
     if (!objs.length || (this.mode !== 'l1' && this.mode !== 'l2')) return 'Select objects in the level first (layer 1 or 2).';
     const l2 = this.mode === 'l2';
@@ -1428,50 +1428,50 @@ export class App {
     }
     if (x1 < 0) return 'The selected objects have no visible tiles.';
     const w = x1 - x0 + 1, h = y1 - y0 + 1;
-    if (w > STRUCT_MAX || h > STRUCT_MAX) return `Selection is ${w}×${h} tiles, a structure can be at most ${STRUCT_MAX}×${STRUCT_MAX}.`;
+    if (w > PREFAB_MAX || h > PREFAB_MAX) return `Selection is ${w}×${h} tiles, a prefab can be at most ${PREFAB_MAX}×${PREFAB_MAX}.`;
     const cell = (i: number) => cells.get(((y0 + Math.floor(i / w)) << 16) | (x0 + (i % w)));
     const tiles = Array.from({ length: w * h }, (_, i) => cell(i)?.tile ?? TRANSPARENT);
     const conds = Array.from({ length: w * h }, (_, i) => cell(i)?.cond ?? null);
     return { x: x0, y: y0, w, h, tiles, ...(conds.some((c) => c) ? { conds } : {}) };
   }
 
-  // stores the selection as structure n; replace: the selected objects become one structure object
+  // stores the selection as prefab n; replace: the selected objects become one prefab object
   // (at the place of the last of them in the object list, so objects in between still cover it)
-  saveSelectionAsStructure(n: number, name: string, replace: boolean): boolean {
-    const r = this.structureFromSelection();
+  saveSelectionAsPrefab(n: number, name: string, replace: boolean): boolean {
+    const r = this.prefabFromSelection();
     if (typeof r === 'string') { toast(r, 'error'); return false; }
     try {
-      this.romEdit(`Structure ${hex(n, 2)} saved`, () => writeStructure(this.rom, n, { w: r.w, h: r.h, tiles: r.tiles, ...(r.conds ? { conds: r.conds } : {}), name }));
+      this.romEdit(`Prefab ${hex(n, 2)} saved`, () => writePrefab(this.rom, n, { w: r.w, h: r.h, tiles: r.tiles, ...(r.conds ? { conds: r.conds } : {}), name }));
     } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); return false; }
     if (replace) {
       this.editLevel(() => {
         const all = this.currentObjects();
         const at = Math.max(...this.selectedObjects().map((o) => all.indexOf(o)));
-        const o: LevelObject = { uid: newUid(), num: 0, ext: STRUCT_EXT, x: r.x, y: r.y, size: 0, struct: n };
+        const o: LevelObject = { uid: newUid(), num: 0, ext: PREFAB_EXT, x: r.x, y: r.y, size: 0, prefab: n };
         const res = [...all.slice(0, at + 1).filter((x) => !this.selection.has(x.uid)), o, ...all.slice(at + 1)];
         if (this.mode === 'l2') this.level.layer2Objects = res; else this.level.objects = res;
         this.selection = new Set([o.uid]);
       });
     }
-    this.paletteItem = { kind: 'obj', num: 0, ext: STRUCT_EXT, size: 0, struct: n };
+    this.paletteItem = { kind: 'obj', num: 0, ext: PREFAB_EXT, size: 0, prefab: n };
     return true;
   }
 
-  // levels whose saved data uses structure n (plus the open level with its unsaved changes)
-  structureUsers(n: number): number[] {
+  // levels whose saved data uses prefab n (plus the open level with its unsaved changes)
+  prefabUsers(n: number): number[] {
     const out: number[] = [];
     const uses = (lv: { objects: LevelObject[]; layer2Objects: LevelObject[] | null }) =>
-      [...lv.objects, ...(lv.layer2Objects ?? [])].some((o) => o.num === 0 && o.ext === STRUCT_EXT && o.struct === n);
+      [...lv.objects, ...(lv.layer2Objects ?? [])].some((o) => o.num === 0 && o.ext === PREFAB_EXT && o.prefab === n);
     for (const i of this.usedLevels()) {
       try { if (uses(i === this.level.number ? this.level : loadLevel(this.rom, i))) out.push(i); } catch { /* unreadable level */ }
     }
     return out;
   }
 
-  // a structure object becomes one Direct-Map16 object per tile, at its place in the object list
-  explodeStructure(o: LevelObject): void {
-    const s = o.struct !== undefined ? readStructure(this.rom, o.struct) : null;
-    if (!s) { toast('The structure does not exist (anymore).', 'error'); return; }
+  // a prefab object becomes one Direct-Map16 object per tile, at its place in the object list
+  explodePrefab(o: LevelObject): void {
+    const s = o.prefab !== undefined ? readPrefab(this.rom, o.prefab) : null;
+    if (!s) { toast('The prefab does not exist (anymore).', 'error'); return; }
     this.editLevel(() => {
       const parts: LevelObject[] = [];
       s.tiles.forEach((t, i) => {
@@ -1666,8 +1666,8 @@ function levelSignature(rom: Rom, n: number): string {
 function headerSignature(rom: Rom, n: number): string {
   return JSON.stringify([levelGfx(rom, n), levelExtGfx(rom, n), customPalette(rom, n), levelMusic(rom, n)]);
 }
-function structuresSignature(rom: Rom): string {
-  try { return JSON.stringify([...listStructures(rom)]); } catch (e) { return String(e); }
+function prefabsSignature(rom: Rom): string {
+  try { return JSON.stringify([...listPrefabs(rom)]); } catch (e) { return String(e); }
 }
 
 function spriteCanvas(img: SpriteImage): HTMLCanvasElement {

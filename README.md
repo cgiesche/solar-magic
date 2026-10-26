@@ -71,11 +71,11 @@ When a level is displayed, it runs the ROM's **original loading routines** (~15 
   drawing order (PgUp/PgDn), undo/redo.
 * Palette: standard objects 01–3F, extended objects, **direct Map16 placement** (any tile, see patch),
   sprites with names and real graphics, including custom sprites (PIXI) with their extra bytes in the properties.
-* **Structures:** save selected objects (e.g. an arrangement of Direct Map16 blocks) as a structure
-  (Palette → Structures → "Selection as structure"). In the level it is then a single 4-byte object;
-  cells that belong to none of the selected objects are transparent. Changing a structure affects
-  all levels. "Dissolve" turns a placed structure back into individual Direct Map16 objects.
-  `.smwlevel` files carry along the structures they use.
+* **Prefabs:** save selected objects (e.g. an arrangement of Direct Map16 blocks) as a prefab
+  (Palette → Prefabs → "Selection as prefab"). In the level it is then a single 4-byte object;
+  cells that belong to none of the selected objects are transparent. Changing a prefab affects
+  all levels. "Break up" turns a placed prefab back into individual Direct Map16 objects.
+  `.smwlevel` files carry along the prefabs they use.
 * Header dialog (H): primary header (mode, screens, tileset, palettes, music, time, sprite GFX, …),
   entrance & scrolling (entrance, midway point, layer 2/3 settings), sprite header, BG tilemap selection.
   Which GFX/ExGFX files a level loads (graphics bypass) is set in the graphics section:
@@ -168,7 +168,7 @@ When a level is displayed, it runs the ROM's **original loading routines** (~15 
   (Lunar Magic's ExAnimation Remap).
 * **Move tiles with their uses** (Map16 tab → *Move …*): the selected tiles 200–FFF go to other numbers – type the
   new top left tile or drag the selection in the sheet – with graphics, "acts like" and custom block, and every use
-  is rewritten: Direct Map16 objects in all levels (both layers), structures, BG tilemaps, the blocks' `list.txt`.
+  is rewritten: Direct Map16 objects in all levels (both layers), prefabs, BG tilemaps, the blocks' `list.txt`.
   Every level looks as before; the panel lists what it rewrites first. Moving onto a tile something places, a tile
   placed by an object's code, or only one of an "always show" pair (tile and tile + 100) is refused; defined but
   unused tiles there are overwritten after asking. One undo step. (Lunar Magic only rewrites the uses, below.)
@@ -209,8 +209,8 @@ When a level is displayed, it runs the ROM's **original loading routines** (~15 
   (16 colors, via DMA from the ROM – no more 3bpp detour).
   The editor's own LZ2 compressor produces smaller data than the original.
 * **Used in levels:** for the selected Map16 tile (FG or BG), GFX file or sprite, the levels using it, how often,
-  in which slots or by which kind of object (object, Direct Map16, structure) – a click opens the level at the first place.
-  The Map16 tab also names the tiles acting like the tile, structures and custom blocks on it, and *Mark unused*
+  in which slots or by which kind of object (object, Direct Map16, prefab) – a click opens the level at the first place.
+  The Map16 tab also names the tiles acting like the tile, prefabs and custom blocks on it, and *Mark unused*
   crosses out tiles 200–FFF that are defined but placed nowhere; the Graphics tab marks inserted ExGFX that no level
   loads. Which tiles a level places is learned by loading it in the emulator (in the background, kept while the ROM
   and the level are unchanged), like Lunar Magic's "Analyze Resources in Levels".
@@ -252,7 +252,7 @@ change only a few verified locations:
 | `$00AA6B` | Format selectable per file: LZ2/3bpp (original) or uncompressed 4bpp via DMA |
 | `$00A9E1`, `$00AA22` | Graphics bypass: 8 GFX slots per level (SP1–4, FG1–3, BG1), ExGFX up to FFF |
 | Ext. object `$05` | "Direct Map16": places any Map16 tile as a rectangle (6 bytes); entry `$05` is empty in the original and in Lunar Magic (whose `$02` is a 5-byte object) |
-| Ext. object `$04` ("SMWS") | Structures: places a stored block of Map16 tiles (4 bytes, 4th byte = structure number 00–FF); only occupies entry `$04` of the extended object table, which is empty in the original and in Lunar Magic (whose `$03` is its swapped screen jump), independent of the editor patch |
+| Ext. object `$04` ("SMWS") | Prefabs: places a stored block of Map16 tiles (4 bytes, 4th byte = prefab number 00–FF); only occupies entry `$04` of the extended object table, which is empty in the original and in Lunar Magic (whose `$03` is its swapped screen jump), independent of the editor patch |
 | `$00922F` ("SMWP") | Custom 256-color palette per level |
 | `$058060` ("SMWB") | BG tilemap data per level in any bank (edited backgrounds) |
 | `$058DE6` ("SMWH") | BG Map16 extension: BG tiles 200–FFF (pages 2–F) from a separate table, like Lunar Magic's BG Map16 pages |

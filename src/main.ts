@@ -187,7 +187,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
       { label: 'Message boxes …', onClick: () => openMessagesDialog(app) },
     ] },
     { label: 'Search', items: [
-      { label: 'Search everywhere …', shortcut: 'Ctrl+F / Ctrl+Space', title: 'Objects, extended objects, Map16 tiles, structures and sprites by number, name or behavior', onClick: search },
+      { label: 'Search everywhere …', shortcut: 'Ctrl+F / Ctrl+Space', title: 'Objects, extended objects, Map16 tiles, prefabs and sprites by number, name or behavior', onClick: search },
     ] },
     { label: 'Help', items: [
       { label: 'Keyboard shortcuts …', shortcut: '?', onClick: () => showHelp() },
@@ -518,7 +518,7 @@ function showHelp(): void {
       ['Alt+← / Alt+→ · mouse back/forward buttons', 'Back / forward through the places opened (workspace, level, overworld map, graphics tab, Ctrl+click jumps)'],
       ['Esc / O / M · P · A', 'Workspace level / overworld / graphics (Map16, palettes, animations)'],
       ['Ctrl+mouse wheel · Middle mouse button drag', 'Zoom · Pan view'],
-      ['Ctrl+F · Ctrl+Space', 'Search everywhere: objects, Map16 tiles, structures, sprites (Tab: only one group)'],
+      ['Ctrl+F · Ctrl+Space', 'Search everywhere: objects, Map16 tiles, prefabs, sprites (Tab: only one group)'],
       ['? / F1', 'This overview'],
       ['L', 'Expand/collapse log (all messages with time)'],
       ['Menus: ↑ ↓ ← → / Enter / Esc', 'Choose entry, neighboring menu / run / close'],

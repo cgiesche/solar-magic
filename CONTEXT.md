@@ -13,7 +13,7 @@ _Avoid_: Lunar Magic hacks, built-in patches
 ### Editing
 
 **ROM edit**:
-One labelled change of the ROM (image and editor data), made through the edit session (editsession.ts, which leaves the write itself to romedit.ts): one undo step, all or nothing (one that fails changes nothing and records nothing), the open level saved before it; what it changed decides what the editor shows anew (the level reloaded, its header, structures). Outside the undo history: expanding the ROM. Every overworld change is one too (a paint stroke when the mouse is released).
+One labelled change of the ROM (image and editor data), made through the edit session (editsession.ts, which leaves the write itself to romedit.ts): one undo step, all or nothing (one that fails changes nothing and records nothing), the open level saved before it; what it changed decides what the editor shows anew (the level reloaded, its header, prefabs). Outside the undo history: expanding the ROM. Every overworld change is one too (a paint stroke when the mouse is released).
 _Avoid_: transaction, ROM write (for an edit)
 
 **Remap**:
@@ -21,7 +21,7 @@ Changing 8x8 tile numbers, palettes or acts-like of chosen Map16 tiles (or the f
 _Avoid_: renumber (that is the level graphics placement's), move tiles (that is a tile move)
 
 **Tile move**:
-Map16 tiles 200–FFF taken to other numbers with their graphics, acts-like and block, every use rewritten (Direct Map16 objects of all levels, structures, BG tilemaps, the blocks' list) so the levels look as before (core/tilemove.ts); one ROM edit. Rewriting the uses alone, the tiles staying, is Lunar Magic's Remap Direct Map16 / Remap Background Tiles (a remap of uses, with a list of Map16 numbers).
+Map16 tiles 200–FFF taken to other numbers with their graphics, acts-like and block, every use rewritten (Direct Map16 objects of all levels, prefabs, BG tilemaps, the blocks' list) so the levels look as before (core/tilemove.ts); one ROM edit. Rewriting the uses alone, the tiles staying, is Lunar Magic's Remap Direct Map16 / Remap Background Tiles (a remap of uses, with a list of Map16 numbers).
 _Avoid_: remap (for a move), renumber
 
 **Quarter**:
@@ -33,8 +33,12 @@ The set of quarters of the Map16 tab's selection that an edit in the builder cha
 _Avoid_: selected quarter (the sheet's selection is of whole tiles)
 
 **Conditional Direct Map16**:
-A Direct Map16 object, or a tile of a structure, that depends on a flag of Lunar Magic's table at $7FC060–F (set by the user's own code, e.g. UberASM): drawn only while the flag is on, or with "always show" always, its tiles + 0x100 while it is on (cdm16.ts). The view's flags are a view setting that test play takes over, not part of the level.
+A Direct Map16 object, or a tile of a prefab, that depends on a flag of Lunar Magic's table at $7FC060–F (set by the user's own code, e.g. UberASM): drawn only while the flag is on, or with "always show" always, its tiles + 0x100 while it is on (cdm16.ts). The view's flags are a view setting that test play takes over, not part of the level.
 _Avoid_: CDM16 (in the UI), switch object
+
+**Prefab**:
+A reusable block of Map16 tiles (at most 64x64, cells may be transparent, tiles may be conditional) stored in the ROM under a number 00–FF and placed in a level as one object, extended object $04 with the number as 4th byte (prefabs.ts, the editor patch SMWS). Made from the selected objects; a change to it applies in every level that places it, "Break up" turns a placed one back into Direct Map16 objects. A `.smwlevel` file carries the prefabs its level uses.
+_Avoid_: structure (the old name), custom object (ObjecTool's ASM objects), stamp (that is the Map16 builder's), collection (Lunar Magic's Custom Collections of Objects are copies without a link)
 
 **Level edit**:
 A change of the open level in memory: its own undo step, written to the ROM when the level is saved (before every ROM edit, when another level is opened, or by hand).

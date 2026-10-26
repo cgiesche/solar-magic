@@ -2,7 +2,7 @@
 
 import { Rom } from './rom.ts';
 import { spriteBankOf, DM16_EXT } from './patches.ts';
-import { STRUCT_EXT } from './structs.ts';
+import { PREFAB_EXT } from './prefabs.ts';
 import { COND_MARK, condByte, condOf, type Dm16Cond } from './cdm16.ts';
 import { MAP_SIZE } from './ram.ts';
 
@@ -60,7 +60,7 @@ export interface LevelObject {
   size: number; // settings byte for standard objects (and Direct Map16)
   tile?: number; // Direct Map16 tile number (extended object $05, editor patch)
   cond?: Dm16Cond; // a Direct Map16 object's flag (cdm16.ts)
-  struct?: number; // structure number (extended object $04 with the structure patch, see structs.ts)
+  prefab?: number; // prefab number (extended object $04 with the prefab patch, see prefabs.ts)
 }
 
 export interface ScreenExit {
@@ -316,7 +316,7 @@ export interface ParsedObjects {
   size: number; // bytes consumed including terminating $FF
 }
 
-// extended object $04 is a structure (4 bytes, structure patch). In a level with a size (`sized`) the
+// extended object $04 is a prefab (4 bytes, prefab patch). In a level with a size (`sized`) the
 // screen jump's low nibble of the second byte is the subscreen (000HHHHH 0000VVVV 00000001): rows
 // V * 32 on; the new screen flag keeps it (observed: where the game puts objects in a Lunar Magic-saved ROM).
 // Subscreens 16-31 (size 1C) need Lunar Magic's swapped screen jump, extended object $03 (000VVVVV 0000HHHH
@@ -373,8 +373,8 @@ export function parseObjects(data: Uint8Array, start: number, vertical: boolean,
       p += o.cond ? 7 : 6;
       continue;
     }
-    if (num === 0 && b2 === STRUCT_EXT) {
-      objects.push({ uid: newUid(), num, ext: b2, x, y, size: 0, struct: data[p + 3] });
+    if (num === 0 && b2 === PREFAB_EXT) {
+      objects.push({ uid: newUid(), num, ext: b2, x, y, size: 0, prefab: data[p + 3] });
       p += 4;
       continue;
     }
@@ -416,8 +416,8 @@ export function serializeObjects(objects: LevelObject[], exits: ScreenExit[], ve
       out.push(t & 0xff, (t >> 8) & 0xff, o.size & 0xff);
       if (o.cond) out.push(condByte(o.cond));
       own(o.cond ? 7 : 6, objects.indexOf(o));
-    } else if (o.num === 0 && o.ext === STRUCT_EXT && o.struct !== undefined) {
-      out.push(o.struct & 0xff);
+    } else if (o.num === 0 && o.ext === PREFAB_EXT && o.prefab !== undefined) {
+      out.push(o.prefab & 0xff);
       own(4, objects.indexOf(o));
     } else own(3, objects.indexOf(o));
   }

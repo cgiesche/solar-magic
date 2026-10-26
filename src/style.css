@@ -131,8 +131,8 @@ input.invalid, input.invalid:focus { outline: 1px solid var(--danger); border-co
 .pal-row.selected .num { color: #fff; }
 .pal-thumb-s { width: 32px; height: 24px; display: inline-flex; align-items: center; justify-content: center; }
 .pal-thumb-s canvas { max-width: 32px; max-height: 24px; image-rendering: pixelated; background: var(--level-backdrop, #15171b); }
-.pal-thumb-s.struct { width: 48px; height: 36px; }
-.pal-thumb-s.struct canvas { max-width: 48px; max-height: 36px; }
+.pal-thumb-s.prefab { width: 48px; height: 36px; }
+.pal-thumb-s.prefab canvas { max-width: 48px; max-height: 36px; }
 .pal-row .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pal-row .icon-btn { padding: 0 3px; color: var(--muted); }
 .pal-row .icon-btn:hover { color: inherit; }

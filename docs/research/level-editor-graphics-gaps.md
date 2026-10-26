@@ -36,7 +36,7 @@ Each of these was checked in code so it is not reported as missing.
   - Clear level;
   - level list with a "used only" filter;
   - Level as PNG: `src/main.ts:160`, `src/ui/levelview.ts` `exportPng`.
-- **Direct Map16 placement:** the editor's own extended object, placed from the palette's Map16 tab (`src/ui/panels.ts`, `src/core/patches.ts` `DM16_EXT`). It also has **structures**, which LM lacks: `src/core/structs.ts`.
+- **Direct Map16 placement:** the editor's own extended object, placed from the palette's Map16 tab (`src/ui/panels.ts`, `src/core/patches.ts` `DM16_EXT`). It also has **prefabs** (then called structures), which LM lacks: `src/core/prefabs.ts`.
 - **Map16 editor:** `src/ui/gfx/map16tab.ts`.
   - 8x8 quarters, palette, flip, priority, acts-like, custom block link.
   - FG pages 0–F (SMWX, `src/core/map16ext.ts`) and BG pages 2–F (SMWH, `src/core/bgmap16.ts`).

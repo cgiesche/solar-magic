@@ -9,7 +9,7 @@ export function spriteName(n: number): string {
 const STD_OBJECTS = `Extended object|Water (blue)|Invisible coin blocks|Invisible note blocks|Invisible POW coins|Coins|Walk-through dirt|Water (other color)|Note blocks|Turn blocks|Coin ? blocks|Throw blocks|Black piranha plants|Cement blocks|Brown blocks|Vertical pipes|Horizontal pipes|Bullet shooter|Slopes|Ledge edges|Ground ledge|Midway/goal point|Blue coins|Rope/clouds|Water surface (animated)|Water surface (static)|Lava surface (animated)|Net top edge|Donut bridge|Net bottom edge|Net vertical edge|Vertical pipe/bone/log|Horizontal pipe/bone/log|Long ground ledge`.split('|');
 
 export function objectName(num: number, ext: number): string {
-  if (num === 0) return ext === 5 ? 'Direct Map16 (editor patch)' : ext === 4 ? 'Structure' : `Extended object ${hex2(ext)}`;
+  if (num === 0) return ext === 5 ? 'Direct Map16 (editor patch)' : ext === 4 ? 'Prefab' : `Extended object ${hex2(ext)}`;
   return STD_OBJECTS[num] ?? `Tileset object ${hex2(num)}`;
 }
 

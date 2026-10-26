@@ -7,7 +7,7 @@
 // - FG: Direct Map16 objects of both layers. Each fills its rectangle with one tile, so matching that tile
 //   moves the whole object (Lunar Magic matches the upper-left tile). With "always show" the object shows
 //   its tile + 100 while its flag is on (cdm16.ts), so a move takes both along or neither. A move also
-//   rewrites the structures' tiles and the custom blocks' list.txt (assembled again).
+//   rewrites the prefabs' tiles and the custom blocks' list.txt (assembled again).
 // - BG: the levels' BG tilemaps. Each tile of a BG the editor stores carries its page (bg.ts), so unlike in
 //   Lunar Magic there is no BG bank to change and tiles of several pages share a BG. A game BG (pages 0-1
 //   only) is known from its load (`gameBg`); rewritten, it is stored by the editor.
@@ -20,8 +20,8 @@ import { L2_PTRS, loadLevel, type Level, type LevelObject } from './level.ts';
 import { saveLevel } from './save.ts';
 import { bgBank } from './patches.ts';
 import { decodeBg } from './bg.ts';
-import { isDm16, structTiles, COND_ADD } from './cdm16.ts';
-import { listStructures, writeStructure, type Structure } from './structs.ts';
+import { isDm16, prefabTiles, COND_ADD } from './cdm16.ts';
+import { listPrefabs, writePrefab, type Prefab } from './prefabs.ts';
 import { EXT_FIRST, EXT_TILES, DEFAULT_ACTS, extTileWords, setExtTileWords, actsLike, setActsLike, blockOf, setBlock } from './map16ext.ts';
 import { BG_EXT_FIRST, BG_EXT_TILES, bgExtTileWords, setBgExtTileWords, vanillaBgWords } from './bgmap16.ts';
 import { loadBlockProject, saveBlockProject } from './blocks.ts';
@@ -41,10 +41,10 @@ export interface MoveSource extends LevelSource {
   index?: LevelTiles[]; // the usage index: tiles placed by objects' code
 }
 
-// the uses rewritten: per level its Direct Map16 objects and BG tiles; the structures; the tiles with a block
+// the uses rewritten: per level its Direct Map16 objects and BG tiles; the prefabs; the tiles with a block
 // (moved, or overwritten)
 export interface LevelChange { level: number; objects: number; bg: number }
-export interface UsesPlan { levels: LevelChange[]; structures: number[]; blocks: number[] }
+export interface UsesPlan { levels: LevelChange[]; prefabs: number[]; blocks: number[] }
 export interface MovePlan extends UsesPlan {
   map: TileMap;
   problems: string[]; // why the move can't be done
@@ -110,7 +110,7 @@ function changedLevels(rom: Rom, layer: Layer, map: TileMap, src: LevelSource): 
 // ---------- the uses alone (Remap Direct Map16 / Background Tiles) ----------
 
 export function planRemap(rom: Rom, layer: Layer, map: TileMap, src: LevelSource): UsesPlan {
-  return { levels: changedLevels(rom, layer, map, src), structures: [], blocks: [] };
+  return { levels: changedLevels(rom, layer, map, src), prefabs: [], blocks: [] };
 }
 
 // rewrites the levels as saved (an open level with changes is saved before, by the ROM edit)
@@ -141,7 +141,7 @@ function setTileData(rom: Rom, layer: Layer, t: number, d: TileData): void {
 const emptyTile = (rom: Rom, layer: Layer, blank: number[]): TileData =>
   ({ words: layer === 'fg' ? blank : vanillaBgWords(rom, 0x025), acts: layer === 'fg' ? DEFAULT_ACTS : null, block: null });
 
-const mappedStructure = (s: Structure, map: TileMap): Structure => ({ ...s, tiles: s.tiles.map((t) => (t >= 0 && map.has(t) ? map.get(t)! : t)) });
+const mappedPrefab = (s: Prefab, map: TileMap): Prefab => ({ ...s, tiles: s.tiles.map((t) => (t >= 0 && map.has(t) ? map.get(t)! : t)) });
 
 // What moving the tiles (map: from → to, both 200-FFF) rewrites, and why it can't be done. Refused: moving
 // onto a tile something places (unless it moves away too), a tile placed by code, a conditional "always
@@ -155,7 +155,7 @@ export function planMove(rom: Rom, layer: Layer, map: TileMap, src: MoveSource):
   if (new Set(dests).size < dests.length) problems.push('Two tiles would move onto the same one.');
   // destinations that stay: what places them would show the moved tiles
   const onto = new Set(dests.filter((t) => !map.has(t)));
-  const plan: MovePlan = { map, problems, overwrite: [], levels: [], structures: [], blocks: [] };
+  const plan: MovePlan = { map, problems, overwrite: [], levels: [], prefabs: [], blocks: [] };
   if (outside.length) return plan;
 
   const placedOnto = new Map<number, string[]>(); // tile → what places it
@@ -176,10 +176,10 @@ export function planMove(rom: Rom, layer: Layer, map: TileMap, src: MoveSource):
     if (c.objects || c.bg) plan.levels.push(c);
   }
   if (layer === 'fg') {
-    for (const [k, s] of listStructures(rom)) {
-      for (const t of structTiles(s)) place(t, `structure ${hex(k, 2)}`);
-      s.tiles.forEach((t, i) => { if (t >= 0 && s.conds?.[i]?.always) pair(t, `structure ${hex(k, 2)}`); });
-      if (s.tiles.some((t) => t >= 0 && moves(map, t))) plan.structures.push(k);
+    for (const [k, s] of listPrefabs(rom)) {
+      for (const t of prefabTiles(s)) place(t, `prefab ${hex(k, 2)}`);
+      s.tiles.forEach((t, i) => { if (t >= 0 && s.conds?.[i]?.always) pair(t, `prefab ${hex(k, 2)}`); });
+      if (s.tiles.some((t) => t >= 0 && moves(map, t))) plan.prefabs.push(k);
     }
     for (const t of [...map.keys(), ...onto]) if (blockOf(rom, t)) plan.blocks.push(t);
     const code = new Map<number, number[]>();
@@ -210,7 +210,7 @@ export function applyMove(rom: Rom, layer: Layer, plan: MovePlan, src: MoveSourc
   for (const [t, d] of map) setTileData(rom, layer, d, data.get(t)!);
   applyRemap(rom, layer, map, src);
   if (layer === 'bg') return;
-  for (const [k, s] of listStructures(rom)) if (s.tiles.some((t) => t >= 0 && moves(map, t))) writeStructure(rom, k, mappedStructure(s, map));
+  for (const [k, s] of listPrefabs(rom)) if (s.tiles.some((t) => t >= 0 && moves(map, t))) writePrefab(rom, k, mappedPrefab(s, map));
   const p = plan.blocks.length ? loadBlockProject(rom) : null;
   if (p) {
     // (a destination's own block is overwritten)

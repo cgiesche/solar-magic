@@ -29,7 +29,7 @@ export function levelSource(app: App, map: TileMap, levels = usedLevels(app.rom)
   };
 }
 
-// what a plan rewrites: the levels (clicking one opens it), structures, blocks
+// what a plan rewrites: the levels (clicking one opens it), prefabs, blocks
 export function planList(app: App, plan: UsesPlan, none: string): HTMLElement {
   const items = plan.levels.map((c) => ({
     level: c.level,
@@ -37,7 +37,7 @@ export function planList(app: App, plan: UsesPlan, none: string): HTMLElement {
   }));
   return h('div', null,
     usedInList(app, 'Rewritten in levels', items, 0, none),
-    plan.structures.length ? h('div', { class: 'hint' }, `Structure${plan.structures.length > 1 ? 's' : ''} ${plan.structures.map((n) => hex(n, 2)).join(', ')}`) : '',
+    plan.prefabs.length ? h('div', { class: 'hint' }, `Prefab${plan.prefabs.length > 1 ? 's' : ''} ${plan.prefabs.map((n) => hex(n, 2)).join(', ')}`) : '',
     plan.blocks.length ? h('div', { class: 'hint' }, `Custom block${plan.blocks.length > 1 ? 's' : ''} on ${plan.blocks.map((t) => hex(t, 3)).join(', ')} (list.txt, assembled again)`) : '');
 }
 

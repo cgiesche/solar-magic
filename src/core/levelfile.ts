@@ -8,7 +8,7 @@ import {
 import { levelGfx, customPalette } from './patches.ts';
 import { encodeBg, decodeBg } from './bg.ts';
 import { condByte } from './cdm16.ts';
-import { STRUCT_EXT, readStructure, listStructures, freeStructureNumber, writeStructure, type Structure } from './structs.ts';
+import { PREFAB_EXT, readPrefab, listPrefabs, freePrefabNumber, writePrefab, type Prefab } from './prefabs.ts';
 
 export const LEVEL_FILE_EXT = '.smwlevel';
 
@@ -25,7 +25,7 @@ interface LevelFileJson {
   gfx?: number[]; // GFX bypass slots (editor patch), $FF = default
   palette?: string; // hex, 512 bytes custom level palette
   bg?: string; // hex, edited BG tilemap (editor format of bg.ts, RLE)
-  structs?: (Structure & { n: number })[]; // structures the level uses (structs.ts), by their number in the exporting ROM
+  prefabs?: (Prefab & { n: number })[]; // prefabs the level uses (prefabs.ts), by their number in the exporting ROM
 }
 
 export interface LevelFileData {
@@ -61,9 +61,9 @@ export function exportLevelFile(rom: Rom, lv: Level, bg: Uint16Array | null = lv
   const pal = customPalette(rom, lv.number);
   if (pal) out.palette = toHex(rom.bytes(pal, 512));
   if (bg && !l2) out.bg = toHex(encodeBg(bg));
-  const used = new Set([...lv.objects, ...(lv.layer2Objects ?? [])].filter((o) => o.num === 0 && o.ext === STRUCT_EXT && o.struct !== undefined).map((o) => o.struct!));
-  const structs = [...used].sort((a, b) => a - b).flatMap((n) => { const s = readStructure(rom, n); return s ? [{ n, ...s }] : []; });
-  if (structs.length) out.structs = structs;
+  const used = new Set([...lv.objects, ...(lv.layer2Objects ?? [])].filter((o) => o.num === 0 && o.ext === PREFAB_EXT && o.prefab !== undefined).map((o) => o.prefab!));
+  const prefabs = [...used].sort((a, b) => a - b).flatMap((n) => { const s = readPrefab(rom, n); return s ? [{ n, ...s }] : []; });
+  if (prefabs.length) out.prefabs = prefabs;
   return JSON.stringify(out, null, 1);
 }
 
@@ -77,19 +77,19 @@ export function importLevelFile(rom: Rom, text: string, into: Level): LevelFileD
   if (j.secondary.length !== SEC_HDR.length) throw new Error('Level file from an older editor version (secondary header without the layer 2 scroll or level size byte) – not supported');
   const palette = j.palette ? fromHex(j.palette) : null;
   if (palette && palette.length !== 512) throw new Error('Palette in the level file is not 512 bytes');
-  // structures: reuse an identical one of this ROM, else store under a free number
+  // prefabs: reuse an identical one of this ROM, else store under a free number
   const remap = new Map<number, number>();
-  if (j.structs?.length) {
-    const have = listStructures(rom);
-    const cond = (s: Structure, i: number) => { const c = s.conds?.[i]; return c ? condByte(c) : -1; };
-    const same = (a: Structure, b: Structure) => a.w === b.w && a.h === b.h && a.name === b.name && a.tiles.every((t, i) => t === b.tiles[i] && cond(a, i) === cond(b, i));
-    for (const s of j.structs) {
+  if (j.prefabs?.length) {
+    const have = listPrefabs(rom);
+    const cond = (s: Prefab, i: number) => { const c = s.conds?.[i]; return c ? condByte(c) : -1; };
+    const same = (a: Prefab, b: Prefab) => a.w === b.w && a.h === b.h && a.name === b.name && a.tiles.every((t, i) => t === b.tiles[i] && cond(a, i) === cond(b, i));
+    for (const s of j.prefabs) {
       const hit = [...have].find(([, x]) => same(x, s));
       if (hit) { remap.set(s.n, hit[0]); continue; }
-      const n = freeStructureNumber(rom);
-      if (n < 0) throw new Error('No free slot for the structures of the level file (all 256 in use)');
-      const st: Structure = { w: s.w, h: s.h, tiles: s.tiles, ...(s.conds ? { conds: s.conds } : {}), name: s.name };
-      writeStructure(rom, n, st);
+      const n = freePrefabNumber(rom);
+      if (n < 0) throw new Error('No free slot for the prefabs of the level file (all 256 in use)');
+      const st: Prefab = { w: s.w, h: s.h, tiles: s.tiles, ...(s.conds ? { conds: s.conds } : {}), name: s.name };
+      writePrefab(rom, n, st);
       have.set(n, st);
       remap.set(s.n, n);
     }
@@ -97,7 +97,7 @@ export function importLevelFile(rom: Rom, text: string, into: Level): LevelFileD
   const level = parseLevelData(rom, into.number, fromHex(j.layer1), j.layer2 ? fromHex(j.layer2) : null,
     j.layer2 ? into.layer2Pointer : j.layer2Pointer, fromHex(j.sprites), decodeSecondaryHeader(j.secondary), j.spriteSizes ? fromHex(j.spriteSizes) : null);
   if (j.bg && !level.layer2Objects) level.bg = decodeBg(fromHex(j.bg));
-  for (const o of [...level.objects, ...(level.layer2Objects ?? [])]) if (o.struct !== undefined) o.struct = remap.get(o.struct) ?? o.struct;
+  for (const o of [...level.objects, ...(level.layer2Objects ?? [])]) if (o.prefab !== undefined) o.prefab = remap.get(o.prefab) ?? o.prefab;
   level.l1Addr = into.l1Addr; level.l1Size = into.l1Size; level.l2Size = into.l2Size;
   level.sprAddr = into.sprAddr; level.sprSize = into.sprSize;
   return { level, gfx: Array.isArray(j.gfx) && j.gfx.length === 8 ? j.gfx : null, palette };

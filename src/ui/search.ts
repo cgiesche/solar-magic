@@ -42,7 +42,7 @@ export function openSearch(providers: SearchProvider[]): void {
   let group = ''; // '' all groups, else a provider id
   let rows: { el: HTMLElement; pick: () => void }[] = [];
   let active = 0;
-  const input = h('input', { class: 'filter search-input', placeholder: 'Search objects, Map16 tiles, structures, sprites …', spellcheck: false, autocomplete: 'off', value: last });
+  const input = h('input', { class: 'filter search-input', placeholder: 'Search objects, Map16 tiles, prefabs, sprites …', spellcheck: false, autocomplete: 'off', value: last });
   const groups = h('div', { class: 'tabs seg search-groups' });
   const list = h('div', { class: 'search-list' });
   const box = h('div', { class: 'search-box' }, h('div', { class: 'row' }, input), groups, list,

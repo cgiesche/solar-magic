@@ -287,11 +287,11 @@ export class Map16Tab implements WsPanel {
       h('button', { class: this.remapping ? 'active' : '', onclick: () => (this.remapping ? this.closeRemap() : this.openRemap()),
         title: 'Change the 8x8 tile numbers, palettes or acts-like of tiles in bulk (Lunar Magic\'s Remap)' }, 'Remap …'),
       h('button', { class: this.moving ? 'active' : '', onclick: () => (this.moving ? this.closeMove() : this.openMove()),
-        title: 'Move the selected tiles to other numbers, with every level, structure and block using them' }, 'Move …'),
+        title: 'Move the selected tiles to other numbers, with every level, prefab and block using them' }, 'Move …'),
       this.bg ? '' : h('label', { class: 'toggle', title: 'Mark all tiles that act like the selected one' },
         (() => { const cb = h('input', { type: 'checkbox', checked: this.sameActs }); cb.addEventListener('change', () => { this.sameActs = cb.checked; this.drawSheet(); }); return cb; })(),
         'Mark same acts-like'),
-      this.bg ? '' : h('label', { class: 'toggle', title: 'Mark the tiles 200–FFF that have graphics, an acts-like setting or a block but are in no level and no structure' },
+      this.bg ? '' : h('label', { class: 'toggle', title: 'Mark the tiles 200–FFF that have graphics, an acts-like setting or a block but are in no level and no prefab' },
         (() => { const cb = h('input', { type: 'checkbox', checked: this.markUnused }); cb.addEventListener('change', () => { this.markUnused = cb.checked; this.drawSheet(); }); return cb; })(),
         'Mark unused'),
       h('span', { class: 'spacer' }),
@@ -821,9 +821,9 @@ export class Map16Tab implements WsPanel {
     }));
     const l = tileLinks(app.rom, t);
     box.replaceChildren(
-      usedInList(app, tilesetTile ? `Used in levels of ${tilesetNames(tilesets)}` : 'Used in levels', items, pending, this.unusedTiles()?.has(t) ? 'Defined, but placed in no level and no structure: unused.' : 'Placed in no level.'),
+      usedInList(app, tilesetTile ? `Used in levels of ${tilesetNames(tilesets)}` : 'Used in levels', items, pending, this.unusedTiles()?.has(t) ? 'Defined, but placed in no level and no prefab: unused.' : 'Placed in no level.'),
       l.actsLike.length ? h('div', { class: 'hint' }, 'Acting like it: ', ...l.actsLike.slice(0, 24).flatMap((x, i) => [i ? ' ' : '', link(x)]), l.actsLike.length > 24 ? ` … (${l.actsLike.length})` : '') : '',
-      l.structures.length ? h('div', { class: 'hint' }, `In structure${l.structures.length > 1 ? 's' : ''} ${l.structures.map((n) => hex(n, 2)).join(', ')}`) : '',
+      l.prefabs.length ? h('div', { class: 'hint' }, `In prefab${l.prefabs.length > 1 ? 's' : ''} ${l.prefabs.map((n) => hex(n, 2)).join(', ')}`) : '',
       l.blocks.length ? h('div', { class: 'hint' }, `Custom block on it: ${l.blocks.join(', ')}`) : '',
     );
   }
@@ -935,7 +935,7 @@ export class Map16Tab implements WsPanel {
       const box = h('div', { class: 'mt-remap' },
         h('div', { class: 'prop-title' }, 'Move tiles', h('span', { class: 'hint' }, '  with every use')),
         h('div', { class: 'row' }, h('label', { class: 'hint', title: 'Or drag the selection in the sheet' }, 'Top left tile to'), input),
-        h('div', { class: 'hint' }, 'Or drag the selection in the sheet. Levels, structures and blocks using the tiles are rewritten, so every level looks as before.'),
+        h('div', { class: 'hint' }, 'Or drag the selection in the sheet. Levels, prefabs and blocks using the tiles are rewritten, so every level looks as before.'),
         status);
       this.moving = { to: -1, box, input, status, plan: null };
     }
