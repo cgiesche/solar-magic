@@ -72,7 +72,7 @@ When a level is displayed, it runs the ROM's **original loading routines** (~15 
 * Palette: standard objects 01–3F, extended objects, **direct Map16 placement** (any tile, see patch),
   sprites with names and real graphics, including custom sprites (PIXI) with their extra bytes in the properties.
 * **Prefabs:** save selected objects (e.g. an arrangement of Direct Map16 blocks) as a prefab
-  (Palette → Prefabs → "Selection as prefab"). In the level it is then a single 4-byte object;
+  (Palette → Objects → Prefabs → "Selection as prefab"). In the level it is then a single 4-byte object;
   cells that belong to none of the selected objects are transparent. Changing a prefab affects
   all levels. "Break up" turns a placed prefab back into individual Direct Map16 objects.
   `.smwlevel` files carry along the prefabs they use.
