@@ -166,13 +166,15 @@ export function owTeleportEntry(rom: Rom) {
   return listPatches(rom).find((p) => p.kind === 'owteleport') ?? null;
 }
 
-function table(rom: Rom): number {
+// the star/pipe table, null without the patch (another tool's hook there: Lunar Magic's)
+function tableOf(rom: Rom): number | null {
   if (rom.r8(FIND_HOOK) === 0x22) {
     const base = rom.r24(FIND_HOOK + 1) - 8;
     if (MAGIC.every((m, i) => rom.r8(base + i) === m)) return rom.r24(base + 4);
   }
-  return missingPatch('Overworld teleports (SMWO)');
+  return null;
 }
+const table = (rom: Rom): number => tableOf(rom) ?? missingPatch('Overworld teleports (SMWO)');
 
 // needs Asar (loadAsar) to be loaded
 export function installOwTeleportPatch(rom: Rom): ApplyResult {
@@ -228,7 +230,8 @@ export const readExitPaths = (rom: Rom): (ExitPath | null)[] => Array.from({ len
 export function teleportDataRanges(rom: Rom): [number, number][] {
   const at = (snes: number, len: number): [number, number] => [snesToPc(snes), snesToPc(snes) + len];
   const out: [number, number][] = [];
-  if (rom.r8(FIND_HOOK) === 0x22) out.push(at(table(rom), PART * 4));
+  const t = tableOf(rom);
+  if (t !== null) out.push(at(t, PART * 4));
   if (rom.r8(EXIT_HOOK) === 0x22) { const [f, t, k] = exitTables(rom); out.push(at(f, EXIT_PATHS * 5), at(t, EXIT_PATHS * 5), at(k, EXIT_PATHS * 2)); }
   return out;
 }
