@@ -76,6 +76,8 @@ When a level is displayed, it runs the ROM's **original loading routines** (~15 
   (Palette → Objects → Prefabs → "Selection as prefab"). In the level it is then a single 4-byte object;
   cells that belong to none of the selected objects are transparent. Changing a prefab affects
   all levels. "Break up" turns a placed prefab back into individual Direct Map16 objects.
+  Pasting the same Direct Map16 arrangement a third time (in any level) suggests saving it as a prefab
+  when that saves bytes; the hint never blocks editing, ✕ stops it for that arrangement.
   `.smwlevel` files carry along the prefabs they use.
 * Header dialog (H): primary header (mode, screens, tileset, palettes, music, time, sprite GFX, …),
   entrance & scrolling (entrance, midway point, layer 2/3 settings), sprite header, BG tilemap selection.

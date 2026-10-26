@@ -765,7 +765,7 @@ export function prefabCanvas(tile: (t: number) => HTMLCanvasElement | null, st: 
 }
 
 // the selected objects as a new prefab, or over an existing one
-function openSavePrefab(app: App): void {
+export function openSavePrefab(app: App): void {
   const r = app.prefabFromSelection();
   if (typeof r === 'string') { toast(r, 'error'); return; }
   const free = freePrefabNumber(app.rom);

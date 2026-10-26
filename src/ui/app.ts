@@ -17,6 +17,7 @@ import { gfxSkipMask, gfxFilesHash } from '../core/gfxpages.ts';
 import { flagBytes, usedFlags, isDm16, dm16Tiles, type Dm16Cond } from '../core/cdm16.ts';
 import { PREFAB_EXT, PREFAB_MAX, TRANSPARENT, listPrefabs, readPrefab, writePrefab, type Prefab } from '../core/prefabs.ts';
 import { prefabDm16Objects } from '../core/prefabcost.ts';
+import { PasteCounter, type PasteHint } from '../core/pastehint.ts';
 import { planPrefabPlaces, applyPrefabPlaces, replaceWithPrefab, type LevelPlaces, type LevelGroups, type PrefabGroup } from '../core/prefabplaces.ts';
 import type { Package } from '../core/pkgreg.ts';
 import { kvEntries, kvWrite, saveRom } from './storage.ts';
@@ -88,6 +89,7 @@ export type AppEvent =
   | 'animated' // which tiles and colors of the level animate is known
   | 'anim-frame' // the next frame of the level animation is shown
   | 'prefabs' // the prefab table changed
+  | 'paste-hint' // App.pasteHint changed
   | 'bgtile' // the BG or layer 3 brush changed (picked from the level)
   | 'reveal' // the level view scrolls to App.reveal
   | 'zoom' // the level view's zoom changed
@@ -172,6 +174,10 @@ export class App {
   private quietUntil = 0; // and after a stroke until then (the next one often follows quickly)
   private persistTimer = 0;
   clipboard: { objects?: LevelObject[]; sprites?: LevelSprite[] } = {};
+  // the arrangements of Direct Map16 objects pasted in the session (pastehint.ts); the hint to save the last
+  // paste (its objects as placed in level/layer) as prefab, until it is dismissed or another level is opened
+  private pastes = new PasteCounter();
+  pasteHint: (PasteHint & { level: number; layer: 'l1' | 'l2'; objects: LevelObject[] }) | null = null;
   // tile (x,y) lookup from map offset
   offsetToTile1 = new Int32Array(MAP_SIZE);
   offsetToTile2 = new Int32Array(MAP_SIZE);
@@ -1590,6 +1596,33 @@ export class App {
       }
       this.selection = sel;
     });
+    if (this.mode !== 'l1' && this.mode !== 'l2') return;
+    const pasted = this.selectedObjects();
+    const hint = this.pastes.paste(pasted);
+    if (hint) this.setPasteHint({ ...hint, level: this.level.number, layer: this.mode, objects: structuredClone(pasted) });
+  }
+  setPasteHint(h: App['pasteHint']): void {
+    this.pasteHint = h;
+    this.emit('paste-hint');
+  }
+  // no hint for the arrangement anymore
+  dismissPasteHint(): void {
+    if (this.pasteHint) this.pastes.dismiss(this.pasteHint.key);
+    this.setPasteHint(null);
+  }
+  // selects the hint's pasted objects (found by what they are: a saved level is loaded anew); false when they
+  // are no longer in the open level
+  selectPasteHint(): boolean {
+    const p = this.pasteHint;
+    if (!p || p.level !== this.level.number) return false;
+    const objs = (p.layer === 'l2' ? this.level.layer2Objects : this.level.objects) ?? [];
+    const same = (a: LevelObject, b: LevelObject) => a.num === b.num && a.ext === b.ext && a.x === b.x && a.y === b.y && a.size === b.size
+      && a.tile === b.tile && JSON.stringify(a.cond ?? null) === JSON.stringify(b.cond ?? null);
+    const uids = p.objects.map((o) => objs.find((q) => same(o, q))?.uid);
+    if (!uids.every((u) => u !== undefined)) return false;
+    if (this.mode !== p.layer) this.setMode(p.layer, uids);
+    else { this.selection = new Set(uids); this.emit('change'); }
+    return true;
   }
 
   // ------------- saving -------------

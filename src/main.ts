@@ -8,6 +8,7 @@ import { App, type EditMode } from './ui/app.ts';
 import { h, clear, toast, log, modal, choose, zoomControl } from './ui/dom.ts';
 import { downloadBytes, pickFile, saveFile, filePath, fileName, desktop, guardClose } from './ui/platform.ts';
 import { LogBar } from './ui/logbar.ts';
+import { pasteHintBox } from './ui/pastehint.ts';
 import { kvGet, kvSet, kvDel, kvClear, saveRom, romFromRecord, type RomRecord } from './ui/storage.ts';
 import { LevelView } from './ui/levelview.ts';
 import { LevelList, Palette, Properties } from './ui/panels.ts';
@@ -252,10 +253,11 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   const right = h('div', { class: 'right' }, palette.root, props.root);
   const logBar = new LogBar();
   const busy = busyIndicator(app);
-  const layout = h('div', { class: 'layout' }, appbar, levelBar, left, center, right, logBar.root, busy);
+  const pasteHint = pasteHintBox(app);
+  const layout = h('div', { class: 'layout' }, appbar, levelBar, left, center, right, logBar.root, busy, pasteHint);
   root.append(layout);
   const owRight = h('div', { class: 'right' });
-  const showLayout = (bar: HTMLElement, l: HTMLElement, main: HTMLElement, side: HTMLElement) => layout.replaceChildren(appbar, bar, l, main, side, logBar.root, busy);
+  const showLayout = (bar: HTMLElement, l: HTMLElement, main: HTMLElement, side: HTMLElement) => layout.replaceChildren(appbar, bar, l, main, side, logBar.root, busy, pasteHint);
 
   // switches between the level editor, the overworld editor and the graphics workspace (palettes, Map16, GFX);
   // gfx: tab to open (default: the last one), Map16 tile to show

@@ -171,6 +171,10 @@ input.invalid, input.invalid:focus { outline: 1px solid var(--danger); border-co
 .busy.show { opacity: 1; transform: none; }
 .busy-spin { flex: none; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,.35); border-top-color: #fff; border-radius: 50%; animation: busy-spin .8s linear infinite; }
 @keyframes busy-spin { to { transform: rotate(360deg); } }
+/* hint to save repeated pastes as a prefab: beside the level, never covering more than itself */
+.paste-hint { position: fixed; right: 342px; bottom: calc(var(--log-h, 0px) + 70px); z-index: 900; display: none; align-items: center; gap: 8px; padding: 6px 6px 6px 12px; background: var(--panel2); border: 1px solid var(--accent2); border-radius: 6px; box-shadow: 0 2px 10px rgba(0,0,0,.45); font-size: 12px; max-width: 45vw; }
+.paste-hint.show { display: flex; }
+.layout.ow-mode .paste-hint, .layout.gfx-mode .paste-hint { display: none; }
 /* log bar: all toasts and notable events with times; collapsed it shows only the latest line */
 .logbar { grid-column: 1 / 4; display: flex; flex-direction: column; min-width: 0; background: var(--bg); border-top: 1px solid var(--border); font-size: 12px; }
 :root:has(.logbar) { --log-h: 27px; } /* toasts and the busy pill sit above the bar */
