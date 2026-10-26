@@ -10,9 +10,9 @@ import { usedLevels, levelOverride } from '../src/core/levelusage.ts';
 import { DM16_EXT } from '../src/core/patches.ts';
 import { flagBytes } from '../src/core/cdm16.ts';
 import { EditSession } from '../src/core/editsession.ts';
-import { installPrefabPatch, writePrefab, PREFAB_EXT, TRANSPARENT, type Prefab } from '../src/core/prefabs.ts';
+import { installPrefabPatch, writePrefab, readPrefab, PREFAB_EXT, TRANSPARENT, type Prefab } from '../src/core/prefabs.ts';
 import { prefabDm16Objects } from '../src/core/prefabcost.ts';
-import { findPrefabPlaces, planPrefabPlaces, applyPrefabPlaces, replaceWithPrefab } from '../src/core/prefabplaces.ts';
+import { findPrefabPlaces, planPrefabPlaces, applyPrefabPlaces, replaceWithPrefab, deletePrefab } from '../src/core/prefabplaces.ts';
 import { editorImage } from './fixture.ts';
 
 let fail = 0;
@@ -143,6 +143,25 @@ check(rom.data.length === image.length && rom.data.every((v, i) => v === image[i
   replaceWithPrefab(lv, N, [g]);
   const i = lv.objects.findIndex((o) => o.ext === PREFAB_EXT && o.num === 0);
   check(lv.objects[i + 1] === after && i === last - g.objects.length + 1, 'the prefab object where its last object was');
+}
+
+// deleting a prefab deletes its objects in every level, one undo step
+{
+  const img = rom.data.slice();
+  const ses = new EditSession(rom);
+  ses.open(H1);
+  ses.romEdit('Prefab saved', () => { writePrefab(rom, N, s); applyPrefabPlaces(rom, N, plan); });
+  const uses = (n: number) => { const lv = loadLevel(rom, n); return [...lv.objects, ...(lv.layer2Objects ?? [])].filter((o) => o.num === 0 && o.ext === PREFAB_EXT && o.prefab === N).length; };
+  const counts = levels.map(uses);
+  const others = levels.map((n) => { const lv = loadLevel(rom, n); return lv.objects.length + (lv.layer2Objects?.length ?? 0); });
+  ses.romEdit('Prefab deleted', () => deletePrefab(rom, N, usedLevels(rom)));
+  check(levels.every((n) => uses(n) === 0), 'deleted: no objects of it left');
+  check(levels.every((n, k) => { const lv = loadLevel(rom, n); return lv.objects.length + (lv.layer2Objects?.length ?? 0) === others[k] - counts[k]; }), 'deleted: the other objects stay');
+  check(readPrefab(rom, N) === null, 'deleted: the prefab is gone');
+  ses.undo();
+  check(levels.every((n, k) => uses(n) === counts[k]) && readPrefab(rom, N) !== null, 'undo: prefab and objects back');
+  ses.undo();
+  check(rom.data.every((v, i) => v === img[i]), 'undo all: as before');
 }
 
 console.log(fail ? `${fail} failures` : 'prefab places ok');

@@ -15,7 +15,7 @@ import { layerGeom, type LayerGeom } from './render.ts';
 import { MAP_BASE, type LevelOverride, type LevelRender } from './levelemu.ts';
 import { levelOverride } from './levelusage.ts';
 import { isDm16, dm16Tiles, flagBytes, COND_FLAGS, type Dm16Cond } from './cdm16.ts';
-import { PREFAB_EXT, TRANSPARENT, type Prefab } from './prefabs.ts';
+import { PREFAB_EXT, TRANSPARENT, writePrefab, type Prefab } from './prefabs.ts';
 import { objectBytes } from './prefabcost.ts';
 
 export type Layer = 1 | 2;
@@ -139,4 +139,24 @@ export function applyPrefabPlaces(rom: Rom, n: number, plan: LevelGroups[]): voi
     replaceWithPrefab(lv, n, p.places);
     saveLevel(rom, lv);
   }
+}
+
+// prefab n's objects (both layers): how many in lv
+export function prefabObjectCount(lv: Level, n: number): number {
+  return [...lv.objects, ...(lv.layer2Objects ?? [])].filter((o) => o.num === 0 && o.ext === PREFAB_EXT && o.prefab === n).length;
+}
+
+// deletes prefab n and its objects in the levels as saved (an open level with changes is saved before, by the
+// ROM edit), so none is left placing nothing
+export function deletePrefab(rom: Rom, n: number, levels: number[]): void {
+  const other = (o: LevelObject) => !(o.num === 0 && o.ext === PREFAB_EXT && o.prefab === n);
+  for (const i of levels) {
+    let lv: Level;
+    try { lv = loadLevel(rom, i); } catch { continue; } // unreadable level
+    if (!prefabObjectCount(lv, n)) continue;
+    lv.objects = lv.objects.filter(other);
+    if (lv.layer2Objects) lv.layer2Objects = lv.layer2Objects.filter(other);
+    saveLevel(rom, lv);
+  }
+  writePrefab(rom, n, null);
 }

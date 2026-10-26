@@ -860,12 +860,12 @@ function renamePrefab(app: App, n: number, st: Prefab): void {
 }
 
 function deletePrefab(app: App, n: number, st: Prefab): void {
-  const users = app.prefabUsers(n);
+  const uses = app.prefabUses(n), count = uses.reduce((k, u) => k + u.count, 0);
   const body = h('div', null, h('div', null, `Delete prefab ${hex2(n)} “${st.name || '(unnamed)'}”?`),
-    h('div', { class: 'hint' }, users.length
-      ? `It is used in level ${users.map(hex3).join(', ')}. The objects stay there but show nothing until a prefab ${hex2(n)} is created again.`
-      : 'It is not used in any level.'));
-  modal('Delete prefab', body, [{ label: 'Cancel' }, { label: 'Delete', danger: true, onClick: () => { try { app.romEdit(`Prefab ${hex2(n)} deleted`, () => writePrefab(app.rom, n, null)); } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); } } }]);
+    uses.length
+      ? h('div', { class: 'warn-box' }, `Its ${count === 1 ? 'object' : `${count} objects`} in level ${uses.map((u) => (u.count > 1 ? `${hex3(u.level)} (${u.count})` : hex3(u.level))).join(', ')} ${count === 1 ? 'is' : 'are'} deleted too. To keep the tiles, “Break up” them first.`)
+      : h('div', { class: 'hint' }, 'It is not used in any level.'));
+  modal('Delete prefab', body, [{ label: 'Cancel' }, { label: 'Delete', danger: true, onClick: () => app.deletePrefab(n) }]);
 }
 
 // small images of the sprites a block spawns, shown in the corner of a palette cell

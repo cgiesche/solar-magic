@@ -19,7 +19,7 @@ import { PREFAB_EXT, PREFAB_MAX, TRANSPARENT, listPrefabs, readPrefab, writePref
 import { prefabDm16Objects } from '../core/prefabcost.ts';
 import { PasteCounter, findPasted, arrangementKey, type PasteHint } from '../core/pastehint.ts';
 import { prefabSuggestions, type PrefabSuggestion } from '../core/prefabsuggest.ts';
-import { planPrefabPlaces, applyPrefabPlaces, replaceWithPrefab, type LevelPlaces, type LevelGroups, type PrefabGroup } from '../core/prefabplaces.ts';
+import { planPrefabPlaces, applyPrefabPlaces, deletePrefab, prefabObjectCount, replaceWithPrefab, type LevelPlaces, type LevelGroups, type PrefabGroup } from '../core/prefabplaces.ts';
 import type { Package } from '../core/pkgreg.ts';
 import { kvEntries, kvWrite, saveRom } from './storage.ts';
 import { ResultCache, RomFingerprint, type CacheEntry } from '../core/romdeps.ts';
@@ -1561,15 +1561,24 @@ export class App {
     }, 1500);
   }
 
-  // levels whose saved data uses prefab n (plus the open level with its unsaved changes)
-  prefabUsers(n: number): number[] {
-    const out: number[] = [];
-    const uses = (lv: { objects: LevelObject[]; layer2Objects: LevelObject[] | null }) =>
-      [...lv.objects, ...(lv.layer2Objects ?? [])].some((o) => o.num === 0 && o.ext === PREFAB_EXT && o.prefab === n);
+  // levels whose saved data uses prefab n (plus the open level with its unsaved changes), with how many objects
+  prefabUses(n: number): { level: number; count: number }[] {
+    const out: { level: number; count: number }[] = [];
     for (const i of this.usedLevels()) {
-      try { if (uses(i === this.level.number ? this.level : loadLevel(this.rom, i))) out.push(i); } catch { /* unreadable level */ }
+      try {
+        const count = prefabObjectCount(i === this.level.number ? this.level : loadLevel(this.rom, i), n);
+        if (count) out.push({ level: i, count });
+      } catch { /* unreadable level */ }
     }
     return out;
+  }
+  prefabUsers(n: number): number[] {
+    return this.prefabUses(n).map((u) => u.level);
+  }
+
+  // deletes prefab n with its objects in all levels, one ROM edit
+  deletePrefab(n: number): void {
+    try { this.romEdit(`Prefab ${hex(n, 2)} deleted`, () => deletePrefab(this.rom, n, usedLevels(this.rom))); } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
   }
 
   // a prefab object becomes Direct Map16 objects (rectangles of one tile, prefabcost.ts), at its place in the object list
