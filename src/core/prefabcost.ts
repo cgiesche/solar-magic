@@ -11,8 +11,8 @@ import { encodePrefab, PREFAB_EXT, TRANSPARENT, type Prefab } from './prefabs.ts
 export interface PrefabCost {
   once: number; // bytes in the ROM's free space
   perPlacement: number; // level data bytes of one prefab object
-  dm16: number; // level data bytes of the tiles as Direct Map16 objects
-  rects: number; // how many Direct Map16 objects that is
+  dm16Bytes: number; // level data bytes of the tiles as Direct Map16 objects (placed at a screen's start: no jumps)
+  dm16Objects: number; // how many Direct Map16 objects that is
   breakEven: number | null; // the first number of placements at which the prefab takes less; null: never
 }
 
@@ -45,8 +45,8 @@ export function prefabCost(s: Prefab): PrefabCost {
   const once = Rom.ratsFootprint(encodePrefab(s).length);
   const perPlacement = bytesOf([{ uid: 0, num: 0, ext: PREFAB_EXT, x: 0, y: 0, size: 0, prefab: 0 }]);
   const objs = prefabDm16Objects(s, 0, 0);
-  const dm16 = bytesOf(objs);
-  // k placements: once + k * perPlacement < k * dm16
-  const breakEven = dm16 > perPlacement ? Math.floor(once / (dm16 - perPlacement)) + 1 : null;
-  return { once, perPlacement, dm16, rects: objs.length, breakEven };
+  const dm16Bytes = bytesOf(objs);
+  // k placements: once + k * perPlacement < k * dm16Bytes
+  const breakEven = dm16Bytes > perPlacement ? Math.floor(once / (dm16Bytes - perPlacement)) + 1 : null;
+  return { once, perPlacement, dm16Bytes, dm16Objects: objs.length, breakEven };
 }

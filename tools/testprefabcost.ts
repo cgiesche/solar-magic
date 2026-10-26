@@ -25,15 +25,15 @@ const mixed: Prefab = {
 const cb = prefabCost(block), cp = prefabCost(platform), cl = prefabCost(long);
 check(cb.breakEven === 1, `3×3 of 9 tiles pays off at the first placement (${cb.breakEven})`);
 check(cp.breakEven === 3, `8-wide platform pays off from the third placement (${cp.breakEven})`);
-check(cp.rects === 3 && cp.dm16 === 18, `platform: 3 Direct Map16 rectangles, 18 bytes (${cp.rects}, ${cp.dm16})`);
+check(cp.dm16Objects === 3 && cp.dm16Bytes === 18, `platform: 3 Direct Map16 rectangles, 18 bytes (${cp.dm16Objects}, ${cp.dm16Bytes})`);
 // a run of one tile is one Direct Map16 object, 6 bytes against 4: it pays off only after many placements
-check(cl.rects === 1 && cl.once === 48 && cl.breakEven === 25, `a run of one tile pays off late (${cl.breakEven})`);
+check(cl.dm16Objects === 1 && cl.once === 48 && cl.breakEven === 25, `a run of one tile pays off late (${cl.breakEven})`);
 check(prefabCost({ w: 1, h: 1, tiles: [T], name: '' }).breakEven === null, 'nothing to place never pays off');
 check(cb.perPlacement === 4, 'a placement is 4 bytes');
 // break-even: the first placement count where the prefab (once + placements) is smaller than Direct Map16
 for (const c of [cb, cp]) {
   const k = c.breakEven!;
-  check(c.once + k * c.perPlacement < k * c.dm16 && c.once + (k - 1) * c.perPlacement >= (k - 1) * c.dm16, `break-even ${k} is the first that saves`);
+  check(c.once + k * c.perPlacement < k * c.dm16Bytes && c.once + (k - 1) * c.perPlacement >= (k - 1) * c.dm16Bytes, `break-even ${k} is the first that saves`);
 }
 
 // the Direct Map16 objects cover exactly the prefab's tiles (with their conditions), none overlapping
@@ -58,7 +58,7 @@ for (const s of [block, platform, long, mixed]) {
 for (const s of [block, platform, long, mixed]) {
   const c = prefabCost(s);
   const dm = serializeObjects(prefabDm16Objects(s, 0x03, 7), [], false); // on screen 0: no screen jump before it
-  check(dm.length - 1 === c.dm16, `${s.w}×${s.h}: Direct Map16 bytes ${c.dm16} = serialized ${dm.length - 1}`);
+  check(dm.length - 1 === c.dm16Bytes, `${s.w}×${s.h}: Direct Map16 bytes ${c.dm16Bytes} = serialized ${dm.length - 1}`);
   const one: LevelObject = { uid: newUid(), num: 0, ext: PREFAB_EXT, x: 0x03, y: 7, size: 0, prefab: 9 };
   check(serializeObjects([one], [], false).length - 1 === c.perPlacement, 'placement bytes = serialized');
 }

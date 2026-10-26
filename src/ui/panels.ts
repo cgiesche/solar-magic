@@ -751,13 +751,12 @@ function openSavePrefab(app: App): void {
   const cost = h('div', { class: 'hint' });
   const updCost = () => {
     const c = prefabCost({ ...r, name: name.value.trim() });
-    const nth = (k: number) => `${k}${k % 100 >= 11 && k % 100 <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][k % 10] ?? 'th'}`;
+    const nth = (k: number) => (k === 1 ? 'first' : `${k}${k % 100 >= 11 && k % 100 <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][k % 10] ?? 'th'}`);
     cost.replaceChildren(
       h('div', null, `Once: ${c.once} bytes of ROM space (the prefab with its name and RATS tag).`),
-      h('div', null, `Each placement: ${c.perPlacement} bytes of level data, as Direct Map16 ${c.dm16} bytes (${c.rects} object${c.rects === 1 ? '' : 's'}).`),
+      h('div', null, `Each placement: ${c.perPlacement} bytes of level data, as Direct Map16 ${c.dm16Bytes} bytes (${c.dm16Objects} object${c.dm16Objects === 1 ? '' : 's'}).`),
       h('div', null, c.breakEven === null ? 'The prefab never takes less space than Direct Map16.'
-        : c.breakEven === 1 ? `Saves space from the first placement on (${c.dm16 - c.perPlacement} bytes per placement).`
-          : `Saves space from the ${nth(c.breakEven)} placement on (${c.dm16 - c.perPlacement} bytes per placement).`));
+        : `Saves space from the ${nth(c.breakEven)} placement on (${c.dm16Bytes - c.perPlacement} bytes per placement).`));
   };
   name.addEventListener('input', updCost);
   const upd = () => {
