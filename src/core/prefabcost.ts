@@ -40,6 +40,8 @@ export function prefabDm16Objects(s: Prefab, x: number, y: number, vertical = fa
 
 // level data bytes of objects (without the end byte)
 const bytesOf = (objs: LevelObject[]) => serializeObjects(objs, [], false).length - 1;
+// level data bytes of one object (without a screen jump before it)
+export const objectBytes = (o: LevelObject): number => bytesOf([{ ...o, x: o.x & 15, y: o.y & 15 }]);
 
 export function prefabCost(s: Prefab): PrefabCost {
   const once = Rom.ratsFootprint(encodePrefab(s).length);
