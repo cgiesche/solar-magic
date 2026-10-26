@@ -825,7 +825,7 @@ export class LevelView {
         if (this.drag.changed) this.scheduleRefresh();
         return;
       }
-      app.insertAt(tx, ty);
+      app.placeAt(tx, ty);
       return;
     }
     if (e.button !== 0) return;
@@ -869,6 +869,7 @@ export class LevelView {
       if (own) {
         const uid = own.item.uid;
         if (app.selection.has(uid)) app.selection.delete(uid); else app.selection.add(uid);
+        app.stampSelection = true;
         app.emit('change');
         return;
       }
@@ -883,11 +884,13 @@ export class LevelView {
         toast(`Mode: ${hit.mode === 'spr' ? 'Sprites' : hit.mode === 'l2' ? 'Layer 2' : 'Layer 1'}`);
       }
       else if (!app.selection.has(hit.item.uid)) app.selection = new Set([hit.item.uid]);
+      app.stampSelection = true;
       app.emit('change');
       const items = app.mode === 'spr' ? app.selectedSprites() : app.selectedObjects();
       this.drag = { kind: 'move', edit: app.beginLevelEdit(), startTx: tx, startTy: ty, lastDx: 0, lastDy: 0, orig: new Map(items.map((o) => [o.uid, { x: o.x, y: o.y }])) };
     } else {
       if (!e.ctrlKey) app.selection.clear();
+      app.stampSelection = true;
       this.drag = { kind: 'band', x0: px, y0: py, x1: px, y1: py, add: e.ctrlKey };
       app.emit('change');
     }

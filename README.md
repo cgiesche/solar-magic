@@ -67,7 +67,8 @@ When a level is displayed, it runs the ROM's **original loading routines** (~15 
   (picked from the level or layer 3's 2bpp tiles), palette, priority, flips and erase; saved into the level's
   layer 3 tilemap file (LT3, a new one when it has none).
 * Objects: select (also by rectangle, Ctrl+click), move (mouse/arrow keys), resize via handle/keys,
-  insert (right-click/Shift+click with a palette entry), delete, copy/paste/duplicate,
+  insert (right-click/Shift+click with a palette entry; after selecting in the level, a copy of the selection),
+  delete, copy/paste/duplicate,
   drawing order (PgUp/PgDn), undo/redo.
 * Palette: standard objects 01–3F, extended objects, **direct Map16 placement** (any tile, see patch),
   sprites with names and real graphics, including custom sprites (PIXI) with their extra bytes in the properties.

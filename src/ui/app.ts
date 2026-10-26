@@ -141,7 +141,11 @@ export class App {
   private editMode: EditMode = 'l1';
   get mode(): EditMode { return this.editMode; }
   selection = new Set<number>();
-  paletteItem: PaletteItem | null = null;
+  // what a right click in the level places: the palette item, or – picked in the level after it – a copy of the selection
+  private palette: PaletteItem | null = null;
+  get paletteItem(): PaletteItem | null { return this.palette; }
+  set paletteItem(p: PaletteItem | null) { this.palette = p; this.stampSelection = false; }
+  stampSelection = false;
   // BG mode brush: a w×h block of BG Map16 tiles (row-major), picked from the palette sheet or the level
   bgBrush: Brush = { w: 1, h: 1, tiles: [0] };
   l3Brush: Brush = { w: 1, h: 1, tiles: [0] }; // layer 3 tilemap words
@@ -1562,8 +1566,16 @@ export class App {
     else this.clipboard = { objects: structuredClone(this.selectedObjects()) };
   }
   paste(tx: number, ty: number): void {
-    const items = this.mode === 'spr' ? this.clipboard.sprites : this.clipboard.objects;
-    if (!items?.length) return;
+    this.placeCopy((this.mode === 'spr' ? this.clipboard.sprites : this.clipboard.objects) ?? [], tx, ty);
+  }
+  // a right click in the level: a copy of the selection when it was picked after the palette item, else the palette item
+  placeAt(tx: number, ty: number): void {
+    if (this.stampSelection && this.selection.size) this.placeCopy(this.mode === 'spr' ? this.selectedSprites() : this.selectedObjects(), tx, ty);
+    else this.insertAt(tx, ty);
+  }
+  // copies of the items with their upper left at tile (tx, ty), selected
+  private placeCopy(items: (LevelObject | LevelSprite)[], tx: number, ty: number): void {
+    if (!items.length) return;
     this.editLevel(() => {
       const minX = Math.min(...items.map((o) => o.x)), minY = Math.min(...items.map((o) => o.y));
       const sel = new Set<number>();
