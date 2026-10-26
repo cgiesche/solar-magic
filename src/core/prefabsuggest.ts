@@ -18,7 +18,7 @@ import { findPrefabPlaces, type Layer, type LevelPlaces } from './prefabplaces.t
 export interface PrefabSuggestion {
   key: string; // the arrangement (arrangementKey)
   prefab: Prefab; // its tiles, without a name
-  places: LevelPlaces[]; // where it is (planPrefabPlaces)
+  places: LevelPlaces[]; // where it is (findPrefabPlaces in each level)
   count: number; // how many places
   levels: number[]; // the levels of the places, ascending
   saved: number; // level data bytes saved by replacing all places, the prefab's ROM cost taken off

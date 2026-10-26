@@ -12,6 +12,7 @@ import { buildExitPanel } from './exitpanel.ts';
 import { DM16_EXT } from '../core/patches.ts';
 import { PREFAB_EXT, TRANSPARENT, freePrefabNumber, readPrefab, writePrefab, PREFAB_COUNT, type Prefab } from '../core/prefabs.ts';
 import { prefabCost } from '../core/prefabcost.ts';
+import type { LevelPlaces } from '../core/prefabplaces.ts';
 import { EXT_TILES } from '../core/map16ext.ts';
 import { COND_FLAGS, COND_ADD, condByte, flagRam, isDm16, type Dm16Cond } from '../core/cdm16.ts';
 import { TileCache, map16Source, drawMap16 } from '../core/render.ts';
@@ -388,7 +389,7 @@ export class Palette {
       const lvs = sg.levels.length > 4 ? `${sg.levels.slice(0, 4).map(hex3).join(', ')} +${sg.levels.length - 4}` : sg.levels.map(hex3).join(', ');
       box.appendChild(h('div', {
         class: 'pal-row', title: `${sg.count} places of these Direct Map16 objects in level ${sg.levels.map(hex3).join(', ')}: save as prefab and replace them all`,
-        onclick: () => openSavePrefab(app, sg.prefab),
+        onclick: () => openSavePrefab(app, { prefab: sg.prefab, places: app.suggestionsCurrent ? sg.places : undefined }),
       }, h('span', { class: 'pal-thumb-s prefab' }, prefabCanvas(sheet, sg.prefab)),
         h('span', { class: 'grow' }, `${sg.count}× in level ${lvs}`, h('span', { class: 'hint' }, ` saves ${sg.saved} byte${sg.saved === 1 ? '' : 's'}`))));
     }
@@ -775,8 +776,10 @@ export function prefabCanvas(tile: (t: number) => HTMLCanvasElement | null, st: 
   return c;
 }
 
-// the selected objects (or arrangement from, a suggestion's) as a new prefab, or over an existing one
-export function openSavePrefab(app: App, from?: Prefab): void {
+// the selected objects as a new prefab, or over an existing one; or a suggestion's arrangement (from), with its
+// places when they are current (else found anew)
+export function openSavePrefab(app: App, sug?: { prefab: Prefab; places?: LevelPlaces[] }): void {
+  const from = sug?.prefab;
   const r = from ?? app.prefabFromSelection();
   if (typeof r === 'string') { toast(r, 'error'); return; }
   const free = freePrefabNumber(app.rom);
@@ -802,7 +805,7 @@ export function openSavePrefab(app: App, from?: Prefab): void {
   };
   name.addEventListener('input', updCost);
   // the same arrangement elsewhere as Direct Map16 objects (prefabplaces.ts), replaced on request
-  const places = app.prefabPlaces({ ...r, name: '' }, !!from);
+  const places = sug?.places ?? app.prefabPlaces({ ...r, name: '' }, !!from);
   const found = places.reduce((k, p) => k + p.places.length, 0);
   const saved = places.reduce((k, p) => k + p.places.reduce((b, q) => b + q.bytes, 0), 0);
   const replaceAll = h('input', { type: 'checkbox', checked: !!from });

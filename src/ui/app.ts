@@ -186,6 +186,7 @@ export class App {
   // repeated arrangements of Direct Map16 objects across the levels (prefabsuggest.ts), found in the background
   // a while after the last change; null while not known yet
   prefabSuggestions: PrefabSuggestion[] | null = null;
+  suggestionsCurrent = false; // they are of the levels and the ROM as they are now (their places can be taken)
   private suggestTimer = 0;
   private suggestRun = 0;
   // tile (x,y) lookup from map offset
@@ -1491,15 +1492,7 @@ export class App {
       if (!here) plan.push(here = { level: open, places: [] });
       here.places.push(selection);
     }
-    const found = places.reduce((k, p) => k + p.places.length, 0);
-    try {
-      this.romEdit(`Prefab ${hex(n, 2)} saved${found ? `, ${found} place${found > 1 ? 's' : ''} replaced` : ''}`, () => {
-        // (the plan's objects are the open level's as edited: saved before the ROM edit)
-        if (plan.some((p) => p.level === open) && this.dirty) throw new Error(`Level ${hex(open, 3)} could not be saved`);
-        writePrefab(this.rom, n, { w: r.w, h: r.h, tiles: r.tiles, ...(r.conds ? { conds: r.conds } : {}), name });
-        applyPrefabPlaces(this.rom, n, plan);
-      });
-    } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); return false; }
+    if (!this.storePrefab(n, { w: r.w, h: r.h, tiles: r.tiles, ...(r.conds ? { conds: r.conds } : {}), name }, plan, places)) return false;
     if (replace && plan.length) {
       // the open level was loaded again: the prefab object where the selection's last object was, after the
       // objects replaced before it
@@ -1516,17 +1509,10 @@ export class App {
 
   // stores arrangement s (a suggestion's) as prefab n, its places (prefabPlaces) replaced in the same ROM edit
   saveArrangementAsPrefab(n: number, s: Prefab, places: LevelPlaces[]): boolean {
-    const found = places.reduce((k, p) => k + p.places.length, 0);
-    try {
-      this.romEdit(`Prefab ${hex(n, 2)} saved${found ? `, ${found} place${found > 1 ? 's' : ''} replaced` : ''}`, () => {
-        if (places.some((p) => p.level === this.level.number) && this.dirty) throw new Error(`Level ${hex(this.level.number, 3)} could not be saved`);
-        writePrefab(this.rom, n, s);
-        applyPrefabPlaces(this.rom, n, places);
-      });
-    } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); return false; }
-    // (found again in the background; until then not offered any more)
+    if (!this.storePrefab(n, s, places, places)) return false;
+    // its places replaced: not offered any more (the next background run doesn't find it either)
     const key = arrangementKey(s);
-    if (this.prefabSuggestions?.some((q) => q.key === key)) {
+    if (places.length && this.prefabSuggestions?.some((q) => q.key === key)) {
       this.prefabSuggestions = this.prefabSuggestions.filter((q) => q.key !== key);
       this.emit('prefab-suggestions');
     }
@@ -1534,9 +1520,24 @@ export class App {
     return true;
   }
 
+  // prefab n as s and plan's objects replaced by it, one ROM edit labelled with the places found elsewhere
+  private storePrefab(n: number, s: Prefab, plan: LevelGroups[], places: LevelPlaces[]): boolean {
+    const open = this.level.number, found = places.reduce((k, p) => k + p.places.length, 0);
+    try {
+      this.romEdit(`Prefab ${hex(n, 2)} saved${found ? `, ${found} place${found > 1 ? 's' : ''} replaced` : ''}`, () => {
+        // (the plan's objects are the open level's as edited: saved before the ROM edit)
+        if (plan.some((p) => p.level === open) && this.dirty) throw new Error(`Level ${hex(open, 3)} could not be saved`);
+        writePrefab(this.rom, n, s);
+        applyPrefabPlaces(this.rom, n, plan);
+      });
+      return true;
+    } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); return false; }
+  }
+
   // the suggestions anew a while after the last change, in slices of background work (later)
   private scheduleSuggestions(): void {
     clearTimeout(this.suggestTimer);
+    this.suggestionsCurrent = false;
     const run = ++this.suggestRun;
     this.suggestTimer = window.setTimeout(() => {
       if (run !== this.suggestRun || this.closed) return;
@@ -1553,6 +1554,7 @@ export class App {
         while (!r.done && performance.now() < until) r = steps.next();
         if (!r.done) { this.later('prefab-suggest', step); return; }
         this.prefabSuggestions = r.value;
+        this.suggestionsCurrent = true;
         this.emit('prefab-suggestions');
       };
       this.later('prefab-suggest', step);

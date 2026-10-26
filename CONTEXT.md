@@ -45,7 +45,7 @@ An extended object (object 00 with its number as an extra byte, 10–FF in the p
 _Avoid_: extended object (for the palette's grouping), ext object
 
 **Prefab**:
-A reusable block of Map16 tiles (at most 64x64, cells may be transparent, tiles may be conditional) stored in the ROM under a number 00–FF and placed in a level as one object, extended object $04 with the number as 4th byte (prefabs.ts, the editor patch SMWS). Made from the selected objects; a change to it applies in every level that places it, "Break up" turns a placed one back into Direct Map16 objects. A `.smwlevel` file carries the prefabs its level uses.
+A reusable block of Map16 tiles (at most 64x64, cells may be transparent, tiles may be conditional) stored in the ROM under a number 00–FF and placed in a level as one object, extended object $04 with the number as 4th byte (prefabs.ts, the editor patch SMWS). Made from the selected objects, or from a suggestion (prefabsuggest.ts: an arrangement of Direct Map16 objects repeated across the levels that a prefab would make smaller, with all its places replaced); a change to it applies in every level that places it, "Break up" turns a placed one back into Direct Map16 objects. A `.smwlevel` file carries the prefabs its level uses.
 _Avoid_: structure (the old name), custom object (ObjecTool's ASM objects), stamp (that is the Map16 builder's), collection (Lunar Magic's Custom Collections of Objects are copies without a link)
 
 **Level edit**:
