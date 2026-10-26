@@ -1,6 +1,7 @@
 // The hint to save a prefab after pasting the same Direct Map16 objects repeatedly (App.pasteHint, #115): a
 // small box beside the level that never blocks editing; its button opens "Selection as prefab" for the pasted
-// objects, ✕ hides it for that arrangement. Opening another level hides it.
+// objects (and the arrangement is not suggested again), ✕ hides it for that arrangement. Opening another level
+// or the pasted objects going (undo) hides it.
 import type { App } from './app.ts';
 import { h, toast } from './dom.ts';
 import { openSavePrefab } from './panels.ts';
@@ -10,9 +11,9 @@ export function pasteHintBox(app: App): HTMLElement {
   const save = h('button', {
     class: 'primary', title: 'Open “Selection as prefab” with the pasted objects selected',
     onclick: () => {
-      if (!app.selectPasteHint()) { toast('The pasted objects are no longer in the level.', 'error'); app.setPasteHint(null); return; }
-      app.setPasteHint(null);
-      openSavePrefab(app);
+      const ok = app.selectPasteHint();
+      app.dismissPasteHint();
+      if (ok) openSavePrefab(app); else toast('The pasted objects are no longer in the level.', 'error');
     },
   }, 'Save as prefab …');
   const dismiss = h('button', { class: 'icon-btn', title: 'Don’t suggest this again for these objects', 'aria-label': 'Dismiss', onclick: () => app.dismissPasteHint() }, '✕');
@@ -22,6 +23,8 @@ export function pasteHintBox(app: App): HTMLElement {
     el.classList.toggle('show', !!p);
     if (p) text.textContent = `Placed ${p.count} times – save as prefab? Saves ${p.saved} byte${p.saved === 1 ? '' : 's'}, edits apply everywhere.`;
   });
-  app.on('level', () => { if (app.pasteHint && app.pasteHint.level !== app.level.number) app.setPasteHint(null); });
+  const gone = () => { if (app.pasteHint && !app.pasteHintObjects()) app.setPasteHint(null); };
+  app.on('level', gone);
+  app.on('change', gone);
   return el;
 }

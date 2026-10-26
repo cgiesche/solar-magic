@@ -17,7 +17,7 @@ import { gfxSkipMask, gfxFilesHash } from '../core/gfxpages.ts';
 import { flagBytes, usedFlags, isDm16, dm16Tiles, type Dm16Cond } from '../core/cdm16.ts';
 import { PREFAB_EXT, PREFAB_MAX, TRANSPARENT, listPrefabs, readPrefab, writePrefab, type Prefab } from '../core/prefabs.ts';
 import { prefabDm16Objects } from '../core/prefabcost.ts';
-import { PasteCounter, type PasteHint } from '../core/pastehint.ts';
+import { PasteCounter, findPasted, type PasteHint } from '../core/pastehint.ts';
 import { planPrefabPlaces, applyPrefabPlaces, replaceWithPrefab, type LevelPlaces, type LevelGroups, type PrefabGroup } from '../core/prefabplaces.ts';
 import type { Package } from '../core/pkgreg.ts';
 import { kvEntries, kvWrite, saveRom } from './storage.ts';
@@ -98,6 +98,9 @@ export type AppEvent =
   | 'open-map16' // the graphics workspace opens on the Map16 tab
   | 'import-gfx'; // the graphics workspace imports App.gfxImport
 
+// the hint to save a paste as prefab (pastehint.ts): the paste's objects as placed in level, layer
+export type PasteHintAt = PasteHint & { level: number; layer: 'l1' | 'l2'; objects: LevelObject[] };
+
 const CACHE_PREFIX = 'rc3:'; // IndexedDB keys of the result cache (bump when result formats change or old results may be wrong: rc3 after the stale boot snapshot fix)
 
 // the 8x8 tiles (layer 1 tile numbers) and colors that change in level n (ov) over 16 times 4 frames (none
@@ -177,7 +180,7 @@ export class App {
   // the arrangements of Direct Map16 objects pasted in the session (pastehint.ts); the hint to save the last
   // paste (its objects as placed in level/layer) as prefab, until it is dismissed or another level is opened
   private pastes = new PasteCounter();
-  pasteHint: (PasteHint & { level: number; layer: 'l1' | 'l2'; objects: LevelObject[] }) | null = null;
+  pasteHint: PasteHintAt | null = null;
   // tile (x,y) lookup from map offset
   offsetToTile1 = new Int32Array(MAP_SIZE);
   offsetToTile2 = new Int32Array(MAP_SIZE);
@@ -1601,7 +1604,7 @@ export class App {
     const hint = this.pastes.paste(pasted);
     if (hint) this.setPasteHint({ ...hint, level: this.level.number, layer: this.mode, objects: structuredClone(pasted) });
   }
-  setPasteHint(h: App['pasteHint']): void {
+  setPasteHint(h: PasteHintAt | null): void {
     this.pasteHint = h;
     this.emit('paste-hint');
   }
@@ -1610,16 +1613,16 @@ export class App {
     if (this.pasteHint) this.pastes.dismiss(this.pasteHint.key);
     this.setPasteHint(null);
   }
-  // selects the hint's pasted objects (found by what they are: a saved level is loaded anew); false when they
-  // are no longer in the open level
-  selectPasteHint(): boolean {
+  // the hint's pasted objects in the open level (uids), or null when they are no longer there (undone, removed)
+  pasteHintObjects(): number[] | null {
     const p = this.pasteHint;
-    if (!p || p.level !== this.level.number) return false;
-    const objs = (p.layer === 'l2' ? this.level.layer2Objects : this.level.objects) ?? [];
-    const same = (a: LevelObject, b: LevelObject) => a.num === b.num && a.ext === b.ext && a.x === b.x && a.y === b.y && a.size === b.size
-      && a.tile === b.tile && JSON.stringify(a.cond ?? null) === JSON.stringify(b.cond ?? null);
-    const uids = p.objects.map((o) => objs.find((q) => same(o, q))?.uid);
-    if (!uids.every((u) => u !== undefined)) return false;
+    if (!p || p.level !== this.level.number) return null;
+    return findPasted((p.layer === 'l2' ? this.level.layer2Objects : this.level.objects) ?? [], p.objects);
+  }
+  // selects the hint's pasted objects; false when they are no longer in the open level
+  selectPasteHint(): boolean {
+    const p = this.pasteHint, uids = this.pasteHintObjects();
+    if (!p || !uids) return false;
     if (this.mode !== p.layer) this.setMode(p.layer, uids);
     else { this.selection = new Set(uids); this.emit('change'); }
     return true;

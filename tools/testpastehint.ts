@@ -5,7 +5,7 @@ import { newUid, type LevelObject } from '../src/core/level.ts';
 import { DM16_EXT } from '../src/core/patches.ts';
 import { PREFAB_EXT, PREFAB_MAX, TRANSPARENT } from '../src/core/prefabs.ts';
 import { prefabCost, objectBytes } from '../src/core/prefabcost.ts';
-import { PasteCounter, dm16Prefab } from '../src/core/pastehint.ts';
+import { PasteCounter, dm16Prefab, findPasted } from '../src/core/pastehint.ts';
 
 let fail = 0;
 const check = (ok: boolean, what: string) => { if (!ok) { fail++; console.log('FAIL', what); } };
@@ -66,6 +66,19 @@ check(dm16Prefab([dm(0, 0, 0x130), dm(PREFAB_MAX, 0, 0x130)]) === null, 'wider t
   const pc = new PasteCounter();
   const mixed = () => [...block(0, 0), { uid: newUid(), num: 5, ext: 0, x: 0, y: 0, size: 0 }];
   check([0, 1, 2, 3].every(() => pc.paste(mixed()) === null), 'with a standard object: no hint');
+}
+
+// the pasted objects found again by what they are (the level saved and loaded anew gives new uids): the later
+// of equal objects, each once; none when one is gone
+{
+  const orig = block(0, 0), copy = block(0, 0); // stamped exactly over the original
+  const twice = [dm(9, 9, 0x130), dm(9, 9, 0x130)];
+  const lv = [...orig, dm(3, 3, 0x200), ...copy, ...twice].map((o) => ({ ...o, uid: newUid() }));
+  const got = findPasted(lv, copy);
+  check(JSON.stringify(got) === JSON.stringify(lv.slice(10, 19).map((o) => o.uid)), 'over the original: the pasted copies');
+  check(new Set(findPasted(lv, twice)).size === 2, 'equal objects in one paste: each its own');
+  check(findPasted(lv.slice(0, 10), [...copy, dm(0x30, 0, 0x100)]) === null, 'one gone: null');
+  check(findPasted(lv, [dm(0, 0, 0x100, 1, 1, { flag: 1, always: false })]) === null, 'another condition: not the same');
 }
 
 console.log(fail ? `${fail} failures` : 'paste hint ok');

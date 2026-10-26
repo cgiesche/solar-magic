@@ -31,6 +31,23 @@ export function dm16Prefab(objs: LevelObject[]): Prefab | null {
   return { w, h, tiles, ...(conds.some((c) => c) ? { conds } : {}), name: '' };
 }
 
+// the pasted objects as they are now in objs (a level saved is loaded anew, with new uids): the last object
+// not yet taken that is the same for each (pasted objects come after what they were placed over); null when
+// one is gone
+export function findPasted(objs: LevelObject[], pasted: LevelObject[]): number[] | null {
+  const same = (a: LevelObject, b: LevelObject) => a.num === b.num && a.ext === b.ext && a.x === b.x && a.y === b.y && a.size === b.size
+    && a.tile === b.tile && a.cond?.flag === b.cond?.flag && a.cond?.always === b.cond?.always;
+  const taken = new Set<number>(), out: number[] = [];
+  for (const p of pasted) {
+    let o: LevelObject | undefined;
+    for (let i = objs.length - 1; i >= 0 && !o; i--) if (!taken.has(objs[i].uid) && same(p, objs[i])) o = objs[i];
+    if (!o) return null;
+    taken.add(o.uid);
+    out.push(o.uid);
+  }
+  return out;
+}
+
 export class PasteCounter {
   private pasted = new Map<string, { count: number; bytes: number }>();
   private dismissed = new Set<string>();
