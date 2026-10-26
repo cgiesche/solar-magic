@@ -36,6 +36,14 @@ _Avoid_: selected quarter (the sheet's selection is of whole tiles)
 A Direct Map16 object, or a tile of a prefab, that depends on a flag of Lunar Magic's table at $7FC060–F (set by the user's own code, e.g. UberASM): drawn only while the flag is on, or with "always show" always, its tiles + 0x100 while it is on (cdm16.ts). The view's flags are a view setting that test play takes over, not part of the level.
 _Avoid_: CDM16 (in the UI), switch object
 
+**Resizable object**:
+A standard object of the game (01–3F): its size (or type) is part of the object, so one object covers a whole area. The palette's Objects tab lists them under "Resizable".
+_Avoid_: standard object (in the UI), normal object
+
+**Fixed-size object**:
+An extended object (object 00 with its number as an extra byte, 10–FF in the palette): it always looks the same, a size is not part of it. The palette's Objects tab lists them under "Fixed size"; "extended object" names its encoding only (by number: "Insert by number", the properties, the ROM format). Direct Map16 ($05) and prefabs ($04) are extended objects too, but are neither listed nor called fixed-size objects.
+_Avoid_: extended object (for the palette's grouping), ext object
+
 **Prefab**:
 A reusable block of Map16 tiles (at most 64x64, cells may be transparent, tiles may be conditional) stored in the ROM under a number 00–FF and placed in a level as one object, extended object $04 with the number as 4th byte (prefabs.ts, the editor patch SMWS). Made from the selected objects; a change to it applies in every level that places it, "Break up" turns a placed one back into Direct Map16 objects. A `.smwlevel` file carries the prefabs its level uses.
 _Avoid_: structure (the old name), custom object (ObjecTool's ASM objects), stamp (that is the Map16 builder's), collection (Lunar Magic's Custom Collections of Objects are copies without a link)
