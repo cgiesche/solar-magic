@@ -25,6 +25,7 @@ export interface PrefabPlace extends PrefabGroup {
   bytes: number; // level data bytes saved: the objects found against one prefab object
 }
 export interface LevelPlaces { level: number; places: PrefabPlace[] }
+export interface LevelGroups { level: number; places: PrefabGroup[] }
 
 const ALL_FLAGS = flagBytes(Array.from({ length: COND_FLAGS }, (_, f) => f));
 const keyOf = (tile: number, cond: Dm16Cond | null | undefined) => `${tile} ${cond ? `${cond.flag} ${cond.always}` : ''}`;
@@ -132,7 +133,7 @@ export function replaceWithPrefab(lv: Level, n: number, groups: PrefabGroup[]): 
 
 // replaces the planned places with prefab n in the levels as saved (an open level with changes is saved
 // before, by the ROM edit)
-export function applyPrefabPlaces(rom: Rom, n: number, plan: LevelPlaces[]): void {
+export function applyPrefabPlaces(rom: Rom, n: number, plan: LevelGroups[]): void {
   for (const p of plan) {
     const lv = loadLevel(rom, p.level);
     replaceWithPrefab(lv, n, p.places);

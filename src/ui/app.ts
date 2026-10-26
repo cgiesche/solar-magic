@@ -17,7 +17,7 @@ import { gfxSkipMask, gfxFilesHash } from '../core/gfxpages.ts';
 import { flagBytes, usedFlags, isDm16, dm16Tiles, type Dm16Cond } from '../core/cdm16.ts';
 import { PREFAB_EXT, PREFAB_MAX, TRANSPARENT, listPrefabs, readPrefab, writePrefab, type Prefab } from '../core/prefabs.ts';
 import { prefabDm16Objects } from '../core/prefabcost.ts';
-import { planPrefabPlaces, applyPrefabPlaces, type LevelPlaces } from '../core/prefabplaces.ts';
+import { planPrefabPlaces, applyPrefabPlaces, replaceWithPrefab, type LevelPlaces, type LevelGroups, type PrefabGroup } from '../core/prefabplaces.ts';
 import type { Package } from '../core/pkgreg.ts';
 import { kvEntries, kvWrite, saveRom } from './storage.ts';
 import { ResultCache, RomFingerprint, type CacheEntry } from '../core/romdeps.ts';
@@ -1454,27 +1454,36 @@ export class App {
 
   // stores the selection as prefab n; replace: the selected objects become one prefab object (at the place of
   // the last of them in the object list, so objects in between still cover it); places (prefabPlaces): replaced
-  // too. One ROM edit.
+  // too, with the prefab and the selection in one ROM edit (else the selection is a level edit after it)
   saveSelectionAsPrefab(n: number, name: string, replace: boolean, places: LevelPlaces[] = []): boolean {
     const r = this.prefabFromSelection();
     if (typeof r === 'string') { toast(r, 'error'); return false; }
     const open = this.level.number, layer = this.mode === 'l2' ? 2 : 1;
-    const plan = places.map((p) => ({ ...p, places: [...p.places] }));
-    if (replace) {
+    const selection: PrefabGroup = { layer, x: r.x, y: r.y, objects: this.selectedIndices() };
+    const plan: LevelGroups[] = places.map((p) => ({ level: p.level, places: [...p.places] }));
+    if (replace && plan.length) {
       let here = plan.find((p) => p.level === open);
       if (!here) plan.push(here = { level: open, places: [] });
-      here.places.push({ layer, x: r.x, y: r.y, objects: this.selectedIndices(), bytes: 0 });
+      here.places.push(selection);
     }
     const found = places.reduce((k, p) => k + p.places.length, 0);
     try {
       this.romEdit(`Prefab ${hex(n, 2)} saved${found ? `, ${found} place${found > 1 ? 's' : ''} replaced` : ''}`, () => {
+        // (the plan's objects are the open level's as edited: saved before the ROM edit)
+        if (plan.some((p) => p.level === open) && this.dirty) throw new Error(`Level ${hex(open, 3)} could not be saved`);
         writePrefab(this.rom, n, { w: r.w, h: r.h, tiles: r.tiles, ...(r.conds ? { conds: r.conds } : {}), name });
         applyPrefabPlaces(this.rom, n, plan);
       });
     } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); return false; }
-    if (replace) {
-      const o = this.currentObjects().find((o) => o.num === 0 && o.ext === PREFAB_EXT && o.prefab === n && o.x === r.x && o.y === r.y);
+    if (replace && plan.length) {
+      // the open level was loaded again: the prefab object where the selection's last object was, after the
+      // objects replaced before it
+      const last = Math.max(...selection.objects), gs = plan.find((p) => p.level === open)!.places.filter((g) => g.layer === layer);
+      const at = last + 1 - gs.flatMap((g) => g.objects).filter((i) => i <= last).length + gs.filter((g) => Math.max(...g.objects) < last).length;
+      const o = this.currentObjects()[at];
       if (o) { this.selection = new Set([o.uid]); this.emit('change'); }
+    } else if (replace) {
+      this.editLevel((lv) => { this.selection = new Set(replaceWithPrefab(lv, n, [selection]).map((o) => o.uid)); });
     }
     this.paletteItem = { kind: 'obj', num: 0, ext: PREFAB_EXT, size: 0, prefab: n };
     return true;

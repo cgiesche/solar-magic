@@ -38,6 +38,7 @@ const load = (n: number, ov = {}) => emu.load(n, ov);
 
 const H1 = 0x105, H2 = 0x106;
 const V = usedLevels(rom).find((n) => isL1Vertical(rom, loadLevel(rom, n).header.mode))!;
+const L2 = usedLevels(rom).find((n) => loadLevel(rom, n).layer2Objects)!; // a level with layer 2 objects
 {
   const lv = loadLevel(rom, H1);
   const pre = lv.objects.length;
@@ -66,6 +67,14 @@ const V = usedLevels(rom).find((n) => isL1Vertical(rom, loadLevel(rom, n).header
   saveLevel(rom, lv);
 }
 {
+  // layer 2: as Break up places it; split around a coin drawn over (a place) and one on top (none)
+  const lv = loadLevel(rom, L2);
+  const [a, b, c, d, e] = singles(0x30, 7);
+  const [f, g, i, j, k] = singles(0x40, 7);
+  lv.layer2Objects!.push(...prefabDm16Objects(s, 0x22, 8), a, b, c, coin(0x30, 7), d, e, f, g, coin(0x41, 8), i, j, k);
+  saveLevel(rom, lv);
+}
+{
   // the coin of G is where the test means it: written by it, at a tile of the prefab
   const lv = loadLevel(rom, H2);
   const r = load(H2, levelOverride(rom, lv));
@@ -80,7 +89,8 @@ const xs = (n: number) => at(n).map((p) => `${p.x.toString(16)},${p.y.toString(1
 check(JSON.stringify(xs(H1)) === JSON.stringify(['22,8', '2e,6']), `level 105: A and B, not C–F (${xs(H1)})`);
 check(JSON.stringify(xs(H2)) === JSON.stringify(['30,7']), `level 106: G, not I (${xs(H2)})`);
 check(JSON.stringify(xs(V)) === JSON.stringify(['e,1f']), `vertical level ${V.toString(16)} (${xs(V)})`);
-check(plan.every((p) => [H1, H2, V].includes(p.level)), 'no other level');
+check(JSON.stringify(xs(L2)) === JSON.stringify(['22,8', '30,7']) && at(L2).every((p) => p.layer === 2), `layer 2 of level ${L2.toString(16)} (${xs(L2)})`);
+check(plan.every((p) => [H1, H2, V, L2].includes(p.level)), 'no other level');
 // the bytes saved: the objects found (B: four of 6 bytes, one of 7 with its condition) against 4
 const b = at(H1).find((p) => p.x === 0x2e)!;
 check(b.objects.length === 5 && b.bytes === 4 * 6 + 7 - 4, `B saves ${b.bytes}`);
@@ -108,7 +118,7 @@ const look = (n: number, flags: number[]) => {
   return [r.wram.slice(MAP[0], MAP[1]), r.wram.slice(MAP[0] + 0x10000, MAP[1] + 0x10000)];
 };
 const same = (x: Uint8Array[], y: Uint8Array[]) => x.every((b, i) => b.every((v, j) => v === y[i][j]));
-const levels = [H1, H2, V];
+const levels = [H1, H2, V, L2];
 const before = levels.map((n) => [look(n, []), look(n, [3])]);
 const image = rom.data.slice();
 const session = new EditSession(rom);
@@ -116,7 +126,7 @@ session.open(H1);
 session.romEdit('Prefab saved', () => { writePrefab(rom, N, s); applyPrefabPlaces(rom, N, plan); });
 levels.forEach((n, k) => {
   check(same(before[k][0], look(n, [])) && same(before[k][1], look(n, [3])), `level ${n.toString(16)} looks the same`);
-  const objs = loadLevel(rom, n).objects;
+  const lv = loadLevel(rom, n), objs = [...lv.objects, ...(lv.layer2Objects ?? [])];
   check(objs.filter((o) => o.num === 0 && o.ext === PREFAB_EXT && o.prefab === N).length === at(n).length, `level ${n.toString(16)}: ${at(n).length} prefab objects`);
 });
 // the rest of level 105 stays: C–F
