@@ -1353,6 +1353,8 @@ export class App {
   insertAt(tx: number, ty: number, p: PaletteItem | null = this.paletteItem): void {
     if (!p) { toast('Choose an object/sprite in the palette first.'); return; }
     this.editLevel(() => this.insert(tx, ty, p));
+    // the placed item is selected: changed (resized, …), the next right click copies it as it is now
+    this.stampSelection = true;
   }
   private insert(tx: number, ty: number, p: PaletteItem): boolean {
     if (p.kind === 'obj' && (this.mode === 'l1' || this.mode === 'l2')) {
