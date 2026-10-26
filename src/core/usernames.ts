@@ -1,8 +1,9 @@
 // The user's names of things, so they are easy to find later: for now FG and BG Map16 tiles; other kinds
-// (graphics files, levels …) are meant to join as further kinds. One name per thing at most, several
-// things may share one (a multi-tile thing is named by naming all its tiles). Editor data, not part of the
-// ROM image: kept with the working ROM and the project file, never in the playable ROM. One entry holding
-// JSON: { v, kinds: { kind: { number in hex: name } } }. The caller makes the change one ROM edit.
+// (graphics files, levels …) are meant to join as further kinds (the graphics files' names are still the
+// ROM's, gfxnames.ts). One name per thing at most, several things may share one (a multi-tile thing is
+// named by naming all its tiles). Editor data, not part of the ROM image: kept with the working ROM and the
+// project file, never in the playable ROM. One entry holding JSON: { v, kinds: { kind: { number in hex:
+// name } } }. The caller makes the change one ROM edit.
 
 import type { Rom } from './rom.ts';
 

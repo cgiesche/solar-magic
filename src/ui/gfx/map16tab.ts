@@ -35,7 +35,7 @@ import { remapEditor, type RemapEditor } from '../remaplist.ts';
 import { planMove, applyMove, planRemap, rectMap, type MovePlan, type MoveSource } from '../../core/tilemove.ts';
 import { levelSource, planList, openRemapUses } from '../tileuses.ts';
 import { loadAsar } from '../../core/asar.ts';
-import { NAME_MAX, namesOf, setName, cleanName } from '../../core/usernames.ts';
+import { NAME_MAX, namesOf, setName, cleanName, type NameKind } from '../../core/usernames.ts';
 import { QuarterGrid, markRect, editMarked, setPalette, setBit, setTileNum, stamp, mirror, summary, wholeTiles, FLIP_X, FLIP_Y, PRIO, type QuarterEdit, type MarkMode, type BitState } from '../../core/quarters.ts';
 
 const Z = 2; // sheet zoom
@@ -108,13 +108,16 @@ export class Map16Tab implements WsPanel {
   private scrollPending = false; // selected while hidden: scroll there when shown
   private builder = h('div', { class: 'mt-builder' });
   private builderCol = h('div', { class: 'mt-col mt-builder-col' }, this.builder);
-  private bHead = h('div', { class: 'mt-builder mt-builder-ctl' });
+  private bInfo = h('div');
+  private bMarks = h('div');
   private bCtl = h('div', { class: 'mt-builder mt-builder-ctl' });
   private qInfo = h('div', { class: 'hint' });
   // the selection's name (F2); kept while it has the focus, so a redraw does not take what is typed
   private nameInput = h('input', { type: 'text', size: 1, maxLength: NAME_MAX, spellcheck: false, autocomplete: 'off',
     title: 'A name to find the tiles by later; all selected tiles get it, empty removes it (F2) – kept in the project file, not in the ROM' });
-  private naming: { bg: boolean; tiles: number[]; was: string } | null = null; // the tiles the field names while it has the focus
+  private naming: { kind: NameKind; tiles: number[]; was: string } | null = null; // the tiles the field names while it has the focus
+  // the builder's head; only its parts are rebuilt, so the name field keeps the focus
+  private bHead = h('div', { class: 'mt-builder mt-builder-ctl' }, this.bInfo, h('div', { class: 'row mt-name' }, h('span', { class: 'hint' }, 'Name'), this.nameInput), this.bMarks);
   private bigCanvas = h('canvas', { class: 'mt-big' });
   private bigScroll = h('div', { class: 'mt-big-scroll' }, this.bigCanvas);
   private gfxTitle = h('div', { class: 'panel-title' });
@@ -197,13 +200,14 @@ export class Map16Tab implements WsPanel {
     const r = this.app.render;
     return new TileCache(r.vram, r.cgram, (this.bg ? r.ppuRegs[0x0b] >> 4 : r.ppuRegs[0x0b] & 0x0f) << 13);
   }
-  private tileName(t: number): string {
+  private kind(): NameKind { return this.bg ? 'bg' : 'fg'; }
+  private tileTitle(t: number): string {
     return `${this.bg ? 'BG' : 'FG'} tile ${hex(t, 3)}`;
   }
 
   // the selection's shared name ('' : none), null: the tiles have different ones
   private selName(): string | null {
-    const names = namesOf(this.app.rom, this.bg ? 'bg' : 'fg');
+    const names = namesOf(this.app.rom, this.kind());
     const all = new Set(this.selection().map((t) => names.get(t) ?? ''));
     return all.size === 1 ? [...all][0] : null;
   }
@@ -213,10 +217,10 @@ export class Map16Tab implements WsPanel {
     this.nameInput.value = v ?? '';
     this.nameInput.placeholder = v === null ? 'Several names' : 'No name';
   }
-  // the field names the tiles selected when it got the focus (a click on the sheet blurs it after selecting)
+  // the field names the tiles selected when it got the focus
   private attachName(): void {
     const f = this.nameInput;
-    f.addEventListener('focus', () => { this.naming = { bg: this.bg, tiles: this.selection(), was: f.value }; });
+    f.addEventListener('focus', () => { this.naming = { kind: this.kind(), tiles: this.selection(), was: f.value }; });
     f.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); f.blur(); }
       if (e.key === 'Escape') { e.preventDefault(); if (this.naming) f.value = this.naming.was; f.blur(); }
@@ -224,16 +228,16 @@ export class Map16Tab implements WsPanel {
     f.addEventListener('blur', () => {
       const n = this.naming;
       this.naming = null;
-      if (n && f.value !== n.was) this.rename(n.bg, n.tiles, f.value);
+      if (n && f.value !== n.was) this.rename(n.kind, n.tiles, f.value);
       this.showName();
     });
   }
-  private rename(bg: boolean, tiles: number[], name: string): void {
-    const v = cleanName(name), kind = bg ? 'bg' : 'fg', names = namesOf(this.app.rom, kind);
+  private rename(kind: NameKind, tiles: number[], name: string): void {
+    const v = cleanName(name), names = namesOf(this.app.rom, kind), layer = kind.toUpperCase();
     const changed = tiles.filter((t) => (names.get(t) ?? '') !== v);
     if (!changed.length) return;
     const what = v ? `named “${v}”` : 'name removed';
-    const label = tiles.length === 1 ? `${bg ? 'BG' : 'FG'} tile ${hex(tiles[0], 3)}: ${what}` : `${tiles.length} ${bg ? 'BG' : 'FG'} tiles: ${what}`;
+    const label = tiles.length === 1 ? `${layer} tile ${hex(tiles[0], 3)}: ${what}` : `${tiles.length} ${layer} tiles: ${what}`;
     this.edit(label, () => setName(this.app.rom, kind, tiles, v));
   }
 
@@ -266,7 +270,7 @@ export class Map16Tab implements WsPanel {
     return this.words(this.selection()[tile])[q];
   }
   private editLabel(n: number, what: string): string {
-    return n === 1 && this.selW * this.selH === 1 ? `${this.tileName(this.sel)}: ${what}` : `${n} ${this.bg ? 'BG' : 'FG'} tile${n > 1 ? 's' : ''}: ${what}`;
+    return n === 1 && this.selW * this.selH === 1 ? `${this.tileTitle(this.sel)}: ${what}` : `${n} ${this.bg ? 'BG' : 'FG'} tile${n > 1 ? 's' : ''}: ${what}`;
   }
   // the changed tiles in one ROM edit (one undo step)
   private writeTiles(e: QuarterEdit, what: string, key: string | null = null): void {
@@ -478,6 +482,7 @@ export class Map16Tab implements WsPanel {
     this.scroll.addEventListener('mousedown', (e) => {
       if (e.button !== 0 || !(e.target instanceof HTMLCanvasElement)) return;
       e.preventDefault();
+      this.nameInput.blur(); // (names the tiles selected before)
       const a = this.cellAt(e);
       if (this.moving && this.inSelection(a)) { this.dragMove(a); return; }
       const pick = (b: { x: number; y: number }) => {
@@ -497,8 +502,8 @@ export class Map16Tab implements WsPanel {
       const p = this.cellAt(e);
       const t = p.y * 16 + p.x;
       const info = this.bg ? undefined : this.app.probes.block(actsLike(this.app.rom, t));
-      const name = namesOf(this.app.rom, this.bg ? 'bg' : 'fg').get(t);
-      e.target.title = `${this.tileName(t)}${name ? ` “${name}”` : ''}${this.bg ? '' : ` – ${info ? probeText(info) : 'determining behavior …'}`}`;
+      const name = namesOf(this.app.rom, this.kind()).get(t);
+      e.target.title = `${this.tileTitle(t)}${name ? ` “${name}”` : ''}${this.bg ? '' : ` – ${info ? probeText(info) : 'determining behavior …'}`}`;
     });
   }
 
@@ -600,10 +605,10 @@ export class Map16Tab implements WsPanel {
     const animated = this.bg ? 0 : all.filter((w) => app.animated()?.tiles.has(w & 0x3ff)).length;
     const used = this.bg || !one ? 0 : this.ws.preview.count(t);
     const last = tiles[tiles.length - 1];
-    this.bHead.replaceChildren(
-      h('div', { class: 'prop-title' }, one ? this.tileName(t) : `${this.bg ? 'BG' : 'FG'} tiles ${hex(t, 3)}–${hex(last, 3)}`, one ? '' : h('span', { class: 'hint' }, `  (${this.selW}×${this.selH})`)),
-      h('div', { class: 'hint' }, this.rangeText(t), one && !this.bg ? ` · in the level ${used}×` : ''),
-      h('div', { class: 'row mt-name' }, h('span', { class: 'hint' }, 'Name'), this.nameInput),
+    this.bInfo.replaceChildren(
+      h('div', { class: 'prop-title' }, one ? this.tileTitle(t) : `${this.bg ? 'BG' : 'FG'} tiles ${hex(t, 3)}–${hex(last, 3)}`, one ? '' : h('span', { class: 'hint' }, `  (${this.selW}×${this.selH})`)),
+      h('div', { class: 'hint' }, this.rangeText(t), one && !this.bg ? ` · in the level ${used}×` : ''));
+    this.bMarks.replaceChildren(
       h('div', { class: 'mt-section' }, 'Quarters', h('span', { class: 'hint' }, `${marks.size} of ${g.cols * g.rows} marked`)),
     );
     this.updateQInfo();
@@ -948,7 +953,7 @@ export class Map16Tab implements WsPanel {
     };
     c.addEventListener('mousemove', (e) => describe(at(e)));
     c.addEventListener('mouseleave', update);
-    const dlg = modal(`Acts-like for ${tiles.length > 1 ? `${tiles.length} Tiles` : this.tileName(tiles[0])}`,
+    const dlg = modal(`Acts-like for ${tiles.length > 1 ? `${tiles.length} Tiles` : this.tileTitle(tiles[0])}`,
       h('div', { class: 'mt-acts-dlg' }, input, info, scroll), [{ label: 'Cancel' }]);
     const take = (v: number) => {
       this.edit(`Acts like ${hex(v, 3)}`, () => { for (const t of tiles) setActsLike(app.rom, t, v); });
