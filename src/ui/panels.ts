@@ -790,6 +790,20 @@ function openSavePrefab(app: App): void {
         : `Saves space from the ${nth(c.breakEven)} placement on (${c.dm16Bytes - c.perPlacement} bytes per placement).`));
   };
   name.addEventListener('input', updCost);
+  // the same arrangement elsewhere as Direct Map16 objects (prefabplaces.ts), replaced on request
+  const places = app.prefabPlaces({ ...r, name: '' });
+  const found = places.reduce((k, p) => k + p.places.length, 0);
+  const saved = places.reduce((k, p) => k + p.places.reduce((b, q) => b + q.bytes, 0), 0);
+  const replaceAll = h('input', { type: 'checkbox' });
+  const plural = (k: number, w: string) => `${k} ${w}${k === 1 ? '' : 's'}`;
+  const elsewhere = found
+    ? h('div', null,
+      usedInList(app, 'The same Direct Map16 objects elsewhere', places.map((p) => ({
+        level: p.level, at: { x: p.places[0].x, y: p.places[0].y },
+        text: `${plural(p.places.length, 'place')}, ${plural(p.places.reduce((b, q) => b + q.bytes, 0), 'byte')} saved`,
+      })), 0, ''),
+      h('label', { class: 'row small' }, replaceAll, ` Replace ${found === 1 ? 'it' : `all ${found}`} with the prefab (saves ${plural(saved, 'byte')} of level data)`))
+    : h('div', { class: 'hint' }, 'The same tiles as Direct Map16 objects are nowhere else.');
   const upd = () => {
     const n = Number(target.value);
     const users = all.has(n) ? app.prefabUsers(n) : [];
@@ -800,7 +814,7 @@ function openSavePrefab(app: App): void {
   target.addEventListener('change', upd);
   if (free < 0 && !all.size) { toast(`All ${PREFAB_COUNT} prefabs are in use.`, 'error'); return; }
   upd();
-  const save = () => app.saveSelectionAsPrefab(Number(target.value), name.value.trim(), replace.checked);
+  const save = () => app.saveSelectionAsPrefab(Number(target.value), name.value.trim(), replace.checked, replaceAll.checked ? places : []);
   const body = h('div', null,
     h('div', { class: 'row' }, preview),
     h('div', { class: 'hint' }, `${r.w}×${r.h} tiles, ${r.tiles.filter((t) => t === TRANSPARENT).length} of them transparent (tiles of other objects are kept there).`),
@@ -809,6 +823,7 @@ function openSavePrefab(app: App): void {
     h('label', { class: 'row small' }, replace, ' Replace the selection in the level with the prefab'),
     note,
     cost,
+    elsewhere,
     h('div', { class: 'hint' }, 'Prefabs (SMWS) only use extended object 04 (free in the game and in Lunar Magic) and change no game code.'));
   const dlg = modal('Selection as prefab', body, [{ label: 'Cancel' }, { label: 'Save', primary: true, onClick: save }]);
   name.addEventListener('keydown', (e) => { if (e.key === 'Enter' && save()) dlg.close(); });

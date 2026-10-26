@@ -17,6 +17,7 @@ import { gfxSkipMask, gfxFilesHash } from '../core/gfxpages.ts';
 import { flagBytes, usedFlags, isDm16, dm16Tiles, type Dm16Cond } from '../core/cdm16.ts';
 import { PREFAB_EXT, PREFAB_MAX, TRANSPARENT, listPrefabs, readPrefab, writePrefab, type Prefab } from '../core/prefabs.ts';
 import { prefabDm16Objects } from '../core/prefabcost.ts';
+import { planPrefabPlaces, applyPrefabPlaces, type LevelPlaces } from '../core/prefabplaces.ts';
 import type { Package } from '../core/pkgreg.ts';
 import { kvEntries, kvWrite, saveRom } from './storage.ts';
 import { ResultCache, RomFingerprint, type CacheEntry } from '../core/romdeps.ts';
@@ -1436,23 +1437,44 @@ export class App {
     return { x: x0, y: y0, w, h, tiles, ...(conds.some((c) => c) ? { conds } : {}) };
   }
 
-  // stores the selection as prefab n; replace: the selected objects become one prefab object
-  // (at the place of the last of them in the object list, so objects in between still cover it)
-  saveSelectionAsPrefab(n: number, name: string, replace: boolean): boolean {
+  // where the arrangement of prefab s already is as Direct Map16 objects (prefabplaces.ts): the open level as
+  // edited (not its selected objects) and all other levels as saved
+  prefabPlaces(s: Prefab): LevelPlaces[] {
+    const open = this.level.number, layer = this.mode === 'l2' ? 2 : 1, sel = new Set(this.selectedIndices());
+    return planPrefabPlaces(this.rom, s, {
+      levels: usedLevels(this.rom),
+      level: (n) => (n === open ? this.level : loadLevel(this.rom, n)),
+      load: (n, ov) => this.learner.emu().load(n, ov),
+      skip: (n, l, i) => n === open && l === layer && sel.has(i),
+    });
+  }
+  private selectedIndices(): number[] {
+    return this.currentObjects().flatMap((o, i) => (this.selection.has(o.uid) ? [i] : []));
+  }
+
+  // stores the selection as prefab n; replace: the selected objects become one prefab object (at the place of
+  // the last of them in the object list, so objects in between still cover it); places (prefabPlaces): replaced
+  // too. One ROM edit.
+  saveSelectionAsPrefab(n: number, name: string, replace: boolean, places: LevelPlaces[] = []): boolean {
     const r = this.prefabFromSelection();
     if (typeof r === 'string') { toast(r, 'error'); return false; }
+    const open = this.level.number, layer = this.mode === 'l2' ? 2 : 1;
+    const plan = places.map((p) => ({ ...p, places: [...p.places] }));
+    if (replace) {
+      let here = plan.find((p) => p.level === open);
+      if (!here) plan.push(here = { level: open, places: [] });
+      here.places.push({ layer, x: r.x, y: r.y, objects: this.selectedIndices(), bytes: 0 });
+    }
+    const found = places.reduce((k, p) => k + p.places.length, 0);
     try {
-      this.romEdit(`Prefab ${hex(n, 2)} saved`, () => writePrefab(this.rom, n, { w: r.w, h: r.h, tiles: r.tiles, ...(r.conds ? { conds: r.conds } : {}), name }));
+      this.romEdit(`Prefab ${hex(n, 2)} saved${found ? `, ${found} place${found > 1 ? 's' : ''} replaced` : ''}`, () => {
+        writePrefab(this.rom, n, { w: r.w, h: r.h, tiles: r.tiles, ...(r.conds ? { conds: r.conds } : {}), name });
+        applyPrefabPlaces(this.rom, n, plan);
+      });
     } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); return false; }
     if (replace) {
-      this.editLevel(() => {
-        const all = this.currentObjects();
-        const at = Math.max(...this.selectedObjects().map((o) => all.indexOf(o)));
-        const o: LevelObject = { uid: newUid(), num: 0, ext: PREFAB_EXT, x: r.x, y: r.y, size: 0, prefab: n };
-        const res = [...all.slice(0, at + 1).filter((x) => !this.selection.has(x.uid)), o, ...all.slice(at + 1)];
-        if (this.mode === 'l2') this.level.layer2Objects = res; else this.level.objects = res;
-        this.selection = new Set([o.uid]);
-      });
+      const o = this.currentObjects().find((o) => o.num === 0 && o.ext === PREFAB_EXT && o.prefab === n && o.x === r.x && o.y === r.y);
+      if (o) { this.selection = new Set([o.uid]); this.emit('change'); }
     }
     this.paletteItem = { kind: 'obj', num: 0, ext: PREFAB_EXT, size: 0, prefab: n };
     return true;
