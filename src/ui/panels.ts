@@ -11,6 +11,7 @@ import { usedInList } from './usedin.ts';
 import { buildExitPanel } from './exitpanel.ts';
 import { DM16_EXT } from '../core/patches.ts';
 import { PREFAB_EXT, TRANSPARENT, freePrefabNumber, readPrefab, writePrefab, PREFAB_COUNT, type Prefab } from '../core/prefabs.ts';
+import { prefabCost } from '../core/prefabcost.ts';
 import { EXT_TILES } from '../core/map16ext.ts';
 import { COND_FLAGS, COND_ADD, condByte, flagRam, isDm16, type Dm16Cond } from '../core/cdm16.ts';
 import { TileCache, map16Source, drawMap16 } from '../core/render.ts';
@@ -746,11 +747,25 @@ function openSavePrefab(app: App): void {
   const preview = prefabCanvas(prefabTileSource(app), { ...r, name: '' });
   preview.style.cssText = `width:${Math.min(r.w * 32, 320)}px;image-rendering:pixelated;background:repeating-conic-gradient(#333 0 25%,#222 0 50%) 0 0/16px 16px`;
   const note = h('div', { class: 'hint' });
+  // what the prefab costs and saves against the same tiles as Direct Map16 objects (prefabcost.ts); the name is part of it
+  const cost = h('div', { class: 'hint' });
+  const updCost = () => {
+    const c = prefabCost({ ...r, name: name.value.trim() });
+    const nth = (k: number) => `${k}${k % 100 >= 11 && k % 100 <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][k % 10] ?? 'th'}`;
+    cost.replaceChildren(
+      h('div', null, `Once: ${c.once} bytes of ROM space (the prefab with its name and RATS tag).`),
+      h('div', null, `Each placement: ${c.perPlacement} bytes of level data, as Direct Map16 ${c.dm16} bytes (${c.rects} object${c.rects === 1 ? '' : 's'}).`),
+      h('div', null, c.breakEven === null ? 'The prefab never takes less space than Direct Map16.'
+        : c.breakEven === 1 ? `Saves space from the first placement on (${c.dm16 - c.perPlacement} bytes per placement).`
+          : `Saves space from the ${nth(c.breakEven)} placement on (${c.dm16 - c.perPlacement} bytes per placement).`));
+  };
+  name.addEventListener('input', updCost);
   const upd = () => {
     const n = Number(target.value);
     const users = all.has(n) ? app.prefabUsers(n) : [];
     note.textContent = all.has(n) ? `The prefab changes everywhere it is used${users.length ? ` (level ${users.map(hex3).join(', ')})` : ''}.` : '';
     if (all.has(n) && !name.value) name.value = all.get(n)!.name;
+    updCost();
   };
   target.addEventListener('change', upd);
   if (free < 0 && !all.size) { toast(`All ${PREFAB_COUNT} prefabs are in use.`, 'error'); return; }
@@ -763,6 +778,7 @@ function openSavePrefab(app: App): void {
     h('div', { class: 'prop' }, h('label', null, 'Save as'), target),
     h('label', { class: 'row small' }, replace, ' Replace the selection in the level with the prefab'),
     note,
+    cost,
     h('div', { class: 'hint' }, 'Prefabs (SMWS) only use extended object 04 (free in the game and in Lunar Magic) and change no game code.'));
   const dlg = modal('Selection as prefab', body, [{ label: 'Cancel' }, { label: 'Save', primary: true, onClick: save }]);
   name.addEventListener('keydown', (e) => { if (e.key === 'Enter' && save()) dlg.close(); });

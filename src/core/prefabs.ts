@@ -191,6 +191,11 @@ export function writePrefab(rom: Rom, n: number, s: Prefab | null): void {
   const old = ptrOf(rom, p.table, n);
   if (old >> 16) rom.freeAt(old);
   if (!s) { setPtr(rom, p.table, n, 0); return; }
+  setPtr(rom, p.table, n, rom.allocWrite(encodePrefab(s)));
+}
+
+// a prefab's block as stored in the ROM (without its RATS tag)
+export function encodePrefab(s: Prefab): Uint8Array {
   if (s.w < 1 || s.h < 1 || s.w > PREFAB_MAX || s.h > PREFAB_MAX || s.tiles.length !== s.w * s.h) throw new Error(`Prefab ${s.w}×${s.h} invalid (at most ${PREFAB_MAX}×${PREFAB_MAX})`);
   const name = new TextEncoder().encode(s.name).slice(0, 63);
   const data = [s.w, s.h];
@@ -203,5 +208,5 @@ export function writePrefab(rom: Rom, n: number, s: Prefab | null): void {
   const buf = new Uint8Array(data.length + name.length + 1);
   buf.set(data);
   buf.set(name, data.length);
-  setPtr(rom, p.table, n, rom.allocWrite(buf));
+  return buf;
 }

@@ -16,6 +16,7 @@ import { DM16_EXT, levelGfx, levelExtGfx, customPalette, levelMusic, defaultGfx 
 import { gfxSkipMask, gfxFilesHash } from '../core/gfxpages.ts';
 import { flagBytes, usedFlags, isDm16, dm16Tiles, type Dm16Cond } from '../core/cdm16.ts';
 import { PREFAB_EXT, PREFAB_MAX, TRANSPARENT, listPrefabs, readPrefab, writePrefab, type Prefab } from '../core/prefabs.ts';
+import { prefabDm16Objects } from '../core/prefabcost.ts';
 import type { Package } from '../core/pkgreg.ts';
 import { kvEntries, kvWrite, saveRom } from './storage.ts';
 import { ResultCache, RomFingerprint, type CacheEntry } from '../core/romdeps.ts';
@@ -1468,16 +1469,12 @@ export class App {
     return out;
   }
 
-  // a prefab object becomes one Direct-Map16 object per tile, at its place in the object list
+  // a prefab object becomes Direct Map16 objects (rectangles of one tile, prefabcost.ts), at its place in the object list
   explodePrefab(o: LevelObject): void {
     const s = o.prefab !== undefined ? readPrefab(this.rom, o.prefab) : null;
     if (!s) { toast('The prefab does not exist (anymore).', 'error'); return; }
     this.editLevel(() => {
-      const parts: LevelObject[] = [];
-      s.tiles.forEach((t, i) => {
-        const cond = s.conds?.[i];
-        if (t !== TRANSPARENT) parts.push({ uid: newUid(), num: 0, ext: DM16_EXT, x: o.x + (i % s.w), y: o.y + Math.floor(i / s.w), size: 0, tile: t, ...(cond ? { cond: { ...cond } } : {}) });
-      });
+      const parts = prefabDm16Objects(s, o.x, o.y, this.vertical);
       const all = this.currentObjects();
       const at = all.indexOf(o);
       const res = [...all.slice(0, at), ...parts, ...all.slice(at + 1)];

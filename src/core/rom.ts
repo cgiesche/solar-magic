@@ -317,6 +317,12 @@ export class Rom {
     return -1;
   }
 
+  // The free space a block of `len` bytes takes with its RATS tag: findFree works in 16-byte steps, so the
+  // next block starts at the next 16-byte boundary.
+  static ratsFootprint(len: number): number {
+    return Math.ceil((len + 8) / 16) * 16;
+  }
+
   // Write data with RATS tag in free space; returns SNES address of payload.
   // Expands the ROM if necessary.
   allocWrite(payload: Uint8Array): number {
