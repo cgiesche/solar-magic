@@ -507,8 +507,8 @@ fix as its own patch; the original is a replaced patch.
 
 A horizontal level without layer 2 objects can be taller or shorter than the game's 27 rows, as in Lunar
 Magic 3.00 (Vitor Vilela's level height hack): *Level header → Level height* offers Lunar Magic's sizes 00–1B
-(28 to 448 rows; 1C–1F are left out: 1C needs Lunar Magic's swapped screen jump, extended object `$03`, which
-is the editor's structure, 1D–1F have more than 32 screens). The level data's 0x3800 bytes are shared by the
+(28 to 448 rows; 1C–1F are left out: 1C needs Lunar Magic's swapped screen jump, extended object `$03` with a
+5-bit subscreen, which the patch doesn't have yet; 1D–1F have more than 32 screens). The level data's 0x3800 bytes are shared by the
 screens, a screen taking as many bytes as the level is high in pixels: the taller the level, the fewer screens
 (size 0D: 56 rows, 16 screens; 1A: 298 rows, 3 screens). Heights the level's screens, objects or sprites don't
 fit in can't be chosen.
@@ -929,7 +929,7 @@ not compatible with the respective feature.
 | `$009F19`, `$048F8A`, `$049001`, `$049199`; code `$05DD80`, `$03BA10`, `$03BA50`, table `$05DDA0` | Initial level flags, no entry if passed, save prompt (Lunar Magic's places) |
 | `$04E9F7`, `$04DCA5`, `$04DCAA`, `$04D859`; pointers `$04E49F`, `$04E4A4`, `$04E709`, `$04E710`, `$04EE3F`, `$04EE5A`, `$04E4B0`, `$04E4BB`, `$04EAF5`, `$04DD45`, `$04DD4A`, `$04DA74`, `$04EC8C`, `$04ECBA`, `$04ECC5`, `$04ED97`, `$04EDBE`, `$04EDB8` | Event steps, silent events, 0x78 events (Lunar Magic's places) |
 | `$04E6C5`, `$04DA98`; pointers `$04E67C`, `$04E69C` | Destroyed level tiles, 0x18 entries (Lunar Magic's places) |
-| Ext. object table `$0DA118` (entry `$03`) | Structures (SMWS); empty in the original, no code hook |
+| Ext. object table `$0DA11B` (entry `$04`) | Structures (SMWS); empty in the original and in Lunar Magic, no code hook |
 | `$05B20F` | Messages in free space (SMWM), only if the texts no longer fit |
 | `$00F545`, `$029328`, `$058A66`, `$058B46`, `$058C34`, `$058D2B`, `$00C096`, `$00C0E7`, `$00C176` | Map16 extension and custom blocks (SMWX) |
 | `$05808C`, `$00A5EE`, `$00A242`, `$00A295`, `$00A2EE` | UberASM: level `load`/`init`/`main`/`end` |
@@ -973,9 +973,13 @@ again.
 * `src/core/patchpkg.ts`: `.zip`, `patch.json`, defines.
 * `src/core/uberasm.ts`, `src/core/uberproject.ts`: UberASM generator and project.
 * `src/core/blocks.ts`, `src/core/map16ext.ts`: custom blocks.
-* `src/core/structs.ts`: structures (extended object `$03`). Level data: `00` object bytes as for any
-  extended object with `$03`, then 1 byte structure number.
-* `src/core/cdm16.ts`: conditional Direct Map16 (see above); test `tools/testcdm16.ts`. Without SMWS, `$03` counts as an ordinary
-  3-byte object, so that patches that use `$03` themselves keep working.
+* `src/core/structs.ts`: structures (extended object `$04`). Level data: `00` object bytes as for any
+  extended object with `$04`, then 1 byte structure number. `$04` because it is empty in the clean game and in
+  Lunar Magic. Lunar Magic's `$03` is its swapped screen jump (level height 1C), a 3-byte object, so a
+  structure there would put Lunar Magic's level load out of step. Found by emulation (`tools/extobjprobe.ts`,
+  [research note](research/lunar-magic-extended-object-03.md), #117). Levels saved with structures at `$03`
+  are not converted (no migration).
+* `src/core/cdm16.ts`: conditional Direct Map16 (see above); test `tools/testcdm16.ts`. The level data reads `$04` as a
+  structure (4 bytes) always: SMWS is installed when the editor opens the ROM (ADR 0004).
 * Tests: `tools/testasar.ts`, `tools/testuberasm.ts`, `tools/testblocks.ts`, `tools/teststructs.ts`,
   `tools/testpkgreg.ts` (part of `npm test`).

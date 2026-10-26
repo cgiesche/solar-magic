@@ -57,7 +57,7 @@ export const isBrushMode = (m: EditMode) => m === 'bg' || m === 'l3';
 export interface Brush { w: number; h: number; tiles: number[] }
 export type PaletteItem =
   // block: a rectangle of Map16 tiles from the palette sheet (tile + row * 16 + col), one Direct-Map16 object each
-  // struct: structure number (extended object $03, see structs.ts)
+  // struct: structure number (extended object $04, see structs.ts)
   | { kind: 'obj'; num: number; ext: number; size: number; tile?: number; block?: { w: number; h: number }; struct?: number }
   | { kind: 'spr'; num: number; extra: number };
 

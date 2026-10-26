@@ -763,7 +763,7 @@ function openSaveStructure(app: App): void {
     h('div', { class: 'prop' }, h('label', null, 'Save as'), target),
     h('label', { class: 'row small' }, replace, ' Replace the selection in the level with the structure'),
     note,
-    h('div', { class: 'hint' }, 'The first time, the structures patch (SMWS) is installed. It only uses extended object 03 and does not change any game code.'));
+    h('div', { class: 'hint' }, 'Structures (SMWS) only use extended object 04 (free in the game and in Lunar Magic) and change no game code.'));
   const dlg = modal('Selection as structure', body, [{ label: 'Cancel' }, { label: 'Save', primary: true, onClick: save }]);
   name.addEventListener('keydown', (e) => { if (e.key === 'Enter' && save()) dlg.close(); });
   setTimeout(() => name.focus(), 0);
@@ -999,7 +999,7 @@ function liveObjects(app: App, objs: LevelObject[]): LevelObject[] {
   return app.currentObjects().filter((o) => ids.has(o.uid));
 }
 
-// extended object $03 always carries a structure number (its 4th byte)
+// extended object $04 always carries a structure number (its 4th byte)
 function fixStruct(o: LevelObject): void {
   if (o.num === 0 && o.ext === STRUCT_EXT) o.struct ??= 0;
   else delete o.struct;

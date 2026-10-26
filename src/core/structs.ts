@@ -1,7 +1,8 @@
 // Structures ("SMWS"): user-made blocks of Map16 tiles, placed as one level object.
-// Extended object $03 takes one extra byte, the structure number (00-FF). The only change to the
-// original game is the pointer for extended object $03 in the extended object table (empty in the
-// original game), so no code of the game or of other patches is hooked.
+// Extended object $04 takes one extra byte, the structure number (00-FF). The only change to the
+// original game is the pointer for extended object $04 in the extended object table (empty in the
+// original game), so no code of the game or of other patches is hooked. $04 is free in the clean game and
+// in Lunar Magic, whose $03 is its swapped screen jump, a 3-byte object (#117, tools/extobjprobe.ts).
 // Code block: "SMWS", version, pointer to the structure table, code. The table holds a 24-bit
 // pointer per structure (0 = none, the object then places nothing). Each structure is its own
 // RATS block: width, height, width*height tile words row by row ($FFFF = transparent, the tile
@@ -16,7 +17,7 @@ import { CDM16_FLAGS } from './ram.ts';
 import { COND_MARK, condByte, condOf, type Dm16Cond } from './cdm16.ts';
 
 export const EXT_OBJ_TABLE = 0x0da10f;
-export const STRUCT_EXT = 0x03;
+export const STRUCT_EXT = 0x04;
 export const STRUCT_SLOT = EXT_OBJ_TABLE + STRUCT_EXT * 3;
 export const STRUCT_HOOKS: [number, number][] = [[STRUCT_SLOT, 3]];
 export const STRUCT_COUNT = 256;
@@ -134,7 +135,7 @@ function build(): Asm {
 export function installStructPatch(rom: Rom): { base: number; table: number } {
   const ex = structPatch(rom);
   if (ex) return ex;
-  if (rom.r24(STRUCT_SLOT) !== 0) throw new Error(`Extended object $03 is already in use${ownerNote(rom, STRUCT_SLOT, 3)} – structures not possible`);
+  if (rom.r24(STRUCT_SLOT) !== 0) throw new Error(`Extended object $${STRUCT_EXT.toString(16).padStart(2, '0')} is already in use${ownerNote(rom, STRUCT_SLOT, 3)} – structures not possible`);
   const a = build();
   const addr = rom.allocWrite(new Uint8Array(a.bytes.length));
   rom.writeBytes(addr, a.link(addr));

@@ -33,8 +33,9 @@ export const LEVEL_HEIGHTS = [
   0x1b0, 0x1c0, 0x1d0, 0x200, 0x220, 0x250, 0x260, 0x280, 0x2a0, 0x2c0, 0x2f0, 0x310, 0x340, 0x380, 0x3b0, 0x400,
   0x440, 0x4a0, 0x510, 0x590, 0x630, 0x700, 0x800, 0x950, 0xb30, 0xe00, 0x12a0, 0x1c00, 0x3800, 0x100, 0xf0, 0xe0,
 ];
-// sizes the editor offers: 1C (one screen, 0x3800 pixels) needs Lunar Magic's swapped screen jump, extended
-// object $03, which is the editor's structure; 1D-1F have more than 32 screens
+// sizes the editor offers: 1C (one screen, 0x3800 pixels, 28 subscreens) needs Lunar Magic's swapped screen jump,
+// extended object $03 (000VVVVV HHHHHHHH: a 5-bit subscreen), which the level height patch doesn't have yet;
+// 1D-1F have more than 32 screens
 export const MAX_LEVEL_SIZE = 0x1b;
 export const SUBSCREEN_ROWS = 32; // a taller level's object and sprite positions count in subscreens of 32 rows
 export const levelRows = (s: { levelSize: number }): number => LEVEL_HEIGHTS[s.levelSize & 0x1f] >> 4;
@@ -59,7 +60,7 @@ export interface LevelObject {
   size: number; // settings byte for standard objects (and Direct Map16)
   tile?: number; // Direct Map16 tile number (extended object $02, editor patch)
   cond?: Dm16Cond; // a Direct Map16 object's flag (cdm16.ts)
-  struct?: number; // structure number (extended object $03 with the structure patch, see structs.ts)
+  struct?: number; // structure number (extended object $04 with the structure patch, see structs.ts)
 }
 
 export interface ScreenExit {
@@ -315,7 +316,7 @@ export interface ParsedObjects {
   size: number; // bytes consumed including terminating $FF
 }
 
-// extended object $03 is a structure (4 bytes, structure patch). In a level with a size (`sized`) the
+// extended object $04 is a structure (4 bytes, structure patch). In a level with a size (`sized`) the
 // screen jump's low nibble of the second byte is the subscreen (000HHHHH 0000VVVV 00000001): rows
 // V * 32 on; the new screen flag keeps it (observed: where the game puts objects in a Lunar Magic-saved ROM).
 // `at` receives each exit's offset in `data`

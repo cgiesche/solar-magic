@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator, type LevelRender } from '../src/core/levelemu.ts';
 import { loadLevel, serializeLayer1, newUid, isL1Vertical, type LevelObject } from '../src/core/level.ts';
-import { installStructPatch, writeStructure, readStructure, listStructures, STRUCT_EXT, TRANSPARENT, structPatch } from '../src/core/structs.ts';
+import { installStructPatch, writeStructure, readStructure, listStructures, STRUCT_EXT, STRUCT_SLOT, EXT_OBJ_TABLE, TRANSPARENT, structPatch } from '../src/core/structs.ts';
 import { saveLevel } from '../src/core/save.ts';
 import { exportLevelFile, importLevelFile } from '../src/core/levelfile.ts';
 import { loadAsar } from '../src/core/asar.ts';
@@ -21,6 +21,10 @@ const check = (ok: boolean, what: string) => { if (!ok) { fail++; console.log('F
 
 installStructPatch(rom);
 check(!!structPatch(rom), 'patch detected');
+// the number (#117, tools/extobjprobe.ts): its slot is empty in the clean game, and extended object $03 – Lunar
+// Magic's swapped screen jump, 3 bytes – stays free
+check(orig.r24(STRUCT_SLOT) === 0, 'the structures\' slot is empty in the clean game');
+check(rom.r24(EXT_OBJ_TABLE + 0x03 * 3) === 0, `extended object $03 left to Lunar Magic (structures: $${STRUCT_EXT.toString(16)})`);
 const e0 = new LevelEmulator(orig); e0.boot();
 const e1 = new LevelEmulator(rom); e1.boot();
 const levels = [...Array(0x25).keys(), ...Array.from({ length: 0x3b }, (_, i) => 0x101 + i)];
@@ -96,6 +100,9 @@ saveLevel(rom, lv);
 const back = loadLevel(rom, 0x105);
 const ss = back.objects.filter((o) => o.ext === STRUCT_EXT && o.num === 0);
 check(ss.length === 2 && ss[0].struct === 5 && ss[1].struct === 7 && ss[1].x === 0x50, 'save/load');
+// in the level data: 00 object bytes, the number, the structure (y 3, x 0 on screen 5: 03 00 04 07)
+const l1 = Array.from(serializeLayer1(rom, back), (b) => b.toString(16).padStart(2, '0')).join(' ');
+check(l1.includes('03 00 04 07'), 'level data: extended object $04, then the structure number');
 
 // level file into another ROM: structures come along
 const text = exportLevelFile(rom, back);
@@ -111,16 +118,17 @@ check(is.length === 2 && st[0]?.name === 'Test ä' && st[1]?.tiles[3] === 0x148 
 writeStructure(rom, 7, null);
 check(readStructure(rom, 7) === null, 'remove');
 
-// other patches: the slot of extended object $03 is protected, and a patch that took it first blocks the install
+// other patches: the structures' slot is protected, and a patch that took it first blocks the install
 await loadAsar();
 const src = (name: string, main: string): PatchSource => ({ name, main: 'main.asm', files: new Map([['main.asm', main]]) });
-const hit = applyPatch(rom, src('ExtObj03', 'lorom\norg $0DA118\ndl $0DA57B\n'));
+const takeSlot = src('ExtObj04', `lorom\norg $${STRUCT_SLOT.toString(16)}\ndl $0DA57B\n`);
+const hit = applyPatch(rom, takeSlot);
 check(!hit.ok && hit.errors[0].includes('SMWS'), 'patch writing the slot rejected: ' + hit.errors[0]);
 const clean = new Rom(cleanImage());
-check(applyPatch(clean, src('ExtObj03', 'lorom\norg $0DA118\ndl $0DA57B\n')).ok, 'slot free for other patches without structures');
+check(applyPatch(clean, takeSlot).ok, 'slot free for other patches without structures');
 let msg = '';
 try { installStructPatch(clean); } catch (e) { msg = (e as Error).message; }
-check(msg.includes('ExtObj03') && !structPatch(clean), 'install refused when the slot is taken: ' + msg);
+check(msg.includes('ExtObj04') && !structPatch(clean), 'install refused when the slot is taken: ' + msg);
 
 console.log(fail ? `${fail} failures` : 'structures ok');
 if (fail) process.exitCode = 1;
