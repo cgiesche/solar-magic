@@ -31,6 +31,9 @@ export function dm16Prefab(objs: LevelObject[]): Prefab | null {
   return { w, h, tiles, ...(conds.some((c) => c) ? { conds } : {}), name: '' };
 }
 
+// one arrangement's key: the same tiles at the same places with the same conditions
+export const arrangementKey = (s: Prefab): string => JSON.stringify([s.w, s.tiles, s.conds ?? null]);
+
 // the pasted objects as they are now in objs (a level saved is loaded anew, with new uids): the last object
 // not yet taken that is the same for each (pasted objects come after what they were placed over); null when
 // one is gone
@@ -56,7 +59,7 @@ export class PasteCounter {
   paste(objs: LevelObject[]): PasteHint | null {
     const s = dm16Prefab(objs);
     if (!s) return null;
-    const key = JSON.stringify([s.w, s.tiles, s.conds ?? null]);
+    const key = arrangementKey(s);
     const p = this.pasted.get(key) ?? { count: 0, bytes: 0 };
     p.count++;
     p.bytes += objs.reduce((n, o) => n + objectBytes(o), 0);
