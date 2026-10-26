@@ -17,8 +17,8 @@ check(eq(tileMatches('WINDOW', 0x400, [files, names]), [0x200, 0x201]), 'any cas
 check(eq(tileMatches('castle win', 0x400, [files, names]), [0x200]), 'a single match');
 check(eq(tileMatches('coin', 0x400, [files, names]), [0x130]), 'block files still match');
 check(eq(tileMatches('bush', 0x200, [files, names]), []), 'only tiles below the count');
-const both = tileMatches('b', 0x400, [names]);
-check(both!.includes(0xb) && both!.includes(0x210), 'a hex digit matches numbers and names');
+const hexWord = tileMatches('b', 0x400, [names]);
+check(!!hexWord?.includes(0xb) && !!hexWord?.includes(0x210), 'a hex digit matches numbers and names');
 
 if (bad) { console.log(`${bad} failed`); process.exit(1); }
 console.log('all ok');

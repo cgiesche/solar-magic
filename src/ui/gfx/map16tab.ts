@@ -349,6 +349,7 @@ export class Map16Tab implements WsPanel {
   }
 
   private redraw(): void {
+    if (this.match) this.findMatches(); // the layer or the names may have changed
     this.drawSheet();
     this.buildBuilder();
     this.drawGfx();
@@ -512,7 +513,7 @@ export class Map16Tab implements WsPanel {
   private attachSearch(): void {
     const s = this.search;
     s.addEventListener('input', () => {
-      this.match = tileMatches(s.value, EXT_TILES, [blockFilesByTile(this.app.rom), namesOf(this.app.rom, this.kind())]);
+      this.findMatches();
       this.drawSheet();
       if (this.match?.length) this.scrollToTile(this.match[0]);
     });
@@ -528,6 +529,11 @@ export class Map16Tab implements WsPanel {
       this.redraw();
       this.scrollToSel();
     });
+  }
+  // custom blocks are FG tiles only
+  private findMatches(): void {
+    const names = namesOf(this.app.rom, this.kind());
+    this.match = tileMatches(this.search.value, EXT_TILES, this.bg ? [names] : [blockFilesByTile(this.app.rom), names]);
   }
   private clearSearch(): void {
     this.search.value = '';

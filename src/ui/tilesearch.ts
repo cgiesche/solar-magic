@@ -6,8 +6,8 @@ import { hex } from '../core/names.ts';
 
 // tiles 0..count-1 matching the typed number, null for an empty input. A leading zero or all digits compare
 // from the left of the full number, otherwise the number as typed is the start ("25" is 025 and 250–25F,
-// "025" only 025). Also the tiles one of whose `texts` (block file, name … per tile) holds the input, in
-// any case.
+// "025" only 025). Also the tiles one of whose `texts` (block file, name … per tile) holds the input,
+// case-insensitively.
 export function tileMatches(input: string, count: number, texts: Map<number, string>[] = []): number[] | null {
   const text = input.trim().toLowerCase();
   const q = text.toUpperCase().replace(/^(\$|0X)/, '');
