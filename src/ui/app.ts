@@ -17,7 +17,8 @@ import { gfxSkipMask, gfxFilesHash } from '../core/gfxpages.ts';
 import { flagBytes, usedFlags, isDm16, dm16Tiles, type Dm16Cond } from '../core/cdm16.ts';
 import { PREFAB_EXT, PREFAB_MAX, TRANSPARENT, listPrefabs, readPrefab, writePrefab, type Prefab } from '../core/prefabs.ts';
 import { prefabDm16Objects } from '../core/prefabcost.ts';
-import { PasteCounter, findPasted, type PasteHint } from '../core/pastehint.ts';
+import { PasteCounter, findPasted, arrangementKey, type PasteHint } from '../core/pastehint.ts';
+import { prefabSuggestions, type PrefabSuggestion } from '../core/prefabsuggest.ts';
 import { planPrefabPlaces, applyPrefabPlaces, replaceWithPrefab, type LevelPlaces, type LevelGroups, type PrefabGroup } from '../core/prefabplaces.ts';
 import type { Package } from '../core/pkgreg.ts';
 import { kvEntries, kvWrite, saveRom } from './storage.ts';
@@ -90,6 +91,7 @@ export type AppEvent =
   | 'anim-frame' // the next frame of the level animation is shown
   | 'prefabs' // the prefab table changed
   | 'paste-hint' // App.pasteHint changed
+  | 'prefab-suggestions' // App.prefabSuggestions changed
   | 'bgtile' // the BG or layer 3 brush changed (picked from the level)
   | 'reveal' // the level view scrolls to App.reveal
   | 'zoom' // the level view's zoom changed
@@ -181,6 +183,11 @@ export class App {
   // paste (its objects as placed in level/layer) as prefab, until it is dismissed or another level is opened
   private pastes = new PasteCounter();
   pasteHint: PasteHintAt | null = null;
+  // repeated arrangements of Direct Map16 objects across the levels (prefabsuggest.ts), found in the background
+  // a while after the last change; null while not known yet
+  prefabSuggestions: PrefabSuggestion[] | null = null;
+  private suggestTimer = 0;
+  private suggestRun = 0;
   // tile (x,y) lookup from map offset
   offsetToTile1 = new Int32Array(MAP_SIZE);
   offsetToTile2 = new Int32Array(MAP_SIZE);
@@ -217,6 +224,7 @@ export class App {
     // sprite images: learned again when what they depend on changed (the learner decides)
     this.on('render', () => this.ensureSpriteImages());
     this.on('rom-change', () => this.ensureSpriteImages());
+    this.on('rom-change', () => this.scheduleSuggestions());
     musicPlayer.onChange(() => { this.resumeBackground(); this.emit('busy'); });
     // level edits and ROM edits (romEdit: one undo step, all or nothing, the follow-ups below)
     this.edits = new EditSession(rom, {
@@ -345,6 +353,7 @@ export class App {
     logMsg(`Level ${hex(n, 3)} opened`);
     this.scheduleSpriteMem();
     this.probes.prefetch();
+    this.scheduleSuggestions(); // (the open level as edited is part of them)
   }
 
   get vertical(): boolean {
@@ -1235,6 +1244,7 @@ export class App {
     if (rerender) this.refresh();
     this.emit('change');
     this.scheduleSpriteMem();
+    this.scheduleSuggestions();
     if (this.layerGone()) this.setMode('l1'); // (its header changed, an edit undone)
   }
   // the open level has no layer for the edit mode (layer 2 objects, BG tilemap)
@@ -1453,9 +1463,9 @@ export class App {
   }
 
   // where the arrangement of prefab s already is as Direct Map16 objects (prefabplaces.ts): the open level as
-  // edited (not its selected objects) and all other levels as saved
-  prefabPlaces(s: Prefab): LevelPlaces[] {
-    const open = this.level.number, layer = this.mode === 'l2' ? 2 : 1, sel = new Set(this.selectedIndices());
+  // edited (not its selected objects, unless all) and all other levels as saved
+  prefabPlaces(s: Prefab, all = false): LevelPlaces[] {
+    const open = this.level.number, layer = this.mode === 'l2' ? 2 : 1, sel = new Set(all ? [] : this.selectedIndices());
     return planPrefabPlaces(this.rom, s, {
       levels: usedLevels(this.rom),
       level: (n) => (n === open ? this.level : loadLevel(this.rom, n)),
@@ -1502,6 +1512,51 @@ export class App {
     }
     this.paletteItem = { kind: 'obj', num: 0, ext: PREFAB_EXT, size: 0, prefab: n };
     return true;
+  }
+
+  // stores arrangement s (a suggestion's) as prefab n, its places (prefabPlaces) replaced in the same ROM edit
+  saveArrangementAsPrefab(n: number, s: Prefab, places: LevelPlaces[]): boolean {
+    const found = places.reduce((k, p) => k + p.places.length, 0);
+    try {
+      this.romEdit(`Prefab ${hex(n, 2)} saved${found ? `, ${found} place${found > 1 ? 's' : ''} replaced` : ''}`, () => {
+        if (places.some((p) => p.level === this.level.number) && this.dirty) throw new Error(`Level ${hex(this.level.number, 3)} could not be saved`);
+        writePrefab(this.rom, n, s);
+        applyPrefabPlaces(this.rom, n, places);
+      });
+    } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); return false; }
+    // (found again in the background; until then not offered any more)
+    const key = arrangementKey(s);
+    if (this.prefabSuggestions?.some((q) => q.key === key)) {
+      this.prefabSuggestions = this.prefabSuggestions.filter((q) => q.key !== key);
+      this.emit('prefab-suggestions');
+    }
+    this.paletteItem = { kind: 'obj', num: 0, ext: PREFAB_EXT, size: 0, prefab: n };
+    return true;
+  }
+
+  // the suggestions anew a while after the last change, in slices of background work (later)
+  private scheduleSuggestions(): void {
+    clearTimeout(this.suggestTimer);
+    const run = ++this.suggestRun;
+    this.suggestTimer = window.setTimeout(() => {
+      if (run !== this.suggestRun || this.closed) return;
+      const open = this.level.number;
+      const steps = prefabSuggestions(this.rom, {
+        levels: usedLevels(this.rom),
+        level: (n) => (n === open ? this.level : loadLevel(this.rom, n)),
+        load: (n, ov) => this.learner.emu().load(n, ov),
+      });
+      const step = () => {
+        if (run !== this.suggestRun) return;
+        const until = performance.now() + 8;
+        let r = steps.next();
+        while (!r.done && performance.now() < until) r = steps.next();
+        if (!r.done) { this.later('prefab-suggest', step); return; }
+        this.prefabSuggestions = r.value;
+        this.emit('prefab-suggestions');
+      };
+      this.later('prefab-suggest', step);
+    }, 1500);
   }
 
   // levels whose saved data uses prefab n (plus the open level with its unsaved changes)

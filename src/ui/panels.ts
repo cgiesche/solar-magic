@@ -175,6 +175,7 @@ export class Palette {
     app.on('render', () => { if (isBrushMode(app.mode)) this.build(); });
     app.on('change', () => { this.followSelection(); this.prefabSelection(); });
     app.on('prefabs', () => { if (this.tab === 'obj') this.build(); });
+    app.on('prefab-suggestions', () => { if (this.tab === 'obj') this.build(); });
     app.on('mode', () => {
       if (app.mode === 'spr') this.tab = 'spr';
       else if (this.tab === 'spr') this.tab = 'obj';
@@ -356,7 +357,8 @@ export class Palette {
   }
 
   // prefabs: blocks of Map16 tiles stored in the ROM, placed as one object each (prefabs.ts); the first section
-  // of the Objects tab, shown with its button and hint even without prefabs; how many prefabs it lists
+  // of the Objects tab, shown with its button and hint even without prefabs, then the suggestions (without a
+  // search); how many prefabs it lists
   buildPrefabs(): number {
     const app = this.app, box = this.prefabBox;
     clear(box);
@@ -366,7 +368,6 @@ export class Palette {
     box.append(h('div', { class: 'pal-head' }, 'Prefabs'), h('div', { class: 'row' }, this.prefabSave), this.prefabHint);
     this.prefabSelection();
     const all = app.prefabs();
-    if (!all.size) return 0;
     const sheet = prefabTileSource(app);
     let shown = 0;
     for (const [n, st] of all) {
@@ -380,6 +381,16 @@ export class Palette {
         h('button', { class: 'icon-btn', title: 'Delete', 'aria-label': 'Delete', onclick: (e: Event) => { e.stopPropagation(); deletePrefab(app, n, st); } }, '✕'));
       box.appendChild(row);
       shown++;
+    }
+    const sug = f ? [] : app.prefabSuggestions ?? [];
+    if (sug.length) box.append(h('div', { class: 'pal-sub' }, 'Suggestions'));
+    for (const sg of sug) {
+      const lvs = sg.levels.length > 4 ? `${sg.levels.slice(0, 4).map(hex3).join(', ')} +${sg.levels.length - 4}` : sg.levels.map(hex3).join(', ');
+      box.appendChild(h('div', {
+        class: 'pal-row', title: `${sg.count} places of these Direct Map16 objects in level ${sg.levels.map(hex3).join(', ')}: save as prefab and replace them all`,
+        onclick: () => openSavePrefab(app, sg.prefab),
+      }, h('span', { class: 'pal-thumb-s prefab' }, prefabCanvas(sheet, sg.prefab)),
+        h('span', { class: 'grow' }, `${sg.count}× in level ${lvs}`, h('span', { class: 'hint' }, ` saves ${sg.saved} byte${sg.saved === 1 ? '' : 's'}`))));
     }
     return shown;
   }
@@ -764,9 +775,9 @@ export function prefabCanvas(tile: (t: number) => HTMLCanvasElement | null, st: 
   return c;
 }
 
-// the selected objects as a new prefab, or over an existing one
-export function openSavePrefab(app: App): void {
-  const r = app.prefabFromSelection();
+// the selected objects (or arrangement from, a suggestion's) as a new prefab, or over an existing one
+export function openSavePrefab(app: App, from?: Prefab): void {
+  const r = from ?? app.prefabFromSelection();
   if (typeof r === 'string') { toast(r, 'error'); return; }
   const free = freePrefabNumber(app.rom);
   const all = app.prefabs();
@@ -791,14 +802,14 @@ export function openSavePrefab(app: App): void {
   };
   name.addEventListener('input', updCost);
   // the same arrangement elsewhere as Direct Map16 objects (prefabplaces.ts), replaced on request
-  const places = app.prefabPlaces({ ...r, name: '' });
+  const places = app.prefabPlaces({ ...r, name: '' }, !!from);
   const found = places.reduce((k, p) => k + p.places.length, 0);
   const saved = places.reduce((k, p) => k + p.places.reduce((b, q) => b + q.bytes, 0), 0);
-  const replaceAll = h('input', { type: 'checkbox' });
+  const replaceAll = h('input', { type: 'checkbox', checked: !!from });
   const plural = (k: number, w: string) => `${k} ${w}${k === 1 ? '' : 's'}`;
   const elsewhere = found
     ? h('div', null,
-      usedInList(app, 'The same Direct Map16 objects elsewhere', places.map((p) => ({
+      usedInList(app, from ? 'Where these Direct Map16 objects are' : 'The same Direct Map16 objects elsewhere', places.map((p) => ({
         level: p.level, at: { x: p.places[0].x, y: p.places[0].y },
         text: `${plural(p.places.length, 'place')}, ${plural(p.places.reduce((b, q) => b + q.bytes, 0), 'byte')} saved`,
       })), 0, ''),
@@ -814,18 +825,20 @@ export function openSavePrefab(app: App): void {
   target.addEventListener('change', upd);
   if (free < 0 && !all.size) { toast(`All ${PREFAB_COUNT} prefabs are in use.`, 'error'); return; }
   upd();
-  const save = () => app.saveSelectionAsPrefab(Number(target.value), name.value.trim(), replace.checked, replaceAll.checked ? places : []);
+  const save = () => (from
+    ? app.saveArrangementAsPrefab(Number(target.value), { ...from, name: name.value.trim() }, replaceAll.checked ? places : [])
+    : app.saveSelectionAsPrefab(Number(target.value), name.value.trim(), replace.checked, replaceAll.checked ? places : []));
   const body = h('div', null,
     h('div', { class: 'row' }, preview),
     h('div', { class: 'hint' }, `${r.w}×${r.h} tiles, ${r.tiles.filter((t) => t === TRANSPARENT).length} of them transparent (tiles of other objects are kept there).`),
     h('div', { class: 'prop' }, h('label', null, 'Name'), name),
     h('div', { class: 'prop' }, h('label', null, 'Save as'), target),
-    h('label', { class: 'row small' }, replace, ' Replace the selection in the level with the prefab'),
+    from ? '' : h('label', { class: 'row small' }, replace, ' Replace the selection in the level with the prefab'),
     note,
     cost,
     elsewhere,
     h('div', { class: 'hint' }, 'Prefabs (SMWS) only use extended object 04 (free in the game and in Lunar Magic) and change no game code.'));
-  const dlg = modal('Selection as prefab', body, [{ label: 'Cancel' }, { label: 'Save', primary: true, onClick: save }]);
+  const dlg = modal(from ? 'Suggestion as prefab' : 'Selection as prefab', body, [{ label: 'Cancel' }, { label: 'Save', primary: true, onClick: save }]);
   name.addEventListener('keydown', (e) => { if (e.key === 'Enter' && save()) dlg.close(); });
   setTimeout(() => name.focus(), 0);
 }
