@@ -404,7 +404,7 @@ export class LevelView {
     // origin marker
     ctx.fillStyle = color;
     ctx.fillRect(o.x * 16, o.y * 16, 4, 4);
-    if (this.app.selection.size === 1 && this.app.selection.has(o.uid) && (o.num !== 0 || o.ext === 2)) {
+    if (this.app.selection.size === 1 && this.app.selection.has(o.uid) && (o.num !== 0 || isDm16(o))) {
       const b = this.app.objectBounds(o), hs = this.handleSize();
       ctx.fillStyle = '#4cc2ff';
       ctx.fillRect(b.x1 * 16 + 11, b.y1 * 16 + 11, hs, hs);

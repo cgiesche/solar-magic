@@ -46,7 +46,7 @@ check(readSecondaryHeader(rom, N).levelSize === 0 && rom.r8(LEVEL_SIZE_TABLE + 0
   ];
   lv.exits = [];
   const l1 = serializeLayer1(rom, lv);
-  check(hex(l1.subarray(5)) === '00 01 01 01 07 02 30 01 00 82 07 02 30 01 00 01 00 01 03 08 02 30 01 00 ff', `layer 1: ${hex(l1.subarray(5))}`);
+  check(hex(l1.subarray(5)) === '00 01 01 01 07 05 30 01 00 82 07 05 30 01 00 01 00 01 03 08 05 30 01 00 ff', `layer 1: ${hex(l1.subarray(5))}`);
   const back = reparse(lv).objects.map((o) => `${o.x},${o.y}`).join(' ');
   check(back === '7,33 23,34 24,3', `parsed back: ${back}`);
   // without a size the nibble means nothing (the game ignores it)

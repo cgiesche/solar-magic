@@ -58,7 +58,7 @@ export interface LevelObject {
   x: number; // absolute tile position
   y: number;
   size: number; // settings byte for standard objects (and Direct Map16)
-  tile?: number; // Direct Map16 tile number (extended object $02, editor patch)
+  tile?: number; // Direct Map16 tile number (extended object $05, editor patch)
   cond?: Dm16Cond; // a Direct Map16 object's flag (cdm16.ts)
   struct?: number; // structure number (extended object $04 with the structure patch, see structs.ts)
 }

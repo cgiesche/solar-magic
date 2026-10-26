@@ -18,7 +18,7 @@
 //  - 6 ExAnimation: 8 header bytes (byte 0: the settings byte, $03FE00), then the list (exanim.ts);
 //  - 7 ExGFX numbers of the slots (bgpack.ts).
 // Lunar Magic's Direct Map16 objects in layer 1/2 (smwspeedruns' "Level Data Format") become the
-// editor's own (extended object $02, patches.ts):
+// editor's own (extended object $05, patches.ts):
 //  - 22 / 23: N10YYYYY 0010XXXX / 0011XXXX HHHHWWWW bbbbbbbb – one tile of page 0 / 1;
 //  - 27 (pages 00-3F) / 29 (40-7F): N10YYYYY 0111XXXX / 1001XXXX, then by the top bits of the 4th byte:
 //    00 HHHHWWWW 00BBBBBB bbbbbbbb (one tile, a rectangle), 01 hhhhwwww 01BBBBBB bbbbbbbb (a block of

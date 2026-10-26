@@ -7,7 +7,7 @@
 //  - per-level GFX bypass: 8 slots (SP4..SP1, FG3, BG1, FG2, FG1), low bytes and a table of high bytes;
 //    0FF = tileset default. The game passes a file's low byte along (in $04-$07, Y); the high bytes of the
 //    slots being uploaded are kept in RAM (EXGFX_HI_RAM) and joined with it where the file is looked up
-//  - extended object $02 "Direct Map16": 6 bytes, places any Map16 tile as a rectangle; 7 with a condition
+//  - extended object $05 "Direct Map16": 6 bytes, places any Map16 tile as a rectangle; 7 with a condition
 //    (Lunar Magic's conditional Direct Map16, cdm16.ts): bit 7 of the tile's high byte, then the condition byte
 //  - "edited" mark at $0FF0A0 where Lunar Magic keeps its version string (see markEdited)
 
@@ -33,8 +33,9 @@ const HOOK_UPLOAD = 0x00aa6b;
 const HOOK_SPRGFX = 0x00a9e1;
 const HOOK_FGGFX = 0x00aa22;
 const EXT_OBJ_TABLE = 0x0da10f;
-export const DM16_EXT = 0x02;
-const DM16_SLOT = EXT_OBJ_TABLE + DM16_EXT * 3; // empty in the original game
+// empty in the original game and in Lunar Magic, whose $02 is a 5-byte object (#117, tools/extobjprobe.ts)
+export const DM16_EXT = 0x05;
+const DM16_SLOT = EXT_OBJ_TABLE + DM16_EXT * 3;
 // Lunar Magic writes "Lunar Magic Version x.yy …" to $0FF0A0 when it first saves a level, together with its
 // level hacks (current level in $7E010B and others). Patches test $0FF0A0 != $FF for "a level editor's
 // hacks are in" (Retry System) and read $0FF0B4, the version's first digit, for LM 3 features (with
@@ -224,7 +225,7 @@ function build(): Asm {
   a.b(0xc2, 0x20, 0xc8, 0xc0, 0x04, 0x00); a.br(0xd0, 'ovlp'); // REP #$20 INY CPY #4 BNE
   a.b(0x68, 0x85, 0x0c, 0x68, 0x85, 0x0a, 0x68, 0x85, 0x08, 0x68, 0x28, 0x60); // restore, PLA PLP RTS
 
-  // ---- extended object $02: Direct Map16 (M=8, X=8) ----
+  // ---- extended object $05: Direct Map16 (M=8, X=8) ----
   a.label('DM16');
   a.b(0xa0, 0x00, 0xb7, 0x65, 0x85, 0x0c); // LDY #0 LDA [$65],y STA $0C
   a.b(0xc8, 0xb7, 0x65, 0x85, 0x0d); // INY LDA [$65],y STA $0D

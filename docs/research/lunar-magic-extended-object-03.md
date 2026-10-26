@@ -31,7 +31,7 @@ object. Structures are now extended object `$04`. It has no handler in the clean
 |---|---|---|---|---|
 | Clean game | 01 | 00 | – | 02–0F (load fails) |
 | Editor ROM with structures, before #117 | 01 | 00, 03 | – | 04–0F |
-| Editor ROM with structures, after #117 | 01 | 00, 04 | – | 03, 05–0F |
+| Editor ROM after #117 (structures `$04`, Direct Map16 `$05`) | 01 | 00, 04 | – | 02, 03, 06–0F |
 | *Journey to Kaizo* (Lunar Magic 3.40) | 01, **03** | 00 | 02 | 04–0F (runs whatever is at `$00:0000`) |
 
 Numbers 10–97 are the game's extended objects (they place tiles) in every ROM. The Lunar Magic 3.31 and 2.53
@@ -55,8 +55,9 @@ needs the swapped screen jump itself. The level height patch would need a handle
 from byte 2), its object hook would have to read the 5-bit subscreen, and the editor's object
 parser/serializer would have to write the swapped form below subscreen 15. That is a separate change.
 
-## Side finding: extended object `$02`
+## Extended object `$02`: Direct Map16
 
 Lunar Magic's `$02` (`$0DE1B0`) is a 5-byte object. It stores 2 bytes in `$19B8,x`/`$19D8,x` (the screen's
-exit) for the screen in byte 1. The editor's Direct Map16 is `$02` with 6 or 7 bytes. It collides the same
-way, but this note does not change it.
+exit) for the screen in byte 1. The editor's Direct Map16 was `$02` with 6 or 7 bytes, which collided the
+same way. It is now `$05`, the next number empty in both (no migration either). On the editor ROM, `$05`
+counts as "other" in the probe: Direct Map16 with zero bytes places tile 000.

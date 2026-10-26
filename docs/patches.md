@@ -814,7 +814,7 @@ entry drawn there.
 
 ### Conditional Direct Map16
 
-A Direct Map16 object (extended object `$02`) or a structure's tile can depend on a flag of Lunar Magic's
+A Direct Map16 object (extended object `$05`) or a structure's tile can depend on a flag of Lunar Magic's
 table at `$7FC060–$7FC06F` (flag *n*: byte `$7FC060 + n/8`, bit `n%8`, bits low to high). While the flag is
 off it is not drawn; with "always show" it is drawn, with its tiles + 0x100 while the flag is on. Nothing
 in the game sets the flags and the editor doesn't clear them: that is up to your own code, e.g. UberASM
@@ -829,7 +829,7 @@ load:
 ```
 
 In the level data the condition is Lunar Magic's byte `ACCCCCCC` (A: always show, C: the flag 00–7F) after
-the tile it belongs to, which says so by its top bit: a Direct Map16 object is `00` object bytes, `$02`,
+the tile it belongs to, which says so by its top bit: a Direct Map16 object is `00` object bytes, `$05`,
 the tile's low byte, its high byte with bit 7 set, the size byte, then the condition byte (7 bytes
 instead of 6); a structure's tile word has bit 15 set and the condition byte follows it. A `.mwl`'s objects
 27/29 in their conditional form keep the condition. The ExAnimation engine's RAM claim leaves the flags out
@@ -913,7 +913,7 @@ not compatible with the respective feature.
 
 | Address | Feature |
 |---|---|
-| `$05D8F5`, `$00BA2C`, `$00AA6B`, `$00A9E1`, `$00AA22`, ext. object table `$0DA115` | Editor patch (SMWE); reads Lunar Magic's conditional Direct Map16 flags, RAM `$7FC060–$7FC06F` (set by other code) |
+| `$05D8F5`, `$00BA2C`, `$00AA6B`, `$00A9E1`, `$00AA22`, ext. object table `$0DA11E` (entry `$05`, empty in the original and in Lunar Magic) | Editor patch (SMWE); reads Lunar Magic's conditional Direct Map16 flags, RAM `$7FC060–$7FC06F` (set by other code) |
 | `$00922F` | Level palettes (SMWP) |
 | `$058060` | BG tilemaps (SMWB) |
 | `$058DE6` | BG Map16 extension, BG tiles 200–FFF (SMWH) |

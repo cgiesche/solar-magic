@@ -120,13 +120,13 @@ const blocks: BlockProject = { files: files({ 'blocks/b.asm': 'db $42\nJMP A : J
   check(!c.ok && c.errors.some((x) => x.includes('RAM conflict')), 'low RAM claim $0DC4 vs $7E0DC5 rejected: ' + c.errors.join(' '));
 }
 
-// 3. the editor patch's extended object $02 slot: protected in an opened ROM; in a clean ROM a patch
+// 3. the editor patch's extended object $05 slot: protected in an opened ROM; in a clean ROM a patch
 // that took it first blocks the editor patch
 {
-  const p = applyPatch(fresh(), src('ExtObj', 'lorom\norg $0DA115\ndl $0DA000\n'));
-  check(!p.ok && p.errors.some((e) => e.includes('SMWE')), 'patch on extended object $02 rejected: ' + p.errors[0]);
+  const p = applyPatch(fresh(), src('ExtObj', 'lorom\norg $0DA11E\ndl $0DA000\n'));
+  check(!p.ok && p.errors.some((e) => e.includes('SMWE')), 'patch on extended object $05 rejected: ' + p.errors[0]);
   const rom = new Rom(cleanImage());
-  check(applyPatch(rom, src('ExtObj', 'lorom\norg $0DA115\ndl $0DA000\n')).ok, 'the same patch applies to a clean ROM');
+  check(applyPatch(rom, src('ExtObj', 'lorom\norg $0DA11E\ndl $0DA000\n')).ok, 'the same patch applies to a clean ROM');
   let msg = '';
   try { installEditorPatch(rom); } catch (e) { msg = (e as Error).message; }
   check(msg.includes('ExtObj'), 'editor patch refuses the taken slot and names the patch: ' + msg);

@@ -251,7 +251,7 @@ change only a few verified locations:
 | `$00BA2C` | GFX pointer table with 4096 entries (ExGFX 000–FFF); the high bytes of the slots' numbers in RAM `$7F367A`–`$7F3682` |
 | `$00AA6B` | Format selectable per file: LZ2/3bpp (original) or uncompressed 4bpp via DMA |
 | `$00A9E1`, `$00AA22` | Graphics bypass: 8 GFX slots per level (SP1–4, FG1–3, BG1), ExGFX up to FFF |
-| Ext. object `$02` | "Direct Map16": places any Map16 tile as a rectangle (6 bytes) |
+| Ext. object `$05` | "Direct Map16": places any Map16 tile as a rectangle (6 bytes); entry `$05` is empty in the original and in Lunar Magic (whose `$02` is a 5-byte object) |
 | Ext. object `$04` ("SMWS") | Structures: places a stored block of Map16 tiles (4 bytes, 4th byte = structure number 00–FF); only occupies entry `$04` of the extended object table, which is empty in the original and in Lunar Magic (whose `$03` is its swapped screen jump), independent of the editor patch |
 | `$00922F` ("SMWP") | Custom 256-color palette per level |
 | `$058060` ("SMWB") | BG tilemap data per level in any bank (edited backgrounds) |
