@@ -1004,9 +1004,13 @@ export class LevelView {
           if (b.x0 <= bx1 && b.x1 > bx0 && b.y0 <= by1 && b.y1 > by0) app.selection.add(s.uid);
         }
       } else if (Math.abs(d.x1 - d.x0) > 3 || Math.abs(d.y1 - d.y0) > 3) {
+        // an object is caught by its tiles (its outline), not its bounding box: slopes reach far diagonally
         for (const o of app.currentObjects()) {
-          const b = app.objectBounds(o);
-          if (b.x0 <= x1 && b.x1 >= x0 && b.y0 <= y1 && b.y1 >= y0) app.selection.add(o.uid);
+          const hit = app.objectTiles(o).some(t => {
+            const x = t & 0xffff, y = t >> 16;
+            return x >= x0 && x <= x1 && y >= y0 && y <= y1;
+          });
+          if (hit) app.selection.add(o.uid);
         }
       }
       app.emit('change');
