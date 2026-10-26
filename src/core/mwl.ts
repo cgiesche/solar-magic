@@ -30,7 +30,7 @@
 import type { Rom } from './rom.ts';
 import {
   type Level, type LevelObject, type ScreenExit, newUid, parsePrimaryHeader, decodeSecondaryHeader, isL1Vertical, isL2Vertical,
-  hasLayer2Objects, hasObjects, parseSprites, spriteSizes, hasLevelSize, isSized, MAX_LEVEL_SIZE, SUBSCREEN_ROWS,
+  hasLayer2Objects, hasObjects, parseSprites, spriteSizes, hasLevelSize, isSized, MAX_LEVEL_SIZE, SUBSCREEN_ROWS, SWAPPED_JUMP,
 } from './level.ts';
 import { DM16_EXT } from './patches.ts';
 import { condOf, type Dm16Cond } from './cdm16.ts';
@@ -122,6 +122,7 @@ export function parseLmObjects(data: Uint8Array, start: number, vertical: boolea
       continue;
     }
     if (num === 0 && b2 === 1) { screen = b0 & 0x1f; if (sized && !vertical) sub = b1 & 0x0f; p += 3; continue; }
+    if (num === 0 && b2 === SWAPPED_JUMP) { screen = b1 & 0x1f; if (sized && !vertical) sub = b0 & 0x1f; p += 3; continue; }
     const { x, y } = at(b0, b1);
     cut = false;
     if (num === 0x22 || num === 0x23) { dm16(x, y, ((num - 0x22) << 8) | data[p + 3], b2); if (cut) high++; p += 4; continue; }

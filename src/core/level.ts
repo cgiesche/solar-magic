@@ -33,10 +33,10 @@ export const LEVEL_HEIGHTS = [
   0x1b0, 0x1c0, 0x1d0, 0x200, 0x220, 0x250, 0x260, 0x280, 0x2a0, 0x2c0, 0x2f0, 0x310, 0x340, 0x380, 0x3b0, 0x400,
   0x440, 0x4a0, 0x510, 0x590, 0x630, 0x700, 0x800, 0x950, 0xb30, 0xe00, 0x12a0, 0x1c00, 0x3800, 0x100, 0xf0, 0xe0,
 ];
-// sizes the editor offers: 1C (one screen, 0x3800 pixels, 28 subscreens) needs Lunar Magic's swapped screen jump,
-// extended object $03 (000VVVVV HHHHHHHH: a 5-bit subscreen), which the level height patch doesn't have yet;
-// 1D-1F have more than 32 screens
-export const MAX_LEVEL_SIZE = 0x1b;
+// sizes the editor offers: 1D-1F have more than 32 screens (1C, one screen of 0x3800 pixels, has 28 subscreens:
+// below subscreen 15 by Lunar Magic's swapped screen jump, see parseObjects)
+export const MAX_LEVEL_SIZE = 0x1c;
+export const SWAPPED_JUMP = 0x03; // Lunar Magic's swapped screen jump, extended object $03
 export const SUBSCREEN_ROWS = 32; // a taller level's object and sprite positions count in subscreens of 32 rows
 export const levelRows = (s: { levelSize: number }): number => LEVEL_HEIGHTS[s.levelSize & 0x1f] >> 4;
 // a level with subscreens: objects and sprites below row 31 (screen jumps with a subscreen, sprite data
@@ -319,6 +319,8 @@ export interface ParsedObjects {
 // extended object $04 is a structure (4 bytes, structure patch). In a level with a size (`sized`) the
 // screen jump's low nibble of the second byte is the subscreen (000HHHHH 0000VVVV 00000001): rows
 // V * 32 on; the new screen flag keeps it (observed: where the game puts objects in a Lunar Magic-saved ROM).
+// Subscreens 16-31 (size 1C) need Lunar Magic's swapped screen jump, extended object $03 (000VVVVV 0000HHHH
+// 00000011; read from Lunar Magic's code in a Lunar Magic-saved ROM, #117).
 // `at` receives each exit's offset in `data`
 export function parseObjects(data: Uint8Array, start: number, vertical: boolean, sized = false, at?: number[]): ParsedObjects {
   const objects: LevelObject[] = [];
@@ -344,6 +346,12 @@ export function parseObjects(data: Uint8Array, start: number, vertical: boolean,
     if (num === 0 && b2 === 1) {
       screen = b0 & 0x1f;
       if (sized && !vertical) sub = b1 & 0x0f;
+      p += 3;
+      continue;
+    }
+    if (num === 0 && b2 === SWAPPED_JUMP) {
+      screen = b1 & 0x1f;
+      if (sized && !vertical) sub = b0 & 0x1f;
       p += 3;
       continue;
     }
@@ -395,7 +403,7 @@ export function serializeObjects(objects: LevelObject[], exits: ScreenExit[], ve
       nflag = 0x80;
       screen = s;
     } else if (s !== screen || v !== sub) {
-      out.push(s & 0x1f, v & 0x0f, 0x01);
+      out.push(...(v > 0x0f ? [v & 0x1f, s & 0x0f, SWAPPED_JUMP] : [s & 0x1f, v, 0x01]));
       own(3, -1);
       screen = s;
       sub = v;

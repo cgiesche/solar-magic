@@ -64,10 +64,11 @@ function step(s: S, joy: number): void {
 }
 const sprites = (w: Uint8Array, dy: number) => Array.from({ length: SPRITE_SLOTS }, (_, i) =>
   w[SPR.status + i] ? `${w[SPR.num + i]}:${spriteX(w, i)},${(spriteY(w, i) + dy) & 0xffff}` : '').join('|');
-// the visible layer 1 tilemap (SMWV's 64x32 at $3000, rows modulo 32 in both)
+// the visible layer 1 tilemap (SMWV's 64x32 at $3000, rows modulo 32 in both); a 33rd column only while the
+// camera's fine scroll shows part of it (else it can lie past the level's last screen)
 function visible(s: S): number[] {
-  const out: number[] = [], w = s.wram, x0 = cameraX(w) >> 3, y0 = cameraY(w) >> 3;
-  for (let r = 0; r < 28; r++) for (let c = 0; c < 33; c++) {
+  const out: number[] = [], w = s.wram, x0 = cameraX(w) >> 3, y0 = cameraY(w) >> 3, cols = cameraX(w) & 7 ? 33 : 32;
+  for (let r = 0; r < 28; r++) for (let c = 0; c < cols; c++) {
     const x = x0 + c, m = ((x & 32) ? 0x3400 : 0x3000) + ((y0 + r) & 31) * 32 + (x & 31);
     out.push(s.vram[m * 2] | (s.vram[m * 2 + 1] << 8));
   }
@@ -98,7 +99,7 @@ function compare(n: number, size: number, dy: number, note = ''): void {
 }
 // also the sizes shorter than 32 rows (28, 29 and 32); a level moves by an even number of rows where its
 // sprites look at their row: the bouncing Paratroopa jumps higher from an odd row ($01856C keeps Y bit 4)
-for (const [n, size, dy] of [[0x105, 0x0e, 32], [0x106, 0x0e, 32], [0x001, 0x0e, 32], [0x002, 0x0e, 32], [0x10b, 0x0e, 32], [0x105, 0x13, 62], [0x106, 0x1a, 271], [0x105, 0x01, 1], [0x106, 0x02, 2], [0x001, 0x01, 0], [0x002, 0x02, 2], [0x105, 0x03, 5]]) compare(n, size, dy);
+for (const [n, size, dy] of [[0x105, 0x0e, 32], [0x106, 0x0e, 32], [0x001, 0x0e, 32], [0x002, 0x0e, 32], [0x10b, 0x0e, 32], [0x105, 0x13, 62], [0x106, 0x1a, 271], [0x105, 0x01, 1], [0x106, 0x02, 2], [0x001, 0x01, 0], [0x002, 0x02, 2], [0x105, 0x03, 5], [0x105, 0x1b, 421], [0x105, 0x1c, 869]]) compare(n, size, dy);
 
 // a pipe in the moved part: level 105's exit pipe (screen 7) leads where the game's does; the exit leads to
 // a secondary entrance in the moved part of the level itself: Mario comes out at its tile, the camera above

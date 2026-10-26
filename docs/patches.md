@@ -506,9 +506,8 @@ fix as its own patch; the original is a replaced patch.
 ### Level heights
 
 A horizontal level without layer 2 objects can be taller or shorter than the game's 27 rows, as in Lunar
-Magic 3.00 (Vitor Vilela's level height hack): *Level header → Level height* offers Lunar Magic's sizes 00–1B
-(28 to 448 rows; 1C–1F are left out: 1C needs Lunar Magic's swapped screen jump, extended object `$03` with a
-5-bit subscreen, which the patch doesn't have yet; 1D–1F have more than 32 screens). The level data's 0x3800 bytes are shared by the
+Magic 3.00 (Vitor Vilela's level height hack): *Level header → Level height* offers Lunar Magic's sizes 00–1C
+(28 to 896 rows; 1D–1F are left out: they have more than 32 screens). The level data's 0x3800 bytes are shared by the
 screens, a screen taking as many bytes as the level is high in pixels: the taller the level, the fewer screens
 (size 0D: 56 rows, 16 screens; 1A: 298 rows, 3 screens). Heights the level's screens, objects or sprites don't
 fit in can't be chosen.
@@ -516,7 +515,9 @@ fit in can't be chosen.
 The data is Lunar Magic's: a byte per level (`TB0MMMMM`, M the size; Lunar Magic's T and B are kept), here at
 `$06CA00` (Lunar Magic keeps its table next to its own code), also read from a `.mwl` (level information byte 16).
 Below row 31 objects are placed by screen jumps with a subscreen of 32 rows (`000HHHHH 0000VVVV 00000001`; the
-new screen flag keeps the subscreen), sprites in Lunar Magic's new format (header bit 5; `$FF V` sets the
+new screen flag keeps the subscreen); subscreens 16–27 (size 1C: one screen of 896 rows) by Lunar Magic's swapped
+screen jump, extended object `$03` (`000VVVVV 0000HHHH 00000011`, the patch's handler sets the screen; read from
+Lunar Magic's code at `$0DE1E0` in a Lunar Magic-saved ROM, #117), sprites in Lunar Magic's new format (header bit 5; `$FF V` sets the
 subscreen, `$FF $FE` ends the data, `$FF $FF` is a sprite starting with `$FF`). Only levels taller than 32
 rows use subscreens. The sprite memory is the header's bits 0–4. All of this was learned from a Lunar
 Magic-saved ROM in the editor's emulator (what Lunar Magic's code sets as the level's height per size, where
@@ -922,7 +923,7 @@ not compatible with the respective feature.
 | `$00A9DA`, `$00A01F` | Layer 3 graphics per level (SMWL); RAM `$7F3678` |
 | `$05D915`, `$00F79D`, table `$06FA00` | Layer 2 scroll rates; RAM `$7F3660–$7F3665` |
 | `$00F713`, `$00F728`, `$00F7F4`, `$00F80C` | Sprite scroll fix; RAM `$7F3683–$7F3686` |
-| `$05D928`, `$0586BB`, entrance options and screen exit flags `$009708`, `$0DA532`, `$0DA536`, the slanted pipe to the left `$00D2B2`, the midway entrance `$05D9B8`, `$05D9DE` (also by a screen exit, its flags `$05D7C5`), new-style exits `$05D7CE`, `$05D836`, `$0DA963`, `$0DA9D6`, `$0DA9EF`, `$058091`, tables `$06CA00`, `$05DE00`, `$06FC00`, `$06FE00`, `$06CC00`, `$06CE00`, `$07E800`, `$07EA00`, `$07EC00`, `$07EE00`; finding a block `$00F478`, `$00F492`, `$00F49A`, `$0194D6`, `$019500`, `$019512`, `$01D97B`, `$01D981`, `$0292D9`, `$0292F9`, `$02930A`, `$0295C0`, `$0295EC`, `$0295FD`, `$02A6BA`, `$02A6CB`, `$02BA50`, `$02BA71`, `$02BA82`, `$02D15A`, `$02D18C`, `$02D19D`, `$03D793`; changing a tile `$00BEEC`, `$00BF41`, `$00C079`, `$00C0C6`, `$00C1B1`, `$00C3D3`; mode tables `$00BDA8`, `$00BDE8`, `$00BE28`, `$00BE68`; sprites `$02A82E`, `$02A968`, `$02AA5F`, `$02AB54`, `$02ABD0`, `$02AF3D`, `$02AFA7`, `$01AC3E`, `$02D038`, `$03B86A`; camera `$00F70D`; entrances `$05D7E0`, `$05DA17`; secondary entrances to the overworld `$05D836` | Level heights (Lunar Magic 3.00's entrances, their options); RAM `$7F3666–$7F3677`, `$7F3679`, Lunar Magic's `$13D7`, `$0BF6–$0CF5` |
+| `$05D928`, `$0586BB`, entrance options and screen exit flags `$009708`, `$0DA532`, `$0DA536`, the slanted pipe to the left `$00D2B2`, the midway entrance `$05D9B8`, `$05D9DE` (also by a screen exit, its flags `$05D7C5`), new-style exits `$05D7CE`, `$05D836`, `$0DA963`, `$0DA9D6`, `$0DA9EF`, `$058091`, ext. object table `$0DA118` (entry `$03`, the swapped screen jump), tables `$06CA00`, `$05DE00`, `$06FC00`, `$06FE00`, `$06CC00`, `$06CE00`, `$07E800`, `$07EA00`, `$07EC00`, `$07EE00`; finding a block `$00F478`, `$00F492`, `$00F49A`, `$0194D6`, `$019500`, `$019512`, `$01D97B`, `$01D981`, `$0292D9`, `$0292F9`, `$02930A`, `$0295C0`, `$0295EC`, `$0295FD`, `$02A6BA`, `$02A6CB`, `$02BA50`, `$02BA71`, `$02BA82`, `$02D15A`, `$02D18C`, `$02D19D`, `$03D793`; changing a tile `$00BEEC`, `$00BF41`, `$00C079`, `$00C0C6`, `$00C1B1`, `$00C3D3`; mode tables `$00BDA8`, `$00BDE8`, `$00BE28`, `$00BE68`; sprites `$02A82E`, `$02A968`, `$02AA5F`, `$02AB54`, `$02ABD0`, `$02AF3D`, `$02AFA7`, `$01AC3E`, `$02D038`, `$03B86A`; camera `$00F70D`; entrances `$05D7E0`, `$05DA17`; secondary entrances to the overworld `$05D836` | Level heights (Lunar Magic 3.00's entrances, their options); RAM `$7F3666–$7F3677`, `$7F3679`, Lunar Magic's `$13D7`, `$0BF6–$0CF5` |
 | `$008A7F`, `$0087AD`, `$0085E3`, `$0580B0`, `$0580B4`, `$0580BF`, `$0580C3`, `$058730`, `$058770`, `$0587D4`, `$0587DB`, `$05880B`, `$058812`, `$0586F7`, `$058A3A` | VRAM patch (SMWV): tilemaps relocated, taller levels' rows; RAM `$7F0000–$7F3654` |
 | `$048509`, `$048543` | Overworld teleports (the star/pipe table with 0x100 entries) |
 | `$04D7F2–$04D85C` | Translevels per level tile (Lunar Magic's table) |
@@ -975,7 +976,7 @@ again.
 * `src/core/blocks.ts`, `src/core/map16ext.ts`: custom blocks.
 * `src/core/structs.ts`: structures (extended object `$04`). Level data: `00` object bytes as for any
   extended object with `$04`, then 1 byte structure number. `$04` because it is empty in the clean game and in
-  Lunar Magic. Lunar Magic's `$03` is its swapped screen jump (level height 1C), a 3-byte object, so a
+  Lunar Magic. Lunar Magic's `$03` is its swapped screen jump (level height 1C, the level height patch's too), a 3-byte object, so a
   structure there would put Lunar Magic's level load out of step. Found by emulation (`tools/extobjprobe.ts`,
   [research note](research/lunar-magic-extended-object-03.md), #117). Levels saved with structures at `$03`
   are not converted (no migration).

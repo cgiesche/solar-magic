@@ -9,6 +9,8 @@
 //    the game's); the sprite memory is the header's bits 4-0 (bit 5: Lunar Magic's new sprite format);
 //  - per object ($0586BB, after the game took the screen's address from its table) the address from the
 //    screen, the subscreen (the screen jump's low nibble of the second byte) and the high Y bit;
+//  - extended object $03 (empty in the game): Lunar Magic's swapped screen jump for subscreens 16-27 (size 1C),
+//    000VVVVV 0000HHHH, the screen from the second byte as Lunar Magic's code at $0DE1E0 sets it;
 //  - where an object goes on to the next or previous screen ($0DA963, $0DA9D6, $0DA9EF, the places
 //    Lunar Magic changes) the screen size instead of the game's $1B0;
 //  - after the load ($058091) the size is cleared again: loads without the setup (the credits) are the game's.
@@ -233,7 +235,16 @@ org $${hx(DONE_HOOK)}   ; LDA $0100 : CMP #$22 (after the level load)
   JSL Done
   NOP
 
+; extended object $03 (empty in the game): Lunar Magic's swapped screen jump 000VVVVV 0000HHHH 00000011, the
+; screen from the second byte (as Lunar Magic's code at $0DE1E0 in a Lunar Magic-saved ROM; Pointer reads V)
+org $0DA118
+  dl SwappedJump
+
 freecode
+SwappedJump:   ; from the extended object dispatcher (A/X/Y 8), which was called by JSR from $0DA102
+  LDA $0B : AND #$1F : STA $1928 : STA $1BA1
+  PLA : PLA : RTL   ; drop the JSR's return, back to the dispatcher's caller
+
 Setup:
   PHX
   REP #$20 : PHA : SEP #$20   ; the game's high byte of A (the entrance code below takes X from TAX)
@@ -694,11 +705,18 @@ Pointer:
   LDA.l !Size : BEQ .game
   SEP #$20
   LDA $1933 : BNE .game8
-  LDA $5A : BNE +
-  LDA $59 : CMP #$01 : BNE +   ; extended object $01: a screen jump
-  LDA $0B : AND #$0F : STA.l !Sub
-+ PHX
-  LDA.l !Sub : AND #$0F : ASL : XBA : LDA #$00
+  LDA $5A : BNE .at
+  LDA $59 : CMP #$01 : BNE .swapped   ; extended object $01: a screen jump
+  LDA $0B : AND #$0F
+  BRA .sub
+.swapped
+  CMP #$03 : BNE .at                  ; $03: Lunar Magic's swapped screen jump (the subscreen in the first byte)
+  LDA $0A : AND #$1F
+.sub
+  STA.l !Sub
+.at
+  PHX
+  LDA.l !Sub : AND #$1F : ASL : XBA : LDA #$00
   REP #$20                              ; subscreen * $200
   CLC : ADC #$C800
   LDX $1928

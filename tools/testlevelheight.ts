@@ -8,7 +8,7 @@ import { LevelEmulator, OV_L1 } from '../src/core/levelemu.ts';
 import {
   type Level, loadLevel, cloneLevel, serializeLayer1, serializeLevelSprites, serializeSprites, spriteSizes, parseLevelData, encodeSecondaryHeader, decodeSecondaryHeader,
   levelRows, maxScreens, isTall, insertScreen, hasLevelSize, newUid, SPRITE_MEMORY, LEVEL_SIZE_TABLE, readSecondaryHeader,
-  entrancePos, nearestEntrance, mainSpot, spotTile, cameraRows, setCameraRows,
+  entrancePos, nearestEntrance, mainSpot, spotTile, cameraRows, setCameraRows, MAX_LEVEL_SIZE,
 } from '../src/core/level.ts';
 import { renderLevel } from '../src/core/render.ts';
 import { DM16_EXT } from '../src/core/patches.ts';
@@ -130,6 +130,32 @@ check(readSecondaryHeader(rom, N).levelSize === 0 && rom.r8(LEVEL_SIZE_TABLE + 0
   const at = (x: number, y: number) => r.wram[g.addr(x, y)] | (r.wram[g.addr(x, y) + 0x10000] << 8);
   const got = [0x0e, 0x0f, 0x10, 0x11].flatMap((x) => [0x2a, 0x2b].map((y) => at(x, y)));
   check(got.every((t) => t === 0x130) && at(0x12, 0x2a) === 0x25 && at(0x0e, 0x2c) === 0x25, `Direct Map16 over the screen edge: ${got.map((t) => t.toString(16)).join(' ')}`);
+}
+
+// size 1C: one screen of 896 rows, 28 subscreens. Below subscreen 15 a screen jump has no room for the subscreen:
+// Lunar Magic's swapped screen jump, extended object $03 (000VVVVV 000HHHHH 00000011, read from Lunar Magic's code
+// in a Lunar Magic-saved ROM, #117), which the patch reads too
+{
+  check(MAX_LEVEL_SIZE === 0x1c && levelRows({ levelSize: 0x1c }) === 896 && maxScreens({ levelSize: 0x1c }) === 1, 'size 1C offered: 896 rows, 1 screen');
+  const lv = sized(base, 0x1c);
+  lv.header = { ...lv.header, screens: 1 };
+  lv.exits = [];
+  lv.sprites = [];
+  lv.objects = [
+    { uid: newUid(), num: 0, ext: DM16_EXT, x: 0x03, y: 0x2a5, size: 0, tile: 0x130 }, // subscreen 21: swapped
+    { uid: newUid(), num: 0, ext: DM16_EXT, x: 0x05, y: 0x025, size: 0, tile: 0x131 }, // subscreen 1: the screen jump
+    { uid: newUid(), num: 0, ext: DM16_EXT, x: 0x06, y: 0x1f5, size: 0, tile: 0x132 }, // subscreen 15: the screen jump
+    { uid: newUid(), num: 0, ext: DM16_EXT, x: 0x07, y: 0x37f, size: 0, tile: 0x133 }, // the last row, subscreen 27
+  ];
+  const l1 = hex(serializeLayer1(rom, lv).subarray(5));
+  check(l1.startsWith('15 00 03 05 03 05 30 01 00 00 01 01 05 05 05 31 01 00 00 0f 01 15 06 05 32 01 00 1b 00 03 1f 07 05 33 01 00'), `layer 1: ${l1}`);
+  const back = reparse(lv).objects.map((o) => `${o.x},${o.y}`).join(' ');
+  check(back === '3,677 5,37 6,501 7,895', `parsed back: ${back}`);
+  const r = emu.load(N, { layer1: serializeLayer1(rom, lv), sprites: serializeLevelSprites(rom, lv), secondaryHeader: encodeSecondaryHeader(lv.secondary) });
+  const g = renderLevel(rom, r, lv.header.mode, 1, levelRows(lv.secondary)).geom1;
+  const at = (x: number, y: number) => r.wram[g.addr(x, y)] | (r.wram[g.addr(x, y) + 0x10000] << 8);
+  const got = lv.objects.map((o) => at(o.x, o.y).toString(16)).join(' ');
+  check(r.ok && g.height === 896 && got === '130 131 132 133', `the game's load: ${got} (${g.width}×${g.height})`);
 }
 
 // probes load their own layer 1 data, in the game's layout, also under a level with a size

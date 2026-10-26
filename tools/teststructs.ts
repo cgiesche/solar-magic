@@ -22,10 +22,10 @@ const check = (ok: boolean, what: string) => { if (!ok) { fail++; console.log('F
 installStructPatch(rom);
 check(!!structPatch(rom), 'patch detected');
 // the number (#117, tools/extobjprobe.ts): its slot is empty in the clean game, and Lunar Magic's extended objects
-// stay free: $02 (5 bytes) and $03, its swapped screen jump (3 bytes)
+// stay theirs: $02 (5 bytes) free, $03 its swapped screen jump (3 bytes, the level height patch's)
 check(orig.r24(STRUCT_SLOT) === 0, 'the structures\' slot is empty in the clean game');
 check(rom.r24(EXT_OBJ_TABLE + 0x02 * 3) === 0, 'extended object $02 left to Lunar Magic (Direct Map16 elsewhere)');
-check(rom.r24(EXT_OBJ_TABLE + 0x03 * 3) === 0, `extended object $03 left to Lunar Magic (structures: $${STRUCT_EXT.toString(16)})`);
+check(rom.r24(EXT_OBJ_TABLE + 0x03 * 3) !== rom.r24(STRUCT_SLOT), `extended object $03 left to Lunar Magic's swapped screen jump (structures: $${STRUCT_EXT.toString(16)})`);
 const e0 = new LevelEmulator(orig); e0.boot();
 const e1 = new LevelEmulator(rom); e1.boot();
 const levels = [...Array(0x25).keys(), ...Array.from({ length: 0x3b }, (_, i) => 0x101 + i)];

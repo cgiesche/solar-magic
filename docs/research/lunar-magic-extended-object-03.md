@@ -31,7 +31,7 @@ object. Structures are now extended object `$04`. It has no handler in the clean
 |---|---|---|---|---|
 | Clean game | 01 | 00 | – | 02–0F (load fails) |
 | Editor ROM with structures, before #117 | 01 | 00, 03 | – | 04–0F |
-| Editor ROM after #117 (structures `$04`, Direct Map16 `$05`) | 01 | 00, 04 | – | 02, 03, 06–0F |
+| Editor ROM after #117 (structures `$04`, Direct Map16 `$05`) | 01 | 00, 04 | – | 02, 06–0F (03: the level height patch's swapped screen jump, 3 bytes) |
 | *Journey to Kaizo* (Lunar Magic 3.40) | 01, **03** | 00 | 02 | 04–0F (runs whatever is at `$00:0000`) |
 
 Numbers 10–97 are the game's extended objects (they place tiles) in every ROM. The Lunar Magic 3.31 and 2.53
@@ -50,10 +50,12 @@ with structures at `$03` load out of step (early development, see `docs/patches.
 
 ## Height 1C
 
-1C is still not offered. The collision is gone, but 1C (one screen of 0x3800 pixels, 28 subscreens) also
-needs the swapped screen jump itself. The level height patch would need a handler for `$03` (screen `$1928`
-from byte 2), its object hook would have to read the 5-bit subscreen, and the editor's object
-parser/serializer would have to write the swapped form below subscreen 15. That is a separate change.
+1C (one screen of 0x3800 pixels, 28 subscreens) is offered now. Below subscreen 15 the screen jump's nibble has no
+room, so the editor writes Lunar Magic's swapped screen jump there: `000VVVVV 0000HHHH 00000011`. The level height
+patch puts a handler of its own at entry `$03`, which sets the screen from byte 2 as Lunar Magic's `$0DE1E0`
+does, and its object hook reads the 5-bit subscreen from byte 1. `tools/testlevelheight.ts` checks the format
+and the game's load. `tools/testlevelheightplay.ts` checks that level 105 moved 869 rows down into a 1C level
+plays like the game's.
 
 ## Extended object `$02`: Direct Map16
 

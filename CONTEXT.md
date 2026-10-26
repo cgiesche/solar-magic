@@ -52,7 +52,7 @@ The zoomed view beside a graphics file's sheet in the Graphics tab, showing the 
 _Avoid_: canvas, paint dialog
 
 **Level size**:
-The height of a horizontal level without layer 2 objects, one of Lunar Magic 3.00's 32 sizes (the editor offers 00-1B); its screens share the game's level data, so a taller level has fewer screens. Objects and sprites below row 31 are placed by subscreens of 32 rows.
+The height of a horizontal level without layer 2 objects, one of Lunar Magic 3.00's 32 sizes (the editor offers 00-1C); its screens share the game's level data, so a taller level has fewer screens. Objects and sprites below row 31 are placed by subscreens of 32 rows.
 _Avoid_: dimension, level mode (that is the header's)
 
 **Tile entrance**:
