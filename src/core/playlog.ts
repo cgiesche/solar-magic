@@ -4,7 +4,7 @@
 // close together (a heavy spot), are one event.
 
 import { LINES_PER_FRAME, type Snes } from './snes.ts';
-import { GM, RAM } from './ram.ts';
+import { GM, RAM, marioTile } from './ram.ts';
 import { SLOT_KINDS, type SlotKind, type SlotFailure } from './slotwatch.ts';
 import type { Death } from './deaths.ts';
 
@@ -52,7 +52,7 @@ export class PlayLog {
   frame(frame: number, used: SlotCounts, failed: SlotFailure[], busy: number, marioX: number, marioY: number): void {
     this.history.push({ frame, used: { ...used }, failed, busy });
     if (this.history.length > this.size) this.history.splice(0, this.history.length - this.size);
-    const at = (count: number): Moment => ({ frame, count, tx: (marioX + 8) >> 4, ty: (marioY + 16) >> 4, last: frame });
+    const at = (count: number): Moment => ({ frame, count, ...marioTile(marioX, marioY), last: frame });
     const near = (e: Moment | null | undefined, within: number): e is Moment => !!e && frame - e.last <= within && frame >= e.last;
     for (const kind of SLOT_KINDS) {
       const mine = failed.filter((f) => f.kind === kind), n = mine.length;

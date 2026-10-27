@@ -32,10 +32,11 @@ export const RAM = {
   scrollUp: 0x1404, // the camera may scroll up (Mario flying, climbing …)
   scrollDir: 0x55, // the side new tiles and sprites load on: 0 left/up, 2 right/down ($56 the same)
   screenMode: 0x5b, // vertical level / layer 2 interaction bits
+  screens: 0x5d, // the level's screens (the last one + 1)
 
   // Mario
   powerup: 0x19,
-  marioAnim: 0x71, // animation (9 = dying, 6 = a vertical pipe)
+  marioAnim: 0x71, // animation (MARIO_DYING, 6 = a vertical pipe)
   marioAnimTimer: 0x1496, // how long the animation goes on (dying: until the death music)
   pipeTimer: 0x88, pipeAction: 0x89, // a pipe animation's timer; its kind (below 4: going in, else coming out)
   levelDataPtr: 0x65, spriteDataPtr: 0xce, // 24-bit: the level's layer 1 data and sprite data being loaded
@@ -127,6 +128,8 @@ export const RAM = {
   playerLives: 0x0db4, // per player (-1: out)
 } as const;
 
+export const MARIO_DYING = 9; // Mario's animation while he dies
+
 // level data: Map16 tile numbers, low bytes at MAP_BASE, high bytes in bank $7F
 export const MAP_BASE = 0xc800;
 export const MAP_SIZE = 0x3800;
@@ -140,6 +143,7 @@ export const LEVEL_HEIGHT_RAM: [number, number] = [0x7f3666, 18];
 export const LEVEL_MAX_Y = LEVEL_HEIGHT_RAM[0] + 4, LEVEL_ROW_MASK = LEVEL_HEIGHT_RAM[0] + 6;
 // and the level being loaded or played (16-bit, from the game's setup)
 export const LEVEL_LOADED = LEVEL_HEIGHT_RAM[0] + 10;
+export const levelLoaded = (w: Uint8Array) => get16(w, LEVEL_LOADED - 0x7e0000);
 // the layer 3 graphics patch's RAM (layer3gfx.ts): 1 while the layer 3 graphics in VRAM are a level's own
 export const LAYER3_GFX_RAM: [number, number] = [0x7f3678, 1];
 // the level heights patch's too: the flags of the screen exit Mario left by (0000wush, Lunar Magic's)
@@ -206,6 +210,8 @@ export function setCameraY(w: Uint8Array, y: number): void { set16(w, RAM.layer1
 
 export const marioX = (w: Uint8Array) => get16(w, RAM.marioX);
 export const marioY = (w: Uint8Array) => get16(w, RAM.marioY);
+// the tile Mario's feet stand in, from his position (pixels)
+export const marioTile = (x: number, y: number) => ({ tx: (x + 8) >> 4, ty: (y + 16) >> 4 });
 // Mario's position, also as the one at the start of the frame
 export function setMarioPos(w: Uint8Array, x: number, y: number): void {
   set16(w, RAM.marioX, x); set16(w, RAM.marioXFrame, x);

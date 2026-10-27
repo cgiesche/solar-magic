@@ -403,14 +403,15 @@ export class LevelView {
   // a red cross at Mario's tile (with the number of deaths there), a dashed red box at what killed him and a
   // line to it
   paintDeaths(ctx: CanvasRenderingContext2D, lw: number): void {
-    const at = this.deathsAt();
+    const at = this.deathsAt(), w = (this.app.images.width >> 4) - 1, hgt = (this.app.images.height >> 4) - 1;
     if (!at.size) return;
     ctx.lineWidth = 2 * lw;
     ctx.strokeStyle = 'rgba(255,60,60,0.9)';
     ctx.setLineDash([3 * lw, 3 * lw]);
     for (const { tx, ty, marks } of at.values()) for (const d of marks) {
-      const k = killerTile(d.killer);
-      if (!k) continue;
+      const kt = killerTile(d.killer);
+      if (!kt) continue;
+      const k = { tx: Math.max(0, Math.min(w, kt.tx)), ty: Math.max(0, Math.min(hgt, kt.ty)) };
       ctx.strokeRect(k.tx * 16 + 1, k.ty * 16 + 1, 14, 14);
       ctx.beginPath();
       ctx.moveTo(tx * 16 + 8, ty * 16 + 8);

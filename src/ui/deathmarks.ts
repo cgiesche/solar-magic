@@ -10,14 +10,14 @@ const MAX_KEPT = 100;
 export type DeathMark = Omit<Death, 'level'>;
 
 const key = (rom: string, level: number) => `${PREF}${rom}:${level}`;
-const read = new Map<string, DeathMark[]>(); // by key, as stored (the level view asks on every paint)
+const cache = new Map<string, DeathMark[]>(); // by key, as stored (the level view asks on every paint)
 
 export function loadDeaths(rom: string, level: number): DeathMark[] {
   const k = key(rom, level);
-  let marks = read.get(k);
+  let marks = cache.get(k);
   if (!marks) {
     try { marks = JSON.parse(localStorage.getItem(k) ?? '[]') as DeathMark[]; } catch { marks = []; }
-    read.set(k, marks);
+    cache.set(k, marks);
   }
   return marks;
 }
@@ -25,13 +25,13 @@ export function loadDeaths(rom: string, level: number): DeathMark[] {
 export function addDeath(rom: string, d: Death): void {
   const { level, ...mark } = d, k = key(rom, level);
   const all = [...loadDeaths(rom, level), mark].slice(-MAX_KEPT);
-  read.set(k, all);
+  cache.set(k, all);
   try { localStorage.setItem(k, JSON.stringify(all)); } catch { /* no storage */ }
 }
 
 export function clearDeaths(rom: string, level: number): void {
   const k = key(rom, level);
-  read.set(k, []);
+  cache.set(k, []);
   try { localStorage.removeItem(k); } catch { /* no storage */ }
 }
 

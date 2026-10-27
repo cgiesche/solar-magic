@@ -57,6 +57,24 @@ const RIGHT = 0x0100;
   check(k?.kind === 'sprite' && k.slots === 'sprite' && k.id === 0x0f, `killed by the Goomba (${JSON.stringify(k)})`);
   check(k?.kind === 'sprite' && Math.abs((k.x >> 4) - d[0].tx) <= 2, 'the Goomba was where Mario died');
   check(d[0]?.level === 0x105, `in level 105 (${d[0]?.level.toString(16)})`);
+  check(s.wram[RAM.screens] === 0x14, `the level's screens in RAM (${s.wram[RAM.screens].toString(16)})`);
+}
+{
+  // a Goomba among other Goombas and Koopas (sprite code reading other slots): still the Goomba that touched him
+  enter(0x105, [...sprite(0x0a, 0x16, 0x0f), ...sprite(0x0c, 0x16, 0x0f), ...sprite(0x0e, 0x16, 0x04), ...sprite(0x10, 0x16, 0x0f)]);
+  const d = play(300, RIGHT);
+  const k = d[0]?.killer;
+  check(d.length === 1 && k?.kind === 'sprite' && k.slots === 'sprite' && (k.id === 0x0f || k.id === 0x04) && Math.abs((k.x >> 4) - d[0].tx) <= 2,
+    `among other sprites: killed by the one he touched (${JSON.stringify(k)}, Mario at ${d[0]?.tx})`);
+}
+{
+  // the level's own sprites running: a muncher's death is still the block's
+  enter(0x105);
+  const w = s.wram, tx = (marioX(w) + 8) >> 4, ty = ((marioY(w) + 16) >> 4) + 1;
+  const a = layerGeom(rom, 0, 0, 0x20, 27).addr(tx, ty);
+  w[a] = 0x2f; w[a + MAP_HI] = 0x01;
+  const d = play(120, 0);
+  check(d[0]?.killer.kind === 'block', `with the level's sprites: a muncher still the killer (${JSON.stringify(d[0]?.killer)})`);
 }
 {
   // a muncher (Map16 12F) in the floor where Mario stands
@@ -97,6 +115,9 @@ const RIGHT = 0x0100;
   const h = layerGeom(rom, 0, 0, 0x20, 27), v = layerGeom(rom, 0, 0x0a, 0x10);
   const at = (x: number, y: number) => JSON.stringify(blockTile(w, h.addr(x, y))) === JSON.stringify({ tx: x, ty: y });
   check(at(0, 0) && at(0x35, 0x19) && at(0x1ff, 0x1a), 'horizontal level: the tile of an address');
+  w[RAM.screens] = 0x10;
+  check(blockTile(w, h.addr(0x100, 0)) === null && at(0xff, 0), 'behind the level\'s screens (layer 2\'s data): no layer 1 tile');
+  w[RAM.screens] = 0;
   w[RAM.screenMode] = 1;
   const atV = (x: number, y: number) => JSON.stringify(blockTile(w, v.addr(x, y))) === JSON.stringify({ tx: x, ty: y });
   check(atV(0, 0) && atV(0x13, 0x25) && atV(0x1f, 0xff), 'vertical level: the tile of an address');

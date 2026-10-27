@@ -45,8 +45,8 @@ function meterRow(label: string, help: string) {
   return { row, fill, val };
 }
 
-// a moment in a list: its text, what it means, a button showing Mario's tile then in the level (another level
-// than the one tested: in that level)
+// a moment in a list: its text, what it means, a button showing Mario's tile then in the level (in e.level when
+// it has one: a death names the level it happened in)
 function momentRow(e: { frame: number; tx: number; ty: number; level?: number }, text: string, help: string, show: Show): HTMLElement {
   return h('div', { class: 'meter-event', title: help },
     h('span', null, `Frame ${e.frame} · ${text} · Mario at ${e.level === undefined ? '' : `${hex(e.level, 3)}: `}${hex(e.tx, 2)}/${hex(e.ty, 2)}`),
