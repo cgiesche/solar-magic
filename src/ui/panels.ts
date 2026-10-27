@@ -139,6 +139,7 @@ export class Picker {
   thumbsFrom: ObjThumb[] | undefined; // the thumbnails shown (undefined: placeholders while they are learned)
   tabs: HTMLDivElement;
   builtPixels = 0; // the screen pixels per pixel the sheet shown is drawn at (0: no sheet)
+  hovered: { el: HTMLElement; rename: () => void; del?: () => void } | null = null; // the Objects tab's cell under the mouse, for F2 and Del
 
   constructor(app: App) {
     this.app = app;
@@ -350,17 +351,18 @@ export class Picker {
       const th = prefabThumb(sheet, st);
       const title = `Prefab ${hex2(n)}: ${st.name || '(unnamed)'}, ${st.w}×${st.h}`;
       const cell = grid.appendChild(h('div', {
-        class: `picker-cell${n === curN ? ' selected' : ''}`, title: `${title}\nRight click: rename, delete`,
+        class: `picker-cell${n === curN ? ' selected' : ''}`, title: `${title}\nRight click: rename (F2), delete (Del)`,
         oncontextmenu: (ev: MouseEvent) => {
           ev.preventDefault();
           contextMenu(ev.clientX, ev.clientY, [{ heading: `Prefab ${hex2(n)}` },
-            { label: 'Rename …', onClick: () => renamePrefab(app, n, st) },
-            { label: 'Delete …', onClick: () => deletePrefab(app, n, st) }]);
+            { label: 'Rename …', shortcut: 'F2', onClick: () => renamePrefab(app, n, st) },
+            { label: 'Delete …', shortcut: 'Del', onClick: () => deletePrefab(app, n, st) }]);
         },
         onclick: () => { if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1'); app.choosePickedItem({ kind: 'obj', num: 0, ext: PREFAB_EXT, size: 0, prefab: n }); },
       }, h('div', { class: 'picker-img' }, th.c),
         h('div', { class: 'picker-label' }, hex2(n)), h('div', { class: 'picker-name' }, st.name || '(unnamed)')));
-      previewOnHover(cell, th.scale, () => prefabCanvas(sheet, st), () => [`Prefab ${hex2(n)}: ${st.name || '(unnamed)'}`, `${st.w}×${st.h} tiles`, 'Right click: rename, delete']);
+      this.keysOn(cell, () => renamePrefab(app, n, st), () => deletePrefab(app, n, st));
+      previewOnHover(cell, th.scale, () => prefabCanvas(sheet, st), () => [`Prefab ${hex2(n)}: ${st.name || '(unnamed)'}`, `${st.w}×${st.h} tiles`, 'Right click: rename (F2), delete (Del)']);
     }
     if (grid.firstChild) box.append(grid);
     const sug = app.prefabSuggestions ?? [];
@@ -745,6 +747,23 @@ export class Picker {
     }
   }
 
+  // F2 (rename) and Del (delete) act on the cell under the mouse
+  keysOn(el: HTMLElement, rename: () => void, del?: () => void): void {
+    el.addEventListener('mouseenter', () => { this.hovered = { el, rename, del }; });
+    el.addEventListener('mouseleave', () => { if (this.hovered?.el === el) this.hovered = null; });
+  }
+
+  // a key for the hovered cell; true when it was used
+  key(e: KeyboardEvent): boolean {
+    const hv = this.hovered;
+    if (!hv?.el.isConnected || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return false;
+    if (e.key === 'F2') hv.rename();
+    else if (e.key === 'Delete' && hv.del) hv.del();
+    else return false;
+    hidePickerPreview(hv.el);
+    return true;
+  }
+
   // the Objects tab: Prefabs, Resizable (standard objects), Fixed size (extended objects); a section without
   // entries is left out (Prefabs keeps its button and hint)
   buildObjects(): void {
@@ -759,10 +778,10 @@ export class Picker {
         const sel = cur?.kind === 'obj' && cur.num === s.num && (s.num !== 0 || cur.ext === s.ext) && objectVariant(app.objectKind(s.num), cur.size) === vt;
         const th = e.th ? thumbAt(e.th) : null;
         const cell = grid.appendChild(h('div', {
-          class: `picker-cell${sel ? ' selected' : ''}`, title: `${e.title}\nRight click: rename`,
+          class: `picker-cell${sel ? ' selected' : ''}`, title: `${e.title}\nRight click: rename (F2)`,
           oncontextmenu: (ev: MouseEvent) => {
             ev.preventDefault();
-            contextMenu(ev.clientX, ev.clientY, [{ heading: app.objectName(s.num, s.ext) }, { label: 'Rename …', onClick: () => renameObject(app, s.num, s.ext) }]);
+            contextMenu(ev.clientX, ev.clientY, [{ heading: app.objectName(s.num, s.ext) }, { label: 'Rename …', shortcut: 'F2', onClick: () => renameObject(app, s.num, s.ext) }]);
           },
           onclick: () => {
             if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1');
@@ -771,7 +790,8 @@ export class Picker {
         }, h('div', { class: 'picker-img' }, th?.c ?? h('span', { class: 'none' }, '–'),
           h('div', { class: 'picker-corner' }, itemBadge(app, e.items), e.enter ? h('div', { class: 'picker-enter', title: enterText(e.enter) }, e.enter) : '')),
           h('div', { class: 'picker-label' }, e.label), h('div', { class: 'picker-name' }, app.objectName(s.num, s.ext))));
-        if (e.th) previewOnHover(cell, th!.scale, () => cloneCanvas(e.th!), () => [...e.title.split('\n'), 'Right click: rename']);
+        this.keysOn(cell, () => renameObject(app, s.num, s.ext));
+        if (e.th) previewOnHover(cell, th!.scale, () => cloneCanvas(e.th!), () => [...e.title.split('\n'), 'Right click: rename (F2)']);
       }
       if (!grid.firstChild) continue;
       this.body.append(h('div', { class: 'picker-head' }, title), grid);

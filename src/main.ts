@@ -415,6 +415,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     if (ctrl && k.toLowerCase() === 'v') { const hv = view.hover; if (hv) app.paste(hv.tx, hv.ty); return; }
     if (ctrl && k.toLowerCase() === 'd') { e.preventDefault(); app.duplicateSelection(); return; }
     if (ctrl && k.toLowerCase() === 'a') { e.preventDefault(); const items = app.mode === 'spr' ? app.level.sprites : app.currentObjects(); app.selection = new Set(items.map((o) => o.uid)); app.emit('change'); return; }
+    if (picker.key(e)) { e.preventDefault(); return; }
     if (k === 'Delete' || k === 'Backspace') { app.deleteSelection(); return; }
     // Esc: a drag cancelled, else the selection cleared, else the picked item
     if (k === 'Escape') {
@@ -556,6 +557,7 @@ function showHelp(): void {
       ['Arrow keys · Alt+arrow keys', 'Move selection by 1 tile · resize'],
       ['+ / - · * / /', 'Change width · change height'],
       ['Del / Backspace', 'Delete selection'],
+      ['F2 · Del over an object or prefab in “Insert”', 'Rename it · delete the prefab'],
       ['Ctrl+A · Esc', 'Select all · cancel dragging, deselect, then clear the element chosen in “Insert”'],
       ['Ctrl+C / Ctrl+V / Ctrl+D', 'Copy / paste at the mouse / duplicate'],
       ['PgUp / PgDn', 'Bring to front / send to back (drawing order)'],
