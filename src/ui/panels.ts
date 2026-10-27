@@ -7,6 +7,7 @@ import { defaultObjectName, namedPerTable } from '../core/objectnames.ts';
 import { NAME_MAX, nameOf, namesOf, nameGroups, connectedRect, tileRanges, type NameKind } from '../core/usernames.ts';
 import { objectVariant, withObjectVariant, type ObjKind } from '../core/objkinds.ts';
 import { thumbCanvas, objKey, type ObjSpec, type ObjThumb } from './thumbs.ts';
+import { wholeScale, fitScale, sized, screenPixels, previewOnHover, previewSheet, hidePickerPreview, PREVIEW_BELOW } from './pickerview.ts';
 import { newUid, spriteId, spriteBytes, spriteSizes, type LevelObject, type LevelSprite } from '../core/level.ts';
 import { levelName } from '../core/overworld.ts';
 import { usedInList } from './usedin.ts';
@@ -138,6 +139,7 @@ export class Picker {
   thumbTiles = new Map<string, number[]>(); // Map16 tiles per object key
   thumbsFrom: ObjThumb[] | undefined; // the thumbnails shown (undefined: placeholders while they are learned)
   tabs: HTMLDivElement;
+  builtScale = 0; // the size the sheet shown is drawn at (0: no sheet)
 
   constructor(app: App) {
     this.app = app;
@@ -146,6 +148,8 @@ export class Picker {
     this.root = h('div', { class: 'panel picker' }, h('div', { class: 'panel-title' }, 'Picker', h('span', { class: 'hint' }, 'Right click/Shift+click places')), this.tabs,
       this.m16Bar, this.body);
     this.body.addEventListener('scroll', () => this.m16Scrolled());
+    // a sheet is drawn anew when the picker's width allows another size
+    new ResizeObserver(() => requestAnimationFrame(() => { if (this.builtScale && this.sheetScale() !== this.builtScale) this.build(); })).observe(this.body);
     app.on('level', () => { this.ensureThumbs(); this.build(); });
     // the thumbnails of the level as edited: asked for whenever they may have changed, the learner decides
     for (const ev of ['objkinds', 'level-header', 'render', 'rom-change', 'thumbs'] as const) app.on(ev, () => { if (this.ensureThumbs() && this.tab === 'obj') this.build(); });
@@ -278,10 +282,11 @@ export class Picker {
       }
     }, { root: this.body, rootMargin: '300px 0px' });
     this.m16Observer = observer;
-    const S = 16 * 1.2;
+    // drawn at the screen's pixels, shown at the size
+    const scale = this.builtScale = this.sheetScale(), k = screenPixels(scale), S = 16 * k;
     for (let p = 0; p < pages; p++) {
       const base = p * 256;
-      const c = h('canvas', { width: 256 * 1.2, height: 256 * 1.2, class: 'm16-pick', 'data-page': String(p) });
+      const c = sized(h('canvas', { width: 256 * k, height: 256 * k, class: 'm16-pick', 'data-page': String(p) }), scale / k);
       const ctx = c.getContext('2d')!;
       ctx.imageSmoothingEnabled = false;
       let sheet: HTMLCanvasElement | null = null;
@@ -304,6 +309,13 @@ export class Picker {
         if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1');
         app.choosePickedItem({ kind: 'obj', num: 0, ext: DM16_EXT, size: 0, tile: base + r.y * 16 + r.x, ...(r.w * r.h > 1 ? { block: { w: r.w, h: r.h } } : {}) });
       }, (x, y) => app.editMap16(base + y * 16 + x));
+      previewSheet(c, () => (sheet ??= renderMap16Sheet(app, false, base, 256)), 16, 16, 16, scale, (r) => {
+        const t = base + r.y * 16 + r.x;
+        if (r.w * r.h > 1) return [`Block ${r.w}×${r.h} from tile ${hex3(t)}`];
+        const pr = app.probes.block(t), name = nameOf(app.rom, 'fg', t);
+        return [`Tile ${hex3(t)}${name ? ` “${name}”` : ''}`, pr ? probeText(pr) : 'determining behavior …', 'Ctrl+click: edit in the Map16 tab'];
+      });
+      if (scale < PREVIEW_BELOW) { this.body.append(h('div', { class: 'picker-head m16-page-head', 'data-page': String(p) }, `Page ${p.toString(16).toUpperCase()}`), c); continue; }
       c.addEventListener('mousemove', (e) => {
         const rc = c.getBoundingClientRect();
         const x = Math.floor((e.clientX - rc.left) / (rc.width / 16)), y = Math.floor((e.clientY - rc.top) / (rc.height / 16));
@@ -337,24 +349,29 @@ export class Picker {
     const all = app.prefabs();
     const sheet = prefabTileSource(app);
     for (const [n, st] of all) {
+      const th = prefabThumb(sheet, st);
       const row = h('div', {
         class: `picker-row${n === curN ? ' selected' : ''}`, title: `Prefab ${hex2(n)}: ${st.name || '(unnamed)'}, ${st.w}×${st.h}`,
         onclick: () => { if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1'); app.choosePickedItem({ kind: 'obj', num: 0, ext: PREFAB_EXT, size: 0, prefab: n }); },
-      }, h('span', { class: 'picker-thumb-s prefab' }, prefabCanvas(sheet, st)), h('span', { class: 'num' }, hex2(n)),
+      }, h('span', { class: 'picker-thumb-s prefab' }, th.c), h('span', { class: 'num' }, hex2(n)),
         h('span', { class: 'grow' }, st.name || '(unnamed)', h('span', { class: 'hint' }, ` ${st.w}×${st.h}`)),
         h('button', { class: 'icon-btn', title: 'Rename', 'aria-label': 'Rename', onclick: (e: Event) => { e.stopPropagation(); renamePrefab(app, n, st); } }, '✎'),
         h('button', { class: 'icon-btn', title: 'Delete', 'aria-label': 'Delete', onclick: (e: Event) => { e.stopPropagation(); deletePrefab(app, n, st); } }, '✕'));
+      previewOnHover(row, th.scale, () => prefabCanvas(sheet, st), () => [`Prefab ${hex2(n)}: ${st.name || '(unnamed)'}`, `${st.w}×${st.h} tiles`]);
       box.appendChild(row);
     }
     const sug = app.prefabSuggestions ?? [];
     if (sug.length) box.append(h('div', { class: 'picker-sub' }, 'Suggestions'));
     for (const sg of sug) {
       const lvs = sg.levels.length > 4 ? `${sg.levels.slice(0, 4).map(hex3).join(', ')} +${sg.levels.length - 4}` : sg.levels.map(hex3).join(', ');
-      box.appendChild(h('div', {
+      const th = prefabThumb(sheet, sg.prefab);
+      const row = box.appendChild(h('div', {
         class: 'picker-row', title: `${sg.count} places of these Direct Map16 objects in level ${sg.levels.map(hex3).join(', ')}: save as prefab and replace them all`,
         onclick: () => openSavePrefab(app, { prefab: sg.prefab, places: app.suggestionsCurrent ? sg.places : undefined }),
-      }, h('span', { class: 'picker-thumb-s prefab' }, prefabCanvas(sheet, sg.prefab)),
+      }, h('span', { class: 'picker-thumb-s prefab' }, th.c),
         h('span', { class: 'grow' }, `${sg.count}× in level ${lvs}`, h('span', { class: 'hint' }, ` saves ${sg.saved} byte${sg.saved === 1 ? '' : 's'}`))));
+      previewOnHover(row, th.scale, () => prefabCanvas(sheet, sg.prefab),
+        () => [`${sg.count}× in level ${sg.levels.map(hex3).join(', ')}`, `Saves ${sg.saved} byte${sg.saved === 1 ? '' : 's'}: save as prefab and replace them all`]);
     }
   }
   prefabSelection(): void {
@@ -374,8 +391,8 @@ export class Picker {
     // a brush that is a rectangle of the sheet is outlined there, one picked from the level is shown separately
     const onSheet = t0 >= 0 && t0 < 0x200 && (t0 & 15) + brush.w <= 16 && (t0 >> 4) + brush.h <= 32
       && brush.tiles.every((t, i) => t === brush.tiles[0] + Math.floor(i / brush.w) * 16 + (i % brush.w));
-    const S = 16 * 1.2;
-    const c = h('canvas', { width: 256 * 1.2, height: 512 * 1.2, class: 'm16-pick', title: 'Click/drag: tile(s) as brush · Ctrl+click: edit in the Map16 tab' });
+    const scale = this.builtScale = this.sheetScale(), k = screenPixels(scale), S = 16 * k;
+    const c = sized(h('canvas', { width: 256 * k, height: 512 * k, class: 'm16-pick', title: 'Click/drag: tile(s) as brush · Ctrl+click: edit in the Map16 tab' }), scale / k);
     const ctx = c.getContext('2d')!;
     ctx.imageSmoothingEnabled = false;
     const draw = (x: number, y: number, w: number, hh: number) => {
@@ -390,6 +407,10 @@ export class Picker {
       app.bgBrush = { w: r.w, h: r.h, tiles: Array.from({ length: r.w * r.h }, (_, i) => this.bgBase + (r.y + Math.floor(i / r.w)) * 16 + r.x + (i % r.w)) };
       this.build();
     }, (x, y) => app.editMap16(this.bgBase + y * 16 + x, true));
+    previewSheet(c, () => sheet, 16, 32, 16, scale, (r) => {
+      const t = this.bgBase + r.y * 16 + r.x, name = nameOf(app.rom, 'bg', t);
+      return r.w * r.h > 1 ? [`Block ${r.w}×${r.h} from BG tile ${hex3(t)}`] : [`BG tile ${hex3(t)}${name ? ` “${name}”` : ''}`, 'Ctrl+click: edit in the Map16 tab'];
+    });
     const what = brush.tiles.length > 1 ? `Block ${brush.w}×${brush.h}${onSheet ? ` from BG tile ${hex3(brush.tiles[0])}` : ' from the level'}` : `BG tile ${hex3(brush.tiles[0])}`;
     const pages = h('select', null, Array.from({ length: EXT_TILES / 512 }, (_, i) => h('option', { value: String(i * 512), selected: i * 512 === this.bgBase },
       i === 0 ? 'Pages 0–1' : `Pages ${(2 * i).toString(16).toUpperCase()}–${(2 * i + 1).toString(16).toUpperCase()}`)));
@@ -406,8 +427,7 @@ export class Picker {
       const src = map16Source(app.rom, app.render);
       brush.tiles.forEach((t, i) => drawMap16(px, brush.w * 16, brush.h * 16, tc, src.bg(t), (i % brush.w) * 16, Math.floor(i / brush.w) * 16));
       pc.putImageData(img, 0, 0);
-      p.style.width = `${Math.min(brush.w * S, 256 * 1.2)}px`;
-      p.style.imageRendering = 'pixelated';
+      sized(p, fitScale(p.width, p.height, 256 * scale, 256 * scale, scale));
       this.body.append(h('div', { class: 'row' }, p));
     }
     this.body.append(c);
@@ -428,8 +448,8 @@ export class Picker {
     // a brush that is a rectangle of the sheet (one palette, priority, no flips) is outlined there
     const onSheet = !(attr & (L3_FLIP_X | L3_FLIP_Y)) && (w0 & L3_TILE) < 0x200 && (w0 & 15) + b.w <= 16
       && b.tiles.every((t, i) => t === w0 + Math.floor(i / b.w) * 16 + (i % b.w));
-    const S = 2;
-    const c = h('canvas', { width: 128 * S, height: 256 * S, class: 'm16-pick', title: 'Click/drag: tile(s) as brush' });
+    const scale = this.builtScale = this.sheetScale(), S = screenPixels(scale);
+    const c = sized(h('canvas', { width: 128 * S, height: 256 * S, class: 'm16-pick', title: 'Click/drag: tile(s) as brush' }), scale / S);
     const ctx = c.getContext('2d')!;
     ctx.imageSmoothingEnabled = false;
     const sheet = document.createElement('canvas');
@@ -446,6 +466,7 @@ export class Picker {
     if (onSheet) show(w0 & 15, (w0 & L3_TILE) >> 4, b.w, b.h); else show(-1, 0, 0, 0);
     attachRectPick(c, 16, 32, (q) => show(q.x, q.y, q.w, q.h), (q) =>
       setBrush({ w: q.w, h: q.h, tiles: Array.from({ length: q.w * q.h }, (_, i) => ((q.y + Math.floor(i / q.w)) * 16 + q.x + (i % q.w)) | (attr & (L3_PAL | L3_PRIO))) }));
+    previewSheet(c, () => sheet, 16, 32, 8, scale, (q) => [q.w * q.h > 1 ? `Block ${q.w}×${q.h} from tile ${hex3(q.y * 16 + q.x)}` : `Tile ${hex3(q.y * 16 + q.x)}`]);
     const palSel = h('select', { title: 'Palette (colors 4 × n – 4 × n + 3)' }, Array.from({ length: 8 }, (_, i) => h('option', { value: String(i), selected: i === pal }, `Palette ${i}`)));
     palSel.addEventListener('change', () => { const p = Number(palSel.value); each((w) => withL3Palette(w, p)); });
     const prio = h('input', { type: 'checkbox', checked: !!(w0 & L3_PRIO) }) as HTMLInputElement;
@@ -474,8 +495,7 @@ export class Picker {
       const pc = p.getContext('2d')!, pimg = pc.createImageData(b.w * 8, b.h * 8), ppx = new Uint32Array(pimg.data.buffer);
       b.tiles.forEach((w, i) => draw(ppx, b.w * 8, w, (i % b.w) * 8, Math.floor(i / b.w) * 8));
       pc.putImageData(pimg, 0, 0);
-      p.style.width = `${Math.min(b.w * 8 * S, 128 * S)}px`;
-      p.style.imageRendering = 'pixelated';
+      sized(p, fitScale(p.width, p.height, 128 * scale, 128 * scale, scale));
       this.body.append(h('div', { class: 'row' }, p));
     }
     this.body.append(c);
@@ -674,8 +694,16 @@ export class Picker {
     return [prefabs, objects('obj', 'Resizable objects'), objects('ext', 'Fixed-size objects'), map16, named, sprites];
   }
 
+  // the size the sheet of the current tab or brush mode fits the picker's width at (layer 3's 8x8 tiles: half
+  // as wide as the Map16 pages)
+  sheetScale(): number {
+    return wholeScale(this.body.clientWidth, this.app.mode === 'l3' ? 128 : 256);
+  }
+
   build(): void {
     const app = this.app;
+    hidePickerPreview(this.body);
+    this.builtScale = 0;
     clear(this.tabs);
     const brush = isBrushMode(app.mode);
     this.m16Bar.style.display = !brush && this.tab === 'm16' ? '' : 'none';
@@ -695,17 +723,23 @@ export class Picker {
   buildSprites(): void {
     const app = this.app;
     const cur = app.pickedItem;
-    let head = false;
+    let grid = this.body.appendChild(h('div', { class: 'picker-grid' }));
     for (const e of this.spriteEntries()) {
-      if (e.id >= 0x200 && !head) { head = true; this.body.appendChild(h('div', { class: 'picker-head' }, 'Custom sprites (PIXI)')); }
+      if (e.id >= 0x200 && !grid.dataset.custom) {
+        this.body.append(h('div', { class: 'picker-head' }, 'Custom sprites (PIXI)'));
+        grid = this.body.appendChild(h('div', { class: 'picker-grid', 'data-custom': '1' }));
+      }
       const sel = cur?.kind === 'spr' && spriteId(cur) === e.id;
       const img = app.spriteThumbs?.get(e.id);
-      this.body.appendChild(h('div', {
-        class: `picker-row${sel ? ' selected' : ''}`, title: e.title,
+      const th = img ? thumbAt(img) : null;
+      const unused = e.id >= 0x200 && app.customSprite(e.id) && !app.spriteUsers(e.id).length;
+      const cell = grid.appendChild(h('div', {
+        class: `picker-cell${sel ? ' selected' : ''}`, title: e.title,
         onclick: () => { if (app.mode !== 'spr') app.setMode('spr'); app.choosePickedItem(e.item); },
-      }, h('span', { class: 'picker-thumb-s' }, img ? cloneCanvas(img) : ''), h('span', { class: 'num' }, e.num), e.name,
-        e.id >= 0x200 && app.customSprite(e.id) && !app.spriteUsers(e.id).length ? h('span', { class: 'gt-unused', title: 'Inserted, but in no level' }, 'unused') : '',
-        itemBadge(app, e.items, 'picker-items-row')));
+      }, h('div', { class: 'picker-img' }, th?.c ?? h('span', { class: 'none' }, '–'),
+        h('div', { class: 'picker-corner' }, itemBadge(app, e.items), unused ? h('span', { class: 'gt-unused', title: 'Inserted, but in no level' }, 'unused') : '')),
+        h('div', { class: 'picker-label' }, e.num), h('div', { class: 'picker-name' }, e.name)));
+      if (img) previewOnHover(cell, th!.scale, () => cloneCanvas(img), () => e.title.split('\n'));
     }
   }
 
@@ -721,16 +755,18 @@ export class Picker {
       for (const e of this.objectEntries(ext)) {
         const { s, vt } = e;
         const sel = cur?.kind === 'obj' && cur.num === s.num && (s.num !== 0 || cur.ext === s.ext) && objectVariant(app.objectKind(s.num), cur.size) === vt;
-        grid.appendChild(h('div', {
+        const th = e.th ? thumbAt(e.th) : null;
+        const cell = grid.appendChild(h('div', {
           class: `picker-cell${sel ? ' selected' : ''}`, title: `${e.title}\nRight click: rename`,
           oncontextmenu: (ev: Event) => { ev.preventDefault(); renameObject(app, s.num, s.ext); },
           onclick: () => {
             if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1');
             app.choosePickedItem(e.item);
           },
-        }, h('div', { class: 'picker-img' }, e.th ? cloneCanvas(e.th) : h('span', { class: 'none' }, '–'),
+        }, h('div', { class: 'picker-img' }, th?.c ?? h('span', { class: 'none' }, '–'),
           h('div', { class: 'picker-corner' }, itemBadge(app, e.items), e.enter ? h('div', { class: 'picker-enter', title: enterText(e.enter) }, e.enter) : '')),
           h('div', { class: 'picker-label' }, e.label), h('div', { class: 'picker-name' }, app.objectName(s.num, s.ext))));
+        if (e.th) previewOnHover(cell, th!.scale, () => cloneCanvas(e.th!), () => [...e.title.split('\n'), 'Right click: rename']);
       }
       if (!grid.firstChild) continue;
       this.body.append(h('div', { class: 'picker-head' }, title), grid);
@@ -757,6 +793,19 @@ function prefabTileSource(app: App): (t: number) => HTMLCanvasElement | null {
     }
     return c;
   };
+}
+
+// a picker cell's image (a copy of `img`) at the size it fits the cell's image box at
+const CELL_W = 96, CELL_H = 62;
+function thumbAt(img: HTMLCanvasElement): { c: HTMLCanvasElement; scale: number } {
+  const scale = fitScale(img.width, img.height, CELL_W, CELL_H);
+  return { c: sized(cloneCanvas(img), scale), scale };
+}
+
+// a prefab's image in a picker row at the size it fits there
+function prefabThumb(tile: (t: number) => HTMLCanvasElement | null, st: Prefab): { c: HTMLCanvasElement; scale: number } {
+  const c = prefabCanvas(tile, st), scale = fitScale(c.width, c.height, CELL_W, 64);
+  return { c: sized(c, scale), scale };
 }
 
 // image of a prefab in the current level's graphics; transparent cells stay empty

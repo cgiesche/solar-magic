@@ -24,6 +24,7 @@ import { TileCache, blit8 } from '../core/render.ts';
 import { hex } from '../core/names.ts';
 import { menuButton } from './menu.ts';
 import { levelPicker } from './levelpicker.ts';
+import { wholeScale, fitScale, sized, previewSheet, hidePickerPreview } from './pickerview.ts';
 import { mainTranslevel } from '../core/level.ts';
 import { RAM, map16Pointer } from '../core/ram.ts';
 import type { Rom } from '../core/rom.ts';
@@ -88,6 +89,7 @@ export class OverworldView {
   private statusText = h('span', { class: 'status-text' });
   private statusStats = h('span', { class: 'status-stats' });
   private palPanel = h('div', { class: 'panel ow-pal-panel' });
+  private palScale = 0; // the size the paint sheet is drawn at (0: none shown)
   private props = h('div', { class: 'panel props' });
   private tlList = h('div', { class: 'level-list' });
   private tlCount = h('span', { class: 'hint' });
@@ -155,6 +157,8 @@ export class OverworldView {
     this.root = h('div', { class: 'center' }, h('div', { class: 'level-view' }, this.scroller, this.eventsBadge), this.timeline, this.status);
     this.scroller.addEventListener('scroll', () => this.paint());
     new ResizeObserver(() => this.layout()).observe(this.scroller);
+    // the paint sheet is drawn anew when the panel's width allows another size
+    new ResizeObserver(() => requestAnimationFrame(() => { if (this.palScale && this.sheetScale(this.mode === 'l1' ? 256 : 128) !== this.palScale) this.buildSide(); })).observe(this.palPanel);
     this.scroller.addEventListener('contextmenu', (e) => e.preventDefault());
     this.scroller.addEventListener('mousedown', (e) => this.onDown(e));
     this.scroller.addEventListener('dblclick', (e) => this.onDouble(e));
@@ -954,6 +958,8 @@ export class OverworldView {
   // ---------------- right: palette, properties ----------------
   buildSide(): void {
     const scroll = this.palPanel.scrollTop;
+    hidePickerPreview(this.palPanel);
+    this.palScale = 0;
     this.palPanel.replaceChildren(...(this.mode === 'sprites' ? [h('div', { class: 'panel-title' }, 'Sprites'), h('div', { class: 'hint' }, 'Drawn as the game shows them on this map at the event progress; a dashed box where it doesn\'t show the sprite. Shadows and height marks: View.')]
       : this.mode === 'links' ? [h('div', { class: 'panel-title' }, 'Overworld links'), this.linkLegend()] : [
       h('div', { class: 'panel-title' }, 'Paint', h('span', { class: 'hint' }, 'Right click/Shift+click paints')),
@@ -1156,10 +1162,17 @@ export class OverworldView {
 
   // palette sheet with the brush outlined (when it is a rectangle of the sheet) and rectangle picking;
   // any other brush (taken from the map, flipped) is shown as a preview instead
+  // the size a sheet `native` pixels wide fits the paint panel at
+  private sheetScale(native: number): number {
+    const st = getComputedStyle(this.palPanel);
+    return wholeScale(this.palPanel.clientWidth - parseFloat(st.paddingLeft) - parseFloat(st.paddingRight), native);
+  }
+
   sheetPalette(sheet: HTMLCanvasElement, cls: string, cols: number, rows: number, cell: number, sheetValue: (x: number, y: number) => number,
-    preview: (ctx: CanvasRenderingContext2D) => void): HTMLElement {
+    preview: (ctx: CanvasRenderingContext2D) => void, describe: (r: { x: number; y: number; w: number; h: number }) => string[]): HTMLElement {
     const b = this.brush;
-    const c = h('canvas', { width: sheet.width, height: sheet.height, class: cls });
+    const scale = this.palScale = this.sheetScale(sheet.width);
+    const c = sized(h('canvas', { width: sheet.width, height: sheet.height, class: cls }), scale);
     const ctx = c.getContext('2d')!;
     const draw = (r: { x: number; y: number; w: number; h: number } | null) => {
       ctx.drawImage(sheet, 0, 0);
@@ -1179,12 +1192,12 @@ export class OverworldView {
       this.brush = { kind: this.mode === 'l2' ? 'l2' : 'l1', w: r.w, h: r.h, entries: Array.from({ length: r.w * r.h }, (_, j) => sheetValue(r.x + (j % r.w), r.y + Math.floor(j / r.w))) };
       this.buildSide();
     });
+    previewSheet(c, () => sheet, cols, rows, cell, scale, describe);
     const out = h('div', null);
     if (!at && b.kind === this.mode) {
       const p = h('canvas', { width: b.w * cell, height: b.h * cell, class: 'ow-brush' });
       preview(p.getContext('2d')!);
-      p.style.width = `${Math.min(b.w * cell * 2, 256)}px`;
-      p.style.imageRendering = 'pixelated';
+      sized(p, fitScale(p.width, p.height, sheet.width * scale, sheet.width * scale, scale));
       out.append(h('div', { class: 'hint' }, `Brush ${b.w}×${b.h}:`), h('div', { class: 'row' }, p));
     }
     out.append(c);
@@ -1211,7 +1224,8 @@ export class OverworldView {
     return h('div', null,
       h('div', { class: 'hint' }, `${one ? `Tile ${hex(b.entries[0], 2)}` : b.kind === 'l1' ? `Block ${b.w}×${b.h}` : ''} · Level tiles: 56–80`),
       this.sheetPalette(sheet, 'ow-pal', 16, 16, 16, (x, y) => y * 16 + x,
-        (ctx) => ctx.drawImage(tiles(b.entries, b.w, b.w * 16, b.h * 16), 0, 0)));
+        (ctx) => ctx.drawImage(tiles(b.entries, b.w, b.w * 16, b.h * 16), 0, 0),
+        (q) => [q.w * q.h > 1 ? `Block ${q.w}×${q.h} from tile ${hex(q.y * 16 + q.x, 2)}` : `Tile ${hex(q.y * 16 + q.x, 2)}`]));
   }
 
   l2Palette(): HTMLElement {
@@ -1244,7 +1258,8 @@ export class OverworldView {
       },
     }, label);
     const pal = h('div', { class: 'ow-pal-scroll' }, this.sheetPalette(sheet, 'ow-pal8', 16, 64, 8, (x, y) => (y * 16 + x) | (this.l2Pal << 10),
-      (ctx) => ctx.drawImage(entries(b.entries, b.w, b.w * 8, b.h * 8), 0, 0)));
+      (ctx) => ctx.drawImage(entries(b.entries, b.w, b.w * 8, b.h * 8), 0, 0),
+      (q) => [q.w * q.h > 1 ? `Block ${q.w}×${q.h} from tile ${hex(q.y * 16 + q.x, 3)}` : `Tile ${hex(q.y * 16 + q.x, 3)}`]));
     return h('div', null,
       h('div', { class: 'prop' }, h('label', null, 'Palette'), select(Array.from({ length: 8 }, (_, i) => [i, String(i)] as [number, string]), this.l2Pal, (v) => { this.l2Pal = v; this.buildSide(); })),
       h('div', { class: 'row' }, flip(0x4000, 'X-Flip'), flip(0x8000, 'Y-Flip'), flip(0x2000, 'Priority')),

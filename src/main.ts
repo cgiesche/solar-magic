@@ -12,6 +12,7 @@ import { pasteHintBox } from './ui/pastehint.ts';
 import { kvGet, kvSet, kvDel, kvClear, saveRom, romFromRecord, type RomRecord } from './ui/storage.ts';
 import { LevelView } from './ui/levelview.ts';
 import { LevelList, Picker, Properties } from './ui/panels.ts';
+import { sideSplitter } from './ui/pickerview.ts';
 import { openSearch } from './ui/search.ts';
 import { openHeaderDialog } from './ui/headerdialog.ts';
 import { hex } from './core/names.ts';
@@ -258,10 +259,13 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   const logBar = new LogBar();
   const busy = busyIndicator(app);
   const pasteHint = pasteHintBox(app);
-  const layout = h('div', { class: 'layout' }, appbar, levelBar, left, center, right, logBar.root, busy, pasteHint);
+  const layout = h('div', { class: 'layout' });
+  const split = sideSplitter(layout);
+  layout.append(appbar, levelBar, left, center, right, split.root, logBar.root, busy, pasteHint);
+  split.use('level');
   root.append(layout);
   const owRight = h('div', { class: 'right' });
-  const showLayout = (bar: HTMLElement, l: HTMLElement, main: HTMLElement, side: HTMLElement) => layout.replaceChildren(appbar, bar, l, main, side, logBar.root, busy, pasteHint);
+  const showLayout = (bar: HTMLElement, l: HTMLElement, main: HTMLElement, side: HTMLElement) => layout.replaceChildren(appbar, bar, l, main, side, split.root, logBar.root, busy, pasteHint);
 
   // switches between the level editor, the overworld editor and the graphics workspace (palettes, Map16, GFX);
   // gfx: tab to open (default: the last one), Map16 tile to show
@@ -283,6 +287,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     }
     const from = workspace;
     workspace = w;
+    split.use(w);
     if (from === 'ow') app.refresh();
     if (w === 'ow') {
       if (app.dirty) app.saveLevel(true);
