@@ -138,36 +138,14 @@ export class Palette {
   thumbTiles = new Map<string, number[]>(); // Map16 tiles per object key
   thumbsFrom: ObjThumb[] | undefined; // the thumbnails shown (undefined: placeholders while they are learned)
   tabs: HTMLDivElement;
-  search: HTMLInputElement;
-  searchRow: HTMLDivElement;
 
   constructor(app: App) {
     this.app = app;
     this.body = h('div', { class: 'palette-body' });
-    this.search = h('input', { class: 'filter', placeholder: 'Search …', spellcheck: false });
-    this.search.addEventListener('input', () => this.build());
     this.tabs = h('div', { class: 'tabs seg' });
-    this.searchRow = h('div', { class: 'row' }, this.search);
     this.root = h('div', { class: 'panel palette' }, h('div', { class: 'panel-title' }, 'Insert', h('span', { class: 'hint' }, 'Right click/Shift+click places')), this.tabs,
-      this.searchRow, this.m16SearchRow, this.m16Bar, this.body);
+      this.m16Bar, this.body);
     this.body.addEventListener('scroll', () => this.m16Scrolled());
-    this.m16Search.addEventListener('input', () => {
-      this.m16Match = tileMatches(this.m16Search.value, EXT_TILES, [blockFilesByTile(app.rom), namesOf(app.rom, 'fg')]);
-      this.build();
-      if (this.m16Match?.length) this.scrollToM16Tile(this.m16Match[0]);
-    });
-    this.m16Search.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && this.m16Search.value) { e.preventDefault(); this.m16Search.value = ''; this.m16Match = null; this.build(); return; }
-      if (e.key !== 'Enter' || this.m16Match?.length !== 1) return;
-      e.preventDefault();
-      app.paletteItem = { kind: 'obj', num: 0, ext: DM16_EXT, size: 0, tile: this.m16Match[0] };
-      this.m16Search.value = '';
-      this.m16Match = null;
-      this.m16Search.blur();
-      if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1');
-      this.build();
-      this.scrollToSelected();
-    });
     app.on('level', () => { this.ensureThumbs(); this.build(); });
     // the thumbnails of the level as edited: asked for whenever they may have changed, the learner decides
     for (const ev of ['objkinds', 'level-header', 'render', 'rom-change', 'thumbs'] as const) app.on(ev, () => { if (this.ensureThumbs() && this.tab === 'obj') this.build(); });
@@ -223,10 +201,6 @@ export class Palette {
     if (cur && JSON.stringify(cur) === JSON.stringify(item) && this.body.querySelector('.selected')) return; // e.g. just inserted
     app.paletteItem = item;
     this.build();
-    if (this.tab !== 'm16' && !this.body.querySelector('.selected') && this.search.value) {
-      this.search.value = ''; // the filter hides it
-      this.build();
-    }
     requestAnimationFrame(() => this.scrollToSelected()); // after the properties panel below has updated
   }
 
@@ -253,11 +227,7 @@ export class Palette {
   m16Observer?: IntersectionObserver;
   m16Page = 0; // page at the top of the list
   m16Bar: HTMLDivElement = h('div', { class: 'tabs seg m16-pages' });
-  // search by tile number, name or block file: the other tiles are dimmed, the list goes to the first match,
-  // Enter takes a single match
-  m16Search: HTMLInputElement = h('input', { class: 'filter', placeholder: 'Tile no. (hex), name or block file …', spellcheck: false, autocomplete: 'off',
-    title: 'Dims the tiles that do not match; Enter takes the tile once only one is left' });
-  m16SearchRow: HTMLDivElement = h('div', { class: 'row' }, this.m16Search);
+  // the tiles of a name chosen in the central search, marked (the others dimmed) until another tile is chosen
   m16Match: number[] | null = null;
   scrollToM16Page(page: number): void {
     const head = this.body.querySelector<HTMLElement>(`.m16-page-head[data-page="${page}"]`);
@@ -336,6 +306,7 @@ export class Palette {
       // click picks a tile, dragging picks a rectangle of tiles
       attachRectPick(c, 16, 16, (r) => draw(r.x, r.y, r.w, r.h), (r) => {
         app.paletteItem = { kind: 'obj', num: 0, ext: DM16_EXT, size: 0, tile: base + r.y * 16 + r.x, ...(r.w * r.h > 1 ? { block: { w: r.w, h: r.h } } : {}) };
+        this.m16Match = null;
         if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1');
         this.build();
       }, (x, y) => app.editMap16(base + y * 16 + x));
@@ -361,21 +332,17 @@ export class Palette {
   }
 
   // prefabs: blocks of Map16 tiles stored in the ROM, placed as one object each (prefabs.ts); the first section
-  // of the Objects tab, shown with its button and hint even without prefabs, then the suggestions (without a
-  // search); how many prefabs it lists
-  buildPrefabs(): number {
+  // of the Objects tab, shown with its button and hint even without prefabs, then the suggestions
+  buildPrefabs(): void {
     const app = this.app, box = this.prefabBox;
     clear(box);
     const cur = app.paletteItem;
     const curN = cur?.kind === 'obj' && cur.num === 0 && cur.ext === PREFAB_EXT ? cur.prefab ?? -1 : -1;
-    const f = this.search.value.trim().toLowerCase();
     box.append(h('div', { class: 'pal-head' }, 'Prefabs'), h('div', { class: 'row' }, this.prefabSave), this.prefabHint);
     this.prefabSelection();
     const all = app.prefabs();
     const sheet = prefabTileSource(app);
-    let shown = 0;
     for (const [n, st] of all) {
-      if (f && !`${hex2(n)} ${st.name}`.toLowerCase().includes(f)) continue;
       const row = h('div', {
         class: `pal-row${n === curN ? ' selected' : ''}`, title: `Prefab ${hex2(n)}: ${st.name || '(unnamed)'}, ${st.w}×${st.h}`,
         onclick: () => { app.paletteItem = { kind: 'obj', num: 0, ext: PREFAB_EXT, size: 0, prefab: n }; if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1'); this.build(); },
@@ -384,9 +351,8 @@ export class Palette {
         h('button', { class: 'icon-btn', title: 'Rename', 'aria-label': 'Rename', onclick: (e: Event) => { e.stopPropagation(); renamePrefab(app, n, st); } }, '✎'),
         h('button', { class: 'icon-btn', title: 'Delete', 'aria-label': 'Delete', onclick: (e: Event) => { e.stopPropagation(); deletePrefab(app, n, st); } }, '✕'));
       box.appendChild(row);
-      shown++;
     }
-    const sug = f ? [] : app.prefabSuggestions ?? [];
+    const sug = app.prefabSuggestions ?? [];
     if (sug.length) box.append(h('div', { class: 'pal-sub' }, 'Suggestions'));
     for (const sg of sug) {
       const lvs = sg.levels.length > 4 ? `${sg.levels.slice(0, 4).map(hex3).join(', ')} +${sg.levels.length - 4}` : sg.levels.map(hex3).join(', ');
@@ -396,7 +362,6 @@ export class Palette {
       }, h('span', { class: 'pal-thumb-s prefab' }, prefabCanvas(sheet, sg.prefab)),
         h('span', { class: 'grow' }, `${sg.count}× in level ${lvs}`, h('span', { class: 'hint' }, ` saves ${sg.saved} byte${sg.saved === 1 ? '' : 's'}`))));
     }
-    return shown;
   }
   prefabSelection(): void {
     const app = this.app;
@@ -601,22 +566,18 @@ export class Palette {
     if (tab === 'spr' ? app.mode !== 'spr' : app.mode !== 'l1' && app.mode !== 'l2') app.setMode(tab === 'spr' ? 'spr' : 'l1');
     this.tab = tab;
     app.paletteItem = item;
-    // (filters that would hide it)
-    this.search.value = '';
-    this.m16Search.value = '';
     this.m16Match = null;
     this.build();
     requestAnimationFrame(() => this.scrollToSelected());
   }
 
   // the tiles of a name (central search): taken as a block (FG) or brush (BG) when they fill a rectangle, else
-  // the first; the FG sheet's search shows the name and marks exactly them
+  // the first; the FG sheet marks exactly them
   chooseNamed(name: string, tiles: number[], bg: boolean): void {
     const app = this.app, c = connectedRect(tiles);
     const r = c && c.w * c.h === tiles.length ? c : { first: tiles[0], w: 1, h: 1 };
     if (!bg) {
       this.choose('m16', { kind: 'obj', num: 0, ext: DM16_EXT, size: 0, tile: r.first, ...(r.w * r.h > 1 ? { block: { w: r.w, h: r.h } } : {}) });
-      this.m16Search.value = name;
       this.m16Match = tiles;
       this.build();
       return;
@@ -724,10 +685,7 @@ export class Palette {
     const app = this.app;
     clear(this.tabs);
     const brush = isBrushMode(app.mode);
-    const searchable = !brush && this.tab !== 'm16';
-    this.searchRow.style.display = searchable ? '' : 'none';
-    this.m16Bar.style.display = this.m16SearchRow.style.display = !brush && this.tab === 'm16' ? '' : 'none';
-    this.search.placeholder = this.tab === 'spr' ? 'Search sprites (no., name) …' : 'Search (no., name, behavior) …';
+    this.m16Bar.style.display = !brush && this.tab === 'm16' ? '' : 'none';
     // the list being left keeps its scroll position (read here: the scroll event may still be pending)
     if (this.builtTab) this.scrolls[this.builtTab] = this.body.scrollTop;
     this.builtTab = brush ? undefined : this.tab;
@@ -743,11 +701,9 @@ export class Palette {
 
   buildSprites(): void {
     const app = this.app;
-    const f = this.search.value.trim().toLowerCase();
     const cur = app.paletteItem;
     let head = false;
     for (const e of this.spriteEntries()) {
-      if (f && !e.text.includes(f)) continue;
       if (e.id >= 0x200 && !head) { head = true; this.body.appendChild(h('div', { class: 'pal-head' }, 'Custom sprites (PIXI)')); }
       const sel = cur?.kind === 'spr' && spriteId(cur) === e.id;
       const img = app.spriteThumbs?.get(e.id);
@@ -758,21 +714,18 @@ export class Palette {
         e.id >= 0x200 && app.customSprite(e.id) && !app.spriteUsers(e.id).length ? h('span', { class: 'gt-unused', title: 'Inserted, but in no level' }, 'unused') : '',
         itemBadge(app, e.items, 'pal-items-row')));
     }
-    if (!this.body.firstChild) this.body.append(emptyState('No sprite matches the search.'));
   }
 
-  // the Objects tab: Prefabs, Resizable (standard objects), Fixed size (extended objects); the search filters
-  // all of them, a section without matches is left out (Prefabs keeps its button and hint)
+  // the Objects tab: Prefabs, Resizable (standard objects), Fixed size (extended objects); a section without
+  // entries is left out (Prefabs keeps its button and hint)
   buildObjects(): void {
     const app = this.app;
-    const f = this.search.value.trim().toLowerCase();
     const cur = app.paletteItem;
     this.body.append(this.prefabBox);
-    let found = this.buildPrefabs() > 0;
+    this.buildPrefabs();
     for (const [ext, title] of [[false, 'Resizable'], [true, 'Fixed size']] as const) {
       const grid = h('div', { class: 'pal-grid' });
       for (const e of this.objectEntries(ext)) {
-        if (f && !e.text.includes(f)) continue;
         const { s, vt } = e;
         const sel = cur?.kind === 'obj' && cur.num === s.num && (s.num !== 0 || cur.ext === s.ext) && objectVariant(app.objectKind(s.num), cur.size) === vt;
         grid.appendChild(h('div', {
@@ -789,9 +742,7 @@ export class Palette {
       }
       if (!grid.firstChild) continue;
       this.body.append(h('div', { class: 'pal-head' }, title), grid);
-      found = true;
     }
-    if (!found) this.body.append(emptyState('No object matches the search.'));
   }
 }
 
