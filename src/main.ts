@@ -11,8 +11,8 @@ import { LogBar } from './ui/logbar.ts';
 import { pasteHintBox } from './ui/pastehint.ts';
 import { kvGet, kvSet, kvDel, kvClear, saveRom, romFromRecord, type RomRecord } from './ui/storage.ts';
 import { LevelView } from './ui/levelview.ts';
-import { LevelList, Palette, Properties, tileNamesProvider } from './ui/panels.ts';
-import { openSearch, type SearchProvider } from './ui/search.ts';
+import { LevelList, Palette, Properties } from './ui/panels.ts';
+import { openSearch } from './ui/search.ts';
 import { openHeaderDialog } from './ui/headerdialog.ts';
 import { hex } from './core/names.ts';
 import { GfxWorkspace, type WsTab } from './ui/gfxworkspace.ts';
@@ -143,14 +143,9 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   // ---- app bar: menus, workspace switcher, main actions
   const testHere = () => { const hv = view.hover; openTestPlay(app, hv ? { tx: hv.tx, ty: hv.ty } : undefined); };
   // central search (Ctrl+F or Ctrl+Space): a result is shown in the level workspace
-  // (named Map16 tiles in the Map16 tab)
-  const search = () => {
-    const inLevel = palette.searchProviders().map((p): SearchProvider => ({
-      ...p, search: (terms) => p.search(terms).map((r) => ({ ...r, pick: () => void setWorkspace('level').then((ok) => { if (ok) r.pick(); }) })),
-    }));
-    const named = tileNamesProvider(app, (name, tiles, bg) => void setWorkspace('gfx', { tab: 'map16' }).then((ok) => { if (ok) ws!.showMap16Named(name, tiles, bg); }));
-    openSearch([...inLevel, named]);
-  };
+  const search = () => openSearch(palette.searchProviders().map((p) => ({
+    ...p, search: (terms) => p.search(terms).map((r) => ({ ...r, pick: () => void setWorkspace('level').then((ok) => { if (ok) r.pick(); }) })),
+  })));
   const insertHere = () => { const hv = view.hover, c = view.centerTile(); openInsertDialog(app, hv ? hv.tx : c.tx, hv ? hv.ty : c.ty); };
   const menus = menuBar([
     { label: 'File', items: [

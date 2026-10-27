@@ -607,6 +607,25 @@ export class Palette {
     requestAnimationFrame(() => this.scrollToSelected());
   }
 
+  // the tiles of a name (central search): taken as a block (FG) or brush (BG) when they fill a rectangle, else
+  // the first; the FG sheet's search shows the name and marks exactly them
+  chooseNamed(name: string, tiles: number[], bg: boolean): void {
+    const app = this.app, c = connectedRect(tiles);
+    const r = c && c.w * c.h === tiles.length ? c : { first: tiles[0], w: 1, h: 1 };
+    if (!bg) {
+      this.choose('m16', { kind: 'obj', num: 0, ext: DM16_EXT, size: 0, tile: r.first, ...(r.w * r.h > 1 ? { block: { w: r.w, h: r.h } } : {}) });
+      this.m16Search.value = name;
+      this.m16Match = tiles;
+      this.build();
+      return;
+    }
+    if (app.mode !== 'bg') app.setMode('bg'); // (says why not when the level has no BG tilemap)
+    if (app.mode !== 'bg') return;
+    this.bgBase = r.first & ~0x1ff;
+    app.bgBrush = { w: r.w, h: r.h, tiles: Array.from({ length: r.w * r.h }, (_, i) => r.first + Math.floor(i / r.w) * 16 + (i % r.w)) };
+    this.build();
+  }
+
   // the tabs for the central search (search.ts)
   searchProviders(): SearchProvider[] {
     const app = this.app;
@@ -650,6 +669,32 @@ export class Palette {
         return out;
       },
     };
+    // the named FG and BG tiles: one result per name, its preview the rectangle around the tiles when they are
+    // connected, else the first tile
+    const named: SearchProvider = {
+      id: 'names', label: 'Map16 tiles',
+      search: (terms) => (['fg', 'bg'] as NameKind[]).flatMap((kind) => {
+        const bg = kind === 'bg', layer = kind.toUpperCase();
+        return nameGroups(namesOf(app.rom, kind)).filter((g) => matchesAll(g.name.toLowerCase(), terms)).map((g): SearchResult => {
+          const nums = tileRanges(g.tiles);
+          return {
+            label: layer, name: g.name, detail: nums,
+            title: `${layer} tile${g.tiles.length > 1 ? 's' : ''} ${nums}: ${g.name}`,
+            thumb: () => {
+              const r = connectedRect(g.tiles) ?? { first: g.tiles[0], w: 1, h: 1 };
+              const sheet = renderMap16Sheet(app, bg, r.first & ~15, r.h * 16);
+              const c = h('canvas', { width: r.w * 16, height: r.h * 16 });
+              c.getContext('2d')!.drawImage(sheet, (r.first & 15) * 16, 0, r.w * 16, r.h * 16, 0, 0, r.w * 16, r.h * 16);
+              const z = Math.min(1.5, 32 / (r.w * 16), 24 / (r.h * 16));
+              c.style.width = `${r.w * 16 * z}px`;
+              c.style.height = `${r.h * 16 * z}px`;
+              return c;
+            },
+            pick: () => this.chooseNamed(g.name, g.tiles, bg),
+          };
+        });
+      }),
+    };
     const prefabs: SearchProvider = {
       id: 'pre', label: 'Prefabs',
       search: (terms) => {
@@ -669,8 +714,8 @@ export class Palette {
         pick: () => this.choose('spr', e.item),
       })),
     };
-    // in the order of the palette: the Objects tab's sections, Map16, Sprites
-    return [prefabs, objects('obj', 'Resizable objects'), objects('ext', 'Fixed-size objects'), map16, sprites];
+    // in the order of the palette: the Objects tab's sections, Map16 (by number, by name), Sprites
+    return [prefabs, objects('obj', 'Resizable objects'), objects('ext', 'Fixed-size objects'), map16, named, sprites];
   }
 
   build(): void {
@@ -874,36 +919,6 @@ function itemBadge(app: App, items: number[], cls = 'pal-items'): HTMLElement | 
   const imgs = items.slice(0, 4).map((n) => app.spriteThumbs?.get(n)).filter((c): c is HTMLCanvasElement => !!c);
   if (!imgs.length) return '';
   return h('div', { class: cls }, ...imgs.map(cloneCanvas));
-}
-
-// the named Map16 tiles for the central search: one result per name (FG and BG apart), its preview the
-// rectangle around the tiles when they are connected, else the first tile; show() opens them in the Map16 tab
-export function tileNamesProvider(app: App, show: (name: string, tiles: number[], bg: boolean) => void): SearchProvider {
-  return {
-    id: 'names', label: 'Map16 tiles',
-    search: (terms) => (['fg', 'bg'] as NameKind[]).flatMap((kind) => {
-      const bg = kind === 'bg', layer = kind.toUpperCase();
-      return nameGroups(namesOf(app.rom, kind)).filter((g) => matchesAll(g.name.toLowerCase(), terms)).map((g): SearchResult => {
-        const nums = tileRanges(g.tiles);
-        return {
-          label: layer, name: g.name, detail: nums,
-          title: `${layer} tile${g.tiles.length > 1 ? 's' : ''} ${nums}: ${g.name}`,
-          thumb: () => {
-            const r = connectedRect(g.tiles) ?? { first: g.tiles[0], w: 1, h: 1 };
-            const base = r.first & ~15;
-            const sheet = renderMap16Sheet(app, bg, base, r.h * 16);
-            const c = h('canvas', { width: r.w * 16, height: r.h * 16 });
-            c.getContext('2d')!.drawImage(sheet, (r.first & 15) * 16, 0, r.w * 16, r.h * 16, 0, 0, r.w * 16, r.h * 16);
-            const z = Math.min(1.5, 32 / (r.w * 16), 24 / (r.h * 16));
-            c.style.width = `${r.w * 16 * z}px`;
-            c.style.height = `${r.h * 16 * z}px`;
-            return c;
-          },
-          pick: () => show(g.name, g.tiles, bg),
-        };
-      });
-    }),
-  };
 }
 
 // `count` tiles from `base`, 16 per row

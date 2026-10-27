@@ -1,7 +1,7 @@
 // Central search (Ctrl+F or Ctrl+Space), like "Search Everywhere" in IntelliJ or the quick open of VS Code: one input over
 // everything the providers offer, the results grouped by provider. A row of groups above the list narrows the
-// search to one of them (Tab / Shift+Tab switch); choosing a result runs its pick(). The providers are the tabs
-// of the "Insert" palette (Palette.searchProviders) and the named Map16 tiles (tileNamesProvider).
+// search to one of them (Tab / Shift+Tab switch); choosing a result runs its pick(). For now the providers are
+// the tabs of the "Insert" palette (Palette.searchProviders).
 
 import { h, clear, emptyState } from './dom.ts';
 
