@@ -4,7 +4,7 @@ import { Rom } from './rom.ts';
 import { decodeTile, cgramToRGBA, snesColorToRGBA } from './gfx.ts';
 import { isL1Vertical, isL2Vertical, hasLayer2Objects } from './level.ts';
 import { MAP_BASE, type LevelRender } from './levelemu.ts';
-import { EXT_FIRST, extTileAddr, extTileWords, setExtTileWords } from './map16ext.ts';
+import { EXT_FIRST, DEFAULT_ACTS, extTileAddr, extTileWords, setExtTileWords, actsLike, blockOf } from './map16ext.ts';
 import { bgTileWords } from './bgmap16.ts';
 import { RAM, get16, map16Tile, bgTile, map16Pointer, cameraX, cameraY } from './ram.ts';
 
@@ -204,6 +204,25 @@ export function renderLevel(rom: Rom, r: LevelRender, mode: number, screens: num
   }
   const layer3 = renderLayer3(r, width, height);
   return { width, height, backdrop: backdropColor(r), layer1, layer2, layer3, geom1, geom2, tiles1, tiles2, bgTiles };
+}
+
+// Tiles of an object layer (1 or layer 2 objects) that are there but cannot be seen: drawn without a single pixel,
+// yet acting unlike air or running a custom block (invisible blocks, P-switch coins and doors, 1-Up points …);
+// by the tile at (x, y), each tile number judged once
+export function invisibleTiles(rom: Rom, li: LevelImages, layer2: boolean): (x: number, y: number) => boolean {
+  const g = layer2 ? li.geom2 : li.geom1, tiles = layer2 ? li.tiles2 : li.tiles1, img = layer2 ? li.layer2 : li.layer1;
+  const known = new Map<number, boolean>();
+  return (x, y) => {
+    if (!g || !tiles || x < 0 || y < 0 || x >= g.width || y >= g.height || (x + 1) * 16 > li.width || (y + 1) * 16 > li.height) return false;
+    const t = tiles[y * g.width + x];
+    let v = known.get(t);
+    if (v === undefined) {
+      v = actsLike(rom, t) !== DEFAULT_ACTS || blockOf(rom, t) !== null;
+      for (let py = 0; py < 16 && v; py++) for (let px = 0; px < 16 && v; px++) if (img[(y * 16 + py) * li.width + x * 16 + px]) v = false;
+      known.set(t, v);
+    }
+    return v;
+  };
 }
 
 // whether a Map16 tile's quarters (4bpp 8x8 tiles from charBase, palette rows 0-7) draw a pixel in one of

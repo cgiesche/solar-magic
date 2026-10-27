@@ -53,6 +53,7 @@ export function viewMenu(app: App, paint: () => void, full = true): HTMLElement 
     show('screens', 'Screen boundaries'), show('grid', 'Grid', undefined, 'G'),
     show('ghost', 'Inactive layer translucent', 'Object layer not being edited shown semi-transparent (only levels with layer 2 objects); while editing the BG or layer 3, layer 1 and the sprites too'),
     show('items', 'Block contents', 'Contents of blocks (found by emulation) semi-transparent over the blocks, arrows at enterable blocks (pipes, doors)'),
+    show('invisible', 'Invisible tiles', 'Layer 1 tiles (and layer 2 objects\' tiles) that draw nothing but are not air – invisible blocks, P-switch coins and doors, 1-Up points, invisible custom blocks – tinted with dashed edges'),
     show('collision', 'Collision', 'How Mario collides with layer 1 (found by emulation): solid sides white, platforms dashed, slopes diagonal; red hurts, blue water, green climbable', 'C'),
     show('arcs', 'Jump arcs at the mouse', 'Where Mario gets jumping from the tile under the mouse (emulated): from standing, walking, running and at P-speed, to both sides; Shift+J pins them to the tile', 'J'),
     show('gameView', 'Game view frame', 'What the player sees: a 256x224 screen over the level; drag it by its edge or label (snaps to 8x8), or Shift+V puts Mario with his feet in the tile under the mouse and the frame where the game puts the camera then. The level is darkened where the camera never goes (found by the level scan)', 'V'),

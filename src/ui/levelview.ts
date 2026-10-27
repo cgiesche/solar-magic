@@ -8,7 +8,7 @@ import { resizeObjectSize } from '../core/objkinds.ts';
 import { probeAt, spriteProbeAt, enterText, collisionText, type PosProbe, type CollisionProbe } from '../core/blockprobe.ts';
 import { type LevelObject, type LevelSprite, newUid, serializeLayer1, serializeLayer2, serializeLevelSprites, spriteSizes, spriteId, EXIT_NEW } from '../core/level.ts';
 import { overworldExitText } from '../core/owteleport.ts';
-import { composite } from '../core/render.ts';
+import { composite, invisibleTiles, type LevelImages } from '../core/render.ts';
 import { layer3CellAt, layer3WordText } from '../core/layer3map.ts';
 import type { ArcSpeed } from '../core/jumparcs.ts';
 import { exitTarget } from '../core/exitgraph.ts';
@@ -289,6 +289,7 @@ export class LevelView {
       if (m.kind === 'sec') ctx.fillText(hex3(m.index), m.x + 15, m.y + 27.5);
     }
     if (app.mode === 'l2' ? app.show.layer2 : app.show.layer1) this.paintConds(ctx, lw);
+    if (app.show.invisible) this.paintInvisible(ctx, lw);
     if (app.show.collision) this.paintCollision(ctx);
     if (app.show.collision || app.show.layer3) this.paintTide(ctx);
     if (app.show.items) this.paintItems(ctx);
@@ -382,6 +383,36 @@ export class LevelView {
       ctx.fillRect(x, y, w, 9);
       ctx.fillStyle = '#fff';
       ctx.fillText(txt, x + 1.5, y + 7.5);
+    }
+  }
+
+  // tiles that are there but cannot be seen (render.ts invisibleTiles): areas of them tinted, their edges dashed;
+  // layer 2 objects' too while layer 2 is shown
+  private invisible: { images: LevelImages; l1: (x: number, y: number) => boolean; l2: (x: number, y: number) => boolean } | null = null;
+  paintInvisible(ctx: CanvasRenderingContext2D, lw: number): void {
+    const app = this.app, im = app.images;
+    if (this.invisible?.images !== im) this.invisible = { images: im, l1: invisibleTiles(app.rom, im, false), l2: invisibleTiles(app.rom, im, true) };
+    const { x0, y0, x1, y1 } = this.visibleTiles();
+    const layers = [...app.show.layer1 ? [this.invisible.l1] : [], ...app.show.layer2 && app.level.layer2Objects ? [this.invisible.l2] : []];
+    for (const at of layers) {
+      const edges = new Path2D();
+      ctx.fillStyle = 'rgba(150,70,255,0.4)';
+      for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+        if (!at(x, y)) continue;
+        const px = x * 16, py = y * 16;
+        ctx.fillRect(px, py, 16, 16);
+        if (!at(x - 1, y)) { edges.moveTo(px, py); edges.lineTo(px, py + 16); }
+        if (!at(x + 1, y)) { edges.moveTo(px + 16, py); edges.lineTo(px + 16, py + 16); }
+        if (!at(x, y - 1)) { edges.moveTo(px, py); edges.lineTo(px + 16, py); }
+        if (!at(x, y + 1)) { edges.moveTo(px, py + 16); edges.lineTo(px + 16, py + 16); }
+      }
+      ctx.lineWidth = 2 * lw;
+      ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+      ctx.stroke(edges);
+      ctx.strokeStyle = '#e4d8ff';
+      ctx.setLineDash([3 * lw, 3 * lw]);
+      ctx.stroke(edges);
+      ctx.setLineDash([]);
     }
   }
 
