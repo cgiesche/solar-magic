@@ -20,6 +20,10 @@
 // Version 4 hooks the change-tile routine's own drawing ($00C176: LDA #$0D : STA $06 : REP #$20 :
 // LDA $0FBE,y : STA $04, the tile written to VRAM as a stripe), which blocks reach through $00C0FB
 // (GPS change_map16): a tile >= $200 showed whatever its index past $0FBE pointed at.
+// Version 5 puts Lunar Magic's pointers to its acts-like tables where LM has them ($06F624 for pages 00-3F,
+// $06F63A for 40-7F; 2 bytes per tile from the page's first tile), both at the acts-like table: community code
+// reads acts-like through them, e.g. the Line-Guide "Acts Like" Fix (imamelia, worldpeace) in the Romhack Races
+// baserom, whose line-guided platforms fell without them. Pages 10-3F (and 50-7F) don't exist in the editor.
 
 import { Rom } from './rom.ts';
 import { Asm } from './asm.ts';
@@ -39,7 +43,9 @@ const PAGE0_FIX = 0x00c096;
 const PAGE1_FIX = 0x00c0e7;
 const CHANGE_HOOK = 0x00c176;
 const CHANGE_CODE = [0xa9, 0x0d, 0x85, 0x06, 0xc2, 0x20, 0xb9, 0xbe, 0x0f, 0x85, 0x04];
-export const MAP16X_HOOKS: [number, number][] = [[F545, 4], [HIT_HOOK, 4], ...RENDER_HOOKS.map((r): [number, number] => [r, 5]), [PAGE0_FIX, 2], [PAGE1_FIX, 2], [CHANGE_HOOK, CHANGE_CODE.length]];
+export const LM_ACTS_PTRS = [0x06f624, 0x06f63a]; // Lunar Magic's acts-like table pointers (pages 00-3F, 40-7F)
+export const MAP16X_HOOKS: [number, number][] = [[F545, 4], [HIT_HOOK, 4], ...RENDER_HOOKS.map((r): [number, number] => [r, 5]), [PAGE0_FIX, 2], [PAGE1_FIX, 2], [CHANGE_HOOK, CHANGE_CODE.length],
+  ...LM_ACTS_PTRS.map((p): [number, number] => [p, 3])];
 
 export interface Map16Ext { base: number; acts: number; gfx: number; blocks: number }
 
@@ -216,6 +222,7 @@ export function installMap16Ext(rom: Rom, blank: number[]): Map16Ext {
   expect(PAGE0_FIX, [0x29, 0xfe], 'tile replacement');
   expect(PAGE1_FIX, [0x09, 0x01], 'tile replacement');
   expect(CHANGE_HOOK, CHANGE_CODE, 'tile replacement drawing');
+  for (const p of LM_ACTS_PTRS) expect(p, [0xff, 0xff, 0xff], 'acts-like table pointer');
 
   const gfxData = new Uint8Array((EXT_TILES - EXT_FIRST) * 8);
   for (let t = 0; t < EXT_TILES - EXT_FIRST; t++) for (let k = 0; k < 4; k++) { gfxData[t * 8 + k * 2] = blank[k] & 0xff; gfxData[t * 8 + k * 2 + 1] = blank[k] >> 8; }
@@ -246,6 +253,7 @@ function writeCode(rom: Rom, gfx: number, acts: Uint8Array): number {
   rom.writeBytes(addr, code);
   rom.w24(addr + 4, L('ActsTbl'));
   rom.w24(addr + 7, gfx);
+  for (const p of LM_ACTS_PTRS) rom.w24(p, L('ActsTbl'));
   const jml = L('F545');
   rom.writeBytes(F545, Uint8Array.from([0x5c, jml & 0xff, (jml >> 8) & 0xff, jml >> 16]));
   const jsl = (at: number, t: number, len: number) => {

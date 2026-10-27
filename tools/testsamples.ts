@@ -18,7 +18,8 @@ import { LevelEmulator, titleScreenLevel } from '../src/core/levelemu.ts';
 import { map16Source } from '../src/core/render.ts';
 import { installEditorPatch, customPalette } from '../src/core/patches.ts';
 import { enableBlocks } from '../src/core/map16ext.ts';
-import { loadLevel, readSecondaryEntrance, writeSecondaryEntrance, exitIndex, type Level } from '../src/core/level.ts';
+import { loadLevel, readSecondaryEntrance, writeSecondaryEntrance, exitIndex, serializeLayer1, serializeSprites, isL1Vertical, type Level } from '../src/core/level.ts';
+import { levelScanJob } from '../src/core/levelscan.ts';
 import { renderLevel } from '../src/core/render.ts';
 import { levelSlots } from '../src/core/gfxslots.ts';
 import { mwlSections, parseLmObjects } from '../src/core/mwl.ts';
@@ -158,6 +159,16 @@ function teleport(rom: Rom): number | null {
   const lr = emu.load(0x13b);
   const ran = tool.filter((o) => lr.wram[0x1a400 + ((o.ext - 0x98) >> 3)] & (1 << ((o.ext - 0x98) & 7)));
   check(lr.ok && tool.length > 0 && ran.length === tool.length, `13B: its ${tool.length} ObjecTool objects (${tool.map((o) => o.ext.toString(16).toUpperCase()).join(', ')}) run ObjecTool's code, emulated (${ran.length})`);
+  // the level check's scan: no sprite falls out – the line-guided platform on screen 6 follows its line
+  // guide, which the baserom's Line-Guide "Acts Like" Fix finds through Lunar Magic's acts-like pointers
+  {
+    const vertical = isL1Vertical(rom, l13b.header.mode);
+    const job = levelScanJob(emu, { number: 0x13b, vertical, ov: { layer1: serializeLayer1(rom, l13b), sprites: serializeSprites(l13b.sprites, l13b.spriteHeader, vertical) },
+      width: l13b.header.screens * 256, height: 27 * 16 });
+    let sr; while (!(sr = job.next()).done);
+    const fell = sr.value.sprites.filter((f) => f.kind === 'fell');
+    check(sr.value.ok && !fell.length, `13B: the level check finds no sprite falling out (${fell.length})`);
+  }
 
   // 13B's secondary entrance 150 (the level file's): its exit on screen 7 leads there, and its teleport
   // block on that screen takes Mario there (screen 7 of 13B)

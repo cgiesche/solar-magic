@@ -5,7 +5,7 @@ import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator, type LevelOverride } from '../src/core/levelemu.ts';
 import { loadLevel, serializeLayer1, serializeSprites, isL1Vertical, newUid, type Level } from '../src/core/level.ts';
 import { installEditorPatch, DM16_EXT } from '../src/core/patches.ts';
-import { installMap16Ext, setActsLike, setExtTileWords } from '../src/core/map16ext.ts';
+import { installMap16Ext, setActsLike, setExtTileWords, actsLike, LM_ACTS_PTRS } from '../src/core/map16ext.ts';
 import { map16Source } from '../src/core/render.ts';
 
 const file = new Uint8Array(readFileSync('test/fixtures/smw.smc'));
@@ -89,6 +89,12 @@ const withWall = (tile: number): LevelOverride => {
   const after = play(ef, 0x105, {}, 60, () => 0);
   const y = (tr: string) => Number(tr.split(',').at(-2));
   if (!(y(after) > y(before) + 16)) { console.log('ground acting like air: Mario did not fall', y(before), y(after)); bad++; }
+}
+// 5. Lunar Magic's acts-like table pointers ($06F624 pages 00-3F, $06F63A 40-7F), which community code reads
+// acts-like through: a tile's entry 2 bytes per tile from the page's first tile, the editor's acts-like
+{
+  const lm = (t: number) => patched.r16(patched.r24(LM_ACTS_PTRS[t >= 0x4000 ? 1 : 0]) + (t & 0x3fff) * 2);
+  if (![0x025, 0x130, 0x1ff, EXT].every((t) => lm(t) === actsLike(patched, t)) || lm(EXT) !== REF) { console.log("Lunar Magic's acts-like pointers do not give the tiles' acts-like"); bad++; }
 }
 console.log('map16 ext bad', bad);
 if (bad) process.exitCode = 1;

@@ -332,7 +332,7 @@ patch takes precedence. Every ROM the editor opens has all editor patches, so al
 | `!SMWE_EXT_GFX` | 512 × 2 bytes: a level's BG2/BG3 graphics file (tiles 200–27F/280–2FF), `$FF` = none |
 | `!SMWE_MAP16X` | 1 if the Map16 extension (SMWX) is installed |
 | `!SMWE_BG_MAP16_GFX` | 8 bytes (4 tile words) per BG tile 200–FFF (SMWH) |
-| `!SMWE_ACTS_LIKE` | `$1000` × 2 bytes: "acts like" of Map16 tiles 000–FFF |
+| `!SMWE_ACTS_LIKE` | `$1000` × 2 bytes: "acts like" of Map16 tiles 000–FFF; Lunar Magic's pointers `$06F624`/`$06F63A` point here too, so code reading acts-like the Lunar Magic way works |
 | `!SMWE_MAP16_GFX` | 8 bytes (4 tile words) per tile 200–FFF |
 | `!SMWE_BLOCKS` | `$1000` × 4 bytes: custom block per tile (address of the JMP table, flags) |
 | `%smwe_require(X)` | aborts with a message if `!SMWE_X` is 0, e.g. `%smwe_require(MAP16X)` (kept for older patches; always passes) |
@@ -932,7 +932,7 @@ not compatible with the respective feature.
 | `$04E6C5`, `$04DA98`; pointers `$04E67C`, `$04E69C` | Destroyed level tiles, 0x18 entries (Lunar Magic's places) |
 | Ext. object table `$0DA11B` (entry `$04`) | Prefabs (SMWS); empty in the original and in Lunar Magic, no code hook |
 | `$05B20F` | Messages in free space (SMWM), only if the texts no longer fit |
-| `$00F545`, `$029328`, `$058A66`, `$058B46`, `$058C34`, `$058D2B`, `$00C096`, `$00C0E7`, `$00C176` | Map16 extension and custom blocks (SMWX) |
+| `$00F545`, `$029328`, `$058A66`, `$058B46`, `$058C34`, `$058D2B`, `$00C096`, `$00C0E7`, `$00C176`; Lunar Magic's acts-like table pointers `$06F624` (pages 00–3F), `$06F63A` (40–7F), both at `!SMWE_ACTS_LIKE` | Map16 extension and custom blocks (SMWX) |
 | `$05808C`, `$00A5EE`, `$00A242`, `$00A295`, `$00A2EE` | UberASM: level `load`/`init`/`main`/`end` |
 | `$00A18F`, `$00A1C3` | UberASM: overworld |
 | `$009322` | UberASM: game modes |
