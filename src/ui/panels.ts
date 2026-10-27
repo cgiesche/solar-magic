@@ -259,12 +259,6 @@ export class Palette {
         onclick: () => this.scrollToM16Page(p),
       }, p.toString(16).toUpperCase()));
     }
-    const label = h('div', { class: 'hint' }, curTile >= 0
-      ? (bw * bh > 1 ? `Block ${bw}×${bh} from tile ${hex3(curTile)} chosen – right click in the level view places it (one Direct Map16 object per tile).`
-        : `Tile ${hex3(curTile)} chosen – right click in the level view places it (Direct Map16 object).`)
-      : 'Click a tile (or drag for several), then right click in the level to place it. Requires the editor patch (installed automatically).');
-    this.body.append(h('div', { class: 'row' },
-      h('button', { title: 'Edit the chosen tile in the graphics area (also create tiles from 200 on)', onclick: () => app.editMap16(curTile >= 0 ? curTile : this.m16Page * 256) }, 'Edit …')), label);
     // tooltip: tile number, name and behaviour when hit from below
     let hoverTile = -1, hoverCanvas: HTMLCanvasElement | null = null;
     const tip = () => {
