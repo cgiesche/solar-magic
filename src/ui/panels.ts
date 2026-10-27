@@ -341,7 +341,7 @@ export class Picker {
     clear(box);
     const cur = app.pickedItem;
     const curN = cur?.kind === 'obj' && cur.num === 0 && cur.ext === PREFAB_EXT ? cur.prefab ?? -1 : -1;
-    box.append(h('div', { class: 'picker-head' }, 'Prefabs'), h('div', { class: 'hint' }, 'A prefab is a single object in the level; changes to it apply in all levels.'));
+    box.append(h('div', { class: 'picker-head' }, 'Prefabs'), h('div', { class: 'hint' }, 'A prefab is a stamp of Map16 tiles, placed as one object; editing it changes every copy.'));
     const all = app.prefabs();
     const sheet = prefabTileSource(app);
     for (const [n, st] of all) {
