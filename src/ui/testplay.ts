@@ -12,7 +12,7 @@ import { AudioOut } from './audio.ts';
 import { musicPlayer } from './musicplayer.ts';
 import { GM, RAM, marioX, marioY, setMarioPos } from '../core/ram.ts';
 import { SlotWatch } from '../core/slotwatch.ts';
-import { PlayLog } from '../core/playlog.ts';
+import { PlayLog, cpuLoad } from '../core/playlog.ts';
 import { playMeter, GRAPH_FRAMES } from './playmeter.ts';
 import { applyTriggers, emptyTriggerView, customOn, switchName, isCustom, isManual, isOneShot, CUSTOM, MANUAL, ONE_SHOT } from '../core/extrigger.ts';
 import { shownSwitches } from './triggerpanel.ts';
@@ -194,10 +194,11 @@ function play(app: App, at: Start | undefined, audio: AudioOut, emu: LevelEmulat
   const setPaused = (p: boolean) => { paused = p; audio.resync(); };
   const frame = () => {
     s.joy1 = keys | readPads().bits;
+    const mode = s.wram[RAM.gameMode];
     try { s.runFrame(); } catch (e) { info.textContent = `Emulation error: ${e}`; paused = true; }
     if (s.audio) audio.push(s.audio);
     frames++;
-    log.frame(frames, watch.usedAll(), watch.take(), marioX(s.wram), marioY(s.wram));
+    log.frame(frames, watch.usedAll(), watch.take(), cpuLoad(s, mode), marioX(s.wram), marioY(s.wram));
   };
   const loop = (t: number) => {
     if (!running) return;

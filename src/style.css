@@ -273,8 +273,8 @@ kbd { background: #181a1f; border: 1px solid var(--border); border-radius: 3px; 
 .meter-val { width: 40px; text-align: right; font-variant-numeric: tabular-nums; }
 .meter-row.warn .meter-fill { background: var(--danger); }
 .meter-row.warn .meter-val { color: var(--danger); }
-.meter-graph { width: 256px; height: 48px; background: var(--panel2); border: 1px solid var(--border); }
-.meter-events { max-height: 220px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.meter-graph { width: 256px; background: var(--panel2); border: 1px solid var(--border); }
+.meter-events { max-height: 120px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
 .meter-event { display: flex; align-items: center; gap: 6px; justify-content: space-between; }
 .meter-event button { padding: 0 6px; font-size: 11px; }
 .msg-editor { display: flex; gap: 14px; }

@@ -246,6 +246,10 @@ _Avoid_: snapshot (that is the emulator's boot state every load starts from), sa
 A slot search of the running game that found every slot it looked at taken, so a sprite (normal, extended or cluster) did not appear, or replaced another where the code then takes a slot anyway (core/slotwatch.ts). Recognised by what the code does (a loop testing consecutive slots for zero), not by the game's tables; a search through a few kept slots (Mario's two fireball slots) is none. It may come with other slots free: the level's sprite memory or the spawning code (a generator) limits the slots it may use. Test play's slot meter shows the live slots and lists the failed spawns with Mario's tile.
 _Avoid_: sprite overflow, slot overflow
 
+**Lag frame**:
+A frame of the level in which the game's main loop was not done before the next NMI, so the game slowed down (core/playlog.ts, from Snes.busyLines: the CPU never reached its wait loop). The CPU load of other frames is the share of the frame's scanlines from the NMI until that wait. Frames the game spends outside the level's game mode (loading, fading) are fully busy but no lag frames. Test play's lag meter shows the load per frame and lists lag frames close together as one event with Mario's tile; the level scan counts them per screen.
+_Avoid_: slowdown frame, CPU overload
+
 **Prefetch**:
 Probing what the palettes could show before anyone asks for it, after everything asked for directly.
 

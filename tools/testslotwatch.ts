@@ -130,18 +130,18 @@ for (const lv of [0x105, 0x106, 0x103, 0x104, 0x10b, 0x101, 0x102, 0x1, 0x5, 0x1
 {
   const log = new PlayLog(4);
   const used = { sprite: 3, extended: 0, cluster: 0 };
-  log.frame(1, used, [], 0x100, 0x150);
+  log.frame(1, used, [], 0, 0x100, 0x150);
   const fail = (kind: SlotKind): SlotFailure => ({ kind, searched: 10, free: 2, replaced: false });
-  log.frame(2, used, [fail('sprite')], 0x120, 0x150);
-  log.frame(3, used, [fail('sprite')], 0x130, 0x150);
-  log.frame(100, used, [fail('sprite'), fail('extended')], 0x400, 0x80);
-  log.frame(101, used, [], 0x400, 0x80);
+  log.frame(2, used, [fail('sprite')], 0, 0x120, 0x150);
+  log.frame(3, used, [fail('sprite')], 0, 0x130, 0x150);
+  log.frame(100, used, [fail('sprite'), fail('extended')], 0, 0x400, 0x80);
+  log.frame(101, used, [], 0, 0x400, 0x80);
   check(log.events.length === 3 && log.events[0].frame === 2 && log.events[0].count === 2 && log.events[0].tx === 0x12 && log.events[0].ty === 0x16 && log.events[0].searched === 10,
     'failures of a kind close together are one event (first frame, count, Mario\'s tile)');
   check(log.events[1].kind === 'sprite' && log.events[1].frame === 100 && log.events[2].kind === 'extended', 'later ones and other kinds are events of their own');
   check(log.history.length === 4 && log.history[3].frame === 101 && log.history[0].frame === 2, 'the history keeps the last frames');
   log.cut();
-  log.frame(102, used, [fail('sprite')], 0x400, 0x80);
+  log.frame(102, used, [fail('sprite')], 0, 0x400, 0x80);
   check(log.events.length === 4 && log.events[3].frame === 102, 'after a savestate is loaded: a failure is an event of its own');
 }
 
