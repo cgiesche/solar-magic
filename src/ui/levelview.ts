@@ -1281,12 +1281,15 @@ export class LevelView {
       items.push({ heading: n > 1 ? `${n} ${spr ? 'sprites' : 'objects'}` : spr ? `Sprite ${hex2(one.num)} ${app.spriteLabel(spriteId(one as LevelSprite))}` : app.objectName(one.num, (one as LevelObject).ext) },
         { label: 'Cut', onClick: () => { app.copy(); app.deleteSelection(); } },
         { label: 'Copy', shortcut: 'Ctrl+C', onClick: () => app.copy() },
+        { label: 'Duplicate', shortcut: 'Ctrl+D', onClick: () => app.duplicateSelection() },
         { label: 'Delete', shortcut: 'Del', onClick: () => app.deleteSelection() });
       if (!spr) items.push('sep',
         { label: 'Bring to front', shortcut: 'PgUp', title: 'Drawn after all other objects', onClick: () => app.reorderSelection('front') },
         { label: 'Send to back', shortcut: 'PgDn', title: 'Drawn before all other objects', onClick: () => app.reorderSelection('back') },
-        // a placed prefab alone is one already
-        ...(n === 1 && isPlacedPrefab(one as LevelObject) ? [] : ['sep' as const, { label: 'Save as prefab …', onClick: () => openSavePrefab(app) }]));
+        // a placed prefab alone is one already: it can only be broken up
+        'sep', n === 1 && isPlacedPrefab(one as LevelObject)
+          ? { label: 'Break up', title: 'Replace the prefab here with single Direct Map16 objects (to edit it, then “Save as prefab …” again)', onClick: () => app.explodePrefab(one as LevelObject) }
+          : { label: 'Save as prefab …', onClick: () => openSavePrefab(app) });
       items.push('sep', { label: 'Properties', onClick: () => app.emit('properties') });
     } else {
       const clip = spr ? app.clipboard.sprites : app.clipboard.objects;

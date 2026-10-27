@@ -103,7 +103,6 @@ input.invalid, input.invalid:focus { outline: 1px solid var(--danger); border-co
 .row.small { font-size: 12px; color: var(--muted); }
 .filter { width: 100%; }
 .picker { flex: 1 1 60%; }
-.prop-actions { flex-wrap: wrap; margin-top: 8px; }
 .props { flex: 0 0 auto; max-height: 40%; border-top: 1px solid var(--border); overflow-y: auto; }
 .tabs { display: flex; gap: 3px; }
 .tabs button { flex: 1; padding: 3px; }

@@ -1039,17 +1039,6 @@ export class Properties {
     return h('div', { class: 'prop' }, h('label', null, label), input, extra);
   }
 
-  // what can be done with the selection (also reachable by keys)
-  actions(objects: boolean): HTMLElement {
-    const app = this.app;
-    return h('div', { class: 'row prop-actions' },
-      h('button', { title: 'Duplicate (Ctrl+D)', onclick: () => app.duplicateSelection() }, 'Duplicate'),
-      objects ? h('button', { title: 'To front – drawn last (PgUp)', onclick: () => app.reorderSelection('front') }, 'To front') : '',
-      objects ? h('button', { title: 'To back – drawn first (PgDn)', onclick: () => app.reorderSelection('back') }, 'To back') : '',
-      objects && !(app.selection.size === 1 && isPlacedPrefab(app.selectedObjects()[0])) ? h('button', { title: 'Save the tiles of the selection as a prefab', onclick: () => openSavePrefab(app) }, 'As prefab …') : '',
-      h('button', { class: 'danger', title: 'Delete (Del)', onclick: () => app.deleteSelection() }, 'Delete'));
-  }
-
   build(): void {
     const app = this.app;
     clear(this.body);
@@ -1072,7 +1061,7 @@ export class Properties {
         }
         return;
       }
-      if (sel.length > 1) { this.body.append(h('div', { class: 'prop-title' }, `${sel.length} sprites selected`), this.actions(false)); return; }
+      if (sel.length > 1) { this.body.append(h('div', { class: 'prop-title' }, `${sel.length} sprites selected`)); return; }
       const s = sel[0];
       // changes the sprite in the open level (a ROM edit saves a changed level: it is loaded anew, the ids kept)
       const upd = (f: (s: LevelSprite) => void) => app.editLevel((lv) => {
@@ -1093,7 +1082,6 @@ export class Properties {
         ...Array.from({ length: nBytes }, (_, i) => this.field(`Extra byte ${i + 1}`, hexInput(s.bytes?.[i] ?? 0, 2, (v) => upd((s) => { resize(s); if (s.bytes) s.bytes[i] = v; })))),
         s.extra >= 2 ? h('div', { class: 'hint' }, custom ? 'Extra bits 2/3: custom sprite without/with extra bit.' : 'This custom sprite is not inserted (ROM → Packages …, Sprites); the game treats it like the original sprite with the same number.') : '',
         custom?.description ? h('div', { class: 'hint pre' }, custom.description) : '',
-        this.actions(false),
         spriteUses(app, id, 'Used in levels'),
       );
       // behaviour when hit from below or jumped on, at this position and in general (emulated)
@@ -1111,7 +1099,7 @@ export class Properties {
       this.body.appendChild(emptyState(`${app.currentObjects().length} objects on ${app.mode === 'l2' ? 'layer 2' : 'layer 1'} – none selected.`));
       return;
     }
-    if (sel.length > 1) { this.body.append(h('div', { class: 'prop-title' }, `${sel.length} objects selected`), ...this.condFields(sel.filter(isDm16)), this.actions(true)); return; }
+    if (sel.length > 1) { this.body.append(h('div', { class: 'prop-title' }, `${sel.length} objects selected`), ...this.condFields(sel.filter(isDm16))); return; }
     const o = sel[0];
     // changes the object in the open level (see the sprite's)
     const upd = (f: (o: LevelObject) => void) => app.editLevel(() => {
@@ -1122,14 +1110,12 @@ export class Properties {
     const idx = app.currentObjects().indexOf(o);
     const ov = app.objectKind(o.num);
     this.body.append(
-      h('div', { class: 'prop-title' }, `${o.num ? 'Object ' + hex2(o.num) : 'Ext. object ' + hex2(o.ext)}: ${app.objectName(o.num, o.ext)} `,
-        h('button', { class: 'icon-btn', title: 'Rename (for this project)', 'aria-label': 'Rename', onclick: () => renameObject(app, o.num, o.ext) }, '✎')),
+      h('div', { class: 'prop-title' }, `${o.num ? 'Object ' + hex2(o.num) : 'Ext. object ' + hex2(o.ext)}: ${app.objectName(o.num, o.ext)}`),
       h('div', { class: 'hint' }, `No. ${idx + 1} of ${app.currentObjects().length} (drawing order)`),
       this.field('Object', hexInput(o.num, 2, (v) => upd((o) => { o.num = v; fixPrefab(o); }), 0x3f)),
       o.num === 0 ? this.field('Ext. object', hexInput(o.ext, 2, (v) => upd((o) => { o.ext = v; fixPrefab(o); }), 0xff)) : '',
       o.num === 0 && o.ext === PREFAB_EXT && o.prefab !== undefined ? this.field('Prefab', hexInput(o.prefab, 2, (v) => upd((o) => (o.prefab = v)), 0xff)) : '',
-      o.num === 0 && o.ext === PREFAB_EXT && o.prefab !== undefined ? h('div', { class: 'hint' }, prefabInfo(app, o.prefab), ' ',
-        h('button', { title: 'Replace the prefab here with single Direct Map16 objects (to edit it, then “Selection as prefab” again)', onclick: () => app.explodePrefab(o) }, 'Break up')) : '',
+      o.num === 0 && o.ext === PREFAB_EXT && o.prefab !== undefined ? h('div', { class: 'hint' }, prefabInfo(app, o.prefab)) : '',
       o.num === 0 && o.ext === DM16_EXT ? this.field('Map16 tile', hexInput(o.tile ?? 0, 3, (v) => upd((o) => (o.tile = v)), EXT_TILES - 1 - (o.cond?.always ? COND_ADD : 0)),
         h('button', { title: 'Edit the tile in the graphics area', onclick: () => app.editMap16(o.tile ?? 0) }, 'Edit …')) : '',
       o.num === 0 && o.ext === DM16_EXT ? this.field('Size (hw)', hexInput(o.size, 2, (v) => upd((o) => (o.size = v)))) : '',
@@ -1139,7 +1125,6 @@ export class Properties {
       o.num !== 0 && ov?.type ? this.field('Type', hexInput(objectVariant(ov, o.size), 1, (v) => upd((o) => (o.size = withObjectVariant(ov, o.size, v))), ov.count - 1)) : '',
       o.num !== 0 ? this.field('Size (byte)', hexInput(o.size, 2, (v) => upd((o) => (o.size = v)))) : '',
       o.num !== 0 ? h('div', { class: 'hint' }, `${nibbleText(ov)} · Keys: + / - width, * / / height, Alt+arrows`) : '',
-      this.actions(true),
     );
     // Map16 tiles of the object and their behaviour when hit from below (emulated)
     const tiles = app.objectMap16(o);
