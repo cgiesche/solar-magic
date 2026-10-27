@@ -313,7 +313,7 @@ export class LevelView {
     // hover
     if (this.hover && !this.drag) {
       const { tx, ty } = this.hover;
-      if (!this.onSelection(this.hover.px, this.hover.py)) this.paintPreview(ctx, tx, ty);
+      if (app.show.preview && !this.onSelection(this.hover.px, this.hover.py)) this.paintPreview(ctx, tx, ty);
       const hits = this.brushMode() ? [] : app.hitsAt(this.hover.px, this.hover.py);
       const hit = hits.find((h) => h.mode === app.mode && app.selection.has(h.item.uid)) ?? hits[0];
       if (hit && !app.selection.has(hit.item.uid)) {
@@ -1171,7 +1171,7 @@ export class LevelView {
     this.pos.textContent = '';
     this.status.textContent = isBrushMode(m) ? 'Click/drag picks up tiles as brush · Right click/Shift+click paints'
       : m === 'exit' ? 'Click an entrance (M, Z, S) or screen to select it – edit it on the right under “Properties” · Drag moves entrances · Right click: new entrance, create exit …'
-        : 'Click selects, drag moves, click into nothing deselects all · Right click/Shift+click places the item chosen in “Insert” (shown at the mouse), else opens the menu · Alt+click: item underneath';
+        : 'Click selects, drag moves, click into nothing deselects all · Right click/Shift+click places the item chosen in “Insert”, else opens the menu · Alt+click: item underneath';
   }
 
   updateStatus(tx: number, ty: number): void {

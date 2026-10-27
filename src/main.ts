@@ -540,7 +540,7 @@ function showHelp(): void {
       ['Click · Ctrl+click · Alt+click', 'Select · add to selection · element underneath'],
       ['Drag', 'Move selection / drag a selection box'],
       ['Handle at bottom right', 'Resize object'],
-      ['Right click / Shift+click', 'Place the element chosen in “Insert” (shown at the mouse) or a copy of the selection'],
+      ['Right click / Shift+click', 'Place the element chosen in “Insert” (View → Placement preview shows it at the mouse) or a copy of the selection'],
       ['Right click on the selection or with nothing chosen · Menu key / Shift+F10', 'Context menu'],
       ['Click into nothing', 'Deselect all and clear the element chosen in “Insert”'],
       ['BG: click/drag · right click/Shift+click', 'Pick up tile(s) as brush · paint'],

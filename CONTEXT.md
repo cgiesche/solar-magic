@@ -69,7 +69,7 @@ What a right click places instead of the palette item when the level's selection
 _Avoid_: stamp (that is the Map16 builder's), duplicate (Ctrl+D, one tile down-right)
 
 **Placement preview**:
-What a right click at the mouse would place, drawn translucent at the tile under it: the palette item or the selection copy, objects as the level's load draws them there with them added (emulated in the background; meanwhile the last one known follows the mouse), sprites with their images. Not shown over the selection or while dragging.
+A view option (off by default: a picture at the mouse feels like dragging, as if a left click dropped it): what a right click at the mouse would place, drawn translucent at the tile under it: the palette item or the selection copy, objects as the level's load draws them there with them added (emulated in the background; meanwhile the last one known follows the mouse), sprites with their images. Not shown over the selection or while dragging.
 _Avoid_: ghost (the view's ghosted other layer), cursor image
 
 **Level edit**:

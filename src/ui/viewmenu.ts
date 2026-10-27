@@ -61,6 +61,7 @@ export function viewMenu(app: App, paint: () => void, full = true): HTMLElement 
       onClick: () => { clearDeaths(projectId(app.rom), app.level.number); paint(); } },
     { label: 'Clear death markers in all levels', title: 'Forget where Mario died in every level of this ROM', disabled: () => !anyDeaths(projectId(app.rom)),
       onClick: () => { clearAllDeaths(projectId(app.rom)); paint(); } },
+    show('preview', 'Placement preview', 'What a right click would place, shown translucent at the mouse: the element chosen in “Insert” or a copy of the selection'),
     show('collision', 'Collision', 'How Mario collides with layer 1 (found by emulation): solid sides white, platforms dashed, slopes diagonal; red hurts, blue water, green climbable', 'C'),
     show('arcs', 'Jump arcs at the mouse', 'Where Mario gets jumping from the tile under the mouse (emulated): from standing, walking, running and at P-speed, to both sides; Shift+J pins them to the tile', 'J'),
     show('gameView', 'Game view frame', 'What the player sees: a 256x224 screen over the level; drag it by its edge or label (snaps to 8x8), or Shift+V puts Mario with his feet in the tile under the mouse and the frame where the game puts the camera then. The level is darkened where the camera never goes (found by the level scan)', 'V'),
