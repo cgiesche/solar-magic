@@ -13,7 +13,7 @@ import { layer3CellAt, layer3WordText } from '../core/layer3map.ts';
 import type { ArcSpeed } from '../core/jumparcs.ts';
 import { exitTarget } from '../core/exitgraph.ts';
 import { contextMenu, type MenuItem } from './menu.ts';
-import { openSavePrefab } from './panels.ts';
+import { isPlacedPrefab, openSavePrefab } from './panels.ts';
 import { openInsertDialog, openScreenDialog } from './tools.ts';
 import { incompleteSprites } from './spritemem.ts';
 import { problemsButton } from './problems.ts';
@@ -1285,8 +1285,8 @@ export class LevelView {
       if (!spr) items.push('sep',
         { label: 'Bring to front', shortcut: 'PgUp', title: 'Drawn after all other objects', onClick: () => app.reorderSelection('front') },
         { label: 'Send to back', shortcut: 'PgDn', title: 'Drawn before all other objects', onClick: () => app.reorderSelection('back') },
-        'sep',
-        { label: 'Save as prefab …', onClick: () => openSavePrefab(app) });
+        // a placed prefab alone is one already
+        ...(n === 1 && isPlacedPrefab(one as LevelObject) ? [] : ['sep' as const, { label: 'Save as prefab …', onClick: () => openSavePrefab(app) }]));
       items.push('sep', { label: 'Properties', onClick: () => app.emit('properties') });
     } else {
       const clip = spr ? app.clipboard.sprites : app.clipboard.objects;

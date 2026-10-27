@@ -844,6 +844,11 @@ export function prefabCanvas(tile: (t: number) => HTMLCanvasElement | null, st: 
 
 // the selected objects as a new prefab, or over an existing one; or a suggestion's arrangement (from), with its
 // places when they are current (else found anew)
+// whether o is a placed prefab (saving it alone as prefab would only copy one)
+export function isPlacedPrefab(o: LevelObject): boolean {
+  return o.num === 0 && o.ext === PREFAB_EXT && o.prefab !== undefined;
+}
+
 export function openSavePrefab(app: App, sug?: { prefab: Prefab; places?: LevelPlaces[] }): void {
   const from = sug?.prefab;
   const r = from ?? app.prefabFromSelection();
@@ -1041,7 +1046,7 @@ export class Properties {
       h('button', { title: 'Duplicate (Ctrl+D)', onclick: () => app.duplicateSelection() }, 'Duplicate'),
       objects ? h('button', { title: 'To front – drawn last (PgUp)', onclick: () => app.reorderSelection('front') }, 'To front') : '',
       objects ? h('button', { title: 'To back – drawn first (PgDn)', onclick: () => app.reorderSelection('back') }, 'To back') : '',
-      objects ? h('button', { title: 'Save the tiles of the selection as a prefab', onclick: () => openSavePrefab(app) }, 'As prefab …') : '',
+      objects && !(app.selection.size === 1 && isPlacedPrefab(app.selectedObjects()[0])) ? h('button', { title: 'Save the tiles of the selection as a prefab', onclick: () => openSavePrefab(app) }, 'As prefab …') : '',
       h('button', { class: 'danger', title: 'Delete (Del)', onclick: () => app.deleteSelection() }, 'Delete'));
   }
 
