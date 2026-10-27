@@ -11,6 +11,9 @@ import { Apu, apuReady, loadApu } from '../core/apu.ts';
 import { AudioOut } from './audio.ts';
 import { musicPlayer } from './musicplayer.ts';
 import { GM, RAM, marioX, marioY, setMarioPos } from '../core/ram.ts';
+import { SlotWatch } from '../core/slotwatch.ts';
+import { PlayLog } from '../core/playlog.ts';
+import { playMeter, GRAPH_FRAMES } from './playmeter.ts';
 import { applyTriggers, emptyTriggerView, customOn, switchName, isCustom, isManual, isOneShot, CUSTOM, MANUAL, ONE_SHOT } from '../core/extrigger.ts';
 import { shownSwitches } from './triggerpanel.ts';
 import { SaveSlot } from '../core/savestate.ts';
@@ -141,6 +144,10 @@ function play(app: App, at: Start | undefined, audio: AudioOut, emu: LevelEmulat
   const ctx = canvas.getContext('2d')!;
   const img = ctx.createImageData(256, 224);
   const info = h('div', { class: 'hint' });
+  // the sprite slots, watched from here on
+  const watch = new SlotWatch(s), log = new PlayLog(GRAPH_FRAMES);
+  s.hook = watch.hook;
+  const meter = playMeter(log, (tx, ty) => { m.close(); app.showUse(lv.number, { x: tx, y: ty }); });
   let keys = 0;
   let running = true;
   let paused = false;
@@ -159,6 +166,7 @@ function play(app: App, at: Start | undefined, audio: AudioOut, emu: LevelEmulat
     const st = usable();
     if (!st) { say('No savestate'); showRestartSaved(); return; }
     s.loadState(st);
+    watch.reset();
     audio.resync();
     say('State loaded');
   };
@@ -188,6 +196,7 @@ function play(app: App, at: Start | undefined, audio: AudioOut, emu: LevelEmulat
     try { s.runFrame(); } catch (e) { info.textContent = `Emulation error: ${e}`; paused = true; }
     if (s.audio) audio.push(s.audio);
     frames++;
+    log.frame(frames, watch.usedAll(), watch.take(), marioX(s.wram), marioY(s.wram));
   };
   const loop = (t: number) => {
     if (!running) return;
@@ -215,6 +224,7 @@ function play(app: App, at: Start | undefined, audio: AudioOut, emu: LevelEmulat
     }
     new Uint32Array(img.data.buffer).set(ppu.frame);
     ctx.putImageData(img, 0, 0);
+    meter.update();
     info.textContent = `Level ${hex(lv.number, 3)} · Frame ${frames}${paused ? ' · Pause' : ''} · Game mode ${hex(s.wram[RAM.gameMode], 2)}`
       + (note && t < noteUntil ? ` · ${note}` : '')
       + (padNames.length ? ` · Gamepad: ${padNames.join(', ')}` : ' · Gamepad: none detected (press a button)')
@@ -228,13 +238,14 @@ function play(app: App, at: Start | undefined, audio: AudioOut, emu: LevelEmulat
     if (!running) return;
     running = false;
     s.ppu = null;
+    s.hook = null;
     audio.close();
     window.removeEventListener('keydown', kd, true);
     window.removeEventListener('keyup', ku, true);
   };
   const triggers = triggerControls(app, s.wram, () => canvas.focus());
   const m = modal(`Test level – ${hex(lv.number, 3)}${fromSave ? ' from the savestate' : at ? ` from ${hex(at.tx, 2)}/${hex(at.ty, 2)}` : ''}${ok ? '' : ' (load error)'}`, h('div', { class: 'play' },
-    canvas,
+    h('div', { class: 'play-main' }, canvas, meter.el),
     info,
     triggers,
     h('div', { class: 'hint play-help' }, 'Controls: arrows · X = jump (B) · Z/Y = run/fire (Y) · S = spin jump · A = X button · Enter = Start · Shift = Select · Q/W = L/R · P = pause. Gamepad: d-pad/left stick, buttons by position as on the SNES pad (bottom = B, right = A, left = Y, top = X), shoulder buttons/triggers = L/R, Start/Select, Home = pause. M = sound on/off. F5 = save state, F8 = load state (gamepad: Select+L / Select+R; one slot, kept for this level until it or the ROM changes). The level is saved before the test.'),

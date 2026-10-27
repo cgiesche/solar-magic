@@ -262,8 +262,21 @@ kbd { background: #181a1f; border: 1px solid var(--border); border-radius: 3px; 
 .level-item .lname { font-family: system-ui, sans-serif; font-size: 11px; color: var(--muted); }
 .level-item.current .lname { color: #dfefff; }
 .play { display: flex; flex-direction: column; gap: 6px; align-items: center; }
-.play-canvas { width: 768px; height: 672px; image-rendering: pixelated; background: #000; outline: none; max-width: 85vw; max-height: 70vh; object-fit: contain; }
+.play-canvas { width: 768px; height: 672px; image-rendering: pixelated; background: #000; outline: none; max-width: calc(85vw - 266px); max-height: 70vh; object-fit: contain; }
 .play-help { align-self: stretch; contain: inline-size; } /* wraps at the canvas width instead of widening the dialog */
+.play-main { display: flex; gap: 10px; align-items: flex-start; } /* the meters (256px) beside the canvas */
+.play-meter { width: 256px; display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.meter-row { display: flex; align-items: center; gap: 6px; }
+.meter-label { width: 62px; color: var(--muted); }
+.meter-bar { flex: 1; height: 8px; background: var(--panel2); border: 1px solid var(--border); border-radius: 2px; overflow: hidden; }
+.meter-fill { height: 100%; background: var(--accent2); }
+.meter-val { width: 40px; text-align: right; font-variant-numeric: tabular-nums; }
+.meter-row.warn .meter-fill { background: var(--danger); }
+.meter-row.warn .meter-val { color: var(--danger); }
+.meter-graph { width: 256px; height: 48px; background: var(--panel2); border: 1px solid var(--border); }
+.meter-events { max-height: 220px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.meter-event { display: flex; align-items: center; gap: 6px; justify-content: space-between; }
+.meter-event button { padding: 0 6px; font-size: 11px; }
 .msg-editor { display: flex; gap: 14px; }
 .msg-list { width: 300px; height: 60vh; overflow-y: auto; border: 1px solid var(--border); font-size: 12px; }
 .msg-list .level-item { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

@@ -87,6 +87,8 @@ export const RAM = {
   currentSprite: 0x15e9, // slot the sprite code runs for
 
   // other sprite kinds
+  extSprites: 0x170b, // extended sprites (fireballs, hammers …): 10 slots, number
+  clusterSprites: 0x1892, // cluster sprites (Boo ceiling, bonus game 1-Ups …): 20 slots, number
   bounceSprites: 0x1699, // 4 slots: number
   scoreSprites: 0x16e1, // number
 
@@ -157,6 +159,7 @@ export const SCREEN_PTRS: [number, number] = [0x0bf6, 0x100];
 
 // normal sprites: per-slot tables (address + slot)
 export const SPRITE_SLOTS = 12;
+export const EXT_SLOTS = 10, CLUSTER_SLOTS = 20;
 export const SPR = {
   num: 0x9e,
   speedY: 0xaa, speedX: 0xb6,
