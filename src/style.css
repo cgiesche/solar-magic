@@ -265,7 +265,7 @@ kbd { background: #181a1f; border: 1px solid var(--border); border-radius: 3px; 
 .play-canvas { width: 768px; height: 672px; image-rendering: pixelated; background: #000; outline: none; max-width: calc(85vw - 266px); max-height: 70vh; object-fit: contain; }
 .play-help { align-self: stretch; contain: inline-size; } /* wraps at the canvas width instead of widening the dialog */
 .play-main { display: flex; gap: 10px; align-items: flex-start; } /* the meters (256px) beside the canvas */
-.play-meter { width: 256px; display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.play-meter { --warn: #e0c252; --cluster: #b07fe0; width: 256px; display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
 .meter-row { display: flex; align-items: center; gap: 6px; }
 .meter-label { width: 62px; color: var(--muted); }
 .meter-bar { flex: 1; height: 8px; background: var(--panel2); border: 1px solid var(--border); border-radius: 2px; overflow: hidden; }

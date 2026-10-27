@@ -20,7 +20,7 @@ const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL
 // code at $008000 (native mode, 8-bit registers), the tables filled before; NMI handler at $00C000 (writes
 // RAM, as the game's does); runs until STP
 const NATIVE = [0x18, 0xfb, 0xe2, 0x30]; // CLC, XCE, SEP #$30
-function run(code: number[], fill: (w: Uint8Array) => void, nmiAfter = -1): { failed: string[]; watch: SlotWatch } {
+function run(code: number[], fill: (w: Uint8Array) => void, nmiAfter = -1): { failed: string[]; replaced: boolean[]; watch: SlotWatch } {
   const rom = new Uint8Array(0x8000);
   rom.set([...NATIVE, ...code, 0xdb]);
   rom.set([0x8d, 0x00, 0x10, 0x9c, 0x01, 0x10, 0xad, 0x00, 0x10, 0x40], 0x4000); // STA $1000, STZ $1001, LDA $1000, RTI
@@ -35,7 +35,8 @@ function run(code: number[], fill: (w: Uint8Array) => void, nmiAfter = -1): { fa
     if (i === nmiAfter) s.cpu.nmiPending = true;
     s.cpu.step();
   }
-  return { failed: watch.take().map((f) => f.kind), watch };
+  const f = watch.take();
+  return { failed: f.map((x) => x.kind), replaced: f.map((x) => x.replaced), watch };
 }
 const full = (kind: SlotKind, except = -1) => (w: Uint8Array) => {
   const t = SLOT_TABLES[kind];
@@ -50,6 +51,12 @@ const pixi = (base: number, n: number) => [0xa2, n - 1, 0xbd, lo(base), hi(base)
   check(run(pixi(N, 12), full('sprite', 3)).failed.length === 0, 'slot 3 free: the search finds it');
   check(run(pixi(E, 10), full('extended')).failed.join() === 'extended', 'extended sprites, all taken: failed');
   check(run(pixi(C, 20), full('cluster')).failed.join() === 'cluster', 'cluster sprites, all taken: failed');
+  check(run(pixi(E, 10), full('extended')).replaced.join() === 'false', 'nothing written after it: did not spawn');
+  // as the game's extended sprites do: none free, then the slot of a rotating index taken anyway (DEC $18FC /
+  // BPL + / LDA #$07 / STA $18FC / + LDY $18FC / LDA #$04 / STA $170B,y)
+  const take = [0xce, 0xfc, 0x18, 0x10, 0x05, 0xa9, 0x07, 0x8d, 0xfc, 0x18, 0xac, 0xfc, 0x18, 0xa9, 0x04, 0x99, lo(E), hi(E)];
+  check(run([...pixi(E, 8).slice(0, 10), ...take].map((b, i) => (i === 6 ? 0x15 : b)), full('extended')).replaced.join() === 'true',
+    'none free, then one taken anyway: another sprite replaced');
   // the game's level sprite loader: down to a bound in scratch RAM (LDA #$FF / STA $06 / LDX #9 / - LDA $14C8,x /
   // BEQ / DEX / CPX $06 / BNE - / LDX $02 / STZ $1938,x)
   const loader = [0xa9, 0xff, 0x85, 0x06, 0xa2, 0x09, 0xbd, lo(N), hi(N), 0xf0, 0x0a, 0xca, 0xe4, 0x06, 0xd0, 0xf6, 0xa6, 0x02, 0x9e, 0x38, 0x19];
@@ -124,7 +131,7 @@ for (const lv of [0x105, 0x106, 0x103, 0x104, 0x10b, 0x101, 0x102, 0x1, 0x5, 0x1
   const log = new PlayLog(4);
   const used = { sprite: 3, extended: 0, cluster: 0 };
   log.frame(1, used, [], 0x100, 0x150);
-  const fail = (kind: SlotKind): SlotFailure => ({ kind, searched: 10, free: 2 });
+  const fail = (kind: SlotKind): SlotFailure => ({ kind, searched: 10, free: 2, replaced: false });
   log.frame(2, used, [fail('sprite')], 0x120, 0x150);
   log.frame(3, used, [fail('sprite')], 0x130, 0x150);
   log.frame(100, used, [fail('sprite'), fail('extended')], 0x400, 0x80);
@@ -133,6 +140,9 @@ for (const lv of [0x105, 0x106, 0x103, 0x104, 0x10b, 0x101, 0x102, 0x1, 0x5, 0x1
     'failures of a kind close together are one event (first frame, count, Mario\'s tile)');
   check(log.events[1].kind === 'sprite' && log.events[1].frame === 100 && log.events[2].kind === 'extended', 'later ones and other kinds are events of their own');
   check(log.history.length === 4 && log.history[3].frame === 101 && log.history[0].frame === 2, 'the history keeps the last frames');
+  log.cut();
+  log.frame(102, used, [fail('sprite')], 0x400, 0x80);
+  check(log.events.length === 4 && log.events[3].frame === 102, 'after a savestate is loaded: a failure is an event of its own');
 }
 
 if (bad) { console.log(`${bad} failed`); process.exit(1); }

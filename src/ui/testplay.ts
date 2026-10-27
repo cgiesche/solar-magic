@@ -167,6 +167,7 @@ function play(app: App, at: Start | undefined, audio: AudioOut, emu: LevelEmulat
     if (!st) { say('No savestate'); showRestartSaved(); return; }
     s.loadState(st);
     watch.reset();
+    log.cut();
     audio.resync();
     say('State loaded');
   };

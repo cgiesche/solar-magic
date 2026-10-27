@@ -164,6 +164,17 @@ export class Snes implements Bus {
     return v;
   }
 
+  // a byte as the CPU would read it from ROM or WRAM, without a bus access (no hooks, no open bus); -1 elsewhere
+  peek(addr: number): number {
+    const bank = addr >> 16, off = addr & 0xffff;
+    if (off >= 0x8000 && (bank & 0x7e) !== 0x7e) {
+      if ((bank & 0xfe) === 0xfe && this.overlay) return this.overlay[((bank & 1) << 15) | (off & 0x7fff)];
+      return this.romData[this.romOffset(addr)];
+    }
+    if ((bank & 0xfe) === 0x7e) return this.wram[addr - 0x7e0000];
+    return off < 0x2000 && (bank & 0x7f) < 0x40 ? this.wram[off] : -1;
+  }
+
   // first read of a ROM page (or a read in a byte page) while reads are recorded
   private recordRead(ro: number): void {
     if (this.romSkip.has(ro)) return;

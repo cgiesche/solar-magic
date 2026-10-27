@@ -9,20 +9,21 @@ import type { PlayLog, PlayEvent } from '../core/playlog.ts';
 export const GRAPH_FRAMES = 256;
 const WARN_FRAMES = 60; // a meter stays red this long after a failed spawn
 
-const KIND_NAME: Record<SlotKind, string> = { sprite: 'Sprites', extended: 'Extended', cluster: 'Cluster' };
-const KIND_HELP: Record<SlotKind, string> = {
-  sprite: 'Normal sprites: enemies, items, platforms …',
-  extended: 'Extended sprites: fireballs, hammers, bones, smoke of some sprites …',
-  cluster: 'Cluster sprites: Boo ceiling and rings, falling spikes, bonus game 1-Ups …',
+// per table: the meter's label, its tooltip, what a slot holds (a / an …), the graph's color (a CSS variable)
+const KINDS: Record<SlotKind, { label: string; help: string; what: string; a: string; color: string }> = {
+  sprite: { label: 'Sprites', help: 'Normal sprites: enemies, items, platforms …', what: 'sprite', a: 'A', color: '--accent' },
+  extended: { label: 'Extended', help: 'Extended sprites: fireballs, hammers, bones, smoke of some sprites …', what: 'extended sprite', a: 'An', color: '--warn' },
+  cluster: { label: 'Cluster', help: 'Cluster sprites: Boo ceiling and rings, falling spikes, bonus game 1-Ups …', what: 'cluster sprite', a: 'A', color: '--cluster' },
 };
-const SPAWN_NAME: Record<SlotKind, string> = { sprite: 'A sprite', extended: 'An extended sprite', cluster: 'A cluster sprite' };
 
 export function eventText(e: PlayEvent): string {
-  return `${SPAWN_NAME[e.kind]} did not spawn${e.count > 1 ? ` (×${e.count})` : ''}`;
+  const k = KINDS[e.kind];
+  return `${k.a} ${k.what} ${e.replaced ? 'replaced another' : 'did not spawn'}${e.count > 1 ? ` (×${e.count})` : ''}`;
 }
 
 export function eventHelp(e: PlayEvent): string {
-  const t = e.kind === 'sprite' ? 'sprite' : `${e.kind} sprite`;
+  const t = KINDS[e.kind].what;
+  if (e.replaced) return `No ${t} slot it may use was free: it took the slot of another one, which vanished.`;
   return e.free === 0
     ? `All ${SLOT_TABLES[e.kind].slots} ${t} slots were taken.`
     : `The ${e.searched} ${t} slots it may use were taken, ${e.free} others were free: the level's sprite memory or the code that spawns it limits its slots.`;
@@ -33,10 +34,10 @@ export function playMeter(log: PlayLog, show: (tx: number, ty: number) => void):
   const rows = SLOT_KINDS.map((k) => {
     const fill = h('div', { class: 'meter-fill' });
     const val = h('span', { class: 'meter-val' });
-    const row = h('div', { class: 'meter-row', title: KIND_HELP[k] }, h('span', { class: 'meter-label' }, KIND_NAME[k]), h('div', { class: 'meter-bar' }, fill), val);
+    const row = h('div', { class: 'meter-row', title: KINDS[k].help }, h('span', { class: 'meter-label' }, KINDS[k].label), h('div', { class: 'meter-bar' }, fill), val);
     return { k, row, fill, val };
   });
-  const graph = h('canvas', { width: GRAPH_FRAMES, height: 48, class: 'meter-graph', title: `Sprite slots in use over the last ${GRAPH_FRAMES} frames; red: a sprite did not spawn` });
+  const graph = h('canvas', { width: GRAPH_FRAMES, height: 48, class: 'meter-graph', title: `Sprite slots in use over the last ${GRAPH_FRAMES} frames (extended and cluster sprites as lines); red: a sprite did not spawn or replaced another` });
   const gctx = graph.getContext('2d')!;
   const list = h('div', { class: 'meter-events' });
   const empty = h('div', { class: 'hint' }, 'No sprite failed to spawn.');
@@ -72,15 +73,18 @@ export function playMeter(log: PlayLog, show: (tx: number, ty: number) => void):
 // sprite slots (filled), extended and cluster slots (lines) of the last frames, failed spawns as red ticks
 function drawGraph(g: CanvasRenderingContext2D, log: PlayLog): void {
   const { width: W, height: H } = g.canvas;
+  const css = getComputedStyle(g.canvas), color = (v: string) => css.getPropertyValue(v).trim();
   g.clearRect(0, 0, W, H);
   const hist = log.history.slice(-W), x0 = W - hist.length;
   const y = (n: number, k: SlotKind) => H - 1 - Math.round(((H - 2) * n) / SLOT_TABLES[k].slots);
-  g.fillStyle = '#e05252';
+  g.fillStyle = color('--danger');
   hist.forEach((f, i) => { if (f.failed.length) g.fillRect(x0 + i, 0, 1, H); });
-  g.fillStyle = 'rgba(76, 194, 255, 0.45)';
+  g.fillStyle = color(KINDS.sprite.color);
+  g.globalAlpha = 0.45;
   hist.forEach((f, i) => { const t = y(f.used.sprite, 'sprite'); g.fillRect(x0 + i, t, 1, H - t); });
-  for (const [k, c] of [['extended', '#e0c252'], ['cluster', '#b07fe0']] as [SlotKind, string][]) {
-    g.strokeStyle = c;
+  g.globalAlpha = 1;
+  for (const k of ['extended', 'cluster'] as SlotKind[]) {
+    g.strokeStyle = color(KINDS[k].color);
     g.beginPath();
     hist.forEach((f, i) => { const t = y(f.used[k], k) + 0.5; if (i) g.lineTo(x0 + i, t); else g.moveTo(x0, t); });
     g.stroke();

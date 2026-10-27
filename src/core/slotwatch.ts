@@ -18,12 +18,13 @@ export const SLOT_TABLES: Record<SlotKind, { base: number; slots: number }> = {
 };
 export const SLOT_KINDS = Object.keys(SLOT_TABLES) as SlotKind[];
 // a failed search: the slots it looked at (all taken), the table's slots free elsewhere then (the code
-// may use only some of them: a sprite memory's for level sprites, a generator's own)
-export interface SlotFailure { kind: SlotKind; searched: number; free: number }
+// may use only some of them: a sprite memory's for level sprites, a generator's own); replaced: the code
+// then took a taken slot anyway (the game's extended sprites, by a rotating index), its sprite vanished
+export interface SlotFailure { kind: SlotKind; searched: number; free: number; replaced: boolean }
 
 const BEQ = 0xf0, BNE = 0xd0;
-const SCRATCH = 0x10; // the game's scratch RAM $00-$0F, where a search keeps its bound
 const INTERRUPT = 4; // bytes an interrupt pushes (native mode): deeper on the stack, the search is interrupted
+const REPLACE_CYCLES = 200; // how soon after the failed search a write to a taken slot is its replacement
 
 interface Run { kind: SlotKind; pc: number; sp: number; last: number; dir: number; count: number }
 
@@ -31,13 +32,18 @@ export class SlotWatch {
   readonly hook: MemHook;
   private failed: SlotFailure[] = [];
   private run: Run | null = null;
+  // the latest failure, while a write may still take a slot that was taken then
+  private after: { f: SlotFailure; taken: boolean[]; until: number } | null = null;
   private s: Snes;
 
   constructor(s: Snes) {
     this.s = s;
     this.hook = {
       onWramRead: (a) => this.read(a),
-      onWramWrite: (a) => { if (this.run && !this.aside(a)) this.end(); },
+      onWramWrite: (a, v) => {
+        if (this.run && !this.aside(a)) this.end();
+        if (this.after) this.written(a, v);
+      },
     };
   }
 
@@ -50,7 +56,7 @@ export class SlotWatch {
   }
 
   usedAll(): Record<SlotKind, number> {
-    return { sprite: this.used('sprite'), extended: this.used('extended'), cluster: this.used('cluster') };
+    return Object.fromEntries(SLOT_KINDS.map((k) => [k, this.used(k)])) as Record<SlotKind, number>;
   }
 
   // the searches that failed since the last call
@@ -63,12 +69,22 @@ export class SlotWatch {
   // the machine's state was replaced (a savestate loaded): a search in progress is gone
   reset(): void {
     this.run = null;
+    this.after = null;
     this.failed = [];
+  }
+
+  // a write after a failed search: into a slot taken then, the search's sprite replaced the one there
+  private written(a: number, v: number): void {
+    const { f, taken, until } = this.after!;
+    if (this.s.cpu.cycles > until) { this.after = null; return; }
+    if (tableOf(a) !== f.kind) return;
+    f.replaced = v !== 0 && taken[a - SLOT_TABLES[f.kind].base];
+    this.after = null;
   }
 
   // an access that isn't the search's own: the stack, or anything in an interrupt
   private aside(a: number): boolean {
-    return (a >= 0x100 && a < 0x200) || this.s.cpu.s < this.run!.sp - (INTERRUPT - 1);
+    return (a >= RAM.stack && a < RAM.stackEnd) || this.s.cpu.s < this.run!.sp - (INTERRUPT - 1);
   }
 
   private read(a: number): void {
@@ -76,10 +92,10 @@ export class SlotWatch {
     if (run && this.aside(a)) return;
     const kind = tableOf(a);
     if (kind === null) {
-      if (run && a >= SCRATCH) this.end();
+      if (run && a >= RAM.scratchEnd) this.end(); // a search keeps its bound in scratch RAM
       return;
     }
-    const cpu = this.s.cpu, next = this.peek((cpu.pbr << 16) | cpu.pc);
+    const cpu = this.s.cpu, next = this.s.peek((cpu.pbr << 16) | cpu.pc);
     if (next !== BEQ && next !== BNE) {
       if (run) this.end();
       return;
@@ -102,16 +118,12 @@ export class SlotWatch {
   private end(): void {
     const r = this.run!;
     this.run = null;
-    const n = SLOT_TABLES[r.kind].slots;
-    if (r.count >= Math.ceil(n / 3)) this.failed.push({ kind: r.kind, searched: r.count, free: n - this.used(r.kind) });
-  }
-
-  // an opcode where the CPU runs (ROM or RAM), without a bus access
-  private peek(addr: number): number {
-    const s = this.s, bank = addr >> 16, off = addr & 0xffff;
-    if (off >= 0x8000 && (bank & 0x7e) !== 0x7e) return s.rom[s.romOffset(addr)];
-    if ((bank & 0xfe) === 0x7e) return s.wram[addr - 0x7e0000];
-    return off < 0x2000 && (bank & 0x7f) < 0x40 ? s.wram[off] : -1;
+    const t = SLOT_TABLES[r.kind];
+    if (r.count < Math.ceil(t.slots / 3)) return;
+    const f = { kind: r.kind, searched: r.count, free: t.slots - this.used(r.kind), replaced: false };
+    this.failed.push(f);
+    const w = this.s.wram, taken = Array.from({ length: t.slots }, (_, i) => w[t.base + i] !== 0);
+    this.after = { f, taken, until: this.s.cpu.cycles + REPLACE_CYCLES };
   }
 }
 

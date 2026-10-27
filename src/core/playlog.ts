@@ -19,6 +19,9 @@ export class PlayLog {
   private size: number;
   constructor(size: number) { this.size = size; }
 
+  // the frames go on from elsewhere (a savestate loaded): a failure from now on is an event of its own
+  cut(): void { this.open.clear(); }
+
   // one emulated frame: the live slots at its end, the searches that failed in it, Mario's position (pixels)
   frame(frame: number, used: SlotCounts, failed: SlotFailure[], marioX: number, marioY: number): void {
     this.history.push({ frame, used: { ...used }, failed });
@@ -31,7 +34,10 @@ export class PlayLog {
       const ev = { ...mine[0], frame, count: n, tx: (marioX + 8) >> 4, ty: (marioY + 16) >> 4, last: frame };
       this.events.push(ev);
       this.open.set(kind, ev);
-      if (this.events.length > MAX_EVENTS) this.events.shift();
+      if (this.events.length > MAX_EVENTS) {
+        const old = this.events.shift()!;
+        if (this.open.get(old.kind) === old) this.open.delete(old.kind);
+      }
     }
   }
 }

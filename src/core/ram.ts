@@ -17,6 +17,8 @@ export const GM = {
 } as const;
 
 export const RAM = {
+  scratchEnd: 0x10, // the game's scratch RAM is $00-$0F
+  stack: 0x0100, stackEnd: 0x0200, // the stack page
   gameMode: 0x0100,
   frameCounter: 0x14, // advances once per game frame (not in lag frames)
   introLevel: 0x0109, // level the game starts with instead of the overworld (0 = none)
