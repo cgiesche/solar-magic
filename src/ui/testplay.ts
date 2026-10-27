@@ -13,6 +13,8 @@ import { musicPlayer } from './musicplayer.ts';
 import { GM, RAM, marioX, marioY, setMarioPos } from '../core/ram.ts';
 import { applyTriggers, emptyTriggerView, customOn, switchName, isCustom, isManual, isOneShot, CUSTOM, MANUAL, ONE_SHOT } from '../core/extrigger.ts';
 import { shownSwitches } from './triggerpanel.ts';
+import { SaveSlot } from '../core/savestate.ts';
+import type { SnesState } from '../core/snes.ts';
 
 const KEYMAP: Record<string, number> = {
   ArrowUp: 0x0800, ArrowDown: 0x0400, ArrowLeft: 0x0200, ArrowRight: 0x0100,
@@ -31,33 +33,43 @@ const PADMAP: [number, number][] = [
   [12, 0x0800], [13, 0x0400], [14, 0x0200], [15, 0x0100], // d-pad
 ];
 const PAD_PAUSE = 16; // home / guide button
+const PAD_SELECT = 8, PAD_L = [4, 6], PAD_R = [5, 7]; // Select+L saves the state, Select+R loads it
+const PAD_COMBO = 0x2000 | 0x0020 | 0x0010; // Select, L, R: not passed to the game while a combo is held
 const AUDIO_LEAD = 1800; // sample pairs to keep queued at first (~56 ms; grows after underruns)
 
-// buttons of all connected gamepads; pause: the pause button is held on one of them
-function readPads(): { bits: number; pause: boolean; names: string[] } {
-  let bits = 0, pause = false;
+// buttons of all connected gamepads; pause: the pause button is held on one of them; save / load: Select+L /
+// Select+R held on one of them (Select, L and R are then left out of bits)
+function readPads(): { bits: number; pause: boolean; save: boolean; load: boolean; names: string[] } {
+  let bits = 0, pause = false, save = false, load = false;
   const names: string[] = [];
   for (const p of navigator.getGamepads?.() ?? []) {
     if (!p || !p.connected) continue;
     names.push(p.id.replace(/\s*\(.*$/, '') || `Gamepad ${p.index + 1}`);
     const pressed = (i: number) => !!p.buttons[i]?.pressed;
-    for (const [i, bit] of PADMAP) if (pressed(i)) bits |= bit;
+    let pb = 0;
+    for (const [i, bit] of PADMAP) if (pressed(i)) pb |= bit;
     if (pressed(PAD_PAUSE)) pause = true;
+    const sel = pressed(PAD_SELECT), l = sel && PAD_L.some(pressed), r = sel && PAD_R.some(pressed);
+    if (l) save = true;
+    if (r) load = true;
+    bits |= l || r ? pb & ~PAD_COMBO : pb;
     const ax = p.axes[0] ?? 0, ay = p.axes[1] ?? 0;
     if (ax < -0.5) bits |= 0x0200; else if (ax > 0.5) bits |= 0x0100;
     if (ay < -0.5) bits |= 0x0800; else if (ay > 0.5) bits |= 0x0400;
   }
-  return { bits, pause, names };
+  return { bits, pause, save, load, names };
 }
 
 let testEmu: LevelEmulator | null = null;
 let soundMuted = false; // kept between test runs
+// the one savestate (F5 / F8): kept between test runs, for its level on the ROM as it was then
+const saveSlot = new SaveSlot<SnesState>();
 
 // at: Mario's start tile (his feet stand in it) instead of the main entrance, with the camera start, options
 // (face left, water) and action of the entrance played from (a secondary entrance's; else the main entrance's
-// without an action)
+// without an action); fromSave: from the savestate instead of the level start (when there is a usable one)
 type Start = { tx: number; ty: number; entrance?: StartEntrance };
-export function openTestPlay(app: App, at?: Start): void {
+export function openTestPlay(app: App, at?: Start, fromSave = false): void {
   // saved first: the game loads the level from the ROM again when Mario dies and enters it again
   if (app.dirty) app.saveLevel(true);
   // the game plays its own music
@@ -65,19 +77,31 @@ export function openTestPlay(app: App, at?: Start): void {
   // the sound emulator loads once; the audio context must start within the key press or click
   const audio = new AudioOut(AUDIO_LEAD);
   if (!apuReady()) {
-    loadApu().then(() => start(app, at, audio), () => start(app, at, audio));
+    loadApu().then(() => start(app, at, audio, fromSave), () => start(app, at, audio, fromSave));
     return;
   }
-  start(app, at, audio);
+  start(app, at, audio, fromSave);
 }
 
-function start(app: App, at: Start | undefined, audio: AudioOut): void {
+function start(app: App, at: Start | undefined, audio: AudioOut, fromSave: boolean): void {
   if (!testEmu || testEmu.rom !== app.rom) {
     testEmu = new LevelEmulator(app.rom);
     if (apuReady()) testEmu.snes.apu = new Apu();
     testEmu.boot();
   }
   const emu = testEmu;
+  const lv = app.level;
+  const saved = fromSave ? saveSlot.get(app.rom, lv.number, app.dirty) : null;
+  const r = saved ? { ok: true } : loadLevel(app, emu, at);
+  const ppu = new PPU(emu.snes);
+  emu.snes.ppu = ppu;
+  // with the PPU attached: the picture on screen is part of the state
+  if (saved) emu.snes.loadState(saved);
+  play(app, at, audio, emu, ppu, r.ok, !!saved);
+}
+
+// loads the level in a game in progress, Mario at the start position
+function loadLevel(app: App, emu: LevelEmulator, at: Start | undefined): { ok: boolean } {
   const lv = app.level;
   const ov = app.buildOverrides();
   // the start position: the nearest main entrance setting loads the level around it (camera, tilemap; FG and
@@ -108,8 +132,11 @@ function start(app: App, at: Start | undefined, audio: AudioOut): void {
     if (move) setMarioPos(w, marioX(w) + move.x, marioY(w) + move.y);
     else setMarioPos(w, start.x, start.y);
   }
-  const ppu = new PPU(s);
-  s.ppu = ppu;
+  return r;
+}
+
+function play(app: App, at: Start | undefined, audio: AudioOut, emu: LevelEmulator, ppu: PPU, ok: boolean, fromSave: boolean): void {
+  const s = emu.snes, lv = app.level;
   const canvas = h('canvas', { width: 256, height: 224, class: 'play-canvas', tabIndex: 0 });
   const ctx = canvas.getContext('2d')!;
   const img = ctx.createImageData(256, 224);
@@ -121,13 +148,32 @@ function start(app: App, at: Start | undefined, audio: AudioOut): void {
   let acc = 0;
   let frames = 0;
   let padPause = false;
+  let padSave = false, padLoad = false;
   let padNames: string[] = [];
+  // a brief note in the info line (savestate saved / loaded), until `until`
+  let note = '', noteUntil = 0;
+  const say = (t: string) => { note = t; noteUntil = performance.now() + 2000; };
+  const usable = () => saveSlot.get(app.rom, lv.number, app.dirty);
+  const saveState = () => { saveSlot.save(app.rom, lv.number, s.saveState()); say('State saved'); showRestartSaved(); };
+  const loadState = () => {
+    const st = usable();
+    if (!st) { say('No savestate'); showRestartSaved(); return; }
+    s.loadState(st);
+    audio.resync();
+    say('State loaded');
+  };
   audio.setMuted(soundMuted);
   const onKey = (down: boolean) => (e: KeyboardEvent) => {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return; // the trigger's frame
     const bit = KEYMAP[e.key];
     if (e.key === 'p' || e.key === 'P') { if (down) setPaused(!paused); e.preventDefault(); return; }
     if (e.key === 'm' || e.key === 'M') { if (down) { soundMuted = !soundMuted; audio.setMuted(soundMuted); } e.preventDefault(); return; }
+    if (e.key === 'F5' || e.key === 'F8') {
+      e.preventDefault(); // F5 would reload the page
+      e.stopPropagation();
+      if (down && !e.repeat) { if (e.key === 'F5') saveState(); else loadState(); }
+      return;
+    }
     if (bit === undefined) return;
     e.preventDefault();
     e.stopPropagation();
@@ -150,6 +196,10 @@ function start(app: App, at: Start | undefined, audio: AudioOut): void {
     const pad = readPads();
     if (pad.pause && !padPause) setPaused(!paused);
     padPause = pad.pause;
+    if (pad.save && !padSave) saveState();
+    padSave = pad.save;
+    if (pad.load && !padLoad) loadState();
+    padLoad = pad.load;
     padNames = pad.names;
     let n = 0;
     if (audio.ready && s.apu) {
@@ -166,6 +216,7 @@ function start(app: App, at: Start | undefined, audio: AudioOut): void {
     new Uint32Array(img.data.buffer).set(ppu.frame);
     ctx.putImageData(img, 0, 0);
     info.textContent = `Level ${hex(lv.number, 3)} · Frame ${frames}${paused ? ' · Pause' : ''} · Game mode ${hex(s.wram[RAM.gameMode], 2)}`
+      + (note && t < noteUntil ? ` · ${note}` : '')
       + (padNames.length ? ` · Gamepad: ${padNames.join(', ')}` : ' · Gamepad: none detected (press a button)')
       + (!s.apu || audio.failed ? ' · No sound' : soundMuted ? ' · Sound off (M)' : '');
     schedule();
@@ -182,13 +233,19 @@ function start(app: App, at: Start | undefined, audio: AudioOut): void {
     window.removeEventListener('keyup', ku, true);
   };
   const triggers = triggerControls(app, s.wram, () => canvas.focus());
-  const m = modal(`Test level – ${hex(lv.number, 3)}${at ? ` from ${hex(at.tx, 2)}/${hex(at.ty, 2)}` : ''}${r.ok ? '' : ' (load error)'}`, h('div', { class: 'play' },
+  const m = modal(`Test level – ${hex(lv.number, 3)}${fromSave ? ' from the savestate' : at ? ` from ${hex(at.tx, 2)}/${hex(at.ty, 2)}` : ''}${ok ? '' : ' (load error)'}`, h('div', { class: 'play' },
     canvas,
     info,
     triggers,
-    h('div', { class: 'hint play-help' }, 'Controls: arrows · X = jump (B) · Z/Y = run/fire (Y) · S = spin jump · A = X button · Enter = Start · Shift = Select · Q/W = L/R · P = pause. Gamepad: d-pad/left stick, buttons by position as on the SNES pad (bottom = B, right = A, left = Y, top = X), shoulder buttons/triggers = L/R, Start/Select, Home = pause. M = sound on/off. The level is saved before the test.'),
-  ), [{ label: 'Restart', onClick: () => { setTimeout(() => openTestPlay(app, at), 0); } }, { label: 'Quit', primary: true }], stop);
-  void m;
+    h('div', { class: 'hint play-help' }, 'Controls: arrows · X = jump (B) · Z/Y = run/fire (Y) · S = spin jump · A = X button · Enter = Start · Shift = Select · Q/W = L/R · P = pause. Gamepad: d-pad/left stick, buttons by position as on the SNES pad (bottom = B, right = A, left = Y, top = X), shoulder buttons/triggers = L/R, Start/Select, Home = pause. M = sound on/off. F5 = save state, F8 = load state (gamepad: Select+L / Select+R; one slot, kept for this level until it or the ROM changes). The level is saved before the test.'),
+  ), [
+    { label: 'Restart from savestate', onClick: () => { setTimeout(() => openTestPlay(app, at, true), 0); } },
+    { label: 'Restart', onClick: () => { setTimeout(() => openTestPlay(app, at), 0); } },
+    { label: 'Quit', primary: true },
+  ], stop);
+  // shown while there is a savestate to start from
+  function showRestartSaved(): void { m.buttons[0].hidden = !usable(); }
+  showRestartSaved();
   canvas.focus();
 }
 

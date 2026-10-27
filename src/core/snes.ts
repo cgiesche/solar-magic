@@ -4,7 +4,7 @@
 // VRAM/CGRAM/WRAM contents itself.
 
 import { CPU, type Bus } from './cpu.ts';
-import type { PPU } from './ppu.ts';
+import type { PPU, PpuState } from './ppu.ts';
 import { APU_CLOCKS_PER_FRAME, type Apu } from './apu.ts';
 import { BYTE_PAGES, type RomReads } from './romdeps.ts';
 
@@ -25,11 +25,13 @@ export interface SnesState {
   [k: string]: unknown;
 }
 
-const STATE_ARRAYS = ['wram', 'sram', 'vram', 'cgram', 'oam', 'ppuRegs', 'dma', 'apuIn', 'apuOut'] as const;
+const STATE_ARRAYS = ['wram', 'sram', 'vram', 'cgram', 'oam', 'ppuRegs', 'dma', 'apuIn', 'apuOut', 'fifoSrc', 'fifoVal'] as const;
 const STATE_SCALARS = ['vmain', 'vaddr', 'vreadLatch', 'cgaddr', 'cgLatch', 'cgReadHigh', 'oamaddr', 'oamLatch', 'm7a', 'm7b',
   'm7latch', 'wmaddr', 'nmitimen', 'wrmpya', 'wrdiv', 'rddiv', 'rdmpy', 'htime', 'vtime', 'nmiFlag', 'irqFlag', 'joy1',
-  'apuLastReadAddr', 'apuSpin', 'apuFrameStart', 'frame', 'line', 'lineCycle', 'openBus', 'hdmaen', 'hdmaDo', 'hdmaOn'] as const;
-const CPU_SCALARS = ['a', 'x', 'y', 's', 'd', 'dbr', 'pbr', 'pc', 'p', 'e', 'cycles', 'stopped', 'waiting', 'nmiPending', 'irqLine'] as const;
+  'apuLastReadAddr', 'apuSpin', 'apuFrameStart', 'frame', 'line', 'lineCycle', 'openBus', 'hdmaen', 'hdmaDo', 'hdmaOn',
+  'fixedColor', 'fifoLen', 'cgLatchTaint', 'busyLines', 'sinceNmi', 'waited'] as const;
+const CPU_SCALARS = ['a', 'x', 'y', 's', 'd', 'dbr', 'pbr', 'pc', 'p', 'e', 'cycles', 'stopped', 'waiting', 'nmiPending', 'irqLine',
+  'lastOp', 'lastOpPc'] as const;
 
 export class Snes implements Bus {
   private romData!: Uint8Array;
@@ -508,6 +510,7 @@ export class Snes implements Bus {
     const cpu = this.cpu as unknown as Record<string, unknown>;
     for (const k of CPU_SCALARS) st['cpu.' + k] = cpu[k];
     if (this.apu) st.apu = this.apu.save();
+    if (this.ppu) st.ppu = this.ppu.saveState();
     return st;
   }
   loadState(st: SnesState): void {
@@ -516,6 +519,7 @@ export class Snes implements Bus {
     for (const k of STATE_SCALARS) self[k] = st[k];
     const cpu = this.cpu as unknown as Record<string, unknown>;
     for (const k of CPU_SCALARS) cpu[k] = st['cpu.' + k];
+    if (this.ppu && st.ppu) this.ppu.loadState(st.ppu as PpuState);
     if (this.apu) {
       if (st.apu) this.apu.load(st.apu as Uint8Array);
       else this.apu.reset();
@@ -538,8 +542,8 @@ export class Snes implements Bus {
   // CPU load: lines from an NMI until the CPU waits for the next one (a wait loop, see Cpu.idle),
   // for the frame that ended with the latest NMI; -1: it never waited (a lag frame)
   busyLines = 0;
-  private sinceNmi = 0;
-  private waited = -1;
+  sinceNmi = 0;
+  waited = -1;
 
   runFrame(maxSteps = 2_000_000): void {
     const cpu = this.cpu;

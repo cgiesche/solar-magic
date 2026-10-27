@@ -137,7 +137,8 @@ export function onModalsChange(fn: () => void): () => void {
 }
 const modalsChanged = (d: number) => { openModals += d; for (const f of modalWatchers) f(); };
 
-export function modal(title: string, body: HTMLElement, buttons: { label: string; primary?: boolean; danger?: boolean; onClick?: () => boolean | void }[], onClose?: () => void, beforeClose?: () => boolean): { close: (force?: boolean) => void } {
+// buttons: the elements of the given buttons, in order (e.g. to show one only at times)
+export function modal(title: string, body: HTMLElement, buttons: { label: string; primary?: boolean; danger?: boolean; onClick?: () => boolean | void }[], onClose?: () => void, beforeClose?: () => boolean): { close: (force?: boolean) => void; buttons: HTMLButtonElement[] } {
   const back = h('div', { class: 'modal-back' });
   let closed = false;
   // Esc closes the topmost dialog
@@ -156,19 +157,20 @@ export function modal(title: string, body: HTMLElement, buttons: { label: string
     modalsChanged(-1);
   };
   window.addEventListener('keydown', esc, true);
+  const els = buttons.map((b) => h('button', {
+    class: b.danger ? 'danger' : b.primary ? 'primary' : '',
+    onclick: () => { if (b.onClick?.() !== false) close(); },
+  }, b.label));
   const box = h('div', { class: 'modal' },
     h('div', { class: 'modal-title' }, title, h('button', { class: 'icon-btn', onclick: () => close(), title: 'Close' }, '✕')),
     h('div', { class: 'modal-body' }, body),
-    h('div', { class: 'modal-buttons' }, buttons.map((b) => h('button', {
-      class: b.danger ? 'danger' : b.primary ? 'primary' : '',
-      onclick: () => { if (b.onClick?.() !== false) close(); },
-    }, b.label))),
+    h('div', { class: 'modal-buttons' }, els),
   );
   back.appendChild(box);
   back.addEventListener('mousedown', (e) => { if (e.target === back) close(); });
   document.body.appendChild(back);
   modalsChanged(1);
-  return { close };
+  return { close, buttons: els };
 }
 
 // zoom levels of every view (1: one SNES pixel per screen pixel); a view uses a range of them

@@ -4,6 +4,8 @@
 
 import type { Snes } from './snes.ts';
 
+export interface PpuState { hofs: number[]; vofs: number[]; latch: number; hlatch: number; frame: Uint32Array }
+
 export class PPU {
   snes: Snes;
   // scroll registers with SNES write-twice latching
@@ -24,6 +26,18 @@ export class PPU {
 
   constructor(snes: Snes) {
     this.snes = snes;
+  }
+
+  // what a savestate keeps of it (see Snes.saveState): the scroll registers and the picture on screen
+  saveState(): PpuState {
+    return { hofs: [...this.hofs], vofs: [...this.vofs], latch: this.latch, hlatch: this.hlatch, frame: this.frame.slice() };
+  }
+  loadState(st: PpuState): void {
+    this.hofs = [...st.hofs];
+    this.vofs = [...st.vofs];
+    this.latch = st.latch;
+    this.hlatch = st.hlatch;
+    this.frame.set(st.frame);
   }
 
   // called by Snes on PPU register writes that need special handling

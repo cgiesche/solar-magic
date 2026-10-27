@@ -1,12 +1,14 @@
 // C interface of snes_spc for the editor (src/core/apu.ts): one SPC per handle, port reads/writes
 // at SPC clock times within the current frame, filtered sample output per frame and full state
-// save/load. The output buffer is the instance's own and is set at the start of every frame:
+// save/load (with what the frame's end hands on to the next: the samples made past it, the clocks
+// short of a sample and the output filter's memory, so a loaded state sounds exactly as from the
+// save). The output buffer is the instance's own and is set at the start of every frame:
 // the DSP also produces samples while the CPU's port accesses run the SPC (set_output only at the
 // frame's end would lose them and write to wherever the previous frame's buffer pointer was).
-#define private public // spcw_ram reads the RAM directly
+#define private public // spcw_ram reads the RAM directly, spcw_save the filter's memory
 #include "SNES_SPC.h"
-#undef private
 #include "SPC_Filter.h"
+#undef private
 #include <string.h>
 #include <emscripten/emscripten.h>
 
@@ -66,17 +68,33 @@ EMSCRIPTEN_KEEPALIVE int spcw_play( Inst* s, int count, short* out ) {
 	s->filter.run( out, count );
 	return 1;
 }
-EMSCRIPTEN_KEEPALIVE int spcw_state_size() { return SNES_SPC::state_size; }
+// after snes_spc's own state: the clocks short of a sample, the samples already in buf for the next frame
+// (count, then the samples; at most extra_size, as set_output hands them on) and the filter's memory
+EMSCRIPTEN_KEEPALIVE int spcw_state_size() {
+	return SNES_SPC::state_size + 2 * sizeof (int) + SNES_SPC::extra_size * sizeof (short) + sizeof (SPC_Filter::ch);
+}
 EMSCRIPTEN_KEEPALIVE int spcw_save( Inst* s, unsigned char* out ) {
 	unsigned char* p = out;
 	s->spc.copy_state( &p, save_func );
+	int clocks = s->spc.m.extra_clocks;
+	int n = (int) ( s->spc.dsp.out_pos() - s->buf );
+	if ( n < 0 || n > SNES_SPC::extra_size ) n = 0;
+	save_func( &p, &clocks, sizeof clocks );
+	save_func( &p, &n, sizeof n );
+	save_func( &p, s->buf, n * sizeof (short) );
+	save_func( &p, s->filter.ch, sizeof s->filter.ch );
 	return (int) ( p - out );
 }
 EMSCRIPTEN_KEEPALIVE void spcw_load( Inst* s, unsigned char* in ) {
 	unsigned char* p = in;
 	s->spc.copy_state( &p, load_func );
-	s->filter.clear();
-	s->spc.m.extra_pos = s->spc.m.extra_buf; // samples left over from before the load aren't part of the state
+	int clocks, n;
+	load_func( &p, &clocks, sizeof clocks );
+	load_func( &p, &n, sizeof n );
+	load_func( &p, s->spc.m.extra_buf, n * sizeof (short) );
+	load_func( &p, s->filter.ch, sizeof s->filter.ch );
+	s->spc.m.extra_clocks = clocks;
+	s->spc.m.extra_pos = s->spc.m.extra_buf + n; // arm puts them at the start of the next frame's samples
 	arm( s );
 }
 EMSCRIPTEN_KEEPALIVE int spcw_load_spc( Inst* s, const unsigned char* data, int size ) {

@@ -238,6 +238,10 @@ _Avoid_: cache key (for what belongs in the input), dependency (that is a ROM by
 What the editor reads out of the ROM without emulating (the custom sprite list, the graphics mask, the sprite memory values in use, a level as saved): memoized per ROM generation, not an emulated result.
 _Avoid_: emulated result, cache
 
+**Savestate**:
+Test play's one slot (F5 saves, F8 loads; Select+L / Select+R on a gamepad): the whole emulated machine at a frame – memory, registers, scroll, color math, the sound unit and the picture on screen – so that loading it goes on exactly as from the moment of saving. It belongs to its level on the ROM as it was then: any change of the ROM since (the level saved, a ROM edit) makes it stale, and a stale one is dropped (core/savestate.ts). Not written to disk.
+_Avoid_: snapshot (that is the emulator's boot state every load starts from), save (the game's own save file, or saving the level)
+
 **Prefetch**:
 Probing what the palettes could show before anyone asks for it, after everything asked for directly.
 
