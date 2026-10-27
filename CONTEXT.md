@@ -41,15 +41,15 @@ A Direct Map16 object, or a tile of a prefab, that depends on a flag of Lunar Ma
 _Avoid_: CDM16 (in the UI), switch object
 
 **Resizable object**:
-A standard object of the game (01–3F): its size (or type) is part of the object, so one object covers a whole area. The palette's Objects tab lists them under "Resizable".
+A standard object of the game (01–3F): its size (or type) is part of the object, so one object covers a whole area. The picker's Objects tab lists them under "Resizable".
 _Avoid_: standard object (in the UI), normal object
 
 **Fixed-size object**:
-An extended object (object 00 with its number as an extra byte, 10–FF in the palette): it always looks the same, a size is not part of it. The palette's Objects tab lists them under "Fixed size"; "extended object" names its encoding only (by number: "Insert by number", the properties, the ROM format). Direct Map16 ($05) and prefabs ($04) are extended objects too, but are neither listed nor called fixed-size objects.
-_Avoid_: extended object (for the palette's grouping), ext object
+An extended object (object 00 with its number as an extra byte, 10–FF in the picker): it always looks the same, a size is not part of it. The picker's Objects tab lists them under "Fixed size"; "extended object" names its encoding only (by number: "Insert by number", the properties, the ROM format). Direct Map16 ($05) and prefabs ($04) are extended objects too, but are neither listed nor called fixed-size objects.
+_Avoid_: extended object (for the picker's grouping), ext object
 
 **Object name**:
-What a resizable or fixed-size object is called in the palette, the properties, the status bar and the search (objectnames.ts). Built in only for the game's own numbers (standard 01–21, extended 00, 01, 10–97, and 2E–3F per object group), after Lunar Magic's descriptions; the free numbers are "Object XX" / "Extended object XX" (the editor's own 04, 05 excepted). The user may rename any object for the project, over the built-in name (editor data like a tile name; Reset brings the built-in one back).
+What a resizable or fixed-size object is called in the picker, the properties, the status bar and the search (objectnames.ts). Built in only for the game's own numbers (standard 01–21, extended 00, 01, 10–97, and 2E–3F per object group), after Lunar Magic's descriptions; the free numbers are "Object XX" / "Extended object XX" (the editor's own 04, 05 excepted). The user may rename any object for the project, over the built-in name (editor data like a tile name; Reset brings the built-in one back).
 _Avoid_: description, tooltip (Lunar Magic's `.osc`), label
 
 **Object group**:
@@ -60,16 +60,20 @@ _Avoid_: tileset group (the tilesets sharing Map16 tileset tiles, learned apart,
 A reusable block of Map16 tiles (at most 64x64, cells may be transparent, tiles may be conditional) stored in the ROM under a number 00–FF and placed in a level as one object, extended object $04 with the number as 4th byte (prefabs.ts, the editor patch SMWS). Made from the selected objects, or from a suggestion (prefabsuggest.ts: an arrangement of Direct Map16 objects repeated across the levels that a prefab would make smaller, with all its places replaced); a change to it applies in every level that places it, deleting it deletes its objects in every level, "Break up" turns a placed one back into Direct Map16 objects. A `.smwlevel` file carries the prefabs its level uses.
 _Avoid_: structure (the old name), custom object (ObjecTool's ASM objects), stamp (that is the Map16 builder's), collection (Lunar Magic's Custom Collections of Objects are copies without a link)
 
-**Palette item**:
-What the palette's "Insert" has chosen for a right click (or Shift+click) in layer 1/2 and sprites to place: an object, a block of Map16 tiles, a prefab or a sprite – or none. Choosing one in the palette clears the level's selection; a single item selected in the level becomes it (shown in its tab). A click into nothing (no item of a shown layer there, not dragged, without Ctrl) clears it with the selection, so does Esc once the selection is clear. Without one – and on the selection – the right click opens the level's context menu.
-_Avoid_: brush (BG and layer 3 paint with one, never empty), current object, ghost (the view's ghosted other layer)
+**Picker**:
+The panel beside the level or the overworld that something to place or paint is chosen from: in a level objects, prefabs, Map16 tiles and sprites (layer 1/2 and sprites), BG and layer 3 tiles; in the overworld its tiles and sprites. Its pictures are drawn at whole-number sizes only, as large as its width allows for fixed grids (a Map16 page keeps its 16 columns); below 3× the hovered entry is shown enlarged beside it.
+_Avoid_: palette (that is colors), Insert panel, tile selector
+
+**Picked item**:
+What the picker has chosen for a right click (or Shift+click) in layer 1/2 and sprites to place: an object, a block of Map16 tiles, a prefab or a sprite – or none. Choosing one in the picker clears the level's selection; a single item selected in the level becomes it (shown in its tab). A click into nothing (no item of a shown layer there, not dragged, without Ctrl) clears it with the selection, so does Esc once the selection is clear. Without one – and on the selection – the right click opens the level's context menu.
+_Avoid_: palette item (the old name), brush (BG and layer 3 paint with one, never empty), current object, ghost (the view's ghosted other layer)
 
 **Selection copy**:
-What a right click places instead of the palette item when the level's selection was picked after it (a click, a box, or the item just placed): a copy of the selected items with their upper left at the mouse. A right click on the selection itself opens the context menu instead.
+What a right click places instead of the picked item when the level's selection was picked after it (a click, a box, or the item just placed): a copy of the selected items with their upper left at the mouse. A right click on the selection itself opens the context menu instead.
 _Avoid_: stamp (that is the Map16 builder's), duplicate (Ctrl+D, one tile down-right)
 
 **Placement preview**:
-A view option (off by default: a picture at the mouse feels like dragging, as if a left click dropped it): what a right click at the mouse would place, drawn translucent at the tile under it: the palette item or the selection copy, objects as the level's load draws them there with them added (emulated in the background; meanwhile the last one known follows the mouse), sprites with their images. Not shown over the selection or while dragging.
+A view option (off by default: a picture at the mouse feels like dragging, as if a left click dropped it): what a right click at the mouse would place, drawn translucent at the tile under it: the picked item or the selection copy, objects as the level's load draws them there with them added (emulated in the background; meanwhile the last one known follows the mouse), sprites with their images. Not shown over the selection or while dragging.
 _Avoid_: ghost (the view's ghosted other layer), cursor image
 
 **Level edit**:
