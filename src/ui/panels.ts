@@ -1109,13 +1109,16 @@ export class Properties {
     });
     const idx = app.currentObjects().indexOf(o);
     const ov = app.objectKind(o.num);
+    const pf = isPlacedPrefab(o) ? readPrefab(app.rom, o.prefab!) : null;
     this.body.append(
-      h('div', { class: 'prop-title' }, `${o.num ? 'Object ' + hex2(o.num) : 'Ext. object ' + hex2(o.ext)}: ${app.objectName(o.num, o.ext)}`),
+      h('div', { class: 'prop-title' }, isPlacedPrefab(o)
+        ? `Prefab ${hex2(o.prefab!)}: ${pf ? pf.name || '(unnamed)' : '(missing)'}`
+        : `${o.num ? 'Object ' + hex2(o.num) : 'Ext. object ' + hex2(o.ext)}: ${app.objectName(o.num, o.ext)}`),
       h('div', { class: 'hint' }, `No. ${idx + 1} of ${app.currentObjects().length} (drawing order)`),
       this.field('Object', hexInput(o.num, 2, (v) => upd((o) => { o.num = v; fixPrefab(o); }), 0x3f)),
       o.num === 0 ? this.field('Ext. object', hexInput(o.ext, 2, (v) => upd((o) => { o.ext = v; fixPrefab(o); }), 0xff)) : '',
       o.num === 0 && o.ext === PREFAB_EXT && o.prefab !== undefined ? this.field('Prefab', hexInput(o.prefab, 2, (v) => upd((o) => (o.prefab = v)), 0xff)) : '',
-      o.num === 0 && o.ext === PREFAB_EXT && o.prefab !== undefined ? h('div', { class: 'hint' }, prefabInfo(app, o.prefab)) : '',
+      isPlacedPrefab(o) && !pf ? h('div', { class: 'hint' }, 'This prefab does not exist – the object places nothing.') : '',
       o.num === 0 && o.ext === DM16_EXT ? this.field('Map16 tile', hexInput(o.tile ?? 0, 3, (v) => upd((o) => (o.tile = v)), EXT_TILES - 1 - (o.cond?.always ? COND_ADD : 0)),
         h('button', { title: 'Edit the tile in the graphics area', onclick: () => app.editMap16(o.tile ?? 0) }, 'Edit …')) : '',
       o.num === 0 && o.ext === DM16_EXT ? this.field('Size (hw)', hexInput(o.size, 2, (v) => upd((o) => (o.size = v)))) : '',
@@ -1153,11 +1156,6 @@ function fixPrefab(o: LevelObject): void {
   if (o.num === 0 && o.ext === PREFAB_EXT) o.prefab ??= 0;
   else delete o.prefab;
   if (!isDm16(o)) delete o.cond;
-}
-
-function prefabInfo(app: App, n: number): string {
-  const st = readPrefab(app.rom, n);
-  return st ? `${st.name || '(unnamed)'}, ${st.w}×${st.h}` : 'This prefab does not exist – the object places nothing.';
 }
 
 // what the nibbles of a standard object's settings byte do (emulated, see objkinds.ts)
