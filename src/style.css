@@ -137,11 +137,7 @@ input.invalid, input.invalid:focus { outline: 1px solid var(--danger); border-co
 .picker-row.selected .num { color: #fff; }
 .picker-thumb-s { width: 32px; height: 24px; display: inline-flex; align-items: center; justify-content: center; }
 .picker-thumb-s canvas { max-width: 32px; max-height: 24px; image-rendering: pixelated; background: var(--level-backdrop, #15171b); }
-.picker-thumb-s.prefab { width: 96px; height: 64px; flex: none; }
-.picker-thumb-s.prefab canvas { max-width: none; max-height: none; }
 .picker-row .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.picker-row .icon-btn { padding: 0 3px; color: var(--muted); }
-.picker-row .icon-btn:hover { color: inherit; }
 .none { color: var(--muted); }
 .props-body { display: flex; flex-direction: column; gap: 5px; }
 .prop { display: flex; align-items: center; gap: 6px; }

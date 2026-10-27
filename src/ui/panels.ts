@@ -26,6 +26,7 @@ import { probeText, spritesOf, spriteProbeAt, enterText, enterSuffix } from '../
 import { tileMatches, drawTileMatches } from './tilesearch.ts';
 import { matchesAll, type SearchProvider, type SearchResult } from './search.ts';
 import { blockFilesByTile } from './blockdialog.ts';
+import { contextMenu } from './menu.ts';
 
 // behaviour of the given Map16 tiles when hit from below or entered (only tiles with an effect);
 // undefined while probes are still pending
@@ -344,29 +345,37 @@ export class Picker {
     box.append(h('div', { class: 'picker-head' }, 'Prefabs'), h('div', { class: 'hint' }, 'A prefab is a stamp of Map16 tiles, placed as one object; editing it changes every copy.'));
     const all = app.prefabs();
     const sheet = prefabTileSource(app);
+    const grid = h('div', { class: 'picker-grid' });
     for (const [n, st] of all) {
       const th = prefabThumb(sheet, st);
-      const row = h('div', {
-        class: `picker-row${n === curN ? ' selected' : ''}`, title: `Prefab ${hex2(n)}: ${st.name || '(unnamed)'}, ${st.w}×${st.h}`,
+      const title = `Prefab ${hex2(n)}: ${st.name || '(unnamed)'}, ${st.w}×${st.h}`;
+      const cell = grid.appendChild(h('div', {
+        class: `picker-cell${n === curN ? ' selected' : ''}`, title: `${title}\nRight click: rename, delete`,
+        oncontextmenu: (ev: MouseEvent) => {
+          ev.preventDefault();
+          contextMenu(ev.clientX, ev.clientY, [{ heading: `Prefab ${hex2(n)}` },
+            { label: 'Rename …', onClick: () => renamePrefab(app, n, st) },
+            { label: 'Delete …', onClick: () => deletePrefab(app, n, st) }]);
+        },
         onclick: () => { if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1'); app.choosePickedItem({ kind: 'obj', num: 0, ext: PREFAB_EXT, size: 0, prefab: n }); },
-      }, h('span', { class: 'picker-thumb-s prefab' }, th.c), h('span', { class: 'num' }, hex2(n)),
-        h('span', { class: 'grow' }, st.name || '(unnamed)', h('span', { class: 'hint' }, ` ${st.w}×${st.h}`)),
-        h('button', { class: 'icon-btn', title: 'Rename', 'aria-label': 'Rename', onclick: (e: Event) => { e.stopPropagation(); renamePrefab(app, n, st); } }, '✎'),
-        h('button', { class: 'icon-btn', title: 'Delete', 'aria-label': 'Delete', onclick: (e: Event) => { e.stopPropagation(); deletePrefab(app, n, st); } }, '✕'));
-      previewOnHover(row, th.scale, () => prefabCanvas(sheet, st), () => [`Prefab ${hex2(n)}: ${st.name || '(unnamed)'}`, `${st.w}×${st.h} tiles`]);
-      box.appendChild(row);
+      }, h('div', { class: 'picker-img' }, th.c),
+        h('div', { class: 'picker-label' }, hex2(n)), h('div', { class: 'picker-name' }, st.name || '(unnamed)')));
+      previewOnHover(cell, th.scale, () => prefabCanvas(sheet, st), () => [`Prefab ${hex2(n)}: ${st.name || '(unnamed)'}`, `${st.w}×${st.h} tiles`, 'Right click: rename, delete']);
     }
+    if (grid.firstChild) box.append(grid);
     const sug = app.prefabSuggestions ?? [];
-    if (sug.length) box.append(h('div', { class: 'picker-sub' }, 'Suggestions'));
+    if (!sug.length) return;
+    const sgrid = h('div', { class: 'picker-grid' });
+    box.append(h('div', { class: 'picker-sub' }, 'Suggestions'), sgrid);
     for (const sg of sug) {
       const lvs = sg.levels.length > 4 ? `${sg.levels.slice(0, 4).map(hex3).join(', ')} +${sg.levels.length - 4}` : sg.levels.map(hex3).join(', ');
       const th = prefabThumb(sheet, sg.prefab);
-      const row = box.appendChild(h('div', {
-        class: 'picker-row', title: `${sg.count} places of these Direct Map16 objects in level ${sg.levels.map(hex3).join(', ')}: save as prefab and replace them all`,
+      const cell = sgrid.appendChild(h('div', {
+        class: 'picker-cell', title: `${sg.count} places of these Direct Map16 objects in level ${sg.levels.map(hex3).join(', ')}: save as prefab and replace them all`,
         onclick: () => openSavePrefab(app, { prefab: sg.prefab, places: app.suggestionsCurrent ? sg.places : undefined }),
-      }, h('span', { class: 'picker-thumb-s prefab' }, th.c),
-        h('span', { class: 'grow' }, `${sg.count}× in level ${lvs}`, h('span', { class: 'hint' }, ` saves ${sg.saved} byte${sg.saved === 1 ? '' : 's'}`))));
-      previewOnHover(row, th.scale, () => prefabCanvas(sheet, sg.prefab),
+      }, h('div', { class: 'picker-img' }, th.c),
+        h('div', { class: 'picker-label' }, `${sg.count}×`), h('div', { class: 'picker-name' }, `level ${lvs}, saves ${sg.saved} byte${sg.saved === 1 ? '' : 's'}`)));
+      previewOnHover(cell, th.scale, () => prefabCanvas(sheet, sg.prefab),
         () => [`${sg.count}× in level ${sg.levels.map(hex3).join(', ')}`, `Saves ${sg.saved} byte${sg.saved === 1 ? '' : 's'}: save as prefab and replace them all`]);
     }
   }
@@ -751,7 +760,10 @@ export class Picker {
         const th = e.th ? thumbAt(e.th) : null;
         const cell = grid.appendChild(h('div', {
           class: `picker-cell${sel ? ' selected' : ''}`, title: `${e.title}\nRight click: rename`,
-          oncontextmenu: (ev: Event) => { ev.preventDefault(); renameObject(app, s.num, s.ext); },
+          oncontextmenu: (ev: MouseEvent) => {
+            ev.preventDefault();
+            contextMenu(ev.clientX, ev.clientY, [{ heading: app.objectName(s.num, s.ext) }, { label: 'Rename …', onClick: () => renameObject(app, s.num, s.ext) }]);
+          },
           onclick: () => {
             if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1');
             app.choosePickedItem(e.item);
@@ -795,9 +807,9 @@ function thumbAt(img: HTMLCanvasElement): { c: HTMLCanvasElement; scale: number 
   return { c: sized(cloneCanvas(img), scale), scale };
 }
 
-// a prefab's image in a picker row at the size it fits there
+// a prefab's image in a picker cell at the size it fits there
 function prefabThumb(tile: (t: number) => HTMLCanvasElement | null, st: Prefab): { c: HTMLCanvasElement; scale: number } {
-  const c = prefabCanvas(tile, st), scale = fitScale(c.width, c.height, CELL_W, 64);
+  const c = prefabCanvas(tile, st), scale = fitScale(c.width, c.height, CELL_W, CELL_H);
   return { c: sized(c, scale), scale };
 }
 
