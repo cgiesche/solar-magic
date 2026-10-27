@@ -133,8 +133,6 @@ export class Picker {
   scrolls = { obj: 0, m16: 0, spr: 0 }; // scroll position of each tab's list, kept across rebuilds and tab changes
   prefabBox: HTMLDivElement = h('div'); // the Prefabs section
   // its button and hint, which follow the selection without a rebuild
-  prefabSave: HTMLButtonElement = h('button', { title: 'Save the tiles of the selected objects as a prefab', onclick: () => openSavePrefab(this.app) }, 'Selection as prefab …');
-  prefabHint: HTMLDivElement = h('div', { class: 'hint' });
   thumbs = new Map<string, HTMLCanvasElement>();
   thumbTiles = new Map<string, number[]>(); // Map16 tiles per object key
   thumbsFrom: ObjThumb[] | undefined; // the thumbnails shown (undefined: placeholders while they are learned)
@@ -158,7 +156,7 @@ export class Picker {
     app.on('bgtile', () => { if (isBrushMode(app.mode)) this.build(); });
     app.on('probes', () => { if (this.tab === 'm16') this.m16Tip(); else this.build(); });
     app.on('render', () => { if (isBrushMode(app.mode)) this.build(); });
-    app.on('change', () => { this.followSelection(); this.prefabSelection(); });
+    app.on('change', () => this.followSelection());
     app.on('picked-item', () => this.build());
     app.on('prefabs', () => { if (this.tab === 'obj') this.build(); });
     app.on('object-names', () => { if (this.tab === 'obj') this.build(); });
@@ -337,14 +335,13 @@ export class Picker {
   }
 
   // prefabs: blocks of Map16 tiles stored in the ROM, placed as one object each (prefabs.ts); the first section
-  // of the Objects tab, shown with its button and hint even without prefabs, then the suggestions
+  // of the Objects tab, shown with its hint even without prefabs, then the suggestions
   buildPrefabs(): void {
     const app = this.app, box = this.prefabBox;
     clear(box);
     const cur = app.pickedItem;
     const curN = cur?.kind === 'obj' && cur.num === 0 && cur.ext === PREFAB_EXT ? cur.prefab ?? -1 : -1;
-    box.append(h('div', { class: 'picker-head' }, 'Prefabs'), h('div', { class: 'row' }, this.prefabSave), this.prefabHint);
-    this.prefabSelection();
+    box.append(h('div', { class: 'picker-head' }, 'Prefabs'), h('div', { class: 'hint' }, 'A prefab is a single object in the level; changes to it apply in all levels.'));
     const all = app.prefabs();
     const sheet = prefabTileSource(app);
     for (const [n, st] of all) {
@@ -372,12 +369,6 @@ export class Picker {
       previewOnHover(row, th.scale, () => prefabCanvas(sheet, sg.prefab),
         () => [`${sg.count}× in level ${sg.levels.map(hex3).join(', ')}`, `Saves ${sg.saved} byte${sg.saved === 1 ? '' : 's'}: save as prefab and replace them all`]);
     }
-  }
-  prefabSelection(): void {
-    const app = this.app;
-    const sel = (app.mode === 'l1' || app.mode === 'l2') ? app.selectedObjects().length : 0;
-    this.prefabSave.disabled = !sel;
-    this.prefabHint.textContent = sel ? `${sel} object${sel > 1 ? 's' : ''} selected.` : 'Select objects in the level (also Direct Map16 blocks), then “Selection as prefab”. In the level, a prefab is a single object; changes to it apply in all levels.';
   }
 
   // BG Map16 tiles for painting the level background (BG mode); pages 2-F with the extended BG Map16
