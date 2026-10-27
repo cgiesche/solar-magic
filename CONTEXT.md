@@ -250,6 +250,10 @@ _Avoid_: sprite overflow, slot overflow
 A frame of the level in which the game's main loop was not done before the next NMI, so the game slowed down (core/playlog.ts, from Snes.busyLines: the CPU never reached its wait loop). The CPU load of other frames is the share of the frame's scanlines from the NMI until that wait. Frames the game spends outside the level's game mode (loading, fading) are fully busy but no lag frames. Test play's lag meter shows the load per frame and lists lag frames close together as one event with Mario's tile; the level scan counts them per screen.
 _Avoid_: slowdown frame, CPU overload
 
+**Death marker**:
+Where Mario died in a recent test play of a level, drawn over it (View → Death markers) with what killed him (core/deaths.ts): a death is the frame the game sets Mario dying, the killer is learned from what the code did up to then – the timer run out, Mario fallen below the screen, a sprite's code running (normal, extended or cluster; the slot whose number was read last while X still holds it), else the level's tile read last (a block). Kept in the browser per ROM and level, the newest 100, until cleared; editor-local, never in the ROM.
+_Avoid_: death point, skull
+
 **Prefetch**:
 Probing what the palettes could show before anyone asks for it, after everything asked for directly.
 

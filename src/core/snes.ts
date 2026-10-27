@@ -21,6 +21,15 @@ export interface MemHook {
   onOverlayRead?(offset: number): void;
 }
 
+// several hooks as one, each called in turn
+export function joinHooks(...hooks: MemHook[]): MemHook {
+  const all = <K extends keyof MemHook>(k: K) => {
+    const fs = hooks.map((h) => h[k]?.bind(h)).filter((f) => !!f) as ((...a: number[]) => void)[];
+    return fs.length ? (...a: number[]) => { for (const f of fs) f(...a); } : undefined;
+  };
+  return { onRomRead: all('onRomRead'), onWramWrite: all('onWramWrite'), onWramRead: all('onWramRead'), onOverlayRead: all('onOverlayRead') };
+}
+
 export interface SnesState {
   [k: string]: unknown;
 }

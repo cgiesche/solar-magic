@@ -1,12 +1,13 @@
 // Test play's meters beside the game: the CPU's load (red after a lag frame) and live slots of the sprite
 // tables (red after a failed spawn), a bar each, graphs of the last frames, and the lag frames and failed
-// spawns with where Mario was, to show in the level.
+// spawns with where Mario was, and where he died and what killed him, to show in the level.
 
 import { h } from './dom.ts';
 import { hex } from '../core/names.ts';
 import { LINES_PER_FRAME } from '../core/snes.ts';
 import { SLOT_KINDS, SLOT_TABLES, type SlotKind } from '../core/slotwatch.ts';
 import { LAG, type PlayLog, type PlayEvent, type LagEvent } from '../core/playlog.ts';
+import { killerText } from './deathmarks.ts';
 
 export const GRAPH_FRAMES = 256;
 const WARN_FRAMES = 60; // a meter stays red this long after a failed spawn or a lag frame
@@ -44,16 +45,19 @@ function meterRow(label: string, help: string) {
   return { row, fill, val };
 }
 
-// a moment in a list: its text, what it means, a button showing Mario's tile then in the level
-function momentRow(e: { frame: number; tx: number; ty: number }, text: string, help: string, show: (tx: number, ty: number) => void): HTMLElement {
+// a moment in a list: its text, what it means, a button showing Mario's tile then in the level (another level
+// than the one tested: in that level)
+function momentRow(e: { frame: number; tx: number; ty: number; level?: number }, text: string, help: string, show: Show): HTMLElement {
   return h('div', { class: 'meter-event', title: help },
-    h('span', null, `Frame ${e.frame} · ${text} · Mario at ${hex(e.tx, 2)}/${hex(e.ty, 2)}`),
-    h('button', { title: 'Quit the test and show this place in the level', onclick: () => show(e.tx, e.ty) }, 'Show'),
+    h('span', null, `Frame ${e.frame} · ${text} · Mario at ${e.level === undefined ? '' : `${hex(e.level, 3)}: `}${hex(e.tx, 2)}/${hex(e.ty, 2)}`),
+    h('button', { title: 'Quit the test and show this place in the level', onclick: () => show(e.tx, e.ty, e.level) }, 'Show'),
   );
 }
 
-// show: closes test play and shows a tile of the level
-export function playMeter(log: PlayLog, show: (tx: number, ty: number) => void): { el: HTMLElement; update: () => void } {
+type Show = (tx: number, ty: number, level?: number) => void;
+
+// show: closes test play and shows a tile of the level (of another level); name: a sprite's name by its id
+export function playMeter(log: PlayLog, show: Show, name: (id: number) => string): { el: HTMLElement; update: () => void } {
   const cpu = meterRow('CPU', 'Share of the frame the CPU was busy (from the NMI until the game waits for the next one); red: a lag frame, the game\'s frame was not done in time and the game slowed down');
   const rows = SLOT_KINDS.map((k) => ({ k, ...meterRow(KINDS[k].label, KINDS[k].help) }));
   const cpuGraph = h('canvas', { width: GRAPH_FRAMES, height: 32, class: 'meter-graph', title: `CPU load over the last ${GRAPH_FRAMES} frames; red: a lag frame` });
@@ -65,7 +69,9 @@ export function playMeter(log: PlayLog, show: (tx: number, ty: number) => void):
   list.append(empty);
   const lagHead = h('div', { class: 'hint' });
   const lagList = h('div', { class: 'meter-events' });
-  let shown = '', shownLag = ''; // the events in the lists (number, failures / lag frames)
+  const deathHead = h('div', { class: 'hint' });
+  const deathList = h('div', { class: 'meter-events' });
+  let shown = '', shownLag = '', shownDeaths = -1; // the events in the lists (number, failures / lag frames)
 
   const update = () => {
     const recent = log.history.slice(-WARN_FRAMES), last = recent[recent.length - 1];
@@ -85,6 +91,14 @@ export function playMeter(log: PlayLog, show: (tx: number, ty: number) => void):
     if (now !== shown) { shown = now; renderList(); }
     const nowLag = `${log.lags.length}:${log.lagFrames}`;
     if (nowLag !== shownLag) { shownLag = nowLag; renderLags(); }
+    if (log.deaths.length !== shownDeaths) { shownDeaths = log.deaths.length; renderDeaths(); }
+  };
+
+  const renderDeaths = () => {
+    deathHead.textContent = `Deaths: ${log.deaths.length}`;
+    // newest first
+    deathList.replaceChildren(...log.deaths.slice().reverse().map((d) => momentRow(d, `Killed by ${killerText(d.killer, name)}`,
+      'Mario died here; the place is kept as a death marker in the level (View → Death markers).', show)));
   };
 
   const renderLags = () => {
@@ -103,8 +117,9 @@ export function playMeter(log: PlayLog, show: (tx: number, ty: number) => void):
   };
 
   renderLags();
+  renderDeaths();
   const el = h('div', { class: 'play-meter' }, cpu.row, cpuGraph, ...rows.map((r) => r.row), graph,
-    lagHead, lagList, h('div', { class: 'hint' }, 'Failed spawns'), list);
+    deathHead, deathList, lagHead, lagList, h('div', { class: 'hint' }, 'Failed spawns'), list);
   return { el, update };
 }
 

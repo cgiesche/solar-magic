@@ -1,11 +1,12 @@
 // What test play measures, frame by frame: the live slots of the sprite tables and the CPU's load for the last
 // frames (the meter's graphs), and the moments to look at – a sprite that failed to spawn, a lag frame – with
-// where Mario was then. Failures of a kind close together (a generator trying every frame), and lag frames
+// where Mario was then, and Mario's deaths. Failures of a kind close together (a generator trying every frame), and lag frames
 // close together (a heavy spot), are one event.
 
 import { LINES_PER_FRAME, type Snes } from './snes.ts';
 import { GM, RAM } from './ram.ts';
 import { SLOT_KINDS, type SlotKind, type SlotFailure } from './slotwatch.ts';
+import type { Death } from './deaths.ts';
 
 export type SlotCounts = Record<SlotKind, number>;
 // busy: the CPU's load (see cpuLoad)
@@ -14,6 +15,7 @@ export interface FrameSample { frame: number; used: SlotCounts; failed: SlotFail
 export interface Moment { frame: number; count: number; tx: number; ty: number; last: number }
 export interface PlayEvent extends SlotFailure, Moment {}
 export type LagEvent = Moment;
+export interface DeathEvent extends Death { frame: number }
 
 export const LAG = -1;
 const MERGE = 64; // frames after a failure in which another of its kind belongs to the same event (a generator tries every 32)
@@ -35,6 +37,7 @@ export class PlayLog {
   history: FrameSample[] = [];
   events: PlayEvent[] = [];
   lags: LagEvent[] = [];
+  deaths: DeathEvent[] = [];
   lagFrames = 0;
   private open = new Map<SlotKind, PlayEvent>();
   private openLag: LagEvent | null = null;
@@ -66,6 +69,11 @@ export class PlayLog {
     if (near(this.openLag, LAG_MERGE)) { this.openLag.count++; this.openLag.last = frame; return; }
     this.openLag = at(1);
     push(this.lags, this.openLag);
+  }
+
+  // Mario died in the frame
+  died(frame: number, d: Death): void {
+    push(this.deaths, { ...d, frame });
   }
 
   // the lag event with the most lag frames (the first of equals)

@@ -90,7 +90,9 @@ export const RAM = {
 
   // other sprite kinds
   extSprites: 0x170b, // extended sprites (fireballs, hammers …): 10 slots, number
+  extXLo: 0x171f, extXHi: 0x1733, extYLo: 0x1715, extYHi: 0x1729, // per extended slot: its position
   clusterSprites: 0x1892, // cluster sprites (Boo ceiling, bonus game 1-Ups …): 20 slots, number
+  clusterXLo: 0x1e16, clusterXHi: 0x1e3e, clusterYLo: 0x1e02, clusterYHi: 0x1e2a, // per cluster slot: its position
   bounceSprites: 0x1699, // 4 slots: number
   scoreSprites: 0x16e1, // number
 

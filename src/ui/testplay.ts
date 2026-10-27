@@ -12,12 +12,14 @@ import { AudioOut } from './audio.ts';
 import { musicPlayer } from './musicplayer.ts';
 import { GM, RAM, marioX, marioY, setMarioPos } from '../core/ram.ts';
 import { SlotWatch } from '../core/slotwatch.ts';
+import { DeathWatch } from '../core/deaths.ts';
+import { addDeath } from './deathmarks.ts';
 import { PlayLog, cpuLoad } from '../core/playlog.ts';
 import { playMeter, GRAPH_FRAMES } from './playmeter.ts';
 import { applyTriggers, emptyTriggerView, customOn, switchName, isCustom, isManual, isOneShot, CUSTOM, MANUAL, ONE_SHOT } from '../core/extrigger.ts';
 import { shownSwitches } from './triggerpanel.ts';
 import { SaveSlot } from '../core/savestate.ts';
-import type { SnesState } from '../core/snes.ts';
+import { joinHooks, type SnesState } from '../core/snes.ts';
 
 const KEYMAP: Record<string, number> = {
   ArrowUp: 0x0800, ArrowDown: 0x0400, ArrowLeft: 0x0200, ArrowRight: 0x0100,
@@ -144,10 +146,10 @@ function play(app: App, at: Start | undefined, audio: AudioOut, emu: LevelEmulat
   const ctx = canvas.getContext('2d')!;
   const img = ctx.createImageData(256, 224);
   const info = h('div', { class: 'hint' });
-  // the sprite slots, watched from here on
-  const watch = new SlotWatch(s), log = new PlayLog(GRAPH_FRAMES);
-  s.hook = watch.hook;
-  const meter = playMeter(log, (tx, ty) => { m.close(); app.showUse(lv.number, { x: tx, y: ty }); });
+  // the sprite slots and Mario's deaths, watched from here on
+  const watch = new SlotWatch(s), deaths = new DeathWatch(s), log = new PlayLog(GRAPH_FRAMES);
+  s.hook = joinHooks(watch.hook, deaths.hook);
+  const meter = playMeter(log, (tx, ty, level = lv.number) => { m.close(); app.showUse(level, { x: tx, y: ty }); }, (id) => app.spriteLabel(id));
   let keys = 0;
   let running = true;
   let paused = false;
@@ -167,6 +169,7 @@ function play(app: App, at: Start | undefined, audio: AudioOut, emu: LevelEmulat
     if (!st) { say('No savestate'); showRestartSaved(); return; }
     s.loadState(st);
     watch.reset();
+    deaths.reset();
     log.cut();
     audio.resync();
     say('State loaded');
@@ -199,6 +202,8 @@ function play(app: App, at: Start | undefined, audio: AudioOut, emu: LevelEmulat
     if (s.audio) audio.push(s.audio);
     frames++;
     log.frame(frames, watch.usedAll(), watch.take(), cpuLoad(s, mode), marioX(s.wram), marioY(s.wram));
+    // kept as markers in the level he died in
+    for (const d of deaths.take()) { log.died(frames, d); addDeath(app.romName, d); }
   };
   const loop = (t: number) => {
     if (!running) return;
@@ -239,6 +244,7 @@ function play(app: App, at: Start | undefined, audio: AudioOut, emu: LevelEmulat
   const stop = () => {
     if (!running) return;
     running = false;
+    if (log.deaths.length) app.emit('change'); // the level view shows them
     s.ppu = null;
     s.hook = null;
     audio.close();
