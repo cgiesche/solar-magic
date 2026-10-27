@@ -48,6 +48,14 @@ _Avoid_: standard object (in the UI), normal object
 An extended object (object 00 with its number as an extra byte, 10–FF in the palette): it always looks the same, a size is not part of it. The palette's Objects tab lists them under "Fixed size"; "extended object" names its encoding only (by number: "Insert by number", the properties, the ROM format). Direct Map16 ($05) and prefabs ($04) are extended objects too, but are neither listed nor called fixed-size objects.
 _Avoid_: extended object (for the palette's grouping), ext object
 
+**Object name**:
+What a resizable or fixed-size object is called in the palette, the properties, the status bar and the search (objectnames.ts). Built in only for the game's own numbers (standard 01–21, extended 00, 01, 10–97, and 2E–3F per object group), after Lunar Magic's descriptions; the free numbers are "Object XX" / "Extended object XX" (the editor's own 04, 05 excepted). The user may rename any object for the project, over the built-in name (editor data like a tile name; Reset brings the built-in one back).
+_Avoid_: description, tooltip (Lunar Magic's `.osc`), label
+
+**Object group**:
+The set of tilesets whose objects 2E–3F are the same, because the game's object loader runs them through one table (the clean game has five: 0/7/C, 1, 2/6/8, 3/9/A/B/E, 4/5/D). Which table a tileset uses is learned by emulation; names of 2E–3F belong to the table, not to a tileset.
+_Avoid_: tileset group (the tilesets sharing Map16 tileset tiles, learned apart, even though in the clean game the groups are the same), "T" value (Lunar Magic's)
+
 **Prefab**:
 A reusable block of Map16 tiles (at most 64x64, cells may be transparent, tiles may be conditional) stored in the ROM under a number 00–FF and placed in a level as one object, extended object $04 with the number as 4th byte (prefabs.ts, the editor patch SMWS). Made from the selected objects, or from a suggestion (prefabsuggest.ts: an arrangement of Direct Map16 objects repeated across the levels that a prefab would make smaller, with all its places replaced); a change to it applies in every level that places it, deleting it deletes its objects in every level, "Break up" turns a placed one back into Direct Map16 objects. A `.smwlevel` file carries the prefabs its level uses.
 _Avoid_: structure (the old name), custom object (ObjecTool's ASM objects), stamp (that is the Map16 builder's), collection (Lunar Magic's Custom Collections of Objects are copies without a link)

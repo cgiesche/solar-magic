@@ -1,15 +1,17 @@
-// The user's names of things, so they are easy to find later: for now FG and BG Map16 tiles; other kinds
-// (graphics files, levels …) are meant to join as further kinds (the graphics files' names are still the
-// ROM's, gfxnames.ts). One name per thing at most, several things may share one (a multi-tile thing is
-// named by naming all its tiles). Editor data, not part of the ROM image: kept with the working ROM and the
-// project file, never in the playable ROM. One entry holding JSON: { v, kinds: { kind: { number in hex:
-// name } } }. The caller makes the change one ROM edit.
+// The user's names of things, so they are easy to find later: FG and BG Map16 tiles, and objects (over their
+// built-in names, objectnames.ts); other kinds (graphics files, levels …) are meant to join as further kinds
+// (the graphics files' names are still the ROM's, gfxnames.ts). One name per thing at most, several things may
+// share one (a multi-tile thing is named by naming all its tiles). Editor data, not part of the ROM image: kept
+// with the working ROM and the project file, never in the playable ROM. One entry holding JSON: { v, kinds:
+// { kind: { number in hex (objects: objectnames.ts objectNameKey): name } } }. The caller makes the change one
+// ROM edit.
 
 import type { Rom } from './rom.ts';
 import { hex3 } from './names.ts';
 
 export type NameKind = 'fg' | 'bg';
 export const NAME_MAX = 64;
+const OBJ = 'obj'; // objects, by objectnames.ts objectNameKey
 const ID = 'names';
 const VERSION = 1;
 
@@ -46,6 +48,24 @@ export function setName(rom: Rom, kind: NameKind, nums: Iterable<number>, name: 
   const kinds = load(rom), v = cleanName(name), m = { ...kinds[kind] };
   for (const n of nums) if (v) m[n.toString(16)] = v; else delete m[n.toString(16)];
   kinds[kind] = m;
+  store(rom, kinds);
+}
+
+// the user's name of an object (objectnames.ts objectNameKey), null: none
+export function objectUserName(rom: Rom, key: string): string | null {
+  return load(rom)[OBJ]?.[key] ?? null;
+}
+
+// all the user's object names, by key
+export function objectUserNames(rom: Rom): Record<string, string> {
+  return { ...load(rom)[OBJ] };
+}
+
+// names an object (an empty name removes the user's, the built-in one shows again)
+export function setObjectUserName(rom: Rom, key: string, name: string): void {
+  const kinds = load(rom), v = cleanName(name), m = { ...kinds[OBJ] };
+  if (v) m[key] = v; else delete m[key];
+  kinds[OBJ] = m;
   store(rom, kinds);
 }
 

@@ -2,8 +2,9 @@
 
 import { isBrushMode, type App, type PaletteItem } from './app.ts';
 import { h, clear, hexInput, checkbox, attachRectPick, modal, toast, emptyState } from './dom.ts';
-import { objectName, spriteName, hex2, hex3 } from '../core/names.ts';
-import { nameOf, namesOf, nameGroups, connectedRect, tileRanges, type NameKind } from '../core/usernames.ts';
+import { spriteName, hex2, hex3 } from '../core/names.ts';
+import { defaultObjectName, namedPerTable } from '../core/objectnames.ts';
+import { NAME_MAX, nameOf, namesOf, nameGroups, connectedRect, tileRanges, type NameKind } from '../core/usernames.ts';
 import { objectVariant, withObjectVariant, type ObjKind } from '../core/objkinds.ts';
 import { thumbCanvas, objKey, type ObjSpec, type ObjThumb } from './thumbs.ts';
 import { newUid, spriteId, spriteBytes, spriteSizes, type LevelObject, type LevelSprite } from '../core/level.ts';
@@ -177,6 +178,7 @@ export class Palette {
     app.on('render', () => { if (isBrushMode(app.mode)) this.build(); });
     app.on('change', () => { this.followSelection(); this.prefabSelection(); });
     app.on('prefabs', () => { if (this.tab === 'obj') this.build(); });
+    app.on('object-names', () => { if (this.tab === 'obj') this.build(); });
     app.on('prefab-suggestions', () => { if (this.tab === 'obj') this.build(); });
     app.on('mode', () => {
       if (app.mode === 'spr') this.tab = 'spr';
@@ -556,7 +558,7 @@ export class Palette {
       if (ext !== (s.num === 0)) continue;
       const kind = app.objectKind(s.num);
       const vt = objectVariant(kind, s.size);
-      const name = objectName(s.num, s.ext) + (vt >= 0 ? ` – type ${vt.toString(16).toUpperCase()}` : '');
+      const name = app.objectName(s.num, s.ext) + (vt >= 0 ? ` – type ${vt.toString(16).toUpperCase()}` : '');
       const label = s.num ? hex2(s.num) + (vt >= 0 ? `.${vt.toString(16).toUpperCase()}` : '') : hex2(s.ext);
       const tiles = this.thumbTiles.get(objKey(s, kind)) ?? [];
       const sum = tiles.length ? blockSummary(app, tiles) : [];
@@ -774,7 +776,8 @@ export class Palette {
         const { s, vt } = e;
         const sel = cur?.kind === 'obj' && cur.num === s.num && (s.num !== 0 || cur.ext === s.ext) && objectVariant(app.objectKind(s.num), cur.size) === vt;
         grid.appendChild(h('div', {
-          class: `pal-cell${sel ? ' selected' : ''}`, title: e.title,
+          class: `pal-cell${sel ? ' selected' : ''}`, title: `${e.title}\nRight click: rename`,
+          oncontextmenu: (ev: Event) => { ev.preventDefault(); renameObject(app, s.num, s.ext); },
           onclick: () => {
             app.paletteItem = e.item;
             if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1');
@@ -782,7 +785,7 @@ export class Palette {
           },
         }, h('div', { class: 'pal-img' }, e.th ? cloneCanvas(e.th) : h('span', { class: 'none' }, '–'),
           h('div', { class: 'pal-corner' }, itemBadge(app, e.items), e.enter ? h('div', { class: 'pal-enter', title: enterText(e.enter) }, e.enter) : '')),
-          h('div', { class: 'pal-label' }, e.label), h('div', { class: 'pal-name' }, objectName(s.num, s.ext))));
+          h('div', { class: 'pal-label' }, e.label), h('div', { class: 'pal-name' }, app.objectName(s.num, s.ext))));
       }
       if (!grid.firstChild) continue;
       this.body.append(h('div', { class: 'pal-head' }, title), grid);
@@ -892,6 +895,20 @@ export function openSavePrefab(app: App, sug?: { prefab: Prefab; places?: LevelP
   setTimeout(() => name.focus(), 0);
 }
 
+// names an object for the project (2E-3F for the open level's object table); Reset brings back the built-in name
+function renameObject(app: App, num: number, ext: number): void {
+  const what = num ? `object ${hex2(num)}` : `extended object ${hex2(ext)}`;
+  const builtin = defaultObjectName(num, ext, app.objectTableOf(num));
+  const cur = app.objectName(num, ext);
+  const name = h('input', { value: cur, placeholder: builtin, maxLength: NAME_MAX, spellcheck: false, autocomplete: 'off' });
+  const save = () => { if (name.value.trim() !== cur) app.renameObject(num, ext, name.value.trim() === builtin ? '' : name.value); };
+  const dlg = modal(`Rename ${what}`, h('div', null, h('div', { class: 'prop' }, h('label', null, 'Name'), name),
+    h('div', { class: 'hint' }, `Built-in: ${builtin}.${namedPerTable(num) ? ' Objects 2E–3F are named per object group (this level’s).' : ''} The name is kept with the project, not in the ROM.`)),
+    [{ label: 'Cancel' }, ...(cur !== builtin ? [{ label: 'Reset', onClick: () => app.renameObject(num, ext, '') }] : []), { label: 'OK', primary: true, onClick: save }]);
+  name.addEventListener('keydown', (e) => { if (e.key === 'Enter') { save(); dlg.close(); } });
+  setTimeout(() => name.select(), 0);
+}
+
 function renamePrefab(app: App, n: number, st: Prefab): void {
   const name = h('input', { value: st.name, spellcheck: false });
   const save = () => {
@@ -957,6 +974,7 @@ export class Properties {
     app.on('change', () => this.build());
     app.on('level', () => this.build());
     app.on('objkinds', () => this.build());
+    app.on('object-names', () => this.build());
     app.on('probes', () => { if (this.probePending) this.build(); });
     app.on('rom-change', () => { if (app.mode === 'exit') this.build(); });
     app.on('palette-item', () => { if (app.mode === 'spr' && !app.selectedSprites().length) this.build(); });
@@ -1082,7 +1100,8 @@ export class Properties {
     const idx = app.currentObjects().indexOf(o);
     const ov = app.objectKind(o.num);
     this.body.append(
-      h('div', { class: 'prop-title' }, `${o.num ? 'Object ' + hex2(o.num) : 'Ext. object ' + hex2(o.ext)}: ${objectName(o.num, o.ext)}`),
+      h('div', { class: 'prop-title' }, `${o.num ? 'Object ' + hex2(o.num) : 'Ext. object ' + hex2(o.ext)}: ${app.objectName(o.num, o.ext)} `,
+        h('button', { class: 'icon-btn', title: 'Rename (for this project)', 'aria-label': 'Rename', onclick: () => renameObject(app, o.num, o.ext) }, '✎')),
       h('div', { class: 'hint' }, `No. ${idx + 1} of ${app.currentObjects().length} (drawing order)`),
       this.field('Object', hexInput(o.num, 2, (v) => upd((o) => { o.num = v; fixPrefab(o); }), 0x3f)),
       o.num === 0 ? this.field('Ext. object', hexInput(o.ext, 2, (v) => upd((o) => { o.ext = v; fixPrefab(o); }), 0xff)) : '',

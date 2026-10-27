@@ -7,7 +7,9 @@ import {
   isL1Vertical, newUid, hasLayer2Objects, hasObjects, L2_PTRS, SEC_HDR,
   entrancePos, nearestEntrance, encodeSecondaryHeader, mainSpot, sameSpot, placeMain, midwaySpot, nearestMidway, placeMidway, exitLandsAtMidway, isSized, SPRITE_MEMORY, levelRows, TIME_TABLE,
 } from '../core/level.ts';
-import { hex, spriteName } from '../core/names.ts';
+import { hex, hex2, spriteName } from '../core/names.ts';
+import { objectTable, objectName, objectNameKey, setObjectName, namedPerTable } from '../core/objectnames.ts';
+import { objectUserNames } from '../core/usernames.ts';
 import { loadPixiProject, customSpriteList, type CustomSprite } from '../core/pixi.ts';
 import { renderLevel, type LevelImages, composite } from '../core/render.ts';
 import { captureSprites, captureSpriteAt, type SpriteImage } from '../core/spritegfx.ts';
@@ -90,6 +92,7 @@ export type AppEvent =
   | 'animated' // which tiles and colors of the level animate is known
   | 'anim-frame' // the next frame of the level animation is shown
   | 'prefabs' // the prefab table changed
+  | 'object-names' // the user's object names changed (a rename, its undo or redo)
   | 'paste-hint' // App.pasteHint changed
   | 'prefab-suggestions' // App.prefabSuggestions changed
   | 'bgtile' // the BG or layer 3 brush changed (picked from the level)
@@ -226,6 +229,11 @@ export class App {
     this.on('render', () => this.ensureSpriteImages());
     this.on('rom-change', () => this.ensureSpriteImages());
     this.on('rom-change', () => this.scheduleSuggestions());
+    this.on('level', () => (this.objectNamesSeen = JSON.stringify(objectUserNames(this.rom)))); // (another ROM, too)
+    this.on('rom-change', () => {
+      const names = JSON.stringify(objectUserNames(this.rom));
+      if (names !== this.objectNamesSeen) { this.objectNamesSeen = names; this.emit('object-names'); }
+    });
     musicPlayer.onChange(() => { this.resumeBackground(); this.emit('busy'); });
     // level edits and ROM edits (romEdit: one undo step, all or nothing, the follow-ups below)
     this.edits = new EditSession(rom, {
@@ -1152,6 +1160,27 @@ export class App {
       { input: thumbsInput(rom, lv), lane: 'thumbs', replace: true, label: 'Object thumbnails', done: this.thumbsLearned });
   }
   private thumbsLearned = () => this.emit('thumbs');
+
+  private objectNamesSeen = ''; // the user's object names as last told ('object-names')
+  // the object table of a tileset's standard objects (objectnames.ts), learned once and kept in the result cache
+  objectTable(ts = this.level.header.tileset): number | null {
+    return this.learner.now(`otab1:${ts}`, (emu) => objectTable(emu, ts));
+  }
+  // the name of an object in the open level's tileset: the user's, else the built-in one (objectnames.ts)
+  objectName(num: number, ext: number): string {
+    return objectName(this.rom, num, ext, this.objectTableOf(num));
+  }
+  // the object table an object's name depends on (null: none, or unknown)
+  objectTableOf(num: number): number | null {
+    return namedPerTable(num) ? this.objectTable() : null;
+  }
+  // names an object for the project, 2E-3F for the open level's object table; empty: back to the built-in name
+  renameObject(num: number, ext: number, name: string): void {
+    const what = num ? `Object ${hex2(num)}` : `Extended object ${hex2(ext)}`;
+    const key = objectNameKey(num, ext, this.objectTableOf(num));
+    if (key === null) { toast(`${what}: the object table of this tileset is unknown, so it cannot be named`, 'error'); return; }
+    try { this.romEdit(name.trim() ? `${what} renamed` : `${what}: name reset`, () => setObjectName(this.rom, key, name)); } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
+  }
 
   // kind of a standard object in the current tileset; null while unknown (then treated as plain)
   objectKind(num: number): ObjKind | null {

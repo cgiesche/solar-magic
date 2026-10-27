@@ -12,7 +12,7 @@ import { overworldExitText } from '../core/owteleport.ts';
 import { tileFields, cameraFields, optionFields } from './entrancefields.ts';
 import { newEntranceIn } from './exitpanel.ts';
 import { exportLevelFile, importLevelFile, LEVEL_FILE_EXT } from '../core/levelfile.ts';
-import { ENTRANCE_ACTIONS, hex, objectName } from '../core/names.ts';
+import { ENTRANCE_ACTIONS, hex } from '../core/names.ts';
 import { saveLevel } from '../core/save.ts';
 import { DM16_EXT, setLevelGfx, customPalette, setCustomPalette, bgBank } from '../core/patches.ts';
 import { bgFromWram } from '../core/bg.ts';
@@ -234,7 +234,7 @@ export function openInsertDialog(app: App, tx: number, ty: number): void {
   let extra = p?.kind === 'spr' ? p.extra : 0;
   const name = h('div', { class: 'hint' });
   const fields = h('div');
-  const showName = () => (name.textContent = kind === 2 ? app.spriteLabel(spriteId({ num, extra })) : kind === 1 ? objectName(0, num) : objectName(num, 0));
+  const showName = () => (name.textContent = kind === 2 ? app.spriteLabel(spriteId({ num, extra })) : kind === 1 ? app.objectName(0, num) : app.objectName(num, 0));
   const build = () => {
     clear(fields);
     if (kind === 0) num = Math.max(1, Math.min(0x3f, num));
