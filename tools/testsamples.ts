@@ -169,6 +169,21 @@ function teleport(rom: Rom): number | null {
     const fell = sr.value.sprites.filter((f) => f.kind === 'fell');
     check(sr.value.ok && !fell.length, `13B: the level check finds no sprite falling out (${fell.length})`);
   }
+  // its screen scrolling pipe on screen 8 (the baserom's UberASM and GPS blocks): Mario below the upward
+  // pipe at tiles 87/88, row 13, jumps in holding up, its turn block takes him right, he leaves the
+  // pipe's right end – the turn block reads its tables with the data bank GPS gives it
+  {
+    const s = emu.snes, w = s.wram;
+    emu.load(0x13b);
+    while (w[0x100] !== 0x14) s.runFrame();
+    const set16 = (a: number, v: number) => { w[a] = v & 255; w[a + 1] = v >> 8; };
+    set16(0x94, 0x878); set16(0x96, 0x120); set16(0x1462, 0x800); set16(0x1464, 0xc0);
+    const dir = () => w[0x1a420] & 15; // !Freeram_SSP_PipeDir
+    const dirs = new Set<number>();
+    for (let f = 0; f < 120; f++) { w[0xf31] = 9; s.joy1 = f < 30 ? 0x8800 : 0; s.runFrame(); if (dir()) dirs.add(dir()); }
+    const x = w[0x94] | (w[0x95] << 8), y = w[0x96] | (w[0x97] << 8);
+    check(dirs.has(2) && !dir() && x >= 0x8a0 && y < 0x100 && w[0x71] === 0, `13B: through its pipe up, then right, out at its right end (directions ${[...dirs].join()}, Mario at ${x.toString(16)},${y.toString(16)})`);
+  }
 
   // 13B's secondary entrance 150 (the level file's): its exit on screen 7 leads there, and its teleport
   // block on that screen takes Mario there (screen 7 of 13B)

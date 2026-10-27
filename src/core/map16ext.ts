@@ -24,6 +24,9 @@
 // $06F63A for 40-7F; 2 bytes per tile from the page's first tile), both at the acts-like table: community code
 // reads acts-like through them, e.g. the Line-Guide "Acts Like" Fix (imamelia, worldpeace) in the Romhack Races
 // baserom, whose line-guided platforms fell without them. Pages 10-3F (and 50-7F) don't exist in the editor.
+// Version 6 runs a custom block with the data bank set to the block's bank (the caller's restored after), as
+// GPS does: blocks read their own tables by absolute addresses, e.g. the screen scrolling pipes' turn blocks
+// in the Romhack Races baserom, which never turned Mario without it.
 
 import { Rom } from './rom.ts';
 import { Asm } from './asm.ts';
@@ -112,16 +115,17 @@ function build(): Asm {
   a.b(0x4a); // LSR
   a.br(0x90, 'noptr');
   a.label('ok');
-  a.b(0x4b); // PHK
+  a.b(0x8b, 0x4b); // PHB (the caller's data bank) : PHK
   a.abs(0xf4, 'back', -1); // PEA.w back-1
   a.label('opBank2'); a.b(0xbf, 0, 0, 0); // LDA.l BlkTbl+2,x
-  a.b(0x48, 0xc2, 0x20, 0xa3, 0x05, 0x29, 0xff, 0x00, 0x18); // PHA : REP #$20 : LDA $05,S : AND #$00FF : CLC
+  a.b(0x48, 0xc2, 0x20, 0xa3, 0x06, 0x29, 0xff, 0x00, 0x18); // PHA : REP #$20 : LDA $06,S : AND #$00FF : CLC
   a.label('opLo'); a.b(0x7f, 0, 0, 0); // ADC.l BlkTbl,x
-  a.b(0x3a, 0x48, 0xe2, 0x30, 0xa3, 0x08); // DEC : PHA : SEP #$30 : LDA $08,S (page)
+  a.b(0x3a, 0x48, 0xe2, 0x30, 0xa3, 0x09); // DEC : PHA : SEP #$30 : LDA $09,S (page)
   a.long(0x22, 'Acts'); // JSL Acts
-  a.b(0xa8, 0xa3, 0x09, 0xaa, 0x6b); // TAY : LDA $09,S : TAX : RTL (→ block code)
+  a.b(0xa8, 0xa3, 0x03, 0x48, 0xab); // TAY : LDA $03,S : PHA : PLB (the data bank: the block's, as GPS sets it)
+  a.b(0xa3, 0x0a, 0xaa, 0x6b); // LDA $0A,S : TAX : RTL (→ block code)
   a.label('back');
-  a.b(0xe2, 0x30, 0x68, 0x68, 0xfa, 0x98, 0x6b); // SEP #$30 : PLA : PLA : PLX : TYA : RTL
+  a.b(0xe2, 0x30, 0xab, 0x68, 0x68, 0xfa, 0x98, 0x6b); // SEP #$30 : PLB : PLA : PLA : PLX : TYA : RTL
   a.label('noptr');
   a.b(0xe2, 0x30, 0x68); // SEP #$30 : PLA
   a.label('plain');

@@ -389,6 +389,8 @@ MarioSide:
   then applies. Example: `LDY #$00 : LDA #$25 : STA $1693` turns the block into air for this contact.
 * **X** is the caller's X (sprite index for `SpriteV/H`, fireball index for `MarioFireball`). It
   is restored afterwards.
+* The **data bank** is the block's own bank, as in GPS: tables of the block are read by absolute
+  addresses (`LDA Table,x`). The caller's data bank is restored afterwards.
 * Each block is assembled on its own, as GPS does it (two blocks may define the same macro).
 * Shared routines from `routines/` are called as `%name()` and inserted only once: with the first block
   using them (after its code, with its defines); later blocks call them there. The

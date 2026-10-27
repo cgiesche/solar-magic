@@ -29,9 +29,9 @@ for (const t of [WALL, PASS]) { setExtTileWords(rom, t, map16Source(rom, emu.loa
 check(!!map16Ext(rom)?.blocks, 'SMWX installed with the block table');
 
 const OFFS = ['MarioBelow', 'MarioAbove', 'MarioSide', 'SpriteV', 'SpriteH', 'MarioCape', 'MarioFireball', 'TopCorner', 'BodyInside', 'HeadInside'];
-// marker: sets bit n of $7FB010/11 for offset n
+// marker: sets bit n of $7FB010/11 for offset n; the data bank it runs with in $7FB012, its own bank in $7FB013
 const marker = ['db $42', ...OFFS.map((o) => `JMP ${o}`),
-  ...OFFS.map((o, i) => `${o}:\n  REP #$20 : LDA $7FB010 : ORA #$${(1 << i).toString(16).padStart(4, '0')} : STA $7FB010 : SEP #$20\n  RTL`)].join('\n');
+  ...OFFS.map((o, i) => `${o}:\n  REP #$20 : LDA $7FB010 : ORA #$${(1 << i).toString(16).padStart(4, '0')} : STA $7FB010 : SEP #$20\n  PHB : PLA : STA $7FB012 : PHK : PLA : STA $7FB013\n  RTL`)].join('\n');
 // passable for Mario: acts like air for all of Mario's offsets, solid for sprites
 const MARIO = ['MarioBelow', 'MarioAbove', 'MarioSide', 'TopCorner', 'BodyInside', 'HeadInside'];
 const pass = ['db $42', ...OFFS.map((o) => `JMP ${o}`), ...OFFS.filter((o) => !MARIO.includes(o)).map((o) => `${o}:`), '  RTL',
@@ -61,14 +61,14 @@ const withWall = (tile: number, floor = REF): LevelOverride => {
   lv.objects.push({ uid: newUid(), num: 0, ext: DM16_EXT, x: 0, y: 24, size: 0x08, tile: floor }); // floor under Mario
   return { layer1: serializeLayer1(rom, lv), sprites: serializeSprites(lv.sprites, lv.spriteHeader, isL1Vertical(rom, lv.header.mode)) };
 };
-function play(tile: number, frames = 300, floor = REF, jump = true): { x: number; bits: number } {
+function play(tile: number, frames = 300, floor = REF, jump = true): { x: number; bits: number; dbr: number; bank: number } {
   emu.load(0x105, withWall(tile, floor));
   const s = emu.snes, w = s.wram;
   let g = 0; while (w[0x100] !== 0x14 && g++ < 100) s.runFrame();
-  w[0x1b010] = 0; w[0x1b011] = 0;
+  w[0x1b010] = 0; w[0x1b011] = 0; w[0x1b012] = 0; w[0x1b013] = 0;
   for (let f = 0; f < frames; f++) { s.joy1 = 0x4100 | (jump && f % 50 < 22 ? 0x8000 : 0); s.runFrame(); }
   s.joy1 = 0;
-  return { x: w[0x94] | (w[0x95] << 8), bits: w[0x1b010] | (w[0x1b011] << 8) };
+  return { x: w[0x94] | (w[0x95] << 8), bits: w[0x1b010] | (w[0x1b011] << 8), dbr: w[0x1b012], bank: w[0x1b013] };
 }
 // (the passable run doesn't jump: sprites still see the block as solid and gather at it)
 const ref = play(REF), wall = play(WALL, 300, WALL), passing = play(PASS, 120, REF, false), refRun = play(REF, 120, REF, false);
@@ -76,6 +76,8 @@ const names = (b: number) => OFFS.filter((_, i) => b & (1 << i)).join(', ') || '
 console.log(`     Mario x: cement ${ref.x}, marker block ${wall.x}, passable block ${passing.x}; offsets seen: ${names(wall.bits)}`);
 check(wall.x === ref.x, 'a block acting like cement stops Mario like cement');
 check((wall.bits & 0b110) === 0b110, 'MarioSide and MarioAbove reached the block code');
+// as GPS runs it: blocks read their own tables by absolute addresses (the game goes on with its own data bank)
+check(wall.bank !== 0 && wall.dbr === wall.bank, `the block code runs with its own bank as the data bank ($${wall.dbr.toString(16)}, block in $${wall.bank.toString(16)})`);
 check(refRun.x < 150 && passing.x > refRun.x + 64, `a block that turns into air for Mario lets him through (${refRun.x} → ${passing.x})`);
 
 // round trip through the ROM and removal
