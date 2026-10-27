@@ -164,9 +164,8 @@ export function exportLevel(app: App): void {
   downloadBytes(`level-${hex(lv.number, 3)}${LEVEL_FILE_EXT}`, new TextEncoder().encode(exportLevelFile(app.rom, lv, bg)), 'application/json');
 }
 
-export function openScreenDialog(app: App, op: 'insert' | 'delete'): void {
+export function openScreenDialog(app: App, op: 'insert' | 'delete', screen = 0): void {
   const lv = app.level;
-  let screen = 0;
   const screenOpts: [number, string][] = Array.from({ length: lv.header.screens }, (_, i) => [i, hex(i, 2)]);
   const dir = app.vertical ? 'down' : 'to the right';
   const body = h('div', null,

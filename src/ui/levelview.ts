@@ -1,6 +1,6 @@
 // Scrollable, zoomable level canvas with editing interactions.
 
-import { App, isBrushMode, type Marker, type LevelEdit, type Brush } from './app.ts';
+import { App, isBrushMode, type Marker, type LevelEdit, type Brush, type PreviewPart } from './app.ts';
 import { h, attachPanZoom, toast } from './dom.ts';
 import { downloadBytes } from './platform.ts';
 import { hex2, hex3 } from '../core/names.ts';
@@ -13,6 +13,8 @@ import { layer3CellAt, layer3WordText } from '../core/layer3map.ts';
 import type { ArcSpeed } from '../core/jumparcs.ts';
 import { exitTarget } from '../core/exitgraph.ts';
 import { contextMenu, type MenuItem } from './menu.ts';
+import { openSavePrefab } from './panels.ts';
+import { openInsertDialog, openScreenDialog } from './tools.ts';
 import { incompleteSprites } from './spritemem.ts';
 import { problemsButton } from './problems.ts';
 import { map16Tile } from '../core/ram.ts';
@@ -26,7 +28,7 @@ import { loadDeaths, killerText, killerTile, levelVersion, type DeathMark } from
 type Drag =
   | { kind: 'move'; edit: LevelEdit; startTx: number; startTy: number; lastDx: number; lastDy: number; orig: Map<number, { x: number; y: number }> }
   | { kind: 'resize'; edit: LevelEdit; startTx: number; startTy: number; origSize: Map<number, number>; lastDw: number; lastDh: number }
-  | { kind: 'band'; x0: number; y0: number; x1: number; y1: number; add: boolean }
+  | { kind: 'band'; x0: number; y0: number; x1: number; y1: number; add: boolean; far: boolean } // far: dragged, not a click
   | { kind: 'marker'; edit: LevelEdit | null; marker: Marker; offX: number; offY: number; moved: boolean } // (secondary entrances: not a level edit)
   | { kind: 'paint'; edit: LevelEdit; changed: boolean; x0: number; y0: number; lastX: number; lastY: number } // BG/layer 3 brush, stamped on a grid of cells from (x0, y0)
   | { kind: 'pick'; x0: number; y0: number; x1: number; y1: number } // BG/layer 3 cells taken into the brush
@@ -102,6 +104,8 @@ export class LevelView {
     app.on('mode', () => { if (!this.hover) this.idleStatus(); });
     app.on('rom-change', () => this.problems.update());
     app.on('arcs', () => this.requestPaint());
+    app.on('placement-preview', () => this.requestPaint());
+    app.on('palette-item', () => { this.lastPreview = null; this.requestPaint(); });
     app.on('game-view', () => this.requestPaint());
     app.on('level-scan', () => { this.problems.update(); this.requestPaint(); });
     this.idleStatus();
@@ -309,6 +313,7 @@ export class LevelView {
     // hover
     if (this.hover && !this.drag) {
       const { tx, ty } = this.hover;
+      if (!this.onSelection(this.hover.px, this.hover.py)) this.paintPreview(ctx, tx, ty);
       const hits = this.brushMode() ? [] : app.hitsAt(this.hover.px, this.hover.py);
       const hit = hits.find((h) => h.mode === app.mode && app.selection.has(h.item.uid)) ?? hits[0];
       if (hit && !app.selection.has(hit.item.uid)) {
@@ -864,6 +869,22 @@ export class LevelView {
     if (alt) ctx.drawImage(alt, x + 8 + Number(alt.dataset.ox) / 2, y + Number(alt.dataset.oy) / 2, alt.width / 2, alt.height / 2);
   }
 
+  // The placement preview: what a right click at tile (tx, ty) would place, translucent. While the one at the tile
+  // is learned, the last one known moves along with the mouse.
+  lastPreview: { tx: number; ty: number; parts: PreviewPart[] } | null = null;
+  paintPreview(ctx: CanvasRenderingContext2D, tx: number, ty: number): void {
+    let parts = this.app.placementPreview(tx, ty), dx = 0, dy = 0;
+    if (parts) this.lastPreview = { tx, ty, parts };
+    else if (this.lastPreview) ({ parts } = this.lastPreview, dx = (tx - this.lastPreview.tx) * 16, dy = (ty - this.lastPreview.ty) * 16);
+    if (!parts?.length) return;
+    ctx.globalAlpha = 0.6;
+    for (const p of parts) {
+      if (p.img) ctx.drawImage(p.img, p.x + dx, p.y + dy);
+      else { ctx.fillStyle = 'rgba(255,80,200,0.5)'; ctx.fillRect(p.x + dx, p.y + dy, 16, 16); }
+    }
+    ctx.globalAlpha = 1;
+  }
+
   paintSprites(ctx: CanvasRenderingContext2D, z: number): void {
     const app = this.app;
     const active = app.mode === 'spr';
@@ -917,6 +938,8 @@ export class LevelView {
         if (this.drag.changed) this.scheduleRefresh();
         return;
       }
+      // on the selection, or with nothing to place: the context menu
+      if (e.button === 2 && (this.onSelection(px, py) || !app.placement(tx, ty))) { this.levelMenu(e.clientX, e.clientY, px, py, tx, ty); return; }
       app.placeAt(tx, ty);
       return;
     }
@@ -983,7 +1006,7 @@ export class LevelView {
     } else {
       if (!e.ctrlKey) app.selection.clear();
       app.stampSelection = true;
-      this.drag = { kind: 'band', x0: px, y0: py, x1: px, y1: py, add: e.ctrlKey };
+      this.drag = { kind: 'band', x0: px, y0: py, x1: px, y1: py, add: e.ctrlKey, far: false };
       app.emit('change');
     }
   }
@@ -1010,6 +1033,7 @@ export class LevelView {
     if (!d) return;
     if (d.kind === 'band') {
       d.x1 = px; d.y1 = py;
+      d.far ||= Math.abs(d.x1 - d.x0) > 3 || Math.abs(d.y1 - d.y0) > 3;
       this.requestPaint();
     } else if (d.kind === 'gameView') {
       app.gameView = gameViewAt(px - d.offX, py - d.offY, app.images.width, app.images.height, app.cameraReach());
@@ -1095,7 +1119,7 @@ export class LevelView {
           const b = app.spriteBox(s);
           if (b.x0 <= bx1 && b.x1 > bx0 && b.y0 <= by1 && b.y1 > by0) app.selection.add(s.uid);
         }
-      } else if (Math.abs(d.x1 - d.x0) > 3 || Math.abs(d.y1 - d.y0) > 3) {
+      } else if (d.far) {
         // an object is caught by its tiles (its outline), not its bounding box: slopes reach far diagonally
         for (const o of app.currentObjects()) {
           const hit = app.objectTiles(o).some(t => {
@@ -1105,11 +1129,40 @@ export class LevelView {
           if (hit) app.selection.add(o.uid);
         }
       }
+      // a click into nothing (no item of any shown layer there): nothing placed by a right click any more
+      if (!d.far && !d.add) app.clearPaletteItem();
       app.emit('change');
       return;
     }
     if (d.kind === 'move') { if (d.lastDx || d.lastDy) d.edit.commit(); else d.edit.cancel(); return; }
     if (d.kind === 'resize') { if (d.lastDw || d.lastDh) d.edit.commit(); else d.edit.cancel(); return; }
+  }
+
+  // Esc while dragging: the drag undone (moving, resizing, painting, a level entrance) or dropped (a selection
+  // box, picking tiles, the game view frame); false when there is none to cancel (moving a secondary entrance)
+  cancelDrag(): boolean {
+    const d = this.drag;
+    if (!d || (d.kind === 'marker' && !d.edit)) return false;
+    this.drag = null;
+    if (d.kind === 'move' || d.kind === 'resize' || d.kind === 'paint' || d.kind === 'marker') d.edit?.cancel(true);
+    if (this.hover) this.updateCursor(this.hover.px, this.hover.py, this.hover.top);
+    this.paint();
+    return true;
+  }
+
+  // the context menu by the keyboard: at the mouse when it is over the level, else at the selection (its first
+  // item) or the middle of the view
+  keyMenu(): void {
+    const app = this.app;
+    if (app.mode !== 'l1' && app.mode !== 'l2' && app.mode !== 'spr') return;
+    let px: number, py: number;
+    if (this.hover) ({ px, py } = this.hover);
+    else {
+      const it = (app.mode === 'spr' ? app.selectedSprites() : app.selectedObjects())[0], c = this.centerTile();
+      px = (it ? it.x : c.tx) * 16 + 8; py = (it ? it.y : c.ty) * 16 + 8;
+    }
+    const r = this.scroller.getBoundingClientRect(), z = app.zoom;
+    this.levelMenu(r.left + px * z - this.scroller.scrollLeft, r.top + py * z - this.scroller.scrollTop, px, py, Math.floor(px / 16), Math.floor(py / 16));
   }
 
   // status bar without the mouse over the level: what the mouse does in this mode
@@ -1118,7 +1171,7 @@ export class LevelView {
     this.pos.textContent = '';
     this.status.textContent = isBrushMode(m) ? 'Click/drag picks up tiles as brush · Right click/Shift+click paints'
       : m === 'exit' ? 'Click an entrance (M, Z, S) or screen to select it – edit it on the right under “Properties” · Drag moves entrances · Right click: new entrance, create exit …'
-        : 'Click selects, drag moves · Right click/Shift+click inserts the item chosen in “Insert” · Alt+click: item underneath';
+        : 'Click selects, drag moves, click into nothing deselects all · Right click/Shift+click places the item chosen in “Insert” (shown at the mouse), else opens the menu · Alt+click: item underneath';
   }
 
   updateStatus(tx: number, ty: number): void {
@@ -1202,8 +1255,59 @@ export class LevelView {
     this.scroller.style.cursor = c;
   }
 
+  // whether the pixel is on a selected item of the current mode
+  onSelection(px: number, py: number): boolean {
+    return this.app.hitsAt(px, py).some((h) => h.mode === this.app.mode && this.app.selection.has(h.item.uid));
+  }
+
+  // The context menu of layer 1/2 and sprites at the pixel (client position x, y): of the selection when on it –
+  // an item there not selected is selected first, as by a click – else of the spot (paste, insert, the screen)
+  levelMenu(x: number, y: number, px: number, py: number, tx: number, ty: number): void {
+    const app = this.app;
+    if (!this.onSelection(px, py)) {
+      const hit = app.hitsAt(px, py)[0];
+      if (hit) {
+        if (hit.mode !== app.mode) app.setMode(hit.mode, [hit.item.uid]);
+        else app.selection = new Set([hit.item.uid]);
+        app.stampSelection = true;
+        app.emit('change');
+      } else if (app.selection.size) { app.selection.clear(); app.emit('change'); }
+    }
+    const spr = app.mode === 'spr';
+    const items: MenuItem[] = [];
+    if (app.selection.size) {
+      const objs = app.selectedObjects(), sprs = app.selectedSprites(), n = spr ? sprs.length : objs.length;
+      const one = spr ? sprs[0] : objs[0];
+      items.push({ heading: n > 1 ? `${n} ${spr ? 'sprites' : 'objects'}` : spr ? `Sprite ${hex2(one.num)} ${app.spriteLabel(spriteId(one as LevelSprite))}` : app.objectName(one.num, (one as LevelObject).ext) },
+        { label: 'Cut', onClick: () => { app.copy(); app.deleteSelection(); } },
+        { label: 'Copy', shortcut: 'Ctrl+C', onClick: () => app.copy() },
+        { label: 'Delete', shortcut: 'Del', onClick: () => app.deleteSelection() });
+      if (!spr) items.push('sep',
+        { label: 'Bring to front', shortcut: 'PgUp', title: 'Drawn after all other objects', onClick: () => app.reorderSelection('front') },
+        { label: 'Send to back', shortcut: 'PgDn', title: 'Drawn before all other objects', onClick: () => app.reorderSelection('back') },
+        'sep',
+        { label: 'Save as prefab …', onClick: () => openSavePrefab(app) });
+      items.push('sep', { label: 'Properties', onClick: () => app.emit('properties') });
+    } else {
+      const clip = spr ? app.clipboard.sprites : app.clipboard.objects;
+      items.push(
+        { label: 'Paste here', shortcut: 'Ctrl+V', disabled: () => !clip?.length, onClick: () => app.paste(tx, ty) },
+        { label: 'Insert by number …', shortcut: 'I', onClick: () => openInsertDialog(app, tx, ty) },
+        { label: 'Select all', shortcut: 'Ctrl+A', onClick: () => { app.selection = new Set((spr ? app.level.sprites : app.currentObjects()).map((o) => o.uid)); app.emit('change'); } });
+      const scr = app.vertical ? ty >> 4 : tx >> 4;
+      items.push(...this.exitItems(px, py, tx, ty, true),
+        { label: 'Insert screen here …', disabled: () => app.level.header.screens >= 32, onClick: () => openScreenDialog(app, 'insert', scr) },
+        { label: 'Delete screen …', disabled: () => app.level.header.screens <= 1, onClick: () => openScreenDialog(app, 'delete', scr) });
+    }
+    contextMenu(x, y, items);
+  }
+
   // right click in mode 'exit': entrances and the screen's exit at the mouse
   exitMenu(e: MouseEvent, px: number, py: number, tx: number, ty: number): void {
+    contextMenu(e.clientX, e.clientY, this.exitItems(px, py, tx, ty));
+  }
+  // the entrances and the screen's exit at the pixel; toExits: they switch to mode 'exit' first (from another mode)
+  exitItems(px: number, py: number, tx: number, ty: number, toExits = false): MenuItem[] {
     const app = this.app;
     const scr = app.vertical ? ty >> 4 : tx >> 4;
     const ex = app.level.exits.find((x) => x.screen === scr);
@@ -1224,7 +1328,8 @@ export class LevelView {
     } else {
       items.push({ label: 'Create exit', onClick: () => { app.selectScreen(scr); app.editLevel(() => { app.level.exits.push({ uid: newUid(), screen: scr, dest: app.level.number, secondary: false, flags: EXIT_NEW }); }, false); } });
     }
-    contextMenu(e.clientX, e.clientY, items);
+    if (toExits) for (const it of items) if (typeof it === 'object' && 'onClick' in it) { const f = it.onClick; it.onClick = () => { if (app.mode !== 'exit') app.setMode('exit'); f(); }; }
+    return items;
   }
 
   // topmost marker whose circle contains the pixel

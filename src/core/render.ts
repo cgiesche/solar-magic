@@ -206,6 +206,25 @@ export function renderLevel(rom: Rom, r: LevelRender, mode: number, screens: num
   return { width, height, backdrop: backdropColor(r), layer1, layer2, layer3, geom1, geom2, tiles1, tiles2, bgTiles };
 }
 
+// tiles of an object layer (packed y<<16|x, laid out by g) as one picture cut to their bounds, 0 = transparent;
+// null without tiles
+export function renderLayerTiles(rom: Rom, r: LevelRender, g: LayerGeom, layer2: boolean, tiles: number[]): { x0: number; y0: number; w: number; h: number; px: Uint32Array } | null {
+  if (!tiles.length) return null;
+  let x0 = Infinity, y0 = Infinity, x1 = -1, y1 = -1;
+  for (const t of tiles) {
+    const x = t & 0xffff, y = t >> 16;
+    x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y);
+  }
+  const w = (x1 - x0 + 1) * 16, h = (y1 - y0 + 1) * 16, px = new Uint32Array(w * h);
+  const tc = new TileCache(r.vram, r.cgram, layer2 ? (r.ppuRegs[0x0b] >> 4) << 13 : (r.ppuRegs[0x0b] & 0x0f) << 13);
+  const src = map16Source(rom, r);
+  for (const t of tiles) {
+    const x = t & 0xffff, y = t >> 16;
+    drawMap16(px, w, h, tc, src.fg(map16Tile(r.wram, g.addr(x, y))), (x - x0) * 16, (y - y0) * 16);
+  }
+  return { x0, y0, w, h, px };
+}
+
 // Tiles of an object layer (1 or layer 2 objects) that are there but cannot be seen: drawn without a single pixel,
 // yet acting unlike air or running a custom block (invisible blocks, P-switch coins and doors, 1-Up points …);
 // by the tile at (x, y), each tile number judged once

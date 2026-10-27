@@ -12,7 +12,7 @@ import { hex, hex2, spriteName } from '../core/names.ts';
 import { objectTable, objectName, objectNameKey, setObjectName, namedPerTable } from '../core/objectnames.ts';
 import { objectUserNames } from '../core/usernames.ts';
 import { loadPixiProject, customSpriteList, type CustomSprite } from '../core/pixi.ts';
-import { renderLevel, type LevelImages, composite } from '../core/render.ts';
+import { renderLevel, renderLayerTiles, type LevelImages, composite } from '../core/render.ts';
 import { captureSprites, captureSpriteAt, type SpriteImage } from '../core/spritegfx.ts';
 import { spriteMemJob, usedSpriteMemory } from '../core/spritemem.ts';
 import { DM16_EXT, levelGfx, levelExtGfx, customPalette, levelMusic, defaultGfx } from '../core/patches.ts';
@@ -48,7 +48,7 @@ import type { ProbeReply } from '../core/probehost.ts';
 import { ProbeClient } from '../core/probeclient.ts';
 import { ResultLearner } from '../core/learner.ts';
 import type { RomReads } from '../core/romdeps.ts';
-import { objectThumbsJob, thumbsKey, thumbsInput, objKey, type ObjSpec, type ObjThumb } from './thumbs.ts';
+import { objectThumbsJob, thumbCanvas, thumbsKey, thumbsInput, objKey, type ObjSpec, type ObjThumb } from './thumbs.ts';
 import { levelInput, inputHash } from '../core/inputs.ts';
 import { map16Tile, bgTile } from '../core/ram.ts';
 import { exanimTiles, exanimColors, exanimPeriod, readLevelList, readGlobalList } from '../core/exanim.ts';
@@ -67,6 +67,10 @@ export type PaletteItem =
   // prefab: prefab number (extended object $04, see prefabs.ts)
   | { kind: 'obj'; num: number; ext: number; size: number; tile?: number; block?: { w: number; h: number }; prefab?: number }
   | { kind: 'spr'; num: number; extra: number };
+// what a right click in the level adds (App.placement)
+export interface Placement { objects: LevelObject[]; sprites: LevelSprite[] }
+// a picture of the placement preview in level pixels; img null: a sprite without an image (drawn as its tile)
+export interface PreviewPart { x: number; y: number; img: HTMLCanvasElement | null }
 
 type Listener = () => void;
 
@@ -85,7 +89,9 @@ export type AppEvent =
   | 'level-scan' // the level scan of the level as edited is known
   | 'game-view' // the camera at Mario's place for the game view frame is known (or asked for)
   | 'level-uses' // more levels' Map16 tiles are known (levelTiles)
-  | 'palette-item' // a sprite was chosen in the palette
+  | 'palette-item' // a palette item was chosen in the palette, or the palette item cleared
+  | 'placement-preview' // the placement preview asked for is known
+  | 'properties' // the properties panel is wanted (the context menu)
   | 'arcs' // jump arcs asked for are known
   | 'sprites' // sprite images were captured
   | 'thumbs' // object thumbnails asked for are known
@@ -372,8 +378,8 @@ export class App {
     return isL1Vertical(this.rom, this.level.header.mode);
   }
 
-  buildOverrides(): LevelOverride {
-    const lv = this.level, ov = levelOverride(this.rom, lv);
+  buildOverrides(lv = this.level): LevelOverride {
+    const ov = levelOverride(this.rom, lv);
     return {
       ...ov,
       bgData: !ov.layer2 && lv.bg ? encodeBg(lv.bg) : undefined,
@@ -1404,30 +1410,49 @@ export class App {
 
   insertAt(tx: number, ty: number, p: PaletteItem | null = this.paletteItem): void {
     if (!p) { toast('Choose an object/sprite in the palette first.'); return; }
-    this.editLevel(() => this.insert(tx, ty, p));
+    this.editLevel(() => {
+      const pl = this.newItems(p, tx, ty);
+      if (!pl) return false;
+      this.add(pl);
+    });
     // the placed item is selected: changed (resized, …), the next right click copies it as it is now
     this.stampSelection = true;
   }
-  private insert(tx: number, ty: number, p: PaletteItem): boolean {
-    if (p.kind === 'obj' && (this.mode === 'l1' || this.mode === 'l2')) {
-      const cells = p.block ? Array.from({ length: p.block.w * p.block.h }, (_, i) => ({ dx: i % p.block!.w, dy: Math.floor(i / p.block!.w) })) : [{ dx: 0, dy: 0 }];
-      this.selection = new Set();
-      for (const { dx, dy } of cells) {
-        const o: LevelObject = { uid: newUid(), num: p.num, ext: p.ext, x: tx + dx, y: ty + dy, size: p.size };
-        if (p.tile !== undefined) o.tile = p.tile + dy * 16 + dx;
-        if (p.prefab !== undefined) o.prefab = p.prefab;
-        this.clampObject(o);
-        this.currentObjects().push(o);
-        this.selection.add(o.uid);
-      }
-    } else if (p.kind === 'spr') {
-      if (this.mode !== 'spr') this.setMode('spr');
+  // palette item p at tile (tx, ty): objects in layer 1/2, a sprite in any mode; null when it can't go into the
+  // current mode (an object while editing sprites)
+  private newItems(p: PaletteItem, tx: number, ty: number): Placement | null {
+    if (p.kind === 'spr') {
       const s: LevelSprite = { uid: newUid(), num: p.num, x: tx, y: ty, extra: p.extra };
       if (s.extra >= 2) { const b = spriteBytes(spriteSizes(this.rom), s); if (b.length) s.bytes = b; }
-      this.level.sprites.push(s);
-      this.selection = new Set([s.uid]);
-    } else return false;
-    return true;
+      return { objects: [], sprites: [s] };
+    }
+    if (this.mode !== 'l1' && this.mode !== 'l2') return null;
+    const cells = p.block ? Array.from({ length: p.block.w * p.block.h }, (_, i) => ({ dx: i % p.block!.w, dy: Math.floor(i / p.block!.w) })) : [{ dx: 0, dy: 0 }];
+    const objects = cells.map(({ dx, dy }) => {
+      const o: LevelObject = { uid: newUid(), num: p.num, ext: p.ext, x: tx + dx, y: ty + dy, size: p.size };
+      if (p.tile !== undefined) o.tile = p.tile + dy * 16 + dx;
+      if (p.prefab !== undefined) o.prefab = p.prefab;
+      this.clampObject(o);
+      return o;
+    });
+    return { objects, sprites: [] };
+  }
+  // copies of the current mode's items with their upper left at tile (tx, ty)
+  private copiesAt(items: (LevelObject | LevelSprite)[], tx: number, ty: number): Placement {
+    const minX = Math.min(...items.map((o) => o.x)), minY = Math.min(...items.map((o) => o.y));
+    const copies = items.map((it) => {
+      const c = { ...structuredClone(it), uid: newUid(), x: it.x - minX + tx, y: it.y - minY + ty };
+      this.clampObject(c);
+      return c;
+    });
+    return this.mode === 'spr' ? { objects: [], sprites: copies as LevelSprite[] } : { objects: copies as LevelObject[], sprites: [] };
+  }
+  // puts the placement into the level, selected (sprites in mode sprites)
+  private add(pl: Placement): void {
+    if (pl.sprites.length && this.mode !== 'spr') this.setMode('spr');
+    this.level.sprites.push(...pl.sprites);
+    this.currentObjects().push(...pl.objects);
+    this.selection = new Set([...pl.objects, ...pl.sprites].map((o) => o.uid));
   }
 
   // ------------- conditional Direct Map16 (cdm16.ts) -------------
@@ -1679,24 +1704,74 @@ export class App {
   }
   // a right click in the level: a copy of the selection when it was picked after the palette item, else the palette item
   placeAt(tx: number, ty: number): void {
-    if (this.stampSelection && this.selection.size) this.placeCopy(this.mode === 'spr' ? this.selectedSprites() : this.selectedObjects(), tx, ty);
+    if (this.copiesSelection()) this.placeCopy(this.selectedItems(), tx, ty);
     else this.insertAt(tx, ty);
   }
+  private copiesSelection(): boolean {
+    return this.stampSelection && this.selection.size > 0;
+  }
+  private selectedItems(): (LevelObject | LevelSprite)[] {
+    return this.mode === 'spr' ? this.selectedSprites() : this.selectedObjects();
+  }
+  // what a right click at tile (tx, ty) places (placeAt); null: nothing (only layer 1/2 and sprites place)
+  placement(tx: number, ty: number): Placement | null {
+    if (this.mode !== 'l1' && this.mode !== 'l2' && this.mode !== 'spr') return null;
+    if (this.copiesSelection()) { const items = this.selectedItems(); return items.length ? this.copiesAt(items, tx, ty) : null; }
+    return this.paletteItem ? this.newItems(this.paletteItem, tx, ty) : null;
+  }
+  // The placement preview at tile (tx, ty): the placement as the level shows it once placed – objects drawn by
+  // the level's load with them added (learned in the background: undefined until known), sprites with their images
+  placementPreview(tx: number, ty: number): PreviewPart[] | undefined {
+    const pl = this.placement(tx, ty);
+    if (!pl) return [];
+    const parts: PreviewPart[] = pl.sprites.map((s) => {
+      const img = this.spriteImageOf(s) ?? null;
+      return img ? { x: s.x * 16 + Number(img.dataset.ox), y: s.y * 16 + Number(img.dataset.oy), img } : { x: s.x * 16, y: s.y * 16, img };
+    });
+    if (!pl.objects.length) return parts;
+    const objs = this.objectsPreview(pl.objects);
+    return objs === undefined ? undefined : objs ? [...parts, objs] : parts;
+  }
+  // (the latest asked for, also while it is learned)
+  private previewMemo: { render: LevelRender | null; sig: string; part: PreviewPart | null | undefined } = { render: null, sig: '', part: undefined };
+  private objectsPreview(objects: LevelObject[]): PreviewPart | null | undefined {
+    const sig = JSON.stringify([this.mode, objects.map((o) => ({ ...o, uid: 0 }))]), m = this.previewMemo;
+    if (m.render === this.render && m.sig === sig) return m.part;
+    const l2 = this.mode === 'l2', rom = this.rom, base = this.currentObjects();
+    const lv: Level = l2 ? { ...this.level, layer2Objects: [...base, ...objects] } : { ...this.level, objects: [...base, ...objects] };
+    const ov = this.buildOverrides(lv), g = l2 ? this.images.geom2 : this.images.geom1;
+    if (!g) return null;
+    const map = l2 ? this.offsetToTile2 : this.offsetToTile1, keys = objects.map((_, i) => this.objectKey(l2, base.length + i));
+    const pic = this.learner.learn(`pp1:${lv.number}:${l2 ? 2 : 1}`, function* (emu) {
+      const r = emu.load(lv.number, ov);
+      if (!r.ok) return null;
+      const tiles = new Set<number>();
+      for (const k of keys) for (const off of r.touched.get(k) ?? []) if (map[off] >= 0) tiles.add(map[off]);
+      return renderLayerTiles(rom, r, g, l2, [...tiles]);
+    }, { input: inputHash(this.levelInput(ov)), lane: 'placement', replace: true, keep: 'memory', done: this.previewLearned });
+    const part = pic && { x: pic.x0 * 16, y: pic.y0 * 16, img: thumbCanvas(pic) };
+    this.previewMemo = { render: this.render, sig, part };
+    return part;
+  }
+  private previewLearned = () => { this.previewMemo.render = null; this.emit('placement-preview'); };
+
+  // the palette item chosen in the palette: the level's selection cleared (it would be copied by a right click)
+  choosePaletteItem(p: PaletteItem): void {
+    this.paletteItem = p;
+    if (this.selection.size) { this.selection.clear(); this.emit('change'); }
+    this.emit('palette-item');
+  }
+  // no palette item any more
+  clearPaletteItem(): void {
+    if (!this.paletteItem) return;
+    this.paletteItem = null;
+    this.emit('palette-item');
+  }
+
   // copies of the items with their upper left at tile (tx, ty), selected
   private placeCopy(items: (LevelObject | LevelSprite)[], tx: number, ty: number): void {
     if (!items.length) return;
-    this.editLevel(() => {
-      const minX = Math.min(...items.map((o) => o.x)), minY = Math.min(...items.map((o) => o.y));
-      const sel = new Set<number>();
-      for (const it of items) {
-        const c = { ...structuredClone(it), uid: newUid(), x: it.x - minX + tx, y: it.y - minY + ty };
-        this.clampObject(c);
-        sel.add(c.uid);
-        if (this.mode === 'spr') this.level.sprites.push(c as LevelSprite);
-        else this.currentObjects().push(c as LevelObject);
-      }
-      this.selection = sel;
-    });
+    this.editLevel(() => this.add(this.copiesAt(items, tx, ty)));
     if (this.mode !== 'l1' && this.mode !== 'l2') return;
     const pasted = this.selectedObjects();
     const hint = this.pastes.paste(pasted);

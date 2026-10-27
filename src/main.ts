@@ -117,6 +117,10 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   const levels = new LevelList(app);
   const palette = new Palette(app);
   const props = new Properties(app);
+  app.on('properties', () => {
+    props.root.scrollIntoView({ block: 'nearest' });
+    props.root.querySelector<HTMLElement>('input, select, textarea, button')?.focus();
+  });
 
   let workspace: 'level' | 'ow' | 'gfx' = 'level';
   let ow: OverworldView | null = null;
@@ -407,7 +411,13 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     if (ctrl && k.toLowerCase() === 'd') { e.preventDefault(); app.duplicateSelection(); return; }
     if (ctrl && k.toLowerCase() === 'a') { e.preventDefault(); const items = app.mode === 'spr' ? app.level.sprites : app.currentObjects(); app.selection = new Set(items.map((o) => o.uid)); app.emit('change'); return; }
     if (k === 'Delete' || k === 'Backspace') { app.deleteSelection(); return; }
-    if (k === 'Escape') { app.selection.clear(); app.emit('change'); return; }
+    // Esc: a drag cancelled, else the selection cleared, else the palette item
+    if (k === 'Escape') {
+      if (view.cancelDrag()) return;
+      if (app.selection.size) { app.selection.clear(); app.emit('change'); } else app.clearPaletteItem();
+      return;
+    }
+    if (k === 'ContextMenu' || (k === 'F10' && e.shiftKey)) { e.preventDefault(); view.keyMenu(); return; }
     if (k === '1') app.setMode('l1');
     else if (k === '2') app.setMode('l2');
     else if (k === '3') app.setMode('spr');
@@ -530,7 +540,9 @@ function showHelp(): void {
       ['Click · Ctrl+click · Alt+click', 'Select · add to selection · element underneath'],
       ['Drag', 'Move selection / drag a selection box'],
       ['Handle at bottom right', 'Resize object'],
-      ['Right click / Shift+click', 'Place the element chosen in “Insert”'],
+      ['Right click / Shift+click', 'Place the element chosen in “Insert” (shown at the mouse) or a copy of the selection'],
+      ['Right click on the selection or with nothing chosen · Menu key / Shift+F10', 'Context menu'],
+      ['Click into nothing', 'Deselect all and clear the element chosen in “Insert”'],
       ['BG: click/drag · right click/Shift+click', 'Pick up tile(s) as brush · paint'],
       ['Ctrl+click on a Map16/BG tile in “Insert”', 'Go to definition: the tile in the Map16 tab of the graphics area'],
       ['Ins / I', 'Insert object/sprite by number (at the mouse)'],
@@ -539,7 +551,7 @@ function showHelp(): void {
       ['Arrow keys · Alt+arrow keys', 'Move selection by 1 tile · resize'],
       ['+ / - · * / /', 'Change width · change height'],
       ['Del / Backspace', 'Delete selection'],
-      ['Ctrl+A · Esc', 'Select all · deselect'],
+      ['Ctrl+A · Esc', 'Select all · cancel dragging, deselect, then clear the element chosen in “Insert”'],
       ['Ctrl+C / Ctrl+V / Ctrl+D', 'Copy / paste at the mouse / duplicate'],
       ['PgUp / PgDn', 'Bring to front / send to back (drawing order)'],
       ['H · G · C', 'Level header · grid on/off · collision overlay on/off'],

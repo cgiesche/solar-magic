@@ -60,6 +60,18 @@ _Avoid_: tileset group (the tilesets sharing Map16 tileset tiles, learned apart,
 A reusable block of Map16 tiles (at most 64x64, cells may be transparent, tiles may be conditional) stored in the ROM under a number 00–FF and placed in a level as one object, extended object $04 with the number as 4th byte (prefabs.ts, the editor patch SMWS). Made from the selected objects, or from a suggestion (prefabsuggest.ts: an arrangement of Direct Map16 objects repeated across the levels that a prefab would make smaller, with all its places replaced); a change to it applies in every level that places it, deleting it deletes its objects in every level, "Break up" turns a placed one back into Direct Map16 objects. A `.smwlevel` file carries the prefabs its level uses.
 _Avoid_: structure (the old name), custom object (ObjecTool's ASM objects), stamp (that is the Map16 builder's), collection (Lunar Magic's Custom Collections of Objects are copies without a link)
 
+**Palette item**:
+What the palette's "Insert" has chosen for a right click (or Shift+click) in layer 1/2 and sprites to place: an object, a block of Map16 tiles, a prefab or a sprite – or none. Choosing one in the palette clears the level's selection; a single item selected in the level becomes it (shown in its tab). A click into nothing (no item of a shown layer there, not dragged, without Ctrl) clears it with the selection, so does Esc once the selection is clear. Without one – and on the selection – the right click opens the level's context menu.
+_Avoid_: brush (BG and layer 3 paint with one, never empty), current object, ghost (the view's ghosted other layer)
+
+**Selection copy**:
+What a right click places instead of the palette item when the level's selection was picked after it (a click, a box, or the item just placed): a copy of the selected items with their upper left at the mouse. A right click on the selection itself opens the context menu instead.
+_Avoid_: stamp (that is the Map16 builder's), duplicate (Ctrl+D, one tile down-right)
+
+**Placement preview**:
+What a right click at the mouse would place, drawn translucent at the tile under it: the palette item or the selection copy, objects as the level's load draws them there with them added (emulated in the background; meanwhile the last one known follows the mouse), sprites with their images. Not shown over the selection or while dragging.
+_Avoid_: ghost (the view's ghosted other layer), cursor image
+
 **Level edit**:
 A change of the open level in memory: its own undo step, written to the ROM when the level is saved (before every ROM edit, when another level is opened, or by hand).
 

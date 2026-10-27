@@ -155,6 +155,7 @@ export class Palette {
     app.on('probes', () => { if (this.tab === 'm16') this.m16Tip(); else this.build(); });
     app.on('render', () => { if (isBrushMode(app.mode)) this.build(); });
     app.on('change', () => { this.followSelection(); this.prefabSelection(); });
+    app.on('palette-item', () => this.build());
     app.on('prefabs', () => { if (this.tab === 'obj') this.build(); });
     app.on('object-names', () => { if (this.tab === 'obj') this.build(); });
     app.on('prefab-suggestions', () => { if (this.tab === 'obj') this.build(); });
@@ -305,10 +306,9 @@ export class Palette {
       observer.observe(c);
       // click picks a tile, dragging picks a rectangle of tiles
       attachRectPick(c, 16, 16, (r) => draw(r.x, r.y, r.w, r.h), (r) => {
-        app.paletteItem = { kind: 'obj', num: 0, ext: DM16_EXT, size: 0, tile: base + r.y * 16 + r.x, ...(r.w * r.h > 1 ? { block: { w: r.w, h: r.h } } : {}) };
         this.m16Match = null;
         if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1');
-        this.build();
+        app.choosePaletteItem({ kind: 'obj', num: 0, ext: DM16_EXT, size: 0, tile: base + r.y * 16 + r.x, ...(r.w * r.h > 1 ? { block: { w: r.w, h: r.h } } : {}) });
       }, (x, y) => app.editMap16(base + y * 16 + x));
       c.addEventListener('mousemove', (e) => {
         const rc = c.getBoundingClientRect();
@@ -345,7 +345,7 @@ export class Palette {
     for (const [n, st] of all) {
       const row = h('div', {
         class: `pal-row${n === curN ? ' selected' : ''}`, title: `Prefab ${hex2(n)}: ${st.name || '(unnamed)'}, ${st.w}×${st.h}`,
-        onclick: () => { app.paletteItem = { kind: 'obj', num: 0, ext: PREFAB_EXT, size: 0, prefab: n }; if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1'); this.build(); },
+        onclick: () => { if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1'); app.choosePaletteItem({ kind: 'obj', num: 0, ext: PREFAB_EXT, size: 0, prefab: n }); },
       }, h('span', { class: 'pal-thumb-s prefab' }, prefabCanvas(sheet, st)), h('span', { class: 'num' }, hex2(n)),
         h('span', { class: 'grow' }, st.name || '(unnamed)', h('span', { class: 'hint' }, ` ${st.w}×${st.h}`)),
         h('button', { class: 'icon-btn', title: 'Rename', 'aria-label': 'Rename', onclick: (e: Event) => { e.stopPropagation(); renamePrefab(app, n, st); } }, '✎'),
@@ -565,9 +565,8 @@ export class Palette {
     const app = this.app;
     if (tab === 'spr' ? app.mode !== 'spr' : app.mode !== 'l1' && app.mode !== 'l2') app.setMode(tab === 'spr' ? 'spr' : 'l1');
     this.tab = tab;
-    app.paletteItem = item;
     this.m16Match = null;
-    this.build();
+    app.choosePaletteItem(item);
     requestAnimationFrame(() => this.scrollToSelected());
   }
 
@@ -709,7 +708,7 @@ export class Palette {
       const img = app.spriteThumbs?.get(e.id);
       this.body.appendChild(h('div', {
         class: `pal-row${sel ? ' selected' : ''}`, title: e.title,
-        onclick: () => { app.paletteItem = e.item; if (app.mode !== 'spr') app.setMode('spr'); this.build(); app.emit('palette-item'); },
+        onclick: () => { if (app.mode !== 'spr') app.setMode('spr'); app.choosePaletteItem(e.item); },
       }, h('span', { class: 'pal-thumb-s' }, img ? cloneCanvas(img) : ''), h('span', { class: 'num' }, e.num), e.name,
         e.id >= 0x200 && app.customSprite(e.id) && !app.spriteUsers(e.id).length ? h('span', { class: 'gt-unused', title: 'Inserted, but in no level' }, 'unused') : '',
         itemBadge(app, e.items, 'pal-items-row')));
@@ -732,9 +731,8 @@ export class Palette {
           class: `pal-cell${sel ? ' selected' : ''}`, title: `${e.title}\nRight click: rename`,
           oncontextmenu: (ev: Event) => { ev.preventDefault(); renameObject(app, s.num, s.ext); },
           onclick: () => {
-            app.paletteItem = e.item;
             if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1');
-            this.build();
+            app.choosePaletteItem(e.item);
           },
         }, h('div', { class: 'pal-img' }, e.th ? cloneCanvas(e.th) : h('span', { class: 'none' }, '–'),
           h('div', { class: 'pal-corner' }, itemBadge(app, e.items), e.enter ? h('div', { class: 'pal-enter', title: enterText(e.enter) }, e.enter) : '')),
