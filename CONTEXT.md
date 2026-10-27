@@ -61,7 +61,7 @@ A reusable block of Map16 tiles (at most 64x64, cells may be transparent, tiles 
 _Avoid_: structure (the old name), custom object (ObjecTool's ASM objects), stamp (that is the Map16 builder's), collection (Lunar Magic's Custom Collections of Objects are copies without a link)
 
 **Picker**:
-The panel beside the level or the overworld that something to place or paint is chosen from: in a level objects, prefabs, Map16 tiles and sprites (layer 1/2 and sprites), BG and layer 3 tiles; in the overworld its tiles and sprites. Its pictures are drawn at whole numbers of screen pixels per pixel only (also on a screen scaled by 125 %), as large as its width allows for fixed grids (a Map16 page keeps its 16 columns); below 3× the hovered entry is shown enlarged beside it.
+The panel beside the level or the overworld that something to place or paint is chosen from: in a level objects, prefabs, Map16 tiles and sprites (layer 1/2 and sprites), BG and layer 3 tiles; in the overworld its tiles and sprites. Its pictures keep their pixels of one size: fixed grids fill its width (a Map16 page keeps its 16 columns), drawn at the next whole number of screen pixels per pixel above it and shrunk smoothly; single images at whole numbers of screen pixels; below 3× the hovered entry is shown enlarged beside it.
 _Avoid_: palette (that is colors), Insert panel, tile selector
 
 **Picked item**:

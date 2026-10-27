@@ -1,7 +1,8 @@
-// How pickers draw their pictures: at whole numbers of screen pixels per pixel only (no uneven pixels, also on a
-// screen scaled by 125 % or 150 %), fixed grids as large as the picker's width allows, single images at most 2×
-// in their box; below 3× the hovered entry is shown enlarged beside the picker (showPickerPreview), on the
-// level's side so the picker stays free. Sizes are in CSS pixels per pixel, a whole number of screen pixels.
+// How pickers draw their pictures without uneven pixels: fixed grids fill the picker's width, drawn at the next
+// whole number of screen pixels per pixel above it and shrunk to it smoothly (sharp bilinear: pixels of one size,
+// their edges a little soft unless the width is a whole number of them); single images at whole numbers of screen
+// pixels, at most 2× in their box. Below 3× the hovered entry is shown enlarged beside the picker
+// (showPickerPreview), on the level's side so the picker stays free. Sizes are in CSS pixels per pixel.
 import { h } from './dom.ts';
 
 // pickers below this size get the hover preview
@@ -9,12 +10,10 @@ export const PREVIEW_BELOW = 3;
 
 const dpr = () => window.devicePixelRatio || 1;
 
-// screen pixels per pixel at a size
-export const screenPixels = (scale: number) => Math.max(1, Math.round(scale * dpr()));
-
-// the largest size of a grid `native` pixels wide in `avail` pixels (at least one screen pixel per pixel)
-export function wholeScale(avail: number, native: number): number {
-  return Math.max(1, Math.floor((avail * dpr()) / native)) / dpr();
+// the screen pixels per pixel a grid `native` pixels wide filling `avail` pixels is drawn at (CSS class
+// sheet-fill shrinks it to the width): the next whole number above, at least 1
+export function fillPixels(avail: number, native: number): number {
+  return Math.max(1, Math.ceil((avail * dpr()) / native - 1e-6));
 }
 
 // the size of a w×h image in a maxW×maxH box: up to `max`, or 1/2, 1/3 … of a screen pixel when it is larger
@@ -115,9 +114,9 @@ export function previewSheet(c: HTMLCanvasElement, sheet: () => CanvasImageSourc
 // ---------------- side panel width ----------------
 const SIDE_W = 'side-width-'; // + workspace (localStorage)
 const SIDE_MIN = 330;
-// by default as wide as a Map16 page at 2× (rounded up to whole screen pixels) needs with the panel's padding and
-// scroll bar, while the level keeps most of the window
-const sideDefault = () => Math.max(SIDE_MIN, Math.min(Math.ceil((256 * Math.ceil(2 * dpr() - 1e-6)) / dpr()) + 34, Math.round(innerWidth * 0.35)));
+// by default as wide as a Map16 page at 2× needs with the panel's padding and scroll bar, while the level keeps
+// most of the window
+const sideDefault = () => Math.max(SIDE_MIN, Math.min(512 + 34, Math.round(innerWidth * 0.35)));
 const sideMax = () => Math.max(SIDE_MIN, innerWidth - 190 - 360);
 
 // the handle at the side panel's left edge of `layout` (a grid whose last column is the side panel, its width

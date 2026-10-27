@@ -230,6 +230,8 @@ kbd { background: #181a1f; border: 1px solid var(--border); border-radius: 3px; 
 .ent-detail { width: 360px; display: flex; flex-direction: column; gap: 6px; }
 .modal-body h3 { margin: 12px 0 6px; font-size: 12px; text-transform: uppercase; color: var(--muted); }
 .m16-pick { image-rendering: pixelated; cursor: crosshair; display: block; }
+/* a picker's fixed grid drawn at whole screen pixels per pixel above its width, shrunk to it smoothly (pickerview.ts) */
+canvas.sheet-fill { width: 100%; height: auto; image-rendering: auto; }
 .grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px 14px; } .grid4 .prop label { width: 36px; }
 .ow-side { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .ow-pal-panel { flex: 1; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; }

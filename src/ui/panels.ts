@@ -7,7 +7,7 @@ import { defaultObjectName, namedPerTable } from '../core/objectnames.ts';
 import { NAME_MAX, nameOf, namesOf, nameGroups, connectedRect, tileRanges, type NameKind } from '../core/usernames.ts';
 import { objectVariant, withObjectVariant, type ObjKind } from '../core/objkinds.ts';
 import { thumbCanvas, objKey, type ObjSpec, type ObjThumb } from './thumbs.ts';
-import { wholeScale, fitScale, sized, screenPixels, previewOnHover, previewSheet, hidePickerPreview, PREVIEW_BELOW } from './pickerview.ts';
+import { fillPixels, fitScale, sized, previewOnHover, previewSheet, hidePickerPreview, PREVIEW_BELOW } from './pickerview.ts';
 import { newUid, spriteId, spriteBytes, spriteSizes, type LevelObject, type LevelSprite } from '../core/level.ts';
 import { levelName } from '../core/overworld.ts';
 import { usedInList } from './usedin.ts';
@@ -139,7 +139,7 @@ export class Picker {
   thumbTiles = new Map<string, number[]>(); // Map16 tiles per object key
   thumbsFrom: ObjThumb[] | undefined; // the thumbnails shown (undefined: placeholders while they are learned)
   tabs: HTMLDivElement;
-  builtScale = 0; // the size the sheet shown is drawn at (0: no sheet)
+  builtPixels = 0; // the screen pixels per pixel the sheet shown is drawn at (0: no sheet)
 
   constructor(app: App) {
     this.app = app;
@@ -148,8 +148,8 @@ export class Picker {
     this.root = h('div', { class: 'panel picker' }, h('div', { class: 'panel-title' }, 'Picker', h('span', { class: 'hint' }, 'Right click/Shift+click places')), this.tabs,
       this.m16Bar, this.body);
     this.body.addEventListener('scroll', () => this.m16Scrolled());
-    // a sheet is drawn anew when the picker's width allows another size
-    new ResizeObserver(() => requestAnimationFrame(() => { if (this.builtScale && this.sheetScale() !== this.builtScale) this.build(); })).observe(this.body);
+    // a sheet follows the picker's width, drawn anew when it needs other screen pixels per pixel
+    new ResizeObserver(() => requestAnimationFrame(() => { if (this.builtPixels && this.sheetPixels() !== this.builtPixels) this.build(); })).observe(this.body);
     app.on('level', () => { this.ensureThumbs(); this.build(); });
     // the thumbnails of the level as edited: asked for whenever they may have changed, the learner decides
     for (const ev of ['objkinds', 'level-header', 'render', 'rom-change', 'thumbs'] as const) app.on(ev, () => { if (this.ensureThumbs() && this.tab === 'obj') this.build(); });
@@ -282,11 +282,10 @@ export class Picker {
       }
     }, { root: this.body, rootMargin: '300px 0px' });
     this.m16Observer = observer;
-    // drawn at the screen's pixels, shown at the size
-    const scale = this.builtScale = this.sheetScale(), k = screenPixels(scale), S = 16 * k;
+    const k = this.builtPixels = this.sheetPixels(), S = 16 * k, scale = this.sheetShown();
     for (let p = 0; p < pages; p++) {
       const base = p * 256;
-      const c = sized(h('canvas', { width: 256 * k, height: 256 * k, class: 'm16-pick', 'data-page': String(p) }), scale / k);
+      const c = h('canvas', { width: 256 * k, height: 256 * k, class: 'm16-pick sheet-fill', 'data-page': String(p) });
       const ctx = c.getContext('2d')!;
       ctx.imageSmoothingEnabled = false;
       let sheet: HTMLCanvasElement | null = null;
@@ -391,8 +390,8 @@ export class Picker {
     // a brush that is a rectangle of the sheet is outlined there, one picked from the level is shown separately
     const onSheet = t0 >= 0 && t0 < 0x200 && (t0 & 15) + brush.w <= 16 && (t0 >> 4) + brush.h <= 32
       && brush.tiles.every((t, i) => t === brush.tiles[0] + Math.floor(i / brush.w) * 16 + (i % brush.w));
-    const scale = this.builtScale = this.sheetScale(), k = screenPixels(scale), S = 16 * k;
-    const c = sized(h('canvas', { width: 256 * k, height: 512 * k, class: 'm16-pick', title: 'Click/drag: tile(s) as brush · Ctrl+click: edit in the Map16 tab' }), scale / k);
+    const k = this.builtPixels = this.sheetPixels(), S = 16 * k, scale = this.sheetShown();
+    const c = h('canvas', { width: 256 * k, height: 512 * k, class: 'm16-pick sheet-fill', title: 'Click/drag: tile(s) as brush · Ctrl+click: edit in the Map16 tab' });
     const ctx = c.getContext('2d')!;
     ctx.imageSmoothingEnabled = false;
     const draw = (x: number, y: number, w: number, hh: number) => {
@@ -448,8 +447,8 @@ export class Picker {
     // a brush that is a rectangle of the sheet (one palette, priority, no flips) is outlined there
     const onSheet = !(attr & (L3_FLIP_X | L3_FLIP_Y)) && (w0 & L3_TILE) < 0x200 && (w0 & 15) + b.w <= 16
       && b.tiles.every((t, i) => t === w0 + Math.floor(i / b.w) * 16 + (i % b.w));
-    const scale = this.builtScale = this.sheetScale(), S = screenPixels(scale);
-    const c = sized(h('canvas', { width: 128 * S, height: 256 * S, class: 'm16-pick', title: 'Click/drag: tile(s) as brush' }), scale / S);
+    const S = this.builtPixels = this.sheetPixels(), scale = this.sheetShown();
+    const c = h('canvas', { width: 128 * S, height: 256 * S, class: 'm16-pick sheet-fill', title: 'Click/drag: tile(s) as brush' });
     const ctx = c.getContext('2d')!;
     ctx.imageSmoothingEnabled = false;
     const sheet = document.createElement('canvas');
@@ -694,16 +693,19 @@ export class Picker {
     return [prefabs, objects('obj', 'Resizable objects'), objects('ext', 'Fixed-size objects'), map16, named, sprites];
   }
 
-  // the size the sheet of the current tab or brush mode fits the picker's width at (layer 3's 8x8 tiles: half
-  // as wide as the Map16 pages)
-  sheetScale(): number {
-    return wholeScale(this.body.clientWidth, this.app.mode === 'l3' ? 128 : 256);
+  // the sheet of the current tab or brush mode fills the picker's width (layer 3's 8x8 tiles: half as wide as
+  // the Map16 pages): the screen pixels per pixel it is drawn at, the size it is shown at
+  sheetPixels(): number {
+    return fillPixels(this.body.clientWidth, this.app.mode === 'l3' ? 128 : 256);
+  }
+  sheetShown(): number {
+    return this.body.clientWidth / (this.app.mode === 'l3' ? 128 : 256);
   }
 
   build(): void {
     const app = this.app;
     hidePickerPreview(this.body);
-    this.builtScale = 0;
+    this.builtPixels = 0;
     clear(this.tabs);
     const brush = isBrushMode(app.mode);
     this.m16Bar.style.display = !brush && this.tab === 'm16' ? '' : 'none';
