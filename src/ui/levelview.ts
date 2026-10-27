@@ -88,7 +88,8 @@ export class LevelView {
     this.ctx = this.canvas.getContext('2d')!;
     this.levelCanvas = document.createElement('canvas');
     this.scroller.addEventListener('scroll', () => this.paint());
-    new ResizeObserver(() => this.layout()).observe(this.scroller);
+    // next frame: layout() resizes the canvas inside the observed scroller (no ResizeObserver loop error)
+    new ResizeObserver(() => requestAnimationFrame(() => this.layout())).observe(this.scroller);
     this.scroller.addEventListener('mousedown', (e) => this.onDown(e));
     window.addEventListener('mousemove', (e) => this.onMove(e));
     window.addEventListener('mouseup', (e) => this.onUp(e));

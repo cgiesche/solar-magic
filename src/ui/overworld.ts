@@ -156,7 +156,8 @@ export class OverworldView {
       h('div', { class: 'panel-title' }, 'Level tiles', this.tlCount), this.tlList));
     this.root = h('div', { class: 'center' }, h('div', { class: 'level-view' }, this.scroller, this.eventsBadge), this.timeline, this.status);
     this.scroller.addEventListener('scroll', () => this.paint());
-    new ResizeObserver(() => this.layout()).observe(this.scroller);
+    // next frame: layout() resizes the canvas inside the observed scroller (no ResizeObserver loop error)
+    new ResizeObserver(() => requestAnimationFrame(() => this.layout())).observe(this.scroller);
     // the paint sheet follows the panel's width, drawn anew when it needs other screen pixels per pixel
     new ResizeObserver(() => requestAnimationFrame(() => { if (this.palPixels && fillPixels(this.palWidth(), this.mode === 'l1' ? 256 : 128) !== this.palPixels) this.buildSide(); })).observe(this.palPanel);
     this.scroller.addEventListener('contextmenu', (e) => e.preventDefault());

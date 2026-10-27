@@ -33,7 +33,8 @@ import { NavHistory, fromHash, type NavLoc } from './ui/navhistory.ts';
 const root = document.getElementById('app')!;
 
 // errors nobody caught would otherwise only show up in the dev console
-window.addEventListener('error', (e) => log(`Unexpected error: ${e.message}`, 'error'));
+// “ResizeObserver loop …” is only the browser's notice that it moved some resize notifications to the next frame – nothing failed
+window.addEventListener('error', (e) => { if (!e.message.startsWith('ResizeObserver loop')) log(`Unexpected error: ${e.message}`, 'error'); });
 window.addEventListener('unhandledrejection', (e) => log(`Unexpected error: ${e.reason instanceof Error ? e.reason.message : e.reason}`, 'error'));
 
 // the start page is static HTML in index.html (readable for search engines); kept to show it again after “Close project”

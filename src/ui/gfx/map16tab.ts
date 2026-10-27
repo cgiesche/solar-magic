@@ -810,12 +810,12 @@ export class Map16Tab implements WsPanel {
     attachPanZoom(this.bigScroll, () => this.bigZoom(), (z, ax, ay) => this.setBigZoom(z, ax, ay), 0.5, 32);
     // the column follows the window while fitted
     let lastW = 0;
-    new ResizeObserver(() => {
+    new ResizeObserver(() => requestAnimationFrame(() => {
       const w = this.bigScroll.clientWidth;
       if (w === lastW) return;
       lastW = w;
       if (this.visible && this.bzoom === null && !this.remapping) this.drawBig();
-    }).observe(this.bigScroll);
+    })).observe(this.bigScroll);
   }
   // the quarter under the mouse in the builder
   private quarterUnder(e: MouseEvent): { x: number; y: number } {
@@ -1380,12 +1380,12 @@ export class Map16Tab implements WsPanel {
     const c = this.gfxCanvas;
     attachPanZoom(this.gfxScroll, () => this.gfxZoom(), (z, ax, ay) => this.setGfxZoom(z, ax, ay), 1, 8);
     let lastW = 0;
-    new ResizeObserver(() => {
+    new ResizeObserver(() => requestAnimationFrame(() => {
       const w = this.gfxScroll.clientWidth;
       if (w === lastW) return;
       lastW = w;
       if (this.visible && this.gzoom === null) this.drawGfx();
-    }).observe(this.gfxScroll);
+    })).observe(this.gfxScroll);
     const cell = (e: MouseEvent) => {
       const rc = c.getBoundingClientRect();
       return {
