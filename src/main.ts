@@ -11,7 +11,7 @@ import { LogBar } from './ui/logbar.ts';
 import { pasteHintBox } from './ui/pastehint.ts';
 import { kvGet, kvSet, kvDel, kvClear, saveRom, romFromRecord, type RomRecord } from './ui/storage.ts';
 import { LevelView } from './ui/levelview.ts';
-import { LevelList, Palette, Properties } from './ui/panels.ts';
+import { LevelList, Picker, Properties } from './ui/panels.ts';
 import { openSearch } from './ui/search.ts';
 import { openHeaderDialog } from './ui/headerdialog.ts';
 import { hex } from './core/names.ts';
@@ -115,7 +115,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   const status = h('div', { class: 'statusbar' });
   const view = new LevelView(app, status);
   const levels = new LevelList(app);
-  const palette = new Palette(app);
+  const picker = new Picker(app);
   const props = new Properties(app);
   app.on('properties', () => {
     props.root.scrollIntoView({ block: 'nearest' });
@@ -147,7 +147,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   // ---- app bar: menus, workspace switcher, main actions
   const testHere = () => { const hv = view.hover; openTestPlay(app, hv ? { tx: hv.tx, ty: hv.ty } : undefined); };
   // central search (Ctrl+F or Ctrl+Space): a result is shown in the level workspace
-  const search = () => openSearch(palette.searchProviders().map((p) => ({
+  const search = () => openSearch(picker.searchProviders().map((p) => ({
     ...p, search: (terms) => p.search(terms).map((r) => ({ ...r, pick: () => void setWorkspace('level').then((ok) => { if (ok) r.pick(); }) })),
   })));
   const insertHere = () => { const hv = view.hover, c = view.centerTile(); openInsertDialog(app, hv ? hv.tx : c.tx, hv ? hv.ty : c.ty); };
@@ -254,7 +254,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
 
   const left = h('div', { class: 'left' }, levels.root);
   const center = h('div', { class: 'center' }, view.root, status);
-  const right = h('div', { class: 'right' }, palette.root, props.root);
+  const right = h('div', { class: 'right' }, picker.root, props.root);
   const logBar = new LogBar();
   const busy = busyIndicator(app);
   const pasteHint = pasteHintBox(app);
@@ -411,10 +411,10 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     if (ctrl && k.toLowerCase() === 'd') { e.preventDefault(); app.duplicateSelection(); return; }
     if (ctrl && k.toLowerCase() === 'a') { e.preventDefault(); const items = app.mode === 'spr' ? app.level.sprites : app.currentObjects(); app.selection = new Set(items.map((o) => o.uid)); app.emit('change'); return; }
     if (k === 'Delete' || k === 'Backspace') { app.deleteSelection(); return; }
-    // Esc: a drag cancelled, else the selection cleared, else the palette item
+    // Esc: a drag cancelled, else the selection cleared, else the picked item
     if (k === 'Escape') {
       if (view.cancelDrag()) return;
-      if (app.selection.size) { app.selection.clear(); app.emit('change'); } else app.clearPaletteItem();
+      if (app.selection.size) { app.selection.clear(); app.emit('change'); } else app.clearPickedItem();
       return;
     }
     if (k === 'ContextMenu' || (k === 'F10' && e.shiftKey)) { e.preventDefault(); view.keyMenu(); return; }

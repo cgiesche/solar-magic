@@ -376,7 +376,7 @@ export class Map16Tab implements WsPanel {
     }, { root: this.scroll, rootMargin: '300px 0px' });
     for (let p = 0; p < EXT_TILES / 256; p++) {
       const c = h('canvas', { class: 'mt-sheet', width: 256 * Z + M, height: 256 * Z });
-      const head = h('div', { class: 'pal-head' });
+      const head = h('div', { class: 'picker-head' });
       this.pages.push(c);
       this.heads.push(head);
       this.dirty.add(p);

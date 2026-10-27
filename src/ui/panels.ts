@@ -1,6 +1,6 @@
-// Sidebar panels: level list, palette (objects / sprites), properties.
+// Sidebar panels: level list, picker (objects / sprites), properties.
 
-import { isBrushMode, type App, type PaletteItem } from './app.ts';
+import { isBrushMode, type App, type PickedItem } from './app.ts';
 import { h, clear, hexInput, checkbox, attachRectPick, modal, toast, emptyState } from './dom.ts';
 import { spriteName, hex2, hex3 } from '../core/names.ts';
 import { defaultObjectName, namedPerTable } from '../core/objectnames.ts';
@@ -119,16 +119,16 @@ export class LevelList {
   }
 }
 
-// ---------------- palette ----------------
-type PaletteTab = 'obj' | 'm16' | 'spr';
+// ---------------- picker ----------------
+type PickerTab = 'obj' | 'm16' | 'spr';
 
-export class Palette {
+export class Picker {
   app: App;
   root: HTMLDivElement;
   body: HTMLDivElement;
   // Objects: the user's prefabs, the standard (resizable) and the extended (fixed size) objects in one list
-  tab: PaletteTab = 'obj';
-  builtTab?: PaletteTab; // the tab the body shows (undefined: a brush mode's sheet)
+  tab: PickerTab = 'obj';
+  builtTab?: PickerTab; // the tab the body shows (undefined: a brush mode's sheet)
   scrolls = { obj: 0, m16: 0, spr: 0 }; // scroll position of each tab's list, kept across rebuilds and tab changes
   prefabBox: HTMLDivElement = h('div'); // the Prefabs section
   // its button and hint, which follow the selection without a rebuild
@@ -141,9 +141,9 @@ export class Palette {
 
   constructor(app: App) {
     this.app = app;
-    this.body = h('div', { class: 'palette-body' });
+    this.body = h('div', { class: 'picker-body' });
     this.tabs = h('div', { class: 'tabs seg' });
-    this.root = h('div', { class: 'panel palette' }, h('div', { class: 'panel-title' }, 'Insert', h('span', { class: 'hint' }, 'Right click/Shift+click places')), this.tabs,
+    this.root = h('div', { class: 'panel picker' }, h('div', { class: 'panel-title' }, 'Picker', h('span', { class: 'hint' }, 'Right click/Shift+click places')), this.tabs,
       this.m16Bar, this.body);
     this.body.addEventListener('scroll', () => this.m16Scrolled());
     app.on('level', () => { this.ensureThumbs(); this.build(); });
@@ -155,7 +155,7 @@ export class Palette {
     app.on('probes', () => { if (this.tab === 'm16') this.m16Tip(); else this.build(); });
     app.on('render', () => { if (isBrushMode(app.mode)) this.build(); });
     app.on('change', () => { this.followSelection(); this.prefabSelection(); });
-    app.on('palette-item', () => this.build());
+    app.on('picked-item', () => this.build());
     app.on('prefabs', () => { if (this.tab === 'obj') this.build(); });
     app.on('object-names', () => { if (this.tab === 'obj') this.build(); });
     app.on('prefab-suggestions', () => { if (this.tab === 'obj') this.build(); });
@@ -166,7 +166,7 @@ export class Palette {
     });
   }
 
-  // an item selected in the level becomes the palette item, shown in its tab and scrolled into view
+  // an item selected in the level becomes the picked item, shown in its tab and scrolled into view
   followed = -1;
   followSelection(): void {
     const app = this.app;
@@ -174,7 +174,7 @@ export class Palette {
     if (uid === this.followed) return;
     this.followed = uid;
     if (uid < 0 || app.mode === 'bg' || app.mode === 'exit') return;
-    let item: PaletteItem;
+    let item: PickedItem;
     if (app.mode === 'spr') {
       const s = app.selectedSprites()[0];
       if (!s) return;
@@ -198,9 +198,9 @@ export class Palette {
         this.tab = 'obj';
       }
     }
-    const cur = app.paletteItem;
+    const cur = app.pickedItem;
     if (cur && JSON.stringify(cur) === JSON.stringify(item) && this.body.querySelector('.selected')) return; // e.g. just inserted
-    app.paletteItem = item;
+    app.pickedItem = item;
     this.build();
     requestAnimationFrame(() => this.scrollToSelected()); // after the properties panel below has updated
   }
@@ -208,7 +208,7 @@ export class Palette {
   scrollToSelected(): void {
     const el = this.body.querySelector<HTMLElement>('.selected');
     if (el) { el.scrollIntoView({ block: 'nearest' }); return; }
-    const cur = this.app.paletteItem;
+    const cur = this.app.pickedItem;
     if (cur?.kind !== 'obj' || cur.tile === undefined) return;
     this.scrollToM16Tile(cur.tile);
   }
@@ -248,7 +248,7 @@ export class Palette {
   }
   buildMap16(): void {
     const app = this.app;
-    const cur = app.paletteItem;
+    const cur = app.pickedItem;
     const curTile = cur?.kind === 'obj' && cur.num === 0 && cur.ext === DM16_EXT ? cur.tile ?? -1 : -1;
     const bw = cur?.kind === 'obj' && cur.block ? cur.block.w : 1, bh = cur?.kind === 'obj' && cur.block ? cur.block.h : 1;
     const pages = EXT_TILES / 256;
@@ -302,7 +302,7 @@ export class Palette {
       attachRectPick(c, 16, 16, (r) => draw(r.x, r.y, r.w, r.h), (r) => {
         this.m16Match = null;
         if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1');
-        app.choosePaletteItem({ kind: 'obj', num: 0, ext: DM16_EXT, size: 0, tile: base + r.y * 16 + r.x, ...(r.w * r.h > 1 ? { block: { w: r.w, h: r.h } } : {}) });
+        app.choosePickedItem({ kind: 'obj', num: 0, ext: DM16_EXT, size: 0, tile: base + r.y * 16 + r.x, ...(r.w * r.h > 1 ? { block: { w: r.w, h: r.h } } : {}) });
       }, (x, y) => app.editMap16(base + y * 16 + x));
       c.addEventListener('mousemove', (e) => {
         const rc = c.getBoundingClientRect();
@@ -310,7 +310,7 @@ export class Palette {
         const t = base + Math.min(15, y) * 16 + Math.min(15, x);
         if (t !== hoverTile || c !== hoverCanvas) { hoverTile = t; hoverCanvas = c; tip(); }
       });
-      this.body.append(h('div', { class: 'pal-head m16-page-head', 'data-page': String(p) }, `Page ${p.toString(16).toUpperCase()}`), c);
+      this.body.append(h('div', { class: 'picker-head m16-page-head', 'data-page': String(p) }, `Page ${p.toString(16).toUpperCase()}`), c);
     }
     // back to where the list was; the pages in view are drawn right away so nothing flickers
     this.body.scrollTop = this.scrolls.m16;
@@ -330,30 +330,30 @@ export class Palette {
   buildPrefabs(): void {
     const app = this.app, box = this.prefabBox;
     clear(box);
-    const cur = app.paletteItem;
+    const cur = app.pickedItem;
     const curN = cur?.kind === 'obj' && cur.num === 0 && cur.ext === PREFAB_EXT ? cur.prefab ?? -1 : -1;
-    box.append(h('div', { class: 'pal-head' }, 'Prefabs'), h('div', { class: 'row' }, this.prefabSave), this.prefabHint);
+    box.append(h('div', { class: 'picker-head' }, 'Prefabs'), h('div', { class: 'row' }, this.prefabSave), this.prefabHint);
     this.prefabSelection();
     const all = app.prefabs();
     const sheet = prefabTileSource(app);
     for (const [n, st] of all) {
       const row = h('div', {
-        class: `pal-row${n === curN ? ' selected' : ''}`, title: `Prefab ${hex2(n)}: ${st.name || '(unnamed)'}, ${st.w}×${st.h}`,
-        onclick: () => { if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1'); app.choosePaletteItem({ kind: 'obj', num: 0, ext: PREFAB_EXT, size: 0, prefab: n }); },
-      }, h('span', { class: 'pal-thumb-s prefab' }, prefabCanvas(sheet, st)), h('span', { class: 'num' }, hex2(n)),
+        class: `picker-row${n === curN ? ' selected' : ''}`, title: `Prefab ${hex2(n)}: ${st.name || '(unnamed)'}, ${st.w}×${st.h}`,
+        onclick: () => { if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1'); app.choosePickedItem({ kind: 'obj', num: 0, ext: PREFAB_EXT, size: 0, prefab: n }); },
+      }, h('span', { class: 'picker-thumb-s prefab' }, prefabCanvas(sheet, st)), h('span', { class: 'num' }, hex2(n)),
         h('span', { class: 'grow' }, st.name || '(unnamed)', h('span', { class: 'hint' }, ` ${st.w}×${st.h}`)),
         h('button', { class: 'icon-btn', title: 'Rename', 'aria-label': 'Rename', onclick: (e: Event) => { e.stopPropagation(); renamePrefab(app, n, st); } }, '✎'),
         h('button', { class: 'icon-btn', title: 'Delete', 'aria-label': 'Delete', onclick: (e: Event) => { e.stopPropagation(); deletePrefab(app, n, st); } }, '✕'));
       box.appendChild(row);
     }
     const sug = app.prefabSuggestions ?? [];
-    if (sug.length) box.append(h('div', { class: 'pal-sub' }, 'Suggestions'));
+    if (sug.length) box.append(h('div', { class: 'picker-sub' }, 'Suggestions'));
     for (const sg of sug) {
       const lvs = sg.levels.length > 4 ? `${sg.levels.slice(0, 4).map(hex3).join(', ')} +${sg.levels.length - 4}` : sg.levels.map(hex3).join(', ');
       box.appendChild(h('div', {
-        class: 'pal-row', title: `${sg.count} places of these Direct Map16 objects in level ${sg.levels.map(hex3).join(', ')}: save as prefab and replace them all`,
+        class: 'picker-row', title: `${sg.count} places of these Direct Map16 objects in level ${sg.levels.map(hex3).join(', ')}: save as prefab and replace them all`,
         onclick: () => openSavePrefab(app, { prefab: sg.prefab, places: app.suggestionsCurrent ? sg.places : undefined }),
-      }, h('span', { class: 'pal-thumb-s prefab' }, prefabCanvas(sheet, sg.prefab)),
+      }, h('span', { class: 'picker-thumb-s prefab' }, prefabCanvas(sheet, sg.prefab)),
         h('span', { class: 'grow' }, `${sg.count}× in level ${lvs}`, h('span', { class: 'hint' }, ` saves ${sg.saved} byte${sg.saved === 1 ? '' : 's'}`))));
     }
   }
@@ -528,7 +528,7 @@ export class Palette {
       out.push({
         s, vt, label, name, th, title: `${label}: ${name}${info}`, behavior: sum?.join(' · ') ?? '', text: `${label} ${name} ${info}`.toLowerCase(),
         items: blockSprites(app, tiles), enter: blockEnter(app, tiles),
-        item: { kind: 'obj', num: s.num, ext: s.ext, size: s.size } as PaletteItem,
+        item: { kind: 'obj', num: s.num, ext: s.ext, size: s.size } as PickedItem,
       });
     }
     return out;
@@ -549,18 +549,18 @@ export class Palette {
         id, num, name, info, items: p ? [...new Set(p.pos.flatMap(spritesOf))] : [],
         title: [`${num}: ${name}`, info, app.customSprite(id)?.description].filter(Boolean).join('\n'),
         text: `${hex2(n)} ${num} ${name} ${info}${id >= 0x200 ? ' custom' : ''}`.toLowerCase(),
-        item: { kind: 'spr', num: n, extra } as PaletteItem,
+        item: { kind: 'spr', num: n, extra } as PickedItem,
       };
     });
   }
 
-  // shows an item in its tab, chosen as the palette item (from the central search)
-  choose(tab: PaletteTab, item: PaletteItem): void {
+  // shows an item in its tab, chosen as the picked item (from the central search)
+  choose(tab: PickerTab, item: PickedItem): void {
     const app = this.app;
     if (tab === 'spr' ? app.mode !== 'spr' : app.mode !== 'l1' && app.mode !== 'l2') app.setMode(tab === 'spr' ? 'spr' : 'l1');
     this.tab = tab;
     this.m16Match = null;
-    app.choosePaletteItem(item);
+    app.choosePickedItem(item);
     requestAnimationFrame(() => this.scrollToSelected());
   }
 
@@ -670,7 +670,7 @@ export class Palette {
         pick: () => this.choose('spr', e.item),
       })),
     };
-    // in the order of the palette: the Objects tab's sections, Map16 (by number, by name), Sprites
+    // in the order of the picker: the Objects tab's sections, Map16 (by number, by name), Sprites
     return [prefabs, objects('obj', 'Resizable objects'), objects('ext', 'Fixed-size objects'), map16, named, sprites];
   }
 
@@ -694,18 +694,18 @@ export class Palette {
 
   buildSprites(): void {
     const app = this.app;
-    const cur = app.paletteItem;
+    const cur = app.pickedItem;
     let head = false;
     for (const e of this.spriteEntries()) {
-      if (e.id >= 0x200 && !head) { head = true; this.body.appendChild(h('div', { class: 'pal-head' }, 'Custom sprites (PIXI)')); }
+      if (e.id >= 0x200 && !head) { head = true; this.body.appendChild(h('div', { class: 'picker-head' }, 'Custom sprites (PIXI)')); }
       const sel = cur?.kind === 'spr' && spriteId(cur) === e.id;
       const img = app.spriteThumbs?.get(e.id);
       this.body.appendChild(h('div', {
-        class: `pal-row${sel ? ' selected' : ''}`, title: e.title,
-        onclick: () => { if (app.mode !== 'spr') app.setMode('spr'); app.choosePaletteItem(e.item); },
-      }, h('span', { class: 'pal-thumb-s' }, img ? cloneCanvas(img) : ''), h('span', { class: 'num' }, e.num), e.name,
+        class: `picker-row${sel ? ' selected' : ''}`, title: e.title,
+        onclick: () => { if (app.mode !== 'spr') app.setMode('spr'); app.choosePickedItem(e.item); },
+      }, h('span', { class: 'picker-thumb-s' }, img ? cloneCanvas(img) : ''), h('span', { class: 'num' }, e.num), e.name,
         e.id >= 0x200 && app.customSprite(e.id) && !app.spriteUsers(e.id).length ? h('span', { class: 'gt-unused', title: 'Inserted, but in no level' }, 'unused') : '',
-        itemBadge(app, e.items, 'pal-items-row')));
+        itemBadge(app, e.items, 'picker-items-row')));
     }
   }
 
@@ -713,27 +713,27 @@ export class Palette {
   // entries is left out (Prefabs keeps its button and hint)
   buildObjects(): void {
     const app = this.app;
-    const cur = app.paletteItem;
+    const cur = app.pickedItem;
     this.body.append(this.prefabBox);
     this.buildPrefabs();
     for (const [ext, title] of [[false, 'Resizable'], [true, 'Fixed size']] as const) {
-      const grid = h('div', { class: 'pal-grid' });
+      const grid = h('div', { class: 'picker-grid' });
       for (const e of this.objectEntries(ext)) {
         const { s, vt } = e;
         const sel = cur?.kind === 'obj' && cur.num === s.num && (s.num !== 0 || cur.ext === s.ext) && objectVariant(app.objectKind(s.num), cur.size) === vt;
         grid.appendChild(h('div', {
-          class: `pal-cell${sel ? ' selected' : ''}`, title: `${e.title}\nRight click: rename`,
+          class: `picker-cell${sel ? ' selected' : ''}`, title: `${e.title}\nRight click: rename`,
           oncontextmenu: (ev: Event) => { ev.preventDefault(); renameObject(app, s.num, s.ext); },
           onclick: () => {
             if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1');
-            app.choosePaletteItem(e.item);
+            app.choosePickedItem(e.item);
           },
-        }, h('div', { class: 'pal-img' }, e.th ? cloneCanvas(e.th) : h('span', { class: 'none' }, '–'),
-          h('div', { class: 'pal-corner' }, itemBadge(app, e.items), e.enter ? h('div', { class: 'pal-enter', title: enterText(e.enter) }, e.enter) : '')),
-          h('div', { class: 'pal-label' }, e.label), h('div', { class: 'pal-name' }, app.objectName(s.num, s.ext))));
+        }, h('div', { class: 'picker-img' }, e.th ? cloneCanvas(e.th) : h('span', { class: 'none' }, '–'),
+          h('div', { class: 'picker-corner' }, itemBadge(app, e.items), e.enter ? h('div', { class: 'picker-enter', title: enterText(e.enter) }, e.enter) : '')),
+          h('div', { class: 'picker-label' }, e.label), h('div', { class: 'picker-name' }, app.objectName(s.num, s.ext))));
       }
       if (!grid.firstChild) continue;
-      this.body.append(h('div', { class: 'pal-head' }, title), grid);
+      this.body.append(h('div', { class: 'picker-head' }, title), grid);
     }
   }
 }
@@ -874,8 +874,8 @@ function deletePrefab(app: App, n: number, st: Prefab): void {
   modal('Delete prefab', body, [{ label: 'Cancel' }, { label: 'Delete', danger: true, onClick: () => app.deletePrefab(n) }]);
 }
 
-// small images of the sprites a block spawns, shown in the corner of a palette cell
-function itemBadge(app: App, items: number[], cls = 'pal-items'): HTMLElement | '' {
+// small images of the sprites a block spawns, shown in the corner of a picker cell
+function itemBadge(app: App, items: number[], cls = 'picker-items'): HTMLElement | '' {
   const imgs = items.slice(0, 4).map((n) => app.spriteThumbs?.get(n)).filter((c): c is HTMLCanvasElement => !!c);
   if (!imgs.length) return '';
   return h('div', { class: cls }, ...imgs.map(cloneCanvas));
@@ -920,7 +920,7 @@ export class Properties {
     app.on('object-names', () => this.build());
     app.on('probes', () => { if (this.probePending) this.build(); });
     app.on('rom-change', () => { if (app.mode === 'exit') this.build(); });
-    app.on('palette-item', () => { if (app.mode === 'spr' && !app.selectedSprites().length) this.build(); });
+    app.on('picked-item', () => { if (app.mode === 'spr' && !app.selectedSprites().length) this.build(); });
   }
 
   probePending = false; // the shown object's block behaviour is still being probed
@@ -985,8 +985,8 @@ export class Properties {
       const sel = app.selectedSprites();
       if (!sel.length) {
         this.body.appendChild(emptyState(`${app.level.sprites.length} sprites – none selected.`));
-        // the sprite chosen in the palette
-        const p = app.paletteItem;
+        // the sprite chosen in the picker
+        const p = app.pickedItem;
         if (p?.kind === 'spr') {
           const id = spriteId(p);
           this.body.append(spriteUses(app, id, `Sprite ${hex2(p.num)} (${app.spriteLabel(id)}) used in levels`));

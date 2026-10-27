@@ -59,11 +59,11 @@ import { slipperyActions } from '../core/slippery.ts';
 import { pathKindsJob, type PathKind } from '../core/owpaths.ts';
 
 export type EditMode = 'l1' | 'l2' | 'spr' | 'exit' | 'bg' | 'l3';
-// the modes painted with a brush of tiles picked from the level or the palette: BG tiles, layer 3's 8x8 tiles
+// the modes painted with a brush of tiles picked from the level or the picker: BG tiles, layer 3's 8x8 tiles
 export const isBrushMode = (m: EditMode) => m === 'bg' || m === 'l3';
 export interface Brush { w: number; h: number; tiles: number[] }
-export type PaletteItem =
-  // block: a rectangle of Map16 tiles from the palette sheet (tile + row * 16 + col), one Direct-Map16 object each
+export type PickedItem =
+  // block: a rectangle of Map16 tiles from the picker sheet (tile + row * 16 + col), one Direct-Map16 object each
   // prefab: prefab number (extended object $04, see prefabs.ts)
   | { kind: 'obj'; num: number; ext: number; size: number; tile?: number; block?: { w: number; h: number }; prefab?: number }
   | { kind: 'spr'; num: number; extra: number };
@@ -89,7 +89,7 @@ export type AppEvent =
   | 'level-scan' // the level scan of the level as edited is known
   | 'game-view' // the camera at Mario's place for the game view frame is known (or asked for)
   | 'level-uses' // more levels' Map16 tiles are known (levelTiles)
-  | 'palette-item' // a palette item was chosen in the palette, or the palette item cleared
+  | 'picked-item' // a picked item was chosen in the picker, or the picked item cleared
   | 'placement-preview' // the placement preview asked for is known
   | 'properties' // the properties panel is wanted (the context menu)
   | 'arcs' // jump arcs asked for are known
@@ -158,12 +158,12 @@ export class App {
   private editMode: EditMode = 'l1';
   get mode(): EditMode { return this.editMode; }
   selection = new Set<number>();
-  // what a right click in the level places: the palette item, or – picked in the level after it – a copy of the selection
-  private palette: PaletteItem | null = null;
-  get paletteItem(): PaletteItem | null { return this.palette; }
-  set paletteItem(p: PaletteItem | null) { this.palette = p; this.stampSelection = false; }
+  // what a right click in the level places: the picked item, or – picked in the level after it – a copy of the selection
+  private picked: PickedItem | null = null;
+  get pickedItem(): PickedItem | null { return this.picked; }
+  set pickedItem(p: PickedItem | null) { this.picked = p; this.stampSelection = false; }
   stampSelection = false;
-  // BG mode brush: a w×h block of BG Map16 tiles (row-major), picked from the palette sheet or the level
+  // BG mode brush: a w×h block of BG Map16 tiles (row-major), picked from the picker sheet or the level
   bgBrush: Brush = { w: 1, h: 1, tiles: [0] };
   l3Brush: Brush = { w: 1, h: 1, tiles: [0] }; // layer 3 tilemap words
   zoom = 2;
@@ -426,7 +426,7 @@ export class App {
       this.images = renderLevel(this.rom, r, lv.header.mode, lv.header.screens, levelRows(lv.secondary));
     });
     this.rendered = { key, gen, reads };
-    // palette thumbnails are transparent: shown on the level's backdrop as in the game
+    // picker thumbnails are transparent: shown on the level's backdrop as in the game
     const c = this.images.backdrop;
     document.documentElement.style.setProperty('--level-backdrop', `rgb(${c & 0xff},${(c >> 8) & 0xff},${(c >> 16) & 0xff})`);
     this.compositeImg = this.compose();
@@ -667,7 +667,7 @@ export class App {
   // render and ROM change
   ensureSpriteImages(): void {
     const lv = this.level, hd = lv.header, show = this.showSprites;
-    const all = [...Array.from({ length: 0xe7 }, (_, i) => i), ...this.customSprites().map((c) => c.id)]; // as listed in the palette
+    const all = [...Array.from({ length: 0xe7 }, (_, i) => i), ...this.customSprites().map((c) => c.id)]; // as listed in the picker
     const lvNum = lv.number, bg = lv.layer2Pointer >> 16 === 0xff ? lv.layer2Pointer : 0xffd900;
     const header = { ...hd }, sh = lv.spriteHeader;
     // i5: with the input; sprites from $C9 on (shells, groups), failed batches retried one by one, sprites
@@ -1160,7 +1160,7 @@ export class App {
     return out;
   }
 
-  // The object palette's thumbnails of specs in the level as edited (thumbs.ts): undefined while they are
+  // The object picker's thumbnails of specs in the level as edited (thumbs.ts): undefined while they are
   // learned in the background ('thumbs' when done)
   objectThumbs(specs: ObjSpec[]): ObjThumb[] | undefined {
     const rom = this.rom, lv = this.level, keys = new Map(specs.map((s) => [s, objKey(s, this.objectKind(s.num))]));
@@ -1408,8 +1408,8 @@ export class App {
     o.y = Math.max(0, Math.min((this.vertical ? Math.min(hgt, 0x1ff) : hgt) - 1, o.y));
   }
 
-  insertAt(tx: number, ty: number, p: PaletteItem | null = this.paletteItem): void {
-    if (!p) { toast('Choose an object/sprite in the palette first.'); return; }
+  insertAt(tx: number, ty: number, p: PickedItem | null = this.pickedItem): void {
+    if (!p) { toast('Choose an object/sprite in the picker first.'); return; }
     this.editLevel(() => {
       const pl = this.newItems(p, tx, ty);
       if (!pl) return false;
@@ -1418,9 +1418,9 @@ export class App {
     // the placed item is selected: changed (resized, …), the next right click copies it as it is now
     this.stampSelection = true;
   }
-  // palette item p at tile (tx, ty): objects in layer 1/2, a sprite in any mode; null when it can't go into the
+  // picked item p at tile (tx, ty): objects in layer 1/2, a sprite in any mode; null when it can't go into the
   // current mode (an object while editing sprites)
-  private newItems(p: PaletteItem, tx: number, ty: number): Placement | null {
+  private newItems(p: PickedItem, tx: number, ty: number): Placement | null {
     if (p.kind === 'spr') {
       const s: LevelSprite = { uid: newUid(), num: p.num, x: tx, y: ty, extra: p.extra };
       if (s.extra >= 2) { const b = spriteBytes(spriteSizes(this.rom), s); if (b.length) s.bytes = b; }
@@ -1560,7 +1560,7 @@ export class App {
     } else if (replace) {
       this.editLevel((lv) => { this.selection = new Set(replaceWithPrefab(lv, n, [selection]).map((o) => o.uid)); });
     }
-    this.paletteItem = { kind: 'obj', num: 0, ext: PREFAB_EXT, size: 0, prefab: n };
+    this.pickedItem = { kind: 'obj', num: 0, ext: PREFAB_EXT, size: 0, prefab: n };
     return true;
   }
 
@@ -1573,7 +1573,7 @@ export class App {
       this.prefabSuggestions = this.prefabSuggestions.filter((q) => q.key !== key);
       this.emit('prefab-suggestions');
     }
-    this.paletteItem = { kind: 'obj', num: 0, ext: PREFAB_EXT, size: 0, prefab: n };
+    this.pickedItem = { kind: 'obj', num: 0, ext: PREFAB_EXT, size: 0, prefab: n };
     return true;
   }
 
@@ -1702,7 +1702,7 @@ export class App {
   paste(tx: number, ty: number): void {
     this.placeCopy((this.mode === 'spr' ? this.clipboard.sprites : this.clipboard.objects) ?? [], tx, ty);
   }
-  // a right click in the level: a copy of the selection when it was picked after the palette item, else the palette item
+  // a right click in the level: a copy of the selection when it was picked after the picked item, else the picked item
   placeAt(tx: number, ty: number): void {
     if (this.copiesSelection()) this.placeCopy(this.selectedItems(), tx, ty);
     else this.insertAt(tx, ty);
@@ -1717,7 +1717,7 @@ export class App {
   placement(tx: number, ty: number): Placement | null {
     if (this.mode !== 'l1' && this.mode !== 'l2' && this.mode !== 'spr') return null;
     if (this.copiesSelection()) { const items = this.selectedItems(); return items.length ? this.copiesAt(items, tx, ty) : null; }
-    return this.paletteItem ? this.newItems(this.paletteItem, tx, ty) : null;
+    return this.pickedItem ? this.newItems(this.pickedItem, tx, ty) : null;
   }
   // The placement preview at tile (tx, ty): the placement as the level shows it once placed – objects drawn by
   // the level's load with them added (learned in the background: undefined until known), sprites with their images
@@ -1755,17 +1755,17 @@ export class App {
   }
   private previewLearned = () => { this.previewMemo.render = null; this.emit('placement-preview'); };
 
-  // the palette item chosen in the palette: the level's selection cleared (it would be copied by a right click)
-  choosePaletteItem(p: PaletteItem): void {
-    this.paletteItem = p;
+  // the picked item chosen in the picker: the level's selection cleared (it would be copied by a right click)
+  choosePickedItem(p: PickedItem): void {
+    this.pickedItem = p;
     if (this.selection.size) { this.selection.clear(); this.emit('change'); }
-    this.emit('palette-item');
+    this.emit('picked-item');
   }
-  // no palette item any more
-  clearPaletteItem(): void {
-    if (!this.paletteItem) return;
-    this.paletteItem = null;
-    this.emit('palette-item');
+  // no picked item any more
+  clearPickedItem(): void {
+    if (!this.pickedItem) return;
+    this.pickedItem = null;
+    this.emit('picked-item');
   }
 
   // copies of the items with their upper left at tile (tx, ty), selected

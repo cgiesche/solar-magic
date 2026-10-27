@@ -1,7 +1,7 @@
 // Central search (Ctrl+F or Ctrl+Space), like "Search Everywhere" in IntelliJ or the quick open of VS Code: one input over
 // everything the providers offer, the results grouped by provider. A row of groups above the list narrows the
 // search to one of them (Tab / Shift+Tab switch); choosing a result runs its pick(). For now the providers are
-// the tabs of the "Insert" palette (Palette.searchProviders).
+// the tabs of the picker (Picker.searchProviders).
 
 import { h, clear, emptyState } from './dom.ts';
 
@@ -94,11 +94,11 @@ export function openSearch(providers: SearchProvider[]): void {
     groupsFound.sort((a, b) => Number(b.hit) - Number(a.hit));
     for (const { p, found } of groupsFound) {
       const max = group ? MAX : PER_GROUP;
-      if (!group) list.append(h('div', { class: 'pal-head' }, p.label, h('span', { class: 'hint' }, ` ${found.length}`)));
+      if (!group) list.append(h('div', { class: 'picker-head' }, p.label, h('span', { class: 'hint' }, ` ${found.length}`)));
       for (const r of found.slice(0, max)) {
-        const thumb = h('span', { class: 'pal-thumb-s' });
+        const thumb = h('span', { class: 'picker-thumb-s' });
         if (r.thumb) { thumbs.set(thumb, r.thumb); obs.observe(thumb); }
-        const el = h('div', { class: 'pal-row', title: r.title ?? '' }, thumb, h('span', { class: 'num' }, r.label), h('span', { class: 'grow' }, r.name, r.detail ? h('span', { class: 'hint' }, `  ${r.detail}`) : ''));
+        const el = h('div', { class: 'picker-row', title: r.title ?? '' }, thumb, h('span', { class: 'num' }, r.label), h('span', { class: 'grow' }, r.name, r.detail ? h('span', { class: 'hint' }, `  ${r.detail}`) : ''));
         const i = rows.length;
         el.addEventListener('mousemove', () => { if (active !== i) setActive(i); });
         el.addEventListener('click', () => take(r.pick));
@@ -106,7 +106,7 @@ export function openSearch(providers: SearchProvider[]): void {
         list.append(el);
       }
       if (found.length > max) {
-        const more = h('div', { class: 'pal-row search-more' }, group ? `… ${found.length - max} more – type more to narrow it down` : `… ${found.length - max} more in ${p.label}`);
+        const more = h('div', { class: 'picker-row search-more' }, group ? `… ${found.length - max} more – type more to narrow it down` : `… ${found.length - max} more in ${p.label}`);
         if (!group) {
           const pick = () => setGroup(p.id);
           more.addEventListener('click', pick);

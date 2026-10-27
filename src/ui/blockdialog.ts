@@ -59,7 +59,7 @@ export function blockPane(app: App, changed: () => void): BlockPane {
         select(files.map((f, i) => [i, f.slice(7)] as [number, string]), 0, (i) => (file = files[i])),
         h('label', { class: 'row small', title: 'Behavior without custom code; unchecked keeps the tile\'s own' }, actsBox, 'acts like'), actsIn,
         h('button', { onclick: add }, 'Assign')) : '',
-      h('p', { class: 'hint' }, 'To place: Palette → Map16, or a Direct Map16 object with that tile.'),
+      h('p', { class: 'hint' }, 'To place: Picker → Map16, or a Direct Map16 object with that tile.'),
     ];
   }
 

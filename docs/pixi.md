@@ -21,7 +21,7 @@ This page describes the interface that resources see and how the editor implemen
   export of a PIXI folder as `.zip`. Sprites are only added by uploading a package and removed with the
   package; an unassigned entry leaves the files in the project. Everything is recorded in the ROM as one patch
   with its sources.
-- **Place:** under *Sprites*, the palette shows a section "Custom Sprites (PIXI)" with the names from
+- **Place:** under *Sprites*, the picker shows a section "Custom Sprites (PIXI)" with the names from
   `Collection` and the graphics the game draws – like Lunar Magic, only the variants (extra bit
   clear/set) that `Collection` lists; without `Collection` (`.cfg`) the one without the extra bit. The
   properties show the extra bytes; sprites with extra bytes other than 0 get their own image. When

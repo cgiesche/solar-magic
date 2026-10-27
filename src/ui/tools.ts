@@ -226,7 +226,7 @@ export async function importLevel(app: App): Promise<boolean> {
 
 // Insert by number (like Lunar Magic's manual insert): object, extended object or sprite at tile (tx, ty)
 export function openInsertDialog(app: App, tx: number, ty: number): void {
-  const p = app.paletteItem;
+  const p = app.pickedItem;
   let kind: 0 | 1 | 2 = app.mode === 'spr' ? 2 : p?.kind === 'obj' && p.num === 0 ? 1 : 0;
   let num = p?.kind === 'spr' ? (kind === 2 ? p.num : 1) : p ? (p.num || p.ext) : 1;
   let size = p?.kind === 'obj' ? p.size : 0;
@@ -258,8 +258,8 @@ export function openInsertDialog(app: App, tx: number, ty: number): void {
     } else {
       if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1');
       if (kind === 0 && num === 0) { toast('There is no object 00 – use “Extended object” for extended objects.', 'error'); return false; }
-      if (kind === 1 && num === DM16_EXT) { toast('Please place Direct Map16 via the palette\'s Map16 tab.', 'error'); return false; }
-      if (kind === 1 && num === PREFAB_EXT) { toast('Please place prefabs via the palette\'s Objects tab (Prefabs).', 'error'); return false; }
+      if (kind === 1 && num === DM16_EXT) { toast('Please place Direct Map16 via the picker\'s Map16 tab.', 'error'); return false; }
+      if (kind === 1 && num === PREFAB_EXT) { toast('Please place prefabs via the picker\'s Objects tab (Prefabs).', 'error'); return false; }
       app.insertAt(tx, ty, kind === 0 ? { kind: 'obj', num, ext: 0, size } : { kind: 'obj', num: 0, ext: num, size: 0 });
     }
   };

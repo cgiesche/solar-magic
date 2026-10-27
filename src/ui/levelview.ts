@@ -105,7 +105,7 @@ export class LevelView {
     app.on('rom-change', () => this.problems.update());
     app.on('arcs', () => this.requestPaint());
     app.on('placement-preview', () => this.requestPaint());
-    app.on('palette-item', () => { this.lastPreview = null; this.requestPaint(); });
+    app.on('picked-item', () => { this.lastPreview = null; this.requestPaint(); });
     app.on('game-view', () => this.requestPaint());
     app.on('level-scan', () => { this.problems.update(); this.requestPaint(); });
     this.idleStatus();
@@ -930,7 +930,7 @@ export class LevelView {
     const { tx, ty, px, py } = this.tileFromEvent(e);
     if (e.button === 1) return;
     if (e.button === 2 || (e.button === 0 && e.shiftKey && !e.ctrlKey)) {
-      // insert palette item (BG: paint with the brush, dragging keeps painting)
+      // insert picked item (BG: paint with the brush, dragging keeps painting)
       if (app.mode === 'exit') { if (e.button === 2) this.exitMenu(e, px, py, tx, ty); return; }
       if (this.brushMode()) {
         const edit = app.mode === 'l3' ? app.beginLayer3Edit() : app.beginLevelEdit(), c = this.cellAt(px, py);
@@ -1130,7 +1130,7 @@ export class LevelView {
         }
       }
       // a click into nothing (no item of any shown layer there): nothing placed by a right click any more
-      if (!d.far && !d.add) app.clearPaletteItem();
+      if (!d.far && !d.add) app.clearPickedItem();
       app.emit('change');
       return;
     }
