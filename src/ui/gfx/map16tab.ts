@@ -35,7 +35,7 @@ import { remapEditor, type RemapEditor } from '../remaplist.ts';
 import { planMove, applyMove, planRemap, rectMap, type MovePlan, type MoveSource } from '../../core/tilemove.ts';
 import { levelSource, planList, openRemapUses } from '../tileuses.ts';
 import { loadAsar } from '../../core/asar.ts';
-import { NAME_MAX, namesOf, setName, cleanName, type NameKind } from '../../core/usernames.ts';
+import { NAME_MAX, namesOf, setName, cleanName, connectedRect, type NameKind } from '../../core/usernames.ts';
 import { QuarterGrid, markRect, editMarked, setPalette, setBit, setTileNum, stamp, mirror, summary, wholeTiles, FLIP_X, FLIP_Y, PRIO, type QuarterEdit, type MarkMode, type BitState } from '../../core/quarters.ts';
 
 const Z = 2; // sheet zoom
@@ -179,6 +179,20 @@ export class Map16Tab implements WsPanel {
     this.sel = tile & (EXT_TILES - 1);
     this.selW = this.selH = 1;
     this.marksOf = '';
+    if (this.visible) { this.buildBar(); this.redraw(); this.scrollToSel(); } else this.scrollPending = true;
+  }
+
+  // the tiles of a name (central search): the rectangle around them when they are connected, else the
+  // first; the sheet search is set to the name, so it marks all of them
+  selectNamed(name: string, tiles: number[], bg: boolean): void {
+    const r = connectedRect(tiles) ?? { first: tiles[0], w: 1, h: 1 };
+    this.bg = bg;
+    this.sel = r.first;
+    this.selW = r.w;
+    this.selH = r.h;
+    this.marksOf = '';
+    this.search.value = name;
+    this.findMatches();
     if (this.visible) { this.buildBar(); this.redraw(); this.scrollToSel(); } else this.scrollPending = true;
   }
 

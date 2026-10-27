@@ -3,7 +3,7 @@
 // with the project file, never in the playable ROM; one ROM edit is one undo step.
 import { Rom } from '../src/core/rom.ts';
 import { RomEditSession } from '../src/core/romedit.ts';
-import { NAME_MAX, nameOf, namesOf, setName, moveNames } from '../src/core/usernames.ts';
+import { NAME_MAX, nameOf, namesOf, setName, moveNames, nameGroups, connectedRect, tileRanges } from '../src/core/usernames.ts';
 import { cleanImage } from './fixture.ts';
 
 let bad = 0;
@@ -74,6 +74,31 @@ const same = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every(
   moveNames(rom, 'bg', new Map([[0x500, 0x600]]));
   check(nameOf(rom, 'bg', 0x600) === 'Cloud' && nameOf(rom, 'bg', 0x500) === null, 'the moved-away tile is left without');
 }
+
+// grouped by name for the central search: one group per name, however many tiles and wherever they lie
+{
+  const names = new Map([[0x221, 'Bush'], [0x210, 'Bush'], [0x300, 'apple'], [0x211, 'Bush'], [0x220, 'Bush'], [0x5ff, 'Bush ']]);
+  const g = nameGroups(names);
+  check(g.length === 3, 'one group per name');
+  check(JSON.stringify(g.map((x) => x.name)) === JSON.stringify(['apple', 'Bush', 'Bush ']), 'ordered by name, any case; names differing only in spaces stay apart');
+  check(JSON.stringify(g[1].tiles) === JSON.stringify([0x210, 0x211, 0x220, 0x221]), 'a group\'s tiles ascending');
+  check(nameGroups(new Map()).length === 0, 'no names, no groups');
+}
+
+// the rectangle around connected tiles (16 per row on the sheet)
+{
+  const rect = (t: number[]) => JSON.stringify(connectedRect(t));
+  check(rect([0x210, 0x211, 0x220, 0x221]) === JSON.stringify({ first: 0x210, w: 2, h: 2 }), 'a block of 2x2 tiles');
+  check(rect([0x200]) === JSON.stringify({ first: 0x200, w: 1, h: 1 }), 'a single tile');
+  check(rect([0x211, 0x220, 0x221]) === JSON.stringify({ first: 0x210, w: 2, h: 2 }), 'an L shape: its bounding rectangle');
+  check(connectedRect([0x200, 0x202]) === null, 'tiles apart are not connected');
+  check(connectedRect([0x20f, 0x210]) === null, 'the end of a row does not touch the start of the next');
+  check(connectedRect([0x210, 0x221]) === null, 'diagonal neighbours are not connected');
+  check(connectedRect([]) === null, 'no tiles');
+}
+
+// the numbers as shown: runs of consecutive tiles as ranges
+check(tileRanges([0x210, 0x211, 0x212, 0x220, 0x300, 0x301]) === '210–212, 220, 300–301', 'tile numbers in runs');
 
 console.log(bad ? `${bad} FAILED` : 'all ok');
 if (bad) process.exit(1);

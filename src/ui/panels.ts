@@ -3,7 +3,7 @@
 import { isBrushMode, type App, type PaletteItem } from './app.ts';
 import { h, clear, hexInput, checkbox, attachRectPick, modal, toast, emptyState } from './dom.ts';
 import { objectName, spriteName, hex2, hex3 } from '../core/names.ts';
-import { nameOf, namesOf } from '../core/usernames.ts';
+import { nameOf, namesOf, nameGroups, connectedRect, tileRanges, type NameKind } from '../core/usernames.ts';
 import { objectVariant, withObjectVariant, type ObjKind } from '../core/objkinds.ts';
 import { thumbCanvas, objKey, type ObjSpec, type ObjThumb } from './thumbs.ts';
 import { newUid, spriteId, spriteBytes, spriteSizes, type LevelObject, type LevelSprite } from '../core/level.ts';
@@ -877,6 +877,36 @@ function itemBadge(app: App, items: number[], cls = 'pal-items'): HTMLElement | 
 }
 
 // `count` tiles from `base`, 16 per row
+// the named Map16 tiles for the central search: one result per name (FG and BG apart), its preview the
+// rectangle around the tiles when they are connected, else the first tile; show() opens them in the Map16 tab
+export function tileNamesProvider(app: App, show: (name: string, tiles: number[], bg: boolean) => void): SearchProvider {
+  return {
+    id: 'names', label: 'Map16 tiles',
+    search: (terms) => (['fg', 'bg'] as NameKind[]).flatMap((kind) => {
+      const bg = kind === 'bg', layer = kind.toUpperCase();
+      return nameGroups(namesOf(app.rom, kind)).filter((g) => matchesAll(g.name.toLowerCase(), terms)).map((g): SearchResult => {
+        const nums = tileRanges(g.tiles);
+        return {
+          label: layer, name: g.name, detail: nums,
+          title: `${layer} tile${g.tiles.length > 1 ? 's' : ''} ${nums}: ${g.name}`,
+          thumb: () => {
+            const r = connectedRect(g.tiles) ?? { first: g.tiles[0], w: 1, h: 1 };
+            const base = r.first & ~15;
+            const sheet = renderMap16Sheet(app, bg, base, r.h * 16);
+            const c = h('canvas', { width: r.w * 16, height: r.h * 16 });
+            c.getContext('2d')!.drawImage(sheet, (r.first & 15) * 16, 0, r.w * 16, r.h * 16, 0, 0, r.w * 16, r.h * 16);
+            const z = Math.min(1.5, 32 / (r.w * 16), 24 / (r.h * 16));
+            c.style.width = `${r.w * 16 * z}px`;
+            c.style.height = `${r.h * 16 * z}px`;
+            return c;
+          },
+          pick: () => show(g.name, g.tiles, bg),
+        };
+      });
+    }),
+  };
+}
+
 export function renderMap16Sheet(app: App, bg = false, base = 0, count = 512): HTMLCanvasElement {
   const r = app.render;
   const tc = new TileCache(r.vram, r.cgram, (bg ? r.ppuRegs[0x0b] >> 4 : r.ppuRegs[0x0b] & 0x0f) << 13);

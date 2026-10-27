@@ -29,7 +29,7 @@ One of the four 8x8 tiles of a Map16 tile, one 16-bit word: 8x8 tile number, pal
 _Avoid_: 8x8 field, cell, subtile
 
 **Tile name**:
-What the user calls an FG or BG Map16 tile, to find it by later (usernames.ts; other things, e.g. graphics files or levels, are meant to be named the same way). At most 64 characters, one per tile; several tiles share a name to name a thing of several tiles. Editor data: kept with the project file, never in the playable ROM nor in a `.smwlevel` file. Belongs to the tile number: a paste or clear leaves it, a remap too; a tile move takes it along.
+What the user calls an FG or BG Map16 tile, to find it by later (usernames.ts; other things, e.g. graphics files or levels, are meant to be named the same way). At most 64 characters, one per tile; several tiles share a name to name a thing of several tiles. Editor data: kept with the project file, never in the playable ROM nor in a `.smwlevel` file. Belongs to the tile number: a paste or clear leaves it, a remap too; a tile move takes it along. Found by the sheet search and the central search (one result per name).
 _Avoid_: label, tag, description
 
 **Marked quarters**:

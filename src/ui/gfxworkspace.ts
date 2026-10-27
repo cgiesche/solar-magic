@@ -238,6 +238,12 @@ export class GfxWorkspace {
     this.onNav(true);
   }
 
+  showMap16Named(name: string, tiles: number[], bg: boolean): void {
+    this.open('map16');
+    this.map16.selectNamed(name, tiles, bg);
+    this.onNav(true);
+  }
+
   // the Map16 tab's remap panel, filled in by an offer
   showRemap(fill: RemapFill): void {
     this.open('map16');

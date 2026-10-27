@@ -6,6 +6,7 @@
 // name } } }. The caller makes the change one ROM edit.
 
 import type { Rom } from './rom.ts';
+import { hex3 } from './names.ts';
 
 export type NameKind = 'fg' | 'bg';
 export const NAME_MAX = 64;
@@ -59,4 +60,40 @@ export function moveNames(rom: Rom, kind: NameKind, map: Map<number, number>): v
   }
   kinds[kind] = m;
   store(rom, kinds);
+}
+
+// the named things (central search): the numbers of each name ascending, the names in alphabetical order
+export function nameGroups(names: Map<number, string>): { name: string; tiles: number[] }[] {
+  const by = new Map<string, number[]>();
+  for (const [n, v] of names) { const g = by.get(v); if (g) g.push(n); else by.set(v, [n]); }
+  return [...by].map(([name, tiles]) => ({ name, tiles: tiles.sort((a, b) => a - b) })).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// the rectangle around the tiles on the sheet (16 per row) when they are connected side by side or one above
+// another, else null
+export function connectedRect(tiles: number[]): { first: number; w: number; h: number } | null {
+  if (!tiles.length) return null;
+  const set = new Set(tiles), seen = new Set([tiles[0]]), todo = [tiles[0]];
+  while (todo.length) {
+    const t = todo.pop()!;
+    for (const n of [(t & 15) ? t - 1 : -1, (t & 15) < 15 ? t + 1 : -1, t - 16, t + 16]) {
+      if (set.has(n) && !seen.has(n)) { seen.add(n); todo.push(n); }
+    }
+  }
+  if (seen.size < set.size) return null;
+  const xs = tiles.map((t) => t & 15), ys = tiles.map((t) => t >> 4);
+  const x0 = Math.min(...xs), y0 = Math.min(...ys);
+  return { first: y0 * 16 + x0, w: Math.max(...xs) - x0 + 1, h: Math.max(...ys) - y0 + 1 };
+}
+
+// tile numbers (ascending) as shown: runs of consecutive ones as ranges, "210–212, 220"
+export function tileRanges(tiles: number[]): string {
+  const out: string[] = [];
+  for (let i = 0; i < tiles.length;) {
+    let j = i;
+    while (j + 1 < tiles.length && tiles[j + 1] === tiles[j] + 1) j++;
+    out.push(j > i ? `${hex3(tiles[i])}–${hex3(tiles[j])}` : hex3(tiles[i]));
+    i = j + 1;
+  }
+  return out.join(', ');
 }
