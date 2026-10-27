@@ -251,7 +251,7 @@ A frame of the level in which the game's main loop was not done before the next 
 _Avoid_: slowdown frame, CPU overload
 
 **Death marker**:
-Where Mario died in a recent test play of a level, drawn over it (View → Death markers) with what killed him (core/deaths.ts): a death is the frame the game sets Mario dying, the killer is learned from what the code did up to then – the timer run out, Mario fallen below the screen, a sprite's code running (normal, extended or cluster; the slot whose number was read last while X still holds it), else the level's tile read last (a block). Kept in the browser per ROM and level, the newest 100, until cleared; editor-local, never in the ROM.
+Where Mario died in a recent test play of a level, drawn over it (View → Death markers) with what killed him (core/deaths.ts): a death is the frame the game sets Mario dying, the killer is learned from what the code did up to then – the timer run out, Mario fallen out of the picture, else what the code read last: a sprite table for the slot in X (a sprite's code, normal, extended or cluster) or a layer 1 tile (a block). Kept in the browser per project (its id in the editor data, which a file name or saving as a project doesn't change) and level, the newest 100, until cleared (per level or all); each with the level's version then, those from before the level was last changed shown faded. Editor-local, never in the ROM.
 _Avoid_: death point, skull
 
 **Prefetch**:

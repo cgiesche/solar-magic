@@ -1,5 +1,6 @@
 // Application state and editing actions.
 
+import { makeProjectId } from '../core/projectid.ts';
 import { Rom } from '../core/rom.ts';
 import { LevelEmulator, type LevelRender, type LevelOverride, MAP_BASE, MAP_SIZE } from '../core/levelemu.ts';
 import {
@@ -221,6 +222,8 @@ export class App {
   constructor(rom: Rom, name: string) {
     this.rom = rom;
     this.romName = name;
+    // made now, outside any ROM edit (undo never takes it away), and stored with the ROM soon
+    if (makeProjectId(rom)) this.persistTimer = window.setTimeout(() => { this.persistTimer = 0; this.persist(); }, 1000);
     this.emu = new LevelEmulator(rom);
     this.emu.skipMask = () => this.gfxSkipMask();
     this.emu.boot();

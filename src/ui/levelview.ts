@@ -20,7 +20,8 @@ import { GAME_VIEW_W, GAME_VIEW_H, MARIO_W, MARIO_H, type CameraBands } from '..
 import { gameViewAt } from '../core/camerareach.ts';
 import { isDm16, dm16Tiles, prefabFlags } from '../core/cdm16.ts';
 import { PREFAB_EXT, readPrefab } from '../core/prefabs.ts';
-import { loadDeaths, killerText, killerTile, type DeathMark } from './deathmarks.ts';
+import { projectId } from '../core/projectid.ts';
+import { loadDeaths, killerText, killerTile, levelVersion, type DeathMark } from './deathmarks.ts';
 
 type Drag =
   | { kind: 'move'; edit: LevelEdit; startTx: number; startTy: number; lastDx: number; lastDy: number; orig: Map<number, { x: number; y: number }> }
@@ -391,7 +392,7 @@ export class LevelView {
   // where Mario died in test play (deathmarks.ts), by his tile inside the level (a pit's below it: its bottom row)
   deathsAt(): Map<string, { tx: number; ty: number; marks: DeathMark[] }> {
     const app = this.app, w = app.images.width >> 4, hgt = app.images.height >> 4, at = new Map<string, { tx: number; ty: number; marks: DeathMark[] }>();
-    for (const d of loadDeaths(app.romName, app.level.number)) {
+    for (const d of loadDeaths(projectId(app.rom), app.level.number)) {
       const tx = Math.max(0, Math.min(w - 1, d.tx)), ty = Math.max(0, Math.min(hgt - 1, d.ty)), k = `${tx},${ty}`;
       const e = at.get(k) ?? { tx, ty, marks: [] };
       e.marks.push(d);
@@ -401,9 +402,10 @@ export class LevelView {
   }
 
   // a red cross at Mario's tile (with the number of deaths there), a dashed red box at what killed him and a
-  // line to it
+  // line to it; faded: deaths before the level was last changed (saved)
   paintDeaths(ctx: CanvasRenderingContext2D, lw: number): void {
-    const at = this.deathsAt(), w = (this.app.images.width >> 4) - 1, hgt = (this.app.images.height >> 4) - 1;
+    const app = this.app, at = this.deathsAt(), w = (app.images.width >> 4) - 1, hgt = (app.images.height >> 4) - 1;
+    const now = levelVersion(app.rom, app.level.number), old = (d: DeathMark) => d.version !== now;
     if (!at.size) return;
     ctx.lineWidth = 2 * lw;
     ctx.strokeStyle = 'rgba(255,60,60,0.9)';
@@ -412,6 +414,7 @@ export class LevelView {
       const kt = killerTile(d.killer);
       if (!kt) continue;
       const k = { tx: Math.max(0, Math.min(w, kt.tx)), ty: Math.max(0, Math.min(hgt, kt.ty)) };
+      ctx.globalAlpha = old(d) ? 0.35 : 1;
       ctx.strokeRect(k.tx * 16 + 1, k.ty * 16 + 1, 14, 14);
       ctx.beginPath();
       ctx.moveTo(tx * 16 + 8, ty * 16 + 8);
@@ -422,6 +425,7 @@ export class LevelView {
     ctx.font = 'bold 8px sans-serif';
     for (const { tx, ty, marks } of at.values()) {
       const x = tx * 16, y = ty * 16;
+      ctx.globalAlpha = marks.every(old) ? 0.35 : 1;
       ctx.lineCap = 'round';
       for (const [width, color] of [[4, 'rgba(0,0,0,0.7)'], [2, '#ff3c3c']] as const) {
         ctx.lineWidth = width;
@@ -440,6 +444,7 @@ export class LevelView {
         ctx.fillText(txt, x + 11.5, y + 5);
       }
     }
+    ctx.globalAlpha = 1;
   }
 
   // tiles that are there but cannot be seen (render.ts invisibleTiles): areas of them tinted, their edges dashed;
@@ -1149,7 +1154,8 @@ export class LevelView {
     if (died) {
       const by = new Map<string, number>();
       for (const d of died.marks) { const t = killerText(d.killer, (id) => app.spriteLabel(id)); by.set(t, (by.get(t) ?? 0) + 1); }
-      txt += `  · Mario died here${died.marks.length > 1 ? ` ${died.marks.length}×` : ''}: killed by ${[...by].map(([t, n]) => (n > 1 ? `${t} (${n}×)` : t)).join(', ')}`;
+      const now = levelVersion(app.rom, app.level.number), old = died.marks.filter((d) => d.version !== now).length;
+      txt += `  · Mario died here${died.marks.length > 1 ? ` ${died.marks.length}×` : ''}${old ? ` (${old === died.marks.length ? 'all' : old} before the level was last changed)` : ''}: killed by ${[...by].map(([t, n]) => (n > 1 ? `${t} (${n}×)` : t)).join(', ')}`;
     }
     const mk = this.hover ? this.markerAt(this.hover.px, this.hover.py) : null;
     if (mk) txt += `  · ${MARKER_STYLE[mk.kind].title}${mk.kind === 'sec' ? ' ' + hex3(mk.index) : ''} (drag to move)`;

@@ -1,13 +1,15 @@
 // Test play's deaths (src/core/deaths.ts): where Mario died – the frame the game sets him dying – and what
 // killed him, learned by emulation: a sprite he walked into, a block he stood on, a pit he fell into, the timer.
 // node tools/testdeaths.ts
-import { Rom } from '../src/core/rom.ts';
+import { Rom, snesToPc } from '../src/core/rom.ts';
 import { editorImage } from './fixture.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
-import { levelTranslevel } from '../src/core/level.ts';
+import { levelTranslevel, L1_PTRS } from '../src/core/level.ts';
 import { layerGeom } from '../src/core/render.ts';
-import { GM, RAM, MAP_HI, marioX, marioY, cameraY, setMarioPos } from '../src/core/ram.ts';
+import { GM, RAM, MAP_HI, marioX, marioY } from '../src/core/ram.ts';
 import { DeathWatch, blockTile, type Death } from '../src/core/deaths.ts';
+import { levelVersion } from '../src/ui/deathmarks.ts';
+import { projectId } from '../src/core/projectid.ts';
 
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
@@ -88,10 +90,10 @@ const RIGHT = 0x0100;
   check(k?.kind === 'block' && k.tx === tx && k.ty === ty && k.tile === 0x12f, `killed by the muncher's tile (${JSON.stringify(k)}, ${tx}/${ty})`);
 }
 {
-  // fallen below the screen
+  // fallen through the floor and out of the picture (where the game kills him: its own rule)
   enter(0x105, []);
-  const d = play(120, 0, (f) => { if (f === 10) { const w = s.wram; setMarioPos(w, marioX(w), cameraY(w) + 0xd8); } });
-  check(d.length === 1 && d[0].killer.kind === 'pit', `fallen below the screen: killed by the pit (${JSON.stringify(d[0]?.killer)})`);
+  const d = play(200, 0, () => { s.wram[RAM.noLayer1Contact] = 0xff; });
+  check(d.length === 1 && d[0].killer.kind === 'pit', `fallen out of the picture: killed by the pit (${JSON.stringify(d[0]?.killer)})`);
 }
 {
   // the timer runs out
@@ -121,6 +123,24 @@ const RIGHT = 0x0100;
   w[RAM.screenMode] = 1;
   const atV = (x: number, y: number) => JSON.stringify(blockTile(w, v.addr(x, y))) === JSON.stringify({ tx: x, ty: y });
   check(atV(0, 0) && atV(0x13, 0x25) && atV(0x1f, 0xff), 'vertical level: the tile of an address');
+}
+
+{
+  // a death's level version: the level as saved, another after it was changed
+  const v = levelVersion(rom, 0x105);
+  check(v !== -1 && v === levelVersion(rom, 0x105) && v !== levelVersion(rom, 0x106), 'a level\'s version: the same until it changes, another level\'s differs');
+  const d = rom.data.slice(), at = snesToPc(rom.r24(L1_PTRS + 0x105 * 3)) + 5; // a byte of its first object
+  d[at] ^= 1;
+  rom.data = d;
+  check(levelVersion(rom, 0x105) !== v, 'the level changed: another version');
+}
+
+{
+  // the project's id: made once, kept in the project file, none in an exported ROM
+  const p = new Rom(await editorImage()), id = projectId(p);
+  check(id.length === 24 && projectId(p) === id, `a project id, the same when asked again (${id})`);
+  check(projectId(Rom.fromFile(p.outputProject(false))) === id, 'kept in the project file');
+  check(projectId(new Rom(p.output(false))) !== id, 'an exported ROM opened: a new project');
 }
 
 if (bad) { console.log(`${bad} failed`); process.exit(1); }

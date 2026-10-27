@@ -13,7 +13,8 @@ import { musicPlayer } from './musicplayer.ts';
 import { GM, RAM, marioX, marioY, setMarioPos } from '../core/ram.ts';
 import { SlotWatch } from '../core/slotwatch.ts';
 import { DeathWatch } from '../core/deaths.ts';
-import { addDeath } from './deathmarks.ts';
+import { addDeath, levelVersion } from './deathmarks.ts';
+import { projectId } from '../core/projectid.ts';
 import { PlayLog, cpuLoad } from '../core/playlog.ts';
 import { playMeter, GRAPH_FRAMES } from './playmeter.ts';
 import { applyTriggers, emptyTriggerView, customOn, switchName, isCustom, isManual, isOneShot, CUSTOM, MANUAL, ONE_SHOT } from '../core/extrigger.ts';
@@ -203,7 +204,7 @@ function play(app: App, at: Start | undefined, audio: AudioOut, emu: LevelEmulat
     frames++;
     log.frame(frames, watch.usedAll(), watch.take(), cpuLoad(s, mode), marioX(s.wram), marioY(s.wram));
     // kept as markers in the level he died in
-    for (const d of deaths.take()) { log.died(frames, d); addDeath(app.romName, d); }
+    for (const d of deaths.take()) { log.died(frames, d); addDeath(projectId(app.rom), d, levelVersion(app.rom, d.level)); }
   };
   const loop = (t: number) => {
     if (!running) return;
