@@ -18,8 +18,8 @@ import { spriteMemJob, usedSpriteMemory } from '../core/spritemem.ts';
 import { DM16_EXT, levelGfx, levelExtGfx, customPalette, levelMusic, defaultGfx } from '../core/patches.ts';
 import { gfxSkipMask, gfxFilesHash } from '../core/gfxpages.ts';
 import { flagBytes, usedFlags, isDm16, dm16Tiles, type Dm16Cond } from '../core/cdm16.ts';
-import { PREFAB_EXT, PREFAB_MAX, TRANSPARENT, listPrefabs, readPrefab, writePrefab, type Prefab } from '../core/prefabs.ts';
-import { prefabDm16Objects } from '../core/prefabcost.ts';
+import { PREFAB_EXT, PREFAB_MAX, TRANSPARENT, listPrefabs, writePrefab, type Prefab } from '../core/prefabs.ts';
+import { breakUpPrefab, replaced, setPrefabSources } from '../core/prefabsources.ts';
 import { PasteCounter, findPasted, arrangementKey, type PasteHint } from '../core/pastehint.ts';
 import { prefabSuggestions, type PrefabSuggestion } from '../core/prefabsuggest.ts';
 import { planPrefabPlaces, applyPrefabPlaces, deletePrefab, prefabObjectCount, replaceWithPrefab, type LevelPlaces, type LevelGroups, type PrefabGroup } from '../core/prefabplaces.ts';
@@ -1543,13 +1543,14 @@ export class App {
     if (typeof r === 'string') { toast(r, 'error'); return false; }
     const open = this.level.number, layer = this.mode === 'l2' ? 2 : 1;
     const selection: PrefabGroup = { layer, x: r.x, y: r.y, objects: this.selectedIndices() };
+    const sources = { objects: this.currentObjects().filter((o) => this.selection.has(o.uid)), x: r.x, y: r.y };
     const plan: LevelGroups[] = places.map((p) => ({ level: p.level, places: [...p.places] }));
     if (replace && plan.length) {
       let here = plan.find((p) => p.level === open);
       if (!here) plan.push(here = { level: open, places: [] });
       here.places.push(selection);
     }
-    if (!this.storePrefab(n, { w: r.w, h: r.h, tiles: r.tiles, ...(r.conds ? { conds: r.conds } : {}), name }, plan, places)) return false;
+    if (!this.storePrefab(n, { w: r.w, h: r.h, tiles: r.tiles, ...(r.conds ? { conds: r.conds } : {}), name }, plan, places, sources)) return false;
     if (replace && plan.length) {
       // the open level was loaded again: the prefab object where the selection's last object was, after the
       // objects replaced before it
@@ -1577,14 +1578,16 @@ export class App {
     return true;
   }
 
-  // prefab n as s and plan's objects replaced by it, one ROM edit labelled with the places found elsewhere
-  private storePrefab(n: number, s: Prefab, plan: LevelGroups[], places: LevelPlaces[]): boolean {
+  // prefab n as s and plan's objects replaced by it, one ROM edit labelled with the places found elsewhere;
+  // sources: the objects it is made from, its top left at x, y (prefabsources.ts)
+  private storePrefab(n: number, s: Prefab, plan: LevelGroups[], places: LevelPlaces[], sources?: { objects: LevelObject[]; x: number; y: number }): boolean {
     const open = this.level.number, found = places.reduce((k, p) => k + p.places.length, 0);
     try {
       this.romEdit(`Prefab ${hex(n, 2)} saved${found ? `, ${found} place${found > 1 ? 's' : ''} replaced` : ''}`, () => {
         // (the plan's objects are the open level's as edited: saved before the ROM edit)
         if (plan.some((p) => p.level === open) && this.dirty) throw new Error(`Level ${hex(open, 3)} could not be saved`);
         writePrefab(this.rom, n, s);
+        setPrefabSources(this.rom, n, s, sources?.objects ?? null, sources?.x, sources?.y);
         applyPrefabPlaces(this.rom, n, plan);
       });
       return true;
@@ -1638,18 +1641,18 @@ export class App {
     try { this.romEdit(`Prefab ${hex(n, 2)} deleted`, () => deletePrefab(this.rom, n, usedLevels(this.rom))); } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
   }
 
-  // a prefab object becomes Direct Map16 objects (rectangles of one tile, prefabcost.ts), at its place in the object list
+  // a prefab object becomes the objects it was made from where they draw the level as it does, else Direct Map16
+  // objects (rectangles of one tile), at its place in the object list (prefabsources.ts)
   explodePrefab(o: LevelObject): void {
-    const s = o.prefab !== undefined ? readPrefab(this.rom, o.prefab) : null;
-    if (!s) { toast('The prefab does not exist (anymore).', 'error'); return; }
-    this.editLevel(() => {
-      const parts = prefabDm16Objects(s, o.x, o.y, this.vertical);
-      const all = this.currentObjects();
-      const at = all.indexOf(o);
-      const res = [...all.slice(0, at), ...parts, ...all.slice(at + 1)];
-      if (this.mode === 'l2') this.level.layer2Objects = res; else this.level.objects = res;
-      this.selection = new Set(parts.map((p) => p.uid));
+    const r = breakUpPrefab(this.rom, this.level, o, this.vertical, (lv) => this.learner.emu().load(lv.number, this.buildOverrides(lv)));
+    if (!r) { toast('The prefab does not exist (anymore).', 'error'); return; }
+    this.editLevel((lv) => {
+      const { objects, layer2Objects } = replaced(lv, o, r.parts);
+      lv.objects = objects;
+      if (layer2Objects) lv.layer2Objects = layer2Objects;
+      this.selection = new Set(r.parts.map((p) => p.uid));
     });
+    if (r.differs) toast('Its objects would look different here: broken up into single tiles.', 'info');
   }
 
   deleteSelection(): void {

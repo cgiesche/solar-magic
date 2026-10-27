@@ -15,6 +15,7 @@ import { ownerNote } from './patchreg.ts';
 import { missingPatch, nextScreen } from './patches.ts';
 import { CDM16_FLAGS } from './ram.ts';
 import { COND_MARK, condByte, condOf, type Dm16Cond } from './cdm16.ts';
+import { keepPrefabSources } from './prefabsources.ts';
 
 export const EXT_OBJ_TABLE = 0x0da10f;
 export const PREFAB_EXT = 0x04;
@@ -185,9 +186,11 @@ export function freePrefabNumber(rom: Rom): number {
   return -1;
 }
 
-// stores (or with null removes) prefab n
+// stores (or with null removes) prefab n; the objects it was made from (prefabsources.ts) stay only with the
+// same tiles
 export function writePrefab(rom: Rom, n: number, s: Prefab | null): void {
   const p = { table: prefabTable(rom) };
+  keepPrefabSources(rom, n, s);
   const old = ptrOf(rom, p.table, n);
   if (old >> 16) rom.freeAt(old);
   if (!s) { setPtr(rom, p.table, n, 0); return; }

@@ -75,7 +75,8 @@ When a level is displayed, it runs the ROM's **original loading routines** (~15 
 * **Prefabs:** save selected objects (e.g. an arrangement of Direct Map16 blocks) as a prefab
   (Palette → Objects → Prefabs → "Selection as prefab"). In the level it is then a single 4-byte object;
   cells that belong to none of the selected objects are transparent. Changing a prefab affects
-  all levels. "Break up" turns a placed prefab back into individual Direct Map16 objects.
+  all levels. "Break up" turns a placed prefab back into the objects it was made from (or individual
+  Direct Map16 objects where those would look different).
   Pasting the same Direct Map16 arrangement a third time (in any level) suggests saving it as a prefab
   when that saves bytes; the hint never blocks editing, ✕ stops it for that arrangement.
   `.smwlevel` files carry along the prefabs they use.

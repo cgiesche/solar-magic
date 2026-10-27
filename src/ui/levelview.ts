@@ -1288,7 +1288,7 @@ export class LevelView {
         { label: 'Send to back', shortcut: 'PgDn', title: 'Drawn before all other objects', onClick: () => app.reorderSelection('back') },
         // a placed prefab alone is one already: it can only be broken up
         'sep', n === 1 && isPlacedPrefab(one as LevelObject)
-          ? { label: 'Break up', title: 'Replace the prefab here with single Direct Map16 objects (to edit it, then “Save as prefab …” again)', onClick: () => app.explodePrefab(one as LevelObject) }
+          ? { label: 'Break up', title: 'Replace the prefab here with the objects it was made from, or single Direct Map16 objects where those would look different (to edit it, then “Save as prefab …” again)', onClick: () => app.explodePrefab(one as LevelObject) }
           : { label: 'Save as prefab …', onClick: () => openSavePrefab(app) });
       items.push('sep', { label: 'Properties', onClick: () => app.emit('properties') });
     } else {
