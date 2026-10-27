@@ -105,6 +105,7 @@ export class Map16Tab implements WsPanel {
   private search = h('input', { type: 'text', class: 'mt-search', placeholder: 'Tile no. (hex), name or block file …', spellcheck: false, autocomplete: 'off',
     title: 'Dims the tiles that do not match; Enter selects the tile once only one is left' });
   private match: number[] | null = null;
+  private exactName: string | null = null; // the search holds a name from the central search: only its tiles match
   private scrollPending = false; // selected while hidden: scroll there when shown
   private builder = h('div', { class: 'mt-builder' });
   private builderCol = h('div', { class: 'mt-col mt-builder-col' }, this.builder);
@@ -175,24 +176,25 @@ export class Map16Tab implements WsPanel {
   get selected(): { tile: number; bg: boolean } { return { tile: this.sel, bg: this.bg }; }
 
   select(tile: number, bg = false): void {
-    this.bg = bg;
-    this.sel = tile & (EXT_TILES - 1);
-    this.selW = this.selH = 1;
-    this.marksOf = '';
-    if (this.visible) { this.buildBar(); this.redraw(); this.scrollToSel(); } else this.scrollPending = true;
+    this.selectRect(tile & (EXT_TILES - 1), 1, 1, bg);
   }
 
-  // the tiles of a name (central search): the rectangle around them when they are connected, else the
-  // first; the sheet search is set to the name, so it marks all of them
+  // the tiles of a name (central search): selected when they fill a rectangle, else the first; the sheet
+  // search is set to the name and marks exactly them
   selectNamed(name: string, tiles: number[], bg: boolean): void {
-    const r = connectedRect(tiles) ?? { first: tiles[0], w: 1, h: 1 };
+    const r = connectedRect(tiles);
+    this.search.value = this.exactName = name;
+    if (r && r.w * r.h === tiles.length) this.selectRect(r.first, r.w, r.h, bg);
+    else this.selectRect(tiles[0], 1, 1, bg);
+  }
+
+  private selectRect(first: number, w: number, hgt: number, bg: boolean): void {
     this.bg = bg;
-    this.sel = r.first;
-    this.selW = r.w;
-    this.selH = r.h;
+    this.sel = first;
+    this.selW = w;
+    this.selH = hgt;
     this.marksOf = '';
-    this.search.value = name;
-    this.findMatches();
+    if (this.match || this.exactName !== null) this.findMatches();
     if (this.visible) { this.buildBar(); this.redraw(); this.scrollToSel(); } else this.scrollPending = true;
   }
 
@@ -547,11 +549,14 @@ export class Map16Tab implements WsPanel {
   // custom blocks are FG tiles only
   private findMatches(): void {
     const names = namesOf(this.app.rom, this.kind());
+    if (this.exactName !== null && this.search.value === this.exactName) { this.match = [...names].filter(([, v]) => v === this.exactName).map(([t]) => t); return; }
+    this.exactName = null;
     this.match = tileMatches(this.search.value, EXT_TILES, this.bg ? [names] : [blockFilesByTile(this.app.rom), names]);
   }
   private clearSearch(): void {
     this.search.value = '';
     this.match = null;
+    this.exactName = null;
     this.drawSheet();
   }
 

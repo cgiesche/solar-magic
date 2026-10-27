@@ -144,9 +144,13 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   const testHere = () => { const hv = view.hover; openTestPlay(app, hv ? { tx: hv.tx, ty: hv.ty } : undefined); };
   // central search (Ctrl+F or Ctrl+Space): a result is shown in the level workspace
   // (named Map16 tiles in the Map16 tab)
-  const search = () => openSearch([...palette.searchProviders().map((p): SearchProvider => ({
-    ...p, search: (terms) => p.search(terms).map((r) => ({ ...r, pick: () => void setWorkspace('level').then((ok) => { if (ok) r.pick(); }) })),
-  })), tileNamesProvider(app, (name, tiles, bg) => void setWorkspace('gfx', { tab: 'map16' }).then((ok) => { if (ok) ws!.showMap16Named(name, tiles, bg); }))]);
+  const search = () => {
+    const inLevel = palette.searchProviders().map((p): SearchProvider => ({
+      ...p, search: (terms) => p.search(terms).map((r) => ({ ...r, pick: () => void setWorkspace('level').then((ok) => { if (ok) r.pick(); }) })),
+    }));
+    const named = tileNamesProvider(app, (name, tiles, bg) => void setWorkspace('gfx', { tab: 'map16' }).then((ok) => { if (ok) ws!.showMap16Named(name, tiles, bg); }));
+    openSearch([...inLevel, named]);
+  };
   const insertHere = () => { const hv = view.hover, c = view.centerTile(); openInsertDialog(app, hv ? hv.tx : c.tx, hv ? hv.ty : c.ty); };
   const menus = menuBar([
     { label: 'File', items: [

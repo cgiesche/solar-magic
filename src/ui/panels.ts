@@ -876,7 +876,6 @@ function itemBadge(app: App, items: number[], cls = 'pal-items'): HTMLElement | 
   return h('div', { class: cls }, ...imgs.map(cloneCanvas));
 }
 
-// `count` tiles from `base`, 16 per row
 // the named Map16 tiles for the central search: one result per name (FG and BG apart), its preview the
 // rectangle around the tiles when they are connected, else the first tile; show() opens them in the Map16 tab
 export function tileNamesProvider(app: App, show: (name: string, tiles: number[], bg: boolean) => void): SearchProvider {
@@ -907,6 +906,7 @@ export function tileNamesProvider(app: App, show: (name: string, tiles: number[]
   };
 }
 
+// `count` tiles from `base`, 16 per row
 export function renderMap16Sheet(app: App, bg = false, base = 0, count = 512): HTMLCanvasElement {
   const r = app.render;
   const tc = new TileCache(r.vram, r.cgram, (bg ? r.ppuRegs[0x0b] >> 4 : r.ppuRegs[0x0b] & 0x0f) << 13);
