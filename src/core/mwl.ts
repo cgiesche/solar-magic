@@ -33,6 +33,7 @@ import {
   hasLayer2Objects, hasObjects, parseSprites, spriteSizes, hasLevelSize, isSized, MAX_LEVEL_SIZE, SUBSCREEN_ROWS, SWAPPED_JUMP,
 } from './level.ts';
 import { DM16_EXT } from './patches.ts';
+import { OBJ_2D, objectLength2D } from './obj2d.ts';
 import { condOf, type Dm16Cond } from './cdm16.ts';
 import { EXT_FIRST, EXT_TILES } from './map16ext.ts';
 import { parseList, type ExList } from './exanim.ts';
@@ -92,10 +93,13 @@ export function mwlExAnim(d: Uint8Array): ExList | null {
   return ex.some((b) => b !== 0) ? parseList(ex).list : null;
 }
 
+const LM_LEN_2D = 5; // object 2D in Lunar Magic's level files
+
 // layer 1/2 objects with Lunar Magic's Direct Map16 objects as the editor's; `notes`: what is left out
 // sized: a level with a size, whose screen jumps have a subscreen (parseObjects)
 // tile: the Map16 tile a Direct Map16 tile of the file is here (default: the same); one from 1000 on is left out
-export function parseLmObjects(data: Uint8Array, start: number, vertical: boolean, notes: string[], sized = false, tile: (t: number) => number = (t) => t): { objects: LevelObject[]; exits: ScreenExit[] } {
+// len2d: object 2D's length in the ROM (objectLength2D); the file's are 5 bytes, kept where the ROM reads them so
+export function parseLmObjects(data: Uint8Array, start: number, vertical: boolean, notes: string[], sized = false, tile: (t: number) => number = (t) => t, len2d = 3): { objects: LevelObject[]; exits: ScreenExit[] } {
   const objects: LevelObject[] = [];
   const exits: ScreenExit[] = [];
   let p = start, screen = 0, sub = 0, custom = 0, high = 0, cut = false;
@@ -138,11 +142,16 @@ export function parseLmObjects(data: Uint8Array, start: number, vertical: boolea
       p += len;
       continue;
     }
-    if (num === 0x2d) { custom++; p += 5; continue; } // Lunar Magic's custom objects
+    if (num === OBJ_2D) { // Lunar Magic's custom objects
+      if (len2d === LM_LEN_2D) objects.push({ uid: newUid(), num, ext: 0, x, y, size: b2, extension: [data[p + 3], data[p + 4]] });
+      else custom++;
+      p += LM_LEN_2D;
+      continue;
+    }
     objects.push({ uid: newUid(), num, ext: num === 0 ? b2 : 0, x, y, size: num === 0 ? 0 : b2 });
     p += 3;
   }
-  if (custom) notes.push(`${custom} custom object(s) (Lunar Magic object 2D) left out`);
+  if (custom) notes.push(`${custom} custom object(s) (Lunar Magic object 2D) left out: the ROM has no code that reads them as 5 bytes`);
   if (high) notes.push(`${high} Direct Map16 object(s) with tiles from 1000 on left out – the editor has tiles up to FFF`);
   return { objects, exits };
 }
@@ -182,11 +191,12 @@ export function sampleLevel(rom: Rom, d: Uint8Array, into: Level, map: SampleMap
     if (t >= EXT_FIRST) others.add(t);
     return t;
   };
-  const l1 = hasObjects(header.mode) ? parseLmObjects(s.layer1, 5, vert1, notes, isSized(secondary), tile) : { objects: [], exits: [] };
+  const len2d = objectLength2D(rom);
+  const l1 = hasObjects(header.mode) ? parseLmObjects(s.layer1, 5, vert1, notes, isSized(secondary), tile, len2d) : { objects: [], exits: [] };
   let layer2Objects: LevelObject[] | null = null, layer2Header: Uint8Array | null = null;
   if (s.layer2 && hasLayer2Objects(header.mode) && s.layer2.length !== 0x800) {
     layer2Header = s.layer2.slice(0, 5);
-    layer2Objects = parseLmObjects(s.layer2, 5, isL2Vertical(rom, header.mode), notes, false, tile).objects;
+    layer2Objects = parseLmObjects(s.layer2, 5, isL2Vertical(rom, header.mode), notes, false, tile, len2d).objects;
   }
   if (others.size) notes.push(`Uses Map16 tiles the package does not bring: ${[...others].map((t) => hx(t, 3)).join(', ')}`);
   const ps = parseSprites(s.sprites, 0, vert1, spriteSizes(rom));

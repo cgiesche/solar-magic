@@ -8,6 +8,7 @@ import { applyPatch } from '../src/core/patchapply.ts';
 import { parseObjects, serializeObjects, newUid, loadLevel, type LevelObject } from '../src/core/level.ts';
 import { objectLength2D } from '../src/core/obj2d.ts';
 import { saveLevel } from '../src/core/save.ts';
+import { parseLmObjects } from '../src/core/mwl.ts';
 import { editorImage } from './fixture.ts';
 
 await loadAsar();
@@ -73,6 +74,16 @@ check(objectLength2D(hooked) === 5, `once the hook is installed (the same ROM): 
   const o = again.objects.find((q) => q.num === 0x2d);
   check(!!o && o.extension?.join() === '0,0' && o.x === 0x14 && again.objects.at(-1)?.num === 1 && again.objects.length === lv.objects.length,
     'saved and loaded again: 2D with its extension, the object after it');
+}
+
+// Lunar Magic's level files: 2D is always 5 bytes there; kept where the ROM reads it so, else left out with a note
+{
+  const d = new Uint8Array([0x40, 0xd3, 0x12, 0x07, 0x81, 0x00, 0x14, 0x00, 0xff]);
+  const notes: string[] = [];
+  const kept = parseLmObjects(d, 0, false, notes, false, undefined, 5).objects;
+  check(kept.length === 2 && kept[0].num === 0x2d && kept[0].extension?.join() === '7,129' && kept[1].num === 1 && !notes.length, '.mwl: 2D kept with its extension');
+  const left = parseLmObjects(d, 0, false, notes).objects;
+  check(left.length === 1 && left[0].num === 1 && notes.some((n) => n.includes('2D')), '.mwl without the hook: 2D left out with a note');
 }
 
 process.exit(fail ? 1 : 0);
