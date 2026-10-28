@@ -8,9 +8,10 @@ import { cameraReachJob, cameraAtJob, cameraAtKey, type CameraReach } from '../s
 import type { ScanLevel } from '../src/core/levelscan.ts';
 import { loadLevel, serializeLayer1, serializeSprites, isL1Vertical, newUid, type Level } from '../src/core/level.ts';
 import { installEditorPatch, DM16_EXT } from '../src/core/patches.ts';
-import { GM, RAM, cameraY, setMarioPos } from '../src/core/ram.ts';
+import { RAM, cameraY, setMarioPos } from '../src/core/ram.ts';
 import { VERTICAL_SCROLL } from '../src/core/names.ts';
 import { GAME_VIEW_W, GAME_VIEW_H } from '../src/core/camerabands.ts';
+import { PlaySession } from '../src/core/playsession.ts';
 
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
@@ -62,9 +63,8 @@ const every = (r: CameraReach | null, f: (s: [number, number] | null) => boolean
     const lv = loadLevel(rom, 0x105);
     lv.header.verticalScroll = v;
     lv.objects.push({ uid: newUid(), num: 0, ext: DM16_EXT, x: 0x20, y: 0x06, size: 0x0f, tile: 0x130 });
-    emu.load(0x105, { layer1: serializeLayer1(rom, lv), sprites: serializeSprites(lv.sprites, lv.spriteHeader, false) });
+    PlaySession.start(emu, 0x105, { ov: { layer1: serializeLayer1(rom, lv), sprites: serializeSprites(lv.sprites, lv.spriteHeader, false) }, until: 'settled' });
     const s = emu.snes, w = s.wram;
-    for (let f = 0; f < 300 && !(w[RAM.gameMode] === GM.level && w[RAM.marioAnim] === 0 && !w[RAM.spritesLocked]); f++) s.runFrame();
     setMarioPos(w, 0x220, 0x60 - 40);
     for (let f = 0; f < 200; f++) { if (climb) w[RAM.marioClimbing] = 1; w[RAM.hurtTimer] = 0x40; s.runFrame(); }
     return cameraY(w);

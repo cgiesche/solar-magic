@@ -7,6 +7,7 @@ import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { importGfxFile } from '../src/core/gfxfiles.ts';
 import { GM, RAM } from '../src/core/ram.ts';
+import { PlaySession } from '../src/core/playsession.ts';
 import { levelLayer3, setLevelLayer3, layer3Entry, fitsLayer3Slot, lt3SizeFor, LT3_SIZES, type Layer3Gfx } from '../src/core/layer3gfx.ts';
 import { setGfxEntry } from '../src/core/patches.ts';
 import { cleanImage, editorImage } from './fixture.ts';
@@ -53,17 +54,16 @@ const none: Layer3Gfx = { lt3: 0xff, dest: 0, size: 0, lg: [0xff, 0xff, 0xff, 0x
   check(!differ(r.vram, c.vram, 0x4800, 0x4c00), 'LG3: the game\'s file 2A');
   // from there into a level without its own files (through a sublevel exit, as a pipe), and to the
   // overworld: the game's files again
-  const s = emu.snes, w = s.wram, inLevel = s.saveState();
+  const s = emu.snes, w = s.wram, inLevel = s.saveState(), p = PlaySession.resume(emu);
   w[RAM.sublevelCount] = 1; w[RAM.screenExitLo] = 0x06; w[RAM.useSecondaryExit] = 0; w[RAM.gameMode] = GM.levelLoad;
-  for (let f = 0; f < 400 && w[RAM.gameMode] !== GM.level; f++) s.runFrame();
-  check(w[RAM.gameMode] === GM.level && !differ(s.vram, c.vram, 0x4000, 0x5000), 'a level without them after it: layer 3 graphics 28-2B again');
+  check(p.follow() === 'level' && !differ(s.vram, c.vram, 0x4000, 0x5000), 'a level without them after it: layer 3 graphics 28-2B again');
   s.loadState(inLevel);
   w[RAM.gameMode] = GM.overworldLoad;
-  for (let f = 0; f < 400 && w[RAM.gameMode] !== GM.overworld; f++) s.runFrame();
+  const there = p.follow();
   const s0 = ev.snes;
   s0.wram[RAM.gameMode] = GM.overworldLoad;
-  for (let f = 0; f < 400 && s0.wram[RAM.gameMode] !== GM.overworld; f++) s0.runFrame();
-  check(w[RAM.gameMode] === GM.overworld && !differ(s.vram, s0.vram, 0x4000, 0x5000), 'the overworld after it: layer 3 graphics 28-2B as in the clean game');
+  PlaySession.resume(ev).follow();
+  check(there === 'overworld' && !differ(s.vram, s0.vram, 0x4000, 0x5000), 'the overworld after it: layer 3 graphics 28-2B as in the clean game');
 }
 
 // which files the slots take: LG 2bpp graphics (uncompressed or the game's compressed ones), LT3 uncompressed

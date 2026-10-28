@@ -7,6 +7,8 @@ import { LevelEmulator } from '../src/core/levelemu.ts';
 import { PPU } from '../src/core/ppu.ts';
 import { loadAsar } from '../src/core/asar.ts';
 import { installVramPatch } from '../src/core/vrampatch.ts';
+import { PlaySession } from '../src/core/playsession.ts';
+import { GM, RAM, PAD } from '../src/core/ram.ts';
 
 await loadAsar();
 let bad = 0;
@@ -23,7 +25,7 @@ const levels = only ?? (all ? Array.from({ length: 0x200 }, (_, i) => i) : [...A
 const frames = Number(process.argv.find((a) => a.startsWith('--frames='))?.slice(9) ?? 360);
 const ev = new LevelEmulator(vanilla); ev.boot();
 const ep = new LevelEmulator(rom); ep.boot();
-const input = (f: number) => 0x4100 | (f % 70 < 34 ? 0x8000 : 0) | (f % 200 > 150 ? 0x0200 : 0) | (f % 300 > 240 ? 0x0800 : 0);
+const input = (f: number) => PAD.y | PAD.right | (f % 70 < 34 ? PAD.b : 0) | (f % 200 > 150 ? PAD.left : 0) | (f % 300 > 240 ? PAD.up : 0);
 
 // per game frame ($13 advances; lag frames from the extra code don't count), from entering game mode $14
 // both ROMs step per game frame ($13 advances; lag frames don't count), from entering game mode $14.
@@ -56,10 +58,10 @@ for (const n of levels) {
   const orig = (B as any).writeIO.bind(B);
   (B as any).writeIO = (a: number, v: number) => {
     // (only where the new layout is active: boss/mode 7 rooms keep the game's own VRAM use)
-    if ((a === 0x2118 || a === 0x2119) && B.wram[0x13602] === 1 && B.wram[0x100] >= 0x11 && B.wram[0x100] <= 0x14 && ((B as any).vramAddrMapped() & 0x7fff) >= 0x2000 && ((B as any).vramAddrMapped() & 0x7fff) < 0x3000) touched++;
+    if ((a === 0x2118 || a === 0x2119) && B.wram[0x13602] === 1 && B.wram[RAM.gameMode] >= GM.levelLoad && B.wram[RAM.gameMode] <= GM.level && ((B as any).vramAddrMapped() & 0x7fff) >= 0x2000 && ((B as any).vramAddrMapped() & 0x7fff) < 0x3000) touched++;
     return orig(a, v);
   };
-  for (const s of [A, B]) { let g = 0; while (s.wram[0x100] !== 0x14 && g++ < 200) s.runFrame(); }
+  for (const e of [ev, ep]) PlaySession.resume(e).until('gameplay');
   let firstBad = -1;
   const lag = [0, 0]; // lag frames of this level so far
   for (let f = 0; f < frames; f++) {
@@ -71,7 +73,7 @@ for (const n of levels) {
     }
     // after a lag frame in only one run, an extra NMI has already uploaded what the other uploads next
     // frame: compare only while both had the same number of lag frames
-    const same = lag[0] === lag[1] && [0x13, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20, 0x21, 0x5b].every((a) => A.wram[a] === B.wram[a]) && A.wram[0x100] === 0x14 && B.wram[0x100] === 0x14;
+    const same = lag[0] === lag[1] && [0x13, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20, 0x21, 0x5b].every((a) => A.wram[a] === B.wram[a]) && A.wram[RAM.gameMode] === GM.level && B.wram[RAM.gameMode] === GM.level;
     if (!same) { stateFrames++; continue; }
     checked++;
     for (const layer of [1, 2] as const) {

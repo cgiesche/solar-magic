@@ -13,7 +13,8 @@ import { GPS_ROUTINES } from '../src/core/gpsroutines.ts';
 import { listPatches } from '../src/core/patchreg.ts';
 import { saveBlockProject, loadBlockProject, removeBlocks, parseBlockList, writeBlockList, type BlockProject } from '../src/core/blocks.ts';
 import { editorImage } from './fixture.ts';
-import { RAM } from '../src/core/ram.ts';
+import { RAM, PAD } from '../src/core/ram.ts';
+import { PlaySession } from '../src/core/playsession.ts';
 
 const EDITOR_IMAGE = await editorImage(); // the fixture as the editor opens it
 
@@ -63,12 +64,10 @@ const withWall = (tile: number, floor = REF): LevelOverride => {
   return { layer1: serializeLayer1(rom, lv), sprites: serializeSprites(lv.sprites, lv.spriteHeader, isL1Vertical(rom, lv.header.mode)) };
 };
 function play(tile: number, frames = 300, floor = REF, jump = true): { x: number; bits: number; dbr: number; bank: number } {
-  emu.load(0x105, withWall(tile, floor));
-  const s = emu.snes, w = s.wram;
-  let g = 0; while (w[0x100] !== 0x14 && g++ < 100) s.runFrame();
+  const p = PlaySession.start(emu, 0x105, { ov: withWall(tile, floor) }), w = p.wram;
   w[0x1b010] = 0; w[0x1b011] = 0; w[0x1b012] = 0; w[0x1b013] = 0;
-  for (let f = 0; f < frames; f++) { s.joy1 = 0x4100 | (jump && f % 50 < 22 ? 0x8000 : 0); s.runFrame(); }
-  s.joy1 = 0;
+  for (let f = 0; f < frames; f++) p.frame(PAD.y | PAD.right | (jump && f % 50 < 22 ? PAD.b : 0));
+  p.close();
   return { x: w[0x94] | (w[0x95] << 8), bits: w[0x1b010] | (w[0x1b011] << 8), dbr: w[0x1b012], bank: w[0x1b013] };
 }
 // (the passable run doesn't jump: sprites still see the block as solid and gather at it)

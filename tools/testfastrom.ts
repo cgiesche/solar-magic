@@ -5,7 +5,8 @@
 // in the fast banks with $420D = 1 cost 6 master cycles instead of 8).
 import { Rom, pcToSnes } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
-import { GM, RAM } from '../src/core/ram.ts';
+import { PAD } from '../src/core/ram.ts';
+import { PlaySession } from '../src/core/playsession.ts';
 import { loadAsar } from '../src/core/asar.ts';
 import { applyPatch } from '../src/core/patchapply.ts';
 import { cleanGameBytes } from '../src/core/cleangame.ts';
@@ -40,7 +41,7 @@ const clean = new Rom(cleanImage()).data, image = await editorImage();
 {
   const rom = new Rom(image.slice());
   const emu = new LevelEmulator(rom);
-  const s = emu.snes, cpu = s.cpu, w = s.wram;
+  const s = emu.snes, cpu = s.cpu;
   const banks = { main: new Set<number>(), nmi: new Set<number>(), irq: new Set<number>() };
   const at = { main: 0x806b, nmi: 0x816a, irq: 0x8374 }; // the game's wait loop, NMI, IRQ
   let fast = 0, slow = 0;
@@ -65,12 +66,12 @@ const clean = new Rom(cleanImage()).data, image = await editorImage();
   };
   emu.boot();
   check(s.memsel === 1, `$420D = 1 after boot (${s.memsel})`);
-  const input = (f: number) => 0x4100 | (f % 70 < 34 ? 0x8000 : 0) | (f % 200 > 150 ? 0x0200 : 0) | (f % 300 > 240 ? 0x0800 : 0);
+  const input = (f: number) => PAD.y | PAD.right | (f % 70 < 34 ? PAD.b : 0) | (f % 200 > 150 ? PAD.left : 0) | (f % 300 > 240 ? PAD.up : 0);
   const levels = [...Array(0x25).keys(), ...Array.from({ length: 0x3b }, (_, i) => 0x101 + i)];
   for (const n of levels) {
-    if (!emu.load(n).ok) continue;
-    for (let g = 0; w[RAM.gameMode] !== GM.level && g < 200; g++) s.runFrame();
-    for (let f = 0; f < 200; f++) { s.joy1 = input(f); s.runFrame(); }
+    const p = PlaySession.start(emu, n);
+    if (!p.render?.ok) continue;
+    for (let f = 0; f < 200; f++) p.frame(input(f));
   }
   for (const k of ['main', 'nmi', 'irq'] as const) check(banks[k].size > 0 && [...banks[k]].every((b) => b >= 0x80), `${k} runs in the fast banks: ${[...banks[k]].map((b) => hex(b, 2)).join(' ')}`);
   const share = slow / (fast + slow);

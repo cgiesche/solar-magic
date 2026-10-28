@@ -11,7 +11,8 @@ import {
   OverworldEmulator, readL1, readTranslevels, hasLevelFlagsPatch, initialFlags, setInitialFlags, exitDirections, setExitDirection,
   baseEvent, setBaseEvent, revealEvents, setRevealEvents, revealAt, revealedTile, resetTranslevel, translevelUse, FLAG, DIR_FLAGS, MAX_TRANSLEVEL, OW_EVENTS,
 } from '../src/core/overworld.ts';
-import { GM, RAM } from '../src/core/ram.ts';
+import { GM, RAM, PAD } from '../src/core/ram.ts';
+import { PlaySession } from '../src/core/playsession.ts';
 import { cleanImage, editorImage } from './fixture.ts';
 
 let bad = 0;
@@ -32,7 +33,7 @@ function enter(emu: LevelEmulator, i: number): number | null {
   emu.startGameAt(i);
   const s = emu.snes, w = s.wram;
   for (let f = 0; f < 400; f++) {
-    s.joy1 = f % 8 < 2 ? 0x0080 : 0;
+    s.joy1 = f % 8 < 2 ? PAD.a : 0;
     s.runFrame();
     if (w[RAM.gameMode] === GM.levelLoad) { s.joy1 = 0; return w[RAM.translevel]; }
   }
@@ -42,19 +43,16 @@ function enter(emu: LevelEmulator, i: number): number | null {
 // a new game, the level of tile i entered and passed with `exit` (1 normal, 2–4 secret exits 1–3), until the
 // overworld has run its event: the translevel's flags before and after, whether the save prompt came up
 function pass(rom: Rom, i: number, exit: number): { before: number; after: number; prompt: boolean } | null {
-  const e = new LevelEmulator(rom);
-  const tl = enter(e, i);
-  if (tl === null) return null;
-  const s = e.snes, w = s.wram;
-  for (let f = 0; f < 600 && w[RAM.gameMode] !== GM.level; f++) s.runFrame();
-  if (w[RAM.gameMode] !== GM.level) return null;
+  const p = PlaySession.overworld(new LevelEmulator(rom), i);
+  if (!p.enter()) return null;
+  const w = p.wram, tl = w[RAM.translevel];
   const before = w[RAM.levelFlags + tl];
   // as a goal: the level passed with the exit, the overworld loaded after it
   w[RAM.levelExit] = exit; w[RAM.midwayTouched] = 1; w[RAM.levelBeaten] = 1;
   w[RAM.gameMode] = GM.overworldReturn;
-  let prompt = false, f = 0;
-  for (; f < 2000 && w[RAM.gameMode] !== GM.overworld; f++) s.runFrame();
-  for (let k = 0; k < 600; k++) { s.runFrame(); if (w[RAM.savePrompt]) prompt = true; }
+  let prompt = false;
+  p.follow();
+  for (let k = 0; k < 600; k++) { p.frame(); if (w[RAM.savePrompt]) prompt = true; }
   return w[RAM.gameMode] === GM.overworld ? { before, after: w[RAM.levelFlags + tl], prompt } : null;
 }
 

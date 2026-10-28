@@ -7,9 +7,9 @@
 // node tools/testlagmeter.ts
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
-import { levelTranslevel } from '../src/core/level.ts';
 import { LINES_PER_FRAME, type Snes } from '../src/core/snes.ts';
-import { GM, RAM, marioX, marioY } from '../src/core/ram.ts';
+import { GM, RAM, PAD, MARIO_DYING, marioX, marioY } from '../src/core/ram.ts';
+import { PlaySession } from '../src/core/playsession.ts';
 import { PlayLog, cpuLoad, LAG } from '../src/core/playlog.ts';
 import { cleanImage, editorImage } from './fixture.ts';
 
@@ -48,33 +48,25 @@ const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL
 
 // ---------- the game ----------
 // the game played: the clean one, at the end the ROM as the editor opens it
-let rom = new Rom(cleanImage()), emu = new LevelEmulator(rom);
-const open = (image: Uint8Array) => { rom = new Rom(image); emu = new LevelEmulator(rom); emu.boot(); };
+let emu = new LevelEmulator(new Rom(cleanImage()));
+const open = (image: Uint8Array) => { emu = new LevelEmulator(new Rom(image)); emu.boot(); };
 open(cleanImage());
 // k frames walking right (running, jumping every 40 frames), until the level ends (stop); the log of them
-function play(k: number, stop: boolean, each?: (f: number) => void): PlayLog {
-  const s = emu.snes, log = new PlayLog(k);
+function play(p: PlaySession, k: number, stop: boolean, each?: (f: number) => void): PlayLog {
+  const log = new PlayLog(k);
   const used = { sprite: 0, extended: 0, cluster: 0 };
-  for (let i = 0; i < 80 && s.wram[RAM.gameMode] !== GM.level; i++) s.runFrame(); // as test play starts
   for (let f = 0; f < k; f++) {
-    s.joy1 = 0x0100 | 0x4000 | (f % 40 < 10 ? 0x8000 : 0);
     each?.(f);
-    const mode = s.wram[RAM.gameMode];
-    s.runFrame();
-    if (stop && s.wram[RAM.gameMode] !== GM.level) break;
-    log.frame(f, used, [], cpuLoad(s, mode), marioX(s.wram), marioY(s.wram));
+    const load = p.frame(PAD.right | PAD.y | (f % 40 < 10 ? PAD.b : 0));
+    if (stop && p.mode !== GM.level) break;
+    log.frame(f, used, [], load, marioX(p.wram), marioY(p.wram));
   }
   return log;
 }
-const inGame = (lv: number) => {
-  const tl = levelTranslevel(rom, lv);
-  emu.startGame(tl);
-  emu.loadInGame(lv, tl);
-};
+const inGame = (lv: number) => PlaySession.start(emu, lv, { game: {} });
 const vanillaLevels = (what: string) => {
   for (const lv of [0x105, 0x106, 0x10b, 0x1]) {
-    inGame(lv);
-    const log = play(900, true), busy = log.history.map((f) => f.busy).filter((b) => b !== LAG);
+    const log = play(inGame(lv), 900, true), busy = log.history.map((f) => f.busy).filter((b) => b !== LAG);
     check(log.lagFrames === 0 && log.history.length > 300, `${what}: level ${lv.toString(16)} played: no lag frame (${log.lagFrames} in ${log.history.length} frames)`);
     check(busy.every((b) => b > 0 && b < LINES_PER_FRAME) && Math.max(...busy) > Math.min(...busy),
       `${what}: level ${lv.toString(16)}: a load in every frame, it varies (${Math.min(...busy)}–${Math.max(...busy)} of ${LINES_PER_FRAME} lines)`);
@@ -87,16 +79,14 @@ vanillaLevels('the clean game');
   const col = 0x28, row = 0x14, sprites = [0x00];
   for (let i = 0; i < 8; i++) sprites.push(((row & 15) << 4) | ((row >> 4) & 1), (((col + i) & 15) << 4) | ((col + i) >> 4), 0x86);
   sprites.push(0xff);
-  emu.load(0x105, { sprites: new Uint8Array(sprites) });
-  const log = play(600, true);
+  const log = play(PlaySession.start(emu, 0x105, { ov: { sprites: new Uint8Array(sprites) } }), 600, true);
   check(log.lagFrames >= 3 && log.lags.length > 0, `eight Wigglers: lag frames (${log.lagFrames} in ${log.lags.length} events)`);
   const worst = log.worstLag();
   check(!!worst && worst.tx > col - 20 && worst.tx < col + 12, `the worst lag where Mario came near them (tile ${worst?.tx.toString(16)})`);
 }
 {
   // Mario dies: the game fades out and loads the overworld, frames it spends busy but no lag of the level
-  inGame(0x105);
-  const log = play(400, false, (f) => { if (f === 60) emu.snes.wram[RAM.marioAnim] = 9; });
+  const log = play(inGame(0x105), 400, false, (f) => { if (f === 60) emu.snes.wram[RAM.marioAnim] = MARIO_DYING; });
   check(log.lagFrames === 0, `a death and the overworld loaded after it: no lag frame (${log.lagFrames})`);
   check(log.history.some((f) => f.busy === LINES_PER_FRAME), 'loading frames are shown fully busy');
 }

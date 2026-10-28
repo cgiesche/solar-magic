@@ -9,7 +9,8 @@ import { Snes } from '../src/core/snes.ts';
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { levelTranslevel } from '../src/core/level.ts';
-import { RAM, SPR, marioX } from '../src/core/ram.ts';
+import { RAM, SPR, PAD, marioX } from '../src/core/ram.ts';
+import { PlaySession } from '../src/core/playsession.ts';
 import { SlotWatch, SLOT_TABLES, type SlotKind, type SlotFailure } from '../src/core/slotwatch.ts';
 import { PlayLog } from '../src/core/playlog.ts';
 
@@ -84,17 +85,15 @@ const emu = new LevelEmulator(rom);
 emu.boot();
 // k frames walking right (running, jumping every 40 frames, Y pressed every few); the failures and Mario's X then
 function play(k: number, fire = false): { failed: (SlotFailure & { x: number })[] } {
-  const s = emu.snes, watch = new SlotWatch(s);
-  s.hook = watch.hook;
+  const p = PlaySession.resume(emu), w = p.wram, watch = p.watch((s) => new SlotWatch(s));
   const failed: (SlotFailure & { x: number })[] = [];
   try {
     for (let f = 0; f < k; f++) {
-      if (fire) s.wram[RAM.powerup] = 3;
-      s.joy1 = 0x0100 | (f % 6 < 3 ? 0x4000 : 0) | (f % 40 < 10 ? 0x8000 : 0);
-      s.runFrame();
-      for (const f of watch.take()) failed.push({ ...f, x: marioX(s.wram) });
+      if (fire) w[RAM.powerup] = 3;
+      p.frame(PAD.right | (f % 6 < 3 ? PAD.y : 0) | (f % 40 < 10 ? PAD.b : 0));
+      for (const f of watch.take()) failed.push({ ...f, x: marioX(w) });
     }
-  } finally { s.hook = null; }
+  } finally { p.close(); }
   return { failed };
 }
 {

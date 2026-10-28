@@ -7,6 +7,7 @@ import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { importGfxFile } from '../src/core/gfxfiles.ts';
 import { GM, RAM } from '../src/core/ram.ts';
+import { PlaySession } from '../src/core/playsession.ts';
 import { levelLayer3, setLevelLayer3, type Layer3Gfx } from '../src/core/layer3gfx.ts';
 import { gfxEntry, setGfxEntry, freeGfx, levelGfx, setLevelGfx, levelExtGfx, setLevelExtGfx, GFX_SLOT_NAMES, MAX_GFX, gfxRangeFor, gfxNumberProblem, gfxDataSize, installEditorPatch } from '../src/core/patches.ts';
 import { gfxNumber } from '../src/core/levelgfx.ts';
@@ -108,8 +109,7 @@ check(MAX_GFX === 0xfff, 'ExGFX numbers go up to FFF');
   emu3.load(LV);
   const s = emu3.snes, w = s.wram;
   w[RAM.sublevelCount] = 1; w[RAM.screenExitLo] = 0x06; w[RAM.useSecondaryExit] = 0; w[RAM.gameMode] = GM.levelLoad;
-  for (let f = 0; f < 400 && w[RAM.gameMode] !== GM.level; f++) s.runFrame();
-  check(w[RAM.gameMode] === GM.level && same(s.vram.subarray(0, 0x800), other.subarray(0, 0x800)), 'a sublevel with FG1 = 080 after FG1 = 180: ExGFX 080 in VRAM $0000');
+  check(PlaySession.resume(emu3).follow() === 'level' && same(s.vram.subarray(0, 0x800), other.subarray(0, 0x800)), 'a sublevel with FG1 = 080 after FG1 = 180: ExGFX 080 in VRAM $0000');
 }
 
 // SP1 (the sprite slots' upload) from ExGFX 1C0: as the same file under 80

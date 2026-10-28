@@ -7,6 +7,8 @@ import { loadLevel, serializeLayer1, serializeSprites, isL1Vertical, newUid, typ
 import { installEditorPatch, DM16_EXT } from '../src/core/patches.ts';
 import { installMap16Ext, setActsLike, setExtTileWords, actsLike, LM_ACTS_PTRS } from '../src/core/map16ext.ts';
 import { map16Source } from '../src/core/render.ts';
+import { PlaySession } from '../src/core/playsession.ts';
+import { PAD } from '../src/core/ram.ts';
 
 const file = new Uint8Array(readFileSync('test/fixtures/smw.smc'));
 let bad = 0;
@@ -35,11 +37,10 @@ for (const n of list) {
 }
 
 // scripted play: run right with Y, jump periodically; Mario position + camera per game frame
-function play(emu: LevelEmulator, n: number, ov: LevelOverride = {}, frames = 400, input = (f: number) => 0x4100 | (f % 50 < 22 ? 0x8000 : 0)): string {
-  const r = emu.load(n, ov);
+function play(emu: LevelEmulator, n: number, ov: LevelOverride = {}, frames = 400, input = (f: number) => PAD.y | PAD.right | (f % 50 < 22 ? PAD.b : 0)): string {
+  const r = PlaySession.start(emu, n, { ov }).render!;
   if (!r.ok) return 'fail ' + r.error;
   const s = emu.snes, w = s.wram;
-  let g = 0; while (w[0x100] !== 0x14 && g++ < 100) s.runFrame();
   w[0x13] = 0; w[0x14] = 0; w[0x148d] = 0; w[0x148e] = 0; // align frame counters and RNG
   const trace: number[] = [];
   // step per game frame: lag frames (the hooks cost cycles) don't count

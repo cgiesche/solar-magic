@@ -6,6 +6,7 @@ import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadLevel, serializeLayer1, encodeSecondaryHeader, readSecondaryHeader } from '../src/core/level.ts';
 import { renderLevel } from '../src/core/render.ts';
 import { layer3Kind, layer3Kinds, tideRangeJob, layer3Top, type TideRange } from '../src/core/layer3.ts';
+import { PlaySession } from '../src/core/playsession.ts';
 import { editorImage } from './fixture.ts';
 
 let bad = 0;
@@ -36,8 +37,8 @@ check(!!range && range.min < range.load && range.max > range.load, `level 127: t
 
 // Mario swims below the water line: lowest $96 where he doesn't, with the layer 3 offset d
 const lv = loadLevel(rom, 0x127);
-const r0 = emu.load(0x127);
-const top = layer3Top(renderLevel(rom, r0, lv.header.mode, lv.header.screens).layer3, lv.header.screens * 256);
+const p = PlaySession.start(emu, 0x127);
+const top = layer3Top(renderLevel(rom, p.render!, lv.header.mode, lv.header.screens).layer3, lv.header.screens * 256);
 function swimLine(): number {
   const s = emu.snes, w = s.wram, st = s.saveState();
   const swims = (y: number) => {
@@ -52,7 +53,6 @@ function swimLine(): number {
 }
 const d = (w: Uint8Array) => (((w[0x24] | (w[0x25] << 8)) - (w[0x1c] | (w[0x1d] << 8))) << 16) >> 16;
 const s = emu.snes, w = s.wram;
-for (let f = 0; f < 60; f++) s.runFrame();
 const line0 = swimLine(), d0 = d(w), k = line0 - top;
 console.log(`  surface ${top}, swims from $96 = ${line0} (d ${d0})`);
 check(top > 0 && Math.abs(k) <= 32, 'swimming starts at the drawn surface');
