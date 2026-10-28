@@ -5,6 +5,7 @@ import { spriteBankOf, DM16_EXT } from './patches.ts';
 import { PREFAB_EXT } from './prefabs.ts';
 import { COND_MARK, condByte, condOf, type Dm16Cond } from './cdm16.ts';
 import { MAP_SIZE } from './ram.ts';
+import { OBJ_2D, objectLength2D } from './obj2d.ts';
 
 // the timer's hundreds per header time (the game's table, read when a level is entered from the overworld)
 export const TIME_TABLE = 0x0584d7;
@@ -61,6 +62,7 @@ export interface LevelObject {
   tile?: number; // Direct Map16 tile number (extended object $05, editor patch)
   cond?: Dm16Cond; // a Direct Map16 object's flag (cdm16.ts)
   prefab?: number; // prefab number (extended object $04 with the prefab patch, see prefabs.ts)
+  extension?: number[]; // object 2D's bytes after its 3 when a hook reads them (obj2d.ts; LM's "Extension")
 }
 
 export interface ScreenExit {
@@ -321,8 +323,9 @@ export interface ParsedObjects {
 // V * 32 on; the new screen flag keeps it (observed: where the game puts objects in a Lunar Magic-saved ROM).
 // Subscreens 16-31 (size 1C) need Lunar Magic's swapped screen jump, extended object $03 (000VVVVV 0000HHHH
 // 00000011; read from Lunar Magic's code in a Lunar Magic-saved ROM, #117).
+// Object 2D has `len2d` bytes (objectLength2D: 3, or 5 with a hook), those past 3 its extension.
 // `at` receives each exit's offset in `data`
-export function parseObjects(data: Uint8Array, start: number, vertical: boolean, sized = false, at?: number[]): ParsedObjects {
+export function parseObjects(data: Uint8Array, start: number, vertical: boolean, sized = false, at?: number[], len2d = 3): ParsedObjects {
   const objects: LevelObject[] = [];
   const exits: ScreenExit[] = [];
   let p = start;
@@ -378,6 +381,11 @@ export function parseObjects(data: Uint8Array, start: number, vertical: boolean,
       p += 4;
       continue;
     }
+    if (num === OBJ_2D && len2d > 3) {
+      objects.push({ uid: newUid(), num, ext: 0, x, y, size: b2, extension: [...data.subarray(p + 3, p + len2d)] });
+      p += len2d;
+      continue;
+    }
     objects.push({ uid: newUid(), num, ext: num === 0 ? b2 : 0, x, y, size: num === 0 ? 0 : b2 });
     p += 3;
   }
@@ -419,6 +427,9 @@ export function serializeObjects(objects: LevelObject[], exits: ScreenExit[], ve
     } else if (o.num === 0 && o.ext === PREFAB_EXT && o.prefab !== undefined) {
       out.push(o.prefab & 0xff);
       own(4, objects.indexOf(o));
+    } else if (o.num === OBJ_2D && o.extension) {
+      out.push(...o.extension.map((b) => b & 0xff));
+      own(3 + o.extension.length, objects.indexOf(o));
     } else own(3, objects.indexOf(o));
   }
   out.push(0xff);
@@ -553,9 +564,10 @@ export function storedExits(rom: Rom, n: number): { exits: ScreenExit[]; at: num
   const exits: ScreenExit[] = [], at: number[] = [];
   const l1 = rom.r24(L1_PTRS + n * 3), l2 = rom.r24(L2_PTRS + n * 3);
   const d1 = dataWindow(rom, l1), header = parsePrimaryHeader(d1.subarray(0, 5));
+  const len2d = objectLength2D(rom);
   const read = (a: number, d: Uint8Array, vertical: boolean, sized = false) => {
     const offs: number[] = [];
-    exits.push(...parseObjects(d, 5, vertical, sized, offs).exits);
+    exits.push(...parseObjects(d, 5, vertical, sized, offs, len2d).exits);
     at.push(...offs.map((o) => a + o));
   };
   if (hasObjects(header.mode)) read(l1, d1, isL1Vertical(rom, header.mode), isSized(readSecondaryHeader(rom, n)));
@@ -568,13 +580,14 @@ export function storedExits(rom: Rom, n: number): { exits: ScreenExit[]; at: num
 export function parseLevelData(rom: Rom, n: number, l1: Uint8Array, l2: Uint8Array | null, l2Pointer: number, spr: Uint8Array, secondary: SecondaryHeader, sizes: SpriteSizes = spriteSizes(rom)): Level {
   const header = parsePrimaryHeader(l1.subarray(0, 5));
   const vert1 = isL1Vertical(rom, header.mode);
-  const p1 = hasObjects(header.mode) ? parseObjects(l1, 5, vert1, isSized(secondary)) : { objects: [], exits: [], size: 1 };
+  const len2d = objectLength2D(rom);
+  const p1 = hasObjects(header.mode) ? parseObjects(l1, 5, vert1, isSized(secondary), undefined, len2d) : { objects: [], exits: [], size: 1 };
   let layer2Objects: LevelObject[] | null = null;
   let layer2Header: Uint8Array | null = null;
   let l2Size = 0;
   if (l2 && hasLayer2Objects(header.mode)) {
     layer2Header = l2.slice(0, 5);
-    const p2 = parseObjects(l2, 5, isL2Vertical(rom, header.mode));
+    const p2 = parseObjects(l2, 5, isL2Vertical(rom, header.mode), false, undefined, len2d);
     layer2Objects = p2.objects;
     l2Size = 5 + p2.size;
     // exits in layer 2 data are unusual; keep them with layer 1
