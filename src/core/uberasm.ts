@@ -398,20 +398,20 @@ export function buildUberPatch(files: Map<string, Uint8Array>, list: UberList): 
     tables('level', 'Lv', false);
     dispatch('Lv', lvIndex);
     o('UberLevelLoad:', '  SEP #$30', '  PHB', `  LDX #${OFFSET.load}`, '  JSR UberLvDispatch', '  PLB',
-      '  REP #$10', '  PHK', '  PEA.w .ret-1', '  PEA.w $8125-1', '  JML $0583AC', '.ret', '  SEP #$30', '  JML $058091');
+      '  REP #$10', '  PHK', '  PEA.w .ret-1', '  PEA.w $8125-1', '  JML $8583AC', '.ret', '  SEP #$30', '  JML $858091');
     o('UberLevelInit:', '  SEP #$30', '  PHB', `  LDX #${OFFSET.init}`, '  JSR UberLvDispatch', '  PLB',
-      '  PHK', '  PEA.w .ret-1', '  PEA.w $84CF-1', '  JML $00919B', '.ret', '  JML $00A5F3');
+      '  PHK', '  PEA.w .ret-1', '  PEA.w $84CF-1', '  JML $80919B', '.ret', '  JML $80A5F3');
     o('UberLevelMain:', '  PHB', '  LDA $13D4', '  BNE +', '  JSL $7F8000', '+', `  LDX #${OFFSET.main}`, '  JSR UberLvDispatch', '  PLB',
-      '  LDA $13D4', '  BEQ +', '  JML $00A25B', '+', '  JML $00A28A');
-    o('UberLevelEnd:', '  STA $1C', '  PHB', `  LDX #${OFFSET.end}`, '  JSR UberLvDispatch', '  PLB', '  JML $008494');
+      '  LDA $13D4', '  BEQ +', '  JML $80A25B', '+', '  JML $80A28A');
+    o('UberLevelEnd:', '  STA $1C', '  PHB', `  LDX #${OFFSET.end}`, '  JSR UberLvDispatch', '  PLB', '  JML $808494');
   }
   if (used('overworld')) {
     tables('overworld', 'Ow', false);
     dispatch('Ow', owIndex);
     o('UberOwMainEnd:', '  JSL $7F8000', '  PHB', `  LDX #${OFFSET.main}`, '  JSR UberOwDispatch',
-      '  JSL $048241', `  LDX #${OFFSET.end}`, '  JSR UberOwDispatch', '  PLB', '  JML $008494');
-    o('UberOwInit:', '  PHK', '  PEA.w .ret-1', '  PEA.w $84CF-1', '  JML $0092A0', '.ret',
-      '  PHB', `  LDX #${OFFSET.init}`, '  JSR UberOwDispatch', '  PLB', '  JML $0093F4');
+      '  JSL $848241', `  LDX #${OFFSET.end}`, '  JSR UberOwDispatch', '  PLB', '  JML $808494');
+    o('UberOwInit:', '  PHK', '  PEA.w .ret-1', '  PEA.w $84CF-1', '  JML $8092A0', '.ret',
+      '  PHB', `  LDX #${OFFSET.init}`, '  JSR UberOwDispatch', '  PLB', '  JML $8093F4');
   }
   if (used('gamemode')) {
     tables('gamemode', 'Gm', false);
@@ -420,7 +420,7 @@ export function buildUberPatch(files: Map<string, Uint8Array>, list: UberList): 
       '  JSR UberGmDispatch', '  PLB',
       '  LDA !previous_mode', '  CMP #$29', '  BCS .end', '  ASL : TAX', '  LDA $9329,x : STA $00', '  LDA $932A,x : STA $01', '  STZ $02',
       '  PHK', '  PEA.w .end-1', '  PEA.w $84CF-1', '  JML [$0000]',
-      '.end', '  PHB', `  LDX #${OFFSET.end}`, '  JSR UberGmDispatch', '  PLB', '  JML $009326');
+      '.end', '  PHB', `  LDX #${OFFSET.end}`, '  JSR UberGmDispatch', '  PLB', '  JML $809326');
   }
   if (anyNmi) {
     if (nmiUsed('level')) { tables('level', 'LvNmi', true); dispatch('LvNmi', lvIndex); }
@@ -433,17 +433,17 @@ export function buildUberPatch(files: Map<string, Uint8Array>, list: UberList): 
     if (nmiUsed('level')) o(`  LDX #${OFFSET.nmi}`, '  JSR UberLvNmiDispatch');
     o('  BRA .ret', '.ow', '  LDA $0100', '  CMP #$0D : BEQ +', '  CMP #$0E : BNE .ret', '+');
     if (nmiUsed('overworld')) o(`  LDX #${OFFSET.nmi}`, '  JSR UberOwNmiDispatch');
-    o('.ret', '  REP #$20 : PLA : STA $00 : SEP #$20', '  PLB', '  LDA $1DFB', '  JML $00817C');
+    o('.ret', '  REP #$20 : PLA : STA $00 : SEP #$20', '  PLB', '  LDA $1DFB', '  JML $80817C');
   }
   // global code: init (RTS) at power-on, also sets up !previous_mode
-  o('UberGlobalInit:', '  STA $7F8182', '  LDA #$00 : STA !previous_mode+1', '  DEC : STA !previous_mode', '  JSR UberGlobal_init', '  JML $008052');
+  o('UberGlobalInit:', '  STA $7F8182', '  LDA #$00 : STA !previous_mode+1', '  DEC : STA !previous_mode', '  JSR UberGlobal_init', '  JML $808052');
   o('namespace UberGlobal');
   const gl = list.global && files.has(list.global) ? list.global : null;
   if (gl) o(`incsrc "${gl}"`);
   if (!gl || !scanLabels(files, gl).has('init')) o('init:', '  RTS');
   o('namespace off');
   if (list.statusbar && files.has(list.statusbar)) {
-    o('UberStatus:', '  JSR UberStatus_main', '  LDA $1493', '  ORA $9D', '  JML $008E1F', 'namespace UberStatus', `incsrc "${list.statusbar}"`);
+    o('UberStatus:', '  JSR UberStatus_main', '  LDA $1493', '  ORA $9D', '  JML $808E1F', 'namespace UberStatus', `incsrc "${list.statusbar}"`);
     if (!scanLabels(files, list.statusbar).has('main')) o('main:', '  RTS');
     o('namespace off');
   }

@@ -172,10 +172,10 @@ LoadStart2:
 
 ; ---------------------------------------------------------------- shadow copy after a column build
 Build1Frame:
-  JSL $05881A
+  JSL $85881A
   BRA Copy1
 Build1Load:
-  JSL $0588EC
+  JSL $8588EC
 Copy1:
   PHP : SEP #$30
   LDA.l !Act : BEQ .no
@@ -199,10 +199,10 @@ Copy1:
   PLP : RTL
 
 Build2Frame:
-  JSL $058883
+  JSL $858883
   BRA Copy2
 Build2Load:
-  JSL $058955
+  JSL $858955
 Copy2:
   PHP : SEP #$30
   LDA.l !Act : BEQ .no
@@ -239,7 +239,7 @@ VDMA:
 Nmi:
   SEP #$30
   LDA.l !Act : BNE .act
-  LDA $1BE4 : JML $0087B2
+  LDA $1BE4 : JML $8087B2
 .act
   JSR Stream1
   JSR Stream2
@@ -599,7 +599,7 @@ Stripe:
 .van
   PLA
   PHK : PEA.w .ret-1 : PEA.w $84CF-1
-  JML $00871E
+  JML $80871E
 .ret
   SEP #$30 : LDA $12 : RTL
 .own
@@ -627,7 +627,7 @@ Stripe:
   LDA #$FF : STA [$00],y
   PHK : PEA.w .back-1 : PEA.w $84CF-1
   LDA $02
-  JML $00871E
+  JML $80871E
 .back
   REP #$30
   LDA.l !SP : STA $00 : SEP #$20 : LDA.l !SP+2 : STA $02 : REP #$20

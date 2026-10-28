@@ -18,6 +18,7 @@ import { installMap16Ext, enableBlocks } from './map16ext.ts';
 import { installBgMap16Ext } from './bgmap16.ts';
 import { installPrefabPatch } from './prefabs.ts';
 import { newStyleExits } from './exitgraph.ts';
+import { installFastRom } from './fastrom.ts';
 import { keepCleanSharedPalettes } from './sharedpal.ts';
 import { keepCleanGame, isCleanRom } from './cleangame.ts';
 import { LevelEmulator } from './levelemu.ts';
@@ -37,6 +38,7 @@ export async function prepareRom(rom: Rom): Promise<boolean> {
 export async function installEditorPatches(rom: Rom): Promise<void> {
   await loadAsar();
   const asar = (r: ApplyResult) => { if (!r.ok) throw new Error(r.errors.join(' ')); };
+  const clean = rom.data.slice();
   // (bytes of the clean game that Lunar Magic data exported as BPS takes are read where the ROM still has them)
   keepCleanGame(rom);
   // (what a package's shared palettes change is told by the clean game's)
@@ -64,4 +66,6 @@ export async function installEditorPatches(rom: Rom): Promise<void> {
   const blank = map16Source(rom, new LevelEmulator(rom).load(0x105)).fg(0x025);
   installMap16Ext(rom, blank);
   enableBlocks(rom, blank);
+  // last: the long jumps the other patches' hooks took are theirs
+  installFastRom(rom, clean);
 }

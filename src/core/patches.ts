@@ -143,7 +143,7 @@ function build(): Asm {
   a.br(0xd0, 'raw');
   a.b(0xeb); a.br(0xd0, 'big'); // XBA : BNE (above FF)
   a.b(0x28, 0xfa); // PLP PLX
-  a.b(0x5c, 0x28, 0xba, 0x00); // JML $00BA28
+  a.b(0x5c, 0x28, 0xba, 0x80); // JML $80BA28
   a.label('big');
   a.long(0x22, 'GfxDecomp');
   a.b(0x28, 0xfa, 0xa0, 0x80, 0x6b); // PLP PLX LDY #$80 RTL (→ $00AA6F)
@@ -157,7 +157,7 @@ function build(): Asm {
   a.b(0xa9, 0x10, 0x8f, 0x06, 0x43, 0x00); // $1000 bytes
   a.b(0xa9, 0x01, 0x8f, 0x0b, 0x42, 0x00); // start
   a.b(0x28, 0xfa, 0x68, 0x68, 0x68); // PLP PLX, drop JSL return
-  a.b(0x5c, 0xd1, 0xa9, 0x00); // JML $00A9D1 (an RTS in bank 0)
+  a.b(0x5c, 0xd1, 0xa9, 0x80); // JML $80A9D1 (an RTS in bank 0)
 
   // ---- decompression of any file (JSL, M=8 X=16, X = file): through the game's $00BA28 from where
   // it has the file's pointer; X and Y's high byte are lost ----
@@ -168,7 +168,7 @@ function build(): Asm {
   a.long(0xbf, 'GfxBk'); a.b(0x85, 0x8c);
   a.b(0x08, 0xe2, 0x10, 0x4b); a.abs(0xf4, 'dret', -1); // PHP SEP #$10 PHK PEA.w dret-1 (for its RTL)
   a.b(0x8b, 0x5a, 0xa9, 0x00, 0x48, 0xab); // PHB PHY (its PLY PLB) LDA #$00 PHA PLB
-  a.b(0x5c, 0x3b, 0xba, 0x00); // JML $00BA3B
+  a.b(0x5c, 0x3b, 0xba, 0x80); // JML $80BA3B
   a.label('dret');
   a.b(0x28, 0xab, 0x6b); // PLP PLB RTL
 
@@ -693,7 +693,7 @@ export function installExtGfxPatch(rom: Rom): { table: number } {
   a.b(0xe2, 0x30, 0xeb, 0x8f, ...long(UP_HI), 0xeb); // SEP #$30 : XBA : STA.l UpHi : XBA
   a.b(0x9c, 0x16, 0x21, 0x8c, 0x17, 0x21, 0xa8); // STZ $2116 : STY $2117 : TAY (file)
   a.b(0x4b); a.abs(0xf4, 'upr', -1); a.b(0xf4, EXT_UP_RET & 0xff, EXT_UP_RET >> 8); // PHK : PEA.w upr-1 : PEA.w $84CF-1
-  a.b(0x5c, 0x6b, 0xaa, 0x00); // JML $00AA6B (ends with RTS → $0084CF RTL → upr)
+  a.b(0x5c, 0x6b, 0xaa, 0x80); // JML $80AA6B (ends with RTS → $0084CF RTL → upr)
   a.label('upr');
   a.label('upx');
   a.b(0xc2, 0x30, 0x60); // REP #$30 : RTS

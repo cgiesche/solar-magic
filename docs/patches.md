@@ -471,6 +471,40 @@ one extra lag frame – in the test about 0.1 % of frames. If another patch occu
 [Free RAM](#applying-patches)). Patches that use the range anyway or modify the tilemap uploads themselves
 are not compatible with it.
 
+### FastROM
+
+Every ROM the editor makes is FastROM: the game's code runs in the fast ROM banks `$80` and up, as in most
+community hacks (ADR 0007, `src/core/fastrom.ts`). The patch
+- sets the header's map mode to `$30` (`$00FFD5`);
+- points the reset vector to `$00BA52`, which jumps to code in free space that writes `$420D` = 1 and enters the
+  game's reset in bank `$80`;
+- points the native NMI vector to `$00BA4E` (`JML $80816A`, as Lunar Magic's FastROM) and the native IRQ vector
+  to `$00BA56` (`JML $808374`; Lunar Magic leaves the IRQ slow). `$00BA4E–$00BA59` are free bytes of bank 0 in
+  the clean game;
+- sets bit 7 of the bank byte of the game's long jumps into banks `$00`–`$3F`: 568 `JSL`/`JML` operands and the
+  338 entries of 24-bit pointer tables that `JML [abs]` goes through (the game's `ExecutePtrLong`). These are
+  not listed by hand or taken from Lunar Magic: `tools/fastromsites.ts` plays the clean game (boot, title
+  screen with its demo, a new game on the overworld, every level with the VRAM test's input) and records
+  every long jump it executes; its result is `src/core/fastromsites.ts`. A site in code an editor patch
+  replaces is left to that patch.
+
+The editor's own patches (and the routines it provides to packages: UberASM, GPS, PIXI) call and return
+into the game's code in the fast banks too (`JSL $85BB39`, `JML $80F54B` …), and so does the included
+ExAnimation engine (a marked change). What stays slow: long data accesses (`LDA $0xxxxx`), data bank
+setups and data pointer tables (correct in either bank and not worth the bytes), the `JML` of each vector
+stub (vectors point into bank 0), code the tool never ran, and routines a third-party patch calls with a
+`$0x` bank, until they return. The game's `ExecutePtr` takes the bank from its caller, so it follows.
+Playing the levels as the VRAM test does, 0.03 % of the game's instructions run in the slow banks, all of
+them the vector stubs (`tools/testfastrom.ts` reports the share and where they were entered from;
+`tools/fastromsites.ts` checks the site list against a fresh run).
+
+The rewritten bank bytes are **not hooks**: a patch that writes over one is not rejected and gets no
+warning (the code there then runs slow until it returns). The clean game's fingerprint (SMWF) compares
+its blocks with them reverted, so a BPS made against the clean game (Callisto's global ExAnimation)
+still finds the clean bytes there. Free space is addressed in `$80+`: the editor's own blocks and, as
+Asar 1.91 always does for LoROM, a patch's `freecode`/`freedata`. Callisto's `fastrom.bps` is not part of
+a package. ROMs of older editor versions are opened without FastROM (no migration).
+
 ### Layer 2 scroll rates
 
 The level header pairs a horizontal and a vertical layer 2 rate in one of 16 settings. As in Lunar Magic 3.40,
@@ -927,6 +961,7 @@ not compatible with the respective feature.
 | `$00F713`, `$00F728`, `$00F7F4`, `$00F80C` | Sprite scroll fix; RAM `$7F3683–$7F3686` |
 | `$05D928`, `$0586BB`, entrance options and screen exit flags `$009708`, `$0DA532`, `$0DA536`, the slanted pipe to the left `$00D2B2`, the midway entrance `$05D9B8`, `$05D9DE` (also by a screen exit, its flags `$05D7C5`), new-style exits `$05D7CE`, `$05D836`, `$0DA963`, `$0DA9D6`, `$0DA9EF`, `$058091`, ext. object table `$0DA118` (entry `$03`, the swapped screen jump), tables `$06CA00`, `$05DE00`, `$06FC00`, `$06FE00`, `$06CC00`, `$06CE00`, `$07E800`, `$07EA00`, `$07EC00`, `$07EE00`; finding a block `$00F478`, `$00F492`, `$00F49A`, `$0194D6`, `$019500`, `$019512`, `$01D97B`, `$01D981`, `$0292D9`, `$0292F9`, `$02930A`, `$0295C0`, `$0295EC`, `$0295FD`, `$02A6BA`, `$02A6CB`, `$02BA50`, `$02BA71`, `$02BA82`, `$02D15A`, `$02D18C`, `$02D19D`, `$03D793`; changing a tile `$00BEEC`, `$00BF41`, `$00C079`, `$00C0C6`, `$00C1B1`, `$00C3D3`; mode tables `$00BDA8`, `$00BDE8`, `$00BE28`, `$00BE68`; sprites `$02A82E`, `$02A968`, `$02AA5F`, `$02AB54`, `$02ABD0`, `$02AF3D`, `$02AFA7`, `$01AC3E`, `$02D038`, `$03B86A`; camera `$00F70D`; entrances `$05D7E0`, `$05DA17`; secondary entrances to the overworld `$05D836` | Level heights (Lunar Magic 3.00's entrances, their options); RAM `$7F3666–$7F3677`, `$7F3679`, Lunar Magic's `$13D7`, `$0BF6–$0CF5` |
 | `$008A7F`, `$0087AD`, `$0085E3`, `$0580B0`, `$0580B4`, `$0580BF`, `$0580C3`, `$058730`, `$058770`, `$0587D4`, `$0587DB`, `$05880B`, `$058812`, `$0586F7`, `$058A3A` | VRAM patch (SMWV): tilemaps relocated, taller levels' rows; RAM `$7F0000–$7F3654` |
+| Header `$00FFD5`, vectors `$00FFEA`, `$00FFEE`, `$00FFFC`, stubs `$00BA4E–$00BA59` (the rewritten bank bytes of long jumps are not hooks) | FastROM (SMWR) |
 | `$048509`, `$048543` | Overworld teleports (the star/pipe table with 0x100 entries) |
 | `$04D7F2–$04D85C` | Translevels per level tile (Lunar Magic's table) |
 | `$009F19`, `$048F8A`, `$049001`, `$049199`; code `$05DD80`, `$03BA10`, `$03BA50`, table `$05DDA0` | Initial level flags, no entry if passed, save prompt (Lunar Magic's places) |

@@ -241,7 +241,7 @@ macro RevertMap16()
   STA $9C
   %BounceSetupMap16()
   PHX
-  JSL $00BEB0|!BankB
+  JSL $80BEB0|!BankB
   PLX
 endmacro
 macro InvisibleMap16()
@@ -249,7 +249,7 @@ macro InvisibleMap16()
   STA $9C
   %BounceSetupMap16()
   PHX
-  JSL $00BEB0|!BankB
+  JSL $80BEB0|!BankB
   PLX
 endmacro
 macro SetSpeed()
@@ -266,7 +266,7 @@ macro EraseCoinAbove()
   PHK
   PEA.w ?ret-1
   PEA.w $B888
-  JML $029265|!BankB
+  JML $829265|!BankB
 ?ret:
 endmacro
 ${spawnAlt('!bounce_x_low', '!bounce_y_low', '!bounce_x_high', '!bounce_y_high')}`,
@@ -326,9 +326,9 @@ PixiBounce:
   LDY $16C5,x : BEQ +
   DEC $16C5,x
 + CMP.b #${off} : BCS +
-  JML $02905E
+  JML $82905E
 + ${call}
-  JML $02904C ; RTS
+  JML $82904C ; RTS
 ${data}
 `;
     case 'cluster': return `org $02F818
@@ -340,11 +340,11 @@ PixiCluster:
   BEQ ++
   CMP.b #${off} : BCS +
   PEA $F81C ; the original routine, returning to the loop
-  JML $02F821
+  JML $82F821
 + LDA $0100 : CMP #$13 : BEQ ++ ; not while the level fades in
   LDA $1892,x
   ${call}
-++ JML $02F81D
+++ JML $82F81D
 ; level load: cluster sprite tables start cleared
 PixiClusterClear:
   STZ $149A : STZ $1498 : STZ $1495
@@ -353,7 +353,7 @@ PixiClusterClear:
 - STZ $1E02,x
   DEX #2 : BNE -
   SEP #$20
-  JML $00A68F
+  JML $80A68F
 ${data}
 `;
     case 'extended': {
@@ -368,18 +368,18 @@ PixiExtended:
   LDY $176F,x : BEQ +
   DEC $176F,x
 + CMP.b #${off} : BCS +
-  JML $029B27
+  JML $829B27
 + ${call}
-  JML $029B15 ; RTS
+  JML $829B15 ; RTS
 ; cape contact: custom extended sprites run their CAPE routine, if any
 PixiExtCape:
   STX $15E9
   LDA $170B,x : CMP.b #${off} : BCS +
   CMP #$02
-  JML $02963B
+  JML $82963B
 + SEC : SBC.b #${off} : AND.b #${mask}
   %PixiCall(PixiCape_${kind})
-  JML $029653
+  JML $829653
 ${data}
 ${cape}
 `;
@@ -392,9 +392,9 @@ PixiMinor:
   STX $1698
   CMP.b #${off} : BCS +
   PEA $8B73 ; the original routine, returning to the loop
-  JML $028B94
+  JML $828B94
 + ${call}
-++ JML $028B74
+++ JML $828B74
 ${data}
 `;
     case 'smoke': return `org $0296C0
@@ -404,9 +404,9 @@ PixiSmoke:
   LDA $17C0,x : BEQ ++
   AND #$7F
   CMP.b #${off} : BCS +
-  JML $0296C7
+  JML $8296C7
 + ${call}
-++ JML $0296D7
+++ JML $8296D7
 ${data}
 `;
     case 'spinningcoin': return `org $0299D4
@@ -418,14 +418,14 @@ PixiCoin:
   STX $15E9
   LDA $17D0,x : BEQ ++
   CMP.b #${off} : BCS +
-  JML $0299DC
+  JML $8299DC
 + ${call}
-++ JML $0299DF
+++ JML $8299DF
 ; a coin from a block: number 1 (the slot may have held another number)
 PixiCoinNew:
-  JSL $05B34A
+  JSL $85B34A
   LDA #$01 : STA $17D0,x
-  JML $028A84
+  JML $828A84
 ${data}
 `;
     case 'score': return `org $02ADBA
@@ -435,9 +435,9 @@ PixiScore:
   LDA $16E1,x : BEQ ++
   STX $15E9
   CMP.b #${off} : BCS +
-  JML $02ADC2
+  JML $82ADC2
 + ${call}
-++ JML $02ADC5
+++ JML $82ADC5
 ${data}
 `;
     default: return '';
@@ -564,7 +564,7 @@ endif
   INY : LDA [$CE],y : AND #$0F : ORA $02 : CMP $01
   BCC .skip : BNE .exit
   LDA [$CE],y : AND #$F0 : CMP $00 : BNE .skip
-  JML $02A856 ; Y = entry + 1, X = index in $1938
+  JML $82A856 ; Y = entry + 1, X = index in $1938
 .skip ; Y = entry + 1 (also from $02A846)
   DEY : JSR .advance : INX : BRA .loop
 .next ; after a sprite was loaded, Y = entry + 2
@@ -575,7 +575,7 @@ endif
   LDX $02 : STZ $1938,x
 .exit
   REP #$20 : LDA.l !PixiCE : STA $CE : SEP #$20
-  JML $02A84B ; RTS
+  JML $82A84B ; RTS
 ; Y = entry → Y = next entry; past $80 the data pointer moves forward instead
 .advance
   JSR .size
@@ -598,22 +598,22 @@ endif
   CMP #$E0 : BCS .num
   DEY : LDA [$CE],y : INY : AND #$08 : BEQ .vnum
   LDA $05 : CMP #$D0 : BCS .gen
-  JML $02A8D8 ; shooter
+  JML $82A8D8 ; shooter
 .gen ; $18B9 = $80 | extra bit << 6 | number - $CF
   DEY : LDA [$CE],y : INY : AND #$04 : ASL #4 : ORA #$80 : STA $18B9
   LDA $05 : SEC : SBC #$CF : ORA $18B9 : STA $18B9
-  JML $02A8BB
+  JML $82A8BB
 .vnum
   LDA $05
 .num
   CMP #$E7 : BCC +
-  JML $02A86A ; scroll sprites
-+ JML $02A88C
+  JML $82A86A ; scroll sprites
++ JML $82A88C
 ; $02ABA0: shooter slot X, entry at $03 (= Y), number in $04
 .shooter
   LDA [$CE],y : AND #$08 : BNE +
   LDA $04 : SEC : SBC #$C8 : STA $1783,x
-  JML $02ABA8
+  JML $82ABA8
 + LDA [$CE],y : AND #$04 : ASL #4 : ORA #$80 : STA $1783,x ; $80 | extra bit << 6 | number - $BF
   LDA $04 : SEC : SBC #$BF : ORA $1783,x : STA $1783,x
   JSR .size
@@ -626,14 +626,14 @@ endif
   LDA $01,s : DEC : STA $01,s : BEQ +
   INY : LDA [$CE],y : STA.l !shooter_extra_byte_3,x
 + PLA : PLY
-++ JML $02ABA8
+++ JML $82ABA8
 .sptr ; 4 or more extra bytes: a pointer to them
   PHY : INY #3
   REP #$20 : TYA : CLC : ADC $CE : SEP #$20
   STA.l !shooter_extra_byte_1,x : XBA : STA.l !shooter_extra_byte_2,x
   LDA $D0 : STA.l !shooter_extra_byte_3,x
   PLY
-  JML $02ABA8
+  JML $82ABA8
 
 ; extra bits to !extra_bits; custom sprites keep only the position bit in the high position byte
 .bitsH
@@ -646,10 +646,10 @@ endif
   AND #$08 : BEQ +
   PLA : AND #$01 : STA $14E0,x : RTL
 + PLA : AND #$0D : STA $14E0,x : RTL
-; instead of JSL $07F7D2 when a sprite is loaded, Y = entry + 2
+; instead of JSL $87F7D2 when a sprite is loaded, Y = entry + 2
 .spawn
   LDA.l !extra_bits,x : PHA
-  JSL $07F7D2
+  JSL $87F7D2
   PLA : STA.l !extra_bits,x
   AND #$08 : BNE + : RTL
 + LDA [$CE],y : STA.l !new_sprite_num,x
@@ -748,12 +748,12 @@ PixiMain:
 ; all statuses ($018127)
 PixiStatus:
   LDA $14C8,x : CMP #$02 : BCC .default
-  CMP #$08 : BNE + : JML $0185C3
+  CMP #$08 : BNE + : JML $8185C3
 + PHA
   LDA.l !extra_bits,x : AND #$08 : BNE .custom
   PLA
 .default
-  JML $018133
+  JML $818133
 .custom ; stack: status
   LDA.l !extra_prop_2,x : BMI .main
   LDA $01,s : CMP #$07 : BCC .vanilla
@@ -764,13 +764,13 @@ PixiStatus:
   JML [$0000]
 .ret
   PLB
-  JML $0185C2 ; RTS
+  JML $8185C2 ; RTS
 .vanilla
-  LDA $01,s : JSL $01D43E ; original code of the status
+  LDA $01,s : JSL $81D43E ; original code of the status
   LDA.l !extra_prop_2,x : AND #$40 : BNE .main
   LDA $01,s : CMP #$09 : BCS .main
   PLA
-  JML $0185C2 ; RTS
+  JML $8185C2 ; RTS
 .main ; MAIN in any status
   PLA
   JSR PixiGetMain
@@ -810,8 +810,8 @@ PixiStatusOrder:
 PixiShooter:
   BMI .custom
   LDY $17AB,x : BEQ +
-  JML $02B39A
-+ JML $02B3A4
+  JML $82B39A
++ JML $82B3A4
 .custom
   LDY $17AB,x : BEQ +
   PHA : LDA $13 : LSR : BCC ++
@@ -826,15 +826,15 @@ PixiShooter:
 PixiGenerator:
   LDA $18B9 : BMI .custom
   BNE +
-  JML $02B02A ; RTS
-+ JML $02B003
+  JML $82B02A ; RTS
++ JML $82B003
 .custom
   LDY $9D : BNE +
   AND #$3F : CLC : ADC #$CF
   JSR PixiMainOf
   LDA #$02 : PHA : PEA $B029 ; RTL to the RTS at $02B02A
   JML [$0000]
-+ JML $02B02A
++ JML $82B02A
 
 ; $07F785: end of the routine clearing a slot's tables
 PixiErase:
@@ -846,7 +846,7 @@ PixiErase:
 PixiErase2:
   LDA #$00 : STA.l !extra_bits,x
   LDA #$FF : STA $161A,x
-  JML $018156 ; RTS
+  JML $818156 ; RTS
 
 PixiSize:
 ${rows([...spec.sizes])}

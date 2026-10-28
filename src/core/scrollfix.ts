@@ -40,14 +40,14 @@ freecode
 ScrollX:
   LDX #$00 : JSR Direction
   LDY $1411 : BEQ +
-  JML $00F718
-+ JML $00F79D           ; (the game's BEQ to a BRA there)
+  JML $80F718
++ JML $80F79D           ; (the game's BEQ to a BRA there)
 
 ScrollY:
   LDX #$02 : JSR Direction
   LDX $1412 : BNE +
-  JML $00F7F9           ; its RTS
-+ JML $00F7FA
+  JML $80F7F9           ; its RTS
++ JML $80F7FA
 
 ; X = 0 horizontally, 2 vertically: $55/$56 = 0 when the camera moved left/up, 2 right/down
 Direction:

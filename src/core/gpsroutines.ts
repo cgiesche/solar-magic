@@ -52,7 +52,7 @@ const shatter = (kind: number) => r(`
   PHY
   LDA $98 : PHA : LDA $99 : PHA : LDA $9A : PHA : LDA $9B : PHA
   LDA #$02 : STA $9C
-  JSL $00BEB0 ; air
+  JSL $80BEB0 ; air
   REP #$20
   PLA : XBA : STA $9A ; (pulled high, low)
   PLA : XBA : STA $98
@@ -63,7 +63,7 @@ const shatter = (kind: number) => r(`
   SEP #$20
   PHB : LDA #$02 : PHA : PLB
   LDA #$${kind.toString(16).padStart(2, '0')}
-  JSL $028663
+  JSL $828663
   PLB
   PLY
   RTL
@@ -86,10 +86,10 @@ ${block ? `  DEC $1861 : BPL ?.alt ; no free slot: one of the last two
   RTL
 ?.found:`}
   XBA : STA !9E,x
-  JSL $07F7D2 ; keeps the carry
+  JSL $87F7D2 ; keeps the carry
   BCC ?.vanilla
   LDA !9E,x : STA !new_sprite_num,x
-  JSL $0187A7
+  JSL $8187A7
   LDA #$08 : STA !extra_bits,x
 ?.vanilla:
   LDA #$01 : STA !14C8,x
@@ -132,7 +132,7 @@ export const GPS_ROUTINES: Record<string, string> = {
   erase_block: r(`
   LDA #$02 : STA $9C
   PHY
-  JSL $00BEB0
+  JSL $80BEB0
   PLY
   RTL
 `),
@@ -185,7 +185,7 @@ ${call(0x00c00d, 'm')}
   STA $05
   LDA #$0F : TRB $98 : TRB $9A
   PHB : LDA #$02 : PHA : PLB
-  JSL $02887D
+  JSL $82887D
   PLB
   RTL
 `),
@@ -211,7 +211,7 @@ ${call(0x00c00d, 'm')}
   LDA $16A1,y : CLC : ADC #$0C : AND #$F0 : STA $98
   LDA $16A9,y : ADC #$00 : STA $99
   LDA $16C1,y : STA $9C
-  JSL $00BEB0
+  JSL $80BEB0
   PLA : STA $9B : PLA : STA $9A : PLA : STA $99 : PLA : STA $98
   PLA : STA $07 : PLA : STA $06 : PLA : STA $05 : PLA : STA $04 : PLA : STA $03 : PLA : STA $02
 ?.taken:
@@ -252,7 +252,7 @@ ${call(0x0286ed, 'i')}
   LDA $16A1,y : CLC : ADC #$0C : AND #$F0 : STA $98
   LDA $16A9,y : ADC #$00 : STA $99
   LDA $16C1,y : STA $9C
-  JSL $00BEB0
+  JSL $80BEB0
   PLA : STA $07 : PLA : STA $06 : PLA : STA $05 : PLA : STA $04
   PLA : STA $9B : PLA : STA $9A : PLA : STA $99 : PLA : STA $98
   RTL

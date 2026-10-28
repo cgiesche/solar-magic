@@ -206,7 +206,7 @@ export class SlotTracker {
     this.hook = {
       onWramWrite: (a: number, v: number) => {
         if (a === 0x15e9) {
-          if (s.cpu.pbr === 1) { cur = v; s0 = s.cpu.s; }
+          if ((s.cpu.pbr & 0x7f) === 1) { cur = v; s0 = s.cpu.s; }
           else if (cur >= 0 && s.cpu.s < s0) cur = v; // sprite code switching slots
           else cur = -1;
           return;

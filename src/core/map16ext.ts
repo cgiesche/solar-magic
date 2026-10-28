@@ -68,9 +68,9 @@ function build(): Asm {
   a.long(0x22, 'Blk'); // JSL Blk
   a.b(0xa8); // TAY
   a.br(0xd0, 'f545p1');
-  a.b(0xac, 0x93, 0x16, 0x5c, 0x4b, 0xf5, 0x00); // LDY $1693 JML $00F54B (page 0; the JML at $00F545 covers $00F548)
+  a.b(0xac, 0x93, 0x16, 0x5c, 0x4b, 0xf5, 0x80); // LDY $1693 JML $80F54B (page 0; the JML at $00F545 covers $00F548)
   a.label('f545p1');
-  a.b(0x5c, 0x77, 0xf5, 0x00); // JML $00F577 (page 1)
+  a.b(0x5c, 0x77, 0xf5, 0x80); // JML $80F577 (page 1)
 
   // Acts: A (8 bit) = page, $1693 = low byte → acts-like tile; A = its page, Z set accordingly.
   // Keeps X, Y, D, DB and the register widths.

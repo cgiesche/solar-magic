@@ -38,7 +38,7 @@ const STATE_ARRAYS = ['wram', 'sram', 'vram', 'cgram', 'oam', 'ppuRegs', 'dma', 
 const STATE_SCALARS = ['vmain', 'vaddr', 'vreadLatch', 'cgaddr', 'cgLatch', 'cgReadHigh', 'oamaddr', 'oamLatch', 'm7a', 'm7b',
   'm7latch', 'wmaddr', 'nmitimen', 'wrmpya', 'wrdiv', 'rddiv', 'rdmpy', 'htime', 'vtime', 'nmiFlag', 'irqFlag', 'joy1',
   'apuLastReadAddr', 'apuSpin', 'apuFrameStart', 'frame', 'line', 'lineCycle', 'openBus', 'hdmaen', 'hdmaDo', 'hdmaOn',
-  'fixedColor', 'fifoLen', 'cgLatchTaint', 'busyLines', 'sinceNmi', 'waited'] as const;
+  'fixedColor', 'fifoLen', 'cgLatchTaint', 'busyLines', 'sinceNmi', 'waited', 'memsel'] as const;
 const CPU_SCALARS = ['a', 'x', 'y', 's', 'd', 'dbr', 'pbr', 'pc', 'p', 'e', 'cycles', 'stopped', 'waiting', 'nmiPending', 'irqLine',
   'lastOp', 'lastOpPc'] as const;
 
@@ -102,6 +102,7 @@ export class Snes implements Bus {
   hdmaen = 0; // $420C
   hdmaDo = 0; // per channel: transfer on the next line
   hdmaOn = 0; // per channel: table not yet terminated this frame
+  memsel = 0; // $420D: fast ROM access in banks $80+ (bit 0; the timing is not emulated)
   joy1 = 0;
 
   // APU
@@ -391,6 +392,7 @@ export class Snes implements Bus {
       case 0x420a: this.vtime = (this.vtime & 0xff) | ((v & 1) << 8); return;
       case 0x420b: this.runDma(v); return;
       case 0x420c: this.hdmaen = v; return;
+      case 0x420d: this.memsel = v & 1; return;
     }
     if (off >= 0x4300 && off < 0x4380) this.dma[off - 0x4300] = v;
   }

@@ -6,7 +6,8 @@
 // crates/kobo-core/asm/lunar-magic/exanimation.asm and memory.asm, commit 395083bbf7a8664d7c970ce465a5fb418002ab91.
 // Changed by Solar Magic (marked [Solar Magic]): the precision timer (trigger 0F) – a slot with it shares the
 // counter of the first slot of its 8 and a rotation with it always runs, as Lunar Magic's help describes
-// (level_ex20.htm); Kobo's runs it like "always".
+// (level_ex20.htm); Kobo's runs it like "always". The game's animated tiles are called in the fast ROM bank $85
+// (the editor's ROM is FastROM).
 // Only this file is under the MPL; it is used as Asar source by ../exanim.ts.
 
 export const KOBO_COMMIT = '395083bbf7a8664d7c970ce465a5fb418002ab91';
@@ -366,7 +367,7 @@ frame:
     AND #$40
     BNE +
     SEP #$30
-    JSL $05BB39                 ; the game's animated tiles
+    JSL $85BB39                 ; the game's animated tiles (in FastROM's bank) [Solar Magic]
 +   SEP #$20
     REP #$10
     LDA !Frames

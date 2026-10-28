@@ -3,9 +3,11 @@
 // block's CRC is the clean one's; a few bytes read later in blocks that change are kept as they are
 // (KEPT). Lunar Magic data exported as BPS from the clean game (Callisto's global ExAnimation, its
 // overworld) takes some of its bytes from the clean game; those are read from this ROM where it still
-// has them.
+// has them. The FastROM patch's rewritten bank bytes (fastrom.ts) count as the clean game's: a block is
+// compared with them reverted (bit 7 cleared), and they read as the clean byte.
 
 import { Rom, pcToSnes, snesToPc } from './rom.ts';
+import { FASTROM_SITES } from './fastrom.ts';
 import { crc32, bpsReader } from './bps.ts';
 import type { RomRead } from './exanim.ts';
 
@@ -36,6 +38,17 @@ export function isCleanRom(rom: Rom): boolean {
 }
 
 const blockCrc = (d: Uint8Array, k: number) => crc32(d.subarray(k * BLOCK, (k + 1) * BLOCK));
+// FastROM's sites by block
+const SITES = new Map<number, number[]>();
+for (const o of FASTROM_SITES) { const k = Math.floor(o / BLOCK); SITES.set(k, [...SITES.get(k) ?? [], o]); }
+// the block's CRC with FastROM's sites reverted
+function cleanCrc(d: Uint8Array, k: number): number {
+  const sites = SITES.get(k);
+  if (!sites) return blockCrc(d, k);
+  const b = d.slice(k * BLOCK, (k + 1) * BLOCK);
+  for (const o of sites) b[o - k * BLOCK] &= 0x7f;
+  return crc32(b);
+}
 
 // keeps the clean game's fingerprint (run when the clean game is opened, before anything changes it)
 export function keepCleanGame(rom: Rom): void {
@@ -67,8 +80,8 @@ export function cleanGameBytes(rom: Rom): ((o: number) => number | null) | null 
     if (o < 0 || o >= CLEAN_SIZE) return null;
     const k = Math.floor(o / BLOCK);
     let s = same.get(k);
-    if (s === undefined) same.set(k, s = blockCrc(rom.data, k) === v.getUint32(k * 4, true));
-    if (s) return rom.data[o];
+    if (s === undefined) same.set(k, s = cleanCrc(rom.data, k) === v.getUint32(k * 4, true));
+    if (s) return FASTROM_SITES.has(o) ? rom.data[o] & 0x7f : rom.data[o];
     const c = kept.get(o);
     return c === undefined ? null : rom.data[c];
   };

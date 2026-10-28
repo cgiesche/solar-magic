@@ -50,11 +50,11 @@ const spawnSprite = `?.loop:
   RTL
 ?.found:
   XBA : STA !9E,x
-  JSL $07F7D2 ; keeps the carry
+  JSL $87F7D2 ; keeps the carry
   BCC ?.vanilla
   LDA !9E,x : STA !new_sprite_num,x
   LDA $02 : PHA : REP #$20 : LDA $00 : PHA : SEP #$20
-  JSL $0187A7
+  JSL $8187A7
   REP #$20 : PLA : STA $00 : SEP #$20 : PLA : STA $02
   LDA #$08 : STA !extra_bits,x
 ?.vanilla:
@@ -270,7 +270,7 @@ export const ROUTINES: Record<string, string> = {
   SEP #$30
   PHA
   INC : AND $01,s : BEQ ?.mask ; A+1 a power of two
-  JSL $01ACF9
+  JSL $81ACF9
   STA $4204 : LDA $148E : STA $4205 ; 16-bit random number ...
   PLA : INC : STA $4206 ; ... divided by A+1
   NOP #4 : BRA ?.wait
@@ -280,7 +280,7 @@ export const ROUTINES: Record<string, string> = {
   PLP : PLX
   RTL
 ?.mask:
-  JSL $01ACF9
+  JSL $81ACF9
   PLA : AND $148D
   PLP : PLX
   RTL
@@ -289,7 +289,7 @@ export const ROUTINES: Record<string, string> = {
   // star kill: the sprite falls off screen, Mario gets points for consecutive kills
   Star: r(`
   PHB : PHK : PLB
-  JSL $01AB6F ; contact star
+  JSL $81AB6F ; contact star
   LDA #$02 : STA !14C8,x
   LDA #$D0 : STA !AA,x
   %SubHorzPos()
@@ -301,7 +301,7 @@ export const ROUTINES: Record<string, string> = {
   LDA #$08
 ?.cnt:
   STA $18D2
-  JSL $02ACE5 ; points
+  JSL $82ACE5 ; points
   LDY $18D2
   LDA ?.sfx,y : STA $1DF9
   PLB
@@ -311,25 +311,25 @@ export const ROUTINES: Record<string, string> = {
 
   // A = tiles - 1, Y = tile size ($00 8x8, $02 16x16, $FF keep): the game's routine at $01B7B3
   FinishOAMWrite: r(`
-  JML $01B7B3
+  JML $81B7B3
 `),
 
   // the sprite in slot X becomes sprite A (carry set: custom sprite) in its init state
   ReplaceSelf: r(`
   XBA
-  JSL $07F722 ; clear the tables
+  JSL $87F722 ; clear the tables
   XBA
   BCS ?.custom
   STA !9E,x
   STA !new_sprite_num,x
-  JSL $07F78B ; tweakers of the original sprite
+  JSL $87F78B ; tweakers of the original sprite
   LDA #$01 : STA !14C8,x
   LDA #$00 : STA !extra_bits,x
   RTL
 ?.custom:
   STA !new_sprite_num,x
   LDA $02 : PHA : REP #$20 : LDA $00 : PHA : SEP #$20
-  JSL $0187A7
+  JSL $8187A7
   LDA #$01 : STA !14C8,x
   LDA #$08 : STA !extra_bits,x
   REP #$20 : PLA : STA $00 : SEP #$20 : PLA : STA $02
@@ -371,7 +371,7 @@ export const ROUTINES: Record<string, string> = {
   LDA !shoot_y_low,x : CMP $1C : LDA !shoot_y_high,x : SBC $1D : BNE ?.no
   LDA !shoot_x_low,x : CMP $1A : LDA !shoot_x_high,x : SBC $1B : BNE ?.no
   LDA !shoot_x_low,x : SEC : SBC $1A : CLC : ADC #$10 : CMP #$10 : BCC ?.no
-  JSL $02A9DE ; free slot
+  JSL $82A9DE ; free slot
   BMI ?.no
   CLC
   RTL
@@ -388,14 +388,14 @@ export const ROUTINES: Record<string, string> = {
   LDA #$01
 ?.net:
   EOR !1632,x : EOR $13F9 : BNE ?.no ; same side of the net
-  JSL $03B69F ; clipping of the sprite
+  JSL $83B69F ; clipping of the sprite
   LDA $13E9 : SEC : SBC #$02 : STA $00
   LDA $13EA : SBC #$00 : STA $08
   LDA #$14 : STA $02
   LDA $13EB : STA $01
   LDA $13EC : STA $09
   LDA #$10 : STA $03
-  JML $03B72B ; contact check
+  JML $83B72B ; contact check
 ?.no:
   CLC
   RTL
@@ -414,8 +414,8 @@ export const ROUTINES: Record<string, string> = {
   LDA !extended_y_high+8,y : SBC #$00 : STA $09
   LDA #$13 : STA $03
   PHY
-  JSL $03B69F
-  JSL $03B72B
+  JSL $83B69F
+  JSL $83B72B
   PLY
   BCS ?.hit
 ?.next:
@@ -876,8 +876,8 @@ ${callBank2('$02B560', 'yo')}
   LDA #$0A : STA $06 : STA $07
   LDA !extended_y_low,x : CLC : ADC #$03 : STA $05
   LDA !extended_y_high,x : ADC #$00 : STA $0B
-  JSL $03B664 ; Mario's box
-  JSL $03B72B
+  JSL $83B664 ; Mario's box
+  JSL $83B72B
   BCC ?.r
   PHB : LDA #$02 : PHA : PLB
 ${callBank2('$02A469', 'h')}
@@ -899,7 +899,7 @@ ${callBank2('$02A469', 'h')}
   LDA $13EB : STA $01
   LDA $13EC : STA $09
   LDA #$10 : STA $03
-  JSL $03B72B
+  JSL $83B72B
   RTL
 `),
 
@@ -1130,7 +1130,7 @@ ${subpixel('!spinning_coin_y_speed,x', '!spinning_coin_y_bits,x', '!spinning_coi
   PLA : ASL : TAY
   PHK : PEA.w ?.shown-1
   PEA $804C ; RTL at $00804D
-  JML $00C0FB
+  JML $80C0FB
 ?.shown:
   REP #$30
   PLB : PLY : PLX

@@ -513,7 +513,7 @@ Silent:
   PHY : PHP
   LDY $00
   PHK : PER .back-1 : PEA.w $8413               ; the game's piece ($04E4A9, Y the storage index, $04 the position), its RTS through an RTL
-  JML $04E4A9
+  JML $84E4A9
 .back
   PLP : PLY
   BRA .skip

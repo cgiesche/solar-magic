@@ -79,8 +79,8 @@ Scroll:
   CPY #$04 : BCS .own
   LDY $1413
   BNE +
-  JML $00F7AA
-+ JML $00F7A2
+  JML $80F7AA
++ JML $80F7A2
 .own
   LDY $1413
   LDA $1A
@@ -109,7 +109,7 @@ Scroll:
 + CLC : ADC $1417
   STA $20
 .done
-  JML $00F7C2
+  JML $80F7C2
 
 ; A = the layer 1 position, Y = the rate: A = layer 2's position (Z: none; C: an auto-scroll)
 Rate:

@@ -13,6 +13,7 @@ import { messagePatch, MSG_HOOKS } from './messages.ts';
 import { map16Ext, MAP16X_HOOKS } from './map16ext.ts';
 import { bgMap16Ext, BGMAP16_HOOKS } from './bgmap16.ts';
 import { prefabPatch, PREFAB_HOOKS } from './prefabs.ts';
+import { fastRom, FASTROM_HOOKS } from './fastrom.ts';
 import { listPatches, addPatch, removeEntry, backupBytes, patchedHash, hashBytes, overlaps, type PatchEntry, type RamClaim } from './patchreg.ts';
 
 // hook sites of the editor's own patches (SNES address, length)
@@ -27,6 +28,7 @@ export const BUILTINS: Builtin[] = [
   { name: 'Prefabs (SMWS)', installed: (r) => !!prefabPatch(r), hooks: PREFAB_HOOKS },
   { name: 'Extended Map16 (SMWX)', installed: (r) => !!map16Ext(r), hooks: MAP16X_HOOKS },
   { name: 'Extended BG Map16 (SMWH)', installed: (r) => !!bgMap16Ext(r), hooks: BGMAP16_HOOKS },
+  { name: 'FastROM (SMWR)', installed: (r) => !!fastRom(r), hooks: FASTROM_HOOKS },
 ];
 
 // "smwe.asm", available to every patch (incsrc "smwe.asm"): the editor's RAM/ROM interfaces as defines

@@ -355,7 +355,7 @@ SecLevel:
 ; with E the base event from $05FC00 (else the one of the tile Mario stood on, set when he entered the level),
 ; with T Mario at the location $05FA00 (the game's star/pipe warp; owteleport.ts). The level load ($05D796, its
 ; PHB) is left as the game mode's code ends ($0093F7: NMI on, RTS): $05D836 is only reached from there, the
-; game mode's JSL $05D796 ($0096F4) with nothing else on the stack (the editor's hooks before it return)
+; game mode's JSL $85D796 ($0096F4) with nothing else on the stack (the editor's hooks before it return)
 OverworldExit:
   PHA
   TYX
@@ -376,7 +376,7 @@ OverworldExit:
   PLA : PLA : PLA                          ; SecLevel's return
   PLB                                      ; $05D796's PHB
   PLA : PLA : PLA                          ; its return
-  JML $0093F7
+  JML $8093F7
 
 ; the secondary entrance (A 8, X/Y 16, data bank $05): kept, then the game's LDY $0E : LDA $F800,y. A's
 ; high byte stays the game's 0: its code takes table indexes with a 16-bit TAX
@@ -680,7 +680,7 @@ CameraY:
   LDA.l $7E0000+!Height : SEC : SBC #$00F0 : STA $1C
   STZ $1417
   PHK : PEA.w .moved-1 : PHB
-  JML $00F79D                                  ; to its PLB : RTL at $00F7F2
+  JML $80F79D                                  ; to its PLB : RTL at $00F7F2
 .moved
   REP #$20
   LDA.l !Align : SEC : SBC #$8000 : SEC : SBC $20 : STA $1417
@@ -693,7 +693,7 @@ CameraY:
   LDA.l $7E0000+!Height : SEC : SBC #$00F0
   PHK : PEA.w .back-1
   PEA.w $F7F3-1          ; RTL at $00F7F3
-  JML $00F7F4
+  JML $80F7F4
 .back
   RTL
 
