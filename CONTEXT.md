@@ -45,7 +45,7 @@ A standard object of the game (01–3F): its size (or type) is part of the objec
 _Avoid_: standard object (in the UI), normal object
 
 **Fixed-size object**:
-An extended object (object 00 with its number as an extra byte, 10–FF in the picker): it always looks the same, a size is not part of it. The picker's Objects tab lists them under "Fixed size"; "extended object" names its encoding only (by number: "Insert by number", the properties, the ROM format). Direct Map16 ($05) and prefabs ($04) are extended objects too, but are neither listed nor called fixed-size objects.
+An extended object (object 00 with its number as an extra byte, 10–FF in the picker): it always looks the same, a size is not part of it. The picker's Objects tab lists them under "Fixed size" – those that draw tiles or, drawing none, change RAM when the level loads (ObjecTool's 98–FF that set a flag); "extended object" names its encoding only (by number: "Insert by number", the properties, the ROM format). Direct Map16 ($05) and prefabs ($04) are extended objects too, but are neither listed nor called fixed-size objects.
 _Avoid_: extended object (for the picker's grouping), ext object
 
 **Custom object**:
@@ -53,8 +53,16 @@ One of object 2D's numbers 00–FF (its 4th byte) where a hook in the ROM – Ob
 _Avoid_: custom normal object (ObjecTool's name), user defined object (Lunar Magic's), custom midway (only the Retry System's)
 
 **Object name**:
-What a resizable or fixed-size object is called in the picker, the properties, the status bar and the search (objectnames.ts). Built in only for the game's own numbers (standard 01–21, extended 00, 01, 10–97, and 2E–3F per object group), after Lunar Magic's descriptions; the free numbers are "Object XX" / "Extended object XX" (the editor's own 04, 05 excepted). The user may rename any object for the project, over the built-in name (editor data like a tile name; Reset brings the built-in one back).
+What a resizable or fixed-size object is called in the picker, the properties, the status bar and the search (objectnames.ts). Built in only for the game's own numbers (standard 01–21, extended 00, 01, 10–97, and 2E–3F per object group), after Lunar Magic's descriptions; the free numbers are "Object XX" / "Extended object XX" (the editor's own 04, 05 excepted). Over them an extended object's name from an installed package's Lunar Magic `.mw0t` (the newer package's where two name it; gone with the package). The user may rename any object for the project, over those names (editor data like a tile name; Reset brings the other one back).
 _Avoid_: description, tooltip (Lunar Magic's `.osc`), label
+
+**Object tooltip**:
+What the picker says about an object beyond its name: an installed package's Lunar Magic `.osc` text for it (any object; kept with the package like the `.mw0t` names, objtext.ts), else for an object that draws nothing what its load changes in RAM ("sets $7FA402 bit 1", emulated).
+_Avoid_: description, object name
+
+**Object box**:
+How the editor shows an object that writes no tile when the level loads (objboxes.ts): a tile at its position with its number, on top of other objects' tiles, its name beside it while hovered or selected; it is grabbed, moved and deleted there. Editor-only, never in the ROM; the picker's thumbnail of such an object is the same box. Lunar Magic shows a placeholder tile for unused extended objects.
+_Avoid_: placeholder (Lunar Magic's), marker
 
 **Object group**:
 The set of tilesets whose objects 2E–3F are the same, because the game's object loader runs them through one table (the clean game has five: 0/7/C, 1, 2/6/8, 3/9/A/B/E, 4/5/D). Which table a tileset uses is learned by emulation; names of 2E–3F belong to the table, not to a tileset.
