@@ -9,7 +9,8 @@ import {
   entrancePos, nearestEntrance, encodeSecondaryHeader, mainSpot, sameSpot, placeMain, midwaySpot, nearestMidway, placeMidway, exitLandsAtMidway, isSized, SPRITE_MEMORY, levelRows, TIME_TABLE,
 } from '../core/level.ts';
 import { hex, hex2, spriteName } from '../core/names.ts';
-import { objectTable, objectName, objectNameKey, setObjectName, namedPerTable } from '../core/objectnames.ts';
+import { objectTable, objectName, objectNameKey, setObjectName, namedPerTable, numberName } from '../core/objectnames.ts';
+import { boxedObjects, boxAt } from '../core/objboxes.ts';
 import { objectUserNames } from '../core/usernames.ts';
 import { loadPixiProject, customSpriteList, type CustomSprite } from '../core/pixi.ts';
 import { renderLevel, renderLayerTiles, type LevelImages, composite } from '../core/render.ts';
@@ -888,6 +889,9 @@ export class App {
     const g = l2 ? this.images.geom2 : this.images.geom1;
     const objs = l2 ? this.level.layer2Objects : this.level.objects;
     if (!g || !objs) return null;
+    // the boxes of objects that draw nothing lie on top
+    const box = boxAt(this.boxedObjects(l2), tx, ty);
+    if (box) return box;
     const a = g.addr(tx, ty);
     if (a >= 0) {
       const off = a - MAP_BASE;
@@ -899,9 +903,9 @@ export class App {
       // tiles later overwritten by another object still belong to this one
       for (let i = objs.length - 1; i >= 0; i--) if (this.render.touched.get(this.objectKey(l2, i))?.has(off)) return objs[i];
     }
-    // fall back to object origins (objects that produce no visible tiles), a hidden conditional Direct Map16 object's tiles
+    // a hidden conditional Direct Map16 object's tiles
     const at = (ty << 16) | tx;
-    for (let i = objs.length - 1; i >= 0; i--) if ((objs[i].x === tx && objs[i].y === ty) || (isDm16(objs[i]) && objs[i].cond && dm16Tiles(objs[i]).includes(at))) return objs[i];
+    for (let i = objs.length - 1; i >= 0; i--) if (isDm16(objs[i]) && objs[i].cond && dm16Tiles(objs[i]).includes(at)) return objs[i];
     return null;
   }
 
@@ -921,6 +925,19 @@ export class App {
   // whether the object wrote a tile in the level's load
   objectDrawn(o: LevelObject): boolean {
     return !!this.render.touched.get(this.objectKey(this.mode === 'l2', this.currentObjects().indexOf(o)))?.size;
+  }
+
+  // the objects of layer 1 (or 2) that wrote no tile in the level's load: shown as boxes (objboxes.ts)
+  boxedObjects(l2 = this.mode === 'l2'): LevelObject[] {
+    const objs = (l2 ? this.level.layer2Objects : this.level.objects) ?? [];
+    return boxedObjects(objs, this.render.touched, (i) => this.objectKey(l2, i));
+  }
+
+  // what a box's object is called, null when it has no name but its number (object 2D's custom numbers have none)
+  boxName(o: LevelObject): string | null {
+    if (o.extension) return null;
+    const n = this.objectName(o.num, o.ext);
+    return n === numberName(o.num, o.ext) ? null : n;
   }
 
   // Map16 tile numbers an object left in the level (tiles overwritten by later objects excluded)

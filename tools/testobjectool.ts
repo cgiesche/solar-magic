@@ -18,6 +18,9 @@ import { loadLevel } from '../src/core/level.ts';
 import { objectName } from '../src/core/objectnames.ts';
 import { parseMw0t, parseOsc, tipKey, objectTooltip } from '../src/core/objtext.ts';
 import { renderObjectThumbs, type ObjThumb } from '../src/ui/thumbs.ts';
+import { sampleLevel } from '../src/core/mwl.ts';
+import { levelOverride } from '../src/core/levelusage.ts';
+import { boxedObjects, boxLabel, boxAt } from '../src/core/objboxes.ts';
 import { editorImage } from './fixture.ts';
 
 let fail = 0;
@@ -98,6 +101,47 @@ const extended = (): ObjThumb[] => renderObjectThumbs(rom, emu, loadLevel(rom, 0
   const tipped = named.filter((n) => objectTooltip(rom, 0, n));
   check(tipped.length === 42 && objectTooltip(rom, 0, 0x98)!.startsWith('UberASM Object 98: Free Vertical Scroll\n-----\n'), `each named one has its .osc tooltip (${tipped.length})`);
   check(!!objectTooltip(rom, 0x2d, 0x41)?.includes('Retry midway point tape'), 'object 2D 41: its .osc tooltip');
+}
+
+// the sample level 13B: its six objects that draw nothing are boxes, found and moved by their tile
+{
+  const lv = sampleLevel(rom, files['export/levels/level 13B.mwl'], loadLevel(rom, 0x13b), { tile: (t) => t, sprite: () => null }, true).level;
+  const boxes = () => boxedObjects(lv.objects, emu.load(0x13b, levelOverride(rom, lv)).touched, (i) => i);
+  const b = boxes();
+  check(b.map(boxLabel).sort().join() === 'B1,B3,BA,BB,BC,D0', `13B: six boxes (${b.map((o) => `${boxLabel(o)}@${o.x},${o.y}`).join(' ')})`);
+  const b1 = boxAt(b, 1, 1);
+  check(b1?.ext === 0xb1 && boxAt(b, 3, 1) === null, 'B1 found at its tile');
+  b1!.x = 3;
+  const moved = boxes();
+  check(boxAt(moved, 3, 1)?.ext === 0xb1 && !boxAt(moved, 1, 1) && moved.length === 6, 'moved: its box at its new tile');
+}
+
+// a newer package naming some of them: its names win, with a note; removed, the older one's are back
+{
+  const enc = new TextEncoder();
+  const small = zipSync({
+    'mine.asm': enc.encode('lorom\nfreedata\ndb $01\n'),
+    'mine.mw0t': enc.encode('98\tMy scroll object\nB1\tRetry: Set Type to Prompt\nE0\tMy new object\n'),
+    'mine.osc': enc.encode('0\t98\t0\tMy tooltip\n'),
+  });
+  const p = inspectUpload('mine.zip', small) as ReadyPreview;
+  check(p.status === 'ready' && !p.unclaimed.length, `the small package: a patch and its side files (${p.status}, ${p.status === 'ready' ? p.unclaimed : ''})`);
+  const r2 = await installPackage(rom, p, opt);
+  const note = r2.warnings.find((w) => w.includes('replace'));
+  check(r2.ok && note === 'Object names and tooltips of “mine” replace those of “baserom” for extended 98.', `installed with a note: ${note}`);
+  check(name(0x98) === 'My scroll object' && objectTooltip(rom, 0, 0x98) === 'My tooltip' && name(0xe0) === 'My new object' && name(0xa0) === 'Press L & R To Die',
+    `the newer names (98: ${name(0x98)}, E0: ${name(0xe0)}), the older ones elsewhere (A0: ${name(0xa0)})`);
+  await removePackage(rom, r2.pkg!.id, blank);
+  check(name(0x98) === 'Enable Free Vertical Scroll' && objectTooltip(rom, 0, 0x98)?.startsWith('UberASM Object 98') === true && name(0xe0) === 'Extended object E0', 'removed: the baserom\'s names again');
+}
+
+// the baserom removed: its names are gone; 98–DF stay listed, now as what the game's own code draws for them
+{
+  const pkg = listPackages(rom).find((x) => x.name === 'baserom')!;
+  await removePackage(rom, pkg.id, blank);
+  check(!listPackages(rom).length && name(0x98) === 'Extended object 98' && !objectTooltip(rom, 0, 0x98), `removed: no names (98: ${name(0x98)})`);
+  const byKey = new Map(extended().map((t) => [t.key, t]));
+  check(range(0x98, 0xdf).every((n) => byKey.get(hx(n))?.w), 'listed by emulation: 98–DF draw tiles');
 }
 
 process.exit(fail ? 1 : 0);

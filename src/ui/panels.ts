@@ -4,7 +4,9 @@ import { isBrushMode, type App, type PickedItem } from './app.ts';
 import { h, clear, hexInput, checkbox, attachRectPick, modal, toast, emptyState } from './dom.ts';
 import { spriteName, hex2, hex3 } from '../core/names.ts';
 import { baseObjectName, namedPerTable } from '../core/objectnames.ts';
-import { packageObjectName } from '../core/objtext.ts';
+import { packageObjectName, objectTooltip } from '../core/objtext.ts';
+import { boxLabel } from '../core/objboxes.ts';
+import { objectBoxCanvas } from './objbox.ts';
 import { NAME_MAX, nameOf, namesOf, nameGroups, connectedRect, tileRanges, type NameKind } from '../core/usernames.ts';
 import { objectVariant, withObjectVariant, type ObjKind } from '../core/objkinds.ts';
 import { thumbCanvas, objKey, type ObjSpec, type ObjThumb } from './thumbs.ts';
@@ -138,7 +140,8 @@ export class Picker {
   // its button and hint, which follow the selection without a rebuild
   thumbs = new Map<string, HTMLCanvasElement>();
   thumbTiles = new Map<string, number[]>(); // Map16 tiles per object key
-  effects = new Set<string>(); // keys of objects that draw nothing but change RAM (object 2D's custom numbers)
+  effects = new Map<string, string>(); // objects that draw nothing but change RAM: what (thumbs.ts)
+  boxes = new Map<string, HTMLCanvasElement>(); // their thumbnails, the box of the level view (made when shown)
   thumbsFrom: ObjThumb[] | undefined; // the thumbnails shown (undefined: placeholders while they are learned)
   tabs: HTMLDivElement;
   builtPixels = 0; // the screen pixels per pixel the sheet shown is drawn at (0: no sheet)
@@ -528,9 +531,10 @@ export class Picker {
     this.thumbsFrom = thumbs;
     this.thumbTiles = new Map();
     this.thumbs = new Map();
-    this.effects = new Set();
+    this.effects = new Map();
+    this.boxes = new Map();
     for (const t of thumbs ?? []) {
-      if (t.effect) { this.effects.add(t.key); continue; }
+      if (t.effect) { this.effects.set(t.key, t.effect); continue; }
       this.thumbs.set(t.key, thumbCanvas(t));
       this.thumbTiles.set(t.key, t.m16);
     }
@@ -541,7 +545,8 @@ export class Picker {
   // the standard objects (with their types), the extended objects or object 2D's custom numbers as listed in the
   // tab; `text` is what the search looks in (lower case): number, name, Map16 tiles and what they do when hit or
   // entered (emulated, see blockprobe.ts), which tells apart objects that look the same, like pipes with and
-  // without an entrance
+  // without an entrance, and the tooltip – a package's (Lunar Magic's .osc, objtext.ts), else for an object that
+  // draws nothing what its load changes. Such an object's thumbnail is its box of the level view (objbox.ts).
   objectEntries(section: ObjSection) {
     const app = this.app;
     const out = [];
@@ -553,11 +558,13 @@ export class Picker {
       const label = s.extension ? `${hex2(s.num)}.${hex2(s.extension[0])}` : s.num ? hex2(s.num) + (vt >= 0 ? `.${vt.toString(16).toUpperCase()}` : '') : hex2(s.ext);
       const tiles = this.thumbTiles.get(key) ?? [];
       const sum = tiles.length ? blockSummary(app, tiles) : [];
-      const effect = this.effects.has(key);
+      const effect = this.effects.get(key);
+      const tip = objectTooltip(app.rom, s.num, s.extension?.[0] ?? s.ext);
       const info = (tiles.length ? `\nMap16 ${tiles.slice(0, 8).map(hex3).join(' ')}${tiles.length > 8 ? ' …' : ''}` : '')
-        + (effect ? '\nDraws nothing, but changes RAM when the level loads' : '')
+        + (tip ? '\n' + tip : effect ? `\nDraws nothing; when the level loads, it ${effect}` : '')
         + (sum === undefined ? '\n(determining behavior …)' : sum.map((x) => '\n' + x).join(''));
-      const th = this.thumbs.get(key);
+      if (effect && !this.boxes.has(key)) this.boxes.set(key, objectBoxCanvas(boxLabel(s)));
+      const th = this.thumbs.get(key) ?? this.boxes.get(key);
       // invalid extended objects and custom numbers produce nothing
       if (!th && !effect && section !== 'obj' && this.thumbsFrom) continue;
       out.push({

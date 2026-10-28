@@ -89,9 +89,14 @@ export function objectNameKey(num: number, ext: number, table: number | null): s
   return table === null ? null : `s${hex2(num)}@${hex(table, 6)}`;
 }
 
+// the name of an object without one: by its number
+export function numberName(num: number, ext: number): string {
+  return num === 0 ? `Extended object ${hex2(ext)}` : `Object ${hex2(num)}`;
+}
+
 // the name without the user's: the built-in one, else by number
 export function defaultObjectName(num: number, ext: number, table: number | null): string {
-  return builtinObjectName(num, ext, table) ?? (num === 0 ? `Extended object ${hex2(ext)}` : `Object ${hex2(num)}`);
+  return builtinObjectName(num, ext, table) ?? numberName(num, ext);
 }
 
 // the name without the user's in this ROM: a package's (.mw0t, extended objects), else the default one

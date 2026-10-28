@@ -21,6 +21,8 @@ import { map16Tile } from '../core/ram.ts';
 import { GAME_VIEW_W, GAME_VIEW_H, MARIO_W, MARIO_H, type CameraBands } from '../core/camerabands.ts';
 import { gameViewAt } from '../core/camerareach.ts';
 import { isDm16, dm16Tiles, prefabFlags } from '../core/cdm16.ts';
+import { boxLabel } from '../core/objboxes.ts';
+import { paintObjectBox, paintBoxName } from './objbox.ts';
 import { PREFAB_EXT, readPrefab } from '../core/prefabs.ts';
 import { projectId } from '../core/projectid.ts';
 import { loadDeaths, killerText, killerTile, levelVersion, type DeathMark } from './deathmarks.ts';
@@ -296,6 +298,7 @@ export class LevelView {
       if (m.kind === 'sec') ctx.fillText(hex3(m.index), m.x + 15, m.y + 27.5);
     }
     if (app.mode === 'l2' ? app.show.layer2 : app.show.layer1) this.paintConds(ctx, lw);
+    this.paintBoxes(ctx);
     if (app.show.invisible) this.paintInvisible(ctx, lw);
     if (app.show.collision) this.paintCollision(ctx);
     if (app.show.collision || app.show.layer3) this.paintTide(ctx);
@@ -333,6 +336,7 @@ export class LevelView {
         ctx.strokeRect(...this.cellBox(c.x, c.y, b.w, b.h));
       } else ctx.strokeRect(tx * 16, ty * 16, 16, 16);
     }
+    this.paintBoxNames(ctx);
     if (this.drag?.kind === 'pick') {
       const d = this.drag;
       const m = this.brushMax();
@@ -392,6 +396,26 @@ export class LevelView {
       ctx.fillRect(x, y, w, 9);
       ctx.fillStyle = '#fff';
       ctx.fillText(txt, x + 1.5, y + 7.5);
+    }
+  }
+
+  // the objects of the layers shown that draw nothing (objboxes.ts): a box on their tile
+  private boxLayers(): boolean[] {
+    const app = this.app;
+    return [false, true].filter((l2) => (l2 ? app.show.layer2 && !!app.level.layer2Objects : app.show.layer1));
+  }
+  paintBoxes(ctx: CanvasRenderingContext2D): void {
+    for (const l2 of this.boxLayers()) for (const o of this.app.boxedObjects(l2)) paintObjectBox(ctx, o.x * 16, o.y * 16, boxLabel(o));
+  }
+
+  // beside the box of a selected or hovered object, its name where it has one
+  paintBoxNames(ctx: CanvasRenderingContext2D): void {
+    const app = this.app;
+    const hovered = this.hover && !this.drag && !this.brushMode() ? app.hitsAt(this.hover.px, this.hover.py).map((h) => h.item) : [];
+    for (const l2 of this.boxLayers()) for (const o of app.boxedObjects(l2)) {
+      if (!app.selection.has(o.uid) && !hovered.includes(o)) continue;
+      const name = app.boxName(o);
+      if (name) paintBoxName(ctx, o.x * 16, o.y * 16, name, app.zoom);
     }
   }
 
