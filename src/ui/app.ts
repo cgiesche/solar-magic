@@ -16,6 +16,7 @@ import { renderLevel, renderLayerTiles, type LevelImages, composite } from '../c
 import { captureSprites, captureSpriteAt, type SpriteImage } from '../core/spritegfx.ts';
 import { spriteMemJob, usedSpriteMemory } from '../core/spritemem.ts';
 import { DM16_EXT, levelGfx, levelExtGfx, customPalette, levelMusic, defaultGfx } from '../core/patches.ts';
+import { objectLength2D, fitExtension } from '../core/obj2d.ts';
 import { gfxSkipMask, gfxFilesHash } from '../core/gfxpages.ts';
 import { flagBytes, usedFlags, isDm16, dm16Tiles, type Dm16Cond } from '../core/cdm16.ts';
 import { PREFAB_EXT, PREFAB_MAX, TRANSPARENT, listPrefabs, writePrefab, type Prefab } from '../core/prefabs.ts';
@@ -65,7 +66,8 @@ export interface Brush { w: number; h: number; tiles: number[] }
 export type PickedItem =
   // block: a rectangle of Map16 tiles from the picker sheet (tile + row * 16 + col), one Direct-Map16 object each
   // prefab: prefab number (extended object $04, see prefabs.ts)
-  | { kind: 'obj'; num: number; ext: number; size: number; tile?: number; block?: { w: number; h: number }; prefab?: number }
+  // extension: object 2D's bytes after its 3 when the ROM reads them (obj2d.ts)
+  | { kind: 'obj'; num: number; ext: number; size: number; tile?: number; block?: { w: number; h: number }; prefab?: number; extension?: number[] }
   | { kind: 'spr'; num: number; extra: number };
 // what a right click in the level adds (App.placement)
 export interface Placement { objects: LevelObject[]; sprites: LevelSprite[] }
@@ -1432,6 +1434,8 @@ export class App {
       const o: LevelObject = { uid: newUid(), num: p.num, ext: p.ext, x: tx + dx, y: ty + dy, size: p.size };
       if (p.tile !== undefined) o.tile = p.tile + dy * 16 + dx;
       if (p.prefab !== undefined) o.prefab = p.prefab;
+      if (p.extension) o.extension = [...p.extension];
+      fitExtension(o, objectLength2D(this.rom));
       this.clampObject(o);
       return o;
     });

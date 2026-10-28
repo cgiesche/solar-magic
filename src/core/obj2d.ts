@@ -64,3 +64,10 @@ function emulatedExtension(rom: Rom): number {
   const moved = ((wram[RAM.levelDataPtr] | (wram[RAM.levelDataPtr + 1] << 8)) - (DATA & 0xffff)) & 0xffff;
   return moved <= MAX_EXTENSION ? moved : 0;
 }
+
+// gives an object the extension the ROM reads (len2d: objectLength2D): object 2D keeps its bytes as far as
+// they go (missing ones 0), any other object has none
+export function fitExtension(o: { num: number; extension?: number[] }, len2d: number): void {
+  if (o.num === OBJ_2D && len2d > 3) o.extension = Array.from({ length: len2d - 3 }, (_, i) => o.extension?.[i] ?? 0);
+  else delete o.extension;
+}

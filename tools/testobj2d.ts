@@ -6,7 +6,7 @@ import { Rom } from '../src/core/rom.ts';
 import { loadAsar } from '../src/core/asar.ts';
 import { applyPatch } from '../src/core/patchapply.ts';
 import { parseObjects, serializeObjects, newUid, loadLevel, type LevelObject } from '../src/core/level.ts';
-import { objectLength2D } from '../src/core/obj2d.ts';
+import { objectLength2D, fitExtension } from '../src/core/obj2d.ts';
 import { saveLevel } from '../src/core/save.ts';
 import { parseLmObjects } from '../src/core/mwl.ts';
 import { editorImage } from './fixture.ts';
@@ -74,6 +74,15 @@ check(objectLength2D(hooked) === 5, `once the hook is installed (the same ROM): 
   const o = again.objects.find((q) => q.num === 0x2d);
   check(!!o && o.extension?.join() === '0,0' && o.x === 0x14 && again.objects.at(-1)?.num === 1 && again.objects.length === lv.objects.length,
     'saved and loaded again: 2D with its extension, the object after it');
+}
+
+// an object given the extension the ROM reads: 2D with a hook keeps its bytes (missing ones 0), others have none
+{
+  const a = obj(0x2d, 0, 0, 0); fitExtension(a, 5);
+  const b = obj(0x2d, 0, 0, 0, [9, 8, 7]); fitExtension(b, 5);
+  const c = obj(0x2d, 0, 0, 0, [9, 8]); fitExtension(c, 3);
+  const d = obj(0x14, 0, 0, 0, [9, 8]); fitExtension(d, 5);
+  check(a.extension?.join() === '0,0' && b.extension?.join() === '9,8' && !('extension' in c) && !('extension' in d), 'extension fitted to the object and the ROM');
 }
 
 // Lunar Magic's level files: 2D is always 5 bytes there; kept where the ROM reads it so, else left out with a note

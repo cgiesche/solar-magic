@@ -15,6 +15,7 @@ import { exportLevelFile, importLevelFile, LEVEL_FILE_EXT } from '../core/levelf
 import { ENTRANCE_ACTIONS, hex } from '../core/names.ts';
 import { saveLevel } from '../core/save.ts';
 import { DM16_EXT, setLevelGfx, customPalette, setCustomPalette, bgBank } from '../core/patches.ts';
+import { objectLength2D, OBJ_2D } from '../core/obj2d.ts';
 import { bgFromWram } from '../core/bg.ts';
 import { PREFAB_EXT } from '../core/prefabs.ts';
 
@@ -231,6 +232,9 @@ export function openInsertDialog(app: App, tx: number, ty: number): void {
   let num = p?.kind === 'spr' ? (kind === 2 ? p.num : 1) : p ? (p.num || p.ext) : 1;
   let size = p?.kind === 'obj' ? p.size : 0;
   let extra = p?.kind === 'spr' ? p.extra : 0;
+  // object 2D's bytes after its 3 where the ROM reads them (obj2d.ts; Lunar Magic's Extension)
+  const len2d = objectLength2D(app.rom);
+  const extension = Array.from({ length: len2d - 3 }, (_, i) => (p?.kind === 'obj' && p.extension?.[i]) || 0);
   const name = h('div', { class: 'hint' });
   const fields = h('div');
   const showName = () => (name.textContent = kind === 2 ? app.spriteLabel(spriteId({ num, extra })) : kind === 1 ? app.objectName(0, num) : app.objectName(num, 0));
@@ -239,8 +243,10 @@ export function openInsertDialog(app: App, tx: number, ty: number): void {
     if (kind === 0) num = Math.max(1, Math.min(0x3f, num));
     showName();
     fields.append(
-      h('div', { class: 'prop' }, h('label', null, 'Number'), hexInput(num, 2, (v) => { num = v; showName(); }, kind === 0 ? 0x3f : 0xff)),
+      h('div', { class: 'prop' }, h('label', null, 'Number'), hexInput(num, 2, (v) => { const was2d = num === OBJ_2D; num = v; if (kind === 0 && was2d !== (v === OBJ_2D)) build(); else showName(); }, kind === 0 ? 0x3f : 0xff)),
       kind === 0 ? h('div', { class: 'prop' }, h('label', null, 'Size/setting'), hexInput(size, 2, (v) => (size = v))) : '',
+      kind === 0 && num === OBJ_2D && extension.length ? h('div', { class: 'prop' }, h('label', null, 'Extension'), ...extension.map((b, i) => hexInput(b, 2, (v) => (extension[i] = v)))) : '',
+      kind === 0 && num === OBJ_2D && extension.length ? h('div', { class: 'hint' }, `Object 2D has ${len2d} bytes in this ROM: the extension is read by its code (often a custom object's number first)`) : '',
       kind === 2 ? h('div', { class: 'prop' }, h('label', null, 'Extra bits'), hexInput(extra, 1, (v) => { extra = v; showName(); }, 3)) : '',
       kind === 2 ? h('div', { class: 'hint' }, 'Extra bits 2/3: custom sprite (PIXI) without/with extra bit') : '',
       name,
@@ -260,7 +266,7 @@ export function openInsertDialog(app: App, tx: number, ty: number): void {
       if (kind === 0 && num === 0) { toast('There is no object 00 – use “Extended object” for extended objects.', 'error'); return false; }
       if (kind === 1 && num === DM16_EXT) { toast('Please place Direct Map16 via the picker\'s Map16 tab.', 'error'); return false; }
       if (kind === 1 && num === PREFAB_EXT) { toast('Please place prefabs via the picker\'s Objects tab (Prefabs).', 'error'); return false; }
-      app.insertAt(tx, ty, kind === 0 ? { kind: 'obj', num, ext: 0, size } : { kind: 'obj', num: 0, ext: num, size: 0 });
+      app.insertAt(tx, ty, kind === 0 ? { kind: 'obj', num, ext: 0, size, ...(num === OBJ_2D && extension.length ? { extension } : {}) } : { kind: 'obj', num: 0, ext: num, size: 0 });
     }
   };
   const dlg = modal('Insert by number', body, [{ label: 'Cancel' }, { label: 'Insert', primary: true, onClick: insert }]);

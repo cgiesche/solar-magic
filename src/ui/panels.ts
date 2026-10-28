@@ -13,6 +13,7 @@ import { levelName } from '../core/overworld.ts';
 import { usedInList } from './usedin.ts';
 import { buildExitPanel } from './exitpanel.ts';
 import { DM16_EXT } from '../core/patches.ts';
+import { objectLength2D, fitExtension } from '../core/obj2d.ts';
 import { PREFAB_EXT, TRANSPARENT, freePrefabNumber, readPrefab, writePrefab, PREFAB_COUNT, type Prefab } from '../core/prefabs.ts';
 import { prefabCost } from '../core/prefabcost.ts';
 import type { LevelPlaces } from '../core/prefabplaces.ts';
@@ -198,7 +199,7 @@ export class Picker {
         this.tab = 'obj';
       } else {
         const kind = app.objectKind(o.num);
-        item = { kind: 'obj', num: o.num, ext: 0, size: withObjectVariant(kind, 0x11, Math.max(0, objectVariant(kind, o.size))) };
+        item = { kind: 'obj', num: o.num, ext: 0, size: withObjectVariant(kind, 0x11, Math.max(0, objectVariant(kind, o.size))), ...(o.extension ? { extension: [...o.extension] } : {}) };
         this.tab = 'obj';
       }
     }
@@ -1115,7 +1116,7 @@ export class Properties {
         ? `Prefab ${hex2(o.prefab!)}: ${pf ? pf.name || '(unnamed)' : '(missing)'}`
         : `${o.num ? 'Object ' + hex2(o.num) : 'Ext. object ' + hex2(o.ext)}: ${app.objectName(o.num, o.ext)}`),
       h('div', { class: 'hint' }, `No. ${idx + 1} of ${app.currentObjects().length} (drawing order)`),
-      this.field('Object', hexInput(o.num, 2, (v) => upd((o) => { o.num = v; fixPrefab(o); }), 0x3f)),
+      this.field('Object', hexInput(o.num, 2, (v) => upd((o) => { o.num = v; fixPrefab(o); fitExtension(o, objectLength2D(app.rom)); }), 0x3f)),
       o.num === 0 ? this.field('Ext. object', hexInput(o.ext, 2, (v) => upd((o) => { o.ext = v; fixPrefab(o); }), 0xff)) : '',
       o.num === 0 && o.ext === PREFAB_EXT && o.prefab !== undefined ? this.field('Prefab', hexInput(o.prefab, 2, (v) => upd((o) => (o.prefab = v)), 0xff)) : '',
       isPlacedPrefab(o) && !pf ? h('div', { class: 'hint' }, 'This prefab does not exist – the object places nothing.') : '',
@@ -1127,6 +1128,8 @@ export class Properties {
       this.field('Y', hexInput(o.y, 3, (v) => upd((o) => (o.y = v)), app.levelHeightTiles() - 1)),
       o.num !== 0 && ov?.type ? this.field('Type', hexInput(objectVariant(ov, o.size), 1, (v) => upd((o) => (o.size = withObjectVariant(ov, o.size, v))), ov.count - 1)) : '',
       o.num !== 0 ? this.field('Size (byte)', hexInput(o.size, 2, (v) => upd((o) => (o.size = v)))) : '',
+      o.extension ? this.field('Extension', h('span', { title: "The object's bytes after its 3, read by the ROM's code for object 2D (Lunar Magic's Extension; the first is often a custom object's number)" },
+        ...o.extension.map((b, i) => hexInput(b, 2, (v) => upd((o) => { if (o.extension) o.extension[i] = v; }))))) : '',
       o.num !== 0 ? h('div', { class: 'hint' }, `${nibbleText(ov)} · Keys: + / - width, * / / height, Alt+arrows`) : '',
     );
     // Map16 tiles of the object and their behaviour when hit from below (emulated)
