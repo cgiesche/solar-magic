@@ -8,8 +8,7 @@
 // the setting keeps the camera still, it never moves and there is no band.
 
 import type { Snes } from './snes.ts';
-import { RAM, getS16 } from './ram.ts';
-import { PAD } from './blockprobe.ts';
+import { RAM, MARIO_DYING, PAD, getS16 } from './ram.ts';
 
 export const GAME_VIEW_W = 256, GAME_VIEW_H = 224;
 export const MARIO_W = 16, MARIO_H = 32; // big Mario's box from his position
@@ -52,7 +51,7 @@ export function measureCameraBands(st: BandStage): CameraBands {
         const c = getS16(w, axis);
         if ((c - cam) * sign > 0) acc.push(getS16(w, mario) - c);
         cam = c;
-        if (w[RAM.marioAnim] === 9) break; // died
+        if (w[RAM.marioAnim] === MARIO_DYING) break; // died
       }
     } finally { s.joy1 = 0; }
   };

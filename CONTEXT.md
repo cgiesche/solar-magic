@@ -258,6 +258,10 @@ _Avoid_: event, flag (those are Conditional Direct Map16's)
 Finding out how something behaves in the game by running the game's own code on it in an emulator: what a Map16 block does when Mario touches it, how Mario collides with it, what a sprite does when hit from below, how fast Mario runs in a tileset. A probe is always for one tileset.
 _Avoid_: Test, check, lookup table
 
+**Play session**:
+A level played in the emulator from gameplay on, frame by frame with the buttons held: it begins once the level's gameplay has started (or once Mario has settled: standing, the sprites running), and ends when Mario dies, the level is left, or whoever plays stops. Test play, probes that move Mario and the tests play a level that way.
+_Avoid_: run, game loop, harness
+
 **Emulated result**:
 Anything the editor learned by emulation (a probe's outcome, the kinds of a tileset's objects, a level scan, sprite images, object thumbnails, jump arcs). It stays valid as long as its inputs and the ROM bytes it read are unchanged, and is learned again otherwise (on the main thread by the result learner, core/learner.ts: a key, an input, the bytes read).
 _Avoid_: Cached value, generation (for validity)

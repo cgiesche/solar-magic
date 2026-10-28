@@ -9,7 +9,7 @@ import {
   type Level, loadLevel, cloneLevel, maxScreens, entrancePos, mainSpot, levelRows, readSecondaryEntrance, writeSecondaryEntrance,
 } from '../src/core/level.ts';
 import { saveLevel } from '../src/core/save.ts';
-import { GM, RAM, SPR, SPRITE_SLOTS, get16, marioX, marioY, cameraX, cameraY, spriteX, spriteY } from '../src/core/ram.ts';
+import { GM, RAM, MARIO_DYING, SPR, SPRITE_SLOTS, get16, marioX, marioY, cameraX, cameraY, spriteX, spriteY } from '../src/core/ram.ts';
 import { loadAsar } from '../src/core/asar.ts';
 import { uploadFiles, uploadFromFiles } from '../src/core/patchpkg.ts';
 import { planPixiUpload, applyPixiUpload } from '../src/core/pixipkg.ts';
@@ -83,7 +83,7 @@ function compare(n: number, size: number, dy: number, note = ''): void {
   const a = play(game), b = play(tall), d = dy * 16;
   let frames = 0, state = -1, tiles = 0, tilesBad = -1, below = 0;
   let still = 0; // frames the cameras have been the same (the tilemap follows a frame later)
-  for (let f = 0; f < 600 && a.wram[RAM.gameMode] === GM.level && a.wram[RAM.marioAnim] !== 9; f++) {
+  for (let f = 0; f < 600 && a.wram[RAM.gameMode] === GM.level && a.wram[RAM.marioAnim] !== MARIO_DYING; f++) {
     step(a, input(f)); step(b, input(f)); frames++;
     const wa = a.wram, wb = b.wram;
     const same = marioX(wa) === marioX(wb) && marioY(wa) + d === marioY(wb) && sprites(wa, d) === sprites(wb, 0);

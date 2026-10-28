@@ -9,8 +9,7 @@ import { readExitPaths, readExitPath, writeExitPath, readTeleports, writeTelepor
 import { readLinks, makeLink, removeLink, setBothWays, moveLocation, exitEntry, pathSide, koopaTeleport, setKoopaTeleport, opposite, SIDES, KOOPA_X, type LinkEnd, type OwLink } from '../src/core/owlinks.ts';
 import { l1Index, overworldDataRanges } from '../src/core/overworld.ts';
 import { readSecondaryEntrance, writeSecondaryEntrance, newOverworldExit } from '../src/core/level.ts';
-import { GM, RAM, get16, set16 } from '../src/core/ram.ts';
-import { PAD } from '../src/core/blockprobe.ts';
+import { GM, RAM, PAD, get16, set16 } from '../src/core/ram.ts';
 import { editorImage, cleanImage, romDiff } from './fixture.ts';
 
 let bad = 0;

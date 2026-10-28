@@ -33,7 +33,7 @@ import { spriteName, hex3 } from './names.ts';
 import { measureCameraBands, type CameraBands } from './camerabands.ts';
 import { layerGeom } from './render.ts';
 import { hasLayer2Objects, parsePrimaryHeader, encodePrimaryHeader } from './level.ts';
-import { GM, RAM, SPR, SPR_STATE, SPRITE_SLOTS, MAP_HI, marioY, map16Tile, spriteX, spriteY, cameraY, setCameraX, setCameraY, setMarioPos } from './ram.ts';
+import { GM, RAM, SPR, SPR_STATE, SPRITE_SLOTS, MAP_HI, MARIO_DYING, PAD, mapAddr, marioY, map16Tile, spriteX, spriteY, cameraY, setCameraX, setCameraY, setMarioPos } from './ram.ts';
 
 const PROBE_LEVEL = 0x105; // horizontal level, loaded with PROBE_HEADER, without objects and sprites
 const PROBE_HEADER = [0x33, 0x40, 0x08, 0x80, 0x27]; // primary header; the tileset is replaced
@@ -46,8 +46,7 @@ const MAX_VARIANTS = 16; // more X × Y combinations: Y is ignored
 const ENTER_FRAMES = 24;
 const COLLISION_VERSION = 2; // part of the result key: raise when the collision probe changes
 const SETTLE_FRAMES = 6; // frames Mario has to stand still before a probe stops early
-// joypad bits ($4218); Mario's offset to the tile for each enter direction
-export const PAD = { up: 0x0800, down: 0x0400, left: 0x0200, right: 0x0100, b: 0x8000, y: 0x4000, a: 0x0080, l: 0x0020, r: 0x0010 };
+// Mario's offset to the tile for each enter direction
 const ENTER_DX = [-8, -4, 0, 4, 8]; // pipes only let Mario in within a few pixels of their middle
 
 // result cache keys (see ResultCache) of the probes in tileset ts
@@ -399,7 +398,7 @@ export class BlockProber {
       for (let f = 0; f < PROBE_FRAMES; f++) {
         s.runFrame();
         if (w[RAM.marioBlocked] & 8) solid = true;
-        if (w[RAM.marioAnim] === 9 || w[RAM.powerup] < big) hurt = true;
+        if (w[RAM.marioAnim] === MARIO_DYING || w[RAM.powerup] < big) hurt = true;
         for (let i = 0; i < SPRITE_SLOTS; i++) if (i !== ignore && w[SPR.status + i]) seen.add(w[SPR.num + i]);
         if (settled?.(w)) break;
       }
@@ -416,7 +415,7 @@ export class BlockProber {
   }
 
   private put(x: number, y: number, tile: number): void {
-    const w = this.emu.snes.wram, off = MAP_BASE + (x >> 4) * 0x1b0 + y * 16 + (x & 15);
+    const w = this.emu.snes.wram, off = mapAddr(x, y);
     w[off] = tile & 0xff;
     w[off + MAP_HI] = tile >> 8;
   }
@@ -497,7 +496,7 @@ export class BlockProber {
       for (let x = bx - 4; x <= bx + 4; x++) this.put(x, this.by, t);
       this.placeMario(bx * 16, this.by * 16, -40, 0); // feet 8 px above
       if (this.runHeld(0, 16)) continue;
-      const off = MAP_BASE + (bx >> 4) * 0x1b0 + this.by * 16 + (bx & 15);
+      const off = mapAddr(bx, this.by);
       if ((w[RAM.marioBlocked] & 4) && w[RAM.powerup] === 0 && map16Tile(w, off) === t) { c.floorTile = t; break; }
     }
   }
@@ -542,7 +541,7 @@ export class BlockProber {
       try {
         for (let f = 0; f < PROBE_FRAMES && still < SETTLE_FRAMES; f++) {
           this.emu.snes.runFrame();
-          if (w[RAM.marioAnim] === 9) { dead = true; break; }
+          if (w[RAM.marioAnim] === MARIO_DYING) { dead = true; break; }
           if (w[RAM.powerup] < 1) hurt = true;
           if (w[RAM.marioBlocked] & 4) { if (land < 0 && marioY(w) < ty) land = marioY(w); still++; } else still = 0;
           if (marioY(w) > ty + 16) break; // fell through: below the tile, nothing touches it any more
@@ -579,7 +578,7 @@ export class BlockProber {
         for (let f = 0; f < PROBE_FRAMES && pushing < SETTLE_FRAMES; f++) {
           s.joy1 = fromLeft ? PAD.right : PAD.left;
           s.runFrame();
-          if (w[RAM.marioAnim] === 9) { dead = true; break; }
+          if (w[RAM.marioAnim] === MARIO_DYING) { dead = true; break; }
           if (w[RAM.powerup] < 1) hurt = true;
           // settled: pushing against the side for a few frames
           if (w[RAM.marioBlocked] & (fromLeft ? 1 : 2)) { blocked = true; pushing++; } else pushing = 0;
@@ -616,7 +615,7 @@ export class BlockProber {
   private hit(tile: number, big: number, col: number): HitResult {
     const bx = 16 + col, by = this.by;
     const w = this.start(bx, big);
-    const off = MAP_BASE + (bx >> 4) * 0x1b0 + by * 16 + (bx & 15);
+    const off = mapAddr(bx, by);
     w[off] = tile & 0xff;
     w[off + MAP_HI] = tile >> 8;
     this.placeMario(bx * 16, by * 16, 20, -0x40);

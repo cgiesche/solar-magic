@@ -8,8 +8,8 @@
 
 import type { LevelEmulator, LevelOverride } from './levelemu.ts';
 import type { SnesState } from './snes.ts';
-import { PAD, type RunStates, type RunState } from './blockprobe.ts';
-import { GM, RAM, setCameraX, setCameraY, marioX, getS16, marioY, setMarioPos } from './ram.ts';
+import { type RunStates, type RunState } from './blockprobe.ts';
+import { GM, RAM, MARIO_DYING, PAD, setCameraX, setCameraY, marioX, getS16, marioY, setMarioPos } from './ram.ts';
 
 export type ArcSpeed = 'stand' | 'walk' | 'run' | 'p';
 export const ARC_SPEEDS: ArcSpeed[] = ['stand', 'walk', 'run', 'p'];
@@ -106,7 +106,7 @@ export class JumpArcs {
         s.joy1 = hold | PAD.b;
         s.runFrame();
         pts.push(...pos());
-        if (w[RAM.marioAnim] === 9) { end = 'dead'; break; }
+        if (w[RAM.marioAnim] === MARIO_DYING) { end = 'dead'; break; }
         const ground = (w[RAM.marioBlocked] & 4) !== 0;
         if (!ground) air = true;
         else if (air) { end = 'land'; break; }

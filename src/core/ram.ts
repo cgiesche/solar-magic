@@ -132,11 +132,15 @@ export const RAM = {
 } as const;
 
 export const MARIO_DYING = 9; // Mario's animation while he dies
+// joypad bits ($4218)
+export const PAD = { b: 0x8000, y: 0x4000, select: 0x2000, start: 0x1000, up: 0x0800, down: 0x0400, left: 0x0200, right: 0x0100, a: 0x0080, x: 0x0040, l: 0x0020, r: 0x0010 } as const;
 
 // level data: Map16 tile numbers, low bytes at MAP_BASE, high bytes in bank $7F
 export const MAP_BASE = 0xc800;
 export const MAP_SIZE = 0x3800;
 export const MAP_HI = 0x10000; // from a low byte to its high byte
+// the level data address (low byte) of layer 1 tile (tx, ty) in a horizontal level of the game's own height (27 rows)
+export const mapAddr = (tx: number, ty: number) => MAP_BASE + (tx >> 4) * 0x1b0 + ty * 16 + (tx & 15);
 // the level heights patch's RAM (levelheight.ts, SNES address, bytes): a screen's bytes in the level data
 // while a level with a size loads (16-bit, 0: the game's $1B0), the subscreen of the objects that follow,
 // then what playing the level needs (the Y high bytes inside the level, …)

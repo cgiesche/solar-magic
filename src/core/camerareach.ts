@@ -12,7 +12,7 @@
 import { levelDataKey, type LevelEmulator, type LevelOverride } from './levelemu.ts';
 import type { ScanLevel } from './levelscan.ts';
 import { GAME_VIEW_W, GAME_VIEW_H, MARIO_W, MARIO_H } from './camerabands.ts';
-import { GM, RAM, cameraX, cameraY, setMarioPos } from './ram.ts';
+import { GM, RAM, MARIO_DYING, cameraX, cameraY, setMarioPos } from './ram.ts';
 
 // per column of the level (vertical levels: row), 16 pixels each: the pixels [from, to) down (across) it the
 // camera showed; null: never. camera: where the camera (layer 1's place) went, from the first to the last pixel
@@ -51,7 +51,7 @@ function stand(emu: LevelEmulator, x: number, y: number): boolean {
   w[RAM.marioSpeedX] = 0; w[RAM.marioSpeedY] = 0; w[RAM.hurtTimer] = 0x40;
   w[RAM.marioClimbing] = 1;
   s.runFrame();
-  if (w[RAM.marioAnim] === 9) { w[RAM.marioAnim] = 0; w[RAM.marioAnimTimer] = 0; w[RAM.spritesLocked] = 0; } // up again
+  if (w[RAM.marioAnim] === MARIO_DYING) { w[RAM.marioAnim] = 0; w[RAM.marioAnimTimer] = 0; w[RAM.spritesLocked] = 0; } // up again
   return w[RAM.gameMode] === GM.level;
 }
 

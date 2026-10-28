@@ -10,7 +10,7 @@ import { levelTranslevel, encodeSecondaryHeader, startHeader, entrancePos, mainS
 import { Apu, apuReady, loadApu } from '../core/apu.ts';
 import { AudioOut } from './audio.ts';
 import { musicPlayer } from './musicplayer.ts';
-import { GM, RAM, marioX, marioY, setMarioPos } from '../core/ram.ts';
+import { GM, RAM, PAD, marioX, marioY, setMarioPos } from '../core/ram.ts';
 import { SlotWatch } from '../core/slotwatch.ts';
 import { DeathWatch } from '../core/deaths.ts';
 import { addDeath, levelVersion } from './deathmarks.ts';
@@ -23,24 +23,24 @@ import { SaveSlot } from '../core/savestate.ts';
 import { joinHooks, type SnesState } from '../core/snes.ts';
 
 const KEYMAP: Record<string, number> = {
-  ArrowUp: 0x0800, ArrowDown: 0x0400, ArrowLeft: 0x0200, ArrowRight: 0x0100,
-  x: 0x8000, X: 0x8000, // B: jump
-  z: 0x4000, Z: 0x4000, y: 0x4000, Y: 0x4000, // Y: run / fire
-  s: 0x0080, S: 0x0080, // A: spin jump
-  a: 0x0040, A: 0x0040, // X
-  Enter: 0x1000, Shift: 0x2000, q: 0x0020, Q: 0x0020, w: 0x0010, W: 0x0010,
+  ArrowUp: PAD.up, ArrowDown: PAD.down, ArrowLeft: PAD.left, ArrowRight: PAD.right,
+  x: PAD.b, X: PAD.b, // B: jump
+  z: PAD.y, Z: PAD.y, y: PAD.y, Y: PAD.y, // Y: run / fire
+  s: PAD.a, S: PAD.a, // A: spin jump
+  a: PAD.x, A: PAD.x, // X
+  Enter: PAD.start, Shift: PAD.select, q: PAD.l, Q: PAD.l, w: PAD.r, W: PAD.r,
 };
 
 // Gamepad API "standard" layout, by position (an SNES-style pad lines up 1:1, an Xbox pad's bottom button is B)
 const PADMAP: [number, number][] = [
-  [0, 0x8000], [1, 0x0080], [2, 0x4000], [3, 0x0040], // bottom = B, right = A, left = Y, top = X
-  [4, 0x0020], [5, 0x0010], [6, 0x0020], [7, 0x0010], // shoulders and triggers = L / R
-  [8, 0x2000], [9, 0x1000], // Select, Start
-  [12, 0x0800], [13, 0x0400], [14, 0x0200], [15, 0x0100], // d-pad
+  [0, PAD.b], [1, PAD.a], [2, PAD.y], [3, PAD.x], // bottom = B, right = A, left = Y, top = X
+  [4, PAD.l], [5, PAD.r], [6, PAD.l], [7, PAD.r], // shoulders and triggers = L / R
+  [8, PAD.select], [9, PAD.start], // Select, Start
+  [12, PAD.up], [13, PAD.down], [14, PAD.left], [15, PAD.right], // d-pad
 ];
 const PAD_PAUSE = 16; // home / guide button
 const PAD_SELECT = 8, PAD_L = [4, 6], PAD_R = [5, 7]; // Select+L saves the state, Select+R loads it
-const PAD_COMBO = 0x2000 | 0x0020 | 0x0010; // Select, L, R: not passed to the game while a combo is held
+const PAD_COMBO = PAD.select | PAD.l | PAD.r; // Select, L, R: not passed to the game while a combo is held
 const AUDIO_LEAD = 1800; // sample pairs to keep queued at first (~56 ms; grows after underruns)
 
 // buttons of all connected gamepads; pause: the pause button is held on one of them; save / load: Select+L /
@@ -60,8 +60,8 @@ function readPads(): { bits: number; pause: boolean; save: boolean; load: boolea
     if (r) load = true;
     bits |= l || r ? pb & ~PAD_COMBO : pb;
     const ax = p.axes[0] ?? 0, ay = p.axes[1] ?? 0;
-    if (ax < -0.5) bits |= 0x0200; else if (ax > 0.5) bits |= 0x0100;
-    if (ay < -0.5) bits |= 0x0800; else if (ay > 0.5) bits |= 0x0400;
+    if (ax < -0.5) bits |= PAD.left; else if (ax > 0.5) bits |= PAD.right;
+    if (ay < -0.5) bits |= PAD.up; else if (ay > 0.5) bits |= PAD.down;
   }
   return { bits, pause, save, load, names };
 }

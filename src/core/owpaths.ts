@@ -10,8 +10,7 @@
 import type { LevelEmulator } from './levelemu.ts';
 import type { Job } from './learner.ts';
 import { l1Index, overworldDataRanges, OW_L1, DIR_FLAGS } from './overworld.ts';
-import { RAM, GM, get16 } from './ram.ts';
-import { PAD } from './blockprobe.ts';
+import { RAM, GM, PAD, get16 } from './ram.ts';
 
 export const PATH_KINDS = ['walk', 'climb', 'swim', 'exit', 'stop', 'level', 'none'] as const;
 export type PathKind = (typeof PATH_KINDS)[number];

@@ -15,7 +15,7 @@
 import { levelDataKey, type LevelEmulator, type LevelOverride } from './levelemu.ts';
 import { cameraReachJob, type CameraReach } from './camerareach.ts';
 import { tideRangeJob, type TideRange } from './layer3.ts';
-import { GM, RAM, SPR, SPRITE_SLOTS, getS16, set16, cameraX, cameraY, marioX } from './ram.ts';
+import { GM, RAM, MARIO_DYING, SPR, SPRITE_SLOTS, getS16, set16, cameraX, cameraY, marioX } from './ram.ts';
 
 export interface ScreenLoad { screen: number; frames: number; lag: number; maxBusy: number }
 export interface SpriteFate { index: number; kind: 'fell' | 'stuck'; frame: number }
@@ -69,7 +69,7 @@ export function* levelScanJob(emu: LevelEmulator, lv: ScanLevel): Generator<void
       set16(w, RAM.marioX, mx); set16(w, RAM.marioY, my);
       w[RAM.marioSpeedX] = 0; w[RAM.marioSpeedY] = 0; w[RAM.hurtTimer] = 0x40;
       s.runFrame();
-      if (w[RAM.gameMode] !== GM.level || w[RAM.marioAnim] === 9) break; // level ended (goal, death or something the level does)
+      if (w[RAM.gameMode] !== GM.level || w[RAM.marioAnim] === MARIO_DYING) break; // level ended (goal, death or something the level does)
       // the frame counts for the screen in the middle of the camera
       const cam = lv.vertical ? cameraY(w) + 112 : cameraX(w) + 128;
       const scr = cam >> 8;
