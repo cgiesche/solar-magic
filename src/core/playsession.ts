@@ -92,7 +92,9 @@ export class PlaySession {
   until(state: Ready, limit = READY_FRAMES): boolean {
     const w = this.s.wram;
     const there = () => w[RAM.gameMode] === GM.level && (state === 'gameplay' || (w[RAM.marioAnim] === 0 && !w[RAM.spritesLocked]));
-    for (let f = 0; f < limit && !there(); f++) this.s.runFrame();
+    try {
+      for (let f = 0; f < limit && !there(); f++) this.s.runFrame();
+    } catch { return false; } // (the emulated game crashed)
     return state === 'settled' ? w[RAM.gameMode] === GM.level : there();
   }
 

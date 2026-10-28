@@ -4,23 +4,24 @@
 import type { App } from './app.ts';
 import { h, modal } from './dom.ts';
 import { LevelEmulator } from '../core/levelemu.ts';
-import { PPU } from '../core/ppu.ts';
+import type { PPU } from '../core/ppu.ts';
+import { PlaySession } from '../core/playsession.ts';
 import { hex } from '../core/names.ts';
-import { levelTranslevel, encodeSecondaryHeader, startHeader, entrancePos, mainSpot, type StartEntrance } from '../core/level.ts';
+import { encodeSecondaryHeader, startHeader, entrancePos, mainSpot, type StartEntrance } from '../core/level.ts';
 import { Apu, apuReady, loadApu } from '../core/apu.ts';
 import { AudioOut } from './audio.ts';
 import { musicPlayer } from './musicplayer.ts';
-import { GM, RAM, PAD, marioX, marioY, setMarioPos } from '../core/ram.ts';
+import { RAM, PAD, marioX, marioY, setMarioPos } from '../core/ram.ts';
 import { SlotWatch } from '../core/slotwatch.ts';
 import { DeathWatch } from '../core/deaths.ts';
 import { addDeath, levelVersion } from './deathmarks.ts';
 import { projectId } from '../core/projectid.ts';
-import { PlayLog, cpuLoad } from '../core/playlog.ts';
+import { PlayLog } from '../core/playlog.ts';
 import { playMeter, GRAPH_FRAMES } from './playmeter.ts';
 import { applyTriggers, emptyTriggerView, customOn, switchName, isCustom, isManual, isOneShot, CUSTOM, MANUAL, ONE_SHOT } from '../core/extrigger.ts';
 import { shownSwitches } from './triggerpanel.ts';
 import { SaveSlot } from '../core/savestate.ts';
-import { joinHooks, type SnesState } from '../core/snes.ts';
+import type { SnesState } from '../core/snes.ts';
 
 const KEYMAP: Record<string, number> = {
   ArrowUp: PAD.up, ArrowDown: PAD.down, ArrowLeft: PAD.left, ArrowRight: PAD.right,
@@ -98,16 +99,15 @@ function start(app: App, at: Start | undefined, audio: AudioOut, fromSave: boole
   const emu = testEmu;
   const lv = app.level;
   const saved = fromSave ? saveSlot.get(app.rom, lv.number, app.dirty) : null;
-  const r = saved ? { ok: true } : loadLevel(app, emu, at);
-  const ppu = new PPU(emu.snes);
-  emu.snes.ppu = ppu;
+  const p = saved ? PlaySession.resume(emu) : loadLevel(app, emu, at);
+  const ppu = p.picture();
   // with the PPU attached: the picture on screen is part of the state
-  if (saved) emu.snes.loadState(saved);
-  play(app, at, audio, emu, ppu, r.ok, !!saved);
+  if (saved) p.load(saved);
+  play(app, at, audio, p, ppu, saved ? true : p.render?.ok === true, !!saved);
 }
 
 // loads the level in a game in progress, Mario at the start position
-function loadLevel(app: App, emu: LevelEmulator, at: Start | undefined): { ok: boolean } {
+function loadLevel(app: App, emu: LevelEmulator, at: Start | undefined): PlaySession {
   const lv = app.level;
   const ov = app.buildOverrides();
   // the start position: the nearest main entrance setting loads the level around it (camera, tilemap; FG and
@@ -123,33 +123,23 @@ function loadLevel(app: App, emu: LevelEmulator, at: Start | undefined): { ok: b
   }
   // a game in progress (lives, overworld with Mario on the level's tile, entered from there so that the
   // midway point counts): dying returns there
-  const translevel = levelTranslevel(app.rom, lv.number);
-  let r: ReturnType<LevelEmulator['load']>;
-  try {
-    emu.startGame(translevel);
-    r = emu.loadInGame(lv.number, translevel, ov);
-  } catch {
-    r = emu.load(lv.number, { ...ov, translevel });
-  }
-  const s = emu.snes;
-  if (start && r.ok) {
-    try { for (let i = 0; i < 80 && s.wram[RAM.gameMode] !== GM.level; i++) s.runFrame(); } catch { /* shown when playing */ }
-    const w = s.wram;
+  const p = PlaySession.start(emu, lv.number, { ov, game: {} });
+  if (start && p.ready) {
+    const w = p.wram;
     if (move) setMarioPos(w, marioX(w) + move.x, marioY(w) + move.y);
     else setMarioPos(w, start.x, start.y);
   }
-  return r;
+  return p;
 }
 
-function play(app: App, at: Start | undefined, audio: AudioOut, emu: LevelEmulator, ppu: PPU, ok: boolean, fromSave: boolean): void {
-  const s = emu.snes, lv = app.level;
+function play(app: App, at: Start | undefined, audio: AudioOut, p: PlaySession, ppu: PPU, ok: boolean, fromSave: boolean): void {
+  const lv = app.level;
   const canvas = h('canvas', { width: 256, height: 224, class: 'play-canvas', tabIndex: 0 });
   const ctx = canvas.getContext('2d')!;
   const img = ctx.createImageData(256, 224);
   const info = h('div', { class: 'hint' });
   // the sprite slots and Mario's deaths, watched from here on
-  const watch = new SlotWatch(s), deaths = new DeathWatch(s), log = new PlayLog(GRAPH_FRAMES);
-  s.hook = joinHooks(watch.hook, deaths.hook);
+  const watch = p.watch((s) => new SlotWatch(s)), deaths = p.watch((s) => new DeathWatch(s)), log = new PlayLog(GRAPH_FRAMES);
   const meter = playMeter(log, (tx, ty, level = lv.number) => { m.close(); app.showUse(level, { x: tx, y: ty }); }, (id) => app.spriteLabel(id));
   let keys = 0;
   let running = true;
@@ -164,13 +154,11 @@ function play(app: App, at: Start | undefined, audio: AudioOut, emu: LevelEmulat
   let note = '', noteUntil = 0;
   const say = (t: string) => { note = t; noteUntil = performance.now() + 2000; };
   const usable = () => saveSlot.get(app.rom, lv.number, app.dirty);
-  const saveState = () => { saveSlot.save(app.rom, lv.number, s.saveState()); say('State saved'); showRestartSaved(); };
+  const saveState = () => { saveSlot.save(app.rom, lv.number, p.save()); say('State saved'); showRestartSaved(); };
   const loadState = () => {
     const st = usable();
     if (!st) { say('No savestate'); showRestartSaved(); return; }
-    s.loadState(st);
-    watch.reset();
-    deaths.reset();
+    p.load(st);
     log.cut();
     audio.resync();
     say('State loaded');
@@ -197,12 +185,11 @@ function play(app: App, at: Start | undefined, audio: AudioOut, emu: LevelEmulat
   window.addEventListener('keyup', ku, true);
   const setPaused = (p: boolean) => { paused = p; audio.resync(); };
   const frame = () => {
-    s.joy1 = keys | readPads().bits;
-    const mode = s.wram[RAM.gameMode];
-    try { s.runFrame(); } catch (e) { info.textContent = `Emulation error: ${e}`; paused = true; }
-    if (s.audio) audio.push(s.audio);
+    let busy = 0;
+    try { busy = p.frame(keys | readPads().bits); } catch (e) { info.textContent = `Emulation error: ${e}`; paused = true; }
+    if (p.audio) audio.push(p.audio);
     frames++;
-    log.frame(frames, watch.usedAll(), watch.take(), cpuLoad(s, mode), marioX(s.wram), marioY(s.wram));
+    log.frame(frames, watch.usedAll(), watch.take(), busy, marioX(p.wram), marioY(p.wram));
     // kept as markers in the level he died in
     for (const d of deaths.take()) { log.died(frames, d); addDeath(projectId(app.rom), d, levelVersion(app.rom, d.level)); }
   };
@@ -219,7 +206,7 @@ function play(app: App, at: Start | undefined, audio: AudioOut, emu: LevelEmulat
     padLoad = pad.load;
     padNames = pad.names;
     let n = 0;
-    if (audio.ready && s.apu) {
+    if (audio.ready && p.hasSound) {
       // paced by the audio clock: keep ~3 frames queued
       acc = 0;
       while (!paused && audio.buffered() < audio.lead && n < 4) { frame(); n++; }
@@ -233,10 +220,10 @@ function play(app: App, at: Start | undefined, audio: AudioOut, emu: LevelEmulat
     new Uint32Array(img.data.buffer).set(ppu.frame);
     ctx.putImageData(img, 0, 0);
     meter.update();
-    info.textContent = `Level ${hex(lv.number, 3)} · Frame ${frames}${paused ? ' · Pause' : ''} · Game mode ${hex(s.wram[RAM.gameMode], 2)}`
+    info.textContent = `Level ${hex(lv.number, 3)} · Frame ${frames}${paused ? ' · Pause' : ''} · Game mode ${hex(p.mode, 2)}`
       + (note && t < noteUntil ? ` · ${note}` : '')
       + (padNames.length ? ` · Gamepad: ${padNames.join(', ')}` : ' · Gamepad: none detected (press a button)')
-      + (!s.apu || audio.failed ? ' · No sound' : soundMuted ? ' · Sound off (M)' : '');
+      + (!p.hasSound || audio.failed ? ' · No sound' : soundMuted ? ' · Sound off (M)' : '');
     schedule();
   };
   // requestAnimationFrame pauses in hidden tabs; fall back to timers there
@@ -246,13 +233,12 @@ function play(app: App, at: Start | undefined, audio: AudioOut, emu: LevelEmulat
     if (!running) return;
     running = false;
     if (log.deaths.length) app.emit('change'); // the level view shows them
-    s.ppu = null;
-    s.hook = null;
+    p.close();
     audio.close();
     window.removeEventListener('keydown', kd, true);
     window.removeEventListener('keyup', ku, true);
   };
-  const triggers = triggerControls(app, s.wram, () => canvas.focus());
+  const triggers = triggerControls(app, p.wram, () => canvas.focus());
   const m = modal(`Test level – ${hex(lv.number, 3)}${fromSave ? ' from the savestate' : at ? ` from ${hex(at.tx, 2)}/${hex(at.ty, 2)}` : ''}${ok ? '' : ' (load error)'}`, h('div', { class: 'play' },
     h('div', { class: 'play-main' }, canvas, meter.el),
     info,
