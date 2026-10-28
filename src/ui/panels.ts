@@ -3,7 +3,8 @@
 import { isBrushMode, type App, type PickedItem } from './app.ts';
 import { h, clear, hexInput, checkbox, attachRectPick, modal, toast, emptyState } from './dom.ts';
 import { spriteName, hex2, hex3 } from '../core/names.ts';
-import { defaultObjectName, namedPerTable } from '../core/objectnames.ts';
+import { baseObjectName, namedPerTable } from '../core/objectnames.ts';
+import { packageObjectName } from '../core/objtext.ts';
 import { NAME_MAX, nameOf, namesOf, nameGroups, connectedRect, tileRanges, type NameKind } from '../core/usernames.ts';
 import { objectVariant, withObjectVariant, type ObjKind } from '../core/objkinds.ts';
 import { thumbCanvas, objKey, type ObjSpec, type ObjThumb } from './thumbs.ts';
@@ -936,14 +937,16 @@ export function openSavePrefab(app: App, sug?: { prefab: Prefab; places?: LevelP
 }
 
 // names an object for the project (2E-3F for the open level's object table); Reset brings back the built-in name
+// (or the one a package's Lunar Magic .mw0t gives it)
 function renameObject(app: App, num: number, ext: number): void {
   const what = num ? `object ${hex2(num)}` : `extended object ${hex2(ext)}`;
-  const builtin = defaultObjectName(num, ext, app.objectTableOf(num));
+  const builtin = baseObjectName(app.rom, num, ext, app.objectTableOf(num));
+  const fromPackage = num === 0 && packageObjectName(app.rom, ext) !== null;
   const cur = app.objectName(num, ext);
   const name = h('input', { value: cur, placeholder: builtin, maxLength: NAME_MAX, spellcheck: false, autocomplete: 'off' });
   const save = () => { if (name.value.trim() !== cur) app.renameObject(num, ext, name.value.trim() === builtin ? '' : name.value); };
   const dlg = modal(`Rename ${what}`, h('div', null, h('div', { class: 'prop' }, h('label', null, 'Name'), name),
-    h('div', { class: 'hint' }, `Built-in: ${builtin}.${namedPerTable(num) ? ' Objects 2E–3F are named per object group (this level’s).' : ''} The name is kept with the project, not in the ROM.`)),
+    h('div', { class: 'hint' }, `${fromPackage ? 'From a package' : 'Built-in'}: ${builtin}.${namedPerTable(num) ? ' Objects 2E–3F are named per object group (this level’s).' : ''} The name is kept with the project, not in the ROM.`)),
     [{ label: 'Cancel' }, ...(cur !== builtin ? [{ label: 'Reset', onClick: () => app.renameObject(num, ext, '') }] : []), { label: 'OK', primary: true, onClick: save }]);
   name.addEventListener('keydown', (e) => { if (e.key === 'Enter') { save(); dlg.close(); } });
   setTimeout(() => name.select(), 0);

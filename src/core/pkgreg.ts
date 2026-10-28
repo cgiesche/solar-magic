@@ -11,6 +11,7 @@ import type { UberContext } from './uberasm.ts';
 import type { SpriteFolder } from './pixirt.ts';
 import { TOOL_KINDS, type ToolKind } from './parts.ts';
 import { SECTIONS, SECTION_KEYS, type SectionKey, type PartSection, type Other } from './pkgsections.ts';
+import type { ObjectText } from './objtext.ts';
 
 const MAGIC = [0x53, 0x4d, 0x57, 0x4b]; // "SMWK"
 const VERSION = 1;
@@ -40,6 +41,7 @@ export interface Package extends PackageParts {
   fileName: string;
   added: string; // ISO date
   srcId?: string; // its files (zip) in the editor data (rom.extra)
+  objectText?: ObjectText; // object names and tooltips of its Lunar Magic side files (objtext.ts)
 }
 
 export const emptyParts = (): PackageParts => Object.fromEntries(SECTION_KEYS.map((k) => [k, SECTIONS[k].none()])) as unknown as PackageParts;

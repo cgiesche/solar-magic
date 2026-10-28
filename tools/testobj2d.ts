@@ -124,7 +124,7 @@ check(objectLength2D(hooked) === 5, `once the hook is installed (the same ROM): 
   check(fxOnly.map((t) => t.key).join() === 'c1' && fxOnly[0].w === 0, `listed without a picture: custom 01, which changes RAM (${fxOnly.map((t) => t.key)})`);
   const quiet = [0, 1, 3].map((n) => obj(0x2d, 0, 0, 0, [n, 0]));
   const fx = objectEffects(emu, lv, quiet);
-  check(fx.join() === 'false,true,false', `effects: custom 01 changes RAM, 00 and 03 nothing (${fx})`);
+  check(fx.join() === ',sets $7FA400 bit 0,', `effects: custom 01 sets a flag, 00 and 03 nothing (${fx})`);
 }
 
 // Lunar Magic's level files: 2D is always 5 bytes there; kept where the ROM reads it so, else left out with a note

@@ -2,7 +2,7 @@
 // background by App.objectThumbs).
 
 import type { Rom } from '../core/rom.ts';
-import { OV_L1, type LevelEmulator } from '../core/levelemu.ts';
+import { OV_L1, type LevelEmulator, type LevelRender } from '../core/levelemu.ts';
 import { encodePrimaryHeader, serializeObjects, type Level, type LevelObject, newUid, L2_PTRS } from '../core/level.ts';
 import { renderLevel, layerGeom } from '../core/render.ts';
 import { MAP_BASE, map16Tile } from '../core/ram.ts';
@@ -10,7 +10,7 @@ import { objectVariant, type ObjKind } from '../core/objkinds.ts';
 import { levelSlots, layerSlots } from '../core/gfxslots.ts';
 import { gfxFilesHash } from '../core/gfxpages.ts';
 import { inputHash } from '../core/inputs.ts';
-import { objectEffectsJob } from '../core/objeffects.ts';
+import { effectLoad, ramEffect } from '../core/objeffects.ts';
 
 // extension: object 2D's bytes after its 3 where the ROM reads them (obj2d.ts), its custom number first
 export interface ObjSpec { num: number; ext: number; size: number; extension?: number[] }
@@ -23,15 +23,16 @@ export function objKey(s: { num: number; ext: number; size: number; extension?: 
   return v < 0 ? `s${s.num}` : `s${s.num}.${v}`;
 }
 
-// a rendered object: its pixels and the distinct Map16 tiles it produced; effect: one of object 2D's custom
-// numbers that draws no tile but changes RAM when the level loads (objeffects.ts), without pixels (w = h = 0)
-export interface ObjThumb { key: string; w: number; h: number; px: Uint32Array; m16: number[]; effect?: boolean }
+// a rendered object: its pixels and the distinct Map16 tiles it produced; effect: of an extended object or one
+// of object 2D's custom numbers that draws no tile, what its load changes in RAM (objeffects.ts ramEffect),
+// without pixels (w = h = 0)
+export interface ObjThumb { key: string; w: number; h: number; px: Uint32Array; m16: number[]; effect?: string }
 
 // their result cache key: the tileset and palettes (kept side by side) and the objects
 export function thumbsKey(level: Level, specs: ObjSpec[], keyOf: (s: ObjSpec) => string): string {
   const h = level.header;
-  // (o3: with the level they are drawn in as their input)
-  return `o3${h.tileset}-${h.fgPalette}-${h.bgPalette}:${inputHash(specs.map((s) => `${s.num}.${s.ext}.${s.size}=${keyOf(s)}`))}`;
+  // (o4: effects as what they change, extended objects' too)
+  return `o4${h.tileset}-${h.fgPalette}-${h.bgPalette}:${inputHash(specs.map((s) => `${s.num}.${s.ext}.${s.size}=${keyOf(s)}`))}`;
 }
 
 // what they depend on outside the ROM bytes they read: the level they are drawn in as edited (its number
@@ -67,32 +68,17 @@ export function renderObjectThumbs(rom: Rom, emu: LevelEmulator, level: Level, s
 }
 
 // in batches of 32 test levels, a step each; a batch whose load fails (some objects together break the game,
-// like two of tileset 7's object 33) is rendered in halves, an object that fails alone gets no thumbnail. Object
-// 2D's custom numbers that draw nothing are probed for an effect then (#104's rule: listed are the objects that
-// draw tiles or do something), and drawn alone when they do something
+// like two of tileset 7's object 33) is rendered in halves, an object that fails alone gets no thumbnail. An
+// extended object or one of object 2D's custom numbers that drew nothing in its batch is loaded again alone
+// (#104's rule: listed are the objects that draw tiles or do something): it may draw alone what it didn't among
+// the others (Retry's midway bars: only so many per level), else it is listed for what its load changes in RAM
+// (objeffects.ts)
 export function* objectThumbsJob(rom: Rom, emu: LevelEmulator, level: Level, specs: ObjSpec[], keyOf: (s: ObjSpec) => string): Generator<void, ObjThumb[]> {
   const out: ObjThumb[] = [];
   const PER = 32;
-  const render = (batch: ObjSpec[]): void => {
-    const objs: LevelObject[] = batch.map((s, i) => ({ uid: newUid(), num: s.num, ext: s.ext, size: s.size, x: i * 16 + 3, y: 12, ...(s.extension ? { extension: s.extension } : {}) }));
-    const hdr = { ...level.header, screens: 32, mode: 0 };
-    const owners: number[] = [-1, -1, -1, -1, -1];
-    const body = serializeObjects(objs, [], false, owners);
-    const l1 = new Uint8Array(5 + body.length);
-    l1.set(encodePrimaryHeader(hdr));
-    l1.set(body, 5);
-    const byteOwner = new Int32Array(0x10000).fill(-1);
-    owners.forEach((o, i) => (byteOwner[OV_L1 + i] = o));
-    const r = emu.load(level.number, {
-      layer1: l1,
-      layer2Pointer: level.layer2Objects ? rom.r24(L2_PTRS + 0x105 * 3) : level.layer2Pointer,
-      sprites: new Uint8Array([0, 0xff]),
-      byteOwner,
-    });
-    if (!r.ok) {
-      if (batch.length > 1) { render(batch.slice(0, batch.length >> 1)); render(batch.slice(batch.length >> 1)); }
-      return;
-    }
+  const objOf = (s: ObjSpec, i: number): LevelObject => ({ uid: newUid(), num: s.num, ext: s.ext, size: s.size, x: i * 16 + 3, y: 12, ...(s.extension ? { extension: s.extension } : {}) });
+  // the thumbnails of a load's objects that wrote tiles
+  const collect = (r: LevelRender, batch: ObjSpec[]): void => {
     const im = renderLevel(rom, r, 0, 32);
     const g = layerGeom(rom, 0, 0, 32);
     const inv = new Map<number, number>();
@@ -121,17 +107,41 @@ export function* objectThumbsJob(rom: Rom, emu: LevelEmulator, level: Level, spe
       out.push({ key: keyOf(s), w, h: hh, px, m16: [...m16].sort((a, b) => a - b) });
     });
   };
+  const render = (batch: ObjSpec[]): void => {
+    const objs = batch.map(objOf);
+    const hdr = { ...level.header, screens: 32, mode: 0 };
+    const owners: number[] = [-1, -1, -1, -1, -1];
+    const body = serializeObjects(objs, [], false, owners);
+    const l1 = new Uint8Array(5 + body.length);
+    l1.set(encodePrimaryHeader(hdr));
+    l1.set(body, 5);
+    const byteOwner = new Int32Array(0x10000).fill(-1);
+    owners.forEach((o, i) => (byteOwner[OV_L1 + i] = o));
+    const r = emu.load(level.number, {
+      layer1: l1,
+      layer2Pointer: level.layer2Objects ? rom.r24(L2_PTRS + 0x105 * 3) : level.layer2Pointer,
+      sprites: new Uint8Array([0, 0xff]),
+      byteOwner,
+    });
+    if (!r.ok) {
+      if (batch.length > 1) { render(batch.slice(0, batch.length >> 1)); render(batch.slice(batch.length >> 1)); }
+      return;
+    }
+    collect(r, batch);
+  };
   for (let b = 0; b < specs.length; b += PER) { render(specs.slice(b, b + PER)); yield; }
   const drawn = new Set(out.map((t) => t.key));
-  const quiet = specs.filter((s) => s.extension && !drawn.has(keyOf(s)));
-  const fx = !quiet.length ? [] : yield* objectEffectsJob(emu, level, quiet.map((s) => ({ uid: newUid(), num: s.num, ext: s.ext, size: s.size, x: 0, y: 0, extension: s.extension })));
-  // one that does something may draw alone what it didn't among the others (Retry's midway bars: only so many
-  // per level); else it is listed for its effect
-  for (const [i, s] of quiet.entries()) {
-    if (!fx[i]) continue;
+  const quiet = specs.filter((s) => (s.num === 0 || s.extension) && !drawn.has(keyOf(s)));
+  if (!quiet.length) return out;
+  const base = effectLoad(emu, level, []);
+  yield;
+  if (!base.ok) return out;
+  for (const s of quiet) {
+    const r = effectLoad(emu, level, [objOf(s, 0)], true);
     const had = out.length;
-    render([s]);
-    if (out.length === had) out.push({ key: keyOf(s), w: 0, h: 0, px: new Uint32Array(0), m16: [], effect: true });
+    if (r.ok) collect(r, [s]);
+    const effect = r.ok && out.length === had ? ramEffect(base.wram, r.wram) : null;
+    if (effect) out.push({ key: keyOf(s), w: 0, h: 0, px: new Uint32Array(0), m16: [], effect });
     yield;
   }
   return out;

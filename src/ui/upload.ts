@@ -16,6 +16,7 @@ import { errorText } from './projectpane.ts';
 import { docsButton } from './docview.ts';
 import { musicPlayer } from './musicplayer.ts';
 import { placementEditor } from './pkgplace.ts';
+import { isObjectTextFile } from '../core/objtext.ts';
 
 // done: after the package was installed
 export function openUploadPreview(app: App, p: ReadyPreview | ManualPreview, done: (pkg: Package) => void): void {
@@ -38,6 +39,7 @@ export function openUploadPreview(app: App, p: ReadyPreview | ManualPreview, don
     has('sprite') ? 'sprites get the next free numbers' : '',
     has('sfx') ? 'sound effects keep the author’s numbers where free, else get the next free ones (the package’s code playing them follows)' : '',
   ].filter(Boolean);
+  const textFiles = [...p.files.keys()].filter(isObjectTextFile).sort();
   const body = h('div', { class: 'patch-apply' },
     h('p', null, `Found: ${partsSummary(p.parts)}.`),
     h('table', { class: 'uber-table' }, h('tr', null, h('th', null, 'Part'), h('th', null, 'Name'), h('th', null, 'File')),
@@ -45,6 +47,7 @@ export function openUploadPreview(app: App, p: ReadyPreview | ManualPreview, don
     docsButton(p.name, p.files),
     p.callisto ? h('p', { class: 'hint' }, `A Callisto project: its ${patches.length} patches are applied in the order of its patches.toml.`) : '',
     p.notes.map((n) => h('p', { class: 'hint' }, n)),
+    textFiles.length ? h('p', { class: 'hint' }, `Object names and tooltips (Lunar Magic's): ${textFiles.join(', ')}.`) : '',
     p.unclaimed.length ? h('p', { class: 'hint' }, `Not installed: ${p.unclaimed.map((f) => f + (p.docs.includes(f) ? ' (manual)' : '')).join(', ')}.`) : '',
     defaults.length ? h('p', { class: 'hint' }, `Installing applies the whole package: ${defaults.join(', ')}. Assignments can be changed afterwards in the tabs.`) : '',
     patch && patch.candidates.length > 1 ? h('div', { class: 'prop' }, h('label', null, 'Main file'),

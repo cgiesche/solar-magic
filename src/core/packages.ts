@@ -29,7 +29,8 @@ import { NO_FREE_ENTRANCE } from './entrances.ts';
 import { saveLevel } from './save.ts';
 import { sampleSlots } from './pkgsamples.ts';
 import { assignSlot } from './gfxslots.ts';
-import { recordPackageChange, recordPackageChangeAsync, listPackages, packageArchive, uninstallPackage, type Package } from './pkgreg.ts';
+import { recordPackageChange, recordPackageChangeAsync, listPackages, packageArchive, uninstallPackage, savePackage, type Package } from './pkgreg.ts';
+import { uploadObjectText, objectTextNotes, isObjectTextFile } from './objtext.ts';
 import { allOrNothing } from './romedit.ts';
 import { callistoProject, includesCallistoHeader, sharedCode, type CallistoProject } from './callisto.ts';
 import { replacedPatch, replacedNote } from './replaced.ts';
@@ -142,7 +143,7 @@ export function inspectFiles(fileName: string, files: Map<string, Uint8Array>): 
   const left = callisto?.left.filter((l) => files.has(l.file)) ?? [];
   const notes = [...left.map((l) => `Not part of the package: ${l.file} – ${l.what}.`), ...replaced.values()];
   const shared = new Set(callisto ? sharedCode(callisto, files) : []);
-  const unclaimed = paths.filter((p) => !won.files.has(p) && !replaced.has(p) && !included.has(p) && !shared.has(p) && !left.some((l) => l.file === p) && !(upload && SHARED_CODE.test(p) && /\.(asm|asar)$/i.test(p))).sort();
+  const unclaimed = paths.filter((p) => !won.files.has(p) && !replaced.has(p) && !included.has(p) && !shared.has(p) && !left.some((l) => l.file === p) && !isObjectTextFile(p) && !(upload && SHARED_CODE.test(p) && /\.(asm|asar)$/i.test(p))).sort();
   return { ...head, status: 'ready', parts, upload, samples: graphics.mwls, unclaimed, docs, callisto, notes };
 }
 
@@ -329,7 +330,14 @@ export async function installPackage(rom: Rom, preview: ReadyPreview | ManualPre
     }
     if (!rec.result.ok) return failed(rec.result.errors, warnings, prints);
     if (!rec.pkg) return failed(['Nothing changed – everything in the package is already in the ROM.']);
-    return { ok: true, errors: [], warnings, prints, pkg: rec.pkg, sample, ...(samples.length ? { samples } : {}) };
+    // Lunar Magic's object names and tooltips: kept with the package, over those of packages installed before
+    let pkg = rec.pkg;
+    const text = uploadObjectText(preview.files);
+    if (text) {
+      warnings.push(...objectTextNotes(rom, pkg.name, text));
+      pkg = savePackage(rom, { ...pkg, objectText: text });
+    }
+    return { ok: true, errors: [], warnings, prints, pkg, sample, ...(samples.length ? { samples } : {}) };
   } catch (e) {
     return failed([e instanceof Error ? e.message : String(e)], warnings, prints);
   }

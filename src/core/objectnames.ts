@@ -2,7 +2,8 @@
 // docs/research/object-names-stability.md) only for the game's own numbers, which no tool or patch points at
 // another object: standard objects 01–21; the tileset-specific 2E–3F per object table; extended objects 00, 01
 // and 10–97. The free numbers (standard 22–2D, extended 02–0F and 98–FF) are "Object XX" / "Extended object XX",
-// except the editor's own extended 04 and 05. Over all of them the user's names of the project (usernames.ts).
+// except the editor's own extended 04 and 05. Over them the names an installed package's Lunar Magic .mw0t gives
+// extended objects (objtext.ts), over all of them the user's names of the project (usernames.ts).
 // The names follow Lunar Magic's descriptions of the objects (FuSoYa).
 //
 // The object loader ($0DA415 in the clean game) runs standard objects through one of five tables of routines,
@@ -14,6 +15,7 @@ import type { RomReads } from './romdeps.ts';
 import { L1_PTRS, serializeObjects, newUid, type LevelObject } from './level.ts';
 import { OV_L1, type LevelEmulator } from './levelemu.ts';
 import { objectUserName } from './usernames.ts';
+import { packageObjectName } from './objtext.ts';
 
 export { setObjectUserName as setObjectName } from './usernames.ts'; // (key: objectNameKey; empty: the built-in name again)
 import { hex2, hex } from './names.ts';
@@ -92,8 +94,13 @@ export function defaultObjectName(num: number, ext: number, table: number | null
   return builtinObjectName(num, ext, table) ?? (num === 0 ? `Extended object ${hex2(ext)}` : `Object ${hex2(num)}`);
 }
 
-// the name shown: the user's, else the default one
+// the name without the user's in this ROM: a package's (.mw0t, extended objects), else the default one
+export function baseObjectName(rom: Rom, num: number, ext: number, table: number | null): string {
+  return (num === 0 ? packageObjectName(rom, ext) : null) ?? defaultObjectName(num, ext, table);
+}
+
+// the name shown: the user's, else the base one
 export function objectName(rom: Rom, num: number, ext: number, table: number | null): string {
   const key = objectNameKey(num, ext, table);
-  return (key !== null ? objectUserName(rom, key) : null) ?? defaultObjectName(num, ext, table);
+  return (key !== null ? objectUserName(rom, key) : null) ?? baseObjectName(rom, num, ext, table);
 }
