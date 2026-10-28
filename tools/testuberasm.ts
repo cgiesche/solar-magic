@@ -3,6 +3,8 @@
 import { readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
+import { PlaySession } from '../src/core/playsession.ts';
+import { PAD } from '../src/core/ram.ts';
 import { loadAsar } from '../src/core/asar.ts';
 import { applyPatch, uninstallPatch } from '../src/core/patchapply.ts';
 import { listPatches } from '../src/core/patchreg.ts';
@@ -68,21 +70,16 @@ if (r.ok) {
   console.log(`     level init: library $${w(l5, 0x7fb002).toString(16)}, routine $${w(l5, 0x7fb007).toString(16)}, gamemode 14 frames ${w(l5, 0x7fb004)}`);
   // a few frames of gameplay run the game mode $14 main code
   const s = emu.snes;
-  emu.load(0x105);
-  let g = 0; while (s.wram[0x100] !== 0x14 && g++ < 100) s.runFrame();
+  const ps = PlaySession.start(emu, 0x105);
   const f0 = w(s, 0x7fb004);
-  for (let i = 0; i < 30; i++) s.runFrame();
-  check(w(s, 0x7fb004) - f0 >= 25, `game mode $14 main runs every frame (+${w(s, 0x7fb004) - f0} in 30 frames)`);
+  ps.play(30);
+  check(ps.ready && w(s, 0x7fb004) - f0 >= 25, `game mode $14 main runs every frame (+${w(s, 0x7fb004) - f0} in 30 frames)`);
   check(w(s, 0x7fb008) >= 25, `level main runs (${w(s, 0x7fb008)} frames)`);
   // gameplay is the same as without UberASM: run right for 120 frames
   const run = (e: LevelEmulator, n: number) => {
-    e.load(n);
-    const t = e.snes;
-    let k = 0; while (t.wram[0x100] !== 0x14 && k++ < 100) t.runFrame();
-    t.joy1 = 0x0100;
-    for (let i = 0; i < 120; i++) t.runFrame();
-    t.joy1 = 0;
-    return t.wram[0x94] | (t.wram[0x95] << 8);
+    const ps = PlaySession.start(e, n);
+    ps.play(120, PAD.right);
+    return ps.wram[0x94] | (ps.wram[0x95] << 8);
   };
   const plain = new LevelEmulator(new Rom(before.slice())); plain.boot();
   const same = [0x105, 0x106, 0x107, 0x001].every((n) => run(emu, n) === run(plain, n));

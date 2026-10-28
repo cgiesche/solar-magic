@@ -12,10 +12,10 @@ import { unzipSync, zipSync } from 'fflate';
 import { Rom } from '../src/core/rom.ts';
 import { loadAsar } from '../src/core/asar.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
-import { levelTranslevel } from '../src/core/level.ts';
+import { PlaySession } from '../src/core/playsession.ts';
 import { map16Source } from '../src/core/render.ts';
 import { CYCLES_PER_LINE } from '../src/core/snes.ts';
-import { GM, RAM } from '../src/core/ram.ts';
+import { RAM, PAD } from '../src/core/ram.ts';
 import { hashBytes } from '../src/core/patchreg.ts';
 import { inspectUpload, installPackage } from '../src/core/packages.ts';
 import { emptyList, writeLevelList, writeAltFile, setLevelSettings, type ExSlot } from '../src/core/exanim.ts';
@@ -36,9 +36,8 @@ function measure(rom: Rom): { step: number; nmi: number; hashes: number[] } {
   const emu = new LevelEmulator(rom);
   emu.boot();
   const s = emu.snes, cpu = s.cpu;
-  const tl = levelTranslevel(rom, LEVEL);
-  emu.startGame(tl);
-  emu.loadInGame(LEVEL, tl);
+  const p = PlaySession.start(emu, LEVEL, { game: {} });
+  if (!p.ready) throw new Error(`level ${LEVEL.toString(16)} did not get ready`);
   // cycles in the hooks: entered at the hook's JSL, left when the stack is back where it was
   // (the NMI's routine at $00A390, entered with JSR, until its RTS: the clean game's own for comparison)
   let where: 'step' | 'nmi' | null = null, sAt = 0, start = 0, gameAt = -1, gameStart = 0;
@@ -61,12 +60,10 @@ function measure(rom: Rom): { step: number; nmi: number; hashes: number[] } {
     step();
   };
   const hashes: number[] = [];
-  for (let i = 0; i < 80 && s.wram[RAM.gameMode] !== GM.level; i++) s.runFrame();
   let step0 = 0, nmi0 = 0;
   for (let f = 0; f < FRAMES; f++) {
     if (f === FROM) { step0 = acc.step; nmi0 = acc.nmi; }
-    s.joy1 = 0x0100 | 0x4000 | (f % 40 < 10 ? 0x8000 : 0);
-    s.runFrame();
+    p.frame(PAD.right | PAD.y | (f % 40 < 10 ? PAD.b : 0));
     hashes.push(hashBytes([s.vram, s.cgram]) ^ palette);
   }
   const lines = (c: number) => Math.round(c / (FRAMES - FROM) / CYCLES_PER_LINE * 100) / 100;

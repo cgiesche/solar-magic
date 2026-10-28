@@ -15,6 +15,8 @@ import { Rom } from '../src/core/rom.ts';
 import { loadAsar } from '../src/core/asar.ts';
 import { loadApu } from '../src/core/apu.ts';
 import { LevelEmulator, titleScreenLevel } from '../src/core/levelemu.ts';
+import { PlaySession } from '../src/core/playsession.ts';
+import { PAD } from '../src/core/ram.ts';
 import { map16Source } from '../src/core/render.ts';
 import { installEditorPatch, customPalette } from '../src/core/patches.ts';
 import { enableBlocks } from '../src/core/map16ext.ts';
@@ -60,14 +62,10 @@ function teleport(rom: Rom): number | null {
   const lv = loadLevel(rom, 0x13b);
   const im = renderLevel(rom, emu.load(0x13b), lv.header.mode, lv.header.screens);
   const at = [...im.tiles1].indexOf(0x2a4), w = im.geom1.width;
-  const s = emu.snes;
-  emu.load(0x13b);
-  while (s.wram[0x100] !== 0x14) s.runFrame();
+  const p = PlaySession.start(emu, 0x13b), s = emu.snes;
   const px = (at % w) * 16, py = Math.floor(at / w) * 16 - 16;
   s.wram[0x94] = px & 255; s.wram[0x95] = px >> 8; s.wram[0x96] = py & 255; s.wram[0x97] = py >> 8;
-  let left = false;
-  for (let f = 0; f < 400; f++) { s.runFrame(); if (s.wram[0x100] !== 0x14) left = true; else if (left) break; }
-  return left && s.wram[0x1931] === lv.header.tileset && s.wram[0x5d] === lv.header.screens && s.wram[0x95] === 7 ? 0x13b : null;
+  return p.ready && p.follow() === 'level' && s.wram[0x1931] === lv.header.tileset && s.wram[0x5d] === lv.header.screens && s.wram[0x95] === 7 ? 0x13b : null;
 }
 
 // ---------- which are offered ----------
@@ -173,16 +171,14 @@ function teleport(rom: Rom): number | null {
   // pipe at tiles 87/88, row 13, jumps in holding up, its turn block takes him right, he leaves the
   // pipe's right end – the turn block reads its tables with the data bank GPS gives it
   {
-    const s = emu.snes, w = s.wram;
-    emu.load(0x13b);
-    while (w[0x100] !== 0x14) s.runFrame();
+    const p = PlaySession.start(emu, 0x13b), w = p.wram;
     const set16 = (a: number, v: number) => { w[a] = v & 255; w[a + 1] = v >> 8; };
     set16(0x94, 0x878); set16(0x96, 0x120); set16(0x1462, 0x800); set16(0x1464, 0xc0);
     const dir = () => w[0x1a420] & 15; // !Freeram_SSP_PipeDir
     const dirs = new Set<number>();
-    for (let f = 0; f < 120; f++) { w[0xf31] = 9; s.joy1 = f < 30 ? 0x8800 : 0; s.runFrame(); if (dir()) dirs.add(dir()); }
+    for (let f = 0; f < 120; f++) { w[0xf31] = 9; p.frame(f < 30 ? PAD.b | PAD.up : 0); if (dir()) dirs.add(dir()); }
     const x = w[0x94] | (w[0x95] << 8), y = w[0x96] | (w[0x97] << 8);
-    check(dirs.has(2) && !dir() && x >= 0x8a0 && y < 0x100 && w[0x71] === 0, `13B: through its pipe up, then right, out at its right end (directions ${[...dirs].join()}, Mario at ${x.toString(16)},${y.toString(16)})`);
+    check(p.ready && dirs.has(2) && !dir() && x >= 0x8a0 && y < 0x100 && w[0x71] === 0, `13B: through its pipe up, then right, out at its right end (directions ${[...dirs].join()}, Mario at ${x.toString(16)},${y.toString(16)})`);
   }
 
   // 13B's secondary entrance 150 (the level file's): its exit on screen 7 leads there, and its teleport

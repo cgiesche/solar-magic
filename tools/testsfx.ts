@@ -5,6 +5,7 @@
 // node tools/testsfx.ts
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
+import { PlaySession } from '../src/core/playsession.ts';
 import { Apu, loadApu } from '../src/core/apu.ts';
 import { findSfx, sfxNumbers, sfxLinks, parseSfxList } from '../src/core/sfx.ts';
 import { emptyMusicProject, addSfx, removeSfx, sfxKey, saveMusicProject, loadMusicProject, hasAmk, musicEntry } from '../src/core/music.ts';
@@ -72,16 +73,16 @@ check(loadMusicProject(rom)?.sfx.map(sfxKey).join() === '1DFC/Retry/Death Prelud
   const emu = new LevelEmulator(rom);
   emu.snes.apu = new Apu();
   emu.boot();
-  const lr = emu.load(0x105, { music: 0 });
+  const ps = PlaySession.start(emu, 0x105, { ov: { music: 0 } });
   const sn = emu.snes;
-  for (let f = 0; f < 60; f++) sn.runFrame();
+  ps.play(32);
   // the song muted: the sound effect's voice alone
   sn.apu!.mute(0x7f);
   let before = 0, after = 0;
-  for (let f = 0; f < 30; f++) { sn.runFrame(); before = Math.max(before, peak(sn.audio!)); }
+  for (let f = 0; f < 30; f++) { ps.frame(); before = Math.max(before, peak(ps.audio!)); }
   sn.wram[0x1dfc] = 0x38;
-  for (let f = 0; f < 60; f++) { sn.runFrame(); after = Math.max(after, peak(sn.audio!)); }
-  check(lr.ok && before < 100 && after > 1000, `$1DFC = 38 plays it (peak ${before} → ${after})`);
+  for (let f = 0; f < 60; f++) { ps.frame(); after = Math.max(after, peak(ps.audio!)); }
+  check(ps.ready && before < 100 && after > 1000, `$1DFC = 38 plays it (peak ${before} → ${after})`);
 }
 
 removeSfx(p, '1DFC/Retry/Death Prelude.txt');
@@ -121,13 +122,13 @@ check(r2.ok && !hasAmk(rom) && diff === 0, `removed: AddmusicK out again, the RO
   const sent: number[] = [];
   apu.write = (t, port, v) => { if (port === 3 && v) sent.push(v); write(t, port, v); };
   emu.boot();
-  emu.load(0x105);
-  for (let f = 0; f < 30; f++) emu.snes.runFrame();
+  const ps = PlaySession.start(emu, 0x105);
+  ps.play(2);
   sent.length = 0;
-  emu.snes.wram[0x1b800] = 1;
+  ps.wram[0x1b800] = 1;
   let pk = 0;
-  for (let f = 0; f < 30; f++) { emu.snes.runFrame(); pk = Math.max(pk, peak(emu.snes.audio!)); }
-  check(sent.includes(0x39) && pk > 1000, `the code plays it: ${[...new Set(sent)].map((v) => v.toString(16)).join()} sent to $1DFC (peak ${pk})`);
+  for (let f = 0; f < 30; f++) { ps.frame(); pk = Math.max(pk, peak(ps.audio!)); }
+  check(ps.ready && sent.includes(0x39) && pk > 1000, `the code plays it: ${[...new Set(sent)].map((v) => v.toString(16)).join()} sent to $1DFC (peak ${pk})`);
   await removePackage(rp, r.pkg!.id, opt.blank);
   check(loadMusicProject(rp)?.sfx.map((x) => x.name).join() === 'Other', 'removing the package takes its sound effect, the other package\'s stays');
 }

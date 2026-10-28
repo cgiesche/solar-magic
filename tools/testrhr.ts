@@ -13,14 +13,15 @@ import { Rom } from '../src/core/rom.ts';
 import { loadAsar } from '../src/core/asar.ts';
 import { loadApu } from '../src/core/apu.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
-import { GM, RAM, marioX, marioY, setMarioPos } from '../src/core/ram.ts';
+import { GM, RAM, PAD, marioX, marioY, setMarioPos } from '../src/core/ram.ts';
+import { PlaySession } from '../src/core/playsession.ts';
 import { map16Source, renderLevel } from '../src/core/render.ts';
 import { installEditorPatch } from '../src/core/patches.ts';
 import { enableBlocks } from '../src/core/map16ext.ts';
 import { inspectUpload, installPackage, planUpload } from '../src/core/packages.ts';
 import { listPatches } from '../src/core/patchreg.ts';
 import { listPackages } from '../src/core/pkgreg.ts';
-import { loadLevel, levelTranslevel, readSecondaryHeader, entrancePos, midwaySpot } from '../src/core/level.ts';
+import { loadLevel, readSecondaryHeader, entrancePos, midwaySpot } from '../src/core/level.ts';
 import { editorImage } from './fixture.ts';
 
 await loadAsar();
@@ -74,44 +75,39 @@ else {
 // a new game with level n entered as test play does (the overworld's tile of its translevel, else the start)
 const play = (n: number) => {
   const e = new LevelEmulator(rom); e.boot();
-  const tl = levelTranslevel(rom, n);
-  e.startGame(tl);
-  e.loadInGame(n, tl);
-  const s = e.snes;
-  for (let f = 0; f < 300 && s.wram[RAM.gameMode] !== GM.level; f++) s.runFrame();
-  if (s.wram[RAM.gameMode] !== GM.level) throw new Error(`level ${hx(n)} did not load`);
-  return s;
+  const p = PlaySession.start(e, n, { game: {} });
+  if (!p.ready) throw new Error(`level ${hx(n)} did not load`);
+  return p;
 };
 const where = (w: Uint8Array) => `${hx(marioX(w))},${hx(marioY(w))}`;
 
 for (const n of [0x105, 0x13b]) {
-  const s = play(n);
+  const p = play(n);
   let live = 0;
-  for (let f = 0; f < 120; f++) { s.joy1 = 0x0100; s.runFrame(); if (s.wram[RAM.gameMode] === GM.level) live++; }
+  for (let f = 0; f < 120; f++) { p.frame(PAD.right); if (p.mode === GM.level) live++; }
   const lv = loadLevel(rom, n);
-  check(live === 120 && s.wram[0x1931] === lv.header.tileset && s.wram[RAM.screens] === lv.header.screens, `sample level ${hx(n)} plays (${live} of 120 frames, Mario at ${where(s.wram)})`);
+  check(live === 120 && p.wram[0x1931] === lv.header.tileset && p.wram[RAM.screens] === lv.header.screens, `sample level ${hx(n)} plays (${live} of 120 frames, Mario at ${where(p.wram)})`);
 }
 
 // the Retry System in 13B: into the pit, then A a few frames after the prompt opened (its first choice, Retry). The game modes it
 // passes, where Mario is in which level after it
 const h13b = loadLevel(rom, 0x13b).header;
 const retry = (tape: { x: number; y: number } | null) => {
-  const s = play(0x13b), w = s.wram;
-  for (let f = 0; f < 30; f++) s.runFrame();
+  const p = play(0x13b), w = p.wram;
+  p.until('settled');
   if (tape) {
     setMarioPos(w, tape.x, tape.y);
-    for (let f = 0; f < 20; f++) s.runFrame();
+    p.play(20);
   }
   const touched = w[RAM.midwayTouched];
   setMarioPos(w, marioX(w), 0x1f0); // into the pit
   const modes: number[] = [];
   let prompt = -1;
   for (let f = 0; f < 600; f++) {
-    s.joy1 = prompt >= 0 && f >= prompt + 30 && f < prompt + 34 ? 0x0080 : 0;
-    s.runFrame();
+    p.frame(prompt >= 0 && f >= prompt + 30 && f < prompt + 34 ? PAD.a : 0);
     if (modes.at(-1) !== w[RAM.gameMode]) modes.push(w[RAM.gameMode]);
     if (prompt < 0 && w[0x1b40c]) prompt = f; // !retry_ram_prompt_phase ($7FB40C)
-    if (modes.length > 1 && w[RAM.gameMode] === GM.level) { for (let g = 0; g < 60; g++) s.runFrame(); break; } // back in a level: a second to settle
+    if (modes.length > 1 && w[RAM.gameMode] === GM.level) { p.play(60); break; } // back in a level: a second to settle
   }
   const in13b = w[0x1931] === h13b.tileset && w[RAM.screens] === h13b.screens;
   return { touched, prompt: prompt >= 0, modes: modes.map(hx).join(' '), in13b, back: modes.at(-1) === GM.level && !modes.includes(GM.overworldReturn), x: marioX(w), y: marioY(w), at: where(w) };

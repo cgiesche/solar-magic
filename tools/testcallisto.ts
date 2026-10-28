@@ -12,7 +12,8 @@ import { loadAsar } from '../src/core/asar.ts';
 import { Apu, loadApu } from '../src/core/apu.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { PPU } from '../src/core/ppu.ts';
-import { GM, RAM } from '../src/core/ram.ts';
+import { GM, PAD } from '../src/core/ram.ts';
+import { PlaySession } from '../src/core/playsession.ts';
 import { OverworldEmulator } from '../src/core/overworld.ts';
 import { map16Source } from '../src/core/render.ts';
 import { installEditorPatch } from '../src/core/patches.ts';
@@ -105,13 +106,12 @@ const order = (files: Record<string, Uint8Array>) => [...dec.decode(files['tools
   const pipes = gps?.list.filter((b) => /pipe_cap|pass_if_in_pipe|turn_/.test(b.file)) ?? [];
   check(!!gps?.files.has('callisto.asm') && pipes.length > 20 && gps.list.length === 205, `GPS built: ${gps?.list.length} tiles, ${pipes.length} of them screen scrolling pipes (including callisto.asm)`);
   const emu = new LevelEmulator(rom); emu.boot();
-  emu.load(0x105);
+  const ps = PlaySession.start(emu, 0x105);
   const s = emu.snes;
-  let g = 0; while (s.wram[0x100] !== 0x14 && g++ < 200) s.runFrame();
   const x0 = s.wram[0x94] | (s.wram[0x95] << 8);
-  for (let f = 0; f < 120; f++) { s.joy1 = 0x0100; s.runFrame(); }
+  ps.play(120, PAD.right);
   const x1 = s.wram[0x94] | (s.wram[0x95] << 8);
-  check(s.wram[0x100] === 0x14 && x1 > x0 + 32, `the game plays: level 105, Mario runs right (${x0} → ${x1})`);
+  check(ps.ready && ps.mode === GM.level && x1 > x0 + 32, `the game plays: level 105, Mario runs right (${x0} → ${x1})`);
   // Free $7F0000 (free_up_ram.asm) ends $04DD40 with an RTL, which the editor's translevel patch also calls
   check(new OverworldEmulator(rom).load(0, 0).ok, 'the overworld loads (Free $7F0000 with the translevel patch)');
   // a tile the game changes (a coin collected, a block hit) changes on screen: the first solid tile in view
@@ -136,16 +136,14 @@ const order = (files: Record<string, Uint8Array>) => [...dec.decode(files['tools
   // its PIXI sprite at the number its list gives it (A0), which its donut block (29D) spawns: Mario on
   // the block makes it fall, the game goes on
   const donut = loadPixiProject(rom)?.list.find((e) => e.file === 'sprites/donut_sprite.cfg');
-  emu.load(0x105);
-  while (s.wram[0x100] !== 0x14) s.runFrame();
-  for (let f = 0; f < 30; f++) s.runFrame();
+  const pd = PlaySession.start(emu, 0x105, { until: 'settled' });
   const feet = (s.wram[0x94] + 8) >> 4 | ((s.wram[0x95] & 0x0f) << 4), row = ((s.wram[0x96] | (s.wram[0x97] << 8)) + 32) >> 4;
   const at = (feet >> 4) * 0x1b0 + row * 16 + (feet & 15);
   s.wram[0xc800 + at] = 0x9d; s.wram[0x1c800 + at] = 0x02;
   let spawned = false, live = 0;
   for (let f = 0; f < 60; f++) {
-    s.runFrame();
-    if (s.wram[0x100] === 0x14) live++;
+    pd.frame();
+    if (pd.mode === GM.level) live++;
     for (let i = 0; i < 12; i++) if (s.wram[0x14c8 + i] && s.wram[0x7fab9e - 0x7e0000 + i] === 0xa0) spawned = true;
   }
   check(donut?.num === 0xa0 && spawned && live === 60, `its sprite at A0 as list_pixi.txt has it (${donut?.num.toString(16)}): Mario on its donut block spawns it, the game goes on (${live} of 60 frames)`);
@@ -167,11 +165,10 @@ const order = (files: Record<string, Uint8Array>) => [...dec.decode(files['tools
     let sent = -1, f = -1;
     apu.write = (t, port, v) => { if (port === 3 && v === 0x38 && f >= 0) { if (sent < 0) sent = f; if (!send) v = 0; } write(t, port, v); };
     e.boot();
-    e.load(0x105);
+    const p = PlaySession.start(e, 0x105);
     const sn = e.snes;
-    let w = 0; while (sn.wram[0x100] !== 0x14 && w++ < 200) sn.runFrame();
     sn.wram[0x1b411] = 0x02; // !retry_ram_prompt_override ($7FB411): prompt, the death SFX instead of the song
-    for (let i = 0; i < 30; i++) sn.runFrame();
+    p.play(30);
     apu.mute(0x7f);
     sn.wram[0x96] = 0xf0; sn.wram[0x97] = 0x01; // into the pit
     let dead = -1, prompt = -1, peak = 0;
@@ -227,11 +224,10 @@ const mini: Record<string, string> = {
   check(!!loadProject(rom)?.files.has('callisto/lib/ram.asm') && loadBlockProject(rom)?.list[0]?.tile === 0x2c0, 'UberASM code and the block including callisto.asm built');
   // the UberASM code runs in game mode 14 and writes where the project's header says
   const emu = new LevelEmulator(rom); emu.boot();
-  emu.load(0x105);
-  // (until the level runs, then a few frames: how many the fade-in takes depends on the emulator's timing)
-  for (let f = 0; f < 60 && emu.snes.wram[RAM.gameMode] !== GM.level; f++) emu.snes.runFrame();
-  for (let f = 0; f < 5; f++) emu.snes.runFrame();
-  check(emu.snes.wram[0x1b040] === 0x5a, 'the UberASM code runs: $7FB040 = $5A');
+  // (until the level runs, then a few frames)
+  const ps = PlaySession.start(emu, 0x105);
+  ps.play(5);
+  check(ps.ready && emu.snes.wram[0x1b040] === 0x5a, 'the UberASM code runs: $7FB040 = $5A');
   const warnings = await removePackage(rom, r.pkg!.id, opt.blank);
   check(!listPackages(rom).length && romDiff(vanilla, rom.data) === 0, 'removed: the ROM as before ' + warnings.join(' '));
 }

@@ -10,6 +10,8 @@ import { Rom } from '../src/core/rom.ts';
 import { loadAsar } from '../src/core/asar.ts';
 import { loadApu } from '../src/core/apu.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
+import { PlaySession } from '../src/core/playsession.ts';
+import { GM, PAD } from '../src/core/ram.ts';
 import { map16Source } from '../src/core/render.ts';
 import { RomHistory } from '../src/core/romhistory.ts';
 import { inspectUpload, installPackage, removePackage, defaultAssignment, partsSummary, packageManuals, type UploadPreview, type ReadyPreview, type InstallOptions } from '../src/core/packages.ts';
@@ -262,18 +264,16 @@ sameRom('song removed');
   if (r.ok) {
     // falling into a pit: Retry respawns Mario in the level (vanilla: game over with 0 lives)
     const e = new LevelEmulator(rom); e.boot();
-    e.load(0x105);
+    const p = PlaySession.start(e, 0x105);
     const t = e.snes;
-    let k = 0; while (t.wram[0x100] !== 0x14 && k++ < 200) t.runFrame();
-    for (let i = 0; i < 30; i++) t.runFrame();
+    p.play(30);
     t.wram[0x96] = 0xf0; t.wram[0x97] = 0x01;
     const modes: number[] = [];
     for (let i = 0; i < 400; i++) {
-      t.runFrame();
-      if (modes[modes.length - 1] !== t.wram[0x100]) modes.push(t.wram[0x100]);
-      t.joy1 = i >= 200 && i < 204 ? 0x0080 : 0;
+      p.frame(i > 200 && i <= 204 ? PAD.a : 0);
+      if (modes[modes.length - 1] !== p.mode) modes.push(p.mode);
     }
-    check(modes.includes(0x0f) && modes[modes.length - 1] === 0x14 && !modes.includes(0x15), `in the emulator: Retry respawns in the level (game modes ${modes.map((m) => m.toString(16)).join(' ')})`);
+    check(p.ready && modes.includes(0x0f) && modes[modes.length - 1] === GM.level && !modes.includes(0x15), `in the emulator: Retry respawns in the level (game modes ${modes.map((m) => m.toString(16)).join(' ')})`);
     await removePackage(rom, r.pkg!.id, opts.blank);
   }
   const nothing = await installPackage(rom, retry, { ...opts, assignment: { rules: new Map([['', null]]), calls: [] } });
@@ -375,16 +375,15 @@ sameRom('song removed');
   // Mario under the block at (6, 20), jumping: whether the ON/OFF switch flips
   const bump = (what: string): void => {
     const e2 = new LevelEmulator(rom); e2.boot();
-    const l2 = e2.load(0x105);
-    const t = e2.snes, w = t.wram;
+    const p = PlaySession.start(e2, 0x105);
+    const w = p.wram;
     const at = (x: number, y: number) => w[0xc800 + (x >> 4) * 0x1b0 + y * 16 + (x & 15)] | (w[0x1c800 + (x >> 4) * 0x1b0 + y * 16 + (x & 15)] << 8);
-    let k = 0; while (w[0x100] !== 0x14 && k++ < 200) t.runFrame();
-    check(l2.ok && at(6, 20) === 0x508 && at(9, 20) === 0x509, `${what} in the game: tiles ${at(6, 20).toString(16)} ${at(9, 20).toString(16)}`);
+    check(p.ready && at(6, 20) === 0x508 && at(9, 20) === 0x509, `${what} in the game: tiles ${at(6, 20).toString(16)} ${at(9, 20).toString(16)}`);
     const sw = w[0x14af];
-    for (let i = 0; i < 40; i++) { w[0x94] = 6 * 16; w[0x95] = 0; t.runFrame(); }
+    for (let i = 0; i < 40; i++) { w[0x94] = 6 * 16; w[0x95] = 0; p.frame(); }
     w[0x96] = (22 * 16) & 0xff; w[0x97] = (22 * 16) >> 8; w[0x7d] = 0xb0; w[0x72] = 0x0b;
     let flipped = false;
-    for (let i = 0; i < 40 && !flipped; i++) { t.runFrame(); if (w[0x14af] !== sw) flipped = true; }
+    for (let i = 0; i < 40 && !flipped; i++) { p.frame(); if (w[0x14af] !== sw) flipped = true; }
     check(flipped, `${what}: bumping the block flips the ON/OFF switch (${sw} → ${w[0x14af]})`);
   };
   if (lv) {

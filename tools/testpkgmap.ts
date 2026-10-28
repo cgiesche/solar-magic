@@ -4,6 +4,8 @@
 import { readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
+import { PlaySession } from '../src/core/playsession.ts';
+import { GM, PAD } from '../src/core/ram.ts';
 import { loadAsar } from '../src/core/asar.ts';
 import { uploadFiles } from '../src/core/patchpkg.ts';
 import { suggestMapping, placed, suggestCalls, untaken, docFiles, extraParts } from '../src/core/pkgmap.ts';
@@ -88,18 +90,16 @@ const fallback = { level: 0x105, gamemode: 0x14, overworld: 0 };
   if (r.ok) {
     // falling into a pit: Retry respawns Mario in the level (vanilla: game over with 0 lives)
     const emu = new LevelEmulator(rom); emu.boot();
-    emu.load(0x105);
+    const p = PlaySession.start(emu, 0x105);
     const t = emu.snes;
-    let k = 0; while (t.wram[0x100] !== 0x14 && k++ < 200) t.runFrame();
-    for (let i = 0; i < 30; i++) t.runFrame();
+    p.play(30);
     t.wram[0x96] = 0xf0; t.wram[0x97] = 0x01;
     const modes: number[] = [];
     for (let i = 0; i < 400; i++) {
-      t.runFrame();
-      if (modes[modes.length - 1] !== t.wram[0x100]) modes.push(t.wram[0x100]);
-      t.joy1 = i >= 200 && i < 204 ? 0x0080 : 0;
+      p.frame(i > 200 && i <= 204 ? PAD.a : 0);
+      if (modes[modes.length - 1] !== p.mode) modes.push(p.mode);
     }
-    check(modes.includes(0x0f) && modes[modes.length - 1] === 0x14 && !modes.includes(0x15), `Retry respawns in the level (game modes ${modes.map((m) => m.toString(16)).join(' ')})`);
+    check(p.ready && modes.includes(0x0f) && modes[modes.length - 1] === GM.level && !modes.includes(0x15), `Retry respawns in the level (game modes ${modes.map((m) => m.toString(16)).join(' ')})`);
   }
 }
 

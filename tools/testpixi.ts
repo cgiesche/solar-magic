@@ -5,6 +5,8 @@ import { Rom } from '../src/core/rom.ts';
 import { loadLevel, parseSprites, serializeSprites, spriteSizes, SPR_SIZE_PTR, newUid, type LevelSprite } from '../src/core/level.ts';
 import { exportLevelFile, importLevelFile } from '../src/core/levelfile.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
+import { PlaySession } from '../src/core/playsession.ts';
+import { PAD } from '../src/core/ram.ts';
 import { serializeLayer1, isL1Vertical } from '../src/core/level.ts';
 import { installEditorPatch, DM16_EXT } from '../src/core/patches.ts';
 import { setActsLike, setExtTileWords } from '../src/core/map16ext.ts';
@@ -116,12 +118,12 @@ const plv = loadLevel(prom, 0x105);
 const W = (a: number) => pemu.snes.wram[a - 0x7e0000];
 const runWith = (spr: LevelSprite[]) => {
   plv.sprites = spr;
-  const r = pemu.load(0x105, { sprites: serializeSprites(plv.sprites, plv.spriteHeader, false, spriteSizes(prom)) });
-  for (let i = 0; i < 40; i++) pemu.snes.runFrame(); // past the fade-in
-  return r;
+  const p = PlaySession.start(pemu, 0x105, { ov: { sprites: serializeSprites(plv.sprites, plv.spriteHeader, false, spriteSizes(prom)) } });
+  p.play(12); // past the fade-in
+  return p;
 };
 const ld = runWith([{ uid: newUid(), num: 0x10, x: 6, y: 0x16, extra: 2, bytes: [0x5a] }]);
-check(ld.ok, 'level with the custom sprite loads');
+check(ld.ready, 'level with the custom sprite loads');
 check(W(0x7fb000) === 0x11, 'INIT ran');
 check(W(0x7fb001) > 10, `MAIN runs (${W(0x7fb001)} frames)`);
 check(W(0x7fb002) === 0x5a && W(0x7fb003) === 0x10 && W(0x7fb004) === 0x36, 'extra byte, custom number and acts like seen by MAIN');
@@ -141,23 +143,22 @@ const many: LevelSprite[] = [];
 for (let i = 0; i < 30; i++) many.push({ uid: newUid(), num: 0x11, x: 1 + (i >> 1), y: 0x10 + (i & 1), extra: 2, bytes: [i, 0, 0] });
 many.push({ uid: newUid(), num: 0x10, x: 40, y: 0x16, extra: 2, bytes: [0x77] });
 pemu.snes.wram.fill(0, 0x1b000, 0x1b010);
-runWith(many);
+const pm = runWith(many);
 check(W(0x7fb000) === 0, 'sprite behind the screen not loaded yet');
-for (let i = 0; i < 300 && !W(0x7fb000); i++) { pemu.snes.joy1 = 0x4100; pemu.snes.runFrame(); } // run right
-pemu.snes.joy1 = 0;
-for (let i = 0; i < 4; i++) pemu.snes.runFrame();
+for (let i = 0; i < 300 && !W(0x7fb000); i++) pm.frame(PAD.y | PAD.right); // run right
+pm.play(4);
 check(W(0x7fb000) === 0x11 && W(0x7fb002) === 0x77, 'a sprite past byte $80 of the sprite data loads with its extra byte');
 // vanilla sprites still work next to custom ones
 const vrom = new Rom(EDITOR_IMAGE.slice());
 const vemu = new LevelEmulator(vrom); vemu.boot();
 const vlv = loadLevel(vrom, 0x105);
-const a = vemu.load(0x105, { sprites: serializeSprites(vlv.sprites, vlv.spriteHeader, false) });
-for (let i = 0; i < 60; i++) vemu.snes.runFrame();
+const a = PlaySession.start(vemu, 0x105, { ov: { sprites: serializeSprites(vlv.sprites, vlv.spriteHeader, false) } });
+a.play(32);
 plv.sprites = vlv.sprites;
-const b2 = pemu.load(0x105, { sprites: serializeSprites(plv.sprites, plv.spriteHeader, false, spriteSizes(prom)) });
-for (let i = 0; i < 60; i++) pemu.snes.runFrame();
+const b2 = PlaySession.start(pemu, 0x105, { ov: { sprites: serializeSprites(plv.sprites, plv.spriteHeader, false, spriteSizes(prom)) } });
+b2.play(32);
 const live = (w: Uint8Array) => Array.from({ length: 12 }, (_, i) => [0x14c8, 0x9e, 0xe4, 0xd8, 0x14e0, 0x14d4, 0x161a].map((t) => w[t + i]).join(':')).join(' ') + ' ' + Array.from(w.subarray(0x1938, 0x1938 + 0x40)).join('');
-check(a.ok && b2.ok && live(vemu.snes.wram) === live(pemu.snes.wram), 'vanilla level 105 runs the same with the runtime installed');
+check(a.ready && b2.ready && live(vemu.snes.wram) === live(pemu.snes.wram), 'vanilla level 105 runs the same with the runtime installed');
 
 // math routines computed in the game: CircleX/Y/XY, Aiming, Random
 {
@@ -203,8 +204,7 @@ print "MAIN ",pc
   const e3 = new LevelEmulator(r3); e3.boot();
   const l3 = loadLevel(r3, 0x105);
   l3.sprites = [{ uid: newUid(), num: 0x00, x: 6, y: 0x16, extra: 2 }];
-  e3.load(0x105, { sprites: serializeSprites(l3.sprites, l3.spriteHeader, false, spriteSizes(r3)) });
-  for (let i = 0; i < 40; i++) e3.snes.runFrame();
+  PlaySession.start(e3, 0x105, { ov: { sprites: serializeSprites(l3.sprites, l3.spriteHeader, false, spriteSizes(r3)) } }).play(12);
   const w3 = (a: number) => e3.snes.wram[a - 0x7e0000];
   const s16 = (a: number) => { const v = w3(a) | (w3(a + 1) << 8); return v >= 0x8000 ? v - 0x10000 : v; };
   const s8 = (a: number) => (w3(a) >= 0x80 ? w3(a) - 0x100 : w3(a));
@@ -279,8 +279,7 @@ print "MAIN ",pc
   const e5 = new LevelEmulator(r5); e5.boot();
   const l5 = loadLevel(r5, 0x105);
   l5.sprites = [{ uid: newUid(), num: 0xc0, x: 8, y: 0x16, extra: 3, bytes: [0x42] }, { uid: newUid(), num: 0xd0, x: 9, y: 0x16, extra: 2 }];
-  e5.load(0x105, { sprites: serializeSprites(l5.sprites, l5.spriteHeader, false, spriteSizes(r5)) });
-  for (let i = 0; i < 40; i++) e5.snes.runFrame();
+  PlaySession.start(e5, 0x105, { ov: { sprites: serializeSprites(l5.sprites, l5.spriteHeader, false, spriteSizes(r5)) } }).play(12);
   const w5 = (a: number) => e5.snes.wram[a - 0x7e0000];
   check(w5(0x7fb020) > 10 && w5(0x7fb021) === 0x42 && w5(0x7fb023) === 0xc1, `custom shooter runs with its extra byte and extra bit (${w5(0x7fb020)} frames, byte ${w5(0x7fb021).toString(16)}, num ${w5(0x7fb023).toString(16)})`);
   check(w5(0x7fb022) > 10, `custom generator runs (${w5(0x7fb022)} frames)`);
@@ -349,8 +348,7 @@ print "MAIN ",pc
   const e7 = new LevelEmulator(r7); e7.boot();
   const l7 = loadLevel(r7, 0x105);
   l7.sprites = [{ uid: newUid(), num: 0x00, x: 6, y: 0x16, extra: 2 }];
-  e7.load(0x105, { sprites: serializeSprites(l7.sprites, l7.spriteHeader, false, spriteSizes(r7)) });
-  for (let i = 0; i < 34; i++) e7.snes.runFrame();
+  PlaySession.start(e7, 0x105, { ov: { sprites: serializeSprites(l7.sprites, l7.spriteHeader, false, spriteSizes(r7)) } }).play(6);
   const w7 = (a: number) => e7.snes.wram[a - 0x7e0000];
   const names = ['cluster', 'extended', 'minor extended', 'score', 'spinning coin', 'smoke', 'bounce'];
   names.forEach((n, i) => check(w7(0x7fb030 + i) > 0, `custom ${n} sprite runs (${w7(0x7fb030 + i)} frames)`));
@@ -377,15 +375,14 @@ print "MAIN ",pc
   const tile = res8.pkg!.block.tiles[0];
   const l8 = loadLevel(r8, 0x105);
   l8.objects.push({ uid: newUid(), num: 0, ext: DM16_EXT, x: 0, y: 24, size: 0x08, tile }); // floor of shatter blocks under Mario
-  e8.load(0x105, { layer1: serializeLayer1(r8, l8), sprites: serializeSprites(l8.sprites, l8.spriteHeader, isL1Vertical(r8, l8.header.mode), spriteSizes(r8)) });
+  const ov8 = () => ({ layer1: serializeLayer1(r8, l8), sprites: serializeSprites(l8.sprites, l8.spriteHeader, isL1Vertical(r8, l8.header.mode), spriteSizes(r8)) });
+  const p8 = PlaySession.start(e8, 0x105, { ov: ov8() });
   const s8 = e8.snes, w8 = s8.wram;
-  let g = 0; while (w8[0x100] !== 0x14 && g++ < 100) s8.runFrame();
   const at = (x: number, y: number) => w8[0xc800 + (x >> 4) * 0x1b0 + y * 16 + (x & 15)] | (w8[0x1c800 + (x >> 4) * 0x1b0 + y * 16 + (x & 15)] << 8);
   const before = at(2, 24);
   let bounced = false;
-  for (let i = 0; i < 160; i++) { s8.joy1 = 0x0100; s8.runFrame(); if (w8[0x1699] || w8[0x169a] || w8[0x169b] || w8[0x169c]) bounced = true; }
-  s8.joy1 = 0;
-  for (let i = 0; i < 20; i++) s8.runFrame();
+  for (let i = 0; i < 160; i++) { p8.frame(PAD.right); if (w8[0x1699] || w8[0x169a] || w8[0x169b] || w8[0x169c]) bounced = true; }
+  p8.play(20);
   const after = at(2, 24);
   check(before === tile && bounced, `Shatter: the block spawns its bounce sprite (block ${before.toString(16)})`);
   check(after !== tile, `Shatter: the block is gone after Mario left it (now ${after.toString(16)})`);
@@ -394,10 +391,9 @@ print "MAIN ",pc
   // tile >= $200) and holds until Mario leaves
   const cracked = [0x1c21, 0x1c31, 0x1c22, 0x1c32];
   setExtTileWords(r8, 0x601, cracked);
-  e8.load(0x105, { layer1: serializeLayer1(r8, l8), sprites: serializeSprites(l8.sprites, l8.spriteHeader, isL1Vertical(r8, l8.header.mode), spriteSizes(r8)) });
-  g = 0; while (w8[0x100] !== 0x14 && g++ < 100) s8.runFrame();
+  const q8 = PlaySession.start(e8, 0x105, { ov: ov8() });
   const under = (w8[0x94] + 8) >> 4; // the block under Mario
-  for (let i = 0; i < 60; i++) s8.runFrame();
+  q8.play(60);
   const vw = (wa: number) => s8.vram[wa * 2] | (s8.vram[wa * 2 + 1] << 8);
   let shown = false;
   for (let wa = 0; wa < 0x7fff && !shown; wa++) shown = vw(wa) === cracked[0] && vw(wa + 1) === cracked[2] && vw(wa + 32) === cracked[1] && vw(wa + 33) === cracked[3];
