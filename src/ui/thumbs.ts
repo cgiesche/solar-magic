@@ -10,18 +10,22 @@ import { objectVariant, type ObjKind } from '../core/objkinds.ts';
 import { levelSlots, layerSlots } from '../core/gfxslots.ts';
 import { gfxFilesHash } from '../core/gfxpages.ts';
 import { inputHash } from '../core/inputs.ts';
+import { objectEffectsJob } from '../core/objeffects.ts';
 
-export interface ObjSpec { num: number; ext: number; size: number }
+// extension: object 2D's bytes after its 3 where the ROM reads them (obj2d.ts), its custom number first
+export interface ObjSpec { num: number; ext: number; size: number; extension?: number[] }
 
-// sub-objects (see objectVariants) get a key per type
-export function objKey(s: { num: number; ext: number; size: number }, kind: ObjKind | null): string {
+// sub-objects (see objectVariants) get a key per type, object 2D with an extension one per custom number
+export function objKey(s: { num: number; ext: number; size: number; extension?: number[] }, kind: ObjKind | null): string {
   if (s.num === 0) return `e${s.ext}`;
+  if (s.extension) return `c${s.extension[0]}`;
   const v = objectVariant(kind, s.size);
   return v < 0 ? `s${s.num}` : `s${s.num}.${v}`;
 }
 
-// a rendered object: its pixels and the distinct Map16 tiles it produced
-export interface ObjThumb { key: string; w: number; h: number; px: Uint32Array; m16: number[] }
+// a rendered object: its pixels and the distinct Map16 tiles it produced; effect: one of object 2D's custom
+// numbers that draws no tile but changes RAM when the level loads (objeffects.ts), without pixels (w = h = 0)
+export interface ObjThumb { key: string; w: number; h: number; px: Uint32Array; m16: number[]; effect?: boolean }
 
 // their result cache key: the tileset and palettes (kept side by side) and the objects
 export function thumbsKey(level: Level, specs: ObjSpec[], keyOf: (s: ObjSpec) => string): string {
@@ -63,12 +67,14 @@ export function renderObjectThumbs(rom: Rom, emu: LevelEmulator, level: Level, s
 }
 
 // in batches of 32 test levels, a step each; a batch whose load fails (some objects together break the game,
-// like two of tileset 7's object 33) is rendered in halves, an object that fails alone gets no thumbnail
+// like two of tileset 7's object 33) is rendered in halves, an object that fails alone gets no thumbnail. Object
+// 2D's custom numbers that draw nothing are probed for an effect then (#104's rule: listed are the objects that
+// draw tiles or do something)
 export function* objectThumbsJob(rom: Rom, emu: LevelEmulator, level: Level, specs: ObjSpec[], keyOf: (s: ObjSpec) => string): Generator<void, ObjThumb[]> {
   const out: ObjThumb[] = [];
   const PER = 32;
   const render = (batch: ObjSpec[]): void => {
-    const objs: LevelObject[] = batch.map((s, i) => ({ uid: newUid(), num: s.num, ext: s.ext, size: s.size, x: i * 16 + 3, y: 12 }));
+    const objs: LevelObject[] = batch.map((s, i) => ({ uid: newUid(), num: s.num, ext: s.ext, size: s.size, x: i * 16 + 3, y: 12, ...(s.extension ? { extension: s.extension } : {}) }));
     const hdr = { ...level.header, screens: 32, mode: 0 };
     const owners: number[] = [-1, -1, -1, -1, -1];
     const body = serializeObjects(objs, [], false, owners);
@@ -116,5 +122,9 @@ export function* objectThumbsJob(rom: Rom, emu: LevelEmulator, level: Level, spe
     });
   };
   for (let b = 0; b < specs.length; b += PER) { render(specs.slice(b, b + PER)); yield; }
+  const drawn = new Set(out.map((t) => t.key));
+  const quiet = specs.filter((s) => s.extension && !drawn.has(keyOf(s)));
+  const fx = !quiet.length ? [] : yield* objectEffectsJob(emu, level, quiet.map((s) => ({ uid: newUid(), num: s.num, ext: s.ext, size: s.size, x: 0, y: 0, extension: s.extension })));
+  quiet.forEach((s, i) => { if (fx[i]) out.push({ key: keyOf(s), w: 0, h: 0, px: new Uint32Array(0), m16: [], effect: true }); });
   return out;
 }

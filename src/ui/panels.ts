@@ -13,7 +13,7 @@ import { levelName } from '../core/overworld.ts';
 import { usedInList } from './usedin.ts';
 import { buildExitPanel } from './exitpanel.ts';
 import { DM16_EXT } from '../core/patches.ts';
-import { objectLength2D, fitExtension } from '../core/obj2d.ts';
+import { objectLength2D, fitExtension, OBJ_2D } from '../core/obj2d.ts';
 import { PREFAB_EXT, TRANSPARENT, freePrefabNumber, readPrefab, writePrefab, PREFAB_COUNT, type Prefab } from '../core/prefabs.ts';
 import { prefabCost } from '../core/prefabcost.ts';
 import type { LevelPlaces } from '../core/prefabplaces.ts';
@@ -137,6 +137,7 @@ export class Picker {
   // its button and hint, which follow the selection without a rebuild
   thumbs = new Map<string, HTMLCanvasElement>();
   thumbTiles = new Map<string, number[]>(); // Map16 tiles per object key
+  effects = new Set<string>(); // keys of objects that draw nothing but change RAM (object 2D's custom numbers)
   thumbsFrom: ObjThumb[] | undefined; // the thumbnails shown (undefined: placeholders while they are learned)
   tabs: HTMLDivElement;
   builtPixels = 0; // the screen pixels per pixel the sheet shown is drawn at (0: no sheet)
@@ -503,14 +504,19 @@ export class Picker {
     this.body.append(c);
   }
 
+  // standard objects (with their types), extended objects 10–FF and, where the ROM reads object 2D with an
+  // extension (obj2d.ts), its custom numbers 00–FF instead of a plain 2D
   specs(): ObjSpec[] {
     const s: ObjSpec[] = [];
+    const len2d = objectLength2D(this.app.rom);
     for (let n = 1; n < 0x40; n++) {
+      if (n === OBJ_2D && len2d > 3) continue;
       const k = this.app.objectKind(n);
       if (!k?.type) { s.push({ num: n, ext: 0, size: 0x11 }); continue; }
       for (let t = 0; t < k.count; t++) s.push({ num: n, ext: 0, size: withObjectVariant(k, 0x11, t) });
     }
     for (let e = 0x10; e < 0x100; e++) s.push({ num: 0, ext: e, size: 0 });
+    if (len2d > 3) for (let c = 0; c < 0x100; c++) s.push({ num: OBJ_2D, ext: 0, size: 0, extension: Array.from({ length: len2d - 3 }, (_, i) => (i ? 0 : c)) });
     return s;
   }
 
@@ -521,7 +527,9 @@ export class Picker {
     this.thumbsFrom = thumbs;
     this.thumbTiles = new Map();
     this.thumbs = new Map();
+    this.effects = new Set();
     for (const t of thumbs ?? []) {
+      if (t.effect) { this.effects.add(t.key); continue; }
       this.thumbs.set(t.key, thumbCanvas(t));
       this.thumbTiles.set(t.key, t.m16);
     }
@@ -529,28 +537,32 @@ export class Picker {
     return true;
   }
 
-  // the standard objects (with their types) or the extended objects as listed in the tab; `text` is what the
-  // search looks in (lower case): number, name, Map16 tiles and what they do when hit or entered (emulated,
-  // see blockprobe.ts), which tells apart objects that look the same, like pipes with and without an entrance
-  objectEntries(ext: boolean) {
+  // the standard objects (with their types), the extended objects or object 2D's custom numbers as listed in the
+  // tab; `text` is what the search looks in (lower case): number, name, Map16 tiles and what they do when hit or
+  // entered (emulated, see blockprobe.ts), which tells apart objects that look the same, like pipes with and
+  // without an entrance
+  objectEntries(section: ObjSection) {
     const app = this.app;
     const out = [];
     for (const s of this.specs()) {
-      if (ext !== (s.num === 0)) continue;
-      const kind = app.objectKind(s.num);
-      const vt = objectVariant(kind, s.size);
-      const name = app.objectName(s.num, s.ext) + (vt >= 0 ? ` – type ${vt.toString(16).toUpperCase()}` : '');
-      const label = s.num ? hex2(s.num) + (vt >= 0 ? `.${vt.toString(16).toUpperCase()}` : '') : hex2(s.ext);
-      const tiles = this.thumbTiles.get(objKey(s, kind)) ?? [];
+      if (section !== (s.extension ? 'custom' : s.num === 0 ? 'ext' : 'obj')) continue;
+      const kind = app.objectKind(s.num), key = objKey(s, kind);
+      const vt = s.extension ? -1 : objectVariant(kind, s.size);
+      const name = s.extension ? `Custom object ${hex2(s.extension[0])}` : app.objectName(s.num, s.ext) + (vt >= 0 ? ` – type ${vt.toString(16).toUpperCase()}` : '');
+      const label = s.extension ? `${hex2(s.num)}.${hex2(s.extension[0])}` : s.num ? hex2(s.num) + (vt >= 0 ? `.${vt.toString(16).toUpperCase()}` : '') : hex2(s.ext);
+      const tiles = this.thumbTiles.get(key) ?? [];
       const sum = tiles.length ? blockSummary(app, tiles) : [];
+      const effect = this.effects.has(key);
       const info = (tiles.length ? `\nMap16 ${tiles.slice(0, 8).map(hex3).join(' ')}${tiles.length > 8 ? ' …' : ''}` : '')
+        + (effect ? '\nDraws nothing, but changes RAM when the level loads' : '')
         + (sum === undefined ? '\n(determining behavior …)' : sum.map((x) => '\n' + x).join(''));
-      const th = this.thumbs.get(objKey(s, kind));
-      if (!th && ext && this.thumbsFrom) continue; // invalid ext objects produce nothing
+      const th = this.thumbs.get(key);
+      // invalid extended objects and custom numbers produce nothing
+      if (!th && !effect && section !== 'obj' && this.thumbsFrom) continue;
       out.push({
         s, vt, label, name, th, title: `${label}: ${name}${info}`, behavior: sum?.join(' · ') ?? '', text: `${label} ${name} ${info}`.toLowerCase(),
         items: blockSprites(app, tiles), enter: blockEnter(app, tiles),
-        item: { kind: 'obj', num: s.num, ext: s.ext, size: s.size } as PickedItem,
+        item: { kind: 'obj', num: s.num, ext: s.ext, size: s.size, ...(s.extension ? { extension: [...s.extension] } : {}) } as PickedItem,
       });
     }
     return out;
@@ -607,11 +619,11 @@ export class Picker {
   // the tabs for the central search (search.ts)
   searchProviders(): SearchProvider[] {
     const app = this.app;
-    const objects = (id: 'obj' | 'ext', label: string): SearchProvider => ({
+    const objects = (id: ObjSection, label: string): SearchProvider => ({
       id, label,
       search: (terms) => {
         this.ensureThumbs();
-        return this.objectEntries(id === 'ext').filter((e) => matchesAll(e.text, terms)).map((e) => ({
+        return this.objectEntries(id).filter((e) => matchesAll(e.text, terms)).map((e) => ({
           label: e.label, name: e.name, detail: e.behavior, title: e.title, thumb: () => (e.th ? cloneCanvas(e.th) : null), pick: () => this.choose('obj', e.item),
         }));
       },
@@ -693,7 +705,7 @@ export class Picker {
       })),
     };
     // in the order of the picker: the Objects tab's sections, Map16 (by number, by name), Sprites
-    return [prefabs, objects('obj', 'Resizable objects'), objects('ext', 'Fixed-size objects'), map16, named, sprites];
+    return [prefabs, objects('obj', 'Resizable objects'), objects('ext', 'Fixed-size objects'), objects('custom', 'Custom objects'), map16, named, sprites];
   }
 
   // the sheet of the current tab or brush mode fills the picker's width (layer 3's 8x8 tiles: half as wide as
@@ -765,24 +777,27 @@ export class Picker {
     return true;
   }
 
-  // the Objects tab: Prefabs, Resizable (standard objects), Fixed size (extended objects); a section without
-  // entries is left out (Prefabs keeps its button and hint)
+  // the Objects tab: Prefabs, Resizable (standard objects), Fixed size (extended objects), Custom (object 2D's
+  // custom numbers); a section without entries is left out (Prefabs keeps its button and hint)
   buildObjects(): void {
     const app = this.app;
     const cur = app.pickedItem;
     this.body.append(this.prefabBox);
     this.buildPrefabs();
-    for (const [ext, title] of [[false, 'Resizable'], [true, 'Fixed size']] as const) {
+    for (const [section, title] of [['obj', 'Resizable'], ['ext', 'Fixed size'], ['custom', 'Custom']] as const) {
       const grid = h('div', { class: 'picker-grid' });
-      for (const e of this.objectEntries(ext)) {
+      for (const e of this.objectEntries(section)) {
         const { s, vt } = e;
-        const sel = cur?.kind === 'obj' && cur.num === s.num && (s.num !== 0 || cur.ext === s.ext) && objectVariant(app.objectKind(s.num), cur.size) === vt;
+        const sel = cur?.kind === 'obj' && cur.num === s.num && (s.num !== 0 || cur.ext === s.ext)
+          && (s.extension ? cur.extension?.[0] === s.extension[0] : objectVariant(app.objectKind(s.num), cur.size) === vt);
         const th = e.th ? thumbAt(e.th) : null;
+        // (custom numbers have no name of their own: renaming would rename object 2D)
+        const renames = !s.extension, hint = renames ? '\nRight click: rename (F2)' : '';
         const cell = grid.appendChild(h('div', {
-          class: `picker-cell${sel ? ' selected' : ''}`, title: `${e.title}\nRight click: rename (F2)`,
+          class: `picker-cell${sel ? ' selected' : ''}`, title: e.title + hint,
           oncontextmenu: (ev: MouseEvent) => {
             ev.preventDefault();
-            contextMenu(ev.clientX, ev.clientY, [{ heading: app.objectName(s.num, s.ext) }, { label: 'Rename …', shortcut: 'F2', onClick: () => renameObject(app, s.num, s.ext) }]);
+            if (renames) contextMenu(ev.clientX, ev.clientY, [{ heading: app.objectName(s.num, s.ext) }, { label: 'Rename …', shortcut: 'F2', onClick: () => renameObject(app, s.num, s.ext) }]);
           },
           onclick: () => {
             if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1');
@@ -790,15 +805,17 @@ export class Picker {
           },
         }, h('div', { class: 'picker-img' }, th?.c ?? h('span', { class: 'none' }, '–'),
           h('div', { class: 'picker-corner' }, itemBadge(app, e.items), e.enter ? h('div', { class: 'picker-enter', title: enterText(e.enter) }, e.enter) : '')),
-          h('div', { class: 'picker-label' }, e.label), h('div', { class: 'picker-name' }, app.objectName(s.num, s.ext))));
-        this.keysOn(cell, () => renameObject(app, s.num, s.ext));
-        if (e.th) previewOnHover(cell, th!.scale, () => cloneCanvas(e.th!), () => [...e.title.split('\n'), 'Right click: rename (F2)']);
+          h('div', { class: 'picker-label' }, e.label), h('div', { class: 'picker-name' }, s.extension ? e.name : app.objectName(s.num, s.ext))));
+        if (renames) this.keysOn(cell, () => renameObject(app, s.num, s.ext));
+        if (e.th) previewOnHover(cell, th!.scale, () => cloneCanvas(e.th!), () => (e.title + hint).split('\n'));
       }
       if (!grid.firstChild) continue;
       this.body.append(h('div', { class: 'picker-head' }, title), grid);
     }
   }
 }
+
+type ObjSection = 'obj' | 'ext' | 'custom'; // the Objects tab's sections (Resizable, Fixed size, Custom)
 
 // ---------------- prefabs ----------------
 function prefabTileSource(app: App): (t: number) => HTMLCanvasElement | null {

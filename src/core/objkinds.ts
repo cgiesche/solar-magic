@@ -11,6 +11,7 @@ import { OV_L1, MAP_BASE } from './levelemu.ts';
 import { layerGeom } from './render.ts';
 import { encodePrimaryHeader, serializeObjects, newUid, type LevelObject, type Level } from './level.ts';
 import { RomReads } from './romdeps.ts';
+import { objectLength2D, fitExtension } from './obj2d.ts';
 
 export interface ObjKind {
   type: 'lo' | 'hi' | null; // nibble that selects a sub-object
@@ -93,7 +94,9 @@ export class ObjKindProbe {
 
   // null: the load failed and the batch has to be split
   private run(batch: { num: number; size: number }[]): Run[] | null {
+    const len2d = objectLength2D(this.emu.rom);
     const objs: LevelObject[] = batch.map((s, i) => ({ uid: newUid(), num: s.num, ext: 0, size: s.size, x: i * 32 + 16, y: 4 }));
+    for (const o of objs) fitExtension(o, len2d); // (2D as the ROM reads it: custom number 00)
     const owners: number[] = [-1, -1, -1, -1, -1];
     const body = serializeObjects(objs, [], false, owners);
     const l1 = new Uint8Array(5 + body.length);

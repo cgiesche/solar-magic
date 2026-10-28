@@ -9,6 +9,9 @@ import { parseObjects, serializeObjects, newUid, loadLevel, type LevelObject } f
 import { objectLength2D, fitExtension } from '../src/core/obj2d.ts';
 import { saveLevel } from '../src/core/save.ts';
 import { parseLmObjects } from '../src/core/mwl.ts';
+import { LevelEmulator } from '../src/core/levelemu.ts';
+import { objectEffects } from '../src/core/objeffects.ts';
+import { renderObjectThumbs } from '../src/ui/thumbs.ts';
 import { editorImage } from './fixture.ts';
 
 await loadAsar();
@@ -45,7 +48,11 @@ NewNorm:
   INY : LDA [$65],y : STA $58
   INY : TYA : CLC : ADC $65 : STA $65
   LDA $66 : ADC #$00 : STA $66
-  JML $0DA53C
+  LDA $5A : CMP #$01 : BNE +
+  LDA #$01 : STA $7FA400      ; custom 01: a flag other code reads
++ LDA $5A : CMP #$02 : BNE +
+  LDY $57 : LDA #$25 : STA [$6B],y : LDA #$01 : STA [$6E],y   ; custom 02: tile 125
++ JML $0DA53C
 `;
 const hooked = new Rom(await editorImage());
 check(objectLength2D(hooked) === 3, 'before the hook: 3 bytes');
@@ -83,6 +90,21 @@ check(objectLength2D(hooked) === 5, `once the hook is installed (the same ROM): 
   const c = obj(0x2d, 0, 0, 0, [9, 8]); fitExtension(c, 3);
   const d = obj(0x14, 0, 0, 0, [9, 8]); fitExtension(d, 5);
   check(a.extension?.join() === '0,0' && b.extension?.join() === '9,8' && !('extension' in c) && !('extension' in d), 'extension fitted to the object and the ROM');
+}
+
+// the object list: custom numbers that draw tiles get a thumbnail, those that only change RAM are found by the
+// effect probe, the others (doing nothing) by neither
+{
+  const emu = new LevelEmulator(hooked); emu.boot();
+  const lv = loadLevel(hooked, 0x105);
+  const specs = [0, 1, 2, 3].map((n) => ({ num: 0x2d, ext: 0, size: 0, extension: [n, 0] }));
+  const thumbs = renderObjectThumbs(hooked, emu, lv, specs, (s) => `c${s.extension?.[0]}`);
+  const drawn = thumbs.filter((t) => !t.effect), fxOnly = thumbs.filter((t) => t.effect);
+  check(drawn.map((t) => t.key).join() === 'c2' && drawn[0].m16.join() === '293', `thumbnails: custom 02 draws tile 125 (${drawn.map((t) => t.key + ':' + t.m16).join(' ')})`);
+  check(fxOnly.map((t) => t.key).join() === 'c1' && fxOnly[0].w === 0, `listed without a picture: custom 01, which changes RAM (${fxOnly.map((t) => t.key)})`);
+  const quiet = [0, 1, 3].map((n) => obj(0x2d, 0, 0, 0, [n, 0]));
+  const fx = objectEffects(emu, lv, quiet);
+  check(fx.join() === 'false,true,false', `effects: custom 01 changes RAM, 00 and 03 nothing (${fx})`);
 }
 
 // Lunar Magic's level files: 2D is always 5 bytes there; kept where the ROM reads it so, else left out with a note
