@@ -204,9 +204,19 @@ check(levelMusic(rom, 0x105) === 0x29, 'level 105 set to song 29');
   emu.boot();
   emu.startGame(0x29);
   const lr = emu.load(0x105, { continueState: true, translevel: 0x29 });
-  const s = emu.snes;
+  const s = emu.snes, cpu = s.cpu;
+  // the main loop's hook at $008075 enters AddmusicK's code in the fast banks ($80+)
+  const hookTo = new Set<number>();
+  const exec = cpu.exec.bind(cpu);
+  cpu.exec = (op: number) => {
+    const at = cpu.opPc & 0x7fffff;
+    exec(op);
+    if (at === 0x8075) hookTo.add(cpu.pbr);
+  };
   let pk = 0;
   for (let f = 0; f < 240; f++) { s.runFrame(); if (s.audio && f > 60) pk = Math.max(pk, peak(s.audio)); }
+  cpu.exec = exec;
+  check(hookTo.size > 0 && [...hookTo].every((b) => b >= 0x80), `main loop enters AddmusicK in the fast banks (${[...hookTo].map((b) => '$' + b.toString(16).toUpperCase())})`);
   check(lr.ok, `level loads with the sound unit (${lr.error ?? ''})`);
   check(s.wram[0x1b000] === 0x29, `AddmusicK's current song is 29 (${s.wram[0x1b000].toString(16)})`);
   check(pk > 1000, `sound in the level (peak ${pk})`);

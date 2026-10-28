@@ -391,7 +391,7 @@ sameRom('song removed');
     saveLevel(rom, lv);
     bump('sample level');
     const rm = await installPackage(rom, ready(inspectUpload('Square Test.zip', testSongZip())), { level: null, blank: s.fg(0x025), tileWords: (t) => s.fg(t) });
-    check(rm.ok && rom.r24(0x008076) >> 16 === 0x0e, `a song installed: AddmusicK's main loop at $008075 (${rm.warnings.join(' | ')})`);
+    check(rm.ok && rom.r24(0x008076) >> 16 === 0x8e, `a song installed: AddmusicK's main loop at $008075 enters $8E (${rm.warnings.join(' | ')})`);
     bump('with AddmusicK');
   }
 }

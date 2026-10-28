@@ -71,6 +71,11 @@ export async function runAmk(rom: Uint8Array | null, files: Map<string, Uint8Arr
       fs.mkdirTree(`/amk/samples/${d}`);
     }
   }
+  // the main loop's hook ($008075) enters AddmusicK's code through the fast mirror, as the editor's own
+  // hooks do (FastROM, ADR 0007): its free space is addressed in bank $0E, !Bank is $800000 (0 on SA-1)
+  const patch = '/amk/asm/SNES/patch.asm';
+  const asm = new TextDecoder('latin1').decode(fs.readFile(patch)).replace(/^(\tJML MainLabel)(\r?)$/m, '$1|!Bank$2');
+  fs.writeFile(patch, Uint8Array.from(asm, (c) => c.charCodeAt(0)));
   if (rom) fs.writeFile('/amk/rom.sfc', rom);
   let code: number;
   try {

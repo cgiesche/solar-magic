@@ -502,7 +502,9 @@ The rewritten bank bytes are **not hooks**: a patch that writes over one is not 
 warning (the code there then runs slow until it returns). The clean game's fingerprint (SMWF) compares
 its blocks with them reverted, so a BPS made against the clean game (Callisto's global ExAnimation)
 still finds the clean bytes there. Free space is addressed in `$80+`: the editor's own blocks and, as
-Asar 1.91 always does for LoROM, a patch's `freecode`/`freedata`. Callisto's `fastrom.bps` is not part of
+Asar 1.91 always does for LoROM, a patch's `freecode`/`freedata`. AddmusicK puts its code at a fixed
+`$0E8000`; the editor has its main loop hook (`$008075`) jump there as `JML $8E…` (AddmusicK's own
+`!Bank` on its `JML MainLabel`), so its per-frame code runs fast. Callisto's `fastrom.bps` is not part of
 a package. ROMs of older editor versions are opened without FastROM (no migration).
 
 ### Layer 2 scroll rates
