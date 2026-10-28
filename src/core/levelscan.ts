@@ -14,6 +14,7 @@
 
 import { levelDataKey, type LevelEmulator, type LevelOverride } from './levelemu.ts';
 import { cameraReachJob, type CameraReach } from './camerareach.ts';
+import { PlaySession } from './playsession.ts';
 import { tideRangeJob, type TideRange } from './layer3.ts';
 import { GM, RAM, MARIO_DYING, SPR, SPRITE_SLOTS, getS16, set16, cameraX, cameraY, marioX } from './ram.ts';
 
@@ -45,12 +46,9 @@ const NORMAL = 8; // sprite status of a sprite going about its business
 
 // yields between slices of frames; the result when done
 export function* levelScanJob(emu: LevelEmulator, lv: ScanLevel): Generator<void, ScanResult> {
-  const r = emu.load(lv.number, lv.ov);
-  if (!r.ok) return { screens: [], sprites: [], frames: 0, ok: false };
+  if (!PlaySession.start(emu, lv.number, { ov: lv.ov }).ready) return { screens: [], sprites: [], frames: 0, ok: false };
   yield;
   const s = emu.snes, w = s.wram;
-  for (let g = 0; g < 200 && w[RAM.gameMode] !== GM.level; g++) s.runFrame();
-  if (w[RAM.gameMode] !== GM.level) return { screens: [], sprites: [], frames: 0, ok: false };
   const loads = new Map<number, ScreenLoad>();
   const fates: SpriteFate[] = [];
   // per load index: first frame seen, last position and status, the tile-wide window it stays in

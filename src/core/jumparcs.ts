@@ -9,6 +9,7 @@
 import type { LevelEmulator, LevelOverride } from './levelemu.ts';
 import type { SnesState } from './snes.ts';
 import { type RunStates, type RunState } from './blockprobe.ts';
+import { PlaySession } from './playsession.ts';
 import { GM, RAM, MARIO_DYING, PAD, setCameraX, setCameraY, marioX, getS16, marioY, setMarioPos } from './ram.ts';
 
 export type ArcSpeed = 'stand' | 'walk' | 'run' | 'p';
@@ -24,7 +25,6 @@ export interface JumpArc {
 const MAX_FRAMES = 150;
 const SETTLE_FRAMES = 12; // dropping Mario onto the tile before an arc
 const WARM_FRAMES = 6; // on the ground with the running state before the jump
-const LOAD_FRAMES = 300; // until gameplay with Mario standing (entrance animations)
 
 export class JumpArcs {
   emu: LevelEmulator;
@@ -41,15 +41,12 @@ export class JumpArcs {
   prepare(level: number, ov: LevelOverride, spriteHeader: number, height: number): boolean {
     this.ready = null;
     this.height = height;
-    const e = this.emu;
-    const r = e.load(level, { ...ov, sprites: new Uint8Array([spriteHeader, 0xff]), byteOwner: undefined });
-    if (!r.ok) return false;
-    const s = e.snes, w = s.wram;
+    let p: PlaySession;
     try {
-      for (let f = 0; f < LOAD_FRAMES && !(w[RAM.gameMode] === GM.level && w[RAM.marioAnim] === 0 && !w[RAM.spritesLocked]); f++) s.runFrame();
+      p = PlaySession.start(this.emu, level, { ov: { ...ov, sprites: new Uint8Array([spriteHeader, 0xff]), byteOwner: undefined }, until: 'settled' });
     } catch { return false; }
-    if (w[RAM.gameMode] !== GM.level) return false;
-    this.ready = s.saveState();
+    if (!p.ready) return false;
+    this.ready = p.save();
     return true;
   }
 

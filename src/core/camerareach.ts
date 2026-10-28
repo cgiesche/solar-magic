@@ -12,7 +12,8 @@
 import { levelDataKey, type LevelEmulator, type LevelOverride } from './levelemu.ts';
 import type { ScanLevel } from './levelscan.ts';
 import { GAME_VIEW_W, GAME_VIEW_H, MARIO_W, MARIO_H } from './camerabands.ts';
-import { GM, RAM, MARIO_DYING, cameraX, cameraY, setMarioPos } from './ram.ts';
+import { GM, RAM, MARIO_DYING, cameraX, cameraY, standMario } from './ram.ts';
+import { PlaySession } from './playsession.ts';
 
 // per column of the level (vertical levels: row), 16 pixels each: the pixels [from, to) down (across) it the
 // camera showed; null: never. camera: where the camera (layer 1's place) went, from the first to the last pixel
@@ -26,7 +27,6 @@ export interface CameraReach {
 export interface CameraAt { x: number; y: number }
 
 const STEP = 4; // pixels Mario is carried per frame
-const LOAD_FRAMES = 300; // until Mario can move after the level loaded (an entrance in a pipe …)
 const REST = 16; // frames without the camera moving: it rests
 const SETTLE_FRAMES = 600; // at most
 const SLICE = 60; // frames between yields
@@ -38,17 +38,13 @@ export function cameraAtKey(level: number, ov: LevelOverride, x: number, y: numb
 
 // The level loaded and ready for Mario; false when it failed or ended right away
 function start(emu: LevelEmulator, lv: ScanLevel): boolean {
-  if (!emu.load(lv.number, lv.ov).ok) return false;
-  const s = emu.snes, w = s.wram;
-  for (let f = 0; f < LOAD_FRAMES && !(w[RAM.gameMode] === GM.level && w[RAM.marioAnim] === 0 && !w[RAM.spritesLocked]); f++) s.runFrame();
-  return w[RAM.gameMode] === GM.level;
+  return PlaySession.start(emu, lv.number, { ov: lv.ov, until: 'settled' }).ready;
 }
 
 // One frame with Mario standing at (x, y); false when the level ended
 function stand(emu: LevelEmulator, x: number, y: number): boolean {
   const s = emu.snes, w = s.wram;
-  setMarioPos(w, x, y);
-  w[RAM.marioSpeedX] = 0; w[RAM.marioSpeedY] = 0; w[RAM.hurtTimer] = 0x40;
+  standMario(w, x, y);
   w[RAM.marioClimbing] = 1;
   s.runFrame();
   if (w[RAM.marioAnim] === MARIO_DYING) { w[RAM.marioAnim] = 0; w[RAM.marioAnimTimer] = 0; w[RAM.spritesLocked] = 0; } // up again
