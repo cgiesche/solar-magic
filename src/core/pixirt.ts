@@ -241,7 +241,7 @@ macro RevertMap16()
   STA $9C
   %BounceSetupMap16()
   PHX
-  JSL $80BEB0|!BankB
+  JSL $00BEB0|!BankB
   PLX
 endmacro
 macro InvisibleMap16()
@@ -249,7 +249,7 @@ macro InvisibleMap16()
   STA $9C
   %BounceSetupMap16()
   PHX
-  JSL $80BEB0|!BankB
+  JSL $00BEB0|!BankB
   PLX
 endmacro
 macro SetSpeed()
@@ -266,7 +266,7 @@ macro EraseCoinAbove()
   PHK
   PEA.w ?ret-1
   PEA.w $B888
-  JML $829265|!BankB
+  JML $029265|!BankB
 ?ret:
 endmacro
 ${spawnAlt('!bounce_x_low', '!bounce_y_low', '!bounce_x_high', '!bounce_y_high')}`,

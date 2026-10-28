@@ -7,10 +7,11 @@ import { ROUTINES } from './pixiroutines.ts';
 
 const r = (s: string) => '?main:\n' + s.replace(/^\n/, '');
 
-// the game's subroutine at addr (ends with RTS) called through an RTL of its bank (bank 0: $00804D, 2: $02B889)
+// the game's subroutine at addr (ends with RTS) called through an RTL of its bank (bank 0: $00804D, 2: $02B889),
+// in the FastROM mirror
 const call = (addr: number, label: string) => {
   const rtl = (addr >> 16) === 0 ? '$804C' : '$B888';
-  return `  PHK : PEA.w ?.${label}-1\n  PEA.w ${rtl}\n  JML $${addr.toString(16).toUpperCase().padStart(6, '0')}\n?.${label}:`;
+  return `  PHK : PEA.w ?.${label}-1\n  PEA.w ${rtl}\n  JML $${(addr | 0x800000).toString(16).toUpperCase().padStart(6, '0')}\n?.${label}:`;
 };
 
 // smoke-type effect at the block ($98/$9A), on layer 2 relative to it

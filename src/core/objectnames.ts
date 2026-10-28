@@ -42,8 +42,8 @@ const EXTENDED = `Small door|Invisible 1-Up ? block|Invisible note block (unused
 // the editor's own extended objects (patches.ts)
 const EDITOR_EXTENDED: Record<number, string> = { 0x04: 'Prefab', 0x05: 'Direct Map16 (editor patch)' };
 
-// The object table the object loader uses for objects in tileset ts: the SNES address of the entry of object
-// 01 (in the slow banks, as the game's tables are known), null when not found. A level of that tileset with objects 01–0D is loaded; the table is where the
+// The object table the object loader uses for objects in tileset ts: the SNES address of the entry of
+// object 01 (in the slow banks, as the game's tables are known), null when not found. A level of that tileset with objects 01–0D is loaded; the table is where the
 // load reads object n's entry at 3 × (n − 1) bytes from it (the same address for all of them).
 const PROBE_LEVEL = 0x105; // the level loaded (its own objects and sprites left out)
 const PROBE_OBJECTS = 13; // 01–0D: one routine of the game for all of them, which does not crash on size 0

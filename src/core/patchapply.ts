@@ -94,7 +94,8 @@ export interface ApplyResult {
 }
 
 const hex = (n: number, w = 6) => '$' + n.toString(16).toUpperCase().padStart(w, '0');
-const pcHex = (pc: number) => hex(pcToSnes(pc));
+// (the clean game's places in the slow banks, as the hook table and the community name them)
+const pcHex = (pc: number) => hex(pc < 0x80000 ? pcToSnes(pc) & 0x7fffff : pcToSnes(pc));
 
 export function sourceHash(src: PatchSource): string {
   const enc = new TextEncoder();
