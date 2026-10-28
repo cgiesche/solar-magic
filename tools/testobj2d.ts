@@ -94,6 +94,15 @@ check(objectLength2D(hooked) === 5, `once the hook is installed (the same ROM): 
     'saved and loaded again: 2D with its extension, the object after it');
 }
 
+// a level loaded with the hook, written once it is gone: 2D as the game then reads it (3 bytes)
+{
+  const lv = loadLevel(hooked, 0x105);
+  lv.objects.push(obj(0x2d, 0x14, 0x13, 0x00, [5, 6]), obj(1, 0x16, 0x14, 0x00));
+  const n = serializeLayer1(clean, lv).length, m = serializeLayer1(hooked, lv).length;
+  const n2d = lv.objects.filter((o) => o.num === 0x2d).length; // (with the one saved above)
+  check(m - n === 2 * n2d && lv.objects.at(-2)?.extension?.join() === '5,6', `written for the ROM it goes into: 2 bytes less per 2D object without the hook (${n}, ${m}), the level unchanged`);
+}
+
 // an object given the extension the ROM reads: 2D with a hook keeps its bytes (missing ones 0), others have none
 {
   const a = obj(0x2d, 0, 0, 0); fitExtension(a, 5);

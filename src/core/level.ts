@@ -5,7 +5,7 @@ import { spriteBankOf, DM16_EXT } from './patches.ts';
 import { PREFAB_EXT } from './prefabs.ts';
 import { COND_MARK, condByte, condOf, type Dm16Cond } from './cdm16.ts';
 import { MAP_SIZE } from './ram.ts';
-import { OBJ_2D, objectLength2D } from './obj2d.ts';
+import { OBJ_2D, objectLength2D, fitExtension } from './obj2d.ts';
 
 // the timer's hundreds per header time (the game's table, read when a level is entered from the overworld)
 export const TIME_TABLE = 0x0584d7;
@@ -620,11 +620,20 @@ export function parseLevelData(rom: Rom, n: number, l1: Uint8Array, l2: Uint8Arr
   };
 }
 
+// the objects with object 2D as this ROM reads it (a level loaded before a hook came or went: written as the game
+// will read it), copies only where that changes them
+function asRomReads(rom: Rom, objects: LevelObject[]): LevelObject[] {
+  const len2d = objectLength2D(rom);
+  const off = (o: LevelObject) => o.num === OBJ_2D && (o.extension?.length ?? 0) !== Math.max(0, len2d - 3);
+  if (!objects.some(off)) return objects;
+  return objects.map((o) => { if (!off(o)) return o; const c = { ...o }; fitExtension(c, len2d); return c; });
+}
+
 export function serializeLayer1(rom: Rom, lv: Level, owners?: number[]): Uint8Array {
   const hdr = encodePrimaryHeader(lv.header);
   if (owners) for (let i = 0; i < 5; i++) owners.push(-1);
   const body = hasObjects(lv.header.mode)
-    ? serializeObjects(lv.objects, lv.exits, isL1Vertical(rom, lv.header.mode), owners, isSized(lv.secondary))
+    ? serializeObjects(asRomReads(rom, lv.objects), lv.exits, isL1Vertical(rom, lv.header.mode), owners, isSized(lv.secondary))
     : new Uint8Array([0xff]);
   const out = new Uint8Array(hdr.length + body.length);
   out.set(hdr);
@@ -636,7 +645,7 @@ export function serializeLayer2(rom: Rom, lv: Level, owners?: number[]): Uint8Ar
   if (!lv.layer2Objects) return null;
   const hdr = lv.layer2Header ?? new Uint8Array(5);
   if (owners) for (let i = 0; i < 5; i++) owners.push(-1);
-  const body = serializeObjects(lv.layer2Objects, [], isL2Vertical(rom, lv.header.mode), owners);
+  const body = serializeObjects(asRomReads(rom, lv.layer2Objects), [], isL2Vertical(rom, lv.header.mode), owners);
   const out = new Uint8Array(5 + body.length);
   out.set(hdr);
   out.set(body, 5);
