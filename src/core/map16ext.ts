@@ -27,6 +27,12 @@
 // Version 6 runs a custom block with the data bank set to the block's bank (the caller's restored after), as
 // GPS does: blocks read their own tables by absolute addresses, e.g. the screen scrolling pipes' turn blocks
 // in the Romhack Races baserom, which never turned Mario without it.
+// Version 7 looks the tile up in the block table before it identifies the caller: nearly no tile has a block, and
+// working out the caller from the stack for every block check of Mario, the sprites, the cape and the fireballs cost
+// ~230 cycles a call (~16 calls and ~21 scanlines a game frame in level 106). The block table is two halves (the
+// addresses' low words, then bank and flags) indexed like the acts-like table; the hook runs at the JML's target
+// without a JSL and skips the table while blocks are off (a BRA, patched to +0 when they are enabled). A tile without
+// a block costs about as much as the acts-like mapping alone.
 
 import { Rom } from './rom.ts';
 import { Asm } from './asm.ts';
@@ -38,6 +44,7 @@ export const EXT_TILES = 0x1000; // tiles $000-$FFF
 export const DEFAULT_ACTS = 0x025; // new tiles act like air
 const MAGIC = [0x53, 0x4d, 0x57, 0x58]; // "SMWX"
 const HEADER = 16; // +4 acts table, +7 graphics table, +10 block table, +13 blocks enabled
+const BLK_HI = EXT_TILES * 2; // the block table: the addresses' low words, then bank and flags, 2 bytes per tile each
 
 const F545 = 0x00f545;
 const HIT_HOOK = 0x029328;
@@ -62,15 +69,52 @@ export function map16Ext(rom: Rom): Map16Ext | null {
 function build(): Asm {
   const a = new Asm();
   a.b(...MAGIC); a.fill(HEADER - 4);
-  a.labels.set('Flag', 13);
-  // $00F545 replacement (entered by JML, M=8 X=8): custom block, map the tile, continue in the vanilla routine
+  // $00F545 replacement (entered by JML, M=8 X=8; A = page, $1693 = low byte, X = the caller's): the tile's custom
+  // block (if any) for the calling context, the acts-like tile, then the vanilla routine. The tile is looked up
+  // first: only a tile with a block identifies its caller (Ctx). The block table operands (BlkTbl+n) and the skip
+  // are patched when blocks are enabled.
   a.label('F545');
-  a.long(0x22, 'Blk'); // JSL Blk
-  a.b(0xa8); // TAY
+  a.b(0xda); // PHX (stack: 1 X, 2-4 the caller's return address)
+  a.b(0xeb, 0xad, 0x93, 0x16, 0xc2, 0x30, 0x29, 0xff, 0x0f, 0x0a, 0xaa); // XBA : LDA $1693 : REP #$30 : AND #$0FFF : ASL : TAX (tile * 2)
+  a.label('opSkip'); a.br(0x80, 'acts'); // BRA acts (BRA +0 with blocks)
+  a.label('opBank'); a.b(0xbf, 0, 0, 0); // LDA.l BlkTbl+BLK_HI,x (bank and flags: 0 = no block)
+  a.br(0xd0, 'custom');
+  a.label('acts');
+  a.long(0xbf, 'ActsTbl'); // LDA.l ActsTbl,x
+  a.b(0xe2, 0x30, 0x8d, 0x93, 0x16, 0xa8, 0xfa, 0xeb); // SEP #$30 : STA $1693 : TAY : PLX : XBA (its page)
   a.br(0xd0, 'f545p1');
-  a.b(0xac, 0x93, 0x16, 0x5c, 0x4b, 0xf5, 0x80); // LDY $1693 JML $80F54B (page 0; the JML at $00F545 covers $00F548)
+  a.b(0x5c, 0x4b, 0xf5, 0x80); // JML $80F54B (page 0, Y = $1693; the JML at $00F545 covers $00F548)
   a.label('f545p1');
   a.b(0x5c, 0x77, 0xf5, 0x80); // JML $80F577 (page 1)
+  a.label('custom');
+  a.b(0x8a, 0x4a, 0xeb, 0xe2, 0x20, 0x48); // TXA : LSR : XBA : SEP #$20 : PHA (the page; stack: 1 page, 2 X)
+  a.abs(0x20, 'Ctx'); // JSR Ctx → A = GPS offset * 3, $FF = none
+  a.b(0xc9, 0xff);
+  a.br(0xf0, 'noctx');
+  a.b(0x48); // PHA (offset; stack: 1 offset, 2 page, 3 X)
+  a.b(0xc9, 30); // CMP #30 (wall offsets need "db $37")
+  a.br(0x90, 'ok');
+  a.label('opFlags'); a.b(0xbf, 0, 0, 0); // LDA.l BlkTbl+BLK_HI+1,x
+  a.b(0x4a); // LSR
+  a.br(0xb0, 'ok');
+  a.b(0x68); // PLA
+  a.label('noctx');
+  a.b(0x68, 0xc2, 0x30); // PLA : REP #$30
+  a.br(0x80, 'acts');
+  a.label('ok');
+  a.b(0x8b, 0x4b); // PHB (the caller's data bank) : PHK
+  a.abs(0xf4, 'back', -1); // PEA.w back-1
+  a.label('opBank2'); a.b(0xbf, 0, 0, 0); // LDA.l BlkTbl+BLK_HI,x
+  a.b(0x48, 0xc2, 0x20, 0xa3, 0x06, 0x29, 0xff, 0x00, 0x18); // PHA : REP #$20 : LDA $06,S : AND #$00FF : CLC
+  a.label('opLo'); a.b(0x7f, 0, 0, 0); // ADC.l BlkTbl,x
+  a.b(0x3a, 0x48, 0xe2, 0x30, 0xa3, 0x09); // DEC : PHA : SEP #$30 : LDA $09,S (page)
+  a.long(0x22, 'Acts'); // JSL Acts
+  a.b(0xa8, 0xa3, 0x03, 0x48, 0xab); // TAY : LDA $03,S : PHA : PLB (the data bank: the block's, as GPS sets it)
+  a.b(0xa3, 0x0a, 0xaa, 0x6b); // LDA $0A,S : TAX : RTL (→ block code)
+  a.label('back');
+  a.b(0xe2, 0x30, 0xab, 0x68, 0x68, 0xfa, 0x98); // SEP #$30 : PLB : PLA : PLA : PLX : TYA (the acts-like page, the block may change it)
+  a.br(0xd0, 'f545p1');
+  a.b(0xac, 0x93, 0x16, 0x5c, 0x4b, 0xf5, 0x80); // LDY $1693 : JML $80F54B
 
   // Acts: A (8 bit) = page, $1693 = low byte → acts-like tile; A = its page, Z set accordingly.
   // Keeps X, Y, D, DB and the register widths.
@@ -92,52 +136,12 @@ function build(): Asm {
   a.label('hit0');
   a.b(0x6b); // RTL
 
-  // Blk: like Acts, but first runs the custom block of the tile (if any) for the calling context.
-  // The table operands (BlkTbl+n) are patched when blocks are enabled.
-  a.label('Blk');
-  a.b(0x48); // PHA
-  a.long(0xaf, 'Flag'); // LDA.l Flag
-  a.b(0xd0, 0x04, 0x68); // BNE +4 : PLA
-  a.abs(0x4c, 'Acts'); // JMP Acts
-  a.b(0x68, 0xda, 0x48); // PLA : PHX : PHA
-  a.abs(0x20, 'Ctx'); // JSR Ctx → A = GPS offset * 3, $FF = none
-  a.b(0xc9, 0xff);
-  a.br(0xf0, 'plain');
-  a.b(0x48); // PHA (offset)
-  a.b(0xc2, 0x30, 0xa3, 0x02, 0x29, 0x0f, 0x00, 0xeb); // REP #$30 : LDA $02,S : AND #$000F : XBA
-  a.b(0xe2, 0x20, 0xad, 0x93, 0x16, 0xc2, 0x20); // SEP #$20 : LDA $1693 : REP #$20 (A = tile)
-  a.b(0x0a, 0x0a, 0xaa, 0xe2, 0x20); // ASL : ASL : TAX : SEP #$20
-  a.label('opBank'); a.b(0xbf, 0, 0, 0); // LDA.l BlkTbl+2,x
-  a.br(0xf0, 'noptr');
-  a.b(0xa3, 0x01, 0xc9, 30); // LDA $01,S : CMP #30 (wall offsets need "db $37")
-  a.br(0x90, 'ok');
-  a.label('opFlags'); a.b(0xbf, 0, 0, 0); // LDA.l BlkTbl+3,x
-  a.b(0x4a); // LSR
-  a.br(0x90, 'noptr');
-  a.label('ok');
-  a.b(0x8b, 0x4b); // PHB (the caller's data bank) : PHK
-  a.abs(0xf4, 'back', -1); // PEA.w back-1
-  a.label('opBank2'); a.b(0xbf, 0, 0, 0); // LDA.l BlkTbl+2,x
-  a.b(0x48, 0xc2, 0x20, 0xa3, 0x06, 0x29, 0xff, 0x00, 0x18); // PHA : REP #$20 : LDA $06,S : AND #$00FF : CLC
-  a.label('opLo'); a.b(0x7f, 0, 0, 0); // ADC.l BlkTbl,x
-  a.b(0x3a, 0x48, 0xe2, 0x30, 0xa3, 0x09); // DEC : PHA : SEP #$30 : LDA $09,S (page)
-  a.long(0x22, 'Acts'); // JSL Acts
-  a.b(0xa8, 0xa3, 0x03, 0x48, 0xab); // TAY : LDA $03,S : PHA : PLB (the data bank: the block's, as GPS sets it)
-  a.b(0xa3, 0x0a, 0xaa, 0x6b); // LDA $0A,S : TAX : RTL (→ block code)
-  a.label('back');
-  a.b(0xe2, 0x30, 0xab, 0x68, 0x68, 0xfa, 0x98, 0x6b); // SEP #$30 : PLB : PLA : PLA : PLX : TYA : RTL
-  a.label('noptr');
-  a.b(0xe2, 0x30, 0x68); // SEP #$30 : PLA
-  a.label('plain');
-  a.b(0x68, 0xfa); // PLA : PLX
-  a.abs(0x4c, 'Acts'); // JMP Acts
-
-  // Ctx (JSR from Blk; stack: 3 page, 4 X, 5-7 Blk return, 8-10 return address of the $00F545 caller)
+  // Ctx (JSR from F545, M=8 X=16; stack: 3 page, 4 X, 5-7 the return address of the $00F545 caller)
   const ret = (v: number) => a.b(0xa9, v, 0x60); // LDA #v : RTS
   a.label('Ctx');
-  a.b(0xa3, 0x0a, 0x29, 0x7f); a.br(0xd0, 'cNotMario'); // LDA $0A,S (bank) : AND #$7F : BNE
-  a.b(0xa3, 0x09, 0xc9, 0xf4); a.br(0xd0, 'cNone'); // $00F4E0: Mario
-  a.b(0x8a, 0xc9, 0x62); a.br(0xb0, 'cWall'); // TXA : CMP #$62 : BCS wall running
+  a.b(0xa3, 0x07, 0x29, 0x7f); a.br(0xd0, 'cNotMario'); // LDA $07,S (bank) : AND #$7F : BNE
+  a.b(0xa3, 0x06, 0xc9, 0xf4); a.br(0xd0, 'cNone'); // $00F4E0: Mario
+  a.b(0xa3, 0x04, 0xc9, 0x62); a.br(0xb0, 'cWall'); // LDA $04,S (X) : CMP #$62 : BCS wall running
   a.b(0x38, 0xe9, 0x02); // SEC : SBC #$02
   a.label('cMod'); a.b(0xc9, 0x0c); a.br(0x90, 'cPt'); a.b(0xe9, 0x0c); a.br(0x80, 'cMod'); // point = (X-2) mod 12
   a.label('cPt'); a.b(0xc9, 0x00); a.br(0xf0, 'cBody');
@@ -151,11 +155,11 @@ function build(): Asm {
   a.label('cWall'); a.b(0xc9, 0x66); a.br(0xf0, 'cWBody'); a.b(0xc9, 0x6c); a.br(0xf0, 'cWBody'); ret(10 * 3); // WallFeet
   a.label('cWBody'); ret(11 * 3); // WallBody
   a.label('cNotMario'); a.b(0xc9, 0x01); a.br(0xd0, 'cB2');
-  a.b(0xa3, 0x09, 0xc9, 0x95); a.br(0xd0, 'cNone'); // $019536: sprites
+  a.b(0xa3, 0x06, 0xc9, 0x95); a.br(0xd0, 'cNone'); // $019536: sprites
   a.b(0xa5, 0x0f, 0xc9, 0x02); a.br(0x90, 'cSprH'); ret(3 * 3); // SpriteV (floor/ceiling)
   a.label('cSprH'); ret(4 * 3); // SpriteH (walls)
   a.label('cB2'); a.b(0xc9, 0x02); a.br(0xd0, 'cNone');
-  a.b(0xa3, 0x09, 0xc9, 0x96); a.br(0xf0, 'cCape'); a.b(0xc9, 0xa6); a.br(0xf0, 'cFire');
+  a.b(0xa3, 0x06, 0xc9, 0x96); a.br(0xf0, 'cCape'); a.b(0xc9, 0xa6); a.br(0xf0, 'cFire');
   a.label('cNone'); ret(0xff);
   a.label('cCape'); ret(5 * 3); // MarioCape
   a.label('cFire'); ret(6 * 3); // MarioFireball
@@ -275,7 +279,8 @@ function writeCode(rom: Rom, gfx: number, acts: Uint8Array): number {
 function linkBlocks(rom: Rom, base: number, table: number): void {
   const a = build();
   const op = (label: string, add: number) => rom.w24(a.addrOf(label, base) + 1, table + add);
-  op('opBank', 2); op('opFlags', 3); op('opBank2', 2); op('opLo', 0);
+  op('opBank', BLK_HI); op('opFlags', BLK_HI + 1); op('opBank2', BLK_HI); op('opLo', 0);
+  rom.w8(a.addrOf('opSkip', base) + 1, 0);
   rom.w24(base + 10, table);
   rom.w8(base + 13, 1);
 }
@@ -287,21 +292,23 @@ export const BLOCK_OFFSETS = ['MarioBelow', 'MarioAbove', 'MarioSide', 'SpriteV'
 export function enableBlocks(rom: Rom, blank: number[]): Map16Ext {
   const ex = installMap16Ext(rom, blank);
   if (ex.blocks) return ex;
-  const table = rom.allocWrite(new Uint8Array(EXT_TILES * 4));
+  const table = rom.allocWrite(new Uint8Array(BLK_HI * 2));
+  if ((table & 0xffff) + BLK_HI * 2 > 0x10000) throw new Error('Custom block table crosses a bank boundary');
   linkBlocks(rom, ex.base, table);
   return map16Ext(rom)!;
 }
 // address of the block's JMP table (after "db $42/$37") and whether it has the wall offsets; 0 = none
 const ext = (rom: Rom) => map16Ext(rom) ?? missingPatch('Extended Map16 (SMWX)');
 export function blockOf(rom: Rom, t: number): { addr: number; wall: boolean } | null {
-  const e = ext(rom).blocks + (t & 0xfff) * 4;
-  const addr = rom.r24(e);
-  return addr ? { addr, wall: (rom.r8(e + 3) & 1) !== 0 } : null;
+  const e = ext(rom).blocks + (t & 0xfff) * 2;
+  const addr = rom.r16(e) | (rom.r8(e + BLK_HI) << 16);
+  return addr ? { addr, wall: (rom.r8(e + BLK_HI + 1) & 1) !== 0 } : null;
 }
 export function setBlock(rom: Rom, t: number, addr: number, wall: boolean): void {
-  const e = ext(rom).blocks + (t & 0xfff) * 4;
-  rom.w24(e, addr);
-  rom.w8(e + 3, addr && wall ? 1 : 0);
+  const e = ext(rom).blocks + (t & 0xfff) * 2;
+  rom.w16(e, addr & 0xffff);
+  rom.w8(e + BLK_HI, addr >> 16);
+  rom.w8(e + BLK_HI + 1, addr && wall ? 1 : 0);
 }
 
 export function actsLike(rom: Rom, t: number): number {

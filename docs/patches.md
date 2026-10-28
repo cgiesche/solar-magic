@@ -334,7 +334,7 @@ patch takes precedence. Every ROM the editor opens has all editor patches, so al
 | `!SMWE_BG_MAP16_GFX` | 8 bytes (4 tile words) per BG tile 200–FFF (SMWH) |
 | `!SMWE_ACTS_LIKE` | `$1000` × 2 bytes: "acts like" of Map16 tiles 000–FFF; Lunar Magic's pointers `$06F624`/`$06F63A` point here too, so code reading acts-like the Lunar Magic way works |
 | `!SMWE_MAP16_GFX` | 8 bytes (4 tile words) per tile 200–FFF |
-| `!SMWE_BLOCKS` | `$1000` × 4 bytes: custom block per tile (address of the JMP table, flags) |
+| `!SMWE_BLOCKS` | custom block per tile: `$1000` × 2 bytes, the low word of the JMP table's address, then `$1000` × 2 bytes, its bank and the flags (both 0 = no block) |
 | `%smwe_require(X)` | aborts with a message if `!SMWE_X` is 0, e.g. `%smwe_require(MAP16X)` (kept for older patches; always passes) |
 
 ## UberASM

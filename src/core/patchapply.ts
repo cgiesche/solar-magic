@@ -52,7 +52,7 @@ export function editorInclude(rom: Rom): string {
     `!SMWE_MAP16X = ${x ? 1 : 0}`,
     `!SMWE_ACTS_LIKE = ${h(x?.acts ?? 0)} ; $1000 x 2 bytes: acts like of Map16 tiles 000-FFF`,
     `!SMWE_MAP16_GFX = ${h(x?.gfx ?? 0)} ; 8 bytes (4 tile words) per tile 200-FFF`,
-    `!SMWE_BLOCKS = ${h(x?.blocks ?? 0)} ; $1000 x 4 bytes: custom block per tile (JMP table address, flags)`,
+    `!SMWE_BLOCKS = ${h(x?.blocks ?? 0)} ; custom block per tile: $1000 x 2 bytes JMP table address low word, then $1000 x 2 bytes bank, flags`,
     `!SMWE_BG_MAP16_GFX = ${h(bx?.gfx ?? 0)} ; 8 bytes (4 tile words) per BG tile 200-FFF, 0 = no extended BG Map16`,
     'macro smwe_require(what)',
     '  if !SMWE_<what> == 0',

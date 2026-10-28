@@ -1,15 +1,17 @@
 // Test play's lag meter (src/core/playlog.ts): the CPU's load in each frame (scanlines from the NMI until the
 // game waits for the next one) and lag frames – the game's frame not done before the next NMI – as events with
-// Mario's position. Vanilla levels played without lag; eight Wigglers slow the game down where they are; the
-// frames the game spends loading (after a death) are no lag of the level.
+// Mario's position. Vanilla levels played without lag, on the clean game and on the ROM as the editor opens it
+// (its patches' hooks, e.g. the block interaction's, cost no lag frame; level 106 lags there until the emulator times
+// FastROM, #153); eight Wigglers slow the game down where they are; the frames the game spends loading (after a
+// death) are no lag of the level.
 // node tools/testlagmeter.ts
-import { readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { levelTranslevel } from '../src/core/level.ts';
 import { LINES_PER_FRAME, type Snes } from '../src/core/snes.ts';
 import { GM, RAM, marioX, marioY } from '../src/core/ram.ts';
 import { PlayLog, cpuLoad, LAG } from '../src/core/playlog.ts';
+import { cleanImage, editorImage } from './fixture.ts';
 
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
@@ -45,9 +47,10 @@ const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL
 }
 
 // ---------- the game ----------
-const rom = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
-const emu = new LevelEmulator(rom);
-emu.boot();
+// the game played: the clean one, at the end the ROM as the editor opens it
+let rom = new Rom(cleanImage()), emu = new LevelEmulator(rom);
+const open = (image: Uint8Array) => { rom = new Rom(image); emu = new LevelEmulator(rom); emu.boot(); };
+open(cleanImage());
 // k frames walking right (running, jumping every 40 frames), until the level ends (stop); the log of them
 function play(k: number, stop: boolean, each?: (f: number) => void): PlayLog {
   const s = emu.snes, log = new PlayLog(k);
@@ -68,13 +71,16 @@ const inGame = (lv: number) => {
   emu.startGame(tl);
   emu.loadInGame(lv, tl);
 };
-for (const lv of [0x105, 0x106, 0x10b, 0x1]) {
-  inGame(lv);
-  const log = play(900, true), busy = log.history.map((f) => f.busy).filter((b) => b !== LAG);
-  check(log.lagFrames === 0 && log.history.length > 300, `level ${lv.toString(16)} played: no lag frame (${log.lagFrames} in ${log.history.length} frames)`);
-  check(busy.every((b) => b > 0 && b < LINES_PER_FRAME) && Math.max(...busy) > Math.min(...busy),
-    `level ${lv.toString(16)}: a load in every frame, it varies (${Math.min(...busy)}–${Math.max(...busy)} of ${LINES_PER_FRAME} lines)`);
-}
+const vanillaLevels = (what: string) => {
+  for (const lv of [0x105, 0x106, 0x10b, 0x1]) {
+    inGame(lv);
+    const log = play(900, true), busy = log.history.map((f) => f.busy).filter((b) => b !== LAG);
+    check(log.lagFrames === 0 && log.history.length > 300, `${what}: level ${lv.toString(16)} played: no lag frame (${log.lagFrames} in ${log.history.length} frames)`);
+    check(busy.every((b) => b > 0 && b < LINES_PER_FRAME) && Math.max(...busy) > Math.min(...busy),
+      `${what}: level ${lv.toString(16)}: a load in every frame, it varies (${Math.min(...busy)}–${Math.max(...busy)} of ${LINES_PER_FRAME} lines)`);
+  }
+};
+vanillaLevels('the clean game');
 {
   // eight Wigglers (sprite 86) in a row ahead in level 105, at tile row 14 (level sprite data: header byte, then
   // per sprite yyyy--sY, xxxxssss, number)
@@ -94,6 +100,9 @@ for (const lv of [0x105, 0x106, 0x10b, 0x1]) {
   check(log.lagFrames === 0, `a death and the overworld loaded after it: no lag frame (${log.lagFrames})`);
   check(log.history.some((f) => f.busy === LINES_PER_FRAME), 'loading frames are shown fully busy');
 }
+
+open(await editorImage());
+vanillaLevels('the editor ROM');
 
 if (bad) { console.log(`${bad} failed`); process.exit(1); }
 console.log('all ok');
