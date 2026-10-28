@@ -226,3 +226,8 @@ export function setMarioPos(w: Uint8Array, x: number, y: number): void {
   set16(w, RAM.marioX, x); set16(w, RAM.marioXFrame, x);
   set16(w, RAM.marioY, y); set16(w, RAM.marioYFrame, y);
 }
+// Mario at (x, y), standing still and not hurt by what he touches (for the next frame)
+export function standMario(w: Uint8Array, x: number, y: number): void {
+  setMarioPos(w, x, y);
+  w[RAM.marioSpeedX] = 0; w[RAM.marioSpeedY] = 0; w[RAM.hurtTimer] = 0x40;
+}
