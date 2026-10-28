@@ -20,7 +20,7 @@ import { objectLength2D, fitExtension } from '../src/core/obj2d.ts';
 import { saveLevel } from '../src/core/save.ts';
 import { parseLmObjects, sampleLevel, mwlSections } from '../src/core/mwl.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
-import { objectEffects } from '../src/core/objeffects.ts';
+import { effectLoad, ramEffect } from '../src/core/objeffects.ts';
 import { renderObjectThumbs } from '../src/ui/thumbs.ts';
 import { editorImage } from './fixture.ts';
 
@@ -123,7 +123,8 @@ check(objectLength2D(hooked) === 5, `once the hook is installed (the same ROM): 
   check(drawn.map((t) => t.key).join() === 'c2' && drawn[0].m16.join() === '293', `thumbnails: custom 02 draws tile 125 (${drawn.map((t) => t.key + ':' + t.m16).join(' ')})`);
   check(fxOnly.map((t) => t.key).join() === 'c1' && fxOnly[0].w === 0, `listed without a picture: custom 01, which changes RAM (${fxOnly.map((t) => t.key)})`);
   const quiet = [0, 1, 3].map((n) => obj(0x2d, 0, 0, 0, [n, 0]));
-  const fx = objectEffects(emu, lv, quiet);
+  const base = effectLoad(emu, lv, []).wram;
+  const fx = quiet.map((o) => ramEffect(base, effectLoad(emu, lv, [o]).wram));
   check(fx.join() === ',sets $7FA400 bit 0,', `effects: custom 01 sets a flag, 00 and 03 nothing (${fx})`);
 }
 

@@ -2,8 +2,8 @@
 // background by App.objectThumbs).
 
 import type { Rom } from '../core/rom.ts';
-import { OV_L1, type LevelEmulator, type LevelRender } from '../core/levelemu.ts';
-import { encodePrimaryHeader, serializeObjects, type Level, type LevelObject, newUid, L2_PTRS } from '../core/level.ts';
+import type { LevelEmulator, LevelRender } from '../core/levelemu.ts';
+import { type Level, type LevelObject, newUid } from '../core/level.ts';
 import { renderLevel, layerGeom } from '../core/render.ts';
 import { MAP_BASE, map16Tile } from '../core/ram.ts';
 import { objectVariant, type ObjKind } from '../core/objkinds.ts';
@@ -108,21 +108,7 @@ export function* objectThumbsJob(rom: Rom, emu: LevelEmulator, level: Level, spe
     });
   };
   const render = (batch: ObjSpec[]): void => {
-    const objs = batch.map(objOf);
-    const hdr = { ...level.header, screens: 32, mode: 0 };
-    const owners: number[] = [-1, -1, -1, -1, -1];
-    const body = serializeObjects(objs, [], false, owners);
-    const l1 = new Uint8Array(5 + body.length);
-    l1.set(encodePrimaryHeader(hdr));
-    l1.set(body, 5);
-    const byteOwner = new Int32Array(0x10000).fill(-1);
-    owners.forEach((o, i) => (byteOwner[OV_L1 + i] = o));
-    const r = emu.load(level.number, {
-      layer1: l1,
-      layer2Pointer: level.layer2Objects ? rom.r24(L2_PTRS + 0x105 * 3) : level.layer2Pointer,
-      sprites: new Uint8Array([0, 0xff]),
-      byteOwner,
-    });
+    const r = effectLoad(emu, level, batch.map(objOf), true);
     if (!r.ok) {
       if (batch.length > 1) { render(batch.slice(0, batch.length >> 1)); render(batch.slice(batch.length >> 1)); }
       return;

@@ -194,6 +194,8 @@ export function set16(w: Uint8Array, lo: number, v: number, hi = lo + 1): void {
   w[lo] = v & 0xff; w[hi] = (v >> 8) & 0xff;
 }
 
+// a WRAM offset as the game's code names the address: low RAM by its mirror, else with the bank
+export const wramName = (i: number): string => '$' + (i < 0x2000 ? i.toString(16).toUpperCase().padStart(4, '0') : (0x7e0000 + i).toString(16).toUpperCase());
 export const map16Tile = (w: Uint8Array, a: number) => get16(w, a, a + MAP_HI);
 export const bgTile = (w: Uint8Array, o: number) => get16(w, RAM.bgMapLo + o, RAM.bgMapHi + o);
 export const map16Pointer = (w: Uint8Array, t: number) => get16(w, RAM.map16Pointers + t * 2);

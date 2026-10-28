@@ -136,6 +136,7 @@ const extended = (): ObjThumb[] => renderObjectThumbs(rom, emu, loadLevel(rom, 0
 }
 
 // the baserom removed: its names are gone; 98–DF stay listed, now as what the game's own code draws for them
+// (door parts from $0DA6D1's table; #110 may hide those, then this check changes)
 {
   const pkg = listPackages(rom).find((x) => x.name === 'baserom')!;
   await removePackage(rom, pkg.id, blank);

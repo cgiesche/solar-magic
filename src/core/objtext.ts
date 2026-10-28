@@ -13,11 +13,10 @@
 import type { Rom } from './rom.ts';
 import { listPackages } from './pkgreg.ts';
 import { hex2 } from './names.ts';
+import { OBJ_2D } from './obj2d.ts';
 
 // what a package's side files say (as stored in its record): extended number → name, tipKey → tooltip
 export interface ObjectText { names: [number, string][]; tips: [string, string][] }
-
-const OBJ_2D = 0x2d;
 
 // the object a tooltip belongs to: an extended object by its number, object 2D by its custom number (its 4th
 // byte), the others by their number
