@@ -7,7 +7,8 @@
 // Changed by Solar Magic (marked [Solar Magic]): the precision timer (trigger 0F) – a slot with it shares the
 // counter of the first slot of its 8 and a rotation with it always runs, as Lunar Magic's help describes
 // (level_ex20.htm); Kobo's runs it like "always". The game's animated tiles are called in the fast ROM bank $85
-// (the editor's ROM is FastROM).
+// (the editor's ROM is FastROM). A frame's work is Kobo's at less cost: the settings byte and each list's
+// address read once, the scratch kept only as far as it is used, the NMI walks only the uploads queued (#151).
 // Only this file is under the MPL; it is used as Asar source by ../exanim.ts.
 
 export const KOBO_COMMIT = '395083bbf7a8664d7c970ce465a5fb418002ab91';
@@ -76,9 +77,10 @@ incsrc "memory.asm"
 !Legacy = $7FC004
 !LastCall = $7FC003             ; the $14 of the last frame
 !LastFrame = $7FC019            ; the $14 the lists last ran for
+!QueueEnd = $7FC01A             ; 16-bit, the high byte 0: the queue's uploads end here, from !Queue [Solar Magic]
 !Manual = $7FC070
 !Counters = $7FC080             ; level slots, the global ones $20 on
-!Queue = $7FC0C0                ; 8 uploads of 7 bytes (see queue)
+!Queue = $7FC0C0                ; up to 8 uploads of 7 bytes (see queue) [Solar Magic]
 !OneShot = $7FC0F8
 !Custom = $7FC0FC
 
@@ -90,7 +92,7 @@ incsrc "memory.asm"
 !Slot = $08                     ; 16-bit: the slot's entry, from !List
 !Index = $0A                    ; the slot's number
 !Counter = $0B                  ; its counter's index from !Counters
-!Entry = $0C                    ; its upload's offset from !Queue
+!Entry = $0C                    ; the next upload's offset from !Queue [Solar Magic]
 !Frames = $0D                   ; its frames (the frames less one, plus one)
 !Temp = $0E                     ; 16-bit
 
@@ -251,24 +253,25 @@ global_address:
     CLC
     RTS
 
-; !List = the level's list; carry clear for none. A/X/Y 16-bit.
+; !List = the level's list; carry clear for none. A/X/Y 16-bit. Of the
+; scratch only !List is used. [Solar Magic]
 level_address:
-    LDA.l level_list            ; the table, wherever Lunar Magic keeps it
-    STA !Source
-    LDA.l level_list+1
-    STA !Source+1
     LDA.l !Level
     AND #$01FF
     STA !List
-    ASL A
-    CLC
+    ASL A                       ; (carry clear)
     ADC !List
     TAY
-    LDA [!Source],y
+    LDA.l level_list            ; the table, wherever Lunar Magic keeps it
     STA !List
-    INY
-    LDA [!Source],y
+    LDA.l level_list+1
     STA !List+1
+    LDA [!List],y
+    TAX
+    INY
+    LDA [!List],y
+    STA !List+1
+    STX !List
     AND #$00FF                  ; the middle byte: 0 for none
     BEQ .none
     SEC
@@ -302,16 +305,9 @@ init_triggers:
     BNE -
     RTS
 
-clear_queue:                    ; A 16-bit
+clear_queue:                    ; A 16-bit [Solar Magic]
     LDA #$0000
-    STA.l !Queue
-    STA.l !Queue+7
-    STA.l !Queue+14
-    STA.l !Queue+21
-    STA.l !Queue+28
-    STA.l !Queue+35
-    STA.l !Queue+42
-    STA.l !Queue+49
+    STA.l !QueueEnd
     RTS
 
 ; ---------------------------------------------------------------------------
@@ -325,58 +321,77 @@ clear_memory:
     DEX
     BPL -
     STA.l !Legacy-1             ; $7FC003-$7FC004
+    STA.l !QueueEnd             ; [Solar Magic]
     LDX #$1FFE                  ; what the hook replaces
     RTL
 
 ; ---------------------------------------------------------------------------
 ; A frame of the animation, where the game runs its own. A/X/Y 8-bit.
+; [Solar Magic] The same work as Kobo's, cheaper: the settings byte read
+; once, the scratch kept only as far as it is used ($00-$03 for the
+; game's tiles and the lists' addresses, the rest once a list runs), each
+; list's address looked up once.
 frame:
     PHP
-    JSR save_scratch
-    REP #$30
-    STZ !Frames                 ; bit 0: a list with slots runs
-    JSR settings
-    AND #$10
-    BNE +
-    REP #$20
-    JSR global_address
-    BCC +
     SEP #$20
-    LDA [!List]
-    BEQ +
-    LDA #$01
-    TSB !Frames
-+   JSR settings
-    AND #$20
-    BNE +
-    REP #$20
-    JSR level_address
-    BCC +
-    SEP #$20
-    LDA [!List]
-    BEQ +
-    LDA #$01
-    TSB !Frames
-+   SEP #$20
     LDA !EffFrame
     CMP.l !LastCall
-    BEQ .done                   ; run for this $14 already (the game stopped
-                                ; it): the game's tiles too
-    STA.l !LastCall
-    JSR settings
+    BNE +
+    PLP                         ; run for this $14 already (the game stopped
+    RTL                         ; it): the game's tiles too
++   STA.l !LastCall
+    REP #$30
+    PEI ($02)                   ; the direct page scratch, kept for the game's
+    PEI ($00)                   ; code around the hook (see save_scratch)
+    LDA.l !Level
+    AND #$01FF
+    TAX
+    SEP #$20
+    LDA.l !Settings,x
+    PHA                         ; the level's settings, at 1,s
     AND #$40
     BNE +
     SEP #$30
-    JSL $85BB39                 ; the game's animated tiles (in FastROM's bank) [Solar Magic]
+    JSL $85BB39                 ; the game's animated tiles (in FastROM's bank)
+    ; Does a list with slots run? !List the first that does.
 +   SEP #$20
-    REP #$10
-    LDA !Frames
+    LDA 1,s
+    AND #$10
+    BNE .no_global
+    REP #$20
+    JSR global_address
+    BCC .no_global
+    SEP #$20
+    LDA [!List]
+    BNE .run                    ; the global list, then the level's
+.no_global:
+    SEP #$20
+    LDA 1,s
+    ORA #$10                    ; (the settings' copy: no global list to run)
+    STA 1,s
+    AND #$20
+    BNE .done
+    REP #$30
+    JSR level_address
+    BCC .done
+    SEP #$20
+    LDA [!List]
     BEQ .done                   ; neither list
+.run:
+    REP #$30
+    PEI ($0E)                   ; the rest of the scratch
+    PEI ($0C)
+    PEI ($0A)
+    PEI ($08)
+    PEI ($06)
+    PEI ($04)
+    SEP #$20
     LDA !EffFrame
     STA.l !LastFrame
     REP #$20
     JSR clear_queue
     SEP #$20
+    STZ !Entry
     LDA !EffFrame
     AND #$07
     BNE +
@@ -384,29 +399,45 @@ frame:
     INC A
     AND #$1F
     STA.l !Legacy
-+   JSR settings
++   LDA 13,s                    ; the settings (below the six PEIs)
     AND #$10
-    BNE +
-    REP #$20
-    JSR global_address
-    BCC +
-    SEP #$20
+    BNE .level                  ; !List the level's list
     LDA #$20
     STA !Counter
-    LDA #$00
-    JSR run_list
-+   JSR settings
+    JSR run_list                ; !List the global list
+    SEP #$20
+    LDA 13,s
     AND #$20
-    BNE .done
-    REP #$20
+    BNE .restore
+    REP #$30
     JSR level_address
-    BCC .done
+    BCC .restore
+.level:
     SEP #$20
     STZ !Counter
-    LDA #$1C                    ; the level's uploads from the fifth on
-    JSR run_list
+    JSR run_list                ; the level's uploads after the global ones
+.restore:
+    REP #$30
+    PLX
+    STX $04
+    PLX
+    STX $06
+    PLX
+    STX $08
+    PLX
+    STX $0A
+    PLX
+    STX $0C
+    PLX
+    STX $0E
 .done:
-    JSR restore_scratch
+    SEP #$20
+    PLA
+    REP #$30
+    PLX
+    STX $00
+    PLX
+    STX $02
     PLP
     RTL
 
@@ -430,20 +461,9 @@ setup_frame:
 +   PLP
     JML frame
 
-; A = the level's settings byte; A 8-bit and X/Y 16-bit after.
-settings:
-    REP #$30
-    LDA.l !Level
-    AND #$01FF
-    TAX
-    SEP #$20
-    LDA.l !Settings,x
-    RTS
-
-; The list at !List, from slot $14 mod 8 in steps of 8. A = the first
-; upload's offset. A 8-bit, X/Y 16-bit.
+; The list at !List, from slot $14 mod 8 in steps of 8, its uploads queued
+; from !Entry on [Solar Magic]. A 8-bit, X/Y 16-bit.
 run_list:
-    STA !Entry
     REP #$20
     LDY #$0006
     LDA [!List],y               ; the manual triggers set: a frame each
@@ -478,10 +498,6 @@ run_list:
     SEP #$20
     JSR run_slot
 +   SEP #$20
-    LDA !Entry
-    CLC
-    ADC #$07
-    STA !Entry
     LDA !Index
     CLC
     ADC #$08
@@ -776,7 +792,7 @@ tiles:
     SEP #$20
     LDA !Source+2
     STA.l !Queue+6,x
-    RTS
+    JMP queued                  ; [Solar Magic]
 
 ; Bytes per upload by type (01-12); bit 14: two rows, this many bytes each,
 ; the second $100 words below.
@@ -910,6 +926,12 @@ colours_queue:
     SEP #$20
     LDA !Source+2
     STA.l !Queue+6,x
+queued:                         ; the upload at !Entry queued; A 8-bit [Solar Magic]
+    LDA !Entry
+    CLC
+    ADC #$07
+    STA !Entry
+    STA.l !QueueEnd
     RTS
 
 ; ---------------------------------------------------------------------------
@@ -1146,20 +1168,23 @@ game_flashing:
     REP #$10
     RTS
 
-; The queued uploads: 7 bytes each, a 16-bit byte count (0 for none; bit
-; 15 CGRAM, the destination a colour; bit 14 two rows, the second $100 words
-; on), the destination, and the source. They stay queued until the next
-; frame of the animation replaces them, so an NMI without one (the one
-; after the level's setup, which uploads the palette in between, or a
-; paused frame's) makes them again, as it does the game's animated tiles.
+; The queued uploads, up to !QueueEnd [Solar Magic]: 7 bytes each, a 16-bit
+; byte count (bit 15 CGRAM, the destination a colour; bit 14 two rows, the
+; second $100 words on), the destination, and the source. They stay queued
+; until the next frame of the animation replaces them, so an NMI without
+; one (the one after the level's setup, which uploads the palette in
+; between, or a paused frame's) makes them again, as it does the game's
+; animated tiles.
 queue:
     REP #$30
     LDX #$0000
 .next:
-    LDA.l !Queue,x
-    BNE +
-    JMP .skip
-+   BMI .cgram
+    TXA
+    CMP.l !QueueEnd
+    BCC +
+    RTS
++   LDA.l !Queue,x
+    BMI .cgram
     AND #$3FFF
     STA $4325
     LDA.l !Queue+2,x
@@ -1216,10 +1241,7 @@ queue:
     CLC
     ADC #$0007
     TAX
-    CPX #$0038
-    BEQ +
     JMP .next
-+   RTS
 `;
 
 export const MEMORY_ASM = `; Where the ROM maps and where the game keeps its variables, for every patch

@@ -84,6 +84,7 @@ export const RAM = {
   screenExitLo: 0x19b8, screenExitHi: 0x19d8, // per screen
   useSecondaryExit: 0x1b93,
   backdrop: 0x0701, // 16-bit color
+  palettes: 0x0701, palettesEnd: 0x0b05, // the back area color, the palette, their copies the game fades
   map16Pointers: 0x0fbe, // 16-bit per FG Map16 tile: bank $0D address of its 8x8 tiles
   bgMapLo: 0xb900, bgMapHi: 0xbd00, // layer 2 background tilemap, low and high bytes
 
