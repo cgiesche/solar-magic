@@ -14,11 +14,10 @@ export function snesToPc(addr: number): number {
   const bank = (addr >> 16) & 0x7f;
   return (bank << 15) | (addr & 0x7fff);
 }
+// the FastROM mirror ($80 and up): the ROM's code runs there (CONTEXT.md "FastROM"), and offsets beyond
+// banks $3F are reachable only there ($7E/$7F are WRAM)
 export function pcToSnes(off: number): number {
-  const bank = off >> 15;
-  let a = (bank << 16) | 0x8000 | (off & 0x7fff);
-  if (bank >= 0x40) a |= 0x800000; // use FastROM mirror for banks beyond $3F
-  return a;
+  return 0x800000 | ((off >> 15) << 16) | 0x8000 | (off & 0x7fff);
 }
 
 // project file: ROM file, then a zip of the editor data, then this footer (magic, zip length, version)

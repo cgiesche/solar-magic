@@ -43,7 +43,7 @@ const EXTENDED = `Small door|Invisible 1-Up ? block|Invisible note block (unused
 const EDITOR_EXTENDED: Record<number, string> = { 0x04: 'Prefab', 0x05: 'Direct Map16 (editor patch)' };
 
 // The object table the object loader uses for objects in tileset ts: the SNES address of the entry of object
-// 01, null when not found. A level of that tileset with objects 01–0D is loaded; the table is where the
+// 01 (in the slow banks, as the game's tables are known), null when not found. A level of that tileset with objects 01–0D is loaded; the table is where the
 // load reads object n's entry at 3 × (n − 1) bytes from it (the same address for all of them).
 const PROBE_LEVEL = 0x105; // the level loaded (its own objects and sprites left out)
 const PROBE_OBJECTS = 13; // 01–0D: one routine of the game for all of them, which does not crash on size 0
@@ -64,7 +64,7 @@ export function objectTable(emu: LevelEmulator, ts: number): { result: number | 
     // per object the ROM offsets it read, less 3 × (n − 1): the table's start is in all of them
     const starts = Array.from({ length: PROBE_OBJECTS }, (_, i) => new Set([...r.trace?.reads.get(i) ?? []].map((v) => (v % 0x800000) - 3 * i)));
     const common = [...starts[0]].filter((o) => starts.every((s) => s.has(o)));
-    return common.length ? pcToSnes(Math.min(...common)) : null;
+    return common.length ? pcToSnes(Math.min(...common)) & 0x7fffff : null;
   });
 }
 
