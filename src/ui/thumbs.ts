@@ -69,7 +69,7 @@ export function renderObjectThumbs(rom: Rom, emu: LevelEmulator, level: Level, s
 // in batches of 32 test levels, a step each; a batch whose load fails (some objects together break the game,
 // like two of tileset 7's object 33) is rendered in halves, an object that fails alone gets no thumbnail. Object
 // 2D's custom numbers that draw nothing are probed for an effect then (#104's rule: listed are the objects that
-// draw tiles or do something)
+// draw tiles or do something), and drawn alone when they do something
 export function* objectThumbsJob(rom: Rom, emu: LevelEmulator, level: Level, specs: ObjSpec[], keyOf: (s: ObjSpec) => string): Generator<void, ObjThumb[]> {
   const out: ObjThumb[] = [];
   const PER = 32;
@@ -125,6 +125,14 @@ export function* objectThumbsJob(rom: Rom, emu: LevelEmulator, level: Level, spe
   const drawn = new Set(out.map((t) => t.key));
   const quiet = specs.filter((s) => s.extension && !drawn.has(keyOf(s)));
   const fx = !quiet.length ? [] : yield* objectEffectsJob(emu, level, quiet.map((s) => ({ uid: newUid(), num: s.num, ext: s.ext, size: s.size, x: 0, y: 0, extension: s.extension })));
-  quiet.forEach((s, i) => { if (fx[i]) out.push({ key: keyOf(s), w: 0, h: 0, px: new Uint32Array(0), m16: [], effect: true }); });
+  // one that does something may draw alone what it didn't among the others (Retry's midway bars: only so many
+  // per level); else it is listed for its effect
+  for (const [i, s] of quiet.entries()) {
+    if (!fx[i]) continue;
+    const had = out.length;
+    render([s]);
+    if (out.length === had) out.push({ key: keyOf(s), w: 0, h: 0, px: new Uint32Array(0), m16: [], effect: true });
+    yield;
+  }
   return out;
 }
