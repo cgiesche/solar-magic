@@ -6,6 +6,7 @@
 // in the clean game.
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
+import { PlaySession } from '../src/core/playsession.ts';
 import {
   readSecondaryEntrance, writeSecondaryEntrance, decodeSecondaryEntrance, newOverworldExit, SEC_ENT, OW_NOTHING, OW_NORMAL, OW_SECRET, OW_END_TURN,
   type OverworldExit,
@@ -84,23 +85,21 @@ const eventsSet = (s: OwState) => s.events.flatMap((b, i) => Array.from({ length
 // the exit of Mario's screen into entrance `idx`, until the overworld runs again (its event shown): the
 // overworld then, or null
 function leave(r: Rom, idx: number, twoPlayers = false): { before: OwState; after: OwState; mode: number } | null {
-  const e = new LevelEmulator(r);
-  e.startGame(TL);
-  const s = e.snes, w = s.wram;
-  if (twoPlayers) { w[RAM.twoPlayers] = 1; w[RAM.playerLives + 1] = w[RAM.playerLives]; }
-  const before = owState(w);
-  e.loadInGame(N, TL);
-  for (let f = 0; f < 600 && (w[RAM.gameMode] !== GM.level || w[RAM.marioAnim] !== 0); f++) s.runFrame();
-  if (w[RAM.gameMode] !== GM.level) return null;
+  let before!: OwState;
+  const setup = (w: Uint8Array) => {
+    if (twoPlayers) { w[RAM.twoPlayers] = 1; w[RAM.playerLives + 1] = w[RAM.playerLives]; }
+    before = owState(w);
+  };
+  const p = PlaySession.start(new LevelEmulator(r), N, { until: 'settled', game: { translevel: TL, setup } });
+  if (!p.ready) return null;
+  const w = p.wram;
   const scr = w[RAM.marioX + 1];
   w[RAM.screenExitLo + scr] = idx & 0xff; w[RAM.screenExitHi + scr] = 0x04 | 0x02 | (idx >> 8);
   w[RAM.marioAnim] = 6; w[RAM.pipeTimer] = 0; w[RAM.pipeAction] = 0;
-  let left = false, f = 0;
-  for (; f < 900 && !(left && w[RAM.gameMode] === GM.overworld); f++) { s.runFrame(); if (w[RAM.gameMode] !== GM.level) left = true; }
-  if (w[RAM.gameMode] !== GM.overworld) return null;
+  if (p.follow() !== 'overworld') return null;
   // the overworld's events and walking (the player switch) run on for a while
-  for (let k = 0; k < 600; k++) s.runFrame();
-  return { before, after: owState(w), mode: w[RAM.gameMode] };
+  for (let k = 0; k < 600; k++) p.frame();
+  return { before, after: owState(w), mode: p.mode };
 }
 const IDX = new ExitGraph(rom).freeEntrance()!;
 // a copy of the ROM with entrance IDX of level 105 to the overworld; `location`: sets up the teleport location
@@ -141,17 +140,12 @@ const base = rom.r8(BASE_EVENTS + TL);
   check(!!end && !!stay && end.before.player === 0 && end.after.player === 1 && stay.after.player === 0 && !eventsSet(end.after).length,
     `end the turn: player ${end?.after.player} (do nothing: ${stay?.after.player})`);
   // an entrance into a level still leads there
-  const lv = new LevelEmulator(rom);
-  lv.startGame(TL);
-  lv.loadInGame(N, TL);
-  const w = lv.snes.wram;
-  for (let f = 0; f < 600 && (w[RAM.gameMode] !== GM.level || w[RAM.marioAnim] !== 0); f++) lv.snes.runFrame();
+  const p = PlaySession.start(new LevelEmulator(rom), N, { until: 'settled', game: { translevel: TL } });
+  const w = p.wram;
   const scr = w[RAM.marioX + 1];
   w[RAM.screenExitLo + scr] = 0xcb; w[RAM.screenExitHi + scr] = 0x04 | 0x02 | 1;
   w[RAM.marioAnim] = 6; w[RAM.pipeTimer] = 0; w[RAM.pipeAction] = 0;
-  let left = false;
-  for (let f = 0; f < 900 && !(left && w[RAM.gameMode] === GM.level); f++) { lv.snes.runFrame(); if (w[RAM.gameMode] !== GM.level) left = true; }
-  check(w[RAM.gameMode] === GM.level, 'an entrance into a level (1CB) still loads it');
+  check(p.follow() === 'level', 'an entrance into a level (1CB) still loads it');
 }
 
 // the game's star and pipe warps: the entry of each tile (found by the patch's search) and where it leads, as

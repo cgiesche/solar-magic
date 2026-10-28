@@ -5,12 +5,13 @@
 // starts as entering it does; a standard screen exit set to it leads there. The bytes come back as they were.
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
+import { PlaySession } from '../src/core/playsession.ts';
 import {
   type SecondaryHeader, readSecondaryHeader, encodeSecondaryHeader, decodeSecondaryHeader, entrancePos, midwaySpot, midwayStart, nearestMidway, placeMidway,
   setCameraRows, startHeader, mainTranslevel, loadLevel, cloneLevel, LEVEL_HEIGHTS, EXIT_MIDWAY,
 } from '../src/core/level.ts';
 import { saveLevel } from '../src/core/save.ts';
-import { GM, RAM, marioX, marioY, cameraY, setMarioPos } from '../src/core/ram.ts';
+import { RAM, PAD, marioX, marioY, cameraY, setMarioPos } from '../src/core/ram.ts';
 import { cleanImage, editorImage } from './fixture.ts';
 
 let bad = 0;
@@ -40,14 +41,11 @@ const SLANTED = 6; // the entrance action "shoot from slanted pipe"
 // entering level n from the overworld at its midway point (the secondary header as override): where Mario
 // and the camera start, then a second into the level his direction, the water level, how far he moved
 function enter(r: Rom, n: number, sec?: SecondaryHeader) {
-  const emu = new LevelEmulator(r);
-  emu.load(n, { midway: true, ...(sec ? { secondaryHeader: encodeSecondaryHeader(sec) } : {}) });
-  const s = emu.snes, w = s.wram;
+  const p = PlaySession.start(new LevelEmulator(r), n, { ov: { midway: true, ...(sec ? { secondaryHeader: encodeSecondaryHeader(sec) } : {}) } });
+  const w = p.wram;
   const at = { x: marioX(w), y: marioY(w), cam: cameraY(w), midway: w[RAM.midwayUsed] !== 0, screen: w[RAM.midwayScreen] };
-  for (let f = 0; f < 300 && w[RAM.gameMode] !== GM.level; f++) s.runFrame();
   const x0 = marioX(w);
-  s.joy1 = 0;
-  for (let f = 0; f < 60; f++) s.runFrame();
+  for (let f = 0; f < 60; f++) p.frame();
   return { ...at, left: w[RAM.marioDir] === 0, water: w[RAM.waterLevel] !== 0, slippery: w[RAM.slippery] !== 0, dx: ((marioX(w) - x0) << 16) >> 16 };
 }
 type Entered = ReturnType<typeof enter>;
@@ -118,12 +116,10 @@ const atMarker = (r: Entered, sec: SecondaryHeader) => { const p = marker(sec); 
   // the marker): as entering it
   for (const [name, sec] of [['own', own], ['own, face left', { ...own, midwayFaceLeft: 1 }], ['own, water', { ...own, midwayWater: 1 }], ['own, slippery', { ...own, midwaySlippery: 1 }], ['shared', { ...sec0, midwayScreen: 3 }], ['shared, slippery', { ...sec0, midwayScreen: 3, slippery: 1 }]] as [string, SecondaryHeader][]) {
     const p = marker(sec), g = enter(rom, N, sec);
-    const emu = new LevelEmulator(rom);
-    emu.load(N, { secondaryHeader: encodeSecondaryHeader(startHeader(rom, sec, p.x, p.y, 9, 0, midwayStart(sec))) });
-    const s = emu.snes, w = s.wram;
-    for (let f = 0; f < 300 && w[RAM.gameMode] !== GM.level; f++) s.runFrame();
+    const play = PlaySession.start(new LevelEmulator(rom), N, { ov: { secondaryHeader: encodeSecondaryHeader(startHeader(rom, sec, p.x, p.y, 9, 0, midwayStart(sec))) } });
+    const w = play.wram;
     setMarioPos(w, p.x, p.y);
-    for (let f = 0; f < 60; f++) s.runFrame();
+    for (let f = 0; f < 60; f++) play.frame();
     const left = w[RAM.marioDir] === 0, water = w[RAM.waterLevel] !== 0, slippery = w[RAM.slippery] !== 0;
     check(left === g.left && water === g.water && slippery === g.slippery,
       `test play from the midway entrance (${name}): ${left ? 'left' : 'right'}${water ? ', water' : ''}${slippery ? ', slippery' : ''}, entered ${show(g)}`);
@@ -142,22 +138,13 @@ function exitTo(sec: SecondaryHeader, flags: number, to = N, toSec?: SecondaryHe
   // Mario starts on the pipe (tile 8, 20 of screen 7)
   lv.secondary = { ...sec, entranceScreen: 7, entranceTile: 1, entranceX: 0, entranceXHi: 1, entranceY: 0x14 & 15, entranceYHi: 0x14 >> 4 };
   saveLevel(r, lv);
-  const em = new LevelEmulator(r);
-  em.load(N);
-  const s = em.snes, w = s.wram;
-  for (let f = 0; f < 300 && w[RAM.gameMode] !== GM.level; f++) s.runFrame();
+  const p = PlaySession.start(new LevelEmulator(r), N);
+  const w = p.wram;
   w[RAM.marioX] = 0x88; // on the pipe's middle
-  let left = false;
-  for (let f = 0; f < 2000; f++) {
-    s.joy1 = 0x0400; s.runFrame();
-    if (w[RAM.gameMode] !== GM.level) left = true;
-    if (left && w[RAM.gameMode] === GM.level) break;
-  }
-  const entered = left && w[RAM.gameMode] === GM.level;
+  const entered = p.follow(PAD.down) === 'level';
   const at = { x: marioX(w), y: marioY(w), cam: cameraY(w), midway: w[RAM.midwayUsed] !== 0 };
   const x0 = marioX(w);
-  s.joy1 = 0;
-  for (let f = 0; f < 60; f++) s.runFrame();
+  for (let f = 0; f < 60; f++) p.frame();
   return { entered, ...at, screen: w[RAM.midwayScreen], left: w[RAM.marioDir] === 0, water: w[RAM.waterLevel] !== 0, slippery: w[RAM.slippery] !== 0, dx: ((marioX(w) - x0) << 16) >> 16 };
 }
 {

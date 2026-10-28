@@ -5,11 +5,12 @@
 // the table's last entry) where it leads, stars by a star link made, and is put at a Koopa Kid's place set.
 import { Rom, snesToPc } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
+import { PlaySession } from '../src/core/playsession.ts';
 import { readExitPaths, readExitPath, writeExitPath, readTeleports, writeTeleport, EXIT_PATHS, EXIT_HOOK, FIND_HOOK, GAME_EXIT_TABLES, GAME_EXITS, type OwTile, type OwPos } from '../src/core/owteleport.ts';
 import { readLinks, makeLink, removeLink, setBothWays, moveLocation, exitEntry, pathSide, koopaTeleport, setKoopaTeleport, opposite, SIDES, KOOPA_X, type LinkEnd, type OwLink } from '../src/core/owlinks.ts';
 import { l1Index, overworldDataRanges } from '../src/core/overworld.ts';
 import { readSecondaryEntrance, writeSecondaryEntrance, newOverworldExit } from '../src/core/level.ts';
-import { GM, RAM, PAD, get16, set16 } from '../src/core/ram.ts';
+import { GM, RAM, PAD, MARIO_DYING, get16, set16 } from '../src/core/ram.ts';
 import { editorImage, cleanImage, romDiff } from './fixture.ts';
 
 let bad = 0;
@@ -179,14 +180,9 @@ function yiLink(): OwLink { return links.find((l) => l.kind === 'exit' && l.a.su
   // losing to Koopa Kid 1 (a level of Yoshi's Island left by dying while it is there): Mario at its place
   const r = new Rom(rom.data.slice());
   setKoopaTeleport(r, 1, { x: 0x0c, y: 0x09 });
-  const e = new LevelEmulator(r), s = e.snes, w = s.wram;
-  e.startGame(0x29);
-  e.loadInGame(0x105, 0x29);
-  for (let f = 0; f < 600 && (w[RAM.gameMode] !== GM.level || w[RAM.marioAnim] !== 0); f++) s.runFrame();
-  w[RAM.koopaKid] = 1; w[RAM.koopaKidSlot] = 0x80; w[RAM.marioAnim] = 9;
-  let left = false;
-  for (let f = 0; f < 1500 && !(left && w[RAM.gameMode] === GM.overworld); f++) { s.runFrame(); if (w[RAM.gameMode] !== GM.level) left = true; }
-  check(w[RAM.gameMode] === GM.overworld && get16(w, RAM.owPlayerX) === 0xc8 && get16(w, RAM.owPlayerY) === 0x98,
+  const p = PlaySession.start(new LevelEmulator(r), 0x105, { until: 'settled', game: { translevel: 0x29 } }), w = p.wram;
+  w[RAM.koopaKid] = 1; w[RAM.koopaKidSlot] = 0x80; w[RAM.marioAnim] = MARIO_DYING;
+  check(p.follow() === 'overworld' && get16(w, RAM.owPlayerX) === 0xc8 && get16(w, RAM.owPlayerY) === 0x98,
     `lost to Koopa Kid 1: Mario at ${hx(get16(w, RAM.owPlayerX))},${hx(get16(w, RAM.owPlayerY))} (C8,98: tile 0C,09)`);
 }
 

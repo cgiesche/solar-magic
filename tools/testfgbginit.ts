@@ -5,13 +5,14 @@
 // test play from here) leaves those settings alone (Lunar Magic 3.50).
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
+import { PlaySession } from '../src/core/playsession.ts';
 import {
   type SecondaryHeader, type SecondaryEntrance, type BgStart, readSecondaryHeader, encodeSecondaryHeader, readSecondaryEntrance, entrancePos, mainSpot,
   setCameraRows, bgStart, setBgStart, placeMain, placeSecondary, startHeader, nearestEntrance, hasRelativeCamera, levelMode, SEC_HDR, LEVEL_HEIGHTS,
   writeSecondaryEntrance, secondarySpot, loadLevel, cloneLevel,
 } from '../src/core/level.ts';
 import { saveLevel } from '../src/core/save.ts';
-import { GM, RAM, get16, cameraY } from '../src/core/ram.ts';
+import { RAM, PAD, get16, cameraY } from '../src/core/ram.ts';
 import { cleanImage, editorImage } from './fixture.ts';
 
 let bad = 0;
@@ -24,11 +25,10 @@ const N = 0x105;
 const sec0 = readSecondaryHeader(rom, N);
 
 // layer 1 and layer 2 Y at the first frame of the level, as test play loads it (the secondary header as override)
+const play = (e: LevelEmulator, n: number, sec?: SecondaryHeader) => PlaySession.start(e, n, { ov: sec ? { secondaryHeader: encodeSecondaryHeader(sec) } : {} });
 function start(e: LevelEmulator, n: number, sec?: SecondaryHeader): { fg: number; bg: number; marioY: number } {
-  e.load(n, sec ? { secondaryHeader: encodeSecondaryHeader(sec) } : {});
-  const s = e.snes;
-  for (let f = 0; f < 300 && s.wram[RAM.gameMode] !== GM.level; f++) s.runFrame();
-  return { fg: cameraY(s.wram), bg: get16(s.wram, RAM.layer2Y), marioY: get16(s.wram, RAM.marioY) };
+  const w = play(e, n, sec).wram;
+  return { fg: cameraY(w), bg: get16(w, RAM.layer2Y), marioY: get16(w, RAM.marioY) };
 }
 
 // the game's FG/BG start Y: as in the clean game with the same bytes (its own four tables)
@@ -143,25 +143,16 @@ const high = startHeader(rom, sec0, 0x40, 0xb0, sec0.entranceScreen);
     // Mario starts on the pipe (tile 8, 20 of screen 7)
     lv.secondary = { ...lv.secondary, entranceScreen: 7, entranceTile: 1, entranceX: 0, entranceXHi: 1, entranceY: 0x14 & 15, entranceYHi: 0x14 >> 4 };
     saveLevel(r, lv);
-    const em = new LevelEmulator(r);
-    em.load(N);
-    const s = em.snes, w = s.wram;
-    for (let f = 0; f < 300 && w[RAM.gameMode] !== GM.level; f++) s.runFrame();
-    w[RAM.marioX] = 0x88; // on the pipe's middle
-    let left = false;
-    for (let f = 0; f < 2000; f++) {
-      s.joy1 = 0x0400; s.runFrame();
-      if (w[RAM.gameMode] !== GM.level) left = true;
-      if (left && w[RAM.gameMode] === GM.level) break;
-    }
-    return { left, ...settled(s) };
+    const p = PlaySession.start(new LevelEmulator(r), N);
+    p.wram[RAM.marioX] = 0x88; // on the pipe's middle
+    const left = p.follow(PAD.down) === 'level';
+    return { left, ...settled(p) };
   };
   // the two ways into the level reach its first frame after different fades: compared once Mario has stood
   // still for a second (the camera follows him the same way from the same start)
-  const settled = (s: LevelEmulator['snes']) => {
-    s.joy1 = 0;
-    for (let f = 0; f < 60; f++) s.runFrame();
-    const w = s.wram;
+  const settled = (p: PlaySession) => {
+    for (let f = 0; f < 60; f++) p.frame();
+    const w = p.wram;
     return { fg: cameraY(w), bg: get16(w, RAM.layer2Y) };
   };
   const wrong: string[] = [];
@@ -175,8 +166,7 @@ const high = startHeader(rom, sec0, 0x40, 0xb0, sec0.entranceScreen);
   for (const [name, e] of cases) {
     const g = enter(e);
     const p = entrancePos(rom, secondarySpot(e), false);
-    start(emu, N, startHeader(rom, { ...sec0, cameraRelative: 1, cameraOffsetHi: 1 }, p.x, p.y, 9, 0, e));
-    const t = settled(emu.snes);
+    const t = settled(play(emu, N, startHeader(rom, { ...sec0, cameraRelative: 1, cameraOffsetHi: 1 }, p.x, p.y, 9, 0, e)));
     if (g.left) entered++;
     bgs.add(t.bg);
     if (!g.left || g.fg !== t.fg || g.bg !== t.bg) wrong.push(`${name}: test play ${hx(t.fg)}/${hx(t.bg)}, entered ${hx(g.fg)}/${hx(g.bg)}`);

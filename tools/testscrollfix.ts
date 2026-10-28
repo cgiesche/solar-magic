@@ -9,8 +9,9 @@ import { unzipSync, zipSync } from 'fflate';
 import { Rom } from '../src/core/rom.ts';
 import { loadAsar } from '../src/core/asar.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
+import { PlaySession } from '../src/core/playsession.ts';
 import { loadLevel } from '../src/core/level.ts';
-import { GM, RAM, SPR, SPRITE_SLOTS, SCROLL_FIX_RAM, setCameraX, setMarioPos, get16 } from '../src/core/ram.ts';
+import { RAM, PAD, SPR, SPRITE_SLOTS, SCROLL_FIX_RAM, setCameraX, setMarioPos, get16 } from '../src/core/ram.ts';
 import { inspectUpload } from '../src/core/packages.ts';
 import { cleanImage, editorImage } from './fixture.ts';
 
@@ -26,9 +27,7 @@ const hx = (v: number) => v.toString(16).toUpperCase();
 // in the level's sprite data) that were in a slot meanwhile, and $55 at the end
 function scrollLeft(rom: Rom, from: number, frames: number): { seen: Set<number>; dir: number; cam: number } {
   const emu = new LevelEmulator(rom); emu.boot();
-  emu.load(0x105);
-  const s = emu.snes, w = s.wram;
-  let g = 0; while (w[RAM.gameMode] !== GM.level && g++ < 200) s.runFrame();
+  const p = PlaySession.start(emu, 0x105), w = p.wram;
   setCameraX(w, from);
   const seen = new Set<number>();
   for (let f = 0; f < frames; f++) {
@@ -37,8 +36,7 @@ function scrollLeft(rom: Rom, from: number, frames: number): { seen: Set<number>
     setCameraX(w, x);
     setMarioPos(w, x + 0xc0, 0x140);
     w[RAM.marioSpeedY] = 0; w[RAM.hurtTimer] = 0xff; w[RAM.noLayer1Contact] = 0xff;
-    s.joy1 = 0x0100;
-    s.runFrame();
+    p.frame(PAD.right);
     for (let i = 0; i < SPRITE_SLOTS; i++) if (w[SPR.status + i]) seen.add(w[SPR.loadIndex + i]);
   }
   return { seen, dir: w[RAM.scrollDir], cam: get16(w, RAM.layer1X) };
@@ -62,14 +60,15 @@ function scrollLeft(rom: Rom, from: number, frames: number): { seen: Set<number>
 // camera code): RAM left over from before (another level, power-on garbage) doesn't set $55
 {
   const emu = new LevelEmulator(new Rom(await editorImage())); emu.boot();
-  const s = emu.snes, w = s.wram;
+  const w = emu.snes.wram;
   const prev = SCROLL_FIX_RAM[0] - 0x7e0000;
   emu.load(0x105);
   w[prev] = 0x34; w[prev + 1] = 0x12; w[prev + 2] = 0x34; w[prev + 3] = 0x12;
   emu.load(0x105, { continueState: true });
-  let g = 0; while (w[RAM.gameMode] !== GM.level && g++ < 200) s.runFrame();
+  const p = PlaySession.resume(emu);
+  p.until('gameplay');
   w[RAM.scrollDir] = 0x55; // (no direction: shows whether the first frame sets one)
-  s.runFrame();
+  p.frame();
   check(w[RAM.scrollDir] === 0x55 && get16(w, prev) === get16(w, RAM.layer1XNext),
     `a level's first frame: $55 left as it is (${hx(w[RAM.scrollDir])}), the camera's position kept (${hx(get16(w, prev))})`);
 }

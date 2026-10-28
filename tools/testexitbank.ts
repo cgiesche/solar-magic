@@ -7,12 +7,13 @@
 // model and by emulation.
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator, type LevelOverride } from '../src/core/levelemu.ts';
+import { PlaySession } from '../src/core/playsession.ts';
 import {
   type ScreenExit, loadLevel, cloneLevel, serializeLayer1, parseObjects, parseLevelData, readSecondaryEntrance, writeSecondaryEntrance, decodeSecondaryEntrance,
   readSecondaryHeader, encodeSecondaryHeader, newUid, storedExits, exitIndex, levelTranslevel, mainTranslevel, EXIT_NEW, SEC_ENT, SEC_LEVEL_HI,
 } from '../src/core/level.ts';
 import { ExitGraph, exitTarget, isBlank, submapBanks, newStyleExits } from '../src/core/exitgraph.ts';
-import { GM, RAM, LEVEL_LOADED } from '../src/core/ram.ts';
+import { RAM, PAD, LEVEL_LOADED } from '../src/core/ram.ts';
 import type { SnesState } from '../src/core/snes.ts';
 import { DM16_EXT } from '../src/core/patches.ts';
 import { setActsLike, setExtTileWords } from '../src/core/map16ext.ts';
@@ -85,18 +86,10 @@ function arrive(r: Rom, exits: ScreenExit[], raw?: (l1: Uint8Array) => void): nu
   const l1 = serializeLayer1(r, lv);
   raw?.(l1);
   const sec = { ...readSecondaryHeader(r, N), entranceScreen: 7, entranceTile: 1, entranceX: 0, entranceXHi: 1, entranceY: 0x14 & 15, entranceYHi: 0x14 >> 4 };
-  const em = new LevelEmulator(r);
-  em.load(N, { layer1: l1, secondaryHeader: encodeSecondaryHeader(sec) });
-  const s = em.snes, w = s.wram;
-  for (let f = 0; f < 300 && w[RAM.gameMode] !== GM.level; f++) s.runFrame();
+  const p = PlaySession.start(new LevelEmulator(r), N, { ov: { layer1: l1, secondaryHeader: encodeSecondaryHeader(sec) } });
+  const w = p.wram;
   w[RAM.marioX] = 0x88;
-  let left = false;
-  for (let f = 0; f < 2000; f++) {
-    s.joy1 = 0x0400; s.runFrame();
-    if (w[RAM.gameMode] !== GM.level) left = true;
-    if (left && w[RAM.gameMode] === GM.level) break;
-  }
-  if (!left || w[RAM.gameMode] !== GM.level) return -1;
+  if (p.follow(PAD.down) !== 'level') return -1;
   // the level the game loaded (the level heights patch keeps it, from Y at the setup)
   const at = LEVEL_LOADED - 0x7e0000;
   return w[at] | (w[at + 1] << 8);
@@ -136,18 +129,12 @@ function play(em: LevelEmulator, tl: number, level: number, screens: number[], o
   if (st) em.snes.loadState(st);
   else { em.startGame(tl); g.set(tl, em.snes.saveState()); }
   em.load(level, { ...ov, translevel: tl, continueState: true });
-  const s = em.snes, w = s.wram;
+  const p = PlaySession.resume(em), w = p.wram;
   for (const screen of screens) {
-    for (let f = 0; f < 600 && (w[RAM.gameMode] !== GM.level || w[RAM.marioAnim] !== 0); f++) s.runFrame();
+    p.until('settled');
     w[w[RAM.screenMode] & 1 ? RAM.marioY + 1 : RAM.marioX + 1] = screen;
     w[RAM.marioAnim] = 6; w[RAM.pipeTimer] = 0; w[RAM.pipeAction] = 0;
-    let left = false;
-    for (let f = 0; f < 600; f++) {
-      s.runFrame();
-      if (w[RAM.gameMode] !== GM.level) left = true;
-      if (left && w[RAM.gameMode] === GM.level) break;
-    }
-    if (!left || w[RAM.gameMode] !== GM.level) return null;
+    if (p.follow() !== 'level') return null;
   }
   const b = (a: number, n: number) => Array.from(w.subarray(a, a + n), (v) => hx(v).padStart(2, '0')).join('');
   const at = LEVEL_LOADED - 0x7e0000;
@@ -226,16 +213,9 @@ function play(em: LevelEmulator, tl: number, level: number, screens: number[], o
   check(res.ok, 'a block calling %teleport() assembles ' + res.errors.join(' | '));
   const lv = cloneLevel(loadLevel(r, N));
   lv.objects.push({ uid: newUid(), num: 0, ext: DM16_EXT, x: 0, y: 24, size: 0x08, tile: T }); // the floor under Mario
-  const em = new LevelEmulator(r);
-  em.load(N, { layer1: serializeLayer1(r, lv) });
-  const s = em.snes, w = s.wram;
-  for (let f = 0; f < 300 && w[RAM.gameMode] !== GM.level; f++) s.runFrame();
-  let left = false;
-  for (let f = 0; f < 1500; f++) {
-    s.runFrame();
-    if (w[RAM.gameMode] !== GM.level) left = true;
-    if (left && w[RAM.gameMode] === GM.level) break;
-  }
+  const p = PlaySession.start(new LevelEmulator(r), N, { ov: { layer1: serializeLayer1(r, lv) } });
+  const w = p.wram;
+  const left = p.follow() === 'level';
   const at = LEVEL_LOADED - 0x7e0000, to = w[at] | (w[at + 1] << 8);
   check(left && to === 0x015, `teleport of 105 into 015 (the other bank): arrives in ${hx(to)}`);
 }

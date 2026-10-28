@@ -4,9 +4,10 @@
 import { Rom, snesToPc } from '../src/core/rom.ts';
 import { editorImage } from './fixture.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
+import { PlaySession } from '../src/core/playsession.ts';
 import { levelTranslevel, L1_PTRS } from '../src/core/level.ts';
 import { layerGeom } from '../src/core/render.ts';
-import { GM, RAM, MAP_HI, marioX, marioY } from '../src/core/ram.ts';
+import { RAM, PAD, MAP_HI, marioX, marioY } from '../src/core/ram.ts';
 import { DeathWatch, blockTile, type Death } from '../src/core/deaths.ts';
 import { levelVersion } from '../src/ui/deathmarks.ts';
 import { projectId } from '../src/core/projectid.ts';
@@ -21,39 +22,34 @@ emu.boot();
 const s = emu.snes;
 
 // level lv in a game in progress (small Mario), sprites: the level's own unless given; until gameplay
-function enter(lv: number, sprites?: number[]): void {
-  const tl = levelTranslevel(rom, lv);
-  emu.startGame(tl);
-  emu.loadInGame(lv, tl, sprites ? { sprites: new Uint8Array([0, ...sprites, 0xff]) } : {});
-  for (let i = 0; i < 80 && s.wram[RAM.gameMode] !== GM.level; i++) s.runFrame();
+function enter(lv: number, sprites?: number[]): PlaySession {
+  const p = PlaySession.start(emu, lv, { ov: sprites ? { sprites: new Uint8Array([0, ...sprites, 0xff]) } : {}, game: {} });
   s.wram[RAM.powerup] = 0;
+  return p;
 }
 // k frames with buttons held (each: before a frame), watched; the deaths
-function play(k: number, buttons: number, each?: (f: number) => void): Death[] {
-  const watch = new DeathWatch(s), deaths: Death[] = [];
-  s.hook = watch.hook;
+function play(p: PlaySession, k: number, buttons: number, each?: (f: number) => void): Death[] {
+  const watch = p.watch((m) => new DeathWatch(m)), deaths: Death[] = [];
   for (let f = 0; f < k; f++) {
-    s.joy1 = buttons;
     each?.(f);
-    s.runFrame();
+    p.frame(buttons);
     deaths.push(...watch.take());
   }
-  s.hook = null;
+  p.close();
   return deaths;
 }
 // a sprite entry at tile col/row (yyyy--sY, xxxxssss, number)
 const sprite = (col: number, row: number, num: number) => [((row & 15) << 4) | ((row >> 4) & 1), ((col & 15) << 4) | (col >> 4), num];
-const RIGHT = 0x0100;
 
 {
-  enter(0x105, []);
-  const d = play(200, 0);
+  const p = enter(0x105, []);
+  const d = play(p, 200, 0);
   check(d.length === 0, `standing in the level: no death (${d.length})`);
 }
 {
   // a Goomba ahead, small Mario walks into it
-  enter(0x105, sprite(0x0a, 0x16, 0x0f));
-  const d = play(300, RIGHT);
+  const p = enter(0x105, sprite(0x0a, 0x16, 0x0f));
+  const d = play(p, 300, PAD.right);
   const k = d[0]?.killer;
   check(d.length === 1, `walked into a Goomba: one death (${d.length})`);
   check(k?.kind === 'sprite' && k.slots === 'sprite' && k.id === 0x0f, `killed by the Goomba (${JSON.stringify(k)})`);
@@ -63,52 +59,52 @@ const RIGHT = 0x0100;
 }
 {
   // a Goomba among other Goombas and Koopas (sprite code reading other slots): still the Goomba that touched him
-  enter(0x105, [...sprite(0x0a, 0x16, 0x0f), ...sprite(0x0c, 0x16, 0x0f), ...sprite(0x0e, 0x16, 0x04), ...sprite(0x10, 0x16, 0x0f)]);
-  const d = play(300, RIGHT);
+  const p = enter(0x105, [...sprite(0x0a, 0x16, 0x0f), ...sprite(0x0c, 0x16, 0x0f), ...sprite(0x0e, 0x16, 0x04), ...sprite(0x10, 0x16, 0x0f)]);
+  const d = play(p, 300, PAD.right);
   const k = d[0]?.killer;
   check(d.length === 1 && k?.kind === 'sprite' && k.slots === 'sprite' && (k.id === 0x0f || k.id === 0x04) && Math.abs((k.x >> 4) - d[0].tx) <= 2,
     `among other sprites: killed by the one he touched (${JSON.stringify(k)}, Mario at ${d[0]?.tx})`);
 }
 {
   // the level's own sprites running: a muncher's death is still the block's
-  enter(0x105);
+  const p = enter(0x105);
   const w = s.wram, tx = (marioX(w) + 8) >> 4, ty = ((marioY(w) + 16) >> 4) + 1;
   const a = layerGeom(rom, 0, 0, 0x20, 27).addr(tx, ty);
   w[a] = 0x2f; w[a + MAP_HI] = 0x01;
-  const d = play(120, 0);
+  const d = play(p, 120, 0);
   check(d[0]?.killer.kind === 'block', `with the level's sprites: a muncher still the killer (${JSON.stringify(d[0]?.killer)})`);
 }
 {
   // a muncher (Map16 12F) in the floor where Mario stands
-  enter(0x105, []);
+  const p = enter(0x105, []);
   const w = s.wram, tx = (marioX(w) + 8) >> 4, ty = ((marioY(w) + 16) >> 4) + 1;
   const a = layerGeom(rom, 0, 0, 0x20, 27).addr(tx, ty);
   w[a] = 0x2f; w[a + MAP_HI] = 0x01;
-  const d = play(120, 0);
+  const d = play(p, 120, 0);
   const k = d[0]?.killer;
   check(d.length === 1, `standing on a muncher: one death (${d.length})`);
   check(k?.kind === 'block' && k.tx === tx && k.ty === ty && k.tile === 0x12f, `killed by the muncher's tile (${JSON.stringify(k)}, ${tx}/${ty})`);
 }
 {
   // fallen through the floor and out of the picture (where the game kills him: its own rule)
-  enter(0x105, []);
-  const d = play(200, 0, () => { s.wram[RAM.noLayer1Contact] = 0xff; });
+  const p = enter(0x105, []);
+  const d = play(p, 200, 0, () => { s.wram[RAM.noLayer1Contact] = 0xff; });
   check(d.length === 1 && d[0].killer.kind === 'pit', `fallen out of the picture: killed by the pit (${JSON.stringify(d[0]?.killer)})`);
 }
 {
   // the timer runs out
-  enter(0x105, []);
-  const d = play(120, 0, (f) => { if (f === 10) s.wram.set([0, 0, 1], RAM.timer); });
+  const p = enter(0x105, []);
+  const d = play(p, 120, 0, (f) => { if (f === 10) s.wram.set([0, 0, 1], RAM.timer); });
   check(d.length === 1 && d[0].killer.kind === 'time', `time up: killed by the timer (${JSON.stringify(d[0]?.killer)})`);
 }
 {
   // a level without a time limit keeps its timer at 000: a muncher's death is no time-up
-  enter(0x105, []);
+  const p = enter(0x105, []);
   const w = s.wram, tx = (marioX(w) + 8) >> 4, ty = ((marioY(w) + 16) >> 4) + 1;
   const a = layerGeom(rom, 0, 0, 0x20, 27).addr(tx, ty);
   w[a] = 0x2f; w[a + MAP_HI] = 0x01;
   w.set([0, 0, 0], RAM.timer);
-  const d = play(120, 0);
+  const d = play(p, 120, 0);
   check(d[0]?.killer.kind === 'block', `timer at 000 without counting: not the timer (${JSON.stringify(d[0]?.killer)})`);
 }
 {

@@ -5,11 +5,12 @@
 import { readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
+import { PlaySession } from '../src/core/playsession.ts';
 import {
   type Level, loadLevel, cloneLevel, maxScreens, entrancePos, mainSpot, levelRows, readSecondaryEntrance, writeSecondaryEntrance,
 } from '../src/core/level.ts';
 import { saveLevel } from '../src/core/save.ts';
-import { GM, RAM, MARIO_DYING, SPR, SPRITE_SLOTS, get16, marioX, marioY, cameraX, cameraY, spriteX, spriteY } from '../src/core/ram.ts';
+import { GM, RAM, MARIO_DYING, PAD, SPR, SPRITE_SLOTS, get16, marioX, marioY, cameraX, cameraY, spriteX, spriteY } from '../src/core/ram.ts';
 import { loadAsar } from '../src/core/asar.ts';
 import { uploadFiles, uploadFromFiles } from '../src/core/patchpkg.ts';
 import { planPixiUpload, applyPixiUpload } from '../src/core/pixipkg.ts';
@@ -49,11 +50,7 @@ function play(lv: Level, prepare?: (rom: Rom) => void) {
   const rom = new Rom(base.data.slice());
   prepare?.(rom);
   saveLevel(rom, cloneLevel(lv));
-  const emu = new LevelEmulator(rom);
-  emu.load(lv.number);
-  const s = emu.snes;
-  for (let f = 0; f < 300 && s.wram[RAM.gameMode] !== GM.level; f++) s.runFrame();
-  return s;
+  return PlaySession.start(new LevelEmulator(rom), lv.number).emu.snes;
 }
 type S = ReturnType<typeof play>;
 // one game frame ($14 advances; a lag frame more or less doesn't count)
@@ -76,7 +73,7 @@ function visible(s: S): number[] {
 }
 
 // the same input to the game's level and the moved one
-const input = (f: number) => 0x0100 | (f % 70 < 30 ? 0x8000 : 0) | (f % 200 > 150 ? 0x4000 : 0);
+const input = (f: number) => PAD.right | (f % 70 < 30 ? PAD.b : 0) | (f % 200 > 150 ? PAD.y : 0);
 function compare(n: number, size: number, dy: number, note = ''): void {
   const game = cut(n, size), tall = moved(game, size, dy);
   const rows = levelRows(tall.secondary);
@@ -119,7 +116,7 @@ for (const [n, size, dy] of [[0x105, 0x0e, 32], [0x106, 0x0e, 32], [0x001, 0x0e,
     w[RAM.marioX] = 0x88; // on the pipe's middle
     const start = marioY(w);
     let left = false, f = 0;
-    for (; f < 400; f++) { step(s, 0x0400); if (w[RAM.gameMode] !== GM.level) left = true; if (left && w[RAM.gameMode] === GM.level) break; }
+    for (; f < 400; f++) { step(s, PAD.down); if (w[RAM.gameMode] !== GM.level) left = true; if (left && w[RAM.gameMode] === GM.level) break; }
     return { start, left, x: marioX(w), y: marioY(w), cam: get16(w, RAM.layer1Y) };
   };
   const g = run(0, 0, false), t = run(32, 0x0e, false);
@@ -142,7 +139,7 @@ for (const [n, size, dy] of [[0x105, 0x0e, 32], [0x106, 0x0e, 32], [0x001, 0x0e,
   const s = play(lv), w = s.wram;
   w[RAM.marioX] = 0x88;
   let left = false, f = 0;
-  for (; f < 400; f++) { step(s, 0x0400); if (w[RAM.gameMode] !== GM.level) left = true; if (left && w[RAM.gameMode] === GM.level) break; }
+  for (; f < 400; f++) { step(s, PAD.down); if (w[RAM.gameMode] !== GM.level) left = true; if (left && w[RAM.gameMode] === GM.level) break; }
   for (let n = 0; n < 60; n++) step(s, 0);
   const x = marioX(w), y = marioY(w), at = `${x.toString(16)},${y.toString(16)} camera ${cameraX(w).toString(16)},${cameraY(w).toString(16)}`;
   check(left && x >> 8 >= 8 && x >> 8 <= 9 && y < 0x1b0 && cameraY(w) === 0xc0, `secondary entrance $1CB: Mario shot out of the pipe cannon at ${at}`);

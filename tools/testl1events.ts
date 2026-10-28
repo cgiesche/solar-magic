@@ -6,6 +6,7 @@
 // block's bottom row destroys the tile below it (the clean game the one in the block to its right).
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
+import { PlaySession } from '../src/core/playsession.ts';
 import { RomEditSession } from '../src/core/romedit.ts';
 import {
   OverworldEmulator, gameL1, readL1, writeL1, readTranslevels, baseEvent, OW_EVENTS, NO_EVENT, l1Index, isLevelTile,
@@ -30,19 +31,15 @@ const l1At = (rom: Rom, n: number) => gameL1(new OverworldEmulator(rom).load(0, 
 
 // a new game, level 105 entered and passed with its normal exit, until the overworld ran its event: layer 1 in RAM
 function pass(rom: Rom): Uint8Array | null {
-  const le = new LevelEmulator(rom);
-  le.startGameAt(tile105);
-  const s = le.snes, w = s.wram;
-  for (let f = 0; f < 400 && w[RAM.gameMode] !== GM.levelLoad; f++) { s.joy1 = f % 8 < 2 ? 0x0080 : 0; s.runFrame(); }
-  s.joy1 = 0;
-  for (let f = 0; f < 600 && w[RAM.gameMode] !== GM.level; f++) s.runFrame();
-  if (w[RAM.gameMode] !== GM.level) return null;
+  const p = PlaySession.overworld(new LevelEmulator(rom), tile105);
+  if (!p.enter()) return null;
+  const w = p.wram;
   w[RAM.levelExit] = 1; w[RAM.levelBeaten] = 1; w[RAM.midwayTouched] = 1;
   w[RAM.gameMode] = GM.overworldReturn;
-  for (let f = 0; f < 2000 && w[RAM.gameMode] !== GM.overworld; f++) s.runFrame();
+  p.follow();
   const e = baseEvent(rom, TL);
-  for (let f = 0; f < 3000; f++) { s.runFrame(); if (f > 300 && w[RAM.owEvents + (e >> 3)] & (0x80 >> (e & 7)) ) break; }
-  for (let f = 0; f < 300; f++) s.runFrame();
+  for (let f = 0; f < 3000; f++) { p.frame(); if (f > 300 && w[RAM.owEvents + (e >> 3)] & (0x80 >> (e & 7)) ) break; }
+  for (let f = 0; f < 300; f++) p.frame();
   return w.slice(RAM.owLayer1, RAM.owLayer1End);
 }
 

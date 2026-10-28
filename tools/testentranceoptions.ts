@@ -6,6 +6,7 @@
 // options don't own stay as they were.
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
+import { PlaySession } from '../src/core/playsession.ts';
 import {
   type SecondaryEntrance, type SecondaryHeader, readSecondaryHeader, encodeSecondaryHeader, decodeSecondaryHeader, readSecondaryEntrance,
   writeSecondaryEntrance, decodeSecondaryEntrance, entrancePos, secondarySpot, startHeader, loadLevel, cloneLevel, parseObjects, serializeObjects,
@@ -13,7 +14,7 @@ import {
 } from '../src/core/level.ts';
 import { slipperyActions, arrivesSlippery, slipperyEntrances } from '../src/core/slippery.ts';
 import { saveLevel } from '../src/core/save.ts';
-import { GM, RAM, marioX } from '../src/core/ram.ts';
+import { RAM, PAD, marioX } from '../src/core/ram.ts';
 import { editorImage } from './fixture.ts';
 
 let bad = 0;
@@ -50,21 +51,16 @@ const sec0 = readSecondaryHeader(rom, N);
 
 // Mario's direction ($76: 0 left), the water level ($85), whether he swims ($75) and the slippery level ($86), a
 // second into the level; dx: how far he moved meanwhile (a slanted pipe shoots him out)
-function after(s: LevelEmulator['snes']) {
-  const w = s.wram, x0 = marioX(w);
-  s.joy1 = 0;
-  for (let f = 0; f < 60; f++) s.runFrame();
+function after(p: PlaySession) {
+  const w = p.wram, x0 = marioX(w);
+  for (let f = 0; f < 60; f++) p.frame();
   return { left: w[RAM.marioDir] === 0, water: w[RAM.waterLevel] !== 0, swims: w[RAM.marioInWater] !== 0, slippery: w[RAM.slippery] !== 0, dx: (((marioX(w) - x0) << 16) >> 16) };
 }
 const show = (r: ReturnType<typeof after>) => `${r.left ? 'left' : 'right'}${r.water ? ', water' : ''}${r.swims ? ', swimming' : ''}${r.slippery ? ', slippery' : ''}${r.dx ? `, moved ${r.dx}` : ''}`;
 const SLANTED = 6; // the entrance action "shoot from slanted pipe" ($192A)
 // the level from its main entrance with this secondary header (as test play loads it)
 function start(sec: SecondaryHeader) {
-  const emu = new LevelEmulator(rom);
-  emu.load(N, { secondaryHeader: encodeSecondaryHeader(sec) });
-  const s = emu.snes;
-  for (let f = 0; f < 300 && s.wram[RAM.gameMode] !== GM.level; f++) s.runFrame();
-  return after(s);
+  return after(PlaySession.start(new LevelEmulator(rom), N, { ov: { secondaryHeader: encodeSecondaryHeader(sec) } }));
 }
 {
   const game = start(sec0), left = start({ ...sec0, faceLeft: 1 }), water = start({ ...sec0, water: 1 });
@@ -88,18 +84,10 @@ function enter(e: SecondaryEntrance, flags = 2) {
   // Mario starts on the pipe (tile 8, 20 of screen 7)
   lv.secondary = { ...lv.secondary, entranceScreen: 7, entranceTile: 1, entranceX: 0, entranceXHi: 1, entranceY: 0x14 & 15, entranceYHi: 0x14 >> 4 };
   saveLevel(r, lv);
-  const em = new LevelEmulator(r);
-  em.load(N);
-  const s = em.snes, w = s.wram;
-  for (let f = 0; f < 300 && w[RAM.gameMode] !== GM.level; f++) s.runFrame();
-  w[RAM.marioX] = 0x88; // on the pipe's middle
-  let left = false;
-  for (let f = 0; f < 2000; f++) {
-    s.joy1 = 0x0400; s.runFrame();
-    if (w[RAM.gameMode] !== GM.level) left = true;
-    if (left && w[RAM.gameMode] === GM.level) break;
-  }
-  return { entered: left && w[RAM.gameMode] === GM.level, ...after(s) };
+  const p = PlaySession.start(new LevelEmulator(r), N);
+  p.wram[RAM.marioX] = 0x88; // on the pipe's middle
+  const entered = p.follow(PAD.down) === 'level';
+  return { entered, ...after(p) };
 }
 {
   const base: SecondaryEntrance = { ...readSecondaryEntrance(rom, IDX), destLevel: N, screen: 2, entranceX: 3, entranceY: 6, entranceTile: 0, action: 0, slippery: 0, faceLeft: 0, water: 0 };

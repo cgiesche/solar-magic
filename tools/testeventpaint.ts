@@ -5,6 +5,7 @@
 // reordering the steps changes the order in the game. All by emulation.
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
+import { PlaySession } from '../src/core/playsession.ts';
 import { RomEditSession } from '../src/core/romedit.ts';
 import { OverworldEmulator, gameL2, readL2, readTranslevels, baseEvent, OW_EVENTS, l2Index } from '../src/core/overworld.ts';
 import {
@@ -76,19 +77,15 @@ check(onSub.every((i) => gameL2(emu.load(1, e + 1))[i - 0x1000] === word) && onM
 // passing level 105 with its normal exit in a new game: the frame each painted tile appears in VRAM (while it fades in
 // with palette bit 12 cleared, $04E6F9), the tilemap after
 function pass(rom: Rom): { frame: Map<number, number>; tilemap: Uint16Array } | null {
-  const le = new LevelEmulator(rom);
-  le.startGameAt(tile);
-  const sn = le.snes, w = sn.wram;
-  for (let f = 0; f < 400 && w[RAM.gameMode] !== GM.levelLoad; f++) { sn.joy1 = f % 8 < 2 ? 0x0080 : 0; sn.runFrame(); }
-  sn.joy1 = 0;
-  for (let f = 0; f < 600 && w[RAM.gameMode] !== GM.level; f++) sn.runFrame();
-  if (w[RAM.gameMode] !== GM.level) return null;
+  const le = new LevelEmulator(rom), sn = le.snes, w = sn.wram;
+  const p = PlaySession.overworld(le, tile);
+  if (!p.enter()) return null;
   w[RAM.levelExit] = 1; w[RAM.levelBeaten] = 1; w[RAM.midwayTouched] = 1;
   w[RAM.gameMode] = GM.overworldReturn;
-  for (let f = 0; f < 2000 && w[RAM.gameMode] !== GM.overworld; f++) sn.runFrame();
+  p.follow();
   const frame = new Map<number, number>();
   for (let f = 0; f < 3000; f++) {
-    sn.runFrame();
+    p.frame();
     const at = (sn.ppuRegs[0x08] & 0xfc) << 9;
     for (const i of onSub) if (!frame.has(i)) { const k = i - 0x1000; if (((sn.vram[at + k * 2] | (sn.vram[at + k * 2 + 1] << 8)) & 0xefff) === (word & 0xefff)) frame.set(i, f); }
     if (frame.size === onSub.length && w[RAM.owEvents + (e >> 3)] & (0x80 >> (e & 7)) && f > 200) break;
