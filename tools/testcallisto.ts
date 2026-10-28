@@ -12,6 +12,7 @@ import { loadAsar } from '../src/core/asar.ts';
 import { Apu, loadApu } from '../src/core/apu.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { PPU } from '../src/core/ppu.ts';
+import { GM, RAM } from '../src/core/ram.ts';
 import { OverworldEmulator } from '../src/core/overworld.ts';
 import { map16Source } from '../src/core/render.ts';
 import { installEditorPatch } from '../src/core/patches.ts';
@@ -227,7 +228,9 @@ const mini: Record<string, string> = {
   // the UberASM code runs in game mode 14 and writes where the project's header says
   const emu = new LevelEmulator(rom); emu.boot();
   emu.load(0x105);
-  for (let f = 0; f < 30; f++) emu.snes.runFrame();
+  // (until the level runs, then a few frames: how many the fade-in takes depends on the emulator's timing)
+  for (let f = 0; f < 60 && emu.snes.wram[RAM.gameMode] !== GM.level; f++) emu.snes.runFrame();
+  for (let f = 0; f < 5; f++) emu.snes.runFrame();
   check(emu.snes.wram[0x1b040] === 0x5a, 'the UberASM code runs: $7FB040 = $5A');
   const warnings = await removePackage(rom, r.pkg!.id, opt.blank);
   check(!listPackages(rom).length && romDiff(vanilla, rom.data) === 0, 'removed: the ROM as before ' + warnings.join(' '));

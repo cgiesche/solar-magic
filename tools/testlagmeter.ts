@@ -1,8 +1,8 @@
 // Test play's lag meter (src/core/playlog.ts): the CPU's load in each frame (scanlines from the NMI until the
 // game waits for the next one) and lag frames – the game's frame not done before the next NMI – as events with
 // Mario's position. Vanilla levels played without lag, on the clean game and on the ROM as the editor opens it
-// (its patches' hooks, e.g. the block interaction's, cost no lag frame; level 106 lags there until the emulator times
-// FastROM, #153); eight Wigglers slow the game down where they are; the frames the game spends loading (after a
+// (its patches' hooks, e.g. the block interaction's, cost no lag frame; its code runs from FastROM, which the
+// emulator times); eight Wigglers slow the game down where they are; the frames the game spends loading (after a
 // death) are no lag of the level.
 // node tools/testlagmeter.ts
 import { Rom } from '../src/core/rom.ts';

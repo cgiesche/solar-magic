@@ -26,7 +26,8 @@ export class CPU {
   pc = 0;
   p = 0x34;
   e = true;
-  cycles = 0;
+  cycles = 0; // in slow bus accesses (8 master cycles)
+  fastRom = false; // $420D bit 0: accesses in $80-$BF:8000-FFFF and $C0-$FF take 6 master cycles
   stopped = false;
   waiting = false;
   nmiPending = false;
@@ -46,11 +47,11 @@ export class CPU {
 
   // ---- memory helpers ----
   rd(addr: number): number {
-    this.cycles++;
+    this.cycles += this.fastRom && (addr & 0x800000) && (addr & 0x408000) ? 0.75 : 1;
     return this.bus.read(addr & 0xffffff);
   }
   wr(addr: number, v: number): void {
-    this.cycles++;
+    this.cycles += this.fastRom && (addr & 0x800000) && (addr & 0x408000) ? 0.75 : 1;
     this.bus.write(addr & 0xffffff, v & 0xff);
   }
   rd16(addr: number): number {

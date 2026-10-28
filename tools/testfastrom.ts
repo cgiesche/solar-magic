@@ -1,7 +1,8 @@
 // FastROM (fastrom.ts, ADR 0007): the editor's ROM is FastROM – header, $420D, the game in bank $80 in its
 // main loop, NMI and IRQ; while the levels are played as in the VRAM test, few instructions run in the slow
 // banks (reported, with where they were entered from); a patch may overwrite a rewritten JSL; the clean
-// game's fingerprint sees the sites as clean; free space is addressed in $80+.
+// game's fingerprint sees the sites as clean; free space is addressed in $80+; the emulator times it (ROM accesses
+// in the fast banks with $420D = 1 cost 6 master cycles instead of 8).
 import { Rom, pcToSnes } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { GM, RAM } from '../src/core/ram.ts';
@@ -10,6 +11,7 @@ import { applyPatch } from '../src/core/patchapply.ts';
 import { cleanGameBytes } from '../src/core/cleangame.ts';
 import { fastRom, installFastRom } from '../src/core/fastrom.ts';
 import { JUMP_SITES, TABLE_SITES } from '../src/core/fastromsites.ts';
+import { Snes } from '../src/core/snes.ts';
 import { editorImage, cleanImage } from './fixture.ts';
 
 await loadAsar();
@@ -75,6 +77,34 @@ const clean = new Rom(cleanImage()).data, image = await editorImage();
   console.log(`     ${(share * 100).toFixed(2)} % of the game's instructions in the slow banks ($00–$3F); entered from:`);
   for (const [k, n] of [...entries].sort((a, b) => b[1] - a[1]).slice(0, 12)) console.log(`       ${(n / (fast + slow) * 100).toFixed(3).padStart(6)} %  ${k}`);
   check(share < 0.01, `fewer than 1 % in the slow banks`);
+}
+
+// 2b. the emulator times FastROM: an access in $80–$BF:8000–FFFF or $C0–$FF with $420D bit 0 set costs 6 master
+// cycles (3/4 of a slow access), every other access 8 – also in those banks while $420D is 0
+{
+  // LDA $8000 a hundred times, then LDA $0000 (a WRAM byte through the data bank) a hundred times
+  const code = new Uint8Array(0x80000);
+  for (let i = 0; i < 100; i++) code.set([0xad, 0x00, 0x80], i * 3);
+  for (let i = 0; i < 100; i++) code.set([0xad, 0x00, 0x00], 300 + i * 3);
+  // cycles (in slow accesses) per instruction for 100 instructions from offset at, code and data in bank
+  const time = (bank: number, memsel: number, at: number, s = new Snes(code)) => {
+    s.write(0x420d, memsel);
+    s.cpu.pbr = s.cpu.dbr = bank;
+    s.cpu.pc = 0x8000 + at;
+    const c0 = s.cpu.cycles;
+    for (let i = 0; i < 100; i++) s.cpu.step();
+    return (s.cpu.cycles - c0) / 100;
+  };
+  check(time(0x00, 1, 0) === 4, `ROM in bank $00, $420D = 1: 4 slow accesses an LDA $8000 (${time(0x00, 1, 0)})`);
+  check(time(0x80, 0, 0) === 4, `ROM in bank $80, $420D = 0: 4 (${time(0x80, 0, 0)})`);
+  check(time(0x80, 1, 0) === 3, `ROM in bank $80, $420D = 1: 4 fast accesses, 3 (${time(0x80, 1, 0)})`);
+  check(time(0xc0, 1, 0) === 3, `bank $C0, $420D = 1: 3 (${time(0xc0, 1, 0)})`);
+  check(time(0x80, 1, 300) === 3.25, `LDA $0000 in bank $80: 3 fast fetches, WRAM slow: 3.25 (${time(0x80, 1, 300)})`);
+  const s = new Snes(code);
+  s.write(0x420d, 1);
+  const t = new Snes(code);
+  t.loadState(s.saveState());
+  check(t.memsel === 1 && time(0x80, 1, 0, t) === 3, 'a savestate keeps $420D');
 }
 
 // 3. a patch overwriting a rewritten JSL operand: no rejection, no warning

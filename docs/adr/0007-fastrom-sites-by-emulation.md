@@ -13,4 +13,4 @@ We decided that the sites are found by a tool that emulates the clean game (boot
 
 ## Consequences
 
-The data depends only on the clean game, so it is generated once; a site in game code that an editor patch replaces is left to that patch. Memory timing (fast vs slow ROM cycles) is not emulated yet, so the editor cannot show what FastROM gains; that is a separate issue.
+The data depends only on the clean game, so it is generated once; a site in game code that an editor patch replaces is left to that patch. The emulator times FastROM (#153): with $420D bit 0 set, an access in $80–$BF:8000–FFFF or $C0–$FF costs 6 master cycles instead of 8, so the lag meter shows what FastROM gains.

@@ -8,7 +8,7 @@ import type { PPU, PpuState } from './ppu.ts';
 import { APU_CLOCKS_PER_FRAME, type Apu } from './apu.ts';
 import { BYTE_PAGES, type RomReads } from './romdeps.ts';
 
-export const CYCLES_PER_LINE = 170; // approximate CPU cycles (bus accesses) per scanline
+export const CYCLES_PER_LINE = 170; // approximate CPU cycles (slow bus accesses) per scanline
 export const LINES_PER_FRAME = 262;
 export const VBLANK_LINE = 225;
 const APU_RATIO = APU_CLOCKS_PER_FRAME / (CYCLES_PER_LINE * LINES_PER_FRAME); // SPC clocks per CPU cycle
@@ -102,7 +102,9 @@ export class Snes implements Bus {
   hdmaen = 0; // $420C
   hdmaDo = 0; // per channel: transfer on the next line
   hdmaOn = 0; // per channel: table not yet terminated this frame
-  memsel = 0; // $420D: fast ROM access in banks $80+ (bit 0; the timing is not emulated)
+  // $420D: fast ROM access in banks $80+ (bit 0; the CPU times it)
+  get memsel(): number { return this.cpu.fastRom ? 1 : 0; }
+  set memsel(v: number) { this.cpu.fastRom = (v & 1) !== 0; }
   joy1 = 0;
 
   // APU
