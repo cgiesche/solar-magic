@@ -48,6 +48,10 @@ _Avoid_: standard object (in the UI), normal object
 An extended object (object 00 with its number as an extra byte, 10–FF in the picker): it always looks the same, a size is not part of it. The picker's Objects tab lists them under "Fixed size"; "extended object" names its encoding only (by number: "Insert by number", the properties, the ROM format). Direct Map16 ($05) and prefabs ($04) are extended objects too, but are neither listed nor called fixed-size objects.
 _Avoid_: extended object (for the picker's grouping), ext object
 
+**Custom object**:
+One of object 2D's numbers 00–FF (its 4th byte) where a hook in the ROM – ObjecTool's, the Retry System's midway bars – reads object 2D as 5 bytes: the 4th and 5th bytes are its **extension** (Lunar Magic's "Extension"), the 5th a setting. Whether 2D has them is learned by emulation (obj2d.ts); without such a hook 2D is a resizable object of 3 bytes. The picker's Objects tab lists under "Custom" the numbers that draw tiles or, drawing none, change RAM when the level loads. ObjecTool's custom extended objects (98–FF) are fixed-size objects.
+_Avoid_: custom normal object (ObjecTool's name), user defined object (Lunar Magic's), custom midway (only the Retry System's)
+
 **Object name**:
 What a resizable or fixed-size object is called in the picker, the properties, the status bar and the search (objectnames.ts). Built in only for the game's own numbers (standard 01–21, extended 00, 01, 10–97, and 2E–3F per object group), after Lunar Magic's descriptions; the free numbers are "Object XX" / "Extended object XX" (the editor's own 04, 05 excepted). The user may rename any object for the project, over the built-in name (editor data like a tile name; Reset brings the built-in one back).
 _Avoid_: description, tooltip (Lunar Magic's `.osc`), label
