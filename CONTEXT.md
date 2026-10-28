@@ -7,8 +7,12 @@ A browser-based editor for Super Mario World ROMs: levels, graphics and third-pa
 ### The editor's own patches
 
 **Editor patches**:
-The editor's own ASM in the ROM (SMWE, SMWV, SMWG, SMWP, SMWB, SMWU, SMWX, SMWH, SMWS, the ExAnimation engine, the layer 2 scroll rates, the level heights, SMWL's layer 3 graphics per level, the sprite scroll fix), installed into the clean ROM when it is opened; the editor relies on them and opens no other ROMs than the clean game and its own (ADR 0004). Only SMWM (message texts in free space) is installed when it is needed. Not third-party content and never part of a package.
+The editor's own ASM in the ROM (SMWE, SMWV, SMWG, SMWP, SMWB, SMWU, SMWX, SMWH, SMWS, the ExAnimation engine, the layer 2 scroll rates, the level heights, SMWL's layer 3 graphics per level, the sprite scroll fix, FastROM), installed into the clean ROM when it is opened; the editor relies on them and opens no other ROMs than the clean game and its own (ADR 0004). Only SMWM (message texts in free space) is installed when it is needed. Not third-party content and never part of a package.
 _Avoid_: Lunar Magic hacks, built-in patches
+
+**FastROM**:
+The game's code runs in the fast ROM banks ($80 and up), as in most community hacks and the code written for them; an editor patch, so every ROM the editor makes is FastROM. Not a package's part (Callisto's initial patch is left out).
+_Avoid_: speed patch, HiROM
 
 ### Editing
 
