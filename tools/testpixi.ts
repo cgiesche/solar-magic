@@ -430,6 +430,23 @@ print "MAIN ",pc
   check(!!statue && statue.w === 24 && statue.h === 24, `Bowser statue without its flame (${statue ? `${statue.w}x${statue.h}` : 'no image'})`);
 }
 
+// a sprite that draws itself and erases itself in its first frame (like the donut lift turning into its block
+// while Mario isn't on it): shown as it drew itself
+{
+  const enc = new TextEncoder();
+  const r = new Rom(EDITOR_IMAGE.slice());
+  const res = savePixiProject(r, { files: new Map([
+    ['sprites/gone.cfg', enc.encode('01\n36\n00 00 3B 80 00 00\n00 00\ngone.asm\n00:00\n')],
+    ['sprites/gone.asm', enc.encode(`print "INIT ",pc\n  RTL\nprint "MAIN ",pc\n  PHB : PHK : PLB\n  JSR Gfx\n  STZ !14C8,x\n  PLB\n  RTL\n${marker.slice(marker.indexOf('Gfx:'))}`)],
+  ]), list: parsePixiList('30 gone.cfg\n') });
+  if (!res.ok) console.log(res.errors.join('\n'));
+  const e = new LevelEmulator(r); e.boot();
+  const l = loadLevel(r, 0x105), bg = l.layer2Pointer >> 16 === 0xff ? l.layer2Pointer : 0xffd900;
+  const img = captureSprites(e, 0x105, l.header, l.spriteHeader, bg, [0x00, 0x230]).get(0x230);
+  check(res.ok && !!img && img.w === 16 && img.h === 16 && img.ox === 0 && img.oy === 0,
+    `sprite erasing itself at once: shown as it drew itself (${img ? `${img.w}x${img.h} at ${img.ox},${img.oy}` : 'no image'})`);
+}
+
 // removing restores the ROM
 const w = removePixi(prom);
 check(w.length === 0 && spriteSizes(prom) === null, 'removed: no size table');

@@ -675,9 +675,9 @@ export class App {
     const all = [...Array.from({ length: 0xe7 }, (_, i) => i), ...this.customSprites().map((c) => c.id)]; // as listed in the picker
     const lvNum = lv.number, bg = lv.layer2Pointer >> 16 === 0xff ? lv.layer2Pointer : 0xffd900;
     const header = { ...hd }, sh = lv.spriteHeader;
-    // i5: with the input; sprites from $C9 on (shells, groups), failed batches retried one by one, sprites
-    // that draw nothing shown by what they spawn
-    const stored = this.learner.learn(`i5${hd.spriteGfx}-${hd.spritePalette}`, function* (emu) {
+    // i6: with the input; sprites from $C9 on (shells, groups), failed batches retried one by one, sprites
+    // that draw nothing shown by what they spawn, sprites erasing themselves at once by what they drew
+    const stored = this.learner.learn(`i6${hd.spriteGfx}-${hd.spritePalette}`, function* (emu) {
       show(null);
       const images: [number, SpriteImage][] = [];
       for (let i = 0; i < all.length; i += 6) {

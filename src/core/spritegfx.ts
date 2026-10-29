@@ -136,6 +136,14 @@ export function captureSprites(
       // offset relative to the spawn tile, compensating for movement since spawn
       if (img) result.set(l.n, { ...img, ox: img.ox + cx - l.x, oy: img.oy + cy - l.y });
     });
+    // loaded alone and gone without an image (erased itself): the tiles it drew in its last frame alive
+    const p = placed[0];
+    if (batch.length === 1 && !result.has(p.id)) {
+      const k = [...rec.lastDrawn.keys()].find((i) => rec.spawner[i] < 0 && !w[SPR.status + i]);
+      const f = k === undefined ? null : rec.lastDrawn.get(k)!;
+      const img = f ? drawTiles(emu.snes, readOamBuffer(f.oam).filter((t) => f.owner[t.i] === k)) : null;
+      if (img) result.set(p.id, { ...img, ox: img.ox + f!.cx - spriteX(w, k!), oy: img.oy + f!.cy - spriteY(w, k!) });
+    }
     done += batch.length;
     onProgress?.(Math.min(nums.length, done));
   }
@@ -192,6 +200,9 @@ export class SlotTracker {
   // slots that lost a visible tile that way (the tile is missing on screen) and the slots that overwrote it
   private lost = new Set<number>();
   snapLost = this.lost;
+  // per slot the last frame it drew a visible tile in (that frame's OAM buffer, owners and camera): a sprite
+  // that erases itself in its first frames (the donut lift turning into a block) is shown as it drew itself
+  readonly lastDrawn = new Map<number, { oam: Uint8Array; owner: Int8Array; cx: number; cy: number }>();
   private hook: MemHook;
   private status = new Uint8Array(SPRITE_SLOTS); // as before the write the hook sees
   // each OAM entry's Y as before the write the hook sees (the hook comes after the write, and a sprite
@@ -219,6 +230,8 @@ export class SlotTracker {
           this.conflicts = new Set();
           this.snapLost = this.lost;
           this.lost = new Set();
+          const frame = { oam: this.snapOam, owner: this.snapOwner, cx: cameraX(s.wram), cy: cameraY(s.wram) };
+          for (const t of readOamBuffer(frame.oam)) if (frame.owner[t.i] >= 0) this.lastDrawn.set(frame.owner[t.i], frame);
         }
         if (a >= SPR.status && a < SPR.status + SPRITE_SLOTS) {
           const i = a - SPR.status;
