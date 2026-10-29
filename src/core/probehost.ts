@@ -10,7 +10,8 @@
 
 import { Rom, type RomRange } from './rom.ts';
 import { BlockProber, blockKey, collisionKey, spriteKey, runsKey, cameraKey } from './blockprobe.ts';
-import { gfxSkipMask } from './gfxpages.ts';
+import { displaySkipMask } from './gfxpages.ts';
+import { TILESETS, tilesetPointers, pointersKey } from './tilesets.ts';
 import { RomReads, type CacheEntry } from './romdeps.ts';
 import { LevelEmulator } from './levelemu.ts';
 import { ObjKindProbe, kindsKey, type KindLevel } from './objkinds.ts';
@@ -86,6 +87,8 @@ export class ProbeHost {
   private prefetch = new Map<string, ProbeJob>();
   private tasks = new Map<TaskType, Task>(); // taking turns
   private emus = new Map<TaskType, LevelEmulator>();
+  private ptrEmu: LevelEmulator | null = null; // learns the tilesets' Map16 pointers (pointers())
+  private ptrMask: { gen: number; mask: Uint8Array | null } = { gen: -1, mask: null };
   started = 0; // tasks (re)started
 
   // a new ROM (gen: the editor's count of changes); queued jobs and tasks are dropped
@@ -99,15 +102,41 @@ export class ProbeHost {
       this.rom.data = data;
       this.prober = new BlockProber(this.rom);
       const emu = this.prober.emu, rom = this.rom;
-      // ROM bytes of GFX file data: emulated results don't depend on them (see App.gfxSkipMask)
+      // ROM bytes of GFX file data, Map16 tile words and colors: what blocks do doesn't depend on them (see
+      // displaySkipMask)
       emu.skipMask = () => {
-        if (this.mask.gen !== rom.gen) this.mask = { gen: rom.gen, mask: gfxSkipMask(rom) };
+        if (this.mask.gen !== rom.gen) this.mask = { gen: rom.gen, mask: displaySkipMask(rom, this.pointers()) };
         return this.mask.mask;
       };
       return;
     }
     this.rom.data = data;
     this.prober.reset(); // probe levels that read changed pages are prepared again
+  }
+
+  // per tileset the pointers of FG Map16 tiles 000-1FF (tilesets.ts), as the editor learns them (App.tilesetPointerTable):
+  // kept in the result cache. Learned on an own emulator, as the mask is asked for while the prober's emulator runs (and
+  // what learning them reads isn't a dependency of that run), with the other display data left out (tilesetPointers
+  // leaves out the tiles it finds)
+  private pointers(): number[][] {
+    const rom = this.rom!, results = this.prober!.results, reads = rom.reads;
+    rom.reads = null;
+    try {
+      return Array.from({ length: TILESETS }, (_, ts) => {
+        const known = results.get<number[]>(pointersKey(ts));
+        if (known) return known;
+        if (!this.ptrEmu) {
+          this.ptrEmu = new LevelEmulator(rom);
+          this.ptrEmu.skipMask = () => {
+            if (this.ptrMask.gen !== rom.gen) this.ptrMask = { gen: rom.gen, mask: displaySkipMask(rom, []) };
+            return this.ptrMask.mask;
+          };
+        }
+        const { result, reads: r } = tilesetPointers(this.ptrEmu, ts);
+        results.set(pointersKey(ts), result, results.fp.deps(r));
+        return result;
+      });
+    } finally { rom.reads = reads; }
   }
 
   // The ROM changed (gen) by the bytes written at these offsets, to this size: queued jobs stay, a task that read

@@ -4,8 +4,8 @@
 // the queue and the tasks, restarting only a task that read a changed byte (overworld edits restart nothing).
 import { readFileSync } from 'node:fs';
 import { Rom, snesToPc } from '../src/core/rom.ts';
-import { BlockProber, blockKey, spriteKey } from '../src/core/blockprobe.ts';
-import { ProbeHost, PROBE_SPRITE, PROBE_RUNS, jobKey, type ProbeDone, type ProbeReply } from '../src/core/probehost.ts';
+import { BlockProber, blockKey, collisionKey, spriteKey, runsKey } from '../src/core/blockprobe.ts';
+import { ProbeHost, PROBE_SPRITE, PROBE_RUNS, PROBE_COLL, jobKey, type ProbeDone, type ProbeReply } from '../src/core/probehost.ts';
 import { ResultCache, RomFingerprint } from '../src/core/romdeps.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { ObjKindProbe, kindsKey, type ObjKinds } from '../src/core/objkinds.ts';
@@ -13,7 +13,12 @@ import { levelScanJob, type ScanLevel } from '../src/core/levelscan.ts';
 import { cameraAtJob } from '../src/core/camerareach.ts';
 import { loadLevel, serializeLayer1, serializeSprites, L2_PTRS } from '../src/core/level.ts';
 import { editorImage } from './fixture.ts';
-import { gfxSkipMask } from '../src/core/gfxpages.ts';
+import { gfxSkipMask, displaySkipMask } from '../src/core/gfxpages.ts';
+import { tilesetPointers, TILESETS } from '../src/core/tilesets.ts';
+import { setActsLike, extTileWords, setExtTileWords } from '../src/core/map16ext.ts';
+import { bgTileAddr } from '../src/core/bgmap16.ts';
+import { FG_PALS, BACK_AREA } from '../src/core/sharedpal.ts';
+import { setCustomPalette } from '../src/core/patches.ts';
 import { readL1, writeL1, readL2, writeL2, l1Index, l2Index, l2Pointers } from '../src/core/overworld.ts';
 
 const EDITOR_IMAGE = await editorImage(); // the fixture as the editor opens it
@@ -63,7 +68,10 @@ const scanLevel: ScanLevel = {
   ov: { layer1: serializeLayer1(rom, lv), sprites: serializeSprites(lv.sprites, lv.spriteHeader, false) },
 };
 const emu = new LevelEmulator(new Rom(file));
-const emuRom = new Rom(file); emu.skipMask = () => gfxSkipMask(emuRom); // as the host: GFX and ExAnimation data are no dependency
+const emuRom = new Rom(file), ptrEmu = new LevelEmulator(new Rom(file));
+ptrEmu.skipMask = () => displaySkipMask(ptrEmu.rom, []);
+const emuMask = displaySkipMask(emuRom, Array.from({ length: TILESETS }, (_, ts) => tilesetPointers(ptrEmu, ts).result));
+emu.skipMask = () => emuMask; // as the host: GFX and ExAnimation data, Map16 tile words and colors are no dependency
 const kindProbe = new ObjKindProbe(emu, { ...lv, header: { ...lv.header, tileset: 1 } }, l2), kinds = kindProbe.result();
 const job = levelScanJob(emu, scanLevel);
 let scanned; for (;;) { const r = job.next(); if (r.done) { scanned = r.value; break; } }
@@ -163,6 +171,53 @@ check(host.pending === 0, 'new ROM: tasks dropped');
   const sc = replies.find((d) => d.type === 'scan');
   check(sc?.type === 'scan' && sc.id === 5 && JSON.stringify(sc.result) === JSON.stringify(scanned), 'restarted scan as played directly, answering the latest request');
   check(replies.some((d) => d.type === 'kinds' && !d.failed) && replies.filter((d) => d.type === 'probe').length === 2, 'the kinds and the queued probes done');
+}
+
+// what blocks look like is no input of what they do: drawing a Map16 tile (FG of the tilesets' shared and own pages,
+// extended FG, BG) or changing colors (shared palettes, a level's own) drops no block, collision or sprite result; a
+// changed acts-like drops the results of that tile
+{
+  const r = new Rom(file), h = new ProbeHost(), ed = new ResultCache(new RomFingerprint(r));
+  h.setRom(1, r.data.slice());
+  const keep = (d: ProbeReply | null) => { for (const [k, e] of d?.put ?? []) ed.set(k, e.data, e.deps); return d; };
+  const tiles = [0x025, 0x040, 0x0a0, 0x130, 0x200];
+  const jobs = [...tiles.flatMap((t) => [{ ts: 0, k: t }, { ts: 0, k: PROBE_COLL | t }]), { ts: 0, k: PROBE_SPRITE | 0x0d }, { ts: 0, k: PROBE_RUNS }];
+  h.ask(jobs);
+  while (h.pending) keep(h.next());
+  const keys = [...tiles.flatMap((t) => [blockKey(0, t), collisionKey(0, t)]), spriteKey(0, 0x0d), runsKey(0)];
+  const ptrs = tilesetPointers(ptrEmu, 0).result;
+  let gen = 1;
+  const send = (change: () => void) => {
+    const g = r.gen;
+    change();
+    h.handle({ type: 'edit', gen: ++gen, size: r.size, edits: r.changesSince(g)!.map(([a, e]) => [a, r.data.slice(a, e)]) });
+  };
+  const prober = (h as unknown as { prober: BlockProber }).prober; // (its boot snapshot: booted again when replaced)
+  const edit = (what: string, change: () => void) => {
+    const boot = prober.emu.baseState;
+    send(change);
+    const lost = keys.filter((k) => ed.get(k) === undefined);
+    check(lost.length === 0, `${what}: no result dropped${lost.length ? ` (${lost.join(', ')})` : ''}`);
+    h.ask([{ ts: 0, k: 0x025 }]);
+    h.next();
+    check(prober.emu.baseState === boot, `${what}: not booted again`);
+    h.ask(jobs); // (the dropped ones again)
+    while (h.pending) keep(h.next());
+  };
+  const draw = (snes: number) => r.writeAt(snesToPc(snes), Uint8Array.of(r.r8(snes) ^ 0x41));
+  for (const t of [0x025, 0x040, 0x0a0, 0x130]) edit(`FG tile ${t.toString(16)} drawn`, () => draw(0x0d0000 | ptrs[t]));
+  edit('extended FG tile 200 drawn', () => setExtTileWords(r, 0x200, extTileWords(r, 0x200)!.map((w) => w ^ 0x4000)));
+  edit('BG tile 025 drawn', () => draw(bgTileAddr(r, 0x025)!));
+  edit('shared FG palette 0 changed', () => draw(FG_PALS + 2));
+  edit('back area color changed', () => draw(BACK_AREA));
+  const colors = new Uint8Array(0x200).fill(0x21);
+  edit('own palette of level 106 set', () => setCustomPalette(r, 0x106, colors));
+  edit('own palette of the probe level set', () => setCustomPalette(r, 0x105, colors));
+  edit('own palette of the probe level changed', () => setCustomPalette(r, 0x105, colors.map((c) => c ^ 3)));
+  edit('own palette of the probe level removed', () => setCustomPalette(r, 0x105, null));
+
+  send(() => setActsLike(r, 0x025, 0x130));
+  check(ed.get(blockKey(0, 0x025)) === undefined && ed.get(collisionKey(0, 0x025)) === undefined, 'acts-like of 025 changed: its results dropped');
 }
 
 // a new size: a new ROM (queue dropped)

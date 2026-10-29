@@ -513,6 +513,7 @@ export function installCustomPalettePatch(rom: Rom): { base: number; table: numb
   return customPalettePatch(rom)!;
 }
 
+export const PALETTE_SIZE = 0x200; // a level's own colors: 256 (color 0 the back area color)
 const palettes = (rom: Rom) => customPalettePatch(rom) ?? missingPatch('Level palettes (SMWP)');
 export function customPalette(rom: Rom, level: number): number {
   return rom.r24(palettes(rom).table + level * 3);

@@ -56,7 +56,7 @@ import { map16Tile, bgTile } from '../core/ram.ts';
 import { exanimTiles, exanimColors, exanimPeriod, readLevelList, readGlobalList } from '../core/exanim.ts';
 import { emptyTriggerView, usedTriggers, initTriggers, type TriggerView, type SlotRef } from '../core/extrigger.ts';
 import { LevelUses, levelTilesAll, levelOverride, usedLevels, spriteUsage, isTilesetTile, type LevelTiles, type SpriteUser } from '../core/levelusage.ts';
-import { TILESETS, tilesetPointers, sharingTilesets } from '../core/tilesets.ts';
+import { TILESETS, tilesetPointers, sharingTilesets, pointersKey } from '../core/tilesets.ts';
 import { slipperyActions } from '../core/slippery.ts';
 import { pathKindsJob, type PathKind } from '../core/owpaths.ts';
 
@@ -1101,7 +1101,7 @@ export class App {
   }
   // per tileset the pointers of FG Map16 tiles 000-1FF (tilesets.ts), learned once and kept in the result cache
   tilesetPointerTable(): number[][] {
-    return Array.from({ length: TILESETS }, (_, ts) => this.learner.now(`tsp1:${ts}`, (emu) => tilesetPointers(emu, ts)));
+    return Array.from({ length: TILESETS }, (_, ts) => this.learner.now(pointersKey(ts), (emu) => tilesetPointers(emu, ts)));
   }
   // the entrance actions that make a level slippery (slippery.ts), learned once and kept in the result cache
   slipperyActions(): number[] {

@@ -20,6 +20,9 @@ function probe(rom: Rom, ts: number): LevelOverride {
   return { layer1: Uint8Array.of(h[0], h[1], h[2], h[3], (h[4] & 0xf0) | ts, 0xff), sprites: Uint8Array.of(0, 0xff) };
 }
 
+// the result cache key of tilesetPointers
+export const pointersKey = (ts: number) => `tsp1:${ts}`;
+
 // The pointers of FG Map16 tiles 000-1FF ($0FBE) as a level of tileset ts loads them, and what the load
 // read. The reads leave out the tiles' 8x8 data (the pointers don't depend on it, so editing a tile
 // keeps the result): a first load finds where it is. Not on top of the boot's reads: the title screen's
