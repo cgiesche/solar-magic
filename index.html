@@ -36,7 +36,7 @@
     "operatingSystem": "Web browser, Windows, macOS, Linux",
     "description": "A free level editor for Super Mario World (SNES) that runs in the browser: edit levels, the overworld, graphics, palettes and music, and play-test ROM hacks instantly.",
     "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
-    "featureList": ["Level editing", "Overworld editing", "Graphics and palette editing", "Prefabs: linked, reusable groups of Map16 tiles", "Instant play-testing with sound", "Asar patches, UberASM, GPS blocks, PIXI sprites and AddmusicK music", "Lunar Magic level files", "Desktop app for Windows, macOS and Linux"]
+    "featureList": ["Level editing", "Overworld editing", "Graphics and palette editing", "Prefabs: linked, reusable groups of Map16 tiles", "Test play with sound, starting at any position", "Level checks: missing exits, slowdown, misplaced sprites", "Asar patches, UberASM, GPS blocks, PIXI sprites and AddmusicK music", "Lunar Magic level files", "Desktop app for Windows, macOS and Linux"]
   }
   </script>
   <script type="application/ld+json">
@@ -145,9 +145,27 @@
             <h3>Test play</h3>
             <p><kbd>T</kbd> starts the current level in the built-in emulator, with sound. Keyboard and gamepad are supported.</p>
             <ul>
+              <li><kbd>Shift</kbd>+<kbd>T</kbd> starts with Mario at the mouse position</li>
               <li>CPU load, lag frames and sprite slots per frame</li>
               <li>Death markers: where Mario died and what killed him</li>
               <li>Save states</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="landing-row">
+          <a class="landing-shot" href="/screens/problems.webp" data-caption="The problem list of a level: a missing exit, sprites that fall out, incomplete sprites">
+            <img src="/screens/problems.webp" width="870" height="420" loading="lazy" alt="The problem list in the status bar with a missing exit, falling sprites and a sprite memory warning" />
+          </a>
+          <div>
+            <h3>Level checks</h3>
+            <p>The editor checks the open level while you work and lists what it finds in the status bar. Clicking an entry shows the place in the level. Some checks play the level through in the background.</p>
+            <ul>
+              <li>Pipes and doors without an exit, exits without a pipe or door, exits to secondary entrances that are not set up</li>
+              <li>Slowdown per screen</li>
+              <li>Sprites that fall out of the level right after appearing or are stuck between blocks</li>
+              <li>Sprites drawn incompletely because of the sprite memory setting, with a fix</li>
+              <li>More than 128 sprites; objects, sprites or exits beyond the last screen</li>
             </ul>
           </div>
         </div>
