@@ -5,6 +5,7 @@ import { h, attachPanZoom, toast } from './dom.ts';
 import { downloadBytes } from './platform.ts';
 import { hex2, hex3 } from '../core/names.ts';
 import { resizeObjectSize } from '../core/objkinds.ts';
+import { KILL_FILL, HURT_FILL, CLIMB_FILL, SPIKE_COLOR, NET_COLOR, spikeRow, netTile, drawSkull } from './collisionmarks.ts';
 import { probeAt, spriteProbeAt, enterText, collisionText, type PosProbe, type CollisionProbe } from '../core/blockprobe.ts';
 import { type LevelObject, type LevelSprite, newUid, serializeLayer1, serializeLayer2, serializeLevelSprites, spriteSizes, spriteId, EXIT_NEW } from '../core/level.ts';
 import { overworldExitText } from '../core/owteleport.ts';
@@ -44,8 +45,6 @@ const ARC_STYLE: Record<ArcSpeed, { color: string; label: string; dash?: boolean
 };
 
 // the game view's scroll bands: X bands are columns of the frame, Y bands rows; the look-ahead ones outlined
-// tiles that kill in the collision overlay, 8x8 px drawn in the middle of the tile
-const SKULL = ['..XXXX..', '.XXXXXX.', 'XXXXXXXX', 'X..XX..X', 'X..XX..X', 'XXXX.XXX', '.XXXXXX.', '.X.XX.X.'];
 const BAND_STYLE: Record<keyof CameraBands, { color: string; label: string; axis: 'x' | 'y'; look?: boolean }> = {
   right: { color: '255,60,60', label: 'scrolling right', axis: 'x' },
   left: { color: '60,220,90', label: 'scrolling left', axis: 'x' },
@@ -765,24 +764,17 @@ export class LevelView {
       const c = at(x, y);
       if (!c) continue;
       const px = x * 16, py = y * 16;
-      const fill = c.kills ? 'rgba(255,30,30,0.6)' : c.hurtsTop || c.hurtsSide ? 'rgba(255,70,70,0.4)'
-        : c.water ? 'rgba(60,140,255,0.35)' : c.climb ? 'rgba(60,220,90,0.35)' : null;
+      const fill = c.kills ? KILL_FILL : c.hurtsTop || c.hurtsSide ? HURT_FILL
+        : c.water ? 'rgba(60,140,255,0.35)' : c.climb ? CLIMB_FILL : null;
       if (fill) { ctx.fillStyle = fill; ctx.fillRect(px, py, 16, 16); }
       if (c.kills) skulls.push([px, py]);
       else {
         // spikes on the sides that hurt, where they face something Mario can come from
-        if (c.hurtsTop && !at(x, y - 1)?.bottom) this.spikeRow(spikes, px, py, 0);
-        if (c.hurtsSide && !at(x - 1, y)?.right) this.spikeRow(spikes, px, py, 1);
-        if (c.hurtsSide && !at(x + 1, y)?.left) this.spikeRow(spikes, px, py, 2);
+        if (c.hurtsTop && !at(x, y - 1)?.bottom) spikeRow(spikes, px, py, 0);
+        if (c.hurtsSide && !at(x - 1, y)?.right) spikeRow(spikes, px, py, 1);
+        if (c.hurtsSide && !at(x + 1, y)?.left) spikeRow(spikes, px, py, 2);
       }
-      if (c.climb) {
-        // diagonals every 8 px, which join into a net across neighboring tiles
-        for (const d of [0, 8]) {
-          net.moveTo(px + d, py); net.lineTo(px + 16, py + 16 - d);
-          net.moveTo(px + 16 - d, py); net.lineTo(px, py + 16 - d);
-          if (d) { net.moveTo(px, py + d); net.lineTo(px + 16 - d, py + 16); net.moveTo(px + 16, py + d); net.lineTo(px + d, py + 16); }
-        }
-      }
+      if (c.climb) netTile(net, px, py);
       if (c.slope) {
         // the surface within the tile (steep slopes measure beyond it)
         const [l, r] = c.slope, k = (r - l) / 16, xAt = (yy: number) => (yy - l) / k;
@@ -815,25 +807,12 @@ export class LevelView {
     ctx.stroke(platLines);
     ctx.setLineDash([]);
     ctx.lineWidth = lw / 2;
-    ctx.strokeStyle = 'rgba(150,255,170,0.8)';
+    ctx.strokeStyle = NET_COLOR;
     ctx.stroke(net);
-    ctx.fillStyle = '#ffd24a';
+    ctx.fillStyle = SPIKE_COLOR;
     ctx.fill(spikes);
     ctx.fillStyle = '#fff';
-    for (const [px, py] of skulls) {
-      SKULL.forEach((row, j) => [...row].forEach((ch, i) => { if (ch === 'X') ctx.fillRect(px + 4 + i, py + 4 + j, 1, 1); }));
-    }
-  }
-
-  // three spikes along a side of the tile at (px, py), pointing out of it: 0 top, 1 left, 2 right
-  private spikeRow(p: Path2D, px: number, py: number, side: number): void {
-    for (const o of [0, 5, 10]) {
-      const a = o + 0.5, m = o + 3, b = o + 5.5; // along the side
-      const pts = side === 0 ? [[a, 4], [m, 0], [b, 4]] : side === 1 ? [[4, a], [0, m], [4, b]] : [[12, a], [16, m], [12, b]];
-      p.moveTo(px + pts[0][0], py + pts[0][1]);
-      for (const [qx, qy] of pts.slice(1)) p.lineTo(px + qx, py + qy);
-      p.closePath();
-    }
+    for (const [px, py] of skulls) drawSkull(ctx, px, py);
   }
 
   // Water of a layer 3 tide (see App.tide): in the collision overlay the area Mario swims in is

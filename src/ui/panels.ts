@@ -31,6 +31,7 @@ import { tileMatches, drawTileMatches } from './tilesearch.ts';
 import { matchesAll, type SearchProvider, type SearchResult } from './search.ts';
 import { blockFilesByTile } from './blockdialog.ts';
 import { contextMenu } from './menu.ts';
+import { collisionMarks, markCanvas, MARK_TEXT, type CollisionMark } from './collisionmarks.ts';
 
 // behaviour of the given Map16 tiles when hit from below or entered (only tiles with an effect);
 // undefined while probes are still pending
@@ -60,6 +61,11 @@ export function blockEnter(app: App, tiles: number[]): string {
   const dirs = new Set<string>();
   for (const t of tiles.slice(0, 16)) for (const d of app.cachedBlock(t)?.enter ?? '') dirs.add(d);
   return [...'↓↑←→'].filter((d) => dirs.has(d)).join('');
+}
+
+// how any of the tiles treats Mario (kills, hurts, climbable), from finished probes only
+export function blockMarks(app: App, tiles: number[]): CollisionMark[] {
+  return collisionMarks(tiles.slice(0, 16).map((t) => app.cachedCollision(t)));
 }
 
 // the levels with sprite id, each opening at its first one
@@ -560,16 +566,18 @@ export class Picker {
       const sum = tiles.length ? blockSummary(app, tiles) : [];
       const effect = this.effects.get(key);
       const tip = objectTooltip(app.rom, s.num, s.extension?.[0] ?? s.ext);
+      const marks = blockMarks(app, tiles);
       const info = (tiles.length ? `\nMap16 ${tiles.slice(0, 8).map(hex3).join(' ')}${tiles.length > 8 ? ' …' : ''}` : '')
         + (tip ? '\n' + tip : effect ? `\nDraws nothing; when the level loads, it ${effect}` : '')
-        + (sum === undefined ? '\n(determining behavior …)' : sum.map((x) => '\n' + x).join(''));
+        + (sum === undefined ? '\n(determining behavior …)' : sum.map((x) => '\n' + x).join(''))
+        + (marks.length ? `\nTouching it: ${marks.map((m) => MARK_TEXT[m]).join(', ')}` : '');
       if (effect && !this.boxes.has(key)) this.boxes.set(key, objectBoxCanvas(boxLabel(s)));
       const th = this.thumbs.get(key) ?? this.boxes.get(key);
       // invalid extended objects and custom numbers produce nothing
       if (!th && !effect && section !== 'obj' && this.thumbsFrom) continue;
       out.push({
         s, vt, label, name, th, title: `${label}: ${name}${info}`, behavior: sum?.join(' · ') ?? '', text: `${label} ${name} ${info}`.toLowerCase(),
-        items: blockSprites(app, tiles), enter: blockEnter(app, tiles),
+        items: blockSprites(app, tiles), enter: blockEnter(app, tiles), marks,
         item: { kind: 'obj', num: s.num, ext: s.ext, size: s.size, ...(s.extension ? { extension: [...s.extension] } : {}) } as PickedItem,
       });
     }
@@ -812,7 +820,8 @@ export class Picker {
             app.choosePickedItem(e.item);
           },
         }, h('div', { class: 'picker-img' }, th?.c ?? h('span', { class: 'none' }, '–'),
-          h('div', { class: 'picker-corner' }, itemBadge(app, e.items), e.enter ? h('div', { class: 'picker-enter', title: enterText(e.enter) }, e.enter) : '')),
+          h('div', { class: 'picker-corner' }, itemBadge(app, e.items), e.enter ? h('div', { class: 'picker-enter', title: enterText(e.enter) }, e.enter) : '',
+            e.marks.length ? h('div', { class: 'picker-items', title: e.marks.map((m) => MARK_TEXT[m]).join(', ') }, ...e.marks.map(markCanvas)) : '')),
           h('div', { class: 'picker-label' }, e.label), h('div', { class: 'picker-name' }, s.extension ? e.name : app.objectName(s.num, s.ext))));
         if (renames) this.keysOn(cell, () => renameObject(app, s.num, s.ext));
         if (e.th) previewOnHover(cell, th!.scale, () => cloneCanvas(e.th!), () => (e.title + hint).split('\n'));

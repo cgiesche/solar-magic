@@ -93,9 +93,9 @@ export class ProbeClient {
     });
   }
 
-  // Probes everything the palette tabs can show (Map16 tiles 000-1FF plus `tiles`, all sprites) in
-  // the background, after what is asked for directly; results go to the cache, so this runs once
-  // per tileset and ROM state.
+  // Probes everything the palette tabs can show (Map16 tiles 000-1FF plus `tiles`, all sprites; how
+  // Mario collides with `tiles`) in the background, after what is asked for directly; results go to
+  // the cache, so this runs once per tileset and ROM state.
   prefetch(tiles: Iterable<number> = []): void {
     this.d.cacheReady.then(() => {
       this.sync();
@@ -106,7 +106,7 @@ export class ProbeClient {
         const job = { ts, k }, id = jobId(job);
         if (!this.failed.has(id) && !this.asked.has(id) && this.d.results.get(jobKey(job)) === undefined) jobs.set(id, job);
       };
-      for (const t of tiles) add(t);
+      for (const t of tiles) { add(t); add(PROBE_COLL | t); }
       for (let t = 0; t < 0x200; t++) add(t);
       for (let n = 0; n < SPRITE_PROBE_END; n++) add(PROBE_SPRITE | n);
       if (!jobs.size && !this.prefetched.size) return;
