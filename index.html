@@ -36,7 +36,7 @@
     "operatingSystem": "Web browser, Windows, macOS, Linux",
     "description": "A free level editor for Super Mario World (SNES) that runs in the browser: edit levels, the overworld, graphics, palettes and music, and play-test ROM hacks instantly.",
     "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
-    "featureList": ["Level editing", "Overworld editing", "Graphics and palette editing", "Prefabs: linked, reusable groups of Map16 tiles", "Test play with sound, starting at any position", "Level checks: missing exits, slowdown, misplaced sprites", "Asar patches, UberASM, GPS blocks, PIXI sprites and AddmusicK music", "Lunar Magic level files", "Desktop app for Windows, macOS and Linux"]
+    "featureList": ["Level editing", "Overworld editing", "Graphics and palette editing", "Prefabs: linked, reusable groups of Map16 tiles", "Test play with sound, starting at any position", "Level checks: missing exits, slowdown, misplaced sprites", "Block behavior found by emulation, including custom blocks", "Asar patches, UberASM, GPS blocks, PIXI sprites and AddmusicK music", "Lunar Magic level files", "Desktop app for Windows, macOS and Linux"]
   }
   </script>
   <script type="application/ld+json">
@@ -171,6 +171,23 @@
         </div>
 
         <div class="landing-row">
+          <a class="landing-shot" href="/screens/blocks.webp" data-caption="Custom ? blocks of the Romhack Races baserom: what each one gives, found by emulation, shown over the block">
+            <img src="/screens/blocks.webp" width="1200" height="600" loading="lazy" alt="Custom question blocks in a level, each with the item it gives drawn over it" />
+          </a>
+          <div>
+            <h3>Block behavior from the game itself</h3>
+            <p>What a block does is found out by running the game in an emulator: Mario hits it from below, lands on it, walks against it and tries to enter it. There are no lists of known tile numbers, so the game's blocks, patched blocks and custom GPS blocks are handled the same way.</p>
+            <ul>
+              <li>What a block gives when hit, drawn over the block in the level</li>
+              <li>Collision overlay: solid, passable, slopes, deadly</li>
+              <li>Pipes and doors that can be entered, with their direction</li>
+              <li>What a sprite gives when hit or jumped on</li>
+              <li>Jump arcs (<kbd>J</kbd>) from Mario's measured speeds</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="landing-row">
           <a class="landing-shot" href="/screens/graphics.webp" data-caption="The graphics workspace: Map16 tiles, the tile editor and a live preview of the level">
             <img src="/screens/graphics.webp" width="1600" height="1000" loading="lazy" alt="The graphics workspace with the Map16 tiles, the tile editor and a level preview" />
           </a>
@@ -215,7 +232,7 @@
         <ul class="landing-compat">
           <li><strong>Asar</strong><span>patches</span></li>
           <li><strong>UberASM Tool</strong><span>level, game mode and global code</span></li>
-          <li><strong>GPS</strong><span>custom blocks</span></li>
+          <li><strong>GPS</strong><span>custom blocks, their behavior found by emulation</span></li>
           <li><strong>PIXI</strong><span>custom sprites</span></li>
           <li><strong>AddmusicK</strong><span>songs and sound effects</span></li>
           <li><strong>Callisto</strong><span>projects such as the Romhack Races baserom</span></li>
