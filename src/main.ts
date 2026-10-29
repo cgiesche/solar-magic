@@ -39,8 +39,11 @@ window.addEventListener('unhandledrejection', (e) => log(`Unexpected error: ${e.
 
 // the start page is static HTML in index.html (readable for search engines); kept to show it again after “Close project”
 const landing = root.querySelector<HTMLElement>('.landing')!;
-landing.querySelector('#landing-open-rom')!.addEventListener('click', openRomFile);
+landing.querySelector('#landing-new-project')!.addEventListener('click', openRomFile);
 landing.querySelector('#landing-open-project')!.addEventListener('click', openProjectFile);
+
+// the desktop app hides the start page's download of itself
+if (desktop) document.documentElement.classList.add('desktop');
 
 function welcome(): void {
   clear(root);
