@@ -4,7 +4,7 @@ import { App, isBrushMode, type Marker, type LevelEdit, type Brush, type Preview
 import { h, attachPanZoom, toast } from './dom.ts';
 import { downloadBytes } from './platform.ts';
 import { hex2, hex3 } from '../core/names.ts';
-import { resizeObjectSize } from '../core/objkinds.ts';
+import { aimResize, type Grab, type Drivers } from '../core/objresize.ts';
 import { KILL_FILL, HURT_FILL, CLIMB_FILL, SPIKE_COLOR, NET_COLOR, spikeRow, netTile, drawSkull, switchMarks, drawSwitchMarks } from './collisionmarks.ts';
 import { probeAt, spriteProbeAt, enterText, collisionText, collisionIn, switchText, SWITCH_STATES, SWITCH_NAME, type PosProbe, type CollisionCore, type SwitchState } from '../core/blockprobe.ts';
 import { type LevelObject, type LevelSprite, newUid, serializeLayer1, serializeLayer2, serializeLevelSprites, spriteSizes, spriteId, EXIT_NEW } from '../core/level.ts';
@@ -30,7 +30,7 @@ import { loadDeaths, killerText, killerTile, levelVersion, type DeathMark } from
 
 type Drag =
   | { kind: 'move'; edit: LevelEdit; startTx: number; startTy: number; lastDx: number; lastDy: number; orig: Map<number, { x: number; y: number }> }
-  | { kind: 'resize'; edit: LevelEdit; startTx: number; startTy: number; origSize: Map<number, number>; lastDw: number; lastDh: number }
+  | { kind: 'resize'; edit: LevelEdit; grab: Grab; uid: number; orig: Map<number, { x: number; y: number; size: number; drivers: Drivers }>; last: string; changed: boolean }
   | { kind: 'band'; x0: number; y0: number; x1: number; y1: number; add: boolean; far: boolean } // far: dragged, not a click
   | { kind: 'marker'; edit: LevelEdit | null; marker: Marker; offX: number; offY: number; moved: boolean } // (secondary entrances: not a level edit)
   | { kind: 'paint'; edit: LevelEdit; changed: boolean; x0: number; y0: number; lastX: number; lastY: number } // BG/layer 3 brush, stamped on a grid of cells from (x0, y0)
@@ -108,6 +108,7 @@ export class LevelView {
     app.on('mode', () => { if (!this.hover) this.idleStatus(); });
     app.on('rom-change', () => this.problems.update());
     app.on('arcs', () => this.requestPaint());
+    app.on('sizes', () => { this.requestPaint(); if (this.hover) this.updateCursor(this.hover.px, this.hover.py, this.hover.top); });
     app.on('placement-preview', () => this.requestPaint());
     app.on('picked-item', () => { this.lastPreview = null; this.requestPaint(); });
     app.on('game-view', () => this.requestPaint());
@@ -314,6 +315,7 @@ export class LevelView {
     if (app.mode === 'l1' || app.mode === 'l2') {
       const sel = app.selectedObjects();
       for (const o of sel) this.outlineObject(ctx, o, '#4cc2ff', lw);
+      for (const o of this.handleObjects()) this.paintHandles(ctx, o, lw);
     }
     // hover
     if (this.hover && !this.drag) {
@@ -527,10 +529,19 @@ export class LevelView {
     // origin marker
     ctx.fillStyle = color;
     ctx.fillRect(o.x * 16, o.y * 16, 4, 4);
-    if (this.app.selection.size === 1 && this.app.selection.has(o.uid) && (o.num !== 0 || isDm16(o))) {
-      const b = this.app.objectBounds(o), hs = this.handleSize();
-      ctx.fillStyle = '#4cc2ff';
-      ctx.fillRect(b.x1 * 16 + 11, b.y1 * 16 + 11, hs, hs);
+  }
+
+  // resize handles on the corners and the middles of the edges, those of the axes the object can be resized on
+  paintHandles(ctx: CanvasRenderingContext2D, o: LevelObject, lw: number): void {
+    const b = this.app.objectBounds(o), d = this.app.resizeDrivers(o), hs = this.handleSize();
+    const xs = [b.x0 * 16, (b.x0 + b.x1 + 1) * 8, (b.x1 + 1) * 16], ys = [b.y0 * 16, (b.y0 + b.y1 + 1) * 8, (b.y1 + 1) * 16];
+    ctx.fillStyle = '#4cc2ff';
+    ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+    ctx.lineWidth = lw;
+    for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) {
+      if ((i === 1 && j === 1) || (i !== 1 && !d.x) || (j !== 1 && !d.y)) continue;
+      ctx.fillRect(xs[i] - hs / 2, ys[j] - hs / 2, hs, hs);
+      ctx.strokeRect(xs[i] - hs / 2, ys[j] - hs / 2, hs, hs);
     }
   }
 
@@ -1021,11 +1032,20 @@ export class LevelView {
       app.selectScreen(app.vertical ? ty >> 4 : tx >> 4);
       return;
     }
-    // resize handle?
+    // resize handle? (all selected objects resized on the grabbed edges, their sizes emulated first)
     const ho = this.handleAt(px, py);
     if (ho) {
-      this.drag = { kind: 'resize', edit: app.beginLevelEdit(), startTx: tx, startTy: ty, origSize: new Map([[ho.uid, ho.size]]), lastDw: 0, lastDh: 0 };
-      return;
+      const objs = app.selectedObjects().filter((o) => app.resizable(o));
+      app.probeSizes(objs);
+      const d = app.resizeDrivers(ho.o);
+      const grab: Grab = { hx: d.x ? ho.grab.hx : 0, hy: d.y ? ho.grab.hy : 0 };
+      if (grab.hx || grab.hy) {
+        const orig = new Map(objs.map((o) => [o.uid, { x: o.x, y: o.y, size: o.size, drivers: app.resizeDrivers(o) }]));
+        this.drag = { kind: 'resize', edit: app.beginLevelEdit(), grab, uid: ho.o.uid, orig, last: '', changed: false };
+        this.updateCursor(px, py, -1);
+        this.resizeStatus();
+        return;
+      }
     }
     const hits = app.hitsAt(px, py);
     if (e.ctrlKey) {
@@ -1116,14 +1136,26 @@ export class LevelView {
       if (app.mode === 'spr') app.changed(false);
       else this.scheduleRefresh();
     } else if (d.kind === 'resize') {
-      const dw = tx - d.startTx, dh = ty - d.startTy;
-      if (dw === d.lastDw && dh === d.lastDh) return;
-      d.lastDw = dw; d.lastDh = dh;
-      for (const o of app.selectedObjects()) {
-        const s0 = d.origSize.get(o.uid);
-        if (s0 === undefined) continue;
-        o.size = resizeObjectSize(app.objectKind(o.num), s0, dw, dh);
+      // the grabbed object aims at the mouse, the others move the same edges by as many tiles
+      const { w, h } = app.objectLimits(), g = d.grab;
+      const objs = app.selectedObjects().filter((o) => d.orig.has(o.uid));
+      const edges = (o: LevelObject) => {
+        const or = d.orig.get(o.uid)!, b = app.sizeBoxes(o)(or.size);
+        return b ? { x: or.x + (g.hx === 1 ? b.x1 : b.x0), y: or.y + (g.hy === 1 ? b.y1 : b.y0) } : null;
+      };
+      const aim = (o: LevelObject, ax: number, ay: number) => { const or = d.orig.get(o.uid)!; return aimResize(or, or.drivers, app.sizeBoxes(o), g, ax, ay, w, h); };
+      const grabbed = objs.find((o) => o.uid === d.uid), ge = grabbed && edges(grabbed), gr = grabbed && aim(grabbed, tx, ty);
+      if (!grabbed || !ge || !gr) return;
+      const dx = (g.hx === 1 ? gr.box.x1 : gr.box.x0) - ge.x, dy = (g.hy === 1 ? gr.box.y1 : gr.box.y0) - ge.y;
+      for (const o of objs) {
+        const e0 = o === grabbed ? ge : edges(o), r = o === grabbed ? gr : e0 && aim(o, e0.x + dx, e0.y + dy);
+        if (r) { o.x = r.x; o.y = r.y; o.size = r.size; }
       }
+      const key = objs.map((o) => `${o.x},${o.y},${o.size}`).join(' ');
+      if (key === d.last) return;
+      d.last = key;
+      d.changed = objs.some((o) => { const or = d.orig.get(o.uid)!; return o.x !== or.x || o.y !== or.y || o.size !== or.size; });
+      this.resizeStatus();
       this.scheduleRefresh();
     }
   }
@@ -1185,7 +1217,7 @@ export class LevelView {
       return;
     }
     if (d.kind === 'move') { if (d.lastDx || d.lastDy) d.edit.commit(); else d.edit.cancel(); return; }
-    if (d.kind === 'resize') { if (d.lastDw || d.lastDh) d.edit.commit(); else d.edit.cancel(); return; }
+    if (d.kind === 'resize') { if (d.changed) d.edit.commit(); else d.edit.cancel(); return; }
   }
 
   // Esc while dragging: the drag undone (moving, resizing, painting, a level entrance) or dropped (a selection
@@ -1228,6 +1260,7 @@ export class LevelView {
     const app = this.app;
     const g = app.images.geom1;
     this.pos.textContent = `X ${hex3(tx)}  Y ${hex3(ty)}  Screen ${hex2(app.vertical ? ty >> 4 : tx >> 4)}`;
+    if (this.drag?.kind === 'resize') { this.resizeStatus(); return; }
     if (app.mode === 'l3') {
       const c = this.hover ? this.cellAt(this.hover.px, this.hover.py) : { x: 0, y: 0 }, t = app.l3At(c.x, c.y), b = app.l3Brush;
       const tile = layer3WordText;
@@ -1282,31 +1315,58 @@ export class LevelView {
     this.status.textContent = txt.replace(/^\s*·\s*/, '');
   }
 
-  // the resize handle stays ~8 screen pixels at any zoom
+  // the resize handles stay ~7 screen pixels at any zoom
   handleSize(): number {
-    return Math.max(5, 8 / this.app.zoom);
+    return 7 / this.app.zoom;
   }
-  // the selected object whose resize handle is at the pixel
-  handleAt(px: number, py: number): LevelObject | null {
+  // the selected objects that show resize handles: all up to 32 selected, else the one under the mouse
+  handleObjects(): LevelObject[] {
     const app = this.app;
-    if ((app.mode !== 'l1' && app.mode !== 'l2') || app.selection.size !== 1) return null;
-    const o = app.selectedObjects()[0];
-    if (!o || (o.num === 0 && o.ext !== 2)) return null;
-    const b = app.objectBounds(o), hs = this.handleSize();
-    const hx = b.x1 * 16 + 11, hy = b.y1 * 16 + 11;
-    return px >= hx - 2 && px <= hx + hs + 2 && py >= hy - 2 && py <= hy + hs + 2 ? o : null;
+    if (app.mode !== 'l1' && app.mode !== 'l2') return [];
+    const objs = app.selectedObjects().filter((o) => app.resizable(o));
+    if (objs.length <= 32) return objs;
+    const d = this.drag, top = this.hover?.top;
+    return objs.filter((o) => (d?.kind === 'resize' ? o.uid === d.uid : o.uid === top));
+  }
+  // The object whose resize handle is at the pixel and the edges it grabs: each edge along its whole length, in a
+  // band reaching a little inside the object and more outside (its inside stays for moving), the corners where
+  // two meet; the topmost object first. Only the axes the object can be resized on.
+  handleAt(px: number, py: number): { o: LevelObject; grab: Grab } | null {
+    const u = 1 / this.app.zoom, objs = this.handleObjects();
+    const side = (p: number, a: number, b: number): -1 | 0 | 1 | null =>
+      p >= a - 5 * u && p < a + 2 * u ? -1 : p > b - 2 * u && p <= b + 5 * u ? 1 : p >= a && p <= b ? 0 : null;
+    for (let i = objs.length - 1; i >= 0; i--) {
+      const o = objs[i], b = this.app.objectBounds(o), d = this.app.resizeDrivers(o);
+      const sx = side(px, b.x0 * 16, (b.x1 + 1) * 16), sy = side(py, b.y0 * 16, (b.y1 + 1) * 16);
+      if (sx === null || sy === null) continue;
+      const hx = d.x ? sx : 0, hy = d.y ? sy : 0;
+      if (hx || hy) return { o, grab: { hx, hy } };
+    }
+    return null;
+  }
+  // the cursor of resizing on edges
+  resizeCursor(g: Grab): string {
+    return !g.hx ? 'ns-resize' : !g.hy ? 'ew-resize' : g.hx === g.hy ? 'nwse-resize' : 'nesw-resize';
+  }
+  // the size and tiles of the grabbed object while resizing
+  resizeStatus(): void {
+    const d = this.drag;
+    if (d?.kind !== 'resize') return;
+    const o = this.app.selectedObjects().find((o) => o.uid === d.uid), b = o && this.app.sizeBoxes(o)(o.size);
+    if (!o || !b) return;
+    this.status.textContent = `Resizing: size ${hex2(o.size)} · ${b.x1 - b.x0 + 1}×${b.y1 - b.y0 + 1} tiles`;
   }
   // what a click would do, shown by the cursor
   updateCursor(px: number, py: number, top: number): void {
     const app = this.app, d = this.drag;
-    let c = '';
-    if (d?.kind === 'resize') c = 'nwse-resize';
+    let c = '', ho: ReturnType<LevelView['handleAt']>;
+    if (d?.kind === 'resize') c = this.resizeCursor(d.grab);
     else if (d?.kind === 'marker' || d?.kind === 'move' || d?.kind === 'gameView') c = 'grabbing';
     else if (this.gameViewGrab(px, py)) c = 'grab';
     else if (this.brushMode()) c = 'crosshair';
     else if (this.markerAt(px, py)) c = 'grab';
     else if (app.mode === 'exit') c = 'pointer';
-    else if (this.handleAt(px, py)) c = 'nwse-resize';
+    else if ((ho = this.handleAt(px, py))) c = this.resizeCursor(ho.grab);
     else if (top >= 0 && app.selection.has(top)) c = 'move';
     this.scroller.style.cursor = c;
   }

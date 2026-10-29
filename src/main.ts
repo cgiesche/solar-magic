@@ -444,7 +444,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
       if (!app.selection.size) return;
       e.preventDefault();
       const dx = k === 'ArrowLeft' ? -1 : k === 'ArrowRight' ? 1 : 0, dy = k === 'ArrowUp' ? -1 : k === 'ArrowDown' ? 1 : 0;
-      if (e.altKey) app.resizeSelection(dx, dy);
+      if (e.altKey) app.resizeSelection(e.shiftKey ? -dx : dx, e.shiftKey ? -dy : dy, e.shiftKey); // (Shift: the left/top edges)
       else app.moveSelection(dx, dy);
     } else if (k === '+' || k === '=') app.resizeSelection(1, 0);
     else if (k === '-' || k === '_') app.resizeSelection(-1, 0);
@@ -551,7 +551,7 @@ function showHelp(): void {
       ['1 / 2 / 3 / 4 / 5', 'Mode layer 1 / layer 2 / sprites / entrances/exits / BG'],
       ['Click · Ctrl+click · Alt+click', 'Select · add to selection · element underneath'],
       ['Drag', 'Move selection / drag a selection box'],
-      ['Handle at bottom right', 'Resize object'],
+      ['Drag a handle on an edge or corner', 'Resize objects (all selected; the opposite edges stay)'],
       ['Right click / Shift+click', 'Place the element chosen in “Insert” (View → Placement preview shows it at the mouse) or a copy of the selection'],
       ['Right click on the selection or with nothing chosen · Menu key / Shift+F10', 'Context menu'],
       ['Click into nothing', 'Deselect all and clear the element chosen in “Insert”'],
@@ -560,7 +560,7 @@ function showHelp(): void {
       ['Ins / I', 'Insert object/sprite by number (at the mouse)'],
       ['Drag M / Z / S marker', 'Move main entrance / midway point / secondary entrance'],
       ['Entrances/Exits: click · right click', 'Choose entrance or screen (exit), edit on the right · new secondary entrance, create exit, entrance here'],
-      ['Arrow keys · Alt+arrow keys', 'Move selection by 1 tile · resize'],
+      ['Arrow keys · Alt+arrow keys · Alt+Shift+arrow keys', 'Move selection by 1 tile · resize on the right/bottom · on the left/top'],
       ['+ / - · * / /', 'Change width · change height'],
       ['Del / Backspace', 'Delete selection'],
       ['F2 · Del over an object or prefab in “Insert”', 'Rename it · delete the prefab'],

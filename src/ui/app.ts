@@ -39,6 +39,7 @@ import type { RomHistory } from '../core/romhistory.ts';
 import type { EditOptions } from '../core/romedit.ts';
 import { EditSession, type LevelEdit, type StepResult } from '../core/editsession.ts';
 import { resizeObjectSize, type ObjKind, type ObjKinds } from '../core/objkinds.ts';
+import { SizeProbe, sizeParts, partSizes, drivers, namedDrivers, keepEdges, type Box, type Drivers, type SizeSpec } from '../core/objresize.ts';
 import { JumpArcs, ARC_SPEEDS, type JumpArc } from '../core/jumparcs.ts';
 import { scanKey, type ScanLevel, type ScanResult } from '../core/levelscan.ts';
 import { cameraAtKey, type CameraReach, type CameraAt } from '../core/camerareach.ts';
@@ -96,6 +97,7 @@ export type AppEvent =
   | 'placement-preview' // the placement preview asked for is known
   | 'properties' // the properties panel is wanted (the context menu)
   | 'arcs' // jump arcs asked for are known
+  | 'sizes' // the sizes of objects asked for (resizing, objresize.ts) are known
   | 'sprites' // sprite images were captured
   | 'thumbs' // object thumbnails asked for are known
   | 'sprite-mem' // the sprite memory check of the level is known
@@ -1429,10 +1431,15 @@ export class App {
   }
 
   clampObject(o: { x: number; y: number }): void {
+    const { w, h } = this.objectLimits();
+    o.x = Math.max(0, Math.min(w - 1, o.x));
+    o.y = Math.max(0, Math.min(h - 1, o.y));
+  }
+  // the tiles an object's origin can be on in the mode's layer: 0 to w - 1, 0 to h - 1
+  objectLimits(): { w: number; h: number } {
     const w = this.mode === 'l2' && this.images.geom2 ? this.images.geom2.width : this.levelWidthTiles();
     const hgt = this.mode === 'l2' && this.images.geom2 ? this.images.geom2.height : this.levelHeightTiles();
-    o.x = Math.max(0, Math.min(w - 1, o.x));
-    o.y = Math.max(0, Math.min((this.vertical ? Math.min(hgt, 0x1ff) : hgt) - 1, o.y));
+    return { w, h: this.vertical ? Math.min(hgt, 0x1ff) : hgt };
   }
 
   insertAt(tx: number, ty: number, p: PickedItem | null = this.pickedItem): void {
@@ -1702,11 +1709,74 @@ export class App {
     });
   }
 
-  // resize: width/height nibbles of settings byte
-  resizeSelection(dw: number, dh: number): void {
-    const objs = this.selectedObjects().filter((o) => o.num !== 0 || o.ext === DM16_EXT);
+  // resize: width/height nibbles of settings byte by one step each; the left and top edges stay where they
+  // are, with far the right and bottom ones (an object at the level's edge that would have to leave it stays)
+  resizeSelection(dw: number, dh: number, far = false): void {
+    const objs = this.selectedObjects().filter((o) => this.resizable(o));
     if (!objs.length) return;
-    this.editLevel(() => { for (const o of objs) o.size = resizeObjectSize(this.objectKind(o.num), o.size, dw, dh); });
+    const sized = objs.map((o) => resizeObjectSize(this.objectKind(o.num), o.size, dw, dh));
+    this.sizeProbe().probe(objs.flatMap((o, i) => [this.sizeSpec(o, o.size), this.sizeSpec(o, sized[i])]));
+    const { w, h } = this.objectLimits();
+    this.editLevel(() => objs.forEach((o, i) => {
+      const box = this.sizeBoxes(o);
+      if (!box(o.size) || !box(sized[i])) { o.size = sized[i]; return; } // (draws nothing: the origin stays)
+      const at = keepEdges(o, sized[i], box, far, w, h);
+      if (at) { o.x = at.x; o.y = at.y; o.size = sized[i]; }
+    }));
+  }
+
+  // whether the settings byte sizes the object: standard objects and Direct Map16
+  resizable(o: LevelObject): boolean {
+    return o.num !== 0 || o.ext === DM16_EXT;
+  }
+
+  // the tiles objects cover at each size, emulated alone (objresize.ts) with an emulator of their own,
+  // for the level's tileset as the ROM is now
+  private sizer: { key: string; probe: SizeProbe } | null = null;
+  private sizeEmu: LevelEmulator | null = null;
+  sizeProbe(): SizeProbe {
+    const lv = this.level, l2 = lv.layer2Objects ? this.rom.r24(L2_PTRS + 0x105 * 3) : lv.layer2Pointer;
+    const key = `${this.rom.gen}:${lv.number}:${inputHash(lv.header)}:${l2}`;
+    if (this.sizer?.key === key && this.sizeEmu?.rom === this.rom) return this.sizer.probe;
+    if (this.sizeEmu?.rom !== this.rom) { this.sizeEmu = new LevelEmulator(this.rom); this.sizeEmu.adoptBoot(this.emu); }
+    this.sizer = { key, probe: new SizeProbe(this.sizeEmu, { number: lv.number, header: lv.header }, l2) };
+    return this.sizer.probe;
+  }
+  private sizeSpec(o: LevelObject, size: number): SizeSpec {
+    return { num: o.num, ext: o.ext, size, tile: o.tile, extension: o.extension };
+  }
+  // the object's box at a size (relative to its origin), undefined while not probed
+  sizeBoxes(o: LevelObject): (size: number) => Box | null | undefined {
+    const p = this.sizeProbe();
+    return (size) => p.box(this.sizeSpec(o, size));
+  }
+  // every size the parts of the object's settings byte can take
+  private allSizes(o: LevelObject): SizeSpec[] {
+    return sizeParts(this.objectKind(o.num)).flatMap((p) => partSizes(o.size, p).map((s) => this.sizeSpec(o, s)));
+  }
+  // probes all sizes of the objects now (a drag starts)
+  probeSizes(objs: LevelObject[]): void {
+    this.sizeProbe().probe(objs.flatMap((o) => this.allSizes(o)));
+  }
+  // which part of the settings byte sizes which axis of the object: as emulated once its sizes are known,
+  // before as its kind says (they are probed in the background then, 'sizes' when known)
+  resizeDrivers(o: LevelObject): Drivers {
+    const p = this.sizeProbe(), kind = this.objectKind(o.num), specs = this.allSizes(o);
+    if (specs.every((s) => p.box(s) !== undefined)) return drivers(kind, o.size, this.sizeBoxes(o));
+    this.prefetchSizes();
+    return namedDrivers(kind);
+  }
+  private sizesQueued = false;
+  private prefetchSizes(): void {
+    if (this.sizesQueued) return;
+    this.sizesQueued = true;
+    this.later('sizes', () => {
+      this.sizesQueued = false;
+      const objs = this.mode === 'l1' || this.mode === 'l2' ? this.selectedObjects().filter((o) => this.resizable(o)).slice(0, 32) : [];
+      if (!objs.length) return;
+      if (this.sizeProbe().probe(objs.flatMap((o) => this.allSizes(o)), 1)) this.emit('sizes');
+      else this.prefetchSizes();
+    });
   }
 
   // copies the selection and pastes it one tile down-right (Ctrl+D)
