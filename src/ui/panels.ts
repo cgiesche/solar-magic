@@ -10,7 +10,7 @@ import { objectBoxCanvas } from './objbox.ts';
 import { NAME_MAX, nameOf, namesOf, nameGroups, connectedRect, tileRanges, type NameKind } from '../core/usernames.ts';
 import { objectVariant, withObjectVariant, type ObjKind } from '../core/objkinds.ts';
 import { thumbCanvas, objKey, type ObjSpec, type ObjThumb } from './thumbs.ts';
-import { fillPixels, fitScale, sized, previewOnHover, previewSheet, hidePickerPreview, PREVIEW_BELOW } from './pickerview.ts';
+import { fillPixels, fitScale, sized, previewOnHover, previewSheet, hidePickerPreview, PREVIEW_BELOW, type LegendRow } from './pickerview.ts';
 import { newUid, spriteId, spriteBytes, spriteSizes, type LevelObject, type LevelSprite } from '../core/level.ts';
 import { levelName } from '../core/overworld.ts';
 import { usedInList } from './usedin.ts';
@@ -66,6 +66,20 @@ export function blockEnter(app: App, tiles: number[]): string {
 // how any of the tiles treats Mario (kills, hurts, climbable), from finished probes only
 export function blockMarks(app: App, tiles: number[]): CollisionMark[] {
   return collisionMarks(tiles.slice(0, 16).map((t) => app.cachedCollision(t)));
+}
+
+// the symbols the picker draws on an entry, for its preview's legend: the items it gives, the directions it is
+// entered in, how it treats Mario
+const MARK_LEGEND: Record<CollisionMark, string> = { kills: 'Kills Mario when touched', hurts: 'Hurts Mario when touched', climb: 'Mario can climb in it' };
+export function entryLegend(app: App, e: { items?: number[]; enter?: string; marks?: CollisionMark[] }): LegendRow[] {
+  const out: LegendRow[] = [];
+  for (const n of (e.items ?? []).slice(0, 4)) {
+    const img = app.spriteThumbs?.get(n);
+    if (img) out.push({ icon: cloneCanvas(img), text: `Gives ${app.spriteLabel(n)}` });
+  }
+  if (e.enter) out.push({ icon: h('div', { class: 'picker-enter' }, e.enter), text: enterText(e.enter)[0].toUpperCase() + enterText(e.enter).slice(1) });
+  for (const m of e.marks ?? []) out.push({ icon: markCanvas(m), text: MARK_LEGEND[m] });
+  return out;
 }
 
 // the levels with sprite id, each opening at its first one
@@ -275,11 +289,12 @@ export class Picker {
         onclick: () => this.scrollToM16Page(p),
       }, p.toString(16).toUpperCase()));
     }
-    // tooltip: tile number, name and behaviour when hit from below
+    // tooltip: tile number, name, behaviour when hit from below and how it treats Mario
     let hoverTile = -1, hoverCanvas: HTMLCanvasElement | null = null;
     const tip = () => {
       const p = app.probes.block(hoverTile), name = nameOf(app.rom, 'fg', hoverTile);
-      if (hoverCanvas) hoverCanvas.title = `Tile ${hex3(hoverTile)}${name ? ` “${name}”` : ''}: ${p ? probeText(p) : 'determining behavior …'}\nCtrl+click: edit in the Map16 tab`;
+      const c = app.probes.collision(hoverTile), marks = c ? collisionMarks([c]).map((m) => ` · ${MARK_TEXT[m]}`).join('') : '';
+      if (hoverCanvas) hoverCanvas.title = `Tile ${hex3(hoverTile)}${name ? ` “${name}”` : ''}: ${p ? probeText(p) + marks : 'determining behavior …'}\nCtrl+click: edit in the Map16 tab`;
     };
     this.m16Tip = () => { if (hoverTile >= 0 && hoverCanvas?.isConnected) tip(); };
     // a page is drawn once it scrolls into view
@@ -325,6 +340,10 @@ export class Picker {
         if (r.w * r.h > 1) return [`Block ${r.w}×${r.h} from tile ${hex3(t)}`];
         const pr = app.probes.block(t), name = nameOf(app.rom, 'fg', t);
         return [`Tile ${hex3(t)}${name ? ` “${name}”` : ''}`, pr ? probeText(pr) : 'determining behavior …', 'Ctrl+click: edit in the Map16 tab'];
+      }, (r) => {
+        const t = base + r.y * 16 + r.x, tiles = Array.from({ length: r.w * r.h }, (_, i) => t + Math.floor(i / r.w) * 16 + (i % r.w));
+        tiles.forEach((u) => app.probes.collision(u)); // asked for; shown once known (the next move of the mouse)
+        return entryLegend(app, { items: blockSprites(app, tiles), enter: blockEnter(app, tiles), marks: blockMarks(app, tiles) });
       });
       if (scale < PREVIEW_BELOW) { this.body.append(h('div', { class: 'picker-head m16-page-head', 'data-page': String(p) }, `Page ${p.toString(16).toUpperCase()}`), c); continue; }
       c.addEventListener('mousemove', (e) => {
@@ -569,14 +588,13 @@ export class Picker {
       const marks = blockMarks(app, tiles);
       const info = (tiles.length ? `\nMap16 ${tiles.slice(0, 8).map(hex3).join(' ')}${tiles.length > 8 ? ' …' : ''}` : '')
         + (tip ? '\n' + tip : effect ? `\nDraws nothing; when the level loads, it ${effect}` : '')
-        + (sum === undefined ? '\n(determining behavior …)' : sum.map((x) => '\n' + x).join(''))
-        + (marks.length ? `\nTouching it: ${marks.map((m) => MARK_TEXT[m]).join(', ')}` : '');
+        + (sum === undefined ? '\n(determining behavior …)' : sum.map((x) => '\n' + x).join(''));
       if (effect && !this.boxes.has(key)) this.boxes.set(key, objectBoxCanvas(boxLabel(s)));
       const th = this.thumbs.get(key) ?? this.boxes.get(key);
       // invalid extended objects and custom numbers produce nothing
       if (!th && !effect && section !== 'obj' && this.thumbsFrom) continue;
       out.push({
-        s, vt, label, name, th, title: `${label}: ${name}${info}`, behavior: sum?.join(' · ') ?? '', text: `${label} ${name} ${info}`.toLowerCase(),
+        s, vt, label, name, th, title: `${label}: ${name}${info}`, behavior: sum?.join(' · ') ?? '', text: `${label} ${name} ${info} ${marks.map((m) => MARK_TEXT[m]).join(' ')}`.toLowerCase(),
         items: blockSprites(app, tiles), enter: blockEnter(app, tiles), marks,
         item: { kind: 'obj', num: s.num, ext: s.ext, size: s.size, ...(s.extension ? { extension: [...s.extension] } : {}) } as PickedItem,
       });
@@ -772,7 +790,7 @@ export class Picker {
       }, h('div', { class: 'picker-img' }, th?.c ?? h('span', { class: 'none' }, '–'),
         h('div', { class: 'picker-corner' }, itemBadge(app, e.items), unused ? h('span', { class: 'gt-unused', title: 'Inserted, but in no level' }, 'unused') : '')),
         h('div', { class: 'picker-label' }, e.num), h('div', { class: 'picker-name' }, e.name)));
-      if (img) previewOnHover(cell, th!.scale, () => cloneCanvas(img), () => e.title.split('\n'));
+      if (img) previewOnHover(cell, th!.scale, () => cloneCanvas(img), () => e.title.split('\n'), () => entryLegend(app, e));
     }
   }
 
@@ -824,7 +842,7 @@ export class Picker {
             e.marks.length ? h('div', { class: 'picker-items', title: e.marks.map((m) => MARK_TEXT[m]).join(', ') }, ...e.marks.map(markCanvas)) : '')),
           h('div', { class: 'picker-label' }, e.label), h('div', { class: 'picker-name' }, s.extension ? e.name : app.objectName(s.num, s.ext))));
         if (renames) this.keysOn(cell, () => renameObject(app, s.num, s.ext));
-        if (e.th) previewOnHover(cell, th!.scale, () => cloneCanvas(e.th!), () => (e.title + hint).split('\n'));
+        if (e.th) previewOnHover(cell, th!.scale, () => cloneCanvas(e.th!), () => (e.title + hint).split('\n'), () => entryLegend(app, e));
       }
       if (!grid.firstChild) continue;
       this.body.append(h('div', { class: 'picker-head' }, title), grid);

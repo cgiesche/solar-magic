@@ -435,6 +435,11 @@ canvas.sheet-fill { width: 100%; height: auto; image-rendering: auto; }
 .pick-pop-img canvas { display: block; background: var(--level-backdrop, #15171b); }
 .pick-pop-text { align-self: stretch; color: var(--muted); white-space: pre-wrap; }
 .pick-pop-head { color: var(--text); font-weight: 600; }
+.pick-pop-legend { align-self: stretch; display: flex; flex-direction: column; gap: 3px; padding-top: 5px; border-top: 1px solid var(--border); color: var(--text); }
+.pick-pop-legend[hidden] { display: none; }
+.pick-pop-row { display: flex; align-items: center; gap: 6px; }
+.pick-pop-icon { flex: none; width: 32px; display: flex; justify-content: center; }
+.pick-pop-icon .picker-enter { font-size: 13px; line-height: 16px; }
 .loupe-sw.transp { background: repeating-conic-gradient(#555 0 25%, #333 0 50%) 0 0 / 8px 8px; }
 .ws-prev-img, .ws-prev-over { position: absolute; left: 0; top: 0; image-rendering: pixelated; }
 .ws-prev-over { pointer-events: none; }

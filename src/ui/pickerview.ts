@@ -41,7 +41,9 @@ export function crop(sheet: CanvasImageSource, x: number, y: number, w: number, 
 
 // ---------------- hover preview ----------------
 const BOX = 256; // the largest the enlarged image gets
-let pop: { root: HTMLElement; img: HTMLElement; text: HTMLElement } | null = null;
+// a symbol the picker draws on the entry (or would, if there was room) and what it means, listed below the text
+export interface LegendRow { icon: HTMLElement; text: string }
+let pop: { root: HTMLElement; img: HTMLElement; text: HTMLElement; legend: HTMLElement } | null = null;
 let owner: HTMLElement | null = null;
 
 // 4× (an 8x8 tile 8×, as large as a 16x16 one), smaller where that does not fit the box
@@ -50,16 +52,20 @@ function previewScale(w: number, hh: number): number {
 }
 
 // shows `image` enlarged with its lines of text left of the side panel `from` is in, at the mouse's height
-export function showPickerPreview(from: HTMLElement, e: MouseEvent, image: HTMLCanvasElement | null, lines: string[]): void {
+export function showPickerPreview(from: HTMLElement, e: MouseEvent, image: HTMLCanvasElement | null, lines: string[], legend: LegendRow[] = []): void {
   if (!pop) {
-    const img = h('div', { class: 'pick-pop-img' }), text = h('div', { class: 'pick-pop-text' });
-    pop = { root: h('div', { class: 'pick-pop' }, img, text), img, text };
+    const img = h('div', { class: 'pick-pop-img' }), text = h('div', { class: 'pick-pop-text' }), lg = h('div', { class: 'pick-pop-legend' });
+    pop = { root: h('div', { class: 'pick-pop' }, img, text, lg), img, text, legend: lg };
   }
   if (!pop.root.isConnected) document.body.append(pop.root);
   owner = from;
   pop.img.replaceChildren(...(image ? [sized(image, previewScale(image.width, image.height))] : []));
   pop.img.hidden = !image;
   pop.text.replaceChildren(...lines.filter(Boolean).map((l, i) => h('div', { class: i ? '' : 'pick-pop-head' }, l)));
+  // canvases at 2× (larger ones fitted into 32 px)
+  const icon = (el: HTMLElement) => (el instanceof HTMLCanvasElement ? sized(el, Math.min(2, 32 / Math.max(el.width, el.height))) : el);
+  pop.legend.replaceChildren(...legend.map((r) => h('div', { class: 'pick-pop-row' }, h('span', { class: 'pick-pop-icon' }, icon(r.icon)), r.text)));
+  pop.legend.hidden = !legend.length;
   const side = (from.closest('.right') ?? from).getBoundingClientRect();
   const w = pop.root.offsetWidth, hh = pop.root.offsetHeight;
   const x = Math.max(4, side.left - 8 - w);
@@ -76,17 +82,18 @@ export function hidePickerPreview(from?: HTMLElement): void {
 
 // an entry of a picker (a cell, a row) previews its image while hovered when shown below PREVIEW_BELOW;
 // its title is then the preview's text instead of a tooltip
-export function previewOnHover(el: HTMLElement, shown: number, image: () => HTMLCanvasElement | null, lines: () => string[]): void {
+export function previewOnHover(el: HTMLElement, shown: number, image: () => HTMLCanvasElement | null, lines: () => string[],
+  legend?: () => LegendRow[]): void {
   if (shown >= PREVIEW_BELOW) return;
   el.removeAttribute('title');
-  el.addEventListener('mousemove', (e) => showPickerPreview(el, e, image(), lines()));
+  el.addEventListener('mousemove', (e) => showPickerPreview(el, e, image(), lines(), legend?.()));
   el.addEventListener('mouseleave', () => hidePickerPreview(el));
 }
 
 // a sheet of cells (cols × rows, each `cell` native pixels) drawn at `shown`: previews the hovered cell, or the
-// rectangle dragged from where the left button went down, with what describe() says about it
+// rectangle dragged from where the left button went down, with what describe() says about it and legend()'s rows
 export function previewSheet(c: HTMLCanvasElement, sheet: () => CanvasImageSource, cols: number, rows: number, cell: number, shown: number,
-  describe: (r: { x: number; y: number; w: number; h: number }) => string[]): void {
+  describe: (r: { x: number; y: number; w: number; h: number }) => string[], legend?: (r: { x: number; y: number; w: number; h: number }) => LegendRow[]): void {
   if (shown >= PREVIEW_BELOW) return;
   let down: { x: number; y: number } | null = null;
   const cellAt = (e: MouseEvent) => {
@@ -99,7 +106,7 @@ export function previewSheet(c: HTMLCanvasElement, sheet: () => CanvasImageSourc
   const show = (e: MouseEvent) => {
     const a = cellAt(e), b = down ?? a;
     const r = { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(a.x - b.x) + 1, h: Math.abs(a.y - b.y) + 1 };
-    showPickerPreview(c, e, crop(sheet(), r.x * cell, r.y * cell, r.w * cell, r.h * cell), describe(r));
+    showPickerPreview(c, e, crop(sheet(), r.x * cell, r.y * cell, r.w * cell, r.h * cell), describe(r), legend?.(r));
   };
   c.addEventListener('mousedown', (e) => {
     if (e.button !== 0 || e.ctrlKey || e.metaKey) return;
