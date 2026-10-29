@@ -1,7 +1,8 @@
 // Animation frames drawn cell by cell (animatedPixels): only the 16x16 cells drawing an 8x8 tile whose graphics
 // or colors an animation step changes are drawn anew – the pixels that change are exactly those that a
 // render of the whole level with the step's VRAM and CGRAM changes (layer 1, layer 2 objects or the BG,
-// layer 3 tides and images, ghosted layers).
+// layer 3 tides and images, ghosted layers). The images emulated one at a time (animationSteps) are those of
+// animationFrames.
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { Rom } from '../src/core/rom.ts';
 import { loadAsar } from '../src/core/asar.ts';
@@ -42,6 +43,17 @@ for (const level of [0x105, 0x106, 0x001, 0x127, 0x002, 0x01f, 0x009, 0x011, 0x0
     }
     check(same === steps && steps + fallback === snaps.length, `level ${level.toString(16)}, ${what}: ${same}/${steps} steps the same as drawn whole (${changed} pixels changed${fallback ? `, ${fallback} drawn whole` : ''}, ${li.geom1.vertical ? 'vertical' : 'horizontal'}${li.layer3 ? ', layer 3' : ''})`);
   }
+}
+
+// emulated one at a time in background slices (animationSteps): the same images, another level loaded in between
+{
+  emu.load(0x105);
+  const whole = emu.animationFrames(12, 8);
+  emu.load(0x105);
+  const next = emu.animationSteps(8), steps: { vram: Uint8Array; cgram: Uint8Array }[] = [];
+  for (let i = 0; i < 12; i++) { steps.push(next()!); emu.load(0x106); }
+  const same = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((v, k) => v === b[k]);
+  check(steps.every((s, i) => same(s.vram, whole[i].vram) && same(s.cgram, whole[i].cgram)), 'animationSteps: the images of animationFrames, though level 106 loads between them');
 }
 
 if (bad) { console.log(`${bad} failed`); process.exit(1); }

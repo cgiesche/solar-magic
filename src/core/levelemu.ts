@@ -485,6 +485,19 @@ export class LevelEmulator {
     } catch { /* keep the frames we have */ }
     return out;
   }
+
+  // the images of animationFrames one at a time, for background slices: each call runs `step` frames on from
+  // where the last one stopped – other loads in between don't disturb it; null once the game fails
+  animationSteps(step = 8): () => { vram: Uint8Array; cgram: Uint8Array } | null {
+    let state: SnesState | null = this.snes.saveState();
+    return () => {
+      if (!state) return null;
+      this.snes.loadState(state);
+      const f = this.animationFrames(1, step)[0] ?? null;
+      state = f && this.snes.saveState();
+      return f;
+    };
+  }
 }
 
 // the level the game loads for its title screen (the entry of the layer 1 pointer table it reads while

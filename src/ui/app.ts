@@ -227,7 +227,8 @@ export class App {
   private closed = false; // project closed: nothing is written to the browser any more
   reveal = { x: 0, y: 0 }; // pixel the level view scrolls to on 'reveal'
   // tile/palette animation: frames stored as pixel diffs against the static composite
-  anim = { gen: 0, snaps: [] as { vram: Uint8Array; cgram: Uint8Array }[], base: null as Uint32Array | null,
+  // snaps: the images emulated so far, of count; next emulates the next one (null when there are no more)
+  anim = { gen: 0, snaps: [] as { vram: Uint8Array; cgram: Uint8Array }[], count: 0, next: null as (() => { vram: Uint8Array; cgram: Uint8Array } | null) | null, base: null as Uint32Array | null,
     frames: [] as { idx: Uint32Array; val: Uint32Array }[], phase: -1, timer: 0 };
 
   constructor(rom: Rom, name: string) {
@@ -425,8 +426,12 @@ export class App {
     const { reads } = this.emu.recordAll(() => {
       const r = this.emu.load(lv.number, ov);
       this.renderError = r.ok ? null : r.error ?? 'Error';
-      // as many steps as the level's own animations take to repeat (the game's repeat after 8)
-      this.anim.snaps = this.show.anim && r.ok ? this.emu.animationFrames(exanimPeriod([readLevelList(this.rom, lv.number), readGlobalList(this.rom)], 64, 8)) : [];
+      // as many steps as the level's own animations take to repeat (the game's repeat after 8), emulated in
+      // the background (startAnimation)
+      const anim = this.show.anim && r.ok;
+      this.anim.snaps = [];
+      this.anim.count = anim ? exanimPeriod([readLevelList(this.rom, lv.number), readGlobalList(this.rom)], 64, 8) : 0;
+      this.anim.next = anim ? this.emu.animationSteps() : null;
       this.render = r;
       this.images = renderLevel(this.rom, r, lv.header.mode, lv.header.screens, levelRows(lv.secondary));
     });
@@ -454,34 +459,44 @@ export class App {
     return composite(images, this.show.layer1, this.show.layer2, ghost, this.show.layer3);
   }
 
-  // renders the animation snapshots in the background, then cycles them (8 game frames each)
+  // emulates and renders the animation snapshots in the background, then cycles them (8 game frames each)
   startAnimation(): void {
     const a = this.anim;
     const gen = ++a.gen;
     a.frames = [];
     a.phase = -1;
     a.base = this.compositeImg;
-    if (!a.snaps.length) { clearInterval(a.timer); a.timer = 0; this.setBusy('anim', null); return; }
+    if (!a.count) { clearInterval(a.timer); a.timer = 0; this.setBusy('anim', null); return; }
     const base = a.base, snaps = a.snaps, lv = this.level;
     let i = 0;
     const step = () => {
       if (gen !== a.gen) return;
-      this.setBusy('anim', `Animations ${i + 1}/${snaps.length}`);
-      // only the cells the step changes drawn anew; all of them when it changes every cell
-      const changed = animatedPixels(this.rom, this.render, this.images, base, snaps[i].vram, snaps[i].cgram, (cell) => this.compose(cell));
-      if (changed) a.frames.push(changed);
-      else {
-        const li = renderLevel(this.rom, { ...this.render, vram: snaps[i].vram, cgram: snaps[i].cgram }, lv.header.mode, lv.header.screens, levelRows(lv.secondary));
-        const img = this.compose(li);
-        const idx: number[] = [];
-        for (let k = 0; k < img.length; k++) if (img[k] !== base[k]) idx.push(k);
-        const ix = Uint32Array.from(idx);
-        a.frames.push({ idx: ix, val: ix.map((k) => img[k]) });
+      if (i === snaps.length) {
+        // the next image emulated, what it reads counting for the render (refresh)
+        const { result, reads } = this.emu.recordAll(() => a.next?.() ?? null);
+        this.rendered?.reads.add(reads);
+        if (result) snaps.push(result);
+        else a.count = snaps.length;
       }
-      if (++i < snaps.length) this.later('anim', step);
-      else this.setBusy('anim', null);
-      if (i === snaps.length && !a.timer) a.timer = window.setInterval(() => this.animTick(), 1000 / 7.5);
+      if (i < a.count) {
+        // only the cells the step changes drawn anew; all of them when it changes every cell
+        const changed = animatedPixels(this.rom, this.render, this.images, base, snaps[i].vram, snaps[i].cgram, (cell) => this.compose(cell));
+        if (changed) a.frames.push(changed);
+        else {
+          const li = renderLevel(this.rom, { ...this.render, vram: snaps[i].vram, cgram: snaps[i].cgram }, lv.header.mode, lv.header.screens, levelRows(lv.secondary));
+          const img = this.compose(li);
+          const idx: number[] = [];
+          for (let k = 0; k < img.length; k++) if (img[k] !== base[k]) idx.push(k);
+          const ix = Uint32Array.from(idx);
+          a.frames.push({ idx: ix, val: ix.map((k) => img[k]) });
+        }
+        i++;
+      }
+      if (i < a.count) { this.setBusy('anim', `Animations ${i + 1}/${a.count}`); this.later('anim', step); return; }
+      this.setBusy('anim', null);
+      if (a.frames.length && !a.timer) a.timer = window.setInterval(() => this.animTick(), 1000 / 7.5);
     };
+    this.setBusy('anim', `Animations 1/${a.count}`);
     this.later('anim', step);
   }
 
