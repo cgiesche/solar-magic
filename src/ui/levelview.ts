@@ -44,6 +44,8 @@ const ARC_STYLE: Record<ArcSpeed, { color: string; label: string; dash?: boolean
 };
 
 // the game view's scroll bands: X bands are columns of the frame, Y bands rows; the look-ahead ones outlined
+// tiles that kill in the collision overlay, 8x8 px drawn in the middle of the tile
+const SKULL = ['..XXXX..', '.XXXXXX.', 'XXXXXXXX', 'X..XX..X', 'X..XX..X', 'XXXX.XXX', '.XXXXXX.', '.X.XX.X.'];
 const BAND_STYLE: Record<keyof CameraBands, { color: string; label: string; axis: 'x' | 'y'; look?: boolean }> = {
   right: { color: '255,60,60', label: 'scrolling right', axis: 'x' },
   left: { color: '60,220,90', label: 'scrolling left', axis: 'x' },
@@ -740,7 +742,8 @@ export class LevelView {
 
   // How Mario collides with layer 1 (found by emulation): the level is dimmed, solid sides are
   // white lines where they face something passable, platforms (solid from above only) dashed,
-  // slopes diagonal; red: hurts (stronger: kills), blue: water, green: climbable.
+  // slopes diagonal; red: hurts, with spikes on the sides that hurt (stronger, with a skull: kills),
+  // blue: water, green with a net: climbable.
   paintCollision(ctx: CanvasRenderingContext2D): void {
     const app = this.app, g = app.images.geom1, w = app.render.wram;
     if (!app.show.layer1) return;
@@ -756,7 +759,8 @@ export class LevelView {
     ctx.fillStyle = 'rgba(0,0,0,0.45)';
     ctx.fillRect(x0 * 16, y0 * 16, (x1 - x0) * 16, (y1 - y0) * 16);
     const lw = 2 / app.zoom;
-    const solidLines = new Path2D(), platLines = new Path2D();
+    const solidLines = new Path2D(), platLines = new Path2D(), net = new Path2D(), spikes = new Path2D();
+    const skulls: [number, number][] = [];
     for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
       const c = at(x, y);
       if (!c) continue;
@@ -764,6 +768,21 @@ export class LevelView {
       const fill = c.kills ? 'rgba(255,30,30,0.6)' : c.hurtsTop || c.hurtsSide ? 'rgba(255,70,70,0.4)'
         : c.water ? 'rgba(60,140,255,0.35)' : c.climb ? 'rgba(60,220,90,0.35)' : null;
       if (fill) { ctx.fillStyle = fill; ctx.fillRect(px, py, 16, 16); }
+      if (c.kills) skulls.push([px, py]);
+      else {
+        // spikes on the sides that hurt, where they face something Mario can come from
+        if (c.hurtsTop && !at(x, y - 1)?.bottom) this.spikeRow(spikes, px, py, 0);
+        if (c.hurtsSide && !at(x - 1, y)?.right) this.spikeRow(spikes, px, py, 1);
+        if (c.hurtsSide && !at(x + 1, y)?.left) this.spikeRow(spikes, px, py, 2);
+      }
+      if (c.climb) {
+        // diagonals every 8 px, which join into a net across neighboring tiles
+        for (const d of [0, 8]) {
+          net.moveTo(px + d, py); net.lineTo(px + 16, py + 16 - d);
+          net.moveTo(px + 16 - d, py); net.lineTo(px, py + 16 - d);
+          if (d) { net.moveTo(px, py + d); net.lineTo(px + 16 - d, py + 16); net.moveTo(px + 16, py + d); net.lineTo(px + d, py + 16); }
+        }
+      }
       if (c.slope) {
         // the surface within the tile (steep slopes measure beyond it)
         const [l, r] = c.slope, k = (r - l) / 16, xAt = (yy: number) => (yy - l) / k;
@@ -795,6 +814,26 @@ export class LevelView {
     ctx.setLineDash([3 * lw, 2 * lw]);
     ctx.stroke(platLines);
     ctx.setLineDash([]);
+    ctx.lineWidth = lw / 2;
+    ctx.strokeStyle = 'rgba(150,255,170,0.8)';
+    ctx.stroke(net);
+    ctx.fillStyle = '#ffd24a';
+    ctx.fill(spikes);
+    ctx.fillStyle = '#fff';
+    for (const [px, py] of skulls) {
+      SKULL.forEach((row, j) => [...row].forEach((ch, i) => { if (ch === 'X') ctx.fillRect(px + 4 + i, py + 4 + j, 1, 1); }));
+    }
+  }
+
+  // three spikes along a side of the tile at (px, py), pointing out of it: 0 top, 1 left, 2 right
+  private spikeRow(p: Path2D, px: number, py: number, side: number): void {
+    for (const o of [0, 5, 10]) {
+      const a = o + 0.5, m = o + 3, b = o + 5.5; // along the side
+      const pts = side === 0 ? [[a, 4], [m, 0], [b, 4]] : side === 1 ? [[4, a], [0, m], [4, b]] : [[12, a], [16, m], [12, b]];
+      p.moveTo(px + pts[0][0], py + pts[0][1]);
+      for (const [qx, qy] of pts.slice(1)) p.lineTo(px + qx, py + qy);
+      p.closePath();
+    }
   }
 
   // Water of a layer 3 tide (see App.tide): in the collision overlay the area Mario swims in is
