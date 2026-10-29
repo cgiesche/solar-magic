@@ -36,7 +36,7 @@
     "operatingSystem": "Web browser, Windows, macOS, Linux",
     "description": "A free level editor for Super Mario World (SNES) that runs in the browser: edit levels, the overworld, graphics, palettes and music, and play-test ROM hacks instantly.",
     "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
-    "featureList": ["Level editing", "Overworld editing", "Graphics and palette editing", "Instant play-testing with sound", "Asar patches, UberASM, GPS blocks, PIXI sprites and AddmusicK music", "Lunar Magic level files", "Desktop app for Windows, macOS and Linux"]
+    "featureList": ["Level editing", "Overworld editing", "Graphics and palette editing", "Prefabs: linked, reusable groups of Map16 tiles", "Instant play-testing with sound", "Asar patches, UberASM, GPS blocks, PIXI sprites and AddmusicK music", "Lunar Magic level files", "Desktop app for Windows, macOS and Linux"]
   }
   </script>
   <script type="application/ld+json">
@@ -111,6 +111,28 @@
               <li>Objects, sprites, entrances and exits, layer 2 and layer 3</li>
               <li>Overworld paths, events and level tile settings</li>
               <li>Undo and redo; search across objects, tiles and sprites</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="landing-row">
+          <div class="landing-shot-stack">
+            <a class="landing-shot" href="/screens/prefabs.webp" data-caption="A prefab placed three times in level 105, listed in the picker">
+              <img src="/screens/prefabs.webp" width="1000" height="790" loading="lazy" alt="Three copies of a prefab selected in level 105, the prefab listed at the top of the object picker" />
+            </a>
+            <a class="landing-shot landing-inset" href="/screens/prefab-save.webp" data-caption="Saving a selection as prefab: size, ROM space and the bytes saved per placement">
+              <img src="/screens/prefab-save.webp" width="648" height="420" loading="lazy" alt="The Selection as prefab dialog with the cost of the prefab and the space it saves" />
+            </a>
+          </div>
+          <div>
+            <h3>Prefabs</h3>
+            <p>A prefab is a group of Map16 tiles stored under its own number and placed like an object. A change to a prefab applies to every place it is used, in all levels. Lunar Magic's Custom Collections insert copies; prefabs stay linked.</p>
+            <ul>
+              <li>Saved from selected objects, up to 64×64 tiles, with transparent cells</li>
+              <li>Less level data than the same tiles as Direct Map16 objects; the dialog shows from which placement on it saves space</li>
+              <li>Repeated Direct Map16 arrangements across the levels are suggested as prefabs</li>
+              <li>A placed prefab can be broken up into the objects it was made from</li>
+              <li>Uses only extended object 04, free in the game and in Lunar Magic; no game code is changed</li>
             </ul>
           </div>
         </div>

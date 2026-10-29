@@ -49,13 +49,16 @@ input.invalid, input.invalid:focus { outline: 1px solid var(--danger); border-co
 .landing-badges li.landing-get-app::before { content: "↓ "; }
 .landing-shot { display: block; position: relative; border-radius: 10px; overflow: hidden; border: 1px solid var(--border); cursor: zoom-in; box-shadow: 0 18px 50px rgba(0, 0, 0, .45); transition: transform .25s, box-shadow .25s, border-color .25s; }
 .landing-shot img { display: block; width: 100%; height: auto; }
+.landing-shot-stack { position: relative; padding-top: 6%; }
+.landing-inset { position: absolute; left: -14px; top: 0; width: 46%; box-shadow: 0 18px 50px rgba(0, 0, 0, .65); }
 .landing-shot:hover { transform: translateY(-3px); border-color: rgba(76, 194, 255, .5); box-shadow: 0 24px 60px rgba(0, 0, 0, .55); }
 .landing-hero-shot { margin-top: 44px; box-shadow: 0 30px 90px rgba(0, 0, 0, .6), 0 0 0 1px rgba(76, 194, 255, .12), 0 0 80px rgba(37, 198, 217, .12); }
 .landing-section { padding: 72px 0; border-top: 1px solid var(--border); }
 .landing-kicker { text-transform: uppercase; letter-spacing: .12em; font-size: 12px; font-weight: 700; color: var(--sun); margin-bottom: 6px !important; }
 .landing-intro { max-width: 720px; color: var(--muted); font-size: 17px; margin-bottom: 36px !important; }
 .landing-row { display: grid; grid-template-columns: 3fr 2fr; gap: 40px; align-items: center; margin-bottom: 56px; }
-.landing-row:nth-of-type(even) > .landing-shot { order: 2; }
+.landing-row:nth-of-type(even) { grid-template-columns: 2fr 3fr; }
+.landing-row:nth-of-type(even) > :first-child { order: 2; }
 .landing-row p { color: var(--muted); }
 .landing-row ul { margin: 0; padding: 0; list-style: none; }
 .landing-row li { position: relative; padding-left: 22px; margin-bottom: 6px; }
@@ -101,9 +104,10 @@ input.invalid, input.invalid:focus { outline: 1px solid var(--danger); border-co
   .landing-nav-links { gap: 14px; font-size: 13px; }
   .landing-nav-links a[href="#features"], .landing-nav-links a[href="#faq"] { display: none; }
   .landing-section { padding: 52px 0; }
-  .landing-row, .landing-pair, .landing-perf { grid-template-columns: 1fr; gap: 18px; }
+  .landing-row, .landing-row:nth-of-type(even), .landing-pair, .landing-perf { grid-template-columns: 1fr; gap: 18px; }
   .perf-nums { justify-content: center; }
-  .landing-row:nth-of-type(even) > .landing-shot { order: 0; }
+  .landing-row:nth-of-type(even) > :first-child { order: 0; }
+  .landing-inset { left: 0; }
 }
 /* the start page's screenshots, large (ui/landing.ts) */
 .lightbox { max-width: none; max-height: none; width: 100vw; height: 100dvh; margin: 0; padding: 0; border: 0; background: transparent; color: var(--text); overflow: hidden;
