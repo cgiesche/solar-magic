@@ -470,6 +470,8 @@ export class LevelEmulator {
 
   // Continues the live state left by load() into gameplay (GM $14) and snapshots VRAM/CGRAM
   // every `step` frames (tile and palette animation). Must directly follow load().
+  // Mario is kept invulnerable as after a hit: a sprite walking into him would kill him and the game
+  // (its animations included) freeze for the rest of the frames.
   animationFrames(count = 8, step = 8): { vram: Uint8Array; cgram: Uint8Array }[] {
     this.sync();
     const s = this.snes, out: { vram: Uint8Array; cgram: Uint8Array }[] = [];
@@ -477,7 +479,7 @@ export class LevelEmulator {
       let guard = 0;
       while (s.wram[RAM.gameMode] !== GM.level && guard++ < 80) s.runFrame();
       for (let i = 0; i < count; i++) {
-        for (let f = 0; f < step; f++) s.runFrame();
+        for (let f = 0; f < step; f++) { s.wram[RAM.hurtTimer] = 2; s.runFrame(); }
         out.push({ vram: s.vram.slice(), cgram: s.cgram.slice() });
       }
     } catch { /* keep the frames we have */ }
