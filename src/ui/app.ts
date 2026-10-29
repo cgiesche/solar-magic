@@ -13,7 +13,7 @@ import { objectTable, objectName, objectNameKey, setObjectName, namedPerTable, n
 import { boxedObjects, boxAt } from '../core/objboxes.ts';
 import { objectUserNames } from '../core/usernames.ts';
 import { loadPixiProject, customSpriteList, type CustomSprite } from '../core/pixi.ts';
-import { renderLevel, renderLayerTiles, type LevelImages, composite, animatedPixels } from '../core/render.ts';
+import { renderLevel, renderLayerTiles, type LevelImages, composite, animatedPixels, TileAnimation, type AnimStep } from '../core/render.ts';
 import { captureSprites, captureSpriteAt, type SpriteImage } from '../core/spritegfx.ts';
 import { spriteMemJob, usedSpriteMemory } from '../core/spritemem.ts';
 import { DM16_EXT, levelGfx, levelExtGfx, customPalette, levelMusic, defaultGfx } from '../core/patches.ts';
@@ -102,7 +102,7 @@ export type AppEvent =
   | 'thumbs' // object thumbnails asked for are known
   | 'sprite-mem' // the sprite memory check of the level is known
   | 'animated' // which tiles and colors of the level animate is known
-  | 'anim-frame' // the next frame of the level animation is shown
+  | 'anim-frame' // the next frame of the level animation is shown, or the level as rendered again when it stops
   | 'prefabs' // the prefab table changed
   | 'object-names' // the user's object names changed (a rename, its undo or redo)
   | 'paste-hint' // App.pasteHint changed
@@ -466,7 +466,7 @@ export class App {
     a.frames = [];
     a.phase = -1;
     a.base = this.compositeImg;
-    if (!a.count) { clearInterval(a.timer); a.timer = 0; this.setBusy('anim', null); return; }
+    if (!a.count) { this.stopAnimation(); this.setBusy('anim', null); return; }
     const base = a.base, snaps = a.snaps, lv = this.level;
     let i = 0;
     const step = () => {
@@ -500,10 +500,32 @@ export class App {
     this.later('anim', step);
   }
 
+  // the pictures following the animation (pickeranim.ts) go back to the level as rendered
+  private stopAnimation(): void {
+    const a = this.anim;
+    if (!a.timer) return;
+    clearInterval(a.timer);
+    a.timer = 0;
+    this.emit('anim-frame');
+  }
+
+  // the step of the animation shown now; null when none is (the level as rendered)
+  animStep(): AnimStep | null {
+    const a = this.anim;
+    return this.show.anim && a.timer && a.phase >= 0 ? a.snaps[a.phase] ?? null : null;
+  }
+
+  // the animation's steps in pictures of the level's Map16 tiles (the pickers'), for the render shown
+  private tileAnim: { r: LevelRender; anim: TileAnimation } | null = null;
+  tileAnimation(): TileAnimation {
+    if (this.tileAnim?.r !== this.render) this.tileAnim = { r: this.render, anim: new TileAnimation(this.rom, this.render) };
+    return this.tileAnim.anim;
+  }
+
   animTick(): void {
     const a = this.anim;
     if (!a.frames.length || !a.base) return;
-    if (!this.show.anim) { clearInterval(a.timer); a.timer = 0; return; }
+    if (!this.show.anim) { this.stopAnimation(); return; }
     if (this.backgroundHeld()) return;
     const img = this.compositeImg === a.base ? a.base.slice() : this.compositeImg;
     const prev = a.frames[a.phase];

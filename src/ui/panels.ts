@@ -22,12 +22,13 @@ import { prefabCost } from '../core/prefabcost.ts';
 import type { LevelPlaces } from '../core/prefabplaces.ts';
 import { EXT_TILES } from '../core/map16ext.ts';
 import { COND_FLAGS, COND_ADD, condByte, flagRam, isDm16, type Dm16Cond } from '../core/cdm16.ts';
-import { TileCache, map16Source, drawMap16 } from '../core/render.ts';
+import { TileCache, map16Source, drawMap16, sheetCells } from '../core/render.ts';
 import { lt3Target, lt3Users, blankLayer3Tile, l3Palette, withL3Palette, L3_TILE, L3_PAL, L3_PRIO, L3_FLIP_X, L3_FLIP_Y } from '../core/layer3map.ts';
 import { LT3_DESTS } from '../core/layer3gfx.ts';
 import { probeable } from '../core/probeclient.ts';
 import { probeText, spritesOf, spriteProbeAt, enterText, enterSuffix, switchText, switchedText, SWITCH_NAME, type SwitchState } from '../core/blockprobe.ts';
 import { tileMatches, drawTileMatches } from './tilesearch.ts';
+import { animateTiles, noteCopy } from './pickeranim.ts';
 import { matchesAll, type SearchProvider, type SearchResult } from './search.ts';
 import { blockFilesByTile } from './blockdialog.ts';
 import { contextMenu } from './menu.ts';
@@ -332,10 +333,12 @@ export class Picker {
       const ctx = c.getContext('2d')!;
       ctx.imageSmoothingEnabled = false;
       let sheet: HTMLCanvasElement | null = null;
-      // page plus the chosen rectangle of tiles (x, y, w, h in cells)
+      const pageSheet = () => sheet ??= animateSheet(app, renderMap16Sheet(app, false, base, 256), false, base, c, () => draw(...shownRect));
+      // page plus the chosen rectangle of tiles (x, y, w, h in cells); drawn again as the animation goes on
+      let shownRect: [number, number, number, number] = [-1, 0, 0, 0];
       const draw = (x: number, y: number, w: number, hh: number) => {
-        sheet ??= renderMap16Sheet(app, false, base, 256);
-        ctx.drawImage(sheet, 0, 0, c.width, c.height);
+        shownRect = [x, y, w, hh];
+        ctx.drawImage(pageSheet(), 0, 0, c.width, c.height);
         drawTileMatches(ctx, this.m16Match, base, 256, S);
         if (x < 0) return;
         ctx.strokeStyle = '#4cc2ff'; ctx.lineWidth = 2;
@@ -351,7 +354,7 @@ export class Picker {
         if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1');
         app.choosePickedItem({ kind: 'obj', num: 0, ext: DM16_EXT, size: 0, tile: base + r.y * 16 + r.x, ...(r.w * r.h > 1 ? { block: { w: r.w, h: r.h } } : {}) });
       }, (x, y) => app.editMap16(base + y * 16 + x));
-      previewSheet(c, () => (sheet ??= renderMap16Sheet(app, false, base, 256)), 16, 16, 16, scale, (r) => {
+      previewSheet(c, pageSheet, 16, 16, 16, scale, (r) => {
         const t = base + r.y * 16 + r.x;
         if (r.w * r.h > 1) return [`Block ${r.w}×${r.h} from tile ${hex3(t)}`];
         const pr = app.probes.block(t), name = nameOf(app.rom, 'fg', t);
@@ -395,7 +398,7 @@ export class Picker {
     const sheet = prefabTileSource(app);
     const grid = h('div', { class: 'picker-grid' });
     for (const [n, st] of all) {
-      const th = prefabThumb(sheet, st);
+      const th = prefabThumb(app, sheet, st);
       const title = `Prefab ${hex2(n)}: ${st.name || '(unnamed)'}, ${st.w}×${st.h}`;
       const cell = grid.appendChild(h('div', {
         class: `picker-cell${n === curN ? ' selected' : ''}`, title: `${title}\nRight click: rename (F2), delete (Del)`,
@@ -409,7 +412,7 @@ export class Picker {
       }, h('div', { class: 'picker-img' }, th.c),
         h('div', { class: 'picker-label' }, hex2(n)), h('div', { class: 'picker-name' }, st.name || '(unnamed)')));
       this.keysOn(cell, () => renamePrefab(app, n, st), () => deletePrefab(app, n, st));
-      previewOnHover(cell, th.scale, () => prefabCanvas(sheet, st), () => [`Prefab ${hex2(n)}: ${st.name || '(unnamed)'}`, `${st.w}×${st.h} tiles`, 'Right click: rename (F2), delete (Del)']);
+      previewOnHover(cell, th.scale, () => animatedPrefab(app, sheet, st), () => [`Prefab ${hex2(n)}: ${st.name || '(unnamed)'}`, `${st.w}×${st.h} tiles`, 'Right click: rename (F2), delete (Del)']);
     }
     if (grid.firstChild) box.append(grid);
     const sug = app.prefabSuggestions ?? [];
@@ -418,13 +421,13 @@ export class Picker {
     box.append(h('div', { class: 'picker-sub' }, 'Suggestions'), sgrid);
     for (const sg of sug) {
       const lvs = sg.levels.length > 4 ? `${sg.levels.slice(0, 4).map(hex3).join(', ')} +${sg.levels.length - 4}` : sg.levels.map(hex3).join(', ');
-      const th = prefabThumb(sheet, sg.prefab);
+      const th = prefabThumb(app, sheet, sg.prefab);
       const cell = sgrid.appendChild(h('div', {
         class: 'picker-cell', title: `${sg.count} places of these Direct Map16 objects in level ${sg.levels.map(hex3).join(', ')}: save as prefab and replace them all`,
         onclick: () => openSavePrefab(app, { prefab: sg.prefab, places: app.suggestionsCurrent ? sg.places : undefined }),
       }, h('div', { class: 'picker-img' }, th.c),
         h('div', { class: 'picker-label' }, `${sg.count}×`), h('div', { class: 'picker-name' }, `level ${lvs}, saves ${sg.saved} byte${sg.saved === 1 ? '' : 's'}`)));
-      previewOnHover(cell, th.scale, () => prefabCanvas(sheet, sg.prefab),
+      previewOnHover(cell, th.scale, () => animatedPrefab(app, sheet, sg.prefab),
         () => [`${sg.count}× in level ${sg.levels.map(hex3).join(', ')}`, `Saves ${sg.saved} byte${sg.saved === 1 ? '' : 's'}: save as prefab and replace them all`]);
     }
   }
@@ -434,6 +437,7 @@ export class Picker {
   buildBg(): void {
     const app = this.app;
     const sheet = renderMap16Sheet(app, true, this.bgBase);
+    let shownRect: [number, number, number, number] = [-1, 0, 0, 0];
     const brush = app.bgBrush;
     const t0 = brush.tiles[0] - this.bgBase;
     // a brush that is a rectangle of the sheet is outlined there, one picked from the level is shown separately
@@ -444,11 +448,13 @@ export class Picker {
     const ctx = c.getContext('2d')!;
     ctx.imageSmoothingEnabled = false;
     const draw = (x: number, y: number, w: number, hh: number) => {
+      shownRect = [x, y, w, hh];
       ctx.drawImage(sheet, 0, 0, c.width, c.height);
       if (x < 0) return;
       ctx.strokeStyle = '#4cc2ff'; ctx.lineWidth = 2;
       ctx.strokeRect(x * S, y * S, w * S, hh * S);
     };
+    animateSheet(app, sheet, true, this.bgBase, c, () => draw(...shownRect));
     if (onSheet) draw(t0 & 15, t0 >> 4, brush.w, brush.h); else draw(-1, 0, 0, 0);
     // click picks a tile, dragging picks a rectangle of tiles (as in the Map16 tab)
     attachRectPick(c, 16, 32, (r) => draw(r.x, r.y, r.w, r.h), (r) => {
@@ -576,7 +582,10 @@ export class Picker {
     this.boxes = new Map();
     for (const t of thumbs ?? []) {
       if (t.effect) { this.effects.set(t.key, t.effect); continue; }
-      this.thumbs.set(t.key, thumbCanvas(t));
+      const c = thumbCanvas(t);
+      this.thumbs.set(t.key, c);
+      // its copies in the picker, the search and the hover preview follow the animation
+      animateTiles(this.app, c, t.cells, { alive: () => this.thumbsFrom === thumbs });
       this.thumbTiles.set(t.key, t.m16);
     }
     if (thumbs) this.app.probes.prefetch([...this.thumbTiles.values()].flat());
@@ -741,7 +750,7 @@ export class Picker {
         const sheet = prefabTileSource(app);
         return [...app.prefabs()].filter(([n, st]) => matchesAll(`${hex2(n)} ${st.name}`.toLowerCase(), terms)).map(([n, st]) => ({
           label: hex2(n), name: `${st.name || '(unnamed)'} ${st.w}×${st.h}`, title: `Prefab ${hex2(n)}: ${st.name || '(unnamed)'}, ${st.w}×${st.h}`,
-          thumb: () => prefabCanvas(sheet, st),
+          thumb: () => animatedPrefab(app, sheet, st),
           pick: () => this.choose('obj', { kind: 'obj', num: 0, ext: PREFAB_EXT, size: 0, prefab: n }),
         }));
       },
@@ -898,9 +907,16 @@ function thumbAt(img: HTMLCanvasElement): { c: HTMLCanvasElement; scale: number 
 }
 
 // a prefab's image in a picker cell at the size it fits there
-function prefabThumb(tile: (t: number) => HTMLCanvasElement | null, st: Prefab): { c: HTMLCanvasElement; scale: number } {
-  const c = prefabCanvas(tile, st), scale = fitScale(c.width, c.height, CELL_W, CELL_H);
+function prefabThumb(app: App, tile: (t: number) => HTMLCanvasElement | null, st: Prefab): { c: HTMLCanvasElement; scale: number } {
+  const c = animatedPrefab(app, tile, st), scale = fitScale(c.width, c.height, CELL_W, CELL_H);
   return { c: sized(c, scale), scale };
+}
+
+// prefabCanvas following the level's animation while shown
+function animatedPrefab(app: App, tile: (t: number) => HTMLCanvasElement | null, st: Prefab): HTMLCanvasElement {
+  const c = prefabCanvas(tile, st);
+  animateTiles(app, c, st.tiles.flatMap((t, i) => (t === TRANSPARENT ? [] : [(i % st.w) * 16, Math.floor(i / st.w) * 16, t])), { on: c });
+  return c;
 }
 
 // image of a prefab in the current level's graphics; transparent cells stay empty
@@ -1033,6 +1049,7 @@ function itemBadge(app: App, items: number[], cls = 'picker-items'): HTMLElement
 }
 
 // `count` tiles from `base`, 16 per row
+const SHEET_BACK = 0xff181818; // where a sheet's tiles draw nothing
 export function renderMap16Sheet(app: App, bg = false, base = 0, count = 512): HTMLCanvasElement {
   const r = app.render;
   const tc = new TileCache(r.vram, r.cgram, (bg ? r.ppuRegs[0x0b] >> 4 : r.ppuRegs[0x0b] & 0x0f) << 13);
@@ -1043,16 +1060,25 @@ export function renderMap16Sheet(app: App, bg = false, base = 0, count = 512): H
   const ctx = c.getContext('2d')!;
   const img = ctx.createImageData(256, hgt);
   const px = new Uint32Array(img.data.buffer);
-  px.fill(0xff181818);
+  px.fill(SHEET_BACK);
   for (let t = 0; t < count; t++) drawMap16(px, 256, hgt, tc, bg ? src.bg(base + t) : src.fg(base + t), (t & 15) * 16, (t >> 4) * 16);
   ctx.putImageData(img, 0, 0);
   return c;
 }
 
+// a sheet of renderMap16Sheet (its tiles from base) follows the level's animation while `on` (the canvas
+// it is drawn into by shown) is in the page
+function animateSheet(app: App, sheet: HTMLCanvasElement, bg: boolean, base: number, on: HTMLCanvasElement, shown: () => void): HTMLCanvasElement {
+  animateTiles(app, sheet, sheetCells(base, (sheet.height >> 4) * 16), { bg, back: SHEET_BACK, on, shown });
+  return sheet;
+}
+
+// (a copy of a picture following the animation follows it too)
 export function cloneCanvas(c: HTMLCanvasElement): HTMLCanvasElement {
   const n = document.createElement('canvas');
   n.width = c.width; n.height = c.height;
   n.getContext('2d')!.drawImage(c, 0, 0);
+  noteCopy(c, n);
   return n;
 }
 

@@ -23,16 +23,17 @@ export function objKey(s: { num: number; ext: number; size: number; extension?: 
   return v < 0 ? `s${s.num}` : `s${s.num}.${v}`;
 }
 
-// a rendered object: its pixels and the distinct Map16 tiles it produced; effect: of an extended object or one
+// a rendered object: its pixels, the distinct Map16 tiles it produced and where (cells: x, y of a tile's top left
+// pixel and its number, one after the other – for the animation, pickeranim.ts); effect: of an extended object or one
 // of object 2D's custom numbers that draws no tile, what its load changes in RAM (objeffects.ts ramEffect),
 // without pixels (w = h = 0)
-export interface ObjThumb { key: string; w: number; h: number; px: Uint32Array; m16: number[]; effect?: string }
+export interface ObjThumb { key: string; w: number; h: number; px: Uint32Array; m16: number[]; cells: number[]; effect?: string }
 
 // their result cache key: the tileset and palettes (kept side by side) and the objects
 export function thumbsKey(level: Level, specs: ObjSpec[], keyOf: (s: ObjSpec) => string): string {
   const h = level.header;
-  // (o4: effects as what they change, extended objects' too)
-  return `o4${h.tileset}-${h.fgPalette}-${h.bgPalette}:${inputHash(specs.map((s) => `${s.num}.${s.ext}.${s.size}=${keyOf(s)}`))}`;
+  // (o4: effects as what they change, extended objects' too; o5: with cells)
+  return `o5${h.tileset}-${h.fgPalette}-${h.bgPalette}:${inputHash(specs.map((s) => `${s.num}.${s.ext}.${s.size}=${keyOf(s)}`))}`;
 }
 
 // what they depend on outside the ROM bytes they read: the level they are drawn in as edited (its number
@@ -94,9 +95,10 @@ export function* objectThumbsJob(rom: Rom, emu: LevelEmulator, level: Level, spe
         x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y);
       }
       const w = (x1 - x0 + 1) * 16, hh = (y1 - y0 + 1) * 16;
-      const px = new Uint32Array(w * hh);
+      const px = new Uint32Array(w * hh), cells: number[] = [];
       for (const t of tiles) {
         const tx = t & 0xffff, ty = t >> 16;
+        cells.push((tx - x0) * 16, (ty - y0) * 16, map16Tile(r.wram, g.addr(tx, ty)));
         for (let yy = 0; yy < 16; yy++) for (let xx = 0; xx < 16; xx++) {
           const v = im.layer1[(ty * 16 + yy) * im.width + tx * 16 + xx];
           px[((ty - y0) * 16 + yy) * w + (tx - x0) * 16 + xx] = v;
@@ -104,7 +106,7 @@ export function* objectThumbsJob(rom: Rom, emu: LevelEmulator, level: Level, spe
       }
       const m16 = new Set<number>();
       for (const off of set!) m16.add(map16Tile(r.wram, MAP_BASE + off));
-      out.push({ key: keyOf(s), w, h: hh, px, m16: [...m16].sort((a, b) => a - b) });
+      out.push({ key: keyOf(s), w, h: hh, px, m16: [...m16].sort((a, b) => a - b), cells });
     });
   };
   const render = (batch: ObjSpec[]): void => {
@@ -127,7 +129,7 @@ export function* objectThumbsJob(rom: Rom, emu: LevelEmulator, level: Level, spe
     const had = out.length;
     if (r.ok) collect(r, [s]);
     const effect = r.ok && out.length === had ? ramEffect(base.wram, r.wram) : null;
-    if (effect) out.push({ key: keyOf(s), w: 0, h: 0, px: new Uint32Array(0), m16: [], effect });
+    if (effect) out.push({ key: keyOf(s), w: 0, h: 0, px: new Uint32Array(0), m16: [], cells: [], effect });
     yield;
   }
   return out;

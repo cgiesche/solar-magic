@@ -329,12 +329,9 @@ export function composite(li: LevelImages, show1 = true, show2 = true, ghost = 0
   return out;
 }
 
-// An animation step (other VRAM and CGRAM than the render r) as the pixels of the composed level image `base`
-// that change: only the 16x16 cells drawing an 8x8 tile whose graphics or colors differ are drawn anew, each
-// composed by look as the whole image was. null when the step changes what every cell shows (the backdrop
-// color) or a layer 3 the render drew nothing of: then it is drawn whole.
-export function animatedPixels(rom: Rom, r: LevelRender, li: LevelImages, base: Uint32Array, vram: Uint8Array, cgram: Uint8Array, look: (cell: LevelImages) => Uint32Array): { idx: Uint32Array; val: Uint32Array } | null {
-  if (cgram[0] !== r.cgram[0] || cgram[1] !== r.cgram[1]) return null;
+// What an animation step (other VRAM and CGRAM than the render r) changes: whether an 8x8 tile looks different –
+// its graphics (bpp * 8 bytes from charBase) or a color of its palette; null when the step changes nothing
+export function stepChanges(r: LevelRender, vram: Uint8Array, cgram: Uint8Array): ((word: number, charBase: number, bpp: number) => boolean) | null {
   // which 16-byte rows of VRAM and which colors differ
   const rowDiff = new Uint8Array(0x1000), colorDiff = new Uint8Array(256);
   let any = false;
@@ -342,15 +339,107 @@ export function animatedPixels(rom: Rom, r: LevelRender, li: LevelImages, base: 
     for (let k = 0; k < 16; k++) if (vram[i + k] !== r.vram[i + k]) { rowDiff[i >> 4] = 1; any = true; break; }
   }
   for (let c = 0; c < 256; c++) if (cgram[c * 2] !== r.cgram[c * 2] || cgram[c * 2 + 1] !== r.cgram[c * 2 + 1]) { colorDiff[c] = 1; any = true; }
-  if (!any) return { idx: new Uint32Array(0), val: new Uint32Array(0) };
-  // whether an 8x8 tile looks different: its graphics (bpp * 8 bytes from charBase) or a color of its palette
-  const tileDiffers = (word: number, charBase: number, bpp: number): boolean => {
+  if (!any) return null;
+  return (word, charBase, bpp) => {
     const at = (charBase + (word & 0x3ff) * bpp * 8) & 0xffff;
     for (let a = at; a < at + bpp * 8; a += 16) if (rowDiff[(a & 0xffff) >> 4]) return true;
     const colors = bpp === 2 ? 4 : 16, row = ((word >> 10) & 7) * colors;
     for (let v = 1; v < colors; v++) if (colorDiff[row + v]) return true;
     return false;
   };
+}
+
+// where the 8x8 tiles of FG (layer 1) or BG (layer 2) Map16 tiles are in VRAM
+export function charBase(r: LevelRender, bg: boolean): number {
+  const p = r.ppuRegs[0x0b];
+  return (bg ? p >> 4 : p & 0x0f) << 13;
+}
+
+// the cells (see TilePicture) of a sheet of `count` Map16 tiles from `first`, 16 a row
+export function sheetCells(first: number, count: number): number[] {
+  const out: number[] = [];
+  for (let t = 0; t < count; t++) out.push((t & 15) * 16, (t >> 4) * 16, first + t);
+  return out;
+}
+
+// An image of the animation: the level's VRAM and CGRAM at one of its steps
+export interface AnimStep { vram: Uint8Array; cgram: Uint8Array }
+
+// A picture of the level's Map16 tiles (a picker's page, an object's thumbnail): its pixels (w wide), where each
+// tile is and which (cells: x, y of its top left pixel and its number, one after the other), FG or BG tiles,
+// and the pixel where a tile draws none
+export interface TilePicture { px: Uint32Array; w: number; h: number; cells: number[]; bg: boolean; back: number }
+
+// The level's animation in pictures of its Map16 tiles: between two steps, only the tiles that look different
+// in one of them are drawn anew; what a step changes is found once per step and tile
+export class TileAnimation {
+  private rom: Rom;
+  private r: LevelRender;
+  private src: Map16Source;
+  private known = new WeakMap<AnimStep, { differs: ReturnType<typeof stepChanges>; fg: Map<number, boolean>; bg: Map<number, boolean> }>();
+  private caches = new WeakMap<AnimStep, { fg: TileCache; bg: TileCache }>();
+  private base: { fg: TileCache; bg: TileCache };
+
+  constructor(rom: Rom, r: LevelRender) {
+    this.rom = rom;
+    this.r = r;
+    this.src = map16Source(rom, r);
+    this.base = this.tileCaches(r);
+  }
+
+  private tileCaches(s: AnimStep): { fg: TileCache; bg: TileCache } {
+    return { fg: new TileCache(s.vram, s.cgram, charBase(this.r, false)), bg: new TileCache(s.vram, s.cgram, charBase(this.r, true)) };
+  }
+
+  private words(t: number, bg: boolean): number[] {
+    return bg ? this.src.bg(t) : this.src.fg(t);
+  }
+
+  // whether Map16 tile t looks different at step s than the render shows it
+  changes(s: AnimStep, t: number, bg: boolean): boolean {
+    let k = this.known.get(s);
+    if (!k) this.known.set(s, k = { differs: stepChanges(this.r, s.vram, s.cgram), fg: new Map(), bg: new Map() });
+    if (!k.differs) return false;
+    const m = bg ? k.bg : k.fg;
+    let v = m.get(t);
+    if (v === undefined) {
+      const base = charBase(this.r, bg), differs = k.differs;
+      m.set(t, v = this.words(t, bg).some((w) => differs(w, base, 4)));
+    }
+    return v;
+  }
+
+  // the picture, drawn as step `from` showed it (null: as the render shows it), redrawn as step `to` shows it
+  // (all: the whole picture, for one drawn with another render); whether a tile was drawn anew
+  redraw(pic: TilePicture, from: AnimStep | null, to: AnimStep | null, all = false): boolean {
+    let tc: TileCache | null = null, any = false;
+    const c = pic.cells;
+    if (all) pic.px.fill(pic.back);
+    for (let i = 0; i < c.length; i += 3) {
+      const t = c[i + 2];
+      if (!all && !(from && this.changes(from, t, pic.bg)) && !(to && this.changes(to, t, pic.bg))) continue;
+      if (!tc) {
+        let set = to ? this.caches.get(to) : this.base;
+        if (!set) this.caches.set(to!, set = this.tileCaches(to!));
+        tc = pic.bg ? set.bg : set.fg;
+      }
+      const x0 = c[i], y0 = c[i + 1];
+      for (let y = y0; y < y0 + 16 && y < pic.h; y++) pic.px.fill(pic.back, y * pic.w + x0, y * pic.w + Math.min(pic.w, x0 + 16));
+      drawMap16(pic.px, pic.w, pic.h, tc, this.words(t, pic.bg), x0, y0);
+      any = true;
+    }
+    return any;
+  }
+}
+
+// An animation step (other VRAM and CGRAM than the render r) as the pixels of the composed level image `base`
+// that change: only the 16x16 cells drawing an 8x8 tile whose graphics or colors differ are drawn anew, each
+// composed by look as the whole image was. null when the step changes what every cell shows (the backdrop
+// color) or a layer 3 the render drew nothing of: then it is drawn whole.
+export function animatedPixels(rom: Rom, r: LevelRender, li: LevelImages, base: Uint32Array, vram: Uint8Array, cgram: Uint8Array, look: (cell: LevelImages) => Uint32Array): { idx: Uint32Array; val: Uint32Array } | null {
+  if (cgram[0] !== r.cgram[0] || cgram[1] !== r.cgram[1]) return null;
+  const tileDiffers = stepChanges(r, vram, cgram);
+  if (!tileDiffers) return { idx: new Uint32Array(0), val: new Uint32Array(0) };
   const p = r.ppuRegs, base1 = (p[0x0b] & 0x0f) << 13, base2 = (p[0x0b] >> 4) << 13;
   const src = map16Source(rom, r);
   const map16Differs = (charBase: number, words: (t: number) => number[]) => {
