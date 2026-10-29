@@ -13,7 +13,7 @@ import { objectTable, objectName, objectNameKey, setObjectName, namedPerTable, n
 import { boxedObjects, boxAt } from '../core/objboxes.ts';
 import { objectUserNames } from '../core/usernames.ts';
 import { loadPixiProject, customSpriteList, type CustomSprite } from '../core/pixi.ts';
-import { renderLevel, renderLayerTiles, type LevelImages, composite } from '../core/render.ts';
+import { renderLevel, renderLayerTiles, type LevelImages, composite, animatedPixels } from '../core/render.ts';
 import { captureSprites, captureSpriteAt, type SpriteImage } from '../core/spritegfx.ts';
 import { spriteMemJob, usedSpriteMemory } from '../core/spritemem.ts';
 import { DM16_EXT, levelGfx, levelExtGfx, customPalette, levelMusic, defaultGfx } from '../core/patches.ts';
@@ -467,12 +467,17 @@ export class App {
     const step = () => {
       if (gen !== a.gen) return;
       this.setBusy('anim', `Animations ${i + 1}/${snaps.length}`);
-      const li = renderLevel(this.rom, { ...this.render, vram: snaps[i].vram, cgram: snaps[i].cgram }, lv.header.mode, lv.header.screens, levelRows(lv.secondary));
-      const img = this.compose(li);
-      const idx: number[] = [];
-      for (let k = 0; k < img.length; k++) if (img[k] !== base[k]) idx.push(k);
-      const ix = Uint32Array.from(idx);
-      a.frames.push({ idx: ix, val: ix.map((k) => img[k]) });
+      // only the cells the step changes drawn anew; all of them when it changes every cell
+      const changed = animatedPixels(this.rom, this.render, this.images, base, snaps[i].vram, snaps[i].cgram, (cell) => this.compose(cell));
+      if (changed) a.frames.push(changed);
+      else {
+        const li = renderLevel(this.rom, { ...this.render, vram: snaps[i].vram, cgram: snaps[i].cgram }, lv.header.mode, lv.header.screens, levelRows(lv.secondary));
+        const img = this.compose(li);
+        const idx: number[] = [];
+        for (let k = 0; k < img.length; k++) if (img[k] !== base[k]) idx.push(k);
+        const ix = Uint32Array.from(idx);
+        a.frames.push({ idx: ix, val: ix.map((k) => img[k]) });
+      }
       if (++i < snaps.length) this.later('anim', step);
       else this.setBusy('anim', null);
       if (i === snaps.length && !a.timer) a.timer = window.setInterval(() => this.animTick(), 1000 / 7.5);

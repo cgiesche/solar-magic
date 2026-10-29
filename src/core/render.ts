@@ -329,6 +329,111 @@ export function composite(li: LevelImages, show1 = true, show2 = true, ghost = 0
   return out;
 }
 
+// An animation step (other VRAM and CGRAM than the render r) as the pixels of the composed level image `base`
+// that change: only the 16x16 cells drawing an 8x8 tile whose graphics or colors differ are drawn anew, each
+// composed by look as the whole image was. null when the step changes what every cell shows (the backdrop
+// color) or a layer 3 the render drew nothing of: then it is drawn whole.
+export function animatedPixels(rom: Rom, r: LevelRender, li: LevelImages, base: Uint32Array, vram: Uint8Array, cgram: Uint8Array, look: (cell: LevelImages) => Uint32Array): { idx: Uint32Array; val: Uint32Array } | null {
+  if (cgram[0] !== r.cgram[0] || cgram[1] !== r.cgram[1]) return null;
+  // which 16-byte rows of VRAM and which colors differ
+  const rowDiff = new Uint8Array(0x1000), colorDiff = new Uint8Array(256);
+  let any = false;
+  for (let i = 0; i < 0x10000; i += 16) {
+    for (let k = 0; k < 16; k++) if (vram[i + k] !== r.vram[i + k]) { rowDiff[i >> 4] = 1; any = true; break; }
+  }
+  for (let c = 0; c < 256; c++) if (cgram[c * 2] !== r.cgram[c * 2] || cgram[c * 2 + 1] !== r.cgram[c * 2 + 1]) { colorDiff[c] = 1; any = true; }
+  if (!any) return { idx: new Uint32Array(0), val: new Uint32Array(0) };
+  // whether an 8x8 tile looks different: its graphics (bpp * 8 bytes from charBase) or a color of its palette
+  const tileDiffers = (word: number, charBase: number, bpp: number): boolean => {
+    const at = (charBase + (word & 0x3ff) * bpp * 8) & 0xffff;
+    for (let a = at; a < at + bpp * 8; a += 16) if (rowDiff[(a & 0xffff) >> 4]) return true;
+    const colors = bpp === 2 ? 4 : 16, row = ((word >> 10) & 7) * colors;
+    for (let v = 1; v < colors; v++) if (colorDiff[row + v]) return true;
+    return false;
+  };
+  const p = r.ppuRegs, base1 = (p[0x0b] & 0x0f) << 13, base2 = (p[0x0b] >> 4) << 13;
+  const src = map16Source(rom, r);
+  const map16Differs = (charBase: number, words: (t: number) => number[]) => {
+    const known = new Map<number, boolean>();
+    return (t: number) => {
+      let v = known.get(t);
+      if (v === undefined) known.set(t, v = words(t).some((w) => tileDiffers(w, charBase, 4)));
+      return v;
+    };
+  };
+  const cols = li.width >> 4, rows = li.height >> 4;
+  const dirty = new Uint8Array(cols * rows);
+  const fg1 = map16Differs(base1, (t) => src.fg(t));
+  for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) if (fg1(li.tiles1[y * li.geom1.width + x])) dirty[y * cols + x] = 1;
+  const g2 = li.geom2, tiles2 = li.tiles2, bgTiles = li.bgTiles;
+  const layer2At = (x: number, y: number): number[] | null =>
+    g2 && tiles2 ? (x < g2.width && y < g2.height ? src.fg(tiles2[y * g2.width + x]) : null) : bgTiles ? src.bg(bgTiles[(y % 27) * 32 + (x % 32)]) : null;
+  if (g2 && tiles2) {
+    const fg2 = map16Differs(base2, (t) => src.fg(t));
+    for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) if (x < g2.width && y < g2.height && fg2(tiles2[y * g2.width + x])) dirty[y * cols + x] = 1;
+  } else if (bgTiles) {
+    const bg = map16Differs(base2, (t) => src.bg(t));
+    for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) if (bg(bgTiles[(y % 27) * 32 + (x % 32)])) dirty[y * cols + x] = 1;
+  }
+  // layer 3: a tile whose word or look differs marks the cells it covers (placed as renderLayer3 does)
+  const l3on = (p[0x2c] & 0x04) !== 0 || (p[0x2d] & 0x04) !== 0;
+  const g3 = l3on ? layer3Geometry(r) : null, base3 = (p[0x0c] & 0x0f) << 13;
+  if (g3) {
+    const { mw, mh, dx, dy } = g3;
+    for (let ty = LAYER3_STATUS_ROWS; ty < mh / 8; ty++) {
+      const py = ty * 8 - dy;
+      if (py + 8 <= 0 || py >= li.height) continue;
+      for (let tx = 0; tx < mw / 8; tx++) {
+        const a = layer3TileAddr(g3, tx, ty);
+        const was = r.vram[a] | (r.vram[a + 1] << 8), now = vram[a] | (vram[a + 1] << 8);
+        if (was === now && !tileDiffers(now, base3, 2)) continue;
+        if (!li.layer3) return null;
+        for (let px = ((((tx * 8 - dx) % mw) + mw) % mw) - mw; px < li.width; px += mw) {
+          if (px + 8 <= 0) continue;
+          for (let cy = Math.max(0, py >> 4); cy <= Math.min(rows - 1, (py + 7) >> 4); cy++)
+            for (let cx = Math.max(0, px >> 4); cx <= Math.min(cols - 1, (px + 7) >> 4); cx++) dirty[cy * cols + cx] = 1;
+        }
+      }
+    }
+  }
+  // the dirty cells drawn anew, one at a time, as 16x16 level images
+  const tc1 = new TileCache(vram, cgram, base1), tc2 = new TileCache(vram, cgram, base2), tc3 = new TileCache(vram, cgram, base3);
+  const prioFront = (p[0x05] & 0x0f) === 0x09;
+  const cell: LevelImages = { ...li, width: 16, height: 16, layer1: new Uint32Array(256), layer2: new Uint32Array(256), layer3: li.layer3 && { back: new Uint32Array(256), front: new Uint32Array(256), blend: li.layer3.blend } };
+  const idx: number[] = [], val: number[] = [];
+  for (let cy = 0; cy < rows; cy++) for (let cx = 0; cx < cols; cx++) {
+    if (!dirty[cy * cols + cx]) continue;
+    cell.layer1.fill(0);
+    drawMap16(cell.layer1, 16, 16, tc1, src.fg(li.tiles1[cy * li.geom1.width + cx]), 0, 0);
+    cell.layer2.fill(0);
+    const w2 = layer2At(cx, cy);
+    if (w2) drawMap16(cell.layer2, 16, 16, tc2, w2, 0, 0);
+    if (cell.layer3 && g3) {
+      cell.layer3.back.fill(0); cell.layer3.front.fill(0);
+      const { mw, mh, dx, dy } = g3;
+      // the layer 3 tiles covering the cell: tile rows by level y, tile columns by level x (repeating every mw)
+      for (let ys = cy * 16 + dy - ((cy * 16 + dy) & 7); ys < cy * 16 + 16 + dy; ys += 8) {
+        const ty = ys >> 3;
+        if (ty < LAYER3_STATUS_ROWS || ty >= mh / 8) continue;
+        for (let x = cx * 16; x < cx * 16 + 16;) {
+          const m = (((x + dx) % mw) + mw) % mw, px = x - (m & 7);
+          const a = layer3TileAddr(g3, m >> 3, ty), word = vram[a] | (vram[a + 1] << 8);
+          blit8((prioFront && word & 0x2000) ? cell.layer3.front : cell.layer3.back, 16, 16, tc3.get(word, 2), px - cx * 16, ys - dy - cy * 16);
+          x = px + 8;
+        }
+      }
+    }
+    const img = look(cell);
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+      const k = (cy * 16 + y) * li.width + cx * 16 + x;
+      if (img[y * 16 + x] !== base[k]) { idx.push(k); val.push(img[y * 16 + x]); }
+    }
+  }
+  // in pixel order, as a scan of the whole image finds them
+  const order = idx.map((_, j) => j).sort((a, b) => idx[a] - idx[b]);
+  return { idx: Uint32Array.from(order, (j) => idx[j]), val: Uint32Array.from(order, (j) => val[j]) };
+}
+
 function blend(a: number, b: number, t: number): number {
   const ch = (s: number) => Math.round(((a >> s) & 0xff) * t + ((b >> s) & 0xff) * (1 - t));
   return (0xff000000 | (ch(16) << 16) | (ch(8) << 8) | ch(0)) >>> 0;
