@@ -140,7 +140,9 @@ export class LevelView {
       this.levelCanvas.height = im.height;
     }
     const lctx = this.levelCanvas.getContext('2d')!;
-    const id = new ImageData(new Uint8ClampedArray(this.app.compositeImg.buffer.slice(0) as ArrayBuffer), im.width, im.height);
+    // putImageData copies the pixels: the image is only viewed, not copied first
+    const c = this.app.compositeImg;
+    const id = new ImageData(new Uint8ClampedArray(c.buffer as ArrayBuffer, c.byteOffset, c.byteLength), im.width, im.height);
     lctx.putImageData(id, 0, 0);
     if (relayout) this.layout(); else this.requestPaint();
   }
