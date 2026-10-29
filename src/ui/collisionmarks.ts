@@ -1,8 +1,9 @@
 // Symbols for how a tile treats Mario (found by emulation, see CollisionProbe), drawn as shapes in
 // tile pixels, text glyphs blur at 16 px: spikes on the sides that hurt, a skull on tiles that kill,
-// a net over climbable ones. The collision overlay draws them over the level, the picker as badges.
+// a net over climbable ones, a switch's color where a switch state makes the tile act otherwise. The
+// collision overlay draws them over the level, the picker as badges.
 
-import type { CollisionProbe } from '../core/blockprobe.ts';
+import { SWITCH_STATES, type CollisionProbe, type SwitchState } from '../core/blockprobe.ts';
 
 export const SPIKE_COLOR = '#ffd24a';
 export const NET_COLOR = 'rgba(150,255,170,0.8)';
@@ -67,5 +68,53 @@ export function markCanvas(mark: CollisionMark): HTMLCanvasElement {
     ctx.fillRect(0, 11, 16, 5);
   }
   else { const p = new Path2D(); netTile(p, 0, 0); ctx.lineWidth = 1; ctx.strokeStyle = NET_COLOR; ctx.stroke(p); }
+  return c;
+}
+
+// ---- switch states ----
+const SWITCH_COLOR: Record<SwitchState, string> = { blueP: '#3f7bff', silverP: '#c4c8d0', off: '#ff5050' };
+
+// the switch states that make any of the tiles act otherwise
+export function switchMarks(probes: (CollisionProbe | undefined)[]): SwitchState[] {
+  return SWITCH_STATES.filter((sw) => probes.some((c) => c?.switched[sw]));
+}
+
+// a 4x4 square per state at the bottom middle of the tile at (px, py), outlined (spikes stay free: they
+// are on the top and the sides)
+export function drawSwitchMarks(ctx: CanvasRenderingContext2D, px: number, py: number, states: SwitchState[]): void {
+  const x0 = px + 8 - (states.length * 5 - 1) / 2;
+  states.forEach((sw, i) => {
+    const x = x0 + i * 5, y = py + 11;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(x - 0.5, y - 0.5, 5, 5);
+    ctx.fillStyle = SWITCH_COLOR[sw];
+    ctx.fillRect(x, y, 4, 4);
+  });
+}
+
+// 3x5 letters for the badges
+const LETTERS: Record<string, string[]> = {
+  P: ['XX.', 'X.X', 'XX.', 'X..', 'X..'], O: ['XXX', 'X.X', 'X.X', 'X.X', 'XXX'], F: ['XXX', 'X..', 'XX.', 'X..', 'X..'],
+};
+function drawText(ctx: CanvasRenderingContext2D, text: string, x: number, y: number): void {
+  [...text].forEach((ch, k) => LETTERS[ch].forEach((row, j) => [...row].forEach((v, i) => { if (v === 'X') ctx.fillRect(x + k * 4 + i, y + j, 1, 1); })));
+}
+
+// a 16x16 badge of a switch state: a P-switch of its color, or an OFF block
+export function switchCanvas(sw: SwitchState): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = c.height = 16;
+  const ctx = c.getContext('2d')!;
+  ctx.fillStyle = SWITCH_COLOR[sw];
+  if (sw === 'off') {
+    ctx.fillRect(1, 3, 14, 10);
+    ctx.fillStyle = '#fff';
+    drawText(ctx, 'OFF', 2, 5);
+  } else {
+    ctx.fillRect(3, 3, 10, 9); // the button
+    ctx.fillRect(1, 12, 14, 3); // its base
+    ctx.fillStyle = sw === 'blueP' ? '#fff' : '#333';
+    drawText(ctx, 'P', 7, 5);
+  }
   return c;
 }

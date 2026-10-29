@@ -258,6 +258,10 @@ _Avoid_: event, flag (those are Conditional Direct Map16's)
 Finding out how something behaves in the game by running the game's own code on it in an emulator: what a Map16 block does when Mario touches it, how Mario collides with it, what a sprite does when hit from below, how fast Mario runs in a tileset. A probe is always for one tileset. What blocks look like (Map16 quarters, colors, graphics files) is not among the bytes a probe has read: drawing keeps it (ADR 0008).
 _Avoid_: Test, check, lookup table
 
+**Switch state**:
+A game condition a tile may act otherwise in: the blue P-switch running, the silver P-switch running, ON/OFF set to OFF. The collision probe runs once without and once in each, one at a time, and keeps the states that change how Mario collides with the tile or what jumping against it does (vanilla: coins and used blocks swap under the blue P-switch, Munchers become coins under the silver one). The view sets them (View → Game state), the level is drawn and the collision overlay shown in them; test play takes them over.
+_Avoid_: Switch mode, P-state
+
 **Play session**:
 A level played in the emulator from gameplay on, frame by frame with the buttons held: it begins once the level's gameplay has started (or once Mario has settled: standing, the sprites running), and ends when Mario dies, the level is left, or whoever plays stops. Test play, probes that move Mario and the tests play a level that way.
 _Avoid_: run, game loop, harness

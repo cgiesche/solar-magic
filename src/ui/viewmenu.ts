@@ -4,7 +4,7 @@ import type { App } from './app.ts';
 import { menuButton, type MenuItem } from './menu.ts';
 import { hex2 } from '../core/names.ts';
 import { COND_FLAGS, flagRam } from '../core/cdm16.ts';
-import { triggerMenu } from './triggerpanel.ts';
+import { triggerMenu, setSwitch } from './triggerpanel.ts';
 import { projectId } from '../core/projectid.ts';
 import { loadDeaths, clearDeaths, clearAllDeaths, anyDeaths } from './deathmarks.ts';
 
@@ -23,6 +23,16 @@ export function viewMenu(app: App, paint: () => void, full = true): HTMLElement 
   // view-only game state (re-runs the level load)
   const gameState = (k: keyof App['switches'], label: string, title: string): MenuItem => ({
     label, title, checked: () => app.switches[k], onToggle: (v) => { app.switches[k] = v; app.refresh(); },
+  });
+  // a P-switch's timer, a game condition of the view's triggers (extrigger.ts); as an animation trigger (turning
+  // the animation on) when the level's animations use it
+  const pSwitch = (sw: number, label: string, title: string): MenuItem => ({
+    label, title, checked: () => app.exTriggers.game.has(sw),
+    onToggle: (v) => {
+      if (app.levelTriggers().has(sw)) { setSwitch(app, sw, v); return; }
+      if (v) app.exTriggers.game.add(sw); else app.exTriggers.game.delete(sw);
+      app.refresh();
+    },
   });
   const anim = show('anim', 'Animation', 'Play animated tiles and palettes (as in the game, custom animations too)');
   // the conditional Direct Map16 flags the level uses, each on or off (cdm16.ts; Lunar Magic: all at once)
@@ -44,6 +54,8 @@ export function viewMenu(app: App, paint: () => void, full = true): HTMLElement 
     { heading: 'Game state' },
     gameState('palaces', '!-blocks pressed', 'View: all switch palaces pressed'),
     gameState('onOff', 'ON/OFF set to OFF', 'View: ON/OFF switch set to OFF'),
+    pSwitch(0x01, 'Blue P-switch running', 'View and test play: the blue P-switch\'s timer running (coins and used blocks swap; the collision overlay shows it too)'),
+    pSwitch(0x02, 'Silver P-switch running', 'View and test play: the silver P-switch\'s timer running (the collision overlay shows it too)'),
     ...flags(),
     ...triggerMenu(app),
   ];

@@ -83,7 +83,7 @@ export function triggerPanel(app: App, openSlot: (r: SlotRef) => void): HTMLElem
 // the View menu's part: the level's triggers switched (Lunar Magic's View > ExAnimation Triggers); a manual
 // trigger steps to its next frame
 export function triggerMenu(app: App): MenuItem[] {
-  const used = [...shownSwitches(app).keys()].filter((sw) => sw !== 0x03); // ON/OFF: the game state's own item
+  const used = [...shownSwitches(app).keys()].filter((sw) => sw > 0x03); // P-switches, ON/OFF: the game state's own items
   return [
     { heading: 'Animation triggers' },
     ...used.map((sw): MenuItem => isManual(sw)

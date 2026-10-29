@@ -26,12 +26,12 @@ import { TileCache, map16Source, drawMap16 } from '../core/render.ts';
 import { lt3Target, lt3Users, blankLayer3Tile, l3Palette, withL3Palette, L3_TILE, L3_PAL, L3_PRIO, L3_FLIP_X, L3_FLIP_Y } from '../core/layer3map.ts';
 import { LT3_DESTS } from '../core/layer3gfx.ts';
 import { probeable } from '../core/probeclient.ts';
-import { probeText, spritesOf, spriteProbeAt, enterText, enterSuffix } from '../core/blockprobe.ts';
+import { probeText, spritesOf, spriteProbeAt, enterText, enterSuffix, switchText, switchedText, SWITCH_NAME, type SwitchState } from '../core/blockprobe.ts';
 import { tileMatches, drawTileMatches } from './tilesearch.ts';
 import { matchesAll, type SearchProvider, type SearchResult } from './search.ts';
 import { blockFilesByTile } from './blockdialog.ts';
 import { contextMenu } from './menu.ts';
-import { collisionMarks, markCanvas, MARK_TEXT, type CollisionMark } from './collisionmarks.ts';
+import { collisionMarks, markCanvas, switchMarks, switchCanvas, MARK_TEXT, type CollisionMark } from './collisionmarks.ts';
 
 // behaviour of the given Map16 tiles when hit from below or entered (only tiles with an effect);
 // undefined while probes are still pending
@@ -68,10 +68,21 @@ export function blockMarks(app: App, tiles: number[]): CollisionMark[] {
   return collisionMarks(tiles.slice(0, 16).map((t) => app.cachedCollision(t)));
 }
 
+// the switch states that make any of the tiles act otherwise, with what each does then (finished probes only)
+export function blockSwitches(app: App, tiles: number[]): { sw: SwitchState; text: string }[] {
+  const probes = tiles.slice(0, 16).map((t) => [t, app.cachedCollision(t)] as const);
+  return switchMarks(probes.map(([, c]) => c)).map((sw) => {
+    const by = probes.flatMap(([t, c]) => { const x = c && switchText(c, sw); return x ? [{ t, x }] : []; });
+    const one = new Set(by.map((b) => b.x)).size === 1;
+    return { sw, text: one ? by[0].x : by.map((b) => `${hex3(b.t)}: ${b.x}`).join('; ') };
+  });
+}
+
 // the symbols the picker draws on an entry, for its preview's legend: the items it gives, the directions it is
 // entered in, how it treats Mario
+const SWITCH_LEGEND: Record<SwitchState, string> = { blueP: 'While the blue P-switch runs', silverP: 'While the silver P-switch runs', off: 'While ON/OFF is OFF' };
 const MARK_LEGEND: Record<CollisionMark, string> = { kills: 'Kills Mario when touched', hurts: 'Hurts Mario when touched', climb: 'Mario can climb in it' };
-export function entryLegend(app: App, e: { items?: number[]; enter?: string; marks?: CollisionMark[] }): LegendRow[] {
+export function entryLegend(app: App, e: { items?: number[]; enter?: string; marks?: CollisionMark[]; switches?: { sw: SwitchState; text: string }[] }): LegendRow[] {
   const out: LegendRow[] = [];
   for (const n of (e.items ?? []).slice(0, 4)) {
     const img = app.spriteThumbs?.get(n);
@@ -82,6 +93,7 @@ export function entryLegend(app: App, e: { items?: number[]; enter?: string; mar
     out.push({ icon: h('div', { class: 'picker-enter' }, e.enter), text: `Mario enters it holding ${dirs.join(' or ')}` });
   }
   for (const m of e.marks ?? []) out.push({ icon: markCanvas(m), text: MARK_LEGEND[m] });
+  for (const { sw, text } of e.switches ?? []) out.push({ icon: switchCanvas(sw), text: `${SWITCH_LEGEND[sw]}: ${text}` });
   return out;
 }
 
@@ -296,7 +308,8 @@ export class Picker {
     let hoverTile = -1, hoverCanvas: HTMLCanvasElement | null = null;
     const tip = () => {
       const p = app.probes.block(hoverTile), name = nameOf(app.rom, 'fg', hoverTile);
-      const c = app.probes.collision(hoverTile), marks = c ? collisionMarks([c]).map((m) => ` · ${MARK_TEXT[m]}`).join('') : '';
+      const c = app.probes.collision(hoverTile), o = c && switchedText(c);
+      const marks = (c ? collisionMarks([c]).map((m) => ` · ${MARK_TEXT[m]}`).join('') : '') + (o ? ` · ${o}` : '');
       if (hoverCanvas) hoverCanvas.title = `Tile ${hex3(hoverTile)}${name ? ` “${name}”` : ''}: ${p ? probeText(p) + marks : 'determining behavior …'}\nCtrl+click: edit in the Map16 tab`;
     };
     this.m16Tip = () => { if (hoverTile >= 0 && hoverCanvas?.isConnected) tip(); };
@@ -346,7 +359,7 @@ export class Picker {
       }, (r) => {
         const t = base + r.y * 16 + r.x, tiles = Array.from({ length: r.w * r.h }, (_, i) => t + Math.floor(i / r.w) * 16 + (i % r.w));
         tiles.forEach((u) => app.probes.collision(u)); // asked for; shown once known (the next move of the mouse)
-        return entryLegend(app, { items: blockSprites(app, tiles), enter: blockEnter(app, tiles), marks: blockMarks(app, tiles) });
+        return entryLegend(app, { items: blockSprites(app, tiles), enter: blockEnter(app, tiles), marks: blockMarks(app, tiles), switches: blockSwitches(app, tiles) });
       });
       if (scale < PREVIEW_BELOW) { this.body.append(h('div', { class: 'picker-head m16-page-head', 'data-page': String(p) }, `Page ${p.toString(16).toUpperCase()}`), c); continue; }
       c.addEventListener('mousemove', (e) => {
@@ -588,7 +601,7 @@ export class Picker {
       const sum = tiles.length ? blockSummary(app, tiles) : [];
       const effect = this.effects.get(key);
       const tip = objectTooltip(app.rom, s.num, s.extension?.[0] ?? s.ext);
-      const marks = blockMarks(app, tiles);
+      const marks = blockMarks(app, tiles), switches = blockSwitches(app, tiles);
       const info = (tiles.length ? `\nMap16 ${tiles.slice(0, 8).map(hex3).join(' ')}${tiles.length > 8 ? ' …' : ''}` : '')
         + (tip ? '\n' + tip : effect ? `\nDraws nothing; when the level loads, it ${effect}` : '')
         + (sum === undefined ? '\n(determining behavior …)' : sum.map((x) => '\n' + x).join(''));
@@ -597,8 +610,8 @@ export class Picker {
       // invalid extended objects and custom numbers produce nothing
       if (!th && !effect && section !== 'obj' && this.thumbsFrom) continue;
       out.push({
-        s, vt, label, name, th, title: `${label}: ${name}${info}`, behavior: sum?.join(' · ') ?? '', text: `${label} ${name} ${info} ${marks.map((m) => MARK_TEXT[m]).join(' ')}`.toLowerCase(),
-        items: blockSprites(app, tiles), enter: blockEnter(app, tiles), marks,
+        s, vt, label, name, th, title: `${label}: ${name}${info}`, behavior: sum?.join(' · ') ?? '', text: `${label} ${name} ${info} ${marks.map((m) => MARK_TEXT[m]).join(' ')} ${switches.map((x) => `${SWITCH_NAME[x.sw]} ${x.text}`).join(' ')}`.toLowerCase(),
+        items: blockSprites(app, tiles), enter: blockEnter(app, tiles), marks, switches,
         item: { kind: 'obj', num: s.num, ext: s.ext, size: s.size, ...(s.extension ? { extension: [...s.extension] } : {}) } as PickedItem,
       });
     }
@@ -842,7 +855,8 @@ export class Picker {
           },
         }, h('div', { class: 'picker-img' }, th?.c ?? h('span', { class: 'none' }, '–'),
           h('div', { class: 'picker-corner' }, itemBadge(app, e.items), e.enter ? h('div', { class: 'picker-enter', title: enterText(e.enter) }, e.enter) : '',
-            e.marks.length ? h('div', { class: 'picker-items', title: e.marks.map((m) => MARK_TEXT[m]).join(', ') }, ...e.marks.map(markCanvas)) : '')),
+            e.marks.length || e.switches.length ? h('div', { class: 'picker-items', title: [...e.marks.map((m) => MARK_TEXT[m]), ...e.switches.map((x) => `${SWITCH_NAME[x.sw]}: ${x.text}`)].join('\n') },
+              ...e.marks.map(markCanvas), ...e.switches.map((x) => switchCanvas(x.sw))) : '')),
           h('div', { class: 'picker-label' }, e.label), h('div', { class: 'picker-name' }, s.extension ? e.name : app.objectName(s.num, s.ext))));
         if (renames) this.keysOn(cell, () => renameObject(app, s.num, s.ext));
         if (e.th) previewOnHover(cell, th!.scale, () => cloneCanvas(e.th!), () => (e.title + hint).split('\n'), () => entryLegend(app, e));

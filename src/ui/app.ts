@@ -45,7 +45,7 @@ import { cameraAtKey, type CameraReach, type CameraAt } from '../core/camerareac
 import { MARIO_W, MARIO_H, type CameraBands } from '../core/camerabands.ts';
 import { layer3Kinds, tideKind, layer3Top, type Layer3Kind } from '../core/layer3.ts';
 import { layer2MotionsJob, type Layer2Motions } from '../core/l2scroll.ts';
-import { variantOf, blockKey, collisionKey, type BlockProbe, type CollisionProbe, type RunStates } from '../core/blockprobe.ts';
+import { variantOf, blockKey, collisionKey, type BlockProbe, type CollisionProbe, type RunStates, type SwitchState, SWITCH_STATES, SWITCH_TRIGGER } from '../core/blockprobe.ts';
 import type { ProbeReply } from '../core/probehost.ts';
 import { ProbeClient } from '../core/probeclient.ts';
 import { ResultLearner } from '../core/learner.ts';
@@ -958,6 +958,11 @@ export class App {
   cachedBlock(tile: number): BlockProbe | undefined {
     return this.results.get(blockKey(this.level.header.tileset, tile));
   }
+  // the switch states the view sets (the probes' order: blue P-switch, silver P-switch, OFF)
+  viewSwitches(): SwitchState[] {
+    return SWITCH_STATES.filter((sw) => (sw === 'off' ? this.switches.onOff : this.exTriggers.game.has(SWITCH_TRIGGER[sw])));
+  }
+
   cachedCollision(tile: number): CollisionProbe | undefined {
     return this.results.get(collisionKey(this.level.header.tileset, tile));
   }

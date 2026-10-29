@@ -5,8 +5,8 @@ import { h, attachPanZoom, toast } from './dom.ts';
 import { downloadBytes } from './platform.ts';
 import { hex2, hex3 } from '../core/names.ts';
 import { resizeObjectSize } from '../core/objkinds.ts';
-import { KILL_FILL, HURT_FILL, CLIMB_FILL, SPIKE_COLOR, NET_COLOR, spikeRow, netTile, drawSkull } from './collisionmarks.ts';
-import { probeAt, spriteProbeAt, enterText, collisionText, type PosProbe, type CollisionProbe } from '../core/blockprobe.ts';
+import { KILL_FILL, HURT_FILL, CLIMB_FILL, SPIKE_COLOR, NET_COLOR, spikeRow, netTile, drawSkull, switchMarks, drawSwitchMarks } from './collisionmarks.ts';
+import { probeAt, spriteProbeAt, enterText, collisionText, collisionIn, switchText, SWITCH_STATES, SWITCH_NAME, type PosProbe, type CollisionCore, type SwitchState } from '../core/blockprobe.ts';
 import { type LevelObject, type LevelSprite, newUid, serializeLayer1, serializeLayer2, serializeLevelSprites, spriteSizes, spriteId, EXIT_NEW } from '../core/level.ts';
 import { overworldExitText } from '../core/owteleport.ts';
 import { composite, invisibleTiles, type LevelImages } from '../core/render.ts';
@@ -742,28 +742,34 @@ export class LevelView {
   // How Mario collides with layer 1 (found by emulation): the level is dimmed, solid sides are
   // white lines where they face something passable, platforms (solid from above only) dashed,
   // slopes diagonal; red: hurts, with spikes on the sides that hurt (stronger, with a skull: kills),
-  // blue: water, green with a net: climbable.
+  // blue: water, green with a net: climbable. All in the switch states the view sets (P-switches, OFF);
+  // a tile that a switch state makes act otherwise has that switch's color at its bottom.
   paintCollision(ctx: CanvasRenderingContext2D): void {
     const app = this.app, g = app.images.geom1, w = app.render.wram;
     if (!app.show.layer1) return;
     const { x0, y0, x1, y1 } = this.visibleTiles();
-    const info = new Map<number, CollisionProbe | undefined>();
-    const at = (x: number, y: number): CollisionProbe | undefined => {
+    // in the switch states the view sets; the states that make the tile act otherwise are marked
+    const on = app.viewSwitches();
+    const info = new Map<number, { c: CollisionCore; sw: SwitchState[] } | undefined>();
+    const probe = (x: number, y: number) => {
       const a = g.addr(x, y);
       if (a < 0) return undefined;
       const t = map16Tile(w, a);
-      if (!info.has(t)) info.set(t, app.probes.collision(t));
+      if (!info.has(t)) { const p = app.probes.collision(t); info.set(t, p && { c: collisionIn(p, on), sw: switchMarks([p]) }); }
       return info.get(t);
     };
+    const at = (x: number, y: number): CollisionCore | undefined => probe(x, y)?.c; // (neighbors)
+    const switched: [number, number, SwitchState[]][] = [];
     ctx.fillStyle = 'rgba(0,0,0,0.45)';
     ctx.fillRect(x0 * 16, y0 * 16, (x1 - x0) * 16, (y1 - y0) * 16);
     const lw = 2 / app.zoom;
     const solidLines = new Path2D(), platLines = new Path2D(), net = new Path2D(), spikes = new Path2D();
     const skulls: [number, number][] = [];
     for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
-      const c = at(x, y);
-      if (!c) continue;
-      const px = x * 16, py = y * 16;
+      const here = probe(x, y);
+      if (!here) continue;
+      const c = here.c, px = x * 16, py = y * 16;
+      if (here.sw.length) switched.push([px, py, here.sw]);
       const fill = c.kills ? KILL_FILL : c.hurtsTop || c.hurtsSide ? HURT_FILL
         : c.water ? 'rgba(60,140,255,0.35)' : c.climb ? CLIMB_FILL : null;
       if (fill) { ctx.fillStyle = fill; ctx.fillRect(px, py, 16, 16); }
@@ -813,6 +819,7 @@ export class LevelView {
     ctx.fill(spikes);
     ctx.fillStyle = '#fff';
     for (const [px, py] of skulls) drawSkull(ctx, px, py);
+    for (const [px, py, sw] of switched) drawSwitchMarks(ctx, px, py, sw);
   }
 
   // Water of a layer 3 tide (see App.tide): in the collision overlay the area Mario swims in is
@@ -1236,7 +1243,13 @@ export class LevelView {
       const sum = [p && probeAt(p, tx).summary, p && enterText(p.enter)].filter(Boolean).join(', ');
       if (sum) txt += ` (${sum})`;
       const c = app.show.collision && app.mode !== 'bg' ? app.probes.collision(t) : undefined;
-      if (c) txt += ` · ${collisionText(c)}`;
+      if (c) {
+        // in the view's switch states; the others, and without a switch when the view's change it
+        const on = app.viewSwitches(), shown = collisionIn(c, on);
+        const other = [...SWITCH_STATES.filter((sw) => !on.includes(sw) && c.switched[sw]).map((sw) => `${SWITCH_NAME[sw]}: ${switchText(c, sw)}`),
+          ...(shown !== c ? [`without switches: ${collisionText(c)}`] : [])];
+        txt += ` · ${collisionText(shown)}${other.length ? ` (${other.join(' · ')})` : ''}`;
+      }
       const tide = app.show.collision && app.mode !== 'bg' ? app.tide() : null;
       if (tide && ty * 16 + 8 >= tide.high) txt += ty * 16 + 8 >= tide.low ? ' · water (tide)' : ' · water at high tide';
     }

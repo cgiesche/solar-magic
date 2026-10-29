@@ -16,7 +16,10 @@
 // state or the game mode that a run without the button doesn't show.
 // How Mario collides with a tile (the collision overlay) is found out the same way: he drops onto
 // it at both ends (a different landing height is a slope), walks against it from both sides on a
-// floor, jumps against it from below and stands inside a passable one (water, vines and nets).
+// floor, jumps against it from below and stands inside a passable one (water, vines and nets). This
+// is done again with each switch state set in RAM (blue P-switch, silver P-switch, OFF), and the
+// states in which the tile acts otherwise are kept (vanilla: coins and used blocks swap under the
+// blue P-switch).
 // Mario's speed and P-meter when walking, running and at P-speed (for the jump arcs) are taken
 // from him running on a long floor of the probe level.
 // Some tiles behave differently per tileset (vanilla: the boss door tile 9C can only be entered in
@@ -31,6 +34,7 @@ import type { SnesState } from './snes.ts';
 import { ResultCache, RomFingerprint, type RomDeps, type RomReads } from './romdeps.ts';
 import { spriteName, hex3 } from './names.ts';
 import { measureCameraBands, type CameraBands } from './camerabands.ts';
+import { applyTriggers, emptyTriggerView } from './extrigger.ts';
 import { layerGeom } from './render.ts';
 import { hasLayer2Objects, parsePrimaryHeader, encodePrimaryHeader } from './level.ts';
 import { GM, RAM, SPR, SPR_STATE, SPRITE_SLOTS, MAP_HI, MARIO_DYING, PAD, mapAddr, marioY, map16Tile, spriteX, spriteY, cameraY, setCameraX, setCameraY, setMarioPos } from './ram.ts';
@@ -44,7 +48,7 @@ const PROBE_CAM_Y_MAX = 0x1b * 16 - 224;
 const PROBE_SCREENS = PROBE_HEADER[0] & 0x1f; // the level's screens but its last (it has one more)
 const MAX_VARIANTS = 16; // more X × Y combinations: Y is ignored
 const ENTER_FRAMES = 24;
-const COLLISION_VERSION = 2; // part of the result key: raise when the collision probe changes
+const COLLISION_VERSION = 3; // part of the result key: raise when the collision probe changes
 const SETTLE_FRAMES = 6; // frames Mario has to stand still before a probe stops early
 // Mario's offset to the tile for each enter direction
 const ENTER_DX = [-8, -4, 0, 4, 8]; // pipes only let Mario in within a few pixels of their middle
@@ -83,9 +87,16 @@ export interface BlockProbe extends ColumnProbe {
   tile: number;
   enter: string; // directions to hold to enter it (pipes, doors) as arrows ↓↑←→, '' = none
 }
+// a switch the game's code may make a tile act otherwise in, set as a view setting does (extrigger.ts)
+export type SwitchState = 'blueP' | 'silverP' | 'off';
+export const SWITCH_STATES: SwitchState[] = ['blueP', 'silverP', 'off'];
+export const SWITCH_NAME: Record<SwitchState, string> = { blueP: 'blue P-switch', silverP: 'silver P-switch', off: 'OFF' };
+// the ExAnimation trigger of the same condition (extrigger.ts switchOf)
+export const SWITCH_TRIGGER: Record<SwitchState, number> = { blueP: 0x01, silverP: 0x02, off: 0x03 };
+
 // How Mario collides with a tile; slope: how far below the tile top Mario stands at its left and
 // right edge (null: flat or no floor)
-export interface CollisionProbe {
+export interface CollisionCore {
   top: boolean; // Mario can stand on it
   bottom: boolean; // stops him from below
   left: boolean; // stops him walking right against its left side
@@ -96,6 +107,12 @@ export interface CollisionProbe {
   kills: boolean; // touching it kills even big Mario (lava)
   water: boolean; // swimming inside it
   climb: boolean; // climbing inside it (vines, nets)
+}
+// in a switch state: how Mario collides, what jumping against it from below does (small Mario, column 0)
+export interface SwitchedCollision { collision: CollisionCore; below: string }
+export interface CollisionProbe extends CollisionCore {
+  below: string; // the same without a switch
+  switched: Partial<Record<SwitchState, SwitchedCollision>>; // only the states that change something
 }
 
 // Mario's X speed ($7B, to the right) and P-meter ($13E4) in a running state
@@ -143,6 +160,7 @@ interface TilesetProbes {
   deps: RomDeps | null; // of marks, to notice when ready is outdated
   by: number; // block row in the probe level; the block goes to screen 1, column 0-15
   floorTile: number; // a tile Mario can stand on (found by trying), -1 = not searched yet, -2 = none found
+  switchFloor: Partial<Record<SwitchState, number>>; // the same in a switch state (the floor may depend on it)
   climbTile: number; // a tile Mario climbs in (vines, nets), the same way
 }
 
@@ -153,6 +171,7 @@ export class BlockProber {
   results: ResultCache;
   private sets = new Map<number, TilesetProbes>();
   private cur!: TilesetProbes;
+  private sw: SwitchState | null = null; // set by start() in the probe state
 
   // boot: another emulator on the same ROM whose title screen snapshot is taken over (saves booting
   // again); results: where probe results are kept
@@ -167,7 +186,7 @@ export class BlockProber {
   // probe (and look up cached results) in tileset ts from now on
   use(ts: number): void {
     let t = this.sets.get(ts);
-    if (!t) this.sets.set(ts, (t = { ready: null, reads: null, deps: null, by: 0, floorTile: -1, climbTile: -1 }));
+    if (!t) this.sets.set(ts, (t = { ready: null, reads: null, deps: null, by: 0, floorTile: -1, switchFloor: {}, climbTile: -1 }));
     this.tileset = ts;
     this.cur = t;
   }
@@ -176,7 +195,7 @@ export class BlockProber {
   // again; results are checked when used
   reset(): void {
     for (const t of this.sets.values()) {
-      if (t.deps && !this.results.fp.valid(t.deps)) Object.assign(t, { ready: null, reads: null, deps: null, by: 0, floorTile: -1, climbTile: -1 });
+      if (t.deps && !this.results.fp.valid(t.deps)) Object.assign(t, { ready: null, reads: null, deps: null, by: 0, floorTile: -1, switchFloor: {}, climbTile: -1 });
     }
   }
 
@@ -206,7 +225,15 @@ export class BlockProber {
   }
 
   probeCollision(tile: number): CollisionProbe {
-    return this.cachedCollision(tile) ?? this.computed(collisionKey(this.tileset, tile), () => this.collision(tile));
+    return this.cachedCollision(tile) ?? this.computed(collisionKey(this.tileset, tile), (): CollisionProbe => {
+      const base = this.collision(tile), key = JSON.stringify(base);
+      const switched: CollisionProbe['switched'] = {};
+      for (const sw of SWITCH_STATES) {
+        const r = this.inState(sw, () => this.collision(tile));
+        if (JSON.stringify(r) !== key) switched[sw] = { collision: r.core, below: r.below };
+      }
+      return { ...base.core, below: base.below, switched };
+    });
   }
 
   // walking: after a while holding right; running: holding Y too, once the P-meter starts to
@@ -368,7 +395,16 @@ export class BlockProber {
       setCameraY(w, cy);
     }
     w[RAM.powerup] = big;
+    if (this.sw === 'off') w[RAM.onOff] = 1; // (the view's own switch, set by the level load there)
+    else if (this.sw) applyTriggers(w, { ...emptyTriggerView(), game: new Set([SWITCH_TRIGGER[this.sw]]) });
     return w;
+  }
+
+  // fn() in a switch state (with a floor tile that is one in it)
+  private inState<T>(sw: SwitchState | null, fn: () => T): T {
+    const old = this.sw;
+    this.sw = sw;
+    try { return fn(); } finally { this.sw = old; }
   }
 
   // fresh state with sprite num in the probe slot at tile X & 15 = x, Y & 15 = y (rows chosen so
@@ -477,6 +513,16 @@ export class BlockProber {
   // the first tile a dropped Mario comes to rest on without anything happening
   private floor(): number {
     const c = this.cur;
+    const sw = this.sw;
+    if (sw) {
+      const known = c.switchFloor[sw];
+      if (known !== undefined) return known;
+      const base = this.floorIn(null);
+      // the floor without a switch, if it stays one (dropped onto, as searched)
+      const { reads } = this.emu.tracked(() => { c.switchFloor[sw] = base >= 0 && this.standsOn(base) ? base : this.searchFloor(); }, null);
+      if (c.reads) { c.reads.add(reads); c.deps = this.results.fp.deps(c.reads); }
+      return c.switchFloor[sw]!;
+    }
     if (c.floorTile !== -1) return c.floorTile;
     // later probes use the result: its pages count for the probe level
     const { reads } = this.emu.tracked(() => this.findFloor(), null);
@@ -488,17 +534,29 @@ export class BlockProber {
   }
 
   private findFloor(): void {
-    const c = this.cur;
-    c.floorTile = -2;
-    for (let i = 0; i < 0x200; i++) {
-      const t = (i + 0x100) & 0x1ff, bx = 16;
-      const w = this.start(bx, 0);
-      for (let x = bx - 4; x <= bx + 4; x++) this.put(x, this.by, t);
-      this.placeMario(bx * 16, this.by * 16, -40, 0); // feet 8 px above
-      if (this.runHeld(0, 16)) continue;
-      const off = mapAddr(bx, this.by);
-      if ((w[RAM.marioBlocked] & 4) && w[RAM.powerup] === 0 && map16Tile(w, off) === t) { c.floorTile = t; break; }
-    }
+    this.cur.floorTile = this.searchFloor();
+  }
+
+  // the floor in the switch state sw (null: none)
+  private floorIn(sw: SwitchState | null): number {
+    const old = this.sw;
+    this.sw = sw;
+    try { return this.floor(); } finally { this.sw = old; }
+  }
+
+  // the first tile from 100 on that small Mario, dropped onto a row of it, stands on unharmed; -2: none
+  private searchFloor(): number {
+    for (let i = 0; i < 0x200; i++) if (this.standsOn((i + 0x100) & 0x1ff)) return (i + 0x100) & 0x1ff;
+    return -2;
+  }
+
+  private standsOn(t: number): boolean {
+    const bx = 16;
+    const w = this.start(bx, 0);
+    for (let x = bx - 4; x <= bx + 4; x++) this.put(x, this.by, t);
+    this.placeMario(bx * 16, this.by * 16, -40, 0); // feet 8 px above
+    if (this.runHeld(0, 16)) return false;
+    return !!(w[RAM.marioBlocked] & 4) && w[RAM.powerup] === 0 && map16Tile(w, mapAddr(bx, this.by)) === t;
   }
 
   private climbTile(): number {
@@ -529,7 +587,7 @@ export class BlockProber {
     }
   }
 
-  private collision(tile: number): CollisionProbe {
+  private collision(tile: number): { core: CollisionCore; below: string } {
     const bx = 16, by = this.by, ty = by * 16;
     // drop: Mario (big, so damage shows as losing the powerup) falls onto the tile with his middle
     // above pixel cx of it; landing: his Y when he first stands
@@ -588,7 +646,7 @@ export class BlockProber {
       return { blocked, hurt, dead };
     };
     const l = walk(true), r = walk(false);
-    const bottom = this.hit(tile, 0, 0).solid;
+    const hitBelow = this.hit(tile, 0, 0), bottom = hitBelow.solid;
     // inside a passable tile: water ($75) or climbing ($74, holding up)
     let water = false, climb = false;
     if (!top && !bottom && !l.blocked && !r.blocked) {
@@ -606,9 +664,12 @@ export class BlockProber {
       s.joy1 = 0;
     }
     return {
-      top, bottom, left: l.blocked, right: r.blocked, slope,
-      hurtsTop: drops.some((d) => d.hurt), hurtsSide: l.hurt || r.hurt, kills: drops.some((d) => d.dead) || l.dead || r.dead,
-      water, climb,
+      core: {
+        top, bottom, left: l.blocked, right: r.blocked, slope,
+        hurtsTop: drops.some((d) => d.hurt), hurtsSide: l.hurt || r.hurt, kills: drops.some((d) => d.dead) || l.dead || r.dead,
+        water, climb,
+      },
+      below: describe(tile, hitBelow),
     };
   }
 
@@ -741,7 +802,7 @@ export function probeText(p: ColumnProbe | BlockProbe, x?: number): string {
 }
 
 // "solid: top, sides · hurts on top" for the status bar
-export function collisionText(c: CollisionProbe): string {
+export function collisionText(c: CollisionCore): string {
   const sides = [c.left && 'left', c.right && 'right'].filter(Boolean);
   const solid = [c.top && 'top', c.bottom && 'bottom', ...(sides.length === 2 ? ['sides'] : sides)].filter(Boolean);
   const p: string[] = [];
@@ -757,6 +818,32 @@ export function collisionText(c: CollisionProbe): string {
   if (c.water && !c.kills) p.push('water');
   if (c.climb) p.push('climbable');
   return p.join(' · ');
+}
+
+// how Mario collides with the tile while the switches `on` hold: the first of them that changes it (a tile
+// is probed with one switch at a time)
+export function collisionIn(c: CollisionProbe, on: SwitchState[]): CollisionCore {
+  for (const sw of on) { const s = c.switched[sw]; if (s) return s.collision; }
+  return c;
+}
+
+// what each switch state changes: "blue P-switch: solid, from below: +1 coin"; '' when none does
+export function switchedText(c: CollisionProbe): string {
+  return SWITCH_STATES.flatMap((sw) => {
+    const t = switchText(c, sw);
+    return t ? [`${SWITCH_NAME[sw]}: ${t}`] : [];
+  }).join(' · ');
+}
+
+// what the tile does in that state where it differs from without a switch; '' when the state changes nothing
+export function switchText(c: CollisionProbe, sw: SwitchState): string {
+  const s = c.switched[sw];
+  if (!s) return '';
+  const p: string[] = [];
+  const a = collisionText(c), b = collisionText(s.collision);
+  if (a !== b) p.push(b);
+  if (s.below !== c.below) p.push(`from below: ${s.below || 'no effect'}`);
+  return p.join(', ') || 'acts otherwise';
 }
 
 export function enterText(enter: string): string {
