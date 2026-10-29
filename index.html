@@ -12,6 +12,7 @@
   <link rel="icon" type="image/png" href="/favicon.png" />
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   <meta property="og:type" content="website" />
+  <meta property="og:locale" content="en_US" />
   <meta property="og:site_name" content="Solar Magic" />
   <meta property="og:url" content="https://smw.traumwald.net/" />
   <meta property="og:image" content="https://smw.traumwald.net/og-image.jpg" />
@@ -24,6 +25,7 @@
   <meta name="twitter:title" content="Solar Magic – Super Mario World Level Editor" />
   <meta name="twitter:description" content="Create your own Super Mario World levels and ROM hacks right in your browser. Free, no installation, play-test instantly." />
   <meta name="twitter:image" content="https://smw.traumwald.net/og-image.jpg" />
+  <meta name="twitter:image:alt" content="The Solar Magic level editor showing Yoshi's Island 1" />
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
@@ -59,6 +61,8 @@
     /* the desktop app does not offer itself for download */
     .desktop .landing-get-app, .desktop .landing-download { display: none !important; }
   </style>
+  <!-- without JavaScript nothing removes “booting”: the start page is shown anyway, with its note -->
+  <noscript><style>.booting .landing { visibility: visible; }</style></noscript>
 </head>
 <body>
   <div id="app">
@@ -91,7 +95,7 @@
           <li class="landing-get-app"><a href="#download">Desktop app for Windows, macOS &amp; Linux</a></li>
         </ul>
         <a class="landing-shot landing-hero-shot" href="/screens/level.webp" data-caption="The level editor: Yoshi's Island 1 with the level list and the object picker">
-          <img src="/screens/level.webp" width="1600" height="1000" alt="The level editor with Yoshi's Island 1, the level list and the object picker" />
+          <img src="/screens/level.webp" width="1600" height="1000" fetchpriority="high" alt="The level editor with Yoshi's Island 1, the level list and the object picker" />
         </a>
       </header>
 
@@ -291,6 +295,8 @@
         <p class="landing-kicker">FAQ</p>
         <h2 id="faq">Questions</h2>
         <dl class="landing-faq">
+          <dt>What is Solar Magic?</dt>
+          <dd>Solar Magic is a free level editor for Super Mario World. It runs in your web browser and lets you build your own levels and ROM hacks without installing anything.</dd>
           <dt>Do I need to install anything?</dt>
           <dd>No. Solar Magic runs in any modern web browser. A <a href="#download">desktop app</a> is available as well.</dd>
           <dt>Where do I get a ROM?</dt>
