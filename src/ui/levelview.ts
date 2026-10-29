@@ -1095,9 +1095,10 @@ export class LevelView {
       this.hover = { tx, ty, px, py, top, cx: cell?.x ?? tx, cy: cell?.y ?? ty };
       if (moved) {
         this.updateStatus(tx, ty);
-        if (!(e.buttons & 4)) this.updateCursor(px, py, top); // middle button: panning sets its own cursor
         this.requestPaint();
       }
+      // (every pixel: the resize handles are narrower than a tile; middle button: panning sets its own cursor)
+      if (!(e.buttons & 4)) this.updateCursor(px, py, top);
     }
     const d = this.drag;
     if (!d) return;

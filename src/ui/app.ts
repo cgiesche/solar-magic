@@ -1740,6 +1740,7 @@ export class App {
     if (this.sizer?.key === key && this.sizeEmu?.rom === this.rom) return this.sizer.probe;
     if (this.sizeEmu?.rom !== this.rom) { this.sizeEmu = new LevelEmulator(this.rom); this.sizeEmu.adoptBoot(this.emu); }
     this.sizer = { key, probe: new SizeProbe(this.sizeEmu, { number: lv.number, header: lv.header }, l2) };
+    this.driverMemo.clear();
     return this.sizer.probe;
   }
   private sizeSpec(o: LevelObject, size: number): SizeSpec {
@@ -1760,9 +1761,17 @@ export class App {
   }
   // which part of the settings byte sizes which axis of the object: as emulated once its sizes are known,
   // before as its kind says (they are probed in the background then, 'sizes' when known)
+  private driverMemo = new Map<string, Drivers>(); // (emulated ones, per object as resized and its kind)
   resizeDrivers(o: LevelObject): Drivers {
-    const p = this.sizeProbe(), kind = this.objectKind(o.num), specs = this.allSizes(o);
-    if (specs.every((s) => p.box(s) !== undefined)) return drivers(kind, o.size, this.sizeBoxes(o));
+    const p = this.sizeProbe(), kind = this.objectKind(o.num);
+    const key = `${o.num}:${o.ext}:${o.size}:${o.tile ?? ''}:${o.extension?.join(',') ?? ''}:${JSON.stringify(kind)}`;
+    const had = this.driverMemo.get(key);
+    if (had) return had;
+    if (this.allSizes(o).every((s) => p.box(s) !== undefined)) {
+      const d = drivers(kind, o.size, this.sizeBoxes(o));
+      this.driverMemo.set(key, d);
+      return d;
+    }
     this.prefetchSizes();
     return namedDrivers(kind);
   }
