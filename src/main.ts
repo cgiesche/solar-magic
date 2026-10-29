@@ -29,6 +29,7 @@ import { musicPlayer, LEVEL_MUSIC } from './ui/musicplayer.ts';
 import { openMessagesDialog } from './ui/messagedialog.ts';
 import { map16Tile } from './core/ram.ts';
 import { NavHistory, fromHash, type NavLoc } from './ui/navhistory.ts';
+import { initLanding } from './ui/landing.ts';
 
 const root = document.getElementById('app')!;
 
@@ -41,6 +42,7 @@ window.addEventListener('unhandledrejection', (e) => log(`Unexpected error: ${e.
 const landing = root.querySelector<HTMLElement>('.landing')!;
 landing.querySelector('#landing-new-project')!.addEventListener('click', openRomFile);
 landing.querySelector('#landing-open-project')!.addEventListener('click', openProjectFile);
+initLanding(landing);
 
 // the desktop app hides the start page's download of itself
 if (desktop) document.documentElement.classList.add('desktop');

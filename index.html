@@ -57,97 +57,169 @@
     /* until the editor knows whether a project is waiting, the start page stays invisible (no flash before the editor) */
     .booting .landing { visibility: hidden; }
     /* the desktop app does not offer itself for download */
-    .desktop .landing-get-app, .desktop .landing-download { display: none; }
+    .desktop .landing-get-app, .desktop .landing-download { display: none !important; }
   </style>
 </head>
 <body>
   <div id="app">
     <main class="landing">
-      <header class="landing-hero">
-        <img class="landing-logo" src="/apple-touch-icon.png" width="96" height="96" alt="" />
+      <nav class="landing-nav" aria-label="Start page">
+        <a class="landing-brand" href="#top"><img src="/favicon.png" width="24" height="24" alt="" />Solar Magic</a>
+        <span class="landing-nav-links">
+          <a href="#features">Features</a>
+          <a href="#community">Community content</a>
+          <a href="#download" class="landing-get-app">Desktop app</a>
+          <a href="#faq">FAQ</a>
+        </span>
+      </nav>
+
+      <header class="landing-hero" id="top">
+        <img class="landing-logo" src="/apple-touch-icon.png" width="88" height="88" alt="" />
         <h1>Solar Magic</h1>
         <p class="landing-tagline">The Super Mario World level editor that runs in your browser.</p>
-        <p class="landing-lead">Build your own levels, reshape the overworld, paint new graphics and play your creation the moment you made it – free and without installing anything.</p>
+        <p class="landing-lead">Build levels, reshape the overworld, paint graphics and play your creation the moment you made it – with the patches, blocks, sprites and music the community has made over the years.</p>
         <div class="landing-actions">
           <button type="button" class="primary big" id="landing-new-project">New project …</button>
           <button type="button" class="big" id="landing-open-project">Open project …</button>
         </div>
         <p class="hint">A new project starts from a clean Super Mario World (US) ROM. You can also drop the ROM or a project file onto this page.</p>
-        <p class="landing-get-app"><a href="#download">Or get the desktop app for Windows, macOS and Linux</a></p>
         <noscript><p class="landing-noscript">Solar Magic needs JavaScript. Please enable it to start editing.</p></noscript>
-        <a class="landing-hero-shot" href="/screens/level.webp"><img src="/screens/level.webp" width="1600" height="1000" alt="The level editor with Yoshi's Island 1, the level list and the object picker" /></a>
+        <ul class="landing-badges">
+          <li>Free</li>
+          <li>Nothing to install</li>
+          <li>Your ROM never leaves your computer</li>
+          <li class="landing-get-app"><a href="#download">Desktop app for Windows, macOS &amp; Linux</a></li>
+        </ul>
+        <a class="landing-shot landing-hero-shot" href="/screens/level.webp" data-caption="The level editor: Yoshi's Island 1 with the level list and the object picker">
+          <img src="/screens/level.webp" width="1600" height="1000" alt="The level editor with Yoshi's Island 1, the level list and the object picker" />
+        </a>
       </header>
 
-      <section class="landing-section" aria-labelledby="what">
-        <h2 id="what">What is Solar Magic?</h2>
-        <p>Solar Magic is a level editor for <strong>Super Mario World</strong> on the Super Nintendo. Start from your copy of the game, change anything from a single block to whole worlds, and save the result as your own ROM hack to play on an emulator or share as a patch with friends.</p>
-        <p>Everything you see in the editor looks exactly like it will in the game, so there are no surprises when you press play.</p>
+      <section class="landing-section" aria-labelledby="features">
+        <p class="landing-kicker">Features</p>
+        <h2 id="features">Everything you need to make a hack</h2>
+        <p class="landing-intro">What you see in the editor is what the game shows: Solar Magic draws your levels with the game itself, so there are no surprises when you press play.</p>
+
+        <div class="landing-row">
+          <a class="landing-shot" href="/screens/overworld.webp" data-caption="The overworld editor: the main map with its level tiles">
+            <img src="/screens/overworld.webp" width="1600" height="1000" loading="lazy" alt="The overworld editor showing the main map with its level tiles" />
+          </a>
+          <div>
+            <h3>Levels and the overworld</h3>
+            <p>Place ground, pipes, enemies and power-ups, connect areas with doors and pipes, and paint backgrounds. On the overworld, reshape the map, link your levels and decide which paths each exit opens.</p>
+            <ul>
+              <li>Objects, sprites, entrances and exits, layer 2 and layer 3</li>
+              <li>Overworld paths, events and the levels behind each tile</li>
+              <li>Undo and redo, and one search across objects, tiles and sprites</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="landing-row">
+          <a class="landing-shot" href="/screens/testplay.webp" data-caption="Test play: the level runs right in the editor, with CPU and sprite meters beside it">
+            <img src="/screens/testplay.webp" width="1064" height="872" loading="lazy" alt="Test play of a level with the CPU and sprite meters beside the game" />
+          </a>
+          <div>
+            <h3>Play right away</h3>
+            <p>Press <kbd>T</kbd> and you are in your level – with music and sound effects, a keyboard or a gamepad. No emulator to start, no file to save first.</p>
+            <ul>
+              <li>Meters for slowdown and sprite slots while you play</li>
+              <li>See where Mario died and what killed him</li>
+              <li>Save states to try a jump again and again</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="landing-row">
+          <a class="landing-shot" href="/screens/graphics.webp" data-caption="The graphics workspace: Map16 tiles, the tile editor and a live preview of the level">
+            <img src="/screens/graphics.webp" width="1600" height="1000" loading="lazy" alt="The graphics workspace with the Map16 tiles, the tile editor and a level preview" />
+          </a>
+          <div>
+            <h3>Graphics, colors and animation</h3>
+            <p>Repaint tiles pixel by pixel, build your own blocks from them, change palettes and bring things to life with animations – while a preview shows the level as you change it.</p>
+            <ul>
+              <li>Map16 tiles with what they act like and where they are used</li>
+              <li>ExGFX, palettes and ExAnimation</li>
+              <li>Import PNG images and Lunar Magic graphics files</li>
+            </ul>
+          </div>
+        </div>
+
+        <ul class="landing-features">
+          <li><h3>Music</h3><p>Add your own AddmusicK songs and listen to every level's music in the editor.</p></li>
+          <li><h3>Message boxes</h3><p>Rewrite what the game's message blocks say, in the game's own font.</p></li>
+          <li><h3>Share your hack</h3><p>Export a playable ROM for any emulator, or a BPS patch to share.</p></li>
+        </ul>
       </section>
 
-      <section class="landing-section" aria-labelledby="features">
-        <h2 id="features">What you can do</h2>
-        <div class="landing-showcase">
+      <section class="landing-section landing-community" aria-labelledby="community">
+        <p class="landing-kicker">Community content</p>
+        <h2 id="community">Made for what the SMW community built</h2>
+        <p class="landing-intro">Solar Magic speaks the formats of the Super Mario World hacking scene. Downloads from <a href="https://www.smwcentral.net/" rel="noopener">SMW Central</a> work as they are: drop one into the editor and everything it contains is installed in one go – and removed again just as easily.</p>
+
+        <div class="landing-pair">
           <figure>
-            <a href="/screens/overworld.webp"><img src="/screens/overworld.webp" width="1600" height="1000" loading="lazy" alt="The overworld editor showing the main map with its level tiles" /></a>
-            <figcaption><h3>Edit the overworld</h3><p>Reshape the map, connect your levels, set up events and decide where every path leads.</p></figcaption>
+            <a class="landing-shot" href="/screens/rhr105.webp" data-caption="Level 105 of the Romhack Races baserom: its custom blocks, installed from the baserom's zip">
+              <img src="/screens/rhr105.webp" width="1600" height="1000" loading="lazy" alt="Level 105 of the Romhack Races baserom with its block legend in the editor" />
+            </a>
+            <figcaption>Recognize it? Level 105 of the Romhack Races baserom – in Solar Magic.</figcaption>
           </figure>
           <figure>
-            <a href="/screens/testplay.webp"><img src="/screens/testplay.webp" width="1064" height="872" loading="lazy" alt="Test play of a level with the CPU and sprite meters beside the game" /></a>
-            <figcaption><h3>Play right away</h3><p>Try your level instantly inside the editor – with music and sound effects. Meters show slowdown and sprite slots, and you see where and why Mario died.</p></figcaption>
-          </figure>
-          <figure>
-            <a href="/screens/graphics.webp"><img src="/screens/graphics.webp" width="1600" height="1000" loading="lazy" alt="The graphics workspace with the Map16 tiles, the tile editor and a level preview" /></a>
-            <figcaption><h3>Graphics &amp; colors</h3><p>Repaint tiles, build Map16 blocks, change palettes and bring things to life with animations – with a live preview of the level.</p></figcaption>
-          </figure>
-          <figure>
-            <a href="/screens/packages.webp"><img src="/screens/packages.webp" width="950" height="673" loading="lazy" alt="The packages dialog with UberASM, blocks, sprites and graphics installed from SMW Central" /></a>
-            <figcaption><h3>Community content</h3><p>Drop in a download from SMW Central: everything it contains is installed in one go and can be removed again just as easily.</p></figcaption>
+            <a class="landing-shot" href="/screens/packages.webp" data-caption="The Packages dialog: the Romhack Races baserom installed as one package">
+              <img src="/screens/packages.webp" width="950" height="841" loading="lazy" alt="The Packages dialog listing what the Romhack Races baserom brought" />
+            </a>
+            <figcaption>The whole baserom, uploaded as its zip: 85 patches, UberASM, 77 blocks, a sprite, a sound effect and its graphics.</figcaption>
           </figure>
         </div>
-        <ul class="landing-features">
-          <li><h3>Design levels</h3><p>Place ground, pipes, enemies and power-ups, set up doors and pipes between areas, and paint backgrounds.</p></li>
-          <li><h3>Music</h3><p>Add your own songs and listen to every level's music in the editor.</p></li>
-          <li><h3>Message boxes</h3><p>Rewrite what the game's message blocks say.</p></li>
-        </ul>
-      </section>
 
-      <section class="landing-section" aria-labelledby="community">
-        <h2 id="community">Made for the SMW hacking community</h2>
-        <p>Solar Magic works with the formats and tools the Super Mario World hacking scene has built over the years. The patches, blocks, sprites, music and graphics you find on <a href="https://www.smwcentral.net/" rel="noopener">SMW Central</a> work as they are – no conversion, no command line.</p>
         <ul class="landing-compat">
-          <li><strong>Patches</strong> for Asar</li>
-          <li><strong>UberASM</strong> code</li>
-          <li><strong>Custom blocks</strong> for GPS</li>
-          <li><strong>Custom sprites</strong> for PIXI</li>
-          <li><strong>Music &amp; sound effects</strong> for AddmusicK</li>
-          <li><strong>Graphics</strong>: ExGFX, Map16, palettes</li>
-          <li><strong>Lunar Magic level files</strong> (.mwl): backgrounds, tiles and colors</li>
-          <li><strong>Callisto projects</strong> such as the Romhack Races baserom</li>
+          <li><strong>Asar</strong><span>patches</span></li>
+          <li><strong>UberASM Tool</strong><span>level, game mode and global code</span></li>
+          <li><strong>GPS</strong><span>custom blocks</span></li>
+          <li><strong>PIXI</strong><span>custom sprites</span></li>
+          <li><strong>AddmusicK</strong><span>songs and sound effects</span></li>
+          <li><strong>Callisto</strong><span>whole projects, like the Romhack Races baserom</span></li>
+          <li><strong>Lunar Magic formats</strong><span>Map16, ExGFX, palettes, level files (.mwl)</span></li>
+          <li><strong>BPS</strong><span>patches of your hack to share</span></li>
         </ul>
-        <p>What you make is a regular Super Mario World ROM: play it on any emulator or share it as a BPS patch.</p>
       </section>
 
       <section class="landing-section" aria-labelledby="how">
-        <h2 id="how">Get started in three steps</h2>
+        <p class="landing-kicker">Get started</p>
+        <h2 id="how">Three steps to your own hack</h2>
         <ol class="landing-steps">
-          <li><strong>Start a new project.</strong> Choose a clean Super Mario World (US) ROM made from your own copy of the game.</li>
-          <li><strong>Make it yours.</strong> Pick a level and start building.</li>
-          <li><strong>Play and share.</strong> Test your changes, then save your ROM or a patch to share.</li>
+          <li><strong>Start a new project</strong><span>Choose a clean Super Mario World (US) ROM made from your own copy of the game.</span></li>
+          <li><strong>Make it yours</strong><span>Pick a level and start building – or drop in what the community made.</span></li>
+          <li><strong>Play and share</strong><span>Test as you go, then export your ROM or a patch for your friends.</span></li>
         </ol>
       </section>
 
       <section class="landing-section landing-download" aria-labelledby="download">
-        <h2 id="download">Desktop app</h2>
-        <p>Prefer a program of its own? The desktop app is the same editor and opens and saves your files directly on your computer.</p>
+        <p class="landing-kicker">Desktop app</p>
+        <h2 id="download">Prefer an app of its own?</h2>
+        <p class="landing-intro">The desktop app is the same editor in its own window. It opens and saves your files right where they are on your computer.</p>
         <ul class="landing-downloads">
-          <li><h3>Windows</h3><a href="https://github.com/cgiesche/solar-magic/releases/latest/download/solar-magic-windows-x64-setup.exe">Installer (.exe)</a> · <a href="https://github.com/cgiesche/solar-magic/releases/latest/download/solar-magic-windows-x64.msi">.msi</a></li>
-          <li><h3>macOS</h3><a href="https://github.com/cgiesche/solar-magic/releases/latest/download/solar-magic-macos-arm64.dmg">Apple Silicon (.dmg)</a></li>
-          <li><h3>Linux</h3><a href="https://github.com/cgiesche/solar-magic/releases/latest/download/solar-magic-linux-x86_64.AppImage">AppImage</a> · <a href="https://github.com/cgiesche/solar-magic/releases/latest/download/solar-magic-linux-amd64.deb">.deb</a> · <a href="https://github.com/cgiesche/solar-magic/releases/latest/download/solar-magic-linux-x86_64.rpm">.rpm</a></li>
+          <li data-os="windows">
+            <h3>Windows</h3>
+            <a class="dl-main" href="https://github.com/cgiesche/solar-magic/releases/latest/download/solar-magic-windows-x64-setup.exe">Download installer</a>
+            <span class="hint">64-bit · also as <a href="https://github.com/cgiesche/solar-magic/releases/latest/download/solar-magic-windows-x64.msi">.msi</a></span>
+          </li>
+          <li data-os="mac">
+            <h3>macOS</h3>
+            <a class="dl-main" href="https://github.com/cgiesche/solar-magic/releases/latest/download/solar-magic-macos-arm64.dmg">Download .dmg</a>
+            <span class="hint">Apple Silicon</span>
+          </li>
+          <li data-os="linux">
+            <h3>Linux</h3>
+            <a class="dl-main" href="https://github.com/cgiesche/solar-magic/releases/latest/download/solar-magic-linux-x86_64.AppImage">Download AppImage</a>
+            <span class="hint">x86-64 · also as <a href="https://github.com/cgiesche/solar-magic/releases/latest/download/solar-magic-linux-amd64.deb">.deb</a> and <a href="https://github.com/cgiesche/solar-magic/releases/latest/download/solar-magic-linux-x86_64.rpm">.rpm</a></span>
+          </li>
         </ul>
-        <p class="hint">All versions: <a href="https://github.com/cgiesche/solar-magic/releases">releases on GitHub</a>.</p>
+        <p class="hint">Earlier versions and release notes: <a href="https://github.com/cgiesche/solar-magic/releases">releases on GitHub</a>.</p>
       </section>
 
       <section class="landing-section" aria-labelledby="faq">
+        <p class="landing-kicker">FAQ</p>
         <h2 id="faq">Questions</h2>
         <dl class="landing-faq">
           <dt>Do I need to install anything?</dt>
