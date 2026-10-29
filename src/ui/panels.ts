@@ -77,7 +77,10 @@ export function entryLegend(app: App, e: { items?: number[]; enter?: string; mar
     const img = app.spriteThumbs?.get(n);
     if (img) out.push({ icon: cloneCanvas(img), text: `Gives ${app.spriteLabel(n)}` });
   }
-  if (e.enter) out.push({ icon: h('div', { class: 'picker-enter' }, e.enter), text: enterText(e.enter)[0].toUpperCase() + enterText(e.enter).slice(1) });
+  if (e.enter) {
+    const dirs = [...e.enter].map((d) => ({ '↓': 'down', '↑': 'up', '←': 'left', '→': 'right' })[d]);
+    out.push({ icon: h('div', { class: 'picker-enter' }, e.enter), text: `Mario enters it holding ${dirs.join(' or ')}` });
+  }
   for (const m of e.marks ?? []) out.push({ icon: markCanvas(m), text: MARK_LEGEND[m] });
   return out;
 }
