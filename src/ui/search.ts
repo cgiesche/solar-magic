@@ -83,15 +83,18 @@ export function openSearch(providers: SearchProvider[]): void {
     active = 0;
     const terms = searchTerms(input.value);
     if (!terms.length) { list.append(emptyState('Type a number or a name.')); return; }
-    // results whose number or name is the query come first, and so do their groups
+    // results whose number or name is the query come first, then those with every term in the number or name,
+    // then those found by the rest (detail, behavior, …); a group is ranked by its best result
     const q = terms.join(' ');
-    const exact = (r: SearchResult) => r.label.toLowerCase() === q || r.name.toLowerCase() === q;
+    const rank = (r: SearchResult) => {
+      const label = r.label.toLowerCase(), name = r.name.toLowerCase();
+      return label === q || name === q ? 0 : matchesAll(`${label} ${name}`, terms) ? 1 : 2;
+    };
     const groupsFound = providers.filter((p) => !group || p.id === group).map((p) => {
-      const found = p.search(terms);
-      const hits = found.filter(exact);
-      return { p, found: hits.length ? [...hits, ...found.filter((r) => !exact(r))] : found, hit: hits.length > 0 };
+      const found = p.search(terms).map((r) => ({ r, rank: rank(r) })).sort((a, b) => a.rank - b.rank); // (stable)
+      return { p, found: found.map((x) => x.r), best: found[0]?.rank ?? 3 };
     }).filter((g) => g.found.length);
-    groupsFound.sort((a, b) => Number(b.hit) - Number(a.hit));
+    groupsFound.sort((a, b) => a.best - b.best);
     for (const { p, found } of groupsFound) {
       const max = group ? MAX : PER_GROUP;
       if (!group) list.append(h('div', { class: 'picker-head' }, p.label, h('span', { class: 'hint' }, ` ${found.length}`)));
