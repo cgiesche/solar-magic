@@ -9,7 +9,8 @@ import { MSG_COLS, MSG_LINES, SPACE, charCode, type Message } from './messages.t
 // lines: 8, each at most 18 codes (spaces typed at the end are kept); the caret: line 0-7, column 0-18
 export interface Box { lines: number[][]; line: number; col: number }
 
-const trim = (l: number[]): number[] => {
+// the line without its trailing spaces
+export const trimLine = (l: number[]): number[] => {
   let n = l.length;
   while (n && l[n - 1] === SPACE) n--;
   return l.slice(0, n);
@@ -18,17 +19,17 @@ const pad = (l: number[], n: number): number[] => (l.length >= n ? l.slice() : [
 const withLines = (lines: number[][], line: number, col: number): Box => ({ lines, line, col });
 
 export function boxOf(m: Message): Box {
-  return { lines: Array.from({ length: MSG_LINES }, (_, l) => trim(m[l] ?? [])), line: 0, col: 0 };
+  return { lines: Array.from({ length: MSG_LINES }, (_, l) => trimLine(m[l] ?? [])), line: 0, col: 0 };
 }
-export const boxMessage = (b: Box): Message => b.lines.map(trim);
-export const charsLeft = (line: number[]): number => MSG_COLS - trim(line).length;
+export const boxMessage = (b: Box): Message => b.lines.map(trimLine);
+export const charsLeft = (line: number[]): number => MSG_COLS - trimLine(line).length;
 
 // the code typed at the caret; null: no room in the line
 export function typeCode(b: Box, code: number): Box | null {
   if (b.col >= MSG_COLS) return null;
   const l = pad(b.lines[b.line], b.col);
   l.splice(b.col, 0, code);
-  if (trim(l).length > MSG_COLS) return null;
+  if (trimLine(l).length > MSG_COLS) return null;
   const lines = b.lines.slice();
   lines[b.line] = l.slice(0, MSG_COLS);
   return withLines(lines, b.line, b.col + 1);
@@ -36,7 +37,7 @@ export function typeCode(b: Box, code: number): Box | null {
 
 // Enter: the rest of the line moves to a new line below; null when the last line has text
 export function newline(b: Box): Box | null {
-  if (trim(b.lines[MSG_LINES - 1]).length) return null;
+  if (trimLine(b.lines[MSG_LINES - 1]).length) return null;
   const l = b.lines[b.line];
   const lines = [...b.lines.slice(0, b.line), l.slice(0, b.col), l.slice(b.col), ...b.lines.slice(b.line + 1, MSG_LINES - 1)];
   return withLines(lines, b.line + 1, 0);
@@ -45,7 +46,7 @@ export function newline(b: Box): Box | null {
 // line k joined to the end of line k - 1 (the caret there), null when it does not fit
 function join(b: Box, k: number): Box | null {
   const above = b.lines[k - 1], joined = [...above, ...b.lines[k]];
-  if (trim(joined).length > MSG_COLS) return null;
+  if (trimLine(joined).length > MSG_COLS) return null;
   const lines = [...b.lines.slice(0, k - 1), joined.slice(0, MSG_COLS), ...b.lines.slice(k + 1), []];
   return withLines(lines, k - 1, above.length);
 }
@@ -79,12 +80,12 @@ export type Move = 'left' | 'right' | 'up' | 'down' | 'home' | 'end';
 export function move(b: Box, m: Move): Box {
   const at = (line: number, col: number) => withLines(b.lines, line, col);
   switch (m) {
-    case 'left': return b.col ? at(b.line, b.col - 1) : b.line ? at(b.line - 1, trim(b.lines[b.line - 1]).length) : b;
+    case 'left': return b.col ? at(b.line, b.col - 1) : b.line ? at(b.line - 1, trimLine(b.lines[b.line - 1]).length) : b;
     case 'right': return b.col < MSG_COLS ? at(b.line, b.col + 1) : b.line < MSG_LINES - 1 ? at(b.line + 1, 0) : b;
     case 'up': return at(Math.max(0, b.line - 1), b.col);
     case 'down': return at(Math.min(MSG_LINES - 1, b.line + 1), b.col);
     case 'home': return at(b.line, 0);
-    case 'end': return at(b.line, trim(b.lines[b.line]).length);
+    case 'end': return at(b.line, trimLine(b.lines[b.line]).length);
   }
 }
 
@@ -97,11 +98,11 @@ const SENTENCE_END = new Set(['.', '!', '?'].map((c) => charCode(c)!));
 
 // the line's spaces between words spread to fill it, as the game's texts are set: evenly, the ones left over
 // first after the end of a sentence, then from the left; leading spaces stay
-export function justifyLine(codes: number[], src: number[] = codes.map((_, i) => i)): number[] {
-  return justified({ codes, src }).codes;
+export function justifyLine(codes: number[]): number[] {
+  return justified({ codes, src: codes.map((_, i) => i) }).codes;
 }
 function justified(l: WrappedLine): WrappedLine {
-  const t = trim(l.codes);
+  const t = trimLine(l.codes);
   let lead = 0;
   while (lead < t.length && t[lead] === SPACE) lead++;
   const words: { codes: number[]; src: number[] }[] = [];
@@ -130,7 +131,7 @@ function justified(l: WrappedLine): WrappedLine {
 
 // every line followed by one with text spread (justifyLine): the lines of a paragraph but its last
 export function justifyBox(b: Box): Box {
-  const lines = b.lines.map((l, k) => (k < MSG_LINES - 1 && trim(b.lines[k + 1]).length ? justifyLine(trim(l)) : l));
+  const lines = b.lines.map((l, k) => (k < MSG_LINES - 1 && trimLine(b.lines[k + 1]).length ? justifyLine(trimLine(l)) : l));
   return { ...b, lines };
 }
 
@@ -200,7 +201,7 @@ export function encodeText(s: string): Encoded {
 // are set), the caret after it; null when it does not fit into the box
 export function paste(b: Box, text: string, justify: boolean): (Encoded & { box: Box }) | null {
   const paras = text.replace(/\r\n?/g, '\n').split('\n').map(encodeText);
-  const l = pad(b.lines[b.line], b.col), prefix = l.slice(0, b.col), suffix = trim(l.slice(b.col));
+  const l = pad(b.lines[b.line], b.col), prefix = l.slice(0, b.col), suffix = trimLine(l.slice(b.col));
   const codes = paras.map((p) => p.codes);
   codes[0] = [...prefix, ...codes[0]];
   const caret = codes[codes.length - 1].length;
@@ -210,7 +211,7 @@ export function paste(b: Box, text: string, justify: boolean): (Encoded & { box:
   const k = last.findIndex((w) => w.src.some((s) => s >= caret));
   const kk = k < 0 ? last.length - 1 : k, col = k < 0 ? last[kk].codes.length : last[kk].src.findIndex((s) => s >= caret);
   const lines = [...b.lines.slice(0, b.line), ...wrapped.flat().map((w) => w.codes), ...b.lines.slice(b.line + 1)];
-  while (lines.length > MSG_LINES && !trim(lines[lines.length - 1]).length) lines.pop();
+  while (lines.length > MSG_LINES && !trimLine(lines[lines.length - 1]).length) lines.pop();
   if (lines.length > MSG_LINES) return null;
   const line = b.line + wrapped.slice(0, -1).reduce((n, w) => n + w.length, 0) + kk;
   return {

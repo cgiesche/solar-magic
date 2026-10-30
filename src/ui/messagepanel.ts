@@ -14,7 +14,7 @@ import { TileCache, blit8 } from '../core/render.ts';
 import {
   readMessage, writeMessages, isBlank, switchPalace, yoshiHouse, messageToShow, charCode, codeChar, YOSHI_THANKS, MSG_LINES, MSG_COLS, SPACE, type Message,
 } from '../core/messages.ts';
-import { boxOf, boxMessage, typeCode, newline, backspace, del, move, charsLeft, paste, justifyBox, suggestion, type Box, type Move } from '../core/messagebox.ts';
+import { boxOf, boxMessage, trimLine, typeCode, newline, backspace, del, move, charsLeft, paste, justifyBox, suggestion, type Box, type Move } from '../core/messagebox.ts';
 import { messageTranslevel, messageLevels } from '../core/messageuse.ts';
 import { openTestPlay } from './testplay.ts';
 
@@ -128,7 +128,7 @@ export class MessagePanel {
     const { translevel: t, msg: n } = app.messages;
     const key = `${t}:${n}`, m = readMessage(rom, t, n);
     // the box as edited while it shows the same text (the caret, spaces typed at a line's end stay)
-    if (!this.box || this.shown !== key || JSON.stringify(boxMessage(this.box).map(trimEnd)) !== JSON.stringify(m.map(trimEnd))) {
+    if (!this.box || this.shown !== key || JSON.stringify(boxMessage(this.box).map(trimLine)) !== JSON.stringify(m.map(trimLine))) {
       const caret = this.box && this.shown === key ? { line: this.box.line, col: this.box.col } : { line: 0, col: 0 };
       this.box = { ...boxOf(m), ...caret };
     }
@@ -320,8 +320,3 @@ export class MessagePanel {
 }
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
-const trimEnd = (l: number[]): number[] => {
-  let n = l.length;
-  while (n && l[n - 1] === SPACE) n--;
-  return l.slice(0, n);
-};

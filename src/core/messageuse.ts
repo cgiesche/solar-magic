@@ -54,7 +54,7 @@ export function messageProblems(rom: Rom, tl: number, here: MessageLevel, others
     const other = m === 3 ? 0 : 3 - m;
     const only = other && !empty(rom, t, other) ? ` – only message ${other} has text` : '';
     out.push({ key: `msg-empty:${s.uid}`, severity: 'warn', text: `${name(s)} opens message ${m}, which is empty${only}`, where: { sprites: [s.uid] }, message: { translevel: t, msg: n },
-      title: `Players see an empty box. ${only ? `Which message a message box opens depends on where it is (for the game's: message 1 at an even X, 2 at an odd X). ` : ''}Write the message or move the sprite.` });
+      title: `Players see an empty box. ${only ? 'Which message a message box opens can depend on where it is (its hover shows which). ' : ''}Write the message or move the sprite.` });
   }
   // translevel 0's: the intro and Yoshi's thank-you, shown by the game itself
   if (!tl) return out;

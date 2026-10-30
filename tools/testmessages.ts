@@ -21,10 +21,10 @@ const text = (m: Message) => m.map(lineToText).join(' / ');
 // the message box of translevel tl's level as the game shows it: the characters written to the stripe buffer
 // ($7F837D, 4 byte header + 18 × (character, attribute) per row) once message `msg` opens, the switch pressed,
 // and the game mode a second after B closed it
-function shown(rom: Rom, tl: number, msg: number, yoshi = false) {
+function shown(rom: Rom, tl: number, msg: number, yoshi = false, level = translevelToLevel(tl)) {
   const emu = new LevelEmulator(rom);
   emu.boot();
-  const p = PlaySession.start(emu, translevelToLevel(tl), { game: { translevel: tl, setup: (w) => { w[RAM.yoshiCarried] = yoshi ? 1 : 0; } } });
+  const p = PlaySession.start(emu, level, { game: { translevel: tl, setup: (w) => { w[RAM.yoshiCarried] = yoshi ? 1 : 0; } } });
   if (!p.ready) return null;
   const w = p.wram, chars: number[] = [];
   p.watch(() => ({ hook: { onWramWrite(a: number, v: number) { const rel = (a - 0x18381) % 40; if (a >= 0x18381 && a < 0x18381 + 8 * 40 && rel < 36 && !(rel & 1)) chars.push(v); } } as never, reset() {} }));
@@ -95,6 +95,9 @@ const empty = Array.from({ length: TRANSLEVELS }, (_, tl) => tl).find((tl) => tl
     const t = messageToShow(rom, tl, n), s = shown(rom, tl || 0x29, t.message, t.yoshi);
     check(s?.chars === box(readMessage(rom, tl, n)), `show in game: translevel ${hx(tl)} message ${n} ($1426 = ${t.message}${t.yoshi ? ', with Yoshi' : ''})`);
   }
+  // a level nothing reaches (13C): its message 1 is the intro's
+  const t = messageToShow(rom, 0, 1), s = shown(rom, 0, t.message, false, 0x13c);
+  check(s?.chars === box(readMessage(rom, 0, 1)), 'show in game: a level nothing reaches shows the intro\'s message');
 }
 
 // written messages: read back, shown by the game, the others unchanged; identical ones share their data
