@@ -1,4 +1,4 @@
-// Opening a ROM (editorpatches.ts): a clean ROM gets all of the editor's own patches (not SMWM) and every
+// Opening a ROM (editorpatches.ts): a clean ROM gets all of the editor's own patches and every
 // level loads as before; a ROM the editor made opens as it is; any other ROM is refused.
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
@@ -31,7 +31,7 @@ check(!!bgMap16Ext(rom), 'SMWH');
 check(!!prefabPatch(rom), 'SMWS');
 check(exanimInstalled(rom) && exanimEntry(rom)?.kind === 'exanim', 'ExAnimation engine (kind exanim)');
 check(layer3Entry(rom)?.kind === 'layer3', 'layer 3 graphics (SMWL, kind layer3)');
-check(!messagePatch(rom), 'no SMWM');
+check(!!messagePatch(rom), 'SMWM (messages per level)');
 
 // a ROM the editor made: opened as it is (also as exported, with its header)
 const data = rom.data.slice();

@@ -119,8 +119,9 @@ When a level is displayed, it runs the ROM's **original loading routines** (~15 
   **Auto-correction:** if a sprite edit makes other sprites incomplete, the editor adjusts the value itself.
   This is part of the same undo step. A value chosen by hand in the header dialog stays as long as no new
   overlaps arise.
-* **Message boxes** (*ROM → Message boxes*): edit all 25 message boxes with a preview in the game's font; if the texts
-  no longer fit in their place, they are moved to free space.
+* **Message boxes** (*Level → Message boxes*, or *Edit …* at a level tile on the overworld): every level has two messages
+  (those of its translevel, as in Lunar Magic), edited with a preview in the game's font, and Yoshi's thank-you
+  (message 3). The clean game's messages move to the levels that showed them; a level without text shows an empty box.
 * **Test level (T):** play the level in the built-in emulator (a changed level is saved first, so entering it again after dying plays the same), with keyboard or gamepad, with music and sound effects (M mutes the sound). It is played in a game in progress, entered from its overworld tile (a sub-level through its main level), so the midway tape counts: dying returns to the overworld, entering the level again starts at the midway point once touched.
 
 ### Music
@@ -245,8 +246,8 @@ When a level is displayed, it runs the ROM's **original loading routines** (~15 
 
 ## Custom ROM patch ("SMWE")
 
-Installed into the clean ROM when it is opened, together with the editor's other patches below (all but SMWM,
-which moves the message texts only when they no longer fit in place). The patches are assembled at runtime and
+Installed into the clean ROM when it is opened, together with the editor's other patches below. The patches are
+assembled at runtime and
 change only a few verified locations:
 
 | Location | Purpose |
@@ -264,7 +265,7 @@ change only a few verified locations:
 | `$058A66`, `$058B46`, `$058C34`, `$058D2B` | Tilemap building: tiles from 200 on come from the extended Map16 graphics table |
 | `$00C096`, `$00C0E7` | Tile replacement sets the page to 0/1 instead of only bit 0 (for tiles on page ≥ 2) |
 | `$00C176` | Tile replacement draws tiles from 200 on from the extended Map16 graphics table (blocks changing into such a tile) |
-| `$05B20F` ("SMWM") | Read message texts from free space (only if they no longer fit in place) |
+| `$05B1A3` ("SMWM") | Two messages per level, Lunar Magic's routine at `$03BB90` (pointers `$03BE80`, text in free space) |
 | `$058551` ("SMWU") | Music per level: song number from a table (512 levels) instead of the 8 header settings (`$0584DB`), 0 = header |
 | `$00AA50` ("SMWG") | BG2/BG3 graphics slots per level for Map16 tiles 200–2FF (as in Lunar Magic); requires the VRAM patch |
 | 13 locations ("SMWV") | VRAM patch: layer 1/2 tilemaps in levels 64×32 at `$3000`/`$3800` instead of 64×64 at `$2000`/`$3000` (like LM), so that BG2/BG3 have room; details in [docs/patches.md](docs/patches.md) |

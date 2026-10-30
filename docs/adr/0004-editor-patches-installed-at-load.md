@@ -14,3 +14,5 @@ We decided that the editor opens only two kinds of ROMs: the clean game (CRC of 
 ## Consequences
 
 A clean ROM grows by the patches' code and tables (it is expanded to 1 MB) and every level loads through them; the tests compare all levels with the clean game. The VRAM patch costs a little CPU time in every ROM (about 0.1 % of frames get one more lag frame, docs/patches.md). A third-party patch that changes an editor hook is rejected instead of warned about. The editor's own patches should therefore stay clear of hooks that popular community patches use, and follow established formats (Lunar Magic's ExAnimation layout, $7E010B) where community content relies on them. A ROM made by an older editor version may no longer open; while in early development that is accepted.
+
+SMWM is now installed with the others, as the messages per level in Lunar Magic's layout (ADR 0009).

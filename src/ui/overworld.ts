@@ -9,7 +9,8 @@ import {
   initialFlags, setInitialFlags, FLAG, DIR_FLAGS, OW_EVENTS, revealEvents, setRevealEvents, revealAt, revealedTile, revealEventCount,
   readRevealList, writeRevealList, destroyEffects, destroySettingAt, destroyEvent, setDestroyEvent, readDestroyList, freeTranslevel, levelTilesOf,
 } from '../core/overworld.ts';
-import { messageSlots } from '../core/messages.ts';
+import { hasMessages, isBlank, readMessage } from '../core/messages.ts';
+import { openMessagesDialog } from './messagedialog.ts';
 import {
   readEvents, writeEvents, applyEvents, paintEvent, reorderSteps, eventRunners, eventTitle, submapViews, eventPlace, submapOf, pieceTiles, isBig, l2XY,
   paintEventL1, layer1Without, eventL1Tiles, exitChanges, type EventData, type EventRunner, type Rect, type ExitChanges,
@@ -72,7 +73,7 @@ type StepKind = 'step' | 'silent' | 'l1';
 // the level picker's note for a level no tile enters: what a tile choosing it gets (translevelUse)
 function freeNote(rom: Rom, tl: number): string {
   if (translevelUse(rom, tl) === 2) return 'free · has a level';
-  const has = [!isNameless(nameCode(rom, tl)) && 'name', baseEvent(rom, tl) !== NO_EVENT && 'event', messageSlots(rom, tl).length > 0 && 'message'].filter(Boolean);
+  const has = [!isNameless(nameCode(rom, tl)) && 'name', baseEvent(rom, tl) !== NO_EVENT && 'event', hasMessages(rom, tl) && 'message'].filter(Boolean);
   return has.length ? `free · has ${has.join(', ')}` : 'free';
 }
 
@@ -1037,7 +1038,7 @@ export class OverworldView {
     if (!tl) return h('div', { class: 'ow-info' }, ...head, h('div', { class: 'hint warn-text' }, '⚠ This level tile enters no level.'));
     const code = nameCode(rom, tl), parts = splitNameCode(code);
     const lvl = translevelToLevel(tl);
-    const ev = baseEvent(rom, tl), msgs = messageSlots(rom, tl);
+    const ev = baseEvent(rom, tl), msgs = [1, 2].filter((n) => !isBlank(readMessage(rom, tl, n)));
     const sel = (k: number) => select(Array.from({ length: NAME_PART_COUNTS[k] }, (_, i) => [i, `${hex(i, 2)}: ${nameWord(rom, k, i).trim() || '(empty)'}`] as [number, string]), parts[k], (v) => {
       parts[k] = v;
       this.app.romEdit(`Level name ${hex(lvl, 3)}`, () => setNameCode(rom, tl, joinNameCode(parts)));
@@ -1051,7 +1052,8 @@ export class OverworldView {
       // the level's other settings (kept when its tiles are painted over, shown to every new tile entering it)
       ...this.levelSettings(tl),
       ...this.exitResultRows(tl),
-      h('div', { class: 'prop' }, h('label', null, 'Message box'), h('span', null, msgs.length ? msgs.map((m) => `${hex(m.slot, 2)} (message ${m.msg})`).join(', ') : 'none')),
+      h('div', { class: 'prop' }, h('label', null, 'Message boxes'), h('span', null, msgs.length ? msgs.map((n) => `message ${n}`).join(', ') : 'none'),
+        h('button', { onclick: () => openMessagesDialog(this.app, tl), title: 'Edit the level\'s two messages' }, 'Edit …')),
       h('div', { class: 'row' },
         h('button', { onclick: () => this.onOpenLevel(lvl), title: 'Open in the level editor (also by double click in the list)' }, `Edit level ${hex(lvl, 3)}`),
         !isNameless(code) || code === 0xffff || ev !== NO_EVENT || msgs.length || exitDirections(rom, tl).some((d) => d) || initialFlags(rom, tl)

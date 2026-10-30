@@ -251,9 +251,7 @@ themselves, external patches via `ram` in the `patch.json` (see below):
 - Addresses in the low RAM mirror (`$0DC4`) are compared as `$7E0DC4`.
 
 The editor's own patches are installed when a ROM is opened (see [Editor hooks](#editor-hooks)), so a
-patch that changes one of their entry points is rejected. The one exception is SMWM (message texts in free
-space), installed only when the texts no longer fit in place: a patch on its entry point only gets a
-warning, and moving the texts is then no longer possible.
+patch that changes one of their entry points is rejected.
 
 **Removing** resets the changed bytes to their original state and frees the patch's free
 space. If a patch applied later has modified this patch's code, that one has to be removed
@@ -970,7 +968,7 @@ not compatible with the respective feature.
 | `$04E9F7`, `$04DCA5`, `$04DCAA`, `$04D859`; pointers `$04E49F`, `$04E4A4`, `$04E709`, `$04E710`, `$04EE3F`, `$04EE5A`, `$04E4B0`, `$04E4BB`, `$04EAF5`, `$04DD45`, `$04DD4A`, `$04DA74`, `$04EC8C`, `$04ECBA`, `$04ECC5`, `$04ED97`, `$04EDBE`, `$04EDB8` | Event steps, silent events, 0x78 events (Lunar Magic's places) |
 | `$04E6C5`, `$04DA98`; pointers `$04E67C`, `$04E69C` | Destroyed level tiles, 0x18 entries (Lunar Magic's places) |
 | Ext. object table `$0DA11B` (entry `$04`) | Prefabs (SMWS); empty in the original and in Lunar Magic, no code hook |
-| `$05B20F` | Messages in free space (SMWM), only if the texts no longer fit |
+| `$05B1A3`; code `$03BB90–$03BC8E`, pointers `$03BE80` | Two messages per level (SMWM, Lunar Magic's places; its copy of the switch palace routine with the loop at `$03BC72`, which hijacks of Lunar Magic's ROMs patch, is the editor's too) |
 | `$00F545`, `$029328`, `$058A66`, `$058B46`, `$058C34`, `$058D2B`, `$00C096`, `$00C0E7`, `$00C176`; Lunar Magic's acts-like table pointers `$06F624` (pages 00–3F), `$06F63A` (40–7F), both at `!SMWE_ACTS_LIKE` | Map16 extension and custom blocks (SMWX) |
 | `$05808C`, `$00A5EE`, `$00A242`, `$00A295`, `$00A2EE` | UberASM: level `load`/`init`/`main`/`end` |
 | `$00A18F`, `$00A1C3` | UberASM: overworld |
@@ -985,9 +983,8 @@ The UberASM hooks are only set if there is code for the respective area (`$00804
 No patches are bundled, because licenses on SMWCentral vary. Whether a patch
 fits can usually be read from its readme:
 
-* Compare **hijack addresses** with the table above. Example: a VWF dialog patch that replaces the
-  message routine at `$05B1xx–$05B2xx` does not get along with relocated message texts
-  (SMWM). As long as the texts stay in their place, SMWM is not installed.
+* Compare **hijack addresses** with the table above. Example: the messages (SMWM) are where Lunar Magic
+  has them (`$05B1A3` → `$03BB90`), so a message patch made for Lunar Magic ROMs finds their layout.
 * **"Requires Lunar Magic" or "LM x.y+"** usually means the patch builds on LM hooks; that
   does not work here.
 * **SA-1-only** does not work.

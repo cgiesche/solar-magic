@@ -7,7 +7,7 @@ A browser-based editor for Super Mario World ROMs: levels, graphics and third-pa
 ### The editor's own patches
 
 **Editor patches**:
-The editor's own ASM in the ROM (SMWE, SMWV, SMWG, SMWP, SMWB, SMWU, SMWX, SMWH, SMWS, the ExAnimation engine, the layer 2 scroll rates, the level heights, SMWL's layer 3 graphics per level, the sprite scroll fix, FastROM), installed into the clean ROM when it is opened; the editor relies on them and opens no other ROMs than the clean game and its own (ADR 0004). Only SMWM (message texts in free space) is installed when it is needed. Not third-party content and never part of a package.
+The editor's own ASM in the ROM (SMWE, SMWV, SMWG, SMWP, SMWB, SMWU, SMWX, SMWH, SMWS, the ExAnimation engine, the layer 2 scroll rates, the level heights, SMWL's layer 3 graphics per level, the sprite scroll fix, SMWM's two messages per level, FastROM), installed into the clean ROM when it is opened; the editor relies on them and opens no other ROMs than the clean game and its own (ADR 0004). Not third-party content and never part of a package.
 _Avoid_: Lunar Magic hacks, built-in patches
 
 **FastROM**:
@@ -148,6 +148,10 @@ _Avoid_: level dot, node
 **Translevel**:
 The number the overworld knows a level by (0–24 for levels 0–24, 25–5F for 101–13B), the index of everything per level on the overworld (names, base events, flags, saved progress). Stored per tile in Lunar Magic's table, not found by scanning the map, so placing a level tile shifts no other level's number.
 _Avoid_: level number (for the overworld's), OW level
+
+**Message**:
+The text a message box sprite (B9) shows: two per translevel (message 1 and 2, as the sprite is set), and Yoshi's thank-you (message 3, translevel 0's message 2, in any level). A switch palace's message 1 also presses its switch and Yoshi's house shows message 2 while Mario rides Yoshi – which translevels these are the game's table tells. A level without text shows an empty box. Edited from the level (SMWM, Lunar Magic's layout).
+_Avoid_: message slot
 
 **Path tile**:
 A layer 1 tile Mario walks, climbs or swims along, or stops or exits on; invisible in the game, drawn by the editor as an overlay. The game's 5 hardcoded paths are not tiles.

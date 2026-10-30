@@ -1,6 +1,5 @@
 // The editor opens two kinds of ROMs: the clean game, which gets the editor's own patches right away,
-// and ROMs it made itself (they have them). The patches are all of them except SMWM (messages in free
-// space), which breaks VWF dialog patches and is installed only when the texts outgrow their place.
+// and ROMs it made itself (they have them).
 
 import type { Rom } from './rom.ts';
 import { loadAsar } from './asar.ts';
@@ -14,6 +13,7 @@ import { installOwTeleportPatch } from './owteleport.ts';
 import { installScrollFixPatch } from './scrollfix.ts';
 import { installTranslevelPatch, installLevelFlagsPatch, installDestroyPatch } from './overworld.ts';
 import { installEventPatch } from './owevents.ts';
+import { installMessagePatch } from './messages.ts';
 import { installMap16Ext, enableBlocks } from './map16ext.ts';
 import { installBgMap16Ext } from './bgmap16.ts';
 import { installPrefabPatch } from './prefabs.ts';
@@ -61,6 +61,7 @@ export async function installEditorPatches(rom: Rom): Promise<void> {
   installLevelFlagsPatch(rom);
   installEventPatch(rom);
   installDestroyPatch(rom);
+  installMessagePatch(rom);
   newStyleExits(rom);
   // new Map16 tiles start as the empty tile 025 of the ROM
   const blank = map16Source(rom, new LevelEmulator(rom).load(0x105)).fg(0x025);

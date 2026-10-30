@@ -10,7 +10,7 @@ import { missingPatch } from './patches.ts';
 import { lz2Compress, lz2Decompress } from './lz2.ts';
 import type { RomRead } from './exanim.ts';
 import { hasOwnContent } from './level.ts';
-import { messageSlots, unassignMessageSlot } from './messages.ts';
+import { hasMessages, clearMessages } from './messages.ts';
 import { eventDataRanges } from './owevents.ts';
 import { teleportDataRanges } from './owteleport.ts';
 import { KOOPA_X, KOOPA_Y, KOOPAS } from './owlinks.ts';
@@ -265,7 +265,7 @@ export function levelTilesOf(l1: ArrayLike<number>, t: ArrayLike<number>, tl: nu
 export const enterableLevels = (): number[] => Array.from({ length: MAX_TRANSLEVEL }, (_, k) => translevelToLevel(k + 1));
 
 // ---- a translevel's settings ----
-// The name, base event, exit reveal directions and message slots belong to the level (its translevel), not to a
+// The name, base event, exit reveal directions and messages belong to the level (its translevel), not to a
 // tile: a level tile painted over leaves them, a new one entering the level shows them. The editor resets them only
 // when asked (resetTranslevel), never the level's data.
 
@@ -404,7 +404,7 @@ export function installLevelFlagsPatch(rom: Rom): void {
 export type TranslevelUse = 0 | 1 | 2;
 export function translevelUse(rom: Rom, tl: number): TranslevelUse {
   if (hasOwnContent(rom, translevelToLevel(tl))) return 2;
-  return !isNameless(nameCode(rom, tl)) || baseEvent(rom, tl) !== NO_EVENT || messageSlots(rom, tl).length || initialFlags(rom, tl) ? 1 : 0;
+  return !isNameless(nameCode(rom, tl)) || baseEvent(rom, tl) !== NO_EVENT || hasMessages(rom, tl) || initialFlags(rom, tl) ? 1 : 0;
 }
 
 // the settings of translevel tl as the game's unused ones: no name, no base event, every exit enabling up, no
@@ -414,7 +414,7 @@ export function resetTranslevel(rom: Rom, tl: number): void {
   rom.w8(BASE_EVENTS + tl, NO_EVENT);
   rom.w8(EXIT_DIRS + tl, 0);
   setInitialFlags(rom, tl, 0);
-  for (const s of messageSlots(rom, tl)) unassignMessageSlot(rom, s.slot);
+  clearMessages(rom, tl);
 }
 
 // ---- level names ----

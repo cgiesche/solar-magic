@@ -11,7 +11,7 @@ import {
   placeTile, freeTranslevel, sharedTranslevels, translevelUse, resetTranslevel, levelName, nameCode, setNameCode, baseEvent,
   exitDirections, translevelToLevel, BASE_EVENTS, NO_EVENT, OW_EVENTS,
 } from '../src/core/overworld.ts';
-import { messageSlots } from '../src/core/messages.ts';
+import { hasMessages } from '../src/core/messages.ts';
 import { L1_PTRS } from '../src/core/level.ts';
 import { GM, RAM } from '../src/core/ram.ts';
 import { cleanImage, editorImage } from './fixture.ts';
@@ -144,10 +144,10 @@ function enter(emu: LevelEmulator, i: number): number | null {
   setNameCode(rom, 0x5f, 0x0123);
   check(freeTranslevel(t, use) === 0x5d, 'all with settings: the lowest of them before a level of its own');
   // reset: as the clean game's unused ones, the level's data stays
-  const msg = [...Array(0x60).keys()].find((n) => n && cleanTl.includes(n) && messageSlots(rom, n).length)!;
+  const msg = [...Array(0x60).keys()].find((n) => n && cleanTl.includes(n) && hasMessages(rom, n))!;
   const l1Ptr = rom.r24(L1_PTRS + translevelToLevel(msg) * 3), was = rom.data.slice();
   s.edit('Reset', () => resetTranslevel(rom, msg));
-  check(nameCode(rom, msg) === 0 && baseEvent(rom, msg) === NO_EVENT && exitDirections(rom, msg).every((d) => d === 0) && !messageSlots(rom, msg).length,
+  check(nameCode(rom, msg) === 0 && baseEvent(rom, msg) === NO_EVENT && exitDirections(rom, msg).every((d) => d === 0) && !hasMessages(rom, msg),
     `reset ${hx(msg)}: no name, no base event, exits revealing up, no message box`);
   check(rom.r24(L1_PTRS + translevelToLevel(msg) * 3) === l1Ptr && use(msg) === 2, 'reset: the level\'s data stays');
   s.undo();

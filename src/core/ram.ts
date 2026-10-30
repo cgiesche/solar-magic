@@ -78,6 +78,10 @@ export const RAM = {
   levelFlags: 0x1ea2, // per translevel: bits 0-3 the directions Mario may walk from its tiles (right, left, down, up), 4 save prompt and 5 no entry if passed (Lunar Magic's), 6 the midway point was touched, 7 passed
   midwayTouched: 0x13ce, // the midway tape was touched in this level (dying then marks the translevel's $1EA2 bit 6)
   midwayUsed: 0x13cf, // the level was loaded at its midway point
+  message: 0x1426, // the message box to show: 1 or 2 the level's messages, 3 Yoshi's thank-you
+  palaceSwitch: 0x13d2, // the switch palace's switch pressed (1-4), set when its message box opens
+  ridingYoshi: 0x187a, // Mario rides Yoshi
+  yoshiCarried: 0x0dc1, // Mario brings Yoshi into the next level
   midwayScreen: 0x13cd, // the level's midway screen: its tape sets the checkpoint unless it is 0
   entranceAction: 0x192a, // what Mario does when he enters (pipe, door, …)
   levelMusic: 0x0dda, // song of the level; the game doesn't restart it when the next level has the same

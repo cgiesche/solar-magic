@@ -127,5 +127,32 @@ const retry = (tape: { x: number; y: number } | null) => {
     `13B: the midway tape touched (${hx(tape.x)},${hx(tape.y)}), Mario dies, Retry: back at its midway point ${m.at} (its marker: ${hx(marker.x)},${hx(marker.y)}; game modes ${m.modes})`);
 }
 
+// 13B's message box (sprite B9): big Mario jumps into it from below – its message opens, no switch palace's
+// switch is pressed and the level goes on after B closed it (the game's lookup showed the yellow switch palace's
+// in any level its table doesn't name)
+{
+  const b9 = loadLevel(rom, 0x13b).sprites.find((s) => s.num === 0xb9)!;
+  const p = play(0x13b), w = p.wram;
+  p.until('settled');
+  w[RAM.powerup] = 1;
+  setMarioPos(w, b9.x * 16, b9.y * 16 + 0x40);
+  p.play(30);
+  let msg = 0;
+  for (let f = 0; f < 90 && !msg; f++) { p.frame(f < 30 ? PAD.b : 0); msg = w[RAM.message]; }
+  p.play(60); p.play(4, PAD.b); p.play(120);
+  check(msg === 1 && w[RAM.palaceSwitch] === 0 && w[RAM.gameMode] === GM.level,
+    `13B: Mario hits the message box at ${hx(b9.x)},${hx(b9.y)} – message ${msg}, switch ${w[RAM.palaceSwitch]}, game mode ${hx(w[RAM.gameMode])} after it closed`);
+}
+// the Retry System's hijack of Lunar Magic's switch palace routine ($03BC72, the loop drawing the switch's tiles)
+// lands in the editor's: the yellow switch palace's message still presses its switch and returns to the overworld
+{
+  const p = play(0x14), w = p.wram;
+  p.until('settled');
+  w[RAM.message] = 1;
+  p.play(90); p.play(4, PAD.b); p.play(120);
+  check(rom.r8(0x03bc72) === 0x22 && w[RAM.palaceSwitch] === 1 && w[RAM.gameMode] !== GM.level,
+    `level 14: the switch palace's message with the Retry System's hijack at $03BC72 – switch ${w[RAM.palaceSwitch]}, game mode ${hx(w[RAM.gameMode])} after it closed`);
+}
+
 if (bad) { console.log(`${bad} failed`); process.exit(1); }
 console.log('all ok');

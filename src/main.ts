@@ -189,14 +189,13 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
       { label: 'Import LM level file …', title: 'A Lunar Magic level file (.mwl, or a .zip with one): its background, Map16 tiles, graphics slots and colors into this level', onClick: () => void openLevelImport(app) },
       'sep',
       { label: 'Secondary entrances …', onClick: () => openEntrancesDialog(app) },
+      { label: 'Message boxes …', title: 'The level\'s two messages (those of its overworld level) and Yoshi\'s thank-you', onClick: () => openMessagesDialog(app) },
     ] },
     { label: 'ROM', items: [
       { label: 'ROM information …', onClick: () => openRomInfo(app) },
       { label: 'Expand ROM …', disabled: () => app.rom.size >= 0x400000, onClick: () => openExpandDialog(app) },
       'sep',
       { label: 'Packages …', title: 'Third-party content: upload packages (patches, UberASM, blocks, sprites, music) and configure what they brought', onClick: () => openResources(app, 'packages') },
-      'sep',
-      { label: 'Message boxes …', onClick: () => openMessagesDialog(app) },
     ] },
     { label: 'Search', items: [
       { label: 'Search everywhere …', shortcut: 'Ctrl+F / Ctrl+Space', title: 'Objects, extended objects, Map16 tiles, prefabs and sprites by number, name or behavior', onClick: search },
