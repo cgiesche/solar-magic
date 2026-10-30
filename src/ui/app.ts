@@ -173,7 +173,7 @@ export class App {
   bgBrush: Brush = { w: 1, h: 1, tiles: [0] };
   l3Brush: Brush = { w: 1, h: 1, tiles: [0] }; // layer 3 tilemap words
   zoom = 2;
-  show = { layer1: true, layer2: true, layer3: true, sprites: true, grid: false, screens: true, exits: true, ghost: true, anim: false, items: true, invisible: true, deaths: true, collision: false, preview: false, arcs: false, gameView: false, scrollBands: false };
+  show = { layer1: true, layer2: true, layer3: true, sprites: true, grid: false, screens: true, exits: true, ghost: true, anim: true, items: true, invisible: true, deaths: true, collision: false, preview: false, arcs: false, gameView: false, scrollBands: false };
   // the game view frame's top left corner in level pixels (levelview.ts), kept while editing and between levels
   gameView: { x: number; y: number } | null = null;
   // the frame placed by Mario (Shift+V): his place (inside the level) and the camera the game puts there in the
