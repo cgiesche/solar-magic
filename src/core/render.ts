@@ -21,6 +21,12 @@ export function screenBase(rom: Rom, layer: number, mode: number, s: number): nu
   return rom.r16(screenTable + s * 3);
 }
 
+// Screen s's rectangle in the level picture (pixels): a horizontal level's screens lie side by side, the
+// level's height each; a vertical level's are stacked, the level's width (two 16-tile halves) each.
+export function screenRect(g: LayerGeom, s: number): { x: number; y: number; w: number; h: number } {
+  return g.vertical ? { x: 0, y: s * 256, w: g.width * 16, h: 256 } : { x: s * 256, y: 0, w: 256, h: g.height * 16 };
+}
+
 // rows: the height of a horizontal level (levelRows). A horizontal layer's screens lie one after the other,
 // rows * 16 bytes each, layer 2's from the 16th screen on (the game's tables for them are built in RAM
 // with the level, levelheight.ts); a vertical layer's come from the game's tables.

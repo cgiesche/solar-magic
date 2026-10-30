@@ -9,7 +9,7 @@ import { KILL_FILL, HURT_FILL, CLIMB_FILL, SPIKE_COLOR, NET_COLOR, spikeRow, net
 import { probeAt, spriteProbeAt, enterText, collisionText, collisionIn, switchText, SWITCH_STATES, SWITCH_NAME, type PosProbe, type CollisionCore, type SwitchState } from '../core/blockprobe.ts';
 import { type LevelObject, type LevelSprite, newUid, serializeLayer1, serializeLayer2, serializeLevelSprites, spriteSizes, spriteId, EXIT_NEW } from '../core/level.ts';
 import { overworldExitText } from '../core/owteleport.ts';
-import { composite, invisibleTiles, type LevelImages } from '../core/render.ts';
+import { composite, invisibleTiles, screenRect, type LevelImages } from '../core/render.ts';
 import { layer3CellAt, layer3WordText } from '../core/layer3map.ts';
 import type { ArcSpeed } from '../core/jumparcs.ts';
 import { exitTarget } from '../core/exitgraph.ts';
@@ -273,20 +273,19 @@ export class LevelView {
     }
     // exits
     if (app.show.exits || app.mode === 'exit') {
-      const scrH = vertical ? 256 : im.height;
       if (app.mode === 'exit' && !app.exitMarker) {
         // the chosen screen, also without an exit
-        const x = vertical ? 0 : app.exitScreen * 256, y = vertical ? app.exitScreen * 256 : 0;
+        const r = screenRect(im.geom1, app.exitScreen);
         ctx.strokeStyle = 'rgba(255,200,0,0.9)';
         ctx.lineWidth = 2 / app.zoom;
-        ctx.strokeRect(x + 1 / app.zoom, y + 1 / app.zoom, 256 - 2 / app.zoom, (vertical ? 256 : scrH) - 2 / app.zoom);
+        ctx.strokeRect(r.x + 1 / app.zoom, r.y + 1 / app.zoom, r.w - 2 / app.zoom, r.h - 2 / app.zoom);
       }
       const g = app.entrances.graph();
       for (const ex of app.level.exits) {
-        const x = vertical ? 0 : ex.screen * 256, y = vertical ? ex.screen * 256 : 0;
+        const { x, y, w, h: rh } = screenRect(im.geom1, ex.screen);
         const sel = app.mode === 'exit' && !app.exitMarker && app.exitScreen === ex.screen;
         ctx.fillStyle = sel ? 'rgba(255,200,0,0.25)' : 'rgba(255,160,0,0.08)';
-        ctx.fillRect(x, y, 256, vertical ? 256 : scrH);
+        ctx.fillRect(x, y, w, rh);
         const t = exitTarget(app.rom, app.level.number, ex);
         const ok = t.entrance < 0 || t.overworld || g.entrancesOf(t.to).includes(t.entrance);
         ctx.font = `bold ${12 / app.zoom}px sans-serif`;
