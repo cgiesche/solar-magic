@@ -3,7 +3,7 @@
 // the arrows move freely within the box; nothing is pushed out of it (refused instead). Pasted text wraps into
 // lines of 18, justified on request as the game's texts are set; characters the font lacks are replaced by a
 // suggestion where there is one.
-import { type Box, boxOf, boxMessage, typeCode, newline, backspace, del, move, charsLeft, paste, wrap, justifyLine, encodeText, suggestion } from '../src/core/messagebox.ts';
+import { type Box, boxOf, boxMessage, typeCode, newline, backspace, del, move, charsLeft, paste, wrap, justifyLine, justifyBox, encodeText, suggestion } from '../src/core/messagebox.ts';
 import { textToLine, lineToText, MSG_COLS, MSG_LINES, type Message } from '../src/core/messages.ts';
 
 let bad = 0;
@@ -92,6 +92,12 @@ const put = (b: Box, line: number, col: number): Box => ({ ...b, line, col });
   check(suggestion('A') === null && suggestion('€') === null, 'none for characters in the font or without a likeness');
   const e = encodeText('a€b');
   check(e.codes.length === 2 && e.dropped.join('') === '€', 'characters without a suggestion are left out and named');
+}
+
+// justifying a whole message: every line followed by one with text in the same paragraph
+{
+  const j = justifyBox(boxOf(msg('Welcome! This is', 'Dinosaur Land.', '', 'on top of the', 'end')));
+  check(text(j) === 'Welcome!  This  is/Dinosaur Land.//on   top   of  the/end', `justified (${text(j)})`);
 }
 
 // back to a message

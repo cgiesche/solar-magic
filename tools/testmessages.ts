@@ -7,7 +7,7 @@ import { LevelEmulator } from '../src/core/levelemu.ts';
 import { translevelToLevel } from '../src/core/overworld.ts';
 import { PlaySession } from '../src/core/playsession.ts';
 import { GM, PAD, RAM } from '../src/core/ram.ts';
-import { readMessage, writeMessages, lineToText, textToLine, hasMessages, switchPalace, yoshiHouse, messagePatch, YOSHI_THANKS, PTRS, MSG_COLS, MSG_LINES, TRANSLEVELS, type Message } from '../src/core/messages.ts';
+import { readMessage, writeMessages, lineToText, textToLine, hasMessages, switchPalace, yoshiHouse, messagePatch, messageToShow, YOSHI_THANKS, PTRS, MSG_COLS, MSG_LINES, TRANSLEVELS, type Message } from '../src/core/messages.ts';
 import { BlockProber, spriteMessage } from '../src/core/blockprobe.ts';
 import { editorImage } from './fixture.ts';
 
@@ -86,6 +86,15 @@ const empty = Array.from({ length: TRANSLEVELS }, (_, tl) => tl).find((tl) => tl
 {
   const s = shown(rom, empty, 1);
   check(s?.chars === box([]) && s.palace === 0 && s.mode === GM.level, `${hx(translevelToLevel(empty))} (no message): an empty box, no switch, the level goes on (switch ${s?.palace}, game mode ${hx(s?.mode ?? 0)})`);
+}
+
+// "Show in game": what the editor sets so that the game shows exactly a message (Yoshi's house's message 2: with Yoshi)
+{
+  const y = yoshiHouse(rom);
+  for (const [tl, n] of [[0x29, 1], [0x29, 2], [y, 1], [y, 2], [0, 2], [0x08, 2]]) {
+    const t = messageToShow(rom, tl, n), s = shown(rom, tl || 0x29, t.message, t.yoshi);
+    check(s?.chars === box(readMessage(rom, tl, n)), `show in game: translevel ${hx(tl)} message ${n} ($1426 = ${t.message}${t.yoshi ? ', with Yoshi' : ''})`);
+  }
 }
 
 // written messages: read back, shown by the game, the others unchanged; identical ones share their data

@@ -128,6 +128,12 @@ function justified(l: WrappedLine): WrappedLine {
   return out;
 }
 
+// every line followed by one with text spread (justifyLine): the lines of a paragraph but its last
+export function justifyBox(b: Box): Box {
+  const lines = b.lines.map((l, k) => (k < MSG_LINES - 1 && trim(b.lines[k + 1]).length ? justifyLine(trim(l)) : l));
+  return { ...b, lines };
+}
+
 // one paragraph broken into lines of 18 at its spaces (a longer word broken where the line ends); its leading
 // spaces and the spaces between words on a line kept; justify: all lines but the last spread (justifyLine)
 export function wrap(codes: number[], justify: boolean): WrappedLine[] {

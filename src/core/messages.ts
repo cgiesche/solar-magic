@@ -174,6 +174,14 @@ export function switchPalace(rom: Rom, tl: number): number {
 // the translevel whose message 2 shows while Mario rides Yoshi (Yoshi's house)
 export const yoshiHouse = (rom: Rom): number => rom.r8(GAME_INDEX + YOSHI_HOUSE);
 
+// what makes the game show message msg of translevel tl in a level of tl: the message box number ($1426) and
+// whether Mario rides Yoshi (Yoshi's house shows its message 2 then); translevel 0's message 2 is message 3
+export function messageToShow(rom: Rom, tl: number, msg: number): { message: number; yoshi: boolean } {
+  if (tl === YOSHI_THANKS.translevel && msg === YOSHI_THANKS.msg) return { message: 3, yoshi: false };
+  if (tl === yoshiHouse(rom)) return { message: 1, yoshi: msg === 2 };
+  return { message: msg, yoshi: false };
+}
+
 // "{xx}" for codes without a character
 export function lineToText(line: number[]): string {
   return line.map((c) => CODE_TO_CHAR.get(c) ?? `{${c.toString(16).padStart(2, '0')}}`).join('').replace(/ +$/, '');
