@@ -8,6 +8,7 @@ import { translevelToLevel } from '../src/core/overworld.ts';
 import { PlaySession } from '../src/core/playsession.ts';
 import { GM, PAD, RAM } from '../src/core/ram.ts';
 import { readMessage, writeMessages, lineToText, textToLine, hasMessages, switchPalace, yoshiHouse, messagePatch, YOSHI_THANKS, PTRS, MSG_COLS, MSG_LINES, TRANSLEVELS, type Message } from '../src/core/messages.ts';
+import { BlockProber, spriteMessage } from '../src/core/blockprobe.ts';
 import { editorImage } from './fixture.ts';
 
 let bad = 0;
@@ -99,6 +100,15 @@ const empty = Array.from({ length: TRANSLEVELS }, (_, tl) => tl).find((tl) => tl
   console.log('  again:', writeMessages(rom, [{ translevel: 0x29, msg: 2, message: m }]));
   check(box(readMessage(rom, 0x29, 2)) === box(m) && rom.r16(PTRS + (0x29 * 2 + 1) * 2) === rom.r16(PTRS + empty * 4), 'written again: an identical message shares its data');
   check(shown(rom, 0x29, 2)?.chars === box(m), 'shown by the game after rewriting');
+}
+
+// which message a message box sprite opens: learned by hitting it (the game's B9 reads its X position)
+{
+  const p = new BlockProber(new Rom(await editorImage())).probeSprite(0xb9);
+  const by = Array.from({ length: 16 }, (_, x) => spriteMessage(p, x, 0x10));
+  check(by.every((m, x) => m === (x & 1) + 1), `message box B9: message 1 at even X, 2 at odd X (${by.join('')}; ${p.summary})`);
+  const koopa = new BlockProber(new Rom(await editorImage())).probeSprite(0x04);
+  check(Array.from({ length: 16 }, (_, x) => spriteMessage(koopa, x, 0x10)).every((m) => !m), 'a koopa opens none');
 }
 
 console.log('messages bad', bad);

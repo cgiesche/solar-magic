@@ -189,6 +189,8 @@ export const SPR = {
   loadIndex: 0x161a, // index in the level's sprite data ($FF = not from there)
   // PIXI's tables (bank $7F): custom sprite number, extra bits, extra bytes
   customNum: 0x1ab9e, extraBits: 0x1ab10, extraBytes: [0x1ab40, 0x1ab4c, 0x1ab58, 0x1ab64],
+  // the tables the game counts down every frame (the sprite's timers)
+  timers: [0x1540, 0x154c, 0x1558, 0x1564, 0x15ac, 0x163e, 0x1fe2],
 } as const;
 
 // all tables of a sprite's state but its position, subpixels and off-screen flags

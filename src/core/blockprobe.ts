@@ -42,6 +42,7 @@ import { GM, RAM, SPR, SPR_STATE, SPRITE_SLOTS, MAP_HI, MARIO_DYING, PAD, mapAdd
 const PROBE_LEVEL = 0x105; // horizontal level, loaded with PROBE_HEADER, without objects and sprites
 const PROBE_HEADER = [0x33, 0x40, 0x08, 0x80, 0x27]; // primary header; the tileset is replaced
 const PROBE_FRAMES = 24;
+const TIMER_FRAMES = 64; // a sprite hit: up to this many more frames while timers the hit started run
 const SPRITE_SLOT = 11; // slot of a probed sprite (items it spawns take lower free slots)
 const SPRITE_ROW = 6; // probed sprites go to rows 6-21 (Mario fits below them, the level has $1B rows)
 const PROBE_CAM_Y_MAX = 0x1b * 16 - 224;
@@ -56,7 +57,7 @@ const ENTER_DX = [-8, -4, 0, 4, 8]; // pipes only let Mario in within a few pixe
 // result cache keys (see ResultCache) of the probes in tileset ts
 export const blockKey = (ts: number, tile: number) => `b${ts}:${tile}`;
 export const collisionKey = (ts: number, tile: number) => `c${COLLISION_VERSION}.${ts}:${tile}`;
-export const spriteKey = (ts: number, num: number) => `s${ts}:${num}`;
+export const spriteKey = (ts: number, num: number) => `s2.${ts}:${num}`;
 export const runsKey = (ts: number) => `r1.${ts}`;
 export const cameraKey = (ts: number, mode: number, vscroll: number) => `cam2.${ts}:${mode}.${vscroll}`;
 
@@ -68,6 +69,7 @@ export interface HitResult {
   onOff: boolean; // ON/OFF switch state toggled
   after: number; // tile at the block position afterwards (-1 for sprites)
   solid: boolean; // Mario was blocked by it
+  message?: number; // the message box it opened ($1426: 1 or 2 the level's, 3 Yoshi's thank-you)
 }
 
 export interface PosProbe {
@@ -146,6 +148,11 @@ export function spriteProbeAt(p: SpriteProbe, x: number, y: number): PosProbe {
 // result for a block or sprite at tile column x
 export function probeAt(p: ColumnProbe, x: number): PosProbe {
   return p.pos[x & 15];
+}
+
+// the message box small Mario hitting the sprite at tile (x, y) from below opens, 0 none
+export function spriteMessage(p: SpriteProbe, x: number, y: number): number {
+  return spriteProbeAt(p, x, y).small.message ?? 0;
 }
 
 // sprites spawned, small Mario's first
@@ -304,14 +311,22 @@ export class BlockProber {
 
   probeSprite(num: number): SpriteProbe {
     return this.cachedSprite(num) ?? this.computed(spriteKey(this.tileset, num), (): SpriteProbe => {
-      const variants = this.spriteVariants(num);
-      const pos = variants.reps.map(({ x, y }): PosProbe => {
+      const at = ({ x, y }: { x: number; y: number }): PosProbe => {
         const base0 = this.hitSprite(num, 0, x, y, 'none');
         // (the run without Mario is the same for small and big Mario: he stays away from the sprite)
         const small = this.spriteEffect(num, 0, x, y, 'below', base0), big = this.spriteEffect(num, 1, x, y, 'below', base0);
         const stomp = this.spriteEffect(num, 0, x, y, 'stomp', base0);
         return { small, big, stomp, summary: summarizeSprite(small, big, stomp) };
-      });
+      };
+      let variants = this.spriteVariants(num), pos = variants.reps.map(at);
+      // a message box: which message it opens may depend on where it is, not on its tables (the game's reads its
+      // X position when hit) – the X positions split by the message hitting it there opens
+      if (pos.some((q) => q.small.message)) {
+        const y = variants.reps[0].y;
+        const msgs = Array.from({ length: 16 }, (_, x) => this.spriteEffect(num, 0, x, y, 'below').message ?? 0);
+        const split = splitX(variants, msgs);
+        if (split.nx !== variants.nx) { variants = split; pos = variants.reps.map(at); }
+      }
       return { num, variants, pos, summary: byVariant(variants, pos), solid: pos.some((q) => q.small.solid || q.big.solid) };
     });
   }
@@ -350,6 +365,7 @@ export class BlockProber {
   private spriteEffect(num: number, big: number, x: number, y: number, how: 'below' | 'stomp', base = this.hitSprite(num, big, x, y, 'none')): HitResult {
     const r = this.hitSprite(num, big, x, y, how);
     return {
+      ...(r.message && r.message !== base.message ? { message: r.message } : {}),
       sprites: r.sprites.filter((n) => !base.sprites.includes(n)),
       coins: Math.max(0, r.coins - base.coins),
       lives: Math.max(0, r.lives - base.lives),
@@ -423,23 +439,27 @@ export class BlockProber {
     w[RAM.marioSpeedX] = 0; w[RAM.marioSpeedY] = vy & 0xff; w[RAM.marioInAir] = 0x0b;
   }
 
-  // runs the probe frames; ignore: sprite slot excluded from the observation (the probed sprite);
-  // stops early once settled() says nothing can happen any more
-  private observe(big: number, off: number, ignore = -1, settled?: (w: Uint8Array) => boolean): HitResult {
+  // runs the probe frames (up to TIMER_FRAMES more while busy() says something is still under way); ignore:
+  // sprite slot excluded from the observation (the probed sprite); stops early once settled() says nothing can
+  // happen any more
+  private observe(big: number, off: number, ignore = -1, settled?: (w: Uint8Array) => boolean, busy?: (w: Uint8Array) => boolean): HitResult {
     const s = this.emu.snes, w = s.wram;
     const coins = w[RAM.coins], lives = w[RAM.lives], onOff = w[RAM.onOff];
     const seen = new Set<number>();
-    let solid = false, hurt = false;
+    let solid = false, hurt = false, message = 0;
     try {
-      for (let f = 0; f < PROBE_FRAMES; f++) {
+      for (let f = 0, more = false; f < PROBE_FRAMES || (more && f < PROBE_FRAMES + TIMER_FRAMES); f++) {
         s.runFrame();
+        more = busy?.(w) ?? false;
+        message ||= w[RAM.message];
         if (w[RAM.marioBlocked] & 8) solid = true;
         if (w[RAM.marioAnim] === MARIO_DYING || w[RAM.powerup] < big) hurt = true;
         for (let i = 0; i < SPRITE_SLOTS; i++) if (i !== ignore && w[SPR.status + i]) seen.add(w[SPR.num + i]);
-        if (settled?.(w)) break;
+        if (!more && settled?.(w)) break;
       }
     } catch { /* keep what was observed */ }
     return {
+      ...(message ? { message } : {}),
       sprites: [...seen],
       coins: (w[RAM.coins] - coins + 100) % 100,
       lives: (w[RAM.lives] - lives) & 0xff,
@@ -697,8 +717,15 @@ export class BlockProber {
     if (how === 'below') this.placeMario(ax, sy, 24, -0x60);
     else if (how === 'stomp') this.placeMario(ax, sy, -28, 0x30);
     else this.placeMario(ax, sy, 64, 0);
-    // settled: as for blocks, once Mario has fallen past the sprite
-    return this.observe(big, -1, slot, how === 'none' ? undefined : (w) => marioY(w) > sy + 32 && settledHit(w));
+    // settled: as for blocks, once Mario has fallen past the sprite – and the timers the hit started have run
+    // out (a message box opens its message once it has bounced)
+    if (how === 'none') return this.observe(big, -1, slot);
+    const last = SPR.timers.map((t) => w[t + slot]), armed = new Set<number>();
+    const timing = (w: Uint8Array) => {
+      SPR.timers.forEach((t, k) => { if (w[t + slot] > last[k]) armed.add(k); last[k] = w[t + slot]; });
+      return [...armed].some((k) => last[k]);
+    };
+    return this.observe(big, -1, slot, (w) => marioY(w) > sy + 32 && settledHit(w), timing);
   }
 }
 
@@ -725,6 +752,7 @@ function describe(tile: number, r: HitResult): string {
   if (r.coins) p.push(`+${r.coins} coin${r.coins > 1 ? 's' : ''}`);
   if (r.lives) p.push(`+${r.lives} ${r.lives > 1 ? 'lives' : 'life'}`);
   if (r.onOff) p.push('ON/OFF');
+  if (r.message) p.push(r.message === 3 ? 'Yoshi\'s thank-you' : `message ${r.message}`);
   if (r.hurt) p.push('hurts');
   if (r.after < 0) return p.join(', '); // sprite
   if (!p.length) return r.after === tile ? '' : `becomes ${hex3(r.after)}`;
@@ -757,6 +785,15 @@ function summarizeSprite(small: HitResult, big: HitResult, stomp: HitResult): st
   const below = summarize(-1, small, big), on = describe(-1, stomp);
   const p = [below && `from below: ${below}`, on && `jumped on: ${on}`].filter(Boolean);
   return p.length ? p.join(' · ') : null;
+}
+
+// the variants with each X class split by msgs (by X & 15)
+function splitX(v: SpriteVariants, msgs: number[]): SpriteVariants {
+  const keys = v.xs.map((c, x) => `${c}:${msgs[x]}`), u = [...new Set(keys)];
+  const xs = keys.map((k) => u.indexOf(k)), nx = u.length, ny = v.reps.length / v.nx;
+  const reps: { x: number; y: number }[] = [];
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) reps.push({ x: xs.indexOf(i), y: v.reps[j * v.nx].y });
+  return { xs, ys: v.ys, nx, reps };
 }
 
 // one text for all variants, grouped by the positions they apply to ("X even: …")
