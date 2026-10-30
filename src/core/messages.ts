@@ -25,7 +25,8 @@ const TEXT_OP = 0x03bc0b; // operand of LDA.l text,x
 export const PTRS = 0x03be80;
 export const MSG_HOOKS: [number, number][] = [[HOOK, 7]];
 const MAGIC = [0x53, 0x4d, 0x57, 0x4d]; // "SMWM", before the text
-const END = 0xfe, SPACE = 0x1f;
+const END = 0xfe;
+export const SPACE = 0x1f;
 // message 3 ($1426 = 3): Yoshi's thank-you, the first time Mario frees him
 export const YOSHI_THANKS = { translevel: 0, msg: 2 } as const;
 
@@ -39,6 +40,9 @@ const CHARS: [number, string][] = [
 ];
 const CODE_TO_CHAR = new Map(CHARS);
 const CHAR_TO_CODE = new Map(CHARS.map(([c, s]) => [s, c]));
+// the font's code of a character, its character (undefined: none – Yoshi's signature, symbols, custom glyphs)
+export const charCode = (ch: string): number | undefined => CHAR_TO_CODE.get(ch);
+export const codeChar = (c: number): string | undefined => CODE_TO_CHAR.get(c);
 
 export type Message = number[][]; // 8 lines of character codes
 
