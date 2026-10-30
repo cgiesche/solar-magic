@@ -63,12 +63,38 @@
   </style>
   <!-- without JavaScript nothing removes “booting”: the start page is shown anyway, with its note -->
   <noscript><style>.booting .landing { visibility: visible; }</style></noscript>
+  <script>
+    // the start page shows as soon as it is clear that no project is waiting (nothing stored in the browser, no ?rom=),
+    // without waiting for the editor's code; otherwise main.ts decides. landingShown tells boot.ts which it was.
+    window.landingShown = new Promise(function (done) {
+      if (/[?&]rom=/.test(location.search)) return done(false);
+      var show = function (yes) {
+        if (yes) document.documentElement.classList.remove('booting');
+        done(yes);
+      };
+      try {
+        var r = indexedDB.open('smw-editor');
+        // no database yet: not created here (storage.ts creates it with its store)
+        r.onupgradeneeded = function () { r.transaction.abort(); };
+        r.onerror = function (e) { e.preventDefault(); show(!!r.error && r.error.name === 'AbortError'); };
+        r.onsuccess = function () {
+          var db = r.result;
+          try {
+            var q = db.transaction('kv').objectStore('kv').count('rom');
+            q.onsuccess = function () { show(!q.result); };
+            q.onerror = function () { show(false); };
+          } catch (e) { show(false); }
+          db.close();
+        };
+      } catch (e) { done(false); }
+    });
+  </script>
 </head>
 <body>
   <div id="app">
     <main class="landing">
       <nav class="landing-nav" aria-label="Start page">
-        <a class="landing-brand" href="#top"><img src="/favicon.png" width="24" height="24" alt="" />Solar Magic</a>
+        <a class="landing-brand" href="#top"><img src="/logo-48.webp" width="24" height="24" alt="" />Solar Magic</a>
         <span class="landing-nav-links">
           <a href="#features">Features</a>
           <a href="#community">Community content</a>
@@ -78,7 +104,7 @@
       </nav>
 
       <header class="landing-hero" id="top">
-        <img class="landing-logo" src="/apple-touch-icon.png" width="88" height="88" alt="" />
+        <img class="landing-logo" src="/logo.webp" width="88" height="88" fetchpriority="high" alt="" />
         <h1>Solar Magic</h1>
         <p class="landing-tagline">A Super Mario World level editor for the browser.</p>
         <p class="landing-lead">Edit levels, the overworld, graphics and music, test them in the built-in emulator, and install patches, blocks, sprites and music from SMW Central.</p>
@@ -95,7 +121,7 @@
           <li class="landing-get-app"><a href="#download">Desktop app for Windows, macOS &amp; Linux</a></li>
         </ul>
         <a class="landing-shot landing-hero-shot" href="/screens/level.webp" data-caption="The level editor: Yoshi's Island 1 with the level list and the object picker">
-          <img src="/screens/level.webp" width="1600" height="1000" fetchpriority="high" alt="The level editor with Yoshi's Island 1, the level list and the object picker" />
+          <img src="/screens/level.webp" srcset="/screens/level-800.webp 800w, /screens/level-1200.webp 1200w, /screens/level.webp 1600w" sizes="(max-width: 1112px) calc(100vw - 32px), 1080px" width="1600" height="1000" fetchpriority="high" alt="The level editor with Yoshi's Island 1, the level list and the object picker" />
         </a>
       </header>
 
@@ -106,7 +132,7 @@
 
         <div class="landing-row">
           <a class="landing-shot" href="/screens/overworld.webp" data-caption="The overworld editor: the main map with its level tiles">
-            <img src="/screens/overworld.webp" width="1600" height="1000" loading="lazy" alt="The overworld editor showing the main map with its level tiles" />
+            <img src="/screens/overworld.webp" srcset="/screens/overworld-800.webp 800w, /screens/overworld.webp 1600w" sizes="(max-width: 760px) calc(100vw - 32px), (max-width: 1112px) calc((100vw - 72px) * .6), 624px" width="1600" height="1000" loading="lazy" alt="The overworld editor showing the main map with its level tiles" />
           </a>
           <div>
             <h3>Levels and the overworld</h3>
@@ -122,7 +148,7 @@
         <div class="landing-row">
           <div class="landing-shot-stack">
             <a class="landing-shot" href="/screens/prefabs.webp" data-caption="A prefab placed three times in level 105, listed in the picker">
-              <img src="/screens/prefabs.webp" width="1000" height="790" loading="lazy" alt="Three copies of a prefab selected in level 105, the prefab listed at the top of the object picker" />
+              <img src="/screens/prefabs.webp" srcset="/screens/prefabs-800.webp 800w, /screens/prefabs.webp 1000w" sizes="(max-width: 760px) calc(100vw - 32px), (max-width: 1112px) calc((100vw - 72px) * .6), 624px" width="1000" height="790" loading="lazy" alt="Three copies of a prefab selected in level 105, the prefab listed at the top of the object picker" />
             </a>
             <a class="landing-shot landing-inset" href="/screens/prefab-save.webp" data-caption="Saving a selection as prefab: size, ROM space and the bytes saved per placement">
               <img src="/screens/prefab-save.webp" width="648" height="420" loading="lazy" alt="The Selection as prefab dialog with the cost of the prefab and the space it saves" />
@@ -143,7 +169,7 @@
 
         <div class="landing-row">
           <a class="landing-shot" href="/screens/testplay.webp" data-caption="Test play: the level runs right in the editor, with CPU and sprite meters beside it">
-            <img src="/screens/testplay.webp" width="1064" height="872" loading="lazy" alt="Test play of a level with the CPU and sprite meters beside the game" />
+            <img src="/screens/testplay.webp" srcset="/screens/testplay-800.webp 800w, /screens/testplay.webp 1064w" sizes="(max-width: 760px) calc(100vw - 32px), (max-width: 1112px) calc((100vw - 72px) * .6), 624px" width="1064" height="872" loading="lazy" alt="Test play of a level with the CPU and sprite meters beside the game" />
           </a>
           <div>
             <h3>Test play</h3>
@@ -193,7 +219,7 @@
 
         <div class="landing-row">
           <a class="landing-shot" href="/screens/graphics.webp" data-caption="The graphics workspace: Map16 tiles, the tile editor and a live preview of the level">
-            <img src="/screens/graphics.webp" width="1600" height="1000" loading="lazy" alt="The graphics workspace with the Map16 tiles, the tile editor and a level preview" />
+            <img src="/screens/graphics.webp" srcset="/screens/graphics-800.webp 800w, /screens/graphics.webp 1600w" sizes="(max-width: 760px) calc(100vw - 32px), (max-width: 1112px) calc((100vw - 72px) * .6), 624px" width="1600" height="1000" loading="lazy" alt="The graphics workspace with the Map16 tiles, the tile editor and a level preview" />
           </a>
           <div>
             <h3>Graphics, colors and animation</h3>
@@ -221,13 +247,13 @@
         <div class="landing-pair">
           <figure>
             <a class="landing-shot" href="/screens/rhr105.webp" data-caption="Level 105 of the Romhack Races baserom: its custom blocks, installed from the baserom's zip">
-              <img src="/screens/rhr105.webp" width="1600" height="1000" loading="lazy" alt="Level 105 of the Romhack Races baserom with its block legend in the editor" />
+              <img src="/screens/rhr105.webp" srcset="/screens/rhr105-800.webp 800w, /screens/rhr105.webp 1600w" sizes="(max-width: 760px) calc(100vw - 32px), (max-width: 1112px) calc((100vw - 56px) * .61), 642px" width="1600" height="1000" loading="lazy" alt="Level 105 of the Romhack Races baserom with its block legend in the editor" />
             </a>
             <figcaption>Level 105 of the Romhack Races baserom in Solar Magic.</figcaption>
           </figure>
           <figure>
             <a class="landing-shot" href="/screens/packages.webp" data-caption="The Packages dialog: the Romhack Races baserom installed as one package">
-              <img src="/screens/packages.webp" width="950" height="841" loading="lazy" alt="The Packages dialog listing what the Romhack Races baserom brought" />
+              <img src="/screens/packages.webp" srcset="/screens/packages-800.webp 800w, /screens/packages.webp 950w" sizes="(max-width: 760px) calc(100vw - 32px), (max-width: 1112px) calc((100vw - 56px) * .39), 414px" width="950" height="841" loading="lazy" alt="The Packages dialog listing what the Romhack Races baserom brought" />
             </a>
             <figcaption>The baserom installed from its zip file: 85 patches, UberASM, 77 blocks, one sprite, one sound effect and its graphics.</figcaption>
           </figure>
@@ -315,6 +341,6 @@
       </footer>
     </main>
   </div>
-  <script type="module" src="/src/main.ts"></script>
+  <script type="module" src="/src/boot.ts"></script>
 </body>
 </html>

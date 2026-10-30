@@ -1,4 +1,3 @@
-import './style.css';
 import { Rom } from './core/rom.ts';
 import { openLevelImport } from './ui/levelimport.ts';
 import { createBps, crc32 } from './core/bps.ts';
@@ -48,8 +47,11 @@ initLanding(landing);
 if (desktop) document.documentElement.classList.add('desktop');
 
 function welcome(): void {
-  clear(root);
-  root.appendChild(landing);
+  // at the start it is already there (and may have been scrolled: index.html shows it before this code runs)
+  if (!landing.isConnected) {
+    clear(root);
+    root.appendChild(landing);
+  }
   document.documentElement.classList.remove('booting');
 }
 
