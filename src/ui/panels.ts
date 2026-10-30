@@ -678,15 +678,6 @@ export class Picker {
   // the tabs for the central search (search.ts)
   searchProviders(): SearchProvider[] {
     const app = this.app;
-    const objects = (id: ObjSection, label: string): SearchProvider => ({
-      id, label,
-      search: (terms) => {
-        this.ensureThumbs();
-        return this.objectEntries(id).filter((e) => matchesAll(e.text, terms)).map((e) => ({
-          label: e.label, name: e.name, detail: e.behavior, title: e.title, thumb: () => (e.th ? cloneCanvas(e.th) : null), pick: () => this.choose('obj', e.item),
-        }));
-      },
-    });
     // Map16 tiles by number (the rules of the tab's tile search), by what they do (finished probes only) or by
     // the file of the custom block on them
     const map16: SearchProvider = {
@@ -744,15 +735,24 @@ export class Picker {
         });
       }),
     };
-    const prefabs: SearchProvider = {
-      id: 'pre', label: 'Prefabs',
+    // the Objects tab in one group, in its order: Prefabs, Resizable, Fixed size, Custom; the section is named
+    // after the number (and found by its name)
+    const objects: SearchProvider = {
+      id: 'obj', label: 'Objects',
       search: (terms) => {
         const sheet = prefabTileSource(app);
-        return [...app.prefabs()].filter(([n, st]) => matchesAll(`${hex2(n)} ${st.name}`.toLowerCase(), terms)).map(([n, st]) => ({
-          label: hex2(n), name: `${st.name || '(unnamed)'} ${st.w}×${st.h}`, title: `Prefab ${hex2(n)}: ${st.name || '(unnamed)'}, ${st.w}×${st.h}`,
+        const prefabs = [...app.prefabs()].filter(([n, st]) => matchesAll(`${hex2(n)} ${st.name} prefab`.toLowerCase(), terms)).map(([n, st]): SearchResult => ({
+          label: hex2(n), name: `${st.name || '(unnamed)'} ${st.w}×${st.h}`, detail: 'Prefab', title: `Prefab ${hex2(n)}: ${st.name || '(unnamed)'}, ${st.w}×${st.h}`,
           thumb: () => animatedPrefab(app, sheet, st),
           pick: () => this.choose('obj', { kind: 'obj', num: 0, ext: PREFAB_EXT, size: 0, prefab: n }),
         }));
+        this.ensureThumbs();
+        const sections = ([['obj', 'Resizable'], ['ext', 'Fixed size'], ['custom', 'Custom']] as const).flatMap(([id, section]) =>
+          this.objectEntries(id).filter((e) => matchesAll(`${e.text} ${section.toLowerCase()}`, terms)).map((e): SearchResult => ({
+            label: e.label, name: e.name, detail: e.behavior ? `${section} · ${e.behavior}` : section, title: `${section}: ${e.title}`,
+            thumb: () => (e.th ? cloneCanvas(e.th) : null), pick: () => this.choose('obj', e.item),
+          })));
+        return [...prefabs, ...sections];
       },
     };
     const sprites: SearchProvider = {
@@ -763,8 +763,8 @@ export class Picker {
         pick: () => this.choose('spr', e.item),
       })),
     };
-    // in the order of the picker: the Objects tab's sections, Map16 (by number, by name), Sprites
-    return [prefabs, objects('obj', 'Resizable objects'), objects('ext', 'Fixed-size objects'), objects('custom', 'Custom objects'), map16, named, sprites];
+    // in the order of the picker: Objects, Map16 (by number, by name), Sprites
+    return [objects, map16, named, sprites];
   }
 
   // the sheet of the current tab or brush mode fills the picker's width (layer 3's 8x8 tiles: half as wide as
