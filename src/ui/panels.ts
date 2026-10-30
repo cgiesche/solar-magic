@@ -678,15 +678,38 @@ export class Picker {
   // the tabs for the central search (search.ts)
   searchProviders(): SearchProvider[] {
     const app = this.app;
-    // Map16 tiles by number (the rules of the tab's tile search), by what they do (finished probes only) or by
-    // the file of the custom block on them
+    // the named FG and BG tiles: one result per name, its preview the rectangle around the tiles when they are
+    // connected, else the first tile
+    const named = (terms: string[]) => (['fg', 'bg'] as NameKind[]).flatMap((kind) => {
+      const bg = kind === 'bg', layer = kind.toUpperCase();
+      return nameGroups(namesOf(app.rom, kind)).filter((g) => matchesAll(g.name.toLowerCase(), terms)).map((g): SearchResult => {
+        const nums = tileRanges(g.tiles);
+        return {
+          label: layer, name: g.name, detail: nums,
+          title: `${layer} tile${g.tiles.length > 1 ? 's' : ''} ${nums}: ${g.name}`,
+          thumb: () => {
+            const r = connectedRect(g.tiles) ?? { first: g.tiles[0], w: 1, h: 1 };
+            const sheet = renderMap16Sheet(app, bg, r.first & ~15, r.h * 16);
+            const c = h('canvas', { width: r.w * 16, height: r.h * 16 });
+            c.getContext('2d')!.drawImage(sheet, (r.first & 15) * 16, 0, r.w * 16, r.h * 16, 0, 0, r.w * 16, r.h * 16);
+            const z = Math.min(1.5, 32 / (r.w * 16), 24 / (r.h * 16));
+            c.style.width = `${r.w * 16 * z}px`;
+            c.style.height = `${r.h * 16 * z}px`;
+            return c;
+          },
+          pick: () => this.chooseNamed(g.name, g.tiles, bg),
+        };
+      });
+    });
+    // Map16: first the tiles the user named, then tiles by number (the rules of the tab's tile search), by what
+    // they do (finished probes only) or by the file of the custom block on them
     const map16: SearchProvider = {
       id: 'm16', label: 'Map16',
       search: (terms) => {
         const nums = terms.map((t) => new Set(tileMatches(t, EXT_TILES) ?? []));
         const sheets = new Map<number, HTMLCanvasElement>();
         const files = blockFilesByTile(app.rom);
-        const out: SearchResult[] = [];
+        const out: SearchResult[] = named(terms);
         for (let t = 0; t < EXT_TILES; t++) {
           const p = app.cachedBlock(t);
           const text = p ? probeText(p) : '';
@@ -708,32 +731,6 @@ export class Picker {
         }
         return out;
       },
-    };
-    // the named FG and BG tiles: one result per name, its preview the rectangle around the tiles when they are
-    // connected, else the first tile
-    const named: SearchProvider = {
-      id: 'names', label: 'Map16 tiles',
-      search: (terms) => (['fg', 'bg'] as NameKind[]).flatMap((kind) => {
-        const bg = kind === 'bg', layer = kind.toUpperCase();
-        return nameGroups(namesOf(app.rom, kind)).filter((g) => matchesAll(g.name.toLowerCase(), terms)).map((g): SearchResult => {
-          const nums = tileRanges(g.tiles);
-          return {
-            label: layer, name: g.name, detail: nums,
-            title: `${layer} tile${g.tiles.length > 1 ? 's' : ''} ${nums}: ${g.name}`,
-            thumb: () => {
-              const r = connectedRect(g.tiles) ?? { first: g.tiles[0], w: 1, h: 1 };
-              const sheet = renderMap16Sheet(app, bg, r.first & ~15, r.h * 16);
-              const c = h('canvas', { width: r.w * 16, height: r.h * 16 });
-              c.getContext('2d')!.drawImage(sheet, (r.first & 15) * 16, 0, r.w * 16, r.h * 16, 0, 0, r.w * 16, r.h * 16);
-              const z = Math.min(1.5, 32 / (r.w * 16), 24 / (r.h * 16));
-              c.style.width = `${r.w * 16 * z}px`;
-              c.style.height = `${r.h * 16 * z}px`;
-              return c;
-            },
-            pick: () => this.chooseNamed(g.name, g.tiles, bg),
-          };
-        });
-      }),
     };
     // the Objects tab in one group, in its order: Prefabs, Resizable, Fixed size, Custom; the section is named
     // after the number (and found by its name)
@@ -763,8 +760,8 @@ export class Picker {
         pick: () => this.choose('spr', e.item),
       })),
     };
-    // in the order of the picker: Objects, Map16 (by number, by name), Sprites
-    return [objects, map16, named, sprites];
+    // in the order of the picker: Objects, Map16, Sprites
+    return [objects, map16, sprites];
   }
 
   // the sheet of the current tab or brush mode fills the picker's width (layer 3's 8x8 tiles: half as wide as
