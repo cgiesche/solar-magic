@@ -43,6 +43,11 @@ const box = (x: number, y = 0x10): LevelSprite => ({ uid: newUid(), num: 0xb9, x
   check(b9.map(opens).join(',') === '1,2', `105's message boxes open message 1 and 2 (at ${b9.map((s) => `${hx(s.x)}/${hx(s.y)}`).join(', ')})`);
   check(messageProblems(rom, 0x29, here, messageLevels(graph, 0x29).slice(1).map(level), opens).length === 0, 'vanilla 105: no problems');
 }
+// vanilla 12A (vertical): its message box opens message 2, as in the game
+{
+  const b9 = level(0x12a).sprites.filter((s) => s.num === 0xb9);
+  check(b9.map(opens).join(',') === '2', `12A's message box opens message 2 (at ${b9.map((s) => `${hx(s.x)}/${hx(s.y)}`).join(', ')})`);
+}
 
 // translevel 13 (a Star World message): only message 1 has text
 const STAR = 0x13;

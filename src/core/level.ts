@@ -487,13 +487,13 @@ export function parseSprites(data: Uint8Array, start: number, vertical: boolean,
     }
     const b0 = data[p], b1 = data[p + 1], b2 = data[p + 2];
     const screen = (b1 & 0x0f) | ((b0 & 2) << 3);
-    const lo = b0 >> 4; // y within screen (or tile row)
+    const lo = b0 >> 4; // y within screen (x in a vertical level)
     const hi = b0 & 1;
-    const col = b1 >> 4;
+    const col = b1 >> 4; // x within screen (y in a vertical level)
     let x: number, y: number;
     if (vertical) {
-      y = screen * 16 + lo;
-      x = hi * 16 + col;
+      y = screen * 16 + col;
+      x = hi * 16 + lo;
     } else {
       x = screen * 16 + col;
       y = sub * SUBSCREEN_ROWS + hi * 16 + lo;
@@ -525,7 +525,7 @@ export function serializeSprites(sprites: LevelSprite[], header: number, vertica
     }
     let screen: number, lo: number, hi: number, col: number;
     if (vertical) {
-      screen = s.y >> 4; lo = s.y & 15; hi = (s.x >> 4) & 1; col = s.x & 15;
+      screen = s.y >> 4; col = s.y & 15; hi = (s.x >> 4) & 1; lo = s.x & 15;
     } else {
       screen = s.x >> 4; col = s.x & 15; hi = (s.y >> 4) & 1; lo = s.y & 15;
     }
