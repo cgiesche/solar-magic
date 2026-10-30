@@ -18,6 +18,7 @@ export interface Problem {
   text: string;
   title?: string; // longer explanation
   where?: ProblemPlace;
+  message?: { translevel: number; msg: number }; // the message it is about (msg 1 or 2)
   fix?: { label: string; run: () => void };
 }
 

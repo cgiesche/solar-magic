@@ -150,9 +150,10 @@ export function probeAt(p: ColumnProbe, x: number): PosProbe {
   return p.pos[x & 15];
 }
 
-// the message box small Mario hitting the sprite at tile (x, y) from below opens, 0 none
+// the message box the sprite at tile (x, y) opens when hit from below or jumped on (a switch palace's switch), 0 none
 export function spriteMessage(p: SpriteProbe, x: number, y: number): number {
-  return spriteProbeAt(p, x, y).small.message ?? 0;
+  const q = spriteProbeAt(p, x, y);
+  return q.small.message ?? q.big.message ?? q.stomp?.message ?? 0;
 }
 
 // sprites spawned, small Mario's first
@@ -321,9 +322,10 @@ export class BlockProber {
       let variants = this.spriteVariants(num), pos = variants.reps.map(at);
       // a message box: which message it opens may depend on where it is, not on its tables (the game's reads its
       // X position when hit) – the X positions split by the message hitting it there opens
-      if (pos.some((q) => q.small.message)) {
+      const how = pos.some((q) => q.small.message) ? 'below' : pos.some((q) => q.stomp?.message) ? 'stomp' : null;
+      if (how) {
         const y = variants.reps[0].y;
-        const msgs = Array.from({ length: 16 }, (_, x) => this.spriteEffect(num, 0, x, y, 'below').message ?? 0);
+        const msgs = Array.from({ length: 16 }, (_, x) => this.spriteEffect(num, 0, x, y, how).message ?? 0);
         const split = splitX(variants, msgs);
         if (split.nx !== variants.nx) { variants = split; pos = variants.reps.map(at); }
       }
