@@ -5,9 +5,10 @@
 // A 64x32 tilemap holds 32 of the 54 tile rows of a horizontal level. All 54 rows of both layers are
 // kept in a RAM shadow ($7F0000, filled right after the game builds a column); the tilemap holds a
 // window of 32 rows around the camera and rows are copied in from the shadow as the camera moves
-// vertically. Vertical levels already stream rows: there only the look-ahead shrinks from 8 to 1 block
-// (the tilemap holds 16 block rows) and addresses are mapped. Single tile changes (stripes) go to the
-// shadow and, inside the window, to VRAM. Everything else (overworld, title, credits) is unchanged:
+// vertically. Vertical levels already stream rows: there the rows built are the camera's and 14 below
+// it instead of 8 above / 23 below (the tilemap holds 16 block rows) and addresses are mapped. Single
+// tile changes (stripes) go to the shadow and, inside the window, to VRAM (in a vertical level: only on
+// the camera's rows). Everything else (overworld, title, credits) is unchanged:
 // the layout is only switched on by the level load (game mode $12), not in boss/mode 7 rooms.
 //
 // A horizontal level taller than the game's 27 rows (levelheight.ts: its height in $13D7, its screens'
@@ -107,14 +108,17 @@ org $0586F7   ; SEP #$20 : LDA $5B
 org $058A3A   ; SEP #$10 : LDY #$0D
   JSL TallColumn
 
-; level load loop: vertical layers start 31 rows before the last one
+; level load loop: vertical layers start 31 rows before the last one (32 rows, the last 16 stay: c-1..c+14)
 org $0580B0
   JSL LoadStart1
 org $0580B4
   JSL LoadStart2
 
-; vertical layers: build 1 block above / 15 below the camera instead of 8 / 23. The tilemap holds 16
-; block rows: the two edge rows share a slot, but only one of them can be on screen (rows c..c+14)
+; vertical layers: build the camera's block row c / 14 below it instead of 8 above / 23 below. The tilemap
+; holds 16 block rows and the screen shows c..c+14: the game builds an edge row only when the camera enters
+; a block row (or turns), so each must be the row that comes into view there – going up row c itself, going
+; down c+14 (on screen from the next pixel on). Built further out (c-1 / c+15, one slot), a camera stopped at
+; a block row and then going up showed c-1 with the tiles of c+15 (12A's bottom)
 org $0587D4
   JSL VTop
 org $0587DB
@@ -147,12 +151,12 @@ SetSC:
 VTop:
   PHA
   LDA.l !Act : AND #$00FF : BEQ +
-  PLA : SEC : SBC #$0001 : RTL
+  PLA : RTL
 + PLA : SEC : SBC #$0008 : RTL
 VBot:
   PHA
   LDA.l !Act : AND #$00FF : BEQ +
-  PLA : CLC : ADC #$000F : RTL
+  PLA : CLC : ADC #$000E : RTL
 + PLA : CLC : ADC #$0017 : RTL
 
 LoadStart1:
@@ -683,9 +687,10 @@ PutWord:
   LDA #$3000 : STA.l !TB
   LDA.l !Win1 : AND #$00FF : STA.l !TC
   LDX #$0000                                     ; shadow of layer 1
-  BRA .horz
+  JMP .horz
 .v1
-  LDA #$3000 : BRA .vert
+  LDA #$3000 : STA.l !TB
+  LDA $1C : BRA .vert
 .l2
   AND #$0FFF : STA.l !TA
   SEP #$20 : LDA $5B : AND #$02 : REP #$20 : BNE .v2
@@ -694,10 +699,16 @@ PutWord:
   LDX #$1B00                                     ; shadow of layer 2
   BRA .horz
 .v2
-  LDA #$3800
-.vert                                            ; vertical layer: rows modulo 32
-  STA.l !TB
-  LDA.l !TA : AND #$07FF : ORA.l !TB
+  LDA #$3800 : STA.l !TB
+  LDA $20
+.vert                                            ; vertical layer (A = its camera Y): rows modulo 32, only
+  LSR #4 : STA.l !TD                             ; the camera's block rows c..c+14 (the slot of any other
+  LDA.l !TA : LSR #6 : AND #$000F : STA.l !TE    ; may be one on screen; it is built when it comes into view)
+  LDA.l !TA : AND #$0800 : BEQ +
+  LDA.l !TE : ORA #$0010 : STA.l !TE
++ LDA.l !TE : SEC : SBC.l !TD : AND #$001F : CMP #$000F : BCC +
+  JMP .r
++ LDA.l !TA : AND #$07FF : ORA.l !TB
   JMP .vram
 .horz
   ; row y = (a >> 5 & 31) + (a & $800 ? 32 : 0), column byte offset = (a & 31) * 2 + (a & $400 ? 64 : 0)
