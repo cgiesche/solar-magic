@@ -74,9 +74,11 @@ const saveSlot = new SaveSlot<SnesState>();
 
 // at: Mario's start tile (his feet stand in it) instead of the main entrance, with the camera start, options
 // (face left, water) and action of the entrance played from (a secondary entrance's; else the main entrance's
-// without an action); fromSave: from the savestate instead of the level start (when there is a usable one)
+// without an action); fromSave: from the savestate instead of the level start (when there is a usable one); show:
+// a message box open once the level runs (messages.ts messageToShow; yoshi: Mario brings Yoshi along)
 type Start = { tx: number; ty: number; entrance?: StartEntrance };
-export function openTestPlay(app: App, at?: Start, fromSave = false): void {
+type ShowMessage = { message: number; yoshi: boolean };
+export function openTestPlay(app: App, at?: Start, fromSave = false, show?: ShowMessage): void {
   // saved first: the game loads the level from the ROM again when Mario dies and enters it again
   if (app.dirty) app.saveLevel(true);
   // the game plays its own music
@@ -84,13 +86,13 @@ export function openTestPlay(app: App, at?: Start, fromSave = false): void {
   // the sound emulator loads once; the audio context must start within the key press or click
   const audio = new AudioOut(AUDIO_LEAD);
   if (!apuReady()) {
-    loadApu().then(() => start(app, at, audio, fromSave), () => start(app, at, audio, fromSave));
+    loadApu().then(() => start(app, at, audio, fromSave, show), () => start(app, at, audio, fromSave, show));
     return;
   }
-  start(app, at, audio, fromSave);
+  start(app, at, audio, fromSave, show);
 }
 
-function start(app: App, at: Start | undefined, audio: AudioOut, fromSave: boolean): void {
+function start(app: App, at: Start | undefined, audio: AudioOut, fromSave: boolean, show?: ShowMessage): void {
   if (!testEmu || testEmu.rom !== app.rom) {
     testEmu = new LevelEmulator(app.rom);
     if (apuReady()) testEmu.snes.apu = new Apu();
@@ -99,7 +101,7 @@ function start(app: App, at: Start | undefined, audio: AudioOut, fromSave: boole
   const emu = testEmu;
   const lv = app.level;
   const saved = fromSave ? saveSlot.get(app.rom, lv.number, app.dirty) : null;
-  const p = saved ? PlaySession.resume(emu) : loadLevel(app, emu, at);
+  const p = saved ? PlaySession.resume(emu) : loadLevel(app, emu, at, show);
   const ppu = p.picture();
   // with the PPU attached: the picture on screen is part of the state
   if (saved) p.load(saved);
@@ -107,7 +109,7 @@ function start(app: App, at: Start | undefined, audio: AudioOut, fromSave: boole
 }
 
 // loads the level in a game in progress, Mario at the start position
-function loadLevel(app: App, emu: LevelEmulator, at: Start | undefined): PlaySession {
+function loadLevel(app: App, emu: LevelEmulator, at: Start | undefined, show?: ShowMessage): PlaySession {
   const lv = app.level;
   const ov = app.buildOverrides();
   // the start position: the nearest main entrance setting loads the level around it (camera, tilemap; FG and
@@ -123,7 +125,8 @@ function loadLevel(app: App, emu: LevelEmulator, at: Start | undefined): PlaySes
   }
   // a game in progress (lives, overworld with Mario on the level's tile, entered from there so that the
   // midway point counts): dying returns there
-  const p = PlaySession.start(emu, lv.number, { ov, game: {} });
+  const p = PlaySession.start(emu, lv.number, { ov, game: { setup: show?.yoshi ? (w) => { w[RAM.yoshiCarried] = 1; } : undefined } });
+  if (show && p.ready) p.wram[RAM.message] = show.message;
   if (start && p.ready) {
     const w = p.wram;
     if (move) setMarioPos(w, marioX(w) + move.x, marioY(w) + move.y);

@@ -361,15 +361,22 @@ canvas.sheet-fill { width: 100%; height: auto; image-rendering: auto; }
 .meter-events { max-height: 120px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
 .meter-event { display: flex; align-items: center; gap: 6px; justify-content: space-between; }
 .meter-event button { padding: 0 6px; font-size: 11px; }
-.msg-editor { display: flex; gap: 14px; }
-.msg-list { width: 220px; max-height: 60vh; align-self: flex-start; overflow-y: auto; border: 1px solid var(--border); font-size: 12px; }
-.msg-list .level-item { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.msg-list .level-item.used { color: var(--accent); }
-.msg-detail { display: flex; flex-direction: column; gap: 8px; width: 330px; }
-.msg-preview { width: 328px; image-rendering: pixelated; border: 1px solid var(--border); }
-.msg-lines { display: flex; flex-direction: column; gap: 3px; }
-.msg-line { font-family: ui-monospace, monospace; }
-.msg-line.invalid { outline: 1px solid var(--danger); }
+.msg-panel { flex: 1 1 auto; overflow-y: auto; }
+.msg-close { padding: 0 7px; }
+.msg-tabs { flex-wrap: wrap; }
+/* the game's box, typed into: a transparent text area over it catches the keys */
+.msg-box { position: relative; margin-right: 26px; }
+.msg-canvas { display: block; width: 100%; image-rendering: pixelated; border: 1px solid var(--border); }
+.msg-box:focus-within .msg-canvas { border-color: var(--accent); }
+.msg-input { position: absolute; inset: 0; width: 100%; height: 100%; padding: 0; border: 0; opacity: 0; resize: none; cursor: text; }
+.msg-left { position: absolute; right: -24px; width: 20px; display: flex; align-items: center; justify-content: flex-end; font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.msg-left.full { color: var(--accent); }
+.msg-note { min-height: 1em; }
+.msg-note button { padding: 0 6px; font-size: 11px; }
+.msg-actions { flex-wrap: wrap; }
+.msg-font { display: block; width: 100%; image-rendering: pixelated; cursor: pointer; border: 1px solid var(--border); }
+.msg-hover { position: fixed; left: 0; top: 0; z-index: 1100; display: flex; flex-direction: column; gap: 4px; padding: 6px; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; box-shadow: 0 4px 16px rgba(0, 0, 0, .5); pointer-events: none; }
+.msg-hover canvas { width: 320px; image-rendering: pixelated; }
 .hint.error { color: var(--danger); min-height: 1em; }
 .patch-manager { width: 640px; max-width: 100%; }
 .patch-list { display: flex; flex-direction: column; gap: 6px; margin: 8px 0 12px; }

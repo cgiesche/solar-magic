@@ -26,7 +26,7 @@ import { openResources } from './ui/resources.ts';
 import { OverworldView } from './ui/overworld.ts';
 import { openTestPlay } from './ui/testplay.ts';
 import { musicPlayer, LEVEL_MUSIC } from './ui/musicplayer.ts';
-import { openMessagesDialog } from './ui/messagedialog.ts';
+import { MessagePanel, levelMessages } from './ui/messagepanel.ts';
 import { map16Tile } from './core/ram.ts';
 import { NavHistory, fromHash, type NavLoc } from './ui/navhistory.ts';
 import { initLanding } from './ui/landing.ts';
@@ -125,6 +125,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   const picker = new Picker(app);
   const props = new Properties(app);
   app.on('properties', () => {
+    if (app.messages) app.closeMessages();
     props.root.scrollIntoView({ block: 'nearest' });
     props.root.querySelector<HTMLElement>('input, select, textarea, button')?.focus();
   });
@@ -189,7 +190,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
       { label: 'Import LM level file …', title: 'A Lunar Magic level file (.mwl, or a .zip with one): its background, Map16 tiles, graphics slots and colors into this level', onClick: () => void openLevelImport(app) },
       'sep',
       { label: 'Secondary entrances …', onClick: () => openEntrancesDialog(app) },
-      { label: 'Message boxes …', title: 'The level\'s two messages (those of its overworld level) and Yoshi\'s thank-you', onClick: () => openMessagesDialog(app) },
+      { label: 'Message boxes', title: 'Edit the level\'s two messages (those of its overworld level) and Yoshi\'s thank-you beside the level (also: double click a message box)', onClick: () => app.openMessages(levelMessages(app), 1) },
     ] },
     { label: 'ROM', items: [
       { label: 'ROM information …', onClick: () => openRomInfo(app) },
@@ -323,6 +324,14 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   };
 
   app.gotoOverworldTile = async (i) => { if (await setWorkspace('ow')) ow!.showTile(i); };
+
+  // the message panel takes the picker's place while it is open
+  const messagePanel = new MessagePanel(app);
+  app.on('messages', () => {
+    if (!app.messages) { right.replaceChildren(picker.root, props.root); return; }
+    if (workspace !== 'level') void setWorkspace('level');
+    if (messagePanel.root.parentElement !== right) { right.replaceChildren(messagePanel.root); messagePanel.focus(); }
+  });
 
   // ---- browser back/forward through the places (navhistory.ts)
   let nav: NavHistory | null = null;

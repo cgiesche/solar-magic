@@ -6,6 +6,22 @@ import { h, clear } from './dom.ts';
 import { closeMenus } from './menu.ts';
 import { exitProblems, levelProblems, scanProblems, sortProblems, type Problem, type ProblemPlace } from '../core/problems.ts';
 import { incompleteSprites, spriteMemDialog, spriteMemText, SPRITE_MEM_HELP } from './spritemem.ts';
+import { messageLevels, messageProblems, type MessageLevel } from '../core/messageuse.ts';
+import { loadLevel } from '../core/level.ts';
+import { levelMessages, spriteOpens } from './messagepanel.ts';
+
+// the sprites of the other levels showing the open level's messages, read again after a ROM change
+let sharing: { key: string; levels: MessageLevel[] } | null = null;
+function sharingLevels(app: App, tl: number): MessageLevel[] {
+  const key = `${app.rom.gen}:${tl}:${app.level.number}`;
+  if (sharing?.key !== key) {
+    const levels = messageLevels(app.entrances.graph(), tl).filter((n) => n !== app.level.number).flatMap((n) => {
+      try { return [{ number: n, sprites: loadLevel(app.rom, n).sprites }]; } catch { return []; }
+    });
+    sharing = { key, levels };
+  }
+  return sharing.levels;
+}
 
 // everything known about the current level; reveal: shows sprites (selects them in sprite mode)
 export function collectProblems(app: App, reveal: (uids: number[]) => void): Problem[] {
@@ -13,6 +29,8 @@ export function collectProblems(app: App, reveal: (uids: number[]) => void): Pro
   const out = [...levelProblems(app.level, app.vertical), ...exitProblems(app.rom, app.level, app.entrances.graph(), (s) => app.enterableOn(s))];
   const sc = app.levelScan;
   if (sc && sc.level === app.level.number) out.push(...scanProblems(app.level, sc.result, sc.uids));
+  const tl = levelMessages(app);
+  out.push(...messageProblems(app.rom, tl, app.level, sharingLevels(app, tl), (s) => spriteOpens(app, s)));
   const inc = incompleteSprites(app);
   if (inc.length) {
     out.push({ key: 'sprite-mem', severity: 'warn', text: `${spriteMemText(inc.length)}: not enough sprite memory`, title: SPRITE_MEM_HELP,
@@ -41,7 +59,7 @@ export function problemsButton(app: App, reveal: (uids: number[]) => void): HTML
     for (const p of list) {
       const row = h('div', { class: `problem problem-${p.severity}`, title: p.title ?? '' },
         h('span', { class: 'problem-icon' }, ICON[p.severity]),
-        h('button', { class: 'problem-text', disabled: !p.where, onclick: () => p.where && show(p.where) }, p.text),
+        h('button', { class: 'problem-text', disabled: !p.where && !p.message, onclick: () => { if (p.where) show(p.where); if (p.message) app.openMessages(p.message.translevel, p.message.msg); } }, p.text),
         p.fix ? h('button', { class: 'problem-fix', onclick: () => { close(); p.fix!.run(); } }, p.fix.label) : null);
       pop.append(row);
     }

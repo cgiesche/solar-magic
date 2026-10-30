@@ -18,6 +18,7 @@ import { isPlacedPrefab, openSavePrefab } from './panels.ts';
 import { openInsertDialog, openScreenDialog } from './tools.ts';
 import { incompleteSprites } from './spritemem.ts';
 import { problemsButton } from './problems.ts';
+import { spriteOpens, messageOfBox, messageLabel, showMessageHover, hideMessageHover } from './messagepanel.ts';
 import { map16Tile } from '../core/ram.ts';
 import { GAME_VIEW_W, GAME_VIEW_H, MARIO_W, MARIO_H, type CameraBands } from '../core/camerabands.ts';
 import { gameViewAt } from '../core/camerareach.ts';
@@ -98,7 +99,15 @@ export class LevelView {
     window.addEventListener('mouseup', (e) => this.onUp(e));
     this.scroller.addEventListener('contextmenu', (e) => e.preventDefault());
     attachPanZoom(this.scroller, () => this.app.zoom, (z, ax, ay) => this.setZoom(z, { ax, ay }));
-    this.scroller.addEventListener('mouseleave', () => { this.hover = null; this.idleStatus(); this.paint(); });
+    this.scroller.addEventListener('mouseleave', () => { this.hover = null; this.idleStatus(); this.paint(); hideMessageHover(); });
+    // a message box sprite: the panel on the message it opens
+    this.scroller.addEventListener('dblclick', (e) => {
+      const s = this.messageSpriteAt(e), m = s ? spriteOpens(app, s) : 0;
+      if (!m) return;
+      const t = messageOfBox(app, m);
+      hideMessageHover();
+      app.openMessages(t.translevel, t.msg);
+    });
     app.on('render', () => { this.updateLevelImage(); this.updateStats(); });
     app.on('anim-frame', () => { this.updateLevelImage(false); });
     app.on('change', () => { this.paint(); this.updateStats(); });
@@ -192,6 +201,19 @@ export class LevelView {
   // the largest brush picked from the level
   brushMax(): { w: number; h: number } {
     return this.app.mode === 'l3' ? { w: 32, h: 32 } : { w: 32, h: 27 };
+  }
+
+  // the sprite under the mouse, when it is one
+  messageSpriteAt(e: MouseEvent): LevelSprite | null {
+    const { px, py } = this.tileFromEvent(e);
+    return (this.app.hitsAt(px, py).find((x) => x.mode === 'spr')?.item as LevelSprite | undefined) ?? null;
+  }
+  // a message box sprite under the mouse: the message it opens beside it
+  hoverMessage(e: MouseEvent): void {
+    const s = this.drag || e.buttons ? null : this.messageSpriteAt(e), m = s ? spriteOpens(this.app, s) : 0;
+    if (!m) { hideMessageHover(); return; }
+    const t = messageOfBox(this.app, m);
+    showMessageHover(this.app, e, t.translevel, t.msg, `Opens ${messageLabel(t.translevel, t.msg).replace(/^M/, 'm')}`);
   }
 
   tileFromEvent(e: MouseEvent): { tx: number; ty: number; px: number; py: number } {
@@ -1101,6 +1123,7 @@ export class LevelView {
       }
       // (every pixel: the resize handles are narrower than a tile; middle button: panning sets its own cursor)
       if (!(e.buttons & 4)) this.updateCursor(px, py, top);
+      this.hoverMessage(e);
     }
     const d = this.drag;
     if (!d) return;

@@ -113,7 +113,8 @@ export type AppEvent =
   | 'busy' // background work (setBusy), a modal or the music player changed
   | 'open-gfx' // the graphics workspace opens on App.wsGfx
   | 'open-map16' // the graphics workspace opens on the Map16 tab
-  | 'import-gfx'; // the graphics workspace imports App.gfxImport
+  | 'import-gfx' // the graphics workspace imports App.gfxImport
+  | 'messages'; // the message panel opens on App.messages (null: it closes)
 
 // the hint to save a paste as prefab (pastehint.ts): the paste's objects as placed in level, layer
 export type PasteHintAt = PasteHint & { level: number; layer: 'l1' | 'l2'; objects: LevelObject[] };
@@ -642,6 +643,17 @@ export class App {
 
   // set by the host: shows the overworld with layer 1 tile i (l1Index) selected
   gotoOverworldTile: (i: number) => void = () => {};
+
+  // the message the message panel shows (msg 1 or 2 of a translevel), null while it is closed
+  messages: { translevel: number; msg: number } | null = null;
+  openMessages(translevel: number, msg: number): void {
+    this.messages = { translevel, msg };
+    this.emit('messages');
+  }
+  closeMessages(): void {
+    this.messages = null;
+    this.emit('messages');
+  }
 
   // opens a level and chooses the screen of one of its exits
   gotoExit(level: number, screen: number): void {

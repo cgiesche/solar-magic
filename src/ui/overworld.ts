@@ -10,7 +10,6 @@ import {
   readRevealList, writeRevealList, destroyEffects, destroySettingAt, destroyEvent, setDestroyEvent, readDestroyList, freeTranslevel, levelTilesOf,
 } from '../core/overworld.ts';
 import { hasMessages, isBlank, readMessage } from '../core/messages.ts';
-import { openMessagesDialog } from './messagedialog.ts';
 import {
   readEvents, writeEvents, applyEvents, paintEvent, reorderSteps, eventRunners, eventTitle, submapViews, eventPlace, submapOf, pieceTiles, isBig, l2XY,
   paintEventL1, layer1Without, eventL1Tiles, exitChanges, type EventData, type EventRunner, type Rect, type ExitChanges,
@@ -1053,7 +1052,7 @@ export class OverworldView {
       ...this.levelSettings(tl),
       ...this.exitResultRows(tl),
       h('div', { class: 'prop' }, h('label', null, 'Message boxes'), h('span', null, msgs.length ? msgs.map((n) => `message ${n}`).join(', ') : 'none'),
-        h('button', { onclick: () => openMessagesDialog(this.app, tl), title: 'Edit the level\'s two messages' }, 'Edit …')),
+        h('button', { onclick: () => { this.onOpenLevel(lvl); this.app.openMessages(tl, 1); }, title: 'Edit the level\'s two messages beside the level' }, 'Edit …')),
       h('div', { class: 'row' },
         h('button', { onclick: () => this.onOpenLevel(lvl), title: 'Open in the level editor (also by double click in the list)' }, `Edit level ${hex(lvl, 3)}`),
         !isNameless(code) || code === 0xffff || ev !== NO_EVENT || msgs.length || exitDirections(rom, tl).some((d) => d) || initialFlags(rom, tl)

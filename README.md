@@ -119,9 +119,14 @@ When a level is displayed, it runs the ROM's **original loading routines** (~15 
   **Auto-correction:** if a sprite edit makes other sprites incomplete, the editor adjusts the value itself.
   This is part of the same undo step. A value chosen by hand in the header dialog stays as long as no new
   overlaps arise.
-* **Message boxes** (*Level → Message boxes*, or *Edit …* at a level tile on the overworld): every level has two messages
-  (those of its translevel, as in Lunar Magic), edited with a preview in the game's font, and Yoshi's thank-you
-  (message 3). The clean game's messages move to the levels that showed them; a level without text shows an empty box.
+* **Message boxes** (*Level → Message boxes*, a double click on a message box sprite, or *Edit …* at a level tile on the
+  overworld): every level has two messages (those of its translevel, as in Lunar Magic, shared with its sub-levels) and
+  Yoshi's thank-you (message 3), edited in a panel beside the level. You type into the game's 18×8 box itself, drawn in the
+  ROM's own font: Enter starts a line, Backspace at a line's start joins it to the line above, text never leaves the box;
+  pasted text wraps (optionally justified like the game's texts), a character picker shows the font's glyphs, characters
+  the font lacks get a look-alike. Hovering a message box sprite shows the message it opens – which one is learned by
+  hitting it in the emulator. *Show in game* plays the level with the box open. The problem list reports boxes opening an
+  empty message and messages no box opens. The clean game's messages move to the levels that showed them.
 * **Test level (T):** play the level in the built-in emulator (a changed level is saved first, so entering it again after dying plays the same), with keyboard or gamepad, with music and sound effects (M mutes the sound). It is played in a game in progress, entered from its overworld tile (a sub-level through its main level), so the midway tape counts: dying returns to the overworld, entering the level again starts at the midway point once touched.
 
 ### Music
