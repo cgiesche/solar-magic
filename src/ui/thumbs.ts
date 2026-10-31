@@ -1,15 +1,15 @@
 // Object preview thumbnails, rendered by emulating a test level that contains the objects (learned in the
-// background by App.objectThumbs).
+// background by App.objectThumbs); and the placement preview's input, which follows the same graphics files.
 
 import type { Rom } from '../core/rom.ts';
-import type { LevelEmulator, LevelRender } from '../core/levelemu.ts';
+import type { LevelEmulator, LevelRender, LevelOverride } from '../core/levelemu.ts';
 import { type Level, type LevelObject, newUid } from '../core/level.ts';
 import { renderLevel, layerGeom } from '../core/render.ts';
 import { MAP_BASE, map16Tile } from '../core/ram.ts';
 import { objectVariant, type ObjKind } from '../core/objkinds.ts';
 import { levelSlots, layerSlots } from '../core/gfxslots.ts';
 import { gfxFilesHash } from '../core/gfxpages.ts';
-import { inputHash } from '../core/inputs.ts';
+import { inputHash, levelInput } from '../core/inputs.ts';
 import { effectLoad, ramEffect } from '../core/objeffects.ts';
 
 // extension: object 2D's bytes after its 3 where the ROM reads them (obj2d.ts), its custom number first
@@ -41,8 +41,17 @@ export function thumbsKey(level: Level, specs: ObjSpec[], keyOf: (s: ObjSpec) =>
 // the bytes read, see App.gfxSkipMask). Not its BG: they show layer 1; nor its size and mode: the test level
 // has its own.
 export function thumbsInput(rom: Rom, level: Level): unknown {
-  const files = layerSlots(levelSlots(rom, level.number, level.header)).map((s) => s.file);
-  return { level: level.number, header: { ...level.header, screens: 0, mode: 0 }, gfx: filesHash(rom, files) };
+  return { level: level.number, header: { ...level.header, screens: 0, mode: 0 }, gfx: layerFilesHash(rom, level) };
+}
+// what the placement preview (App.objectsPreview) depends on outside the ROM bytes it read: the level as edited
+// with the placed objects (ov: its load's overrides) and, as for thumbnails, the content of the graphics files its
+// layers draw from
+export function previewInput(rom: Rom, level: Level, ov: LevelOverride): unknown {
+  return { level: levelInput(level.number, ov), gfx: layerFilesHash(rom, level) };
+}
+// the content hash of the graphics files level's Map16 tiles draw from (its layer slots)
+function layerFilesHash(rom: Rom, level: Level): number {
+  return filesHash(rom, layerSlots(levelSlots(rom, level.number, level.header)).map((s) => s.file));
 }
 // (once per ROM state and files)
 const filesMemo = { rom: null as Rom | null, gen: -1, files: '', hash: 0 };

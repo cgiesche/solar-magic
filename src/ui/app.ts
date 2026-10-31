@@ -51,7 +51,7 @@ import type { ProbeReply } from '../core/probehost.ts';
 import { ProbeClient } from '../core/probeclient.ts';
 import { ResultLearner } from '../core/learner.ts';
 import type { RomReads } from '../core/romdeps.ts';
-import { objectThumbsJob, thumbCanvas, thumbsKey, thumbsInput, objKey, type ObjSpec, type ObjThumb } from './thumbs.ts';
+import { objectThumbsJob, thumbCanvas, thumbsKey, thumbsInput, previewInput, objKey, type ObjSpec, type ObjThumb } from './thumbs.ts';
 import { levelInput, inputHash } from '../core/inputs.ts';
 import { map16Tile, bgTile } from '../core/ram.ts';
 import { exanimTiles, exanimColors, exanimPeriod, readLevelList, readGlobalList } from '../core/exanim.ts';
@@ -1921,7 +1921,7 @@ export class App {
       const tiles = new Set<number>();
       for (const k of keys) for (const off of r.touched.get(k) ?? []) if (map[off] >= 0) tiles.add(map[off]);
       return renderLayerTiles(rom, r, g, l2, [...tiles]);
-    }, { input: inputHash(this.levelInput(ov)), lane: 'placement', replace: true, keep: 'memory', done: this.previewLearned });
+    }, { input: inputHash(previewInput(rom, lv, ov)), lane: 'placement', replace: true, keep: 'memory', done: this.previewLearned });
     const part = pic && { x: pic.x0 * 16, y: pic.y0 * 16, img: thumbCanvas(pic) };
     this.previewMemo = { render: this.render, sig, part };
     return part;

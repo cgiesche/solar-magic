@@ -10,14 +10,16 @@ import { cameraAtKey } from '../src/core/camerareach.ts';
 import { emptyTriggerView } from '../src/core/extrigger.ts';
 import { assignSlot, levelSlots, layerSlots } from '../src/core/gfxslots.ts';
 import { gfxSkipMask } from '../src/core/gfxpages.ts';
-import { gfxEntry } from '../src/core/patches.ts';
+import { gfxEntry, GFX_FILES } from '../src/core/patches.ts';
 import { lz2Decompress } from '../src/core/lz2.ts';
+import { readGfx, writeGfx } from '../src/core/gfxfiles.ts';
 import { Rom, snesToPc } from '../src/core/rom.ts';
 import { ResultCache, RomFingerprint, RomReads, INPUTS_PER_KEY, type CacheEntry } from '../src/core/romdeps.ts';
 import { ResultLearner } from '../src/core/learner.ts';
 import { inputHash, levelInput } from '../src/core/inputs.ts';
 import { captureSprites } from '../src/core/spritegfx.ts';
-import { renderObjectThumbs, thumbsKey, thumbsInput, objKey, type ObjSpec } from '../src/ui/thumbs.ts';
+import { renderObjectThumbs, thumbsKey, thumbsInput, previewInput, objKey, type ObjSpec } from '../src/ui/thumbs.ts';
+import { layerGeom, renderLayerTiles } from '../src/core/render.ts';
 import { editorImage } from './fixture.ts';
 
 let fail = 0;
@@ -32,7 +34,7 @@ const learner = new ResultLearner({
   later: (_key, step) => steps.push(step), soon: (step) => steps.push(step), setBusy: () => {},
 });
 const drain = async () => { for (let i = 0; i < 1000; i++) { await new Promise((r) => setTimeout(r, 0)); while (steps.length) steps.shift()!(); } };
-const ovOf = (lv: Level): LevelOverride => ({ layer1: serializeLayer1(rom, lv), secondaryHeader: encodeSecondaryHeader(lv.secondary), layer2Pointer: lv.layer2Pointer });
+const ovOf = (lv: Level, r = rom): LevelOverride => ({ layer1: serializeLayer1(r, lv), secondaryHeader: encodeSecondaryHeader(lv.secondary), layer2Pointer: lv.layer2Pointer });
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
 // layer 2 motions (App.layer2Motions): an unsaved entrance action changes what the scroll settings do
@@ -85,6 +87,46 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
   check(inputHash(thumbsInput(r, lv)) !== before, 'thumbnails: the graphics files\' content is in their input');
   const bg = { ...structuredClone(lv), layer2Pointer: loadLevel(r, 0x106).layer2Pointer };
   check(thumbs(bg) === thumbs(lv), 'thumbnails: the BG doesn\'t change them (not a gap)');
+}
+
+// placement preview (App.objectsPreview): drawn by the level's load with the placed objects added; pixels drawn
+// in the graphics files the level uses show in the next preview (the files' data isn't among the bytes read, their
+// content is in its input), those drawn in a file it doesn't use keep the preview
+{
+  const r = new Rom(await editorImage()), e = new LevelEmulator(r);
+  e.skipMask = () => gfxSkipMask(r);
+  e.boot();
+  const queue: (() => void)[] = [];
+  const lr = new ResultLearner({
+    rom: r, results: new ResultCache(new RomFingerprint(r)), cacheReady: Promise.resolve(), main: e,
+    later: (_key, step) => queue.push(step), soon: (step) => queue.push(step), setBusy: () => {},
+  });
+  const run = async () => { for (let i = 0; i < 1000; i++) { await new Promise((res) => setTimeout(res, 0)); while (queue.length) queue.shift()!(); } };
+  const N = 0x105, saved = loadLevel(r, N);
+  const lv = { ...saved, objects: [...saved.objects, { ...saved.objects[0], x: 2, y: 20 }] }, ov = ovOf(lv, r);
+  const g = layerGeom(r, 0, lv.header.mode, lv.header.screens), tiles = Array.from({ length: 16 * 27 }, (_, i) => ((i >> 4) << 16) | (i & 15));
+  let runs = 0;
+  const key = `pp1:${N.toString(16)}:1`;
+  const preview = async () => {
+    const opts = { input: previewInput(r, lv, ov), lane: 'placement', replace: true, keep: 'memory' as const };
+    const job = function* (em: LevelEmulator) { runs++; const res = em.load(N, ov); return res.ok ? renderLayerTiles(r, res, g, false, tiles) : null; };
+    const pic = lr.learn(key, job, opts);
+    if (pic !== undefined) return pic;
+    await run();
+    return lr.learn(key, job, opts);
+  };
+  const a = await preview(), pixels = (p: typeof a) => p ? inputHash(p.px) : '';
+  const files = layerSlots(levelSlots(r, N, lv.header)).map((s) => s.file);
+  // pixels drawn in a file, as the graphics tab does (all of them: those of the tiles in the preview among them)
+  const draw = (file: number) => { const f = readGfx(r, file); f.pix = f.pix.map((p) => p ^ 1); writeGfx(r, f); };
+  for (const f of files) draw(f);
+  const b = await preview();
+  check(a !== null && b !== null && pixels(a) !== pixels(b), 'placement preview: pixels drawn in the graphics files the level uses show in the next one');
+  const before = runs, all = levelSlots(r, N, lv.header).map((s) => s.file);
+  const unused = Array.from({ length: GFX_FILES }, (_, i) => i).find((f) => !all.includes(f) && gfxEntry(r, f))!;
+  draw(unused);
+  const c = await preview();
+  check(c === b && runs === before, `placement preview: pixels drawn in GFX${unused.toString(16).padStart(2, '0')} (not the level's) keep it`);
 }
 
 // level scan and the camera at Mario (levelDataKey): an ExAnimation trigger of the view changes the scan
