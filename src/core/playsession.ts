@@ -100,10 +100,10 @@ export class PlaySession {
 
   // one frame with the buttons (PAD bits) held; the CPU's load of the frame (playlog.ts cpuLoad)
   frame(pad = 0): number {
-    const mode = this.s.wram[RAM.gameMode];
+    const modeBefore = this.s.wram[RAM.gameMode];
     this.s.joy1 = pad;
     this.s.runFrame();
-    return cpuLoad(this.s.busyLines, mode, this.s.wram[RAM.gameMode]);
+    return cpuLoad(this.s.busyLines, modeBefore, this.s.wram[RAM.gameMode]);
   }
 
   // up to n frames with the buttons held (or per frame), each called before a frame; ends early when Mario dies (he

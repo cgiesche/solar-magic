@@ -22,7 +22,7 @@ const MERGE = 64; // frames after a failure in which another of its kind belongs
 const LAG_MERGE = 30; // frames after a lag frame in which another belongs to the same event
 const MAX_EVENTS = 200;
 
-// The CPU's load in the frame that just ran from busy: scanlines from the NMI until the game waited for the next
+// The CPU's load in the frame that just ran, from busy: scanlines from the NMI until the game waited for the next
 // one (Snes.busyLines, -1: it never waited). LAG: the level's frame wasn't done before the next NMI (a lag frame,
 // the game slows down); the frames the game spends elsewhere (loading, fading) count as fully busy but are no
 // lag of the level. The load is measured up to the frame's NMI, the game mode read after the frame: it is the
