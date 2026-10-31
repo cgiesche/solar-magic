@@ -17,7 +17,7 @@ import { parsePrimaryHeader, L1_PTRS, type PrimaryHeader } from '../../core/leve
 import type { LevelRender } from '../../core/levelemu.ts';
 import { ColorSources } from '../../core/colorsources.ts';
 import { animLinks, colorAnimsAt } from './animtab.ts';
-import { BACK_AREA, BG_PALS, FG_PALS, SPR_PALS, tableOf, tableName, type TableKind } from '../../core/sharedpal.ts';
+import { BACK_AREA, BG_PALS, FG_PALS, SPR_PALS, tableOf, tableName, usesTable, type TableKind } from '../../core/sharedpal.ts';
 
 type Kind = TableKind | 'own' | 'none';
 interface Origin { kind: Kind; num: number }
@@ -155,12 +155,9 @@ export class PaletteTab implements WsPanel {
 
   // levels a change of the color affects (null: just this one)
   affected(i: number): number[] | null {
-    const o = this.origin(i);
-    if (o.kind === 'own' || o.kind === 'none') return null;
-    const all = [...this.levelHeaders().entries()];
-    const key: Partial<Record<Kind, keyof PrimaryHeader>> = { back: 'backAreaColor', bg: 'bgPalette', fg: 'fgPalette', spr: 'spritePalette' };
-    const k = key[o.kind];
-    return all.filter(([, hd]) => !k || hd[k] === o.num).map(([n]) => n);
+    const { kind, num } = this.origin(i);
+    if (kind === 'own' || kind === 'none') return null;
+    return [...this.levelHeaders()].filter(([, hd]) => usesTable(hd, { kind, num })).map(([n]) => n);
   }
 
   // ---------- editing ----------

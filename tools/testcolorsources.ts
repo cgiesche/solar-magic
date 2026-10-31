@@ -1,12 +1,13 @@
 // Where the level's colors are loaded from (colorsources.ts, the palette tab): traced again only when that may have
 // changed. Changing a color (shared or the level's own) keeps the trace; another palette in the level's header, or the
-// level's own palette set or removed, traces again; the sources are those of a plain load with source tracking.
+// level's own palette set or removed, traces again; the sources are those of a plain load with source tracking. A traced
+// shared color (in FastROM's banks) is told by its table: the header's palette, used by the levels choosing it.
 import { Rom, pcToSnes, snesToPc } from '../src/core/rom.ts';
 import { LevelEmulator, type LevelOverride } from '../src/core/levelemu.ts';
 import { loadLevel, type Level } from '../src/core/level.ts';
 import { levelOverride } from '../src/core/levelusage.ts';
 import { setCustomPalette, customPalette, PALETTE_SIZE } from '../src/core/patches.ts';
-import { SHARED_PALETTES, SHARED_PAL_SIZE, tableOf } from '../src/core/sharedpal.ts';
+import { SHARED_PALETTES, SHARED_PAL_SIZE, tableOf, tableName, usesTable } from '../src/core/sharedpal.ts';
 import { ColorSources } from '../src/core/colorsources.ts';
 import { editorImage } from './fixture.ts';
 
@@ -29,8 +30,19 @@ const first = sources.trace(LEVEL, ov());
 check(sources.traces === 1, 'first trace: a load');
 check(same(first.cgramSrc, plain(ov())), 'the sources are those of a plain load with source tracking');
 const shared = [...new Set(offsets(first.cgramSrc).filter((o) => o >= SHARED && o < SHARED + SHARED_PAL_SIZE))].map(pcToSnes);
-const fg = shared.find((a) => tableOf(SHARED_PALETTES + snesToPc(a) - SHARED).kind === 'fg');
-check(fg !== undefined, 'level 105 loads colors of its FG palette');
+const fg = shared.find((a) => tableOf(a).kind === 'fg');
+check(fg !== undefined && fg >= 0x800000, 'level 105 loads colors of its FG palette (traced in the FastROM banks)');
+
+// the tables of the traced shared colors: those of the header's palettes, a change of one affecting the levels using it
+{
+  const hd = lv.header, o = tableOf(fg!);
+  check(o.num === hd.fgPalette && tableName(o) === `FG palette ${hd.fgPalette}`, `its FG color is labelled with the header's FG palette (${tableName(o)})`);
+  const kinds = new Set(shared.map((a) => tableOf(a).kind));
+  check((['bg', 'fg', 'spr'] as const).every((k) => kinds.has(k)), `BG, FG and sprite palette colors are told apart (${[...kinds].join(', ')})`);
+  check(shared.every((a) => usesTable(hd, tableOf(a))), 'every shared color is of a table the header uses (its BG, FG, sprite palettes)');
+  check(usesTable(hd, o) && !usesTable({ ...hd, fgPalette: (hd.fgPalette + 1) & 7 }, o), 'a change of its FG color affects the levels with that FG palette only');
+  check(shared.every((a) => { const f = tableOf(a), s = tableOf(a & 0x7fffff); return f.kind === s.kind && f.num === s.num; }), 'the same tables in the slow banks');
+}
 
 // a shared color changed: the same trace (a load traced afresh may find another source for some changed colors: the
 // tracing matches the values written to those read lately)

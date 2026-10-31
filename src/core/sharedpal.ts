@@ -4,8 +4,9 @@
 // only the colors differing from the clean game's. Those are known from the editor's copy of the clean
 // game's block ("SMWC"), taken when it opens the clean game, as this ROM's colors may have been edited.
 
-import { Rom, pcToSnes } from './rom.ts';
+import { Rom, pcToSnes, snesToPc } from './rom.ts';
 import { hex } from './names.ts';
+import type { PrimaryHeader } from './level.ts';
 
 export const SHARED_PALETTES = 0x00b0a0;
 export const SHARED_PAL_SIZE = 0x7e2; // up to $00:B881
@@ -14,23 +15,37 @@ export const SHARED_COLORS = SHARED_PAL_SIZE / 2;
 // the tables of the block
 export const BACK_AREA = 0x00b0a0;
 export const BG_PALS = 0x00b0b0;
+export const L3_PAL = 0x00b170; // up to FG_PALS
 export const FG_PALS = 0x00b190;
+export const MARIO_PALS = 0x00b2c8; // up to SPR_PALS
 export const SPR_PALS = 0x00b318;
 export const PAL_SIZE = 0x18; // 12 colors: two rows of 6 (colors 2-7)
 
 export type TableKind = 'back' | 'bg' | 'fg' | 'spr' | 'l3' | 'mario' | 'global';
 export interface TableOrigin { kind: TableKind; num: number }
 
-// the table a color at SNES address `addr` belongs to (global: none of the others)
+// the table a color at SNES address `addr` belongs to (global: none of the others), in whichever mirror it is given:
+// a traced source is in FastROM's ($80 and up), the tables' addresses are in bank $00
 export function tableOf(addr: number): TableOrigin {
-  const inTable = (base: number, n: number, size: number) => addr >= base && addr < base + n * size;
-  if (inTable(BACK_AREA, 8, 2)) return { kind: 'back', num: (addr - BACK_AREA) >> 1 };
-  if (inTable(BG_PALS, 8, PAL_SIZE)) return { kind: 'bg', num: Math.floor((addr - BG_PALS) / PAL_SIZE) };
-  if (addr >= 0x00b170 && addr < 0x00b190) return { kind: 'l3', num: 0 };
-  if (inTable(FG_PALS, 8, PAL_SIZE)) return { kind: 'fg', num: Math.floor((addr - FG_PALS) / PAL_SIZE) };
-  if (addr >= 0x00b2c8 && addr < SPR_PALS) return { kind: 'mario', num: 0 };
-  if (inTable(SPR_PALS, 8, PAL_SIZE)) return { kind: 'spr', num: Math.floor((addr - SPR_PALS) / PAL_SIZE) };
+  const off = snesToPc(addr);
+  const at = (base: number) => off - snesToPc(base);
+  const inTable = (base: number, n: number, size: number) => at(base) >= 0 && at(base) < n * size;
+  if (inTable(BACK_AREA, 8, 2)) return { kind: 'back', num: at(BACK_AREA) >> 1 };
+  if (inTable(BG_PALS, 8, PAL_SIZE)) return { kind: 'bg', num: Math.floor(at(BG_PALS) / PAL_SIZE) };
+  if (inTable(L3_PAL, 1, FG_PALS - L3_PAL)) return { kind: 'l3', num: 0 };
+  if (inTable(FG_PALS, 8, PAL_SIZE)) return { kind: 'fg', num: Math.floor(at(FG_PALS) / PAL_SIZE) };
+  if (inTable(MARIO_PALS, 1, SPR_PALS - MARIO_PALS)) return { kind: 'mario', num: 0 };
+  if (inTable(SPR_PALS, 8, PAL_SIZE)) return { kind: 'spr', num: Math.floor(at(SPR_PALS) / PAL_SIZE) };
   return { kind: 'global', num: 0 };
+}
+
+// the header's palette choice that selects the table (none: a table every level loads)
+const HEADER_FIELD: Partial<Record<TableKind, 'backAreaColor' | 'bgPalette' | 'fgPalette' | 'spritePalette'>> = { back: 'backAreaColor', bg: 'bgPalette', fg: 'fgPalette', spr: 'spritePalette' };
+
+// whether a level with header `hd` (and no own palette) loads its colors from the table
+export function usesTable(hd: PrimaryHeader, o: TableOrigin): boolean {
+  const k = HEADER_FIELD[o.kind];
+  return !k || hd[k] === o.num;
 }
 
 export function tableName(o: TableOrigin): string {
