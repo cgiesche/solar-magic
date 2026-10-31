@@ -4,10 +4,10 @@
 // and sprites are read from the ROM.
 import { Rom, snesToPc } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
-import { loadLevel, newUid, spriteId, L1_PTRS, L2_PTRS } from '../src/core/level.ts';
+import { loadLevel, newUid, spriteId, storedBgAddr, levelDataRanges, hasLayer2Objects, L1_PTRS, L2_PTRS } from '../src/core/level.ts';
 import { bgFromWram, bgDataSize } from '../src/core/bg.ts';
 import { saveLevel } from '../src/core/save.ts';
-import { DM16_EXT, setGfxEntry, levelGfx, setLevelGfx, editorPatch, setCustomPalette, bgBank } from '../src/core/patches.ts';
+import { DM16_EXT, setGfxEntry, levelGfx, setLevelGfx, editorPatch, setCustomPalette, bgBank, setBgBank } from '../src/core/patches.ts';
 import { PREFAB_EXT, writePrefab, TRANSPARENT } from '../src/core/prefabs.ts';
 import { setActsLike, setExtTileWords, extTileWords } from '../src/core/map16ext.ts';
 import { ResultCache, RomFingerprint, RomReads, PAGE_SHIFT, BYTE_PAGES, type RomDeps } from '../src/core/romdeps.ts';
@@ -190,10 +190,10 @@ check(uses.missing(levels).length === 0, 'every level known after scanning');
     bg[0] ^= 1;
     lb.bg = bg;
     saveLevel(rom, lb);
-    check(!!bgBank(rom, t), `level ${name}'s BG tilemap is stored in free space`);
+    const a = storedBgAddr(rom, t);
+    check(!!a, `level ${name}'s BG tilemap is stored in free space`);
     stale('BG tilemap');
     // its stored data changed in place (the first chunk's value: a tile number of the low plane)
-    const a = (bgBank(rom, t) << 16) | (rom.r24(L2_PTRS + t * 3) & 0xffff);
     rom.w8(a + 1, rom.r8(a + 1) ^ 1);
     stale('stored BG tilemap data');
   }
@@ -214,7 +214,7 @@ check(uses.missing(levels).length === 0, 'every level known after scanning');
   };
   // where a level's stored BG tilemap lies (PC, up to its end mark)
   const stored = (n: number) => {
-    const o = snesToPc((bgBank(rom, n) << 16) | (rom.r24(L2_PTRS + n * 3) & 0xffff));
+    const o = snesToPc(storedBgAddr(rom, n));
     return [o, o + bgDataSize(rom.data, o)];
   };
   // a level's BG tilemap with a tile changed, stored in free space
@@ -223,7 +223,7 @@ check(uses.missing(levels).length === 0, 'every level known after scanning');
     bg[i] ^= 1;
     lv.bg = bg;
     saveLevel(rom, lv);
-    check(!!bgBank(rom, n), `level ${n.toString(16)}'s BG tilemap is stored in free space`);
+    check(!!storedBgAddr(rom, n), `level ${n.toString(16)}'s BG tilemap is stored in free space`);
   };
   const pages = ([o, end]: number[]) => [o >> PAGE_SHIFT, (end - 1) >> PAGE_SHIFT];
   edit(0x105, 1);
@@ -339,6 +339,24 @@ check(uses.missing(levels).length === 0, 'every level known after scanning');
   const u = (usage.get(id) ?? []).find((x) => x.level === 0x105);
   const n = lv105.sprites.filter((q) => spriteId(q) === id).length;
   check(!!u && u.count === n && u.x === s.x && u.y === s.y, `sprite ${s.num.toString(16)}: level 105, ${n}×, first at ${s.x}/${s.y} (${JSON.stringify(u)})`);
+}
+
+// a bank entry of the BG patch is a stored BG tilemap only behind a layer 2 pointer in bank $FF (the game reads layer 2
+// objects for any other): one behind another pointer adds no level data range, saving the level with a BG pointer
+// again drops it (else the game would read the new BG tilemap from its bank)
+{
+  const r = new Rom(rom.data.slice());
+  const n = Array.from({ length: 0x200 }, (_, i) => i).find((i) => !hasLayer2Objects(loadLevel(r, i).header.mode) && !bgBank(r, i) && r.r24(L2_PTRS + i * 3) >> 16 === 0xff)!;
+  const ptr = r.r24(L2_PTRS + n * 3), other = 0x0c0000 | (ptr & 0xffff);
+  r.w24(L2_PTRS + n * 3, other);
+  const ranges = JSON.stringify(levelDataRanges(r));
+  setBgBank(r, n, spare >> 16);
+  check(storedBgAddr(r, n) === 0, `level ${n.toString(16)} with a bank entry behind pointer ${other.toString(16)}: no stored BG tilemap`);
+  check(JSON.stringify(levelDataRanges(r)) === ranges, 'and no level data range of one');
+  const lv = loadLevel(r, n);
+  lv.layer2Pointer = ptr;
+  saveLevel(r, lv);
+  check(bgBank(r, n) === 0 && storedBgAddr(r, n) === 0, `saved with pointer ${ptr.toString(16)} again: the bank entry is dropped`);
 }
 
 // slotMove: where a level's Map16 tiles were made for when a file changes slots (the remap offer)

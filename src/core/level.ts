@@ -547,6 +547,14 @@ export function spriteBank(rom: Rom, n: number): number {
   return spriteBankOf(rom, n);
 }
 
+// where the BG tilemap the editor stored for a level is (SNES; 0: none): the BG patch's bank with the layer 2
+// pointer's low word – the game reads a BG tilemap only for a pointer in bank $FF (see $05803B), so a bank entry
+// behind any other pointer is none
+export function storedBgAddr(rom: Rom, n: number): number {
+  const l2 = rom.r24(L2_PTRS + n * 3), bank = l2 >> 16 === 0xff ? bgBank(rom, n) : 0;
+  return bank ? (bank << 16) | (l2 & 0xffff) : 0;
+}
+
 // a generous window of level data: up to the end of the bank
 const dataWindow = (rom: Rom, a: number) => rom.bytes(a, 0x8000 - (a & 0x7fff));
 
@@ -612,12 +620,11 @@ export function levelDataRanges(rom: Rom): [number, number][] {
     const o1 = snesToPc(l1), mode = o1 >= 0 && o1 + 5 < d.length ? parsePrimaryHeader(d.subarray(o1, o1 + 5)).mode : 0;
     const d1 = unseen(l1);
     if (d1) add(l1, 5 + (hasObjects(mode) ? parseObjects(d1, 5, false, false, undefined, len2d).size : 1));
-    const objects2 = (l2 >> 16) !== 0xff && hasLayer2Objects(mode);
-    const d2 = objects2 ? unseen(l2) : null;
+    const d2 = (l2 >> 16) !== 0xff && hasLayer2Objects(mode) ? unseen(l2) : null;
     if (d2) add(l2, 5 + parseObjects(d2, 5, false, false, undefined, len2d).size);
     // a stored BG tilemap, up to its end mark
-    const bank = !objects2 && bgs ? bgBank(rom, n) : 0, bgAddr = bank ? (bank << 16) | (l2 & 0xffff) : 0;
-    const db = bank ? unseen(bgAddr) : null;
+    const bgAddr = bgs ? storedBgAddr(rom, n) : 0;
+    const db = bgAddr ? unseen(bgAddr) : null;
     if (db) add(bgAddr, Math.min(db.length, bgDataSize(db)));
     const ds = unseen(spr);
     if (ds) add(spr, parseSprites(ds, 0, false, sizes).size);

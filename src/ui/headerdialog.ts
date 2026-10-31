@@ -5,10 +5,10 @@ import { h, select, hexInput, modal, toast } from './dom.ts';
 import { TILESETS, levelModeName, MUSIC, TIME_SETTINGS, VERTICAL_SCROLL, ENTRANCE_ACTIONS, layer2RateName, hex2, hex } from '../core/names.ts';
 import {
   hasLayer2Objects, type PrimaryHeader, type SecondaryHeader, L2_PTRS, SPRITE_MEMORY, MAX_LEVEL_SIZE, SUBSCREEN_ROWS, levelRows, maxScreens, hasLevelSize,
-  mainSpot, spotTile, hasRelativeCamera,
+  mainSpot, spotTile, hasRelativeCamera, storedBgAddr,
 } from '../core/level.ts';
 import { cameraOptions, cameraValue, setCamera, tileFields, bgStartFields } from './entrancefields.ts';
-import { bgBank, levelMusic, setLevelMusic, HEADER_MUSIC_TABLE } from '../core/patches.ts';
+import { levelMusic, setLevelMusic, HEADER_MUSIC_TABLE } from '../core/patches.ts';
 import { songHex } from '../core/music.ts';
 import { currentSongs, playButton } from './musicdialog.ts';
 import { musicPlayer } from './musicplayer.ts';
@@ -48,13 +48,13 @@ export function openHeaderDialog(app: App): void {
   const bgs = new Map<number, number[]>();
   for (let i = 0; i < 512; i++) {
     const p = app.rom.r24(L2_PTRS + i * 3);
-    if (p >> 16 !== 0xff || bgBank(app.rom, i)) continue;
+    if (p >> 16 !== 0xff || storedBgAddr(app.rom, i)) continue;
     if (!bgs.has(p)) bgs.set(p, []);
     bgs.get(p)!.push(i);
   }
   const bgOpts: [number, string][] = [...bgs.entries()].map(([p, ls]) => [p, `$${hex(p & 0xffff, 4)} (e.g. level ${ls.slice(0, 3).map((l) => hex(l, 3)).join(', ')})`]);
   const CUSTOM_BG = -1;
-  if (lv.bg || bgBank(app.rom, lv.number)) { l2ptr = CUSTOM_BG; bgOpts.unshift([CUSTOM_BG, 'Custom (edited in BG mode)']); }
+  if (lv.bg || storedBgAddr(app.rom, lv.number)) { l2ptr = CUSTOM_BG; bgOpts.unshift([CUSTOM_BG, 'Custom (edited in BG mode)']); }
   else if (!bgs.has(l2ptr) && l2ptr >> 16 === 0xff) bgOpts.push([l2ptr, `$${hex(l2ptr & 0xffff, 4)}`]);
 
   // layer 3: what each setting does depends on the tileset (found by emulation, see layer3.ts)

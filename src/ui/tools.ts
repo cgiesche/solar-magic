@@ -5,7 +5,7 @@ import { h, modal, clear, hexInput, select, toast, choose, emptyState, checkbox 
 import { downloadBytes, pickFile } from './platform.ts';
 import { isBlank } from '../core/exitgraph.ts';
 import {
-  type SecondaryEntrance, loadLevel, cloneLevel, insertScreen, deleteScreen, clearLevel, spriteId, secondarySpot, spotTile,
+  type SecondaryEntrance, loadLevel, cloneLevel, insertScreen, deleteScreen, clearLevel, spriteId, secondarySpot, spotTile, storedBgAddr,
 } from '../core/level.ts';
 import { overworldFields } from './owexit.ts';
 import { overworldExitText } from '../core/owteleport.ts';
@@ -14,7 +14,7 @@ import { newEntranceIn } from './exitpanel.ts';
 import { exportLevelFile, importLevelFile, LEVEL_FILE_EXT } from '../core/levelfile.ts';
 import { ENTRANCE_ACTIONS, hex } from '../core/names.ts';
 import { saveLevel } from '../core/save.ts';
-import { DM16_EXT, setLevelGfx, customPalette, setCustomPalette, bgBank } from '../core/patches.ts';
+import { DM16_EXT, setLevelGfx, customPalette, setCustomPalette } from '../core/patches.ts';
 import { objectLength2D, OBJ_2D } from '../core/obj2d.ts';
 import { bgFromWram } from '../core/bg.ts';
 import { PREFAB_EXT } from '../core/prefabs.ts';
@@ -161,7 +161,7 @@ export function openSaveAsDialog(app: App): void {
 
 export function exportLevel(app: App): void {
   const lv = app.level;
-  const bg = lv.bg ?? (!lv.layer2Objects && bgBank(app.rom, lv.number) ? bgFromWram(app.render.wram) : null);
+  const bg = lv.bg ?? (!lv.layer2Objects && storedBgAddr(app.rom, lv.number) ? bgFromWram(app.render.wram) : null);
   downloadBytes(`level-${hex(lv.number, 3)}${LEVEL_FILE_EXT}`, new TextEncoder().encode(exportLevelFile(app.rom, lv, bg)), 'application/json');
 }
 
@@ -189,7 +189,7 @@ function saveAs(app: App, target: number): void {
   const copy = cloneLevel(app.level);
   const dst = loadLevel(app.rom, target);
   // an edited BG belongs to its level (bank table entry): the copy gets its own data
-  if (!copy.layer2Objects && !copy.bg && bgBank(app.rom, app.level.number)) copy.bg = bgFromWram(app.render.wram);
+  if (!copy.layer2Objects && !copy.bg && storedBgAddr(app.rom, app.level.number)) copy.bg = bgFromWram(app.render.wram);
   copy.number = target;
   // write into fresh space: pretend old data of target is the destination
   copy.l1Addr = dst.l1Addr; copy.l1Size = 0; copy.l2Size = 0; copy.sprAddr = dst.sprAddr; copy.sprSize = 0;

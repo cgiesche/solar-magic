@@ -3,7 +3,7 @@
 import { Rom } from './rom.ts';
 import {
   type Level, L1_PTRS, L2_PTRS, SPR_PTRS, serializeLayer1, serializeLayer2, serializeLevelSprites, isL1Vertical, spriteSizes,
-  writeSecondaryHeader, spriteBank,
+  writeSecondaryHeader, spriteBank, storedBgAddr,
 } from './level.ts';
 import { setSpriteBank, bgBank, setBgBank } from './patches.ts';
 import { encodeBg } from './bg.ts';
@@ -46,10 +46,11 @@ export function saveLevel(rom: Rom, lv: Level): string[] {
     log.push(`Layer 2: ${l2.length} bytes @ $${a2.toString(16).toUpperCase()}`);
   } else {
     // BG tilemap: edited data goes to free space (bank via BG patch); a changed pointer drops old custom data
-    const old = rom.r24(L2_PTRS + n * 3), oldBank = bgBank(rom, n);
-    if (oldBank && (lv.bg || lv.layer2Pointer !== old)) {
-      const users = Array.from({ length: 512 }, (_, i) => i).filter((i) => bgBank(rom, i) === oldBank && rom.r24(L2_PTRS + i * 3) === old);
-      if (users.length <= 1) rom.freeAt((oldBank << 16) | (old & 0xffff));
+    // (a bank entry behind a pointer of no BG tilemap is dropped too, else a new BG pointer would read from its bank)
+    const old = rom.r24(L2_PTRS + n * 3), oldBg = storedBgAddr(rom, n);
+    if (bgBank(rom, n) && (lv.bg || lv.layer2Pointer !== old)) {
+      const users = oldBg ? Array.from({ length: 512 }, (_, i) => i).filter((i) => storedBgAddr(rom, i) === oldBg) : [];
+      if (users.length === 1) rom.freeAt(oldBg);
       setBgBank(rom, n, 0);
     }
     if (lv.bg) {

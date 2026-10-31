@@ -16,9 +16,8 @@
 
 import type { Rom } from './rom.ts';
 import { hex } from './names.ts';
-import { L2_PTRS, loadLevel, type Level, type LevelObject } from './level.ts';
+import { L2_PTRS, loadLevel, storedBgAddr, type Level, type LevelObject } from './level.ts';
 import { saveLevel } from './save.ts';
-import { bgBank } from './patches.ts';
 import { decodeBg } from './bg.ts';
 import { isDm16, prefabTiles, COND_ADD } from './cdm16.ts';
 import { listPrefabs, writePrefab, type Prefab } from './prefabs.ts';
@@ -64,16 +63,15 @@ export function rectMap(from: number, w: number, h: number, to: number): TileMap
 
 // the BG tilemap the editor stored for a level (null: none, or the level's pointer was changed since)
 export function storedBg(rom: Rom, lv: Level): Uint16Array | null {
-  const bank = bgBank(rom, lv.number), ptr = rom.r24(L2_PTRS + lv.number * 3);
-  if (!bank || lv.layer2Objects || lv.layer2Pointer !== ptr) return null;
-  const a = (bank << 16) | (ptr & 0xffff);
+  const a = storedBgAddr(rom, lv.number);
+  if (!a || lv.layer2Objects || lv.layer2Pointer !== rom.r24(L2_PTRS + lv.number * 3)) return null;
   return decodeBg(rom.bytes(a, Math.min(0x1000, 0x10000 - (a & 0xffff))));
 }
 
 // a level's BG tilemap as edited, stored or (when `game`) the game's; null: none (layer 2 objects) or not known
 function levelBg(rom: Rom, lv: Level, src: LevelSource, game: boolean): Uint16Array | null {
   if (lv.layer2Objects) return null;
-  return lv.bg ?? storedBg(rom, lv) ?? (game && !bgBank(rom, lv.number) ? src.gameBg?.(lv.number) ?? null : null);
+  return lv.bg ?? storedBg(rom, lv) ?? (game && !storedBgAddr(rom, lv.number) ? src.gameBg?.(lv.number) ?? null : null);
 }
 
 const dm16Objects = (lv: Level): LevelObject[] => [...lv.objects, ...(lv.layer2Objects ?? [])].filter(isDm16);
