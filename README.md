@@ -259,7 +259,7 @@ change only a few verified locations:
 |---|---|
 | `$05D8F5` | Sprite data in any bank (bank table for 512 levels); current level number in `$7E010B` (like Lunar Magic) |
 | `$00BA2C` | GFX pointer table with 4096 entries (ExGFX 000–FFF); the high bytes of the slots' numbers in RAM `$7F367A`–`$7F3682` |
-| `$00AA6B`, `$00AA80` | Format selectable per file: LZ2/3bpp (original) or uncompressed 4bpp via DMA – also the game's own GFX00–31 (colors 8–F, as Lunar Magic's 4bpp GFX); the game's other code reading such a file gets it as 3bpp; RAM `$7F3687`–`$7F368A` |
+| `$00AA6B`, `$00AA80` | Format selectable per file: LZ2/3bpp (original) or uncompressed 4bpp via DMA – also the game's own GFX00–31 (colors 8–F, as Lunar Magic's 4bpp GFX); the game's other code reading such a file gets it as 3bpp; an LZ2 file the game decompresses over part of it in the same upload (GFX31 over GFX01 after the special world) is converted as in the game, the rest stays 4bpp; RAM `$7F3687`–`$7F368E` |
 | `$00A9E1`, `$00AA22` | Graphics bypass: 8 GFX slots per level (SP1–4, FG1–3, BG1), ExGFX up to FFF |
 | Ext. object `$05` | "Direct Map16": places any Map16 tile as a rectangle (6 bytes); entry `$05` is empty in the original and in Lunar Magic (whose `$02` is a 5-byte object) |
 | Ext. object `$04` ("SMWS") | Prefabs: places a stored block of Map16 tiles (4 bytes, 4th byte = prefab number 00–FF); only occupies entry `$04` of the extended object table, which is empty in the original and in Lunar Magic (whose `$03` is its swapped screen jump), independent of the editor patch |

@@ -3,7 +3,7 @@
 // from the clean game's are the package's – a file whose only difference is the 4th bitplane as the game's
 // upload sets it (GFX17: tiles in colors 8–F) is the clean game's. A file using colors 8–F of its own
 // (Lunar Magic's 4bpp GFX: GFX01's donut lift, GFX08) is kept 4bpp: the game uploads it as it is, its
-// other code reading the file gets it as 3bpp, GFX31 still replaces half of GFX01 after the special world. They replace the game's file (GFX33, the animated
+// other code reading the file gets it as 3bpp, GFX31 still replaces half of GFX01 after the special world (the other half stays 4bpp). They replace the game's file (GFX33, the animated
 // tiles, by the game's loader at $00:B888, which shares its bank with GFX32); removed, the game's files
 // are as before. resources/original_graphics/ (the baserom's backup copy) is not part of the package, and
 // no GFX##.bin becomes an ExGFX file. A second package changing one of them is a conflict; a file changed
@@ -46,21 +46,29 @@ async function target(): Promise<{ rom: Rom; opt: InstallOptions }> {
 const upload = (name: string, files: Record<string, Uint8Array>) => ready(inspectUpload(`${name}.zip`, zipSync(files)));
 // the animated tiles as the game puts them into RAM ($7E7D00, GFX33 as 4bpp)
 const animRam = (rom: Rom) => new LevelEmulator(rom).load(0x105).wram.slice(0x7d00, 0x7d00 + 0x3000);
-// the game's routine at `at` (bank 0; ret: its return, RTS or RTL) called with Y = `y`, after `setup`
-function call(rom: Rom, at: number, ret: 'rts' | 'rtl', y: number, setup = (_s: Snes) => {}): Snes {
-  const s = new Snes(rom.data), cpu = s.cpu, w = s.wram, end = 0x1f00;
+// the game's routine at `at` (bank 0; ret: its return, RTS or RTL) called with Y = `y`, after `setup`; it
+// returns to `end` (bank 0: RAM, or the caller's code after its JSR)
+function call(rom: Rom, at: number, ret: 'rts' | 'rtl', y: number, setup = (_s: Snes) => {}, end = 0x1f00): Snes {
+  const s = new Snes(rom.data), cpu = s.cpu, w = s.wram;
   if (ret === 'rtl') w.set([(end - 1) & 0xff, (end - 1) >> 8, 0], 0x1fd); else w.set([(end - 1) & 0xff, (end - 1) >> 8], 0x1fe);
   s.write(0x2115, 0x80); s.write(0x2116, 0); s.write(0x2117, 0);
   setup(s);
   cpu.e = false; cpu.p = 0x34; cpu.s = ret === 'rtl' ? 0x1fc : 0x1fd; cpu.d = 0; cpu.dbr = 0; cpu.pbr = 0; cpu.pc = at; cpu.y = y;
-  for (let n = 0; n < 2_000_000 && !(cpu.pbr === 0 && cpu.pc === end); n++) cpu.step();
+  for (let n = 0; n < 2_000_000 && !((cpu.pbr & 0x7f) === 0 && cpu.pc === end); n++) cpu.step();
   if (cpu.pc !== end) throw new Error(`$${at.toString(16)} did not return`);
   return s;
 }
 // the file as the game's code reading it gets it ($00BA28: 3bpp in its buffer)
 const read3bpp = (rom: Rom, n: number) => call(rom, 0x00ba28, 'rtl', n).wram.slice(GFX_BUFFER, GFX_BUFFER + 0xc00);
-// the file as the game uploads it to VRAM ($00AA6B; sw: the special world passed, $1EEB bit 7)
-const uploaded = (rom: Rom, n: number, sw = false) => call(rom, 0x00aa6b, 'rts', n, (s) => { s.wram[RAM.specialWorld] = sw ? 0x80 : 0; }).vram.slice(0, 0x1000);
+// the file as the game uploads it to VRAM ($00AA6B; sw: the special world passed, $1EEB bit 7): called as one
+// of the game's loops over the slots calls it, by default the sprite slots' for SP2 (X = 2, after its JSR
+// at $00AA08, to VRAM $6800); FG2 in the FG/BG slots' loop (X = 1, $00AA49, VRAM $1000)
+type Slot = { x: number; vram: number; end: number };
+const SP2: Slot = { x: 2, vram: 0x6800, end: 0xaa0b }, FG2: Slot = { x: 1, vram: 0x1000, end: 0xaa4c };
+const uploaded = (rom: Rom, n: number, sw = false, slot = SP2) => call(rom, 0x00aa6b, 'rts', n, (s) => {
+  s.wram[RAM.specialWorld] = sw ? 0x80 : 0;
+  s.cpu.x = slot.x; s.write(0x2117, slot.vram >> 8);
+}, slot.end).vram.slice(slot.vram * 2, slot.vram * 2 + 0x1000);
 const fourBpp = [0x01, 0x08]; // the baserom's files using colors 8–F of their own
 
 // ---------- the files and the clean game's ----------
@@ -117,7 +125,10 @@ const colors = (d: Uint8Array, t: number) => { const pix = new Uint8Array(64); d
   check(same(read3bpp(rom, 2), cleanGlobalGfx(rom, 2)), '… an LZ2 file as before');
   const sw = uploaded(rom, 1, true), swClean = uploaded(clean, 1, true);
   check(same(sw.subarray(0, 0x800), swClean.subarray(0, 0x800)) && !same(swClean.subarray(0, 0x800), uploaded(clean, 1).subarray(0, 0x800)), 'after the special world GFX31 replaces its first half, as in the clean game');
-  check(same(sw.subarray(0x800), convertBpp(convertBpp(bin(1), 4, 3), 3, 4).subarray(0x800)), '… the rest GFX01\'s tiles (3bpp, as the game converts it)');
+  check(same(sw.subarray(0x800), bin(1).subarray(0x800)), '… the rest GFX01\'s tiles as they are (4bpp)');
+  check(colors(sw, 0x42).join() === '1,10,13,14,15', `its donut lift after the special world in colors ${colors(sw, 0x42).join(' ')}`);
+  const fg = uploaded(rom, 1, true, FG2), fgClean = uploaded(clean, 1, true, FG2);
+  check(same(fg.subarray(0, 0x800), fgClean.subarray(0, 0x800)) && same(fg.subarray(0x800), bin(1).subarray(0x800)), '… uploaded by the FG/BG slots\' loop too (to its VRAM address)');
   setGlobalGfx(rom, 8, bin(8));
   check(same(uploaded(rom, 8), bin(8)), 'GFX08 uploaded as it is too');
 }

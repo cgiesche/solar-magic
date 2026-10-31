@@ -7,7 +7,9 @@
 //    One of the game's files may be raw 4bpp too (colors 8-F, as Lunar Magic's 4bpp GFX): its upload goes
 //    through the game's routine as far as the choice of the file ($00AA6B-$00AA7F, which loads GFX31 for
 //    GFX01 after the special world), then copies it as it is instead of the 3bpp conversion; the game's
-//    other code reading a file through $00BA28 gets it as 3bpp (the 4th bitplane dropped)
+//    other code reading a file through $00BA28 gets it as 3bpp (the 4th bitplane dropped). An LZ2 file
+//    decompressed over the start of it in the same upload (GFX31) is converted by the game, the rest of the
+//    raw file is copied as it is after it
 //  - per-level GFX bypass: 8 slots (SP4..SP1, FG3, BG1, FG2, FG1), low bytes and a table of high bytes;
 //    0FF = tileset default. The game passes a file's low byte along (in $04-$07, Y); the high bytes of the
 //    slots being uploaded are kept in RAM (EXGFX_HI_RAM) and joined with it where the file is looked up
@@ -54,7 +56,7 @@ const EDITED_TEXT = 'Solar Magic';
 // the bytes the editor patch changes in the game (SNES address, length), protected from other patches (patchapply.ts)
 export const EDITOR_HOOKS: [number, number][] = [[SPR_BANK_HOOK, 4], [HOOK_GFXPTR, 15], [HOOK_UPLOAD, 4], [HOOK_RAWUP, 5], [HOOK_SPRGFX, 15], [HOOK_FGGFX, 15], [DM16_SLOT, 3], [EDITED_MARK, EDITED_LEN]];
 const MAGIC = [0x53, 0x4d, 0x57, 0x45]; // "SMWE"
-const VERSION = 5; // 5: the game's files as raw 4bpp
+const VERSION = 6; // 5: the game's files as raw 4bpp; 6: an LZ2 file over part of one
 const HEADER = 32;
 // GFX file numbers: 000-FFF (Lunar Magic's range); 0FF in a slot is "none" (the default), so no file has it
 export const GFX_FILES = 0x1000;
@@ -63,12 +65,16 @@ export const GFX_NONE = 0xff;
 // the RAM of the high bytes: the 8 slots of the bypass as the game uploads them (sprite slots, then
 // FG/BG; uploaded again when one changes), then the one for the next upload by BG2/BG3 (EXT_UP_RET)
 const SLOT_HI = EXGFX_HI_RAM[0], UP_HI = EXGFX_HI_RAM[0] + 8;
-// the RAM of a raw file's upload: 1 during an upload, then the raw file to copy (its bank 0: none)
-const UP_MODE = GFX_RAW_RAM[0], RAW_PTR = GFX_RAW_RAM[0] + 1;
+// the RAM of a raw file's upload: 1 during an upload, then the raw file to copy (its bank 0: none), how many
+// of its bytes an LZ2 file decompressed over it replaces (16-bit, as 4bpp: whole tiles), the upload's VRAM
+// address (16-bit; bit 15: not known)
+const UP_MODE = GFX_RAW_RAM[0], RAW_PTR = GFX_RAW_RAM[0] + 1, RAW_OFF = GFX_RAW_RAM[0] + 4, RAW_VRAM = GFX_RAW_RAM[0] + 6;
 const BUF = 0x7e0000 | GFX_BUFFER;
 // the game's calls of its upload routine $00AA6B (their return addresses): the sprite and the FG/BG
 // slots' loops (X = slot); BG2/BG3 call it with this return address (the RTL at $0084CF)
 const SPR_UP_RET = 0xaa0a, FG_UP_RET = 0xaa4b, EXT_UP_RET = 0x84ce;
+// where these loops read a slot's VRAM address (high byte; LDA abs,x, the low byte is 0: STZ $2116)
+const SPR_VRAM_LDA = 0x00a9f9, FG_VRAM_LDA = 0x00aa3a;
 const long = (v: number) => [v & 0xff, (v >> 8) & 0xff, v >> 16];
 
 export interface PatchInfo {
@@ -110,8 +116,13 @@ export function missingPatch(what: string): never {
 }
 const editor = (rom: Rom) => editorPatch(rom) ?? missingPatch('Editor patch (SMWE)');
 
-function build(): Asm {
+function build(rom: Rom): Asm {
   const a = new Asm();
+  // the upload's VRAM address for a slot (X) of the loop reading it at `at`: from where the loop has it
+  const slotVram = (at?: number) => at !== undefined && rom.r8(at) === 0xbd
+    ? [0xbf, ...long((at & 0xff0000) | rom.r16(at + 1)), 0x8f, ...long(RAW_VRAM + 1), 0xa9, 0x00, 0x8f, ...long(RAW_VRAM)] // LDA.l tbl,x : STA.l RawVram+1 : LDA #0 : STA.l RawVram
+    : [0xa9, 0x80, 0x8f, ...long(RAW_VRAM + 1)]; // not known
+  const rawOff0 = [0xa9, 0x00, 0x8f, ...long(RAW_OFF), 0x8f, ...long(RAW_OFF + 1)]; // RawOff = 0
   a.b(...MAGIC, VERSION);
   // data pointers (patched after link, see install)
   a.fill(HEADER - 5);
@@ -124,20 +135,27 @@ function build(): Asm {
   a.long(0xbf, 'SprBankTbl'); // LDA.l tbl,x
   a.b(0x85, 0xd0, 0xc2, 0x20, 0xfa, 0x68, 0x28, 0x6b); // STA $D0 REP#$20 PLX PLA PLP RTL
 
-  // ---- GFX pointer lookup (JSL from $00BA2C, M=8, Y = file): an LZ2 file is decompressed by the game; a
-  // raw one is converted to 3bpp into the game's buffer (as the game would have it, for code reading it so
-  // and for GFX31 decompressed over half of it) and, during an upload, remembered (RawUp copies it) ----
+  // ---- GFX pointer lookup (JSL from $00BA2C, M=8, Y = file): an LZ2 file is decompressed by the game
+  // (during an upload, over the start of a raw file: LzOver); a raw one is converted to 3bpp into the game's
+  // buffer (as the game would have it, for code reading it so and for GFX31 decompressed over half of it)
+  // and, during an upload, remembered (RawUp copies it) ----
   a.label('GfxPtr');
   a.b(0xda, 0xbb); // PHX TYX
   a.long(0xbf, 'GfxLo'); a.b(0x85, 0x8a);
   a.long(0xbf, 'GfxHi'); a.b(0x85, 0x8b);
   a.long(0xbf, 'GfxBk'); a.b(0x85, 0x8c);
   a.long(0xbf, 'GfxFlags'); a.br(0xd0, 'praw');
-  a.b(0x8f, ...long(RAW_PTR + 2)); // STA.l RawPtr bank (A = 0: the file is in the buffer)
+  a.b(0xaf, ...long(UP_MODE)); a.br(0xf0, 'plz'); // LDA.l UpMode : BEQ
+  a.b(0xaf, ...long(RAW_PTR + 2)); a.br(0xf0, 'plz'); // LDA.l RawPtr bank : BEQ
+  a.abs(0x20, 'LzOver'); // JSR
   a.b(0xfa, 0x6b); // PLX RTL (→ the game's decompression)
+  a.label('plz');
+  a.b(0x8f, ...long(RAW_PTR + 2)); // STA.l RawPtr bank (A = 0: the file is in the buffer)
+  a.b(0xfa, 0x6b); // PLX RTL
   a.label('praw');
   a.b(0xaf, ...long(UP_MODE)); a.br(0xf0, 'p3'); // LDA.l UpMode : BEQ
   a.b(0xa5, 0x8a, 0x8f, ...long(RAW_PTR), 0xa5, 0x8b, 0x8f, ...long(RAW_PTR + 1), 0xa5, 0x8c, 0x8f, ...long(RAW_PTR + 2)); // RawPtr = $8A
+  a.b(...rawOff0);
   a.label('p3'); // 128 tiles: the first 16 bytes as they are, then every other byte (bitplane 2)
   a.b(0x08, 0xc2, 0x30, 0xa0, 0x00, 0x00, 0xa2, 0x00, 0x00); // PHP REP #$30 LDY #0 LDX #0
   a.label('p3t');
@@ -155,6 +173,49 @@ function build(): Asm {
   a.b(0xfa, 0x68, 0x68, 0x68); // PLX, drop the JSL return
   a.b(0x5c, 0x4a, 0xba, 0x80); // JML $80BA4A (PLY PLB RTL)
 
+  // ---- an LZ2 file at [$8A] the game decompresses over the start of the raw file (JSR, M=8): the tiles it
+  // fills (by reading its headers as the game's $00B8DE does) are the game's; all of them: no raw file ----
+  a.label('LzOver');
+  a.b(0x08, 0xc2, 0x10, 0xd4, 0x8a, 0xa5, 0x8c, 0x48); // PHP REP #$10 PEI ($8A) LDA $8C PHA
+  a.b(0xa0, 0x00, 0x00); // LDY #0 (its size)
+  a.label('lw');
+  a.abs(0x20, 'lb'); a.b(0xc9, 0xff); a.br(0xf0, 'lend'); // JSR lb : CMP #$FF : BEQ (the end)
+  a.b(0x85, 0x8f, 0x29, 0xe0, 0xc9, 0xe0); a.br(0xd0, 'lsh'); // STA $8F AND #$E0 CMP #$E0 BNE
+  a.b(0xa5, 0x8f, 0x0a, 0x0a, 0x0a, 0x29, 0xe0, 0x48); // LDA $8F ASL #3 AND #$E0 PHA (the command)
+  a.b(0xa5, 0x8f, 0x29, 0x03, 0xeb); a.abs(0x20, 'lb'); a.b(0xc2, 0x20); a.br(0x80, 'lln'); // LDA $8F AND #3 XBA JSR lb REP #$20 BRA
+  a.label('lsh');
+  a.b(0x48, 0xa5, 0x8f, 0xc2, 0x20, 0x29, 0x1f, 0x00); // PHA LDA $8F REP #$20 AND #$001F
+  a.label('lln');
+  a.b(0x1a, 0x85, 0x8d, 0x98, 0x18, 0x65, 0x8d, 0xa8, 0xe2, 0x20); // INC STA $8D (length) TYA CLC ADC $8D TAY SEP #$20
+  // the command's bytes: 0 the length's, 1 and 3 one, 2 and 4 (and above) two
+  a.b(0x68); a.br(0xf0, 'lcp'); a.br(0x30, 'l2'); a.b(0x0a); a.br(0x10, 'l1'); a.b(0x0a); a.br(0x10, 'l2'); // PLA BEQ BMI ASL BPL ASL BPL
+  a.label('l1');
+  a.abs(0x20, 'lb'); a.br(0x80, 'lw');
+  a.label('l2');
+  a.abs(0x20, 'lb'); a.br(0x80, 'l1');
+  a.label('lcp');
+  a.abs(0x20, 'lb'); a.b(0xa6, 0x8d, 0xca, 0x86, 0x8d); a.br(0xd0, 'lcp'); a.br(0x80, 'lw'); // JSR lb LDX $8D DEX STX $8D BNE BRA
+  a.label('lend');
+  a.b(0x68, 0x85, 0x8c, 0xc2, 0x20, 0x68, 0x85, 0x8a); // PLA STA $8C REP #$20 PLA STA $8A
+  a.b(0x98, 0xc9, 0x00, 0x0c); a.br(0xb0, 'lall'); // TYA CMP #$0C00 (128 tiles) BCS
+  a.b(0x64, 0x8d); // STZ $8D (its tiles as 4bpp bytes; a tile it fills part of too)
+  a.label('lt');
+  a.b(0xc9, 0x01, 0x00); a.br(0x90, 'ltd'); // CMP #1 BCC
+  a.b(0xa8, 0xa5, 0x8d, 0x18, 0x69, 0x20, 0x00, 0x85, 0x8d, 0x98, 0x38, 0xe9, 0x18, 0x00); a.br(0xb0, 'lt'); // TAY $8D += 32 TYA SEC SBC #24 BCS
+  a.label('ltd');
+  a.b(0xa5, 0x8d, 0xc9, 0x00, 0x10); a.br(0xb0, 'lall'); // LDA $8D CMP #$1000 BCS
+  a.b(0xcf, ...long(RAW_OFF)); a.br(0x90, 'lkeep'); a.b(0x8f, ...long(RAW_OFF)); // CMP.l RawOff BCC (more before) STA.l RawOff
+  a.label('lkeep');
+  a.b(0x28, 0x60); // PLP RTS
+  a.label('lall');
+  a.b(0xe2, 0x20, 0xa9, 0x00, 0x8f, ...long(RAW_PTR + 2), 0x28, 0x60); // SEP #$20 LDA #0 STA.l RawPtr bank PLP RTS
+  // the next byte at [$8A] (M=8 X=16), as the game's $00B983: on to the next bank's $8000
+  a.label('lb');
+  a.b(0xa7, 0x8a, 0xa6, 0x8a, 0xe8); a.br(0xd0, 'lbn'); // LDA [$8A] LDX $8A INX BNE
+  a.b(0xa2, 0x00, 0x80, 0xe6, 0x8c); // LDX #$8000 INC $8C
+  a.label('lbn');
+  a.b(0x86, 0x8a, 0x60); // STX $8A RTS
+
   // ---- GFX upload (JSL from $00AA6B, M=8 X=8, Y = the file's low byte): its high byte by the caller;
   // files up to FF through the game's $00BA28 (GfxPtr), those above FF here; they go on as file 80 (the game
   // treats some of its own files, by number, differently: 01, 08, 1E); a raw file is copied by RawUp ----
@@ -163,13 +224,13 @@ function build(): Asm {
   a.b(0xc9, ...long(SPR_UP_RET).slice(0, 2)); a.br(0xf0, 'uspr'); // CMP : BEQ
   a.b(0xc9, ...long(FG_UP_RET).slice(0, 2)); a.br(0xf0, 'ufg');
   a.b(0xc9, ...long(EXT_UP_RET).slice(0, 2)); a.br(0xf0, 'uext');
-  a.b(0xe2, 0x20, 0xa9, 0x00); a.br(0x80, 'uhi'); // SEP #$20 LDA #$00 BRA
+  a.b(0xe2, 0x20, ...slotVram(), 0xa9, 0x00); a.br(0x80, 'uhi'); // SEP #$20, the VRAM address not known, LDA #$00 BRA
   a.label('uspr');
-  a.b(0xe2, 0x20, 0xbf, ...long(SLOT_HI)); a.br(0x80, 'uhi'); // SEP #$20 LDA.l SlotHi,x
+  a.b(0xe2, 0x20, ...slotVram(SPR_VRAM_LDA), 0xbf, ...long(SLOT_HI)); a.br(0x80, 'uhi'); // SEP #$20 LDA.l SlotHi,x
   a.label('ufg');
-  a.b(0xe2, 0x20, 0xbf, ...long(SLOT_HI + 4)); a.br(0x80, 'uhi');
+  a.b(0xe2, 0x20, ...slotVram(FG_VRAM_LDA), 0xbf, ...long(SLOT_HI + 4)); a.br(0x80, 'uhi');
   a.label('uext');
-  a.b(0xe2, 0x20, 0xaf, ...long(UP_HI)); // SEP #$20 LDA.l UpHi
+  a.b(0xe2, 0x20, 0xaf, ...long(UP_HI)); // SEP #$20 LDA.l UpHi (the VRAM address: by the caller)
   a.label('uhi');
   a.b(0xeb, 0x98, 0xc2, 0x10, 0xaa); // XBA TYA REP #$10 TAX (X = file, 16 bit)
   a.b(0xa9, 0x01, 0x8f, ...long(UP_MODE), 0xa9, 0x00, 0x8f, ...long(RAW_PTR + 2)); // UpMode = 1, no raw file yet
@@ -185,24 +246,34 @@ function build(): Asm {
   a.long(0xbf, 'GfxLo'); a.b(0x8f, ...long(RAW_PTR));
   a.long(0xbf, 'GfxHi'); a.b(0x8f, ...long(RAW_PTR + 1));
   a.long(0xbf, 'GfxBk'); a.b(0x8f, ...long(RAW_PTR + 2));
+  a.b(...rawOff0);
   a.br(0x80, 'bigend');
 
   // ---- the upload's conversion (JSL from $00AA80, Y = file): a raw file DMA'd from ROM as it is, else
-  // the game's 3bpp conversion ----
+  // the game's 3bpp conversion; with an LZ2 file over the start of the raw file, the game's conversion
+  // (returning through $0084CF's RTL) and then the rest of the raw file (RawRest) ----
   a.label('RawUp');
   a.b(0xe2, 0x20, 0xa9, 0x00, 0x8f, ...long(UP_MODE)); // SEP #$20 : UpMode = 0
-  a.b(0xaf, ...long(RAW_PTR + 2)); a.br(0xd0, 'raw'); // LDA.l RawPtr bank : BNE
-  a.b(0xc2, 0x20, 0xa9, 0x00, 0x00, 0x6b); // REP #$20 LDA #$0000 RTL (the replaced code)
-  a.label('raw');
-  a.b(0x8f, 0x04, 0x43, 0x00);
-  a.b(0xaf, ...long(RAW_PTR), 0x8f, 0x02, 0x43, 0x00);
-  a.b(0xaf, ...long(RAW_PTR + 1), 0x8f, 0x03, 0x43, 0x00);
-  a.b(0xa9, 0x01, 0x8f, 0x00, 0x43, 0x00); // DMA mode 1
-  a.b(0xa9, 0x18, 0x8f, 0x01, 0x43, 0x00); // → $2118
-  a.b(0xa9, 0x00, 0x8f, 0x05, 0x43, 0x00);
-  a.b(0xa9, 0x10, 0x8f, 0x06, 0x43, 0x00); // $1000 bytes
+  a.b(0xaf, ...long(RAW_PTR + 2)); a.br(0xf0, 'rgame'); // LDA.l RawPtr bank : BEQ
+  a.b(0xc2, 0x20, 0xaf, ...long(RAW_OFF)); a.br(0xf0, 'rwhole'); // REP #$20 LDA.l RawOff : BEQ
+  a.b(0xaf, ...long(RAW_VRAM)); a.br(0x30, 'rgame16'); // LDA.l RawVram : BMI (not known: the game's)
+  a.b(0xe2, 0x20, 0x68, 0x68, 0x68); // SEP #$20, drop the JSL return
+  a.b(0x4b); a.abs(0xf4, 'RawRest', -1); a.b(0xf4, EXT_UP_RET & 0xff, EXT_UP_RET >> 8); // PHK : PEA.w RawRest-1 : PEA.w $84CF-1
+  a.b(0xc2, 0x20, 0xa9, 0x00, 0x00, 0x5c, 0x85, 0xaa, 0x80); // REP #$20 LDA #$0000 JML $80AA85
+  a.label('rgame');
+  a.b(0xc2, 0x20); // REP #$20
+  a.label('rgame16');
+  a.b(0xa9, 0x00, 0x00, 0x6b); // LDA #$0000 RTL (the replaced code)
+  a.label('rwhole');
+  a.b(0xe2, 0x20, 0x68, 0x68, 0x68, 0xc2, 0x20); a.br(0x80, 'rdma'); // drop the JSL return, BRA (M=16)
+  a.label('RawRest'); // (M=8) VRAM: the upload's address + the tiles the game wrote
+  a.b(0xc2, 0x20, 0xaf, ...long(RAW_OFF), 0x4a, 0x18, 0x6f, ...long(RAW_VRAM), 0x8f, 0x16, 0x21, 0x00); // REP #$20 LDA.l RawOff LSR CLC ADC.l RawVram STA.l $2116
+  a.label('rdma'); // (M=16) the raw file from RawOff on
+  a.b(0xaf, ...long(RAW_OFF), 0x18, 0x6f, ...long(RAW_PTR), 0x8f, 0x02, 0x43, 0x00); // LDA.l RawOff CLC ADC.l RawPtr STA.l $4302
+  a.b(0xa9, 0x00, 0x10, 0x38, 0xef, ...long(RAW_OFF), 0x8f, 0x05, 0x43, 0x00); // LDA #$1000 SEC SBC.l RawOff STA.l $4305
+  a.b(0xa9, 0x01, 0x18, 0x8f, 0x00, 0x43, 0x00); // DMA mode 1 → $2118
+  a.b(0xe2, 0x20, 0xaf, ...long(RAW_PTR + 2), 0x8f, 0x04, 0x43, 0x00); // SEP #$20 LDA.l RawPtr bank STA.l $4304
   a.b(0xa9, 0x01, 0x8f, 0x0b, 0x42, 0x00); // start
-  a.b(0x68, 0x68, 0x68); // drop the JSL return
   a.b(0x5c, 0xd1, 0xa9, 0x80); // JML $80A9D1 (an RTS in bank 0: the upload's)
 
   // ---- decompression of any file (JSL, M=8 X=16, X = file): through the game's $00BA28 from where
@@ -368,7 +439,7 @@ export function installEditorPatch(rom: Rom): PatchInfo {
     throw new Error(`Unexpected code in the graphics loading routine${note} – patch not possible`);
   }
   if (rom.r24(DM16_SLOT) !== 0) throw new Error(`Extended object $${DM16_EXT.toString(16).padStart(2, '0')} is already in use${ownerNote(rom, DM16_SLOT, 3)} – patch not possible`);
-  const a = build();
+  const a = build(rom);
   // allocate first to know the base address, then link
   const size = a.bytes.length;
   const addr = rom.allocWrite(new Uint8Array(size));
@@ -738,7 +809,8 @@ export function installExtGfxPatch(rom: Rom): { table: number } {
   // editor patch's UpHi, which its upload takes for a call with this return address (EXT_UP_RET)
   a.label('Up');
   a.b(0xc9, 0xff, 0x00); a.br(0xf0, 'upx'); // CMP #$00FF : BEQ
-  a.b(0xe2, 0x30, 0xeb, 0x8f, ...long(UP_HI), 0xeb); // SEP #$30 : XBA : STA.l UpHi : XBA
+  a.b(0xe2, 0x30, 0xeb, 0x8f, ...long(UP_HI)); // SEP #$30 : XBA : STA.l UpHi
+  a.b(0xa9, 0x00, 0x8f, ...long(RAW_VRAM), 0x98, 0x8f, ...long(RAW_VRAM + 1), 0xeb); // LDA #0 : STA.l RawVram : TYA : STA.l RawVram+1 (the upload's VRAM address) : XBA
   a.b(0x9c, 0x16, 0x21, 0x8c, 0x17, 0x21, 0xa8); // STZ $2116 : STY $2117 : TAY (file)
   a.b(0x4b); a.abs(0xf4, 'upr', -1); a.b(0xf4, EXT_UP_RET & 0xff, EXT_UP_RET >> 8); // PHK : PEA.w upr-1 : PEA.w $84CF-1
   a.b(0x5c, 0x6b, 0xaa, 0x80); // JML $80AA6B (ends with RTS → $0084CF RTL → upr)

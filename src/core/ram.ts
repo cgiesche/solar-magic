@@ -169,8 +169,9 @@ export const EXGFX_HI_RAM: [number, number] = [0x7f367a, 9];
 // the sprite scroll fix's (scrollfix.ts): the camera's position the frame before, X and Y (16-bit each)
 export const SCROLL_FIX_RAM: [number, number] = [0x7f3683, 4];
 // the editor patch's too: 1 while a graphics file is uploaded to VRAM, then the address of the raw file the
-// upload copies as it is (bank 0: none)
-export const GFX_RAW_RAM: [number, number] = [0x7f3687, 4];
+// upload copies as it is (bank 0: none), how many of its bytes an LZ2 file decompressed over it replaces (as
+// 4bpp, 16-bit) and the upload's VRAM address (16-bit; bit 15: not known)
+export const GFX_RAW_RAM: [number, number] = [0x7f3687, 8];
 // Lunar Magic's conditional Direct Map16 flags (cdm16.ts), which community code sets: 128 bits, low to high
 export const CDM16_FLAGS: [number, number] = [0x7fc060, 16];
 // Lunar Magic's ExAnimation RAM (extrigger.ts), which community code sets and reads: the manual frames (16 bytes),
