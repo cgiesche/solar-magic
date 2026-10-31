@@ -1704,9 +1704,20 @@ export class App {
   }
 
   // the suggestions anew a while after the last change, in slices of background work (later); the levels that
-  // didn't change keep their results (keptSuggestions). A change they don't depend on keeps them current at once.
+  // didn't change keep their results (keptSuggestions). A change they don't depend on keeps them current at once;
+  // one back to the latest run's state (an undo) makes them current at once with that run's whole list (a suggestion
+  // saved and undone is back with its places, a list it was dropped from is never current).
   private scheduleSuggestions(): void {
-    if (this.suggestionsCurrent && this.keptSuggestions.holds(this.rom, this.suggestSource())) return;
+    const held = this.keptSuggestions.held(this.rom, this.suggestSource());
+    if (held) {
+      if (this.suggestionsCurrent) return;
+      clearTimeout(this.suggestTimer);
+      this.suggestRun++; // (a run started meanwhile stops)
+      this.prefabSuggestions = held;
+      this.suggestionsCurrent = true;
+      this.emit('prefab-suggestions');
+      return;
+    }
     clearTimeout(this.suggestTimer);
     this.suggestionsCurrent = false;
     const run = ++this.suggestRun;

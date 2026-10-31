@@ -5,7 +5,8 @@
 // gone once the places are replaced by the prefab. Each level's arrangements and places are kept between runs
 // (KeptSuggestions, #185): a run takes apart only the levels that changed, with the same suggestions; a cold run keeps
 // all its places for the next one, also more than the bound (#200). A run loads only the levels whose load read a
-// changed byte, and a change nothing of the latest run read keeps its suggestions (KeptSuggestions.holds, #201).
+// changed byte, and a change nothing of the latest run read keeps its suggestions (KeptSuggestions.held, #201), as
+// do an undo back to its state and another level opened without edits (#212).
 import { Rom, snesToPc } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadLevel, newUid, hasObjects, L1_PTRS, type LevelObject } from '../src/core/level.ts';
@@ -99,6 +100,9 @@ check(list.every((s) => s.saved > 0 && s.count > 1), 'only positive savings of r
   check(l3.find((s) => s.prefab.w === 3)?.count === 2, 'the open level as edited');
 }
 
+// a block's tile gone from lv
+const tile104 = (lv: Level) => { lv.objects = lv.objects.filter((o) => !(o.ext === DM16_EXT && o.tile === 0x104)); return lv; };
+
 // kept between runs: only the levels that changed are taken apart again, the suggestions as a full run's
 {
   class Spy extends KeptSuggestions {
@@ -126,7 +130,7 @@ check(list.every((s) => s.saved > 0 && s.count > 1), 'only positive savings of r
   };
   // the latest run's suggestions hold (kept at once) or not after a change
   const holds = (open: Level | undefined, want: boolean, what: string) =>
-    check(kept.holds(rom, { levels: usedLevels(rom), open, emu: load }) === want, `${what}: the latest suggestions ${want ? 'hold' : 'don\'t hold'}`);
+    check((kept.held(rom, { levels: usedLevels(rom), open, emu: load }) !== null) === want, `${what}: the latest suggestions ${want ? 'hold' : 'don\'t hold'}`);
   same(undefined, 'first run');
   check(kept.took.length === usedLevels(rom).length && kept.searched.length > 0, 'first run: every level taken apart');
   check(kept.loaded.length === usedLevels(rom).length, 'first run: every level loaded');
@@ -144,15 +148,15 @@ check(list.every((s) => s.saved > 0 && s.count > 1), 'only positive savings of r
     // a level edited (searched again first): the unchanged levels' places are still kept
     const edited = H2;
     const open = loadLevel(rom, edited);
-    open.objects = open.objects.filter((o) => !(o.ext === DM16_EXT && o.tile === 0x104));
+    tile104(open);
     small.reset();
     suggestPrefabs(rom, { levels: usedLevels(rom), open, emu: load, kept: small });
     check(small.searched.length > 0 && small.searched.every((n) => n === edited), `a level edited with a bound of 2: only it searched again (${[...new Set(small.searched)].map((n) => n.toString(16))})`);
   }
   // the open level as edited: a block's tile gone (as a place it is gone)
   const open = loadLevel(rom, H2);
-  holds(open, false, 'a level opened'); // (another open level: not compared with its saved data)
-  open.objects = open.objects.filter((o) => !(o.ext === DM16_EXT && o.tile === 0x104));
+  holds(open, true, 'a level opened'); // (without edits: its content is its saved one's)
+  tile104(open);
   same(open, 'open level edited');
   only([H2], 'open level edited', []);
   check(kept.searched.includes(H2), 'open level edited: searched again');
@@ -215,6 +219,56 @@ check(list.every((s) => s.saved > 0 && s.count > 1), 'only positive savings of r
   saveLevel(rom, h1);
   same(undefined, 'a level with places saved');
   only([H1], 'a level with places saved');
+}
+
+// the latest run's suggestions back at once: an undo back to its state, another level opened without edits, an edit
+// of an open level that isn't among the levels (#212)
+{
+  const kept = new KeptSuggestions(new RomFingerprint(rom));
+  const src = (open?: Level) => ({ levels: usedLevels(rom), open, emu: load, kept });
+  const held = (open: Level | undefined) => kept.held(rom, src(open));
+  const list = suggestPrefabs(rom, src(loadLevel(rom, H2))); // (H2 open: not loaded as saved)
+  check(list.length > 0 && held(loadLevel(rom, H2)) === list, 'nothing changed: the run\'s list');
+  // the open level edited, the edit undone
+  check(held(tile104(loadLevel(rom, H2))) === null, 'the open level edited: not held');
+  check(held(loadLevel(rom, H2)) === list, 'the edit undone: held');
+  // a byte of a level's data changed and changed back (a ROM edit undone)
+  const d = snesToPc(rom.r24(L1_PTRS + H1 * 3)) + 5, was = rom.data[d];
+  rom.writeAt(d, Uint8Array.of(was ^ 1));
+  check(held(loadLevel(rom, H2)) === null, 'a level\'s data changed: not held');
+  rom.writeAt(d, Uint8Array.of(was));
+  check(held(loadLevel(rom, H2)) === list, 'a ROM edit undone: held');
+  // another level opened without edits: the one open before taken as saved (loaded for it), the same content
+  check(held(loadLevel(rom, H1)) === list, 'another level opened: held');
+  check(held(loadLevel(rom, H1)) === list && held(undefined) === list, 'another level opened: held again, also with none open');
+  // with edits of the level open before unsaved: its saved content isn't what the run took
+  suggestPrefabs(rom, src(tile104(loadLevel(rom, H2))));
+  check(held(tile104(loadLevel(rom, H2))) !== null, 'H2 edited: held');
+  check(held(loadLevel(rom, H1)) === null, 'another level opened, the edits of the one before unsaved: not held');
+  // the level open before saved after the switch: its load's bytes count
+  const l2 = suggestPrefabs(rom, src(loadLevel(rom, H2)));
+  check(held(loadLevel(rom, H1)) === l2, 'another level opened: held (2)');
+  const h2 = loadLevel(rom, H2);
+  h2.objects.push(dm(0x70, 4, 0x191));
+  saveLevel(rom, h2);
+  check(held(loadLevel(rom, H1)) === null, 'the level open before saved after the switch: not held');
+  // a suggestion saved as prefab with its places replaced: not held; undone (the ROM as before): the run's whole list
+  // with it again (its places are back)
+  {
+    const l4 = suggestPrefabs(rom, src(undefined)), s = l4.find((q) => q.prefab.w === 3)!, before = rom.data.slice();
+    writePrefab(rom, 7, { ...s.prefab, name: 'Block' });
+    applyPrefabPlaces(rom, 7, s.places);
+    check(held(undefined) === null, 'a suggestion saved: not held');
+    rom.writeAt(0, before);
+    check(held(undefined) === l4 && l4.includes(s), 'the save undone: held, with the saved suggestion');
+  }
+  // an edit of an open level that isn't among the levels: held
+  const l3 = suggestPrefabs(rom, src(loadLevel(rom, H1)));
+  const unused = Array.from({ length: 0x200 }, (_, n) => n).find((n) => !usedLevels(rom).includes(n))!;
+  const u = loadLevel(rom, unused);
+  check(held(u) === l3, 'a level not among them opened: held');
+  u.objects.push(...block(0x20, 5));
+  check(held(u) === l3, 'a level not among them edited: held');
 }
 
 // replaced by the prefab: the suggestion is gone

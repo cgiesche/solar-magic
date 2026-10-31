@@ -8,7 +8,8 @@
 // Each level's arrangements and places can be kept between runs (KeptSuggestions), with the level (as saved, or
 // as edited) as their input and the places with the ROM bytes their search read: a run takes apart only the
 // levels that changed, and loads only those whose load read a changed byte (#201). A change none of the latest
-// run's bytes and levels takes part in keeps its suggestions (KeptSuggestions.holds).
+// run's bytes and levels takes part in keeps its suggestions (KeptSuggestions.held), also one that brings back its
+// state (an undo) or opens another level without edits (#212).
 
 import type { Rom } from './rom.ts';
 import { loadLevel, serializeLayer1, serializeLayer2, serializeObjects, hasObjects, isL1Vertical, isSized, type Level, type LevelObject } from './level.ts';
@@ -57,8 +58,9 @@ export class KeptSuggestions {
   private arrangements = new Map<number, { input: string; a: Arrangements }[]>(); // a level's latest used inputs first
   private places: MemoryResults;
   private contents: MemoryResults; // a level's content as saved, by object 2D's length
-  private run: { read: RomReads; levels: string; open: string; len2d: number } | null = null; // the running run's (what it read: its levels' loads, its places' searches)
-  private last: { deps: RomDeps; levels: string; open: string; len2d: number } | null = null; // the latest finished run's
+  private run: { read: RomReads; levels: string; edited: number | null; len2d: number } | null = null; // the running run's (what it read: its levels' loads, its places' searches)
+  // the latest finished run's, with each level's content it took (inputs) and its suggestions
+  private last: { deps: RomDeps; levels: string; edited: number | null; len2d: number; inputs: Map<number, string>; list: PrefabSuggestion[] } | null = null;
 
   constructor(fp: RomFingerprint, limit = PLACES) {
     this.fp = fp;
@@ -70,26 +72,48 @@ export class KeptSuggestions {
   startRun(rom: Rom, src: SuggestSource, len2d: number): void {
     this.places.startRound();
     this.contents.startRound();
-    this.run = { read: new RomReads(rom.data.length), levels: src.levels.join(), open: openKey(rom, src.open), len2d };
+    this.run = { read: new RomReads(rom.data.length), levels: src.levels.join(), edited: editedOf(src), len2d };
   }
-  endRun(): void {
+  endRun(inputs: Map<number, string>, list: PrefabSuggestion[]): void {
     this.places.endRound();
     this.contents.endRound();
     const { read, ...run } = this.run!;
-    this.last = { deps: this.fp.deps(read), ...run };
+    this.last = { deps: this.fp.deps(read), ...run, inputs, list };
     this.run = null;
   }
 
-  // the latest finished run's suggestions are those of a run on src now: the same levels and open level, and no
-  // ROM byte it read changed (a pixel of a graphics file keeps them; a level saved, a prefab's places, doesn't)
-  holds(rom: Rom, src: SuggestSource): boolean {
-    const l = this.last;
-    return !!l && l.levels === src.levels.join() && l.len2d === objectLength2D(rom) && l.open === openKey(rom, src.open) && this.fp.valid(l.deps);
+  // the latest finished run's suggestions (not to be changed) if a run on src now has them, else null: the same
+  // levels with the same contents, and no ROM byte it read changed (a pixel of a graphics file keeps them, a level
+  // saved doesn't, an undo back brings them back). The open level counts only if it is among the levels. Another
+  // level opened: the one the run took as edited is compared as saved, and from then on it is the latest run's.
+  held(rom: Rom, src: SuggestSource): PrefabSuggestion[] | null {
+    const l = this.last, len2d = objectLength2D(rom);
+    if (!l || l.levels !== src.levels.join() || l.len2d !== len2d || !this.fp.valid(l.deps)) return null;
+    const edited = editedOf(src);
+    if (edited !== null && l.inputs.get(edited) !== levelContent(rom, src.open!)) return null;
+    if (l.edited !== null && l.edited !== edited) {
+      let e = this.savedEntry(l.edited, len2d);
+      if (!e) {
+        updateBytePages(rom); // (as a run's loads)
+        const s = loadSaved(rom, l.edited);
+        if (!s) return null;
+        e = { data: s.input, deps: this.fp.deps(s.reads) };
+        this.contents.set(`${l.edited}`, e.data, e.deps, `${len2d}`);
+      }
+      if (e.data !== l.inputs.get(l.edited)) return null;
+      const read = new RomReads(rom.data.length);
+      read.addDeps(l.deps);
+      read.addDeps(e.deps);
+      l.deps = this.fp.deps(read);
+    }
+    l.edited = edited;
+    return l.list;
   }
 
   savedContent(n: number, len2d: number): string | undefined {
-    return this.used(this.contents.entry<string>(`${n}`, `${len2d}`));
+    return this.used(this.savedEntry(n, len2d));
   }
+  private savedEntry(n: number, len2d: number) { return this.contents.entry<string>(`${n}`, `${len2d}`); }
   setSavedContent(n: number, len2d: number, input: string, reads: RomReads): void {
     this.contents.set(`${n}`, input, this.fp.deps(reads), `${len2d}`);
     this.run?.read.add(reads);
@@ -128,7 +152,8 @@ const levelContent = (rom: Rom, lv: Level) => inputHash({
   layer1: serializeLayer1(rom, lv), layer2: serializeLayer2(rom, lv), layer2Pointer: lv.layer2Pointer, secondary: lv.secondary,
   objects: hasObjects(lv.header.mode) ? null : serializeObjects(lv.objects, [], isL1Vertical(rom, lv.header.mode), undefined, isSized(lv.secondary)),
 });
-const openKey = (rom: Rom, open: Level | undefined) => (open ? `${open.number}:${levelContent(rom, open)}` : '');
+// the level a run on src takes as edited: the open level, if it is among the levels
+const editedOf = (src: SuggestSource) => (src.open && src.levels.includes(src.open.number) ? src.open.number : null);
 
 // level n as saved with its content and the ROM bytes loading it read; null: unreadable
 function loadSaved(rom: Rom, n: number): { lv: Level; input: string; reads: RomReads } | null {
@@ -244,8 +269,9 @@ export function* prefabSuggestions(rom: Rom, src: SuggestSource): Generator<void
     const saved = places.reduce((m, p) => m + p.places.reduce((b, q) => b + q.bytes, 0), 0) - cost.once;
     if (k > 1 && saved > 0) out.push({ key, prefab, places, count: k, levels: places.map((p) => p.level).sort((x, y) => x - y), saved });
   }
-  kept?.endRun();
-  return out.sort((x, y) => y.saved - x.saved);
+  out.sort((x, y) => y.saved - x.saved);
+  kept?.endRun(new Map([...levels].map(([n, l]) => [n, l.input])), out);
+  return out;
 }
 
 // all at once
