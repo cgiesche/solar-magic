@@ -236,3 +236,15 @@ export function* spriteMemJob(ctx: SpriteMemContext, m: number, candidates: numb
   ctx.groupResults?.endCheck();
   return { check, suggestion };
 }
+
+// The sprite memory check of a level's sprites (the result learner's job, no picture): the level with its header and
+// BG, its sprite memory value, the values a suggestion tries and its sprites (in an order that doesn't change
+// between sessions: the result is kept by their indices)
+export interface SpriteMemLevel { number: number; header: PrimaryHeader; bgPointer: number; mem: number; candidates: number[]; sprites: LevelSprite[] }
+export interface SpriteMemResult { lost: number[]; suggestion: number | null } // lost: indices of sprites drawn incompletely
+
+// spriteMemJob with the result by the sprites' indices
+export function* spriteMemCheckJob(emu: LevelEmulator, l: SpriteMemLevel, groupResults?: SpriteGroupResults): Generator<void, SpriteMemResult> {
+  const r = yield* spriteMemJob({ emu, level: l.number, header: l.header, bgPointer: l.bgPointer, groupResults }, l.mem, l.candidates, l.sprites);
+  return { lost: [...r.check.conflicts].map((u) => l.sprites.findIndex((q) => q.uid === u)), suggestion: r.suggestion };
+}

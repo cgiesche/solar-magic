@@ -5,7 +5,8 @@
 // Longer tasks run here too, as jobs of the job runner (jobrunner.ts) a step at a time between the probes: the object
 // kinds of a tileset (objkinds.ts), the level scan (levelscan.ts) and the camera at Mario standing at a place
 // (camerareach.ts). A task the editor no longer wants is kept without running; asked for again with the same
-// result, it goes on where it stood. The result learner's jobs (CONTEXT.md; the sprite images) run here too, in
+// result, it goes on where it stood. The result learner's jobs (CONTEXT.md; the sprite images, the levels' uses, the
+// sprite memory check, the animated tiles and colors) run here too, in
 // lanes as on the main thread (learner.ts), taking turns with the tasks; they choose whether the display data counts
 // for them (pictures: it does; the probes and tasks: it doesn't, ADR 0008).
 // After the first copy of the ROM the editor sends the ranges a change wrote: queued jobs stay, a task starts over
@@ -19,7 +20,10 @@ import { objKindsJob, kindsKey } from './objkinds.ts';
 import { levelScanJob, type ScanResult } from './levelscan.ts';
 import { cameraAtJob, type CameraAt } from './camerareach.ts';
 import { spriteSetJob, spriteAtJob, spriteBytesJob } from './spritegfx.ts';
-import { jobId, jobKey, type ProbeJob, type ProbeMessage, type ProbeReply, type TaskMessage, type TaskType, type LearnJob, type LearnMessage } from './probeprotocol.ts';
+import { LevelUses, levelUsesJob } from './levelusage.ts';
+import { SpriteGroupResults, spriteMemCheckJob } from './spritemem.ts';
+import { animatedJob } from './levelemu.ts';
+import { jobId, jobKey, learnKeep, type ProbeJob, type ProbeMessage, type ProbeReply, type TaskMessage, type TaskType, type LearnJob, type LearnMessage } from './probeprotocol.ts';
 
 // a longer task: what was asked (a request asking for the same result may have replaced it) and its job
 interface Task { msg: TaskMessage; run: JobRun<unknown> }
@@ -34,13 +38,20 @@ function taskJob(m: TaskMessage): JobRun<unknown>['start'] {
 }
 function* found<T>(job: Generator<void, T | null>): Job<T | undefined> { return (yield* job) ?? undefined; }
 
+// what learn jobs keep between them: the levels' uses (the entries of each level) and the results of single sprite
+// groups (the sprite memory check's)
+interface LearnState { uses: LevelUses; groups: SpriteGroupResults }
+
 // a learn job's job and whether it is a picture (CONTEXT.md); show takes what it shows while it runs (null: it
 // started, also over)
-function learnJob(j: LearnJob, show: (items: unknown[] | null) => void): { picture: boolean; start: JobRun<unknown>['start'] } {
+function learnJob(j: LearnJob, state: LearnState, show: (items: unknown[] | null) => void): { picture: boolean; start: JobRun<unknown>['start'] } {
   switch (j.kind) {
     case 'sprites': return { picture: true, start: (emu, _p, part) => spriteSetJob(emu, j.level, j.nums, show, part, j.input) };
     case 'spriteAt': return { picture: true, start: (emu) => spriteAtJob(emu, j.level, j.id, j.x, j.y) };
     case 'spriteBytes': return { picture: true, start: (emu) => spriteBytesJob(emu, j.level, j.id, j.bytes) };
+    case 'uses': return { picture: false, start: (emu) => levelUsesJob(state.uses, emu, j.levels, show) };
+    case 'spriteMem': return { picture: false, start: (emu) => spriteMemCheckJob(emu, j.level, state.groups) };
+    case 'animated': return { picture: true, start: (emu) => animatedJob(emu, j.level, j.ov) };
   }
 }
 
@@ -57,6 +68,7 @@ export class ProbeHost {
   private rom: Rom | null = null;
   private prober: BlockProber | null = null;
   private runner: JobRunner | null = null;
+  private state: LearnState | null = null;
   private gen = -1;
   private asked = new Map<string, ProbeJob>(); // requested directly: first
   private prefetch = new Map<string, ProbeJob>();
@@ -64,6 +76,7 @@ export class ProbeHost {
   // cancelled tasks, not run: taken up again when the same result is asked for before another task of their type
   // (which would use their emulator)
   private cancelled = new Map<TaskType, Task>();
+  private turned = false; // the last job run was a turn's (prefetched probes take turns with them)
 
   // tasks' jobs (re)started
   get started(): number { return this.runner?.started ?? 0; }
@@ -82,6 +95,7 @@ export class ProbeHost {
       // the tasks' emulators start from the prober's boot snapshot, which leaves out the display data as the probes
       // do (ADR 0008): the prober's emulator gets the runner's mask (gfxDisplaySkipMask)
       this.runner = new JobRunner({ rom, results: this.prober.results, noDisplay: this.prober.emu });
+      this.state = { uses: new LevelUses(rom, this.prober.results), groups: new SpriteGroupResults(this.prober.results.fp) };
       return;
     }
     this.rom.data = data;
@@ -141,8 +155,9 @@ export class ProbeHost {
     if (known) { known.msg = msg; return; }
     const show = (items: unknown[] | null) => { if (items === null) { l.fresh = true; l.shown = []; } else l.shown.push(...items); };
     // (a job starting over runs for the latest request)
-    const start: JobRun<unknown>['start'] = (emu, p, part) => learnJob(l.msg.job, show).start(emu, p, part);
-    const l: Learn = { msg, fresh: false, shown: [], run: this.runner.run({ key: msg.key, input: msg.input, keep: true, picture: learnJob(msg.job, show).picture, start }) };
+    const state = this.state!, start: JobRun<unknown>['start'] = (emu, p, part) => learnJob(l.msg.job, state, show).start(emu, p, part);
+    const run = this.runner.run({ key: msg.key, input: msg.input, keep: learnKeep(msg.job), picture: learnJob(msg.job, state, show).picture, start });
+    const l: Learn = { msg, fresh: false, shown: [], run };
     lane.learns.push(l);
   }
 
@@ -153,12 +168,24 @@ export class ProbeHost {
     try { r = this.runner!.step(name, l.run); } catch (e) { console.error(e); r = { result: null }; failed = true; }
     if (r) {
       lane.learns.shift();
-      return { type: 'learned', gen: this.gen, lane: m.lane, key: m.key, input: m.input, result: failed ? null : r.result, failed, put: this.put(failed ? null : m.key, m.input) };
+      const keep = learnKeep(m.job), memory = failed || keep !== 'memory' ? undefined : this.runner!.memory.entry(m.key, m.input);
+      return {
+        type: 'learned', gen: this.gen, lane: m.lane, key: m.key, input: m.input, result: failed ? null : r.result, failed,
+        put: [...this.put(failed || keep !== true ? null : m.key, m.input), ...this.usesKnown(m.job)], ...(memory && { memory: { ...memory, input: m.input } }),
+      };
     }
     const d: ProbeReply = { type: 'learning', gen: this.gen, lane: m.lane, key: m.key, input: m.input, label: l.run.label, fresh: l.fresh, shown: l.shown, put: this.put(null) };
     l.fresh = false;
     l.shown = [];
     return d;
+  }
+
+  // The entries of the levels' uses asked for that this cache holds, also those not set since the last reply: the
+  // editor asked for them as it doesn't have them (it may have dropped one, computed on an older ROM generation), and
+  // would otherwise ask again and again
+  private usesKnown(j: LearnJob): [string, CacheEntry][] {
+    if (j.kind !== 'uses') return [];
+    return j.levels.flatMap((n) => { const e = this.state!.uses.entry(n); return e ? [e] : []; });
   }
 
   // the task of that type is not wanted any more: it runs no further step (kept, see startTask)
@@ -219,10 +246,12 @@ export class ProbeHost {
 
   get pending(): number { return this.asked.size + this.turns.size + this.prefetch.size; }
 
-  // runs the next job (asked probes, then a step of a longer task or a learn job, then prefetched probes); null
-  // when nothing finished (a learn job's step gives its progress)
+  // runs the next job (asked probes, then a step of a longer task or a learn job taking turns with a prefetched probe,
+  // so a long one, as the levels' uses, doesn't hold up what the palettes show); null when nothing finished (a learn
+  // job's step gives its progress)
   next(): ProbeReply | null {
-    if (!this.asked.size && this.turns.size) {
+    this.turned = !this.asked.size && this.turns.size > 0 && !(this.turned && this.prefetch.size);
+    if (this.turned) {
       const [name, turn] = this.turns.entries().next().value!;
       this.turns.delete(name);
       if ('learns' in turn) {

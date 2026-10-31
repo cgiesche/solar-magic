@@ -2,7 +2,7 @@
 
 import { makeProjectId } from '../core/projectid.ts';
 import { Rom } from '../core/rom.ts';
-import { LevelEmulator, type LevelRender, type LevelOverride, MAP_BASE, MAP_SIZE } from '../core/levelemu.ts';
+import { LevelEmulator, type LevelRender, type LevelOverride, type Animated, MAP_BASE, MAP_SIZE } from '../core/levelemu.ts';
 import {
   type Level, type LevelObject, type LevelSprite, type ScreenExit, loadLevel, spriteLoadOrder, serializeLayer1, serializeSprites, serializeLevelSprites, spriteSizes, spriteId, spriteBytes,
   isL1Vertical, newUid, hasLayer2Objects, hasObjects, L2_PTRS, SEC_HDR,
@@ -15,7 +15,7 @@ import { objectUserNames } from '../core/usernames.ts';
 import { loadPixiProject, customSpriteList, type CustomSprite } from '../core/pixi.ts';
 import { renderLevel, renderLayerTiles, type LevelImages, composite, animatedPixels, TileAnimation, type AnimStep } from '../core/render.ts';
 import type { SpriteImage, SpriteLevel } from '../core/spritegfx.ts';
-import { spriteMemJob, usedSpriteMemory, SpriteGroupResults } from '../core/spritemem.ts';
+import { usedSpriteMemory, type SpriteMemLevel, type SpriteMemResult } from '../core/spritemem.ts';
 import { DM16_EXT, levelGfx, levelExtGfx, customPalette, levelMusic, defaultGfx } from '../core/patches.ts';
 import { objectLength2D, fitExtension } from '../core/obj2d.ts';
 import { gfxSkipMask, gfxFilesHash } from '../core/gfxpages.ts';
@@ -123,25 +123,6 @@ export type PasteHintAt = PasteHint & { level: number; layer: 'l1' | 'l2'; objec
 // wrong: 4 keeps several inputs per key)
 const CACHE_NAME = 'rc', CACHE_VERSION = 4, CACHE_PREFIX = `${CACHE_NAME}${CACHE_VERSION}:`;
 const SWEEP_SLICE = 64; // stored results checked against the ROM per background slice (ResultCache.sweep)
-
-// the 8x8 tiles (layer 1 tile numbers) and colors that change in level n (ov) over 16 times 4 frames (none
-// when it fails)
-function animatedIn(emu: LevelEmulator, n: number, ov: LevelOverride): { tiles: Set<number>; colors: Set<number> } {
-  const tiles = new Set<number>(), colors = new Set<number>();
-  try {
-    const r = emu.load(n, ov);
-    const frames = emu.animationFrames(16, 4);
-    const base = (r.ppuRegs[0x0b] & 0x0f) << 13;
-    for (const f of frames) {
-      for (let t = 0; t < 0x400; t++) {
-        const o = (base + t * 32) & 0xffff;
-        for (let b = 0; b < 32; b++) if (f.vram[o + b] !== r.vram[o + b]) { tiles.add(t); break; }
-      }
-      for (let c = 0; c < 256; c++) if (f.cgram[c * 2] !== r.cgram[c * 2] || f.cgram[c * 2 + 1] !== r.cgram[c * 2 + 1]) colors.add(c);
-    }
-  } catch (e) { console.error(e); return { tiles: new Set(), colors: new Set() }; }
-  return { tiles, colors };
-}
 
 // result of the sprite memory check (see App.checkSpriteMem); gen: the edit session's levelGen when it started
 export interface SpriteMemState { key: string; level: number; mem: number; gen: number; conflicts: Set<number>; suggestion: number | null }
@@ -285,7 +266,6 @@ export class App {
       soon: (step) => setTimeout(step, 0),
       setBusy: (key, label) => this.setBusy(key, label),
     });
-    this.spriteGroupResults = new SpriteGroupResults(this.results.fp);
     this.keptSuggestions = new KeptSuggestions(this.results.fp);
     this.probes = new ProbeClient({
       results: this.results,
@@ -847,10 +827,9 @@ export class App {
 
   // ------------- sprite memory (see spritemem.ts) -------------
   // sprites drawn incompletely because their OAM range is too small, and a sprite memory value
-  // that shows all; checked in the background after every change (only the groups of sprites it changed:
-  // the others' results are kept in spriteGroupResults)
+  // that shows all; checked in the probe worker after every change (only the groups of sprites it changed: the others'
+  // results are kept there)
   spriteMem: SpriteMemState | null = null;
-  private spriteGroupResults: SpriteGroupResults;
   private spriteMemBase: SpriteMemState | null = null; // the latest check no edit came after (autocorrection compares with it)
   private spriteMemTimer = 0;
   private spriteMemRun = 0;
@@ -873,7 +852,7 @@ export class App {
     const key = `sm3:${lv.number}`, checked = `${key}#${inputHash(input)}`;
     if (this.spriteMem?.key === checked) return;
     const run = ++this.spriteMemRun;
-    const done = (r: { lost: number[]; suggestion: number | null }) => {
+    const done = (r: SpriteMemResult) => {
       if (run !== this.spriteMemRun || this.level !== lv) return;
       const cur = { key: checked, level: lv.number, mem, gen, conflicts: new Set(r.lost.map((i) => sprites[i].uid)), suggestion: r.suggestion };
       this.spriteMem = cur;
@@ -883,11 +862,8 @@ export class App {
       this.spriteMemBase = cur;
       if (base) this.autoSpriteMem(base, cur);
     };
-    const groupResults = this.spriteGroupResults;
-    const stored = this.learner.learn(key, function* (emu) {
-      const r = yield* spriteMemJob({ emu, level: lv.number, header, bgPointer: bg, groupResults }, mem, candidates, sprites);
-      return { lost: [...r.check.conflicts].map((u) => sprites.findIndex((q) => q.uid === u)), suggestion: r.suggestion };
-    }, { input, lane: 'spritemem', replace: true, label: 'Checking sprite memory', picture: false, done });
+    const level: SpriteMemLevel = { number: lv.number, header, bgPointer: bg, mem, candidates, sprites };
+    const stored = this.probes.learn<SpriteMemResult>(key, { kind: 'spriteMem', level }, { input, lane: 'spritemem', replace: true, label: 'Checking sprite memory', done });
     if (stored) done(stored);
   }
 
@@ -918,21 +894,22 @@ export class App {
   }
 
   // 8x8 tiles (layer 1 tile numbers) and colors the game keeps rewriting in this level (tile and
-  // palette animation), found by emulating some frames in the background, kept in memory with the level as
+  // palette animation), found by emulating some frames in the probe worker, kept in memory with the level as
   // edited as their input; null until known ('animated' when done), the level's previous ones meanwhile
-  animated(): { tiles: Set<number>; colors: Set<number> } | null {
+  animated(): Animated | null {
     const n = this.level.number, ov = this.buildOverrides();
-    const res = this.learner.learn(`anim:${n}`, function* (emu) { return animatedIn(emu, n, ov); },
-      { input: { level: this.levelInput(ov), masked: this.maskedHash() }, keep: 'memory', lane: 'animated', replace: true, done: this.animatedLearned });
+    // (the load's owners of level bytes aren't needed: not sent)
+    const res = this.probes.learn<Animated>(`anim:${n}`, { kind: 'animated', level: n, ov: { ...ov, byteOwner: undefined } },
+      { input: { level: this.levelInput(ov), masked: this.maskedHash() }, lane: 'animated', replace: true, done: this.animatedLearned });
     if (res) this.animatedShown = { level: n, res };
     return this.withOwnAnims(res ?? (this.animatedShown?.level === n ? this.animatedShown.res : null));
   }
-  private animatedShown: { level: number; res: { tiles: Set<number>; colors: Set<number> } } | null = null;
+  private animatedShown: { level: number; res: Animated } | null = null;
   private animatedLearned = () => this.emit('animated');
   // plus the tiles and colors the ROM's own ExAnimation slots overwrite (their trigger may not fire in the
   // emulated frames, e.g. on/off or manual), read from the lists as they are now
-  private ownAnim: { key: string; res: { tiles: Set<number>; colors: Set<number> } | null; out: { tiles: Set<number>; colors: Set<number> } | null } = { key: '', res: null, out: null };
-  private withOwnAnims(res: { tiles: Set<number>; colors: Set<number> } | null): { tiles: Set<number>; colors: Set<number> } | null {
+  private ownAnim: { key: string; res: Animated | null; out: Animated | null } = { key: '', res: null, out: null };
+  private withOwnAnims(res: Animated | null): Animated | null {
     if (!res) return null;
     const o = this.ownAnim, charWord = (this.render.ppuRegs[0x0b] & 0x0f) << 12;
     const key = `${this.rom.gen}:${this.level.number}:${charWord}`;
@@ -1158,15 +1135,14 @@ export class App {
     // Direct Map16 objects in both of their states, whatever the view's flags
     const rom = this.rom, lv = this.level, ov = this.buildOverrides();
     const here = this.learner.now(`lt:${lv.number}`, (emu) => emu.tracked(() => levelTilesAll(rom, lv, (o) => emu.load(lv.number, o), ov)), { input: this.levelInput(ov), keep: 'memory', picture: false });
-    const levels = [here];
-    let pending = 0;
+    const levels = [here], missing: number[] = [];
     for (const n of usedLevels(this.rom)) {
       if (n === this.level.number) continue;
       const t = idx.tiles(n);
-      if (t) levels.push(t); else pending++;
+      if (t) levels.push(t); else missing.push(n);
     }
-    if (pending) this.learnLevelTiles(idx);
-    return { levels, pending };
+    if (missing.length) this.learnLevelTiles(missing);
+    return { levels, pending: missing.length };
   }
   // a level's BG tilemap from its load (the open one as shown), where it is the game's own (tilemove.ts)
   loadedBg(n: number): Uint16Array {
@@ -1202,15 +1178,12 @@ export class App {
 
   private usesIndex: LevelUses | null = null;
 
-  // the other levels' tiles not known (each stored by LevelUses), 'level-uses' as they come
-  private learnLevelTiles(idx: LevelUses): void {
-    const missing = () => idx.missing(usedLevels(this.rom)).filter((n) => n !== this.level.number);
-    this.learner.learn('uses', function* (emu) {
-      for (let left = missing(); left.length; left = missing()) {
-        while (left.length) { idx.scan(left.shift()!, emu); yield `Uses in levels (${left.length})`; }
-      }
-    }, { keep: false, label: 'Uses in levels', picture: false, progress: this.usesLearned, done: this.usesLearned });
+  // the other levels' tiles not known (missing; each stored by LevelUses), learned in the probe worker, 'level-uses' as
+  // they come
+  private learnLevelTiles(missing: number[]): void {
+    this.probes.learn('uses', { kind: 'uses', levels: missing }, { lane: 'uses', label: 'Uses in levels', shown: this.usesShown, done: this.usesLearned });
   }
+  private usesShown = (levels: unknown[] | null) => { if (levels?.length) this.emit('level-uses'); };
   private usesLearned = () => this.emit('level-uses');
 
   // ------------- jump arcs (see jumparcs.ts) -------------

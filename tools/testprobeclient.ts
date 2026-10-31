@@ -19,6 +19,7 @@ import type { ScanLevel } from '../src/core/levelscan.ts';
 import { captureSprites, spriteLoad, type SpriteLevel } from '../src/core/spritegfx.ts';
 import type { LearnJob } from '../src/core/probeprotocol.ts';
 import { inputHash } from '../src/core/inputs.ts';
+import { levelTilesKey } from '../src/core/levelusage.ts';
 import { editorImage } from './fixture.ts';
 
 const EDITOR_IMAGE = await editorImage(); // the fixture as the editor opens it
@@ -362,6 +363,34 @@ function editor(worker: Worker | null) {
   await settle();
   e2.drain();
   check(done2.length === 1 && JSON.stringify(done2[0]) === direct && JSON.stringify(e2.results.get('spr', inputHash(input))) === direct, 'no worker: captured on the main thread');
+}
+
+// the levels' uses and the animated tiles and colors (#177): the uses come in the levels' entries as each level is
+// learned (shown), the job keeps nothing of its own; the animated ones are kept in memory only, asked again the result at
+// once (also after a ROM change of nothing they read)
+{
+  const w = new Worker(), e = editor(w);
+  const shown: unknown[] = [];
+  let usesDone = 0;
+  e.client.learn('uses', { kind: 'uses', levels: [0x105, 0x106] }, { lane: 'uses', label: 'Uses in levels', shown: (l) => { if (l) shown.push(...l); }, done: () => usesDone++ });
+  await settle();
+  w.run();
+  check(shown.join() === [0x105, 0x106].join() && usesDone === 1 && [0x105, 0x106].every((n) => e.results.under(levelTilesKey(n)).length === 1) && !e.busy.has('uses'),
+    'uses: shown a level at a time, in the levels\' entries, done');
+  check(e.steps.every(([k]) => k === 'probe-prefetch'), 'uses: the main thread loaded no level');
+
+  const job: LearnJob = { kind: 'animated', level: 0x105, ov: {} }, opts = { input: { an: 1 }, lane: 'animated', replace: true };
+  let anDone = 0;
+  check(e.client.learn('anim:105', job, { ...opts, done: () => anDone++ }) === undefined, 'animated: unknown, asked for');
+  await settle();
+  w.run();
+  const learns = () => w.sent.filter((m) => m.type === 'learn').length, n = learns();
+  const got = e.client.learn<{ tiles: Set<number> }>('anim:105', job, opts);
+  check(anDone === 1 && (got?.tiles.size ?? 0) > 0 && e.results.get('anim:105', inputHash({ an: 1 })) === undefined, 'animated: kept in memory, not in the result cache');
+  touch(e.rom);
+  check(e.client.learn('anim:105', job, opts) === got, '… after a ROM change of nothing it read: the same');
+  await settle();
+  check(learns() === n, '… not asked again');
 }
 
 console.log(bad ? `${bad} failures` : 'all ok');

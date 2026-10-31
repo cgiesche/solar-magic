@@ -5,7 +5,8 @@
 // restart nothing).
 // A cancelled scan runs no further slice and goes on when asked for again. Results a task's slice found before a ROM
 // change go with the next reply only if they hold on the new ROM. Jobs keep their result cache keys; only the scan
-// can be cancelled. Learn jobs (the sprite images) as captured directly, with the result learner's entries, in lanes.
+// can be cancelled. Learn jobs (the sprite images, the levels' uses, the sprite memory check, the animated tiles) as
+// learned directly, with the result learner's entries, in lanes; prefetched probes take turns with the tasks.
 import { readFileSync } from 'node:fs';
 import { Rom, snesToPc } from '../src/core/rom.ts';
 import { BlockProber, blockKey, collisionKey, spriteKey, runsKey, cameraKey } from '../src/core/blockprobe.ts';
@@ -27,7 +28,10 @@ import { bgTileAddr } from '../src/core/bgmap16.ts';
 import { FG_PALS, BACK_AREA } from '../src/core/sharedpal.ts';
 import { setCustomPalette } from '../src/core/patches.ts';
 import { captureSprites, captureSpriteAt, spriteSetJob, spriteLoad, spriteLoads, type SpriteLevel } from '../src/core/spritegfx.ts';
-import { storeKey } from '../src/core/romdeps.ts';
+import { storeKey, type CacheEntry, type RomDeps } from '../src/core/romdeps.ts';
+import { LevelUses, levelUsesJob, levelTilesKey } from '../src/core/levelusage.ts';
+import { spriteMemCheckJob, usedSpriteMemory, SpriteGroupResults, type SpriteMemLevel, type SpriteMemResult } from '../src/core/spritemem.ts';
+import { animatedJob, type Animated } from '../src/core/levelemu.ts';
 import { inputHash } from '../src/core/inputs.ts';
 import { ResultLearner } from '../src/core/learner.ts';
 import { readL1, writeL1, readL2, writeL2, l1Index, l2Index, l2Pointers } from '../src/core/overworld.ts';
@@ -188,9 +192,13 @@ check(host.pending === 0, 'new ROM: tasks dropped');
   // the same scan asked for again (the same key): the running one answers it
   h.handle({ type: 'scan', id: 5, key: 'scan-re', level: scanLevel });
   check(h.started === started, 'the same scan asked for again while it runs: not restarted');
+  // (a prefetched probe first: they take turns with the tasks)
+  const replies: ProbeReply[] = [];
+  const first = h.next();
+  if (first) replies.push(first);
+  check(first?.type === 'probe' && h.started === started, 'a prefetched probe takes its turn after the tasks\' steps');
   h.next();
   check(h.started === started + 1, 'the scan started over before its next step');
-  const replies: ProbeReply[] = [];
   while (h.pending) { const d = h.next(); if (d) replies.push(d); }
   const sc = replies.find((d) => d.type === 'scan');
   check(sc?.type === 'scan' && sc.id === 5 && JSON.stringify(sc.result) === JSON.stringify(scanned), 'restarted scan as played directly, answering the latest request');
@@ -447,6 +455,70 @@ for (const changeRead of [false, true]) {
   const got = out.find((d) => d.type === 'learned');
   check(out.filter((d) => d.type === 'learning').length === 0 && got?.type === 'learned' && JSON.stringify(got.result) === capture(more) && !got.put.some(([k]) => k.startsWith('spr/')),
     'the editor\'s stored loads: none captured, the same images, not handed back');
+}
+
+// the levels' uses, the sprite memory check and the animated tiles and colors (learn jobs, #177): results and entries
+// (keys, inputs, bytes read) as the result learner on the main thread makes them: the uses in the levels' entries (the
+// job keeps none), shown a level at a time; the check in the result cache; the animated ones in memory only, handed
+// back with the result
+{
+  const r = new Rom(file), h = new ProbeHost();
+  h.setRom(1, r.data.slice());
+  const run = (m: ProbeMessage) => {
+    h.handle(m);
+    const out: ProbeReply[] = [];
+    while (h.pending) { const d = h.next(); if (d) out.push(d); }
+    return { out, done: out.find((d) => d.type === 'learned'), put: new Map(out.flatMap((d) => ('put' in d ? d.put : []))) };
+  };
+  // the main thread's result learner, as the editor set it up
+  const lr = new Rom(file), main = new LevelEmulator(lr), results = new ResultCache(new RomFingerprint(lr)), later: (() => void)[] = [];
+  main.skipMask = () => gfxSkipMask(lr);
+  main.boot();
+  const learner = new ResultLearner({ rom: lr, results, cacheReady: Promise.resolve(), main, later: (_k, f) => later.push(f), soon: (f) => later.push(f), setBusy: () => {} });
+  const drain = async (until: () => boolean) => {
+    for (let i = 0; i < 2000 && !until(); i++) { await new Promise((f) => setTimeout(f, 0)); while (later.length) later.shift()!(); }
+  };
+  const same = (a: CacheEntry | undefined, b: CacheEntry | undefined) => !!a && !!b && JSON.stringify(a) === JSON.stringify(b);
+
+  // uses
+  const levels = [0x105, 0x106, 0x107];
+  const uses = run({ type: 'learn', lane: 'uses', key: 'uses', job: { kind: 'uses', levels }, replace: false });
+  const shownLevels = uses.out.flatMap((d) => (d.type === 'learning' ? d.shown : []));
+  check(shownLevels.join() === levels.join() && uses.done?.type === 'learned' && !uses.done.failed && uses.done.result === undefined, `uses: a level at a time, shown as it comes (${shownLevels.join()})`);
+  const idx = new LevelUses(lr, results);
+  let usesDone = false;
+  learner.learn('uses', (emu) => levelUsesJob(idx, emu, levels, () => {}), { keep: false, picture: false, done: () => (usesDone = true) });
+  await drain(() => usesDone);
+  const there = levels.map((n) => results.under(levelTilesKey(n))[0]);
+  check(there.every((e) => !!e && same(uses.put.get(e[0]), e[1])) && !uses.put.has('uses'), 'uses: the levels\' entries as the result learner\'s on the main thread (keys, inputs, bytes read: no picture), none of the job\'s');
+  const again = run({ type: 'learn', lane: 'uses', key: 'uses', job: { kind: 'uses', levels }, replace: false });
+  check(!again.out.some((d) => d.type === 'learning') && levels.every((n, i) => same(again.put.get(there[i][0]), there[i][1])),
+    'uses asked again: the levels known, none loaded, their entries handed back (the editor asked: it has none)');
+
+  // the sprite memory check of $E0 in level 00C (incomplete with the level's value: a suggestion)
+  const lvc = loadLevel(r, 0xc), sprites = [{ uid: 1, num: 0xe0, x: 8, y: 0x14, extra: 0 }];
+  const sm: SpriteMemLevel = { number: 0xc, header: lvc.header, bgPointer: 0xffd900, mem: lvc.spriteHeader & 0x3f, candidates: usedSpriteMemory(r), sprites };
+  const smInput = inputHash({ sm: 'test' });
+  const check1 = run({ type: 'learn', lane: 'spritemem', key: 'sm-test', input: smInput, job: { kind: 'spriteMem', level: sm }, replace: true });
+  let smDone: unknown;
+  learner.learn('sm-test', (emu) => spriteMemCheckJob(emu, sm, new SpriteGroupResults(results.fp)), { input: { sm: 'test' }, picture: false, done: (x) => (smDone = x) });
+  await drain(() => smDone !== undefined);
+  check(check1.done?.type === 'learned' && JSON.stringify(check1.done.result) === JSON.stringify(smDone) && (smDone as SpriteMemResult).lost.length === 1 && (smDone as SpriteMemResult).suggestion !== null, `sprite memory: the check as on the main thread (${JSON.stringify(smDone)})`);
+  check(same(check1.put.get(storeKey('sm-test', smInput)), results.entry('sm-test', smInput) && { ...results.entry('sm-test', smInput)!, input: smInput }),
+    'sprite memory: its entry as the result learner\'s (key, input, bytes read)');
+
+  // the animated tiles and colors of level 105: in memory only
+  const anInput = inputHash({ an: 'test' });
+  const an = run({ type: 'learn', lane: 'animated', key: 'anim:test', input: anInput, job: { kind: 'animated', level: 0x105, ov: {} }, replace: true });
+  let anDone: Animated | undefined;
+  learner.learn('anim:test', (emu) => animatedJob(emu, 0x105, {}), { input: { an: 'test' }, keep: 'memory', done: (x) => (anDone = x) });
+  await drain(() => anDone !== undefined);
+  const res = an.done?.type === 'learned' ? an.done.result as Animated : undefined;
+  check(!!res && !!anDone && res.tiles.size > 0 && [...res.tiles].join() === [...anDone.tiles].join() && [...res.colors].join() === [...anDone.colors].join(),
+    `animated: the tiles and colors as on the main thread (${res?.tiles.size} tiles, ${res?.colors.size} colors)`);
+  const mem = (learner as unknown as { runner: { memory: { entry(k: string, i: string): { data: unknown; deps: RomDeps } | undefined } } }).runner.memory.entry('anim:test', anInput);
+  check(an.done?.type === 'learned' && !!mem && !an.put.has(storeKey('anim:test', anInput)) && an.done.memory?.input === anInput
+    && JSON.stringify(an.done.memory.deps) === JSON.stringify(mem.deps), 'animated: kept in memory only, its entry handed back as the result learner keeps it (bytes read)');
 }
 
 // the job runner under both owners (runnercheck.ts)

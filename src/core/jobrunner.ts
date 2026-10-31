@@ -14,7 +14,7 @@ import { RomReads, INPUTS_PER_KEY, type ResultCache, type RomDeps, type RomFinge
 import { gfxSkipMask, gfxDisplaySkipMask } from './gfxpages.ts';
 import { TILESETS, tilesetPointers, pointersKey } from './tilesets.ts';
 
-const MEMORY = 256; // results kept in memory only (keep: 'memory'), the latest used
+export const MEMORY = 256; // results kept in memory only (keep: 'memory'), the latest used
 
 // a job: a step per next(), the result as its return value (undefined: none, nothing kept); a yielded string is its
 // label from then on. It doesn't write the ROM: a write to a byte it read starts it over (also one written back)

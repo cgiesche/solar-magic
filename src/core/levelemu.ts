@@ -521,6 +521,26 @@ export class LevelEmulator {
   }
 }
 
+// The 8x8 tiles (layer 1 tile numbers) and colors that change in level n (ov) over 16 times 4 frames (none when it
+// fails): the animated tiles and colors (a picture, the result learner's job, CONTEXT.md)
+export interface Animated { tiles: Set<number>; colors: Set<number> }
+export function* animatedJob(emu: LevelEmulator, n: number, ov: LevelOverride): Generator<never, Animated> {
+  const tiles = new Set<number>(), colors = new Set<number>();
+  try {
+    const r = emu.load(n, ov);
+    const frames = emu.animationFrames(16, 4);
+    const base = (r.ppuRegs[0x0b] & 0x0f) << 13;
+    for (const f of frames) {
+      for (let t = 0; t < 0x400; t++) {
+        const o = (base + t * 32) & 0xffff;
+        for (let b = 0; b < 32; b++) if (f.vram[o + b] !== r.vram[o + b]) { tiles.add(t); break; }
+      }
+      for (let c = 0; c < 256; c++) if (f.cgram[c * 2] !== r.cgram[c * 2] || f.cgram[c * 2 + 1] !== r.cgram[c * 2 + 1]) colors.add(c);
+    }
+  } catch (e) { console.error(e); return { tiles: new Set(), colors: new Set() }; }
+  return { tiles, colors };
+}
+
 // the level the game loads for its title screen (the entry of the layer 1 pointer table it reads while
 // booting), null when it reads none; emulated once per ROM state
 const titleLevels = new WeakMap<Rom, { gen: number; level: number | null }>();

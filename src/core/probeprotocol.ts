@@ -7,6 +7,9 @@ import type { KindLevel } from './objkinds.ts';
 import type { ScanLevel, ScanResult } from './levelscan.ts';
 import type { CameraAt } from './camerareach.ts';
 import type { SpriteLevel } from './spritegfx.ts';
+import type { SpriteMemLevel } from './spritemem.ts';
+import type { LevelOverride } from './levelemu.ts';
+import type { Keep } from './jobrunner.ts';
 
 // a probe in tileset ts: what a Map16 tile does, how Mario collides with it, what a sprite does, Mario's
 // run speeds, the scroll bands in a level of that mode and vertical scroll setting
@@ -47,19 +50,32 @@ export interface CameraDone { type: 'camera'; gen: number; id: number; result: C
 export type ProbeReply = ProbeDone | KindsDone | ScanDone | CameraDone | Learned | Learning;
 
 // A result learner job (CONTEXT.md) run here: the images of all sprites of a sprite set, the image of a sprite at a
-// tile (its variant by position), the image of a custom sprite with extra bytes
+// tile (its variant by position), the image of a custom sprite with extra bytes, the tiles of the levels not known yet
+// (their uses, levelusage.ts), a level's sprite memory check, the tiles and colors animating in a level
 export type LearnJob =
   | { kind: 'sprites'; level: SpriteLevel; nums: number[]; input?: string } // (input: of each test level load, spriteSetJob)
   | { kind: 'spriteAt'; level: SpriteLevel; id: number; x: number; y: number }
-  | { kind: 'spriteBytes'; level: SpriteLevel; id: number; bytes: number[] };
+  | { kind: 'spriteBytes'; level: SpriteLevel; id: number; bytes: number[] }
+  | { kind: 'uses'; levels: number[] }
+  | { kind: 'spriteMem'; level: SpriteMemLevel }
+  | { kind: 'animated'; level: number; ov: LevelOverride };
+
+// where a learn job's result goes (jobrunner.ts Keep): the levels' uses go to the entries of each level (the job keeps
+// none), the animated tiles and colors change with every edit (memory only), the others to the result cache
+export function learnKeep(j: LearnJob): Keep {
+  return j.kind === 'uses' ? false : j.kind === 'animated' ? 'memory' : true;
+}
 
 // a learn job asked for: its result under key and input (the hash of what it depends on outside the ROM, inputs.ts),
 // learned in a lane (one job at a time, in the order asked); replace drops the lane's other jobs; parts: the editor's
 // stored entries of the result's parts (jobrunner.ts Part, by stored key; checked when first used)
 export interface LearnMessage { type: 'learn'; lane: string; key: string; input?: string; job: LearnJob; replace: boolean; parts?: [string, CacheEntry][] }
 
-// a learn job's result (failed: it threw, result null), with its result cache entry
-export interface Learned { type: 'learned'; gen: number; lane: string; key: string; input?: string; result: unknown; failed: boolean; put: [string, CacheEntry][] }
+// a learn job's result (failed: it threw, result null), with its result cache entry (memory: the entry of one kept in
+// memory only, learnKeep)
+export interface Learned {
+  type: 'learned'; gen: number; lane: string; key: string; input?: string; result: unknown; failed: boolean; put: [string, CacheEntry][]; memory?: CacheEntry;
+}
 // a step of a learn job that didn't finish it: its progress label, what it shows meanwhile (the job's items since the
 // last reply; fresh: it started (over) since then, what it showed before goes) and the entries set meanwhile
 export interface Learning {

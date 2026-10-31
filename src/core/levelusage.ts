@@ -9,7 +9,7 @@
 // - GFX slots (gfxslots.ts) and sprites are read from the ROM.
 
 import { snesToPc, type Rom } from './rom.ts';
-import type { ResultCache } from './romdeps.ts';
+import { storeKey, type ResultCache, type CacheEntry } from './romdeps.ts';
 import type { LevelEmulator, LevelRender, LevelOverride } from './levelemu.ts';
 import { OV_L1, OV_L2, MAP_BASE } from './levelemu.ts';
 import {
@@ -139,6 +139,12 @@ export class LevelUses {
     return this.results.get<LevelTiles>(levelTilesKey(n), i.input);
   }
 
+  // level n's result cache entry while it holds (none for a level that can't be read)
+  entry(n: number): [string, CacheEntry] | undefined {
+    const i = this.input(n), e = i ? this.results.entry(levelTilesKey(n), i.input) : undefined;
+    return e && [storeKey(levelTilesKey(n), i!.input), e];
+  }
+
   // the levels whose tiles are not known
   missing(levels: Iterable<number>): number[] {
     return [...levels].filter((n) => this.tiles(n) === undefined);
@@ -157,6 +163,21 @@ export class LevelUses {
     this.results.set(levelTilesKey(n), tiles, this.results.fp.deps(run.reads), i.input);
     return tiles;
   }
+}
+
+// The tiles of the levels among `levels` not known yet (LevelUses), a level per step on emu (the result learner's job, no picture:
+// its result is in the levels' entries, the job keeps none); show gets each level as its tiles are kept
+export function* levelUsesJob(idx: LevelUses, emu: LevelEmulator, levels: number[], show: (levels: number[]) => void): Generator<string, undefined> {
+  // (again until none is missing: a level's tiles kept before may not hold any more)
+  for (let left = idx.missing(levels); left.length; left = idx.missing(levels)) {
+    while (left.length) {
+      const n = left.shift()!;
+      idx.scan(n, emu);
+      show([n]);
+      yield `Uses in levels (${left.length})`;
+    }
+  }
+  return undefined;
 }
 
 export interface TileUser { level: number; uses: TileUse[] }

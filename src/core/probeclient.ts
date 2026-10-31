@@ -1,17 +1,17 @@
 // The editor's side of the probes (probehost.ts): asks for block, collision and sprite probes, Mario's
 // run speeds and the game view's scroll bands in the current tileset, prefetches what the palettes can
 // show, and runs the object kinds, the level scan, the camera at a place and the result learner's jobs that run there
-// (CONTEXT.md; the sprite images), all in the probe worker. It
-// sends the ROM once, then the ranges each change wrote (the worker keeps its queue and restarts only tasks
+// (CONTEXT.md; the sprite images, the levels' uses, the sprite memory check, the animated tiles and colors), all in the
+// probe worker. It sends the ROM once, then the ranges each change wrote (the worker keeps its queue and restarts only tasks
 // that read a changed byte; the whole ROM again, with everything still wanted, when the ROM's log of changes
 // doesn't reach back), and falls back to probing on the main thread in background slices when the worker
 // fails. Results go to the editor's ResultCache, also those from before a ROM change: they hold while the ROM
 // bytes they read are unchanged.
 
 import { ProbeHost, pumpProbes } from './probehost.ts';
-import { jobId, jobKey, type ProbeJob, type ProbeMessage, type ProbeDone, type ProbeReply, type KindsDone, type ScanDone, type CameraDone, type LearnJob, type LearnMessage, type Learned, type Learning } from './probeprotocol.ts';
+import { jobId, jobKey, learnKeep, type ProbeJob, type ProbeMessage, type ProbeDone, type ProbeReply, type KindsDone, type ScanDone, type CameraDone, type LearnJob, type LearnMessage, type Learned, type Learning } from './probeprotocol.ts';
 import { inputHash } from './inputs.ts';
-import { partKey } from './jobrunner.ts';
+import { partKey, MemoryResults, MEMORY, type Keep } from './jobrunner.ts';
 import type { ResultCache } from './romdeps.ts';
 import type { Rom } from './rom.ts';
 import { SPRITE_PROBE_END, probeable, type BlockProbe, type CollisionProbe, type SpriteProbe, type RunStates } from './blockprobe.ts';
@@ -66,9 +66,13 @@ export class ProbeClient {
   private playWant = new Map<Played, { msg: ProbeMessage & { type: Played }; done: (r: unknown) => void }>();
   private lanes = new Map<string, LearnLane>(); // learn jobs asked for and not done yet, by lane
   private learnFailed = new Set<string>(); // learn jobs (key and input) that failed, forgotten when the ROM changes
+  private memory: MemoryResults; // learn jobs' results kept in memory only, as the worker's (checked against the ROM)
   private d: ProbeClientDeps;
 
-  constructor(deps: ProbeClientDeps) { this.d = deps; }
+  constructor(deps: ProbeClientDeps) {
+    this.d = deps;
+    this.memory = new MemoryResults(deps.results.fp, MEMORY);
+  }
 
   // What a Map16 tile does when hit from below, how Mario collides with it, what a sprite id does
   // (normal sprites only, not shooters/generators): undefined while unknown, then asked for
@@ -202,7 +206,7 @@ export class ProbeClient {
       const kept = lane.wants[0];
       this.send?.(kept ? { ...kept.msg, replace: true } : { type: 'unlearn', lane: opts.lane });
     }
-    const stored = this.d.results.get<T>(key, input);
+    const keep = learnKeep(job), stored = this.stored<T>(key, input, keep);
     if (stored !== undefined || this.learnFailed.has(id)) {
       this.learnBusy(opts.lane);
       return stored;
@@ -214,7 +218,7 @@ export class ProbeClient {
       // (stored results first: the result may be known by then)
       this.d.cacheReady.then(() => {
         if (!this.lanes.get(w.msg.lane)?.wants.includes(w)) return;
-        const known = this.d.results.get(key, input);
+        const known = this.stored(key, input, keep);
         // (with the stored parts of the result: the worker learns only the others)
         if (known === undefined) this.send?.(this.withParts(w.msg));
         else this.learned({ type: 'learned', gen: this.gen, lane: w.msg.lane, key, input, result: known, failed: false, put: [] });
@@ -224,6 +228,11 @@ export class ProbeClient {
     if (done && !want.done.includes(done)) want.done.push(done);
     this.learnBusy(opts.lane);
     return undefined;
+  }
+
+  // a learn job's result as kept (learnKeep: none for those the job keeps none of)
+  private stored<T>(key: string, input: string | undefined, keep: Keep): T | undefined {
+    return keep === false ? undefined : (keep === 'memory' ? this.memory : this.d.results).get<T>(key, input);
   }
 
   // Starts the worker, and sends it what a ROM change wrote: the ranges, or the whole ROM when they aren't known
@@ -305,10 +314,12 @@ export class ProbeClient {
   // (as probeDone: a result from an older ROM counts while it holds)
   private learned(d: Learned): void {
     this.take(d);
+    // (one kept in memory: while it holds, also from an older ROM, and also when no longer wanted, as the others)
+    if (d.memory && this.d.results.fp.valid(d.memory.deps)) this.memory.set(d.key, d.memory.data, d.memory.deps, d.input);
     const w = this.want(d);
     if (!w) return;
-    const { lane, want } = w;
-    if (d.gen !== this.gen && this.d.results.get(d.key, d.input) === undefined) { this.send?.(want.msg); return; }
+    const { lane, want } = w, keep = learnKeep(want.msg.job);
+    if (d.gen !== this.gen && (keep === false || this.stored(d.key, d.input, keep) === undefined)) { this.send?.(want.msg); return; }
     if (d.failed) this.learnFailed.add(`${d.key}#${d.input}`);
     lane.wants.splice(lane.wants.indexOf(want), 1);
     lane.progress = null;
