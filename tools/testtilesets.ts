@@ -64,6 +64,8 @@ const ptrs = runs.map((r) => r.result);
   let seen: Uint8Array | null = null, thrown = false;
   try { emu.withSkipMask(new Uint8Array(1), () => { seen = emu.skipMask!(); throw new Error('x'); }); } catch { thrown = true; }
   check(thrown && seen !== null && emu.skipMask === own, 'the previous mask is restored after an exception');
+  const fnMask = () => null;
+  check(emu.withSkipMask(fnMask, () => emu.skipMask) === fnMask && emu.skipMask === own, 'a function given as the mask is set as it is');
   emu.skipMask = null;
 }
 
