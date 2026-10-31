@@ -122,9 +122,10 @@ export class ProbeHost {
     const t = this.tasks.get(msg.type) ?? this.cancelled.get(msg.type);
     this.cancelled.delete(msg.type);
     if (t && taskKey(t.msg) === taskKey(msg)) { t.msg = msg; this.tasks.set(msg.type, t); return; }
-    const run = this.runner.run({ key: taskKey(msg), keep: true, picture: false, boot: msg.type !== 'kinds', start: taskJob(msg) });
+    // (a job starting over runs for the latest request)
+    const task: Task = { msg, run: this.runner.run({ key: taskKey(msg), keep: true, picture: false, boot: msg.type !== 'kinds', start: (emu, p) => taskJob(task.msg)(emu, p) }) };
     this.tasks.delete(msg.type);
-    this.tasks.set(msg.type, { msg, run });
+    this.tasks.set(msg.type, task);
   }
 
   // a finished task's reply (result null: it failed), answering its latest request

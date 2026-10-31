@@ -4,8 +4,8 @@
 // each gives Mario ($049FEB: bit 3 swimming, bit 4 climbing; 52–55 read past it) and its list of exit tiles ($049426); a
 // patched game's tile shows what it does there; editing the overworld's data keeps the result.
 import { Rom, snesToPc } from '../src/core/rom.ts';
-import { LevelEmulator } from '../src/core/levelemu.ts';
-import { RomReads } from '../src/core/romdeps.ts';
+import { RomReads, ResultCache, RomFingerprint } from '../src/core/romdeps.ts';
+import { JobRunner } from '../src/core/jobrunner.ts';
 import { pathKindsJob, PATH_KINDS, type PathKind } from '../src/core/owpaths.ts';
 import {
   readL1, writeL1, readL2, writeL2, readTranslevels, writeTranslevels, setInitialFlags, setExitDirection, setNameCode, FLAG, MAX_TRANSLEVEL,
@@ -18,13 +18,9 @@ const hx = (v: number) => v.toString(16).toUpperCase().padStart(2, '0');
 
 // the job run to its end as the result learner runs it, with what it read
 function learn(rom: Rom): { kinds: PathKind[]; reads: RomReads } {
-  const emu = new LevelEmulator(rom);
-  const job = pathKindsJob(emu), reads = new RomReads(rom.data.length);
-  for (;;) {
-    const r = emu.tracked(() => job.next());
-    reads.add(r.reads);
-    if (r.result.done) return { kinds: r.result.value, reads };
-  }
+  const runner = new JobRunner({ rom, results: new ResultCache(new RomFingerprint(rom)) });
+  const run = runner.run({ key: 'owpk', keep: false, picture: false, start: pathKindsJob });
+  for (;;) { const r = runner.step('owpk', run); if (r) return { kinds: r.result, reads: run.reads }; }
 }
 
 const image = await editorImage();

@@ -17,7 +17,7 @@ import { TILESETS, tilesetPointers, pointersKey } from './tilesets.ts';
 const MEMORY = 256; // results kept in memory only (keep: 'memory'), the latest used
 
 // a job: a step per next(), the result as its return value (undefined: none, nothing kept); a yielded string is its
-// label from then on
+// label from then on. It doesn't write the ROM: a write to a byte it read starts it over (also one written back)
 export type Job<T> = Iterator<string | void, T>;
 
 // Runs a job to its end at once: what it yields between steps (a progress label) is ignored.
