@@ -260,12 +260,14 @@ export class ResultCache {
     return { deps: e.deps, data: e.data, input: e.input };
   }
 
-  set(key: string, data: unknown, deps: RomDeps, input?: string): void {
+  // (current: deps were hashed on the current ROM; else on an older one, and the result is checked when first used)
+  set(key: string, data: unknown, deps: RomDeps, input?: string, current = true): void {
+    if (current) this.fp.sync();
     let slots = this.entries.get(key);
     if (!slots) this.entries.set(key, (slots = []));
     const i = slots.findIndex((e) => e.input === input);
     if (i >= 0) slots.splice(i, 1);
-    slots.unshift({ deps, data, input, gen: this.fp.gen });
+    slots.unshift({ deps, data, input, gen: current ? this.fp.gen : -1 });
     const k = storeKey(key, input);
     this.dropped.delete(k);
     this.dirty.set(k, key);
@@ -295,9 +297,10 @@ export class ResultCache {
     return this.unchecked.length > 0;
   }
 
-  // entries flushed by another cache (the probe worker's), by stored key
-  setAll(put: [string, CacheEntry][]): void {
-    for (const [k, e] of put) this.set(keyOf(k, e), e.data, e.deps, e.input);
+  // entries flushed by another cache (the probe worker's), by stored key; current: hashed on the current ROM (else
+  // on an older one, whose bytes they read may have changed since)
+  setAll(put: [string, CacheEntry][], current: boolean): void {
+    for (const [k, e] of put) this.set(keyOf(k, e), e.data, e.deps, e.input, current);
   }
 
   private remove(key: string, slots: Slot[], i: number): void {

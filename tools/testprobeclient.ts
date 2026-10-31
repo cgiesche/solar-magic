@@ -1,6 +1,6 @@
 // The editor's probe client (probeclient.ts) against a probe host (probehost.ts) in a stand-in
 // worker the test runs by hand: a reply from before a ROM change does not make it ask again and
-// again, results come in after it, and one still valid is kept; after the first copy of the ROM it gets the
+// again, results come in after it, and one still valid is kept, one whose bytes changed meanwhile not (asked again); after the first copy of the ROM it gets the
 // ranges a change wrote; a broken worker hands everything
 // wanted to the main thread; a failed probe is not asked again until the ROM changes; the
 // prefetch follows the tileset; object kinds are kept while the bytes they read are unchanged; a cancelled
@@ -8,7 +8,7 @@
 import { readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
 import { BlockProber } from '../src/core/blockprobe.ts';
-import { ProbeHost, type ProbeMessage, type ProbeReply } from '../src/core/probehost.ts';
+import { ProbeHost, jobKey, type ProbeMessage, type ProbeReply } from '../src/core/probehost.ts';
 import { ProbeClient } from '../src/core/probeclient.ts';
 import { ResultCache, RomFingerprint } from '../src/core/romdeps.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
@@ -109,6 +109,32 @@ function editor(worker: Worker | null) {
   w.reply(old!);
   check(JSON.stringify(e.client.block(0x130)) === JSON.stringify(direct.probe(0x130)), 'its result is kept: still valid');
   check(e.ready === 1 && !e.busy.has('probe'), "job done: 'ready' told, nothing busy");
+}
+
+// a reply from before a ROM change that changed what the probe read: not taken (though the cache is already synced
+// to the new ROM when it comes), the job is asked once more; a reply from the current ROM is taken without a check
+{
+  const w = new Worker(), e = editor(w);
+  e.client.block(0x130);
+  await settle();
+  const old = w.host.next(); // (computed on the ROM before, not handed over yet)
+  const deps = old?.type === 'probe' ? old.put.find(([k]) => k === jobKey(old.job))?.[1].deps : undefined;
+  const read = deps ? (deps.pages.length ? (deps.pages[0] << 8) | 0xff : deps.bytes[0]) : 0;
+  check(!!deps && (deps.pages.length > 0 || deps.bytes.length > 0), '(the probe read ROM bytes)');
+  e.rom.writeAt(read, Uint8Array.of(e.rom.data[read] ^ 1));
+  e.client.block(0x130); // (the worker gets the edit)
+  await settle();
+  e.results.fp.sync(); // (the cache has seen the new ROM, as any result used meanwhile makes it)
+  const asks = w.asks(0x130);
+  w.reply(old!);
+  check(e.client.block(0x130) === undefined, 'a byte it read changed meanwhile: its result is not taken');
+  await settle();
+  check(w.asks(0x130) > asks, '… and the job is asked once more');
+  let checks = 0;
+  const valid = e.results.fp.valid.bind(e.results.fp);
+  e.results.fp.valid = (d) => { checks++; return valid(d); };
+  w.run();
+  check(e.client.block(0x130) !== undefined && checks === 0, `a reply from the current ROM: taken without a check (${checks} checks)`);
 }
 
 // after the first copy of the ROM the worker gets the ranges a change wrote; the whole ROM again (with what is

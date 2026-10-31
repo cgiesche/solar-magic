@@ -2,7 +2,8 @@
 // jobs before prefetched ones, a new ROM drops the queue; object kinds, level scan and camera as
 // computed directly, in slices that let asked jobs go first. A ROM change sent as the ranges it wrote keeps
 // the queue and the tasks, restarting only a task that read a changed byte (overworld edits restart nothing).
-// A cancelled scan runs no further slice and goes on when asked for again.
+// A cancelled scan runs no further slice and goes on when asked for again. Results a task's slice found before a ROM
+// change go with the next reply only if they hold on the new ROM.
 import { readFileSync } from 'node:fs';
 import { Rom, snesToPc } from '../src/core/rom.ts';
 import { BlockProber, blockKey, collisionKey, spriteKey, runsKey } from '../src/core/blockprobe.ts';
@@ -15,7 +16,7 @@ import { cameraAtJob } from '../src/core/camerareach.ts';
 import { loadLevel, serializeLayer1, serializeSprites, L2_PTRS } from '../src/core/level.ts';
 import { editorImage } from './fixture.ts';
 import { gfxSkipMask, displaySkipMask } from '../src/core/gfxpages.ts';
-import { tilesetPointers, TILESETS } from '../src/core/tilesets.ts';
+import { tilesetPointers, pointersKey, TILESETS } from '../src/core/tilesets.ts';
 import { setActsLike, extTileWords, setExtTileWords } from '../src/core/map16ext.ts';
 import { bgTileAddr } from '../src/core/bgmap16.ts';
 import { FG_PALS, BACK_AREA } from '../src/core/sharedpal.ts';
@@ -264,6 +265,24 @@ check(host.pending === 0, 'new ROM: tasks dropped');
 
   send(() => setActsLike(r, 0x025, 0x130));
   check(ed.get(blockKey(0, 0x025)) === undefined && ed.get(collisionKey(0, 0x025)) === undefined, 'acts-like of 025 changed: its results dropped');
+}
+
+// result cache entries a task's slice set (the tilesets' pointers) and not handed back yet: after a ROM change only
+// those that hold on it go with the next reply (the editor takes a reply of the current ROM unchecked)
+for (const changeRead of [false, true]) {
+  const r = new Rom(file), h = new ProbeHost();
+  h.setRom(1, r.data.slice());
+  const prober = (h as unknown as { prober: BlockProber }).prober;
+  h.handle({ type: 'kinds', ts: 1, level: { number: lv.number, header: lv.header }, layer2Pointer: l2 });
+  h.next();
+  const read = prober.results.entry(pointersKey(1))?.deps, o = !read ? -1 : changeRead ? read.bytes[0] : 0x7fc0; // (the internal name)
+  check(!!read && (changeRead || (!read.bytes.includes(o) && !read.pages.includes(o >> 8))), "(the kinds' first slice learned the pointers)");
+  r.writeAt(o, Uint8Array.of(r.data[o] ^ 1));
+  h.handle({ type: 'edit', gen: 2, size: r.size, edits: [[o, r.data.slice(o, o + 1)]] });
+  const put = prober.results.flush().put, fp = new RomFingerprint(r);
+  const kept = put.filter(([k]) => Array.from({ length: TILESETS }, (_, ts) => pointersKey(ts)).includes(k)).length;
+  check(put.every(([, e]) => fp.valid(e.deps)), `a ROM change ${changeRead ? '' : 'not '}of a byte they read: the entries not handed back yet all hold on it`);
+  check(kept === (changeRead ? 0 : TILESETS), `… the pointers ${changeRead ? 'left out' : 'kept'} (${kept})`);
 }
 
 // a new size: a new ROM (queue dropped)

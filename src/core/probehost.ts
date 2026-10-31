@@ -117,6 +117,14 @@ export class ProbeHost {
     }
     this.rom.data = data;
     this.prober.reset(); // probe levels that read changed pages are prepared again
+    this.keepHolding();
+  }
+
+  // Result cache entries set and not handed back yet (by a task's slice: the tilesets' pointers) were hashed on the
+  // ROM before a change, but go with a reply of the new one, which the editor takes unchecked: kept only if they hold.
+  private keepHolding(): void {
+    const results = this.prober!.results;
+    results.setAll(results.flush().put.filter(([, e]) => results.fp.valid(e.deps)), true);
   }
 
   // per tileset the pointers of FG Map16 tiles 000-1FF (tilesets.ts), as the editor learns them (ResultLearner.tilesetPointers):
@@ -156,6 +164,7 @@ export class ProbeHost {
     }
     for (const t of [...this.tasks.values(), ...this.cancelled.values()]) if (t.reads()?.touches(ranges)) this.begin(t);
     this.prober.reset();
+    this.keepHolding();
   }
 
   handle(m: ProbeMessage): void {
