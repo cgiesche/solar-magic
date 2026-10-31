@@ -16,7 +16,7 @@ import type { RomDeps, RomFingerprint, RomReads } from './romdeps.ts';
 import type { Rom } from './rom.ts';
 import { SPR, SPRITE_SLOTS, spriteX, spriteY, cameraX, cameraY } from './ram.ts';
 
-const SCREEN_W = 16, SCREEN_H = 14; // tiles
+const VIEW_W = 16, VIEW_H = 14; // tiles
 
 export interface SpriteMemCheck {
   conflicts: Set<number>; // uids of sprites drawn incompletely
@@ -66,19 +66,19 @@ type Cam = ReturnType<typeof testLevel>;
 // the test level's camera per sprite memory value, found once per job (again when the ROM changed meanwhile)
 type Cams = Map<number, { gen: number; cam: Cam; reads: RomReads }>;
 
-// A sprite group (CONTEXT.md): a largest set of the level's sprites that fit on one screen together, played as one
+// A sprite group (CONTEXT.md): a largest set of the level's sprites that fit in one view together, played as one
 export type SpriteGroup = LevelSprite[];
 
-// The level's sprite groups: the sprites that fit on one screen together (maximal sets, an isolated
-// sprite alone: sprites like $E0 spawn several slots by themselves)
+// The level's sprite groups: the sprites that fit in one view together (maximal sets, an isolated
+// sprite alone: a group sprite like $E0 spawns several slots by itself)
 export function spriteGroups(sprites: LevelSprite[]): SpriteGroup[] {
   const byX = [...sprites].sort((a, b) => a.x - b.x || a.y - b.y);
   const sets: SpriteGroup[] = [];
   const seen = new Set<string>();
   for (let i = 0; i < byX.length; i++) {
-    const col = byX.filter((s) => s.x >= byX[i].x && s.x < byX[i].x + SCREEN_W);
+    const col = byX.filter((s) => s.x >= byX[i].x && s.x < byX[i].x + VIEW_W);
     for (const top of col) {
-      const g = col.filter((s) => s.y >= top.y && s.y < top.y + SCREEN_H);
+      const g = col.filter((s) => s.y >= top.y && s.y < top.y + VIEW_H);
       const key = g.map((s) => s.uid).sort((a, b) => a - b).join(',');
       if (seen.has(key)) continue;
       seen.add(key);
@@ -92,10 +92,10 @@ export function spriteGroups(sprites: LevelSprite[]): SpriteGroup[] {
 // Runs one group with sprite memory m; null when the load fails
 function runGroup(ctx: SpriteMemContext, m: number, group: SpriteGroup, cam: Cam): { lost: Set<number>; live: number } | null {
   const { emu, level, bgPointer } = ctx;
-  // the group centered on the screen (sprites near an edge would be drawn partly off screen)
+  // the group centered in the view (sprites near an edge would be drawn partly off screen)
   const xs = group.map((s) => s.x), ys = group.map((s) => s.y);
-  const x0 = Math.min(...xs) - ((SCREEN_W - 1 - Math.max(...xs) + Math.min(...xs)) >> 1);
-  const y0 = Math.min(...ys) - ((SCREEN_H - 1 - Math.max(...ys) + Math.min(...ys)) >> 1);
+  const x0 = Math.min(...xs) - ((VIEW_W - 1 - Math.max(...xs) + Math.min(...xs)) >> 1);
+  const y0 = Math.min(...ys) - ((VIEW_H - 1 - Math.max(...ys) + Math.min(...ys)) >> 1);
   const placed = group.map((s) => ({ n: s.num, extra: s.extra, bytes: s.bytes, uid: s.uid, tx: (cam.camX >> 4) + s.x - x0, ty: (cam.camY >> 4) + s.y - y0 }));
   const order = sortPlaced(placed);
   const tracker = new SlotTracker(emu.snes);

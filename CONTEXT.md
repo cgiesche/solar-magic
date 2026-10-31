@@ -111,6 +111,10 @@ _Avoid_: canvas, paint dialog
 The height of a horizontal level without layer 2 objects, one of Lunar Magic 3.00's 32 sizes (the editor offers 00-1C); its screens share the game's level data, so a taller level has fewer screens. Objects and sprites below row 31 are placed by subscreens of 32 rows.
 _Avoid_: dimension, level mode (that is the header's)
 
+**Screen**:
+One of a level's sections along its length, numbered from 00 (at most 32): in a horizontal level 16 tiles wide and as tall as the level, in a vertical level 16 tiles tall and as wide as the level (two halves of 16); the unit objects, sprites, screen exits and entrances are placed by, not the part of the level in sight at once (a view, 16x14 tiles, as the game view frame shows).
+_Avoid_: screen (for a view of the level)
+
 **Tile entrance**:
 An entrance that puts Mario at a tile of its screen (Lunar Magic's), instead of at one of the game's table positions, which don't reach a taller level's rows; its camera starts a number of rows above Mario. Entrances placed in a level with a size are tile entrances.
 _Avoid_: method 2, exact entrance
@@ -300,7 +304,11 @@ _Avoid_: sprite overflow, slot overflow
 
 **Sprite group**:
 A largest set of a level's sprites that fit in one view (16x14 tiles) together (an isolated sprite is one alone; a sprite may be in several): what the sprite memory check plays in the emulator, one at a time, to see which sprites lose tiles (core/spritemem.ts). The latest used groups keep their result per sprite memory value while the ROM bytes it read are unchanged, kept by their sprites' places relative to each other, so after a sprite change only the groups that changed are played again (not one moved as a whole).
-_Avoid_: window, object group
+_Avoid_: window, object group, group sprite (one sprite that spawns several)
+
+**Group sprite**:
+One entry of the level's sprite data that is several sprites in the game, its code spawning the others when it loads ($DE five Eeries, $E0 three platforms): one sprite to the editor, the slots it spawns counted for it by the sprite memory check.
+_Avoid_: sprite group (that is the sprite memory check's), cluster sprite (a kind of sprite of its own)
 
 **Lag frame**:
 A frame of the level in which the game's main loop was not done before the next NMI, so the game slowed down (core/playlog.ts, from Snes.busyLines: the CPU never reached its wait loop). The CPU load of other frames is the share of the frame's scanlines from the NMI until that wait. Frames the game spends outside the level's game mode (loading, fading) are fully busy but no lag frames. Test play's lag meter shows the load per frame and lists lag frames close together as one event with Mario's tile; the level scan counts them per screen.
