@@ -33,7 +33,8 @@ for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
   const pos = [[0, 0], [0, 8], [8, 0], [8, 8]];
   for (let q = 0; q < 4; q++) { const t = tc.get(words[q]); for (let yy = 0; yy < 8; yy++) for (let xx = 0; xx < 8; xx++) if (t[yy * 8 + xx]) img[(y * 16 + pos[q][1] + yy) * W + x * 16 + pos[q][0] + xx] = t[yy * 8 + xx]; }
 }
-writePng('/tmp/claude-1000/-home-cgiesche-sources-smw-editor-ai/624ce7dd-933c-4fab-929a-f37f123d88a8/scratchpad/owmain.png', W, W, img);
+const out = process.env.OUT;
+if (out) writePng(`${out}/owmain.png`, W, W, img);
 const tl = w.subarray(RAM.owTranslevels, RAM.owTranslevelsEnd); // the game's translevel per tile
 const seen: string[] = [];
 for (let i = 0; i < 0x800; i++) if (tl[i]) seen.push(`${tl[i].toString(16)}=${translevelToLevel(tl[i]).toString(16)} ${levelName(rom, tl[i])}`);
