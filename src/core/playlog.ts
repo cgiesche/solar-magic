@@ -3,8 +3,8 @@
 // where Mario was then, and Mario's deaths. Failures of a kind close together (a generator trying every frame), and lag frames
 // close together (a heavy spot), are one event.
 
-import { LINES_PER_FRAME, type Snes } from './snes.ts';
-import { GM, RAM, marioTile } from './ram.ts';
+import { LINES_PER_FRAME } from './snes.ts';
+import { GM, marioTile } from './ram.ts';
 import { SLOT_KINDS, type SlotKind, type SlotFailure } from './slotwatch.ts';
 import type { Death } from './deaths.ts';
 
@@ -22,15 +22,15 @@ const MERGE = 64; // frames after a failure in which another of its kind belongs
 const LAG_MERGE = 30; // frames after a lag frame in which another belongs to the same event
 const MAX_EVENTS = 200;
 
-// The CPU's load in the frame that just ran: scanlines from the NMI until the game waited for the next one
-// (Snes.busyLines). LAG: the level's frame wasn't done before the next NMI (a lag frame, the game slows
-// down); the frames the game spends elsewhere (loading, fading) count as fully busy but are no lag of the
-// level. The load is measured up to the frame's NMI, the game mode read after the frame: it is the level's
-// frame when the game was in the level's mode before it (modeBefore) and after it, so the last loading
-// frame, whose game mode turns to the level's after the NMI, is none.
-export function cpuLoad(s: Snes, modeBefore: number): number {
-  if (s.busyLines >= 0) return s.busyLines;
-  return modeBefore === GM.level && s.wram[RAM.gameMode] === GM.level ? LAG : LINES_PER_FRAME;
+// The CPU's load in the frame that just ran from busy: scanlines from the NMI until the game waited for the next
+// one (Snes.busyLines, -1: it never waited). LAG: the level's frame wasn't done before the next NMI (a lag frame,
+// the game slows down); the frames the game spends elsewhere (loading, fading) count as fully busy but are no
+// lag of the level. The load is measured up to the frame's NMI, the game mode read after the frame: it is the
+// level's frame when the game was in the level's mode before it (modeBefore) and after it (modeAfter), so the last
+// loading frame, whose game mode turns to the level's after the NMI, is none.
+export function cpuLoad(busy: number, modeBefore: number, modeAfter: number): number {
+  if (busy >= 0) return busy;
+  return modeBefore === GM.level && modeAfter === GM.level ? LAG : LINES_PER_FRAME;
 }
 
 export class PlayLog {

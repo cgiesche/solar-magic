@@ -7,7 +7,7 @@
 // node tools/testlagmeter.ts
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
-import { LINES_PER_FRAME, type Snes } from '../src/core/snes.ts';
+import { LINES_PER_FRAME } from '../src/core/snes.ts';
 import { GM, RAM, PAD, MARIO_DYING, marioX, marioY } from '../src/core/ram.ts';
 import { PlaySession } from '../src/core/playsession.ts';
 import { PlayLog, cpuLoad, LAG } from '../src/core/playlog.ts';
@@ -39,11 +39,10 @@ const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL
 
 // ---------- what a frame's load is: the game mode on both sides of it ----------
 {
-  const at = (busy: number, mode: number) => ({ busyLines: busy, wram: Object.assign(new Uint8Array(0x20000), { [RAM.gameMode]: mode }) }) as unknown as Snes;
-  check(cpuLoad(at(120, GM.level), GM.level) === 120, 'the game waited: its load in scanlines');
-  check(cpuLoad(at(-1, GM.level), GM.level) === LAG, 'it never waited, in the level: a lag frame');
-  check(cpuLoad(at(-1, GM.level), GM.level - 1) === LINES_PER_FRAME, 'the last loading frame, the level\'s mode set after the NMI: fully busy, no lag');
-  check(cpuLoad(at(-1, GM.level + 1), GM.level) === LINES_PER_FRAME, 'the level left in it: fully busy, no lag');
+  check(cpuLoad(120, GM.level, GM.level) === 120, 'the game waited: its load in scanlines');
+  check(cpuLoad(-1, GM.level, GM.level) === LAG, 'it never waited, in the level: a lag frame');
+  check(cpuLoad(-1, GM.level - 1, GM.level) === LINES_PER_FRAME, 'the last loading frame, the level\'s mode set after the NMI: fully busy, no lag');
+  check(cpuLoad(-1, GM.level, GM.level + 1) === LINES_PER_FRAME, 'the level left in it: fully busy, no lag');
 }
 
 // ---------- the game ----------

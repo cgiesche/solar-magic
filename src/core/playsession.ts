@@ -103,7 +103,7 @@ export class PlaySession {
     const mode = this.s.wram[RAM.gameMode];
     this.s.joy1 = pad;
     this.s.runFrame();
-    return cpuLoad(this.s, mode);
+    return cpuLoad(this.s.busyLines, mode, this.s.wram[RAM.gameMode]);
   }
 
   // up to n frames with the buttons held (or per frame), each called before a frame; ends early when Mario dies (he
