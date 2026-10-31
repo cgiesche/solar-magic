@@ -191,14 +191,26 @@ export interface CacheEntry {
   input?: string; // the hash of the result's input (inputs.ts), if it has one
 }
 
+export const INPUTS_PER_KEY = 4; // inputs a key keeps results for (the latest used)
+
+// where an entry is stored: its key, with the input's hash; a key's inputs in the order last used under the key
+// with an empty input (the inputs' hashes, '' for none; written when they change, not the entries)
+const storeKey = (key: string, input: string | undefined) => input === undefined ? key : `${key}#${input}`;
+const orderKey = (key: string) => `${key}#`;
+const keyOf = (stored: string, e: CacheEntry) => e.input === undefined ? stored : stored.slice(0, -e.input.length - 1);
+
+type Slot = CacheEntry & { gen: number };
+
 // results by key, checked against the ROM once per fingerprint generation; changed and dropped
-// keys are collected for storing (see flush()). A result with an input holds for that input only (one
-// result per key: another input's replaces it).
+// entries are collected for storing (see flush()). A result with an input holds for that input only; a key
+// keeps the results of its latest used INPUTS_PER_KEY inputs (switching between levels whose sprite memory differs
+// doesn't learn their sprite images again), the least recently used one dropped.
 export class ResultCache {
   fp: RomFingerprint;
-  private entries = new Map<string, CacheEntry & { gen: number }>();
-  dirty = new Set<string>();
-  dropped = new Set<string>();
+  private entries = new Map<string, Slot[]>(); // a key's results, the latest used first
+  private dirty = new Map<string, string>(); // stored keys of changed results: their key
+  private dropped = new Set<string>(); // stored keys of dropped results
+  private reordered = new Set<string>(); // keys whose inputs' order changed
   onChange: (() => void) | null = null;
 
   constructor(fp: RomFingerprint) {
@@ -206,48 +218,96 @@ export class ResultCache {
   }
 
   get<T>(key: string, input?: string): T | undefined {
-    const e = this.entries.get(key);
-    if (!e || e.input !== input) return undefined;
+    const slots = this.entries.get(key), i = slots?.findIndex((e) => e.input === input) ?? -1;
+    if (i < 0) return undefined;
+    const e = slots![i];
     this.fp.sync();
     if (e.gen !== this.fp.gen) {
       if (!this.fp.valid(e.deps)) {
-        this.entries.delete(key);
-        this.dirty.delete(key);
-        this.dropped.add(key);
+        this.remove(key, slots!, i);
         this.onChange?.();
         return undefined;
       }
       e.gen = this.fp.gen;
     }
+    if (i > 0) {
+      slots!.splice(i, 1);
+      slots!.unshift(e);
+      this.reordered.add(key);
+      this.onChange?.();
+    }
     return e.data as T;
   }
 
-  // the entry under key, if it holds for the current ROM
-  entry(key: string): CacheEntry | undefined {
-    const e = this.entries.get(key);
-    if (!e || this.get(key, e.input) === undefined) return undefined;
+  // the entry under key for the input, if it holds for the current ROM
+  entry(key: string, input?: string): CacheEntry | undefined {
+    if (this.get(key, input) === undefined) return undefined;
+    const e = this.entries.get(key)![0];
     return { deps: e.deps, data: e.data, input: e.input };
   }
 
   set(key: string, data: unknown, deps: RomDeps, input?: string): void {
-    this.entries.set(key, { deps, data, input, gen: this.fp.gen });
-    this.dropped.delete(key);
-    this.dirty.add(key);
+    let slots = this.entries.get(key);
+    if (!slots) this.entries.set(key, (slots = []));
+    const i = slots.findIndex((e) => e.input === input);
+    if (i >= 0) slots.splice(i, 1);
+    slots.unshift({ deps, data, input, gen: this.fp.gen });
+    const k = storeKey(key, input);
+    this.dropped.delete(k);
+    this.dirty.set(k, key);
+    if (slots.length > 1 || input !== undefined) this.reordered.add(key);
+    while (slots.length > INPUTS_PER_KEY) this.remove(key, slots, slots.length - 1);
     this.onChange?.();
   }
 
-  // entries read from storage (checked when first used)
-  load(entries: [string, CacheEntry][]): void {
-    for (const [k, e] of entries) if (!this.entries.has(k)) this.entries.set(k, { ...e, gen: -1 });
+  // entries flushed by another cache (the probe worker's), by stored key
+  setAll(put: [string, CacheEntry][]): void {
+    for (const [k, e] of put) this.set(keyOf(k, e), e.data, e.deps, e.input);
   }
 
-  // changed entries to store and dropped keys to delete since the last call
-  flush(): { put: [string, CacheEntry][]; del: string[] } {
-    const put: [string, CacheEntry][] = [];
-    for (const k of this.dirty) { const e = this.entries.get(k); if (e) put.push([k, { deps: e.deps, data: e.data, input: e.input }]); }
-    const del = [...this.dropped];
+  private remove(key: string, slots: Slot[], i: number): void {
+    const input = slots[i].input, k = storeKey(key, input);
+    slots.splice(i, 1);
+    if (!slots.length) this.entries.delete(key);
+    this.dirty.delete(k);
+    this.dropped.add(k);
+    if (input !== undefined || slots.length) this.reordered.add(key);
+  }
+
+  // entries read from storage (checked when first used): results by stored key, and the keys' inputs' order
+  load(entries: [string, CacheEntry | string[]][]): void {
+    const order = new Map<string, string[]>(), loaded = new Map<string, CacheEntry[]>();
+    for (const [k, e] of entries) {
+      if (Array.isArray(e)) { order.set(k.slice(0, -1), e); continue; }
+      const key = keyOf(k, e);
+      let l = loaded.get(key);
+      if (!l) loaded.set(key, (l = []));
+      l.push(e);
+    }
+    for (const [key, l] of loaded) {
+      const o = order.get(key) ?? [], rank = (e: CacheEntry) => { const r = o.indexOf(e.input ?? ''); return r < 0 ? o.length : r; };
+      let slots = this.entries.get(key);
+      if (!slots) this.entries.set(key, (slots = []));
+      for (const e of l.sort((a, b) => rank(a) - rank(b))) if (!slots.some((s) => s.input === e.input)) slots.push({ ...e, gen: -1 });
+      while (slots.length > INPUTS_PER_KEY) this.remove(key, slots, slots.length - 1);
+    }
+  }
+
+  // changed entries to store (with the changed orders of keys' inputs) and dropped ones to delete since the last call
+  flush(): { put: [string, CacheEntry][]; order: [string, string[]][]; del: string[] } {
+    const put: [string, CacheEntry][] = [], order: [string, string[]][] = [], del = [...this.dropped];
+    for (const [k, key] of this.dirty) {
+      const e = this.entries.get(key)?.find((s) => storeKey(key, s.input) === k);
+      if (e) put.push([k, { deps: e.deps, data: e.data, input: e.input }]);
+    }
+    for (const key of this.reordered) {
+      const slots = this.entries.get(key);
+      if (slots?.some((s) => s.input !== undefined)) order.push([orderKey(key), slots.map((s) => s.input ?? '')]);
+      else del.push(orderKey(key));
+    }
     this.dirty.clear();
     this.dropped.clear();
-    return { put, del };
+    this.reordered.clear();
+    return { put, order, del };
   }
 }

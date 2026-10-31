@@ -119,7 +119,7 @@ export type AppEvent =
 // the hint to save a paste as prefab (pastehint.ts): the paste's objects as placed in level, layer
 export type PasteHintAt = PasteHint & { level: number; layer: 'l1' | 'l2'; objects: LevelObject[] };
 
-const CACHE_PREFIX = 'rc3:'; // IndexedDB keys of the result cache (bump when result formats change or old results may be wrong: rc3 after the stale boot snapshot fix)
+const CACHE_PREFIX = 'rc4:'; // IndexedDB keys of the result cache (bump when result formats change or old results may be wrong: rc4 keeps several inputs per key)
 
 // the 8x8 tiles (layer 1 tile numbers) and colors that change in level n (ov) over 16 times 4 frames (none
 // when it fails)
@@ -269,7 +269,7 @@ export class App {
     });
     this.entrances = new SecondaryEntrances(this.edits);
     this.results = new ResultCache(new RomFingerprint(rom));
-    this.cacheReady = kvEntries<CacheEntry>(CACHE_PREFIX)
+    this.cacheReady = kvEntries<CacheEntry | string[]>(CACHE_PREFIX)
       .then((e) => this.results.load(e.map(([k, v]) => [k.slice(CACHE_PREFIX.length), v])))
       .catch((e) => console.error(e));
     this.learner = new ResultLearner({
@@ -309,8 +309,8 @@ export class App {
 
   private storeResults(): void {
     this.cacheTimer = 0;
-    const { put, del } = this.results.flush();
-    kvWrite(put.map(([k, v]) => [CACHE_PREFIX + k, v]), del.map((k) => CACHE_PREFIX + k)).catch((e) => console.error(e));
+    const { put, order, del } = this.results.flush();
+    kvWrite([...put, ...order].map(([k, v]) => [CACHE_PREFIX + k, v]), del.map((k) => CACHE_PREFIX + k)).catch((e) => console.error(e));
   }
 
   on(ev: AppEvent, fn: Listener): void {

@@ -2,7 +2,7 @@
 // the ROM bytes it read changes it, so it is part of the result's input (or key) – an unsaved edit or a view
 // setting learns it again instead of reusing what another state of the level gave.
 import { LevelEmulator, type LevelOverride } from '../src/core/levelemu.ts';
-import { loadLevel, serializeLayer1, serializeSprites, encodeSecondaryHeader, isL1Vertical, type Level } from '../src/core/level.ts';
+import { loadLevel, serializeLayer1, serializeSprites, encodeSecondaryHeader, isL1Vertical, SPRITE_MEMORY, type Level } from '../src/core/level.ts';
 import { layer2MotionsJob } from '../src/core/l2scroll.ts';
 import { layer3Kinds } from '../src/core/layer3.ts';
 import { levelScanJob, scanKey } from '../src/core/levelscan.ts';
@@ -13,9 +13,10 @@ import { gfxSkipMask } from '../src/core/gfxpages.ts';
 import { gfxEntry } from '../src/core/patches.ts';
 import { lz2Decompress } from '../src/core/lz2.ts';
 import { Rom, snesToPc } from '../src/core/rom.ts';
-import { ResultCache, RomFingerprint } from '../src/core/romdeps.ts';
+import { ResultCache, RomFingerprint, RomReads, INPUTS_PER_KEY, type CacheEntry } from '../src/core/romdeps.ts';
 import { ResultLearner } from '../src/core/learner.ts';
 import { inputHash, levelInput } from '../src/core/inputs.ts';
+import { captureSprites } from '../src/core/spritegfx.ts';
 import { renderObjectThumbs, thumbsKey, thumbsInput, objKey, type ObjSpec } from '../src/ui/thumbs.ts';
 import { editorImage } from './fixture.ts';
 
@@ -99,6 +100,70 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
   check(!same(scan(ov), scan(on)), 'level scan: a silver P-switch trigger in the view changes it');
   check(scanKey(N, ov) !== scanKey(N, on), 'level scan: the view\'s triggers are in its key');
   check(cameraAtKey(N, ov, 0x40, 0x100) !== cameraAtKey(N, on, 0x40, 0x100), 'camera at Mario: the view\'s triggers are in its key');
+}
+
+// several inputs per key: sprite images (App.ensureSpriteImages) are keyed by sprite set and palette, the level's
+// sprite memory is in their input – 001 and 11E share the key, switching back to 001 doesn't capture again
+{
+  const a = loadLevel(rom, 0x001), b = loadLevel(rom, 0x11e);
+  check(a.header.spriteGfx === b.header.spriteGfx && a.header.spritePalette === b.header.spritePalette && (a.spriteHeader & SPRITE_MEMORY) !== (b.spriteHeader & SPRITE_MEMORY),
+    '001 and 11E: the same sprite set, another sprite memory');
+  let captured = 0;
+  const learned: number[] = [];
+  for (const lv of [a, b, a]) {
+    const hd = lv.header, sh = lv.spriteHeader;
+    const stored = learner.learn(`i6${hd.spriteGfx}-${hd.spritePalette}`, function* (e) {
+      captured++;
+      return [...captureSprites(e, lv.number, hd, sh, 0xffd900, [0x0d])];
+    }, { input: { gfx: hd.spriteGfx, palette: hd.spritePalette, memory: sh & SPRITE_MEMORY }, lane: 'sprites', replace: true, done: () => learned.push(lv.number) });
+    await drain();
+    if (stored) learned.push(lv.number);
+  }
+  check(captured === 2 && learned.join() === '1,286,1', `sprite images: 001, 11E, 001 captures 001's once (${captured} captures)`);
+}
+
+// the result cache keeps the latest used INPUTS_PER_KEY inputs of a key, also as stored; a result is still dropped when
+// bytes it read change
+{
+  const r = new Rom(await editorImage()), fp = new RomFingerprint(r), cache = new ResultCache(fp);
+  const reads = new RomReads(r.data.length); reads.read(0x100, 1); reads.read(0x200 * 8, 1);
+  const deps = fp.deps(reads), inputs = Array.from({ length: INPUTS_PER_KEY + 2 }, (_, i) => `in${i}`);
+  const has = (c: ResultCache, i: number) => c.get('k', inputs[i]) === i;
+  for (let i = 0; i < INPUTS_PER_KEY; i++) cache.set('k', i, deps, inputs[i]);
+  check(inputs.slice(0, INPUTS_PER_KEY).every((_, i) => has(cache, i)), `a key holds ${INPUTS_PER_KEY} inputs`);
+  // (used last: 0 .. INPUTS_PER_KEY-1 in order; 0 used again, so 1 is the least recently used)
+  has(cache, 0);
+  cache.set('k', INPUTS_PER_KEY, deps, inputs[INPUTS_PER_KEY]);
+  check(!has(cache, 1) && [0, 2, INPUTS_PER_KEY].every((i) => has(cache, i)), 'another input drops the least recently used one');
+  // stored as App does (IndexedDB: put the entries and orders, delete the dropped)
+  const db = new Map<string, CacheEntry | string[]>();
+  const store = (c: ResultCache) => { const { put, order, del } = c.flush(); for (const [k, v] of [...put, ...order]) db.set(k, v); for (const k of del) db.delete(k); };
+  store(cache);
+  check([...db.keys()].filter((k) => !k.endsWith('#')).length === INPUTS_PER_KEY, `stored: ${INPUTS_PER_KEY} entries of the key`);
+  has(cache, 3); has(cache, 2); store(cache); // (used last: 2, 3, INPUTS_PER_KEY, 0)
+  const again = new ResultCache(fp);
+  again.load([...db]);
+  again.set('k', INPUTS_PER_KEY + 1, deps, inputs[INPUTS_PER_KEY + 1]);
+  store(again);
+  check(!has(again, 0) && [2, 3, INPUTS_PER_KEY, INPUTS_PER_KEY + 1].every((i) => has(again, i)) && !db.has(`k#${inputs[0]}`) && db.size === INPUTS_PER_KEY + 1,
+    'loaded from storage: the least recently used goes first, also from storage');
+  r.writeAt(0x100, Uint8Array.of(r.data[0x100] ^ 1));
+  check([2, 3, INPUTS_PER_KEY, INPUTS_PER_KEY + 1].every((i) => !has(again, i)), 'a changed byte read drops the results of all inputs');
+  store(again);
+  check(db.size === 0, 'and from storage');
+}
+
+// results kept in memory only keep the latest used INPUTS_PER_KEY inputs of a key too
+{
+  let runs = 0;
+  const lt = (i: number) => learner.now('mem', () => { runs++; return { result: i, reads: new RomReads(rom.data.length) }; }, { input: i, keep: 'memory' });
+  for (let i = 0; i < INPUTS_PER_KEY; i++) lt(i);
+  lt(0); lt(INPUTS_PER_KEY);
+  const before = runs;
+  lt(0); lt(2);
+  check(runs === before, `memory: ${INPUTS_PER_KEY} inputs of a key kept`);
+  lt(1);
+  check(runs === before + 1, 'memory: the least recently used one dropped');
 }
 
 if (fail) { console.log(`${fail} failed`); process.exit(1); }

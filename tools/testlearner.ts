@@ -157,7 +157,7 @@ for (const keep of [true, 'memory'] as const) {
   check(learner.learn('j', () => sum(2), { input: 'y', keep }) === undefined, `${what}, sliced: another input learns it again`);
   await drain();
   check(runs === 2 && learner.learn('j', () => sum(2), { input: 'y', keep }) === 0, `${what}, sliced: learned for the new input`);
-  const stored = results.flush().put.map(([k]) => k);
+  const stored = results.flush().put.map(([k]) => k.split('#')[0]); // (stored by key and input)
   check(keep === true ? stored.includes('i') && stored.includes('j') : !stored.length, `${what}: ${keep === true ? 'in' : 'not in'} the result cache (${stored})`);
 }
 

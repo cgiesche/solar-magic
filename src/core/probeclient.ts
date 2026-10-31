@@ -239,7 +239,7 @@ export class ProbeClient {
   // read. A job that ran on an older ROM is done only if its result still holds (otherwise it is
   // asked for once more: the worker has the new ROM by now).
   private probeDone(d: ProbeDone): void {
-    for (const [k, e] of d.put) this.d.results.set(k, e.data, e.deps);
+    this.d.results.setAll(d.put);
     const id = jobId(d.job);
     if (d.gen !== this.gen && this.d.results.get(jobKey(d.job)) === undefined) {
       if (this.asked.has(id)) this.send?.({ type: 'ask', jobs: [d.job] });
@@ -253,7 +253,7 @@ export class ProbeClient {
 
   // (as probeDone: kinds from an older ROM count while their result holds)
   private kindsDone(d: KindsDone): void {
-    for (const [k, e] of d.put) this.d.results.set(k, e.data, e.deps);
+    this.d.results.setAll(d.put);
     if (this.kindsWant?.ts !== d.ts) return;
     if (d.gen !== this.gen && this.d.results.get(kindsKey(d.ts)) === undefined) { this.send?.(this.kindsWant); return; }
     if (d.failed) this.kindsFailed.add(d.ts);
@@ -265,7 +265,7 @@ export class ProbeClient {
   // (as probeDone: a result from an older ROM counts while it holds)
   private playDone(d: ScanDone | CameraDone): void {
     const want = this.playWant.get(d.type);
-    for (const [k, e] of d.put) this.d.results.set(k, e.data, e.deps);
+    this.d.results.setAll(d.put);
     if (want?.msg.id !== d.id) return;
     if (d.gen !== this.gen && this.d.results.get(want.msg.key) === undefined) { this.send?.(want.msg); return; }
     this.playWant.delete(d.type);

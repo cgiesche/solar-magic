@@ -275,7 +275,7 @@ Anything the editor learned by emulation (a probe's outcome, the kinds of a tile
 _Avoid_: Cached value, generation (for validity)
 
 **Input**:
-State outside the ROM that an emulated result depends on: the level as edited (one input for everything learned from it, with the view settings – switches, conditional Direct Map16 flags, animation triggers), the content of graphics files (their bytes don't count as read). Given next to the result's key and compared by its hash (core/inputs.ts), never by object identity.
+State outside the ROM that an emulated result depends on: the level as edited (one input for everything learned from it, with the view settings – switches, conditional Direct Map16 flags, animation triggers), the content of graphics files (their bytes don't count as read). Given next to the result's key and compared by its hash (core/inputs.ts), never by object identity. A key keeps the results of its latest used few inputs (core/romdeps.ts INPUTS_PER_KEY), the least recently used dropped first.
 _Avoid_: cache key (for what belongs in the input), dependency (that is a ROM byte read)
 
 **Derived ROM data**:

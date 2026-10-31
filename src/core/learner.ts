@@ -12,7 +12,7 @@
 
 import type { Rom } from './rom.ts';
 import { LevelEmulator } from './levelemu.ts';
-import { RomReads, type ResultCache, type RomDeps, type RomFingerprint } from './romdeps.ts';
+import { RomReads, INPUTS_PER_KEY, type ResultCache, type RomDeps, type RomFingerprint } from './romdeps.ts';
 import { inputHash } from './inputs.ts';
 import { displaySkipMask } from './gfxpages.ts';
 import { TILESETS, tilesetPointers, pointersKey } from './tilesets.ts';
@@ -266,11 +266,11 @@ export class ResultLearner {
 }
 
 // results kept in memory only (keep: 'memory'), the latest used; checked against the ROM like the result
-// cache's
+// cache's, a key keeping the results of its latest used INPUTS_PER_KEY inputs as there
 class MemoryResults {
   private fp: RomFingerprint;
   private limit: number;
-  private entries = new Map<string, { data: unknown; deps: RomDeps; input: string | undefined; gen: number }>();
+  private entries = new Map<string, { key: string; data: unknown; deps: RomDeps; gen: number }>(); // by key and input
 
   constructor(fp: RomFingerprint, limit: number) {
     this.fp = fp;
@@ -278,21 +278,24 @@ class MemoryResults {
   }
 
   get<T>(key: string, input: string | undefined): T | undefined {
-    const e = this.entries.get(key);
-    if (!e || e.input !== input) return undefined;
+    const id = `${key}#${input}`, e = this.entries.get(id);
+    if (!e) return undefined;
     this.fp.sync();
     if (e.gen !== this.fp.gen) {
-      if (!this.fp.valid(e.deps)) { this.entries.delete(key); return undefined; }
+      if (!this.fp.valid(e.deps)) { this.entries.delete(id); return undefined; }
       e.gen = this.fp.gen;
     }
-    this.entries.delete(key);
-    this.entries.set(key, e);
+    this.entries.delete(id);
+    this.entries.set(id, e);
     return e.data as T;
   }
 
   set(key: string, data: unknown, deps: RomDeps, input: string | undefined): void {
-    this.entries.delete(key);
-    this.entries.set(key, { data, deps, input, gen: this.fp.gen });
+    const id = `${key}#${input}`;
+    this.entries.delete(id);
+    this.entries.set(id, { key, data, deps, gen: this.fp.gen });
+    const of = [...this.entries].filter(([, e]) => e.key === key); // (the least recently used first)
+    if (of.length > INPUTS_PER_KEY) this.entries.delete(of[0][0]);
     if (this.entries.size > this.limit) this.entries.delete(this.entries.keys().next().value!);
   }
 }
