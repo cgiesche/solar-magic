@@ -12,7 +12,7 @@ import { loadLevel, spriteSizes, SPRITE_MEMORY, type LevelSprite, type PrimaryHe
 import { record, rootSlot, sortPlaced, SlotTracker, testLevel, testSpriteData } from './spritegfx.ts';
 import { MemoryResults } from './learner.ts';
 import { inputHash } from './inputs.ts';
-import type { RomDeps, RomFingerprint, RomReads } from './romdeps.ts';
+import { RomReads, type RomDeps, type RomFingerprint } from './romdeps.ts';
 import type { Rom } from './rom.ts';
 import { SPR, SPRITE_SLOTS, spriteX, spriteY, cameraX, cameraY } from './ram.ts';
 
@@ -196,7 +196,8 @@ export function usedSpriteMemory(rom: Rom): number[] {
 // A value for which all groups are free of conflicts and keep as many sprites alive as with the
 // current one (base: its check), tried in the order given (most used first); null if none.
 // A value is first checked against the kept group results (one that fails rules it out without playing a group),
-// then the other groups are played, those with conflicts first, so a candidate usually fails fast.
+// then the other groups are played, those with conflicts first, so a candidate usually fails fast. Only the chosen
+// value's reads count for an enclosing tracked() call (a stored check depends on the current value and the suggestion).
 export function suggestSpriteMemory(ctx: SpriteMemContext, current: number, candidates: number[], groups: SpriteGroup[], base: SpriteMemCheck): number | null {
   return runJob(suggestJob(ctx, current, candidates, groups, base));
 }
@@ -206,20 +207,25 @@ function* suggestJob(ctx: SpriteMemContext, current: number, candidates: number[
   if (!bad.length) return null;
   const order = [...bad, ...groups.map((_, i) => i).filter((i) => !bad.includes(i))];
   const fails = (i: number, r: GroupCheck) => !r || r.lost.size > 0 || r.live < base.live[i];
+  const { emu } = ctx;
   for (const m of candidates) {
     if (m === current) continue;
+    // what the value's checks read counts only when it is chosen: a ROM change that lets a rejected value fit
+    // doesn't check again (the suggestion still fits, maybe not the first one that does)
+    const reads = new RomReads(emu.rom.data.length);
+    const apart = <T>(fn: () => T): T => { const r = emu.tracked(fn, null, false); reads.add(r.reads); return r.result; };
     const play: number[] = [];
     let ok = true;
     for (const i of order) {
-      const r = keptGroup(ctx, m, groups[i]);
+      const r = apart(() => keptGroup(ctx, m, groups[i]));
       if (r === undefined) play.push(i);
       else if (fails(i, r)) { ok = false; break; }
     }
     for (const i of ok ? play : []) {
       yield;
-      if (fails(i, checkGroup(ctx, m, groups[i], cams))) { ok = false; break; }
+      if (fails(i, apart(() => checkGroup(ctx, m, groups[i], cams)))) { ok = false; break; }
     }
-    if (ok) return m;
+    if (ok) { emu.count(reads); return m; }
   }
   return null;
 }

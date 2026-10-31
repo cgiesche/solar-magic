@@ -142,8 +142,8 @@ export class LevelEmulator {
   }
 
   // runs fn recording the ROM it reads, on top of base (default: the boot's); the reads also
-  // count for an enclosing tracked() call
-  tracked<T>(fn: () => T, base: RomReads | null = this.bootReads): { result: T; reads: RomReads } {
+  // count for an enclosing tracked() call (with counted false only when given to count())
+  tracked<T>(fn: () => T, base: RomReads | null = this.bootReads, counted = true): { result: T; reads: RomReads } {
     const s = this.snes, outer = s.romReads, outerRom = this.rom.reads, outerMask = s.romSkipMask;
     const reads = new RomReads(this.rom.data.length, base);
     s.romReads = this.rom.reads = reads; // the emulated CPU's reads and the editor code's
@@ -154,9 +154,15 @@ export class LevelEmulator {
       s.romReads = outer;
       s.romSkipMask = outerMask;
       this.rom.reads = outerRom;
-      outer?.add(reads);
-      if (outerRom && outerRom !== outer) outerRom.add(reads);
+      if (counted) this.count(reads);
     }
+  }
+
+  // reads (of a tracked() call not counted) count for the enclosing tracked() call as if read in it
+  count(reads: RomReads): void {
+    const outer = this.snes.romReads, outerRom = this.rom.reads;
+    outer?.add(reads);
+    if (outerRom && outerRom !== outer) outerRom.add(reads);
   }
 
   // runs fn recording every ROM byte it and the boot it starts from read, those skipMask leaves out too: what

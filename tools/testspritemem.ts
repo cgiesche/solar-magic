@@ -7,7 +7,8 @@
 // no group is played twice with a value (the suggestion after a move that causes a conflict plays the untouched
 // groups only with values not played before), moving all sprites plays no group again, and a kept result holds
 // the compact dependencies (RomDeps), not the record of the ROM bytes read. A check keeps all group results it used
-// for the next one, also more than the bound (#200).
+// for the next one, also more than the bound (#200). A check depends on the bytes read for the current value and the
+// suggestion only, not a rejected value's; two groups with the same layout share a result (#208).
 // Usage: node tools/testspritemem.ts [levels,hex]
 import { readFileSync } from 'node:fs';
 import { unzipSync } from 'fflate';
@@ -17,7 +18,7 @@ import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadLevel, newUid, type LevelSprite } from '../src/core/level.ts';
 import { checkSpriteMemory, runJob, spriteMemJob, spriteGroups, suggestSpriteMemory, usedSpriteMemory, SpriteGroupResults, type GroupResult, type SpriteGroup, type SpriteMemContext } from '../src/core/spritemem.ts';
-import { RomFingerprint, RomReads } from '../src/core/romdeps.ts';
+import { PAGE_SHIFT, RomFingerprint, RomReads } from '../src/core/romdeps.ts';
 import { editorImage } from './fixture.ts';
 
 const EDITOR_IMAGE = await editorImage(); // the fixture as the editor opens it
@@ -163,6 +164,68 @@ console.log('used sprite memory', candidates.map((m) => m.toString(16)).join(' '
   if (groupResults.ran > withE0 * candidates.length) fail(`001: the search after the move played ${groupResults.ran} groups, ${withE0} with $E0`);
   if (!same(kept, run(moved, false))) fail('001: after the move kept groups give another result than a check of the whole level');
   else console.log(`001 $E0 added: ${firstRan} groups played; moved: ${groupResults.ran} (${withE0} groups with it), suggestion ${kept.suggestion?.toString(16)}`);
+}
+
+// what a check reads, as the learner records it (each step tracked, as Learner runs a job)
+const jobReads = (ctx: SpriteMemContext, m: number, values: number[], sprites: LevelSprite[]) => {
+  const job = spriteMemJob(ctx, m, values, sprites), reads = new RomReads(rom.data.length);
+  for (;;) {
+    const r = emu.tracked(() => job.next());
+    reads.add(r.reads);
+    if (r.result.done) return { result: r.result.value, reads };
+  }
+};
+// group results each as if it read a page of its own (a page of the free space at the ROM's end, read by nothing
+// else): a check's reads show which results it depends on
+class Marked extends Counted {
+  marks = new Map<string, number>(); // key: its page
+  set(key: string, check: GroupResult['check'], reads: RomReads): void {
+    const p = (rom.data.length >> PAGE_SHIFT) - 1 - this.marks.size;
+    this.marks.set(key, p);
+    reads.read(p << PAGE_SHIFT);
+    rom.reads?.read(p << PAGE_SHIFT); // (read where the group is played)
+    super.set(key, check, reads);
+  }
+  in(reads: RomReads): string { return [...this.marks.values()].filter((p) => reads.pages[p]).sort().join(); }
+}
+
+// a check depends on the bytes read for the current value and the chosen suggestion only, not those of values tried
+// and rejected (#208): when it plays the groups and when it uses kept results; the values tried least used first
+// (several fail before one fits)
+{
+  const lv = loadLevel(rom, 0xc);
+  const ctx = { emu, level: 0xc, header: lv.header, bgPointer: bgOf(lv.layer2Pointer) };
+  const sprites: LevelSprite[] = [...lv.sprites, { uid: newUid(), num: 0xe0, x: 8, y: 0x14, extra: 0 }];
+  const groups = spriteGroups(sprites), values = [...candidates].reverse(), groupResults = new Marked('00C reads');
+  const played = jobReads({ ...ctx, groupResults }, 0, values, sprites), kept = jobReads({ ...ctx, groupResults }, 0, values, sprites);
+  const s = played.result.suggestion;
+  if (s === null) fail('00C reads: no suggestion');
+  else {
+    const tried = values.slice(0, values.indexOf(s)).filter((v) => v !== 0).length;
+    if (!tried) fail('00C reads: no value rejected before the suggestion');
+    // the results of the current value and the suggestion (all kept by now)
+    const own = emu.tracked(() => checkSpriteMemory({ ...ctx, groupResults }, 0, groups)).reads;
+    own.add(emu.tracked(() => checkSpriteMemory({ ...ctx, groupResults }, s, groups)).reads);
+    const want = groupResults.in(own);
+    if (!want) fail('00C reads: no group results marked');
+    if (groupResults.in(played.reads) !== want) fail('00C reads: the check playing the groups depends on a rejected value');
+    else if (groupResults.in(kept.reads) !== want) fail('00C reads: the check with kept groups depends on a rejected value');
+    else console.log(`00C reads: ${want.split(',').length} of ${groupResults.marks.size} group results (current value and suggestion ${s.toString(16)}, ${tried} values rejected)`);
+  }
+}
+
+// two groups with the same layout in one level ($E0 twice, far apart) share a result: the check plays it once, with
+// the same conflicts and suggestion as a check of the whole level
+{
+  const lv = loadLevel(rom, 0xc);
+  const ctx = { emu, level: 0xc, header: lv.header, bgPointer: bgOf(lv.layer2Pointer) };
+  const sprites: LevelSprite[] = [{ uid: newUid(), num: 0xe0, x: 8, y: 0x14, extra: 0 }, { uid: newUid(), num: 0xe0, x: 0x48, y: 0x14, extra: 0 }];
+  const groupResults = new Counted('00C same layout');
+  const c = checkSpriteMemory({ ...ctx, groupResults }, 0, spriteGroups(sprites)), ran = groupResults.ran;
+  const kept = checkAndSuggest(ctx, groupResults, 0, sprites), whole = checkAndSuggest(ctx, undefined, 0, sprites);
+  if (c.live.length !== 2 || ran !== 1 || c.conflicts.size !== 2) fail(`00C same layout: ${c.live.length} groups, ${ran} played, ${c.conflicts.size} conflicts`);
+  else if (!same(kept, whole)) fail('00C same layout: kept groups give another result than a check of the whole level');
+  else console.log(`00C same layout: one group played for two, ${kept.check.conflicts.size} conflicts, suggestion ${kept.suggestion?.toString(16)} as a whole check`);
 }
 
 // levels with their own sprite memory
