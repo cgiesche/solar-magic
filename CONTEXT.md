@@ -275,8 +275,12 @@ A level played in the emulator from gameplay on, frame by frame with the buttons
 _Avoid_: run, game loop, harness
 
 **Emulated result**:
-Anything the editor learned by emulation (a probe's outcome, the kinds of a tileset's objects, a level scan, sprite images, object thumbnails, jump arcs). It stays valid as long as its inputs and the ROM bytes it read are unchanged, and is learned again otherwise (on the main thread by the result learner, core/learner.ts: a key, an input, the bytes read). One that is no picture doesn't count the display data among the bytes it read (ADR 0008).
+Anything the editor learned by emulation (a probe's outcome, the kinds of a tileset's objects, a level scan, sprite images, object thumbnails, jump arcs). It stays valid as long as its inputs and the ROM bytes it read are unchanged, and is learned again otherwise (by the result learner: a key, an input, the bytes read). One that is no picture doesn't count the display data among the bytes it read (ADR 0008).
 _Avoid_: Cached value, generation (for validity)
+
+**Result learner**:
+What learns emulated results: runs the emulation for a result's key and input, records the ROM bytes it reads, and keeps the result while they and the input are unchanged. A read byte that changes while it learns starts it over. Wherever it runs (beside the editor or in the background worker) it learns the same way; probes are results it learns too.
+_Avoid_: prober (for the whole), worker (for what it does)
 
 **Picture**:
 An emulated result that shows what things look like (sprite images, object thumbnails, the placement preview, animated tiles and colors), and so counts the display data among the bytes it read. Any other result (a probe, a level's uses, a jump arc, …) is no picture and leaves the display data out, so drawing a tile or changing a color keeps it (ADR 0008). The palette tab's trace of where colors come from leaves out only the colors' values.
