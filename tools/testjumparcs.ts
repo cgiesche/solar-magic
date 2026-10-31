@@ -1,10 +1,13 @@
 // Jump arcs (jumparcs.ts): emulated jumps from a tile of a level go further with more speed and
-// are stopped by walls.
+// are stopped by walls. Learned as the editor does (jumpArcsJob in the result learner), a second request in the same
+// level state doesn't load the level again, an edit of a byte the load read does.
 import { readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
 import { BlockProber } from '../src/core/blockprobe.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
-import { JumpArcs, ARC_SPEEDS, type JumpArc } from '../src/core/jumparcs.ts';
+import { JumpArcs, ARC_SPEEDS, jumpArcsJob, type JumpArc } from '../src/core/jumparcs.ts';
+import { ResultLearner } from '../src/core/learner.ts';
+import { ResultCache, RomFingerprint } from '../src/core/romdeps.ts';
 import { loadLevel, serializeLayer1, newUid } from '../src/core/level.ts';
 import { installEditorPatch, DM16_EXT } from '../src/core/patches.ts';
 
@@ -52,6 +55,36 @@ for (const dir of [-1, 1] as const) {
   const rise = sl.map((a) => a.pts[1] - Math.min(...a.pts.filter((_, i) => i & 1)));
   check(sl.every((a) => a.end === 'land' && a.pts[1] > 20 * 16 && a.pts[1] < 21 * 16) && rise.every((r) => r > 48),
     `jumps ${dir < 0 ? 'down' : 'up'} the slope from its surface (${sl[0].pts[1]}) rise ${rise.join(', ')} px`);
+}
+
+// learned as the editor does: the level loaded once per level state on the learner's 'arcs' lane, again after an edit
+// of a byte the load read
+{
+  let loads = 0;
+  const prepare = JumpArcs.prototype.prepare;
+  JumpArcs.prototype.prepare = function (...a) { loads++; return prepare.apply(this, a); };
+  const main = new LevelEmulator(rom);
+  main.boot();
+  const steps: (() => void)[] = [];
+  const learner = new ResultLearner({
+    rom, results: new ResultCache(new RomFingerprint(rom)), cacheReady: Promise.resolve(), main,
+    later: (_key, step) => steps.push(step), soon: (step) => steps.push(step), setBusy: () => {},
+  });
+  const load: Parameters<JumpArcs['prepare']> = [orig.number, { layer1: serializeLayer1(rom, orig) }, orig.spriteHeader, 27 * 16];
+  const ask = async (tx: number) => {
+    let out: JumpArc[] | null = null;
+    learner.learn(`arcs:${tx},20`, (emu, prep) => jumpArcsJob(emu, prep, 'lv105', load, tx, 20, runs), { keep: false, lane: 'arcs', picture: false, done: (r) => (out = r) });
+    while (!out) { await new Promise((r) => setTimeout(r, 0)); while (steps.length) steps.shift()!(); }
+    return out as JumpArc[];
+  };
+  const a = await ask(11), b = await ask(12);
+  check(a.length === 8 && b.length === 8 && loads === 1, `a second request in the same level state: the level not loaded again (${loads} loads)`);
+  const o = learner.emu(false).bootReads!.pages.indexOf(1) << 8;
+  rom.writeAt(o, Uint8Array.of(rom.data[o] ^ 1));
+  rom.writeAt(o, Uint8Array.of(rom.data[o] ^ 1)); // (changed back: the level still loads)
+  const c = await ask(13);
+  check(c.length === 8 && loads === 2, `an edit of a byte the load read: loaded again (${loads} loads)`);
+  JumpArcs.prototype.prepare = prepare;
 }
 
 console.log(bad ? `${bad} failures` : 'all ok');

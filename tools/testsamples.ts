@@ -22,7 +22,7 @@ import { installEditorPatch, customPalette } from '../src/core/patches.ts';
 import { enableBlocks } from '../src/core/map16ext.ts';
 import { loadLevel, readSecondaryEntrance, writeSecondaryEntrance, exitIndex, serializeLayer1, serializeSprites, isL1Vertical, type Level } from '../src/core/level.ts';
 import { levelScanJob } from '../src/core/levelscan.ts';
-import { runJob } from '../src/core/runjob.ts';
+import { runJob } from '../src/core/jobrunner.ts';
 import { renderLevel } from '../src/core/render.ts';
 import { levelSlots } from '../src/core/gfxslots.ts';
 import { mwlSections, parseLmObjects } from '../src/core/mwl.ts';

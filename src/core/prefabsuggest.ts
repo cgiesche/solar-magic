@@ -14,13 +14,12 @@
 import type { Rom } from './rom.ts';
 import { loadLevel, serializeLayer1, serializeLayer2, serializeObjects, hasObjects, isL1Vertical, isSized, type Level, type LevelObject } from './level.ts';
 import type { LevelEmulator } from './levelemu.ts';
-import { runJob } from './runjob.ts';
 import { isDm16, dm16Tiles } from './cdm16.ts';
 import type { Prefab } from './prefabs.ts';
 import { prefabCost } from './prefabcost.ts';
 import { dm16Prefab, arrangementKey } from './pastehint.ts';
 import { findPrefabPlaces, tileKey, type Layer, type LevelPlaces, type PrefabPlace } from './prefabplaces.ts';
-import { MemoryResults } from './learner.ts';
+import { MemoryResults, runJob } from './jobrunner.ts';
 import { inputHash } from './inputs.ts';
 import { INPUTS_PER_KEY, RomReads, updateBytePages, type RomDeps, type RomFingerprint } from './romdeps.ts';
 import { objectLength2D } from './obj2d.ts';

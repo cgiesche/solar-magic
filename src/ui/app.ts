@@ -40,7 +40,7 @@ import type { EditOptions } from '../core/romedit.ts';
 import { EditSession, type LevelEdit, type StepResult } from '../core/editsession.ts';
 import { resizeObjectSize, type ObjKind, type ObjKinds } from '../core/objkinds.ts';
 import { SizeProbe, sizeParts, partSizes, drivers, namedDrivers, keepEdges, type Box, type Drivers, type SizeSpec } from '../core/objresize.ts';
-import { JumpArcs, ARC_SPEEDS, type JumpArc } from '../core/jumparcs.ts';
+import { jumpArcsJob, type JumpArc } from '../core/jumparcs.ts';
 import { scanKey, type ScanLevel, type ScanResult } from '../core/levelscan.ts';
 import { cameraAtKey, type CameraReach, type CameraAt } from '../core/camerareach.ts';
 import { MARIO_W, MARIO_H, type CameraBands } from '../core/camerabands.ts';
@@ -1220,9 +1220,6 @@ export class App {
   // ------------- jump arcs (see jumparcs.ts) -------------
   // arcs from a tile of the level as edited: emulated in the background, the latest request only, kept in
   // memory with the level as edited as their input; 'arcs' when some are ready
-  private arcs: JumpArcs | null = null;
-  private arcsFor = ''; // the ROM and level state the arc emulator is prepared for
-  private arcsLoad: RomReads | null = null; // what preparing it read
   private arcsWaiting = false; // for the run speeds probe
 
   jumpArcs(tx: number, ty: number): JumpArc[] | undefined {
@@ -1240,27 +1237,10 @@ export class App {
     const lv = this.level, ov = this.buildOverrides(), height = this.images.height;
     const level = inputHash({ level: this.levelInput(ov), spriteHeader: lv.spriteHeader, height });
     // (asked for on every paint: joins the job while it is learned)
-    return this.learner.learn(`arcs:${tx},${ty}`, (emu) => this.arcJob(emu, level, [lv.number, ov, lv.spriteHeader, height], tx, ty, runs),
+    return this.learner.learn(`arcs:${tx},${ty}`, (emu, prepare) => jumpArcsJob(emu, prepare, level, [lv.number, ov, lv.spriteHeader, height], tx, ty, runs),
       { input: { level, runs }, keep: 'memory', lane: 'arcs', replace: true, label: 'Jump arcs', picture: false, done: this.arcsLearned });
   }
   private arcsLearned = () => this.emit('arcs');
-
-  // (none when the level doesn't reach gameplay); levelHash: the hash of the level state prepared with
-  private *arcJob(emu: LevelEmulator, levelHash: string, prepare: Parameters<JumpArcs['prepare']>, tx: number, ty: number, runs: RunStates): Generator<void, JumpArc[]> {
-    if (this.arcs?.emu !== emu) { this.arcs = new JumpArcs(emu); this.arcsFor = ''; }
-    const arcs = this.arcs, state = `${this.rom.gen}:${levelHash}`;
-    if (this.arcsFor !== state) {
-      const r = emu.tracked(() => arcs.prepare(...prepare));
-      this.arcsFor = r.result ? state : '';
-      this.arcsLoad = r.reads;
-      if (!this.arcsFor) { console.error('jump arcs: the level did not reach gameplay'); return []; }
-      yield;
-    } else this.rom.reads?.add(this.arcsLoad!); // the arcs depend on the level's load they start from too
-
-    const out: JumpArc[] = [];
-    for (const sp of ARC_SPEEDS) for (const dir of [1, -1] as const) { out.push(arcs.arc(tx, ty, sp, dir, runs)); yield; }
-    return out;
-  }
 
   // The object picker's thumbnails of specs in the level as edited (thumbs.ts): undefined while they are
   // learned in the background ('thumbs' when done)

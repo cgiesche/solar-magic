@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { cameraReachJob, cameraAtJob, cameraAtKey, type CameraReach } from '../src/core/camerareach.ts';
-import { runJob } from '../src/core/runjob.ts';
+import { runJob } from '../src/core/jobrunner.ts';
 import type { ScanLevel } from '../src/core/levelscan.ts';
 import { loadLevel, serializeLayer1, serializeSprites, isL1Vertical, newUid, type Level } from '../src/core/level.ts';
 import { installEditorPatch, DM16_EXT } from '../src/core/patches.ts';

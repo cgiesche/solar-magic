@@ -1,0 +1,293 @@
+// The emulated job runner under the result learner (CONTEXT.md), on the editor's main thread (learner.ts) and in the
+// probe worker (probehost.ts): runs a job a step at a time on an emulator of its own, with the ROM bytes it reads
+// tracked, and keeps its result under its key and input while they are unchanged (romdeps.ts). A job during which
+// bytes it read changed starts over before its next step (or before its result is kept). Which job runs next and how
+// long a turn lasts is the owner's.
+// An emulator per lane, set up from a boot snapshot: pictures (CONTEXT.md) from the main one's, results that are no
+// pictures from one that leaves out the display data too (the Map16 tiles' quarters, the colors: gfxDisplaySkipMask,
+// ADR 0008), so that drawing a tile or changing a color keeps them. A lane's emulator keeps a prepared state (a level
+// loaded) for the later jobs there while the bytes preparing it read are unchanged.
+
+import type { Rom } from './rom.ts';
+import { LevelEmulator } from './levelemu.ts';
+import { RomReads, INPUTS_PER_KEY, type ResultCache, type RomDeps, type RomFingerprint } from './romdeps.ts';
+import { gfxSkipMask, gfxDisplaySkipMask } from './gfxpages.ts';
+import { TILESETS, tilesetPointers, pointersKey } from './tilesets.ts';
+
+const MEMORY = 256; // results kept in memory only (keep: 'memory'), the latest used
+
+// a job: a step per next(), the result as its return value (undefined: none, nothing kept); a yielded string is its
+// label from then on
+export type Job<T> = Iterator<string | void, T>;
+
+// Runs a job to its end at once: what it yields between steps (a progress label) is ignored.
+export function runJob<T>(job: Generator<unknown, T>): T {
+  for (;;) { const r = job.next(); if (r.done) return r.value; }
+}
+
+// where a result goes: the result cache (stored), memory only (results that change with every edit, not
+// worth storing) or nowhere (to the owner only)
+export type Keep = boolean | 'memory';
+
+// the state kept on a job's emulator under key while the bytes preparing it read are unchanged (they count for the
+// job), else prepare's (null: none kept); one per emulator
+export type Prepare = <S>(key: string, prepare: () => S | null) => S | null;
+
+// what a job learns
+export interface JobSpec<T> {
+  key: string;
+  input?: string; // the hash of what the result depends on outside the ROM (inputs.ts)
+  keep: Keep;
+  picture: boolean; // the result shows what things look like: it reads the display data
+  boot?: boolean; // the boot snapshot's reads count for the result (default: true)
+  start: (emu: LevelEmulator, prepare: Prepare) => Job<T>;
+}
+
+// a job asked for: not started yet (job null), or running since the ROM generation gen
+export interface JobRun<T> extends JobSpec<T> {
+  job: Job<T> | null;
+  emu: LevelEmulator | null;
+  reads: RomReads;
+  gen: number;
+  label: string | null; // yielded
+}
+
+export interface RunnerDeps {
+  rom: Rom;
+  results: ResultCache;
+  main?: LevelEmulator; // the booted emulator whose boot snapshot pictures start from (default: an own one)
+  noDisplay?: LevelEmulator; // the one whose boot snapshot the others start from (default: an own one; its skip mask is set)
+}
+
+interface Prepared { key: string; state: unknown; reads: RomReads; gen: number }
+
+export class JobRunner {
+  private d: RunnerDeps;
+  readonly memory: MemoryResults;
+  private emus = new Map<string, LevelEmulator>(); // by lane
+  private main: LevelEmulator | null = null; // own, without deps.main
+  private gfxMask = { gen: -1, mask: null as Uint8Array | null }; // its skip mask
+  private noDisplay: LevelEmulator | null = null; // own, without deps.noDisplay
+  private pointerEmu: LevelEmulator | null = null; // learns the tilesets' pointers (tilesetPointers)
+  private display = { gen: -1, mask: null as Uint8Array | null }; // displayMask
+  private preps = new WeakMap<LevelEmulator, Prepared>(); // by emulator
+  started = 0; // jobs (re)started
+
+  constructor(deps: RunnerDeps) {
+    this.d = deps;
+    this.memory = new MemoryResults(deps.results.fp, MEMORY);
+    if (deps.noDisplay) deps.noDisplay.skipMask = this.displayMask;
+  }
+
+  run<T>(spec: JobSpec<T>): JobRun<T> {
+    return { ...spec, job: null, emu: null, reads: new RomReads(0), gen: -1, label: null };
+  }
+
+  // Runs a step of the job (its first one: a stored result, else the job started on the lane's emulator); its
+  // result when it ended, else null. The job starts over first when bytes it read changed since its last step.
+  step<T>(lane: string, r: JobRun<T>): { result: T } | null {
+    const rom = this.d.rom;
+    if (r.job && this.changed(r.gen, r.reads)) r.job = null;
+    if (!r.job) {
+      // (stored meanwhile, or loaded from storage)
+      const stored = this.stored<T>(r.key, r.input, r.keep);
+      if (stored !== undefined) return { result: stored };
+      const emu = r.emu = this.emu(lane, r.picture);
+      r.reads = new RomReads(rom.data.length);
+      r.label = null;
+      r.job = r.start(emu, (key, prepare) => this.prepared(emu, key, prepare));
+      this.started++;
+    }
+    r.gen = rom.gen;
+    const emu = r.emu!, job = r.job, t = emu.tracked(() => job.next(), r.boot === false ? null : emu.bootReads);
+    r.reads.add(t.reads);
+    if (!t.result.done) {
+      if (typeof t.result.value === 'string') r.label = t.result.value;
+      return null;
+    }
+    r.job = null;
+    if (this.changed(r.gen, r.reads)) return null; // (the job wrote bytes it read: again)
+    if (t.result.value !== undefined) this.store(r.key, r.input, r.keep, t.result.value, r.reads);
+    return { result: t.result.value };
+  }
+
+  // any byte read changed since ROM generation gen (one the ROM's change log no longer reaches counts as changed)
+  private changed(gen: number, reads: RomReads): boolean {
+    const ch = this.d.rom.changesSince(gen);
+    return ch === null || (ch.length > 0 && reads.touches(ch));
+  }
+
+  // (inside a job's step)
+  private prepared<S>(emu: LevelEmulator, key: string, prepare: () => S | null): S | null {
+    const p = this.preps.get(emu);
+    if (p?.key === key && !this.changed(p.gen, p.reads)) {
+      p.gen = this.d.rom.gen;
+      emu.count(p.reads);
+      return p.state as S;
+    }
+    this.preps.delete(emu);
+    const gen = this.d.rom.gen, { result, reads } = emu.tracked(prepare);
+    if (result !== null) this.preps.set(emu, { key, state: result, reads, gen });
+    return result;
+  }
+
+  stored<T>(key: string, input: string | undefined, keep: Keep): T | undefined {
+    return keep === false ? undefined : (keep === 'memory' ? this.memory : this.d.results).get<T>(key, input);
+  }
+
+  store(key: string, input: string | undefined, keep: Keep, result: unknown, reads: RomReads): void {
+    if (keep !== false) (keep === 'memory' ? this.memory : this.d.results).set(key, result, this.d.results.fp.deps(reads), input);
+  }
+
+  // the lane's emulator, set up from the boot snapshot for pictures or for results that are no pictures (noDisplayBoot)
+  emu(lane: string, picture: boolean): LevelEmulator {
+    const emu = this.fresh(this.emus.get(lane) ?? null, picture);
+    this.emus.set(lane, emu);
+    return emu;
+  }
+
+  private fresh(emu: LevelEmulator | null, picture: boolean): LevelEmulator {
+    if (!picture) this.displayMask(); // (first: the pointers it needs are learned at once)
+    const from = picture ? this.mainBoot() : this.noDisplayBoot();
+    if (!emu || emu.rom !== this.d.rom) emu = new LevelEmulator(this.d.rom);
+    emu.skipMask = picture ? () => from.skipMask?.() ?? null : this.displayMask;
+    emu.adoptBoot(from);
+    return emu;
+  }
+
+  // The main boot snapshot: deps.main's, else an own one leaving out the GFX file data (gfxSkipMask) as the editor's
+  private mainBoot(): LevelEmulator {
+    if (this.d.main) return this.d.main;
+    const rom = this.d.rom;
+    if (!this.main || this.main.rom !== rom) {
+      const m = this.gfxMask;
+      this.main = new LevelEmulator(rom);
+      this.main.skipMask = () => {
+        if (m.gen !== rom.gen) { m.gen = rom.gen; m.mask = gfxSkipMask(rom); }
+        return m.mask;
+      };
+    }
+    this.main.ensureBoot();
+    return this.main;
+  }
+
+  // The bytes results that are no pictures don't read: the display data (gfxDisplaySkipMask, with the tilesets'
+  // pointers), the GFX file data among them; once per ROM state. Learning the pointers isn't part of the
+  // result asking for the mask.
+  displayMask = (): Uint8Array | null => {
+    const rom = this.d.rom, m = this.display;
+    if (m.gen !== rom.gen) {
+      const reads = rom.reads;
+      rom.reads = null;
+      try { m.mask = gfxDisplaySkipMask(rom, this.tilesetPointers()); m.gen = rom.gen; } finally { rom.reads = reads; }
+    }
+    return m.mask;
+  };
+
+  // per tileset the pointers of FG Map16 tiles 000-1FF (tilesets.ts), learned once and kept in the result cache.
+  // No picture, though learned from the main boot snapshot as pictures are: the boot snapshot of results that are
+  // no pictures needs the mask, which needs these pointers. Their reads leave out the display data by themselves,
+  // without the boot's reads (tilesetPointers). On an own emulator: the mask is asked for while the lanes' run.
+  tilesetPointers(): number[][] {
+    return Array.from({ length: TILESETS }, (_, ts) => {
+      const key = pointersKey(ts), known = this.stored<number[]>(key, undefined, true);
+      if (known !== undefined) return known;
+      const { result, reads } = tilesetPointers(this.pointerEmu = this.fresh(this.pointerEmu, true), ts);
+      this.store(key, undefined, true, result, reads);
+      return result;
+    });
+  }
+
+  // The boot snapshot for results that are no pictures: the same state as the main one's, its reads without the
+  // display data (a title screen's tile or color isn't read by every such result). Booted on its own emulator, again
+  // when what it read changed (a display edit too: the state holds the title screen's colors).
+  private noDisplayBoot(): LevelEmulator {
+    let e = this.d.noDisplay ?? this.noDisplay;
+    if (!e || e.rom !== this.d.rom) {
+      this.noDisplay = e = new LevelEmulator(this.d.rom);
+      e.skipMask = this.displayMask;
+    }
+    e.ensureBoot();
+    return e;
+  }
+}
+
+// results kept in memory only (keep: 'memory'), the latest used; checked against the ROM like the result
+// cache's, a key keeping the results of its latest used INPUTS_PER_KEY inputs as there (also the sprite
+// memory check's group results, spritemem.ts, and the prefab suggestions' places, prefabsuggest.ts). A round
+// (a check, a run over all levels) keeps all results it used, also more than the limit, and so does the latest
+// finished round while the next one runs (a round left unfinished doesn't replace it): the next round over the same
+// finds them. Getting and setting take constant time (a key's inputs are looked through, not all results).
+type Entry = { key: string; data: unknown; deps: RomDeps; gen: number; round: number };
+
+export class MemoryResults {
+  private fp: RomFingerprint;
+  private limit: number;
+  private entries = new Map<string, Entry>(); // by key and input
+  private inputs = new Map<string, string[]>(); // a key's entries, the least recently used first
+  private round = 0; // 0: none started (only the limit bounds)
+  private used = 0; // results used in the round
+  private finished = 0; // results used in the latest finished round
+  looked = 0; // entries looked at to keep the bounds (counted for tests)
+
+  constructor(fp: RomFingerprint, limit: number) {
+    this.fp = fp;
+    this.limit = limit;
+  }
+
+  // starts a round: from now on the results used are kept (with those of the latest finished round)
+  startRound(): void {
+    this.round++;
+    this.used = 0;
+  }
+  // the round is finished: its results are kept until the next one finishes
+  endRound(): void { this.finished = this.used; }
+
+  get<T>(key: string, input: string | undefined): T | undefined { return this.entry<T>(key, input)?.data; }
+
+  // the result with the bytes it read, if it holds for the current ROM
+  entry<T>(key: string, input: string | undefined): { data: T; deps: RomDeps } | undefined {
+    const id = `${key}#${input}`, e = this.entries.get(id);
+    if (!e) return undefined;
+    this.fp.sync();
+    if (e.gen !== this.fp.gen) {
+      if (!this.fp.valid(e.deps)) { this.remove(id, key); return undefined; }
+      e.gen = this.fp.gen;
+    }
+    this.touch(id, e);
+    return { data: e.data as T, deps: e.deps };
+  }
+
+  set(key: string, data: unknown, deps: RomDeps, input: string | undefined): void {
+    const id = `${key}#${input}`, old = this.entries.get(id);
+    this.touch(id, { key, data, deps, gen: this.fp.gen, round: old?.round ?? -1 });
+    const of = this.inputs.get(key)!;
+    if (of.length > INPUTS_PER_KEY) this.remove(of[0], key);
+    while (this.entries.size > Math.max(this.limit, this.finished + this.used)) {
+      const [first, e] = this.entries.entries().next().value!;
+      this.remove(first, e.key);
+    }
+  }
+
+  // e becomes the latest used result
+  private touch(id: string, e: Entry): void {
+    if (this.round && e.round !== this.round) { e.round = this.round; this.used++; }
+    this.entries.delete(id);
+    this.entries.set(id, e);
+    const of = this.inputs.get(e.key);
+    if (!of) { this.inputs.set(e.key, [id]); return; }
+    const i = of.indexOf(id);
+    this.looked += of.length;
+    if (i >= 0) of.splice(i, 1);
+    of.push(id);
+  }
+
+  private remove(id: string, key: string): void {
+    if (this.round && this.entries.get(id)?.round === this.round) this.used--;
+    this.entries.delete(id);
+    const of = this.inputs.get(key)!, i = of.indexOf(id);
+    this.looked += of.length;
+    of.splice(i, 1);
+    if (!of.length) this.inputs.delete(key);
+  }
+}

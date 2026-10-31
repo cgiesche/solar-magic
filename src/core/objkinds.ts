@@ -206,3 +206,16 @@ export function resizeObjectSize(kind: ObjKind | null | undefined, size: number,
   const step = (d: 'w' | 'h' | null, v: number) => (d ? Math.max(0, Math.min(15, v + (d === 'w' ? dw : dh))) : v);
   return (step(k.hi, size >> 4) << 4) | step(k.lo, size & 15);
 }
+
+// ObjKindProbe as a job (jobrunner.ts, without the boot's reads): a step per emulated level load; what it reads is
+// what the probe's reads() gives, not the level loads around the object routines
+export function* objKindsJob(emu: LevelEmulator, level: KindLevel, layer2Pointer: number): Generator<void, ObjKinds> {
+  const untracked = <T>(fn: () => T) => emu.tracked(fn, null, false).result;
+  const probe = untracked(() => new ObjKindProbe(emu, level, layer2Pointer));
+  while (!probe.done) {
+    untracked(() => probe.step());
+    emu.count(probe.reads());
+    yield;
+  }
+  return probe.result();
+}

@@ -6,7 +6,7 @@ import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadLevel, serializeLayer1, encodeSecondaryHeader, readSecondaryHeader } from '../src/core/level.ts';
 import { renderLevel } from '../src/core/render.ts';
 import { layer3Kind, layer3Kinds, tideRangeJob, layer3Top, type TideRange } from '../src/core/layer3.ts';
-import { runJob } from '../src/core/runjob.ts';
+import { runJob } from '../src/core/jobrunner.ts';
 import { PlaySession } from '../src/core/playsession.ts';
 import { editorImage } from './fixture.ts';
 

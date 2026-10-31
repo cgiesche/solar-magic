@@ -12,7 +12,7 @@ import { levelSlots, layerSlots } from '../core/gfxslots.ts';
 import { gfxFilesHash } from '../core/gfxpages.ts';
 import { levelAnimHash } from '../core/exanim.ts';
 import { inputHash, levelInput } from '../core/inputs.ts';
-import { runJob } from '../core/runjob.ts';
+import { runJob } from '../core/jobrunner.ts';
 import { effectLoad, ramEffect } from '../core/objeffects.ts';
 
 // extension: object 2D's bytes after its 3 where the ROM reads them (obj2d.ts), its custom number first

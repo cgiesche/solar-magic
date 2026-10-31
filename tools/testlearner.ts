@@ -1,7 +1,8 @@
 // Learning emulated results on the main thread (learner.ts): a result the cache holds comes back without
 // running anything; two requests for one key run its job once; a sliced job during which the ROM bytes it
-// read change keeps nothing and is learned again. A result with an input (inputs.ts) is learned again when
-// the input or a byte it read changes, and reused when neither does; one kept in memory isn't stored.
+// read change keeps nothing and is learned again (it starts over before its next step). A result with an input
+// (inputs.ts) is learned again when the input or a byte it read changes, and reused when neither does; one kept in
+// memory isn't stored.
 // Memory-only results (#200): a write looks at a key's inputs only, not at all results (counted); a key keeps its latest
 // used inputs, the latest used results stay within the limit, and a round keeps all results it used, also more.
 // A result that is no picture doesn't read what blocks look like (ADR 0008): flipping a standard Map16 tile's
@@ -9,7 +10,8 @@
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { ResultCache, RomFingerprint, INPUTS_PER_KEY } from '../src/core/romdeps.ts';
-import { ResultLearner, MemoryResults } from '../src/core/learner.ts';
+import { ResultLearner } from '../src/core/learner.ts';
+import { MemoryResults } from '../src/core/jobrunner.ts';
 import { inputHash, levelInput } from '../src/core/inputs.ts';
 import { gfxSkipMask } from '../src/core/gfxpages.ts';
 import { LevelUses, usedLevels } from '../src/core/levelusage.ts';
@@ -19,6 +21,7 @@ import { setSharedColor, sharedColor } from '../src/core/sharedpal.ts';
 import { captureSprites } from '../src/core/spritegfx.ts';
 import { objectThumbsJob, objKey } from '../src/ui/thumbs.ts';
 import { editorImage } from './fixture.ts';
+import { checkJobRunner } from './runnercheck.ts';
 
 let fail = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) fail++; };
@@ -105,6 +108,25 @@ function* sum(n: number): Generator<void, number> {
   await drain();
   check(runs === 2 && heard.join() === '5', `learned again after a ROM write (${runs} runs, ${heard})`);
   check(results.get('w') === 5, 'only the result from the new bytes is kept');
+  rom.w8(spare, 0);
+}
+
+// a ROM write to a byte the job read, between two of its steps: it starts over before its next step
+{
+  const { results, learner, drain } = editor();
+  runs = 0;
+  let wrote = false, third = 0;
+  learner.learn('v', function* () {
+    runs++;
+    const s = rom.r8(spare);
+    yield;
+    if (!wrote) { wrote = true; rom.w8(spare, 3); }
+    yield;
+    third++;
+    return s;
+  });
+  await drain();
+  check(runs === 2 && third === 1 && results.get('v') === 3, `started over before the step after the write (${runs} runs, ${third} third steps)`);
   rom.w8(spare, 0);
 }
 
@@ -254,6 +276,9 @@ for (const keep of [true, 'memory'] as const) {
   check(round.get('r999', undefined) === undefined && round.get('s0', undefined) === 0 && round.get('t19', undefined) === 19,
     'smaller rounds drop the results of earlier rounds');
 }
+
+// the job runner under both owners (runnercheck.ts)
+await checkJobRunner(check);
 
 if (fail) { console.log(`${fail} failed`); process.exit(1); }
 console.log('all ok');

@@ -8,6 +8,7 @@
 
 import type { LevelEmulator, LevelOverride } from './levelemu.ts';
 import type { SnesState } from './snes.ts';
+import type { Prepare } from './jobrunner.ts';
 import { type RunStates, type RunState } from './blockprobe.ts';
 import { PlaySession } from './playsession.ts';
 import { GM, RAM, MARIO_DYING, PAD, setCameraX, setCameraY, marioX, getS16, marioY, setMarioPos } from './ram.ts';
@@ -113,4 +114,17 @@ export class JumpArcs {
     s.joy1 = 0;
     return { speed, dir, pts, end };
   }
+}
+
+// The arcs from tile (tx, ty) at every speed to both sides as a job (jobrunner.ts; no picture): the level is loaded
+// once per level state (level: its hash) and kept on the job's emulator, then an arc a step. None when the level
+// doesn't reach gameplay.
+export function* jumpArcsJob(emu: LevelEmulator, prepare: Prepare, level: string, load: Parameters<JumpArcs['prepare']>, tx: number, ty: number, runs: RunStates): Generator<void, JumpArc[]> {
+  let loaded = false;
+  const arcs = prepare(`arcs:${level}`, () => { loaded = true; const a = new JumpArcs(emu); return a.prepare(...load) ? a : null; });
+  if (!arcs) { console.error('jump arcs: the level did not reach gameplay'); return []; }
+  if (loaded) yield;
+  const out: JumpArc[] = [];
+  for (const sp of ARC_SPEEDS) for (const dir of [1, -1] as const) { out.push(arcs.arc(tx, ty, sp, dir, runs)); yield; }
+  return out;
 }

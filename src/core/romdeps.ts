@@ -212,7 +212,7 @@ export const INPUTS_PER_KEY = 4; // inputs a key keeps results for (the latest u
 
 // where an entry is stored: its key, with the input's hash; a key's inputs in the order last used under the key
 // with an empty input (the inputs' hashes, '' for none; written when they change, not the entries)
-const storeKey = (key: string, input: string | undefined) => input === undefined ? key : `${key}#${input}`;
+export const storeKey = (key: string, input: string | undefined) => input === undefined ? key : `${key}#${input}`;
 const orderKey = (key: string) => `${key}#`;
 const keyOf = (stored: string, e: CacheEntry) => e.input === undefined ? stored : stored.slice(0, -e.input.length - 1);
 

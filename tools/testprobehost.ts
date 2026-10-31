@@ -1,7 +1,8 @@
 // Probe jobs (probehost.ts, run by the editor's probe worker): results as the prober's own, asked
 // jobs before prefetched ones, a new ROM drops the queue; object kinds, level scan and camera as
-// computed directly, in slices that let asked jobs go first. A ROM change sent as the ranges it wrote keeps
-// the queue and the tasks, restarting only a task that read a changed byte (overworld edits restart nothing).
+// computed directly, a step at a time that lets asked jobs go first. A ROM change sent as the ranges it wrote keeps
+// the queue and the tasks; only a task that read a changed byte starts over, before its next step (overworld edits
+// restart nothing).
 // A cancelled scan runs no further slice and goes on when asked for again. Results a task's slice found before a ROM
 // change go with the next reply only if they hold on the new ROM. Jobs keep their result cache keys; only the scan
 // can be cancelled.
@@ -15,9 +16,10 @@ import { LevelEmulator } from '../src/core/levelemu.ts';
 import { ObjKindProbe, kindsKey, type ObjKinds } from '../src/core/objkinds.ts';
 import { levelScanJob, type ScanLevel } from '../src/core/levelscan.ts';
 import { cameraAtJob } from '../src/core/camerareach.ts';
-import { runJob } from '../src/core/runjob.ts';
+import { runJob } from '../src/core/jobrunner.ts';
 import { loadLevel, serializeLayer1, serializeSprites, L2_PTRS } from '../src/core/level.ts';
 import { editorImage } from './fixture.ts';
+import { checkJobRunner } from './runnercheck.ts';
 import { gfxSkipMask, gfxDisplaySkipMask } from '../src/core/gfxpages.ts';
 import { tilesetPointers, pointersKey, TILESETS } from '../src/core/tilesets.ts';
 import { setActsLike, extTileWords, setExtTileWords } from '../src/core/map16ext.ts';
@@ -175,15 +177,18 @@ check(host.pending === 0, 'new ROM: tasks dropped');
   const page = emu.bootReads!.pages.indexOf(1), o = page << 8;
   const flip = (gen: number) => { r.writeAt(o, Uint8Array.of(r.data[o] ^ 1)); h.handle({ type: 'edit', gen, size: r.size, edits: [[o, r.data.slice(o, o + 1)]] }); };
   flip(2); flip(3);
-  check(h.started === started + 1 && h.pending === pending, 'a byte the scan read: the scan restarted once, the kinds and the queue go on');
+  check(h.started === started && h.pending === pending, 'a byte the scan read: nothing restarted at once, the kinds and the queue stay');
   // the same scan asked for again (the same key): the running one answers it
   h.handle({ type: 'scan', id: 5, key: 'scan-re', level: scanLevel });
-  check(h.started === started + 1, 'the same scan asked for again while it runs: not restarted');
+  check(h.started === started, 'the same scan asked for again while it runs: not restarted');
+  h.next();
+  check(h.started === started + 1, 'the scan started over before its next step');
   const replies: ProbeReply[] = [];
   while (h.pending) { const d = h.next(); if (d) replies.push(d); }
   const sc = replies.find((d) => d.type === 'scan');
   check(sc?.type === 'scan' && sc.id === 5 && JSON.stringify(sc.result) === JSON.stringify(scanned), 'restarted scan as played directly, answering the latest request');
   check(replies.some((d) => d.type === 'kinds' && !d.failed) && replies.filter((d) => d.type === 'probe').length === 2, 'the kinds and the queued probes done');
+  check(h.started === started + 1, 'the scan started over once, the kinds not');
 }
 
 // a cancelled scan runs no further slice; asked for again with the same key it goes on where it stood (also after a
@@ -210,11 +215,12 @@ check(host.pending === 0, 'new ROM: tasks dropped');
   const o = emu.bootReads!.pages.indexOf(1) << 8, started2 = h.started;
   r.writeAt(o, Uint8Array.of(r.data[o] ^ 1));
   h.handle({ type: 'edit', gen: 2, size: r.size, edits: [[o, r.data.slice(o, o + 1)]] });
-  check(h.started === started2 + 1 && h.pending === 0, 'a byte the cancelled scan read: started over, still not run');
+  check(h.started === started2 && h.pending === 0, 'a byte the cancelled scan read: not run, not started over yet');
   r.writeAt(o, Uint8Array.of(r.data[o] ^ 1)); // (changed back: the scan has read nothing since it started over)
   h.handle({ type: 'edit', gen: 3, size: r.size, edits: [[o, r.data.slice(o, o + 1)]] });
   h.handle({ type: 'scan', id: 4, key: 'scan-d', level: scanLevel });
-  check(h.started === started2 + 1, '… asked for again: goes on from its start, not restarted again');
+  h.next();
+  check(h.started === started2 + 1, '… asked for again: started over before its next step, once');
   sc = null;
   while (h.pending) { const d = h.next(); if (d?.type === 'scan') sc = d; }
   check(sc?.type === 'scan' && sc.id === 4 && JSON.stringify(sc.result) === JSON.stringify(scanned), '… as played directly');
@@ -223,8 +229,10 @@ check(host.pending === 0, 'new ROM: tasks dropped');
   for (let i = 0; i < 4; i++) h.next();
   h.handle({ type: 'cancel', task: 'scan' });
   h.handle({ type: 'scan', id: 6, key: 'scan-f', level: scanLevel });
+  h.next();
   check(h.started === started2 + 3, 'another scan asked for after a cancel: started anew');
   h.handle({ type: 'scan', id: 7, key: 'scan-e', level: scanLevel });
+  h.next();
   check(h.started === started2 + 4, '… and the cancelled one asked for after it: started anew too');
   sc = null;
   while (h.pending) { const d = h.next(); if (d?.type === 'scan') sc = d; }
@@ -304,6 +312,9 @@ for (const changeRead of [false, true]) {
   h.edit(2, r.size * 2, []);
   check(h.pending === 0, 'a new size: tasks dropped');
 }
+
+// the job runner under both owners (runnercheck.ts)
+await checkJobRunner(check);
 
 console.log(bad ? `${bad} failures` : 'all ok');
 if (bad) process.exitCode = 1;

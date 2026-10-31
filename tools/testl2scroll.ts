@@ -6,7 +6,7 @@ import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadLevel, encodeSecondaryHeader, decodeSecondaryHeader, readSecondaryHeader, type SecondaryHeader } from '../src/core/level.ts';
 import { layer2Motion, layer2MotionsJob, motionText, RATE_OPTIONS, type Motion } from '../src/core/l2scroll.ts';
-import { runJob } from '../src/core/runjob.ts';
+import { runJob } from '../src/core/jobrunner.ts';
 import { exportLevelFile, importLevelFile } from '../src/core/levelfile.ts';
 import { mwlSections } from '../src/core/mwl.ts';
 import { uploadFiles } from '../src/core/patchpkg.ts';

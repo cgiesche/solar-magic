@@ -6,7 +6,7 @@ import { loadLevel, serializeLayer1, serializeSprites, encodeSecondaryHeader, is
 import { layer2MotionsJob } from '../src/core/l2scroll.ts';
 import { layer3Kinds } from '../src/core/layer3.ts';
 import { levelScanJob, scanKey } from '../src/core/levelscan.ts';
-import { runJob } from '../src/core/runjob.ts';
+import { runJob } from '../src/core/jobrunner.ts';
 import { cameraAtKey } from '../src/core/camerareach.ts';
 import { emptyTriggerView } from '../src/core/extrigger.ts';
 import { assignSlot, levelSlots, layerSlots } from '../src/core/gfxslots.ts';

@@ -9,7 +9,7 @@ import { installEditorPatch } from '../src/core/patches.ts';
 import { loadLevel, serializeLayer1, serializeSprites, isL1Vertical } from '../src/core/level.ts';
 import { GAME_VIEW_W, GAME_VIEW_H, type Band, type CameraBands } from '../src/core/camerabands.ts';
 import { gameViewAt, cameraRange, cameraReachJob, type CameraReach } from '../src/core/camerareach.ts';
-import { runJob } from '../src/core/runjob.ts';
+import { runJob } from '../src/core/jobrunner.ts';
 import { VERTICAL_SCROLL } from '../src/core/names.ts';
 
 let bad = 0;

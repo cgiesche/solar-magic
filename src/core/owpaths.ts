@@ -8,7 +8,7 @@
 // (overworldDataRanges, what is painted) is not read as far as the result is concerned.
 
 import type { LevelEmulator } from './levelemu.ts';
-import type { Job } from './learner.ts';
+import type { Job } from './jobrunner.ts';
 import { l1Index, overworldDataRanges, OW_L1, DIR_FLAGS } from './overworld.ts';
 import { RAM, GM, PAD, get16 } from './ram.ts';
 

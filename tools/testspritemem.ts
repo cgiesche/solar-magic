@@ -18,7 +18,7 @@ import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadLevel, newUid, type LevelSprite } from '../src/core/level.ts';
 import { checkSpriteMemory, spriteMemJob, spriteGroups, suggestSpriteMemory, usedSpriteMemory, SpriteGroupResults, type GroupResult, type SpriteGroup, type SpriteMemContext } from '../src/core/spritemem.ts';
-import { runJob } from '../src/core/runjob.ts';
+import { runJob } from '../src/core/jobrunner.ts';
 import { PAGE_SHIFT, RomFingerprint, RomReads } from '../src/core/romdeps.ts';
 import { editorImage } from './fixture.ts';
 

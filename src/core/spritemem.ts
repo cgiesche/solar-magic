@@ -10,8 +10,7 @@
 import { LevelEmulator } from './levelemu.ts';
 import { loadLevel, spriteSizes, SPRITE_MEMORY, type LevelSprite, type PrimaryHeader } from './level.ts';
 import { record, rootSlot, sortPlaced, SlotTracker, testLevel, testSpriteData } from './spritegfx.ts';
-import { MemoryResults } from './learner.ts';
-import { runJob } from './runjob.ts';
+import { MemoryResults, runJob } from './jobrunner.ts';
 import { inputHash } from './inputs.ts';
 import { RomReads, type RomDeps, type RomFingerprint } from './romdeps.ts';
 import type { Rom } from './rom.ts';
