@@ -39,11 +39,19 @@ BYTE_PAGES.fill(1, 0x2e000 >> PAGE_SHIFT, 0x30000 >> PAGE_SHIFT);
 BYTE_PAGES[0x7f00 >> PAGE_SHIFT] = 1;
 const FIXED_BYTE_PAGES = BYTE_PAGES.slice();
 
+// the ROM state the byte pages were last computed for (a Rom and its generation: several ROMs may be in one process;
+// one slot, not a WeakMap as other per-ROM caches: the one table holds one ROM state's pages)
+let bytePagesOf: { rom: WeakRef<Rom>; gen: number } | null = null;
+export const bytePagesStats = { runs: 0 }; // computations (not those skipped as up to date)
+
 // adds the byte pages of this ROM's editor patch tables, its level palettes' pointers, its free space blocks' edges,
-// ExAnimation data, overworld data and level data (call when the ROM may have changed); the GFX file pointers and the
-// ExAnimation data aren't recorded at all (see gfxSkipMask), byte pages keep the rest of their pages from counting
-// them (an animation list next to code that is run)
+// ExAnimation data, overworld data and level data (call when the ROM may have changed: computed once per ROM state,
+// whichever emulator asks first); the GFX file pointers and the ExAnimation data aren't recorded at all (see
+// gfxSkipMask), byte pages keep the rest of their pages from counting them (an animation list next to code that is run)
 export function updateBytePages(rom: Rom): void {
+  if (bytePagesOf && bytePagesOf.gen === rom.gen && bytePagesOf.rom.deref() === rom) return;
+  bytePagesOf = { rom: new WeakRef(rom), gen: rom.gen };
+  bytePagesStats.runs++;
   BYTE_PAGES.set(FIXED_BYTE_PAGES);
   const reads = rom.reads;
   rom.reads = null;
@@ -66,7 +74,7 @@ export function updateBytePages(rom: Rom): void {
     if (pal) mark(pal.table, 0x200 * 3);
     const bg = bgPatch(rom);
     if (bg) mark(bg.table, 0x200);
-  } finally { rom.reads = reads; }
+  } catch (e) { bytePagesOf = null; throw e; } finally { rom.reads = reads; }
 }
 
 // what a computation read (the emulated CPU and editor code, see Snes.romReads, Rom.reads)

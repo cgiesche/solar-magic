@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { Rom, snesToPc } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { OverworldEmulator } from '../src/core/overworld.ts';
-import { RomFingerprint } from '../src/core/romdeps.ts';
+import { RomFingerprint, BYTE_PAGES, bytePagesStats, updateBytePages } from '../src/core/romdeps.ts';
 import { gfxSkipMask } from '../src/core/gfxpages.ts';
 import { installEditorPatch, gfxEntry } from '../src/core/patches.ts';
 import { lz2Decompress, lz2Compress } from '../src/core/lz2.ts';
@@ -189,6 +189,33 @@ const TITLE_BYTE = 0x7fc0; // the internal name: not read while booting
   rom.writeAt(BOOT_BYTE, Uint8Array.of(rom.data[BOOT_BYTE] ^ 0xff));
   ow.load(0, 0);
   check(ow.titleState !== title && ow.titleState !== null, 'overworld: change of what the title read: reached again');
+}
+
+// the byte pages are computed once per ROM state, whichever emulator catches up with it first; another ROM in the
+// process (a test's, the probe worker's copy) has its own state, also at the same generation number
+{
+  const rom = fresh(), runs = () => bytePagesStats.runs;
+  const r0 = runs();
+  const a = new LevelEmulator(rom), b = new LevelEmulator(rom), ow = new OverworldEmulator(rom);
+  check(runs() - r0 === 1, `three emulators created on one ROM: computed once (${runs() - r0})`);
+  a.load(0x105); b.load(0x105); ow.load(0, 0);
+  check(runs() - r0 === 1, `their loads on the unchanged ROM: not computed again (${runs() - r0})`);
+  rom.writeAt(TITLE_BYTE, Uint8Array.of(0x20));
+  a.load(0x105); b.load(0x105); ow.load(0, 0);
+  check(runs() - r0 === 2, `a change, three emulators catching up: computed once more (${runs() - r0})`);
+  const vanilla = BYTE_PAGES.slice();
+  const other = fresh();
+  installEditorPatch(other);
+  // (both at the same generation number: it alone doesn't tell the ROM states apart)
+  while (other.gen < rom.gen) other.writeAt(TITLE_BYTE, Uint8Array.of(other.gen & 1 ? 0x21 : 0x22));
+  while (rom.gen < other.gen) rom.writeAt(TITLE_BYTE, Uint8Array.of(rom.gen & 1 ? 0x21 : 0x22));
+  a.load(0x105);
+  const r1 = runs();
+  updateBytePages(other);
+  const patched = BYTE_PAGES.slice();
+  check(other.gen === rom.gen && runs() - r1 === 1 && patched.some((v, i) => v !== vanilla[i]), 'another ROM at the same generation: its own byte pages');
+  a.load(0x105); // (its ROM unchanged since its last load)
+  check(runs() - r1 === 2 && BYTE_PAGES.every((v, i) => v === vanilla[i]), 'back to the first ROM\'s emulator: its byte pages again');
 }
 
 // the fingerprint follows the ROM without an emulator

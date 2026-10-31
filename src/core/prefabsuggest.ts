@@ -20,7 +20,7 @@ import { dm16Prefab, arrangementKey } from './pastehint.ts';
 import { findPrefabPlaces, tileKey, type Layer, type LevelPlaces, type PrefabPlace } from './prefabplaces.ts';
 import { MemoryResults } from './learner.ts';
 import { inputHash } from './inputs.ts';
-import { INPUTS_PER_KEY, RomReads, type RomDeps, type RomFingerprint } from './romdeps.ts';
+import { INPUTS_PER_KEY, RomReads, updateBytePages, type RomDeps, type RomFingerprint } from './romdeps.ts';
 import { objectLength2D } from './obj2d.ts';
 
 export interface PrefabSuggestion {
@@ -181,6 +181,9 @@ export function dm16Groups(lv: Level): { layer: Layer; objects: number[] }[] {
 
 export function* prefabSuggestions(rom: Rom, src: SuggestSource): Generator<void, PrefabSuggestion[]> {
   const kept = src.kept, len2d = kept ? objectLength2D(rom) : 0;
+  // (the loads' reads are recorded by byte where this ROM state's byte pages say, not where an emulator last left them;
+  // again after each step: another ROM's may have been computed in between)
+  updateBytePages(rom);
   kept?.startRun(rom, src, len2d);
   // the arrangements of the groups, with how often they occur
   const levels = new Map<number, { lv: Level | null; input: string; a: Arrangements }>(); // (lv: loaded when needed)
@@ -208,6 +211,7 @@ export function* prefabSuggestions(rom: Rom, src: SuggestSource): Generator<void
       if (f) f.count++; else found.set(key, { prefab: s, count: 1 });
     }
     yield;
+    updateBytePages(rom);
   }
   // the places of those occurring more than once, in the levels that have their first tile
   let emu: LevelEmulator | null = null; // (taken once per arrangement, when a search is needed)
@@ -234,6 +238,7 @@ export function* prefabSuggestions(rom: Rom, src: SuggestSource): Generator<void
       }
       if (ps.length) places.push({ level: n, places: ps });
       yield;
+      updateBytePages(rom);
     }
     const k = places.reduce((m, p) => m + p.places.length, 0);
     const saved = places.reduce((m, p) => m + p.places.reduce((b, q) => b + q.bytes, 0), 0) - cost.once;

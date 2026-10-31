@@ -715,9 +715,9 @@ export class OverworldEmulator {
   // (as LevelEmulator's boot snapshot)
   private sync(): void {
     this.snes.rom = this.rom.data;
+    updateBytePages(this.rom);
     if (this.romGen === this.rom.gen) return;
     this.romGen = this.rom.gen;
-    updateBytePages(this.rom);
     if (this.title?.reads.differ(this.title.rom, this.rom.data)) { this.titleState = null; this.title = null; }
   }
   // map `map` at event progress `progress` (events 0 … progress-1 passed), as after loading a save: the game draws

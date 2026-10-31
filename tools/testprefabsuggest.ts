@@ -16,7 +16,7 @@ import { installPrefabPatch, writePrefab } from '../src/core/prefabs.ts';
 import { prefabCost } from '../src/core/prefabcost.ts';
 import { applyPrefabPlaces } from '../src/core/prefabplaces.ts';
 import { dm16Groups, prefabSuggestions, suggestPrefabs, KeptSuggestions } from '../src/core/prefabsuggest.ts';
-import { RomFingerprint, RomReads, updateBytePages } from '../src/core/romdeps.ts';
+import { RomFingerprint, RomReads } from '../src/core/romdeps.ts';
 import { gfxSkipMask } from '../src/core/gfxpages.ts';
 import { readGfx, writeGfx } from '../src/core/gfxfiles.ts';
 import type { Level } from '../src/core/level.ts';
@@ -111,8 +111,8 @@ check(list.every((s) => s.saved > 0 && s.count > 1), 'only positive savings of r
     reset() { this.took = []; this.searched = []; this.loaded = []; }
   }
   const kept = new Spy(new RomFingerprint(rom));
-  // (the level data's pages recorded by byte, as the editor's emulator keeps them with every ROM change)
-  const run = (open?: Level) => { updateBytePages(rom); kept.reset(); return suggestPrefabs(rom, { levels: usedLevels(rom), open, emu: load, kept }); };
+  // (no emulator brings the byte pages up to date before a run: the run does it itself)
+  const run = (open?: Level) => { kept.reset(); return suggestPrefabs(rom, { levels: usedLevels(rom), open, emu: load, kept }); };
   const same = (open: Level | undefined, what: string) => {
     const k = run(open);
     const full = suggestPrefabs(rom, { levels: usedLevels(rom), open, emu: load });

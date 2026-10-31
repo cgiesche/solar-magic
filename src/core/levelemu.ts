@@ -175,12 +175,13 @@ export class LevelEmulator {
   // Every entry (boot, load, startGame, call, animationFrames) first catches up with a changed ROM
   // (rom.gen): the data array may be replaced (expansion), and a change of what the boot read (a
   // patch's power-on code, e.g. Retry System's RAM setup) makes the boot snapshot stale: boot again
-  // with the next load.
+  // with the next load. The byte pages are computed again when another ROM's were computed since (a
+  // check only, when they are this ROM state's).
   private sync(): void {
     this.snes.rom = this.rom.data;
+    updateBytePages(this.rom);
     if (this.romGen === this.rom.gen) return;
     this.romGen = this.rom.gen;
-    updateBytePages(this.rom);
     if (this.baseState && this.bootReads && this.bootRom &&
       (this.bootReads.differ(this.bootRom, this.rom.data) || this.bootMasked?.differ(this.bootRom, this.rom.data))) {
       this.baseState = null;
