@@ -26,11 +26,14 @@ import { setActsLike, extTileWords, setExtTileWords } from '../src/core/map16ext
 import { bgTileAddr } from '../src/core/bgmap16.ts';
 import { FG_PALS, BACK_AREA } from '../src/core/sharedpal.ts';
 import { setCustomPalette } from '../src/core/patches.ts';
-import { captureSprites, captureSpriteAt, spriteSetJob, type SpriteLevel } from '../src/core/spritegfx.ts';
+import { captureSprites, captureSpriteAt, spriteSetJob, spriteLoad, spriteLoads, type SpriteLevel } from '../src/core/spritegfx.ts';
 import { storeKey } from '../src/core/romdeps.ts';
 import { inputHash } from '../src/core/inputs.ts';
 import { ResultLearner } from '../src/core/learner.ts';
 import { readL1, writeL1, readL2, writeL2, l1Index, l2Index, l2Pointers } from '../src/core/overworld.ts';
+
+// sprites by their test level load (spriteLoad), the loads in the order of their first sprite
+const byLoad = (ids: number[]) => { const m = new Map<number, number[]>(); for (const n of ids) m.set(spriteLoad(n), [...(m.get(spriteLoad(n)) ?? []), n]); return m; };
 
 const EDITOR_IMAGE = await editorImage(); // the fixture as the editor opens it
 
@@ -317,7 +320,8 @@ for (const changeRead of [false, true]) {
   check(h.pending === 0, 'a new size: tasks dropped');
 }
 
-// sprite images (learn jobs, #175): as captured directly, a test level load per step with the images as they come;
+// sprite images (learn jobs, #175): as captured directly, a test level load (six sprites grouped by number, #176) per
+// step with the images as they come;
 // the result cache entries as the result learner on the main thread makes them (key, input, bytes read: a picture,
 // from the main boot snapshot); a lane's jobs one after another, a request for the same result joins it, replace
 // drops the lane's others, unlearn all of them
@@ -328,12 +332,16 @@ for (const changeRead of [false, true]) {
   const nums = [0x00, 0x04, 0x0d, 0x0f, 0x11, 0x1d, 0x21, 0x3e], input = inputHash({ set: 'test', nums });
   const capEmu = new LevelEmulator(new Rom(file));
   capEmu.skipMask = () => gfxSkipMask(capEmu.rom);
-  const direct = [...captureSprites(capEmu, 0x105, lv5.header, lv5.spriteHeader, 0xffd900, nums.slice(0, 6)), ...captureSprites(capEmu, 0x105, lv5.header, lv5.spriteHeader, 0xffd900, nums.slice(6))];
+  // a capture of the whole set: each load's sprites at once
+  const capture = (on: LevelEmulator, ids: number[]) => {
+    return [...spriteLoads(ids).values()].flatMap((l) => [...captureSprites(on, 0x105, lv5.header, lv5.spriteHeader, 0xffd900, l)]);
+  };
+  const direct = capture(capEmu, nums);
   h.handle({ type: 'learn', lane: 'sprites', key: 'spr-set', input, job: { kind: 'sprites', level, nums }, replace: true });
   const replies: ProbeReply[] = [];
   while (h.pending) { const d = h.next(); if (d) replies.push(d); }
   const steps = replies.filter((d) => d.type === 'learning'), done = replies.find((d) => d.type === 'learned');
-  check(steps.length === 2 && steps[0].type === 'learning' && steps[0].fresh && steps[0].label === 'Sprite graphics 75 %' && steps.every((d) => d.type === 'learning' && d.lane === 'sprites' && d.key === 'spr-set' && d.input === input),
+  check(steps.length === 5 && steps[0].type === 'learning' && steps[0].fresh && steps[0].label === 'Sprite graphics 20 %' && steps.every((d) => d.type === 'learning' && d.lane === 'sprites' && d.key === 'spr-set' && d.input === input),
     `sprite set: a reply per test level load, labelled, the first fresh (${steps.length} steps)`);
   const shown = steps.flatMap((d) => (d.type === 'learning' ? d.shown : []));
   check(JSON.stringify(shown) === JSON.stringify(direct), 'sprite set: the images as they come, as captured directly');
@@ -346,7 +354,7 @@ for (const changeRead of [false, true]) {
   main.skipMask = () => gfxSkipMask(lr);
   main.boot();
   const learner = new ResultLearner({ rom: lr, results, cacheReady: Promise.resolve(), main, later: (_k, f) => later.push(f), soon: (f) => later.push(f), setBusy: () => {} });
-  learner.learn('spr-set', (e) => spriteSetJob(e, level, nums, () => {}), { input: { set: 'test', nums } });
+  learner.learn('spr-set', (e, _p, part) => spriteSetJob(e, level, nums, () => {}, part), { input: { set: 'test', nums } });
   for (let i = 0; i < 100 && !results.entry('spr-set', input); i++) { await new Promise((f) => setTimeout(f, 0)); while (later.length) later.shift()!(); }
   const there = results.entry('spr-set', input);
   check(!!there && !!entry && JSON.stringify(there.deps) === JSON.stringify(entry.deps) && JSON.stringify(there.data) === JSON.stringify(entry.data),
@@ -382,6 +390,63 @@ for (const changeRead of [false, true]) {
   h.handle(at(5)); h.handle(at(6));
   h.handle({ type: 'unlearn', lane: 'variants' });
   check(h.pending === 0, 'unlearn: the lane\'s jobs dropped');
+}
+
+// a changed sprite recaptures only its own images (#176): each test level load of a set is kept on its own with the bytes
+// it read; a change one load read captures only that load again, a sprite added to the list only the load it is in,
+// the result the same as a capture of the whole set; a host given the editor's stored loads captures none
+{
+  const r = new Rom(file), h = new ProbeHost();
+  h.setRom(1, r.data.slice());
+  const lv5 = loadLevel(r, 0x105), level: SpriteLevel = { number: 0x105, header: lv5.header, spriteHeader: lv5.spriteHeader, bgPointer: 0xffd900 };
+  const capture = (ids: number[]) => {
+    const on = new LevelEmulator(new Rom(r.data.slice()));
+    on.skipMask = () => gfxSkipMask(on.rom);
+    return JSON.stringify([...spriteLoads(ids).values()].flatMap((l) => [...captureSprites(on, 0x105, lv5.header, lv5.spriteHeader, 0xffd900, l)]));
+  };
+  const loadInput = inputHash({ set: 'test' });
+  const learn = (nums: number[]): ProbeMessage => ({ type: 'learn', lane: 'sprites', key: 'spr', input: inputHash({ set: 'test', nums }), job: { kind: 'sprites', level, nums, input: loadInput }, replace: true });
+  const run = (m: ProbeMessage) => {
+    h.handle(m);
+    const out: ProbeReply[] = [];
+    while (h.pending) { const d = h.next(); if (d) out.push(d); }
+    const done = out.find((d) => d.type === 'learned');
+    return { loads: out.filter((d) => d.type === 'learning').length, result: done?.type === 'learned' ? JSON.stringify(done.result) : '', put: out.flatMap((d) => ('put' in d ? d.put : [])) };
+  };
+  const nums = [0x00, 0x04, 0x0d, 0x0f, 0x11, 0x1d, 0x21, 0x3e];
+  const first = run(learn(nums));
+  const parts = first.put.filter(([k]) => k.startsWith('spr/'));
+  check(first.loads === 5 && parts.length === 5 && first.result === capture(nums), `set: a part per test level load (${parts.length}), the images as a capture of the whole set`);
+
+  // a page only one load read (its sprite's code or tables)
+  const own = parts.map(([k, e]) => ({ k, pages: new Set(e.deps.pages) }));
+  const only = own.flatMap((o) => [...o.pages].filter((p) => own.every((x) => x === o || !x.pages.has(p))).map((p) => ({ k: o.k, p })));
+  check(only.length > 0, `set: pages only one load read (${only.length})`);
+  const o = (only[0]?.p ?? 0) << 8;
+  r.writeAt(o, Uint8Array.of(r.data[o] ^ 0x01));
+  h.handle({ type: 'edit', gen: 2, size: r.size, edits: [[o, r.data.slice(o, o + 1)]] });
+  const changed = run(learn(nums));
+  const redone = changed.put.filter(([k]) => k.startsWith('spr/')).map(([k]) => k);
+  check(changed.loads === 1 && redone.length === 1 && redone[0] === only[0]?.k, `a change one load read: only that load captured again (${changed.loads} loads, ${redone.join()})`);
+  check(changed.result === capture(nums), '… the images as a capture of the whole set');
+
+  // a sprite added to the list (a new custom sprite): only the load it is in
+  const more = [...nums, 0x05];
+  const added = run(learn(more));
+  const addedParts = added.put.filter(([k]) => k.startsWith('spr/')).map(([k]) => k.split('#')[0]);
+  check(added.loads === 1 && addedParts.join() === `spr/${spriteLoad(0x05).toString(16)}`, `a sprite added: only its load captured (${addedParts.join()})`);
+  check(added.result === capture(more), '… the images as a capture of the whole set');
+
+  // another host (the worker after the editor reopened the ROM) given the editor's stored loads: captures none
+  const h2 = new ProbeHost();
+  h2.setRom(1, r.data.slice());
+  const all = new Map([...parts, ...changed.put, ...added.put].filter(([k]) => k.startsWith('spr/')));
+  h2.handle({ ...(learn(more) as ProbeMessage & { type: 'learn' }), parts: [...all] });
+  const out: ProbeReply[] = [];
+  while (h2.pending) { const d = h2.next(); if (d) out.push(d); }
+  const got = out.find((d) => d.type === 'learned');
+  check(out.filter((d) => d.type === 'learning').length === 0 && got?.type === 'learned' && JSON.stringify(got.result) === capture(more) && !got.put.some(([k]) => k.startsWith('spr/')),
+    'the editor\'s stored loads: none captured, the same images, not handed back');
 }
 
 // the job runner under both owners (runnercheck.ts)

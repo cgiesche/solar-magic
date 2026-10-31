@@ -16,7 +16,7 @@ import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadLevel, L2_PTRS } from '../src/core/level.ts';
 import { ObjKindProbe, kindsKey, type ObjKinds } from '../src/core/objkinds.ts';
 import type { ScanLevel } from '../src/core/levelscan.ts';
-import { captureSprites, type SpriteLevel } from '../src/core/spritegfx.ts';
+import { captureSprites, spriteLoad, type SpriteLevel } from '../src/core/spritegfx.ts';
 import type { LearnJob } from '../src/core/probeprotocol.ts';
 import { inputHash } from '../src/core/inputs.ts';
 import { editorImage } from './fixture.ts';
@@ -303,7 +303,10 @@ function editor(worker: Worker | null) {
   const level: SpriteLevel = { number: 0x105, header: lv.header, spriteHeader: lv.spriteHeader, bgPointer: 0xffd900 };
   const nums = [0x0d, 0x0f, 0x11, 0x1d, 0x21, 0x3e, 0x04], input = { set: 'test' };
   const capEmu = new LevelEmulator(new Rom(file));
-  const direct = JSON.stringify([...captureSprites(capEmu, 0x105, lv.header, lv.spriteHeader, 0xffd900, nums.slice(0, 6)), ...captureSprites(capEmu, 0x105, lv.header, lv.spriteHeader, 0xffd900, nums.slice(6))]);
+  // (a test level load per sprites of one spriteLoad, in the order of their first sprite)
+  const loads = [[0x0d, 0x0f, 0x11], [0x1d], [0x21], [0x3e], [0x04]];
+  check(loads.every((l) => l.every((n) => spriteLoad(n) === spriteLoad(l[0]))), '(the test level loads as grouped)');
+  const direct = JSON.stringify(loads.flatMap((l) => [...captureSprites(capEmu, 0x105, lv.header, lv.spriteHeader, 0xffd900, l)]));
   const job: LearnJob = { kind: 'sprites', level, nums };
   const learns = (w: Worker) => w.sent.filter((m) => m.type === 'learn').length;
 
@@ -315,7 +318,7 @@ function editor(worker: Worker | null) {
   await settle();
   check(learns(w) === 1, 'learn: asked once');
   const replies = w.run(1);
-  check(replies[0]?.type === 'learning' && shown.length === 2 && shown[0] === null && (shown[1]?.length ?? 0) > 0 && e.busy.get('sprites') === 'Sprite graphics 86 %', `learn: the first images as they come, the progress label (${e.busy.get('sprites')})`);
+  check(replies[0]?.type === 'learning' && shown.length === 2 && shown[0] === null && (shown[1]?.length ?? 0) > 0 && e.busy.get('sprites') === 'Sprite graphics 20 %', `learn: the first images as they come, the progress label (${e.busy.get('sprites')})`);
   w.run();
   check(done.length === 1 && JSON.stringify(done[0]) === direct && JSON.stringify(shown.slice(1).flat()) === direct, 'learn: the result and the images shown as captured directly');
   check(JSON.stringify(e.results.get('spr', inputHash(input))) === direct && !e.busy.has('sprites'), 'learn: in the result cache under its key and input, nothing busy');
@@ -323,6 +326,16 @@ function editor(worker: Worker | null) {
   check(JSON.stringify(e.client.learn('spr', job, opts)) === direct, 'learn: asked again, the stored result');
   await settle();
   check(learns(w) === 1, '… not asked again');
+
+  // the stored test level loads go with the request (#176): a worker without them captures none
+  const w3 = new Worker(), e3 = editor(w3), done3: unknown[] = [];
+  e3.results.setAll(e.results.under('spr/'), true);
+  e3.client.learn('spr', job, { ...opts, done: (r) => done3.push(r) });
+  await settle();
+  const sent3 = w3.sent.find((m) => m.type === 'learn');
+  const got3 = w3.run();
+  check(sent3?.type === 'learn' && sent3.parts?.length === loads.length, `learn: the stored loads sent with it (${sent3?.type === 'learn' && sent3.parts?.length})`);
+  check(!got3.some((d) => d.type === 'learning') && done3.length === 1 && JSON.stringify(done3[0]) === direct, '… none captured, the same images');
 
   // replace: another set drops the variants asked before it (the worker told), also when it is known
   const at = (x: number): LearnJob => ({ kind: 'spriteAt', level, id: 0x0d, x, y: 0 });

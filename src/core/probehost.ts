@@ -38,7 +38,7 @@ function* found<T>(job: Generator<void, T | null>): Job<T | undefined> { return 
 // started, also over)
 function learnJob(j: LearnJob, show: (items: unknown[] | null) => void): { picture: boolean; start: JobRun<unknown>['start'] } {
   switch (j.kind) {
-    case 'sprites': return { picture: true, start: (emu) => spriteSetJob(emu, j.level, j.nums, show) };
+    case 'sprites': return { picture: true, start: (emu, _p, part) => spriteSetJob(emu, j.level, j.nums, show, part, j.input) };
     case 'spriteAt': return { picture: true, start: (emu) => spriteAtJob(emu, j.level, j.id, j.x, j.y) };
     case 'spriteBytes': return { picture: true, start: (emu) => spriteBytesJob(emu, j.level, j.id, j.bytes) };
   }
@@ -136,11 +136,12 @@ export class ProbeHost {
     let lane = this.turns.get(name) as Lane | undefined;
     if (!lane) this.turns.set(name, (lane = { learns: [] }));
     if (msg.replace) lane.learns = lane.learns.filter(same);
+    if (msg.parts) this.prober!.results.load(msg.parts); // (not handed back: the editor has them)
     const known = lane.learns.find(same);
     if (known) { known.msg = msg; return; }
     const show = (items: unknown[] | null) => { if (items === null) { l.fresh = true; l.shown = []; } else l.shown.push(...items); };
     // (a job starting over runs for the latest request)
-    const start: JobRun<unknown>['start'] = (emu, p) => learnJob(l.msg.job, show).start(emu, p);
+    const start: JobRun<unknown>['start'] = (emu, p, part) => learnJob(l.msg.job, show).start(emu, p, part);
     const l: Learn = { msg, fresh: false, shown: [], run: this.runner.run({ key: msg.key, input: msg.input, keep: true, picture: learnJob(msg.job, show).picture, start }) };
     lane.learns.push(l);
   }
@@ -176,7 +177,7 @@ export class ProbeHost {
     this.cancelled.delete(msg.type);
     if (t && taskKey(t.msg) === taskKey(msg)) { t.msg = msg; this.turns.set(msg.type, t); return; }
     // (a job starting over runs for the latest request)
-    const task: Task = { msg, run: this.runner.run({ key: taskKey(msg), keep: true, picture: false, boot: msg.type !== 'kinds', start: (emu, p) => taskJob(task.msg)(emu, p) }) };
+    const task: Task = { msg, run: this.runner.run({ key: taskKey(msg), keep: true, picture: false, boot: msg.type !== 'kinds', start: (emu, p, part) => taskJob(task.msg)(emu, p, part) }) };
     this.turns.delete(msg.type);
     this.turns.set(msg.type, task);
   }

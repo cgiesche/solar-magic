@@ -33,6 +33,13 @@ export type Keep = boolean | 'memory';
 // job), else prepare's (null: none kept); one per emulator
 export type Prepare = <S>(key: string, prepare: () => S | null) => S | null;
 
+// A part of a job's result kept on its own (under partKey(the job's key, sub) and its own input, as the job's result
+// is kept) with the bytes it read: the stored one while they are unchanged (learned: false), else learn's (undefined:
+// none, nothing kept). Its reads count for the job too, so a change one part read learns the job again, which takes
+// the other parts as stored.
+export type Part = <S>(sub: string, input: string | undefined, learn: () => S | undefined) => { result: S | undefined; learned: boolean };
+export const partKey = (key: string, sub: string) => `${key}/${sub}`;
+
 // what a job learns
 export interface JobSpec<T> {
   key: string;
@@ -40,7 +47,7 @@ export interface JobSpec<T> {
   keep: Keep;
   picture: boolean; // the result shows what things look like: it reads the display data
   boot?: boolean; // the boot snapshot's reads count for the result (default: true)
-  start: (emu: LevelEmulator, prepare: Prepare) => Job<T>;
+  start: (emu: LevelEmulator, prepare: Prepare, part: Part) => Job<T>;
 }
 
 // a job asked for: not started yet (job null), or running since the ROM generation gen
@@ -95,7 +102,7 @@ export class JobRunner {
       const emu = r.emu = this.emu(lane, r.picture);
       r.reads = new RomReads(rom.data.length);
       r.label = null;
-      r.job = r.start(emu, (key, prepare) => this.prepared(emu, key, prepare));
+      r.job = r.start(emu, (key, prepare) => this.prepared(emu, key, prepare), (sub, input, learn) => this.part(r, emu, sub, input, learn));
       this.started++;
     }
     r.gen = rom.gen;
@@ -129,6 +136,20 @@ export class JobRunner {
     const gen = this.d.rom.gen, { result, reads } = emu.tracked(prepare);
     if (result !== null) this.preps.set(emu, { key, state: result, reads, gen });
     return result;
+  }
+
+  // (inside a job's step)
+  private part<S>(r: JobRun<unknown>, emu: LevelEmulator, sub: string, input: string | undefined, learn: () => S | undefined): { result: S | undefined; learned: boolean } {
+    const key = partKey(r.key, sub), e = r.keep === false ? undefined : (r.keep === 'memory' ? this.memory : this.d.results).entry(key, input);
+    if (e) {
+      const reads = new RomReads(this.d.rom.data.length);
+      reads.addDeps(e.deps);
+      emu.count(reads);
+      return { result: e.data as S, learned: false };
+    }
+    const t = emu.tracked(learn, r.boot === false ? null : emu.bootReads);
+    if (t.result !== undefined) this.store(key, input, r.keep, t.result, t.reads);
+    return { result: t.result, learned: true };
   }
 
   stored<T>(key: string, input: string | undefined, keep: Keep): T | undefined {

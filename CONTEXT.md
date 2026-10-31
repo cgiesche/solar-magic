@@ -275,7 +275,7 @@ A level played in the emulator from gameplay on, frame by frame with the buttons
 _Avoid_: run, game loop, harness
 
 **Emulated result**:
-Anything the editor learned by emulation (a probe's outcome, the kinds of a tileset's objects, a level scan, sprite images, object thumbnails, jump arcs). It stays valid as long as its inputs and the ROM bytes it read are unchanged, and is learned again otherwise (by the result learner: a key, an input, the bytes read). One that is no picture doesn't count the display data among the bytes it read (ADR 0008).
+Anything the editor learned by emulation (a probe's outcome, the kinds of a tileset's objects, a level scan, sprite images, object thumbnails, jump arcs). It stays valid as long as its inputs and the ROM bytes it read are unchanged, and is learned again otherwise (by the result learner: a key, an input, the bytes read). One that is no picture doesn't count the display data among the bytes it read (ADR 0008). A result may be put together from parts kept on their own the same way (the sprite images of a set: one part per test level load of six sprites, grouped by number), so a change one part read learns only that part again.
 _Avoid_: Cached value, generation (for validity)
 
 **Result learner**:

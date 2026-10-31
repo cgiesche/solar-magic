@@ -14,7 +14,7 @@ import type { Rom } from './rom.ts';
 import type { LevelEmulator } from './levelemu.ts';
 import type { RomReads, ResultCache } from './romdeps.ts';
 import { inputHash } from './inputs.ts';
-import { JobRunner, type Job, type JobRun, type Keep, type Prepare } from './jobrunner.ts';
+import { JobRunner, type Job, type JobRun, type Keep, type Prepare, type Part } from './jobrunner.ts';
 
 const SLICE = 12; // ms a slice of a job runs before input and drawing get through
 const AT_ONCE = ''; // the lane of the emulator for work at once
@@ -76,7 +76,7 @@ export class ResultLearner {
 
   // The result under key for opts.input (opts.keep), else undefined: the job is started (after the stored
   // results are loaded, which may hold it) and opts.done called with its result
-  learn<T>(key: string, start: (emu: LevelEmulator, prepare: Prepare) => Job<T>, opts: LearnOptions<T> = {}): T | undefined {
+  learn<T>(key: string, start: (emu: LevelEmulator, prepare: Prepare, part: Part) => Job<T>, opts: LearnOptions<T> = {}): T | undefined {
     const name = opts.lane ?? key, input = this.hash(opts.input), id = input === undefined ? key : `${key}#${input}`;
     let lane = this.lanes.get(name);
     if (!lane) this.lanes.set(name, (lane = { runs: [], scheduled: false }));

@@ -746,8 +746,11 @@ export class App {
     const all = [...Array.from({ length: 0xe7 }, (_, i) => i), ...this.customSprites().map((c) => c.id)]; // as listed in the picker
     // i6: with the input; sprites from $C9 on (shells, groups), failed batches retried one by one, sprites
     // that draw nothing shown by what they spawn, sprites erasing themselves at once by what they drew
-    const stored = this.probes.learn(`i6${hd.spriteGfx}-${hd.spritePalette}`, { kind: 'sprites', level: this.spriteLevel(), nums: all }, {
-      input: this.spriteInput(), lane: 'sprites', replace: true, label: 'Sprite graphics', done: this.spritesLearned,
+    // (each test level load is kept on its own, with what spriteInput gives but the custom sprites: a custom sprite
+    // added or changed captures only its load again)
+    const input = this.spriteInput(), { custom: _, ...loadInput } = input;
+    const stored = this.probes.learn(`i6${hd.spriteGfx}-${hd.spritePalette}`, { kind: 'sprites', level: this.spriteLevel(), nums: all, input: inputHash(loadInput) }, {
+      input, lane: 'sprites', replace: true, label: 'Sprite graphics', done: this.spritesLearned,
       shown: (items) => { show(items as [number, SpriteImage][] | null); if (items) this.spritesShown(); },
     });
     if (stored && stored !== this.spritesFrom) this.spritesLearned(stored);
@@ -773,7 +776,7 @@ export class App {
   // What sprite images depend on besides the ROM bytes they read: the level's sprite settings (sprite memory:
   // a sprite whose OAM range is too small is captured as the game shows it), the content of its sprite
   // graphics files (graphics data isn't among the bytes read, see gfxSkipMask) and the custom sprites
-  private spriteInput(): unknown {
+  private spriteInput(): { custom: number[] } & Record<string, unknown> {
     const lv = this.level, hd = lv.header, files = this.spriteGfxFiles();
     const m = this.spriteFiles;
     if (m.gen !== this.rom.gen || m.files !== files.join()) { m.gen = this.rom.gen; m.files = files.join(); m.hash = gfxFilesHash(this.rom, files); }

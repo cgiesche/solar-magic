@@ -11,6 +11,7 @@
 import { ProbeHost, pumpProbes } from './probehost.ts';
 import { jobId, jobKey, type ProbeJob, type ProbeMessage, type ProbeDone, type ProbeReply, type KindsDone, type ScanDone, type CameraDone, type LearnJob, type LearnMessage, type Learned, type Learning } from './probeprotocol.ts';
 import { inputHash } from './inputs.ts';
+import { partKey } from './jobrunner.ts';
 import type { ResultCache } from './romdeps.ts';
 import type { Rom } from './rom.ts';
 import { SPRITE_PROBE_END, probeable, type BlockProbe, type CollisionProbe, type SpriteProbe, type RunStates } from './blockprobe.ts';
@@ -214,7 +215,8 @@ export class ProbeClient {
       this.d.cacheReady.then(() => {
         if (!this.lanes.get(w.msg.lane)?.wants.includes(w)) return;
         const known = this.d.results.get(key, input);
-        if (known === undefined) this.send?.(w.msg);
+        // (with the stored parts of the result: the worker learns only the others)
+        if (known === undefined) this.send?.(this.withParts(w.msg));
         else this.learned({ type: 'learned', gen: this.gen, lane: w.msg.lane, key, input, result: known, failed: false, put: [] });
       });
     }
@@ -246,7 +248,7 @@ export class ProbeClient {
       if (this.asked.size) this.send({ type: 'ask', jobs: [...this.asked.values()] });
       if (this.kindsWant) this.send(this.kindsWant);
       for (const w of this.playWant.values()) this.send(w.msg);
-      for (const lane of this.lanes.values()) for (const w of lane.wants) this.send(w.msg);
+      for (const lane of this.lanes.values()) for (const w of lane.wants) this.send(this.withParts(w.msg));
     }
     this.d.later('probe-prefetch', () => this.prefetch()); // results that read changed ROM data are redone
   }
@@ -312,6 +314,12 @@ export class ProbeClient {
     lane.progress = null;
     this.learnBusy(d.lane);
     if (!d.failed) for (const f of want.done) f(d.result);
+  }
+
+  // a learn job's request with the stored parts of its result (jobrunner.ts Part): a worker without them (a new one, a
+  // new ROM) learns only the others
+  private withParts(msg: LearnMessage): LearnMessage {
+    return { ...msg, parts: this.d.results.under(partKey(msg.key, '')) };
   }
 
   private learnBusy(name: string): void {

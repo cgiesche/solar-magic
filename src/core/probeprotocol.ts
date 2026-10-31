@@ -49,13 +49,14 @@ export type ProbeReply = ProbeDone | KindsDone | ScanDone | CameraDone | Learned
 // A result learner job (CONTEXT.md) run here: the images of all sprites of a sprite set, the image of a sprite at a
 // tile (its variant by position), the image of a custom sprite with extra bytes
 export type LearnJob =
-  | { kind: 'sprites'; level: SpriteLevel; nums: number[] }
+  | { kind: 'sprites'; level: SpriteLevel; nums: number[]; input?: string } // (input: of each test level load, spriteSetJob)
   | { kind: 'spriteAt'; level: SpriteLevel; id: number; x: number; y: number }
   | { kind: 'spriteBytes'; level: SpriteLevel; id: number; bytes: number[] };
 
 // a learn job asked for: its result under key and input (the hash of what it depends on outside the ROM, inputs.ts),
-// learned in a lane (one job at a time, in the order asked); replace drops the lane's other jobs
-export interface LearnMessage { type: 'learn'; lane: string; key: string; input?: string; job: LearnJob; replace: boolean }
+// learned in a lane (one job at a time, in the order asked); replace drops the lane's other jobs; parts: the editor's
+// stored entries of the result's parts (jobrunner.ts Part, by stored key; checked when first used)
+export interface LearnMessage { type: 'learn'; lane: string; key: string; input?: string; job: LearnJob; replace: boolean; parts?: [string, CacheEntry][] }
 
 // a learn job's result (failed: it threw, result null), with its result cache entry
 export interface Learned { type: 'learned'; gen: number; lane: string; key: string; input?: string; result: unknown; failed: boolean; put: [string, CacheEntry][] }

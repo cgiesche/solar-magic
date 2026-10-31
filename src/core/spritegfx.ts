@@ -5,6 +5,8 @@ import { LevelEmulator } from './levelemu.ts';
 import type { Snes, MemHook } from './snes.ts';
 import { encodePrimaryHeader, spriteBytes, spriteSizes, SPRITE_MEMORY, type PrimaryHeader, type SpriteSizes } from './level.ts';
 import { decodeTile, cgramToRGBA } from './gfx.ts';
+import { inputHash } from './inputs.ts';
+import type { Part } from './jobrunner.ts';
 import { GM, RAM, SPR, SPRITE_SLOTS, spriteX, spriteY, cameraX, cameraY, setCameraX, setCameraY, setMarioPos } from './ram.ts';
 
 export interface SpriteImage {
@@ -47,6 +49,9 @@ export function readPpuOam(oam: Uint8Array): OamTile[] {
 }
 export const tileKey = (t: OamTile) => `${t.x},${t.y},${t.tile},${t.attr},${t.big}`;
 
+// the test level's sprite slots (tiles right and below of where its camera starts)
+const SLOT_COLS = [5, 9, 13], SLOT_ROWS = [4, 10];
+
 // nums: sprite ids (see spriteId; custom sprites $2xx/$3xx); bytes: extra bytes of custom sprites (else 0)
 export function captureSprites(
   emu: LevelEmulator, level: number, header: PrimaryHeader, spriteHeader: number, bgPointer: number, nums: number[],
@@ -54,9 +59,8 @@ export function captureSprites(
 ): Map<number, SpriteImage> {
   const result = new Map<number, SpriteImage>();
   const { l1, secondary, camX, camY } = testLevel(emu, level, header, spriteHeader, bgPointer);
-  const cols = [5, 9, 13], rows = [4, 10];
   const slots: { tx: number; ty: number }[] = [];
-  for (const r of rows) for (const c of cols) slots.push({ tx: (camX >> 4) + c, ty: (camY >> 4) + r });
+  for (const r of SLOT_ROWS) for (const c of SLOT_COLS) slots.push({ tx: (camX >> 4) + c, ty: (camY >> 4) + r });
   const s = emu.snes;
   // what the empty level shows (Mario): sprites drawn outside the sprite slots (cluster sprites
   // like Boo rings) are what a load with them shows in addition
@@ -363,18 +367,36 @@ export function captureSpriteAt(
 // The level sprite images are captured in: its number, header and sprite header, and the layer 2 (BG) pointer
 export interface SpriteLevel { number: number; header: PrimaryHeader; spriteHeader: number; bgPointer: number }
 
-// The images of the sprites nums (a sprite set's: the result under its key), one test level load (six sprite slots)
-// per step; show gets each step's images as they come (null first: the capture started, also over)
+// The test level load a sprite is captured in: as many sprites as the test level has slots for (six), grouped by
+// number, so that a sprite added to or removed from a list leaves the other loads as they were
+export const spriteLoad = (id: number) => Math.floor(id / (SLOT_COLS.length * SLOT_ROWS.length));
+// the sprites nums by their test level load, the loads in the order of their first sprite
+export function spriteLoads(nums: number[]): Map<number, number[]> {
+  const loads = new Map<number, number[]>();
+  for (const n of nums) {
+    const l = loads.get(spriteLoad(n));
+    if (l) l.push(n); else loads.set(spriteLoad(n), [n]);
+  }
+  return loads;
+}
+
+// The images of the sprites nums (a sprite set's: the result under its key), one test level load (spriteLoad) per
+// step, each a part of the result (jobrunner.ts Part: kept on its own with the bytes it read, input the hash of what
+// the images depend on outside the ROM besides the sprites in the load; a load as stored takes no step of its own),
+// so a change that one sprite's code read captures only its load again; show gets each load's images as they come
+// (null first: the capture started, also over)
 export function* spriteSetJob(
-  emu: LevelEmulator, lv: SpriteLevel, nums: number[], show: (images: [number, SpriteImage][] | null) => void,
+  emu: LevelEmulator, lv: SpriteLevel, nums: number[], show: (images: [number, SpriteImage][] | null) => void, part: Part, input?: string,
 ): Generator<string, [number, SpriteImage][]> {
   show(null);
-  const images: [number, SpriteImage][] = [];
-  for (let i = 0; i < nums.length; i += 6) {
-    const r = [...captureSprites(emu, lv.number, lv.header, lv.spriteHeader, lv.bgPointer, nums.slice(i, i + 6))];
-    show(r);
-    images.push(...r);
-    yield `Sprite graphics ${Math.min(100, Math.round((i + 6) / nums.length * 100))} %`;
+  const loads = spriteLoads(nums), images: [number, SpriteImage][] = [];
+  let i = 0;
+  for (const [load, ids] of loads) {
+    i++;
+    const r = part(load.toString(16), inputHash({ input, ids }), () => [...captureSprites(emu, lv.number, lv.header, lv.spriteHeader, lv.bgPointer, ids)]);
+    show(r.result!);
+    images.push(...r.result!);
+    if (r.learned) yield `Sprite graphics ${Math.round(i / loads.size * 100)} %`;
   }
   return images;
 }

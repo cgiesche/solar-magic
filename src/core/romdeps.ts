@@ -346,6 +346,13 @@ export class ResultCache {
     this.sweepGen = -1; // (the next sweep checks them)
   }
 
+  // the entries of the keys starting with prefix, by stored key (also those not checked against the current ROM yet)
+  under(prefix: string): [string, CacheEntry][] {
+    const out: [string, CacheEntry][] = [];
+    for (const [key, slots] of this.entries) if (key.startsWith(prefix)) for (const s of slots) out.push([storeKey(key, s.input), { deps: s.deps, data: s.data, input: s.input }]);
+    return out;
+  }
+
   // changed entries to store (with the changed orders of keys' inputs) and dropped ones to delete since the last call
   flush(): { put: [string, CacheEntry][]; order: [string, string[]][]; del: string[] } {
     const put: [string, CacheEntry][] = [], order: [string, string[]][] = [], del = [...this.dropped];
