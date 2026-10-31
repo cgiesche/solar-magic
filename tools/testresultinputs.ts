@@ -14,7 +14,7 @@ import { gfxEntry, GFX_FILES } from '../src/core/patches.ts';
 import { lz2Decompress } from '../src/core/lz2.ts';
 import { readGfx, writeGfx } from '../src/core/gfxfiles.ts';
 import { Rom, snesToPc } from '../src/core/rom.ts';
-import { ResultCache, RomFingerprint, RomReads, INPUTS_PER_KEY, type CacheEntry } from '../src/core/romdeps.ts';
+import { ResultCache, RomFingerprint, RomReads, INPUTS_PER_KEY, oldStoreKeys, type CacheEntry } from '../src/core/romdeps.ts';
 import { ResultLearner } from '../src/core/learner.ts';
 import { inputHash, levelInput } from '../src/core/inputs.ts';
 import { captureSprites } from '../src/core/spritegfx.ts';
@@ -206,6 +206,40 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
   check(runs === before, `memory: ${INPUTS_PER_KEY} inputs of a key kept`);
   lt(1);
   check(runs === before + 1, 'memory: the least recently used one dropped');
+}
+
+// stored results nobody asks for (App.sweepResults): the rows of earlier cache versions go at start, the background
+// sweep drops the results whose bytes read changed, of inputs not in use too, a few at a time
+{
+  const keys = ['rc2:a', 'rc3:k#x', 'rc3:k#', 'rc4:k#in0', 'rc4:k#', 'rc5:n', 'rc:z', 'rcx:y', 'rom'];
+  check(oldStoreKeys(keys, 'rc', 4).join() === 'rc2:a,rc3:k#x,rc3:k#,rc:z', 'old cache rows: those of earlier prefixes, not the current or a later one or other stores');
+  const r = new Rom(await editorImage()), fp = new RomFingerprint(r), cache = new ResultCache(fp);
+  const db = new Map<string, CacheEntry | string[]>();
+  const store = (c: ResultCache) => { const { put, order, del } = c.flush(); for (const [k, v] of [...put, ...order]) db.set(k, v); for (const k of del) db.delete(k); };
+  const depsAt = (o: number) => { const rd = new RomReads(r.data.length); rd.read(o, 1); return fp.deps(rd); };
+  // two keys, all of their inputs stored; key 'k' read 0x100, key 'j' 0x400
+  for (let i = 0; i < INPUTS_PER_KEY; i++) { cache.set('k', i, depsAt(0x100), `in${i}`); cache.set('j', i, depsAt(0x400), `in${i}`); }
+  store(cache);
+  const loaded = new ResultCache(fp);
+  let changes = 0;
+  loaded.onChange = () => changes++;
+  loaded.load([...db]);
+  const sweep = (c: ResultCache, n: number) => { let slices = 1; while (c.sweep(n)) slices++; return slices; };
+  check(sweep(loaded, 3) === Math.ceil(2 * INPUTS_PER_KEY / 3) && changes === 0, 'sweep: the loaded results checked a few per slice, all still hold');
+  r.writeAt(0x100, Uint8Array.of(r.data[0x100] ^ 1));
+  loaded.get('k', 'in0'); // (one in use: dropped when asked for, the others by the sweep)
+  sweep(loaded, 3);
+  store(loaded);
+  check(changes > 0 && [...db.keys()].every((k) => !k.startsWith('k#')) && [...db.keys()].filter((k) => k.startsWith('j#') && k !== 'j#').length === INPUTS_PER_KEY,
+    'sweep: a changed byte read drops the results of all inputs of the key from storage without them being asked for, keeps the others');
+  // a ROM change while the sweep runs: it starts again with what isn't checked for the new ROM
+  for (let i = 0; i < INPUTS_PER_KEY; i++) loaded.set('k', i, depsAt(0x100), `in${i}`);
+  r.writeAt(0x400, Uint8Array.of(r.data[0x400] ^ 1));
+  loaded.sweep(1);
+  r.writeAt(0x100, Uint8Array.of(r.data[0x100] ^ 1));
+  sweep(loaded, 1);
+  store(loaded);
+  check(db.size === 0, 'sweep: a ROM change during it is checked too');
 }
 
 if (fail) { console.log(`${fail} failed`); process.exit(1); }

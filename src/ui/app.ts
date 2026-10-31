@@ -26,8 +26,8 @@ import { PasteCounter, findPasted, arrangementKey, type PasteHint } from '../cor
 import { prefabSuggestions, KeptSuggestions, type PrefabSuggestion } from '../core/prefabsuggest.ts';
 import { planPrefabPlaces, applyPrefabPlaces, deletePrefab, prefabObjectCount, replaceWithPrefab, type LevelPlaces, type LevelGroups, type PrefabGroup } from '../core/prefabplaces.ts';
 import type { Package } from '../core/pkgreg.ts';
-import { kvEntries, kvWrite, saveRom } from './storage.ts';
-import { ResultCache, RomFingerprint, type CacheEntry } from '../core/romdeps.ts';
+import { kvEntries, kvKeys, kvWrite, saveRom } from './storage.ts';
+import { ResultCache, RomFingerprint, oldStoreKeys, type CacheEntry } from '../core/romdeps.ts';
 import { bgFromWram, bgIndex, encodeBg } from '../core/bg.ts';
 import { lt3Override, lt3Target, lt3Covers, layer3Map, layer3Word, layer3Index, blankLayer3Tile } from '../core/layer3map.ts';
 import { layer3Geometry, type Layer3Geometry } from '../core/render.ts';
@@ -119,7 +119,10 @@ export type AppEvent =
 // the hint to save a paste as prefab (pastehint.ts): the paste's objects as placed in level, layer
 export type PasteHintAt = PasteHint & { level: number; layer: 'l1' | 'l2'; objects: LevelObject[] };
 
-const CACHE_PREFIX = 'rc4:'; // IndexedDB keys of the result cache (bump when result formats change or old results may be wrong: rc4 keeps several inputs per key)
+// IndexedDB keys of the result cache: its name and version (bump when result formats change or old results may be
+// wrong: 4 keeps several inputs per key)
+const CACHE_NAME = 'rc', CACHE_VERSION = 4, CACHE_PREFIX = `${CACHE_NAME}${CACHE_VERSION}:`;
+const SWEEP_SLICE = 64; // stored results checked against the ROM per background slice (ResultCache.sweep)
 
 // the 8x8 tiles (layer 1 tile numbers) and colors that change in level n (ov) over 16 times 4 frames (none
 // when it fails)
@@ -273,6 +276,9 @@ export class App {
     this.cacheReady = kvEntries<CacheEntry | string[]>(CACHE_PREFIX)
       .then((e) => this.results.load(e.map(([k, v]) => [k.slice(CACHE_PREFIX.length), v])))
       .catch((e) => console.error(e));
+    // the rows of earlier versions of the result cache go; the loaded results are checked in the background
+    kvKeys(CACHE_NAME).then((k) => kvWrite([], oldStoreKeys(k, CACHE_NAME, CACHE_VERSION))).catch((e) => console.error(e));
+    void this.cacheReady.then(() => this.sweepResults());
     this.learner = new ResultLearner({
       rom, results: this.results, cacheReady: this.cacheReady, main: this.emu,
       later: (key, step) => this.later(key, step),
@@ -314,6 +320,13 @@ export class App {
     this.cacheTimer = 0;
     const { put, order, del } = this.results.flush();
     kvWrite([...put, ...order].map(([k, v]) => [CACHE_PREFIX + k, v]), del.map((k) => CACHE_PREFIX + k)).catch((e) => console.error(e));
+  }
+
+  // drops the loaded results that no longer hold for the ROM (also those of inputs not in use), a slice at a time
+  // (once: a result whose bytes an edit changes, and an undo changes back, would be dropped for nothing)
+  private sweepResults(): void {
+    const step = () => { if (this.results.sweep(SWEEP_SLICE)) this.later('result-sweep', step); };
+    this.later('result-sweep', step);
   }
 
   on(ev: AppEvent, fn: Listener): void {

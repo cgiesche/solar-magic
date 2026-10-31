@@ -202,6 +202,15 @@ const storeKey = (key: string, input: string | undefined) => input === undefined
 const orderKey = (key: string) => `${key}#`;
 const keyOf = (stored: string, e: CacheEntry) => e.input === undefined ? stored : stored.slice(0, -e.input.length - 1);
 
+// stored keys of earlier versions of a store whose keys start with its name and version ('rc' 4: 'rc3:…', 'rc2:…',
+// 'rc:…'; not a later version's, kept for the editor that wrote it)
+export function oldStoreKeys(keys: string[], name: string, version: number): string[] {
+  return keys.filter((k) => {
+    const v = k.startsWith(name) ? /^(\d*):/.exec(k.slice(name.length)) : null;
+    return v !== null && Number(v[1]) < version;
+  });
+}
+
 type Slot = CacheEntry & { gen: number };
 
 // results by key, checked against the ROM once per fingerprint generation; changed and dropped
@@ -214,6 +223,8 @@ export class ResultCache {
   private dirty = new Map<string, string>(); // stored keys of changed results: their key
   private dropped = new Set<string>(); // stored keys of dropped results
   private reordered = new Set<string>(); // keys whose inputs' order changed
+  private unchecked: [string, Slot][] = []; // results sweep() checks next, for fingerprint generation sweepGen
+  private sweepGen = -1;
   onChange: (() => void) | null = null;
 
   constructor(fp: RomFingerprint) {
@@ -263,6 +274,27 @@ export class ResultCache {
     this.onChange?.();
   }
 
+  // checks up to count results not checked against the current ROM yet (of any input, used or not) and drops those
+  // that no longer hold, so storage loses them without them being asked for; false once all are checked. A changed
+  // ROM starts again with the results not checked since.
+  sweep(count: number): boolean {
+    this.fp.sync();
+    if (this.sweepGen !== this.fp.gen) {
+      this.sweepGen = this.fp.gen;
+      this.unchecked = [];
+      for (const [key, slots] of this.entries) for (const s of slots) if (s.gen !== this.fp.gen) this.unchecked.push([key, s]);
+    }
+    let dropped = false;
+    for (; count > 0 && this.unchecked.length; count--) {
+      const [key, s] = this.unchecked.pop()!, slots = this.entries.get(key), i = slots?.indexOf(s) ?? -1;
+      if (i < 0 || s.gen === this.fp.gen) continue; // (replaced, dropped or checked since)
+      if (this.fp.valid(s.deps)) s.gen = this.fp.gen;
+      else { this.remove(key, slots!, i); dropped = true; }
+    }
+    if (dropped) this.onChange?.();
+    return this.unchecked.length > 0;
+  }
+
   // entries flushed by another cache (the probe worker's), by stored key
   setAll(put: [string, CacheEntry][]): void {
     for (const [k, e] of put) this.set(keyOf(k, e), e.data, e.deps, e.input);
@@ -294,6 +326,7 @@ export class ResultCache {
       for (const e of l.sort((a, b) => rank(a) - rank(b))) if (!slots.some((s) => s.input === e.input)) slots.push({ ...e, gen: -1 });
       while (slots.length > INPUTS_PER_KEY) this.remove(key, slots, slots.length - 1);
     }
+    this.sweepGen = -1; // (the next sweep checks them)
   }
 
   // changed entries to store (with the changed orders of keys' inputs) and dropped ones to delete since the last call
