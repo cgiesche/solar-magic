@@ -1,7 +1,8 @@
 // Palettes tab: the level's 16 palette rows, labelled by where their colors come from (FG/BG/sprite
 // palette of the header, global colors), with a color editor, row tools and the header palette choice.
-// Colors are written to the ROM location they were loaded from (traced during emulation); before a
-// shared palette is changed the user decides between all levels and an own palette for this level.
+// Colors are written to the ROM location they were loaded from (traced during emulation, again only when that may
+// have changed: ColorSources); before a shared palette is changed the user decides between all levels and an own
+// palette for this level.
 
 import type { App } from '../app.ts';
 import type { GfxWorkspace, WsPanel } from '../gfxworkspace.ts';
@@ -14,6 +15,7 @@ import { hex } from '../../core/names.ts';
 import { customPalette, setCustomPalette } from '../../core/patches.ts';
 import { parsePrimaryHeader, L1_PTRS, type PrimaryHeader } from '../../core/level.ts';
 import type { LevelRender } from '../../core/levelemu.ts';
+import { ColorSources } from '../../core/colorsources.ts';
 import { animLinks, colorAnimsAt } from './animtab.ts';
 import { BACK_AREA, BG_PALS, FG_PALS, SPR_PALS, tableOf, tableName, type TableKind } from '../../core/sharedpal.ts';
 
@@ -53,6 +55,7 @@ export class PaletteTab implements WsPanel {
   private app: App;
   private ws: GfxWorkspace;
   private trace: LevelRender | null = null;
+  private sources: ColorSources;
   private custom = 0;
   private sel = 0x21;
   private selEnd = 0x21; // range end (same row) for gradients
@@ -71,6 +74,7 @@ export class PaletteTab implements WsPanel {
   constructor(app: App, ws: GfxWorkspace) {
     this.app = app;
     this.ws = ws;
+    this.sources = new ColorSources(app.rom);
     this.root = h('div', { class: 'pt' }, this.bar, h('div', { class: 'pt-main' }, h('div', { class: 'pt-left' }, this.rows, this.headerBox), this.detail));
     app.on('render', () => { if (this.visible) { this.retrace(); this.paint(); } });
     app.on('rom-change', () => {
@@ -109,11 +113,8 @@ export class PaletteTab implements WsPanel {
   private retrace(): void {
     const app = this.app;
     this.custom = customPalette(app.rom, app.level.number);
-    if (this.trace && this.tracedFor === app.render) return;
-    this.trace = app.emu.load(app.level.number, { ...app.buildOverrides(), trackSources: true });
-    this.tracedFor = app.render;
+    this.trace = this.sources.trace(app.level.number, app.buildOverrides());
   }
-  private tracedFor: LevelRender | null = null;
 
   private backAreaAddr(): number {
     return BACK_AREA + this.app.level.header.backAreaColor * 2;

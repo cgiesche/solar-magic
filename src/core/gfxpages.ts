@@ -9,6 +9,8 @@
 // For what blocks do (block probes, probehost.ts) and the editor's other results that are no pictures (learner.ts)
 // also the Map16 tiles' 8x8 tile words and the colors: they only reach VRAM and CGRAM as well, so drawing a tile or
 // changing a palette keeps them (displaySkipMask). Not for pictures: object thumbnails and sprite images show them.
+// Where the level's colors are loaded from (the palette tab) leaves out the GFX files and the colors' values
+// (colorSkipMask): changing a color keeps it.
 
 import { snesToPc, type Rom } from './rom.ts';
 import { editorPatch, gfxEntry, GFX_FILES, GFX_NONE, customPalettePatch, PALETTE_SIZE } from './patches.ts';
@@ -27,10 +29,9 @@ function fileRange(rom: Rom, i: number): [number, number] | null {
   try { return [pc, Math.min(rom.data.length, pc + (e.raw ? e.size : lz2Decompress(rom.data, pc).size))]; } catch { return null; }
 }
 
-// 1 for every byte of GFX file data, the files' pointer entries and ExAnimation data (and the checksum). Often built lazily
-// inside a tracked computation: reading the pointer tables here isn't a dependency of its result (else a new ExGFX file
-// would drop them all)
-export function gfxSkipMask(rom: Rom): Uint8Array {
+// 1 for every byte of GFX file data and the files' pointer entries (and the checksum). Its reads aren't a dependency
+// (see gfxSkipMask).
+function gfxFileMask(rom: Rom): Uint8Array {
   const reads = rom.reads;
   rom.reads = null;
   try {
@@ -41,36 +42,69 @@ export function gfxSkipMask(rom: Rom): Uint8Array {
     }
     const p = editorPatch(rom);
     if (p) for (const t of [p.gfxLo, p.gfxHi, p.gfxBank, p.gfxFlags]) { const o = snesToPc(t); mask.fill(1, o, o + GFX_FILES); }
-    for (const [a, b] of exanimDataRanges(rom)) mask.fill(1, a, b);
     mask.fill(1, 0x7fdc, 0x7fe0); // checksum: rewritten whenever the ROM is stored, some sprites read it as a table
     return mask;
   } finally { rom.reads = reads; }
 }
 
-const LEVELS = 0x200;
-
-// gfxSkipMask and every byte that only says what blocks look like: the quarters (8x8 tile words) of the FG Map16 tiles (ptrs:
-// the pointers of tiles 000-1FF per tileset, tilesetPointers; the extended tiles' table) and the BG Map16 tiles, the
-// shared palettes and the levels' own palettes (their pointers too: a level without one only takes the shared
-// colors). Built like gfxSkipMask: its reads aren't a dependency.
-export function displaySkipMask(rom: Rom, ptrs: number[][]): Uint8Array {
-  const mask = gfxSkipMask(rom);
+// marks the ExAnimation data in a mask. Its reads aren't a dependency (see gfxSkipMask).
+function addExanim(rom: Rom, mask: Uint8Array): Uint8Array {
   const reads = rom.reads;
   rom.reads = null;
   try {
-    const fill = (snes: number, len: number) => { const o = snesToPc(snes); if (o < mask.length) mask.fill(1, o, Math.min(o + len, mask.length)); };
+    for (const [a, b] of exanimDataRanges(rom)) mask.fill(1, a, b);
+    return mask;
+  } finally { rom.reads = reads; }
+}
+
+// 1 for every byte of GFX file data, the files' pointer entries and ExAnimation data (and the checksum). Often built lazily
+// inside a tracked computation: reading the pointer tables here isn't a dependency of its result (else a new ExGFX file
+// would drop them all)
+export function gfxSkipMask(rom: Rom): Uint8Array {
+  return addExanim(rom, gfxFileMask(rom));
+}
+
+const LEVELS = 0x200;
+
+// fills the bytes at a SNES address into a mask
+function fillSnes(mask: Uint8Array, snes: number, len: number): void {
+  const o = snesToPc(snes);
+  if (o < mask.length) mask.fill(1, o, Math.min(o + len, mask.length));
+}
+
+// The GFX file data with its pointer entries and the colors' values: the shared palettes and the levels' own palettes –
+// not the own palettes' pointers, they say where a level's colors come from (see ColorSources), nor the ExAnimation
+// data, a color animation writes colors too. Built like gfxSkipMask: its reads aren't a dependency.
+export function colorSkipMask(rom: Rom): Uint8Array {
+  const mask = gfxFileMask(rom);
+  const reads = rom.reads;
+  rom.reads = null;
+  try {
+    fillSnes(mask, SHARED_PALETTES, SHARED_PAL_SIZE);
+    const pal = customPalettePatch(rom);
+    if (pal) for (let l = 0; l < LEVELS; l++) { const a = rom.r24(pal.table + l * 3); if (a) fillSnes(mask, a, PALETTE_SIZE); }
+    return mask;
+  } finally { rom.reads = reads; }
+}
+
+// gfxSkipMask, colorSkipMask and every byte that only says what blocks look like: the quarters (8x8 tile words) of the FG Map16 tiles
+// (ptrs: the pointers of tiles 000-1FF per tileset, tilesetPointers; the extended tiles' table) and the BG Map16 tiles,
+// and the levels' own palettes' pointers too (a level without one only takes the shared colors). Built like
+// gfxSkipMask: its reads aren't a dependency.
+export function displaySkipMask(rom: Rom, ptrs: number[][]): Uint8Array {
+  const mask = addExanim(rom, colorSkipMask(rom));
+  const reads = rom.reads;
+  rom.reads = null;
+  try {
+    const fill = (snes: number, len: number) => fillSnes(mask, snes, len);
     for (const ps of ptrs) for (const p of ps) if (p >= 0x8000) fill(0x0d0000 | p, 8);
     const fg = map16Ext(rom);
     if (fg) fill(fg.gfx, (EXT_TILES - EXT_FIRST) * 8);
     fill(bgTileAddr(rom, 0)!, BG_EXT_FIRST * 8);
     const bg = bgMap16Ext(rom);
     if (bg) fill(bg.gfx, (BG_EXT_TILES - BG_EXT_FIRST) * 8);
-    fill(SHARED_PALETTES, SHARED_PAL_SIZE);
     const pal = customPalettePatch(rom);
-    if (pal) {
-      fill(pal.table, LEVELS * 3);
-      for (let l = 0; l < LEVELS; l++) { const a = rom.r24(pal.table + l * 3); if (a) fill(a, PALETTE_SIZE); }
-    }
+    if (pal) fill(pal.table, LEVELS * 3);
     return mask;
   } finally { rom.reads = reads; }
 }
