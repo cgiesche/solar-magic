@@ -12,7 +12,7 @@ import { loadAsar } from '../src/core/asar.ts';
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadLevel, newUid, type LevelSprite } from '../src/core/level.ts';
-import { checkSpriteMemory, spriteMemJob, spriteWindows, suggestSpriteMemory, usedSpriteMemory, SpriteGroupResults, type GroupResult } from '../src/core/spritemem.ts';
+import { checkSpriteMemory, spriteMemJob, spriteGroups, suggestSpriteMemory, usedSpriteMemory, SpriteGroupResults, type GroupResult } from '../src/core/spritemem.ts';
 import { RomFingerprint } from '../src/core/romdeps.ts';
 import { editorImage } from './fixture.ts';
 
@@ -31,14 +31,14 @@ console.log('used sprite memory', candidates.map((m) => m.toString(16)).join(' '
 {
   const lv = loadLevel(rom, 0xc);
   const ctx = { emu, level: 0xc, header: lv.header, bgPointer: bgOf(lv.layer2Pointer) };
-  const wins = [[{ uid: newUid(), num: 0xe0, x: 8, y: 0x14, extra: 0 }]];
+  const groups = [[{ uid: newUid(), num: 0xe0, x: 8, y: 0x14, extra: 0 }]];
   const m = lv.spriteHeader & 0x3f;
-  const base = checkSpriteMemory(ctx, m, wins);
+  const base = checkSpriteMemory(ctx, m, groups);
   if (!base.conflicts.size) fail(`00C: $E0 with ${m.toString(16)} shows no conflict`);
-  const s = suggestSpriteMemory(ctx, m, candidates, wins, base);
+  const s = suggestSpriteMemory(ctx, m, candidates, groups, base);
   if (s === null) fail('00C: no suggestion');
   else {
-    const c = checkSpriteMemory(ctx, s, wins);
+    const c = checkSpriteMemory(ctx, s, groups);
     if (c.conflicts.size || c.live[0] < base.live[0]) fail(`00C: suggestion ${s.toString(16)} does not help`);
     console.log(`00C $E0: ${m.toString(16)} → ${s.toString(16)}`);
   }
@@ -53,8 +53,8 @@ console.log('used sprite memory', candidates.map((m) => m.toString(16)).join(' '
   if (r.errors.length) fail(`No More Sprite Tile Limits not applied: ${r.errors.join(' ')}`);
   const e = new LevelEmulator(nmstl); e.boot();
   const lv = loadLevel(nmstl, 0x105);
-  const wins = [[{ uid: newUid(), num: 0x62, x: 3, y: 4, extra: 0 }, { uid: newUid(), num: 0x62, x: 14, y: 9, extra: 0 }]];
-  const c = checkSpriteMemory({ emu: e, level: 0x105, header: lv.header, bgPointer: bgOf(lv.layer2Pointer) }, 0x08, wins);
+  const groups = [[{ uid: newUid(), num: 0x62, x: 3, y: 4, extra: 0 }, { uid: newUid(), num: 0x62, x: 14, y: 9, extra: 0 }]];
+  const c = checkSpriteMemory({ emu: e, level: 0x105, header: lv.header, bgPointer: bgOf(lv.layer2Pointer) }, 0x08, groups);
   if (c.conflicts.size || c.live[0] !== 2) fail(`No More Sprite Tile Limits: two $62 with conflicts (${c.conflicts.size}) or not both alive (${c.live[0]})`);
   else console.log('No More Sprite Tile Limits: two $62, no conflicts');
 }
@@ -65,10 +65,10 @@ console.log('used sprite memory', candidates.map((m) => m.toString(16)).join(' '
   const ctx = { emu, level: 0xc, header: lv.header, bgPointer: bgOf(lv.layer2Pointer) };
   let ran = 0;
   class Counted extends SpriteGroupResults { set(key: string, r: GroupResult): void { ran++; super.set(key, r); } }
-  const groups = new Counted(new RomFingerprint(rom));
+  const groupResults = new Counted(new RomFingerprint(rom));
   const before: LevelSprite[] = [...lv.sprites, { uid: newUid(), num: 0xe0, x: 8, y: 0x14, extra: 0 }];
   const run = (sprites: LevelSprite[], kept: boolean) => {
-    const job = spriteMemJob({ ...ctx, groups: kept ? groups : undefined }, 0, candidates, sprites);
+    const job = spriteMemJob({ ...ctx, groupResults: kept ? groupResults : undefined }, 0, candidates, sprites);
     for (;;) { const r = job.next(); if (r.done) return r.value; }
   };
   const same = (a: ReturnType<typeof run>, b: ReturnType<typeof run>) => a.suggestion === b.suggestion && a.check.live.join() === b.check.live.join() &&
@@ -80,14 +80,14 @@ console.log('used sprite memory', candidates.map((m) => m.toString(16)).join(' '
   const moved = before.find((s) => s.num === 0x8f)!, to = { ...moved, x: 12 };
   const after = before.map((s) => (s === moved ? to : s));
   // a group as its sprites (uid and place); changed: groups of after that before didn't have
-  const groupsOf = (sprites: LevelSprite[]) => spriteWindows(sprites).map((w) => w.map((s) => `${s.uid}@${s.x},${s.y}`));
+  const groupsOf = (sprites: LevelSprite[]) => spriteGroups(sprites).map((g) => g.map((s) => `${s.uid}@${s.x},${s.y}`));
   const old = groupsOf(before), oldKeys = new Set(old.map((g) => [...g].sort().join(' ')));
   const changed = groupsOf(after).filter((g) => !oldKeys.has([...g].sort().join(' ')));
   // each holds the moved sprite now or is what is left of a group it was in
   const had = (g: string[], uid: number) => g.some((p) => p.startsWith(`${uid}@`));
   if (changed.some((g) => !had(g, moved.uid) && !old.some((o) => had(o, moved.uid) && g.every((p) => o.includes(p))))) fail('00C: a changed group without the moved sprite');
   ran = 0;
-  const c = checkSpriteMemory({ ...ctx, groups }, 0, spriteWindows(after));
+  const c = checkSpriteMemory({ ...ctx, groupResults }, 0, spriteGroups(after));
   if (ran !== changed.length) fail(`00C: moving one sprite checked ${ran} groups, ${changed.length} changed`);
   console.log(`00C one sprite moved: ${ran} of ${c.live.length} groups checked`);
   const t0 = Date.now(), again = run(after, true), ms = Date.now() - t0;
@@ -99,9 +99,9 @@ console.log('used sprite memory', candidates.map((m) => m.toString(16)).join(' '
 {
   const lv = loadLevel(rom, 0x105), m = lv.spriteHeader & 0x3f;
   const ctx = { emu, level: 0x105, header: lv.header, bgPointer: bgOf(lv.layer2Pointer) };
-  const groups = new SpriteGroupResults(new RomFingerprint(rom));
+  const groupResults = new SpriteGroupResults(new RomFingerprint(rom));
   const run = (sprites: LevelSprite[], kept: boolean) => {
-    const job = spriteMemJob({ ...ctx, groups: kept ? groups : undefined }, m, candidates, sprites);
+    const job = spriteMemJob({ ...ctx, groupResults: kept ? groupResults : undefined }, m, candidates, sprites);
     for (;;) { const r = job.next(); if (r.done) return r.value; }
   };
   run(lv.sprites, true);
@@ -118,10 +118,10 @@ for (const n of list) {
   const lv = loadLevel(rom, n);
   const ctx = { emu, level: n, header: lv.header, bgPointer: bgOf(lv.layer2Pointer) };
   const t0 = Date.now();
-  const wins = spriteWindows(lv.sprites);
-  const c = checkSpriteMemory(ctx, lv.spriteHeader & 0x3f, wins);
+  const groups = spriteGroups(lv.sprites);
+  const c = checkSpriteMemory(ctx, lv.spriteHeader & 0x3f, groups);
   const names = [...c.conflicts].map((u) => { const s = lv.sprites.find((q) => q.uid === u)!; return `${s.num.toString(16)}@${s.x},${s.y}`; });
-  console.log(`${n.toString(16).padStart(3, '0')} mem=${(lv.spriteHeader & 0x3f).toString(16)} sprites=${lv.sprites.length} windows=${wins.length} ${Date.now() - t0}ms conflicts=${names.join(' ') || '-'}`);
+  console.log(`${n.toString(16).padStart(3, '0')} mem=${(lv.spriteHeader & 0x3f).toString(16)} sprites=${lv.sprites.length} groups=${groups.length} ${Date.now() - t0}ms conflicts=${names.join(' ') || '-'}`);
   if (c.conflicts.size) fail(`${n.toString(16)}: conflicts with its own sprite memory`);
 }
 console.log('bad', bad);

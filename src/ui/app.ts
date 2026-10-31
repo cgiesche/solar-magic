@@ -279,7 +279,7 @@ export class App {
       soon: (step) => setTimeout(step, 0),
       setBusy: (key, label) => this.setBusy(key, label),
     });
-    this.spriteGroups = new SpriteGroupResults(this.results.fp);
+    this.spriteGroupResults = new SpriteGroupResults(this.results.fp);
     this.keptSuggestions = new KeptSuggestions(this.results.fp);
     this.probes = new ProbeClient({
       results: this.results,
@@ -839,9 +839,9 @@ export class App {
   // ------------- sprite memory (see spritemem.ts) -------------
   // sprites drawn incompletely because their OAM range is too small, and a sprite memory value
   // that shows all; checked in the background after every change (only the groups of sprites it changed:
-  // the others' results are kept in spriteGroups)
+  // the others' results are kept in spriteGroupResults)
   spriteMem: SpriteMemState | null = null;
-  private spriteGroups: SpriteGroupResults;
+  private spriteGroupResults: SpriteGroupResults;
   private spriteMemBase: SpriteMemState | null = null; // the latest check no edit came after (autocorrection compares with it)
   private spriteMemTimer = 0;
   private spriteMemRun = 0;
@@ -874,9 +874,9 @@ export class App {
       this.spriteMemBase = cur;
       if (base) this.autoSpriteMem(base, cur);
     };
-    const groups = this.spriteGroups;
+    const groupResults = this.spriteGroupResults;
     const stored = this.learner.learn(key, function* (emu) {
-      const r = yield* spriteMemJob({ emu, level: lv.number, header, bgPointer: bg, groups }, mem, candidates, sprites);
+      const r = yield* spriteMemJob({ emu, level: lv.number, header, bgPointer: bg, groupResults }, mem, candidates, sprites);
       return { lost: [...r.check.conflicts].map((u) => sprites.findIndex((q) => q.uid === u)), suggestion: r.suggestion };
     }, { input, lane: 'spritemem', replace: true, label: 'Checking sprite memory', picture: false, done });
     if (stored) done(stored);
