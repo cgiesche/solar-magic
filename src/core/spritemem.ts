@@ -32,8 +32,8 @@ export interface SpriteMemContext {
 }
 
 // group results kept, the latest used (of all levels): a level's groups with the values a suggestion tries, so a
-// search plays a group only with values not played before as long as they fit (about 6 KB each in level 105: the
-// pages and bytes read)
+// search plays a group only with values not played before (about 6 KB each in level 105: the pages and bytes read);
+// a check keeps all it used, also more (a very large level)
 const KEPT_GROUPS = 1024;
 
 // The results of single groups (a group with a sprite memory value in a level with its header and BG: which of
@@ -43,10 +43,14 @@ export class SpriteGroupResults {
   private fp: RomFingerprint;
   private kept: MemoryResults;
 
-  constructor(fp: RomFingerprint) {
+  constructor(fp: RomFingerprint, limit = KEPT_GROUPS) {
     this.fp = fp;
-    this.kept = new MemoryResults(fp, KEPT_GROUPS);
+    this.kept = new MemoryResults(fp, limit);
   }
+
+  // a check starts or is finished: the results a finished check used are all kept for the next one
+  startCheck(): void { this.kept.startRound(); }
+  endCheck(): void { this.kept.endRound(); }
 
   get(key: string): GroupResult | undefined { return this.kept.get<GroupResult>(key, undefined); }
   set(key: string, check: GroupResult['check'], reads: RomReads): void {
@@ -221,7 +225,9 @@ function* suggestJob(ctx: SpriteMemContext, current: number, candidates: number[
 // the groups not kept run.
 export function* spriteMemJob(ctx: SpriteMemContext, m: number, candidates: number[], sprites: LevelSprite[]): Generator<void, { check: SpriteMemCheck; suggestion: number | null }> {
   const groups = spriteGroups(sprites), cams: Cams = new Map();
+  ctx.groupResults?.startCheck();
   const check = yield* checkJob(ctx, m, groups, cams);
   const suggestion = check.conflicts.size ? yield* suggestJob(ctx, m, candidates, groups, check, cams) : null;
+  ctx.groupResults?.endCheck();
   return { check, suggestion };
 }

@@ -3,7 +3,8 @@
 // would save (the level data of the places against one prefab object each, the prefab's ROM cost taken off);
 // only positive savings, the largest first. Computed in steps (a generator), so it runs in the background;
 // gone once the places are replaced by the prefab. Each level's arrangements and places are kept between runs
-// (KeptSuggestions, #185): a run takes apart only the levels that changed, with the same suggestions.
+// (KeptSuggestions, #185): a run takes apart only the levels that changed, with the same suggestions; a cold run keeps
+// all its places for the next one, also more than the bound (#200).
 import { Rom, snesToPc } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadLevel, newUid, type LevelObject } from '../src/core/level.ts';
@@ -122,6 +123,22 @@ check(list.every((s) => s.saved > 0 && s.count > 1), 'only positive savings of r
   check(kept.took.length === usedLevels(rom).length && kept.searched.length > 0, 'first run: every level taken apart');
   same(undefined, 'again');
   only([], 'nothing changed');
+  // a bound far below the places of a cold run: all are kept for the next run
+  {
+    const small = new Spy(new RomFingerprint(rom), 2);
+    suggestPrefabs(rom, { levels: usedLevels(rom), emu: load, kept: small });
+    const cold = small.searched.length;
+    small.reset();
+    suggestPrefabs(rom, { levels: usedLevels(rom), emu: load, kept: small });
+    check(cold > 2 && !small.searched.length, `a cold run of ${cold} place searches with a bound of 2: none searched again`);
+    // a level edited (searched again first): the unchanged levels' places are still kept
+    const edited = H2;
+    const open = loadLevel(rom, edited);
+    open.objects = open.objects.filter((o) => !(o.ext === DM16_EXT && o.tile === 0x104));
+    small.reset();
+    suggestPrefabs(rom, { levels: usedLevels(rom), level: (n) => (n === edited ? open : loadLevel(rom, n)), emu: load, kept: small });
+    check(small.searched.length > 0 && small.searched.every((n) => n === edited), `a level edited with a bound of 2: only it searched again (${[...new Set(small.searched)].map((n) => n.toString(16))})`);
+  }
   // the open level as edited: a block's tile gone (as a place it is gone)
   const open = loadLevel(rom, H2);
   open.objects = open.objects.filter((o) => !(o.ext === DM16_EXT && o.tile === 0x104));

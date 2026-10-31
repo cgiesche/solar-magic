@@ -41,7 +41,7 @@ export interface SuggestSource {
 // tiles it has (tileKey)
 interface Arrangements { list: [string, Prefab][]; tiles: Set<string> }
 
-const PLACES = 4096; // place searches kept (a level and an arrangement each), the latest used
+const PLACES = 4096; // place searches kept (a level and an arrangement each), the latest used; a run keeps all it used, also more
 
 // The results of single levels kept between runs. A level's arrangements are kept by the level's content (they
 // read no ROM byte), an arrangement's places in a level by the level's content and while the ROM bytes their
@@ -52,10 +52,14 @@ export class KeptSuggestions {
   private arrangements = new Map<number, { input: string; a: Arrangements }[]>(); // a level's latest used inputs first
   private places: MemoryResults;
 
-  constructor(fp: RomFingerprint) {
+  constructor(fp: RomFingerprint, limit = PLACES) {
     this.fp = fp;
-    this.places = new MemoryResults(fp, PLACES);
+    this.places = new MemoryResults(fp, limit);
   }
+
+  // a run starts or is finished: the places a finished run used are all kept for the next one
+  startRun(): void { this.places.startRound(); }
+  endRun(): void { this.places.endRound(); }
 
   arrangementsOf(n: number, input: string): Arrangements | undefined {
     const l = this.arrangements.get(n), i = l?.findIndex((e) => e.input === input) ?? -1;
@@ -118,6 +122,7 @@ export function dm16Groups(lv: Level): { layer: Layer; objects: number[] }[] {
 
 export function* prefabSuggestions(rom: Rom, src: SuggestSource): Generator<void, PrefabSuggestion[]> {
   const kept = src.kept;
+  kept?.startRun();
   // the arrangements of the groups, with how often they occur
   const levels = new Map<number, { lv: Level; input: string; a: Arrangements }>();
   const found = new Map<string, { prefab: Prefab; count: number }>();
@@ -164,6 +169,7 @@ export function* prefabSuggestions(rom: Rom, src: SuggestSource): Generator<void
     const saved = places.reduce((m, p) => m + p.places.reduce((b, q) => b + q.bytes, 0), 0) - cost.once;
     if (k > 1 && saved > 0) out.push({ key, prefab, places, count: k, levels: places.map((p) => p.level).sort((x, y) => x - y), saved });
   }
+  kept?.endRun();
   return out.sort((x, y) => y.saved - x.saved);
 }
 

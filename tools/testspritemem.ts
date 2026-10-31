@@ -6,7 +6,8 @@
 // checks only the groups it was and is in, with the same conflicts and suggestion as a check of the whole level;
 // no group is played twice with a value (the suggestion after a move that causes a conflict plays the untouched
 // groups only with values not played before), moving all sprites plays no group again, and a kept result holds
-// the compact dependencies (RomDeps), not the record of the ROM bytes read.
+// the compact dependencies (RomDeps), not the record of the ROM bytes read. A check keeps all group results it used
+// for the next one, also more than the bound (#200).
 // Usage: node tools/testspritemem.ts [levels,hex]
 import { readFileSync } from 'node:fs';
 import { unzipSync } from 'fflate';
@@ -32,7 +33,7 @@ class Counted extends SpriteGroupResults {
   ran = 0;
   private played = new Set<string>();
   private name: string;
-  constructor(name: string) { super(new RomFingerprint(rom)); this.name = name; }
+  constructor(name: string, limit?: number) { super(new RomFingerprint(rom), limit); this.name = name; }
   set(key: string, check: GroupResult['check'], reads: RomReads): void {
     this.ran++;
     if (this.played.has(key)) fail(`${this.name}: a group played again with the same value`);
@@ -131,6 +132,18 @@ console.log('used sprite memory', candidates.map((m) => m.toString(16)).join(' '
   if (groupResults.ran) fail(`105: moving all sprites played ${groupResults.ran} groups again`);
   if (!same(all, run(shifted, false))) fail('105: all sprites moved, kept groups give another result than a check of the whole level');
   else console.log(`105 all sprites moved: ${groupResults.ran} groups played, same result as a whole check`);
+  // a bound far below the level's groups: the check again plays none
+  const small = new Counted('105 bound 2', 2);
+  runJob(ctx, small, m, lv.sprites);
+  const played = small.ran;
+  small.ran = 0;
+  // one sprite moved: only its groups are played (a replay of another fails), the others still kept
+  runJob(ctx, small, m, after);
+  const moved = small.ran;
+  small.ran = 0;
+  runJob(ctx, small, m, lv.sprites);
+  if (played <= 2 || small.ran) fail(`105 with a bound of 2: ${played} groups played, again ${small.ran}`);
+  else console.log(`105 with a bound of 2: ${played} groups played, ${moved} after a move, none again`);
 }
 
 // level 1: a sprite added that causes a conflict (its value searched with the untouched groups), then moved: the

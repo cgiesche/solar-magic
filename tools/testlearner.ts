@@ -2,12 +2,14 @@
 // running anything; two requests for one key run its job once; a sliced job during which the ROM bytes it
 // read change keeps nothing and is learned again. A result with an input (inputs.ts) is learned again when
 // the input or a byte it read changes, and reused when neither does; one kept in memory isn't stored.
+// Memory-only results (#200): a write looks at a key's inputs only, not at all results (counted); a key keeps its latest
+// used inputs, the latest used results stay within the limit, and a round keeps all results it used, also more.
 // A result that is no picture doesn't read what blocks look like (ADR 0008): flipping a standard Map16 tile's
 // quarters or changing a shared color keeps the levels' uses, sprite images and object thumbnails are learned again.
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
-import { ResultCache, RomFingerprint } from '../src/core/romdeps.ts';
-import { ResultLearner } from '../src/core/learner.ts';
+import { ResultCache, RomFingerprint, INPUTS_PER_KEY } from '../src/core/romdeps.ts';
+import { ResultLearner, MemoryResults } from '../src/core/learner.ts';
 import { inputHash, levelInput } from '../src/core/inputs.ts';
 import { gfxSkipMask } from '../src/core/gfxpages.ts';
 import { LevelUses, usedLevels } from '../src/core/levelusage.ts';
@@ -217,6 +219,40 @@ for (const keep of [true, 'memory'] as const) {
   check(plain.missing(levels).length === 0 && shown.missing(levels).length === levels.length,
     'changing a shared color keeps every level\'s uses (as pictures all would be learned again)');
   check(results.get('spr') === undefined && thumbs() === undefined && redrawn(), 'the sprite images and object thumbnails are learned again, the open level drawn anew');
+}
+
+// memory-only results: writes look at a key's inputs only; the bounds; a round keeps what it used
+{
+  const fp = new RomFingerprint(rom), deps = fp.deps(main.tracked(() => rom.r8(spare)).reads);
+  const mem = new MemoryResults(fp, 256);
+  for (let i = 0; i < 20000; i++) mem.set(`k${i % 5000}`, i, deps, `${i}`);
+  check(mem.looked <= 20000 * 2 * (INPUTS_PER_KEY + 1), `20000 writes look at ${mem.looked} entries (not all results each)`);
+  check(mem.get('k4999', '19999') === 19999 && mem.get('k0', '0') === undefined, 'the latest used results stay within the limit');
+  const one = new MemoryResults(fp, 256);
+  for (let i = 0; i < 10; i++) one.set('k', i, deps, `${i}`);
+  check(one.get('k', '9') === 9 && one.get('k', `${9 - INPUTS_PER_KEY + 1}`) !== undefined && one.get('k', `${9 - INPUTS_PER_KEY}`) === undefined,
+    `a key keeps its latest used ${INPUTS_PER_KEY} inputs`);
+  const round = new MemoryResults(fp, 16);
+  round.startRound();
+  for (let i = 0; i < 1000; i++) round.set(`r${i}`, i, deps, undefined);
+  round.endRound();
+  // the next rounds (one left unfinished) write new results before they read the kept ones
+  for (const end of [false, true]) {
+    round.startRound();
+    for (let i = 0; i < 50; i++) round.set(`n${end}${i}`, i, deps, undefined);
+    let kept = 0;
+    for (let i = 0; i < 1000; i++) if (round.get(`r${i}`, undefined) === i) kept++;
+    if (end) round.endRound();
+    check(kept === 1000, `a round of 1000 results with a limit of 16: the next ${end ? '' : 'unfinished '}round writing 50 first finds ${kept}`);
+  }
+  round.startRound();
+  for (let i = 0; i < 20; i++) round.set(`s${i}`, i, deps, undefined);
+  round.endRound();
+  round.startRound();
+  for (let i = 0; i < 20; i++) round.set(`t${i}`, i, deps, undefined);
+  round.endRound();
+  check(round.get('r999', undefined) === undefined && round.get('s0', undefined) === 0 && round.get('t19', undefined) === 19,
+    'smaller rounds drop the results of earlier rounds');
 }
 
 if (fail) { console.log(`${fail} failed`); process.exit(1); }
