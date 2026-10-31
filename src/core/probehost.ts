@@ -88,7 +88,6 @@ export class ProbeHost {
   private tasks = new Map<TaskType, Task>(); // taking turns
   private emus = new Map<TaskType, LevelEmulator>();
   private ptrEmu: LevelEmulator | null = null; // learns the tilesets' Map16 pointers (pointers())
-  private ptrMask: { gen: number; mask: Uint8Array | null } = { gen: -1, mask: null };
   started = 0; // tasks (re)started
 
   // a new ROM (gen: the editor's count of changes); queued jobs and tasks are dropped
@@ -114,10 +113,9 @@ export class ProbeHost {
     this.prober.reset(); // probe levels that read changed pages are prepared again
   }
 
-  // per tileset the pointers of FG Map16 tiles 000-1FF (tilesets.ts), as the editor learns them (App.tilesetPointerTable):
+  // per tileset the pointers of FG Map16 tiles 000-1FF (tilesets.ts), as the editor learns them (ResultLearner.tilesetPointers):
   // kept in the result cache. Learned on an own emulator, as the mask is asked for while the prober's emulator runs (and
-  // what learning them reads isn't a dependency of that run), with the other display data left out (tilesetPointers
-  // leaves out the tiles it finds)
+  // what learning them reads isn't a dependency of that run); tilesetPointers leaves out the display data itself
   private pointers(): number[][] {
     const rom = this.rom!, results = this.prober!.results, reads = rom.reads;
     rom.reads = null;
@@ -125,14 +123,7 @@ export class ProbeHost {
       return Array.from({ length: TILESETS }, (_, ts) => {
         const known = results.get<number[]>(pointersKey(ts));
         if (known) return known;
-        if (!this.ptrEmu) {
-          this.ptrEmu = new LevelEmulator(rom);
-          this.ptrEmu.skipMask = () => {
-            if (this.ptrMask.gen !== rom.gen) this.ptrMask = { gen: rom.gen, mask: displaySkipMask(rom, []) };
-            return this.ptrMask.mask;
-          };
-        }
-        const { result, reads: r } = tilesetPointers(this.ptrEmu, ts);
+        const { result, reads: r } = tilesetPointers(this.ptrEmu ??= new LevelEmulator(rom), ts);
         results.set(pointersKey(ts), result, results.fp.deps(r));
         return result;
       });

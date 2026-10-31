@@ -2,11 +2,20 @@
 // running anything; two requests for one key run its job once; a sliced job during which the ROM bytes it
 // read change keeps nothing and is learned again. A result with an input (inputs.ts) is learned again when
 // the input or a byte it read changes, and reused when neither does; one kept in memory isn't stored.
+// A result that is no picture doesn't read what blocks look like (ADR 0008): flipping a standard Map16 tile's
+// quarters or changing a shared color keeps the levels' uses, sprite images and object thumbnails are learned again.
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { ResultCache, RomFingerprint } from '../src/core/romdeps.ts';
 import { ResultLearner } from '../src/core/learner.ts';
 import { inputHash, levelInput } from '../src/core/inputs.ts';
+import { gfxSkipMask } from '../src/core/gfxpages.ts';
+import { LevelUses, usedLevels } from '../src/core/levelusage.ts';
+import { loadLevel, levelRows } from '../src/core/level.ts';
+import { renderLevel, setFgWords, map16Source } from '../src/core/render.ts';
+import { setSharedColor, sharedColor } from '../src/core/sharedpal.ts';
+import { captureSprites } from '../src/core/spritegfx.ts';
+import { objectThumbsJob, objKey } from '../src/ui/thumbs.ts';
 import { editorImage } from './fixture.ts';
 
 let fail = 0;
@@ -16,11 +25,11 @@ const rom = new Rom(await editorImage());
 const main = new LevelEmulator(rom); main.boot();
 const spare = rom.allocWrite(new Uint8Array(0x300)); // a page of its own no load reads
 
-function editor() {
-  const results = new ResultCache(new RomFingerprint(rom));
+function editor(r = rom, m = main) {
+  const results = new ResultCache(new RomFingerprint(r));
   const steps: (() => void)[] = [];
   const learner = new ResultLearner({
-    rom, results, cacheReady: Promise.resolve(), main,
+    rom: r, results, cacheReady: Promise.resolve(), main: m,
     later: (_key, step) => steps.push(step), soon: (step) => steps.push(step),
     setBusy: () => {},
   });
@@ -161,6 +170,53 @@ for (const keep of [true, 'memory'] as const) {
   learner.learn('r', () => sum(3), { input: 2, keep: 'memory', lane: 'l', replace: true, done: () => heard.push('2') });
   await drain();
   check(heard.join() === '2', `replace drops the request for another input (${heard})`);
+}
+
+// Display data (ADR 0008): the levels' uses (picture: false) and, to compare, the same as pictures, each in an editor of
+// its own; sprite images and object thumbnails of level 105 as pictures
+{
+  const r = new Rom(await editorImage());
+  const m = new LevelEmulator(r);
+  m.skipMask = () => gfxSkipMask(r); // as the editor
+  m.boot();
+  const levels = [0x105, ...usedLevels(r).slice(0, 12)];
+  const scanned = async (picture: boolean) => {
+    const e = editor(r, m), uses = new LevelUses(r, e.results);
+    let done = false;
+    e.learner.learn('uses', function* (emu) { for (const n of levels) { uses.scan(n, emu); yield; } }, { keep: false, picture, done: () => (done = true) });
+    while (!done) await e.drain();
+    return uses;
+  };
+  const plain = await scanned(false), shown = await scanned(true);
+  const { learner, results, drain } = editor(r, m);
+  const lv = loadLevel(r, 0x105), bg = lv.layer2Pointer >> 16 === 0xff ? lv.layer2Pointer : 0xffd900;
+  const sprites = () => learner.now('spr', (emu) => emu.tracked(() => captureSprites(emu, 0x105, lv.header, lv.spriteHeader, bg, [0, 1, 2, 3, 4, 5])));
+  sprites();
+  const specs = [...new Map(lv.objects.map((o) => [`${o.num}:${o.ext}:${o.size}`, { num: o.num, ext: o.ext, size: o.size }])).values()];
+  const keyOf = (q: typeof specs[number]) => objKey(q, null);
+  const thumbs = () => learner.learn('thumbs', (emu) => objectThumbsJob(r, emu, lv, specs, keyOf));
+  thumbs();
+  await drain();
+  check(plain.missing(levels).length === 0 && shown.missing(levels).length === 0 && results.get('spr') !== undefined
+    && !!thumbs()?.some((t) => t.m16.includes(0x130)), 'display data: uses, sprite images and object thumbnails (one showing tile 130) learned');
+
+  // the open level as drawn (App.refresh): every byte its load and the boot read
+  const draw = () => { const x = m.load(0x105); renderLevel(r, x, lv.header.mode, lv.header.screens, levelRows(lv.secondary)); };
+  const drawn = () => { const gen = r.gen; return () => m.recordAll(draw).reads.touches(r.changesSince(gen)!); };
+  let redrawn = drawn();
+  setFgWords(r, m.load(0x105), 0x130, [...map16Source(r, m.load(0x105)).fg(0x130)].map((w) => w ^ 0x4000));
+  const flipped = shown.missing(levels).length;
+  check(plain.missing(levels).length === 0 && flipped > 0, `flipping tile 130's quarters keeps every level's uses (as pictures ${flipped} of ${levels.length} would be learned again)`);
+  check(thumbs() === undefined && redrawn(), 'the object thumbnails are learned again, the open level drawn anew');
+  await drain();
+  for (const n of shown.missing(levels)) shown.scan(n, learner.emu());
+  sprites();
+  redrawn = drawn();
+
+  setSharedColor(r, 0x21, sharedColor(r, 0x21) ^ 1);
+  check(plain.missing(levels).length === 0 && shown.missing(levels).length === levels.length,
+    'changing a shared color keeps every level\'s uses (as pictures all would be learned again)');
+  check(results.get('spr') === undefined && thumbs() === undefined && redrawn(), 'the sprite images and object thumbnails are learned again, the open level drawn anew');
 }
 
 if (fail) { console.log(`${fail} failed`); process.exit(1); }

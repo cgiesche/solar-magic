@@ -57,7 +57,7 @@ import { map16Tile, bgTile } from '../core/ram.ts';
 import { exanimTiles, exanimColors, exanimPeriod, readLevelList, readGlobalList } from '../core/exanim.ts';
 import { emptyTriggerView, usedTriggers, initTriggers, type TriggerView, type SlotRef } from '../core/extrigger.ts';
 import { LevelUses, levelTilesAll, levelOverride, usedLevels, spriteUsage, isTilesetTile, type LevelTiles, type SpriteUser } from '../core/levelusage.ts';
-import { TILESETS, tilesetPointers, sharingTilesets, pointersKey } from '../core/tilesets.ts';
+import { TILESETS, sharingTilesets } from '../core/tilesets.ts';
 import { slipperyActions } from '../core/slippery.ts';
 import { pathKindsJob, type PathKind } from '../core/owpaths.ts';
 
@@ -872,7 +872,7 @@ export class App {
     const stored = this.learner.learn(key, function* (emu) {
       const r = yield* spriteMemJob({ emu, level: lv.number, header, bgPointer: bg }, mem, candidates, sprites);
       return { lost: [...r.check.conflicts].map((u) => sprites.findIndex((q) => q.uid === u)), suggestion: r.suggestion };
-    }, { input, lane: 'spritemem', replace: true, label: 'Checking sprite memory', done });
+    }, { input, lane: 'spritemem', replace: true, label: 'Checking sprite memory', picture: false, done });
     if (stored) done(stored);
   }
 
@@ -1107,7 +1107,7 @@ export class App {
   layer3Kinds(tileset: number): Layer3Kind[] {
     const lv = this.level, ov = this.buildOverrides(), input = this.levelInput(ov);
     if (tileset !== lv.header.tileset) ov.layer1 = serializeLayer1(this.rom, { ...lv, header: { ...lv.header, tileset } });
-    return this.learner.now(`l3k2:${tileset}`, (emu) => emu.tracked(() => layer3Kinds(emu, lv.number, ov)), { input });
+    return this.learner.now(`l3k2:${tileset}`, (emu) => emu.tracked(() => layer3Kinds(emu, lv.number, ov)), { input, picture: false });
   }
 
   // Water line of a layer 3 tide in level pixels: the surface where the level view draws layer 3
@@ -1132,7 +1132,7 @@ export class App {
   layer2Motions(done: () => void): Layer2Motions | null {
     const n = this.level.number, ov = this.buildOverrides();
     // (urgent: the header dialog shows them)
-    return this.learner.learn(`l2m2:${n}`, function* (emu) { return (yield* layer2MotionsJob(emu, n, ov)).result; }, { input: this.levelInput(ov), lane: 'l2', replace: true, urgent: true, done }) ?? null;
+    return this.learner.learn(`l2m2:${n}`, function* (emu) { return (yield* layer2MotionsJob(emu, n, ov)).result; }, { input: this.levelInput(ov), lane: 'l2', replace: true, urgent: true, picture: false, done }) ?? null;
   }
 
   // The Map16 tiles of every level (levelusage.ts), the open one as edited: those known now, the others are
@@ -1142,7 +1142,7 @@ export class App {
     // the open level's (kept in memory with the level as edited as their input); a level with conditional
     // Direct Map16 objects in both of their states, whatever the view's flags
     const rom = this.rom, lv = this.level, ov = this.buildOverrides();
-    const here = this.learner.now(`lt:${lv.number}`, (emu) => emu.tracked(() => levelTilesAll(rom, lv, (o) => emu.load(lv.number, o), ov)), { input: this.levelInput(ov), keep: 'memory' });
+    const here = this.learner.now(`lt:${lv.number}`, (emu) => emu.tracked(() => levelTilesAll(rom, lv, (o) => emu.load(lv.number, o), ov)), { input: this.levelInput(ov), keep: 'memory', picture: false });
     const levels = [here];
     let pending = 0;
     for (const n of usedLevels(this.rom)) {
@@ -1165,16 +1165,16 @@ export class App {
   }
   // per tileset the pointers of FG Map16 tiles 000-1FF (tilesets.ts), learned once and kept in the result cache
   tilesetPointerTable(): number[][] {
-    return Array.from({ length: TILESETS }, (_, ts) => this.learner.now(pointersKey(ts), (emu) => tilesetPointers(emu, ts)));
+    return this.learner.tilesetPointers();
   }
   // the entrance actions that make a level slippery (slippery.ts), learned once and kept in the result cache
   slipperyActions(): number[] {
-    return this.learner.now('slip1', slipperyActions);
+    return this.learner.now('slip1', slipperyActions, { picture: false });
   }
   // what Mario does on each overworld layer 1 tile 00–FF (owpaths.ts): learned in the background once and kept in
   // the result cache while the game's code is unchanged; null while that runs, then `done` is called
   pathKinds(done: () => void): PathKind[] | null {
-    return this.learner.learn('owpk1', pathKindsJob, { label: 'Path tiles', done }) ?? null;
+    return this.learner.learn('owpk1', pathKindsJob, { label: 'Path tiles', picture: false, done }) ?? null;
   }
   // the levels with sprite id (spriteId), the open level as edited
   spriteUsers(id: number): SpriteUser[] {
@@ -1194,7 +1194,7 @@ export class App {
       for (let left = missing(); left.length; left = missing()) {
         while (left.length) { idx.scan(left.shift()!, emu); yield `Uses in levels (${left.length})`; }
       }
-    }, { keep: false, label: 'Uses in levels', progress: this.usesLearned, done: this.usesLearned });
+    }, { keep: false, label: 'Uses in levels', picture: false, progress: this.usesLearned, done: this.usesLearned });
   }
   private usesLearned = () => this.emit('level-uses');
 
@@ -1222,7 +1222,7 @@ export class App {
     const level = inputHash({ level: this.levelInput(ov), spriteHeader: lv.spriteHeader, height });
     // (asked for on every paint: joins the job while it is learned)
     return this.learner.learn(`arcs:${tx},${ty}`, (emu) => this.arcJob(emu, level, [lv.number, ov, lv.spriteHeader, height], tx, ty, runs),
-      { input: { level, runs }, keep: 'memory', lane: 'arcs', replace: true, label: 'Jump arcs', done: this.arcsLearned });
+      { input: { level, runs }, keep: 'memory', lane: 'arcs', replace: true, label: 'Jump arcs', picture: false, done: this.arcsLearned });
   }
   private arcsLearned = () => this.emit('arcs');
 
@@ -1256,7 +1256,7 @@ export class App {
   private objectNamesSeen = ''; // the user's object names as last told ('object-names')
   // the object table of a tileset's standard objects (objectnames.ts), learned once and kept in the result cache
   objectTable(ts = this.level.header.tileset): number | null {
-    return this.learner.now(`otab1:${ts}`, (emu) => objectTable(emu, ts));
+    return this.learner.now(`otab1:${ts}`, (emu) => objectTable(emu, ts), { picture: false });
   }
   // the name of an object in the open level's tileset: the user's, else the built-in one (objectnames.ts)
   objectName(num: number, ext: number): string {

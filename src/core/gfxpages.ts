@@ -6,9 +6,9 @@
 // files' content instead.
 // The same for the ExAnimation data (pointer table, settings, lists, alternative files): editing an
 // animation keeps the block probes (whose test level may be the level being animated).
-// For what blocks do (block probes, probehost.ts) also the Map16 tiles' 8x8 tile words and the colors: they only
-// reach VRAM and CGRAM as well, so drawing a tile or changing a palette keeps them (displaySkipMask). Not for the
-// editor's other results: object thumbnails show them.
+// For what blocks do (block probes, probehost.ts) and the editor's other results that are no pictures (learner.ts)
+// also the Map16 tiles' 8x8 tile words and the colors: they only reach VRAM and CGRAM as well, so drawing a tile or
+// changing a palette keeps them (displaySkipMask). Not for pictures: object thumbnails and sprite images show them.
 
 import { snesToPc, type Rom } from './rom.ts';
 import { editorPatch, gfxEntry, GFX_FILES, GFX_NONE, customPalettePatch, PALETTE_SIZE } from './patches.ts';

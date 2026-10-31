@@ -190,9 +190,14 @@ export class LevelEmulator {
     }
   }
 
-  load(level: number, ov: LevelOverride = {}): LevelRender {
+  // the boot snapshot, booted (again) when there is none or what it read changed
+  ensureBoot(): void {
     this.sync();
     if (!this.baseState) this.boot();
+  }
+
+  load(level: number, ov: LevelOverride = {}): LevelRender {
+    this.ensureBoot();
     const s = this.snes;
     if (!ov.continueState) s.loadState(this.baseState!);
     const w = s.wram;

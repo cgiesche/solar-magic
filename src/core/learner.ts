@@ -5,11 +5,17 @@
 // request for a key (and input) already asked for joins it. A result holds while its key, its input (state
 // outside the ROM it depends on, inputs.ts) and the ROM bytes it read (romdeps.ts) are unchanged; a sliced
 // job during which bytes it read changed keeps nothing and runs again.
+// A result that is no picture (picture: false) doesn't read the display data either (the Map16 tiles'
+// quarters, the colors: displaySkipMask, as the probe worker's results, ADR 0008): drawing a tile or
+// changing a color keeps it. Its job runs from a boot snapshot that leaves them out too, booted on an own
+// emulator; pictures (sprite images, thumbnails) run from the main emulator's.
 
 import type { Rom } from './rom.ts';
 import { LevelEmulator } from './levelemu.ts';
 import { RomReads, type ResultCache, type RomDeps, type RomFingerprint } from './romdeps.ts';
 import { inputHash } from './inputs.ts';
+import { displaySkipMask } from './gfxpages.ts';
+import { TILESETS, tilesetPointers, pointersKey } from './tilesets.ts';
 
 const SLICE = 12; // ms a slice of a job runs before input and drawing get through
 const MEMORY = 256; // results kept in memory only (keep: 'memory'), the latest used
@@ -33,6 +39,7 @@ export interface LearnOptions<T> {
   replace?: boolean; // drops the lane's other jobs (they are not wanted any more), also when the result is known
   input?: unknown; // what the result depends on outside the ROM (inputs.ts; treated as unchanging once given)
   keep?: Keep; // the result goes to the result cache (default: true)
+  picture?: boolean; // the result shows what things look like: it reads the display data (default: true)
   urgent?: boolean; // runs while a dialog is open (one that shows the result); the same for all jobs of a lane
   label?: string | ((queued: number) => string); // busy label (queued: the lane's jobs); a job's yielded string replaces it
   done?: (result: T) => void; // (a callback already waiting for the key isn't added again)
@@ -63,6 +70,9 @@ export class ResultLearner {
   private d: LearnerDeps;
   private lanes = new Map<string, Lane>();
   private atOnce: LevelEmulator | null = null;
+  private noDisplay: LevelEmulator | null = null; // the boot snapshot of results that are no pictures (noDisplayBoot)
+  private pointerEmu: LevelEmulator | null = null; // learns the tilesets' pointers (tilesetPointers)
+  private display = { gen: -1, mask: null as Uint8Array | null }; // displayMask
   private snap = { gen: -1, data: new Uint8Array(0) }; // the ROM as jobs start with it (copied once per change)
   private memory: MemoryResults;
   private hashes = new WeakMap<object, string>(); // of inputs given as objects
@@ -74,11 +84,11 @@ export class ResultLearner {
 
   // The result under key for the input, else learned at once: run returns it with the ROM bytes it read
   // (emu.tracked)
-  now<T>(key: string, run: (emu: LevelEmulator) => { result: T; reads: RomReads }, opts: { input?: unknown; keep?: true | 'memory' } = {}): T {
+  now<T>(key: string, run: (emu: LevelEmulator) => { result: T; reads: RomReads }, opts: { input?: unknown; keep?: true | 'memory'; picture?: boolean } = {}): T {
     const input = this.hash(opts.input), keep = opts.keep ?? true;
     const stored = this.stored<T>(key, input, keep);
     if (stored !== undefined) return stored;
-    const { result, reads } = run(this.emu());
+    const { result, reads } = run(this.emu(opts.picture ?? true));
     this.store(key, input, keep, result, reads);
     return result;
   }
@@ -132,18 +142,59 @@ export class ResultLearner {
     if (keep !== false) (keep === 'memory' ? this.memory : this.d.results).set(key, result, this.d.results.fp.deps(reads), input);
   }
 
-  // the emulator for work at once (set up from the main one's boot state)
-  emu(): LevelEmulator {
-    return (this.atOnce = this.fresh(this.atOnce));
+  // the emulator for work at once (set up from the main one's boot state; picture: false, see noDisplayBoot)
+  emu(picture = true): LevelEmulator {
+    return (this.atOnce = this.fresh(this.atOnce, picture));
   }
 
-  private fresh(emu: LevelEmulator | null): LevelEmulator {
-    if (!emu || emu.rom !== this.d.rom) {
-      emu = new LevelEmulator(this.d.rom);
-      emu.skipMask = () => this.d.main.skipMask?.() ?? null;
+  private fresh(emu: LevelEmulator | null, picture: boolean): LevelEmulator {
+    let from = this.d.main;
+    if (!picture) {
+      this.displayMask(); // (first: the pointers it needs are learned at once)
+      from = this.noDisplayBoot();
     }
-    emu.adoptBoot(this.d.main);
+    if (!emu || emu.rom !== this.d.rom) emu = new LevelEmulator(this.d.rom);
+    emu.skipMask = picture ? () => this.d.main.skipMask?.() ?? null : this.displayMask;
+    emu.adoptBoot(from);
     return emu;
+  }
+
+  // The bytes results that are no pictures don't read: the display data (displaySkipMask, with the tilesets'
+  // pointers), the GFX file data among them; once per ROM state. Learning the pointers isn't part of the
+  // result asking for the mask.
+  private displayMask = (): Uint8Array | null => {
+    const rom = this.d.rom, m = this.display;
+    if (m.gen !== rom.gen) {
+      const reads = rom.reads;
+      rom.reads = null;
+      try { m.mask = displaySkipMask(rom, this.tilesetPointers()); m.gen = rom.gen; } finally { rom.reads = reads; }
+    }
+    return m.mask;
+  };
+
+  // per tileset the pointers of FG Map16 tiles 000-1FF (tilesets.ts), learned once and kept in the result cache
+  // (their reads leave out the display data by themselves). On an own emulator: the mask is asked for while
+  // other emulators of the learner's run.
+  tilesetPointers(): number[][] {
+    return Array.from({ length: TILESETS }, (_, ts) => {
+      const key = pointersKey(ts), known = this.stored<number[]>(key, undefined, true);
+      if (known !== undefined) return known;
+      const { result, reads } = tilesetPointers(this.pointerEmu = this.fresh(this.pointerEmu, true), ts);
+      this.store(key, undefined, true, result, reads);
+      return result;
+    });
+  }
+
+  // The boot snapshot for results that are no pictures: the same state as the main one's, its reads without the
+  // display data (a title screen's tile or color isn't read by every such result). Booted on an own emulator, again
+  // when what it read changed (a display edit too: the state holds the title screen's colors).
+  private noDisplayBoot(): LevelEmulator {
+    if (!this.noDisplay || this.noDisplay.rom !== this.d.rom) {
+      this.noDisplay = new LevelEmulator(this.d.rom);
+      this.noDisplay.skipMask = this.displayMask;
+    }
+    this.noDisplay.ensureBoot();
+    return this.noDisplay;
   }
 
   private schedule(name: string, lane: Lane): void {
@@ -162,12 +213,11 @@ export class ResultLearner {
       // (stored meanwhile, or loaded from storage)
       const stored = this.stored(run.key, run.input, run.opts.keep ?? true);
       if (stored !== undefined) { this.finish(name, lane, run, stored); return; }
-      const emu = lane.emu = this.fresh(lane.emu);
       if (this.snap.gen !== rom.gen) this.snap = { gen: rom.gen, data: rom.data.slice() };
       run.rom = this.snap.data;
       run.reads = new RomReads(rom.data.length);
       run.label = null;
-      try { run.job = run.start(emu); } catch (e) { this.fail(name, lane, run, e); return; }
+      try { run.job = run.start(lane.emu = this.fresh(lane.emu, run.opts.picture ?? true)); } catch (e) { this.fail(name, lane, run, e); return; }
     }
     const emu = lane.emu!, job = run.job!, t0 = performance.now();
     try {

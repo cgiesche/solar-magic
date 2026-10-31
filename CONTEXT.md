@@ -271,7 +271,7 @@ A level played in the emulator from gameplay on, frame by frame with the buttons
 _Avoid_: run, game loop, harness
 
 **Emulated result**:
-Anything the editor learned by emulation (a probe's outcome, the kinds of a tileset's objects, a level scan, sprite images, object thumbnails, jump arcs). It stays valid as long as its inputs and the ROM bytes it read are unchanged, and is learned again otherwise (on the main thread by the result learner, core/learner.ts: a key, an input, the bytes read).
+Anything the editor learned by emulation (a probe's outcome, the kinds of a tileset's objects, a level scan, sprite images, object thumbnails, jump arcs). It stays valid as long as its inputs and the ROM bytes it read are unchanged, and is learned again otherwise (on the main thread by the result learner, core/learner.ts: a key, an input, the bytes read). One that is no picture (all but sprite images, object thumbnails, the placement preview, animated tiles and colors) doesn't count what blocks look like (Map16 quarters, colors) among the bytes it read (ADR 0008).
 _Avoid_: Cached value, generation (for validity)
 
 **Input**:

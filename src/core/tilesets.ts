@@ -4,11 +4,12 @@
 // 2/6/8, 3/9/A/B/E, 4/5/D): editing such a tile changes it in all of them. Learned by loading a level
 // with each tileset in the emulator, not from a table.
 
-import { snesToPc, type Rom } from './rom.ts';
+import type { Rom } from './rom.ts';
 import type { RomReads } from './romdeps.ts';
 import type { LevelEmulator, LevelOverride } from './levelemu.ts';
 import { L1_PTRS } from './level.ts';
 import { map16Pointer } from './ram.ts';
+import { displaySkipMask } from './gfxpages.ts';
 
 export const TILESETS = 16; // the header's 4 bits
 const FG_TILES = 0x200;
@@ -24,16 +25,14 @@ function probe(rom: Rom, ts: number): LevelOverride {
 export const pointersKey = (ts: number) => `tsp1:${ts}`;
 
 // The pointers of FG Map16 tiles 000-1FF ($0FBE) as a level of tileset ts loads them, and what the load
-// read. The reads leave out the tiles' 8x8 data (the pointers don't depend on it, so editing a tile
-// keeps the result): a first load finds where it is. Not on top of the boot's reads: the title screen's
-// level read tile data too.
+// read. The reads leave out the display data (displaySkipMask), the tiles' 8x8 data included (the pointers
+// don't depend on it, so drawing a tile or changing a color keeps the result): a first load finds where
+// it is. Not on top of the boot's reads: the title screen's level read tile data too.
 export function tilesetPointers(emu: LevelEmulator, ts: number): { result: number[]; reads: RomReads } {
   const rom = emu.rom;
   const load = () => { const r = emu.load(PROBE_LEVEL, probe(rom, ts)); return Array.from({ length: FG_TILES }, (_, t) => map16Pointer(r.wram, t)); };
-  const first = load();
+  const mask = displaySkipMask(rom, [load()]);
   const base = emu.skipMask;
-  const mask = base?.()?.slice() ?? new Uint8Array(rom.data.length);
-  for (const p of first) if (p >= 0x8000) { const o = snesToPc(0x0d0000 | p); mask.fill(1, o, Math.min(o + 8, mask.length)); }
   emu.skipMask = () => mask;
   try { return emu.tracked(load, null); } finally { emu.skipMask = base; }
 }
