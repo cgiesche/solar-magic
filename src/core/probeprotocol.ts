@@ -9,6 +9,7 @@ import type { CameraAt } from './camerareach.ts';
 import type { SpriteLevel } from './spritegfx.ts';
 import type { SpriteMemLevel } from './spritemem.ts';
 import type { LevelOverride } from './levelemu.ts';
+import type { Level } from './level.ts';
 import type { Keep } from './jobrunner.ts';
 
 // a probe in tileset ts: what a Map16 tile does, how Mario collides with it, what a sprite does, Mario's
@@ -51,19 +52,23 @@ export type ProbeReply = ProbeDone | KindsDone | ScanDone | CameraDone | Learned
 
 // A result learner job (CONTEXT.md) run here: the images of all sprites of a sprite set, the image of a sprite at a
 // tile (its variant by position), the image of a custom sprite with extra bytes, the tiles of the levels not known yet
-// (their uses, levelusage.ts), a level's sprite memory check, the tiles and colors animating in a level
+// (their uses, levelusage.ts), a level's sprite memory check, the tiles and colors animating in a level, what the four
+// layer 3 settings do in a level as given (layer3.ts), the tiles of a level as edited (levelusage.ts levelTilesAll)
 export type LearnJob =
   | { kind: 'sprites'; level: SpriteLevel; nums: number[]; input?: string } // (input: of each test level load, spriteSetJob)
   | { kind: 'spriteAt'; level: SpriteLevel; id: number; x: number; y: number }
   | { kind: 'spriteBytes'; level: SpriteLevel; id: number; bytes: number[] }
   | { kind: 'uses'; levels: number[] }
   | { kind: 'spriteMem'; level: SpriteMemLevel }
-  | { kind: 'animated'; level: number; ov: LevelOverride };
+  | { kind: 'animated'; level: number; ov: LevelOverride }
+  | { kind: 'layer3'; level: number; ov: LevelOverride }
+  | { kind: 'levelTiles'; level: Level; ov: LevelOverride };
 
 // where a learn job's result goes (jobrunner.ts Keep): the levels' uses go to the entries of each level (the job keeps
-// none), the animated tiles and colors change with every edit (memory only), the others to the result cache
+// none), the animated tiles and colors and the tiles of the level as edited change with every edit (memory only), the
+// others to the result cache
 export function learnKeep(j: LearnJob): Keep {
-  return j.kind === 'uses' ? false : j.kind === 'animated' ? 'memory' : true;
+  return j.kind === 'uses' ? false : j.kind === 'animated' || j.kind === 'levelTiles' ? 'memory' : true;
 }
 
 // a learn job asked for: its result under key and input (the hash of what it depends on outside the ROM, inputs.ts),

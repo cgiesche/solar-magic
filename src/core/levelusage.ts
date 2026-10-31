@@ -88,6 +88,11 @@ export function levelTilesAll(rom: Rom, lv: Level, load: (ov: LevelOverride) => 
   const flags = usedFlags(rom, lv);
   return flags.size ? mergeTiles(off, levelTilesOf(rom, lv, load({ ...ov, cdm16Flags: flagBytes(flags.keys()) }))) : off;
 }
+// the same for level lv as edited (ov: its levelOverride's and the view's) as a job (the result learner's, no picture,
+// CONTEXT.md): a single step
+export function* levelTilesJob(rom: Rom, emu: LevelEmulator, lv: Level, ov: LevelOverride): Generator<never, LevelTiles> {
+  return levelTilesAll(rom, lv, (o) => emu.load(lv.number, o), ov);
+}
 // the uses of both (of a use in both, the first's, with the larger count)
 export function mergeTiles(a: LevelTiles, b: LevelTiles): LevelTiles {
   const key = (u: TileUse) => `${u.tile}:${u.layer}:${u.source}`;

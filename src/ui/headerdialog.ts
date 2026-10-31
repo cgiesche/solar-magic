@@ -57,12 +57,18 @@ export function openHeaderDialog(app: App): void {
   if (lv.bg || storedBgAddr(app.rom, lv.number)) { l2ptr = CUSTOM_BG; bgOpts.unshift([CUSTOM_BG, 'Custom (edited in BG mode)']); }
   else if (!bgs.has(l2ptr) && l2ptr >> 16 === 0xff) bgOpts.push([l2ptr, `$${hex(l2ptr & 0xffff, 4)}`]);
 
-  // layer 3: what each setting does depends on the tileset (found by emulation, see layer3.ts)
-  const l3Opts = (): [number, string][] => app.layer3Kinds(hd.tileset).map((k, i) => [i, `${i} – ${LAYER3_KIND_TEXT[k]}`]);
+  // layer 3: what each setting does depends on the tileset (found by emulation in the background, see layer3.ts),
+  // the settings' numbers until known
+  const l3Opts = (): [number, string][] => {
+    const kinds = app.layer3Kinds(hd.tileset, l3Known);
+    return range(4, (i) => (kinds ? `${i} – ${LAYER3_KIND_TEXT[kinds[i]]}` : `${i} – …`));
+  };
+  const l3Fill = () => l3Sel.replaceChildren(...l3Opts().map(([v, l]) => h('option', { value: String(v), selected: v === sd.layer3 }, l)));
+  const l3Known = () => { if (open) l3Fill(); };
   const l3Sel = sel2('layer3', l3Opts());
   const tilesetSel = select(range(16, (i) => `${hex2(i)} – ${TILESETS[i]}`), hd.tileset, (v) => {
     hd.tileset = v;
-    l3Sel.replaceChildren(...l3Opts().map(([v, l]) => h('option', { value: String(v), selected: v === sd.layer3 }, l)));
+    l3Fill();
   });
 
   // music: the header's 8 settings, or a song of the ROM for this level (music per level)

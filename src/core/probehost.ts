@@ -6,7 +6,7 @@
 // kinds of a tileset (objkinds.ts), the level scan (levelscan.ts) and the camera at Mario standing at a place
 // (camerareach.ts). A task the editor no longer wants is kept without running; asked for again with the same
 // result, it goes on where it stood. The result learner's jobs (CONTEXT.md; the sprite images, the levels' uses, the
-// sprite memory check, the animated tiles and colors) run here too, in
+// sprite memory check, the animated tiles and colors, the layer 3 kinds, the tiles of the level as edited) run here too, in
 // lanes as on the main thread (learner.ts), taking turns with the tasks; they choose whether the display data counts
 // for them (pictures: it does; the probes and tasks: it doesn't, ADR 0008).
 // After the first copy of the ROM the editor sends the ranges a change wrote: queued jobs stay, a task starts over
@@ -20,7 +20,8 @@ import { objKindsJob, kindsKey } from './objkinds.ts';
 import { levelScanJob, type ScanResult } from './levelscan.ts';
 import { cameraAtJob, type CameraAt } from './camerareach.ts';
 import { spriteSetJob, spriteAtJob, spriteBytesJob } from './spritegfx.ts';
-import { LevelUses, levelUsesJob } from './levelusage.ts';
+import { LevelUses, levelUsesJob, levelTilesJob } from './levelusage.ts';
+import { layer3KindsJob } from './layer3.ts';
 import { SpriteGroupResults, spriteMemCheckJob } from './spritemem.ts';
 import { animatedJob } from './levelemu.ts';
 import { jobId, jobKey, learnKeep, type ProbeJob, type ProbeMessage, type ProbeReply, type TaskMessage, type TaskType, type LearnJob, type LearnMessage } from './probeprotocol.ts';
@@ -39,8 +40,8 @@ function taskJob(m: TaskMessage): JobRun<unknown>['start'] {
 function* found<T>(job: Generator<void, T | null>): Job<T | undefined> { return (yield* job) ?? undefined; }
 
 // what learn jobs keep between them: the levels' uses (the entries of each level) and the results of single sprite
-// groups (the sprite memory check's)
-interface LearnState { uses: LevelUses; groups: SpriteGroupResults }
+// groups (the sprite memory check's); the ROM
+interface LearnState { uses: LevelUses; groups: SpriteGroupResults; rom: Rom }
 
 // a learn job's job and whether it is a picture (CONTEXT.md); show takes what it shows while it runs (null: it
 // started, also over)
@@ -52,6 +53,8 @@ function learnJob(j: LearnJob, state: LearnState, show: (items: unknown[] | null
     case 'uses': return { picture: false, start: (emu) => levelUsesJob(state.uses, emu, j.levels, show) };
     case 'spriteMem': return { picture: false, start: (emu) => spriteMemCheckJob(emu, j.level, state.groups) };
     case 'animated': return { picture: true, start: (emu) => animatedJob(emu, j.level, j.ov) };
+    case 'layer3': return { picture: false, start: (emu) => layer3KindsJob(emu, j.level, j.ov) };
+    case 'levelTiles': return { picture: false, start: (emu) => levelTilesJob(state.rom, emu, j.level, j.ov) };
   }
 }
 
@@ -95,7 +98,7 @@ export class ProbeHost {
       // the tasks' emulators start from the prober's boot snapshot, which leaves out the display data as the probes
       // do (ADR 0008): the prober's emulator gets the runner's mask (gfxDisplaySkipMask)
       this.runner = new JobRunner({ rom, results: this.prober.results, noDisplay: this.prober.emu });
-      this.state = { uses: new LevelUses(rom, this.prober.results), groups: new SpriteGroupResults(this.prober.results.fp) };
+      this.state = { uses: new LevelUses(rom, this.prober.results), groups: new SpriteGroupResults(this.prober.results.fp), rom };
       return;
     }
     this.rom.data = data;

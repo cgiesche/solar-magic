@@ -1,5 +1,6 @@
 // Web Worker running the block/sprite probes, object kinds, level scan and the result learner's jobs there (the sprite
-// images, the levels' uses, the sprite memory check, the animated tiles and colors; see core/probehost.ts)
+// images, the levels' uses, the sprite memory check, the animated tiles and colors, the layer 3 kinds, the tiles
+// of the level as edited; see core/probehost.ts)
 // off the main thread: one job or task slice a turn, then a look at the incoming messages (a
 // changed ROM drops the queue, asked jobs go first).
 

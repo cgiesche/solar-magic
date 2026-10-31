@@ -42,6 +42,11 @@ export function layer3Kinds(emu: LevelEmulator, level: number, ov: LevelOverride
   });
 }
 
+// the same as a job (the result learner's, no picture, CONTEXT.md): a single step
+export function* layer3KindsJob(emu: LevelEmulator, level: number, ov: LevelOverride): Generator<never, Layer3Kind[]> {
+  return layer3Kinds(emu, level, ov);
+}
+
 // layer 3 Y offset against the camera ($24 - $1C): at the end of the level load (where the level
 // view draws layer 3) and its range while the tide rises and falls
 export interface TideRange { load: number; min: number; max: number }

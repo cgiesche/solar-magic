@@ -5,8 +5,9 @@
 // restart nothing).
 // A cancelled scan runs no further slice and goes on when asked for again. Results a task's slice found before a ROM
 // change go with the next reply only if they hold on the new ROM. Jobs keep their result cache keys; only the scan
-// can be cancelled. Learn jobs (the sprite images, the levels' uses, the sprite memory check, the animated tiles) as
-// learned directly, with the result learner's entries, in lanes; prefetched probes take turns with the tasks.
+// can be cancelled. Learn jobs (the sprite images, the levels' uses, the sprite memory check, the animated tiles, the layer 3
+// kinds, the tiles of the level as edited) as learned directly, with the result learner's entries, in lanes; prefetched
+// probes take turns with the tasks.
 import { readFileSync } from 'node:fs';
 import { Rom, snesToPc } from '../src/core/rom.ts';
 import { BlockProber, blockKey, collisionKey, spriteKey, runsKey, cameraKey } from '../src/core/blockprobe.ts';
@@ -18,7 +19,7 @@ import { ObjKindProbe, kindsKey, type ObjKinds } from '../src/core/objkinds.ts';
 import { levelScanJob, type ScanLevel } from '../src/core/levelscan.ts';
 import { cameraAtJob } from '../src/core/camerareach.ts';
 import { runJob } from '../src/core/jobrunner.ts';
-import { loadLevel, serializeLayer1, serializeSprites, L2_PTRS } from '../src/core/level.ts';
+import { loadLevel, serializeLayer1, serializeSprites, encodeSecondaryHeader, L2_PTRS } from '../src/core/level.ts';
 import { editorImage } from './fixture.ts';
 import { checkJobRunner } from './runnercheck.ts';
 import { gfxSkipMask, gfxDisplaySkipMask } from '../src/core/gfxpages.ts';
@@ -29,7 +30,8 @@ import { FG_PALS, BACK_AREA } from '../src/core/sharedpal.ts';
 import { setCustomPalette } from '../src/core/patches.ts';
 import { captureSprites, captureSpriteAt, spriteSetJob, spriteLoad, spriteLoads, type SpriteLevel } from '../src/core/spritegfx.ts';
 import { storeKey, type CacheEntry, type RomDeps } from '../src/core/romdeps.ts';
-import { LevelUses, levelUsesJob, levelTilesKey } from '../src/core/levelusage.ts';
+import { LevelUses, levelUsesJob, levelTilesKey, levelTilesAll, levelOverride } from '../src/core/levelusage.ts';
+import { layer3Kinds } from '../src/core/layer3.ts';
 import { spriteMemCheckJob, usedSpriteMemory, SpriteGroupResults, type SpriteMemLevel, type SpriteMemResult } from '../src/core/spritemem.ts';
 import { animatedJob, type Animated } from '../src/core/levelemu.ts';
 import { inputHash } from '../src/core/inputs.ts';
@@ -519,6 +521,26 @@ for (const changeRead of [false, true]) {
   const mem = (learner as unknown as { runner: { memory: { entry(k: string, i: string): { data: unknown; deps: RomDeps } | undefined } } }).runner.memory.entry('anim:test', anInput);
   check(an.done?.type === 'learned' && !!mem && !an.put.has(storeKey('anim:test', anInput)) && an.done.memory?.input === anInput
     && JSON.stringify(an.done.memory.deps) === JSON.stringify(mem.deps), 'animated: kept in memory only, its entry handed back as the result learner keeps it (bytes read)');
+
+  // the layer 3 kinds of level 105 in the castle tileset and the tiles of the level as edited (learn jobs, #178): results and
+  // entries as the result learner's now() on the main thread made them (no pictures; the kinds in the result cache, the
+  // tiles in memory only)
+  const lv5 = loadLevel(r, 0x105), ov5 = levelOverride(r, lv5), l3ov = { layer1: serializeLayer1(r, { ...lv5, header: { ...lv5.header, tileset: 1 } }), secondaryHeader: encodeSecondaryHeader(lv5.secondary) };
+  const l3Input = inputHash({ l3: 'test' });
+  const l3 = run({ type: 'learn', lane: 'layer3', key: 'l3k-test', input: l3Input, job: { kind: 'layer3', level: 0x105, ov: l3ov }, replace: true });
+  const l3Now = learner.now('l3k-test', (emu) => emu.tracked(() => layer3Kinds(emu, 0x105, l3ov)), { input: { l3: 'test' }, picture: false });
+  check(l3.done?.type === 'learned' && !l3.done.failed && (l3.done.result as string[]).join() === l3Now.join() && l3Now.join() === 'none,tide-moving,image,image',
+    `layer 3 kinds: as on the main thread (${l3Now.join()})`);
+  check(same(l3.put.get(storeKey('l3k-test', l3Input)), results.entry('l3k-test', l3Input) && { ...results.entry('l3k-test', l3Input)!, input: l3Input }),
+    'layer 3 kinds: their entry as the result learner\'s (key, input, bytes read: no picture)');
+  const ltInput = inputHash({ lt: 'test' });
+  const lt = run({ type: 'learn', lane: 'lt', key: 'lt-test', input: ltInput, job: { kind: 'levelTiles', level: lv5, ov: ov5 }, replace: true });
+  const ltNow = learner.now('lt-test', (emu) => emu.tracked(() => levelTilesAll(lr, lv5, (o) => emu.load(0x105, o), ov5)), { input: { lt: 'test' }, keep: 'memory', picture: false });
+  check(lt.done?.type === 'learned' && !lt.done.failed && JSON.stringify(lt.done.result) === JSON.stringify(ltNow) && ltNow.fg.length > 0,
+    `open level's tiles: as on the main thread (${ltNow.fg.length} FG, ${ltNow.bg.length} BG uses)`);
+  const ltMem = (learner as unknown as { runner: { memory: { entry(k: string, i: string): { data: unknown; deps: RomDeps } | undefined } } }).runner.memory.entry('lt-test', ltInput);
+  check(lt.done?.type === 'learned' && !!ltMem && !lt.put.has(storeKey('lt-test', ltInput)) && lt.done.memory?.input === ltInput
+    && JSON.stringify(lt.done.memory.deps) === JSON.stringify(ltMem.deps), 'open level\'s tiles: kept in memory only, their entry handed back as the result learner keeps it (bytes read)');
 }
 
 // the job runner under both owners (runnercheck.ts)

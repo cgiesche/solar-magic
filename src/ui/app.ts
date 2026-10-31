@@ -44,7 +44,7 @@ import { jumpArcsJob, type JumpArc } from '../core/jumparcs.ts';
 import { scanKey, type ScanLevel, type ScanResult } from '../core/levelscan.ts';
 import { cameraAtKey, type CameraReach, type CameraAt } from '../core/camerareach.ts';
 import { MARIO_W, MARIO_H, type CameraBands } from '../core/camerabands.ts';
-import { layer3Kinds, tideKind, layer3Top, type Layer3Kind } from '../core/layer3.ts';
+import { tideKind, layer3Top, type Layer3Kind } from '../core/layer3.ts';
 import { layer2MotionsJob, type Layer2Motions } from '../core/l2scroll.ts';
 import { variantOf, blockKey, collisionKey, type BlockProbe, type CollisionProbe, type RunStates, type SwitchState, SWITCH_STATES, SWITCH_TRIGGER } from '../core/blockprobe.ts';
 import type { ProbeReply } from '../core/probeprotocol.ts';
@@ -56,7 +56,7 @@ import { levelInput, inputHash } from '../core/inputs.ts';
 import { map16Tile, bgTile } from '../core/ram.ts';
 import { exanimTiles, exanimColors, exanimPeriod, readLevelList, readGlobalList } from '../core/exanim.ts';
 import { emptyTriggerView, usedTriggers, initTriggers, type TriggerView, type SlotRef } from '../core/extrigger.ts';
-import { LevelUses, levelTilesAll, levelOverride, usedLevels, spriteUsage, isTilesetTile, type LevelTiles, type SpriteUser } from '../core/levelusage.ts';
+import { LevelUses, levelOverride, usedLevels, spriteUsage, isTilesetTile, type LevelTiles, type SpriteUser } from '../core/levelusage.ts';
 import { TILESETS, sharingTilesets } from '../core/tilesets.ts';
 import { slipperyActions } from '../core/slippery.ts';
 import { pathKindsJob, type PathKind } from '../core/owpaths.ts';
@@ -1094,12 +1094,14 @@ export class App {
   }
 
   // What the four layer 3 settings do in a tileset (see layer3.ts): the level as edited is loaded
-  // with each of them on an own emulator; kept per tileset while the level as edited and the ROM it read
-  // are unchanged
-  layer3Kinds(tileset: number): Layer3Kind[] {
+  // with each of them in the probe worker; kept per tileset while the level as edited and the ROM it read
+  // are unchanged. null while that runs, then `done` is called (the latest tileset asked for only).
+  layer3Kinds(tileset: number, done: () => void): Layer3Kind[] | null {
     const lv = this.level, ov = this.buildOverrides(), input = this.levelInput(ov);
     if (tileset !== lv.header.tileset) ov.layer1 = serializeLayer1(this.rom, { ...lv, header: { ...lv.header, tileset } });
-    return this.learner.now(`l3k2:${tileset}`, (emu) => emu.tracked(() => layer3Kinds(emu, lv.number, ov)), { input, picture: false });
+    // (the load leaves out the sprites and the owners of level bytes: not sent)
+    return this.probes.learn<Layer3Kind[]>(`l3k2:${tileset}`, { kind: 'layer3', level: lv.number, ov: { ...ov, sprites: undefined, byteOwner: undefined } },
+      { input, lane: 'layer3', replace: true, label: 'Layer 3 settings', done }) ?? null;
   }
 
   // Water line of a layer 3 tide in level pixels: the surface where the level view draws layer 3
@@ -1128,22 +1130,28 @@ export class App {
   }
 
   // The Map16 tiles of every level (levelusage.ts), the open one as edited: those known now, the others are
-  // learned in the background ('level-uses' as they come); pending: how many are still missing
+  // learned in the probe worker ('level-uses' as they come); pending: how many are still missing (the open level's
+  // previous ones count as missing while its tiles as edited are learned)
   levelTiles(): { levels: LevelTiles[]; pending: number } {
     const idx = this.usesIndex ??= new LevelUses(this.rom, this.results);
     // the open level's (kept in memory with the level as edited as their input); a level with conditional
     // Direct Map16 objects in both of their states, whatever the view's flags
-    const rom = this.rom, lv = this.level, ov = this.buildOverrides();
-    const here = this.learner.now(`lt:${lv.number}`, (emu) => emu.tracked(() => levelTilesAll(rom, lv, (o) => emu.load(lv.number, o), ov)), { input: this.levelInput(ov), keep: 'memory', picture: false });
-    const levels = [here], missing: number[] = [];
+    const lv = this.level, ov = this.buildOverrides();
+    const here = this.probes.learn<LevelTiles>(`lt:${lv.number}`, { kind: 'levelTiles', level: lv, ov },
+      { input: this.levelInput(ov), lane: 'lt', replace: true, label: 'Uses in this level', done: this.usesLearned });
+    // (the last known ones meanwhile, of this level since it was opened: none after another level's)
+    if (here || this.levelTilesShown?.level !== lv.number) this.levelTilesShown = here ?? null;
+    const shown = here ?? this.levelTilesShown;
+    const levels = shown ? [shown] : [], missing: number[] = [];
     for (const n of usedLevels(this.rom)) {
       if (n === this.level.number) continue;
       const t = idx.tiles(n);
       if (t) levels.push(t); else missing.push(n);
     }
     if (missing.length) this.learnLevelTiles(missing);
-    return { levels, pending: missing.length };
+    return { levels, pending: missing.length + (here ? 0 : 1) };
   }
+  private levelTilesShown: LevelTiles | null = null; // the open level's tiles last known
   // a level's BG tilemap from its load (the open one as shown), where it is the game's own (tilemove.ts)
   loadedBg(n: number): Uint16Array {
     return bgFromWram(n === this.level.number ? this.render.wram : this.learner.emu().load(n).wram);

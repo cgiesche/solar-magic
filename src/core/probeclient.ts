@@ -1,8 +1,9 @@
 // The editor's side of the probes (probehost.ts): asks for block, collision and sprite probes, Mario's
 // run speeds and the game view's scroll bands in the current tileset, prefetches what the palettes can
 // show, and runs the object kinds, the level scan, the camera at a place and the result learner's jobs that run there
-// (CONTEXT.md; the sprite images, the levels' uses, the sprite memory check, the animated tiles and colors), all in the
-// probe worker. It sends the ROM once, then the ranges each change wrote (the worker keeps its queue and restarts only tasks
+// (CONTEXT.md; the sprite images, the levels' uses, the sprite memory check, the animated tiles and colors, the layer 3
+// kinds, the tiles of the level as edited), all in the probe worker. It sends the ROM once, then the ranges each change
+// wrote (the worker keeps its queue and restarts only tasks
 // that read a changed byte; the whole ROM again, with everything still wanted, when the ROM's log of changes
 // doesn't reach back), and falls back to probing on the main thread in background slices when the worker
 // fails. Results go to the editor's ResultCache, also those from before a ROM change: they hold while the ROM
