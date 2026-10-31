@@ -14,7 +14,7 @@
 
 import { snesToPc, type Rom } from './rom.ts';
 import { applyPatch, type ApplyResult } from './patchapply.ts';
-import { listPatches, type RamClaim } from './patchreg.ts';
+import { listPatches, hashBytes, type RamClaim } from './patchreg.ts';
 import { CDM16_FLAGS } from './ram.ts';
 import { EXANIMATION_ASM, MEMORY_ASM } from './kobo/exanimation.ts';
 import { installEditorPatch } from './patches.ts';
@@ -425,6 +425,30 @@ export function exanimDataRanges(rom: Rom): [number, number][] {
   return out;
 }
 
+// a hash of what a level's animations copy at its load from the ExAnimation data, whose bytes an emulated
+// result reads without recording them (exanimDataRanges): the level's settings and, per list in effect (the
+// level's, the global one), its slots and the parts of its Anim graphic their frames read – every frame, which
+// one shows at the load depends on the triggers. Frames from RAM aren't in it: the game's graphics there
+// (GFX33, loaded by its own pointer, not the file table) are read as recorded. Anim graphics no list in effect
+// reads aren't in it either.
+export function levelAnimHash(rom: Rom, level: number): number {
+  if (!exanimInstalled(rom)) return 0;
+  const settings = levelSettings(rom, level), parts: Uint8Array[] = [Uint8Array.of(settings)];
+  for (const l of [settings & NO_LEVEL_LIST ? null : readLevelList(rom, level), settings & NO_GLOBAL_LIST ? null : readGlobalList(rom)]) {
+    parts.push(Uint8Array.of(l ? 1 : 0));
+    if (!l) continue;
+    parts.push(listBytes(l));
+    const alt = readAltFile(rom, l.altFile);
+    if (!alt) continue;
+    for (const e of l.slots.values()) {
+      if (!usesAltFile(e)) continue;
+      const len = altFrameBytes(e);
+      for (const f of e.frames) parts.push(alt.subarray(f, f + len));
+    }
+  }
+  return hashBytes(parts);
+}
+
 // adds slots to a level's list, in its free slots (its own slots stay); returns the slot numbers used
 export function addLevelSlots(rom: Rom, level: number, slots: ExSlot[]): number[] {
   if (!slots.length) return [];
@@ -464,6 +488,8 @@ export function addGlobalSlots(rom: Rom, slots: ExSlot[]): (number | null)[] {
 export const AN2_FRAMES = 0xad00, AN2_FRAMES_END = 0xbd00;
 export const altFileName = (n: number) => `Anim graphic ${'ABCD'[n]}`;
 const frameBytes = (type: number) => type === 0x0f ? 16 : tilesOf(type) * 32;
+// the bytes a frame of a slot reading its Anim graphic takes there (one color: none, the frame is the color itself)
+const altFrameBytes = (e: ExSlot) => kindOf(e.type) === 'tiles' ? frameBytes(e.type) : slotColors(e) === 1 ? 0 : slotColors(e) * 2;
 const tileSlotFromAn2 = (e: ExSlot) => kindOf(e.type) === 'tiles' && !(e.dest & 0x8000) && e.frames.some((f) => f >= AN2_FRAMES && f < AN2_FRAMES_END);
 
 // the alternative file a level's tile slots take their frames from (its list's; 0 without one)
@@ -488,9 +514,8 @@ export function altFileExtent(rom: Rom, n: number, global: ExList | null = readG
     if (!l || l.altFile !== n) continue;
     for (const e of l.slots.values()) {
       if (!usesAltFile(e) || !e.frames.length) continue;
-      const colors = slotColors(e);
-      if (kindOf(e.type) === 'colors' && colors === 1) continue;
-      end = Math.max(end, Math.max(...e.frames) + (kindOf(e.type) === 'tiles' ? frameBytes(e.type) : colors * 2));
+      const len = altFrameBytes(e);
+      if (len) end = Math.max(end, Math.max(...e.frames) + len);
     }
   }
   return end;

@@ -1,5 +1,6 @@
 // Object preview thumbnails, rendered by emulating a test level that contains the objects (learned in the
-// background by App.objectThumbs); and the placement preview's input, which follows the same graphics files.
+// background by App.objectThumbs); and the placement preview's input, which follows the same graphics files and
+// animations.
 
 import type { Rom } from '../core/rom.ts';
 import type { LevelEmulator, LevelRender, LevelOverride } from '../core/levelemu.ts';
@@ -9,6 +10,7 @@ import { MAP_BASE, map16Tile } from '../core/ram.ts';
 import { objectVariant, type ObjKind } from '../core/objkinds.ts';
 import { levelSlots, layerSlots } from '../core/gfxslots.ts';
 import { gfxFilesHash } from '../core/gfxpages.ts';
+import { levelAnimHash } from '../core/exanim.ts';
 import { inputHash, levelInput } from '../core/inputs.ts';
 import { effectLoad, ramEffect } from '../core/objeffects.ts';
 
@@ -37,17 +39,17 @@ export function thumbsKey(level: Level, specs: ObjSpec[], keyOf: (s: ObjSpec) =>
 }
 
 // what they depend on outside the ROM bytes they read: the level they are drawn in as edited (its number
-// decides its graphics slots) and the content of the graphics files they draw from (graphics data isn't among
-// the bytes read, see App.gfxSkipMask). Not its BG: they show layer 1; nor its size and mode: the test level
-// has its own.
+// decides its graphics slots), the content of the graphics files they draw from and what the level's animations
+// copy at its load (graphics and ExAnimation data aren't among the bytes read, see App.gfxSkipMask). Not its BG:
+// they show layer 1; nor its size and mode: the test level has its own.
 export function thumbsInput(rom: Rom, level: Level): unknown {
-  return { level: level.number, header: { ...level.header, screens: 0, mode: 0 }, gfx: layerFilesHash(rom, level) };
+  return { level: level.number, header: { ...level.header, screens: 0, mode: 0 }, gfx: layerFilesHash(rom, level), anim: animHash(rom, level.number) };
 }
 // what the placement preview (App.objectsPreview) depends on outside the ROM bytes it read: the level as edited
 // with the placed objects (ov: its load's overrides) and, as for thumbnails, the content of the graphics files its
-// layers draw from
+// layers draw from and what its animations copy
 export function previewInput(rom: Rom, level: Level, ov: LevelOverride): unknown {
-  return { level: levelInput(level.number, ov), gfx: layerFilesHash(rom, level) };
+  return { level: levelInput(level.number, ov), gfx: layerFilesHash(rom, level), anim: animHash(rom, level.number) };
 }
 // the content hash of the graphics files level's Map16 tiles draw from (its layer slots)
 function layerFilesHash(rom: Rom, level: Level): number {
@@ -58,6 +60,13 @@ const filesMemo = { rom: null as Rom | null, gen: -1, files: '', hash: 0 };
 function filesHash(rom: Rom, files: number[]): number {
   const m = filesMemo;
   if (m.rom !== rom || m.gen !== rom.gen || m.files !== files.join()) Object.assign(m, { rom, gen: rom.gen, files: files.join(), hash: gfxFilesHash(rom, files) });
+  return m.hash;
+}
+// what level's animations copy at its load (levelAnimHash; once per ROM state and level)
+const animMemo = { rom: null as Rom | null, gen: -1, level: -1, hash: 0 };
+function animHash(rom: Rom, level: number): number {
+  const m = animMemo;
+  if (m.rom !== rom || m.gen !== rom.gen || m.level !== level) Object.assign(m, { rom, gen: rom.gen, level, hash: levelAnimHash(rom, level) });
   return m.hash;
 }
 

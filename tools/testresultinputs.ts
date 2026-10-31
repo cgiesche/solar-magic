@@ -12,7 +12,8 @@ import { assignSlot, levelSlots, layerSlots } from '../src/core/gfxslots.ts';
 import { gfxSkipMask } from '../src/core/gfxpages.ts';
 import { gfxEntry, GFX_FILES } from '../src/core/patches.ts';
 import { lz2Decompress } from '../src/core/lz2.ts';
-import { readGfx, writeGfx } from '../src/core/gfxfiles.ts';
+import { readGfx, writeGfx, createGfx, ANIM_FILE } from '../src/core/gfxfiles.ts';
+import { emptyList, writeLevelList, writeGlobalList, setLevelSettings, NO_LEVEL_LIST } from '../src/core/exanim.ts';
 import { Rom, snesToPc } from '../src/core/rom.ts';
 import { ResultCache, RomFingerprint, RomReads, INPUTS_PER_KEY, oldStoreKeys, type CacheEntry } from '../src/core/romdeps.ts';
 import { ResultLearner } from '../src/core/learner.ts';
@@ -127,6 +128,72 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
   draw(unused);
   const c = await preview();
   check(c === b && runs === before, `placement preview: pixels drawn in GFX${unused.toString(16).padStart(2, '0')} (not the level's) keep it`);
+}
+
+// placement preview and object thumbnails: what the level's animations copy at its load from an Anim graphic
+// (ExAnimation data isn't among the bytes read) is in their input – pixels drawn in the frames its slots read show in
+// the next preview, those drawn in tiles of the graphic no frame reads or in an Anim graphic no list of the level
+// reads keep it
+{
+  const r = new Rom(await editorImage()), e = new LevelEmulator(r);
+  e.skipMask = () => gfxSkipMask(r);
+  e.boot();
+  const queue: (() => void)[] = [];
+  const lr = new ResultLearner({
+    rom: r, results: new ResultCache(new RomFingerprint(r)), cacheReady: Promise.resolve(), main: e,
+    later: (_key, step) => queue.push(step), soon: (step) => queue.push(step), setBusy: () => {},
+  });
+  const run = async () => { for (let i = 0; i < 1000; i++) { await new Promise((res) => setTimeout(res, 0)); while (queue.length) queue.shift()!(); } };
+  const N = 0x105;
+  // Anim graphic A: its first 32 tiles over all of the layers' 512 tiles (16 slots of 32 tiles, one frame), the
+  // other 96 read by no frame; Anim graphic B: no list reads it
+  createGfx(r, ANIM_FILE); createGfx(r, ANIM_FILE + 1);
+  const list = emptyList();
+  for (let k = 0; k < 16; k++) list.slots.set(k, { type: 0x0e, trigger: 0, framesLess1: 0, dest: 0x8000 | (k * 0x200), frames: [0] });
+  list.count = 16;
+  writeLevelList(r, N, list);
+  const lv = loadLevel(r, N), ov = ovOf(lv, r);
+  const g = layerGeom(r, 0, lv.header.mode, lv.header.screens), tiles = Array.from({ length: 16 * 27 }, (_, i) => ((i >> 4) << 16) | (i & 15));
+  let runs = 0;
+  const key = `pp1:${N.toString(16)}:1`;
+  const preview = async () => {
+    const opts = { input: previewInput(r, lv, ov), lane: 'placement', replace: true, keep: 'memory' as const };
+    const job = function* (em: LevelEmulator) { runs++; const res = em.load(N, ov); return res.ok ? renderLayerTiles(r, res, g, false, tiles) : null; };
+    const pic = lr.learn(key, job, opts);
+    if (pic !== undefined) return pic;
+    await run();
+    return lr.learn(key, job, opts);
+  };
+  const pixels = (p: Awaited<ReturnType<typeof preview>>) => p ? inputHash(p.px) : '';
+  // pixels drawn in tiles [from, to) of a file, as the graphics tab does
+  const draw = (file: number, from: number, to: number) => { const f = readGfx(r, file); for (let i = from * 64; i < to * 64; i++) f.pix[i] = (f.pix[i] + 5) & 15; writeGfx(r, f); };
+  const a = await preview(), thumbs = inputHash(thumbsInput(r, lv));
+  draw(ANIM_FILE, 0, 32);
+  const b = await preview();
+  check(a !== null && b !== null && pixels(a) !== pixels(b), 'placement preview: pixels drawn in the frames the level\'s animations show at its load show in the next one');
+  check(inputHash(thumbsInput(r, lv)) !== thumbs, 'thumbnails: the frames the level\'s animations copy are in their input');
+  const before = runs, thumbsB = inputHash(thumbsInput(r, lv));
+  draw(ANIM_FILE, 32, 128);
+  draw(ANIM_FILE + 1, 0, 128);
+  const c = await preview();
+  check(c === b && runs === before, 'placement preview: pixels drawn in Anim graphic tiles no frame of the level reads keep it');
+  check(inputHash(thumbsInput(r, lv)) === thumbsB, 'thumbnails: Anim graphic tiles the level\'s animations don\'t read keep them');
+  list.slots.get(0)!.frames = [0x400];
+  writeLevelList(r, N, list);
+  check(inputHash(thumbsInput(r, lv)) !== thumbsB, 'thumbnails: a slot reading other frames is in their input');
+  setLevelSettings(r, N, NO_LEVEL_LIST);
+  const off = inputHash(thumbsInput(r, lv));
+  draw(ANIM_FILE, 0, 128);
+  check(inputHash(thumbsInput(r, lv)) === off, 'thumbnails: with the level\'s animations off its Anim graphic keeps them');
+  const global = emptyList();
+  global.altFile = 1;
+  global.slots.set(0, { type: 0x01, trigger: 0, framesLess1: 0, dest: 0x8000, frames: [0x20] });
+  writeGlobalList(r, global);
+  const g0 = inputHash(thumbsInput(r, lv));
+  draw(ANIM_FILE + 1, 0, 1);
+  check(inputHash(thumbsInput(r, lv)) === g0, 'thumbnails: a tile of the global list\'s Anim graphic no frame reads keeps them');
+  draw(ANIM_FILE + 1, 1, 2);
+  check(inputHash(thumbsInput(r, lv)) !== g0, 'thumbnails: the frames the global list copies are in their input');
 }
 
 // level scan and the camera at Mario (levelDataKey): an ExAnimation trigger of the view changes the scan
