@@ -25,7 +25,7 @@ import { assemble } from './asar.ts';
 import { rleEncode } from './rle.ts';
 import { missingPatch } from './patches.ts';
 import {
-  OW_EVENTS, OverworldEmulator, gameL1, readL1, readTranslevels, isLevelTile, baseEvent, translevelToLevel, l1XY, revealAt, revealEventCount, readDestroyList,
+  OW_EVENTS, OverworldEmulator, type OverworldLoads, gameL1, readL1, readTranslevels, isLevelTile, baseEvent, translevelToLevel, l1XY, revealAt, revealEventCount, readDestroyList,
   destroyEffects, l1Index,
 } from './overworld.ts';
 import { RAM, getS16 } from './ram.ts';
@@ -377,13 +377,14 @@ export function eventTitle(runners: Map<number, EventRunner[]>, e: number): stri
 }
 
 // the part of the submaps' region each submap shows (8x8 tiles; the camera the game sets there, emulated), index
-// 1–6; the main map scrolls over all of region 0
-export function submapViews(emu: OverworldEmulator): Rect[] {
-  return Array.from({ length: 7 }, (_, k) => {
+// 1–6; the main map scrolls over all of region 0. From the kept loads: emulated again only when the ROM edits
+// changed what one read
+export function submapViews(loads: OverworldLoads): Rect[] {
+  return loads.derive('submapViews', (load) => Array.from({ length: 7 }, (_, k) => {
     if (!k) return { x: 0, y: 0, w: W, h: W };
-    const w = emu.load(k, 0).wram;
+    const w = load(k, 0).wram;
     return { x: Math.round(getS16(w, RAM.layer2X) / 8), y: Math.round(getS16(w, RAM.layer2Y) / 8), w: 32, h: 28 };
-  });
+  }));
 }
 // the submap a layer 1 tile is on: 0 on the main map, else the one whose view's center is nearest (as LevelEmulator's)
 export function submapOf(views: Rect[], tile: number): number {

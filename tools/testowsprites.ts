@@ -4,7 +4,7 @@
 // game's OAM) is drawn where it is.
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
-import { OverworldEmulator } from '../src/core/overworld.ts';
+import { OverworldEmulator, OverworldLoads } from '../src/core/overworld.ts';
 import {
   readStart, writeStart, readOwSprites, readOwSprite, writeOwSprite, koopaKidPos, setKoopaKidPos, owSpriteImages, OW_SPRITE_SLOTS, KOOPA_KIDS,
 } from '../src/core/owsprites.ts';
@@ -43,8 +43,8 @@ const rom = new Rom(await editorImage());
 
 // ---- sprites where set ----
 {
-  const r = new Rom(rom.data.slice()), emu = new OverworldEmulator(r);
-  const before = owSpriteImages(new OverworldEmulator(rom), 0, 0);
+  const r = new Rom(rom.data.slice()), emu = new OverworldEmulator(r), loads = new OverworldLoads(emu, 4);
+  const before = owSpriteImages(new OverworldLoads(new OverworldEmulator(rom), 4), 0, 0);
   const shown = before.map((v, k) => (v.image ? k : -1)).filter((k) => k >= 0);
   check(shown.length >= 3, `the main map shows slots ${shown.join(', ')}`);
   // the Boos (slot 10) moved and slot 9 (Cheep Cheep) made Boos too
@@ -55,11 +55,30 @@ const rom = new Rom(await editorImage());
   const slot = (k: number) => ({ num: w[RAM.owSpriteNum + 3 + k], x: w[RAM.owSpriteXLo + 3 + k] | (w[RAM.owSpriteXHi + 3 + k] << 8), y: w[RAM.owSpriteYLo + 3 + k] | (w[RAM.owSpriteYHi + 3 + k] << 8) });
   check(JSON.stringify(slot(10)) === JSON.stringify({ ...boo, x: boo.x + 0x40, y: boo.y - 0x18 }) && JSON.stringify(slot(9)) === JSON.stringify({ num: boo.num, x: 0x100, y: 0x100 }),
     `loaded where set: slot 10 ${JSON.stringify(slot(10))}, slot 9 ${JSON.stringify(slot(9))}`);
-  const after = owSpriteImages(emu, 0, 0);
+  const after = owSpriteImages(loads, 0, 0);
   const near = (k: number, x: number, y: number) => { const i = after[k].image; return !!i && Math.abs(i.ox + i.w / 2 - x) < 24 && Math.abs(i.oy + i.h / 2 - y) < 24; };
   const b0 = before[10].image!, moved = after[10].image;
   check(!!moved && moved.ox - b0.ox === 0x40 && moved.oy - b0.oy === -0x18, `slot 10 drawn moved by 40,-18 (${moved && `${hx(moved.ox)},${hx(moved.oy)}`} from ${hx(b0.ox)},${hx(b0.oy)})`);
   check(near(9, 0x100, 0x100), `slot 9 drawn as Boos at 100,100 (${after[9].image && `${hx(after[9].image.ox)},${hx(after[9].image.oy)} ${after[9].image.w}x${after[9].image.h}`})`);
+}
+
+// ---- from a kept load ----
+// the images run on from the map's kept load: the same as from a load of their own, no load when one is kept (another
+// map loaded in between)
+{
+  const emu = new OverworldEmulator(new Rom(rom.data.slice())), loads = new OverworldLoads(emu, 4);
+  let loaded = 0;
+  const loadRecorded = emu.loadRecorded.bind(emu);
+  emu.loadRecorded = (map, progress) => { loaded++; return loadRecorded(map, progress); };
+  const text = (vs: ReturnType<typeof owSpriteImages>) => JSON.stringify(vs.map((v) => v.image && { ox: v.image.ox, oy: v.image.oy, w: v.image.w, h: v.image.h, z: v.z, px: Array.from(v.image.rgba).join() }));
+  for (const [map, progress] of [[0, 0], [0, 0x20], [1, 0]]) {
+    const own = text(owSpriteImages(new OverworldLoads(new OverworldEmulator(new Rom(rom.data.slice())), 1), map, progress));
+    loads.get(map, progress);
+    loads.get(map ? 0 : 2, 0);
+    loaded = 0;
+    const kept = text(owSpriteImages(loads, map, progress));
+    check(kept === own && loaded === 0, `map ${map} at progress ${hx(progress)}: the kept load's images the same as its own load's, ${loaded} loads`);
+  }
 }
 
 if (bad) { console.log(`${bad} FAILED`); process.exit(1); }

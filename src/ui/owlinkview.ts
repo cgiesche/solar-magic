@@ -14,7 +14,7 @@ import {
 } from '../core/owlinks.ts';
 import { readTeleports, tileText, sameTile, type OwTile } from '../core/owteleport.ts';
 import { l1Index, l1XY, isLevelTile, DIR_NAMES, DIR_ARROWS } from '../core/overworld.ts';
-import { submapOf, submapViews } from '../core/owevents.ts';
+import { submapOf } from '../core/owevents.ts';
 import { isPathKind, PATH_KIND_NAMES } from '../core/owpaths.ts';
 import { ExitGraph } from '../core/exitgraph.ts';
 import { readSecondaryEntrance, levelTranslevel } from '../core/level.ts';
@@ -77,7 +77,6 @@ export class LinkLayer {
   private index(t: OwTile): number { return l1Index(t.submap ? 1 : 0, t.x, t.y); }
   private tile(i: number): OwTile {
     const { x, y } = l1XY(i);
-    this.view.views ??= submapViews(this.view.emu);
     return { submap: submapOf(this.view.views, i), x, y };
   }
   private shown(t: OwTile): boolean { return (t.submap ? 1 : 0) === this.view.region; }

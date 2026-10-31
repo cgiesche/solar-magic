@@ -763,39 +763,78 @@ export class OverworldEmulator {
     }
     return { vram: s.vram.slice(), cgram: s.cgram.slice(), wram: s.wram.slice(), ppuRegs: s.ppuRegs.slice(), ok: w[RAM.gameMode] === GM.overworld };
   }
-  // load, with the ROM bytes it read (reaching the title screen, too): what the map shown depends on
-  loadRecorded(map: number, progress: number): { result: OwRender; reads: RomReads } {
+  // load, with the ROM bytes it read (reaching the title screen, too): what the map shown depends on; state: the
+  // console right after it (the game run on from there: restore)
+  loadRecorded(map: number, progress: number): { result: OwRender; reads: RomReads; state: SnesState } {
     const result = this.load(map, progress);
-    return { result, reads: this.lastReads! };
+    return { result, reads: this.lastReads!, state: this.snes.saveState() };
+  }
+  // the console as `state` (loadRecorded's), on the current ROM
+  restore(state: SnesState): void {
+    this.sync();
+    this.snes.loadState(state);
   }
 }
 
+// a result kept while the ROM edits since its generation `gen` changed no byte it read
+interface Kept { gen: number; reads: RomReads }
+// a kept load: what it shows and the console right after it
+interface KeptLoad extends Kept { r: OwRender; state: SnesState }
+
 // emulated overworlds by map and event progress, the latest used `max` (a slider moved through every progress): each
 // kept while the ROM edits since its load changed no byte the load read (painting the map or its events loads it
-// again, a tile name or a level's graphics don't), as App.refresh keeps the level render
+// again, a tile name or a level's graphics don't), as App.refresh keeps the level render; and what is derived from
+// them (derive), kept while none of the loads it used would load again
 export class OverworldLoads {
   emu: OverworldEmulator;
   private max: number;
-  private kept = new Map<string, { r: OwRender; gen: number; reads: RomReads }>();
+  private kept = new Map<string, KeptLoad>();
+  private derived = new Map<string, Kept & { v: unknown }>();
   constructor(emu: OverworldEmulator, max: number) {
     this.emu = emu;
     this.max = max;
   }
   get(map: number, progress: number): OwRender {
-    const key = `${map}-${progress}`, rom = this.emu.rom;
+    return this.load(map, progress).r;
+  }
+  // the emulator's console as right after loading map `map` at event progress `progress` (to run the game on)
+  restore(map: number, progress: number): void {
+    this.emu.restore(this.load(map, progress).state);
+  }
+  // `make`'s result from the loads it asks for (`load`), kept under `key` while the ROM edits since changed no byte
+  // they read; a load not kept yet isn't kept for it (the slider's stay)
+  derive<T>(key: string, make: (load: (map: number, progress: number) => OwRender) => T): T {
+    let d = this.derived.get(key);
+    if (!d || !this.holds(d)) {
+      const gen = this.emu.rom.gen, reads = new RomReads(this.emu.rom.data.length);
+      const v = make((map, progress) => { const k = this.load(map, progress, false); reads.add(k.reads); return k.r; });
+      d = { v, gen, reads };
+      this.derived.set(key, d);
+    }
+    return d.v as T;
+  }
+  // the kept load, else a new one (kept when `keep`)
+  private load(map: number, progress: number, keep = true): KeptLoad {
+    const key = `${map}-${progress}`;
     let k = this.kept.get(key);
     if (k) {
       this.kept.delete(key);
-      const changes = rom.changesSince(k.gen);
-      if (!changes || k.reads.touches(changes)) k = undefined;
-      else k.gen = rom.gen;
+      if (!this.holds(k)) k = undefined;
+      else keep = true;
     }
     if (!k) {
-      const gen = rom.gen, { result, reads } = this.emu.loadRecorded(map, progress);
-      k = { r: result, gen, reads };
-      if (this.kept.size >= this.max) this.kept.delete(this.kept.keys().next().value!);
+      const gen = this.emu.rom.gen, { result, reads, state } = this.emu.loadRecorded(map, progress);
+      k = { r: result, gen, reads, state };
+      if (keep && this.kept.size >= this.max) this.kept.delete(this.kept.keys().next().value!);
     }
-    this.kept.set(key, k);
-    return k.r;
+    if (keep) this.kept.set(key, k);
+    return k;
+  }
+  // a kept result still holds (then it is as of the current ROM)
+  private holds(k: Kept): boolean {
+    const rom = this.emu.rom, changes = rom.changesSince(k.gen);
+    if (!changes || k.reads.touches(changes)) return false;
+    k.gen = rom.gen;
+    return true;
   }
 }

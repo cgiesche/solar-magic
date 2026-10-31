@@ -14,7 +14,7 @@ import {
 } from '../core/owsprites.ts';
 import { KOOPA_TILE } from '../core/owlinks.ts';
 import { l1Index, MAP_NAMES } from '../core/overworld.ts';
-import { submapOf, submapViews } from '../core/owevents.ts';
+import { submapOf } from '../core/owevents.ts';
 import { hex } from '../core/names.ts';
 
 // what is selected or dragged: a sprite slot, a player's start, where a Koopa Kid jumps out
@@ -37,7 +37,7 @@ export class SpriteLayer {
   private shown(): NonNullable<SpriteLayer['views']> {
     const key = `${this.rom.gen}/${this.view.map}/${this.view.progress}`;
     if (this.views?.key !== key) {
-      const views = owSpriteImages(this.view.emu, this.view.map, this.view.progress);
+      const views = owSpriteImages(this.view.loads, this.view.map, this.view.progress);
       this.views = { key, views, canvases: views.map((v) => (v.image ? thumbCanvas({ w: v.image.w, h: v.image.h, px: v.image.rgba }) : null)) };
     }
     return this.views;
@@ -146,7 +146,6 @@ export class SpriteLayer {
       this.edit(`Koopa Kid ${it.k + 1}: jumps out elsewhere`, () => setKoopaKidPos(rom, it.k, { x: (p.x + d.dx) & 0xffff, y: (p.y + d.dy) & 0xffff }));
     } else {
       const s = readStart(rom, it.player), x = Math.max(0, Math.min(31, s.x + d.dx / 16)), y = Math.max(0, Math.min(31, s.y + d.dy / 16));
-      this.view.views ??= submapViews(this.view.emu);
       const submap = submapOf(this.view.views, l1Index(this.view.region, x, y));
       this.edit(`${PLAYERS[it.player]}'s start: moved`, () => writeStart(rom, it.player, { submap, x, y }));
     }

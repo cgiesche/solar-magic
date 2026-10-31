@@ -22,7 +22,7 @@ const diff = (a: ArrayLike<number>, b: ArrayLike<number>) => { let n = 0; for (l
 const progressMaps = (d: EventData, base: Uint16Array) => { const out = [base]; for (let e = 0; e < OW_EVENTS; e++) out.push(applyEvents(out[e], d, e, e + 1)); return out; };
 
 const image = await editorImage();
-const views = submapViews(new OverworldEmulator(new Rom(image.slice())));
+const views = submapViews(new OverworldLoads(new OverworldEmulator(new Rom(image.slice())), 6));
 check(views.slice(1).every((v) => v.w === 32 && v.h === 28), `the submaps' views: ${views.slice(1).map((v) => `${v.x},${v.y}`).join(' ')}`);
 
 // ---- written back unchanged; every event painted as it is ----

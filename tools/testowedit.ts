@@ -4,7 +4,8 @@
 import { Rom, snesToPc } from '../src/core/rom.ts';
 import { RomEditSession } from '../src/core/romedit.ts';
 import { OverworldEmulator, OverworldLoads, readL1, writeL1, readL2, writeL2, l1Index, l2Index, l2Pointers, OW_L1, setNameCode, nameCode } from '../src/core/overworld.ts';
-import { RAM } from '../src/core/ram.ts';
+import { RAM, getS16 } from '../src/core/ram.ts';
+import { submapViews } from '../src/core/owevents.ts';
 import { editorPatch } from '../src/core/patches.ts';
 import { editorImage } from './fixture.ts';
 
@@ -121,6 +122,38 @@ const diff = (a: Uint8Array, b: Uint8Array) => { const out: number[] = []; for (
   check(loads.get(0, 5) !== r5, 'painting layer 1: the other event progress loaded again');
   s.undo();
   check(loads.get(0, 0).wram[RAM.owLayer1 + i] === r0.wram[RAM.owLayer1 + i], 'undone: loaded again, the tile as before');
+}
+
+// the submaps' views from the kept loads: as each submap's load shows them, shown again without emulating while the
+// ROM edits changed nothing they read
+{
+  const { rom, s } = fresh();
+  const emu = new OverworldEmulator(rom), loads = new OverworldLoads(emu, 2);
+  let loaded = 0;
+  const loadRecorded = emu.loadRecorded.bind(emu);
+  emu.loadRecorded = (map, progress) => { loaded++; return loadRecorded(map, progress); };
+  // each submap's camera as its own load leaves it
+  const direct = () => {
+    const e = new OverworldEmulator(new Rom(rom.data.slice()));
+    return [1, 2, 3, 4, 5, 6].map((k) => { const w = e.load(k, 0).wram; return `${Math.round(getS16(w, RAM.layer2X) / 8)},${Math.round(getS16(w, RAM.layer2Y) / 8)}`; }).join(' ');
+  };
+  const text = (v: ReturnType<typeof submapViews>) => v.slice(1).map((r) => `${r.x},${r.y}`).join(' ');
+  const r0 = loads.get(0, 0), r1 = loads.get(1, 0);
+  loaded = 0;
+  const v = submapViews(loads), want = direct();
+  check(loaded === 5 && text(v) === want, `the submaps' views: ${text(v)} (each submap's load: ${want}), ${loaded} loads (submap 1's kept)`);
+  loaded = 0;
+  check(submapViews(loads) === v && loaded === 0, 'asked again: the kept views, no load');
+  const gfx = editorPatch(rom)!.levelGfx + 0x105 * 8;
+  s.edit('Level 105 graphics', () => rom.w8(gfx, rom.r8(gfx) ^ 1));
+  check(submapViews(loads) === v && loaded === 0, 'a ROM edit no load read: the kept views, no load');
+  check(loads.get(0, 0) === r0 && loads.get(1, 0) === r1 && loaded === 0, 'the loads kept before stay kept: no load');
+  const l1 = readL1(rom), i = l1Index(1, 7, 9);
+  l1[i] = l1[i] === 0x56 ? 0x57 : 0x56;
+  s.edit('Paint layer 1', () => writeL1(rom, l1));
+  loaded = 0;
+  const v2 = submapViews(loads);
+  check(v2 !== v && loaded === 6 && text(v2) === direct(), `painting layer 1: loaded again (${loaded} loads), the same views`);
 }
 
 if (bad) { console.log(`${bad} failed`); process.exit(1); }

@@ -99,6 +99,7 @@ export class OverworldView {
   emu: OverworldEmulator;
   map = 0;
   loads: OverworldLoads;
+  private shownViews: Rect[] | null = null;
   // the maps as in the ROM, with the stroke being painted (written to the ROM when it ends); tls: the translevel
   // of each layer 1 tile; rom: the maps as in the ROM; shown: as the game shows them at the event progress, the
   // tiles of the stroke being painted as painted (it goes to the map before events)
@@ -120,7 +121,6 @@ export class OverworldView {
   event = -1;
   // l1: layer 1 as after it (the game's at the event progress just after it), with the stroke being painted
   private ev: { data: EventData; before: Uint16Array; after: Uint16Array; l1: Uint8Array | null; runners: Map<number, EventRunner[]> } | null = null;
-  views: Rect[] | null = null; // the submaps' views (emulated once)
   private hoverStep: { kind: StepKind; k: number } | null = null;
   private playing: { start: number; before: HTMLCanvasElement } | null = null;
   private timeline = h('div', { class: 'ow-timeline' });
@@ -199,6 +199,11 @@ export class OverworldView {
 
   render(): OwRender {
     return this.loads.get(this.map, this.progress);
+  }
+  // the submaps' views, as when the overworld was shown (from the kept loads: emulated again only when the ROM edits
+  // since changed what they read)
+  get views(): Rect[] {
+    return (this.shownViews ??= submapViews(this.loads));
   }
 
   // ---------------- drawing ----------------
@@ -584,7 +589,6 @@ export class OverworldView {
 
   // shows layer 1 tile i (l1Index) selected, on the submap it is on
   showTile(i: number): void {
-    this.views ??= submapViews(this.emu);
     this.setMap(submapOf(this.views, i));
     this.selectTile(i, true);
   }
@@ -692,7 +696,6 @@ export class OverworldView {
     this.buildTimeline();
   }
   private place(e: number) {
-    this.views ??= submapViews(this.emu);
     return eventPlace(this.ev!.runners, this.views, e, this.map);
   }
   // the events by the level exit that runs them (by level, then exit), those no level on the map runs by number
@@ -746,7 +749,6 @@ export class OverworldView {
     this.timeline.classList.toggle('show', !!ev);
     if (!ev) { this.timeline.replaceChildren(); return; }
     const steps = ev.data.steps[e], silent = ev.data.silent[e].filter((s) => s.layer === 2);
-    this.views ??= submapViews(this.emu);
     const run = ev.runners.get(e)?.[0], where = MAP_NAMES[run ? submapOf(this.views, run.tile) : this.map];
     const l1 = eventL1Tiles(ev.data, e), l1Here = l1.filter((i) => (i >= 0x400) === (this.region === 1)).length;
     const hover = (kind: StepKind, k: number) => ({
@@ -1276,7 +1278,7 @@ export class OverworldView {
 
   show(): void {
     this.emu.rom = this.app.rom;
-    this.views = null;
+    this.shownViews = null;
     this.event = -1;
     this.progress = loadProgress(this.app.romName);
     this.buildBar();

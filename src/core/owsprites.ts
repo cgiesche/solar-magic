@@ -10,7 +10,7 @@
 // each slot shown alone with the camera on it (on the main map it follows Mario), its OAM tiles those the game adds.
 
 import type { Rom } from './rom.ts';
-import { OverworldEmulator } from './overworld.ts';
+import type { OverworldLoads } from './overworld.ts';
 import { RAM, set16, getS16 } from './ram.ts';
 import { readPpuOam, drawTiles, tileKey, type SpriteImage } from './spritegfx.ts';
 
@@ -62,10 +62,10 @@ export function setKoopaKidPos(rom: Rom, k: number, p: { x: number; y: number })
 // height above its position ($0E55)
 export interface OwSpriteView { image: SpriteImage | null; z: number }
 const SHOW_FRAMES = 3;
-// every slot of map `map` at event progress `progress`, as the game shows it
-export function owSpriteImages(emu: OverworldEmulator, map: number, progress: number): OwSpriteView[] {
-  emu.load(map, progress);
-  const s = emu.snes, w = s.wram, start = s.saveState(), sprites = readOwSprites(emu.rom);
+// every slot of map `map` at event progress `progress`, as the game shows it (run on from the kept load)
+export function owSpriteImages(loads: OverworldLoads, map: number, progress: number): OwSpriteView[] {
+  loads.restore(map, progress);
+  const emu = loads.emu, s = emu.snes, w = s.wram, start = s.saveState(), sprites = readOwSprites(emu.rom);
   const nums = (keep: number) => { for (let k = 0; k < OW_SPRITE_SLOTS; k++) if (k !== keep) w[RAM.owSpriteNum + FIRST_SLOT + k] = 0; };
   // the frames with slot `keep` (-1 none) and the camera on (x, y) on the main map: the OAM tiles on the map; without
   // a slot on a submap (its camera doesn't move) once
