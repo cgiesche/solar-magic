@@ -2,14 +2,16 @@
 // level places (by object, Direct Map16, prefab; its BG tilemap) are learned by loading it in the
 // emulator and stay valid while the ROM bytes and level data they came from are unchanged; GFX slots
 // and sprites are read from the ROM.
-import { Rom } from '../src/core/rom.ts';
+import { Rom, snesToPc } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
-import { loadLevel, newUid, spriteId } from '../src/core/level.ts';
+import { loadLevel, newUid, spriteId, L1_PTRS } from '../src/core/level.ts';
 import { saveLevel } from '../src/core/save.ts';
 import { DM16_EXT, setGfxEntry, levelGfx, setLevelGfx } from '../src/core/patches.ts';
 import { PREFAB_EXT, writePrefab, TRANSPARENT } from '../src/core/prefabs.ts';
 import { setActsLike, setExtTileWords, extTileWords } from '../src/core/map16ext.ts';
-import { ResultCache, RomFingerprint } from '../src/core/romdeps.ts';
+import { ResultCache, RomFingerprint, RomReads, PAGE_SHIFT, type RomDeps } from '../src/core/romdeps.ts';
+import { captureSprites } from '../src/core/spritegfx.ts';
+import { ProbeHost, PROBE_SPRITE, jobKey, type ProbeJob } from '../src/core/probehost.ts';
 import { map16Source } from '../src/core/render.ts';
 import {
   LevelUses, usedLevels, fgTileUsers, bgTileUsers, tileLinks, unusedFgTiles, gfxUsage, unusedExGfx, spriteUsage, slotMove,
@@ -111,6 +113,65 @@ check(uses.missing(levels).length === 0, 'every level known after scanning');
   check(!fgTileUsers([again], 0x345, [0]).length && !!before, 'the new scan no longer has tile 345');
   // a stored result is found again by a new index on the same cache
   check(new LevelUses(rom, results).tiles(0x105) !== undefined, 'results come from the result cache');
+}
+
+// validity of what the boot read (every result counts it): the title screen's level shares pages of level data
+// with others; saving one of them keeps the boot snapshot, the probes, the sprite images and the other levels' uses
+{
+  const lv105 = loadLevel(rom, 0x105), bg = lv105.layer2Pointer >> 16 === 0xff ? lv105.layer2Pointer : 0xffd900;
+  const images = results.fp.deps(emu.tracked(() => captureSprites(emu, 0x105, lv105.header, lv105.spriteHeader, bg, [0x04, 0x05, 0x0d])).reads);
+  const host = new ProbeHost(), probes = new Map<string, RomDeps>();
+  const jobs: ProbeJob[] = [{ ts: 0, k: 0x130 }, { ts: 0, k: 0x12b }, { ts: 0, k: PROBE_SPRITE | 0x04 }];
+  host.setRom(rom.gen, rom.data.slice());
+  host.ask(jobs);
+  while (host.pending) { const d = host.next(); if (d?.type === 'probe') for (const [k, e] of d.put) probes.set(k, e.deps); }
+  const base = () => { emu.load(0x105); return emu.baseState; };
+  let state = base();
+  const kept = (what: string, level: number) => {
+    const m = uses.missing(levels), s = base();
+    check(s === state, `${what}: the boot snapshot is kept`);
+    check(m.length === 1 && m[0] === level, `${what}: only level ${level.toString(16)} is scanned again (${m.map((x) => x.toString(16))})`);
+    check(results.fp.valid(images), `${what}: the sprite images are kept`);
+    check(jobs.every((j) => probes.has(jobKey(j))) && [...probes.values()].every((d) => results.fp.valid(d)), `${what}: the block and sprite probes are kept`);
+    for (const n of m) uses.scan(n, emu);
+    state = s;
+  };
+  // the boot loads the title screen's level: the level whose pointer it read
+  const boot = emu.bootReads!;
+  const title = Array.from({ length: 0x200 }, (_, n) => n).filter((n) => boot.bytes.has(snesToPc(L1_PTRS + n * 3)));
+  const shares = (n: number) => { const p = snesToPc(loadLevel(rom, n).l1Addr) >> PAGE_SHIFT; return !!boot.pages[p] || [...boot.bytes].some((b) => b >> PAGE_SHIFT === p); };
+  check(title.length === 1, `the boot loads one level (${title.map((x) => x.toString(16))})`);
+  check([0x000, 0x014, 0x11b].every(shares), 'levels 000, 014, 11B: their layer 1 data starts on a page the boot read');
+  const s105 = loadLevel(rom, 0x105), at = s105.sprAddr;
+  s105.sprites[0].x++;
+  saveLevel(rom, s105);
+  check(s105.sprAddr === at, 'level 105 with a sprite moved is saved in place');
+  kept('saving level 105 with a sprite moved', 0x105);
+  for (const n of [0x000, 0x014, 0x11b]) {
+    const lv = loadLevel(rom, n);
+    lv.objects.at(-1)!.x ^= 1;
+    saveLevel(rom, lv);
+    kept(`saving level ${n.toString(16)}'s layer 1 data`, n);
+  }
+  // a level's data moving to free space: what read its old place and its pointer is dropped
+  {
+    const lv = loadLevel(rom, 0x106), a = lv.l1Addr;
+    const pointer = new RomReads(rom.data.length); pointer.read(snesToPc(L1_PTRS + 0x106 * 3), 3);
+    const pointerDeps = results.fp.deps(pointer);
+    for (let i = 0; i < 40; i++) lv.objects.push({ uid: newUid(), num: 0x21, ext: 0, x: 0x10 + i, y: 0x10, size: 0 });
+    saveLevel(rom, lv);
+    check(loadLevel(rom, 0x106).l1Addr !== a, 'level 106 grown: its layer 1 data moves to free space');
+    check(!results.fp.valid(pointerDeps), 'what read its pointer entry is dropped');
+    kept('saving level 106 moved', 0x106);
+  }
+  // the title screen level's own data: the boot is stale
+  {
+    const lv = loadLevel(rom, title[0]);
+    lv.objects.at(-1)!.x ^= 1;
+    saveLevel(rom, lv);
+    check(base() !== state, `a change of the title screen level ${title[0].toString(16)}'s data makes the boot snapshot stale`);
+    check(uses.missing(levels).length === levels.length, 'then every level is scanned again');
+  }
 }
 
 // GFX files: the slots of each level (defaults of the tileset included), ExGFX inserted but in no slot

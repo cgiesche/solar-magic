@@ -1,6 +1,6 @@
 // Super Mario World level data: parsing and serialization.
 
-import { Rom } from './rom.ts';
+import { Rom, snesToPc } from './rom.ts';
 import { spriteBankOf, DM16_EXT } from './patches.ts';
 import { PREFAB_EXT } from './prefabs.ts';
 import { COND_MARK, condByte, condOf, type Dm16Cond } from './cdm16.ts';
@@ -573,6 +573,33 @@ export function storedExits(rom: Rom, n: number): { exits: ScreenExit[]; at: num
   if (hasObjects(header.mode)) read(l1, d1, isL1Vertical(rom, header.mode), isSized(readSecondaryHeader(rom, n)));
   if ((l2 >> 16) !== 0xff && hasLayer2Objects(header.mode)) read(l2, dataWindow(rom, l2), isL2Vertical(rom, header.mode));
   return { exits, at };
+}
+
+// where the levels' data lies (PC ranges): layer 1 and layer 2 objects with their headers, sprites; each place once
+// however many levels share it (the BG tilemaps are not level data of their own). Sizes only: a level's orientation
+// and size change where its objects and sprites are, not how many bytes they take.
+export function levelDataRanges(rom: Rom): [number, number][] {
+  const d = rom.data, len2d = objectLength2D(rom), sizes = spriteSizes(rom);
+  const out: [number, number][] = [], seen = new Set<number>();
+  // the data at a not met before, up to the end of its bank (as dataWindow, without copying it)
+  const unseen = (a: number) => {
+    const o = snesToPc(a);
+    if (o < 0 || o + 5 >= d.length || seen.has(a)) return null;
+    seen.add(a);
+    return d.subarray(o, Math.min(d.length, o + 0x8000 - (a & 0x7fff)));
+  };
+  const add = (a: number, size: number) => { const o = snesToPc(a); out.push([o, Math.min(d.length, o + size)]); };
+  for (let n = 0; n < 0x200; n++) {
+    const l1 = rom.r24(L1_PTRS + n * 3), l2 = rom.r24(L2_PTRS + n * 3), spr = (spriteBank(rom, n) << 16) | rom.r16(SPR_PTRS + n * 2);
+    const o1 = snesToPc(l1), mode = o1 >= 0 && o1 + 5 < d.length ? parsePrimaryHeader(d.subarray(o1, o1 + 5)).mode : 0;
+    const d1 = unseen(l1);
+    if (d1) add(l1, 5 + (hasObjects(mode) ? parseObjects(d1, 5, false, false, undefined, len2d).size : 1));
+    const d2 = (l2 >> 16) !== 0xff && hasLayer2Objects(mode) ? unseen(l2) : null;
+    if (d2) add(l2, 5 + parseObjects(d2, 5, false, false, undefined, len2d).size);
+    const ds = unseen(spr);
+    if (ds) add(spr, parseSprites(ds, 0, false, sizes).size);
+  }
+  return out;
 }
 
 // builds a level from raw data: layer 1 (with 5 byte header), layer 2 object data (with header) or null,

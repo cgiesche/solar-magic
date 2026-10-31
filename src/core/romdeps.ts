@@ -10,13 +10,17 @@
 // The same for the editor patch's tables (GFX file pointers, per-level GFX and sprite bank): a new
 // ExGFX file or another level's GFX setting only drops what read that entry. The same for the
 // pages holding ExAnimation data and the overworld's data (painting the overworld only drops what
-// read the tiles painted, a level's initial flags what read them).
+// read the tiles painted, a level's initial flags what read them). The same for the pages holding
+// level data (layer 1, layer 2 objects, sprites): the boot loads the title screen's level, which every
+// result counts, and its data shares pages with other levels' – saving one of those only drops what
+// read its bytes.
 
 import type { Rom } from './rom.ts';
 import { snesToPc, type RomRange } from './rom.ts';
 import { editorPatch, GFX_FILES } from './patches.ts';
 import { exanimDataRanges } from './exanim.ts';
 import { overworldDataRanges } from './overworld.ts';
+import { levelDataRanges } from './level.ts';
 
 export const PAGE_SHIFT = 8;
 
@@ -33,9 +37,9 @@ BYTE_PAGES.fill(1, 0x2e000 >> PAGE_SHIFT, 0x30000 >> PAGE_SHIFT);
 BYTE_PAGES[0x7f00 >> PAGE_SHIFT] = 1;
 const FIXED_BYTE_PAGES = BYTE_PAGES.slice();
 
-// adds the byte pages of this ROM's editor patch tables, its free space blocks' edges, ExAnimation data and overworld
-// data (call when the ROM may have changed); the ExAnimation data isn't recorded at all (see gfxSkipMask), byte pages
-// keep the rest of their pages from counting it (an animation list next to code that is run)
+// adds the byte pages of this ROM's editor patch tables, its free space blocks' edges, ExAnimation data, overworld
+// data and level data (call when the ROM may have changed); the ExAnimation data isn't recorded at all (see
+// gfxSkipMask), byte pages keep the rest of their pages from counting it (an animation list next to code that is run)
 export function updateBytePages(rom: Rom): void {
   BYTE_PAGES.set(FIXED_BYTE_PAGES);
   const reads = rom.reads;
@@ -49,6 +53,8 @@ export function updateBytePages(rom: Rom): void {
     for (const b of rom.scanRats()) { markPc(b.start, b.start + 1); markPc(b.start + 7 + b.size, b.start + 8 + b.size); }
     const p = editorPatch(rom);
     if (!p) return;
+    // (after the patch's check: where a level's sprite data lies needs its sprite bank table)
+    for (const [a, b] of levelDataRanges(rom)) markPc(a, b);
     const mark = (snes: number, len: number) => { const o = snesToPc(snes); markPc(o, o + len); };
     mark(p.gfxLo, GFX_FILES); mark(p.gfxHi, GFX_FILES); mark(p.gfxBank, GFX_FILES); mark(p.gfxFlags, GFX_FILES);
     mark(p.levelGfx, 0x200 * 8); mark(p.levelGfxHi, 0x200 * 8);
