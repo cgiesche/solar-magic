@@ -271,8 +271,16 @@ A level played in the emulator from gameplay on, frame by frame with the buttons
 _Avoid_: run, game loop, harness
 
 **Emulated result**:
-Anything the editor learned by emulation (a probe's outcome, the kinds of a tileset's objects, a level scan, sprite images, object thumbnails, jump arcs). It stays valid as long as its inputs and the ROM bytes it read are unchanged, and is learned again otherwise (on the main thread by the result learner, core/learner.ts: a key, an input, the bytes read). One that is no picture (all but sprite images, object thumbnails, the placement preview, animated tiles and colors) doesn't count what blocks look like (Map16 quarters, colors) among the bytes it read (ADR 0008).
+Anything the editor learned by emulation (a probe's outcome, the kinds of a tileset's objects, a level scan, sprite images, object thumbnails, jump arcs). It stays valid as long as its inputs and the ROM bytes it read are unchanged, and is learned again otherwise (on the main thread by the result learner, core/learner.ts: a key, an input, the bytes read). One that is no picture doesn't count the display data among the bytes it read (ADR 0008).
 _Avoid_: Cached value, generation (for validity)
+
+**Picture**:
+An emulated result that shows what things look like (sprite images, object thumbnails, the placement preview, animated tiles and colors), and so counts the display data among the bytes it read. Any other result (a probe, a level's uses, a jump arc, …) is no picture and leaves the display data out, so drawing a tile or changing a color keeps it (ADR 0008). The palette tab's trace of where colors come from leaves out only the colors' values.
+_Avoid_: image, render (for the kind of result; a sprite image is one picture)
+
+**Display data**:
+The ROM bytes that only say what tiles and colors look like: the Map16 quarters (FG tiles 000–1FF of every tileset, the extended FG tiles, the BG tiles), the shared palettes and the levels' own palettes with their pointers. Not acts-like or the blocks' code. Graphics file data is no display data: no emulated result counts it as read, a graphics file's content is an input instead. Nor is ExAnimation data: only the palette tab's trace counts it as read (a color animation writes colors).
+_Avoid_: graphics data, GFX (those are graphics files)
 
 **Input**:
 State outside the ROM that an emulated result depends on: the level as edited (one input for everything learned from it, with the view settings – switches, conditional Direct Map16 flags, animation triggers), the content of graphics files (their bytes don't count as read). Given next to the result's key and compared by its hash (core/inputs.ts), never by object identity. A key keeps the results of its latest used few inputs (core/romdeps.ts INPUTS_PER_KEY), the least recently used dropped first.
