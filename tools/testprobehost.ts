@@ -13,6 +13,7 @@ import { LevelEmulator } from '../src/core/levelemu.ts';
 import { ObjKindProbe, kindsKey, type ObjKinds } from '../src/core/objkinds.ts';
 import { levelScanJob, type ScanLevel } from '../src/core/levelscan.ts';
 import { cameraAtJob } from '../src/core/camerareach.ts';
+import { runJob } from '../src/core/runjob.ts';
 import { loadLevel, serializeLayer1, serializeSprites, L2_PTRS } from '../src/core/level.ts';
 import { editorImage } from './fixture.ts';
 import { gfxSkipMask, gfxDisplaySkipMask } from '../src/core/gfxpages.ts';
@@ -75,8 +76,7 @@ ptrEmu.skipMask = () => gfxDisplaySkipMask(ptrEmu.rom, []);
 const emuMask = gfxDisplaySkipMask(emuRom, Array.from({ length: TILESETS }, (_, ts) => tilesetPointers(ptrEmu, ts).result));
 emu.skipMask = () => emuMask; // as the host: GFX and ExAnimation data and the display data are no dependency
 const kindProbe = new ObjKindProbe(emu, { ...lv, header: { ...lv.header, tileset: 1 } }, l2), kinds = kindProbe.result();
-const job = levelScanJob(emu, scanLevel);
-let scanned; for (;;) { const r = job.next(); if (r.done) { scanned = r.value; break; } }
+const scanned = runJob(levelScanJob(emu, scanLevel));
 host.handle({ type: 'kinds', ts: 1, level: { number: lv.number, header: lv.header }, layer2Pointer: l2 });
 host.handle({ type: 'scan', id: 7, key: 'scan-key', level: scanLevel });
 host.handle({ type: 'camera', id: 9, key: 'camera-key', level: scanLevel, x: 0xbb8, y: 0x20 });
@@ -92,8 +92,7 @@ const kEntry = k?.type === 'kinds' ? k.put.find(([key]) => key === kindsKey(1))?
 check(k?.type === 'kinds' && k.ts === 1 && !k.failed && JSON.stringify([...(kEntry?.data as ObjKinds).kinds]) === JSON.stringify([...kinds.kinds]), 'object kinds as computed directly, in a result cache entry');
 check(!!kEntry && kEntry.deps.pages.length === 0 && kEntry.deps.bytes.length === kindProbe.reads().bytes.size && kEntry.deps.bytes.length > 0, 'object kinds depend on the single bytes the object routines read, no pages');
 check(sc?.type === 'scan' && sc.id === 7 && JSON.stringify(sc.result) === JSON.stringify(scanned) && sc.put.some(([key]) => key === 'scan-key'), 'level scan as played directly, with its cache entry');
-const cam = replies.find((d) => d.type === 'camera'), camAt = cameraAtJob(emu, scanLevel, 0xbb8, 0x20);
-let camera; for (;;) { const r = camAt.next(); if (r.done) { camera = r.value; break; } }
+const cam = replies.find((d) => d.type === 'camera'), camera = runJob(cameraAtJob(emu, scanLevel, 0xbb8, 0x20));
 check(cam?.type === 'camera' && cam.id === 9 && JSON.stringify(cam.result) === JSON.stringify(camera) && cam.put.some(([key]) => key === 'camera-key'), 'camera at a place as played directly, with its cache entry');
 host.handle({ type: 'scan', id: 8, key: 'scan-key', level: scanLevel });
 host.next();

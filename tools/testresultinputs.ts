@@ -6,6 +6,7 @@ import { loadLevel, serializeLayer1, serializeSprites, encodeSecondaryHeader, is
 import { layer2MotionsJob } from '../src/core/l2scroll.ts';
 import { layer3Kinds } from '../src/core/layer3.ts';
 import { levelScanJob, scanKey } from '../src/core/levelscan.ts';
+import { runJob } from '../src/core/runjob.ts';
 import { cameraAtKey } from '../src/core/camerareach.ts';
 import { emptyTriggerView } from '../src/core/extrigger.ts';
 import { assignSlot, levelSlots, layerSlots } from '../src/core/gfxslots.ts';
@@ -199,10 +200,7 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 // level scan and the camera at Mario (levelDataKey): an ExAnimation trigger of the view changes the scan
 {
   const N = 0x106, lv = loadLevel(rom, N), vertical = isL1Vertical(rom, lv.header.mode);
-  const scan = (ov: LevelOverride) => {
-    const job = levelScanJob(emu, { number: N, vertical, ov, width: lv.header.screens * 256, height: 27 * 16 });
-    for (;;) { const r = job.next(); if (r.done) return r.value; }
-  };
+  const scan = (ov: LevelOverride) => runJob(levelScanJob(emu, { number: N, vertical, ov, width: lv.header.screens * 256, height: 27 * 16 }));
   const ov = { ...ovOf(lv), sprites: serializeSprites(lv.sprites, lv.spriteHeader, vertical), exTriggers: emptyTriggerView() };
   const silver = emptyTriggerView(); silver.game.add(0x02);
   const on = { ...ov, exTriggers: silver };

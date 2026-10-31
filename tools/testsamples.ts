@@ -22,6 +22,7 @@ import { installEditorPatch, customPalette } from '../src/core/patches.ts';
 import { enableBlocks } from '../src/core/map16ext.ts';
 import { loadLevel, readSecondaryEntrance, writeSecondaryEntrance, exitIndex, serializeLayer1, serializeSprites, isL1Vertical, type Level } from '../src/core/level.ts';
 import { levelScanJob } from '../src/core/levelscan.ts';
+import { runJob } from '../src/core/runjob.ts';
 import { renderLevel } from '../src/core/render.ts';
 import { levelSlots } from '../src/core/gfxslots.ts';
 import { mwlSections, parseLmObjects } from '../src/core/mwl.ts';
@@ -161,11 +162,10 @@ function teleport(rom: Rom): number | null {
   // guide, which the baserom's Line-Guide "Acts Like" Fix finds through Lunar Magic's acts-like pointers
   {
     const vertical = isL1Vertical(rom, l13b.header.mode);
-    const job = levelScanJob(emu, { number: 0x13b, vertical, ov: { layer1: serializeLayer1(rom, l13b), sprites: serializeSprites(l13b.sprites, l13b.spriteHeader, vertical) },
-      width: l13b.header.screens * 256, height: 27 * 16 });
-    let sr; while (!(sr = job.next()).done);
-    const fell = sr.value.sprites.filter((f) => f.kind === 'fell');
-    check(sr.value.ok && !fell.length, `13B: the level check finds no sprite falling out (${fell.length})`);
+    const sr = runJob(levelScanJob(emu, { number: 0x13b, vertical, ov: { layer1: serializeLayer1(rom, l13b), sprites: serializeSprites(l13b.sprites, l13b.spriteHeader, vertical) },
+      width: l13b.header.screens * 256, height: 27 * 16 }));
+    const fell = sr.sprites.filter((f) => f.kind === 'fell');
+    check(sr.ok && !fell.length, `13B: the level check finds no sprite falling out (${fell.length})`);
   }
   // its screen scrolling pipe on screen 8 (the baserom's UberASM and GPS blocks): Mario below the upward
   // pipe at tiles 87/88, row 13, jumps in holding up, its turn block takes him right, he leaves the

@@ -12,6 +12,7 @@ import { levelSlots, layerSlots } from '../core/gfxslots.ts';
 import { gfxFilesHash } from '../core/gfxpages.ts';
 import { levelAnimHash } from '../core/exanim.ts';
 import { inputHash, levelInput } from '../core/inputs.ts';
+import { runJob } from '../core/runjob.ts';
 import { effectLoad, ramEffect } from '../core/objeffects.ts';
 
 // extension: object 2D's bytes after its 3 where the ROM reads them (obj2d.ts), its custom number first
@@ -82,8 +83,7 @@ export function thumbCanvas(t: Pick<ObjThumb, 'w' | 'h' | 'px'>): HTMLCanvasElem
 
 // all at once (see objectThumbsJob)
 export function renderObjectThumbs(rom: Rom, emu: LevelEmulator, level: Level, specs: ObjSpec[], keyOf: (s: ObjSpec) => string): ObjThumb[] {
-  const job = objectThumbsJob(rom, emu, level, specs, keyOf);
-  for (;;) { const r = job.next(); if (r.done) return r.value; }
+  return runJob(objectThumbsJob(rom, emu, level, specs, keyOf));
 }
 
 // in batches of 32 test levels, a step each; a batch whose load fails (some objects together break the game,

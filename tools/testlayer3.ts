@@ -6,6 +6,7 @@ import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadLevel, serializeLayer1, encodeSecondaryHeader, readSecondaryHeader } from '../src/core/level.ts';
 import { renderLevel } from '../src/core/render.ts';
 import { layer3Kind, layer3Kinds, tideRangeJob, layer3Top, type TideRange } from '../src/core/layer3.ts';
+import { runJob } from '../src/core/runjob.ts';
 import { PlaySession } from '../src/core/playsession.ts';
 import { editorImage } from './fixture.ts';
 
@@ -30,9 +31,8 @@ check(normal.join() === 'none,tide-moving,tide-fixed,image', `normal tileset: ${
 const castle = layer3Kinds(emu, 0x105, ovOf(0x105, 1));
 check(castle.join() === 'none,tide-moving,image,image', `castle tileset: ${castle.join()}`);
 
-function run<T>(job: Generator<void, T>): T { for (;;) { const r = job.next(); if (r.done) return r.value; } }
-check(run(tideRangeJob(emu, 0x002, {})) === null, 'fixed tide: no range');
-const range = run(tideRangeJob(emu, 0x127, {})) as TideRange;
+check(runJob(tideRangeJob(emu, 0x002, {})) === null, 'fixed tide: no range');
+const range = runJob(tideRangeJob(emu, 0x127, {})) as TideRange;
 check(!!range && range.min < range.load && range.max > range.load, `level 127: tide moves (${JSON.stringify(range)})`);
 
 // Mario swims below the water line: lowest $96 where he doesn't, with the layer 3 offset d

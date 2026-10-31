@@ -14,6 +14,7 @@
 import type { Rom } from './rom.ts';
 import { loadLevel, serializeLayer1, serializeLayer2, serializeObjects, hasObjects, isL1Vertical, isSized, type Level, type LevelObject } from './level.ts';
 import type { LevelEmulator } from './levelemu.ts';
+import { runJob } from './runjob.ts';
 import { isDm16, dm16Tiles } from './cdm16.ts';
 import type { Prefab } from './prefabs.ts';
 import { prefabCost } from './prefabcost.ts';
@@ -276,6 +277,5 @@ export function* prefabSuggestions(rom: Rom, src: SuggestSource): Generator<void
 
 // all at once
 export function suggestPrefabs(rom: Rom, src: SuggestSource): PrefabSuggestion[] {
-  const g = prefabSuggestions(rom, src);
-  for (;;) { const r = g.next(); if (r.done) return r.value; }
+  return runJob(prefabSuggestions(rom, src));
 }

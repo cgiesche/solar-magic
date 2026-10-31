@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { levelScanJob, scanKey, type ScanResult } from '../src/core/levelscan.ts';
+import { runJob } from '../src/core/runjob.ts';
 import { loadLevel, serializeLayer1, serializeSprites, spriteLoadOrder, newUid, isL1Vertical, type Level, type LevelSprite } from '../src/core/level.ts';
 import { installEditorPatch, DM16_EXT } from '../src/core/patches.ts';
 
@@ -15,12 +16,11 @@ const emu = new LevelEmulator(rom); emu.boot();
 
 function scan(lv: Level): ScanResult {
   const vertical = isL1Vertical(rom, lv.header.mode);
-  const job = levelScanJob(emu, {
+  return runJob(levelScanJob(emu, {
     number: lv.number, vertical,
     ov: { layer1: serializeLayer1(rom, lv), sprites: serializeSprites(lv.sprites, lv.spriteHeader, vertical) },
     width: vertical ? 512 : lv.header.screens * 256, height: vertical ? lv.header.screens * 256 : 27 * 16,
-  });
-  for (;;) { const r = job.next(); if (r.done) return r.value; }
+  }));
 }
 const lagged = (r: ScanResult) => r.screens.filter((s) => s.lag >= 3);
 const fate = (lv: Level, r: ScanResult, uid: number) => {

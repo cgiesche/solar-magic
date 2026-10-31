@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { cameraReachJob, cameraAtJob, cameraAtKey, type CameraReach } from '../src/core/camerareach.ts';
+import { runJob } from '../src/core/runjob.ts';
 import type { ScanLevel } from '../src/core/levelscan.ts';
 import { loadLevel, serializeLayer1, serializeSprites, isL1Vertical, newUid, type Level } from '../src/core/level.ts';
 import { installEditorPatch, DM16_EXT } from '../src/core/patches.ts';
@@ -27,8 +28,7 @@ function scanLevel(lv: Level): ScanLevel {
     width: vertical ? 512 : lv.header.screens * 256, height: vertical ? lv.header.screens * 256 : 27 * 16,
   };
 }
-function run<T>(job: Generator<void, T>): T { for (;;) { const r = job.next(); if (r.done) return r.value; } }
-const reach = (lv: Level) => run(cameraReachJob(emu, scanLevel(lv)));
+const reach = (lv: Level) => runJob(cameraReachJob(emu, scanLevel(lv)));
 const fmt = (r: CameraReach | null) => {
   if (!r) return 'none';
   const runs: string[] = [];
@@ -84,7 +84,7 @@ const every = (r: CameraReach | null, f: (s: [number, number] | null) => boolean
 // the camera for Mario standing at a place: he is on the screen, the camera inside the level
 {
   const lv = scanLevel(loadLevel(rom, 0x105));
-  const at = (x: number, y: number) => run(cameraAtJob(emu, lv, x, y));
+  const at = (x: number, y: number) => runJob(cameraAtJob(emu, lv, x, y));
   const onScreen = (c: { x: number; y: number } | null, x: number, y: number) =>
     !!c && x >= c.x && x + 16 <= c.x + GAME_VIEW_W && y >= c.y && y + 32 <= c.y + GAME_VIEW_H;
   const high = at(0xbb8, 0x20), low = at(0xbb8, 0x160), start = at(0x40, 0x160);

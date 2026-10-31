@@ -11,6 +11,7 @@ import { LevelEmulator } from './levelemu.ts';
 import { loadLevel, spriteSizes, SPRITE_MEMORY, type LevelSprite, type PrimaryHeader } from './level.ts';
 import { record, rootSlot, sortPlaced, SlotTracker, testLevel, testSpriteData } from './spritegfx.ts';
 import { MemoryResults } from './learner.ts';
+import { runJob } from './runjob.ts';
 import { inputHash } from './inputs.ts';
 import { RomReads, type RomDeps, type RomFingerprint } from './romdeps.ts';
 import type { Rom } from './rom.ts';
@@ -162,11 +163,6 @@ function checkGroup(ctx: SpriteMemContext, m: number, group: SpriteGroup, cams: 
 
 export function checkSpriteMemory(ctx: SpriteMemContext, m: number, groups: SpriteGroup[]): SpriteMemCheck {
   return runJob(checkJob(ctx, m, groups));
-}
-
-// Runs a job of the check to its end
-export function runJob<T>(job: Generator<void, T>): T {
-  for (;;) { const r = job.next(); if (r.done) return r.value; }
 }
 
 // the check as steps (one group each) for running in the background

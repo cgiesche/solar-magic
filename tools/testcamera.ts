@@ -9,6 +9,7 @@ import { installEditorPatch } from '../src/core/patches.ts';
 import { loadLevel, serializeLayer1, serializeSprites, isL1Vertical } from '../src/core/level.ts';
 import { GAME_VIEW_W, GAME_VIEW_H, type Band, type CameraBands } from '../src/core/camerabands.ts';
 import { gameViewAt, cameraRange, cameraReachJob, type CameraReach } from '../src/core/camerareach.ts';
+import { runJob } from '../src/core/runjob.ts';
 import { VERTICAL_SCROLL } from '../src/core/names.ts';
 
 let bad = 0;
@@ -73,10 +74,7 @@ check(JSON.stringify(gameViewAt(40, 40, 200, 200)) === '{"x":0,"y":0}', 'a level
   const emu = new LevelEmulator(rom); emu.boot();
   const ov = { layer1: serializeLayer1(rom, lv105), sprites: serializeSprites(lv105.sprites, lv105.spriteHeader, false) };
   const w = lv105.header.screens * 256, h = 432;
-  const job = cameraReachJob(emu, { number: 0x105, vertical: false, ov, width: w, height: h });
-  let r: IteratorResult<void, CameraReach | null>;
-  do r = job.next(); while (!r.done);
-  const reach = r.value;
+  const reach = runJob(cameraReachJob(emu, { number: 0x105, vertical: false, ov, width: w, height: h }));
   check(!!reach?.camera && reach.camera.along[0] === 0 && reach.camera.along[1] === w - GAME_VIEW_W, `105: the camera goes from the level's start to its end (${JSON.stringify(reach?.camera?.along)})`);
   check(JSON.stringify(gameViewAt(0x800, 400, w, h, reach)) === '{"x":2048,"y":192}', `105: the frame dragged to the bottom stops where the camera does (${JSON.stringify(gameViewAt(0x800, 400, w, h, reach))})`);
   check(JSON.stringify(gameViewAt(0x800, -50, w, h, reach)) === '{"x":2048,"y":0}', '105: and at the top');

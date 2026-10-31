@@ -6,6 +6,7 @@ import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadLevel, encodeSecondaryHeader, decodeSecondaryHeader, readSecondaryHeader, type SecondaryHeader } from '../src/core/level.ts';
 import { layer2Motion, layer2MotionsJob, motionText, RATE_OPTIONS, type Motion } from '../src/core/l2scroll.ts';
+import { runJob } from '../src/core/runjob.ts';
 import { exportLevelFile, importLevelFile } from '../src/core/levelfile.ts';
 import { mwlSections } from '../src/core/mwl.ts';
 import { uploadFiles } from '../src/core/patchpkg.ts';
@@ -51,10 +52,7 @@ for (let i = 0; i < 12; i++) {
 
 // what the header dialog shows: measured for every setting
 {
-  const job = layer2MotionsJob(emu, N, {});
-  let r = job.next();
-  while (!r.done) r = job.next();
-  const m = r.value.result;
+  const m = runJob(layer2MotionsJob(emu, N, {})).result;
   check(m.paired.length === 16 && m.separate.length === RATE_OPTIONS.length, `measured: ${m.paired.length} paired, ${m.separate.length} separate settings`);
   const text = (v: number, axis: 'x' | 'y') => motionText(m.separate[RATE_OPTIONS.indexOf(v)][axis], axis);
   const shown = [text(0, 'x'), text(1, 'x'), text(4, 'y'), text(7, 'y'), text(8, 'x'), text(0x10, 'y'), text(0x16, 'x'), motionText(m.paired[0].y, 'y')];
