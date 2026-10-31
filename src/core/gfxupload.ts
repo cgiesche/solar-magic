@@ -6,9 +6,10 @@ import { type Rom } from './rom.ts';
 import { Snes } from './snes.ts';
 import { RAM, GFX_BUFFER } from './ram.ts';
 import { hashBytes } from './patchreg.ts';
+import { HOOK_UPLOAD } from './patches.ts';
 
 // the routine after its JSL $00BA28: the file in the game's buffer at [$00], Y = its number
-const CONVERT = 0xaa6f;
+const CONVERT = (HOOK_UPLOAD + 4) & 0xffff;
 const RET = 0x1f00; // where it returns to (bank 0's RAM)
 const MAX_STEPS = 200_000;
 const CHECK = 256; // steps between looks at what it wrote so far

@@ -32,8 +32,8 @@ function only3bpp(d: Uint8Array): boolean {
 // colors 8–F, as the game puts them); else 4bpp, colors 8–F – only a file of 128 tiles, a smaller one is
 // taken as 3bpp (the 4th bitplane dropped)
 export function from4bpp(rom: Rom, num: number, bin: Uint8Array): Uint8Array {
-  const three = convertBpp(bin, 4, 3), full = bin.length === RAW_GFX_SIZES[0];
-  if (!full || only3bpp(bin)) return three;
+  const three = convertBpp(bin, 4, 3), tiles128 = bin.length === RAW_GFX_SIZES[0];
+  if (!tiles128 || only3bpp(bin)) return three;
   return num < VANILLA_GFX && uploadsAs(rom, num, three, bin) ? three : bin;
 }
 

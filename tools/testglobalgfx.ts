@@ -12,7 +12,7 @@ import { unzipSync, zipSync } from 'fflate';
 import { readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
 import { Snes } from '../src/core/snes.ts';
-import { GFX_BUFFER } from '../src/core/ram.ts';
+import { GFX_BUFFER, RAM } from '../src/core/ram.ts';
 import { gfxEntry } from '../src/core/patches.ts';
 import { loadAsar } from '../src/core/asar.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
@@ -60,7 +60,7 @@ function call(rom: Rom, at: number, ret: 'rts' | 'rtl', y: number, setup = (_s: 
 // the file as the game's code reading it gets it ($00BA28: 3bpp in its buffer)
 const read3bpp = (rom: Rom, n: number) => call(rom, 0x00ba28, 'rtl', n).wram.slice(GFX_BUFFER, GFX_BUFFER + 0xc00);
 // the file as the game uploads it to VRAM ($00AA6B; sw: the special world passed, $1EEB bit 7)
-const uploaded = (rom: Rom, n: number, sw = false) => call(rom, 0x00aa6b, 'rts', n, (s) => { s.wram[0x1eeb] = sw ? 0x80 : 0; }).vram.slice(0, 0x1000);
+const uploaded = (rom: Rom, n: number, sw = false) => call(rom, 0x00aa6b, 'rts', n, (s) => { s.wram[RAM.specialWorld] = sw ? 0x80 : 0; }).vram.slice(0, 0x1000);
 const fourBpp = [0x01, 0x08]; // the baserom's files using colors 8–F of their own
 
 // ---------- the files and the clean game's ----------

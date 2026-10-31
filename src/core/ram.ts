@@ -68,6 +68,7 @@ export const RAM = {
   // level
   translevel: 0x13bf,
   tileset: 0x1931, // the FG/BG tileset (its graphics files)
+  specialWorld: 0x1eeb, // bit 7: the special world passed (GFX31 replaces half of GFX01)
   onOff: 0x14af,
   blueP: 0x14ad, silverP: 0x14ae, // the P-switches' timers (running while not 0)
   starTimer: 0x1490, // Mario has a star while not 0

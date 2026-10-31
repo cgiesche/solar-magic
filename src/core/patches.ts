@@ -33,7 +33,7 @@ export function nextScreen(): number[] {
 const HOOK_GFXPTR = 0x00ba2c;
 // the game's table of GFX00–31: low, high and bank bytes (replaced by the editor's file table)
 export const GAME_GFX_TABLE = [0x00b992, 0x00b9c4, 0x00b9f6];
-const HOOK_UPLOAD = 0x00aa6b;
+export const HOOK_UPLOAD = 0x00aa6b;
 // the start of the upload's 3bpp conversion (REP #$20 : LDA #$0000)
 const HOOK_RAWUP = 0x00aa80;
 const RAWUP_ORIG = [0xc2, 0x20, 0xa9, 0x00, 0x00];
