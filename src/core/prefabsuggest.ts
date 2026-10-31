@@ -5,15 +5,21 @@
 // when the places' level data against one prefab object each saves more than the prefab's ROM cost
 // (prefabcost.ts), the largest saving first. A generator, one level or one candidate in one level per step,
 // so it runs in the background.
+// Each level's arrangements and places can be kept between runs (KeptSuggestions), with the level (as saved, or
+// as edited) as their input and the places with the ROM bytes their search read: a run takes apart only the
+// levels that changed.
 
 import type { Rom } from './rom.ts';
-import { loadLevel, type Level, type LevelObject } from './level.ts';
-import type { LevelOverride, LevelRender } from './levelemu.ts';
-import { isDm16, dm16Tiles, type Dm16Cond } from './cdm16.ts';
+import { loadLevel, serializeLayer1, serializeLayer2, type Level, type LevelObject } from './level.ts';
+import type { LevelEmulator } from './levelemu.ts';
+import { isDm16, dm16Tiles } from './cdm16.ts';
 import type { Prefab } from './prefabs.ts';
 import { prefabCost } from './prefabcost.ts';
 import { dm16Prefab, arrangementKey } from './pastehint.ts';
-import { findPrefabPlaces, type Layer, type LevelPlaces } from './prefabplaces.ts';
+import { findPrefabPlaces, tileKey, type Layer, type LevelPlaces, type PrefabPlace } from './prefabplaces.ts';
+import { MemoryResults } from './learner.ts';
+import { inputHash } from './inputs.ts';
+import { INPUTS_PER_KEY, type RomFingerprint, type RomReads } from './romdeps.ts';
 
 export interface PrefabSuggestion {
   key: string; // the arrangement (arrangementKey)
@@ -27,7 +33,61 @@ export interface PrefabSuggestion {
 export interface SuggestSource {
   levels: number[];
   level?: (n: number) => Level; // default: as saved
-  load: (n: number, ov: LevelOverride) => LevelRender;
+  emu: () => LevelEmulator; // the emulator to load a level on (what a place search read is tracked there)
+  kept?: KeptSuggestions; // the levels' results of earlier runs
+}
+
+// a level's arrangements (arrangementKey and prefab of each group, in dm16Groups' order) and the Direct Map16
+// tiles it has (tileKey)
+interface Arrangements { list: [string, Prefab][]; tiles: Set<string> }
+
+const PLACES = 4096; // place searches kept (a level and an arrangement each), the latest used
+
+// The results of single levels kept between runs. A level's arrangements are kept by the level's content (they
+// read no ROM byte), an arrangement's places in a level by the level's content and while the ROM bytes their
+// search read are unchanged (the tables, the emulated load where objects lie between those of a place). Both keep
+// a level's latest used INPUTS_PER_KEY contents, so undoing an edit finds them.
+export class KeptSuggestions {
+  private fp: RomFingerprint;
+  private arrangements = new Map<number, { input: string; a: Arrangements }[]>(); // a level's latest used inputs first
+  private places: MemoryResults;
+
+  constructor(fp: RomFingerprint) {
+    this.fp = fp;
+    this.places = new MemoryResults(fp, PLACES);
+  }
+
+  arrangementsOf(n: number, input: string): Arrangements | undefined {
+    const l = this.arrangements.get(n), i = l?.findIndex((e) => e.input === input) ?? -1;
+    if (i < 0) return undefined;
+    const [e] = l!.splice(i, 1);
+    l!.unshift(e);
+    return e.a;
+  }
+  setArrangements(n: number, input: string, a: Arrangements): void {
+    const l = [{ input, a }, ...(this.arrangements.get(n) ?? []).filter((e) => e.input !== input)];
+    this.arrangements.set(n, l.slice(0, INPUTS_PER_KEY));
+  }
+
+  placesOf(n: number, key: string, input: string): PrefabPlace[] | undefined { return this.places.get<PrefabPlace[]>(`${n}:${key}`, input); }
+  setPlaces(n: number, key: string, input: string, places: PrefabPlace[], reads: RomReads): void {
+    this.places.set(`${n}:${key}`, places, this.fp.deps(reads), input);
+  }
+}
+
+// what a level's arrangements and places depend on besides the ROM: its objects as the emulated load gets them
+// (levelOverride's, the header and screen exits in them) and its secondary header
+const levelContent = (rom: Rom, lv: Level) =>
+  inputHash({ layer1: serializeLayer1(rom, lv), layer2: serializeLayer2(rom, lv), layer2Pointer: lv.layer2Pointer, secondary: lv.secondary });
+
+function arrangements(lv: Level): Arrangements {
+  const list: [string, Prefab][] = [];
+  for (const g of dm16Groups(lv)) {
+    const objs = (g.layer === 1 ? lv.objects : lv.layer2Objects!) as LevelObject[];
+    const s = dm16Prefab(g.objects.map((i) => objs[i]));
+    if (s) list.push([arrangementKey(s), s]);
+  }
+  return { list, tiles: new Set([...lv.objects, ...(lv.layer2Objects ?? [])].filter(isDm16).map((o) => tileKey(o.tile ?? 0, o.cond))) };
 }
 
 // the Direct Map16 objects of lv in connected groups (indices in their layer's list, ascending)
@@ -57,26 +117,30 @@ export function dm16Groups(lv: Level): { layer: Layer; objects: number[] }[] {
 }
 
 export function* prefabSuggestions(rom: Rom, src: SuggestSource): Generator<void, PrefabSuggestion[]> {
+  const kept = src.kept;
   // the arrangements of the groups, with how often they occur
-  const levels = new Map<number, Level>();
+  const levels = new Map<number, { lv: Level; input: string; a: Arrangements }>();
   const found = new Map<string, { prefab: Prefab; count: number }>();
   for (const n of src.levels) {
     let lv: Level;
     try { lv = src.level?.(n) ?? loadLevel(rom, n); } catch { continue; } // unreadable level
-    levels.set(n, lv);
-    for (const g of dm16Groups(lv)) {
-      const objs = (g.layer === 1 ? lv.objects : lv.layer2Objects!) as LevelObject[];
-      const s = dm16Prefab(g.objects.map((i) => objs[i]));
-      if (!s) continue;
-      const key = arrangementKey(s);
+    const input = kept ? levelContent(rom, lv) : '';
+    let a = kept?.arrangementsOf(n, input);
+    if (!a) { a = arrangements(lv); kept?.setArrangements(n, input, a); }
+    levels.set(n, { lv, input, a });
+    for (const [key, s] of a.list) {
       const f = found.get(key);
       if (f) f.count++; else found.set(key, { prefab: s, count: 1 });
     }
     yield;
   }
   // the places of those occurring more than once, in the levels that have their first tile
-  const tileKey = (tile: number, c: Dm16Cond | null | undefined) => `${tile} ${c ? `${c.flag} ${c.always}` : ''}`;
-  const has = new Map([...levels].map(([n, lv]) => [n, new Set([...lv.objects, ...(lv.layer2Objects ?? [])].filter(isDm16).map((o) => tileKey(o.tile ?? 0, o.cond)))]));
+  let emu: LevelEmulator | null = null; // (taken once per arrangement, when a search is needed)
+  const search = (n: number, lv: Level, s: Prefab) => {
+    const e = (emu ??= src.emu());
+    // (a load starts from the boot's state: its reads count once a load is needed)
+    return e.tracked(() => findPrefabPlaces(rom, lv, s, (ov) => { const r = e.load(n, ov); if (e.bootReads) rom.reads?.add(e.bootReads); return r; }), null);
+  };
   const out: PrefabSuggestion[] = [];
   for (const [key, { prefab, count }] of found) {
     if (count < 2) continue;
@@ -84,9 +148,15 @@ export function* prefabSuggestions(rom: Rom, src: SuggestSource): Generator<void
     const a = prefab.tiles.findIndex((t) => t >= 0);
     const first = tileKey(prefab.tiles[a], prefab.conds?.[a]);
     const places: LevelPlaces[] = [];
-    for (const [n, lv] of levels) {
-      if (!has.get(n)!.has(first)) continue;
-      const ps = findPrefabPlaces(rom, lv, prefab, (ov) => src.load(n, ov));
+    emu = null;
+    for (const [n, l] of levels) {
+      if (!l.a.tiles.has(first)) continue;
+      let ps = kept?.placesOf(n, key, l.input);
+      if (!ps) {
+        const r = search(n, l.lv, prefab);
+        ps = r.result;
+        kept?.setPlaces(n, key, l.input, ps, r.reads);
+      }
       if (ps.length) places.push({ level: n, places: ps });
       yield;
     }

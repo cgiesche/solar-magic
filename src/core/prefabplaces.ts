@@ -28,14 +28,15 @@ export interface LevelPlaces { level: number; places: PrefabPlace[] }
 export interface LevelGroups { level: number; places: PrefabGroup[] }
 
 const ALL_FLAGS = flagBytes(Array.from({ length: COND_FLAGS }, (_, f) => f));
-const keyOf = (tile: number, cond: Dm16Cond | null | undefined) => `${tile} ${cond ? `${cond.flag} ${cond.always}` : ''}`;
+// a Direct Map16 tile with its condition
+export const tileKey = (tile: number, cond: Dm16Cond | null | undefined) => `${tile} ${cond ? `${cond.flag} ${cond.always}` : ''}`;
 const ownerKey = (layer: Layer, i: number) => (layer === 2 ? 0x8000 | i : i);
 
 // the places of prefab s in lv (as given); load: lv's emulated load, called when an object between those of
 // a place may write a prefab tile; skip: objects that are no place's (the selection)
 export function findPrefabPlaces(rom: Rom, lv: Level, s: Prefab, load: (ov: LevelOverride) => LevelRender,
   skip: (layer: Layer, i: number) => boolean = () => false): PrefabPlace[] {
-  const cells = s.tiles.map((t, i) => (t === TRANSPARENT ? '' : keyOf(t, s.conds?.[i])));
+  const cells = s.tiles.map((t, i) => (t === TRANSPARENT ? '' : tileKey(t, s.conds?.[i])));
   const anchor = cells.findIndex(Boolean);
   if (anchor < 0) return [];
   const ac = anchor % s.w, ar = Math.floor(anchor / s.w);
@@ -62,7 +63,7 @@ export function findPrefabPlaces(rom: Rom, lv: Level, s: Prefab, load: (ov: Leve
         if (!isDm16(o)) return;
         const ts = dm16Tiles(o), inside = ts.map(idx).filter((i) => i >= 0);
         if (!inside.length) return;
-        const k = keyOf(o.tile ?? 0, o.cond);
+        const k = tileKey(o.tile ?? 0, o.cond);
         if (inside.length === ts.length && inside.every((i) => cells[i] === k)) {
           S.push(j);
           for (const i of inside) lastS[i] = j;
@@ -82,7 +83,7 @@ export function findPrefabPlaces(rom: Rom, lv: Level, s: Prefab, load: (ov: Leve
     };
     const tried = new Set<number>();
     for (const o of objs) {
-      if (!isDm16(o) || keyOf(o.tile ?? 0, o.cond) !== cells[anchor]) continue;
+      if (!isDm16(o) || tileKey(o.tile ?? 0, o.cond) !== cells[anchor]) continue;
       for (const t of dm16Tiles(o)) {
         const X = (t & 0xffff) - ac, Y = (t >> 16) - ar;
         if (X < 0 || Y < 0 || tried.has((Y << 16) | X)) continue;

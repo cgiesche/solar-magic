@@ -23,7 +23,7 @@ import { flagBytes, usedFlags, isDm16, dm16Tiles, type Dm16Cond } from '../core/
 import { PREFAB_EXT, PREFAB_MAX, TRANSPARENT, listPrefabs, writePrefab, type Prefab } from '../core/prefabs.ts';
 import { breakUpPrefab, replaced, setPrefabSources } from '../core/prefabsources.ts';
 import { PasteCounter, findPasted, arrangementKey, type PasteHint } from '../core/pastehint.ts';
-import { prefabSuggestions, type PrefabSuggestion } from '../core/prefabsuggest.ts';
+import { prefabSuggestions, KeptSuggestions, type PrefabSuggestion } from '../core/prefabsuggest.ts';
 import { planPrefabPlaces, applyPrefabPlaces, deletePrefab, prefabObjectCount, replaceWithPrefab, type LevelPlaces, type LevelGroups, type PrefabGroup } from '../core/prefabplaces.ts';
 import type { Package } from '../core/pkgreg.ts';
 import { kvEntries, kvWrite, saveRom } from './storage.ts';
@@ -203,6 +203,7 @@ export class App {
   // a while after the last change; null while not known yet
   prefabSuggestions: PrefabSuggestion[] | null = null;
   suggestionsCurrent = false; // they are of the levels and the ROM as they are now (their places can be taken)
+  private keptSuggestions: KeptSuggestions; // the levels' arrangements and places of earlier runs (only changed levels are taken apart again)
   private suggestTimer = 0;
   private suggestRun = 0;
   // tile (x,y) lookup from map offset
@@ -279,6 +280,7 @@ export class App {
       setBusy: (key, label) => this.setBusy(key, label),
     });
     this.spriteGroups = new SpriteGroupResults(this.results.fp);
+    this.keptSuggestions = new KeptSuggestions(this.results.fp);
     this.probes = new ProbeClient({
       results: this.results,
       cacheReady: this.cacheReady,
@@ -1688,7 +1690,8 @@ export class App {
     } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); return false; }
   }
 
-  // the suggestions anew a while after the last change, in slices of background work (later)
+  // the suggestions anew a while after the last change, in slices of background work (later); the levels that
+  // didn't change keep their results (keptSuggestions)
   private scheduleSuggestions(): void {
     clearTimeout(this.suggestTimer);
     this.suggestionsCurrent = false;
@@ -1699,7 +1702,8 @@ export class App {
       const steps = prefabSuggestions(this.rom, {
         levels: usedLevels(this.rom),
         level: (n) => (n === open ? this.level : loadLevel(this.rom, n)),
-        load: (n, ov) => this.learner.emu().load(n, ov),
+        emu: () => this.learner.emu(false),
+        kept: this.keptSuggestions,
       });
       const step = () => {
         if (run !== this.suggestRun) return;

@@ -2,8 +2,9 @@
 // once across the levels (however split into rectangles), with their places, levels and the bytes a prefab
 // would save (the level data of the places against one prefab object each, the prefab's ROM cost taken off);
 // only positive savings, the largest first. Computed in steps (a generator), so it runs in the background;
-// gone once the places are replaced by the prefab.
-import { Rom } from '../src/core/rom.ts';
+// gone once the places are replaced by the prefab. Each level's arrangements and places are kept between runs
+// (KeptSuggestions, #185): a run takes apart only the levels that changed, with the same suggestions.
+import { Rom, snesToPc } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadLevel, newUid, type LevelObject } from '../src/core/level.ts';
 import { saveLevel } from '../src/core/save.ts';
@@ -12,7 +13,12 @@ import { DM16_EXT } from '../src/core/patches.ts';
 import { installPrefabPatch, writePrefab } from '../src/core/prefabs.ts';
 import { prefabCost } from '../src/core/prefabcost.ts';
 import { applyPrefabPlaces } from '../src/core/prefabplaces.ts';
-import { dm16Groups, prefabSuggestions, suggestPrefabs } from '../src/core/prefabsuggest.ts';
+import { dm16Groups, prefabSuggestions, suggestPrefabs, KeptSuggestions } from '../src/core/prefabsuggest.ts';
+import { RomFingerprint } from '../src/core/romdeps.ts';
+import { gfxSkipMask } from '../src/core/gfxpages.ts';
+import { readGfx, writeGfx } from '../src/core/gfxfiles.ts';
+import type { Level } from '../src/core/level.ts';
+import { SHARED_PALETTES } from '../src/core/sharedpal.ts';
 import { editorImage } from './fixture.ts';
 
 let fail = 0;
@@ -42,11 +48,12 @@ const stairs = (x: number, y: number) => [dm(x, y + 1, 0x150), dm(x + 1, y, 0x15
 const rom = new Rom(await editorImage());
 installPrefabPatch(rom);
 const emu = new LevelEmulator(rom);
+emu.skipMask = () => gfxSkipMask(rom); // as the editor: graphics data isn't among the bytes read
 emu.boot();
-const load = (n: number, ov = {}) => emu.load(n, ov);
+const load = () => emu;
 
 const H1 = 0x105, H2 = 0x106;
-check(suggestPrefabs(rom, { levels: usedLevels(rom), load }).length === 0, 'the clean game: no suggestions');
+check(suggestPrefabs(rom, { levels: usedLevels(rom), emu: load }).length === 0, 'the clean game: no suggestions');
 {
   const lv = loadLevel(rom, H1);
   lv.objects.push(...block(0x20, 5), ...block(0x30, 8), ...platform(0x40, 10), ...stairs(0x50, 4), ...stairs(0x58, 4), dm(0x60, 4, 0x180, 2, 2));
@@ -58,7 +65,7 @@ check(suggestPrefabs(rom, { levels: usedLevels(rom), load }).length === 0, 'the 
   saveLevel(rom, lv);
 }
 
-const steps = prefabSuggestions(rom, { levels: usedLevels(rom), load });
+const steps = prefabSuggestions(rom, { levels: usedLevels(rom), emu: load });
 let yields = 0, r = steps.next();
 while (!r.done) { yields++; r = steps.next(); }
 const list = r.value;
@@ -76,7 +83,7 @@ check(list.every((s) => s.saved > 0 && s.count > 1), 'only positive savings of r
   const lv = loadLevel(rom, 0x107);
   lv.objects.push(...platform(0x20, 10));
   saveLevel(rom, lv);
-  const l2 = suggestPrefabs(rom, { levels: usedLevels(rom), load });
+  const l2 = suggestPrefabs(rom, { levels: usedLevels(rom), emu: load });
   const pl = l2.find((s) => s.prefab.w === 8);
   check(!!pl && pl.count === 3 && pl.saved === 3 * (18 - 4) - prefabCost(pl.prefab).once, `the platform thrice: listed (${pl?.saved})`);
   check(l2.length === 2 && l2[0].prefab.w === 3 && l2[1] === pl, 'sorted by the saving');
@@ -86,17 +93,80 @@ check(list.every((s) => s.saved > 0 && s.count > 1), 'only positive savings of r
 {
   const open = loadLevel(rom, H2);
   open.objects = open.objects.filter((o) => o.ext !== DM16_EXT || o.tile! < 0x100 || o.tile! > 0x108);
-  const l3 = suggestPrefabs(rom, { levels: usedLevels(rom), level: (n) => (n === H2 ? open : loadLevel(rom, n)), load });
+  const l3 = suggestPrefabs(rom, { levels: usedLevels(rom), level: (n) => (n === H2 ? open : loadLevel(rom, n)), emu: load });
   check(l3.find((s) => s.prefab.w === 3)?.count === 2, 'the open level as edited');
+}
+
+// kept between runs: only the levels that changed are taken apart again, the suggestions as a full run's
+{
+  class Spy extends KeptSuggestions {
+    took: number[] = []; // levels whose arrangements were found
+    searched: number[] = []; // levels searched for places
+    setArrangements(...a: Parameters<KeptSuggestions['setArrangements']>) { this.took.push(a[0]); super.setArrangements(...a); }
+    setPlaces(...a: Parameters<KeptSuggestions['setPlaces']>) { this.searched.push(a[0]); super.setPlaces(...a); }
+    reset() { this.took = []; this.searched = []; }
+  }
+  const kept = new Spy(new RomFingerprint(rom));
+  const same = (level: ((n: number) => Level) | undefined, what: string) => {
+    kept.reset();
+    const k = suggestPrefabs(rom, { levels: usedLevels(rom), level, emu: load, kept });
+    const full = suggestPrefabs(rom, { levels: usedLevels(rom), level, emu: load });
+    check(full.length > 0 && JSON.stringify(k) === JSON.stringify(full), `${what}: the suggestions of a full run`);
+  };
+  const only = (levels: number[], what: string) => {
+    const took = [...new Set(kept.took)], searched = [...new Set(kept.searched)];
+    check(JSON.stringify(took) === JSON.stringify(levels), `${what}: levels taken apart ${took.map((n) => n.toString(16))}`);
+    check(searched.every((n) => levels.includes(n)), `${what}: levels searched ${searched.map((n) => n.toString(16))}`);
+  };
+  same(undefined, 'first run');
+  check(kept.took.length === usedLevels(rom).length && kept.searched.length > 0, 'first run: every level taken apart');
+  same(undefined, 'again');
+  only([], 'nothing changed');
+  // the open level as edited: a block's tile gone (as a place it is gone)
+  const open = loadLevel(rom, H2);
+  open.objects = open.objects.filter((o) => !(o.ext === DM16_EXT && o.tile === 0x104));
+  same((n) => (n === H2 ? open : loadLevel(rom, n)), 'open level edited');
+  only([H2], 'open level edited');
+  check(kept.searched.includes(H2), 'open level edited: searched again');
+  // a ROM edit no level's data and no search read: a pixel in a graphics file
+  const f = readGfx(rom, 0x14);
+  f.pix[3] ^= 1;
+  writeGfx(rom, f);
+  same(undefined, 'a graphics file edited');
+  only([], 'a graphics file edited');
+  // another level saved: only it is taken apart again
+  const other = usedLevels(rom).find((n) => n !== H1 && n !== H2 && n !== 0x107)!;
+  const lv = loadLevel(rom, other);
+  lv.objects.push(dm(0x70, 4, 0x190));
+  saveLevel(rom, lv);
+  same(undefined, 'another level saved');
+  only([other], 'another level saved');
+  // a place with another object between its objects: its search loads the level, and the bytes the load read count
+  // (a color of the shared palettes: the test's emulator leaves out only graphics data)
+  const h = loadLevel(rom, H1), b = block(0x70, 12);
+  h.objects.push(...b.slice(0, 4), { uid: newUid(), num: 5, ext: 0, x: 0x78, y: 2, size: 0 }, ...b.slice(4));
+  saveLevel(rom, h);
+  same(undefined, 'a place with an object between');
+  only([H1], 'a place with an object between');
+  const c = snesToPc(SHARED_PALETTES) + 2;
+  rom.writeAt(c, Uint8Array.of(rom.data[c] ^ 0x1f));
+  same(undefined, 'a color edited');
+  check(!kept.took.length && JSON.stringify([...new Set(kept.searched)]) === JSON.stringify([H1]), `a color edited: only the search that loaded again (${kept.searched.map((n) => n.toString(16))})`);
+  // a level with places saved: the suggestion follows
+  const h1 = loadLevel(rom, H1);
+  h1.objects.push(...platform(0x70, 12));
+  saveLevel(rom, h1);
+  same(undefined, 'a level with places saved');
+  only([H1], 'a level with places saved');
 }
 
 // replaced by the prefab: the suggestion is gone
 {
-  const before = suggestPrefabs(rom, { levels: usedLevels(rom), load });
+  const before = suggestPrefabs(rom, { levels: usedLevels(rom), emu: load });
   const b = before.find((s) => s.prefab.w === 3)!;
   writePrefab(rom, 7, { ...b.prefab, name: 'Block' });
   applyPrefabPlaces(rom, 7, b.places);
-  const after = suggestPrefabs(rom, { levels: usedLevels(rom), load });
+  const after = suggestPrefabs(rom, { levels: usedLevels(rom), emu: load });
   check(!after.some((s) => s.key === b.key), 'saved as prefab: gone');
   check(after.some((s) => s.prefab.w === 8), 'the others stay');
 }
