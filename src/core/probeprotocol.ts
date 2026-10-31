@@ -11,6 +11,9 @@ import type { SpriteMemLevel } from './spritemem.ts';
 import type { LevelOverride } from './levelemu.ts';
 import type { Level } from './level.ts';
 import type { Keep } from './jobrunner.ts';
+import type { ObjSpec } from './objthumbs.ts';
+import type { RunStates } from './blockprobe.ts';
+import type { SizeSpec } from './objresize.ts';
 
 // a probe in tileset ts: what a Map16 tile does, how Mario collides with it, what a sprite does, Mario's
 // run speeds, the scroll bands in a level of that mode and vertical scroll setting
@@ -53,7 +56,12 @@ export type ProbeReply = ProbeDone | KindsDone | ScanDone | CameraDone | Learned
 // A result learner job (CONTEXT.md) run here: the images of all sprites of a sprite set, the image of a sprite at a
 // tile (its variant by position), the image of a custom sprite with extra bytes, the tiles of the levels not known yet
 // (their uses, levelusage.ts), a level's sprite memory check, the tiles and colors animating in a level, what the four
-// layer 3 settings do in a level as given (layer3.ts), the tiles of a level as edited (levelusage.ts levelTilesAll)
+// layer 3 settings do in a level as given (layer3.ts), the tiles of a level as edited (levelusage.ts levelTilesAll),
+// the object picker's thumbnails (objthumbs.ts; keys: each object's key, objKey), the placement preview (objthumbs.ts
+// placementPreviewJob), the jump arcs from a tile (jumparcs.ts; level: the hash of the level as loaded, load: what it
+// is loaded with), what the layer 2 scroll settings do in a level (l2scroll.ts), what Mario does on each overworld
+// layer 1 tile (owpaths.ts), the prefab suggestions (prefabsuggest.ts; open: the open level as edited) and the boxes
+// of objects at sizes (objresize.ts; layer2Pointer: the level's layer 2 objects as the probe loads take them)
 export type LearnJob =
   | { kind: 'sprites'; level: SpriteLevel; nums: number[]; input?: string } // (input: of each test level load, spriteSetJob)
   | { kind: 'spriteAt'; level: SpriteLevel; id: number; x: number; y: number }
@@ -62,14 +70,38 @@ export type LearnJob =
   | { kind: 'spriteMem'; level: SpriteMemLevel }
   | { kind: 'animated'; level: number; ov: LevelOverride }
   | { kind: 'layer3'; level: number; ov: LevelOverride }
-  | { kind: 'levelTiles'; level: Level; ov: LevelOverride };
+  | { kind: 'levelTiles'; level: Level; ov: LevelOverride }
+  | { kind: 'thumbs'; level: Level; specs: ObjSpec[]; keys: string[] }
+  | { kind: 'preview'; level: Level; ov: LevelOverride; layer2: boolean; placed: number[] }
+  | { kind: 'arcs'; level: string; load: [number, LevelOverride, number, number]; tx: number; ty: number; runs: RunStates }
+  | { kind: 'layer2Motions'; level: number; ov: LevelOverride }
+  | { kind: 'pathKinds' }
+  | { kind: 'suggest'; levels: number[]; open?: Level }
+  | { kind: 'sizes'; level: KindLevel; layer2Pointer: number; specs: SizeSpec[] };
 
-// where a learn job's result goes (jobrunner.ts Keep): the levels' uses go to the entries of each level (the job keeps
-// none), the animated tiles and colors and the tiles of the level as edited change with every edit (memory only), the
-// others to the result cache
-export function learnKeep(j: LearnJob): Keep {
-  return j.kind === 'uses' ? false : j.kind === 'animated' || j.kind === 'levelTiles' ? 'memory' : true;
-}
+// Per kind of learn job where its result goes (keep, jobrunner.ts Keep) and whether it is a picture (CONTEXT.md, ADR
+// 0008): the levels' uses go to the entries of each level (the job keeps none); the prefab suggestions and the object
+// boxes to the editor only (it keeps them as a run's and per ROM state); the animated tiles and colors, the tiles of
+// the level as edited, the placement preview and the jump arcs change with every edit (memory only); the others to the
+// result cache
+export const LEARN_KINDS: { [K in LearnJob['kind']]: { keep: Keep; picture: boolean } } = {
+  sprites: { keep: true, picture: true },
+  spriteAt: { keep: true, picture: true },
+  spriteBytes: { keep: true, picture: true },
+  uses: { keep: false, picture: false },
+  spriteMem: { keep: true, picture: false },
+  animated: { keep: 'memory', picture: true },
+  layer3: { keep: true, picture: false },
+  levelTiles: { keep: 'memory', picture: false },
+  thumbs: { keep: true, picture: true },
+  preview: { keep: 'memory', picture: true },
+  arcs: { keep: 'memory', picture: false },
+  layer2Motions: { keep: true, picture: false },
+  pathKinds: { keep: true, picture: false },
+  suggest: { keep: false, picture: false },
+  sizes: { keep: false, picture: false },
+};
+export const learnKeep = (j: LearnJob): Keep => LEARN_KINDS[j.kind].keep;
 
 // a learn job asked for: its result under key and input (the hash of what it depends on outside the ROM, inputs.ts),
 // learned in a lane (one job at a time, in the order asked); replace drops the lane's other jobs; parts: the editor's

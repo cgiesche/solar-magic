@@ -130,7 +130,7 @@ const tile104 = (lv: Level) => { lv.objects = lv.objects.filter((o) => !(o.ext =
   };
   // the latest run's suggestions hold (kept at once) or not after a change
   const holds = (open: Level | undefined, want: boolean, what: string) =>
-    check((kept.held(rom, { levels: usedLevels(rom), open, emu: load }) !== null) === want, `${what}: the latest suggestions ${want ? 'hold' : 'don\'t hold'}`);
+    check((kept.held(rom, { levels: usedLevels(rom), open }) !== null) === want, `${what}: the latest suggestions ${want ? 'hold' : 'don\'t hold'}`);
   same(undefined, 'first run');
   check(kept.took.length === usedLevels(rom).length && kept.searched.length > 0, 'first run: every level taken apart');
   check(kept.loaded.length === usedLevels(rom).length, 'first run: every level loaded');

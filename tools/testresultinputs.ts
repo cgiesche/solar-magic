@@ -20,7 +20,7 @@ import { ResultCache, RomFingerprint, RomReads, INPUTS_PER_KEY, oldStoreKeys, ty
 import { ResultLearner } from '../src/core/learner.ts';
 import { inputHash, levelInput } from '../src/core/inputs.ts';
 import { captureSprites } from '../src/core/spritegfx.ts';
-import { renderObjectThumbs, thumbsKey, thumbsInput, previewInput, objKey, type ObjSpec } from '../src/ui/thumbs.ts';
+import { renderObjectThumbs, thumbsKey, thumbsInput, previewInput, objKey, type ObjSpec } from '../src/core/objthumbs.ts';
 import { layerGeom, renderLayerTiles } from '../src/core/render.ts';
 import { editorImage } from './fixture.ts';
 

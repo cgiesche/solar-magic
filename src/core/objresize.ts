@@ -19,10 +19,15 @@ export type SizeSpec = Pick<LevelObject, 'num' | 'ext' | 'size' | 'tile' | 'exte
 // objects per emulated load: each starts a screen with an empty one to its left (routines may grow to the left)
 const PER = 13;
 
+// an object's key among the probed ones: what the probe depends on
+export function sizeKey(s: SizeSpec): string {
+  return `${s.num}:${s.ext}:${s.size}:${s.tile ?? ''}:${s.extension?.join(',') ?? ''}`;
+}
+
 export class SizeProbe {
   private boxes = new Map<string, Box | null>();
   private pos: (off: number) => [number, number] | undefined;
-  private emu: LevelEmulator;
+  emu: LevelEmulator; // (another one may take over: the probe worker's job, sizesJob)
   private level: KindLevel;
   private layer2Pointer: number;
 
@@ -36,19 +41,15 @@ export class SizeProbe {
     this.pos = (off) => inv.get(off);
   }
 
-  private key(s: SizeSpec): string {
-    return `${s.num}:${s.ext}:${s.size}:${s.tile ?? ''}:${s.extension?.join(',') ?? ''}`;
-  }
-
   // the tiles the object covers at its size (null: it draws nothing or its load fails), undefined while not probed
   box(s: SizeSpec): Box | null | undefined {
-    return this.boxes.get(this.key(s));
+    return this.boxes.get(sizeKey(s));
   }
 
   // probes the objects not probed yet, at most `loads` emulated loads; whether all are known now
   probe(specs: SizeSpec[], loads = Infinity): boolean {
     const todo = new Map<string, SizeSpec>();
-    for (const s of specs) { const k = this.key(s); if (!this.boxes.has(k)) todo.set(k, s); }
+    for (const s of specs) { const k = sizeKey(s); if (!this.boxes.has(k)) todo.set(k, s); }
     // each batch from large to small sizes across the whole range: the widest starts leftmost, so wide
     // objects (a width up to 255) still end inside the level
     const sorted = [...todo.values()].sort((a, b) => b.size - a.size), nb = Math.ceil(sorted.length / PER);
@@ -58,7 +59,7 @@ export class SizeProbe {
       const [a, b] = queue.shift()!;
       const r = this.run(list.slice(a, b));
       // a crashing object spoils its whole batch: the halves are loaded again
-      if (r) r.forEach((box, i) => this.boxes.set(this.key(list[a + i]), box));
+      if (r) r.forEach((box, i) => this.boxes.set(sizeKey(list[a + i]), box));
       else { const h = a + ((b - a) >> 1); queue.unshift([a, h], [h, b]); }
     }
     return !queue.length;
@@ -92,6 +93,14 @@ export class SizeProbe {
       return x1 < x0 ? null : { x0: x0 - o.x, y0: y0 - o.y, x1: x1 - o.x, y1: y1 - o.y };
     });
   }
+}
+
+// The boxes of objects (SizeProbe) in a level (layer2Pointer: its layer 2 objects as the probe loads take them) as a
+// job (the result learner's, in the probe worker; no picture): a load per step, the boxes in the order of specs. The
+// probe keeps the boxes between jobs (the owner drops it when the ROM changes or the level is another).
+export function* sizesJob(probe: SizeProbe, specs: SizeSpec[]): Generator<void, (Box | null)[]> {
+  while (!probe.probe(specs, 1)) yield;
+  return specs.map((s) => probe.box(s) ?? null);
 }
 
 // ---- which part of the settings byte sizes which axis ----

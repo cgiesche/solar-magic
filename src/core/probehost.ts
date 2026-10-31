@@ -5,9 +5,11 @@
 // Longer tasks run here too, as jobs of the job runner (jobrunner.ts) a step at a time between the probes: the object
 // kinds of a tileset (objkinds.ts), the level scan (levelscan.ts) and the camera at Mario standing at a place
 // (camerareach.ts). A task the editor no longer wants is kept without running; asked for again with the same
-// result, it goes on where it stood. The result learner's jobs (CONTEXT.md; the sprite images, the levels' uses, the
-// sprite memory check, the animated tiles and colors, the layer 3 kinds, the tiles of the level as edited) run here too, in
-// lanes as on the main thread (learner.ts), taking turns with the tasks; they choose whether the display data counts
+// result, it goes on where it stood. The result learner's jobs (CONTEXT.md; probeprotocol.ts LearnJob: the sprite images,
+// the levels' uses, the sprite memory check, the animated tiles and colors, the layer 3 kinds, the tiles of the level as
+// edited, the object thumbnails, the placement preview, the jump arcs, the layer 2 motions, the overworld path kinds, the
+// prefab suggestions, the object boxes for resizing) run here too, in lanes (one job at a time, a request replacing the
+// lane's others drops them), taking turns with the tasks; they choose whether the display data counts
 // for them (pictures: it does; the probes and tasks: it doesn't, ADR 0008).
 // After the first copy of the ROM the editor sends the ranges a change wrote: queued jobs stay, a task starts over
 // before its next step only when it read a changed byte, results are checked against the ROM as always.
@@ -24,7 +26,14 @@ import { LevelUses, levelUsesJob, levelTilesJob } from './levelusage.ts';
 import { layer3KindsJob } from './layer3.ts';
 import { SpriteGroupResults, spriteMemCheckJob } from './spritemem.ts';
 import { animatedJob } from './levelemu.ts';
-import { jobId, jobKey, learnKeep, type ProbeJob, type ProbeMessage, type ProbeReply, type TaskMessage, type TaskType, type LearnJob, type LearnMessage } from './probeprotocol.ts';
+import { objectThumbsJob, placementPreviewJob } from './objthumbs.ts';
+import { jumpArcsJob } from './jumparcs.ts';
+import { layer2MotionsJob } from './l2scroll.ts';
+import { pathKindsJob } from './owpaths.ts';
+import { KeptSuggestions, prefabSuggestionsJob } from './prefabsuggest.ts';
+import { SizeProbe, sizesJob } from './objresize.ts';
+import { inputHash } from './inputs.ts';
+import { jobId, jobKey, learnKeep, LEARN_KINDS, type ProbeJob, type ProbeMessage, type ProbeReply, type TaskMessage, type TaskType, type LearnJob, type LearnMessage } from './probeprotocol.ts';
 
 // a longer task: what was asked (a request asking for the same result may have replaced it) and its job
 interface Task { msg: TaskMessage; run: JobRun<unknown> }
@@ -39,22 +48,37 @@ function taskJob(m: TaskMessage): JobRun<unknown>['start'] {
 }
 function* found<T>(job: Generator<void, T | null>): Job<T | undefined> { return (yield* job) ?? undefined; }
 
-// what learn jobs keep between them: the levels' uses (the entries of each level) and the results of single sprite
-// groups (the sprite memory check's); the ROM
-interface LearnState { uses: LevelUses; groups: SpriteGroupResults; rom: Rom }
+// what learn jobs keep between them: the levels' uses (the entries of each level), the results of single sprite
+// groups (the sprite memory check's), the results of single levels of the prefab suggestions and the object boxes
+// probed in a level (dropped when the ROM changes, as the editor keeps them per ROM state); the ROM
+interface LearnState { uses: LevelUses; groups: SpriteGroupResults; suggest: KeptSuggestions; sizes: { key: string; probe: SizeProbe } | null; rom: Rom }
 
-// a learn job's job and whether it is a picture (CONTEXT.md); show takes what it shows while it runs (null: it
-// started, also over)
-function learnJob(j: LearnJob, state: LearnState, show: (items: unknown[] | null) => void): { picture: boolean; start: JobRun<unknown>['start'] } {
+// a learn job's job; show takes what it shows while it runs (null: it started, also over)
+function learnJob(j: LearnJob, state: LearnState, show: (items: unknown[] | null) => void): JobRun<unknown>['start'] {
   switch (j.kind) {
-    case 'sprites': return { picture: true, start: (emu, _p, part) => spriteSetJob(emu, j.level, j.nums, show, part, j.input) };
-    case 'spriteAt': return { picture: true, start: (emu) => spriteAtJob(emu, j.level, j.id, j.x, j.y) };
-    case 'spriteBytes': return { picture: true, start: (emu) => spriteBytesJob(emu, j.level, j.id, j.bytes) };
-    case 'uses': return { picture: false, start: (emu) => levelUsesJob(state.uses, emu, j.levels, show) };
-    case 'spriteMem': return { picture: false, start: (emu) => spriteMemCheckJob(emu, j.level, state.groups) };
-    case 'animated': return { picture: true, start: (emu) => animatedJob(emu, j.level, j.ov) };
-    case 'layer3': return { picture: false, start: (emu) => layer3KindsJob(emu, j.level, j.ov) };
-    case 'levelTiles': return { picture: false, start: (emu) => levelTilesJob(state.rom, emu, j.level, j.ov) };
+    case 'sprites': return (emu, _p, part) => spriteSetJob(emu, j.level, j.nums, show, part, j.input);
+    case 'spriteAt': return (emu) => spriteAtJob(emu, j.level, j.id, j.x, j.y);
+    case 'spriteBytes': return (emu) => spriteBytesJob(emu, j.level, j.id, j.bytes);
+    case 'uses': return (emu) => levelUsesJob(state.uses, emu, j.levels, show);
+    case 'spriteMem': return (emu) => spriteMemCheckJob(emu, j.level, state.groups);
+    case 'animated': return (emu) => animatedJob(emu, j.level, j.ov);
+    case 'layer3': return (emu) => layer3KindsJob(emu, j.level, j.ov);
+    case 'levelTiles': return (emu) => levelTilesJob(state.rom, emu, j.level, j.ov);
+    case 'thumbs': {
+      const keys = new Map(j.specs.map((s, i) => [s, j.keys[i]]));
+      return (emu) => objectThumbsJob(state.rom, emu, j.level, j.specs, (s) => keys.get(s)!);
+    }
+    case 'preview': return (emu) => placementPreviewJob(state.rom, emu, j.level, j.ov, j.layer2, j.placed);
+    case 'arcs': return (emu, prepare) => jumpArcsJob(emu, prepare, j.level, j.load, j.tx, j.ty, j.runs);
+    case 'layer2Motions': return function* (emu) { return (yield* layer2MotionsJob(emu, j.level, j.ov)).result; };
+    case 'pathKinds': return (emu) => pathKindsJob(emu);
+    case 'suggest': return (emu) => prefabSuggestionsJob(state.rom, emu, state.suggest, j.levels, j.open);
+    case 'sizes': return (emu) => {
+      const key = `${j.level.number}:${inputHash(j.level.header)}:${j.layer2Pointer}`;
+      if (state.sizes?.key !== key) state.sizes = { key, probe: new SizeProbe(emu, j.level, j.layer2Pointer) };
+      state.sizes.probe.emu = emu;
+      return sizesJob(state.sizes.probe, j.specs);
+    };
   }
 }
 
@@ -98,10 +122,12 @@ export class ProbeHost {
       // the tasks' emulators start from the prober's boot snapshot, which leaves out the display data as the probes
       // do (ADR 0008): the prober's emulator gets the runner's mask (gfxDisplaySkipMask)
       this.runner = new JobRunner({ rom, results: this.prober.results, noDisplay: this.prober.emu });
-      this.state = { uses: new LevelUses(rom, this.prober.results), groups: new SpriteGroupResults(this.prober.results.fp), rom };
+      const fp = this.prober.results.fp;
+      this.state = { uses: new LevelUses(rom, this.prober.results), groups: new SpriteGroupResults(fp), suggest: new KeptSuggestions(fp), sizes: null, rom };
       return;
     }
     this.rom.data = data;
+    this.state!.sizes = null;
     this.prober.reset(); // probe levels that read changed pages are prepared again
     this.keepHolding();
   }
@@ -128,6 +154,7 @@ export class ProbeHost {
     }
     this.gen = gen;
     for (const [at, b] of edits) rom.writeAt(at, b);
+    this.state!.sizes = null;
     this.prober.reset();
     this.keepHolding();
   }
@@ -158,8 +185,8 @@ export class ProbeHost {
     if (known) { known.msg = msg; return; }
     const show = (items: unknown[] | null) => { if (items === null) { l.fresh = true; l.shown = []; } else l.shown.push(...items); };
     // (a job starting over runs for the latest request)
-    const state = this.state!, start: JobRun<unknown>['start'] = (emu, p, part) => learnJob(l.msg.job, state, show).start(emu, p, part);
-    const run = this.runner.run({ key: msg.key, input: msg.input, keep: learnKeep(msg.job), picture: learnJob(msg.job, state, show).picture, start });
+    const state = this.state!, start: JobRun<unknown>['start'] = (emu, p, part) => learnJob(l.msg.job, state, show)(emu, p, part);
+    const run = this.runner.run({ key: msg.key, input: msg.input, ...LEARN_KINDS[msg.job.kind], start });
     const l: Learn = { msg, fresh: false, shown: [], run };
     lane.learns.push(l);
   }
@@ -292,15 +319,16 @@ export class ProbeHost {
   }
 }
 
-// how a pump waits for its next turn (run: the turn), and a turn's start, giving whether another job fits in it
-export interface PumpSchedule { wait(run: () => void): void; startTurn(): () => boolean }
+// how a pump waits for its next turn (run: the turn), and a turn's start, giving whether another job fits in it; while
+// urgent work is asked for (urgent), the next turn comes by soon (also when a turn by wait is held up)
+export interface PumpSchedule { wait(run: () => void): void; startTurn(): () => boolean; soon?(run: () => void): void; urgent?(): boolean }
 
 // Drives a host: each turn runs its jobs while there is work and the turn lasts, hands the replies on and waits
 // for the next turn while work is left. Returns where the editor's messages go (the work they make is scheduled).
 export function pumpProbes(host: ProbeHost, reply: (d: ProbeReply) => void, schedule: PumpSchedule): (m: ProbeMessage) => void {
-  let scheduled = false;
+  let scheduled = false, urged = false;
   const run = () => {
-    scheduled = false;
+    scheduled = urged = false;
     const more = schedule.startTurn();
     do {
       const d = host.next();
@@ -309,9 +337,12 @@ export function pumpProbes(host: ProbeHost, reply: (d: ProbeReply) => void, sche
     later();
   };
   const later = () => {
-    if (scheduled || !host.pending) return;
+    if (!host.pending) return;
+    const urgent = !!schedule.soon && !!schedule.urgent?.();
+    if (scheduled && (urged || !urgent)) return;
     scheduled = true;
-    schedule.wait(run);
+    urged = urgent;
+    if (urgent) schedule.soon!(run); else schedule.wait(run);
   };
   return (m) => { host.handle(m); later(); };
 }

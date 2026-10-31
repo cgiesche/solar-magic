@@ -17,7 +17,7 @@ import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadLevel } from '../src/core/level.ts';
 import { objectName } from '../src/core/objectnames.ts';
 import { parseMw0t, parseOsc, tipKey, objectTooltip } from '../src/core/objtext.ts';
-import { renderObjectThumbs, type ObjThumb } from '../src/ui/thumbs.ts';
+import { renderObjectThumbs, type ObjThumb } from '../src/core/objthumbs.ts';
 import { sampleLevel } from '../src/core/mwl.ts';
 import { levelOverride } from '../src/core/levelusage.ts';
 import { boxedObjects, boxLabel, boxAt } from '../src/core/objboxes.ts';

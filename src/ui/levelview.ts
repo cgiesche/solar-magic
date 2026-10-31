@@ -117,7 +117,13 @@ export class LevelView {
     app.on('mode', () => { if (!this.hover) this.idleStatus(); });
     app.on('rom-change', () => this.problems.update());
     app.on('arcs', () => this.requestPaint());
-    app.on('sizes', () => { this.requestPaint(); if (this.hover) this.updateCursor(this.hover.px, this.hover.py, this.hover.top); });
+    app.on('sizes', () => {
+      // (a resize that started before the sizes were known: its objects' drivers as emulated from now on)
+      const d = this.drag;
+      if (d?.kind === 'resize') for (const o of app.selectedObjects()) { const or = d.orig.get(o.uid); if (or) or.drivers = app.resizeDrivers({ ...o, size: or.size }); }
+      this.requestPaint();
+      if (this.hover) this.updateCursor(this.hover.px, this.hover.py, this.hover.top);
+    });
     app.on('placement-preview', () => this.requestPaint());
     app.on('picked-item', () => { this.lastPreview = null; this.requestPaint(); });
     app.on('game-view', () => this.requestPaint());

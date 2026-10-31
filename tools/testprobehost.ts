@@ -6,7 +6,8 @@
 // A cancelled scan runs no further slice and goes on when asked for again. Results a task's slice found before a ROM
 // change go with the next reply only if they hold on the new ROM. Jobs keep their result cache keys; only the scan
 // can be cancelled. Learn jobs (the sprite images, the levels' uses, the sprite memory check, the animated tiles, the layer 3
-// kinds, the tiles of the level as edited) as learned directly, with the result learner's entries, in lanes; prefetched
+// kinds, the tiles of the level as edited, the object thumbnails, the placement preview, the jump arcs, the layer 2
+// motions, the path kinds, the prefab suggestions, the object boxes) as learned directly, with the result learner's entries, in lanes; prefetched
 // probes take turns with the tasks.
 import { readFileSync } from 'node:fs';
 import { Rom, snesToPc } from '../src/core/rom.ts';
@@ -19,7 +20,7 @@ import { ObjKindProbe, kindsKey, type ObjKinds } from '../src/core/objkinds.ts';
 import { levelScanJob, type ScanLevel } from '../src/core/levelscan.ts';
 import { cameraAtJob } from '../src/core/camerareach.ts';
 import { runJob } from '../src/core/jobrunner.ts';
-import { loadLevel, serializeLayer1, serializeSprites, encodeSecondaryHeader, L2_PTRS } from '../src/core/level.ts';
+import { loadLevel, serializeLayer1, serializeSprites, encodeSecondaryHeader, newUid, L2_PTRS } from '../src/core/level.ts';
 import { editorImage } from './fixture.ts';
 import { checkJobRunner } from './runnercheck.ts';
 import { gfxSkipMask, gfxDisplaySkipMask } from '../src/core/gfxpages.ts';
@@ -36,6 +37,15 @@ import { spriteMemCheckJob, usedSpriteMemory, SpriteGroupResults, type SpriteMem
 import { animatedJob, type Animated } from '../src/core/levelemu.ts';
 import { inputHash } from '../src/core/inputs.ts';
 import { ResultLearner } from '../src/core/learner.ts';
+import { objectThumbsJob, placementPreviewJob, objKey, type ObjSpec, type ObjThumb, type PlacementPreview } from '../src/core/objthumbs.ts';
+import { jumpArcsJob, type JumpArc } from '../src/core/jumparcs.ts';
+import { layer2MotionsJob, type Layer2Motions } from '../src/core/l2scroll.ts';
+import { pathKindsJob, type PathKind } from '../src/core/owpaths.ts';
+import { suggestPrefabs, KeptSuggestions, type SuggestRun } from '../src/core/prefabsuggest.ts';
+import { SizeProbe, type SizeSpec } from '../src/core/objresize.ts';
+import { DM16_EXT } from '../src/core/patches.ts';
+import { installPrefabPatch } from '../src/core/prefabs.ts';
+import { saveLevel } from '../src/core/save.ts';
 import { readL1, writeL1, readL2, writeL2, l1Index, l2Index, l2Pointers } from '../src/core/overworld.ts';
 
 // sprites by their test level load (spriteLoad), the loads in the order of their first sprite
@@ -541,6 +551,115 @@ for (const changeRead of [false, true]) {
   const ltMem = (learner as unknown as { runner: { memory: { entry(k: string, i: string): { data: unknown; deps: RomDeps } | undefined } } }).runner.memory.entry('lt-test', ltInput);
   check(lt.done?.type === 'learned' && !!ltMem && !lt.put.has(storeKey('lt-test', ltInput)) && lt.done.memory?.input === ltInput
     && JSON.stringify(lt.done.memory.deps) === JSON.stringify(ltMem.deps), 'open level\'s tiles: kept in memory only, their entry handed back as the result learner keeps it (bytes read)');
+}
+
+// the object thumbnails, the placement preview, the jump arcs, the layer 2 motions, the overworld path kinds, the prefab
+// suggestions and the object boxes (learn jobs, #179): results and entries (keys, inputs, bytes read) as the result
+// learner on the main thread made them; the placement preview and the arcs in memory only, a request replacing the
+// lane's others drops them; the suggestions and the boxes to the editor only (the boxes probed again after a ROM change)
+{
+  const r = new Rom(file), h = new ProbeHost();
+  h.setRom(1, r.data.slice());
+  const run = (...ms: ProbeMessage[]) => {
+    for (const m of ms) h.handle(m);
+    const out: ProbeReply[] = [];
+    while (h.pending) { const d = h.next(); if (d) out.push(d); }
+    const learned = out.filter((d) => d.type === 'learned');
+    return { out, learned, done: learned[learned.length - 1], put: new Map(out.flatMap((d) => ('put' in d ? d.put : []))) };
+  };
+  const lr = new Rom(file), main = new LevelEmulator(lr), results = new ResultCache(new RomFingerprint(lr)), later: (() => void)[] = [];
+  main.skipMask = () => gfxSkipMask(lr);
+  main.boot();
+  const learner = new ResultLearner({ rom: lr, results, cacheReady: Promise.resolve(), main, later: (_k, f) => later.push(f), soon: (f) => later.push(f), setBusy: () => {} });
+  const learned = async <T>(key: string, start: Parameters<ResultLearner['learn']>[1], opts: Parameters<ResultLearner['learn']>[2] = {}): Promise<T> => {
+    let got: T | undefined;
+    learner.learn(key, start, { ...opts, done: (x) => (got = x as T) });
+    for (let i = 0; i < 5000 && got === undefined; i++) { await new Promise((f) => setTimeout(f, 0)); while (later.length) later.shift()!(); }
+    return got!;
+  };
+  const same = (a: CacheEntry | undefined, b: CacheEntry | undefined) => !!a && !!b && JSON.stringify(a) === JSON.stringify(b);
+  const json = (x: unknown) => JSON.stringify(x, (_k, v) => (v instanceof Uint32Array ? [...v] : v));
+  const lv5 = loadLevel(r, 0x105), ov5 = levelOverride(r, lv5);
+
+  // object thumbnails (a picture, in the result cache)
+  const specs: ObjSpec[] = [{ num: 0x21, ext: 0, size: 0x13 }, { num: 0, ext: 0x10, size: 0 }, { num: 0x0e, ext: 0, size: 0x02 }];
+  const keys = specs.map((q) => objKey(q, null)), thInput = inputHash({ th: 'test' });
+  const th = run({ type: 'learn', lane: 'thumbs', key: 'th-test', input: thInput, job: { kind: 'thumbs', level: lv5, specs, keys }, replace: true });
+  const thNow = await learned<ObjThumb[]>('th-test', (emu) => objectThumbsJob(lr, emu, lv5, specs, (q) => keys[specs.indexOf(q)]), { input: { th: 'test' } });
+  check(th.done?.type === 'learned' && !th.done.failed && json(th.done.result) === json(thNow) && thNow.length === 3, `thumbnails: as on the main thread (${thNow.length})`);
+  check(same(th.put.get(storeKey('th-test', thInput)), results.entry('th-test', thInput) && { ...results.entry('th-test', thInput)!, input: thInput }),
+    'thumbnails: their entry as the result learner\'s (key, input, bytes read: a picture)');
+
+  // the placement preview: an object placed in level 105 (in memory only); a request replacing it drops it
+  const placed = { ...lv5, objects: [...lv5.objects, { uid: 1, num: 0x21, ext: 0, size: 0x13, x: 4, y: 0x14 }] }, ovp = levelOverride(r, placed);
+  const pvJob = (i: number): ProbeMessage => ({ type: 'learn', lane: 'placement', key: `pp-test${i}`, input: thInput, job: { kind: 'preview', level: placed, ov: ovp, layer2: false, placed: [placed.objects.length - 1] }, replace: true });
+  const started = h.started;
+  const pv = run(pvJob(1), pvJob(2));
+  const pvNow = await learned<PlacementPreview | null>('pp-now', (emu) => placementPreviewJob(lr, emu, placed, ovp, false, [placed.objects.length - 1]), { input: 'pp', keep: 'memory' });
+  check(pv.learned.length === 1 && pv.done?.type === 'learned' && pv.done.key === 'pp-test2' && h.started === started + 1, 'placement preview: the replaced request dropped, only the latest learned');
+  check(pv.done?.type === 'learned' && !!pvNow && pvNow.w > 0 && json(pv.done.result) === json(pvNow) && !pv.put.has(storeKey('pp-test2', thInput)) && !!pv.done.memory,
+    `placement preview: as on the main thread (${pvNow?.w}x${pvNow?.h}), in memory only`);
+
+  // jump arcs from two tiles: the first replaced
+  const runs = direct.runStates(), lvHash = inputHash({ lv: 'test' });
+  const arcs = (tx: number): ProbeMessage => ({ type: 'learn', lane: 'arcs', key: `arcs:${tx}`, input: thInput, job: { kind: 'arcs', level: lvHash, load: [0x105, ov5, lv5.spriteHeader, 432], tx, ty: 0x16, runs }, replace: true });
+  const ar = run(arcs(3), arcs(5));
+  const arNow = await learned<JumpArc[]>('arcs:now', (emu, prepare) => jumpArcsJob(emu, prepare, lvHash, [0x105, ov5, lv5.spriteHeader, 432], 5, 0x16, runs), { input: 'arcs', keep: 'memory', picture: false });
+  check(ar.learned.length === 1 && ar.done?.type === 'learned' && ar.done.key === 'arcs:5' && !!ar.done.memory, 'jump arcs: the replaced request dropped, the latest in memory only');
+  check(ar.done?.type === 'learned' && arNow.length === 8 && JSON.stringify(ar.done.result) === JSON.stringify(arNow), 'jump arcs: as on the main thread');
+
+  // the layer 2 motions of level 105 and the overworld path kinds (no pictures, in the result cache)
+  const l2Input = inputHash({ l2: 'test' });
+  const l2 = run({ type: 'learn', lane: 'l2', key: 'l2m-test', input: l2Input, job: { kind: 'layer2Motions', level: 0x105, ov: ov5 }, replace: true });
+  const l2Now = await learned<Layer2Motions>('l2m-test', function* (emu) { return (yield* layer2MotionsJob(emu, 0x105, ov5)).result; }, { input: { l2: 'test' }, picture: false });
+  check(l2.done?.type === 'learned' && !l2.done.failed && l2Now.paired.length === 16 && JSON.stringify(l2.done.result) === JSON.stringify(l2Now), 'layer 2 motions: as on the main thread');
+  check(same(l2.put.get(storeKey('l2m-test', l2Input)), results.entry('l2m-test', l2Input) && { ...results.entry('l2m-test', l2Input)!, input: l2Input }),
+    'layer 2 motions: their entry as the result learner\'s (key, input, bytes read: no picture)');
+  const pk = run({ type: 'learn', lane: 'owpk', key: 'owpk-test', job: { kind: 'pathKinds' }, replace: true });
+  const pkNow = await learned<PathKind[]>('owpk-test', pathKindsJob, { picture: false });
+  check(pk.done?.type === 'learned' && pkNow.length === 0x100 && JSON.stringify(pk.done.result) === JSON.stringify(pkNow), 'path kinds: as on the main thread');
+  check(same(pk.put.get('owpk-test'), results.entry('owpk-test', undefined)), 'path kinds: their entry as the result learner\'s (bytes read: no picture)');
+
+  // the prefab suggestions of some levels, the open one as edited (a 3×3 block of Direct Map16 tiles twice, once in
+  // another level): as found directly; the run handed to the editor holds there (KeptSuggestions.held)
+  const pr = new Rom(file.slice());
+  installPrefabPatch(pr);
+  const dm = (x: number, y: number, tile: number) => ({ uid: newUid(), num: 0, ext: DM16_EXT, x, y, size: 0, tile });
+  const block = (x: number, y: number) => Array.from({ length: 9 }, (_, i) => dm(x + (i % 3), y + Math.floor(i / 3), 0x100 + i));
+  const l6 = loadLevel(pr, 0x106);
+  l6.objects.push(...block(0x24, 6));
+  saveLevel(pr, l6);
+  const edited = loadLevel(pr, 0x105), levels = [0x105, 0x106, 0x107];
+  edited.objects.push(...block(0x20, 5), ...block(0x30, 8));
+  const hp = new ProbeHost();
+  hp.setRom(1, pr.data.slice());
+  hp.handle({ type: 'learn', lane: 'suggest', key: 'suggest', input: '1', job: { kind: 'suggest', levels, open: edited }, replace: true });
+  const sgOut: ProbeReply[] = [];
+  while (hp.pending) { const d = hp.next(); if (d) sgOut.push(d); }
+  const sgDone = sgOut.find((d) => d.type === 'learned');
+  const sgEmu = new LevelEmulator(pr);
+  sgEmu.boot();
+  const sgNow = suggestPrefabs(pr, { levels, open: edited, emu: () => sgEmu });
+  const sgRun = sgDone?.type === 'learned' ? sgDone.result as SuggestRun : undefined;
+  check(!!sgRun && sgNow.length > 0 && JSON.stringify(sgRun.list) === JSON.stringify(sgNow) && sgOut.every((d) => !('put' in d) || !d.put.some(([k]) => k.startsWith('suggest'))),
+    `prefab suggestions: as found directly (${sgNow.length}), nothing kept but the run`);
+  const kept = new KeptSuggestions(new RomFingerprint(pr));
+  if (sgRun) kept.adopt(sgRun);
+  check(JSON.stringify(kept.held(pr, { levels, open: edited })) === JSON.stringify(sgNow), 'prefab suggestions: the run holds in the editor');
+
+  // object boxes at sizes in level 105: as probed directly, to the editor only; probed again after a ROM change
+  const sizes: SizeSpec[] = Array.from({ length: 32 }, (_, size) => ({ num: 0x21, ext: 0, size })); // (in three loads)
+  const kl = { number: 0x105, header: lv5.header }, l2p = lv5.layer2Pointer;
+  const sz = run({ type: 'learn', lane: 'sizes', key: 'sizes', input: '1', job: { kind: 'sizes', level: kl, layer2Pointer: l2p, specs: sizes }, replace: false });
+  const sp = new SizeProbe(new LevelEmulator(lr), kl, l2p);
+  sp.probe(sizes);
+  check(sz.done?.type === 'learned' && JSON.stringify(sz.done.result) === JSON.stringify(sizes.map((q) => sp.box(q))) && sz.put.size === 0 && (sz.done.result as unknown[]).some((b) => b !== null),
+    'object boxes: as probed directly, nothing kept');
+  const sz2 = run({ type: 'learn', lane: 'sizes', key: 'sizes', input: '2', job: { kind: 'sizes', level: kl, layer2Pointer: l2p, specs: sizes }, replace: false });
+  h.handle({ type: 'edit', gen: 2, size: r.size, edits: [[0x7ff0, Uint8Array.of(r.data[0x7ff0])]] });
+  const sz3 = run({ type: 'learn', lane: 'sizes', key: 'sizes', input: '3', job: { kind: 'sizes', level: kl, layer2Pointer: l2p, specs: sizes }, replace: false });
+  check(!sz2.out.some((d) => d.type === 'learning') && sz2.done?.type === 'learned' && sz3.out.filter((d) => d.type === 'learning').length > 0 && JSON.stringify(sz3.done?.type === 'learned' && sz3.done.result) === JSON.stringify(sz.done?.type === 'learned' && sz.done.result),
+    'object boxes: asked again, known without a load; after a ROM change probed again');
 }
 
 // the job runner under both owners (runnercheck.ts)

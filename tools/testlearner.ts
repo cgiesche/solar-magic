@@ -19,7 +19,7 @@ import { loadLevel, levelRows } from '../src/core/level.ts';
 import { renderLevel, setFgWords, map16Source } from '../src/core/render.ts';
 import { setSharedColor, sharedColor } from '../src/core/sharedpal.ts';
 import { captureSprites } from '../src/core/spritegfx.ts';
-import { objectThumbsJob, objKey } from '../src/ui/thumbs.ts';
+import { objectThumbsJob, objKey } from '../src/core/objthumbs.ts';
 import { editorImage } from './fixture.ts';
 import { checkJobRunner } from './runnercheck.ts';
 

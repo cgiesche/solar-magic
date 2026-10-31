@@ -13,7 +13,7 @@ import { objectTable, objectName, objectNameKey, setObjectName, namedPerTable, n
 import { boxedObjects, boxAt } from '../core/objboxes.ts';
 import { objectUserNames } from '../core/usernames.ts';
 import { loadPixiProject, customSpriteList, type CustomSprite } from '../core/pixi.ts';
-import { renderLevel, renderLayerTiles, type LevelImages, composite, animatedPixels, TileAnimation, type AnimStep } from '../core/render.ts';
+import { renderLevel, type LevelImages, composite, animatedPixels, TileAnimation, type AnimStep } from '../core/render.ts';
 import type { SpriteImage, SpriteLevel } from '../core/spritegfx.ts';
 import { usedSpriteMemory, type SpriteMemLevel, type SpriteMemResult } from '../core/spritemem.ts';
 import { DM16_EXT, levelGfx, levelExtGfx, customPalette, levelMusic, defaultGfx } from '../core/patches.ts';
@@ -23,7 +23,7 @@ import { flagBytes, usedFlags, isDm16, dm16Tiles, type Dm16Cond } from '../core/
 import { PREFAB_EXT, PREFAB_MAX, TRANSPARENT, listPrefabs, writePrefab, type Prefab } from '../core/prefabs.ts';
 import { breakUpPrefab, replaced, setPrefabSources } from '../core/prefabsources.ts';
 import { PasteCounter, findPasted, arrangementKey, type PasteHint } from '../core/pastehint.ts';
-import { prefabSuggestions, KeptSuggestions, type PrefabSuggestion, type SuggestSource } from '../core/prefabsuggest.ts';
+import { KeptSuggestions, type PrefabSuggestion, type SuggestLevels, type SuggestRun } from '../core/prefabsuggest.ts';
 import { planPrefabPlaces, applyPrefabPlaces, deletePrefab, prefabObjectCount, replaceWithPrefab, type LevelPlaces, type LevelGroups, type PrefabGroup } from '../core/prefabplaces.ts';
 import type { Package } from '../core/pkgreg.ts';
 import { kvEntries, kvKeys, kvWrite, saveRom } from './storage.ts';
@@ -38,20 +38,21 @@ import { SecondaryEntrances, NO_FREE_ENTRANCE, entranceTables } from '../core/en
 import type { RomHistory } from '../core/romhistory.ts';
 import type { EditOptions } from '../core/romedit.ts';
 import { EditSession, type LevelEdit, type StepResult } from '../core/editsession.ts';
-import { resizeObjectSize, type ObjKind, type ObjKinds } from '../core/objkinds.ts';
-import { SizeProbe, sizeParts, partSizes, drivers, namedDrivers, keepEdges, type Box, type Drivers, type SizeSpec } from '../core/objresize.ts';
-import { jumpArcsJob, type JumpArc } from '../core/jumparcs.ts';
+import { resizeObjectSize, type ObjKind, type ObjKinds, type KindLevel } from '../core/objkinds.ts';
+import { sizeKey, sizeParts, partSizes, drivers, namedDrivers, keepEdges, type Box, type Drivers, type SizeSpec } from '../core/objresize.ts';
+import { type JumpArc } from '../core/jumparcs.ts';
 import { scanKey, type ScanLevel, type ScanResult } from '../core/levelscan.ts';
 import { cameraAtKey, type CameraReach, type CameraAt } from '../core/camerareach.ts';
 import { MARIO_W, MARIO_H, type CameraBands } from '../core/camerabands.ts';
 import { tideKind, layer3Top, type Layer3Kind } from '../core/layer3.ts';
-import { layer2MotionsJob, type Layer2Motions } from '../core/l2scroll.ts';
+import { type Layer2Motions } from '../core/l2scroll.ts';
 import { variantOf, blockKey, collisionKey, type BlockProbe, type CollisionProbe, type RunStates, type SwitchState, SWITCH_STATES, SWITCH_TRIGGER } from '../core/blockprobe.ts';
 import type { ProbeReply } from '../core/probeprotocol.ts';
 import { ProbeClient } from '../core/probeclient.ts';
 import { ResultLearner } from '../core/learner.ts';
 import type { RomReads } from '../core/romdeps.ts';
-import { objectThumbsJob, thumbCanvas, thumbsKey, thumbsInput, previewInput, objKey, type ObjSpec, type ObjThumb } from './thumbs.ts';
+import { thumbCanvas } from './thumbs.ts';
+import { thumbsKey, thumbsInput, previewInput, objKey, type ObjSpec, type ObjThumb, type PlacementPreview } from '../core/objthumbs.ts';
 import { levelInput, inputHash } from '../core/inputs.ts';
 import { map16Tile, bgTile } from '../core/ram.ts';
 import { exanimTiles, exanimColors, exanimPeriod, readLevelList, readGlobalList } from '../core/exanim.ts';
@@ -59,7 +60,7 @@ import { emptyTriggerView, usedTriggers, initTriggers, type TriggerView, type Sl
 import { LevelUses, levelOverride, usedLevels, spriteUsage, isTilesetTile, type LevelTiles, type SpriteUser } from '../core/levelusage.ts';
 import { TILESETS, sharingTilesets } from '../core/tilesets.ts';
 import { slipperyActions } from '../core/slippery.ts';
-import { pathKindsJob, type PathKind } from '../core/owpaths.ts';
+import { type PathKind } from '../core/owpaths.ts';
 
 export type EditMode = 'l1' | 'l2' | 'spr' | 'exit' | 'bg' | 'l3';
 // the modes painted with a brush of tiles picked from the level or the picker: BG tiles, layer 3's 8x8 tiles
@@ -207,7 +208,9 @@ export class App {
   // stored in IndexedDB, loaded once at start (cacheReady)
   results: ResultCache;
   cacheReady: Promise<void>;
-  // learns the emulated results the probe worker doesn't, on the main thread (learner.ts)
+  // the emulated results needed at once, on the main thread (learner.ts now: the slippery entrance actions, the
+  // object tables, the tilesets' pointers; its emulator for loads at once). The others are learned in the probe worker
+  // (probeclient.ts), without one by its host on the main thread.
   private learner: ResultLearner;
   private cacheTimer = 0;
   private closed = false; // project closed: nothing is written to the browser any more
@@ -283,6 +286,7 @@ export class App {
         return (m) => w.postMessage(m, m.type === 'rom' ? [m.data.buffer] : m.type === 'edit' ? m.edits.map(([, b]) => b.buffer) : []);
       },
       later: (key, step) => this.later(key, step),
+      soon: (step) => setTimeout(step, 0),
       setBusy: (key, label) => this.setBusy(key, label),
       ready: () => this.emit('probes'),
       kindsReady: () => this.emit('objkinds'),
@@ -1120,13 +1124,13 @@ export class App {
   }
   private tideCache: { images: LevelImages; range: unknown; value: ReturnType<App['tide']> } | null = null;
 
-  // What every layer 2 scroll setting does (l2scroll.ts), measured with the level's code on an own
-  // emulator a setting at a time; null while that runs, then `done` is called. Kept per level while
+  // What every layer 2 scroll setting does (l2scroll.ts), measured with the level's code in the probe worker a
+  // setting at a time; null while that runs, then `done` is called. Kept per level while
   // the level as edited and the ROM it read are unchanged.
   layer2Motions(done: () => void): Layer2Motions | null {
     const n = this.level.number, ov = this.buildOverrides();
     // (urgent: the header dialog shows them)
-    return this.learner.learn(`l2m2:${n}`, function* (emu) { return (yield* layer2MotionsJob(emu, n, ov)).result; }, { input: this.levelInput(ov), lane: 'l2', replace: true, urgent: true, picture: false, done }) ?? null;
+    return this.probes.learn<Layer2Motions>(`l2m2:${n}`, { kind: 'layer2Motions', level: n, ov }, { input: this.levelInput(ov), lane: 'l2', replace: true, urgent: true, done }) ?? null;
   }
 
   // The Map16 tiles of every level (levelusage.ts), the open one as edited: those known now, the others are
@@ -1170,10 +1174,10 @@ export class App {
   slipperyActions(): number[] {
     return this.learner.now('slip1', slipperyActions, { picture: false });
   }
-  // what Mario does on each overworld layer 1 tile 00–FF (owpaths.ts): learned in the background once and kept in
+  // what Mario does on each overworld layer 1 tile 00–FF (owpaths.ts): learned in the probe worker once and kept in
   // the result cache while the game's code is unchanged; null while that runs, then `done` is called
   pathKinds(done: () => void): PathKind[] | null {
-    return this.learner.learn('owpk1', pathKindsJob, { label: 'Path tiles', picture: false, done }) ?? null;
+    return this.probes.learn<PathKind[]>('owpk1', { kind: 'pathKinds' }, { lane: 'owpk1', label: 'Path tiles', done }) ?? null;
   }
   // the levels with sprite id (spriteId), the open level as edited
   spriteUsers(id: number): SpriteUser[] {
@@ -1195,7 +1199,7 @@ export class App {
   private usesLearned = () => this.emit('level-uses');
 
   // ------------- jump arcs (see jumparcs.ts) -------------
-  // arcs from a tile of the level as edited: emulated in the background, the latest request only, kept in
+  // arcs from a tile of the level as edited: emulated in the probe worker, the latest request only, kept in
   // memory with the level as edited as their input; 'arcs' when some are ready
   private arcsWaiting = false; // for the run speeds probe
 
@@ -1214,17 +1218,17 @@ export class App {
     const lv = this.level, ov = this.buildOverrides(), height = this.images.height;
     const level = inputHash({ level: this.levelInput(ov), spriteHeader: lv.spriteHeader, height });
     // (asked for on every paint: joins the job while it is learned)
-    return this.learner.learn(`arcs:${tx},${ty}`, (emu, prepare) => jumpArcsJob(emu, prepare, level, [lv.number, ov, lv.spriteHeader, height], tx, ty, runs),
-      { input: { level, runs }, keep: 'memory', lane: 'arcs', replace: true, label: 'Jump arcs', picture: false, done: this.arcsLearned });
+    return this.probes.learn<JumpArc[]>(`arcs:${tx},${ty}`, { kind: 'arcs', level, load: [lv.number, ov, lv.spriteHeader, height], tx, ty, runs },
+      { input: { level, runs }, lane: 'arcs', replace: true, label: 'Jump arcs', done: this.arcsLearned });
   }
   private arcsLearned = () => this.emit('arcs');
 
-  // The object picker's thumbnails of specs in the level as edited (thumbs.ts): undefined while they are
-  // learned in the background ('thumbs' when done)
+  // The object picker's thumbnails of specs in the level as edited (objthumbs.ts): undefined while they are
+  // learned in the probe worker ('thumbs' when done)
   objectThumbs(specs: ObjSpec[]): ObjThumb[] | undefined {
     const rom = this.rom, lv = this.level, keys = new Map(specs.map((s) => [s, objKey(s, this.objectKind(s.num))]));
     const keyOf = (s: ObjSpec) => keys.get(s)!, level = { ...lv, header: { ...lv.header } };
-    return this.learner.learn(thumbsKey(lv, specs, keyOf), (emu) => objectThumbsJob(rom, emu, level, specs, keyOf),
+    return this.probes.learn<ObjThumb[]>(thumbsKey(lv, specs, keyOf), { kind: 'thumbs', level, specs, keys: specs.map(keyOf) },
       { input: thumbsInput(rom, lv), lane: 'thumbs', replace: true, label: 'Object thumbnails', done: this.thumbsLearned });
   }
   private thumbsLearned = () => this.emit('thumbs');
@@ -1660,8 +1664,8 @@ export class App {
     } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); return false; }
   }
 
-  // the suggestions anew a while after the last change, in slices of background work (later); the levels that
-  // didn't change keep their results (keptSuggestions). A change they don't depend on keeps them current at once;
+  // the suggestions anew a while after the last change, in the probe worker; the levels that didn't change keep their
+  // results there (prefabsuggest.ts KeptSuggestions; keptSuggestions: the latest run as it came). A change they don't depend on keeps them current at once;
   // one back to the latest run's state (an undo) makes them current at once with that run's whole list (a suggestion
   // saved and undone is back with its places, a list it was dropped from is never current).
   private scheduleSuggestions(): void {
@@ -1670,6 +1674,7 @@ export class App {
       if (this.suggestionsCurrent) return;
       clearTimeout(this.suggestTimer);
       this.suggestRun++; // (a run started meanwhile stops)
+      this.probes.unlearn('prefab-suggest');
       this.prefabSuggestions = held;
       this.suggestionsCurrent = true;
       this.emit('prefab-suggestions');
@@ -1677,25 +1682,23 @@ export class App {
     }
     clearTimeout(this.suggestTimer);
     this.suggestionsCurrent = false;
+    this.probes.unlearn('prefab-suggest'); // (a run started before stops)
     const run = ++this.suggestRun;
     this.suggestTimer = window.setTimeout(() => {
       if (run !== this.suggestRun || this.closed) return;
-      const steps = prefabSuggestions(this.rom, this.suggestSource());
-      const step = () => {
+      const { levels, open } = this.suggestSource();
+      // (the run's number as its input: a new one replaces the one running)
+      this.probes.learn<SuggestRun>('suggest', { kind: 'suggest', levels, open }, { lane: 'prefab-suggest', input: run, replace: true, done: (r) => {
         if (run !== this.suggestRun) return;
-        const until = performance.now() + 8;
-        let r = steps.next();
-        while (!r.done && performance.now() < until) r = steps.next();
-        if (!r.done) { this.later('prefab-suggest', step); return; }
-        this.prefabSuggestions = r.value;
+        this.keptSuggestions.adopt(r);
+        this.prefabSuggestions = r.list;
         this.suggestionsCurrent = true;
         this.emit('prefab-suggestions');
-      };
-      this.later('prefab-suggest', step);
+      } });
     }, 1500);
   }
-  private suggestSource(): SuggestSource {
-    return { levels: usedLevels(this.rom), open: this.level, emu: () => this.learner.emu(false), kept: this.keptSuggestions };
+  private suggestSource(): SuggestLevels {
+    return { levels: usedLevels(this.rom), open: this.level };
   }
 
   // levels whose saved data uses prefab n (plus the open level with its unsaved changes), with how many objects
@@ -1756,7 +1759,8 @@ export class App {
     const objs = this.selectedObjects().filter((o) => this.resizable(o));
     if (!objs.length) return;
     const sized = objs.map((o) => resizeObjectSize(this.objectKind(o.num), o.size, dw, dh));
-    this.sizeProbe().probe(objs.flatMap((o, i) => [this.sizeSpec(o, o.size), this.sizeSpec(o, sized[i])]));
+    // (the boxes asked for first: resized when they come)
+    if (!this.askSizes(objs.flatMap((o, i) => [this.sizeSpec(o, o.size), this.sizeSpec(o, sized[i])]), () => this.resizeSelection(dw, dh, far))) return;
     const { w, h } = this.objectLimits();
     this.editLevel(() => objs.forEach((o, i) => {
       const box = this.sizeBoxes(o);
@@ -1771,62 +1775,70 @@ export class App {
     return o.num !== 0 || o.ext === DM16_EXT;
   }
 
-  // the tiles objects cover at each size, emulated alone (objresize.ts) with an emulator of their own,
-  // for the level's tileset as the ROM is now
-  private sizer: { key: string; probe: SizeProbe } | null = null;
-  private sizeEmu: LevelEmulator | null = null;
-  sizeProbe(): SizeProbe {
+  // the tiles objects cover at each size, emulated alone (objresize.ts) in the probe worker, for the level's tileset as
+  // the ROM is now: those known (key: of the level and ROM state they hold for)
+  private sized = { key: '', boxes: new Map<string, Box | null>() };
+  private sizeLevel(): { key: string; level: KindLevel; layer2Pointer: number } {
     const lv = this.level, l2 = lv.layer2Objects ? this.rom.r24(L2_PTRS + 0x105 * 3) : lv.layer2Pointer;
-    const key = `${this.rom.gen}:${lv.number}:${inputHash(lv.header)}:${l2}`;
-    if (this.sizer?.key === key && this.sizeEmu?.rom === this.rom) return this.sizer.probe;
-    if (this.sizeEmu?.rom !== this.rom) { this.sizeEmu = new LevelEmulator(this.rom); this.sizeEmu.adoptBoot(this.emu); }
-    this.sizer = { key, probe: new SizeProbe(this.sizeEmu, { number: lv.number, header: lv.header }, l2) };
-    this.driverMemo.clear();
-    return this.sizer.probe;
+    return { key: `${this.rom.gen}:${lv.number}:${inputHash(lv.header)}:${l2}`, level: { number: lv.number, header: lv.header }, layer2Pointer: l2 };
+  }
+  private sizeBoxMap(): Map<string, Box | null> {
+    const { key } = this.sizeLevel();
+    if (this.sized.key !== key) { this.sized = { key, boxes: new Map() }; this.driverMemo.clear(); }
+    return this.sized.boxes;
+  }
+  // asks the probe worker for the boxes of specs not known ('sizes' when they come, then done); whether all are known
+  private askSizes(specs: SizeSpec[], done?: () => void): boolean {
+    const boxes = this.sizeBoxMap(), todo = [...new Map(specs.filter((s) => !boxes.has(sizeKey(s))).map((s) => [sizeKey(s), s])).values()];
+    if (!todo.length) return true;
+    const { key, level, layer2Pointer } = this.sizeLevel();
+    this.probes.learn<(Box | null)[]>('sizes', { kind: 'sizes', level, layer2Pointer, specs: todo }, { lane: 'sizes', input: { key, specs: todo.map(sizeKey) }, done: (got) => {
+      if (this.sized.key === key) got.forEach((b, i) => this.sized.boxes.set(sizeKey(todo[i]), b));
+      this.emit('sizes');
+      done?.();
+    } });
+    return false;
   }
   private sizeSpec(o: LevelObject, size: number): SizeSpec {
     return { num: o.num, ext: o.ext, size, tile: o.tile, extension: o.extension };
   }
   // the object's box at a size (relative to its origin), undefined while not probed
   sizeBoxes(o: LevelObject): (size: number) => Box | null | undefined {
-    const p = this.sizeProbe();
-    return (size) => p.box(this.sizeSpec(o, size));
+    const boxes = this.sizeBoxMap();
+    return (size) => boxes.get(sizeKey(this.sizeSpec(o, size)));
   }
   // every size the parts of the object's settings byte can take
   private allSizes(o: LevelObject): SizeSpec[] {
     return sizeParts(this.objectKind(o.num)).flatMap((p) => partSizes(o.size, p).map((s) => this.sizeSpec(o, s)));
   }
-  // probes all sizes of the objects now (a drag starts)
+  // asks for all sizes of the objects now (a drag starts; 'sizes' when they come)
   probeSizes(objs: LevelObject[]): void {
-    this.sizeProbe().probe(objs.flatMap((o) => this.allSizes(o)));
+    this.askSizes(objs.flatMap((o) => this.allSizes(o)));
   }
   // which part of the settings byte sizes which axis of the object: as emulated once its sizes are known,
   // before as its kind says (they are probed in the background then, 'sizes' when known)
   private driverMemo = new Map<string, Drivers>(); // (emulated ones, per object as resized and its kind)
   resizeDrivers(o: LevelObject): Drivers {
-    const p = this.sizeProbe(), kind = this.objectKind(o.num);
+    const kind = this.objectKind(o.num), box = this.sizeBoxes(o);
     const key = `${o.num}:${o.ext}:${o.size}:${o.tile ?? ''}:${o.extension?.join(',') ?? ''}:${JSON.stringify(kind)}`;
     const had = this.driverMemo.get(key);
     if (had) return had;
-    if (this.allSizes(o).every((s) => p.box(s) !== undefined)) {
-      const d = drivers(kind, o.size, this.sizeBoxes(o));
+    if (this.allSizes(o).every((s) => box(s.size) !== undefined)) {
+      const d = drivers(kind, o.size, box);
       this.driverMemo.set(key, d);
       return d;
     }
     this.prefetchSizes();
     return namedDrivers(kind);
   }
-  private sizesQueued = false;
+  private sizesAsked: string | null = null; // the sizes' key (sizeLevel) and the selection whose sizes are asked for
   private prefetchSizes(): void {
-    if (this.sizesQueued) return;
-    this.sizesQueued = true;
-    this.later('sizes', () => {
-      this.sizesQueued = false;
-      const objs = this.mode === 'l1' || this.mode === 'l2' ? this.selectedObjects().filter((o) => this.resizable(o)).slice(0, 32) : [];
-      if (!objs.length) return;
-      if (this.sizeProbe().probe(objs.flatMap((o) => this.allSizes(o)), 1)) this.emit('sizes');
-      else this.prefetchSizes();
-    });
+    const objs = this.mode === 'l1' || this.mode === 'l2' ? this.selectedObjects().filter((o) => this.resizable(o)).slice(0, 32) : [];
+    if (!objs.length) return;
+    const key = `${this.sizeLevel().key}/${objs.map((o) => `${o.uid}.${o.size}`).join()}`;
+    if (this.sizesAsked === key) return;
+    this.sizesAsked = key;
+    if (this.askSizes(objs.flatMap((o) => this.allSizes(o)), () => (this.sizesAsked = null))) this.sizesAsked = null;
   }
 
   // copies the selection and pastes it one tile down-right (Ctrl+D)
@@ -1893,14 +1905,9 @@ export class App {
     const lv: Level = l2 ? { ...this.level, layer2Objects: [...base, ...objects] } : { ...this.level, objects: [...base, ...objects] };
     const ov = this.buildOverrides(lv), g = l2 ? this.images.geom2 : this.images.geom1;
     if (!g) return null;
-    const map = l2 ? this.offsetToTile2 : this.offsetToTile1, keys = objects.map((_, i) => this.objectKey(l2, base.length + i));
-    const pic = this.learner.learn(`pp1:${lv.number}:${l2 ? 2 : 1}`, function* (emu) {
-      const r = emu.load(lv.number, ov);
-      if (!r.ok) return null;
-      const tiles = new Set<number>();
-      for (const k of keys) for (const off of r.touched.get(k) ?? []) if (map[off] >= 0) tiles.add(map[off]);
-      return renderLayerTiles(rom, r, g, l2, [...tiles]);
-    }, { input: inputHash(previewInput(rom, lv, ov)), lane: 'placement', replace: true, keep: 'memory', done: this.previewLearned });
+    // (learned in the probe worker: objectKey's keys of the placed objects)
+    const pic = this.probes.learn<PlacementPreview | null>(`pp1:${lv.number}:${l2 ? 2 : 1}`, { kind: 'preview', level: lv, ov, layer2: l2, placed: objects.map((_, i) => base.length + i) },
+      { input: inputHash(previewInput(rom, lv, ov)), lane: 'placement', replace: true, done: this.previewLearned });
     const part = pic && { x: pic.x0 * 16, y: pic.y0 * 16, img: thumbCanvas(pic) };
     this.previewMemo = { render: this.render, sig, part };
     return part;

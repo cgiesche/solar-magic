@@ -40,6 +40,13 @@ export interface SuggestSource {
   kept?: KeptSuggestions; // the levels' results of earlier runs
 }
 
+// the levels of a run and the open level as edited (what decides whether the latest run holds)
+export type SuggestLevels = Pick<SuggestSource, 'levels' | 'open'>;
+
+// a finished run: what it read, its levels, the one it took as edited, object 2D's length, each level's content it took
+// (inputs) and its suggestions
+export interface SuggestRun { deps: RomDeps; levels: string; edited: number | null; len2d: number; inputs: Map<number, string>; list: PrefabSuggestion[] }
+
 // a level's arrangements (arrangementKey and prefab of each group, in dm16Groups' order) and the Direct Map16
 // tiles it has (tileKey)
 interface Arrangements { list: [string, Prefab][]; tiles: Set<string> }
@@ -59,8 +66,7 @@ export class KeptSuggestions {
   private places: MemoryResults;
   private contents: MemoryResults; // a level's content as saved, by object 2D's length
   private run: { read: RomReads; levels: string; edited: number | null; len2d: number } | null = null; // the running run's (what it read: its levels' loads, its places' searches)
-  // the latest finished run's, with each level's content it took (inputs) and its suggestions
-  private last: { deps: RomDeps; levels: string; edited: number | null; len2d: number; inputs: Map<number, string>; list: PrefabSuggestion[] } | null = null;
+  private last: SuggestRun | null = null; // the latest finished run's
 
   constructor(fp: RomFingerprint, limit = PLACES) {
     this.fp = fp;
@@ -69,7 +75,7 @@ export class KeptSuggestions {
   }
 
   // a run starts or is finished: the places a finished run used are all kept for the next one
-  startRun(rom: Rom, src: SuggestSource, len2d: number): void {
+  startRun(rom: Rom, src: SuggestLevels, len2d: number): void {
     this.places.startRound();
     this.contents.startRound();
     this.run = { read: new RomReads(rom.data.length), levels: src.levels.join(), edited: editedOf(src), len2d };
@@ -82,11 +88,16 @@ export class KeptSuggestions {
     this.run = null;
   }
 
+  // the latest finished run; one finished elsewhere (in the probe worker, on the same ROM: its bytes read are checked
+  // here) becomes the latest
+  get latest(): SuggestRun | null { return this.last; }
+  adopt(run: SuggestRun): void { this.last = run; }
+
   // the latest finished run's suggestions (not to be changed) if a run on src now has them, else null: the same
   // levels with the same contents, and no ROM byte it read changed (a pixel of a graphics file keeps them, a level
   // saved doesn't, an undo back brings them back). The open level counts only if it is among the levels. Another
   // level opened: the one the run took as edited is compared as saved, and from then on it is the latest run's.
-  held(rom: Rom, src: SuggestSource): PrefabSuggestion[] | null {
+  held(rom: Rom, src: SuggestLevels): PrefabSuggestion[] | null {
     const l = this.last, len2d = objectLength2D(rom);
     if (!l || l.levels !== src.levels.join() || l.len2d !== len2d || !this.fp.valid(l.deps)) return null;
     const edited = editedOf(src);
@@ -153,7 +164,7 @@ const levelContent = (rom: Rom, lv: Level) => inputHash({
   objects: hasObjects(lv.header.mode) ? null : serializeObjects(lv.objects, [], isL1Vertical(rom, lv.header.mode), undefined, isSized(lv.secondary)),
 });
 // the level a run on src takes as edited: the open level, if it is among the levels
-const editedOf = (src: SuggestSource) => (src.open && src.levels.includes(src.open.number) ? src.open.number : null);
+const editedOf = (src: SuggestLevels) => (src.open && src.levels.includes(src.open.number) ? src.open.number : null);
 
 // level n as saved with its content and the ROM bytes loading it read; null: unreadable
 function loadSaved(rom: Rom, n: number): { lv: Level; input: string; reads: RomReads } | null {
@@ -272,6 +283,13 @@ export function* prefabSuggestions(rom: Rom, src: SuggestSource): Generator<void
   out.sort((x, y) => y.saved - x.saved);
   kept?.endRun(new Map([...levels].map(([n, l]) => [n, l.input])), out);
   return out;
+}
+
+// A run as a job (the result learner's, in the probe worker; no picture): the levels' places searched on emu, the
+// results of single levels kept in kept between runs; the run finished
+export function* prefabSuggestionsJob(rom: Rom, emu: LevelEmulator, kept: KeptSuggestions, levels: number[], open?: Level): Generator<void, SuggestRun> {
+  yield* prefabSuggestions(rom, { levels, open, emu: () => emu, kept });
+  return kept.latest!;
 }
 
 // all at once

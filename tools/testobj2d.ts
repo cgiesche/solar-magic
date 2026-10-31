@@ -21,7 +21,7 @@ import { saveLevel } from '../src/core/save.ts';
 import { parseLmObjects, sampleLevel, mwlSections } from '../src/core/mwl.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { effectLoad, ramEffect } from '../src/core/objeffects.ts';
-import { renderObjectThumbs } from '../src/ui/thumbs.ts';
+import { renderObjectThumbs } from '../src/core/objthumbs.ts';
 import { editorImage } from './fixture.ts';
 
 await loadAsar();

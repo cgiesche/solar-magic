@@ -4,7 +4,8 @@
 // ranges a change wrote; a broken worker hands everything
 // wanted to the main thread, and without a worker it all runs there; a failed probe is not asked again until the ROM changes; the
 // prefetch follows the tileset; object kinds are kept while the bytes they read are unchanged; a cancelled
-// scan is told to the worker; learn jobs (the sprite images) come in as they run, with a worker and without.
+// scan is told to the worker; learn jobs (the sprite images) come in as they run, with a worker and without; a lane's
+// jobs can be dropped, an urgent one runs without a worker while a dialog holds the background slices.
 import { readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
 import { BlockProber } from '../src/core/blockprobe.ts';
@@ -59,7 +60,7 @@ function editor(worker: Worker | null) {
   const rom = new Rom(file.slice()), emu = new LevelEmulator(rom);
   const steps: [string, () => void][] = [];
   const e = {
-    rom, emu, ts: 0, ready: 0, kindsReady: 0, busy: new Map<string, string>(), steps,
+    rom, emu, ts: 0, ready: 0, kindsReady: 0, busy: new Map<string, string>(), steps, soon: [] as (() => void)[],
     results: new ResultCache(new RomFingerprint(rom)),
     client: null as unknown as ProbeClient,
     // background slices on the main thread (the prefetch after a ROM change only when asked)
@@ -75,6 +76,7 @@ function editor(worker: Worker | null) {
     rom: () => rom, tileset: () => e.ts,
     connect: worker ? worker.connect : undefined,
     later: (key, step) => steps.push([key, step]),
+    soon: (step) => e.soon.push(step),
     setBusy: (key, label) => { if (label === null) e.busy.delete(key); else e.busy.set(key, label); },
     ready: () => e.ready++,
     kindLevel: () => {
@@ -391,6 +393,30 @@ function editor(worker: Worker | null) {
   check(e.client.learn('anim:105', job, opts) === got, '… after a ROM change of nothing it read: the same');
   await settle();
   check(learns() === n, '… not asked again');
+}
+
+// a lane's jobs not wanted any more (#179): dropped in the worker, nothing busy. Without a worker an urgent job (one a
+// dialog shows) runs while the background slices wait for the dialog, another one doesn't
+{
+  const w = new Worker(), e = editor(w), lv = loadLevel(e.rom, 0x105);
+  const sizes = (size: number): LearnJob => ({ kind: 'sizes', level: { number: 0x105, header: lv.header }, layer2Pointer: lv.layer2Pointer, specs: [{ num: 0x21, ext: 0, size }] });
+  e.client.learn('sizes', sizes(3), { lane: 'sizes', input: 3, label: 'Sizes' });
+  await settle();
+  e.client.unlearn('sizes');
+  check(w.sent.some((m) => m.type === 'unlearn' && m.lane === 'sizes') && !e.busy.has('sizes') && w.run().length === 0, 'unlearn: the lane dropped in the worker, nothing busy');
+
+  const e2 = editor(null);
+  let done = 0;
+  e2.client.learn('sizes', sizes(3), { lane: 'sizes', input: 3, urgent: true, done: () => done++ });
+  await settle();
+  for (let i = 0; i < 100 && e2.soon.length; i++) e2.soon.shift()!();
+  check(done === 1, 'no worker: an urgent job runs while the background slices wait');
+  e2.client.learn('sizes', sizes(4), { lane: 'sizes', input: 4, done: () => done++ });
+  await settle();
+  for (let i = 0; i < 100 && e2.soon.length; i++) e2.soon.shift()!();
+  check(done === 1 && e2.steps.some(([k]) => k === 'probe'), '… another one waits for them');
+  e2.drain();
+  check(done === 2, '… and runs then');
 }
 
 console.log(bad ? `${bad} failures` : 'all ok');

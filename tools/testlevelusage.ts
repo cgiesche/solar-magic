@@ -22,7 +22,7 @@ import { levelSlots, layerSlots, type GfxSlot } from '../src/core/gfxslots.ts';
 import { gfxSkipMask, gfxFilesHash } from '../src/core/gfxpages.ts';
 import { readGfx, writeGfx } from '../src/core/gfxfiles.ts';
 import { lz2Decompress } from '../src/core/lz2.ts';
-import { thumbsInput } from '../src/ui/thumbs.ts';
+import { thumbsInput } from '../src/core/objthumbs.ts';
 import { editorImage } from './fixture.ts';
 
 let fail = 0;

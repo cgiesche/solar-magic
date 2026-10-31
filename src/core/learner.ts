@@ -1,6 +1,7 @@
-// Learning emulated results on the editor's main thread (what the probe worker doesn't do, see
-// probeclient.ts): a result by its key in the result cache, else learned by a job on an emulator of the
-// learner's job runner (jobrunner.ts), at once or in background slices. A sliced job runs in a lane: one job of a
+// Learning emulated results on the editor's main thread: a result by its key in the result cache, else learned by a
+// job on an emulator of the learner's job runner (jobrunner.ts), at once (now: what the editor needs at once) or in
+// background slices (learn: the editor learns its background jobs in the probe worker instead, probeclient.ts; the
+// tests compare the worker's results with these). A sliced job runs in a lane: one job of a
 // lane at a time (in the order asked), on the lane's own emulator (a job may leave state there between its slices); a
 // request for a key (and input) already asked for joins it. A result holds while its key, its input (state
 // outside the ROM it depends on, inputs.ts) and the ROM bytes it read (romdeps.ts) are unchanged; a sliced

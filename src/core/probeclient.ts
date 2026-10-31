@@ -1,8 +1,7 @@
 // The editor's side of the probes (probehost.ts): asks for block, collision and sprite probes, Mario's
 // run speeds and the game view's scroll bands in the current tileset, prefetches what the palettes can
-// show, and runs the object kinds, the level scan, the camera at a place and the result learner's jobs that run there
-// (CONTEXT.md; the sprite images, the levels' uses, the sprite memory check, the animated tiles and colors, the layer 3
-// kinds, the tiles of the level as edited), all in the probe worker. It sends the ROM once, then the ranges each change
+// show, and runs the object kinds, the level scan, the camera at a place and the result learner's jobs (CONTEXT.md;
+// probeprotocol.ts LearnJob), all in the probe worker. It sends the ROM once, then the ranges each change
 // wrote (the worker keeps its queue and restarts only tasks
 // that read a changed byte; the whole ROM again, with everything still wanted, when the ROM's log of changes
 // doesn't reach back), and falls back to probing on the main thread in background slices when the worker
@@ -33,7 +32,8 @@ export interface ProbeClientDeps {
   kindLevel(): { level: KindLevel; layer2Pointer: number }; // the level object kinds are found with
   // starts the worker (replies go to reply, failed() once it broke down); null or a throw: none
   connect?(reply: (d: ProbeReply) => void, failed: () => void): Send | null;
-  later(key: string, step: () => void): void; // a background slice on the main thread
+  later(key: string, step: () => void): void; // a background slice on the main thread (waits while a dialog is open)
+  soon?(step: () => void): void; // a slice that runs while a dialog is open too (default: later's)
   setBusy(key: string, label: string | null): void; // ('probe', 'kinds', the tasks' types, the learn jobs' lanes)
   ready(): void; // the asked or the prefetched probes are all done
   kindsReady(): void; // object kinds asked for are known (or failed)
@@ -45,6 +45,7 @@ export interface LearnOptions<T> {
   input?: unknown; // what the result depends on outside the ROM (inputs.ts)
   replace?: boolean; // drops the lane's other jobs (they are not wanted any more), also when the result is known
   label?: string | ((queued: number) => string); // busy label (queued: the lane's jobs); the job's progress replaces it
+  urgent?: boolean; // runs while a dialog is open (one that shows the result): matters without a worker only
   done?: (result: T) => void; // (a callback already waiting for the result isn't added again)
   shown?: (items: unknown[] | null) => void; // what the job shows while it runs (null: it started, also over)
 }
@@ -231,6 +232,16 @@ export class ProbeClient {
     return undefined;
   }
 
+  // the jobs of a lane are not wanted any more
+  unlearn(name: string): void {
+    const lane = this.lanes.get(name);
+    if (!lane?.wants.length) return;
+    lane.wants = [];
+    lane.progress = null;
+    this.send?.({ type: 'unlearn', lane: name });
+    this.learnBusy(name);
+  }
+
   // a learn job's result as kept (learnKeep: none for those the job keeps none of)
   private stored<T>(key: string, input: string | undefined, keep: Keep): T | undefined {
     return keep === false ? undefined : (keep === 'memory' ? this.memory : this.d.results).get<T>(key, input);
@@ -282,8 +293,15 @@ export class ProbeClient {
   private local(): Send {
     return pumpProbes(new ProbeHost(), (d) => this.reply(d), {
       wait: (run) => this.d.later('probe', run),
+      // (an urgent learn job asked for: a dialog that shows its result doesn't hold it up)
+      ...(this.d.soon && { soon: this.d.soon, urgent: () => this.urgent() }),
       startTurn: () => { const t0 = performance.now(); return () => performance.now() - t0 < SLICE; },
     });
+  }
+
+  private urgent(): boolean {
+    for (const lane of this.lanes.values()) if (lane.wants.some((w) => w.opts.urgent)) return true;
+    return false;
   }
 
   private reply(d: ProbeReply): void {

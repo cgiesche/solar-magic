@@ -5,7 +5,7 @@ import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadLevel, L2_PTRS } from '../src/core/level.ts';
 import { ObjKindProbe, withObjectVariant } from '../src/core/objkinds.ts';
 import { TileCache, map16Source, drawMap16 } from '../src/core/render.ts';
-import { renderObjectThumbs, objectThumbsJob, objKey, type ObjSpec } from '../src/ui/thumbs.ts';
+import { renderObjectThumbs, objectThumbsJob, objKey, type ObjSpec } from '../src/core/objthumbs.ts';
 import { editorImage } from './fixture.ts';
 
 let fail = 0;
