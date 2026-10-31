@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { Snes } from '../src/core/snes.ts';
 import { hex } from '../src/core/disasm.ts';
 import { cgramToRGBA, decodeTile } from '../src/core/gfx.ts';
-import { writePng } from './png.ts';
+import { writePng, outDir } from './png.ts';
 const raw = readFileSync('Super Mario World (U) [!].smc');
 const rom = new Uint8Array(raw.subarray(raw.length % 0x8000));
 const snes = new Snes(rom); snes.reset();
@@ -36,9 +36,11 @@ function renderBg(sc: number, charBase: number, bpp: number, file: string) {
   }
   writePng(file, W * 8, H * 8, img);
 }
-const S = '/tmp/claude-1000/-home-cgiesche-sources-smw-editor-ai/624ce7dd-933c-4fab-929a-f37f123d88a8/scratchpad/';
-renderBg(snes.ppuRegs[7], (snes.ppuRegs[0xb] & 15) << 13, 4, S + 'ow1.png');
-renderBg(snes.ppuRegs[8], (snes.ppuRegs[0xb] >> 4) << 13, 4, S + 'ow2.png');
+const out = outDir();
+if (out) {
+  renderBg(snes.ppuRegs[7], (snes.ppuRegs[0xb] & 15) << 13, 4, `${out}/ow1.png`);
+  renderBg(snes.ppuRegs[8], (snes.ppuRegs[0xb] >> 4) << 13, 4, `${out}/ow2.png`);
+}
 let s1 = '', s2 = '';
 for (let i = 0; i < 16; i++) { s1 += hex(w[0x14000 + 0x800 + i * 2] | (w[0x14001 + 0x800 + i * 2] << 8), 4) + ' '; s2 += hex(snes.vram[0x6000 + 0x800 + i * 2] | (snes.vram[0x6001 + 0x800 + i * 2] << 8), 4) + ' '; }
 console.log('7F4800', s1); console.log('vram', s2);

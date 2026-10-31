@@ -3,7 +3,7 @@ import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadLevel } from '../src/core/level.ts';
 import { captureSprites } from '../src/core/spritegfx.ts';
-import { writePng } from './png.ts';
+import { writePng, outDir } from './png.ts';
 const rom = new Rom(new Uint8Array(readFileSync('Super Mario World (U) [!].smc')));
 const emu = new LevelEmulator(rom); emu.boot();
 const n = parseInt(process.argv[2] ?? '105', 16);
@@ -22,4 +22,5 @@ for (const [k, s] of m) {
     img[py * W + px] = s.rgba[y * s.w + x];
   }
 }
-writePng(process.env.OUT ?? '/tmp/spr.png', W, H, img);
+const out = outDir();
+if (out) writePng(`${out}/spr${n.toString(16).padStart(3, '0')}.png`, W, H, img);

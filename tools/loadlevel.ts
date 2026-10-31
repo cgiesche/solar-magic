@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { Snes } from '../src/core/snes.ts';
 import { hex } from '../src/core/disasm.ts';
 import { decodeTile, cgramToRGBA } from '../src/core/gfx.ts';
-import { writePng } from './png.ts';
+import { writePng, outDir } from './png.ts';
 
 const raw = readFileSync('Super Mario World (U) [!].smc');
 const rom = new Uint8Array(raw.subarray(raw.length % 0x8000));
@@ -44,4 +44,5 @@ for (let sc = 0; sc < scr; sc++) for (let y = 0; y < 27; y++) for (let x = 0; x 
   const px = sc * 256 + x * 16, py = y * 16;
   draw8(rd(0), px, py); draw8(rd(1), px, py + 8); draw8(rd(2), px + 8, py); draw8(rd(3), px + 8, py + 8);
 }
-writePng(process.argv[3] ?? '/tmp/claude-1000/level.png', W, H, img);
+const out = outDir();
+if (out) writePng(`${out}/l${level.toString(16).padStart(3, '0')}.png`, W, H, img);

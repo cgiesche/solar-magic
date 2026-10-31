@@ -3,7 +3,7 @@ import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator, OV_L1, OV_L2 } from '../src/core/levelemu.ts';
 import { loadLevel, serializeLayer1, serializeLayer2, serializeSprites, isL1Vertical } from '../src/core/level.ts';
 import { renderLevel, composite } from '../src/core/render.ts';
-import { writePng } from './png.ts';
+import { writePng, outDir } from './png.ts';
 import { editorImage } from './fixture.ts';
 
 const rom = new Rom(await editorImage());
@@ -11,7 +11,7 @@ const emu = new LevelEmulator(rom);
 let t0 = Date.now();
 emu.boot();
 console.log('boot ms', Date.now() - t0);
-const out = process.env.OUT;
+const out = outDir();
 const list = process.argv[2] ? process.argv[2].split(',').map((s) => parseInt(s, 16)) : [...Array(0x25).keys(), ...Array.from({ length: 0x3c }, (_, i) => 0x101 + i)];
 let bad = 0;
 for (const n of list) {

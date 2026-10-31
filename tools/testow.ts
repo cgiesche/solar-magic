@@ -2,18 +2,21 @@ import { readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
 import { readL2, writeL2, OverworldEmulator, l2Index, l1Index, levelName, translevelToLevel, OW_EVENTS } from '../src/core/overworld.ts';
 import { TileCache } from '../src/core/render.ts';
-import { writePng } from './png.ts';
+import { writePng, outDir } from './png.ts';
 import { RAM } from '../src/core/ram.ts';
+let bad = 0;
+const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
 const rom = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
 const l2 = readL2(rom);
 const copy = new Rom(rom.output(false));
 const size = writeL2(copy, l2);
 const l2b = readL2(copy);
-console.log('L2 roundtrip', l2.every((v, i) => v === l2b[i]), 'compressed', size, 'orig approx', 0x04cb56 - 0x04a533);
+check(l2.length === l2b.length && l2.every((v, i) => v === l2b[i]), `layer 2 round trip (compressed ${size}, original about ${0x04cb56 - 0x04a533})`);
 const emu = new OverworldEmulator(rom);
 const t0 = Date.now();
 const r = emu.load(0, OW_EVENTS);
-console.log('ow load ms', Date.now() - t0, r.ok);
+check(r.ok, `overworld load (${Date.now() - t0} ms)`);
+if (!r.ok) { console.log(`${bad} failed`); process.exit(1); }
 // render L2 from data
 const tc = new TileCache(r.vram, r.cgram, 0);
 const W = 512;
@@ -33,9 +36,10 @@ for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
   const pos = [[0, 0], [0, 8], [8, 0], [8, 8]];
   for (let q = 0; q < 4; q++) { const t = tc.get(words[q]); for (let yy = 0; yy < 8; yy++) for (let xx = 0; xx < 8; xx++) if (t[yy * 8 + xx]) img[(y * 16 + pos[q][1] + yy) * W + x * 16 + pos[q][0] + xx] = t[yy * 8 + xx]; }
 }
-const out = process.env.OUT;
+const out = outDir();
 if (out) writePng(`${out}/owmain.png`, W, W, img);
 const tl = w.subarray(RAM.owTranslevels, RAM.owTranslevelsEnd); // the game's translevel per tile
 const seen: string[] = [];
 for (let i = 0; i < 0x800; i++) if (tl[i]) seen.push(`${tl[i].toString(16)}=${translevelToLevel(tl[i]).toString(16)} ${levelName(rom, tl[i])}`);
 console.log(seen.length, seen.slice(0, 12).join(' | '));
+if (bad) { console.log(`${bad} failed`); process.exit(1); }

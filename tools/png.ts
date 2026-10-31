@@ -1,11 +1,18 @@
 import { deflateSync } from 'node:zlib';
-import { writeFileSync } from 'node:fs';
+import { writeFileSync, statSync } from 'node:fs';
 const crcTable = new Uint32Array(256).map((_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
 function crc(buf: Uint8Array) { let c = 0xffffffff; for (const b of buf) c = crcTable[(c ^ b) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; }
 function chunk(type: string, data: Uint8Array) {
   const out = new Uint8Array(12 + data.length); const dv = new DataView(out.buffer);
   dv.setUint32(0, data.length); for (let i = 0; i < 4; i++) out[4 + i] = type.charCodeAt(i);
   out.set(data, 8); dv.setUint32(8 + data.length, crc(out.subarray(4, 8 + data.length))); return out;
+}
+// The directory images are written to: OUT, or none when it is unset (says so on each call).
+export function outDir(): string | undefined {
+  const out = process.env.OUT;
+  if (!out) { console.log('OUT unset: no images written (set OUT to a directory to write them)'); return undefined; }
+  if (!statSync(out, { throwIfNoEntry: false })?.isDirectory()) throw new Error(`OUT is not a directory: ${out}`);
+  return out;
 }
 // rgba: Uint32Array ABGR little endian
 export function writePng(path: string, w: number, h: number, rgba: Uint32Array) {
