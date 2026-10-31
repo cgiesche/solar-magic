@@ -5,7 +5,9 @@
 // Longer tasks run here too, as jobs of the job runner (jobrunner.ts) a step at a time between the probes: the object
 // kinds of a tileset (objkinds.ts), the level scan (levelscan.ts) and the camera at Mario standing at a place
 // (camerareach.ts). A task the editor no longer wants is kept without running; asked for again with the same
-// result, it goes on where it stood.
+// result, it goes on where it stood. The result learner's jobs (CONTEXT.md; the sprite images) run here too, in
+// lanes as on the main thread (learner.ts), taking turns with the tasks; they choose whether the display data counts
+// for them (pictures: it does; the probes and tasks: it doesn't, ADR 0008).
 // After the first copy of the ROM the editor sends the ranges a change wrote: queued jobs stay, a task starts over
 // before its next step only when it read a changed byte, results are checked against the ROM as always.
 
@@ -16,7 +18,8 @@ import { JobRunner, type Job, type JobRun } from './jobrunner.ts';
 import { objKindsJob, kindsKey } from './objkinds.ts';
 import { levelScanJob, type ScanResult } from './levelscan.ts';
 import { cameraAtJob, type CameraAt } from './camerareach.ts';
-import { jobId, jobKey, type ProbeJob, type ProbeMessage, type ProbeReply, type TaskMessage, type TaskType } from './probeprotocol.ts';
+import { spriteSetJob, spriteAtJob, spriteBytesJob } from './spritegfx.ts';
+import { jobId, jobKey, type ProbeJob, type ProbeMessage, type ProbeReply, type TaskMessage, type TaskType, type LearnJob, type LearnMessage } from './probeprotocol.ts';
 
 // a longer task: what was asked (a request asking for the same result may have replaced it) and its job
 interface Task { msg: TaskMessage; run: JobRun<unknown> }
@@ -31,6 +34,22 @@ function taskJob(m: TaskMessage): JobRun<unknown>['start'] {
 }
 function* found<T>(job: Generator<void, T | null>): Job<T | undefined> { return (yield* job) ?? undefined; }
 
+// a learn job's job and whether it is a picture (CONTEXT.md); show takes what it shows while it runs (null: it
+// started, also over)
+function learnJob(j: LearnJob, show: (items: unknown[] | null) => void): { picture: boolean; start: JobRun<unknown>['start'] } {
+  switch (j.kind) {
+    case 'sprites': return { picture: true, start: (emu) => spriteSetJob(emu, j.level, j.nums, show) };
+    case 'spriteAt': return { picture: true, start: (emu) => spriteAtJob(emu, j.level, j.id, j.x, j.y) };
+    case 'spriteBytes': return { picture: true, start: (emu) => spriteBytesJob(emu, j.level, j.id, j.bytes) };
+  }
+}
+
+// a learn job asked for: the latest request for its result, its job and what it showed since the last reply
+interface Learn { msg: LearnMessage; run: JobRun<unknown>; fresh: boolean; shown: unknown[] }
+// a lane of learn jobs: the first one runs
+interface Lane { learns: Learn[] }
+const laneTurn = (lane: string) => `learn:${lane}`; // (its turn's and its emulator's name: no task type)
+
 // the result cache key of a task's result
 const taskKey = (m: TaskMessage) => (m.type === 'kinds' ? kindsKey(m.ts) : m.key);
 
@@ -41,7 +60,7 @@ export class ProbeHost {
   private gen = -1;
   private asked = new Map<string, ProbeJob>(); // requested directly: first
   private prefetch = new Map<string, ProbeJob>();
-  private tasks = new Map<TaskType, Task>(); // taking turns
+  private turns = new Map<string, Task | Lane>(); // tasks (by type) and lanes of learn jobs (laneTurn), taking turns
   // cancelled tasks, not run: taken up again when the same result is asked for before another task of their type
   // (which would use their emulator)
   private cancelled = new Map<TaskType, Task>();
@@ -54,7 +73,7 @@ export class ProbeHost {
     this.gen = gen;
     this.asked.clear();
     this.prefetch.clear();
-    this.tasks.clear();
+    this.turns.clear();
     this.cancelled.clear();
     if (!this.rom || !this.prober) {
       const rom = this.rom = new Rom(new Uint8Array(0));
@@ -104,14 +123,48 @@ export class ProbeHost {
       case 'prefetch': this.setPrefetch(m.jobs); break;
       case 'cancel': this.cancel(m.task); break;
       case 'kinds': case 'scan': case 'camera': this.startTask(m); break;
+      case 'learn': this.learn(m); break;
+      case 'unlearn': this.turns.delete(laneTurn(m.lane)); break;
     }
+  }
+
+  // a learn job asked for: queued in its lane, unless the lane has one for the same result (it answers this request
+  // then); replace drops the lane's other jobs
+  private learn(msg: LearnMessage): void {
+    if (!this.runner) return;
+    const name = laneTurn(msg.lane), same = (l: Learn) => l.msg.key === msg.key && l.msg.input === msg.input;
+    let lane = this.turns.get(name) as Lane | undefined;
+    if (!lane) this.turns.set(name, (lane = { learns: [] }));
+    if (msg.replace) lane.learns = lane.learns.filter(same);
+    const known = lane.learns.find(same);
+    if (known) { known.msg = msg; return; }
+    const show = (items: unknown[] | null) => { if (items === null) { l.fresh = true; l.shown = []; } else l.shown.push(...items); };
+    // (a job starting over runs for the latest request)
+    const start: JobRun<unknown>['start'] = (emu, p) => learnJob(l.msg.job, show).start(emu, p);
+    const l: Learn = { msg, fresh: false, shown: [], run: this.runner.run({ key: msg.key, input: msg.input, keep: true, picture: learnJob(msg.job, show).picture, start }) };
+    lane.learns.push(l);
+  }
+
+  // a step of the lane's first job: its result when it ended, else its progress
+  private learnStep(name: string, lane: Lane): ProbeReply {
+    const l = lane.learns[0], m = l.msg;
+    let r: { result: unknown } | null, failed = false;
+    try { r = this.runner!.step(name, l.run); } catch (e) { console.error(e); r = { result: null }; failed = true; }
+    if (r) {
+      lane.learns.shift();
+      return { type: 'learned', gen: this.gen, lane: m.lane, key: m.key, input: m.input, result: failed ? null : r.result, failed, put: this.put(failed ? null : m.key, m.input) };
+    }
+    const d: ProbeReply = { type: 'learning', gen: this.gen, lane: m.lane, key: m.key, input: m.input, label: l.run.label, fresh: l.fresh, shown: l.shown, put: this.put(null) };
+    l.fresh = false;
+    l.shown = [];
+    return d;
   }
 
   // the task of that type is not wanted any more: it runs no further step (kept, see startTask)
   private cancel(type: TaskType): void {
-    const t = this.tasks.get(type);
+    const t = this.turns.get(type) as Task | undefined;
     if (!t) return;
-    this.tasks.delete(type);
+    this.turns.delete(type);
     this.cancelled.set(type, t);
   }
 
@@ -119,13 +172,13 @@ export class ProbeHost {
   // (it answers this request then, going on where it stood)
   private startTask(msg: TaskMessage): void {
     if (!this.runner) return;
-    const t = this.tasks.get(msg.type) ?? this.cancelled.get(msg.type);
+    const t = (this.turns.get(msg.type) as Task | undefined) ?? this.cancelled.get(msg.type);
     this.cancelled.delete(msg.type);
-    if (t && taskKey(t.msg) === taskKey(msg)) { t.msg = msg; this.tasks.set(msg.type, t); return; }
+    if (t && taskKey(t.msg) === taskKey(msg)) { t.msg = msg; this.turns.set(msg.type, t); return; }
     // (a job starting over runs for the latest request)
     const task: Task = { msg, run: this.runner.run({ key: taskKey(msg), keep: true, picture: false, boot: msg.type !== 'kinds', start: (emu, p) => taskJob(task.msg)(emu, p) }) };
-    this.tasks.delete(msg.type);
-    this.tasks.set(msg.type, task);
+    this.turns.delete(msg.type);
+    this.turns.set(msg.type, task);
   }
 
   // a finished task's reply (result null: it failed), answering its latest request
@@ -163,18 +216,24 @@ export class ProbeHost {
     for (const id of this.asked.keys()) this.prefetch.delete(id);
   }
 
-  get pending(): number { return this.asked.size + this.tasks.size + this.prefetch.size; }
+  get pending(): number { return this.asked.size + this.turns.size + this.prefetch.size; }
 
-  // runs the next job (asked probes, then a slice of a longer task, then prefetched probes); null
-  // when nothing finished
+  // runs the next job (asked probes, then a step of a longer task or a learn job, then prefetched probes); null
+  // when nothing finished (a learn job's step gives its progress)
   next(): ProbeReply | null {
-    if (!this.asked.size && this.tasks.size) {
-      const [type, task] = this.tasks.entries().next().value!;
-      this.tasks.delete(type);
+    if (!this.asked.size && this.turns.size) {
+      const [name, turn] = this.turns.entries().next().value!;
+      this.turns.delete(name);
+      if ('learns' in turn) {
+        if (!turn.learns.length) return null; // (all replaced or done)
+        const d = this.learnStep(name, turn);
+        if (turn.learns.length) this.turns.set(name, turn); // (the next turn's next)
+        return d;
+      }
       let r: { result: unknown } | null;
-      try { r = this.runner!.step(type, task.run); } catch (e) { console.error(e); r = { result: null }; }
-      if (r) return this.taskDone(task, r.result ?? null);
-      this.tasks.set(type, task); // (the other task's turn next)
+      try { r = this.runner!.step(name, turn.run); } catch (e) { console.error(e); r = { result: null }; }
+      if (r) return this.taskDone(turn, r.result ?? null);
+      this.turns.set(name, turn); // (the next turn's next)
       return null;
     }
     const p = this.prober;

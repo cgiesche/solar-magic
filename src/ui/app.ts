@@ -14,7 +14,7 @@ import { boxedObjects, boxAt } from '../core/objboxes.ts';
 import { objectUserNames } from '../core/usernames.ts';
 import { loadPixiProject, customSpriteList, type CustomSprite } from '../core/pixi.ts';
 import { renderLevel, renderLayerTiles, type LevelImages, composite, animatedPixels, TileAnimation, type AnimStep } from '../core/render.ts';
-import { captureSprites, captureSpriteAt, type SpriteImage } from '../core/spritegfx.ts';
+import type { SpriteImage, SpriteLevel } from '../core/spritegfx.ts';
 import { spriteMemJob, usedSpriteMemory, SpriteGroupResults } from '../core/spritemem.ts';
 import { DM16_EXT, levelGfx, levelExtGfx, customPalette, levelMusic, defaultGfx } from '../core/patches.ts';
 import { objectLength2D, fitExtension } from '../core/obj2d.ts';
@@ -716,7 +716,8 @@ export class App {
 
   // ------------- sprite images (captured from the running game) -------------
   // kept in the result cache like the probes: all images of a sprite GFX/palette setting together,
-  // variant images by sprite and position; their input (spriteInput) the rest of what they depend on
+  // variant images by sprite and position; their input (spriteInput) the rest of what they depend on. Captured in
+  // the probe worker (probeclient.ts; without one on the main thread)
   // custom sprites of the ROM's PIXI project (see pixi.ts), by sprite id ($2xx / $3xx with the extra bit)
   private customMemo: { gen: number; list: CustomSprite[] } = { gen: -1, list: [] };
   customSprites(): CustomSprite[] {
@@ -743,23 +744,18 @@ export class App {
   ensureSpriteImages(): void {
     const lv = this.level, hd = lv.header, show = this.showSprites;
     const all = [...Array.from({ length: 0xe7 }, (_, i) => i), ...this.customSprites().map((c) => c.id)]; // as listed in the picker
-    const lvNum = lv.number, bg = lv.layer2Pointer >> 16 === 0xff ? lv.layer2Pointer : 0xffd900;
-    const header = { ...hd }, sh = lv.spriteHeader;
     // i6: with the input; sprites from $C9 on (shells, groups), failed batches retried one by one, sprites
     // that draw nothing shown by what they spawn, sprites erasing themselves at once by what they drew
-    const stored = this.learner.learn(`i6${hd.spriteGfx}-${hd.spritePalette}`, function* (emu) {
-      show(null);
-      const images: [number, SpriteImage][] = [];
-      for (let i = 0; i < all.length; i += 6) {
-        // one test level load (six sprite slots) per step
-        const r = captureSprites(emu, lvNum, header, sh, bg, all.slice(i, i + 6));
-        show(r);
-        images.push(...r);
-        yield `Sprite graphics ${Math.min(100, Math.round((i + 6) / all.length * 100))} %`;
-      }
-      return images;
-    }, { input: this.spriteInput(), lane: 'sprites', replace: true, label: 'Sprite graphics', progress: this.spritesShown, done: this.spritesLearned });
+    const stored = this.probes.learn(`i6${hd.spriteGfx}-${hd.spritePalette}`, { kind: 'sprites', level: this.spriteLevel(), nums: all }, {
+      input: this.spriteInput(), lane: 'sprites', replace: true, label: 'Sprite graphics', done: this.spritesLearned,
+      shown: (items) => { show(items as [number, SpriteImage][] | null); if (items) this.spritesShown(); },
+    });
     if (stored && stored !== this.spritesFrom) this.spritesLearned(stored);
+  }
+  // the open level as sprite images are captured in it
+  private spriteLevel(): SpriteLevel {
+    const lv = this.level;
+    return { number: lv.number, header: { ...lv.header }, spriteHeader: lv.spriteHeader, bgPointer: lv.layer2Pointer >> 16 === 0xff ? lv.layer2Pointer : 0xffd900 };
   }
   private spritesFrom: [number, SpriteImage][] | null = null; // the images spriteThumbs shows
   private spritesLearned = (images: [number, SpriteImage][]) => {
@@ -790,21 +786,18 @@ export class App {
   // custom sprites with extra bytes other than 0 one per bytes
   spriteImage(id: number, x: number, y: number, bytes?: number[]): HTMLCanvasElement | undefined {
     const base = this.spriteThumbs.get(id);
-    const lv = this.level, bg = lv.layer2Pointer >> 16 === 0xff ? lv.layer2Pointer : 0xffd900;
-    const shown = this.spritesShown, set = `${lv.header.spriteGfx}-${lv.header.spritePalette}`;
+    const lv = this.level, shown = this.spritesShown, set = `${lv.header.spriteGfx}-${lv.header.spritePalette}`;
     if (bytes?.some((b) => b)) {
       const b = [...bytes];
-      const img = this.learner.learn(`b3${set}:${id}:${b.join(',')}`, function* (emu) {
-        return captureSprites(emu, lv.number, lv.header, lv.spriteHeader, bg, [id], undefined, b).get(id) ?? null;
-      }, { input: this.spriteInput(), lane: 'bytes', done: shown });
+      const img = this.probes.learn<SpriteImage | null>(`b3${set}:${id}:${b.join(',')}`, { kind: 'spriteBytes', level: this.spriteLevel(), id, bytes: b },
+        { input: this.spriteInput(), lane: 'bytes', done: shown });
       return img ? this.spriteCanvas(img) : base;
     }
     const p = this.probes.sprite(id);
     if (!p || p.variants.reps.length < 2) return base;
     const at = p.variants.reps[variantOf(p.variants, x, y)];
-    const img = this.learner.learn<SpriteImage | null>(`v5${set}:${id}:${at.x}:${at.y}`, function* (emu) {
-      return captureSpriteAt(emu, lv.number, lv.header, lv.spriteHeader, bg, id, at.x, at.y);
-    }, { input: this.spriteInput(), lane: 'variants', label: (n) => `Sprite variants (${n})`, done: shown });
+    const img = this.probes.learn<SpriteImage | null>(`v5${set}:${id}:${at.x}:${at.y}`, { kind: 'spriteAt', level: this.spriteLevel(), id, x: at.x, y: at.y },
+      { input: this.spriteInput(), lane: 'variants', label: (n) => `Sprite variants (${n})`, done: shown });
     return img ? this.spriteCanvas(img) : base;
   }
   private spritesShown = () => this.emit('sprites');

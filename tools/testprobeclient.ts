@@ -4,7 +4,7 @@
 // ranges a change wrote; a broken worker hands everything
 // wanted to the main thread, and without a worker it all runs there; a failed probe is not asked again until the ROM changes; the
 // prefetch follows the tileset; object kinds are kept while the bytes they read are unchanged; a cancelled
-// scan is told to the worker.
+// scan is told to the worker; learn jobs (the sprite images) come in as they run, with a worker and without.
 import { readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
 import { BlockProber } from '../src/core/blockprobe.ts';
@@ -16,6 +16,9 @@ import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadLevel, L2_PTRS } from '../src/core/level.ts';
 import { ObjKindProbe, kindsKey, type ObjKinds } from '../src/core/objkinds.ts';
 import type { ScanLevel } from '../src/core/levelscan.ts';
+import { captureSprites, type SpriteLevel } from '../src/core/spritegfx.ts';
+import type { LearnJob } from '../src/core/probeprotocol.ts';
+import { inputHash } from '../src/core/inputs.ts';
 import { editorImage } from './fixture.ts';
 
 const EDITOR_IMAGE = await editorImage(); // the fixture as the editor opens it
@@ -290,6 +293,62 @@ function editor(worker: Worker | null) {
   check(cancels() === 1 && w.host.pending === 0 && !e.busy.has('scan'), 'scan cancelled: the worker told, it runs nothing');
   e.client.cancelScan();
   check(cancels() === 1, '… once');
+}
+
+// learn jobs (sprite images, #175): with a worker the main thread captures nothing, it gets the images as they come and
+// the result with its entry (key and input); asked again, the stored result; replace drops the lane's other jobs, also
+// when the result is known; a failed one waits for a ROM change; without a worker they run on the main thread
+{
+  const lv = loadLevel(new Rom(file), 0x105);
+  const level: SpriteLevel = { number: 0x105, header: lv.header, spriteHeader: lv.spriteHeader, bgPointer: 0xffd900 };
+  const nums = [0x0d, 0x0f, 0x11, 0x1d, 0x21, 0x3e, 0x04], input = { set: 'test' };
+  const capEmu = new LevelEmulator(new Rom(file));
+  const direct = JSON.stringify([...captureSprites(capEmu, 0x105, lv.header, lv.spriteHeader, 0xffd900, nums.slice(0, 6)), ...captureSprites(capEmu, 0x105, lv.header, lv.spriteHeader, 0xffd900, nums.slice(6))]);
+  const job: LearnJob = { kind: 'sprites', level, nums };
+  const learns = (w: Worker) => w.sent.filter((m) => m.type === 'learn').length;
+
+  const w = new Worker(), e = editor(w);
+  const shown: (unknown[] | null)[] = [], done: unknown[] = [];
+  const opts = { input, lane: 'sprites', replace: true, label: 'Sprite graphics', done: (r: unknown) => done.push(r), shown: (i: unknown[] | null) => shown.push(i) };
+  check(e.client.learn('spr', job, opts) === undefined && e.busy.get('sprites') === 'Sprite graphics', 'learn: unknown, asked for, busy');
+  e.client.learn('spr', job, opts);
+  await settle();
+  check(learns(w) === 1, 'learn: asked once');
+  const replies = w.run(1);
+  check(replies[0]?.type === 'learning' && shown.length === 2 && shown[0] === null && (shown[1]?.length ?? 0) > 0 && e.busy.get('sprites') === 'Sprite graphics 86 %', `learn: the first images as they come, the progress label (${e.busy.get('sprites')})`);
+  w.run();
+  check(done.length === 1 && JSON.stringify(done[0]) === direct && JSON.stringify(shown.slice(1).flat()) === direct, 'learn: the result and the images shown as captured directly');
+  check(JSON.stringify(e.results.get('spr', inputHash(input))) === direct && !e.busy.has('sprites'), 'learn: in the result cache under its key and input, nothing busy');
+  check(e.steps.every(([k]) => k === 'probe-prefetch'), 'learn: the main thread ran nothing for it');
+  check(JSON.stringify(e.client.learn('spr', job, opts)) === direct, 'learn: asked again, the stored result');
+  await settle();
+  check(learns(w) === 1, '… not asked again');
+
+  // replace: another set drops the variants asked before it (the worker told), also when it is known
+  const at = (x: number): LearnJob => ({ kind: 'spriteAt', level, id: 0x0d, x, y: 0 });
+  e.client.learn('v1', at(1), { input, lane: 'variants' });
+  e.client.learn('v2', at(2), { input, lane: 'variants', label: (n) => `Sprite variants (${n})` });
+  check(e.busy.get('variants') === undefined, '(the first job of a lane gives the label: none)');
+  e.client.learn('spr', job, { ...opts, lane: 'variants' }); // (known)
+  check(w.sent.some((m) => m.type === 'unlearn' && m.lane === 'variants') && !e.busy.has('variants'), 'replace by a known result: the lane dropped in the worker, nothing busy');
+
+  // a failed job: not asked again until the ROM changes
+  e.client.learn('v3', at(3), { input, lane: 'variants' });
+  await settle();
+  w.run(Infinity, (d) => d.type === 'learned' ? { ...d, failed: true, result: null, put: [] } : d);
+  const n = learns(w);
+  check(e.client.learn('v3', at(3), { input, lane: 'variants' }) === undefined && learns(w) === n, 'failed learn job: not asked again');
+  touch(e.rom);
+  e.client.learn('v3', at(3), { input, lane: 'variants' });
+  await settle();
+  check(learns(w) === n + 1, '… after a ROM change: asked again');
+
+  // no worker: on the main thread, in background slices
+  const e2 = editor(null), done2: unknown[] = [];
+  e2.client.learn('spr', job, { ...opts, done: (r) => done2.push(r) });
+  await settle();
+  e2.drain();
+  check(done2.length === 1 && JSON.stringify(done2[0]) === direct && JSON.stringify(e2.results.get('spr', inputHash(input))) === direct, 'no worker: captured on the main thread');
 }
 
 console.log(bad ? `${bad} failures` : 'all ok');

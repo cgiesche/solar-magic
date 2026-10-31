@@ -359,3 +359,32 @@ export function captureSpriteAt(
   const ncx = cameraX(w), ncy = cameraY(w);
   return { ...img, ox: img.ox + ncx - sx, oy: img.oy + ncy - sy };
 }
+
+// The level sprite images are captured in: its number, header and sprite header, and the layer 2 (BG) pointer
+export interface SpriteLevel { number: number; header: PrimaryHeader; spriteHeader: number; bgPointer: number }
+
+// The images of the sprites nums (a sprite set's: the result under its key), one test level load (six sprite slots)
+// per step; show gets each step's images as they come (null first: the capture started, also over)
+export function* spriteSetJob(
+  emu: LevelEmulator, lv: SpriteLevel, nums: number[], show: (images: [number, SpriteImage][] | null) => void,
+): Generator<string, [number, SpriteImage][]> {
+  show(null);
+  const images: [number, SpriteImage][] = [];
+  for (let i = 0; i < nums.length; i += 6) {
+    const r = [...captureSprites(emu, lv.number, lv.header, lv.spriteHeader, lv.bgPointer, nums.slice(i, i + 6))];
+    show(r);
+    images.push(...r);
+    yield `Sprite graphics ${Math.min(100, Math.round((i + 6) / nums.length * 100))} %`;
+  }
+  return images;
+}
+
+// the image of sprite id with these extra bytes (a custom sprite's; null: none)
+export function* spriteBytesJob(emu: LevelEmulator, lv: SpriteLevel, id: number, bytes: number[]): Generator<never, SpriteImage | null> {
+  return captureSprites(emu, lv.number, lv.header, lv.spriteHeader, lv.bgPointer, [id], undefined, bytes).get(id) ?? null;
+}
+
+// the image of sprite id at tile (x, y) (captureSpriteAt; null: none)
+export function* spriteAtJob(emu: LevelEmulator, lv: SpriteLevel, id: number, x: number, y: number): Generator<never, SpriteImage | null> {
+  return captureSpriteAt(emu, lv.number, lv.header, lv.spriteHeader, lv.bgPointer, id, x, y);
+}

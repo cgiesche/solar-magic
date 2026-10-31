@@ -5,7 +5,7 @@
 // restart nothing).
 // A cancelled scan runs no further slice and goes on when asked for again. Results a task's slice found before a ROM
 // change go with the next reply only if they hold on the new ROM. Jobs keep their result cache keys; only the scan
-// can be cancelled.
+// can be cancelled. Learn jobs (the sprite images) as captured directly, with the result learner's entries, in lanes.
 import { readFileSync } from 'node:fs';
 import { Rom, snesToPc } from '../src/core/rom.ts';
 import { BlockProber, blockKey, collisionKey, spriteKey, runsKey, cameraKey } from '../src/core/blockprobe.ts';
@@ -26,6 +26,10 @@ import { setActsLike, extTileWords, setExtTileWords } from '../src/core/map16ext
 import { bgTileAddr } from '../src/core/bgmap16.ts';
 import { FG_PALS, BACK_AREA } from '../src/core/sharedpal.ts';
 import { setCustomPalette } from '../src/core/patches.ts';
+import { captureSprites, captureSpriteAt, spriteSetJob, type SpriteLevel } from '../src/core/spritegfx.ts';
+import { storeKey } from '../src/core/romdeps.ts';
+import { inputHash } from '../src/core/inputs.ts';
+import { ResultLearner } from '../src/core/learner.ts';
 import { readL1, writeL1, readL2, writeL2, l1Index, l2Index, l2Pointers } from '../src/core/overworld.ts';
 
 const EDITOR_IMAGE = await editorImage(); // the fixture as the editor opens it
@@ -311,6 +315,73 @@ for (const changeRead of [false, true]) {
   h.handle({ type: 'scan', id: 1, key: 'scan-sz', level: scanLevel });
   h.edit(2, r.size * 2, []);
   check(h.pending === 0, 'a new size: tasks dropped');
+}
+
+// sprite images (learn jobs, #175): as captured directly, a test level load per step with the images as they come;
+// the result cache entries as the result learner on the main thread makes them (key, input, bytes read: a picture,
+// from the main boot snapshot); a lane's jobs one after another, a request for the same result joins it, replace
+// drops the lane's others, unlearn all of them
+{
+  const r = new Rom(file), h = new ProbeHost();
+  h.setRom(1, r.data.slice());
+  const lv5 = loadLevel(r, 0x105), level: SpriteLevel = { number: 0x105, header: lv5.header, spriteHeader: lv5.spriteHeader, bgPointer: 0xffd900 };
+  const nums = [0x00, 0x04, 0x0d, 0x0f, 0x11, 0x1d, 0x21, 0x3e], input = inputHash({ set: 'test', nums });
+  const capEmu = new LevelEmulator(new Rom(file));
+  capEmu.skipMask = () => gfxSkipMask(capEmu.rom);
+  const direct = [...captureSprites(capEmu, 0x105, lv5.header, lv5.spriteHeader, 0xffd900, nums.slice(0, 6)), ...captureSprites(capEmu, 0x105, lv5.header, lv5.spriteHeader, 0xffd900, nums.slice(6))];
+  h.handle({ type: 'learn', lane: 'sprites', key: 'spr-set', input, job: { kind: 'sprites', level, nums }, replace: true });
+  const replies: ProbeReply[] = [];
+  while (h.pending) { const d = h.next(); if (d) replies.push(d); }
+  const steps = replies.filter((d) => d.type === 'learning'), done = replies.find((d) => d.type === 'learned');
+  check(steps.length === 2 && steps[0].type === 'learning' && steps[0].fresh && steps[0].label === 'Sprite graphics 75 %' && steps.every((d) => d.type === 'learning' && d.lane === 'sprites' && d.key === 'spr-set' && d.input === input),
+    `sprite set: a reply per test level load, labelled, the first fresh (${steps.length} steps)`);
+  const shown = steps.flatMap((d) => (d.type === 'learning' ? d.shown : []));
+  check(JSON.stringify(shown) === JSON.stringify(direct), 'sprite set: the images as they come, as captured directly');
+  check(done?.type === 'learned' && !done.failed && JSON.stringify(done.result) === JSON.stringify(direct), 'sprite set: the result as captured directly');
+  const entry = done?.type === 'learned' ? done.put.find(([k]) => k === storeKey('spr-set', input))?.[1] : undefined;
+  check(entry?.input === input && JSON.stringify(entry.data) === JSON.stringify(direct), 'sprite set: its result cache entry, with its input');
+
+  // the main thread's result learner, as the editor sets it up
+  const lr = new Rom(file), main = new LevelEmulator(lr), results = new ResultCache(new RomFingerprint(lr)), later: (() => void)[] = [];
+  main.skipMask = () => gfxSkipMask(lr);
+  main.boot();
+  const learner = new ResultLearner({ rom: lr, results, cacheReady: Promise.resolve(), main, later: (_k, f) => later.push(f), soon: (f) => later.push(f), setBusy: () => {} });
+  learner.learn('spr-set', (e) => spriteSetJob(e, level, nums, () => {}), { input: { set: 'test', nums } });
+  for (let i = 0; i < 100 && !results.entry('spr-set', input); i++) { await new Promise((f) => setTimeout(f, 0)); while (later.length) later.shift()!(); }
+  const there = results.entry('spr-set', input);
+  check(!!there && !!entry && JSON.stringify(there.deps) === JSON.stringify(entry.deps) && JSON.stringify(there.data) === JSON.stringify(entry.data),
+    'sprite set: the same entry as the result learner on the main thread (bytes read)');
+  check(!!entry && entry.deps.pages.some((p) => gfxDisplaySkipMask(r, Array.from({ length: TILESETS }, (_, ts) => tilesetPointers(ptrEmu, ts).result))[p << 8]),
+    'sprite set: a picture, its reads keep the display data');
+
+  // the same set again: the stored result at once
+  h.handle({ type: 'learn', lane: 'sprites', key: 'spr-set', input, job: { kind: 'sprites', level, nums }, replace: true });
+  const again = h.next();
+  check(again?.type === 'learned' && again.put.some(([k]) => k === storeKey('spr-set', input)) && h.pending === 0, 'sprite set asked again: its stored result, with its entry');
+
+  // variants and extra bytes in lanes of their own: one after another, the same result asked twice runs once
+  const at = (x: number): ProbeMessage => ({ type: 'learn', lane: 'variants', key: `v:${x}`, input, job: { kind: 'spriteAt', level, id: 0x0d, x, y: 0 }, replace: false });
+  const started = h.started;
+  h.handle(at(0)); h.handle(at(1)); h.handle(at(0));
+  h.handle({ type: 'learn', lane: 'bytes', key: 'b:1', input, job: { kind: 'spriteBytes', level, id: 0x0d, bytes: [1] }, replace: false });
+  const got: ProbeReply[] = [];
+  while (h.pending) { const d = h.next(); if (d) got.push(d); }
+  const learned = got.filter((d) => d.type === 'learned');
+  check(learned.map((d) => d.type === 'learned' && d.key).join() === 'v:0,b:1,v:1' && h.started === started + 3, `variants and bytes: lanes taking turns, a job asked twice runs once (${learned.map((d) => d.type === 'learned' && d.key).join()})`);
+  const v0 = learned.find((d) => d.type === 'learned' && d.key === 'v:0');
+  check(v0?.type === 'learned' && JSON.stringify(v0.result) === JSON.stringify(captureSpriteAt(capEmu, 0x105, lv5.header, lv5.spriteHeader, 0xffd900, 0x0d, 0, 0)), 'a variant as captured directly');
+  const b1 = learned.find((d) => d.type === 'learned' && d.key === 'b:1');
+  check(b1?.type === 'learned' && JSON.stringify(b1.result) === JSON.stringify(captureSprites(capEmu, 0x105, lv5.header, lv5.spriteHeader, 0xffd900, [0x0d], undefined, [1]).get(0x0d) ?? null), 'extra bytes as captured directly');
+
+  // replace drops the lane's other jobs, unlearn the lane
+  h.handle(at(2)); h.handle(at(3));
+  h.handle({ ...at(4), replace: true } as ProbeMessage);
+  const rep: ProbeReply[] = [];
+  while (h.pending) { const d = h.next(); if (d) rep.push(d); }
+  check(rep.map((d) => d.type === 'learned' && d.key).join() === 'v:4', 'replace: only the latest job of the lane');
+  h.handle(at(5)); h.handle(at(6));
+  h.handle({ type: 'unlearn', lane: 'variants' });
+  check(h.pending === 0, 'unlearn: the lane\'s jobs dropped');
 }
 
 // the job runner under both owners (runnercheck.ts)
