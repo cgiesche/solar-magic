@@ -37,7 +37,7 @@ What the user calls an FG or BG Map16 tile, to find it by later (usernames.ts; o
 _Avoid_: label, tag, description
 
 **Marked quarters**:
-The set of quarters of the Map16 tab's selection that an edit in the builder changes (palette, flips, priority, a chosen 8x8 tile by Enter). A new selection marks all. A **stamp** puts the chosen block of 8x8 tiles onto the quarters where it lies (right click, right drag paints; or dropped there), whatever is marked. A **flip** mirrors the marked quarters as one picture (across tile borders, each quarter's flip toggled); the marks must be symmetric to the axis. Acts-like applies to the wholly marked 16x16 tiles only and stays with its tile on a flip.
+The set of quarters of the Map16 tab's selection that an edit in the builder changes (palette, flips, priority, a chosen 8x8 tile by Enter). A new selection marks all. A **stamp** puts the chosen block of 8x8 tiles onto the quarters where it lies (right click, right drag paints; or dropped there), whatever is marked. A **flip** mirrors the marked quarters as a whole (across tile borders, each quarter's flip toggled); the marks must be symmetric to the axis. Acts-like applies to the wholly marked 16x16 tiles only and stays with its tile on a flip.
 _Avoid_: selected quarter (the sheet's selection is of whole tiles)
 
 **Conditional Direct Map16**:
@@ -77,7 +77,7 @@ A reusable block of Map16 tiles (at most 64x64, cells may be transparent, tiles 
 _Avoid_: structure (the old name), custom object (one of object 2D's numbers, ObjecTool's ASM objects), stamp (that is the Map16 builder's), collection (Lunar Magic's Custom Collections of Objects are copies without a link)
 
 **Picker**:
-The panel beside the level or the overworld that something to place or paint is chosen from: in a level objects, prefabs, Map16 tiles and sprites (layer 1/2 and sprites), BG and layer 3 tiles; in the overworld its tiles and sprites. Its pictures keep their pixels of one size: fixed grids fill its width (a Map16 page keeps its 16 columns), drawn at the next whole number of screen pixels per pixel above it and shrunk smoothly; single images at whole numbers of screen pixels; below 3× the hovered entry is shown enlarged beside it.
+The panel beside the level or the overworld that something to place or paint is chosen from: in a level objects, prefabs, Map16 tiles and sprites (layer 1/2 and sprites), BG and layer 3 tiles; in the overworld its tiles and sprites. What it draws keeps its pixels of one size: fixed grids fill its width (a Map16 page keeps its 16 columns), drawn at the next whole number of screen pixels per pixel above it and shrunk smoothly; single images at whole numbers of screen pixels; below 3× the hovered entry is shown enlarged beside it.
 _Avoid_: palette (that is colors), Insert panel, tile selector
 
 **Picked item**:
@@ -89,7 +89,7 @@ What a right click places instead of the picked item when the level's selection 
 _Avoid_: stamp (that is the Map16 builder's), duplicate (Ctrl+D, one tile down-right)
 
 **Placement preview**:
-A view option (off by default: a picture at the mouse feels like dragging, as if a left click dropped it): what a right click at the mouse would place, drawn translucent at the tile under it: the picked item or the selection copy, objects as the level's load draws them there with them added (emulated in the background; meanwhile the last one known follows the mouse), sprites with their images. Not shown over the selection or while dragging.
+A view option (off by default: something drawn at the mouse feels like dragging, as if a left click dropped it): what a right click at the mouse would place, drawn translucent at the tile under it: the picked item or the selection copy, objects as the level's load draws them there with them added (emulated in the background; meanwhile the last one known follows the mouse), sprites with their images. Not shown over the selection or while dragging.
 _Avoid_: ghost (the view's ghosted other layer), cursor image
 
 **Level edit**:
@@ -291,7 +291,7 @@ What the editor reads out of the ROM without emulating (the custom sprite list, 
 _Avoid_: emulated result, cache
 
 **Savestate**:
-Test play's one slot (F5 saves, F8 loads; Select+L / Select+R on a gamepad): the whole emulated machine at a frame – memory, registers, scroll, color math, the sound unit and the picture on screen – so that loading it goes on exactly as from the moment of saving. It belongs to its level on the ROM as it was then: any change of the ROM since (the level saved, a ROM edit) makes it stale, and a stale one is dropped (core/savestate.ts). Not written to disk.
+Test play's one slot (F5 saves, F8 loads; Select+L / Select+R on a gamepad): the whole emulated machine at a frame – memory, registers, scroll, color math, the sound unit and what is on screen – so that loading it goes on exactly as from the moment of saving. It belongs to its level on the ROM as it was then: any change of the ROM since (the level saved, a ROM edit) makes it stale, and a stale one is dropped (core/savestate.ts). Not written to disk.
 _Avoid_: snapshot (that is the emulator's boot state every load starts from), save (the game's own save file, or saving the level)
 
 **Failed spawn**:
@@ -307,7 +307,7 @@ A frame of the level in which the game's main loop was not done before the next 
 _Avoid_: slowdown frame, CPU overload
 
 **Death marker**:
-Where Mario died in a recent test play of a level, drawn over it (View → Death markers) with what killed him (core/deaths.ts): a death is the frame the game sets Mario dying, the killer is learned from what the code did up to then – the timer run out, Mario fallen out of the picture, else what the code read last: a sprite table for the slot in X (a sprite's code, normal, extended or cluster) or a layer 1 tile (a block). Kept in the browser per project (its id in the editor data, which a file name or saving as a project doesn't change) and level, the newest 100, until cleared (per level or all); each with the level's version then, those from before the level was last changed shown faded. Editor-local, never in the ROM.
+Where Mario died in a recent test play of a level, drawn over it (View → Death markers) with what killed him (core/deaths.ts): a death is the frame the game sets Mario dying, the killer is learned from what the code did up to then – the timer run out, Mario fallen out of view, else what the code read last: a sprite table for the slot in X (a sprite's code, normal, extended or cluster) or a layer 1 tile (a block). Kept in the browser per project (its id in the editor data, which a file name or saving as a project doesn't change) and level, the newest 100, until cleared (per level or all); each with the level's version then, those from before the level was last changed shown faded. Editor-local, never in the ROM.
 _Avoid_: death point, skull
 
 **Prefetch**:

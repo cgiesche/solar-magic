@@ -11,7 +11,7 @@
 
 import { Rom, type RomRange } from './rom.ts';
 import { BlockProber, blockKey, collisionKey, spriteKey, runsKey, cameraKey } from './blockprobe.ts';
-import { displaySkipMask } from './gfxpages.ts';
+import { gfxDisplaySkipMask } from './gfxpages.ts';
 import { TILESETS, tilesetPointers, pointersKey } from './tilesets.ts';
 import { RomReads, type CacheEntry } from './romdeps.ts';
 import { LevelEmulator } from './levelemu.ts';
@@ -107,10 +107,10 @@ export class ProbeHost {
       this.rom.data = data;
       this.prober = new BlockProber(this.rom);
       const emu = this.prober.emu, rom = this.rom;
-      // ROM bytes of GFX file data, Map16 tile words and colors: what blocks do doesn't depend on them (see
-      // displaySkipMask)
+      // ROM bytes of GFX file and ExAnimation data and the display data (Map16 quarters, colors): what blocks do
+      // doesn't depend on them (see gfxDisplaySkipMask)
       emu.skipMask = () => {
-        if (this.mask.gen !== rom.gen) this.mask = { gen: rom.gen, mask: displaySkipMask(rom, this.pointers()) };
+        if (this.mask.gen !== rom.gen) this.mask = { gen: rom.gen, mask: gfxDisplaySkipMask(rom, this.pointers()) };
         return this.mask.mask;
       };
       return;

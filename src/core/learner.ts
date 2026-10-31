@@ -6,15 +6,15 @@
 // outside the ROM it depends on, inputs.ts) and the ROM bytes it read (romdeps.ts) are unchanged; a sliced
 // job during which bytes it read changed keeps nothing and runs again.
 // A result that is no picture (picture: false) doesn't read the display data either (the Map16 tiles'
-// quarters, the colors: displaySkipMask, as the probe worker's results, ADR 0008): drawing a tile or
+// quarters, the colors: gfxDisplaySkipMask, as the probe worker's results, ADR 0008): drawing a tile or
 // changing a color keeps it. Its job runs from a boot snapshot that leaves them out too, booted on an own
-// emulator; pictures (sprite images, thumbnails) run from the main emulator's.
+// emulator; pictures (CONTEXT.md) run from the main emulator's.
 
 import type { Rom } from './rom.ts';
 import { LevelEmulator } from './levelemu.ts';
 import { RomReads, INPUTS_PER_KEY, type ResultCache, type RomDeps, type RomFingerprint } from './romdeps.ts';
 import { inputHash } from './inputs.ts';
-import { displaySkipMask } from './gfxpages.ts';
+import { gfxDisplaySkipMask } from './gfxpages.ts';
 import { TILESETS, tilesetPointers, pointersKey } from './tilesets.ts';
 
 const SLICE = 12; // ms a slice of a job runs before input and drawing get through
@@ -159,7 +159,7 @@ export class ResultLearner {
     return emu;
   }
 
-  // The bytes results that are no pictures don't read: the display data (displaySkipMask, with the tilesets'
+  // The bytes results that are no pictures don't read: the display data (gfxDisplaySkipMask, with the tilesets'
   // pointers), the GFX file data among them; once per ROM state. Learning the pointers isn't part of the
   // result asking for the mask.
   private displayMask = (): Uint8Array | null => {
@@ -167,14 +167,16 @@ export class ResultLearner {
     if (m.gen !== rom.gen) {
       const reads = rom.reads;
       rom.reads = null;
-      try { m.mask = displaySkipMask(rom, this.tilesetPointers()); m.gen = rom.gen; } finally { rom.reads = reads; }
+      try { m.mask = gfxDisplaySkipMask(rom, this.tilesetPointers()); m.gen = rom.gen; } finally { rom.reads = reads; }
     }
     return m.mask;
   };
 
-  // per tileset the pointers of FG Map16 tiles 000-1FF (tilesets.ts), learned once and kept in the result cache
-  // (their reads leave out the display data by themselves). On an own emulator: the mask is asked for while
-  // other emulators of the learner's run.
+  // per tileset the pointers of FG Map16 tiles 000-1FF (tilesets.ts), learned once and kept in the result cache.
+  // No picture, though learned from the main emulator's boot snapshot as pictures are: the boot snapshot of results
+  // that are no pictures needs the mask, which needs these pointers. Their reads leave out the display data by
+  // themselves, without the boot's reads (tilesetPointers). On an own emulator: the mask is asked for while other
+  // emulators of the learner's run.
   tilesetPointers(): number[][] {
     return Array.from({ length: TILESETS }, (_, ts) => {
       const key = pointersKey(ts), known = this.stored<number[]>(key, undefined, true);

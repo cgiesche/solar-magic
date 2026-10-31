@@ -1,6 +1,6 @@
 // Where Mario died in test play, and what killed him. A death is the game's: the frame its code sets Mario's
 // animation to dying. What killed him is learned from what the code did up to then, not from the game's
-// tables: the timer run out (written in the frame, now 000), Mario fallen out of the picture (below the
+// tables: the timer run out (written in the frame, now 000), Mario fallen out of view (below the
 // screen's 224 lines), else what the
 // code read last of two: a slot of a sprite table read for the slot in X (sprite code keeps its own slot
 // there: a sprite's code touching Mario reads its position), or a tile of layer 1 (a block's code runs for
@@ -12,7 +12,7 @@ import { SLOT_TABLES, SLOT_KINDS, type SlotKind } from './slotwatch.ts';
 import { spriteId } from './level.ts';
 import { GAME_VIEW_H, MARIO_H } from './camerabands.ts';
 
-// Mario's Y on the screen from which he can't be seen: even small Mario's lower half is below the picture
+// Mario's Y on the screen from which he can't be seen: even small Mario's lower half is below the screen
 const BELOW_SCREEN = GAME_VIEW_H - MARIO_H / 2;
 const SCREEN_BYTES = 0x1b0; // a horizontal level's screen in the level data (27 rows), without a height of its own
 const VERTICAL_SCREEN = 0x200; // a vertical level's (16 rows of two 16-tile halves)

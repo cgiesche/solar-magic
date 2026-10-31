@@ -7,10 +7,10 @@
 // The same for the ExAnimation data (pointer table, settings, lists, alternative files): editing an
 // animation keeps the block probes (whose test level may be the level being animated).
 // For what blocks do (block probes, probehost.ts) and the editor's other results that are no pictures (learner.ts)
-// also the Map16 tiles' 8x8 tile words and the colors: they only reach VRAM and CGRAM as well, so drawing a tile or
-// changing a palette keeps them (displaySkipMask). Not for pictures: object thumbnails and sprite images show them.
-// Where the level's colors are loaded from (the palette tab) leaves out the GFX files and the colors' values
-// (colorSkipMask): changing a color keeps it.
+// also the display data (the Map16 quarters and the colors): they only reach VRAM and CGRAM as well, so drawing a
+// tile or changing a palette keeps them (gfxDisplaySkipMask). Not for pictures (CONTEXT.md): they show them.
+// Where the level's colors are loaded from (the palette tab) leaves out the GFX file data and the colors' values
+// (gfxFileColorValueSkipMask): changing a color keeps it.
 
 import { snesToPc, type Rom } from './rom.ts';
 import { editorPatch, gfxEntry, GFX_FILES, GFX_NONE, customPalettePatch, PALETTE_SIZE } from './patches.ts';
@@ -72,10 +72,10 @@ function fillSnes(mask: Uint8Array, snes: number, len: number): void {
   if (o < mask.length) mask.fill(1, o, Math.min(o + len, mask.length));
 }
 
-// The GFX file data with its pointer entries and the colors' values: the shared palettes and the levels' own palettes –
-// not the own palettes' pointers, they say where a level's colors come from (see ColorSources), nor the ExAnimation
-// data, a color animation writes colors too. Built like gfxSkipMask: its reads aren't a dependency.
-export function colorSkipMask(rom: Rom): Uint8Array {
+// The GFX file data with its pointer entries (and the checksum) and the colors' values: the shared palettes and the
+// levels' own palettes – not the own palettes' pointers, they say where a level's colors come from (see ColorSources),
+// nor the ExAnimation data, a color animation writes colors too. Built like gfxSkipMask: its reads aren't a dependency.
+export function gfxFileColorValueSkipMask(rom: Rom): Uint8Array {
   const mask = gfxFileMask(rom);
   const reads = rom.reads;
   rom.reads = null;
@@ -87,12 +87,12 @@ export function colorSkipMask(rom: Rom): Uint8Array {
   } finally { rom.reads = reads; }
 }
 
-// gfxSkipMask, colorSkipMask and every byte that only says what blocks look like: the quarters (8x8 tile words) of the FG Map16 tiles
-// (ptrs: the pointers of tiles 000-1FF per tileset, tilesetPointers; the extended tiles' table) and the BG Map16 tiles,
-// and the levels' own palettes' pointers too (a level without one only takes the shared colors). Built like
-// gfxSkipMask: its reads aren't a dependency.
-export function displaySkipMask(rom: Rom, ptrs: number[][]): Uint8Array {
-  const mask = addExanim(rom, colorSkipMask(rom));
+// gfxSkipMask's bytes and the display data: the colors' values (gfxFileColorValueSkipMask), the quarters of the FG
+// Map16 tiles (ptrs: the pointers of tiles 000-1FF per tileset, tilesetPointers; the extended tiles' table) and the
+// BG Map16 tiles, and the levels' own palettes' pointers too (a level without one only takes the shared colors).
+// Built like gfxSkipMask: its reads aren't a dependency.
+export function gfxDisplaySkipMask(rom: Rom, ptrs: number[][]): Uint8Array {
+  const mask = addExanim(rom, gfxFileColorValueSkipMask(rom));
   const reads = rom.reads;
   rom.reads = null;
   try {

@@ -15,7 +15,7 @@ import { levelScanJob, type ScanLevel } from '../src/core/levelscan.ts';
 import { cameraAtJob } from '../src/core/camerareach.ts';
 import { loadLevel, serializeLayer1, serializeSprites, L2_PTRS } from '../src/core/level.ts';
 import { editorImage } from './fixture.ts';
-import { gfxSkipMask, displaySkipMask } from '../src/core/gfxpages.ts';
+import { gfxSkipMask, gfxDisplaySkipMask } from '../src/core/gfxpages.ts';
 import { tilesetPointers, pointersKey, TILESETS } from '../src/core/tilesets.ts';
 import { setActsLike, extTileWords, setExtTileWords } from '../src/core/map16ext.ts';
 import { bgTileAddr } from '../src/core/bgmap16.ts';
@@ -71,9 +71,9 @@ const scanLevel: ScanLevel = {
 };
 const emu = new LevelEmulator(new Rom(file));
 const emuRom = new Rom(file), ptrEmu = new LevelEmulator(new Rom(file));
-ptrEmu.skipMask = () => displaySkipMask(ptrEmu.rom, []);
-const emuMask = displaySkipMask(emuRom, Array.from({ length: TILESETS }, (_, ts) => tilesetPointers(ptrEmu, ts).result));
-emu.skipMask = () => emuMask; // as the host: GFX and ExAnimation data, Map16 tile words and colors are no dependency
+ptrEmu.skipMask = () => gfxDisplaySkipMask(ptrEmu.rom, []);
+const emuMask = gfxDisplaySkipMask(emuRom, Array.from({ length: TILESETS }, (_, ts) => tilesetPointers(ptrEmu, ts).result));
+emu.skipMask = () => emuMask; // as the host: GFX and ExAnimation data and the display data are no dependency
 const kindProbe = new ObjKindProbe(emu, { ...lv, header: { ...lv.header, tileset: 1 } }, l2), kinds = kindProbe.result();
 const job = levelScanJob(emu, scanLevel);
 let scanned; for (;;) { const r = job.next(); if (r.done) { scanned = r.value; break; } }

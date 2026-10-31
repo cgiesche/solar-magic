@@ -92,7 +92,8 @@ export class LevelEmulator {
   snes: Snes;
   baseState: SnesState | null = null;
   private romGen: number; // the ROM's generation the emulator is synced to (see sync)
-  // ROM bytes whose reads by the emulated CPU don't count for tracked() results (GFX file data)
+  // ROM bytes whose reads by the emulated CPU don't count for tracked() results (GFX file and ExAnimation data,
+  // gfxSkipMask; for results that are no pictures the display data too, gfxDisplaySkipMask)
   skipMask: (() => Uint8Array | null) | null = null;
   overlay = new Uint8Array(0x10000);
 
