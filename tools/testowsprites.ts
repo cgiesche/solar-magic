@@ -2,13 +2,16 @@
 // game's read and written back unchanged – and by emulation: a new game starts at the set positions (Mario and
 // Luigi), a slot moved or given another sprite is there when the overworld loads, and its image (learned from the
 // game's OAM) is drawn where it is.
-import { Rom } from '../src/core/rom.ts';
+import { Rom, snesToPc } from '../src/core/rom.ts';
+import { RomReads } from '../src/core/romdeps.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { OverworldEmulator, OverworldLoads } from '../src/core/overworld.ts';
 import {
-  readStart, writeStart, readOwSprites, readOwSprite, writeOwSprite, koopaKidPos, setKoopaKidPos, owSpriteImages, OW_SPRITE_SLOTS, KOOPA_KIDS,
+  readStart, writeStart, readOwSprites, readOwSprite, writeOwSprite, koopaKidPos, setKoopaKidPos, owSpriteImages, OW_SPRITE_SLOTS, OW_SPRITES, KOOPA_KIDS,
 } from '../src/core/owsprites.ts';
 import { RAM, get16 } from '../src/core/ram.ts';
+import { RomEditSession } from '../src/core/romedit.ts';
+import { editorPatch } from '../src/core/patches.ts';
 import { editorImage, romDiff } from './fixture.ts';
 
 let bad = 0;
@@ -63,8 +66,8 @@ const rom = new Rom(await editorImage());
 }
 
 // ---- from a kept load ----
-// the images run on from the map's kept load: the same as from a load of their own, no load when one is kept (another
-// map loaded in between)
+// the images run on from the map's kept load: the same as from a load of their own; a load's console is saved when
+// first asked for (taken right after the load, else loaded once more: another map loaded in between), then kept
 {
   const emu = new OverworldEmulator(new Rom(rom.data.slice())), loads = new OverworldLoads(emu, 4);
   let loaded = 0;
@@ -74,11 +77,46 @@ const rom = new Rom(await editorImage());
   for (const [map, progress] of [[0, 0], [0, 0x20], [1, 0]]) {
     const own = text(owSpriteImages(new OverworldLoads(new OverworldEmulator(new Rom(rom.data.slice())), 1), map, progress));
     loads.get(map, progress);
-    loads.get(map ? 0 : 2, 0);
+    emu.load(map ? 0 : 2, 0); // (another map on the console)
     loaded = 0;
     const kept = text(owSpriteImages(loads, map, progress));
-    check(kept === own && loaded === 0, `map ${map} at progress ${hx(progress)}: the kept load's images the same as its own load's, ${loaded} loads`);
+    check(kept === own && loaded === 1, `map ${map} at progress ${hx(progress)}: the kept load's images the same as its own load's, ${loaded} loads (its console not kept)`);
+    emu.load(map ? 0 : 2, 0);
+    loaded = 0;
+    loads.restore(map, progress);
+    check(loaded === 0, `map ${map} at progress ${hx(progress)}: its console kept once asked for, ${loaded} loads`);
   }
+  loads.get(3, 0);
+  loaded = 0;
+  loads.restore(3, 0);
+  check(loaded === 0, `right after a load: its console taken without loading again, ${loaded} loads`);
+}
+
+// ---- kept while what they read stays ----
+// the images are kept while the ROM edits since changed no byte the frames read (a level's graphics), made again for
+// an edit of a slot
+{
+  const r = new Rom(rom.data.slice()), s = new RomEditSession(r), emu = new OverworldEmulator(r), loads = new OverworldLoads(emu, 4);
+  let loaded = 0;
+  const loadRecorded = emu.loadRecorded.bind(emu);
+  emu.loadRecorded = (map, progress) => { loaded++; return loadRecorded(map, progress); };
+  const v = owSpriteImages(loads, 0, 0);
+  loaded = 0;
+  check(owSpriteImages(loads, 0, 0) === v && loaded === 0, 'asked again: the kept images, no load');
+  const gfx = editorPatch(r)!.levelGfx + 0x105 * 8;
+  s.edit('Level 105 graphics', () => r.w8(gfx, r.r8(gfx) ^ 1));
+  check(owSpriteImages(loads, 0, 0) === v && loaded === 0, `a ROM edit the frames didn't read: the kept images, ${loaded} loads`);
+  const outer = new RomReads(r.data.length);
+  emu.snes.romReads = outer;
+  owSpriteImages(loads, 0, 0);
+  emu.snes.romReads = null;
+  check(outer.bytes.has(snesToPc(OW_SPRITES)), 'kept images: their reads count for an outer recorder (the slot table)');
+  const boo = readOwSprite(r, 10);
+  s.edit('Overworld sprite 11: moved', () => writeOwSprite(r, 10, { ...boo, x: boo.x + 0x10 }));
+  const v2 = owSpriteImages(loads, 0, 0);
+  check(v2 !== v && v2[10].image!.ox - v[10].image!.ox === 0x10, 'a slot moved: made again, the slot drawn moved');
+  const v3 = owSpriteImages(loads, 1, 0);
+  check(v3 !== v2 && owSpriteImages(loads, 0, 0) !== v2, 'another map: made for it, the first map\'s made again (one kept)');
 }
 
 if (bad) { console.log(`${bad} FAILED`); process.exit(1); }

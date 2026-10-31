@@ -62,8 +62,12 @@ export function setKoopaKidPos(rom: Rom, k: number, p: { x: number; y: number })
 // height above its position ($0E55)
 export interface OwSpriteView { image: SpriteImage | null; z: number }
 const SHOW_FRAMES = 3;
-// every slot of map `map` at event progress `progress`, as the game shows it (run on from the kept load)
+// every slot of map `map` at event progress `progress`, as the game shows it (run on from the kept load); kept for
+// one map and progress while the ROM edits since changed no byte it read (OverworldLoads.derive)
 export function owSpriteImages(loads: OverworldLoads, map: number, progress: number): OwSpriteView[] {
+  return loads.derive('owSpriteImages', () => runSprites(loads, map, progress), `${map}-${progress}`);
+}
+function runSprites(loads: OverworldLoads, map: number, progress: number): OwSpriteView[] {
   loads.restore(map, progress);
   const emu = loads.emu, s = emu.snes, w = s.wram, start = s.saveState(), sprites = readOwSprites(emu.rom);
   const nums = (keep: number) => { for (let k = 0; k < OW_SPRITE_SLOTS; k++) if (k !== keep) w[RAM.owSpriteNum + FIRST_SLOT + k] = 0; };

@@ -703,6 +703,7 @@ export class OverworldEmulator {
   titleState: SnesState | null = null;
   private title: { reads: RomReads; rom: Uint8Array } | null = null; // what reaching the title screen read
   private lastReads: RomReads | null = null; // what the last load read (reaching the title screen, too)
+  private after: { r: OwRender; cycles: number } | null = null; // the last load, while the console is right after it
   private romGen: number;
   constructor(rom: Rom) {
     this.rom = rom;
@@ -726,6 +727,7 @@ export class OverworldEmulator {
   load(map: number, progress: number): OwRender {
     this.sync();
     const s = this.snes;
+    this.after = null;
     if (!this.titleState) {
       // (an outer recorder gets these reads with the load's, which start from them)
       const outer = s.romReads, reads = new RomReads(this.rom.data.length);
@@ -759,40 +761,53 @@ export class OverworldEmulator {
       s.joy1 = 0;
       for (let i = 0; i < 3; i++) s.runFrame();
     } catch {
-      return { vram: s.vram.slice(), cgram: s.cgram.slice(), wram: s.wram.slice(), ppuRegs: s.ppuRegs.slice(), ok: false };
+      return this.loaded({ vram: s.vram.slice(), cgram: s.cgram.slice(), wram: s.wram.slice(), ppuRegs: s.ppuRegs.slice(), ok: false });
     } finally {
       s.romReads = outer;
       outer?.add(reads);
     }
-    return { vram: s.vram.slice(), cgram: s.cgram.slice(), wram: s.wram.slice(), ppuRegs: s.ppuRegs.slice(), ok: w[RAM.gameMode] === GM.overworld };
+    return this.loaded({ vram: s.vram.slice(), cgram: s.cgram.slice(), wram: s.wram.slice(), ppuRegs: s.ppuRegs.slice(), ok: w[RAM.gameMode] === GM.overworld });
   }
-  // load, with the ROM bytes it read (reaching the title screen, too): what the map shown depends on; state: the
-  // console right after it (the game run on from there: restore)
-  loadRecorded(map: number, progress: number): { result: OwRender; reads: RomReads; state: SnesState } {
+  private loaded(r: OwRender): OwRender {
+    this.after = { r, cycles: this.snes.cpu.cycles };
+    return r;
+  }
+  // load, with the ROM bytes it read (reaching the title screen, too): what the map shown depends on
+  loadRecorded(map: number, progress: number): { result: OwRender; reads: RomReads } {
     const result = this.load(map, progress);
-    return { result, reads: this.lastReads!, state: this.snes.saveState() };
+    return { result, reads: this.lastReads! };
   }
-  // the console as `state` (loadRecorded's), on the current ROM
+  // the console right after the load that gave `r` (the game run on from there: restore), while nothing ran since;
+  // else null. Taken once: the console is then the caller's to change (a poke runs no CPU cycle)
+  stateAfter(r: OwRender): SnesState | null {
+    const a = this.after;
+    this.after = null;
+    if (a?.r !== r || a.cycles !== this.snes.cpu.cycles) return null;
+    this.sync();
+    return this.snes.saveState();
+  }
+  // the console as `state` (stateAfter's), on the current ROM
   restore(state: SnesState): void {
     this.sync();
+    this.after = null;
     this.snes.loadState(state);
   }
 }
 
 // a result kept while the ROM edits since its generation `gen` changed no byte it read
 interface Kept { gen: number; reads: RomReads }
-// a kept load: what it shows and the console right after it
-interface KeptLoad extends Kept { r: OwRender; state: SnesState }
+// a kept load: what it shows and the console right after it (saved when first asked for: restore)
+interface KeptLoad extends Kept { r: OwRender; state: SnesState | null }
 
 // emulated overworlds by map and event progress, the latest used `max` (a slider moved through every progress): each
 // kept while the ROM edits since its load changed no byte the load read (painting the map or its events loads it
 // again, a tile name or a level's graphics don't), as App.refresh keeps the level render; and what is derived from
-// them (derive), kept while none of the loads it used would load again
+// them (derive), kept while none of the loads it used would load again and the frames run on from them read the same
 export class OverworldLoads {
   emu: OverworldEmulator;
   private max: number;
   private kept = new Map<string, KeptLoad>();
-  private derived = new Map<string, Kept & { v: unknown }>();
+  private derived = new Map<string, Kept & { of: string; v: unknown }>();
   constructor(emu: OverworldEmulator, max: number) {
     this.emu = emu;
     this.max = max;
@@ -800,21 +815,36 @@ export class OverworldLoads {
   get(map: number, progress: number): OwRender {
     return this.load(map, progress).r;
   }
-  // the emulator's console as right after loading map `map` at event progress `progress` (to run the game on)
+  // the emulator's console as right after loading map `map` at event progress `progress` (to run the game on); the
+  // load keeps it from the first time it is asked for (taken while the console is still right after the load, else
+  // loaded again)
   restore(map: number, progress: number): void {
-    this.emu.restore(this.load(map, progress).state);
+    const k = this.load(map, progress), emu = this.emu;
+    if (k.state) { emu.restore(k.state); return; }
+    k.state = emu.stateAfter(k.r) ?? emu.stateAfter(emu.loadRecorded(map, progress).result)!;
   }
-  // `make`'s result from the loads it asks for (`load`), kept under `key` while the ROM edits since changed no byte
-  // they read; a load not kept yet isn't kept for it (the slider's stay)
-  derive<T>(key: string, make: (load: (map: number, progress: number) => OwRender) => T): T {
+  // `make`'s result from the loads it asks for (`load`, or restore to run the game on), kept under `key` for `of`
+  // (one per key) while the ROM edits since changed no byte it read: the loads', the frames it runs on from them
+  // and the editor code's; a load not kept yet isn't kept for `load` (the slider's stay)
+  derive<T>(key: string, make: (load: (map: number, progress: number) => OwRender) => T, of = ''): T {
     let d = this.derived.get(key);
-    if (!d || !this.holds(d)) {
-      const gen = this.emu.rom.gen, reads = new RomReads(this.emu.rom.data.length);
-      const v = make((map, progress) => { const k = this.load(map, progress, false); reads.add(k.reads); return k.r; });
-      d = { v, gen, reads };
+    if (!d || d.of !== of || !this.holds(d)) {
+      const emu = this.emu, s = emu.snes, gen = emu.rom.gen, reads = new RomReads(emu.rom.data.length);
+      const outer = s.romReads, outerRom = emu.rom.reads;
+      s.romReads = emu.rom.reads = reads; // the emulated CPU's reads and the editor code's
+      try {
+        d = { v: make((map, progress) => this.load(map, progress, false).r), of, gen, reads };
+      } finally { s.romReads = outer; emu.rom.reads = outerRom; }
       this.derived.set(key, d);
     }
+    this.count(d.reads);
     return d.v as T;
+  }
+  // reads (of a kept result) count for the recorders running (a derive's, an outer one) as if read now
+  private count(reads: RomReads): void {
+    const s = this.emu.snes, outerRom = this.emu.rom.reads;
+    s.romReads?.add(reads);
+    if (outerRom && outerRom !== s.romReads) outerRom.add(reads);
   }
   // the kept load, else a new one (kept when `keep`)
   private load(map: number, progress: number, keep = true): KeptLoad {
@@ -826,11 +856,12 @@ export class OverworldLoads {
       else keep = true;
     }
     if (!k) {
-      const gen = this.emu.rom.gen, { result, reads, state } = this.emu.loadRecorded(map, progress);
-      k = { r: result, gen, reads, state };
+      const gen = this.emu.rom.gen, { result, reads } = this.emu.loadRecorded(map, progress);
+      k = { r: result, gen, reads, state: null };
       if (keep && this.kept.size >= this.max) this.kept.delete(this.kept.keys().next().value!);
     }
     if (keep) this.kept.set(key, k);
+    this.count(k.reads);
     return k;
   }
   // a kept result still holds (then it is as of the current ROM)

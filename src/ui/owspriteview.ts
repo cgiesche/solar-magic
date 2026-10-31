@@ -29,17 +29,15 @@ export class SpriteLayer {
   showShadows = false; // a shadow on the ground under each sprite
   showHeights = true; // a line from a sprite's position up to it at its height
   private clicked = false; // the last mouse press was a click on the selection (the next one cycles)
-  private views: { key: string; views: OwSpriteView[]; canvases: (HTMLCanvasElement | null)[] } | null = null;
+  private views: { views: OwSpriteView[]; canvases: (HTMLCanvasElement | null)[] } | null = null;
   constructor(private view: OverworldView) {}
 
   private get rom() { return this.view.app.rom; }
-  // the slots as the game shows them on the map at the event progress (emulated once per ROM change, map and progress)
+  // the slots as the game shows them on the map at the event progress (emulated again when the map, the progress or
+  // a ROM byte they read changes)
   private shown(): NonNullable<SpriteLayer['views']> {
-    const key = `${this.rom.gen}/${this.view.map}/${this.view.progress}`;
-    if (this.views?.key !== key) {
-      const views = owSpriteImages(this.view.loads, this.view.map, this.view.progress);
-      this.views = { key, views, canvases: views.map((v) => (v.image ? thumbCanvas({ w: v.image.w, h: v.image.h, px: v.image.rgba }) : null)) };
-    }
+    const views = owSpriteImages(this.view.loads, this.view.map, this.view.progress);
+    if (this.views?.views !== views) this.views = { views, canvases: views.map((v) => (v.image ? thumbCanvas({ w: v.image.w, h: v.image.h, px: v.image.rgba }) : null)) };
     return this.views;
   }
   // an item's box on the map (pixels), with a drag's offset
