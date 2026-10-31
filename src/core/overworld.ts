@@ -702,6 +702,7 @@ export class OverworldEmulator {
   snes: Snes;
   titleState: SnesState | null = null;
   private title: { reads: RomReads; rom: Uint8Array } | null = null; // what reaching the title screen read
+  private lastReads: RomReads | null = null; // what the last load read (reaching the title screen, too)
   private romGen: number;
   constructor(rom: Rom) {
     this.rom = rom;
@@ -736,6 +737,9 @@ export class OverworldEmulator {
     } else s.loadState(this.titleState);
     const w = s.wram;
     let n = 0;
+    const outer = s.romReads, reads = new RomReads(this.rom.data.length, this.title!.reads);
+    this.lastReads = reads;
+    s.romReads = reads;
     try {
       while (w[RAM.gameMode] !== GM.overworld && n < 1500) {
         if (w[RAM.gameMode] === GM.fileSelect) w.set(eventBits(progress), RAM.owEvents);
@@ -753,7 +757,45 @@ export class OverworldEmulator {
       for (let i = 0; i < 3; i++) s.runFrame();
     } catch {
       return { vram: s.vram.slice(), cgram: s.cgram.slice(), wram: s.wram.slice(), ppuRegs: s.ppuRegs.slice(), ok: false };
+    } finally {
+      s.romReads = outer;
+      outer?.add(reads);
     }
     return { vram: s.vram.slice(), cgram: s.cgram.slice(), wram: s.wram.slice(), ppuRegs: s.ppuRegs.slice(), ok: w[RAM.gameMode] === GM.overworld };
+  }
+  // load, with the ROM bytes it read (reaching the title screen, too): what the map shown depends on
+  loadRecorded(map: number, progress: number): { result: OwRender; reads: RomReads } {
+    const result = this.load(map, progress);
+    return { result, reads: this.lastReads! };
+  }
+}
+
+// emulated overworlds by map and event progress, the latest used `max` (a slider moved through every progress): each
+// kept while the ROM edits since its load changed no byte the load read (painting the map or its events loads it
+// again, a tile name or a level's graphics don't), as App.refresh keeps the level render
+export class OverworldLoads {
+  emu: OverworldEmulator;
+  private max: number;
+  private kept = new Map<string, { r: OwRender; gen: number; reads: RomReads }>();
+  constructor(emu: OverworldEmulator, max: number) {
+    this.emu = emu;
+    this.max = max;
+  }
+  get(map: number, progress: number): OwRender {
+    const key = `${map}-${progress}`, rom = this.emu.rom;
+    let k = this.kept.get(key);
+    if (k) {
+      this.kept.delete(key);
+      const changes = rom.changesSince(k.gen);
+      if (!changes || k.reads.touches(changes)) k = undefined;
+      else k.gen = rom.gen;
+    }
+    if (!k) {
+      const gen = rom.gen, { result, reads } = this.emu.loadRecorded(map, progress);
+      k = { r: result, gen, reads };
+      if (this.kept.size >= this.max) this.kept.delete(this.kept.keys().next().value!);
+    }
+    this.kept.set(key, k);
+    return k.r;
   }
 }

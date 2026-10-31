@@ -3,8 +3,9 @@
 // free space only otherwise; the game shows the painted map (emulated).
 import { Rom, snesToPc } from '../src/core/rom.ts';
 import { RomEditSession } from '../src/core/romedit.ts';
-import { OverworldEmulator, readL1, writeL1, readL2, writeL2, l1Index, l2Index, l2Pointers, OW_L1, setNameCode, nameCode } from '../src/core/overworld.ts';
+import { OverworldEmulator, OverworldLoads, readL1, writeL1, readL2, writeL2, l1Index, l2Index, l2Pointers, OW_L1, setNameCode, nameCode } from '../src/core/overworld.ts';
 import { RAM } from '../src/core/ram.ts';
+import { editorPatch } from '../src/core/patches.ts';
 import { editorImage } from './fixture.ts';
 
 let bad = 0;
@@ -102,6 +103,24 @@ const diff = (a: Uint8Array, b: Uint8Array) => { const out: number[] = []; for (
   const word = (v: Uint8Array, k: number) => v[base + k * 2] | (v[base + k * 2 + 1] << 8);
   check(word(r0.vram, i2) !== l2[i2] && word(r.vram, i2) === l2[i2], 'the game\'s layer 2 has the painted entry');
   check(Array.from({ length: 0x1000 }, (_, k) => k).every((k) => word(r.vram, k) === l2[k]), 'the game\'s layer 2 is the painted map');
+}
+
+// a kept load stays while a ROM edit changes no byte it read (a level's graphics), painting the map loads it again
+{
+  const { rom, s } = fresh();
+  const loads = new OverworldLoads(new OverworldEmulator(rom), 4);
+  const r0 = loads.get(0, 0), r5 = loads.get(0, 5);
+  const gfx = editorPatch(rom)!.levelGfx + 0x105 * 8;
+  s.edit('Level 105 graphics', () => rom.w8(gfx, rom.r8(gfx) ^ 1));
+  check(loads.get(0, 0) === r0 && loads.get(0, 5) === r5, 'a ROM edit no load read: the loads kept (no emulation)');
+  const l1 = readL1(rom), i = l1Index(0, 7, 9);
+  l1[i] = l1[i] === 0x56 ? 0x57 : 0x56;
+  s.edit('Paint layer 1', () => writeL1(rom, l1));
+  const r = loads.get(0, 0);
+  check(r !== r0 && r.wram[RAM.owLayer1 + i] === l1[i], 'painting layer 1: loaded again, with the painted tile');
+  check(loads.get(0, 5) !== r5, 'painting layer 1: the other event progress loaded again');
+  s.undo();
+  check(loads.get(0, 0).wram[RAM.owLayer1 + i] === r0.wram[RAM.owLayer1 + i], 'undone: loaded again, the tile as before');
 }
 
 if (bad) { console.log(`${bad} failed`); process.exit(1); }

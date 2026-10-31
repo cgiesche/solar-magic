@@ -3,7 +3,7 @@
 import type { App } from './app.ts';
 import { h, toast, select, checkbox, hexInput, attachPanZoom, zoomControl, ZOOM_MIN, ZOOM_MAX, attachRectPick, emptyState } from './dom.ts';
 import {
-  OverworldEmulator, type OwRender, gameL1, gameL2, readL1, writeL1, readL2, writeL2, l1Index, l1XY, l2Index, isLevelTile, readTranslevels, writeTranslevels,
+  OverworldEmulator, OverworldLoads, type OwRender, gameL1, gameL2, readL1, writeL1, readL2, writeL2, l1Index, l1XY, l2Index, isLevelTile, readTranslevels, writeTranslevels,
   placeTile, sharedTranslevels, enterableLevels, translevelToLevel, nameCode, setNameCode, splitNameCode, joinNameCode, nameWord, levelName, NAME_PART_COUNTS, MAP_NAMES,
   translevelUse, resetTranslevel, baseEvent, setBaseEvent, eventNames, exitDirections, setExitDirection, DIR_ARROWS, DIR_NAMES, EXIT_NAMES, NO_EVENT, isNameless,
   initialFlags, setInitialFlags, FLAG, DIR_FLAGS, OW_EVENTS, revealEvents, setRevealEvents, revealAt, revealedTile, revealEventCount,
@@ -98,7 +98,7 @@ export class OverworldView {
   private eventsLabel = h('span', { class: 'ow-events-name' });
   emu: OverworldEmulator;
   map = 0;
-  renders = new Map<string, OwRender>();
+  loads: OverworldLoads;
   // the maps as in the ROM, with the stroke being painted (written to the ROM when it ends); tls: the translevel
   // of each layer 1 tile; rom: the maps as in the ROM; shown: as the game shows them at the event progress, the
   // tiles of the stroke being painted as painted (it goes to the map before events)
@@ -141,6 +141,7 @@ export class OverworldView {
   constructor(app: App) {
     this.app = app;
     this.emu = new OverworldEmulator(app.rom);
+    this.loads = new OverworldLoads(this.emu, RENDERS_KEPT);
     this.l1 = readL1(app.rom);
     this.l2 = readL2(app.rom);
     this.rom = { l1: this.l1.slice(), l2: this.l2.slice() };
@@ -197,19 +198,7 @@ export class OverworldView {
   }
 
   render(): OwRender {
-    const key = `${this.map}-${this.progress}`;
-    let r = this.renders.get(key);
-    if (r) this.renders.delete(key);
-    else {
-      r = this.emu.load(this.map, this.progress);
-      // the latest used (a slider moved through every progress)
-      if (this.renders.size >= RENDERS_KEPT) this.renders.delete(this.renders.keys().next().value!);
-    }
-    this.renders.set(key, r);
-    return r;
-  }
-  invalidate(): void {
-    this.renders.clear();
+    return this.loads.get(this.map, this.progress);
   }
 
   // ---------------- drawing ----------------
@@ -1271,14 +1260,13 @@ export class OverworldView {
       pal);
   }
 
-  // the maps again from the ROM
+  // the maps again from the ROM (the kept loads stay where the ROM edits changed nothing they read)
   sync(): void {
     this.l1 = readL1(this.app.rom);
     this.l2 = readL2(this.app.rom);
     this.rom = { l1: this.l1.slice(), l2: this.l2.slice() };
     this.tls = readTranslevels(this.app.rom);
     this.stopPlay();
-    this.invalidate();
     this.syncEvent();
     this.buildSide();
     this.buildLeft();

@@ -7,7 +7,7 @@ import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { PlaySession } from '../src/core/playsession.ts';
 import { RomEditSession } from '../src/core/romedit.ts';
-import { OverworldEmulator, gameL2, readL2, readTranslevels, baseEvent, OW_EVENTS, l2Index } from '../src/core/overworld.ts';
+import { OverworldEmulator, OverworldLoads, gameL2, readL2, readTranslevels, baseEvent, OW_EVENTS, l2Index } from '../src/core/overworld.ts';
 import {
   readEvents, writeEvents, applyEvents, paintEvent, reorderSteps, eventRunners, eventTitle, submapViews, submapOf, eventPlace, pieceTiles,
   STORAGE_MAX, type EventData,
@@ -63,7 +63,10 @@ for (const i of [...onSub, ...onMain]) painted[i] = word;
 const place = eventPlace(runners, views, e, 0);
 const d1 = paintEvent(d, base, e, painted, place);
 const s = new RomEditSession(rom);
+const loads = new OverworldLoads(new OverworldEmulator(rom), 4), kept = loads.get(0, e + 1);
 s.edit('Event: paint', () => writeEvents(rom, d1));
+const shown = gameL2(loads.get(0, e + 1));
+check(shown !== gameL2(kept) && onMain.every((i) => shown[i] === word), 'a kept overworld load: loaded again, the main map shows the painted tiles');
 check(s.history.undoStack.length === 1 && s.history.undoStack[0].label === 'Event: paint', 'one ROM edit');
 const subTiles = new Set(d1.steps[e].flatMap((p) => pieceTiles(d1, p)));
 const silentTiles = new Set(d1.silent[e].filter((p) => p.layer === 2).flatMap((p) => pieceTiles(d1, { at: p.tile, pos: p.loc })));
