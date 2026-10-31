@@ -2,13 +2,14 @@
 // worker the test runs by hand: a reply from before a ROM change does not make it ask again and
 // again, results come in after it, and one still valid is kept, one whose bytes changed meanwhile not (asked again); after the first copy of the ROM it gets the
 // ranges a change wrote; a broken worker hands everything
-// wanted to the main thread; a failed probe is not asked again until the ROM changes; the
+// wanted to the main thread, and without a worker it all runs there; a failed probe is not asked again until the ROM changes; the
 // prefetch follows the tileset; object kinds are kept while the bytes they read are unchanged; a cancelled
 // scan is told to the worker.
 import { readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
 import { BlockProber } from '../src/core/blockprobe.ts';
-import { ProbeHost, jobKey, type ProbeMessage, type ProbeReply } from '../src/core/probehost.ts';
+import { ProbeHost } from '../src/core/probehost.ts';
+import { jobKey, type ProbeJob, type ProbeMessage, type ProbeReply } from '../src/core/probeprotocol.ts';
 import { ProbeClient } from '../src/core/probeclient.ts';
 import { ResultCache, RomFingerprint } from '../src/core/romdeps.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
@@ -27,6 +28,8 @@ const file = EDITOR_IMAGE.slice();
 const direct = new BlockProber(new Rom(file));
 const settle = () => new Promise((r) => setTimeout(r, 0)); // (stored results are awaited first)
 
+const isBlock = (j: ProbeJob, tile: number) => j.kind === 'block' && j.tile === tile;
+
 // a worker the test runs: messages go to a probe host, replies come back when run() is called
 class Worker {
   host = new ProbeHost();
@@ -44,7 +47,8 @@ class Worker {
     while (n > 0 && this.host.pending) { const d = this.host.next(); if (d) { out.push(d); this.reply(edit(d)); n--; } }
     return out;
   }
-  asks(k: number) { return this.sent.filter((m) => m.type === 'ask' && m.jobs.some((j) => j.k === k)).length; }
+  // ask messages with block tile's job
+  asks(tile: number) { return this.sent.filter((m) => m.type === 'ask' && m.jobs.some((j) => isBlock(j, tile))).length; }
 }
 
 function editor(worker: Worker | null) {
@@ -150,7 +154,7 @@ function editor(worker: Worker | null) {
   check(roms.length === 1 && edits.length === 1, 'one copy of the ROM, then an edit');
   const ed = edits[0];
   check(ed?.type === 'edit' && ed.size === e.rom.size && ed.edits.length === 1 && ed.edits[0][0] === 0x7fc0 && ed.edits[0][1].join() === '65,66', 'the edit: the changed bytes at their offset');
-  check(w.sent.filter((m) => m.type === 'ask' && m.jobs.some((j) => j.k === 0x130)).length === 1, 'jobs asked before the edit: not sent again');
+  check(w.sent.filter((m) => m.type === 'ask' && m.jobs.some((j) => isBlock(j, 0x130))).length === 1, 'jobs asked before the edit: not sent again');
   for (let i = 0; i < 9000; i++) e.rom.w8(0x00ffc0, i);
   e.client.block(0x132);
   await settle();
@@ -183,6 +187,21 @@ function editor(worker: Worker | null) {
   check(!e.busy.has('probe') && !e.busy.has('kinds'), 'nothing busy after');
 }
 
+// no worker: probes and object kinds run on the main thread, in background slices to the end
+{
+  const e = editor(null);
+  e.client.block(0x130);
+  e.client.sprite(0x0d);
+  e.client.kinds(1);
+  await settle();
+  e.drain();
+  check(JSON.stringify(e.client.block(0x130)) === JSON.stringify(direct.probe(0x130)), 'no worker: block 130 probed on the main thread');
+  check(JSON.stringify(e.client.sprite(0x0d)) === JSON.stringify(direct.probeSprite(0x0d)), 'no worker: sprite 0D probed on the main thread');
+  const kinds = e.client.kinds(1);
+  check(kinds !== undefined && kinds !== null && e.kindsReady === 1, 'no worker: object kinds found on the main thread');
+  check(e.ready === 1 && !e.busy.has('probe') && !e.busy.has('kinds') && !e.steps.some(([k]) => k === 'probe'), 'no worker: done, nothing busy, no slice left');
+}
+
 // a failed probe is not asked again until the ROM changes
 {
   const w = new Worker(), e = editor(w);
@@ -208,7 +227,7 @@ function editor(worker: Worker | null) {
   e.client.prefetch();
   await settle();
   const pf = w.sent.filter((m) => m.type === 'prefetch');
-  check(pf.length === 2 && pf[0].type === 'prefetch' && pf[0].jobs.some((j) => j.k === 0x300), 'prefetch of tileset 0 with the extra tile');
+  check(pf.length === 2 && pf[0].type === 'prefetch' && pf[0].jobs.some((j) => isBlock(j, 0x300)), 'prefetch of tileset 0 with the extra tile');
   check(pf[1]?.type === 'prefetch' && pf[1].jobs.length > 0 && pf[1].jobs.every((j) => j.ts === 2), 'tileset 2: only its jobs');
 }
 

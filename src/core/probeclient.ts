@@ -7,16 +7,16 @@
 // fails. Results go to the editor's ResultCache, also those from before a ROM change: they hold while the ROM
 // bytes they read are unchanged.
 
-import { ProbeHost, PROBE_SPRITE, PROBE_COLL, PROBE_RUNS, cameraJob, jobId, jobKey, type ProbeJob, type ProbeMessage, type ProbeDone, type ProbeReply, type KindsDone, type ScanDone, type CameraDone } from './probehost.ts';
+import { ProbeHost, pumpProbes } from './probehost.ts';
+import { jobId, jobKey, type ProbeJob, type ProbeMessage, type ProbeDone, type ProbeReply, type KindsDone, type ScanDone, type CameraDone } from './probeprotocol.ts';
 import type { ResultCache } from './romdeps.ts';
 import type { Rom } from './rom.ts';
-import type { BlockProbe, CollisionProbe, SpriteProbe, RunStates } from './blockprobe.ts';
+import { SPRITE_PROBE_END, probeable, type BlockProbe, type CollisionProbe, type SpriteProbe, type RunStates } from './blockprobe.ts';
 import type { CameraBands } from './camerabands.ts';
 import type { CameraAt } from './camerareach.ts';
 import { kindsKey, type ObjKinds, type KindLevel } from './objkinds.ts';
 import type { ScanLevel, ScanResult } from './levelscan.ts';
 
-export const SPRITE_PROBE_END = 0xc9; // sprites from $C9 on are shooters, generators and run-once sprites
 const SLICE = 12; // ms the main thread probes at a time without a worker
 
 type Send = (m: ProbeMessage) => void;
@@ -54,26 +54,27 @@ export class ProbeClient {
 
   // What a Map16 tile does when hit from below, how Mario collides with it, what a sprite id does
   // (normal sprites only, not shooters/generators): undefined while unknown, then asked for
-  block(tile: number): BlockProbe | undefined { return this.probed(tile); }
-  collision(tile: number): CollisionProbe | undefined { return this.probed(PROBE_COLL | tile); }
+  block(tile: number): BlockProbe | undefined { return this.probed({ kind: 'block', ts: this.d.tileset(), tile }); }
+  collision(tile: number): CollisionProbe | undefined { return this.probed({ kind: 'collision', ts: this.d.tileset(), tile }); }
   sprite(num: number): SpriteProbe | undefined {
-    return probeable(num) ? this.probed(PROBE_SPRITE | num) : undefined;
+    return probeable(num) ? this.probed({ kind: 'sprite', ts: this.d.tileset(), num }) : undefined;
   }
   // Mario's run speeds; null when they could not be found
-  runSpeeds(): RunStates | null | undefined { return this.probedOrFailed<RunStates>(PROBE_RUNS); }
+  runSpeeds(): RunStates | null | undefined { return this.probedOrFailed<RunStates>({ kind: 'runs', ts: this.d.tileset() }); }
 
   // where Mario is on the screen while the camera scrolls (camerabands.ts) in a level of that mode and vertical
   // scroll setting; null when they could not be found
-  cameraBands(mode: number, vscroll: number): CameraBands | null | undefined { return this.probedOrFailed<CameraBands>(cameraJob(mode, vscroll)); }
-
-  // a probe's result; null when it failed
-  private probedOrFailed<T>(k: number): T | null | undefined {
-    const r = this.probed<T>(k);
-    return r === undefined && this.failed.has(jobId({ ts: this.d.tileset(), k })) ? null : r;
+  cameraBands(mode: number, vscroll: number): CameraBands | null | undefined {
+    return this.probedOrFailed<CameraBands>({ kind: 'camera', ts: this.d.tileset(), mode, vscroll });
   }
 
-  private probed<T>(k: number): T | undefined {
-    const job = { ts: this.d.tileset(), k };
+  // a probe's result; null when it failed
+  private probedOrFailed<T>(job: ProbeJob): T | null | undefined {
+    const r = this.probed<T>(job);
+    return r === undefined && this.failed.has(jobId(job)) ? null : r;
+  }
+
+  private probed<T>(job: ProbeJob): T | undefined {
     const p = this.d.results.get<T>(jobKey(job));
     if (p === undefined) this.ask(job);
     return p;
@@ -102,13 +103,13 @@ export class ProbeClient {
       const ts = this.d.tileset();
       // (the queue of another tileset is dropped)
       const jobs = new Map([...this.prefetched].filter(([, j]) => j.ts === ts));
-      const add = (k: number) => {
-        const job = { ts, k }, id = jobId(job);
+      const add = (job: ProbeJob) => {
+        const id = jobId(job);
         if (!this.failed.has(id) && !this.asked.has(id) && this.d.results.get(jobKey(job)) === undefined) jobs.set(id, job);
       };
-      for (const t of tiles) { add(t); add(PROBE_COLL | t); }
-      for (let t = 0; t < 0x200; t++) add(t);
-      for (let n = 0; n < SPRITE_PROBE_END; n++) add(PROBE_SPRITE | n);
+      for (const tile of tiles) { add({ kind: 'block', ts, tile }); add({ kind: 'collision', ts, tile }); }
+      for (let tile = 0; tile < 0x200; tile++) add({ kind: 'block', ts, tile });
+      for (let num = 0; num < SPRITE_PROBE_END; num++) add({ kind: 'sprite', ts, num });
       if (!jobs.size && !this.prefetched.size) return;
       this.prefetched = jobs;
       this.send?.({ type: 'prefetch', jobs: [...jobs.values()] });
@@ -210,29 +211,18 @@ export class ProbeClient {
   }
 
   private local(): Send {
-    const host = new ProbeHost();
-    let scheduled = false;
-    const run = () => {
-      scheduled = false;
-      const t0 = performance.now();
-      while (performance.now() - t0 < SLICE && host.pending) {
-        const d = host.next();
-        if (d) this.reply(d);
-      }
-      schedule();
-    };
-    const schedule = () => {
-      if (scheduled || !host.pending) return;
-      scheduled = true;
-      this.d.later('probe', run);
-    };
-    return (m) => { host.handle(m); schedule(); };
+    return pumpProbes(new ProbeHost(), (d) => this.reply(d), {
+      wait: (run) => this.d.later('probe', run),
+      turn: () => { const t0 = performance.now(); return () => performance.now() - t0 < SLICE; },
+    });
   }
 
   private reply(d: ProbeReply): void {
-    if (d.type === 'probe') this.probeDone(d);
-    else if (d.type === 'kinds') this.kindsDone(d);
-    else this.playDone(d);
+    switch (d.type) {
+      case 'probe': this.probeDone(d); break;
+      case 'kinds': this.kindsDone(d); break;
+      case 'scan': case 'camera': this.playDone(d); break;
+    }
   }
 
   // Results are kept whatever ROM they ran on: the cache checks them against the ROM bytes they
@@ -286,8 +276,3 @@ export class ProbeClient {
 }
 
 type Played = 'scan' | 'camera'; // tasks that play a level
-
-// sprite ids (custom ones from 0x200) that can be probed: not shooters, generators, run-once
-export function probeable(num: number): boolean {
-  return num < 0x200 ? num < SPRITE_PROBE_END : (num & 0xff) < 0xc0;
-}

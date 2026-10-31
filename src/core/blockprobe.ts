@@ -121,6 +121,12 @@ export interface CollisionProbe extends CollisionCore {
 export interface RunState { vx: number; pmeter: number }
 export interface RunStates { walk: RunState; run: RunState; p: RunState }
 
+export const SPRITE_PROBE_END = 0xc9; // sprites from $C9 on are shooters, generators and run-once sprites
+// sprite ids (custom ones from 0x200) that can be probed: not shooters, generators, run-once
+export function probeable(num: number): boolean {
+  return num < 0x200 ? num < SPRITE_PROBE_END : (num & 0xff) < 0xc0;
+}
+
 // positions (low nibbles of the tile X and Y) a sprite behaves differently at
 export interface SpriteVariants {
   xs: number[]; // X class by X & 15

@@ -25,8 +25,7 @@ import { COND_FLAGS, COND_ADD, condByte, flagRam, isDm16, type Dm16Cond } from '
 import { TileCache, map16Source, drawMap16, sheetCells } from '../core/render.ts';
 import { lt3Target, lt3Users, blankLayer3Tile, l3Palette, withL3Palette, L3_TILE, L3_PAL, L3_PRIO, L3_FLIP_X, L3_FLIP_Y } from '../core/layer3map.ts';
 import { LT3_DESTS } from '../core/layer3gfx.ts';
-import { probeable } from '../core/probeclient.ts';
-import { probeText, spritesOf, spriteProbeAt, enterText, enterSuffix, switchText, switchedText, SWITCH_NAME, type SwitchState } from '../core/blockprobe.ts';
+import { probeable, probeText, spritesOf, spriteProbeAt, enterText, enterSuffix, switchText, switchedText, SWITCH_NAME, type SwitchState } from '../core/blockprobe.ts';
 import { tileMatches, drawTileMatches } from './tilesearch.ts';
 import { animateTiles, noteCopy } from './pickeranim.ts';
 import { matchesAll, type SearchProvider, type SearchResult } from './search.ts';

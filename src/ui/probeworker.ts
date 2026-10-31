@@ -1,29 +1,16 @@
 // Web Worker running the block/sprite probes, object kinds and level scan (see core/probehost.ts)
-// off the main thread: one job or task slice at a time, then a look at the incoming messages (a
+// off the main thread: one job or task slice a turn, then a look at the incoming messages (a
 // changed ROM drops the queue, asked jobs go first).
 
-import { ProbeHost, type ProbeMessage, type ProbeReply } from '../core/probehost.ts';
+import { ProbeHost, pumpProbes } from '../core/probehost.ts';
+import type { ProbeMessage, ProbeReply } from '../core/probeprotocol.ts';
 
 // the worker's global scope (the project is typed with the DOM library)
 const scope = self as unknown as { postMessage(m: ProbeReply): void; onmessage: ((e: MessageEvent<ProbeMessage>) => void) | null };
-const host = new ProbeHost();
-const tick = new MessageChannel(); // runs the next job after the messages that came in meanwhile
-let scheduled = false;
+const tick = new MessageChannel(); // the next turn, after the messages that came in meanwhile
+const send = pumpProbes(new ProbeHost(), (d) => scope.postMessage(d), {
+  wait: (run) => { tick.port1.onmessage = run; tick.port2.postMessage(0); },
+  turn: () => () => false,
+});
 
-const schedule = () => {
-  if (scheduled || !host.pending) return;
-  scheduled = true;
-  tick.port2.postMessage(0);
-};
-
-tick.port1.onmessage = () => {
-  scheduled = false;
-  const done = host.next();
-  if (done) scope.postMessage(done);
-  schedule();
-};
-
-scope.onmessage = (e) => {
-  host.handle(e.data);
-  schedule();
-};
+scope.onmessage = (e) => send(e.data);

@@ -10,75 +10,23 @@
 // task starts over only when it read a changed byte, results are checked against the ROM as always.
 
 import { Rom, type RomRange } from './rom.ts';
-import { BlockProber, blockKey, collisionKey, spriteKey, runsKey, cameraKey } from './blockprobe.ts';
+import { BlockProber } from './blockprobe.ts';
 import { gfxDisplaySkipMask } from './gfxpages.ts';
 import { TILESETS, tilesetPointers, pointersKey } from './tilesets.ts';
 import { RomReads, type CacheEntry } from './romdeps.ts';
 import { LevelEmulator } from './levelemu.ts';
 import { ObjKindProbe, kindsKey, type KindLevel } from './objkinds.ts';
-import { levelScanJob, type ScanLevel, type ScanResult } from './levelscan.ts';
-import { cameraAtJob, type CameraAt } from './camerareach.ts';
+import { levelScanJob } from './levelscan.ts';
+import { cameraAtJob } from './camerareach.ts';
+import { jobId, jobKey, type ProbeJob, type ProbeMessage, type ProbeReply, type TaskMessage, type TaskType } from './probeprotocol.ts';
 
-// job keys: Map16 tile; sprites as PROBE_SPRITE | num, collision as PROBE_COLL | tile, Mario's
-// run speeds as PROBE_RUNS, the game view's scroll bands as cameraJob(mode, vscroll)
-export const PROBE_SPRITE = 0x10000;
-export const PROBE_COLL = 0x20000;
-export const PROBE_RUNS = 0x40000;
-export const PROBE_CAMERA = 0x80000;
-// the scroll bands' job in a level of that mode and vertical scroll setting
-export const cameraJob = (mode: number, vscroll: number) => PROBE_CAMERA | ((mode & 0x1f) << 2) | (vscroll & 3);
-// the mode and vertical scroll setting of a scroll bands' job
-const cameraJobLevel = (k: number): [number, number] => [(k >> 2) & 0x1f, k & 3];
-
-export interface ProbeJob { ts: number; k: number }
-
-export interface ProbeDone {
-  type: 'probe';
-  gen: number; // ROM generation the job ran on (see setRom)
-  job: ProbeJob;
-  put: [string, CacheEntry][]; // new result cache entries
-  failed: boolean;
-}
-
-// the object kinds of tileset ts, with their result cache entry (none: the probe failed)
-export interface KindsDone { type: 'kinds'; gen: number; ts: number; failed: boolean; put: [string, CacheEntry][] }
-// a level scan (id: the editor's request; result null: it failed), with its result cache entry
-export interface ScanDone { type: 'scan'; gen: number; id: number; result: ScanResult | null; put: [string, CacheEntry][] }
-// the camera at Mario standing at a place (id: the editor's request; result null: it failed), with its result cache entry
-export interface CameraDone { type: 'camera'; gen: number; id: number; result: CameraAt | null; put: [string, CacheEntry][] }
-export type ProbeReply = ProbeDone | KindsDone | ScanDone | CameraDone;
-
-// what the editor sends: the ROM (the whole of it, or the bytes a change wrote at their offsets and the new
-// size), jobs asked for, the prefetch queue, the longer tasks (a new one replaces the running one of its
-// type, unless it asks for the same result) and that the task of a type is not wanted any more
-export type ProbeMessage =
-  | { type: 'rom'; gen: number; data: Uint8Array }
-  | { type: 'edit'; gen: number; size: number; edits: [number, Uint8Array][] }
-  | { type: 'ask'; jobs: ProbeJob[] }
-  | { type: 'prefetch'; jobs: ProbeJob[] }
-  | { type: 'kinds'; ts: number; level: KindLevel; layer2Pointer: number }
-  | { type: 'scan'; id: number; key: string; level: ScanLevel }
-  | { type: 'camera'; id: number; key: string; level: ScanLevel; x: number; y: number }
-  | { type: 'cancel'; task: TaskType };
-
-export const jobId = (j: ProbeJob) => `${j.ts}:${j.k}`;
 // the result cache key of a task's result
 const taskKey = (m: TaskMessage) => (m.type === 'kinds' ? kindsKey(m.ts) : m.key);
 
-type TaskType = 'kinds' | 'scan' | 'camera';
-type TaskMessage = ProbeMessage & { type: TaskType };
-
-// a longer task: what was asked, its slices (the result; null: failed) and the ROM bytes it read so far
-interface Task { msg: TaskMessage; run: Generator<void, unknown>; reads: () => RomReads | null }
-
-// the result cache key of a job's result
-export function jobKey({ ts, k }: ProbeJob): string {
-  if (k & PROBE_CAMERA) return cameraKey(ts, ...cameraJobLevel(k));
-  if (k & PROBE_RUNS) return runsKey(ts);
-  if (k & PROBE_SPRITE) return spriteKey(ts, k & 0x3ff);
-  if (k & PROBE_COLL) return collisionKey(ts, k & 0xffff);
-  return blockKey(ts, k);
-}
+// a longer task: what was asked, its slices (how it ended) and the ROM bytes it read so far
+interface Task { msg: TaskMessage; run: Generator<void, TaskEnd>; reads: () => RomReads | null }
+// a finished task's result (null: failed) and its reply, with the ROM generation and result cache entries
+interface TaskEnd { result: unknown; reply: (gen: number, put: [string, CacheEntry][]) => ProbeReply }
 
 export class ProbeHost {
   private rom: Rom | null = null;
@@ -168,12 +116,14 @@ export class ProbeHost {
   }
 
   handle(m: ProbeMessage): void {
-    if (m.type === 'rom') this.setRom(m.gen, m.data);
-    else if (m.type === 'edit') this.edit(m.gen, m.size, m.edits);
-    else if (m.type === 'ask') this.ask(m.jobs);
-    else if (m.type === 'prefetch') this.setPrefetch(m.jobs);
-    else if (m.type === 'cancel') this.cancel(m.task);
-    else this.startTask(m);
+    switch (m.type) {
+      case 'rom': this.setRom(m.gen, m.data); break;
+      case 'edit': this.edit(m.gen, m.size, m.edits); break;
+      case 'ask': this.ask(m.jobs); break;
+      case 'prefetch': this.setPrefetch(m.jobs); break;
+      case 'cancel': this.cancel(m.task); break;
+      case 'kinds': case 'scan': case 'camera': this.startTask(m); break;
+    }
   }
 
   // the task of that type is not wanted any more: it runs no further slice (kept, see startTask)
@@ -204,22 +154,32 @@ export class ProbeHost {
     this.started++;
   }
 
-  // a task's slices (the task, for what it read so far, is taken when they start)
-  private *run(m: TaskMessage, task: () => Task): Generator<void, unknown> {
+  // a task's slices and how it ends (the task, for what it read so far, is taken when they start); the reply
+  // answers the task's message when it ends (a request asking for the same result may have replaced it)
+  private *run(m: TaskMessage, task: () => Task): Generator<void, TaskEnd> {
     const t = task();
-    return m.type === 'kinds' ? yield* this.kindsTask(t, m.ts, m.level, m.layer2Pointer)
-      : m.type === 'scan' ? yield* this.played(t, (emu) => levelScanJob(emu, m.level))
-      : yield* this.played(t, (emu) => cameraAtJob(emu, m.level, m.x, m.y));
+    switch (m.type) {
+      case 'kinds': {
+        const result = yield* this.kindsTask(t, m.ts, m.level, m.layer2Pointer);
+        return { result, reply: (gen, put) => ({ type: 'kinds', gen, ts: m.ts, failed: result === null, put }) };
+      }
+      case 'scan': {
+        const result = yield* this.played(t, (emu) => levelScanJob(emu, m.level)), { id } = t.msg as typeof m;
+        return { result, reply: (gen, put) => ({ type: 'scan', gen, id, result, put }) };
+      }
+      case 'camera': {
+        const result = yield* this.played(t, (emu) => cameraAtJob(emu, m.level, m.x, m.y)), { id } = t.msg as typeof m;
+        return { result, reply: (gen, put) => ({ type: 'camera', gen, id, result, put }) };
+      }
+    }
   }
 
   // a finished task's reply, with its result cache entry
-  private taskDone(t: Task, result: unknown): ProbeReply {
-    const p = this.prober!, m = t.msg, key = taskKey(m), put = p.results.flush().put;
+  private taskDone(t: Task, { result, reply }: TaskEnd): ProbeReply {
+    const p = this.prober!, key = taskKey(t.msg), put = p.results.flush().put;
     const e = result !== null && !put.some(([k]) => k === key) ? p.results.entry(key) : undefined;
     if (e) put.push([key, e]);
-    if (m.type === 'kinds') return { type: 'kinds', gen: this.gen, ts: m.ts, failed: result === null, put };
-    if (m.type === 'scan') return { type: 'scan', gen: this.gen, id: m.id, result: result as ScanResult | null, put };
-    return { type: 'camera', gen: this.gen, id: m.id, result: result as CameraAt | null, put };
+    return reply(this.gen, put);
   }
 
   // an own emulator per task type (the prober's keeps its prepared probe levels), from the
@@ -255,9 +215,9 @@ export class ProbeHost {
 
   // runs a job on the task type's emulator, its result (not null) into the result cache under the task's key
   // with the ROM bytes it read; a stored result while it holds; null when it failed
-  private *played<T>(t: Task, make: (emu: LevelEmulator) => Generator<void, T | null>): Generator<void, unknown> {
+  private *played<T>(t: Task, make: (emu: LevelEmulator) => Generator<void, T | null>): Generator<void, T | null> {
     const p = this.prober!, key = taskKey(t.msg), known = p.results.get(key);
-    if (known !== undefined) return known;
+    if (known !== undefined) return known as T;
     const emu = this.emu(t.msg.type);
     try {
       const job = make(emu), reads = new RomReads(this.rom!.data.length);
@@ -313,12 +273,13 @@ export class ProbeHost {
     let failed = false;
     try {
       p.use(job.ts);
-      const k = job.k;
-      if (k & PROBE_CAMERA) p.cameraBands(...cameraJobLevel(k));
-      else if (k & PROBE_RUNS) p.runStates();
-      else if (k & PROBE_SPRITE) p.probeSprite(k & 0x3ff);
-      else if (k & PROBE_COLL) p.probeCollision(k & 0xffff);
-      else p.probe(k);
+      switch (job.kind) {
+        case 'block': p.probe(job.tile); break;
+        case 'collision': p.probeCollision(job.tile); break;
+        case 'sprite': p.probeSprite(job.num); break;
+        case 'runs': p.runStates(); break;
+        case 'camera': p.cameraBands(job.mode, job.vscroll); break;
+      }
     } catch (e) {
       console.error(e);
       failed = true;
@@ -330,4 +291,29 @@ export class ProbeHost {
     if (e) put.push([key, e]);
     return { type: 'probe', gen: this.gen, job, put, failed };
   }
+}
+
+// how a pump waits for its next turn (run: the turn) and how long a turn lasts (started at its start: whether
+// another job fits in after one)
+export interface PumpSchedule { wait(run: () => void): void; turn(): () => boolean }
+
+// Drives a host: each turn runs its jobs while there is work and the turn lasts, hands the replies on and waits
+// for the next turn while work is left. Returns where the editor's messages go (the work they make is scheduled).
+export function pumpProbes(host: ProbeHost, reply: (d: ProbeReply) => void, schedule: PumpSchedule): (m: ProbeMessage) => void {
+  let scheduled = false;
+  const run = () => {
+    scheduled = false;
+    const more = schedule.turn();
+    do {
+      const d = host.next();
+      if (d) reply(d);
+    } while (host.pending && more());
+    later();
+  };
+  const later = () => {
+    if (scheduled || !host.pending) return;
+    scheduled = true;
+    schedule.wait(run);
+  };
+  return (m) => { host.handle(m); later(); };
 }

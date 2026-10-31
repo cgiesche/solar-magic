@@ -8,8 +8,7 @@ import { h, checkbox, toast } from './dom.ts';
 import { hex, hex3 } from '../core/names.ts';
 import { levelName, translevelToLevel } from '../core/overworld.ts';
 import { spriteId, type LevelSprite } from '../core/level.ts';
-import { probeable } from '../core/probeclient.ts';
-import { spriteMessage } from '../core/blockprobe.ts';
+import { probeable, spriteMessage } from '../core/blockprobe.ts';
 import { TileCache, blit8 } from '../core/render.ts';
 import {
   readMessage, writeMessages, isBlank, switchPalace, yoshiHouse, messageToShow, charCode, codeChar, YOSHI_THANKS, MSG_LINES, MSG_COLS, SPACE, type Message,

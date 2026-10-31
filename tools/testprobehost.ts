@@ -3,11 +3,13 @@
 // computed directly, in slices that let asked jobs go first. A ROM change sent as the ranges it wrote keeps
 // the queue and the tasks, restarting only a task that read a changed byte (overworld edits restart nothing).
 // A cancelled scan runs no further slice and goes on when asked for again. Results a task's slice found before a ROM
-// change go with the next reply only if they hold on the new ROM.
+// change go with the next reply only if they hold on the new ROM. Jobs keep their result cache keys; only the scan
+// can be cancelled.
 import { readFileSync } from 'node:fs';
 import { Rom, snesToPc } from '../src/core/rom.ts';
-import { BlockProber, blockKey, collisionKey, spriteKey, runsKey } from '../src/core/blockprobe.ts';
-import { ProbeHost, PROBE_SPRITE, PROBE_RUNS, PROBE_COLL, jobKey, type ProbeDone, type ProbeReply } from '../src/core/probehost.ts';
+import { BlockProber, blockKey, collisionKey, spriteKey, runsKey, cameraKey } from '../src/core/blockprobe.ts';
+import { ProbeHost } from '../src/core/probehost.ts';
+import { jobId, jobKey, type ProbeJob, type ProbeMessage, type ProbeDone, type ProbeReply } from '../src/core/probeprotocol.ts';
 import { ResultCache, RomFingerprint } from '../src/core/romdeps.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { ObjKindProbe, kindsKey, type ObjKinds } from '../src/core/objkinds.ts';
@@ -32,13 +34,23 @@ const file = EDITOR_IMAGE.slice();
 const rom = new Rom(file);
 const direct = new BlockProber(new Rom(file));
 
+// each job's result under the prober's key
+check(jobKey({ kind: 'block', ts: 2, tile: 0x130 }) === blockKey(2, 0x130) && jobKey({ kind: 'collision', ts: 2, tile: 0x130 }) === collisionKey(2, 0x130)
+  && jobKey({ kind: 'sprite', ts: 2, num: 0x20d }) === spriteKey(2, 0x20d) && jobKey({ kind: 'runs', ts: 2 }) === runsKey(2)
+  && jobKey({ kind: 'camera', ts: 2, mode: 0x0a, vscroll: 2 }) === cameraKey(2, 0x0a, 2), 'job keys: the prober\'s result cache keys');
+// @ts-expect-error only the scan can be cancelled
+const cancelKinds: ProbeMessage = { type: 'cancel', task: 'kinds' };
+void cancelKinds;
+
 const host = new ProbeHost();
 host.setRom(1, rom.data.slice());
-host.setPrefetch([{ ts: 0, k: 0x130 }, { ts: 0, k: PROBE_SPRITE | 0x0d }]);
-host.ask([{ ts: 0, k: 0x11f }, { ts: 0, k: PROBE_RUNS }]);
+const prefetched: ProbeJob[] = [{ kind: 'block', ts: 0, tile: 0x130 }, { kind: 'sprite', ts: 0, num: 0x0d }];
+const asked: ProbeJob[] = [{ kind: 'block', ts: 0, tile: 0x11f }, { kind: 'runs', ts: 0 }];
+host.setPrefetch(prefetched);
+host.ask(asked);
 const done: ProbeDone[] = [];
 while (host.pending) { const d = host.next(); if (d?.type === 'probe') done.push(d); }
-check(done.map((d) => d.job.k).join(',') === [0x11f, PROBE_RUNS, 0x130, PROBE_SPRITE | 0x0d].join(','), 'asked jobs first, then prefetched');
+check(done.map((d) => jobId(d.job)).join(',') === [...asked, ...prefetched].map(jobId).join(','), 'asked jobs first, then prefetched');
 check(done.every((d) => d.gen === 1 && !d.failed && d.put.some(([k]) => k === jobKey(d.job))), 'every job gives its result entry');
 
 // the entries hold in the editor's cache (same ROM) and equal the prober's results
@@ -48,19 +60,19 @@ check(JSON.stringify(cache.get(blockKey(0, 0x11f))) === JSON.stringify(direct.pr
 check(JSON.stringify(cache.get(spriteKey(0, 0x0d))) === JSON.stringify(direct.probeSprite(0x0d)), 'sprite 0D as probed directly');
 
 // a ROM change drops the queue; results carry the new generation
-host.ask([{ ts: 0, k: 0x2b }]);
+host.ask([{ kind: 'block', ts: 0, tile: 0x2b }]);
 const changed = rom.data.slice();
 host.setRom(2, changed);
 check(host.pending === 0 && host.next() === null, 'changed ROM: queue dropped');
-host.ask([{ ts: 0, k: 0x2b }]);
+host.ask([{ kind: 'block', ts: 0, tile: 0x2b }]);
 check(host.next()?.gen === 2, 'results after the change carry its generation');
 
 // a result the editor dropped (it came from an older generation) still reaches it when asked again:
 // the host's own cache knows it, its reply must hand the entry back all the same
-host.ask([{ ts: 0, k: 0x2c }]);
+host.ask([{ kind: 'block', ts: 0, tile: 0x2c }]);
 host.next(); // (dropped by the editor)
 host.setRom(3, changed);
-host.ask([{ ts: 0, k: 0x2c }]);
+host.ask([{ kind: 'block', ts: 0, tile: 0x2c }]);
 const again = host.next();
 check(again?.type === 'probe' && again.put.some(([k]) => k === blockKey(0, 0x2c)), 'a result already known to the host is handed back again');
 
@@ -82,7 +94,7 @@ host.handle({ type: 'scan', id: 7, key: 'scan-key', level: scanLevel });
 host.handle({ type: 'camera', id: 9, key: 'camera-key', level: scanLevel, x: 0xbb8, y: 0x20 });
 const replies: ProbeReply[] = [];
 for (let i = 0; host.pending; i++) {
-  if (i === 3) host.ask([{ ts: 1, k: 0x130 }]);
+  if (i === 3) host.ask([{ kind: 'block', ts: 1, tile: 0x130 }]);
   const d = host.next();
   if (d) replies.push(d);
 }
@@ -105,7 +117,7 @@ check(host.pending === 0, 'new ROM: tasks dropped');
   const r = new Rom(file), h = new ProbeHost(), ed = new ResultCache(new RomFingerprint(r));
   h.setRom(1, r.data.slice());
   const keep = (d: ProbeReply | null) => { for (const [k, e] of d?.put ?? []) ed.set(k, e.data, e.deps); return d; };
-  h.ask([{ ts: 0, k: 0x130 }, { ts: 0, k: PROBE_SPRITE | 0x0d }]);
+  h.ask([{ kind: 'block', ts: 0, tile: 0x130 }, { kind: 'sprite', ts: 0, num: 0x0d }]);
   h.handle({ type: 'kinds', ts: 1, level: { number: lv.number, header: lv.header }, layer2Pointer: l2 });
   while (h.pending) keep(h.next());
   h.handle({ type: 'scan', id: 1, key: 'scan-ow', level: scanLevel });
@@ -156,7 +168,7 @@ check(host.pending === 0, 'new ROM: tasks dropped');
   h.handle({ type: 'scan', id: 1, key: 'scan-re', level: scanLevel });
   h.handle({ type: 'kinds', ts: 2, level: { number: lv.number, header: lv.header }, layer2Pointer: l2 });
   h.next(); h.next();
-  h.setPrefetch([{ ts: 0, k: 0x131 }, { ts: 0, k: 0x132 }]);
+  h.setPrefetch([{ kind: 'block', ts: 0, tile: 0x131 }, { kind: 'block', ts: 0, tile: 0x132 }]);
   const started = h.started, pending = h.pending;
   // a byte the boot read (the scan counts it from its first slice; object kinds don't depend on it): changed, and
   // changed back before the restarted scan read anything (no second restart)
@@ -184,7 +196,7 @@ check(host.pending === 0, 'new ROM: tasks dropped');
   const started = h.started;
   h.handle({ type: 'cancel', task: 'scan' });
   check(h.pending === 0 && h.next() === null, 'cancelled scan: no further slice');
-  h.ask([{ ts: 0, k: 0x130 }]);
+  h.ask([{ kind: 'block', ts: 0, tile: 0x130 }]);
   check(h.next()?.type === 'probe' && h.pending === 0, 'cancelled scan: an asked job runs, the scan not after it');
   h.handle({ type: 'scan', id: 2, key: 'scan-c', level: scanLevel });
   check(h.started === started && h.pending === 1, 'the same scan asked for again: goes on, not restarted');
@@ -227,7 +239,7 @@ check(host.pending === 0, 'new ROM: tasks dropped');
   h.setRom(1, r.data.slice());
   const keep = (d: ProbeReply | null) => { for (const [k, e] of d?.put ?? []) ed.set(k, e.data, e.deps); return d; };
   const tiles = [0x025, 0x040, 0x0a0, 0x130, 0x200];
-  const jobs = [...tiles.flatMap((t) => [{ ts: 0, k: t }, { ts: 0, k: PROBE_COLL | t }]), { ts: 0, k: PROBE_SPRITE | 0x0d }, { ts: 0, k: PROBE_RUNS }];
+  const jobs: ProbeJob[] = [...tiles.flatMap((t): ProbeJob[] => [{ kind: 'block', ts: 0, tile: t }, { kind: 'collision', ts: 0, tile: t }]), { kind: 'sprite', ts: 0, num: 0x0d }, { kind: 'runs', ts: 0 }];
   h.ask(jobs);
   while (h.pending) keep(h.next());
   const keys = [...tiles.flatMap((t) => [blockKey(0, t), collisionKey(0, t)]), spriteKey(0, 0x0d), runsKey(0)];
@@ -244,7 +256,7 @@ check(host.pending === 0, 'new ROM: tasks dropped');
     send(change);
     const lost = keys.filter((k) => ed.get(k) === undefined);
     check(lost.length === 0, `${what}: no result dropped${lost.length ? ` (${lost.join(', ')})` : ''}`);
-    h.ask([{ ts: 0, k: 0x025 }]);
+    h.ask([{ kind: 'block', ts: 0, tile: 0x025 }]);
     h.next();
     check(prober.emu.baseState === boot, `${what}: not booted again`);
     h.ask(jobs); // (the dropped ones again)

@@ -47,7 +47,7 @@ import { MARIO_W, MARIO_H, type CameraBands } from '../core/camerabands.ts';
 import { layer3Kinds, tideKind, layer3Top, type Layer3Kind } from '../core/layer3.ts';
 import { layer2MotionsJob, type Layer2Motions } from '../core/l2scroll.ts';
 import { variantOf, blockKey, collisionKey, type BlockProbe, type CollisionProbe, type RunStates, type SwitchState, SWITCH_STATES, SWITCH_TRIGGER } from '../core/blockprobe.ts';
-import type { ProbeReply } from '../core/probehost.ts';
+import type { ProbeReply } from '../core/probeprotocol.ts';
 import { ProbeClient } from '../core/probeclient.ts';
 import { ResultLearner } from '../core/learner.ts';
 import type { RomReads } from '../core/romdeps.ts';

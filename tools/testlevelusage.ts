@@ -12,7 +12,8 @@ import { PREFAB_EXT, writePrefab, TRANSPARENT } from '../src/core/prefabs.ts';
 import { setActsLike, setExtTileWords, extTileWords } from '../src/core/map16ext.ts';
 import { ResultCache, RomFingerprint, RomReads, PAGE_SHIFT, BYTE_PAGES, type RomDeps } from '../src/core/romdeps.ts';
 import { captureSprites } from '../src/core/spritegfx.ts';
-import { ProbeHost, PROBE_SPRITE, jobKey, type ProbeJob } from '../src/core/probehost.ts';
+import { ProbeHost } from '../src/core/probehost.ts';
+import { jobKey, type ProbeJob } from '../src/core/probeprotocol.ts';
 import { map16Source } from '../src/core/render.ts';
 import {
   LevelUses, usedLevels, fgTileUsers, bgTileUsers, tileLinks, unusedFgTiles, gfxUsage, unusedExGfx, spriteUsage, slotMove,
@@ -128,7 +129,7 @@ check(uses.missing(levels).length === 0, 'every level known after scanning');
   const lv105 = loadLevel(rom, 0x105), bg = lv105.layer2Pointer >> 16 === 0xff ? lv105.layer2Pointer : 0xffd900;
   const images = results.fp.deps(emu.tracked(() => captureSprites(emu, 0x105, lv105.header, lv105.spriteHeader, bg, [0x04, 0x05, 0x0d])).reads);
   const host = new ProbeHost(), probes = new Map<string, RomDeps>();
-  const jobs: ProbeJob[] = [{ ts: 0, k: 0x130 }, { ts: 0, k: 0x12b }, { ts: 0, k: PROBE_SPRITE | 0x04 }];
+  const jobs: ProbeJob[] = [{ kind: 'block', ts: 0, tile: 0x130 }, { kind: 'block', ts: 0, tile: 0x12b }, { kind: 'sprite', ts: 0, num: 0x04 }];
   host.setRom(rom.gen, rom.data.slice());
   host.ask(jobs);
   while (host.pending) { const d = host.next(); if (d?.type === 'probe') for (const [k, e] of d.put) probes.set(k, e.deps); }
@@ -247,7 +248,7 @@ check(uses.missing(levels).length === 0, 'every level known after scanning');
   const lv105 = loadLevel(rom, 0x105), bg = lv105.layer2Pointer >> 16 === 0xff ? lv105.layer2Pointer : 0xffd900;
   const images = results.fp.deps(emu.tracked(() => captureSprites(emu, 0x105, lv105.header, lv105.spriteHeader, bg, [0x04, 0x05, 0x0d])).reads);
   const host = new ProbeHost(), probes = new Map<string, RomDeps>();
-  const jobs: ProbeJob[] = [{ ts: 0, k: 0x130 }, { ts: 0, k: 0x12b }, { ts: 0, k: PROBE_SPRITE | 0x04 }];
+  const jobs: ProbeJob[] = [{ kind: 'block', ts: 0, tile: 0x130 }, { kind: 'block', ts: 0, tile: 0x12b }, { kind: 'sprite', ts: 0, num: 0x04 }];
   host.setRom(rom.gen, rom.data.slice());
   host.ask(jobs);
   while (host.pending) { const d = host.next(); if (d?.type === 'probe') for (const [k, e] of d.put) probes.set(k, e.deps); }
