@@ -1,12 +1,13 @@
 // Overworld changes are ROM edits: a paint stroke is one undo step; layer 1 changes only the bytes of the painted
 // tiles, layer 2 stays where it is when it fits (each stream in its own place, the other untouched) and moves to
 // free space only otherwise; the game shows the painted map (emulated).
-import { Rom, snesToPc } from '../src/core/rom.ts';
+import { Rom, snesToPc, pcToSnes } from '../src/core/rom.ts';
 import { RomEditSession } from '../src/core/romedit.ts';
 import { OverworldEmulator, OverworldLoads, readL1, writeL1, readL2, writeL2, l1Index, l2Index, l2Pointers, OW_L1, setNameCode, nameCode } from '../src/core/overworld.ts';
 import { RAM, getS16 } from '../src/core/ram.ts';
 import { submapViews } from '../src/core/owevents.ts';
 import { editorPatch } from '../src/core/patches.ts';
+import { RomReads, PAGE_SHIFT } from '../src/core/romdeps.ts';
 import { editorImage } from './fixture.ts';
 
 let bad = 0;
@@ -15,6 +16,13 @@ const same = (a: ArrayLike<number>, b: ArrayLike<number>) => a.length === b.leng
 const image = await editorImage();
 const fresh = () => { const rom = new Rom(image.slice()); return { rom, s: new RomEditSession(rom) }; };
 // the file offsets where two images differ
+// the ROM's layer 2, its first 0x1000 entries noise (no runs: grows past its place)
+const noisyL2 = (rom: Rom) => {
+  const l2 = readL2(rom);
+  let seed = 1;
+  for (let k = 0; k < 0x1000; k++) { seed = (seed * 1103515245 + 12345) >>> 0; l2[k] = (seed >>> 8) & 0x3fff; }
+  return l2;
+};
 const diff = (a: Uint8Array, b: Uint8Array) => { const out: number[] = []; for (let i = 0; i < Math.max(a.length, b.length); i++) if (a[i] !== b[i]) out.push(i); return out; };
 
 // layer 1: one stroke of three tiles, one undo step that changes their bytes only
@@ -57,9 +65,7 @@ const diff = (a: Uint8Array, b: Uint8Array) => { const out: number[] = []; for (
 {
   const { rom, s } = fresh();
   const before = rom.data.slice(), p = l2Pointers(rom);
-  const l2 = readL2(rom);
-  let seed = 1;
-  for (let k = 0; k < 0x1000; k++) { seed = (seed * 1103515245 + 12345) >>> 0; l2[k] = (seed >>> 8) & 0x3fff; } // (no runs: grows)
+  const l2 = noisyL2(rom);
   s.edit('Paint layer 2', () => writeL2(rom, l2));
   const q = l2Pointers(rom);
   check(q.tiles !== p.tiles && snesToPc(q.tiles) >= 0x80000, 'layer 2, grown: moved to free space');
@@ -154,6 +160,29 @@ const diff = (a: Uint8Array, b: Uint8Array) => { const out: number[] = []; for (
   loaded = 0;
   const v2 = submapViews(loads);
   check(v2 !== v && loaded === 6 && text(v2) === direct(), `painting layer 1: loaded again (${loaded} loads), the same views`);
+}
+
+// layer 2 moved to free space: the loads record its new place by byte (no title screen reached again in between), an
+// edit next to it they didn't read keeps them; an outer read recorder survives a load that reaches the title screen
+{
+  const { rom, s } = fresh();
+  const emu = new OverworldEmulator(rom), outer = new RomReads(rom.data.length);
+  emu.snes.romReads = outer;
+  emu.load(0, 0);
+  check(emu.snes.romReads === outer && outer.bytes.has(snesToPc(OW_L1)), 'reaching the title screen: the outer recorder put back, with the load\'s reads');
+  emu.snes.romReads = null;
+  const loads = new OverworldLoads(emu, 4);
+  const l2 = noisyL2(rom);
+  s.edit('Paint layer 2', () => writeL2(rom, l2));
+  const r0 = loads.get(0, 0);
+  const attrs = snesToPc(l2Pointers(rom).attrs), block = rom.scanRats().find((b) => b.start + 8 <= attrs && attrs < b.start + 8 + b.size)!;
+  const end = block.start + 8 + block.size, next = end + 0x10; // free space after the block, in its last page
+  check(next >> PAGE_SHIFT === (end - 1) >> PAGE_SHIFT, 'layer 2, moved: free space next to it in its page');
+  s.edit('Free space next to layer 2', () => rom.w8(pcToSnes(next), rom.data[next] ^ 1));
+  check(loads.get(0, 0) === r0, 'layer 2, moved: an edit next to it the load didn\'t read keeps it (no emulation)');
+  l2[l2Index(0, 5, 5)] ^= 0x0001;
+  s.edit('Paint layer 2', () => writeL2(rom, l2));
+  check(loads.get(0, 0) !== r0, 'layer 2, moved: painting it loads again');
 }
 
 if (bad) { console.log(`${bad} failed`); process.exit(1); }

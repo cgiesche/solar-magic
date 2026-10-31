@@ -708,13 +708,16 @@ export class OverworldEmulator {
     this.rom = rom;
     this.snes = new Snes(rom.data);
     this.romGen = rom.gen;
+    updateBytePages(rom);
   }
-  // catches up with a changed ROM (rom.gen); a change of what reaching the title screen read makes its
-  // snapshot stale (as LevelEmulator's boot snapshot)
+  // catches up with a changed ROM (rom.gen): the byte pages follow its data (overworld data moved to free space is
+  // recorded by byte at its new place), and a change of what reaching the title screen read makes its snapshot stale
+  // (as LevelEmulator's boot snapshot)
   private sync(): void {
     this.snes.rom = this.rom.data;
     if (this.romGen === this.rom.gen) return;
     this.romGen = this.rom.gen;
+    updateBytePages(this.rom);
     if (this.title?.reads.differ(this.title.rom, this.rom.data)) { this.titleState = null; this.title = null; }
   }
   // map `map` at event progress `progress` (events 0 … progress-1 passed), as after loading a save: the game draws
@@ -724,14 +727,14 @@ export class OverworldEmulator {
     this.sync();
     const s = this.snes;
     if (!this.titleState) {
-      updateBytePages(this.rom);
-      const reads = new RomReads(this.rom.data.length);
+      // (an outer recorder gets these reads with the load's, which start from them)
+      const outer = s.romReads, reads = new RomReads(this.rom.data.length);
       s.romReads = reads;
       try {
         s.reset();
         let f = 0;
         while (s.wram[RAM.gameMode] !== GM.title && f++ < 2000) s.runFrame();
-      } finally { s.romReads = null; }
+      } finally { s.romReads = outer; }
       this.titleState = s.saveState();
       this.title = { reads, rom: this.rom.data.slice() };
     } else s.loadState(this.titleState);
