@@ -278,7 +278,7 @@ export class ProbeHost {
         case 'collision': p.probeCollision(job.tile); break;
         case 'sprite': p.probeSprite(job.num); break;
         case 'runs': p.runStates(); break;
-        case 'camera': p.cameraBands(job.mode, job.vscroll); break;
+        case 'bands': p.cameraBands(job.mode, job.vscroll); break;
       }
     } catch (e) {
       console.error(e);
@@ -293,9 +293,8 @@ export class ProbeHost {
   }
 }
 
-// how a pump waits for its next turn (run: the turn) and how long a turn lasts (started at its start: whether
-// another job fits in after one)
-export interface PumpSchedule { wait(run: () => void): void; turn(): () => boolean }
+// how a pump waits for its next turn (run: the turn), and a turn's start, giving whether another job fits in it
+export interface PumpSchedule { wait(run: () => void): void; startTurn(): () => boolean }
 
 // Drives a host: each turn runs its jobs while there is work and the turn lasts, hands the replies on and waits
 // for the next turn while work is left. Returns where the editor's messages go (the work they make is scheduled).
@@ -303,7 +302,7 @@ export function pumpProbes(host: ProbeHost, reply: (d: ProbeReply) => void, sche
   let scheduled = false;
   const run = () => {
     scheduled = false;
-    const more = schedule.turn();
+    const more = schedule.startTurn();
     do {
       const d = host.next();
       if (d) reply(d);

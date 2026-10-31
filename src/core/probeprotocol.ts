@@ -8,24 +8,13 @@ import type { ScanLevel, ScanResult } from './levelscan.ts';
 import type { CameraAt } from './camerareach.ts';
 
 // a probe in tileset ts: what a Map16 tile does, how Mario collides with it, what a sprite does, Mario's
-// run speeds, the game view's scroll bands in a level of that mode and vertical scroll setting
+// run speeds, the scroll bands in a level of that mode and vertical scroll setting
 export type ProbeJob =
   | { kind: 'block'; ts: number; tile: number }
   | { kind: 'collision'; ts: number; tile: number }
   | { kind: 'sprite'; ts: number; num: number }
   | { kind: 'runs'; ts: number }
-  | { kind: 'camera'; ts: number; mode: number; vscroll: number };
-
-// the job's id in a queue (one per job)
-export function jobId(j: ProbeJob): string {
-  switch (j.kind) {
-    case 'block': return `${j.ts}:${j.tile}`;
-    case 'collision': return `${j.ts}:c${j.tile}`;
-    case 'sprite': return `${j.ts}:s${j.num}`;
-    case 'runs': return `${j.ts}:r`;
-    case 'camera': return `${j.ts}:m${j.mode}.${j.vscroll}`;
-  }
-}
+  | { kind: 'bands'; ts: number; mode: number; vscroll: number };
 
 // the result cache key of a job's result
 export function jobKey(j: ProbeJob): string {
@@ -34,9 +23,11 @@ export function jobKey(j: ProbeJob): string {
     case 'collision': return collisionKey(j.ts, j.tile);
     case 'sprite': return spriteKey(j.ts, j.num);
     case 'runs': return runsKey(j.ts);
-    case 'camera': return cameraKey(j.ts, j.mode, j.vscroll);
+    case 'bands': return cameraKey(j.ts, j.mode, j.vscroll);
   }
 }
+// the job's id in a queue: its result cache key (one per job)
+export const jobId = jobKey;
 
 export interface ProbeDone {
   type: 'probe';

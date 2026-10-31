@@ -65,7 +65,7 @@ export class ProbeClient {
   // where Mario is on the screen while the camera scrolls (camerabands.ts) in a level of that mode and vertical
   // scroll setting; null when they could not be found
   cameraBands(mode: number, vscroll: number): CameraBands | null | undefined {
-    return this.probedOrFailed<CameraBands>({ kind: 'camera', ts: this.d.tileset(), mode, vscroll });
+    return this.probedOrFailed<CameraBands>({ kind: 'bands', ts: this.d.tileset(), mode, vscroll });
   }
 
   // a probe's result; null when it failed
@@ -213,7 +213,7 @@ export class ProbeClient {
   private local(): Send {
     return pumpProbes(new ProbeHost(), (d) => this.reply(d), {
       wait: (run) => this.d.later('probe', run),
-      turn: () => { const t0 = performance.now(); return () => performance.now() - t0 < SLICE; },
+      startTurn: () => { const t0 = performance.now(); return () => performance.now() - t0 < SLICE; },
     });
   }
 

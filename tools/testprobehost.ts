@@ -37,7 +37,7 @@ const direct = new BlockProber(new Rom(file));
 // each job's result under the prober's key
 check(jobKey({ kind: 'block', ts: 2, tile: 0x130 }) === blockKey(2, 0x130) && jobKey({ kind: 'collision', ts: 2, tile: 0x130 }) === collisionKey(2, 0x130)
   && jobKey({ kind: 'sprite', ts: 2, num: 0x20d }) === spriteKey(2, 0x20d) && jobKey({ kind: 'runs', ts: 2 }) === runsKey(2)
-  && jobKey({ kind: 'camera', ts: 2, mode: 0x0a, vscroll: 2 }) === cameraKey(2, 0x0a, 2), 'job keys: the prober\'s result cache keys');
+  && jobKey({ kind: 'bands', ts: 2, mode: 0x0a, vscroll: 2 }) === cameraKey(2, 0x0a, 2), 'job keys: the prober\'s result cache keys');
 // @ts-expect-error only the scan can be cancelled
 const cancelKinds: ProbeMessage = { type: 'cancel', task: 'kinds' };
 void cancelKinds;

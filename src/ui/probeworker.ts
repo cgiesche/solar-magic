@@ -10,7 +10,7 @@ const scope = self as unknown as { postMessage(m: ProbeReply): void; onmessage: 
 const tick = new MessageChannel(); // the next turn, after the messages that came in meanwhile
 const send = pumpProbes(new ProbeHost(), (d) => scope.postMessage(d), {
   wait: (run) => { tick.port1.onmessage = run; tick.port2.postMessage(0); },
-  turn: () => () => false,
+  startTurn: () => () => false,
 });
 
 scope.onmessage = (e) => send(e.data);
