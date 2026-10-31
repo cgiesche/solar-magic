@@ -54,5 +54,18 @@ const ptrs = runs.map((r) => r.result);
   rom.data.set(before);
 }
 
+// learning the pointers sets its own mask for the load and restores the emulator's (withSkipMask), after an
+// exception too
+{
+  const own = () => null;
+  emu.skipMask = own;
+  tilesetPointers(emu, 0);
+  check(emu.skipMask === own, "the emulator's mask is restored after learning the pointers");
+  let seen: Uint8Array | null = null, thrown = false;
+  try { emu.withSkipMask(new Uint8Array(1), () => { seen = emu.skipMask!(); throw new Error('x'); }); } catch { thrown = true; }
+  check(thrown && seen !== null && emu.skipMask === own, 'the previous mask is restored after an exception');
+  emu.skipMask = null;
+}
+
 console.log(fail ? `${fail} FAILED` : 'all ok');
 process.exit(fail ? 1 : 0);

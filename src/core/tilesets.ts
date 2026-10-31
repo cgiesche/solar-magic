@@ -32,9 +32,7 @@ export function tilesetPointers(emu: LevelEmulator, ts: number): { result: numbe
   const rom = emu.rom;
   const load = () => { const r = emu.load(PROBE_LEVEL, probe(rom, ts)); return Array.from({ length: FG_TILES }, (_, t) => map16Pointer(r.wram, t)); };
   const mask = gfxDisplaySkipMask(rom, [load()]);
-  const base = emu.skipMask;
-  emu.skipMask = () => mask;
-  try { return emu.tracked(load, null); } finally { emu.skipMask = base; }
+  return emu.withSkipMask(mask, () => emu.tracked(load, null));
 }
 
 // the tilesets in which FG tile t has the same data as in tileset ts (ts included); ptrs: per tileset

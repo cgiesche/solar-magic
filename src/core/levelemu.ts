@@ -141,6 +141,14 @@ export class LevelEmulator {
     this.bootRom = this.rom.data.slice();
   }
 
+  // runs fn with skipMask set to mask (a mask or a function returning one), the previous one restored
+  // when it returns or throws
+  withSkipMask<T>(mask: Uint8Array | null | (() => Uint8Array | null), fn: () => T): T {
+    const base = this.skipMask;
+    this.skipMask = typeof mask === 'function' ? mask : () => mask;
+    try { return fn(); } finally { this.skipMask = base; }
+  }
+
   // runs fn recording the ROM it reads, on top of base (default: the boot's); the reads also
   // count for an enclosing tracked() call (with counted false only when given to count())
   tracked<T>(fn: () => T, base: RomReads | null = this.bootReads, counted = true): { result: T; reads: RomReads } {
