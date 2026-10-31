@@ -19,6 +19,7 @@ import {
 import { levelSlots, layerSlots, type GfxSlot } from '../src/core/gfxslots.ts';
 import { gfxSkipMask, gfxFilesHash } from '../src/core/gfxpages.ts';
 import { readGfx, writeGfx } from '../src/core/gfxfiles.ts';
+import { lz2Decompress } from '../src/core/lz2.ts';
 import { thumbsInput } from '../src/ui/thumbs.ts';
 import { editorImage } from './fixture.ts';
 
@@ -224,6 +225,29 @@ check(uses.missing(levels).length === 0, 'every level known after scanning');
     setGfxEntry(rom, 0x14, rom.allocWrite(rom.bytes(e.addr, e.packed)), false);
     check(gfxFilesHash(rom, [0x14]) === hash, 'GFX14 moved unchanged: what shows it is kept');
     kept('GFX14 moved unchanged', []);
+  }
+  // only a GFX file's flags changed: an uncompressed file whose bytes are also an LZ2 stream of the same length
+  // (direct copies up to its last byte, the end mark) stored as LZ2 – the same bytes, another picture
+  {
+    const data = new Uint8Array(0x1000).fill(0x55);
+    for (let o = 0; o < data.length - 1;) {
+      const n = Math.min(1024, data.length - 1 - o - 2);
+      data[o] = 0xe0 | ((n - 1) >> 8); data[o + 1] = (n - 1) & 0xff;
+      o += 2 + n;
+    }
+    data[data.length - 1] = 0xff;
+    const addr = rom.allocWrite(data);
+    setGfxEntry(rom, 0x81, addr, true);
+    const slots = levelGfx(rom, 0x105);
+    setLevelGfx(rom, 0x105, slots.map((s, k) => k === 0 || k === 7 ? 0x81 : s)); // in SP4 and FG1 of level 105
+    const sprites = () => levelSlots(rom, 0x105, lv105.header).filter((s) => s.sprite).map((s) => s.file);
+    const thumbs = JSON.stringify(thumbsInput(rom, lv105)), hash = gfxFilesHash(rom, sprites());
+    setGfxEntry(rom, 0x81, addr, false);
+    check(lz2Decompress(rom.data, snesToPc(addr)).size === data.length, 'GFX81 as LZ2: the same bytes');
+    check(sprites().includes(0x81) && gfxFilesHash(rom, sprites()) !== hash, 'GFX81\'s flags changed: level 105\'s sprite images are learned again');
+    check(JSON.stringify(thumbsInput(rom, lv105)) !== thumbs, 'GFX81\'s flags changed: level 105\'s object thumbnails are learned again');
+    setLevelGfx(rom, 0x105, slots);
+    setGfxEntry(rom, 0x81, 0, false);
   }
   // the levels' own palettes: their pointer table is recorded by byte
   const colors = new Uint8Array(0x200).fill(3);

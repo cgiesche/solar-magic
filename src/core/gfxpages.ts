@@ -109,13 +109,16 @@ export function displaySkipMask(rom: Rom, ptrs: number[][]): Uint8Array {
   } finally { rom.reads = reads; }
 }
 
-// content hash of some GFX files (0FF = none)
+// content hash of some GFX files (0FF = none): their data and their flags entry (how the data is stored), not
+// their place
 export function gfxFilesHash(rom: Rom, files: number[]): number {
+  const p = editorPatch(rom)!; // (fileRange needs it too)
   let h = 0x811c9dc5;
   for (const f of files) {
     h = Math.imul(h ^ f, 0x01000193);
     const r = f === GFX_NONE ? null : fileRange(rom, f);
     if (!r) continue;
+    h = Math.imul(h ^ rom.r8(p.gfxFlags + f), 0x01000193);
     for (let o = r[0]; o < r[1]; o++) h = Math.imul(h ^ rom.data[o], 0x01000193);
   }
   return h >>> 0;
