@@ -299,7 +299,7 @@ A slot search of the running game that found every slot it looked at taken, so a
 _Avoid_: sprite overflow, slot overflow
 
 **Sprite group**:
-A largest set of a level's sprites that fit in one view (16x14 tiles) together (an isolated sprite is one alone; a sprite may be in several): what the sprite memory check plays in the emulator, one at a time, to see which sprites lose tiles (core/spritemem.ts). The latest used groups keep their result per sprite memory value while the ROM bytes it read are unchanged, so after a sprite change only the groups that changed are played again.
+A largest set of a level's sprites that fit in one view (16x14 tiles) together (an isolated sprite is one alone; a sprite may be in several): what the sprite memory check plays in the emulator, one at a time, to see which sprites lose tiles (core/spritemem.ts). The latest used groups keep their result per sprite memory value while the ROM bytes it read are unchanged, kept by their sprites' places relative to each other, so after a sprite change only the groups that changed are played again (not one moved as a whole).
 _Avoid_: window, object group
 
 **Lag frame**:

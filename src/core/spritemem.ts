@@ -4,14 +4,15 @@
 // that can be on screen together are loaded into the empty test level and run; the OAM writes
 // show which slots lost visible tiles to another one.
 // Each group of sprites that fit on a screen together is run on its own; its result can be kept between
-// checks (SpriteGroupResults): after a sprite change a check runs only the groups that changed.
+// checks (SpriteGroupResults): after a sprite change a check runs only the groups that changed (a group
+// moved as a whole is played the same: its result is kept by its sprites' places relative to each other).
 
 import { LevelEmulator } from './levelemu.ts';
 import { loadLevel, spriteSizes, SPRITE_MEMORY, type LevelSprite, type PrimaryHeader } from './level.ts';
 import { record, rootSlot, sortPlaced, SlotTracker, testLevel, testSpriteData } from './spritegfx.ts';
 import { MemoryResults } from './learner.ts';
 import { inputHash } from './inputs.ts';
-import type { RomFingerprint, RomReads } from './romdeps.ts';
+import type { RomDeps, RomFingerprint, RomReads } from './romdeps.ts';
 import type { Rom } from './rom.ts';
 import { SPR, SPRITE_SLOTS, spriteX, spriteY, cameraX, cameraY } from './ram.ts';
 
@@ -30,11 +31,14 @@ export interface SpriteMemContext {
   groupResults?: SpriteGroupResults; // results of single groups kept between checks
 }
 
-const KEPT_GROUPS = 256; // group results kept, the latest used
+// group results kept, the latest used (of all levels): a level's groups with the values a suggestion tries, so a
+// search plays a group only with values not played before as long as they fit (about 6 KB each in level 105: the
+// pages and bytes read)
+const KEPT_GROUPS = 1024;
 
 // The results of single groups (a group with a sprite memory value in a level with its header and BG: which of
 // its sprites lost tiles, how many are alive), kept in memory while the ROM bytes they read are unchanged; a check
-// takes over a kept group's reads (a stored check depends on them as if it had run the group)
+// takes over a kept group's dependencies (a stored check depends on them as if it had run the group)
 export class SpriteGroupResults {
   private fp: RomFingerprint;
   private kept: MemoryResults;
@@ -45,11 +49,14 @@ export class SpriteGroupResults {
   }
 
   get(key: string): GroupResult | undefined { return this.kept.get<GroupResult>(key, undefined); }
-  set(key: string, r: GroupResult): void { this.kept.set(key, r, this.fp.deps(r.reads), undefined); }
+  set(key: string, check: GroupResult['check'], reads: RomReads): void {
+    const deps = this.fp.deps(reads);
+    this.kept.set(key, { check, deps }, deps, undefined);
+  }
 }
 
 // lost: indices in the group; null: the load failed
-export interface GroupResult { check: { lost: number[]; live: number } | null; reads: RomReads }
+export interface GroupResult { check: { lost: number[]; live: number } | null; deps: RomDeps }
 
 type Cam = ReturnType<typeof testLevel>;
 // the test level's camera per sprite memory value, found once per job (again when the ROM changed meanwhile)
@@ -110,28 +117,38 @@ function runGroup(ctx: SpriteMemContext, m: number, group: LevelSprite[], cam: {
   return { lost, live };
 }
 
-// The check of one group with sprite memory m: its kept result, else run (and kept). The key holds all a
-// group's result depends on (the suggestion tries more values per group than a key keeps inputs for).
-function checkGroup(ctx: SpriteMemContext, m: number, group: LevelSprite[], cams: Cams): { lost: Set<number>; live: number } | null {
+type GroupCheck = { lost: Set<number>; live: number } | null;
+
+// The key of a group's result with sprite memory m: all it depends on (the suggestion tries more values per group
+// than a key keeps inputs for); the sprites by their places relative to each other, as runGroup plays them
+function groupKey(ctx: SpriteMemContext, m: number, group: LevelSprite[]): string {
+  const x0 = Math.min(...group.map((s) => s.x)), y0 = Math.min(...group.map((s) => s.y));
+  return `smg2:${ctx.level}:${inputHash({ header: ctx.header, bg: ctx.bgPointer, m, sprites: group.map((s) => [s.num, s.x - x0, s.y - y0, s.extra, s.bytes ?? []]) })}`;
+}
+
+// A group's kept result with sprite memory m (the check takes over its dependencies); undefined if none is kept
+function keptGroup(ctx: SpriteMemContext, m: number, group: LevelSprite[], key = groupKey(ctx, m, group)): GroupCheck | undefined {
+  const known = ctx.groupResults?.get(key);
+  if (!known) return undefined;
+  ctx.emu.rom.reads?.addDeps(known.deps);
+  return known.check && { lost: new Set(known.check.lost.map((i) => group[i].uid)), live: known.check.live };
+}
+
+// The check of one group with sprite memory m: its kept result, else run (and kept)
+function checkGroup(ctx: SpriteMemContext, m: number, group: LevelSprite[], cams: Cams): GroupCheck {
   const { emu, groupResults } = ctx;
-  let key: string | undefined;
-  if (groupResults) {
-    key = `smg1:${ctx.level}:${inputHash({ header: ctx.header, bg: ctx.bgPointer, m, sprites: group.map((s) => [s.num, s.x, s.y, s.extra, s.bytes ?? []]) })}`;
-    const known = groupResults.get(key);
-    if (known) {
-      emu.rom.reads?.add(known.reads);
-      return known.check && { lost: new Set(known.check.lost.map((i) => group[i].uid)), live: known.check.live };
-    }
-  }
+  const key = groupResults ? groupKey(ctx, m, group) : '';
+  const kept = groupResults ? keptGroup(ctx, m, group, key) : undefined;
+  if (kept !== undefined) return kept;
   let c = cams.get(m);
   if (!c || c.gen !== emu.rom.gen) {
     const r = emu.tracked(() => testLevel(emu, ctx.level, ctx.header, m, ctx.bgPointer));
     cams.set(m, (c = { gen: emu.rom.gen, cam: r.result, reads: r.reads }));
   }
   const cam = c.cam, { result, reads } = emu.tracked(() => runGroup(ctx, m, group, cam), c.reads);
-  if (groupResults && key) {
+  if (groupResults) {
     const lost = result && group.flatMap((s, i) => (result.lost.has(s.uid) ? [i] : []));
-    groupResults.set(key, { check: result && { lost: lost!, live: result.live }, reads });
+    groupResults.set(key, result && { lost: lost!, live: result.live }, reads);
   }
   return result;
 }
@@ -170,7 +187,8 @@ export function usedSpriteMemory(rom: Rom): number[] {
 
 // A value for which all groups are free of conflicts and keep as many sprites alive as with the
 // current one (base: its check), tried in the order given (most used first); null if none.
-// Groups with conflicts are tried first, so a candidate usually fails fast.
+// A value is first checked against the kept group results (one that fails rules it out without playing a group),
+// then the other groups are played, those with conflicts first, so a candidate usually fails fast.
 export function suggestSpriteMemory(ctx: SpriteMemContext, current: number, candidates: number[], groups: LevelSprite[][], base: SpriteMemCheck): number | null {
   return runJob(suggestJob(ctx, current, candidates, groups, base));
 }
@@ -179,13 +197,19 @@ function* suggestJob(ctx: SpriteMemContext, current: number, candidates: number[
   const bad = groups.map((_, i) => i).filter((i) => groups[i].some((s) => base.conflicts.has(s.uid)));
   if (!bad.length) return null;
   const order = [...bad, ...groups.map((_, i) => i).filter((i) => !bad.includes(i))];
+  const fails = (i: number, r: GroupCheck) => !r || r.lost.size > 0 || r.live < base.live[i];
   for (const m of candidates) {
     if (m === current) continue;
+    const play: number[] = [];
     let ok = true;
     for (const i of order) {
+      const r = keptGroup(ctx, m, groups[i]);
+      if (r === undefined) play.push(i);
+      else if (fails(i, r)) { ok = false; break; }
+    }
+    for (const i of ok ? play : []) {
       yield;
-      const r = checkGroup(ctx, m, groups[i], cams);
-      if (!r || r.lost.size || r.live < base.live[i]) { ok = false; break; }
+      if (fails(i, checkGroup(ctx, m, groups[i], cams))) { ok = false; break; }
     }
     if (ok) return m;
   }

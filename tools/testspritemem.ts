@@ -3,7 +3,10 @@
 // own value free of conflicts (no false alarms). With No More Sprite Tile Limits (the Romhack Races
 // baserom's) two line-guided platforms ($62) next to each other lose nothing: the next sprite's tiles
 // go where the first wrote only tile numbers of hidden tiles. With the groups' results kept, moving one sprite
-// checks only the groups it was and is in, with the same conflicts and suggestion as a check of the whole level.
+// checks only the groups it was and is in, with the same conflicts and suggestion as a check of the whole level;
+// no group is played twice with a value (the suggestion after a move that causes a conflict plays the untouched
+// groups only with values not played before), moving all sprites plays no group again, and a kept result holds
+// the compact dependencies (RomDeps), not the record of the ROM bytes read.
 // Usage: node tools/testspritemem.ts [levels,hex]
 import { readFileSync } from 'node:fs';
 import { unzipSync } from 'fflate';
@@ -12,8 +15,8 @@ import { loadAsar } from '../src/core/asar.ts';
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadLevel, newUid, type LevelSprite } from '../src/core/level.ts';
-import { checkSpriteMemory, spriteMemJob, spriteGroups, suggestSpriteMemory, usedSpriteMemory, SpriteGroupResults, type GroupResult } from '../src/core/spritemem.ts';
-import { RomFingerprint } from '../src/core/romdeps.ts';
+import { checkSpriteMemory, spriteMemJob, spriteGroups, suggestSpriteMemory, usedSpriteMemory, SpriteGroupResults, type GroupResult, type SpriteMemContext } from '../src/core/spritemem.ts';
+import { RomFingerprint, RomReads } from '../src/core/romdeps.ts';
 import { editorImage } from './fixture.ts';
 
 const EDITOR_IMAGE = await editorImage(); // the fixture as the editor opens it
@@ -24,6 +27,28 @@ emu.boot();
 const bgOf = (p: number) => (p >> 16 === 0xff ? p : 0xffd900);
 let bad = 0;
 const fail = (msg: string) => { bad++; console.log('FAIL', msg); };
+// group results that count the groups played, fail when one is played twice with a value or kept with its reads
+class Counted extends SpriteGroupResults {
+  ran = 0;
+  private played = new Set<string>();
+  private name: string;
+  constructor(name: string) { super(new RomFingerprint(rom)); this.name = name; }
+  set(key: string, check: GroupResult['check'], reads: RomReads): void {
+    this.ran++;
+    if (this.played.has(key)) fail(`${this.name}: a group played again with the same value`);
+    this.played.add(key);
+    super.set(key, check, reads);
+    if (Object.values(this.get(key) ?? {}).some((v) => v instanceof RomReads)) fail(`${this.name}: a kept group holds its reads`);
+  }
+}
+type Job = { check: { conflicts: Set<number>; live: number[] }; suggestion: number | null };
+// the check and suggestion of a level's sprites with sprite memory m (with the kept groups if given)
+const runJob = (ctx: Omit<SpriteMemContext, 'groupResults'>, groupResults: SpriteGroupResults | undefined, m: number, sprites: LevelSprite[]): Job => {
+  const job = spriteMemJob({ ...ctx, groupResults }, m, candidates, sprites);
+  for (;;) { const r = job.next(); if (r.done) return r.value; }
+};
+const same = (a: Job, b: Job) => a.suggestion === b.suggestion && a.check.live.join() === b.check.live.join() &&
+  a.check.conflicts.size === b.check.conflicts.size && [...a.check.conflicts].every((u) => b.check.conflicts.has(u));
 const candidates = usedSpriteMemory(rom);
 console.log('used sprite memory', candidates.map((m) => m.toString(16)).join(' '));
 
@@ -63,16 +88,9 @@ console.log('used sprite memory', candidates.map((m) => m.toString(16)).join(' '
 {
   const lv = loadLevel(rom, 0xc);
   const ctx = { emu, level: 0xc, header: lv.header, bgPointer: bgOf(lv.layer2Pointer) };
-  let ran = 0;
-  class Counted extends SpriteGroupResults { set(key: string, r: GroupResult): void { ran++; super.set(key, r); } }
-  const groupResults = new Counted(new RomFingerprint(rom));
+  const groupResults = new Counted('00C');
   const before: LevelSprite[] = [...lv.sprites, { uid: newUid(), num: 0xe0, x: 8, y: 0x14, extra: 0 }];
-  const run = (sprites: LevelSprite[], kept: boolean) => {
-    const job = spriteMemJob({ ...ctx, groupResults: kept ? groupResults : undefined }, 0, candidates, sprites);
-    for (;;) { const r = job.next(); if (r.done) return r.value; }
-  };
-  const same = (a: ReturnType<typeof run>, b: ReturnType<typeof run>) => a.suggestion === b.suggestion && a.check.live.join() === b.check.live.join() &&
-    a.check.conflicts.size === b.check.conflicts.size && [...a.check.conflicts].every((u) => b.check.conflicts.has(u));
+  const run = (sprites: LevelSprite[], kept: boolean) => runJob(ctx, kept ? groupResults : undefined, 0, sprites);
   const first = run(before, true);
   if (!first.check.conflicts.size || first.suggestion === null) fail(`00C with $E0: no conflicts (${first.check.conflicts.size}) or no suggestion`);
   if (!same(first, run(before, false))) fail('00C: kept groups give another result than a check of the whole level');
@@ -86,10 +104,10 @@ console.log('used sprite memory', candidates.map((m) => m.toString(16)).join(' '
   // each holds the moved sprite now or is what is left of a group it was in
   const had = (g: string[], uid: number) => g.some((p) => p.startsWith(`${uid}@`));
   if (changed.some((g) => !had(g, moved.uid) && !old.some((o) => had(o, moved.uid) && g.every((p) => o.includes(p))))) fail('00C: a changed group without the moved sprite');
-  ran = 0;
+  groupResults.ran = 0;
   const c = checkSpriteMemory({ ...ctx, groupResults }, 0, spriteGroups(after));
-  if (ran !== changed.length) fail(`00C: moving one sprite checked ${ran} groups, ${changed.length} changed`);
-  console.log(`00C one sprite moved: ${ran} of ${c.live.length} groups checked`);
+  if (groupResults.ran !== changed.length) fail(`00C: moving one sprite checked ${groupResults.ran} groups, ${changed.length} changed`);
+  console.log(`00C one sprite moved: ${groupResults.ran} of ${c.live.length} groups checked`);
   const t0 = Date.now(), again = run(after, true), ms = Date.now() - t0;
   if (!same(again, run(after, false))) fail('00C: after the move kept groups give another result than a check of the whole level');
   console.log(`00C after the move: ${again.check.conflicts.size} conflicts, suggestion ${again.suggestion?.toString(16)} (${ms}ms with kept groups)`);
@@ -99,17 +117,41 @@ console.log('used sprite memory', candidates.map((m) => m.toString(16)).join(' '
 {
   const lv = loadLevel(rom, 0x105), m = lv.spriteHeader & 0x3f;
   const ctx = { emu, level: 0x105, header: lv.header, bgPointer: bgOf(lv.layer2Pointer) };
-  const groupResults = new SpriteGroupResults(new RomFingerprint(rom));
-  const run = (sprites: LevelSprite[], kept: boolean) => {
-    const job = spriteMemJob({ ...ctx, groupResults: kept ? groupResults : undefined }, m, candidates, sprites);
-    for (;;) { const r = job.next(); if (r.done) return r.value; }
-  };
+  const groupResults = new Counted('105');
+  const run = (sprites: LevelSprite[], kept: boolean) => runJob(ctx, kept ? groupResults : undefined, m, sprites);
   run(lv.sprites, true);
   const after = lv.sprites.map((s, i) => (i === 5 ? { ...s, x: s.x + 9 } : s));
   const t0 = Date.now(), kept = run(after, true), ms = Date.now() - t0, whole = run(after, false);
-  if (kept.suggestion !== whole.suggestion || kept.check.live.join() !== whole.check.live.join() || kept.check.conflicts.size !== whole.check.conflicts.size)
-    fail('105: kept groups give another result than a check of the whole level');
+  if (!same(kept, whole)) fail('105: kept groups give another result than a check of the whole level');
   else console.log(`105 one sprite moved: same result as a whole check (${ms}ms with kept groups)`);
+  // all sprites moved: every group moved as a whole, none played again
+  const shifted = after.map((s) => ({ ...s, x: s.x + 5, y: s.y - 1 }));
+  groupResults.ran = 0;
+  const all = run(shifted, true);
+  if (groupResults.ran) fail(`105: moving all sprites played ${groupResults.ran} groups again`);
+  if (!same(all, run(shifted, false))) fail('105: all sprites moved, kept groups give another result than a check of the whole level');
+  else console.log(`105 all sprites moved: ${groupResults.ran} groups played, same result as a whole check`);
+}
+
+// level 1: a sprite added that causes a conflict (its value searched with the untouched groups), then moved: the
+// search plays only the groups with the added sprite again
+{
+  const lv = loadLevel(rom, 0x1), m = lv.spriteHeader & 0x3f;
+  const ctx = { emu, level: 0x1, header: lv.header, bgPointer: bgOf(lv.layer2Pointer) };
+  const groupResults = new Counted('001');
+  const run = (sprites: LevelSprite[], kept: boolean) => runJob(ctx, kept ? groupResults : undefined, m, sprites);
+  run(lv.sprites, true);
+  const e0 = { uid: newUid(), num: 0xe0, x: lv.sprites[0].x, y: lv.sprites[0].y + 2, extra: 0 };
+  groupResults.ran = 0;
+  const first = run([...lv.sprites, e0], true), firstRan = groupResults.ran;
+  if (!first.check.conflicts.size || first.suggestion === null) fail(`001 with $E0: no conflicts (${first.check.conflicts.size}) or no suggestion`);
+  const moved = [...lv.sprites, { ...e0, x: e0.x + 1 }];
+  groupResults.ran = 0;
+  const kept = run(moved, true);
+  const withE0 = spriteGroups(moved).filter((g) => g.some((s) => s.uid === e0.uid)).length;
+  if (groupResults.ran > withE0 * candidates.length) fail(`001: the search after the move played ${groupResults.ran} groups, ${withE0} with $E0`);
+  if (!same(kept, run(moved, false))) fail('001: after the move kept groups give another result than a check of the whole level');
+  else console.log(`001 $E0 added: ${firstRan} groups played; moved: ${groupResults.ran} (${withE0} groups with it), suggestion ${kept.suggestion?.toString(16)}`);
 }
 
 // levels with their own sprite memory

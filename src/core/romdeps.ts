@@ -112,6 +112,12 @@ export class RomReads {
     for (let p = 0; p < n; p++) this.pages[p] |= r.pages[p];
     for (const b of r.bytes) this.bytes.add(b);
   }
+
+  // the reads a result's dependencies record (a result kept as RomDeps used as if computed again)
+  addDeps(d: RomDeps): void {
+    for (const p of d.pages) if (p < this.pages.length) this.pages[p] = 1;
+    for (const b of d.bytes) this.bytes.add(b);
+  }
 }
 
 // hashes of all pages of the current ROM, rehashed where the ROM changed (Rom.changesSince) when its generation does
