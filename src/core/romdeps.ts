@@ -9,16 +9,17 @@
 // are recorded, so saving a level (another one, or fixing the checksum) doesn't drop anything.
 // The same for the editor patch's tables (per-level GFX and sprite bank; the GFX file pointers aren't
 // recorded at all, see gfxSkipMask): another level's GFX setting only drops what read that entry, and
-// for the levels' own palettes' pointers: giving a level its own palette only drops what loaded that
-// level. The same for the pages holding ExAnimation data and the overworld's data (painting the
-// overworld only drops what read the tiles painted, a level's initial flags what read them). The same
-// for the pages holding level data (layer 1, layer 2 objects, sprites): the boot loads the title
-// screen's level, which every result counts, and its data shares pages with other levels' – saving one
-// of those only drops what read its bytes.
+// for the levels' own palettes' pointers and the banks of their stored BG tilemaps: giving a level its
+// own palette or BG tilemap only drops what loaded that level. The same for the pages holding
+// ExAnimation data and the overworld's data (painting the overworld only drops what read the tiles
+// painted, a level's initial flags what read them). The same for the pages holding level data (layer
+// 1, layer 2 objects, sprites, stored BG tilemaps): the boot loads the title screen's level, which every
+// result counts, and its data shares pages with other levels' – saving one of those only drops what
+// read its bytes.
 
 import type { Rom } from './rom.ts';
 import { snesToPc, type RomRange } from './rom.ts';
-import { editorPatch, customPalettePatch, GFX_FILES } from './patches.ts';
+import { editorPatch, customPalettePatch, bgPatch, GFX_FILES } from './patches.ts';
 import { exanimDataRanges } from './exanim.ts';
 import { overworldDataRanges } from './overworld.ts';
 import { levelDataRanges } from './level.ts';
@@ -63,6 +64,8 @@ export function updateBytePages(rom: Rom): void {
     mark(p.sprBank, 0x200);
     const pal = customPalettePatch(rom);
     if (pal) mark(pal.table, 0x200 * 3);
+    const bg = bgPatch(rom);
+    if (bg) mark(bg.table, 0x200);
   } finally { rom.reads = reads; }
 }
 

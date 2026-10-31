@@ -30,6 +30,13 @@ export function encodeBg(bg: Uint16Array): Uint8Array {
   return Uint8Array.from([...rleEncode(plane, true), 0xff, 0xff]);
 }
 
+// bytes of editor format data at `o` up to its end mark FF FF (where the game stops); decoded from a zero-padded copy,
+// so data cut short still ends
+export function bgDataSize(data: Uint8Array, o = 0): number {
+  const w = new Uint8Array(0x1000); w.set(data.subarray(o, o + w.length));
+  return rleDecode(w, 0, new Uint16Array(0x800), 0, 0x800) + 2;
+}
+
 export function decodeBg(data: Uint8Array): Uint16Array {
   const plane = new Uint16Array(0x800);
   rleDecode(data, 0, plane, 0, 0x800);

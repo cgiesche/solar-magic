@@ -1,7 +1,8 @@
 // Super Mario World level data: parsing and serialization.
 
 import { Rom, snesToPc } from './rom.ts';
-import { spriteBankOf, DM16_EXT } from './patches.ts';
+import { spriteBankOf, DM16_EXT, bgPatch, bgBank } from './patches.ts';
+import { bgDataSize } from './bg.ts';
 import { PREFAB_EXT } from './prefabs.ts';
 import { COND_MARK, condByte, condOf, type Dm16Cond } from './cdm16.ts';
 import { MAP_SIZE } from './ram.ts';
@@ -575,11 +576,11 @@ export function storedExits(rom: Rom, n: number): { exits: ScreenExit[]; at: num
   return { exits, at };
 }
 
-// where the levels' data lies (PC ranges): layer 1 and layer 2 objects with their headers, sprites; each place once
-// however many levels share it (the BG tilemaps are not level data of their own). Sizes only: a level's orientation
-// and size change where its objects and sprites are, not how many bytes they take.
+// where the levels' data lies (PC ranges): layer 1 and layer 2 objects with their headers, sprites, the BG tilemaps
+// the editor stored (the game's own in bank $0C are no level's alone); each place once however many levels share it.
+// Sizes only: a level's orientation and size change where its objects and sprites are, not how many bytes they take.
 export function levelDataRanges(rom: Rom): [number, number][] {
-  const d = rom.data, len2d = objectLength2D(rom), sizes = spriteSizes(rom);
+  const d = rom.data, len2d = objectLength2D(rom), sizes = spriteSizes(rom), bgs = !!bgPatch(rom);
   const out: [number, number][] = [], seen = new Set<number>();
   // the data at a not met before, up to the end of its bank (as dataWindow, without copying it)
   const unseen = (a: number) => {
@@ -594,8 +595,13 @@ export function levelDataRanges(rom: Rom): [number, number][] {
     const o1 = snesToPc(l1), mode = o1 >= 0 && o1 + 5 < d.length ? parsePrimaryHeader(d.subarray(o1, o1 + 5)).mode : 0;
     const d1 = unseen(l1);
     if (d1) add(l1, 5 + (hasObjects(mode) ? parseObjects(d1, 5, false, false, undefined, len2d).size : 1));
-    const d2 = (l2 >> 16) !== 0xff && hasLayer2Objects(mode) ? unseen(l2) : null;
+    const objects2 = (l2 >> 16) !== 0xff && hasLayer2Objects(mode);
+    const d2 = objects2 ? unseen(l2) : null;
     if (d2) add(l2, 5 + parseObjects(d2, 5, false, false, undefined, len2d).size);
+    // a stored BG tilemap, up to its end mark
+    const bank = !objects2 && bgs ? bgBank(rom, n) : 0, bgAddr = bank ? (bank << 16) | (l2 & 0xffff) : 0;
+    const db = bank ? unseen(bgAddr) : null;
+    if (db) add(bgAddr, Math.min(db.length, bgDataSize(db)));
     const ds = unseen(spr);
     if (ds) add(spr, parseSprites(ds, 0, false, sizes).size);
   }

@@ -4,12 +4,13 @@
 // and sprites are read from the ROM.
 import { Rom, snesToPc } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
-import { loadLevel, newUid, spriteId, L1_PTRS } from '../src/core/level.ts';
+import { loadLevel, newUid, spriteId, L1_PTRS, L2_PTRS } from '../src/core/level.ts';
+import { bgFromWram, bgDataSize } from '../src/core/bg.ts';
 import { saveLevel } from '../src/core/save.ts';
-import { DM16_EXT, setGfxEntry, levelGfx, setLevelGfx, editorPatch, setCustomPalette } from '../src/core/patches.ts';
+import { DM16_EXT, setGfxEntry, levelGfx, setLevelGfx, editorPatch, setCustomPalette, bgBank } from '../src/core/patches.ts';
 import { PREFAB_EXT, writePrefab, TRANSPARENT } from '../src/core/prefabs.ts';
 import { setActsLike, setExtTileWords, extTileWords } from '../src/core/map16ext.ts';
-import { ResultCache, RomFingerprint, RomReads, PAGE_SHIFT, type RomDeps } from '../src/core/romdeps.ts';
+import { ResultCache, RomFingerprint, RomReads, PAGE_SHIFT, BYTE_PAGES, type RomDeps } from '../src/core/romdeps.ts';
 import { captureSprites } from '../src/core/spritegfx.ts';
 import { ProbeHost, PROBE_SPRITE, jobKey, type ProbeJob } from '../src/core/probehost.ts';
 import { map16Source } from '../src/core/render.ts';
@@ -170,14 +171,72 @@ check(uses.missing(levels).length === 0, 'every level known after scanning');
     check(!results.fp.valid(pointerDeps), 'what read its pointer entry is dropped');
     kept('saving level 106 moved', 0x106);
   }
-  // the title screen level's own data: the boot is stale
+  // the title screen level's own data (layer 1, sprites, its BG tilemap as layer 2): the boot is stale
   {
-    const lv = loadLevel(rom, title[0]);
+    const t = title[0], name = t.toString(16);
+    const stale = (what: string) => { const s = base(); check(s !== state, `a change of the title screen level ${name}'s ${what} makes the boot snapshot stale`); state = s; };
+    const lv = loadLevel(rom, t);
     lv.objects.at(-1)!.x ^= 1;
     saveLevel(rom, lv);
-    check(base() !== state, `a change of the title screen level ${title[0].toString(16)}'s data makes the boot snapshot stale`);
+    stale('layer 1 data');
     check(uses.missing(levels).length === levels.length, 'then every level is scanned again');
+    const ls = loadLevel(rom, t), at = ls.sprAddr;
+    ls.sprites[0].x ^= 1;
+    saveLevel(rom, ls);
+    check(ls.sprAddr === at, `level ${name} with a sprite moved is saved in place`);
+    stale('sprite data');
+    const lb = loadLevel(rom, t), bg = bgFromWram(emu.load(t).wram);
+    check(!lb.layer2Objects, `level ${name}'s layer 2 is a BG tilemap`);
+    bg[0] ^= 1;
+    lb.bg = bg;
+    saveLevel(rom, lb);
+    check(!!bgBank(rom, t), `level ${name}'s BG tilemap is stored in free space`);
+    stale('BG tilemap');
+    // its stored data changed in place (the first chunk's value: a tile number of the low plane)
+    const a = (bgBank(rom, t) << 16) | (rom.r24(L2_PTRS + t * 3) & 0xffff);
+    rom.w8(a + 1, rom.r8(a + 1) ^ 1);
+    stale('stored BG tilemap data');
   }
+}
+
+// a BG tilemap stored in free space is level data, recorded by byte (as the table of the banks it is in): storing
+// another level's next to it keeps the uses of the levels showing it, saving it anew (freeing its old place) keeps
+// the other level's
+{
+  for (const n of uses.missing(levels)) uses.scan(n, emu);
+  emu.load(0x105);
+  const boot = results.fp.deps(emu.bootReads!);
+  const kept = (what: string, level: number) => {
+    const m = uses.missing(levels);
+    check(m.length === 1 && m[0] === level, `${what}: only level ${level.toString(16)} is scanned again (${m.map((x) => x.toString(16))})`);
+    check(results.fp.valid(boot), `${what}: what the boot read is unchanged`);
+    for (const n of m) uses.scan(n, emu);
+  };
+  // where a level's stored BG tilemap lies (PC, up to its end mark)
+  const stored = (n: number) => {
+    const o = snesToPc((bgBank(rom, n) << 16) | (rom.r24(L2_PTRS + n * 3) & 0xffff));
+    return [o, o + bgDataSize(rom.data, o)];
+  };
+  // a level's BG tilemap with a tile changed, stored in free space
+  const edit = (n: number, i: number) => {
+    const bg = bgFromWram(emu.load(n).wram), lv = loadLevel(rom, n);
+    bg[i] ^= 1;
+    lv.bg = bg;
+    saveLevel(rom, lv);
+    check(!!bgBank(rom, n), `level ${n.toString(16)}'s BG tilemap is stored in free space`);
+  };
+  const pages = ([o, end]: number[]) => [o >> PAGE_SHIFT, (end - 1) >> PAGE_SHIFT];
+  edit(0x105, 1);
+  kept('level 105\'s BG tilemap stored', 0x105);
+  const [first, last] = pages(stored(0x105));
+  emu.load(0x105);
+  check(last - first > 1 && BYTE_PAGES.subarray(first, last + 1).every((b) => b === 1), `its pages (${first.toString(16)}-${last.toString(16)}) are recorded by byte`);
+  edit(0x106, 1);
+  check(pages(stored(0x106))[0] === last, `level 106's BG tilemap is stored on its last page (${stored(0x106)[0].toString(16)})`);
+  kept('level 106\'s BG tilemap stored next to it', 0x106);
+  // (its old place, freed, is on the page of level 106's)
+  edit(0x105, 2);
+  kept('level 105\'s BG tilemap saved anew', 0x105);
 }
 
 // pointer tables recorded no coarser than what they point to: a GFX file moved to free space (an LZ2 file grown
