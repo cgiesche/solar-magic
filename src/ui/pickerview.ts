@@ -1,4 +1,4 @@
-// How pickers draw their pictures without uneven pixels: fixed grids fill the picker's width, drawn at the next
+// How pickers draw what they show without uneven pixels: fixed grids fill the picker's width, drawn at the next
 // whole number of screen pixels per pixel above it and shrunk to it smoothly (sharp bilinear: pixels of one size,
 // their edges a little soft unless the width is a whole number of them); single images at whole numbers of screen
 // pixels, at most 2× in their box. Below 3× the hovered entry is shown enlarged beside the picker

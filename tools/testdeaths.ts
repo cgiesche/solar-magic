@@ -86,10 +86,10 @@ const sprite = (col: number, row: number, num: number) => [((row & 15) << 4) | (
   check(k?.kind === 'block' && k.tx === tx && k.ty === ty && k.tile === 0x12f, `killed by the muncher's tile (${JSON.stringify(k)}, ${tx}/${ty})`);
 }
 {
-  // fallen through the floor and out of the picture (where the game kills him: its own rule)
+  // fallen through the floor and out of view (where the game kills him: its own rule)
   const p = enter(0x105, []);
   const d = play(p, 200, 0, () => { s.wram[RAM.noLayer1Contact] = 0xff; });
-  check(d.length === 1 && d[0].killer.kind === 'pit', `fallen out of the picture: killed by the pit (${JSON.stringify(d[0]?.killer)})`);
+  check(d.length === 1 && d[0].killer.kind === 'pit', `fallen out of view: killed by the pit (${JSON.stringify(d[0]?.killer)})`);
 }
 {
   // the timer runs out

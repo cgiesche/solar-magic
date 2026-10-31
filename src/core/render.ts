@@ -21,7 +21,7 @@ export function screenBase(rom: Rom, layer: number, mode: number, s: number): nu
   return rom.r16(screenTable + s * 3);
 }
 
-// Screen s's rectangle in the level picture (pixels): a horizontal level's screens lie side by side, the
+// Screen s's rectangle in the drawn level (pixels): a horizontal level's screens lie side by side, the
 // level's height each; a vertical level's are stacked, the level's width (two 16-tile halves) each.
 export function screenRect(g: LayerGeom, s: number): { x: number; y: number; w: number; h: number } {
   return g.vertical ? { x: 0, y: s * 256, w: g.width * 16, h: 256 } : { x: s * 256, y: 0, w: 256, h: g.height * 16 };
@@ -212,7 +212,7 @@ export function renderLevel(rom: Rom, r: LevelRender, mode: number, screens: num
   return { width, height, backdrop: backdropColor(r), layer1, layer2, layer3, geom1, geom2, tiles1, tiles2, bgTiles };
 }
 
-// tiles of an object layer (packed y<<16|x, laid out by g) as one picture cut to their bounds, 0 = transparent;
+// tiles of an object layer (packed y<<16|x, laid out by g) drawn together, cut to their bounds, 0 = transparent;
 // null without tiles
 export function renderLayerTiles(rom: Rom, r: LevelRender, g: LayerGeom, layer2: boolean, tiles: number[]): { x0: number; y0: number; w: number; h: number; px: Uint32Array } | null {
   if (!tiles.length) return null;
@@ -361,7 +361,7 @@ export function charBase(r: LevelRender, bg: boolean): number {
   return (bg ? p >> 4 : p & 0x0f) << 13;
 }
 
-// the cells (see TilePicture) of a sheet of `count` Map16 tiles from `first`, 16 a row
+// the cells (see TilePixels) of a sheet of `count` Map16 tiles from `first`, 16 a row
 export function sheetCells(first: number, count: number): number[] {
   const out: number[] = [];
   for (let t = 0; t < count; t++) out.push((t & 15) * 16, (t >> 4) * 16, first + t);
@@ -371,12 +371,12 @@ export function sheetCells(first: number, count: number): number[] {
 // An image of the animation: the level's VRAM and CGRAM at one of its steps
 export interface AnimStep { vram: Uint8Array; cgram: Uint8Array }
 
-// A picture of the level's Map16 tiles (a picker's page, an object's thumbnail): its pixels (w wide), where each
+// Pixels showing the level's Map16 tiles (a picker's page, an object's thumbnail): the pixels (w wide), where each
 // tile is and which (cells: x, y of its top left pixel and its number, one after the other), FG or BG tiles,
 // and the pixel where a tile draws none
-export interface TilePicture { px: Uint32Array; w: number; h: number; cells: number[]; bg: boolean; back: number }
+export interface TilePixels { px: Uint32Array; w: number; h: number; cells: number[]; bg: boolean; back: number }
 
-// The level's animation in pictures of its Map16 tiles: between two steps, only the tiles that look different
+// The level's animation on pixels of its Map16 tiles: between two steps, only the tiles that look different
 // in one of them are drawn anew; what a step changes is found once per step and tile
 export class TileAnimation {
   private rom: Rom;
@@ -415,23 +415,23 @@ export class TileAnimation {
     return v;
   }
 
-  // the picture, drawn as step `from` showed it (null: as the render shows it), redrawn as step `to` shows it
-  // (all: the whole picture, for one drawn with another render); whether a tile was drawn anew
-  redraw(pic: TilePicture, from: AnimStep | null, to: AnimStep | null, all = false): boolean {
+  // the pixels, drawn as step `from` showed them (null: as the render shows them), redrawn as step `to` shows them
+  // (all: all of them, for pixels drawn with another render); whether a tile was drawn anew
+  redraw(pixels: TilePixels, from: AnimStep | null, to: AnimStep | null, all = false): boolean {
     let tc: TileCache | null = null, any = false;
-    const c = pic.cells;
-    if (all) pic.px.fill(pic.back);
+    const c = pixels.cells;
+    if (all) pixels.px.fill(pixels.back);
     for (let i = 0; i < c.length; i += 3) {
       const t = c[i + 2];
-      if (!all && !(from && this.changes(from, t, pic.bg)) && !(to && this.changes(to, t, pic.bg))) continue;
+      if (!all && !(from && this.changes(from, t, pixels.bg)) && !(to && this.changes(to, t, pixels.bg))) continue;
       if (!tc) {
         let set = to ? this.caches.get(to) : this.base;
         if (!set) this.caches.set(to!, set = this.tileCaches(to!));
-        tc = pic.bg ? set.bg : set.fg;
+        tc = pixels.bg ? set.bg : set.fg;
       }
       const x0 = c[i], y0 = c[i + 1];
-      for (let y = y0; y < y0 + 16 && y < pic.h; y++) pic.px.fill(pic.back, y * pic.w + x0, y * pic.w + Math.min(pic.w, x0 + 16));
-      drawMap16(pic.px, pic.w, pic.h, tc, this.words(t, pic.bg), x0, y0);
+      for (let y = y0; y < y0 + 16 && y < pixels.h; y++) pixels.px.fill(pixels.back, y * pixels.w + x0, y * pixels.w + Math.min(pixels.w, x0 + 16));
+      drawMap16(pixels.px, pixels.w, pixels.h, tc, this.words(t, pixels.bg), x0, y0);
       any = true;
     }
     return any;

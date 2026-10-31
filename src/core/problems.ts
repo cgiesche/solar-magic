@@ -76,7 +76,7 @@ export function scanProblems(level: Level, r: ScanResult, uids: number[]): Probl
   for (const s of r.screens) {
     if (s.lag < 3) continue;
     out.push({ key: `lag:${s.screen}`, severity: 'warn', text: `Slowdown on screen ${hex2(s.screen)} (${s.lag} of ${s.frames} frames)`,
-      title: 'Found by playing the level through: in these frames the game did not finish its work before the next picture. Usually too many (or too busy) sprites at once.',
+      title: 'Found by playing the level through: in these frames the game did not finish its work before the next frame. Usually too many (or too busy) sprites at once.',
       where: { screen: s.screen } });
   }
   for (const f of r.sprites) {

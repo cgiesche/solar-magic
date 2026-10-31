@@ -193,7 +193,7 @@ export function installL2ScrollPatch(rom: Rom): ApplyResult {
 }
 
 // how layer 2 moves in one direction: layer 2 pixels per layer 1 pixel, and pixels per frame by itself
-// (positive: the layer's position grows, the picture moves left/up)
+// (positive: the layer's position grows, the drawn layer moves left/up)
 export interface Motion { rate: number; drift: number }
 export interface LayerMotion { x: Motion; y: Motion }
 

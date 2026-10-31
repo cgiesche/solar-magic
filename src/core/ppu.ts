@@ -28,7 +28,7 @@ export class PPU {
     this.snes = snes;
   }
 
-  // what a savestate keeps of it (see Snes.saveState): the scroll registers and the picture on screen
+  // what a savestate keeps of it (see Snes.saveState): the scroll registers and the frame on screen
   saveState(): PpuState {
     return { hofs: [...this.hofs], vofs: [...this.vofs], latch: this.latch, hlatch: this.hlatch, frame: this.frame.slice() };
   }

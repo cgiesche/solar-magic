@@ -1070,7 +1070,7 @@ function animateSheet(app: App, sheet: HTMLCanvasElement, bg: boolean, base: num
   return sheet;
 }
 
-// (a copy of a picture following the animation follows it too)
+// (a copy of a canvas following the animation follows it too)
 export function cloneCanvas(c: HTMLCanvasElement): HTMLCanvasElement {
   const n = document.createElement('canvas');
   n.width = c.width; n.height = c.height;

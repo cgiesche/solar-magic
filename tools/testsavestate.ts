@@ -1,6 +1,6 @@
 // Test play's savestate (Snes.saveState / loadState with the sound unit and a PPU attached): a round trip
-// gives back the exact emulated frame – memory, registers, scroll, color math, the sound unit and the picture
-// on screen – and the emulation goes on from it exactly as from the moment of saving. The slot (savestate.ts)
+// gives back the exact emulated frame – memory, registers, scroll, color math, the sound unit and what
+// is on screen – and the emulation goes on from it exactly as from the moment of saving. The slot (savestate.ts)
 // is kept for the same level on the same, unchanged ROM only.
 // node tools/testsavestate.ts
 import { readFileSync } from 'node:fs';
@@ -51,7 +51,7 @@ const rom = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
   const st = s.saveState();
   // what the frames right after the save do (the input changes the game's state as well)
   const first = play(s, 240);
-  check(!same(s.wram, at.wram) && !same(ppu.frame, at.frame), 'the game ran on after saving (WRAM, picture changed)');
+  check(!same(s.wram, at.wram) && !same(ppu.frame, at.frame), 'the game ran on after saving (WRAM, frame changed)');
   // changed by hand too: a round trip must set them back whatever they are
   s.fixedColor ^= 0x1234; ppu.hofs[0] ^= 0x55; ppu.vofs[1] ^= 0x33; ppu.latch ^= 0xff; ppu.hlatch ^= 0x0f;
   s.loadState(st);
@@ -59,7 +59,7 @@ const rom = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
   check(same(s.wram, at.wram) && same(s.vram, at.vram) && same(s.cgram, at.cgram) && same(s.oam, at.oam), 'loaded: WRAM, VRAM, CGRAM, OAM as at the save');
   check(Object.entries(at.cpu).every(([k, v]) => (s.cpu as unknown as Record<string, unknown>)[k] === v), 'loaded: the CPU registers as at the save');
   check(same(s.apu!.save(), at.apu), 'loaded: the sound unit\'s state as at the save');
-  check(same(ppu.frame, at.frame), 'loaded: the picture on screen as at the save');
+  check(same(ppu.frame, at.frame), 'loaded: the frame on screen as at the save');
   check(s.fixedColor === at.fixedColor && same(ppu.hofs, at.hofs) && same(ppu.vofs, at.vofs) && ppu.latch === at.latch && ppu.hlatch === at.hlatch && s.busyLines === at.busy,
     'loaded: color math fixed color, scroll registers and their latches, CPU load as at the save');
 

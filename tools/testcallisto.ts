@@ -115,7 +115,7 @@ const order = (files: Record<string, Uint8Array>) => [...dec.decode(files['tools
   // Free $7F0000 (free_up_ram.asm) ends $04DD40 with an RTL, which the editor's translevel patch also calls
   check(new OverworldEmulator(rom).load(0, 0).ok, 'the overworld loads (Free $7F0000 with the translevel patch)');
   // a tile the game changes (a coin collected, a block hit) changes on screen: the first solid tile in view
-  // made blank by the game's routine ($00BEB0) – its Map16 and its picture
+  // made blank by the game's routine ($00BEB0) – its Map16 and how it looks on screen
   {
     const w = s.wram;
     const ppu = s.ppu = new PPU(s);

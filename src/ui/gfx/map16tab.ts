@@ -1,5 +1,5 @@
 // Map16 tab: the tile sheet (pages, labelled ranges, multi-selection, copy/paste), a builder showing the
-// whole selection (quarters marked as a set; palette dots, flips mirroring them as one picture, the priority
+// whole selection (quarters marked as a set; palette dots, flips mirroring them as a whole, the priority
 // toggle and acts-like for the marked ones; Ctrl+wheel zoom, middle button pan) and the level's 8x8 graphics grouped by GFX slot. The
 // graphics view uses the palette of the quarter under the mouse, else of the first marked one. Clicking or
 // dragging there chooses 8x8 tiles; a right click in the builder puts them with their top-left corner on
@@ -288,7 +288,7 @@ export class Map16Tab implements WsPanel {
     const state = summary(this.grid(), this.selWords(), this.marked()).prio;
     this.editQuarters(setBit(PRIO, state !== 'on'), `Priority ${state === 'on' ? 'off' : 'on'}`);
   }
-  // the marked quarters mirrored as one picture (acts-like stays with its tile)
+  // the marked quarters mirrored as a whole (acts-like stays with its tile)
   private flip(bit: number, what: string): void {
     const m = this.marked();
     if (!m.size) { toast('Mark quarters first (click, drag or Ctrl+A in the builder)'); return; }
@@ -635,8 +635,8 @@ export class Map16Tab implements WsPanel {
       h('div', { class: 'hint' }, 'Palette (keys 1–8)'),
       h('div', { class: 'mt-pals' }, Array.from({ length: 8 }, (_, p) => palDot(p))),
       h('div', { class: 'row' },
-        flip('↔ Flip', FLIP_X, 'Mirror the marked quarters horizontally as one picture (X)'),
-        flip('↕ Flip', FLIP_Y, 'Mirror the marked quarters vertically as one picture (Y)'),
+        flip('↔ Flip', FLIP_X, 'Mirror the marked quarters horizontally as a whole (X)'),
+        flip('↕ Flip', FLIP_Y, 'Mirror the marked quarters vertically as a whole (Y)'),
         prio(s.prio)),
       h('div', { class: 'mt-section' }, one ? 'Tile' : 'Tiles'),
       acts,
@@ -644,7 +644,7 @@ export class Map16Tab implements WsPanel {
       h('details', { class: 'mt-adv' }, h('summary', null, one ? 'Raw values' : `Raw values of ${hex(t, 3)}`),
         h('div', { class: 'mono hint' }, ws.map((w, q) => `${QUARTER_NAMES[q]} $${hex(w, 4)}`).join('  ')),
         h('div', { class: 'hint' }, this.tileAddr(t) < 0 ? 'Extended tile – created on the first change.' : `ROM $${hex(this.tileAddr(t), 6)}`)),
-      h('p', { class: 'hint' }, 'Choose 8x8 tiles on the right (click or drag), then right-click a quarter to put them there (right drag: paint), or press Enter to put a single one into every marked quarter. Mark quarters for palette, flips (mirroring them as one picture) and priority (click, drag, Ctrl: add/remove, Shift: whole tile, Ctrl+A: all, Esc: none).'),
+      h('p', { class: 'hint' }, 'Choose 8x8 tiles on the right (click or drag), then right-click a quarter to put them there (right drag: paint), or press Enter to put a single one into every marked quarter. Mark quarters for palette, flips (mirroring them as a whole) and priority (click, drag, Ctrl: add/remove, Shift: whole tile, Ctrl+A: all, Esc: none).'),
     );
   }
 

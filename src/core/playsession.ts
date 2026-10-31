@@ -162,14 +162,14 @@ export class PlaySession {
     for (const w of this.watchers) w.reset();
   }
 
-  // the picture from here on (a PPU drawing each frame); the picture on screen is then part of a savestate
-  picture(): PPU {
+  // a PPU from here on, drawing what is on screen; what is on screen is then part of a savestate
+  attachPPU(): PPU {
     const ppu = new PPU(this.s);
     this.s.ppu = ppu;
     return ppu;
   }
 
-  // the machine's hook and picture given back, the buttons released
+  // the machine's hook and PPU given back, the buttons released
   close(): void {
     this.watchers = [];
     this.s.hook = null;

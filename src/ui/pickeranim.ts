@@ -1,17 +1,17 @@
-// The pickers' pictures of Map16 tiles (the Map16 pages, the BG sheet, object and prefab thumbnails) follow the
+// The pickers' canvases of Map16 tiles (the Map16 pages, the BG sheet, object and prefab thumbnails) follow the
 // level's animation: on every step of the level view's animation the tiles that step changes are drawn anew on
-// the picture (TileAnimation, render.ts), then what shows it (a sheet drawn larger with its marks, copies of a
-// thumbnail) is updated. Only pictures on the screen are, the others catch up once they are back on it; when
-// the animation stops, all go back to the level as rendered. A picture is dropped once it is no longer shown.
+// the canvas (TileAnimation, render.ts), then what shows it (a sheet drawn larger with its marks, copies of a
+// thumbnail) is updated. Only canvases on the screen are, the others catch up once they are back on it; when
+// the animation stops, all go back to the level as rendered. A canvas is dropped once it is no longer shown.
 import type { App } from './app.ts';
-import type { AnimStep, TileAnimation, TilePicture } from '../core/render.ts';
+import type { AnimStep, TileAnimation, TilePixels } from '../core/render.ts';
 
 interface Entry {
   canvas: HTMLCanvasElement;
   cells: number[];
   bg: boolean;
   back: number;
-  pic: TilePicture | null; // its pixels, read from the canvas once it is first drawn anew
+  pixels: TilePixels | null; // its pixels, read from the canvas once it is first drawn anew
   anim: TileAnimation; // the render it is drawn with
   step: AnimStep | null; // what it is drawn with (null: the level as rendered)
   shown?: () => void;
@@ -25,18 +25,18 @@ const swept = new WeakMap<Set<Entry>, number>(); // the entries left by the last
 function follow(app: App, e: Entry): void {
   const step = app.animStep(), anim = app.tileAnimation();
   if (step === e.step && anim === e.anim) return;
-  if (!e.pic) {
+  if (!e.pixels) {
     const { width: w, height: h } = e.canvas;
-    e.pic = { px: new Uint32Array(e.canvas.getContext('2d')!.getImageData(0, 0, w, h).data.buffer), w, h, cells: e.cells, bg: e.bg, back: e.back };
+    e.pixels = { px: new Uint32Array(e.canvas.getContext('2d')!.getImageData(0, 0, w, h).data.buffer), w, h, cells: e.cells, bg: e.bg, back: e.back };
   }
-  // a picture of an earlier render is drawn whole with this one
-  const drew = anim.redraw(e.pic, e.step, step, e.anim !== anim);
+  // a canvas of an earlier render is drawn whole with this one
+  const drew = anim.redraw(e.pixels, e.step, step, e.anim !== anim);
   e.step = step;
   e.anim = anim;
   if (!drew) return;
   const ctx = e.canvas.getContext('2d')!;
-  const id = ctx.createImageData(e.pic.w, e.pic.h);
-  new Uint32Array(id.data.buffer).set(e.pic.px);
+  const id = ctx.createImageData(e.pixels.w, e.pixels.h);
+  new Uint32Array(id.data.buffer).set(e.pixels.px);
   ctx.putImageData(id, 0, 0);
   e.shown?.();
 }
@@ -53,7 +53,7 @@ function sweep(all: Set<Entry>): void {
 }
 
 // canvas (one pixel per pixel, drawn with the level as rendered) shows Map16 tiles at cells (x, y of a tile's
-// top left pixel and its number, one after the other, see TilePicture); from now on it follows the animation.
+// top left pixel and its number, one after the other, see TilePixels); from now on it follows the animation.
 // It is shown either by one element `on` (the canvas itself, or one it is drawn into by shown()), alive while
 // that is in the page, or by its copies (cloneCanvas), drawn again when it changes, alive while alive() holds.
 // back: the pixel where a tile draws none. It is drawn anew from the next step on, once on the screen.
@@ -72,9 +72,9 @@ export function animateTiles(app: App, canvas: HTMLCanvasElement, cells: number[
       }
     });
   }
-  // (pictures of rebuilt pickers are dropped here too while no animation runs)
+  // (canvases of rebuilt pickers are dropped here too while no animation runs)
   if (all.size > 2 * (swept.get(all) ?? 0) + 64) sweep(all);
-  const e: Entry = { canvas, cells, bg: o.bg ?? false, back: o.back ?? 0, pic: null, anim: app.tileAnimation(), step: null, alive: () => false, on: () => [] };
+  const e: Entry = { canvas, cells, bg: o.bg ?? false, back: o.back ?? 0, pixels: null, anim: app.tileAnimation(), step: null, alive: () => false, on: () => [] };
   if ('on' in o) {
     const on = o.on;
     Object.assign(e, { shown: o.shown, alive: () => on.isConnected, on: () => [on] });
@@ -86,8 +86,8 @@ export function animateTiles(app: App, canvas: HTMLCanvasElement, cells: number[
 }
 
 // ---------------- copies ----------------
-// the copies made of a picture shown by its copies: drawn again when it changes. One out of the page is dropped
-// when the picture is drawn again or once there are many (not at once: a copy is shown a moment after it is made).
+// the copies made of a canvas shown by its copies: drawn again when it changes. One out of the page is dropped
+// when the canvas is drawn again or once there are many (not at once: a copy is shown a moment after it is made).
 const copies = new WeakMap<HTMLCanvasElement, HTMLCanvasElement[]>();
 const MANY_COPIES = 8;
 

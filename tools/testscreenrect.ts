@@ -1,4 +1,4 @@
-// A screen's rectangle in the level picture (screenRect): a horizontal level's screens are side by side, a
+// A screen's rectangle in the drawn level (screenRect): a horizontal level's screens are side by side, a
 // vertical level's stacked, each the full width of the level (32 tiles). Vanilla 105 and 12A.
 import { Rom } from '../src/core/rom.ts';
 import { loadLevel } from '../src/core/level.ts';

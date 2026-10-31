@@ -58,7 +58,7 @@ for (const n of [0x105, 0x106, 0x001, 0x009, 0x10f, 0x0c]) {
   if (play(ev, n) !== play(ep, n)) { console.log(n.toString(16), 'gameplay differs with patch'); bad++; }
 }
 
-// 3. extended tile $2A0 = copy of $130 (cement block): same picture, same collision
+// 3. extended tile $2A0 = copy of $130 (cement block): same look, same collision
 const EXT = 0x2a0, REF = 0x130;
 setExtTileWords(patched, EXT, map16Source(patched, ep.load(0x105)).fg(REF));
 setActsLike(patched, EXT, REF);

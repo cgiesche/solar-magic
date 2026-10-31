@@ -121,7 +121,7 @@ check(objectLength2D(hooked) === 5, `once the hook is installed (the same ROM): 
   const thumbs = renderObjectThumbs(hooked, emu, lv, specs, (s) => `c${s.extension?.[0]}`);
   const drawn = thumbs.filter((t) => !t.effect), fxOnly = thumbs.filter((t) => t.effect);
   check(drawn.map((t) => t.key).join() === 'c2' && drawn[0].m16.join() === '293', `thumbnails: custom 02 draws tile 125 (${drawn.map((t) => t.key + ':' + t.m16).join(' ')})`);
-  check(fxOnly.map((t) => t.key).join() === 'c1' && fxOnly[0].w === 0, `listed without a picture: custom 01, which changes RAM (${fxOnly.map((t) => t.key)})`);
+  check(fxOnly.map((t) => t.key).join() === 'c1' && fxOnly[0].w === 0, `listed without a thumbnail: custom 01, which changes RAM (${fxOnly.map((t) => t.key)})`);
   const quiet = [0, 1, 3].map((n) => obj(0x2d, 0, 0, 0, [n, 0]));
   const base = effectLoad(emu, lv, []).wram;
   const fx = quiet.map((o) => ramEffect(base, effectLoad(emu, lv, [o]).wram));

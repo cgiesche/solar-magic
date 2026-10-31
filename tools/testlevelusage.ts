@@ -286,7 +286,7 @@ check(uses.missing(levels).length === 0, 'every level known after scanning');
     kept('GFX14 moved unchanged', []);
   }
   // only a GFX file's flags changed: an uncompressed file whose bytes are also an LZ2 stream of the same length
-  // (direct copies up to its last byte, the end mark) stored as LZ2 – the same bytes, another picture
+  // (direct copies up to its last byte, the end mark) stored as LZ2 – the same bytes, stored another way
   {
     const data = new Uint8Array(0x1000).fill(0x55);
     for (let o = 0; o < data.length - 1;) {

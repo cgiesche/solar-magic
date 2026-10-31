@@ -73,7 +73,7 @@ export type PickedItem =
   | { kind: 'spr'; num: number; extra: number };
 // what a right click in the level adds (App.placement)
 export interface Placement { objects: LevelObject[]; sprites: LevelSprite[] }
-// a picture of the placement preview in level pixels; img null: a sprite without an image (drawn as its tile)
+// a part of the placement preview (which is a picture, CONTEXT.md) in level pixels; img null: a sprite without an image (drawn as its tile)
 export interface PreviewPart { x: number; y: number; img: HTMLCanvasElement | null }
 
 type Listener = () => void;
@@ -517,7 +517,7 @@ export class App {
     this.later('anim', step);
   }
 
-  // the pictures following the animation (pickeranim.ts) go back to the level as rendered
+  // the canvases following the animation (pickeranim.ts) go back to the level as rendered
   private stopAnimation(): void {
     const a = this.anim;
     if (!a.timer) return;
@@ -532,7 +532,7 @@ export class App {
     return this.show.anim && a.timer && a.phase >= 0 ? a.snaps[a.phase] ?? null : null;
   }
 
-  // the animation's steps in pictures of the level's Map16 tiles (the pickers'), for the render shown
+  // the animation's steps on canvases of the level's Map16 tiles (the pickers'), for the render shown
   private tileAnim: { r: LevelRender; anim: TileAnimation } | null = null;
   tileAnimation(): TileAnimation {
     if (this.tileAnim?.r !== this.render) this.tileAnim = { r: this.render, anim: new TileAnimation(this.rom, this.render) };

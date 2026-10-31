@@ -21,7 +21,7 @@ function lightbox(shots: HTMLAnchorElement[]): void {
     h('button', { class: 'lb-close', title: 'Close (Esc)', 'aria-label': 'Close', onclick: () => dlg.close() }, '✕'),
     h('button', { class: 'lb-prev', title: 'Previous (←)', 'aria-label': 'Previous screenshot', onclick: () => step(-1) }, '‹'),
     h('button', { class: 'lb-next', title: 'Next (→)', 'aria-label': 'Next screenshot', onclick: () => step(1) }, '›'));
-  // a click anywhere but the arrows closes it (the backdrop, the picture, the caption)
+  // a click anywhere but the arrows closes it (the backdrop, the screenshot, the caption)
   dlg.addEventListener('click', (e) => { if (!(e.target as HTMLElement).closest('.lb-prev, .lb-next')) dlg.close(); });
   dlg.addEventListener('keydown', (e) => {
     if (e.key === 'ArrowLeft') { e.preventDefault(); step(-1); } else if (e.key === 'ArrowRight') { e.preventDefault(); step(1); }

@@ -102,8 +102,8 @@ function start(app: App, at: Start | undefined, audio: AudioOut, fromSave: boole
   const lv = app.level;
   const saved = fromSave ? saveSlot.get(app.rom, lv.number, app.dirty) : null;
   const p = saved ? PlaySession.resume(emu) : loadLevel(app, emu, at, show);
-  const ppu = p.picture();
-  // with the PPU attached: the picture on screen is part of the state
+  const ppu = p.attachPPU();
+  // with the PPU attached: the frame on screen is part of the state
   if (saved) p.load(saved);
   play(app, at, audio, p, ppu, saved ? true : p.render?.ok === true, !!saved);
 }
