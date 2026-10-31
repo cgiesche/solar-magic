@@ -15,7 +15,7 @@ import { objectUserNames } from '../core/usernames.ts';
 import { loadPixiProject, customSpriteList, type CustomSprite } from '../core/pixi.ts';
 import { renderLevel, renderLayerTiles, type LevelImages, composite, animatedPixels, TileAnimation, type AnimStep } from '../core/render.ts';
 import { captureSprites, captureSpriteAt, type SpriteImage } from '../core/spritegfx.ts';
-import { spriteMemJob, usedSpriteMemory } from '../core/spritemem.ts';
+import { spriteMemJob, usedSpriteMemory, SpriteGroupResults } from '../core/spritemem.ts';
 import { DM16_EXT, levelGfx, levelExtGfx, customPalette, levelMusic, defaultGfx } from '../core/patches.ts';
 import { objectLength2D, fitExtension } from '../core/obj2d.ts';
 import { gfxSkipMask, gfxFilesHash } from '../core/gfxpages.ts';
@@ -278,6 +278,7 @@ export class App {
       soon: (step) => setTimeout(step, 0),
       setBusy: (key, label) => this.setBusy(key, label),
     });
+    this.spriteGroups = new SpriteGroupResults(this.results.fp);
     this.probes = new ProbeClient({
       results: this.results,
       cacheReady: this.cacheReady,
@@ -835,8 +836,10 @@ export class App {
 
   // ------------- sprite memory (see spritemem.ts) -------------
   // sprites drawn incompletely because their OAM range is too small, and a sprite memory value
-  // that shows all; checked in the background after every change
+  // that shows all; checked in the background after every change (only the groups of sprites it changed:
+  // the others' results are kept in spriteGroups)
   spriteMem: SpriteMemState | null = null;
+  private spriteGroups: SpriteGroupResults;
   private spriteMemBase: SpriteMemState | null = null; // the latest check no edit came after (autocorrection compares with it)
   private spriteMemTimer = 0;
   private spriteMemRun = 0;
@@ -869,8 +872,9 @@ export class App {
       this.spriteMemBase = cur;
       if (base) this.autoSpriteMem(base, cur);
     };
+    const groups = this.spriteGroups;
     const stored = this.learner.learn(key, function* (emu) {
-      const r = yield* spriteMemJob({ emu, level: lv.number, header, bgPointer: bg }, mem, candidates, sprites);
+      const r = yield* spriteMemJob({ emu, level: lv.number, header, bgPointer: bg, groups }, mem, candidates, sprites);
       return { lost: [...r.check.conflicts].map((u) => sprites.findIndex((q) => q.uid === u)), suggestion: r.suggestion };
     }, { input, lane: 'spritemem', replace: true, label: 'Checking sprite memory', picture: false, done });
     if (stored) done(stored);

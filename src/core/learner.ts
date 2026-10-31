@@ -266,8 +266,9 @@ export class ResultLearner {
 }
 
 // results kept in memory only (keep: 'memory'), the latest used; checked against the ROM like the result
-// cache's, a key keeping the results of its latest used INPUTS_PER_KEY inputs as there
-class MemoryResults {
+// cache's, a key keeping the results of its latest used INPUTS_PER_KEY inputs as there (also the sprite
+// memory check's group results, spritemem.ts)
+export class MemoryResults {
   private fp: RomFingerprint;
   private limit: number;
   private entries = new Map<string, { key: string; data: unknown; deps: RomDeps; gen: number }>(); // by key and input

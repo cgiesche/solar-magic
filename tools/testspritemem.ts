@@ -2,15 +2,18 @@
 // its sprite memory 00 loses tiles, a suggested value shows all of them; levels keep their
 // own value free of conflicts (no false alarms). With No More Sprite Tile Limits (the Romhack Races
 // baserom's) two line-guided platforms ($62) next to each other lose nothing: the next sprite's tiles
-// go where the first wrote only tile numbers of hidden tiles. Usage: node tools/testspritemem.ts [levels,hex]
+// go where the first wrote only tile numbers of hidden tiles. With the groups' results kept, moving one sprite
+// checks only the groups it was and is in, with the same conflicts and suggestion as a check of the whole level.
+// Usage: node tools/testspritemem.ts [levels,hex]
 import { readFileSync } from 'node:fs';
 import { unzipSync } from 'fflate';
 import { applyPatch } from '../src/core/patchapply.ts';
 import { loadAsar } from '../src/core/asar.ts';
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
-import { loadLevel, newUid } from '../src/core/level.ts';
-import { checkSpriteMemory, spriteWindows, suggestSpriteMemory, usedSpriteMemory } from '../src/core/spritemem.ts';
+import { loadLevel, newUid, type LevelSprite } from '../src/core/level.ts';
+import { checkSpriteMemory, spriteMemJob, spriteWindows, suggestSpriteMemory, usedSpriteMemory, SpriteGroupResults, type GroupResult } from '../src/core/spritemem.ts';
+import { RomFingerprint } from '../src/core/romdeps.ts';
 import { editorImage } from './fixture.ts';
 
 const EDITOR_IMAGE = await editorImage(); // the fixture as the editor opens it
@@ -54,6 +57,59 @@ console.log('used sprite memory', candidates.map((m) => m.toString(16)).join(' '
   const c = checkSpriteMemory({ emu: e, level: 0x105, header: lv.header, bgPointer: bgOf(lv.layer2Pointer) }, 0x08, wins);
   if (c.conflicts.size || c.live[0] !== 2) fail(`No More Sprite Tile Limits: two $62 with conflicts (${c.conflicts.size}) or not both alive (${c.live[0]})`);
   else console.log('No More Sprite Tile Limits: two $62, no conflicts');
+}
+
+// kept group results: level 00C with $E0 (conflicts), then one sprite moved
+{
+  const lv = loadLevel(rom, 0xc);
+  const ctx = { emu, level: 0xc, header: lv.header, bgPointer: bgOf(lv.layer2Pointer) };
+  let ran = 0;
+  class Counted extends SpriteGroupResults { set(key: string, r: GroupResult): void { ran++; super.set(key, r); } }
+  const groups = new Counted(new RomFingerprint(rom));
+  const before: LevelSprite[] = [...lv.sprites, { uid: newUid(), num: 0xe0, x: 8, y: 0x14, extra: 0 }];
+  const run = (sprites: LevelSprite[], kept: boolean) => {
+    const job = spriteMemJob({ ...ctx, groups: kept ? groups : undefined }, 0, candidates, sprites);
+    for (;;) { const r = job.next(); if (r.done) return r.value; }
+  };
+  const same = (a: ReturnType<typeof run>, b: ReturnType<typeof run>) => a.suggestion === b.suggestion && a.check.live.join() === b.check.live.join() &&
+    a.check.conflicts.size === b.check.conflicts.size && [...a.check.conflicts].every((u) => b.check.conflicts.has(u));
+  const first = run(before, true);
+  if (!first.check.conflicts.size || first.suggestion === null) fail(`00C with $E0: no conflicts (${first.check.conflicts.size}) or no suggestion`);
+  if (!same(first, run(before, false))) fail('00C: kept groups give another result than a check of the whole level');
+  // a sprite of the level moved next to $E0: only the groups it was and is in run
+  const moved = before.find((s) => s.num === 0x8f)!, to = { ...moved, x: 12 };
+  const after = before.map((s) => (s === moved ? to : s));
+  // a group as its sprites (uid and place); changed: groups of after that before didn't have
+  const groupsOf = (sprites: LevelSprite[]) => spriteWindows(sprites).map((w) => w.map((s) => `${s.uid}@${s.x},${s.y}`));
+  const old = groupsOf(before), oldKeys = new Set(old.map((g) => [...g].sort().join(' ')));
+  const changed = groupsOf(after).filter((g) => !oldKeys.has([...g].sort().join(' ')));
+  // each holds the moved sprite now or is what is left of a group it was in
+  const had = (g: string[], uid: number) => g.some((p) => p.startsWith(`${uid}@`));
+  if (changed.some((g) => !had(g, moved.uid) && !old.some((o) => had(o, moved.uid) && g.every((p) => o.includes(p))))) fail('00C: a changed group without the moved sprite');
+  ran = 0;
+  const c = checkSpriteMemory({ ...ctx, groups }, 0, spriteWindows(after));
+  if (ran !== changed.length) fail(`00C: moving one sprite checked ${ran} groups, ${changed.length} changed`);
+  console.log(`00C one sprite moved: ${ran} of ${c.live.length} groups checked`);
+  const t0 = Date.now(), again = run(after, true), ms = Date.now() - t0;
+  if (!same(again, run(after, false))) fail('00C: after the move kept groups give another result than a check of the whole level');
+  console.log(`00C after the move: ${again.check.conflicts.size} conflicts, suggestion ${again.suggestion?.toString(16)} (${ms}ms with kept groups)`);
+}
+
+// level 105 with its own sprite memory: a sprite moved, the kept groups give the result of a whole check
+{
+  const lv = loadLevel(rom, 0x105), m = lv.spriteHeader & 0x3f;
+  const ctx = { emu, level: 0x105, header: lv.header, bgPointer: bgOf(lv.layer2Pointer) };
+  const groups = new SpriteGroupResults(new RomFingerprint(rom));
+  const run = (sprites: LevelSprite[], kept: boolean) => {
+    const job = spriteMemJob({ ...ctx, groups: kept ? groups : undefined }, m, candidates, sprites);
+    for (;;) { const r = job.next(); if (r.done) return r.value; }
+  };
+  run(lv.sprites, true);
+  const after = lv.sprites.map((s, i) => (i === 5 ? { ...s, x: s.x + 9 } : s));
+  const t0 = Date.now(), kept = run(after, true), ms = Date.now() - t0, whole = run(after, false);
+  if (kept.suggestion !== whole.suggestion || kept.check.live.join() !== whole.check.live.join() || kept.check.conflicts.size !== whole.check.conflicts.size)
+    fail('105: kept groups give another result than a check of the whole level');
+  else console.log(`105 one sprite moved: same result as a whole check (${ms}ms with kept groups)`);
 }
 
 // levels with their own sprite memory
