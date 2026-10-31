@@ -16,7 +16,7 @@ import { loadAsar } from '../src/core/asar.ts';
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadLevel, newUid, type LevelSprite } from '../src/core/level.ts';
-import { checkSpriteMemory, spriteMemJob, spriteGroups, suggestSpriteMemory, usedSpriteMemory, SpriteGroupResults, type GroupResult, type SpriteMemContext } from '../src/core/spritemem.ts';
+import { checkSpriteMemory, runJob, spriteMemJob, spriteGroups, suggestSpriteMemory, usedSpriteMemory, SpriteGroupResults, type GroupResult, type SpriteGroup, type SpriteMemContext } from '../src/core/spritemem.ts';
 import { RomFingerprint, RomReads } from '../src/core/romdeps.ts';
 import { editorImage } from './fixture.ts';
 
@@ -44,10 +44,8 @@ class Counted extends SpriteGroupResults {
 }
 type Job = { check: { conflicts: Set<number>; live: number[] }; suggestion: number | null };
 // the check and suggestion of a level's sprites with sprite memory m (with the kept groups if given)
-const runJob = (ctx: Omit<SpriteMemContext, 'groupResults'>, groupResults: SpriteGroupResults | undefined, m: number, sprites: LevelSprite[]): Job => {
-  const job = spriteMemJob({ ...ctx, groupResults }, m, candidates, sprites);
-  for (;;) { const r = job.next(); if (r.done) return r.value; }
-};
+const checkAndSuggest = (ctx: Omit<SpriteMemContext, 'groupResults'>, groupResults: SpriteGroupResults | undefined, m: number, sprites: LevelSprite[]): Job =>
+  runJob(spriteMemJob({ ...ctx, groupResults }, m, candidates, sprites));
 const same = (a: Job, b: Job) => a.suggestion === b.suggestion && a.check.live.join() === b.check.live.join() &&
   a.check.conflicts.size === b.check.conflicts.size && [...a.check.conflicts].every((u) => b.check.conflicts.has(u));
 const candidates = usedSpriteMemory(rom);
@@ -57,7 +55,7 @@ console.log('used sprite memory', candidates.map((m) => m.toString(16)).join(' '
 {
   const lv = loadLevel(rom, 0xc);
   const ctx = { emu, level: 0xc, header: lv.header, bgPointer: bgOf(lv.layer2Pointer) };
-  const groups = [[{ uid: newUid(), num: 0xe0, x: 8, y: 0x14, extra: 0 }]];
+  const groups: SpriteGroup[] = [[{ uid: newUid(), num: 0xe0, x: 8, y: 0x14, extra: 0 }]];
   const m = lv.spriteHeader & 0x3f;
   const base = checkSpriteMemory(ctx, m, groups);
   if (!base.conflicts.size) fail(`00C: $E0 with ${m.toString(16)} shows no conflict`);
@@ -79,7 +77,7 @@ console.log('used sprite memory', candidates.map((m) => m.toString(16)).join(' '
   if (r.errors.length) fail(`No More Sprite Tile Limits not applied: ${r.errors.join(' ')}`);
   const e = new LevelEmulator(nmstl); e.boot();
   const lv = loadLevel(nmstl, 0x105);
-  const groups = [[{ uid: newUid(), num: 0x62, x: 3, y: 4, extra: 0 }, { uid: newUid(), num: 0x62, x: 14, y: 9, extra: 0 }]];
+  const groups: SpriteGroup[] = [[{ uid: newUid(), num: 0x62, x: 3, y: 4, extra: 0 }, { uid: newUid(), num: 0x62, x: 14, y: 9, extra: 0 }]];
   const c = checkSpriteMemory({ emu: e, level: 0x105, header: lv.header, bgPointer: bgOf(lv.layer2Pointer) }, 0x08, groups);
   if (c.conflicts.size || c.live[0] !== 2) fail(`No More Sprite Tile Limits: two $62 with conflicts (${c.conflicts.size}) or not both alive (${c.live[0]})`);
   else console.log('No More Sprite Tile Limits: two $62, no conflicts');
@@ -91,7 +89,7 @@ console.log('used sprite memory', candidates.map((m) => m.toString(16)).join(' '
   const ctx = { emu, level: 0xc, header: lv.header, bgPointer: bgOf(lv.layer2Pointer) };
   const groupResults = new Counted('00C');
   const before: LevelSprite[] = [...lv.sprites, { uid: newUid(), num: 0xe0, x: 8, y: 0x14, extra: 0 }];
-  const run = (sprites: LevelSprite[], kept: boolean) => runJob(ctx, kept ? groupResults : undefined, 0, sprites);
+  const run = (sprites: LevelSprite[], kept: boolean) => checkAndSuggest(ctx, kept ? groupResults : undefined, 0, sprites);
   const first = run(before, true);
   if (!first.check.conflicts.size || first.suggestion === null) fail(`00C with $E0: no conflicts (${first.check.conflicts.size}) or no suggestion`);
   if (!same(first, run(before, false))) fail('00C: kept groups give another result than a check of the whole level');
@@ -119,7 +117,7 @@ console.log('used sprite memory', candidates.map((m) => m.toString(16)).join(' '
   const lv = loadLevel(rom, 0x105), m = lv.spriteHeader & 0x3f;
   const ctx = { emu, level: 0x105, header: lv.header, bgPointer: bgOf(lv.layer2Pointer) };
   const groupResults = new Counted('105');
-  const run = (sprites: LevelSprite[], kept: boolean) => runJob(ctx, kept ? groupResults : undefined, m, sprites);
+  const run = (sprites: LevelSprite[], kept: boolean) => checkAndSuggest(ctx, kept ? groupResults : undefined, m, sprites);
   run(lv.sprites, true);
   const after = lv.sprites.map((s, i) => (i === 5 ? { ...s, x: s.x + 9 } : s));
   const t0 = Date.now(), kept = run(after, true), ms = Date.now() - t0, whole = run(after, false);
@@ -134,14 +132,14 @@ console.log('used sprite memory', candidates.map((m) => m.toString(16)).join(' '
   else console.log(`105 all sprites moved: ${groupResults.ran} groups played, same result as a whole check`);
   // a bound far below the level's groups: the check again plays none
   const small = new Counted('105 bound 2', 2);
-  runJob(ctx, small, m, lv.sprites);
+  checkAndSuggest(ctx, small, m, lv.sprites);
   const played = small.ran;
   small.ran = 0;
   // one sprite moved: only its groups are played (a replay of another fails), the others still kept
-  runJob(ctx, small, m, after);
+  checkAndSuggest(ctx, small, m, after);
   const moved = small.ran;
   small.ran = 0;
-  runJob(ctx, small, m, lv.sprites);
+  checkAndSuggest(ctx, small, m, lv.sprites);
   if (played <= 2 || small.ran) fail(`105 with a bound of 2: ${played} groups played, again ${small.ran}`);
   else console.log(`105 with a bound of 2: ${played} groups played, ${moved} after a move, none again`);
 }
@@ -152,7 +150,7 @@ console.log('used sprite memory', candidates.map((m) => m.toString(16)).join(' '
   const lv = loadLevel(rom, 0x1), m = lv.spriteHeader & 0x3f;
   const ctx = { emu, level: 0x1, header: lv.header, bgPointer: bgOf(lv.layer2Pointer) };
   const groupResults = new Counted('001');
-  const run = (sprites: LevelSprite[], kept: boolean) => runJob(ctx, kept ? groupResults : undefined, m, sprites);
+  const run = (sprites: LevelSprite[], kept: boolean) => checkAndSuggest(ctx, kept ? groupResults : undefined, m, sprites);
   run(lv.sprites, true);
   const e0 = { uid: newUid(), num: 0xe0, x: lv.sprites[0].x, y: lv.sprites[0].y + 2, extra: 0 };
   groupResults.ran = 0;

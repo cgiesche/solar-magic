@@ -66,11 +66,14 @@ type Cam = ReturnType<typeof testLevel>;
 // the test level's camera per sprite memory value, found once per job (again when the ROM changed meanwhile)
 type Cams = Map<number, { gen: number; cam: Cam; reads: RomReads }>;
 
+// A sprite group (CONTEXT.md): a largest set of the level's sprites that fit on one screen together, played as one
+export type SpriteGroup = LevelSprite[];
+
 // The level's sprite groups: the sprites that fit on one screen together (maximal sets, an isolated
 // sprite alone: sprites like $E0 spawn several slots by themselves)
-export function spriteGroups(sprites: LevelSprite[]): LevelSprite[][] {
+export function spriteGroups(sprites: LevelSprite[]): SpriteGroup[] {
   const byX = [...sprites].sort((a, b) => a.x - b.x || a.y - b.y);
-  const sets: LevelSprite[][] = [];
+  const sets: SpriteGroup[] = [];
   const seen = new Set<string>();
   for (let i = 0; i < byX.length; i++) {
     const col = byX.filter((s) => s.x >= byX[i].x && s.x < byX[i].x + SCREEN_W);
@@ -87,7 +90,7 @@ export function spriteGroups(sprites: LevelSprite[]): LevelSprite[][] {
 }
 
 // Runs one group with sprite memory m; null when the load fails
-function runGroup(ctx: SpriteMemContext, m: number, group: LevelSprite[], cam: { camX: number; camY: number; l1: Uint8Array; secondary: number[] }): { lost: Set<number>; live: number } | null {
+function runGroup(ctx: SpriteMemContext, m: number, group: SpriteGroup, cam: Cam): { lost: Set<number>; live: number } | null {
   const { emu, level, bgPointer } = ctx;
   // the group centered on the screen (sprites near an edge would be drawn partly off screen)
   const xs = group.map((s) => s.x), ys = group.map((s) => s.y);
@@ -125,13 +128,13 @@ type GroupCheck = { lost: Set<number>; live: number } | null;
 
 // The key of a group's result with sprite memory m: all it depends on (the suggestion tries more values per group
 // than a key keeps inputs for); the sprites by their places relative to each other, as runGroup plays them
-function groupKey(ctx: SpriteMemContext, m: number, group: LevelSprite[]): string {
+function groupKey(ctx: SpriteMemContext, m: number, group: SpriteGroup): string {
   const x0 = Math.min(...group.map((s) => s.x)), y0 = Math.min(...group.map((s) => s.y));
   return `smg2:${ctx.level}:${inputHash({ header: ctx.header, bg: ctx.bgPointer, m, sprites: group.map((s) => [s.num, s.x - x0, s.y - y0, s.extra, s.bytes ?? []]) })}`;
 }
 
 // A group's kept result with sprite memory m (the check takes over its dependencies); undefined if none is kept
-function keptGroup(ctx: SpriteMemContext, m: number, group: LevelSprite[], key = groupKey(ctx, m, group)): GroupCheck | undefined {
+function keptGroup(ctx: SpriteMemContext, m: number, group: SpriteGroup, key = groupKey(ctx, m, group)): GroupCheck | undefined {
   const known = ctx.groupResults?.get(key);
   if (!known) return undefined;
   ctx.emu.rom.reads?.addDeps(known.deps);
@@ -139,7 +142,7 @@ function keptGroup(ctx: SpriteMemContext, m: number, group: LevelSprite[], key =
 }
 
 // The check of one group with sprite memory m: its kept result, else run (and kept)
-function checkGroup(ctx: SpriteMemContext, m: number, group: LevelSprite[], cams: Cams): GroupCheck {
+function checkGroup(ctx: SpriteMemContext, m: number, group: SpriteGroup, cams: Cams): GroupCheck {
   const { emu, groupResults } = ctx;
   const key = groupResults ? groupKey(ctx, m, group) : '';
   const kept = groupResults ? keptGroup(ctx, m, group, key) : undefined;
@@ -157,16 +160,17 @@ function checkGroup(ctx: SpriteMemContext, m: number, group: LevelSprite[], cams
   return result;
 }
 
-export function checkSpriteMemory(ctx: SpriteMemContext, m: number, groups: LevelSprite[][]): SpriteMemCheck {
+export function checkSpriteMemory(ctx: SpriteMemContext, m: number, groups: SpriteGroup[]): SpriteMemCheck {
   return runJob(checkJob(ctx, m, groups));
 }
 
-function runJob<T>(job: Generator<void, T>): T {
+// Runs a job of the check to its end
+export function runJob<T>(job: Generator<void, T>): T {
   for (;;) { const r = job.next(); if (r.done) return r.value; }
 }
 
 // the check as steps (one group each) for running in the background
-function* checkJob(ctx: SpriteMemContext, m: number, groups: LevelSprite[][], cams: Cams = new Map()): Generator<void, SpriteMemCheck> {
+function* checkJob(ctx: SpriteMemContext, m: number, groups: SpriteGroup[], cams: Cams = new Map()): Generator<void, SpriteMemCheck> {
   const conflicts = new Set<number>(), live: number[] = [];
   for (const group of groups) {
     yield;
@@ -193,11 +197,11 @@ export function usedSpriteMemory(rom: Rom): number[] {
 // current one (base: its check), tried in the order given (most used first); null if none.
 // A value is first checked against the kept group results (one that fails rules it out without playing a group),
 // then the other groups are played, those with conflicts first, so a candidate usually fails fast.
-export function suggestSpriteMemory(ctx: SpriteMemContext, current: number, candidates: number[], groups: LevelSprite[][], base: SpriteMemCheck): number | null {
+export function suggestSpriteMemory(ctx: SpriteMemContext, current: number, candidates: number[], groups: SpriteGroup[], base: SpriteMemCheck): number | null {
   return runJob(suggestJob(ctx, current, candidates, groups, base));
 }
 
-function* suggestJob(ctx: SpriteMemContext, current: number, candidates: number[], groups: LevelSprite[][], base: SpriteMemCheck, cams: Cams = new Map()): Generator<void, number | null> {
+function* suggestJob(ctx: SpriteMemContext, current: number, candidates: number[], groups: SpriteGroup[], base: SpriteMemCheck, cams: Cams = new Map()): Generator<void, number | null> {
   const bad = groups.map((_, i) => i).filter((i) => groups[i].some((s) => base.conflicts.has(s.uid)));
   if (!bad.length) return null;
   const order = [...bad, ...groups.map((_, i) => i).filter((i) => !bad.includes(i))];
