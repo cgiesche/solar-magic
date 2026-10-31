@@ -7,10 +7,11 @@
 // so it runs in the background.
 // Each level's arrangements and places can be kept between runs (KeptSuggestions), with the level (as saved, or
 // as edited) as their input and the places with the ROM bytes their search read: a run takes apart only the
-// levels that changed.
+// levels that changed, and loads only those whose load read a changed byte (#201). A change none of the latest
+// run's bytes and levels takes part in keeps its suggestions (KeptSuggestions.holds).
 
 import type { Rom } from './rom.ts';
-import { loadLevel, serializeLayer1, serializeLayer2, type Level, type LevelObject } from './level.ts';
+import { loadLevel, serializeLayer1, serializeLayer2, serializeObjects, hasObjects, isL1Vertical, isSized, type Level, type LevelObject } from './level.ts';
 import type { LevelEmulator } from './levelemu.ts';
 import { isDm16, dm16Tiles } from './cdm16.ts';
 import type { Prefab } from './prefabs.ts';
@@ -19,7 +20,8 @@ import { dm16Prefab, arrangementKey } from './pastehint.ts';
 import { findPrefabPlaces, tileKey, type Layer, type LevelPlaces, type PrefabPlace } from './prefabplaces.ts';
 import { MemoryResults } from './learner.ts';
 import { inputHash } from './inputs.ts';
-import { INPUTS_PER_KEY, type RomFingerprint, type RomReads } from './romdeps.ts';
+import { INPUTS_PER_KEY, RomReads, type RomDeps, type RomFingerprint } from './romdeps.ts';
+import { objectLength2D } from './obj2d.ts';
 
 export interface PrefabSuggestion {
   key: string; // the arrangement (arrangementKey)
@@ -32,7 +34,7 @@ export interface PrefabSuggestion {
 
 export interface SuggestSource {
   levels: number[];
-  level?: (n: number) => Level; // default: as saved
+  open?: Level; // the open level as edited, taken instead of its saved data (the others as saved)
   emu: () => LevelEmulator; // the emulator to load a level on (what a place search read is tracked there)
   kept?: KeptSuggestions; // the levels' results of earlier runs
 }
@@ -42,24 +44,56 @@ export interface SuggestSource {
 interface Arrangements { list: [string, Prefab][]; tiles: Set<string> }
 
 const PLACES = 4096; // place searches kept (a level and an arrangement each), the latest used; a run keeps all it used, also more
+const CONTENTS = 0x200; // levels' contents as saved kept (every level's)
 
 // The results of single levels kept between runs. A level's arrangements are kept by the level's content (they
 // read no ROM byte), an arrangement's places in a level by the level's content and while the ROM bytes their
 // search read are unchanged (the tables, the emulated load where objects lie between those of a place). Both keep
-// a level's latest used INPUTS_PER_KEY contents, so undoing an edit finds them.
+// a level's latest used INPUTS_PER_KEY contents, so undoing an edit finds them. A level's content as saved is kept
+// while the ROM bytes its load read are unchanged (and object 2D's length, which the load takes from emulation): a
+// run loads only the levels a ROM change touched.
 export class KeptSuggestions {
   private fp: RomFingerprint;
   private arrangements = new Map<number, { input: string; a: Arrangements }[]>(); // a level's latest used inputs first
   private places: MemoryResults;
+  private contents: MemoryResults; // a level's content as saved, by object 2D's length
+  private run: { read: RomReads; levels: string; open: string; len2d: number } | null = null; // the running run's (what it read: its levels' loads, its places' searches)
+  private last: { deps: RomDeps; levels: string; open: string; len2d: number } | null = null; // the latest finished run's
 
   constructor(fp: RomFingerprint, limit = PLACES) {
     this.fp = fp;
     this.places = new MemoryResults(fp, limit);
+    this.contents = new MemoryResults(fp, CONTENTS);
   }
 
   // a run starts or is finished: the places a finished run used are all kept for the next one
-  startRun(): void { this.places.startRound(); }
-  endRun(): void { this.places.endRound(); }
+  startRun(rom: Rom, src: SuggestSource, len2d: number): void {
+    this.places.startRound();
+    this.contents.startRound();
+    this.run = { read: new RomReads(rom.data.length), levels: src.levels.join(), open: openKey(rom, src.open), len2d };
+  }
+  endRun(): void {
+    this.places.endRound();
+    this.contents.endRound();
+    const { read, ...run } = this.run!;
+    this.last = { deps: this.fp.deps(read), ...run };
+    this.run = null;
+  }
+
+  // the latest finished run's suggestions are those of a run on src now: the same levels and open level, and no
+  // ROM byte it read changed (a pixel of a graphics file keeps them; a level saved, a prefab's places, doesn't)
+  holds(rom: Rom, src: SuggestSource): boolean {
+    const l = this.last;
+    return !!l && l.levels === src.levels.join() && l.len2d === objectLength2D(rom) && l.open === openKey(rom, src.open) && this.fp.valid(l.deps);
+  }
+
+  savedContent(n: number, len2d: number): string | undefined {
+    return this.used(this.contents.entry<string>(`${n}`, `${len2d}`));
+  }
+  setSavedContent(n: number, len2d: number, input: string, reads: RomReads): void {
+    this.contents.set(`${n}`, input, this.fp.deps(reads), `${len2d}`);
+    this.run?.read.add(reads);
+  }
 
   arrangementsOf(n: number, input: string): Arrangements | undefined {
     const l = this.arrangements.get(n), i = l?.findIndex((e) => e.input === input) ?? -1;
@@ -73,16 +107,41 @@ export class KeptSuggestions {
     this.arrangements.set(n, l.slice(0, INPUTS_PER_KEY));
   }
 
-  placesOf(n: number, key: string, input: string): PrefabPlace[] | undefined { return this.places.get<PrefabPlace[]>(`${n}:${key}`, input); }
+  placesOf(n: number, key: string, input: string): PrefabPlace[] | undefined {
+    return this.used(this.places.entry<PrefabPlace[]>(`${n}:${key}`, input));
+  }
   setPlaces(n: number, key: string, input: string, places: PrefabPlace[], reads: RomReads): void {
     this.places.set(`${n}:${key}`, places, this.fp.deps(reads), input);
+    this.run?.read.add(reads);
+  }
+  // a kept result the running run uses: what it read counts for the run
+  private used<T>(e: { data: T; deps: RomDeps } | undefined): T | undefined {
+    if (e) this.run?.read.addDeps(e.deps);
+    return e?.data;
   }
 }
 
 // what a level's arrangements and places depend on besides the ROM: its objects as the emulated load gets them
-// (levelOverride's, the header and screen exits in them) and its secondary header
-const levelContent = (rom: Rom, lv: Level) =>
-  inputHash({ layer1: serializeLayer1(rom, lv), layer2: serializeLayer2(rom, lv), layer2Pointer: lv.layer2Pointer, secondary: lv.secondary });
+// (levelOverride's, the header and screen exits in them) and its secondary header; in a mode without layer 1 objects
+// the level data leaves them out, the arrangements and places don't (the open level as edited may have them)
+const levelContent = (rom: Rom, lv: Level) => inputHash({
+  layer1: serializeLayer1(rom, lv), layer2: serializeLayer2(rom, lv), layer2Pointer: lv.layer2Pointer, secondary: lv.secondary,
+  objects: hasObjects(lv.header.mode) ? null : serializeObjects(lv.objects, [], isL1Vertical(rom, lv.header.mode), undefined, isSized(lv.secondary)),
+});
+const openKey = (rom: Rom, open: Level | undefined) => (open ? `${open.number}:${levelContent(rom, open)}` : '');
+
+// level n as saved with its content and the ROM bytes loading it read; null: unreadable
+function loadSaved(rom: Rom, n: number): { lv: Level; input: string; reads: RomReads } | null {
+  const outer = rom.reads, reads = new RomReads(rom.data.length);
+  rom.reads = reads;
+  try {
+    const lv = loadLevel(rom, n);
+    return { lv, input: levelContent(rom, lv), reads };
+  } catch { return null; } finally {
+    rom.reads = outer;
+    outer?.add(reads);
+  }
+}
 
 function arrangements(lv: Level): Arrangements {
   const list: [string, Prefab][] = [];
@@ -121,17 +180,28 @@ export function dm16Groups(lv: Level): { layer: Layer; objects: number[] }[] {
 }
 
 export function* prefabSuggestions(rom: Rom, src: SuggestSource): Generator<void, PrefabSuggestion[]> {
-  const kept = src.kept;
-  kept?.startRun();
+  const kept = src.kept, len2d = kept ? objectLength2D(rom) : 0;
+  kept?.startRun(rom, src, len2d);
   // the arrangements of the groups, with how often they occur
-  const levels = new Map<number, { lv: Level; input: string; a: Arrangements }>();
+  const levels = new Map<number, { lv: Level | null; input: string; a: Arrangements }>(); // (lv: loaded when needed)
   const found = new Map<string, { prefab: Prefab; count: number }>();
   for (const n of src.levels) {
-    let lv: Level;
-    try { lv = src.level?.(n) ?? loadLevel(rom, n); } catch { continue; } // unreadable level
-    const input = kept ? levelContent(rom, lv) : '';
+    // the open level as edited; another as saved, loaded only when the bytes its kept content's load read changed
+    let lv = n === src.open?.number ? src.open : null, input = lv || !kept ? undefined : kept.savedContent(n, len2d);
+    if (lv) input = kept ? levelContent(rom, lv) : '';
+    else if (input === undefined) {
+      if (kept) {
+        const s = loadSaved(rom, n);
+        if (!s) continue; // unreadable level
+        ({ lv, input } = s);
+        kept.setSavedContent(n, len2d, input, s.reads);
+      } else {
+        try { lv = loadLevel(rom, n); } catch { continue; }
+        input = '';
+      }
+    }
     let a = kept?.arrangementsOf(n, input);
-    if (!a) { a = arrangements(lv); kept?.setArrangements(n, input, a); }
+    if (!a) { lv ??= loadLevel(rom, n); a = arrangements(lv); kept?.setArrangements(n, input, a); }
     levels.set(n, { lv, input, a });
     for (const [key, s] of a.list) {
       const f = found.get(key);
@@ -158,7 +228,7 @@ export function* prefabSuggestions(rom: Rom, src: SuggestSource): Generator<void
       if (!l.a.tiles.has(first)) continue;
       let ps = kept?.placesOf(n, key, l.input);
       if (!ps) {
-        const r = search(n, l.lv, prefab);
+        const r = search(n, (l.lv ??= loadLevel(rom, n)), prefab); // (loaded outside the search: its reads don't count)
         ps = r.result;
         kept?.setPlaces(n, key, l.input, ps, r.reads);
       }

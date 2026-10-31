@@ -4,10 +4,11 @@
 // only positive savings, the largest first. Computed in steps (a generator), so it runs in the background;
 // gone once the places are replaced by the prefab. Each level's arrangements and places are kept between runs
 // (KeptSuggestions, #185): a run takes apart only the levels that changed, with the same suggestions; a cold run keeps
-// all its places for the next one, also more than the bound (#200).
+// all its places for the next one, also more than the bound (#200). A run loads only the levels whose load read a
+// changed byte, and a change nothing of the latest run read keeps its suggestions (KeptSuggestions.holds, #201).
 import { Rom, snesToPc } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
-import { loadLevel, newUid, type LevelObject } from '../src/core/level.ts';
+import { loadLevel, newUid, hasObjects, L1_PTRS, type LevelObject } from '../src/core/level.ts';
 import { saveLevel } from '../src/core/save.ts';
 import { usedLevels } from '../src/core/levelusage.ts';
 import { DM16_EXT } from '../src/core/patches.ts';
@@ -15,7 +16,7 @@ import { installPrefabPatch, writePrefab } from '../src/core/prefabs.ts';
 import { prefabCost } from '../src/core/prefabcost.ts';
 import { applyPrefabPlaces } from '../src/core/prefabplaces.ts';
 import { dm16Groups, prefabSuggestions, suggestPrefabs, KeptSuggestions } from '../src/core/prefabsuggest.ts';
-import { RomFingerprint } from '../src/core/romdeps.ts';
+import { RomFingerprint, RomReads, updateBytePages } from '../src/core/romdeps.ts';
 import { gfxSkipMask } from '../src/core/gfxpages.ts';
 import { readGfx, writeGfx } from '../src/core/gfxfiles.ts';
 import type { Level } from '../src/core/level.ts';
@@ -94,7 +95,7 @@ check(list.every((s) => s.saved > 0 && s.count > 1), 'only positive savings of r
 {
   const open = loadLevel(rom, H2);
   open.objects = open.objects.filter((o) => o.ext !== DM16_EXT || o.tile! < 0x100 || o.tile! > 0x108);
-  const l3 = suggestPrefabs(rom, { levels: usedLevels(rom), level: (n) => (n === H2 ? open : loadLevel(rom, n)), emu: load });
+  const l3 = suggestPrefabs(rom, { levels: usedLevels(rom), open, emu: load });
   check(l3.find((s) => s.prefab.w === 3)?.count === 2, 'the open level as edited');
 }
 
@@ -103,24 +104,33 @@ check(list.every((s) => s.saved > 0 && s.count > 1), 'only positive savings of r
   class Spy extends KeptSuggestions {
     took: number[] = []; // levels whose arrangements were found
     searched: number[] = []; // levels searched for places
+    loaded: number[] = []; // levels loaded (as saved) for their content
     setArrangements(...a: Parameters<KeptSuggestions['setArrangements']>) { this.took.push(a[0]); super.setArrangements(...a); }
     setPlaces(...a: Parameters<KeptSuggestions['setPlaces']>) { this.searched.push(a[0]); super.setPlaces(...a); }
-    reset() { this.took = []; this.searched = []; }
+    setSavedContent(...a: Parameters<KeptSuggestions['setSavedContent']>) { this.loaded.push(a[0]); super.setSavedContent(...a); }
+    reset() { this.took = []; this.searched = []; this.loaded = []; }
   }
   const kept = new Spy(new RomFingerprint(rom));
-  const same = (level: ((n: number) => Level) | undefined, what: string) => {
-    kept.reset();
-    const k = suggestPrefabs(rom, { levels: usedLevels(rom), level, emu: load, kept });
-    const full = suggestPrefabs(rom, { levels: usedLevels(rom), level, emu: load });
+  // (the level data's pages recorded by byte, as the editor's emulator keeps them with every ROM change)
+  const run = (open?: Level) => { updateBytePages(rom); kept.reset(); return suggestPrefabs(rom, { levels: usedLevels(rom), open, emu: load, kept }); };
+  const same = (open: Level | undefined, what: string) => {
+    const k = run(open);
+    const full = suggestPrefabs(rom, { levels: usedLevels(rom), open, emu: load });
     check(full.length > 0 && JSON.stringify(k) === JSON.stringify(full), `${what}: the suggestions of a full run`);
   };
-  const only = (levels: number[], what: string) => {
+  const only = (levels: number[], what: string, loaded = levels) => {
     const took = [...new Set(kept.took)], searched = [...new Set(kept.searched)];
     check(JSON.stringify(took) === JSON.stringify(levels), `${what}: levels taken apart ${took.map((n) => n.toString(16))}`);
     check(searched.every((n) => levels.includes(n)), `${what}: levels searched ${searched.map((n) => n.toString(16))}`);
+    check(JSON.stringify(kept.loaded) === JSON.stringify(loaded), `${what}: levels loaded ${kept.loaded.map((n) => n.toString(16))}`);
   };
+  // the latest run's suggestions hold (kept at once) or not after a change
+  const holds = (open: Level | undefined, want: boolean, what: string) =>
+    check(kept.holds(rom, { levels: usedLevels(rom), open, emu: load }) === want, `${what}: the latest suggestions ${want ? 'hold' : 'don\'t hold'}`);
   same(undefined, 'first run');
   check(kept.took.length === usedLevels(rom).length && kept.searched.length > 0, 'first run: every level taken apart');
+  check(kept.loaded.length === usedLevels(rom).length, 'first run: every level loaded');
+  holds(undefined, true, 'nothing changed');
   same(undefined, 'again');
   only([], 'nothing changed');
   // a bound far below the places of a cold run: all are kept for the next run
@@ -136,28 +146,56 @@ check(list.every((s) => s.saved > 0 && s.count > 1), 'only positive savings of r
     const open = loadLevel(rom, edited);
     open.objects = open.objects.filter((o) => !(o.ext === DM16_EXT && o.tile === 0x104));
     small.reset();
-    suggestPrefabs(rom, { levels: usedLevels(rom), level: (n) => (n === edited ? open : loadLevel(rom, n)), emu: load, kept: small });
+    suggestPrefabs(rom, { levels: usedLevels(rom), open, emu: load, kept: small });
     check(small.searched.length > 0 && small.searched.every((n) => n === edited), `a level edited with a bound of 2: only it searched again (${[...new Set(small.searched)].map((n) => n.toString(16))})`);
   }
   // the open level as edited: a block's tile gone (as a place it is gone)
   const open = loadLevel(rom, H2);
+  holds(open, false, 'a level opened'); // (another open level: not compared with its saved data)
   open.objects = open.objects.filter((o) => !(o.ext === DM16_EXT && o.tile === 0x104));
-  same((n) => (n === H2 ? open : loadLevel(rom, n)), 'open level edited');
-  only([H2], 'open level edited');
+  same(open, 'open level edited');
+  only([H2], 'open level edited', []);
   check(kept.searched.includes(H2), 'open level edited: searched again');
+  // a sprite of the open level moved: its objects are the same
+  holds(open, true, 'a sprite moved');
+  open.sprites[0].x++;
+  holds(open, true, 'a sprite moved');
+  open.sprites[0].x--;
+  // in a mode without layer 1 objects the open level as edited still has them: an edit of them counts
+  {
+    const boss = structuredClone(open);
+    boss.header.mode = Array.from({ length: 0x20 }, (_, m) => m).find((m) => !hasObjects(m))!;
+    same(boss, 'a mode without layer 1 objects');
+    const b2 = structuredClone(boss);
+    b2.objects = b2.objects.filter((o) => !(o.ext === DM16_EXT && o.tile === 0x105));
+    holds(b2, false, 'a mode without layer 1 objects, an object deleted');
+    same(b2, 'a mode without layer 1 objects, an object deleted');
+    only([H2], 'a mode without layer 1 objects, an object deleted', []);
+  }
+  same(open, 'open level edited again');
   // a ROM edit no level's data and no search read: a pixel in a graphics file
   const f = readGfx(rom, 0x14);
   f.pix[3] ^= 1;
   writeGfx(rom, f);
+  holds(open, true, 'a graphics file edited');
   same(undefined, 'a graphics file edited');
   only([], 'a graphics file edited');
-  // another level saved: only it is taken apart again
+  // another level saved: only it is taken apart again, and loaded (no other level's data is read)
   const other = usedLevels(rom).find((n) => n !== H1 && n !== H2 && n !== 0x107)!;
   const lv = loadLevel(rom, other);
   lv.objects.push(dm(0x70, 4, 0x190));
   saveLevel(rom, lv);
+  holds(undefined, false, 'another level saved');
+  {
+    const reads = new RomReads(rom.data.length);
+    rom.reads = reads;
+    run();
+    rom.reads = null;
+    only([other], 'another level saved');
+    const h1 = snesToPc(rom.r24(L1_PTRS + H1 * 3)), size = loadLevel(rom, H1).l1Size;
+    check(!reads.touches([[h1 + 5, h1 + size]]), 'another level saved: an unchanged level\'s data not read');
+  }
   same(undefined, 'another level saved');
-  only([other], 'another level saved');
   // a place with another object between its objects: its search loads the level, and the bytes the load read count
   // (a color of the shared palettes: the test's emulator leaves out only graphics data)
   const h = loadLevel(rom, H1), b = block(0x70, 12);
@@ -166,7 +204,9 @@ check(list.every((s) => s.saved > 0 && s.count > 1), 'only positive savings of r
   same(undefined, 'a place with an object between');
   only([H1], 'a place with an object between');
   const c = snesToPc(SHARED_PALETTES) + 2;
+  holds(undefined, true, 'before a color edited');
   rom.writeAt(c, Uint8Array.of(rom.data[c] ^ 0x1f));
+  holds(undefined, false, 'a color edited');
   same(undefined, 'a color edited');
   check(!kept.took.length && JSON.stringify([...new Set(kept.searched)]) === JSON.stringify([H1]), `a color edited: only the search that loaded again (${kept.searched.map((n) => n.toString(16))})`);
   // a level with places saved: the suggestion follows

@@ -554,7 +554,24 @@ export function loadLevel(rom: Rom, n: number): Level {
   const l1 = rom.r24(L1_PTRS + n * 3);
   const l2 = rom.r24(L2_PTRS + n * 3);
   const spr = (spriteBank(rom, n) << 16) | rom.r16(SPR_PTRS + n * 2);
-  const lv = parseLevelData(rom, n, dataWindow(rom, l1), (l2 >> 16) !== 0xff ? dataWindow(rom, l2) : null, l2, dataWindow(rom, spr), readSecondaryHeader(rom, n));
+  // (the windows' reads count only as far as the level's data goes: saving the data behind it changes nothing read)
+  const reads = rom.reads;
+  rom.reads = null;
+  let w1: Uint8Array, w2: Uint8Array | null, ws: Uint8Array;
+  try { w1 = dataWindow(rom, l1); w2 = (l2 >> 16) !== 0xff ? dataWindow(rom, l2) : null; ws = dataWindow(rom, spr); } finally { rom.reads = reads; }
+  let lv: Level;
+  try { lv = parseLevelData(rom, n, w1, w2, l2, ws, readSecondaryHeader(rom, n)); } catch (e) {
+    // (unreadable: the whole windows count, a fix anywhere in them may make it readable)
+    reads?.read(snesToPc(l1), w1.length);
+    if (w2) reads?.read(snesToPc(l2), w2.length);
+    reads?.read(snesToPc(spr), ws.length);
+    throw e;
+  }
+  if (reads) {
+    reads.read(snesToPc(l1), lv.l1Size);
+    if (lv.l2Size) reads.read(snesToPc(l2), lv.l2Size);
+    reads.read(snesToPc(spr), lv.sprSize);
+  }
   lv.l1Addr = l1;
   lv.sprAddr = spr;
   return lv;

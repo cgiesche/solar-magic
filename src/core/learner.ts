@@ -296,7 +296,10 @@ export class MemoryResults {
   // the round is finished: its results are kept until the next one finishes
   endRound(): void { this.finished = this.used; }
 
-  get<T>(key: string, input: string | undefined): T | undefined {
+  get<T>(key: string, input: string | undefined): T | undefined { return this.entry<T>(key, input)?.data; }
+
+  // the result with the bytes it read, if it holds for the current ROM
+  entry<T>(key: string, input: string | undefined): { data: T; deps: RomDeps } | undefined {
     const id = `${key}#${input}`, e = this.entries.get(id);
     if (!e) return undefined;
     this.fp.sync();
@@ -305,7 +308,7 @@ export class MemoryResults {
       e.gen = this.fp.gen;
     }
     this.touch(id, e);
-    return e.data as T;
+    return { data: e.data as T, deps: e.deps };
   }
 
   set(key: string, data: unknown, deps: RomDeps, input: string | undefined): void {

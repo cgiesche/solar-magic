@@ -23,7 +23,7 @@ import { flagBytes, usedFlags, isDm16, dm16Tiles, type Dm16Cond } from '../core/
 import { PREFAB_EXT, PREFAB_MAX, TRANSPARENT, listPrefabs, writePrefab, type Prefab } from '../core/prefabs.ts';
 import { breakUpPrefab, replaced, setPrefabSources } from '../core/prefabsources.ts';
 import { PasteCounter, findPasted, arrangementKey, type PasteHint } from '../core/pastehint.ts';
-import { prefabSuggestions, KeptSuggestions, type PrefabSuggestion } from '../core/prefabsuggest.ts';
+import { prefabSuggestions, KeptSuggestions, type PrefabSuggestion, type SuggestSource } from '../core/prefabsuggest.ts';
 import { planPrefabPlaces, applyPrefabPlaces, deletePrefab, prefabObjectCount, replaceWithPrefab, type LevelPlaces, type LevelGroups, type PrefabGroup } from '../core/prefabplaces.ts';
 import type { Package } from '../core/pkgreg.ts';
 import { kvEntries, kvKeys, kvWrite, saveRom } from './storage.ts';
@@ -1704,20 +1704,15 @@ export class App {
   }
 
   // the suggestions anew a while after the last change, in slices of background work (later); the levels that
-  // didn't change keep their results (keptSuggestions)
+  // didn't change keep their results (keptSuggestions). A change they don't depend on keeps them current at once.
   private scheduleSuggestions(): void {
+    if (this.suggestionsCurrent && this.keptSuggestions.holds(this.rom, this.suggestSource())) return;
     clearTimeout(this.suggestTimer);
     this.suggestionsCurrent = false;
     const run = ++this.suggestRun;
     this.suggestTimer = window.setTimeout(() => {
       if (run !== this.suggestRun || this.closed) return;
-      const open = this.level.number;
-      const steps = prefabSuggestions(this.rom, {
-        levels: usedLevels(this.rom),
-        level: (n) => (n === open ? this.level : loadLevel(this.rom, n)),
-        emu: () => this.learner.emu(false),
-        kept: this.keptSuggestions,
-      });
+      const steps = prefabSuggestions(this.rom, this.suggestSource());
       const step = () => {
         if (run !== this.suggestRun) return;
         const until = performance.now() + 8;
@@ -1730,6 +1725,9 @@ export class App {
       };
       this.later('prefab-suggest', step);
     }, 1500);
+  }
+  private suggestSource(): SuggestSource {
+    return { levels: usedLevels(this.rom), open: this.level, emu: () => this.learner.emu(false), kept: this.keptSuggestions };
   }
 
   // levels whose saved data uses prefab n (plus the open level with its unsaved changes), with how many objects
