@@ -142,9 +142,9 @@ export class ProbeClient {
     this.play({ type: 'scan', id, key, level }, (r) => done(r as ScanResult | null), 'Level scan');
   }
 
-  // the scan asked for is not wanted any more
+  // the scan asked for is not wanted any more (the worker stops playing it)
   cancelScan(): void {
-    this.playWant.delete('scan');
+    if (this.playWant.delete('scan')) this.send?.({ type: 'cancel', task: 'scan' });
     this.d.setBusy('scan', null);
   }
 

@@ -2,6 +2,7 @@
 // jobs before prefetched ones, a new ROM drops the queue; object kinds, level scan and camera as
 // computed directly, in slices that let asked jobs go first. A ROM change sent as the ranges it wrote keeps
 // the queue and the tasks, restarting only a task that read a changed byte (overworld edits restart nothing).
+// A cancelled scan runs no further slice and goes on when asked for again.
 import { readFileSync } from 'node:fs';
 import { Rom, snesToPc } from '../src/core/rom.ts';
 import { BlockProber, blockKey, collisionKey, spriteKey, runsKey } from '../src/core/blockprobe.ts';
@@ -171,6 +172,51 @@ check(host.pending === 0, 'new ROM: tasks dropped');
   const sc = replies.find((d) => d.type === 'scan');
   check(sc?.type === 'scan' && sc.id === 5 && JSON.stringify(sc.result) === JSON.stringify(scanned), 'restarted scan as played directly, answering the latest request');
   check(replies.some((d) => d.type === 'kinds' && !d.failed) && replies.filter((d) => d.type === 'probe').length === 2, 'the kinds and the queued probes done');
+}
+
+// a cancelled scan runs no further slice; asked for again with the same key it goes on where it stood (also after a
+// change of a byte it read: started over then), another key starts anew
+{
+  const r = new Rom(file), h = new ProbeHost();
+  h.setRom(1, r.data.slice());
+  h.handle({ type: 'scan', id: 1, key: 'scan-c', level: scanLevel });
+  for (let i = 0; i < 4; i++) h.next();
+  const started = h.started;
+  h.handle({ type: 'cancel', task: 'scan' });
+  check(h.pending === 0 && h.next() === null, 'cancelled scan: no further slice');
+  h.ask([{ ts: 0, k: 0x130 }]);
+  check(h.next()?.type === 'probe' && h.pending === 0, 'cancelled scan: an asked job runs, the scan not after it');
+  h.handle({ type: 'scan', id: 2, key: 'scan-c', level: scanLevel });
+  check(h.started === started && h.pending === 1, 'the same scan asked for again: goes on, not restarted');
+  let sc: ProbeReply | null = null;
+  while (h.pending) { const d = h.next(); if (d?.type === 'scan') sc = d; }
+  check(sc?.type === 'scan' && sc.id === 2 && JSON.stringify(sc.result) === JSON.stringify(scanned), 'cancelled and asked again: as played directly, answering the latest request');
+
+  h.handle({ type: 'scan', id: 3, key: 'scan-d', level: scanLevel });
+  for (let i = 0; i < 4; i++) h.next();
+  h.handle({ type: 'cancel', task: 'scan' });
+  const o = emu.bootReads!.pages.indexOf(1) << 8, started2 = h.started;
+  r.writeAt(o, Uint8Array.of(r.data[o] ^ 1));
+  h.handle({ type: 'edit', gen: 2, size: r.size, edits: [[o, r.data.slice(o, o + 1)]] });
+  check(h.started === started2 + 1 && h.pending === 0, 'a byte the cancelled scan read: started over, still not run');
+  r.writeAt(o, Uint8Array.of(r.data[o] ^ 1)); // (changed back: the scan has read nothing since it started over)
+  h.handle({ type: 'edit', gen: 3, size: r.size, edits: [[o, r.data.slice(o, o + 1)]] });
+  h.handle({ type: 'scan', id: 4, key: 'scan-d', level: scanLevel });
+  check(h.started === started2 + 1, '… asked for again: goes on from its start, not restarted again');
+  sc = null;
+  while (h.pending) { const d = h.next(); if (d?.type === 'scan') sc = d; }
+  check(sc?.type === 'scan' && sc.id === 4 && JSON.stringify(sc.result) === JSON.stringify(scanned), '… as played directly');
+
+  h.handle({ type: 'scan', id: 5, key: 'scan-e', level: scanLevel });
+  for (let i = 0; i < 4; i++) h.next();
+  h.handle({ type: 'cancel', task: 'scan' });
+  h.handle({ type: 'scan', id: 6, key: 'scan-f', level: scanLevel });
+  check(h.started === started2 + 3, 'another scan asked for after a cancel: started anew');
+  h.handle({ type: 'scan', id: 7, key: 'scan-e', level: scanLevel });
+  check(h.started === started2 + 4, '… and the cancelled one asked for after it: started anew too');
+  sc = null;
+  while (h.pending) { const d = h.next(); if (d?.type === 'scan') sc = d; }
+  check(sc?.type === 'scan' && sc.id === 7 && JSON.stringify(sc.result) === JSON.stringify(scanned), '… as played directly');
 }
 
 // what blocks look like is no input of what they do: drawing a Map16 tile (FG of the tilesets' shared and own pages,

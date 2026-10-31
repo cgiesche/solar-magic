@@ -3,7 +3,8 @@
 // again, results come in after it, and one still valid is kept; after the first copy of the ROM it gets the
 // ranges a change wrote; a broken worker hands everything
 // wanted to the main thread; a failed probe is not asked again until the ROM changes; the
-// prefetch follows the tileset; object kinds are kept while the bytes they read are unchanged.
+// prefetch follows the tileset; object kinds are kept while the bytes they read are unchanged; a cancelled
+// scan is told to the worker.
 import { readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
 import { BlockProber } from '../src/core/blockprobe.ts';
@@ -13,6 +14,7 @@ import { ResultCache, RomFingerprint } from '../src/core/romdeps.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadLevel, L2_PTRS } from '../src/core/level.ts';
 import { ObjKindProbe, kindsKey, type ObjKinds } from '../src/core/objkinds.ts';
+import type { ScanLevel } from '../src/core/levelscan.ts';
 import { editorImage } from './fixture.ts';
 
 const EDITOR_IMAGE = await editorImage(); // the fixture as the editor opens it
@@ -228,6 +230,21 @@ function editor(worker: Worker | null) {
   check(kindsSent(w3) === 1, '… not asked again');
   touch(e3.rom);
   check(e3.client.kinds(1) === undefined, 'after a ROM change: asked again');
+}
+
+// a scan not wanted any more: the worker is told (only when one was asked for), and nothing is busy with it
+{
+  const w = new Worker(), e = editor(w);
+  const cancels = () => w.sent.filter((m) => m.type === 'cancel' && m.task === 'scan').length;
+  e.client.cancelScan();
+  check(cancels() === 0, 'no scan asked for: no cancel sent');
+  const level: ScanLevel = { number: 0x105, ov: {}, vertical: false, width: 256, height: 432 };
+  e.client.requestScan(1, 'scan-key', level, () => {});
+  await settle();
+  e.client.cancelScan();
+  check(cancels() === 1 && w.host.pending === 0 && !e.busy.has('scan'), 'scan cancelled: the worker told, it runs nothing');
+  e.client.cancelScan();
+  check(cancels() === 1, '… once');
 }
 
 console.log(bad ? `${bad} failures` : 'all ok');

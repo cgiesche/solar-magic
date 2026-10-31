@@ -4,7 +4,8 @@
 // editor stores them in its own ResultCache, where they are checked against the ROM like any other.
 // Longer tasks run here too, a slice at a time between the probes: the object kinds of a
 // tileset (objkinds.ts), the level scan (levelscan.ts) and the camera at Mario standing at a place
-// (camerareach.ts).
+// (camerareach.ts). A task the editor no longer wants is kept without running; asked for again with the same
+// result, it goes on where it stood.
 // After the first copy of the ROM the editor sends the ranges a change wrote: queued jobs stay, a running
 // task starts over only when it read a changed byte, results are checked against the ROM as always.
 
@@ -49,7 +50,7 @@ export type ProbeReply = ProbeDone | KindsDone | ScanDone | CameraDone;
 
 // what the editor sends: the ROM (the whole of it, or the bytes a change wrote at their offsets and the new
 // size), jobs asked for, the prefetch queue, the longer tasks (a new one replaces the running one of its
-// type, unless it asks for the same result)
+// type, unless it asks for the same result) and that the task of a type is not wanted any more
 export type ProbeMessage =
   | { type: 'rom'; gen: number; data: Uint8Array }
   | { type: 'edit'; gen: number; size: number; edits: [number, Uint8Array][] }
@@ -57,7 +58,8 @@ export type ProbeMessage =
   | { type: 'prefetch'; jobs: ProbeJob[] }
   | { type: 'kinds'; ts: number; level: KindLevel; layer2Pointer: number }
   | { type: 'scan'; id: number; key: string; level: ScanLevel }
-  | { type: 'camera'; id: number; key: string; level: ScanLevel; x: number; y: number };
+  | { type: 'camera'; id: number; key: string; level: ScanLevel; x: number; y: number }
+  | { type: 'cancel'; task: TaskType };
 
 export const jobId = (j: ProbeJob) => `${j.ts}:${j.k}`;
 // the result cache key of a task's result
@@ -86,6 +88,9 @@ export class ProbeHost {
   private asked = new Map<string, ProbeJob>(); // requested directly: first
   private prefetch = new Map<string, ProbeJob>();
   private tasks = new Map<TaskType, Task>(); // taking turns
+  // cancelled tasks, not run: taken up again when the same result is asked for before another task of their type
+  // (which would use their emulator)
+  private cancelled = new Map<TaskType, Task>();
   private emus = new Map<TaskType, LevelEmulator>();
   private ptrEmu: LevelEmulator | null = null; // learns the tilesets' Map16 pointers (pointers())
   started = 0; // tasks (re)started
@@ -96,6 +101,7 @@ export class ProbeHost {
     this.asked.clear();
     this.prefetch.clear();
     this.tasks.clear();
+    this.cancelled.clear();
     if (!this.rom || !this.prober) {
       this.rom = new Rom(new Uint8Array(0));
       this.rom.data = data;
@@ -148,7 +154,7 @@ export class ProbeHost {
       rom.writeAt(at, b);
       ranges.push([at, at + b.length]);
     }
-    for (const t of this.tasks.values()) if (t.reads()?.touches(ranges)) this.begin(t);
+    for (const t of [...this.tasks.values(), ...this.cancelled.values()]) if (t.reads()?.touches(ranges)) this.begin(t);
     this.prober.reset();
   }
 
@@ -157,15 +163,25 @@ export class ProbeHost {
     else if (m.type === 'edit') this.edit(m.gen, m.size, m.edits);
     else if (m.type === 'ask') this.ask(m.jobs);
     else if (m.type === 'prefetch') this.setPrefetch(m.jobs);
+    else if (m.type === 'cancel') this.cancel(m.task);
     else this.startTask(m);
   }
 
-  // a task asked for: replaces the running one of its type, unless that one finds the same result (it answers
-  // this request then)
+  // the task of that type is not wanted any more: it runs no further slice (kept, see startTask)
+  private cancel(type: TaskType): void {
+    const t = this.tasks.get(type);
+    if (!t) return;
+    this.tasks.delete(type);
+    this.cancelled.set(type, t);
+  }
+
+  // a task asked for: replaces the running one of its type, unless that one or the cancelled one finds the same result
+  // (it answers this request then, going on where it stood)
   private startTask(msg: TaskMessage): void {
     if (!this.prober) return;
-    const t = this.tasks.get(msg.type);
-    if (t && taskKey(t.msg) === taskKey(msg)) { t.msg = msg; return; }
+    const t = this.tasks.get(msg.type) ?? this.cancelled.get(msg.type);
+    this.cancelled.delete(msg.type);
+    if (t && taskKey(t.msg) === taskKey(msg)) { t.msg = msg; this.tasks.set(msg.type, t); return; }
     const task: Task = { msg, run: this.run(msg, () => task), reads: () => null };
     this.started++;
     this.tasks.delete(msg.type);
