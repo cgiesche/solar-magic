@@ -3,7 +3,11 @@
 //  - the current level number is kept in $7E010B (as Lunar Magic does)
 //  - GFX pointer table with 4096 entries (GFX 00-31 vanilla, 32-FFF = ExGFX, as Lunar Magic's ExGFX 80-FFF)
 //  - per-file format flag: 0 = LZ2 3bpp (vanilla), 1 = raw uncompressed 4bpp (DMA'd directly); raw files of
-//    other sizes (layer3gfx.ts): 2 = 0x800 bytes (2bpp layer 3 graphics), 3 = 0x2000 (a layer 3 tilemap)
+//    other sizes (layer3gfx.ts): 2 = 0x800 bytes (2bpp layer 3 graphics), 3 = 0x2000 (a layer 3 tilemap).
+//    One of the game's files may be raw 4bpp too (colors 8-F, as Lunar Magic's 4bpp GFX): its upload goes
+//    through the game's routine as far as the choice of the file ($00AA6B-$00AA7F, which loads GFX31 for
+//    GFX01 after the special world), then copies it as it is instead of the 3bpp conversion; the game's
+//    other code reading a file through $00BA28 gets it as 3bpp (the 4th bitplane dropped)
 //  - per-level GFX bypass: 8 slots (SP4..SP1, FG3, BG1, FG2, FG1), low bytes and a table of high bytes;
 //    0FF = tileset default. The game passes a file's low byte along (in $04-$07, Y); the high bytes of the
 //    slots being uploaded are kept in RAM (EXGFX_HI_RAM) and joined with it where the file is looked up
@@ -15,7 +19,7 @@ import { Rom } from './rom.ts';
 import { Asm } from './asm.ts';
 import { lz2Decompress } from './lz2.ts';
 import { ownerNote } from './patchreg.ts';
-import { LEVEL_HEIGHT_RAM, EXGFX_HI_RAM, CDM16_FLAGS } from './ram.ts';
+import { LEVEL_HEIGHT_RAM, EXGFX_HI_RAM, CDM16_FLAGS, GFX_RAW_RAM, GFX_BUFFER } from './ram.ts';
 
 export const SPR_BANK_HOOK = 0x05d8f5;
 
@@ -30,6 +34,9 @@ const HOOK_GFXPTR = 0x00ba2c;
 // the game's table of GFX00–31: low, high and bank bytes (replaced by the editor's file table)
 export const GAME_GFX_TABLE = [0x00b992, 0x00b9c4, 0x00b9f6];
 const HOOK_UPLOAD = 0x00aa6b;
+// the start of the upload's 3bpp conversion (REP #$20 : LDA #$0000)
+const HOOK_RAWUP = 0x00aa80;
+const RAWUP_ORIG = [0xc2, 0x20, 0xa9, 0x00, 0x00];
 const HOOK_SPRGFX = 0x00a9e1;
 const HOOK_FGGFX = 0x00aa22;
 const EXT_OBJ_TABLE = 0x0da10f;
@@ -45,9 +52,9 @@ const EDITED_MARK = 0x0ff0a0;
 const EDITED_LEN = 0x15; // up to and including $0FF0B4
 const EDITED_TEXT = 'Solar Magic';
 // the bytes the editor patch changes in the game (SNES address, length), protected from other patches (patchapply.ts)
-export const EDITOR_HOOKS: [number, number][] = [[SPR_BANK_HOOK, 4], [HOOK_GFXPTR, 15], [HOOK_UPLOAD, 4], [HOOK_SPRGFX, 15], [HOOK_FGGFX, 15], [DM16_SLOT, 3], [EDITED_MARK, EDITED_LEN]];
+export const EDITOR_HOOKS: [number, number][] = [[SPR_BANK_HOOK, 4], [HOOK_GFXPTR, 15], [HOOK_UPLOAD, 4], [HOOK_RAWUP, 5], [HOOK_SPRGFX, 15], [HOOK_FGGFX, 15], [DM16_SLOT, 3], [EDITED_MARK, EDITED_LEN]];
 const MAGIC = [0x53, 0x4d, 0x57, 0x45]; // "SMWE"
-const VERSION = 4; // 4: conditional Direct Map16
+const VERSION = 5; // 5: the game's files as raw 4bpp
 const HEADER = 32;
 // GFX file numbers: 000-FFF (Lunar Magic's range); 0FF in a slot is "none" (the default), so no file has it
 export const GFX_FILES = 0x1000;
@@ -56,6 +63,9 @@ export const GFX_NONE = 0xff;
 // the RAM of the high bytes: the 8 slots of the bypass as the game uploads them (sprite slots, then
 // FG/BG; uploaded again when one changes), then the one for the next upload by BG2/BG3 (EXT_UP_RET)
 const SLOT_HI = EXGFX_HI_RAM[0], UP_HI = EXGFX_HI_RAM[0] + 8;
+// the RAM of a raw file's upload: 1 during an upload, then the raw file to copy (its bank 0: none)
+const UP_MODE = GFX_RAW_RAM[0], RAW_PTR = GFX_RAW_RAM[0] + 1;
+const BUF = 0x7e0000 | GFX_BUFFER;
 // the game's calls of its upload routine $00AA6B (their return addresses): the sprite and the FG/BG
 // slots' loops (X = slot); BG2/BG3 call it with this return address (the RTL at $0084CF)
 const SPR_UP_RET = 0xaa0a, FG_UP_RET = 0xaa4b, EXT_UP_RET = 0x84ce;
@@ -114,17 +124,40 @@ function build(): Asm {
   a.long(0xbf, 'SprBankTbl'); // LDA.l tbl,x
   a.b(0x85, 0xd0, 0xc2, 0x20, 0xfa, 0x68, 0x28, 0x6b); // STA $D0 REP#$20 PLX PLA PLP RTL
 
-  // ---- GFX pointer lookup (Y = file) ----
+  // ---- GFX pointer lookup (JSL from $00BA2C, M=8, Y = file): an LZ2 file is decompressed by the game; a
+  // raw one is converted to 3bpp into the game's buffer (as the game would have it, for code reading it so
+  // and for GFX31 decompressed over half of it) and, during an upload, remembered (RawUp copies it) ----
   a.label('GfxPtr');
   a.b(0xda, 0xbb); // PHX TYX
   a.long(0xbf, 'GfxLo'); a.b(0x85, 0x8a);
   a.long(0xbf, 'GfxHi'); a.b(0x85, 0x8b);
   a.long(0xbf, 'GfxBk'); a.b(0x85, 0x8c);
-  a.b(0xfa, 0x6b); // PLX RTL
+  a.long(0xbf, 'GfxFlags'); a.br(0xd0, 'praw');
+  a.b(0x8f, ...long(RAW_PTR + 2)); // STA.l RawPtr bank (A = 0: the file is in the buffer)
+  a.b(0xfa, 0x6b); // PLX RTL (→ the game's decompression)
+  a.label('praw');
+  a.b(0xaf, ...long(UP_MODE)); a.br(0xf0, 'p3'); // LDA.l UpMode : BEQ
+  a.b(0xa5, 0x8a, 0x8f, ...long(RAW_PTR), 0xa5, 0x8b, 0x8f, ...long(RAW_PTR + 1), 0xa5, 0x8c, 0x8f, ...long(RAW_PTR + 2)); // RawPtr = $8A
+  a.label('p3'); // 128 tiles: the first 16 bytes as they are, then every other byte (bitplane 2)
+  a.b(0x08, 0xc2, 0x30, 0xa0, 0x00, 0x00, 0xa2, 0x00, 0x00); // PHP REP #$30 LDY #0 LDX #0
+  a.label('p3t');
+  a.b(0xa9, 0x08, 0x00, 0x48); // LDA #8 PHA
+  a.label('p3w');
+  a.b(0xb7, 0x8a, 0x9f, ...long(BUF), 0xc8, 0xc8, 0xe8, 0xe8); // LDA [$8A],y STA.l buf,x INY INY INX INX
+  a.b(0xa3, 0x01, 0x3a, 0x83, 0x01); a.br(0xd0, 'p3w'); // LDA 1,S DEC STA 1,S BNE
+  a.b(0xa9, 0x08, 0x00, 0x83, 0x01); // LDA #8 STA 1,S
+  a.label('p3b');
+  a.b(0xe2, 0x20, 0xb7, 0x8a, 0x9f, ...long(BUF), 0xc2, 0x20, 0xc8, 0xc8, 0xe8); // SEP #$20 LDA [$8A],y STA.l buf,x REP #$20 INY INY INX
+  a.b(0xa3, 0x01, 0x3a, 0x83, 0x01); a.br(0xd0, 'p3b');
+  a.b(0x68, 0xe0, 0x00, 0x0c); a.br(0xd0, 'p3t'); // PLA CPX #$0C00 BNE
+  a.b(0x28); // PLP
+  a.b(0xa9, BUF & 0xff, 0x85, 0x00, 0xa9, (BUF >> 8) & 0xff, 0x85, 0x01, 0xa9, BUF >> 16, 0x85, 0x02); // $00 = buf, as the game's
+  a.b(0xfa, 0x68, 0x68, 0x68); // PLX, drop the JSL return
+  a.b(0x5c, 0x4a, 0xba, 0x80); // JML $80BA4A (PLY PLB RTL)
 
   // ---- GFX upload (JSL from $00AA6B, M=8 X=8, Y = the file's low byte): its high byte by the caller;
-  // raw 4bpp files are DMA'd straight from ROM; compressed ones above FF are decompressed here and go on
-  // as file 80 (the game treats some of its own files, by number, differently: 01, 08, 1E) ----
+  // files up to FF through the game's $00BA28 (GfxPtr), those above FF here; they go on as file 80 (the game
+  // treats some of its own files, by number, differently: 01, 08, 1E); a raw file is copied by RawUp ----
   a.label('GfxUpload');
   a.b(0xda, 0x08, 0xc2, 0x20, 0xa3, 0x06); // PHX PHP REP #$20 LDA 6,S (the caller's JSR return)
   a.b(0xc9, ...long(SPR_UP_RET).slice(0, 2)); a.br(0xf0, 'uspr'); // CMP : BEQ
@@ -139,25 +172,38 @@ function build(): Asm {
   a.b(0xe2, 0x20, 0xaf, ...long(UP_HI)); // SEP #$20 LDA.l UpHi
   a.label('uhi');
   a.b(0xeb, 0x98, 0xc2, 0x10, 0xaa); // XBA TYA REP #$10 TAX (X = file, 16 bit)
-  a.long(0xbf, 'GfxFlags');
-  a.br(0xd0, 'raw');
+  a.b(0xa9, 0x01, 0x8f, ...long(UP_MODE), 0xa9, 0x00, 0x8f, ...long(RAW_PTR + 2)); // UpMode = 1, no raw file yet
   a.b(0xeb); a.br(0xd0, 'big'); // XBA : BNE (above FF)
   a.b(0x28, 0xfa); // PLP PLX
   a.b(0x5c, 0x28, 0xba, 0x80); // JML $80BA28
   a.label('big');
+  a.long(0xbf, 'GfxFlags'); a.br(0xd0, 'bigraw');
   a.long(0x22, 'GfxDecomp');
+  a.label('bigend');
   a.b(0x28, 0xfa, 0xa0, 0x80, 0x6b); // PLP PLX LDY #$80 RTL (→ $00AA6F)
+  a.label('bigraw');
+  a.long(0xbf, 'GfxLo'); a.b(0x8f, ...long(RAW_PTR));
+  a.long(0xbf, 'GfxHi'); a.b(0x8f, ...long(RAW_PTR + 1));
+  a.long(0xbf, 'GfxBk'); a.b(0x8f, ...long(RAW_PTR + 2));
+  a.br(0x80, 'bigend');
+
+  // ---- the upload's conversion (JSL from $00AA80, Y = file): a raw file DMA'd from ROM as it is, else
+  // the game's 3bpp conversion ----
+  a.label('RawUp');
+  a.b(0xe2, 0x20, 0xa9, 0x00, 0x8f, ...long(UP_MODE)); // SEP #$20 : UpMode = 0
+  a.b(0xaf, ...long(RAW_PTR + 2)); a.br(0xd0, 'raw'); // LDA.l RawPtr bank : BNE
+  a.b(0xc2, 0x20, 0xa9, 0x00, 0x00, 0x6b); // REP #$20 LDA #$0000 RTL (the replaced code)
   a.label('raw');
-  a.long(0xbf, 'GfxLo'); a.b(0x8f, 0x02, 0x43, 0x00);
-  a.long(0xbf, 'GfxHi'); a.b(0x8f, 0x03, 0x43, 0x00);
-  a.long(0xbf, 'GfxBk'); a.b(0x8f, 0x04, 0x43, 0x00);
+  a.b(0x8f, 0x04, 0x43, 0x00);
+  a.b(0xaf, ...long(RAW_PTR), 0x8f, 0x02, 0x43, 0x00);
+  a.b(0xaf, ...long(RAW_PTR + 1), 0x8f, 0x03, 0x43, 0x00);
   a.b(0xa9, 0x01, 0x8f, 0x00, 0x43, 0x00); // DMA mode 1
   a.b(0xa9, 0x18, 0x8f, 0x01, 0x43, 0x00); // → $2118
   a.b(0xa9, 0x00, 0x8f, 0x05, 0x43, 0x00);
   a.b(0xa9, 0x10, 0x8f, 0x06, 0x43, 0x00); // $1000 bytes
   a.b(0xa9, 0x01, 0x8f, 0x0b, 0x42, 0x00); // start
-  a.b(0x28, 0xfa, 0x68, 0x68, 0x68); // PLP PLX, drop JSL return
-  a.b(0x5c, 0xd1, 0xa9, 0x80); // JML $80A9D1 (an RTS in bank 0)
+  a.b(0x68, 0x68, 0x68); // drop the JSL return
+  a.b(0x5c, 0xd1, 0xa9, 0x80); // JML $80A9D1 (an RTS in bank 0: the upload's)
 
   // ---- decompression of any file (JSL, M=8 X=16, X = file): through the game's $00BA28 from where
   // it has the file's pointer; X and Y's high byte are lost ----
@@ -317,8 +363,8 @@ export function installEditorPatch(rom: Rom): PatchInfo {
   const existing = editorPatch(rom);
   if (existing) return existing;
   if (rom.r8(SPR_BANK_HOOK) !== 0xa9 || rom.r8(SPR_BANK_HOOK + 1) !== 0x07) throw new Error(`Unexpected code at $05D8F5${ownerNote(rom, SPR_BANK_HOOK, 4)} – patch not possible (ROM already modified otherwise?)`);
-  if (rom.r8(HOOK_GFXPTR) !== 0xb9 || rom.r8(HOOK_UPLOAD) !== 0x22 || rom.r8(HOOK_SPRGFX) !== 0xad || rom.r8(HOOK_FGGFX) !== 0xad) {
-    const note = ownerNote(rom, HOOK_GFXPTR, 15) || ownerNote(rom, HOOK_UPLOAD, 4) || ownerNote(rom, HOOK_SPRGFX, 15) || ownerNote(rom, HOOK_FGGFX, 15);
+  if (rom.r8(HOOK_GFXPTR) !== 0xb9 || rom.r8(HOOK_UPLOAD) !== 0x22 || rom.r8(HOOK_SPRGFX) !== 0xad || rom.r8(HOOK_FGGFX) !== 0xad || RAWUP_ORIG.some((v, i) => rom.r8(HOOK_RAWUP + i) !== v)) {
+    const note = ownerNote(rom, HOOK_GFXPTR, 15) || ownerNote(rom, HOOK_UPLOAD, 4) || ownerNote(rom, HOOK_RAWUP, 5) || ownerNote(rom, HOOK_SPRGFX, 15) || ownerNote(rom, HOOK_FGGFX, 15);
     throw new Error(`Unexpected code in the graphics loading routine${note} – patch not possible`);
   }
   if (rom.r24(DM16_SLOT) !== 0) throw new Error(`Extended object $${DM16_EXT.toString(16).padStart(2, '0')} is already in use${ownerNote(rom, DM16_SLOT, 3)} – patch not possible`);
@@ -348,6 +394,7 @@ export function installEditorPatch(rom: Rom): PatchInfo {
   hook(rom, SPR_BANK_HOOK, L('SprBank'), 4);
   hook(rom, HOOK_GFXPTR, L('GfxPtr'), 15, 0x00ba3b);
   hook(rom, HOOK_UPLOAD, L('GfxUpload'), 4);
+  hook(rom, HOOK_RAWUP, L('RawUp'), 5);
   hook(rom, HOOK_SPRGFX, L('SprGfxSel'), 15, 0x00a9f0);
   hook(rom, HOOK_FGGFX, L('FgGfxSel'), 15, 0x00aa31);
   rom.w24(DM16_SLOT, L('DM16'));

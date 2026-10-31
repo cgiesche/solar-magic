@@ -67,6 +67,7 @@ export const RAM = {
 
   // level
   translevel: 0x13bf,
+  tileset: 0x1931, // the FG/BG tileset (its graphics files)
   onOff: 0x14af,
   blueP: 0x14ad, silverP: 0x14ae, // the P-switches' timers (running while not 0)
   starTimer: 0x1490, // Mario has a star while not 0
@@ -143,6 +144,8 @@ export const PAD = { b: 0x8000, y: 0x4000, select: 0x2000, start: 0x1000, up: 0x
 export const MAP_BASE = 0xc800;
 export const MAP_SIZE = 0x3800;
 export const MAP_HI = 0x10000; // from a low byte to its high byte
+// the buffer the game decompresses a graphics file to ($00BA28)
+export const GFX_BUFFER = 0xad00;
 // the level data address (low byte) of layer 1 tile (tx, ty) in a horizontal level of the game's own height (27 rows)
 export const mapAddr = (tx: number, ty: number) => MAP_BASE + (tx >> 4) * 0x1b0 + ty * 16 + (tx & 15);
 // the level heights patch's RAM (levelheight.ts, SNES address, bytes): a screen's bytes in the level data
@@ -164,6 +167,9 @@ export const EXIT_FLAGS_RAM: [number, number] = [0x7f3679, 1];
 export const EXGFX_HI_RAM: [number, number] = [0x7f367a, 9];
 // the sprite scroll fix's (scrollfix.ts): the camera's position the frame before, X and Y (16-bit each)
 export const SCROLL_FIX_RAM: [number, number] = [0x7f3683, 4];
+// the editor patch's too: 1 while a graphics file is uploaded to VRAM, then the address of the raw file the
+// upload copies as it is (bank 0: none)
+export const GFX_RAW_RAM: [number, number] = [0x7f3687, 4];
 // Lunar Magic's conditional Direct Map16 flags (cdm16.ts), which community code sets: 128 bits, low to high
 export const CDM16_FLAGS: [number, number] = [0x7fc060, 16];
 // Lunar Magic's ExAnimation RAM (extrigger.ts), which community code sets and reads: the manual frames (16 bytes),

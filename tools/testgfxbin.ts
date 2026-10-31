@@ -10,6 +10,7 @@ import { savePackage, emptyParts } from '../src/core/pkgreg.ts';
 import { gfxBinData, storeGfxBin, gfxBinName, parseGfxBinName, binFiles, planGfxBins, applyGfxBins, exportAllGfx } from '../src/core/gfxbin.ts';
 import { gfxUserName as ownName, setGfxName, gfxLabel } from '../src/core/gfxnames.ts';
 import { zipSync, unzipSync } from 'fflate';
+import { readFileSync } from 'node:fs';
 import { editorImage } from './fixture.ts';
 
 let bad = 0;
@@ -59,6 +60,14 @@ const pattern = (n: number, seed: number) => { const d = new Uint8Array(n); for 
   d[17] = 0xff;
   storeGfxBin(rom, 0x14, d);
   check(same(gfxBinData(rom, 0x14), d) && gfxEntry(rom, 0x14)!.raw, 'a 4bpp file with colors 8–15 into a 3bpp number: stored as 4bpp, nothing lost');
+  // Lunar Magic's 4bpp GFX (the Romhack Races baserom's): GFX17 in colors 8–F only where the game's upload
+  // puts its tiles, GFX31 (64 tiles) likewise for GFX01 after the special world
+  const lm = unzipSync(new Uint8Array(readFileSync('test/fixtures/rhr-baserom-5.15.zip')));
+  const clean = fresh();
+  storeGfxBin(rom, 0x17, lm['workspace/Graphics/GFX17.bin']);
+  check(!gfxEntry(rom, 0x17)!.raw && same(gfxBinData(rom, 0x17), gfxBinData(clean, 0x17)), 'Lunar Magic\'s GFX17.bin: the 3bpp file, the clean game\'s');
+  storeGfxBin(rom, 0x31, lm['workspace/Graphics/GFX31.bin']);
+  check(!gfxEntry(rom, 0x31)!.raw && gfxBinData(rom, 0x31)!.length === 0x800, 'its GFX31.bin: 3bpp, the 4th bitplane dropped');
   // a 2F-sized file (400) into an empty number has no known format
   let refused = false;
   try { storeGfxBin(rom, 0x90, new Uint8Array(0x400)); } catch { refused = true; }

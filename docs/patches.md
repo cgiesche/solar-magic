@@ -950,7 +950,7 @@ not compatible with the respective feature.
 
 | Address | Feature |
 |---|---|
-| `$05D8F5`, `$00BA2C`, `$00AA6B`, `$00A9E1`, `$00AA22`, ext. object table `$0DA11E` (entry `$05`, empty in the original and in Lunar Magic) | Editor patch (SMWE); reads Lunar Magic's conditional Direct Map16 flags, RAM `$7FC060–$7FC06F` (set by other code) |
+| `$05D8F5`, `$00BA2C`, `$00AA6B`, `$00AA80`, `$00A9E1`, `$00AA22`, ext. object table `$0DA11E` (entry `$05`, empty in the original and in Lunar Magic) | Editor patch (SMWE); RAM `$7F367A–$7F368A`; reads Lunar Magic's conditional Direct Map16 flags, RAM `$7FC060–$7FC06F` (set by other code) |
 | `$00922F` | Level palettes (SMWP) |
 | `$058060` | BG tilemaps (SMWB) |
 | `$058DE6` | BG Map16 extension, BG tiles 200–FFF (SMWH) |

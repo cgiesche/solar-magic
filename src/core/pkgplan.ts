@@ -343,7 +343,7 @@ function planGlobalGfx(rom: Rom, files: Map<string, Uint8Array>, found: string[]
     first.set(num, file);
     const clean = cleanGlobalGfx(rom, num);
     if (!clean) { notes.push(`${base(file)}: the clean game's ${name} is not known in this ROM – not taken over`); continue; }
-    const data = fromBin(clean, files.get(file)!);
+    const data = fromBin(rom, num, clean, files.get(file)!);
     if (!data) { notes.push(`${base(file)}: ${files.get(file)!.length} bytes – not a form of ${name} (${clean.length} bytes unpacked), not taken over`); continue; }
     if (same(data, clean)) unchanged.push(num);
     else out.push({ file, num, data });

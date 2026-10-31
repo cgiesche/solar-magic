@@ -1,16 +1,18 @@
 // GFX/ExGFX files as .bin, as Lunar Magic extracts and inserts them (LM help: file_extract_gfx.htm,
-// file_extract_exgfx.htm, file_insert_exgfx.htm): unpacked, 3bpp files as 4bpp (the 4th bitplane empty),
+// file_extract_exgfx.htm, file_insert_exgfx.htm, info_gfx_format.htm): unpacked, 3bpp files as 4bpp,
 // named GFX##.bin / ExGFX#.bin (no leading zero below 100) with a descriptive name after it (LM changes,
 // 3.70), in the folders Graphics/ and ExGraphics/. A file goes back in the format its number has, so
-// export → import → export is byte-identical and the game's files stay 3bpp. Several files (or a .zip)
-// are planned first – new, replaced, unchanged, skipped – then applied together.
+// export → import → export is byte-identical and the game's files stay 3bpp – unless the .bin uses colors
+// 8–F, which Lunar Magic's 4bpp GFX allow (from4bpp). Several files (or a .zip) are planned first – new,
+// replaced, unchanged, skipped – then applied together.
 
 import { unzipSync, zipSync } from 'fflate';
 import { Rom } from './rom.ts';
 import { decodeTile, encodeTile } from './gfx.ts';
-import { gfxHex, gfxNumberProblem, VANILLA_GFX, GFX_FILES } from './patches.ts';
+import { gfxHex, gfxNumberProblem, VANILLA_GFX, GFX_FILES, RAW_GFX_SIZES } from './patches.ts';
 import { gfxBytes, gfxStorage, lz2Storage, storeGfxFile, checkGfxNumber, defaultBpp, type GfxStorage } from './gfxfiles.ts';
 import { gfxLabels, setGfxNames } from './gfxnames.ts';
+import { uploadsAs } from './gfxupload.ts';
 
 // the tiles of `data` from one bpp to another (to 3bpp: the 4th bitplane dropped)
 export function convertBpp(data: Uint8Array, from: number, to: number): Uint8Array {
@@ -25,6 +27,16 @@ function only3bpp(d: Uint8Array): boolean {
   return true;
 }
 
+// a 3bpp file's .bin (its 4bpp form) as the file: 3bpp when the 4th bitplane is empty or, for one of the
+// game's files, what the game's upload sets (gfxupload.ts: Lunar Magic's 4bpp GFX have these tiles in
+// colors 8–F, as the game puts them); else 4bpp, colors 8–F – only a file of 128 tiles, a smaller one is
+// taken as 3bpp (the 4th bitplane dropped)
+export function from4bpp(rom: Rom, num: number, bin: Uint8Array): Uint8Array {
+  const three = convertBpp(bin, 4, 3), full = bin.length === RAW_GFX_SIZES[0];
+  if (!full || only3bpp(bin)) return three;
+  return num < VANILLA_GFX && uploadsAs(rom, num, three, bin) ? three : bin;
+}
+
 // the file as .bin (null: no file under the number)
 export function gfxBinData(rom: Rom, num: number): Uint8Array | null {
   const f = gfxBytes(rom, num);
@@ -33,13 +45,14 @@ export function gfxBinData(rom: Rom, num: number): Uint8Array | null {
 }
 
 // how a .bin goes under `num`: in the format the number's file has (an LZ2 file of the same size; a 3bpp
-// file's 4bpp form back to 3bpp when its 4th bitplane is empty), else by the data (gfxStorage)
+// file's 4bpp form back to 3bpp unless it uses colors 8–F, from4bpp), else by the data (gfxStorage)
 function binStorage(rom: Rom, num: number, data: Uint8Array): GfxStorage {
   const f = gfxBytes(rom, num);
   if (f && !f.raw) {
     if (data.length === f.data.length) return lz2Storage(data, 'LZ2, as before');
-    if (defaultBpp(num, f.data.length) === 3 && data.length === (f.data.length / 3) * 4 && only3bpp(data)) {
-      return lz2Storage(convertBpp(data, 4, 3), '3bpp, as before');
+    if (defaultBpp(num, f.data.length) === 3 && data.length === (f.data.length / 3) * 4) {
+      const d = from4bpp(rom, num, data);
+      if (d.length < data.length) return lz2Storage(d, '3bpp, as before');
     }
   }
   return gfxStorage(data);

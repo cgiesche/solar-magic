@@ -11,8 +11,8 @@ import { snesToPc, type Rom } from './rom.ts';
 import { lz2Compress, lz2Decompress } from './lz2.ts';
 import { cleanGameBytes, known, NotKnown } from './cleangame.ts';
 import { gfxEntry, setGfxEntry, gfxHex, VANILLA_GFX, GAME_GFX_TABLE } from './patches.ts';
-import { gfxBytes, lz2Storage, storeGfxFile } from './gfxfiles.ts';
-import { convertBpp, parseGfxBinName } from './gfxbin.ts';
+import { gfxBytes, gfxStorage, lz2Storage, storeGfxFile } from './gfxfiles.ts';
+import { from4bpp, parseGfxBinName } from './gfxbin.ts';
 import { hashBytes } from './patchreg.ts';
 
 export const GLOBAL_GFX = 0x34; // GFX00–33
@@ -60,11 +60,11 @@ function cleanStream(rom: Rom, addr: number): { data: Uint8Array; stored: Uint8A
   return r === 'not known' ? null : { data: r.data, stored: rom.data.slice(pc, pc + r.size) };
 }
 
-// a .bin in the format of the clean game's file (Lunar Magic extracts 3bpp files as 4bpp: back to 3bpp,
-// the 4th bitplane dropped as Lunar Magic does when it inserts one); null when it fits neither
-export function fromBin(clean: Uint8Array, bin: Uint8Array): Uint8Array | null {
+// a .bin as the file `n`: in the format of the clean game's file (`clean`), or 4bpp when the .bin uses
+// colors 8–F (Lunar Magic extracts 3bpp files as 4bpp; gfxbin.ts from4bpp); null when it fits neither
+export function fromBin(rom: Rom, n: number, clean: Uint8Array, bin: Uint8Array): Uint8Array | null {
   if (bin.length === clean.length) return bin;
-  if (bin.length * 3 === clean.length * 4) return convertBpp(bin, 4, 3);
+  if (bin.length * 3 === clean.length * 4) return from4bpp(rom, n, bin);
   return null;
 }
 
@@ -85,14 +85,14 @@ export function globalGfxData(rom: Rom, n: number): Uint8Array | null {
 // a hash of the file as the ROM has it (a package's record tells by it whether it changed since)
 export const globalGfxHash = (rom: Rom, n: number) => hashBytes([globalGfxData(rom, n) ?? new Uint8Array()]);
 
-// puts the file (unpacked, in the clean game's format) into the ROM; the clean game's file points at the
-// game's own bytes again. Throws when the clean game's file is not known.
+// puts the file (unpacked, in the clean game's format or 4bpp, fromBin) into the ROM; the clean game's
+// file points at the game's own bytes again. Throws when the clean game's file is not known.
 export function setGlobalGfx(rom: Rom, n: number, data: Uint8Array): void {
   const at = cleanAddr(rom, n), clean = at === null ? null : cleanStream(rom, at);
   if (at === null || !clean) throw new Error(`${globalGfxName(n)}: the clean game's file is not known in this ROM`);
   const isClean = same(data, clean.data);
   if (n < VANILLA_GFX) {
-    if (!isClean) { storeGfxFile(rom, n, lz2Storage(data, 'LZ2')); return; }
+    if (!isClean) { storeGfxFile(rom, n, data.length === clean.data.length ? lz2Storage(data, 'LZ2') : gfxStorage(data)); return; }
     const e = gfxEntry(rom, n);
     if (e) rom.freeAt(e.addr);
     setGfxEntry(rom, n, at, false);
