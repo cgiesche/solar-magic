@@ -7,17 +7,18 @@
 // The level tables (pointers, secondary headers: $05E000-$05FFFF) hold a few bytes of every level
 // in each page, the ROM header page ($00FF00) the checksum next to the vectors; there single bytes
 // are recorded, so saving a level (another one, or fixing the checksum) doesn't drop anything.
-// The same for the editor patch's tables (GFX file pointers, per-level GFX and sprite bank): a new
-// ExGFX file or another level's GFX setting only drops what read that entry. The same for the
-// pages holding ExAnimation data and the overworld's data (painting the overworld only drops what
-// read the tiles painted, a level's initial flags what read them). The same for the pages holding
-// level data (layer 1, layer 2 objects, sprites): the boot loads the title screen's level, which every
-// result counts, and its data shares pages with other levels' – saving one of those only drops what
-// read its bytes.
+// The same for the editor patch's tables (per-level GFX and sprite bank; the GFX file pointers aren't
+// recorded at all, see gfxSkipMask): another level's GFX setting only drops what read that entry, and
+// for the levels' own palettes' pointers: giving a level its own palette only drops what loaded that
+// level. The same for the pages holding ExAnimation data and the overworld's data (painting the
+// overworld only drops what read the tiles painted, a level's initial flags what read them). The same
+// for the pages holding level data (layer 1, layer 2 objects, sprites): the boot loads the title
+// screen's level, which every result counts, and its data shares pages with other levels' – saving one
+// of those only drops what read its bytes.
 
 import type { Rom } from './rom.ts';
 import { snesToPc, type RomRange } from './rom.ts';
-import { editorPatch, GFX_FILES } from './patches.ts';
+import { editorPatch, customPalettePatch, GFX_FILES } from './patches.ts';
 import { exanimDataRanges } from './exanim.ts';
 import { overworldDataRanges } from './overworld.ts';
 import { levelDataRanges } from './level.ts';
@@ -37,9 +38,10 @@ BYTE_PAGES.fill(1, 0x2e000 >> PAGE_SHIFT, 0x30000 >> PAGE_SHIFT);
 BYTE_PAGES[0x7f00 >> PAGE_SHIFT] = 1;
 const FIXED_BYTE_PAGES = BYTE_PAGES.slice();
 
-// adds the byte pages of this ROM's editor patch tables, its free space blocks' edges, ExAnimation data, overworld
-// data and level data (call when the ROM may have changed); the ExAnimation data isn't recorded at all (see
-// gfxSkipMask), byte pages keep the rest of their pages from counting it (an animation list next to code that is run)
+// adds the byte pages of this ROM's editor patch tables, its level palettes' pointers, its free space blocks' edges,
+// ExAnimation data, overworld data and level data (call when the ROM may have changed); the GFX file pointers and the
+// ExAnimation data aren't recorded at all (see gfxSkipMask), byte pages keep the rest of their pages from counting
+// them (an animation list next to code that is run)
 export function updateBytePages(rom: Rom): void {
   BYTE_PAGES.set(FIXED_BYTE_PAGES);
   const reads = rom.reads;
@@ -59,6 +61,8 @@ export function updateBytePages(rom: Rom): void {
     mark(p.gfxLo, GFX_FILES); mark(p.gfxHi, GFX_FILES); mark(p.gfxBank, GFX_FILES); mark(p.gfxFlags, GFX_FILES);
     mark(p.levelGfx, 0x200 * 8); mark(p.levelGfxHi, 0x200 * 8);
     mark(p.sprBank, 0x200);
+    const pal = customPalettePatch(rom);
+    if (pal) mark(pal.table, 0x200 * 3);
   } finally { rom.reads = reads; }
 }
 

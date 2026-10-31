@@ -1,7 +1,9 @@
 // GFX file data in the ROM. The graphics only reach VRAM, so results found out by emulation (block
 // behaviour, object kinds) don't depend on them: reads of these bytes aren't recorded (see
-// LevelEmulator.skipMask) and drawing in a GFX file keeps the results. Sprite images do depend on
-// the sprite graphics: their key holds a hash of the sprite files instead.
+// LevelEmulator.skipMask) and drawing in a GFX file keeps the results. Nor are reads of the files' pointer
+// entries: they only lead to the data (an LZ2 file that grows when drawn in is moved to free space, which
+// changes its entry). Sprite images do depend on the sprite graphics: their key holds a hash of the sprite
+// files' content instead.
 // The same for the ExAnimation data (pointer table, settings, lists, alternative files): editing an
 // animation keeps the block probes (whose test level may be the level being animated).
 // For what blocks do (block probes, probehost.ts) also the Map16 tiles' 8x8 tile words and the colors: they only
@@ -9,7 +11,7 @@
 // editor's other results: object thumbnails show them.
 
 import { snesToPc, type Rom } from './rom.ts';
-import { gfxEntry, GFX_FILES, GFX_NONE, customPalettePatch, PALETTE_SIZE } from './patches.ts';
+import { editorPatch, gfxEntry, GFX_FILES, GFX_NONE, customPalettePatch, PALETTE_SIZE } from './patches.ts';
 import { map16Ext, EXT_FIRST, EXT_TILES } from './map16ext.ts';
 import { bgMap16Ext, bgTileAddr, BG_EXT_FIRST, BG_EXT_TILES } from './bgmap16.ts';
 import { SHARED_PALETTES, SHARED_PAL_SIZE } from './sharedpal.ts';
@@ -25,8 +27,9 @@ function fileRange(rom: Rom, i: number): [number, number] | null {
   try { return [pc, Math.min(rom.data.length, pc + (e.raw ? e.size : lz2Decompress(rom.data, pc).size))]; } catch { return null; }
 }
 
-// 1 for every byte of GFX file data and ExAnimation data (and the checksum). Often built lazily inside a tracked computation: reading the
-// pointer tables here isn't a dependency of its result (else a new ExGFX file would drop them all)
+// 1 for every byte of GFX file data, the files' pointer entries and ExAnimation data (and the checksum). Often built lazily
+// inside a tracked computation: reading the pointer tables here isn't a dependency of its result (else a new ExGFX file
+// would drop them all)
 export function gfxSkipMask(rom: Rom): Uint8Array {
   const reads = rom.reads;
   rom.reads = null;
@@ -36,6 +39,8 @@ export function gfxSkipMask(rom: Rom): Uint8Array {
       const r = fileRange(rom, i);
       if (r) mask.fill(1, r[0], r[1]);
     }
+    const p = editorPatch(rom);
+    if (p) for (const t of [p.gfxLo, p.gfxHi, p.gfxBank, p.gfxFlags]) { const o = snesToPc(t); mask.fill(1, o, o + GFX_FILES); }
     for (const [a, b] of exanimDataRanges(rom)) mask.fill(1, a, b);
     mask.fill(1, 0x7fdc, 0x7fe0); // checksum: rewritten whenever the ROM is stored, some sprites read it as a table
     return mask;

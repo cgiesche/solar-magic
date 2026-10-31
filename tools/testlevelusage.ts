@@ -6,7 +6,7 @@ import { Rom, snesToPc } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadLevel, newUid, spriteId, L1_PTRS } from '../src/core/level.ts';
 import { saveLevel } from '../src/core/save.ts';
-import { DM16_EXT, setGfxEntry, levelGfx, setLevelGfx } from '../src/core/patches.ts';
+import { DM16_EXT, setGfxEntry, levelGfx, setLevelGfx, editorPatch, setCustomPalette } from '../src/core/patches.ts';
 import { PREFAB_EXT, writePrefab, TRANSPARENT } from '../src/core/prefabs.ts';
 import { setActsLike, setExtTileWords, extTileWords } from '../src/core/map16ext.ts';
 import { ResultCache, RomFingerprint, RomReads, PAGE_SHIFT, type RomDeps } from '../src/core/romdeps.ts';
@@ -16,7 +16,10 @@ import { map16Source } from '../src/core/render.ts';
 import {
   LevelUses, usedLevels, fgTileUsers, bgTileUsers, tileLinks, unusedFgTiles, gfxUsage, unusedExGfx, spriteUsage, slotMove,
 } from '../src/core/levelusage.ts';
-import type { GfxSlot } from '../src/core/gfxslots.ts';
+import { levelSlots, layerSlots, type GfxSlot } from '../src/core/gfxslots.ts';
+import { gfxSkipMask, gfxFilesHash } from '../src/core/gfxpages.ts';
+import { readGfx, writeGfx } from '../src/core/gfxfiles.ts';
+import { thumbsInput } from '../src/ui/thumbs.ts';
 import { editorImage } from './fixture.ts';
 
 let fail = 0;
@@ -24,7 +27,9 @@ const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL
 
 const rom = new Rom(await editorImage());
 const results = new ResultCache(new RomFingerprint(rom));
-const emu = new LevelEmulator(rom); emu.boot();
+const emu = new LevelEmulator(rom);
+emu.skipMask = () => gfxSkipMask(rom); // as the editor: graphics data isn't among the bytes read
+emu.boot();
 const uses = new LevelUses(rom, results);
 const blank = map16Source(rom, emu.load(0x105)).fg(0x025);
 // free space for an unrelated change later: a page of its own, which no level load reads (its RATS tag may share one)
@@ -172,6 +177,62 @@ check(uses.missing(levels).length === 0, 'every level known after scanning');
     check(base() !== state, `a change of the title screen level ${title[0].toString(16)}'s data makes the boot snapshot stale`);
     check(uses.missing(levels).length === levels.length, 'then every level is scanned again');
   }
+}
+
+// pointer tables recorded no coarser than what they point to: a GFX file moved to free space (an LZ2 file grown
+// when drawn in) or another level's own palette keeps the boot's results, the probes, the sprite images and the
+// other levels' uses; results that show graphics follow the files' content through their input
+{
+  for (const n of uses.missing(levels)) uses.scan(n, emu);
+  const lv105 = loadLevel(rom, 0x105), bg = lv105.layer2Pointer >> 16 === 0xff ? lv105.layer2Pointer : 0xffd900;
+  const images = results.fp.deps(emu.tracked(() => captureSprites(emu, 0x105, lv105.header, lv105.spriteHeader, bg, [0x04, 0x05, 0x0d])).reads);
+  const host = new ProbeHost(), probes = new Map<string, RomDeps>();
+  const jobs: ProbeJob[] = [{ ts: 0, k: 0x130 }, { ts: 0, k: 0x12b }, { ts: 0, k: PROBE_SPRITE | 0x04 }];
+  host.setRom(rom.gen, rom.data.slice());
+  host.ask(jobs);
+  while (host.pending) { const d = host.next(); if (d?.type === 'probe') for (const [k, e] of d.put) probes.set(k, e.deps); }
+  emu.load(0x105);
+  const boot = results.fp.deps(emu.bootReads!);
+  const kept = (what: string, dropped: number[]) => {
+    const m = uses.missing(levels);
+    check(m.join() === dropped.join(), `${what}: ${dropped.length ? `only level ${dropped.map((x) => x.toString(16))}` : 'no level'} is scanned again (${m.map((x) => x.toString(16))})`);
+    check(results.fp.valid(boot), `${what}: what the boot read is unchanged`);
+    check(results.fp.valid(images), `${what}: the sprite images are kept`);
+    check(jobs.every((j) => probes.has(jobKey(j))) && [...probes.values()].every((d) => results.fp.valid(d)), `${what}: the block and sprite probes are kept`);
+    for (const n of m) uses.scan(n, emu);
+  };
+  // the GFX files the title screen loads (a render, which shows them, depends on their pointer entries)
+  const p = editorPatch(rom)!, title = emu.recordAll(() => null).reads;
+  const slots = levelSlots(rom, 0x105, lv105.header), files = layerSlots(slots).map((s) => s.file), sprites = slots.filter((s) => s.sprite).map((s) => s.file);
+  for (const f of [0x14, 0x00]) {
+    const gfx = `GFX${f.toString(16).padStart(2, '0')}`;
+    check(title.bytes.has(snesToPc(p.gfxLo + f)), `the boot loads ${gfx}`);
+    const thumbs = JSON.stringify(thumbsInput(rom, lv105)), spriteHash = gfxFilesHash(rom, sprites), own = gfxFilesHash(rom, [f]);
+    const g = readGfx(rom, f), a = g.addr;
+    // (pixels drawn until the LZ2 data no longer fits its place)
+    for (let i = 0; i < g.pix.length && g.addr === a; i += 37) { g.pix[i] = (g.pix[i] + 5) & 7; writeGfx(rom, g); }
+    const name = `${gfx} drawn in and moved`;
+    check(g.addr !== a, `${name} to free space`);
+    kept(name, []);
+    check(gfxFilesHash(rom, [f]) !== own, `${name}: what shows it is learned again`);
+    check((JSON.stringify(thumbsInput(rom, lv105)) === thumbs) === !files.includes(f), `${name}: level 105's object thumbnails ${files.includes(f) ? 'are' : 'aren\'t'} learned again (its files: ${files.map((x) => x.toString(16))})`);
+    check((gfxFilesHash(rom, sprites) === spriteHash) === !sprites.includes(f), `${name}: level 105's sprite images ${sprites.includes(f) ? 'are' : 'aren\'t'} learned again (its sprite files: ${sprites.map((x) => x.toString(16))})`);
+  }
+  // a GFX file moved but unchanged: nothing is learned again
+  {
+    const e = readGfx(rom, 0x14), hash = gfxFilesHash(rom, [0x14]);
+    setGfxEntry(rom, 0x14, rom.allocWrite(rom.bytes(e.addr, e.packed)), false);
+    check(gfxFilesHash(rom, [0x14]) === hash, 'GFX14 moved unchanged: what shows it is kept');
+    kept('GFX14 moved unchanged', []);
+  }
+  // the levels' own palettes: their pointer table is recorded by byte
+  const colors = new Uint8Array(0x200).fill(3);
+  setCustomPalette(rom, 0x106, colors);
+  kept('own palette of level 106 set', [0x106]);
+  setCustomPalette(rom, 0x106, colors.map((c) => c ^ 1));
+  kept('own palette of level 106 changed', [0x106]);
+  setCustomPalette(rom, 0x106, null);
+  kept('own palette of level 106 removed', [0x106]);
 }
 
 // GFX files: the slots of each level (defaults of the tileset included), ExGFX inserted but in no slot
