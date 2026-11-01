@@ -18,7 +18,7 @@ import { listPatches, addPatch, removeEntry, backupBytes, patchedHash, hashBytes
 
 import { hasTranslevelTable, hasLevelFlagsPatch, hasDestroyPatch, TRANSLEVEL_HOOKS, LEVEL_FLAGS_HOOKS, DESTROY_HOOKS } from './overworld.ts';
 import { hasEventPatch, EVENT_HOOKS } from './owevents.ts';
-import { hasOwTeleportPatch, TELEPORT_HOOKS } from './owteleport.ts';
+import { hasOwTeleportPatch, TELEPORT_HOOKS, OW_TELEPORT_PATCH_NAME } from './owteleport.ts';
 import { levelNamePatch, LEVEL_NAME_HOOKS } from './levelnames.ts';
 import { OW_OPTIONS, owOptionValue } from './owoptions.ts';
 
@@ -43,7 +43,7 @@ export function builtins(): Builtin[] {
     { name: 'Initial level flags', installed: hasLevelFlagsPatch, hooks: LEVEL_FLAGS_HOOKS },
     { name: 'Event steps (Lunar Magic format)', installed: hasEventPatch, hooks: EVENT_HOOKS },
     { name: 'Destroyed level tiles (Lunar Magic format)', installed: hasDestroyPatch, hooks: DESTROY_HOOKS },
-    { name: 'Overworld teleports (Lunar Magic format)', installed: hasOwTeleportPatch, hooks: TELEPORT_HOOKS },
+    { name: OW_TELEPORT_PATCH_NAME, installed: hasOwTeleportPatch, hooks: TELEPORT_HOOKS },
     { name: 'Level names (Lunar Magic format)', installed: (r) => !!levelNamePatch(r), hooks: LEVEL_NAME_HOOKS },
     ...OW_OPTIONS.map((o): Builtin => ({
       name: `the overworld option “${o.label}”`, option: true,

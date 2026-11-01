@@ -31,7 +31,7 @@ import {
 import { RAM, getS16 } from './ram.ts';
 import type { Job } from './jobrunner.ts';
 
-const DIVIDERS = 0x04e359; // 0x79 words: the first step of each event, the end
+const DIVIDERS = 0x04e359, DIVIDER_WORDS = 0x79; // words: the first step of each event, the end
 const STEP_OPS = [0x04e49f, 0x04e709, 0x04ee5a], STEP_OPS2 = [0x04e4a4, 0x04e710, 0x04ee3f];
 const TILE_BANK = 0x04e4b0, TILE_LO = 0x04e4bb, TILE_LONG = 0x04eaf5;
 const PROP_LO = 0x04dd45, PROP_BANK = 0x04dd4a;
@@ -45,7 +45,7 @@ const GAME_REVEAL = 0x04d85d, GAME_REVEAL_VRAM = 0x04d93d, GAME_REVEALS = 0x70;
 // the game's code and tables the patch changes (SNES address, length), Lunar Magic's hijack: the hooks, the event
 // counts, the dividers and the operands pointing to the moved tables; a third-party patch may not change it (patchapply.ts)
 export const EVENT_HOOKS: [number, number][] = [
-  [SILENT_HOOK, 5], [LOAD_HOOK, 4], [LOAD_COUNT, 1], [TL_COUNT, 1], [DIVIDERS, 0x79 * 2],
+  [SILENT_HOOK, 5], [LOAD_HOOK, 4], [LOAD_COUNT, 1], [TL_COUNT, 1], [DIVIDERS, DIVIDER_WORDS * 2],
   ...[...STEP_OPS, ...STEP_OPS2, TILE_LONG, ...REVEAL_OPS, REVEAL_VRAM_OP].map((a): [number, number] => [a, 3]),
   [TILE_BANK, 1], [TILE_LO, 2], [PROP_LO, 2], [PROP_BANK, 1], ...AREA6_OPS.map((a): [number, number] => [a, 2]),
 ];

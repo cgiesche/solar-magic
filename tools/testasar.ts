@@ -5,7 +5,7 @@ import { Rom, snesToPc } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadAsar } from '../src/core/asar.ts';
 import { applyPatch, uninstallPatch, reapplyPatch, type PatchSource } from '../src/core/patchapply.ts';
-import { listPatches } from '../src/core/patchreg.ts';
+import { listPatches, removeEntry } from '../src/core/patchreg.ts';
 import { installEditorPatch } from '../src/core/patches.ts';
 import { inspectUpload } from '../src/core/packages.ts';
 import { installMap16Ext } from '../src/core/map16ext.ts';
@@ -87,6 +87,13 @@ check(diff === 0 && listPatches(rom).length === 0 && rom.scanRats().length === 0
     const rom = new Rom(image.slice());
     const r = applyPatch(rom, src('Hits', `lorom\norg $${at.toString(16)}\ndb $EA\n`));
     check(!r.ok && r.errors.some((e) => e.includes(name)) && rom.data.every((v, i) => v === image[i]), `hook of ${name} rejected: ${r.errors[0]}`);
+  }
+  // the teleport patch is also in the registry (applyPatch): without its entry the built-in still refuses
+  {
+    const rom = new Rom(image.slice());
+    removeEntry(rom, listPatches(rom).find((p) => p.kind === 'owteleport')!.id);
+    const r = applyPatch(rom, src('Hits', 'lorom\norg $048509\ndb $EA\n'));
+    check(!r.ok && r.errors.some((e) => e.startsWith('Conflict with Overworld teleports') && e.includes('hook')), `hook of Overworld teleports rejected without its registry entry: ${r.errors[0]}`);
   }
   const option = (set: boolean) => {
     const rom = new Rom(image.slice());
