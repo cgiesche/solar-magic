@@ -4,7 +4,8 @@
 
 import type { Rom } from './rom.ts';
 import { loadLevel, readSecondaryEntrance, mainTranslevel, exitToMidway, exitIndex, oldStyleSecondary, storedExits, SEC_ENT, SEC_LEVEL_HI, EXIT_NEW, OW_EXIT, type ScreenExit } from './level.ts';
-import { levelName, readTranslevels, translevelToLevel } from './overworld.ts';
+import { readTranslevels, translevelToLevel } from './overworld.ts';
+import { levelName } from './levelnames.ts';
 import { hex } from './names.ts';
 
 export interface ExitRef {

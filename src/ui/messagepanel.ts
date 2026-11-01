@@ -6,7 +6,8 @@
 import type { App } from './app.ts';
 import { h, checkbox, toast } from './dom.ts';
 import { hex, hex3 } from '../core/names.ts';
-import { levelName, translevelToLevel } from '../core/overworld.ts';
+import { translevelToLevel } from '../core/overworld.ts';
+import { levelName } from '../core/levelnames.ts';
 import { spriteId, type LevelSprite } from '../core/level.ts';
 import { probeable, spriteMessage } from '../core/blockprobe.ts';
 import { TileCache, blit8 } from '../core/render.ts';

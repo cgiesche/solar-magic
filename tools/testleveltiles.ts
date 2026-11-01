@@ -8,10 +8,11 @@ import { LevelEmulator } from '../src/core/levelemu.ts';
 import { RomEditSession } from '../src/core/romedit.ts';
 import {
   OverworldEmulator, readL1, writeL1, isLevelTile, readTranslevels, writeTranslevels, hasTranslevelTable,
-  placeTile, freeTranslevel, sharedTranslevels, translevelUse, resetTranslevel, levelName, nameCode, setNameCode, baseEvent,
+  placeTile, freeTranslevel, sharedTranslevels, translevelUse, resetTranslevel, baseEvent,
   exitDirections, translevelToLevel, BASE_EVENTS, NO_EVENT, OW_EVENTS,
 } from '../src/core/overworld.ts';
 import { hasMessages } from '../src/core/messages.ts';
+import { levelName, levelNameTiles, setLevelNameTiles, hasLevelName, encodeName } from '../src/core/levelnames.ts';
 import { L1_PTRS } from '../src/core/level.ts';
 import { GM, RAM } from '../src/core/ram.ts';
 import { cleanImage, editorImage } from './fixture.ts';
@@ -129,25 +130,25 @@ function enter(emu: LevelEmulator, i: number): number | null {
   const use = (tl: number) => translevelUse(rom, tl);
   const free = [0x5d, 0x5e, 0x5f];
   check(free.every((tl) => !cleanTl.includes(tl) && use(tl) === 0), 'the clean game\'s free translevels (139–13B) bring nothing along');
-  check(levelName(rom, 0x5d) === '(no name)' && nameCode(rom, 0x5d) === 0xffff, 'name $FFFF: "(no name)"');
+  check(levelName(rom, 0x5d) === '(no name)' && !hasLevelName(rom, 0x5d), 'the game\'s name $FFFF (RAM shown as letters): no name');
   check(tiles.every((i) => use(cleanTl[i]) > 0), 'every entered level has settings or data of its own');
   // painted over: its level keeps its settings, a new tile prefers one that brings nothing
   const l1 = readL1(rom), t = readTranslevels(rom), del = tiles[0], tl = t[del];
-  const name = nameCode(rom, tl), ev = baseEvent(rom, tl);
+  const name = levelNameTiles(rom, tl).join(), ev = baseEvent(rom, tl);
   placeTile(l1, t, del, 0x00, 0, use);
   s.edit('Paint layer 1', () => { writeL1(rom, l1); writeTranslevels(rom, t); });
-  check(nameCode(rom, tl) === name && baseEvent(rom, tl) === ev && use(tl) === 2, `painted over: level ${hx(translevelToLevel(tl))} keeps its name and base event`);
+  check(levelNameTiles(rom, tl).join() === name && baseEvent(rom, tl) === ev && use(tl) === 2, `painted over: level ${hx(translevelToLevel(tl))} keeps its name and base event`);
   check(freeTranslevel(t) === tl && freeTranslevel(t, use) === 0x5d, `a new tile gets 5D, not the lower ${hx(tl)} with a level`);
   // the order: nothing, then settings only, then a level of its own
-  setNameCode(rom, 0x5d, 0x0123); rom.w8(BASE_EVENTS + 0x5e, 0x10);
+  setLevelNameTiles(rom, 0x5d, encodeName('A NAME').tiles); rom.w8(BASE_EVENTS + 0x5e, 0x10);
   check(use(0x5d) === 1 && use(0x5e) === 1 && freeTranslevel(t, use) === 0x5f, 'a name or base event: 5F first');
-  setNameCode(rom, 0x5f, 0x0123);
+  setLevelNameTiles(rom, 0x5f, encodeName('A NAME').tiles);
   check(freeTranslevel(t, use) === 0x5d, 'all with settings: the lowest of them before a level of its own');
   // reset: as the clean game's unused ones, the level's data stays
   const msg = [...Array(0x60).keys()].find((n) => n && cleanTl.includes(n) && hasMessages(rom, n))!;
   const l1Ptr = rom.r24(L1_PTRS + translevelToLevel(msg) * 3), was = rom.data.slice();
   s.edit('Reset', () => resetTranslevel(rom, msg));
-  check(nameCode(rom, msg) === 0 && baseEvent(rom, msg) === NO_EVENT && exitDirections(rom, msg).every((d) => d === 0) && !hasMessages(rom, msg),
+  check(!hasLevelName(rom, msg) && baseEvent(rom, msg) === NO_EVENT && exitDirections(rom, msg).every((d) => d === 0) && !hasMessages(rom, msg),
     `reset ${hx(msg)}: no name, no base event, exits revealing up, no message box`);
   check(rom.r24(L1_PTRS + translevelToLevel(msg) * 3) === l1Ptr && use(msg) === 2, 'reset: the level\'s data stays');
   s.undo();

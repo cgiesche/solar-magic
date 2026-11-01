@@ -11,6 +11,7 @@ import { lz2Compress, lz2Decompress } from './lz2.ts';
 import type { RomRead } from './exanim.ts';
 import { hasOwnContent } from './level.ts';
 import { hasMessages, clearMessages } from './messages.ts';
+import { levelName, hasLevelName, clearLevelName, levelNameRanges } from './levelnames.ts';
 import { eventDataRanges } from './owevents.ts';
 import { teleportDataRanges } from './owteleport.ts';
 import { KOOPA_X, KOOPA_Y, KOOPAS } from './owlinks.ts';
@@ -21,12 +22,6 @@ export const OW_L1 = 0x0cf7df; // 0x800 bytes: 2 maps × 32×32 16x16 tiles (qua
 const L2_TILE_PTR = 0x04dc72; // LDA #$A533 operand
 const L2_BANK = 0x04dc79; // LDA #$04 operand (shared bank of both streams)
 const L2_ATTR_PTR = 0x04dc8d; // LDA #$C02B operand
-export const NAME_CODES = 0x04a0fc; // 16-bit per translevel
-const NAME_CHARS = 0x049ac5;
-const NAME_P1 = 0x049c91; // 31 entries
-const NAME_P2 = 0x049ccf; // 15 entries
-const NAME_P3 = 0x049ced; // 10 entries
-export const NAME_PART_COUNTS = [31, 15, 10];
 
 export const MAP_NAMES = ['Main map', "Yoshi's Island", 'Vanilla Dome', 'Forest of Illusion', 'Valley of Bowser', 'Special World', 'Star World'];
 
@@ -306,8 +301,6 @@ export function setExitDirection(rom: Rom, tl: number, exit: number, dir: number
 }
 
 export const NO_EVENT = 0xff; // a base event no exit runs (the clean game's Top Secret Area, Star Roads)
-export const NO_NAME = 0x0000; // blank in the game; $FFFF (the unused translevels') shows RAM as letters
-export const isNameless = (code: number): boolean => code === 0x0000 || code === 0xffff;
 
 // ---- initial level flags (Lunar Magic's) ----
 // The flags ($1EA2, ram.ts levelFlags) each translevel starts a new game with: the directions Mario may walk
@@ -427,54 +420,17 @@ export function installLevelFlagsPatch(rom: Rom): void {
 export type TranslevelUse = 0 | 1 | 2;
 export function translevelUse(rom: Rom, tl: number): TranslevelUse {
   if (hasOwnContent(rom, translevelToLevel(tl))) return 2;
-  return !isNameless(nameCode(rom, tl)) || baseEvent(rom, tl) !== NO_EVENT || hasMessages(rom, tl) || initialFlags(rom, tl) ? 1 : 0;
+  return hasLevelName(rom, tl) || baseEvent(rom, tl) !== NO_EVENT || hasMessages(rom, tl) || initialFlags(rom, tl) ? 1 : 0;
 }
 
 // the settings of translevel tl as the game's unused ones: no name, no base event, every exit enabling up, no
 // message, no initial flags
 export function resetTranslevel(rom: Rom, tl: number): void {
-  setNameCode(rom, tl, NO_NAME);
+  clearLevelName(rom, tl);
   rom.w8(BASE_EVENTS + tl, NO_EVENT);
   rom.w8(EXIT_DIRS + tl, 0);
   setInitialFlags(rom, tl, 0);
   clearMessages(rom, tl);
-}
-
-// ---- level names ----
-const CHARMAP: Record<number, string> = { 0x1f: ' ', 0x5d: "'", 0x5a: '#', 0x1c: '-', 0x1b: '!', 0x1d: '.' };
-for (let i = 0; i < 26; i++) CHARMAP[i] = String.fromCharCode(65 + i);
-for (let i = 0; i < 9; i++) CHARMAP[0x64 + i] = String(i + 1);
-
-export function nameWord(rom: Rom, part: number, idx: number): string {
-  const table = [NAME_P1, NAME_P2, NAME_P3][part];
-  const off = rom.r16(table + idx * 2);
-  let s = '';
-  for (let i = 0; i < 40; i++) {
-    const b = rom.r8(NAME_CHARS + off + i);
-    const c = b & 0x7f;
-    s += CHARMAP[c] ?? '·';
-    if (b & 0x80) break;
-  }
-  return s;
-}
-export function nameCode(rom: Rom, translevel: number): number {
-  return rom.r16(NAME_CODES + translevel * 2);
-}
-export function setNameCode(rom: Rom, translevel: number, code: number): void {
-  rom.w16(NAME_CODES + translevel * 2, code);
-}
-export function splitNameCode(code: number): [number, number, number] {
-  return [(code >> 8) & 0x7f, (code >> 4) & 0x0f, code & 0x0f];
-}
-export function joinNameCode(p: [number, number, number]): number {
-  return ((p[0] & 0x7f) << 8) | ((p[1] & 15) << 4) | (p[2] & 15);
-}
-// "(no name)" for $0000 and $FFFF
-export function levelName(rom: Rom, translevel: number): string {
-  const code = nameCode(rom, translevel);
-  if (isNameless(code)) return '(no name)';
-  const [a, b, c] = splitNameCode(code);
-  return (nameWord(rom, 0, a) + nameWord(rom, 1, b) + nameWord(rom, 2, c)).replace(/\s+/g, ' ').trim();
 }
 
 // ---- events ----
@@ -692,8 +648,8 @@ export function overworldDataRanges(rom: Rom): [number, number][] {
     at(p.attrs, rleDecode(d, snesToPc(p.attrs), scratch, 8, 0x2000)),
     at(L2_TILE_PTR, 2), at(L2_BANK, 1), at(L2_ATTR_PTR, 2),
     at(EXIT_DIRS, MAX_TRANSLEVEL + 1),
-    at(NAME_CODES, (MAX_TRANSLEVEL + 1) * 2),
   ];
+  out.push(...levelNameRanges(rom));
   const tl = translevelTableBlock(rom);
   if (tl) out.push(at(tl.snes, tl.size), at(TL_PTR, 2), at(TL_BANK, 1));
   if (hasLevelFlagsPatch(rom)) out.push(at(LEVEL_FLAGS, MAX_TRANSLEVEL + 1));

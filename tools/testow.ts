@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
-import { readL2, writeL2, OverworldEmulator, l2Index, l1Index, levelName, translevelToLevel, OW_EVENTS } from '../src/core/overworld.ts';
+import { readL2, writeL2, OverworldEmulator, l2Index, l1Index, translevelToLevel, OW_EVENTS } from '../src/core/overworld.ts';
+import { levelName, levelNamePatch } from '../src/core/levelnames.ts';
 import { TileCache } from '../src/core/render.ts';
 import { writePng, outDir } from './png.ts';
 import { RAM } from '../src/core/ram.ts';
@@ -40,6 +41,6 @@ const out = outDir();
 if (out) writePng(`${out}/owmain.png`, W, W, img);
 const tl = w.subarray(RAM.owTranslevels, RAM.owTranslevelsEnd); // the game's translevel per tile
 const seen: string[] = [];
-for (let i = 0; i < 0x800; i++) if (tl[i]) seen.push(`${tl[i].toString(16)}=${translevelToLevel(tl[i]).toString(16)} ${levelName(rom, tl[i])}`);
+for (let i = 0; i < 0x800; i++) if (tl[i]) seen.push(`${tl[i].toString(16)}=${translevelToLevel(tl[i]).toString(16)} ${levelNamePatch(rom) ? levelName(rom, tl[i]) : ''}`);
 console.log(seen.length, seen.slice(0, 12).join(' | '));
 if (bad) { console.log(`${bad} failed`); process.exit(1); }

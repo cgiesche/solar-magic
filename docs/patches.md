@@ -968,6 +968,7 @@ not compatible with the respective feature.
 | `$04E9F7`, `$04DCA5`, `$04DCAA`, `$04D859`; pointers `$04E49F`, `$04E4A4`, `$04E709`, `$04E710`, `$04EE3F`, `$04EE5A`, `$04E4B0`, `$04E4BB`, `$04EAF5`, `$04DD45`, `$04DD4A`, `$04DA74`, `$04EC8C`, `$04ECBA`, `$04ECC5`, `$04ED97`, `$04EDBE`, `$04EDB8` | Event steps, silent events, 0x78 events (Lunar Magic's places) |
 | `$04E6C5`, `$04DA98`; pointers `$04E67C`, `$04E69C` | Destroyed level tiles, 0x18 entries (Lunar Magic's places) |
 | Ext. object table `$0DA11B` (entry `$04`) | Prefabs (SMWS); empty in the original and in Lunar Magic, no code hook |
+| `$048E81`, `$049549`; code `$03BB20–$03BB71`, its table's address `$03BB57` | Level names as free text, 0x60 × 19 tiles (Lunar Magic's places and routine, [research](research/lunar-magic-level-names.md)) |
 | `$05B1A3`; code `$03BB90–$03BC8E`, pointers `$03BE80` | Two messages per level (SMWM, Lunar Magic's places; its copy of the switch palace routine with the loop at `$03BC72`, which hijacks of Lunar Magic's ROMs patch, is the editor's too) |
 | `$00F545`, `$029328`, `$058A66`, `$058B46`, `$058C34`, `$058D2B`, `$00C096`, `$00C0E7`, `$00C176`; Lunar Magic's acts-like table pointers `$06F624` (pages 00–3F), `$06F63A` (40–7F), both at `!SMWE_ACTS_LIKE` | Map16 extension and custom blocks (SMWX) |
 | `$05808C`, `$00A5EE`, `$00A242`, `$00A295`, `$00A2EE` | UberASM: level `load`/`init`/`main`/`end` |

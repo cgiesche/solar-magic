@@ -345,6 +345,9 @@ canvas.sheet-fill { width: 100%; height: auto; image-rendering: auto; }
 .ow-reveal input.hex { width: 3.2em; flex: none; }
 .ow-info { border: 1px solid var(--border); border-radius: 6px; padding: 6px; display: flex; flex-direction: column; gap: 5px; }
 .ow-info select { flex: 1; min-width: 0; max-width: none; }
+.ln-input { flex: 1; min-width: 0; font-family: monospace; }
+.ln-input.bad { border-color: var(--warn, #e05050); }
+.ln-border { display: block; width: 100%; image-rendering: pixelated; border: 1px solid var(--border); }
 .level-item { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .level-item .lname { font-family: system-ui, sans-serif; font-size: 11px; color: var(--muted); }
 .level-item.current .lname { color: #dfefff; }

@@ -13,7 +13,7 @@ import { thumbCanvas } from './thumbs.ts';
 import { objKey, type ObjSpec, type ObjThumb } from '../core/objthumbs.ts';
 import { fillPixels, fitScale, sized, previewOnHover, previewSheet, hidePickerPreview, PREVIEW_BELOW, type LegendRow } from './pickerview.ts';
 import { newUid, spriteId, spriteBytes, spriteSizes, type LevelObject, type LevelSprite } from '../core/level.ts';
-import { levelName } from '../core/overworld.ts';
+import { levelName } from '../core/levelnames.ts';
 import { usedInList } from './usedin.ts';
 import { buildExitPanel } from './exitpanel.ts';
 import { DM16_EXT } from '../core/patches.ts';

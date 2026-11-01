@@ -3,7 +3,8 @@
 // free space only otherwise; the game shows the painted map (emulated).
 import { Rom, snesToPc, pcToSnes } from '../src/core/rom.ts';
 import { RomEditSession } from '../src/core/romedit.ts';
-import { OverworldEmulator, OverworldLoads, readL1, writeL1, readL2, writeL2, l1Index, l2Index, l2Pointers, OW_L1, setNameCode, nameCode } from '../src/core/overworld.ts';
+import { OverworldEmulator, OverworldLoads, readL1, writeL1, readL2, writeL2, l1Index, l2Index, l2Pointers, OW_L1 } from '../src/core/overworld.ts';
+import { levelNameTiles, setLevelNameTiles, encodeName } from '../src/core/levelnames.ts';
 import { RAM, getS16 } from '../src/core/ram.ts';
 import { submapViews } from '../src/core/owevents.ts';
 import { editorPatch } from '../src/core/patches.ts';
@@ -85,11 +86,11 @@ const diff = (a: Uint8Array, b: Uint8Array) => { const out: number[] = []; for (
 // a level name: one undo step
 {
   const { rom, s } = fresh();
-  const code = nameCode(rom, 1);
-  s.edit('Level name 001', () => setNameCode(rom, 1, code ^ 0x0011));
-  check(s.history.undoStack.length === 1 && nameCode(rom, 1) === (code ^ 0x0011), 'level name: a ROM edit');
+  const was = levelNameTiles(rom, 1), next = encodeName('MY LEVEL').tiles;
+  s.edit('Level name 001', () => setLevelNameTiles(rom, 1, next));
+  check(s.history.undoStack.length === 1 && levelNameTiles(rom, 1).join() === [...next, ...Array(19 - next.length).fill(0x1f)].join(), 'level name: a ROM edit');
   s.undo();
-  check(nameCode(rom, 1) === code, 'level name undone');
+  check(levelNameTiles(rom, 1).join() === was.join(), 'level name undone');
 }
 
 // the game shows the painted map: layer 1 in its tilemap in WRAM, layer 2 in VRAM

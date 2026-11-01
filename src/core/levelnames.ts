@@ -1,0 +1,170 @@
+// Level names as free text, in Lunar Magic's layout (an editor patch, ADR 0005; docs/research/lunar-magic-level-names.md).
+// The game builds a translevel's name from three words of shared tables (its code at $04A0FC, drawn by $049D07);
+// Lunar Magic replaces that with a name of its own per translevel: where the game looks the code up and draws it –
+// $048E81 when the overworld loads, $049549 when Mario stops on a tile – a JSL to $03BB20 (then NOPs, 10 bytes in
+// all), whose routine writes the name's 19 tiles from a table – 0x60 × 19 bytes in free space, its address the
+// operand of the LDA.l at $03BB56 – as the stripe the game wrote (layer 3 at $508B, attribute $39). The routine is
+// Lunar Magic's, byte for byte, so tools reading the table's address there find it.
+// The text of a name follows Lunar Magic's built-in table for level names: a tile per character, `\XX` for a tile
+// without one, and its "MultiChar" tiles – the game's squished tiles for "YELLOW" and " ILLUSI".
+
+import { Rom, snesToPc } from './rom.ts';
+import { Snes } from './snes.ts';
+import { assemble } from './asar.ts';
+
+export const NAME_LEN = 19; // tiles of a name on the overworld's border
+export const NAME_TRANSLEVELS = 0x60;
+export const NAME_SPACE = 0x1f;
+export const NAME_VRAM = 0x508b; // where the game writes a name: layer 3's tilemap (word address), its row 4 from column 11
+export const NAME_ATTR = 0x39; // the tiles' attribute: BG3 tile $100 + the tile, palette 6, priority
+const NAME_CODES = 0x04a0fc; // the game's: 16 bit per translevel, $FFFF (the unused translevels) shows RAM as letters
+const HOOK = 0x049549, HOOK_END = 0x049553, LOAD_HOOK = 0x048e81, HOOK_LEN = 10, ROUTINE = 0x03bb20, ROUTINE_END = 0x03bb72;
+const TABLE_OP = 0x03bb57; // operand of LDA.l table,x
+export const NAME_HOOKS: [number, number][] = [[LOAD_HOOK, HOOK_LEN], [HOOK, HOOK_LEN]];
+// the name's place in the stripe buffer the routine writes ($7F837D + the buffer's end, $7F837B)
+const STRIPE = 0x1837b; // in WRAM
+
+const hx = (n: number) => '$' + n.toString(16).toUpperCase().padStart(6, '0');
+const levelNameAsm = () => `lorom
+org ${hx(LOAD_HOOK)}                 ; the overworld loads
+  JSL LevelName                      ; A (16 bit): the translevel
+  NOP #6
+org ${hx(HOOK)}                      ; Mario stops on a tile
+  JSL LevelName
+  NOP #6
+org ${hx(ROUTINE)}
+LevelName:
+  STA $02 : ASL #4 : STA $00
+  LDA $02 : ASL : CLC : ADC $02 : ADC $00 : TAX   ; × 19
+  PHB : PEA $7F7F : PLB : PLB
+  LDA $837B : TAY
+  CLC : ADC #$0026 : STA $02
+  CLC : ADC #$0004 : STA $837B
+  LDA #$2500 : STA $837F,y
+  LDA #$${(((NAME_VRAM & 0xff) << 8) | (NAME_VRAM >> 8)).toString(16).toUpperCase()} : STA $837D,y   ; the stripe's VRAM address, high byte first
+  SEP #$20
+.tile:
+  .table: LDA.l $000000,x
+  STA $8381,y
+  LDA #$${NAME_ATTR.toString(16).toUpperCase()} : STA $8382,y
+  INY #2
+  INX
+  CPY $02 : BCC .tile
+  LDA #$FF : STA $8381,y
+  REP #$20
+  PLB
+  RTL
+End:
+`;
+
+export function levelNamePatch(rom: Rom): { table: number } | null {
+  if ([LOAD_HOOK, HOOK].some((a) => rom.r8(a) !== 0x22 || (rom.r24(a + 1) & 0x7fffff) !== ROUTINE)) return null;
+  return { table: rom.r24(TABLE_OP) };
+}
+// (not patches.ts' missingPatch: patchapply.ts, which it leads to, lists this patch's hooks)
+const table = (rom: Rom) => {
+  const p = levelNamePatch(rom);
+  if (!p) throw new Error('Level names (Lunar Magic format) is not installed in this ROM');
+  return p.table;
+};
+
+// the 19 tiles of translevel tl's name
+export function levelNameTiles(rom: Rom, tl: number): number[] {
+  return [...rom.bytes(table(rom) + tl * NAME_LEN, NAME_LEN)];
+}
+// at most 19 tiles, padded with spaces
+export function setLevelNameTiles(rom: Rom, tl: number, tiles: number[]): void {
+  if (tiles.length > NAME_LEN) throw new Error(`A level name has at most ${NAME_LEN} tiles (${tiles.length})`);
+  rom.writeBytes(table(rom) + tl * NAME_LEN, Uint8Array.from({ length: NAME_LEN }, (_, k) => tiles[k] ?? NAME_SPACE));
+}
+export const hasLevelName = (rom: Rom, tl: number): boolean => levelNameTiles(rom, tl).some((t) => t !== NAME_SPACE);
+export const clearLevelName = (rom: Rom, tl: number): void => setLevelNameTiles(rom, tl, []);
+// the name as text (Lunar Magic's MultiChar tiles as their letters), "(no name)" when blank
+export function levelName(rom: Rom, tl: number): string {
+  return decodeName(levelNameTiles(rom, tl)).trim() || '(no name)';
+}
+
+// the ROM bytes of the names (PC offsets, [start, end))
+export function levelNameRanges(rom: Rom): [number, number][] {
+  const p = levelNamePatch(rom);
+  return p ? [[snesToPc(p.table), snesToPc(p.table) + NAME_TRANSLEVELS * NAME_LEN]] : [];
+}
+
+// ---- text ----
+// Lunar Magic 3.71's built-in table for level names (tile = character), its MultiChar entries last
+const TABLE: [number[], string][] = [
+  ...Array.from({ length: 26 }, (_, i) => [[i], String.fromCharCode(65 + i)] as [number[], string]),
+  [[0x1a], '!'], [[0x1b], '.'], [[0x1c], '-'], [[0x1d], ','], [[0x1e], '?'], [[0x1f], ' '],
+  ...Array.from({ length: 26 }, (_, i) => [[0x40 + i], String.fromCharCode(97 + i)] as [number[], string]),
+  [[0x5a], '#'], [[0x5b], '('], [[0x5c], ')'], [[0x5d], "'"],
+  ...Array.from({ length: 7 }, (_, i) => [[0x64 + i], String(i + 1)] as [number[], string]), [[0x6b], '0'], [[0xae], '8'], [[0xaf], '9'],
+];
+export const MULTI_CHAR: [number[], string][] = [[[0x32, 0x33, 0x34, 0x35, 0x36, 0x37], ' ILLUSI'], [[0x38, 0x39, 0x3a, 0x3b, 0x3c], 'YELLOW']];
+const TILE_CHAR = new Map(TABLE.map(([t, s]) => [t[0], s]));
+const CHAR_TILE = new Map(TABLE.map(([t, s]) => [s, t[0]]));
+// the character of a tile (undefined: none, written `\XX`)
+export const tileChar = (t: number): string | undefined => TILE_CHAR.get(t);
+const esc = (t: number) => `\\${t.toString(16).toUpperCase().padStart(2, '0')}`;
+
+// the text of a name's tiles, trailing spaces left out; multi: Lunar Magic's MultiChar tiles as their letters (else `\XX`)
+export function decodeName(tiles: number[], multi = true): string {
+  let s = '';
+  for (let i = 0; i < tiles.length;) {
+    const m = multi ? MULTI_CHAR.find(([t]) => t.every((v, k) => tiles[i + k] === v)) : undefined;
+    if (m) { s += m[1]; i += m[0].length; continue; }
+    s += TILE_CHAR.get(tiles[i]) ?? esc(tiles[i]);
+    i++;
+  }
+  return s.replace(/ +$/, '');
+}
+
+// the tiles of a name's text: `\XX` a tile by number; multi: "YELLOW" and " ILLUSI" as Lunar Magic's MultiChar
+// tiles. missing: the characters without a tile (left out), with their place in the text; shown: the tiles with -1
+// in the place of each of them
+export interface EncodedName { tiles: number[]; missing: { ch: string; at: number }[]; shown: number[] }
+export function encodeName(text: string, multi = true): EncodedName {
+  const tiles: number[] = [], missing: { ch: string; at: number }[] = [], shown: number[] = [];
+  for (let i = 0; i < text.length;) {
+    const e = /^\\([0-9a-fA-F]{2})/.exec(text.slice(i, i + 3));
+    if (e) { tiles.push(parseInt(e[1], 16)); shown.push(parseInt(e[1], 16)); i += 3; continue; }
+    const m = multi ? MULTI_CHAR.find(([, s]) => text.startsWith(s, i)) : undefined;
+    if (m) { tiles.push(...m[0]); shown.push(...m[0]); i += m[1].length; continue; }
+    const ch = String.fromCodePoint(text.codePointAt(i)!), t = CHAR_TILE.get(ch);
+    if (t === undefined) missing.push({ ch, at: i });
+    else tiles.push(t);
+    shown.push(t ?? -1);
+    i += ch.length;
+  }
+  return { tiles, missing, shown };
+}
+
+// ---- the game's names ----
+// the stripe the overworld's code writes for translevel tl's name (as where Mario stands on its tile, $049549 up to
+// $049553 run with A = tl): its 4-byte header, the tiles with their attribute, the end mark $FF
+export function shownNameStripe(rom: Rom, tl: number, s = new Snes(rom.data)): number[] {
+  const cpu = s.cpu, w = s.wram;
+  w[STRIPE] = 0; w[STRIPE + 1] = 0;
+  w.fill(0, STRIPE + 2, STRIPE + 2 + 0x40);
+  cpu.e = false; cpu.p = 0x04; cpu.s = 0x1ff; cpu.d = 0; cpu.dbr = HOOK >> 16; cpu.pbr = HOOK >> 16; cpu.pc = HOOK & 0xffff; cpu.a = tl;
+  for (let n = 0; n < 100_000 && !((cpu.pbr & 0x7f) === HOOK >> 16 && cpu.pc === (HOOK_END & 0xffff)); n++) cpu.step();
+  if (cpu.pc !== (HOOK_END & 0xffff)) throw new Error(`The level name of translevel ${tl.toString(16)} was not written`);
+  return [...w.subarray(STRIPE + 2, STRIPE + 2 + w[STRIPE] + 1)];
+}
+const nameless = (rom: Rom, tl: number) => [0, 0xffff].includes(rom.r16(NAME_CODES + tl * 2));
+
+// needs Asar (loadAsar) to be loaded; every translevel gets the name the game shows for it (its routine emulated),
+// those without one ($0000 blank, $FFFF RAM shown as letters) a blank name
+export function installLevelNamePatch(rom: Rom): void {
+  if (levelNamePatch(rom)) return;
+  const s = new Snes(rom.data), names = new Uint8Array(NAME_TRANSLEVELS * NAME_LEN).fill(NAME_SPACE);
+  for (let tl = 0; tl < NAME_TRANSLEVELS; tl++) {
+    if (nameless(rom, tl)) continue;
+    const st = shownNameStripe(rom, tl, s);
+    for (let k = 0; k < NAME_LEN; k++) names[tl * NAME_LEN + k] = st[4 + k * 2];
+  }
+  const r = assemble(rom.data, new Map([['levelnames.asm', levelNameAsm()]]), 'levelnames.asm');
+  if (!r.ok) throw new Error(r.errors.map((e) => e.message).join(' '));
+  if (r.labels['LevelName_table'] + 1 !== TABLE_OP || r.labels['End'] !== ROUTINE_END) throw new Error('Level names: the routine is not laid out as Lunar Magic\'s');
+  for (const [a, n] of [...NAME_HOOKS, [ROUTINE, ROUTINE_END - ROUTINE]]) rom.writeAt(snesToPc(a), r.rom.subarray(snesToPc(a), snesToPc(a) + n));
+  rom.w24(TABLE_OP, rom.allocWrite(names));
+}

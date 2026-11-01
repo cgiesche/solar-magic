@@ -4,12 +4,14 @@ import type { App } from './app.ts';
 import { h, toast, select, checkbox, hexInput, attachPanZoom, zoomControl, ZOOM_MIN, ZOOM_MAX, attachRectPick, emptyState } from './dom.ts';
 import {
   type OwRender, gameL1, gameL2, readL1, writeL1, readL2, writeL2, l1Index, l1XY, l2Index, isLevelTile, readTranslevels, writeTranslevels,
-  placeTile, sharedTranslevels, enterableLevels, translevelToLevel, nameCode, setNameCode, splitNameCode, joinNameCode, nameWord, levelName, NAME_PART_COUNTS, MAP_NAMES,
-  translevelUse, resetTranslevel, baseEvent, setBaseEvent, eventNames, exitDirections, setExitDirection, DIR_ARROWS, DIR_NAMES, EXIT_NAMES, NO_EVENT, isNameless,
+  placeTile, sharedTranslevels, enterableLevels, translevelToLevel, MAP_NAMES,
+  translevelUse, resetTranslevel, baseEvent, setBaseEvent, eventNames, exitDirections, setExitDirection, DIR_ARROWS, DIR_NAMES, EXIT_NAMES, NO_EVENT,
   initialFlags, setInitialFlags, FLAG, DIR_FLAGS, OW_EVENTS, revealEvents, setRevealEvents, revealAt, revealedTile, revealEventCount,
   readRevealList, writeRevealList, destroyEffects, destroySettingAt, destroyEvent, setDestroyEvent, readDestroyList, freeTranslevel, levelTilesOf, OW_L1_TILES,
 } from '../core/overworld.ts';
 import { hasMessages, isBlank, readMessage } from '../core/messages.ts';
+import { levelName, hasLevelName } from '../core/levelnames.ts';
+import { levelNameField } from './levelnamefield.ts';
 import {
   readEvents, writeEvents, applyEvents, paintEvent, reorderSteps, eventRunners, eventTitle, eventPlace, submapOf, pieceTiles, isBig, l2XY,
   paintEventL1, layer1Without, eventL1Tiles, exitChanges, type EventData, type EventRunner, type Rect, type ExitChanges,
@@ -75,7 +77,7 @@ type StepKind = 'step' | 'silent' | 'l1';
 // the level picker's note for a level no tile enters: what a tile choosing it gets (translevelUse)
 function freeNote(rom: Rom, tl: number): string {
   if (translevelUse(rom, tl) === 2) return 'free · has a level';
-  const has = [!isNameless(nameCode(rom, tl)) && 'name', baseEvent(rom, tl) !== NO_EVENT && 'event', hasMessages(rom, tl) && 'message'].filter(Boolean);
+  const has = [hasLevelName(rom, tl) && 'name', baseEvent(rom, tl) !== NO_EVENT && 'event', hasMessages(rom, tl) && 'message'].filter(Boolean);
   return has.length ? `free · has ${has.join(', ')}` : 'free';
 }
 
@@ -1111,19 +1113,10 @@ export class OverworldView {
       ...others.map((k) => h('div', { class: 'hint warn-text' }, `⚠ The level tile at ${where(k)} enters this level too.`)),
     ];
     if (!tl) return h('div', { class: 'ow-info' }, ...head, h('div', { class: 'hint warn-text' }, '⚠ This level tile enters no level.'));
-    const code = nameCode(rom, tl), parts = splitNameCode(code);
     const lvl = translevelToLevel(tl);
     const ev = baseEvent(rom, tl), msgs = [1, 2].filter((n) => !isBlank(readMessage(rom, tl, n)));
-    const sel = (k: number) => select(Array.from({ length: NAME_PART_COUNTS[k] }, (_, i) => [i, `${hex(i, 2)}: ${nameWord(rom, k, i).trim() || '(empty)'}`] as [number, string]), parts[k], (v) => {
-      parts[k] = v;
-      this.app.romEdit(`Level name ${hex(lvl, 3)}`, () => setNameCode(rom, tl, joinNameCode(parts)));
-    });
     return h('div', { class: 'ow-info' }, ...head,
-      h('div', null, `“${levelName(this.app.rom, tl)}”`),
-      code === 0xffff ? h('div', { class: 'hint warn-text' }, '⚠ The game shows garbage as this name – choose one or reset the settings.') : null,
-      h('div', { class: 'prop' }, h('label', null, 'Name part 1'), sel(0)),
-      h('div', { class: 'prop' }, h('label', null, 'Name part 2'), sel(1)),
-      h('div', { class: 'prop' }, h('label', null, 'Name part 3'), sel(2)),
+      ...levelNameField(this.app, tl, this.render()),
       // the level's other settings (kept when its tiles are painted over, shown to every new tile entering it)
       ...this.levelSettings(tl),
       ...this.exitResultRows(tl),
@@ -1131,7 +1124,7 @@ export class OverworldView {
         h('button', { onclick: () => { this.onOpenLevel(lvl); this.app.openMessages(tl, 1); }, title: 'Edit the level\'s two messages beside the level' }, 'Edit …')),
       h('div', { class: 'row' },
         h('button', { onclick: () => this.onOpenLevel(lvl), title: 'Open in the level editor (also by double click in the list)' }, `Edit level ${hex(lvl, 3)}`),
-        !isNameless(code) || code === 0xffff || ev !== NO_EVENT || msgs.length || exitDirections(rom, tl).some((d) => d) || initialFlags(rom, tl)
+        hasLevelName(rom, tl) || ev !== NO_EVENT || msgs.length || exitDirections(rom, tl).some((d) => d) || initialFlags(rom, tl)
           ? h('button', { onclick: () => this.app.romEdit(`Level ${hex(lvl, 3)}: settings reset`, () => resetTranslevel(rom, tl)),
             title: 'No name, no base event, every exit enabling up, no message box, no initial flags – the level\'s data stays' }, 'Reset settings') : null),
     );

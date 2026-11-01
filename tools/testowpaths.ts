@@ -8,8 +8,9 @@ import { RomReads, ResultCache, RomFingerprint } from '../src/core/romdeps.ts';
 import { JobRunner } from '../src/core/jobrunner.ts';
 import { pathKindsJob, PATH_KINDS, type PathKind } from '../src/core/owpaths.ts';
 import {
-  readL1, writeL1, readL2, writeL2, readTranslevels, writeTranslevels, setInitialFlags, setExitDirection, setNameCode, FLAG, MAX_TRANSLEVEL,
+  readL1, writeL1, readL2, writeL2, readTranslevels, writeTranslevels, setInitialFlags, setExitDirection, FLAG, MAX_TRANSLEVEL,
 } from '../src/core/overworld.ts';
+import { setLevelNameTiles, encodeName } from '../src/core/levelnames.ts';
 import { editorImage, cleanImage } from './fixture.ts';
 
 let bad = 0;
@@ -60,7 +61,7 @@ check(kinds.length === 0x100, '256 tiles');
   const l1 = readL1(r), l2 = readL2(r), tls = readTranslevels(r);
   l1.fill(0x04, 0, 0x40); l2.fill(0x0123, 0, 0x100); tls[0x10] = 0x30;
   writeL1(r, l1); writeL2(r, l2); writeTranslevels(r, tls);
-  setInitialFlags(r, 0x29, 0x8f); setExitDirection(r, 0x29, 0, 3); setNameCode(r, 0x29, 0x0123);
+  setInitialFlags(r, 0x29, 0x8f); setExitDirection(r, 0x29, 0, 3); setLevelNameTiles(r, 0x29, encodeName('A NAME').tiles);
   check(!reads.differ(before, r.data), 'layer 1, layer 2, translevels, initial flags, exit directions, a name changed: the kinds hold');
 }
 
