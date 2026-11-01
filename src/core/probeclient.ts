@@ -20,6 +20,9 @@ import type { CameraAt } from './camerareach.ts';
 import { kindsKey, type ObjKinds, type KindLevel } from './objkinds.ts';
 import type { ScanLevel, ScanResult } from './levelscan.ts';
 
+// a learn job that failed (learnOrFailed)
+export const FAILED: unique symbol = Symbol('failed');
+
 const SLICE = 12; // ms the main thread probes at a time without a worker
 
 type Send = (m: ProbeMessage) => void;
@@ -204,6 +207,15 @@ export class ProbeClient {
   // The result under key for opts.input, else undefined: its job is asked for in the worker (after the stored results
   // are loaded, which may hold it), opts.done called with its result; one that failed is asked again after a ROM change
   learn<T>(key: string, job: LearnJob, opts: LearnOptions<T>): T | undefined {
+    const r = this.learnOrFailed<T>(key, job, opts);
+    if (r !== FAILED) return r;
+    opts.failed?.();
+    return undefined;
+  }
+
+  // as learn, FAILED when the job failed (not asked again until the ROM changes): opts.failed is then not called, only
+  // when it fails later (a caller that redraws on it isn't told again and again)
+  learnOrFailed<T>(key: string, job: LearnJob, opts: LearnOptions<T>): T | typeof FAILED | undefined {
     this.sync();
     const input = opts.input === undefined ? undefined : inputHash(opts.input), id = `${key}#${input}`;
     const same = (w: LearnWant) => w.msg.key === key && w.msg.input === input;
@@ -219,8 +231,7 @@ export class ProbeClient {
     const keep = learnKeep(job), stored = this.stored<T>(key, input, keep);
     if (stored !== undefined || this.learnFailed.has(id)) {
       this.learnBusy(opts.lane);
-      if (stored === undefined) opts.failed?.();
-      return stored;
+      return stored === undefined ? FAILED : stored;
     }
     let want = lane.wants.find(same);
     if (!want) {
@@ -329,13 +340,14 @@ export class ProbeClient {
     return lane && want ? { lane, want } : null;
   }
 
-  // a learn job's progress: what it shows, its label
+  // a learn job's progress: what it shows (not what a step on an older ROM showed: the job runs again where it read
+  // a changed byte, the result is checked), its label
   private learning(d: Learning): void {
     this.take(d);
     const w = this.want(d);
     if (!w) return;
     if (d.fresh) w.want.opts.shown?.(null);
-    if (d.shown.length) w.want.opts.shown?.(d.shown);
+    if (d.shown.length && d.gen === this.gen) w.want.opts.shown?.(d.shown);
     if (w.lane.wants[0] === w.want) w.lane.progress = d.label;
     this.learnBusy(d.lane);
   }

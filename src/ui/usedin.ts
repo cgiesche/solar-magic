@@ -9,12 +9,14 @@ import { levelNameOf } from './panels.ts';
 
 export interface UsedIn { level: number; text: string; at?: { x: number; y: number } } // at: level tile
 
-// title: what is listed; pending: levels still being looked through; none: the text when nothing uses it
-export function usedInList(app: App, title: string, items: UsedIn[], pending: number, none: string): HTMLElement {
+// title: what is listed; pending: levels still being looked through; none: the text when nothing uses it; unknown: what
+// could not be looked through (none is not claimed then)
+export function usedInList(app: App, title: string, items: UsedIn[], pending: number, none: string, unknown?: string): HTMLElement {
   const box = h('div', { class: 'used-in' },
     h('div', { class: 'panel-title' }, title, h('span', { class: 'hint' }, items.length ? `${items.length} level${items.length > 1 ? 's' : ''}` : '')));
   if (pending) box.append(h('div', { class: 'hint' }, `Looking through ${pending} more level${pending > 1 ? 's' : ''} …`));
-  if (!items.length) { if (!pending) box.append(h('div', { class: 'hint' }, none)); return box; }
+  if (unknown) box.append(h('div', { class: 'hint' }, unknown));
+  if (!items.length) { if (!pending && !unknown) box.append(h('div', { class: 'hint' }, none)); return box; }
   box.append(h('div', { class: 'used-in-list' }, items.map((u) => {
     const name = levelNameOf(app, u.level);
     return h('a', {

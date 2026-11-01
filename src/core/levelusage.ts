@@ -111,6 +111,22 @@ export function levelOverride(rom: Rom, lv: Level): LevelOverride {
   return { layer1: l1, layer2: l2 ?? undefined, layer2Pointer: l2 ? undefined : lv.layer2Pointer, byteOwner };
 }
 
+// what is known of the open level's tiles as edited: known, still learned (pending), or they could not be learned
+export type OpenTilesState = 'known' | 'pending' | 'failed';
+
+// The open level's tiles as edited (learned elsewhere, e.g. the probe worker) and, while they are learned, the last
+// known ones: only for the level and ROM state (gen: the ROM's count of changes) they were learned at – another
+// level's, and those from before a ROM change, are dropped (#229)
+export class OpenLevelTiles {
+  private last: { tiles: LevelTiles; gen: number } | null = null;
+  // here: the tiles learned for the level as it is now (undefined: not known); failed: they could not be learned
+  shown(level: number, gen: number, here: LevelTiles | undefined, failed = false): { tiles: LevelTiles | null; state: OpenTilesState } {
+    if (here) this.last = { tiles: here, gen };
+    else if (this.last && (this.last.tiles.level !== level || this.last.gen !== gen)) this.last = null;
+    return { tiles: here ?? this.last?.tiles ?? null, state: here ? 'known' : failed ? 'failed' : 'pending' };
+  }
+}
+
 export const levelTilesKey = (n: number) => `lu2:${n}`; // (its input: the level as saved, inputs.ts)
 
 // The tiles of the ROM's levels as saved, learned a level at a time (scan) and kept in the result cache.

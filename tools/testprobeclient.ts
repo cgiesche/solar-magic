@@ -5,13 +5,15 @@
 // wanted to the main thread, and without a worker it all runs there; a failed probe is not asked again until the ROM changes; the
 // prefetch follows the tileset; object kinds are kept while the bytes they read are unchanged; a cancelled
 // scan is told to the worker; learn jobs (the sprite images) come in as they run, with a worker and without; a lane's
-// jobs can be dropped, an urgent one runs without a worker while a dialog holds the background slices.
+// jobs can be dropped, an urgent one runs without a worker while a dialog holds the background slices; a failed job
+// asked again is FAILED without telling the asker again, the open level's last known tiles hold for their level and ROM
+// state only, a progress reply from an older ROM shows nothing.
 import { readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
 import { BlockProber } from '../src/core/blockprobe.ts';
 import { ProbeHost } from '../src/core/probehost.ts';
 import { jobKey, type ProbeJob, type ProbeMessage, type ProbeReply } from '../src/core/probeprotocol.ts';
-import { ProbeClient } from '../src/core/probeclient.ts';
+import { ProbeClient, FAILED } from '../src/core/probeclient.ts';
 import { ResultCache, RomFingerprint } from '../src/core/romdeps.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadLevel, L2_PTRS } from '../src/core/level.ts';
@@ -20,7 +22,7 @@ import type { ScanLevel } from '../src/core/levelscan.ts';
 import { captureSprites, spriteLoad, type SpriteLevel } from '../src/core/spritegfx.ts';
 import type { LearnJob } from '../src/core/probeprotocol.ts';
 import { inputHash } from '../src/core/inputs.ts';
-import { levelTilesKey } from '../src/core/levelusage.ts';
+import { levelTilesKey, levelOverride, OpenLevelTiles, type LevelTiles } from '../src/core/levelusage.ts';
 import { editorImage } from './fixture.ts';
 
 const EDITOR_IMAGE = await editorImage(); // the fixture as the editor opens it
@@ -419,6 +421,57 @@ function editor(worker: Worker | null) {
   check(done === 1 && e2.steps.some(([k]) => k === 'probe'), '… another one waits for them');
   e2.drain();
   check(done === 2, '… and runs then');
+}
+
+// the open level's tiles (#226, #229): a failed job is told once as it fails, asked again it is FAILED without telling
+// the asker again (who redraws on it); the last known ones only for the level and ROM state they were learned at
+{
+  const w = new Worker(), e = editor(w), lv = loadLevel(e.rom, 0x105);
+  const job: LearnJob = { kind: 'levelTiles', level: lv, ov: levelOverride(e.rom, lv) }, input = { lt: 1 };
+  let fails = 0;
+  const opts = { input, lane: 'lt', replace: true, failed: () => fails++ };
+  check(e.client.learnOrFailed('lt:105', job, opts) === undefined, 'open level tiles: unknown, asked for');
+  await settle();
+  w.run(Infinity, (d) => d.type === 'learned' ? { ...d, failed: true, result: null, put: [], memory: undefined } : d);
+  check(fails === 1 && !e.busy.has('lt'), 'failed: told once, nothing busy');
+  check(e.client.learnOrFailed('lt:105', job, opts) === FAILED && fails === 1, '… asked again: FAILED, not told again');
+  touch(e.rom);
+  check(e.client.learnOrFailed('lt:105', job, opts) === undefined, '… after a ROM change: asked again');
+  await settle();
+  w.run();
+  const got = e.client.learnOrFailed<LevelTiles>('lt:105', job, opts);
+  check(got !== FAILED && got?.level === 0x105 && got.fg.length > 0, '… and learned');
+
+  const tiles = (level: number): LevelTiles => ({ level, tileset: 0, ok: true, fg: [], bg: [] });
+  const open = new OpenLevelTiles(), a = tiles(0x105), b = tiles(0x106);
+  check(open.shown(0x105, 1, a).tiles === a && open.shown(0x105, 1, a).state === 'known', 'open tiles: known');
+  const p = open.shown(0x105, 1, undefined);
+  check(p.tiles === a && p.state === 'pending', '… learned again: the last known meanwhile');
+  const f = open.shown(0x105, 1, undefined, true);
+  check(f.tiles === a && f.state === 'failed', '… failed: the last known, failed');
+  check(open.shown(0x105, 2, undefined).tiles === null, '… after a ROM change: none');
+  open.shown(0x105, 2, a);
+  check(open.shown(0x106, 2, undefined).tiles === null && open.shown(0x105, 2, undefined).tiles === null, '… another level\'s: none, also back at the first');
+  check(open.shown(0x106, 2, b).tiles === b, '… known for the other level');
+}
+
+// a progress reply from an older ROM generation (#229): its images are not shown (the result is checked as before)
+{
+  const lv = loadLevel(new Rom(file), 0x105);
+  const level: SpriteLevel = { number: 0x105, header: lv.header, spriteHeader: lv.spriteHeader, bgPointer: 0xffd900 };
+  const job: LearnJob = { kind: 'sprites', level, nums: [0x0d, 0x1d, 0x21] };
+  const w = new Worker(), e = editor(w), shown: (unknown[] | null)[] = [], done: unknown[] = [];
+  const opts = { input: { set: 'gen' }, lane: 'sprites', done: (r: unknown) => done.push(r), shown: (i: unknown[] | null) => shown.push(i) };
+  e.client.learn('spr', job, opts);
+  await settle();
+  const before = e.rom.gen;
+  touch(e.rom);
+  e.client.learn('spr', job, opts); // (the worker gets the edit)
+  await settle();
+  const first = w.run(1, (d) => ({ ...d, gen: before }));
+  check(first[0]?.type === 'learning' && first[0].shown.length > 0 && shown.every((i) => i === null), 'progress from an older ROM: its images not shown');
+  w.run();
+  check(shown.some((i) => i?.length) && done.length === 1, '… those of the current ROM are, and the result');
 }
 
 console.log(bad ? `${bad} failures` : 'all ok');

@@ -953,7 +953,8 @@ export class AnimTab implements WsPanel {
   private openApplyPalette(s: ExSlot, row: number): void {
     const app = this.app, off = this.offPalette(s, row), placed = this.placedTiles();
     const targets = new Set(this.targetTiles(s));
-    const { levels, pending } = app.levelTiles();
+    // (the open level counts by its placed tiles: not as still looked through)
+    const { levels, pending: all, open } = app.levelTiles(), pending = all - (open === 'pending' ? 1 : 0);
     // the tiles of this level first; when none is placed here, the user asks for the others
     const anyHere = off.some((o) => placed.has(o.tile));
     const chosen = new Set(off.filter((o) => !anyHere || placed.has(o.tile)).map((o) => o.tile));

@@ -180,7 +180,7 @@ export class Map16Tab implements WsPanel {
     app.on('probes', () => { if (this.visible) this.buildBuilder(); });
     onBehaviorProgress(app, () => { if (this.visible && this.matchPending) { this.findMatches(); this.drawSheet(); } });
     app.on('animated', redraw);
-    app.on('level-uses', () => { this.unused = null; if (this.visible) { this.buildUses(); if (this.markUnused) this.drawSheet(); } });
+    app.on('level-uses', () => { this.unused = null; if (this.visible) { this.buildUses(); this.drawMove(); if (this.markUnused) this.drawSheet(); } });
   }
 
   previewHint(): string {
@@ -983,7 +983,8 @@ export class Map16Tab implements WsPanel {
   // "Used in levels": where the selected tile is placed (the open level as edited), what else refers to it
   private buildUses(): void {
     const app = this.app, t = this.sel, box = this.usesBox;
-    const { levels, pending } = app.levelTiles();
+    const { levels, pending, open } = app.levelTiles();
+    const unknown = open === 'failed' ? `The tiles this level places as edited could not be learned${levels.some((l) => l.level === app.level.number) ? ' (listed as last known)' : ''}.` : undefined;
     const link = (x: number) => h('a', { href: '#', class: 'mono', title: 'Show the tile', onclick: (e: Event) => { e.preventDefault(); this.select(x, this.target); } }, hex(x, 3));
     if (this.ow) {
       // on the maps as in the ROM (before events)
@@ -993,7 +994,7 @@ export class Map16Tab implements WsPanel {
     }
     if (this.bg) {
       const users = bgTileUsers(levels, t);
-      box.replaceChildren(usedInList(app, 'Used in levels', users.map((u) => ({ level: u.level, text: `${u.count}× in the BG` })), pending, 'In no level\'s background.'));
+      box.replaceChildren(usedInList(app, 'Used in levels', users.map((u) => ({ level: u.level, text: `${u.count}× in the BG` })), pending, 'In no level\'s background.', unknown));
       return;
     }
     const tilesets = app.tilesetsOf(t), tilesetTile = isTilesetTile(t);
@@ -1004,7 +1005,7 @@ export class Map16Tab implements WsPanel {
     }));
     const l = tileLinks(app.rom, t);
     box.replaceChildren(
-      usedInList(app, tilesetTile ? `Used in levels of ${tilesetNames(tilesets)}` : 'Used in levels', items, pending, this.unusedTiles()?.has(t) ? 'Defined, but placed in no level and no prefab: unused.' : 'Placed in no level.'),
+      usedInList(app, tilesetTile ? `Used in levels of ${tilesetNames(tilesets)}` : 'Used in levels', items, pending, this.unusedTiles()?.has(t) ? 'Defined, but placed in no level and no prefab: unused.' : 'Placed in no level.', unknown),
       l.actsLike.length ? h('div', { class: 'hint' }, 'Acting like it: ', ...l.actsLike.slice(0, 24).flatMap((x, i) => [i ? ' ' : '', link(x)]), l.actsLike.length > 24 ? ` … (${l.actsLike.length})` : '') : '',
       l.prefabs.length ? h('div', { class: 'hint' }, `In prefab${l.prefabs.length > 1 ? 's' : ''} ${l.prefabs.map((n) => hex(n, 2)).join(', ')}`) : '',
       l.blocks.length ? h('div', { class: 'hint' }, `Custom block on it: ${l.blocks.join(', ')}`) : '',
@@ -1169,7 +1170,7 @@ export class Map16Tab implements WsPanel {
       return;
     }
     const map = rectMap(this.sel, this.selW, this.selH, m.to);
-    const { levels: index, pending } = app.levelTiles();
+    const { levels: index, pending, open } = app.levelTiles();
     const src: MoveSource = { ...levelSource(app, map), blank: map16Source(app.rom, app.render).fg(0x025), index };
     const plan = planMove(app.rom, this.bg ? 'bg' : 'fg', map, src);
     m.plan = { plan, src, pending: this.bg ? 0 : pending };
@@ -1179,6 +1180,7 @@ export class Map16Tab implements WsPanel {
       ok && plan.overwrite.length ? h('div', { class: 'warn-box' }, `Tile${plan.overwrite.length > 1 ? 's' : ''} ${plan.overwrite.slice(0, 8).map((t) => hex(t, 3)).join(', ')}${plan.overwrite.length > 8 ? ' …' : ''} ${plan.overwrite.length > 1 ? 'have' : 'has'} graphics, acts-like or a block of ${plan.overwrite.length > 1 ? 'their' : 'its'} own, used nowhere: overwritten (asked first).`) : '',
       ok ? planList(app, plan, 'No level places these tiles.') : '',
       ok && m.plan.pending ? h('div', { class: 'warn-box' }, `${pending} level${pending > 1 ? 's are' : ' is'} still being looked through for tiles placed by objects' code, which can't be rewritten.`) : '',
+      ok && open === 'failed' && !this.bg ? h('div', { class: 'warn-box' }, 'The tiles this level\'s objects\' code places as edited could not be learned: tiles placed there by custom objects are not known.') : '',
       h('div', { class: 'row' },
         h('button', { class: 'primary', disabled: !ok, onclick: () => void this.applyMove() }, `Move to ${hex(m.to, 3)}`),
         h('button', { onclick: () => this.closeMove() }, 'Close')),
