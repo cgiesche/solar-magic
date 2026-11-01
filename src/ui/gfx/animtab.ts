@@ -22,11 +22,10 @@ import {
   NO_GAME_COLORS, NO_GAME_TILES, NO_LEVEL_LIST, NO_GLOBAL_LIST, NO_DOT_COLORS, altFileUsers, localizeFrames, shapeOf, exanimTiles, exanimColors, ALT_FILE_MAX,
   rotationRange, setRotationRange, rotationStep, rotated, stepsPerSecond, heldColors, reversesOnTrigger, ROTATION_MAX,
 } from '../../core/exanim.ts';
-import { submapSlots } from '../../core/submapgfx.ts';
-import { MAP_NAMES } from '../../core/overworld.ts';
+import type { GfxTarget } from './target.ts';
 import { gfxName, lmAnimName } from './map16tab.ts';
 import { gfxBytes, hasGfx, createGfx, ANIM_FILE } from '../../core/gfxfiles.ts';
-import { levelSlots, layerSlots, slotOfTile, type GfxSlot } from '../../core/gfxslots.ts';
+import { layerSlots, slotOfTile, type GfxSlot } from '../../core/gfxslots.ts';
 import { cssOf, htmlOf } from './palettetab.ts';
 import { remapSlot } from '../../core/remap.ts';
 import { remapEditor } from '../remaplist.ts';
@@ -125,16 +124,18 @@ export class AnimTab implements WsPanel {
     this.root = h('div', { class: 'at' }, this.bar, h('div', { class: 'at-main' }, this.slotsBox, this.detail, this.side));
     const rebuild = () => { if (this.visible) this.build(); };
     app.on('rom-change', rebuild);
-    app.on('level', () => { if (this.submap === null) rebuild(); });
-    app.on('render', () => { if (this.visible && this.submap === null) this.buildSide(); });
+    app.on('level', () => { if (this.t.levelPreview) rebuild(); });
+    app.on('render', () => { if (this.visible && this.t.levelPreview) this.buildSide(); });
     // (the submap's load came: what the tab draws with)
-    ws.preview.onMap(() => { if (this.submap !== null) rebuild(); });
+    ws.preview.onMap(rebuild);
   }
 
-  // the workspace's target: the open level's lists (null) or a submap's
+  // the workspace's target: the open level's lists or a submap's
   readonly submaps = true;
-  private get submap(): number | null { return this.ws.target.submap; }
-  private get ow(): boolean { return this.submap !== null; }
+  private get t(): GfxTarget { return this.ws.desc; }
+  // the overworld's ExAnimation (its settings, its triggers 01–08 are events), the submap's tilemaps instead of the
+  // level's Map16 tiles
+  private get ow(): boolean { return this.t.owAnims; }
   targetChanged(): void {
     this.global = false;
     this.sel = 0;
@@ -147,24 +148,23 @@ export class AnimTab implements WsPanel {
   }
   // the list edited (the target's own or the global one) and the target's own
   private ref(global = this.global): ExListRef {
-    if (this.submap !== null) return global ? { kind: 'owGlobal' } : { kind: 'submap', n: this.submap };
-    return global ? { kind: 'global' } : { kind: 'level', n: this.app.level.number };
+    return this.t.animList(global);
   }
   // the target's name: "level 105", "submap 1"
-  private get own(): string { return this.submap !== null ? `submap ${this.submap}` : `level ${hex(this.app.level.number, 3)}`; }
+  private get own(): string { return this.t.short; }
   // the list's name: "global", "the overworld's global list" …
   private listName(global = this.global): string { return global ? (this.ow ? 'overworld global' : 'global') : this.own; }
   // what the tab draws with: the level as rendered, or the console after the submap's load (nothing while it is
   // emulated)
   private shown(): Shown {
-    return this.submap === null ? this.app.render : this.ws.preview.submapRender() ?? NOTHING_SHOWN;
+    return this.t.levelPreview ? this.app.render : this.ws.preview.submapRender() ?? NOTHING_SHOWN;
   }
   private triggerName(t: number): string { return triggerNameOf(t, this.ow); }
   private secondSet(t: number): boolean { return secondSetOf(t, this.ow); }
   private secondSetName(t: number): string { return secondSetNameOf(t, this.ow); }
 
   previewHint(): string {
-    return this.ow ? '' : 'Click: take the Map16 tile under the mouse as target (top left quarter)';
+    return this.t.levelPreview ? 'Click: take the Map16 tile under the mouse as target (top left quarter)' : '';
   }
 
   // a slot's key there: the list's
@@ -202,9 +202,7 @@ export class AnimTab implements WsPanel {
   }
   // the open level's graphics slots (the submap's)
   private gfxSlots(): GfxSlot[] {
-    if (this.submap !== null) return submapSlots(this.app.rom, this.submap);
-    const lv = this.app.level;
-    return levelSlots(this.app.rom, lv.number, lv.header);
+    return this.t.slots();
   }
 
   private slot(): ExSlot | null {
@@ -315,13 +313,13 @@ export class AnimTab implements WsPanel {
     const app = this.app, b = this.bar;
     clear(b);
     const scope = (g: boolean, label: string, title: string) => h('button', { class: this.global === g ? 'active' : '', title, onclick: () => { this.global = g; this.sel = 0; this.frame = 0; this.build(); } }, label);
-    if (this.submap !== null) {
-      const m = this.submap;
+    const m = this.t.at.submap;
+    if (this.ow && m !== null) {
       b.append(h('span', { class: 'hint' }, 'List'), h('span', { class: 'btn-group' },
-        scope(false, `Submap ${m}`, `Animations that run only on ${MAP_NAMES[m]}`),
+        scope(false, `Submap ${m}`, `Animations that run only on ${this.t.owner}`),
         scope(true, 'Overworld global', 'Animations that run on every submap (a submap can turn them off via “Play on submap …”)')));
       const key = `s${m}`;
-      if (this.flagsLevel !== key) { this.flagsMenu = this.submapFlagsMenu(m); this.flagsLevel = key; }
+      if (this.flagsLevel !== key) { this.flagsMenu = this.submapFlagsMenu(m, this.t.owner); this.flagsLevel = key; }
       b.append(h('span', { class: 'spacer' }), this.flagsMenu!);
       return;
     }
@@ -380,7 +378,7 @@ export class AnimTab implements WsPanel {
     ] });
   }
   // which animations play on submap m (Lunar Magic's overworld animation settings): a setting of the submap
-  private submapFlagsMenu(m: number): HTMLElement {
+  private submapFlagsMenu(m: number, name: string): HTMLElement {
     const app = this.app;
     const flag = (bit: number, label: string, title: string): MenuItem => ({
       label, title,
@@ -390,7 +388,7 @@ export class AnimTab implements WsPanel {
         app.romEdit(`Submap ${m}: ${label} ${on ? 'on' : 'off'}`, () => setSubmapAnimSettings(app.rom, m, on ? st & ~bit : st | bit));
       },
     });
-    return menuButton({ label: `Play on submap ${m}`, title: `Which animations run on ${MAP_NAMES[m]} (a setting of the submap, also for “Overworld global”; the Trigger Init is set either way)`, items: [
+    return menuButton({ label: `Play on submap ${m}`, title: `Which animations run on ${name} (a setting of the submap, also for “Overworld global”; the Trigger Init is set either way)`, items: [
       { heading: 'Game' },
       flag(NO_GAME_TILES, 'Original tile animation', 'The game\'s animated tiles of the overworld (water, waves …)'),
       flag(NO_DOT_COLORS, 'Level dot colors', 'The game\'s flashing of colors 6·D and 7·D (the level dots)'),
@@ -411,7 +409,7 @@ export class AnimTab implements WsPanel {
     this.previews = [];
     const l = this.list();
     box.append(h('div', { class: 'panel-title' }, this.global ? (this.ow ? 'Overworld global animations' : 'Global animations') : `Animations of ${this.own}`, h('span', { class: 'hint' }, `${l.slots.size} of ${SLOTS}`)));
-    if (this.ow && !this.ws.preview.submapRender()) box.append(h('p', { class: 'hint' }, `${MAP_NAMES[this.submap!]} is loaded in the emulator …`));
+    if (!this.t.levelPreview && !this.ws.preview.submapRender()) box.append(h('p', { class: 'hint' }, `${this.t.owner} is loaded in the emulator …`));
     box.append(this.sourceSelect(l));
     for (const p of triggerProblems(readList(this.app.rom, this.ref(false)), readList(this.app.rom, this.ref(true)), this.ow)) {
       box.append(h('div', { class: 'warn-box' }, p.text, ' ', p.slots.map((r, i) => h('span', null, i ? ', ' : '', h('a', { href: '#', onclick: (e: Event) => { e.preventDefault(); this.select(r.global, r.slot); } }, slotName(r, this.ow))))));
@@ -781,7 +779,7 @@ export class AnimTab implements WsPanel {
       h('div', { class: 'panel-title at-step' }, '1 · Target', h('span', { class: 'hint' }, 'which 8x8 tiles are replaced')),
       h('div', { class: 'prop' }, h('label', null, 'Target'),
         h('span', { class: 'mono' }, `8x8 tile ${hex(t, 3)}`), slot ? h('span', { class: 'hint' }, ` ${slot.name}`) : '',
-        h('button', { class: this.picking === 'target' ? 'active' : '', title: this.ow ? 'Click in the VRAM grid on the right' : 'Click in the VRAM grid on the right or in the level preview', onclick: () => { this.picking = this.picking ? null : 'target'; this.triggers = false; this.buildSide(); this.buildDetail(); } }, 'Choose target')),
+        h('button', { class: this.picking === 'target' ? 'active' : '', title: this.t.levelPreview ? 'Click in the VRAM grid on the right or in the level preview' : 'Click in the VRAM grid on the right', onclick: () => { this.picking = this.picking ? null : 'target'; this.triggers = false; this.buildSide(); this.buildDetail(); } }, 'Choose target')),
       h('div', { class: 'hint' }, `${shape.w}×${shape.h} tiles`, slot ? h('span', null, ' · ', h('a', { href: '#', title: `Open ${gfxName(slot.file)} in the Graphics tab`, onclick: (e: Event) => { e.preventDefault(); this.ws.showGfx(slot.file, t - slot.first); } }, `view in ${gfxName(slot.file)}`)) : ''),
       this.ow ? this.mapUse(s)
         : users.length
@@ -1096,7 +1094,7 @@ export class AnimTab implements WsPanel {
 
   previewClick(px: number, py: number): void {
     const s = this.slot();
-    if (!s || this.ow) return;
+    if (!s || !this.t.levelPreview) return;
     if (kindOf(s.type) === 'tiles') {
       const m = this.ws.preview.tileAt(px, py);
       if (m < 0) return;

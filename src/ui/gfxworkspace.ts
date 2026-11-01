@@ -12,7 +12,7 @@ import { Map16Tab, type RemapFill } from './gfx/map16tab.ts';
 import { gfxTarget, type GfxTarget, type Map16Target } from './gfx/target.ts';
 import { GfxTab } from './gfx/gfxtab.ts';
 import { AnimTab } from './gfx/animtab.ts';
-import { MAP_NAMES, gameL2, overworldReplacement, type OwRender } from '../core/overworld.ts';
+import { MAP_NAMES, gameL2, type OwRender } from '../core/overworld.ts';
 import { drawOwMap } from './overworld.ts';
 import { cgramToRGBA } from '../core/gfx.ts';
 
@@ -319,7 +319,7 @@ export class GfxWorkspace {
 
   // edits the level's graphics (submap null) or a submap's; the open tab shows them
   setTarget(t: WsTarget): void {
-    const locked = t.submap !== null ? overworldReplacement(this.app.rom) : null;
+    const locked = gfxTarget(this.app, t).locked();
     if (locked) { toast(`The overworld is replaced by ${locked}: its graphics can't be edited here`); t = { ...t, submap: null }; }
     const same = t.submap === this.target.submap && t.progress === this.target.progress;
     this.target = { ...t };
