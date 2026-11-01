@@ -13,7 +13,8 @@
 
 import type { Rom } from './rom.ts';
 import type { LevelEmulator, LevelOverride } from './levelemu.ts';
-import { L1_PTRS, L2_PTRS, encodeSecondaryHeader, decodeSecondaryHeader, readSecondaryHeader, type SecondaryHeader } from './level.ts';
+import { L1_PTRS, encodeSecondaryHeader, decodeSecondaryHeader, readSecondaryHeader, type SecondaryHeader } from './level.ts';
+import { fallbackBgPointer } from './levelheader.ts';
 import type { RomReads } from './romdeps.ts';
 import { GM, RAM, get16, setMarioPos, setCameraX, setCameraY } from './ram.ts';
 import { applyPatch, type ApplyResult } from './patchapply.ts';
@@ -208,7 +209,7 @@ export function layer2Motion(emu: LevelEmulator, level: number, ov: LevelOverrid
   const rom = emu.rom, l1 = ov.layer1 ?? rom.bytes(rom.r24(L1_PTRS + level * 3), 5);
   const hdr = [(l1[0] & 0xe0) | 0x0f, (l1[1] & 0xe0) | VERTICAL_MODE, l1[2], l1[3], l1[4]];
   const r = emu.load(level, {
-    ...ov, layer1: new Uint8Array([...hdr, 0xff]), layer2: undefined, bgData: undefined, layer2Pointer: rom.r24(L2_PTRS + 0x105 * 3),
+    ...ov, layer1: new Uint8Array([...hdr, 0xff]), layer2: undefined, bgData: undefined, layer2Pointer: fallbackBgPointer(rom),
     sprites: new Uint8Array([0, 0xff]), byteOwner: undefined,
   });
   const none: LayerMotion = { x: { rate: 0, drift: 0 }, y: { rate: 0, drift: 0 } };

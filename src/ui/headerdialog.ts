@@ -4,7 +4,7 @@ import type { App } from './app.ts';
 import { h, select, hexInput, modal, toast } from './dom.ts';
 import { TILESETS, levelModeName, MUSIC, TIME_SETTINGS, VERTICAL_SCROLL, ENTRANCE_ACTIONS, layer2RateName, hex2, hex } from '../core/names.ts';
 import {
-  hasLayer2Objects, type PrimaryHeader, type SecondaryHeader, L2_PTRS, SPRITE_MEMORY, MAX_LEVEL_SIZE, SUBSCREEN_ROWS, levelRows, maxScreens, hasLevelSize,
+  hasLayer2Objects, type PrimaryHeader, type SecondaryHeader, L2_PTRS, SPRITE_MEMORY, maxScreens, hasLevelSize,
   mainSpot, spotTile, hasRelativeCamera, storedBgAddr,
 } from '../core/level.ts';
 import { cameraOptions, cameraValue, setCamera, tileFields, bgStartFields } from './entrancefields.ts';
@@ -13,7 +13,8 @@ import { songHex } from '../core/music.ts';
 import { currentSongs, playButton } from './musicdialog.ts';
 import { musicPlayer } from './musicplayer.ts';
 import { LAYER3_KIND_TEXT } from '../core/layer3.ts';
-import { RATE_OPTIONS, hRate, withRates, motionText, type Layer2Motions, type LayerMotion } from '../core/l2scroll.ts';
+import { levelSizeOptions, applyHeaderChange, headerRefusal, objectsBelow, NO_HEIGHTS, type HeaderChange } from '../core/levelheader.ts';
+import { RATE_OPTIONS, hRate, motionText, type Layer2Motions, type LayerMotion } from '../core/l2scroll.ts';
 import { incompleteSprites, spriteMemText, SPRITE_MEM_HELP } from './spritemem.ts';
 import { slipperyText } from './exitpanel.ts';
 
@@ -146,24 +147,24 @@ export function openHeaderDialog(app: App): void {
   // level height (Lunar Magic 3.00's sizes of horizontal levels): the screens that fit, and no height the
   // level's objects and sprites lie below
   const rom = app.rom;
-  const lowest = Math.max(-1, ...lv.objects.map((o) => o.y), ...lv.sprites.map((q) => q.y));
-  const sizeOpts = (): HTMLOptionElement[] => Array.from({ length: MAX_LEVEL_SIZE + 1 }, (_, i) => {
-    const rows = levelRows({ levelSize: i }), screens = maxScreens({ levelSize: i });
-    const why = !hasLevelSize(rom, hd.mode) && i ? 'Horizontal levels without layer 2 objects only'
-      : hd.screens > screens ? `The level has ${hd.screens} screens` : lowest >= Math.max(rows, SUBSCREEN_ROWS) ? `Objects or sprites lie down to row ${hex(lowest, 3)}` : '';
-    return h('option', { value: String(i), selected: i === sd.levelSize, disabled: !!why && i !== sd.levelSize, title: why },
-      `${i ? `${hex2(i)} – ` : ''}${rows} rows (${hex(rows * 16, 3)} px), up to ${screens} screens${i ? '' : ' – the game\'s'}`);
-  });
+  const sizeOpts = (): HTMLOptionElement[] => levelSizeOptions(rom, lv, hd.mode, hd.screens).map(({ size: i, rows, screens, reason }) =>
+    h('option', { value: String(i), selected: i === sd.levelSize, disabled: !!reason && i !== sd.levelSize, title: reason },
+      `${i ? `${hex2(i)} – ` : ''}${rows} rows (${hex(rows * 16, 3)} px), up to ${screens} screens${i ? '' : ' – the game\'s'}`));
   const sizeSel = h('select', null, sizeOpts());
   const screenOpts = (): HTMLOptionElement[] => range(maxScreens(sd), (i) => String(i + 1)).map(([v, l]) => h('option', { value: String(v + 1), selected: v + 1 === hd.screens }, l));
   const screensSel = h('select', null, screenOpts());
   const sizeHint = h('span', { class: 'hint' });
   const showSize = () => {
     sizeSel.disabled = !hasLevelSize(rom, hd.mode) && !sd.levelSize;
-    sizeHint.textContent = sizeSel.disabled ? 'Horizontal levels without layer 2 objects only'
-      : !hasLevelSize(rom, hd.mode) ? `The level mode has no heights: back to the game's height${lowest >= SUBSCREEN_ROWS ? ` – not while objects or sprites lie down to row ${hex(lowest, 3)}` : ''}` : 'As Lunar Magic 3.00; entrances in a taller level are placed at tiles, the camera relative to Mario';
+    const below = headerRefusal(rom, lv, change()) ? objectsBelow(lv, 0) : '';
+    sizeHint.textContent = sizeSel.disabled ? NO_HEIGHTS
+      : !hasLevelSize(rom, hd.mode) ? `The level mode has no heights: back to the game's height${below ? ` – not while ${below[0].toLowerCase()}${below.slice(1)}` : ''}` : 'As Lunar Magic 3.00; entrances in a taller level are placed at tiles, the camera relative to Mario';
   };
   sizeSel.addEventListener('change', () => { sd.levelSize = Number(sizeSel.value); screensSel.replaceChildren(...screenOpts()); });
+  // the change the dialog's form holds
+  const change = (): HeaderChange => ({
+    header: { ...hd }, secondary: { ...sd }, rates: sepBox.checked ? { h: hr, v: vr } : null, spriteHeader, bgPointer: l2ptr === CUSTOM_BG ? null : l2ptr,
+  });
 
   // the camera's start: the game's FG/BG start Y, or relative to Mario (horizontal levels), the BG then by the
   // level's BG start (also for its secondary entrances): bottom-aligned by its height, relative to the FG, or 0
@@ -249,31 +250,13 @@ export function openHeaderDialog(app: App): void {
     { label: 'Cancel', onClick: () => { if (musicPlayer.label === 'header') musicPlayer.stop(); } },
     {
       label: 'Apply', primary: true, onClick: () => {
-        // a mode without heights takes the game's: refused while objects or sprites lie below what it reaches
-        if (sd.levelSize && !hasLevelSize(rom, hd.mode) && lowest >= SUBSCREEN_ROWS) {
-          toast(`Level mode ${hex2(hd.mode)} has no heights, and objects or sprites lie down to row ${hex(lowest, 3)} – move them up first.`, 'error');
-          return false;
-        }
+        const c = change(), refusal = headerRefusal(rom, lv, c);
+        if (refusal) { toast(refusal, 'error'); return false; }
         if (musicPlayer.label === 'header') musicPlayer.stop();
         if (levelSong !== levelMusic(app.rom, lv.number)) {
           try { app.romEdit(`Music of level ${hex(lv.number, 3)}`, () => setLevelMusic(app.rom, lv.number, levelSong)); } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
         }
-        app.editLevel((lv) => {
-          const modeChangedL2 = hasLayer2Objects(hd.mode) !== hasLayer2Objects(lv.header.mode);
-          lv.header = hd;
-          if (!hasLevelSize(rom, hd.mode)) sd.levelSize = 0;
-          hd.screens = Math.min(hd.screens, maxScreens(sd));
-          lv.secondary = sepBox.checked ? withRates(sd, hr, vr) : { ...sd, layer2Separate: 0, layer2HAuto: 0, layer2V: 0 };
-          lv.spriteHeader = spriteHeader;
-          if (l2ptr !== CUSTOM_BG) { lv.bg = null; lv.layer2Pointer = l2ptr; }
-          if (modeChangedL2) {
-            if (hasLayer2Objects(hd.mode) && !lv.layer2Objects) { lv.layer2Objects = []; lv.layer2Header = new Uint8Array(5); }
-            if (!hasLayer2Objects(hd.mode) && lv.layer2Objects) {
-              lv.layer2Objects = null;
-              if (lv.layer2Pointer >> 16 !== 0xff) lv.layer2Pointer = app.rom.r24(L2_PTRS + 0x105 * 3);
-            }
-          }
-        }); // (an edit mode whose layer is gone switches back to layer 1)
+        app.editLevel((lv) => !applyHeaderChange(rom, lv, c)); // (an edit mode whose layer is gone switches back to layer 1)
         app.emit('level-header');
       },
     },

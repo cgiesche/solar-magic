@@ -6,7 +6,8 @@
 // what the loader leaves behind is not compared anyway.
 
 import type { LevelEmulator, LevelRender } from './levelemu.ts';
-import { encodePrimaryHeader, serializeObjects, newUid, L2_PTRS, type Level, type LevelObject } from './level.ts';
+import { encodePrimaryHeader, serializeObjects, newUid, type Level, type LevelObject } from './level.ts';
+import { levelBgPointer } from './levelheader.ts';
 import { OV_L1 } from './levelemu.ts';
 import { MAP_BASE, MAP_SIZE, MAP_HI, RAM, wramName } from './ram.ts';
 import { hex } from './names.ts';
@@ -39,7 +40,7 @@ export function effectLoad(emu: LevelEmulator, level: Level, objs: LevelObject[]
   }
   return emu.load(level.number, {
     layer1: l1,
-    layer2Pointer: level.layer2Objects ? emu.rom.r24(L2_PTRS + 0x105 * 3) : level.layer2Pointer,
+    layer2Pointer: levelBgPointer(emu.rom, level),
     sprites: new Uint8Array([0, 0xff]),
     byteOwner,
   });

@@ -5,9 +5,10 @@ import { Rom } from '../core/rom.ts';
 import { LevelEmulator, type LevelRender, type LevelOverride, type Animated, MAP_BASE, MAP_SIZE } from '../core/levelemu.ts';
 import {
   type Level, type LevelObject, type LevelSprite, type ScreenExit, loadLevel, spriteLoadOrder, serializeLayer1, serializeSprites, serializeLevelSprites, spriteSizes, spriteId, spriteBytes,
-  isL1Vertical, newUid, hasLayer2Objects, hasObjects, L2_PTRS, SEC_HDR,
+  isL1Vertical, newUid, hasLayer2Objects, hasObjects, SEC_HDR,
   entrancePos, nearestEntrance, encodeSecondaryHeader, mainSpot, sameSpot, placeMain, midwaySpot, nearestMidway, placeMidway, exitLandsAtMidway, isSized, SPRITE_MEMORY, levelRows, TIME_TABLE,
 } from '../core/level.ts';
+import { levelBgPointer } from '../core/levelheader.ts';
 import { hex, hex2, spriteName } from '../core/names.ts';
 import { objectTable, objectName, objectNameKey, setObjectName, namedPerTable, numberName } from '../core/objectnames.ts';
 import { boxedObjects, boxAt } from '../core/objboxes.ts';
@@ -277,7 +278,7 @@ export class App {
       tileset: () => this.level.header.tileset,
       kindLevel: () => {
         const lv = this.level;
-        return { level: { number: lv.number, header: lv.header }, layer2Pointer: lv.layer2Objects ? this.rom.r24(L2_PTRS + 0x105 * 3) : lv.layer2Pointer };
+        return { level: { number: lv.number, header: lv.header }, layer2Pointer: levelBgPointer(this.rom, lv) };
       },
       connect: (reply, failed) => {
         const w = new Worker(new URL('./probeworker.ts', import.meta.url), { type: 'module' });
@@ -1779,7 +1780,7 @@ export class App {
   // the ROM is now: those known (key: of the level and ROM state they hold for)
   private sized = { key: '', boxes: new Map<string, Box | null>() };
   private sizeLevel(): { key: string; level: KindLevel; layer2Pointer: number } {
-    const lv = this.level, l2 = lv.layer2Objects ? this.rom.r24(L2_PTRS + 0x105 * 3) : lv.layer2Pointer;
+    const lv = this.level, l2 = levelBgPointer(this.rom, lv);
     return { key: `${this.rom.gen}:${lv.number}:${inputHash(lv.header)}:${l2}`, level: { number: lv.number, header: lv.header }, layer2Pointer: l2 };
   }
   private sizeBoxMap(): Map<string, Box | null> {
