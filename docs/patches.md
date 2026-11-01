@@ -828,11 +828,17 @@ layout ([research](research/lunar-magic-submap-graphics.md)):
   upload routine (`$00A9DA`, which uploads only the files that changed) with the screen off, the window closed over
   it. Lunar Magic's FG5/FG6 (with its option to merge FG1/FG2 into SP3/SP4) and AN2 are not offered: the editor's
   animations take their frames from the Anim graphics (ADR 0003).
+- **layer 3** (Lunar Magic's "Submap Layer 3 GFX/Tilemap Bypass"): LG1–LG4 and LT3 as a level's (SMWL's table,
+  entries 200–206 after the levels'); LG1–LG4 are uploaded with the other files, so also when Mario walks to another
+  submap; an LT3 file replaces the game's border while the overworld loads (a JSL at `$00A153`, Lunar Magic's place,
+  in place of the border's stripe image), not when Mario walks (as in Lunar Magic: use a star or pipe between
+  submaps with different borders). The level names are written over it as before.
 
 `tools/testsubmapgfx.ts` checks that the routine is Lunar Magic's, that the patched game shows every submap in the
 clean game's colors before and after the special world, and that a color changed for one submap is shown there –
 when the overworld loads there and when Mario walks there – and nowhere else; that a file put into a submap's slot
-is in VRAM there when the overworld loads and when Mario walks there, the other submaps keeping theirs.
+is in VRAM there when the overworld loads and when Mario walks there, the other submaps keeping theirs; that layer 3
+is the clean game's on every submap, a submap's LG1 is loaded there, its LT3 replaces the border there only.
 
 ### Layer 3 graphics per level
 
@@ -994,6 +1000,7 @@ not compatible with the respective feature.
 | `$04E6C5`, `$04DA98`; pointers `$04E67C`, `$04E69C` | Destroyed level tiles, 0x18 entries (Lunar Magic's places) |
 | Ext. object table `$0DA11B` (entry `$04`) | Prefabs (SMWS); empty in the original and in Lunar Magic, no code hook |
 | `$00AD32`; its routine's ADC operand and MVN bank: the table | Submap palettes, 14 × 256 colors (Lunar Magic's place and routine, [research](research/lunar-magic-submap-graphics.md)) |
+| `$00A153` | Submap LT3: copied in place of the overworld's border (Lunar Magic's place; SMWL's table) |
 | `$04DBB9` | Submap graphics files: loaded when Mario walks to another submap (Lunar Magic's place; the files in SMWE's bypass) |
 | `$048E81`, `$049549`; code `$03BB20–$03BB71`, its table's address `$03BB57` | Level names as free text, 0x60 × 19 tiles (Lunar Magic's places and routine, [research](research/lunar-magic-level-names.md)) |
 | `$05B1A3`; code `$03BB90–$03BC8E`, pointers `$03BE80` | Two messages per level (SMWM, Lunar Magic's places; its copy of the switch palace routine with the loop at `$03BC72`, which hijacks of Lunar Magic's ROMs patch, is the editor's too) |

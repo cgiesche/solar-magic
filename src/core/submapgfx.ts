@@ -17,6 +17,8 @@ import { assemble } from './asar.ts';
 import { OverworldEmulator } from './overworld.ts';
 import { RAM } from './ram.ts';
 import { levelGfx, setLevelGfx, defaultGfx, submapGfxEntry, GFX_NONE } from './patches.ts';
+import { levelSlots as entrySlotsOf, assignSlot, type GfxSlot } from './gfxslots.ts';
+import type { Lt3Place } from './layer3gfx.ts';
 
 export const SUBMAPS = 7;
 export const SUBMAP_PALETTE_SIZE = 0x200; // 256 colors, color 0 the back area color
@@ -165,23 +167,27 @@ export const OW_GFX_SLOT_NAMES = ['FG1', 'FG2', 'FG3', 'FG4', 'SP1', 'SP2', 'SP3
 // overworld's FG4, FG3, FG2, FG1)
 const BYPASS_K: Record<string, number> = { FG1: 7, FG2: 6, FG3: 5, FG4: 4, SP1: 3, SP2: 2, SP3: 1, SP4: 0 };
 
+// the layer 3 slots of a bypass entry (the header doesn't matter for them)
+const entrySlots = (rom: Rom, n: number): GfxSlot[] => entrySlotsOf(rom, n, { tileset: 0, spriteGfx: 0 });
 export const submapTileset = (rom: Rom, map: number): number => rom.r8(OW_TILESETS + map);
 export const submapSpriteSet = (rom: Rom): number => rom.r8(OW_SPRITE_SET);
 export const hasSubmapGfxPatch = (rom: Rom): boolean => rom.r8(GFX_HOOK) === 0x22;
 
-export interface SubmapSlot { name: string; k: number; file: number; def: number; custom: boolean; first: number; sprite: boolean }
-// the slots of submap `map` (first: the slot's first 8x8 tile, as the level's: FG 000–1FF, sprites 000–1FF of OAM)
-export function submapSlots(rom: Rom, map: number): SubmapSlot[] {
+// the slots of submap `map` (first: the slot's first 8x8 tile, as the level's: FG 000–1FF, sprites 000–1FF of OAM, layer
+// 3's tiles), then layer 3's LG1–LG4 (the game's 28–2B by default) and LT3 (none: the game's border), as a level's
+// (layer3gfx.ts, the submap's entry)
+export function submapSlots(rom: Rom, map: number): GfxSlot[] {
   const own = levelGfx(rom, submapGfxEntry(map)), def = defaultGfx(rom, submapTileset(rom, map), submapSpriteSet(rom));
-  return OW_GFX_SLOT_NAMES.map((name, i) => {
-    const k = BYPASS_K[name], f = own[k];
-    return { name, k, file: f !== GFX_NONE ? f : def[k], def: def[k], custom: f !== GFX_NONE, first: (i & 3) * 0x80, sprite: i >= 4 };
+  const gfx = OW_GFX_SLOT_NAMES.map((name, i): GfxSlot => {
+    const k = BYPASS_K[name], f = own[k], sprite = i >= 4;
+    return { name, kind: 'gfx', k, file: f !== GFX_NONE ? f : def[k], def: def[k], custom: f !== GFX_NONE, first: (i & 3) * 0x80, sprite, map16: !sprite };
   });
+  return [...gfx, ...entrySlots(rom, submapGfxEntry(map)).filter((x) => x.kind === 'lg' || x.kind === 'lt3')];
 }
-// puts `file` into slot `name` of submap `map` (FF: the default)
-export function assignSubmapSlot(rom: Rom, map: number, name: string, file: number): void {
+// puts `file` into slot `name` of submap `map` (FF: the default; an LT3 file goes to `place` when given)
+export function assignSubmapSlot(rom: Rom, map: number, name: string, file: number, place?: Lt3Place): void {
   const k = BYPASS_K[name];
-  if (k === undefined) throw new Error(`No graphics slot ${name} on the overworld`);
+  if (k === undefined) { assignSlot(rom, submapGfxEntry(map), name, file, place); return; }
   const set = levelGfx(rom, submapGfxEntry(map));
   set[k] = file;
   setLevelGfx(rom, submapGfxEntry(map), set);

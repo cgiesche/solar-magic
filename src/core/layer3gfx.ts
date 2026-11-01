@@ -12,6 +12,10 @@
 // half ($5800); FF the file's size – 0 0x2000 bytes (512x512), 1 0x1000 (512x256), 2 0x800 (256x256).
 // The editor keeps them in a table of its own (Lunar Magic's table, at no fixed place, also holds the
 // other slots, which the editor keeps elsewhere).
+// The submaps have the same (Lunar Magic's "Submap Layer 3 GFX/Tilemap Bypass", ov_overworld_layer3_gfx.htm): entries
+// 200–206 of the table (submapgfx.ts), read while the overworld loads for the submap Mario is on – LG1–LG4 also when
+// he walks to another submap (the graphics upload runs again there), LT3 in place of the game's border (stripe image
+// 6, set at $00A153: Lunar Magic's place), not reloaded when he walks.
 
 import type { Rom } from './rom.ts';
 import { applyPatch, type ApplyResult } from './patchapply.ts';
@@ -27,10 +31,11 @@ export const GAME_LAYER3_GFX = 0x28; // the game's files 28-2B
 export const LG_SIZE = 0x800;
 export const LT3_DESTS = ['Under the status bar', 'Start of layer 3', 'Last line of the status bar', 'Bottom half of layer 3'];
 export const LT3_SIZES = [0x2000, 0x1000, 0x800];
-const GFX_HOOK = 0x00a9da, MAP_HOOK = 0x00a01f;
+const GFX_HOOK = 0x00a9da, MAP_HOOK = 0x00a01f, BORDER_HOOK = 0x00a153;
 const MAGIC = [0x53, 0x4d, 0x57, 0x4c]; // "SMWL"
-// the table's parts: LT3 and LG1-LG4 a word per level, then LT3's DDFF a byte per level
-const LT3_TBL = 0, LG_TBL = 0x400, DDFF_TBL = 0x1400;
+// the table's parts: LT3 and LG1-LG4 a word per entry (levels 000–1FF, then submaps 0–6), then LT3's DDFF a byte per entry
+const ENTRIES = 0x207, PART = ENTRIES * 2;
+const LT3_TBL = 0, LG_TBL = PART, DDFF_TBL = 5 * PART;
 const hx = (n: number) => '$' + n.toString(16).toUpperCase();
 const hx4 = (n: number) => '$' + n.toString(16).toUpperCase().padStart(4, '0');
 
@@ -54,6 +59,8 @@ lorom
 !GfxBk = ${hx(p.gfxBank)}
 !GfxFlags = ${hx(p.gfxFlags)}
 !GfxDecomp = ${hx(p.decomp)}
+!Player = ${hx(0x7e0000 | RAM.playerIndex)}
+!Submap = ${hx(0x7e0000 | RAM.submap)}
 
 org ${hx(GFX_HOOK)}
   JSL Gfx
@@ -64,6 +71,9 @@ org ${hx(MAP_HOOK)}   ; A/X 8 bit, $00 = 3 * tileset (the game's)
   JSL Map
   BEQ NoImage           ; (a label: asar takes a long address in a branch as an offset)
 
+org ${hx(BORDER_HOOK)}  ; the overworld loads: LDA #$06 : STA $12 (the border's stripe image)
+  JSL Border
+
 freecode
   db ${MAGIC.map((m) => hx(m)).join(',')}
   dl Tbl
@@ -73,14 +83,19 @@ Gfx:
   PHP
   LDA.l !GameMode    ; (below $0B the title screen and file select, which load a level too)
   CMP #$0B : BCC .level
-  CMP #$0F : BCC .game
+  CMP #$0F : BCC .ow
 .level
   REP #$30
   LDA.l $7E010B : AND #$01FF : ASL : TAX
+  BRA .check
+.ow                  ; the submap's entry
+  REP #$30
+  JSR Entry : ASL : TAX
+.check
   LDA.l Tbl+${hx(LG_TBL)},x : CMP #$00FF : BNE .own
-  LDA.l Tbl+${hx(LG_TBL + 0x400)},x : CMP #$00FF : BNE .own
-  LDA.l Tbl+${hx(LG_TBL + 0x800)},x : CMP #$00FF : BNE .own
-  LDA.l Tbl+${hx(LG_TBL + 0xc00)},x : CMP #$00FF : BNE .own
+  LDA.l Tbl+${hx(LG_TBL + PART)},x : CMP #$00FF : BNE .own
+  LDA.l Tbl+${hx(LG_TBL + 2 * PART)},x : CMP #$00FF : BNE .own
+  LDA.l Tbl+${hx(LG_TBL + 3 * PART)},x : CMP #$00FF : BNE .own
   SEP #$20
   BRA .game
 .own
@@ -91,7 +106,7 @@ Gfx:
   TYA : CLC : ADC #${hx4(GAME_LAYER3_GFX)}
 + JSR Upload
   PLX : PLY
-  TXA : CLC : ADC #$0400 : TAX
+  TXA : CLC : ADC #${hx4(PART)} : TAX
   INY : CPY #$0004 : BNE -
   SEP #$20
   LDA #$01 : STA.l !Own
@@ -136,13 +151,47 @@ Upload:
   REP #$30
   RTS
 
+; (A/X 16 bit) the overworld's entry: 200 + the submap of the player
+Entry:
+  LDA.l !Player : AND #$00FF : TAX
+  LDA.l !Submap,x : AND #$00FF : CLC : ADC #$0200
+  RTS
+
+; the overworld loads (JSL from $00A153, A 8 bit, the screen off): the submap's LT3 copied in place of the game's
+; border, else the border's stripe image as the game
+Border:
+  PHP
+  REP #$30
+  JSR Entry
+  JSR Lt3
+  BNE +
+  SEP #$20
+  LDA #$06 : STA $12
++ PLP
+  RTL
+
 ; returns Z set: no image of the layer 3 setting (none, or the level's LT3 is there instead); else
 ; A = the setting - 1, as the game's code goes on. The LT3 file is uncompressed and at least as long as its
 ; size says (the editor offers only such); a compressed one is left out
 Map:
   PHP
   REP #$30
-  LDA.l $7E010B : AND #$01FF : TAX
+  LDA.l $7E010B : AND #$01FF
+  JSR Lt3
+  BEQ .game
+  PLP
+  SEP #$02
+  RTL
+.game
+  PLP
+  LDA !Setting : BEQ +
+  DEC
+  REP #$02
++ RTL
+
+; (A/X 16 bit) entry A's LT3 file copied to VRAM; Z clear: copied
+Lt3:
+  TAX
   PHX
   ASL : TAX
   LDA.l Tbl+${hx(LT3_TBL)},x
@@ -164,18 +213,15 @@ Map:
   LDA #$01 : STA $4300
   LDA #$18 : STA $4301
   LDA #$01 : STA $420B
-  PLP
-  SEP #$02
-  RTL
+  REP #$20
+  LDA #$0001
+  RTS
 .packed
 .none
   PLX
-.game
-  PLP
-  LDA !Setting : BEQ +
-  DEC
-  REP #$02
-+ RTL
+  REP #$20
+  LDA #$0000
+  RTS
 ; by DDFF: destination, the file's bytes skipped (the status bar's), the bytes copied (up to VRAM $6000)
 .vram
   dw ${copies.map((c) => hx4(c.vram)).join(', ')}
@@ -186,7 +232,7 @@ Map:
 
 Tbl:
   fillword $00FF : fill ${hx(DDFF_TBL)}
-  fillbyte $00 : fill $200
+  fillbyte $00 : fill ${hx(ENTRIES)}
 `;
 }
 
@@ -216,14 +262,15 @@ export function installLayer3Patch(rom: Rom): ApplyResult {
 export interface Lt3Place { dest: number; size: number }
 export interface Layer3Gfx extends Lt3Place { lt3: number; lg: number[] }
 
+// (n: a level 000–1FF, or a submap's entry 200–206: submapgfx.ts)
 export function levelLayer3(rom: Rom, n: number): Layer3Gfx {
   const t = table(rom);
-  return { lt3: rom.r16(t + LT3_TBL + n * 2), ...fromLt3Nibble(rom.r8(t + DDFF_TBL + n)), lg: [0, 1, 2, 3].map((k) => rom.r16(t + LG_TBL + k * 0x400 + n * 2)) };
+  return { lt3: rom.r16(t + LT3_TBL + n * 2), ...fromLt3Nibble(rom.r8(t + DDFF_TBL + n)), lg: [0, 1, 2, 3].map((k) => rom.r16(t + LG_TBL + k * PART + n * 2)) };
 }
 export function setLevelLayer3(rom: Rom, n: number, g: Layer3Gfx): void {
   const t = table(rom);
   rom.w16(t + LT3_TBL + n * 2, gfxNum(g.lt3));
-  g.lg.forEach((v, k) => rom.w16(t + LG_TBL + k * 0x400 + n * 2, gfxNum(v)));
+  g.lg.forEach((v, k) => rom.w16(t + LG_TBL + k * PART + n * 2, gfxNum(v)));
   rom.w8(t + DDFF_TBL + n, lt3Nibble(g));
 }
 

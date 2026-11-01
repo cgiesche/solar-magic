@@ -62,3 +62,15 @@ The editor keeps the files in its own bypass (SMWE: levels' and submaps' lists d
 takes Lunar Magic's place at `$04DBB9`: its code turns the screen off (the window has closed over it there) and NMI,
 runs the game's upload routine `$00A9DA` – which reads the submap's files and uploads only those that changed – and
 turns them on again.
+
+## Layer 3
+
+Lunar Magic's help: layer 3's files (LG1–LG4) and a tilemap file (LT3, destination "Start of layer 3", 0x800 bytes for
+256x256) per submap; "using an exit tile during the game will not reload the layer 3 tilemap, but the layer 3
+graphics will reload". The hijack map names `$00A153` (the overworld's load: `LDA #$06 : STA $12`, the border's
+stripe image) as the place Lunar Magic skips the border when a submap has an LT3 file.
+
+The editor keeps them in its layer 3 table (SMWL, entries 200–206 after the levels'): its graphics upload, which the
+overworld's load and the editor's code at `$04DBB9` run, takes the submap's LG files; a JSL at `$00A153` copies the
+LT3 file instead of setting the border's stripe image. The level name's stripe (`$508B`) and the lives are written
+over the file as over the border.

@@ -100,7 +100,7 @@ One of the files 000–FFF (the game's GFX 00–31 and the ExGFX) or an Anim gra
 _Avoid_: ExGFX (for all of them), GFX entry (that is the file table's)
 
 **Graphics slot**:
-One of a level's places for a graphics file (core/gfxslots.ts): FG1–FG3, BG1 and SP1–SP4 (the header's tileset and sprite set by default), BG2/BG3, layer 3's LG1–LG4 (the game's 28–2B by default) and LT3 (none by default; an LT3 file copies at most its own length). A submap's are FG1–FG4 and SP1–SP4 (the overworld's files by default, core/submapgfx.ts). FF puts the default back. Changing one is a ROM edit of that level (or submap) only.
+One of a level's places for a graphics file (core/gfxslots.ts): FG1–FG3, BG1 and SP1–SP4 (the header's tileset and sprite set by default), BG2/BG3, layer 3's LG1–LG4 (the game's 28–2B by default) and LT3 (none by default; an LT3 file copies at most its own length). A submap's are FG1–FG4 and SP1–SP4 (the overworld's files by default, core/submapgfx.ts) and layer 3's LG1–LG4 and LT3 (none: the game's border). FF puts the default back. Changing one is a ROM edit of that level (or submap) only.
 _Avoid_: GFX bypass (Lunar Magic's table), slot (alone, where an animation slot could be meant)
 
 **Pixel editor**:

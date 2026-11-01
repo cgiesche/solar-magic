@@ -5,6 +5,8 @@
 // other submap; one changed after the special world only after it.
 // Graphics files: a file put into a submap's slot is in VRAM where the slot is when the overworld loads there and when
 // Mario walks there from the main map; other submaps keep theirs; the default back: the game's file again.
+// Layer 3: the patched game shows the clean game's layer 3 on every submap; LG1 of a submap is in VRAM there (also when
+// Mario walks there); an LT3 file replaces the border there (the level name still written over it), not elsewhere.
 // node tools/testsubmapgfx.ts
 import { Rom, snesToPc } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
@@ -14,6 +16,7 @@ import {
   submapSlots, assignSubmapSlot,
   submapPalettePatch, submapColor, setSubmapColor, submapPaletteRanges, SUBMAPS, SUBMAP_PALETTES, SUBMAP_PALETTE_SIZE,
 } from '../src/core/submapgfx.ts';
+import { importGfxFile } from '../src/core/gfxfiles.ts';
 import { cleanImage, editorImage } from './fixture.ts';
 
 let bad = 0;
@@ -114,7 +117,7 @@ const holds = (a: Uint8Array, b: Uint8Array, was: Uint8Array) => a.filter((v, i)
 const vrams = (rom: Rom) => { const emu = new OverworldEmulator(rom); return Array.from({ length: SUBMAPS }, (_, m) => emu.load(m, 0).vram); };
 {
   const slots = submapSlots(rom, 1), fg1 = slots.find((x) => x.name === 'FG1')!, fg2 = slots.find((x) => x.name === 'FG2')!, sp1 = slots.find((x) => x.name === 'SP1')!;
-  check(slots.map((x) => x.name).join() === 'FG1,FG2,FG3,FG4,SP1,SP2,SP3,SP4' && slots.every((x) => !x.custom), `Yoshi's Island's slots, all the game's (${slots.map((x) => `${x.name} ${hx(x.file)}`).join(', ')})`);
+  check(slots.map((x) => x.name).join() === 'FG1,FG2,FG3,FG4,SP1,SP2,SP3,SP4,LG1,LG2,LG3,LG4,LT3' && slots.every((x) => !x.custom), `Yoshi's Island's slots, all the game's (${slots.map((x) => `${x.name} ${hx(x.file)}`).join(', ')})`);
   const before = vrams(rom);
   assignSubmapSlot(rom, 1, 'FG1', fg2.file);
   check(submapSlots(rom, 1)[0].file === fg2.file && submapSlots(rom, 1)[0].custom, `FG1 of Yoshi's Island set to ${hx(fg2.file)}`);
@@ -135,6 +138,35 @@ const vrams = (rom: Rom) => { const emu = new OverworldEmulator(rom); return Arr
   assignSubmapSlot(rom, 1, 'SP1', 0xff);
   const back = vrams(rom);
   check(!blocks(before[1], back[1]).length && submapSlots(rom, 1).every((x) => !x.custom), 'the defaults back: the game\'s graphics');
+}
+
+// ---- layer 3 ----
+// layer 3's graphics (VRAM $4000–$47FF words: LG1–LG4, 0x800 bytes each) and tilemap ($5000–$5FFF)
+const L3_GFX = 0x8000, L3_MAP = 0xa000, L3_END = 0xc000;
+const l3 = (rom: Rom) => vrams(rom).map((v) => v.slice(L3_GFX, L3_END));
+{
+  const a = l3(clean), b = l3(rom);
+  check(a.every((v, m) => same(v, b[m])), 'layer 3 (graphics and tilemap) on every submap as in the clean game');
+  const lg = submapSlots(rom, 1).filter((x) => x.kind === 'lg'), lt3 = submapSlots(rom, 1).find((x) => x.kind === 'lt3')!;
+  check(lg.map((x) => `${x.name} ${hx(x.file)}`).join() === 'LG1 28,LG2 29,LG3 2A,LG4 2B' && lt3.file === 0xff, `Yoshi's Island's layer 3 slots: ${lg.map((x) => `${x.name} ${hx(x.file)}`).join(', ')}, LT3 none`);
+  assignSubmapSlot(rom, 1, 'LG1', 0x29);
+  const c = l3(rom), g = (v: Uint8Array, k: number) => v.subarray(k * 0x800, (k + 1) * 0x800);
+  check(same(g(c[1], 0), g(c[1], 1)) && !same(g(b[1], 0), g(c[1], 0)), 'LG1 of Yoshi\'s Island set to 29: loaded there');
+  check(c.every((v, m) => m === 1 || same(v, b[m])), 'the other submaps keep the game\'s layer 3');
+  const { s, main } = walk(rom);
+  check(same(g(s.vram.subarray(L3_GFX), 0), g(c[1], 0)) && !same(g(main.vram.subarray(L3_GFX), 0), g(c[1], 0)), 'walked onto Yoshi\'s Island: its LG1 loaded');
+  // an LT3 file: tile 0x55 everywhere (the start of layer 3, 256x256)
+  const map = new Uint8Array(0x2000);
+  for (let i = 0; i < map.length; i += 2) { map[i] = 0x55; map[i + 1] = 0x39; }
+  importGfxFile(rom, 0xe80, map);
+  assignSubmapSlot(rom, 1, 'LT3', 0xe80, { dest: 1, size: 2 });
+  const d = l3(rom), m1 = d[1].subarray(L3_MAP - L3_GFX), w = (v: Uint8Array, i: number) => v[i * 2] | (v[i * 2 + 1] << 8);
+  const rows = Array.from({ length: 32 }, (_, y) => Array.from({ length: 32 }, (_, x) => w(m1, y * 32 + x)));
+  const own = rows.flat().filter((t) => t === 0x3955).length, name = rows[4].slice(11, 30).filter((t) => t !== 0x3955).length;
+  check(own >= 32 * 32 - 32 && name > 0, `LT3 set on Yoshi's Island: its tilemap there (${own} of 1024 tiles; the game writes the level name over row 4 – ${name} tiles – and the lives)`);
+  check(d.every((v, m) => m === 1 || same(v, b[m])), 'the other submaps keep the game\'s border');
+  for (const n of ['LG1', 'LT3']) assignSubmapSlot(rom, 1, n, 0xff);
+  check(l3(rom).every((v, m) => same(v, b[m])), 'the defaults back: the game\'s layer 3');
 }
 
 if (bad) { console.log(`\n${bad} FAILED`); process.exit(1); }

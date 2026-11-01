@@ -20,7 +20,7 @@ const ORDER: BinPlanItem['status'][] = ['new', 'replace', 'skip', 'unchanged']; 
 import { cgramToRGBA } from '../../core/gfx.ts';
 import { hex } from '../../core/names.ts';
 import {
-  freeGfx, gfxRange, gfxRangeFor, gfxDataSize, gfxNumberProblem, gfxHex, VANILLA_GFX, AS_IS_FIRST, GFX_FILES, MAX_GFX, GFX_NONE, type GfxFileKind,
+  freeGfx, submapGfxEntry, gfxRange, gfxRangeFor, gfxDataSize, gfxNumberProblem, gfxHex, VANILLA_GFX, AS_IS_FIRST, GFX_FILES, MAX_GFX, GFX_NONE, type GfxFileKind,
 } from '../../core/patches.ts';
 import { exgfxName } from '../../core/map16file.ts';
 import { gfxBinData, gfxBinName, storeGfxBin, parseGfxBinName, binFiles, planGfxBins, applyGfxBins, exportAllGfx, type BinFile, type BinPlanItem } from '../../core/gfxbin.ts';
@@ -232,7 +232,7 @@ export class GfxTab implements WsPanel {
 
   // ---------- palette ----------
   private gfxSlots(): Slot[] {
-    if (this.map !== null) return submapSlots(this.app.rom, this.map).map((x) => ({ ...x, kind: 'gfx', map16: !x.sprite }));
+    if (this.map !== null) return submapSlots(this.app.rom, this.map);
     const lv = this.app.level;
     return levelSlots(this.app.rom, lv.number, lv.header);
   }
@@ -316,9 +316,9 @@ export class GfxTab implements WsPanel {
 
   // where the LT3 file goes in the layer 3 tilemap, and how much of it
   private lt3Settings(): HTMLElement {
-    const app = this.app, n = app.level.number, g = levelLayer3(app.rom, n), bytes = gfxBytes(app.rom, g.lt3)?.data.length ?? 0;
+    const app = this.app, n = this.map !== null ? submapGfxEntry(this.map) : app.level.number, g = levelLayer3(app.rom, n), bytes = gfxBytes(app.rom, g.lt3)?.data.length ?? 0;
     const set = (what: string, v: Partial<typeof g>) => {
-      try { app.romEdit(`LT3 of level ${hex(n, 3)}: ${what}`, () => setLevelLayer3(app.rom, n, { ...levelLayer3(app.rom, n), ...v })); }
+      try { app.romEdit(`LT3 of ${this.owner()}: ${what}`, () => setLevelLayer3(app.rom, n, { ...levelLayer3(app.rom, n), ...v })); }
       catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
     };
     const sel = (opts: string[], cur: number, title: string, on: (v: number) => void, off: (i: number) => boolean = () => false) => h('select', { title, onchange: (e: Event) => on(Number((e.target as HTMLSelectElement).value)) },
@@ -368,7 +368,7 @@ export class GfxTab implements WsPanel {
       onclick: () => { done(num); dlg.close(); },
     }, img ?? h('div', { class: 'gt-gal-none' }, '—'), h('b', { class: 'mono' }, label), h('span', { class: 'hint' }, sub));
     const empty = s.kind === 'ext' || s.kind === 'lt3';
-    grid.append(item(-1, empty ? 'none' : `Default (${gfxName(s.def)})`, s.kind === 'lt3' ? 'the layer 3 setting\'s image' : empty ? 'Leave slot empty' : s.kind === 'lg' ? 'the game\'s layer 3 graphics'
+    grid.append(item(-1, empty ? 'none' : `Default (${gfxName(s.def)})`, s.kind === 'lt3' ? (this.map !== null ? 'the game\'s border' : 'the layer 3 setting\'s image') : empty ? 'Leave slot empty' : s.kind === 'lg' ? 'the game\'s layer 3 graphics'
       : this.map !== null ? 'the overworld\'s graphics in the game' : s.sprite ? 'from the sprite graphics in the header' : 'from the tileset in the header'));
     const extra = (code: number, label: string, sub: string) => h('div', { class: 'gt-gal-item gt-gal-new', onclick: () => { done(code); dlg.close(); } },
       h('div', { class: 'gt-gal-none' }, '+'), h('b', null, label), h('span', { class: 'hint' }, sub));
