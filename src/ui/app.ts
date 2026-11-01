@@ -1202,9 +1202,19 @@ export class App {
   // The overworld as emulated, learned in the probe worker and kept in memory while the ROM bytes it read are unchanged
   // (the latest event progresses of each map): undefined while it runs, then `done` is called. Map `map` at event
   // progress `progress` (a new request drops the one still waiting: the slider), the submaps' views, the sprites' images
-  // at a map and progress (a new request drops the one still waiting).
-  overworldMap(map: number, progress: number, done: (r: OwRender) => void): OwRender | undefined {
-    return this.probes.learn<OwRender>(`owm1:${map}`, { kind: 'owMap', map, progress }, { lane: 'ow', input: { progress }, replace: true, label: 'Overworld', done });
+  // at a map and progress (a new request drops the one still waiting). The maps' requests replace those of their
+  // lane only: another view's (the exit dialog's map picker) asks in its own
+  overworldMap(map: number, progress: number, done: (r: OwRender) => void, lane = 'ow'): OwRender | undefined {
+    return this.probes.learn<OwRender>(`owm1:${map}`, { kind: 'owMap', map, progress }, { lane, input: { progress }, replace: true, label: 'Overworld', done });
+  }
+  // layer 1 as after event e without its layer 1 changes (owevents.ts layer1Without: what a layer 1 stroke painted on
+  // the event is compared with), learned in the probe worker and kept in memory while the ROM bytes it read are
+  // unchanged: undefined while it runs (a new request drops the one still waiting), then `done` is called; null when
+  // it could not be emulated (not asked again until the ROM changes)
+  layer1Without(e: number, done: (l1: Uint8Array | null) => void): Uint8Array | null | undefined {
+    const r = this.probes.learnOrFailed<Uint8Array>(`owlw1:${e}`, { kind: 'owL1Without', event: e },
+      { lane: 'owlw', replace: true, label: 'Overworld event', done, failed: () => done(null) });
+    return r === FAILED ? null : r;
   }
   // the save at an event progress (owprogress.ts progressSaves: the level flags, switch palaces and events triggered
   // the game has then), learned in the probe worker and kept in memory while the ROM bytes it read are unchanged:

@@ -29,6 +29,7 @@ import {
   destroyEffects, l1Index,
 } from './overworld.ts';
 import { RAM, getS16 } from './ram.ts';
+import { record, countReads } from './romdeps.ts';
 import type { Job } from './jobrunner.ts';
 
 const DIVIDERS = 0x04e359, DIVIDER_WORDS = 0x79; // words: the first step of each event, the end
@@ -287,10 +288,32 @@ export function paintEventL1(d: EventData, e: number, after: ArrayLike<number>, 
 }
 // layer 1 as after events 0 … e passed without event e's layer 1 changes (emulated, on a copy of the ROM)
 export function layer1Without(rom: Rom, e: number): Uint8Array {
-  const copy = new Rom(rom.data.slice()), d = readEvents(copy), silent = d.silent.slice();
-  silent[e] = silent[e].filter((s) => s.layer === 2);
-  writeEvents(copy, { ...d, silent });
-  return gameL1(new OverworldEmulator(copy).load(0, e + 1)).slice();
+  return new EventL1Copy().without(rom, e);
+}
+// layer1Without on a copy of the ROM kept between calls (taking the ROM's bytes each time): its emulator keeps the
+// title screen while the bytes reaching it read stay. What the copy's events and load read counts as read from the
+// ROM (its recorders: a result kept by them goes when the ROM's events or what the load read change)
+export class EventL1Copy {
+  private copy: { rom: Rom; emu: OverworldEmulator } | null = null;
+  without(rom: Rom, e: number): Uint8Array {
+    let c = this.copy;
+    if (c && c.rom.data.length === rom.data.length) c.rom.data = rom.data.slice();
+    else { const copy = new Rom(rom.data); c = this.copy = { rom: copy, emu: new OverworldEmulator(copy) }; }
+    const edit = record(c.rom, () => {
+      const d = readEvents(c.rom), silent = d.silent.slice();
+      silent[e] = silent[e].filter((s) => s.layer === 2);
+      writeEvents(c.rom, { ...d, silent });
+    }, { counted: false });
+    const { result, reads } = c.emu.loadRecorded(0, e + 1);
+    countReads(rom, null, edit.reads);
+    countReads(rom, null, reads);
+    return gameL1(result).slice();
+  }
+}
+// layer1Without as a job of the result learner (probe worker: the overworld view asks for it while an event is
+// painted), on the learner's kept copy. One step
+export function* layer1WithoutJob(copy: EventL1Copy, rom: Rom, e: number): Job<Uint8Array> {
+  return copy.without(rom, e);
 }
 // the layer 1 tiles (l1Index) event e changes
 export const eventL1Tiles = (d: EventData, e: number): number[] => d.silent[e].filter((s) => s.layer === 1).map((s) => s.loc);

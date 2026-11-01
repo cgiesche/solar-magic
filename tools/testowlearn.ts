@@ -6,6 +6,9 @@
 // event progresses replace each other (only the latest is loaded); without a worker it all runs on the main thread.
 // The save at an event progress (#255, owprogress.ts progressSaves; owSave, App.progressSave) too: as learned
 // directly, another progress known without emulating again, without a worker on the main thread.
+// Layer 1 as after an event without its layer 1 changes (#236, owevents.ts layer1Without; owL1Without,
+// App.layer1Without), what an event's layer 1 stroke is compared with: as found directly, not on the main thread,
+// asked again after the event's layer 1 was painted (its silent steps written), again as found directly.
 import { Rom } from '../src/core/rom.ts';
 import { ProbeHost } from '../src/core/probehost.ts';
 import type { LearnJob, ProbeMessage, ProbeReply } from '../src/core/probeprotocol.ts';
@@ -13,7 +16,7 @@ import { ProbeClient } from '../src/core/probeclient.ts';
 import { ResultCache, RomFingerprint } from '../src/core/romdeps.ts';
 import { loadLevel, L2_PTRS } from '../src/core/level.ts';
 import { OverworldEmulator, OverworldLoads, readL1, writeL1, l1Index, type OwRender } from '../src/core/overworld.ts';
-import { submapViews, type Rect } from '../src/core/owevents.ts';
+import { submapViews, layer1Without, readEvents, writeEvents, paintEventL1, eventL1Tiles, type Rect } from '../src/core/owevents.ts';
 import { owSpriteImages, type OwSpriteView } from '../src/core/owsprites.ts';
 import { progressSaves, type ProgressSave } from '../src/core/owprogress.ts';
 import { editorImage } from './fixture.ts';
@@ -67,8 +70,10 @@ function editor(worker: Worker | null) {
     client.learn<OwSpriteView[]>(`ows1:${m}`, { kind: 'owSprites', map: m, progress }, { lane: 'ows', input: { progress }, replace: true, done });
   const save = (progress: number, done: (v: ProgressSave) => void = () => {}) =>
     client.learn<ProgressSave>('owps1', { kind: 'owSave', progress }, { lane: 'owps', input: { progress }, done });
+  const without = (event: number, done: (v: Uint8Array) => void = () => {}) =>
+    client.learn<Uint8Array>(`owlw1:${event}`, { kind: 'owL1Without', event }, { lane: 'owlw', replace: true, done });
   const drain = () => { while (steps.length) steps.shift()!(); };
-  return { rom, client, map, views, sprites, save, drain };
+  return { rom, client, map, views, sprites, save, without, drain };
 }
 
 const sameRender = (a: OwRender | undefined, b: OwRender) =>
@@ -133,6 +138,29 @@ loadsHere = 0;
   await settle();
   w.run();
   check(!!painted && painted.wram !== got!.wram && loadsHere === 0, 'layer 1 painted: loaded again in the worker; the main thread loaded no overworld');
+
+  // layer 1 without an event's layer 1 changes (the first with some)
+  const d0 = readEvents(e.rom), ev = [...d0.silent.keys()].find((k) => eventL1Tiles(d0, k).length)!;
+  const withoutHere = (rom: Rom) => { const n = loadsHere, v = layer1Without(new Rom(rom.data.slice()), ev); loadsHere = n; return v; };
+  let wo: Uint8Array | undefined;
+  check(e.without(ev, (v) => (wo = v)) === undefined, `layer 1 without event ${ev.toString(16)}'s changes: asked for`);
+  await settle();
+  w.run();
+  const directWo = withoutHere(e.rom);
+  check(!!wo && Buffer.compare(wo, directWo) === 0 && loadsHere === 0,
+    'layer 1 without the event: as found directly, not on the main thread');
+  check(!!e.without(ev), 'asked again: known at once');
+  // the event's layer 1 painted (a tile more, as an event stroke writes it)
+  const at = l1Index(0, 5, 5), after = Uint8Array.from(directWo);
+  after[at] ^= 1;
+  writeEvents(e.rom, paintEventL1(readEvents(e.rom), ev, after, directWo, new Set([at])));
+  check(eventL1Tiles(readEvents(e.rom), ev).includes(at), "the event's layer 1 painted");
+  let wo2: Uint8Array | undefined;
+  check(e.without(ev, (v) => (wo2 = v)) === undefined, "the event's layer 1 painted: asked again");
+  await settle();
+  w.run();
+  check(!!wo2 && Buffer.compare(wo2, withoutHere(e.rom)) === 0 && Buffer.compare(wo2, directWo) === 0 && loadsHere === 0,
+    "again as found directly, the same as before (the event's own layer 1 changes aren't in it), not on the main thread");
 }
 
 // without a worker: on the main thread, in background slices

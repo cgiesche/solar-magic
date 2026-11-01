@@ -6,7 +6,7 @@ import type { App } from './app.ts';
 import { h, modal, select, checkbox, toast } from './dom.ts';
 import { hex2, hex3 } from '../core/names.ts';
 import { OW_ACTIONS, owActionName, type OverworldExit } from '../core/level.ts';
-import { OverworldEmulator, MAP_NAMES, OW_EVENTS, eventNames, readL1, readL2, readTranslevels, translevelToLevel, l1Index } from '../core/overworld.ts';
+import { MAP_NAMES, OW_EVENTS, eventNames, readL1, readL2, readTranslevels, translevelToLevel, l1Index } from '../core/overworld.ts';
 import { readTeleport, readTeleports, locationText, tileText, overworldExitText, type OwTile } from '../core/owteleport.ts';
 import { drawOwMap, putImage } from './overworld.ts';
 
@@ -50,23 +50,35 @@ function teleportTo(app: App, idx: number, tile: OwTile): void {
 }
 
 // a tile of an overworld map, clicked; the tiles teleports lead to are marked with their location index, `cur`
-// framed. The map as in the ROM
+// framed. The map as in the ROM, emulated in the probe worker (App.overworldMap, in a lane of its own: the overworld
+// view's requests stay); until its load comes the map is dark with a note
 export function pickOverworldTile(app: App, cur: OwTile | null): Promise<OwTile | null> {
   return new Promise((resolve) => {
-    const rom = app.rom, emu = new OverworldEmulator(rom), l1 = readL1(rom), l2 = readL2(rom), tls = readTranslevels(rom);
+    const rom = app.rom, l1 = readL1(rom), l2 = readL2(rom), tls = readTranslevels(rom);
     const images = new Map<number, HTMLCanvasElement>();
-    let map = cur?.submap ?? 0, hover: { x: number; y: number } | null = null, done = false;
+    let map = cur?.submap ?? 0, hover: { x: number; y: number } | null = null, done = false, open = true;
     const canvas = h('canvas', { width: 512, height: 512, class: 'ow-pick' });
     const status = h('div', { class: 'hint' }, 'Click a tile: Mario comes out there.');
+    // (undefined while the map's load is emulated)
     const image = (m: number) => {
       let c = images.get(m);
-      if (!c) { c = document.createElement('canvas'); putImage(c, drawOwMap(rom, emu.load(m, 0), m > 0 ? 1 : 0, l1, l2)); images.set(m, c); }
+      if (c) return c;
+      const r = app.overworldMap(m, 0, () => { if (open) paint(); }, 'owpick');
+      if (!r) return undefined;
+      c = document.createElement('canvas');
+      putImage(c, drawOwMap(rom, r, m > 0 ? 1 : 0, l1, l2));
+      images.set(m, c);
       return c;
     };
     const paint = () => {
       const ctx = canvas.getContext('2d')!;
       ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(image(map), 0, 0);
+      const img = image(map);
+      if (img) ctx.drawImage(img, 0, 0);
+      else {
+        ctx.fillStyle = '#000'; ctx.fillRect(0, 0, 512, 512);
+        ctx.fillStyle = '#fff'; ctx.font = '14px sans-serif'; ctx.fillText('Loading the map…', 16, 28);
+      }
       const region = map > 0 ? 1 : 0;
       ctx.font = 'bold 8px monospace';
       for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
@@ -101,7 +113,7 @@ export function pickOverworldTile(app: App, cur: OwTile | null): Promise<OwTile 
       h('label', { class: 'row' }, 'Map ', select(MAP_NAMES.map((n, i) => [i, n] as [number, string]), map, (v) => { map = v; paint(); })),
       canvas, status,
       h('div', { class: 'hint' }, 'Blue: places teleports already lead to (their location index); a star\'s or pipe\'s is shared. Another tile gets a location of its own.')),
-    [{ label: 'Cancel' }], () => { if (!done) resolve(null); });
+    [{ label: 'Cancel' }], () => { open = false; app.probes.unlearn('owpick'); if (!done) resolve(null); });
     paint();
   });
 }

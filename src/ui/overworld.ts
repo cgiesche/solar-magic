@@ -15,7 +15,7 @@ import { levelName, hasLevelName } from '../core/levelnames.ts';
 import { levelNameField } from './levelnamefield.ts';
 import {
   readEvents, writeEvents, applyEvents, paintEvent, reorderSteps, eventRunners, eventTitle, eventPlace, submapOf, pieceTiles, isBig, l2XY,
-  paintEventL1, layer1Without, eventL1Tiles, exitChanges, type EventData, type EventRunner, type Rect, type ExitChanges,
+  paintEventL1, eventL1Tiles, exitChanges, type EventData, type EventRunner, type Rect, type ExitChanges,
 } from '../core/owevents.ts';
 import { isPathKind, PATH_KIND_NAMES, type PathKind } from '../core/owpaths.ts';
 import type { OwSpriteView } from '../core/owsprites.ts';
@@ -133,8 +133,12 @@ export class OverworldView {
   // the event being painted (both layers shown and painted as after it), -1 none: the map before events
   event = -1;
   // l1: layer 1 as after it (the game's at the event progress just after it, game; null until its load comes), with the
-  // stroke being painted
-  private ev: { data: EventData; before: Uint16Array; after: Uint16Array; l1: Uint8Array | null; game: Uint8Array | null; runners: Map<number, EventRunner[]> } | null = null;
+  // stroke being painted; without: layer 1 as after it without its layer 1 changes (what a stroke is compared with,
+  // App.layer1Without; undefined while it is emulated, null when it could not be). Layer 1 is painted once both come
+  private ev: {
+    data: EventData; before: Uint16Array; after: Uint16Array; l1: Uint8Array | null; game: Uint8Array | null; without: Uint8Array | null | undefined;
+    runners: Map<number, EventRunner[]>;
+  } | null = null;
   private hoverStep: { kind: StepKind; k: number } | null = null;
   private playing: { start: number; before: HTMLCanvasElement; stepMs: number; fade: boolean } | null = null;
   private timeline = h('div', { class: 'ow-timeline' });
@@ -520,6 +524,8 @@ export class OverworldView {
     if (e.button === 2 || (e.button === 0 && e.shiftKey && !e.ctrlKey)) {
       // (a level tile painted gets a translevel: not before the level tiles are known)
       if (this.mode === 'l1' && !this.pathKinds()) { toast('The path tiles are still being learned – layer 1 can be painted in a moment.'); return; }
+      if (this.mode === 'l1' && this.ev?.without === null) { toast('Layer 1 can\'t be painted on this event: the map without its layer 1 changes could not be emulated.', 'error'); return; }
+      if (this.mode === 'l1' && this.ev && (!this.ev.l1 || !this.ev.without)) { toast('The map after the event is still being emulated – layer 1 can be painted in a moment.'); return; }
       this.drag = { kind: 'paint', layer: this.mode, x0: c.x, y0: c.y, lastX: c.x, lastY: c.y };
       this.paintAt(c.x, c.y);
       return;
@@ -615,7 +621,7 @@ export class OverworldView {
   paintAt(x: number, y: number): void {
     const b = this.brush;
     if (b.kind !== this.mode) return;
-    if (this.mode === 'l1' && this.ev && !this.ev.l1) return; // (the map after the event is still emulated)
+    if (this.mode === 'l1' && this.ev && (!this.ev.l1 || !this.ev.without)) return; // (the maps the event is painted with are still emulated)
     const n = this.mode === 'l1' ? 32 : 64;
     let changed = false;
     for (let dy = 0; dy < b.h; dy++) for (let dx = 0; dx < b.w; dx++) {
@@ -769,7 +775,8 @@ export class OverworldView {
     const e = this.event;
     if (e < 0) { this.ev = null; this.buildTimeline(); return; }
     const rom = this.app.rom, data = readEvents(rom), base = readL2(rom), before = applyEvents(base, data, 0, e);
-    this.ev = { data, before, after: applyEvents(before, data, e, e + 1), l1: null, game: null, runners: eventRunners(rom) };
+    const ev = this.ev = { data, before, after: applyEvents(before, data, e, e + 1), l1: null, game: null, without: undefined as Uint8Array | null | undefined, runners: eventRunners(rom) };
+    ev.without = this.app.layer1Without(e, (v) => { if (this.ev === ev) ev.without = v; });
     this.buildTimeline();
   }
   // (null while the submaps' views are learned)
@@ -802,14 +809,16 @@ export class OverworldView {
       this.sync();
     }
   }
-  // a stroke on layer 1 while an event is painted: its layer 1 changes found again (the map after it without them
-  // emulated), with the translevels of level tiles it placed where none was; one ROM edit
+  // a stroke on layer 1 while an event is painted: its layer 1 changes found again (the map after it without them,
+  // emulated in the probe worker before the stroke: none is painted without it), with the translevels of level tiles
+  // it placed where none was; one ROM edit
   endEventL1Stroke(): void {
-    const rom = this.app.rom, e = this.event, after = this.ev!.l1!, game = this.ev!.game!, tls = this.tls;
+    const rom = this.app.rom, e = this.event, after = this.ev!.l1, game = this.ev!.game, without = this.ev!.without, tls = this.tls;
+    if (!after || !game || !without) return;
     const painted = new Set([...after.keys()].filter((i) => after[i] !== game[i]));
     try {
       this.app.romEdit(`${eventTitle(this.ev!.runners, e)}: paint layer 1`, () => {
-        writeEvents(rom, paintEventL1(readEvents(rom), e, after, layer1Without(rom, e), painted));
+        writeEvents(rom, paintEventL1(readEvents(rom), e, after, without, painted));
         writeTranslevels(rom, tls);
       });
     } catch (err) {
