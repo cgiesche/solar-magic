@@ -28,6 +28,7 @@ const with_ = (id: OwOptionId, on: boolean) => { const rom = fresh(); setOwOptio
   for (const o of OW_OPTIONS) {
     const was = rom.data.slice();
     check(owOptionValue(rom, o.id) === o.game, `${o.id}: the editor's ROM has the game's (${o.game})`);
+    // (bank 3's place is in the editor's own save prompt routine, not in the clean game)
     const inClean = o.bytes.filter((b) => b.at < 0x030000 || b.at >= 0x040000);
     check(inClean.every((b) => same(clean.bytes(b.at, b.game.length), b.game)), `${o.id}: the clean game's bytes are the game's`);
     const s = new RomEditSession(rom);
@@ -136,6 +137,17 @@ function reveal(rom: Rom, tl: number): { gaps: number[]; l2: Uint8Array } {
   check(off.gaps.every((g) => g === Math.ceil(0x40 / DEFAULT_REVEAL_SPEED) + 2) && fast.gaps.every((g) => g === want(rom)),
     `without the fade a step every $40 / speed frames + 2: speed ${DEFAULT_REVEAL_SPEED}: ${steps(off)}; ${hx(MAX_REVEAL_SPEED)}: ${steps(fast)}`);
   check(same(fade.l2, off.l2) && same(fade.l2, fast.l2), 'the same layer 2 after the event');
+  // the sprites' translucency: off with the fade off, a switch of its own then; the fade's state doesn't depend on it
+  const translucent = (r: Rom) => {
+    const p = PlaySession.overworld(new LevelEmulator(r), tileOf(tl));
+    for (let f = 0; f < 5; f++) p.frame();
+    return (p.wram[RAM.colorMath] & 0x10) !== 0;
+  };
+  check(owOptionValue(rom, 'translucency') === false && translucent(fresh()) && !translucent(rom), 'the fade off: sprites in palettes C–F not translucent (emulated)');
+  setOwOption(rom, 'translucency', true);
+  check(owOptionValue(rom, 'pathFade') === false && translucent(rom), 'translucency turned back on with the fade off (as Lunar Magic allows)');
+  setOwOption(rom, 'pathFade', true);
+  check(owOptionValue(rom, 'pathFade') === true && owOptionValue(rom, 'translucency') === true, 'the fade on again: translucent as in the game');
   let threw = false;
   try { setRevealSpeed(fresh(), 3); } catch { threw = true; }
   check(threw, 'no reveal speed with the fade on');

@@ -821,13 +821,14 @@ that writes the options; ROMs Lunar Magic saved with options set show the same):
 | Start+Select exits passed levels | `$00A267` | `BPL` → `BRA` (off) |
 | Start scrolls the main map | `$048380` | `AND #$10` → `AND #$00` (off) |
 | The game's 5 hardcoded paths | `$049307` | `BRA` over the table lookup (off) |
-| Event path fade effect | `$04E6FA`, `$04E73E`, `$04E75E`, `$04EAAE`, `$04EACC`, `$00A0EB` | off: a step's tiles written at once, Lunar Magic's step routine at `$04EACC` with the path reveal speed (`$04EAD1`, 6), sprites not translucent |
+| Event path fade effect | `$04E6FA`, `$04E73E`, `$04E75E`, `$04EAAE`, `$04EACC` | off: a step's tiles written at once, Lunar Magic's step routine at `$04EACC` with the path reveal speed (`$04EAD1`, 6) |
+| Translucent sprites in palettes C–F (with the fade off) | `$00A0EB` | `LDA #$30` → `#$20`: turned off with the fade, can be turned on again |
 | Save prompt after castles, fortresses, ghost houses, switch palaces | `$04E622`, `$03BA26` | off: the save tiles don't count; a level tile's own save prompt flag still does |
 | Save Luigi's map position | `$048F9F` | on: `BRA` over the copy of Mario's position |
 | Players can exchange lives / L/R opens the life exchange | `$04828D` / `$04836E` | `BEQ` → `BRA` (off) |
 
 The save prompt routine of the level tile settings (`$03BA10`) is Lunar Magic's byte for byte, with its switch at
-`+$16`. With the fade off a step follows every `$40` / speed + 2 frames (the timeline's *Play* shows it so); the
+`+$16` (a byte of the editor's routine, not of the clean game; the other places are the clean game's). With the fade off a step follows every `$40` / speed + 2 frames (the timeline's *Play* shows it so); the
 fade takes 14. Bytes a patch changed show the option as changed by a patch, and it can't be switched.
 `tools/testowoptions.ts` checks each option in the game by emulation.
 

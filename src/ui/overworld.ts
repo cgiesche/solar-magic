@@ -1062,6 +1062,7 @@ export class OverworldView {
     const rom = this.app.rom;
     const rows: HTMLElement[] = [];
     for (const o of OW_OPTIONS) {
+      if (o.sub && owOptionValue(rom, o.sub.of) !== o.sub.when) continue;
       const v = owOptionValue(rom, o.id);
       if (v === null) { rows.push(h('div', { class: 'row hint warn-text', title: o.title }, `⚠ ${o.label}: its code was changed by a patch`)); continue; }
       const c = checkbox(o.label, o.title, v, (on) => this.app.romEdit(`${o.label}: ${on ? 'on' : 'off'}`, () => setOwOption(rom, o.id, on)));
@@ -1069,11 +1070,12 @@ export class OverworldView {
         c.querySelector('input')!.disabled = true;
         c.title += ` – no effect while "${owOption(o.needs).label}" is off`;
       }
+      if (o.sub) c.classList.add('ow-option-sub');
       rows.push(c);
       const speed = o.id === 'pathFade' ? revealSpeed(rom) : null;
       if (speed !== null) {
         const inp = hexInput(speed, 2, (n) => this.app.romEdit('Path reveal speed', () => setRevealSpeed(rom, n)), MAX_REVEAL_SPEED, (n) => n >= 1 || 'at least 1');
-        inp.title = `How fast each step of an event's path appears: added to a counter every frame, a step at 40 (${DEFAULT_REVEAL_SPEED.toString(16).toUpperCase()}: Lunar Magic's default; 40: a step every few frames)`;
+        inp.title = `How fast each step of an event's path appears: added to a counter every frame, a step at 40 (${DEFAULT_REVEAL_SPEED.toString(16).toUpperCase()}: Lunar Magic's default; 40: a step every 3 frames)`;
         rows.push(h('div', { class: 'prop ow-option-sub' }, h('label', null, 'Path reveal speed'), inp));
       }
     }

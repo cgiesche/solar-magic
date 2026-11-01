@@ -9,8 +9,8 @@
 //   11F–120, 10C–10D, and 24 to a pipe by position) – a BRA over the lookup ($049307)
 // - path fade: the event path's fade-in (palettes, translucent sprites); off, each step's tiles are written at once
 //   and the next one follows after $40 / speed frames (Lunar Magic's "Path Reveal Speed", 6 by default; the ADC's
-//   operand in its routine at $04EACC). Off also turns off the sprites' translucency the fade needs ($00A0EB,
-//   Lunar Magic's "Enable translucency for palettes C-F in sprites" unchecked)
+//   operand in its routine at $04EACC). Turned off, it also turns off the sprites' translucency the fade needs
+//   ($00A0EB), Lunar Magic's "Enable translucency for palettes C-F in sprites" – a switch of its own, unchecked by default
 // - Start+Select on passed levels ($00A267), Start to scroll the main map ($048380)
 // - the save prompt after the game's castle, fortress, ghost house and switch palace tiles ($04E622, and the switch
 //   in the save prompt routine at $03BA26, overworld.ts) – a level tile's own "save prompt" flag still brings it up
@@ -19,7 +19,7 @@
 import type { Rom } from './rom.ts';
 import { LF_SAVE_SWITCH } from './overworld.ts';
 
-export type OwOptionId = 'startSelect' | 'startScroll' | 'hardcodedPaths' | 'pathFade' | 'savePrompt' | 'saveLuigi' | 'lifeExchange' | 'lrExchange';
+export type OwOptionId = 'startSelect' | 'startScroll' | 'hardcodedPaths' | 'pathFade' | 'translucency' | 'savePrompt' | 'saveLuigi' | 'lifeExchange' | 'lrExchange';
 
 interface Bytes { at: number; game: number[]; changed: number[] }
 export interface OwOption {
@@ -30,11 +30,13 @@ export interface OwOption {
   game: boolean;
   bytes: Bytes[];
   needs?: OwOptionId; // has an effect only while that one is on
+  // a setting of another option, shown with it while that one has this value (the fade's translucency while it is off)
+  sub?: { of: OwOptionId; when: boolean };
 }
 
 const FADE_SPEED = 0x04ead1; // the ADC's operand in Lunar Magic's step routine
 export const DEFAULT_REVEAL_SPEED = 0x06; // Lunar Magic's
-export const MAX_REVEAL_SPEED = 0x40; // a step a frame
+export const MAX_REVEAL_SPEED = 0x40; // the counter reaches $40 in one frame (a step every 3 frames)
 
 export const OW_OPTIONS: readonly OwOption[] = [
   {
@@ -62,8 +64,12 @@ export const OW_OPTIONS: readonly OwOption[] = [
       { at: 0x04eaae, game: [0x20, 0x30], changed: [0x80, 0x04] },
       // LDA $1495 : CLC : ADC #speed : STA $1495 : RTS (the speed not compared)
       { at: 0x04eacc, game: [0xc2, 0x30, 0xa0, 0x8c, 0x00, 0xa2, 0x06, 0x00, 0xad, 0x84], changed: [0xad, 0x95, 0x14, 0x18, 0x69, DEFAULT_REVEAL_SPEED, 0x8d, 0x95, 0x14, 0x60] },
-      { at: 0x00a0eb, game: [0x30], changed: [0x20] },
     ],
+  },
+  {
+    id: 'translucency', label: 'Translucent sprites in palettes C–F', game: true, sub: { of: 'pathFade', when: false },
+    title: 'The path fade makes sprites in palettes C–F translucent; with it off they are not (Lunar Magic\'s default), unless custom overworld sprites need it',
+    bytes: [{ at: 0x00a0eb, game: [0x30], changed: [0x20] }],
   },
   {
     id: 'savePrompt', label: 'Save prompt after castles, fortresses, ghost houses, switch palaces', game: true,
@@ -108,6 +114,8 @@ export function setOwOption(rom: Rom, id: OwOptionId, on: boolean): void {
   if (cur === on) return;
   const which = on === o.game ? 'game' : 'changed';
   for (const b of o.bytes) b[which].forEach((v, k) => rom.w8(b.at + k, v));
+  // the fade's translucency: off with it turned off (Lunar Magic's default), the game's with it on
+  if (id === 'pathFade' && owOptionValue(rom, 'translucency') !== null) setOwOption(rom, 'translucency', on);
 }
 
 // the path reveal speed with the path fade off (added to the step timer each frame; a step at $40); null with the fade
