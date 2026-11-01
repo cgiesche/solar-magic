@@ -5,7 +5,7 @@
 // wanted to the main thread, and without a worker it all runs there; a failed probe is not asked again until the ROM changes; the
 // prefetch follows the tileset; object kinds are kept while the bytes they read are unchanged; a cancelled
 // scan is told to the worker; learn jobs (the sprite images) come in as they run, with a worker and without; a lane's
-// jobs can be dropped, an urgent one runs without a worker while a dialog holds the background slices; a failed job
+// jobs can be dropped (telling their askers), an urgent one (or any, urged) runs without a worker while a dialog holds the background slices; a failed job
 // asked again is FAILED without telling the asker again, the open level's last known tiles hold for their level and ROM
 // state only, a progress reply from an older ROM shows nothing.
 import { readFileSync } from 'node:fs';
@@ -421,6 +421,37 @@ function editor(worker: Worker | null) {
   check(done === 1 && e2.steps.some(([k]) => k === 'probe'), '… another one waits for them');
   e2.drain();
   check(done === 2, '… and runs then');
+}
+
+// waits that a dialog shows (#252): without a worker, urge() runs the probes and learn jobs while the dialog holds
+// the background slices, until released; a job dropped (unlearn, or replaced by another) tells its asker
+{
+  const e = editor(null);
+  e.client.block(0x130);
+  await settle();
+  for (let i = 0; i < 100 && e.soon.length; i++) e.soon.shift()!();
+  check(e.client.block(0x130) === undefined && e.steps.some(([k]) => k === 'probe'), 'no worker: a probe waits for the background slices');
+  const release = e.client.urge();
+  for (let i = 0; i < 1000 && e.soon.length && e.client.block(0x130) === undefined; i++) e.soon.shift()!();
+  check(e.client.block(0x130) !== undefined, '… urged: it runs while they wait');
+  release();
+  e.client.block(0x131);
+  await settle();
+  for (let i = 0; i < 100 && e.soon.length; i++) e.soon.shift()!();
+  check(e.client.block(0x131) === undefined, '… released: the next one waits again');
+
+  const w = new Worker(), e2 = editor(w), lv = loadLevel(e2.rom, 0x105);
+  const sizes = (size: number): LearnJob => ({ kind: 'sizes', level: { number: 0x105, header: lv.header }, layer2Pointer: lv.layer2Pointer, specs: [{ num: 0x21, ext: 0, size }] });
+  let dropped = 0, done = 0;
+  e2.client.learn('sz3', sizes(3), { lane: 'sz', input: 3, done: () => done++, dropped: () => dropped++ });
+  e2.client.unlearn('sz');
+  check(dropped === 1 && done === 0, 'unlearn: the dropped job tells its asker');
+  e2.client.learn('sz3', sizes(3), { lane: 'sz', input: 3, done: () => done++, dropped: () => dropped++ });
+  e2.client.learn('sz4', sizes(4), { lane: 'sz', input: 4, replace: true, done: () => done++ });
+  check(dropped === 2, '… replaced by another: too');
+  await settle();
+  w.run();
+  check(done === 1 && dropped === 2, '… the replacing one is done, the dropped one not told again');
 }
 
 // the open level's tiles (#226, #229): a failed job is told once as it fails, asked again it is FAILED without telling

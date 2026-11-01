@@ -60,11 +60,29 @@ const pngBytes = (c: HTMLCanvasElement) => new Promise<Uint8Array>((ok, fail) =>
   b.arrayBuffer().then((a) => ok(new Uint8Array(a)), fail);
 }, 'image/png'));
 
-// File → Level as PNG: the open level as edited, at its size (once its sprites' images and probes are known)
+const SHOW_WAIT = 300; // ms Level as PNG waits before it shows what it waits for
+
+// File → Level as PNG: the open level as edited, at its size (once its sprites' images and probes are known). A wait
+// one notices shows in a dialog, as Levels as images shows it, with a Cancel (then nothing is saved).
 export async function exportLevelPng(app: App): Promise<void> {
   const lv = app.level;
+  let ended = false, dlg: ReturnType<typeof modal> | null = null;
+  const stop = () => { if (!ended) { cancel.cancelled = true; cancel.wake?.(); } };
+  const status = h('div', { class: 'hint' }, 'Sprite graphics …');
+  const cancel: Cancel = { cancelled: false, wake: null, status: (s) => { status.textContent = s; } };
+  const show = setTimeout(() => {
+    dlg = modal('Level as PNG', h('div', { style: 'min-width:360px' }, h('p', {}, `Level ${hex3(lv.number)}: waiting for what it is drawn with`), status), [{ label: 'Cancel' }], stop);
+  }, SHOW_WAIT);
+  // (the probes run while the dialog is open)
+  const release = app.probes.urge();
   try {
-    const p = await levelPicture(app, lv, app.images, app.render, { cancelled: false, wake: null }).finally(() => app.probes.unlearn(LANE));
+    const p = await levelPicture(app, lv, app.images, app.render, cancel).finally(() => {
+      ended = true;
+      clearTimeout(show);
+      release();
+      app.probes.unlearn(LANE);
+      (dlg as ReturnType<typeof modal> | null)?.close(true);
+    });
     if (!p) return;
     await downloadBytes(levelImageName(lv.number, levelNameOf(app, lv.number)), await pngBytes(drawLevelImage(app, p)), 'image/png');
   } catch (e) {
@@ -78,8 +96,8 @@ export async function exportLevelPng(app: App): Promise<void> {
 const LANE = 'level-images'; // the learn jobs of the sprites' images
 const PROBE_WAIT = 30000; // ms a level waits for its probes at most (then: drawn with those known)
 
-// what the export waits for, unless it is cancelled before (then: null)
-type Cancel = { cancelled: boolean; wake: (() => void) | null };
+// what the export waits for, unless it is cancelled before (then: null); status: what it waits for now
+type Cancel = { cancelled: boolean; wake: (() => void) | null; status?: (what: string) => void };
 function until<T>(cancel: Cancel, p: Promise<T>): Promise<T | null> {
   return new Promise((ok) => {
     const wake = () => ok(null);
@@ -88,20 +106,21 @@ function until<T>(cancel: Cancel, p: Promise<T>): Promise<T | null> {
   });
 }
 
-// while probes are pending (a probe done, or half a second): false when cancelled
-async function probed(app: App, cancel: Cancel, pending: () => boolean): Promise<boolean> {
+// while probes are pending (their count; a probe done, or half a second): false when cancelled
+async function probed(app: App, cancel: Cancel, what: string, pending: () => number): Promise<boolean> {
   const t0 = performance.now();
-  while (pending() && performance.now() - t0 < PROBE_WAIT) {
+  for (let n = pending(); n > 0 && performance.now() - t0 < PROBE_WAIT; n = pending()) {
+    cancel.status?.(`${what} (${n}) …`);
     await until(cancel, new Promise<void>((ok) => { const off = app.on('probes', () => { off(); ok(); }); setTimeout(() => { off(); ok(); }, 500); }));
     if (cancel.cancelled) return false;
   }
   return !cancel.cancelled;
 }
 
-// a sprite image learned (null: it failed)
+// a sprite image learned (null: it failed, or its job was dropped)
 function learned(app: App, j: SpriteJob): Promise<unknown> {
   return new Promise((ok) => {
-    const r = app.probes.learn(j.key, j.job, { input: j.input, lane: LANE, urgent: true, label: 'Level images: sprite graphics', done: ok, failed: () => ok(null) });
+    const r = app.probes.learn(j.key, j.job, { input: j.input, lane: LANE, urgent: true, label: 'Level images: sprite graphics', done: ok, failed: () => ok(null), dropped: () => ok(null) });
     if (r !== undefined) ok(r);
   });
 }
@@ -111,6 +130,7 @@ function learned(app: App, j: SpriteJob): Promise<unknown> {
 // items blocks and sprites give)
 async function levelSprites(app: App, lv: Level, cancel: Cancel, placed: boolean): Promise<Pick<LevelPicture, 'sprite'> & Pick<OverlayLevel, 'thumb'> | null> {
   const jobs = app.spriteJobs(lv), ts = lv.header.tileset;
+  cancel.status?.('Sprite graphics …');
   const all = await until(cancel, learned(app, jobs.all)) as [number, SpriteImage][] | null;
   if (cancel.cancelled) return null;
   const base = new Map((all ?? []).map(([n, img]) => [n, app.spriteCanvas(img)]));
@@ -118,7 +138,8 @@ async function levelSprites(app: App, lv: Level, cancel: Cancel, placed: boolean
   if (!placed) return { sprite: () => undefined, thumb };
   // the variants: once every sprite's probe is known (or failed)
   const plain = lv.sprites.filter((s) => !(s.extra >= 2 && s.bytes?.some((b) => b)));
-  if (!await probed(app, cancel, () => plain.some((s) => app.spriteVariant(spriteId(s), s.x, s.y, ts) === undefined))) return null;
+  if (!await probed(app, cancel, 'Sprite probes', () => plain.filter((s) => app.spriteVariant(spriteId(s), s.x, s.y, ts) === undefined).length)) return null;
+  cancel.status?.('Sprite graphics …');
   const own = new Map<LevelSprite, HTMLCanvasElement>();
   for (const s of lv.sprites) {
     const id = spriteId(s), bytes = s.extra >= 2 ? s.bytes : undefined;
@@ -150,7 +171,7 @@ async function levelPicture(app: App, lv: Level, images: LevelImages, render: Le
   const imgs = show.sprites || show.items ? await levelSprites(app, lv, cancel, show.sprites) : { sprite: () => undefined, thumb: () => undefined };
   if (!imgs) return null;
   const overlay = levelOverlay(app, lv, render, images, imgs.thumb, scanOf(app, lv));
-  if (!await probed(app, cancel, () => overlayPending(overlay, show) > 0)) return null;
+  if (!await probed(app, cancel, 'Block behavior for the overlays', () => overlayPending(overlay, show))) return null;
   return { level: lv, images, sprite: imgs.sprite, overlay };
 }
 
@@ -247,9 +268,13 @@ export function openLevelImages(app: App, listed: () => number[]): void {
     const emu = new LevelEmulator(app.rom);
     emu.skipMask = () => app.gfxSkipMask();
     emu.adoptBoot(app.emu);
+    // (the probes run while the dialog is open)
+    const release = app.probes.urge();
     for (let i = 0; i < nums.length && !cancel.cancelled; i++) {
       const n = nums[i];
-      status.textContent = `Level ${hex3(n)} (${i + 1} of ${nums.length}) …`;
+      const at = `Level ${hex3(n)} (${i + 1} of ${nums.length})`;
+      status.textContent = `${at} …`;
+      cancel.status = (what) => { status.textContent = `${at}: ${what}`; };
       bar.value = i;
       await new Promise((ok) => setTimeout(ok, 0)); // (the progress shown, a click on Cancel taken)
       if (cancel.cancelled) break;
@@ -267,6 +292,8 @@ export function openLevelImages(app: App, listed: () => number[]): void {
         fail(n, e instanceof Error ? e.message : String(e));
       }
     }
+    cancel.status = undefined;
+    release();
     app.probes.unlearn(LANE);
     running = false;
     cancelBtn.textContent = 'Close';

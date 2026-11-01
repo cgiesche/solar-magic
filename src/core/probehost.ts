@@ -338,8 +338,9 @@ export class ProbeHost {
 export interface PumpSchedule { wait(run: () => void): void; startTurn(): () => boolean; soon?(run: () => void): void; urgent?(): boolean }
 
 // Drives a host: each turn runs its jobs while there is work and the turn lasts, hands the replies on and waits
-// for the next turn while work is left. Returns where the editor's messages go (the work they make is scheduled).
-export function pumpProbes(host: ProbeHost, reply: (d: ProbeReply) => void, schedule: PumpSchedule): (m: ProbeMessage) => void {
+// for the next turn while work is left. Returns where the editor's messages go (the work they make is scheduled), and
+// urged(): the urgency changed (a turn waiting for the background slices is taken soon instead)
+export function pumpProbes(host: ProbeHost, reply: (d: ProbeReply) => void, schedule: PumpSchedule): ((m: ProbeMessage) => void) & { urged(): void } {
   let scheduled = false, urged = false;
   const run = () => {
     scheduled = urged = false;
@@ -358,5 +359,5 @@ export function pumpProbes(host: ProbeHost, reply: (d: ProbeReply) => void, sche
     urged = urgent;
     if (urgent) schedule.soon!(run); else schedule.wait(run);
   };
-  return (m) => { host.handle(m); later(); };
+  return Object.assign((m: ProbeMessage) => { host.handle(m); later(); }, { urged: later });
 }

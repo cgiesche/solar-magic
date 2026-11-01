@@ -51,10 +51,11 @@ export interface LearnOptions<T> {
   urgent?: boolean; // runs while a dialog is open (one that shows the result): matters without a worker only
   done?: (result: T) => void; // (a callback already waiting for the result isn't added again)
   failed?: () => void; // the job failed (also when it had failed before and isn't run again until the ROM changes)
+  dropped?: () => void; // the job was dropped before it was done (unlearn, or replaced by another job of its lane)
   shown?: (items: unknown[] | null) => void; // what the job shows while it runs (null: it started, also over)
 }
 
-interface LearnWant { msg: LearnMessage; opts: LearnOptions<unknown>; done: ((r: unknown) => void)[]; failed: (() => void)[] }
+interface LearnWant { msg: LearnMessage; opts: LearnOptions<unknown>; done: ((r: unknown) => void)[]; failed: (() => void)[]; dropped: (() => void)[] }
 interface LearnLane { wants: LearnWant[]; progress: string | null }
 
 export class ProbeClient {
@@ -73,6 +74,8 @@ export class ProbeClient {
   private lanes = new Map<string, LearnLane>(); // learn jobs asked for and not done yet, by lane
   private learnFailed = new Set<string>(); // learn jobs (key and input) that failed, forgotten when the ROM changes
   private memory: MemoryResults; // learn jobs' results kept in memory only, as the worker's (checked against the ROM)
+  private urges = 0; // waits a dialog shows (urge)
+  private urged: (() => void) | null = null; // without a worker: the pump re-checks its urgency
   private d: ProbeClientDeps;
 
   constructor(deps: ProbeClientDeps) {
@@ -223,10 +226,12 @@ export class ProbeClient {
     if (!lane) this.lanes.set(opts.lane, (lane = { wants: [], progress: null }));
     if (opts.replace && lane.wants.some((w) => !same(w))) {
       // (the worker drops them too: the job kept answers a replacing request, without one the lane goes)
+      const gone = lane.wants.filter((w) => !same(w));
       lane.wants = lane.wants.filter(same);
       lane.progress = null;
       const kept = lane.wants[0];
       this.send?.(kept ? { ...kept.msg, replace: true } : { type: 'unlearn', lane: opts.lane });
+      this.drop(gone);
     }
     const keep = learnKeep(job), stored = this.stored<T>(key, input, keep);
     if (stored !== undefined || this.learnFailed.has(id)) {
@@ -235,7 +240,7 @@ export class ProbeClient {
     }
     let want = lane.wants.find(same);
     if (!want) {
-      const w: LearnWant = want = { msg: { type: 'learn', lane: opts.lane, key, input, job, replace: !!opts.replace }, opts: opts as LearnOptions<unknown>, done: [], failed: [] };
+      const w: LearnWant = want = { msg: { type: 'learn', lane: opts.lane, key, input, job, replace: !!opts.replace }, opts: opts as LearnOptions<unknown>, done: [], failed: [], dropped: [] };
       lane.wants.push(w);
       // (stored results first: the result may be known by then)
       this.d.cacheReady.then(() => {
@@ -249,6 +254,7 @@ export class ProbeClient {
     const done = opts.done as ((r: unknown) => void) | undefined;
     if (done && !want.done.includes(done)) want.done.push(done);
     if (opts.failed && !want.failed.includes(opts.failed)) want.failed.push(opts.failed);
+    if (opts.dropped && !want.dropped.includes(opts.dropped)) want.dropped.push(opts.dropped);
     this.learnBusy(opts.lane);
     return undefined;
   }
@@ -257,10 +263,27 @@ export class ProbeClient {
   unlearn(name: string): void {
     const lane = this.lanes.get(name);
     if (!lane?.wants.length) return;
+    const gone = lane.wants;
     lane.wants = [];
     lane.progress = null;
     this.send?.({ type: 'unlearn', lane: name });
     this.learnBusy(name);
+    this.drop(gone);
+  }
+
+  // (their askers told: they don't wait for them any more)
+  private drop(gone: LearnWant[]): void {
+    for (const w of gone) for (const f of w.dropped) f();
+  }
+
+  // A dialog shows a wait for probes and learn jobs (one that shows their results, or a long export): without a
+  // worker they all run while it is open, as urgent learn jobs do, until the returned release is called
+  urge(): () => void {
+    this.sync();
+    this.urges++;
+    this.urged?.();
+    let held = true;
+    return () => { if (held) { held = false; this.urges--; } };
   }
 
   // a learn job's result as kept (learnKeep: none for those the job keeps none of)
@@ -312,15 +335,18 @@ export class ProbeClient {
   }
 
   private local(): Send {
-    return pumpProbes(new ProbeHost(), (d) => this.reply(d), {
+    const send = pumpProbes(new ProbeHost(), (d) => this.reply(d), {
       wait: (run) => this.d.later('probe', run),
-      // (an urgent learn job asked for: a dialog that shows its result doesn't hold it up)
+      // (an urgent learn job asked for, or a wait urged: a dialog that shows it doesn't hold it up)
       ...(this.d.soon && { soon: this.d.soon, urgent: () => this.urgent() }),
       startTurn: () => { const t0 = performance.now(); return () => performance.now() - t0 < SLICE; },
     });
+    this.urged = send.urged;
+    return send;
   }
 
   private urgent(): boolean {
+    if (this.urges > 0) return true;
     for (const lane of this.lanes.values()) if (lane.wants.some((w) => w.opts.urgent)) return true;
     return false;
   }
