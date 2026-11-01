@@ -156,6 +156,71 @@ export class KeptSuggestions {
   }
 }
 
+// The suggestions the editor shows and whether they are current (of the levels and the ROM as they are now: their
+// places can be taken). check() after every change: the latest run's list held (KeptSuggestions.held) is current at
+// once, else the list stays shown, not current, and a run is started (start; stop cancels one). While an edit is
+// under way (editing: a ROM edit with its follow-ups, the open level not yet loaded again) nothing is checked and the
+// list is not current: the edit session's settled checks once it is done, whatever the order of its follow-ups (#220).
+export interface SuggestionHooks {
+  rom(): Rom;
+  source(): SuggestLevels;
+  editing(): boolean; // a ROM edit is under way (its follow-ups too)
+  start(): void; // a run a while after the last change (finished: done with its result)
+  stop(): void; // the run started, if any, is stopped (its result won't come)
+  changed(): void; // the list changed, or became current
+}
+
+export class SuggestionList {
+  private shown: PrefabSuggestion[] | null = null;
+  private held = false; // current as of the latest check
+  private kept: KeptSuggestions;
+  private hooks: SuggestionHooks;
+
+  constructor(kept: KeptSuggestions, hooks: SuggestionHooks) {
+    this.kept = kept;
+    this.hooks = hooks;
+  }
+
+  // (never while an edit is under way: read then, the list may be of the ROM before it)
+  get current(): boolean { return this.held && !this.hooks.editing(); }
+  // the list shown (null: not known yet)
+  get list(): PrefabSuggestion[] | null { return this.shown; }
+
+  check(): void {
+    if (this.hooks.editing()) return;
+    const held = this.kept.held(this.hooks.rom(), this.hooks.source());
+    if (held) {
+      if (this.held && this.shown === held) return;
+      this.hooks.stop();
+      this.shown = held;
+      this.held = true;
+      this.hooks.changed();
+      return;
+    }
+    this.hooks.stop();
+    this.held = false; // (the list shown stays as it is)
+    this.hooks.start();
+  }
+
+  // the run started finished with r (during an edit: of the ROM before it, shown if it still holds once it is done)
+  done(r: SuggestRun): void {
+    this.kept.adopt(r);
+    if (this.hooks.editing()) return;
+    this.shown = r.list;
+    this.held = true;
+    this.hooks.changed();
+  }
+
+  // a suggestion saved as prefab with its places replaced: not offered any more (the next run doesn't find it either);
+  // the list without it is no run's, never current
+  drop(key: string): void {
+    if (!this.shown?.some((q) => q.key === key)) return;
+    this.shown = this.shown.filter((q) => q.key !== key);
+    this.held = false;
+    this.hooks.changed();
+  }
+}
+
 // what a level's arrangements and places depend on besides the ROM: its objects as the emulated load gets them
 // (levelOverride's, the header and screen exits in them) and its secondary header; in a mode without layer 1 objects
 // the level data leaves them out, the arrangements and places don't (the open level as edited may have them)

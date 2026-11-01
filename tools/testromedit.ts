@@ -1,6 +1,7 @@
 // ROM edit session: one labelled edit is one undo step, all or nothing (an edit that throws or reports
 // failure leaves ROM and editor data as they were and records nothing), the open level is stored before
-// it, and the follow-ups run from what changed – also after undo and redo.
+// it, and the follow-ups run from what changed – also after undo and redo; settled runs once an edit (also a failed one)
+// or undo/redo is done with its follow-ups, running until then (#220).
 import { Rom } from '../src/core/rom.ts';
 import { RomEditSession, allOrNothing, type FollowUp } from '../src/core/romedit.ts';
 import { cleanImage } from './fixture.ts';
@@ -103,6 +104,32 @@ function setup() {
   s.edit('Slider', () => rom.w16(A, 1), { key: 'c' });
   s.edit('Slider', () => rom.w16(A, 2), { key: 'c' });
   check(s.history.undoStack.length === 1, 'same key: merged');
+}
+
+// settled: once per edit or undo/redo, after its follow-ups, also when it failed or changed nothing; running until then
+{
+  const rom = new Rom(cleanImage());
+  const log: string[] = [];
+  let s!: RomEditSession;
+  const at = (what: string) => () => log.push(`${what}${s.running ? ' running' : ''}`);
+  s = new RomEditSession(rom, {
+    prepare: at('prepare'),
+    written: at('written'),
+    followUps: [{ read: (r) => String(r.r16(A)), changed: at('follow') }],
+    settled: at('settled'),
+  });
+  s.edit('Color', () => { rom.w16(A, 0x4321); s.edit('Inner', () => rom.w16(B, 1)); });
+  check(log.join() === 'prepare running,written running,follow running,settled' && !s.running, `settled after the follow-ups, once with an inner edit (${log})`);
+  log.length = 0;
+  s.undo();
+  check(log.join() === 'written running,follow running,settled', `undo: settled after the follow-ups (${log})`);
+  log.length = 0;
+  try { s.edit('Fails', () => { rom.w16(A, 1); throw new Error('no'); }); } catch { /* passed on */ }
+  s.edit('Nothing', () => {});
+  check(log.join() === 'prepare running,settled,prepare running,settled' && !s.running, `a failed edit and one changing nothing: settled (${log})`);
+  log.length = 0;
+  await s.editAsync('Songs', async () => { await Promise.resolve(); log.push(`awaited${s.running ? ' running' : ''}`); rom.w16(A, 2); });
+  check(log.join() === 'prepare running,awaited running,written running,follow running,settled', `an awaited edit: running until settled (${log})`);
 }
 
 console.log(bad ? `${bad} failures` : 'romedit ok');

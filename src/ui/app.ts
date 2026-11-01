@@ -24,7 +24,7 @@ import { flagBytes, usedFlags, isDm16, dm16Tiles, type Dm16Cond } from '../core/
 import { PREFAB_EXT, PREFAB_MAX, TRANSPARENT, listPrefabs, writePrefab, type Prefab } from '../core/prefabs.ts';
 import { breakUpPrefab, replaced, setPrefabSources } from '../core/prefabsources.ts';
 import { PasteCounter, findPasted, arrangementKey, type PasteHint } from '../core/pastehint.ts';
-import { KeptSuggestions, type PrefabSuggestion, type SuggestLevels, type SuggestRun } from '../core/prefabsuggest.ts';
+import { KeptSuggestions, SuggestionList, type PrefabSuggestion, type SuggestLevels, type SuggestRun } from '../core/prefabsuggest.ts';
 import { planPrefabPlaces, applyPrefabPlaces, deletePrefab, prefabObjectCount, replaceWithPrefab, type LevelPlaces, type LevelGroups, type PrefabGroup } from '../core/prefabplaces.ts';
 import type { Package } from '../core/pkgreg.ts';
 import { kvEntries, kvKeys, kvWrite, saveRom } from './storage.ts';
@@ -195,9 +195,10 @@ export class App {
   pasteHint: PasteHintAt | null = null;
   // repeated arrangements of Direct Map16 objects across the levels (prefabsuggest.ts), found in the background
   // a while after the last change; null while not known yet
-  prefabSuggestions: PrefabSuggestion[] | null = null;
-  suggestionsCurrent = false; // they are of the levels and the ROM as they are now (their places can be taken)
-  private keptSuggestions: KeptSuggestions; // the levels' arrangements and places of earlier runs (only changed levels are taken apart again)
+  private suggestions: SuggestionList; // the list shown and whether it is current (prefabsuggest.ts SuggestionList)
+  get prefabSuggestions(): PrefabSuggestion[] | null { return this.suggestions.list; }
+  // they are of the levels and the ROM as they are now (their places can be taken)
+  get suggestionsCurrent(): boolean { return this.suggestions.current; }
   private suggestTimer = 0;
   private suggestRun = 0;
   // tile (x,y) lookup from map offset
@@ -241,7 +242,6 @@ export class App {
     // sprite images: learned again when what they depend on changed (the learner decides)
     this.on('render', () => this.ensureSpriteImages());
     this.on('rom-change', () => this.ensureSpriteImages());
-    this.on('rom-change', () => this.scheduleSuggestions());
     this.on('level', () => (this.objectNamesSeen = JSON.stringify(objectUserNames(this.rom)))); // (another ROM, too)
     this.on('rom-change', () => {
       const names = JSON.stringify(objectUserNames(this.rom));
@@ -254,6 +254,8 @@ export class App {
       saved: (log, silent) => this.levelSaved(log, silent),
       saveFailed: (e) => toast(`Save failed: ${e}`, 'error'),
       written: () => this.romChanged(),
+      // (the open level loaded again by then, whatever the order of the follow-ups)
+      settled: () => this.checkSuggestions(),
       followUps: [
         // the open level as stored (a patch rewrote its sprite data, a package its sample …): loaded again
         { read: (r) => (this.level ? levelSignature(r, this.level.number) : ''), changed: () => this.reloadLevel() },
@@ -278,7 +280,15 @@ export class App {
       soon: (step) => setTimeout(step, 0),
       setBusy: (key, label) => this.setBusy(key, label),
     });
-    this.keptSuggestions = new KeptSuggestions(this.results.fp);
+    // the levels' arrangements and places of earlier runs kept (only changed levels are taken apart again)
+    this.suggestions = new SuggestionList(new KeptSuggestions(this.results.fp), {
+      rom: () => this.rom,
+      source: () => this.suggestSource(),
+      editing: () => this.edits.running,
+      start: () => this.startSuggestRun(),
+      stop: () => this.stopSuggestRun(),
+      changed: () => this.emit('prefab-suggestions'),
+    });
     this.probes = new ProbeClient({
       results: this.results,
       cacheReady: this.cacheReady,
@@ -389,7 +399,7 @@ export class App {
     logMsg(`Level ${hex(n, 3)} opened`);
     this.scheduleSpriteMem();
     this.probes.prefetch();
-    this.scheduleSuggestions(); // (the open level as edited is part of them)
+    this.checkSuggestions(); // (the open level as edited is part of them)
   }
 
   get vertical(): boolean {
@@ -1386,7 +1396,7 @@ export class App {
     if (rerender) this.refresh();
     this.emit('change');
     this.scheduleSpriteMem();
-    this.scheduleSuggestions();
+    this.checkSuggestions();
     if (this.layerGone()) this.setMode('l1'); // (its header changed, an edit undone)
   }
   // the open level has no layer for the edit mode (layer 2 objects, BG tilemap)
@@ -1679,11 +1689,7 @@ export class App {
   saveArrangementAsPrefab(n: number, s: Prefab, places: LevelPlaces[]): boolean {
     if (!this.storePrefab(n, s, places, places)) return false;
     // its places replaced: not offered any more (the next background run doesn't find it either)
-    const key = arrangementKey(s);
-    if (places.length && this.prefabSuggestions?.some((q) => q.key === key)) {
-      this.prefabSuggestions = this.prefabSuggestions.filter((q) => q.key !== key);
-      this.emit('prefab-suggestions');
-    }
+    if (places.length) this.suggestions.drop(arrangementKey(s));
     this.pickedItem = { kind: 'obj', num: 0, ext: PREFAB_EXT, size: 0, prefab: n };
     return true;
   }
@@ -1705,35 +1711,26 @@ export class App {
   }
 
   // the suggestions anew a while after the last change, in the probe worker; the levels that didn't change keep their
-  // results there (prefabsuggest.ts KeptSuggestions; keptSuggestions: the latest run as it came). A change they don't depend on keeps them current at once;
-  // one back to the latest run's state (an undo) makes them current at once with that run's whole list (a suggestion
-  // saved and undone is back with its places, a list it was dropped from is never current).
-  private scheduleSuggestions(): void {
-    const held = this.keptSuggestions.held(this.rom, this.suggestSource());
-    if (held) {
-      if (this.suggestionsCurrent) return;
-      clearTimeout(this.suggestTimer);
-      this.suggestRun++; // (a run started meanwhile stops)
-      this.probes.unlearn('prefab-suggest');
-      this.prefabSuggestions = held;
-      this.suggestionsCurrent = true;
-      this.emit('prefab-suggestions');
-      return;
-    }
+  // results there (prefabsuggest.ts KeptSuggestions). A change they don't depend on keeps them current at once; one
+  // back to the latest run's state (an undo) makes them current at once with that run's whole list (a suggestion
+  // saved and undone is back with its places, a list it was dropped from is never current). During a ROM edit the
+  // edit session's settled checks once it is done (SuggestionList.check).
+  private checkSuggestions(): void {
+    this.suggestions.check();
+  }
+  private stopSuggestRun(): void {
     clearTimeout(this.suggestTimer);
-    this.suggestionsCurrent = false;
-    this.probes.unlearn('prefab-suggest'); // (a run started before stops)
-    const run = ++this.suggestRun;
+    this.suggestRun++; // (a run started meanwhile stops)
+    this.probes.unlearn('prefab-suggest');
+  }
+  private startSuggestRun(): void {
+    const run = this.suggestRun;
     this.suggestTimer = window.setTimeout(() => {
       if (run !== this.suggestRun || this.closed) return;
       const { levels, open } = this.suggestSource();
       // (the run's number as its input: a new one replaces the one running)
       this.probes.learn<SuggestRun>('suggest', { kind: 'suggest', levels, open }, { lane: 'prefab-suggest', input: run, replace: true, done: (r) => {
-        if (run !== this.suggestRun) return;
-        this.keptSuggestions.adopt(r);
-        this.prefabSuggestions = r.list;
-        this.suggestionsCurrent = true;
-        this.emit('prefab-suggestions');
+        if (run === this.suggestRun) this.suggestions.done(r);
       } });
     }, 1500);
   }

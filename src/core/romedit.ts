@@ -4,7 +4,10 @@
 // - the edit is all or nothing: when it throws or reports failure (returns `{ ok: false }`), the ROM
 //   image and the editor data are put back and no undo step is recorded;
 // - afterwards (and after undo/redo) each follow-up whose data differs from before runs, so callers
-//   never send notifications themselves.
+//   never send notifications themselves;
+// - once the edit (also one that failed or changed nothing) or undo/redo and its follow-ups are done, `settled` runs:
+//   what depends on the ROM and the open level together is checked there, not by the order of the follow-ups. While
+//   an edit runs (its prepare and follow-ups too), the session is `running`.
 // Edits started while another one is open are part of it (one step, follow-ups once at the end); a
 // failing inner edit only puts back its own part.
 
@@ -23,6 +26,8 @@ export interface EditHooks {
   // runs before the follow-ups
   written?(w: { label: string; recorded: boolean }): void;
   followUps?: FollowUp[];
+  // an edit or undo/redo is done, its follow-ups too (see above)
+  settled?(): void;
 }
 
 export interface EditOptions {
@@ -60,6 +65,7 @@ export class RomEditSession {
   readonly history: RomHistory;
   private hooks: EditHooks;
   private depth = 0;
+  private active = 0; // an outermost edit or an undo/redo, from its prepare to its follow-ups
 
   constructor(rom: Rom, hooks: EditHooks = {}, history = new RomHistory(rom)) {
     this.rom = rom;
@@ -87,11 +93,22 @@ export class RomEditSession {
     return this.step(() => this.history.redo());
   }
 
+  // an edit is under way (also its prepare and follow-ups): settled runs once it is done
+  get running(): boolean { return this.active > 0; }
+
   private step(f: () => RomEdit | null): RomEdit | null {
-    const before = this.readAll();
-    const e = f();
-    if (e) this.done(e.label, false, before);
-    return e;
+    this.active++;
+    try {
+      const before = this.readAll();
+      const e = f();
+      if (e) this.done(e.label, false, before);
+      return e;
+    } finally { this.settle(); }
+  }
+
+  private settle(): void {
+    if (--this.active) return;
+    try { this.hooks.settled?.(); } catch (e) { console.error(e); }
   }
 
   private inner<T>(fn: () => T): T {
@@ -110,17 +127,25 @@ export class RomEditSession {
       const s = this.rom.snapshot();
       return { rollback: () => this.rom.restore(s), finish: () => {} };
     }
-    this.hooks.prepare?.();
-    const before = this.readAll();
+    this.active++;
+    let before: string[];
+    try {
+      this.hooks.prepare?.();
+      before = this.readAll();
+    } catch (e) { this.settle(); throw e; }
     const h = this.history, record = opt.record !== false;
     const snap = record ? null : this.rom.snapshot();
     const gen = this.rom.gen, pushes = h.pushes;
     if (record) h.begin(label, opt.key ?? null);
     return {
-      rollback: () => { if (snap) this.rom.restore(snap); else h.rollback(); },
+      rollback: () => {
+        try { if (snap) this.rom.restore(snap); else h.rollback(); } finally { this.settle(); }
+      },
       finish: () => {
-        const changed = record ? h.commit() !== null : this.rom.gen !== gen;
-        if (changed) this.done(label, h.pushes !== pushes, before);
+        try {
+          const changed = record ? h.commit() !== null : this.rom.gen !== gen;
+          if (changed) this.done(label, h.pushes !== pushes, before);
+        } finally { this.settle(); }
       },
     };
   }

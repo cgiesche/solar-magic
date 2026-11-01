@@ -36,6 +36,9 @@ export interface SessionHooks {
   // see EditHooks.written (romedit.ts)
   written?(w: { label: string; recorded: boolean }): void;
   followUps?: FollowUp[];
+  // a ROM edit or undo/redo is done with its follow-ups (see EditHooks.settled), or the open level was saved outside
+  // a ROM edit: the ROM and the open level are as they stay
+  settled?(): void;
 }
 
 export class EditSession {
@@ -61,6 +64,7 @@ export class EditSession {
         this.hooks.written?.(w);
       },
       followUps: hooks.followUps,
+      settled: () => this.hooks.settled?.(),
     });
   }
 
@@ -72,6 +76,8 @@ export class EditSession {
   get romHistory(): RomHistory { return this.romEdits.history; }
   // the kind of the latest step undo would take back
   get lastStep(): 'level' | 'rom' | null { return this.undoOrder[this.undoOrder.length - 1]?.kind ?? null; }
+  // a ROM edit or undo/redo is under way (its prepare and follow-ups too): settled follows
+  get running(): boolean { return this.romEdits.running; }
 
   // opens level n (the dirty one saved first, or its changes dropped with discard) with a new level history
   open(n: number, discard = false): void {
@@ -90,11 +96,12 @@ export class EditSession {
       this.current = loadLevel(this.rom, was.number);
       keepUids(was, this.level, isL1Vertical(this.rom, this.level.header.mode));
       this.hooks.saved?.(log, silent);
-      return true;
     } catch (e) {
       this.hooks.saveFailed?.(e);
       return false;
     }
+    if (!this.running) this.hooks.settled?.();
+    return true;
   }
 
   // ------------- level edits -------------

@@ -6,7 +6,9 @@
 // (KeptSuggestions, #185): a run takes apart only the levels that changed, with the same suggestions; a cold run keeps
 // all its places for the next one, also more than the bound (#200). A run loads only the levels whose load read a
 // changed byte, and a change nothing of the latest run read keeps its suggestions (KeptSuggestions.held, #201), as
-// do an undo back to its state and another level opened without edits (#212).
+// do an undo back to its state and another level opened without edits (#212). The list the editor shows is checked
+// once a ROM edit and its follow-ups are done (SuggestionList with the edit session's settled), so a saved suggestion
+// is never shown as current, whatever the order of the follow-ups (#220).
 import { Rom, snesToPc } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadLevel, newUid, hasObjects, L1_PTRS, type LevelObject } from '../src/core/level.ts';
@@ -16,7 +18,9 @@ import { DM16_EXT } from '../src/core/patches.ts';
 import { installPrefabPatch, writePrefab } from '../src/core/prefabs.ts';
 import { prefabCost } from '../src/core/prefabcost.ts';
 import { applyPrefabPlaces } from '../src/core/prefabplaces.ts';
-import { dm16Groups, prefabSuggestions, suggestPrefabs, KeptSuggestions } from '../src/core/prefabsuggest.ts';
+import { dm16Groups, prefabSuggestions, suggestPrefabs, KeptSuggestions, SuggestionList } from '../src/core/prefabsuggest.ts';
+import { EditSession } from '../src/core/editsession.ts';
+import type { FollowUp } from '../src/core/romedit.ts';
 import { RomFingerprint, RomReads } from '../src/core/romdeps.ts';
 import { gfxSkipMask } from '../src/core/gfxpages.ts';
 import { readGfx, writeGfx } from '../src/core/gfxfiles.ts';
@@ -269,6 +273,77 @@ const tile104 = (lv: Level) => { lv.objects = lv.objects.filter((o) => !(o.ext =
   check(held(u) === l3, 'a level not among them opened: held');
   u.objects.push(...block(0x20, 5));
   check(held(u) === l3, 'a level not among them edited: held');
+}
+
+// the list shown through the edit session (#220): a suggestion whose places are all in the open level, saved as prefab
+// in a ROM edit, is never shown as current, also when something checks the list while the edit's follow-ups run
+// (before the open level is loaded again) and whatever the order of the follow-ups; undone, the list is current again
+for (const reloadFirst of [false, true]) {
+  const what = reloadFirst ? 'the level reloaded first' : 'the level reloaded last';
+  const r2 = new Rom(await editorImage());
+  installPrefabPatch(r2);
+  const emu2 = new LevelEmulator(r2);
+  emu2.skipMask = () => gfxSkipMask(r2);
+  emu2.boot();
+  {
+    const lv = loadLevel(r2, H2);
+    lv.objects.push(...block(0x20, 5), ...blockSplit(0x30, 8));
+    saveLevel(r2, lv);
+  }
+  const kept = new KeptSuggestions(new RomFingerprint(r2));
+  let session!: EditSession, starts = 0, stale = 0;
+  const list = new SuggestionList(kept, {
+    rom: () => r2,
+    source: () => ({ levels: usedLevels(r2), open: session.level }),
+    editing: () => session.running,
+    start: () => { starts++; },
+    stop: () => {},
+    changed: () => {},
+  });
+  let key = '';
+  // the list shown as current with the saved suggestion in it while its places are replaced in the ROM
+  const look = () => { list.check(); if (key && list.current && list.list!.some((q) => q.key === key)) stale++; };
+  const reload: FollowUp = { read: (r) => JSON.stringify(loadLevel(r, H2), (k, v) => (k === 'uid' ? undefined : v)), changed: () => { session.open(H2, true); look(); } };
+  const prefabs: FollowUp = { read: (r) => String(r.gen), changed: () => look() };
+  session = new EditSession(r2, {
+    written: () => look(), // ('rom-change': views of the ROM change, before the follow-ups)
+    changed: () => look(),
+    settled: () => look(),
+    followUps: reloadFirst ? [reload, prefabs] : [prefabs, reload],
+  });
+  session.open(H2);
+  const run = (): void => {
+    suggestPrefabs(r2, { levels: usedLevels(r2), open: session.level, emu: () => emu2, kept });
+    list.done(kept.latest!);
+  };
+  run();
+  const s = list.list!.find((q) => q.prefab.w === 3 && q.prefab.h === 3);
+  check(!!s && s.levels.length === 1 && s.levels[0] === H2 && list.current, `${what}: the block, its places all in the open level, current`);
+  if (!s) continue;
+  key = s.key;
+  starts = 0;
+  // (the places are replaced in the ROM from the edit's first write on)
+  session.romEdit('Prefab 07 saved', () => { writePrefab(r2, 7, { ...s.prefab, name: 'Block' }); applyPrefabPlaces(r2, 7, s.places); });
+  list.drop(key);
+  check(stale === 0, `${what}: the saved suggestion never shown as current (${stale})`);
+  check(!list.current && starts === 1 && !list.list!.some((q) => q.key === key), `${what}: after the save not current, one run started, the suggestion gone`);
+  check(!session.running, `${what}: the session settled`);
+  key = '';
+  session.undo();
+  check(list.current && list.list!.some((q) => q.key === s.key), `${what}: the save undone: the run before current again, with the suggestion`);
+  session.redo();
+  check(!list.current && starts === 2, `${what}: redone: not current, a run started`);
+  run();
+  check(list.current && !list.list!.some((q) => q.key === s.key), `${what}: the next run without it`);
+  // a run finishing during an edit: not shown then; once the edit is done it is checked (this one ran after the
+  // edit's write, so it holds)
+  const shown = list.list;
+  session.romEdit('Prefab 08 saved', () => {
+    writePrefab(r2, 8, { ...s.prefab, name: 'Other' });
+    run();
+    check(list.list === shown && !list.current, `${what}: a run finished during an edit: not shown, not current`);
+  });
+  check(!session.running && list.list !== shown && list.current, `${what}: after that edit: its run shown, current`);
 }
 
 // replaced by the prefab: the suggestion is gone

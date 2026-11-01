@@ -161,5 +161,28 @@ const setMem = (s: EditSession, m: number) => s.editLevel(() => { s.level.sprite
   check(runs.saved === 0 && !s.dirty && mem(s) === m0 && (loadLevel(rom, N).spriteHeader & SPRITE_MEMORY) === m0, 'open(discard): unsaved changes dropped');
 }
 
+// settled: after a ROM edit with its follow-ups (the dirty level saved in its prepare: not settled before it), and
+// after a save outside a ROM edit (#220)
+{
+  const rom = new Rom(image.slice());
+  let settled = 0, s!: EditSession;
+  const seen: boolean[] = []; // running as the follow-up saw it
+  s = new EditSession(rom, {
+    settled: () => { settled++; },
+    followUps: [{ read: (r) => String(r.r16(A)), changed: () => seen.push(s.running) }],
+  });
+  s.open(N);
+  setMem(s, mem(s) ^ 1);
+  s.romEdit('Color', () => rom.w16(A, rom.r16(A) ^ 0x1234));
+  check(settled === 1 && seen.join() === 'true' && !s.running, 'ROM edit with a dirty level: settled once, after the follow-ups');
+  setMem(s, mem(s) ^ 1);
+  s.save();
+  check(settled === 2, 'a save outside a ROM edit: settled');
+  s.undo();
+  check(settled === 2, 'level undo: not settled (no ROM step)');
+  s.undo();
+  check(settled === 3, 'ROM undo: settled');
+}
+
 if (bad) { console.log(`${bad} FAILED`); process.exit(1); }
 console.log('all ok');
