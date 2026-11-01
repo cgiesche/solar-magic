@@ -9,6 +9,8 @@ import { listPatches } from '../src/core/patchreg.ts';
 import { installEditorPatch } from '../src/core/patches.ts';
 import { inspectUpload } from '../src/core/packages.ts';
 import { installMap16Ext } from '../src/core/map16ext.ts';
+import { setOwOption } from '../src/core/owoptions.ts';
+import { editorImage } from './fixture.ts';
 
 await loadAsar();
 const file = new Uint8Array(readFileSync('test/fixtures/smw.smc'));
@@ -72,6 +74,28 @@ check(diff === 0 && listPatches(rom).length === 0 && rom.scanRats().length === 0
   check(msg.includes('HitsSMWX'), 'built-in names the patch that took its hook: ' + msg);
   const f = applyPatch(rom, src('Broken', 'lorom\nLDA #$1234,q\n'));
   check(!f.ok && f.errors[0].includes('main.asm:2'), 'Asar errors are reported: ' + f.errors[0]);
+}
+
+// 3a. the hooks of the overworld editor patches are refused; an overworld option's code only while it is set (#243)
+{
+  const image = await editorImage();
+  const hooks: [string, number][] = [
+    ['Translevels per level tile', 0x04d7f2], ['Initial level flags', 0x009f19], ['Event steps', 0x04e9f7],
+    ['Destroyed level tiles', 0x04e6c5], ['Overworld teleports', 0x048509], ['Level names', 0x049549],
+  ];
+  for (const [name, at] of hooks) {
+    const rom = new Rom(image.slice());
+    const r = applyPatch(rom, src('Hits', `lorom\norg $${at.toString(16)}\ndb $EA\n`));
+    check(!r.ok && r.errors.some((e) => e.includes(name)) && rom.data.every((v, i) => v === image[i]), `hook of ${name} rejected: ${r.errors[0]}`);
+  }
+  const option = (set: boolean) => {
+    const rom = new Rom(image.slice());
+    if (set) setOwOption(rom, 'startSelect', false);
+    return applyPatch(rom, src('HitsOption', 'lorom\norg $00A267\ndb $10\n'));
+  };
+  const set = option(true), unset = option(false);
+  check(!set.ok && set.errors[0].includes('Start+Select'), 'code of a set overworld option rejected: ' + set.errors[0]);
+  check(unset.ok && unset.warnings.some((w) => w.includes('Start+Select') && w.includes('can no longer be set')), 'code of an overworld option not set only warns: ' + unset.warnings.join(' | '));
 }
 
 // 3b. smwe.asm describes the ROM's editor patches

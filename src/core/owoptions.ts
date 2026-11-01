@@ -18,7 +18,10 @@
 // - Luigi's map position saved as his own instead of Mario's ($048F9F)
 // - life exchange ($04828D, the window), L/R opening it ($04836E)
 import type { Rom } from './rom.ts';
-import { LF_SAVE_SWITCH } from './overworld.ts';
+
+// 1: the game's save tiles bring up the save prompt – in the initial level flags patch's save prompt routine (overworld.ts
+// asserts it). Here, not there: this module imports nothing, so patchapply.ts can import it inside the import cycle.
+export const LF_SAVE_SWITCH = 0x03ba26;
 
 export type OwOptionId = 'startSelect' | 'startScroll' | 'hardcodedPaths' | 'pathFade' | 'translucency' | 'savePrompt' | 'saveLuigi' | 'lifeExchange' | 'lrExchange';
 

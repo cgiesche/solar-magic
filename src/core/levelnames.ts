@@ -24,6 +24,9 @@ const TILE_HOOK = 0x049549, TILE_HOOK_END = 0x049553, LOAD_HOOK = 0x048e81, HOOK
 export const NAME_ROUTINE = 0x03bb20, NAME_ROUTINE_END = 0x03bb72;
 export const NAME_TABLE_OP = 0x03bb57; // operand of LDA.l table,x
 export const NAME_HOOKS: [number, number][] = [[LOAD_HOOK, HOOK_LEN], [TILE_HOOK, HOOK_LEN]];
+// the game's places the patch writes (SNES address, length), Lunar Magic's hijack: the hooks and the routine; a third-party
+// patch may not change them (patchapply.ts)
+export const LEVEL_NAME_HOOKS: [number, number][] = [...NAME_HOOKS, [NAME_ROUTINE, NAME_ROUTINE_END - NAME_ROUTINE]];
 
 const hx = (n: number) => '$' + n.toString(16).toUpperCase().padStart(6, '0');
 const levelNameAsm = () => `lorom
@@ -166,6 +169,6 @@ export function installLevelNamePatch(rom: Rom): void {
   const r = assemble(rom.data, new Map([['levelnames.asm', levelNameAsm()]]), 'levelnames.asm');
   if (!r.ok) throw new Error(r.errors.map((e) => e.message).join(' '));
   if (r.labels['LevelName_table'] + 1 !== NAME_TABLE_OP || r.labels['End'] !== NAME_ROUTINE_END) throw new Error('Level names: the routine is not laid out as Lunar Magic\'s');
-  for (const [a, n] of [...NAME_HOOKS, [NAME_ROUTINE, NAME_ROUTINE_END - NAME_ROUTINE]]) rom.writeAt(snesToPc(a), r.rom.subarray(snesToPc(a), snesToPc(a) + n));
+  for (const [a, n] of LEVEL_NAME_HOOKS) rom.writeAt(snesToPc(a), r.rom.subarray(snesToPc(a), snesToPc(a) + n));
   rom.w24(NAME_TABLE_OP, rom.allocWrite(names));
 }

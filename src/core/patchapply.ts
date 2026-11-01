@@ -16,20 +16,42 @@ import { prefabPatch, PREFAB_HOOKS } from './prefabs.ts';
 import { fastRom, FASTROM_HOOKS } from './fastrom.ts';
 import { listPatches, addPatch, removeEntry, backupBytes, patchedHash, hashBytes, overlaps, type PatchEntry, type RamClaim } from './patchreg.ts';
 
-// hook sites of the editor's own patches (SNES address, length)
-interface Builtin { name: string; installed: (rom: Rom) => boolean; hooks: [number, number][] }
-export const BUILTINS: Builtin[] = [
-  { name: 'Editor patch (SMWE)', installed: (r) => !!editorPatch(r), hooks: EDITOR_HOOKS },
-  { name: 'Level palettes (SMWP)', installed: (r) => !!customPalettePatch(r), hooks: PAL_HOOKS },
-  { name: 'BG tilemaps (SMWB)', installed: (r) => !!bgPatch(r), hooks: BG_HOOKS },
-  { name: 'Music per level (SMWU)', installed: (r) => !!musicPatch(r), hooks: MUSIC_HOOKS },
-  { name: 'BG2/BG3 graphics (SMWG)', installed: (r) => !!extGfxPatch(r), hooks: EXT_GFX_HOOKS },
-  { name: 'Messages per level (SMWM)', installed: (r) => !!messagePatch(r), hooks: MSG_HOOKS },
-  { name: 'Prefabs (SMWS)', installed: (r) => !!prefabPatch(r), hooks: PREFAB_HOOKS },
-  { name: 'Extended Map16 (SMWX)', installed: (r) => !!map16Ext(r), hooks: MAP16X_HOOKS },
-  { name: 'Extended BG Map16 (SMWH)', installed: (r) => !!bgMap16Ext(r), hooks: BGMAP16_HOOKS },
-  { name: 'FastROM (SMWR)', installed: (r) => !!fastRom(r), hooks: FASTROM_HOOKS },
-];
+import { hasTranslevelTable, hasLevelFlagsPatch, hasDestroyPatch, TRANSLEVEL_HOOKS, LEVEL_FLAGS_HOOKS, DESTROY_HOOKS } from './overworld.ts';
+import { hasEventPatch, EVENT_HOOKS } from './owevents.ts';
+import { hasOwTeleportPatch, TELEPORT_HOOKS } from './owteleport.ts';
+import { levelNamePatch, LEVEL_NAME_HOOKS } from './levelnames.ts';
+import { OW_OPTIONS, owOptionValue } from './owoptions.ts';
+
+// hook sites of the editor's own patches (SNES address, length); an overworld option (`option`) is "installed" while
+// it is set to a value other than the clean game's
+interface Builtin { name: string; installed: (rom: Rom) => boolean; hooks: [number, number][]; option?: true }
+let builtinList: Builtin[] | null = null;
+// (built on first use: the overworld modules import this one, their hook lists aren't there yet when it loads)
+export function builtins(): Builtin[] {
+  return builtinList ??= [
+    { name: 'Editor patch (SMWE)', installed: (r) => !!editorPatch(r), hooks: EDITOR_HOOKS },
+    { name: 'Level palettes (SMWP)', installed: (r) => !!customPalettePatch(r), hooks: PAL_HOOKS },
+    { name: 'BG tilemaps (SMWB)', installed: (r) => !!bgPatch(r), hooks: BG_HOOKS },
+    { name: 'Music per level (SMWU)', installed: (r) => !!musicPatch(r), hooks: MUSIC_HOOKS },
+    { name: 'BG2/BG3 graphics (SMWG)', installed: (r) => !!extGfxPatch(r), hooks: EXT_GFX_HOOKS },
+    { name: 'Messages per level (SMWM)', installed: (r) => !!messagePatch(r), hooks: MSG_HOOKS },
+    { name: 'Prefabs (SMWS)', installed: (r) => !!prefabPatch(r), hooks: PREFAB_HOOKS },
+    { name: 'Extended Map16 (SMWX)', installed: (r) => !!map16Ext(r), hooks: MAP16X_HOOKS },
+    { name: 'Extended BG Map16 (SMWH)', installed: (r) => !!bgMap16Ext(r), hooks: BGMAP16_HOOKS },
+    { name: 'FastROM (SMWR)', installed: (r) => !!fastRom(r), hooks: FASTROM_HOOKS },
+    { name: 'Translevels per level tile', installed: hasTranslevelTable, hooks: TRANSLEVEL_HOOKS },
+    { name: 'Initial level flags', installed: hasLevelFlagsPatch, hooks: LEVEL_FLAGS_HOOKS },
+    { name: 'Event steps (Lunar Magic format)', installed: hasEventPatch, hooks: EVENT_HOOKS },
+    { name: 'Destroyed level tiles (Lunar Magic format)', installed: hasDestroyPatch, hooks: DESTROY_HOOKS },
+    { name: 'Overworld teleports (Lunar Magic format)', installed: hasOwTeleportPatch, hooks: TELEPORT_HOOKS },
+    { name: 'Level names (Lunar Magic format)', installed: (r) => !!levelNamePatch(r), hooks: LEVEL_NAME_HOOKS },
+    ...OW_OPTIONS.map((o): Builtin => ({
+      name: `the overworld option “${o.label}”`, option: true,
+      installed: (r) => owOptionValue(r, o.id) === !o.game,
+      hooks: o.bytes.map((b): [number, number] => [b.at, b.game.length]),
+    })),
+  ];
+}
 
 // "smwe.asm", available to every patch (incsrc "smwe.asm"): the editor's RAM/ROM interfaces as defines
 export function editorInclude(rom: Rom): string {
@@ -235,10 +257,13 @@ export function registerChanges(rom: Rom, before: Uint8Array, beforeRats: RatsBl
     if (p) { errors.push(`Conflict with patch “${p.name}” at ${where}.`); continue; }
     const hit = beforeRats.find((b) => overlaps([b.start, b.size + 8], s));
     if (hit) { errors.push(`The patch overwrites protected data (RATS block at ${pcHex(hit.start)}) at ${where}.`); continue; }
-    for (const bi of BUILTINS) {
+    for (const bi of builtins()) {
       const h = bi.hooks.find(([a, n]) => overlaps([snesToPc(a), n], s));
       if (!h) continue;
-      if (bi.installed(rom)) errors.push(`Conflict with ${bi.name}: the patch changes its hook at ${hex(h[0])}.`);
+      if (bi.option) {
+        if (bi.installed(rom)) errors.push(`Conflict with ${bi.name}, which is set: the patch changes its code at ${hex(h[0])}.`);
+        else warnings.push(`The patch changes ${hex(h[0])}; ${bi.name} can no longer be set afterwards.`);
+      } else if (bi.installed(rom)) errors.push(`Conflict with ${bi.name}: the patch changes its hook at ${hex(h[0])}.`);
       else warnings.push(`The patch uses ${hex(h[0])}; ${bi.name} can no longer be installed afterwards.`);
     }
   }

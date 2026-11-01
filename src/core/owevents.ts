@@ -42,6 +42,13 @@ const GAME_SILENT = { events: 0x04e8e4, layers: 0x04e910, locs: 0x04e93c, tiles:
 // the reveal tables (per event: the layer 1 tile, its VRAM address), 0x70 entries in the game
 const REVEAL_OPS = [0x04da74, 0x04ec8c, 0x04ecba, 0x04ecc5, 0x04ed97, 0x04edbe], REVEAL_VRAM_OP = 0x04edb8;
 const GAME_REVEAL = 0x04d85d, GAME_REVEAL_VRAM = 0x04d93d, GAME_REVEALS = 0x70;
+// the game's code and tables the patch changes (SNES address, length), Lunar Magic's hijack: the hooks, the event
+// counts, the dividers and the operands pointing to the moved tables; a third-party patch may not change it (patchapply.ts)
+export const EVENT_HOOKS: [number, number][] = [
+  [SILENT_HOOK, 5], [LOAD_HOOK, 4], [LOAD_COUNT, 1], [TL_COUNT, 1], [DIVIDERS, 0x79 * 2],
+  ...[...STEP_OPS, ...STEP_OPS2, TILE_LONG, ...REVEAL_OPS, REVEAL_VRAM_OP].map((a): [number, number] => [a, 3]),
+  [TILE_BANK, 1], [TILE_LO, 2], [PROP_LO, 2], [PROP_BANK, 1], ...AREA6_OPS.map((a): [number, number] => [a, 2]),
+];
 
 // the event tile storage's limit: its YXPCCCTT go to $7F0000, below the level heights patch's RAM at $7F3666
 export const STORAGE_MAX = 0x3600;

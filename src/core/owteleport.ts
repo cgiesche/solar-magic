@@ -36,6 +36,9 @@ export const EXIT_PATHS = 0x80;
 export const EXIT_HOOK = 0x049a35;
 export const GAME_EXIT_TABLES = [0x049964, 0x0499aa, 0x0499f0], GAME_EXITS = 14;
 const EXIT_PTRS = [0x11, 0x2c, 0x48]; // the tables' addresses in the routine (Lunar Magic's places)
+// the game's code the patch changes (SNES address, length), Lunar Magic's hijack (JSL : RTS, JSL : BRA, JSL : RTS); a
+// third-party patch may not change it (patchapply.ts)
+export const TELEPORT_HOOKS: [number, number][] = [[FIND_HOOK, 5], [DEST_HOOK, 6], [EXIT_HOOK, 5]];
 const MAGIC = [0x53, 0x4d, 0x57, 0x4f]; // "SMWO"
 const NONE = 0xffff;
 const hx = (n: number) => '$' + n.toString(16).toUpperCase();
@@ -175,6 +178,7 @@ function tableOf(rom: Rom): number | null {
   return null;
 }
 const table = (rom: Rom): number => tableOf(rom) ?? missingPatch('Overworld teleports (SMWO)');
+export const hasOwTeleportPatch = (rom: Rom): boolean => tableOf(rom) !== null;
 
 // needs Asar (loadAsar) to be loaded
 export function installOwTeleportPatch(rom: Rom): ApplyResult {

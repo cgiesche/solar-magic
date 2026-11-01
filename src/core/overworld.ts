@@ -18,6 +18,7 @@ import { teleportDataRanges } from './owteleport.ts';
 import { KOOPA_X, KOOPA_Y, KOOPAS } from './owlinks.ts';
 import { START, OW_SPRITES, OW_SPRITE_SLOTS, KOOPA_KID, KOOPA_KIDS, hasOwSpriteSlots } from './owsprites.ts';
 import { customSpriteRanges } from './owcustom.ts';
+import { LF_SAVE_SWITCH } from './owoptions.ts';
 import type { Job } from './jobrunner.ts';
 
 export const OW_L1 = 0x0cf7df; // 0x800 bytes: 2 maps × 32×32 16x16 tiles (quadrant layout)
@@ -142,6 +143,8 @@ const TL_PTR = 0x04d803; // LDA #$xxxx operand: the table's address
 const TL_BANK = 0x04d808; // LDA #$xx operand: its bank
 export const MAX_TRANSLEVEL = 0x5f; // level 13B
 const TL_SLACK = 0x40; // free bytes after the table in its block, so that later changes still fit
+// the game's code the patch replaces (SNES address, length), Lunar Magic's hijack: a third-party patch may not change it (patchapply.ts)
+export const TRANSLEVEL_HOOKS: [number, number][] = [[TL_HOOK, TL_HOOK_END - TL_HOOK]];
 const hx = (n: number) => '$' + n.toString(16).toUpperCase();
 
 const translevelAsm = () => `lorom
@@ -240,7 +243,7 @@ export function installTranslevelPatch(rom: Rom): void {
   const t = game.wram.slice(RAM.owTranslevels, RAM.owTranslevelsEnd);
   const r = assemble(rom.data, new Map([['translevels.asm', translevelAsm()]]), 'translevels.asm');
   if (!r.ok) throw new Error(r.errors.map((e) => e.message).join(' '));
-  rom.writeAt(snesToPc(TL_HOOK), r.rom.subarray(snesToPc(TL_HOOK), snesToPc(TL_HOOK_END)));
+  for (const [a, n] of TRANSLEVEL_HOOKS) rom.writeAt(snesToPc(a), r.rom.subarray(snesToPc(a), snesToPc(a) + n));
   writeTranslevels(rom, t);
 }
 
@@ -317,8 +320,11 @@ export const FLAG = { right: 0x01, left: 0x02, down: 0x04, up: 0x08, savePrompt:
 export const DIR_FLAGS = [FLAG.up, FLAG.down, FLAG.left, FLAG.right];
 const LF_INIT_HOOK = 0x009f19, LF_INIT = 0x05dd80;
 const LF_SAVE_HOOK = 0x048f8a, LF_SAVE_LOOP = 0x049001, LF_SAVE = 0x03ba10;
-export const LF_SAVE_SWITCH = LF_SAVE + 0x16; // 1: the game's save tiles bring up the save prompt (owoptions.ts)
 const LF_ENTER_HOOK = 0x049199, LF_ENTER = 0x03ba50, LF_END = 0x03bae6;
+// the places of the game the patch writes its code to (SNES address, length), Lunar Magic's hijack
+const LF_CODE: [number, number][] = [[LF_INIT_HOOK, 4], [LF_INIT, LEVEL_FLAGS - LF_INIT], [LF_SAVE_HOOK, 5], [LF_SAVE_LOOP, 2], [LF_ENTER_HOOK, 4], [LF_SAVE, LF_END - LF_SAVE]];
+// …with the table: a third-party patch may change none of it (patchapply.ts)
+export const LEVEL_FLAGS_HOOKS: [number, number][] = [...LF_CODE, [LEVEL_FLAGS, MAX_TRANSLEVEL + 1]];
 
 const levelFlagsAsm = () => `lorom
 ; a new file: the initial flags of every translevel (the game's loop of 8 has run once)
@@ -350,6 +356,7 @@ SavePrompt:
   LDX $04
   LDA.l $7E${hx(RAM.owTranslevels).slice(1)},x : AND.w #$00FF : TAX
   LDA.w ${hx(RAM.levelFlags)},x : AND.w #${hx(FLAG.savePrompt)} : BNE .flag
+  assert pc() == ${hx(LF_SAVE_SWITCH - 1)}           ; the overworld option's switch (owoptions.ts)
   LDA.w #$0001 : BEQ .none
   LDA.w ${hx(RAM.owTile)}
 .ret:
@@ -416,7 +423,7 @@ export function installLevelFlagsPatch(rom: Rom): void {
   const flags = game.wram.slice(RAM.levelFlags, RAM.levelFlags + MAX_TRANSLEVEL + 1);
   const r = assemble(rom.data, new Map([['levelflags.asm', levelFlagsAsm()]]), 'levelflags.asm');
   if (!r.ok) throw new Error(r.errors.map((e) => e.message).join(' '));
-  for (const [a, n] of [[LF_INIT_HOOK, 4], [LF_INIT, LEVEL_FLAGS - LF_INIT], [LF_SAVE_HOOK, 5], [LF_SAVE_LOOP, 2], [LF_ENTER_HOOK, 4], [LF_SAVE, LF_END - LF_SAVE]]) {
+  for (const [a, n] of LF_CODE) {
     rom.writeAt(snesToPc(a), r.rom.subarray(snesToPc(a), snesToPc(a) + n));
   }
   rom.writeBytes(LEVEL_FLAGS, flags);
@@ -509,6 +516,9 @@ export function writeRevealList(rom: Rom, list: RevealPair[]): void {
 export const DESTROYS = 0x18;
 const DESTROY_EV_OP = 0x04e67c, DESTROY_LOC_OP = 0x04e69c, DESTROY_FIX = 0x04e6c5, REVEAL54 = 0x04da98;
 const GAME_DESTROYS = 0x10, DESTROY_CALL = 0x04e677;
+// the game's code the patch changes (SNES address, length), Lunar Magic's hijack: the tables' pointers, the JSL, the
+// BRA; a third-party patch may not change it (patchapply.ts)
+export const DESTROY_HOOKS: [number, number][] = [[DESTROY_EV_OP, 3], [DESTROY_LOC_OP, 3], [DESTROY_FIX, 4], [REVEAL54, 1]];
 export interface Destroy { event: number; tile: number }
 
 const destroyAsm = (code: number) => `lorom
