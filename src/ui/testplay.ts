@@ -94,7 +94,7 @@ export function openTestPlay(app: App, at?: Start, fromSave = false, show?: Show
 // learned for it (App.progressSave), Mario on layer 1 tile `tile` (l1Index; < 0: at the start position); the levels
 // entered from there are the ROM's
 // (save: while it is being learned, what gives it: the test starts then, the sound started within the key press)
-export function openOverworldTestPlay(app: App, tile: number, progress: number, save: ProgressSave | Promise<ProgressSave | undefined> | undefined, showLevel: ShowLevel, fromSave = false): void {
+export function openOverworldTestPlay(app: App, tile: number, progress: number, save: ProgressSave | Promise<ProgressSave | undefined>, showLevel: ShowLevel, fromSave = false): void {
   const o: Origin = { kind: 'overworld', tile, progress, showLevel };
   if (save instanceof Promise) begin(app, o, fromSave, save.then((v) => { o.save = v; }));
   else begin(app, { ...o, save }, fromSave);

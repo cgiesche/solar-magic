@@ -66,7 +66,7 @@ function editor(worker: Worker | null) {
   const sprites = (m: number, progress: number, done: (v: OwSpriteView[]) => void = () => {}) =>
     client.learn<OwSpriteView[]>(`ows1:${m}`, { kind: 'owSprites', map: m, progress }, { lane: 'ows', input: { progress }, replace: true, done });
   const save = (progress: number, done: (v: ProgressSave) => void = () => {}) =>
-    client.learn<ProgressSave>('owps1', { kind: 'owSave', progress }, { lane: 'owps', input: { progress }, replace: true, done });
+    client.learn<ProgressSave>('owps1', { kind: 'owSave', progress }, { lane: 'owps', input: { progress }, done });
   const drain = () => { while (steps.length) steps.shift()!(); };
   return { rom, client, map, views, sprites, save, drain };
 }

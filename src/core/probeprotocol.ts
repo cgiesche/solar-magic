@@ -92,10 +92,10 @@ export type LearnJob =
 // 0008): the levels' uses go to the entries of each level (the job keeps none); the prefab suggestions and the object
 // boxes to the editor only (it keeps them as a run's and per ROM state); the animated tiles and colors, the tiles of
 // the level as edited, the placement preview and the jump arcs change with every edit (memory only); the others to the
-// result cache. The overworld's jobs run on the overworld's own emulator, not on one booted for levels: its boot doesn't
-// count for them (boot false, jobrunner.ts JobSpec); it has no skip mask, so they count the display data, the submaps'
-// views (no picture) too: marked pictures (ADR 0008). They change with the map painted, the event progress slider goes
-// through many (memory only)
+// result cache. The overworld's jobs run on the overworld's own emulator, not on one booted for levels: its boot
+// doesn't count for them (boot false, jobrunner.ts JobSpec); it has no skip mask, so they count the display data, the
+// submaps' views and the save at a progress (no pictures) too: marked pictures (ADR 0008). They change with the map
+// painted, the event progress slider goes through many (memory only)
 export const LEARN_KINDS: { [K in LearnJob['kind']]: { keep: Keep; picture: boolean; boot?: false } } = {
   sprites: { keep: true, picture: true },
   spriteAt: { keep: true, picture: true },

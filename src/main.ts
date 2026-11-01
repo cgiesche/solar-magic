@@ -28,7 +28,6 @@ import { openResources } from './ui/resources.ts';
 import { OverworldView } from './ui/overworld.ts';
 import { overworldReplacement } from './core/overworld.ts';
 import { openTestPlay, openOverworldTestPlay } from './ui/testplay.ts';
-import type { ProgressSave } from './core/owprogress.ts';
 import { musicPlayer, LEVEL_MUSIC } from './ui/musicplayer.ts';
 import { MessagePanel, levelMessages } from './ui/messagepanel.ts';
 import { map16Tile } from './core/ram.ts';
@@ -363,12 +362,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   // is; a new file's when it can't be); a moment of the meters is shown in the level editor
   const testOverworld = () => {
     const o = owShown();
-    if (!o) return;
-    const tile = o.selected, progress = o.progress;
-    let learned!: (v?: ProgressSave) => void;
-    const later = new Promise<ProgressSave | undefined>((ok) => { learned = ok; });
-    const save = app.progressSave(progress, (v) => learned(v), () => learned()) ?? later;
-    openOverworldTestPlay(app, tile, progress, save, (n, at) => void setWorkspace('level').then((ok) => { if (ok) app.showUse(n, at); }));
+    if (o) openOverworldTestPlay(app, o.selected, o.progress, app.progressSave(o.progress), (n, at) => void setWorkspace('level').then((ok) => { if (ok) app.showUse(n, at); }));
   };
 
   app.gotoOverworldTile = async (i) => { if (await setWorkspace('ow')) owShown()?.showTile(i); };

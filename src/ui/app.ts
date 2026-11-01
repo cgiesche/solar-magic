@@ -1211,9 +1211,12 @@ export class App {
   }
   // the save at an event progress (owprogress.ts progressSaves: the level flags, switch palaces and events triggered
   // the game has then), learned in the probe worker and kept in memory while the ROM bytes it read are unchanged:
-  // undefined while it runs, then `done` is called (`failed`: it could not be learned)
-  progressSave(progress: number, done: (v: ProgressSave) => void, failed?: () => void): ProgressSave | undefined {
-    return this.probes.learn<ProgressSave>('owps1', { kind: 'owSave', progress }, { lane: 'owps', input: { progress }, replace: true, label: 'Overworld progress', done, failed });
+  // known, else what gives it once learned (undefined: it could not be). Requests don't replace each other: one
+  // emulation learns every progress, and each test play started waits for its own
+  progressSave(progress: number): ProgressSave | Promise<ProgressSave | undefined> {
+    let learned!: (v?: ProgressSave) => void;
+    const later = new Promise<ProgressSave | undefined>((ok) => { learned = ok; });
+    return this.probes.learn<ProgressSave>('owps1', { kind: 'owSave', progress }, { lane: 'owps', input: { progress }, label: 'Overworld progress', done: learned, failed: () => learned() }) ?? later;
   }
   submapViews(done: (v: Rect[]) => void): Rect[] | undefined {
     return this.probes.learn<Rect[]>('owv1', { kind: 'owViews' }, { lane: 'owv', label: 'Submap views', done });
