@@ -257,7 +257,7 @@ Bringing graphics parts (FG and BG Map16 tiles, ExGFX, palettes, animation frame
 _Avoid_: background package, graphics import
 
 **Anim graphic**:
-One of four graphics (A–D, Lunar Magic's ExGFX 60–63) that tile animations take their frames from; each animation list (a level's, the global one) uses one, and every list using it shares it. The only place animation frames come from: frames a package or level file keeps elsewhere (Lunar Magic's AN2, its own ExGFX 60–63, the game's graphics in RAM) are copied in when it is imported (ADR 0003).
+One of four graphics (A–D, Lunar Magic's ExGFX 60–63) that tile animations take their frames from; each animation list (a level's, the global one, a submap's, the overworld's global one) uses one, and every list using it shares it. The only place animation frames come from: frames a package or level file keeps elsewhere (Lunar Magic's AN2, its own ExGFX 60–63, the game's graphics in RAM) are copied in when it is imported (ADR 0003).
 _Avoid_: AN2, alternative file, animation ExGFX
 
 **Color rotation**:
@@ -265,7 +265,7 @@ An animation slot (types 18–1B) that moves a range of 2–128 palette colors a
 _Avoid_: palette rotate, palette cycling
 
 **Animation trigger**:
-What makes an animation slot run (Lunar Magic's ExAnimation triggers): a game condition (P-switches, ON/OFF, star, time below 100, 5 Dragon Coins – the last two also once), the precision timer (the slot shares the frame counter of the first slot of its 8), or one that the user's own code sets in the engine's RAM: a manual trigger (the frame to show), a custom trigger (on/off, a second frame set while on) or a one-shot (the slot plays once, then the engine turns it off). A list's **Trigger Init** sets custom triggers and manual frames when the level loads, the level's over the global list's. The view's triggers are a view setting that test play takes over (set after the level's load), not part of the level.
+What makes an animation slot run (Lunar Magic's ExAnimation triggers): a game condition (P-switches, ON/OFF, star, time below 100, 5 Dragon Coins – the last two also once), the precision timer (the slot shares the frame counter of the first slot of its 8), or one that the user's own code sets in the engine's RAM: a manual trigger (the frame to show), a custom trigger (on/off, a second frame set while on) or a one-shot (the slot plays once, then the engine turns it off). A list's **Trigger Init** sets custom triggers and manual frames when the level loads, the level's over the global list's. On the overworld (a list per submap and the overworld's global one) the game conditions are replaced by **event triggers** (Lunar Magic's "Event Manual 8–F"): each holds, showing its second frame set, once the overworld event whose number its manual frame 8–F has is passed; the Trigger Init sets those numbers when the submap loads (also when Mario walks there). The view's triggers are a view setting that test play takes over (set after the level's load), not part of the level.
 _Avoid_: event, flag (those are Conditional Direct Map16's)
 
 ### Emulated results

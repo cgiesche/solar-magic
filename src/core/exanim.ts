@@ -11,6 +11,12 @@
 //  - a list: slots used, alternative file (0-3), custom triggers kept / set at the load (16 bits each),
 //    manual triggers set (16 bits) and their frames, then a 16-bit offset per slot (from the first
 //    offset, 0 = unused); an entry: type, trigger, frames less one, 16-bit destination, 16-bit frames
+//  - the overworld (Lunar Magic's overworld ExAnimation, help ov_overworld_ex20*.htm): the JSL at $048086 leads to
+//    the engine's overworld block O: at O+$4A the address of a settings byte per submap, at O+$57 the overworld's
+//    global list's address >> 8 (0: none) and at O+$61 its low word, at O+$E1 the address of 7 3-byte pointers to
+//    the submaps' lists ($0000FF: none) – read from Lunar Magic's code in ROMs it saved
+//    (docs/research/lunar-magic-submap-graphics.md). Its lists are a level's, but for triggers 01-08: Lunar Magic's
+//    "Event Manual 8-F", holding while the event whose number manual frame 8-F has is passed, each with a second set.
 
 import { snesToPc, type Rom } from './rom.ts';
 import { applyPatch, type ApplyResult } from './patchapply.ts';
@@ -32,6 +38,10 @@ export const SLOTS = 0x20;
 
 // settings bits (set = off)
 export const NO_GAME_COLORS = 0x80, NO_GAME_TILES = 0x40, NO_LEVEL_LIST = 0x20, NO_GLOBAL_LIST = 0x10;
+// a submap's settings bits (set = off): the game's tiles, its own list (NO_LEVEL_LIST) and the overworld's global
+// list as a level's, and the level dots' colors 6D and 7D (Lunar Magic's), the lightning, color 47 (the editor's own
+// bit: Lunar Magic's code reads none)
+export const NO_DOT_COLORS = 0x80, NO_LIGHTNING = 0x08;
 
 export interface ExSlot {
   type: number; // 01-1B
@@ -123,14 +133,18 @@ export function exanimColors(rom: Rom, level: number): Map<number, { global: boo
   }
   return out;
 }
-// whether a trigger has a second set of frames (shown while its condition holds)
-export function secondSet(trigger: number): boolean {
-  return (trigger >= 1 && trigger <= 5) || trigger === 7 || (trigger >= 9 && trigger <= 0x0e) || (trigger >= 0x20 && trigger <= 0x2f);
+// whether a trigger has a second set of frames (shown while its condition holds); ow: in an overworld list, where
+// 06 and 08 are event triggers as 01-05 and 07
+export function secondSet(trigger: number, ow = false): boolean {
+  return (trigger >= 1 && trigger <= 5) || trigger === 7 || (trigger >= 9 && trigger <= 0x0e) || (trigger >= 0x20 && trigger <= 0x2f) || (ow && (trigger === 6 || trigger === 8));
 }
-export function frameWords(type: number, trigger: number, framesLess1: number): number {
+export function frameWords(type: number, trigger: number, framesLess1: number, ow = false): number {
   if (kindOf(type) === 'rotation') return 0;
-  return (framesLess1 + 1) * (secondSet(trigger) ? 2 : 1);
+  return (framesLess1 + 1) * (secondSet(trigger, ow) ? 2 : 1);
 }
+// an overworld event trigger (01-08: Lunar Magic's "Event Manual 8-F") and the manual frame holding its event
+export const isEventTrigger = (t: number) => t >= 1 && t <= 8;
+export const eventManual = (t: number) => t + 7;
 
 export const TYPE_NAMES: Record<number, string> = {
   0x01: '1 tile', 0x02: '2 tiles side by side', 0x03: '3 tiles', 0x04: '4 tiles side by side', 0x05: '5 tiles', 0x06: '6 tiles', 0x07: '7 tiles', 0x08: '8 tiles',
@@ -140,7 +154,8 @@ export const TYPE_NAMES: Record<number, string> = {
   0x18: 'Rotate colors right', 0x19: 'Rotate colors right, reverse on trigger', 0x1a: 'Rotate colors left', 0x1b: 'Rotate colors left, reverse on trigger',
 };
 
-export function triggerName(t: number): string {
+export function triggerName(t: number, ow = false): string {
+  if (ow && isEventTrigger(t)) return `Event Manual ${eventManual(t).toString(16).toUpperCase()}`;
   const fixed: Record<number, string> = {
     0x00: 'Always', 0x01: 'Blue P-switch', 0x02: 'Silver P-switch', 0x03: 'ON/OFF switch', 0x04: 'Star', 0x05: 'Time below 100',
     0x06: 'Time below 100 (one shot)', 0x07: '5 Dragon Coins', 0x08: '5 Dragon Coins (one shot)', 0x0f: 'Precision timer',
@@ -153,7 +168,8 @@ export function triggerName(t: number): string {
   return `$${t.toString(16)}`;
 }
 // what the second frame set means
-export function secondSetName(t: number): string {
+export function secondSetName(t: number, ow = false): string {
+  if (ow && isEventTrigger(t)) return `the event of Manual ${eventManual(t).toString(16).toUpperCase()} passed`;
   return ({ 1: 'P-switch active', 2: 'P-switch active', 3: 'Switch OFF', 4: 'Star active', 5: 'Time below 100', 7: '5 Dragon Coins collected' } as Record<number, string>)[t] ?? `${triggerName(t)} on`;
 }
 
@@ -233,7 +249,8 @@ export function slotTiles(e: ExSlot): number[] {
 export const usesAltFile = (e: ExSlot) => kindOf(e.type) === 'tiles' ? (e.dest & 0x8000) !== 0 : kindOf(e.type) === 'colors' && e.type < 0x16 && ((e.dest >> 8) & 0x80) !== 0;
 
 // ---- list bytes ----
-export function parseList(b: Uint8Array): { list: ExList; length: number } {
+// (ow: an overworld list, its triggers 06 and 08 with a second set)
+export function parseList(b: Uint8Array, ow = false): { list: ExList; length: number } {
   const get = (i: number) => { if (i >= b.length) throw new Error('ExAnimation list truncated'); return b[i]; };
   const word = (i: number) => get(i) | (get(i + 1) << 8);
   const count = get(0);
@@ -250,7 +267,7 @@ export function parseList(b: Uint8Array): { list: ExList; length: number } {
     const p = base + off;
     const type = get(p), trigger = get(p + 1), framesLess1 = get(p + 2), dest = word(p + 3);
     if (!kindOf(type)) throw new Error(`ExAnimation list: unknown type ${type.toString(16)} in slot ${s.toString(16)}`);
-    const n = frameWords(type, trigger, framesLess1);
+    const n = frameWords(type, trigger, framesLess1, ow);
     const frames = Array.from({ length: n }, (_, i) => word(p + 5 + 2 * i));
     end = Math.max(end, p + 5 + 2 * n);
     list.slots.set(s, { type, trigger, framesLess1, dest, frames });
@@ -317,8 +334,8 @@ export function exanimEntry(rom: Rom) {
 }
 
 
-const listAt = (rom: Rom, addr: number): ExList | null => {
-  try { return parseList(rom.bytes(addr, listMaxLength(addr))).list; } catch { return null; }
+const listAt = (rom: Rom, addr: number, ow = false): ExList | null => {
+  try { return parseList(rom.bytes(addr, listMaxLength(addr)), ow).list; } catch { return null; }
 };
 
 export function levelListAddr(rom: Rom, level: number): number {
@@ -342,12 +359,10 @@ export function readGlobalList(rom: Rom): ExList | null {
   return a ? listAt(rom, a) : null;
 }
 
-// frees a list unless another level (or the global list) still points at it
-function freeList(rom: Rom, addr: number, level: number | null): void {
+// frees list `self`'s at `addr` unless another list (a level's, a submap's, a global one) still points at it
+function freeList(rom: Rom, addr: number, self: ExListRef): void {
   if (!addr) return;
-  const l = exanimLayout(rom)!;
-  for (let i = 0; i < 512; i++) if (i !== level && rom.r24(l.table + i * 3) === addr) return;
-  if (level !== null && globalListAddr(rom) === addr) return;
+  if (listRefs(rom).some((r) => !sameRef(r, self) && listAddr(rom, r) === addr)) return;
   rom.freeAt(addr);
 }
 
@@ -357,14 +372,14 @@ const hasContent = (l: ExList | null) => !!l && (l.slots.size > 0 || l.manual.si
 export function writeLevelList(rom: Rom, level: number, list: ExList | null): void {
   const l = exanimLayout(rom)!;
   const old = levelListAddr(rom, level);
-  freeList(rom, old, level);
+  freeList(rom, old, { kind: 'level', n: level });
   const p = hasContent(list) ? rom.allocWrite(listBytes(list!)) : 0x0000ff;
   rom.w24(l.table + level * 3, p);
 }
 
 export function writeGlobalList(rom: Rom, list: ExList | null): void {
   const l = exanimLayout(rom)!;
-  freeList(rom, globalListAddr(rom), null);
+  freeList(rom, globalListAddr(rom), { kind: 'global' });
   const p = hasContent(list) ? rom.allocWrite(listBytes(list!)) : 0;
   rom.w16(l.target + GLOBAL_BANK, p ? p >> 8 : 0);
   rom.w16(l.target + GLOBAL_LOW, p & 0xffff);
@@ -375,6 +390,87 @@ export function levelSettings(rom: Rom, level: number): number {
 }
 export function setLevelSettings(rom: Rom, level: number, v: number): void {
   rom.w8(SETTINGS + level, v & 0xf0);
+}
+
+// ---- the overworld's lists ----
+const OW_HOOK = 0x048086;
+const OW_SETTINGS_AT = 0x4a, OW_GLOBAL_HIGH = 0x57, OW_GLOBAL_LOW = 0x61, OW_TABLE_AT = 0xe1;
+export const SUBMAP_LISTS = 7;
+export interface OwExLayout { target: number; settings: number; table: number }
+export function owExanimLayout(rom: RomRead): OwExLayout | null {
+  if (rom.r8(OW_HOOK) !== 0x22) return null;
+  const target = rom.r24(OW_HOOK + 1);
+  return { target, settings: rom.r24(target + OW_SETTINGS_AT), table: rom.r24(target + OW_TABLE_AT) };
+}
+export function submapListAddr(rom: Rom, submap: number): number {
+  const l = owExanimLayout(rom);
+  if (!l) return 0;
+  const p = rom.r24(l.table + submap * 3);
+  return ((p >> 8) & 0xff) === 0 || (p & 0xffff) === 0xffff ? 0 : p;
+}
+export function readSubmapList(rom: Rom, submap: number): ExList | null {
+  const a = submapListAddr(rom, submap);
+  return a ? listAt(rom, a, true) : null;
+}
+export function writeSubmapList(rom: Rom, submap: number, list: ExList | null): void {
+  const l = owExanimLayout(rom)!;
+  freeList(rom, submapListAddr(rom, submap), { kind: 'submap', n: submap });
+  rom.w24(l.table + submap * 3, hasContent(list) ? rom.allocWrite(listBytes(list!)) : 0x0000ff);
+}
+export function owGlobalListAddr(rom: RomRead): number {
+  const l = owExanimLayout(rom);
+  if (!l) return 0;
+  const high = rom.r16(l.target + OW_GLOBAL_HIGH);
+  return high ? (high << 8) | rom.r16(l.target + OW_GLOBAL_LOW) : 0;
+}
+export function readOwGlobalList(rom: Rom): ExList | null {
+  const a = owGlobalListAddr(rom);
+  return a ? listAt(rom, a, true) : null;
+}
+export function writeOwGlobalList(rom: Rom, list: ExList | null): void {
+  const l = owExanimLayout(rom)!;
+  freeList(rom, owGlobalListAddr(rom), { kind: 'owGlobal' });
+  const p = hasContent(list) ? rom.allocWrite(listBytes(list!)) : 0;
+  rom.w16(l.target + OW_GLOBAL_HIGH, p ? p >> 8 : 0);
+  rom.w16(l.target + OW_GLOBAL_LOW, p & 0xffff);
+}
+export function submapAnimSettings(rom: Rom, submap: number): number {
+  return rom.r8(owExanimLayout(rom)!.settings + submap);
+}
+export function setSubmapAnimSettings(rom: Rom, submap: number, v: number): void {
+  rom.w8(owExanimLayout(rom)!.settings + submap, v & 0xf8);
+}
+
+// ---- every list by one name ----
+// a level's list, the levels' global one, a submap's, the overworld's global one
+export type ExListRef = { kind: 'level'; n: number } | { kind: 'global' } | { kind: 'submap'; n: number } | { kind: 'owGlobal' };
+export const isOwList = (r: ExListRef) => r.kind === 'submap' || r.kind === 'owGlobal';
+const sameRef = (a: ExListRef, b: ExListRef) => a.kind === b.kind && ('n' in a ? a.n === (b as { n: number }).n : true);
+// every list there is a place for
+export function listRefs(rom: Rom): ExListRef[] {
+  const out: ExListRef[] = [...Array.from({ length: 512 }, (_, n): ExListRef => ({ kind: 'level', n })), { kind: 'global' }];
+  if (owExanimLayout(rom)) out.push(...Array.from({ length: SUBMAP_LISTS }, (_, n): ExListRef => ({ kind: 'submap', n })), { kind: 'owGlobal' });
+  return out;
+}
+export function listAddr(rom: Rom, r: ExListRef): number {
+  switch (r.kind) {
+    case 'level': return levelListAddr(rom, r.n);
+    case 'global': return globalListAddr(rom);
+    case 'submap': return submapListAddr(rom, r.n);
+    case 'owGlobal': return owGlobalListAddr(rom);
+  }
+}
+export function readList(rom: Rom, r: ExListRef): ExList | null {
+  const a = listAddr(rom, r);
+  return a ? listAt(rom, a, isOwList(r)) : null;
+}
+export function writeList(rom: Rom, r: ExListRef, list: ExList | null): void {
+  switch (r.kind) {
+    case 'level': writeLevelList(rom, r.n, list); break;
+    case 'global': writeGlobalList(rom, list); break;
+    case 'submap': writeSubmapList(rom, r.n, list); break;
+    case 'owGlobal': writeOwGlobalList(rom, list); break;
+  }
 }
 
 // ---- alternative files ExGFX 60-63 ----
@@ -410,17 +506,33 @@ export function exanimDataRanges(rom: Rom): [number, number][] {
   add(l.table, 512 * 3);
   add(SETTINGS, 0x200);
   add(ALT_FILES, 4 * 3);
-  const lists = new Set<number>();
-  for (let i = 0; i < 512; i++) { const a = levelListAddr(rom, i); if (a) lists.add(a); }
-  const g = globalListAddr(rom);
-  if (g) lists.add(g);
-  for (const a of lists) {
-    try { add(a, parseList(rom.bytes(a, listMaxLength(a))).length); } catch { /* not a list */ }
+  const ow = owExanimLayout(rom);
+  if (ow) { add(ow.table, SUBMAP_LISTS * 3); add(ow.settings, SUBMAP_LISTS); }
+  const lists = new Map<number, boolean>();
+  for (const r of listRefs(rom)) { const a = listAddr(rom, r); if (a) lists.set(a, isOwList(r)); }
+  for (const [a, owList] of lists) {
+    try { add(a, parseList(rom.bytes(a, listMaxLength(a)), owList).length); } catch { /* not a list */ }
   }
   for (let n = 0; n < 4; n++) {
     const a = altFileAddr(rom, n);
     const size = a ? rom.isRatsAt(snesToPc(a) - 8) : 0;
     if (size > 0) add(a, size);
+  }
+  return out;
+}
+
+// [start, end) ROM offsets of the overworld's ExAnimation data: its tables and lists (also in exanimDataRanges), which
+// overworld results that are no picture leave out (overworld.ts overworldDataRanges)
+export function owExanimDataRanges(rom: Rom): [number, number][] {
+  const ow = owExanimLayout(rom);
+  if (!ow) return [];
+  const out: [number, number][] = [];
+  const add = (snes: number, len: number) => { const o = snesToPc(snes); if (o >= 0 && o < rom.data.length) out.push([o, Math.min(rom.data.length, o + len)]); };
+  add(ow.table, SUBMAP_LISTS * 3);
+  add(ow.settings, SUBMAP_LISTS);
+  for (const a of new Set([...Array.from({ length: SUBMAP_LISTS }, (_, i) => submapListAddr(rom, i)), owGlobalListAddr(rom)])) {
+    if (!a) continue;
+    try { add(a, parseList(rom.bytes(a, listMaxLength(a)), true).length); } catch { /* not a list */ }
   }
   return out;
 }
@@ -497,19 +609,22 @@ export function levelAltFile(rom: Rom, level: number): number {
   return readLevelList(rom, level)?.altFile ?? 0;
 }
 
-// the lists whose tile slots take frames from alternative file `n`: levels and the global list
-export function altFileUsers(rom: Rom, n: number): { levels: number[]; global: boolean } {
+// the lists whose tile slots take frames from alternative file `n`: levels, the global list, submaps, the overworld's
+// global list
+export function altFileUsers(rom: Rom, n: number): { levels: number[]; global: boolean; submaps: number[]; owGlobal: boolean } {
   const uses = (l: ExList | null) => !!l && l.altFile === n && [...l.slots.values()].some((e) => kindOf(e.type) === 'tiles' && (e.dest & 0x8000) !== 0);
-  const levels: number[] = [];
+  const levels: number[] = [], submaps: number[] = [];
   for (let i = 0; i < 512; i++) if (uses(readLevelList(rom, i))) levels.push(i);
-  return { levels, global: uses(readGlobalList(rom)) };
+  for (let i = 0; i < SUBMAP_LISTS; i++) if (uses(readSubmapList(rom, i))) submaps.push(i);
+  return { levels, global: uses(readGlobalList(rom)), submaps, owGlobal: uses(readOwGlobalList(rom)) };
 }
 
-// the end of what the slots of all lists (levels and the global one, or `global` in its place) read from
-// Anim graphic `n`
+// the end of what the slots of all lists (levels and the global one, or `global` in its place, the submaps and the
+// overworld's global one) read from Anim graphic `n`
 export function altFileExtent(rom: Rom, n: number, global: ExList | null = readGlobalList(rom)): number {
   let end = 0;
-  const lists = [...Array.from({ length: 512 }, (_, i) => readLevelList(rom, i)), global];
+  const lists = [...Array.from({ length: 512 }, (_, i) => readLevelList(rom, i)), global,
+    ...Array.from({ length: SUBMAP_LISTS }, (_, i) => readSubmapList(rom, i)), readOwGlobalList(rom)];
   for (const l of lists) {
     if (!l || l.altFile !== n) continue;
     for (const e of l.slots.values()) {

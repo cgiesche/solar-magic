@@ -8,7 +8,7 @@ import { GM, RAM } from './ram.ts';
 import { assemble } from './asar.ts';
 import { missingPatch } from './patches.ts';
 import { lz2Compress, lz2Decompress } from './lz2.ts';
-import type { RomRead } from './exanim.ts';
+import { owExanimDataRanges, type RomRead } from './exanim.ts';
 import { hasOwnContent } from './level.ts';
 import { hasMessages, clearMessages } from './messages.ts';
 import { levelName, hasLevelName, clearLevelName, levelNameRanges } from './levelnames.ts';
@@ -643,7 +643,8 @@ export function eventNames(rom: Rom): Map<number, string> {
 // The ROM bytes (PC offsets, [start, end)) of the overworld's data that the editor writes: layer 1, layer 2 with its
 // pointers, the translevel table with its pointer, per translevel the exit directions, initial flags and name, the
 // layer 1 tiles' Map16, the reveals with the reveal list, the destroyed level tiles, the event steps, the links (star/pipe, exit path and
-// Koopa Kid tables), the start positions and the sprites (owsprites.ts), the custom sprites' table (owcustom.ts).
+// Koopa Kid tables), the start positions and the sprites (owsprites.ts), the custom sprites' table (owcustom.ts), the
+// submaps' animations (exanim.ts).
 // Learned results that load the overworld without depending on what is painted there leave them out (owpaths.ts).
 export function overworldDataRanges(rom: Rom): [number, number][] {
   const at = (snes: number, len: number): [number, number] => [snesToPc(snes), snesToPc(snes) + len];
@@ -664,7 +665,7 @@ export function overworldDataRanges(rom: Rom): [number, number][] {
   if (hasDestroyPatch(rom)) out.push(at(rom.r24(DESTROY_EV_OP), DESTROYS), at(rom.r24(DESTROY_LOC_OP), DESTROYS * 2));
   out.push(...teleportDataRanges(rom), at(KOOPA_X, KOOPAS * 2), at(KOOPA_Y, KOOPAS * 2));
   out.push(at(START, 0x16), ...(hasOwSpriteSlots(rom) ? [at(OW_SPRITES, OW_SPRITE_SLOTS * 5)] : []), ...Object.values(KOOPA_KID).map((t) => at(t, KOOPA_KIDS)));
-  out.push(...customSpriteRanges(rom));
+  out.push(...customSpriteRanges(rom), ...owExanimDataRanges(rom));
   return out;
 }
 

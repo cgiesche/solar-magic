@@ -9,6 +9,9 @@
 // (level_ex20.htm); Kobo's runs it like "always". The game's animated tiles are called in the fast ROM bank $85
 // (the editor's ROM is FastROM). A frame's work is Kobo's at less cost: the settings byte and each list's
 // address read once, the scratch kept only as far as it is used, the NMI walks only the uploads queued (#151).
+// The overworld's lists (a list per submap and the overworld's global one, with a settings byte per submap, in Lunar
+// Magic's overworld layout: its hooks at $048086, $0480E0 and $00A4E3, its tables at the first one's target) run on
+// the same code, with the overworld's event triggers in place of the level's conditions (#244).
 // Only this file is under the MPL; it is used as Asar source by ../exanim.ts.
 
 export const KOBO_COMMIT = '395083bbf7a8664d7c970ce465a5fb418002ab91';
@@ -76,6 +79,8 @@ incsrc "memory.asm"
 
 !Legacy = $7FC004
 !LastCall = $7FC003             ; the $14 of the last frame
+!OwSettings = $7FC00A           ; the submap's settings, where Lunar Magic keeps them [Solar Magic]
+!OwSubmap = !OwSettings+1       ; the submap the lists were set up for; $FF in a level [Solar Magic]
 !LastFrame = $7FC019            ; the $14 the lists last ran for
 !QueueEnd = $7FC01A             ; 16-bit, the high byte 0: the queue's uploads end here, from !Queue [Solar Magic]
 !Manual = $7FC070
@@ -125,6 +130,25 @@ org $008A4E
     JSL clear_memory
     NOP
 
+; The overworld [Solar Magic], at Lunar Magic's places (SMW Central's hijack
+; map): its load sets up the game's animated tiles at $048086 (entered with
+; JSR at the load, game mode $0C, the screen off; REP #$30 : STZ $03 : STZ
+; $05), each frame animates them at $0480E0 (LDA $13 : AND #$07, then a BNE),
+; the NMI uploads them and the level dots' colours 6D and 7D at $00A4E3 (REP
+; #$10 : LDA #$80 : STA $2115). The game code a hook replaces runs in ours.
+org $048086
+    JSL ow_init
+    RTS
+org $0480E0
+    JSL ow_frame
+    RTS
+org $00A4E3
+    JSL ow_nmi
+    RTS
+; the RTL the game's routines return through when this code runs them (their
+; RTS to it)
+assert read1($048414) == $6B
+
 ; The alternative files: none until a build writes them.
 org !AltFiles
     dl $000000,$000000,$000000,$000000
@@ -144,6 +168,15 @@ level_table:
     for i = 0..512
         dl $0000FF
     endfor
+
+; The submaps' lists and settings [Solar Magic]: 7 each, as level_table and
+; the levels' settings (all on).
+ow_table:
+    for i = 0..7
+        dl $0000FF
+    endfor
+ow_settings:
+    db $00,$00,$00,$00,$00,$00,$00
 
 freecode
 prot level_table
@@ -172,6 +205,20 @@ level_init_body:
     STZ $1933|!addr             ; what the hook replaces
     PHP
     JSR save_scratch
+    SEP #$20
+    LDA #$1F                    ; the first eighth frame counts it to 0
+    STA.l !Legacy
+    LDA #$FF                    ; a level's lists [Solar Magic]
+    STA.l !OwSubmap
+    JSR setup_lists
+    JSR restore_scratch
+    PLP
+    RTL
+
+; The lists' start, in a level or on a submap [Solar Magic: shared]: every
+; slot's counter, the one-shots, the queue; the triggers' starting states,
+; the global list's, then the level's (the submap's).
+setup_lists:
     REP #$30
     LDA #$FFFF
     LDX #$003E
@@ -184,22 +231,17 @@ level_init_body:
     STA.l !OneShot+2
     JSR clear_queue
     SEP #$20
-    LDA #$1F                    ; the first eighth frame counts it to 0
-    STA.l !Legacy
     LDA #$FF
     STA.l !LastFrame
     STA.l !LastCall
     REP #$20
-    ; The triggers' starting states: the global list's, then the level's.
     JSR global_address
     BCC +
     JSR init_triggers
 +   JSR level_address
     BCC +
     JSR init_triggers
-+   JSR restore_scratch
-    PLP
-    RTL
++   RTS
 
 ; The direct page scratch this code uses, $00-$0F, kept for the game's code
 ; around the hooks, which leaves values there across them. The caller's
@@ -242,6 +284,8 @@ restore_scratch:
 
 ; !List = the global list; carry clear for none. A/X/Y 16-bit.
 global_address:
+    LDA.l !OwSettings           ; the high byte !OwSubmap: positive on the
+    BPL ow_global_address       ; overworld [Solar Magic]
     LDA.l global_bank           ; the bank in the high byte
     BEQ .none
     STA !List+1
@@ -256,6 +300,8 @@ global_address:
 ; !List = the level's list; carry clear for none. A/X/Y 16-bit. Of the
 ; scratch only !List is used. [Solar Magic]
 level_address:
+    LDA.l !OwSettings           ; on the overworld: the submap's [Solar Magic]
+    BPL ow_submap_address
     LDA.l !Level
     AND #$01FF
     STA !List
@@ -265,6 +311,47 @@ level_address:
     LDA.l level_list            ; the table, wherever Lunar Magic keeps it
     STA !List
     LDA.l level_list+1
+    STA !List+1
+    LDA [!List],y
+    TAX
+    INY
+    LDA [!List],y
+    STA !List+1
+    STX !List
+    AND #$00FF                  ; the middle byte: 0 for none
+    BEQ .none
+    SEC
+    RTS
+.none:
+    CLC
+    RTS
+
+; !List = the overworld's global list; carry clear for none. A/X/Y 16-bit.
+; [Solar Magic]
+ow_global_address:
+    LDA.l ow_global_bank        ; the address >> 8
+    BEQ .none
+    STA !List+1
+    LDA.l ow_global_low
+    STA !List
+    SEC
+    RTS
+.none:
+    CLC
+    RTS
+
+; !List = the list of the submap the lists were set up for; carry clear for
+; none. A/X/Y 16-bit. [Solar Magic]
+ow_submap_address:
+    LDA.l !OwSubmap
+    AND #$00FF
+    STA !List
+    ASL A                       ; (carry clear)
+    ADC !List
+    TAY
+    LDA.l ow_list               ; the table, wherever Lunar Magic keeps it
+    STA !List
+    LDA.l ow_list+1
     STA !List+1
     LDA [!List],y
     TAX
@@ -322,6 +409,8 @@ clear_memory:
     BPL -
     STA.l !Legacy-1             ; $7FC003-$7FC004
     STA.l !QueueEnd             ; [Solar Magic]
+    DEC A                       ; no submap's lists, all off [Solar Magic]
+    STA.l !OwSettings
     LDX #$1FFE                  ; what the hook replaces
     RTL
 
@@ -350,11 +439,14 @@ frame:
     LDA.l !Settings,x
     PHA                         ; the level's settings, at 1,s
     AND #$40
-    BNE +
+    BNE frame_lists
     SEP #$30
     JSL $85BB39                 ; the game's animated tiles (in FastROM's bank)
-    ; Does a list with slots run? !List the first that does.
-+   SEP #$20
+; Does a list with slots run? !List the first that does. [Solar Magic: also
+; the overworld's frame's, ow_frame] The stack: the settings at 1,s, the
+; scratch's $00-$03 and the caller's flags below.
+frame_lists:
+    SEP #$20
     LDA 1,s
     AND #$10
     BNE .no_global
@@ -526,6 +618,8 @@ run_slot:
     CMP #$17
     BNE .trigger
 .fades:
+    LDA.l !OwSubmap             ; (not on the overworld, which has no end:
+    BPL .trigger                ; Lunar Magic's help) [Solar Magic]
     LDA.l !EndLevelTimer        ; types 15 and 17 stop at the level's end
     BEQ .trigger
     RTS
@@ -558,6 +652,12 @@ run_slot:
     ADC !Frames
     JMP upload
 .condition_once:
+    PHA                         ; on the overworld 06 and 08 are event
+    LDA.l !OwSubmap             ; triggers with a second set, as 01-05 and 07
+    BMI +                       ; [Solar Magic]
+    PLA
+    BRA .custom
++   PLA
     JSR condition
     BCC .none
     JSR counter
@@ -676,6 +776,10 @@ one_shot_bit:
 condition:
     CMP #$20
     BCS .custom
+    PHA
+    LDA.l !OwSubmap
+    BPL .overworld              ; [Solar Magic]
+    PLA
     CMP #$01
     BEQ .pow
     CMP #$02
@@ -734,6 +838,44 @@ condition:
 +   LSR A
     SEP #$20
     RTS
+; On the overworld 01-08 are Lunar Magic's "Event Manual 8-F": they hold
+; while the event whose number manual frame 8-F has is passed ($1F02, a bit
+; each, the first event the high bit). [Solar Magic]
+.overworld:
+    PLA
+    DEC A                       ; 01-08 as 0-7 (none and 09-0F: never)
+    CMP #$08
+    BCS .none
+    REP #$20
+    AND #$00FF
+    TAX
+    SEP #$20
+    LDA.l !Manual+8,x           ; the event
+    PHA
+    LSR A
+    LSR A
+    LSR A
+    REP #$20
+    AND #$00FF
+    TAX
+    SEP #$20
+    LDA.l $001F02|!addr,x
+    STA !Temp
+    PLA
+    AND #$07
+    REP #$20
+    AND #$00FF
+    TAX
+    SEP #$20
+    LDA.l .event_bits,x
+    AND !Temp
+    CMP #$01
+    RTS
+.none:
+    CLC
+    RTS
+.event_bits:
+    db $80,$40,$20,$10,$08,$04,$02,$01
 
 ; ---------------------------------------------------------------------------
 ; The upload of frame A of the slot. A 8-bit, X/Y 16-bit.
@@ -867,7 +1009,10 @@ colours:
     PLA
     CMP #$13
     BEQ colours_queue
-    ; The palette's two copies in RAM.
+    LDA.l !OwSubmap             ; the overworld's palette has no copy that
+    BMI +                       ; fades [Solar Magic]
+    JMP ow_colours
++   ; The palette's two copies in RAM.
     REP #$20
     LDA !Temp
     AND #$00FF
@@ -900,8 +1045,14 @@ colours:
     STA !Source+2
     BRA colours_queue
 .back_area:
+    LDA.l !OwSubmap             ; (A 8-bit; N stays through the REP)
     REP #$20
-    LDA !Source                 ; the colour itself
+    BMI +
+    LDA !Source                 ; the overworld: no copy [Solar Magic]
+    STA.l !BackAreaColour
+    SEP #$20
+    RTS
++   LDA !Source                 ; the colour itself
     STA.l !BackAreaColour
     STA.l !CopyBackArea
     SEP #$20
@@ -982,7 +1133,10 @@ rotation:
     LDA #$FF
     STA.l !Counters,x
     JSR rotate_range            ; X = 2 * the first colour, Y = the colours
-    PLA
+    LDA.l !OwSubmap             ; the overworld: no copy that fades
+    BMI +                       ; [Solar Magic]
+    JMP ow_turn
++   PLA
     CMP #$1A
     REP #$20
     BCS .left
@@ -1242,6 +1396,288 @@ queue:
     ADC #$0007
     TAX
     JMP .next
+
+; ---------------------------------------------------------------------------
+; The overworld [Solar Magic]: a list per submap and the overworld's global
+; one, run as a level's lists, with a settings byte per submap. Lunar
+; Magic's editor finds the tables through the values at its offsets from the
+; load's hook target (read from Lunar Magic's code in ROMs it saved,
+; docs/research/lunar-magic-submap-graphics.md): the settings' address at
+; +$4A, the global list's address >> 8 at +$57 and its low word at +$61, the
+; submaps' 7 3-byte list pointers ($0000FF: none) at +$E1 and that address
+; plus one at +$D6. A submap's settings byte: 80 the level dots' colours 6D
+; and 7D, 40 the game's animated tiles, 20 the submap's list, 10 the global
+; list, each off when set (Lunar Magic's); 08 the lightning (colour 47, the
+; editor's own: Lunar Magic's code keeps none).
+ow_init:
+    BRL ow_init_body
+    fillbyte $FF : fill $4A-3
+ow_settings_at:                 ; +$4A
+    dl ow_settings
+    fillbyte $FF : fill $57-$4D
+ow_global_bank:                 ; +$57
+    dw $0000
+    fillbyte $FF : fill $61-$59
+ow_global_low:                  ; +$61
+    dw $0000
+    fillbyte $FF : fill $D6-$63
+ow_list_next:                   ; +$D6
+    dl ow_table+1
+    fillbyte $FF : fill $E1-$D9
+ow_list:                        ; +$E1
+    dl ow_table
+
+assert ow_settings_at-ow_init == $4A
+assert ow_global_bank-ow_init == $57
+assert ow_global_low-ow_init == $61
+assert ow_list_next-ow_init == $D6
+assert ow_list-ow_init == $E1
+
+; The overworld's load (A/X/Y 8-bit, the data bank $04, the screen off): the
+; lists set up for the player's submap, the game's animated tiles set up
+; (unless off), then eight frames of the lists with their uploads, $14 from
+; 0 to 7 (and back after them), so the map shows them from the start.
+ow_init_body:
+    PHP
+    JSR ow_setup
+    SEP #$30
+    LDA.l !OwSettings
+    AND #$40
+    BNE .setup
+    REP #$30
+    STZ $03                     ; what the hook replaces, then the game's
+    STZ $05                     ; code after it, returning through an RTL
+    PHK
+    PER .setup-1
+    PEA $8413
+    JML $84808C
+.setup:
+    SEP #$30
+    LDA !EffFrame
+    PHA
+    LDA.l !OwSettings
+    PHA
+    ORA #$C0                    ; the game's tiles set up already, no dots
+    STA.l !OwSettings
+    STZ !EffFrame
+-   JSL ow_frame
+    JSL ow_nmi
+    INC !EffFrame
+    LDA !EffFrame
+    CMP #$08
+    BCC -
+    PLA
+    STA.l !OwSettings
+    PLA
+    STA !EffFrame
+    LDA #$FF
+    STA.l !LastCall
+    PLP
+    RTL
+
+; The lists set up for the player's submap ($1F11 of $0DB3), its settings
+; read. Any A/X/Y size; the scratch kept.
+ow_setup:
+    PHP
+    JSR save_scratch
+    SEP #$30
+    LDX $0DB3|!addr
+    LDA $1F11|!addr,x
+    STA.l !OwSubmap
+    REP #$30
+    AND #$00FF
+    TAY
+    LDA.l ow_settings_at
+    STA !List
+    LDA.l ow_settings_at+1
+    STA !List+1
+    SEP #$20
+    LDA [!List],y
+    STA.l !OwSettings
+    JSR setup_lists
+    JSR restore_scratch
+    PLP
+    RTS
+
+; A frame on the overworld, where the game animates its tiles (A/X/Y 8-bit,
+; the data bank $04): the lists set up again once Mario is on another submap
+; (he walked there), the game's tiles (unless off; by its frame counter
+; $13), the lightning held off (when so set), then the lists, as a level's.
+ow_frame:
+    PHP
+    SEP #$30
+    LDX $0DB3|!addr
+    LDA $1F11|!addr,x
+    CMP.l !OwSubmap
+    BEQ +
+    JSR ow_setup
++   SEP #$30
+    LDA.l !OwSettings
+    AND #$40
+    BNE .lightning
+    PHK
+    PER .lightning-1
+    PEA $8413
+    LDA $13                     ; what the hook replaces
+    AND #$07
+    BNE +
+    JML $8480E6
++   JML $848101
+.lightning:
+    SEP #$30
+    LDA.l !OwSettings
+    AND #$08
+    BEQ +
+    STZ $1FFB|!addr             ; no flash ($04F708), and none to come
+    LDA #$FF
+    STA $1FFC|!addr
++   LDA !EffFrame
+    CMP.l !LastCall
+    BNE +
+    PLP
+    RTL
++   STA.l !LastCall
+    REP #$30
+    PEI ($02)
+    PEI ($00)
+    SEP #$20
+    LDA.l !OwSettings
+    PHA
+    JMP frame_lists
+
+; The overworld's NMI uploads (entered with JSR, A/X 8-bit): the game's
+; animated tiles from $0AF6 (unless off), the queue, the level dots' colours
+; 6D and 7D (unless off), as the code the hook replaces does them.
+ow_nmi:
+    PHP
+    SEP #$20
+    REP #$10
+    LDA.l !OwSettings
+    AND #$40
+    BNE +
+    LDA #$80
+    STA $2115
+    LDY #$0750
+    STY $2116
+    LDY #$1801
+    STY $4320
+    LDY #$0AF6
+    STY $4322
+    STZ $4324
+    LDY #$0160
+    STY $4325
+    LDA #$04
+    STA $420B
++   JSR queue
+    SEP #$30
+    LDA.l !OwSettings
+    BMI .done
+    LDA $13D9|!addr
+    CMP #$0A
+    BEQ .done
+    STZ $00
+    LDA #$6D
+    JSR .dot
+    LDA #$10
+    STA $00
+    LDA #$7D
+    JSR .dot
+.done:
+    PLP
+    RTL
+.dot:                           ; colour A from the flashing colours, by $14
+    STA $2121
+    LDA !EffFrame
+    AND #$1C
+    LSR A
+    ADC $00
+    TAX
+    LDA.l $00B60C,x
+    STA $2122
+    LDA.l $00B60D,x
+    STA $2122
+    RTS
+
+; Colours (types 14 and 15) on the overworld: into its palette ($0703) and
+; CGRAM, from the frame; A 8-bit, X/Y 16-bit, as colours has them.
+ow_colours:
+    REP #$20
+    LDA !Temp
+    AND #$00FF
+    ASL A
+    TAX
+    LDA !Frames
+    AND #$00FF
+    PHA
+    LDY #$0000
+-   LDA [!Source],y
+    STA.l !MainPalette,x
+    INX
+    INX
+    INY
+    INY
+    LDA 1,s
+    DEC A
+    STA 1,s
+    BNE -
+    PLA
+    SEP #$20
+    JMP colours_queue
+
+; A rotation's turn on the overworld: the palette's colours ($0703), then
+; uploaded from there. The type at 1,s; X = 2 * the first colour, Y = the
+; colours; A 8-bit.
+ow_turn:
+    PLA
+    CMP #$1A
+    REP #$20
+    BCS .left
+    TYA                         ; right: from the last colour down
+    DEC A
+    ASL A
+    STA !Source
+    TXA
+    CLC
+    ADC !Source
+    TAX
+    LDA.l !MainPalette,x
+    PHA
+    DEY
+    BEQ .ends
+-   LDA.l !MainPalette-2,x
+    STA.l !MainPalette,x
+    DEX
+    DEX
+    DEY
+    BNE -
+    BRA .ends
+.left:
+    LDA.l !MainPalette,x
+    PHA
+    DEY
+    BEQ .ends
+-   LDA.l !MainPalette+2,x
+    STA.l !MainPalette,x
+    INX
+    INX
+    DEY
+    BNE -
+.ends:
+    PLA
+    STA.l !MainPalette,x
+    SEP #$20
+    JSR rotate_range
+    REP #$20
+    TXA
+    CLC
+    ADC.w #!MainPalette&$FFFF
+    STA !Source
+    SEP #$20
+    LDA.b #!MainPalette>>16
+    STA !Source+2
+    TYA
+    STA !Frames
+    JMP colours_queue
 `;
 
 export const MEMORY_ASM = `; Where the ROM maps and where the game keeps its variables, for every patch

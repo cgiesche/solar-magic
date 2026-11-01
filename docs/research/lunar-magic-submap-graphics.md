@@ -74,3 +74,38 @@ The editor keeps them in its layer 3 table (SMWL, entries 200–206 after the le
 overworld's load and the editor's code at `$04DBB9` run, takes the submap's LG files; a JSL at `$00A153` copies the
 LT3 file instead of setting the border's stripe image. The level name's stripe (`$508B`) and the lives are written
 over the file as over the border.
+
+## Animations
+
+Research for issue #244. Lunar Magic's overworld ExAnimation (help `ov_overworld_ex20.htm`, `_global.htm`,
+`_settings.htm`) hooks three places with `JSL routine : RTS`: `$048086` (the overworld's load sets up the game's
+animated tiles there; game mode `$0C`, the screen off, data bank `$04`), `$0480E0` (each frame, where the game animates
+them) and `$00A4E3` (the NMI's upload of the game's tiles from `$0AF6` and the level dots' colors 6D/7D). It also
+makes the game's tile animation count with `$14` instead of `$13` (`$048102`, `$04810D`, `$04813B`); the editor keeps
+`$13`. *celery*, *Bluerio's Adventure* and *Journey to Kaizo* have the same code at different places; its tables are
+operands at fixed offsets from the first hook's target (the same in all three):
+
+| Place | Contents |
+|---|---|
+| target `+$4A` | the address of 7 settings bytes, one per submap (`LDA long,x`; a RATS block of its own) |
+| target `+$57` | the overworld's global list's address >> 8 (`LDA #`; 0: none) |
+| target `+$61` | its low word (`LDA #`) |
+| target `+$D6` | the submaps' list table's address plus one |
+| target `+$E1` | the address of 7 3-byte pointers to the submaps' lists (`$0000FF`: none; a RATS block of its own) |
+
+The lists are a level's (the editor's parser reads the 7 lists of *Bluerio's Adventure* and *Journey to Kaizo*), but
+for the triggers: the jump table at `$C0C27B` in *celery* sends 01–08 to code that takes the event number from manual
+frame 8–F (`$7FC078`+) and holds while that event's bit in `$1F02` is set (the first event the high bit) – Lunar
+Magic's "Event Manual 8–F". The slot code takes the second frame set for every trigger that holds, so on the
+overworld 06 and 08 have one too. Color animations write the palette `$0703` (no fading copy), the RAM and the frame
+counters are the level's (`$7FC070`, `$7FC080`, `$7FC0A0`, `$7FC0F8`, `$7FC0FC`); the settings byte of the submap is
+kept at `$7FC00A`. Its bits, as the code reads them: `$80` the level dots' colors (the NMI), `$40` the game's
+animated tiles, `$20` the submap's list, `$10` the global list – each off when set. The help's lightning switch
+(color 47) is read by none of this code nor by any other place in these ROMs or in `Lunar Magic.exe` 3.71's patch code
+the search found; the editor keeps its own lightning switch in the free bit `$08` (to be confirmed against a ROM Lunar
+Magic saved with it). At the load Lunar Magic runs the lists eight times, `$14` from 0 to 7, with their uploads.
+
+The editor's engine (Kobo's, `src/core/kobo/exanimation.ts`) runs the overworld's lists on the same code as a level's,
+from its own hooks at those places, with its tables at Lunar Magic's offsets. It sets the lists up again when Mario
+is on another submap than they were set up for (Lunar Magic's own way there was not traced), and holds the lightning
+off (`$1FFB`, `$1FFC`, the game's lightning at `$04F708`) where the submap's bit says so.
