@@ -6,7 +6,7 @@ import { LevelEmulator, type LevelRender, type LevelOverride, type Animated, MAP
 import {
   type Level, type LevelObject, type LevelSprite, type ScreenExit, loadLevel, spriteLoadOrder, serializeLayer1, serializeSprites, serializeLevelSprites, spriteSizes, spriteId, spriteBytes,
   isL1Vertical, newUid, hasLayer2Objects, hasObjects, SEC_HDR,
-  entrancePos, nearestEntrance, encodeSecondaryHeader, mainSpot, sameSpot, placeMain, midwaySpot, nearestMidway, placeMidway, exitLandsAtMidway, isSized, SPRITE_MEMORY, levelRows, TIME_TABLE,
+  nearestEntrance, encodeSecondaryHeader, mainSpot, sameSpot, placeMain, midwaySpot, nearestMidway, placeMidway, exitLandsAtMidway, isSized, SPRITE_MEMORY, levelRows, TIME_TABLE,
 } from '../core/level.ts';
 import { levelBgPointer } from '../core/levelheader.ts';
 import { hex, hex2, spriteName } from '../core/names.ts';
@@ -35,7 +35,7 @@ import { layer3Geometry, type Layer3Geometry } from '../core/render.ts';
 import { toast, log as logMsg, modalsOpen, onModalsChange } from './dom.ts';
 import { musicPlayer } from './musicplayer.ts';
 import { exitTarget } from '../core/exitgraph.ts';
-import { SecondaryEntrances, NO_FREE_ENTRANCE, entranceTables } from '../core/entrances.ts';
+import { SecondaryEntrances, NO_FREE_ENTRANCE, entranceTables, entranceMarkers, type Marker } from '../core/entrances.ts';
 import type { RomHistory } from '../core/romhistory.ts';
 import type { EditOptions } from '../core/romedit.ts';
 import { EditSession, type LevelEdit, type StepResult } from '../core/editsession.ts';
@@ -45,7 +45,7 @@ import { type JumpArc } from '../core/jumparcs.ts';
 import { scanKey, type ScanLevel, type ScanResult } from '../core/levelscan.ts';
 import { cameraAtKey, type CameraReach, type CameraAt } from '../core/camerareach.ts';
 import { MARIO_W, MARIO_H, type CameraBands } from '../core/camerabands.ts';
-import { tideKind, layer3Top, type Layer3Kind } from '../core/layer3.ts';
+import { tideLines, type TideLines, type Layer3Kind } from '../core/layer3.ts';
 import { type Layer2Motions } from '../core/l2scroll.ts';
 import { variantOf, blockKey, collisionKey, type BlockProbe, type CollisionProbe, type RunStates, type SwitchState, SWITCH_STATES, SWITCH_TRIGGER } from '../core/blockprobe.ts';
 import type { ProbeReply, LearnJob } from '../core/probeprotocol.ts';
@@ -137,8 +137,7 @@ export interface SpriteJob { key: string; job: LearnJob; input: unknown }
 // result of the sprite memory check (see App.checkSpriteMem); gen: the edit session's levelGen when it started
 export interface SpriteMemState { key: string; level: number; mem: number; gen: number; conflicts: Set<number>; suggestion: number | null }
 
-// entrance markers: main entrance, midway point, secondary entrances leading into this level
-export interface Marker { kind: 'main' | 'midway' | 'sec'; index: number; x: number; y: number }
+export type { Marker };
 
 export class App {
   rom: Rom;
@@ -551,14 +550,9 @@ export class App {
   }
 
   // ------------- entrances -------------
-  markers(): Marker[] {
-    const s = this.level.secondary;
-    const vert = (s.verticalPositioning & 1) !== 0;
-    const main = entrancePos(this.rom, mainSpot(s), vert);
-    const mid = entrancePos(this.rom, midwaySpot(s), vert);
-    const out: Marker[] = [{ kind: 'midway', index: 0, ...mid }, { kind: 'main', index: 0, ...main }];
-    for (const i of this.entrances.inOpenLevel()) out.push({ kind: 'sec', index: i, ...this.entrances.place(i) });
-    return out;
+  // (of the open level; of another one for its image, levelimages.ts)
+  markers(lv: Level = this.level): Marker[] {
+    return entranceMarkers(this.rom, lv, this.entrances.inLevel(lv.number));
   }
 
   // snaps a marker to the entrance setting nearest to Mario's top-left pixel (px, py) – in a level with a
@@ -1131,21 +1125,15 @@ export class App {
       { input, lane: 'layer3', replace: true, label: 'Layer 3 settings', done }) ?? null;
   }
 
-  // Water line of a layer 3 tide in level pixels: the surface where the level view draws layer 3
-  // (as at the end of the level load), and for a tide that rises and falls its highest and lowest
-  // line once the level scan has measured how far it moves (higher $24 - $1C: water higher up)
-  tide(): { moving: boolean; surface: number; high: number; low: number } | null {
+  // Water line of a layer 3 tide in level pixels (layer3.ts tideLines), its range once the level scan measured it
+  tide(): TideLines | null {
     const im = this.images, range = this.levelScan?.level === this.level.number ? this.levelScan.result.tide ?? null : null;
     if (this.tideCache?.images === im && this.tideCache.range === range) return this.tideCache.value;
-    const kind = tideKind(this.render), surface = kind ? layer3Top(im.layer3, im.width) : -1;
-    const value = surface < 0 ? null : {
-      moving: kind === 'tide-moving', surface,
-      high: range ? surface + range.load - range.max : surface, low: range ? surface + range.load - range.min : surface,
-    };
+    const value = tideLines(this.render, im.layer3, im.width, range);
     this.tideCache = { images: im, range, value };
     return value;
   }
-  private tideCache: { images: LevelImages; range: unknown; value: ReturnType<App['tide']> } | null = null;
+  private tideCache: { images: LevelImages; range: unknown; value: TideLines | null } | null = null;
 
   // What every layer 2 scroll setting does (l2scroll.ts), measured with the level's code in the probe worker a
   // setting at a time; null while that runs, then `done` is called. Kept per level while

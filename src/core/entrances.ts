@@ -10,7 +10,7 @@ import type { EditSession } from './editsession.ts';
 import {
   type SecondaryEntrance, type SecondaryHeader, readSecondaryEntrance, writeSecondaryEntrance, decodeSecondaryEntrance, readSecondaryHeader,
   mainSpot, secondarySpot, setSecondarySpot, sameSpot, placeSecondary, entrancePos, nearestEntrance, copyCameraStart, copyEntranceOptions,
-  newOverworldExit, hasRelativeCamera, levelMode, isSized, levelRows, setExitSecondary, SEC_ENT,
+  newOverworldExit, hasRelativeCamera, levelMode, isSized, levelRows, setExitSecondary, SEC_ENT, midwaySpot, type Level,
 } from './level.ts';
 import { ExitGraph, entrancesInto, isOverworldExit } from './exitgraph.ts';
 import { locationFor, tileText, type OwTile } from './owteleport.ts';
@@ -26,6 +26,21 @@ export type ExitLeadsTo =
   | { kind: 'main'; level: number }
   | { kind: 'secondary'; level: number; entrance?: number | 'new' }
   | { kind: 'overworld' };
+
+// entrance markers: main entrance, midway point, secondary entrances leading into this level
+export interface Marker { kind: 'main' | 'midway' | 'sec'; index: number; x: number; y: number }
+
+// A level's entrance markers at Mario's top-left pixel: its midway point, its main entrance and the secondary
+// entrances `secs` into it (SecondaryEntrances.inLevel)
+export function entranceMarkers(rom: Rom, lv: Pick<Level, 'secondary'>, secs: number[]): Marker[] {
+  const s = lv.secondary;
+  const vert = (s.verticalPositioning & 1) !== 0;
+  const main = entrancePos(rom, mainSpot(s), vert);
+  const mid = entrancePos(rom, midwaySpot(s), vert);
+  const out: Marker[] = [{ kind: 'midway', index: 0, ...mid }, { kind: 'main', index: 0, ...main }];
+  for (const i of secs) out.push({ kind: 'sec', index: i, ...entrancePos(rom, secondarySpot(readSecondaryEntrance(rom, i)), vert) });
+  return out;
+}
 
 type Session = Pick<EditSession, 'rom' | 'level' | 'romEdit' | 'editLevel'>;
 
@@ -64,6 +79,11 @@ export class SecondaryEntrances {
 
   get(idx: number): SecondaryEntrance {
     return readSecondaryEntrance(this.rom, idx);
+  }
+
+  // the secondary entrances into a level (the open one: inOpenLevel)
+  inLevel(level: number): number[] {
+    return level === this.session.level.number ? this.inOpenLevel() : entrancesInto(this.rom, level);
   }
 
   // Mario's top-left pixel at an entrance into the open level

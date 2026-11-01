@@ -5,16 +5,16 @@
 import type { Rom } from './rom.ts';
 import { renderLevel, type LevelImages } from './render.ts';
 import { levelRows, type Level } from './level.ts';
-import type { LevelEmulator, LevelOverride } from './levelemu.ts';
+import type { LevelEmulator, LevelOverride, LevelRender } from './levelemu.ts';
 
 export const SCREEN_PX = 256; // a screen's width (vertical levels: its height) in pixels
 
-// The level's images as the level view draws them, its load emulated with ov (App.buildOverrides);
-// error: the load failed
-export function renderLevelImages(rom: Rom, emu: LevelEmulator, lv: Level, ov: LevelOverride): { images: LevelImages } | { error: string } {
+// The level's images as the level view draws them, its load emulated with ov (App.buildOverrides) – what the
+// overlays are drawn from; error: the load failed
+export function renderLevelImages(rom: Rom, emu: LevelEmulator, lv: Level, ov: LevelOverride): { images: LevelImages; render: LevelRender } | { error: string } {
   const r = emu.load(lv.number, ov);
   if (!r.ok) return { error: r.error ?? 'the level did not load' };
-  return { images: renderLevel(rom, r, lv.header.mode, lv.header.screens, levelRows(lv.secondary)) };
+  return { images: renderLevel(rom, r, lv.header.mode, lv.header.screens, levelRows(lv.secondary)), render: r };
 }
 
 // The screens from the first to the last one the level uses: one that layer 1 draws on (in a level with layer 2

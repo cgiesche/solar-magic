@@ -2,13 +2,11 @@
 
 import { App, isBrushMode, type Marker, type LevelEdit, type Brush, type PreviewPart } from './app.ts';
 import { h, attachPanZoom, toast } from './dom.ts';
-import { paintGrid, paintScreens, paintExits } from './leveloverlays.ts';
+import { paintOverlays, openOverlay, boxLayers, deathsAt, gameViewLabelBox, gameViewIn, BAND_STYLE, MARKER_STYLE, type GameViewFrame } from './leveloverlays.ts';
 import { hex2, hex3 } from '../core/names.ts';
 import { aimResize, type Grab, type Drivers } from '../core/objresize.ts';
-import { KILL_FILL, HURT_FILL, CLIMB_FILL, SPIKE_COLOR, NET_COLOR, spikeRow, netTile, drawSkull, switchMarks, drawSwitchMarks } from './collisionmarks.ts';
-import { probeAt, spriteProbeAt, enterText, collisionText, collisionIn, switchText, SWITCH_STATES, SWITCH_NAME, type PosProbe, type CollisionCore, type SwitchState } from '../core/blockprobe.ts';
+import { probeAt, spriteProbeAt, enterText, collisionText, collisionIn, switchText, SWITCH_STATES, SWITCH_NAME } from '../core/blockprobe.ts';
 import { type LevelObject, type LevelSprite, newUid, serializeLayer1, serializeLayer2, serializeLevelSprites, spriteSizes, spriteId, EXIT_NEW } from '../core/level.ts';
-import { invisibleTiles, screenRect, type LevelImages } from '../core/render.ts';
 import { layer3CellAt, layer3WordText } from '../core/layer3map.ts';
 import type { ArcSpeed } from '../core/jumparcs.ts';
 import { contextMenu, type MenuItem } from './menu.ts';
@@ -18,14 +16,11 @@ import { incompleteSprites } from './spritemem.ts';
 import { problemsButton } from './problems.ts';
 import { spriteOpens, messageOfBox, messageLabel, showMessageHover, hideMessageHover } from './messagepanel.ts';
 import { map16Tile } from '../core/ram.ts';
-import { GAME_VIEW_W, GAME_VIEW_H, MARIO_W, MARIO_H, type CameraBands } from '../core/camerabands.ts';
+import { GAME_VIEW_W, GAME_VIEW_H, MARIO_H } from '../core/camerabands.ts';
 import { gameViewAt } from '../core/camerareach.ts';
-import { isDm16, dm16Tiles, prefabFlags } from '../core/cdm16.ts';
-import { boxLabel } from '../core/objboxes.ts';
-import { paintObjectBox, paintBoxName } from './objbox.ts';
-import { PREFAB_EXT, readPrefab } from '../core/prefabs.ts';
+import { paintBoxName } from './objbox.ts';
 import { projectId } from '../core/projectid.ts';
-import { loadDeaths, killerText, killerTile, levelVersion, type DeathMark } from './deathmarks.ts';
+import { loadDeaths, killerText, levelVersion, type DeathMark } from './deathmarks.ts';
 
 type Drag =
   | { kind: 'move'; edit: LevelEdit; startTx: number; startTy: number; lastDx: number; lastDy: number; orig: Map<number, { x: number; y: number }> }
@@ -41,22 +36,6 @@ const ARC_STYLE: Record<ArcSpeed, { color: string; label: string; dash?: boolean
   walk: { color: '#7fe0ff', label: 'walking' },
   run: { color: '#ffd84c', label: 'running' },
   p: { color: '#ff6bd5', label: 'P-speed', dash: true },
-};
-
-// the game view's scroll bands: X bands are columns of the frame, Y bands rows; the look-ahead ones outlined
-const BAND_STYLE: Record<keyof CameraBands, { color: string; label: string; axis: 'x' | 'y'; look?: boolean }> = {
-  right: { color: '255,60,60', label: 'scrolling right', axis: 'x' },
-  left: { color: '60,220,90', label: 'scrolling left', axis: 'x' },
-  up: { color: '70,130,255', label: 'scrolling up', axis: 'y' },
-  down: { color: '190,80,255', label: 'scrolling down', axis: 'y' },
-  lookRight: { color: '255,200,40', label: 'after R (look ahead)', axis: 'x', look: true },
-  lookLeft: { color: '60,220,255', label: 'after L (look ahead)', axis: 'x', look: true },
-};
-
-const MARKER_STYLE: Record<Marker['kind'], { color: string; label: string; title: string }> = {
-  main: { color: 'rgba(255,40,40,0.9)', label: 'M', title: 'Main entrance' },
-  midway: { color: 'rgba(255,150,0,0.9)', label: 'Z', title: 'Midway point' },
-  sec: { color: 'rgba(40,120,255,0.9)', label: 'S', title: 'Secondary entrance' },
 };
 
 export class LevelView {
@@ -244,54 +223,17 @@ export class LevelView {
     ctx.drawImage(this.levelCanvas, 0, 0);
     const im = app.images;
     const lw = 1 / z;
-    // grid, screen boundaries
-    if (app.show.grid) paintGrid(ctx, im.width, im.height, lw);
-    if (app.show.screens) paintScreens(ctx, im.width, im.height, app.vertical, app.level.header.screens, lw, 1 / app.zoom);
-    // exits
-    if (app.show.exits || app.mode === 'exit') {
-      const choosing = app.mode === 'exit' && !app.exitMarker;
-      if (choosing) {
-        // the chosen screen, also without an exit
-        const r = screenRect(im.geom1, app.exitScreen);
-        ctx.strokeStyle = 'rgba(255,200,0,0.9)';
-        ctx.lineWidth = 2 / app.zoom;
-        ctx.strokeRect(r.x + 1 / app.zoom, r.y + 1 / app.zoom, r.w - 2 / app.zoom, r.h - 2 / app.zoom);
-      }
-      paintExits(ctx, app, app.level, im.geom1, 1 / app.zoom, choosing ? app.exitScreen : -1);
-    }
-    // entrance markers (Mario's start position, drawn at his lower 16x16 half)
-    ctx.font = `bold 9px sans-serif`;
-    for (const m of app.markers()) {
-      if (m.x >= im.width || m.y >= im.height + 32) continue;
-      const st = MARKER_STYLE[m.kind];
-      const dragged = this.drag?.kind === 'marker' && this.drag.marker.kind === m.kind && this.drag.marker.index === m.index;
-      ctx.fillStyle = st.color;
-      ctx.beginPath();
-      ctx.arc(m.x + 8, m.y + 24, dragged ? 8 : 6, 0, Math.PI * 2);
-      ctx.fill();
-      if (app.mode === 'exit' && app.exitMarker?.kind === m.kind && app.exitMarker.index === m.index) {
-        ctx.strokeStyle = '#ffd800';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(m.x + 8, m.y + 24, 9.5, 0, Math.PI * 2);
-        ctx.stroke();
-      }
-      ctx.fillStyle = '#fff';
-      ctx.fillText(st.label, m.x + 5, m.y + 27.5);
-      if (m.kind === 'sec') ctx.fillText(hex3(m.index), m.x + 15, m.y + 27.5);
-    }
-    if (app.mode === 'l2' ? app.show.layer2 : app.show.layer1) this.paintConds(ctx, lw);
-    this.paintBoxes(ctx);
-    if (app.show.invisible) this.paintInvisible(ctx, lw);
-    if (app.show.collision) this.paintCollision(ctx);
-    if (app.show.collision || app.show.layer3) this.paintTide(ctx);
-    if (app.show.items) this.paintItems(ctx);
-    // sprites
-    if (app.show.sprites) this.paintSprites(ctx, z);
-    if (app.show.sprites && app.show.items) this.paintSpriteItems(ctx);
-    if (app.show.deaths) this.paintDeaths(ctx, lw);
-    if (app.show.arcs) this.paintArcs(ctx);
-    if (app.show.gameView) this.paintGameView(ctx);
+    const choosing = app.mode === 'exit' && !app.exitMarker;
+    paintOverlays(ctx, app, openOverlay(app), {
+      show: app.show, lw, px: 1 / app.zoom, area: this.visibleTiles(), width: im.width, height: im.height, screens: app.level.header.screens,
+      exits: app.show.exits || app.mode === 'exit', chosenExit: choosing ? app.exitScreen : -1,
+      marker: (m) => ({
+        big: this.drag?.kind === 'marker' && this.drag.marker.kind === m.kind && this.drag.marker.index === m.index,
+        ring: app.mode === 'exit' && app.exitMarker?.kind === m.kind && app.exitMarker.index === m.index,
+      }),
+      layer2: app.mode === 'l2', tideLabelX: this.scroller.scrollLeft / app.zoom + 8 / app.zoom, spriteAlpha: this.spriteAlpha(),
+      sprites: () => this.paintSprites(ctx, z), arcs: () => this.paintArcs(ctx), gameView: app.show.gameView ? this.gameViewFrame() : undefined,
+    });
     // selection
     if (app.mode === 'l1' || app.mode === 'l2') {
       const sel = app.selectedObjects();
@@ -352,143 +294,20 @@ export class LevelView {
     }
   }
 
-  // conditional Direct Map16 (cdm16.ts): a flag badge on each object that depends on a flag (prefabs by their
-  // tiles' flags), green while the view shows it with the flag on; where one left nothing in the level's load, its tiles dashed
-  paintConds(ctx: CanvasRenderingContext2D, lw: number): void {
-    const app = this.app;
-    const prefabs = new Map<number, number[]>();
-    ctx.font = 'bold 7px sans-serif';
-    for (const o of app.currentObjects()) {
-      let flags: number[];
-      if (isDm16(o)) flags = o.cond ? [o.cond.flag] : [];
-      else if (o.num === 0 && o.ext === PREFAB_EXT && o.prefab !== undefined) {
-        if (!prefabs.has(o.prefab)) prefabs.set(o.prefab, prefabFlags(readPrefab(app.rom, o.prefab)));
-        flags = prefabs.get(o.prefab)!;
-      } else continue;
-      if (!flags.length) continue;
-      if (isDm16(o) && o.cond && !app.objectDrawn(o)) {
-        ctx.strokeStyle = 'rgba(255,190,60,0.8)';
-        ctx.lineWidth = lw;
-        ctx.setLineDash([3 * lw, 3 * lw]);
-        for (const t of dm16Tiles(o)) ctx.strokeRect((t & 0xffff) * 16 + 0.5, (t >> 16) * 16 + 0.5, 15, 15);
-        ctx.setLineDash([]);
-      }
-      const on = flags.some((f) => app.cdm16.has(f));
-      const txt = `⚑${flags.slice(0, 2).map(hex2).join(',')}${flags.length > 2 ? '…' : ''}`;
-      const x = o.x * 16 + 1, y = o.y * 16 + 1, w = ctx.measureText(txt).width + 3;
-      ctx.fillStyle = on ? 'rgba(30,140,60,0.9)' : 'rgba(150,90,0,0.9)';
-      ctx.fillRect(x, y, w, 9);
-      ctx.fillStyle = '#fff';
-      ctx.fillText(txt, x + 1.5, y + 7.5);
-    }
-  }
-
-  // the objects of the layers shown that draw nothing (objboxes.ts): a box on their tile
-  private boxLayers(): boolean[] {
-    const app = this.app;
-    return [false, true].filter((l2) => (l2 ? app.show.layer2 && !!app.level.layer2Objects : app.show.layer1));
-  }
-  paintBoxes(ctx: CanvasRenderingContext2D): void {
-    for (const l2 of this.boxLayers()) for (const o of this.app.boxedObjects(l2)) paintObjectBox(ctx, o.x * 16, o.y * 16, boxLabel(o));
-  }
-
   // beside the box of a selected or hovered object, its name where it has one
   paintBoxNames(ctx: CanvasRenderingContext2D): void {
     const app = this.app;
     const hovered = this.hover && !this.drag && !this.brushMode() ? app.hitsAt(this.hover.px, this.hover.py).map((h) => h.item) : [];
-    for (const l2 of this.boxLayers()) for (const o of app.boxedObjects(l2)) {
+    for (const l2 of boxLayers(app.show, app.level)) for (const o of app.boxedObjects(l2)) {
       if (!app.selection.has(o.uid) && !hovered.includes(o)) continue;
       const name = app.boxName(o);
       if (name) paintBoxName(ctx, o.x * 16, o.y * 16, name, app.zoom);
     }
   }
 
-  // where Mario died in test play (deathmarks.ts), by his tile inside the level (a pit's below it: its bottom row)
+  // where Mario died in test play, by his tile (leveloverlays.ts)
   deathsAt(): Map<string, { tx: number; ty: number; marks: DeathMark[] }> {
-    const app = this.app, w = app.images.width >> 4, hgt = app.images.height >> 4, at = new Map<string, { tx: number; ty: number; marks: DeathMark[] }>();
-    for (const d of loadDeaths(projectId(app.rom), app.level.number)) {
-      const tx = Math.max(0, Math.min(w - 1, d.tx)), ty = Math.max(0, Math.min(hgt - 1, d.ty)), k = `${tx},${ty}`;
-      const e = at.get(k) ?? { tx, ty, marks: [] };
-      e.marks.push(d);
-      at.set(k, e);
-    }
-    return at;
-  }
-
-  // a red cross at Mario's tile (with the number of deaths there), a dashed red box at what killed him and a
-  // line to it; faded: deaths before the level was last changed (saved)
-  paintDeaths(ctx: CanvasRenderingContext2D, lw: number): void {
-    const app = this.app, at = this.deathsAt(), w = (app.images.width >> 4) - 1, hgt = (app.images.height >> 4) - 1;
-    const now = levelVersion(app.rom, app.level.number), old = (d: DeathMark) => d.version !== now;
-    if (!at.size) return;
-    ctx.lineWidth = 2 * lw;
-    ctx.strokeStyle = 'rgba(255,60,60,0.9)';
-    ctx.setLineDash([3 * lw, 3 * lw]);
-    for (const { tx, ty, marks } of at.values()) for (const d of marks) {
-      const kt = killerTile(d.killer);
-      if (!kt) continue;
-      const k = { tx: Math.max(0, Math.min(w, kt.tx)), ty: Math.max(0, Math.min(hgt, kt.ty)) };
-      ctx.globalAlpha = old(d) ? 0.35 : 1;
-      ctx.strokeRect(k.tx * 16 + 1, k.ty * 16 + 1, 14, 14);
-      ctx.beginPath();
-      ctx.moveTo(tx * 16 + 8, ty * 16 + 8);
-      ctx.lineTo(k.tx * 16 + 8, k.ty * 16 + 8);
-      ctx.stroke();
-    }
-    ctx.setLineDash([]);
-    ctx.font = 'bold 8px sans-serif';
-    for (const { tx, ty, marks } of at.values()) {
-      const x = tx * 16, y = ty * 16;
-      ctx.globalAlpha = marks.every(old) ? 0.35 : 1;
-      ctx.lineCap = 'round';
-      for (const [width, color] of [[4, 'rgba(0,0,0,0.7)'], [2, '#ff3c3c']] as const) {
-        ctx.lineWidth = width;
-        ctx.strokeStyle = color;
-        ctx.beginPath();
-        ctx.moveTo(x + 3, y + 3); ctx.lineTo(x + 13, y + 13);
-        ctx.moveTo(x + 13, y + 3); ctx.lineTo(x + 3, y + 13);
-        ctx.stroke();
-      }
-      ctx.lineCap = 'butt';
-      if (marks.length > 1) {
-        const txt = String(marks.length);
-        ctx.fillStyle = 'rgba(0,0,0,0.7)';
-        ctx.fillRect(x + 10, y - 2, ctx.measureText(txt).width + 3, 9);
-        ctx.fillStyle = '#fff';
-        ctx.fillText(txt, x + 11.5, y + 5);
-      }
-    }
-    ctx.globalAlpha = 1;
-  }
-
-  // tiles that are there but cannot be seen (render.ts invisibleTiles): areas of them tinted, their edges dashed;
-  // layer 2 objects' too while layer 2 is shown
-  private invisible: { images: LevelImages; l1: (x: number, y: number) => boolean; l2: (x: number, y: number) => boolean } | null = null;
-  paintInvisible(ctx: CanvasRenderingContext2D, lw: number): void {
-    const app = this.app, im = app.images;
-    if (this.invisible?.images !== im) this.invisible = { images: im, l1: invisibleTiles(app.rom, im, false), l2: invisibleTiles(app.rom, im, true) };
-    const { x0, y0, x1, y1 } = this.visibleTiles();
-    const layers = [...app.show.layer1 ? [this.invisible.l1] : [], ...app.show.layer2 && app.level.layer2Objects ? [this.invisible.l2] : []];
-    for (const at of layers) {
-      const edges = new Path2D();
-      ctx.fillStyle = 'rgba(150,70,255,0.4)';
-      for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
-        if (!at(x, y)) continue;
-        const px = x * 16, py = y * 16;
-        ctx.fillRect(px, py, 16, 16);
-        if (!at(x - 1, y)) { edges.moveTo(px, py); edges.lineTo(px, py + 16); }
-        if (!at(x + 1, y)) { edges.moveTo(px + 16, py); edges.lineTo(px + 16, py + 16); }
-        if (!at(x, y - 1)) { edges.moveTo(px, py); edges.lineTo(px + 16, py); }
-        if (!at(x, y + 1)) { edges.moveTo(px, py + 16); edges.lineTo(px + 16, py + 16); }
-      }
-      ctx.lineWidth = 2 * lw;
-      ctx.strokeStyle = 'rgba(0,0,0,0.6)';
-      ctx.stroke(edges);
-      ctx.strokeStyle = '#e4d8ff';
-      ctx.setLineDash([3 * lw, 3 * lw]);
-      ctx.stroke(edges);
-      ctx.setLineDash([]);
-    }
+    return deathsAt({ images: this.app.images, deaths: loadDeaths(projectId(this.app.rom), this.app.level.number) });
   }
 
   outlineObject(ctx: CanvasRenderingContext2D, o: LevelObject, color: string, lw: number): void {
@@ -589,22 +408,13 @@ export class LevelView {
     });
   }
 
-  // the game view frame's place: the camera at Mario when it is placed by him, else where it was put (first: the
-  // middle of the view), inside the level as it is now and where the game lets the camera go (a smaller level or
-  // a narrower camera range moves it only while it is open)
-  gameViewPos(): { x: number; y: number } {
-    const app = this.app, im = app.images, z = app.zoom, cam = app.gameViewMario?.camera;
-    if (cam) return cam;
+  // the game view frame (leveloverlays.ts gameViewIn), put first in the middle of the view; a smaller level or a
+  // narrower camera range moves it only while it is open
+  gameViewFrame(): GameViewFrame {
+    const app = this.app, im = app.images, z = app.zoom;
     app.gameView ??= gameViewAt((this.scroller.scrollLeft + this.scroller.clientWidth / 2) / z - GAME_VIEW_W / 2,
       (this.scroller.scrollTop + this.scroller.clientHeight / 2) / z - GAME_VIEW_H / 2, im.width, im.height);
-    return gameViewAt(app.gameView.x, app.gameView.y, im.width, im.height, app.cameraReach());
-  }
-
-  // the label in the frame's top left corner (level pixels; it stays the same size on the screen)
-  private gameViewLabel(): { x: number; y: number; w: number; h: number; text: string } {
-    const p = this.gameViewPos(), z = this.app.zoom, m = this.app.gameViewMario;
-    const text = !m ? 'Game view' : m.camera === undefined ? 'Game view (emulating …)' : m.camera === null ? 'Game view (camera not found)' : 'Game view at Mario';
-    return { x: p.x, y: p.y, w: (10 + text.length * 6) / z, h: 14 / z, text };
+    return gameViewIn(app, { level: app.level, images: im, reach: app.cameraReach() }, this.drag?.kind === 'gameView');
   }
 
   // Shift+V: the game view frame placed by Mario with his feet in the tile under the mouse
@@ -618,72 +428,11 @@ export class LevelView {
   // whether the pixel grabs the game view frame: its edge (a few screen pixels either side) or its label
   gameViewGrab(px: number, py: number): boolean {
     if (!this.app.show.gameView) return false;
-    const p = this.gameViewPos(), m = 4 / this.app.zoom, l = this.gameViewLabel();
+    const p = this.gameViewFrame(), m = 4 / this.app.zoom, l = gameViewLabelBox(p, 1 / this.app.zoom);
     const inX = px >= p.x - m && px <= p.x + GAME_VIEW_W + m, inY = py >= p.y - m && py <= p.y + GAME_VIEW_H + m;
     const edge = (inX && (Math.abs(py - p.y) <= m || Math.abs(py - p.y - GAME_VIEW_H) <= m))
       || (inY && (Math.abs(px - p.x) <= m || Math.abs(px - p.x - GAME_VIEW_W) <= m));
     return edge || (px >= l.x && px <= l.x + l.w && py >= l.y && py <= l.y + l.h);
-  }
-
-  // The game view frame (camerabands.ts) over the level darkened where the camera never goes (camerareach.ts),
-  // with the scroll bands inside when they are shown, and Mario when it is placed by him
-  paintGameView(ctx: CanvasRenderingContext2D): void {
-    const app = this.app, p = this.gameViewPos(), z = app.zoom, lw = 1 / z;
-    this.paintCameraReach(ctx);
-    const m = app.gameViewMario;
-    if (m) {
-      ctx.fillStyle = 'rgba(255,60,60,0.45)';
-      ctx.fillRect(m.x, m.y, MARIO_W, MARIO_H);
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 1.5 * lw;
-      ctx.strokeRect(m.x, m.y, MARIO_W, MARIO_H);
-    }
-    const bands = app.show.scrollBands ? app.scrollBands() : undefined;
-    for (const [k, st] of Object.entries(BAND_STYLE) as [keyof CameraBands, (typeof BAND_STYLE)[keyof CameraBands]][]) {
-      const b = bands?.[k];
-      if (!b) continue;
-      const [x, y, w, bh] = st.axis === 'x' ? [p.x + b.from, p.y, b.to - b.from, GAME_VIEW_H] : [p.x, p.y + b.from, GAME_VIEW_W, b.to - b.from];
-      ctx.fillStyle = `rgba(${st.color},${st.look ? 0.12 : 0.22})`;
-      ctx.fillRect(x, y, w, bh);
-      if (st.look) {
-        ctx.strokeStyle = `rgba(${st.color},0.9)`;
-        ctx.lineWidth = 1.5 * lw;
-        ctx.setLineDash([4 * lw, 3 * lw]);
-        ctx.strokeRect(x, y, w, bh);
-        ctx.setLineDash([]);
-      }
-    }
-    ctx.strokeStyle = 'rgba(0,0,0,0.6)';
-    ctx.lineWidth = 4 * lw;
-    ctx.strokeRect(p.x, p.y, GAME_VIEW_W, GAME_VIEW_H);
-    ctx.strokeStyle = this.drag?.kind === 'gameView' ? '#ffd800' : '#ffffff';
-    ctx.lineWidth = 2 * lw;
-    ctx.strokeRect(p.x, p.y, GAME_VIEW_W, GAME_VIEW_H);
-    const l = this.gameViewLabel();
-    ctx.fillStyle = 'rgba(0,0,0,0.65)';
-    ctx.fillRect(l.x, l.y, l.w, l.h);
-    ctx.fillStyle = '#fff';
-    ctx.font = `${11 / z}px sans-serif`;
-    ctx.fillText(l.text, l.x + 5 / z, l.y + 11 / z);
-  }
-
-  // the level darkened where the camera never shows it, a rectangle per run of columns (vertical levels: rows)
-  // with the same span
-  private paintCameraReach(ctx: CanvasRenderingContext2D): void {
-    const r = this.app.cameraReach(), im = this.app.images;
-    if (!r) return;
-    const across = r.vertical ? im.width : im.height;
-    const rect = (along: number, n: number, from: number, to: number) => {
-      if (to > from) { if (r.vertical) ctx.fillRect(from, along, to - from, n); else ctx.fillRect(along, from, n, to - from); }
-    };
-    ctx.fillStyle = 'rgba(0,0,0,0.5)';
-    for (let i = 0, j = 0; i < r.spans.length; i = j) {
-      const s = r.spans[i];
-      for (j = i + 1; j < r.spans.length && r.spans[j]?.[0] === s?.[0] && r.spans[j]?.[1] === s?.[1]; j++);
-      const [from, to] = s ?? [across, across];
-      rect(i * 16, (j - i) * 16, 0, from);
-      rect(i * 16, (j - i) * 16, to, across);
-    }
   }
 
   // what the overlays of the game view mean, in the top right corner of the view: where the camera never goes
@@ -731,184 +480,9 @@ export class LevelView {
     return { x0, y0, x1: Math.min(g.width, x0 + Math.ceil(this.scroller.clientWidth / z / 16) + 1), y1: Math.min(g.height, y0 + Math.ceil(this.scroller.clientHeight / z / 16) + 1) };
   }
 
-  // How Mario collides with layer 1 (found by emulation): the level is dimmed, solid sides are
-  // white lines where they face something passable, platforms (solid from above only) dashed,
-  // slopes diagonal; red: hurts, with spikes on the sides that hurt (stronger, with a skull: kills),
-  // blue: water, green with a net: climbable. All in the switch states the view sets (P-switches, OFF);
-  // a tile that a switch state makes act otherwise has that switch's color at its bottom.
-  paintCollision(ctx: CanvasRenderingContext2D): void {
-    const app = this.app, g = app.images.geom1, w = app.render.wram;
-    if (!app.show.layer1) return;
-    const { x0, y0, x1, y1 } = this.visibleTiles();
-    // in the switch states the view sets; the states that make the tile act otherwise are marked
-    const on = app.viewSwitches();
-    const info = new Map<number, { c: CollisionCore; sw: SwitchState[] } | undefined>();
-    const probe = (x: number, y: number) => {
-      const a = g.addr(x, y);
-      if (a < 0) return undefined;
-      const t = map16Tile(w, a);
-      if (!info.has(t)) { const p = app.probes.collision(t); info.set(t, p && { c: collisionIn(p, on), sw: switchMarks([p]) }); }
-      return info.get(t);
-    };
-    const at = (x: number, y: number): CollisionCore | undefined => probe(x, y)?.c; // (neighbors)
-    const switched: [number, number, SwitchState[]][] = [];
-    ctx.fillStyle = 'rgba(0,0,0,0.45)';
-    ctx.fillRect(x0 * 16, y0 * 16, (x1 - x0) * 16, (y1 - y0) * 16);
-    const lw = 2 / app.zoom;
-    const solidLines = new Path2D(), platLines = new Path2D(), net = new Path2D(), spikes = new Path2D();
-    const skulls: [number, number][] = [];
-    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
-      const here = probe(x, y);
-      if (!here) continue;
-      const c = here.c, px = x * 16, py = y * 16;
-      if (here.sw.length) switched.push([px, py, here.sw]);
-      const fill = c.kills ? KILL_FILL : c.hurtsTop || c.hurtsSide ? HURT_FILL
-        : c.water ? 'rgba(60,140,255,0.35)' : c.climb ? CLIMB_FILL : null;
-      if (fill) { ctx.fillStyle = fill; ctx.fillRect(px, py, 16, 16); }
-      if (c.kills) skulls.push([px, py]);
-      else {
-        // spikes on the sides that hurt, where they face something Mario can come from
-        if (c.hurtsTop && !at(x, y - 1)?.bottom) spikeRow(spikes, px, py, 0);
-        if (c.hurtsSide && !at(x - 1, y)?.right) spikeRow(spikes, px, py, 1);
-        if (c.hurtsSide && !at(x + 1, y)?.left) spikeRow(spikes, px, py, 2);
-      }
-      if (c.climb) netTile(net, px, py);
-      if (c.slope) {
-        // the surface within the tile (steep slopes measure beyond it)
-        const [l, r] = c.slope, k = (r - l) / 16, xAt = (yy: number) => (yy - l) / k;
-        let xa = 0, xb = 16;
-        if (k !== 0) {
-          const lo = Math.min(xAt(0), xAt(16)), hi = Math.max(xAt(0), xAt(16));
-          xa = Math.max(0, lo); xb = Math.min(16, hi);
-        }
-        const yAt = (xx: number) => Math.max(0, Math.min(16, l + k * xx));
-        solidLines.moveTo(px + xa, py + yAt(xa));
-        solidLines.lineTo(px + xb, py + yAt(xb));
-        continue;
-      }
-      const full = c.bottom || c.left || c.right;
-      if (c.top && !full) {
-        if (!at(x, y - 1)?.bottom) { platLines.moveTo(px, py); platLines.lineTo(px + 16, py); }
-        continue;
-      }
-      // sides facing a tile that doesn't close them off
-      if (c.top && !at(x, y - 1)?.bottom) { solidLines.moveTo(px, py); solidLines.lineTo(px + 16, py); }
-      if (c.bottom && !at(x, y + 1)?.top) { solidLines.moveTo(px, py + 16); solidLines.lineTo(px + 16, py + 16); }
-      if (c.left && !at(x - 1, y)?.right) { solidLines.moveTo(px, py); solidLines.lineTo(px, py + 16); }
-      if (c.right && !at(x + 1, y)?.left) { solidLines.moveTo(px + 16, py); solidLines.lineTo(px + 16, py + 16); }
-    }
-    ctx.lineWidth = lw;
-    ctx.strokeStyle = '#fff';
-    ctx.stroke(solidLines);
-    ctx.strokeStyle = '#7fe0ff';
-    ctx.setLineDash([3 * lw, 2 * lw]);
-    ctx.stroke(platLines);
-    ctx.setLineDash([]);
-    ctx.lineWidth = lw / 2;
-    ctx.strokeStyle = NET_COLOR;
-    ctx.stroke(net);
-    ctx.fillStyle = SPIKE_COLOR;
-    ctx.fill(spikes);
-    ctx.fillStyle = '#fff';
-    for (const [px, py] of skulls) drawSkull(ctx, px, py);
-    for (const [px, py, sw] of switched) drawSwitchMarks(ctx, px, py, sw);
-  }
-
-  // Water of a layer 3 tide (see App.tide): in the collision overlay the area Mario swims in is
-  // blue (lighter where only at high tide); a tide that rises and falls gets dashed lines at its
-  // highest and lowest water line
-  paintTide(ctx: CanvasRenderingContext2D): void {
-    const app = this.app, t = app.tide(), im = app.images;
-    if (!t) return;
-    if (app.show.collision) {
-      ctx.fillStyle = 'rgba(60,140,255,0.18)';
-      ctx.fillRect(0, t.high, im.width, t.low - t.high);
-      ctx.fillStyle = 'rgba(60,140,255,0.35)';
-      ctx.fillRect(0, t.low, im.width, im.height - t.low);
-    }
-    if (!t.moving || t.high === t.low) return;
-    const lw = 1.5 / app.zoom;
-    ctx.lineWidth = lw;
-    ctx.strokeStyle = '#7fc8ff';
-    ctx.setLineDash([6 * lw, 4 * lw]);
-    ctx.beginPath();
-    for (const y of [t.high, t.low]) { ctx.moveTo(0, y); ctx.lineTo(im.width, y); }
-    ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.font = `bold ${11 / app.zoom}px sans-serif`;
-    const x0 = this.scroller.scrollLeft / app.zoom + 8 / app.zoom;
-    for (const [y, txt] of [[t.high, 'Tide: highest water'], [t.low, 'Tide: lowest water']] as [number, string][]) {
-      ctx.fillStyle = 'rgba(0,0,0,0.6)';
-      ctx.fillRect(x0 - 2 / app.zoom, y - 14 / app.zoom, ctx.measureText(txt).width + 4 / app.zoom, 13 / app.zoom);
-      ctx.fillStyle = '#7fc8ff';
-      ctx.fillText(txt, x0, y - 4 / app.zoom);
-    }
-  }
-
-  // translucent image of the item a block (visible part of layer 1) or sprite gives, drawn over it
-  paintItems(ctx: CanvasRenderingContext2D): void {
-    const app = this.app, g = app.images.geom1, w = app.render.wram, z = app.zoom;
-    if (!app.show.layer1) return;
-    const x0 = Math.max(0, Math.floor(this.scroller.scrollLeft / z / 16)), y0 = Math.max(0, Math.floor(this.scroller.scrollTop / z / 16));
-    const x1 = Math.min(g.width, x0 + Math.ceil(this.scroller.clientWidth / z / 16) + 1);
-    const y1 = Math.min(g.height, y0 + Math.ceil(this.scroller.clientHeight / z / 16) + 1);
-    ctx.globalAlpha = 0.65;
-    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
-      const a = g.addr(x, y);
-      if (a < 0) continue;
-      const p = app.probes.block(map16Tile(w, a));
-      if (!p) continue;
-      if (p.summary !== null) this.drawItem(ctx, probeAt(p, x), x * 16, y * 16);
-      if (p.enter) this.drawEnter(ctx, p.enter, x * 16, y * 16);
-    }
-    ctx.globalAlpha = 1;
-  }
-
-  // arrows for the directions a tile can be entered in (pipes, doors), white in the upper right
-  // corner like the items; drawn as shapes, text glyphs blur at 16 px tiles
-  drawEnter(ctx: CanvasRenderingContext2D, dirs: string, x: number, y: number): void {
-    const a = ctx.globalAlpha, n = dirs.length, bx = x + 16 - n * 5 - 1;
-    ctx.globalAlpha = 1;
-    ctx.fillStyle = 'rgba(0,0,0,0.7)';
-    ctx.fillRect(bx, y, n * 5 + 1, 6);
-    ctx.fillStyle = '#fff';
-    [...dirs].forEach((d, i) => {
-      const cx = bx + 3 + i * 5, cy = y + 3; // 4x4 triangle around (cx, cy)
-      const pts = d === '↓' ? [[-2, -2], [2, -2], [0, 2]] : d === '↑' ? [[-2, 2], [2, 2], [0, -2]]
-        : d === '←' ? [[2, -2], [2, 2], [-2, 0]] : [[-2, -2], [-2, 2], [2, 0]];
-      ctx.beginPath();
-      pts.forEach(([px, py], k) => (k ? ctx.lineTo(cx + px, cy + py) : ctx.moveTo(cx + px, cy + py)));
-      ctx.fill();
-    });
-    ctx.globalAlpha = a;
-  }
-
   // sprites are translucent like the ghosted layers while the background or layer 3 is edited
   spriteAlpha(): number {
     return this.app.show.ghost && isBrushMode(this.app.mode) ? 0.35 : 1;
-  }
-
-  // the same for sprites that give items (flying ? blocks …), drawn over the sprite images
-  paintSpriteItems(ctx: CanvasRenderingContext2D): void {
-    const app = this.app;
-    ctx.globalAlpha = 0.65 * this.spriteAlpha();
-    for (const s of app.level.sprites) {
-      const p = app.probes.sprite(spriteId(s));
-      if (p?.summary) this.drawItem(ctx, spriteProbeAt(p, s.x, s.y), s.x * 16, s.y * 16);
-    }
-    ctx.globalAlpha = 1;
-  }
-
-  // item of a probe result at pixel (x, y); a different item for big Mario at half size, upper right
-  drawItem(ctx: CanvasRenderingContext2D, r: PosProbe, x: number, y: number): void {
-    const thumbs = this.app.spriteThumbs;
-    const small = r.small.sprites[0], big = r.big.sprites[0];
-    const main = small ?? big ?? r.stomp?.sprites[0];
-    const img = main !== undefined ? thumbs?.get(main) : undefined;
-    if (!img) return;
-    ctx.drawImage(img, x + Number(img.dataset.ox), y + Number(img.dataset.oy));
-    const alt = big !== undefined && big !== main ? thumbs?.get(big) : undefined;
-    if (alt) ctx.drawImage(alt, x + 8 + Number(alt.dataset.ox) / 2, y + Number(alt.dataset.oy) / 2, alt.width / 2, alt.height / 2);
   }
 
   // The placement preview: what a right click at tile (tx, ty) would place, translucent. While the one at the tile
@@ -987,7 +561,7 @@ export class LevelView {
     }
     if (e.button !== 0) return;
     if (!e.ctrlKey && this.gameViewGrab(px, py)) {
-      const p = this.gameViewPos();
+      const f = this.gameViewFrame(), p = { x: f.x, y: f.y };
       app.gameView = p;
       app.gameViewMario = null; // (placed by hand from here)
       this.drag = { kind: 'gameView', offX: px - p.x, offY: py - p.y };

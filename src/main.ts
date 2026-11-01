@@ -179,7 +179,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
       'sep',
       { label: 'Import level file …', title: 'Replaces the current level (undoable; palette/graphics bypass are written to the ROM directly)', disabled: () => !inLevel(), onClick: () => importLevel(app) },
       { label: 'Export level file …', title: `Level as ${LEVEL_FILE_EXT} file (objects, sprites, exits, header, graphics bypass, custom palette)`, disabled: () => !inLevel(), onClick: () => exportLevel(app) },
-      { label: 'Level as PNG …', title: 'The level as the level view shows it (the View menu\'s layers, sprites, exits, screen boundaries and grid) at original size', disabled: () => !inLevel(), onClick: () => void exportLevelPng(app) },
+      { label: 'Level as PNG …', title: 'The level as the level view shows it (the View menu\'s layers, sprites and overlays, without the selection) at original size', disabled: () => !inLevel(), onClick: () => void exportLevelPng(app) },
       { label: 'Levels as images …', title: 'Several levels (used, all or chosen) as PNGs in one .zip, drawn as Level as PNG; with a zoom and cropped to the screens each level uses', disabled: () => !inLevel(), onClick: () => openLevelImages(app, () => levels.shown) },
       'sep',
       { label: 'Close project …', title: 'Remove the ROM and all editor data from the browser and return to the start page', onClick: () => closeProject(app) },

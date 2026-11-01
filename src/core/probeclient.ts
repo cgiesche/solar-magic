@@ -88,13 +88,16 @@ export class ProbeClient {
   spriteIn(num: number, ts: number): SpriteProbe | null | undefined {
     return probeable(num) ? this.probedOrFailed<SpriteProbe>({ kind: 'sprite', ts, num }) : null;
   }
+  // a Map16 tile's probes in tileset ts (another level's image, levelimages.ts); null when they failed
+  blockIn(tile: number, ts: number): BlockProbe | null | undefined { return this.probedOrFailed<BlockProbe>({ kind: 'block', ts, tile }); }
+  collisionIn(tile: number, ts: number): CollisionProbe | null | undefined { return this.probedOrFailed<CollisionProbe>({ kind: 'collision', ts, tile }); }
   // Mario's run speeds; null when they could not be found
   runSpeeds(): RunStates | null | undefined { return this.probedOrFailed<RunStates>({ kind: 'runs', ts: this.d.tileset() }); }
 
   // where Mario is on the screen while the camera scrolls (camerabands.ts) in a level of that mode and vertical
-  // scroll setting; null when they could not be found
-  cameraBands(mode: number, vscroll: number): CameraBands | null | undefined {
-    return this.probedOrFailed<CameraBands>({ kind: 'bands', ts: this.d.tileset(), mode, vscroll });
+  // scroll setting (in tileset ts: the current one, another level's for its image); null when they could not be found
+  cameraBands(mode: number, vscroll: number, ts = this.d.tileset()): CameraBands | null | undefined {
+    return this.probedOrFailed<CameraBands>({ kind: 'bands', ts, mode, vscroll });
   }
 
   // a probe's result; null when it failed

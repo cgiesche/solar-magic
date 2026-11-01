@@ -23,7 +23,7 @@ export const LAYER3_KIND_TEXT: Record<Layer3Kind, string> = {
 };
 
 // the tide of the loaded level, if it has one
-export function tideKind(r: LevelRender): 'tide-moving' | 'tide-fixed' | null {
+export function tideKind(r: Pick<LevelRender, 'wram'>): 'tide-moving' | 'tide-fixed' | null {
   const t = r.wram[RAM.layer3Tide];
   return t === 1 ? 'tide-moving' : t === 2 ? 'tide-fixed' : null;
 }
@@ -80,4 +80,16 @@ export function layer3Top(l3: { back: Uint32Array; front: Uint32Array } | null, 
   if (!l3) return -1;
   for (let i = 0; i < l3.back.length; i++) if (l3.back[i] || l3.front[i]) return Math.floor(i / width);
   return -1;
+}
+
+// Water line of a layer 3 tide in level pixels: the surface where the level view draws layer 3 (as at the end of
+// the level load), and for a tide that rises and falls its highest and lowest line once the level scan has
+// measured how far it moves (range; higher $24 - $1C: water higher up); null: the level has no tide
+export interface TideLines { moving: boolean; surface: number; high: number; low: number }
+export function tideLines(r: Pick<LevelRender, 'wram'>, l3: { back: Uint32Array; front: Uint32Array } | null, width: number, range: TideRange | null): TideLines | null {
+  const kind = tideKind(r), surface = kind ? layer3Top(l3, width) : -1;
+  return surface < 0 ? null : {
+    moving: kind === 'tide-moving', surface,
+    high: range ? surface + range.load - range.max : surface, low: range ? surface + range.load - range.min : surface,
+  };
 }
