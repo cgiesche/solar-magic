@@ -93,6 +93,7 @@ export class LevelView {
     app.on('sprite-mem', () => { this.requestPaint(); this.updateStats(); });
     app.on('mode', () => { if (!this.hover) this.idleStatus(); });
     app.on('rom-change', () => this.problems.update());
+    app.on('message-routine', () => this.problems.update());
     app.on('arcs', () => this.requestPaint());
     app.on('sizes', () => {
       // (a resize that started before the sizes were known: its objects' drivers as emulated from now on, the edges

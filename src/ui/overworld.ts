@@ -10,7 +10,7 @@ import {
   readRevealList, writeRevealList, destroyEffects, destroySettingAt, destroyEvent, setDestroyEvent, readDestroyList, freeTranslevel, levelTilesOf, OW_L1_TILES,
 } from '../core/overworld.ts';
 import { hasMessages, isBlank, readMessage } from '../core/messages.ts';
-import { currentMessageRoutine, messageRoutineNote } from '../core/messagedraw.ts';
+import { messageRoutineNote, messageRoutineUnknown } from '../core/messagedraw.ts';
 import { levelName, hasLevelName } from '../core/levelnames.ts';
 import { levelNameField } from './levelnamefield.ts';
 import {
@@ -194,6 +194,8 @@ export class OverworldView {
       if (this.drag?.kind === 'paint') this.drag = null;
       this.sync();
     });
+    // whether the game draws the editor's messages came (the level tile's message boxes)
+    app.on('message-routine', () => { if (this.root.isConnected) this.sync(); });
   }
 
   setZoom(z: number, ax = this.scroller.clientWidth / 2, ay = this.scroller.clientHeight / 2): void {
@@ -1175,15 +1177,17 @@ export class OverworldView {
     if (!tl) return h('div', { class: 'ow-info' }, ...head, h('div', { class: 'hint warn-text' }, '⚠ This level tile enters no level.'));
     const lvl = translevelToLevel(tl);
     const ev = baseEvent(rom, tl), msgs = [1, 2].filter((n) => !isBlank(readMessage(rom, tl, n)));
-    // (a package drawing the message boxes: the editor's messages are not what players see)
-    const routine = currentMessageRoutine(rom);
+    // (a package drawing the message boxes: the editor's messages are not what players see; checked meanwhile)
+    const routine = this.app.messageRoutine();
+    const shown = msgs.length ? msgs.map((n) => `message ${n}`).join(', ') : 'none';
     return h('div', { class: 'ow-info' }, ...head,
       ...levelNameField(this.app, tl, this.render()),
       // the level's other settings (kept when its tiles are painted over, shown to every new tile entering it)
       ...this.levelSettings(tl),
       ...this.exitResultRows(tl),
-      h('div', { class: 'prop' }, h('label', null, 'Message boxes'), routine.game ? h('span', null, msgs.length ? msgs.map((n) => `message ${n}`).join(', ') : 'none')
-        : h('span', { class: 'warn-text', title: messageRoutineNote(routine) }, '⚠ drawn by a package'),
+      h('div', { class: 'prop' }, h('label', null, 'Message boxes'), !routine ? h('span', { class: 'hint', title: 'Checking whether the game draws the editor\'s messages' }, `${shown} · checking…`)
+        : routine.game === false ? h('span', { class: 'warn-text', title: messageRoutineNote(routine) }, '⚠ drawn by a package')
+        : h('span', routine.game === null ? { title: messageRoutineUnknown(routine) } : null, shown),
         h('button', { onclick: () => { this.onOpenLevel(lvl); this.app.openMessages(tl, 1); }, title: 'Edit the level\'s two messages beside the level' }, 'Edit …')),
       h('div', { class: 'row' },
         h('button', { onclick: () => this.onOpenLevel(lvl), title: 'Open in the level editor (also by double click in the list)' }, `Edit level ${hex(lvl, 3)}`),

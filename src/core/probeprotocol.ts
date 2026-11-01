@@ -65,7 +65,7 @@ export type ProbeReply = ProbeDone | KindsDone | ScanDone | CameraDone | Learned
 // overworld's map at an event progress (overworld.ts overworldMapJob), the submaps' views (owevents.ts submapViews),
 // the overworld sprites' images at a map and event progress (owsprites.ts owSpriteImages) and the save at an event
 // progress (owprogress.ts progressSaves), layer 1 as after an event without its layer 1 changes (owevents.ts
-// layer1Without)
+// layer1Without); whether the game draws the editor's messages (messagedraw.ts messageRoutine)
 export type LearnJob =
   | { kind: 'sprites'; level: SpriteLevel; nums: number[]; input?: string } // (input: of each test level load, spriteSetJob)
   | { kind: 'spriteAt'; level: SpriteLevel; id: number; x: number; y: number }
@@ -88,7 +88,8 @@ export type LearnJob =
   | { kind: 'owCustom'; map: number; progress: number }
   | { kind: 'owLooks'; ids: number[] }
   | { kind: 'owSave'; progress: number }
-  | { kind: 'owL1Without'; event: number };
+  | { kind: 'owL1Without'; event: number }
+  | { kind: 'msgRoutine' };
 
 // Per kind of learn job where its result goes (keep, jobrunner.ts Keep) and whether it is a picture (CONTEXT.md, ADR
 // 0008): the levels' uses go to the entries of each level (the job keeps none); the prefab suggestions and the object
@@ -122,6 +123,7 @@ export const LEARN_KINDS: { [K in LearnJob['kind']]: { keep: Keep; picture: bool
   owLooks: { keep: 'memory', picture: true, boot: false },
   owSave: { keep: 'memory', picture: true, boot: false },
   owL1Without: { keep: 'memory', picture: true, boot: false },
+  msgRoutine: { keep: true, picture: false },
 };
 export const learnKeep = (j: LearnJob): Keep => LEARN_KINDS[j.kind].keep;
 

@@ -36,6 +36,7 @@ import { OverworldEmulator, OverworldLoads, overworldMapJob, OW_LOADS_KEPT } fro
 import { submapViewsJob, layer1WithoutJob, EventL1Copy } from './owevents.ts';
 import { owSpritesJob, owCustomJob, owLooksJob } from './owsprites.ts';
 import { progressSaveJob } from './owprogress.ts';
+import { messageRoutineJob } from './messagedraw.ts';
 import { inputHash } from './inputs.ts';
 import { jobId, jobKey, learnKeep, LEARN_KINDS, type ProbeJob, type ProbeMessage, type ProbeReply, type TaskMessage, type TaskType, type LearnJob, type LearnMessage } from './probeprotocol.ts';
 
@@ -95,6 +96,7 @@ function learnJob(j: LearnJob, state: LearnState, show: (items: unknown[] | null
     case 'owLooks': return () => owLooksJob(owLoads(state), j.ids);
     case 'owSave': return () => progressSaveJob(owLoads(state), j.progress);
     case 'owL1Without': return () => layer1WithoutJob(state.l1Copy ??= new EventL1Copy(), state.rom, j.event);
+    case 'msgRoutine': return (emu) => messageRoutineJob(state.rom, emu);
   }
 }
 

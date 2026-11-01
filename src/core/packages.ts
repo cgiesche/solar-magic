@@ -32,7 +32,6 @@ import { assignSlot } from './gfxslots.ts';
 import { recordPackageChange, recordPackageChangeAsync, listPackages, packageArchive, uninstallPackage, type Package } from './pkgreg.ts';
 import { uploadObjectText, objectTextNotes, isObjectTextFile } from './objtext.ts';
 import { allOrNothing } from './romedit.ts';
-import { messageRoutineTaken } from './messagedraw.ts';
 import { callistoProject, includesCallistoHeader, sharedCode, type CallistoProject } from './callisto.ts';
 import { replacedPatch, replacedNote } from './replaced.ts';
 import { partAdapter, DETECT_ORDER, PART_ORDER, SHARED_CODE, planInstall, planUpload, applyParts, pixiListed, applyAssignment, patchSource, partsOf, sfxLinkedFiles,
@@ -194,8 +193,7 @@ export function defaultAssignment(p: ManualPreview, level: number): ManualAssign
 
 // sample: the sample level to put in place of the current one (a level edit, not saved yet); samples: the
 // levels sample levels were written as (InstallOptions.samples)
-// messages: set when the package took over drawing the message boxes (the editor's message editing no longer applies)
-export interface InstallResult extends ApplyResult { pkg: Package | null; sample?: SampleLevel; samples?: number[]; messages?: string }
+export interface InstallResult extends ApplyResult { pkg: Package | null; sample?: SampleLevel; samples?: number[] }
 
 // the sample level `file` as level `into` – the current one, or (`own`) the level of its own number with
 // its screen exits and graphics slots – with the package's parts where they landed: Map16 tiles by the plan
@@ -281,7 +279,6 @@ export async function installPackage(rom: Rom, preview: ReadyPreview | ManualPre
   const prints: string[] = [];
   let sample: SampleLevel | undefined;
   const samples: number[] = [];
-  const before = new Rom(rom.data.slice());
   try {
     const archive = zipSync(Object.fromEntries(preview.files), { level: 9 });
     // Lunar Magic's object names and tooltips: kept with the package, over those of packages installed before
@@ -337,8 +334,7 @@ export async function installPackage(rom: Rom, preview: ReadyPreview | ManualPre
       }
     }
     warnings.push(...textNotes);
-    const messages = messageRoutineTaken(before, rom);
-    return { ok: true, errors: [], warnings, prints, pkg: rec.pkg, sample, ...(samples.length ? { samples } : {}), ...(messages ? { messages } : {}) };
+    return { ok: true, errors: [], warnings, prints, pkg: rec.pkg, sample, ...(samples.length ? { samples } : {}) };
   } catch (e) {
     return failed([e instanceof Error ? e.message : String(e)], warnings, prints);
   }

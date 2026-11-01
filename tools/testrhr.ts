@@ -22,7 +22,7 @@ import { inspectUpload, installPackage, planUpload } from '../src/core/packages.
 import { listPatches } from '../src/core/patchreg.ts';
 import { listPackages } from '../src/core/pkgreg.ts';
 import { loadLevel, readSecondaryHeader, entrancePos, midwaySpot } from '../src/core/level.ts';
-import { messageRoutine } from '../src/core/messagedraw.ts';
+import { messageRoutine, messageRoutineTaken } from '../src/core/messagedraw.ts';
 import { editorImage } from './fixture.ts';
 
 await loadAsar();
@@ -55,7 +55,8 @@ check(r.ok && r.samples?.join() === [0x105, 0x13b].join(), `installed as one upl
 // its patches leave the message routine alone: the game draws the editor's messages, the install says nothing of it
 {
   const m = messageRoutine(rom);
-  check(m.game && m.level !== null && !r.messages, `the game draws the editor's messages (played in level ${m.level === null ? '–' : hx(m.level)}), the install summary says nothing of them`);
+  check(m.game === true && m.level !== null && messageRoutineTaken(p.name, undefined, m) === null,
+    `the game draws the editor's messages (${m.messages.join(', ')} opened in level ${m.level === null ? '–' : hx(m.level)}), the install says nothing of them`);
 }
 
 const pkg = listPackages(rom);

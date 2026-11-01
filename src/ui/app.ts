@@ -50,6 +50,7 @@ import { type Layer2Motions } from '../core/l2scroll.ts';
 import { variantOf, blockKey, collisionKey, type BlockProbe, type CollisionProbe, type RunStates, type SwitchState, SWITCH_STATES, SWITCH_TRIGGER } from '../core/blockprobe.ts';
 import type { ProbeReply, LearnJob } from '../core/probeprotocol.ts';
 import { ProbeClient, FAILED } from '../core/probeclient.ts';
+import { messageRoutineInput, UNKNOWN_ROUTINE, type MessageRoutine } from '../core/messagedraw.ts';
 import { ResultLearner } from '../core/learner.ts';
 import { holds, perRomState, type Recorded } from '../core/romdeps.ts';
 import { thumbCanvas } from './thumbs.ts';
@@ -122,7 +123,8 @@ export type AppEvent =
   | 'open-gfx' // the graphics workspace opens on App.wsGfx
   | 'open-map16' // the graphics workspace opens on the Map16 tab
   | 'import-gfx' // the graphics workspace imports App.gfxImport
-  | 'messages'; // the message panel opens on App.messages (null: it closes)
+  | 'messages' // the message panel opens on App.messages (null: it closes)
+  | 'message-routine'; // whether the game draws the editor's messages is known (App.messageRoutine)
 
 // the hint to save a paste as prefab (pastehint.ts): the paste's objects as placed in level, layer
 export type PasteHintAt = PasteHint & { level: number; layer: 'l1' | 'l2'; objects: LevelObject[] };
@@ -1218,6 +1220,43 @@ export class App {
       { lane: 'owlw', replace: true, label: 'Overworld event', done, failed: () => done(null) });
     return r === FAILED ? null : r;
   }
+  // Whether the game draws the editor's messages (messagedraw.ts messageRoutine), learned in the probe worker and
+  // stored while the ROM bytes it read and the registered patches and packages are unchanged: undefined while it is
+  // checked (then 'message-routine' is emitted and the promises of messageRoutineKnown resolve). While a ROM edit
+  // that left the patches and packages as they were is checked again, the result for them is still given; a check
+  // that failed is unknown (game null).
+  messageRoutine(): MessageRoutine | undefined {
+    const rom = this.rom;
+    if (this.msgRoutine?.gen !== rom.gen || this.msgRoutine.rom !== rom) {
+      const input = messageRoutineInput(rom), last = this.msgRoutine?.rom === rom && this.msgRoutine.input === input ? this.msgRoutine.known : undefined;
+      this.msgRoutine = { rom, gen: rom.gen, input, known: last, learned: undefined };
+    }
+    const cur = this.msgRoutine, input = cur.input;
+    const learned = (r: MessageRoutine) => {
+      if (this.msgRoutine?.rom !== rom || this.msgRoutine.input !== input) return;
+      this.msgRoutine.known = this.msgRoutine.learned = r;
+      const waiting = this.msgRoutineWaiting.splice(0);
+      for (const w of waiting) w(r);
+      this.emit('message-routine');
+    };
+    if (!cur.learned) {
+      const r = this.probes.learnOrFailed<MessageRoutine>('msgr1', { kind: 'msgRoutine' }, {
+        lane: 'msgr', input: { patches: input }, replace: true, label: 'Checking the message routine',
+        done: learned, failed: () => learned(UNKNOWN_ROUTINE),
+      });
+      if (r !== undefined) cur.known = cur.learned = r === FAILED ? UNKNOWN_ROUTINE : r;
+    }
+    return cur.learned ?? cur.known;
+  }
+  // messageRoutine once it is known for the ROM as it is now
+  messageRoutineKnown(): Promise<MessageRoutine> {
+    const now = this.messageRoutine();
+    if (now && this.msgRoutine?.learned) return Promise.resolve(now);
+    return new Promise((resolve) => this.msgRoutineWaiting.push(resolve));
+  }
+  private msgRoutine: { rom: Rom; gen: number; input: string; known: MessageRoutine | undefined; learned: MessageRoutine | undefined } | null = null;
+  private msgRoutineWaiting: ((r: MessageRoutine) => void)[] = [];
+
   // the save at an event progress (owprogress.ts progressSaves: the level flags, switch palaces and events triggered
   // the game has then), learned in the probe worker and kept in memory while the ROM bytes it read are unchanged:
   // known, else what gives it once learned (undefined: it could not be). Requests don't replace each other: one

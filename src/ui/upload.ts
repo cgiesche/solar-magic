@@ -5,6 +5,7 @@
 
 import type { App } from './app.ts';
 import { h, modal, clear, toast, logTool } from './dom.ts';
+import { messageRoutineTaken } from '../core/messagedraw.ts';
 import { installPackage, partsSummary, partLabel, type ReadyPreview, type ManualPreview, type InstallOptions } from '../core/packages.ts';
 import { assignmentEditor } from './pkgmap.ts';
 import type { Package } from '../core/pkgreg.ts';
@@ -82,6 +83,8 @@ function installDialog(app: App, p: ReadyPreview | ManualPreview, body: HTMLElem
     if (music) musicPlayer.stop();
     clear(log).appendChild(h('p', { class: 'hint' }, music ? 'Installing – AddmusicK is inserting the music …' : 'Installing …'));
     const src = map16Source(app.rom, app.render);
+    // whether the game drew the messages before (known, or as last known for the patches then)
+    const routineBefore = app.messageRoutine();
     let r;
     try {
       const opt: InstallOptions = { level: app.level.number, blank: src.fg(0x025), tileWords: (t) => src.fg(t), ...choices() };
@@ -96,7 +99,13 @@ function installDialog(app: App, p: ReadyPreview | ManualPreview, body: HTMLElem
     const sample = r.sample;
     if (sample) app.replaceLevel(sample.level);
     const own = r.samples?.length ? `, its sample level(s) as level ${r.samples.map((n) => hex(n, 3)).join(', ')}` : '';
-    toast(`“${p.name}” installed${r.warnings.length ? ` (${r.warnings.length} warning(s))` : ''}${sample ? `, its sample level in place of level ${hex(app.level.number, 3)} (not saved yet)` : ''}${own} – Ctrl+Z undoes it.${r.messages ? ` ${r.messages}` : ''}`);
+    toast(`“${p.name}” installed${r.warnings.length ? ` (${r.warnings.length} warning(s))` : ''}${sample ? `, its sample level in place of level ${hex(app.level.number, 3)} (not saved yet)` : ''}${own} – Ctrl+Z undoes it.`);
+    // a package that took over drawing the message boxes: said once that is known (checked in the probe worker)
+    const name = r.pkg.name, rom = app.rom;
+    void app.messageRoutineKnown().then((after) => {
+      const note = app.rom === rom ? messageRoutineTaken(name, routineBefore, after) : null;
+      if (note) toast(`“${name}”: ${note}`);
+    });
     done(r.pkg);
   };
   const dlg = modal(`Upload: ${p.name}`, body, [
