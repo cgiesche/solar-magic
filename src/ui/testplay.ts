@@ -3,7 +3,7 @@
 // plays its music and sound effects itself.
 
 import type { App } from './app.ts';
-import { h, modal } from './dom.ts';
+import { h, modal, toast } from './dom.ts';
 import { LevelEmulator } from '../core/levelemu.ts';
 import type { PPU } from '../core/ppu.ts';
 import { PlaySession } from '../core/playsession.ts';
@@ -83,8 +83,6 @@ type Start = { tx: number; ty: number; entrance?: StartEntrance };
 type ShowMessage = { message: number; yoshi: boolean };
 type ShowLevel = (level: number, at: { x: number; y: number }) => void;
 type Origin = { kind: 'level'; at?: Start; show?: ShowMessage } | { kind: 'overworld'; tile: number; progress: number; showLevel: ShowLevel };
-// the savestate's place for a test play from the overworld (a level's is its number)
-const OVERWORLD_SLOT = -1;
 
 // fromSave: from the savestate instead of the start (when there is a usable one)
 export function openTestPlay(app: App, at?: Start, fromSave = false, show?: ShowMessage): void {
@@ -110,7 +108,8 @@ function begin(app: App, o: Origin, fromSave: boolean): void {
   start(app, o, audio, fromSave);
 }
 
-const slotOf = (app: App, o: Origin) => (o.kind === 'level' ? app.level.number : OVERWORLD_SLOT);
+// the savestate's place: a level's number, a test from the overworld's below 0, by its tile and event progress
+const slotOf = (app: App, o: Origin) => (o.kind === 'level' ? app.level.number : -1 - ((o.tile + 1) * 0x100 + o.progress));
 
 function start(app: App, o: Origin, audio: AudioOut, fromSave: boolean): void {
   if (!testEmu || testEmu.rom !== app.rom) {
@@ -130,7 +129,7 @@ function start(app: App, o: Origin, audio: AudioOut, fromSave: boolean): void {
     });
     ok = p.render?.ok === true;
   } else {
-    try { p = PlaySession.fromOverworld(emu, o.tile, o.progress); } catch { p = PlaySession.resume(emu); ok = false; }
+    try { p = PlaySession.fromOverworld(emu, o.tile, o.progress); } catch (e) { p = PlaySession.resume(emu); ok = false; toast(`The overworld did not load: ${e instanceof Error ? e.message : e}`, 'error'); }
   }
   const ppu = p.attachPPU();
   // with the PPU attached: the frame on screen is part of the state
@@ -141,8 +140,8 @@ function start(app: App, o: Origin, audio: AudioOut, fromSave: boolean): void {
 // what the title says the test starts from
 function originText(app: App, o: Origin): string {
   if (o.kind === 'level') return `Test level – ${hex(app.level.number, 3)}${o.at ? ` from ${hex(o.at.tx, 2)}/${hex(o.at.ty, 2)}` : ''}`;
-  const { x, y } = l1XY(o.tile), events = o.progress === 0 ? 'no events passed' : o.progress >= OW_EVENTS ? 'all events passed' : `events up to ${hex(o.progress - 1, 2)} passed`;
-  return `Test play – overworld, ${o.tile < 0 ? 'start position' : `tile ${hex(x, 2)},${hex(y, 2)} (${o.tile >= 0x400 ? 'submaps' : 'main map'})`}, ${events}`;
+  const { x, y } = l1XY(o.tile), progress = o.progress === 0 ? 'none' : o.progress >= OW_EVENTS ? 'all' : `up to ${hex(o.progress - 1, 2)}`;
+  return `Test play – overworld, ${o.tile < 0 ? 'start position' : `tile ${hex(x, 2)},${hex(y, 2)} (${o.tile >= 0x400 ? 'submaps' : 'main map'})`}, event progress: ${progress}`;
 }
 
 function play(app: App, o: Origin, audio: AudioOut, p: PlaySession, ppu: PPU, ok: boolean, fromSave: boolean): void {
@@ -206,7 +205,7 @@ function play(app: App, o: Origin, audio: AudioOut, p: PlaySession, ppu: PPU, ok
     try { busy = p.frame(keys | readPads().bits); } catch (e) { info.textContent = `Emulation error: ${e}`; paused = true; }
     if (p.audio) audio.push(p.audio);
     frames++;
-    log.frame(frames, watch.usedAll(), watch.take(), busy, marioX(p.wram), marioY(p.wram), levelLoaded(p.wram));
+    log.frame(frames, watch.usedAll(), watch.take(), busy, marioX(p.wram), marioY(p.wram), p.mode === GM.level ? levelLoaded(p.wram) : undefined);
     // kept as markers in the level he died in
     for (const d of deaths.take()) { log.died(frames, d); addDeath(projectId(app.rom), d, levelVersion(app.rom, d.level)); }
   };

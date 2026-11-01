@@ -411,16 +411,7 @@ export class LevelEmulator {
     if (!this.baseState) this.boot();
     const s = this.snes, w = s.wram;
     s.loadState(this.baseState!);
-    s.joy1 = 0;
-    for (let n = 0; w[RAM.gameMode] !== GM.overworld; n++) {
-      if (n > 1500) throw new Error('new game did not reach the overworld');
-      if (events && (w[RAM.gameMode] === GM.fileSelect || w[RAM.gameMode] === GM.overworldLoad)) w.set(events, RAM.owEvents);
-      if (w[RAM.gameMode] === GM.overworldLoad) w[RAM.introLevel] = 0; // no intro level
-      s.joy1 = (n % 16) < 4 ? (w[RAM.gameMode] === GM.title ? 0x1000 : 0x0080) : 0;
-      s.runFrame();
-    }
-    s.joy1 = 0;
-    for (let i = 0; i < 3; i++) s.runFrame();
+    this.untilOverworld(true, events);
     const i = tile(w);
     if (i < 0) return;
     const { x: tx, y: ty } = l1XY(i);
@@ -452,14 +443,22 @@ export class LevelEmulator {
   // submap, the camera at him) – after startGameAt moved him; events: set again as it loads (startGameAt)
   reloadOverworld(events?: Uint8Array): void {
     this.sync();
+    this.snes.wram[RAM.gameMode] = GM.overworldLoad;
+    this.untilOverworld(false, events);
+  }
+  // frames until the overworld runs (newGame: through the title screen and file select, buttons pressed), no intro
+  // level; events (startGameAt) set as the file and the overworld load
+  private untilOverworld(newGame: boolean, events?: Uint8Array): void {
     const s = this.snes, w = s.wram;
-    s.joy1 = 0;
-    w[RAM.gameMode] = GM.overworldLoad;
     for (let n = 0; w[RAM.gameMode] !== GM.overworld; n++) {
-      if (n > 1500) throw new Error('the overworld did not load');
-      if (events && w[RAM.gameMode] === GM.overworldLoad) w.set(events, RAM.owEvents);
+      if (n > 1500) throw new Error(newGame ? 'new game did not reach the overworld' : 'the overworld did not load');
+      const m = w[RAM.gameMode];
+      if (events && (m === GM.fileSelect || m === GM.overworldLoad)) w.set(events, RAM.owEvents);
+      if (m === GM.overworldLoad) w[RAM.introLevel] = 0; // no intro level
+      s.joy1 = newGame && (n % 16) < 4 ? (m === GM.title ? 0x1000 : 0x0080) : 0;
       s.runFrame();
     }
+    s.joy1 = 0;
     for (let i = 0; i < 3; i++) s.runFrame();
   }
 

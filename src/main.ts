@@ -218,7 +218,8 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   const undoBtn = h('button', { onclick: () => app.undo(), title: 'Undo (Ctrl+Z)' }, '↶');
   const redoBtn = h('button', { onclick: () => app.redo(), title: 'Redo (Ctrl+Y)' }, '↷');
   const saveBtn = h('button', { class: 'primary', onclick: () => app.saveLevel(), title: 'Write level to ROM (Ctrl+S)' });
-  const testBtn = h('button', { onclick: () => (workspace === 'ow' ? testOverworld() : openTestPlay(app)), title: 'Test the level in the built-in emulator (T, Shift+T: from the mouse position)' }, '▶ Test');
+  const testLevelTitle = 'Test the level in the built-in emulator (T, Shift+T: from the mouse position)';
+  const testBtn = h('button', { onclick: () => (workspace === 'ow' ? testOverworld() : openTestPlay(app)), title: testLevelTitle }, '▶ Test');
   // loops the open level's music while editing; anything else that plays (test play, a song in a dialog) ends it
   const musicTitle = 'Play the level\'s music in a loop while editing';
   let musicOf = ''; // level and header music playing
@@ -253,7 +254,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     // (the overworld's changes are ROM edits: nothing to save; hidden, so nothing else moves)
     saveBtn.style.visibility = workspace === 'ow' ? 'hidden' : '';
     testBtn.disabled = workspace === 'ow' && !owShown();
-    testBtn.title = workspace !== 'ow' ? 'Test the level in the built-in emulator (T, Shift+T: from the mouse position)'
+    testBtn.title = workspace !== 'ow' ? testLevelTitle
       : owShown() ? 'Play the game from the overworld in the built-in emulator (T): a new game at the event progress shown, Mario on the selected tile (without one at the start position)'
         : 'The overworld is replaced by a package';
     musicBtn.disabled = workspace === 'ow';
