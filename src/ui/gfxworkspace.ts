@@ -143,6 +143,11 @@ export class LevelPreview {
   submapCgram(): Uint8Array | null {
     return this.ow?.fresh ? this.ow.r?.cgram ?? null : null;
   }
+  // the console after the load of the submap shown (VRAM, CGRAM, WRAM, PPU registers), null: none shown or still
+  // emulated
+  submapRender(): OwRender | null {
+    return this.ow?.fresh ? this.ow.r : null;
+  }
   // the colors of what is shown (CGRAM as loaded)
   get cgram(): Uint8Array {
     return this.ow ? this.ow.r?.cgram ?? new Uint8Array(0x200) : this.app.render.cgram;
@@ -319,6 +324,7 @@ export class GfxWorkspace {
     this.preview.showSubmap(this.target);
     this.pal.targetChanged();
     this.map16.targetChanged();
+    this.anim.targetChanged();
     if (this.active) { this.open(this.tab); this.onNav(false); }
   }
 

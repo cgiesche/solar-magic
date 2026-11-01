@@ -1095,7 +1095,7 @@ export class OverworldView {
     const sel = select(opts, cur, (v) => this.app.romEdit(`Music of ${MAP_NAMES[map]}`, () => setSubmapMusic(rom, map, v)));
     sel.title = `The song ${MAP_NAMES[map]} plays – when the overworld loads there and when Mario comes from another map (songs come with packages; with AddmusicK all of its songs)`;
     return h('div', { class: 'ow-info' }, h('div', { class: 'prop' }, h('label', null, 'Map music'), sel),
-      h('button', { onclick: () => this.onEditGraphics(map, this.progress), title: `${MAP_NAMES[map]}'s own palettes, graphics files and layer 3 in the graphics workspace` }, 'Edit graphics of this submap'));
+      h('button', { onclick: () => this.onEditGraphics(map, this.progress), title: `${MAP_NAMES[map]}'s own palettes, graphics files, layer 3 and animations in the graphics workspace` }, 'Edit graphics of this submap'));
   }
 
   // what the overworld links mode's arrows mean
