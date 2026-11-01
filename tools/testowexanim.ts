@@ -4,7 +4,8 @@
 // overworld loads there and after Mario walked there from the main map –, the global one everywhere unless a submap
 // turns it off; color slots and rotations change the submap's palette; an event trigger ("Event Manual 8–F") shows
 // its second set once the event of its manual frame is passed; the settings turn off the game's tile animation, the
-// level dots' colors; the game's lightning switched per submap as Lunar Magic does. Lunar Magic's tables are read where it keeps them (a ROM it saved, when there).
+// level dots' colors; the game's lightning is switched per submap as Lunar Magic does. Lunar Magic's tables are read
+// where it keeps them (a ROM it saved, when there).
 // node tools/testowexanim.ts
 import { existsSync, readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
@@ -13,7 +14,7 @@ import { OverworldEmulator, l1Index } from '../src/core/overworld.ts';
 import { RAM, PAD } from '../src/core/ram.ts';
 import {
   owExanimLayout, readSubmapList, writeSubmapList, readOwGlobalList, writeOwGlobalList, submapAnimSettings, setSubmapAnimSettings,
-  submapLightning, setSubmapLightning,
+  submapLightning, setSubmapLightning, LIGHTNING_MASK,
   writeAltFile, emptyList, listBytes, exanimDataRanges, owExanimDataRanges, SUBMAP_LISTS,
   NO_GAME_TILES, NO_LEVEL_LIST, NO_GLOBAL_LIST, NO_DOT_COLORS, type ExList,
 } from '../src/core/exanim.ts';
@@ -154,8 +155,8 @@ const dots = (x: Shot) => `${color(x.cgram, 0x6d)} ${color(x.cgram, 0x7d)}`;
 // FF with the Valley of Bowser's off, 7F with only the main map's on, 77 with both, 75 with Star Road's too)
 {
   const flashes = (r: Rom, m: number) => new Set(run(r, m, 900).shots.map((x) => color(x.cgram, 0x47))).size;
-  const mask = () => rom.r8(0x04f709);
-  check(mask() === 0xf7 && Array.from({ length: SUBMAP_LISTS }, (_, m) => submapLightning(rom, m)).join() === [0, 1, 2, 3, 4, 5, 6].map((m) => m === 4).join(),
+  const mask = () => rom.r8(LIGHTNING_MASK);
+  check(mask() === 0xf7 && Array.from({ length: SUBMAP_LISTS }, (_, m) => submapLightning(rom, m) === (m === 4)).every(Boolean),
     'the lightning on the Valley of Bowser only, as in the game (F7)');
   const before = flashes(rom, 4);
   setSubmapLightning(rom, 4, false);
@@ -163,8 +164,9 @@ const dots = (x: Shot) => `${color(x.cgram, 0x6d)} ${color(x.cgram, 0x7d)}`;
   check(mask() === 0xff && !submapLightning(rom, 4), `the Valley of Bowser's off: FF (${hx(mask())})`);
   check(before > 1 && after === 1, `Valley of Bowser: color 47 flashes (${before} colors in 900 frames), with the lightning off not (${after})`);
   const main0 = flashes(rom, 0);
-  setSubmapLightning(rom, 4, true);
   setSubmapLightning(rom, 0, true);
+  check(mask() === 0x7f, `only the main map's on: 7F (${hx(mask())})`);
+  setSubmapLightning(rom, 4, true);
   check(mask() === 0x77, `the main map's on too: 77 (${hx(mask())})`);
   setSubmapLightning(rom, 6, true);
   check(mask() === 0x75, `and Star Road's: 75 (${hx(mask())})`);
