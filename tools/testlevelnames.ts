@@ -69,6 +69,27 @@ const rom = new Rom(image.slice());
   check(threw, 'a name of more than 19 tiles refused');
 }
 
+// ---- the tiles Lunar Magic 3.71 saved for typed names (docs/research/lunar-magic-level-names.md, "Confirmed") ----
+{
+  const lm: [string, boolean, string][] = [ // text, MultiChar tiles on, the tiles in the ROM Lunar Magic saved
+    ['ABCDEFGHIJKLMNOPQRS', true, '00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F 10 11 12'],
+    ['TUVWXYZ!.-,? abcdef', true, '13 14 15 16 17 18 19 1A 1B 1C 1D 1E 1F 40 41 42 43 44 45'],
+    ['ghijklmnopqrstuvwxy', true, '46 47 48 49 4A 4B 4C 4D 4E 4F 50 51 52 53 54 55 56 57 58'],
+    ["z#()'0123456789", true, '59 5A 5B 5C 5D 6B 64 65 66 67 68 69 6A AE AF'],
+    ['8 9 0 80 99 08', true, 'AE 1F AF 1F 6B 1F AE 6B 1F AF AF 1F 6B AE'],
+    ['YELLOW SWITCH', true, '38 39 3A 3B 3C 1F 12 16 08 13 02 07'],
+    ['FOREST OF ILLUSION', true, '05 0E 11 04 12 13 1F 0E 05 32 33 34 35 36 37 0E 0D'],
+    ['YELLOW  ILLUSION', false, '18 04 0B 0B 0E 16 1F 1F 08 0B 0B 14 12 08 0E 0D'],
+    ['\\20\\FE\\6C\\30', true, '20 FE 6C 30'],
+    ['A@B~C', true, '00 01 02'], // characters without a tile left out
+  ];
+  const bytes = (s: string) => s.split(' ').map((v) => parseInt(v, 16));
+  const differ = lm.filter(([text, multi, tiles]) => encodeName(text, multi).tiles.join() !== bytes(tiles).join());
+  check(!differ.length, `typed names give Lunar Magic's tiles: every character of its table, the digits 0, 8 and 9, MultiChar tiles on and off, \\XX, characters without a tile${differ.length ? ` (differ: ${differ.map(([t]) => JSON.stringify(t)).join(', ')})` : ''}`);
+  check(lm.every(([text, multi, tiles]) => decodeName(bytes(tiles), multi) === (text.includes('@') ? 'ABC' : text)), 'and read back as their text');
+  check(['0', '8', '9'].every((d, k) => encodeName(d).tiles[0] === [0x6b, 0xae, 0xaf][k] && decodeName([[0x6b, 0xae, 0xaf][k]]) === d), 'the digits 0, 8 and 9: tiles 6B, AE, AF');
+}
+
 // ---- a changed name: one ROM edit, the game shows it ----
 {
   const r = new Rom(image.slice()), s = new RomEditSession(r), emu = new OverworldEmulator(r);

@@ -46,6 +46,16 @@ const with_ = (id: OwOptionId, on: boolean) => { const rom = fresh(); setOwOptio
   try { setOwOption(rom, 'hardcodedPaths', false); } catch { threw = true; }
   check(threw && rom.r8(0x049307) === 0xea, 'not written then');
 }
+// the bytes Lunar Magic 3.71 saved with the option checked and unchecked (docs/research/lunar-magic-overworld-options.md)
+{
+  const lm: [OwOptionId, number, number[], number[]][] = [ // option, place, bytes with it on, with it off
+    ['hardcodedPaths', 0x049307, [0xa6, 0x08], [0x80, 0x71]],
+    ['saveLuigi', 0x048f9f, [0x80, 0x3b], [0xc2, 0x30]],
+  ];
+  for (const [id, at, on, off] of lm) {
+    check(same(with_(id, true).bytes(at, 2), on) && same(with_(id, false).bytes(at, 2), off), `${id}: on and off, the bytes of a ROM Lunar Magic saved`);
+  }
+}
 
 // ---- Start+Select on a passed level ----
 // a new game on the tile of translevel tl (its flags | `flags`), the level entered; then paused and Select held: left

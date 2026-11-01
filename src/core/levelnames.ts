@@ -6,7 +6,8 @@
 // operand of the LDA.l at $03BB56 – as the stripe the game wrote (layer 3 at $508B, attribute $39). The routine is
 // Lunar Magic's, byte for byte, so tools reading the table's address there find it.
 // The text of a name follows Lunar Magic's built-in table for level names: a tile per character, `\XX` for a tile
-// without one, and its "MultiChar" tiles – the game's squished tiles for "YELLOW" and " ILLUSI".
+// without one, and its "MultiChar" tiles – the game's squished tiles for "YELLOW" and " ILLUSI" (the tiles of names
+// typed in Lunar Magic 3.71 confirm it, docs/research/lunar-magic-level-names.md).
 
 import { Rom, snesToPc } from './rom.ts';
 import { Snes } from './snes.ts';

@@ -2,8 +2,9 @@
 // ov_overworld_extra_options.htm) that the community uses, as switches (ADR 0005). Each changes a few bytes of the
 // game's code in the places Lunar Magic changes, to the bytes Lunar Magic writes; turned back, the clean game's.
 // The places and bytes are read from Lunar Magic 3.71's code (Lunar Magic.exe: its table of ROM places and the
-// routine that writes the options), the ROMs Lunar Magic saved with options set show the same, SMW Central's hijack
-// map names most of them. What each does in the game is checked by emulation (tools/testowoptions.ts).
+// routine that writes the options), the ROMs Lunar Magic saved with options set show the same (the hardcoded paths
+// and Luigi's position saved by Lunar Magic 3.71 on and off: docs/research/lunar-magic-overworld-options.md),
+// SMW Central's hijack map names most of them. What each does in the game is checked by emulation (tools/testowoptions.ts).
 //
 // - hardcoded paths: the game's 5 paths between levels that cross other paths ($049301: levels 9–15, 23–1B,
 //   11F–120, 10C–10D, and 24 to a pipe by position) – a BRA over the lookup ($049307)

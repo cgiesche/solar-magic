@@ -60,3 +60,36 @@ out: the squished tiles are copied as they are. Name code `$0000` writes spaces.
 5D–5F have `$FFFF`, for which the game shows RAM as letters, so they get a blank name. Lunar Magic does the
 same, as the clean names in *celery* show. In the test, the patched game writes the same stripe as the clean
 game for all 93 translevels that have names.
+
+## Confirmed by a ROM Lunar Magic saved
+
+Issue #254 checked the character table, which so far came only from `Lunar Magic.exe` (ADR 0005). Lunar Magic 3.71,
+running under wine, saved names typed into its "Edit Level Names" dialog into a copy of the clean game. The steps
+are in [lunar-magic-overworld-options.md](lunar-magic-overworld-options.md), "Making the ROMs".
+
+| Typed | MultiChar | Tiles saved |
+|---|---|---|
+| `ABCDEFGHIJKLMNOPQRS` | on | `00`–`12` |
+| `TUVWXYZ!.-,? abcdef` | on | `13`–`1F`, `40`–`45` |
+| `ghijklmnopqrstuvwxy` | on | `46`–`58` |
+| `z#()'0123456789` | on | `59 5A 5B 5C 5D 6B 64 65 66 67 68 69 6A AE AF` |
+| `8 9 0 80 99 08` | on | `AE 1F AF 1F 6B 1F AE 6B 1F AF AF 1F 6B AE` |
+| `YELLOW SWITCH` | on | `38 39 3A 3B 3C 1F 12 16 08 13 02 07` |
+| `FOREST OF ILLUSION` | on | `05 0E 11 04 12 13 1F 0E 05 32 33 34 35 36 37 0E 0D` |
+| `YELLOW  ILLUSION` | off | `18 04 0B 0B 0E 16 1F 1F 08 0B 0B 14 12 08 0E 0D` |
+| `\20\FE\6C\30` | on | `20 FE 6C 30` |
+| `A@B~C` | on | `00 01 02` |
+
+In each case, the remaining tiles of the 19 are spaces (`1F`).
+
+- Every character in the table gives the editor's tile, including the digits 0, 8 and 9 (`6B`, `AE`, `AF`).
+- With MultiChar on, the MultiChar strings become the squished tiles; with it off, they become plain letters.
+  `\XX` gives the tile by number.
+- Lunar Magic drops a character without a tile (`@`, `~`) as you type it. The editor also leaves it out, and
+  shows it as missing.
+- The dialog shows the game's names (MultiChar on, all 96 translevels) as the text that the editor's `decodeName`
+  gives. With MultiChar off, it shows the squished tiles as `\XX`, as the editor does.
+- When Lunar Magic installs the names, it writes the same 0x60 × 19 table that the editor writes when it installs
+  the patch.
+
+`tools/testlevelnames.ts` checks the editor's text against these tiles.
