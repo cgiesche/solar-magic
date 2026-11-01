@@ -12,8 +12,8 @@ import { SLOT_TABLES, SLOT_KINDS, type SlotKind } from './slotwatch.ts';
 import { spriteId } from './level.ts';
 import { GAME_VIEW_H, MARIO_H } from './camerabands.ts';
 
-// Mario's Y on the screen from which he can't be seen: even small Mario's lower half is below the screen
-const BELOW_SCREEN = GAME_VIEW_H - MARIO_H / 2;
+// Mario's Y in the view from which he can't be seen: even small Mario's lower half is below it
+const BELOW_VIEW = GAME_VIEW_H - MARIO_H / 2;
 const SCREEN_BYTES = 0x1b0; // a horizontal level's screen in the level data (27 rows), without a height of its own
 const VERTICAL_SCREEN = 0x200; // a vertical level's (16 rows of two 16-tile halves)
 
@@ -89,9 +89,9 @@ export class DeathWatch {
   }
 
   private killer(y: number): Killer {
-    const w = this.s.wram, onScreen = (y - cameraY(w)) & 0xffff, last = this.last;
+    const w = this.s.wram, inView = (y - cameraY(w)) & 0xffff, last = this.last;
     if (this.ticked && w[RAM.timer] === 0 && w[RAM.timer + 1] === 0 && w[RAM.timer + 2] === 0) return { kind: 'time' };
-    if (onScreen >= BELOW_SCREEN && onScreen < 0x8000) return { kind: 'pit' };
+    if (inView >= BELOW_VIEW && inView < 0x8000) return { kind: 'pit' };
     if (!last) return { kind: 'unknown' };
     if ('block' in last) return { kind: 'block', ...blockTile(w, last.block)!, tile: map16Tile(w, last.block) };
     const { kind, i } = last;

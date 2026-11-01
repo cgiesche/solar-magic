@@ -276,17 +276,18 @@ export function levelColorUsers(rom: Rom, r: LevelRender, im: LevelImages, color
 }
 
 // where the BG3 tilemap is on the level image at the end of the load: its VRAM byte address, size in pixels
-// (mw x mh, 32x32 tiles a screen), scroll against the camera; tile (tx, ty) is drawn at level pixel
-// (tx * 8 - dx, ty * 8 - dy), repeated every mw pixels horizontally
+// (mw x mh, one, two or four tilemap quadrants of 32x32 tiles), scroll against the camera; tile (tx, ty) is
+// drawn at level pixel (tx * 8 - dx, ty * 8 - dy), repeated every mw pixels horizontally
 export interface Layer3Geometry { base: number; wide: number; mw: number; mh: number; dx: number; dy: number }
 export const LAYER3_STATUS_ROWS = 5; // the status bar's tile rows (not drawn)
 export function layer3Geometry(r: LevelRender): Layer3Geometry {
   const w = r.wram, sc = r.ppuRegs[0x09], wide = sc & 1, tall = (sc >> 1) & 1;
   return { base: (sc & 0xfc) << 9, wide, mw: 256 << wide, mh: 256 << tall, dx: get16(w, RAM.layer3X) - cameraX(w), dy: get16(w, RAM.layer3Y) - cameraY(w) };
 }
-// VRAM byte address of tile (tx, ty)'s word
+// VRAM byte address of tile (tx, ty)'s word: in its tilemap quadrant (32x32 tiles), those left to right, then down
+const TILEMAP_QUADRANT = 0x800; // bytes
 export const layer3TileAddr = (g: Layer3Geometry, tx: number, ty: number): number =>
-  (g.base + ((tx >> 5) + (ty >> 5) * (g.wide ? 2 : 1)) * 0x800 + ((ty & 31) * 32 + (tx & 31)) * 2) & 0xffff;
+  (g.base + ((tx >> 5) + (ty >> 5) * (g.wide ? 2 : 1)) * TILEMAP_QUADRANT + ((ty & 31) * 32 + (tx & 31)) * 2) & 0xffff;
 
 // BG3 tilemap (2bpp) placed like on screen at the end of the level load: layer 3 scroll ($22/$24)
 // relative to the camera ($1A/$1C), repeated horizontally. Approximation: layer 3 is assumed to

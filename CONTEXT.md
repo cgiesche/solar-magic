@@ -112,8 +112,16 @@ The height of a horizontal level without layer 2 objects, one of Lunar Magic 3.0
 _Avoid_: dimension, level mode (that is the header's)
 
 **Screen**:
-One of a level's sections along its length, numbered from 00 (at most 32): in a horizontal level 16 tiles wide and as tall as the level, in a vertical level 16 tiles tall and as wide as the level (two halves of 16); the unit objects, sprites, screen exits and entrances are placed by, not the part of the level in sight at once (a view, 16x14 tiles, as the game view frame shows).
-_Avoid_: screen (for a view of the level)
+One of a level's sections along its length, numbered from 00 (at most 32): in a horizontal level 16 tiles wide and as tall as the level, in a vertical level 16 tiles tall and as wide as the level (two halves of 16); the unit objects, sprites, screen exits and entrances are placed by, not the part of the level in sight at once (that is a view), nor a 32x32-tile part of a layer's tilemap (that is a tilemap quadrant).
+_Avoid_: screen (for a view of the level or a tilemap quadrant)
+
+**View**:
+The part of the level in sight at once in the game: 256x224 pixels (16x14 tiles), as the game view frame shows it, placed by the camera. The sprite memory check plays what fits in one (sprite groups). Not the editor's level view, nor its view settings.
+_Avoid_: screen (that is a level section), window
+
+**Tilemap quadrant**:
+A 32x32-tile part of a tilemap laid out as the SNES reads it (in VRAM 0x800 bytes; the SNES's "screen"): a layer's tilemap is 1, 2 or 4 of them side by side and one below the other (layer 3's: core/render.ts layer3Geometry; the overworld's layer 1 and 2 maps keep that layout). Not a level's screen, nor a BG tilemap (the level's stored layer 2 background).
+_Avoid_: screen, block (that is a Map16 tile's behaviour)
 
 **Tile entrance**:
 An entrance that puts Mario at a tile of its screen (Lunar Magic's), instead of at one of the game's table positions, which don't reach a taller level's rows; its camera starts a number of rows above Mario. Entrances placed in a level with a size are tile entrances.
@@ -315,11 +323,11 @@ A slot search of the running game that found every slot it looked at taken, so a
 _Avoid_: sprite overflow, slot overflow
 
 **Sprite group**:
-A largest set of a level's sprites that fit in one view (16x14 tiles) together (an isolated sprite is one alone; a sprite may be in several): what the sprite memory check plays in the emulator, one at a time, to see which sprites lose tiles (core/spritemem.ts). The latest used groups keep their result per sprite memory value while the ROM bytes it read are unchanged, kept by their sprites' places relative to each other, so after a sprite change only the groups that changed are played again (not one moved as a whole).
+A largest set of a level's sprites that fit in one view together (an isolated sprite is one alone; a sprite may be in several): what the sprite memory check plays in the emulator, one at a time, to see which sprites lose tiles (core/spritemem.ts). The latest used groups keep their result per sprite memory value while the ROM bytes it read are unchanged, kept by their sprites' places relative to each other, so after a sprite change only the groups that changed are played again (not one moved as a whole).
 _Avoid_: window, object group, group sprite (one sprite that spawns several)
 
 **Group sprite**:
-One entry of the level's sprite data that is several sprites in the game, its code spawning the others when it loads ($DE five Eeries, $E0 three platforms): one sprite to the editor, the slots it spawns counted for it by the sprite memory check.
+One entry of the level's sprite data that is several sprites in the game, its code spawning the others when it loads ($DE five Eeries, $E0 three platforms): one sprite to the editor, the slots it spawns counted for it by the sprite memory check in every view (sprite group) it is in.
 _Avoid_: sprite group (that is the sprite memory check's), cluster sprite (a kind of sprite of its own)
 
 **Lag frame**:

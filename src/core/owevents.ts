@@ -64,7 +64,8 @@ const silentCode = (rom: Rom) => rom.r24(SILENT_HOOK + 1);
 export const isBig = (d: { area6: number }, at: number): boolean => at < d.area6;
 
 // the layer 2 tiles (indexes of readL2's map) a piece at `pos` writes, in storage order: rows of 6 or 2 tiles,
-// crossing into the next 32x32 block as the game's $04E4D0/$04E520 do; a tile outside the tilemap is left out (-1)
+// crossing into the next tilemap quadrant (32x32 tiles) as the game's $04E4D0/$04E520 do; a tile outside the
+// tilemap is left out (-1)
 export function pieceCells(pos: number, big: boolean): number[] {
   const n = big ? 6 : 2, out: number[] = [];
   let row = pos;

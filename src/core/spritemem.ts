@@ -1,9 +1,9 @@
 // Sprite memory ($1692, sprite header bits 0-5): which OAM range each sprite slot gets. When a
 // slot's range is too small for its sprite, the next slot drawn overwrites tiles of it and parts
 // of the graphics are missing (in the game as in the editor). Found by emulation: the sprites
-// that can be on screen together are loaded into the empty test level and run; the OAM writes
+// that can be in one view together are loaded into the empty test level and run; the OAM writes
 // show which slots lost visible tiles to another one.
-// Each group of sprites that fit on a screen together is run on its own; its result can be kept between
+// Each group of sprites that fit in a view together is run on its own; its result can be kept between
 // checks (SpriteGroupResults): after a sprite change a check runs only the groups that changed (a group
 // moved as a whole is played the same: its result is kept by its sprites' places relative to each other).
 
@@ -15,8 +15,9 @@ import { inputHash } from './inputs.ts';
 import { RomReads, type RomDeps, type RomFingerprint } from './romdeps.ts';
 import type { Rom } from './rom.ts';
 import { SPR, SPRITE_SLOTS, spriteX, spriteY, cameraX, cameraY } from './ram.ts';
+import { GAME_VIEW_W, GAME_VIEW_H } from './camerabands.ts';
 
-const VIEW_W = 16, VIEW_H = 14; // tiles
+const VIEW_W = GAME_VIEW_W / 16, VIEW_H = GAME_VIEW_H / 16; // tiles
 
 export interface SpriteMemCheck {
   conflicts: Set<number>; // uids of sprites drawn incompletely
@@ -92,7 +93,7 @@ export function spriteGroups(sprites: LevelSprite[]): SpriteGroup[] {
 // Runs one group with sprite memory m; null when the load fails
 function runGroup(ctx: SpriteMemContext, m: number, group: SpriteGroup, cam: Cam): { lost: Set<number>; live: number } | null {
   const { emu, level, bgPointer } = ctx;
-  // the group centered in the view (sprites near an edge would be drawn partly off screen)
+  // the group centered in the view (sprites near an edge would be drawn partly out of view)
   const xs = group.map((s) => s.x), ys = group.map((s) => s.y);
   const x0 = Math.min(...xs) - ((VIEW_W - 1 - Math.max(...xs) + Math.min(...xs)) >> 1);
   const y0 = Math.min(...ys) - ((VIEW_H - 1 - Math.max(...ys) + Math.min(...ys)) >> 1);

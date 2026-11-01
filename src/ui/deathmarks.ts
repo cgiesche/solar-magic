@@ -77,7 +77,7 @@ export function killerText(k: Killer, name: (id: number) => string): string {
   switch (k.kind) {
     case 'sprite': return k.slots === 'sprite' ? name(k.id) : `${k.slots} sprite ${hex2(k.id)}`;
     case 'block': return `the block (tile ${hex3(k.tile)})`;
-    case 'pit': return 'falling out of the screen';
+    case 'pit': return 'falling out of view';
     case 'time': return 'the timer running out';
     default: return 'something not recognised';
   }

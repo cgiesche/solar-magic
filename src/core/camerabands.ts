@@ -1,5 +1,5 @@
-// The game view frame (Lunar Magic's Game View Screen): what the player sees, a 256x224 screen over the level,
-// with bands where Mario is on that screen while the camera scrolls right, left, up and down, and while it
+// The game view frame (Lunar Magic's Game View Screen): what the player sees, the view (256x224) over the level,
+// with bands where Mario is in it while the camera scrolls right, left, up and down, and while it
 // follows him after L or R moved it ahead. The bands are learned by moving Mario in a probe level with the open
 // level's mode and vertical scroll setting (BlockProber.cameraBands) and reading his position on the screen in
 // the frames the camera moves, not from a table: walking, running and at P-speed for the horizontal ones;
