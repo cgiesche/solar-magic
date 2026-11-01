@@ -29,7 +29,7 @@ import { mwlSections, parseLmObjects } from '../src/core/mwl.ts';
 import { DM16_EXT } from '../src/core/patches.ts';
 import { inspectUpload, installPackage, removePackage, planUpload, type UploadPreview, type ReadyPreview, type InstallOptions } from '../src/core/packages.ts';
 import { listPackages } from '../src/core/pkgreg.ts';
-import { editorImage } from './fixture.ts';
+import { editorImage, recordShape } from './fixture.ts';
 
 await loadAsar();
 await loadApu();
@@ -213,9 +213,7 @@ function teleport(rom: Rom): number | null {
     const { rom, opt } = await target();
     const r = await installPackage(rom, baserom, o({ ...opt, plan: planUpload(rom, baserom, opt.blank) }));
     const all = listPackages(rom);
-    // (the patches by their number: their registry ids are new each install)
-    const { id: _i, added: _a, srcId: _s, patches, ...rest } = all[0] ?? {};
-    return { ok: r.ok && all.length === 1, samples: r.samples ?? [], rec: JSON.stringify({ ...rest, patches: patches?.length }) };
+    return { ok: r.ok && all.length === 1, samples: r.samples ?? [], rec: recordShape(all[0]) };
   };
   const plain = await record((o) => o);
   const full = await record((o) => ({ ...o, setup: true, samples: [L('105'), L('13B')] }));

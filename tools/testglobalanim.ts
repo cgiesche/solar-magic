@@ -19,7 +19,7 @@ import { readGlobalList, writeGlobalList, readAltFile, writeAltFile, emptyList, 
 import { inspectUpload, installPackage, removePackage, planUpload, type UploadPreview, type ReadyPreview, type InstallOptions } from '../src/core/packages.ts';
 import { listPackages, packageRemoval, packageSummary } from '../src/core/pkgreg.ts';
 import { setExtTileWords } from '../src/core/map16ext.ts';
-import { cleanImage, editorImage, romDiff } from './fixture.ts';
+import { cleanImage, editorImage, romDiff, recordShape } from './fixture.ts';
 
 await loadAsar();
 let bad = 0;
@@ -155,13 +155,11 @@ const upload = () => ready(inspectUpload('baserom-anim.zip', zipSync({ [BPS]: bp
     const o: InstallOptions = setup ? { ...opt, setup: true, cgram: l.cgram, wram: l.wram, sample: loadLevel(rom, 0x105) } : opt;
     const r = await installPackage(rom, ready(inspectUpload('anim.zip', zipSync({ ...onoff, [BPS]: bps, [ALT]: alt }))), o);
     const all = listPackages(rom);
-    // (the patches by their number: their registry ids are new each install)
-    const { id: _i, added: _a, srcId: _s, patches, ...rest } = all[0] ?? {};
-    return { ok: r.ok && all.length === 1, a: readAltFile(rom, 0)?.length ?? 0, sample: !!r.sample, pkg: all[0], rec: JSON.stringify({ ...rest, patches: patches?.length }), errors: r.errors };
+    return { ok: r.ok && all.length === 1, a: readAltFile(rom, 0)?.length ?? 0, sample: !!r.sample, pkg: all[0], rec: recordShape(all[0]), errors: r.errors };
   };
   const plain = await record(false), full = await record(true);
   check(plain.ok && full.ok && full.sample && plain.a === 0 && full.a > 0, `installed with and without the level setup and the sample level, which copy frames into ${altFileName(0)} (${full.a}) ${full.errors.join(' ')}`);
-  check(plain.pkg?.globalAnim?.graphic?.join() === '1,32', `the global animation's frames: in ${altFileName(1)}, its size before 20 (${plain.pkg?.globalAnim?.graphic?.join()})`);
+  check(plain.pkg?.globalAnim?.graphic?.join() === [1, 0x20].join(), `the global animation's frames: in ${altFileName(1)}, its size before 20 (${plain.pkg?.globalAnim?.graphic?.join()})`);
   check(full.rec === plain.rec, `the record with the level setup and the sample level: the one without them (graphic ${full.pkg?.globalAnim?.graphic?.join()})`);
 }
 

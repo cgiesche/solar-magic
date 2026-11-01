@@ -274,8 +274,8 @@ function placeEntrances(rom: Rom, sample: SampleLevel, entrances: MwlSections['e
 const failed = (errors: string[], warnings: string[] = [], prints: string[] = []): InstallResult => ({ ok: false, errors, warnings, prints, pkg: null });
 
 // applies every part and records the package; ok false when it failed (run it in an edit session,
-// romedit.ts, which puts the ROM back). The level setup and the sample levels come after the recording:
-// level edits, not the package's (ADR 0002), in the same edit session (one undo).
+// romedit.ts, which puts the ROM back); the level setup and the sample levels after the recording: level
+// edits, not the package's (ADR 0002), in the same edit session (one undo)
 export async function installPackage(rom: Rom, preview: ReadyPreview | ManualPreview, opt: InstallOptions): Promise<InstallResult> {
   const warnings: string[] = [];
   const prints: string[] = [];
@@ -285,7 +285,7 @@ export async function installPackage(rom: Rom, preview: ReadyPreview | ManualPre
   try {
     const archive = zipSync(Object.fromEntries(preview.files), { level: 9 });
     // Lunar Magic's object names and tooltips: kept with the package, over those of packages installed before
-    const objectText = uploadObjectText(preview.files) ?? undefined;
+    const objectText = uploadObjectText(preview.files);
     const target = { name: preview.name, fileName: preview.fileName, archive, objectText };
     const textNotes = objectText ? objectTextNotes(rom, preview.name, objectText) : [];
     let rec;
@@ -294,23 +294,23 @@ export async function installPackage(rom: Rom, preview: ReadyPreview | ManualPre
       const a = opt.assignment ?? defaultAssignment(preview, opt.level ?? 0x105);
       rec = recordPackageChange(rom, target, (claim) => applyAssignment(rom, preview.files, a, claim));
     } else {
-      let c = planInstall(rom, preview, opt);
+      const planned = planInstall(rom, preview, opt);
       // code playing a sound effect of the package that gets another number than the author's: its
       // define set to that number (the package's parts read anew from those files)
-      const linked = sfxLinkedFiles(preview, c.sfx);
+      const linked = sfxLinkedFiles(preview, planned.sfx);
+      let parts = planned;
       if (linked) {
         const again = inspectFiles(preview.fileName, linked);
         if (again.status !== 'ready') return failed([`The package with its sound effects' numbers set: ${again.status === 'failed' ? again.reason : again.status}`]);
-        c = { ...planInstall(rom, again, opt), sfx: c.sfx };
+        parts = { ...planInstall(rom, again, opt), sfx: planned.sfx };
       }
-      ctx = c;
-      rec = await recordPackageChangeAsync(rom, target, (claim) => applyParts(rom, c, claim));
+      ctx = parts;
+      rec = await recordPackageChangeAsync(rom, target, (claim) => applyParts(rom, parts, claim));
     }
     warnings.push(...rec.result.warnings);
     prints.push(...rec.result.prints);
     if (!rec.result.ok) return failed(rec.result.errors, warnings, prints);
     if (!rec.pkg) return failed(['Nothing changed – everything in the package is already in the ROM.']);
-    warnings.push(...textNotes);
     if (ctx && preview.status === 'ready') {
       // the sample level needs the package's ExGFX in its slots: the level setup comes with it
       if (opt.level !== null && (opt.setup !== false || opt.sample) && (ctx.plan.gfx.some((g) => g.slot) || ctx.plan.palettes.length || ctx.plan.exanim.length)) {
@@ -336,6 +336,7 @@ export async function installPackage(rom: Rom, preview: ReadyPreview | ManualPre
         samples.push(at);
       }
     }
+    warnings.push(...textNotes);
     const messages = messageRoutineTaken(before, rom);
     return { ok: true, errors: [], warnings, prints, pkg: rec.pkg, sample, ...(samples.length ? { samples } : {}), ...(messages ? { messages } : {}) };
   } catch (e) {

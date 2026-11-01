@@ -3,6 +3,7 @@
 import { readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
 import { installEditorPatches } from '../src/core/editorpatches.ts';
+import type { Package } from '../src/core/pkgreg.ts';
 
 export const cleanImage = (): Uint8Array => new Uint8Array(readFileSync('test/fixtures/smw.smc'));
 
@@ -25,4 +26,12 @@ export function romDiff(a: Uint8Array, b: Uint8Array, skip: (i: number) => boole
   let n = 0;
   for (let i = 0; i < Math.max(a.length, b.length); i++) if ((a[i] ?? 0) !== (b[i] ?? 0) && !skip(i) && !regs.some(([s, e]) => i >= s && i < e)) n++;
   return n;
+}
+
+// a package's record without what is new each install (its id, date, files' blob id, the patches' registry
+// ids: their number), to compare two installs
+export function recordShape(pkg: Package | undefined): string {
+  if (!pkg) return '';
+  const { id: _i, added: _a, srcId: _s, patches, ...rest } = pkg;
+  return JSON.stringify({ ...rest, patches: patches.length });
 }
