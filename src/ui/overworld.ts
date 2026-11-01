@@ -10,6 +10,7 @@ import {
   readRevealList, writeRevealList, destroyEffects, destroySettingAt, destroyEvent, setDestroyEvent, readDestroyList, freeTranslevel, levelTilesOf, OW_L1_TILES,
 } from '../core/overworld.ts';
 import { hasMessages, isBlank, readMessage } from '../core/messages.ts';
+import { currentMessageRoutine, messageRoutineNote } from '../core/messagedraw.ts';
 import { levelName, hasLevelName } from '../core/levelnames.ts';
 import { levelNameField } from './levelnamefield.ts';
 import {
@@ -1156,12 +1157,15 @@ export class OverworldView {
     if (!tl) return h('div', { class: 'ow-info' }, ...head, h('div', { class: 'hint warn-text' }, '⚠ This level tile enters no level.'));
     const lvl = translevelToLevel(tl);
     const ev = baseEvent(rom, tl), msgs = [1, 2].filter((n) => !isBlank(readMessage(rom, tl, n)));
+    // (a package drawing the message boxes: the editor's messages are not what players see)
+    const routine = currentMessageRoutine(rom);
     return h('div', { class: 'ow-info' }, ...head,
       ...levelNameField(this.app, tl, this.render()),
       // the level's other settings (kept when its tiles are painted over, shown to every new tile entering it)
       ...this.levelSettings(tl),
       ...this.exitResultRows(tl),
-      h('div', { class: 'prop' }, h('label', null, 'Message boxes'), h('span', null, msgs.length ? msgs.map((n) => `message ${n}`).join(', ') : 'none'),
+      h('div', { class: 'prop' }, h('label', null, 'Message boxes'), routine.game ? h('span', null, msgs.length ? msgs.map((n) => `message ${n}`).join(', ') : 'none')
+        : h('span', { class: 'warn-text', title: messageRoutineNote(routine) }, '⚠ drawn by a package'),
         h('button', { onclick: () => { this.onOpenLevel(lvl); this.app.openMessages(tl, 1); }, title: 'Edit the level\'s two messages beside the level' }, 'Edit …')),
       h('div', { class: 'row' },
         h('button', { onclick: () => this.onOpenLevel(lvl), title: 'Open in the level editor (also by double click in the list)' }, `Edit level ${hex(lvl, 3)}`),

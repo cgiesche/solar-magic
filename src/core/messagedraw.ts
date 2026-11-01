@@ -19,7 +19,7 @@ import { packageOfPatch } from './pkgreg.ts';
 const LEVEL = 0x105; // the level played (a level of a translevel, as the game enters it) …
 const TRIES = 4; // … else the next overworld levels, as many
 const FRAMES = 120; // frames for the box to open and its text to be written (the game's: ~30)
-const STRIPES = 0x1837d, LINE = 4 + MSG_COLS * 2; // $7F837D in WRAM, one line's stripe
+const STRIPES = RAM.stripes, LINE = 4 + MSG_COLS * 2; // the stripe buffer ($7F837D), one line's stripe
 
 export interface MessageRoutine {
   // the game draws the editor's messages

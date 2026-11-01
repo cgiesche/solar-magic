@@ -340,9 +340,7 @@ export async function installPackage(rom: Rom, preview: ReadyPreview | ManualPre
       warnings.push(...objectTextNotes(rom, pkg.name, text));
       pkg = savePackage(rom, { ...pkg, objectText: text });
     }
-    // (also a warning: the install's log says it)
     const messages = messageRoutineTaken(before, rom);
-    if (messages) warnings.push(messages);
     return { ok: true, errors: [], warnings, prints, pkg, sample, ...(samples.length ? { samples } : {}), ...(messages ? { messages } : {}) };
   } catch (e) {
     return failed([e instanceof Error ? e.message : String(e)], warnings, prints);

@@ -70,15 +70,15 @@ export function showMessageHover(app: App, e: MouseEvent, tl: number, msg: numbe
     hover = { root: h('div', { class: 'msg-hover' }, text, canvas), canvas, text, drawn: '', render: null };
   }
   if (!hover.root.isConnected) document.body.append(hover.root);
-  const drawn = currentMessageRoutine(app.rom);
-  hover.canvas.hidden = !drawn.game;
-  if (!drawn.game) {
-    hover.text.textContent = `${what} · ${messageRoutineNote(drawn)}`;
+  const routine = currentMessageRoutine(app.rom);
+  hover.canvas.hidden = !routine.game;
+  if (!routine.game) {
+    hover.text.textContent = `${what} · ${messageRoutineNote(routine)}`;
     hover.drawn = '';
   }
   const m = readMessage(app.rom, tl, msg), key = `${what}:${m.join('/')}`;
   // (drawn again when the message or the level's font changed)
-  if (drawn.game && (key !== hover.drawn || app.render !== hover.render)) {
+  if (routine.game && (key !== hover.drawn || app.render !== hover.render)) {
     hover.text.textContent = `${what}${isBlank(m) ? ' – empty' : ''} · double click to edit`;
     drawMessage(app, hover.canvas, m);
     hover.drawn = key;
@@ -135,8 +135,8 @@ export class MessagePanel {
     this.root.replaceChildren();
     if (!app.messages) { this.box = null; this.shown = ''; return; }
     const { translevel: t, msg: n } = app.messages;
-    const drawn = currentMessageRoutine(rom);
-    if (!drawn.game) { this.replaced(t, n, messageRoutineNote(drawn)); return; }
+    const routine = currentMessageRoutine(rom);
+    if (!routine.game) { this.replaced(t, n, messageRoutineNote(routine)); return; }
     const key = `${t}:${n}`, m = readMessage(rom, t, n);
     // the box as edited while it shows the same text (the caret, spaces typed at a line's end stay)
     if (!this.box || this.shown !== key || JSON.stringify(boxMessage(this.box).map(trimLine)) !== JSON.stringify(m.map(trimLine))) {

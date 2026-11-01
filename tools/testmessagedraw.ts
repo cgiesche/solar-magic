@@ -28,7 +28,7 @@ const src = map16Source(rom, new LevelEmulator(rom).load(0x105));
 const opts: InstallOptions = { level: 0x105, blank: src.fg(0x025), tileWords: (t) => src.fg(t) };
 const r = await installPackage(rom, up, opts);
 check(r.ok, `VWF Dialogues installed${r.ok ? '' : ': ' + r.errors.join(' ')}`);
-check(!!r.messages && r.warnings.includes(r.messages), `its install says message editing no longer applies (${r.messages})`);
+check(!!r.messages, `its install says message editing no longer applies (${r.messages})`);
 {
   const m = currentMessageRoutine(rom);
   check(!m.game && m.packages.join() === 'vwf_dialogues', `the game no longer draws the editor's messages, the package drawing them named (${m.packages.join(', ')})`);
