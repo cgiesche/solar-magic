@@ -2,7 +2,7 @@
 
 import { App, isBrushMode, type Marker, type LevelEdit, type Brush, type PreviewPart } from './app.ts';
 import { h, attachPanZoom, toast } from './dom.ts';
-import { paintGrid, paintScreens, paintExits } from './levelimages.ts';
+import { paintGrid, paintScreens, paintExits } from './leveloverlays.ts';
 import { hex2, hex3 } from '../core/names.ts';
 import { aimResize, type Grab, type Drivers } from '../core/objresize.ts';
 import { KILL_FILL, HURT_FILL, CLIMB_FILL, SPIKE_COLOR, NET_COLOR, spikeRow, netTile, drawSkull, switchMarks, drawSwitchMarks } from './collisionmarks.ts';
