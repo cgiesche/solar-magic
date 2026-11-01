@@ -22,4 +22,4 @@ We decided:
 
 ## Consequences
 
-Overworld edits go through the ROM history like every other change, and the background analyses survive them, which every other edit gains too. The editor writes Lunar Magic's overworld hijacks into its ROMs; their layouts that are not documented (level names) are learned from a ROM Lunar Magic saved, in the tools, not by opening it in the editor. What so far rests on `Lunar Magic.exe` alone (two overworld options, the level names' character table) is checked against such a ROM.
+Overworld edits go through the ROM history like every other change, and the background analyses survive them, which every other edit gains too. The editor writes Lunar Magic's overworld hijacks into its ROMs; their layouts that are not documented (level names) are learned from a ROM Lunar Magic saved, in the tools, not by opening it in the editor. What so far rests on `Lunar Magic.exe` alone (two overworld options, the level names' character table) is checked against such a ROM (done in #254: both agree, [research](../research/lunar-magic-overworld-options.md)).
