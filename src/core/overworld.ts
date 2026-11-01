@@ -205,8 +205,9 @@ export function readTranslevels(rom: Rom): Uint8Array {
 
 // the level each level tile enters (l1Index → level number) in a ROM read through `r` – another than the
 // open one, e.g. the Lunar Magic ROM a BPS makes (cleangame.ts), whose reads may throw; null without
-// Lunar Magic's translevel table. The tiles the table gives a translevel: the editor gives one only to a level tile
-// (placeTile; painted on the map after an event, the one the event makes), no test of the tile needed
+// Lunar Magic's translevel table. The tiles the table gives a translevel, without a test of the tile: the editor gives
+// one only to a level tile it paints (placeTile; on the map after an event, the one the event makes); the game's
+// scan and Lunar Magic also to the star tiles (5F), which enter no level
 export function levelTileLevels(r: RomRead): Map<number, number> | null {
   if (!hasTranslevelTable(r)) return null;
   const at = tableAt(r);
