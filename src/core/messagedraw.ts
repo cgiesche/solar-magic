@@ -113,18 +113,19 @@ class Play {
     p.load(this.before);
     this.chars = [];
     this.opened = null;
-    let f = 0, at = -1;
+    let f = 0, at = -1; // frames played, the one the box opened in
     try {
       open(p, spawn);
-      for (; f < OPEN_FRAMES + FRAMES && this.chars.length < MSG_LINES * MSG_COLS; f++) {
+      while (f < OPEN_FRAMES + FRAMES && this.chars.length < MSG_LINES * MSG_COLS) {
         p.frame();
+        f++;
         if (at < 0 && this.opened) at = f;
-        if (at < 0 && f >= OPEN_FRAMES) break;
+        if (at < 0 && f > OPEN_FRAMES) break;
         if (at >= 0 && f - at >= FRAMES) break;
       }
     } catch { /* (the emulated game crashed: what was written) */ }
     const o = this.opened as { message: number; translevel: number } | null; // (set by the hook)
-    return { box: o && { ...o, chars: this.chars.slice(0, MSG_LINES * MSG_COLS) }, frames: f + 1 };
+    return { box: o && { ...o, chars: this.chars.slice(0, MSG_LINES * MSG_COLS) }, frames: f };
   }
 
   close(): void { this.p.close(); }
@@ -187,7 +188,7 @@ export function* messageRoutineJob(rom: Rom, emu: LevelEmulator): Generator<void
       // (a message opened again: compared once)
       if (box && !boxes.some((b) => b.box.message === box.message)) boxes.push({ opener, box, frames });
     }
-    const messages = boxes.map((b) => b.box.message).sort();
+    const messages = boxes.map((b) => b.box.message).sort((a, b) => a - b);
     if (!boxes.length) return { game: null, packages: [], level, messages };
     const wrong = boxes.filter((b) => !drawn(rom, b.box));
     if (!wrong.length) return { game: true, packages: [], level, messages };
@@ -235,6 +236,8 @@ export function messageRoutineNote(r: MessageRoutine): string {
     : 'by a patch that replaces the game\'s message routine';
   return `Messages in this ROM are drawn ${by}, not by the game's message box: the editor's messages are not what players see.`;
 }
+// what the editor says while it is checked
+export const MESSAGE_ROUTINE_CHECKING = 'Checking whether the game draws the editor\'s messages (a package may draw them instead)…';
 // what the editor says when it could not tell (MessageRoutine game null)
 export function messageRoutineUnknown(r: MessageRoutine): string {
   return r.level === null

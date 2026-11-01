@@ -9,6 +9,7 @@ import { incompleteSprites, spriteMemDialog, spriteMemText, SPRITE_MEM_HELP } fr
 import { messageLevels, messageProblems, type MessageLevel } from '../core/messageuse.ts';
 import { loadLevel } from '../core/level.ts';
 import { levelMessages, spriteOpens } from './messagepanel.ts';
+import { MESSAGE_ROUTINE_CHECKING, messageRoutineUnknown } from '../core/messagedraw.ts';
 
 // the sprites of the other levels showing the open level's messages, read again after a ROM change
 let sharing: { key: string; levels: MessageLevel[] } | null = null;
@@ -32,8 +33,10 @@ export function collectProblems(app: App, reveal: (uids: number[]) => void): Pro
   // (a package drawing the message boxes: the editor's messages are not what players see, nothing to check; whether
   // one does is checked first)
   const tl = levelMessages(app), routine = app.messageRoutine();
-  if (!routine) out.push({ key: 'msg-routine-checking', severity: 'info', text: 'Checking whether the game draws the message boxes…', title: 'The message checks follow once that is known.' });
-  else if (routine.game !== false) out.push(...messageProblems(app.rom, tl, app.level, sharingLevels(app, tl), (s) => spriteOpens(app, s)));
+  if (!routine) out.push({ key: 'msg-routine-checking', severity: 'info', text: MESSAGE_ROUTINE_CHECKING, title: 'The message checks follow once that is known.' });
+  // (unknown: checked as the game's, said so)
+  if (routine?.game === null) out.push({ key: 'msg-routine-unknown', severity: 'info', text: messageRoutineUnknown(routine), title: 'The message checks take the editor\'s messages as what players see.' });
+  if (routine && routine.game !== false) out.push(...messageProblems(app.rom, tl, app.level, sharingLevels(app, tl), (s) => spriteOpens(app, s)));
   const inc = incompleteSprites(app);
   if (inc.length) {
     out.push({ key: 'sprite-mem', severity: 'warn', text: `${spriteMemText(inc.length)}: not enough sprite memory`, title: SPRITE_MEM_HELP,

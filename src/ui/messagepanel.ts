@@ -18,7 +18,7 @@ import {
 } from '../core/messages.ts';
 import { boxOf, boxMessage, trimLine, typeCode, newline, backspace, del, move, charsLeft, paste, justifyBox, suggestion, type Box, type Move } from '../core/messagebox.ts';
 import { messageTranslevel, messageLevels } from '../core/messageuse.ts';
-import { messageRoutineNote, messageRoutineUnknown } from '../core/messagedraw.ts';
+import { messageRoutineNote, messageRoutineUnknown, MESSAGE_ROUTINE_CHECKING } from '../core/messagedraw.ts';
 import { openTestPlay } from './testplay.ts';
 
 const W = MSG_COLS * 8 + 16, H = MSG_LINES * 8 + 16; // the box with its black border, in pixels
@@ -74,13 +74,13 @@ export function showMessageHover(app: App, e: MouseEvent, tl: number, msg: numbe
   const routine = app.messageRoutine(), game = routine?.game !== false && !!routine;
   hover.canvas.hidden = !game;
   if (!game) {
-    hover.text.textContent = `${what} · ${routine ? messageRoutineNote(routine) : 'checking whether the game draws the editor\'s messages…'}`;
+    hover.text.textContent = `${what} · ${routine ? messageRoutineNote(routine) : MESSAGE_ROUTINE_CHECKING}`;
     hover.drawn = '';
   }
   const m = readMessage(app.rom, tl, msg), key = `${what}:${m.join('/')}`;
   // (drawn again when the message or the level's font changed)
   if (game && (key !== hover.drawn || app.render !== hover.render)) {
-    hover.text.textContent = `${what}${isBlank(m) ? ' – empty' : ''} · double click to edit`;
+    hover.text.textContent = `${what}${isBlank(m) ? ' – empty' : ''} · double click to edit${routine?.game === null ? ` · ⚠ ${messageRoutineUnknown(routine)}` : ''}`;
     drawMessage(app, hover.canvas, m);
     hover.drawn = key;
     hover.render = app.render;
@@ -195,7 +195,7 @@ export class MessagePanel {
     this.box = null; this.shown = ''; this.canvas = null; this.input = null; this.where = null; this.note = null;
     this.root.append(
       h('div', { class: 'panel-title' }, 'Message boxes', h('button', { class: 'msg-close', title: 'Close – back to the picker', onclick: () => app.closeMessages() }, '×')),
-      h('div', { class: 'hint' }, 'Checking whether the game draws the editor\'s messages (a package may draw them instead)…'),
+      h('div', { class: 'hint' }, MESSAGE_ROUTINE_CHECKING),
     );
   }
 

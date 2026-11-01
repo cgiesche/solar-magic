@@ -10,7 +10,7 @@ import {
   readRevealList, writeRevealList, destroyEffects, destroySettingAt, destroyEvent, setDestroyEvent, readDestroyList, freeTranslevel, levelTilesOf, OW_L1_TILES,
 } from '../core/overworld.ts';
 import { hasMessages, isBlank, readMessage } from '../core/messages.ts';
-import { messageRoutineNote, messageRoutineUnknown } from '../core/messagedraw.ts';
+import { messageRoutineNote, messageRoutineUnknown, MESSAGE_ROUTINE_CHECKING } from '../core/messagedraw.ts';
 import { levelName, hasLevelName } from '../core/levelnames.ts';
 import { levelNameField } from './levelnamefield.ts';
 import {
@@ -1185,9 +1185,10 @@ export class OverworldView {
       // the level's other settings (kept when its tiles are painted over, shown to every new tile entering it)
       ...this.levelSettings(tl),
       ...this.exitResultRows(tl),
-      h('div', { class: 'prop' }, h('label', null, 'Message boxes'), !routine ? h('span', { class: 'hint', title: 'Checking whether the game draws the editor\'s messages' }, `${shown} · checking…`)
+      h('div', { class: 'prop' }, h('label', null, 'Message boxes'), !routine ? h('span', { class: 'hint', title: MESSAGE_ROUTINE_CHECKING }, `${shown} · checking…`)
         : routine.game === false ? h('span', { class: 'warn-text', title: messageRoutineNote(routine) }, '⚠ drawn by a package')
-        : h('span', routine.game === null ? { title: messageRoutineUnknown(routine) } : null, shown),
+        : routine.game === null ? h('span', { class: 'warn-text', title: messageRoutineUnknown(routine) }, `${shown} · ⚠ not checked`)
+        : h('span', null, shown),
         h('button', { onclick: () => { this.onOpenLevel(lvl); this.app.openMessages(tl, 1); }, title: 'Edit the level\'s two messages beside the level' }, 'Edit …')),
       h('div', { class: 'row' },
         h('button', { onclick: () => this.onOpenLevel(lvl), title: 'Open in the level editor (also by double click in the list)' }, `Edit level ${hex(lvl, 3)}`),
