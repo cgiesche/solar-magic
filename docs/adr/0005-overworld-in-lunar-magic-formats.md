@@ -10,6 +10,7 @@ We decided:
 - A ROM edit must not restart background analyses (probes, object kinds, level scan) whose bytes it did not change: the ROM knows the ranges a write changed, the worker gets those, running tasks go on unless they read them.
 - The user paints an event as the map looks after it; the editor finds its steps (animated on the event's submap, silent on others, in an order the user can change) and checks the result by emulation, instead of Lunar Magic's 6x6/2x2 piece storage and numbered steps.
 - A package that replaces the overworld (Overworld Revolution's `YFOR` signature) locks the overworld workspace.
+- The editor writes Lunar Magic's hijacks and their routines byte for byte as Lunar Magic does, so community tools and patches that look for them find them. Where a layout, a place or a byte value isn't documented, it may be read from `Lunar Magic.exe`, but only counts once a ROM Lunar Magic saved confirms it (made in the tools, Lunar Magic run under wine).
 
 ## Considered options
 
@@ -21,4 +22,4 @@ We decided:
 
 ## Consequences
 
-Overworld edits go through the ROM history like every other change, and the background analyses survive them, which every other edit gains too. The editor writes Lunar Magic's overworld hijacks into its ROMs; their layouts that are not documented (level names) are learned from a ROM Lunar Magic saved, in the tools, not by opening it in the editor.
+Overworld edits go through the ROM history like every other change, and the background analyses survive them, which every other edit gains too. The editor writes Lunar Magic's overworld hijacks into its ROMs; their layouts that are not documented (level names) are learned from a ROM Lunar Magic saved, in the tools, not by opening it in the editor. What so far rests on `Lunar Magic.exe` alone (two overworld options, the level names' character table) is checked against such a ROM.
