@@ -5,7 +5,8 @@ import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadLevel, L2_PTRS } from '../src/core/level.ts';
 import { ObjKindProbe } from '../src/core/objkinds.ts';
-import { SizeProbe, sizeParts, partSizes, drivers, aimResize, keepEdges, type Grab } from '../src/core/objresize.ts';
+import { SizeProbe, sizeParts, partSizes, drivers, namedDrivers, aimResize, keepEdges, keyResize, grabFor, ObjectBoxes, StepQueue, type Grab, type LearnBoxes, type SizeSpec } from '../src/core/objresize.ts';
+import { resizeObjectSize } from '../src/core/objkinds.ts';
 import { editorImage } from './fixture.ts';
 
 let bad = 0;
@@ -67,6 +68,77 @@ const aim = (num: number, o: { x: number; y: number; size: number }, grab: Grab,
   check(!!wide && wide.x1 - wide.x0 === 0xc8, `… wide ones probed in full (width ${wide && wide.x1 - wide.x0 + 1})`);
   const r = aim(0x21, { x: 10, y: 10, size: 0x02 }, { hx: 1, hy: 0 }, 110, 0);
   check(r?.size === 100, `… right edge 100 tiles out: size 100 (${r?.size})`);
+}
+
+// The boxes as the editor learns them (ObjectBoxes, the probe worker's job: here a queue run by hand)
+const jobs: (() => void)[] = [];
+const runJobs = () => { while (jobs.length) jobs.shift()!(); };
+const learnLater = (fail: (specs: SizeSpec[]) => boolean): LearnBoxes => (_key, specs, done, failed) =>
+  jobs.push(() => { if (fail(specs)) failed(); else { probe.probe(specs); done(specs.map((s) => probe.box(s) ?? null)); } });
+const allOf = (num: number, size: number) => sizeParts(kinds.get(num)).flatMap((p) => partSizes(size, p).map((s) => ({ num, ext: 0, size: s })));
+
+// a failed job: the boxes are null (a keyboard step keeps the origin) and the drivers those the kind names
+{
+  const boxes = new ObjectBoxes(learnLater(() => true)).at('a');
+  let told = 0;
+  check(!boxes.ask([{ num: 0x05, ext: 0, size: 0x22 }, { num: 0x05, ext: 0, size: 0x23 }], () => told++) && told === 0, 'failing: asked, not known yet');
+  runJobs();
+  const b = (size: number) => boxes.box({ num: 0x05, ext: 0, size });
+  check(told === 1 && b(0x22) === null && b(0x23) === null, `failed: told once, null boxes (${told})`);
+  const r = keyResize({ x: 20, y: 10, size: 0x22 }, 0x23, b, false, 512, 27);
+  check(r?.size === 0x23 && r.x === 20 && r.y === 10, 'a waiting keyboard step is made, the origin stays');
+  check(boxes.drivers(kinds.get(0x05), { num: 0x05, ext: 0, size: 0x22 }) === undefined, 'drivers unknown while not all sizes are');
+  boxes.ask(allOf(0x05, 0x22));
+  runJobs();
+  const d = boxes.drivers(kinds.get(0x05), { num: 0x05, ext: 0, size: 0x22 }), n = namedDrivers(kinds.get(0x05));
+  check(!!d && d.x === n.x && d.y === n.y, `failed: the drivers the kind names (${d?.x}/${d?.y})`);
+  // a job known to have failed: the client tells at once (learn calls failed): known now, then not called
+  const now = new ObjectBoxes((_k, _s, _done, failed) => failed()).at('a');
+  let nowTold = 0;
+  check(now.ask([{ num: 0x05, ext: 0, size: 0x22 }], () => nowTold++) && nowTold === 0 && now.box({ num: 0x05, ext: 0, size: 0x22 }) === null, 'failed at once: known, then not called');
+  // another level by the time the job ends: nothing kept, then called (asked anew)
+  const moved = new ObjectBoxes(learnLater(() => false)).at('a');
+  let movedTold = 0;
+  moved.ask([{ num: 0x05, ext: 0, size: 0x22 }], () => movedTold++);
+  moved.at('b');
+  runJobs();
+  check(movedTold === 1 && moved.box({ num: 0x05, ext: 0, size: 0x22 }) === undefined, 'another level meanwhile: told, nothing kept');
+}
+
+// keyboard steps waiting for boxes: in the order pressed, as without the wait. Coins at the level's left edge (3 wide):
+// a step wider keeping the right edge can't be made (the origin would leave the level), then one narrower can.
+{
+  const run = (known: number[]) => {
+    const boxes = new ObjectBoxes(learnLater(() => false)).at('a'), queue = new StepQueue();
+    boxes.ask(known.map((size) => ({ num: 0x05, ext: 0, size })));
+    runJobs();
+    const o = { x: 0, y: 10, size: 0x22 };
+    const press = (dw: number) => queue.add((retry) => {
+      const size = resizeObjectSize(kinds.get(0x05), o.size, dw, 0);
+      if (!boxes.ask([{ num: 0x05, ext: 0, size: o.size }, { num: 0x05, ext: 0, size }], retry)) return false;
+      const r = keyResize(o, size, (s) => boxes.box({ num: 0x05, ext: 0, size: s }), true, 512, 27);
+      if (r) Object.assign(o, r);
+      return true;
+    });
+    press(1);
+    press(-1);
+    runJobs();
+    return o;
+  };
+  const all = run([0x21, 0x22, 0x23]), waited = run([0x21, 0x22]);
+  check(all.x === 1 && all.size === 0x21, `boxes known: the wider step stays, the narrower one is made (${all.size.toString(16)} at ${all.x})`);
+  check(waited.x === all.x && waited.size === all.size, `the wider step waiting for its boxes: the same, the narrower one after it (${waited.size.toString(16)} at ${waited.x})`);
+}
+
+// the edges a drag grabs: those the drivers move (at the start as the kind names them, when the boxes come as emulated)
+{
+  const g = grabFor({ hx: 1, hy: 1 }, { x: null, y: 'hi' });
+  check(g.hx === 0 && g.hy === 1, 'grab: only the edges the drivers move');
+  const boxes = new ObjectBoxes(learnLater(() => false)).at('a'), o = { num: 0x39, ext: 0, size: 0x22 };
+  boxes.ask(allOf(0x39, 0x22));
+  runJobs();
+  const d = boxes.drivers(kinds.get(0x39), o), e = drivers(kinds.get(0x39), 0x22, (size) => probe.box({ ...o, size }));
+  check(!!d && d.x === e.x && d.y === e.y, `drivers as emulated once known (${d?.x}/${d?.y})`);
 }
 
 console.log(bad ? `${bad} failed` : 'all ok');

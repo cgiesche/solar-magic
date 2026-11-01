@@ -40,7 +40,7 @@ import type { RomHistory } from '../core/romhistory.ts';
 import type { EditOptions } from '../core/romedit.ts';
 import { EditSession, type LevelEdit, type StepResult } from '../core/editsession.ts';
 import { resizeObjectSize, type ObjKind, type ObjKinds, type KindLevel } from '../core/objkinds.ts';
-import { sizeKey, sizeParts, partSizes, drivers, namedDrivers, keepEdges, type Box, type Drivers, type SizeSpec } from '../core/objresize.ts';
+import { sizeKey, sizeParts, partSizes, namedDrivers, keyResize, ObjectBoxes, StepQueue, type Box, type Drivers, type SizeSpec } from '../core/objresize.ts';
 import { type JumpArc } from '../core/jumparcs.ts';
 import { scanKey, type ScanLevel, type ScanResult } from '../core/levelscan.ts';
 import { cameraAtKey, type CameraReach, type CameraAt } from '../core/camerareach.ts';
@@ -1790,20 +1790,23 @@ export class App {
   }
 
   // resize: width/height nibbles of settings byte by one step each; the left and top edges stay where they
-  // are, with far the right and bottom ones (an object at the level's edge that would have to leave it stays)
+  // are, with far the right and bottom ones (an object at the level's edge that would have to leave it stays).
+  // The boxes are asked for first: resized when they come, presses meanwhile after it in order
   resizeSelection(dw: number, dh: number, far = false): void {
+    this.keyResizes.add((retry) => this.resizeStep(dw, dh, far, retry));
+  }
+  private keyResizes = new StepQueue();
+  private resizeStep(dw: number, dh: number, far: boolean, retry: () => void): boolean {
     const objs = this.selectedObjects().filter((o) => this.resizable(o));
-    if (!objs.length) return;
+    if (!objs.length) return true;
     const sized = objs.map((o) => resizeObjectSize(this.objectKind(o.num), o.size, dw, dh));
-    // (the boxes asked for first: resized when they come)
-    if (!this.askSizes(objs.flatMap((o, i) => [this.sizeSpec(o, o.size), this.sizeSpec(o, sized[i])]), () => this.resizeSelection(dw, dh, far))) return;
+    if (!this.askSizes(objs.flatMap((o, i) => [this.sizeSpec(o, o.size), this.sizeSpec(o, sized[i])]), retry)) return false;
     const { w, h } = this.objectLimits();
     this.editLevel(() => objs.forEach((o, i) => {
-      const box = this.sizeBoxes(o);
-      if (!box(o.size) || !box(sized[i])) { o.size = sized[i]; return; } // (draws nothing: the origin stays)
-      const at = keepEdges(o, sized[i], box, far, w, h);
-      if (at) { o.x = at.x; o.y = at.y; o.size = sized[i]; }
+      const r = keyResize(o, sized[i], this.sizeBoxes(o), far, w, h);
+      if (r) { o.x = r.x; o.y = r.y; o.size = r.size; }
     }));
+    return true;
   }
 
   // whether the settings byte sizes the object: standard objects and Direct Map16
@@ -1812,36 +1815,31 @@ export class App {
   }
 
   // the tiles objects cover at each size, emulated alone (objresize.ts) in the probe worker, for the level's tileset as
-  // the ROM is now: those known (key: of the level and ROM state they hold for)
-  private sized = { key: '', boxes: new Map<string, Box | null>() };
+  // the ROM is now: those known (sizeLevel's key: of the level and ROM state they hold for)
+  private sized = new ObjectBoxes((key, specs, done, failed) => {
+    const { level, layer2Pointer } = this.sizeLevel();
+    this.probes.learn<(Box | null)[]>('sizes', { kind: 'sizes', level, layer2Pointer, specs }, { lane: 'sizes', input: { key, specs: specs.map(sizeKey) },
+      done: (got) => { done(got); this.emit('sizes'); }, failed: () => { failed(); this.emit('sizes'); } });
+  });
   private sizeLevel(): { key: string; level: KindLevel; layer2Pointer: number } {
     const lv = this.level, l2 = levelBgPointer(this.rom, lv);
     return { key: `${this.rom.gen}:${lv.number}:${inputHash(lv.header)}:${l2}`, level: { number: lv.number, header: lv.header }, layer2Pointer: l2 };
   }
-  private sizeBoxMap(): Map<string, Box | null> {
-    const { key } = this.sizeLevel();
-    if (this.sized.key !== key) { this.sized = { key, boxes: new Map() }; this.driverMemo.clear(); }
-    return this.sized.boxes;
+  // the boxes known for the level as it is now
+  private objectBoxes(): ObjectBoxes {
+    return this.sized.at(this.sizeLevel().key);
   }
   // asks the probe worker for the boxes of specs not known ('sizes' when they come, then done); whether all are known
   private askSizes(specs: SizeSpec[], done?: () => void): boolean {
-    const boxes = this.sizeBoxMap(), todo = [...new Map(specs.filter((s) => !boxes.has(sizeKey(s))).map((s) => [sizeKey(s), s])).values()];
-    if (!todo.length) return true;
-    const { key, level, layer2Pointer } = this.sizeLevel();
-    this.probes.learn<(Box | null)[]>('sizes', { kind: 'sizes', level, layer2Pointer, specs: todo }, { lane: 'sizes', input: { key, specs: todo.map(sizeKey) }, done: (got) => {
-      if (this.sized.key === key) got.forEach((b, i) => this.sized.boxes.set(sizeKey(todo[i]), b));
-      this.emit('sizes');
-      done?.();
-    } });
-    return false;
+    return this.objectBoxes().ask(specs, done);
   }
   private sizeSpec(o: LevelObject, size: number): SizeSpec {
     return { num: o.num, ext: o.ext, size, tile: o.tile, extension: o.extension };
   }
   // the object's box at a size (relative to its origin), undefined while not probed
   sizeBoxes(o: LevelObject): (size: number) => Box | null | undefined {
-    const boxes = this.sizeBoxMap();
-    return (size) => boxes.get(sizeKey(this.sizeSpec(o, size)));
+    const boxes = this.objectBoxes();
+    return (size) => boxes.box(this.sizeSpec(o, size));
   }
   // every size the parts of the object's settings byte can take
   private allSizes(o: LevelObject): SizeSpec[] {
@@ -1852,18 +1850,10 @@ export class App {
     this.askSizes(objs.flatMap((o) => this.allSizes(o)));
   }
   // which part of the settings byte sizes which axis of the object: as emulated once its sizes are known,
-  // before as its kind says (they are probed in the background then, 'sizes' when known)
-  private driverMemo = new Map<string, Drivers>(); // (emulated ones, per object as resized and its kind)
+  // before (and when their job failed) as its kind says (they are probed in the background then, 'sizes' when known)
   resizeDrivers(o: LevelObject): Drivers {
-    const kind = this.objectKind(o.num), box = this.sizeBoxes(o);
-    const key = `${o.num}:${o.ext}:${o.size}:${o.tile ?? ''}:${o.extension?.join(',') ?? ''}:${JSON.stringify(kind)}`;
-    const had = this.driverMemo.get(key);
-    if (had) return had;
-    if (this.allSizes(o).every((s) => box(s.size) !== undefined)) {
-      const d = drivers(kind, o.size, box);
-      this.driverMemo.set(key, d);
-      return d;
-    }
+    const kind = this.objectKind(o.num), d = this.objectBoxes().drivers(kind, this.sizeSpec(o, o.size));
+    if (d) return d;
     this.prefetchSizes();
     return namedDrivers(kind);
   }

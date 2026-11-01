@@ -208,3 +208,99 @@ export function keepEdges(o: { x: number; y: number; size: number }, size: numbe
   const x = far ? o.x + b0.x1 - b1.x1 : o.x + b0.x0 - b1.x0, y = far ? o.y + b0.y1 - b1.y1 : o.y + b0.y0 - b1.y0;
   return x < 0 || x >= w || y < 0 || y >= h ? null : { x, y };
 }
+
+// A keyboard step from the object's size to `size`: the origin that keeps its left/top edges (with far the
+// right/bottom ones). One that draws nothing at either size (or whose boxes could not be learned) keeps its
+// origin; null when it would leave the level (w × h tiles).
+export function keyResize(o: { x: number; y: number; size: number }, size: number, box: (size: number) => Box | null | undefined,
+  far: boolean, w: number, h: number): { x: number; y: number; size: number } | null {
+  if (!box(o.size) || !box(size)) return { x: o.x, y: o.y, size };
+  const at = keepEdges(o, size, box, far, w, h);
+  return at && { ...at, size };
+}
+
+// the edges a handle grabs (the edges at the pixel) that the drivers move: the others stay
+export function grabFor(handle: Grab, d: Drivers): Grab {
+  return { hx: d.x ? handle.hx : 0, hy: d.y ? handle.hy : 0 };
+}
+
+// ---- the boxes known ----
+
+// learns the boxes of specs (the probe worker's 'sizes' job, for the level and ROM state named by key): done with them
+// in the order of specs, or failed; either may be called at once
+export type LearnBoxes = (key: string, specs: SizeSpec[], done: (boxes: (Box | null)[]) => void, failed: () => void) => void;
+
+// The boxes of objects at their sizes as learned for one level and ROM state (at: those of another are dropped), and
+// the drivers that follow from them. A job that failed gives null boxes, as a load that fails did in the probe (a
+// keyboard step keeps the origin), and the drivers the kind names (a drag grabs and resizes as it started).
+export class ObjectBoxes {
+  private key = '';
+  private boxes = new Map<string, Box | null>();
+  private failed = new Set<string>(); // (specs whose job failed)
+  private memo = new Map<string, Drivers>(); // (emulated ones, per object as resized and its kind)
+  private learn: LearnBoxes;
+
+  constructor(learn: LearnBoxes) {
+    this.learn = learn;
+  }
+
+  // for the level and ROM state named by key
+  at(key: string): this {
+    if (this.key !== key) { this.key = key; this.boxes = new Map(); this.failed.clear(); this.memo.clear(); }
+    return this;
+  }
+
+  // the object's box (null: it draws nothing, or its job failed), undefined while not learned
+  box(s: SizeSpec): Box | null | undefined {
+    return this.boxes.get(sizeKey(s));
+  }
+
+  // asks for the boxes of specs not known; whether all are known now (then is not called), else then once they are
+  // (or the level or ROM state is another by then: they are asked for anew)
+  ask(specs: SizeSpec[], then?: () => void): boolean {
+    const todo = [...new Map(specs.filter((s) => !this.boxes.has(sizeKey(s))).map((s) => [sizeKey(s), s])).values()];
+    if (!todo.length) return true;
+    const key = this.key;
+    let now = true, settled = false;
+    const put = (boxes: (Box | null)[] | null) => {
+      if (settled) return;
+      settled = true;
+      if (this.key === key) todo.forEach((s, i) => { this.boxes.set(sizeKey(s), boxes ? boxes[i] : null); if (!boxes) this.failed.add(sizeKey(s)); });
+      if (!now) then?.();
+    };
+    this.learn(key, todo, (boxes) => put(boxes), () => put(null));
+    now = false;
+    return settled;
+  }
+
+  // which part sizes which axis of the object (o: as it is now) for its kind: as the boxes of all the sizes its parts
+  // can take say, those the kind names when their job failed; undefined while not all are known
+  drivers(kind: ObjKind | null | undefined, o: SizeSpec): Drivers | undefined {
+    const sizes = sizeParts(kind).flatMap((p) => partSizes(o.size, p)).map((size) => ({ ...o, size }));
+    if (sizes.some((s) => !this.boxes.has(sizeKey(s)))) return undefined;
+    if (sizes.some((s) => this.failed.has(sizeKey(s)))) return namedDrivers(kind);
+    const key = `${sizeKey(o)}:${JSON.stringify(kind)}`;
+    let d = this.memo.get(key);
+    if (!d) this.memo.set(key, (d = drivers(kind, o.size, (size) => this.box({ ...o, size }))));
+    return d;
+  }
+}
+
+// Steps run one at a time in the order added: a step that waits (returns false) is run again when it calls retry, the
+// ones added meanwhile wait behind it (keyboard resizes waiting for boxes end up as without the wait)
+export type Step = (retry: () => void) => boolean;
+export class StepQueue {
+  private steps: Step[] = [];
+  add(step: Step): void {
+    this.steps.push(step);
+    if (this.steps.length === 1) this.pump();
+  }
+  private pump = (): void => {
+    while (this.steps.length) {
+      let waits = true;
+      try { waits = !this.steps[0](this.pump); } catch (e) { this.steps = []; throw e; } // (one that throws: the queue starts anew)
+      if (waits) return;
+      this.steps.shift();
+    }
+  };
+}

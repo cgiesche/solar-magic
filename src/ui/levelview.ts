@@ -4,7 +4,7 @@ import { App, isBrushMode, type Marker, type LevelEdit, type Brush, type Preview
 import { h, attachPanZoom, toast } from './dom.ts';
 import { paintOverlays, openOverlay, boxLayers, deathsAt, gameViewLabelBox, gameViewIn, BAND_STYLE, type SpriteDraw, MARKER_STYLE, type GameViewFrame } from './leveloverlays.ts';
 import { hex2, hex3 } from '../core/names.ts';
-import { aimResize, type Grab, type Drivers } from '../core/objresize.ts';
+import { aimResize, grabFor, type Grab, type Drivers } from '../core/objresize.ts';
 import { probeAt, spriteProbeAt, enterText, collisionText, collisionIn, switchText, SWITCH_STATES, SWITCH_NAME } from '../core/blockprobe.ts';
 import { type LevelObject, type LevelSprite, newUid, serializeLayer1, serializeLayer2, serializeLevelSprites, spriteSizes, spriteId, EXIT_NEW } from '../core/level.ts';
 import { layer3CellAt, layer3WordText } from '../core/layer3map.ts';
@@ -24,7 +24,7 @@ import { loadDeaths, killerText, levelVersion, type DeathMark } from './deathmar
 
 type Drag =
   | { kind: 'move'; edit: LevelEdit; startTx: number; startTy: number; lastDx: number; lastDy: number; orig: Map<number, { x: number; y: number }> }
-  | { kind: 'resize'; edit: LevelEdit; grab: Grab; uid: number; orig: Map<number, { x: number; y: number; size: number; drivers: Drivers }>; last: string; changed: boolean }
+  | { kind: 'resize'; edit: LevelEdit; handle: Grab; grab: Grab; uid: number; orig: Map<number, { x: number; y: number; size: number; drivers: Drivers }>; last: string; changed: boolean }
   | { kind: 'band'; x0: number; y0: number; x1: number; y1: number; add: boolean; far: boolean } // far: dragged, not a click
   | { kind: 'marker'; edit: LevelEdit | null; marker: Marker; offX: number; offY: number; moved: boolean } // (secondary entrances: not a level edit)
   | { kind: 'paint'; edit: LevelEdit; changed: boolean; x0: number; y0: number; lastX: number; lastY: number } // BG/layer 3 brush, stamped on a grid of cells from (x0, y0)
@@ -95,9 +95,14 @@ export class LevelView {
     app.on('rom-change', () => this.problems.update());
     app.on('arcs', () => this.requestPaint());
     app.on('sizes', () => {
-      // (a resize that started before the sizes were known: its objects' drivers as emulated from now on)
+      // (a resize that started before the sizes were known: its objects' drivers as emulated from now on, the edges
+      // grabbed those the grabbed object's drivers move)
       const d = this.drag;
-      if (d?.kind === 'resize') for (const o of app.selectedObjects()) { const or = d.orig.get(o.uid); if (or) or.drivers = app.resizeDrivers({ ...o, size: or.size }); }
+      if (d?.kind === 'resize') {
+        for (const o of app.selectedObjects()) { const or = d.orig.get(o.uid); if (or) or.drivers = app.resizeDrivers({ ...o, size: or.size }); }
+        const g = d.orig.get(d.uid);
+        if (g) d.grab = grabFor(d.handle, g.drivers);
+      }
       this.requestPaint();
       if (this.hover) this.updateCursor(this.hover.px, this.hover.py, this.hover.top);
     });
@@ -565,11 +570,10 @@ export class LevelView {
     if (ho) {
       const objs = app.selectedObjects().filter((o) => app.resizable(o));
       app.probeSizes(objs);
-      const d = app.resizeDrivers(ho.o);
-      const grab: Grab = { hx: d.x ? ho.grab.hx : 0, hy: d.y ? ho.grab.hy : 0 };
+      const grab = grabFor(ho.grab, app.resizeDrivers(ho.o));
       if (grab.hx || grab.hy) {
         const orig = new Map(objs.map((o) => [o.uid, { x: o.x, y: o.y, size: o.size, drivers: app.resizeDrivers(o) }]));
-        this.drag = { kind: 'resize', edit: app.beginLevelEdit(), grab, uid: ho.o.uid, orig, last: '', changed: false };
+        this.drag = { kind: 'resize', edit: app.beginLevelEdit(), handle: ho.grab, grab, uid: ho.o.uid, orig, last: '', changed: false };
         this.updateCursor(px, py, -1);
         this.resizeStatus();
         return;
