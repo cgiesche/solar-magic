@@ -66,7 +66,8 @@ import type { OwRender } from '../core/overworld.ts';
 import type { Rect } from '../core/owevents.ts';
 import type { OwSpriteView } from '../core/owsprites.ts';
 import type { ProgressSave } from '../core/owprogress.ts';
-import type { Map16Target } from './gfx/map16tab.ts';
+import type { Map16Target } from './gfx/target.ts';
+import type { WsTarget } from './gfxworkspace.ts';
 
 export type EditMode = 'l1' | 'l2' | 'spr' | 'exit' | 'bg' | 'l3';
 // the modes painted with a brush of tiles picked from the level or the picker: BG tiles, layer 3's 8x8 tiles
@@ -181,7 +182,7 @@ export class App {
   exTriggers: TriggerView = emptyTriggerView();
   wsTile = 0; // Map16 tile for 'open-map16' (opens the graphics workspace there)
   wsTarget: Map16Target = 'fg'; // what wsTile is a tile of
-  wsOw: { map: number; progress: number } | undefined = undefined; // for an overworld tile: the map and event progress to draw it as on
+  wsAt: WsTarget | undefined = undefined; // for an overworld tile: the submap and event progress to draw it as on
   gfxImport: { file: File; into: Package | null } | null = null; // for 'import-gfx'
   wsGfx: number | null = null; // GFX file for 'open-gfx'
   private romTimer = 0;
@@ -2068,14 +2069,11 @@ export class App {
     this.emit('open-gfx');
   }
 
-  editMap16(tile: number, bg = false): void {
-    this.editTile(tile, bg ? 'bg' : 'fg');
-  }
-  // the Map16 tab on a tile of a target; an overworld tile drawn as on map `ow.map` at event progress `ow.progress`
-  editTile(tile: number, target: Map16Target, ow?: { map: number; progress: number }): void {
+  // the Map16 tab on a tile of a target; an overworld tile drawn as on the submap of `at` at its event progress
+  editTile(tile: number, target: Map16Target = 'fg', at?: WsTarget): void {
     this.wsTile = tile;
     this.wsTarget = target;
-    this.wsOw = ow;
+    this.wsAt = at;
     this.emit('open-map16');
   }
 

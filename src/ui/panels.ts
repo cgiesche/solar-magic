@@ -357,7 +357,7 @@ export class Picker {
         this.m16Match = null;
         if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1');
         app.choosePickedItem({ kind: 'obj', num: 0, ext: DM16_EXT, size: 0, tile: base + r.y * 16 + r.x, ...(r.w * r.h > 1 ? { block: { w: r.w, h: r.h } } : {}) });
-      }, (x, y) => app.editMap16(base + y * 16 + x));
+      }, (x, y) => app.editTile(base + y * 16 + x));
       previewSheet(c, pageSheet, 16, 16, 16, scale, (r) => {
         const t = base + r.y * 16 + r.x;
         if (r.w * r.h > 1) return [`Block ${r.w}×${r.h} from tile ${hex3(t)}`];
@@ -464,7 +464,7 @@ export class Picker {
     attachRectPick(c, 16, 32, (r) => draw(r.x, r.y, r.w, r.h), (r) => {
       app.bgBrush = { w: r.w, h: r.h, tiles: Array.from({ length: r.w * r.h }, (_, i) => this.bgBase + (r.y + Math.floor(i / r.w)) * 16 + r.x + (i % r.w)) };
       this.build();
-    }, (x, y) => app.editMap16(this.bgBase + y * 16 + x, true));
+    }, (x, y) => app.editTile(this.bgBase + y * 16 + x, 'bg'));
     previewSheet(c, () => sheet, 16, 32, 16, scale, (r) => {
       const t = this.bgBase + r.y * 16 + r.x, name = nameOf(app.rom, 'bg', t);
       return r.w * r.h > 1 ? [`Block ${r.w}×${r.h} from BG tile ${hex3(t)}`] : [`BG tile ${hex3(t)}${name ? ` “${name}”` : ''}`, 'Ctrl+click: edit in the Map16 tab'];
@@ -475,7 +475,7 @@ export class Picker {
     pages.addEventListener('change', () => { this.bgBase = Number(pages.value); this.build(); });
     // same order as the Map16 tab: pages, state, sheet
     this.body.append(h('div', { class: 'row' }, pages,
-      h('button', { title: 'Edit BG tiles in the graphics area (also create tiles from 200 on)', onclick: () => app.editMap16(onSheet ? brush.tiles[0] : this.bgBase, true) }, 'Edit …')),
+      h('button', { title: 'Edit BG tiles in the graphics area (also create tiles from 200 on)', onclick: () => app.editTile(onSheet ? brush.tiles[0] : this.bgBase, 'bg') }, 'Edit …')),
     h('div', { class: 'hint' }, `Brush: ${what} – click tiles here or in the level (drag: block). The BG tilemap (32×27) repeats.`));
     if (!onSheet) {
       const p = h('canvas', { width: brush.w * 16, height: brush.h * 16, class: 'bg-brush' });
@@ -1223,7 +1223,7 @@ export class Properties {
       o.num === 0 && o.ext === PREFAB_EXT && o.prefab !== undefined ? this.field('Prefab', hexInput(o.prefab, 2, (v) => upd((o) => (o.prefab = v)), 0xff)) : '',
       isPlacedPrefab(o) && !pf ? h('div', { class: 'hint' }, 'This prefab does not exist – the object places nothing.') : '',
       o.num === 0 && o.ext === DM16_EXT ? this.field('Map16 tile', hexInput(o.tile ?? 0, 3, (v) => upd((o) => (o.tile = v)), EXT_TILES - 1 - (o.cond?.always ? COND_ADD : 0)),
-        h('button', { title: 'Edit the tile in the graphics area', onclick: () => app.editMap16(o.tile ?? 0) }, 'Edit …')) : '',
+        h('button', { title: 'Edit the tile in the graphics area', onclick: () => app.editTile(o.tile ?? 0) }, 'Edit …')) : '',
       o.num === 0 && o.ext === DM16_EXT ? this.field('Size (hw)', hexInput(o.size, 2, (v) => upd((o) => (o.size = v)))) : '',
       ...this.condFields(isDm16(o) ? [o] : []),
       this.field('X', hexInput(o.x, 3, (v) => upd((o) => (o.x = v)), app.levelWidthTiles() - 1)),

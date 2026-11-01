@@ -189,7 +189,7 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
       out.push(section('block', 'Blocks', 'To place: palette → Map16, or a Direct Map16 object with the tile.',
         blocks.length ? h('table', { class: 'uber-table' }, h('tr', null, h('th', null, 'Tile'), h('th', null, 'Block'), h('th', null, 'acts like'), h('th')),
           blocks.map((b) => h('tr', null,
-            h('td', { class: 'mono' }, h('a', { href: '#', title: 'Open in the Map16 editor', onclick: (e: Event) => { e.preventDefault(); host.leave(() => app.editMap16(b.tile)); } }, hex(b.tile, 3))),
+            h('td', { class: 'mono' }, h('a', { href: '#', title: 'Open in the Map16 editor', onclick: (e: Event) => { e.preventDefault(); host.leave(() => app.editTile(b.tile)); } }, hex(b.tile, 3))),
             h('td', { class: 'mono' }, b.file.replace(/^blocks\//, '')),
             h('td', { class: 'mono' }, b.acts !== undefined ? hex(b.acts, 3) : '–'),
             h('td', { class: 'actions' }, definesButton(proj.files, b.file, () => touch('block')), editButton(proj.files, b.file, () => touch('block')))))) : '',

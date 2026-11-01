@@ -8,7 +8,8 @@ import { h, toast, attachPanZoom, zoomControl, showColorLoupe, hideColorLoupe } 
 import { viewMenu } from './viewmenu.ts';
 import { hex } from '../core/names.ts';
 import { PaletteTab } from './gfx/palettetab.ts';
-import { Map16Tab, type RemapFill, type Map16Target } from './gfx/map16tab.ts';
+import { Map16Tab, type RemapFill } from './gfx/map16tab.ts';
+import { gfxTarget, type GfxTarget, type Map16Target } from './gfx/target.ts';
 import { GfxTab } from './gfx/gfxtab.ts';
 import { AnimTab } from './gfx/animtab.ts';
 import { MAP_NAMES, gameL2, overworldReplacement, type OwRender } from '../core/overworld.ts';
@@ -303,6 +304,9 @@ export class GfxWorkspace {
     this.preview.onClick = (px, py, e) => this.panel().previewClick?.(px, py, e);
   }
 
+  // what the target is, for the palette, graphics and animation tabs (the level's FG tiles, or the submap's)
+  get desc(): GfxTarget { return gfxTarget(this.app, this.target); }
+
   panel(t = this.tab): WsPanel {
     return t === 'pal' ? this.pal : t === 'map16' ? this.map16 : t === 'gfx' ? this.gfx : this.anim;
   }
@@ -372,9 +376,12 @@ export class GfxWorkspace {
     this.onNav(true);
   }
 
-  showMap16(tile: number, target: Map16Target = 'fg', ow?: { map: number; progress: number }): void {
+  // a Map16 tile of a target; the overworld's tiles drawn as on the submap of `at` (else the one shown last)
+  showMap16(tile: number, target: Map16Target = 'fg', at?: WsTarget): void {
     this.open('map16');
-    this.map16.select(tile, target, ow);
+    const progress = at?.progress ?? this.target.progress;
+    this.setTarget({ submap: target === 'ow' ? at?.submap ?? this.target.submap ?? this.map16.lastSubmap : null, progress });
+    this.map16.select(tile, target);
     this.onNav(true);
   }
 

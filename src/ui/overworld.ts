@@ -1204,7 +1204,7 @@ export class OverworldView {
   private editTile(i: number): void {
     const t = this.l1[i];
     if (t >= OW_L1_TILES) { toast(`Tile ${hex(t, 2)} is past the overworld's layer 1 tiles (00–${hex(OW_L1_TILES - 1, 2)})`); return; }
-    this.app.editTile(t, 'ow', { map: this.map, progress: this.progress });
+    this.app.editTile(t, 'ow', { submap: this.map, progress: this.progress });
   }
 
   // the events by the level exit that runs them, the number as detail

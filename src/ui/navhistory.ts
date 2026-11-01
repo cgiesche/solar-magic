@@ -4,7 +4,7 @@
 // The place is in the URL hash too, so a reload stays there.
 import type { EditMode } from './app.ts';
 import type { WsTab } from './gfxworkspace.ts';
-import type { Map16Target } from './gfx/map16tab.ts';
+import type { Map16Target } from './gfx/target.ts';
 
 export type NavLoc =
   | { w: 'level'; level: number; mode?: EditMode; cx?: number; cy?: number } // cx/cy: tile in the middle of the view

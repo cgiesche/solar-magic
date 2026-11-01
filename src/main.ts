@@ -17,8 +17,8 @@ import { openSearch } from './ui/search.ts';
 import { onBehaviorProgress } from './ui/tilesearch.ts';
 import { openHeaderDialog } from './ui/headerdialog.ts';
 import { hex } from './core/names.ts';
-import { GfxWorkspace, type WsTab } from './ui/gfxworkspace.ts';
-import type { Map16Target } from './ui/gfx/map16tab.ts';
+import { GfxWorkspace, type WsTab, type WsTarget } from './ui/gfxworkspace.ts';
+import type { Map16Target } from './ui/gfx/target.ts';
 import { openRemapUses } from './ui/tileuses.ts';
 import { openEntrancesDialog, openRomInfo, openInsertDialog, openExpandDialog, openSaveAsDialog, exportLevel, importLevel, openScreenDialog, clearLevelConfirm } from './ui/tools.ts';
 import { menuBar, closeMenus } from './ui/menu.ts';
@@ -287,13 +287,14 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
 
   // switches between the level editor, the overworld editor and the graphics workspace (palettes, Map16, GFX);
   // gfx: tab to open (default: the last one), Map16 tile to show
-  const setWorkspace = async (w: typeof workspace, gfx?: { tab?: WsTab; tile?: number; target?: Map16Target; ow?: { map: number; progress: number }; submap?: { map: number; progress: number } }): Promise<boolean> => {
+  // at: the workspace's target (a submap and the event progress it is shown at)
+  const setWorkspace = async (w: typeof workspace, gfx?: { tab?: WsTab; tile?: number; target?: Map16Target; at?: WsTarget }): Promise<boolean> => {
     closeMenus();
-    if (gfx?.submap && ws) ws.setTarget({ submap: gfx.submap.map, progress: gfx.submap.progress });
+    if (gfx?.at && ws) ws.setTarget(gfx.at);
     if (w === workspace) {
       if (w === 'gfx' && gfx?.tab) {
         ws!.open(gfx.tab);
-        if (gfx.tab === 'map16' && gfx.tile !== undefined) ws!.showMap16(gfx.tile, gfx.target, gfx.ow);
+        if (gfx.tab === 'map16' && gfx.tile !== undefined) ws!.showMap16(gfx.tile, gfx.target, gfx.at);
       }
       return true;
     }
@@ -313,13 +314,13 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
       showOverworld();
     } else if (w === 'gfx') {
       if (!ws) { ws = new GfxWorkspace(app); ws.onNav = (jump) => nav?.mark(jump); }
-      if (gfx?.submap) ws.setTarget({ submap: gfx.submap.map, progress: gfx.submap.progress });
+      if (gfx?.at) ws.setTarget(gfx.at);
       showLayout(ws.bar, left, ws.root, ws.side);
       layout.classList.add('gfx-mode');
       // the level view is only up to date when coming from it
       const hv = from === 'level' ? view.hover : null;
       ws.enter(gfx?.tab ?? ws.tab, hv ? { tx: hv.tx, ty: hv.ty } : view.centerTile());
-      if (gfx?.tab === 'map16' && gfx.tile !== undefined) ws.showMap16(gfx.tile, gfx.target, gfx.ow);
+      if (gfx?.tab === 'map16' && gfx.tile !== undefined) ws.showMap16(gfx.tile, gfx.target, gfx.at);
     } else {
       showLayout(levelBar, left, center, right);
       view.layout();
@@ -346,7 +347,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
         ow = new OverworldView(app);
         ow.onOpenLevel = async (n) => { if (await setWorkspace('level')) app.openLevel(n); };
         ow.onNav = () => nav?.mark();
-        ow.onEditGraphics = (map, progress) => void setWorkspace('gfx', { tab: 'pal', submap: { map, progress } });
+        ow.onEditGraphics = (map, progress) => void setWorkspace('gfx', { tab: 'pal', at: { submap: map, progress } });
       }
       owRight.replaceChildren(ow.side);
       showLayout(ow.bar, ow.left, ow.root, owRight);
@@ -396,7 +397,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     else if (l.w === 'gfx') {
       ws!.setTarget({ submap: l.sub ?? null, progress: ws!.target.progress });
       if (l.tab === 'pal' && l.pal !== undefined) ws!.showPalette(l.pal >> 4, l.pal & 15);
-      else if (l.tab === 'map16' && l.m16 !== undefined) ws!.showMap16(l.m16, l.target, l.sub !== undefined ? { map: l.sub, progress: ws!.target.progress } : undefined);
+      else if (l.tab === 'map16' && l.m16 !== undefined) ws!.showMap16(l.m16, l.target, l.sub !== undefined ? { submap: l.sub, progress: ws!.target.progress } : undefined);
       else if (l.tab === 'gfx' && l.gfx !== undefined) ws!.showGfx(l.gfx);
       else if (l.tab === 'anim' && l.anim) ws!.showAnim(l.anim.global, l.anim.slot);
       else ws!.open(l.tab);
@@ -430,7 +431,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
       if (e.button === 3) { e.preventDefault(); history.back(); } else if (e.button === 4) { e.preventDefault(); history.forward(); }
     });
   }
-  app.on('open-map16', () => setWorkspace('gfx', { tab: 'map16', tile: app.wsTile, target: app.wsTarget, ow: app.wsOw }));
+  app.on('open-map16', () => setWorkspace('gfx', { tab: 'map16', tile: app.wsTile, target: app.wsTarget, at: app.wsAt }));
   app.on('open-gfx', () => {
     const n = app.wsGfx;
     app.wsGfx = null;

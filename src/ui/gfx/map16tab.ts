@@ -7,7 +7,8 @@
 // into every marked quarter, a block from the first marked one. Move takes the selected tiles to other
 // numbers with every use (tilemove.ts); dragging the selection in the sheet chooses where.
 // Targets: the FG tiles, the BG tiles and the overworld's layer 1 tiles (00–C0, drawn with the graphics and colors of
-// an overworld map as the game loads it, the 8x8 graphics as in VRAM there; no acts-like, names or move).
+// an overworld map as the game loads it, the 8x8 graphics as in VRAM there; no acts-like, names or move), described by
+// target.ts: the overworld's tiles are the workspace's submap target, the level's FG or BG tiles its level target.
 
 import type { App } from '../app.ts';
 import type { GfxWorkspace, WsPanel } from '../gfxworkspace.ts';
@@ -16,29 +17,28 @@ import { h, clear, toast, modal, choose, attachPanZoom } from '../dom.ts';
 import { pickFile, downloadBytes } from '../platform.ts';
 import { TileCache } from '../../core/render.ts';
 import { hex } from '../../core/names.ts';
-import { EXT_FIRST, EXT_TILES, actsLike, setActsLike } from '../../core/map16ext.ts';
-import { BG_EXT_FIRST, bgTileAddr, bgTileWords, setBgExtTileWords } from '../../core/bgmap16.ts';
-import { blockFileOf, blockFilesByTile } from '../blockdialog.ts';
+import { EXT_TILES, actsLike, setActsLike } from '../../core/map16ext.ts';
+import { blockFileOf } from '../blockdialog.ts';
 import { openResources } from '../resources.ts';
 import { parseMap16File, map16Targets, writeMap16File, type Map16File } from '../../core/map16file.ts';
 import { renderMap16Sheet } from '../panels.ts';
 import { probeText } from '../../core/blockprobe.ts';
 import { VANILLA_GFX } from '../../core/patches.ts';
 import { ANIM_FILE } from '../../core/gfxfiles.ts';
-import { levelSlots, layerSlots, slotOfTile, type GfxSlot } from '../../core/gfxslots.ts';
+import { layerSlots, slotOfTile } from '../../core/gfxslots.ts';
 import { cgramToRGBA } from '../../core/gfx.ts';
 import { tileMatches, drawTileMatches, tileBehaviors, behaviorTile, pendingHint, onBehaviorProgress } from '../tilesearch.ts';
 import { animsAt, animLinks } from './animtab.ts';
-import { fgTileUsers, bgTileUsers, tileLinks, unusedFgTiles, isTilesetTile, TILE_SOURCES } from '../../core/levelusage.ts';
-import { usedInList } from '../usedin.ts';
-import { map16Source, fgTileAddr, setFgWords } from '../../core/render.ts';
+import { unusedFgTiles } from '../../core/levelusage.ts';
+import { map16Source } from '../../core/render.ts';
 import { remapTile, remapLine, slotRemapLine, parseRemap } from '../../core/remap.ts';
 import { remapEditor, type RemapEditor } from '../remaplist.ts';
 import { planMove, applyMove, planRemap, rectMap, type MovePlan, type MoveSource } from '../../core/tilemove.ts';
 import { levelSource, planList, openRemapUses } from '../tileuses.ts';
 import { loadAsar } from '../../core/asar.ts';
 import { NAME_MAX, namesOf, setName, cleanName, type NameKind } from '../../core/usernames.ts';
-import { overworldReplacement, OW_L1_TILES, MAP_NAMES, owTileAddr, owTileWords, setOwTileWords, readL1, type OwRender } from '../../core/overworld.ts';
+import { overworldReplacement, MAP_NAMES, type OwRender } from '../../core/overworld.ts';
+import { gfxTarget, type GfxTarget, type Map16Target } from './target.ts';
 import { drawMap16 } from '../../core/render.ts';
 import { QuarterGrid, markRect, editMarked, setPalette, setBit, setTileNum, stamp, mirror, summary, wholeTiles, FLIP_X, FLIP_Y, PRIO, type QuarterEdit, type MarkMode, type BitState } from '../../core/quarters.ts';
 
@@ -50,11 +50,6 @@ const LABELS_W = 92; // the slot names left of the 8x8 graphics
 const QUARTER_NAMES = ['top left', 'bottom left', 'top right', 'bottom right'];
 const SHEET_BACK = 0xff1b1d22;
 
-// what the tab edits: FG or BG Map16 tiles, or the overworld's layer 1 tiles
-export type Map16Target = 'fg' | 'bg' | 'ow';
-const TARGET_NAMES: Record<Map16Target, string> = { fg: 'FG', bg: 'BG', ow: 'OW' };
-// the overworld's 8x8 graphics as in VRAM after its load: four slots of 128 (no file behind them here)
-const OW_SLOTS: GfxSlot[] = [0, 1, 2, 3].map((k) => ({ name: `VRAM ${k + 1}`, kind: 'gfx', k, file: -1, def: -1, custom: false, first: k * 0x80, sprite: false, map16: true }));
 
 interface Clip { w: number; h: number; words: number[][]; acts: number[] | null }
 // the remap panel: the list editor, which tiles it changes ('sel': the selected ones, 'uses': the
@@ -62,15 +57,13 @@ interface Clip { w: number; h: number; words: number[][]; acts: number[] | null 
 export type RemapScope = 'sel' | 'uses';
 interface Remapping { ed: RemapEditor; scope: RemapScope; box: HTMLElement; scopes: HTMLElement; status: HTMLElement; preview: HTMLElement }
 // what an offer fills in when it opens the remap
-export interface RemapFill { line?: string; scope?: RemapScope; bg?: boolean }
+export interface RemapFill { line?: string; scope?: RemapScope; target?: Map16Target }
 // the move panel: where the selection's top left tile goes (-1: not a valid number), the plan for it
 // (pending: levels the usage index has not looked through yet for tiles placed by objects' code)
 interface Moving { to: number; box: HTMLElement; input: HTMLInputElement; status: HTMLElement; plan: { plan: MovePlan; src: MoveSource; pending: number } | null }
 // a tile the remap changes: its words and acts-like before and after
 interface RemapRow { tile: number; words: number[]; acts: number | null; newWords: number[]; newActs: number | null; out: number[]; changed: boolean }
 type Cell = { x: number; y: number };
-// "tileset 1", "tilesets 0, 7, C"
-const tilesetNames = (ts: number[]) => `tileset${ts.length > 1 ? 's' : ''} ${ts.map((x) => hex(x, 1)).join(', ')}`;
 
 // a file's name; the Anim graphics are numbered past the ExGFX (gfxfiles.ts)
 export function gfxName(n: number): string {
@@ -86,13 +79,15 @@ export class Map16Tab implements WsPanel {
   root: HTMLElement;
   private app: App;
   private ws: GfxWorkspace;
-  private target: Map16Target = 'fg';
-  private get bg(): boolean { return this.target === 'bg'; }
-  private get fg(): boolean { return this.target === 'fg'; }
-  private get ow(): boolean { return this.target === 'ow'; }
-  // the overworld map whose load draws the overworld's tiles, at an event progress; its load (the last one while the
-  // next is emulated)
-  private owAt = { map: 0, progress: 0 };
+  // the level's tiles edited while the workspace's target is the level; the submap the overworld's tiles were drawn as
+  // on last (chosen again when they are)
+  private layer: 'fg' | 'bg' = 'fg';
+  lastSubmap = 0;
+  // what the tab edits: the workspace's target (a submap: the overworld's tiles, drawn as on it)
+  private get t(): GfxTarget { return gfxTarget(this.app, this.ws.target, this.layer); }
+  // the target the selection is of (a change starts a new one)
+  private selOf = '';
+  // the load of the submap the overworld's tiles are drawn as on (the last one while the next is emulated)
   private owR: OwRender | null = null;
   private sel = 0x130;
   private selW = 1;
@@ -152,12 +147,6 @@ export class Map16Tab implements WsPanel {
   private visualFrom: { x: number; y: number; w: number; h: number } | null = null;
   private visualTo: Cell | null = null;
 
-  // the open level's graphics slots (the overworld's VRAM)
-  private gfxSlots(): GfxSlot[] {
-    if (this.ow) return OW_SLOTS;
-    const lv = this.app.level;
-    return levelSlots(this.app.rom, lv.number, lv.header);
-  }
 
   constructor(app: App, ws: GfxWorkspace) {
     this.app = app;
@@ -174,7 +163,7 @@ export class Map16Tab implements WsPanel {
     this.attachGfx();
     this.attachBig();
     this.attachName();
-    const redraw = () => { this.unused = null; if (this.visible) { if (this.ow) this.owRender(); this.redraw(); } };
+    const redraw = () => { this.unused = null; if (this.visible) this.redraw(); };
     app.on('rom-change', redraw);
     app.on('render', redraw);
     app.on('probes', () => { if (this.visible) this.buildBuilder(); });
@@ -184,19 +173,35 @@ export class Map16Tab implements WsPanel {
   }
 
   previewHint(): string {
-    return this.ow ? '' : 'Click: edit the tile under the mouse · marked: where the selected tile occurs in the level';
+    return this.t.levelPreview ? 'Click: edit the tile under the mouse · marked: where the selected tile occurs in the level' : '';
   }
 
-  // a submap as the workspace's target: its tiles (the overworld's), drawn as on it; the level: FG tiles
+  // a submap as the workspace's target: its tiles (the overworld's), drawn as on it; the level: its FG or BG tiles
   readonly submaps = true;
   targetChanged(): void {
-    const t = this.ws.target;
-    if (t.submap !== null && (!this.ow || this.owAt.map !== t.submap || this.owAt.progress !== t.progress)) this.select(this.sel, 'ow', { map: t.submap, progress: t.progress });
-    else if (t.submap === null && this.ow) this.select(this.sel, 'fg');
+    if (this.ws.target.submap !== null) this.lastSubmap = this.ws.target.submap;
+    this.retarget();
   }
-  // the workspace's target follows the tab's (the overworld's tiles: the submap they are drawn as on)
-  private syncTarget(): void {
-    this.ws.setTarget({ submap: this.ow ? this.owAt.map : null, progress: this.ow ? this.owAt.progress : this.ws.target.progress });
+  // a selection of the target's tiles (the one of another target's ends; a move only where the target has it), the
+  // tab shown anew
+  private retarget(): void {
+    const t = this.t, of = t.id;
+    if (!t.move && this.moving) this.moving = null;
+    if (of !== this.selOf) {
+      this.selOf = of;
+      this.sel = Math.min(this.sel & 0x1ff, t.tiles - 1);
+      this.selW = this.selH = 1;
+      this.marksOf = '';
+    }
+    if (this.visible) { this.buildBar(); this.redraw(); this.scrollToSel(); } else this.scrollPending = true;
+  }
+  // the tiles edited: the level's FG or BG tiles, or the overworld's (drawn as on the submap shown last); the
+  // workspace's target follows
+  private setLayer(target: Map16Target): void {
+    if (target !== 'ow') this.layer = target;
+    const submap = target === 'ow' ? this.ws.target.submap ?? this.lastSubmap : null;
+    if (submap !== this.ws.target.submap) this.ws.setTarget({ submap, progress: this.ws.target.progress });
+    else this.retarget();
   }
 
   show(): void {
@@ -207,80 +212,60 @@ export class Map16Tab implements WsPanel {
   }
   hide(): void { this.visible = false; }
 
-  get selected(): { tile: number; target: Map16Target } { return { tile: this.sel, target: this.target }; }
+  get selected(): { tile: number; target: Map16Target } { return { tile: this.sel, target: this.t.id }; }
 
-  // tile of a target; the overworld's tiles drawn from map `ow.map` at event progress `ow.progress` (else the map
-  // shown last)
-  select(tile: number, target: Map16Target = 'fg', ow?: { map: number; progress: number }): void {
-    if (target === 'ow' && this.owLocked()) { toast(`The overworld is replaced by ${this.owLocked()}: its tiles can't be edited here`); target = 'fg'; }
-    if (target === 'ow' && this.moving) this.closeMove();
-    this.target = target;
-    if (ow) this.owAt = { ...ow };
-    this.sel = Math.min(tile & (EXT_TILES - 1), this.count() - 1);
+  // a tile of the target (the workspace's target is set before: a submap for the overworld's tiles)
+  select(tile: number, target: Map16Target = 'fg'): void {
+    if (target !== 'ow') this.layer = target;
+    const t = this.t;
+    if (!t.move && this.moving) this.moving = null;
+    this.selOf = t.id;
+    this.sel = Math.min(tile & (EXT_TILES - 1), t.tiles - 1);
     this.selW = this.selH = 1;
     this.marksOf = '';
     if (this.visible) { this.buildBar(); this.redraw(); this.scrollToSel(); } else this.scrollPending = true;
-    this.syncTarget();
   }
 
   // ---------- data ----------
-  // the target's number of tiles
-  private count(): number { return this.ow ? OW_L1_TILES : EXT_TILES; }
-  // the overworld map's load (the one shown last while it is emulated; null before the first), redrawn when it comes
   // the package replacing the whole overworld, whose formats the overworld's tiles must not be written into (ADR 0005)
   private owLocked(): string | null { return overworldReplacement(this.app.rom); }
-  private owRender(): OwRender | null {
-    const { map, progress } = this.owAt;
-    const r = this.app.overworldMap(map, progress, (x) => {
-      if (this.owAt.map !== map || this.owAt.progress !== progress) return;
+  // the load of the submap the overworld's tiles are drawn as on (the one shown last while it is emulated; null before
+  // the first), redrawn when it comes; the level's render while its tiles are edited
+  private shown(): { vram: Uint8Array; cgram: Uint8Array; ppuRegs: Uint8Array } | null {
+    const { submap, progress } = this.ws.target;
+    if (submap === null) return this.app.render;
+    const r = this.app.overworldMap(submap, progress, (x) => {
+      if (this.ws.target.submap !== submap || this.ws.target.progress !== progress) return;
       this.owR = x;
-      if (this.visible && this.ow) this.redraw();
+      if (this.visible) this.redraw();
     });
     if (r) this.owR = r;
     return this.owR;
   }
-  private tileAddr(t: number): number {
-    if (this.ow) return owTileAddr(t);
-    return this.bg ? bgTileAddr(this.app.rom, t) ?? -1 : fgTileAddr(this.app.rom, this.app.render, t);
-  }
-  words(t: number): number[] {
-    if (this.ow) return t < OW_L1_TILES ? owTileWords(this.app.rom, t) : [0, 0, 0, 0];
-    const a = this.tileAddr(t);
-    if (a < 0) return bgTileWords(this.app.rom, t);
-    return [0, 1, 2, 3].map((q) => this.app.rom.r16(a + q * 2));
-  }
-  private setWords(t: number, ws: number[]): void {
-    if (this.ow) setOwTileWords(this.app.rom, t, ws);
-    else if (!this.bg) setFgWords(this.app.rom, this.app.render, t, ws);
-    else if (t >= BG_EXT_FIRST) setBgExtTileWords(this.app.rom, t, ws);
-    else { const a = this.tileAddr(t); ws.forEach((v, q) => this.app.rom.w16(a + q * 2, v)); }
-  }
+  words(t: number): number[] { return this.t.words(t); }
+  // the 8x8 graphics as drawn (the level's BG tiles from BG2's graphics base, the others from BG1's)
   private tc(): TileCache {
-    if (this.ow) {
-      const r = this.owR;
-      return r ? new TileCache(r.vram, r.cgram, (r.ppuRegs[0x0b] & 0x0f) << 13) : new TileCache(new Uint8Array(0x10000), new Uint8Array(0x200));
-    }
-    const r = this.app.render;
-    return new TileCache(r.vram, r.cgram, (this.bg ? r.ppuRegs[0x0b] >> 4 : r.ppuRegs[0x0b] & 0x0f) << 13);
+    const r = this.shown();
+    if (!r) return new TileCache(new Uint8Array(0x10000), new Uint8Array(0x200));
+    return new TileCache(r.vram, r.cgram, (this.t.id === 'bg' ? r.ppuRegs[0x0b] >> 4 : r.ppuRegs[0x0b] & 0x0f) << 13);
   }
   // the colors the target's tiles are drawn in
-  private cgram(): Uint8Array { return this.ow ? this.owR?.cgram ?? new Uint8Array(0x200) : this.app.render.cgram; }
-  private kind(): NameKind { return this.bg ? 'bg' : 'fg'; }
-  private layerName(): string { return TARGET_NAMES[this.target]; }
-  private num(t: number): string { return hex(t, this.ow ? 2 : 3); }
+  private cgram(): Uint8Array { return this.shown()?.cgram ?? new Uint8Array(0x200); }
+  private num(t: number): string { return hex(t, this.t.digits); }
   private tileTitle(t: number): string {
-    return `${this.layerName()} tile ${this.num(t)}`;
+    return `${this.t.layer} tile ${this.num(t)}`;
   }
 
   // the selection's shared name ('' : none), null: the tiles have different ones
   private selName(): string | null {
-    if (this.ow) return '';
-    const names = namesOf(this.app.rom, this.kind());
+    const kind = this.t.names;
+    if (!kind) return '';
+    const names = namesOf(this.app.rom, kind);
     const all = new Set(this.selection().map((t) => names.get(t) ?? ''));
     return all.size === 1 ? [...all][0] : null;
   }
   private showName(): void {
-    this.nameRow.style.display = this.ow ? 'none' : '';
+    this.nameRow.style.display = this.t.names ? '' : 'none';
     if (document.activeElement === this.nameInput) return;
     const v = this.selName();
     this.nameInput.value = v ?? '';
@@ -289,7 +274,7 @@ export class Map16Tab implements WsPanel {
   // the field names the tiles selected when it got the focus
   private attachName(): void {
     const f = this.nameInput;
-    f.addEventListener('focus', () => { this.naming = { kind: this.kind(), tiles: this.selection(), was: f.value }; });
+    f.addEventListener('focus', () => { const kind = this.t.names; this.naming = kind ? { kind, tiles: this.selection(), was: f.value } : null; });
     f.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); f.blur(); }
       if (e.key === 'Escape') { e.preventDefault(); if (this.naming) f.value = this.naming.was; f.blur(); }
@@ -311,7 +296,7 @@ export class Map16Tab implements WsPanel {
   }
 
   private edit(label: string, fn: () => void, key: string | null = null): void {
-    const locked = this.ow ? this.owLocked() : null;
+    const locked = this.t.locked();
     if (locked) { toast(`The overworld is replaced by ${locked}: its tiles can't be edited here`, 'error'); return; }
     try { this.app.romEdit(label, fn, { key }); } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
   }
@@ -320,7 +305,7 @@ export class Map16Tab implements WsPanel {
   private grid(): QuarterGrid { return new QuarterGrid(this.selW, this.selH); }
   // the marks; a new selection starts with every quarter marked and the builder fitted
   private marked(): Set<number> {
-    const of = `${this.target}:${this.sel}:${this.selW}x${this.selH}`;
+    const of = `${this.t.id}:${this.sel}:${this.selW}x${this.selH}`;
     if (of !== this.marksOf) { this.marksOf = of; this.marks = this.grid().all(); this.bzoom = null; this.hoverQ = null; }
     return this.marks;
   }
@@ -341,13 +326,13 @@ export class Map16Tab implements WsPanel {
     return this.words(this.selection()[tile])[q];
   }
   private editLabel(n: number, what: string): string {
-    return n === 1 && this.selW * this.selH === 1 ? `${this.tileTitle(this.sel)}: ${what}` : `${n} ${this.layerName()} tile${n > 1 ? 's' : ''}: ${what}`;
+    return n === 1 && this.selW * this.selH === 1 ? `${this.tileTitle(this.sel)}: ${what}` : `${n} ${this.t.layer} tile${n > 1 ? 's' : ''}: ${what}`;
   }
   // the changed tiles in one ROM edit (one undo step)
   private writeTiles(e: QuarterEdit, what: string, key: string | null = null): void {
     if (!e.changed.length) return;
-    const tiles = this.selection();
-    this.edit(this.editLabel(e.changed.length, what), () => { for (const i of e.changed) this.setWords(tiles[i], e.words[i]); }, key);
+    const tiles = this.selection(), t = this.t;
+    this.edit(this.editLabel(e.changed.length, what), () => { for (const i of e.changed) t.setWords(tiles[i], e.words[i]); }, key);
   }
   private editQuarters(fn: (w: number) => number, what: string): void {
     const m = this.marked();
@@ -378,36 +363,35 @@ export class Map16Tab implements WsPanel {
   // ---------- UI ----------
   private buildBar(): void {
     clear(this.bar);
+    const t = this.t;
     const layer = (target: Map16Target, label: string, title: string) => h('button', {
-      class: this.target === target ? 'active' : '', title,
+      class: t.id === target ? 'active' : '', title,
       onclick: () => {
-        if (this.target === target) return;
+        if (t.id === target) return;
         if (target === 'ow' && this.owLocked()) return;
-        if (target === 'ow' && this.moving) this.closeMove();
-        this.target = target; this.sel = Math.min(this.sel & 0x1ff, this.count() - 1); this.selW = this.selH = 1; this.buildBar(); this.redraw(); this.scrollToSel();
-        this.syncTarget();
+        this.setLayer(target);
       },
-      disabled: target === 'ow' && !!this.owLocked() && this.target !== 'ow',
+      disabled: target === 'ow' && !!this.owLocked() && t.id !== 'ow',
     }, label);
     clear(this.pageBar);
-    const pages = Math.ceil(this.count() / 256);
+    // (one page: none to choose)
+    const pages = Math.ceil(t.tiles / 256);
     this.pages.forEach((c, p) => { c.style.display = this.heads[p].style.display = p < pages ? '' : 'none'; });
-    for (let p = 0; p < pages && !this.ow; p++) {
+    for (let p = 0; p < pages && pages > 1; p++) {
       this.pageBar.appendChild(h('button', {
         class: p === this.topPage ? 'active' : '',
-        title: p < 2 ? `Page ${p}: ${this.bg ? 'BG tiles of the original backgrounds' : p ? 'standard tiles' : 'standard and tileset tiles'}`
-          : `Page ${hex(p, 1)}: extended ${this.bg ? 'BG ' : ''}tiles${this.bg ? '' : ' (in the level via Direct Map16 object)'}`,
+        title: t.pageTitle(p),
         onclick: () => this.scrollToPage(p),
       }, hex(p, 1)));
       this.heads[p].replaceChildren(`Page ${hex(p, 1)}`);
     }
-    this.search.placeholder = this.fg ? 'Tile no. (hex), name, behavior or block file …' : this.bg ? 'Tile no. (hex) or name …' : 'Tile no. (hex) …';
+    this.search.placeholder = t.searchHint;
     this.bar.append(
       h('span', { class: 'btn-group' },
         layer('fg', 'Foreground', 'FG tiles (layer 1 and layer 2 objects)'),
         layer('bg', 'Background', 'BG tiles (layer 2 backgrounds)'),
         layer('ow', 'Overworld', 'The overworld\'s layer 1 tiles 00–C0 (paths, level tiles, …)')),
-      this.ow ? this.owMapSelect() : this.pageBar,
+      t.where === 'submap' ? this.owMapSelect() : this.pageBar,
       this.search,
       this.searchHint,
       h('span', { class: 'sep' }),
@@ -415,16 +399,16 @@ export class Map16Tab implements WsPanel {
       h('button', { onclick: () => this.paste(), title: 'Paste starting at the selected tile (Ctrl+V)' }, 'Paste'),
       h('button', { class: this.remapping ? 'active' : '', onclick: () => (this.remapping ? this.closeRemap() : this.openRemap()),
         title: 'Change the 8x8 tile numbers, palettes or acts-like of tiles in bulk (Lunar Magic\'s Remap)' }, 'Remap …'),
-      this.ow ? '' : h('button', { class: this.moving ? 'active' : '', onclick: () => (this.moving ? this.closeMove() : this.openMove()),
+      !t.move ? '' : h('button', { class: this.moving ? 'active' : '', onclick: () => (this.moving ? this.closeMove() : this.openMove()),
         title: 'Move the selected tiles to other numbers, with every level, prefab and block using them' }, 'Move …'),
-      !this.fg ? '' : h('label', { class: 'toggle', title: 'Mark all tiles that act like the selected one' },
+      !t.acts ? '' : h('label', { class: 'toggle', title: 'Mark all tiles that act like the selected one' },
         (() => { const cb = h('input', { type: 'checkbox', checked: this.sameActs }); cb.addEventListener('change', () => { this.sameActs = cb.checked; this.drawSheet(); }); return cb; })(),
         'Mark same acts-like'),
-      !this.fg ? '' : h('label', { class: 'toggle', title: 'Mark the tiles 200–FFF that have graphics, an acts-like setting or a block but are in no level and no prefab' },
+      !t.acts ? '' : h('label', { class: 'toggle', title: 'Mark the tiles 200–FFF that have graphics, an acts-like setting or a block but are in no level and no prefab' },
         (() => { const cb = h('input', { type: 'checkbox', checked: this.markUnused }); cb.addEventListener('change', () => { this.markUnused = cb.checked; this.drawSheet(); }); return cb; })(),
         'Mark unused'),
       h('span', { class: 'spacer' }),
-      this.ow ? '' : menuButton({ label: 'Import/Export', items: [
+      !t.files ? '' : menuButton({ label: 'Import/Export', items: [
         { label: 'Import (.map16) …', title: 'Insert a Lunar Magic .map16 starting at the selected tile', onClick: () => void this.importMap16() },
         { label: 'Export (.map16)', title: 'Save the selected tiles (with acts-like) as .map16', onClick: () => this.exportMap16() },
       ] }),
@@ -434,18 +418,18 @@ export class Map16Tab implements WsPanel {
   // the overworld map whose graphics and colors draw the overworld's tiles
   private owMapSelect(): HTMLElement {
     const s = h('select', { title: 'The overworld\'s tiles are drawn with this map\'s graphics and colors' },
-      MAP_NAMES.map((n, i) => h('option', { value: String(i), selected: i === this.owAt.map }, n)));
-    s.addEventListener('change', () => { this.owAt = { map: Number(s.value), progress: this.owAt.progress }; this.owRender(); this.redraw(); this.syncTarget(); });
+      MAP_NAMES.map((n, i) => h('option', { value: String(i), selected: i === this.ws.target.submap }, n)));
+    s.addEventListener('change', () => this.ws.setTarget({ submap: Number(s.value), progress: this.ws.target.progress }));
     return h('span', { class: 'row', style: 'gap:4px' }, h('span', { class: 'hint' }, 'Drawn as on'), s);
   }
 
   private redraw(): void {
-    if (this.ow) this.owRender();
+    this.shown();
     if (this.match) this.findMatches(); // the layer or the names may have changed
     this.drawSheet();
     this.buildBuilder();
     this.drawGfx();
-    this.ws.preview.highlight = new Set(this.fg ? this.selection() : []);
+    this.ws.preview.highlight = new Set(this.t.acts ? this.selection() : []);
     this.ws.preview.drawHighlight();
   }
 
@@ -481,7 +465,7 @@ export class Map16Tab implements WsPanel {
   // pages near the view are drawn now, the others once they come near it
   // (only the target's pages)
   private drawSheet(): void {
-    for (let p = 0; p < Math.ceil(this.count() / 256); p++) {
+    for (let p = 0; p < Math.ceil(this.t.tiles / 256); p++) {
       if (this.near.has(p)) this.drawPage(p); else this.dirty.add(p);
     }
   }
@@ -493,11 +477,12 @@ export class Map16Tab implements WsPanel {
     ctx.fillStyle = '#1b1d22';
     ctx.fillRect(0, 0, c.width, c.height);
     ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(this.ow ? this.owSheet() : renderMap16Sheet(this.app, this.bg, base, 256), M, 0, 256 * Z, 256 * Z);
+    const t = this.t;
+    ctx.drawImage(t.id === 'ow' ? this.owSheet() : renderMap16Sheet(this.app, t.id === 'bg', base, 256), M, 0, 256 * Z, 256 * Z);
     // ranges
-    const band = (from: number, to: number, color: string, label: string) => {
+    for (const { from, to, color, label } of t.bands()) {
       const a = Math.max(from, base), b = Math.min(to, base + 0xff);
-      if (a > b) return;
+      if (a > b) continue;
       const y0 = ((a - base) >> 4) * 16 * Z, y1 = (((b - base) >> 4) + 1) * 16 * Z;
       ctx.fillStyle = color;
       ctx.fillRect(0, y0, 4, y1 - y0);
@@ -509,37 +494,23 @@ export class Map16Tab implements WsPanel {
       ctx.textAlign = 'center';
       ctx.fillText(label, 0, 0);
       ctx.restore();
-    };
-    if (this.ow) band(0, OW_L1_TILES - 1, '#7dd87d', 'Overworld');
-    else if (this.bg) {
-      band(0, 0x1ff, '#7d8bff', 'Background tiles');
-      band(BG_EXT_FIRST, EXT_TILES - 1, '#4cc2ff', 'Extended');
-    }
-    else {
-      band(0x000, 0x072, '#8b93a3', 'Standard');
-      // (the tilesets sharing all of them)
-      let ts = this.app.tilesetsOf(0x073);
-      for (let t = 0x074; t <= 0x0ff; t++) { const of = this.app.tilesetsOf(t); ts = ts.filter((x) => of.includes(x)); }
-      band(0x073, 0x0ff, '#ffb000', `Tileset${ts.length > 1 ? 's' : ''} ${ts.map((x) => hex(x, 1)).join('/')}`);
-      band(0x100, 0x1ff, '#8b93a3', 'Standard');
-      band(0x200, EXT_TILES - 1, '#4cc2ff', 'Extended');
     }
     ctx.fillStyle = 'rgba(255,255,255,0.45)';
     ctx.font = '10px ui-monospace, monospace';
     ctx.textAlign = 'right';
     for (let row = 0; row < 16; row += 2) ctx.fillText(this.num(base + row * 16), M - 2, row * 16 * Z + 11);
     ctx.textAlign = 'left';
-    if (this.sameActs && this.fg) {
+    if (this.sameActs && t.acts) {
       const a = actsLike(this.app.rom, this.sel);
       ctx.fillStyle = 'rgba(255,176,0,0.35)';
-      for (let t = 0; t < 256; t++) if (actsLike(this.app.rom, base + t) === a) ctx.fillRect(M + (t & 15) * 16 * Z, (t >> 4) * 16 * Z, 16 * Z, 16 * Z);
+      for (let k = 0; k < 256; k++) if (actsLike(this.app.rom, base + k) === a) ctx.fillRect(M + (k & 15) * 16 * Z, (k >> 4) * 16 * Z, 16 * Z, 16 * Z);
     }
-    const unused = this.markUnused && this.fg ? this.unusedTiles() : null;
+    const unused = this.markUnused && t.acts ? this.unusedTiles() : null;
     if (unused) {
       ctx.strokeStyle = 'rgba(255,90,90,0.9)';
       ctx.lineWidth = 2;
-      for (let t = 0; t < 256; t++) if (unused.has(base + t)) {
-        const x = M + (t & 15) * 16 * Z, y = (t >> 4) * 16 * Z;
+      for (let k = 0; k < 256; k++) if (unused.has(base + k)) {
+        const x = M + (k & 15) * 16 * Z, y = (k >> 4) * 16 * Z;
         ctx.beginPath(); ctx.moveTo(x + 4, y + 4); ctx.lineTo(x + 16 * Z - 4, y + 16 * Z - 4); ctx.moveTo(x + 16 * Z - 4, y + 4); ctx.lineTo(x + 4, y + 16 * Z - 4); ctx.stroke();
       }
     }
@@ -565,9 +536,9 @@ export class Map16Tab implements WsPanel {
   private owSheet(): HTMLCanvasElement {
     const c = document.createElement('canvas');
     c.width = 256; c.height = 256;
-    const ctx = c.getContext('2d')!, img = ctx.createImageData(256, 256), px = new Uint32Array(img.data.buffer), tc = this.tc();
+    const ctx = c.getContext('2d')!, img = ctx.createImageData(256, 256), px = new Uint32Array(img.data.buffer), tc = this.tc(), t = this.t;
     px.fill(SHEET_BACK);
-    if (this.owR) for (let t = 0; t < OW_L1_TILES; t++) drawMap16(px, 256, 256, tc, this.words(t), (t & 15) * 16, (t >> 4) * 16);
+    if (this.owR) for (let k = 0; k < t.tiles; k++) drawMap16(px, 256, 256, tc, t.words(k), (k & 15) * 16, (k >> 4) * 16);
     ctx.putImageData(img, 0, 0);
     return c;
   }
@@ -575,7 +546,7 @@ export class Map16Tab implements WsPanel {
   // tile column and row (over all pages) under the mouse; between pages: the page above
   private cellAt(e: MouseEvent): { x: number; y: number } {
     let p = 0;
-    for (let i = 1; i < Math.ceil(this.count() / 256); i++) if (this.pages[i].getBoundingClientRect().top <= e.clientY) p = i;
+    for (let i = 1; i < Math.ceil(this.t.tiles / 256); i++) if (this.pages[i].getBoundingClientRect().top <= e.clientY) p = i;
     const c = this.pages[p], rc = c.getBoundingClientRect();
     const sx = c.width / rc.width;
     return {
@@ -593,7 +564,7 @@ export class Map16Tab implements WsPanel {
       if (this.moving && this.inSelection(a)) { this.dragMove(a); return; }
       const pick = (b: { x: number; y: number }) => {
         // (no tile past the target's last)
-        if ((Math.max(a.y, b.y) * 16 + Math.max(a.x, b.x)) >= this.count()) return;
+        if ((Math.max(a.y, b.y) * 16 + Math.max(a.x, b.x)) >= this.t.tiles) return;
         this.sel = Math.min(a.y, b.y) * 16 + Math.min(a.x, b.x);
         this.selW = Math.abs(a.x - b.x) + 1;
         this.selH = Math.abs(a.y - b.y) + 1;
@@ -607,11 +578,11 @@ export class Map16Tab implements WsPanel {
     });
     this.scroll.addEventListener('mousemove', (e) => {
       if (!(e.target instanceof HTMLCanvasElement)) return;
-      const p = this.cellAt(e);
+      const p = this.cellAt(e), d = this.t;
       const t = p.y * 16 + p.x;
-      if (t >= this.count()) { e.target.title = ''; return; }
-      const b = this.fg ? behaviorTile(this.app.rom, t) : -1, info = b >= 0 ? this.app.probes.block(b) : undefined;
-      const name = this.ow ? undefined : namesOf(this.app.rom, this.kind()).get(t);
+      if (t >= d.tiles) { e.target.title = ''; return; }
+      const b = d.acts ? behaviorTile(this.app.rom, t) : -1, info = b >= 0 ? this.app.probes.block(b) : undefined;
+      const name = d.names ? namesOf(this.app.rom, d.names).get(t) : undefined;
       e.target.title = `${this.tileTitle(t)}${name ? ` “${name}”` : ''}${b >= 0 ? ` – ${info ? probeText(info) : 'determining behavior …'}` : ''}`;
     });
   }
@@ -638,17 +609,10 @@ export class Map16Tab implements WsPanel {
       this.scrollToSel();
     });
   }
-  // custom blocks and behavior are FG tiles' only; while tiles' behavior is still being determined, a hint says
-  // how many ('probes' searches again)
+  // while tiles' behavior is still being determined, a hint says how many ('probes' searches again)
   private findMatches(): void {
-    let pending = 0;
-    if (this.ow) this.match = tileMatches(this.search.value, OW_L1_TILES);
-    else if (this.bg) this.match = tileMatches(this.search.value, EXT_TILES, [namesOf(this.app.rom, 'bg')]);
-    else {
-      const behaviors = tileBehaviors(this.app, this.search.value, EXT_TILES);
-      pending = behaviors.pending;
-      this.match = tileMatches(this.search.value, EXT_TILES, [blockFilesByTile(this.app.rom), namesOf(this.app.rom, 'fg'), behaviors.texts]);
-    }
+    const { match, pending } = this.t.match(this.search.value);
+    this.match = match;
     this.matchPending = pending > 0;
     this.searchHint.textContent = pendingHint(pending);
   }
@@ -697,12 +661,12 @@ export class Map16Tab implements WsPanel {
     // the canvas stays in place, so its scroll position and zoom do
     if (b.firstChild !== this.bHead) b.replaceChildren(this.bHead, this.bigScroll, this.bCtl);
     this.buildUses();
-    const t = this.sel, one = this.selW * this.selH === 1;
-    const tiles = this.selection(), words = tiles.map((x) => this.words(x));
+    const t = this.sel, one = this.selW * this.selH === 1, d = this.t;
+    const tiles = this.selection(), words = tiles.map((x) => d.words(x));
     const g = this.grid(), marks = this.marked();
     this.drawBig();
     const s = summary(g, words, marks);
-    const ws = this.words(t);
+    const ws = d.words(t);
     const prio = (st: BitState) => h('button', {
       class: st === 'on' ? 'active' : st === 'mixed' ? 'mt-is-mixed' : '', title: 'Drawn in front of sprites/Mario', disabled: !marks.size,
       onclick: () => this.togglePrio(),
@@ -717,29 +681,29 @@ export class Map16Tab implements WsPanel {
       for (let k = 0; k < 7; k++) pp[k] = allPal[p * 16 + 1 + k * 2] | 0xff000000;
       cx.putImageData(im, 0, 0);
       return h('button', {
-        class: `mt-pal${s.pals.has(p) ? ' active' : ''}`, title: `Palette ${p} (key ${p + 1})${this.ow ? '' : ' · Ctrl+click: open in the Palettes tab'}`,
+        class: `mt-pal${s.pals.has(p) ? ' active' : ''}`, title: `Palette ${p} (key ${p + 1})${d.palettes ? ' · Ctrl+click: open in the Palettes tab' : ''}`,
         onclick: (e: MouseEvent) => {
-          if ((e.ctrlKey || e.metaKey) && !this.ow) { this.ws.showPalette(p, 1); return; }
+          if ((e.ctrlKey || e.metaKey) && d.palettes) { this.ws.showPalette(p, 1); return; }
           this.editQuarters(setPalette(p), `Palette ${p}`);
         },
       }, c, h('span', null, String(p)));
     };
     // own animations on the quarters, each once
     const all = words.flat();
-    const own = !this.fg ? [] : all.flatMap((w) => animsAt(app, w & 0x3ff)).filter((a, i, l) => l.findIndex((x) => x.global === a.global && x.slot === a.slot) === i);
-    const animated = !this.fg ? 0 : all.filter((w) => app.animated()?.tiles.has(w & 0x3ff)).length;
-    const used = !this.fg || !one ? 0 : this.ws.preview.count(t);
+    const own = !d.anims ? [] : all.flatMap((w) => animsAt(app, w & 0x3ff)).filter((a, i, l) => l.findIndex((x) => x.global === a.global && x.slot === a.slot) === i);
+    const animated = !d.anims ? 0 : all.filter((w) => app.animated()?.tiles.has(w & 0x3ff)).length;
+    const used = !d.acts || !one ? 0 : this.ws.preview.count(t);
     const last = tiles[tiles.length - 1];
     this.bInfo.replaceChildren(
-      h('div', { class: 'prop-title' }, one ? this.tileTitle(t) : `${this.layerName()} tiles ${this.num(t)}–${this.num(last)}`, one ? '' : h('span', { class: 'hint' }, `  (${this.selW}×${this.selH})`)),
-      h('div', { class: 'hint' }, this.rangeText(t), one && this.fg ? ` · in the level ${used}×` : ''));
+      h('div', { class: 'prop-title' }, one ? this.tileTitle(t) : `${d.layer} tiles ${this.num(t)}–${this.num(last)}`, one ? '' : h('span', { class: 'hint' }, `  (${this.selW}×${this.selH})`)),
+      h('div', { class: 'hint' }, d.range(t), one && d.acts ? ` · in the level ${used}×` : ''));
     this.bMarks.replaceChildren(
       h('div', { class: 'mt-section' }, 'Quarters', h('span', { class: 'hint' }, `${marks.size} of ${g.cols * g.rows} marked`)),
     );
     this.updateQInfo();
     this.showName();
     let acts: HTMLElement | string = '';
-    if (this.fg) {
+    if (d.acts) {
       const whole = wholeTiles(g, marks);
       acts = whole ? this.actsUi(whole.map((i) => tiles[i])) : h('div', { class: 'mt-acts mt-off' },
         h('div', { class: 'panel-title' }, 'Acts like'),
@@ -757,13 +721,13 @@ export class Map16Tab implements WsPanel {
         flip('↔ Flip', FLIP_X, 'Mirror the marked quarters horizontally as a whole (X)'),
         flip('↕ Flip', FLIP_Y, 'Mirror the marked quarters vertically as a whole (Y)'),
         prio(s.prio)),
-      this.ow && !this.owR ? h('div', { class: 'hint' }, 'Loading the overworld …') : '',
+      !this.shown() ? h('div', { class: 'hint' }, 'Loading the overworld …') : '',
       h('div', { class: 'mt-section' }, one ? 'Tile' : 'Tiles'),
       acts,
       this.usesBox,
       h('details', { class: 'mt-adv' }, h('summary', null, one ? 'Raw values' : `Raw values of ${hex(t, 3)}`),
         h('div', { class: 'mono hint' }, ws.map((w, q) => `${QUARTER_NAMES[q]} $${hex(w, 4)}`).join('  ')),
-        h('div', { class: 'hint' }, this.tileAddr(t) < 0 ? 'Extended tile – created on the first change.' : `ROM $${hex(this.tileAddr(t), 6)}`)),
+        h('div', { class: 'hint' }, d.addr(t) < 0 ? 'Extended tile – created on the first change.' : `ROM $${hex(d.addr(t), 6)}`)),
       h('p', { class: 'hint' }, 'Choose 8x8 tiles on the right (click or drag), then right-click a quarter to put them there (right drag: paint), or press Enter to put a single one into every marked quarter. Mark quarters for palette, flips (mirroring them as a whole) and priority (click, drag, Ctrl: add/remove, Shift: whole tile, Ctrl+A: all, Esc: none).'),
     );
   }
@@ -772,7 +736,7 @@ export class Map16Tab implements WsPanel {
   private updateQInfo(): void {
     const k = this.focusQ(), { tile, q } = this.grid().locate(k);
     const w = this.wordAt(k), num8 = w & 0x3ff;
-    const slot = slotOfTile(this.gfxSlots(), num8);
+    const slot = slotOfTile(this.t.vram(), num8);
     const where = this.selW * this.selH > 1 ? `${this.num(this.selection()[tile])} ` : '';
     const from = slot && slot.file >= 0 ? ` from ${slot.name} (${gfxName(slot.file)})` : '';
     this.qInfo.textContent = `${this.hoverQ !== null ? 'Under the mouse' : 'Quarter'}: ${where}${QUARTER_NAMES[q]}, 8x8 tile ${hex(num8, 3)}${from}, palette ${(w >> 10) & 7}`;
@@ -831,7 +795,7 @@ export class Map16Tab implements WsPanel {
       for (let y = 2; y < g.rows; y += 2) { ctx.moveTo(0, Math.round(y * sy) + 0.5); ctx.lineTo(c.width, Math.round(y * sy) + 0.5); }
       ctx.stroke();
     }
-    const anim = this.fg ? this.app.animated() : null;
+    const anim = this.t.anims ? this.app.animated() : null;
     if (anim?.tiles.size) {
       const a = Math.max(3, Math.min(16, sx / 3));
       ctx.fillStyle = '#ff4fd8';
@@ -982,51 +946,18 @@ export class Map16Tab implements WsPanel {
 
   // "Used in levels": where the selected tile is placed (the open level as edited), what else refers to it
   private buildUses(): void {
-    const app = this.app, t = this.sel, box = this.usesBox;
-    const { levels, pending, open } = app.levelTiles();
-    const unknown = open === 'failed' ? `The tiles this level places as edited could not be learned${levels.some((l) => l.level === app.level.number) ? ' (listed as last known)' : ''}.` : undefined;
-    const link = (x: number) => h('a', { href: '#', class: 'mono', title: 'Show the tile', onclick: (e: Event) => { e.preventDefault(); this.select(x, this.target); } }, hex(x, 3));
-    if (this.ow) {
-      // on the maps as in the ROM (before events)
-      const l1 = readL1(app.rom), n = [0, 1].map((m) => l1.subarray(m * 0x400, m * 0x400 + 0x400).filter((v) => v === t).length);
-      box.replaceChildren(h('div', { class: 'hint' }, n[0] || n[1] ? `On layer 1: ${n[0]}× on the main map, ${n[1]}× on the submaps (before events)` : 'On no overworld map (before events).'));
-      return;
-    }
-    if (this.bg) {
-      const users = bgTileUsers(levels, t);
-      box.replaceChildren(usedInList(app, 'Used in levels', users.map((u) => ({ level: u.level, text: `${u.count}× in the BG` })), pending, 'In no level\'s background.', unknown));
-      return;
-    }
-    const tilesets = app.tilesetsOf(t), tilesetTile = isTilesetTile(t);
-    const users = fgTileUsers(levels, t, tilesets);
-    const items = users.map((u) => ({
-      level: u.level, at: { x: u.uses[0].x, y: u.uses[0].y },
-      text: u.uses.map((q) => `${q.count}× ${TILE_SOURCES[q.source]}${q.layer === 2 ? ' (layer 2)' : ''}`).join(', '),
-    }));
-    const l = tileLinks(app.rom, t);
-    box.replaceChildren(
-      usedInList(app, tilesetTile ? `Used in levels of ${tilesetNames(tilesets)}` : 'Used in levels', items, pending, this.unusedTiles()?.has(t) ? 'Defined, but placed in no level and no prefab: unused.' : 'Placed in no level.', unknown),
-      l.actsLike.length ? h('div', { class: 'hint' }, 'Acting like it: ', ...l.actsLike.slice(0, 24).flatMap((x, i) => [i ? ' ' : '', link(x)]), l.actsLike.length > 24 ? ` … (${l.actsLike.length})` : '') : '',
-      l.prefabs.length ? h('div', { class: 'hint' }, `In prefab${l.prefabs.length > 1 ? 's' : ''} ${l.prefabs.map((n) => hex(n, 2)).join(', ')}`) : '',
-      l.blocks.length ? h('div', { class: 'hint' }, `Custom block on it: ${l.blocks.join(', ')}`) : '',
-    );
+    const d = this.t;
+    const link = (x: number) => h('a', { href: '#', class: 'mono', title: 'Show the tile', onclick: (e: Event) => { e.preventDefault(); this.select(x, d.id); } }, hex(x, 3));
+    this.usesBox.replaceChildren(...d.usedIn(this.sel, link, d.acts ? this.unusedTiles() : null));
   }
 
   // opens a quarter's 8x8 tile in the graphics tab, in the quarter's palette
   private editGfx(w: number): void {
     const num = w & 0x3ff;
-    const slot = slotOfTile(this.gfxSlots(), num);
-    if (this.ow) { toast('The overworld\'s 8x8 graphics can\'t be opened in the Graphics tab yet'); return; }
+    const slot = slotOfTile(this.t.vram(), num);
+    if (slot && slot.file < 0) { toast('The overworld\'s 8x8 graphics can\'t be opened in the Graphics tab yet'); return; }
     if (!slot) { toast(`8x8 tile ${hex(num, 3)} is in none of this level's graphics slots`); return; }
     this.ws.showGfx(slot.file, num - slot.first, (w >> 10) & 7);
-  }
-
-  private rangeText(t: number): string {
-    if (this.ow) return `overworld layer 1 tile (all maps; drawn as on ${MAP_NAMES[this.owAt.map]})`;
-    if (this.bg) return t >= BG_EXT_FIRST ? 'extended background tile' : 'background tile';
-    if (t >= EXT_FIRST) return 'extended tile (in the level via Direct Map16 object)';
-    if (isTilesetTile(t)) { const ts = this.app.tilesetsOf(t); return `tileset tile (applies to ${tilesetNames(ts)}${ts.length > 1 ? '' : ' only'})`; }
-    return 'standard tile (all tilesets)';
   }
 
   // acts-like of the wholly marked tiles
@@ -1117,7 +1048,7 @@ export class Map16Tab implements WsPanel {
   }
   // the move panel: the selection goes to the typed number or where it is dragged in the sheet
   openMove(): void {
-    if (this.ow) return;
+    if (!this.t.move) return;
     if (this.remapping) this.closeRemap();
     if (!this.moving) {
       const input = h('input', { type: 'text', class: 'hex', size: 4, maxLength: 3, spellcheck: false, autocomplete: 'off', title: 'The new number of the top left tile (hex)' });
@@ -1164,7 +1095,8 @@ export class Map16Tab implements WsPanel {
     if (!m) return;
     m.plan = null;
     const app = this.app, n = this.selW * this.selH, last = m.to + (this.selH - 1) * 16 + this.selW - 1;
-    const what = `${n} ${this.bg ? 'BG' : 'FG'} tile${n > 1 ? 's' : ''} from ${hex(this.sel, 3)}`;
+    const layer = this.t.id === 'bg' ? 'bg' : 'fg';
+    const what = `${n} ${layer.toUpperCase()} tile${n > 1 ? 's' : ''} from ${hex(this.sel, 3)}`;
     if (m.to < 0 || (m.to & 15) + this.selW > 16 || last >= EXT_TILES || m.to === this.sel) {
       m.status.replaceChildren(h('div', { class: 'hint' }, m.to < 0 || m.to === this.sel ? `Where do the ${what} go?` : 'The tiles do not fit on the page there.'));
       return;
@@ -1172,15 +1104,15 @@ export class Map16Tab implements WsPanel {
     const map = rectMap(this.sel, this.selW, this.selH, m.to);
     const { levels: index, pending, open } = app.levelTiles();
     const src: MoveSource = { ...levelSource(app, map), blank: map16Source(app.rom, app.render).fg(0x025), index };
-    const plan = planMove(app.rom, this.bg ? 'bg' : 'fg', map, src);
-    m.plan = { plan, src, pending: this.bg ? 0 : pending };
+    const plan = planMove(app.rom, layer, map, src);
+    m.plan = { plan, src, pending: layer === 'bg' ? 0 : pending };
     const ok = !plan.problems.length;
     m.status.replaceChildren(
       ...plan.problems.map((q) => h('div', { class: 'warn-box' }, q)),
       ok && plan.overwrite.length ? h('div', { class: 'warn-box' }, `Tile${plan.overwrite.length > 1 ? 's' : ''} ${plan.overwrite.slice(0, 8).map((t) => hex(t, 3)).join(', ')}${plan.overwrite.length > 8 ? ' …' : ''} ${plan.overwrite.length > 1 ? 'have' : 'has'} graphics, acts-like or a block of ${plan.overwrite.length > 1 ? 'their' : 'its'} own, used nowhere: overwritten (asked first).`) : '',
       ok ? planList(app, plan, 'No level places these tiles.') : '',
       ok && m.plan.pending ? h('div', { class: 'warn-box' }, `${pending} level${pending > 1 ? 's are' : ' is'} still being looked through for tiles placed by objects' code, which can't be rewritten.`) : '',
-      ok && open === 'failed' && !this.bg ? h('div', { class: 'warn-box' }, 'The tiles this level\'s objects\' code places as edited could not be learned: tiles placed there by custom objects are not known.') : '',
+      ok && open === 'failed' && layer === 'fg' ? h('div', { class: 'warn-box' }, 'The tiles this level\'s objects\' code places as edited could not be learned: tiles placed there by custom objects are not known.') : '',
       h('div', { class: 'row' },
         h('button', { class: 'primary', disabled: !ok, onclick: () => void this.applyMove() }, `Move to ${hex(m.to, 3)}`),
         h('button', { onclick: () => this.closeMove() }, 'Close')),
@@ -1191,7 +1123,7 @@ export class Map16Tab implements WsPanel {
   private async applyMove(): Promise<void> {
     const m = this.moving, p = m?.plan;
     if (!m || !p || p.plan.problems.length) return;
-    const { plan, src } = p, to = m.to, from = this.sel, layer = this.bg ? 'bg' : 'fg';
+    const { plan, src } = p, to = m.to, from = this.sel, layer = this.t.id === 'bg' ? 'bg' : 'fg';
     if (p.pending && await choose('Move now?', `${p.pending} level${p.pending > 1 ? 's have' : ' has'} not been looked through yet for these tiles placed by objects' code (custom objects), which a move can't rewrite. Wait for the look-through, or move now?`,
       [{ label: 'Wait' }, { label: 'Move now' }]) !== 1) return;
     if (plan.overwrite.length && await choose('Overwrite tiles?', `Tile${plan.overwrite.length > 1 ? 's' : ''} ${plan.overwrite.map((t) => hex(t, 3)).join(', ')} ${plan.overwrite.length > 1 ? 'have' : 'has'} contents of ${plan.overwrite.length > 1 ? 'their' : 'its'} own (used nowhere). Overwrite with the moved tiles?`,
@@ -1214,7 +1146,7 @@ export class Map16Tab implements WsPanel {
   // opens the remap panel; an offer fills in the list and may choose the tiles it changes
   openRemap(fill: RemapFill = {}): void {
     if (this.moving) this.closeMove();
-    if (fill.bg !== undefined && (fill.bg ? 'bg' : 'fg') !== this.target) { this.target = fill.bg ? 'bg' : 'fg'; this.sel &= 0x1ff; this.selW = this.selH = 1; }
+    if (fill.target && fill.target !== this.t.id) this.setLayer(fill.target);
     if (!this.remapping) {
       const preview = h('div', { class: 'mt-remap-preview' }), scopes = h('div', { class: 'mt-remap-scopes' }), status = h('div', { class: 'mt-remap' });
       const ed = remapEditor('map16', () => this.drawRemap());
@@ -1245,17 +1177,17 @@ export class Map16Tab implements WsPanel {
     if (r.scope === 'sel') return this.selection();
     const { remap } = r.ed.parsed();
     const src = new Set([...remap.tiles.keys(), ...remap.tilePals.keys()]);
-    const out: number[] = [];
+    const out: number[] = [], d = this.t;
     if (!src.size) return out;
-    for (let t = this.ow ? 0 : EXT_FIRST; t < this.count(); t++) if (this.words(t).some((w) => src.has(w & 0x3ff))) out.push(t);
+    for (let t = d.usesFirst; t < d.tiles; t++) if (d.words(t).some((w) => src.has(w & 0x3ff))) out.push(t);
     return out;
   }
 
   // each target before and after the remap
   private remapResult(): RemapRow[] {
-    const { remap } = this.remapping!.ed.parsed();
+    const { remap } = this.remapping!.ed.parsed(), d = this.t;
     return this.remapTargets().map((t) => {
-      const words = this.words(t), acts = this.fg ? actsLike(this.app.rom, t) : null;
+      const words = d.words(t), acts = d.acts ? actsLike(this.app.rom, t) : null;
       const r = remapTile(words, acts, t, remap);
       return { tile: t, words, acts, newWords: r.words, newActs: r.acts, out: r.out, changed: r.words.some((w, q) => w !== words[q]) || r.acts !== acts };
     });
@@ -1270,13 +1202,12 @@ export class Map16Tab implements WsPanel {
     const out = [...new Set(res.flatMap((x) => x.out))].sort((a, b) => a - b);
     const scope = (v: RemapScope, label: string, title: string) => h('label', { class: 'toggle', title },
       h('input', { type: 'radio', name: 'mt-remap-scope', checked: r.scope === v, onchange: () => { r.scope = v; this.drawRemap(); } }), label);
-    const bad = !r.ed.valid();
+    const bad = !r.ed.valid(), d = this.t;
     r.scopes.replaceChildren(
-      scope('sel', `Selected ${this.layerName()} tiles (${this.selW * this.selH} from ${this.num(this.sel)})`, 'Select tiles in the sheet on the left'),
-      this.ow ? scope('uses', 'OW tiles 00–C0 that use the list\'s source 8x8 tiles', 'Every overworld tile with a quarter the list changes')
-        : scope('uses', `${this.layerName()} tiles 200–FFF that use the list's source 8x8 tiles`, 'Every extended tile with a quarter the list changes'));
+      scope('sel', `Selected ${d.layer} tiles (${this.selW * this.selH} from ${this.num(this.sel)})`, 'Select tiles in the sheet on the left'),
+      scope('uses', `${d.layer} tiles ${d.usesRange} that use the list's source 8x8 tiles`, `Every ${d.layer} tile ${d.usesRange} with a quarter the list changes`));
     r.status.replaceChildren(
-      !this.fg && (remap.acts.size || remap.tileActs.size) ? h('div', { class: 'hint' }, `${this.layerName()} tiles have no acts-like setting: G and S pairs do nothing here.`) : '',
+      !d.acts && (remap.acts.size || remap.tileActs.size) ? h('div', { class: 'hint' }, `${d.layer} tiles have no acts-like setting: G and S pairs do nothing here.`) : '',
       r.preview,
       out.length ? h('div', { class: 'warn-box' }, `The offset takes 8x8 tile${out.length > 1 ? 's' : ''} ${out.slice(0, 8).map((t) => hex(t, 3)).join(', ')}${out.length > 8 ? ' …' : ''} out of 000–3FF: they stay.`) : '',
       h('div', { class: 'hint' }, bad ? 'Fix the marked lines first.' : `${changed.length} of ${res.length} tile${res.length === 1 ? '' : 's'} change.`),
@@ -1321,7 +1252,7 @@ export class Map16Tab implements WsPanel {
       c.title = 'Marked: tiles that change';
       return c;
     };
-    r.preview.replaceChildren(!shown.length ? h('div', { class: 'hint' }, r.scope === 'uses' ? `No tile ${this.ow ? '00–C0' : '200–FFF'} uses the list's source 8x8 tiles.` : 'No tiles selected.') :
+    r.preview.replaceChildren(!shown.length ? h('div', { class: 'hint' }, r.scope === 'uses' ? `No tile ${this.t.usesRange} uses the list's source 8x8 tiles.` : 'No tiles selected.') :
       h('div', { class: 'mt-remap-sides' },
         h('div', null, h('div', { class: 'hint' }, 'Before'), grid((x) => x.words, false)),
         h('div', null, h('div', { class: 'hint' }, 'After'), grid((x) => x.newWords, true))),
@@ -1332,9 +1263,10 @@ export class Map16Tab implements WsPanel {
   private applyRemap(): void {
     const res = this.remapResult().filter((x) => x.changed);
     if (!res.length) return;
-    this.edit(`${res.length} ${this.layerName()} tile${res.length > 1 ? 's' : ''} remapped`, () => {
+    const d = this.t;
+    this.edit(`${res.length} ${d.layer} tile${res.length > 1 ? 's' : ''} remapped`, () => {
       for (const x of res) {
-        if (x.newWords.some((w, q) => w !== x.words[q])) this.setWords(x.tile, x.newWords);
+        if (x.newWords.some((w, q) => w !== x.words[q])) d.setWords(x.tile, x.newWords);
         if (x.newActs !== null && x.newActs !== x.acts) setActsLike(this.app.rom, x.tile, x.newActs);
       }
     });
@@ -1387,7 +1319,7 @@ export class Map16Tab implements WsPanel {
     this.gzPx = Math.ceil(z);
     const fq = this.focusQ(), fw = this.wordAt(fq);
     const pal = (fw >> 10) & 7;
-    const slots = layerSlots(this.gfxSlots());
+    const slots = layerSlots(this.t.vram());
     const rows = slots.length * 8;
     const W = 128, Hh = rows * 8;
     const c = this.gfxCanvas;
@@ -1421,7 +1353,7 @@ export class Map16Tab implements WsPanel {
     for (const n of new Set([...this.marked()].map((k) => { const { tile, q } = g.locate(k); return words[tile][q] & 0x3ff; }))) mark(n, false);
     mark(fw & 0x3ff, true);
     // tiles the game animates: hatched corner
-    const anim = this.fg ? app.animated() : null;
+    const anim = this.t.anims ? app.animated() : null;
     if (anim?.tiles.size) {
       ctx.fillStyle = '#ff4fd8';
       slots.forEach((s, si) => {
@@ -1442,7 +1374,7 @@ export class Map16Tab implements WsPanel {
     c.style.width = `${W * z}px`; c.style.height = `${Hh * z}px`;
     this.gfxLabels.replaceChildren(...slots.map((s) => h('div', { class: 'mt-slot', style: { height: `${64 * z}px` } },
       h('span', { class: 'mt-slot-name' }, s.name),
-      s.file < 0 ? h('span', { class: 'hint', title: 'The overworld\'s 8x8 graphics as in VRAM after its load' }, MAP_NAMES[this.owAt.map])
+      s.file < 0 ? h('span', { class: 'hint', title: 'The overworld\'s 8x8 graphics as in VRAM after its load' }, this.t.owner)
         : h('a', { href: '#', class: 'mt-slot-file', title: 'Open in the Graphics tab (sheet and pixel editor)', onclick: (e: Event) => { e.preventDefault(); this.ws.showGfx(s.file); } }, gfxName(s.file)),
       s.custom ? h('span', { class: 'hint' }, 'custom') : '',
       h('span', { class: 'hint mono' }, `${hex(s.first, 3)}–${hex(s.first + 0x7f, 3)}`))));
@@ -1483,7 +1415,7 @@ export class Map16Tab implements WsPanel {
 
   // 8x8 tile number at a cell of the grouped view (-1: none)
   private gfxTileAt(p: Cell): number {
-    const s = layerSlots(this.gfxSlots())[p.y >> 3];
+    const s = layerSlots(this.t.vram())[p.y >> 3];
     return s ? s.first + (p.y & 7) * 16 + p.x : -1;
   }
   // the chosen 8x8 tiles as rows of tile numbers
@@ -1564,27 +1496,27 @@ export class Map16Tab implements WsPanel {
     c.addEventListener('mousemove', (e) => {
       if (this.drag) return;
       const n = tileOf(cell(e));
-      c.title = n >= 0 ? `8x8 tile ${hex(n, 3)}${this.fg && this.app.animated()?.tiles.has(n) ? ' – animated (the game keeps overwriting it)' : ''}` : '';
+      c.title = n >= 0 ? `8x8 tile ${hex(n, 3)}${this.t.anims && this.app.animated()?.tiles.has(n) ? ' – animated (the game keeps overwriting it)' : ''}` : '';
     });
   }
 
   // ---------- copy / paste / files ----------
   private copy(): void {
-    const tiles = this.selection();
-    this.clip = { w: this.selW, h: this.selH, words: tiles.map((t) => this.words(t)), acts: this.fg ? tiles.map((t) => actsLike(this.app.rom, t)) : null };
+    const tiles = this.selection(), d = this.t;
+    this.clip = { w: this.selW, h: this.selH, words: tiles.map((t) => d.words(t)), acts: d.acts ? tiles.map((t) => actsLike(this.app.rom, t)) : null };
     toast(`${tiles.length} tile${tiles.length > 1 ? 's' : ''} copied`);
   }
   private paste(): void {
     const c = this.clip;
     if (!c) { toast('Copy tiles first (Ctrl+C)'); return; }
-    const max = this.count();
+    const d = this.t, max = d.tiles;
     const targets: number[] = [];
     for (let y = 0; y < c.h; y++) for (let x = 0; x < c.w; x++) targets.push(this.sel + y * 16 + x);
     if (targets.some((t) => t >= max) || (this.sel & 15) + c.w > 16) { toast('The tiles do not fit on the page from here', 'error'); return; }
     this.edit(`${targets.length} tile${targets.length > 1 ? 's' : ''} pasted at ${this.num(this.sel)}`, () => {
       targets.forEach((t, i) => {
-        this.setWords(t, c.words[i]);
-        if (c.acts && this.fg) setActsLike(this.app.rom, t, c.acts[i]);
+        d.setWords(t, c.words[i]);
+        if (c.acts && d.acts) setActsLike(this.app.rom, t, c.acts[i]);
       });
     });
     this.selW = c.w; this.selH = c.h;
@@ -1592,7 +1524,8 @@ export class Map16Tab implements WsPanel {
   }
 
   private async importMap16(): Promise<void> {
-    if (this.ow) return; // (FG and BG tiles only)
+    const d = this.t;
+    if (!d.files) return;
     const f = await pickFile('.map16');
     if (!f) return;
     let m: Map16File;
@@ -1601,8 +1534,8 @@ export class Map16Tab implements WsPanel {
       const targets = map16Targets(m, this.sel);
       if (targets.some((t) => t >= EXT_TILES)) throw new Error('The tiles no longer fit on the Map16 pages from here');
       this.edit(`${f.name} imported`, () => targets.forEach((t, i) => {
-        this.setWords(t, m.tiles[i]);
-        if (m.acts && !this.bg) setActsLike(this.app.rom, t, m.acts![i]);
+        d.setWords(t, m.tiles[i]);
+        if (m.acts && d.acts) setActsLike(this.app.rom, t, m.acts![i]);
       }));
       this.selW = Math.min(16, m.width); this.selH = m.height;
       toast(`${m.tiles.length} tile(s) from ${f.name} imported at ${hex(this.sel, 3)}`);
@@ -1616,8 +1549,8 @@ export class Map16Tab implements WsPanel {
   // A .map16 imported elsewhere than it was exported from: the levels using the tiles at their old numbers
   // may be rewritten to the new ones (Remap Direct Map16 / Background Tiles with the list filled in)
   private async offerUsesRemap(m: Map16File): Promise<void> {
-    const o = m.origin, layer = this.bg ? 'bg' : 'fg';
-    if (!o || o.bg !== this.bg || o.tile === this.sel) return;
+    const layer = this.t.id === 'bg' ? 'bg' : 'fg', o = m.origin;
+    if (!o || o.bg !== (layer === 'bg') || o.tile === this.sel) return;
     const w = Math.min(16, m.width), line = remapLine(o.tile, w, m.height, this.sel);
     const { remap } = parseRemap(line, { what: 'numbers' });
     const users = planRemap(this.app.rom, layer, remap.tiles, levelSource(this.app, remap.tiles)).levels;
@@ -1633,7 +1566,7 @@ export class Map16Tab implements WsPanel {
   // imported tiles that draw from a slot holding no ExGFX in this level, while ExGFX the tiles don't use
   // are in other slots: their graphics are likely there. Offers the remap with that slot's offset.
   private async offerImportRemap(): Promise<void> {
-    const slots = layerSlots(this.gfxSlots());
+    const slots = layerSlots(this.t.vram());
     const count = new Map<number, number>(); // 128-tile region → quarters drawing from it
     for (const t of this.selection()) for (const w of this.words(t)) count.set((w & 0x3ff) >> 7, (count.get((w & 0x3ff) >> 7) ?? 0) + 1);
     const main = [...count.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
@@ -1653,10 +1586,11 @@ export class Map16Tab implements WsPanel {
   }
 
   private async exportMap16(): Promise<void> {
-    if (this.ow) return;
+    const d = this.t;
+    if (!d.files) return;
     const tiles = this.selection();
-    const data = writeMap16File({ width: this.selW, height: this.selH, tiles: tiles.map((t) => this.words(t)), acts: this.bg ? null : tiles.map((t) => actsLike(this.app.rom, t)) });
-    const name = `${this.bg ? 'bg' : 'fg'}_${hex(this.sel, 3)}.map16`;
+    const data = writeMap16File({ width: this.selW, height: this.selH, tiles: tiles.map((t) => d.words(t)), acts: d.acts ? tiles.map((t) => actsLike(this.app.rom, t)) : null });
+    const name = `${d.id}_${hex(this.sel, 3)}.map16`;
     if (await downloadBytes(name, data)) toast(`${name} exported`);
   }
 
@@ -1671,7 +1605,7 @@ export class Map16Tab implements WsPanel {
     if (k === 'Escape' && this.remapping) { if (this.visualFrom) { this.visualFrom = null; this.drawGfx(); } else this.closeRemap(); return true; }
     if (k === 'Escape') { if (!this.marked().size) return false; this.setMarks(new Set()); return true; }
     if (k === 'Enter' && !this.remapping) { this.fillMarked(); return true; }
-    if (k === 'F2' && !this.remapping && !this.moving && !this.ow) { this.nameInput.focus(); this.nameInput.select(); return true; }
+    if (k === 'F2' && !this.remapping && !this.moving && this.t.names) { this.nameInput.focus(); this.nameInput.select(); return true; }
     if (k === 'x' || k === 'X') { this.flip(FLIP_X, '↔ Flip'); return true; }
     if (k === 'y' || k === 'Y') { this.flip(FLIP_Y, '↕ Flip'); return true; }
     if (k >= '1' && k <= '8') { const p = Number(k) - 1; this.editQuarters(setPalette(p), `Palette ${p}`); return true; }
@@ -1684,7 +1618,7 @@ export class Map16Tab implements WsPanel {
     }
     if (k === 'ArrowLeft' || k === 'ArrowRight' || k === 'ArrowUp' || k === 'ArrowDown') {
       const d = k === 'ArrowLeft' ? -1 : k === 'ArrowRight' ? 1 : k === 'ArrowUp' ? -16 : 16;
-      const max = this.count();
+      const max = this.t.tiles;
       const n = this.sel + d;
       if (n < 0 || n >= max) return true;
       this.sel = n;
@@ -1697,6 +1631,7 @@ export class Map16Tab implements WsPanel {
   }
 
   previewClick(px: number, py: number): void {
+    if (!this.t.levelPreview) return;
     const t = this.ws.preview.tileAt(px, py);
     if (t >= 0) this.select(t, 'fg');
   }
