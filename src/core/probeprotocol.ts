@@ -82,7 +82,9 @@ export type LearnJob =
   | { kind: 'sizes'; level: KindLevel; layer2Pointer: number; specs: SizeSpec[] }
   | { kind: 'owMap'; map: number; progress: number }
   | { kind: 'owViews' }
-  | { kind: 'owSprites'; map: number; progress: number };
+  | { kind: 'owSprites'; map: number; progress: number }
+  | { kind: 'owCustom'; map: number; progress: number }
+  | { kind: 'owLooks'; ids: number[] };
 
 // Per kind of learn job where its result goes (keep, jobrunner.ts Keep) and whether it is a picture (CONTEXT.md, ADR
 // 0008): the levels' uses go to the entries of each level (the job keeps none); the prefab suggestions and the object
@@ -111,6 +113,8 @@ export const LEARN_KINDS: { [K in LearnJob['kind']]: { keep: Keep; picture: bool
   owMap: { keep: 'memory', picture: true, boot: false },
   owViews: { keep: 'memory', picture: true, boot: false },
   owSprites: { keep: 'memory', picture: true, boot: false },
+  owCustom: { keep: 'memory', picture: true, boot: false },
+  owLooks: { keep: 'memory', picture: true, boot: false },
 };
 export const learnKeep = (j: LearnJob): Keep => LEARN_KINDS[j.kind].keep;
 

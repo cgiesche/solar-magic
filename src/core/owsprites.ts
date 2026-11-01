@@ -8,12 +8,15 @@
 //   Y low, $04FB91 Y high; the tile checked at $04FBA1)
 // What the sprites look like at an event progress is learned by emulation (owSpriteImages): the overworld loaded,
 // each slot shown alone with the camera on it (on the main map it follows Mario), its OAM tiles those the game adds.
+// With BOWSIE installed (owcustom.ts) its loader has taken the place of the slots' table and load: there are none.
+// The custom sprites (BOWSIE's, Lunar Magic's table) are drawn the same way (customSpriteImages, customSpriteLooks).
 
 import type { Rom } from './rom.ts';
 import type { OverworldLoads } from './overworld.ts';
 import type { Job } from './jobrunner.ts';
 import { RAM, set16, getS16 } from './ram.ts';
 import { readPpuOam, drawTiles, tileKey, type SpriteImage } from './spritegfx.ts';
+import { bowsieInstalled, readCustomSprites, customEntryAddrs, type CustomOwSprite } from './owcustom.ts';
 
 export const START = 0x009ef0;
 const START_X = 6, START_Y = 8, START_TX = 0x0e, START_TY = 0x10; // offsets of player 1's words, player 2's + 4
@@ -48,6 +51,8 @@ export function writeOwSprite(rom: Rom, k: number, s: OwSprite): void {
   rom.writeBytes(a, Uint8Array.of(s.num, s.x & 0xff, (s.x >> 8) & 0xff, s.y & 0xff, (s.y >> 8) & 0xff));
 }
 export const readOwSprites = (rom: Rom): OwSprite[] => Array.from({ length: OW_SPRITE_SLOTS }, (_, k) => readOwSprite(rom, k));
+// the game's sprite slots are there (not with BOWSIE, whose code is where their table was)
+export const hasOwSpriteSlots = (rom: Rom): boolean => !bowsieInstalled(rom);
 
 // ---- Koopa Kids ----
 export function koopaKidPos(rom: Rom, k: number): { x: number; y: number } {
@@ -73,6 +78,7 @@ export function* owSpritesJob(loads: OverworldLoads, map: number, progress: numb
   return owSpriteImages(loads, map, progress);
 }
 function runSprites(loads: OverworldLoads, map: number, progress: number): OwSpriteView[] {
+  if (!hasOwSpriteSlots(loads.emu.rom)) return [];
   loads.restore(map, progress);
   const emu = loads.emu, s = emu.snes, w = s.wram, start = s.saveState(), sprites = readOwSprites(emu.rom);
   const nums = (keep: number) => { for (let k = 0; k < OW_SPRITE_SLOTS; k++) if (k !== keep) w[RAM.owSpriteNum + FIRST_SLOT + k] = 0; };
@@ -93,4 +99,56 @@ function runSprites(loads: OverworldLoads, map: number, progress: number): OwSpr
     const img = drawTiles(s, on.tiles.filter((t) => !base.has(tileKey(t))));
     return { image: img && { ...img, ox: img.ox + on.cx, oy: img.oy + on.cy }, z: on.z };
   });
+}
+
+// ---- custom sprites (BOWSIE) by emulation ----
+// Each shown alone on the map loaded at the progress: BOWSIE's slots emptied (as its clear_ram), the sprite put in
+// the first as its loader spawns one (number, pixel position and height, the first 4 extra bytes or, with more, the
+// address of its entry's extra bytes) and the camera on it (on the main map Mario put there); its own init and main
+// code then draw it, its image the OAM tiles it adds. Without BOWSIE none is shown.
+interface CustomRun { s: CustomOwSprite; extraAt: number }
+function runCustom(loads: OverworldLoads, map: number, progress: number, sprites: CustomRun[]): OwSpriteView[] {
+  if (!bowsieInstalled(loads.emu.rom) || !sprites.length) return sprites.map((r) => ({ image: null, z: r.s.z * 8 }));
+  loads.restore(map, progress);
+  const emu = loads.emu, s = emu.snes, w = s.wram, start = s.saveState();
+  const clear = () => { w.fill(0, RAM.bowsieNum, RAM.bowsieTablesEnd); w.fill(0, RAM.bowsieExtra1, RAM.bowsieExtra1 + 48); w.fill(0, RAM.bowsieExtra2, RAM.bowsieExtra2 + 48); };
+  const run = (one: CustomRun | null, x: number, y: number) => {
+    s.loadState(start);
+    clear();
+    if (one) {
+      const { s: sp, extraAt } = one, e = sp.extra;
+      set16(w, RAM.bowsieNum, sp.id); set16(w, RAM.bowsieX, sp.x * 8); set16(w, RAM.bowsieY, sp.y * 8); set16(w, RAM.bowsieZ, sp.z * 8);
+      if (e.length > 4) { set16(w, RAM.bowsieExtra1, extraAt & 0xffff); set16(w, RAM.bowsieExtra2, extraAt >> 16); }
+      else { w[RAM.bowsieExtra1] = e[0] ?? 0; w[RAM.bowsieExtra1 + 1] = e[1] ?? 0; w[RAM.bowsieExtra2] = e[2] ?? 0; w[RAM.bowsieExtra2 + 1] = e[3] ?? 0; }
+    }
+    if (!map) { set16(w, RAM.owPlayerX, x); set16(w, RAM.owPlayerY, y); }
+    for (let f = 0; f < SHOW_FRAMES; f++) s.runFrame();
+    return { tiles: readPpuOam(s.oam), cx: getS16(w, RAM.layer1X), cy: getS16(w, RAM.layer1Y) };
+  };
+  let bare: ReturnType<typeof run> | null = null;
+  return sprites.map((one) => {
+    const x = one.s.x * 8, y = one.s.y * 8;
+    const base = new Set((map ? (bare ??= run(null, x, y)) : run(null, x, y)).tiles.map(tileKey)), on = run(one, x, y);
+    const img = drawTiles(s, on.tiles.filter((t) => !base.has(tileKey(t))));
+    return { image: img && { ...img, ox: img.ox + on.cx, oy: img.oy + on.cy }, z: one.s.z * 8 };
+  });
+}
+// the custom sprites of map `map` (its list in Lunar Magic's table) as the game shows them at event progress
+// `progress`, in the list's order; kept as owSpriteImages
+export function customSpriteImages(loads: OverworldLoads, map: number, progress: number): OwSpriteView[] {
+  return loads.derive('customSpriteImages', () => {
+    const rom = loads.emu.rom, list = readCustomSprites(rom)[map] ?? [], at = customEntryAddrs(rom, map);
+    return runCustom(loads, map, progress, list.map((s, k) => ({ s, extraAt: (at[k] ?? 0) + 3 })));
+  }, `${map}-${progress}`);
+}
+export function* owCustomJob(loads: OverworldLoads, map: number, progress: number): Job<OwSpriteView[]> {
+  return customSpriteImages(loads, map, progress);
+}
+// how custom sprites `ids` look (the palette): each alone on the main map before any event, its extra bytes 0
+export function customSpriteLooks(loads: OverworldLoads, ids: number[]): (SpriteImage | null)[] {
+  return loads.derive('customSpriteLooks', () => runCustom(loads, 0, 0, ids.map((id) => ({ s: { id, x: 0x20, y: 0x20, z: 0, extra: [] }, extraAt: 0 })))
+    .map((v) => v.image && { ...v.image, ox: v.image.ox - 0x100, oy: v.image.oy - 0x100 }), ids.join(','));
+}
+export function* owLooksJob(loads: OverworldLoads, ids: number[]): Job<(SpriteImage | null)[]> {
+  return customSpriteLooks(loads, ids);
 }

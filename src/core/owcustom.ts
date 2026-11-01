@@ -51,12 +51,13 @@ export function customTable(rom: Rom): number | null {
   return pc >= 0 && pc < rom.data.length ? p : null;
 }
 
-function decode(rom: Rom, at: number, sizes: Uint8Array | null): { sprites: CustomOwSprite[]; end: number } {
-  const out: CustomOwSprite[] = [];
+function decode(rom: Rom, at: number, sizes: Uint8Array | null): { sprites: CustomOwSprite[]; end: number; addrs: number[] } {
+  const out: CustomOwSprite[] = [], addrs: number[] = [];
   let a = at;
   for (let guard = 0; guard < 0x100; guard++) {
-    if (rom.r16(a) === 0) return { sprites: out, end: a + 2 };
+    if (rom.r16(a) === 0) return { sprites: out, end: a + 2, addrs };
     const [b0, b1, b2] = rom.bytes(a, 3), id = b0 & 0x7f, n = customEntrySize(sizes, id);
+    addrs.push(a);
     out.push({ id, x: (b0 >> 7) | ((b1 & 0x1f) << 1), y: (b1 >> 5) | ((b2 & 7) << 3), z: b2 >> 3, extra: [...rom.bytes(a + 3, n - 3)] });
     a += n;
   }
@@ -68,6 +69,12 @@ export function readCustomSprites(rom: Rom, sizes = customSizeTable(rom)): Custo
   const t = customTable(rom);
   if (t === null) return Array.from({ length: OW_CUSTOM_SUBMAPS }, () => []);
   return Array.from({ length: OW_CUSTOM_SUBMAPS }, (_, m) => decode(rom, t + rom.r16(t + m * 2), sizes).sprites);
+}
+
+// where each sprite of submap `map` is in the table (its entry's address; [] without a table)
+export function customEntryAddrs(rom: Rom, map: number): number[] {
+  const t = customTable(rom);
+  return t === null ? [] : decode(rom, t + rom.r16(t + map * 2), customSizeTable(rom)).addrs;
 }
 
 // the table's bytes for the lists (each entry the size the sizes give it: extra bytes cut or padded with 0)

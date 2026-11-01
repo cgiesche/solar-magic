@@ -1198,6 +1198,14 @@ export class App {
   overworldSprites(map: number, progress: number, done: (v: OwSpriteView[]) => void): OwSpriteView[] | undefined {
     return this.probes.learn<OwSpriteView[]>(`ows1:${map}`, { kind: 'owSprites', map, progress }, { lane: 'ows', input: { progress }, replace: true, label: 'Overworld sprites', done });
   }
+  // the custom overworld sprites' images at a map and progress (BOWSIE's, owsprites.ts customSpriteImages), and how the
+  // installed ones look (the palette)
+  overworldCustomSprites(map: number, progress: number, done: (v: OwSpriteView[]) => void): OwSpriteView[] | undefined {
+    return this.probes.learn<OwSpriteView[]>(`owc1:${map}`, { kind: 'owCustom', map, progress }, { lane: 'owc', input: { progress }, replace: true, label: 'Overworld sprites', done });
+  }
+  overworldSpriteLooks(ids: number[], done: (v: (SpriteImage | null)[]) => void): (SpriteImage | null)[] | undefined {
+    return this.probes.learn<(SpriteImage | null)[]>(`owl1:${ids.join(',')}`, { kind: 'owLooks', ids }, { lane: 'owl', replace: true, label: 'Overworld sprites', done });
+  }
   // the levels with sprite id (spriteId), the open level as edited
   spriteUsers(id: number): SpriteUser[] {
     const n = this.level.number;

@@ -9,7 +9,8 @@ import { packageSummary } from '../src/core/pkgreg.ts';
 import { readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
 import { loadAsar } from '../src/core/asar.ts';
-import { OverworldEmulator } from '../src/core/overworld.ts';
+import { OverworldEmulator, OverworldLoads } from '../src/core/overworld.ts';
+import { customSpriteImages, customSpriteLooks } from '../src/core/owsprites.ts';
 import { readPpuOam } from '../src/core/spritegfx.ts';
 import { RAM, get16, getS16 } from '../src/core/ram.ts';
 import { saveBowsieProject, loadBowsieProject, removeBowsie, bowsieInstalled, bowsieSprites, type BowsieProject } from '../src/core/bowsie.ts';
@@ -77,6 +78,17 @@ const slots = (w: Uint8Array) => Array.from({ length: 24 }, (_, k) => ({ num: ge
   const load = emu.load(2, 0);
   sn.hook = null;
   check(load.ok && extra === 0x5a, `Vanilla Dome: the flying switch block's extra byte ${hx(extra)} in BOWSIE's extra table`);
+}
+
+// drawn by emulation: the main map's Piranha Plant where it is, Yoshi's Island's at its height; the palette's looks
+{
+  const loads = new OverworldLoads(new OverworldEmulator(new Rom(rom.data.slice())), 2);
+  const main = customSpriteImages(loads, 0, 0), yi = customSpriteImages(loads, 1, 0);
+  const i = main[0]?.image, j = yi[0]?.image;
+  check(main.length === 1 && !!i && i.ox === 0xa0 && i.oy === 0x60 && i.w >= 16, `main map: drawn at ${i && `${hx(i.ox)},${hx(i.oy)} ${i.w}x${i.h}`}`);
+  check(yi.length === 1 && !!j && j.ox === 0x50 && j.oy === 0x70 - 0x10 && yi[0].z === 0x10, `Yoshi's Island: drawn at ${j && `${hx(j.ox)},${hx(j.oy)}`}, height ${yi[0]?.z}`);
+  const looks = customSpriteLooks(loads, [4, 0x0c, 0x30]);
+  check(!!looks[0] && looks[0].w === 16 && !looks[2], `the palette: 04 ${looks[0] && `${looks[0].w}x${looks[0].h} at ${looks[0].ox},${looks[0].oy}`}, 0C ${looks[1] ? 'drawn' : 'none'}, 30 (no sprite) none`);
 }
 
 // removed: the ROM as before but the table (now with 3-byte entries… back to 4) and its pointer
