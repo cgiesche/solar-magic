@@ -126,7 +126,9 @@ When a level is displayed, it runs the ROM's **original loading routines** (~15 
   pasted text wraps (optionally justified like the game's texts), a character picker shows the font's glyphs, characters
   the font lacks get a look-alike. Hovering a message box sprite shows the message it opens – which one is learned by
   hitting it in the emulator. *Show in game* plays the level with the box open. The problem list reports boxes opening an
-  empty message and messages no box opens. The clean game's messages move to the levels that showed them.
+  empty message and messages no box opens. The clean game's messages move to the levels that showed them. When an
+  installed package draws the message boxes itself (a VWF dialog patch – the editor finds out by opening a box in the
+  emulator), the panel, the preview and the checks say which package draws them instead; its install says so too.
 * **Test level (T):** play the level in the built-in emulator (a changed level is saved first, so entering it again after dying plays the same), with keyboard or gamepad, with music and sound effects (M mutes the sound). It is played in a game in progress, entered from its overworld tile (a sub-level through its main level), so the midway tape counts: dying returns to the overworld, entering the level again starts at the midway point once touched.
 
 ### Music

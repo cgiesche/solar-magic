@@ -9,6 +9,7 @@ import { incompleteSprites, spriteMemDialog, spriteMemText, SPRITE_MEM_HELP } fr
 import { messageLevels, messageProblems, type MessageLevel } from '../core/messageuse.ts';
 import { loadLevel } from '../core/level.ts';
 import { levelMessages, spriteOpens } from './messagepanel.ts';
+import { currentMessageRoutine } from '../core/messagedraw.ts';
 
 // the sprites of the other levels showing the open level's messages, read again after a ROM change
 let sharing: { key: string; levels: MessageLevel[] } | null = null;
@@ -29,8 +30,9 @@ export function collectProblems(app: App, reveal: (uids: number[]) => void): Pro
   const out = [...levelProblems(app.level, app.vertical), ...exitProblems(app.rom, app.level, app.entrances.graph(), (s) => app.enterableOn(s))];
   const sc = app.levelScan;
   if (sc && sc.level === app.level.number) out.push(...scanProblems(app.level, sc.result, sc.uids));
+  // (a package drawing the message boxes: the editor's messages are not what players see, nothing to check)
   const tl = levelMessages(app);
-  out.push(...messageProblems(app.rom, tl, app.level, sharingLevels(app, tl), (s) => spriteOpens(app, s)));
+  if (currentMessageRoutine(app.rom).game) out.push(...messageProblems(app.rom, tl, app.level, sharingLevels(app, tl), (s) => spriteOpens(app, s)));
   const inc = incompleteSprites(app);
   if (inc.length) {
     out.push({ key: 'sprite-mem', severity: 'warn', text: `${spriteMemText(inc.length)}: not enough sprite memory`, title: SPRITE_MEM_HELP,

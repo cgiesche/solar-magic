@@ -10,7 +10,7 @@
 // - removePackage: the package and everything it brought, files shared with other packages kept.
 
 import { zipSync, unzipSync } from 'fflate';
-import type { Rom } from './rom.ts';
+import { Rom } from './rom.ts';
 import { reapplyPatch, type ApplyResult } from './patchapply.ts';
 import type { PartKind, ToolKind } from './parts.ts';
 import { PART_LABEL } from './parts.ts';
@@ -32,6 +32,7 @@ import { assignSlot } from './gfxslots.ts';
 import { recordPackageChange, recordPackageChangeAsync, listPackages, packageArchive, uninstallPackage, savePackage, type Package } from './pkgreg.ts';
 import { uploadObjectText, objectTextNotes, isObjectTextFile } from './objtext.ts';
 import { allOrNothing } from './romedit.ts';
+import { messageRoutineTaken } from './messagedraw.ts';
 import { callistoProject, includesCallistoHeader, sharedCode, type CallistoProject } from './callisto.ts';
 import { replacedPatch, replacedNote } from './replaced.ts';
 import { partAdapter, DETECT_ORDER, PART_ORDER, SHARED_CODE, planInstall, planUpload, applyParts, pixiListed, applyAssignment, patchSource, partsOf, sfxLinkedFiles,
@@ -193,7 +194,8 @@ export function defaultAssignment(p: ManualPreview, level: number): ManualAssign
 
 // sample: the sample level to put in place of the current one (a level edit, not saved yet); samples: the
 // levels sample levels were written as (InstallOptions.samples)
-export interface InstallResult extends ApplyResult { pkg: Package | null; sample?: SampleLevel; samples?: number[] }
+// messages: set when the package took over drawing the message boxes (the editor's message editing no longer applies)
+export interface InstallResult extends ApplyResult { pkg: Package | null; sample?: SampleLevel; samples?: number[]; messages?: string }
 
 // the sample level `file` as level `into` – the current one, or (`own`) the level of its own number with
 // its screen exits and graphics slots – with the package's parts where they landed: Map16 tiles by the plan
@@ -278,6 +280,7 @@ export async function installPackage(rom: Rom, preview: ReadyPreview | ManualPre
   const prints: string[] = [];
   let sample: SampleLevel | undefined;
   const samples: number[] = [];
+  const before = new Rom(rom.data.slice());
   try {
     const archive = zipSync(Object.fromEntries(preview.files), { level: 9 });
     const target = { name: preview.name, fileName: preview.fileName, archive };
@@ -337,7 +340,10 @@ export async function installPackage(rom: Rom, preview: ReadyPreview | ManualPre
       warnings.push(...objectTextNotes(rom, pkg.name, text));
       pkg = savePackage(rom, { ...pkg, objectText: text });
     }
-    return { ok: true, errors: [], warnings, prints, pkg, sample, ...(samples.length ? { samples } : {}) };
+    // (also a warning: the install's log says it)
+    const messages = messageRoutineTaken(before, rom);
+    if (messages) warnings.push(messages);
+    return { ok: true, errors: [], warnings, prints, pkg, sample, ...(samples.length ? { samples } : {}), ...(messages ? { messages } : {}) };
   } catch (e) {
     return failed([e instanceof Error ? e.message : String(e)], warnings, prints);
   }

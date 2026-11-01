@@ -96,7 +96,7 @@ function installDialog(app: App, p: ReadyPreview | ManualPreview, body: HTMLElem
     const sample = r.sample;
     if (sample) app.replaceLevel(sample.level);
     const own = r.samples?.length ? `, its sample level(s) as level ${r.samples.map((n) => hex(n, 3)).join(', ')}` : '';
-    toast(`“${p.name}” installed${r.warnings.length ? ` (${r.warnings.length} warning(s))` : ''}${sample ? `, its sample level in place of level ${hex(app.level.number, 3)} (not saved yet)` : ''}${own} – Ctrl+Z undoes it.`);
+    toast(`“${p.name}” installed${r.warnings.length ? ` (${r.warnings.length} warning(s))` : ''}${sample ? `, its sample level in place of level ${hex(app.level.number, 3)} (not saved yet)` : ''}${own} – Ctrl+Z undoes it.${r.messages ? ` ${r.messages}` : ''}`);
     done(r.pkg);
   };
   const dlg = modal(`Upload: ${p.name}`, body, [

@@ -22,6 +22,7 @@ import { inspectUpload, installPackage, planUpload } from '../src/core/packages.
 import { listPatches } from '../src/core/patchreg.ts';
 import { listPackages } from '../src/core/pkgreg.ts';
 import { loadLevel, readSecondaryHeader, entrancePos, midwaySpot } from '../src/core/level.ts';
+import { messageRoutine } from '../src/core/messagedraw.ts';
 import { editorImage } from './fixture.ts';
 
 await loadAsar();
@@ -50,6 +51,12 @@ const before = listPatches(rom).length;
 const r = await installPackage(rom, p, { level: 0x106, blank, tileWords: (t) => src.fg(t), setup: false, plan: planUpload(rom, p, blank), samples: [L('105'), L('13B')] });
 if (!r.ok) console.log(r.errors.slice(0, 5).join('\n'));
 check(r.ok && r.samples?.join() === [0x105, 0x13b].join(), `installed as one upload with the sample levels 105 and 13B (${r.samples?.map(hx).join(', ')})`);
+
+// its patches leave the message routine alone: the game draws the editor's messages, the install says nothing of it
+{
+  const m = messageRoutine(rom);
+  check(m.game && m.level !== null && !r.messages, `the game draws the editor's messages (played in level ${m.level === null ? '–' : hx(m.level)}), the install summary says nothing of them`);
+}
 
 const pkg = listPackages(rom);
 const base = (f: string) => f.slice(f.lastIndexOf('/') + 1).replace(/\.asm$/, '');

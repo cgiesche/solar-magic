@@ -2,6 +2,8 @@
 // message box sprite, a problem about a message), in place of the picker. The message is typed into the game's
 // box itself (messagebox.ts), drawn in the ROM's own font as the level has it; every change is a ROM edit (typing
 // in one message merges into one step). Also the hover preview of the message a sprite in the level opens.
+// While a package draws the message boxes instead of the game (messagedraw.ts), neither edits nor previews: they
+// say which package draws them.
 
 import type { App } from './app.ts';
 import { h, checkbox, toast } from './dom.ts';
@@ -16,6 +18,7 @@ import {
 } from '../core/messages.ts';
 import { boxOf, boxMessage, trimLine, typeCode, newline, backspace, del, move, charsLeft, paste, justifyBox, suggestion, type Box, type Move } from '../core/messagebox.ts';
 import { messageTranslevel, messageLevels } from '../core/messageuse.ts';
+import { currentMessageRoutine, messageRoutineNote } from '../core/messagedraw.ts';
 import { openTestPlay } from './testplay.ts';
 
 const W = MSG_COLS * 8 + 16, H = MSG_LINES * 8 + 16; // the box with its black border, in pixels
@@ -67,9 +70,15 @@ export function showMessageHover(app: App, e: MouseEvent, tl: number, msg: numbe
     hover = { root: h('div', { class: 'msg-hover' }, text, canvas), canvas, text, drawn: '', render: null };
   }
   if (!hover.root.isConnected) document.body.append(hover.root);
+  const drawn = currentMessageRoutine(app.rom);
+  hover.canvas.hidden = !drawn.game;
+  if (!drawn.game) {
+    hover.text.textContent = `${what} · ${messageRoutineNote(drawn)}`;
+    hover.drawn = '';
+  }
   const m = readMessage(app.rom, tl, msg), key = `${what}:${m.join('/')}`;
   // (drawn again when the message or the level's font changed)
-  if (key !== hover.drawn || app.render !== hover.render) {
+  if (drawn.game && (key !== hover.drawn || app.render !== hover.render)) {
     hover.text.textContent = `${what}${isBlank(m) ? ' – empty' : ''} · double click to edit`;
     drawMessage(app, hover.canvas, m);
     hover.drawn = key;
@@ -126,6 +135,8 @@ export class MessagePanel {
     this.root.replaceChildren();
     if (!app.messages) { this.box = null; this.shown = ''; return; }
     const { translevel: t, msg: n } = app.messages;
+    const drawn = currentMessageRoutine(rom);
+    if (!drawn.game) { this.replaced(t, n, messageRoutineNote(drawn)); return; }
     const key = `${t}:${n}`, m = readMessage(rom, t, n);
     // the box as edited while it shows the same text (the caret, spaces typed at a line's end stay)
     if (!this.box || this.shown !== key || JSON.stringify(boxMessage(this.box).map(trimLine)) !== JSON.stringify(m.map(trimLine))) {
@@ -171,6 +182,21 @@ export class MessagePanel {
     this.draw();
     this.blink = window.setInterval(() => { this.caretOn = !this.caretOn; this.draw(); }, 530);
     if (focused) this.input.focus();
+  }
+
+  // a package draws the message boxes: what the panel says instead of the box (the game shows the package's text)
+  private replaced(t: number, n: number, note: string): void {
+    const app = this.app, show = messageToShow(app.rom, t, n);
+    this.box = null; this.shown = ''; this.canvas = null; this.input = null; this.where = null; this.note = null;
+    this.root.append(
+      h('div', { class: 'panel-title' }, 'Message boxes', h('button', { class: 'msg-close', title: 'Close – back to the picker', onclick: () => app.closeMessages() }, '×')),
+      h('div', { class: 'hint warn-text' }, `⚠ ${note}`),
+      h('div', { class: 'hint' }, 'Edit them as that package says (its manual). Message editing comes back here when the package is removed.'),
+      h('div', { class: 'row' }, h('button', {
+        disabled: t !== YOSHI_THANKS.translevel && t !== levelMessages(app), onclick: () => openTestPlay(app, undefined, false, show),
+        title: 'Test play this level with the message box open: what the package shows',
+      }, '▶ Show in game')),
+    );
   }
 
   // the levels showing the messages, the translevel's role in the game
