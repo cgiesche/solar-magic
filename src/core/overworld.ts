@@ -2,7 +2,7 @@
 
 import { Rom, snesToPc } from './rom.ts';
 import { Snes, type SnesState } from './snes.ts';
-import { RomReads, updateBytePages } from './romdeps.ts';
+import { RomReads, record, countReads, holds } from './romdeps.ts';
 import { rleDecode, rleEncode } from './rle.ts';
 import { GM, RAM } from './ram.ts';
 import { assemble } from './asar.ts';
@@ -708,14 +708,12 @@ export class OverworldEmulator {
     this.rom = rom;
     this.snes = new Snes(rom.data);
     this.romGen = rom.gen;
-    updateBytePages(rom);
   }
-  // catches up with a changed ROM (rom.gen): the byte pages follow its data (overworld data moved to free space is
-  // recorded by byte at its new place), and a change of what reaching the title screen read makes its snapshot stale
-  // (as LevelEmulator's boot snapshot)
+  // catches up with a changed ROM (rom.gen): a change of what reaching the title screen read makes its snapshot stale
+  // (as LevelEmulator's boot snapshot). (The byte pages follow its data by themselves: a recorder takes the ROM
+  // state's, overworld data moved to free space is recorded by byte at its new place.)
   private sync(): void {
     this.snes.rom = this.rom.data;
-    updateBytePages(this.rom);
     if (this.romGen === this.rom.gen) return;
     this.romGen = this.rom.gen;
     if (this.title?.reads.differ(this.title.rom, this.rom.data)) { this.titleState = null; this.title = null; }
@@ -729,7 +727,7 @@ export class OverworldEmulator {
     this.after = null;
     if (!this.titleState) {
       // (an outer recorder gets these reads with the load's, which start from them)
-      const outer = s.romReads, reads = new RomReads(this.rom.data.length);
+      const outer = s.romReads, reads = new RomReads(this.rom);
       s.romReads = reads;
       try {
         s.reset();
@@ -741,7 +739,7 @@ export class OverworldEmulator {
     } else s.loadState(this.titleState);
     const w = s.wram;
     let n = 0;
-    const outer = s.romReads, reads = new RomReads(this.rom.data.length, this.title!.reads);
+    const outer = s.romReads, reads = new RomReads(this.rom, this.title!.reads);
     this.lastReads = reads;
     s.romReads = reads;
     try {
@@ -827,13 +825,10 @@ export class OverworldLoads {
   // and the editor code's; a load not kept yet isn't kept for `load` (the slider's stay)
   derive<T>(key: string, make: (load: (map: number, progress: number) => OwRender) => T, of = ''): T {
     let d = this.derived.get(key);
-    if (!d || d.of !== of || !this.holds(d)) {
-      const emu = this.emu, s = emu.snes, gen = emu.rom.gen, reads = new RomReads(emu.rom.data.length);
-      const outer = s.romReads, outerRom = emu.rom.reads;
-      s.romReads = emu.rom.reads = reads; // the emulated CPU's reads and the editor code's
-      try {
-        d = { v: make((map, progress) => this.load(map, progress, false).r), of, gen, reads };
-      } finally { s.romReads = outer; emu.rom.reads = outerRom; }
+    if (!d || d.of !== of || !holds(this.emu.rom, d)) {
+      // (the emulated CPU's reads and the editor code's)
+      const { result, reads, gen } = record(this.emu.rom, () => make((map, progress) => this.load(map, progress, false).r), { cpu: this.emu.snes, counted: false });
+      d = { v: result, of, gen, reads };
       this.derived.set(key, d);
     }
     this.count(d.reads);
@@ -841,9 +836,7 @@ export class OverworldLoads {
   }
   // reads (of a kept result) count for the recorders running (a derive's, an outer one) as if read now
   private count(reads: RomReads): void {
-    const s = this.emu.snes, outerRom = this.emu.rom.reads;
-    s.romReads?.add(reads);
-    if (outerRom && outerRom !== s.romReads) outerRom.add(reads);
+    countReads(this.emu.rom, this.emu.snes, reads);
   }
   // the kept load, else a new one (kept when `keep`)
   private load(map: number, progress: number, keep = true): KeptLoad {
@@ -851,7 +844,7 @@ export class OverworldLoads {
     let k = this.kept.get(key);
     if (k) {
       this.kept.delete(key);
-      if (!this.holds(k)) k = undefined;
+      if (!holds(this.emu.rom, k)) k = undefined;
       else keep = true;
     }
     if (!k) {
@@ -862,13 +855,6 @@ export class OverworldLoads {
     if (keep) this.kept.set(key, k);
     this.count(k.reads);
     return k;
-  }
-  // a kept result still holds (then it is as of the current ROM)
-  private holds(k: Kept): boolean {
-    const rom = this.emu.rom, changes = rom.changesSince(k.gen);
-    if (!changes || k.reads.touches(changes)) return false;
-    k.gen = rom.gen;
-    return true;
   }
 }
 

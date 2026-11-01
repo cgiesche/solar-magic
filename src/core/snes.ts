@@ -6,7 +6,7 @@
 import { CPU, type Bus } from './cpu.ts';
 import type { PPU, PpuState } from './ppu.ts';
 import { APU_CLOCKS_PER_FRAME, type Apu } from './apu.ts';
-import { BYTE_PAGES, type RomReads } from './romdeps.ts';
+import type { RomReads } from './romdeps.ts';
 
 export const CYCLES_PER_LINE = 170; // approximate CPU cycles (slow bus accesses) per scanline
 export const LINES_PER_FRAME = 262;
@@ -191,7 +191,8 @@ export class Snes implements Bus {
   private recordRead(ro: number): void {
     if (this.romSkip.has(ro)) return;
     if (this.romSkipMask !== null && this.romSkipMask[ro] === 1) { this.romMasked?.read(ro); return; }
-    if (BYTE_PAGES[ro >> 8]) this.romReads!.bytes.add(ro); else this.romReads!.pages[ro >> 8] = 1;
+    const r = this.romReads!;
+    if (r.bytePages[ro >> 8]) r.bytes.add(ro); else r.pages[ro >> 8] = 1;
   }
 
   // ROM read with hooks or data provenance tracking on

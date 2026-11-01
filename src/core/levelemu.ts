@@ -8,7 +8,7 @@ import { L1_PTRS, L2_PTRS, SPR_PTRS, SEC_HDR, LEVEL_SIZE_TABLE, mainTranslevel }
 import { translevelToLevel, l1XY } from './overworld.ts';
 import { editorPatch, musicPatch, BG_HOOK, HEADER_MUSIC_TABLE } from './patches.ts';
 import { lt3Patches, type Lt3Place } from './layer3gfx.ts';
-import { RomReads, updateBytePages, PAGE_SHIFT } from './romdeps.ts';
+import { RomReads, record, countReads, PAGE_SHIFT, type Recorded } from './romdeps.ts';
 import { applyTriggers, type TriggerView } from './extrigger.ts';
 import { inputHash, levelInput } from './inputs.ts';
 import { GM, RAM, SPR, MAP_BASE, MAP_SIZE, MAP_HI, CDM16_FLAGS, getS16, set16, setSpritePos } from './ram.ts';
@@ -102,7 +102,6 @@ export class LevelEmulator {
     this.snes = new Snes(rom.data);
     this.snes.overlay = this.overlay;
     this.romGen = rom.gen;
-    updateBytePages(rom);
   }
 
   bootReads: RomReads | null = null; // ROM read while booting (every load starts from that state)
@@ -125,7 +124,7 @@ export class LevelEmulator {
     this.sync();
     const s = this.snes;
     s.powerOn();
-    const masked = new RomReads(this.rom.data.length), outerMasked = s.romMasked;
+    const masked = new RomReads(this.rom), outerMasked = s.romMasked;
     s.romMasked = masked;
     try {
       this.bootReads = this.tracked(() => {
@@ -151,32 +150,19 @@ export class LevelEmulator {
 
   // runs fn recording the ROM it reads, on top of base (default: the boot's); the reads also
   // count for an enclosing tracked() call (with counted false only when given to count())
-  tracked<T>(fn: () => T, base: RomReads | null = this.bootReads, counted = true): { result: T; reads: RomReads } {
-    const s = this.snes, outer = s.romReads, outerRom = this.rom.reads, outerMask = s.romSkipMask;
-    const reads = new RomReads(this.rom.data.length, base);
-    s.romReads = this.rom.reads = reads; // the emulated CPU's reads and the editor code's
-    if (!outer) s.romSkipMask = this.skipMask?.() ?? null;
-    try {
-      return { result: fn(), reads };
-    } finally {
-      s.romReads = outer;
-      s.romSkipMask = outerMask;
-      this.rom.reads = outerRom;
-      if (counted) this.count(reads);
-    }
+  tracked<T>(fn: () => T, base: RomReads | null = this.bootReads, counted = true): Recorded<T> {
+    return record(this.rom, fn, { cpu: this.snes, base, mask: this.skipMask, counted });
   }
 
   // reads (of a tracked() call not counted) count for the enclosing tracked() call as if read in it
   count(reads: RomReads): void {
-    const outer = this.snes.romReads, outerRom = this.rom.reads;
-    outer?.add(reads);
-    if (outerRom && outerRom !== outer) outerRom.add(reads);
+    countReads(this.rom, this.snes, reads);
   }
 
   // runs fn recording every ROM byte it and the boot it starts from read, those skipMask leaves out too: what
   // fn's outcome depends on (a render shows GFX file data)
-  recordAll<T>(fn: () => T): { result: T; reads: RomReads } {
-    const s = this.snes, outer = s.romMasked, masked = new RomReads(this.rom.data.length);
+  recordAll<T>(fn: () => T): Recorded<T> {
+    const s = this.snes, outer = s.romMasked, masked = new RomReads(this.rom);
     s.romMasked = masked;
     try {
       const r = this.tracked(fn);
@@ -190,11 +176,9 @@ export class LevelEmulator {
   // Every entry (boot, load, startGame, call, animationFrames) first catches up with a changed ROM
   // (rom.gen): the data array may be replaced (expansion), and a change of what the boot read (a
   // patch's power-on code, e.g. Retry System's RAM setup) makes the boot snapshot stale: boot again
-  // with the next load. The byte pages are computed again when another ROM's were computed since (a
-  // check only, when they are this ROM state's).
+  // with the next load.
   private sync(): void {
     this.snes.rom = this.rom.data;
-    updateBytePages(this.rom);
     if (this.romGen === this.rom.gen) return;
     this.romGen = this.rom.gen;
     if (this.baseState && this.bootReads && this.bootRom &&

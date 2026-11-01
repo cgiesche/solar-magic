@@ -10,7 +10,7 @@ import { saveLevel } from '../src/core/save.ts';
 import { DM16_EXT, setGfxEntry, levelGfx, setLevelGfx, editorPatch, setCustomPalette, bgBank, setBgBank } from '../src/core/patches.ts';
 import { PREFAB_EXT, writePrefab, TRANSPARENT } from '../src/core/prefabs.ts';
 import { setActsLike, setExtTileWords, extTileWords } from '../src/core/map16ext.ts';
-import { ResultCache, RomFingerprint, RomReads, PAGE_SHIFT, BYTE_PAGES, type RomDeps } from '../src/core/romdeps.ts';
+import { ResultCache, RomFingerprint, RomReads, PAGE_SHIFT, bytePages, type RomDeps } from '../src/core/romdeps.ts';
 import { captureSprites } from '../src/core/spritegfx.ts';
 import { ProbeHost } from '../src/core/probehost.ts';
 import { jobKey, type ProbeJob } from '../src/core/probeprotocol.ts';
@@ -164,7 +164,7 @@ check(uses.missing(levels).length === 0, 'every level known after scanning');
   // a level's data moving to free space: what read its old place and its pointer is dropped
   {
     const lv = loadLevel(rom, 0x106), a = lv.l1Addr;
-    const pointer = new RomReads(rom.data.length); pointer.read(snesToPc(L1_PTRS + 0x106 * 3), 3);
+    const pointer = new RomReads(rom); pointer.read(snesToPc(L1_PTRS + 0x106 * 3), 3);
     const pointerDeps = results.fp.deps(pointer);
     for (let i = 0; i < 40; i++) lv.objects.push({ uid: newUid(), num: 0x21, ext: 0, x: 0x10 + i, y: 0x10, size: 0 });
     saveLevel(rom, lv);
@@ -231,7 +231,7 @@ check(uses.missing(levels).length === 0, 'every level known after scanning');
   kept('level 105\'s BG tilemap stored', 0x105);
   const [first, last] = pages(stored(0x105));
   emu.load(0x105);
-  check(last - first > 1 && BYTE_PAGES.subarray(first, last + 1).every((b) => b === 1), `its pages (${first.toString(16)}-${last.toString(16)}) are recorded by byte`);
+  check(last - first > 1 && bytePages(rom).subarray(first, last + 1).every((b) => b === 1), `its pages (${first.toString(16)}-${last.toString(16)}) are recorded by byte`);
   edit(0x106, 1);
   check(pages(stored(0x106))[0] === last, `level 106's BG tilemap is stored on its last page (${stored(0x106)[0].toString(16)})`);
   kept('level 106\'s BG tilemap stored next to it', 0x106);

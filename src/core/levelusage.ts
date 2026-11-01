@@ -9,7 +9,7 @@
 // - GFX slots (gfxslots.ts) and sprites are read from the ROM.
 
 import { snesToPc, type Rom } from './rom.ts';
-import { storeKey, type ResultCache, type CacheEntry } from './romdeps.ts';
+import { storeKey, unrecorded, type ResultCache, type CacheEntry } from './romdeps.ts';
 import type { LevelEmulator, LevelRender, LevelOverride } from './levelemu.ts';
 import { OV_L1, OV_L2, MAP_BASE } from './levelemu.ts';
 import {
@@ -145,9 +145,14 @@ export class LevelUses {
     if (this.inputs.gen !== this.rom.gen) this.inputs = { gen: this.rom.gen, of: new Map() };
     let v = this.inputs.of.get(n);
     if (v === undefined) {
-      const reads = this.rom.reads;
-      this.rom.reads = null; // (reading the level isn't part of an emulated result: it is its input)
-      try { const lv = loadLevel(this.rom, n); v = { lv, input: inputHash(levelInput(n, levelOverride(this.rom, lv))) }; } catch { v = null; } finally { this.rom.reads = reads; }
+      const rom = this.rom;
+      // (reading the level isn't part of an emulated result: it is its input)
+      v = unrecorded(rom, () => {
+        try {
+          const lv = loadLevel(rom, n);
+          return { lv, input: inputHash(levelInput(n, levelOverride(rom, lv))) };
+        } catch { return null; }
+      });
       this.inputs.of.set(n, v);
     }
     return v;

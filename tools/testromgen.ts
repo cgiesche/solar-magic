@@ -2,10 +2,11 @@
 // of the bytes already there is no change. Emulators catch up by themselves with the next entry – no syncing by
 // the caller – and boot again only when what the boot read changed; the fingerprint rehashes changed pages only.
 import { readFileSync } from 'node:fs';
-import { Rom, snesToPc } from '../src/core/rom.ts';
+import { Rom, snesToPc, pcToSnes } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { OverworldEmulator } from '../src/core/overworld.ts';
-import { RomFingerprint, BYTE_PAGES, bytePagesStats, updateBytePages } from '../src/core/romdeps.ts';
+import { RomFingerprint, RomReads, bytePages, record, PAGE_SHIFT } from '../src/core/romdeps.ts';
+import { levelDataRanges } from '../src/core/level.ts';
 import { gfxSkipMask } from '../src/core/gfxpages.ts';
 import { installEditorPatch, gfxEntry } from '../src/core/patches.ts';
 import { lz2Decompress, lz2Compress } from '../src/core/lz2.ts';
@@ -191,31 +192,41 @@ const TITLE_BYTE = 0x7fc0; // the internal name: not read while booting
   check(ow.titleState !== title && ow.titleState !== null, 'overworld: change of what the title read: reached again');
 }
 
-// the byte pages are computed once per ROM state, whichever emulator catches up with it first; another ROM in the
-// process (a test's, the probe worker's copy) has its own state, also at the same generation number
+// the byte pages belong to a ROM state: computed once for it, whoever asks first; another ROM in the process (a
+// test's, the probe worker's copy) has its own, also at the same generation number. A recorder takes its ROM's: no
+// emulator has to set them up first.
 {
-  const rom = fresh(), runs = () => bytePagesStats.runs;
-  const r0 = runs();
+  const rom = fresh(), pages = bytePages(rom);
   const a = new LevelEmulator(rom), b = new LevelEmulator(rom), ow = new OverworldEmulator(rom);
-  check(runs() - r0 === 1, `three emulators created on one ROM: computed once (${runs() - r0})`);
   a.load(0x105); b.load(0x105); ow.load(0, 0);
-  check(runs() - r0 === 1, `their loads on the unchanged ROM: not computed again (${runs() - r0})`);
+  check(bytePages(rom) === pages, 'emulators and loads on the unchanged ROM: its byte pages not computed again');
   rom.writeAt(TITLE_BYTE, Uint8Array.of(0x20));
-  a.load(0x105); b.load(0x105); ow.load(0, 0);
-  check(runs() - r0 === 2, `a change, three emulators catching up: computed once more (${runs() - r0})`);
-  const vanilla = BYTE_PAGES.slice();
+  const changed = bytePages(rom);
+  check(changed !== pages && bytePages(rom) === changed, 'a change: computed once more');
   const other = fresh();
   installEditorPatch(other);
   // (both at the same generation number: it alone doesn't tell the ROM states apart)
   while (other.gen < rom.gen) other.writeAt(TITLE_BYTE, Uint8Array.of(other.gen & 1 ? 0x21 : 0x22));
   while (rom.gen < other.gen) rom.writeAt(TITLE_BYTE, Uint8Array.of(rom.gen & 1 ? 0x21 : 0x22));
-  a.load(0x105);
-  const r1 = runs();
-  updateBytePages(other);
-  const patched = BYTE_PAGES.slice();
-  check(other.gen === rom.gen && runs() - r1 === 1 && patched.some((v, i) => v !== vanilla[i]), 'another ROM at the same generation: its own byte pages');
-  a.load(0x105); // (its ROM unchanged since its last load)
-  check(runs() - r1 === 2 && BYTE_PAGES.every((v, i) => v === vanilla[i]), 'back to the first ROM\'s emulator: its byte pages again');
+  const vanilla = bytePages(rom), patched = bytePages(other);
+  check(other.gen === rom.gen && patched !== vanilla && patched.some((v, i) => v !== vanilla[i]), 'another ROM at the same generation: its own byte pages');
+  // a level's data is on byte pages with the editor patch only; read without any emulator or set-up call
+  const [start] = levelDataRanges(other)[0], page = start >> PAGE_SHIFT;
+  const read = (r: Rom) => record(r, () => r.r8(pcToSnes(start))).reads;
+  const ro = read(other), rv = read(rom);
+  check(patched[page] === 1 && ro.bytes.has(start) && !ro.pages[page], `the patched ROM records a read in a level's data (${start.toString(16)}) by byte`);
+  check(vanilla[page] === 0 && rv.pages[page] === 1 && !rv.bytes.has(start), 'the vanilla ROM records the same read by page');
+  // two emulators, one per ROM, loading in turns: each records against its own ROM's byte pages
+  const e = new LevelEmulator(other);
+  e.load(0x105);
+  const own = (r: Rom, reads: RomReads) => {
+    const bp = bytePages(r);
+    return reads.bytePages === bp && [...reads.bytes].every((o) => bp[o >> PAGE_SHIFT] === 1) && reads.pages.every((v, p) => !v || !bp[p]);
+  };
+  const tv = a.tracked(() => a.load(0x105)), tp = e.tracked(() => e.load(0x105)), tv2 = a.tracked(() => a.load(0x106));
+  check(own(rom, tv.reads) && own(other, tp.reads) && own(rom, tv2.reads), 'level loads on two ROMs in turns: each recorded against its ROM\'s byte pages');
+  const differ = [...tp.reads.bytes].some((o) => !vanilla[o >> PAGE_SHIFT] && tv.reads.pages[o >> PAGE_SHIFT]);
+  check(differ, 'a page read by both loads is recorded by byte on the patched ROM, by page on the vanilla one');
 }
 
 // the fingerprint follows the ROM without an emulator

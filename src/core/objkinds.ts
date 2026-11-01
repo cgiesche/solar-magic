@@ -126,7 +126,7 @@ export class ObjKindProbe {
   // what the result depends on: the single ROM bytes the object routines read (not the level load
   // around them, so saving a level doesn't drop it)
   reads(): RomReads {
-    const r = new RomReads(this.emu.rom.data.length);
+    const r = new RomReads(this.emu.rom);
     for (const o of this.romRead) r.bytes.add(o);
     return r;
   }

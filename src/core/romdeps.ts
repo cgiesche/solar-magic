@@ -18,6 +18,7 @@
 // read its bytes.
 
 import type { Rom } from './rom.ts';
+import type { Snes } from './snes.ts';
 import { snesToPc, type RomRange } from './rom.ts';
 import { editorPatch, customPalettePatch, bgPatch, GFX_FILES, GFX_BYPASS_ENTRIES } from './patches.ts';
 import { exanimDataRanges } from './exanim.ts';
@@ -33,64 +34,81 @@ export interface RomDeps {
   h2: number;
 }
 
-// pages whose reads are recorded by byte
-export const BYTE_PAGES = new Uint8Array(0x10000);
-BYTE_PAGES.fill(1, 0x2e000 >> PAGE_SHIFT, 0x30000 >> PAGE_SHIFT);
-BYTE_PAGES[0x7f00 >> PAGE_SHIFT] = 1;
-const FIXED_BYTE_PAGES = BYTE_PAGES.slice();
+// pages whose reads are recorded by byte in every ROM state: the level tables and the ROM header page
+const FIXED_BYTE_PAGES = new Uint8Array(0x10000);
+FIXED_BYTE_PAGES.fill(1, 0x2e000 >> PAGE_SHIFT, 0x30000 >> PAGE_SHIFT);
+FIXED_BYTE_PAGES[0x7f00 >> PAGE_SHIFT] = 1;
 
-// the ROM state the byte pages were last computed for (a Rom and its generation: several ROMs may be in one process;
-// one slot, not a WeakMap as other per-ROM caches: the one table holds one ROM state's pages)
-let bytePagesOf: { rom: WeakRef<Rom>; gen: number } | null = null;
-export const bytePagesStats = { runs: 0 }; // computations (not those skipped as up to date)
-
-// adds the byte pages of this ROM's editor patch tables, its level palettes' pointers, its free space blocks' edges,
-// ExAnimation data, overworld data and level data (call when the ROM may have changed: computed once per ROM state,
-// whichever emulator asks first); the GFX file pointers and the ExAnimation data aren't recorded at all (see
-// gfxSkipMask), byte pages keep the rest of their pages from counting them (an animation list next to code that is run)
-export function updateBytePages(rom: Rom): void {
-  if (bytePagesOf && bytePagesOf.gen === rom.gen && bytePagesOf.rom.deref() === rom) return;
-  bytePagesOf = { rom: new WeakRef(rom), gen: rom.gen };
-  bytePagesStats.runs++;
-  BYTE_PAGES.set(FIXED_BYTE_PAGES);
+// runs fn without recording the ROM bytes the editor code reads (Rom.reads): what it reads isn't part of the
+// computation running around it (a level's data read as a load's input, a mask kept per ROM state)
+export function unrecorded<T>(rom: Rom, fn: () => T): T {
   const reads = rom.reads;
   rom.reads = null;
-  try {
-    const markPc = (o: number, end: number) => BYTE_PAGES.fill(1, o >> PAGE_SHIFT, ((end - 1) >> PAGE_SHIFT) + 1);
-    for (const [a, b] of exanimDataRanges(rom)) markPc(a, b);
-    for (const [a, b] of overworldDataRanges(rom)) markPc(a, b);
-    // the pages a block in free space shares with the free space around it, which a save fills (code and tables
-    // every level reads next to a level's data)
-    for (const b of rom.scanRats()) { markPc(b.start, b.start + 1); markPc(b.start + 7 + b.size, b.start + 8 + b.size); }
-    const p = editorPatch(rom);
-    if (!p) return;
-    // (after the patch's check: where a level's sprite data lies needs its sprite bank table)
-    for (const [a, b] of levelDataRanges(rom)) markPc(a, b);
-    const mark = (snes: number, len: number) => { const o = snesToPc(snes); markPc(o, o + len); };
-    mark(p.gfxLo, GFX_FILES); mark(p.gfxHi, GFX_FILES); mark(p.gfxBank, GFX_FILES); mark(p.gfxFlags, GFX_FILES);
-    mark(p.levelGfx, GFX_BYPASS_ENTRIES * 8); mark(p.levelGfxHi, GFX_BYPASS_ENTRIES * 8);
-    mark(p.sprBank, 0x200);
-    const pal = customPalettePatch(rom);
-    if (pal) mark(pal.table, 0x200 * 3);
-    const bg = bgPatch(rom);
-    if (bg) mark(bg.table, 0x200);
-  } catch (e) { bytePagesOf = null; throw e; } finally { rom.reads = reads; }
+  try { return fn(); } finally { rom.reads = reads; }
 }
+
+// make(rom), computed once per ROM state (a Rom and its generation: several ROMs may be in one process, also at the
+// same generation number) and kept for it; what make reads isn't recorded (unrecorded): the next asker gets the kept
+// value without its reads (skip masks, byte pages). A make that throws keeps nothing.
+export function perRomState<T>(make: (rom: Rom) => T): (rom: Rom) => T {
+  const kept = new WeakMap<Rom, { gen: number; value: T }>();
+  return (rom) => {
+    const k = kept.get(rom);
+    if (k && k.gen === rom.gen) return k.value;
+    const gen = rom.gen, value = unrecorded(rom, () => make(rom));
+    kept.set(rom, { gen, value });
+    return value;
+  };
+}
+
+// The pages of this ROM state whose reads are recorded by byte (1): the fixed ones, the pages of its editor patch
+// tables, its level palettes' pointers, its free space blocks' edges, ExAnimation data, overworld data and level data.
+// A recorder (RomReads) looks them up for the ROM it records for. The GFX file pointers and the ExAnimation data
+// aren't recorded at all (see gfxSkipMask), byte pages keep the rest of their pages from counting them (an animation
+// list next to code that is run).
+export const bytePages = perRomState((rom: Rom): Uint8Array => {
+  const pages = FIXED_BYTE_PAGES.slice();
+  const markPc = (o: number, end: number) => pages.fill(1, o >> PAGE_SHIFT, ((end - 1) >> PAGE_SHIFT) + 1);
+  for (const [a, b] of exanimDataRanges(rom)) markPc(a, b);
+  for (const [a, b] of overworldDataRanges(rom)) markPc(a, b);
+  // the pages a block in free space shares with the free space around it, which a save fills (code and tables
+  // every level reads next to a level's data)
+  for (const b of rom.scanRats()) { markPc(b.start, b.start + 1); markPc(b.start + 7 + b.size, b.start + 8 + b.size); }
+  const p = editorPatch(rom);
+  if (!p) return pages;
+  // (after the patch's check: where a level's sprite data lies needs its sprite bank table)
+  for (const [a, b] of levelDataRanges(rom)) markPc(a, b);
+  const mark = (snes: number, len: number) => { const o = snesToPc(snes); markPc(o, o + len); };
+  mark(p.gfxLo, GFX_FILES); mark(p.gfxHi, GFX_FILES); mark(p.gfxBank, GFX_FILES); mark(p.gfxFlags, GFX_FILES);
+  mark(p.levelGfx, GFX_BYPASS_ENTRIES * 8); mark(p.levelGfxHi, GFX_BYPASS_ENTRIES * 8);
+  mark(p.sprBank, 0x200);
+  const pal = customPalettePatch(rom);
+  if (pal) mark(pal.table, 0x200 * 3);
+  const bg = bgPatch(rom);
+  if (bg) mark(bg.table, 0x200);
+  return pages;
+});
 
 // what a computation read (the emulated CPU and editor code, see Snes.romReads, Rom.reads)
 export class RomReads {
   pages: Uint8Array; // 1 = read
   bytes = new Set<number>();
+  // the pages recorded by byte: those of the ROM state it was made for (bytePages). A recorder kept across ROM edits
+  // keeps them (only add() what newer recorders read): a page that became a byte page since counts as a whole, which
+  // drops more results, never fewer
+  readonly bytePages: Uint8Array;
 
-  constructor(romSize: number, base?: RomReads | null) {
-    this.pages = new Uint8Array(romSize >> PAGE_SHIFT);
+  // a recorder for rom as it is now, starting with base's reads
+  constructor(rom: Rom, base?: RomReads | null) {
+    this.pages = new Uint8Array(rom.data.length >> PAGE_SHIFT);
+    this.bytePages = bytePages(rom);
     if (base) this.add(base);
   }
 
   read(o: number, len = 1): void {
     for (let i = o; i < o + len; i++) {
       const p = i >> PAGE_SHIFT;
-      if (BYTE_PAGES[p]) this.bytes.add(i);
+      if (this.bytePages[p]) this.bytes.add(i);
       else if (p < this.pages.length) this.pages[p] = 1;
     }
   }
@@ -126,6 +144,55 @@ export class RomReads {
     for (const p of d.pages) if (p < this.pages.length) this.pages[p] = 1;
     for (const b of d.bytes) this.bytes.add(b);
   }
+}
+
+// A computation's result with the ROM bytes it read, as of ROM generation gen (when it started).
+export interface Recorded<T> { result: T; reads: RomReads; gen: number }
+
+// the emulated CPU whose ROM reads are recorded with the editor code's (Snes)
+type RecordingCpu = Pick<Snes, 'romReads' | 'romSkipMask'>;
+
+export interface RecordOptions {
+  cpu?: RecordingCpu | null; // its reads are recorded too
+  base?: RomReads | null; // reads the result counts as its own (a boot's: the state it starts from)
+  mask?: (() => Uint8Array | null) | null; // the CPU's reads it leaves out (a skip mask; inside another recording the outer one's mask applies)
+  counted?: boolean; // the reads count for the recording around it (default; else only as given to countReads)
+}
+
+// Runs fn, returning its result with what it read: the editor code's reads (Rom.reads) and the CPU's, recorded
+// against the byte pages of the ROM state it starts in. The recorders running around it are restored after it, also
+// when it throws, and get its reads (counted).
+export function record<T>(rom: Rom, fn: () => T, o: RecordOptions = {}): Recorded<T> {
+  const cpu = o.cpu ?? null, outer = cpu?.romReads ?? null, outerRom = rom.reads, outerMask = cpu?.romSkipMask ?? null;
+  const gen = rom.gen, reads = new RomReads(rom, o.base);
+  rom.reads = reads;
+  if (cpu) {
+    cpu.romReads = reads;
+    if (!outer) cpu.romSkipMask = o.mask?.() ?? null;
+  }
+  try {
+    return { result: fn(), reads, gen };
+  } finally {
+    rom.reads = outerRom;
+    if (cpu) { cpu.romReads = outer; cpu.romSkipMask = outerMask; }
+    if (o.counted !== false) countReads(rom, cpu, reads);
+  }
+}
+
+// reads (of a recording not counted, of a kept result) count for the recorders running as if read now
+export function countReads(rom: Rom, cpu: RecordingCpu | null, reads: RomReads): void {
+  const outer = cpu?.romReads ?? null, outerRom = rom.reads;
+  outer?.add(reads);
+  if (outerRom && outerRom !== outer) outerRom.add(reads);
+}
+
+// a recorded result still holds: the ROM edits since its generation changed no byte it read (one the ROM's change log
+// no longer reaches counts as changed); then it is as of the current generation
+export function holds(rom: Rom, r: { gen: number; reads: RomReads }): boolean {
+  const changes = rom.changesSince(r.gen);
+  if (!changes || (changes.length > 0 && r.reads.touches(changes))) return false;
+  r.gen = rom.gen;
+  return true;
 }
 
 // hashes of all pages of the current ROM, rehashed where the ROM changed (Rom.changesSince) when its generation does

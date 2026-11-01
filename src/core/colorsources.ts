@@ -7,37 +7,28 @@
 
 import type { Rom } from './rom.ts';
 import { LevelEmulator, type LevelOverride, type LevelRender } from './levelemu.ts';
-import type { RomReads } from './romdeps.ts';
+import { holds, perRomState, type Recorded } from './romdeps.ts';
 import { gfxFileColorValueSkipMask } from './gfxpages.ts';
 import { inputHash, levelInput } from './inputs.ts';
 
 export class ColorSources {
   emu: LevelEmulator;
   traces = 0; // loads made (tests)
-  private kept: { key: string; gen: number; reads: RomReads; r: LevelRender } | null = null;
-  private mask = { gen: -1, mask: null as Uint8Array | null };
+  private kept: Recorded<LevelRender> & { key: string } | null = null;
 
   constructor(rom: Rom) {
     this.emu = new LevelEmulator(rom);
-    this.emu.skipMask = () => {
-      const m = this.mask;
-      if (m.gen !== rom.gen) { m.mask = gfxFileColorValueSkipMask(rom); m.gen = rom.gen; }
-      return m.mask;
-    };
+    const mask = perRomState(gfxFileColorValueSkipMask);
+    this.emu.skipMask = () => mask(rom);
   }
 
   // the level (ov: as edited, buildOverrides) loaded with its colors' sources: the kept one while it holds
   trace(level: number, ov: LevelOverride): LevelRender {
-    const emu = this.emu, rom = emu.rom, key = inputHash(levelInput(level, ov)), k = this.kept;
-    const changes = k?.key === key ? rom.changesSince(k.gen) : null;
-    if (k && changes && !k.reads.touches(changes)) {
-      k.gen = rom.gen;
-      return k.r;
-    }
+    const emu = this.emu, key = inputHash(levelInput(level, ov)), k = this.kept;
+    if (k?.key === key && holds(emu.rom, k)) return k.result;
     emu.ensureBoot(); // (first: its reads are the base of the load's)
-    const gen = rom.gen, { result, reads } = emu.tracked(() => emu.load(level, { ...ov, trackSources: true }));
+    this.kept = { key, ...emu.tracked(() => emu.load(level, { ...ov, trackSources: true })) };
     this.traces++;
-    this.kept = { key, gen, reads, r: result };
-    return result;
+    return this.kept.result;
   }
 }

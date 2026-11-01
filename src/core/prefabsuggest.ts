@@ -21,7 +21,7 @@ import { dm16Prefab, arrangementKey } from './pastehint.ts';
 import { findPrefabPlaces, tileKey, type Layer, type LevelPlaces, type PrefabPlace } from './prefabplaces.ts';
 import { MemoryResults, runJob } from './jobrunner.ts';
 import { inputHash } from './inputs.ts';
-import { INPUTS_PER_KEY, RomReads, updateBytePages, type RomDeps, type RomFingerprint } from './romdeps.ts';
+import { INPUTS_PER_KEY, RomReads, record, type RomDeps, type RomFingerprint } from './romdeps.ts';
 import { objectLength2D } from './obj2d.ts';
 
 export interface PrefabSuggestion {
@@ -78,7 +78,7 @@ export class KeptSuggestions {
   startRun(rom: Rom, src: SuggestLevels, len2d: number): void {
     this.places.startRound();
     this.contents.startRound();
-    this.run = { read: new RomReads(rom.data.length), levels: src.levels.join(), edited: editedOf(src), len2d };
+    this.run = { read: new RomReads(rom), levels: src.levels.join(), edited: editedOf(src), len2d };
   }
   endRun(inputs: Map<number, string>, list: PrefabSuggestion[]): void {
     this.places.endRound();
@@ -105,14 +105,13 @@ export class KeptSuggestions {
     if (l.edited !== null && l.edited !== edited) {
       let e = this.savedEntry(l.edited, len2d);
       if (!e) {
-        updateBytePages(rom); // (as a run's loads)
         const s = loadSaved(rom, l.edited);
         if (!s) return null;
         e = { data: s.input, deps: this.fp.deps(s.reads) };
         this.contents.set(`${l.edited}`, e.data, e.deps, `${len2d}`);
       }
       if (e.data !== l.inputs.get(l.edited)) return null;
-      const read = new RomReads(rom.data.length);
+      const read = new RomReads(rom);
       read.addDeps(l.deps);
       read.addDeps(e.deps);
       l.deps = this.fp.deps(read);
@@ -233,15 +232,10 @@ const editedOf = (src: SuggestLevels) => (src.open && src.levels.includes(src.op
 
 // level n as saved with its content and the ROM bytes loading it read; null: unreadable
 function loadSaved(rom: Rom, n: number): { lv: Level; input: string; reads: RomReads } | null {
-  const outer = rom.reads, reads = new RomReads(rom.data.length);
-  rom.reads = reads;
   try {
-    const lv = loadLevel(rom, n);
-    return { lv, input: levelContent(rom, lv), reads };
-  } catch { return null; } finally {
-    rom.reads = outer;
-    outer?.add(reads);
-  }
+    const { result, reads } = record(rom, () => { const lv = loadLevel(rom, n); return { lv, input: levelContent(rom, lv) }; });
+    return { ...result, reads };
+  } catch { return null; }
 }
 
 function arrangements(lv: Level): Arrangements {
@@ -282,9 +276,6 @@ export function dm16Groups(lv: Level): { layer: Layer; objects: number[] }[] {
 
 export function* prefabSuggestions(rom: Rom, src: SuggestSource): Generator<void, PrefabSuggestion[]> {
   const kept = src.kept, len2d = kept ? objectLength2D(rom) : 0;
-  // (the loads' reads are recorded by byte where this ROM state's byte pages say, not where an emulator last left them;
-  // again after each step: another ROM's may have been computed in between)
-  updateBytePages(rom);
   kept?.startRun(rom, src, len2d);
   // the arrangements of the groups, with how often they occur
   const levels = new Map<number, { lv: Level | null; input: string; a: Arrangements }>(); // (lv: loaded when needed)
@@ -312,7 +303,6 @@ export function* prefabSuggestions(rom: Rom, src: SuggestSource): Generator<void
       if (f) f.count++; else found.set(key, { prefab: s, count: 1 });
     }
     yield;
-    updateBytePages(rom);
   }
   // the places of those occurring more than once, in the levels that have their first tile
   let emu: LevelEmulator | null = null; // (taken once per arrangement, when a search is needed)
@@ -339,7 +329,6 @@ export function* prefabSuggestions(rom: Rom, src: SuggestSource): Generator<void
       }
       if (ps.length) places.push({ level: n, places: ps });
       yield;
-      updateBytePages(rom);
     }
     const k = places.reduce((m, p) => m + p.places.length, 0);
     const saved = places.reduce((m, p) => m + p.places.reduce((b, q) => b + q.bytes, 0), 0) - cost.once;

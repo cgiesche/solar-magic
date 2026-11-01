@@ -233,7 +233,7 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 // bytes it read change
 {
   const r = new Rom(await editorImage()), fp = new RomFingerprint(r), cache = new ResultCache(fp);
-  const reads = new RomReads(r.data.length); reads.read(0x100, 1); reads.read(0x200 * 8, 1);
+  const reads = new RomReads(r); reads.read(0x100, 1); reads.read(0x200 * 8, 1);
   const deps = fp.deps(reads), inputs = Array.from({ length: INPUTS_PER_KEY + 2 }, (_, i) => `in${i}`);
   const has = (c: ResultCache, i: number) => c.get('k', inputs[i]) === i;
   for (let i = 0; i < INPUTS_PER_KEY; i++) cache.set('k', i, deps, inputs[i]);
@@ -263,7 +263,7 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 // results kept in memory only keep the latest used INPUTS_PER_KEY inputs of a key too
 {
   let runs = 0;
-  const lt = (i: number) => learner.now('mem', () => { runs++; return { result: i, reads: new RomReads(rom.data.length) }; }, { input: i, keep: 'memory' });
+  const lt = (i: number) => learner.now('mem', () => { runs++; return { result: i, reads: new RomReads(rom) }; }, { input: i, keep: 'memory' });
   for (let i = 0; i < INPUTS_PER_KEY; i++) lt(i);
   lt(0); lt(INPUTS_PER_KEY);
   const before = runs;
@@ -281,7 +281,7 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
   const r = new Rom(await editorImage()), fp = new RomFingerprint(r), cache = new ResultCache(fp);
   const db = new Map<string, CacheEntry | string[]>();
   const store = (c: ResultCache) => { const { put, order, del } = c.flush(); for (const [k, v] of [...put, ...order]) db.set(k, v); for (const k of del) db.delete(k); };
-  const depsAt = (o: number) => { const rd = new RomReads(r.data.length); rd.read(o, 1); return fp.deps(rd); };
+  const depsAt = (o: number) => { const rd = new RomReads(r); rd.read(o, 1); return fp.deps(rd); };
   // two keys, all of their inputs stored; key 'k' read 0x100, key 'j' 0x400
   for (let i = 0; i < INPUTS_PER_KEY; i++) { cache.set('k', i, depsAt(0x100), `in${i}`); cache.set('j', i, depsAt(0x400), `in${i}`); }
   store(cache);

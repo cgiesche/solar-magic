@@ -119,7 +119,7 @@ const tile104 = (lv: Level) => { lv.objects = lv.objects.filter((o) => !(o.ext =
     reset() { this.took = []; this.searched = []; this.loaded = []; }
   }
   const kept = new Spy(new RomFingerprint(rom));
-  // (no emulator brings the byte pages up to date before a run: the run does it itself)
+  // (no emulator brings the byte pages up to date before a run: a recorder takes its ROM state's)
   const run = (open?: Level) => { kept.reset(); return suggestPrefabs(rom, { levels: usedLevels(rom), open, emu: load, kept }); };
   const same = (open: Level | undefined, what: string) => {
     const k = run(open);
@@ -195,7 +195,7 @@ const tile104 = (lv: Level) => { lv.objects = lv.objects.filter((o) => !(o.ext =
   saveLevel(rom, lv);
   holds(undefined, false, 'another level saved');
   {
-    const reads = new RomReads(rom.data.length);
+    const reads = new RomReads(rom);
     rom.reads = reads;
     run();
     rom.reads = null;

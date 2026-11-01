@@ -10,7 +10,7 @@
 
 import type { Rom } from './rom.ts';
 import { LevelEmulator } from './levelemu.ts';
-import { RomReads, INPUTS_PER_KEY, type ResultCache, type RomDeps, type RomFingerprint } from './romdeps.ts';
+import { RomReads, INPUTS_PER_KEY, holds, perRomState, type ResultCache, type RomDeps, type RomFingerprint } from './romdeps.ts';
 import { gfxSkipMask, gfxDisplaySkipMask } from './gfxpages.ts';
 import { TILESETS, tilesetPointers, pointersKey } from './tilesets.ts';
 
@@ -73,10 +73,10 @@ export class JobRunner {
   readonly memory: MemoryResults;
   private emus = new Map<string, LevelEmulator>(); // by lane
   private main: LevelEmulator | null = null; // own, without deps.main
-  private gfxMask = { gen: -1, mask: null as Uint8Array | null }; // its skip mask
+  private gfxMask = perRomState(gfxSkipMask); // its skip mask
   private noDisplay: LevelEmulator | null = null; // own, without deps.noDisplay
   private pointerEmu: LevelEmulator | null = null; // learns the tilesets' pointers (tilesetPointers)
-  private display = { gen: -1, mask: null as Uint8Array | null }; // displayMask
+  private display = perRomState((rom) => gfxDisplaySkipMask(rom, this.tilesetPointers())); // displayMask
   private preps = new WeakMap<LevelEmulator, Prepared>(); // by emulator
   started = 0; // jobs (re)started
 
@@ -87,20 +87,20 @@ export class JobRunner {
   }
 
   run<T>(spec: JobSpec<T>): JobRun<T> {
-    return { ...spec, job: null, emu: null, reads: new RomReads(0), gen: -1, label: null };
+    return { ...spec, job: null, emu: null, reads: new RomReads(this.d.rom), gen: -1, label: null };
   }
 
   // Runs a step of the job (its first one: a stored result, else the job started on the lane's emulator); its
   // result when it ended, else null. The job starts over first when bytes it read changed since its last step.
   step<T>(lane: string, r: JobRun<T>): { result: T } | null {
     const rom = this.d.rom;
-    if (r.job && this.changed(r.gen, r.reads)) r.job = null;
+    if (r.job && !holds(rom, r)) r.job = null;
     if (!r.job) {
       // (stored meanwhile, or loaded from storage)
       const stored = this.stored<T>(r.key, r.input, r.keep);
       if (stored !== undefined) return { result: stored };
       const emu = r.emu = this.emu(lane, r.picture);
-      r.reads = new RomReads(rom.data.length);
+      r.reads = new RomReads(rom);
       r.label = null;
       r.job = r.start(emu, (key, prepare) => this.prepared(emu, key, prepare), (sub, input, learn) => this.part(r, emu, sub, input, learn));
       this.started++;
@@ -113,27 +113,20 @@ export class JobRunner {
       return null;
     }
     r.job = null;
-    if (this.changed(r.gen, r.reads)) return null; // (the job wrote bytes it read: again)
+    if (!holds(rom, r)) return null; // (the job wrote bytes it read: again)
     if (t.result.value !== undefined) this.store(r.key, r.input, r.keep, t.result.value, r.reads);
     return { result: t.result.value };
-  }
-
-  // any byte read changed since ROM generation gen (one the ROM's change log no longer reaches counts as changed)
-  private changed(gen: number, reads: RomReads): boolean {
-    const ch = this.d.rom.changesSince(gen);
-    return ch === null || (ch.length > 0 && reads.touches(ch));
   }
 
   // (inside a job's step)
   private prepared<S>(emu: LevelEmulator, key: string, prepare: () => S | null): S | null {
     const p = this.preps.get(emu);
-    if (p?.key === key && !this.changed(p.gen, p.reads)) {
-      p.gen = this.d.rom.gen;
+    if (p?.key === key && holds(this.d.rom, p)) {
       emu.count(p.reads);
       return p.state as S;
     }
     this.preps.delete(emu);
-    const gen = this.d.rom.gen, { result, reads } = emu.tracked(prepare);
+    const { result, reads, gen } = emu.tracked(prepare);
     if (result !== null) this.preps.set(emu, { key, state: result, reads, gen });
     return result;
   }
@@ -142,7 +135,7 @@ export class JobRunner {
   private part<S>(r: JobRun<unknown>, emu: LevelEmulator, sub: string, input: string | undefined, learn: () => S | undefined): { result: S | undefined; learned: boolean } {
     const key = partKey(r.key, sub), e = r.keep === false ? undefined : (r.keep === 'memory' ? this.memory : this.d.results).entry(key, input);
     if (e) {
-      const reads = new RomReads(this.d.rom.data.length);
+      const reads = new RomReads(this.d.rom);
       reads.addDeps(e.deps);
       emu.count(reads);
       return { result: e.data as S, learned: false };
@@ -181,12 +174,8 @@ export class JobRunner {
     if (this.d.main) return this.d.main;
     const rom = this.d.rom;
     if (!this.main || this.main.rom !== rom) {
-      const m = this.gfxMask;
       this.main = new LevelEmulator(rom);
-      this.main.skipMask = () => {
-        if (m.gen !== rom.gen) { m.gen = rom.gen; m.mask = gfxSkipMask(rom); }
-        return m.mask;
-      };
+      this.main.skipMask = () => this.gfxMask(rom);
     }
     this.main.ensureBoot();
     return this.main;
@@ -195,15 +184,7 @@ export class JobRunner {
   // The bytes results that are no pictures don't read: the display data (gfxDisplaySkipMask, with the tilesets'
   // pointers), the GFX file data among them; once per ROM state. Learning the pointers isn't part of the
   // result asking for the mask.
-  displayMask = (): Uint8Array | null => {
-    const rom = this.d.rom, m = this.display;
-    if (m.gen !== rom.gen) {
-      const reads = rom.reads;
-      rom.reads = null;
-      try { m.mask = gfxDisplaySkipMask(rom, this.tilesetPointers()); m.gen = rom.gen; } finally { rom.reads = reads; }
-    }
-    return m.mask;
-  };
+  displayMask = (): Uint8Array | null => this.display(this.d.rom);
 
   // per tileset the pointers of FG Map16 tiles 000-1FF (tilesets.ts), learned once and kept in the result cache.
   // No picture, though learned from the main boot snapshot as pictures are: the boot snapshot of results that are

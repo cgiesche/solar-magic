@@ -169,7 +169,7 @@ console.log('used sprite memory', candidates.map((m) => m.toString(16)).join(' '
 
 // what a check reads, as the learner records it (each step tracked, as Learner runs a job)
 const jobReads = (ctx: SpriteMemContext, m: number, values: number[], sprites: LevelSprite[]) => {
-  const job = spriteMemJob(ctx, m, values, sprites), reads = new RomReads(rom.data.length);
+  const job = spriteMemJob(ctx, m, values, sprites), reads = new RomReads(rom);
   for (;;) {
     const r = emu.tracked(() => job.next());
     reads.add(r.reads);

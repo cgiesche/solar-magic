@@ -208,7 +208,7 @@ function* suggestJob(ctx: SpriteMemContext, current: number, candidates: number[
     if (m === current) continue;
     // what the value's checks read counts only when it is chosen: a ROM change that lets a rejected value fit
     // doesn't check again (the suggestion still fits, maybe not the first one that does)
-    const reads = new RomReads(emu.rom.data.length);
+    const reads = new RomReads(emu.rom);
     const apart = <T>(fn: () => T): T => { const r = emu.tracked(fn, null, false); reads.add(r.reads); return r.result; };
     const play: number[] = [];
     let ok = true;

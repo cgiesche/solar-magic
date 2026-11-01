@@ -20,6 +20,7 @@ import { SHARED_PALETTES, SHARED_PAL_SIZE } from './sharedpal.ts';
 import { lz2Decompress } from './lz2.ts';
 import { exanimDataRanges } from './exanim.ts';
 import { submapPaletteRanges } from './submapgfx.ts';
+import { unrecorded } from './romdeps.ts';
 
 // [start, end) ROM offsets of a file's data
 function fileRange(rom: Rom, i: number): [number, number] | null {
@@ -33,9 +34,7 @@ function fileRange(rom: Rom, i: number): [number, number] | null {
 // 1 for every byte of GFX file data and the files' pointer entries (and the checksum). Its reads aren't a dependency
 // (see gfxSkipMask).
 function gfxFileMask(rom: Rom): Uint8Array {
-  const reads = rom.reads;
-  rom.reads = null;
-  try {
+  return unrecorded(rom, () => {
     const mask = new Uint8Array(rom.data.length);
     for (let i = 0; i < GFX_FILES; i++) {
       const r = fileRange(rom, i);
@@ -45,17 +44,15 @@ function gfxFileMask(rom: Rom): Uint8Array {
     if (p) for (const t of [p.gfxLo, p.gfxHi, p.gfxBank, p.gfxFlags]) { const o = snesToPc(t); mask.fill(1, o, o + GFX_FILES); }
     mask.fill(1, 0x7fdc, 0x7fe0); // checksum: rewritten whenever the ROM is stored, some sprites read it as a table
     return mask;
-  } finally { rom.reads = reads; }
+  });
 }
 
 // marks the ExAnimation data in a mask. Its reads aren't a dependency (see gfxSkipMask).
 function addExanim(rom: Rom, mask: Uint8Array): Uint8Array {
-  const reads = rom.reads;
-  rom.reads = null;
-  try {
+  return unrecorded(rom, () => {
     for (const [a, b] of exanimDataRanges(rom)) mask.fill(1, a, b);
     return mask;
-  } finally { rom.reads = reads; }
+  });
 }
 
 // 1 for every byte of GFX file data, the files' pointer entries and ExAnimation data (and the checksum). Often built lazily
@@ -78,15 +75,13 @@ function fillSnes(mask: Uint8Array, snes: number, len: number): void {
 // nor the ExAnimation data, a color animation writes colors too. Built like gfxSkipMask: its reads aren't a dependency.
 export function gfxFileColorValueSkipMask(rom: Rom): Uint8Array {
   const mask = gfxFileMask(rom);
-  const reads = rom.reads;
-  rom.reads = null;
-  try {
+  return unrecorded(rom, () => {
     fillSnes(mask, SHARED_PALETTES, SHARED_PAL_SIZE);
     const pal = customPalettePatch(rom);
     if (pal) for (let l = 0; l < LEVELS; l++) { const a = rom.r24(pal.table + l * 3); if (a) fillSnes(mask, a, PALETTE_SIZE); }
     for (const [a, b] of submapPaletteRanges(rom)) mask.fill(1, a, Math.min(b, mask.length));
     return mask;
-  } finally { rom.reads = reads; }
+  });
 }
 
 // gfxSkipMask's bytes and the display data: the colors' values (gfxFileColorValueSkipMask), the quarters of the FG
@@ -95,9 +90,7 @@ export function gfxFileColorValueSkipMask(rom: Rom): Uint8Array {
 // Built like gfxSkipMask: its reads aren't a dependency.
 export function gfxDisplaySkipMask(rom: Rom, ptrs: number[][]): Uint8Array {
   const mask = addExanim(rom, gfxFileColorValueSkipMask(rom));
-  const reads = rom.reads;
-  rom.reads = null;
-  try {
+  return unrecorded(rom, () => {
     const fill = (snes: number, len: number) => fillSnes(mask, snes, len);
     for (const ps of ptrs) for (const p of ps) if (p >= 0x8000) fill(0x0d0000 | p, 8);
     const fg = map16Ext(rom);
@@ -108,7 +101,7 @@ export function gfxDisplaySkipMask(rom: Rom, ptrs: number[][]): Uint8Array {
     const pal = customPalettePatch(rom);
     if (pal) fill(pal.table, LEVELS * 3);
     return mask;
-  } finally { rom.reads = reads; }
+  });
 }
 
 // content hash of some GFX files (0FF = none): their data and their flags entry (how the data is stored), not

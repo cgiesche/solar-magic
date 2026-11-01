@@ -6,6 +6,7 @@ import { bgDataSize } from './bg.ts';
 import { PREFAB_EXT } from './prefabs.ts';
 import { COND_MARK, condByte, condOf, type Dm16Cond } from './cdm16.ts';
 import { MAP_SIZE } from './ram.ts';
+import { unrecorded } from './romdeps.ts';
 import { OBJ_2D, objectLength2D, fitExtension } from './obj2d.ts';
 
 // the timer's hundreds per header time (the game's table, read when a level is entered from the overworld)
@@ -564,9 +565,7 @@ export function loadLevel(rom: Rom, n: number): Level {
   const spr = (spriteBank(rom, n) << 16) | rom.r16(SPR_PTRS + n * 2);
   // (the windows' reads count only as far as the level's data goes: saving the data behind it changes nothing read)
   const reads = rom.reads;
-  rom.reads = null;
-  let w1: Uint8Array, w2: Uint8Array | null, ws: Uint8Array;
-  try { w1 = dataWindow(rom, l1); w2 = (l2 >> 16) !== 0xff ? dataWindow(rom, l2) : null; ws = dataWindow(rom, spr); } finally { rom.reads = reads; }
+  const [w1, w2, ws] = unrecorded(rom, () => [dataWindow(rom, l1), (l2 >> 16) !== 0xff ? dataWindow(rom, l2) : null, dataWindow(rom, spr)] as const);
   let lv: Level;
   try { lv = parseLevelData(rom, n, w1, w2, l2, ws, readSecondaryHeader(rom, n)); } catch (e) {
     // (unreadable: the whole windows count, a fix anywhere in them may make it readable)

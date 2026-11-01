@@ -167,7 +167,7 @@ const diff = (a: Uint8Array, b: Uint8Array) => { const out: number[] = []; for (
 // edit next to it they didn't read keeps them; an outer read recorder survives a load that reaches the title screen
 {
   const { rom, s } = fresh();
-  const emu = new OverworldEmulator(rom), outer = new RomReads(rom.data.length);
+  const emu = new OverworldEmulator(rom), outer = new RomReads(rom);
   emu.snes.romReads = outer;
   emu.load(0, 0);
   check(emu.snes.romReads === outer && outer.bytes.has(snesToPc(OW_L1)), 'reaching the title screen: the outer recorder put back, with the load\'s reads');

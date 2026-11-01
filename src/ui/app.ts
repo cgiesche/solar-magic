@@ -51,7 +51,7 @@ import { variantOf, blockKey, collisionKey, type BlockProbe, type CollisionProbe
 import type { ProbeReply, LearnJob } from '../core/probeprotocol.ts';
 import { ProbeClient, FAILED } from '../core/probeclient.ts';
 import { ResultLearner } from '../core/learner.ts';
-import type { RomReads } from '../core/romdeps.ts';
+import { holds, perRomState, type Recorded } from '../core/romdeps.ts';
 import { thumbCanvas } from './thumbs.ts';
 import { thumbsKey, thumbsInput, previewInput, objKey, type ObjSpec, type ObjThumb, type PlacementPreview } from '../core/objthumbs.ts';
 import { levelInput, inputHash } from '../core/inputs.ts';
@@ -430,22 +430,20 @@ export class App {
   }
 
   // what the render was made from: its inputs, the ROM generation and the ROM bytes it read
-  private rendered: { key: string; gen: number; reads: RomReads } | null = null;
+  private rendered: (Recorded<void> & { key: string }) | null = null;
 
   // the level emulated and drawn anew – unless its inputs and the ROM bytes the last render read are unchanged
   // (a ROM edit elsewhere: the overworld, another level's data)
   refresh(): void {
     const lv = this.level, ov = this.buildOverrides();
     const key = inputHash({ level: lv.number, ov, header: lv.header, secondary: lv.secondary, show: this.show, mode: this.mode });
-    const was = this.rendered, changes = was?.key === key ? this.rom.changesSince(was.gen) : null;
-    if (was && changes && !was.reads.touches(changes)) {
-      was.gen = this.rom.gen;
+    const was = this.rendered;
+    if (was?.key === key && holds(this.rom, was)) {
       this.scheduleScan();
       this.updateGameViewCamera(ov);
       return;
     }
-    const gen = this.rom.gen;
-    const { reads } = this.emu.recordAll(() => {
+    this.rendered = { key, ...this.emu.recordAll(() => {
       const r = this.emu.load(lv.number, ov);
       this.renderError = r.ok ? null : r.error ?? 'Error';
       // as many steps as the level's own animations take to repeat (the game's repeat after 8), emulated in
@@ -456,8 +454,7 @@ export class App {
       this.anim.next = anim ? this.emu.animationSteps() : null;
       this.render = r;
       this.images = renderLevel(this.rom, r, lv.header.mode, lv.header.screens, levelRows(lv.secondary));
-    });
-    this.rendered = { key, gen, reads };
+    }) };
     // picker thumbnails are transparent: shown on the level's backdrop as in the game
     const c = this.images.backdrop;
     document.documentElement.style.setProperty('--level-backdrop', `rgb(${c & 0xff},${(c >> 8) & 0xff},${(c >> 16) & 0xff})`);
@@ -822,11 +819,9 @@ export class App {
 
   // ROM bytes of GFX file data: emulated results don't depend on them (graphics only reach VRAM);
   // sprite images and object thumbnails have the files' content in their input instead
-  private gfxMaskMemo: { gen: number; mask: Uint8Array | null } = { gen: -1, mask: null };
+  private gfxMask = perRomState(gfxSkipMask);
   gfxSkipMask(): Uint8Array | null {
-    const m = this.gfxMaskMemo;
-    if (m.gen !== this.rom.gen) { m.gen = this.rom.gen; m.mask = gfxSkipMask(this.rom); }
-    return m.mask;
+    return this.gfxMask(this.rom);
   }
 
   // the content of the bytes gfxSkipMask leaves out of the bytes read (graphics and ExAnimation data), for

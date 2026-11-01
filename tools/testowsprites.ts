@@ -106,7 +106,7 @@ const rom = new Rom(await editorImage());
   const gfx = editorPatch(r)!.levelGfx + 0x105 * 8;
   s.edit('Level 105 graphics', () => r.w8(gfx, r.r8(gfx) ^ 1));
   check(owSpriteImages(loads, 0, 0) === v && loaded === 0, `a ROM edit the frames didn't read: the kept images, ${loaded} loads`);
-  const outer = new RomReads(r.data.length);
+  const outer = new RomReads(r);
   emu.snes.romReads = outer;
   owSpriteImages(loads, 0, 0);
   emu.snes.romReads = null;
