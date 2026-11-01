@@ -51,19 +51,19 @@ function teleportTo(app: App, idx: number, tile: OwTile): void {
 
 // a tile of an overworld map, clicked; the tiles teleports lead to are marked with their location index, `cur`
 // framed. The map as in the ROM, emulated in the probe worker (App.overworldMap, in a lane of its own: the overworld
-// view's requests stay); until its load comes the map is dark with a note
+// view's requests stay); until its load comes the map is dark with a note (also when it failed)
 export function pickOverworldTile(app: App, cur: OwTile | null): Promise<OwTile | null> {
   return new Promise((resolve) => {
     const rom = app.rom, l1 = readL1(rom), l2 = readL2(rom), tls = readTranslevels(rom);
-    const images = new Map<number, HTMLCanvasElement>();
+    const images = new Map<number, HTMLCanvasElement>(), failed = new Set<number>();
     let map = cur?.submap ?? 0, hover: { x: number; y: number } | null = null, done = false, open = true;
     const canvas = h('canvas', { width: 512, height: 512, class: 'ow-pick' });
     const status = h('div', { class: 'hint' }, 'Click a tile: Mario comes out there.');
     // (undefined while the map's load is emulated)
     const image = (m: number) => {
       let c = images.get(m);
-      if (c) return c;
-      const r = app.overworldMap(m, 0, () => { if (open) paint(); }, 'owpick');
+      if (c || failed.has(m)) return c;
+      const r = app.overworldMap(m, 0, () => { if (open) paint(); }, { lane: 'owpick', failed: () => { if (failed.has(m)) return; failed.add(m); if (open) paint(); } });
       if (!r) return undefined;
       c = document.createElement('canvas');
       putImage(c, drawOwMap(rom, r, m > 0 ? 1 : 0, l1, l2));
@@ -77,7 +77,7 @@ export function pickOverworldTile(app: App, cur: OwTile | null): Promise<OwTile 
       if (img) ctx.drawImage(img, 0, 0);
       else {
         ctx.fillStyle = '#000'; ctx.fillRect(0, 0, 512, 512);
-        ctx.fillStyle = '#fff'; ctx.font = '14px sans-serif'; ctx.fillText('Loading the map…', 16, 28);
+        ctx.fillStyle = '#fff'; ctx.font = '14px sans-serif'; ctx.fillText(failed.has(map) ? 'The map could not be emulated.' : 'Loading the map…', 16, 28);
       }
       const region = map > 0 ? 1 : 0;
       ctx.font = 'bold 8px monospace';

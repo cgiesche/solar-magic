@@ -525,7 +525,7 @@ export class OverworldView {
       // (a level tile painted gets a translevel: not before the level tiles are known)
       if (this.mode === 'l1' && !this.pathKinds()) { toast('The path tiles are still being learned – layer 1 can be painted in a moment.'); return; }
       if (this.mode === 'l1' && this.ev?.without === null) { toast('Layer 1 can\'t be painted on this event: the map without its layer 1 changes could not be emulated.', 'error'); return; }
-      if (this.mode === 'l1' && this.ev && (!this.ev.l1 || !this.ev.without)) { toast('The map after the event is still being emulated – layer 1 can be painted in a moment.'); return; }
+      if (this.mode === 'l1' && this.ev && !this.evL1Ready()) { toast('The map after the event is still being emulated – layer 1 can be painted in a moment.'); return; }
       this.drag = { kind: 'paint', layer: this.mode, x0: c.x, y0: c.y, lastX: c.x, lastY: c.y };
       this.paintAt(c.x, c.y);
       return;
@@ -621,7 +621,7 @@ export class OverworldView {
   paintAt(x: number, y: number): void {
     const b = this.brush;
     if (b.kind !== this.mode) return;
-    if (this.mode === 'l1' && this.ev && (!this.ev.l1 || !this.ev.without)) return; // (the maps the event is painted with are still emulated)
+    if (this.mode === 'l1' && this.ev && !this.evL1Ready()) return; // (the maps the event is painted with are still emulated)
     const n = this.mode === 'l1' ? 32 : 64;
     let changed = false;
     for (let dy = 0; dy < b.h; dy++) for (let dx = 0; dx < b.w; dx++) {
@@ -778,6 +778,10 @@ export class OverworldView {
     const ev = this.ev = { data, before, after: applyEvents(before, data, e, e + 1), l1: null, game: null, without: undefined as Uint8Array | null | undefined, runners: eventRunners(rom) };
     ev.without = this.app.layer1Without(e, (v) => { if (this.ev === ev) ev.without = v; });
     this.buildTimeline();
+  }
+  // layer 1 can be painted on the event: the maps after it with and without its layer 1 changes came
+  private evL1Ready(): boolean {
+    return !!this.ev?.l1 && !!this.ev.without;
   }
   // (null while the submaps' views are learned)
   private place(e: number) {

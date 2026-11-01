@@ -291,7 +291,7 @@ export function layer1Without(rom: Rom, e: number): Uint8Array {
   return new EventL1Copy().without(rom, e);
 }
 // layer1Without on a copy of the ROM kept between calls (taking the ROM's bytes each time): its emulator keeps the
-// title screen while the bytes reaching it read stay. What the copy's events and load read counts as read from the
+// title screen snapshot while the ROM bytes read on the way to the title screen are unchanged. What the copy's events and load read counts as read from the
 // ROM (its recorders: a result kept by them goes when the ROM's events or what the load read change)
 export class EventL1Copy {
   private copy: { rom: Rom; emu: OverworldEmulator } | null = null;

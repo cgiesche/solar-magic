@@ -1203,9 +1203,11 @@ export class App {
   // (the latest event progresses of each map): undefined while it runs, then `done` is called. Map `map` at event
   // progress `progress` (a new request drops the one still waiting: the slider), the submaps' views, the sprites' images
   // at a map and progress (a new request drops the one still waiting). The maps' requests replace those of their
-  // lane only: another view's (the exit dialog's map picker) asks in its own
-  overworldMap(map: number, progress: number, done: (r: OwRender) => void, lane = 'ow'): OwRender | undefined {
-    return this.probes.learn<OwRender>(`owm1:${map}`, { kind: 'owMap', map, progress }, { lane, input: { progress }, replace: true, label: 'Overworld', done });
+  // lane only: a dialog's (the exit dialog's map picker) asks in its own, urgent (runs while it is open), told when
+  // the load failed
+  overworldMap(map: number, progress: number, done: (r: OwRender) => void, dialog?: { lane: string; failed: () => void }): OwRender | undefined {
+    return this.probes.learn<OwRender>(`owm1:${map}`, { kind: 'owMap', map, progress },
+      { lane: dialog?.lane ?? 'ow', urgent: !!dialog, failed: dialog?.failed, input: { progress }, replace: true, label: 'Overworld', done });
   }
   // layer 1 as after event e without its layer 1 changes (owevents.ts layer1Without: what a layer 1 stroke painted on
   // the event is compared with), learned in the probe worker and kept in memory while the ROM bytes it read are
