@@ -992,7 +992,13 @@ export class OverworldView {
   // keys while the overworld is shown; false: not handled
   key(e: KeyboardEvent): boolean {
     const k = e.key.toLowerCase();
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && this.mode === 'sprites') {
+      if (k === 'c') return this.sprites.copy();
+      if (k === 'v') return this.sprites.paste();
+      if (k === 'd') return this.sprites.duplicate();
+    }
     if (e.ctrlKey || e.metaKey || e.altKey) return false;
+    if (k === 'escape' && this.mode === 'sprites' && this.sprites.picked !== null) { this.sprites.pick(null); return true; }
     if (k === 'escape' && this.mode === 'links' && this.links.cancelPending()) return true;
     if (k === 'escape' && this.event >= 0) { this.setEvent(-1); return true; }
     if (k === 'g') { this.showGrid = !this.showGrid; this.paint(); return true; }
@@ -1028,7 +1034,7 @@ export class OverworldView {
     const scroll = this.palPanel.scrollTop;
     hidePickerPreview(this.palPanel);
     this.palPixels = 0;
-    this.palPanel.replaceChildren(...(this.mode === 'sprites' ? [h('div', { class: 'panel-title' }, 'Sprites'), h('div', { class: 'hint' }, 'Drawn as the game shows them on this map at the event progress; a dashed box where it doesn\'t show the sprite. Shadows and height marks: View.')]
+    this.palPanel.replaceChildren(...(this.mode === 'sprites' ? this.sprites.palette()
       : this.mode === 'links' ? [h('div', { class: 'panel-title' }, 'Overworld links'), this.linkLegend()] : [
       h('div', { class: 'panel-title' }, 'Paint', h('span', { class: 'hint' }, 'Right click/Shift+click paints')),
       this.mode === 'l1' ? this.l1Palette() : this.l2Palette()]));

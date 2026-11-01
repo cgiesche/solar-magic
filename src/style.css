@@ -345,6 +345,11 @@ canvas.sheet-fill { width: 100%; height: auto; image-rendering: auto; }
 .ow-reveal input.hex { width: 3.2em; flex: none; }
 .ow-info { border: 1px solid var(--border); border-radius: 6px; padding: 6px; display: flex; flex-direction: column; gap: 5px; }
 .ow-info select { flex: 1; min-width: 0; max-width: none; }
+.ow-cpal { display: flex; flex-direction: column; gap: 2px; margin: 4px 0; }
+.ow-cpal-item { display: flex; align-items: center; gap: 6px; text-align: left; padding: 2px 4px; }
+.ow-cpal-item canvas { image-rendering: pixelated; width: 32px; height: auto; max-height: 32px; object-fit: contain; }
+.ow-cpal-item.active { outline: 2px solid var(--accent); }
+.ow-cpal-none { display: inline-block; width: 32px; text-align: center; font-family: monospace; opacity: .7; }
 .ln-input { flex: 1; min-width: 0; font-family: monospace; }
 .ln-input.bad { border-color: var(--warn, #e05050); }
 .ln-border { display: block; width: 100%; image-rendering: pixelated; border: 1px solid var(--border); }
