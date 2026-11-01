@@ -75,7 +75,7 @@ export class ProbeClient {
   private learnFailed = new Set<string>(); // learn jobs (key and input) that failed, forgotten when the ROM changes
   private memory: MemoryResults; // learn jobs' results kept in memory only, as the worker's (checked against the ROM)
   private urges = 0; // waits a dialog shows (urge)
-  private urged: (() => void) | null = null; // without a worker: the pump re-checks its urgency
+  private recheckUrgency: (() => void) | null = null; // without a worker: the pump re-checks its urgency
   private d: ProbeClientDeps;
 
   constructor(deps: ProbeClientDeps) {
@@ -281,7 +281,7 @@ export class ProbeClient {
   urge(): () => void {
     this.sync();
     this.urges++;
-    this.urged?.();
+    this.recheckUrgency?.();
     let held = true;
     return () => { if (held) { held = false; this.urges--; } };
   }
@@ -341,7 +341,7 @@ export class ProbeClient {
       ...(this.d.soon && { soon: this.d.soon, urgent: () => this.urgent() }),
       startTurn: () => { const t0 = performance.now(); return () => performance.now() - t0 < SLICE; },
     });
-    this.urged = send.urged;
+    this.recheckUrgency = send.recheck;
     return send;
   }
 

@@ -66,22 +66,23 @@ const SHOW_WAIT = 300; // ms Level as PNG waits before it shows what it waits fo
 // one notices shows in a dialog, as Levels as images shows it, with a Cancel (then nothing is saved).
 export async function exportLevelPng(app: App): Promise<void> {
   const lv = app.level;
-  let ended = false, dlg: ReturnType<typeof modal> | null = null;
-  const stop = () => { if (!ended) { cancel.cancelled = true; cancel.wake?.(); } };
-  const status = h('div', { class: 'hint' }, 'Sprite graphics …');
-  const cancel: Cancel = { cancelled: false, wake: null, status: (s) => { status.textContent = s; } };
+  let ended = false;
+  const shown: { dlg?: { close(force?: boolean): void } } = {};
+  const status = h('div', { class: 'hint' }, SPRITE_GFX);
+  const wait: ExportWait = { lane: 'level-png', cancelled: false, wake: null, status: (s) => { status.textContent = s; } };
+  const stop = () => { if (!ended) cancelWait(wait); };
   const show = setTimeout(() => {
-    dlg = modal('Level as PNG', h('div', { style: 'min-width:360px' }, h('p', {}, `Level ${hex3(lv.number)}: waiting for what it is drawn with`), status), [{ label: 'Cancel' }], stop);
+    shown.dlg = modal('Level as PNG', h('div', { style: 'min-width:360px' }, h('p', {}, `Level ${hex3(lv.number)}: waiting for what it is drawn with`), status), [{ label: 'Cancel' }], stop);
   }, SHOW_WAIT);
   // (the probes run while the dialog is open)
   const release = app.probes.urge();
   try {
-    const p = await levelPicture(app, lv, app.images, app.render, cancel).finally(() => {
+    const p = await levelPicture(app, lv, app.images, app.render, wait).finally(() => {
       ended = true;
       clearTimeout(show);
       release();
-      app.probes.unlearn(LANE);
-      (dlg as ReturnType<typeof modal> | null)?.close(true);
+      app.probes.unlearn(wait.lane);
+      shown.dlg?.close(true);
     });
     if (!p) return;
     await downloadBytes(levelImageName(lv.number, levelNameOf(app, lv.number)), await pngBytes(drawLevelImage(app, p)), 'image/png');
@@ -93,12 +94,16 @@ export async function exportLevelPng(app: App): Promise<void> {
 
 // ---------------- what a level is drawn with ----------------
 
-const LANE = 'level-images'; // the learn jobs of the sprites' images
+const SPRITE_GFX = 'Sprite graphics …'; // (what an export waits for while its sprites' images are learned)
 const PROBE_WAIT = 30000; // ms a level waits for its probes at most (then: drawn with those known)
 
-// what the export waits for, unless it is cancelled before (then: null); status: what it waits for now
-type Cancel = { cancelled: boolean; wake: (() => void) | null; status?: (what: string) => void };
-function until<T>(cancel: Cancel, p: Promise<T>): Promise<T | null> {
+// An export's waits: lane: the learn jobs of its sprites' images (each export its own, dropped when it ends);
+// cancelled, wake: ends the wait it is in; status: tells what it waits for now
+type ExportWait = { lane: string; cancelled: boolean; wake: (() => void) | null; status?: (what: string) => void };
+const cancelWait = (w: ExportWait) => { w.cancelled = true; w.wake?.(); };
+
+// what the export waits for, unless it is cancelled before (then: null)
+function until<T>(cancel: ExportWait, p: Promise<T>): Promise<T | null> {
   return new Promise((ok) => {
     const wake = () => ok(null);
     cancel.wake = wake;
@@ -106,8 +111,9 @@ function until<T>(cancel: Cancel, p: Promise<T>): Promise<T | null> {
   });
 }
 
-// while probes are pending (their count; a probe done, or half a second): false when cancelled
-async function probed(app: App, cancel: Cancel, what: string, pending: () => number): Promise<boolean> {
+// while probes are pending (their count; looked at again when the asked probes are all done, or after half a
+// second): false when cancelled
+async function probed(app: App, cancel: ExportWait, what: string, pending: () => number): Promise<boolean> {
   const t0 = performance.now();
   for (let n = pending(); n > 0 && performance.now() - t0 < PROBE_WAIT; n = pending()) {
     cancel.status?.(`${what} (${n}) …`);
@@ -118,9 +124,9 @@ async function probed(app: App, cancel: Cancel, what: string, pending: () => num
 }
 
 // a sprite image learned (null: it failed, or its job was dropped)
-function learned(app: App, j: SpriteJob): Promise<unknown> {
+function learned(app: App, cancel: ExportWait, j: SpriteJob): Promise<unknown> {
   return new Promise((ok) => {
-    const r = app.probes.learn(j.key, j.job, { input: j.input, lane: LANE, urgent: true, label: 'Level images: sprite graphics', done: ok, failed: () => ok(null), dropped: () => ok(null) });
+    const r = app.probes.learn(j.key, j.job, { input: j.input, lane: cancel.lane, urgent: true, label: 'Level images: sprite graphics', done: ok, failed: () => ok(null), dropped: () => ok(null) });
     if (r !== undefined) ok(r);
   });
 }
@@ -128,10 +134,10 @@ function learned(app: App, j: SpriteJob): Promise<unknown> {
 // The images of the level's sprites, as the level view's (App.spriteImage) for this level: learned, the sprites'
 // probes waited for (their variants; placed: the placed sprites' own images, else only those by sprite id – the
 // items blocks and sprites give)
-async function levelSprites(app: App, lv: Level, cancel: Cancel, placed: boolean): Promise<Pick<LevelPicture, 'sprite'> & Pick<OverlayLevel, 'thumb'> | null> {
+async function levelSprites(app: App, lv: Level, cancel: ExportWait, placed: boolean): Promise<Pick<LevelPicture, 'sprite'> & Pick<OverlayLevel, 'thumb'> | null> {
   const jobs = app.spriteJobs(lv), ts = lv.header.tileset;
-  cancel.status?.('Sprite graphics …');
-  const all = await until(cancel, learned(app, jobs.all)) as [number, SpriteImage][] | null;
+  cancel.status?.(SPRITE_GFX);
+  const all = await until(cancel, learned(app, cancel, jobs.all)) as [number, SpriteImage][] | null;
   if (cancel.cancelled) return null;
   const base = new Map((all ?? []).map(([n, img]) => [n, app.spriteCanvas(img)]));
   const thumb = (id: number) => base.get(id);
@@ -139,7 +145,7 @@ async function levelSprites(app: App, lv: Level, cancel: Cancel, placed: boolean
   // the variants: once every sprite's probe is known (or failed)
   const plain = lv.sprites.filter((s) => !(s.extra >= 2 && s.bytes?.some((b) => b)));
   if (!await probed(app, cancel, 'Sprite probes', () => plain.filter((s) => app.spriteVariant(spriteId(s), s.x, s.y, ts) === undefined).length)) return null;
-  cancel.status?.('Sprite graphics …');
+  cancel.status?.(SPRITE_GFX);
   const own = new Map<LevelSprite, HTMLCanvasElement>();
   for (const s of lv.sprites) {
     const id = spriteId(s), bytes = s.extra >= 2 ? s.bytes : undefined;
@@ -150,7 +156,7 @@ async function levelSprites(app: App, lv: Level, cancel: Cancel, placed: boolean
       if (at) j = jobs.at(id, at.x, at.y);
     }
     if (!j) continue;
-    const img = await until(cancel, learned(app, j)) as SpriteImage | null;
+    const img = await until(cancel, learned(app, cancel, j)) as SpriteImage | null;
     if (cancel.cancelled) return null;
     if (img) own.set(s, app.spriteCanvas(img));
   }
@@ -166,7 +172,7 @@ function scanOf(app: App, lv: Level): ScanResult | undefined {
 
 // What the level is drawn with: its load (render, images), its sprites' images, its overlays with its probes
 // (in its tileset) – waited for; null: cancelled
-async function levelPicture(app: App, lv: Level, images: LevelImages, render: LevelRender, cancel: Cancel): Promise<LevelPicture | null> {
+async function levelPicture(app: App, lv: Level, images: LevelImages, render: LevelRender, cancel: ExportWait): Promise<LevelPicture | null> {
   const show = app.show;
   const imgs = show.sprites || show.items ? await levelSprites(app, lv, cancel, show.sprites) : { sprite: () => undefined, thumb: () => undefined };
   if (!imgs) return null;
@@ -237,10 +243,10 @@ export function openLevelImages(app: App, listed: () => number[]): void {
   const failures = h('ul', { class: 'li-failed' });
   const progress = h('div', { class: 'li-progress', style: 'display:none;min-width:360px' }, status, bar, failures);
   const body = h('div', {}, settings, progress);
-  const cancel: Cancel = { cancelled: false, wake: null };
+  const cancel: ExportWait = { lane: 'level-images', cancelled: false, wake: null };
   let running = false, closed = false;
   let save: (() => Promise<void>) | null = null; // after a cancel: saves the levels drawn until then
-  const stop = () => { cancel.cancelled = true; cancel.wake?.(); app.probes.unlearn(LANE); };
+  const stop = () => { cancelWait(cancel); app.probes.unlearn(cancel.lane); };
   const dlg = modal('Levels as images', body, [
     { label: 'Export', primary: true, onClick: () => {
       if (save) { void save(); return; }
@@ -270,31 +276,34 @@ export function openLevelImages(app: App, listed: () => number[]): void {
     emu.adoptBoot(app.emu);
     // (the probes run while the dialog is open)
     const release = app.probes.urge();
-    for (let i = 0; i < nums.length && !cancel.cancelled; i++) {
-      const n = nums[i];
-      const at = `Level ${hex3(n)} (${i + 1} of ${nums.length})`;
-      status.textContent = `${at} …`;
-      cancel.status = (what) => { status.textContent = `${at}: ${what}`; };
-      bar.value = i;
-      await new Promise((ok) => setTimeout(ok, 0)); // (the progress shown, a click on Cancel taken)
-      if (cancel.cancelled) break;
-      try {
-        // (the open level as edited, as Level as PNG)
-        const lv = n === app.level.number ? app.level : loadLevel(app.rom, n);
-        const r = renderLevelImages(app.rom, emu, lv, app.buildOverrides(lv));
-        if ('error' in r) { fail(n, r.error); continue; }
-        const p = await levelPicture(app, lv, r.images, r.render, cancel);
-        if (!p) break;
-        const c = drawLevelImage(app, p, zoom, crop ? usedScreens(r.images, lv) : lv.header.screens);
-        files[levelImageName(n, levelNameOf(app, n))] = [await pngBytes(c), { level: 0 }]; // (PNG is compressed)
-      } catch (e) {
-        console.error(e);
-        fail(n, e instanceof Error ? e.message : String(e));
+    try {
+      for (let i = 0; i < nums.length && !cancel.cancelled; i++) {
+        const n = nums[i];
+        const at = `Level ${hex3(n)} (${i + 1} of ${nums.length})`;
+        status.textContent = `${at} …`;
+        cancel.status = (what) => { status.textContent = `${at}: ${what}`; };
+        bar.value = i;
+        await new Promise((ok) => setTimeout(ok, 0)); // (the progress shown, a click on Cancel taken)
+        if (cancel.cancelled) break;
+        try {
+          // (the open level as edited, as Level as PNG)
+          const lv = n === app.level.number ? app.level : loadLevel(app.rom, n);
+          const r = renderLevelImages(app.rom, emu, lv, app.buildOverrides(lv));
+          if ('error' in r) { fail(n, r.error); continue; }
+          const p = await levelPicture(app, lv, r.images, r.render, cancel);
+          if (!p) break;
+          const c = drawLevelImage(app, p, zoom, crop ? usedScreens(r.images, lv) : lv.header.screens);
+          files[levelImageName(n, levelNameOf(app, n))] = [await pngBytes(c), { level: 0 }]; // (PNG is compressed)
+        } catch (e) {
+          console.error(e);
+          fail(n, e instanceof Error ? e.message : String(e));
+        }
       }
+    } finally {
+      cancel.status = undefined;
+      release();
+      app.probes.unlearn(cancel.lane);
     }
-    cancel.status = undefined;
-    release();
-    app.probes.unlearn(LANE);
     running = false;
     cancelBtn.textContent = 'Close';
     const done = Object.keys(files).length;
