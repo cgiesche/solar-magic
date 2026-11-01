@@ -397,6 +397,7 @@ const OW_HOOK = 0x048086;
 const OW_SETTINGS_AT = 0x4a, OW_GLOBAL_HIGH = 0x57, OW_GLOBAL_LOW = 0x61, OW_TABLE_AT = 0xe1;
 export const SUBMAP_LISTS = 7;
 export interface OwExLayout { target: number; settings: number; table: number }
+// (null: no such hook – the editor's ROMs have it; the tools read Lunar Magic's ROMs, and ROMs without it, here too)
 export function owExanimLayout(rom: RomRead): OwExLayout | null {
   if (rom.r8(OW_HOOK) !== 0x22) return null;
   const target = rom.r24(OW_HOOK + 1);

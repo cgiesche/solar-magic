@@ -33,7 +33,7 @@ import { remapEditor } from '../remaplist.ts';
 import type { LevelRender } from '../../core/levelemu.ts';
 import type { Rom } from '../../core/rom.ts';
 import {
-  triggersFor, maxFrames, triggerRam, triggerProblems, customInit, setCustomInit, isManual, isCustom, isOneShot, playsOnce, slotName, PRECISION, type CustomInit, type SlotRef,
+  triggersFor, maxFrames, triggerRam, triggerProblems, customInit, setCustomInit, isManual, isCustom, isOneShot, playsOnce, slotName, PRECISION, OW_EVENTS, type CustomInit, type SlotRef,
 } from '../../core/extrigger.ts';
 
 // what the tab draws with: the level's render, or the console after the submap's load
@@ -548,7 +548,7 @@ export class AnimTab implements WsPanel {
     }));
     const manual = h('div', { class: 'ti-grid' }, Array.from({ length: 16 }, (_, n) => {
       const cur = draft.manual.get(n), event = ow && n >= 8;
-      const frame = hexInput(cur === undefined || cur === 0xff ? 0 : cur, 2, (f) => { draft.manual.set(n, f); on.checked = true; }, event ? 0xff : 0xfe);
+      const frame = hexInput(cur === undefined || cur === 0xff ? 0 : cur, 2, (f) => { draft.manual.set(n, f); on.checked = true; }, event ? OW_EVENTS - 1 : 0xfe);
       const on = h('input', { type: 'checkbox', checked: cur !== undefined, title: event ? `Set the event of ${this.triggerName(n - 7)} when the submap loads` : `Set the frame when the ${where} loads` });
       on.addEventListener('change', () => { if (on.checked) draft.manual.set(n, Number.parseInt(frame.value, 16) || 0); else draft.manual.delete(n); });
       const gf = g?.manual.get(n);
@@ -560,7 +560,7 @@ export class AnimTab implements WsPanel {
         ? (this.global ? 'Set on every submap when it loads (also when Mario walks there); a submap\'s own Trigger Init overrides these.' : 'Set when this submap loads (also when Mario walks there), over the overworld global list\'s. Also when the submap\'s animations are turned off.')
         : this.global ? 'Set in every level when it loads; a level\'s own Trigger Init overrides these.' : 'Set when this level loads, over the global list\'s (shown where it sets one). Also when the level\'s animations are turned off.'),
       h('div', { class: 'panel-title' }, 'Custom triggers', h('span', { class: 'hint' }, ow ? 'keep: as before the submap' : 'keep: as before the level (the last level left it)')), custom,
-      h('div', { class: 'panel-title' }, ow ? 'Manual frames and events' : 'Manual frames', h('span', { class: 'hint' }, ow ? '0–7: the frame, 00–FE; 8–F: the event numbers of Event Manual 8–F' : '00–FE; FF is the engine\'s “nothing shown yet”')), manual);
+      h('div', { class: 'panel-title' }, ow ? 'Manual frames and events' : 'Manual frames', h('span', { class: 'hint' }, ow ? `0–7: the frame, 00–FE; 8–F: the event numbers of Event Manual 8–F, 00–${hex(OW_EVENTS - 1, 2)}` : '00–FE; FF is the engine\'s “nothing shown yet”')), manual);
     modal(`Trigger Init – ${this.listName()}`, body, [
       { label: 'Apply', primary: true, onClick: () => { void this.save(draft, 'Trigger Init'); } },
       { label: 'Cancel' },

@@ -13,6 +13,8 @@ import { kindOf, secondSet, triggerName, reversesOnTrigger, isEventTrigger, even
 import { RAM, EXTRIGGER_RAM } from './ram.ts';
 
 export { EXTRIGGER_RAM };
+// the overworld's events (their bits at RAM.owEvents: 15 bytes)
+export const OW_EVENTS = 0x78;
 export const MANUAL = 0x10, CUSTOM = 0x20, ONE_SHOT = 0x30, PRECISION = 0x0f;
 
 const GAME_HOLDS = [0x03, 0x01, 0x02, 0x04, 0x05, 0x07]; // ON/OFF, P-switches, star, time, coins
@@ -58,7 +60,7 @@ const addr = (a: number) => `$${hx(a, a > 0xffff ? 6 : 4)}`;
 // as in Lunar Magic's help; 8-bit A for a manual frame); null for those without RAM; ow: in an overworld list
 export function triggerRam(t: number, ow = false): { ram: string; what: string; asm?: string; off?: string } | null {
   if (ow && isEventTrigger(t)) {
-    return { ram: addr(EXTRIGGER_RAM.manual + eventManual(t)), what: `the event's number (Manual ${hx(eventManual(t), 1)}, set by Trigger Init); it holds while that event is passed ($1F02, a bit each)` };
+    return { ram: addr(EXTRIGGER_RAM.manual + eventManual(t)), what: `the event's number (Manual ${hx(eventManual(t), 1)}, set by Trigger Init); it holds while that event is passed (${addr(RAM.owEvents)}, a bit each)` };
   }
   if (isManual(t)) {
     const a = addr(EXTRIGGER_RAM.manual + (t - MANUAL));
@@ -168,7 +170,7 @@ export function usedTriggers(level: ExList | null, global: ExList | null): Map<n
 // (ow: a submap's list and the overworld's global one)
 export function triggerProblems(level: ExList | null, global: ExList | null, ow = false): { text: string; slots: SlotRef[] }[] {
   const out: { text: string; slots: SlotRef[] }[] = [];
-  const slotName = (r: SlotRef) => slotNameOf(r, ow), triggerName = (t: number) => triggerNameOf(t, ow), playsOnce = (t: number) => playsOnceOf(t, ow);
+  const name = (r: SlotRef) => slotName(r, ow), trigger = (t: number) => triggerName(t, ow), once = (t: number) => playsOnce(t, ow);
   // the same one-shot in several slots of the level (its own and the global ones run there)
   const shots = new Map<number, SlotRef[]>();
   // a manual trigger's slots: their fewest frames (the engine shows frame 0 for a frame past a slot's last)
@@ -185,13 +187,14 @@ export function triggerProblems(level: ExList | null, global: ExList | null, ow 
         const reverses = reversesOnTrigger(e.type), c = `Custom ${hx((e.trigger - CUSTOM) & 15, 1)}`;
         const does = isManual(e.trigger) ? (reverses ? 'it always turns, never the other way' : 'it never turns')
           : reverses ? `it turns the other way while ${c} is on` : `it turns only while ${c} is on`;
-        out.push({ text: `Slot ${slotName({ global: g, slot })} is a color rotation with ${triggerName(e.trigger)}: the engine has no manual or one-shot trigger for rotations – ${does}; choose a custom trigger`, slots: [{ global: g, slot }] });
+        out.push({ text: `Slot ${name({ global: g, slot })} is a color rotation with ${trigger(e.trigger)}: the engine has no manual or one-shot trigger for rotations – ${does}; choose a custom trigger`, slots: [{ global: g, slot }] });
       }
       if (isOneShot(e.trigger)) { const a = shots.get(e.trigger) ?? []; a.push({ global: g, slot }); shots.set(e.trigger, a); }
-      if (playsOnce(e.trigger) && kindOf(e.type) !== 'rotation' && e.framesLess1 + 1 > 0xff) out.push({ text: `Slot ${slotName({ global: g, slot })} plays once (${triggerName(e.trigger)}) with 256 frames – at most 255: the engine never ends it`, slots: [{ global: g, slot }] });
+      if (once(e.trigger) && kindOf(e.type) !== 'rotation' && e.framesLess1 + 1 > 0xff) out.push({ text: `Slot ${name({ global: g, slot })} plays once (${trigger(e.trigger)}) with 256 frames – at most 255: the engine never ends it`, slots: [{ global: g, slot }] });
     }
     const own = g ? 'Global' : ow ? 'Submap' : 'Level';
     for (const [n, f] of l.manual) if (f !== 0xff && f >= (manualFrames.get(n) ?? 0x100)) out.push({ text: `${own} Trigger Init: Manual ${hx(n, 1)} starts at frame ${hx(f, 2)}, but a slot using it has only ${manualFrames.get(n)} frames – it shows frame 00 there`, slots: [] });
+    for (const [n, f] of l.manual) if (ow && n >= 8 && f >= OW_EVENTS) out.push({ text: `${own} Trigger Init: the event of ${trigger(n - 7)} is ${hx(f, 2)} – the overworld has events 00–${hx(OW_EVENTS - 1, 2)}; the trigger never holds`, slots: [] });
     for (const [n, f] of l.manual) if (f === 0xff && !(ow && n >= 8)) out.push({ text: `${own} Trigger Init: Manual ${hx(n, 1)} starts at frame FF – the engine takes FF for “nothing shown yet”, so the frame never shows; choose 00–FE`, slots: [] });
     // the precision timer: its slots and the first of their 8 move one counter on, each at the frames it
     // has (from 0 again past its last), so with different frame counts they skip frames
@@ -199,11 +202,9 @@ export function triggerProblems(level: ExList | null, global: ExList | null, ow 
       const group = [...l.slots].sort((a, b) => a[0] - b[0]).filter(([n, e]) => n >= first && n < first + 8 && kindOf(e.type) && (n === first || e.trigger === PRECISION));
       if (!group.some(([n, e]) => n !== first && e.trigger === PRECISION) || !group.some(([, e]) => kindOf(e.type) !== 'rotation')) continue;
       const frames = new Set(group.map(([, e]) => e.framesLess1));
-      if (frames.size > 1) out.push({ text: `Slots ${group.map(([slot]) => slotName({ global: g, slot })).join(', ')} share the counter of slot ${slotName({ global: g, slot: first })} (the precision timer), with different frame counts (${group.map(([, e]) => e.framesLess1 + 1).join(', ')}): each moves it on and back to 0 past its own last frame, so they skip frames`, slots: group.map(([slot]) => ({ global: g, slot })) });
+      if (frames.size > 1) out.push({ text: `Slots ${group.map(([slot]) => name({ global: g, slot })).join(', ')} share the counter of slot ${name({ global: g, slot: first })} (the precision timer), with different frame counts (${group.map(([, e]) => e.framesLess1 + 1).join(', ')}): each moves it on and back to 0 past its own last frame, so they skip frames`, slots: group.map(([slot]) => ({ global: g, slot })) });
     }
   }
-  for (const [t, refs] of shots) if (refs.length > 1) out.push({ text: `${triggerName(t)} is used by ${refs.length} slots (${refs.map(slotName).join(', ')}): the first to finish turns it off and pauses the others`, slots: refs });
+  for (const [t, refs] of shots) if (refs.length > 1) out.push({ text: `${trigger(t)} is used by ${refs.length} slots (${refs.map(name).join(', ')}): the first to finish turns it off and pauses the others`, slots: refs });
   return out;
 }
-
-const slotNameOf = slotName, triggerNameOf = triggerName, playsOnceOf = playsOnce;
