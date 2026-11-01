@@ -11,8 +11,9 @@ import type { Death } from './deaths.ts';
 export type SlotCounts = Record<SlotKind, number>;
 // busy: the CPU's load (see cpuLoad)
 export interface FrameSample { frame: number; used: SlotCounts; failed: SlotFailure[]; busy: number }
-// a moment: its first frame, Mario's tile then (his feet stand in it), count: frames (or failures) in it, its last frame
-export interface Moment { frame: number; count: number; tx: number; ty: number; last: number }
+// a moment: its first frame, Mario's tile then (his feet stand in it) and the level he was in (when known), count:
+// frames (or failures) in it, its last frame
+export interface Moment { frame: number; count: number; tx: number; ty: number; level?: number; last: number }
 export interface PlayEvent extends SlotFailure, Moment {}
 export type LagEvent = Moment;
 export interface DeathEvent extends Death { frame: number }
@@ -48,12 +49,12 @@ export class PlayLog {
   cut(): void { this.open.clear(); this.openLag = null; }
 
   // one emulated frame: the live slots at its end, the searches that failed in it, the CPU's load (cpuLoad),
-  // Mario's position (pixels)
-  frame(frame: number, used: SlotCounts, failed: SlotFailure[], busy: number, marioX: number, marioY: number): void {
+  // Mario's position (pixels), the level being played (when known; moments in another level are others)
+  frame(frame: number, used: SlotCounts, failed: SlotFailure[], busy: number, marioX: number, marioY: number, level?: number): void {
     this.history.push({ frame, used: { ...used }, failed, busy });
     if (this.history.length > this.size) this.history.splice(0, this.history.length - this.size);
-    const at = (count: number): Moment => ({ frame, count, ...marioTile(marioX, marioY), last: frame });
-    const near = (e: Moment | null | undefined, within: number): e is Moment => !!e && frame - e.last <= within && frame >= e.last;
+    const at = (count: number): Moment => ({ frame, count, ...marioTile(marioX, marioY), ...(level === undefined ? {} : { level }), last: frame });
+    const near = (e: Moment | null | undefined, within: number): e is Moment => !!e && frame - e.last <= within && frame >= e.last && e.level === level;
     for (const kind of SLOT_KINDS) {
       const mine = failed.filter((f) => f.kind === kind), n = mine.length;
       if (!n) continue;

@@ -35,6 +35,10 @@ const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL
   log.cut();
   log.frame(202, used, [], LAG, 0x400, 0x80);
   check(log.lags.length === 3, 'after a savestate is loaded: a lag frame is an event of its own');
+  log.frame(203, used, [], LAG, 0x400, 0x80, 0x105);
+  log.frame(204, used, [], LAG, 0x400, 0x80, 0x106);
+  check(log.lags.length === 5 && log.lags[3].level === 0x105 && log.lags[4].level === 0x106 && log.lags[2].level === undefined,
+    'with the level played: lag frames in another level are an event of their own, each names its level');
 }
 
 // ---------- what a frame's load is: the game mode on both sides of it ----------

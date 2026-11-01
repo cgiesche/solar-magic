@@ -7,8 +7,10 @@ import type { Snes, SnesState, MemHook } from './snes.ts';
 import { joinHooks } from './snes.ts';
 import { PPU } from './ppu.ts';
 import { LevelEmulator, type LevelOverride, type LevelRender } from './levelemu.ts';
-import { levelTranslevel } from './level.ts';
-import { GM, RAM, MARIO_DYING, PAD } from './ram.ts';
+import { levelTranslevel, encodeSecondaryHeader, startHeader, entrancePos, mainSpot, type SecondaryHeader, type StartEntrance } from './level.ts';
+import { eventBits } from './overworld.ts';
+import { progressLevelFlags } from './owevents.ts';
+import { GM, RAM, MARIO_DYING, PAD, marioX, marioY, setMarioPos } from './ram.ts';
 import { cpuLoad } from './playlog.ts';
 
 // frames from the load (the level faded in) until gameplay, or until Mario has settled; more: the level hangs
@@ -34,6 +36,17 @@ export interface PlayStart {
   // the midway point): the level's translevel (default: as the game reaches the level); setup changes the
   // game's RAM on the overworld before the level is entered. A level the game can't enter so is loaded on its own.
   game?: { translevel?: number; setup?: (wram: Uint8Array) => void };
+}
+
+// test play of a level (the level editor's): within a game in progress, entered from its overworld tile
+export interface TestStart {
+  ov?: LevelOverride;
+  // Mario's start tile (his feet stand in it) instead of the main entrance, with the camera start, options (face
+  // left, water) and action of the entrance played from (a secondary entrance's; else the main entrance's without an
+  // action); level: the level's secondary header, its last screen and its rows (entrances of a sized level, else 0)
+  at?: { tx: number; ty: number; entrance?: StartEntrance; level: { secondary: SecondaryHeader; maxScreen: number; rows: number } };
+  // a message box open once the level runs (messages.ts messageToShow); yoshi: Mario brings Yoshi along
+  show?: { message: number; yoshi: boolean };
 }
 
 export class PlaySession {
@@ -69,9 +82,47 @@ export class PlaySession {
     return p;
   }
 
+  // test play of level n (TestStart): a game in progress (lives, the overworld with Mario on the level's tile,
+  // entered from there so that the midway point counts – dying returns there). The start tile: the nearest main
+  // entrance setting loads the level around it (camera, tilemap; FG and BG start as set), in gameplay Mario is then
+  // moved to the exact pixel – with an entrance action by how far the setting is from it, keeping where the action
+  // put him (in the pipe, shot out of it)
+  static test(emu: LevelEmulator, n: number, opt: TestStart = {}): PlaySession {
+    const ov = { ...opt.ov }, at = opt.at, show = opt.show;
+    const start = at && { x: at.tx * 16, y: at.ty * 16 - 16 };
+    let move: { x: number; y: number } | undefined;
+    if (at && start) {
+      const sec = startHeader(emu.rom, at.level.secondary, start.x, start.y, at.level.maxScreen, at.level.rows, at.entrance);
+      const p = entrancePos(emu.rom, mainSpot(sec), (sec.verticalPositioning & 1) !== 0);
+      if (sec.entranceAction) move = { x: start.x - p.x, y: start.y - p.y };
+      ov.secondaryHeader = encodeSecondaryHeader(sec);
+    }
+    const p = PlaySession.start(emu, n, { ov, game: { setup: show?.yoshi ? (w) => { w[RAM.yoshiCarried] = 1; } : undefined } });
+    if (show && p.ready) p.wram[RAM.message] = show.message;
+    if (start && p.ready) {
+      const w = p.wram;
+      if (move) setMarioPos(w, marioX(w) + move.x, marioY(w) + move.y);
+      else setMarioPos(w, start.x, start.y);
+    }
+    return p;
+  }
+
   // a new game with Mario on the overworld on layer 1 tile i (overworld.ts l1Index order); enter() plays the level there
   static overworld(emu: LevelEmulator, i: number): PlaySession {
     emu.startGameAt(i);
+    return new PlaySession(emu, null, false);
+  }
+
+  // test play from the overworld: a new game at event progress `progress` (events 0 … progress-1 passed, as the
+  // overworld view shows it; the levels whose exits ran them passed, owevents.ts progressLevelFlags), Mario on layer 1
+  // tile i (< 0: at the start position), the overworld loaded where he stands. Levels entered from there load from
+  // the ROM as the game does
+  static fromOverworld(emu: LevelEmulator, i: number, progress = 0): PlaySession {
+    const events = progress > 0 ? eventBits(progress) : undefined;
+    emu.startGameAt(i, events);
+    const w = emu.snes.wram;
+    for (const [tl, f] of progressLevelFlags(emu.rom, progress)) w[RAM.levelFlags + tl] |= f;
+    emu.reloadOverworld(events);
     return new PlaySession(emu, null, false);
   }
 

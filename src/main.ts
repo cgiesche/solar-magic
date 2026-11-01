@@ -24,7 +24,7 @@ import { LEVEL_FILE_EXT } from './core/levelfile.ts';
 import { openResources } from './ui/resources.ts';
 import { OverworldView } from './ui/overworld.ts';
 import { overworldReplacement } from './core/overworld.ts';
-import { openTestPlay } from './ui/testplay.ts';
+import { openTestPlay, openOverworldTestPlay } from './ui/testplay.ts';
 import { musicPlayer, LEVEL_MUSIC } from './ui/musicplayer.ts';
 import { MessagePanel, levelMessages } from './ui/messagepanel.ts';
 import { map16Tile } from './core/ram.ts';
@@ -218,7 +218,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   const undoBtn = h('button', { onclick: () => app.undo(), title: 'Undo (Ctrl+Z)' }, '↶');
   const redoBtn = h('button', { onclick: () => app.redo(), title: 'Redo (Ctrl+Y)' }, '↷');
   const saveBtn = h('button', { class: 'primary', onclick: () => app.saveLevel(), title: 'Write level to ROM (Ctrl+S)' });
-  const testBtn = h('button', { onclick: () => openTestPlay(app), title: 'Test the level in the built-in emulator (T, Shift+T: from the mouse position)' }, '▶ Test');
+  const testBtn = h('button', { onclick: () => (workspace === 'ow' ? testOverworld() : openTestPlay(app)), title: 'Test the level in the built-in emulator (T, Shift+T: from the mouse position)' }, '▶ Test');
   // loops the open level's music while editing; anything else that plays (test play, a song in a dialog) ends it
   const musicTitle = 'Play the level\'s music in a loop while editing';
   let musicOf = ''; // level and header music playing
@@ -252,8 +252,10 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     saveBtn.textContent = `Save level${app.dirty ? ' *' : ''}`;
     // (the overworld's changes are ROM edits: nothing to save; hidden, so nothing else moves)
     saveBtn.style.visibility = workspace === 'ow' ? 'hidden' : '';
-    testBtn.disabled = workspace === 'ow';
-    testBtn.title = workspace === 'ow' ? 'Test play is available in the level editor' : 'Test the level in the built-in emulator (T, Shift+T: from the mouse position)';
+    testBtn.disabled = workspace === 'ow' && !owShown();
+    testBtn.title = workspace !== 'ow' ? 'Test the level in the built-in emulator (T, Shift+T: from the mouse position)'
+      : owShown() ? 'Play the game from the overworld in the built-in emulator (T): a new game at the event progress shown, Mario on the selected tile (without one at the start position)'
+        : 'The overworld is replaced by a package';
     musicBtn.disabled = workspace === 'ow';
     musicBtn.title = workspace === 'ow' ? 'The level\'s music plays in the level editor' : musicTitle;
     if (workspace === 'ow' && musicPlayer.label === LEVEL_MUSIC) musicPlayer.stop();
@@ -345,9 +347,15 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     if (!owLocked) ow!.show();
   };
   // a package installed or removed (or undone) while the overworld workspace is shown: locked or unlocked at once
-  app.on('rom-change', () => { if (workspace === 'ow' && !!overworldReplacement(app.rom) !== !!owLocked) showOverworld(); });
+  app.on('rom-change', () => { if (workspace === 'ow' && !!overworldReplacement(app.rom) !== !!owLocked) { showOverworld(); updateToolbar(); } });
   // the overworld editor while it is shown (not while locked)
   const owShown = () => (workspace === 'ow' && !owLocked ? ow : null);
+  // test play from the overworld: the selected tile, the event progress shown; a moment of the meters is shown in
+  // the level editor
+  const testOverworld = () => {
+    const o = owShown();
+    if (o) openOverworldTestPlay(app, o.selected, o.progress, (n, at) => void setWorkspace('level').then((ok) => { if (ok) app.showUse(n, at); }));
+  };
 
   app.gotoOverworldTile = async (i) => { if (await setWorkspace('ow')) owShown()?.showTile(i); };
 
@@ -448,6 +456,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     }
     if (workspace === 'ow') {
       if (owShown()?.key(e)) e.preventDefault();
+      else if ((k === 't' || k === 'T') && !ctrl && !e.altKey && !e.shiftKey && owShown()) testOverworld();
       else if (k === 'Escape') void setWorkspace('level');
       return;
     }
@@ -612,6 +621,7 @@ function showHelp(): void {
       ['Alt+click / Ctrl+click', 'Level info of the level tile'],
       ['G', 'Grid on/off'],
       [', / .', 'Event progress: one event back / further'],
+      ['T', 'Test play from the overworld: a new game at the event progress, Mario on the selected tile (or at the start position)'],
     ]],
     ['Graphics', [
       ['P / M / G / A', 'Tab palettes / Map16 tiles / graphics / animations; Esc back to the level'],

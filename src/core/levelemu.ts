@@ -399,12 +399,14 @@ export class LevelEmulator {
   startGame(tl: number): void {
     this.startOn((w) => (tl > 0 ? w.subarray(RAM.owTranslevels, RAM.owTranslevelsEnd).indexOf(tl) : -1));
   }
-  // as startGame, Mario on layer 1 tile i (l1Index order)
-  startGameAt(i: number): void {
-    this.startOn(() => i);
+  // as startGame, Mario on layer 1 tile i (l1Index order; < 0: at the start position); events: the event bits
+  // ($1F02, overworld.ts eventBits) of the game, set as the file is loaded and the overworld loads (as
+  // OverworldEmulator.load: the game draws their layer 2 tiles at the file select, applies them to layer 1 on the load)
+  startGameAt(i: number, events?: Uint8Array): void {
+    this.startOn(() => i, events);
   }
   // tile: Mario's layer 1 tile on the overworld the new game reached (< 0: he stays at the start)
-  private startOn(tile: (wram: Uint8Array) => number): void {
+  private startOn(tile: (wram: Uint8Array) => number, events?: Uint8Array): void {
     this.sync();
     if (!this.baseState) this.boot();
     const s = this.snes, w = s.wram;
@@ -412,6 +414,7 @@ export class LevelEmulator {
     s.joy1 = 0;
     for (let n = 0; w[RAM.gameMode] !== GM.overworld; n++) {
       if (n > 1500) throw new Error('new game did not reach the overworld');
+      if (events && (w[RAM.gameMode] === GM.fileSelect || w[RAM.gameMode] === GM.overworldLoad)) w.set(events, RAM.owEvents);
       if (w[RAM.gameMode] === GM.overworldLoad) w[RAM.introLevel] = 0; // no intro level
       s.joy1 = (n % 16) < 4 ? (w[RAM.gameMode] === GM.title ? 0x1000 : 0x0080) : 0;
       s.runFrame();
@@ -443,6 +446,21 @@ export class LevelEmulator {
       set16(w, RAM.owPlayerTileX + o, tx); set16(w, RAM.owPlayerTileY + o, ty);
     }
     w[RAM.submap] = w[RAM.submap + 1] = sub;
+  }
+
+  // on the overworld: loads it again as the game does after a level, so that it shows where Mario stands now (his
+  // submap, the camera at him) – after startGameAt moved him; events: set again as it loads (startGameAt)
+  reloadOverworld(events?: Uint8Array): void {
+    this.sync();
+    const s = this.snes, w = s.wram;
+    s.joy1 = 0;
+    w[RAM.gameMode] = GM.overworldLoad;
+    for (let n = 0; w[RAM.gameMode] !== GM.overworld; n++) {
+      if (n > 1500) throw new Error('the overworld did not load');
+      if (events && w[RAM.gameMode] === GM.overworldLoad) w.set(events, RAM.owEvents);
+      s.runFrame();
+    }
+    for (let i = 0; i < 3; i++) s.runFrame();
   }
 
   // loads level n of translevel tl within the game startGame(tl) began: entered from the overworld tile as in

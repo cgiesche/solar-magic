@@ -1,5 +1,6 @@
-// "Test level": runs the edited level in the built-in emulator (video, sound, input). The sound unit
-// is emulated too (apu.ts): the game uploads and plays its music and sound effects itself.
+// "Test level": runs the edited level in the built-in emulator (video, sound, input) – or the game from the
+// overworld (core/playsession.ts fromOverworld). The sound unit is emulated too (apu.ts): the game uploads and
+// plays its music and sound effects itself.
 
 import type { App } from './app.ts';
 import { h, modal } from './dom.ts';
@@ -7,11 +8,12 @@ import { LevelEmulator } from '../core/levelemu.ts';
 import type { PPU } from '../core/ppu.ts';
 import { PlaySession } from '../core/playsession.ts';
 import { hex } from '../core/names.ts';
-import { encodeSecondaryHeader, startHeader, entrancePos, mainSpot, type StartEntrance } from '../core/level.ts';
+import type { StartEntrance } from '../core/level.ts';
+import { l1XY, OW_EVENTS } from '../core/overworld.ts';
 import { Apu, apuReady, loadApu } from '../core/apu.ts';
 import { AudioOut } from './audio.ts';
 import { musicPlayer } from './musicplayer.ts';
-import { RAM, PAD, marioX, marioY, setMarioPos } from '../core/ram.ts';
+import { RAM, PAD, GM, marioX, marioY, levelLoaded } from '../core/ram.ts';
 import { SlotWatch } from '../core/slotwatch.ts';
 import { DeathWatch } from '../core/deaths.ts';
 import { addDeath, levelVersion } from './deathmarks.ts';
@@ -72,13 +74,29 @@ let soundMuted = false; // kept between test runs
 // the one savestate (F5 / F8): kept between test runs, for its level on the ROM as it was then
 const saveSlot = new SaveSlot<SnesState>();
 
-// at: Mario's start tile (his feet stand in it) instead of the main entrance, with the camera start, options
-// (face left, water) and action of the entrance played from (a secondary entrance's; else the main entrance's
-// without an action); fromSave: from the savestate instead of the level start (when there is a usable one); show:
-// a message box open once the level runs (messages.ts messageToShow; yoshi: Mario brings Yoshi along)
+// where test play starts: the open level (at: Mario's start tile instead of the main entrance, with the camera
+// start, options and action of the entrance played from – PlaySession.test; show: a message box open once the level
+// runs, messages.ts messageToShow; yoshi: Mario brings Yoshi along), or the overworld (a new game at the event
+// progress, Mario on layer 1 tile `tile` – < 0: at the start position; PlaySession.fromOverworld; showLevel: shows a
+// tile of a level in the level editor, when a moment of the meters is shown)
 type Start = { tx: number; ty: number; entrance?: StartEntrance };
 type ShowMessage = { message: number; yoshi: boolean };
+type ShowLevel = (level: number, at: { x: number; y: number }) => void;
+type Origin = { kind: 'level'; at?: Start; show?: ShowMessage } | { kind: 'overworld'; tile: number; progress: number; showLevel: ShowLevel };
+// the savestate's place for a test play from the overworld (a level's is its number)
+const OVERWORLD_SLOT = -1;
+
+// fromSave: from the savestate instead of the start (when there is a usable one)
 export function openTestPlay(app: App, at?: Start, fromSave = false, show?: ShowMessage): void {
+  begin(app, { kind: 'level', at, show }, fromSave);
+}
+// the game from the overworld: events 0 … progress-1 passed (the overworld view's event progress), Mario on layer 1
+// tile `tile` (l1Index; < 0: at the start position); the levels entered from there are the ROM's
+export function openOverworldTestPlay(app: App, tile: number, progress: number, showLevel: ShowLevel, fromSave = false): void {
+  begin(app, { kind: 'overworld', tile, progress, showLevel }, fromSave);
+}
+
+function begin(app: App, o: Origin, fromSave: boolean): void {
   // saved first: the game loads the level from the ROM again when Mario dies and enters it again
   if (app.dirty) app.saveLevel(true);
   // the game plays its own music
@@ -86,64 +104,60 @@ export function openTestPlay(app: App, at?: Start, fromSave = false, show?: Show
   // the sound emulator loads once; the audio context must start within the key press or click
   const audio = new AudioOut(AUDIO_LEAD);
   if (!apuReady()) {
-    loadApu().then(() => start(app, at, audio, fromSave, show), () => start(app, at, audio, fromSave, show));
+    loadApu().then(() => start(app, o, audio, fromSave), () => start(app, o, audio, fromSave));
     return;
   }
-  start(app, at, audio, fromSave, show);
+  start(app, o, audio, fromSave);
 }
 
-function start(app: App, at: Start | undefined, audio: AudioOut, fromSave: boolean, show?: ShowMessage): void {
+const slotOf = (app: App, o: Origin) => (o.kind === 'level' ? app.level.number : OVERWORLD_SLOT);
+
+function start(app: App, o: Origin, audio: AudioOut, fromSave: boolean): void {
   if (!testEmu || testEmu.rom !== app.rom) {
     testEmu = new LevelEmulator(app.rom);
     if (apuReady()) testEmu.snes.apu = new Apu();
     testEmu.boot();
   }
   const emu = testEmu;
-  const lv = app.level;
-  const saved = fromSave ? saveSlot.get(app.rom, lv.number, app.dirty) : null;
-  const p = saved ? PlaySession.resume(emu) : loadLevel(app, emu, at, show);
+  const saved = fromSave ? saveSlot.get(app.rom, slotOf(app, o), app.dirty) : null;
+  let p: PlaySession, ok = true;
+  if (saved) p = PlaySession.resume(emu);
+  else if (o.kind === 'level') {
+    const lv = app.level;
+    p = PlaySession.test(emu, lv.number, {
+      ov: app.buildOverrides(), show: o.show,
+      at: o.at && { ...o.at, level: { secondary: lv.secondary, maxScreen: lv.header.screens - 1, rows: app.entranceRows() } },
+    });
+    ok = p.render?.ok === true;
+  } else {
+    try { p = PlaySession.fromOverworld(emu, o.tile, o.progress); } catch { p = PlaySession.resume(emu); ok = false; }
+  }
   const ppu = p.attachPPU();
   // with the PPU attached: the frame on screen is part of the state
   if (saved) p.load(saved);
-  play(app, at, audio, p, ppu, saved ? true : p.render?.ok === true, !!saved);
+  play(app, o, audio, p, ppu, ok, !!saved);
 }
 
-// loads the level in a game in progress, Mario at the start position
-function loadLevel(app: App, emu: LevelEmulator, at: Start | undefined, show?: ShowMessage): PlaySession {
-  const lv = app.level;
-  const ov = app.buildOverrides();
-  // the start position: the nearest main entrance setting loads the level around it (camera, tilemap; FG and
-  // BG start as set), in gameplay Mario is then moved to the exact pixel – with an entrance action by how far
-  // the setting is from it, keeping where the action put him (in the pipe, shot out of it)
-  const start = at && { x: at.tx * 16, y: at.ty * 16 - 16 };
-  let move: { x: number; y: number } | undefined;
-  if (start) {
-    const sec = startHeader(app.rom, lv.secondary, start.x, start.y, lv.header.screens - 1, app.entranceRows(), at.entrance);
-    const p = entrancePos(app.rom, mainSpot(sec), (sec.verticalPositioning & 1) !== 0);
-    if (sec.entranceAction) move = { x: start.x - p.x, y: start.y - p.y };
-    ov.secondaryHeader = encodeSecondaryHeader(sec);
-  }
-  // a game in progress (lives, overworld with Mario on the level's tile, entered from there so that the
-  // midway point counts): dying returns there
-  const p = PlaySession.start(emu, lv.number, { ov, game: { setup: show?.yoshi ? (w) => { w[RAM.yoshiCarried] = 1; } : undefined } });
-  if (show && p.ready) p.wram[RAM.message] = show.message;
-  if (start && p.ready) {
-    const w = p.wram;
-    if (move) setMarioPos(w, marioX(w) + move.x, marioY(w) + move.y);
-    else setMarioPos(w, start.x, start.y);
-  }
-  return p;
+// what the title says the test starts from
+function originText(app: App, o: Origin): string {
+  if (o.kind === 'level') return `Test level – ${hex(app.level.number, 3)}${o.at ? ` from ${hex(o.at.tx, 2)}/${hex(o.at.ty, 2)}` : ''}`;
+  const { x, y } = l1XY(o.tile), events = o.progress === 0 ? 'no events passed' : o.progress >= OW_EVENTS ? 'all events passed' : `events up to ${hex(o.progress - 1, 2)} passed`;
+  return `Test play – overworld, ${o.tile < 0 ? 'start position' : `tile ${hex(x, 2)},${hex(y, 2)} (${o.tile >= 0x400 ? 'submaps' : 'main map'})`}, ${events}`;
 }
 
-function play(app: App, at: Start | undefined, audio: AudioOut, p: PlaySession, ppu: PPU, ok: boolean, fromSave: boolean): void {
-  const lv = app.level;
+function play(app: App, o: Origin, audio: AudioOut, p: PlaySession, ppu: PPU, ok: boolean, fromSave: boolean): void {
+  const lv = app.level, slot = slotOf(app, o);
   const canvas = h('canvas', { width: 256, height: 224, class: 'play-canvas', tabIndex: 0 });
   const ctx = canvas.getContext('2d')!;
   const img = ctx.createImageData(256, 224);
   const info = h('div', { class: 'hint' });
   // the sprite slots and Mario's deaths, watched from here on
   const watch = p.watch((s) => new SlotWatch(s)), deaths = p.watch((s) => new DeathWatch(s)), log = new PlayLog(GRAPH_FRAMES);
-  const meter = playMeter(log, (tx, ty, level = lv.number) => { m.close(); app.showUse(level, { x: tx, y: ty }); }, (id) => app.spriteLabel(id));
+  const meter = playMeter(log, (tx, ty, level = lv.number) => {
+    m.close();
+    if (o.kind === 'overworld') o.showLevel(level, { x: tx, y: ty });
+    else app.showUse(level, { x: tx, y: ty });
+  }, (id) => app.spriteLabel(id));
   let keys = 0;
   let running = true;
   let paused = false;
@@ -156,8 +170,8 @@ function play(app: App, at: Start | undefined, audio: AudioOut, p: PlaySession, 
   // a brief note in the info line (savestate saved / loaded), until `until`
   let note = '', noteUntil = 0;
   const say = (t: string) => { note = t; noteUntil = performance.now() + 2000; };
-  const usable = () => saveSlot.get(app.rom, lv.number, app.dirty);
-  const saveState = () => { saveSlot.save(app.rom, lv.number, p.save()); say('State saved'); showRestartSaved(); };
+  const usable = () => saveSlot.get(app.rom, slot, app.dirty);
+  const saveState = () => { saveSlot.save(app.rom, slot, p.save()); say('State saved'); showRestartSaved(); };
   const loadState = () => {
     const st = usable();
     if (!st) { say('No savestate'); showRestartSaved(); return; }
@@ -192,7 +206,7 @@ function play(app: App, at: Start | undefined, audio: AudioOut, p: PlaySession, 
     try { busy = p.frame(keys | readPads().bits); } catch (e) { info.textContent = `Emulation error: ${e}`; paused = true; }
     if (p.audio) audio.push(p.audio);
     frames++;
-    log.frame(frames, watch.usedAll(), watch.take(), busy, marioX(p.wram), marioY(p.wram));
+    log.frame(frames, watch.usedAll(), watch.take(), busy, marioX(p.wram), marioY(p.wram), levelLoaded(p.wram));
     // kept as markers in the level he died in
     for (const d of deaths.take()) { log.died(frames, d); addDeath(projectId(app.rom), d, levelVersion(app.rom, d.level)); }
   };
@@ -223,7 +237,9 @@ function play(app: App, at: Start | undefined, audio: AudioOut, p: PlaySession, 
     new Uint32Array(img.data.buffer).set(ppu.frame);
     ctx.putImageData(img, 0, 0);
     meter.update();
-    info.textContent = `Level ${hex(lv.number, 3)} · Frame ${frames}${paused ? ' · Pause' : ''} · Game mode ${hex(p.mode, 2)}`
+    // (from the overworld: the level being played, while one is)
+    const where = o.kind === 'level' ? `Level ${hex(lv.number, 3)}` : p.mode === GM.level ? `Level ${hex(levelLoaded(p.wram), 3)}` : 'Overworld';
+    info.textContent = `${where} · Frame ${frames}${paused ? ' · Pause' : ''} · Game mode ${hex(p.mode, 2)}`
       + (note && t < noteUntil ? ` · ${note}` : '')
       + (padNames.length ? ` · Gamepad: ${padNames.join(', ')}` : ' · Gamepad: none detected (press a button)')
       + (!p.hasSound || audio.failed ? ' · No sound' : soundMuted ? ' · Sound off (M)' : '');
@@ -241,15 +257,16 @@ function play(app: App, at: Start | undefined, audio: AudioOut, p: PlaySession, 
     window.removeEventListener('keydown', kd, true);
     window.removeEventListener('keyup', ku, true);
   };
-  const triggers = triggerControls(app, p.wram, () => canvas.focus());
-  const m = modal(`Test level – ${hex(lv.number, 3)}${fromSave ? ' from the savestate' : at ? ` from ${hex(at.tx, 2)}/${hex(at.ty, 2)}` : ''}${ok ? '' : ' (load error)'}`, h('div', { class: 'play' },
+  // (the open level's triggers: from the overworld other levels are played)
+  const triggers = o.kind === 'level' ? triggerControls(app, p.wram, () => canvas.focus()) : '';
+  const m = modal(`${originText(app, o)}${fromSave ? ' – from the savestate' : ''}${ok ? '' : ' (load error)'}`, h('div', { class: 'play' },
     h('div', { class: 'play-main' }, canvas, meter.el),
     info,
     triggers,
-    h('div', { class: 'hint play-help' }, 'Controls: arrows · X = jump (B) · Z/Y = run/fire (Y) · S = spin jump · A = X button · Enter = Start · Shift = Select · Q/W = L/R · P = pause. Gamepad: d-pad/left stick, buttons by position as on the SNES pad (bottom = B, right = A, left = Y, top = X), shoulder buttons/triggers = L/R, Start/Select, Home = pause. M = sound on/off. F5 = save state, F8 = load state (gamepad: Select+L / Select+R; one slot, kept for this level until it or the ROM changes). The level is saved before the test.'),
+    h('div', { class: 'hint play-help' }, `Controls: arrows · X = jump (B) · Z/Y = run/fire (Y) · S = spin jump · A = X button · Enter = Start · Shift = Select · Q/W = L/R · P = pause. Gamepad: d-pad/left stick, buttons by position as on the SNES pad (bottom = B, right = A, left = Y, top = X), shoulder buttons/triggers = L/R, Start/Select, Home = pause. M = sound on/off. F5 = save state, F8 = load state (gamepad: Select+L / Select+R; one slot, kept for this ${o.kind === 'level' ? 'level' : 'test from the overworld'} until it or the ROM changes). ${o.kind === 'level' ? 'The level is saved before the test.' : 'The open level is saved before the test; levels entered on the overworld play as saved.'}`),
   ), [
-    { label: 'Restart from savestate', onClick: () => { setTimeout(() => openTestPlay(app, at, true), 0); } },
-    { label: 'Restart', onClick: () => { setTimeout(() => openTestPlay(app, at), 0); } },
+    { label: 'Restart from savestate', onClick: () => { setTimeout(() => begin(app, o, true), 0); } },
+    { label: 'Restart', onClick: () => { setTimeout(() => begin(app, o, false), 0); } },
     { label: 'Quit', primary: true },
   ], stop);
   // shown while there is a savestate to start from
