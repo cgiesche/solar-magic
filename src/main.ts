@@ -13,6 +13,7 @@ import { LevelView } from './ui/levelview.ts';
 import { LevelList, Picker, Properties } from './ui/panels.ts';
 import { sideSplitter } from './ui/pickerview.ts';
 import { openSearch } from './ui/search.ts';
+import { onBehaviorProgress } from './ui/tilesearch.ts';
 import { openHeaderDialog } from './ui/headerdialog.ts';
 import { hex } from './core/names.ts';
 import { GfxWorkspace, type WsTab } from './ui/gfxworkspace.ts';
@@ -163,7 +164,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   // central search (Ctrl+F or Ctrl+Space): a result is shown in the level workspace
   const search = () => openSearch(picker.searchProviders().map((p) => ({
     ...p, search: (terms) => p.search(terms).map((r) => ({ ...r, pick: () => void setWorkspace('level').then((ok) => { if (ok) r.pick(); }) })),
-  })));
+  })), { refresh: (again) => onBehaviorProgress(app, again) }); // (tiles' behavior determined)
   const insertHere = () => { const hv = view.hover, c = view.centerTile(); openInsertDialog(app, hv ? hv.tx : c.tx, hv ? hv.ty : c.ty); };
   const menus = menuBar([
     { label: 'File', items: [

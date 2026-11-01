@@ -27,7 +27,7 @@ import { VANILLA_GFX } from '../../core/patches.ts';
 import { ANIM_FILE } from '../../core/gfxfiles.ts';
 import { levelSlots, layerSlots, slotOfTile, type GfxSlot } from '../../core/gfxslots.ts';
 import { cgramToRGBA } from '../../core/gfx.ts';
-import { tileMatches, drawTileMatches } from '../tilesearch.ts';
+import { tileMatches, drawTileMatches, tileBehaviors, behaviorTile, pendingHint, onBehaviorProgress } from '../tilesearch.ts';
 import { animsAt, animLinks } from './animtab.ts';
 import { fgTileUsers, bgTileUsers, tileLinks, unusedFgTiles, isTilesetTile, TILE_SOURCES } from '../../core/levelusage.ts';
 import { usedInList } from '../usedin.ts';
@@ -120,9 +120,11 @@ export class Map16Tab implements WsPanel {
   private dirty = new Set<number>(); // pages to draw once they come near the view
   private topPage = 0; // page at the top of the list
   private pageBar = h('span', { class: 'btn-group m16-pages' });
-  private search = h('input', { type: 'text', class: 'mt-search', placeholder: 'Tile no. (hex), name or block file …', spellcheck: false, autocomplete: 'off',
+  private search = h('input', { type: 'text', class: 'mt-search', placeholder: 'Tile no. (hex) or name …', spellcheck: false, autocomplete: 'off',
     title: 'Dims the tiles that do not match; Enter selects the tile once only one is left' });
+  private searchHint = h('span', { class: 'hint mt-search-hint', title: 'The search by behavior is complete once they are determined' }); // tiles still being determined
   private match: number[] | null = null;
+  private matchPending = false; // the match is not final: tiles' behavior is still being determined
   private scrollPending = false; // selected while hidden: scroll there when shown
   private builder = h('div', { class: 'mt-builder' });
   private builderCol = h('div', { class: 'mt-col mt-builder-col' }, this.builder);
@@ -176,6 +178,7 @@ export class Map16Tab implements WsPanel {
     app.on('rom-change', redraw);
     app.on('render', redraw);
     app.on('probes', () => { if (this.visible) this.buildBuilder(); });
+    onBehaviorProgress(app, () => { if (this.visible && this.matchPending) { this.findMatches(); this.drawSheet(); } });
     app.on('animated', redraw);
     app.on('level-uses', () => { this.unused = null; if (this.visible) { this.buildUses(); if (this.markUnused) this.drawSheet(); } });
   }
@@ -398,6 +401,7 @@ export class Map16Tab implements WsPanel {
       }, hex(p, 1)));
       this.heads[p].replaceChildren(`Page ${hex(p, 1)}`);
     }
+    this.search.placeholder = this.fg ? 'Tile no. (hex), name, behavior or block file …' : this.bg ? 'Tile no. (hex) or name …' : 'Tile no. (hex) …';
     this.bar.append(
       h('span', { class: 'btn-group' },
         layer('fg', 'Foreground', 'FG tiles (layer 1 and layer 2 objects)'),
@@ -405,6 +409,7 @@ export class Map16Tab implements WsPanel {
         layer('ow', 'Overworld', 'The overworld\'s layer 1 tiles 00–C0 (paths, level tiles, …)')),
       this.ow ? this.owMapSelect() : this.pageBar,
       this.search,
+      this.searchHint,
       h('span', { class: 'sep' }),
       h('button', { onclick: () => this.copy(), title: 'Copy the selected tiles, with acts-like (Ctrl+C)' }, 'Copy'),
       h('button', { onclick: () => this.paste(), title: 'Paste starting at the selected tile (Ctrl+V)' }, 'Paste'),
@@ -605,9 +610,9 @@ export class Map16Tab implements WsPanel {
       const p = this.cellAt(e);
       const t = p.y * 16 + p.x;
       if (t >= this.count()) { e.target.title = ''; return; }
-      const info = this.fg ? this.app.probes.block(actsLike(this.app.rom, t)) : undefined;
+      const b = this.fg ? behaviorTile(this.app.rom, t) : -1, info = b >= 0 ? this.app.probes.block(b) : undefined;
       const name = this.ow ? undefined : namesOf(this.app.rom, this.kind()).get(t);
-      e.target.title = `${this.tileTitle(t)}${name ? ` “${name}”` : ''}${this.fg ? ` – ${info ? probeText(info) : 'determining behavior …'}` : ''}`;
+      e.target.title = `${this.tileTitle(t)}${name ? ` “${name}”` : ''}${b >= 0 ? ` – ${info ? probeText(info) : 'determining behavior …'}` : ''}`;
     });
   }
 
@@ -633,15 +638,25 @@ export class Map16Tab implements WsPanel {
       this.scrollToSel();
     });
   }
-  // custom blocks are FG tiles only
+  // custom blocks and behavior are FG tiles' only; while tiles' behavior is still being determined, a hint says
+  // how many ('probes' searches again)
   private findMatches(): void {
-    if (this.ow) { this.match = tileMatches(this.search.value, OW_L1_TILES); return; }
-    const names = namesOf(this.app.rom, this.kind());
-    this.match = tileMatches(this.search.value, EXT_TILES, this.bg ? [names] : [blockFilesByTile(this.app.rom), names]);
+    let pending = 0;
+    if (this.ow) this.match = tileMatches(this.search.value, OW_L1_TILES);
+    else if (this.bg) this.match = tileMatches(this.search.value, EXT_TILES, [namesOf(this.app.rom, 'bg')]);
+    else {
+      const how = this.search.value.trim() ? tileBehaviors(this.app, EXT_TILES) : { texts: new Map<number, string>(), pending: 0 };
+      pending = how.pending;
+      this.match = tileMatches(this.search.value, EXT_TILES, [blockFilesByTile(this.app.rom), namesOf(this.app.rom, 'fg'), how.texts]);
+    }
+    this.matchPending = pending > 0;
+    this.searchHint.textContent = pendingHint(pending);
   }
   private clearSearch(): void {
     this.search.value = '';
     this.match = null;
+    this.matchPending = false;
+    this.searchHint.textContent = '';
     this.drawSheet();
   }
 
@@ -1044,12 +1059,12 @@ export class Map16Tab implements WsPanel {
     const sheet = renderMap16Sheet(app, false, 0);
     const cur = actsLike(app.rom, tiles[0]);
     const scroll = h('div', { class: 'mt-acts-scroll' }, c);
-    const tip = `Click a tile or type its number or name: the ${tiles.length > 1 ? 'marked tiles then act' : 'tile then acts'} like this one.`;
+    const tip = `Click a tile or type its number, name or behavior: the ${tiles.length > 1 ? 'marked tiles then act' : 'tile then acts'} like this one.`;
     const info = h('div', { class: 'hint mt-acts-info' }, tip);
     const say = (text: string) => { info.textContent = text; info.title = text; };
     const describe = (t: number) => { const p = app.probes.block(t); say(`Tile ${hex(t, 3)}: ${p ? probeText(p) : 'determining …'}`); };
-    const input = h('input', { type: 'text', class: 'mt-acts-input', placeholder: 'Tile number (hex) or name, e.g. 130', spellcheck: false, autocomplete: 'off' });
-    let matches: number[] | null = null;
+    const input = h('input', { type: 'text', class: 'mt-acts-input', placeholder: 'Tile number (hex), name or behavior, e.g. 130 or coin', spellcheck: false, autocomplete: 'off' });
+    let matches: number[] | null = null, pending = 0;
     const draw = () => {
       ctx.drawImage(sheet, 0, 0, 512, 1024);
       ctx.lineWidth = 2;
@@ -1057,12 +1072,15 @@ export class Map16Tab implements WsPanel {
       ctx.strokeRect((cur & 15) * 32 + 1, (cur >> 4) * 32 + 1, 30, 30);
       drawTileMatches(ctx, matches, 0, 0x200, 32);
     };
-    const update = () => {
-      matches = tileMatches(input.value, 0x200, [namesOf(app.rom, 'fg')]);
+    const update = (scrollTo = true) => {
+      const how = input.value.trim() ? tileBehaviors(app, 0x200) : null;
+      pending = how?.pending ?? 0;
+      matches = tileMatches(input.value, 0x200, [namesOf(app.rom, 'fg'), how?.texts ?? new Map()]);
       draw();
-      if (matches?.length === 1) describe(matches[0]);
-      else say(!matches ? tip : matches.length ? `${matches.length} tiles match.` : 'No tile 000–1FF matches.');
-      if (matches?.length) {
+      const more = pending ? ` (${pendingHint(pending)})` : '';
+      if (matches?.length === 1 && !pending) describe(matches[0]);
+      else say(!matches ? tip : matches.length ? `${matches.length} tile${matches.length > 1 ? 's' : ''} match${matches.length > 1 ? '' : 'es'}.${more}` : `No tile 000–1FF matches.${more}`);
+      if (matches?.length && scrollTo) {
         const y = (matches[0] >> 4) * 32 * (c.getBoundingClientRect().height / 1024 || 1);
         if (y < scroll.scrollTop || y > scroll.scrollTop + scroll.clientHeight - 32) scroll.scrollTop = y - 8;
       }
@@ -1072,15 +1090,17 @@ export class Map16Tab implements WsPanel {
       return Math.floor((e.clientY - rc.top) / (rc.height / 32)) * 16 + Math.floor((e.clientX - rc.left) / (rc.width / 16));
     };
     c.addEventListener('mousemove', (e) => describe(at(e)));
-    c.addEventListener('mouseleave', update);
+    c.addEventListener('mouseleave', () => update());
+    // the search again once tiles' behavior is determined
+    const off = onBehaviorProgress(app, () => { if (pending) update(false); });
     const dlg = modal(`Acts-like for ${tiles.length > 1 ? `${tiles.length} Tiles` : this.tileTitle(tiles[0])}`,
-      h('div', { class: 'mt-acts-dlg' }, input, info, scroll), [{ label: 'Cancel' }]);
+      h('div', { class: 'mt-acts-dlg' }, input, info, scroll), [{ label: 'Cancel' }], off);
     const take = (v: number) => {
       this.edit(`Acts like ${hex(v, 3)}`, () => { for (const t of tiles) setActsLike(app.rom, t, v); });
       dlg.close();
     };
     c.addEventListener('mousedown', (e) => take(at(e)));
-    input.addEventListener('input', update);
+    input.addEventListener('input', () => update());
     input.addEventListener('keydown', (e) => {
       if (e.key !== 'Enter') return;
       e.preventDefault();

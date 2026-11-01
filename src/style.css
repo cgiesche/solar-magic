@@ -497,6 +497,7 @@ canvas.sheet-fill { width: 100%; height: auto; image-rendering: auto; }
 /* the scrollbar always there: the fitted zoom does not change when it would appear */
 .mt-gfx-scroll { overflow-x: auto; overflow-y: scroll; border: 1px solid var(--border); flex: 1; min-height: 0; }
 .mt-search { width: 9em; font-family: ui-monospace, monospace; }
+.mt-search-hint { white-space: nowrap; }
 .mt-sheet { display: block; image-rendering: pixelated; cursor: crosshair; }
 .mt-builder-col { flex: 1; min-width: 240px; overflow-y: auto; }
 .mt-builder { display: flex; flex-direction: column; gap: 8px; }
@@ -753,5 +754,6 @@ button.danger:hover:not(:disabled) { border-color: var(--danger); }
 .search-list .picker-row .num { min-width: 3em; }
 .search-more { color: var(--muted); font-style: italic; }
 .search-foot { padding: 0 2px; }
+.search-note { padding: 4px 6px; font-style: italic; }
 .ow-legend { display: inline-block; width: 22px; height: 0; margin-right: 6px; vertical-align: middle; }
 .ow-option-sub { margin-left: 22px; }

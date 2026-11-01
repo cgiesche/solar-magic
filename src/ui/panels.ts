@@ -27,7 +27,7 @@ import { TileCache, map16Source, drawMap16, sheetCells } from '../core/render.ts
 import { lt3Target, lt3Users, blankLayer3Tile, l3Palette, withL3Palette, L3_TILE, L3_PAL, L3_PRIO, L3_FLIP_X, L3_FLIP_Y } from '../core/layer3map.ts';
 import { LT3_DESTS } from '../core/layer3gfx.ts';
 import { probeable, probeText, spritesOf, spriteProbeAt, enterText, enterSuffix, switchText, switchedText, SWITCH_NAME, type SwitchState } from '../core/blockprobe.ts';
-import { tileMatches, drawTileMatches } from './tilesearch.ts';
+import { tileMatches, drawTileMatches, tileBehaviors, behaviorTile, pendingHint } from './tilesearch.ts';
 import { animateTiles, noteCopy } from './pickeranim.ts';
 import { matchesAll, type SearchProvider, type SearchResult } from './search.ts';
 import { blockFilesByTile } from './blockdialog.ts';
@@ -305,10 +305,11 @@ export class Picker {
         onclick: () => this.scrollToM16Page(p),
       }, p.toString(16).toUpperCase()));
     }
-    // tooltip: tile number, name, behaviour when hit from below and how it treats Mario
+    // tooltip: tile number, name, behaviour when hit from below (as the tile search finds it) and how it treats Mario
     let hoverTile = -1, hoverCanvas: HTMLCanvasElement | null = null;
+    const behavior = (t: number) => { const b = behaviorTile(app.rom, t); return app.probes.block(b < 0 ? t : b); };
     const tip = () => {
-      const p = app.probes.block(hoverTile), name = nameOf(app.rom, 'fg', hoverTile);
+      const p = behavior(hoverTile), name = nameOf(app.rom, 'fg', hoverTile);
       const c = app.probes.collision(hoverTile), o = c && switchedText(c);
       const marks = (c ? collisionMarks([c]).map((m) => ` · ${MARK_TEXT[m]}`).join('') : '') + (o ? ` · ${o}` : '');
       if (hoverCanvas) hoverCanvas.title = `Tile ${hex3(hoverTile)}${name ? ` “${name}”` : ''}: ${p ? probeText(p) + marks : 'determining behavior …'}\nCtrl+click: edit in the Map16 tab`;
@@ -357,7 +358,7 @@ export class Picker {
       previewSheet(c, pageSheet, 16, 16, 16, scale, (r) => {
         const t = base + r.y * 16 + r.x;
         if (r.w * r.h > 1) return [`Block ${r.w}×${r.h} from tile ${hex3(t)}`];
-        const pr = app.probes.block(t), name = nameOf(app.rom, 'fg', t);
+        const pr = behavior(t), name = nameOf(app.rom, 'fg', t);
         return [`Tile ${hex3(t)}${name ? ` “${name}”` : ''}`, pr ? probeText(pr) : 'determining behavior …', 'Ctrl+click: edit in the Map16 tab'];
       }, (r) => {
         const t = base + r.y * 16 + r.x, tiles = Array.from({ length: r.w * r.h }, (_, i) => t + Math.floor(i / r.w) * 16 + (i % r.w));
@@ -702,17 +703,21 @@ export class Picker {
       });
     });
     // Map16: first the tiles the user named, then tiles by number (the rules of the tab's tile search), by what
-    // they do (finished probes only) or by the file of the custom block on them
+    // they do (emulated, as the tooltips say it; while tiles are still being determined, the note says how many)
+    // or by the file of the custom block on them
+    let pending = 0;
     const map16: SearchProvider = {
       id: 'm16', label: 'Map16',
+      note: () => pendingHint(pending),
       search: (terms) => {
         const nums = terms.map((t) => new Set(tileMatches(t, EXT_TILES) ?? []));
         const sheets = new Map<number, HTMLCanvasElement>();
         const files = blockFilesByTile(app.rom);
+        const how = tileBehaviors(app, EXT_TILES);
+        pending = how.pending;
         const out: SearchResult[] = named(terms);
         for (let t = 0; t < EXT_TILES; t++) {
-          const p = app.cachedBlock(t);
-          const text = p ? probeText(p) : '';
+          const text = how.texts.get(t) ?? '';
           const file = files.get(t);
           const low = `${text} ${file ?? ''}`.toLowerCase();
           if (!terms.every((x, i) => nums[i].has(t) || low.includes(x))) continue;

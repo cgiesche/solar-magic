@@ -319,10 +319,12 @@ export class App {
     this.later('result-sweep', step);
   }
 
-  on(ev: AppEvent, fn: Listener): void {
+  // (returns what takes fn off again)
+  on(ev: AppEvent, fn: Listener): () => void {
     let s = this.listeners.get(ev);
     if (!s) { s = new Set(); this.listeners.set(ev, s); }
     s.add(fn);
+    return () => { this.listeners.get(ev)?.delete(fn); };
   }
   // fn the next time ev is emitted only
   once(ev: AppEvent, fn: Listener): void {

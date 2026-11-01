@@ -19,6 +19,13 @@ export interface SearchProvider {
   label: string;
   // results matching every term of the query (lower case, at least one); the order is the provider's
   search: (terms: string[]) => SearchResult[];
+  // after search(): why its results may not be final yet ('' when they are), e.g. tiles still being determined
+  note?: () => string;
+}
+
+export interface SearchOptions {
+  // calls again() whenever results that were not final may have changed; returns what stops it
+  refresh?: (again: () => void) => () => void;
 }
 
 // the terms of a query: words in lower case
@@ -37,7 +44,7 @@ const MAX = 300; // results shown for one group
 let last = ''; // the query is kept for the next time, selected
 let current: { close: () => void } | null = null;
 
-export function openSearch(providers: SearchProvider[]): void {
+export function openSearch(providers: SearchProvider[], opts: SearchOptions = {}): void {
   if (current) { current.close(); return; }
   let group = ''; // '' all groups, else a provider id
   let rows: { el: HTMLElement; pick: () => void }[] = [];
@@ -61,7 +68,9 @@ export function openSearch(providers: SearchProvider[]): void {
 
   // thumbnails are drawn when their row scrolls into view
   let observer: IntersectionObserver | null = null;
-  function build(): void {
+  let noted = false; // results shown that are not final
+  function build(keep = false): void {
+    const was = active;
     observer?.disconnect();
     const thumbs = new Map<Element, () => Node | null>();
     const obs = new IntersectionObserver((entries) => {
@@ -82,6 +91,7 @@ export function openSearch(providers: SearchProvider[]): void {
     rows = [];
     active = 0;
     const terms = searchTerms(input.value);
+    noted = false;
     if (!terms.length) { list.append(emptyState('Type a number or a name.')); return; }
     // results whose number or name is the query come first, then those with every term in the number or name,
     // then those found by the rest (detail, behavior, …); a group is ranked by its best result
@@ -90,10 +100,15 @@ export function openSearch(providers: SearchProvider[]): void {
       const label = r.label.toLowerCase(), name = r.name.toLowerCase();
       return label === q || name === q ? 0 : matchesAll(`${label} ${name}`, terms) ? 1 : 2;
     };
+    const notes: string[] = [];
     const groupsFound = providers.filter((p) => !group || p.id === group).map((p) => {
       const found = p.search(terms).map((r) => ({ r, rank: rank(r) })).sort((a, b) => a.rank - b.rank); // (stable)
+      const note = p.note?.();
+      if (note) notes.push(`${p.label}: ${note}`);
       return { p, found: found.map((x) => x.r), best: found[0]?.rank ?? 3 };
     }).filter((g) => g.found.length);
+    noted = notes.length > 0;
+    for (const n of notes) list.append(h('div', { class: 'hint search-note' }, n));
     groupsFound.sort((a, b) => a.best - b.best);
     for (const { p, found } of groupsFound) {
       const max = group ? MAX : PER_GROUP;
@@ -120,9 +135,16 @@ export function openSearch(providers: SearchProvider[]): void {
         list.append(more);
       }
     }
-    if (!rows.length) list.append(emptyState(group ? `Nothing found in ${providers.find((p) => p.id === group)?.label}.` : 'Nothing found.'));
-    setActive(0);
+    if (!rows.length) list.append(emptyState(group ? `Nothing found in ${providers.find((p) => p.id === group)?.label}${noted ? ' yet' : ''}.` : `Nothing found${noted ? ' yet' : ''}.`));
+    setActive(keep ? Math.min(was, rows.length - 1) : 0);
   }
+  // (the row chosen and the scroll position stay)
+  const stopRefresh = opts.refresh?.(() => {
+    if (!noted) return;
+    const top = list.scrollTop;
+    build(true);
+    list.scrollTop = top;
+  });
 
   input.addEventListener('input', () => { last = input.value; build(); });
   input.addEventListener('keydown', (e) => {
@@ -148,6 +170,7 @@ export function openSearch(providers: SearchProvider[]): void {
   input.select();
   current = { close };
   function close(): void {
+    stopRefresh?.();
     observer?.disconnect();
     back.remove();
     current = null;
