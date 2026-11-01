@@ -117,6 +117,7 @@ export class LevelList {
   onlyUsed: HTMLInputElement;
   count = h('span', { class: 'hint' });
   private first = -1;
+  shown: number[] = []; // the levels listed (the filter and "used only" applied)
   constructor(app: App) {
     this.app = app;
     this.filter = h('input', { placeholder: 'No. (hex) or name …', class: 'filter', spellcheck: false, title: 'Filters by level number (hex) or name; Enter opens the first match' });
@@ -143,6 +144,7 @@ export class LevelList {
     const f = this.filter.value.trim().toLowerCase();
     clear(this.list);
     this.first = -1;
+    this.shown = [];
     let n = 0;
     for (let i = 0; i < 0x200; i++) {
       if (this.onlyUsed.checked && !used.has(i)) continue;
@@ -152,6 +154,7 @@ export class LevelList {
       const name = levelNameOf(this.app, i);
       const el = h('div', { class: `level-item${cur ? ' current' : ''}${used.has(i) ? '' : ' unused'}`, title: name, onclick: () => this.app.openLevel(i) }, label, name ? h('span', { class: 'lname' }, ' ' + name) : '');
       this.list.appendChild(el);
+      this.shown.push(i);
       if (this.first < 0) this.first = i;
       n++;
       if (cur) setTimeout(() => el.scrollIntoView({ block: 'nearest' }), 0);

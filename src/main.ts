@@ -10,6 +10,7 @@ import { LogBar } from './ui/logbar.ts';
 import { pasteHintBox } from './ui/pastehint.ts';
 import { kvGet, kvSet, kvDel, kvClear, saveRom, romFromRecord, type RomRecord } from './ui/storage.ts';
 import { LevelView } from './ui/levelview.ts';
+import { exportLevelPng, openLevelImages } from './ui/levelimages.ts';
 import { LevelList, Picker, Properties } from './ui/panels.ts';
 import { sideSplitter } from './ui/pickerview.ts';
 import { openSearch } from './ui/search.ts';
@@ -178,7 +179,8 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
       'sep',
       { label: 'Import level file …', title: 'Replaces the current level (undoable; palette/graphics bypass are written to the ROM directly)', disabled: () => !inLevel(), onClick: () => importLevel(app) },
       { label: 'Export level file …', title: `Level as ${LEVEL_FILE_EXT} file (objects, sprites, exits, header, graphics bypass, custom palette)`, disabled: () => !inLevel(), onClick: () => exportLevel(app) },
-      { label: 'Level as PNG …', title: 'Visible layers and sprites at original size', disabled: () => !inLevel(), onClick: () => view.exportPng() },
+      { label: 'Level as PNG …', title: 'The level as the level view shows it (the View menu\'s layers, sprites, exits, screen boundaries and grid) at original size', disabled: () => !inLevel(), onClick: () => void exportLevelPng(app) },
+      { label: 'Levels as images …', title: 'Several levels (used, all or chosen) as PNGs in one .zip, drawn as Level as PNG; with a zoom and cropped to the screens each level uses', disabled: () => !inLevel(), onClick: () => openLevelImages(app, () => levels.shown) },
       'sep',
       { label: 'Close project …', title: 'Remove the ROM and all editor data from the browser and return to the start page', onClick: () => closeProject(app) },
     ] },

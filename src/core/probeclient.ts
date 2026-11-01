@@ -47,10 +47,11 @@ export interface LearnOptions<T> {
   label?: string | ((queued: number) => string); // busy label (queued: the lane's jobs); the job's progress replaces it
   urgent?: boolean; // runs while a dialog is open (one that shows the result): matters without a worker only
   done?: (result: T) => void; // (a callback already waiting for the result isn't added again)
+  failed?: () => void; // the job failed (also when it had failed before and isn't run again until the ROM changes)
   shown?: (items: unknown[] | null) => void; // what the job shows while it runs (null: it started, also over)
 }
 
-interface LearnWant { msg: LearnMessage; opts: LearnOptions<unknown>; done: ((r: unknown) => void)[] }
+interface LearnWant { msg: LearnMessage; opts: LearnOptions<unknown>; done: ((r: unknown) => void)[]; failed: (() => void)[] }
 interface LearnLane { wants: LearnWant[]; progress: string | null }
 
 export class ProbeClient {
@@ -82,6 +83,10 @@ export class ProbeClient {
   collision(tile: number): CollisionProbe | undefined { return this.probed({ kind: 'collision', ts: this.d.tileset(), tile }); }
   sprite(num: number): SpriteProbe | undefined {
     return probeable(num) ? this.probed({ kind: 'sprite', ts: this.d.tileset(), num }) : undefined;
+  }
+  // a sprite's probe in tileset ts (not only the current one); null when it failed or the probes don't tell it
+  spriteIn(num: number, ts: number): SpriteProbe | null | undefined {
+    return probeable(num) ? this.probedOrFailed<SpriteProbe>({ kind: 'sprite', ts, num }) : null;
   }
   // Mario's run speeds; null when they could not be found
   runSpeeds(): RunStates | null | undefined { return this.probedOrFailed<RunStates>({ kind: 'runs', ts: this.d.tileset() }); }
@@ -211,11 +216,12 @@ export class ProbeClient {
     const keep = learnKeep(job), stored = this.stored<T>(key, input, keep);
     if (stored !== undefined || this.learnFailed.has(id)) {
       this.learnBusy(opts.lane);
+      if (stored === undefined) opts.failed?.();
       return stored;
     }
     let want = lane.wants.find(same);
     if (!want) {
-      const w: LearnWant = want = { msg: { type: 'learn', lane: opts.lane, key, input, job, replace: !!opts.replace }, opts: opts as LearnOptions<unknown>, done: [] };
+      const w: LearnWant = want = { msg: { type: 'learn', lane: opts.lane, key, input, job, replace: !!opts.replace }, opts: opts as LearnOptions<unknown>, done: [], failed: [] };
       lane.wants.push(w);
       // (stored results first: the result may be known by then)
       this.d.cacheReady.then(() => {
@@ -228,6 +234,7 @@ export class ProbeClient {
     }
     const done = opts.done as ((r: unknown) => void) | undefined;
     if (done && !want.done.includes(done)) want.done.push(done);
+    if (opts.failed && !want.failed.includes(opts.failed)) want.failed.push(opts.failed);
     this.learnBusy(opts.lane);
     return undefined;
   }
@@ -344,6 +351,7 @@ export class ProbeClient {
     lane.progress = null;
     this.learnBusy(d.lane);
     if (!d.failed) for (const f of want.done) f(d.result);
+    else for (const f of want.failed) f();
   }
 
   // a learn job's request with the stored parts of its result (jobrunner.ts Part): a worker without them (a new one, a

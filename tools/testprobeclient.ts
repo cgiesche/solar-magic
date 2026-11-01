@@ -348,12 +348,14 @@ function editor(worker: Worker | null) {
   e.client.learn('spr', job, { ...opts, lane: 'variants' }); // (known)
   check(w.sent.some((m) => m.type === 'unlearn' && m.lane === 'variants') && !e.busy.has('variants'), 'replace by a known result: the lane dropped in the worker, nothing busy');
 
-  // a failed job: not asked again until the ROM changes
-  e.client.learn('v3', at(3), { input, lane: 'variants' });
+  // a failed job: told to the asker (failed); not asked again until the ROM changes (told at once then)
+  let fails = 0;
+  e.client.learn('v3', at(3), { input, lane: 'variants', failed: () => fails++ });
   await settle();
   w.run(Infinity, (d) => d.type === 'learned' ? { ...d, failed: true, result: null, put: [] } : d);
+  check(fails === 1, 'failed learn job: told to the asker');
   const n = learns(w);
-  check(e.client.learn('v3', at(3), { input, lane: 'variants' }) === undefined && learns(w) === n, 'failed learn job: not asked again');
+  check(e.client.learn('v3', at(3), { input, lane: 'variants', failed: () => fails++ }) === undefined && learns(w) === n && fails === 2, 'failed learn job: not asked again, told at once');
   touch(e.rom);
   e.client.learn('v3', at(3), { input, lane: 'variants' });
   await settle();

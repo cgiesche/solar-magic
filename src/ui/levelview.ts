@@ -2,17 +2,15 @@
 
 import { App, isBrushMode, type Marker, type LevelEdit, type Brush, type PreviewPart } from './app.ts';
 import { h, attachPanZoom, toast } from './dom.ts';
-import { downloadBytes } from './platform.ts';
+import { paintGrid, paintScreens, paintExits } from './levelimages.ts';
 import { hex2, hex3 } from '../core/names.ts';
 import { aimResize, type Grab, type Drivers } from '../core/objresize.ts';
 import { KILL_FILL, HURT_FILL, CLIMB_FILL, SPIKE_COLOR, NET_COLOR, spikeRow, netTile, drawSkull, switchMarks, drawSwitchMarks } from './collisionmarks.ts';
 import { probeAt, spriteProbeAt, enterText, collisionText, collisionIn, switchText, SWITCH_STATES, SWITCH_NAME, type PosProbe, type CollisionCore, type SwitchState } from '../core/blockprobe.ts';
 import { type LevelObject, type LevelSprite, newUid, serializeLayer1, serializeLayer2, serializeLevelSprites, spriteSizes, spriteId, EXIT_NEW } from '../core/level.ts';
-import { overworldExitText } from '../core/owteleport.ts';
-import { composite, invisibleTiles, screenRect, type LevelImages } from '../core/render.ts';
+import { invisibleTiles, screenRect, type LevelImages } from '../core/render.ts';
 import { layer3CellAt, layer3WordText } from '../core/layer3map.ts';
 import type { ArcSpeed } from '../core/jumparcs.ts';
-import { exitTarget } from '../core/exitgraph.ts';
 import { contextMenu, type MenuItem } from './menu.ts';
 import { isPlacedPrefab, openSavePrefab } from './panels.ts';
 import { openInsertDialog, openScreenDialog } from './tools.ts';
@@ -246,66 +244,20 @@ export class LevelView {
     ctx.drawImage(this.levelCanvas, 0, 0);
     const im = app.images;
     const lw = 1 / z;
-    // grid
-    if (app.show.grid) {
-      ctx.strokeStyle = 'rgba(255,255,255,0.12)';
-      ctx.lineWidth = lw;
-      ctx.beginPath();
-      for (let x = 0; x <= im.width; x += 16) { ctx.moveTo(x, 0); ctx.lineTo(x, im.height); }
-      for (let y = 0; y <= im.height; y += 16) { ctx.moveTo(0, y); ctx.lineTo(im.width, y); }
-      ctx.stroke();
-    }
-    // screen boundaries
-    const vertical = app.vertical;
-    if (app.show.screens) {
-      ctx.strokeStyle = 'rgba(255,255,255,0.45)';
-      ctx.setLineDash([4 * lw, 4 * lw]);
-      ctx.lineWidth = lw;
-      ctx.beginPath();
-      if (vertical) for (let y = 256; y < im.height; y += 256) { ctx.moveTo(0, y); ctx.lineTo(im.width, y); }
-      else for (let x = 256; x < im.width; x += 256) { ctx.moveTo(x, 0); ctx.lineTo(x, im.height); }
-      ctx.stroke();
-      ctx.setLineDash([]);
-      // on a dark box like the exit labels, readable on light backgrounds too
-      ctx.font = `${11 / app.zoom}px sans-serif`;
-      const n = app.level.header.screens;
-      for (let s = 0; s < n; s++) {
-        const x = vertical ? 0 : s * 256, y = vertical ? s * 256 : 0, txt = hex2(s);
-        ctx.fillStyle = 'rgba(0,0,0,0.6)';
-        ctx.fillRect(x, y, ctx.measureText(txt).width + 4 / app.zoom, 14 / app.zoom);
-        ctx.fillStyle = '#fff';
-        ctx.fillText(txt, x + 2 / app.zoom, y + 11 / app.zoom);
-      }
-    }
+    // grid, screen boundaries
+    if (app.show.grid) paintGrid(ctx, im.width, im.height, lw);
+    if (app.show.screens) paintScreens(ctx, im.width, im.height, app.vertical, app.level.header.screens, lw, 1 / app.zoom);
     // exits
     if (app.show.exits || app.mode === 'exit') {
-      if (app.mode === 'exit' && !app.exitMarker) {
+      const choosing = app.mode === 'exit' && !app.exitMarker;
+      if (choosing) {
         // the chosen screen, also without an exit
         const r = screenRect(im.geom1, app.exitScreen);
         ctx.strokeStyle = 'rgba(255,200,0,0.9)';
         ctx.lineWidth = 2 / app.zoom;
         ctx.strokeRect(r.x + 1 / app.zoom, r.y + 1 / app.zoom, r.w - 2 / app.zoom, r.h - 2 / app.zoom);
       }
-      const g = app.entrances.graph();
-      for (const ex of app.level.exits) {
-        const { x, y, w, h: rh } = screenRect(im.geom1, ex.screen);
-        const sel = app.mode === 'exit' && !app.exitMarker && app.exitScreen === ex.screen;
-        ctx.fillStyle = sel ? 'rgba(255,200,0,0.25)' : 'rgba(255,160,0,0.08)';
-        ctx.fillRect(x, y, w, rh);
-        const t = exitTarget(app.rom, app.level.number, ex);
-        const ok = t.entrance < 0 || t.overworld || g.entrancesOf(t.to).includes(t.entrance);
-        ctx.font = `bold ${12 / app.zoom}px sans-serif`;
-        const line = (txt: string, i: number) => {
-          const ty = y + (12 + i * 14) / app.zoom;
-          ctx.fillStyle = 'rgba(0,0,0,0.6)';
-          ctx.fillRect(x + 18 / app.zoom, ty - 11 / app.zoom, ctx.measureText(txt).width + 4 / app.zoom, 14 / app.zoom);
-          ctx.fillStyle = ok ? '#ffb000' : '#ff5050';
-          ctx.fillText(txt, x + 20 / app.zoom, ty);
-        };
-        line(t.overworld ? 'Exit → Overworld' : `Exit → ${g.label(t.to)}`, 0);
-        if (t.overworld) line(overworldExitText(app.rom, app.entrances.get(t.entrance).overworld!), 1);
-        else if (t.entrance >= 0) line(ok ? `via sec. entrance ${hex3(t.entrance)}` : `sec. entrance ${hex3(t.entrance)} missing`, 1);
-      }
+      paintExits(ctx, app, app.level, im.geom1, 1 / app.zoom, choosing ? app.exitScreen : -1);
     }
     // entrance markers (Mario's start position, drawn at his lower 16x16 half)
     ctx.font = `bold 9px sans-serif`;
@@ -1514,23 +1466,6 @@ export class LevelView {
     app.setMode('spr', uids);
     if (first) this.scrollToTile(first.x, first.y);
     this.paint();
-  }
-
-  // visible layers + sprites at 1:1 as PNG
-  exportPng(): void {
-    const app = this.app, im = app.images;
-    const c = document.createElement('canvas');
-    c.width = im.width; c.height = im.height;
-    const ctx = c.getContext('2d')!;
-    const px = composite(im, app.show.layer1, app.show.layer2, 0, app.show.layer3); // without ghosting
-    ctx.putImageData(new ImageData(new Uint8ClampedArray(px.buffer as ArrayBuffer), im.width, im.height), 0, 0);
-    if (app.show.sprites) for (const s of app.level.sprites) {
-      const img = app.spriteImageOf(s);
-      if (img) ctx.drawImage(img, s.x * 16 + Number(img.dataset.ox), s.y * 16 + Number(img.dataset.oy));
-    }
-    c.toBlob(async (b) => {
-      if (b) downloadBytes(`level-${hex3(app.level.number)}.png`, new Uint8Array(await b.arrayBuffer()), 'image/png');
-    }, 'image/png');
   }
 
   centerTile(): { tx: number; ty: number } {
