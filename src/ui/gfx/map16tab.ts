@@ -181,7 +181,19 @@ export class Map16Tab implements WsPanel {
   }
 
   previewHint(): string {
-    return 'Click: edit the tile under the mouse · marked: where the selected tile occurs in the level';
+    return this.ow ? '' : 'Click: edit the tile under the mouse · marked: where the selected tile occurs in the level';
+  }
+
+  // a submap as the workspace's target: its tiles (the overworld's), drawn as on it; the level: FG tiles
+  readonly submaps = true;
+  targetChanged(): void {
+    const t = this.ws.target;
+    if (t.submap !== null && (!this.ow || this.owAt.map !== t.submap || this.owAt.progress !== t.progress)) this.select(this.sel, 'ow', { map: t.submap, progress: t.progress });
+    else if (t.submap === null && this.ow) this.select(this.sel, 'fg');
+  }
+  // the workspace's target follows the tab's (the overworld's tiles: the submap they are drawn as on)
+  private syncTarget(): void {
+    this.ws.setTarget({ submap: this.ow ? this.owAt.map : null, progress: this.ow ? this.owAt.progress : this.ws.target.progress });
   }
 
   show(): void {
@@ -205,6 +217,7 @@ export class Map16Tab implements WsPanel {
     this.selW = this.selH = 1;
     this.marksOf = '';
     if (this.visible) { this.buildBar(); this.redraw(); this.scrollToSel(); } else this.scrollPending = true;
+    this.syncTarget();
   }
 
   // ---------- data ----------
@@ -369,6 +382,7 @@ export class Map16Tab implements WsPanel {
         if (target === 'ow' && this.owLocked()) return;
         if (target === 'ow' && this.moving) this.closeMove();
         this.target = target; this.sel = Math.min(this.sel & 0x1ff, this.count() - 1); this.selW = this.selH = 1; this.buildBar(); this.redraw(); this.scrollToSel();
+        this.syncTarget();
       },
       disabled: target === 'ow' && !!this.owLocked() && this.target !== 'ow',
     }, label);
@@ -416,7 +430,7 @@ export class Map16Tab implements WsPanel {
   private owMapSelect(): HTMLElement {
     const s = h('select', { title: 'The overworld\'s tiles are drawn with this map\'s graphics and colors' },
       MAP_NAMES.map((n, i) => h('option', { value: String(i), selected: i === this.owAt.map }, n)));
-    s.addEventListener('change', () => { this.owAt = { map: Number(s.value), progress: this.owAt.progress }; this.owRender(); this.redraw(); });
+    s.addEventListener('change', () => { this.owAt = { map: Number(s.value), progress: this.owAt.progress }; this.owRender(); this.redraw(); this.syncTarget(); });
     return h('span', { class: 'row', style: 'gap:4px' }, h('span', { class: 'hint' }, 'Drawn as on'), s);
   }
 

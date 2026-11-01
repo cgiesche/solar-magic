@@ -284,8 +284,9 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
 
   // switches between the level editor, the overworld editor and the graphics workspace (palettes, Map16, GFX);
   // gfx: tab to open (default: the last one), Map16 tile to show
-  const setWorkspace = async (w: typeof workspace, gfx?: { tab?: WsTab; tile?: number; target?: Map16Target; ow?: { map: number; progress: number } }): Promise<boolean> => {
+  const setWorkspace = async (w: typeof workspace, gfx?: { tab?: WsTab; tile?: number; target?: Map16Target; ow?: { map: number; progress: number }; submap?: { map: number; progress: number } }): Promise<boolean> => {
     closeMenus();
+    if (gfx?.submap && ws) ws.setTarget({ submap: gfx.submap.map, progress: gfx.submap.progress });
     if (w === workspace) {
       if (w === 'gfx' && gfx?.tab) {
         ws!.open(gfx.tab);
@@ -309,6 +310,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
       showOverworld();
     } else if (w === 'gfx') {
       if (!ws) { ws = new GfxWorkspace(app); ws.onNav = (jump) => nav?.mark(jump); }
+      if (gfx?.submap) ws.setTarget({ submap: gfx.submap.map, progress: gfx.submap.progress });
       showLayout(ws.bar, left, ws.root, ws.side);
       layout.classList.add('gfx-mode');
       // the level view is only up to date when coming from it
@@ -341,6 +343,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
         ow = new OverworldView(app);
         ow.onOpenLevel = async (n) => { if (await setWorkspace('level')) app.openLevel(n); };
         ow.onNav = () => nav?.mark();
+        ow.onEditGraphics = (map, progress) => void setWorkspace('gfx', { tab: 'pal', submap: { map, progress } });
       }
       owRight.replaceChildren(ow.side);
       showLayout(ow.bar, ow.left, ow.root, owRight);
@@ -374,11 +377,11 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   const capture = (): NavLoc => {
     if (workspace === 'ow') { const o = owShown(); return { w: 'ow', map: o?.map ?? 0, ...(o && o.selected >= 0 ? { tile: o.selected } : {}) }; }
     if (workspace === 'gfx' && ws) {
-      const t = ws.tab;
-      if (t === 'pal') return { w: 'gfx', tab: t, pal: ws.pal.selected };
-      if (t === 'map16') { const s = ws.map16.selected; return { w: 'gfx', tab: t, m16: s.tile, target: s.target }; }
-      if (t === 'gfx') return { w: 'gfx', tab: t, gfx: ws.gfx.selected };
-      return { w: 'gfx', tab: t, anim: ws.anim.selected };
+      const t = ws.tab, sub = ws.target.submap ?? undefined, g = { w: 'gfx' as const, tab: t, ...(sub !== undefined ? { sub } : {}) };
+      if (t === 'pal') return { ...g, pal: ws.pal.selected };
+      if (t === 'map16') { const s = ws.map16.selected; return { ...g, m16: s.tile, target: s.target }; }
+      if (t === 'gfx') return { ...g, gfx: ws.gfx.selected };
+      return { ...g, anim: ws.anim.selected };
     }
     // the view is only laid out while the level workspace is shown
     const c = workspace === 'level' ? view.centerTile() : null;
@@ -388,8 +391,9 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     if (!(await setWorkspace(l.w))) return false;
     if (l.w === 'ow') { const o = owShown(); if (o) { o.setMap(l.map); if (l.tile !== undefined) o.selectTile(l.tile, true); } }
     else if (l.w === 'gfx') {
+      ws!.setTarget({ submap: l.sub ?? null, progress: ws!.target.progress });
       if (l.tab === 'pal' && l.pal !== undefined) ws!.showPalette(l.pal >> 4, l.pal & 15);
-      else if (l.tab === 'map16' && l.m16 !== undefined) ws!.showMap16(l.m16, l.target);
+      else if (l.tab === 'map16' && l.m16 !== undefined) ws!.showMap16(l.m16, l.target, l.sub !== undefined ? { map: l.sub, progress: ws!.target.progress } : undefined);
       else if (l.tab === 'gfx' && l.gfx !== undefined) ws!.showGfx(l.gfx);
       else if (l.tab === 'anim' && l.anim) ws!.showAnim(l.anim.global, l.anim.slot);
       else ws!.open(l.tab);

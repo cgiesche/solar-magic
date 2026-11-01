@@ -12,6 +12,7 @@ import type { RomRead } from './exanim.ts';
 import { hasOwnContent } from './level.ts';
 import { hasMessages, clearMessages } from './messages.ts';
 import { levelName, hasLevelName, clearLevelName, levelNameRanges } from './levelnames.ts';
+import { submapPaletteRanges } from './submapgfx.ts';
 import { eventDataRanges } from './owevents.ts';
 import { teleportDataRanges } from './owteleport.ts';
 import { KOOPA_X, KOOPA_Y, KOOPAS } from './owlinks.ts';
@@ -649,7 +650,7 @@ export function overworldDataRanges(rom: Rom): [number, number][] {
     at(L2_TILE_PTR, 2), at(L2_BANK, 1), at(L2_ATTR_PTR, 2),
     at(EXIT_DIRS, MAX_TRANSLEVEL + 1),
   ];
-  out.push(...levelNameRanges(rom));
+  out.push(...levelNameRanges(rom), ...submapPaletteRanges(rom));
   const tl = translevelTableBlock(rom);
   if (tl) out.push(at(tl.snes, tl.size), at(TL_PTR, 2), at(TL_BANK, 1));
   if (hasLevelFlagsPatch(rom)) out.push(at(LEVEL_FLAGS, MAX_TRANSLEVEL + 1));

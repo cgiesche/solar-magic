@@ -809,6 +809,23 @@ a layer 1 change, a reveal list entry and a destroyed tile show when level 105 i
 is loaded, that a castle top on row F destroys the tile below it (the clean game the one to its right), and that
 the clean game's layer 1 changes painted as they are change no byte.
 
+### Submap graphics
+
+The graphics workspace edits a submap's graphics as a level's: its target (the bar's first choice) is the open level
+or one of the 7 submaps, the overworld's properties lead there (*Edit graphics of this submap*). In Lunar Magic's
+layout ([research](research/lunar-magic-submap-graphics.md)):
+- **palettes** (Lunar Magic's custom overworld palettes): all 256 colors per submap, a second set after the special
+  world (`$1EEB` bit 7, the game's test). A JSL at `$00AD32` (then RTS) to Lunar Magic's routine, byte for byte,
+  which copies 0x200 bytes to the palette buffer `$0703` from a table of 14 palettes (its low 16 bits the operand of
+  the routine's ADC, its bank the MVN's source bank); the game loads the overworld's colors there and when Mario
+  walks to another submap (`$00A594`). The table starts with the game's colors: its routine (`$00AD25`) run while
+  the overworld loads on each submap, before and after the special world (emulated). The Palettes tab marks the
+  colors the game rewrites on the overworld (they differ in its load).
+
+`tools/testsubmapgfx.ts` checks that the routine is Lunar Magic's, that the patched game shows every submap in the
+clean game's colors before and after the special world, and that a color changed for one submap is shown there –
+when the overworld loads there and when Mario walks there – and nowhere else.
+
 ### Layer 3 graphics per level
 
 As Lunar Magic's *Layer 3 GFX/Tilemap Bypass*, a level can have its own layer 3 graphics and tilemap
@@ -968,6 +985,7 @@ not compatible with the respective feature.
 | `$04E9F7`, `$04DCA5`, `$04DCAA`, `$04D859`; pointers `$04E49F`, `$04E4A4`, `$04E709`, `$04E710`, `$04EE3F`, `$04EE5A`, `$04E4B0`, `$04E4BB`, `$04EAF5`, `$04DD45`, `$04DD4A`, `$04DA74`, `$04EC8C`, `$04ECBA`, `$04ECC5`, `$04ED97`, `$04EDBE`, `$04EDB8` | Event steps, silent events, 0x78 events (Lunar Magic's places) |
 | `$04E6C5`, `$04DA98`; pointers `$04E67C`, `$04E69C` | Destroyed level tiles, 0x18 entries (Lunar Magic's places) |
 | Ext. object table `$0DA11B` (entry `$04`) | Prefabs (SMWS); empty in the original and in Lunar Magic, no code hook |
+| `$00AD32`; its routine's ADC operand and MVN bank: the table | Submap palettes, 14 × 256 colors (Lunar Magic's place and routine, [research](research/lunar-magic-submap-graphics.md)) |
 | `$048E81`, `$049549`; code `$03BB20–$03BB71`, its table's address `$03BB57` | Level names as free text, 0x60 × 19 tiles (Lunar Magic's places and routine, [research](research/lunar-magic-level-names.md)) |
 | `$05B1A3`; code `$03BB90–$03BC8E`, pointers `$03BE80` | Two messages per level (SMWM, Lunar Magic's places; its copy of the switch palace routine with the loop at `$03BC72`, which hijacks of Lunar Magic's ROMs patch, is the editor's too) |
 | `$00F545`, `$029328`, `$058A66`, `$058B46`, `$058C34`, `$058D2B`, `$00C096`, `$00C0E7`, `$00C176`; Lunar Magic's acts-like table pointers `$06F624` (pages 00–3F), `$06F63A` (40–7F), both at `!SMWE_ACTS_LIKE` | Map16 extension and custom blocks (SMWX) |

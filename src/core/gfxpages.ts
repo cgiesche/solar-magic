@@ -19,6 +19,7 @@ import { bgMap16Ext, bgTileAddr, BG_EXT_FIRST, BG_EXT_TILES } from './bgmap16.ts
 import { SHARED_PALETTES, SHARED_PAL_SIZE } from './sharedpal.ts';
 import { lz2Decompress } from './lz2.ts';
 import { exanimDataRanges } from './exanim.ts';
+import { submapPaletteRanges } from './submapgfx.ts';
 
 // [start, end) ROM offsets of a file's data
 function fileRange(rom: Rom, i: number): [number, number] | null {
@@ -72,8 +73,8 @@ function fillSnes(mask: Uint8Array, snes: number, len: number): void {
   if (o < mask.length) mask.fill(1, o, Math.min(o + len, mask.length));
 }
 
-// The GFX file data with its pointer entries (and the checksum) and the colors' values: the shared palettes and the
-// levels' own palettes – not the own palettes' pointers, they say where a level's colors come from (see ColorSources),
+// The GFX file data with its pointer entries (and the checksum) and the colors' values: the shared palettes, the
+// levels' own palettes and the submaps' (submapgfx.ts) – not the own palettes' pointers, they say where a level's colors come from (see ColorSources),
 // nor the ExAnimation data, a color animation writes colors too. Built like gfxSkipMask: its reads aren't a dependency.
 export function gfxFileColorValueSkipMask(rom: Rom): Uint8Array {
   const mask = gfxFileMask(rom);
@@ -83,6 +84,7 @@ export function gfxFileColorValueSkipMask(rom: Rom): Uint8Array {
     fillSnes(mask, SHARED_PALETTES, SHARED_PAL_SIZE);
     const pal = customPalettePatch(rom);
     if (pal) for (let l = 0; l < LEVELS; l++) { const a = rom.r24(pal.table + l * 3); if (a) fillSnes(mask, a, PALETTE_SIZE); }
+    for (const [a, b] of submapPaletteRanges(rom)) mask.fill(1, a, Math.min(b, mask.length));
     return mask;
   } finally { rom.reads = reads; }
 }

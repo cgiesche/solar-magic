@@ -149,6 +149,8 @@ export class OverworldView {
   // set by the host: open a level in the level editor
   onOpenLevel: (n: number) => void = () => {};
   onNav: () => void = () => {};
+  // the graphics workspace on a submap's graphics (shown at an event progress)
+  onEditGraphics: (map: number, progress: number) => void = () => {};
 
   constructor(app: App) {
     this.app = app;
@@ -1053,7 +1055,8 @@ export class OverworldView {
     if (!songs.some((s) => s.num === cur)) opts.push([cur, songHex(cur)]);
     const sel = select(opts, cur, (v) => this.app.romEdit(`Music of ${MAP_NAMES[map]}`, () => setSubmapMusic(rom, map, v)));
     sel.title = `The song ${MAP_NAMES[map]} plays – when the overworld loads there and when Mario comes from another map (songs come with packages; with AddmusicK all of its songs)`;
-    return h('div', { class: 'ow-info' }, h('div', { class: 'prop' }, h('label', null, 'Map music'), sel));
+    return h('div', { class: 'ow-info' }, h('div', { class: 'prop' }, h('label', null, 'Map music'), sel),
+      h('button', { onclick: () => this.onEditGraphics(map, this.progress), title: `${MAP_NAMES[map]}'s own palettes in the graphics workspace` }, 'Edit graphics of this submap'));
   }
 
   // what the overworld links mode's arrows mean

@@ -1,14 +1,19 @@
 // Graphics workspace: palettes, Map16 and GFX files as linked tabs next to a live preview of the level.
 // Not a modal: the level list stays usable, edits show up in the preview right away and undo works.
+// Its target is the open level or a submap of the overworld (submapgfx.ts: its own palettes, …), chosen in its bar;
+// the preview then shows the submap's map as the game loads it (emulated, App.overworldMap).
 
 import type { App } from './app.ts';
-import { h, attachPanZoom, zoomControl, showColorLoupe, hideColorLoupe } from './dom.ts';
+import { h, toast, attachPanZoom, zoomControl, showColorLoupe, hideColorLoupe } from './dom.ts';
 import { viewMenu } from './viewmenu.ts';
 import { hex } from '../core/names.ts';
 import { PaletteTab } from './gfx/palettetab.ts';
 import { Map16Tab, type RemapFill, type Map16Target } from './gfx/map16tab.ts';
 import { GfxTab } from './gfx/gfxtab.ts';
 import { AnimTab } from './gfx/animtab.ts';
+import { MAP_NAMES, gameL2, overworldReplacement, type OwRender } from '../core/overworld.ts';
+import { drawOwMap } from './overworld.ts';
+import { cgramToRGBA } from '../core/gfx.ts';
 
 export type WsTab = 'pal' | 'map16' | 'gfx' | 'anim';
 
@@ -22,7 +27,15 @@ export interface WsPanel {
   previewHint?(): string;
   // eyedropper in the preview: the color under the mouse (pipette cursor and swatch)
   previewColor?(px: number, py: number): { rgba: number; label: string };
+  // the workspace's target changed (WsTarget); a panel without it shows nothing of a submap
+  targetChanged?(): void;
+  // the panel edits a submap's graphics (else it shows a note while a submap is the target)
+  submaps?: boolean;
 }
+
+// what the workspace edits: the open level's graphics (submap null) or those of a submap (0–6); progress: the
+// overworld's event progress its preview is shown at
+export interface WsTarget { submap: number | null; progress: number }
 
 // the current level image, scaled; marks every place of the highlighted Map16 tiles
 export class LevelPreview {
@@ -41,13 +54,19 @@ export class LevelPreview {
   colorAt: ((px: number, py: number) => { rgba: number; label: string }) | null = null;
   hint = '';
   private app: App;
+  // a submap shown instead of the level: its map at the event progress (its load, the image drawn from it; null while
+  // it is emulated)
+  private ow: { map: number; progress: number; r: OwRender | null; img: Uint32Array | null; fresh: boolean } | null = null;
+  // the submap's load came (it shows the ROM as it is now)
+  onMap: (() => void) | null = null;
+  private title = h('span', null, 'Level preview');
 
   constructor(app: App) {
     this.app = app;
     this.box = h('div', { class: 'ws-prev-box' }, this.img, this.over);
     this.scroller = h('div', { class: 'ws-prev-scroll' }, this.box);
     this.root = h('div', { class: 'ws-prev' },
-      h('div', { class: 'panel-title' }, 'Level preview', this.zoomCtl.root),
+      h('div', { class: 'panel-title' }, this.title, this.zoomCtl.root),
       this.scroller, this.info);
     attachPanZoom(this.scroller, () => this.zoom, (z, ax, ay) => this.setZoom(z, ax, ay));
     this.scroller.addEventListener('mousemove', (e) => {
@@ -55,7 +74,7 @@ export class LevelPreview {
       this.box.classList.toggle('pipette', !!(p && this.colorAt));
       if (p && this.colorAt && !(e.buttons & 4)) { const c = this.colorAt(p.px, p.py); showColorLoupe(e, c.rgba, c.label); } else hideColorLoupe();
       if (!p) { this.info.textContent = this.hint; return; }
-      const t = this.tileAt(p.px, p.py);
+      const t = this.ow ? -1 : this.tileAt(p.px, p.py);
       this.info.textContent = `X ${hex(p.px >> 4, 2)} Y ${hex(p.py >> 4, 2)}${t >= 0 ? ` · Map16 ${hex(t, 3)}` : ''}${this.hint ? ` — ${this.hint}` : ''}`;
     });
     this.scroller.addEventListener('mouseleave', () => { this.info.textContent = this.hint; hideColorLoupe(); });
@@ -64,9 +83,82 @@ export class LevelPreview {
       const p = this.pos(e);
       if (p) { e.preventDefault(); this.onClick?.(p.px, p.py, e); }
     });
-    app.on('render', () => this.update());
-    app.on('anim-frame', () => this.update());
-    app.on('reveal', () => this.scrollTo(app.reveal.x >> 4, app.reveal.y >> 4));
+    app.on('render', () => { if (!this.ow) this.update(); });
+    app.on('anim-frame', () => { if (!this.ow) this.update(); });
+    app.on('reveal', () => { if (!this.ow) this.scrollTo(app.reveal.x >> 4, app.reveal.y >> 4); });
+    // (a ROM edit may change what the submap's load shows: asked for again)
+    app.on('rom-change', () => { if (this.ow) this.loadMap(); });
+  }
+
+  // shows submap `map` at event progress `progress` (null: the level)
+  showSubmap(t: WsTarget): void {
+    const was = this.ow?.map;
+    this.ow = t.submap === null ? null : { map: t.submap, progress: t.progress, r: null, img: null, fresh: false };
+    this.title.textContent = this.ow ? `${MAP_NAMES[this.ow.map]} (overworld)` : 'Level preview';
+    if (this.ow) this.loadMap();
+    else this.update();
+    if (this.ow && was !== this.ow.map && this.root.isConnected) this.scrollToSubmap();
+  }
+  private loadMap(): void {
+    const o = this.ow!;
+    const r = this.app.overworldMap(o.map, o.progress, (x) => {
+      if (this.ow !== o) return;
+      const first = !o.img;
+      this.drawMap(o, x);
+      o.fresh = true;
+      this.onMap?.();
+      this.update();
+      this.info.textContent = this.hint;
+      // (the image had no size to scroll in before)
+      if (first) this.scrollToSubmap();
+    });
+    o.fresh = !!r;
+    if (r) this.drawMap(o, r);
+    this.update();
+  }
+  private drawMap(o: NonNullable<LevelPreview['ow']>, r: OwRender): void {
+    o.r = r;
+    // (layer 2 of the loaded region as the game shows it, in readL2's order)
+    const region = o.map > 0 ? 1 : 0, l2 = new Uint16Array(0x2000);
+    l2.set(gameL2(r), region * 0x1000);
+    o.img = drawOwMap(this.app.rom, r, region, null, l2);
+  }
+  // the submap's view in the middle (its region's 512x512 image)
+  scrollToSubmap(): void {
+    const o = this.ow!;
+    const v = this.app.submapViews((vs) => { if (this.ow === o) this.scrollToRect(vs[o.map]); });
+    if (v) this.scrollToRect(v[o.map]);
+  }
+  private scrollToRect(r: { x: number; y: number; w: number; h: number } | undefined): void {
+    if (r) this.scrollTo((r.x + r.w / 2) / 2, (r.y + r.h / 2) / 2);
+  }
+  // the image shown (the level's, or the submap's map; null while none is known)
+  private image(): { w: number; h: number; px: Uint32Array; backdrop: number } | null {
+    if (this.ow) return this.ow.img ? { w: 512, h: 512, px: this.ow.img, backdrop: 0 } : null;
+    const im = this.app.images;
+    return im ? { w: im.width, h: im.height, px: this.app.compositeImg, backdrop: im.backdrop } : null;
+  }
+  // the colors of the submap shown as loaded, null: none shown or still emulated
+  submapCgram(): Uint8Array | null {
+    return this.ow?.fresh ? this.ow.r?.cgram ?? null : null;
+  }
+  // the colors of what is shown (CGRAM as loaded)
+  get cgram(): Uint8Array {
+    return this.ow ? this.ow.r?.cgram ?? new Uint8Array(0x200) : this.app.render.cgram;
+  }
+  // the pixel at (px, py) of what is shown (RGBA) and the backdrop color there
+  pixel(px: number, py: number): { rgba: number; backdrop: boolean } {
+    const im = this.image();
+    if (!im) return { rgba: 0, backdrop: true };
+    const v = im.px[py * im.w + px];
+    return { rgba: v, backdrop: !v || (v >>> 0) === (im.backdrop >>> 0) };
+  }
+  // the CGRAM entry with the pixel's color (FG/BG rows first, then the others), -1 if none has it
+  entryAt(px: number, py: number): number {
+    const p = this.pixel(px, py), pal = cgramToRGBA(this.cgram);
+    const order = [2, 3, 4, 5, 6, 7, 0, 1, 8, 9, 10, 11, 12, 13, 14, 15];
+    for (const row of order) for (let c = 1; c < 16; c++) if (pal[row * 16 + c] === p.rgba) return row * 16 + c;
+    return pal[0] === p.rgba || p.backdrop ? 0 : -1;
   }
 
   // z: zoom factor; anchor: point in the scroller that stays put (default: the middle)
@@ -82,11 +174,11 @@ export class LevelPreview {
   }
 
   private pos(e: MouseEvent): { px: number; py: number } | null {
-    const im = this.app.images;
+    const im = this.image();
     if (!im) return null;
     const rc = this.img.getBoundingClientRect();
     const px = Math.floor((e.clientX - rc.left) / this.zoom), py = Math.floor((e.clientY - rc.top) / this.zoom);
-    return px >= 0 && py >= 0 && px < im.width && py < im.height ? { px, py } : null;
+    return px >= 0 && py >= 0 && px < im.w && py < im.h ? { px, py } : null;
   }
 
   tileAt(px: number, py: number): number {
@@ -102,15 +194,17 @@ export class LevelPreview {
   }
 
   update(): void {
-    const im = this.app.images;
-    if (!im || !this.root.isConnected) return;
-    if (this.img.width !== im.width || this.img.height !== im.height) {
-      this.img.width = this.over.width = im.width;
-      this.img.height = this.over.height = im.height;
+    const im = this.image();
+    if (!this.root.isConnected) return;
+    // (the submap's map while it is emulated: nothing of the level stays)
+    if (!im) { if (this.ow) { this.img.getContext('2d')!.clearRect(0, 0, this.img.width, this.img.height); this.info.textContent = 'The map is being loaded …'; } return; }
+    if (this.img.width !== im.w || this.img.height !== im.h) {
+      this.img.width = this.over.width = im.w;
+      this.img.height = this.over.height = im.h;
       this.layout();
     }
-    const ci = this.app.compositeImg;
-    const id = new ImageData(new Uint8ClampedArray(ci.buffer as ArrayBuffer, ci.byteOffset, im.width * im.height * 4), im.width, im.height);
+    const px = this.ow ? im.px.map((v) => v || 0xff000000) : im.px;
+    const id = new ImageData(new Uint8ClampedArray(px.buffer as ArrayBuffer, px.byteOffset, im.w * im.h * 4), im.w, im.h);
     this.img.getContext('2d')!.putImageData(id, 0, 0);
     this.drawHighlight();
   }
@@ -126,7 +220,7 @@ export class LevelPreview {
     const ctx = this.over.getContext('2d')!;
     ctx.clearRect(0, 0, this.over.width, this.over.height);
     const im = this.app.images;
-    if (!im || !this.highlight.size && !this.highlight2.size && !this.highlightBg.size) return;
+    if (!im || this.ow || !this.highlight.size && !this.highlight2.size && !this.highlightBg.size) return;
     ctx.strokeStyle = '#ffb000';
     ctx.lineWidth = 1;
     ctx.fillStyle = 'rgba(255,176,0,0.4)';
@@ -147,7 +241,7 @@ export class LevelPreview {
   // number of places of the tile in layer 1
   count(tile: number): number {
     const im = this.app.images;
-    if (!im) return 0;
+    if (!im || this.ow) return 0;
     let n = 0;
     for (const t of im.tiles1) if (t === tile) n++;
     return n;
@@ -173,6 +267,9 @@ export class GfxWorkspace {
   private body = h('div', { class: 'ws-body' });
   bar: HTMLElement;
   active = false;
+  target: WsTarget = { submap: null, progress: 0 };
+  private targetSel: HTMLSelectElement;
+  private note = h('div', { class: 'ws-note' });
   // set by the host: a tab was opened (jump: a jump to something in it, Ctrl+click or a link)
   onNav: (jump: boolean) => void = () => {};
   private app: App;
@@ -185,7 +282,12 @@ export class GfxWorkspace {
     this.gfx = new GfxTab(app, this);
     this.anim = new AnimTab(app, this);
     const tabBtn = (t: WsTab, label: string, key: string) => h('button', { 'data-tab': t, title: `${label} (${key})`, onclick: () => this.open(t) }, label);
+    this.targetSel = h('select', { class: 'ws-target', title: 'Whose graphics are edited: the open level\'s or those of a submap of the overworld' });
+    this.targetSel.addEventListener('change', () => this.setTarget({ submap: this.targetSel.value === 'level' ? null : Number(this.targetSel.value), progress: this.target.progress }));
+    app.on('level', () => this.fillTargets());
+    this.fillTargets();
     this.bar = h('div', { class: 'ctxbar ws-tabs' },
+      this.targetSel,
       h('div', { class: 'btn-group' }, tabBtn('pal', 'Palettes', 'P'), tabBtn('map16', 'Map16 tiles', 'M'), tabBtn('gfx', 'Graphics', 'G'), tabBtn('anim', 'Animations', 'A')),
       h('span', { class: 'spacer' }),
       h('span', { class: 'hint', title: 'Exception: the palette choice in the header (Palettes tab, below) belongs to the level and is written with “Save level”.' }, 'Changes go straight into the ROM · Ctrl+Z / Ctrl+Y'),
@@ -199,10 +301,40 @@ export class GfxWorkspace {
     return t === 'pal' ? this.pal : t === 'map16' ? this.map16 : t === 'gfx' ? this.gfx : this.anim;
   }
 
+  private fillTargets(): void {
+    const lv = this.app.level ? `Level ${hex(this.app.level.number, 3)}` : 'Level';
+    this.targetSel.replaceChildren(h('option', { value: 'level' }, lv), ...MAP_NAMES.map((n, k) => h('option', { value: String(k) }, `Submap ${k}: ${n}`)));
+    this.targetSel.value = this.target.submap === null ? 'level' : String(this.target.submap);
+  }
+
+  // edits the level's graphics (submap null) or a submap's; the open tab shows them
+  setTarget(t: WsTarget): void {
+    const locked = t.submap !== null ? overworldReplacement(this.app.rom) : null;
+    if (locked) { toast(`The overworld is replaced by ${locked}: its graphics can't be edited here`); t = { ...t, submap: null }; }
+    const same = t.submap === this.target.submap && t.progress === this.target.progress;
+    this.target = { ...t };
+    this.targetSel.value = t.submap === null ? 'level' : String(t.submap);
+    if (same) return;
+    this.preview.showSubmap(this.target);
+    this.pal.targetChanged();
+    this.map16.targetChanged();
+    if (this.active) { this.open(this.tab); this.onNav(false); }
+  }
+
   open(t: WsTab): void {
     if (this.active && this.tab !== t) { this.panel().hide?.(); this.onNav(false); }
     this.tab = t;
     for (const b of this.bar.querySelectorAll('button')) b.classList.toggle('active', (b as HTMLElement).dataset.tab === t);
+    if (this.target.submap !== null && !this.panel().submaps) {
+      this.panel().hide?.();
+      this.note.replaceChildren(h('p', null, `${({ pal: 'Palettes', map16: 'Map16 tiles', gfx: 'Graphics', anim: 'Animations' })[t]} of a submap are not edited here yet.`),
+        h('button', { onclick: () => this.setTarget({ ...this.target, submap: null }) }, 'Edit the level\'s'));
+      this.body.replaceChildren(this.note);
+      this.preview.setHint('');
+      this.preview.colorAt = null;
+      this.preview.update();
+      return;
+    }
     this.body.replaceChildren(this.panel().root);
     this.preview.clearHighlight();
     this.preview.setHint(this.panel().previewHint?.() ?? '');
@@ -218,7 +350,8 @@ export class GfxWorkspace {
     this.active = true;
     this.app.flushRomChange();
     this.open(t);
-    if (at) this.preview.scrollTo(at.tx, at.ty);
+    if (this.target.submap !== null) this.preview.scrollToSubmap();
+    else if (at) this.preview.scrollTo(at.tx, at.ty);
   }
 
   leave(): void {

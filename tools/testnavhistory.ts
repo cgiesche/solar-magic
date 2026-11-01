@@ -13,6 +13,8 @@ const places: NavLoc[] = [
   { w: 'ow', map: 6 },
   { w: 'gfx', tab: 'pal' },
   { w: 'gfx', tab: 'pal', pal: 0x21 },
+  { w: 'gfx', tab: 'pal', sub: 3, pal: 0x45 },
+  { w: 'gfx', tab: 'map16', sub: 0, m16: 0x5f, target: 'ow' },
   { w: 'gfx', tab: 'map16', target: 'fg' },
   { w: 'gfx', tab: 'map16', m16: 0x130, target: 'fg' },
   { w: 'gfx', tab: 'map16', m16: 0x2a, target: 'bg' },

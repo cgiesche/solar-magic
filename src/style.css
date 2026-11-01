@@ -432,6 +432,7 @@ canvas.sheet-fill { width: 100%; height: auto; image-rendering: auto; }
 .ws-bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 6px 8px; border-bottom: 1px solid var(--border); background: var(--panel2); }
 .ws-bar .sep { width: 1px; height: 20px; background: var(--border); }
 .ws-bar .spacer { flex: 1; }
+.ws-note { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 16px; color: var(--muted); flex: 0 !important; }
 .badge { font-size: 11px; padding: 2px 7px; border-radius: 10px; background: var(--accent2); color: #fff; }
 .badge.muted { background: #3a3f49; color: var(--text); }
 .ws-placeholder { display: flex; align-items: center; justify-content: center; }

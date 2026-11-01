@@ -9,7 +9,7 @@ import type { Map16Target } from './gfx/map16tab.ts';
 export type NavLoc =
   | { w: 'level'; level: number; mode?: EditMode; cx?: number; cy?: number } // cx/cy: tile in the middle of the view
   | { w: 'ow'; map: number; tile?: number } // tile: the selected layer 1 tile (l1Index)
-  | { w: 'gfx'; tab: WsTab; pal?: number; m16?: number; target?: Map16Target; gfx?: number; anim?: { global: boolean; slot: number } };
+  | { w: 'gfx'; tab: WsTab; sub?: number; pal?: number; m16?: number; target?: Map16Target; gfx?: number; anim?: { global: boolean; slot: number } }; // sub: a submap as the target
 
 const hx = (n: number) => n.toString(16).toUpperCase();
 const num = (s: string | undefined, max: number): number | null => {
@@ -21,14 +21,22 @@ const num = (s: string | undefined, max: number): number | null => {
 export function toHash(l: NavLoc): string {
   if (l.w === 'level') return `#level/${hx(l.level)}`;
   if (l.w === 'ow') return `#ow/${l.map}`;
-  if (l.tab === 'pal') return `#gfx/pal${l.pal !== undefined ? `/${hx(l.pal)}` : ''}`;
-  if (l.tab === 'map16') return `#gfx/map16${l.target && l.target !== 'fg' ? `/${l.target}` : ''}${l.m16 !== undefined ? `/${hx(l.m16)}` : ''}`;
-  if (l.tab === 'gfx') return `#gfx/gfx${l.gfx !== undefined ? `/${hx(l.gfx)}` : ''}`;
-  return `#gfx/anim${l.anim ? `/${l.anim.global ? 'g' : 'l'}${hx(l.anim.slot)}` : ''}`;
+  const g = `#gfx${l.sub !== undefined ? `/s${l.sub}` : ''}`;
+  if (l.tab === 'pal') return `${g}/pal${l.pal !== undefined ? `/${hx(l.pal)}` : ''}`;
+  if (l.tab === 'map16') return `${g}/map16${l.target && l.target !== 'fg' ? `/${l.target}` : ''}${l.m16 !== undefined ? `/${hx(l.m16)}` : ''}`;
+  if (l.tab === 'gfx') return `${g}/gfx${l.gfx !== undefined ? `/${hx(l.gfx)}` : ''}`;
+  return `${g}/anim${l.anim ? `/${l.anim.global ? 'g' : 'l'}${hx(l.anim.slot)}` : ''}`;
 }
 
 export function fromHash(hash: string): NavLoc | null {
   const p = hash.replace(/^#/, '').split('/');
+  // a submap as the graphics workspace's target
+  if (p[0] === 'gfx' && /^s[0-6]$/.test(p[1] ?? '')) {
+    const l = fromHash(['gfx', ...p.slice(2)].join('/'));
+    if (l?.w !== 'gfx') return null;
+    const { w, tab, ...rest } = l;
+    return { w, tab, sub: Number(p[1].slice(1)), ...rest };
+  }
   if (p[0] === 'level' && p.length === 2) {
     const n = num(p[1], 0x1ff);
     return n === null ? null : { w: 'level', level: n };
@@ -65,7 +73,7 @@ export function fromHash(hash: string): NavLoc | null {
 
 // the place without what is chosen there: a different key is a new history step
 export function stepKey(l: NavLoc): string {
-  return l.w === 'level' ? `level/${l.level}` : l.w === 'ow' ? `ow/${l.map}` : `gfx/${l.tab}`;
+  return l.w === 'level' ? `level/${l.level}` : l.w === 'ow' ? `ow/${l.map}` : `gfx/${l.sub ?? ''}/${l.tab}`;
 }
 
 export function sameLoc(a: NavLoc, b: NavLoc): boolean {
