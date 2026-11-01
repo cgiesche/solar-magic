@@ -68,6 +68,13 @@ export function setOwTileWords(rom: Rom, t: number, ws: number[]): void {
   if (t < 0 || t >= OW_L1_TILES) throw new Error(`No overworld layer 1 tile ${t.toString(16).toUpperCase()}`);
   ws.forEach((w, q) => rom.w16(owTileAddr(t) + q * 2, w));
 }
+// how often layer 1 has tile t as in the ROM (before events): on the main map and on the submaps
+export function owTileUses(rom: Rom, t: number): { main: number; submaps: number } {
+  const l1 = readL1(rom);
+  let main = 0, submaps = 0;
+  for (let k = 0; k < 0x800; k++) if (l1[k] === t) { if (k < 0x400) main++; else submaps++; }
+  return { main, submaps };
+}
 
 export function l2Pointers(rom: Rom): { tiles: number; attrs: number } {
   const bank = rom.r8(L2_BANK);

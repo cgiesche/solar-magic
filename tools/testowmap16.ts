@@ -4,7 +4,7 @@
 // leaves the overworld's data out).
 import { Rom, snesToPc } from '../src/core/rom.ts';
 import { RomEditSession } from '../src/core/romedit.ts';
-import { OverworldEmulator, gameL1, l1Index, owTileWords, setOwTileWords, owTileAddr, overworldDataRanges, OW_L1_TILES, type OwRender } from '../src/core/overworld.ts';
+import { OverworldEmulator, gameL1, l1Index, owTileWords, setOwTileWords, owTileAddr, overworldDataRanges, owTileUses, readL1, writeL1, OW_L1_TILES, type OwRender } from '../src/core/overworld.ts';
 import { map16Pointer } from '../src/core/ram.ts';
 import { FLIP_X } from '../src/core/quarters.ts';
 import { editorImage } from './fixture.ts';
@@ -64,6 +64,18 @@ try { setOwTileWords(rom, OW_L1_TILES, ws); } catch { threw = true; }
 check(threw, 'no tile past C0');
 const ranges = overworldDataRanges(rom);
 check(ranges.some(([a, b]) => a <= snesToPc(owTileAddr(0)) && b >= snesToPc(owTileAddr(OW_L1_TILES - 1)) + 8), 'the tiles\' Map16 is overworld data');
+
+// a tile's places on layer 1 as in the ROM (before events): on the main map, on the submaps
+{
+  const r = new Rom(image.slice()), l = readL1(r), u0 = owTileUses(r, t);
+  const n = (from: number) => l.subarray(from, from + 0x400).filter((v) => v === t).length;
+  check(u0.main === n(0) && u0.submaps === n(0x400) && u0.main + u0.submaps > 0, `tile ${t.toString(16)}: ${u0.main}× on the main map, ${u0.submaps}× on the submaps`);
+  const k1 = l.findIndex((v, k) => k < 0x400 && v !== t), k2 = l.findIndex((v, k) => k >= 0x400 && v !== t);
+  l[k1] = t; l[k2] = t;
+  writeL1(r, l);
+  const u1 = owTileUses(r, t);
+  check(u1.main === u0.main + 1 && u1.submaps === u0.submaps + 1, 'one more place on each counts');
+}
 
 console.log(bad ? `${bad} FAILED` : 'all ok');
 process.exit(bad ? 1 : 0);
