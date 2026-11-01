@@ -81,6 +81,8 @@ incsrc "memory.asm"
 !LastCall = $7FC003             ; the $14 of the last frame
 !OwSettings = $7FC00A           ; the submap's settings, where Lunar Magic keeps them [Solar Magic]
 !OwSubmap = !OwSettings+1       ; the submap the lists were set up for; $FF in a level [Solar Magic]
+                                ; (Lunar Magic's layer 2 settings, which the editor's ROMs don't
+                                ; keep: docs/research/lunar-magic-submap-graphics.md, "$7FC00B")
 !LastFrame = $7FC019            ; the $14 the lists last ran for
 !QueueEnd = $7FC01A             ; 16-bit, the high byte 0: the queue's uploads end here, from !Queue [Solar Magic]
 !Manual = $7FC070
@@ -136,12 +138,22 @@ org $008A4E
 ; $05), each frame animates them at $0480E0 (LDA $13 : AND #$07, then a BNE),
 ; the NMI uploads them and the level dots' colours 6D and 7D at $00A4E3 (REP
 ; #$10 : LDA #$80 : STA $2115). The game code a hook replaces runs in ours.
+; As Lunar Magic, the game's tile animation counts with $14 instead of $13
+; ($048102, $04810D, $04813B), so it keeps step with the lists; on the
+; overworld both count every frame ($00A1C1), only their phase differs.
 org $048086
     JSL ow_init
     RTS
 org $0480E0
     JSL ow_frame
     RTS
+assert read1($048102) == $13 && read1($04810D) == $13 && read1($04813B) == $13
+org $048101
+    LDA !EffFrame
+org $04810C
+    LDA !EffFrame
+org $04813A
+    AND !EffFrame
 org $00A4E3
     JSL ow_nmi
     RTS
@@ -1500,25 +1512,23 @@ ow_setup:
     RTS
 
 ; A frame on the overworld, where the game animates its tiles (A/X/Y 8-bit,
-; the data bank $04): the lists set up again once Mario is on another submap
-; (he walked there), the game's tiles (unless off; by its frame counter
-; $13), then the lists, as a level's.
+; the data bank $04): the game's tiles (unless off; by the frame counter
+; $14, as Lunar Magic has them), then the lists, as a level's. When Mario
+; walks to another submap the lists of the one he left run on until the
+; window has closed over it: where the game loads the new submap's palette,
+; the editor's graphics code at $04DBB9 (submapgfx.ts) runs the load's hook
+; again, the screen off, which sets the new submap's lists up. (Lunar Magic
+; keeps the lists the load set up until the next load.)
 ow_frame:
     PHP
     SEP #$30
-    LDX $0DB3|!addr
-    LDA $1F11|!addr,x
-    CMP.l !OwSubmap
-    BEQ +
-    JSR ow_setup
-+   SEP #$30
     LDA.l !OwSettings
     AND #$40
     BNE .lists
     PHK
     PER .lists-1
     PEA $8413
-    LDA $13                     ; what the hook replaces
+    LDA !EffFrame               ; what the hook replaces ($13: Lunar Magic's $14)
     AND #$07
     BNE +
     JML $8480E6

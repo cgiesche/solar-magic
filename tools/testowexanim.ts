@@ -1,7 +1,8 @@
 // ExAnimation on the overworld (issue #244, exanim.ts, the engine's overworld part in kobo/exanimation.ts), in Lunar
 // Magic's layout: a list per submap and the overworld's global one, a settings byte per submap.
-// Without lists the patched overworld is the clean game's frame by frame; a submap's list runs there only – when the
-// overworld loads there and after Mario walked there from the main map –, the global one everywhere unless a submap
+// Without lists the patched overworld is the clean game's frame by frame (its tile animation counting with $14, as
+// Lunar Magic's, #253); a submap's list runs there only – when the overworld loads there and after Mario walked there
+// from the main map, set up as at the load once the window has closed (#253) –, the global one everywhere unless a submap
 // turns it off; color slots and rotations change the submap's palette; an event trigger ("Event Manual 8–F") shows
 // its second set once the event of its manual frame is passed; the settings turn off the game's tile animation, the
 // level dots' colors; the game's lightning is switched per submap as Lunar Magic does. Lunar Magic's tables are read
@@ -55,8 +56,16 @@ if (existsSync(LM)) {
 } else console.log('skip  Lunar Magic\'s tables (no Journey to Kaizo ROM in resources_local)');
 
 // ---- without lists: the clean game's overworld ----
+// The game's tile animation counts with $14 instead of $13, as in ROMs Lunar Magic saved (its three operands): on the
+// overworld both count every frame, so the clean game with those three bytes changed (and the LDA $13 the frame's hook
+// replaces, $0480E1) is the one to compare with.
+const COUNTER_AT = [0x048102, 0x04810d, 0x04813b];
+check(COUNTER_AT.every((a) => clean.r8(a) === 0x13 && rom.r8(a) === 0x14), 'the game\'s tile animation counts with $14 ($048102, $04810D, $04813B), as Lunar Magic\'s');
+if (existsSync(LM)) { const raw = readFileSync(LM), lm = new Rom(new Uint8Array(raw.subarray(raw.length % 0x8000))); check(COUNTER_AT.every((a) => lm.r8(a) === 0x14), 'as in Journey to Kaizo'); }
+const clean14 = new Rom(cleanImage());
+for (const a of [...COUNTER_AT, 0x0480e1]) clean14.w8(a, 0x14);
 for (const m of [0, 1, 4]) {
-  const a = run(clean, m, 40), b = run(rom, m, 40);
+  const a = run(clean14, m, 40), b = run(rom, m, 40);
   const vr = a.shots.findIndex((x, f) => !same(x.vram, b.shots[f].vram)), cg = a.shots.findIndex((x, f) => !same(x.cgram, b.shots[f].cgram));
   check(vr < 0 && cg < 0, `submap ${m}: VRAM and CGRAM as in the clean game, 40 frames after the load${vr >= 0 || cg >= 0 ? ` (differ from frame ${vr}, ${cg})` : ''}`);
 }
@@ -86,29 +95,57 @@ const tiles = (shots: Shot[], word: number) => new Set(shots.map((x) => tile(x.v
 
 // the console after Mario walked from the main map onto Yoshi's Island (main map 02,14, whose path leads there),
 // then `frames` frames; main: 16 frames on the main map before
-function walk(rom: Rom, frames: number): { shots: Shot[]; submap: number; main: Shot[] } {
+// the game's tile animation: the tiles it uploads from $0AF6 to VRAM $0750 on
+const gameTiles = (x: Shot) => x.vram.slice(0x0ea0, 0x0ea0 + 0x160).join();
+// first: the frame the game loaded the new submap's palette (the window closed, the tileset $1931 changed); vram:
+// changes VRAM before
+function walk(rom: Rom, frames: number, vram?: (v: Uint8Array) => void): { shots: Shot[]; submap: number; main: Shot[]; first: Shot | null } {
   const emu = new LevelEmulator(rom), s = emu.snes, w = s.wram;
   const i = l1Index(0, 2, 0x13);
   emu.startGameAt(i);
   w[RAM.submap] = w[RAM.submap + 1] = 0;
   emu.reloadOverworld();
   w[RAM.owTranslevels + i] = 1; w[RAM.levelFlags + 1] = 0x0f;
+  vram?.(s.vram);
   const mainShots: Shot[] = [];
   for (let f = 0; f < 16; f++) { s.runFrame(); mainShots.push({ vram: s.vram.slice(), cgram: s.cgram.slice(), wram: s.wram.slice() }); }
-  let walked = false;
+  let walked = false, first: Shot | null = null;
+  const tileset = w[RAM.tileset];
   for (let f = 0; f < 900; f++) {
     s.joy1 = f < 4 ? PAD.down : 0;
     s.runFrame();
+    if (!first && w[RAM.tileset] !== tileset) first = { vram: s.vram.slice(), cgram: s.cgram.slice(), wram: s.wram.slice() };
     if (w[RAM.owProcess] !== 3) walked = true;
     else if (walked && f > 30) break;
   }
   const shots: Shot[] = [];
   for (let f = 0; f < frames; f++) { s.runFrame(); shots.push({ vram: s.vram.slice(), cgram: s.cgram.slice(), wram: s.wram.slice() }); }
-  return { shots, submap: w[RAM.submap], main: mainShots };
+  return { shots, submap: w[RAM.submap], main: mainShots, first };
 }
 {
   const wk = walk(rom, 24), t = seen(wk.shots, T);
   check(wk.submap === 1 && tiles(wk.main, T).size === 1 && t.has(0x11) && t.has(0x22), `walked from the main map (not animated there) onto Yoshi's Island: its tile animates (${[...t].map((v) => hx(v)).join(' ')})`);
+}
+{
+  // set up where the game loads the new submap's palette, the screen off, as at the load: once the window has closed
+  // every slot's frame shows at once (slots k, k+8, … run at $14 mod 8 = k: eight slots, one per value)
+  const all: ExList = emptyList();
+  for (let k = 0; k < 8; k++) all.slots.set(k, { type: 0x01, trigger: 0, framesLess1: 1, dest: 0x8000 | (T + k * 16), frames: [0x00, 0x20] });
+  writeSubmapList(rom, 1, all);
+  // (the tiles cleared before: the loads before left frames of Yoshi's Island's in VRAM)
+  const wk = walk(rom, 0, (v) => v.fill(0, T * 2, (T + 8 * 16) * 2)), f0 = Array.from({ length: 8 }, (_, k) => (wk.first ? tile(wk.first.vram, T + k * 16)[0] : -1));
+  check(f0.every((v) => v === 0x11 || v === 0x22), `the frame the window closed, all eight slots show a frame already (${f0.map((v) => hx(v)).join(' ')})`);
+  writeSubmapList(rom, 1, yi);
+}
+{
+  // the main map without the game's tile animation (it isn't set up at the load there), Yoshi's Island with it:
+  // after the walk its tiles animate as after a walk from a main map with them
+  const on = walk(rom, 64);
+  setSubmapAnimSettings(rom, 0, NO_GAME_TILES);
+  const off = walk(rom, 64);
+  setSubmapAnimSettings(rom, 0, 0);
+  const differ = off.shots.findIndex((x, f) => gameTiles(x) !== gameTiles(on.shots[f]));
+  check(new Set(off.shots.map(gameTiles)).size > 1 && differ < 0, `the game's tiles off on the main map: on Yoshi's Island after the walk they animate as from a main map with them${differ >= 0 ? ` (differ from frame ${differ})` : ''}`);
 }
 
 // ---- the overworld's global list ----
@@ -137,7 +174,6 @@ setSubmapAnimSettings(rom, 1, NO_LEVEL_LIST);
 setSubmapAnimSettings(rom, 1, 0);
 setSubmapAnimSettings(rom, 2, 0);
 // the game's tile animation (the tiles it uploads from $0AF6 to VRAM $0750 on) and the level dots' colors 6D and 7D
-const gameTiles = (x: Shot) => x.vram.slice(0x0ea0, 0x0ea0 + 0x160).join();
 const dots = (x: Shot) => `${color(x.cgram, 0x6d)} ${color(x.cgram, 0x7d)}`;
 {
   const a = run(rom, 1, 64);

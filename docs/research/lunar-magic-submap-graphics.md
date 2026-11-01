@@ -81,8 +81,8 @@ Research for issue #244. Lunar Magic's overworld ExAnimation (help `ov_overworld
 `_settings.htm`) hooks three places with `JSL routine : RTS`: `$048086` (the overworld's load sets up the game's
 animated tiles there; game mode `$0C`, the screen off, data bank `$04`), `$0480E0` (each frame, where the game animates
 them) and `$00A4E3` (the NMI's upload of the game's tiles from `$0AF6` and the level dots' colors 6D/7D). It also
-makes the game's tile animation count with `$14` instead of `$13` (`$048102`, `$04810D`, `$04813B`); the editor keeps
-`$13`. *celery*, *Bluerio's Adventure* and *Journey to Kaizo* have the same code at different places; its tables are
+makes the game's tile animation count with `$14` instead of `$13` (`$048102`, `$04810D`, `$04813B`, and its frame hook
+reads `$14` where the game's `LDA $13` was): see "The frame counter" below. *celery*, *Bluerio's Adventure* and *Journey to Kaizo* have the same code at different places; its tables are
 operands at fixed offsets from the first hook's target (the same in all three):
 
 | Place | Contents |
@@ -104,8 +104,47 @@ animated tiles, `$20` the submap's list, `$10` the global list – each off when
 (color 47) is none of these bits: see "The lightning switch" below. At the load Lunar Magic runs the lists eight times, `$14` from 0 to 7, with their uploads.
 
 The editor's engine (Kobo's, `src/core/kobo/exanimation.ts`) runs the overworld's lists on the same code as a level's,
-from its own hooks at those places, with its tables at Lunar Magic's offsets. It sets the lists up again when Mario
-is on another submap than they were set up for (Lunar Magic's own way there was not traced).
+from its own hooks at those places, with its tables at Lunar Magic's offsets.
+
+### The frame counter
+
+Research for issue #253. On the overworld the game counts both `$13` (every frame, `$008070`) and `$14` (each frame of
+game mode `$0E`, `$00A1C1`), so the two differ in phase only. Lunar Magic's lists run by `$14` (slots k, k+8, … at
+`$14` mod 8 = k, the load's eight frames `$14` 0–7) and the game's tiles with them, so a list that adds frames to the
+game's own animated tiles keeps step with them. The editor does the same (the three operands, its frame hook reading
+`$14`); `tools/testowexanim.ts` checks the overworld without lists frame by frame against the clean game with those
+bytes changed.
+
+### Walking to another submap
+
+Research for issue #253. Lunar Magic sets the lists up in its load hook only (`$048086`, which the game reaches from
+the overworld's load alone, `JSR $8086` at `$048EEB`): its frame hook never reads the submap, its routine at
+`$04DBB9` (the submap's graphics) doesn't call it. Emulated in *Journey to Kaizo* (lists on submaps 0 and 5): after
+`$1F11` changes the list pointer it set up (`$7FC000`–`$7FC002`) and the settings (`$7FC00A`) stay those of the
+submap the overworld loaded on. So in Lunar Magic the lists of the submap Mario left keep running on the new one until
+the overworld loads again (a level entered and left).
+
+The editor sets the new submap's lists up there instead: its own code at `$04DBB9` (`src/core/submapgfx.ts`), where the
+game has loaded the new submap's palette and the window has closed, runs the load's hook again after the graphics
+upload, the screen still off – the game's animated tiles from their start (also when the submap left had them off and
+they were never set up), the lists set up and run eight frames with their uploads, as at the load. In the walk from the
+main map to Yoshi's Island `$1F11` changes 9 frames before that (the window closing); the lists of the main map run on
+until then.
+
+### `$7FC00B`
+
+Research for issue #253. The engine keeps the submap the lists were set up for at `$7FC00B` (`$FF` in a level), next to
+Lunar Magic's `$7FC00A`. Lunar Magic doesn't leave it free: its overworld graphics routine (`$0FFAB0`, from `$00A140`)
+writes 0 there, and its level load keeps the level's layer 2 tilemap settings there (`$0EF510`, from the table at
+`$0EF310`; hijack map), which its graphics code reads (`$0FF7D2`: bit 0, `$0EFD09`: bit 2). Emulating *Journey to
+Kaizo* through the overworld and a level, Lunar Magic reads and writes all of `$7FC000`–`$7FC01C` but `$7FC005` (the
+engine's `$7FC019`/`$7FC01A` among them). None of the community packages at hand (BOWSIE, No Overworld, the Retry
+System, the blocks and sprites in `resources_local`) uses `$7FC00A`/`$7FC00B`.
+
+The editor keeps it there: its ROMs run none of Lunar Magic's code that reads it (the editor's graphics bypass and
+layer 2 are its own), and the editor's patch registry claims `$7FC003`–`$7FC0FF` for the engine, so packages that
+declare their RAM don't get it. Should the editor ever follow Lunar Magic's layer 2 tilemap settings in RAM, the
+engine's byte has to move.
 
 ### The lightning switch
 

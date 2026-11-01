@@ -139,13 +139,21 @@ export function installSubmapPalettePatch(rom: Rom): void {
 // code are its own (the editor's bypass differs from Lunar Magic's for levels too), the place where the game changes
 // the submap is its: when Mario walks to another submap the game loads only its palette ($04DBAE), so a JSL at
 // $04DBB9 (Lunar Magic's place) loads the new submap's graphics there – the game's own routine ($00A9DA, which
-// uploads only the files that changed), the screen turned off meanwhile (the window has closed over it).
+// uploads only the files that changed), the screen turned off meanwhile (the window has closed over it). Then, the
+// screen still off, the overworld load's set-up of the animated tiles runs as at the load ($048086, where the
+// ExAnimation hooks in): the game's tiles from their start, the new submap's lists set up and run eight frames with
+// their uploads, so the window opens on its animations (Lunar Magic keeps the lists the load set up until the next
+// load, docs/research/lunar-magic-submap-graphics.md).
 const OW_TILESETS = 0x04dc02; // per submap: the tileset $1931
 const OW_SPRITE_SET = 0x04dc1d; // the operand of LDA #$11 : STA $192B ($04DC09, the overworld's load)
 const GFX_HOOK = 0x04dbb9; // STA $0704 : STZ $0803, 6 bytes
-const GFX_CODE_LEN = 0x30;
+const GFX_CODE_LEN = 0x70;
 const UPLOAD = 0x00a9da; // the game's graphics upload (JSR; RTS)
 const RTL_00 = 0x0084cf; // an RTL in bank 0, where the upload's RTS returns
+// the overworld load's set-up of the animated tiles (JSR from $048EEB; RTS): the game's, the ExAnimation's load
+// hook (kobo/exanimation.ts: the lists set up for the player's submap and run eight frames with their uploads)
+const OW_ANIM_LOAD = 0x048086;
+const OW_ANIM_RTL = 0x048414; // an RTL in bank 4, where its RTS returns
 const hx = (n: number) => '$' + n.toString(16).toUpperCase().padStart(4, '0');
 const gfxHookAsm = (at: number) => `lorom
 org $${GFX_HOOK.toString(16).toUpperCase()}
@@ -162,6 +170,16 @@ SubmapGfx:
   PHK : PEA.w .ret-1 : PEA.w ${hx((RTL_00 - 1) & 0xffff)} ; the upload's RTS to the RTL, back here
   JML ${hx(UPLOAD).replace('$', '$00')}
 .ret:
+  REP #$30                        ; the direct page scratch kept around the animations' load
+  PEI ($00) : PEI ($02) : PEI ($04) : PEI ($06) : PEI ($08) : PEI ($0A) : PEI ($0C) : PEI ($0E)
+  SEP #$30
+  LDA #$04 : PHA : PLB
+  PHK : PEA.w .anim-1 : PEA.w ${hx((OW_ANIM_RTL - 1) & 0xffff)} ; the animations' load, its RTS to the RTL, back here
+  JML $${OW_ANIM_LOAD.toString(16).toUpperCase().padStart(6, '0')}
+.anim:
+  REP #$30
+  PLA : STA $0E : PLA : STA $0C : PLA : STA $0A : PLA : STA $08 : PLA : STA $06 : PLA : STA $04 : PLA : STA $02 : PLA : STA $00
+  SEP #$30
   LDA #$81 : STA $4200            ; NMI and the joypad read on again, as the game has them on the overworld
   LDA ${hx(RAM.brightness)} : STA $2100
   PLB : PLP
@@ -203,7 +221,7 @@ export function assignSubmapSlot(rom: Rom, map: number, name: string, file: numb
 // needs Asar (loadAsar) to be loaded
 export function installSubmapGfxPatch(rom: Rom): void {
   if (hasSubmapGfxPatch(rom)) return;
-  if (rom.r8(GFX_HOOK) !== 0x8d || rom.r16(GFX_HOOK + 1) !== 0x0704 || rom.r8(RTL_00) !== 0x6b) throw new Error('Submap graphics: unexpected code at $04DBB9');
+  if (rom.r8(GFX_HOOK) !== 0x8d || rom.r16(GFX_HOOK + 1) !== 0x0704 || rom.r8(RTL_00) !== 0x6b || rom.r8(OW_ANIM_RTL) !== 0x6b) throw new Error('Submap graphics: unexpected code at $04DBB9');
   const at = rom.allocWrite(new Uint8Array(GFX_CODE_LEN));
   const r = assemble(rom.data, new Map([['submapgfx.asm', gfxHookAsm(at)]]), 'submapgfx.asm');
   if (!r.ok) throw new Error(r.errors.map((e) => e.message).join(' '));
