@@ -56,7 +56,7 @@ export class LevelPreview {
   private app: App;
   // a submap shown instead of the level: its map at the event progress (its load, the image drawn from it; null while
   // it is emulated)
-  private ow: { map: number; progress: number; r: OwRender | null; img: Uint32Array | null; fresh: boolean } | null = null;
+  private ow: { submap: number; progress: number; r: OwRender | null; img: Uint32Array | null; fresh: boolean } | null = null;
   // called when the submap's load came (it shows the ROM as it is now)
   private mapListeners: (() => void)[] = [];
   onMap(fn: () => void): void { this.mapListeners.push(fn); }
@@ -93,16 +93,16 @@ export class LevelPreview {
 
   // shows submap `map` at event progress `progress` (null: the level)
   showSubmap(t: WsTarget): void {
-    const was = this.ow?.map;
-    this.ow = t.submap === null ? null : { map: t.submap, progress: t.progress, r: null, img: null, fresh: false };
-    this.title.textContent = this.ow ? `${MAP_NAMES[this.ow.map]} (overworld)` : 'Level preview';
+    const was = this.ow?.submap;
+    this.ow = t.submap === null ? null : { submap: t.submap, progress: t.progress, r: null, img: null, fresh: false };
+    this.title.textContent = this.ow ? `${MAP_NAMES[this.ow.submap]} (overworld)` : 'Level preview';
     if (this.ow) this.loadMap();
     else this.update();
-    if (this.ow && was !== this.ow.map && this.root.isConnected) this.scrollToSubmap();
+    if (this.ow && was !== this.ow.submap && this.root.isConnected) this.scrollToSubmap();
   }
   private loadMap(): void {
     const o = this.ow!;
-    const r = this.app.overworldMap(o.map, o.progress, (x) => {
+    const r = this.app.overworldMap(o.submap, o.progress, (x) => {
       if (this.ow !== o) return;
       const first = !o.img;
       this.drawMap(o, x);
@@ -120,15 +120,15 @@ export class LevelPreview {
   private drawMap(o: NonNullable<LevelPreview['ow']>, r: OwRender): void {
     o.r = r;
     // (layer 2 of the loaded region as the game shows it, in readL2's order)
-    const region = o.map > 0 ? 1 : 0, l2 = new Uint16Array(0x2000);
+    const region = o.submap > 0 ? 1 : 0, l2 = new Uint16Array(0x2000);
     l2.set(gameL2(r), region * 0x1000);
     o.img = drawOwMap(this.app.rom, r, region, null, l2);
   }
   // the submap's view in the middle (its region's 512x512 image)
   scrollToSubmap(): void {
     const o = this.ow!;
-    const v = this.app.submapViews((vs) => { if (this.ow === o) this.scrollToRect(vs[o.map]); });
-    if (v) this.scrollToRect(v[o.map]);
+    const v = this.app.submapViews((vs) => { if (this.ow === o) this.scrollToRect(vs[o.submap]); });
+    if (v) this.scrollToRect(v[o.submap]);
   }
   private scrollToRect(r: { x: number; y: number; w: number; h: number } | undefined): void {
     if (r) this.scrollTo((r.x + r.w / 2) / 2, (r.y + r.h / 2) / 2);

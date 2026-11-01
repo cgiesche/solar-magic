@@ -12,7 +12,7 @@
 //    raw file is copied as it is after it
 //  - per-level GFX bypass: 8 slots (SP4..SP1, FG3, BG1, FG2, FG1), low bytes and a table of high bytes;
 //    0FF = tileset default. Then the same for the 7 submaps (entries 200–206, the overworld's FG4..FG1 in
-//    the FG/BG slots): the overworld's load takes the submap Mario is on ($1F11 of the player $0DB3). The game passes a file's low byte along (in $04-$07, Y); the high bytes of the
+//    the FG/BG slots): the overworld's load takes the submap Mario is on. The game passes a file's low byte along (in $04-$07, Y); the high bytes of the
 //    slots being uploaded are kept in RAM (EXGFX_HI_RAM) and joined with it where the file is looked up
 //  - extended object $05 "Direct Map16": 6 bytes, places any Map16 tile as a rectangle; 7 with a condition
 //    (Lunar Magic's conditional Direct Map16, cdm16.ts): bit 7 of the tile's high byte, then the condition byte
@@ -22,7 +22,7 @@ import { Rom } from './rom.ts';
 import { Asm } from './asm.ts';
 import { lz2Decompress } from './lz2.ts';
 import { ownerNote } from './patchreg.ts';
-import { LEVEL_HEIGHT_RAM, EXGFX_HI_RAM, CDM16_FLAGS, GFX_RAW_RAM, GFX_BUFFER } from './ram.ts';
+import { LEVEL_HEIGHT_RAM, EXGFX_HI_RAM, CDM16_FLAGS, GFX_RAW_RAM, GFX_BUFFER, RAM } from './ram.ts';
 
 export const SPR_BANK_HOOK = 0x05d8f5;
 
@@ -321,9 +321,9 @@ function build(rom: Rom): Asm {
   a.label('ovlv');
   a.b(0xe6, 0x0c, 0xaf, 0x0b, 0x01, 0x7e, 0x29, 0xff, 0x01, 0x0a, 0x0a, 0x0a); // INC $0C LDA.l $7E010B AND #$01FF ASL*3
   a.br(0x80, 'ovrow');
-  a.label('ovow'); // the submap's entry (200 + $1F11 of the player)
-  a.b(0xe6, 0x0c, 0xad, 0xb3, 0x0d, 0x29, 0xff, 0x00, 0xaa); // INC $0C LDA $0DB3 AND #$FF TAX
-  a.b(0xbd, 0x11, 0x1f, 0x29, 0xff, 0x00, 0x18, 0x69, 0x00, 0x02, 0x0a, 0x0a, 0x0a); // LDA $1F11,x AND #$FF CLC ADC #$0200 ASL*3
+  a.label('ovow'); // the submap's entry (200 + the player's submap)
+  a.b(0xe6, 0x0c, 0xad, RAM.playerIndex & 0xff, RAM.playerIndex >> 8, 0x29, 0xff, 0x00, 0xaa); // INC $0C LDA player AND #$FF TAX
+  a.b(0xbd, RAM.submap & 0xff, RAM.submap >> 8, 0x29, 0xff, 0x00, 0x18, 0x69, ...long(submapGfxEntry(0)).slice(0, 2), 0x0a, 0x0a, 0x0a); // LDA submap,x AND #$FF CLC ADC #$0200 ASL*3
   a.label('ovrow');
   a.b(0x18, 0x63, 0x07, 0x85, 0x08, 0xa0, 0x00, 0x00); // CLC ADC 7,S STA $08 (level*8 + base) LDY #0
   a.label('ovlp');
@@ -560,7 +560,8 @@ export function setGfxEntry(rom: Rom, i: number, addr: number, raw: boolean, siz
 // ---- per-level GFX bypass ----
 export const GFX_SLOT_NAMES = ['SP4', 'SP3', 'SP2', 'SP1', 'FG3', 'BG1', 'FG2', 'FG1'];
 // the bypass's entries: levels 000–1FF, then submaps 0–6 (submapGfxEntry)
-export const GFX_BYPASS_ENTRIES = 0x200 + 7;
+export const SUBMAPS = 7;
+export const GFX_BYPASS_ENTRIES = 0x200 + SUBMAPS;
 export const submapGfxEntry = (map: number): number => 0x200 + map;
 export function levelGfx(rom: Rom, n: number): number[] {
   const p = editor(rom);

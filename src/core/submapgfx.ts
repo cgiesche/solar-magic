@@ -16,11 +16,13 @@ import { Rom, snesToPc } from './rom.ts';
 import { assemble } from './asar.ts';
 import { OverworldEmulator } from './overworld.ts';
 import { RAM } from './ram.ts';
-import { levelGfx, setLevelGfx, defaultGfx, submapGfxEntry, GFX_NONE } from './patches.ts';
+import { levelGfx, setLevelGfx, defaultGfx, submapGfxEntry, GFX_NONE, SUBMAPS } from './patches.ts';
+export { SUBMAPS };
 import { levelSlots as entrySlotsOf, assignSlot, type GfxSlot } from './gfxslots.ts';
-import type { Lt3Place } from './layer3gfx.ts';
+import { LT3_SLOT, type Lt3Place } from './layer3gfx.ts';
+// where a submap's LT3 file goes: the start of layer 3 (LT3_DESTS)
+export const SUBMAP_LT3_DEST = 1;
 
-export const SUBMAPS = 7;
 export const SUBMAP_PALETTE_SIZE = 0x200; // 256 colors, color 0 the back area color
 export const SUBMAP_PALETTES = SUBMAPS * 2; // normal, then after the special world
 const PAL_HOOK = 0x00ad32; // JSL routine : RTS
@@ -31,6 +33,7 @@ const ROUTINE_ADC = 18; // the ADC's operand: the table's low 16 bits
 const ROUTINE_BANK = 30; // the MVN's source bank: the table's bank
 // the special world passed: bit 7 of $1EEB (the game's LDA $1EEA in 16 bit, its sign: translevel 49's passed flag)
 const SPECIAL_FLAG = RAM.levelFlags + 0x49;
+const COLORS = RAM.palettes + 2; // the palette buffer: the colors after the back area color
 
 const routineAsm = () => `lorom
 org $${PAL_HOOK.toString(16).toUpperCase()}
@@ -96,7 +99,7 @@ export function gameSubmapPalettes(rom: Rom): Uint8Array {
   cpu.exec = (op: number) => {
     if ((cpu.opPc & 0x7fffff) === PAL_ROUTINE) { if (special) w[SPECIAL_FLAG] |= 0x80; else w[SPECIAL_FLAG] &= 0x7f; }
     exec(op);
-    if (cpu.pc === (PAL_RETURN & 0xffff) && (cpu.pbr & 0x7f) === 0) got = w.slice(0x703, 0x703 + SUBMAP_PALETTE_SIZE);
+    if (cpu.pc === (PAL_RETURN & 0xffff) && (cpu.pbr & 0x7f) === 0) got = w.slice(COLORS, COLORS + SUBMAP_PALETTE_SIZE);
   };
   try {
     for (let k = 0; k < SUBMAP_PALETTES; k++) {
@@ -141,23 +144,26 @@ const OW_TILESETS = 0x04dc02; // per submap: the tileset $1931
 const OW_SPRITE_SET = 0x04dc1d; // the operand of LDA #$11 : STA $192B ($04DC09, the overworld's load)
 const GFX_HOOK = 0x04dbb9; // STA $0704 : STZ $0803, 6 bytes
 const GFX_CODE_LEN = 0x30;
+const UPLOAD = 0x00a9da; // the game's graphics upload (JSR; RTS)
+const RTL_00 = 0x0084cf; // an RTL in bank 0, where the upload's RTS returns
+const hx = (n: number) => '$' + n.toString(16).toUpperCase().padStart(4, '0');
 const gfxHookAsm = (at: number) => `lorom
 org $${GFX_HOOK.toString(16).toUpperCase()}
   JSL SubmapGfx
   NOP #2
 org $${at.toString(16).toUpperCase()}
 SubmapGfx:
-  STA $0704 : STZ $0803           ; the game's code
+  STA ${hx(RAM.palettes + 3)} : STZ ${hx(RAM.palettes + 0x102)}   ; the game's code
   PHP : PHB
   SEP #$30
   LDA #$00 : PHA : PLB
   LDA #$80 : STA $2100            ; screen off, no NMI while the files are uploaded
   STZ $4200
-  PHK : PEA.w .ret-1 : PEA.w $84CE ; $A9DA's RTS to the RTL at $0084CF, back here
-  JML $00A9DA
+  PHK : PEA.w .ret-1 : PEA.w ${hx((RTL_00 - 1) & 0xffff)} ; the upload's RTS to the RTL, back here
+  JML ${hx(UPLOAD).replace('$', '$00')}
 .ret:
-  LDA #$81 : STA $4200
-  LDA $0DAE : STA $2100
+  LDA #$81 : STA $4200            ; NMI and the joypad read on again, as the game has them on the overworld
+  LDA ${hx(RAM.brightness)} : STA $2100
   PLB : PLP
   RTL
 End:
@@ -187,7 +193,8 @@ export function submapSlots(rom: Rom, map: number): GfxSlot[] {
 // puts `file` into slot `name` of submap `map` (FF: the default; an LT3 file goes to `place` when given)
 export function assignSubmapSlot(rom: Rom, map: number, name: string, file: number, place?: Lt3Place): void {
   const k = BYPASS_K[name];
-  if (k === undefined) { assignSlot(rom, submapGfxEntry(map), name, file, place); return; }
+  // (an LT3 file on the overworld goes to the start of layer 3, as in Lunar Magic: the border's place)
+  if (k === undefined) { assignSlot(rom, submapGfxEntry(map), name, file, place ?? (name === LT3_SLOT ? { dest: SUBMAP_LT3_DEST, size: 0 } : undefined)); return; }
   const set = levelGfx(rom, submapGfxEntry(map));
   set[k] = file;
   setLevelGfx(rom, submapGfxEntry(map), set);
@@ -196,7 +203,7 @@ export function assignSubmapSlot(rom: Rom, map: number, name: string, file: numb
 // needs Asar (loadAsar) to be loaded
 export function installSubmapGfxPatch(rom: Rom): void {
   if (hasSubmapGfxPatch(rom)) return;
-  if (rom.r8(GFX_HOOK) !== 0x8d || rom.r16(GFX_HOOK + 1) !== 0x0704) throw new Error('Submap graphics: unexpected code at $04DBB9');
+  if (rom.r8(GFX_HOOK) !== 0x8d || rom.r16(GFX_HOOK + 1) !== 0x0704 || rom.r8(RTL_00) !== 0x6b) throw new Error('Submap graphics: unexpected code at $04DBB9');
   const at = rom.allocWrite(new Uint8Array(GFX_CODE_LEN));
   const r = assemble(rom.data, new Map([['submapgfx.asm', gfxHookAsm(at)]]), 'submapgfx.asm');
   if (!r.ok) throw new Error(r.errors.map((e) => e.message).join(' '));

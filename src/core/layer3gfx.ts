@@ -20,7 +20,7 @@
 import type { Rom } from './rom.ts';
 import { applyPatch, type ApplyResult } from './patchapply.ts';
 import { listPatches } from './patchreg.ts';
-import { installEditorPatch, editorPatch, missingPatch, gfxEntry, gfxNum, freeGfx, gfxRangeFor, GFX_NONE, RAW_GFX_SIZES, LT3_SLOT } from './patches.ts';
+import { installEditorPatch, editorPatch, missingPatch, gfxEntry, gfxNum, freeGfx, gfxRangeFor, GFX_NONE, RAW_GFX_SIZES, LT3_SLOT, GFX_BYPASS_ENTRIES, submapGfxEntry } from './patches.ts';
 import { lz2Decompress } from './lz2.ts';
 import { snesToPc } from './rom.ts';
 import { LAYER3_GFX_RAM, RAM } from './ram.ts';
@@ -34,7 +34,7 @@ export const LT3_SIZES = [0x2000, 0x1000, 0x800];
 const GFX_HOOK = 0x00a9da, MAP_HOOK = 0x00a01f, BORDER_HOOK = 0x00a153;
 const MAGIC = [0x53, 0x4d, 0x57, 0x4c]; // "SMWL"
 // the table's parts: LT3 and LG1-LG4 a word per entry (levels 000–1FF, then submaps 0–6), then LT3's DDFF a byte per entry
-const ENTRIES = 0x207, PART = ENTRIES * 2;
+const ENTRIES = GFX_BYPASS_ENTRIES, PART = ENTRIES * 2;
 const LT3_TBL = 0, LG_TBL = PART, DDFF_TBL = 5 * PART;
 const hx = (n: number) => '$' + n.toString(16).toUpperCase();
 const hx4 = (n: number) => '$' + n.toString(16).toUpperCase().padStart(4, '0');
@@ -154,7 +154,7 @@ Upload:
 ; (A/X 16 bit) the overworld's entry: 200 + the submap of the player
 Entry:
   LDA.l !Player : AND #$00FF : TAX
-  LDA.l !Submap,x : AND #$00FF : CLC : ADC #$0200
+  LDA.l !Submap,x : AND #$00FF : CLC : ADC #${hx4(submapGfxEntry(0))}
   RTS
 
 ; the overworld loads (JSL from $00A153, A 8 bit, the screen off): the submap's LT3 copied in place of the game's
@@ -164,10 +164,12 @@ Border:
   REP #$30
   JSR Entry
   JSR Lt3
-  BNE +
   SEP #$20
+  BNE +
   LDA #$06 : STA $12
-+ PLP
+  BRA ++
++ STZ $12                 ; (no stripe image)
+++ PLP
   RTL
 
 ; returns Z set: no image of the layer 3 setting (none, or the level's LT3 is there instead); else

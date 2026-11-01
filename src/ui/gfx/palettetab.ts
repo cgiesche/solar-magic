@@ -82,11 +82,11 @@ export class PaletteTab implements WsPanel {
     this.ws = ws;
     this.sources = new ColorSources(app.rom);
     this.root = h('div', { class: 'pt' }, this.bar, h('div', { class: 'pt-main' }, h('div', { class: 'pt-left' }, this.rows, this.headerBox), this.detail));
-    app.on('render', () => { if (this.visible && this.map === null) { this.retrace(); this.paint(); } });
+    app.on('render', () => { if (this.visible && this.submap === null) { this.retrace(); this.paint(); } });
     app.on('rom-change', () => {
       this.headers = null;
       if (!this.visible) return;
-      if (this.map !== null) { this.paint(); return; }
+      if (this.submap !== null) { this.paint(); return; }
       const c = customPalette(app.rom, app.level.number);
       if (c !== this.custom) { this.custom = c; this.buildBar(); }
       this.paint();
@@ -94,7 +94,7 @@ export class PaletteTab implements WsPanel {
     app.on('level', () => { this.trace = null; this.headers = null; });
     app.on('animated', () => { if (this.visible) this.paint(); });
     // (which colors the game rewrites on a submap is known from its load)
-    ws.preview.onMap(() => { if (this.visible && this.map !== null) this.paint(); });
+    ws.preview.onMap(() => { if (this.visible && this.submap !== null) this.paint(); });
     app.on('level-header', () => { this.headers = null; if (this.visible) this.buildHeader(); });
     this.buildRows();
   }
@@ -105,25 +105,25 @@ export class PaletteTab implements WsPanel {
 
   // the submap whose colors are edited (the workspace's target), null: the level's
   readonly submaps = true;
-  private get map(): number | null { return this.ws.target.submap; }
+  private get submap(): number | null { return this.ws.target.submap; }
   targetChanged(): void {
     this.trace = null;
     if (this.visible) this.show();
   }
   // the name of what the colors belong to
   private ownerName(): string {
-    return this.map === null ? `level ${hex(this.app.level.number, 3)}` : `${MAP_NAMES[this.map]}${this.special ? ' (after the special world)' : ''}`;
+    return this.submap === null ? `level ${hex(this.app.level.number, 3)}` : `${MAP_NAMES[this.submap]}${this.special ? ' (after the special world)' : ''}`;
   }
   // the colors the game rewrites on the submap shown (its load's CGRAM differs from its palette there), null while it
   // is emulated (or with the special world's colors: the preview shows the submap before it)
   private owAnimated(): Set<number> | null {
     const c = this.ws.preview.submapCgram();
-    if (this.map === null || this.special || !c) return null;
-    const pal = submapPalette(this.app.rom, this.map);
+    if (this.submap === null || this.special || !c) return null;
+    const pal = submapPalette(this.app.rom, this.submap);
     return new Set(Array.from({ length: 256 }, (_, i) => i).filter((i) => c[i * 2] !== pal[i * 2] || c[i * 2 + 1] !== pal[i * 2 + 1]));
   }
   private animatedColor(i: number): boolean {
-    return this.map !== null ? !!this.owAnimated()?.has(i) : !!this.app.animated()?.colors.has(i);
+    return this.submap !== null ? !!this.owAnimated()?.has(i) : !!this.app.animated()?.colors.has(i);
   }
 
   show(): void {
@@ -144,7 +144,7 @@ export class PaletteTab implements WsPanel {
   // ---------- data ----------
   private retrace(): void {
     const app = this.app;
-    if (this.map !== null) return;
+    if (this.submap !== null) return;
     this.custom = customPalette(app.rom, app.level.number);
     this.trace = this.sources.trace(app.level.number, app.buildOverrides());
   }
@@ -155,7 +155,7 @@ export class PaletteTab implements WsPanel {
 
   // SNES address the color is loaded from, -1 when it has no fixed place
   src(i: number): number {
-    if (this.map !== null) return submapPaletteAddr(this.app.rom, this.map, this.special) + i * 2;
+    if (this.submap !== null) return submapPaletteAddr(this.app.rom, this.submap, this.special) + i * 2;
     if (this.custom) return this.custom + i * 2;
     if (i === 0) return this.backAreaAddr();
     const r = this.trace;
@@ -172,7 +172,7 @@ export class PaletteTab implements WsPanel {
   }
 
   origin(i: number): Origin {
-    if (this.custom || this.map !== null) return { kind: 'own', num: 0 };
+    if (this.custom || this.submap !== null) return { kind: 'own', num: 0 };
     return originOf(this.src(i));
   }
 
@@ -198,7 +198,7 @@ export class PaletteTab implements WsPanel {
   // before changing shared colors: all levels or an own palette for this one; false = cancelled
   private async allowed(idx: number[]): Promise<boolean> {
     const app = this.app, lvl = app.level.number;
-    if (this.map !== null || this.custom || this.shareOk.has(lvl)) return true;
+    if (this.submap !== null || this.custom || this.shareOk.has(lvl)) return true;
     const users = new Set<number>();
     const kinds = new Set<string>();
     for (const i of idx) {
@@ -260,14 +260,14 @@ export class PaletteTab implements WsPanel {
   }
 
   private setColor(v: number, key: string | null = null): void {
-    void this.write([[this.sel, v]], `Color ${hex(this.sel >> 4, 1)}·${hex(this.sel & 15, 1)}${this.map !== null ? ` of ${this.ownerName()}` : ''}`, key);
+    void this.write([[this.sel, v]], `Color ${hex(this.sel >> 4, 1)}·${hex(this.sel & 15, 1)}${this.submap !== null ? ` of ${this.ownerName()}` : ''}`, key);
   }
 
   // ---------- UI ----------
   private buildBar(): void {
     const app = this.app;
     clear(this.bar);
-    const own = this.custom !== 0, map = this.map;
+    const own = this.custom !== 0, map = this.submap;
     const special = () => {
       const cb = h('input', { type: 'checkbox', checked: this.special });
       cb.addEventListener('change', () => { this.special = cb.checked; this.buildBar(); this.paint(); });
@@ -322,7 +322,7 @@ export class PaletteTab implements WsPanel {
   }
 
   paint(): void {
-    if (!this.trace && this.map === null) return;
+    if (!this.trace && this.submap === null) return;
     const lo = Math.min(this.sel, this.selEnd), hi = Math.max(this.sel, this.selEnd);
     for (let i = 0; i < 256; i++) {
       const sw = this.swatches[i];
@@ -333,7 +333,7 @@ export class PaletteTab implements WsPanel {
       const animated = this.animatedColor(i);
       sw.classList.toggle('locked', locked);
       sw.classList.toggle('animated', animated);
-      sw.title = `Color ${hex(i >> 4, 1)}·${hex(i & 15, 1)} – ${locked ? 'set by the game, not editable (only with an own palette)' : this.map !== null ? `palette of ${this.ownerName()}` : originName(this.origin(i))}${animated ? ` · animated: the game keeps rewriting it${this.map === null ? ' (Ctrl+click: open its animation)' : ''}` : ''}`;
+      sw.title = `Color ${hex(i >> 4, 1)}·${hex(i & 15, 1)} – ${locked ? 'set by the game, not editable (only with an own palette)' : this.submap !== null ? `palette of ${this.ownerName()}` : originName(this.origin(i))}${animated ? ` · animated: the game keeps rewriting it${this.submap === null ? ' (Ctrl+click: open its animation)' : ''}` : ''}`;
     }
     for (let row = 0; row < 16; row++) {
       const names: string[] = [];
@@ -343,7 +343,7 @@ export class PaletteTab implements WsPanel {
         const n = originName(this.origin(i));
         if (!names.includes(n)) names.push(n);
       }
-      this.rowLabels[row].textContent = this.map !== null ? (row === 0 ? 'Own palette of this submap' : '')
+      this.rowLabels[row].textContent = this.submap !== null ? (row === 0 ? 'Own palette of this submap' : '')
         : this.custom ? (row === 0 ? 'Own palette of this level' : '') : names.filter((n) => n !== 'Global' || names.length === 1).join(' · ');
     }
     this.buildDetail();
@@ -361,14 +361,14 @@ export class PaletteTab implements WsPanel {
     const o = this.origin(i);
     const users = editable ? this.affected(i) : null;
     const others = users ? users.filter((n) => n !== this.app.level.number).length : 0;
-    const own = this.map === null ? colorAnimsAt(this.app, i) : [];
+    const own = this.submap === null ? colorAnimsAt(this.app, i) : [];
     d.append(
       h('div', { class: 'pt-big', style: { background: cssOf(c) } }),
       h('div', { class: 'prop-title' }, `Color ${hex(i >> 4, 1)}·${hex(i & 15, 1)}`, h('span', { class: 'hint' }, `  Palette ${hex(i >> 4, 1)}, color ${hex(i & 15, 1)}`)),
-      h('div', { class: 'hint' }, this.map !== null ? `Palette of ${this.ownerName()} · this submap only`
+      h('div', { class: 'hint' }, this.submap !== null ? `Palette of ${this.ownerName()} · this submap only`
         : editable ? `${originName(o)} · ${o.kind === 'own' ? 'applies to this level only' : others ? `also in ${others} other level${others === 1 ? '' : 's'}` : 'this level only'}` : ''),
       own.length ? h('div', { class: 'warn-box' }, 'Animated by ', animLinks(this.ws, own), ' – the level shows its colors instead of this one.')
-        : this.animatedColor(i) ? h('div', { class: 'warn-box' }, this.map !== null
+        : this.animatedColor(i) ? h('div', { class: 'warn-box' }, this.submap !== null
           ? 'Animated: the game rewrites this color on the overworld (Mario, the level tiles\' blinking, the lightning, the path fade). A change here is barely or not at all visible in the game.'
           : 'Animated: the game keeps rewriting this color (flashing coins, ?-blocks etc.). A change here is barely or not at all visible in the game.') : '',
     );
@@ -404,7 +404,7 @@ export class PaletteTab implements WsPanel {
       ...sliders,
       h('div', { class: 'prop' }, h('label', null, 'HTML color'), htmlIn, picker),
       h('div', { class: 'prop' }, h('label', null, 'SNES value'), h('span', { class: 'mono' }, `$${hex(c, 4)}`), h('span', { class: 'hint mono' }, `@ $${hex(this.src(i), 6)}`)),
-      h('p', { class: 'hint' }, `Shift+click marks a range of the palette (for “Gradient”). A click into the ${this.map !== null ? 'map' : 'level preview'} selects the color there.`),
+      h('p', { class: 'hint' }, `Shift+click marks a range of the palette (for “Gradient”). A click into the ${this.submap !== null ? 'map' : 'level preview'} selects the color there.`),
     );
   }
 
@@ -413,7 +413,7 @@ export class PaletteTab implements WsPanel {
     const app = this.app;
     const box = this.headerBox;
     clear(box);
-    if (this.map !== null) {
+    if (this.submap !== null) {
       box.append(h('p', { class: 'hint' }, 'When a path is revealed the game copies colors 1–7 of palettes 4–7 into palettes 0–3 and C–F and fades them: '
         + 'tiles drawn in those palettes change color during the path fade.'));
       return;
@@ -485,7 +485,7 @@ export class PaletteTab implements WsPanel {
       const v = snesColorToRGBA(this.color(i));
       out[i * 3] = v & 255; out[i * 3 + 1] = (v >> 8) & 255; out[i * 3 + 2] = (v >> 16) & 255;
     }
-    const name = this.map !== null ? `submap${this.map}${this.special ? '-special' : ''}.pal` : `level${hex(this.app.level.number, 3)}.pal`;
+    const name = this.submap !== null ? `submap${this.submap}${this.special ? '-special' : ''}.pal` : `level${hex(this.app.level.number, 3)}.pal`;
     if (await downloadBytes(name, out)) toast(`${name} exported`);
   }
   private async importPal(): Promise<void> {
@@ -513,7 +513,7 @@ export class PaletteTab implements WsPanel {
 
   // Ctrl+click: the own animation that rewrites the color, in the Animations tab
   private gotoAnim(i: number): void {
-    if (this.map !== null) return;
+    if (this.submap !== null) return;
     const own = colorAnimsAt(this.app, i);
     if (own.length) { this.ws.showAnim(own[0].global, own[0].slot); return; }
     toast(`Color ${hex(i >> 4, 1)}·${hex(i & 15, 1)} is ${this.app.animated()?.colors.has(i) ? 'animated by the game itself, not by an own animation' : 'not animated'}.`);
