@@ -3,14 +3,22 @@
 // view; the picker's thumbnail is the same box), so they can be seen, selected, moved and deleted. The box is
 // editor-only, never written to the ROM. Lunar Magic shows a placeholder tile for unused extended objects.
 
-import type { LevelObject } from './level.ts';
+import type { Level, LevelObject } from './level.ts';
 import { isDm16 } from './cdm16.ts';
 import { hex2 } from './names.ts';
 
-// the objects of a layer (key: of the object at an index, App.objectKey) that wrote no tile; a conditional
+// the key of a layer's object at an index in the level's load (LevelRender.touched, owner)
+export const objectKey = (layer2: boolean, idx: number): number => (layer2 ? 0x8000 | idx : idx);
+
+// the objects of a layer (key: of the object at an index, objectKey) that wrote no tile; a conditional
 // Direct Map16 object hidden by its flag is shown otherwise
 export function boxedObjects(objs: LevelObject[], touched: Map<number, Set<number>>, key: (i: number) => number): LevelObject[] {
   return objs.filter((o, i) => !touched.get(key(i))?.size && !(isDm16(o) && o.cond));
+}
+
+// the same of a level's layer 1 (or 2) in its load
+export function layerBoxes(lv: Pick<Level, 'objects' | 'layer2Objects'>, touched: Map<number, Set<number>>, layer2: boolean): LevelObject[] {
+  return boxedObjects((layer2 ? lv.layer2Objects : lv.objects) ?? [], touched, (i) => objectKey(layer2, i));
 }
 
 // what its box says: its number as in the picker (extended objects' own, 2D's custom number after a dot)

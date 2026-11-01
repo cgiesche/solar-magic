@@ -11,7 +11,7 @@ import {
 import { levelBgPointer } from '../core/levelheader.ts';
 import { hex, hex2, spriteName } from '../core/names.ts';
 import { objectTable, objectName, objectNameKey, setObjectName, namedPerTable, numberName } from '../core/objectnames.ts';
-import { boxedObjects, boxAt } from '../core/objboxes.ts';
+import { layerBoxes, boxAt, objectKey } from '../core/objboxes.ts';
 import { objectUserNames } from '../core/usernames.ts';
 import { loadPixiProject, customSpriteList, type CustomSprite } from '../core/pixi.ts';
 import { renderLevel, type LevelImages, composite, animatedPixels, TileAnimation, type AnimStep } from '../core/render.ts';
@@ -950,7 +950,7 @@ export class App {
   }
 
   objectKey(layer2: boolean, idx: number): number {
-    return layer2 ? 0x8000 | idx : idx;
+    return objectKey(layer2, idx);
   }
 
   // grab area = every tile the object wrote (same as its outline), topmost first
@@ -998,8 +998,7 @@ export class App {
 
   // the objects of layer 1 (or 2) that wrote no tile in the level's load: shown as boxes (objboxes.ts)
   boxedObjects(l2 = this.mode === 'l2'): LevelObject[] {
-    const objs = (l2 ? this.level.layer2Objects : this.level.objects) ?? [];
-    return boxedObjects(objs, this.render.touched, (i) => this.objectKey(l2, i));
+    return layerBoxes(this.level, this.render.touched, l2);
   }
 
   // what a box's object is called, null when it has no name but its number (object 2D's custom numbers have none)

@@ -2,7 +2,7 @@
 
 import { App, isBrushMode, type Marker, type LevelEdit, type Brush, type PreviewPart } from './app.ts';
 import { h, attachPanZoom, toast } from './dom.ts';
-import { paintOverlays, openOverlay, boxLayers, deathsAt, gameViewLabelBox, gameViewIn, BAND_STYLE, MARKER_STYLE, type GameViewFrame } from './leveloverlays.ts';
+import { paintOverlays, openOverlay, boxLayers, deathsAt, gameViewLabelBox, gameViewIn, BAND_STYLE, type SpriteDraw, MARKER_STYLE, type GameViewFrame } from './leveloverlays.ts';
 import { hex2, hex3 } from '../core/names.ts';
 import { aimResize, type Grab, type Drivers } from '../core/objresize.ts';
 import { probeAt, spriteProbeAt, enterText, collisionText, collisionIn, switchText, SWITCH_STATES, SWITCH_NAME } from '../core/blockprobe.ts';
@@ -232,7 +232,7 @@ export class LevelView {
         ring: app.mode === 'exit' && app.exitMarker?.kind === m.kind && app.exitMarker.index === m.index,
       }),
       layer2: app.mode === 'l2', tideLabelX: this.scroller.scrollLeft / app.zoom + 8 / app.zoom, spriteAlpha: this.spriteAlpha(),
-      sprites: () => this.paintSprites(ctx, z), arcs: () => this.paintArcs(ctx), gameView: app.show.gameView ? this.gameViewFrame() : undefined,
+      sprites: this.spriteDraw(), arcs: () => this.paintArcs(ctx), gameView: app.show.gameView ? this.gameViewFrame() : undefined,
     });
     // selection
     if (app.mode === 'l1' || app.mode === 'l2') {
@@ -501,37 +501,10 @@ export class LevelView {
     ctx.globalAlpha = 1;
   }
 
-  paintSprites(ctx: CanvasRenderingContext2D, z: number): void {
-    const app = this.app;
-    const active = app.mode === 'spr';
-    ctx.font = `bold ${9 / app.zoom * 1.2}px monospace`;
-    const incomplete = new Set(incompleteSprites(app)), a = this.spriteAlpha();
-    ctx.globalAlpha = a;
-    for (const s of app.level.sprites) {
-      const x = s.x * 16, y = s.y * 16;
-      const sel = app.selection.has(s.uid) && active;
-      const img = app.spriteImageOf(s);
-      if (img) {
-        ctx.globalAlpha = (active ? 1 : 0.85) * a;
-        ctx.drawImage(img, x + Number(img.dataset.ox), y + Number(img.dataset.oy));
-        ctx.globalAlpha = a;
-      }
-      ctx.fillStyle = sel ? 'rgba(255,80,200,0.45)' : active ? 'rgba(255,80,200,0.22)' : 'rgba(255,80,200,0.12)';
-      if (!img) ctx.fillRect(x, y, 16, 16);
-      ctx.strokeStyle = sel ? '#ff50c8' : 'rgba(255,80,200,0.8)';
-      ctx.lineWidth = (sel ? 2 : 1) / z;
-      ctx.strokeRect(x, y, 16, 16);
-      if (incomplete.has(s.uid)) { // drawn incompletely (sprite memory)
-        ctx.strokeStyle = '#ffa020';
-        ctx.lineWidth = 2 / z;
-        ctx.strokeRect(x - 2 / z, y - 2 / z, 16 + 4 / z, 16 + 4 / z);
-      }
-      if (!img || sel || active) {
-        ctx.fillStyle = '#fff';
-        ctx.fillText(hex2(s.num), x + 1, y + 8);
-      }
-    }
-    ctx.globalAlpha = 1;
+  // the sprites as the level view draws them (leveloverlays.ts paintSprites)
+  spriteDraw(): SpriteDraw {
+    const app = this.app, active = app.mode === 'spr';
+    return { image: (s) => app.spriteImageOf(s), imageAlpha: active ? 1 : 0.85, active, selected: (s) => app.selection.has(s.uid), incomplete: new Set(incompleteSprites(app)) };
   }
 
   // ---------------- interactions ----------------

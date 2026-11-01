@@ -4,10 +4,11 @@
 // an OverlayLevel: the open level's (openOverlay) or another level's for its image (levelOverlay), with that
 // level's probes (in its tileset). Selection, hover and drag previews stay the level view's own.
 
-import type { App, Marker } from './app.ts';
+import type { App } from './app.ts';
+import type { Marker } from '../core/entrances.ts';
 import { hex2, hex3 } from '../core/names.ts';
 import { screenRect, invisibleTiles, type LayerGeom, type LevelImages } from '../core/render.ts';
-import { spriteId, type Level, type LevelObject } from '../core/level.ts';
+import { spriteId, type Level, type LevelSprite } from '../core/level.ts';
 import type { LevelRender } from '../core/levelemu.ts';
 import type { Rom } from '../core/rom.ts';
 import { exitTarget } from '../core/exitgraph.ts';
@@ -17,7 +18,7 @@ import { probeAt, spriteProbeAt, collisionIn, type PosProbe, type CollisionCore,
 import { KILL_FILL, HURT_FILL, CLIMB_FILL, SPIKE_COLOR, NET_COLOR, spikeRow, netTile, drawSkull, switchMarks, drawSwitchMarks } from './collisionmarks.ts';
 import { map16Tile } from '../core/ram.ts';
 import { isDm16, dm16Tiles, prefabFlags } from '../core/cdm16.ts';
-import { boxLabel, boxedObjects } from '../core/objboxes.ts';
+import { boxLabel, layerBoxes, objectKey } from '../core/objboxes.ts';
 import { paintObjectBox } from './objbox.ts';
 import { PREFAB_EXT, readPrefab } from '../core/prefabs.ts';
 import { tideLines, type TideLines, type TideRange } from '../core/layer3.ts';
@@ -45,8 +46,8 @@ export interface OverlayLevel {
   tide: TideLines | null;
   reach: CameraReach | null | undefined; // from the level scan (undefined: none yet, null: not found)
   bands(): CameraBands | null | undefined; // the scroll bands under its mode and vertical scroll setting
-  deaths: DeathMark[]; // where Mario died in test play
-  version: number; // the level's version (deathmarks.ts levelVersion): older deaths are faded
+  readonly deaths: DeathMark[]; // where Mario died in test play
+  readonly version: number; // the level's version (deathmarks.ts levelVersion): older deaths are faded
 }
 
 // the open level as the level view shows it
@@ -57,7 +58,9 @@ export function openOverlay(app: App): OverlayLevel {
     block: (t) => app.probes.block(t), collision: (t) => app.probes.collision(t), sprite: (id) => app.probes.sprite(id),
     thumb: (id) => app.spriteThumbs.get(id), switches: app.viewSwitches(), cdm16: app.cdm16,
     tide: app.tide(), reach: app.cameraReach(), bands: () => app.probes.cameraBands(h.mode, h.verticalScroll),
-    deaths: loadDeaths(projectId(app.rom), lv.number), version: levelVersion(app.rom, lv.number),
+    // (only once the death markers are drawn)
+    get deaths() { return loadDeaths(projectId(app.rom), lv.number); },
+    get version() { return levelVersion(app.rom, lv.number); },
   };
 }
 
@@ -73,7 +76,8 @@ export function levelOverlay(app: App, lv: Level, render: OverlayLevel['render']
     tide: tideLines(render, images.layer3, images.width, scan?.tide ?? null),
     reach: scan ? scan.camera ?? null : undefined,
     bands: () => app.probes.cameraBands(h.mode, h.verticalScroll, ts),
-    deaths: loadDeaths(projectId(app.rom), lv.number), version: levelVersion(app.rom, lv.number),
+    get deaths() { return loadDeaths(projectId(app.rom), lv.number); },
+    get version() { return levelVersion(app.rom, lv.number); },
   };
 }
 
@@ -134,8 +138,8 @@ export interface OverlayDraw {
   marker?: (m: Marker) => { big: boolean; ring: boolean }; // an entrance marker dragged (big), chosen in exit mode (ring)
   layer2: boolean; // the conditional Direct Map16 badges of layer 2's objects (the level view in layer 2 mode)
   tideLabelX: number; // where the tide's labels start
-  spriteAlpha: number;
-  sprites: () => void; // draws the sprites (after the block contents, before what they give)
+  spriteAlpha: number; // the sprites' and what they give (the level view: ghosted while BG or layer 3 is edited)
+  sprites: SpriteDraw;
   arcs?: () => void; // the level view's jump arcs
   gameView?: GameViewFrame; // while show.gameView
 }
@@ -152,7 +156,8 @@ export function paintOverlays(ctx: CanvasRenderingContext2D, app: App, src: Over
       ctx.lineWidth = 2 * d.px;
       ctx.strokeRect(r.x + d.px, r.y + d.px, r.w - 2 * d.px, r.h - 2 * d.px);
     }
-    paintExits(ctx, app, { ...src.level, exits: src.level.exits.filter((e) => e.screen < d.screens) }, im.geom1, d.px, d.chosenExit);
+    const lv = src.level, exits = lv.exits.filter((e) => e.screen < d.screens);
+    paintExits(ctx, app, exits.length < lv.exits.length ? { ...lv, exits } : lv, im.geom1, d.px, d.chosenExit);
   }
   paintMarkers(ctx, src, d.marker);
   if (d.layer2 ? show.layer2 : show.layer1) paintConds(ctx, src, d.layer2, d.lw);
@@ -161,7 +166,7 @@ export function paintOverlays(ctx: CanvasRenderingContext2D, app: App, src: Over
   if (show.collision && show.layer1) paintCollision(ctx, src, d.area, 2 * d.px);
   if (show.collision || show.layer3) paintTide(ctx, src, show.collision, d.tideLabelX, d.px);
   if (show.items && show.layer1) paintItems(ctx, src, d.area);
-  if (show.sprites) d.sprites();
+  if (show.sprites) paintSprites(ctx, src.level.sprites, d.sprites, d.spriteAlpha, d.lw, d.px);
   if (show.sprites && show.items) paintSpriteItems(ctx, src, d.spriteAlpha);
   if (show.deaths) paintDeaths(ctx, src, d.lw);
   if (show.arcs) d.arcs?.();
@@ -251,9 +256,6 @@ export function paintMarkers(ctx: CanvasRenderingContext2D, src: OverlayLevel, h
   }
 }
 
-// the key of a layer's object in the level's load (LevelRender.touched)
-const objectKey = (l2: boolean, i: number) => (l2 ? 0x8000 | i : i);
-
 // conditional Direct Map16 (cdm16.ts): a flag badge on each object of the layer that depends on a flag (prefabs by
 // their tiles' flags), green while the view shows it with the flag on; where one left nothing in the level's
 // load, its tiles dashed
@@ -290,11 +292,8 @@ export function paintConds(ctx: CanvasRenderingContext2D, src: OverlayLevel, l2:
 export function boxLayers(show: Show, lv: Level): boolean[] {
   return [false, true].filter((l2) => (l2 ? show.layer2 && !!lv.layer2Objects : show.layer1));
 }
-export function boxedIn(src: Pick<OverlayLevel, 'level' | 'render'>, l2: boolean): LevelObject[] {
-  return boxedObjects((l2 ? src.level.layer2Objects : src.level.objects) ?? [], src.render.touched, (i) => objectKey(l2, i));
-}
 export function paintBoxes(ctx: CanvasRenderingContext2D, src: OverlayLevel, show: Show): void {
-  for (const l2 of boxLayers(show, src.level)) for (const o of boxedIn(src, l2)) paintObjectBox(ctx, o.x * 16, o.y * 16, boxLabel(o));
+  for (const l2 of boxLayers(show, src.level)) for (const o of layerBoxes(src.level, src.render.touched, l2)) paintObjectBox(ctx, o.x * 16, o.y * 16, boxLabel(o));
 }
 
 // tiles that are there but cannot be seen (render.ts invisibleTiles): areas of them tinted, their edges dashed;
@@ -470,6 +469,48 @@ function drawEnter(ctx: CanvasRenderingContext2D, dirs: string, x: number, y: nu
     ctx.fill();
   });
   ctx.globalAlpha = a;
+}
+
+// how the sprites are drawn: their images (imageAlpha: the level view's outside sprite mode), the sprite mode's
+// look (active) and selection, the sprites sprite memory draws incompletely (uids)
+export interface SpriteDraw {
+  image(s: LevelSprite): HTMLCanvasElement | undefined;
+  imageAlpha: number;
+  active: boolean;
+  selected(s: LevelSprite): boolean;
+  incomplete: ReadonlySet<number>;
+}
+
+// each sprite's image with a box on it (filled with its number where it has none, in sprite mode always numbered),
+// an orange box around one drawn incompletely (sprite memory)
+export function paintSprites(ctx: CanvasRenderingContext2D, sprites: LevelSprite[], d: SpriteDraw, alpha: number, lw: number, px: number): void {
+  ctx.font = `bold ${9 * px * 1.2}px monospace`;
+  ctx.globalAlpha = alpha;
+  for (const s of sprites) {
+    const x = s.x * 16, y = s.y * 16;
+    const sel = d.active && d.selected(s);
+    const img = d.image(s);
+    if (img) {
+      ctx.globalAlpha = d.imageAlpha * alpha;
+      ctx.drawImage(img, x + Number(img.dataset.ox), y + Number(img.dataset.oy));
+      ctx.globalAlpha = alpha;
+    }
+    ctx.fillStyle = sel ? 'rgba(255,80,200,0.45)' : d.active ? 'rgba(255,80,200,0.22)' : 'rgba(255,80,200,0.12)';
+    if (!img) ctx.fillRect(x, y, 16, 16);
+    ctx.strokeStyle = sel ? '#ff50c8' : 'rgba(255,80,200,0.8)';
+    ctx.lineWidth = (sel ? 2 : 1) * lw;
+    ctx.strokeRect(x, y, 16, 16);
+    if (d.incomplete.has(s.uid)) {
+      ctx.strokeStyle = '#ffa020';
+      ctx.lineWidth = 2 * lw;
+      ctx.strokeRect(x - 2 * lw, y - 2 * lw, 16 + 4 * lw, 16 + 4 * lw);
+    }
+    if (!img || sel || d.active) {
+      ctx.fillStyle = '#fff';
+      ctx.fillText(hex2(s.num), x + 1, y + 8);
+    }
+  }
+  ctx.globalAlpha = 1;
 }
 
 // the same for sprites that give items (flying ? blocks …), drawn over the sprite images

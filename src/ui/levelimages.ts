@@ -18,6 +18,7 @@ import { scanKey, type ScanResult } from '../core/levelscan.ts';
 import { paintOverlays, levelOverlay, overlayPending, gameViewIn, wholeLevel, type OverlayLevel } from './leveloverlays.ts';
 import { renderLevelImages, usedScreens, screensSize, levelImageName, parseLevelList } from '../core/levelimage.ts';
 import type { SpriteImage } from '../core/spritegfx.ts';
+import { incompleteSprites } from './spritemem.ts';
 
 // ---------------- a level's image ----------------
 
@@ -46,12 +47,9 @@ export function drawLevelImage(app: App, p: LevelPicture, zoom = 1, screens = p.
   paintOverlays(ctx, app, p.overlay, {
     show, lw: 1 / zoom, px: 1, area: wholeLevel(im.geom1), width, height, screens,
     exits: show.exits, chosenExit: -1, layer2: app.mode === 'l2', tideLabelX: 8, spriteAlpha: 1,
-    sprites: () => {
-      for (const s of lv.sprites) {
-        const img = p.sprite(s);
-        if (img) ctx.drawImage(img, s.x * 16 + Number(img.dataset.ox), s.y * 16 + Number(img.dataset.oy));
-      }
-    },
+    // (the sprites as outside sprite mode, their images opaque; drawn incompletely: the open level's, the only one
+    // whose sprite memory is checked)
+    sprites: { image: p.sprite, imageAlpha: 1, active: false, selected: () => false, incomplete: new Set(lv === app.level ? incompleteSprites(app) : []) },
     gameView: show.gameView ? gameViewIn(app, p.overlay) : undefined,
   });
   return c;
@@ -66,8 +64,7 @@ const pngBytes = (c: HTMLCanvasElement) => new Promise<Uint8Array>((ok, fail) =>
 export async function exportLevelPng(app: App): Promise<void> {
   const lv = app.level;
   try {
-    const p = await levelPicture(app, lv, app.images, app.render, { cancelled: false, wake: null });
-    app.probes.unlearn(LANE);
+    const p = await levelPicture(app, lv, app.images, app.render, { cancelled: false, wake: null }).finally(() => app.probes.unlearn(LANE));
     if (!p) return;
     await downloadBytes(levelImageName(lv.number, levelNameOf(app, lv.number)), await pngBytes(drawLevelImage(app, p)), 'image/png');
   } catch (e) {

@@ -76,7 +76,7 @@ const { ctx, calls } = recCtx();
 const im = r.images, g = im.geom1;
 paintOverlays(ctx, app, src, {
   show, lw: 1, px: 1, area: wholeLevel(g), width: im.width, height: im.height, screens: lv.header.screens,
-  exits: false, chosenExit: -1, layer2: false, tideLabelX: 8, spriteAlpha: 1, sprites: () => {},
+  exits: false, chosenExit: -1, layer2: false, tideLabelX: 8, spriteAlpha: 1, sprites: { image: () => undefined, imageAlpha: 1, active: false, selected: () => false, incomplete: new Set() },
 });
 
 // collision: the level dimmed, the solid tops of its ground as white lines, at the tiles level 106's load put there
@@ -113,7 +113,7 @@ paintOverlays(ctx, app, src, {
   const { ctx: c2, calls: k2 } = recCtx();
   paintOverlays(c2, app, src, {
     show: { ...show, collision: false }, lw: 1, px: 1, area: wholeLevel(g), width: im.width, height: im.height, screens: lv.header.screens,
-    exits: false, chosenExit: -1, layer2: false, tideLabelX: 8, spriteAlpha: 1, sprites: () => {},
+    exits: false, chosenExit: -1, layer2: false, tideLabelX: 8, spriteAlpha: 1, sprites: { image: () => undefined, imageAlpha: 1, active: false, selected: () => false, incomplete: new Set() },
   });
   check(!k2.some((c) => c.style.fill === 'rgba(0,0,0,0.45)' && c.op === 'fillRect'), 'collision off: not drawn');
   check(k2.some((c) => c.op === 'fillText' && c.args[0] === 'M'), 'collision off: the markers drawn');
