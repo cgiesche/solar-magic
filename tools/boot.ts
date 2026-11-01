@@ -1,9 +1,9 @@
-import { readFileSync } from 'node:fs';
+import { cleanImage } from './fixture.ts';
 import { Snes } from '../src/core/snes.ts';
 import { disasm, hex } from '../src/core/disasm.ts';
 
-const raw = readFileSync('Super Mario World (U) [!].smc');
-const rom = new Uint8Array(raw.subarray(raw.length % 0x8000));
+const raw = cleanImage();
+const rom = raw.subarray(raw.length % 0x8000);
 const snes = new Snes(rom);
 snes.reset();
 const t0 = Date.now();

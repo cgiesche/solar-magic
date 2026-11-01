@@ -6,7 +6,7 @@ import { Apu, loadApu, APU_RATE } from '../src/core/apu.ts';
 import { hex } from '../src/core/disasm.ts';
 
 await loadApu();
-const raw = readFileSync(process.env.ROM ?? 'Super Mario World (U) [!].smc');
+const raw = readFileSync(process.env.ROM ?? 'test/fixtures/smw.smc');
 const rom = new Uint8Array(raw.subarray(raw.length % 0x8000));
 const snes = new Snes(rom);
 snes.apu = new Apu();

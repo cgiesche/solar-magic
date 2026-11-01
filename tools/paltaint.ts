@@ -1,7 +1,7 @@
-import { readFileSync } from 'node:fs';
+import { cleanImage } from './fixture.ts';
 import { Rom, pcToSnes } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
-const rom = new Rom(new Uint8Array(readFileSync('Super Mario World (U) [!].smc')));
+const rom = new Rom(cleanImage());
 const emu = new LevelEmulator(rom); emu.boot();
 const t0=Date.now();
 const r = emu.load(parseInt(process.argv[2] ?? "105", 16), { trackSources: true });

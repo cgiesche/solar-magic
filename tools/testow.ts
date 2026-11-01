@@ -1,13 +1,13 @@
-import { readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
 import { readL2, writeL2, OverworldEmulator, l2Index, l1Index, translevelToLevel, OW_EVENTS } from '../src/core/overworld.ts';
 import { levelName, levelNamePatch } from '../src/core/levelnames.ts';
 import { TileCache } from '../src/core/render.ts';
 import { writePng, outDir } from './png.ts';
 import { RAM } from '../src/core/ram.ts';
+import { cleanImage } from './fixture.ts';
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
-const rom = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
+const rom = new Rom(cleanImage());
 const l2 = readL2(rom);
 const copy = new Rom(rom.output(false));
 const size = writeL2(copy, l2);

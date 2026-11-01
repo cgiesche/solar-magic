@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { disasm, hex } from '../src/core/disasm.ts';
-const raw = readFileSync(process.env.ROM ?? 'Super Mario World (U) [!].smc');
+const raw = readFileSync(process.env.ROM ?? 'test/fixtures/smw.smc');
 const rom = new Uint8Array(raw.subarray(raw.length % 0x8000));
 const rd = (a: number) => rom[((((a >> 16) & 0x7f) << 15) | (a & 0x7fff)) % rom.length];
 let a = parseInt(process.argv[2], 16);

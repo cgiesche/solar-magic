@@ -1,10 +1,10 @@
-import { readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadLevel } from '../src/core/level.ts';
 import { captureSprites } from '../src/core/spritegfx.ts';
 import { writePng, outDir } from './png.ts';
-const rom = new Rom(new Uint8Array(readFileSync('Super Mario World (U) [!].smc')));
+import { editorImage } from './fixture.ts';
+const rom = new Rom(await editorImage());
 const emu = new LevelEmulator(rom); emu.boot();
 const n = parseInt(process.argv[2] ?? '105', 16);
 const lv = loadLevel(rom, n);

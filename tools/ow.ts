@@ -1,10 +1,10 @@
-import { readFileSync } from 'node:fs';
 import { Snes } from '../src/core/snes.ts';
 import { hex } from '../src/core/disasm.ts';
 import { cgramToRGBA, decodeTile } from '../src/core/gfx.ts';
 import { writePng, outDir } from './png.ts';
-const raw = readFileSync('Super Mario World (U) [!].smc');
-const rom = new Uint8Array(raw.subarray(raw.length % 0x8000));
+import { cleanImage } from './fixture.ts';
+const raw = cleanImage();
+const rom = raw.subarray(raw.length % 0x8000);
 const snes = new Snes(rom); snes.reset();
 while (snes.wram[0x100] !== 0x07) snes.runFrame();
 const w = snes.wram;
