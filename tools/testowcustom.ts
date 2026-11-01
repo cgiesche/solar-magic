@@ -40,7 +40,7 @@ const spr = (id: number, x: number, y: number, z: number, extra: number) => [id 
   writeCustomSprites(r, lists);
   check(r.scanRats().length === before && readCustomSprites(r)[4].length === 1, 'rewritten: the old table freed, one RATS block still');
   writeCustomSprites(r, none());
-  check(r.r24(OW_CUSTOM_PTR) === 0 && r.scanRats().length === before - 1 && readCustomSprites(r).every((l) => !l.length), 'without sprites: pointer 0, the table freed');
+  check(r.r24(OW_CUSTOM_PTR) === 0xffffff && r.scanRats().length === before - 1 && readCustomSprites(r).every((l) => !l.length), 'without sprites: pointer $FFFFFF (the clean game\'s), the table freed');
 }
 
 // the size table: sprite 1 first; entries of its sizes, extra bytes cut or padded

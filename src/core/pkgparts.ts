@@ -22,6 +22,7 @@ import { suggestCalls, placed, type PkgRules } from './pkgmap.ts';
 import { isSongText, songsFromFiles, loadMusicProject, emptyMusicProject, addSongs, addSfx, nextFreeSong, folders as musicFolders, saveMusicProject, hasAmk, musicEntry } from './music.ts';
 import { pixiParts, planPixiUpload, applyPixiUpload, linkedDefines, hexNum, type PixiPlan } from './pixipkg.ts';
 import { parseCfg, parseJsonCfg } from './pixi.ts';
+import { bowsieUploadSprites, applyBowsieUpload } from './bowsie.ts';
 import { detectBlocks, applyBlocks, applyGraphics, routinesCalled, planPackage, plannedFgTiles, type DetectedBlock, type DetectedGraphics, type PackagePlan } from './pkgplan.ts';
 import { loadProject, saveProject, emptyProject, projectFromFiles, addCall, isUberList, type UberProject } from './uberproject.ts';
 import { setLevelMusic } from './patches.ts';
@@ -41,6 +42,7 @@ export type PreviewPart =
   | PartBase<'uberasm'> & { ctx: UberContext; folder: UberProject | null } // folder: the UberASM Tool folder it is in, installed as a whole
   | PartBase<'block'> & { found: DetectedBlock[] } // one per tile a GPS list.txt puts it on, else one without a tile
   | PartBase<'sprite'>
+  | PartBase<'owsprite'>
   | PartBase<'music'>
   | PartBase<'sfx'> & { bank: SfxBank; rel: string; author: number | null } // rel: its path below the bank's folder; author: its number in the upload's list
   | PartBase<'graphics'> & { type: GraphicsType };
@@ -342,6 +344,27 @@ const sprite: PartAdapter<'sprite'> = {
   },
 };
 
+// ---------- overworld sprites ----------
+
+const owsprite: PartAdapter<'owsprite'> = {
+  kind: 'owsprite',
+  // BOWSIE's sprites (an .asm with init and main and BOWSIE's names), each with the files of its folder but the manuals
+  claims(d) {
+    if (!d.upload || d.callisto) return [];
+    const out: FileClaim[] = [];
+    for (const f of bowsieUploadSprites(d.files)) {
+      out.push({ file: f, rank: RANK.content, part: { kind: 'owsprite', name: base(f).replace(/\.asm$/i, ''), file: f } });
+      const dir = dirOf(f);
+      for (const p of d.paths) if (p !== f && dirOf(p) === dir && !d.docs.includes(p)) out.push({ file: p, rank: RANK.content, of: f });
+    }
+    return out;
+  },
+  apply(rom, mine, { preview }, claim) {
+    const others = new Set(preview.parts.filter((p) => p.kind !== 'owsprite').map((p) => p.file));
+    return applyBowsieUpload(rom, preview.files, mine.map((p) => p.file), others, (f) => claim('owsprite', f));
+  },
+};
+
 // ---------- songs and sound effects ----------
 
 // the songs and sound effects of the package go into the music project together: one AddmusicK run –
@@ -433,17 +456,17 @@ const graphics: PartAdapter<'graphics'> = {
 
 // ---------- all of them ----------
 
-export const PART_ADAPTERS: { [K in PartKind]: PartAdapter<K> } = { patch, uberasm, block, sprite, music, sfx, graphics };
+export const PART_ADAPTERS: { [K in PartKind]: PartAdapter<K> } = { patch, uberasm, block, sprite, owsprite, music, sfx, graphics };
 // an adapter by its kind, for loops over all kinds
 export const partAdapter = (k: PartKind) => PART_ADAPTERS[k] as PartAdapter<PartKind>;
 // who wins a file at equal rank
-export const DETECT_ORDER: PartKind[] = ['graphics', 'sfx', 'music', 'uberasm', 'block', 'sprite', 'patch'];
+export const DETECT_ORDER: PartKind[] = ['graphics', 'sfx', 'music', 'owsprite', 'uberasm', 'block', 'sprite', 'patch'];
 // the order of applying: the patch first, the sprites' numbers before the blocks spawning them, the
 // Map16 tiles after the blocks on them; AddmusicK after the UberASM code (as Callisto has it: it fits its
 // NMI changes to a hijack of UberASM's that is there)
-export const INSTALL_ORDER: PartKind[] = ['patch', 'uberasm', 'sprite', 'block', 'music', 'sfx', 'graphics'];
+export const INSTALL_ORDER: PartKind[] = ['patch', 'uberasm', 'sprite', 'block', 'owsprite', 'music', 'sfx', 'graphics'];
 // the order of the preview's list
-export const PART_ORDER: PartKind[] = ['patch', 'uberasm', 'block', 'sprite', 'music', 'sfx', 'graphics'];
+export const PART_ORDER: PartKind[] = ['patch', 'uberasm', 'block', 'sprite', 'owsprite', 'music', 'sfx', 'graphics'];
 
 // the graphics parts and the sample levels of a preview, as pkgplan.ts takes them
 function previewGraphics(p: ReadyPreview): DetectedGraphics {

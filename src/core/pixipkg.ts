@@ -38,6 +38,7 @@ export function pixiParts(upload: Upload): Omit<PixiPlan, 'links'> {
   const used = new Set<string>(); // asm files belonging to a cfg/json
   for (const [f, data] of upload.files) {
     if (!/\.(json|cfg)$/i.test(f)) continue;
+    if (/\.json$/i.test(f) && !/"(ActLike|AsmFile|\$1656|Type)"/i.test(dec.decode(data))) continue; // (another tool's json, e.g. BOWSIE's tooltips)
     try {
       const c = /\.json$/i.test(f) ? parseJsonCfg(dec.decode(data), f) : parseCfg(dec.decode(data), f);
       if (c.asm) used.add(c.asm);

@@ -21,7 +21,7 @@ import { setSharedColor } from '../src/core/sharedpal.ts';
 import { setGlobalGfx, cleanGlobalGfx } from '../src/core/globalgfx.ts';
 import { placeGlobalSlots } from '../src/core/levelgfx.ts';
 import { testSongZip } from './testsong.ts';
-import { zipSync } from 'fflate';
+import { zipSync, unzipSync } from 'fflate';
 import { editorImage, romDiff } from './fixture.ts';
 
 const EDITOR_IMAGE = await editorImage(); // the fixture as the editor opens it
@@ -65,6 +65,8 @@ const samples: Record<SectionKey, () => Promise<Package | null> | Package | null
     return ok(saveBlockProject(rom, p));
   }),
   sprite: () => install('BrutalBill.zip', fixture('BrutalBill.zip')),
+  // (BOWSIE's Piranha Plant with the defines it includes)
+  owsprite: () => install('Piranha.zip', zipSync(Object.fromEntries(Object.entries(unzipSync(fixture('BOWSIE originals.zip'))).filter(([k]) => /PiranhaPlant|OriginalSMWSpriteDefines/.test(k))))),
   gfx: () => record('gfx', () => { importGfxFile(rom, 0x90, new Uint8Array(0x1000).fill(0x33)); return { ok: true }; }),
   music: () => install('Song.zip', testSongZip()),
   sfx: () => install('Sfx.zip', zipSync({ '1DFC/Death Prelude.txt': enc.encode('$DA $02 $04 $30 $B4 $B2 $B4') })),

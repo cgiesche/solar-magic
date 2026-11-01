@@ -55,7 +55,7 @@ const nameOf = (fileName: string) => fileName.replace(/\.[^.]*$/, '').split(/[\\
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : one.endsWith('h') ? 'es' : 's'}`;
 
 // "2 sprites, 1 UberASM file, 1 song"
-const COUNT_NOUN: Record<PartKind, string> = { patch: 'patch', uberasm: 'UberASM file', block: 'block', sprite: 'sprite', music: 'song', sfx: 'sound effect', graphics: 'graphics file' };
+const COUNT_NOUN: Record<PartKind, string> = { patch: 'patch', uberasm: 'UberASM file', block: 'block', sprite: 'sprite', owsprite: 'overworld sprite', music: 'song', sfx: 'sound effect', graphics: 'graphics file' };
 export function partsSummary(parts: PreviewPart[]): string {
   const n = new Map<PartKind, number>();
   for (const p of parts) n.set(p.kind, (n.get(p.kind) ?? 0) + 1);

@@ -21,6 +21,12 @@ export const OW_CUSTOM_POS_MAX = 0x3f; // X and Y, 8px steps
 export const OW_CUSTOM_Z_MAX = 0x1f; // height, 8px steps
 const DEFAULT_SIZE = 4, MIN_SIZE = 3, MAX_SIZE = 0x0f;
 
+// BOWSIE is installed: its signature (00cactus) at $04EF3E (bowsie.ts). Its loader takes the place of the game's
+// overworld sprite load and its 13 slots at $04F625 (owsprites.ts).
+export const BOWSIE_PTR = 0x04ef3e;
+const BOWSIE_SIGNATURE = [0x00, 0xca, 0xc7, 0x05];
+export const bowsieInstalled = (rom: Rom): boolean => BOWSIE_SIGNATURE.every((b, k) => rom.r8(BOWSIE_PTR + k) === b);
+
 // a sprite on a submap: x, y and z in 8px steps; extra: its extra bytes (as many as its size takes)
 export interface CustomOwSprite { id: number; x: number; y: number; z: number; extra: number[] }
 
@@ -96,14 +102,15 @@ export function customSpritesProblem(lists: CustomOwSprite[][]): string | null {
   return null;
 }
 
-// writes the lists to a new table (the old one freed); without sprites the pointer is 0 (none, as Lunar Magic reads
-// it, and BOWSIE's loader stops at a bank of 0). Sizes: those to write with (by default the ROM's).
+// writes the lists to a new table (the old one freed); without sprites the pointer says none: $FFFFFF as in the clean
+// game, 0 with BOWSIE (its loader stops at a bank of 0, it would read $FFFFFF as a table). Sizes: those to write with
+// (by default the ROM's).
 export function writeCustomSprites(rom: Rom, lists: CustomOwSprite[][], sizes = customSizeTable(rom)): void {
   const why = customSpritesProblem(lists);
   if (why) throw new Error(why);
   const old = customTable(rom);
   if (old !== null) rom.freeAt(old);
-  rom.w24(OW_CUSTOM_PTR, lists.some((l) => l.length) ? rom.allocWrite(customTableBytes(lists, sizes)) : 0);
+  rom.w24(OW_CUSTOM_PTR, lists.some((l) => l.length) ? rom.allocWrite(customTableBytes(lists, sizes)) : bowsieInstalled(rom) ? 0 : 0xffffff);
 }
 
 // the ROM bytes of the custom sprites (PC offsets, [start, end)): the pointer and the table

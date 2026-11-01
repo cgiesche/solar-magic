@@ -15,6 +15,7 @@ import { uninstallPatch } from './patchapply.ts';
 import { loadProject, saveProject, emptyProject, type UberProject } from './uberproject.ts';
 import { loadBlockProject, saveBlockProject, type BlockProject } from './blocks.ts';
 import { loadPixiProject, savePixiProject, type PixiProject } from './pixi.ts';
+import { loadBowsieProject, saveBowsieProject, type BowsieProject } from './bowsie.ts';
 import { hex } from './names.ts';
 import { removeGfx } from './gfxfiles.ts';
 import { gfxEntry, gfxHex, GFX_FILES, VANILLA_GFX, levelMusic, setLevelMusic } from './patches.ts';
@@ -219,6 +220,33 @@ export const sprite = {
   },
 } satisfies PartSection<{ files: Map<string, number>; sprites: Map<string, string> }, SpritePart> & Owns;
 
+type OwSpritePart = PackageParts['owsprite'];
+// overworld sprite files (BOWSIE) and the list entries (num → file)
+export const owsprite = {
+  none: () => ({ files: [], list: [] }),
+  read(rom) {
+    const p = tryLoad(() => loadBowsieProject(rom));
+    return { files: hashes(p?.files), sprites: new Map((p?.list ?? []).map((e) => [e.num, e.file])) };
+  },
+  added: (a, b) => ({ files: changedFiles(a.files, b.files), list: [...b.sprites].filter(([n, f]) => a.sprites.get(n) !== f).map(([n]) => n) }),
+  merge: (r, p) => ({ files: union(r.files, p.files), list: union(r.list, p.list) }),
+  empty: (p) => !p.files.length && !p.list.length,
+  summary: (p) => count(p.list.length, 'Overworld sprite', 'overworld sprites'),
+  removal: (p) => (p.list.length ? `overworld sprite(s) ${p.list.map((n) => hex(n, 2)).join(', ')}` : null),
+  // its sprites in the project: one of its numbers with one of its files
+  owned(mine: OwSpritePart, p: BowsieProject) {
+    return p.list.filter((e) => mine.list.includes(e.num) && mine.files.includes(e.file));
+  },
+  remove(rom, mine, others) {
+    const p = loadBowsieProject(rom);
+    if (!p) return [];
+    const own = new Set(owsprite.owned(mine, p));
+    p.list = p.list.filter((e) => !own.has(e));
+    for (const f of mine.files) if (!others.some((o) => o.files.includes(f))) p.files.delete(f);
+    return check(saveBowsieProject(rom, p), 'Overworld sprites');
+  },
+} satisfies PartSection<{ files: Map<string, number>; sprites: Map<number, string> }, OwSpritePart> & Owns;
+
 // ExGFX files it created (read: the file's address per number, 0 = none)
 const gfx: PartSection<number[], number[]> = {
   none: () => [],
@@ -350,6 +378,6 @@ const globalGfx: PartSection<number[], [number, number][]> = {
 
 // every field of PackageParts has its adapter (the compiler checks it)
 type Sections = { [K in keyof PackageParts]-?: PartSection<any, NonNullable<PackageParts[K]>> };
-export const SECTIONS = { music, sfx, sprite, block, uberasm, patches, map16, bgMap16, gfx, globalGfx, sharedPal, globalAnim } satisfies Sections;
+export const SECTIONS = { music, sfx, sprite, owsprite, block, uberasm, patches, map16, bgMap16, gfx, globalGfx, sharedPal, globalAnim } satisfies Sections;
 export type SectionKey = keyof typeof SECTIONS;
 export const SECTION_KEYS = Object.keys(SECTIONS) as SectionKey[];

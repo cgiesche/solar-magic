@@ -1,6 +1,6 @@
 // The Packages dialog: the one place third-party content enters the ROM. "Upload package …" (or a file
 // dropped on the dialog) shows the upload preview and installs the package (upload.ts); the Packages tab
-// lists every installed package with what it brought (packages.ts); UberASM, Blocks, Sprites and Music
+// lists every installed package with what it brought (packages.ts); UberASM, Blocks, Sprites, Overworld sprites and Music
 // configure what packages brought. Every change goes into the ROM at once; Ctrl+Z / Ctrl+Y in the dialog
 // undo and redo it (ADR 0001).
 
@@ -17,6 +17,7 @@ import { openUploadPreview, showUploadFailure, showReplaced } from './upload.ts'
 import { uberPane } from './uberdialog.ts';
 import { blockPane } from './blockdialog.ts';
 import { pixiPane } from './pixidialog.ts';
+import { bowsiePane } from './bowsiedialog.ts';
 import { musicPane } from './musicdialog.ts';
 import { musicPlayer } from './musicplayer.ts';
 import { errorText } from './projectpane.ts';
@@ -27,7 +28,7 @@ export interface ResourceOptions {
   onChange?: () => void; // after the ROM was changed from the dialog
 }
 
-const TAB_LABEL: Record<ResourceTab, string> = { packages: 'Packages', uberasm: 'UberASM', block: 'Blocks', sprite: 'Sprites', music: 'Music' };
+const TAB_LABEL: Record<ResourceTab, string> = { packages: 'Packages', uberasm: 'UberASM', block: 'Blocks', sprite: 'Sprites', owsprite: 'Overworld sprites', music: 'Music' };
 
 export async function openResources(app: App, tab: ResourceTab = 'packages', opts: ResourceOptions = {}): Promise<void> {
   const body = h('div', { class: 'resources' }, h('p', { class: 'hint' }, 'Loading Asar …'));
@@ -60,7 +61,7 @@ export async function openResources(app: App, tab: ResourceTab = 'packages', opt
   const changed = () => { patches.reload(); opts.onChange?.(); };
   const renderTabs = () => clear(tabBar).append(...(Object.keys(TAB_LABEL) as ResourceTab[]).map((k) =>
     h('button', { class: k === tab ? 'mode active' : 'mode', onclick: () => show(k) }, TAB_LABEL[k])));
-  const p = { uberasm: uberPane(app, changed), block: blockPane(app, changed), sprite: pixiPane(app, changed) };
+  const p = { uberasm: uberPane(app, changed), block: blockPane(app, changed), sprite: pixiPane(app, changed), owsprite: bowsiePane(app, changed) };
   const music = musicPane(app, changed);
   afterUndo = () => {
     for (const x of Object.values(p)) x.reload();

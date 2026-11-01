@@ -16,6 +16,7 @@ import { isGfxData } from '../core/gfxfiles.ts';
 import { hex } from '../core/names.ts';
 import { ALL, type UberContext } from '../core/uberasm.ts';
 import { KIND_LABEL as SPRITE_KIND, spriteConfig, type PixiProject } from '../core/pixi.ts';
+import { bowsieSpriteInfo, type BowsieProject } from '../core/bowsie.ts';
 import type { UberProject } from '../core/uberproject.ts';
 import type { BlockProject } from '../core/blocks.ts';
 import { map16Source } from '../core/render.ts';
@@ -87,7 +88,7 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
       const files = [...host.panes[k].project().files.keys()].filter((f) => f !== 'list.txt' && !recs.some((r) => r[k].files.includes(f)));
       if (files.length) notes.push([k, `${label}: ${files.length} file(s)`]);
     };
-    count('uberasm', 'UberASM'); count('block', 'Blocks'); count('sprite', 'Sprites');
+    count('uberasm', 'UberASM'); count('block', 'Blocks'); count('sprite', 'Sprites'); count('owsprite', 'Overworld sprites');
     if (!notes.length) return '';
     return h('div', { class: 'pkg-orphans hint' }, h('div', null, 'Not from a package (added earlier or by hand):'),
       notes.map(([k, t]) => h('div', null, h('a', { href: '#', onclick: (e: Event) => { e.preventDefault(); host.show(k); } }, t))));
@@ -209,6 +210,18 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
             h('td', { class: 'actions' }, definesButton(proj.files, asmOf(e), () => touch('sprite')), editButton(proj.files, asmOf(e), () => touch('sprite')))))) : '',
         rest.length ? h('details', { class: 'pkg-files' }, h('summary', null, `More files (${rest.length})`),
           h('table', { class: 'uber-table' }, rest.map((f) => fileRow('sprite', proj.files, f)))) : ''));
+    }
+    // overworld sprites
+    if (rec.owsprite.list.length || rec.owsprite.files.length) {
+      const proj = host.panes.owsprite.project() as BowsieProject;
+      const sprites = SECTIONS.owsprite.owned(rec.owsprite, proj).sort((a, b) => a.num - b.num);
+      const rest = rec.owsprite.files.filter((f) => !sprites.some((e) => e.file === f)).sort();
+      out.push(section('owsprite', 'Overworld sprites', 'To place: overworld editor, Sprites mode.',
+        sprites.length ? h('table', { class: 'uber-table' }, h('tr', null, h('th', null, 'No.'), h('th', null, 'Name'), h('th')),
+          sprites.map((e) => h('tr', null, h('td', { class: 'mono' }, hex(e.num, 2)), h('td', { title: e.file }, bowsieSpriteInfo(proj, e).name),
+            h('td', { class: 'actions' }, definesButton(proj.files, e.file, () => touch('owsprite')), editButton(proj.files, e.file, () => touch('owsprite')))))) : '',
+        rest.length ? h('details', { class: 'pkg-files' }, h('summary', null, `More files (${rest.length})`),
+          h('table', { class: 'uber-table' }, rest.map((f) => fileRow('owsprite', proj.files, f)))) : ''));
     }
     // graphics files it created
     if (rec.gfx.length) {

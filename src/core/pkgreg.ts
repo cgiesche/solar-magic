@@ -1,5 +1,5 @@
 // Installed packages ("SMWK"): what each added download put into the ROM – its Asar patches, files and
-// list.txt entries of the UberASM, block and sprite (PIXI) projects, songs and sound effects, ExGFX files, global GFX files, shared palette colors, global animation slots – so a package can be looked at,
+// list.txt entries of the UberASM, block, sprite (PIXI) and overworld sprite (BOWSIE) projects, songs and sound effects, ExGFX files, global GFX files, shared palette colors, global animation slots – so a package can be looked at,
 // configured and removed as one. Not declared by the add dialogs but observed: the ROM's projects are
 // compared before and after a package (or a part of it) was added. Kept in the ROM like the patch
 // registry: a RATS block holding "SMWK", a version byte and deflated JSON; the package's own files (zip)
@@ -22,6 +22,7 @@ export interface PackageParts {
   uberasm: { files: string[]; calls: [UberContext, number, string][]; other: Partial<Record<Other, string>> };
   block: { files: string[]; tiles: number[] };
   sprite: { files: string[]; list: [SpriteFolder, number][] };
+  owsprite: { files: string[]; list: number[] }; // overworld sprites (BOWSIE): files and numbers
   gfx: number[]; // ExGFX numbers it created
   music?: string[]; // songs it added to the music project (their .txt)
   sfx?: string[]; // sound effects it added to the music project ("<bank>/<file>")
@@ -176,7 +177,7 @@ export async function recordPackageChangeAsync<R extends { ok: boolean }>(rom: R
 
 function startRecording(rom: Rom, target: PackageTarget) {
   const was = snapshot(rom);
-  const claimed: Record<ToolKind, Set<string>> = { uberasm: new Set(), block: new Set(), sprite: new Set() };
+  const claimed: Record<ToolKind, Set<string>> = { uberasm: new Set(), block: new Set(), sprite: new Set(), owsprite: new Set() };
   return {
     claim: ((tool, file) => { claimed[tool].add(file); }) as Claim,
     finish<R extends { ok: boolean }>(result: R): Recorded<R> {
