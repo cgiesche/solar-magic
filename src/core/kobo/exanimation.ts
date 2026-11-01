@@ -1407,8 +1407,8 @@ queue:
 ; submaps' 7 3-byte list pointers ($0000FF: none) at +$E1 and that address
 ; plus one at +$D6. A submap's settings byte: 80 the level dots' colours 6D
 ; and 7D, 40 the game's animated tiles, 20 the submap's list, 10 the global
-; list, each off when set (Lunar Magic's); 08 the lightning (colour 47, the
-; editor's own: Lunar Magic's code keeps none).
+; list, each off when set (Lunar Magic's). The lightning (colour 47) is the
+; game's own, switched by its mask at $04F709 (exanim.ts).
 ow_init:
     BRL ow_init_body
     fillbyte $FF : fill $4A-3
@@ -1502,7 +1502,7 @@ ow_setup:
 ; A frame on the overworld, where the game animates its tiles (A/X/Y 8-bit,
 ; the data bank $04): the lists set up again once Mario is on another submap
 ; (he walked there), the game's tiles (unless off; by its frame counter
-; $13), the lightning held off (when so set), then the lists, as a level's.
+; $13), then the lists, as a level's.
 ow_frame:
     PHP
     SEP #$30
@@ -1514,24 +1514,18 @@ ow_frame:
 +   SEP #$30
     LDA.l !OwSettings
     AND #$40
-    BNE .lightning
+    BNE .lists
     PHK
-    PER .lightning-1
+    PER .lists-1
     PEA $8413
     LDA $13                     ; what the hook replaces
     AND #$07
     BNE +
     JML $8480E6
 +   JML $848101
-.lightning:
+.lists:
     SEP #$30
-    LDA.l !OwSettings
-    AND #$08
-    BEQ +
-    STZ $1FFB|!addr             ; no flash ($04F708), and none to come
-    LDA #$FF
-    STA $1FFC|!addr
-+   LDA !EffFrame
+    LDA !EffFrame
     CMP.l !LastCall
     BNE +
     PLP

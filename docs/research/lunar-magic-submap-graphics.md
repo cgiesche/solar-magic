@@ -101,11 +101,37 @@ overworld 06 and 08 have one too. Color animations write the palette `$0703` (no
 counters are the level's (`$7FC070`, `$7FC080`, `$7FC0A0`, `$7FC0F8`, `$7FC0FC`); the settings byte of the submap is
 kept at `$7FC00A`. Its bits, as the code reads them: `$80` the level dots' colors (the NMI), `$40` the game's
 animated tiles, `$20` the submap's list, `$10` the global list – each off when set. The help's lightning switch
-(color 47) is read by none of this code nor by any other place in these ROMs or in `Lunar Magic.exe` 3.71's patch code
-the search found; the editor keeps its own lightning switch in the free bit `$08` (to be confirmed against a ROM Lunar
-Magic saved with it). At the load Lunar Magic runs the lists eight times, `$14` from 0 to 7, with their uploads.
+(color 47) is none of these bits: see "The lightning switch" below. At the load Lunar Magic runs the lists eight times, `$14` from 0 to 7, with their uploads.
 
 The editor's engine (Kobo's, `src/core/kobo/exanimation.ts`) runs the overworld's lists on the same code as a level's,
 from its own hooks at those places, with its tables at Lunar Magic's offsets. It sets the lists up again when Mario
-is on another submap than they were set up for (Lunar Magic's own way there was not traced), and holds the lightning
-off (`$1FFB`, `$1FFC`, the game's lightning at `$04F708`) where the submap's bit says so.
+is on another submap than they were set up for (Lunar Magic's own way there was not traced).
+
+### The lightning switch
+
+Research for issue #256. Lunar Magic's "Edit Animation Settings" dialog has the switch "Enable original game's
+lightning palette animation" per submap. Lunar Magic 3.71 saved the clean game's overworld (`test/fixtures/smw.smc`)
+with it changed, from its UI under wine (how: [lunar-magic-overworld-options.md](lunar-magic-overworld-options.md),
+"Making the ROMs"; the dialog is Overworld → "Edit Animation Settings...", the menu's fifth item, with the submap in
+combo box 107 and the switch in checkbox 105). The dialog shows it on for the Valley of Bowser alone in the clean game.
+
+Each save differs from the one before only in `$04F709` and in Lunar Magic's checksum make-up bytes (`$0FF093`–`$0FF094`,
+as `$0FF025` for the "Extra Options"):
+
+| The lightning on | `$04F709` |
+|---|---|
+| the Valley of Bowser (the clean game, saved as it was) | `F7` |
+| none (the Valley of Bowser's turned off) | `FF` |
+| the main map | `7F` |
+| the main map and the Valley of Bowser | `77` |
+| the main map, the Valley of Bowser and Star Road | `75` |
+
+`$04F709` is the operand of the game's own `LDA #$F7 : JSR $F882 : BNE $F76E` at `$04F708`, the start of its lightning
+code: `$04F882` gives non-zero (and the code skips the lightning) when the mask has the player's submap's bit, from the
+game's table at `$04F875` (`80 40 20 10 08 04 02`, the main map to Star Road). So the switch is a mask of the submaps the
+lightning is off on, kept in the game's code, and works without ExAnimation; the settings bytes (target `+$4A`) stayed
+the same. *Journey to Kaizo* has `7D` there (the lightning on the main map and Star Road).
+
+The editor writes that byte the same way (`submapLightning`/`setSubmapLightning` in `src/core/exanim.ts`; bit `$80 >> m`
+as a constant, since BOWSIE's code overwrites the game's table) and keeps no bit of its own;
+`tools/testowexanim.ts` checks the bytes and the lightning by emulation.

@@ -39,9 +39,9 @@ export const SLOTS = 0x20;
 // settings bits (set = off)
 export const NO_GAME_COLORS = 0x80, NO_GAME_TILES = 0x40, NO_LEVEL_LIST = 0x20, NO_GLOBAL_LIST = 0x10;
 // a submap's settings bits (set = off): the game's tiles, its own list (NO_LEVEL_LIST) and the overworld's global
-// list as a level's, and the level dots' colors 6D and 7D (Lunar Magic's), the lightning, color 47 (the editor's own
-// bit: Lunar Magic's code reads none)
-export const NO_DOT_COLORS = 0x80, NO_LIGHTNING = 0x08;
+// list as a level's, and the level dots' colors 6D and 7D (Lunar Magic's); the lightning is not among them
+// (submapLightning)
+export const NO_DOT_COLORS = 0x80;
 
 export interface ExSlot {
   type: number; // 01-1B
@@ -439,7 +439,21 @@ export function submapAnimSettings(rom: Rom, submap: number): number {
   return rom.r8(owExanimLayout(rom)!.settings + submap);
 }
 export function setSubmapAnimSettings(rom: Rom, submap: number, v: number): void {
-  rom.w8(owExanimLayout(rom)!.settings + submap, v & 0xf8);
+  rom.w8(owExanimLayout(rom)!.settings + submap, v & 0xf0);
+}
+// The game's lightning (color 47) per submap, Lunar Magic's "Enable original game's lightning palette animation": a
+// mask in the game's own code, the operand of its LDA #$F7 : JSR $F882 at $04F708, of the submaps it is off on –
+// submap m's bit $80 >> m, as the game's table at $04F875 has them (a constant here: BOWSIE's code overwrites that
+// table), so in the clean game (F7) on the Valley of Bowser only. Lunar Magic 3.71 writes this byte and no other for
+// the switch (ROMs it saved, docs/research/lunar-magic-submap-graphics.md, "Animations"); it doesn't need the
+// ExAnimation patch.
+const LIGHTNING_MASK = 0x04f709;
+export function submapLightning(rom: RomRead, submap: number): boolean {
+  return !(rom.r8(LIGHTNING_MASK) & (0x80 >> submap));
+}
+export function setSubmapLightning(rom: Rom, submap: number, on: boolean): void {
+  const v = rom.r8(LIGHTNING_MASK);
+  rom.w8(LIGHTNING_MASK, on ? v & ~(0x80 >> submap) : v | (0x80 >> submap));
 }
 
 // ---- every list by one name ----
