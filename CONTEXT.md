@@ -189,8 +189,12 @@ A star, pipe or exit path tile leading to another place of the overworld (one-wa
 _Avoid_: link (that is a part's), warp, teleport (for the tile)
 
 **Overworld sprite**:
-One of the game's 13 sprite slots of the overworld (Lakitu, bird, fish, Piranha Plant, cloud, Koopa Kid, smoke, Bowser sign, Bowser, Boos): a sprite and a position, the same on every submap – the sprite's own code decides where and when it shows; drawn as the game shows it at the event progress (emulated). Lunar Magic's custom overworld sprites (BOWSIE's) are another table.
+One of the game's 13 sprite slots of the overworld (Lakitu, bird, fish, Piranha Plant, cloud, Koopa Kid, smoke, Bowser sign, Bowser, Boos): a sprite and a position, the same on every submap – the sprite's own code decides where and when it shows; drawn as the game shows it at the event progress (emulated). Lunar Magic's custom overworld sprites (BOWSIE's) are another table. Gone while BOWSIE is installed: its loader takes their table's place.
 _Avoid_: event sprite, OW object
+
+**Custom overworld sprite**:
+A sprite of an overworld package (BOWSIE's format, Arinsu: an .asm with init and main) placed on one submap: its number (01–7E), a position and a height in 8px steps and its extra bytes, kept in Lunar Magic's custom overworld sprite table (`$0EF55D`, up to 0x18 a submap; the entry's size from the size table BOWSIE writes). The editor does BOWSIE's insertion itself (one patch, without MaxTile) and draws each placed sprite by emulation.
+_Avoid_: OW sprite (for these), BOWSIE sprite (in the UI)
 
 **Start position**:
 Where Mario and Luigi stand when a new game begins: a submap and a tile each.
