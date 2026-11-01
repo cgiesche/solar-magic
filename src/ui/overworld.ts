@@ -28,6 +28,8 @@ import { levelPicker } from './levelpicker.ts';
 import { fillPixels, fitScale, sized, previewSheet, hidePickerPreview } from './pickerview.ts';
 import { mainTranslevel } from '../core/level.ts';
 import { RAM, map16Pointer } from '../core/ram.ts';
+import { loadMusicProject, submapSongs, submapMusic, setSubmapMusic, songHex, type SongInfo } from '../core/music.ts';
+import { songLabel } from './musicdialog.ts';
 import type { Rom } from '../core/rom.ts';
 
 // a w×h block of L1 tiles (16x16) or L2 tilemap entries (8x8), row-major; L1 tiles picked up from the map carry
@@ -1035,8 +1037,21 @@ export class OverworldView {
     if (this.mode === 'links') { this.props.replaceChildren(h('div', { class: 'panel-title' }, 'Overworld link'), this.links.props()); return; }
     if (this.mode === 'sprites') { this.props.replaceChildren(h('div', { class: 'panel-title' }, 'Sprite'), this.sprites.props()); return; }
     this.props.replaceChildren(h('div', { class: 'panel-title' }, 'Properties'),
+      this.mapSettings(),
       this.selected >= 0 ? this.tileInfo(this.selected) : emptyState('Select a level tile in the list on the left, or any tile with Alt/Ctrl+click on the map.'),
       this.revealList());
+  }
+
+  // the settings of the map shown: its song (one ROM edit), from the ROM's songs as for levels
+  private mapSettings(): HTMLElement {
+    const rom = this.app.rom, map = this.map, cur = submapMusic(rom, map);
+    let songs: SongInfo[];
+    try { songs = submapSongs(rom, loadMusicProject(rom)); } catch { songs = submapSongs(rom); } // (names of custom songs missing)
+    const opts = songs.map((s): [number, string] => [s.num, songLabel(s)]);
+    if (!songs.some((s) => s.num === cur)) opts.push([cur, songHex(cur)]);
+    const sel = select(opts, cur, (v) => this.app.romEdit(`Music of ${MAP_NAMES[map]}`, () => setSubmapMusic(rom, map, v)));
+    sel.title = `The song ${MAP_NAMES[map]} plays – when the overworld loads there and when Mario comes from another map (songs come with packages; with AddmusicK all of its songs)`;
+    return h('div', { class: 'ow-info' }, h('div', { class: 'prop' }, h('label', null, 'Map music'), sel));
   }
 
   // what the overworld links mode's arrows mean

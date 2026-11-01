@@ -65,4 +65,13 @@ awk 'BEGIN { print "// the numbers of AddmusicK'"'"'s own sound effects per bank
   { sub(/\r$/, "") } /^SFX1DF9:/ { if (b) print "],"; b = "1DF9"; printf "  \"1DF9\": ["; next } /^SFX1DFC:/ { if (b) print "],"; b = "1DFC"; printf "  \"1DFC\": ["; next }
   /^[0-9A-Fa-f][0-9A-Fa-f]?[ \t]/ && b { printf "0x%s, ", toupper($1) }
   END { print "],"; print "};" }' "$WORK/Addmusic_sound effects.txt" >> "$OUT/originals.ts"
+# the submaps' songs: the original game's, and AddmusicK's numbers for them
+awk 'BEGIN { print "// the songs of the submaps ($048D8A, $04DBC8; asm/SNES/tweaks.asm): the original game'"'"'s, which AddmusicK writes over"; print "// with its own numbers only while $04DBC8 holds the original ones" }
+  { sub(/\r$/, "") }
+  FNR == 1 { file++ }
+  file == 1 && /^![A-Za-z0-9_]+[ \t]*=[ \t]*\$[0-9A-Fa-f]+/ { v = $0; sub(/^[^=]*=[ \t]*\$/, "", v); sub(/[^0-9A-Fa-f].*$/, "", v); n = $1; sub(/[ \t=].*$/, "", n); def[n] = v }
+  file == 2 && /read1\(\$04DBC8\)/ { s = $0; while (match(s, /== \$[0-9A-Fa-f]+/)) { orig = orig sprintf("0x%s, ", toupper(substr(s, RSTART + 4, RLENGTH - 4))); s = substr(s, RSTART + RLENGTH) } }
+  file == 2 && prev ~ /^org \$048D8A/ { s = $0; sub(/^[ \t]*db[ \t]*/, "", s); k = split(s, a, /[ \t]*,[ \t]*/); for (j = 1; j <= k; j++) { gsub(/[ \t]/, "", a[j]); amk = amk sprintf("0x%s, ", toupper(def[a[j]])) } }
+  { prev = $0 }
+  END { printf "export const AMK_SUBMAP_SONGS = { original: [%s], amk: [%s] };\n", substr(orig, 1, length(orig) - 2), substr(amk, 1, length(amk) - 2) }' "$WORK/asm/UserDefines.asm" "$WORK/asm/SNES/tweaks.asm" >> "$OUT/originals.ts"
 echo "AddmusicK $AMK_TAG -> $OUT"

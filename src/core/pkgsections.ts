@@ -18,7 +18,9 @@ import { loadPixiProject, savePixiProject, type PixiProject } from './pixi.ts';
 import { hex } from './names.ts';
 import { removeGfx } from './gfxfiles.ts';
 import { gfxEntry, gfxHex, GFX_FILES, VANILLA_GFX, levelMusic, setLevelMusic } from './patches.ts';
-import { loadMusicProject, saveMusicProject, removeSong, removeSfx, sfxKey } from './music.ts';
+import {
+  loadMusicProject, saveMusicProject, removeSong, removeSfx, sfxKey, submapSongs, submapMusic, setSubmapMusic, defaultSubmapMusic, SUBMAPS,
+} from './music.ts';
 import { EXT_FIRST, EXT_TILES, DEFAULT_ACTS, extTileWords, actsLike, setExtTileWords, setActsLike } from './map16ext.ts';
 import { BG_EXT_FIRST, BG_EXT_TILES, bgExtTileWords, setBgExtTileWords, vanillaBgWords } from './bgmap16.ts';
 import type { UberContext } from './uberasm.ts';
@@ -233,7 +235,7 @@ const gfx: PartSection<number[], number[]> = {
 };
 
 // songs it added to the music project (their .txt)
-// (AddmusicK inserts the rest again; levels set to a removed song get their header music back)
+// (AddmusicK inserts the rest again; levels set to a removed song get their header music back, submaps their own song)
 const music = listSection((rom) => (tryLoad(() => loadMusicProject(rom))?.songs ?? []).map((s) => s.file), async (rom, mine) => {
   const p = loadMusicProject(rom);
   if (!p) return [];
@@ -242,6 +244,8 @@ const music = listSection((rom) => (tryLoad(() => loadMusicProject(rom))?.songs 
   const r = await saveMusicProject(rom, p);
   if (!r.ok) throw new Error(`Music: ${r.errors.join(' ')}`);
   for (let l = 0; l < 0x200; l++) if (nums.includes(levelMusic(rom, l)) && !p.songs.some((s) => s.num === levelMusic(rom, l))) setLevelMusic(rom, l, 0);
+  const left = submapSongs(rom, p);
+  for (let i = 0; i < SUBMAPS; i++) if (nums.includes(submapMusic(rom, i)) && !left.some((s) => s.num === submapMusic(rom, i))) setSubmapMusic(rom, i, defaultSubmapMusic(rom, i));
   return r.warnings;
 }, (p) => count(p.length, 'Song', 'songs'), (p) => (!p.length ? null : `${p.length > 1 ? 'songs' : 'the song'} (AddmusicK inserts the music again)`));
 

@@ -16,7 +16,7 @@ import { RESERVED_TOP } from './rom.ts';
 import { HEADER_MUSIC_TABLE, levelMusic, setLevelMusic } from './patches.ts';
 import { MUSIC } from './names.ts';
 import { runAmk, type AmkResult } from './amk.ts';
-import { AMK_ORIGINALS } from '../vendor/amk/originals.ts';
+import { AMK_ORIGINALS, AMK_SUBMAP_SONGS } from '../vendor/amk/originals.ts';
 import { sfxListText, sfxName, SFX_LIST, type SoundEffect, type SfxBank } from './sfx.ts';
 
 export const FIRST_CUSTOM = 0x29;
@@ -465,8 +465,12 @@ function amkErrors(r: AmkResult): string[] {
 export async function saveMusicProject(rom: Rom, p: MusicProject): Promise<MusicResult> {
   const amkBefore = hasAmk(rom);
   const table = rom.data.slice(snesToPc(HEADER_MUSIC_TABLE), snesToPc(HEADER_MUSIC_TABLE) + 8);
+  const submaps = Array.from({ length: SUBMAPS }, (_, i) => submapMusic(rom, i));
   const r = await insertProject(rom, p);
-  if (r.ok && hasAmk(rom) !== amkBefore) remapLevelMusic(rom, table);
+  if (r.ok && hasAmk(rom) !== amkBefore) {
+    remapLevelMusic(rom, table);
+    remapSubmapMusic(rom, submaps);
+  }
   return r;
 }
 
@@ -519,6 +523,9 @@ async function insertProject(rom: Rom, p: MusicProject): Promise<MusicResult> {
     if (out[i] !== input[i]) return fail([`AddmusicK wrote at ${'$' + pcToSnes(i).toString(16).toUpperCase()} to banks $7E/$7F, which are reserved for the editor.`], r.log);
   }
   if (saved) out.set(saved, RESERVED_TOP);
+  // the submaps' songs stay the editor's (saveMusicProject gives them AddmusicK's numbers): not AddmusicK's bytes, so
+  // a song chosen later doesn't count as a change of its code
+  for (const t of [SUBMAP_MUSIC, SUBMAP_MUSIC_SWITCH]) out.set(input.subarray(snesToPc(t), snesToPc(t) + SUBMAPS), snesToPc(t));
   // what AddmusicK wrote: every changed byte, runs closer than 16 bytes joined
   const written: [number, number][] = [];
   for (let i = 0; i < top; i++) {
@@ -576,3 +583,43 @@ export function romSongs(rom: Rom, p: MusicProject | null = null): SongInfo[] {
 }
 
 export const songHex = (n: number) => n.toString(16).toUpperCase().padStart(2, '0');
+
+// ---------- songs of the submaps ----------
+
+// The song each submap plays (Lunar Magic's "Edit Submap Music Selection"): the game takes it from $048D8A when the
+// overworld loads and from $04DBC8 when Mario goes to another submap (with AddmusicK from $04DBC8 only, every
+// frame); the editor keeps both tables the same. Numbers as in romSongs; without AddmusicK the original sound
+// driver's overworld songs, another bank than the levels'.
+export const SUBMAP_MUSIC = 0x048d8a;
+export const SUBMAP_MUSIC_SWITCH = 0x04dbc8;
+export const SUBMAPS = 7;
+
+export const submapMusic = (rom: Rom, map: number): number => rom.r8(SUBMAP_MUSIC + map);
+export function setSubmapMusic(rom: Rom, map: number, song: number): void {
+  rom.w8(SUBMAP_MUSIC + map, song);
+  rom.w8(SUBMAP_MUSIC_SWITCH + map, song);
+}
+
+// the song a submap plays in the game as it came (under AddmusicK's number when it is in the ROM)
+export const defaultSubmapMusic = (rom: Rom, map: number): number => (hasAmk(rom) ? AMK_SUBMAP_SONGS.amk : AMK_SUBMAP_SONGS.original)[map];
+
+// The songs a submap can play: with AddmusicK all of the ROM's (romSongs), without the original game's submap songs
+// (named as AddmusicK names its recreations of them)
+export function submapSongs(rom: Rom, p: MusicProject | null = null): SongInfo[] {
+  if (hasAmk(rom)) return romSongs(rom, p);
+  return AMK_SUBMAP_SONGS.original.map((num, i): SongInfo => {
+    const f = AMK_ORIGINALS.find((o) => o[0] === AMK_SUBMAP_SONGS.amk[i])?.[1];
+    return { num, name: f ? originalName(f) : songHex(num), kind: 'vanilla' };
+  }).sort((a, b) => a.num - b.num);
+}
+
+// the submaps set to song `num`
+export const submapsWithSong = (rom: Rom, num: number): number[] =>
+  Array.from({ length: SUBMAPS }, (_, i) => i).filter((i) => submapMusic(rom, i) === num);
+
+// AddmusicK installed or removed (`before`: the submaps' songs then): each submap plays the same song under its new
+// number, as AddmusicK does with an unchanged table; one set to another song (a custom one gone) gets its own back
+function remapSubmapMusic(rom: Rom, before: number[]): void {
+  const amk = hasAmk(rom), from = amk ? AMK_SUBMAP_SONGS.original : AMK_SUBMAP_SONGS.amk, to = amk ? AMK_SUBMAP_SONGS.amk : AMK_SUBMAP_SONGS.original;
+  before.forEach((s, i) => { const k = from.indexOf(s); setSubmapMusic(rom, i, to[k >= 0 ? k : i]); });
+}

@@ -11,8 +11,9 @@ import { hex } from '../core/names.ts';
 import {
   loadMusicProject, saveMusicProject, emptyMusicProject, romSongs, songSpcs, spcOf,
   hasAmk, musicEntry, songHex, projectToZip, FIRST_CUSTOM, LAST_SONG,
-  songDefines, validDefine, type MusicProject, type MusicSong, type SongInfo,
+  songDefines, validDefine, submapsWithSong, setSubmapMusic, type MusicProject, type MusicSong, type SongInfo,
 } from '../core/music.ts';
+import { MAP_NAMES } from '../core/overworld.ts';
 import { levelMusic, setLevelMusic, musicPatch, HEADER_MUSIC_TABLE } from '../core/patches.ts';
 import { musicPlayer } from './musicplayer.ts';
 import { errorText, type Pane } from './projectpane.ts';
@@ -223,11 +224,12 @@ export function musicPane(app: App, changed: () => void): Pane {
     reload();
   };
 
-  // a custom song under another number; levels playing it keep playing it
+  // a custom song under another number; levels and submaps playing it keep playing it
   const setNumber = async (num: number, to: number) => {
-    const users = levelsBySong(app).get(num) ?? [];
+    const users = levelsBySong(app).get(num) ?? [], maps = submapsWithSong(app.rom, num);
     const p: MusicProject = { ...proj, songs: proj.songs.map((x) => (x.num === num ? { ...x, num: to } : x)) };
-    if (await insertMusic(app, p, `Song ${songHex(num)} is now song ${songHex(to)}`, () => { for (const l of users) setLevelMusic(app.rom, l, to); })) changed();
+    const move = () => { for (const l of users) setLevelMusic(app.rom, l, to); for (const m of maps) setSubmapMusic(app.rom, m, to); };
+    if (await insertMusic(app, p, `Song ${songHex(num)} is now song ${songHex(to)}`, move)) changed();
     reload();
   };
 
@@ -293,7 +295,7 @@ export function musicPane(app: App, changed: () => void): Pane {
       h('p', { class: 'hint' }, `Level ${hex(lv, 3)} plays song ${songHex(cur.num)}${cur.own ? ' (set for the level)' : ` (header music ${app.level.header.music})`}. `
         + '▶ plays a song in this level as the game does; “Level” makes it the music of the level (instead of its header music).'),
       h('table', { class: 'uber-table music-table' },
-        h('tr', null, h('th'), h('th', null, 'No.'), h('th', null, 'Song'), h('th', null, 'Type'), h('th', null, 'Volume'), h('th', null, 'Set for levels'), h('th', null, 'Package'), h('th')),
+        h('tr', null, h('th'), h('th', null, 'No.'), h('th', null, 'Song'), h('th', null, 'Type'), h('th', null, 'Volume'), h('th', null, 'Set for'), h('th', null, 'Package'), h('th')),
         songs.map((s) => {
           const ls = users.get(s.num) ?? [];
           const ps = s.kind === 'custom' && entry ? proj.songs.find((x) => x.num === s.num) : undefined;
@@ -304,7 +306,8 @@ export function musicPane(app: App, changed: () => void): Pane {
             h('td', null, s.name, s.file ? h('div', { class: 'hint mono' }, s.file) : ''),
             h('td', { class: 'hint' }, kindText(s)),
             h('td', null, s.kind === 'custom' && entry ? volumeSelect(s.num) : ''),
-            h('td', { class: 'mono hint' }, ls.length > 6 ? `${ls.slice(0, 6).map((l) => hex(l, 3)).join(' ')} … (${ls.length})` : ls.map((l) => hex(l, 3)).join(' ')),
+            h('td', { class: 'hint' }, h('span', { class: 'mono' }, ls.length > 6 ? `${ls.slice(0, 6).map((l) => hex(l, 3)).join(' ')} … (${ls.length})` : ls.map((l) => hex(l, 3)).join(' ')),
+              (amk ? submapsWithSong(app.rom, s.num) : []).map((m) => h('div', { title: 'The submap plays this song (Overworld workspace, Properties)' }, MAP_NAMES[m]))),
             h('td', { class: 'hint' }, s.file ? packages.filter((r) => r.music?.includes(s.file!)).pop()?.name ?? '–' : ''),
             h('td', { class: 'actions' },
               h('button', { class: mine ? 'active' : '', title: mine ? `Level ${hex(lv, 3)}: back to its header music` : `Make this the music of level ${hex(lv, 3)}`, onclick: () => setForLevel(s.num) }, 'Level'),
