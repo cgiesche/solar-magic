@@ -27,7 +27,9 @@ export function tileMatches(input: string, count: number, texts: Map<number, str
 }
 
 // the tile whose block probe tells what FG tile t does: t itself below 200 or with a custom block, else the
-// tile it acts like (the game runs that tile's code for it); -1 for an extended tile without the extension
+// tile it acts like (the game runs that tile's code for it, so they share one probe instead of one for each of
+// the 3584 extended tiles; testtilesearch.ts checks by emulation that both say the same); -1 for an extended tile
+// without the extension
 export function behaviorTile(rom: Rom, t: number): number {
   if (t < EXT_FIRST) return t;
   const e = map16Ext(rom);
@@ -37,32 +39,29 @@ export function behaviorTile(rom: Rom, t: number): number {
 
 export interface Behaviors {
   texts: Map<number, string>; // what each tile does, of those already determined
-  pending: number; // how many tiles are still being determined
+  pending: number; // how many tiles are still being determined (those whose probes tell the others: the work left)
 }
+const NONE: Behaviors = { texts: new Map(), pending: 0 };
 
-// the behavior texts of tiles 0..count-1; `text` of a tile: undefined while still being determined, null when it
-// has none
-export function behaviorTexts(count: number, text: (t: number) => string | null | undefined): Behaviors {
-  const texts = new Map<number, string>();
-  let pending = 0;
+// the behavior texts of tiles 0..count-1: `probeOf` a tile, the tile whose probe tells it (-1: none), `text` of that
+// probe, undefined while it is still being determined
+export function behaviorTexts(count: number, probeOf: (t: number) => number, text: (probe: number) => string | undefined): Behaviors {
+  const texts = new Map<number, string>(), byProbe = new Map<number, string | undefined>();
   for (let t = 0; t < count; t++) {
-    const x = text(t);
-    if (x === undefined) pending++;
-    else if (x !== null) texts.set(t, x);
+    const b = probeOf(t);
+    if (b < 0) continue;
+    if (!byProbe.has(b)) byProbe.set(b, text(b));
+    const x = byProbe.get(b);
+    if (x !== undefined) texts.set(t, x);
   }
-  return { texts, pending };
+  return { texts, pending: [...byProbe.values()].filter((x) => x === undefined).length };
 }
 
-// what FG tiles 0..count-1 do, as the tooltips say it (the emulation's block probes, behaviorTile's; those not
-// done yet are asked for, 'probes' says when they are)
-export function tileBehaviors(app: App, count: number): Behaviors {
-  const byProbe = new Map<number, string | undefined>();
-  return behaviorTexts(count, (t) => {
-    const b = behaviorTile(app.rom, t);
-    if (b < 0) return null;
-    if (!byProbe.has(b)) { const p = app.probes.block(b); byProbe.set(b, p && probeText(p)); }
-    return byProbe.get(b);
-  });
+// what FG tiles 0..count-1 do, as the tooltips say it (the emulation's block probes, behaviorTile's), for a typed
+// search (none for an empty one); the probes not done yet are asked for, onBehaviorProgress says when more are
+export function tileBehaviors(app: App, input: string, count: number): Behaviors {
+  if (!input.trim()) return NONE;
+  return behaviorTexts(count, (t) => behaviorTile(app.rom, t), (b) => { const p = app.probes.block(b); return p && probeText(p); });
 }
 
 // fn whenever more tiles' behavior may be known: when the probes are done, and as they go on (the busy count of

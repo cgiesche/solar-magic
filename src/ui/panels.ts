@@ -713,11 +713,11 @@ export class Picker {
         const nums = terms.map((t) => new Set(tileMatches(t, EXT_TILES) ?? []));
         const sheets = new Map<number, HTMLCanvasElement>();
         const files = blockFilesByTile(app.rom);
-        const how = tileBehaviors(app, EXT_TILES);
-        pending = how.pending;
+        const behaviors = tileBehaviors(app, terms.join(' '), EXT_TILES);
+        pending = behaviors.pending;
         const out: SearchResult[] = named(terms);
         for (let t = 0; t < EXT_TILES; t++) {
-          const text = how.texts.get(t) ?? '';
+          const text = behaviors.texts.get(t) ?? '';
           const file = files.get(t);
           const low = `${text} ${file ?? ''}`.toLowerCase();
           if (!terms.every((x, i) => nums[i].has(t) || low.includes(x))) continue;

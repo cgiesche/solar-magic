@@ -29,11 +29,13 @@ check(eq(tileMatches('bush', 0x200, [files, names]), []), 'only tiles below the 
 const hexWord = tileMatches('b', 0x400, [names]);
 check(!!hexWord?.includes(0xb) && !!hexWord?.includes(0x210), 'a hex digit matches numbers and names');
 
-// behavior texts: of the tiles determined; undefined still being determined, null none
-const probed = new Map<number, string | null>([[0x2b, '+1 coin'], [0x130, 'from below: solid, no effect'], [0x7, null]]);
-const how = behaviorTexts(0x200, (t) => probed.has(t) ? probed.get(t) : t < 0x10 ? undefined : null);
-check(how.pending === 0x10 - 1, 'the tiles still being determined are counted (not those without behavior)');
-check(eq(tileMatches('coin', 0x200, [names, how.texts]), [0x2b]), 'part of the behavior text matches the tile');
+// behavior texts: of the tiles determined (by the probe of the tile that tells them), undefined still being
+// determined; tile 7 has none, tile 1F0 is told by 2B
+const probed = new Map<number, string>([[0x2b, '+1 coin'], [0x130, 'from below: solid, no effect']]);
+const how = behaviorTexts(0x200, (t) => t === 7 ? -1 : t === 0x1f0 ? 0x2b : t, (b) => probed.get(b) ?? (b < 0x10 ? undefined : ''));
+check(how.pending === 0x10 - 1, 'the probes still being determined are counted (not tiles without behavior)');
+check(how.texts.get(0x1f0) === '+1 coin' && !how.texts.has(7) && !how.texts.has(3), 'a tile has the text of the probe that tells it');
+check(eq(tileMatches('coin', 0x200, [names, how.texts]), [0x2b, 0x1f0]), 'part of the behavior text matches the tiles');
 check(eq(tileMatches('SOLID', 0x200, [how.texts]), [0x130]), 'behavior in any case');
 check(eq(tileMatches('solid', 0x200, [files, names]), []), 'without behavior texts no tile matches by behavior');
 check(pendingHint(0) === '' && pendingHint(1) === '1 tile still being determined …' && pendingHint(12) === '12 tiles still being determined …', 'the hint while not final');

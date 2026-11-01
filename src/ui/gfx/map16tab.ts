@@ -645,9 +645,9 @@ export class Map16Tab implements WsPanel {
     if (this.ow) this.match = tileMatches(this.search.value, OW_L1_TILES);
     else if (this.bg) this.match = tileMatches(this.search.value, EXT_TILES, [namesOf(this.app.rom, 'bg')]);
     else {
-      const how = this.search.value.trim() ? tileBehaviors(this.app, EXT_TILES) : { texts: new Map<number, string>(), pending: 0 };
-      pending = how.pending;
-      this.match = tileMatches(this.search.value, EXT_TILES, [blockFilesByTile(this.app.rom), namesOf(this.app.rom, 'fg'), how.texts]);
+      const behaviors = tileBehaviors(this.app, this.search.value, EXT_TILES);
+      pending = behaviors.pending;
+      this.match = tileMatches(this.search.value, EXT_TILES, [blockFilesByTile(this.app.rom), namesOf(this.app.rom, 'fg'), behaviors.texts]);
     }
     this.matchPending = pending > 0;
     this.searchHint.textContent = pendingHint(pending);
@@ -1073,9 +1073,9 @@ export class Map16Tab implements WsPanel {
       drawTileMatches(ctx, matches, 0, 0x200, 32);
     };
     const update = (scrollTo = true) => {
-      const how = input.value.trim() ? tileBehaviors(app, 0x200) : null;
-      pending = how?.pending ?? 0;
-      matches = tileMatches(input.value, 0x200, [namesOf(app.rom, 'fg'), how?.texts ?? new Map()]);
+      const behaviors = tileBehaviors(app, input.value, 0x200);
+      pending = behaviors.pending;
+      matches = tileMatches(input.value, 0x200, [namesOf(app.rom, 'fg'), behaviors.texts]);
       draw();
       const more = pending ? ` (${pendingHint(pending)})` : '';
       if (matches?.length === 1 && !pending) describe(matches[0]);
