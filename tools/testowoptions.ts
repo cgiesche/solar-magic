@@ -131,22 +131,27 @@ function reveal(rom: Rom, tl: number): { gaps: number[]; l2: Uint8Array } {
   }
   return { gaps: at.slice(1).map((f, k) => f - at[k]), l2: w.slice(0x14000, 0x16000) };
 }
-{
-  const tl = 0x29;
+// Yoshi's Island 1's event (on its submap) and Donut Plains 1's (on the main map)
+for (const tl of [0x29, 0x15]) {
+  const at = `translevel ${hx(tl)} (tile ${hx(tileOf(tl))})`;
   const fade = reveal(fresh(), tl);
   const rom = with_('pathFade', false);
-  check(revealSpeed(fresh()) === null && revealSpeed(rom) === DEFAULT_REVEAL_SPEED, `reveal speed: none with the fade, ${DEFAULT_REVEAL_SPEED} (Lunar Magic's) without`);
   const off = reveal(rom, tl);
   setRevealSpeed(rom, MAX_REVEAL_SPEED);
   const fast = reveal(rom, tl);
   const steps = (r: { gaps: number[] }) => r.gaps.join(',');
   check(fade.gaps.length > 2 && off.gaps.length === fade.gaps.length && fast.gaps.length === fade.gaps.length,
-    `the same steps with and without the fade (${fade.gaps.length + 1})`);
+    `${at}: the same steps with and without the fade (${fade.gaps.length + 1})`);
   const want = (r: Rom) => revealStepFrames(r);
-  check(fade.gaps.every((g) => g === want(fresh())), `with the fade a step every ${want(fresh())} frames (${steps(fade)})`);
+  check(fade.gaps.every((g) => g === want(fresh())), `${at}: with the fade a step every ${want(fresh())} frames (${steps(fade)})`);
   check(off.gaps.every((g) => g === Math.ceil(0x40 / DEFAULT_REVEAL_SPEED) + 2) && fast.gaps.every((g) => g === want(rom)),
-    `without the fade a step every $40 / speed frames + 2: speed ${DEFAULT_REVEAL_SPEED}: ${steps(off)}; ${hx(MAX_REVEAL_SPEED)}: ${steps(fast)}`);
-  check(same(fade.l2, off.l2) && same(fade.l2, fast.l2), 'the same layer 2 after the event');
+    `${at}: without the fade a step every $40 / speed frames + 2: speed ${DEFAULT_REVEAL_SPEED}: ${steps(off)}; ${hx(MAX_REVEAL_SPEED)}: ${steps(fast)}`);
+  check(same(fade.l2, off.l2) && same(fade.l2, fast.l2), `${at}: the same layer 2 after the event`);
+}
+{
+  const tl = 0x29;
+  const rom = with_('pathFade', false);
+  check(revealSpeed(fresh()) === null && revealSpeed(rom) === DEFAULT_REVEAL_SPEED, `reveal speed: none with the fade, ${DEFAULT_REVEAL_SPEED} (Lunar Magic's) without`);
   // the sprites' translucency: off with the fade off, a switch of its own then; the fade's state doesn't depend on it
   const translucent = (r: Rom) => {
     const p = PlaySession.overworld(new LevelEmulator(r), tileOf(tl));
@@ -223,6 +228,31 @@ function exchange(rom: Rom): number {
   check(game > 1, `L opens the life exchange (${game})`);
   check(noLR === 0, `L/R off: not opened (${noLR})`);
   check(no <= 1, `life exchange off: L asks, nothing opens (${no})`);
+}
+// a 2-player game, Mario's last life lost in Yoshi's Island 1 (the timer run out), Luigi with lives: after the game
+// over, back on the overworld, the highest value of the life exchange window's counter and whose turn it is then
+function gameOver(rom: Rom): { max: number; player: number } {
+  const p = PlaySession.overworld(new LevelEmulator(rom), tileOf(0x29));
+  const w = p.wram;
+  w[RAM.twoPlayers] = 1; w[RAM.playerLives] = 4; w[RAM.playerLives + 1] = 4;
+  if (!p.enter()) throw new Error('not entered');
+  w[RAM.lives] = 0;
+  if (p.play(400, 0, (f) => { if (f === 10) w.set([0, 0, 1], RAM.timer); }) !== 'died') throw new Error('not died');
+  let max = 0, over = false;
+  for (let f = 0; f < 1500; f++) {
+    p.frame();
+    if (w[RAM.gameMode] !== GM.overworld) continue;
+    over = true;
+    max = Math.max(max, w[RAM.lifeExchange]);
+  }
+  if (!over || w[RAM.playerLives] !== 0xff) throw new Error('no game over on the overworld');
+  return { max, player: w[RAM.playerIndex] };
+}
+{
+  const game = gameOver(fresh()), noLR = gameOver(with_('lrExchange', false)), no = gameOver(with_('lifeExchange', false));
+  check(game.max > 1 && game.player === 0, `a game over offers the life exchange (${game.max})`);
+  check(noLR.max > 1 && noLR.player === 0, `L/R off: a game over still offers it (${noLR.max})`);
+  check(no.max <= 1 && no.player === 1, `life exchange off: a game over doesn't offer it, Luigi's turn (${no.max})`);
 }
 
 if (bad) { console.log(`${bad} failed`); process.exit(1); }
