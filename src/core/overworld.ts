@@ -56,6 +56,20 @@ export function writeL1(rom: Rom, d: Uint8Array): void {
   rom.writeBytes(OW_L1, d);
 }
 
+// The layer 1 tiles' Map16: per tile its four quarters (8x8 tile words in the order TL, BL, TR, BR, as the FG Map16
+// tiles), 8 bytes each from $05D000 – tiles 00–C0, the game's layer 1 tiles (the overworld's load points its Map16
+// pointers there, tile by tile; Lunar Magic's expansion to 0x200 tiles is not supported yet).
+export const OW_L1_MAP16 = 0x05d000;
+export const OW_L1_TILES = 0xc1;
+export const owTileAddr = (t: number): number => OW_L1_MAP16 + t * 8;
+export function owTileWords(rom: RomRead, t: number): number[] {
+  return [0, 1, 2, 3].map((q) => rom.r16(owTileAddr(t) + q * 2));
+}
+export function setOwTileWords(rom: Rom, t: number, ws: number[]): void {
+  if (t < 0 || t >= OW_L1_TILES) throw new Error(`No overworld layer 1 tile ${t.toString(16).toUpperCase()}`);
+  ws.forEach((w, q) => rom.w16(owTileAddr(t) + q * 2, w));
+}
+
 export function l2Pointers(rom: Rom): { tiles: number; attrs: number } {
   const bank = rom.r8(L2_BANK);
   return { tiles: (bank << 16) | rom.r16(L2_TILE_PTR), attrs: (bank << 16) | rom.r16(L2_ATTR_PTR) };
@@ -665,7 +679,7 @@ export function eventNames(rom: Rom): Map<number, string> {
 
 // The ROM bytes (PC offsets, [start, end)) of the overworld's data that the editor writes: layer 1, layer 2 with its
 // pointers, the translevel table with its pointer, per translevel the exit directions, initial flags and name, the
-// reveals with the reveal list, the destroyed level tiles, the event steps, the links (star/pipe, exit path and
+// layer 1 tiles' Map16, the reveals with the reveal list, the destroyed level tiles, the event steps, the links (star/pipe, exit path and
 // Koopa Kid tables), the start positions and the sprites (owsprites.ts).
 // Learned results that load the overworld without depending on what is painted there leave them out (owpaths.ts).
 export function overworldDataRanges(rom: Rom): [number, number][] {
@@ -673,6 +687,7 @@ export function overworldDataRanges(rom: Rom): [number, number][] {
   const p = l2Pointers(rom), d = rom.data, scratch = new Uint16Array(0x2000);
   const out = [
     at(OW_L1, 0x800),
+    at(OW_L1_MAP16, OW_L1_TILES * 8),
     at(p.tiles, rleDecode(d, snesToPc(p.tiles), scratch, 0, 0x2000)),
     at(p.attrs, rleDecode(d, snesToPc(p.attrs), scratch, 8, 0x2000)),
     at(L2_TILE_PTR, 2), at(L2_BANK, 1), at(L2_ATTR_PTR, 2),

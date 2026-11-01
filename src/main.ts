@@ -16,6 +16,7 @@ import { openSearch } from './ui/search.ts';
 import { openHeaderDialog } from './ui/headerdialog.ts';
 import { hex } from './core/names.ts';
 import { GfxWorkspace, type WsTab } from './ui/gfxworkspace.ts';
+import type { Map16Target } from './ui/gfx/map16tab.ts';
 import { openRemapUses } from './ui/tileuses.ts';
 import { openEntrancesDialog, openRomInfo, openInsertDialog, openExpandDialog, openSaveAsDialog, exportLevel, importLevel, openScreenDialog, clearLevelConfirm } from './ui/tools.ts';
 import { menuBar, closeMenus } from './ui/menu.ts';
@@ -283,12 +284,12 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
 
   // switches between the level editor, the overworld editor and the graphics workspace (palettes, Map16, GFX);
   // gfx: tab to open (default: the last one), Map16 tile to show
-  const setWorkspace = async (w: typeof workspace, gfx?: { tab?: WsTab; tile?: number; bg?: boolean }): Promise<boolean> => {
+  const setWorkspace = async (w: typeof workspace, gfx?: { tab?: WsTab; tile?: number; target?: Map16Target; ow?: { map: number; progress: number } }): Promise<boolean> => {
     closeMenus();
     if (w === workspace) {
       if (w === 'gfx' && gfx?.tab) {
         ws!.open(gfx.tab);
-        if (gfx.tab === 'map16' && gfx.tile !== undefined) ws!.showMap16(gfx.tile, gfx.bg);
+        if (gfx.tab === 'map16' && gfx.tile !== undefined) ws!.showMap16(gfx.tile, gfx.target, gfx.ow);
       }
       return true;
     }
@@ -313,7 +314,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
       // the level view is only up to date when coming from it
       const hv = from === 'level' ? view.hover : null;
       ws.enter(gfx?.tab ?? ws.tab, hv ? { tx: hv.tx, ty: hv.ty } : view.centerTile());
-      if (gfx?.tab === 'map16' && gfx.tile !== undefined) ws.showMap16(gfx.tile, gfx.bg);
+      if (gfx?.tab === 'map16' && gfx.tile !== undefined) ws.showMap16(gfx.tile, gfx.target, gfx.ow);
     } else {
       showLayout(levelBar, left, center, right);
       view.layout();
@@ -375,7 +376,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     if (workspace === 'gfx' && ws) {
       const t = ws.tab;
       if (t === 'pal') return { w: 'gfx', tab: t, pal: ws.pal.selected };
-      if (t === 'map16') { const s = ws.map16.selected; return { w: 'gfx', tab: t, m16: s.tile, bg: s.bg }; }
+      if (t === 'map16') { const s = ws.map16.selected; return { w: 'gfx', tab: t, m16: s.tile, target: s.target }; }
       if (t === 'gfx') return { w: 'gfx', tab: t, gfx: ws.gfx.selected };
       return { w: 'gfx', tab: t, anim: ws.anim.selected };
     }
@@ -388,7 +389,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     if (l.w === 'ow') { const o = owShown(); if (o) { o.setMap(l.map); if (l.tile !== undefined) o.selectTile(l.tile, true); } }
     else if (l.w === 'gfx') {
       if (l.tab === 'pal' && l.pal !== undefined) ws!.showPalette(l.pal >> 4, l.pal & 15);
-      else if (l.tab === 'map16' && l.m16 !== undefined) ws!.showMap16(l.m16, l.bg);
+      else if (l.tab === 'map16' && l.m16 !== undefined) ws!.showMap16(l.m16, l.target);
       else if (l.tab === 'gfx' && l.gfx !== undefined) ws!.showGfx(l.gfx);
       else if (l.tab === 'anim' && l.anim) ws!.showAnim(l.anim.global, l.anim.slot);
       else ws!.open(l.tab);
@@ -422,7 +423,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
       if (e.button === 3) { e.preventDefault(); history.back(); } else if (e.button === 4) { e.preventDefault(); history.forward(); }
     });
   }
-  app.on('open-map16', () => setWorkspace('gfx', { tab: 'map16', tile: app.wsTile, bg: app.wsTileBg }));
+  app.on('open-map16', () => setWorkspace('gfx', { tab: 'map16', tile: app.wsTile, target: app.wsTarget, ow: app.wsOw }));
   app.on('open-gfx', () => {
     const n = app.wsGfx;
     app.wsGfx = null;
@@ -621,6 +622,7 @@ function showHelp(): void {
       ['Click/drag · right click/Shift+click', 'Pick up tile(s) as brush · paint'],
       ['Alt+click / Ctrl+click', 'Level info of the level tile'],
       ['G', 'Grid on/off'],
+      ['M', 'Edit the selected tile\'s 8x8 tiles in the Map16 tab (target Overworld)'],
       [', / .', 'Event progress: one event back / further'],
       ['T', 'Test play from the overworld: a new game at the event progress, Mario on the selected tile (or at the start position)'],
     ]],

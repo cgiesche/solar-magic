@@ -7,7 +7,7 @@ import {
   placeTile, sharedTranslevels, enterableLevels, translevelToLevel, nameCode, setNameCode, splitNameCode, joinNameCode, nameWord, levelName, NAME_PART_COUNTS, MAP_NAMES,
   translevelUse, resetTranslevel, baseEvent, setBaseEvent, eventNames, exitDirections, setExitDirection, DIR_ARROWS, DIR_NAMES, EXIT_NAMES, NO_EVENT, isNameless,
   initialFlags, setInitialFlags, FLAG, DIR_FLAGS, OW_EVENTS, revealEvents, setRevealEvents, revealAt, revealedTile, revealEventCount,
-  readRevealList, writeRevealList, destroyEffects, destroySettingAt, destroyEvent, setDestroyEvent, readDestroyList, freeTranslevel, levelTilesOf,
+  readRevealList, writeRevealList, destroyEffects, destroySettingAt, destroyEvent, setDestroyEvent, readDestroyList, freeTranslevel, levelTilesOf, OW_L1_TILES,
 } from '../core/overworld.ts';
 import { hasMessages, isBlank, readMessage } from '../core/messages.ts';
 import {
@@ -990,6 +990,7 @@ export class OverworldView {
     if (k === 'escape' && this.mode === 'links' && this.links.cancelPending()) return true;
     if (k === 'escape' && this.event >= 0) { this.setEvent(-1); return true; }
     if (k === 'g') { this.showGrid = !this.showGrid; this.paint(); return true; }
+    if (k === 'm' && this.selected >= 0 && (this.mode === 'l1' || this.mode === 'l2')) { this.editTile(this.selected); return true; }
     if (k === ',' || k === '.') { this.setProgress(this.progress + (k === ',' ? -1 : 1)); return true; }
     if (k >= '1' && k <= '4') { (this.bar.querySelectorAll('.btn-group button')[+k - 1] as HTMLButtonElement).click(); return true; }
     if ((k === 'delete' || k === 'backspace') && this.mode === 'sprites') return this.sprites.remove();
@@ -1137,8 +1138,15 @@ export class OverworldView {
   tileInfo(i: number): HTMLElement {
     const { x, y } = l1XY(i), t = this.l1[i];
     const info = isLevelTile(t) ? this.levelInfo(i) : h('div', { class: 'ow-info' }, h('div', { class: 'hint' }, `Tile ${hex(x, 2)},${hex(y, 2)} · ${hex(t, 2)} (not a level tile)`));
-    info.append(...this.revealSettings(i), ...this.destroySettings(i));
+    info.append(h('div', { class: 'row' }, h('button', { title: 'Edit which 8x8 tiles make this layer 1 tile, in the Map16 tab (M) – for every place of the tile on all maps', onclick: () => this.editTile(i) }, `Edit tile ${hex(t, 2)} in Map16 …`)),
+      ...this.revealSettings(i), ...this.destroySettings(i));
     return info;
+  }
+  // the Map16 tab on layer 1 tile i's tile (as in the ROM), drawn as on this map at the event progress
+  private editTile(i: number): void {
+    const t = this.l1[i];
+    if (t >= OW_L1_TILES) { toast(`Tile ${hex(t, 2)} is past the overworld's layer 1 tiles (00–${hex(OW_L1_TILES - 1, 2)})`); return; }
+    this.app.editTile(t, 'ow', { map: this.map, progress: this.progress });
   }
 
   // the events by the level exit that runs them, the number as detail

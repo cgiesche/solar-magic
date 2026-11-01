@@ -13,9 +13,10 @@ const places: NavLoc[] = [
   { w: 'ow', map: 6 },
   { w: 'gfx', tab: 'pal' },
   { w: 'gfx', tab: 'pal', pal: 0x21 },
-  { w: 'gfx', tab: 'map16', bg: false },
-  { w: 'gfx', tab: 'map16', m16: 0x130, bg: false },
-  { w: 'gfx', tab: 'map16', m16: 0x2a, bg: true },
+  { w: 'gfx', tab: 'map16', target: 'fg' },
+  { w: 'gfx', tab: 'map16', m16: 0x130, target: 'fg' },
+  { w: 'gfx', tab: 'map16', m16: 0x2a, target: 'bg' },
+  { w: 'gfx', tab: 'map16', m16: 0x5f, target: 'ow' },
   { w: 'gfx', tab: 'gfx' },
   { w: 'gfx', tab: 'gfx', gfx: 0x14 },
   { w: 'gfx', tab: 'anim' },
@@ -30,11 +31,11 @@ check(toHash({ w: 'level', level: 0x105, mode: 'spr', cx: 10, cy: 20 }) === '#le
 check(fromHash('#gfx/map16/bg/130')?.w === 'gfx', 'hash without leading # works too');
 
 for (const h of ['', '#', '#level', '#level/200', '#level/xyz', '#level/105/1', '#ow/7', '#ow/a', '#gfx', '#gfx/foo',
-  '#gfx/pal/100', '#gfx/map16/bg/bg/1', '#gfx/anim/x3', '#gfx/anim/g', '#something'])
+  '#gfx/pal/100', '#gfx/map16/bg/bg/1', '#gfx/map16/ow/bg/1', '#gfx/anim/x3', '#gfx/anim/g', '#something'])
   check(fromHash(h) === null, `“${h}” leads nowhere`);
 
 const k = (l: NavLoc) => stepKey(l);
-check(k({ w: 'gfx', tab: 'map16', m16: 1 }) === k({ w: 'gfx', tab: 'map16', m16: 2, bg: true }), 'other tile in the Map16 tab: no new step');
+check(k({ w: 'gfx', tab: 'map16', m16: 1 }) === k({ w: 'gfx', tab: 'map16', m16: 2, target: 'bg' }), 'other tile in the Map16 tab: no new step');
 check(k({ w: 'level', level: 0x105, cx: 1 }) === k({ w: 'level', level: 0x105, mode: 'spr', cx: 50 }), 'scrolling or another mode in the level: no new step');
 check(k({ w: 'gfx', tab: 'map16' }) !== k({ w: 'gfx', tab: 'pal' }), 'other graphics tab: new step');
 check(k({ w: 'level', level: 0x105 }) !== k({ w: 'level', level: 0x106 }), 'other level: new step');

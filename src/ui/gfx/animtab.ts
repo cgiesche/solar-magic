@@ -528,7 +528,7 @@ export class AnimTab implements WsPanel {
     pv.highlightBg = new Set(u.bg);
     pv.drawHighlight();
     const links = (label: string, tiles: number[], bg: boolean) => tiles.length
-      ? h('div', { class: 'gt-users' }, h('span', { class: 'hint' }, label), tiles.slice(0, 24).map((m) => h('a', { href: '#', class: 'mono', title: 'Open in the Map16 tab', onclick: (e: Event) => { e.preventDefault(); this.ws.showMap16(m, bg); } }, hex(m, 3))), tiles.length > 24 ? h('span', { class: 'hint' }, `… (${tiles.length})`) : '')
+      ? h('div', { class: 'gt-users' }, h('span', { class: 'hint' }, label), tiles.slice(0, 24).map((m) => h('a', { href: '#', class: 'mono', title: 'Open in the Map16 tab', onclick: (e: Event) => { e.preventDefault(); this.ws.showMap16(m, bg ? 'bg' : 'fg'); } }, hex(m, 3))), tiles.length > 24 ? h('span', { class: 'hint' }, `… (${tiles.length})`) : '')
       : '';
     const none = layers.length && !u.layer1.length && !u.layer2.length && !u.bg.length;
     return h('div', { class: 'at-users' },

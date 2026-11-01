@@ -4,11 +4,12 @@
 // The place is in the URL hash too, so a reload stays there.
 import type { EditMode } from './app.ts';
 import type { WsTab } from './gfxworkspace.ts';
+import type { Map16Target } from './gfx/map16tab.ts';
 
 export type NavLoc =
   | { w: 'level'; level: number; mode?: EditMode; cx?: number; cy?: number } // cx/cy: tile in the middle of the view
   | { w: 'ow'; map: number; tile?: number } // tile: the selected layer 1 tile (l1Index)
-  | { w: 'gfx'; tab: WsTab; pal?: number; m16?: number; bg?: boolean; gfx?: number; anim?: { global: boolean; slot: number } };
+  | { w: 'gfx'; tab: WsTab; pal?: number; m16?: number; target?: Map16Target; gfx?: number; anim?: { global: boolean; slot: number } };
 
 const hx = (n: number) => n.toString(16).toUpperCase();
 const num = (s: string | undefined, max: number): number | null => {
@@ -21,7 +22,7 @@ export function toHash(l: NavLoc): string {
   if (l.w === 'level') return `#level/${hx(l.level)}`;
   if (l.w === 'ow') return `#ow/${l.map}`;
   if (l.tab === 'pal') return `#gfx/pal${l.pal !== undefined ? `/${hx(l.pal)}` : ''}`;
-  if (l.tab === 'map16') return `#gfx/map16${l.bg ? '/bg' : ''}${l.m16 !== undefined ? `/${hx(l.m16)}` : ''}`;
+  if (l.tab === 'map16') return `#gfx/map16${l.target && l.target !== 'fg' ? `/${l.target}` : ''}${l.m16 !== undefined ? `/${hx(l.m16)}` : ''}`;
   if (l.tab === 'gfx') return `#gfx/gfx${l.gfx !== undefined ? `/${hx(l.gfx)}` : ''}`;
   return `#gfx/anim${l.anim ? `/${l.anim.global ? 'g' : 'l'}${hx(l.anim.slot)}` : ''}`;
 }
@@ -41,12 +42,12 @@ export function fromHash(hash: string): NavLoc | null {
     return n === null ? null : { w: 'gfx', tab, pal: n };
   }
   if (tab === 'map16') {
-    const bg = rest[0] === 'bg';
-    const r = bg ? rest.slice(1) : rest;
+    const target: Map16Target = rest[0] === 'bg' || rest[0] === 'ow' ? rest[0] : 'fg';
+    const r = target !== 'fg' ? rest.slice(1) : rest;
     if (r.length > 1) return null;
-    if (!r.length) return { w: 'gfx', tab, bg };
+    if (!r.length) return { w: 'gfx', tab, target };
     const n = num(r[0], 0xffff);
-    return n === null ? null : { w: 'gfx', tab, m16: n, bg };
+    return n === null ? null : { w: 'gfx', tab, m16: n, target };
   }
   if (tab === 'gfx' && rest.length <= 1) {
     if (!rest.length) return { w: 'gfx', tab };
