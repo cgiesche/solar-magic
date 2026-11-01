@@ -111,7 +111,7 @@ function runCustom(loads: OverworldLoads, map: number, progress: number, sprites
   if (!bowsieInstalled(loads.emu.rom) || !sprites.length) return sprites.map((r) => ({ image: null, z: r.s.z * 8 }));
   loads.restore(map, progress);
   const emu = loads.emu, s = emu.snes, w = s.wram, start = s.saveState();
-  const clear = () => { w.fill(0, RAM.bowsieNum, RAM.bowsieTablesEnd); w.fill(0, RAM.bowsieExtra1, RAM.bowsieExtra1 + 48); w.fill(0, RAM.bowsieExtra2, RAM.bowsieExtra2 + 48); };
+  const clear = () => { w.fill(0, RAM.bowsieNum, RAM.bowsieTablesEnd); w.fill(0, RAM.bowsieExtra1, RAM.bowsieExtra1 + RAM.bowsieExtraLen); w.fill(0, RAM.bowsieExtra2, RAM.bowsieExtra2 + RAM.bowsieExtraLen); };
   const run = (one: CustomRun | null, x: number, y: number) => {
     s.loadState(start);
     clear();

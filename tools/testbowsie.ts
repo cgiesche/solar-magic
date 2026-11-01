@@ -14,7 +14,7 @@ import { customSpriteImages, customSpriteLooks } from '../src/core/owsprites.ts'
 import { readPpuOam } from '../src/core/spritegfx.ts';
 import { RAM, get16, getS16 } from '../src/core/ram.ts';
 import { saveBowsieProject, loadBowsieProject, removeBowsie, bowsieInstalled, bowsieSprites, type BowsieProject } from '../src/core/bowsie.ts';
-import { readCustomSprites, writeCustomSprites, customSizeTable, customSpriteRanges, type CustomOwSprite } from '../src/core/owcustom.ts';
+import { readCustomSprites, writeCustomSprites, customSizeTable, customSpriteRanges, customEntryAddrs, type CustomOwSprite } from '../src/core/owcustom.ts';
 import { editorImage, romDiff } from './fixture.ts';
 
 let bad = 0;
@@ -78,6 +78,32 @@ const slots = (w: Uint8Array) => Array.from({ length: 24 }, (_, k) => ({ num: ge
   const load = emu.load(2, 0);
   sn.hook = null;
   check(load.ok && extra === 0x5a, `Vanilla Dome: the flying switch block's extra byte ${hx(extra)} in BOWSIE's extra table`);
+}
+
+// BOWSIE's reader on a list of two: an odd X (its low bit in the entry's first byte) and a sprite with 5 extra bytes,
+// which its loader gives the address of its entry's extra bytes
+{
+  const r2 = new Rom(rom.data.slice()), l = readCustomSprites(r2);
+  l[3] = [{ id: 4, x: 0x0b, y: 0x09, z: 1, extra: [] }, { id: 0x12, x: 0x0c, y: 0x0a, z: 0, extra: [1, 2, 3, 4, 5] }];
+  writeCustomSprites(r2, l);
+  const at = customEntryAddrs(r2, 3)[1] + 3, e2 = new OverworldEmulator(r2), ext = new Map<number, number>();
+  // (the extra tables as the loader writes them: the first value written to each byte)
+  e2.snes.hook = { onWramWrite: (a: number, v: number) => {
+    for (const base of [RAM.bowsieExtra1, RAM.bowsieExtra2, RAM.bowsieNum, RAM.bowsieX, RAM.bowsieY]) if (a >= base && a < base + RAM.bowsieExtraLen && v && !ext.has(a)) ext.set(a, v);
+  } };
+  e2.load(3, 0);
+  e2.snes.hook = null;
+  // (as spawned: the sprite with 5 extra bytes may erase itself where no level tile is; writes of the title screen's
+  // level to the same RAM left out by their numbers)
+  const word = (base: number, k: number) => (ext.get(base + k * 2) ?? 0) | ((ext.get(base + k * 2 + 1) ?? 0) << 8);
+  const got = Array.from({ length: 24 }, (_, k) => ({ k, num: word(RAM.bowsieNum, k), x: word(RAM.bowsieX, k), y: word(RAM.bowsieY, k) })).filter((g) => g.num && g.num <= 0x7e);
+  const tile = got.find((g) => g.num === 0x12);
+  const ptr = tile ? word(RAM.bowsieExtra1, tile.k) | (word(RAM.bowsieExtra2, tile.k) << 16) : -1;
+  check(got.some((g) => g.num === 4 && g.x === 0x58 && g.y === 0x48) && got.some((g) => g.num === 0x12 && g.x === 0x60 && g.y === 0x50), `Forest of Illusion: both spawned, the odd X too ${JSON.stringify(got)}`);
+  check(ptr === at, `5 extra bytes: their address ${hx(at)} in the extra tables (${hx(ptr)})`);
+  let threw = false;
+  try { l[3] = [{ id: 0x7f, x: 0, y: 0, z: 0, extra: [] }]; writeCustomSprites(r2, l); } catch { threw = true; }
+  check(threw, 'with BOWSIE, sprite 7F refused (its tables end at 7E)');
 }
 
 // drawn by emulation: the main map's Piranha Plant where it is, Yoshi's Island's at its height; the palette's looks

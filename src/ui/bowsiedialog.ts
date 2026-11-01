@@ -38,7 +38,7 @@ export function bowsiePane(app: App, changed: () => void): Pane {
     });
     return [
       rows.length ? h('table', { class: 'uber-table' }, h('tr', null, h('th', null, 'No.'), h('th', null, 'File'), h('th', null, 'Name'), h('th', null, 'Extra bytes'), h('th', null, 'Package'), h('th')), rows)
-        : h('p', { class: 'hint' }, 'No overworld sprites yet – “Upload package …” above installs a BOWSIE sprite; it gets the next free number.'),
+        : h('p', { class: 'hint' }, 'No overworld sprites yet – “Upload package …” above installs custom overworld sprites in BOWSIE\'s format; each gets the next free number.'),
       sprites.length ? h('div', { class: 'row uber-add' },
         h('label', null, 'No.'), numIn,
         select(sprites.map((f, i) => [i, f.replace(/^sprites\//, '')] as [number, string]), 0, (i) => (file = sprites[i])),

@@ -115,6 +115,8 @@ export function customSpritesProblem(lists: CustomOwSprite[][]): string | null {
 export function writeCustomSprites(rom: Rom, lists: CustomOwSprite[][], sizes = customSizeTable(rom)): void {
   const why = customSpritesProblem(lists);
   if (why) throw new Error(why);
+  // (BOWSIE's pointer tables end at 7E)
+  if (bowsieInstalled(rom) && lists.some((l) => l.some((s) => s.id > 0x7e))) throw new Error('With BOWSIE, custom overworld sprites are 01–7E');
   const old = customTable(rom);
   if (old !== null) rom.freeAt(old);
   rom.w24(OW_CUSTOM_PTR, lists.some((l) => l.length) ? rom.allocWrite(customTableBytes(lists, sizes)) : bowsieInstalled(rom) ? 0 : 0xffffff);

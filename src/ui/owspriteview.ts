@@ -23,7 +23,7 @@ import { toast } from './dom.ts';
 import { hasOwSpriteSlots } from '../core/owsprites.ts';
 import {
   readCustomSprites, writeCustomSprites, customSpritesProblem, customSizeTable, customExtraBytes, bowsieInstalled,
-  OW_CUSTOM_POS_MAX, OW_CUSTOM_Z_MAX, type CustomOwSprite,
+  OW_CUSTOM_POS_MAX, OW_CUSTOM_Z_MAX, OW_CUSTOM_SUBMAPS, type CustomOwSprite,
 } from '../core/owcustom.ts';
 import { loadBowsieProject, bowsieSprites, type BowsieSpriteInfo } from '../core/bowsie.ts';
 import type { SpriteImage } from '../core/spritegfx.ts';
@@ -90,7 +90,7 @@ export class SpriteLayer {
   }
   // the custom sprites of every submap (7 lists)
   private lists(): CustomOwSprite[][] {
-    try { return readCustomSprites(this.rom); } catch { return Array.from({ length: 7 }, () => []); }
+    try { return readCustomSprites(this.rom); } catch { return Array.from({ length: OW_CUSTOM_SUBMAPS }, () => []); }
   }
   // the submaps of the region shown (the main map, or the 6 submaps)
   private maps(): number[] {
@@ -307,7 +307,7 @@ export class SpriteLayer {
         h('div', { class: 'ow-cpal' }, inst.map((i, k) => h('button', { class: 'ow-cpal-item' + (this.picked === i.num ? ' active' : ''), title: `${hex(i.num, 2)} ${i.name}${i.description ? '\n' + i.description : ''}`, onclick: () => this.pick(i.num) },
           looks[k] ?? h('span', { class: 'ow-cpal-none' }, hex(i.num, 2)), h('span', null, `${hex(i.num, 2)} ${i.name}`)))));
     }
-    out.push(h('div', { class: 'hint' }, bowsieInstalled(this.rom) ? 'BOWSIE is installed: the game\'s 13 sprite slots are gone – its sprites are BOWSIE sprites now (BOWSIE comes with them as its “originals”).'
+    out.push(h('div', { class: 'hint' }, bowsieInstalled(this.rom) ? 'BOWSIE is installed: the game\'s 13 sprite slots are gone – its sprites come as custom overworld sprites now (BOWSIE\'s “originals”).'
       : 'The game\'s sprites: drawn as the game shows them on this map at the event progress; a dashed box where it doesn\'t show the sprite.'),
       h('div', { class: 'hint' }, 'Shadows and height marks: View.'));
     return out;

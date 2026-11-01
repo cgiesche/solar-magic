@@ -1,7 +1,7 @@
 // Custom overworld sprites in Lunar Magic's table (owcustom.ts), on the model: the clean game has none; lists written
 // are Lunar Magic's bytes (its help's `spr` macro, offsets per submap, `dw 0` ends), read back the same; the size
 // table gives each sprite its entry's size (extra bytes cut or padded); a rewrite frees the old table; without sprites
-// the pointer is 0; Lunar Magic's limits are kept.
+// the pointer is $FFFFFF as in the clean game (0 with BOWSIE: testbowsie.ts); Lunar Magic's limits are kept.
 import { Rom, snesToPc } from '../src/core/rom.ts';
 import {
   readCustomSprites, writeCustomSprites, customTable, customTableBytes, customSizeTable, customSpritesProblem, customSpriteRanges,

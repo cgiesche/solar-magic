@@ -131,7 +131,9 @@ export const RAM = {
   // BOWSIE's overworld sprite tables (its vldc9_defines.asm, bowsie.ts): 16 bits a slot (index slot * 2), 24 slots – the
   // sprite, its pixel position and height, its first 4 extra bytes (or a pointer to them)
   bowsieNum: 0x14c8, bowsieX: 0x1588, bowsieY: 0x15b8, bowsieZ: 0x15e8, bowsieExtra1: 0x0de0, bowsieExtra2: 0x0e10,
-  bowsieTablesEnd: 0x14c8 + 24 * 2 * 21 + 6, // the end of what its clear_ram zeroes from bowsieNum on (its tables and flags)
+  bowsieTablesEnd: 0x14c8 + 24 * 2 * 21 + 6, // the end of what its clear_ram zeroes from bowsieNum on (its 21 tables and flags,
+  // 24 slots: BOWSIE_SLOTS of bowsie.ts)
+  bowsieExtraLen: 24 * 2, // the extra tables' length
   koopaKid: 0x0ef6, // the Koopa Kid of tiles 49–4B Mario met (0–2, owlinks.ts)
   koopaKidSlot: 0x0ef7, // $80 | its overworld sprite slot while it is there, 0 none
   owProcess: 0x13d9, // what the overworld is doing: Mario standing, walking, switching submaps …

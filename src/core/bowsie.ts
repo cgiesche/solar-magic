@@ -1,7 +1,8 @@
 // Custom overworld sprites in BOWSIE's format (Better Overworld Sprite Insertion Engine, Arinsu;
 // https://github.com/arinsuwu/bowsie). A project is a set of files in BOWSIE's layout (sprites/, routines/) with its
 // list.txt (`NN file.asm`, numbers 01–7E). BOWSIE itself is not run: its steps are done here with the built-in Asar
-// and BOWSIE's own ASM (src/vendor/bowsie, unchanged), all runs recorded as one patch:
+// and BOWSIE's own ASM (src/vendor/bowsie, with three fixes for running without MaxTile: tools/build-bowsie.sh), all runs
+// recorded as one patch:
 //  1. the shared routines, all in one free space block (each %name() a JSL to it)
 //  2. each sprite on its own in a namespace (init/main labels, `!extra` its extra bytes, 2 when not set)
 //  3. the system of a vanilla overworld (vldc9.asm): its signature and pointers at $04EF3E, the loader in place of
@@ -154,7 +155,7 @@ export function buildBowsiePatch(p: BowsieProject): { src: PatchSource; sizes: (
     ...routines.map((n) => `namespace ${n}\n    ${n}:\n        incsrc "routines/${n}.asm"\n    print "Shared subroutine %${n}() inserted at $", hex(${n})\nnamespace off\n`),
   ].join('\n'));
   const sprites = [...p.list].sort((a, b) => a.num - b.num);
-  const init = new Array<number>(0x7e).fill(UNUSED), main = new Array<number>(0x7e).fill(UNUSED);
+  const init = new Array<number>(BOWSIE_LAST).fill(UNUSED), main = new Array<number>(BOWSIE_LAST).fill(UNUSED);
   const sizes = new Uint8Array(OW_CUSTOM_IDS).fill(3);
   let ssr = '';
   const addr = (line: string) => parseInt(/\$([0-9A-Fa-f]+)/.exec(line)?.[1] ?? 'x', 16);
@@ -209,7 +210,7 @@ namespace off
       }
       // the system, its pointer tables and the size table
       const ptrs = (a: number[]) => Uint8Array.from(a.flatMap((v) => [v & 0xff, (v >> 8) & 0xff, v >> 16]));
-      const bins = new Map<string, Uint8Array | string>([...out, [DIR + 'init_ptrs.bin', ptrs(init)], [DIR + 'main_ptrs.bin', ptrs(main)], [DIR + 'extra_size.bin', sizes.slice(0, 0x7f)]]);
+      const bins = new Map<string, Uint8Array | string>([...out, [DIR + 'init_ptrs.bin', ptrs(init)], [DIR + 'main_ptrs.bin', ptrs(main)], [DIR + 'extra_size.bin', sizes]]);
       const f = DIR + 'system.asm';
       bins.set(f, `incsrc "vldc9_defines.asm"
 incsrc "ssr.asm"
@@ -226,7 +227,7 @@ ow_sprite_main_ptrs:
     incbin main_ptrs.bin
 incsrc "routine_ptrs.asm"
 `);
-      return { main: f, files: bins as Map<string, string> };
+      return { main: f, files: bins };
     },
   };
   return { src, sizes: () => sizes };
@@ -275,11 +276,8 @@ export function saveBowsieProject(rom: Rom, p: BowsieProject): ApplyResult {
     if (JSON.stringify(readCustomSprites(rom)) !== was) r.warnings.push('The extra bytes of placed overworld sprites were adjusted to their new count.');
     return r;
   };
-  if (!p.list.length && !p.files.size) {
-    if (!e) return { ok: true, errors: [], warnings: [], prints: [] };
-    return after({ ok: true, errors: [], warnings: uninstallPatch(rom, e.id), prints: [] });
-  }
   try {
+    if (!p.list.length && !p.files.size) return e ? after({ ok: true, errors: [], warnings: uninstallPatch(rom, e.id), prints: [] }) : { ok: true, errors: [], warnings: [], prints: [] };
     const { src } = buildBowsiePatch(p);
     return after(e ? reapplyPatch(rom, e.id, src) : applyPatch(rom, src));
   } catch (err) { return fail(err); }
