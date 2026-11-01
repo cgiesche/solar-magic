@@ -89,6 +89,7 @@ export const RAM = {
   levelMusic: 0x0dda, // song of the level; the game doesn't restart it when the next level has the same
   musicRequest: 0x1dfb, // a song the game asks the sound driver to play (0: none)
   amkSong: 0x1b000, // AddmusicK's current song ($7FB000, its !FreeRAM)
+  stripeEnd: 0x1837b, stripes: 0x1837d, // the stripe buffer the game uploads to VRAM ($7F837D), its used length (16 bit)
   screenExitLo: 0x19b8, screenExitHi: 0x19d8, // per screen
   useSecondaryExit: 0x1b93,
   backdrop: 0x0701, // 16-bit color

@@ -9,12 +9,12 @@ import { hex, hex3 } from '../core/names.ts';
 import type { OwRender } from '../core/overworld.ts';
 import { translevelToLevel } from '../core/overworld.ts';
 import { TileCache, blit8 } from '../core/render.ts';
-import { levelNameTiles, setLevelNameTiles, decodeName, encodeName, tileChar, NAME_LEN, NAME_VRAM, NAME_ATTR, type EncodedName } from '../core/levelnames.ts';
+import { levelNameTiles, setLevelNameTiles, decodeName, encodeName, tileChar, tileEscape, NAME_LEN, NAME_VRAM, NAME_ATTR, NAME_SPACE, type EncodedName } from '../core/levelnames.ts';
 
 const COLS = 32, ROWS = 3, FIRST_ROW = 3; // the border's rows shown: the name's (4) with the one above and below
 const W = COLS * 8, H = ROWS * 8;
 const FONT_TILES = 0x100; // the tiles the picker shows (16 × 16)
-const MISSING = 0xff3030e0, OVER = 0x803030ff; // (ABGR) // a character without a tile; a tile past the name's 19 (blended)
+const MISSING = 0xff3030e0, TOO_LONG = 0x803030ff; // (ABGR) // a character without a tile; a tile past the name's 19 (blended)
 
 const MULTI_PREF = 'smwe.levelNameMultiChar';
 let multiChar = ((): boolean => { try { return localStorage.getItem(MULTI_PREF) !== '0'; } catch { return true; } })();
@@ -41,13 +41,13 @@ function drawBorder(c: HTMLCanvasElement, r: OwRender | null, shown: number[]): 
       blit8(px, W, H, tc.get(r.vram[a] | (r.vram[a + 1] << 8), 2), x * 8, y * 8);
     }
     for (let k = 0; k < Math.max(NAME_LEN, shown.length) && col + k < COLS && row >= 0 && row < ROWS; k++) {
-      const t = shown[k] ?? 0x1f, x = (col + k) * 8, y = row * 8;
+      const t = shown[k] ?? NAME_SPACE, x = (col + k) * 8, y = row * 8;
       for (let i = 0; i < 64; i++) px[(y + (i >> 3)) * W + x + (i & 7)] = 0xff000000;
       if (t >= 0) blit8(px, W, H, g(t), x, y);
       for (let i = 0; i < 64; i++) {
         const p = (y + (i >> 3)) * W + x + (i & 7), edge = i >> 3 === 0 || i >> 3 === 7 || (i & 7) === 0 || (i & 7) === 7;
         if (t < 0 && edge) px[p] = MISSING;
-        else if (k >= NAME_LEN) px[p] = blend(px[p], OVER);
+        else if (k >= NAME_LEN) px[p] = blend(px[p], TOO_LONG);
       }
     }
   }
@@ -85,8 +85,7 @@ export function levelNameField(app: App, tl: number, r: OwRender | null): HTMLEl
   const commit = () => {
     update();
     if (problem()) return;
-    const now = levelNameTiles(rom, tl), next = Array.from({ length: NAME_LEN }, (_, k) => enc.tiles[k] ?? 0x1f);
-    if (next.every((t, k) => t === now[k])) return;
+    if (levelNameTiles(rom, tl).every((t, k) => t === (enc.tiles[k] ?? NAME_SPACE))) return;
     app.romEdit(`Level name ${hex3(lvl)}`, () => setLevelNameTiles(rom, tl, enc.tiles));
   };
   input.addEventListener('input', update);
@@ -107,7 +106,7 @@ export function levelNameField(app: App, tl: number, r: OwRender | null): HTMLEl
         update();
       })),
     r ? fontPicker(r, (t) => {
-      const ch = tileChar(t) ?? `\\${hex(t, 2)}`, a = input.selectionStart ?? input.value.length, b = input.selectionEnd ?? a;
+      const ch = tileChar(t) ?? tileEscape(t), a = input.selectionStart ?? input.value.length, b = input.selectionEnd ?? a;
       input.value = input.value.slice(0, a) + ch + input.value.slice(b);
       input.setSelectionRange(a + ch.length, a + ch.length);
       input.focus();
@@ -127,7 +126,7 @@ function fontPicker(r: OwRender, pick: (t: number) => void): HTMLCanvasElement {
     const b = c.getBoundingClientRect();
     return Math.min(15, Math.floor(((e.clientX - b.left) / b.width) * 16)) + 16 * Math.min(15, Math.floor(((e.clientY - b.top) / b.height) * 16));
   };
-  c.addEventListener('mousemove', (e) => { const t = tileAt(e), ch = tileChar(t); c.title = `${hex(t, 2)}${ch ? ` “${ch}”` : ` (\\${hex(t, 2)})`} · click to type it`; });
+  c.addEventListener('mousemove', (e) => { const t = tileAt(e), ch = tileChar(t); c.title = `${hex(t, 2)}${ch ? ` “${ch}”` : ` (${tileEscape(t)})`} · click to type it`; });
   c.addEventListener('mousedown', (e) => { e.preventDefault(); pick(tileAt(e)); });
   return c;
 }
