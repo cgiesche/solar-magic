@@ -38,7 +38,7 @@ import { planMove, applyMove, planRemap, rectMap, type MovePlan, type MoveSource
 import { levelSource, planList, openRemapUses } from '../tileuses.ts';
 import { loadAsar } from '../../core/asar.ts';
 import { NAME_MAX, namesOf, setName, cleanName, type NameKind } from '../../core/usernames.ts';
-import { OW_L1_TILES, MAP_NAMES, owTileAddr, owTileWords, setOwTileWords, readL1, type OwRender } from '../../core/overworld.ts';
+import { overworldReplacement, OW_L1_TILES, MAP_NAMES, owTileAddr, owTileWords, setOwTileWords, readL1, type OwRender } from '../../core/overworld.ts';
 import { drawMap16 } from '../../core/render.ts';
 import { QuarterGrid, markRect, editMarked, setPalette, setBit, setTileNum, stamp, mirror, summary, wholeTiles, FLIP_X, FLIP_Y, PRIO, type QuarterEdit, type MarkMode, type BitState } from '../../core/quarters.ts';
 
@@ -197,6 +197,8 @@ export class Map16Tab implements WsPanel {
   // tile of a target; the overworld's tiles drawn from map `ow.map` at event progress `ow.progress` (else the map
   // shown last)
   select(tile: number, target: Map16Target = 'fg', ow?: { map: number; progress: number }): void {
+    if (target === 'ow' && this.owLocked()) { toast(`The overworld is replaced by ${this.owLocked()}: its tiles can't be edited here`); target = 'fg'; }
+    if (target === 'ow' && this.moving) this.closeMove();
     this.target = target;
     if (ow) this.owAt = { ...ow };
     this.sel = Math.min(tile & (EXT_TILES - 1), this.count() - 1);
@@ -209,6 +211,8 @@ export class Map16Tab implements WsPanel {
   // the target's number of tiles
   private count(): number { return this.ow ? OW_L1_TILES : EXT_TILES; }
   // the overworld map's load (the one shown last while it is emulated; null before the first), redrawn when it comes
+  // the package replacing the whole overworld, whose formats the overworld's tiles must not be written into (ADR 0005)
+  private owLocked(): string | null { return overworldReplacement(this.app.rom); }
   private owRender(): OwRender | null {
     const { map, progress } = this.owAt;
     const r = this.app.overworldMap(map, progress, (x) => {
@@ -291,6 +295,8 @@ export class Map16Tab implements WsPanel {
   }
 
   private edit(label: string, fn: () => void, key: string | null = null): void {
+    const locked = this.ow ? this.owLocked() : null;
+    if (locked) { toast(`The overworld is replaced by ${locked}: its tiles can't be edited here`, 'error'); return; }
     try { this.app.romEdit(label, fn, { key }); } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
   }
 
@@ -360,9 +366,11 @@ export class Map16Tab implements WsPanel {
       class: this.target === target ? 'active' : '', title,
       onclick: () => {
         if (this.target === target) return;
+        if (target === 'ow' && this.owLocked()) return;
         if (target === 'ow' && this.moving) this.closeMove();
         this.target = target; this.sel = Math.min(this.sel & 0x1ff, this.count() - 1); this.selW = this.selH = 1; this.buildBar(); this.redraw(); this.scrollToSel();
       },
+      disabled: target === 'ow' && !!this.owLocked() && this.target !== 'ow',
     }, label);
     clear(this.pageBar);
     const pages = Math.ceil(this.count() / 256);
@@ -452,8 +460,9 @@ export class Map16Tab implements WsPanel {
   }
 
   // pages near the view are drawn now, the others once they come near it
+  // (only the target's pages)
   private drawSheet(): void {
-    for (let p = 0; p < this.pages.length; p++) {
+    for (let p = 0; p < Math.ceil(this.count() / 256); p++) {
       if (this.near.has(p)) this.drawPage(p); else this.dirty.add(p);
     }
   }
@@ -1536,7 +1545,7 @@ export class Map16Tab implements WsPanel {
     const targets: number[] = [];
     for (let y = 0; y < c.h; y++) for (let x = 0; x < c.w; x++) targets.push(this.sel + y * 16 + x);
     if (targets.some((t) => t >= max) || (this.sel & 15) + c.w > 16) { toast('The tiles do not fit on the page from here', 'error'); return; }
-    this.edit(`${targets.length} tile${targets.length > 1 ? 's' : ''} pasted at ${hex(this.sel, 3)}`, () => {
+    this.edit(`${targets.length} tile${targets.length > 1 ? 's' : ''} pasted at ${this.num(this.sel)}`, () => {
       targets.forEach((t, i) => {
         this.setWords(t, c.words[i]);
         if (c.acts && this.fg) setActsLike(this.app.rom, t, c.acts[i]);
@@ -1547,6 +1556,7 @@ export class Map16Tab implements WsPanel {
   }
 
   private async importMap16(): Promise<void> {
+    if (this.ow) return; // (FG and BG tiles only)
     const f = await pickFile('.map16');
     if (!f) return;
     let m: Map16File;
@@ -1607,6 +1617,7 @@ export class Map16Tab implements WsPanel {
   }
 
   private async exportMap16(): Promise<void> {
+    if (this.ow) return;
     const tiles = this.selection();
     const data = writeMap16File({ width: this.selW, height: this.selH, tiles: tiles.map((t) => this.words(t)), acts: this.bg ? null : tiles.map((t) => actsLike(this.app.rom, t)) });
     const name = `${this.bg ? 'bg' : 'fg'}_${hex(this.sel, 3)}.map16`;
