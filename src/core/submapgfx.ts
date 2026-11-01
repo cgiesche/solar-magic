@@ -175,7 +175,7 @@ SubmapGfx:
   SEP #$30
   LDA #$04 : PHA : PLB
   PHK : PEA.w .anim-1 : PEA.w ${hx((OW_ANIM_RTL - 1) & 0xffff)} ; the animations' load, its RTS to the RTL, back here
-  JML $${OW_ANIM_LOAD.toString(16).toUpperCase().padStart(6, '0')}
+  JML ${hx(OW_ANIM_LOAD).replace('$', '$0')}
 .anim:
   REP #$30
   PLA : STA $0E : PLA : STA $0C : PLA : STA $0A : PLA : STA $08 : PLA : STA $06 : PLA : STA $04 : PLA : STA $02 : PLA : STA $00
@@ -221,7 +221,7 @@ export function assignSubmapSlot(rom: Rom, map: number, name: string, file: numb
 // needs Asar (loadAsar) to be loaded
 export function installSubmapGfxPatch(rom: Rom): void {
   if (hasSubmapGfxPatch(rom)) return;
-  if (rom.r8(GFX_HOOK) !== 0x8d || rom.r16(GFX_HOOK + 1) !== 0x0704 || rom.r8(RTL_00) !== 0x6b || rom.r8(OW_ANIM_RTL) !== 0x6b) throw new Error('Submap graphics: unexpected code at $04DBB9');
+  if (rom.r8(GFX_HOOK) !== 0x8d || rom.r16(GFX_HOOK + 1) !== 0x0704 || rom.r8(RTL_00) !== 0x6b || rom.r8(OW_ANIM_RTL) !== 0x6b) throw new Error('Submap graphics: unexpected code at $04DBB9, $0084CF or $048414');
   const at = rom.allocWrite(new Uint8Array(GFX_CODE_LEN));
   const r = assemble(rom.data, new Map([['submapgfx.asm', gfxHookAsm(at)]]), 'submapgfx.asm');
   if (!r.ok) throw new Error(r.errors.map((e) => e.message).join(' '));

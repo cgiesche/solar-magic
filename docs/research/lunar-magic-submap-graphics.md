@@ -121,7 +121,7 @@ Research for issue #253. Lunar Magic sets the lists up in its load hook only (`$
 the overworld's load alone, `JSR $8086` at `$048EEB`): its frame hook never reads the submap, its routine at
 `$04DBB9` (the submap's graphics) doesn't call it. Emulated in *Journey to Kaizo* (lists on submaps 0 and 5): after
 `$1F11` changes the list pointer it set up (`$7FC000`–`$7FC002`) and the settings (`$7FC00A`) stay those of the
-submap the overworld loaded on. So in Lunar Magic the lists of the submap Mario left keep running on the new one until
+submap the overworld loaded on (`tools/lmowsubmap.ts`). So in Lunar Magic the lists of the submap Mario left keep running on the new one until
 the overworld loads again (a level entered and left).
 
 The editor sets the new submap's lists up there instead: its own code at `$04DBB9` (`src/core/submapgfx.ts`), where the
@@ -129,7 +129,8 @@ game has loaded the new submap's palette and the window has closed, runs the loa
 upload, the screen still off – the game's animated tiles from their start (also when the submap left had them off and
 they were never set up), the lists set up and run eight frames with their uploads, as at the load. In the walk from the
 main map to Yoshi's Island `$1F11` changes 9 frames before that (the window closing); the lists of the main map run on
-until then.
+until then. Unlike the game, the walk so starts the game's animated tiles from their start (their phase, behind the
+closed window).
 
 ### `$7FC00B`
 
@@ -144,7 +145,7 @@ System, the blocks and sprites in `resources_local`) uses `$7FC00A`/`$7FC00B`.
 The editor keeps it there: its ROMs run none of Lunar Magic's code that reads it (the editor's graphics bypass and
 layer 2 are its own), and the editor's patch registry claims `$7FC003`–`$7FC0FF` for the engine, so packages that
 declare their RAM don't get it. Should the editor ever follow Lunar Magic's layer 2 tilemap settings in RAM, the
-engine's byte has to move.
+engine's byte has to move (#265).
 
 ### The lightning switch
 
