@@ -33,6 +33,7 @@ import { RAM, map16Pointer } from '../core/ram.ts';
 import { loadMusicProject, submapSongs, submapMusic, setSubmapMusic, songHex, type SongInfo } from '../core/music.ts';
 import { songLabel } from './musicdialog.ts';
 import type { Rom } from '../core/rom.ts';
+import { OW_OPTIONS, owOption, owOptionValue, setOwOption, revealSpeed, setRevealSpeed, revealStepFrames, MAX_REVEAL_SPEED, DEFAULT_REVEAL_SPEED } from '../core/owoptions.ts';
 
 // a w×h block of L1 tiles (16x16) or L2 tilemap entries (8x8), row-major; L1 tiles picked up from the map carry
 // their translevels (`tls`, 0 none), so a level tile placed with them enters the same level
@@ -134,7 +135,7 @@ export class OverworldView {
   // stroke being painted
   private ev: { data: EventData; before: Uint16Array; after: Uint16Array; l1: Uint8Array | null; game: Uint8Array | null; runners: Map<number, EventRunner[]> } | null = null;
   private hoverStep: { kind: StepKind; k: number } | null = null;
-  private playing: { start: number; before: HTMLCanvasElement } | null = null;
+  private playing: { start: number; before: HTMLCanvasElement; stepMs: number; fade: boolean } | null = null;
   private timeline = h('div', { class: 'ow-timeline' });
   showGrid = false;
   showPaths = false;
@@ -891,19 +892,21 @@ export class OverworldView {
     }
   }
 
-  // the steps shown as the game does: the map before the event, each step fading in after the one before (about
-  // 14 frames each, as measured in the game; silent ones are on other submaps)
+  // the steps shown as the game does: the map before the event, each step fading in after the one before (14 frames
+  // each, as measured in the game) – or, with the path fade off, appearing at the reveal speed; silent ones are on
+  // other submaps
   play(): void {
     const ev = this.ev;
     if (!ev) return;
     const before = document.createElement('canvas'), r = this.render();
     if (!r) return;
     putImage(before, drawOwMap(this.app.rom, r, this.region, this.showL1 ? this.shown.l1 : undefined, this.showL2 ? ev.before : undefined));
-    this.playing = { start: performance.now(), before };
+    const rom = this.app.rom;
+    this.playing = { start: performance.now(), before, stepMs: revealStepFrames(rom) * 1000 / 60, fade: owOptionValue(rom, 'pathFade') !== false };
     const tick = () => {
       if (!this.playing) return;
       this.paint();
-      if (performance.now() - this.playing.start > (ev.data.steps[this.event].length + 2) * STEP_MS) this.stopPlay();
+      if (performance.now() - this.playing.start > (ev.data.steps[this.event].length + 2) * this.playing.stepMs) this.stopPlay();
       else requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
@@ -914,7 +917,7 @@ export class OverworldView {
     this.paint();
   }
   paintPlay(ctx: CanvasRenderingContext2D): void {
-    const ev = this.ev!, pl = this.playing!, t = (performance.now() - pl.start) / STEP_MS;
+    const ev = this.ev!, pl = this.playing!, t = (performance.now() - pl.start) / pl.stepMs;
     ctx.drawImage(pl.before, 0, 0);
     const steps = ev.data.steps[this.event];
     const show = (p: { at: number; pos: number }, alpha: number) => {
@@ -924,7 +927,7 @@ export class OverworldView {
         if (c.r === this.region) ctx.drawImage(this.mapCanvas, c.x * 8, c.y * 8, 8, 8, c.x * 8, c.y * 8, 8, 8);
       }
     };
-    steps.forEach((p, k) => { if (t > k) show(p, t - k); });
+    steps.forEach((p, k) => { if (t > k) show(p, pl.fade ? t - k : 1); });
     ctx.globalAlpha = 1;
   }
 
@@ -1049,7 +1052,34 @@ export class OverworldView {
     this.props.replaceChildren(h('div', { class: 'panel-title' }, 'Properties'),
       this.mapSettings(),
       this.selected >= 0 ? this.tileInfo(this.selected) : emptyState('Select a level tile in the list on the left, or any tile with Alt/Ctrl+click on the map.'),
-      this.revealList());
+      this.revealList(),
+      this.optionsPanel());
+  }
+
+  // the game's overworld options (Lunar Magic's "Extra Options", core/owoptions.ts): each switch one ROM edit
+  private optionsOpen = false;
+  private optionsPanel(): HTMLElement {
+    const rom = this.app.rom;
+    const rows: HTMLElement[] = [];
+    for (const o of OW_OPTIONS) {
+      const v = owOptionValue(rom, o.id);
+      if (v === null) { rows.push(h('div', { class: 'row hint warn-text', title: o.title }, `⚠ ${o.label}: its code was changed by a patch`)); continue; }
+      const c = checkbox(o.label, o.title, v, (on) => this.app.romEdit(`${o.label}: ${on ? 'on' : 'off'}`, () => setOwOption(rom, o.id, on)));
+      if (o.needs && owOptionValue(rom, o.needs) === false) {
+        c.querySelector('input')!.disabled = true;
+        c.title += ` – no effect while "${owOption(o.needs).label}" is off`;
+      }
+      rows.push(c);
+      const speed = o.id === 'pathFade' ? revealSpeed(rom) : null;
+      if (speed !== null) {
+        const inp = hexInput(speed, 2, (n) => this.app.romEdit('Path reveal speed', () => setRevealSpeed(rom, n)), MAX_REVEAL_SPEED, (n) => n >= 1 || 'at least 1');
+        inp.title = `How fast each step of an event's path appears: added to a counter every frame, a step at 40 (${DEFAULT_REVEAL_SPEED.toString(16).toUpperCase()}: Lunar Magic's default; 40: a step every few frames)`;
+        rows.push(h('div', { class: 'prop ow-option-sub' }, h('label', null, 'Path reveal speed'), inp));
+      }
+    }
+    const d = h('details', { class: 'ow-reveals', open: this.optionsOpen, ontoggle: () => (this.optionsOpen = d.open) },
+      h('summary', null, 'Overworld options', h('span', { class: 'hint' }, ' · the game\'s, for all maps')), ...rows);
+    return d;
   }
 
   // the settings of the map shown: its song (one ROM edit), from the ROM's songs as for levels
@@ -1387,8 +1417,6 @@ export class OverworldView {
     this.layout();
   }
 }
-
-const STEP_MS = 14 * 1000 / 60; // a step's path fade
 
 // the event progress kept per ROM (by its name) in the browser
 const PROGRESS_PREF = 'ow-event-progress:';

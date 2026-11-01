@@ -754,3 +754,4 @@ button.danger:hover:not(:disabled) { border-color: var(--danger); }
 .search-more { color: var(--muted); font-style: italic; }
 .search-foot { padding: 0 2px; }
 .ow-legend { display: inline-block; width: 22px; height: 0; margin-right: 6px; vertical-align: middle; }
+.ow-option-sub { margin-left: 22px; }

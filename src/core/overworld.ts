@@ -317,8 +317,8 @@ export const FLAG = { right: 0x01, left: 0x02, down: 0x04, up: 0x08, savePrompt:
 export const DIR_FLAGS = [FLAG.up, FLAG.down, FLAG.left, FLAG.right];
 const LF_INIT_HOOK = 0x009f19, LF_INIT = 0x05dd80;
 const LF_SAVE_HOOK = 0x048f8a, LF_SAVE_LOOP = 0x049001, LF_SAVE = 0x03ba10;
+export const LF_SAVE_SWITCH = LF_SAVE + 0x16; // 1: the game's save tiles bring up the save prompt (owoptions.ts)
 const LF_ENTER_HOOK = 0x049199, LF_ENTER = 0x03ba50, LF_END = 0x03bae6;
-const SAVE_TILES = 0x048f7f; // the game's 8 layer 1 tiles that bring up the save prompt when passed
 
 const levelFlagsAsm = () => `lorom
 ; a new file: the initial flags of every translevel (the game's loop of 8 has run once)
@@ -336,7 +336,9 @@ InitFlags:
 warnpc ${hx(LEVEL_FLAGS)}
 
 ; a level passed (A/X/Y 8, $04 Mario's tile): the tile the game looks up in its list of save tiles – the
-; list's last one when the translevel's save prompt flag is set; the list's loop goes on with A
+; list's last one ($80) when the translevel's save prompt flag is set, $FF (none) when the switch is 0 (Lunar
+; Magic's option "save prompt after castles …", owoptions.ts); the list's loop goes on with A. Lunar Magic's
+; routine byte for byte, the switch at +$16
 org ${hx(LF_SAVE_HOOK)}
   JSL SavePrompt : NOP
 org ${hx(LF_SAVE_LOOP)}
@@ -346,15 +348,18 @@ SavePrompt:
   PHP
   REP #$30
   LDX $04
-  LDA.l $7E${hx(RAM.owTranslevels).slice(1)},x : AND #$00FF : TAX
-  SEP #$20
-  LDA.l $7E${hx(RAM.levelFlags).slice(1)},x : AND #${hx(FLAG.savePrompt)} : BEQ +
-  LDA.l ${hx(SAVE_TILES + 7)}
-  BRA ++
-+ LDA.l $7E${hx(RAM.owTile).slice(1)}
-++ LDX.w #$0007
+  LDA.l $7E${hx(RAM.owTranslevels).slice(1)},x : AND.w #$00FF : TAX
+  LDA.w ${hx(RAM.levelFlags)},x : AND.w #${hx(FLAG.savePrompt)} : BNE .flag
+  LDA.w #$0001 : BEQ .none
+  LDA.w ${hx(RAM.owTile)}
+.ret:
+  LDX.w #$0007
   PLP
   RTL
+.flag:
+  LDA.w #$0080 : BRA .ret
+.none:
+  LDA.w #$00FF : BRA .ret
 warnpc ${hx(LF_ENTER)}
 
 ; A pressed on a tile (A 8 = the tile): carry set when Mario doesn't enter – a tile above $80, as the game's

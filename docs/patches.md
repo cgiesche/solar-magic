@@ -809,6 +809,28 @@ a layer 1 change, a reveal list entry and a destroyed tile show when level 105 i
 is loaded, that a castle top on row F destroys the tile below it (the clean game the one to its right), and that
 the clean game's layer 1 changes painted as they are change no byte.
 
+### Overworld options
+
+Lunar Magic's "Extra Options" of the overworld that the community uses are switches in the overworld's properties
+(*Overworld options*), each one ROM edit (`src/core/owoptions.ts`). A switch writes the bytes Lunar Magic writes in
+its places, turned back the clean game's – read from Lunar Magic 3.71's code (its table of ROM places and the routine
+that writes the options; ROMs Lunar Magic saved with options set show the same):
+
+| Option | Places | Changed |
+|---|---|---|
+| Start+Select exits passed levels | `$00A267` | `BPL` → `BRA` (off) |
+| Start scrolls the main map | `$048380` | `AND #$10` → `AND #$00` (off) |
+| The game's 5 hardcoded paths | `$049307` | `BRA` over the table lookup (off) |
+| Event path fade effect | `$04E6FA`, `$04E73E`, `$04E75E`, `$04EAAE`, `$04EACC`, `$00A0EB` | off: a step's tiles written at once, Lunar Magic's step routine at `$04EACC` with the path reveal speed (`$04EAD1`, 6), sprites not translucent |
+| Save prompt after castles, fortresses, ghost houses, switch palaces | `$04E622`, `$03BA26` | off: the save tiles don't count; a level tile's own save prompt flag still does |
+| Save Luigi's map position | `$048F9F` | on: `BRA` over the copy of Mario's position |
+| Players can exchange lives / L/R opens the life exchange | `$04828D` / `$04836E` | `BEQ` → `BRA` (off) |
+
+The save prompt routine of the level tile settings (`$03BA10`) is Lunar Magic's byte for byte, with its switch at
+`+$16`. With the fade off a step follows every `$40` / speed + 2 frames (the timeline's *Play* shows it so); the
+fade takes 14. Bytes a patch changed show the option as changed by a patch, and it can't be switched.
+`tools/testowoptions.ts` checks each option in the game by emulation.
+
 ### Submap graphics
 
 The graphics workspace edits a submap's graphics as a level's: its target (the bar's first choice) is the open level

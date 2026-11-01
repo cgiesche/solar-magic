@@ -139,6 +139,11 @@ export const RAM = {
   owProcess: 0x13d9, // what the overworld is doing: Mario standing, walking, switching submaps …
   owPose: 0x1f13, // per player (2 bytes apart): Mario's pose on the overworld – bit 3 swimming, bit 4 climbing
   savePrompt: 0x13ca, // set when the overworld is to show the save prompt
+  saveCopy: 0x1fa9, // the overworld's state copied to be saved ($1F02–$1F2E: owEvents … owPlayerTileY, switchPalaces …)
+  paused: 0x13d4, // in a level: paused; on the main map: looking around with Start
+  lifeExchange: 0x1b87, // the life exchange window of a 2-player game (set when L/R opens it, counts while it shows)
+  owHardcodedPath: 0x1b78, // set while Mario walks one of the game's 5 hardcoded paths ($049369)
+  owEventStep: 0x1deb, // 16-bit: the step of the event the overworld shows
   fileLevelFlags: 0x1f49, // the save file's copy of levelFlags, filled with the initial flags when a new file is made
   playerIndex: 0x0db3, // 0 Mario, 1 Luigi
   brightness: 0x0dae, mosaicDir: 0x0daf, mosaic: 0x0db0, // the screen's fade (the next game mode's start)

@@ -199,6 +199,10 @@ _Avoid_: OW sprite (for these), BOWSIE sprite (in the UI)
 **Start position**:
 Where Mario and Luigi stand when a new game begins: a submap and a tile each.
 
+**Overworld option**:
+One of Lunar Magic's "Extra Options" of the overworld the community uses (Start+Select on passed levels, Start to scroll the main map, the 5 hardcoded paths, the event path fade with the path reveal speed, the save prompt after castles and the like, saving Luigi's position, life exchange and L/R for it): a switch for the whole game that changes a few bytes of the game's code to Lunar Magic's, turned back the clean game's; one ROM edit each.
+_Avoid_: extra option, setting (for these)
+
 ### Third-party content
 
 **Package**:
