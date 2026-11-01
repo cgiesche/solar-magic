@@ -8,9 +8,9 @@
 // result, it goes on where it stood. The result learner's jobs (CONTEXT.md; probeprotocol.ts LearnJob: the sprite images,
 // the levels' uses, the sprite memory check, the animated tiles and colors, the layer 3 kinds, the tiles of the level as
 // edited, the object thumbnails, the placement preview, the jump arcs, the layer 2 motions, the overworld path kinds, the
-// prefab suggestions, the object boxes for resizing, the overworld's maps, submap views and sprite images) run here too, in lanes (one job at a time, a request replacing the
-// lane's others drops them), taking turns with the tasks; they choose whether the display data counts
-// for them (pictures: it does; the probes and tasks: it doesn't, ADR 0008).
+// prefab suggestions, the object boxes for resizing, the overworld's maps, submap views and sprite images) run here
+// too, in lanes (one job at a time, a request replacing the lane's others drops them), taking turns with the tasks;
+// they choose whether the display data counts for them (pictures: it does; the probes and tasks: it doesn't, ADR 0008).
 // After the first copy of the ROM the editor sends the ranges a change wrote: queued jobs stay, a task starts over
 // before its next step only when it read a changed byte, results are checked against the ROM as always.
 

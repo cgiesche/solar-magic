@@ -99,9 +99,10 @@ export class OverworldView {
   private eventsLabel = h('span', { class: 'ow-events-name' });
   map = 0;
   // The map as the game shows it is emulated in the probe worker (App.overworldMap): until the load of the map at the
-  // event progress comes, the map drawn last stays (last: its load; stale: something was built from another load or
-  // none, built again when it comes; afterShown: what waits for the map shown, as the game shows it)
-  private last: OwRender | null = null;
+  // event progress comes, the map drawn last stays (last: its load, of map `map`, with the maps as in the ROM then;
+  // stale: something was built from another load or none, built again when it comes; afterShown: what waits for the
+  // map shown, as the game shows it)
+  private last: { r: OwRender; map: number; rom: { l1: Uint8Array; l2: Uint16Array } } | null = null;
   private stale = false;
   private afterShown: (() => void) | null = null;
   private shownViews: Rect[] | null = null;
@@ -205,7 +206,7 @@ export class OverworldView {
   // the load of the map at the event progress, undefined while it is emulated (asked for: it is shown when it comes)
   private load(): OwRender | undefined {
     const r = this.app.overworldMap(this.map, this.progress, this.loaded);
-    if (r) this.last = r;
+    if (r) this.last = { r, map: this.map, rom: this.rom };
     return r;
   }
   private loaded = () => {
@@ -219,7 +220,7 @@ export class OverworldView {
   render(): OwRender | null {
     const r = this.load();
     if (!r) this.stale = true;
-    return r ?? this.last;
+    return r ?? this.last?.r ?? null;
   }
   // the submaps' views, as when the overworld was shown (learned in the probe worker, kept while the ROM bytes they read
   // are unchanged); null until they come
@@ -250,19 +251,22 @@ export class OverworldView {
   };
 
   // ---------------- drawing ----------------
-  // the map at the event progress; while its load is emulated the one drawn last stays
+  // the map at the event progress; while its load is emulated the last load of this map, with what was painted since
+  // (another map's: the image drawn last stays)
   redrawMap(): void {
-    const r = this.load();
-    if (!r) { this.paint(); return; }
+    const exact = this.load(), last = exact ? null : this.last?.map === this.map ? this.last : null;
+    if (!exact && !last) { this.paint(); return; }
+    const r = exact ?? last!.r, from = exact ? this.rom : last!.rom;
     const base = this.region * 0x1000, game1 = gameL1(r), game2 = gameL2(r);
-    if (this.ev && !this.ev.l1) { this.ev.l1 = game1.slice(); this.ev.game = game1.slice(); }
+    if (exact && this.ev && !this.ev.l1) { this.ev.l1 = game1.slice(); this.ev.game = game1.slice(); }
     this.shown = {
-      l1: this.ev ? this.ev.l1! : this.l1.map((t, i) => (t !== this.rom.l1[i] ? t : game1[i])),
-      l2: this.ev ? this.ev.after : this.l2.map((t, i) => (t !== this.rom.l2[i] || i < base || i >= base + 0x1000 ? t : game2[i - base])),
+      l1: this.ev?.l1 ?? this.l1.map((t, i) => (t !== from.l1[i] ? t : game1[i])),
+      l2: this.ev ? this.ev.after : this.l2.map((t, i) => (t !== from.l2[i] || i < base || i >= base + 0x1000 ? t : game2[i - base])),
     };
     const img = drawOwMap(this.app.rom, r, this.region, this.showL1 ? this.shown.l1 : undefined, this.showL2 ? this.shown.l2 : undefined);
     putImage(this.mapCanvas, img);
     this.paint();
+    if (!exact) return;
     const after = this.afterShown;
     this.afterShown = null;
     after?.();
@@ -710,6 +714,7 @@ export class OverworldView {
   setProgress(n: number): void {
     n = clampProgress(n);
     if (n === this.progress) return;
+    this.afterShown = null; // (a note for the map shown before)
     if (this.event >= 0) { this.event = -1; this.syncEvent(); this.buildBar(); }
     this.progress = n;
     storeProgress(this.app.romName, n);
@@ -919,6 +924,7 @@ export class OverworldView {
 
   setMap(n: number): void {
     if (n === this.map) return;
+    this.afterShown = null; // (a note for the map shown before)
     this.map = n;
     this.selected = -1;
     this.redrawMap();
@@ -1348,6 +1354,9 @@ export class OverworldView {
     void this.views; // (asked for now: the links, sprites and events need them)
     this.event = -1;
     this.progress = loadProgress(this.app.romName);
+    // (the map drawn last may be another ROM's: not shown while this one's load is emulated)
+    this.last = null;
+    if (!this.load()) putImage(this.mapCanvas, new Uint32Array(512 * 512));
     this.buildBar();
     this.sync();
     this.layout();
