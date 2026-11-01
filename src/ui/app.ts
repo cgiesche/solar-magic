@@ -62,6 +62,9 @@ import { LevelUses, levelOverride, usedLevels, spriteUsage, isTilesetTile, type 
 import { TILESETS, sharingTilesets } from '../core/tilesets.ts';
 import { slipperyActions } from '../core/slippery.ts';
 import { type PathKind } from '../core/owpaths.ts';
+import type { OwRender } from '../core/overworld.ts';
+import type { Rect } from '../core/owevents.ts';
+import type { OwSpriteView } from '../core/owsprites.ts';
 
 export type EditMode = 'l1' | 'l2' | 'spr' | 'exit' | 'bg' | 'l3';
 // the modes painted with a brush of tiles picked from the level or the picker: BG tiles, layer 3's 8x8 tiles
@@ -1179,6 +1182,19 @@ export class App {
   // the result cache while the game's code is unchanged; null while that runs, then `done` is called
   pathKinds(done: () => void): PathKind[] | null {
     return this.probes.learn<PathKind[]>('owpk1', { kind: 'pathKinds' }, { lane: 'owpk1', label: 'Path tiles', done }) ?? null;
+  }
+  // The overworld as emulated, learned in the probe worker and kept in memory while the ROM bytes it read are unchanged
+  // (the latest event progresses of each map): undefined while it runs, then `done` is called. Map `map` at event
+  // progress `progress` (a new request drops the one still waiting: the slider), the submaps' views, the sprites' images
+  // at a map and progress (a new request drops the one still waiting).
+  overworldMap(map: number, progress: number, done: (r: OwRender) => void): OwRender | undefined {
+    return this.probes.learn<OwRender>(`owm1:${map}`, { kind: 'owMap', map, progress }, { lane: 'ow', input: { progress }, replace: true, label: 'Overworld', done });
+  }
+  submapViews(done: (v: Rect[]) => void): Rect[] | undefined {
+    return this.probes.learn<Rect[]>('owv1', { kind: 'owViews' }, { lane: 'owv', label: 'Submap views', done });
+  }
+  overworldSprites(map: number, progress: number, done: (v: OwSpriteView[]) => void): OwSpriteView[] | undefined {
+    return this.probes.learn<OwSpriteView[]>(`ows1:${map}`, { kind: 'owSprites', map, progress }, { lane: 'ows', input: { progress }, replace: true, label: 'Overworld sprites', done });
   }
   // the levels with sprite id (spriteId), the open level as edited
   spriteUsers(id: number): SpriteUser[] {

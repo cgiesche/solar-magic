@@ -29,6 +29,7 @@ import {
   destroyEffects, l1Index,
 } from './overworld.ts';
 import { RAM, getS16 } from './ram.ts';
+import type { Job } from './jobrunner.ts';
 
 const DIVIDERS = 0x04e359; // 0x79 words: the first step of each event, the end
 const STEP_OPS = [0x04e49f, 0x04e709, 0x04ee5a], STEP_OPS2 = [0x04e4a4, 0x04e710, 0x04ee3f];
@@ -385,6 +386,10 @@ export function submapViews(loads: OverworldLoads): Rect[] {
     const w = load(k, 0).wram;
     return { x: Math.round(getS16(w, RAM.layer2X) / 8), y: Math.round(getS16(w, RAM.layer2Y) / 8), w: 32, h: 28 };
   }));
+}
+// submapViews as a job of the result learner (probe worker), one step (overworld.ts overworldMapJob)
+export function* submapViewsJob(loads: OverworldLoads): Job<Rect[]> {
+  return submapViews(loads);
 }
 // the submap a layer 1 tile is on: 0 on the main map, else the one whose view's center is nearest (as LevelEmulator's)
 export function submapOf(views: Rect[], tile: number): number {

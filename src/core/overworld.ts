@@ -15,6 +15,7 @@ import { eventDataRanges } from './owevents.ts';
 import { teleportDataRanges } from './owteleport.ts';
 import { KOOPA_X, KOOPA_Y, KOOPAS } from './owlinks.ts';
 import { START, OW_SPRITES, OW_SPRITE_SLOTS, KOOPA_KID, KOOPA_KIDS } from './owsprites.ts';
+import type { Job } from './jobrunner.ts';
 
 export const OW_L1 = 0x0cf7df; // 0x800 bytes: 2 maps × 32×32 16x16 tiles (quadrant layout)
 const L2_TILE_PTR = 0x04dc72; // LDA #$A533 operand
@@ -872,3 +873,12 @@ export class OverworldLoads {
     return true;
   }
 }
+
+// The map `map` at event progress `progress` as a job of the result learner (probe worker: the overworld view asks for
+// it there), from `loads` (the learner's own, kept between jobs). One step: the loads' emulator is shared by the
+// overworld's jobs (owSpritesJob, submapViewsJob), so none may stop halfway. Its reads go to the job's (the ROM's
+// recorder, OverworldLoads.count).
+export function* overworldMapJob(loads: OverworldLoads, map: number, progress: number): Job<OwRender> {
+  return loads.get(map, progress);
+}
+export const OW_LOADS_KEPT = 16; // emulated overworlds kept (map and event progress: a slider moved through them)

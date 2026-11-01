@@ -8,7 +8,7 @@
 // result, it goes on where it stood. The result learner's jobs (CONTEXT.md; probeprotocol.ts LearnJob: the sprite images,
 // the levels' uses, the sprite memory check, the animated tiles and colors, the layer 3 kinds, the tiles of the level as
 // edited, the object thumbnails, the placement preview, the jump arcs, the layer 2 motions, the overworld path kinds, the
-// prefab suggestions, the object boxes for resizing) run here too, in lanes (one job at a time, a request replacing the
+// prefab suggestions, the object boxes for resizing, the overworld's maps, submap views and sprite images) run here too, in lanes (one job at a time, a request replacing the
 // lane's others drops them), taking turns with the tasks; they choose whether the display data counts
 // for them (pictures: it does; the probes and tasks: it doesn't, ADR 0008).
 // After the first copy of the ROM the editor sends the ranges a change wrote: queued jobs stay, a task starts over
@@ -32,6 +32,9 @@ import { layer2MotionsJob } from './l2scroll.ts';
 import { pathKindsJob } from './owpaths.ts';
 import { KeptSuggestions, prefabSuggestionsJob } from './prefabsuggest.ts';
 import { SizeProbe, sizesJob } from './objresize.ts';
+import { OverworldEmulator, OverworldLoads, overworldMapJob, OW_LOADS_KEPT } from './overworld.ts';
+import { submapViewsJob } from './owevents.ts';
+import { owSpritesJob } from './owsprites.ts';
 import { inputHash } from './inputs.ts';
 import { jobId, jobKey, learnKeep, LEARN_KINDS, type ProbeJob, type ProbeMessage, type ProbeReply, type TaskMessage, type TaskType, type LearnJob, type LearnMessage } from './probeprotocol.ts';
 
@@ -50,8 +53,12 @@ function* found<T>(job: Generator<void, T | null>): Job<T | undefined> { return 
 
 // what learn jobs keep between them: the levels' uses (the entries of each level), the results of single sprite
 // groups (the sprite memory check's), the results of single levels of the prefab suggestions and the object boxes
-// probed in a level (dropped when the ROM changes, as the editor keeps them per ROM state); the ROM
-interface LearnState { uses: LevelUses; groups: SpriteGroupResults; suggest: KeptSuggestions; sizes: { key: string; probe: SizeProbe } | null; rom: Rom }
+// probed in a level (dropped when the ROM changes, as the editor keeps them per ROM state), the overworld's loads (each
+// kept while the ROM bytes it read are unchanged; made when first used); the ROM
+interface LearnState {
+  uses: LevelUses; groups: SpriteGroupResults; suggest: KeptSuggestions; sizes: { key: string; probe: SizeProbe } | null; ow: OverworldLoads | null; rom: Rom;
+}
+const owLoads = (state: LearnState) => (state.ow ??= new OverworldLoads(new OverworldEmulator(state.rom), OW_LOADS_KEPT));
 
 // a learn job's job; show takes what it shows while it runs (null: it started, also over)
 function learnJob(j: LearnJob, state: LearnState, show: (items: unknown[] | null) => void): JobRun<unknown>['start'] {
@@ -79,6 +86,9 @@ function learnJob(j: LearnJob, state: LearnState, show: (items: unknown[] | null
       state.sizes.probe.emu = emu;
       return sizesJob(state.sizes.probe, j.specs);
     };
+    case 'owMap': return () => overworldMapJob(owLoads(state), j.map, j.progress);
+    case 'owViews': return () => submapViewsJob(owLoads(state));
+    case 'owSprites': return () => owSpritesJob(owLoads(state), j.map, j.progress);
   }
 }
 
@@ -123,7 +133,7 @@ export class ProbeHost {
       // do (ADR 0008): the prober's emulator gets the runner's mask (gfxDisplaySkipMask)
       this.runner = new JobRunner({ rom, results: this.prober.results, noDisplay: this.prober.emu });
       const fp = this.prober.results.fp;
-      this.state = { uses: new LevelUses(rom, this.prober.results), groups: new SpriteGroupResults(fp), suggest: new KeptSuggestions(fp), sizes: null, rom };
+      this.state = { uses: new LevelUses(rom, this.prober.results), groups: new SpriteGroupResults(fp), suggest: new KeptSuggestions(fp), sizes: null, ow: null, rom };
       return;
     }
     this.rom.data = data;

@@ -11,6 +11,7 @@
 
 import type { Rom } from './rom.ts';
 import type { OverworldLoads } from './overworld.ts';
+import type { Job } from './jobrunner.ts';
 import { RAM, set16, getS16 } from './ram.ts';
 import { readPpuOam, drawTiles, tileKey, type SpriteImage } from './spritegfx.ts';
 
@@ -66,6 +67,10 @@ const SHOW_FRAMES = 3;
 // one map and progress while the ROM edits since changed no byte it read (OverworldLoads.derive)
 export function owSpriteImages(loads: OverworldLoads, map: number, progress: number): OwSpriteView[] {
   return loads.derive('owSpriteImages', () => runSprites(loads, map, progress), `${map}-${progress}`);
+}
+// owSpriteImages as a job of the result learner (probe worker), one step (overworldMapJob)
+export function* owSpritesJob(loads: OverworldLoads, map: number, progress: number): Job<OwSpriteView[]> {
+  return owSpriteImages(loads, map, progress);
 }
 function runSprites(loads: OverworldLoads, map: number, progress: number): OwSpriteView[] {
   loads.restore(map, progress);

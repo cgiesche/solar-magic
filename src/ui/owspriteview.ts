@@ -9,18 +9,18 @@ import type { OverworldView } from './overworld.ts';
 import { h, select, hexInput, emptyState } from './dom.ts';
 import { thumbCanvas } from './thumbs.ts';
 import {
-  readOwSprites, writeOwSprite, readStart, writeStart, koopaKidPos, setKoopaKidPos, owSpriteImages, OW_SPRITE_NAMES, OW_SPRITE_SLOTS, KOOPA_KIDS,
+  readOwSprites, writeOwSprite, readStart, writeStart, koopaKidPos, setKoopaKidPos, OW_SPRITE_NAMES, OW_SPRITE_SLOTS, KOOPA_KIDS,
   type OwSpriteView,
 } from '../core/owsprites.ts';
 import { KOOPA_TILE } from '../core/owlinks.ts';
 import { l1Index, MAP_NAMES } from '../core/overworld.ts';
-import { submapOf } from '../core/owevents.ts';
 import { hex } from '../core/names.ts';
 
 // what is selected or dragged: a sprite slot, a player's start, where a Koopa Kid jumps out
 type Item = { kind: 'sprite'; k: number } | { kind: 'start'; player: number } | { kind: 'koopa'; k: number };
 type Drag = { item: Item; x0: number; y0: number; dx: number; dy: number };
 const PLAYERS = ['Mario', 'Luigi'];
+const NONE_SHOWN = { views: Array.from({ length: OW_SPRITE_SLOTS }, (): OwSpriteView => ({ image: null, z: 0 })), canvases: [] as (HTMLCanvasElement | null)[] };
 const same = (a: Item | null, b: Item) => !!a && a.kind === b.kind && (a.kind === 'start' ? a.player === (b as typeof a).player : (a as { k: number }).k === (b as { k: number }).k);
 
 export class SpriteLayer {
@@ -33,12 +33,12 @@ export class SpriteLayer {
   constructor(private view: OverworldView) {}
 
   private get rom() { return this.view.app.rom; }
-  // the slots as the game shows them on the map at the event progress (emulated again when the map, the progress or
-  // a ROM byte they read changes)
+  // the slots as the game shows them on the map at the event progress (emulated in the probe worker again when the map,
+  // the progress or a ROM byte they read changes); while that runs the ones shown last (none at first: dashed boxes)
   private shown(): NonNullable<SpriteLayer['views']> {
-    const views = owSpriteImages(this.view.loads, this.view.map, this.view.progress);
-    if (this.views?.views !== views) this.views = { views, canvases: views.map((v) => (v.image ? thumbCanvas({ w: v.image.w, h: v.image.h, px: v.image.rgba }) : null)) };
-    return this.views;
+    const views = this.view.owSprites();
+    if (views && this.views?.views !== views) this.views = { views, canvases: views.map((v) => (v.image ? thumbCanvas({ w: v.image.w, h: v.image.h, px: v.image.rgba }) : null)) };
+    return this.views ?? NONE_SHOWN;
   }
   // an item's box on the map (pixels), with a drag's offset
   private box(it: Item): { x: number; y: number; w: number; h: number } | null {
@@ -144,7 +144,7 @@ export class SpriteLayer {
       this.edit(`Koopa Kid ${it.k + 1}: jumps out elsewhere`, () => setKoopaKidPos(rom, it.k, { x: (p.x + d.dx) & 0xffff, y: (p.y + d.dy) & 0xffff }));
     } else {
       const s = readStart(rom, it.player), x = Math.max(0, Math.min(31, s.x + d.dx / 16)), y = Math.max(0, Math.min(31, s.y + d.dy / 16));
-      const submap = submapOf(this.view.views, l1Index(this.view.region, x, y));
+      const submap = this.view.submapAt(l1Index(this.view.region, x, y));
       this.edit(`${PLAYERS[it.player]}'s start: moved`, () => writeStart(rom, it.player, { submap, x, y }));
     }
   }
@@ -172,7 +172,7 @@ export class SpriteLayer {
         h('div', null, h('b', null, `Sprite slot ${s.k + 1}`), h('span', { class: 'hint' }, ` · RAM slot ${s.k + 3}`)),
         h('div', { class: 'prop' }, h('label', null, 'Sprite'), select(names, sp.num, (n) => this.edit(`Overworld sprite ${s.k + 1}: ${OW_SPRITE_NAMES[n] ?? hex(n, 2)}`, () => writeOwSprite(rom, s.k, { ...sp, num: n })))),
         pos(sp.x, sp.y, (x, y) => this.edit(`Overworld sprite ${s.k + 1}: moved`, () => writeOwSprite(rom, s.k, { ...sp, x, y }))),
-        h('div', { class: 'hint' }, sp.num && !v.image ? `The game doesn't show it on ${MAP_NAMES[this.view.map]} at this event progress.` : v.z ? `Height ${hex(v.z, 2)} pixels.` : ''));
+        h('div', { class: 'hint' }, !this.view.owSprites() ? '' : sp.num && !v.image ? `The game doesn't show it on ${MAP_NAMES[this.view.map]} at this event progress.` : v.z ? `Height ${hex(v.z, 2)} pixels.` : ''));
     }
     if (s.kind === 'koopa') {
       const p = koopaKidPos(rom, s.k);

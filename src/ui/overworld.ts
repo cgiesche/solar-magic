@@ -3,7 +3,7 @@
 import type { App } from './app.ts';
 import { h, toast, select, checkbox, hexInput, attachPanZoom, zoomControl, ZOOM_MIN, ZOOM_MAX, attachRectPick, emptyState } from './dom.ts';
 import {
-  OverworldEmulator, OverworldLoads, type OwRender, gameL1, gameL2, readL1, writeL1, readL2, writeL2, l1Index, l1XY, l2Index, isLevelTile, readTranslevels, writeTranslevels,
+  type OwRender, gameL1, gameL2, readL1, writeL1, readL2, writeL2, l1Index, l1XY, l2Index, isLevelTile, readTranslevels, writeTranslevels,
   placeTile, sharedTranslevels, enterableLevels, translevelToLevel, nameCode, setNameCode, splitNameCode, joinNameCode, nameWord, levelName, NAME_PART_COUNTS, MAP_NAMES,
   translevelUse, resetTranslevel, baseEvent, setBaseEvent, eventNames, exitDirections, setExitDirection, DIR_ARROWS, DIR_NAMES, EXIT_NAMES, NO_EVENT, isNameless,
   initialFlags, setInitialFlags, FLAG, DIR_FLAGS, OW_EVENTS, revealEvents, setRevealEvents, revealAt, revealedTile, revealEventCount,
@@ -11,10 +11,11 @@ import {
 } from '../core/overworld.ts';
 import { hasMessages, isBlank, readMessage } from '../core/messages.ts';
 import {
-  readEvents, writeEvents, applyEvents, paintEvent, reorderSteps, eventRunners, eventTitle, submapViews, eventPlace, submapOf, pieceTiles, isBig, l2XY,
+  readEvents, writeEvents, applyEvents, paintEvent, reorderSteps, eventRunners, eventTitle, eventPlace, submapOf, pieceTiles, isBig, l2XY,
   paintEventL1, layer1Without, eventL1Tiles, exitChanges, type EventData, type EventRunner, type Rect, type ExitChanges,
 } from '../core/owevents.ts';
 import { isPathKind, PATH_KIND_NAMES, type PathKind } from '../core/owpaths.ts';
+import type { OwSpriteView } from '../core/owsprites.ts';
 import { LinkLayer } from './owlinkview.ts';
 import { SpriteLayer } from './owspriteview.ts';
 import { levelTeleports, locationUses, type LevelTeleport } from '../core/owlinks.ts';
@@ -96,10 +97,15 @@ export class OverworldView {
   private eventsBadge = h('div', { class: 'ow-badge' });
   private eventsSlider = h('input', { type: 'range', class: 'ow-events', min: 0, max: OW_EVENTS, step: 1 });
   private eventsLabel = h('span', { class: 'ow-events-name' });
-  emu: OverworldEmulator;
   map = 0;
-  loads: OverworldLoads;
+  // The map as the game shows it is emulated in the probe worker (App.overworldMap): until the load of the map at the
+  // event progress comes, the map drawn last stays (last: its load; stale: something was built from another load or
+  // none, built again when it comes; afterShown: what waits for the map shown, as the game shows it)
+  private last: OwRender | null = null;
+  private stale = false;
+  private afterShown: (() => void) | null = null;
   private shownViews: Rect[] | null = null;
+  private pendingTile = -1; // a tile to show (showTile) once the submaps' views are known
   // the maps as in the ROM, with the stroke being painted (written to the ROM when it ends); tls: the translevel
   // of each layer 1 tile; rom: the maps as in the ROM; shown: as the game shows them at the event progress, the
   // tiles of the stroke being painted as painted (it goes to the map before events)
@@ -119,8 +125,9 @@ export class OverworldView {
   progress = 0;
   // the event being painted (both layers shown and painted as after it), -1 none: the map before events
   event = -1;
-  // l1: layer 1 as after it (the game's at the event progress just after it), with the stroke being painted
-  private ev: { data: EventData; before: Uint16Array; after: Uint16Array; l1: Uint8Array | null; runners: Map<number, EventRunner[]> } | null = null;
+  // l1: layer 1 as after it (the game's at the event progress just after it, game; null until its load comes), with the
+  // stroke being painted
+  private ev: { data: EventData; before: Uint16Array; after: Uint16Array; l1: Uint8Array | null; game: Uint8Array | null; runners: Map<number, EventRunner[]> } | null = null;
   private hoverStep: { kind: StepKind; k: number } | null = null;
   private playing: { start: number; before: HTMLCanvasElement } | null = null;
   private timeline = h('div', { class: 'ow-timeline' });
@@ -140,8 +147,6 @@ export class OverworldView {
 
   constructor(app: App) {
     this.app = app;
-    this.emu = new OverworldEmulator(app.rom);
-    this.loads = new OverworldLoads(this.emu, RENDERS_KEPT);
     this.l1 = readL1(app.rom);
     this.l2 = readL2(app.rom);
     this.rom = { l1: this.l1.slice(), l2: this.l2.slice() };
@@ -197,19 +202,60 @@ export class OverworldView {
     return this.map > 0 ? 1 : 0;
   }
 
-  render(): OwRender {
-    return this.loads.get(this.map, this.progress);
+  // the load of the map at the event progress, undefined while it is emulated (asked for: it is shown when it comes)
+  private load(): OwRender | undefined {
+    const r = this.app.overworldMap(this.map, this.progress, this.loaded);
+    if (r) this.last = r;
+    return r;
   }
-  // the submaps' views, as when the overworld was shown (from the kept loads: emulated again only when the ROM edits
-  // since changed what they read)
-  get views(): Rect[] {
-    return (this.shownViews ??= submapViews(this.loads));
+  private loaded = () => {
+    if (!this.root.isConnected) return;
+    this.redrawMap();
+    if (this.stale) { this.stale = false; this.buildSide(); this.buildLeft(); }
+    this.updateStatus();
+  };
+  // the map's load for drawing tiles: the map at the event progress, while it is emulated the one drawn last (null:
+  // none yet)
+  render(): OwRender | null {
+    const r = this.load();
+    if (!r) this.stale = true;
+    return r ?? this.last;
   }
+  // the submaps' views, as when the overworld was shown (learned in the probe worker, kept while the ROM bytes they read
+  // are unchanged); null until they come
+  get views(): Rect[] | null {
+    return (this.shownViews ??= this.app.submapViews(this.viewsLearned) ?? null);
+  }
+  private viewsLearned = (v: Rect[]) => {
+    if (!this.root.isConnected || this.shownViews) return;
+    this.shownViews = v;
+    this.buildTimeline();
+    this.paint();
+    if (this.pendingTile >= 0) { const i = this.pendingTile; this.pendingTile = -1; this.showTile(i); }
+  };
+  // the submap layer 1 tile i is on; while the submaps' views are learned the first of its region (0 or 1): only for
+  // what is drawn, edits wait for the views (onDown)
+  submapAt(i: number): number {
+    const v = this.views;
+    return v ? submapOf(v, i) : i >= 0x400 ? 1 : 0;
+  }
+  // the sprites' images at the map and event progress (owsprites.ts), undefined while they are emulated
+  owSprites(): OwSpriteView[] | undefined {
+    return this.app.overworldSprites(this.map, this.progress, this.spritesLearned);
+  }
+  private spritesLearned = () => {
+    if (!this.root.isConnected) return;
+    this.paint();
+    if (this.mode === 'sprites') this.buildProps();
+  };
 
   // ---------------- drawing ----------------
+  // the map at the event progress; while its load is emulated the one drawn last stays
   redrawMap(): void {
-    const r = this.render(), base = this.region * 0x1000, game1 = gameL1(r), game2 = gameL2(r);
-    if (this.ev && !this.ev.l1) this.ev.l1 = game1.slice();
+    const r = this.load();
+    if (!r) { this.paint(); return; }
+    const base = this.region * 0x1000, game1 = gameL1(r), game2 = gameL2(r);
+    if (this.ev && !this.ev.l1) { this.ev.l1 = game1.slice(); this.ev.game = game1.slice(); }
     this.shown = {
       l1: this.ev ? this.ev.l1! : this.l1.map((t, i) => (t !== this.rom.l1[i] ? t : game1[i])),
       l2: this.ev ? this.ev.after : this.l2.map((t, i) => (t !== this.rom.l2[i] || i < base || i >= base + 0x1000 ? t : game2[i - base])),
@@ -217,6 +263,9 @@ export class OverworldView {
     const img = drawOwMap(this.app.rom, r, this.region, this.showL1 ? this.shown.l1 : undefined, this.showL2 ? this.shown.l2 : undefined);
     putImage(this.mapCanvas, img);
     this.paint();
+    const after = this.afterShown;
+    this.afterShown = null;
+    after?.();
   }
 
   drawL1Tile(img: Uint32Array, tc: TileCache, r: OwRender, t: number, px: number, py: number, W = 512, H = 512): void {
@@ -449,6 +498,8 @@ export class OverworldView {
     const rc = this.scroller.getBoundingClientRect();
     if (e.clientX - rc.left > this.scroller.clientWidth || e.clientY - rc.top > this.scroller.clientHeight) return;
     const c = this.cell(e);
+    // (links and moved starts are written with the submap of their tiles: not before the submaps' views are known)
+    if ((this.mode === 'links' || this.mode === 'sprites') && !this.views) return;
     if (this.mode === 'links') { if (e.button === 0) this.links.down(c.x, c.y); return; }
     if (this.mode === 'sprites') { if (e.button === 0) { const p = this.point(e); this.sprites.down(p.x, p.y); } return; }
     if (e.button === 2 || (e.button === 0 && e.shiftKey && !e.ctrlKey)) {
@@ -529,10 +580,15 @@ export class OverworldView {
       this.sync();
       return;
     }
-    // shown again at the event progress: painted tiles an event changes are on the map before events only
-    const covered = layer === 'l1' ? l1.filter((v, i) => v !== old.l1[i] && this.shown.l1[i] !== v).length
-      : l2.filter((v, i) => v !== old.l2[i] && this.shown.l2[i] !== v).length;
-    if (covered) toast(`${covered} painted tile${covered > 1 ? 's are' : ' is'} changed by events at this event progress – painting changes the map before events (fewer events: ,)`);
+    // shown again at the event progress (once its load comes): painted tiles an event changes are on the map before
+    // events only
+    const covered = () => {
+      const n = layer === 'l1' ? l1.filter((v, i) => v !== old.l1[i] && this.shown.l1[i] !== v).length
+        : l2.filter((v, i) => v !== old.l2[i] && this.shown.l2[i] !== v).length;
+      if (n) toast(`${n} painted tile${n > 1 ? 's are' : ' is'} changed by events at this event progress – painting changes the map before events (fewer events: ,)`);
+    };
+    if (this.load()) covered(); // (known at once: the ROM edit's sync drew it)
+    else this.afterShown = covered;
     if (layer !== 'l1') return;
     const added = [...sharedTranslevels(l1, tls)].filter(([tl, at]) => (before.get(tl)?.length ?? 0) < at.length);
     if (added.length) toast(`${added.map(([tl, at]) => `Level ${hex(translevelToLevel(tl), 3)} is entered from ${at.length} tiles`).join(', ')} – to move a level tile, paint over the old one.`);
@@ -542,6 +598,7 @@ export class OverworldView {
   paintAt(x: number, y: number): void {
     const b = this.brush;
     if (b.kind !== this.mode) return;
+    if (this.mode === 'l1' && this.ev && !this.ev.l1) return; // (the map after the event is still emulated)
     const n = this.mode === 'l1' ? 32 : 64;
     let changed = false;
     for (let dy = 0; dy < b.h; dy++) for (let dx = 0; dx < b.w; dx++) {
@@ -589,7 +646,9 @@ export class OverworldView {
 
   // shows layer 1 tile i (l1Index) selected, on the submap it is on
   showTile(i: number): void {
-    this.setMap(submapOf(this.views, i));
+    const views = this.views;
+    if (!views) { this.pendingTile = i; return; } // (shown when they come)
+    this.setMap(submapOf(views, i));
     this.selectTile(i, true);
   }
 
@@ -692,11 +751,13 @@ export class OverworldView {
     const e = this.event;
     if (e < 0) { this.ev = null; this.buildTimeline(); return; }
     const rom = this.app.rom, data = readEvents(rom), base = readL2(rom), before = applyEvents(base, data, 0, e);
-    this.ev = { data, before, after: applyEvents(before, data, e, e + 1), l1: null, runners: eventRunners(rom) };
+    this.ev = { data, before, after: applyEvents(before, data, e, e + 1), l1: null, game: null, runners: eventRunners(rom) };
     this.buildTimeline();
   }
+  // (null while the submaps' views are learned)
   private place(e: number) {
-    return eventPlace(this.ev!.runners, this.views, e, this.map);
+    const views = this.views;
+    return views && eventPlace(this.ev!.runners, views, e, this.map);
   }
   // the events by the level exit that runs them (by level, then exit), those no level on the map runs by number
   eventPicker(): HTMLSelectElement {
@@ -714,9 +775,10 @@ export class OverworldView {
   }
   // a stroke on layer 2 while an event is painted: its steps found again, one ROM edit
   endEventStroke(): void {
-    const rom = this.app.rom, e = this.event, after = this.ev!.after;
+    const rom = this.app.rom, e = this.event, after = this.ev!.after, place = this.place(e);
     try {
-      this.app.romEdit(`${eventTitle(this.ev!.runners, e)}: paint`, () => writeEvents(rom, paintEvent(readEvents(rom), readL2(rom), e, after, this.place(e))));
+      if (!place) throw new Error('the submaps are still being loaded, try again');
+      this.app.romEdit(`${eventTitle(this.ev!.runners, e)}: paint`, () => writeEvents(rom, paintEvent(readEvents(rom), readL2(rom), e, after, place)));
     } catch (err) {
       toast(`Not painted: ${err instanceof Error ? err.message : err}`, 'error');
       this.sync();
@@ -725,7 +787,7 @@ export class OverworldView {
   // a stroke on layer 1 while an event is painted: its layer 1 changes found again (the map after it without them
   // emulated), with the translevels of level tiles it placed where none was; one ROM edit
   endEventL1Stroke(): void {
-    const rom = this.app.rom, e = this.event, after = this.ev!.l1!, game = gameL1(this.render()), tls = this.tls;
+    const rom = this.app.rom, e = this.event, after = this.ev!.l1!, game = this.ev!.game!, tls = this.tls;
     const painted = new Set([...after.keys()].filter((i) => after[i] !== game[i]));
     try {
       this.app.romEdit(`${eventTitle(this.ev!.runners, e)}: paint layer 1`, () => {
@@ -749,7 +811,7 @@ export class OverworldView {
     this.timeline.classList.toggle('show', !!ev);
     if (!ev) { this.timeline.replaceChildren(); return; }
     const steps = ev.data.steps[e], silent = ev.data.silent[e].filter((s) => s.layer === 2);
-    const run = ev.runners.get(e)?.[0], where = MAP_NAMES[run ? submapOf(this.views, run.tile) : this.map];
+    const run = ev.runners.get(e)?.[0], where = MAP_NAMES[run ? this.submapAt(run.tile) : this.map];
     const l1 = eventL1Tiles(ev.data, e), l1Here = l1.filter((i) => (i >= 0x400) === (this.region === 1)).length;
     const hover = (kind: StepKind, k: number) => ({
       onmouseenter: () => { this.hoverStep = { kind, k }; this.paint(); },
@@ -823,8 +885,9 @@ export class OverworldView {
   play(): void {
     const ev = this.ev;
     if (!ev) return;
-    const before = document.createElement('canvas');
-    putImage(before, drawOwMap(this.app.rom, this.render(), this.region, this.showL1 ? this.shown.l1 : undefined, this.showL2 ? ev.before : undefined));
+    const before = document.createElement('canvas'), r = this.render();
+    if (!r) return;
+    putImage(before, drawOwMap(this.app.rom, r, this.region, this.showL1 ? this.shown.l1 : undefined, this.showL2 ? ev.before : undefined));
     this.playing = { start: performance.now(), before };
     const tick = () => {
       if (!this.playing) return;
@@ -984,7 +1047,7 @@ export class OverworldView {
     const r = this.render(), c = h('canvas', { width: 16, height: 16, class: 'ow-tile' }), ctx = c.getContext('2d')!;
     const id = ctx.createImageData(16, 16), px = new Uint32Array(id.data.buffer);
     px.fill(0xff181818);
-    this.drawL1Tile(px, new TileCache(r.vram, r.cgram, 0), r, t, 0, 0, 16, 16);
+    if (r) this.drawL1Tile(px, new TileCache(r.vram, r.cgram, 0), r, t, 0, 0, 16, 16);
     ctx.putImageData(id, 0, 0);
     return c;
   }
@@ -1201,6 +1264,7 @@ export class OverworldView {
 
   l1Palette(): HTMLElement {
     const r = this.render();
+    if (!r) return h('div', { class: 'hint' }, 'Loading the overworld…');
     const tc = new TileCache(r.vram, r.cgram, 0);
     const tiles = (list: number[], w: number, W: number, H: number) => {
       const c = document.createElement('canvas');
@@ -1225,6 +1289,7 @@ export class OverworldView {
 
   l2Palette(): HTMLElement {
     const r = this.render();
+    if (!r) return h('div', { class: 'hint' }, 'Loading the overworld…');
     const tc = new TileCache(r.vram, r.cgram, 0);
     const entries = (list: number[], w: number, W: number, H: number) => {
       const c = document.createElement('canvas');
@@ -1277,8 +1342,10 @@ export class OverworldView {
   }
 
   show(): void {
-    this.emu.rom = this.app.rom;
     this.shownViews = null;
+    this.pendingTile = -1;
+    this.afterShown = null;
+    void this.views; // (asked for now: the links, sprites and events need them)
     this.event = -1;
     this.progress = loadProgress(this.app.romName);
     this.buildBar();
@@ -1287,7 +1354,6 @@ export class OverworldView {
   }
 }
 
-const RENDERS_KEPT = 16; // emulated overworlds kept (map and event progress)
 const STEP_MS = 14 * 1000 / 60; // a step's path fade
 
 // the event progress kept per ROM (by its name) in the browser
