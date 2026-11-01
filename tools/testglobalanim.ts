@@ -12,7 +12,7 @@ import { Rom } from '../src/core/rom.ts';
 import { loadAsar } from '../src/core/asar.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { map16Source } from '../src/core/render.ts';
-import { levelTranslevel } from '../src/core/level.ts';
+import { levelTranslevel, loadLevel } from '../src/core/level.ts';
 import { cleanGameBytes } from '../src/core/cleangame.ts';
 import { isGlobalAnimBps, globalAnimList } from '../src/core/globalanim.ts';
 import { readGlobalList, writeGlobalList, readAltFile, writeAltFile, emptyList, exanimTiles, altFileName } from '../src/core/exanim.ts';
@@ -134,6 +134,35 @@ const upload = () => ready(inspectUpload('baserom-anim.zip', zipSync({ [BPS]: bp
   check(after?.slots.size === 1 && after.slots.get(0)!.dest === (0x8000 | 0x0700), `removed: the global list as before (${[...after?.slots.keys() ?? []].map(hx).join(' ')}) ${warnings.join(' ')}`);
   check(readAltFile(rom, 0)?.length === 0x20, `removed: ${altFileName(0)} its size before (${readAltFile(rom, 0)?.length})`);
   check(!listPackages(rom).length && romDiff(before, rom.data) === 0, `removed: the ROM as before (${romDiff(before, rom.data)} bytes differ)`);
+}
+
+// ---------- the level setup and the sample level: not the package's ----------
+
+// On-Off Blocks (its sample level with an ExAnimation, frames from its AN2) with the global animation: the
+// level setup and the sample level copy frames into level 105's Anim graphic A, the global slots theirs into
+// the global list's Anim graphic B. Those level edits are not the package's: its record is the one of an
+// install without them (the global animation's frames in B, B's size before).
+{
+  const onoff = unzipSync(new Uint8Array(readFileSync('test/fixtures/On-Off Block.zip')));
+  const record = async (setup: boolean) => {
+    const { rom, opt } = await target();
+    const own = emptyList();
+    own.altFile = 1;
+    own.slots.set(0, { type: 0x01, trigger: 0, framesLess1: 0, dest: 0x8000 | 0x0700, frames: [0] });
+    writeAltFile(rom, 1, new Uint8Array(0x20).fill(0x5a));
+    writeGlobalList(rom, own);
+    const l = new LevelEmulator(rom).load(0x105);
+    const o: InstallOptions = setup ? { ...opt, setup: true, cgram: l.cgram, wram: l.wram, sample: loadLevel(rom, 0x105) } : opt;
+    const r = await installPackage(rom, ready(inspectUpload('anim.zip', zipSync({ ...onoff, [BPS]: bps, [ALT]: alt }))), o);
+    const all = listPackages(rom);
+    // (the patches by their number: their registry ids are new each install)
+    const { id: _i, added: _a, srcId: _s, patches, ...rest } = all[0] ?? {};
+    return { ok: r.ok && all.length === 1, a: readAltFile(rom, 0)?.length ?? 0, sample: !!r.sample, pkg: all[0], rec: JSON.stringify({ ...rest, patches: patches?.length }), errors: r.errors };
+  };
+  const plain = await record(false), full = await record(true);
+  check(plain.ok && full.ok && full.sample && plain.a === 0 && full.a > 0, `installed with and without the level setup and the sample level, which copy frames into ${altFileName(0)} (${full.a}) ${full.errors.join(' ')}`);
+  check(plain.pkg?.globalAnim?.graphic?.join() === '1,32', `the global animation's frames: in ${altFileName(1)}, its size before 20 (${plain.pkg?.globalAnim?.graphic?.join()})`);
+  check(full.rec === plain.rec, `the record with the level setup and the sample level: the one without them (graphic ${full.pkg?.globalAnim?.graphic?.join()})`);
 }
 
 // ---------- the clean game's bytes no longer in the ROM ----------

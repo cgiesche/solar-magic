@@ -206,5 +206,22 @@ function teleport(rom: Rom): number | null {
     && teleport(rom) === 0x13b, `150 taken: 13B's entrance at ${hx(idx)}, its exit and teleport block lead there, 150 kept`);
 }
 
+{
+  // the package's record: its parts only – the level setup of the open level and the sample levels are
+  // level edits (removing the package keeps them), so the record is the one of an install without them
+  const record = async (o: (opt: InstallOptions) => InstallOptions) => {
+    const { rom, opt } = await target();
+    const r = await installPackage(rom, baserom, o({ ...opt, plan: planUpload(rom, baserom, opt.blank) }));
+    const all = listPackages(rom);
+    // (the patches by their number: their registry ids are new each install)
+    const { id: _i, added: _a, srcId: _s, patches, ...rest } = all[0] ?? {};
+    return { ok: r.ok && all.length === 1, samples: r.samples ?? [], rec: JSON.stringify({ ...rest, patches: patches?.length }) };
+  };
+  const plain = await record((o) => o);
+  const full = await record((o) => ({ ...o, setup: true, samples: [L('105'), L('13B')] }));
+  check(plain.ok && full.ok && full.samples.join() === [0x105, 0x13b].join(), `installed with and without the level setup and sample levels (${full.samples.map(hx).join()})`);
+  check(full.rec === plain.rec, 'the record with the level setup and sample levels: the one without them');
+}
+
 if (bad) { console.log(`${bad} failed`); process.exit(1); }
 console.log('all ok');

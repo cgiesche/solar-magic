@@ -73,7 +73,7 @@ const blank = src.fg(0x025);
 installEditorPatch(rom); enableBlocks(rom, blank);
 const opt: InstallOptions = { level: 0x105, blank, tileWords: (t) => src.fg(t), setup: false };
 const r = await installPackage(rom, inspectUpload('baserom.zip', zipSync(keep)) as ReadyPreview, opt);
-check(r.ok && !!r.pkg?.objectText, `installed, with its object names and tooltips (${r.errors.join(' ')})`);
+check(r.ok && !!r.pkg?.objectText && JSON.stringify(listPackages(rom)[0]?.objectText) === JSON.stringify(r.pkg.objectText), `installed, its object names and tooltips in its record (${r.errors.join(' ')})`);
 const name = (ext: number) => objectName(rom, 0, ext, null);
 
 // the Extended list's objects (thumbs.ts): those that draw nothing are listed for what their load changes

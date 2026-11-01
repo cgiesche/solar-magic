@@ -153,8 +153,10 @@ export function packageRemoval(r: Package): string[] {
 
 // ---------- recording a change into a package ----------
 
-// an installed package getting more, or a new one (its files kept with the editor data)
-export type PackageTarget = Package | { name: string; fileName: string; archive?: Uint8Array };
+// an installed package getting more, or a new one (its files kept with the editor data, its object names
+// and tooltips with its record)
+export type PackageTarget = Package | NewPackage;
+export interface NewPackage { name: string; fileName: string; archive?: Uint8Array; objectText?: ObjectText }
 // a project file the change placed that was there already (same content, brought by another package
 // too): it belongs to the package as well, so removing the other one keeps it
 export type Claim = (tool: ToolKind, file: string) => void;
@@ -188,8 +190,10 @@ function startRecording(rom: Rom, target: PackageTarget) {
       const old = 'id' in target ? target : null;
       // (nothing new, but the record may still change: a patch applied anew drops its old id)
       if (isEmptyParts(parts) && (!old || JSON.stringify(mergeParts(old, parts, now)) === JSON.stringify(complete(old)))) return { result, pkg: null };
-      const base: Package = old ?? { id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`, name: target.name, fileName: target.fileName, added: new Date().toISOString(), ...emptyParts() };
-      return { result, pkg: savePackage(rom, mergeParts(base, parts, now), old ? undefined : (target as { archive?: Uint8Array }).archive) };
+      const add = old ? null : target as NewPackage;
+      const base: Package = old ?? { id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`, name: target.name, fileName: target.fileName, added: new Date().toISOString(),
+        ...emptyParts(), ...(add?.objectText ? { objectText: add.objectText } : {}) };
+      return { result, pkg: savePackage(rom, mergeParts(base, parts, now), add?.archive) };
     },
   };
 }

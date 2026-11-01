@@ -29,7 +29,7 @@ import { NO_FREE_ENTRANCE } from './entrances.ts';
 import { saveLevel } from './save.ts';
 import { sampleSlots } from './pkgsamples.ts';
 import { assignSlot } from './gfxslots.ts';
-import { recordPackageChange, recordPackageChangeAsync, listPackages, packageArchive, uninstallPackage, savePackage, type Package } from './pkgreg.ts';
+import { recordPackageChange, recordPackageChangeAsync, listPackages, packageArchive, uninstallPackage, type Package } from './pkgreg.ts';
 import { uploadObjectText, objectTextNotes, isObjectTextFile } from './objtext.ts';
 import { allOrNothing } from './romedit.ts';
 import { messageRoutineTaken } from './messagedraw.ts';
@@ -274,7 +274,8 @@ function placeEntrances(rom: Rom, sample: SampleLevel, entrances: MwlSections['e
 const failed = (errors: string[], warnings: string[] = [], prints: string[] = []): InstallResult => ({ ok: false, errors, warnings, prints, pkg: null });
 
 // applies every part and records the package; ok false when it failed (run it in an edit session,
-// romedit.ts, which puts the ROM back)
+// romedit.ts, which puts the ROM back). The level setup and the sample levels come after the recording:
+// level edits, not the package's (ADR 0002), in the same edit session (one undo).
 export async function installPackage(rom: Rom, preview: ReadyPreview | ManualPreview, opt: InstallOptions): Promise<InstallResult> {
   const warnings: string[] = [];
   const prints: string[] = [];
@@ -283,65 +284,60 @@ export async function installPackage(rom: Rom, preview: ReadyPreview | ManualPre
   const before = new Rom(rom.data.slice());
   try {
     const archive = zipSync(Object.fromEntries(preview.files), { level: 9 });
-    const target = { name: preview.name, fileName: preview.fileName, archive };
+    // Lunar Magic's object names and tooltips: kept with the package, over those of packages installed before
+    const objectText = uploadObjectText(preview.files) ?? undefined;
+    const target = { name: preview.name, fileName: preview.fileName, archive, objectText };
+    const textNotes = objectText ? objectTextNotes(rom, preview.name, objectText) : [];
     let rec;
+    let ctx: InstallContext | null = null;
     if (preview.status === 'manual') {
       const a = opt.assignment ?? defaultAssignment(preview, opt.level ?? 0x105);
       rec = recordPackageChange(rom, target, (claim) => applyAssignment(rom, preview.files, a, claim));
-      warnings.push(...rec.result.warnings);
-      prints.push(...rec.result.prints);
     } else {
-      let ctx = planInstall(rom, preview, opt);
+      let c = planInstall(rom, preview, opt);
       // code playing a sound effect of the package that gets another number than the author's: its
       // define set to that number (the package's parts read anew from those files)
-      const linked = sfxLinkedFiles(preview, ctx.sfx);
+      const linked = sfxLinkedFiles(preview, c.sfx);
       if (linked) {
         const again = inspectFiles(preview.fileName, linked);
         if (again.status !== 'ready') return failed([`The package with its sound effects' numbers set: ${again.status === 'failed' ? again.reason : again.status}`]);
-        ctx = { ...planInstall(rom, again, opt), sfx: ctx.sfx };
+        c = { ...planInstall(rom, again, opt), sfx: c.sfx };
       }
-      rec = await recordPackageChangeAsync(rom, target, async (claim) => {
-        const r = await applyParts(rom, ctx, claim);
-        warnings.push(...r.warnings);
-        prints.push(...r.prints);
-        if (!r.ok) return r;
-        // the sample level needs the package's ExGFX in its slots: the level setup comes with it
-        if (opt.level !== null && (opt.setup !== false || opt.sample) && (ctx.plan.gfx.some((g) => g.slot) || ctx.plan.palettes.length || ctx.plan.exanim.length)) {
-          const s = applyLevelSetup(rom, opt.level, ctx.plan, { cgram: opt.cgram ?? null, wram: opt.wram });
-          warnings.push(...s.warnings);
-          prints.push(...s.prints);
-        }
-        if (opt.sample && preview.samples.length === 1) {
-          sample = placeSample(rom, preview, ctx, preview.samples[0], opt.sample, opt, false);
-          warnings.push(...sample.notes);
-        }
-        // sample levels at their own numbers: written (level edits of levels not open)
-        for (const f of opt.samples ?? []) {
-          const at = ctx.plan.samples.find((x) => x.file === f && !x.left)?.level ?? null;
-          if (at === null) { warnings.push(`${f}: not offered as a sample level – left out`); continue; }
-          // (one that cannot be taken over leaves the others and the package)
-          let s: SampleLevel;
-          try {
-            s = allOrNothing(rom, () => { const x = placeSample(rom, preview, ctx, f, loadLevel(rom, at), opt, true); saveLevel(rom, x.level); return x; });
-          } catch (e) { warnings.push(`Level ${hx(at)}: the sample level ${f.split('/').pop()} not taken over – ${e instanceof Error ? e.message : e}`); continue; }
-          warnings.push(...s.notes.map((t) => `Level ${hx(at)}: ${t}`));
-          prints.push(`Level ${hx(at)}: the sample level ${f.split('/').pop()}`);
-          samples.push(at);
-        }
-        return r;
-      });
+      ctx = c;
+      rec = await recordPackageChangeAsync(rom, target, (claim) => applyParts(rom, c, claim));
     }
+    warnings.push(...rec.result.warnings);
+    prints.push(...rec.result.prints);
     if (!rec.result.ok) return failed(rec.result.errors, warnings, prints);
     if (!rec.pkg) return failed(['Nothing changed – everything in the package is already in the ROM.']);
-    // Lunar Magic's object names and tooltips: kept with the package, over those of packages installed before
-    let pkg = rec.pkg;
-    const text = uploadObjectText(preview.files);
-    if (text) {
-      warnings.push(...objectTextNotes(rom, pkg.name, text));
-      pkg = savePackage(rom, { ...pkg, objectText: text });
+    warnings.push(...textNotes);
+    if (ctx && preview.status === 'ready') {
+      // the sample level needs the package's ExGFX in its slots: the level setup comes with it
+      if (opt.level !== null && (opt.setup !== false || opt.sample) && (ctx.plan.gfx.some((g) => g.slot) || ctx.plan.palettes.length || ctx.plan.exanim.length)) {
+        const s = applyLevelSetup(rom, opt.level, ctx.plan, { cgram: opt.cgram ?? null, wram: opt.wram });
+        warnings.push(...s.warnings);
+        prints.push(...s.prints);
+      }
+      if (opt.sample && preview.samples.length === 1) {
+        sample = placeSample(rom, preview, ctx, preview.samples[0], opt.sample, opt, false);
+        warnings.push(...sample.notes);
+      }
+      // sample levels at their own numbers: written (level edits of levels not open)
+      for (const f of opt.samples ?? []) {
+        const at = ctx.plan.samples.find((x) => x.file === f && !x.left)?.level ?? null;
+        if (at === null) { warnings.push(`${f}: not offered as a sample level – left out`); continue; }
+        // (one that cannot be taken over leaves the others and the package)
+        let s: SampleLevel;
+        try {
+          s = allOrNothing(rom, () => { const x = placeSample(rom, preview, ctx, f, loadLevel(rom, at), opt, true); saveLevel(rom, x.level); return x; });
+        } catch (e) { warnings.push(`Level ${hx(at)}: the sample level ${f.split('/').pop()} not taken over – ${e instanceof Error ? e.message : e}`); continue; }
+        warnings.push(...s.notes.map((t) => `Level ${hx(at)}: ${t}`));
+        prints.push(`Level ${hx(at)}: the sample level ${f.split('/').pop()}`);
+        samples.push(at);
+      }
     }
     const messages = messageRoutineTaken(before, rom);
-    return { ok: true, errors: [], warnings, prints, pkg, sample, ...(samples.length ? { samples } : {}), ...(messages ? { messages } : {}) };
+    return { ok: true, errors: [], warnings, prints, pkg: rec.pkg, sample, ...(samples.length ? { samples } : {}), ...(messages ? { messages } : {}) };
   } catch (e) {
     return failed([e instanceof Error ? e.message : String(e)], warnings, prints);
   }
