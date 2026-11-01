@@ -4,6 +4,9 @@ import { readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
 import { installEditorPatches } from '../src/core/editorpatches.ts';
 import type { Package } from '../src/core/pkgreg.ts';
+import { ResultCache, RomFingerprint } from '../src/core/romdeps.ts';
+import { JobRunner } from '../src/core/jobrunner.ts';
+import { pathKindsJob, levelTileTest, type PathKind, type LevelTileTest } from '../src/core/owpaths.ts';
 
 export const cleanImage = (): Uint8Array => new Uint8Array(readFileSync('test/fixtures/smw.smc'));
 
@@ -17,6 +20,15 @@ export async function editorImage(): Promise<Uint8Array> {
   }
   return patched.slice();
 }
+
+// the kinds of the overworld's layer 1 tiles in `rom` (owpaths.ts), the job run to its end as the result learner runs it
+export function pathKinds(rom: Rom): PathKind[] {
+  const runner = new JobRunner({ rom, results: new ResultCache(new RomFingerprint(rom)) });
+  const run = runner.run({ key: 'owpk', keep: false, picture: false, start: pathKindsJob });
+  for (;;) { const r = runner.step('owpk', run); if (r) return r.result; }
+}
+// which tiles are level tiles in `rom`, learned as the editor learns them
+export const levelTiles = (rom: Rom): LevelTileTest => levelTileTest(pathKinds(rom));
 
 // bytes that differ between two ROM images (missing bytes count as 0), not counting `skip` and the patch
 // registry (SMWA): it is rewritten into the first free space after every change, so it moves around

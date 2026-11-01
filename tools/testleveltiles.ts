@@ -7,7 +7,7 @@ import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { RomEditSession } from '../src/core/romedit.ts';
 import {
-  OverworldEmulator, readL1, writeL1, isLevelTile, readTranslevels, writeTranslevels, hasTranslevelTable,
+  OverworldEmulator, readL1, writeL1, readTranslevels, writeTranslevels, hasTranslevelTable,
   placeTile, freeTranslevel, sharedTranslevels, translevelUse, resetTranslevel, baseEvent,
   exitDirections, translevelToLevel, BASE_EVENTS, NO_EVENT, OW_EVENTS,
 } from '../src/core/overworld.ts';
@@ -15,7 +15,7 @@ import { hasMessages } from '../src/core/messages.ts';
 import { levelName, levelNameTiles, setLevelNameTiles, hasLevelName, encodeName } from '../src/core/levelnames.ts';
 import { L1_PTRS } from '../src/core/level.ts';
 import { GM, RAM } from '../src/core/ram.ts';
-import { cleanImage, editorImage } from './fixture.ts';
+import { cleanImage, editorImage, levelTiles } from './fixture.ts';
 
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
@@ -25,6 +25,7 @@ const hx = (v: number) => v.toString(16).toUpperCase();
 const clean = new Rom(cleanImage());
 const image = await editorImage();
 const patched = new Rom(image.slice());
+const isLevelTile = levelTiles(patched); // (learned as the editor learns it)
 // the translevel the clean game gives each tile (its scan, $7ED000 after loading the overworld)
 const gameTranslevels = (rom: Rom) => new OverworldEmulator(rom).load(0, 0).wram.slice(RAM.owTranslevels, RAM.owTranslevelsEnd);
 const cleanTl = gameTranslevels(clean);
@@ -78,34 +79,34 @@ function enter(emu: LevelEmulator, i: number): number | null {
   // a new level tile before every other one
   const at = [...l1.keys()].find((i) => i < first && !isLevelTile(l1[i]))!;
   const before = t.slice(), free = freeTranslevel(t);
-  placeTile(l1, t, at, 0x56);
+  placeTile(l1, t, at, 0x56, isLevelTile);
   check(free > 0 && t[at] === free && !cleanTl.includes(free), `a new level tile gets a free translevel (${hx(free)})`);
   check(tiles.every((i) => t[i] === before[i]), 'no other tile\'s translevel changed');
   // anywhere: a new level tile on every other tile changes no level tile's translevel
   const moving = [...l1.keys()].filter((i) => !isLevelTile(l1[i]) && i !== at).filter((i) => {
     const m = l1.slice(), n = before.slice();
-    placeTile(m, n, i, 0x56);
+    placeTile(m, n, i, 0x56, isLevelTile);
     return tiles.some((k) => n[k] !== before[k]);
   });
   check(!moving.length, `a new level tile on any of the ${0x800 - tiles.length} other tiles changes no other level tile (${moving.length})`);
   // painted over: freed
-  placeTile(l1, t, at, 0x00);
+  placeTile(l1, t, at, 0x00, isLevelTile);
   check(t[at] === 0 && freeTranslevel(t) === free, 'a level tile painted over: its translevel free again');
   // another level tile painted over a level tile: keeps its translevel
-  placeTile(l1, t, last, l1[last] === 0x56 ? 0x57 : 0x56);
+  placeTile(l1, t, last, l1[last] === 0x56 ? 0x57 : 0x56, isLevelTile);
   check(t[last] === cleanTl[last], 'a level tile painted over a level tile keeps its translevel');
   // moved: picked up with its translevel, placed elsewhere (both enter it), then the old one painted over
   const mv = tiles[3], to = [...l1.keys()].find((i) => i > last && !isLevelTile(l1[i]))!;
-  placeTile(l1, t, to, l1[mv], t[mv]);
-  check(sharedTranslevels(l1, t).get(cleanTl[mv])?.join() === `${mv},${to}`, 'picked up and placed: two tiles enter its translevel (warned)');
-  placeTile(l1, t, mv, 0x00);
-  check(t[to] === cleanTl[mv] && !sharedTranslevels(l1, t).size, 'moved: the new tile keeps the translevel, the old one has none');
+  placeTile(l1, t, to, l1[mv], isLevelTile, t[mv]);
+  check(sharedTranslevels(l1, t, isLevelTile).get(cleanTl[mv])?.join() === `${mv},${to}`, 'picked up and placed: two tiles enter its translevel (warned)');
+  placeTile(l1, t, mv, 0x00, isLevelTile);
+  check(t[to] === cleanTl[mv] && !sharedTranslevels(l1, t, isLevelTile).size, 'moved: the new tile keeps the translevel, the old one has none');
 
   // as a ROM edit: written, read back, undone; the game enters the moved level from its new tile, and a new
   // level tile placed before the others changes no other tile's level (the clean game's scan would shift them)
   const rom = new Rom(image.slice()), s = new RomEditSession(rom);
   const was = rom.data.slice();
-  placeTile(l1, t, at, 0x56);
+  placeTile(l1, t, at, 0x56, isLevelTile);
   s.edit('Paint layer 1', () => { writeL1(rom, l1); writeTranslevels(rom, t); });
   check(same(readTranslevels(rom), t) && same(readL1(rom), l1), 'written and read back');
   const e = new LevelEmulator(rom);
@@ -135,7 +136,7 @@ function enter(emu: LevelEmulator, i: number): number | null {
   // painted over: its level keeps its settings, a new tile prefers one that brings nothing
   const l1 = readL1(rom), t = readTranslevels(rom), del = tiles[0], tl = t[del];
   const name = levelNameTiles(rom, tl).join(), ev = baseEvent(rom, tl);
-  placeTile(l1, t, del, 0x00, 0, use);
+  placeTile(l1, t, del, 0x00, isLevelTile, 0, use);
   s.edit('Paint layer 1', () => { writeL1(rom, l1); writeTranslevels(rom, t); });
   check(levelNameTiles(rom, tl).join() === name && baseEvent(rom, tl) === ev && use(tl) === 2, `painted over: level ${hx(translevelToLevel(tl))} keeps its name and base event`);
   check(freeTranslevel(t) === tl && freeTranslevel(t, use) === 0x5d, `a new tile gets 5D, not the lower ${hx(tl)} with a level`);

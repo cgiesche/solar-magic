@@ -9,13 +9,13 @@ import { LevelEmulator } from '../src/core/levelemu.ts';
 import { PlaySession } from '../src/core/playsession.ts';
 import { RomEditSession } from '../src/core/romedit.ts';
 import {
-  OverworldEmulator, gameL1, readL1, writeL1, readTranslevels, baseEvent, OW_EVENTS, NO_EVENT, l1Index, isLevelTile,
+  OverworldEmulator, gameL1, readL1, writeL1, readTranslevels, baseEvent, OW_EVENTS, NO_EVENT, l1Index,
   hasDestroyPatch, readDestroyList, destroyEvent, setDestroyEvent, destroyEffects, destroyedAt, DESTROYS,
   readRevealList, writeRevealList, revealedTile, revealAt, setRevealEvents,
 } from '../src/core/overworld.ts';
 import { readEvents, writeEvents, paintEventL1, layer1Without, eventL1Tiles } from '../src/core/owevents.ts';
 import { GM, RAM } from '../src/core/ram.ts';
-import { cleanImage, editorImage, romDiff } from './fixture.ts';
+import { cleanImage, editorImage, romDiff, levelTiles } from './fixture.ts';
 
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
@@ -82,6 +82,7 @@ check(destroyable.length > 0, `destroyable tiles: ${destroyable.map((t) => `${hx
 // ---- a level tile destroyed by an event ----
 {
   const rom = new Rom(image.slice()), e = baseEvent(rom, TL), l1 = readL1(rom);
+  const isLevelTile = levelTiles(rom);
   const t = destroyable.find((v) => isLevelTile(v) && effects[v].length === 1 && !effects[v][0].dx && !effects[v][0].dy)!;
   l1[tile105] = t;
   writeL1(rom, l1);

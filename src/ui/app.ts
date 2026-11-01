@@ -61,7 +61,7 @@ import { emptyTriggerView, usedTriggers, initTriggers, type TriggerView, type Sl
 import { LevelUses, OpenLevelTiles, levelOverride, usedLevels, spriteUsage, isTilesetTile, type LevelTiles, type OpenTilesState, type SpriteUser } from '../core/levelusage.ts';
 import { TILESETS, sharingTilesets } from '../core/tilesets.ts';
 import { slipperyActions } from '../core/slippery.ts';
-import { type PathKind } from '../core/owpaths.ts';
+import { type PathKind, type LevelTileTest, levelTileTest } from '../core/owpaths.ts';
 import type { OwRender } from '../core/overworld.ts';
 import type { Rect } from '../core/owevents.ts';
 import type { OwSpriteView } from '../core/owsprites.ts';
@@ -1192,6 +1192,11 @@ export class App {
   // the result cache while the game's code is unchanged; null while that runs, then `done` is called
   pathKinds(done: () => void): PathKind[] | null {
     return this.probes.learn<PathKind[]>('owpk1', { kind: 'pathKinds' }, { lane: 'owpk1', label: 'Path tiles', done }) ?? null;
+  }
+  // which overworld tiles are level tiles (owpaths.ts levelTileTest), from the path tiles: null while they are learned
+  levelTileTest(done: () => void): LevelTileTest | null {
+    const kinds = this.pathKinds(done);
+    return kinds && levelTileTest(kinds);
   }
   // The overworld as emulated, learned in the probe worker and kept in memory while the ROM bytes it read are unchanged
   // (the latest event progresses of each map): undefined while it runs, then `done` is called. Map `map` at event

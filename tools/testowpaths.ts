@@ -6,9 +6,9 @@
 import { Rom, snesToPc } from '../src/core/rom.ts';
 import { RomReads, ResultCache, RomFingerprint } from '../src/core/romdeps.ts';
 import { JobRunner } from '../src/core/jobrunner.ts';
-import { pathKindsJob, PATH_KINDS, type PathKind } from '../src/core/owpaths.ts';
+import { pathKindsJob, levelTileTest, PATH_KINDS, type PathKind } from '../src/core/owpaths.ts';
 import {
-  readL1, writeL1, readL2, writeL2, readTranslevels, writeTranslevels, setInitialFlags, setExitDirection, FLAG, MAX_TRANSLEVEL,
+  readL1, writeL1, readL2, writeL2, readTranslevels, writeTranslevels, placeTile, setInitialFlags, setExitDirection, FLAG, MAX_TRANSLEVEL,
 } from '../src/core/overworld.ts';
 import { setLevelNameTiles, encodeName } from '../src/core/levelnames.ts';
 import { editorImage, cleanImage } from './fixture.ts';
@@ -52,6 +52,11 @@ check(kinds.length === 0x100, '256 tiles');
   check(kinds[0] === 'none' && Array.from({ length: 0x100 - 0x87 }, (_, k) => kinds[k + 0x87]).every((k) => k === 'none'), 'tile 00 and 87–FF: no path');
   check(kinds[0x56] === 'level' && kinds[0x80] === 'level', 'level tiles 56, 80: enter a level');
   check([0x81, 0x82, 0x86].every((t) => kinds[t] === 'stop'), 'tiles 81, 82, 86: Mario stops, enters no level');
+  const level = levelTileTest(kinds), levels = Array.from({ length: 0x100 }, (_, t) => t).filter(level);
+  // (the game's scan gives 56–80 a translevel, $04D838; A on 5F or 5B looks Mario's place up in the star and pipe
+  // places, $049161, $049184, and enters no level)
+  const want = Array.from({ length: 0x2b }, (_, k) => k + 0x56).filter((t) => t !== 0x5b && t !== 0x5f);
+  check(levels.join() === want.join(), `the level tiles: 56–80 without 5B and 5F (${levels.length})`);
 }
 
 // ---- kept while the overworld is edited ----
@@ -80,6 +85,20 @@ check(kinds.length === 0x100, '256 tiles');
   check(reads.differ(rom.data, r.data), 'the game\'s code changed: the kinds are learned again');
   const k = learn(r).kinds;
   check(k[0x05] === 'swim' && k[0x04] === 'walk', `tile 05 made a swimming tile: ${k[0x05]} (04: ${k[0x04]})`);
+}
+{
+  // where A is pressed on a tile, the editor's patch ends as the game: CMP #$81 (tiles from 81 on enter nothing);
+  // made CMP #$82, tile 81 enters a level – a level tile, so painting it gives it a translevel
+  const r = new Rom(rom.data.slice());
+  const at = Array.from({ length: 0x96 }, (_, k) => 0x03ba50 + k).find((a) => r.r8(a) === 0xc9 && r.r8(a + 1) === 0x81 && r.r8(a + 2) === 0x6b)!;
+  r.w8(at + 1, 0x82);
+  const k = learn(r).kinds, level = levelTileTest(k), before = levelTileTest(kinds);
+  check(k[0x81] === 'level' && k[0x82] === 'stop' && level(0x81) && !before(0x81), `the game entering a level from tile 81 (CMP #$82 at ${at.toString(16)}): tile 81 ${k[0x81]}, a level tile (82 ${k[0x82]})`);
+  const l1 = readL1(r), t = readTranslevels(r), i = l1.findIndex((v, j) => !t[j] && !level(v));
+  placeTile(l1, t, i, 0x81, level);
+  const l1b = readL1(rom), tb = readTranslevels(rom);
+  placeTile(l1b, tb, i, 0x81, before);
+  check(t[i] > 0 && tb[i] === 0, `tile 81 painted: a translevel there (${hx(t[i])}), none in the unpatched game`);
 }
 
 if (bad) { console.log(`${bad} failed`); process.exit(1); }

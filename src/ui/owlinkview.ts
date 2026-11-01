@@ -13,7 +13,7 @@ import {
   KOOPAS, KOOPA_TILE, type OwLink, type LinkEnd, type LinkKind,
 } from '../core/owlinks.ts';
 import { readTeleports, tileText, sameTile, type OwTile } from '../core/owteleport.ts';
-import { l1Index, l1XY, isLevelTile, DIR_NAMES, DIR_ARROWS } from '../core/overworld.ts';
+import { l1Index, l1XY, DIR_NAMES, DIR_ARROWS } from '../core/overworld.ts';
 import { isPathKind, PATH_KIND_NAMES } from '../core/owpaths.ts';
 import { ExitGraph } from '../core/exitgraph.ts';
 import { readSecondaryEntrance, levelTranslevel } from '../core/level.ts';
@@ -108,7 +108,7 @@ export class LinkLayer {
   // the level tiles of the shown region entering these levels
   private levelTiles(levels: number[]): number[] {
     const tls = new Set(levels.map((l) => levelTranslevel(this.rom, l)).filter((t) => t > 0)), base = this.view.region * 0x400, out: number[] = [];
-    for (let i = base; i < base + 0x400; i++) if (tls.has(this.view.tls[i]) && isLevelTile(this.view.l1[i])) out.push(i);
+    for (let i = base; i < base + 0x400; i++) if (tls.has(this.view.tls[i]) && this.view.isLevelTile(this.view.l1[i])) out.push(i);
     return out;
   }
 

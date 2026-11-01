@@ -10,7 +10,7 @@ import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { PlaySession } from '../src/core/playsession.ts';
 import {
-  OverworldEmulator, OverworldLoads, readTranslevels, readL1, isLevelTile, l1XY, baseEvent, setBaseEvent, eventBits, exitDirections, DIR_FLAGS, FLAG,
+  OverworldEmulator, OverworldLoads, readTranslevels, readL1, l1XY, baseEvent, setBaseEvent, eventBits, exitDirections, DIR_FLAGS, FLAG,
   OW_EVENTS, gameL1,
 } from '../src/core/overworld.ts';
 import { eventRunners } from '../src/core/owevents.ts';
@@ -18,7 +18,7 @@ import { progressSaves } from '../src/core/owprogress.ts';
 import { loadLevel, cloneLevel, newUid } from '../src/core/level.ts';
 import { saveLevel } from '../src/core/save.ts';
 import { GM, RAM, SPR, PAD, get16, getS16, marioX, marioY } from '../src/core/ram.ts';
-import { editorImage } from './fixture.ts';
+import { editorImage, levelTiles } from './fixture.ts';
 
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
@@ -112,6 +112,7 @@ const PADS = [PAD.up, PAD.down, PAD.left, PAD.right];
 
 // ---- a main map tile; no selection: the start position ----
 {
+  const isLevelTile = levelTiles(rom);
   const i = [...tls.keys()].find((k) => k < 0x400 && tls[k] && isLevelTile(l1[k]))!;
   const p = PlaySession.fromOverworld(emu, i, 0), at = l1XY(i), t = tileOf();
   const px = get16(w, RAM.owPlayerX), py = get16(w, RAM.owPlayerY), cx = getS16(w, RAM.layer1X), cy = getS16(w, RAM.layer1Y);

@@ -3,13 +3,13 @@
 // (owlinks.ts levelTeleports). Checked by emulation: every layer 1 and layer 2 tile the game changes when a level's
 // exit event passes (the overworld loaded at the event progress before and after it) is among those shown.
 import { Rom } from '../src/core/rom.ts';
-import { OverworldEmulator, gameL1, gameL2, readTranslevels, readL1, isLevelTile, translevelToLevel, l1XY } from '../src/core/overworld.ts';
+import { OverworldEmulator, gameL1, gameL2, readTranslevels, readL1, translevelToLevel, l1XY } from '../src/core/overworld.ts';
 import { exitChanges, readEvents, eventRunners } from '../src/core/owevents.ts';
 import { levelTeleports } from '../src/core/owlinks.ts';
 import { locationFor } from '../src/core/owteleport.ts';
 import { ExitGraph } from '../src/core/exitgraph.ts';
 import { readSecondaryEntrance, writeSecondaryEntrance, newOverworldExit, OW_SECRET, type ScreenExit } from '../src/core/level.ts';
-import { editorImage } from './fixture.ts';
+import { editorImage, levelTiles } from './fixture.ts';
 
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
@@ -18,6 +18,7 @@ const hx = (v: number, n = 2) => v.toString(16).toUpperCase().padStart(n, '0');
 const rom = new Rom(await editorImage());
 const emu = new OverworldEmulator(rom), d = readEvents(rom), runners = eventRunners(rom);
 const l1 = readL1(rom), tls = readTranslevels(rom);
+const isLevelTile = levelTiles(rom);
 const levels = [...new Set(tls.filter((t, i) => t && isLevelTile(l1[i])))].sort((a, b) => a - b);
 
 // ---- every level exit's changes cover what the game changes ----

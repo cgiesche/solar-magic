@@ -27,7 +27,7 @@ export function buildExitPanel(app: App, body: HTMLElement): boolean {
   const sel = app.exitMarker;
   if (sel?.kind === 'sec' && !app.entrances.inOpenLevel().includes(sel.index)) app.exitMarker = null;
   else if (sel?.kind === 'sec') { secondaryPanel(app, body, sel.index); return false; }
-  else if (sel) { mainPanel(app, body, sel.kind); return false; }
+  else if (sel) return mainPanel(app, body, sel.kind);
   return exitPanel(app, body);
 }
 
@@ -156,12 +156,15 @@ function createdIn(app: App, idx: number, level: number): void {
 }
 
 // ---- who leads here ----
-// the overworld's level tiles entering level n (a sub-level: its main level's), each opening the overworld there
-function levelTileRows(app: App, n: number): HTMLElement[] {
+// the overworld's level tiles entering level n (a sub-level: its main level's), each opening the overworld there;
+// null while the level tiles are learned (the panel is built again then)
+function levelTileRows(app: App, n: number): HTMLElement[] | null {
   const main = mainTranslevel(n), tl = main ?? levelTranslevel(app.rom, n);
   if (!tl) return [];
+  const isLevel = app.levelTileTest(() => app.emit('probes'));
+  if (!isLevel) return null;
   const via = main === null ? ` (through level ${hex3(translevelToLevel(tl))})` : '';
-  return levelTilesOf(readL1(app.rom), readTranslevels(app.rom), tl).map((i) => {
+  return levelTilesOf(readL1(app.rom), readTranslevels(app.rom), tl, isLevel).map((i) => {
     const { x, y } = l1XY(i);
     return h('div', { class: 'row' }, h('span', null, 'Overworld'), h('span', { class: 'lname' }, `level tile ${i >= 0x400 ? 'submaps' : 'main map'} ${hex2(x)},${hex2(y)}${via}`),
       h('button', { class: 'link-btn', title: 'Show the level tile on the overworld (back returns here)', onclick: () => app.gotoOverworldTile(i) }, 'open'));
@@ -213,7 +216,8 @@ function secondaryPanel(app: App, body: HTMLElement, idx: number): void {
 }
 
 // ---- main entrance / midway point ----
-function mainPanel(app: App, body: HTMLElement, kind: 'main' | 'midway'): void {
+// (whether it waits for what is learned: built again then)
+function mainPanel(app: App, body: HTMLElement, kind: 'main' | 'midway'): boolean {
   const lv = app.level, s = lv.secondary, n = lv.number;
   // changes the secondary header of the open level
   const upd = (f: (s: SecondaryHeader, lv: Level) => void) => app.editLevel((lv) => f(lv.secondary, lv));
@@ -243,10 +247,10 @@ function mainPanel(app: App, body: HTMLElement, kind: 'main' | 'midway'): void {
         : hint('Exits set to “go to midway entrance” lead to the main entrance while it has no own settings.'),
       h('div', { class: 'row' }, h('button', { onclick: () => testAt(app, 'midway', 0) }, '▶ Test here')),
     );
-    return;
+    return false;
   }
   const g = app.entrances.graph();
-  const extra = levelTileRows(app, n);
+  const rows = levelTileRows(app, n), extra = rows ?? [hint('The overworld\'s level tiles are being learned …')];
   body.append(
     h('div', { class: 'prop-title' }, 'Main entrance'),
     hint(`${spotText(mainSpot(s))} – drag the marker to move it`),
@@ -258,6 +262,7 @@ function mainPanel(app: App, body: HTMLElement, kind: 'main' | 'midway'): void {
     h('div', { class: 'row' }, h('button', { title: 'Test play from the main entrance (T)', onclick: () => testAt(app, 'main', 0) }, '▶ Test here')),
     hint('More settings (scrolling, layer 3 …) in the header dialog (H).'),
   );
+  return !rows;
 }
 
 

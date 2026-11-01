@@ -20,6 +20,7 @@ import { START, OW_SPRITES, OW_SPRITE_SLOTS, KOOPA_KID, KOOPA_KIDS, hasOwSpriteS
 import { customSpriteRanges } from './owcustom.ts';
 import { LF_SAVE_SWITCH } from './owoptions.ts';
 import type { Job } from './jobrunner.ts';
+import type { LevelTileTest } from './owpaths.ts';
 
 export const OW_L1 = 0x0cf7df; // 0x800 bytes: 2 maps × 32×32 16x16 tiles (quadrant layout)
 const L2_TILE_PTR = 0x04dc72; // LDA #$A533 operand
@@ -129,11 +130,9 @@ export function writeL2(rom: Rom, entries: Uint16Array): number {
 // Ankouno's OverworldTables.asm); the patch writes its own code there in that layout. The rest of the game's
 // routine stays: each level tile's initial flags ($04D678 by translevel) to $7ED800, then the passed events; before
 // them the event tiles' YXPCCCTT are decompressed again ($04DD40), $7F0000 being the VRAM patch's in a level.
-// Translevel 0 is no level (the scan starts at 1); a level tile has one, any other tile 0.
+// Translevel 0 is no level (the scan starts at 1); a level tile has one, any other tile 0. Which tiles are level
+// tiles the game's code decides: learned by emulation (owpaths.ts levelTileTest), passed in where it matters.
 
-export function isLevelTile(t: number): boolean {
-  return t >= 0x56 && t < 0x81;
-}
 export function translevelToLevel(t: number): number {
   return t < 0x25 ? t : t + 0xdc;
 }
@@ -206,17 +205,15 @@ export function readTranslevels(rom: Rom): Uint8Array {
 
 // the level each level tile enters (l1Index → level number) in a ROM read through `r` – another than the
 // open one, e.g. the Lunar Magic ROM a BPS makes (cleangame.ts), whose reads may throw; null without
-// Lunar Magic's translevel table
+// Lunar Magic's translevel table. The tiles the table gives a translevel: the editor gives one only to a level tile
+// (placeTile; painted on the map after an event, the one the event makes), no test of the tile needed
 export function levelTileLevels(r: RomRead): Map<number, number> | null {
   if (!hasTranslevelTable(r)) return null;
   const at = tableAt(r);
   const packed = new Proxy({} as { readonly [i: number]: number }, { get: (_, k) => r.r8(at + Number(k)) });
   const t = lz2Decompress(packed, 0).data;
   const out = new Map<number, number>();
-  for (let i = 0; i < 0x800; i++) {
-    const tile = r.r8(OW_L1 + i);
-    if (isLevelTile(tile) && t[i]) out.set(i, translevelToLevel(t[i]));
-  }
+  for (let i = 0; i < 0x800; i++) if (t[i]) out.set(i, translevelToLevel(t[i]));
   return out;
 }
 
@@ -259,28 +256,28 @@ export function freeTranslevel(t: Uint8Array, rank: (tl: number) => number = () 
   return best;
 }
 
-// paints tile v at i (l1 and t changed): a level tile takes `carried` (the translevel it was picked up from the
+// paints tile v at i (l1 and t changed): a level tile (isLevel) takes `carried` (the translevel it was picked up from the
 // map with), else keeps the one there (a level tile painted over), else gets a free one (as freeTranslevel); any
 // other tile none, so the translevel of a level tile painted over is free again (its level keeps its settings)
-export function placeTile(l1: Uint8Array, t: Uint8Array, i: number, v: number, carried = 0, rank?: (tl: number) => number): void {
+export function placeTile(l1: Uint8Array, t: Uint8Array, i: number, v: number, isLevel: LevelTileTest, carried = 0, rank?: (tl: number) => number): void {
   l1[i] = v;
-  if (!isLevelTile(v)) t[i] = 0;
+  if (!isLevel(v)) t[i] = 0;
   else if (carried) t[i] = carried;
   else if (!t[i]) t[i] = freeTranslevel(t, rank);
 }
 
 // the translevels more than one level tile enters, with their tiles
-export function sharedTranslevels(l1: Uint8Array, t: Uint8Array): Map<number, number[]> {
+export function sharedTranslevels(l1: Uint8Array, t: Uint8Array, isLevel: LevelTileTest): Map<number, number[]> {
   const tiles = new Map<number, number[]>();
-  t.forEach((n, i) => { if (n && isLevelTile(l1[i])) (tiles.get(n) ?? tiles.set(n, []).get(n)!).push(i); });
+  t.forEach((n, i) => { if (n && isLevel(l1[i])) (tiles.get(n) ?? tiles.set(n, []).get(n)!).push(i); });
   for (const [n, l] of tiles) if (l.length < 2) tiles.delete(n);
   return tiles;
 }
 
 // the layer 1 tiles (l1Index) entering translevel tl
-export function levelTilesOf(l1: ArrayLike<number>, t: ArrayLike<number>, tl: number): number[] {
+export function levelTilesOf(l1: ArrayLike<number>, t: ArrayLike<number>, tl: number, isLevel: LevelTileTest): number[] {
   const out: number[] = [];
-  for (let i = 0; i < t.length; i++) if (tl && t[i] === tl && isLevelTile(l1[i])) out.push(i);
+  for (let i = 0; i < t.length; i++) if (tl && t[i] === tl && isLevel(l1[i])) out.push(i);
   return out;
 }
 

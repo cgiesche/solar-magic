@@ -25,7 +25,7 @@ import { assemble } from './asar.ts';
 import { rleEncode } from './rle.ts';
 import { missingPatch } from './patches.ts';
 import {
-  OW_EVENTS, OverworldEmulator, type OverworldLoads, gameL1, readL1, readTranslevels, isLevelTile, baseEvent, translevelToLevel, l1XY, revealAt, revealEventCount, readDestroyList,
+  OW_EVENTS, OverworldEmulator, type OverworldLoads, gameL1, readL1, readTranslevels, baseEvent, translevelToLevel, l1XY, revealAt, revealEventCount, readDestroyList,
   destroyEffects, l1Index,
 } from './overworld.ts';
 import { RAM, getS16 } from './ram.ts';
@@ -343,12 +343,12 @@ function isReversed(steps: Piece[], d: EventData, place: EventPlace): boolean {
 // ---- which level runs an event, where it is shown ----
 
 // a level exit that runs an event: the translevel, the exit (0 normal, 1–3 the secret exits: the base event + it),
-// a layer 1 tile entering the level (l1Index)
+// a layer 1 tile entering the level (l1Index: the first the translevel table gives it, levelTileLevels)
 export interface EventRunner { tl: number; exit: number; tile: number }
 export function eventRunners(rom: Rom): Map<number, EventRunner[]> {
-  const l1 = readL1(rom), tls = readTranslevels(rom), out = new Map<number, EventRunner[]>();
+  const tls = readTranslevels(rom), out = new Map<number, EventRunner[]>();
   const tileOf = new Map<number, number>();
-  tls.forEach((tl, i) => { if (tl && isLevelTile(l1[i]) && !tileOf.has(tl)) tileOf.set(tl, i); });
+  tls.forEach((tl, i) => { if (tl && !tileOf.has(tl)) tileOf.set(tl, i); });
   for (const [tl, tile] of [...tileOf].sort((a, b) => a[0] - b[0])) {
     const b = baseEvent(rom, tl);
     for (let exit = 0; exit < 4 && b + exit < OW_EVENTS; exit++) (out.get(b + exit) ?? out.set(b + exit, []).get(b + exit)!).push({ tl, exit, tile });

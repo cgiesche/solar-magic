@@ -3,7 +3,7 @@
 import type { App } from './app.ts';
 import { h, toast, select, checkbox, hexInput, attachPanZoom, zoomControl, ZOOM_MIN, ZOOM_MAX, attachRectPick, emptyState } from './dom.ts';
 import {
-  type OwRender, gameL1, gameL2, readL1, writeL1, readL2, writeL2, l1Index, l1XY, l2Index, isLevelTile, readTranslevels, writeTranslevels,
+  type OwRender, gameL1, gameL2, readL1, writeL1, readL2, writeL2, l1Index, l1XY, l2Index, readTranslevels, writeTranslevels,
   placeTile, sharedTranslevels, enterableLevels, translevelToLevel, MAP_NAMES,
   translevelUse, resetTranslevel, baseEvent, setBaseEvent, eventNames, exitDirections, setExitDirection, DIR_ARROWS, DIR_NAMES, EXIT_NAMES, NO_EVENT,
   initialFlags, setInitialFlags, FLAG, DIR_FLAGS, OW_EVENTS, revealEvents, setRevealEvents, revealAt, revealedTile, revealEventCount,
@@ -318,11 +318,11 @@ export class OverworldView {
       ctx.stroke();
     }
     // level tile labels: the level each enters (in orange where another tile enters it too)
-    const shared = sharedTranslevels(this.l1, this.tls);
+    const shared = sharedTranslevels(this.l1, this.tls, this.isLevelTile);
     ctx.font = `bold ${8}px monospace`;
     for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
       const i = l1Index(this.region, x, y), tl = this.tls[i];
-      if (!isLevelTile(this.l1[i])) continue;
+      if (!this.isLevelTile(this.l1[i])) continue;
       ctx.fillStyle = i === this.selected ? 'rgba(76,194,255,0.85)' : shared.has(tl) || !tl ? 'rgba(230,120,0,0.85)' : 'rgba(0,0,0,0.6)';
       ctx.fillRect(x * 16, y * 16 + 10, 16, 7);
       ctx.fillStyle = '#fff';
@@ -357,9 +357,10 @@ export class OverworldView {
     }
   }
 
-  // the layer 1 tiles shown, as the game sees them (null while their kinds are learned)
+  // the kinds of the layer 1 tiles, as the game sees them (null while they are learned)
   private kinds: { gen: number; kinds: PathKind[] } | null = null;
-  private kindsLearned = () => { this.paint(); this.updateStatus(); };
+  // (the level tiles come with them: their labels, the list, the selected tile's settings)
+  private kindsLearned = () => { if (!this.root.isConnected) return; this.paint(); this.updateStatus(); this.buildSide(); this.buildLeft(); };
   pathKinds(): PathKind[] | null {
     const gen = this.app.rom.gen;
     if (this.kinds?.gen !== gen) {
@@ -369,6 +370,8 @@ export class OverworldView {
     }
     return this.kinds.kinds;
   }
+  // whether layer 1 tile t is a level tile (owpaths.ts levelTileTest; none while the path tiles are learned)
+  isLevelTile = (t: number): boolean => this.pathKinds()?.[t] === 'level';
 
   // the path tiles of the map shown, a mark per kind (as Lunar Magic's "Layer 1 Mario Paths"): walk green, climb
   // green with rungs, swim blue, exit red, stop a cross
@@ -414,7 +417,7 @@ export class OverworldView {
     ctx.lineWidth = 2 * lw;
     ctx.strokeRect(x * 16, y * 16, 16, 16);
     const tl = this.tls[i];
-    if (!isLevelTile(this.l1[i]) || !tl) return;
+    if (!this.isLevelTile(this.l1[i]) || !tl) return;
     this.paintExitResults(ctx, lw, i, tl);
     const dirs = exitDirections(this.app.rom, tl);
     const step = [[0, -1], [0, 1], [-1, 0], [1, 0]];
@@ -515,6 +518,8 @@ export class OverworldView {
     if (this.mode === 'links') { if (e.button === 0) this.links.down(c.x, c.y); return; }
     if (this.mode === 'sprites') { if (e.button === 0) { const p = this.point(e); this.sprites.down(p.x, p.y); } return; }
     if (e.button === 2 || (e.button === 0 && e.shiftKey && !e.ctrlKey)) {
+      // (a level tile painted gets a translevel: not before the level tiles are known)
+      if (this.mode === 'l1' && !this.pathKinds()) { toast('The path tiles are still being learned – layer 1 can be painted in a moment.'); return; }
       this.drag = { kind: 'paint', layer: this.mode, x0: c.x, y0: c.y, lastX: c.x, lastY: c.y };
       this.paintAt(c.x, c.y);
       return;
@@ -532,7 +537,7 @@ export class OverworldView {
     const { x, y } = this.cell(e, 16);
     if (x < 0 || y < 0 || x >= 32 || y >= 32) return;
     const i = l1Index(this.region, x, y), tl = this.tls[i];
-    if (!isLevelTile(this.l1[i]) || !tl) return;
+    if (!this.isLevelTile(this.l1[i]) || !tl) return;
     this.drag = null;
     this.selectTile(i, false);
     this.onOpenLevel(translevelToLevel(tl));
@@ -579,7 +584,7 @@ export class OverworldView {
     const rom = this.app.rom;
     if (layer === 'l2' && this.ev) { this.endEventStroke(); return; }
     if (layer === 'l1' && this.ev) { this.endEventL1Stroke(); return; }
-    const before = layer === 'l1' ? sharedTranslevels(readL1(rom), readTranslevels(rom)) : new Map<number, number[]>();
+    const before = layer === 'l1' ? sharedTranslevels(readL1(rom), readTranslevels(rom), this.isLevelTile) : new Map<number, number[]>();
     const l1 = this.l1, l2 = this.l2, tls = this.tls, old = this.rom;
     try {
       this.app.romEdit(layer === 'l1' ? 'Paint layer 1' : 'Paint layer 2', () => {
@@ -602,9 +607,9 @@ export class OverworldView {
     if (this.load()) covered(); // (known at once: the ROM edit's sync drew it)
     else this.afterShown = covered;
     if (layer !== 'l1') return;
-    const added = [...sharedTranslevels(l1, tls)].filter(([tl, at]) => (before.get(tl)?.length ?? 0) < at.length);
+    const added = [...sharedTranslevels(l1, tls, this.isLevelTile)].filter(([tl, at]) => (before.get(tl)?.length ?? 0) < at.length);
     if (added.length) toast(`${added.map(([tl, at]) => `Level ${hex(translevelToLevel(tl), 3)} is entered from ${at.length} tiles`).join(', ')} – to move a level tile, paint over the old one.`);
-    if (l1.some((v, i) => isLevelTile(v) && !tls[i])) toast('Every level (001–024, 101–13B) is already entered from a level tile – the new level tile enters none; choose its level in the properties.');
+    if (l1.some((v, i) => this.isLevelTile(v) && !tls[i])) toast('Every level (001–024, 101–13B) is already entered from a level tile – the new level tile enters none; choose its level in the properties.');
   }
 
   paintAt(x: number, y: number): void {
@@ -620,7 +625,7 @@ export class OverworldView {
       if (this.mode === 'l1' && this.ev?.l1) {
         // as after the event: the translevels stay, a level tile where none is gets one
         const i = l1Index(this.region, xx, yy), into = this.ev.l1, carried = b.tls?.[dy * b.w + dx] ?? 0;
-        const tl = isLevelTile(v) && !this.tls[i] ? carried || freeTranslevel(this.tls, (n) => translevelUse(this.app.rom, n)) : this.tls[i];
+        const tl = this.isLevelTile(v) && !this.tls[i] ? carried || freeTranslevel(this.tls, (n) => translevelUse(this.app.rom, n)) : this.tls[i];
         if (into[i] === v && tl === this.tls[i]) continue;
         into[i] = v;
         this.tls[i] = tl;
@@ -628,7 +633,7 @@ export class OverworldView {
       } else if (this.mode === 'l1') {
         const i = l1Index(this.region, xx, yy), carried = b.tls?.[dy * b.w + dx] ?? 0;
         if (this.l1[i] === v && (!carried || this.tls[i] === carried)) continue;
-        placeTile(this.l1, this.tls, i, v, carried, (tl) => translevelUse(this.app.rom, tl));
+        placeTile(this.l1, this.tls, i, v, this.isLevelTile, carried, (tl) => translevelUse(this.app.rom, tl));
         changed = true;
       } else {
         const i = l2Index(this.region, xx, yy), into = this.ev ? this.ev.after : this.l2;
@@ -645,7 +650,7 @@ export class OverworldView {
     const idx = this.mode === 'l2' ? l2Index : l1Index;
     const at = Array.from({ length: r.w * r.h }, (_, i) => idx(this.region, r.x + (i % r.w), r.y + Math.floor(i / r.w)));
     const entries = at.map((i) => src[i]);
-    this.brush = { kind: this.mode === 'l2' ? 'l2' : 'l1', w: r.w, h: r.h, entries, tls: this.mode === 'l1' ? at.map((i, k) => (isLevelTile(entries[k]) ? this.tls[i] : 0)) : undefined };
+    this.brush = { kind: this.mode === 'l2' ? 'l2' : 'l1', w: r.w, h: r.h, entries, tls: this.mode === 'l1' ? at.map((i, k) => (this.isLevelTile(entries[k]) ? this.tls[i] : 0)) : undefined };
     this.buildSide();
     this.paint();
   }
@@ -704,7 +709,7 @@ export class OverworldView {
         if (this.ev && eventL1Tiles(this.ev.data, this.event).includes(i)) t += ' (by this event)';
         else if (shown !== this.l1[i]) t += ` (by events, ${hex(this.l1[i], 2)} before)`;
         const tl = this.tls[i];
-        if (isLevelTile(this.l1[i])) t += tl ? `  ·  Level ${hex(translevelToLevel(tl), 3)} “${levelName(this.app.rom, tl)}”` : '  ·  Enters no level';
+        if (this.isLevelTile(this.l1[i])) t += tl ? `  ·  Level ${hex(translevelToLevel(tl), 3)} “${levelName(this.app.rom, tl)}”` : '  ·  Enters no level';
         const k = this.showPaths ? this.pathKinds()?.[shown] : undefined;
         if (k && isPathKind(k)) { t += `  ·  ${PATH_KIND_NAMES[k]}`; this.scroller.title = PATH_KIND_NAMES[k]; }
       }
@@ -1016,11 +1021,11 @@ export class OverworldView {
 
   // ---------------- left: level tiles of the map ----------------
   buildLeft(): void {
-    const shared = sharedTranslevels(this.l1, this.tls);
+    const shared = sharedTranslevels(this.l1, this.tls, this.isLevelTile);
     const items: HTMLElement[] = [];
     for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
       const i = l1Index(this.region, x, y), tl = this.tls[i];
-      if (!isLevelTile(this.l1[i])) continue;
+      if (!this.isLevelTile(this.l1[i])) continue;
       const lvl = translevelToLevel(tl), name = tl ? levelName(this.app.rom, tl) : '(enters no level)';
       const cur = i === this.selected, warn = shared.has(tl) || !tl;
       const el = h('div', { class: `level-item${cur ? ' current' : ''}`, title: `${name}\n${warn && tl ? 'Another level tile enters this level too\n' : ''}Click: select · Double click: open in the level editor`,
@@ -1139,8 +1144,8 @@ export class OverworldView {
   levelInfo(i: number): HTMLElement {
     const rom = this.app.rom, tl = this.tls[i], { x, y } = l1XY(i);
     const where = (k: number) => { const p = l1XY(k); return `${k >= 0x400 ? 'submaps' : 'main map'} ${hex(p.x, 2)},${hex(p.y, 2)}`; };
-    const others = levelTilesOf(this.l1, this.tls, tl).filter((k) => k !== i);
-    const onMap = (t: number) => this.tls.findIndex((v, k) => v === t && k !== i && isLevelTile(this.l1[k]));
+    const others = levelTilesOf(this.l1, this.tls, tl, this.isLevelTile).filter((k) => k !== i);
+    const onMap = (t: number) => this.tls.findIndex((v, k) => v === t && k !== i && this.isLevelTile(this.l1[k]));
     const levels = enterableLevels();
     const choose = levelPicker(this.app, tl ? translevelToLevel(tl) : levels[0], (lvl) => {
       const t = mainTranslevel(lvl)!;
@@ -1190,7 +1195,7 @@ export class OverworldView {
   // the selected tile: a level tile's settings, and for every tile the events that reveal it
   tileInfo(i: number): HTMLElement {
     const { x, y } = l1XY(i), t = this.l1[i];
-    const info = isLevelTile(t) ? this.levelInfo(i) : h('div', { class: 'ow-info' }, h('div', { class: 'hint' }, `Tile ${hex(x, 2)},${hex(y, 2)} · ${hex(t, 2)} (not a level tile)`));
+    const info = this.isLevelTile(t) ? this.levelInfo(i) : h('div', { class: 'ow-info' }, h('div', { class: 'hint' }, `Tile ${hex(x, 2)},${hex(y, 2)} · ${hex(t, 2)} (not a level tile)`));
     info.append(h('div', { class: 'row' }, h('button', { title: 'Edit which 8x8 tiles make this layer 1 tile, in the Map16 tab (M) – for every place of the tile on all maps', onclick: () => this.editTile(i) }, `Edit tile ${hex(t, 2)} in Map16 …`)),
       ...this.revealSettings(i), ...this.destroySettings(i));
     return info;
@@ -1434,4 +1439,3 @@ function storeProgress(rom: string, n: number): void {
   try { if (n) localStorage.setItem(PROGRESS_PREF + rom, String(n)); else localStorage.removeItem(PROGRESS_PREF + rom); } catch { /* no storage */ }
 }
 
-export { isLevelTile };

@@ -16,6 +16,10 @@ export const PATH_KINDS = ['walk', 'climb', 'swim', 'exit', 'stop', 'level', 'no
 export type PathKind = (typeof PATH_KINDS)[number];
 // the kinds drawn as path tiles (a level tile shows itself)
 export const isPathKind = (k: PathKind): boolean => k !== 'level' && k !== 'none';
+// whether a layer 1 tile is a level tile: one the game enters a level from (kind 'level'), as learned here – so a
+// patch changing which tiles enter levels is followed, no range of tile numbers is assumed
+export type LevelTileTest = (tile: number) => boolean;
+export const levelTileTest = (kinds: readonly PathKind[]): LevelTileTest => (t) => kinds[t] === 'level';
 export const PATH_KIND_NAMES: Record<PathKind, string> = {
   walk: 'Path: walk', climb: 'Path: climb', swim: 'Path: swim', exit: 'Path: exit to another submap',
   stop: 'Path: Mario stops, enters no level', level: 'Level tile', none: 'No path',
