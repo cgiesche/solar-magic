@@ -41,6 +41,14 @@ export function l2Index(map: number, x: number, y: number): number {
   return map * 0x1000 + ((y >> 5) * 2 + (x >> 5)) * 0x400 + (y & 31) * 32 + (x & 31);
 }
 
+// A package that replaces the whole overworld, which the overworld workspace would corrupt (ADR 0005): its name, null
+// when the overworld is the game's. Overworld Revolution (yoshifanatic) marks its ROMs with `YFOR` at $048000.
+const OW_REPLACEMENTS = [{ addr: 0x048000, sig: 'YFOR', name: 'Overworld Revolution (yoshifanatic)' }];
+export function overworldReplacement(rom: Rom): string | null {
+  for (const r of OW_REPLACEMENTS) if ([...r.sig].every((c, k) => rom.r8(r.addr + k) === c.charCodeAt(0))) return r.name;
+  return null;
+}
+
 export function readL1(rom: Rom): Uint8Array {
   return rom.bytes(OW_L1, 0x800);
 }

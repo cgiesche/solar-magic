@@ -324,6 +324,9 @@ canvas.sheet-fill { width: 100%; height: auto; image-rendering: auto; }
 .ow-timeline.show { display: block; }
 .ow-timeline-head { display: flex; align-items: center; gap: 6px; }
 .ow-timeline-head .grow { flex: 1; }
+.ow-locked { flex: 1; display: flex; align-items: center; justify-content: center; padding: 16px; overflow: auto; }
+.ow-locked-note { max-width: 520px; padding: 14px 18px; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; line-height: 1.5; }
+.ow-locked-note p { margin: 8px 0 0; color: var(--muted); }
 .ow-steps { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 5px; max-height: 64px; overflow-y: auto; }
 .ow-step { padding: 1px 7px; border: 1px solid var(--border); border-radius: 4px; background: var(--panel2); font-family: ui-monospace, monospace; cursor: grab; user-select: none; }
 .ow-step:hover { border-color: #ffd34c; }

@@ -23,6 +23,7 @@ import { viewMenu } from './ui/viewmenu.ts';
 import { LEVEL_FILE_EXT } from './core/levelfile.ts';
 import { openResources } from './ui/resources.ts';
 import { OverworldView } from './ui/overworld.ts';
+import { overworldReplacement } from './core/overworld.ts';
 import { openTestPlay } from './ui/testplay.ts';
 import { musicPlayer, LEVEL_MUSIC } from './ui/musicplayer.ts';
 import { MessagePanel, levelMessages } from './ui/messagepanel.ts';
@@ -134,6 +135,8 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
 
   let workspace: 'level' | 'ow' | 'gfx' = 'level';
   let ow: OverworldView | null = null;
+  // the package that replaced the overworld while the overworld workspace is shown locked (ADR 0005), else null
+  let owLocked: string | null = null;
   let ws: GfxWorkspace | null = null;
   const inLevel = () => workspace !== 'ow';
 
@@ -299,15 +302,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     if (from === 'ow') app.refresh();
     if (w === 'ow') {
       if (app.dirty) app.saveLevel(true);
-      if (!ow) {
-        ow = new OverworldView(app);
-        ow.onOpenLevel = async (n) => { if (await setWorkspace('level')) app.openLevel(n); };
-        ow.onNav = () => nav?.mark();
-      }
-      owRight.replaceChildren(ow.side);
-      showLayout(ow.bar, ow.left, ow.root, owRight);
-      layout.classList.add('ow-mode');
-      ow.show();
+      showOverworld();
     } else if (w === 'gfx') {
       if (!ws) { ws = new GfxWorkspace(app); ws.onNav = (jump) => nav?.mark(jump); }
       showLayout(ws.bar, left, ws.root, ws.side);
@@ -325,7 +320,36 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     return true;
   };
 
-  app.gotoOverworldTile = async (i) => { if (await setWorkspace('ow')) ow!.showTile(i); };
+  // the overworld workspace: the overworld editor, or only a note while a package replaced the overworld (ADR 0005)
+  const owLockBar = h('div', { class: 'ctxbar' });
+  const owLockLeft = h('div', { class: 'left' });
+  const owLockNote = h('div', { class: 'ow-locked' });
+  const showOverworld = () => {
+    owLocked = overworldReplacement(app.rom);
+    if (owLocked) {
+      owLockNote.replaceChildren(h('div', { class: 'ow-locked-note' },
+        h('b', {}, `The overworld is replaced by ${owLocked}.`),
+        h('p', {}, 'Its overworld has its own formats, which the overworld editor would corrupt: the overworld can\'t be edited here. Levels, graphics and everything else are edited as before.')));
+      owRight.replaceChildren();
+      showLayout(owLockBar, owLockLeft, h('div', { class: 'center' }, owLockNote), owRight);
+    } else {
+      if (!ow) {
+        ow = new OverworldView(app);
+        ow.onOpenLevel = async (n) => { if (await setWorkspace('level')) app.openLevel(n); };
+        ow.onNav = () => nav?.mark();
+      }
+      owRight.replaceChildren(ow.side);
+      showLayout(ow.bar, ow.left, ow.root, owRight);
+    }
+    layout.classList.add('ow-mode');
+    if (!owLocked) ow!.show();
+  };
+  // a package installed or removed (or undone) while the overworld workspace is shown: locked or unlocked at once
+  app.on('rom-change', () => { if (workspace === 'ow' && !!overworldReplacement(app.rom) !== !!owLocked) showOverworld(); });
+  // the overworld editor while it is shown (not while locked)
+  const owShown = () => (workspace === 'ow' && !owLocked ? ow : null);
+
+  app.gotoOverworldTile = async (i) => { if (await setWorkspace('ow')) owShown()?.showTile(i); };
 
   // the message panel takes the picker's place while it is open
   const messagePanel = new MessagePanel(app);
@@ -338,7 +362,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   // ---- browser back/forward through the places (navhistory.ts)
   let nav: NavHistory | null = null;
   const capture = (): NavLoc => {
-    if (workspace === 'ow' && ow) return { w: 'ow', map: ow.map, ...(ow.selected >= 0 ? { tile: ow.selected } : {}) };
+    if (workspace === 'ow') { const o = owShown(); return { w: 'ow', map: o?.map ?? 0, ...(o && o.selected >= 0 ? { tile: o.selected } : {}) }; }
     if (workspace === 'gfx' && ws) {
       const t = ws.tab;
       if (t === 'pal') return { w: 'gfx', tab: t, pal: ws.pal.selected };
@@ -352,7 +376,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   };
   const restore = async (l: NavLoc): Promise<boolean> => {
     if (!(await setWorkspace(l.w))) return false;
-    if (l.w === 'ow') { ow!.setMap(l.map); if (l.tile !== undefined) ow!.selectTile(l.tile, true); }
+    if (l.w === 'ow') { const o = owShown(); if (o) { o.setMap(l.map); if (l.tile !== undefined) o.selectTile(l.tile, true); } }
     else if (l.w === 'gfx') {
       if (l.tab === 'pal' && l.pal !== undefined) ws!.showPalette(l.pal >> 4, l.pal & 15);
       else if (l.tab === 'map16' && l.m16 !== undefined) ws!.showMap16(l.m16, l.bg);
@@ -423,7 +447,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
       return;
     }
     if (workspace === 'ow') {
-      if (ow?.key(e)) e.preventDefault();
+      if (owShown()?.key(e)) e.preventDefault();
       else if (k === 'Escape') void setWorkspace('level');
       return;
     }
