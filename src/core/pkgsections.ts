@@ -244,8 +244,8 @@ const music = listSection((rom) => (tryLoad(() => loadMusicProject(rom))?.songs 
   const r = await saveMusicProject(rom, p);
   if (!r.ok) throw new Error(`Music: ${r.errors.join(' ')}`);
   for (let l = 0; l < 0x200; l++) if (nums.includes(levelMusic(rom, l)) && !p.songs.some((s) => s.num === levelMusic(rom, l))) setLevelMusic(rom, l, 0);
-  const left = submapSongs(rom, p);
-  for (let i = 0; i < SUBMAPS; i++) if (nums.includes(submapMusic(rom, i)) && !left.some((s) => s.num === submapMusic(rom, i))) setSubmapMusic(rom, i, defaultSubmapMusic(rom, i));
+  const remaining = submapSongs(rom, p);
+  for (let i = 0; i < SUBMAPS; i++) if (nums.includes(submapMusic(rom, i)) && !remaining.some((s) => s.num === submapMusic(rom, i))) setSubmapMusic(rom, i, defaultSubmapMusic(rom, i));
   return r.warnings;
 }, (p) => count(p.length, 'Song', 'songs'), (p) => (!p.length ? null : `${p.length > 1 ? 'songs' : 'the song'} (AddmusicK inserts the music again)`));
 

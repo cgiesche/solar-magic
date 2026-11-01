@@ -23,7 +23,6 @@ const hx = (v: number) => v.toString(16).toUpperCase().padStart(2, '0');
 const songs = (rom: Rom) => Array.from({ length: SUBMAPS }, (_, i) => submapMusic(rom, i));
 const table = (rom: Rom, t: number) => Array.from({ length: SUBMAPS }, (_, i) => rom.r8(t + i));
 const list = (a: number[]) => a.map(hx).join(' ');
-const AMK_CUR = 0x1b000; // AddmusicK's current song ($7FB000)
 
 // The song the game plays on each submap: the last one written to $1DFB (the original driver: the request port) or
 // AddmusicK's current song, after the overworld loaded there (load) and after Mario walked from the main map onto
@@ -32,8 +31,8 @@ function played(rom: Rom): { load: number[]; walk: number } {
   const emu = new LevelEmulator(rom), s = emu.snes, w = s.wram, cpu = s.cpu, amk = hasAmk(rom);
   let last = 0;
   const exec = cpu.exec.bind(cpu);
-  cpu.exec = (op: number) => { exec(op); if (w[0x1dfb]) last = w[0x1dfb]; };
-  const song = () => (amk ? w[AMK_CUR] : last);
+  cpu.exec = (op: number) => { exec(op); if (w[RAM.musicRequest]) last = w[RAM.musicRequest]; };
+  const song = () => (amk ? w[RAM.amkSong] : last);
   emu.startGameAt(-1);
   const ow = s.saveState(), load: number[] = [];
   for (let k = 0; k < SUBMAPS; k++) {

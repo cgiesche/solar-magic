@@ -21,7 +21,7 @@ import { loadProject, saveProject } from '../src/core/uberproject.ts';
 import { ALL } from '../src/core/uberasm.ts';
 import { loadBlockProject, saveBlockProject } from '../src/core/blocks.ts';
 import { loadPixiProject, savePixiProject } from '../src/core/pixi.ts';
-import { loadMusicProject } from '../src/core/music.ts';
+import { loadMusicProject, hasAmk, submapMusic, setSubmapMusic, defaultSubmapMusic } from '../src/core/music.ts';
 import { loadLevel, newUid } from '../src/core/level.ts';
 import { saveLevel } from '../src/core/save.ts';
 import { levelMusic, setLevelMusic, installEditorPatch, customPalette, DM16_EXT } from '../src/core/patches.ts';
@@ -231,6 +231,16 @@ sameRom('graphics removed');
 // a song: inserted with AddmusicK, set for the current level
 const rm = await install(inspectUpload('Square Test.zip', testSongZip()));
 check(rm.ok && loadMusicProject(rom)?.songs.length === 1 && levelMusic(rom, 0x105) === loadMusicProject(rom)!.songs[0].num, 'song inserted and set for level 105');
+// a second song set for Yoshi's Island (music per submap), its package removed: the map gets its own song back,
+// AddmusicK stays for the first
+{
+  const r2 = await install(inspectUpload('Second Test.zip', testSongZip()), { level: null });
+  const song = loadMusicProject(rom)?.songs.find((s) => s.num !== loadMusicProject(rom)!.songs[0].num)?.num ?? -1;
+  setSubmapMusic(rom, 1, song);
+  await removePackage(rom, r2.pkg!.id, opts.blank);
+  check(r2.ok && song > 0 && hasAmk(rom) && submapMusic(rom, 1) === defaultSubmapMusic(rom, 1),
+    `second song's package removed: Yoshi's Island back to its own song (${submapMusic(rom, 1).toString(16)})`);
+}
 await removePackage(rom, rm.pkg!.id, opts.blank);
 sameRom('song removed');
 

@@ -527,11 +527,14 @@ async function insertProject(rom: Rom, p: MusicProject): Promise<MusicResult> {
   // a song chosen later doesn't count as a change of its code
   for (const t of [SUBMAP_MUSIC, SUBMAP_MUSIC_SWITCH]) out.set(input.subarray(snesToPc(t), snesToPc(t) + SUBMAPS), snesToPc(t));
   // what AddmusicK wrote: every changed byte, runs closer than 16 bytes joined
+  // (a run is never joined over the submaps' songs)
   const written: [number, number][] = [];
+  const tables = [SUBMAP_MUSIC, SUBMAP_MUSIC_SWITCH].map((t) => snesToPc(t));
+  const across = (a: number, b: number) => tables.some((t) => t < b && t + SUBMAPS > a);
   for (let i = 0; i < top; i++) {
     if (i < input.length && out[i] === input[i]) continue;
     const last = written[written.length - 1];
-    if (last && i - (last[0] + last[1]) < 16) last[1] = i + 1 - last[0];
+    if (last && i - (last[0] + last[1]) < 16 && !across(last[0] + last[1], i)) last[1] = i + 1 - last[0];
     else written.push([i, 1]);
   }
   const archive = projectToZip(p);

@@ -87,6 +87,8 @@ export const RAM = {
   midwayScreen: 0x13cd, // the level's midway screen: its tape sets the checkpoint unless it is 0
   entranceAction: 0x192a, // what Mario does when he enters (pipe, door, …)
   levelMusic: 0x0dda, // song of the level; the game doesn't restart it when the next level has the same
+  musicRequest: 0x1dfb, // a song the game asks the sound driver to play (0: none)
+  amkSong: 0x1b000, // AddmusicK's current song ($7FB000, its !FreeRAM)
   screenExitLo: 0x19b8, screenExitHi: 0x19d8, // per screen
   useSecondaryExit: 0x1b93,
   backdrop: 0x0701, // 16-bit color

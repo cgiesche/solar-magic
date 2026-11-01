@@ -295,7 +295,7 @@ export function musicPane(app: App, changed: () => void): Pane {
       h('p', { class: 'hint' }, `Level ${hex(lv, 3)} plays song ${songHex(cur.num)}${cur.own ? ' (set for the level)' : ` (header music ${app.level.header.music})`}. `
         + '▶ plays a song in this level as the game does; “Level” makes it the music of the level (instead of its header music).'),
       h('table', { class: 'uber-table music-table' },
-        h('tr', null, h('th'), h('th', null, 'No.'), h('th', null, 'Song'), h('th', null, 'Type'), h('th', null, 'Volume'), h('th', null, 'Set for'), h('th', null, 'Package'), h('th')),
+        h('tr', null, h('th'), h('th', null, 'No.'), h('th', null, 'Song'), h('th', null, 'Type'), h('th', null, 'Volume'), h('th', null, 'Set for levels / maps'), h('th', null, 'Package'), h('th')),
         songs.map((s) => {
           const ls = users.get(s.num) ?? [];
           const ps = s.kind === 'custom' && entry ? proj.songs.find((x) => x.num === s.num) : undefined;
