@@ -4,6 +4,8 @@
 // those of the overworld loaded directly; the editor's thread loads no overworld (with a worker); a result asked again
 // is known at once (memory), also after a ROM edit it didn't read, a layer 1 edit asks again; requests for the slider's
 // event progresses replace each other (only the latest is loaded); without a worker it all runs on the main thread.
+// The save at an event progress (#255, owprogress.ts progressSaves; owSave, App.progressSave) too: as learned
+// directly, another progress known without emulating again, without a worker on the main thread.
 import { Rom } from '../src/core/rom.ts';
 import { ProbeHost } from '../src/core/probehost.ts';
 import type { LearnJob, ProbeMessage, ProbeReply } from '../src/core/probeprotocol.ts';
@@ -13,6 +15,7 @@ import { loadLevel, L2_PTRS } from '../src/core/level.ts';
 import { OverworldEmulator, OverworldLoads, readL1, writeL1, l1Index, type OwRender } from '../src/core/overworld.ts';
 import { submapViews, type Rect } from '../src/core/owevents.ts';
 import { owSpriteImages, type OwSpriteView } from '../src/core/owsprites.ts';
+import { progressSaves, type ProgressSave } from '../src/core/owprogress.ts';
 import { editorImage } from './fixture.ts';
 
 const file = await editorImage();
@@ -62,8 +65,10 @@ function editor(worker: Worker | null) {
   const views = (done: (v: Rect[]) => void = () => {}) => client.learn<Rect[]>('owv1', { kind: 'owViews' }, { lane: 'owv', done });
   const sprites = (m: number, progress: number, done: (v: OwSpriteView[]) => void = () => {}) =>
     client.learn<OwSpriteView[]>(`ows1:${m}`, { kind: 'owSprites', map: m, progress }, { lane: 'ows', input: { progress }, replace: true, done });
+  const save = (progress: number, done: (v: ProgressSave) => void = () => {}) =>
+    client.learn<ProgressSave>('owps1', { kind: 'owSave', progress }, { lane: 'owps', input: { progress }, replace: true, done });
   const drain = () => { while (steps.length) steps.shift()!(); };
-  return { rom, client, map, views, sprites, drain };
+  return { rom, client, map, views, sprites, save, drain };
 }
 
 const sameRender = (a: OwRender | undefined, b: OwRender) =>
@@ -71,7 +76,7 @@ const sameRender = (a: OwRender | undefined, b: OwRender) =>
 const text = (v: unknown) => JSON.stringify(v, (_k, x) => (x instanceof Uint8Array || x instanceof Uint32Array ? Array.from(x) : x));
 
 const directRom = new Rom(file.slice()), directLoads = new OverworldLoads(new OverworldEmulator(directRom), 16);
-const direct = { main: directLoads.get(0, 0x10), yi: directLoads.get(1, 0), views: submapViews(directLoads), sprites: owSpriteImages(directLoads, 0, 0x10) };
+const direct = { main: directLoads.get(0, 0x10), yi: directLoads.get(1, 0), views: submapViews(directLoads), sprites: owSpriteImages(directLoads, 0, 0x10), saves: progressSaves(directLoads) };
 loadsHere = 0;
 
 // with a worker
@@ -103,6 +108,20 @@ loadsHere = 0;
   check(text(views) === text(direct.views) && views!.length === 7, `the submaps' views: as found directly (${text(views?.[1])})`);
   check(text(sprites) === text(direct.sprites) && sprites!.some((s) => s.image), 'the sprites on the main map at progress 10: as found directly');
 
+  // the save at an event progress
+  let saved: ProgressSave | undefined;
+  check(e.save(0x20, (v) => (saved = v)) === undefined, 'the save at event progress 20: asked for');
+  await settle();
+  w.run();
+  check(text(saved) === text(direct.saves[0x20]) && saved!.eventsTriggered === 0x20 && loadsHere === 0, `the save: as learned directly (${saved?.eventsTriggered} events triggered), not on the main thread`);
+  const loaded = loadsThere;
+  let other: ProgressSave | undefined;
+  e.save(0x30, (v) => (other = v));
+  await settle();
+  w.run();
+  check(text(other) === text(direct.saves[0x30]) && loadsThere === loaded && text(e.save(0x20)) === text(direct.saves[0x20]),
+    'another progress: without emulating again; the first known at once');
+
   // a ROM edit the loads didn't read (the internal name) keeps them, painting layer 1 asks again
   e.rom.writeAt(0x7fc0, Uint8Array.of(e.rom.data[0x7fc0] ^ 1));
   check(sameRender(e.map(1, 0), direct.yi) && !!e.views() && !!e.sprites(0, 0x10), 'an edit nothing read: all known at once');
@@ -121,10 +140,13 @@ loadsHere = 0;
   const e = editor(null);
   let got: OwRender | undefined, views: Rect[] | undefined;
   e.map(0, 0x10, (r) => (got = r));
+  let saved: ProgressSave | undefined;
   e.views((v) => (views = v));
+  e.save(0x20, (v) => (saved = v));
   await settle();
   e.drain();
-  check(sameRender(got, direct.main) && text(views) === text(direct.views) && loadsHere > 0, 'without a worker: the map and the views on the main thread, as loaded directly');
+  check(sameRender(got, direct.main) && text(views) === text(direct.views) && text(saved) === text(direct.saves[0x20]) && loadsHere > 0,
+    'without a worker: the map, the views and the save on the main thread, as learned directly');
 }
 
 console.log(bad ? `${bad} failures` : 'all ok');

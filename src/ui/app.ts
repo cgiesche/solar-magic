@@ -65,6 +65,7 @@ import { type PathKind } from '../core/owpaths.ts';
 import type { OwRender } from '../core/overworld.ts';
 import type { Rect } from '../core/owevents.ts';
 import type { OwSpriteView } from '../core/owsprites.ts';
+import type { ProgressSave } from '../core/owprogress.ts';
 import type { Map16Target } from './gfx/map16tab.ts';
 
 export type EditMode = 'l1' | 'l2' | 'spr' | 'exit' | 'bg' | 'l3';
@@ -1207,6 +1208,12 @@ export class App {
   // at a map and progress (a new request drops the one still waiting).
   overworldMap(map: number, progress: number, done: (r: OwRender) => void): OwRender | undefined {
     return this.probes.learn<OwRender>(`owm1:${map}`, { kind: 'owMap', map, progress }, { lane: 'ow', input: { progress }, replace: true, label: 'Overworld', done });
+  }
+  // the save at an event progress (owprogress.ts progressSaves: the level flags, switch palaces and events triggered
+  // the game has then), learned in the probe worker and kept in memory while the ROM bytes it read are unchanged:
+  // undefined while it runs, then `done` is called (`failed`: it could not be learned)
+  progressSave(progress: number, done: (v: ProgressSave) => void, failed?: () => void): ProgressSave | undefined {
+    return this.probes.learn<ProgressSave>('owps1', { kind: 'owSave', progress }, { lane: 'owps', input: { progress }, replace: true, label: 'Overworld progress', done, failed });
   }
   submapViews(done: (v: Rect[]) => void): Rect[] | undefined {
     return this.probes.learn<Rect[]>('owv1', { kind: 'owViews' }, { lane: 'owv', label: 'Submap views', done });

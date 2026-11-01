@@ -35,6 +35,7 @@ import { SizeProbe, sizesJob } from './objresize.ts';
 import { OverworldEmulator, OverworldLoads, overworldMapJob, OW_LOADS_KEPT } from './overworld.ts';
 import { submapViewsJob } from './owevents.ts';
 import { owSpritesJob, owCustomJob, owLooksJob } from './owsprites.ts';
+import { progressSaveJob } from './owprogress.ts';
 import { inputHash } from './inputs.ts';
 import { jobId, jobKey, learnKeep, LEARN_KINDS, type ProbeJob, type ProbeMessage, type ProbeReply, type TaskMessage, type TaskType, type LearnJob, type LearnMessage } from './probeprotocol.ts';
 
@@ -91,6 +92,7 @@ function learnJob(j: LearnJob, state: LearnState, show: (items: unknown[] | null
     case 'owSprites': return () => owSpritesJob(owLoads(state), j.map, j.progress);
     case 'owCustom': return () => owCustomJob(owLoads(state), j.map, j.progress);
     case 'owLooks': return () => owLooksJob(owLoads(state), j.ids);
+    case 'owSave': return () => progressSaveJob(owLoads(state), j.progress);
   }
 }
 

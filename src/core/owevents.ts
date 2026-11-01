@@ -26,7 +26,7 @@ import { rleEncode } from './rle.ts';
 import { missingPatch } from './patches.ts';
 import {
   OW_EVENTS, OverworldEmulator, type OverworldLoads, gameL1, readL1, readTranslevels, isLevelTile, baseEvent, translevelToLevel, l1XY, revealAt, revealEventCount, readDestroyList,
-  destroyEffects, l1Index, exitDirections, DIR_FLAGS, FLAG,
+  destroyEffects, l1Index,
 } from './overworld.ts';
 import { RAM, getS16 } from './ram.ts';
 import type { Job } from './jobrunner.ts';
@@ -347,18 +347,6 @@ export function eventRunners(rom: Rom): Map<number, EventRunner[]> {
   }
   // the normal exits first
   for (const l of out.values()) l.sort((a, b) => a.exit - b.exit || a.tl - b.tl);
-  return out;
-}
-// The level flags ($1EA2, ram.ts levelFlags) a game at event progress `progress` (events 0 … progress-1 passed) has
-// beyond a new file's, by translevel: each level on the map whose exit ran a passed event is passed, the path in
-// that exit's direction open (EXIT_DIRS) – what the game sets when a player passes it. An event's runners as
-// eventTitle names them: the levels whose exit of the lowest number runs it (a normal exit before a secret one)
-export function progressLevelFlags(rom: Rom, progress: number, runners = eventRunners(rom)): Map<number, number> {
-  const out = new Map<number, number>();
-  for (const [e, rs] of runners) {
-    if (e >= progress) continue;
-    for (const r of rs) if (r.exit === rs[0].exit) out.set(r.tl, (out.get(r.tl) ?? 0) | FLAG.passed | DIR_FLAGS[exitDirections(rom, r.tl)[r.exit]]);
-  }
   return out;
 }
 // What passing translevel tl changes on the overworld, per exit (0 normal, 1–3 the secret exits) whose event is the

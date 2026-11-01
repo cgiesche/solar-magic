@@ -10,6 +10,7 @@ import { PlaySession } from '../core/playsession.ts';
 import { hex } from '../core/names.ts';
 import type { StartEntrance } from '../core/level.ts';
 import { l1XY, OW_EVENTS } from '../core/overworld.ts';
+import type { ProgressSave } from '../core/owprogress.ts';
 import { Apu, apuReady, loadApu } from '../core/apu.ts';
 import { AudioOut } from './audio.ts';
 import { musicPlayer } from './musicplayer.ts';
@@ -77,32 +78,39 @@ const saveSlot = new SaveSlot<SnesState>();
 // where test play starts: the open level (at: Mario's start tile instead of the main entrance, with the camera
 // start, options and action of the entrance played from – PlaySession.test; show: a message box open once the level
 // runs, messages.ts messageToShow; yoshi: Mario brings Yoshi along), or the overworld (a new game at the event
-// progress, Mario on layer 1 tile `tile` – < 0: at the start position; PlaySession.fromOverworld; showLevel: shows a
-// tile of a level in the level editor, when a moment of the meters is shown)
+// progress with its save – owprogress.ts, none: a new file's –, Mario on layer 1 tile `tile` – < 0: at the start
+// position; PlaySession.fromOverworld; showLevel: shows a tile of a level in the level editor, when a moment of the
+// meters is shown)
 type Start = { tx: number; ty: number; entrance?: StartEntrance };
 type ShowMessage = { message: number; yoshi: boolean };
 type ShowLevel = (level: number, at: { x: number; y: number }) => void;
-type Origin = { kind: 'level'; at?: Start; show?: ShowMessage } | { kind: 'overworld'; tile: number; progress: number; showLevel: ShowLevel };
+type Origin = { kind: 'level'; at?: Start; show?: ShowMessage } | { kind: 'overworld'; tile: number; progress: number; save?: ProgressSave; showLevel: ShowLevel };
 
 // fromSave: from the savestate instead of the start (when there is a usable one)
 export function openTestPlay(app: App, at?: Start, fromSave = false, show?: ShowMessage): void {
   begin(app, { kind: 'level', at, show }, fromSave);
 }
-// the game from the overworld: events 0 … progress-1 passed (the overworld view's event progress), Mario on layer 1
-// tile `tile` (l1Index; < 0: at the start position); the levels entered from there are the ROM's
-export function openOverworldTestPlay(app: App, tile: number, progress: number, showLevel: ShowLevel, fromSave = false): void {
-  begin(app, { kind: 'overworld', tile, progress, showLevel }, fromSave);
+// the game from the overworld: events 0 … progress-1 passed (the overworld view's event progress) with the save
+// learned for it (App.progressSave), Mario on layer 1 tile `tile` (l1Index; < 0: at the start position); the levels
+// entered from there are the ROM's
+// (save: while it is being learned, what gives it: the test starts then, the sound started within the key press)
+export function openOverworldTestPlay(app: App, tile: number, progress: number, save: ProgressSave | Promise<ProgressSave | undefined> | undefined, showLevel: ShowLevel, fromSave = false): void {
+  const o: Origin = { kind: 'overworld', tile, progress, showLevel };
+  if (save instanceof Promise) begin(app, o, fromSave, save.then((v) => { o.save = v; }));
+  else begin(app, { ...o, save }, fromSave);
 }
 
-function begin(app: App, o: Origin, fromSave: boolean): void {
+// (ready: what the start waits for besides the sound emulator)
+function begin(app: App, o: Origin, fromSave: boolean, ready?: Promise<void>): void {
   // saved first: the game loads the level from the ROM again when Mario dies and enters it again
   if (app.dirty) app.saveLevel(true);
   // the game plays its own music
   musicPlayer.stop();
   // the sound emulator loads once; the audio context must start within the key press or click
   const audio = new AudioOut(AUDIO_LEAD);
-  if (!apuReady()) {
-    loadApu().then(() => start(app, o, audio, fromSave), () => start(app, o, audio, fromSave));
+  if (!apuReady() || ready) {
+    const go = () => start(app, o, audio, fromSave);
+    Promise.all([apuReady() ? undefined : loadApu().catch(() => {}), ready]).then(go, go);
     return;
   }
   start(app, o, audio, fromSave);
@@ -129,7 +137,7 @@ function start(app: App, o: Origin, audio: AudioOut, fromSave: boolean): void {
     });
     ok = p.render?.ok === true;
   } else {
-    try { p = PlaySession.fromOverworld(emu, o.tile, o.progress); } catch (e) { p = PlaySession.resume(emu); ok = false; toast(`The overworld did not load: ${e instanceof Error ? e.message : e}`, 'error'); }
+    try { p = PlaySession.fromOverworld(emu, o.tile, o.progress, o.save); } catch (e) { p = PlaySession.resume(emu); ok = false; toast(`The overworld did not load: ${e instanceof Error ? e.message : e}`, 'error'); }
   }
   const ppu = p.attachPPU();
   // with the PPU attached: the frame on screen is part of the state

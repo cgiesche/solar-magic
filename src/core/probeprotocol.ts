@@ -62,8 +62,9 @@ export type ProbeReply = ProbeDone | KindsDone | ScanDone | CameraDone | Learned
 // is loaded with), what the layer 2 scroll settings do in a level (l2scroll.ts), what Mario does on each overworld
 // layer 1 tile (owpaths.ts), the prefab suggestions (prefabsuggest.ts; open: the open level as edited) and the boxes
 // of objects at sizes (objresize.ts; layer2Pointer: the level's layer 2 objects as the probe loads take them); the
-// overworld's map at an event progress (overworld.ts overworldMapJob), the submaps' views (owevents.ts submapViews) and
-// the overworld sprites' images at a map and event progress (owsprites.ts owSpriteImages)
+// overworld's map at an event progress (overworld.ts overworldMapJob), the submaps' views (owevents.ts submapViews),
+// the overworld sprites' images at a map and event progress (owsprites.ts owSpriteImages) and the save at an event
+// progress (owprogress.ts progressSaves)
 export type LearnJob =
   | { kind: 'sprites'; level: SpriteLevel; nums: number[]; input?: string } // (input: of each test level load, spriteSetJob)
   | { kind: 'spriteAt'; level: SpriteLevel; id: number; x: number; y: number }
@@ -84,7 +85,8 @@ export type LearnJob =
   | { kind: 'owViews' }
   | { kind: 'owSprites'; map: number; progress: number }
   | { kind: 'owCustom'; map: number; progress: number }
-  | { kind: 'owLooks'; ids: number[] };
+  | { kind: 'owLooks'; ids: number[] }
+  | { kind: 'owSave'; progress: number };
 
 // Per kind of learn job where its result goes (keep, jobrunner.ts Keep) and whether it is a picture (CONTEXT.md, ADR
 // 0008): the levels' uses go to the entries of each level (the job keeps none); the prefab suggestions and the object
@@ -115,6 +117,7 @@ export const LEARN_KINDS: { [K in LearnJob['kind']]: { keep: Keep; picture: bool
   owSprites: { keep: 'memory', picture: true, boot: false },
   owCustom: { keep: 'memory', picture: true, boot: false },
   owLooks: { keep: 'memory', picture: true, boot: false },
+  owSave: { keep: 'memory', picture: true, boot: false },
 };
 export const learnKeep = (j: LearnJob): Keep => LEARN_KINDS[j.kind].keep;
 

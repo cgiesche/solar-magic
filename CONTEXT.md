@@ -170,7 +170,7 @@ A 6x6 or 2x2 block of 8x8 tiles an event changes on layer 2: **animated** (shown
 _Avoid_: event tile (Lunar Magic's), piece
 
 **Event progress**:
-Up to which event the overworld is shown as passed (events applied in their number order, as the game does when it loads a save); a view setting that test play from the overworld takes over, not part of the ROM.
+Up to which event the overworld is shown as passed (events applied in their number order, as the game does when it loads a save); a view setting that test play from the overworld takes over, not part of the ROM. Test play takes over the save at that progress too – the levels passed with their paths open and the events triggered – learned by emulation: each event's level (the first that runs it) left with its exit in the event order, the game's code setting what passing it sets (core/owprogress.ts); a level only runs an event the game hasn't run, so of two levels running the same one only the first is passed.
 _Avoid_: events passed, after all events
 
 **Reveal**:

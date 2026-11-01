@@ -116,7 +116,8 @@ export const RAM = {
   owPlayerX: 0x1f17, owPlayerY: 0x1f19, // 16-bit pixel position, per player 4 bytes apart
   owPlayerTileX: 0x1f1f, owPlayerTileY: 0x1f21, // 16-bit
   owPlayerStride: 4,
-  switchPalaces: 0x1f27, // 4
+  switchPalaces: 0x1f27, // 4: green, yellow, blue, red (1 pressed)
+  eventsTriggered: 0x1f2e, // the count of events the overworld ran (the file select shows it)
   owLayer1: 0xc800, owLayer1End: 0xd000, // overworld layer 1 tilemap (with events applied)
   owTranslevels: 0xd000, owTranslevelsEnd: 0xd800, // translevel per overworld tile
   owTileFlags: 0xd800, owTileFlagsEnd: 0xe000, // per overworld tile: its translevel's initial flags ($04D678)

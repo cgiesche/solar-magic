@@ -1,17 +1,20 @@
 // Test play from the overworld (issue #87, core/playsession.ts fromOverworld): a new game at the overworld view's
-// event progress – the event bits as the view loads them, the layer 1 the view shows, the levels whose exits ran the
-// passed events passed with their exit's path open (owevents.ts progressLevelFlags) – with Mario on the selected
-// layer 1 tile (or at the start position) and the overworld loaded where he stands; a level entered from there is
-// the ROM's (an edit saved shows). The level editor's test play from a tile (PlaySession.test, moved from
-// ui/testplay.ts) still puts Mario at the tile.
+// event progress – the event bits as the view loads them, the layer 1 the view shows, the save learned for it by
+// emulation (#255, owprogress.ts progressSaves: each event's level left with its exit as the game does, the game's
+// code setting the level flags, running the event and counting it) – with Mario on the selected layer 1 tile (or at
+// the start position) and the overworld loaded where he stands; a level entered from there is the ROM's (an edit
+// saved shows). The level editor's test play from a tile (PlaySession.test, moved from ui/testplay.ts) still puts
+// Mario at the tile.
 // node tools/testowplay.ts
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { PlaySession } from '../src/core/playsession.ts';
 import {
-  OverworldEmulator, readTranslevels, readL1, isLevelTile, l1XY, baseEvent, eventBits, exitDirections, DIR_FLAGS, FLAG, OW_EVENTS, gameL1,
+  OverworldEmulator, OverworldLoads, readTranslevels, readL1, isLevelTile, l1XY, baseEvent, setBaseEvent, eventBits, exitDirections, DIR_FLAGS, FLAG,
+  OW_EVENTS, gameL1,
 } from '../src/core/overworld.ts';
-import { progressLevelFlags, eventRunners } from '../src/core/owevents.ts';
+import { eventRunners } from '../src/core/owevents.ts';
+import { progressSaves } from '../src/core/owprogress.ts';
 import { loadLevel, cloneLevel, newUid } from '../src/core/level.ts';
 import { saveLevel } from '../src/core/save.ts';
 import { GM, RAM, SPR, PAD, get16, getS16, marioX, marioY } from '../src/core/ram.ts';
@@ -42,14 +45,46 @@ const owL1 = () => w.slice(RAM.owLayer1, RAM.owLayer1End);
   p.close();
 }
 
-// ---- at an event progress: Yoshi's Island 1's normal exit passed ----
+// ---- the save at each event progress, learned by emulation ----
 const e = baseEvent(rom, TL), n = e + 1, dir = exitDirections(rom, TL)[0];
+const saves = progressSaves(new OverworldLoads(new OverworldEmulator(rom), 4));
 {
-  const flags = progressLevelFlags(rom, n), runners = eventRunners(rom);
-  const before = [...runners].filter(([ev]) => ev < n).map(([, rs]) => rs[0].tl);
-  check(flags.get(TL) === (FLAG.passed | DIR_FLAGS[dir]) && [...flags.keys()].every((t) => before.includes(t)),
-    `progress ${hx(n)}: level 105 passed, its normal exit's direction open (${hx(flags.get(TL) ?? 0)}); only levels of passed events (${[...flags.keys()].map(hx).join(' ')})`);
-  check(progressLevelFlags(rom, 0).size === 0 && progressLevelFlags(rom, OW_EVENTS).size >= 0x40, `none at progress 0, every level with an event at all (${progressLevelFlags(rom, OW_EVENTS).size})`);
+  const fresh = new OverworldEmulator(rom).load(0, 0).wram;
+  const flagsAt0 = [...fresh.subarray(RAM.levelFlags, RAM.levelFlags + 0x60)];
+  check(saves.length === OW_EVENTS + 1 && same(saves[0].levelFlags, flagsAt0) && saves[0].eventsTriggered === 0 && saves[0].switchPalaces.every((v) => !v),
+    'progress 0: a new file\'s save');
+  check((saves[n].levelFlags[TL] & (FLAG.passed | DIR_FLAGS[dir])) === (FLAG.passed | DIR_FLAGS[dir]) && !(saves[e].levelFlags[TL] & FLAG.passed),
+    `progress ${hx(n)}: level 105 passed, its normal exit's direction open (${hx(saves[n].levelFlags[TL])}), not at ${hx(e)}`);
+  // the rule test play used before (#87): each level whose exit of the lowest number runs a passed event is passed, the
+  // path in that exit's direction open – right where an event has one such level (the game passes one of two)
+  const runners = eventRunners(rom), off: string[] = [], shared = new Set<number>();
+  for (const rs of runners.values()) { const first = rs.filter((r) => r.exit === rs[0].exit); if (first.length > 1) first.forEach((r) => shared.add(r.tl)); }
+  for (let p = 0; p <= OW_EVENTS; p++) {
+    const want = new Map<number, number>();
+    for (const [ev, rs] of runners) {
+      const first = rs.filter((r) => r.exit === rs[0].exit);
+      if (ev < p && first.length === 1) want.set(rs[0].tl, (want.get(rs[0].tl) ?? 0) | FLAG.passed | DIR_FLAGS[exitDirections(rom, rs[0].tl)[rs[0].exit]]);
+    }
+    for (let tl = 0; tl < 0x60; tl++) {
+      const got = saves[p].levelFlags[tl], w = want.get(tl) ?? 0;
+      if ((got & w) !== w || ((got & FLAG.passed) && !w && !shared.has(tl) && !(flagsAt0[tl] & FLAG.passed))) off.push(`${hx(p)}/${hx(tl)}: ${hx(got)} for ${hx(w)}`);
+    }
+  }
+  check(!off.length, `every progress 00–78 of the clean game: the levels passed and the directions open as the rule gave them (the game opens more) ${off.slice(0, 6).join(' ')}`);
+  const counts = saves.map((v) => v.eventsTriggered);
+  check(counts.every((c, p) => !p || c - counts[p - 1] === 0 || c - counts[p - 1] === 1) && counts[0x60] === 0x60,
+    `events triggered follow the progress: one more with each event the game runs (${hx(counts[0x10])} at 10, ${hx(counts[0x60])} at 60, ${hx(counts[OW_EVENTS])} at 78)`);
+  // (the switch palaces are pressed in their levels, not learned yet: #257)
+  check(saves.every((v) => v.switchPalaces.every((x) => !x)), 'switch palaces: a new file\'s at every progress (#257)');
+}
+// two levels running the same event with their normal exit: only the one the game marks passed
+{
+  const r2 = new Rom(rom.data.slice()), other = 0x2a; // Yoshi's Island 2
+  setBaseEvent(r2, other, e);
+  const v = progressSaves(new OverworldLoads(new OverworldEmulator(r2), 4))[n];
+  const passed = [TL, other].filter((t) => v.levelFlags[t] & FLAG.passed);
+  check(baseEvent(r2, other) === e && passed.length === 1 && passed[0] === TL && v.eventsTriggered === n,
+    `Yoshi's Island 2 also running event ${hx(e)}: only level 105 passed (${passed.map(hx).join(' ')}), ${v.eventsTriggered} events triggered`);
 }
 const walk = (p: PlaySession, pad: number) => {
   const from = tileOf();
@@ -65,11 +100,12 @@ const PADS = [PAD.up, PAD.down, PAD.left, PAD.right];
   p.close();
 }
 {
-  const p = PlaySession.fromOverworld(emu, tile, n);
+  const p = PlaySession.fromOverworld(emu, tile, n, saves[n]);
   const ev = w.slice(RAM.owEvents, RAM.owEvents + OW_EVENTS / 8);
   check(same(ev, eventBits(n)), `progress ${hx(n)}: the event bits of events 00–${hx(e)}`);
   check(same(owL1(), gameL1(owe.load(1, n))), 'layer 1 as the view shows it at that progress');
-  check((w[RAM.levelFlags + TL] & (FLAG.passed | DIR_FLAGS[dir])) === (FLAG.passed | DIR_FLAGS[dir]), 'level 105 passed in the game');
+  check((w[RAM.levelFlags + TL] & (FLAG.passed | DIR_FLAGS[dir])) === (FLAG.passed | DIR_FLAGS[dir]) && w[RAM.eventsTriggered] === saves[n].eventsTriggered,
+    `level 105 passed in the game, ${w[RAM.eventsTriggered]} events triggered as learned`);
   check(walk(p, PADS[dir]), `Mario walks from level 105 ${['up', 'down', 'left', 'right'][dir]} along the revealed path (to ${hx(tileOf().x)},${hx(tileOf().y)})`);
   p.close();
 }
@@ -95,13 +131,13 @@ const PADS = [PAD.up, PAD.down, PAD.left, PAD.right];
 const GOOMBA = 0x0f;
 const goombas = () => Array.from({ length: 12 }, (_, k) => k).filter((k) => w[SPR.status + k] && w[SPR.num + k] === GOOMBA).length;
 {
-  const p = PlaySession.fromOverworld(emu, tile, n);
+  const p = PlaySession.fromOverworld(emu, tile, n, saves[n]);
   check(p.enter('settled') && goombas() === 0, `level 105 entered from its tile: no Goomba in it (${goombas()})`);
   p.close();
   const lv = cloneLevel(loadLevel(rom, 0x105));
   lv.sprites.push({ uid: newUid(), x: 0x0a, y: 0x16, num: GOOMBA, extra: 0 });
   saveLevel(rom, lv);
-  const q = PlaySession.fromOverworld(emu, tile, n);
+  const q = PlaySession.fromOverworld(emu, tile, n, saves[n]);
   check(q.enter('settled') && goombas() === 1, `a Goomba added and saved: entered from the overworld, it is there (${goombas()})`);
   q.close();
 }
