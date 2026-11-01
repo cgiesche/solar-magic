@@ -1,8 +1,8 @@
 // The pickers' canvases of Map16 tiles (the Map16 pages, the BG sheet, object and prefab thumbnails) follow the
 // level's animation: on every step of the level view's animation the tiles that step changes are drawn anew on
 // the canvas (TileAnimation, render.ts), then what shows it (a sheet drawn larger with its marks, copies of a
-// thumbnail) is updated. Only canvases on the screen are, the others catch up once they are back on it; when
-// the animation stops, all go back to the level as rendered. A canvas is dropped once it is no longer shown.
+// thumbnail) is updated. Only canvases in sight are, the others catch up once they are back in sight; when the
+// animation stops, all go back to the level as rendered. A canvas is dropped once it is no longer shown.
 import type { App } from './app.ts';
 import type { AnimStep, TileAnimation, TilePixels } from '../core/render.ts';
 
@@ -56,7 +56,7 @@ function sweep(all: Set<Entry>): void {
 // top left pixel and its number, one after the other, see TilePixels); from now on it follows the animation.
 // It is shown either by one element `on` (the canvas itself, or one it is drawn into by shown()), alive while
 // that is in the page, or by its copies (cloneCanvas), drawn again when it changes, alive while alive() holds.
-// back: the pixel where a tile draws none. It is drawn anew from the next step on, once on the screen.
+// back: the pixel where a tile draws none. It is drawn anew from the next step on, once in sight.
 export function animateTiles(app: App, canvas: HTMLCanvasElement, cells: number[], o: { bg?: boolean; back?: number } & ({ on: HTMLElement; shown?: () => void } | { alive: () => boolean })): void {
   if (!cells.length) return;
   let all = entries.get(app);
@@ -64,11 +64,11 @@ export function animateTiles(app: App, canvas: HTMLCanvasElement, cells: number[
     const set = all = new Set();
     entries.set(app, set);
     app.on('anim-frame', () => {
-      // stopped: back to the level as rendered, also where not on the screen (no step comes to catch up)
+      // stopped: back to the level as rendered, also where out of sight (no step comes to catch up)
       const stopped = !app.animStep();
       for (const e of set) {
         if (!e.alive()) drop(set, e);
-        else if (stopped || e.on().some(onScreen)) follow(app, e);
+        else if (stopped || e.on().some(inSight)) follow(app, e);
       }
     });
   }
@@ -115,19 +115,20 @@ function redrawCopies(of: HTMLCanvasElement): void {
   }
 }
 
-// ---------------- on the screen ----------------
-// whether an element is on the screen, as reported for it since it was first asked about (until then not)
-const onScreenNow = new WeakMap<Element, boolean>();
+// ---------------- in sight ----------------
+// whether an element is in sight (in the part of the page shown), as reported for it since it was first asked
+// about (until then not)
+const inSightNow = new WeakMap<Element, boolean>();
 let observer: IntersectionObserver | null = null;
-function onScreen(el: Element): boolean {
+function inSight(el: Element): boolean {
   if (!el.isConnected) { forget(el); return false; }
-  const v = onScreenNow.get(el);
+  const v = inSightNow.get(el);
   if (v !== undefined) return v;
-  observer ??= new IntersectionObserver((es) => { for (const x of es) if (onScreenNow.has(x.target)) onScreenNow.set(x.target, x.isIntersecting); });
+  observer ??= new IntersectionObserver((es) => { for (const x of es) if (inSightNow.has(x.target)) inSightNow.set(x.target, x.isIntersecting); });
   observer.observe(el);
-  onScreenNow.set(el, false);
+  inSightNow.set(el, false);
   return false;
 }
 function forget(el: Element): void {
-  if (onScreenNow.delete(el)) observer?.unobserve(el);
+  if (inSightNow.delete(el)) observer?.unobserve(el);
 }
