@@ -14,6 +14,7 @@
 #include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 static void info(HWND h, int d) {
   char c[256], t[512] = "";
@@ -43,10 +44,10 @@ static HWND hwnd(const char *s) { return (HWND)(ULONG_PTR)strtoull(s, 0, 16); }
 
 int main(int argc, char **argv) {
   setvbuf(stdout, 0, _IONBF, 0);
-  if (argc < 2) return 1;
-  const char *c = argv[1];
+  const char *c = argc > 1 ? argv[1] : "";
+  int need = !strcmp(c, "ls") ? 2 : !strcmp(c, "click") || !strcmp(c, "gettext") ? 3 : 4;
+  if (argc < need) { fprintf(stderr, "usage: see the comment at the top of tools/lmctl.c\n"); return 1; }
   if (!strcmp(c, "ls")) EnumWindows(top, argc > 2);
-  else if (argc < 3) return 1;
   else if (!strcmp(c, "menu")) PostMessageA(hwnd(argv[2]), WM_SYSCOMMAND, SC_KEYMENU, (unsigned char)argv[3][0]);
   else if (!strcmp(c, "key")) {
     HWND h = hwnd(argv[2]); UINT vk = strtoul(argv[3], 0, 0);
@@ -60,6 +61,6 @@ int main(int argc, char **argv) {
     SendMessageA(lb, LB_SETCURSEL, atoi(argv[3]), 0);
     SendMessageA(GetParent(lb), WM_COMMAND, MAKEWPARAM(GetDlgCtrlID(lb), LBN_SELCHANGE), (LPARAM)lb);
   }
-  else return 1;
+  else { fprintf(stderr, "unknown command %s\n", c); return 1; }
   return 0;
 }

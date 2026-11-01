@@ -53,7 +53,7 @@ const with_ = (id: OwOptionId, on: boolean) => { const rom = fresh(); setOwOptio
     ['saveLuigi', 0x048f9f, [0x80, 0x3b], [0xc2, 0x30]],
   ];
   for (const [id, at, on, off] of lm) {
-    check(same(with_(id, true).bytes(at, 2), on) && same(with_(id, false).bytes(at, 2), off), `${id}: on and off, the bytes of a ROM Lunar Magic saved`);
+    check(same(with_(id, true).bytes(at, on.length), on) && same(with_(id, false).bytes(at, off.length), off), `${id}: on and off, the bytes of a ROM Lunar Magic saved`);
   }
 }
 

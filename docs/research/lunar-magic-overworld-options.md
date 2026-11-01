@@ -19,23 +19,25 @@ checked and unchecked:
 - The two saves differ in only these four bytes and in `$0FF025`.
 - `$0FF025` is not an option flag. Lunar Magic adjusts it to make up for the bytes it changed, so that the sum
   of the bytes stays the same: `$9C` with both options as in the game, `$90` with both changed, and `$D3` with only
-  Luigi's changed. Each value is the earlier one minus the sum of the changed bytes, modulo 256. The checksum in the
-  ROM's header at `$00FFDC` stayed the same in every save.
+  Luigi's changed. Each value is the earlier one minus the change in the sum of the changed bytes, modulo 256. The
+  checksum in the ROM's header at `$00FFDC` stayed the same in every save. The editor doesn't write this byte: it is
+  Lunar Magic's own bookkeeping, and neither the game nor Lunar Magic reads it for the options.
 - Lunar Magic reads the options from the code. A ROM it saved with both options as in the game, with `80 71` and
   `80 3B` written into it by hand and `$0FF025` left alone, showed both options as changed in the "Extra Options"
-  dialog. A ROM the editor wrote with these options therefore shows them correctly in Lunar Magic.
+  dialog. So a ROM with the editor's bytes should show them correctly in Lunar Magic too. This was checked on a
+  ROM that Lunar Magic saved, not on one the editor wrote.
 
 `tools/testowoptions.ts` checks that the editor writes these bytes for each option, both on and off.
 
 ## Making the ROMs
 
 Lunar Magic's command line (help `info_command_line.htm`) can't set overworld options or level names, so the
-ROMs were saved from its UI. Lunar Magic runs under wine, in a WINEPREFIX in the scratchpad (see the RHR reference
-build). It runs on a headless display, not on the user's screen:
+ROMs were saved from its UI. Lunar Magic runs under wine with a WINEPREFIX of its own (`WINEPREFIX=<dir> wineboot -i`),
+on a headless display rather than the user's screen:
 
 1. A virtual compositor with Xwayland:
    `env -u DISPLAY -u WAYLAND_DISPLAY kwin_wayland --virtual --xwayland --socket lmwl --width 1280 --height 1024 --no-lockscreen --exit-with-session <script>`.
-   The session script writes down its `$DISPLAY` (`:2` here), then sleeps.
+   The session script writes down the `$DISPLAY` kwin gives it, then sleeps; Lunar Magic and `lmctl` run on that display.
 2. `xdotool` can't send input on that display, because Xwayland routes faked input through the compositor, which
    ignores it. `tools/lmctl.c` drives the windows with window messages from inside wine instead. Build it with
    `winegcc -m64 tools/lmctl.c -o lmctl.exe` and run it as `wine lmctl.exe … | cat`. `import -window <X id>` (from
