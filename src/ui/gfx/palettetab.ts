@@ -94,7 +94,7 @@ export class PaletteTab implements WsPanel {
     app.on('level', () => { this.trace = null; this.headers = null; });
     app.on('animated', () => { if (this.visible) this.paint(); });
     // (which colors the game rewrites on a submap is known from its load)
-    ws.preview.onMap = () => { if (this.visible && this.map !== null) this.paint(); };
+    ws.preview.onMap(() => { if (this.visible && this.map !== null) this.paint(); });
     app.on('level-header', () => { this.headers = null; if (this.visible) this.buildHeader(); });
     this.buildRows();
   }

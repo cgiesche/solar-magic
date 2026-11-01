@@ -57,8 +57,9 @@ export class LevelPreview {
   // a submap shown instead of the level: its map at the event progress (its load, the image drawn from it; null while
   // it is emulated)
   private ow: { map: number; progress: number; r: OwRender | null; img: Uint32Array | null; fresh: boolean } | null = null;
-  // the submap's load came (it shows the ROM as it is now)
-  onMap: (() => void) | null = null;
+  // called when the submap's load came (it shows the ROM as it is now)
+  private mapListeners: (() => void)[] = [];
+  onMap(fn: () => void): void { this.mapListeners.push(fn); }
   private title = h('span', null, 'Level preview');
 
   constructor(app: App) {
@@ -106,7 +107,7 @@ export class LevelPreview {
       const first = !o.img;
       this.drawMap(o, x);
       o.fresh = true;
-      this.onMap?.();
+      for (const fn of this.mapListeners) fn();
       this.update();
       this.info.textContent = this.hint;
       // (the image had no size to scroll in before)

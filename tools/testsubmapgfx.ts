@@ -3,12 +3,15 @@
 // every submap in the clean game's colors, before and after the special world (emulated); a color changed for one
 // submap is shown there – when the overworld loads there and when Mario walks there from the main map – and on no
 // other submap; one changed after the special world only after it.
+// Graphics files: a file put into a submap's slot is in VRAM where the slot is when the overworld loads there and when
+// Mario walks there from the main map; other submaps keep theirs; the default back: the game's file again.
 // node tools/testsubmapgfx.ts
 import { Rom, snesToPc } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { OverworldEmulator, l1Index, overworldDataRanges } from '../src/core/overworld.ts';
 import { RAM, PAD } from '../src/core/ram.ts';
 import {
+  submapSlots, assignSubmapSlot,
   submapPalettePatch, submapColor, setSubmapColor, submapPaletteRanges, SUBMAPS, SUBMAP_PALETTES, SUBMAP_PALETTE_SIZE,
 } from '../src/core/submapgfx.ts';
 import { cleanImage, editorImage } from './fixture.ts';
@@ -67,15 +70,16 @@ setSubmapColor(rom, 1, false, C, mine);
   const s = shown(rom, true);
   check(color(s[1], C) !== mine, 'after the special world Yoshi\'s Island has its special palette\'s color');
 }
-// walked from the main map onto Yoshi's Island (main map 02,14, whose path leads there): its colors are loaded
-{
+// the console after Mario walked from the main map onto Yoshi's Island (main map 02,14, whose path leads there); main:
+// the CGRAM and VRAM on the main map before
+function walk(rom: Rom): { s: LevelEmulator['snes']; main: { cgram: Uint8Array; vram: Uint8Array } } {
   const emu = new LevelEmulator(rom), s = emu.snes, w = s.wram;
   const i = l1Index(0, 2, 0x13);
   emu.startGameAt(i);
   w[RAM.submap] = w[RAM.submap + 1] = 0;
   emu.reloadOverworld();
   w[RAM.owTranslevels + i] = 1; w[RAM.levelFlags + 1] = 0x0f;
-  const main = color(s.cgram, C);
+  const main = { cgram: s.cgram.slice(), vram: s.vram.slice() };
   let walked = false;
   for (let f = 0; f < 900; f++) {
     s.joy1 = f < 4 ? PAD.down : 0;
@@ -84,6 +88,11 @@ setSubmapColor(rom, 1, false, C, mine);
     else if (walked && f > 30) break;
   }
   for (let f = 0; f < 30; f++) s.runFrame();
+  return { s, main };
+}
+// walked from the main map onto Yoshi's Island: its colors are loaded
+{
+  const { s, main: m } = walk(rom), w = s.wram, main = color(m.cgram, C);
   check(w[RAM.submap] === 1 && main !== mine && color(s.cgram, C) === mine, `walked onto Yoshi's Island: its color ${hx(C)} shown (${hx(color(s.cgram, C), 4)}; on the main map ${hx(main, 4)})`);
 }
 // after the special world, set for it
@@ -92,6 +101,40 @@ setSubmapColor(rom, 1, true, C, mine);
 {
   const a = shown(rom, false), s = shown(rom, true);
   check(color(a[1], C) === old && color(s[1], C) === mine, 'a color set after the special world: shown only after it');
+}
+
+// ---- graphics files ----
+// the 0x1000-byte blocks of VRAM (a slot's 128 4bpp tiles) that differ
+const blocks = (a: Uint8Array, b: Uint8Array) => Array.from({ length: a.length >> 12 }, (_, k) => k).filter((k) => a.subarray(k << 12, (k + 1) << 12).some((v, i) => v !== b[(k << 12) + i]));
+const block = (v: Uint8Array, k: number) => v.subarray(k << 12, (k + 1) << 12);
+const same = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((v, i) => v === b[i]);
+// block a holds the graphics of block b – but for the tiles the overworld animates there (at most 16 tiles of 32 bytes:
+// the animation writes them every frame, a frame of its own in each) – and no longer those of `was`
+const holds = (a: Uint8Array, b: Uint8Array, was: Uint8Array) => a.filter((v, i) => v !== b[i]).length <= 0x200 && a.filter((v, i) => v !== was[i]).length > 0x800;
+const vrams = (rom: Rom) => { const emu = new OverworldEmulator(rom); return Array.from({ length: SUBMAPS }, (_, m) => emu.load(m, 0).vram); };
+{
+  const slots = submapSlots(rom, 1), fg1 = slots.find((x) => x.name === 'FG1')!, fg2 = slots.find((x) => x.name === 'FG2')!, sp1 = slots.find((x) => x.name === 'SP1')!;
+  check(slots.map((x) => x.name).join() === 'FG1,FG2,FG3,FG4,SP1,SP2,SP3,SP4' && slots.every((x) => !x.custom), `Yoshi's Island's slots, all the game's (${slots.map((x) => `${x.name} ${hx(x.file)}`).join(', ')})`);
+  const before = vrams(rom);
+  assignSubmapSlot(rom, 1, 'FG1', fg2.file);
+  check(submapSlots(rom, 1)[0].file === fg2.file && submapSlots(rom, 1)[0].custom, `FG1 of Yoshi's Island set to ${hx(fg2.file)}`);
+  const after = vrams(rom), ch = blocks(before[1], after[1]);
+  check(ch.length === 1 && holds(block(after[1], ch[0]), block(after[1], ch[0] + 1), block(before[1], ch[0])),
+    `loaded on Yoshi's Island: one slot's graphics changed (blocks ${ch.map((k) => hx(k)).join(' ')}), now as FG2's`);
+  check(after.every((v, m) => m === 1 || !blocks(before[m], v).length), 'the other submaps keep their graphics');
+  // walked there from the main map: the slot loaded too, the rest as when the overworld loads there
+  const { s, main } = walk(rom);
+  check(s.wram[RAM.submap] === 1 && holds(block(s.vram, ch[0]), block(after[1], ch[0]), block(main.vram, ch[0])),
+    'walked onto Yoshi\'s Island: its FG1 loaded');
+  check(s.wram[RAM.gameMode] === 0x0e && s.ppuRegs[0] === 0x0f, `the overworld runs on after it, the screen on (game mode ${hx(s.wram[RAM.gameMode])}, INIDISP ${hx(s.ppuRegs[0])})`);
+  // a sprite slot
+  assignSubmapSlot(rom, 1, 'SP1', fg1.file);
+  const sp = vrams(rom), chs = blocks(after[1], sp[1]);
+  check(chs.length >= 1 && chs.every((k) => !ch.includes(k)), `SP1 set to ${hx(fg1.file)}: the sprite graphics changed (blocks ${chs.map((k) => hx(k)).join(' ')}, was ${hx(sp1.file)})`);
+  assignSubmapSlot(rom, 1, 'FG1', 0xff);
+  assignSubmapSlot(rom, 1, 'SP1', 0xff);
+  const back = vrams(rom);
+  check(!blocks(before[1], back[1]).length && submapSlots(rom, 1).every((x) => !x.custom), 'the defaults back: the game\'s graphics');
 }
 
 if (bad) { console.log(`\n${bad} FAILED`); process.exit(1); }

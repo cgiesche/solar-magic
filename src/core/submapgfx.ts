@@ -16,6 +16,7 @@ import { Rom, snesToPc } from './rom.ts';
 import { assemble } from './asar.ts';
 import { OverworldEmulator } from './overworld.ts';
 import { RAM } from './ram.ts';
+import { levelGfx, setLevelGfx, defaultGfx, submapGfxEntry, GFX_NONE } from './patches.ts';
 
 export const SUBMAPS = 7;
 export const SUBMAP_PALETTE_SIZE = 0x200; // 256 colors, color 0 the back area color
@@ -123,4 +124,76 @@ export function installSubmapPalettePatch(rom: Rom): void {
   rom.w16(at + ROUTINE_ADC, tbl & 0xffff);
   rom.w8(at + ROUTINE_BANK, tbl >> 16);
   rom.writeBytes(PAL_HOOK, Uint8Array.from([0x22, at & 0xff, (at >> 8) & 0xff, at >> 16, 0x60]));
+}
+
+// ---- graphics files ----
+// A submap's graphics slots: FG1–FG4 (the overworld's tileset, $04DC02 per submap, as the game loads it into the
+// level's FG1/FG2/BG1/FG3 places) and SP1–SP4 (its sprite set, $04DC1D); FF the default. Kept in the editor patch's
+// bypass (patches.ts, entries 200–206), which the overworld's load reads for the submap Mario is on. Lunar Magic's
+// "Submap GFX" has the same slots (its FG5/FG6 only with its option to merge FG1/FG2 into SP3/SP4); its table and
+// code are its own (the editor's bypass differs from Lunar Magic's for levels too), the place where the game changes
+// the submap is its: when Mario walks to another submap the game loads only its palette ($04DBAE), so a JSL at
+// $04DBB9 (Lunar Magic's place) loads the new submap's graphics there – the game's own routine ($00A9DA, which
+// uploads only the files that changed), the screen turned off meanwhile (the window has closed over it).
+const OW_TILESETS = 0x04dc02; // per submap: the tileset $1931
+const OW_SPRITE_SET = 0x04dc1d; // the operand of LDA #$11 : STA $192B ($04DC09, the overworld's load)
+const GFX_HOOK = 0x04dbb9; // STA $0704 : STZ $0803, 6 bytes
+const GFX_CODE_LEN = 0x30;
+const gfxHookAsm = (at: number) => `lorom
+org $${GFX_HOOK.toString(16).toUpperCase()}
+  JSL SubmapGfx
+  NOP #2
+org $${at.toString(16).toUpperCase()}
+SubmapGfx:
+  STA $0704 : STZ $0803           ; the game's code
+  PHP : PHB
+  SEP #$30
+  LDA #$00 : PHA : PLB
+  LDA #$80 : STA $2100            ; screen off, no NMI while the files are uploaded
+  STZ $4200
+  PHK : PEA.w .ret-1 : PEA.w $84CE ; $A9DA's RTS to the RTL at $0084CF, back here
+  JML $00A9DA
+.ret:
+  LDA #$81 : STA $4200
+  LDA $0DAE : STA $2100
+  PLB : PLP
+  RTL
+End:
+`;
+export const OW_GFX_SLOT_NAMES = ['FG1', 'FG2', 'FG3', 'FG4', 'SP1', 'SP2', 'SP3', 'SP4'];
+// the slot's place in the bypass (GFX_SLOT_NAMES order: SP4..SP1, then the FG/BG slots FG3, BG1, FG2, FG1 – the
+// overworld's FG4, FG3, FG2, FG1)
+const BYPASS_K: Record<string, number> = { FG1: 7, FG2: 6, FG3: 5, FG4: 4, SP1: 3, SP2: 2, SP3: 1, SP4: 0 };
+
+export const submapTileset = (rom: Rom, map: number): number => rom.r8(OW_TILESETS + map);
+export const submapSpriteSet = (rom: Rom): number => rom.r8(OW_SPRITE_SET);
+export const hasSubmapGfxPatch = (rom: Rom): boolean => rom.r8(GFX_HOOK) === 0x22;
+
+export interface SubmapSlot { name: string; k: number; file: number; def: number; custom: boolean; first: number; sprite: boolean }
+// the slots of submap `map` (first: the slot's first 8x8 tile, as the level's: FG 000–1FF, sprites 000–1FF of OAM)
+export function submapSlots(rom: Rom, map: number): SubmapSlot[] {
+  const own = levelGfx(rom, submapGfxEntry(map)), def = defaultGfx(rom, submapTileset(rom, map), submapSpriteSet(rom));
+  return OW_GFX_SLOT_NAMES.map((name, i) => {
+    const k = BYPASS_K[name], f = own[k];
+    return { name, k, file: f !== GFX_NONE ? f : def[k], def: def[k], custom: f !== GFX_NONE, first: (i & 3) * 0x80, sprite: i >= 4 };
+  });
+}
+// puts `file` into slot `name` of submap `map` (FF: the default)
+export function assignSubmapSlot(rom: Rom, map: number, name: string, file: number): void {
+  const k = BYPASS_K[name];
+  if (k === undefined) throw new Error(`No graphics slot ${name} on the overworld`);
+  const set = levelGfx(rom, submapGfxEntry(map));
+  set[k] = file;
+  setLevelGfx(rom, submapGfxEntry(map), set);
+}
+
+// needs Asar (loadAsar) to be loaded
+export function installSubmapGfxPatch(rom: Rom): void {
+  if (hasSubmapGfxPatch(rom)) return;
+  if (rom.r8(GFX_HOOK) !== 0x8d || rom.r16(GFX_HOOK + 1) !== 0x0704) throw new Error('Submap graphics: unexpected code at $04DBB9');
+  const at = rom.allocWrite(new Uint8Array(GFX_CODE_LEN));
+  const r = assemble(rom.data, new Map([['submapgfx.asm', gfxHookAsm(at)]]), 'submapgfx.asm');
+  if (!r.ok) throw new Error(r.errors.map((e) => e.message).join(' '));
+  if (r.labels['End'] - at > GFX_CODE_LEN) throw new Error('Submap graphics: the code is longer than its block');
+  for (const [a, n] of [[GFX_HOOK, 6], [at, GFX_CODE_LEN]]) rom.writeAt(snesToPc(a), r.rom.subarray(snesToPc(a), snesToPc(a) + n));
 }

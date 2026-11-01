@@ -270,6 +270,7 @@ change only a few verified locations:
 | `$058A66`, `$058B46`, `$058C34`, `$058D2B` | Tilemap building: tiles from 200 on come from the extended Map16 graphics table |
 | `$00C096`, `$00C0E7` | Tile replacement sets the page to 0/1 instead of only bit 0 (for tiles on page ≥ 2) |
 | `$00C176` | Tile replacement draws tiles from 200 on from the extended Map16 graphics table (blocks changing into such a tile) |
+| `$04DBB9` | Submap graphics files: the game's upload when Mario walks to another submap (the files per submap in SMWE's bypass, entries 200–206) |
 | `$00AD32` | Submap palettes: Lunar Magic's routine copies all 256 colors of the submap (14 palettes: 7 submaps, again after the special world) instead of the game's shared tables |
 | `$048E81`, `$049549` | Level names as free text: Lunar Magic's routine at `$03BB20` (19 tiles per translevel, table address at `$03BB57`) instead of the game's three shared words |
 | `$05B1A3` ("SMWM") | Two messages per level, Lunar Magic's routine at `$03BB90` (pointers `$03BE80`, text in free space) |

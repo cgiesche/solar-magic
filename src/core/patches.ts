@@ -11,7 +11,8 @@
 //    decompressed over the start of it in the same upload (GFX31) is converted by the game, the rest of the
 //    raw file is copied as it is after it
 //  - per-level GFX bypass: 8 slots (SP4..SP1, FG3, BG1, FG2, FG1), low bytes and a table of high bytes;
-//    0FF = tileset default. The game passes a file's low byte along (in $04-$07, Y); the high bytes of the
+//    0FF = tileset default. Then the same for the 7 submaps (entries 200–206, the overworld's FG4..FG1 in
+//    the FG/BG slots): the overworld's load takes the submap Mario is on ($1F11 of the player $0DB3). The game passes a file's low byte along (in $04-$07, Y); the high bytes of the
 //    slots being uploaded are kept in RAM (EXGFX_HI_RAM) and joined with it where the file is looked up
 //  - extended object $05 "Direct Map16": 6 bytes, places any Map16 tile as a rectangle; 7 with a condition
 //    (Lunar Magic's conditional Direct Map16, cdm16.ts): bit 7 of the tile's high byte, then the condition byte
@@ -56,7 +57,7 @@ const EDITED_TEXT = 'Solar Magic';
 // the bytes the editor patch changes in the game (SNES address, length), protected from other patches (patchapply.ts)
 export const EDITOR_HOOKS: [number, number][] = [[SPR_BANK_HOOK, 4], [HOOK_GFXPTR, 15], [HOOK_UPLOAD, 4], [HOOK_RAWUP, 5], [HOOK_SPRGFX, 15], [HOOK_FGGFX, 15], [DM16_SLOT, 3], [EDITED_MARK, EDITED_LEN]];
 const MAGIC = [0x53, 0x4d, 0x57, 0x45]; // "SMWE"
-const VERSION = 6; // 5: the game's files as raw 4bpp; 6: an LZ2 file over part of one
+const VERSION = 7; // 5: the game's files as raw 4bpp; 6: an LZ2 file over part of one; 7: the submaps' bypass
 const HEADER = 32;
 // GFX file numbers: 000-FFF (Lunar Magic's range); 0FF in a slot is "none" (the default), so no file has it
 export const GFX_FILES = 0x1000;
@@ -309,7 +310,7 @@ function build(rom: Rom): Asm {
   a.b(0x6b);
 
   // A = slot base (0 sprite slots, 4 FG/BG), M=8 X=8, DB=$00: the level's files into $04-$07 (its low
-  // bytes; the high bytes to SlotHi), in levels only; a slot whose high byte is or was not 0 is uploaded
+  // bytes; the high bytes to SlotHi), on the overworld (game modes 0B–0E) the submap's; a slot whose high byte is or was not 0 is uploaded
   // again (the game's record of uploaded files, $0101-$0108, holds low bytes)
   a.label('ApplyOvr');
   a.b(0x08, 0xc2, 0x30, 0x29, 0xff, 0x00, 0x48); // PHP REP #$30 AND #$00FF PHA (base: 7,S)
@@ -320,8 +321,9 @@ function build(rom: Rom): Asm {
   a.label('ovlv');
   a.b(0xe6, 0x0c, 0xaf, 0x0b, 0x01, 0x7e, 0x29, 0xff, 0x01, 0x0a, 0x0a, 0x0a); // INC $0C LDA.l $7E010B AND #$01FF ASL*3
   a.br(0x80, 'ovrow');
-  a.label('ovow');
-  a.b(0xa9, 0x00, 0x00);
+  a.label('ovow'); // the submap's entry (200 + $1F11 of the player)
+  a.b(0xe6, 0x0c, 0xad, 0xb3, 0x0d, 0x29, 0xff, 0x00, 0xaa); // INC $0C LDA $0DB3 AND #$FF TAX
+  a.b(0xbd, 0x11, 0x1f, 0x29, 0xff, 0x00, 0x18, 0x69, 0x00, 0x02, 0x0a, 0x0a, 0x0a); // LDA $1F11,x AND #$FF CLC ADC #$0200 ASL*3
   a.label('ovrow');
   a.b(0x18, 0x63, 0x07, 0x85, 0x08, 0xa0, 0x00, 0x00); // CLC ADC 7,S STA $08 (level*8 + base) LDY #0
   a.label('ovlp');
@@ -408,8 +410,8 @@ function build(rom: Rom): Asm {
   a.label('GfxHi'); a.fill(GFX_FILES);
   a.label('GfxBk'); a.fill(GFX_FILES);
   a.label('GfxFlags'); a.fill(GFX_FILES);
-  a.label('LevelGfx'); a.fill(512 * 8, 0xff);
-  a.label('LevelGfxHi'); a.fill(512 * 8);
+  a.label('LevelGfx'); a.fill(GFX_BYPASS_ENTRIES * 8, 0xff);
+  a.label('LevelGfxHi'); a.fill(GFX_BYPASS_ENTRIES * 8);
   return a;
 }
 
@@ -557,6 +559,9 @@ export function setGfxEntry(rom: Rom, i: number, addr: number, raw: boolean, siz
 
 // ---- per-level GFX bypass ----
 export const GFX_SLOT_NAMES = ['SP4', 'SP3', 'SP2', 'SP1', 'FG3', 'BG1', 'FG2', 'FG1'];
+// the bypass's entries: levels 000–1FF, then submaps 0–6 (submapGfxEntry)
+export const GFX_BYPASS_ENTRIES = 0x200 + 7;
+export const submapGfxEntry = (map: number): number => 0x200 + map;
 export function levelGfx(rom: Rom, n: number): number[] {
   const p = editor(rom);
   return Array.from({ length: 8 }, (_, k) => rom.r8(p.levelGfx + n * 8 + k) | (rom.r8(p.levelGfxHi + n * 8 + k) << 8));

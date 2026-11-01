@@ -15,7 +15,7 @@ import { installTranslevelPatch, installLevelFlagsPatch, installDestroyPatch } f
 import { installEventPatch } from './owevents.ts';
 import { installMessagePatch } from './messages.ts';
 import { installLevelNamePatch } from './levelnames.ts';
-import { installSubmapPalettePatch } from './submapgfx.ts';
+import { installSubmapPalettePatch, installSubmapGfxPatch } from './submapgfx.ts';
 import { installMap16Ext, enableBlocks } from './map16ext.ts';
 import { installBgMap16Ext } from './bgmap16.ts';
 import { installPrefabPatch } from './prefabs.ts';
@@ -66,6 +66,7 @@ export async function installEditorPatches(rom: Rom): Promise<void> {
   installMessagePatch(rom);
   installLevelNamePatch(rom);
   installSubmapPalettePatch(rom);
+  installSubmapGfxPatch(rom);
   newStyleExits(rom);
   // new Map16 tiles start as the empty tile 025 of the ROM
   const blank = map16Source(rom, new LevelEmulator(rom).load(0x105)).fg(0x025);

@@ -45,3 +45,20 @@ the overworld's load on each submap (as after loading a save, before and after t
 sprites') are those the game had there then; the patched game shows the same colors as the clean game on every
 submap, and the 22 bytes the game rewrites after the load (Mario, the level tiles' blinking, the lightning) are the
 game's as before.
+
+## Graphics files
+
+Lunar Magic's "Submap GFX" loads its own files for FG1–FG4 (FG5/FG6 with its option to merge FG1/FG2 into
+SP3/SP4), SP1–SP4 and AN2. Its hooks: `$00A140` (`JSL $0FFAB0`, which points its ExGFX routines at a 32-byte list of
+the submap's files: `$7FC006` = table + submap × $20) before the overworld's load uploads the files (`$00A144 JSR
+$A9DA`), and `$04DBB9` (`JSL $0FFB20`, 6 bytes, the game's `STA $0704 : STZ $0803`) where Mario walks to another
+submap: the game sets the tileset `$1931` (`$04DC02` per submap) and loads the palette there, not the graphics; Lunar
+Magic's routine turns NMI off (`STZ $4200`) and uploads the new files at once.
+
+In the game every submap's tileset (`$11–$17`) has the same files (1C 1D 08 1E), the sprite set is `$11` (`LDA #$11 :
+STA $192B` at `$04DC1C`): walking to another submap needs no upload.
+
+The editor keeps the files in its own bypass (SMWE: levels' and submaps' lists differ from Lunar Magic's anyway) and
+takes Lunar Magic's place at `$04DBB9`: its code turns the screen off (the window has closed over it there) and NMI,
+runs the game's upload routine `$00A9DA` – which reads the submap's files and uploads only those that changed – and
+turns them on again.

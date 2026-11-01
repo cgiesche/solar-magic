@@ -821,10 +821,18 @@ layout ([research](research/lunar-magic-submap-graphics.md)):
   walks to another submap (`$00A594`). The table starts with the game's colors: its routine (`$00AD25`) run while
   the overworld loads on each submap, before and after the special world (emulated). The Palettes tab marks the
   colors the game rewrites on the overworld (they differ in its load).
+- **graphics files** (Lunar Magic's "Submap GFX"): FG1–FG4 (the overworld's tileset, `$04DC02` per submap) and
+  SP1–SP4 (its sprite set, `$04DC1D`), FF the default. Kept in the editor patch's bypass (SMWE, entries 200–206
+  after the levels'), which the overworld's load reads for the submap Mario is on (`$1F11` of the player). When Mario
+  walks to another submap the game loads only its palette; a JSL at `$04DBB9` (Lunar Magic's place) runs the game's
+  upload routine (`$00A9DA`, which uploads only the files that changed) with the screen off, the window closed over
+  it. Lunar Magic's FG5/FG6 (with its option to merge FG1/FG2 into SP3/SP4) and AN2 are not offered: the editor's
+  animations take their frames from the Anim graphics (ADR 0003).
 
 `tools/testsubmapgfx.ts` checks that the routine is Lunar Magic's, that the patched game shows every submap in the
 clean game's colors before and after the special world, and that a color changed for one submap is shown there –
-when the overworld loads there and when Mario walks there – and nowhere else.
+when the overworld loads there and when Mario walks there – and nowhere else; that a file put into a submap's slot
+is in VRAM there when the overworld loads and when Mario walks there, the other submaps keeping theirs.
 
 ### Layer 3 graphics per level
 
@@ -986,6 +994,7 @@ not compatible with the respective feature.
 | `$04E6C5`, `$04DA98`; pointers `$04E67C`, `$04E69C` | Destroyed level tiles, 0x18 entries (Lunar Magic's places) |
 | Ext. object table `$0DA11B` (entry `$04`) | Prefabs (SMWS); empty in the original and in Lunar Magic, no code hook |
 | `$00AD32`; its routine's ADC operand and MVN bank: the table | Submap palettes, 14 × 256 colors (Lunar Magic's place and routine, [research](research/lunar-magic-submap-graphics.md)) |
+| `$04DBB9` | Submap graphics files: loaded when Mario walks to another submap (Lunar Magic's place; the files in SMWE's bypass) |
 | `$048E81`, `$049549`; code `$03BB20–$03BB71`, its table's address `$03BB57` | Level names as free text, 0x60 × 19 tiles (Lunar Magic's places and routine, [research](research/lunar-magic-level-names.md)) |
 | `$05B1A3`; code `$03BB90–$03BC8E`, pointers `$03BE80` | Two messages per level (SMWM, Lunar Magic's places; its copy of the switch palace routine with the loop at `$03BC72`, which hijacks of Lunar Magic's ROMs patch, is the editor's too) |
 | `$00F545`, `$029328`, `$058A66`, `$058B46`, `$058C34`, `$058D2B`, `$00C096`, `$00C0E7`, `$00C176`; Lunar Magic's acts-like table pointers `$06F624` (pages 00–3F), `$06F63A` (40–7F), both at `!SMWE_ACTS_LIKE` | Map16 extension and custom blocks (SMWX) |

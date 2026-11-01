@@ -19,7 +19,7 @@
 
 import type { Rom } from './rom.ts';
 import { snesToPc, type RomRange } from './rom.ts';
-import { editorPatch, customPalettePatch, bgPatch, GFX_FILES } from './patches.ts';
+import { editorPatch, customPalettePatch, bgPatch, GFX_FILES, GFX_BYPASS_ENTRIES } from './patches.ts';
 import { exanimDataRanges } from './exanim.ts';
 import { overworldDataRanges } from './overworld.ts';
 import { levelDataRanges } from './level.ts';
@@ -68,7 +68,7 @@ export function updateBytePages(rom: Rom): void {
     for (const [a, b] of levelDataRanges(rom)) markPc(a, b);
     const mark = (snes: number, len: number) => { const o = snesToPc(snes); markPc(o, o + len); };
     mark(p.gfxLo, GFX_FILES); mark(p.gfxHi, GFX_FILES); mark(p.gfxBank, GFX_FILES); mark(p.gfxFlags, GFX_FILES);
-    mark(p.levelGfx, 0x200 * 8); mark(p.levelGfxHi, 0x200 * 8);
+    mark(p.levelGfx, GFX_BYPASS_ENTRIES * 8); mark(p.levelGfxHi, GFX_BYPASS_ENTRIES * 8);
     mark(p.sprBank, 0x200);
     const pal = customPalettePatch(rom);
     if (pal) mark(pal.table, 0x200 * 3);
