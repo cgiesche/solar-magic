@@ -73,13 +73,10 @@ export function readL1(rom: Rom): Uint16Array {
 }
 // tiles 100–1FF need the high byte map (an editor ROM has it)
 export function writeL1(rom: Rom, d: ArrayLike<number>): void {
+  const hi = Uint8Array.from(d, (t) => t >> 8), has = hasL1HighMap(rom);
+  if (!has && hi.some((b) => b)) missingPatch('Overworld layer 1 tiles 100–1FF');
   rom.writeBytes(OW_L1, Uint8Array.from(d, (t) => t & 0xff));
-  const hi = Uint8Array.from(d, (t) => t >> 8);
-  if (!hasL1HighMap(rom)) {
-    if (hi.some((b) => b)) missingPatch('Overworld layer 1 tiles 100–1FF');
-    return;
-  }
-  if (readL1High(rom)!.every((b, i) => b === hi[i])) return;
+  if (!has || readL1High(rom)!.every((b, i) => b === hi[i])) return;
   writePacked(rom, L1_HI_PTR, L1_HI_BANK, hi, L1_HI_SLACK);
 }
 

@@ -6,7 +6,7 @@
 // Koopa Kid's place moves it; a tile on the other map region is linked by choosing it after the source ("…to a tile
 // on another map"); Delete removes the selected link. Each change is one ROM edit (owlinks.ts).
 
-import type { OverworldView } from './overworld.ts';
+import { l1Hex, type OverworldView } from './overworld.ts';
 import { h, toast, checkbox, select, emptyState } from './dom.ts';
 import {
   readLinks, makeLink, removeLink, setBothWays, moveLocation, locationUses, pathSide, koopaTeleport, setKoopaTeleport, opposite,
@@ -90,7 +90,7 @@ export class LinkLayer {
     const k = kinds[this.view.shown.l1[i]];
     if (k === 'exit') return { kind: 'exit' };
     if (k === 'stop' || k === 'level') return { kind: 'star' };
-    return { kind: null, why: `Mario doesn't stop on tile ${hex(this.view.shown.l1[i], this.view.shown.l1[i] > 0xff ? 3 : 2)} (${PATH_KIND_NAMES[k].toLowerCase()}): a star or pipe is a tile he stops on, an exit path an exit path tile` };
+    return { kind: null, why: `Mario doesn't stop on tile ${l1Hex(this.view.shown.l1[i])} (${PATH_KIND_NAMES[k].toLowerCase()}): a star or pipe is a tile he stops on, an exit path an exit path tile` };
   }
   // an exit path tile's end: the side its path goes on (toward a path tile around it)
   private exitEnd(t: OwTile): LinkEnd {

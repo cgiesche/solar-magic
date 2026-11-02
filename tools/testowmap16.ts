@@ -33,7 +33,7 @@ const bank = owTileAddr(rom, 0) & 0xff0000;
 check(Array.from({ length: OW_L1_TILES }, (_, t) => (bank | map16Pointer(r0.wram, t)) === owTileAddr(rom, t)).every(Boolean), 'the game\'s Map16 pointers of tiles 000–1FF are the Map16\'s + 8 per tile');
 // a tile on the main map (x, y), as the game draws it before the change
 // (one the submaps have too)
-const l1 = gameL1(r0), r3 = emu.load(3, 0), l13 = Uint8Array.from(gameL1(r3));
+const l1 = gameL1(r0), r3 = emu.load(3, 0), l13 = gameL1(r3);
 const onSubmaps = new Set(Array.from({ length: 0x400 }, (_, k) => l13[0x400 + k]));
 let at = { x: -1, y: -1 }, t = -1;
 for (let y = 0; y < 32 && t < 0; y++) for (let x = 0; x < 32; x++) {

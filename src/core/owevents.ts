@@ -277,10 +277,10 @@ export function paintEvent(d: EventData, base: Uint16Array, e: number, after: Ui
 // Event e's layer 1 changes (Lunar Magic's layer 1 event editor: silent steps, VRAM not refreshed – for other
 // submaps and invisible tiles): the tiles where `after` (layer 1 as it is to look after the event) differs from
 // `without` (as after it without them, layer1Without) – a step kept where its tile stays, new ones at the end in
-// tile order. A step writing the tile already there is kept unless `painted` (the tiles painted) has it: when
+// tile order (a step writes the tile's high byte too, $7FC800). A step writing the tile already there is kept unless `painted` (the tiles painted) has it: when
 // events pass in another order than their numbers it may not be. Its layer 2 steps stay.
 export function paintEventL1(d: EventData, e: number, after: ArrayLike<number>, without: ArrayLike<number>, painted: ReadonlySet<number> = new Set()): EventData {
-  const keep = (s: Silent) => s.layer === 2 || (s.loc < 0x800 && (s.tile & 0xff) === after[s.loc] && (after[s.loc] !== without[s.loc] || !painted.has(s.loc)));
+  const keep = (s: Silent) => s.layer === 2 || (s.loc < 0x800 && s.tile === after[s.loc] && (after[s.loc] !== without[s.loc] || !painted.has(s.loc)));
   const kept = d.silent[e].filter(keep), have = new Set(kept.filter((s) => s.layer === 1).map((s) => s.loc)), added: Silent[] = [];
   for (let i = 0; i < 0x800; i++) if (after[i] !== without[i] && !have.has(i)) added.push({ layer: 1, tile: after[i], loc: i });
   const silent = d.silent.slice();

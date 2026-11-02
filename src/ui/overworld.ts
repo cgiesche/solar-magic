@@ -85,7 +85,7 @@ function drawL1Tile(rom: Rom, img: Uint32Array, tc: TileCache, r: OwRender, t: n
 }
 
 // a layer 1 tile's number: 2 digits on page 0, 3 on page 1 (82, 1A5)
-const l1Hex = (t: number) => hex(t, t > 0xff ? 3 : 2);
+export const l1Hex = (t: number): string => hex(t, t > 0xff ? 3 : 2);
 
 // what the timeline shows: an animated step, a silent one, the layer 1 changes
 type StepKind = 'step' | 'silent' | 'l1';

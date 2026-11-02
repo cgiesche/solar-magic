@@ -11,7 +11,7 @@ import {
   OverworldEmulator, gameL1, l1Index, readL1, writeL1, readTranslevels, owTileWords, setOwTileWords, owTileAddr, hasL1HighMap, hasOwMap16Ext,
   hasTranslevelTable, overworldDataRanges, revealedTile, readRevealList, destroyEffects, OW_L1_TILES, type OwRender,
 } from '../src/core/overworld.ts';
-import { readEvents, writeEvents } from '../src/core/owevents.ts';
+import { readEvents, writeEvents, paintEventL1 } from '../src/core/owevents.ts';
 import { map16Pointer, RAM } from '../src/core/ram.ts';
 import { FLIP_X } from '../src/core/quarters.ts';
 import { PATH_TILES_END, NO_SHAPE } from '../src/core/owpaths.ts';
@@ -111,6 +111,12 @@ check(inData(rom.r16(0x04d822) | (rom.r8(0x04d827) << 16), 8), 'the high bytes\'
   writeEvents(r2, { ...d, silent });
   const emu = new OverworldEmulator(r2), before0 = emu.load(0, 0), after = emu.load(0, 1);
   check(gameL1(before0)[at] !== T + 1 && gameL1(after)[at] === T + 1 && same(shownWords(after, 7, 5), ws), 'an event\'s silent step to tile 1A6: shown after the event');
+  // painted again with another tile added: the step to 1A6 kept in its place
+  const d2 = readEvents(r2), wo = gameL1(before0), af = gameL1(after).slice(), at2 = l1Index(0, 3, 5); // (before it in tile order)
+  af[at2] = T;
+  const p = paintEventL1(d2, 0, af, wo, new Set([at2])).silent[0].filter((x) => x.layer === 1);
+  const k = d2.silent[0].filter((x) => x.layer === 1).findIndex((x) => x.loc === at);
+  check(p[k]?.loc === at && p[k]?.tile === T + 1 && p[p.length - 1].tile === T, 'painted on after it: the step to 1A6 kept in its place, the new one at the end');
 }
 
 s.undo();
@@ -131,7 +137,7 @@ check(same(rom.data, before), 'undone');
   let threw = false;
   l[onMain] = T;
   try { writeL1(c, l); } catch { threw = true; }
-  check(threw && !hasL1HighMap(c) && same(readL1(c).subarray(0, 0x10), cl1.subarray(0, 0x10)), 'the clean game: no high bytes, a tile of page 1 refused');
+  check(threw && !hasL1HighMap(c) && same(readL1(c), cl1), 'the clean game: no high bytes, a tile of page 1 refused');
 }
 
 // the game reads the low byte where Mario walks, levels are entered, tiles revealed and destroyed: a tile 1xx is xx
