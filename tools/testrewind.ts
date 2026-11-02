@@ -8,7 +8,7 @@ import { Rom } from '../src/core/rom.ts';
 import { editorImage } from './fixture.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { PlaySession } from '../src/core/playsession.ts';
-import { RewindRing, REWIND_EVERY, REWIND_STATES, stateBytes } from '../src/core/rewind.ts';
+import { RewindRing, REWIND_EVERY, REWIND_STATES } from '../src/core/rewind.ts';
 import { PlayLog, LAG } from '../src/core/playlog.ts';
 import { SLOT_KINDS, type SlotKind } from '../src/core/slotwatch.ts';
 import { PAD } from '../src/core/ram.ts';
@@ -17,6 +17,9 @@ import { Apu, loadApu } from '../src/core/apu.ts';
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
 const same = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((v, i) => v === b[i]);
+// the bytes of a state's memory (its arrays, the PPU's frame and the sound unit's included)
+const stateBytes = (st: unknown): number => ArrayBuffer.isView(st) ? st.byteLength
+  : st && typeof st === 'object' ? Object.values(st).reduce<number>((a, v) => a + stateBytes(v), 0) : 0;
 
 {
   // the ring alone: the newest `size` kept, dropped from the newest end
@@ -107,15 +110,15 @@ const input = (f: number) => PAD.right | (f % 40 < 10 ? PAD.b : 0);
   for (let f = 1; f <= 50; f++) {
     const lag = f >= 10 && f <= 30;
     log.frame(f, none(), f === 5 || f === 20 || f === 40 ? [fail] : [], lag ? LAG : 100, 0, 0, 0x105);
-    if (f === 25) log.died(f, { level: 0x105, tx: 0, ty: 0, killer: { kind: 'pit' } });
+    if (f === 15 || f === 25) log.died(f, { level: 0x105, tx: f, ty: 0, killer: { kind: 'pit' } });
   }
-  check(log.events.length === 1 && log.events[0].count === 3 && log.lagFrames === 21 && log.deaths.length === 1, `before: events ${log.events.map((e) => e.count)}, lag frames ${log.lagFrames}`);
+  check(log.events.length === 1 && log.events[0].count === 3 && log.lagFrames === 21 && log.deaths.length === 2, `before: events ${log.events.map((e) => e.count)}, lag frames ${log.lagFrames}`);
   const gone = log.rewindTo(15);
-  check(gone !== null && gone.length === 1, 'back to frame 15: the death after it given back');
+  check(gone !== null && gone.length === 1 && gone[0].frame === 25, 'back to frame 15: the death after it given back');
   check(log.history.length === 15 && log.history[14].frame === 15, `the samples up to frame 15 (${log.history.length})`);
   check(log.events.length === 1 && log.events[0].count === 1 && log.events[0].last === 5, 'the failure events as at frame 15');
   check(log.lagFrames === 6 && log.lags.length === 1 && log.lags[0].count === 6 && log.lags[0].last === 15, `the lag frames as at frame 15 (${log.lagFrames})`);
-  check(log.deaths.length === 0, 'no death');
+  check(log.deaths.length === 1 && log.deaths[0].frame === 15, 'the death in frame 15 kept');
   // going on: frames merge into the events open then
   log.frame(16, none(), [fail], LAG, 0, 0, 0x105);
   check(log.events.length === 1 && log.events[0].count === 2 && log.lags[0].count === 7, 'played on: the open events go on');

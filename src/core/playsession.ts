@@ -238,11 +238,11 @@ export class PlaySession {
   rewind(): number | null {
     const ring = this.rewind_?.ring;
     if (!ring) return null;
-    while (ring.length && ring.newest()!.frame > this.frames_) ring.pop();
-    const k = ring.newest()?.frame === this.frames_ ? 1 : 0;
-    const to = ring.at(k);
+    // (none is newer than the current frame: stepping back pops them, a savestate loaded clears them)
+    const atNow = ring.newest()?.frame === this.frames_;
+    const to = ring.at(atNow ? 1 : 0);
     if (!to) return null;
-    if (k) ring.pop();
+    if (atNow) ring.pop();
     this.s.loadState(to.state);
     this.frames_ = to.frame;
     for (const w of this.watchers) w.reset();

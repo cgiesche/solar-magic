@@ -221,6 +221,9 @@ function play(app: App, o: Origin, audio: AudioOut, p: PlaySession, ppu: PPU, ok
   const kd = onKey(true), ku = onKey(false);
   window.addEventListener('keydown', kd, true);
   window.addEventListener('keyup', ku, true);
+  // (a key released in another window: its keyup never comes)
+  const blur = () => { keys = 0; keyRewind = false; };
+  window.addEventListener('blur', blur);
   const setPaused = (p: boolean) => { paused = p; audio.resync(); };
   const frame = () => {
     let busy = 0;
@@ -303,6 +306,7 @@ function play(app: App, o: Origin, audio: AudioOut, p: PlaySession, ppu: PPU, ok
     audio.close();
     window.removeEventListener('keydown', kd, true);
     window.removeEventListener('keyup', ku, true);
+    window.removeEventListener('blur', blur);
   };
   // (the open level's triggers: from the overworld other levels are played)
   const triggers = o.kind === 'level' ? triggerControls(app, p.wram, () => canvas.focus()) : '';

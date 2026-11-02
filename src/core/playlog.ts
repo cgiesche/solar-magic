@@ -40,9 +40,13 @@ interface LogMark {
   frame: number;
   pushed: { events: number; lags: number; deaths: number };
   lagFrames: number;
-  open: [SlotKind, PlayEvent, number, number][];
-  openLag: [LagEvent, number, number] | null;
+  open: [SlotKind, OpenAt<PlayEvent>][];
+  openLag: OpenAt<LagEvent> | null;
 }
+// an open event with its count and last frame at a mark
+interface OpenAt<E extends Moment> { e: E; count: number; last: number }
+const openAt = <E extends Moment>(e: E): OpenAt<E> => ({ e, count: e.count, last: e.last });
+const reopen = <E extends Moment>(o: OpenAt<E>): E => Object.assign(o.e, { count: o.count, last: o.last });
 
 export class PlayLog {
   history: FrameSample[] = [];
@@ -77,8 +81,8 @@ export class PlayLog {
     const gone = back(this.deaths, this.pushed.deaths - m.pushed.deaths);
     this.pushed = { ...m.pushed };
     this.lagFrames = m.lagFrames;
-    this.open = new Map(m.open.map(([kind, e, count, last]) => { e.count = count; e.last = last; return [kind, e]; }));
-    this.openLag = m.openLag && Object.assign(m.openLag[0], { count: m.openLag[1], last: m.openLag[2] });
+    this.open = new Map(m.open.map(([kind, o]) => [kind, reopen(o)]));
+    this.openLag = m.openLag && reopen(m.openLag);
     return gone;
   }
 
@@ -86,8 +90,8 @@ export class PlayLog {
     if (!this.keep) return;
     this.marks.push({
       frame, pushed: { ...this.pushed }, lagFrames: this.lagFrames,
-      open: [...this.open].map(([kind, e]) => [kind, e, e.count, e.last]),
-      openLag: this.openLag && [this.openLag, this.openLag.count, this.openLag.last],
+      open: [...this.open].map(([kind, e]) => [kind, openAt(e)]),
+      openLag: this.openLag && openAt(this.openLag),
     });
     if (this.marks.length > this.keep) this.marks.splice(0, this.marks.length - this.keep);
   }

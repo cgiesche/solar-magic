@@ -3,8 +3,6 @@
 // (PlaySession.keepRewind / rewind). A state with the PPU and the sound unit is about 514 KiB (KiB: WRAM 128,
 // SRAM 32, VRAM 64, the sound unit 65, the frame on screen 224; tools/testrewind.ts prints it), the ring about 50 MiB.
 
-import type { SnesState } from './snes.ts';
-
 export const REWIND_EVERY = 6; // frames between kept states
 export const REWIND_STATES = 100; // states kept: 600 frames, 10 s
 
@@ -36,11 +34,4 @@ export class RewindRing<T> {
     return it;
   }
   clear(): void { this.items.fill(undefined); this.head = 0; this.count = 0; }
-}
-
-// the bytes of a state's memory (its arrays, the PPU's frame and the sound unit's included)
-export function stateBytes(st: unknown): number {
-  if (ArrayBuffer.isView(st)) return st.byteLength;
-  if (st && typeof st === 'object') return Object.values(st as SnesState).reduce<number>((a, v) => a + stateBytes(v), 0);
-  return 0;
 }
