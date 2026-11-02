@@ -16,8 +16,8 @@ import { levelTranslevel, loadLevel } from '../src/core/level.ts';
 import { cleanGameBytes } from '../src/core/cleangame.ts';
 import { isGlobalAnimBps, globalAnimList } from '../src/core/globalanim.ts';
 import { readGlobalList, writeGlobalList, readAltFile, writeAltFile, emptyList, exanimTiles, altFileName } from '../src/core/exanim.ts';
-import { inspectUpload, installPackage, removePackage, planUpload, type UploadPreview, type ReadyPreview, type InstallOptions } from '../src/core/packages.ts';
-import { listPackages, packageRemoval, packageSummary } from '../src/core/pkgreg.ts';
+import { inspectUpload, installPackage, planUpload, type UploadPreview, type ReadyPreview, type InstallOptions } from '../src/core/packages.ts';
+import { listPackages, packageRemoval, packageSummary, uninstallPackage } from '../src/core/pkgreg.ts';
 import { setExtTileWords } from '../src/core/map16ext.ts';
 import { cleanImage, editorImage, romDiff, recordShape } from './fixture.ts';
 
@@ -129,7 +129,7 @@ const upload = () => ready(inspectUpload('baserom-anim.zip', zipSync({ [BPS]: bp
   check(same(tileBytes(play.vram, 0x2f0, 16), alt.subarray(0xe00, 0x1000)), 'in test play: the OFF frame');
 
   // removed: the global list and its Anim graphic as before
-  const warnings = await removePackage(rom, pkg.id, opt.blank);
+  const warnings = await uninstallPackage(rom, pkg.id, opt.blank);
   const after = readGlobalList(rom);
   check(after?.slots.size === 1 && after.slots.get(0)!.dest === (0x8000 | 0x0700), `removed: the global list as before (${[...after?.slots.keys() ?? []].map(hx).join(' ')}) ${warnings.join(' ')}`);
   check(readAltFile(rom, 0)?.length === 0x20, `removed: ${altFileName(0)} its size before (${readAltFile(rom, 0)?.length})`);

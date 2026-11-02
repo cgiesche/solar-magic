@@ -6,14 +6,15 @@
 // - installPackage: applies every part of a previewed upload and records what it brought as one package
 //   (observed like pkgreg.ts does: the ROM's projects before and after); all or nothing;
 // - reapplyPackagePatch: a package's patch with other settings;
-// Detecting, planning and applying each part kind is its part adapter's (pkgparts.ts).
-// - removePackage: the package and everything it brought, files shared with other packages kept.
+// - importForPackage: a graphics file of an installed package imported, its number recorded with it.
+// Detecting, planning and applying each part kind is its part adapter's (pkgparts.ts); recording what a
+// package brought and removing it again is the registry's (pkgreg.ts uninstallPackage). The recorder is
+// called only here.
 
 import { zipSync, unzipSync } from 'fflate';
 import { Rom } from './rom.ts';
 import { reapplyPatch, type ApplyResult } from './patchapply.ts';
 import type { PartKind, ToolKind } from './parts.ts';
-import { PART_LABEL } from './parts.ts';
 import { uploadFiles, uploadFromFiles, withDefines, type Upload } from './patchpkg.ts';
 import { suggestMapping, placed, suggestCalls, packageDocs, type PkgSuggestion } from './pkgmap.ts';
 import { detectGraphics, includedFiles, applyLevelSetup } from './pkgplan.ts';
@@ -29,7 +30,7 @@ import { NO_FREE_ENTRANCE } from './entrances.ts';
 import { saveLevel } from './save.ts';
 import { sampleSlots } from './pkgsamples.ts';
 import { assignSlot } from './gfxslots.ts';
-import { recordPackageChange, recordPackageChangeAsync, listPackages, packageArchive, uninstallPackage, type Package } from './pkgreg.ts';
+import { recordPackageChange, recordPackageChangeAsync, listPackages, packageArchive, type Package } from './pkgreg.ts';
 import { uploadObjectText, objectTextNotes, isObjectTextFile } from './objtext.ts';
 import { allOrNothing } from './romedit.ts';
 import { callistoProject, includesCallistoHeader, sharedCode, type CallistoProject } from './callisto.ts';
@@ -61,7 +62,6 @@ export function partsSummary(parts: PreviewPart[]): string {
   for (const p of parts) n.set(p.kind, (n.get(p.kind) ?? 0) + 1);
   return [...n].map(([k, c]) => plural(c, COUNT_NOUN[k])).join(', ');
 }
-export const partLabel = (k: PartKind) => PART_LABEL[k];
 
 export function inspectUpload(fileName: string, data: Uint8Array): UploadPreview {
   const name = nameOf(fileName);
@@ -352,11 +352,13 @@ export function reapplyPackagePatch(rom: Rom, entryId: string, upload: Upload, f
   return rec ? recordPackageChange(rom, rec, apply).result : apply();
 }
 
-// ---------- removing ----------
-
-// the package and everything it brought (songs too); files another package brought as well stay
-export function removePackage(rom: Rom, id: string, blank: number[]): Promise<string[]> {
-  return uninstallPackage(rom, id, blank);
+// writes a graphics file imported for an installed package (`into`; undefined: for none): what it adds
+// (its ExGFX number) goes into the package's record. Run it in an edit session. Returns what `write` did.
+export function importForPackage<T>(rom: Rom, into: Package | undefined, write: () => T): T {
+  if (!into) return write();
+  let value!: T;
+  recordPackageChange(rom, into, () => { value = write(); return { ok: true }; });
+  return value;
 }
 
 // ---------- files and manuals ----------

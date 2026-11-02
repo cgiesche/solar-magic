@@ -14,10 +14,10 @@ import { enableBlocks, extTileWords, actsLike, setExtTileWords } from '../src/co
 import { bgExtTileWords } from '../src/core/bgmap16.ts';
 import { tilesetPointers, tilesetWords, TILESETS } from '../src/core/tilesets.ts';
 import { parseRomMap16, parseMap16File } from '../src/core/map16file.ts';
-import { inspectUpload, installPackage, removePackage, planUpload, type UploadPreview, type ReadyPreview, type InstallOptions } from '../src/core/packages.ts';
+import { inspectUpload, installPackage, planUpload, type UploadPreview, type ReadyPreview, type InstallOptions } from '../src/core/packages.ts';
 import { loadBlockProject } from '../src/core/blocks.ts';
 import { editPlan } from '../src/core/pkgplan.ts';
-import { listPackages } from '../src/core/pkgreg.ts';
+import { listPackages, uninstallPackage } from '../src/core/pkgreg.ts';
 import { editorImage, romDiff } from './fixture.ts';
 
 await loadAsar();
@@ -130,7 +130,7 @@ const preview = ready(inspectUpload('rhr-baserom-5.15.zip', zipSync(baserom)));
   check(loadBlockProject(rom)?.list.some((b) => b.tile === 0x2c0) === true && extTileWords(rom, 0x2c0)!.join() === fgWords(0x2c0).join(), 'the block on tile 2C0, which shows it');
   const pkg = listPackages(rom)[0];
   check(!!pkg && pkg.map16?.length === fg.length && pkg.bgMap16?.length === 100, `the package's Map16 tiles recorded (${pkg?.map16?.length} FG, ${pkg?.bgMap16?.length} BG)`);
-  const warnings = await removePackage(rom, r.pkg!.id, opt.blank);
+  const warnings = await uninstallPackage(rom, r.pkg!.id, opt.blank);
   check(!listPackages(rom).length && romDiff(before, rom.data) === 0, `removed: the Map16 as before (${romDiff(before, rom.data)} bytes differ) ${warnings.join(' ')}`);
 }
 

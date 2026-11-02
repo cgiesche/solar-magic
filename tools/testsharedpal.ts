@@ -11,8 +11,8 @@ import { loadAsar } from '../src/core/asar.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { map16Source } from '../src/core/render.ts';
 import { SHARED_PALETTES, SHARED_PAL_SIZE, cleanSharedPalettes, sharedColorNames } from '../src/core/sharedpal.ts';
-import { inspectUpload, installPackage, removePackage, planUpload, type UploadPreview, type ReadyPreview, type InstallOptions } from '../src/core/packages.ts';
-import { listPackages, packageRemoval, packageSummary } from '../src/core/pkgreg.ts';
+import { inspectUpload, installPackage, planUpload, type UploadPreview, type ReadyPreview, type InstallOptions } from '../src/core/packages.ts';
+import { listPackages, packageRemoval, packageSummary, uninstallPackage } from '../src/core/pkgreg.ts';
 import { cleanImage, editorImage, romDiff } from './fixture.ts';
 
 await loadAsar();
@@ -93,7 +93,7 @@ check(sharedColorNames(OTHERS).join('; ') === 'Back area color 0; BG palette 0: 
   check(!r2.ok && r2.errors.some((e) => /conflict/i.test(e) && e.includes('baserom-palettes') && e.includes('color 15') && !e.includes('14')), `a second package changing one: conflict (${r2.errors.join(' ')})`);
   check(listPackages(rom).length === 1, 'not installed');
 
-  const warnings = await removePackage(rom, pkg.id, opt.blank);
+  const warnings = await uninstallPackage(rom, pkg.id, opt.blank);
   check(color(rom, CHANGED[0]) === 0x0421 && color(rom, CHANGED[1]) === color(clean, CHANGED[1]), 'removed: its colors set back (the hand-edited one as it was)');
   check(!listPackages(rom).length && romDiff(before, rom.data) === 0, `removed: the ROM as before (${romDiff(before, rom.data)} bytes differ) ${warnings.join(' ')}`);
 

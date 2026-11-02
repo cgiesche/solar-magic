@@ -7,9 +7,10 @@ import type { App } from './app.ts';
 import { h, clear, toast, choose, logTool } from './dom.ts';
 import { downloadBytes } from './platform.ts';
 import { listPatches, type PatchEntry } from '../core/patchreg.ts';
-import { listPackages, packageSummary, packageRemoval, type Package } from '../core/pkgreg.ts';
+import type { ApplyResult } from '../core/patchapply.ts';
+import { listPackages, packageSummary, packageRemoval, uninstallPackage, type Package } from '../core/pkgreg.ts';
 import { SECTIONS } from '../core/pkgsections.ts';
-import { removePackage, packageFiles } from '../core/packages.ts';
+import { reapplyPackagePatch, packageFiles } from '../core/packages.ts';
 import { loadMusicProject, songHex, sfxKey } from '../core/music.ts';
 import { playButton, playSong, currentSongs } from './musicdialog.ts';
 import { isGfxData } from '../core/gfxfiles.ts';
@@ -20,7 +21,7 @@ import { bowsieSpriteInfo, type BowsieProject } from '../core/bowsie.ts';
 import type { UberProject } from '../core/uberproject.ts';
 import type { BlockProject } from '../core/blocks.ts';
 import { map16Source } from '../core/render.ts';
-import { storedUpload, toUpload, settingsForm, reapplyPackagePatch, patchDone, type PackagesTab } from './patchmanager.ts';
+import { storedUpload, toUpload, settingsForm, patchDone, type PackagesTab } from './patchmanager.ts';
 import { errorText, type Pane } from './projectpane.ts';
 import { definesButton, editButton } from './defineedit.ts';
 import { openDocs, packageDocs } from './docview.ts';
@@ -143,7 +144,10 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
     if (m?.description) box.appendChild(h('p', null, m.description));
     const form = settingsForm(upload, s.main, p.defines);
     const again = () => {
-      const r = reapplyPackagePatch(app, upload, s.fileName, s.main, form.read(), p, rec);
+      // one undoable ROM edit with the package's record; the ROM changed when ok
+      let r: ApplyResult;
+      try { r = app.romEdit(`Patch “${upload.name}” reapplied`, () => reapplyPackagePatch(app.rom, p.id, upload, s.fileName, s.main, form.read(), rec)); }
+      catch (e) { r = { ok: false, errors: [errorText(e)], warnings: [], prints: [] }; }
       if (!r.ok) { logTool(`Patch “${upload.name}”`, r); return; }
       patchDone(upload.name, true, r);
       host.changed();
@@ -316,7 +320,7 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
     const keys = TOOL_KINDS.filter((k) => rec[k].files.length);
     try {
       const blank = map16Source(app.rom, app.render).fg(0x025);
-      const w = await app.romEditAsync(`Package “${rec.name}” removed`, () => removePackage(app.rom, rec.id, blank));
+      const w = await app.romEditAsync(`Package “${rec.name}” removed`, () => uninstallPackage(app.rom, rec.id, blank));
       toast(`“${rec.name}” removed${w.length ? ': ' + w.join(' ') : ''}`);
     } catch (e) { toast(errorText(e), 'error'); }
     for (const k of keys) host.panes[k].reload();

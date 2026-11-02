@@ -20,8 +20,8 @@ import { map16Source } from '../src/core/render.ts';
 import { convertBpp } from '../src/core/gfxbin.ts';
 import { decodeTile } from '../src/core/gfx.ts';
 import { GLOBAL_GFX, GFX32, GFX33, cleanGlobalGfx, globalGfxData, setGlobalGfx, fromBin, globalGfxNum } from '../src/core/globalgfx.ts';
-import { inspectUpload, installPackage, removePackage, planUpload, type UploadPreview, type ReadyPreview, type InstallOptions } from '../src/core/packages.ts';
-import { listPackages, packageRemoval, packageSummary } from '../src/core/pkgreg.ts';
+import { inspectUpload, installPackage, planUpload, type UploadPreview, type ReadyPreview, type InstallOptions } from '../src/core/packages.ts';
+import { listPackages, packageRemoval, packageSummary, uninstallPackage } from '../src/core/pkgreg.ts';
 import { cleanImage, editorImage, romDiff } from './fixture.ts';
 
 await loadAsar();
@@ -175,7 +175,7 @@ const tiles01 = (rom: Rom) => new LevelEmulator(rom).load(0x105).vram.slice(0xd0
   check(!r2.ok && r2.errors.some((e) => /conflict/i.test(e) && e.includes('baserom-graphics') && e.includes('GFX14')), `a second package changing one: conflict (${r2.errors.join(' ')})`);
   check(listPackages(rom).length === 1, 'not installed');
 
-  const warnings = await removePackage(rom, pkg.id, opt.blank);
+  const warnings = await uninstallPackage(rom, pkg.id, opt.blank);
   check(!warnings.length && !listPackages(rom).length && romDiff(before, rom.data) === 0, `removed: the ROM as before (${romDiff(before, rom.data)} bytes differ) ${warnings.join(' ')}`);
   check(same(tiles01(rom), vram), 'the game loads the clean GFX01 again');
 }
@@ -193,7 +193,7 @@ const tiles01 = (rom: Rom) => new LevelEmulator(rom).load(0x105).vram.slice(0xd0
   // GFX01 edited after
   const after = globalGfxData(rom, 1)!.map((v) => v ^ 0xf0);
   setGlobalGfx(rom, 1, after);
-  const warnings = await removePackage(rom, listPackages(rom)[0].id, opt.blank);
+  const warnings = await uninstallPackage(rom, listPackages(rom)[0].id, opt.blank);
   check(warnings.some((w) => w.includes('GFX01') && /changed since/.test(w)), `changed since: reported (${warnings.join(' ')})`);
   check(same(globalGfxData(rom, 1), after), '… and left as it is');
   check([0, 2, 3, GFX33].every((n) => same(globalGfxData(rom, n), cleanGlobalGfx(rom, n))), 'the others set back to the clean game\'s');

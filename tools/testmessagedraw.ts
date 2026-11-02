@@ -17,8 +17,8 @@ import { PlaySession } from '../src/core/playsession.ts';
 import { map16Source } from '../src/core/render.ts';
 import { RomHistory } from '../src/core/romhistory.ts';
 import { listPatches } from '../src/core/patchreg.ts';
-import { listPackages } from '../src/core/pkgreg.ts';
-import { inspectUpload, installPackage, removePackage, defaultAssignment, type InstallOptions } from '../src/core/packages.ts';
+import { listPackages, uninstallPackage } from '../src/core/pkgreg.ts';
+import { inspectUpload, installPackage, defaultAssignment, type InstallOptions } from '../src/core/packages.ts';
 import { messageRoutine, messageRoutineInput, messageRoutineNote, messageRoutineTaken, type MessageRoutine } from '../src/core/messagedraw.ts';
 import { ProbeHost } from '../src/core/probehost.ts';
 import type { ProbeMessage, ProbeReply } from '../src/core/probeprotocol.ts';
@@ -156,7 +156,7 @@ history.redo();
   check(a.known && same(a.r, replaced) && playsThere === 0, 'VWF\'s install redone: known again at once, not played again');
 }
 
-await removePackage(rom, r.pkg!.id, opts.blank);
+await uninstallPackage(rom, r.pkg!.id, opts.blank);
 {
   const m = messageRoutine(rom);
   check(m.game === true, 'removed: the game draws the editor\'s messages again');

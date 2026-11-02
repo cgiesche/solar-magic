@@ -3,7 +3,7 @@
 // install has its effect in the emulator and is one package; removing gives the ROM as before, keeping
 // files another package brought too (the editor's own patches it needed, like the Map16 extension, stay);
 // undoing an install restores ROM bytes and editor data in one step. The manuals the tool tabs list come
-// and go with their packages.
+// and go with their packages. A graphic imported for an installed package goes into its record.
 import { readFileSync } from 'node:fs';
 import { unzipSync, zipSync } from 'fflate';
 import { Rom } from '../src/core/rom.ts';
@@ -14,8 +14,8 @@ import { PlaySession } from '../src/core/playsession.ts';
 import { GM, PAD } from '../src/core/ram.ts';
 import { map16Source } from '../src/core/render.ts';
 import { RomHistory } from '../src/core/romhistory.ts';
-import { inspectUpload, installPackage, removePackage, defaultAssignment, partsSummary, packageManuals, type UploadPreview, type ReadyPreview, type InstallOptions } from '../src/core/packages.ts';
-import { listPackages } from '../src/core/pkgreg.ts';
+import { inspectUpload, installPackage, defaultAssignment, partsSummary, packageManuals, importForPackage, type UploadPreview, type ReadyPreview, type InstallOptions } from '../src/core/packages.ts';
+import { listPackages, uninstallPackage } from '../src/core/pkgreg.ts';
 import type { ToolKind } from '../src/core/parts.ts';
 import { loadProject, saveProject } from '../src/core/uberproject.ts';
 import { ALL } from '../src/core/uberasm.ts';
@@ -26,6 +26,8 @@ import { loadLevel, newUid } from '../src/core/level.ts';
 import { saveLevel } from '../src/core/save.ts';
 import { levelMusic, setLevelMusic, installEditorPatch, customPalette, DM16_EXT } from '../src/core/patches.ts';
 import { readLevelList, readAltFile, usesAltFile } from '../src/core/exanim.ts';
+import { storeGfxBin } from '../src/core/gfxbin.ts';
+import { hasGfx, removeGfx } from '../src/core/gfxfiles.ts';
 import { levelColors } from '../src/core/levelgfx.ts';
 import { enableBlocks, setExtTileWords } from '../src/core/map16ext.ts';
 import { parseLmObjects } from '../src/core/mwl.ts';
@@ -135,10 +137,27 @@ const shared = 'Shared:\n  RTL\n';
 const pa = await install(inspectUpload('A.zip', zip({ 'level/a.asm': 'main:\n  JSL shared_Shared\n  RTL\n', 'library/shared.asm': shared })));
 const pb = await install(inspectUpload('B.zip', zip({ 'level/b.asm': 'main:\n  JSL shared_Shared\n  RTL\n', 'library/shared.asm': shared })), { level: 0x106 });
 check(pa.ok && pb.ok, 'A and B installed');
-await removePackage(rom, pa.pkg!.id, opts.blank);
+await uninstallPackage(rom, pa.pkg!.id, opts.blank);
 const up = loadProject(rom)!;
 check(!up.files.has('level/a.asm') && up.files.has('library/shared.asm') && up.files.has('level/b.asm'), 'removing A keeps the library file B uses');
-await removePackage(rom, pb.pkg!.id, opts.blank);
+await uninstallPackage(rom, pb.pkg!.id, opts.blank);
+
+// a graphic imported for an installed package (the graphics tab's import into a package): its new ExGFX
+// number goes into the package's record and leaves with it; imported for none, no record changes
+{
+  const r = await install(inspectUpload('G.zip', zip({ 'level/g.asm': 'main:\n  RTL\n' })));
+  const free = Array.from({ length: 0x100 }, (_, i) => 0x100 + i).find((n) => !hasGfx(rom, n))!;
+  const data = new Uint8Array(0x1000).map((_, i) => i * 7);
+  const kind = importForPackage(rom, r.pkg!, () => storeGfxBin(rom, free, data));
+  const rec = listPackages(rom).find((p) => p.id === r.pkg!.id)!;
+  check(r.ok && typeof kind === 'string' && hasGfx(rom, free) && rec.gfx.includes(free), `an imported graphic goes into its package's record (${rec.gfx.join()})`);
+  const before = JSON.stringify(listPackages(rom));
+  importForPackage(rom, undefined, () => storeGfxBin(rom, free + 1, data));
+  check(hasGfx(rom, free + 1) && JSON.stringify(listPackages(rom)) === before, 'imported for no package: no record changes');
+  await uninstallPackage(rom, r.pkg!.id, opts.blank);
+  check(!hasGfx(rom, free) && hasGfx(rom, free + 1), 'removing the package takes its imported graphic along, not the other');
+  removeGfx(rom, free + 1);
+}
 
 // two packages bringing an identical sprite file: removing the first keeps it for the second
 {
@@ -146,10 +165,10 @@ await removePackage(rom, pb.pkg!.id, opts.blank);
   const sa = await install(inspectUpload('SA.zip', zip({ 'cluster/shared.asm': sprite, 'readme.txt': 'A' })));
   const sb = await install(inspectUpload('SB.zip', zip({ 'cluster/shared.asm': sprite, 'cluster/own.asm': sprite, 'readme.txt': 'B' })));
   check(sa.ok && sb.ok && sb.pkg!.sprite.files.includes('cluster/shared.asm'), `SB's record has the shared sprite file (${sb.pkg?.sprite.files.join()})`);
-  await removePackage(rom, sa.pkg!.id, opts.blank);
+  await uninstallPackage(rom, sa.pkg!.id, opts.blank);
   const pp = loadPixiProject(rom);
   check(!!pp?.files.has('cluster/shared.asm') && pp.files.has('cluster/own.asm'), 'removing SA keeps the sprite file SB uses');
-  await removePackage(rom, sb.pkg!.id, opts.blank);
+  await uninstallPackage(rom, sb.pkg!.id, opts.blank);
 }
 
 // its file assigned by hand elsewhere (all levels) and its own assignment dropped: removing it takes
@@ -160,7 +179,7 @@ await removePackage(rom, pb.pkg!.id, opts.blank);
   p.list.level.delete(0x105);
   p.list.level.set(ALL, [{ file: 'level/c.asm', bytes: [] }]);
   saveProject(rom, p);
-  const rm = await removePackage(rom, r.pkg!.id, opts.blank);
+  const rm = await uninstallPackage(rom, r.pkg!.id, opts.blank);
   const after = loadProject(rom);
   check(r.ok && !rm.length && !after?.files.has('level/c.asm') && !after?.list.level.has(ALL), 'removing a package drops hand-made assignments of its files ' + rm.join(' | '));
 }
@@ -174,11 +193,11 @@ await removePackage(rom, pb.pkg!.id, opts.blank);
   check(withDocs.ok && without.ok && names('uberasm') === 'Docs' && !names('block') && !names('sprite'), `manuals: only the package with a readme, in the UberASM tab (${names('uberasm')})`);
   check(packageManuals(rom, 'uberasm')[0]?.files.has('readme.txt') === true, 'manuals: with the package files');
   const before = rom.snapshot();
-  await removePackage(rom, withDocs.pkg!.id, opts.blank);
+  await uninstallPackage(rom, withDocs.pkg!.id, opts.blank);
   check(!names('uberasm'), 'manuals: gone with the package');
   rom.restore(before);
   check(names('uberasm') === 'Docs', 'manuals: back when the removal is undone');
-  for (const r of [withDocs, without]) await removePackage(rom, r.pkg!.id, opts.blank);
+  for (const r of [withDocs, without]) await uninstallPackage(rom, r.pkg!.id, opts.blank);
 }
 
 // sprites and blocks
@@ -197,14 +216,14 @@ const ro = await install(onoff, { level: null });
   check(ro.ok && ro.pkg!.block.tiles.length === 2 && ro.pkg!.map16!.length === 2 && ro.pkg!.gfx.length === 0, `On-Off Blocks: block on two Map16 tiles, no ExGFX (its only file is AN2, animation frames) (${ro.prints.join(' | ')})`);
   check(!!sprite && num !== undefined && parseInt(num, 16) === sprite.num, `On-Off Blocks: the block spawns bounce sprite ${sprite?.num.toString(16)} (!bounce_num = $${num})`);
 }
-for (const r of [ro, rs, rr, rb, r1]) await removePackage(rom, r.pkg!.id, opts.blank);
+for (const r of [ro, rs, rr, rb, r1]) await uninstallPackage(rom, r.pkg!.id, opts.blank);
 sameRom('all removed');
 
 // tool folders
 for (const [p, what] of [[uberFolder, 'UberASM Tool folder'], [gpsFolder, 'GPS folder'], [pixiFolder, 'PIXI folder']] as const) {
   const r = await install(p);
   check(r.ok && listPackages(rom).length === 1, `${what}: installed as one package`);
-  await removePackage(rom, r.pkg!.id, opts.blank);
+  await uninstallPackage(rom, r.pkg!.id, opts.blank);
 }
 sameRom('tool folders removed');
 
@@ -216,7 +235,7 @@ sameRom('tool folders removed');
   const modes = r.pkg?.uberasm.calls.map(([ctx, num, f]) => `${ctx} ${num.toString(16)} ${f.replace(/^.*_/, '')}`).join(', ');
   check(r.ok && modes === 'gamemode c gm0C.asm, gamemode 10 gm10.asm, gamemode 14 gm14.asm', `No Overworld: installed, game modes from the readme (${modes})`);
   check([...rom.data.slice(0x25c64, 0x25c67)].every((b) => b === 0xea), 'No Overworld: its hijack (NOP #3 at $04DC64)');
-  await removePackage(rom, r.pkg!.id, opts.blank);
+  await uninstallPackage(rom, r.pkg!.id, opts.blank);
 }
 sameRom('No Overworld removed');
 
@@ -224,7 +243,7 @@ sameRom('No Overworld removed');
 {
   const r = await install(tilesOnly, { level: null });
   check(r.ok && r.pkg!.map16!.length === 2 && r.pkg!.gfx.length === 1, 'graphics only: Map16 tiles and ExGFX installed as one package');
-  await removePackage(rom, r.pkg!.id, opts.blank);
+  await uninstallPackage(rom, r.pkg!.id, opts.blank);
 }
 sameRom('graphics removed');
 
@@ -237,11 +256,11 @@ check(rm.ok && loadMusicProject(rom)?.songs.length === 1 && levelMusic(rom, 0x10
   const r2 = await install(inspectUpload('Second Test.zip', testSongZip()), { level: null });
   const song = loadMusicProject(rom)?.songs.find((s) => s.num !== loadMusicProject(rom)!.songs[0].num)?.num ?? -1;
   setSubmapMusic(rom, 1, song);
-  await removePackage(rom, r2.pkg!.id, opts.blank);
+  await uninstallPackage(rom, r2.pkg!.id, opts.blank);
   check(r2.ok && song > 0 && hasAmk(rom) && submapMusic(rom, 1) === defaultSubmapMusic(rom, 1),
     `second song's package removed: Yoshi's Island back to its own song (${submapMusic(rom, 1).toString(16)})`);
 }
-await removePackage(rom, rm.pkg!.id, opts.blank);
+await uninstallPackage(rom, rm.pkg!.id, opts.blank);
 sameRom('song removed');
 
 // a failing install leaves the ROM as it was
@@ -284,7 +303,7 @@ sameRom('song removed');
       if (modes[modes.length - 1] !== p.mode) modes.push(p.mode);
     }
     check(p.ready && modes.includes(0x0f) && modes[modes.length - 1] === GM.level && !modes.includes(0x15), `in the emulator: Retry respawns in the level (game modes ${modes.map((m) => m.toString(16)).join(' ')})`);
-    await removePackage(rom, r.pkg!.id, opts.blank);
+    await uninstallPackage(rom, r.pkg!.id, opts.blank);
   }
   const nothing = await installPackage(rom, retry, { ...opts, assignment: { rules: new Map([['', null]]), calls: [] } });
   check(!nothing.ok && /Nothing/i.test(nothing.errors[0] ?? ''), 'an assignment taking nothing: error');
@@ -308,7 +327,7 @@ sameRom('song removed');
   const up3 = loadProject(rom)!; up3.list.level = calls;
   const reU = saveProject(rom, up3);
   check(reP.ok && reB.ok && reU.ok && loadPixiProject(rom)!.list.length === 2 && loadBlockProject(rom)!.list.length === 2, 'assigned again');
-  for (const r of [ru, rr2, rb2]) await removePackage(rom, r.pkg!.id, opts.blank);
+  for (const r of [ru, rr2, rb2]) await uninstallPackage(rom, r.pkg!.id, opts.blank);
   check(!listPackages(rom).length && !loadPixiProject(rom) && !loadBlockProject(rom), 'and removed with their packages');
 }
 
@@ -324,14 +343,14 @@ sameRom('song removed');
   const want = (i: number) => (pal[i * 3] >> 3) | ((pal[i * 3 + 1] >> 3) << 5) | ((pal[i * 3 + 2] >> 3) << 10);
   const off = await installPackage(rom, ready(onoff), { ...o, setup: false });
   check(off.ok && !customPalette(rom, 0x105), 'level setup unchecked: level 105 keeps its colors');
-  await removePackage(rom, off.pkg!.id, o.blank);
+  await uninstallPackage(rom, off.pkg!.id, o.blank);
   const r = await installPackage(rom, ready(onoff), o);
   const e2 = new LevelEmulator(rom); e2.boot();
   const cg = e2.load(0x105).cgram;
   const row7 = Array.from({ length: 9 }, (_, i) => cg[(0x70 + i) * 2] | (cg[(0x70 + i) * 2 + 1] << 8));
   const other = cg[0x12] | (cg[0x13] << 8), before = l.cgram[0x12] | (l.cgram[0x13] << 8);
   check(r.ok && row7.every((c, i) => c === want(0x70 + i)) && other === before, `level setup: palette row 7 from PinkThreeCols.pal in the level, other colors kept (${r.prints.filter((p) => /color/.test(p)).join()})`);
-  await removePackage(rom, r.pkg!.id, o.blank);
+  await uninstallPackage(rom, r.pkg!.id, o.blank);
   check(!!customPalette(rom, 0x105), 'removing the package keeps the level setup');
 }
 

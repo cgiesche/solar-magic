@@ -6,10 +6,10 @@
 import type { App } from './app.ts';
 import { h, modal, clear, toast, logTool } from './dom.ts';
 import { messageRoutineTaken } from '../core/messagedraw.ts';
-import { installPackage, partsSummary, partLabel, type ReadyPreview, type ManualPreview, type InstallOptions } from '../core/packages.ts';
+import { installPackage, partsSummary, type ReadyPreview, type ManualPreview, type InstallOptions } from '../core/packages.ts';
 import { assignmentEditor } from './pkgmap.ts';
 import type { Package } from '../core/pkgreg.ts';
-import type { PartKind } from '../core/parts.ts';
+import { PART_LABEL, type PartKind } from '../core/parts.ts';
 import { map16Source } from '../core/render.ts';
 import { hex } from '../core/names.ts';
 import { settingsForm } from './patchmanager.ts';
@@ -44,7 +44,7 @@ export function openUploadPreview(app: App, p: ReadyPreview | ManualPreview, don
   const body = h('div', { class: 'patch-apply' },
     h('p', null, `Found: ${partsSummary(p.parts)}.`),
     h('table', { class: 'uber-table' }, h('tr', null, h('th', null, 'Part'), h('th', null, 'Name'), h('th', null, 'File')),
-      p.parts.map((x) => h('tr', null, h('td', null, partLabel(x.kind)), h('td', null, x.name), h('td', { class: 'mono hint' }, x.file)))),
+      p.parts.map((x) => h('tr', null, h('td', null, PART_LABEL[x.kind]), h('td', null, x.name), h('td', { class: 'mono hint' }, x.file)))),
     docsButton(p.name, p.files),
     p.callisto ? h('p', { class: 'hint' }, `A Callisto project: its ${patches.length} patches are applied in the order of its patches.toml.`) : '',
     p.notes.map((n) => h('p', { class: 'hint' }, n)),

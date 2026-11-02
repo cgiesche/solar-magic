@@ -27,8 +27,8 @@ import { renderLevel } from '../src/core/render.ts';
 import { levelSlots } from '../src/core/gfxslots.ts';
 import { mwlSections, parseLmObjects } from '../src/core/mwl.ts';
 import { DM16_EXT } from '../src/core/patches.ts';
-import { inspectUpload, installPackage, removePackage, planUpload, type UploadPreview, type ReadyPreview, type InstallOptions } from '../src/core/packages.ts';
-import { listPackages } from '../src/core/pkgreg.ts';
+import { inspectUpload, installPackage, planUpload, type UploadPreview, type ReadyPreview, type InstallOptions } from '../src/core/packages.ts';
+import { listPackages, uninstallPackage } from '../src/core/pkgreg.ts';
 import { editorImage, recordShape } from './fixture.ts';
 
 await loadAsar();
@@ -190,7 +190,7 @@ function teleport(rom: Rom): number | null {
   check(teleport(rom) === 0x13b, `13B: its teleport block takes Mario into 13B (${hx(teleport(rom) ?? 0)})`);
 
   // removed: the sample levels stay
-  await removePackage(rom, listPackages(rom)[0].id, opt.blank);
+  await uninstallPackage(rom, listPackages(rom)[0].id, opt.blank);
   check(!listPackages(rom).length && same(loadLevel(rom, 0x105), l105) && same(loadLevel(rom, 0x13b), l13b), 'package removed: 105 and 13B stay (not part of it)');
 }
 

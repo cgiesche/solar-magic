@@ -18,12 +18,12 @@ import { OverworldEmulator } from '../src/core/overworld.ts';
 import { map16Source } from '../src/core/render.ts';
 import { installEditorPatch } from '../src/core/patches.ts';
 import { enableBlocks } from '../src/core/map16ext.ts';
-import { inspectUpload, installPackage, removePackage, type UploadPreview, type ReadyPreview, type InstallOptions } from '../src/core/packages.ts';
+import { inspectUpload, installPackage, type UploadPreview, type ReadyPreview, type InstallOptions } from '../src/core/packages.ts';
 import { parseToml, callistoAsm } from '../src/core/callisto.ts';
 import { listPatches } from '../src/core/patchreg.ts';
 import { loadProject } from '../src/core/uberproject.ts';
 import { loadBlockProject } from '../src/core/blocks.ts';
-import { listPackages } from '../src/core/pkgreg.ts';
+import { listPackages, uninstallPackage } from '../src/core/pkgreg.ts';
 import { loadMusicProject, hasAmk } from '../src/core/music.ts';
 import { loadPixiProject } from '../src/core/pixi.ts';
 import { editorImage, romDiff } from './fixture.ts';
@@ -185,7 +185,7 @@ const order = (files: Record<string, Uint8Array>) => [...dec.decode(files['tools
     check(d.dead === 0 && d.sent === d.dead && d.prompt === d.dead && d.peak > 2 * held.peak && d.peak > 2000,
       `Mario dies (frame ${d.dead}), the prompt opens (frame ${d.prompt}), Death Prelude plays: 38 sent to $1DFC (frame ${d.sent}), its voice at ${d.peak} (${held.peak} without)`);
   }
-  const removed = await removePackage(rom, pkg[0].id, opt.blank);
+  const removed = await uninstallPackage(rom, pkg[0].id, opt.blank);
   check(!hasAmk(rom), `removed with the package: its sound effect, AddmusicK with it ${removed.join(' ')}`);
 }
 
@@ -228,7 +228,7 @@ const mini: Record<string, string> = {
   const ps = PlaySession.start(emu, 0x105);
   ps.play(5);
   check(ps.ready && emu.snes.wram[0x1b040] === 0x5a, 'the UberASM code runs: $7FB040 = $5A');
-  const warnings = await removePackage(rom, r.pkg!.id, opt.blank);
+  const warnings = await uninstallPackage(rom, r.pkg!.id, opt.blank);
   check(!listPackages(rom).length && romDiff(vanilla, rom.data) === 0, 'removed: the ROM as before ' + warnings.join(' '));
 }
 

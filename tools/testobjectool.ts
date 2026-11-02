@@ -11,8 +11,8 @@ import { loadAsar } from '../src/core/asar.ts';
 import { map16Source } from '../src/core/render.ts';
 import { installEditorPatch } from '../src/core/patches.ts';
 import { enableBlocks } from '../src/core/map16ext.ts';
-import { inspectUpload, installPackage, removePackage, type ReadyPreview, type InstallOptions } from '../src/core/packages.ts';
-import { listPackages } from '../src/core/pkgreg.ts';
+import { inspectUpload, installPackage, type ReadyPreview, type InstallOptions } from '../src/core/packages.ts';
+import { listPackages, uninstallPackage } from '../src/core/pkgreg.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadLevel } from '../src/core/level.ts';
 import { objectName } from '../src/core/objectnames.ts';
@@ -131,7 +131,7 @@ const extended = (): ObjThumb[] => renderObjectThumbs(rom, emu, loadLevel(rom, 0
   check(r2.ok && note === 'Object names and tooltips of “mine” replace those of “baserom” for extended 98.', `installed with a note: ${note}`);
   check(name(0x98) === 'My scroll object' && objectTooltip(rom, 0, 0x98) === 'My tooltip' && name(0xe0) === 'My new object' && name(0xa0) === 'Press L & R To Die',
     `the newer names (98: ${name(0x98)}, E0: ${name(0xe0)}), the older ones elsewhere (A0: ${name(0xa0)})`);
-  await removePackage(rom, r2.pkg!.id, blank);
+  await uninstallPackage(rom, r2.pkg!.id, blank);
   check(name(0x98) === 'Enable Free Vertical Scroll' && objectTooltip(rom, 0, 0x98)?.startsWith('UberASM Object 98') === true && name(0xe0) === 'Extended object E0', 'removed: the baserom\'s names again');
 }
 
@@ -139,7 +139,7 @@ const extended = (): ObjThumb[] => renderObjectThumbs(rom, emu, loadLevel(rom, 0
 // (door parts from $0DA6D1's table; #110 may hide those, then this check changes)
 {
   const pkg = listPackages(rom).find((x) => x.name === 'baserom')!;
-  await removePackage(rom, pkg.id, blank);
+  await uninstallPackage(rom, pkg.id, blank);
   check(!listPackages(rom).length && name(0x98) === 'Extended object 98' && !objectTooltip(rom, 0, 0x98), `removed: no names (98: ${name(0x98)})`);
   const byKey = new Map(extended().map((t) => [t.key, t]));
   check(range(0x98, 0xdf).every((n) => byKey.get(hx(n))?.w), 'listed by emulation: 98–DF draw tiles');

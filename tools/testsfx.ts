@@ -11,8 +11,8 @@ import { findSfx, sfxNumbers, sfxLinks, parseSfxList } from '../src/core/sfx.ts'
 import { emptyMusicProject, addSfx, removeSfx, sfxKey, saveMusicProject, loadMusicProject, hasAmk, musicEntry } from '../src/core/music.ts';
 import { loadAsar } from '../src/core/asar.ts';
 import { loadProject } from '../src/core/uberproject.ts';
-import { inspectUpload, installPackage, removePackage, type ReadyPreview } from '../src/core/packages.ts';
-import { listPackages } from '../src/core/pkgreg.ts';
+import { inspectUpload, installPackage, type ReadyPreview } from '../src/core/packages.ts';
+import { listPackages, uninstallPackage } from '../src/core/pkgreg.ts';
 import { zipSync } from 'fflate';
 import { editorImage, romDiff } from './fixture.ts';
 
@@ -129,7 +129,7 @@ check(r2.ok && !hasAmk(rom) && diff === 0, `removed: AddmusicK out again, the RO
   let pk = 0;
   for (let f = 0; f < 30; f++) { ps.frame(); pk = Math.max(pk, peak(ps.audio!)); }
   check(ps.ready && sent.includes(0x39) && pk > 1000, `the code plays it: ${[...new Set(sent)].map((v) => v.toString(16)).join()} sent to $1DFC (peak ${pk})`);
-  await removePackage(rp, r.pkg!.id, opt.blank);
+  await uninstallPackage(rp, r.pkg!.id, opt.blank);
   check(loadMusicProject(rp)?.sfx.map((x) => x.name).join() === 'Other', 'removing the package takes its sound effect, the other package\'s stays');
 }
 

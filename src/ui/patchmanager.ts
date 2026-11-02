@@ -8,11 +8,8 @@ import { h, modal, toast, logTool } from './dom.ts';
 import type { ApplyResult } from '../core/patchapply.ts';
 import { patchArchive, type PatchEntry } from '../core/patchreg.ts';
 import { uploadFromFiles, effectiveDefines, optionDefault, unpackUpload, type StoredUpload, type Upload, type PatchOption } from '../core/patchpkg.ts';
-import { reapplyPackagePatch as reapply } from '../core/packages.ts';
 import { definesForm } from './defineedit.ts';
-import { errorText } from './projectpane.ts';
 import type { ToolKind } from '../core/parts.ts';
-import type { Package } from '../core/pkgreg.ts';
 
 export type { StoredUpload };
 export async function storedUpload(app: App, p: PatchEntry): Promise<StoredUpload | undefined> {
@@ -65,16 +62,6 @@ function optionRow(o: PatchOption, value: string, inputs: [string, () => string]
     control = inp;
   }
   return h('div', { class: 'prop' }, h('label', null, o.label), control, o.hint ? h('span', { class: 'hint' }, o.hint) : null);
-}
-
-// applies the patch of an installed package (`rec`; null: none) anew with other settings, as one undoable
-// ROM edit with the package's record; the ROM changed when ok
-export function reapplyPackagePatch(app: App, upload: Upload, fileName: string, main: string, values: Record<string, string>, entry: PatchEntry, rec: Package | null): ApplyResult {
-  try {
-    return app.romEdit(`Patch “${upload.name}” reapplied`, () => reapply(app.rom, entry.id, upload, fileName, main, values, rec));
-  } catch (e) {
-    return { ok: false, errors: [errorText(e)], warnings: [], prints: [] };
-  }
 }
 
 export function patchDone(name: string, again: boolean, r: ApplyResult): void {

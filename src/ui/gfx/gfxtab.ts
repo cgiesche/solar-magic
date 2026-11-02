@@ -29,7 +29,8 @@ import { gfxLabels, gfxUserName, setGfxName, GFX_NAME_MAX } from '../../core/gfx
 import { gfxNumber } from '../../core/levelgfx.ts';
 import { gfxNumberField } from '../gfxnum.ts';
 import { levelLayer3, setLevelLayer3, fitsLayer3Slot, LT3_DESTS, LT3_SIZES } from '../../core/layer3gfx.ts';
-import { recordPackageChange, type Package } from '../../core/pkgreg.ts';
+import type { Package } from '../../core/pkgreg.ts';
+import { importForPackage } from '../../core/packages.ts';
 import { gfxName, lmAnimName } from './map16tab.ts';
 import { ALT_FILE_MAX } from '../../core/exanim.ts';
 import { readGfx, writeGfx, hasGfx, gfxBytes, createGfx, importGfxFile, ANIM_FILE, type GfxFile } from '../../core/gfxfiles.ts';
@@ -1249,12 +1250,7 @@ export class GfxTab implements WsPanel {
 
   // writes an imported file as one undoable ROM edit; into: the package that gets the new number
   private importEdit<T>(label: string, into: Package | undefined, write: () => T): T {
-    return this.app.romEdit(label, () => {
-      if (!into) return write();
-      let value!: T;
-      recordPackageChange(this.app.rom, into, () => { value = write(); return { ok: true }; });
-      return value;
-    });
+    return this.app.romEdit(label, () => importForPackage(this.app.rom, into, write));
   }
 
   // the number the image went to; null: cancelled or failed
