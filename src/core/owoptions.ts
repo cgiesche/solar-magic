@@ -69,7 +69,7 @@ export const OW_OPTIONS: readonly OwOption[] = [
   },
   {
     id: 'pathFade', label: 'Event path fade effect', game: true,
-    title: 'The game fades in each step of an event\'s path, with sprites in palettes C–F, translucent. While it fades, colors 0–7 of palettes 0–3 change, palettes C–F take colors 0–7 of palettes 4–7 and colors 8–F of palettes C–E turn black (the Palettes tab marks them on a submap). Turned off, each step appears at once at the path reveal speed and the colors stay – and custom overworld sprites (BOWSIE) run with MaxTile, which needs it off.',
+    title: 'The game fades in each step of an event\'s path, with sprites in palettes C–F, translucent. While it fades, colors 0–7 of palettes 0–3 change, palettes C–F take colors 0–7 of palettes 4–7 and colors 8–F of palettes C–E turn black (the Palettes tab marks them on a submap). Turned off, the steps follow each other at the path reveal speed, unfaded, and the colors stay – and custom overworld sprites (BOWSIE) run with MaxTile, which needs it off.',
     bytes: [
       { at: 0x04e6fa, game: [0x62, 0xea], changed: [0x96, 0xe4] },
       { at: 0x04e73e, game: [0xef], changed: [0xff] },

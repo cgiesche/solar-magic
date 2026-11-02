@@ -332,6 +332,7 @@ export class PaletteTab implements WsPanel {
     const fixed = this.fixed;
     if (!this.trace && fixed === null) return;
     const lo = Math.min(this.sel, this.selEnd), hi = Math.max(this.sel, this.selEnd);
+    const fade = fixed !== null ? pathFadeColors(this.app.rom) : null;
     for (let i = 0; i < 256; i++) {
       const sw = this.swatches[i];
       const locked = this.src(i) < 0;
@@ -340,12 +341,11 @@ export class PaletteTab implements WsPanel {
       sw.classList.toggle('range', i >= lo && i <= hi && lo !== hi);
       const animated = this.animatedColor(i);
       sw.classList.toggle('locked', locked);
-      const faded = this.fadedColor(i);
+      const faded = !!fade?.has(i);
       sw.classList.toggle('animated', animated);
       sw.classList.toggle('faded', faded);
-      sw.title = `Color ${hex(i >> 4, 1)}·${hex(i & 15, 1)} – ${locked ? 'set by the game, not editable (only with an own palette)' : fixed !== null ? `palette of ${this.ownerName()}` : originName(this.origin(i))}${animated ? ` · animated: the game keeps rewriting it${this.t.anims ? ' (Ctrl+click: open its animation)' : ''}` : ''}${faded ? ' · rewritten while an event\'s path fades in' : ''}`;
+      sw.title = `Color ${hex(i >> 4, 1)}·${hex(i & 15, 1)} – ${locked ? 'set by the game, not editable (only with an own palette)' : fixed !== null ? `palette of ${this.ownerName()}` : originName(this.origin(i))}${animated ? ` · animated: the game ${fixed !== null ? `rewrites it as the ${this.t.where} loads` : 'keeps rewriting it'}${this.t.anims ? ' (Ctrl+click: open its animation)' : ''}` : ''}${faded ? ' · rewritten while an event\'s path fades in' : ''}`;
     }
-    if (fixed !== null) this.buildHeader();
     for (let row = 0; row < 16; row++) {
       const names: string[] = [];
       for (let c = 0; c < 16; c++) {
