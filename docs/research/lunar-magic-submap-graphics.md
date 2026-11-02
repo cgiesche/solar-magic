@@ -195,10 +195,30 @@ Kaizo* through the overworld and a level, Lunar Magic reads and writes all of `$
 engine's `$7FC019`/`$7FC01A` among them). None of the community packages at hand (BOWSIE, No Overworld, the Retry
 System, the blocks and sprites in `resources_local`) uses `$7FC00A`/`$7FC00B`.
 
-The editor keeps it there: its ROMs run none of Lunar Magic's code that reads it (the editor's graphics bypass and
-layer 2 are its own), and the editor's patch registry claims `$7FC003`–`$7FC0FF` for the engine, so packages that
-declare their RAM don't get it. Should the editor ever follow Lunar Magic's layer 2 tilemap settings in RAM, the
-engine's byte has to move (#265).
+The editor first kept it there: its ROMs run none of Lunar Magic's code that reads it. Issue #265 moved the engine's
+own bytes instead, so that it no longer depends on that: `!LastFrame`, `!OwSubmap` and `!QueueEnd` (16-bit) are at
+`$7FC05C`–`$7FC05F` now, the top of the gap below the conditional Direct Map16 flags (`$7FC060`).
+
+The evidence, from `tools/lmramprobe.ts` (each ROM booted with the sound unit, a new game to the overworld, each submap
+loaded and run 60 frames, then every level `000`–`1FF` loaded and played 120 frames, right held, jumping), which
+records every read and write of `$7FC000`–`$7FC0FF`:
+
+| ROM | Lunar Magic | `$7FC000`–`$7FC05F` touched |
+|---|---|---|
+| *QW2* | 2.53 | `$7FC000`–`$7FC004`, `$7FC006`–`$7FC012`, `$7FC016`–`$7FC01A` |
+| *Bluerio's Adventure* | 3.31 | `$7FC000`–`$7FC004`, `$7FC006`–`$7FC01C` |
+| *celery* (no overworld: its new game goes into a level) | 3.40 | `$7FC000`–`$7FC004`, `$7FC006`–`$7FC01C` |
+| *Journey to Kaizo* | 3.40 | `$7FC000`–`$7FC004`, `$7FC006`–`$7FC01C` |
+| the clean game saved by Lunar Magic 3.71 under wine (its command line: expanded to 4 MB, *Bluerio's Adventure*'s graphics, ExGFX, Map16, shared palette, overworld, global animation and 177 levels imported) | 3.71 | `$7FC000`–`$7FC004`, `$7FC006`–`$7FC01C` |
+
+In all five `$7FC005` and `$7FC01D`–`$7FC05F` stay untouched; above them only what Lunar Magic's help documents
+(`edit_cdm16.htm`, `level_ex20.htm`: `$7FC060` on), which content sets. Lunar Magic's help names nothing in
+`$7FC005`–`$7FC05F`. Lunar Magic's own use grew from the low end (2.53 up to `$7FC01A`, 3.31 on up to `$7FC01C`), so
+the engine's bytes are at the gap's top, away from it. Community code: none of the packages at hand (the archives in
+`resources_local` and `test/fixtures`, the RHR baserom's among them) names any address of `$7FC000`–`$7FC0FF`. The
+editor's patch registry still claims `$7FC003`–`$7FC0FF` for the engine (but the shared flags), so packages that
+declare their RAM don't get the new bytes either. `tools/testowexanim.ts` checks that the engine writes no other byte
+of `$7FC000`–`$7FC05F` than `$7FC003`, `$7FC004`, `$7FC00A` (shared with Lunar Magic, with its meaning) and its own.
 
 ### The lightning switch
 

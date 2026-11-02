@@ -11,7 +11,9 @@
 // address read once, the scratch kept only as far as it is used, the NMI walks only the uploads queued (#151).
 // The overworld's lists (a list per submap and the overworld's global one, with a settings byte per submap, in Lunar
 // Magic's overworld layout: its hooks at $048086, $0480E0 and $00A4E3, its tables at the first one's target) run on
-// the same code, with the overworld's event triggers in place of the level's conditions (#244).
+// the same code, with the overworld's event triggers in place of the level's conditions (#244). The engine's own
+// bytes are at $7FC05C-$7FC05F, which Lunar Magic and community code leave free; Kobo's $7FC019/$7FC01A are Lunar
+// Magic's (#265).
 // Only this file is under the MPL; it is used as Asar source by ../exanim.ts.
 
 export const KOBO_COMMIT = '395083bbf7a8664d7c970ce465a5fb418002ab91';
@@ -80,11 +82,12 @@ incsrc "memory.asm"
 !Legacy = $7FC004
 !LastCall = $7FC003             ; the $14 of the last frame
 !OwSettings = $7FC00A           ; the submap's settings, where Lunar Magic keeps them [Solar Magic]
-!OwSubmap = !OwSettings+1       ; the submap the lists were set up for; $FF in a level [Solar Magic]
-                                ; (Lunar Magic's layer 2 settings, which the editor's ROMs don't
-                                ; keep: docs/research/lunar-magic-submap-graphics.md, "$7FC00B")
-!LastFrame = $7FC019            ; the $14 the lists last ran for
-!QueueEnd = $7FC01A             ; 16-bit, the high byte 0: the queue's uploads end here, from !Queue [Solar Magic]
+; The engine's own bytes, where Lunar Magic and community code leave the block
+; free (Kobo's at $7FC00B, $7FC019 and $7FC01A, which Lunar Magic uses
+; otherwise: docs/research/lunar-magic-submap-graphics.md, "$7FC00B") [Solar Magic]
+!LastFrame = $7FC05C            ; the $14 the lists last ran for
+!OwSubmap = !LastFrame+1        ; the submap the lists were set up for; $FF in a level [Solar Magic]
+!QueueEnd = $7FC05E             ; 16-bit, the high byte 0: the queue's uploads end here, from !Queue [Solar Magic]
 !Manual = $7FC070
 !Counters = $7FC080             ; level slots, the global ones $20 on
 !Queue = $7FC0C0                ; up to 8 uploads of 7 bytes (see queue) [Solar Magic]
@@ -296,7 +299,7 @@ restore_scratch:
 
 ; !List = the global list; carry clear for none. A/X/Y 16-bit.
 global_address:
-    LDA.l !OwSettings           ; the high byte !OwSubmap: positive on the
+    LDA.l !OwSubmap-1           ; the high byte !OwSubmap: positive on the
     BPL ow_global_address       ; overworld [Solar Magic]
     LDA.l global_bank           ; the bank in the high byte
     BEQ .none
@@ -312,7 +315,7 @@ global_address:
 ; !List = the level's list; carry clear for none. A/X/Y 16-bit. Of the
 ; scratch only !List is used. [Solar Magic]
 level_address:
-    LDA.l !OwSettings           ; on the overworld: the submap's [Solar Magic]
+    LDA.l !OwSubmap-1           ; on the overworld: the submap's [Solar Magic]
     BPL ow_submap_address
     LDA.l !Level
     AND #$01FF
@@ -422,7 +425,10 @@ clear_memory:
     STA.l !Legacy-1             ; $7FC003-$7FC004
     STA.l !QueueEnd             ; [Solar Magic]
     DEC A                       ; no submap's lists, all off [Solar Magic]
+    SEP #$20
     STA.l !OwSettings
+    STA.l !OwSubmap
+    REP #$20
     LDX #$1FFE                  ; what the hook replaces
     RTL
 

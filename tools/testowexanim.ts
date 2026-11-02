@@ -91,6 +91,17 @@ const tiles = (shots: Shot[], word: number) => new Set(shots.map((x) => tile(x.v
   check(c.has(0x001f) && c.has(0x7c00) && p.has(0x001f) && p.has(0x7c00), `Yoshi's Island: color 21 animates in CGRAM and the palette (${[...c].map((v) => hx(v, 4)).join(' ')})`);
   check(![...seen(m2.shots, T)].some((v) => v === 0x11 || v === 0x22) && !m2.shots.some((x) => color(x.cgram, 0x21) === 0x7c00), 'Vanilla Dome: not');
 }
+// the engine's RAM in Lunar Magic's block (#265; docs/research/lunar-magic-submap-graphics.md, "$7FC00B"): from the
+// reset through the title screen's level to Yoshi's Island's list, of $7FC000-$7FC05F it writes only the bytes it
+// shares with Lunar Magic ($7FC003/$7FC004, the settings $7FC00A) and its own at $7FC05C-$7FC05F
+{
+  const emu = new OverworldEmulator(rom), written = new Set<number>();
+  emu.snes.hook = { onWramWrite: (a) => { if (a >= 0x1c000 && a < 0x1c060) written.add(0x7e0000 + a); } };
+  emu.load(1, 0);
+  for (let f = 0; f < 24; f++) emu.snes.runFrame();
+  const own = [0x7fc003, 0x7fc004, 0x7fc00a, 0x7fc05c, 0x7fc05d, 0x7fc05e, 0x7fc05f];
+  check(written.has(0x7fc05d) && [...written].every((a) => own.includes(a)), `the engine writes only its own bytes of $7FC000-$7FC05F (${[...written].sort().map((a) => hx(a, 6)).join(' ')})`);
+}
 
 // the console after Mario walked from the main map onto Yoshi's Island (main map 02,14, whose path leads there),
 // then `frames` frames; main: 16 frames on the main map before
