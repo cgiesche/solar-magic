@@ -180,7 +180,7 @@ export function openLevelImages(app: App, listed: () => number[], arcPin: ArcPin
     const fail = (n: number, why: string) => { failed.push(`${hex3(n)}: ${why}`); failures.append(h('li', {}, `Level ${hex3(n)}: ${why}`)); };
     // (an emulator of its own: the level view's keeps its level and its animation)
     const emu = new LevelEmulator(app.rom);
-    emu.skipMask = () => app.gfxSkipMask();
+    emu.skipMask = app.gfxSkipMask;
     emu.adoptBoot(app.emu);
     // (the probes run while the dialog is open)
     const release = app.probes.urge();

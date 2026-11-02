@@ -11,8 +11,8 @@
 
 import type { LevelEmulator, LevelRender, ObjectTrace } from './levelemu.ts';
 import { ramEffect } from './objeffects.ts';
-import { OV_L1, MAP_BASE, readOffset } from './levelemu.ts';
-import { layerGeom } from './render.ts';
+import { OV_L1, readOffset } from './levelemu.ts';
+import { layerGeom, tileByOffset, tilePos } from './render.ts';
 import { encodePrimaryHeader, serializeObjects, newUid, type LevelObject, type Level } from './level.ts';
 import { RomReads } from './romdeps.ts';
 import { objectLength2D, objectLength2DReads, fitExtension, OBJ_2D } from './obj2d.ts';
@@ -121,10 +121,7 @@ export class ObjKindProbe {
     this.emu = emu;
     this.level = level;
     this.layer2Pointer = layer2Pointer;
-    const g = layerGeom(emu.rom, 0, 0, 32);
-    const inv = new Map<number, [number, number]>();
-    for (let y = 0; y < g.height; y++) for (let x = 0; x < g.width; x++) inv.set(g.addr(x, y) - MAP_BASE, [x, y]);
-    this.pos = (off) => inv.get(off);
+    this.pos = tilePos(tileByOffset(layerGeom(emu.rom, 0, 0, 32)));
     for (let n = 1; n < 0x40; n++) for (const size of nibbleValues()) this.specs.push({ num: n, size });
     this.len2d = objectLength2D(emu.rom);
     // (the specs depend on object 2D's length: what finding it read counts, as single bytes)

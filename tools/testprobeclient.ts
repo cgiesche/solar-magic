@@ -316,7 +316,7 @@ function editor(worker: Worker | null) {
   // (a test level load per sprites of one spriteLoad, in the order of their first sprite)
   const loads = [[0x0d, 0x0f, 0x11], [0x1d], [0x21], [0x3e], [0x04]];
   check(loads.every((l) => l.every((n) => spriteLoad(n) === spriteLoad(l[0]))), '(the test level loads as grouped)');
-  const direct = JSON.stringify(loads.flatMap((l) => [...captureSprites(capEmu, 0x105, lv.header, lv.spriteHeader, 0xffd900, l)]));
+  const direct = JSON.stringify(loads.flatMap((l) => [...captureSprites(capEmu, { number: 0x105, header: lv.header, spriteHeader: lv.spriteHeader, bgPointer: 0xffd900 }, l)]));
   const job: LearnJob = { kind: 'sprites', level, nums };
   const learns = (w: Worker) => w.sent.filter((m) => m.type === 'learn').length;
 

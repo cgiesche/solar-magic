@@ -10,7 +10,7 @@
 
 import type { Rom } from './rom.ts';
 import { LevelEmulator } from './levelemu.ts';
-import { RomReads, holds, perRomState, byFingerprint, type ResultCache, type RomDeps, type RomFingerprint } from './romdeps.ts';
+import { RomReads, holds, perRomState, byFingerprint, type ResultCache, type RomDeps, type RomFingerprint, type Recorded, type Since } from './romdeps.ts';
 import { KeptResults } from './keptresults.ts';
 import { gfxSkipMask, gfxDisplaySkipMask } from './gfxpages.ts';
 import { TILESETS, tilesetPointers, pointersKey } from './tilesets.ts';
@@ -52,12 +52,10 @@ export interface JobSpec<T> {
   start: (emu: LevelEmulator, prepare: Prepare, part: Part) => Job<T>;
 }
 
-// a job asked for: not started yet (job null), or running since the ROM generation gen
-export interface JobRun<T> extends JobSpec<T> {
+// a job asked for: not started yet (job null), or running with the bytes it read so far, as of the ROM generation gen
+export interface JobRun<T> extends JobSpec<T>, Since {
   job: Job<T> | null;
   emu: LevelEmulator | null;
-  reads: RomReads;
-  gen: number;
   label: string | null; // yielded
 }
 
@@ -68,7 +66,15 @@ export interface RunnerDeps {
   noDisplay?: LevelEmulator; // the one whose boot snapshot the others start from (default: an own one; its skip mask is set)
 }
 
-interface Prepared { key: string; state: unknown; reads: RomReads; gen: number }
+// a lane emulator's prepared state (result) under its key, with what preparing it read
+interface Prepared extends Recorded<unknown> { key: string }
+
+// where results are kept (the result cache or the runner's memory results)
+interface KeptStore {
+  get<T>(key: string, input?: string): T | undefined;
+  entry(key: string, input?: string): { deps: RomDeps; data: unknown } | undefined;
+  set(key: string, data: unknown, deps: RomDeps, input?: string): void;
+}
 
 export class JobRunner {
   private d: RunnerDeps;
@@ -125,17 +131,17 @@ export class JobRunner {
     const p = this.preps.get(emu);
     if (p?.key === key && holds(this.d.rom, p)) {
       emu.count(p.reads);
-      return p.state as S;
+      return p.result as S;
     }
     this.preps.delete(emu);
-    const { result, reads, gen } = emu.tracked(prepare);
-    if (result !== null) this.preps.set(emu, { key, state: result, reads, gen });
-    return result;
+    const t = emu.tracked(prepare);
+    if (t.result !== null) this.preps.set(emu, { ...t, key });
+    return t.result;
   }
 
   // (inside a job's step)
   private part<S>(r: JobRun<unknown>, emu: LevelEmulator, sub: string, input: string | undefined, learn: () => S | undefined): { result: S | undefined; learned: boolean } {
-    const key = partKey(r.key, sub), e = r.keep === false ? undefined : (r.keep === 'memory' ? this.memory : this.d.results).entry(key, input);
+    const key = partKey(r.key, sub), e = this.storeFor(r.keep)?.entry(key, input);
     if (e) {
       const reads = new RomReads(this.d.rom);
       reads.addDeps(e.deps);
@@ -147,12 +153,17 @@ export class JobRunner {
     return { result: t.result, learned: true };
   }
 
+  // where results kept so go (none: not kept)
+  private storeFor(keep: Keep): KeptStore | undefined {
+    return keep === false ? undefined : keep === 'memory' ? this.memory : this.d.results;
+  }
+
   stored<T>(key: string, input: string | undefined, keep: Keep): T | undefined {
-    return keep === false ? undefined : (keep === 'memory' ? this.memory : this.d.results).get<T>(key, input);
+    return this.storeFor(keep)?.get<T>(key, input);
   }
 
   store(key: string, input: string | undefined, keep: Keep, result: unknown, reads: RomReads): void {
-    if (keep !== false) (keep === 'memory' ? this.memory : this.d.results).set(key, result, this.d.results.fp.deps(reads), input);
+    this.storeFor(keep)?.set(key, result, this.d.results.fp.deps(reads), input);
   }
 
   // the lane's emulator, set up from the boot snapshot for pictures or for results that are no pictures (noDisplayBoot)

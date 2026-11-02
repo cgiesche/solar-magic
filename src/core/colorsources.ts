@@ -7,31 +7,28 @@
 
 import type { Rom } from './rom.ts';
 import { LevelEmulator, type LevelOverride, type LevelRender } from './levelemu.ts';
-import { perRomState, bySince, type Since } from './romdeps.ts';
-import { KeptResults } from './keptresults.ts';
+import { perRomState, holds, type Recorded } from './romdeps.ts';
 import { gfxFileColorValueSkipMask } from './gfxpages.ts';
 import { inputHash, levelInput } from './inputs.ts';
 
 export class ColorSources {
   emu: LevelEmulator;
   traces = 0; // loads made (tests)
-  private kept: KeptResults<Since>; // the latest load, by the level as edited
+  private kept: { input: string; load: Recorded<LevelRender> } | null = null; // the latest load, by the level as edited
 
   constructor(rom: Rom) {
     this.emu = new LevelEmulator(rom);
     const mask = perRomState(gfxFileColorValueSkipMask);
     this.emu.skipMask = () => mask(rom);
-    this.kept = new KeptResults({ validity: bySince(rom), inputsPerKey: 1 });
   }
 
   // the level (ov: as edited, buildOverrides) loaded with its colors' sources: the kept one while it holds
   trace(level: number, ov: LevelOverride): LevelRender {
-    const emu = this.emu, input = inputHash(levelInput(level, ov)), k = this.kept.get<LevelRender>('trace', input);
-    if (k) return k;
+    const emu = this.emu, input = inputHash(levelInput(level, ov)), k = this.kept;
+    if (k?.input === input && holds(emu.rom, k.load)) return k.load.result;
     emu.ensureBoot(); // (first: its reads are the base of the load's)
-    const { result, reads, gen } = emu.tracked(() => emu.load(level, { ...ov, trackSources: true }));
-    this.kept.set('trace', result, { gen, reads }, input);
+    this.kept = { input, load: emu.tracked(() => emu.load(level, { ...ov, trackSources: true })) };
     this.traces++;
-    return result;
+    return this.kept.load.result;
   }
 }

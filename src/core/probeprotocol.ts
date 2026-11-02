@@ -16,6 +16,7 @@ import type { Keep } from './jobrunner.ts';
 import type { ObjSpec } from './objthumbs.ts';
 import type { RunStates } from './blockprobe.ts';
 import type { SizeSpec } from './objresize.ts';
+import type { ArcLoad } from './jumparcs.ts';
 import type { Prefab } from './prefabs.ts';
 import type { PrefabSkip } from './prefabplaces.ts';
 import type { OwTriggerSwitches } from './owanimview.ts';
@@ -88,7 +89,7 @@ export type LearnJob =
   | { kind: 'levelTiles'; state: StateRef }
   | { kind: 'thumbs'; level: Level; specs: ObjSpec[]; keys: string[] }
   | { kind: 'preview'; state: StateRef; layer2: boolean; objects: LevelObject[] }
-  | { kind: 'arcs'; level: string; load: [number, LevelOverride, number, number]; tx: number; ty: number; runs: RunStates }
+  | { kind: 'arcs'; level: string; load: ArcLoad; tx: number; ty: number; runs: RunStates }
   | { kind: 'layer2Motions'; level: number; ov: LevelOverride }
   | { kind: 'pathKinds' }
   | { kind: 'pathShapes' }

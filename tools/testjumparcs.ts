@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
 import { BlockProber } from '../src/core/blockprobe.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
-import { JumpArcs, ARC_SPEEDS, jumpArcsJob, type JumpArc } from '../src/core/jumparcs.ts';
+import { JumpArcs, ARC_SPEEDS, jumpArcsJob, type JumpArc, type ArcLoad } from '../src/core/jumparcs.ts';
 import { JobRunner } from '../src/core/jobrunner.ts';
 import { learnAtOnce } from './runnercheck.ts';
 import { ResultCache, RomFingerprint } from '../src/core/romdeps.ts';
@@ -27,7 +27,7 @@ lv.objects = Array.from({ length: 8 }, (_, k) => ({ uid: newUid(), num: 0, ext: 
 const arcEmu = new LevelEmulator(rom);
 if (prober.emu.baseState) arcEmu.adoptBoot(prober.emu);
 const arcs = new JumpArcs(arcEmu);
-const prepare = () => arcs.prepare(lv.number, { layer1: serializeLayer1(rom, lv) }, lv.spriteHeader, 27 * 16);
+const prepare = () => arcs.prepare({ level: lv.number, ov: { layer1: serializeLayer1(rom, lv) }, spriteHeader: lv.spriteHeader, height: 27 * 16 });
 check(prepare(), 'level 105 runs to gameplay');
 const TX = 0x40, TY = 23;
 const dist = (a: JumpArc) => Math.abs(a.pts[a.pts.length - 2] - a.pts[0]);
@@ -50,7 +50,7 @@ check(maxX <= (TX + 3) * 16, `the wall stops the jump (Mario's middle at most at
 // the 45° slope (tile 1AA, up to the right) in the original level 105 at tile (11, 20): Mario
 // starts on its surface and jumps full height in both directions, also running downhill
 const orig = loadLevel(rom, 0x105);
-check(arcs.prepare(orig.number, { layer1: serializeLayer1(rom, orig) }, orig.spriteHeader, 27 * 16), 'original level 105 runs to gameplay');
+check(arcs.prepare({ level: orig.number, ov: { layer1: serializeLayer1(rom, orig) }, spriteHeader: orig.spriteHeader, height: 27 * 16 }), 'original level 105 runs to gameplay');
 for (const dir of [-1, 1] as const) {
   const sl = ARC_SPEEDS.map((sp) => arcs.arc(11, 20, sp, dir, runs));
   const rise = sl.map((a) => a.pts[1] - Math.min(...a.pts.filter((_, i) => i & 1)));
@@ -67,7 +67,7 @@ for (const dir of [-1, 1] as const) {
   const main = new LevelEmulator(rom);
   main.boot();
   const runner = new JobRunner({ rom, results: new ResultCache(new RomFingerprint(rom)), main });
-  const load: Parameters<JumpArcs['prepare']> = [orig.number, { layer1: serializeLayer1(rom, orig) }, orig.spriteHeader, 27 * 16];
+  const load: ArcLoad = { level: orig.number, ov: { layer1: serializeLayer1(rom, orig) }, spriteHeader: orig.spriteHeader, height: 27 * 16 };
   const ask = (tx: number): JumpArc[] =>
     learnAtOnce(runner, { key: `arcs:${tx},20`, keep: false, picture: false, start: (emu, prep) => jumpArcsJob(emu, prep, 'lv105', load, tx, 20, runs) }, 'arcs');
   const a = ask(11), b = ask(12);

@@ -3,9 +3,10 @@
 // mouse: of the sizes the dragged part of the settings byte can take, the one whose dragged edge lands
 // nearest, with the origin moved so the edges opposite the dragged ones stay where they were.
 
+import type { Rom } from './rom.ts';
 import type { LevelEmulator, ObjectTrace } from './levelemu.ts';
-import { OV_L1, MAP_BASE } from './levelemu.ts';
-import { layerGeom } from './render.ts';
+import { OV_L1 } from './levelemu.ts';
+import { layerGeom, tileByOffset, tilePos } from './render.ts';
 import { encodePrimaryHeader, serializeObjects, newUid, type LevelObject } from './level.ts';
 import { objectLength2D, fitExtension } from './obj2d.ts';
 import { sizedByte, withSizedByte, type ObjKind, type KindLevel } from './objkinds.ts';
@@ -27,18 +28,16 @@ export function sizeKey(s: SizeSpec): string {
 export class SizeProbe {
   private boxes = new Map<string, Box | null>();
   private pos: (off: number) => [number, number] | undefined;
-  emu: LevelEmulator; // (another one may take over: the probe worker's job, sizesJob)
+  private rom: Rom;
   private level: KindLevel;
   private layer2Pointer: number;
 
-  constructor(emu: LevelEmulator, level: KindLevel, layer2Pointer: number) {
-    this.emu = emu;
+  // (rom: the one the boxes are probed in, by the emulators given to probe)
+  constructor(rom: Rom, level: KindLevel, layer2Pointer: number) {
+    this.rom = rom;
     this.level = level;
     this.layer2Pointer = layer2Pointer;
-    const g = layerGeom(emu.rom, 0, 0, 32);
-    const inv = new Map<number, [number, number]>();
-    for (let y = 0; y < g.height; y++) for (let x = 0; x < g.width; x++) inv.set(g.addr(x, y) - MAP_BASE, [x, y]);
-    this.pos = (off) => inv.get(off);
+    this.pos = tilePos(tileByOffset(layerGeom(rom, 0, 0, 32)));
   }
 
   // the tiles the object covers at its size (null: it draws nothing or its load fails), undefined while not probed
@@ -46,8 +45,9 @@ export class SizeProbe {
     return this.boxes.get(sizeKey(s));
   }
 
-  // probes the objects not probed yet, at most `loads` emulated loads; whether all are known now
-  probe(specs: SizeSpec[], loads = Infinity): boolean {
+  // probes the objects not probed yet in emu (booted, on the probe's ROM), at most `loads` emulated loads; whether
+  // all are known now
+  probe(emu: LevelEmulator, specs: SizeSpec[], loads = Infinity): boolean {
     const todo = new Map<string, SizeSpec>();
     for (const s of specs) { const k = sizeKey(s); if (!this.boxes.has(k)) todo.set(k, s); }
     // each batch from large to small sizes across the whole range: the widest starts leftmost, so wide
@@ -57,7 +57,7 @@ export class SizeProbe {
     for (let i = 0, j = 0; j < nb; j++) { const n = Math.ceil((sorted.length - j) / nb); queue.push([i, i + n]); i += n; }
     while (queue.length && loads-- > 0) {
       const [a, b] = queue.shift()!;
-      const r = this.run(list.slice(a, b));
+      const r = this.run(emu, list.slice(a, b));
       // a crashing object spoils its whole batch: the halves are loaded again
       if (r) r.forEach((box, i) => this.boxes.set(sizeKey(list[a + i]), box));
       else { const h = a + ((b - a) >> 1); queue.unshift([a, h], [h, b]); }
@@ -66,8 +66,8 @@ export class SizeProbe {
   }
 
   // null: the load failed and the batch has to be split
-  private run(batch: SizeSpec[]): (Box | null)[] | null {
-    const len2d = objectLength2D(this.emu.rom);
+  private run(emu: LevelEmulator, batch: SizeSpec[]): (Box | null)[] | null {
+    const len2d = objectLength2D(this.rom);
     const objs: LevelObject[] = batch.map((s, i) => ({ uid: newUid(), num: s.num, ext: s.ext, size: s.size, x: i * 32 + 16, y: 4,
       ...(s.tile !== undefined ? { tile: s.tile } : {}), ...(s.extension ? { extension: [...s.extension] } : {}) }));
     for (const o of objs) fitExtension(o, len2d);
@@ -78,7 +78,7 @@ export class SizeProbe {
     l1.set(body, 5);
     const byteOwner = new Int32Array(0x10000).fill(-1);
     owners.forEach((o, i) => (byteOwner[OV_L1 + i] = o));
-    const r = this.emu.load(this.level.number, { layer1: l1, layer2Pointer: this.layer2Pointer, sprites: new Uint8Array([0, 0xff]), byteOwner, trace: true });
+    const r = emu.load(this.level.number, { layer1: l1, layer2Pointer: this.layer2Pointer, sprites: new Uint8Array([0, 0xff]), byteOwner, trace: true });
     if (!r.ok && batch.length > 1) return null;
     const tr = r.trace as ObjectTrace;
     return objs.map((o, i) => {
@@ -98,8 +98,8 @@ export class SizeProbe {
 // The boxes of objects (SizeProbe) in a level (layer2Pointer: its layer 2 objects as the probe loads take them) as a
 // job (the result learner's, in the probe worker; no picture): a load per step, the boxes in the order of specs. The
 // probe keeps the boxes between jobs (the owner drops it when the ROM changes or the level is another).
-export function* sizesJob(probe: SizeProbe, specs: SizeSpec[]): Generator<void, (Box | null)[]> {
-  while (!probe.probe(specs, 1)) yield;
+export function* sizesJob(probe: SizeProbe, emu: LevelEmulator, specs: SizeSpec[]): Generator<void, (Box | null)[]> {
+  while (!probe.probe(emu, specs, 1)) yield;
   return specs.map((s) => probe.box(s) ?? null);
 }
 

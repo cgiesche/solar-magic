@@ -30,7 +30,7 @@ import { LevelUses, levelUsesJob, levelTilesJob, levelOverride } from './levelus
 import { layer3KindsJob } from './layer3.ts';
 import { SpriteGroupResults, spriteMemCheckJob } from './spritemem.ts';
 import { owAnimatedJob } from './owanimated.ts';
-import { animatedJob } from './levelemu.ts';
+import { animatedJob, type LevelEmulator } from './levelemu.ts';
 import { objectThumbsJob, placementPreviewJob, withPlaced } from './objthumbs.ts';
 import { jumpArcsJob } from './jumparcs.ts';
 import { layer2MotionsJob } from './l2scroll.ts';
@@ -57,7 +57,7 @@ import { jobId, jobKey, learnKeep, LEARN_KINDS, EDIT_STATES, type StateRef, type
 interface Task { msg: TaskMessage; run: JobRun<unknown> }
 
 // a task's job (none of them is a picture); one that finds nothing (null) gives undefined, which isn't kept
-function taskJob(m: TaskMessage): JobRun<unknown>['start'] {
+function taskJob(m: TaskMessage): (emu: LevelEmulator) => Job<unknown> {
   switch (m.type) {
     case 'kinds': return (emu) => objKindsJob(emu, { ...m.level, header: { ...m.level.header, tileset: m.ts } }, m.layer2Pointer);
     case 'scan': return (emu) => found(levelScanJob(emu, m.level));
@@ -109,9 +109,8 @@ function learnJob(j: LearnJob, state: LearnState, show: (items: unknown[] | null
     case 'suggest': return (emu) => prefabSuggestionsJob(state.rom, emu, state.suggest, j.levels, j.open);
     case 'sizes': return (emu) => {
       const key = `${j.level.number}:${inputHash(j.level.header)}:${j.layer2Pointer}`;
-      if (state.sizes?.key !== key) state.sizes = { key, probe: new SizeProbe(emu, j.level, j.layer2Pointer) };
-      state.sizes.probe.emu = emu;
-      return sizesJob(state.sizes.probe, j.specs);
+      if (state.sizes?.key !== key) state.sizes = { key, probe: new SizeProbe(state.rom, j.level, j.layer2Pointer) };
+      return sizesJob(state.sizes.probe, emu, j.specs);
     };
     case 'owMap': return () => overworldMapJob(owLoads(state), j.map, j.progress, !!j.special);
     case 'owTriggers': return () => owTriggerJob(owLoads(state), j.map, j.progress, j.special, j.switches);
@@ -324,7 +323,7 @@ export class ProbeHost {
     if (t && taskKey(t.msg) === taskKey(msg)) { t.msg = msg; this.setTask(t); return; } // (a running one keeps its turn)
     if (running) this.turns.delete(running); // (the new one's turn comes last)
     // (a job starting over runs for the latest request)
-    const task: Task = { msg, run: this.runner.run({ key: taskKey(msg), keep: true, picture: false, boot: msg.type !== 'kinds', start: (emu, p, part) => taskJob(task.msg)(emu, p, part) }) };
+    const task: Task = { msg, run: this.runner.run({ key: taskKey(msg), keep: true, picture: false, boot: msg.type !== 'kinds', start: (emu) => taskJob(task.msg)(emu) }) };
     this.setTask(task);
   }
 

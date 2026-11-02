@@ -327,6 +327,10 @@ _Avoid_: Cached value, generation (for validity)
 What learns emulated results: runs the emulation for a result's key and input, records the ROM bytes it reads, and keeps the result while they and the input are unchanged. A read byte that changes while it learns starts it over. Wherever it runs (beside the editor or in the background worker) it learns the same way; probes are results it learns too.
 _Avoid_: prober (for the whole), worker (for what it does)
 
+**Round**:
+A run of the editor over many results that will be run over again (the sprite memory check of a level's groups, the prefab suggestions over all levels): while it runs, the results it uses are kept, also more than their store's bound, and so are the latest finished round's while the next one runs (a round left unfinished doesn't replace it), so the next run finds them (core/keptresults.ts startRound/endRound).
+_Avoid_: pass, generation
+
 **Lane**:
 A queue of the result learner's background jobs: one runs at a time, in the order asked; asking again for a job already there (the same key and input) joins it; a request may replace the lane's other jobs (they are not wanted any more). The busy indicator shows a lane's running job.
 _Avoid_: queue (for the probes' asked and prefetched jobs)

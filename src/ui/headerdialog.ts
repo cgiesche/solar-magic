@@ -28,6 +28,7 @@ export function openHeaderDialog(app: App): void {
   const sd: SecondaryHeader = { ...lv.secondary };
   let spriteHeader = lv.spriteHeader;
   let l2ptr = lv.layer2Pointer;
+  let open = true; // (the dialog: callbacks of results learned in the background fill it in only while open)
 
   const f = (label: string, el: HTMLElement, hint?: string | HTMLElement) => h('div', { class: 'prop' }, h('label', null, label), el, typeof hint === 'string' ? h('span', { class: 'hint' }, hint) : hint ?? null);
   const sel = <K extends keyof PrimaryHeader>(k: K, opts: [number, string][]) => select(opts, hd[k] as number, (v) => { (hd[k] as number) = v; });
@@ -59,14 +60,14 @@ export function openHeaderDialog(app: App): void {
   else if (!bgs.has(l2ptr) && l2ptr >> 16 === 0xff) bgOpts.push([l2ptr, `$${hex(l2ptr & 0xffff, 4)}`]);
 
   // layer 3: what each setting does depends on the tileset (found by emulation in the background, see layer3.ts),
-  // the settings' numbers until known
-  const l3Opts = (): [number, string][] => {
-    const kinds = app.layer3Kinds(hd.tileset, l3Known);
-    return range(4, (i) => (kinds ? `${i} – ${LAYER3_KIND_TEXT[kinds[i]]}` : `${i} – …`));
+  // the settings' numbers until known (filled in again then)
+  const l3Sel = sel2('layer3', []);
+  const l3Fill = (): void => {
+    const kinds = app.layer3Kinds(hd.tileset, () => { if (open) l3Fill(); });
+    const opts = range(4, (i) => (kinds ? `${i} – ${LAYER3_KIND_TEXT[kinds[i]]}` : `${i} – …`));
+    l3Sel.replaceChildren(...opts.map(([v, l]) => h('option', { value: String(v), selected: v === sd.layer3 }, l)));
   };
-  const l3Fill = () => l3Sel.replaceChildren(...l3Opts().map(([v, l]) => h('option', { value: String(v), selected: v === sd.layer3 }, l)));
-  const l3Known = () => { if (open) l3Fill(); };
-  const l3Sel = sel2('layer3', l3Opts());
+  l3Fill();
   // which entrances make the level slippery (learned in the background, filled in when known)
   const slipNote = h('span', { class: 'hint' }, slipperyText(app, sd));
   if (!app.slipperyActions()) app.once('slippery', () => { if (open) slipNote.textContent = slipperyText(app, sd); });
@@ -182,7 +183,6 @@ export function openHeaderDialog(app: App): void {
   };
   const cameraSel = select(cameraOptions(cameraValue(sd), relativeOk()), cameraValue(sd), (v) => { setCamera(sd, v); bgStartSel.refresh(); showCamera(); });
 
-  let open = true;
   const screensWarn = h('div', { class: 'hint warn-text' });
   screensSel.addEventListener('change', () => {
     hd.screens = Number(screensSel.value);

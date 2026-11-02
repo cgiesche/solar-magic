@@ -52,13 +52,15 @@ export const tileKey = (t: OamTile) => `${t.x},${t.y},${t.tile},${t.attr},${t.bi
 // the test level's sprite slots (tiles right and below of where its camera starts)
 const SLOT_COLS = [5, 9, 13], SLOT_ROWS = [4, 10];
 
+// The level sprite images are captured in: its number, header and sprite header, and the layer 2 (BG) pointer
+export interface SpriteLevel { number: number; header: PrimaryHeader; spriteHeader: number; bgPointer: number }
+
 // nums: sprite ids (see spriteId; custom sprites $2xx/$3xx); bytes: extra bytes of custom sprites (else 0)
 export function captureSprites(
-  emu: LevelEmulator, level: number, header: PrimaryHeader, spriteHeader: number, bgPointer: number, nums: number[],
-  onProgress?: (done: number) => void, bytes?: number[],
+  emu: LevelEmulator, lv: SpriteLevel, nums: number[], onProgress?: (done: number) => void, bytes?: number[],
 ): Map<number, SpriteImage> {
   const result = new Map<number, SpriteImage>();
-  const { l1, secondary, camX, camY } = testLevel(emu, level, header, spriteHeader, bgPointer);
+  const { l1, secondary, camX, camY } = testLevel(emu, lv.number, lv.header, lv.spriteHeader, lv.bgPointer);
   const slots: { tx: number; ty: number }[] = [];
   for (const r of SLOT_ROWS) for (const c of SLOT_COLS) slots.push({ tx: (camX >> 4) + c, ty: (camY >> 4) + r });
   const s = emu.snes;
@@ -83,7 +85,7 @@ export function captureSprites(
     const placed = batch.map((id, i) => ({ id, n: id & 0xff, extra: id >> 8, bytes, ...slots[i] }));
     const order = sortPlaced(placed);
     const tracker = new SlotTracker(s);
-    const r = emu.load(level, { layer1: l1, sprites: testSpriteData(spriteHeader, order, spriteSizes(emu.rom)), secondaryHeader: secondary, layer2Pointer: bgPointer, fadeHook: tracker.start });
+    const r = emu.load(lv.number, { layer1: l1, sprites: testSpriteData(lv.spriteHeader, order, spriteSizes(emu.rom)), secondaryHeader: secondary, layer2Pointer: lv.bgPointer, fadeHook: tracker.start });
     if (!r.ok) continue;
     const rec = record(emu, 3, tracker);
     if (!rec) continue;
@@ -333,11 +335,9 @@ export function drawTiles(s: Snes, g: OamTile[]): SpriteImage | null {
 // Sprite num as it looks at tile X & 15 = x, Y & 15 = y (sprites that start differently depending
 // on their position, see SpriteVariants): spawned alone into the empty level with the camera
 // centered on it, so every position is fully on screen.
-export function captureSpriteAt(
-  emu: LevelEmulator, level: number, header: PrimaryHeader, spriteHeader: number, bgPointer: number, num: number, x: number, y: number,
-): SpriteImage | null {
-  const hdr = encodePrimaryHeader({ ...header, mode: 0, screens: 4, time: 2 });
-  const r = emu.load(level, { layer1: new Uint8Array([...hdr, 0xff]), sprites: new Uint8Array([spriteHeader & SPRITE_MEMORY, 0xff]), secondaryHeader: [0, 0, 0, 0], layer2Pointer: bgPointer });
+export function captureSpriteAt(emu: LevelEmulator, lv: SpriteLevel, num: number, x: number, y: number): SpriteImage | null {
+  const hdr = encodePrimaryHeader({ ...lv.header, mode: 0, screens: 4, time: 2 });
+  const r = emu.load(lv.number, { layer1: new Uint8Array([...hdr, 0xff]), sprites: new Uint8Array([lv.spriteHeader & SPRITE_MEMORY, 0xff]), secondaryHeader: [0, 0, 0, 0], layer2Pointer: lv.bgPointer });
   if (!r.ok) return null;
   const s = emu.snes, w = s.wram;
   try {
@@ -363,9 +363,6 @@ export function captureSpriteAt(
   const ncx = cameraX(w), ncy = cameraY(w);
   return { ...img, ox: img.ox + ncx - sx, oy: img.oy + ncy - sy };
 }
-
-// The level sprite images are captured in: its number, header and sprite header, and the layer 2 (BG) pointer
-export interface SpriteLevel { number: number; header: PrimaryHeader; spriteHeader: number; bgPointer: number }
 
 // The test level load a sprite is captured in: as many sprites as the test level has slots for (six), grouped by
 // number, so that a sprite added to or removed from a list leaves the other loads as they were
@@ -393,7 +390,7 @@ export function* spriteSetJob(
   let i = 0;
   for (const p of loads) {
     i++;
-    const r = part(p.sub, p.input, () => [...captureSprites(emu, lv.number, lv.header, lv.spriteHeader, lv.bgPointer, p.ids)]);
+    const r = part(p.sub, p.input, () => [...captureSprites(emu, lv, p.ids)]);
     show(r.result!);
     images.push(...r.result!);
     if (r.learned) yield `Sprite graphics ${Math.round(i / loads.length * 100)} %`;
@@ -408,10 +405,10 @@ export function spriteSetParts(nums: number[], input?: string): { sub: string; i
 
 // the image of sprite id with these extra bytes (a custom sprite's; null: none)
 export function* spriteBytesJob(emu: LevelEmulator, lv: SpriteLevel, id: number, bytes: number[]): Generator<never, SpriteImage | null> {
-  return captureSprites(emu, lv.number, lv.header, lv.spriteHeader, lv.bgPointer, [id], undefined, bytes).get(id) ?? null;
+  return captureSprites(emu, lv, [id], undefined, bytes).get(id) ?? null;
 }
 
 // the image of sprite id at tile (x, y) (captureSpriteAt; null: none)
 export function* spriteAtJob(emu: LevelEmulator, lv: SpriteLevel, id: number, x: number, y: number): Generator<never, SpriteImage | null> {
-  return captureSpriteAt(emu, lv.number, lv.header, lv.spriteHeader, lv.bgPointer, id, x, y);
+  return captureSpriteAt(emu, lv, id, x, y);
 }

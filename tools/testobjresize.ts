@@ -16,10 +16,10 @@ const rom = new Rom(await editorImage());
 const emu = new LevelEmulator(rom); emu.boot();
 const lv = loadLevel(rom, 0x105), l2 = rom.r24(L2_PTRS + 0x105 * 3);
 const { kinds } = new ObjKindProbe(emu, lv, l2).result();
-const probe = new SizeProbe(emu, lv, l2);
+const probe = new SizeProbe(rom, lv, l2);
 const box = (num: number) => (size: number) => probe.box({ num, ext: 0, size });
 const setup = (num: number, size: number) => {
-  probe.probe(sizeParts(kinds.get(num)).flatMap((p) => partSizes(size, p).map((s) => ({ num, ext: 0, size: s }))));
+  probe.probe(emu, sizeParts(kinds.get(num)).flatMap((p) => partSizes(size, p).map((s) => ({ num, ext: 0, size: s }))));
   return drivers(kinds.get(num), size, box(num));
 };
 const aim = (num: number, o: { x: number; y: number; size: number }, grab: Grab, tx: number, ty: number) =>
@@ -74,7 +74,7 @@ const aim = (num: number, o: { x: number; y: number; size: number }, grab: Grab,
 const jobs: (() => void)[] = [];
 const runJobs = () => { while (jobs.length) jobs.shift()!(); };
 const learnLater = (fail: (specs: SizeSpec[]) => boolean): LearnBoxes => (_key, specs, done, failed) =>
-  jobs.push(() => { if (fail(specs)) failed(); else { probe.probe(specs); done(specs.map((s) => probe.box(s) ?? null)); } });
+  jobs.push(() => { if (fail(specs)) failed(); else { probe.probe(emu, specs); done(specs.map((s) => probe.box(s) ?? null)); } });
 const allOf = (num: number, size: number) => sizeParts(kinds.get(num)).flatMap((p) => partSizes(size, p).map((s) => ({ num, ext: 0, size: s })));
 
 // a failed job: the boxes are null (a keyboard step keeps the origin) and the drivers those the kind names

@@ -20,6 +20,7 @@ import { objectBytes } from './prefabcost.ts';
 import { setPrefabSources } from './prefabsources.ts';
 import { hex } from './names.ts';
 import type { EditSession } from './editsession.ts';
+import { objectKey } from './objboxes.ts';
 
 export type Layer = 1 | 2;
 // objects (indices in the layer's list) to become one prefab object at x, y
@@ -33,7 +34,6 @@ export interface LevelGroups { level: number; places: PrefabGroup[] }
 const ALL_FLAGS = flagBytes(Array.from({ length: COND_FLAGS }, (_, f) => f));
 // a Direct Map16 tile with its condition
 export const tileKey = (tile: number, cond: Dm16Cond | null | undefined) => `${tile} ${cond ? `${cond.flag} ${cond.always}` : ''}`;
-const ownerKey = (layer: Layer, i: number) => (layer === 2 ? 0x8000 | i : i);
 
 // the places of prefab s in lv (as given); load: lv's emulated load, called when an object between those of
 // a place may write a prefab tile; skip: objects that are no place's (the selection)
@@ -46,7 +46,7 @@ export function findPrefabPlaces(rom: Rom, lv: Level, s: Prefab, load: (ov: Leve
   const perPlacement = objectBytes({ uid: 0, num: 0, ext: PREFAB_EXT, x: 0, y: 0, size: 0, prefab: 0 });
   let written: Map<number, Set<number>> | null = null;
   const writes = (layer: Layer, i: number) =>
-    (written ??= load({ ...levelOverride(rom, lv), cdm16Flags: ALL_FLAGS }).touched).get(ownerKey(layer, i));
+    (written ??= load({ ...levelOverride(rom, lv), cdm16Flags: ALL_FLAGS }).touched).get(objectKey(layer === 2, i));
   const out: PrefabPlace[] = [];
   for (const layer of [1, 2] as const) {
     const objs = layer === 1 ? lv.objects : lv.layer2Objects;

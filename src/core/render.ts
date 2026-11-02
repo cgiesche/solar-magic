@@ -3,7 +3,7 @@
 import { Rom } from './rom.ts';
 import { decodeTile, cgramToRGBA, snesColorToRGBA } from './gfx.ts';
 import { isL1Vertical, isL2Vertical, hasLayer2Objects } from './level.ts';
-import { MAP_BASE, type LevelRender } from './levelemu.ts';
+import { MAP_BASE, MAP_SIZE, type LevelRender } from './levelemu.ts';
 import { EXT_FIRST, DEFAULT_ACTS, extTileAddr, extTileWords, setExtTileWords, actsLike, blockOf } from './map16ext.ts';
 import { bgTileWords } from './bgmap16.ts';
 import { RAM, get16, map16Tile, bgTile, map16Pointer, cameraX, cameraY } from './ram.ts';
@@ -54,6 +54,22 @@ export function layerGeom(rom: Rom, layer: number, mode: number, screens: number
     },
   };
 }
+
+// the tile of a layer at each offset of the level's tilemap (in a load's touched sets and owner map: an address less
+// MAP_BASE), packed (y<<16|x); -1 where the layer has none (or no layer, g null)
+export function tileByOffset(g: LayerGeom | null): Int32Array {
+  const m = new Int32Array(MAP_SIZE).fill(-1);
+  if (g) for (let y = 0; y < g.height; y++) for (let x = 0; x < g.width; x++) {
+    const a = g.addr(x, y) - MAP_BASE;
+    if (a >= 0 && a < MAP_SIZE) m[a] = (y << 16) | x;
+  }
+  return m;
+}
+// the tile (x, y) at an offset of such a map, undefined where the layer has none
+export const tilePos = (m: Int32Array) => (off: number): [number, number] | undefined => {
+  const t = m[off];
+  return t >= 0 ? [t & 0xffff, t >> 16] : undefined;
+};
 
 // tiles 8x8 cache: key = palette-bank-specific tile word
 export class TileCache {

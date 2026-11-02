@@ -870,15 +870,12 @@ export class OverworldLoads {
   // (one per key) while the ROM edits since changed no byte it read: the loads', the frames it runs on from them
   // and the editor code's; a load not kept yet isn't kept for `load` (the slider's stay)
   derive<T>(key: string, make: (load: (map: number, progress: number) => OwRender) => T, of = ''): T {
-    let d = this.derived.entry<T>(key, of);
-    if (!d) {
-      // (the emulated CPU's reads and the editor code's)
-      const { result, reads, gen } = record(this.emu.rom, () => make((map, progress) => this.load(map, progress, false).r), { cpu: this.emu.snes, counted: false });
-      d = { data: result, deps: { gen, reads } };
-      this.derived.set(key, d.data, d.deps, of);
-    }
-    this.count(d.deps.reads);
-    return d.data;
+    const d = this.derived.entry<T>(key, of);
+    if (d) { this.count(d.deps.reads); return d.data; }
+    // (the emulated CPU's reads and the editor code's; they count for the recorders running)
+    const { result, reads, gen } = record(this.emu.rom, () => make((map, progress) => this.load(map, progress, false).r), { cpu: this.emu.snes });
+    this.derived.set(key, result, { gen, reads }, of);
+    return result;
   }
   // reads (of a kept result) count for the recorders running (a derive's, an outer one) as if read now
   private count(reads: RomReads): void {

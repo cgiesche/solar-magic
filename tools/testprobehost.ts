@@ -370,7 +370,7 @@ for (const changeRead of [false, true]) {
   capEmu.skipMask = () => gfxSkipMask(capEmu.rom);
   // a capture of the whole set: each load's sprites at once
   const capture = (on: LevelEmulator, ids: number[]) => {
-    return [...spriteLoads(ids).values()].flatMap((l) => [...captureSprites(on, 0x105, lv5.header, lv5.spriteHeader, 0xffd900, l)]);
+    return [...spriteLoads(ids).values()].flatMap((l) => [...captureSprites(on, level, l)]);
   };
   const direct = capture(capEmu, nums);
   h.handle({ type: 'learn', lane: 'sprites', key: 'spr-set', input, job: { kind: 'sprites', level, nums }, replace: true });
@@ -409,9 +409,9 @@ for (const changeRead of [false, true]) {
   const learned = got.filter((d) => d.type === 'learned');
   check(learned.map((d) => d.type === 'learned' && d.key).join() === 'v:0,b:1,v:1' && h.started === started + 3, `variants and bytes: lanes taking turns, a job asked twice runs once (${learned.map((d) => d.type === 'learned' && d.key).join()})`);
   const v0 = learned.find((d) => d.type === 'learned' && d.key === 'v:0');
-  check(v0?.type === 'learned' && JSON.stringify(v0.result) === JSON.stringify(captureSpriteAt(capEmu, 0x105, lv5.header, lv5.spriteHeader, 0xffd900, 0x0d, 0, 0)), 'a variant as captured directly');
+  check(v0?.type === 'learned' && JSON.stringify(v0.result) === JSON.stringify(captureSpriteAt(capEmu, level, 0x0d, 0, 0)), 'a variant as captured directly');
   const b1 = learned.find((d) => d.type === 'learned' && d.key === 'b:1');
-  check(b1?.type === 'learned' && JSON.stringify(b1.result) === JSON.stringify(captureSprites(capEmu, 0x105, lv5.header, lv5.spriteHeader, 0xffd900, [0x0d], undefined, [1]).get(0x0d) ?? null), 'extra bytes as captured directly');
+  check(b1?.type === 'learned' && JSON.stringify(b1.result) === JSON.stringify(captureSprites(capEmu, level, [0x0d], undefined, [1]).get(0x0d) ?? null), 'extra bytes as captured directly');
 
   // replace drops the lane's other jobs, unlearn the lane
   h.handle(at(2)); h.handle(at(3));
@@ -434,7 +434,7 @@ for (const changeRead of [false, true]) {
   const capture = (ids: number[]) => {
     const on = new LevelEmulator(new Rom(r.data.slice()));
     on.skipMask = () => gfxSkipMask(on.rom);
-    return JSON.stringify([...spriteLoads(ids).values()].flatMap((l) => [...captureSprites(on, 0x105, lv5.header, lv5.spriteHeader, 0xffd900, l)]));
+    return JSON.stringify([...spriteLoads(ids).values()].flatMap((l) => [...captureSprites(on, level, l)]));
   };
   const loadInput = inputHash({ set: 'test' });
   const learn = (nums: number[]): ProbeMessage => ({ type: 'learn', lane: 'sprites', key: 'spr', input: inputHash({ set: 'test', nums }), job: { kind: 'sprites', level, nums, input: loadInput }, replace: true });
@@ -514,7 +514,7 @@ for (const changeRead of [false, true]) {
     const again = run();
     const on = new LevelEmulator(new Rom(r.data.slice()));
     on.skipMask = () => gfxSkipMask(on.rom);
-    const whole = JSON.stringify([...spriteLoads(nums).values()].flatMap((l) => [...captureSprites(on, 0x105, lv5.header, lv5.spriteHeader, 0xffd900, l)]));
+    const whole = JSON.stringify([...spriteLoads(nums).values()].flatMap((l) => [...captureSprites(on, level, l)]));
     return { first: first.parts, again: again.parts, same: again.result === whole };
   };
   const flip = (o: number) => (r: Rom) => r.writeAt(o, Uint8Array.of(r.data[o] ^ 0x01));
@@ -696,9 +696,9 @@ for (const changeRead of [false, true]) {
 
   // jump arcs from two tiles: the first replaced
   const runs = direct.runStates(), lvHash = inputHash({ lv: 'test' });
-  const arcs = (tx: number): ProbeMessage => ({ type: 'learn', lane: 'arcs', key: `arcs:${tx}`, input: thInput, job: { kind: 'arcs', level: lvHash, load: [0x105, ov5, lv5.spriteHeader, 432], tx, ty: 0x16, runs }, replace: true });
+  const arcs = (tx: number): ProbeMessage => ({ type: 'learn', lane: 'arcs', key: `arcs:${tx}`, input: thInput, job: { kind: 'arcs', level: lvHash, load: { level: 0x105, ov: ov5, spriteHeader: lv5.spriteHeader, height: 432 }, tx, ty: 0x16, runs }, replace: true });
   const ar = run(arcs(3), arcs(5));
-  const arNow = atOnce<JumpArc[]>({ key: 'arcs:now', input: 'arcs', keep: 'memory', picture: false, start: (emu, prepare) => jumpArcsJob(emu, prepare, lvHash, [0x105, ov5, lv5.spriteHeader, 432], 5, 0x16, runs) });
+  const arNow = atOnce<JumpArc[]>({ key: 'arcs:now', input: 'arcs', keep: 'memory', picture: false, start: (emu, prepare) => jumpArcsJob(emu, prepare, lvHash, { level: 0x105, ov: ov5, spriteHeader: lv5.spriteHeader, height: 432 }, 5, 0x16, runs) });
   check(ar.learned.length === 1 && ar.done?.type === 'learned' && ar.done.key === 'arcs:5' && !!ar.done.memory, 'jump arcs: the replaced request dropped, the latest in memory only');
   check(ar.done?.type === 'learned' && arNow.length === 8 && JSON.stringify(ar.done.result) === JSON.stringify(arNow), 'jump arcs: as on the main thread');
 
@@ -745,8 +745,8 @@ for (const changeRead of [false, true]) {
   const sizes: SizeSpec[] = Array.from({ length: 32 }, (_, size) => ({ num: 0x21, ext: 0, size })); // (in three loads)
   const kl = { number: 0x105, header: lv5.header }, l2p = lv5.layer2Pointer;
   const sz = run({ type: 'learn', lane: 'sizes', key: 'sizes', input: '1', job: { kind: 'sizes', level: kl, layer2Pointer: l2p, specs: sizes }, replace: false });
-  const sp = new SizeProbe(new LevelEmulator(lr), kl, l2p);
-  sp.probe(sizes);
+  const sp = new SizeProbe(lr, kl, l2p);
+  sp.probe(new LevelEmulator(lr), sizes);
   check(sz.done?.type === 'learned' && JSON.stringify(sz.done.result) === JSON.stringify(sizes.map((q) => sp.box(q))) && sz.put.size === 0 && (sz.done.result as unknown[]).some((b) => b !== null),
     'object boxes: as probed directly, nothing kept');
   const sz2 = run({ type: 'learn', lane: 'sizes', key: 'sizes', input: '2', job: { kind: 'sizes', level: kl, layer2Pointer: l2p, specs: sizes }, replace: false });

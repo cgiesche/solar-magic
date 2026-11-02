@@ -27,6 +27,10 @@ const MAX_FRAMES = 150;
 const SETTLE_FRAMES = 12; // dropping Mario onto the tile before an arc
 const WARM_FRAMES = 6; // on the ground with the running state before the jump
 
+// what a level is loaded with for its jump arcs: its number, its load's overrides (as for rendering), its sprite header
+// byte and its height in pixels (falling below ends an arc)
+export interface ArcLoad { level: number; ov: LevelOverride; spriteHeader: number; height: number }
+
 export class JumpArcs {
   emu: LevelEmulator;
   private ready: SnesState | null = null;
@@ -39,7 +43,7 @@ export class JumpArcs {
 
   // Loads the level (overrides as for rendering; sprites are left out) and runs it to gameplay.
   // false when it doesn't get there.
-  prepare(level: number, ov: LevelOverride, spriteHeader: number, height: number): boolean {
+  prepare({ level, ov, spriteHeader, height }: ArcLoad): boolean {
     this.ready = null;
     this.height = height;
     let p: PlaySession;
@@ -119,9 +123,9 @@ export class JumpArcs {
 // The arcs from tile (tx, ty) at every speed to both sides as a job (jobrunner.ts; no picture): the level is loaded
 // once per level state (level: its hash) and kept on the job's emulator, then an arc a step. None when the level
 // doesn't reach gameplay.
-export function* jumpArcsJob(emu: LevelEmulator, prepare: Prepare, level: string, load: Parameters<JumpArcs['prepare']>, tx: number, ty: number, runs: RunStates): Generator<void, JumpArc[]> {
+export function* jumpArcsJob(emu: LevelEmulator, prepare: Prepare, level: string, load: ArcLoad, tx: number, ty: number, runs: RunStates): Generator<void, JumpArc[]> {
   let loaded = false;
-  const arcs = prepare(`arcs:${level}`, () => { loaded = true; const a = new JumpArcs(emu); return a.prepare(...load) ? a : null; });
+  const arcs = prepare(`arcs:${level}`, () => { loaded = true; const a = new JumpArcs(emu); return a.prepare(load) ? a : null; });
   if (!arcs) { console.error('jump arcs: the level did not reach gameplay'); return []; }
   if (loaded) yield;
   const out: JumpArc[] = [];

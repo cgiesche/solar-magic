@@ -174,7 +174,7 @@ for (const keep of [true, 'memory'] as const) {
   const plain = await scanned(false), shown = await scanned(true);
   const { learner, results, runner, learn } = editor(r, m);
   const lv = loadLevel(r, 0x105), bg = lv.layer2Pointer >> 16 === 0xff ? lv.layer2Pointer : 0xffd900;
-  const sprites = () => learner.now('spr', (emu) => emu.tracked(() => captureSprites(emu, 0x105, lv.header, lv.spriteHeader, bg, [0, 1, 2, 3, 4, 5])));
+  const sprites = () => learner.now('spr', (emu) => emu.tracked(() => captureSprites(emu, { number: 0x105, header: lv.header, spriteHeader: lv.spriteHeader, bgPointer: bg }, [0, 1, 2, 3, 4, 5])));
   sprites();
   const specs = [...new Map(lv.objects.map((o) => [`${o.num}:${o.ext}:${o.size}`, { num: o.num, ext: o.ext, size: o.size }])).values()];
   const keyOf = (q: typeof specs[number]) => objKey(q, null);

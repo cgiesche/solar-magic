@@ -14,7 +14,7 @@ import {
 import { levelBgPointer } from '../core/levelheader.ts';
 import { hex, hex2, spriteName } from '../core/names.ts';
 import { objectTableKey, objectName, objectNameKey, setObjectName, namedPerTable, numberName } from '../core/objectnames.ts';
-import { layerBoxes, boxAt, objectKey } from '../core/objboxes.ts';
+import { layerBoxes, boxAt } from '../core/objboxes.ts';
 import { objectUserNames } from '../core/usernames.ts';
 import { loadPixiProject, customSpriteList, type CustomSprite } from '../core/pixi.ts';
 import { renderLevel, type LevelImages, composite, animatedPixels, TileAnimation, type AnimStep } from '../core/render.ts';
@@ -232,7 +232,7 @@ export class App {
     // made now, outside any ROM edit (undo never takes it away), and stored with the ROM soon
     if (makeProjectId(rom)) this.persistTimer = window.setTimeout(() => { this.persistTimer = 0; this.persist(); }, 1000);
     this.emu = new LevelEmulator(rom);
-    this.emu.skipMask = () => this.gfxSkipMask();
+    this.emu.skipMask = this.gfxSkipMask;
     this.emu.boot();
     onModalsChange(() => { this.scheduler.resume(); this.emit('busy'); });
     // sprite images: learned again when what they depend on changed (the learner decides)
@@ -757,9 +757,7 @@ export class App {
   // ROM bytes of GFX file data: emulated results don't depend on them (graphics only reach VRAM);
   // sprite images and object thumbnails have the files' content in their input instead
   private gfxMask = perRomState(gfxSkipMask);
-  gfxSkipMask(): Uint8Array | null {
-    return this.gfxMask(this.rom);
-  }
+  readonly gfxSkipMask = (): Uint8Array | null => this.gfxMask(this.rom);
 
   // the content of the bytes gfxSkipMask leaves out of the bytes read (graphics and ExAnimation data), for
   // results that depend on them; once per ROM state
@@ -879,10 +877,6 @@ export class App {
   }
 
   // ------------- queries -------------
-  objectKey(layer2: boolean, idx: number): number {
-    return objectKey(layer2, idx);
-  }
-
   // grab area = every tile the object wrote (same as its outline), topmost first
   objectAt(tx: number, ty: number, l2 = this.model.mode === 'l2'): LevelObject | null {
     const g = l2 ? this.images.geom2 : this.images.geom1;
@@ -1282,7 +1276,7 @@ export class App {
     const lv = this.level, ov = this.buildOverrides(), height = this.images.height;
     const level = inputHash({ level: this.levelInput(ov), spriteHeader: lv.spriteHeader, height });
     // (asked for on every paint: joins the job while it is learned)
-    return this.probes.learn<JumpArc[]>(`arcs:${tx},${ty}`, { kind: 'arcs', level, load: [lv.number, ov, lv.spriteHeader, height], tx, ty, runs },
+    return this.probes.learn<JumpArc[]>(`arcs:${tx},${ty}`, { kind: 'arcs', level, load: { level: lv.number, ov, spriteHeader: lv.spriteHeader, height }, tx, ty, runs },
       { input: { level, runs }, lane: 'arcs', replace: true, label: 'Jump arcs', done: this.arcsLearned });
   }
   private arcsLearned = () => this.emit('arcs');

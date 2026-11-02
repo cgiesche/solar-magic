@@ -5,7 +5,8 @@
 import type { Rom } from './rom.ts';
 import { readOffset, type LevelEmulator, type LevelRender, type LevelOverride } from './levelemu.ts';
 import { type Level, type LevelObject, newUid, levelRows } from './level.ts';
-import { renderLevel, layerGeom, renderLayerTiles } from './render.ts';
+import { renderLevel, layerGeom, renderLayerTiles, tileByOffset } from './render.ts';
+import { objectKey } from './objboxes.ts';
 import { MAP_BASE, map16Tile } from './ram.ts';
 import { objectVariant, sizedByte, type ObjKind } from './objkinds.ts';
 import { levelSlots, layerSlots } from './gfxslots.ts';
@@ -127,13 +128,12 @@ export function* objectThumbsJob(rom: Rom, emu: LevelEmulator, level: Level, spe
     };
     const im = renderLevel(rom, r, 0, 32);
     const g = layerGeom(rom, 0, 0, 32);
-    const inv = new Map<number, number>();
-    for (let y = 0; y < g.height; y++) for (let x = 0; x < g.width; x++) inv.set(g.addr(x, y) - MAP_BASE, (y << 16) | x);
+    const tileAt = tileByOffset(g);
     batch.forEach((s, i) => {
       if (unhandled(s, i)) { out.push({ key: keyOf(s), w: 0, h: 0, px: new Uint32Array(0), m16: [], cells: [], unhandled: true }); return; }
       const set = r.touched.get(i);
       const tiles: number[] = [];
-      if (set) for (const off of set) { const t = inv.get(off); if (t !== undefined) tiles.push(t); }
+      if (set) for (const off of set) { const t = tileAt[off]; if (t >= 0) tiles.push(t); }
       if (!tiles.length) return;
       let x0 = 1e9, y0 = 1e9, x1 = -1, y1 = -1;
       for (const t of tiles) {
@@ -190,11 +190,8 @@ export function* placementPreviewJob(rom: Rom, emu: LevelEmulator, level: Level,
   const r = emu.load(level.number, ov);
   if (!r.ok) return null;
   const h = level.header, g = layer2 ? layerGeom(rom, 1, h.mode, h.screens) : layerGeom(rom, 0, h.mode, h.screens, levelRows(level.secondary));
-  const tileAt = new Map<number, number>(); // by the offset in the tilemap
-  for (let y = 0; y < g.height; y++) for (let x = 0; x < g.width; x++) tileAt.set(g.addr(x, y) - MAP_BASE, (y << 16) | x);
-  const tiles = new Set<number>();
-  // (the objects' keys in the load's trace: those of layer 2 objects with bit 15 set, as App.objectKey)
-  for (const i of placed) for (const off of r.touched.get(layer2 ? 0x8000 | i : i) ?? []) { const t = tileAt.get(off); if (t !== undefined) tiles.add(t); }
+  const tileAt = tileByOffset(g), tiles = new Set<number>();
+  for (const i of placed) for (const off of r.touched.get(objectKey(layer2, i)) ?? []) { const t = tileAt[off]; if (t >= 0) tiles.add(t); }
   return renderLayerTiles(rom, r, g, layer2, [...tiles]);
 }
 export type PlacementPreview = NonNullable<ReturnType<typeof renderLayerTiles>>;

@@ -89,7 +89,7 @@ export class PaletteTab implements WsPanel {
     app.on('render', () => { if (this.visible && this.t.levelPreview) { this.retrace(); this.paint(); } });
     this.watch = app.watchRom(() => { if (this.visible) this.paint(); });
     this.headersWatch = app.watchRom(() => (this.headers = null));
-    app.on('level', () => { this.trace = null; this.headers = null; });
+    app.on('level', () => (this.headers = null));
     app.on('animated', () => { if (this.visible) this.paint(); });
     // (which colors the game rewrites on a submap is known from its load)
     ws.preview.onMap(() => { if (this.visible) this.paint(); });
@@ -255,7 +255,6 @@ export class PaletteTab implements WsPanel {
     const app = this.app;
     app.romEdit(`Own palette of level ${hex(app.level.number, 3)} removed`, () => setCustomPalette(app.rom, app.level.number, null));
     this.custom = 0;
-    this.trace = null;
     this.headers = null;
     this.retrace();
     this.buildBar();

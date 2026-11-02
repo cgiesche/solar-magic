@@ -4,8 +4,8 @@
 // from the selection, box selection by object tiles, the tile under the mouse) don't read the render's WRAM and
 // owner map themselves.
 
-import { MAP_BASE, MAP_SIZE, type LevelRender } from './levelemu.ts';
-import type { LayerGeom } from './render.ts';
+import { MAP_BASE, type LevelRender } from './levelemu.ts';
+import { tileByOffset, type LayerGeom } from './render.ts';
 import type { LevelObject } from './level.ts';
 import { objectKey } from './objboxes.ts';
 import { isDm16, dm16Tiles, type Dm16Cond } from './cdm16.ts';
@@ -27,7 +27,7 @@ export class RenderQuery {
 
   constructor(render: Pick<LevelRender, 'wram' | 'owner' | 'touched'>, geom1: LayerGeom, geom2: LayerGeom | null) {
     this.render = render; this.geom1 = geom1; this.geom2 = geom2;
-    this.offsetToTile = [offsetMap(geom1), offsetMap(geom2)];
+    this.offsetToTile = [tileByOffset(geom1), tileByOffset(geom2)];
   }
 
   private geom(l2: boolean): LayerGeom | null {
@@ -119,13 +119,4 @@ export class RenderQuery {
     const conds = Array.from({ length: w * h }, (_, i) => cell(i)?.cond ?? null);
     return { x: x0, y: y0, w, h, tiles, ...(conds.some((c) => c) ? { conds } : {}) };
   }
-}
-
-function offsetMap(g: LayerGeom | null): Int32Array {
-  const m = new Int32Array(MAP_SIZE).fill(-1);
-  if (g) for (let y = 0; y < g.height; y++) for (let x = 0; x < g.width; x++) {
-    const a = g.addr(x, y) - MAP_BASE;
-    if (a >= 0 && a < MAP_SIZE) m[a] = pack(x, y);
-  }
-  return m;
 }

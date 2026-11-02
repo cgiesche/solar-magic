@@ -175,10 +175,10 @@ check(objectLength2D(hooked) === 5, `once the hook is installed (the same ROM): 
   check(kinds.get(0x05) === undefined && kinds.get(0x2d)?.byte === undefined, 'the standard objects as before');
 
   // its boxes: as the 5th byte says
-  const probe = new SizeProbe(emu, lv, l2);
+  const probe = new SizeProbe(emu.rom, lv, l2);
   const spec = (ext5: number) => ({ num: 0x2d, ext: 0, size: 0, extension: [5, ext5] });
   const box = (v: number) => probe.box(withSizedByte(k5, spec(0x11), v));
-  probe.probe(Array.from({ length: 0x100 }, (_, v) => withSizedByte(k5, spec(0x11), v)));
+  probe.probe(emu, Array.from({ length: 0x100 }, (_, v) => withSizedByte(k5, spec(0x11), v)));
   const b = box(0x21);
   check(!!b && b.x1 - b.x0 === 1 && b.y1 - b.y0 === 2, `custom 05 at 21: 2×3 tiles (${JSON.stringify(b)})`);
   const d = drivers(k5, 0x11, box);

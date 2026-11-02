@@ -127,7 +127,7 @@ check(uses.missing(levels).length === 0, 'every level known after scanning');
 // with others; saving one of them keeps the boot snapshot, the probes, the sprite images and the other levels' uses
 {
   const lv105 = loadLevel(rom, 0x105), bg = lv105.layer2Pointer >> 16 === 0xff ? lv105.layer2Pointer : 0xffd900;
-  const images = results.fp.deps(emu.tracked(() => captureSprites(emu, 0x105, lv105.header, lv105.spriteHeader, bg, [0x04, 0x05, 0x0d])).reads);
+  const images = results.fp.deps(emu.tracked(() => captureSprites(emu, { number: 0x105, header: lv105.header, spriteHeader: lv105.spriteHeader, bgPointer: bg }, [0x04, 0x05, 0x0d])).reads);
   const host = new ProbeHost(), probes = new Map<string, RomDeps>();
   const jobs: ProbeJob[] = [{ kind: 'block', ts: 0, tile: 0x130 }, { kind: 'block', ts: 0, tile: 0x12b }, { kind: 'sprite', ts: 0, num: 0x04 }];
   host.setRom(rom.gen, rom.data.slice());
@@ -246,7 +246,7 @@ check(uses.missing(levels).length === 0, 'every level known after scanning');
 {
   for (const n of uses.missing(levels)) uses.scan(n, emu);
   const lv105 = loadLevel(rom, 0x105), bg = lv105.layer2Pointer >> 16 === 0xff ? lv105.layer2Pointer : 0xffd900;
-  const images = results.fp.deps(emu.tracked(() => captureSprites(emu, 0x105, lv105.header, lv105.spriteHeader, bg, [0x04, 0x05, 0x0d])).reads);
+  const images = results.fp.deps(emu.tracked(() => captureSprites(emu, { number: 0x105, header: lv105.header, spriteHeader: lv105.spriteHeader, bgPointer: bg }, [0x04, 0x05, 0x0d])).reads);
   const host = new ProbeHost(), probes = new Map<string, RomDeps>();
   const jobs: ProbeJob[] = [{ kind: 'block', ts: 0, tile: 0x130 }, { kind: 'block', ts: 0, tile: 0x12b }, { kind: 'sprite', ts: 0, num: 0x04 }];
   host.setRom(rom.gen, rom.data.slice());

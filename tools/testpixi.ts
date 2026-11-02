@@ -164,7 +164,7 @@ check(W(0x7fb002) === 0x5a && W(0x7fb003) === 0x10 && W(0x7fb004) === 0x36, 'ext
 
 // images of custom sprites, captured like the original ones (sprite ids $2xx/$3xx)
 {
-  const img = captureSprites(pemu, 0x105, plv.header, plv.spriteHeader, plv.layer2Pointer >> 16 === 0xff ? plv.layer2Pointer : 0xffd900, [0x00, 0x210, 0x310]);
+  const img = captureSprites(pemu, { number: 0x105, header: plv.header, spriteHeader: plv.spriteHeader, bgPointer: plv.layer2Pointer >> 16 === 0xff ? plv.layer2Pointer : 0xffd900 }, [0x00, 0x210, 0x310]);
   check(img.has(0x00) && img.has(0x210) && img.has(0x310), `images of custom sprites captured (${[...img.keys()].map((k) => k.toString(16)).join(' ')})`);
   const one = img.get(0x210);
   check(!!one && one.w === 16 && one.h === 16 && one.ox === 0 && one.oy === 0, 'custom sprite image: its 16x16 tile at the sprite');
@@ -481,11 +481,11 @@ print "MAIN ",pc
   check(res9.ok, 'stack sprite assembled');
   const e9 = new LevelEmulator(r9); e9.boot();
   const l9 = loadLevel(r9, 0x105), bg9 = l9.layer2Pointer >> 16 === 0xff ? l9.layer2Pointer : 0xffd900;
-  const goomba = captureSprites(e9, 0x105, l9.header, l9.spriteHeader, bg9, [0x0f]).get(0x0f);
-  const stack = captureSprites(e9, 0x105, l9.header, l9.spriteHeader, bg9, [0x220], undefined, [0x0f]).get(0x220);
+  const goomba = captureSprites(e9, { number: 0x105, header: l9.header, spriteHeader: l9.spriteHeader, bgPointer: bg9 }, [0x0f]).get(0x0f);
+  const stack = captureSprites(e9, { number: 0x105, header: l9.header, spriteHeader: l9.spriteHeader, bgPointer: bg9 }, [0x220], undefined, [0x0f]).get(0x220);
   check(!!goomba && !!stack && stack.w === goomba.w && stack.h === goomba.h + 16 && stack.oy === goomba.oy - 16,
     `stack sprite: shown as the two Goombas it spawned (${stack ? `${stack.w}x${stack.h} at ${stack.ox},${stack.oy}` : 'no image'})`);
-  const statue = captureSprites(e9, 0x105, l9.header, l9.spriteHeader, bg9, [0xbc]).get(0xbc);
+  const statue = captureSprites(e9, { number: 0x105, header: l9.header, spriteHeader: l9.spriteHeader, bgPointer: bg9 }, [0xbc]).get(0xbc);
   check(!!statue && statue.w === 24 && statue.h === 24, `Bowser statue without its flame (${statue ? `${statue.w}x${statue.h}` : 'no image'})`);
 }
 
@@ -501,7 +501,7 @@ print "MAIN ",pc
   if (!res.ok) console.log(res.errors.join('\n'));
   const e = new LevelEmulator(r); e.boot();
   const l = loadLevel(r, 0x105), bg = l.layer2Pointer >> 16 === 0xff ? l.layer2Pointer : 0xffd900;
-  const img = captureSprites(e, 0x105, l.header, l.spriteHeader, bg, [0x00, 0x230]).get(0x230);
+  const img = captureSprites(e, { number: 0x105, header: l.header, spriteHeader: l.spriteHeader, bgPointer: bg }, [0x00, 0x230]).get(0x230);
   check(res.ok && !!img && img.w === 16 && img.h === 16 && img.ox === 0 && img.oy === 0,
     `sprite erasing itself at once: shown as it drew itself (${img ? `${img.w}x${img.h} at ${img.ox},${img.oy}` : 'no image'})`);
 }
