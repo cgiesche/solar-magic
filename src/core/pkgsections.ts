@@ -380,21 +380,18 @@ const globalGfx: PartSection<number[], [number, number][]> = {
 // (two packages never change the same shared palette color or global GFX file: removing one sets back
 // what it found, which would undo or keep the other's)
 
-// installing a package changing these shared palette colors: a conflict with each package changing one too
-export function sharedPalConflicts(installed: Package[], colors: number[]): string[] {
+// installing a package changing these (shared palette colors, global GFX files) in a section: a conflict
+// with each package changing one of them too; say: the sentence naming those both change
+function conflicts(installed: Package[], mine: number[], theirs: (p: Package) => [number, number][] | undefined, say: (both: number[]) => string): string[] {
   return installed.flatMap((p) => {
-    const both = (p.sharedPal ?? []).map(([i]) => i).filter((i) => colors.includes(i));
-    return both.length ? [`Conflict with package “${p.name}”: both change the shared palettes' ${sharedColorNames(both).join('; ')}.`] : [];
+    const both = (theirs(p) ?? []).map(([n]) => n).filter((n) => mine.includes(n));
+    return both.length ? [`Conflict with package “${p.name}”: both change ${say(both)}.`] : [];
   });
 }
-
-// installing a package replacing these global GFX files: a conflict with each package replacing one too
-export function globalGfxConflicts(installed: Package[], nums: number[]): string[] {
-  return installed.flatMap((p) => {
-    const both = (p.globalGfx ?? []).map(([n]) => n).filter((n) => nums.includes(n));
-    return both.length ? [`Conflict with package “${p.name}”: both change ${both.map(globalGfxName).join(', ')}.`] : [];
-  });
-}
+export const sharedPalConflicts = (installed: Package[], colors: number[]) =>
+  conflicts(installed, colors, (p) => p.sharedPal, (both) => `the shared palettes' ${sharedColorNames(both).join('; ')}`);
+export const globalGfxConflicts = (installed: Package[], nums: number[]) =>
+  conflicts(installed, nums, (p) => p.globalGfx, (both) => both.map(globalGfxName).join(', '));
 
 // ---------- what of the tool projects is a package's ----------
 
@@ -429,6 +426,8 @@ const SECTION_KIND: Record<SectionKey, PartKind> = {
 const kindRank = (k: SectionKey) => PART_KINDS.indexOf(SECTION_KIND[k]);
 // the sections in the order of their part kinds (parts.ts PART_KINDS): what a package brought is said so
 export const SECTION_KEYS = (Object.keys(SECTIONS) as SectionKey[]).sort((a, b) => kindRank(a) - kindRank(b));
-// the order of removing: the other way round (the graphics first, songs and sound effects before the
-// UberASM code, the patches last – those applied later first)
+// the order of removing: the part kinds the other way round (the sections of one kind, the graphics', in
+// their order) – the graphics first, songs and sound effects before the UberASM code (AddmusicK runs
+// again, fitting its NMI changes to the UberASM hijack still there), the patches last (those applied
+// later first)
 export const REMOVAL_KEYS = [...SECTION_KEYS].sort((a, b) => kindRank(b) - kindRank(a));
