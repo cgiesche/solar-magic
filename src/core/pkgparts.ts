@@ -21,13 +21,13 @@ import { uploadSource, effectiveDefines, packUpload, type FileDefines, type Uplo
 import { suggestCalls, placed, type PkgRules } from './pkgmap.ts';
 import { isSongText, songsFromFiles, loadMusicProject, emptyMusicProject, addSongs, addSfx, nextFreeSong, folders as musicFolders, saveMusicProject, hasAmk, musicEntry } from './music.ts';
 import { pixiParts, planPixiUpload, applyPixiUpload, linkedDefines, hexNum, type PixiPlan } from './pixipkg.ts';
-import { parseCfg, parseJsonCfg } from './pixi.ts';
+import { parseCfg, parseJsonCfg, readPixiList, FOLDER } from './pixi.ts';
 import { bowsieUploadSprites, applyBowsieUpload } from './bowsie.ts';
 import { detectBlocks, applyBlocks, applyGraphics, routinesCalled, planPackage, plannedFgTiles, type DetectedBlock, type DetectedGraphics, type PackagePlan } from './pkgplan.ts';
 import { loadProject, saveProject, emptyProject, projectFromFiles, addCall, isUberList, type UberProject } from './uberproject.ts';
 import { setLevelMusic } from './patches.ts';
 import { findSfx, sfxNumbers, sfxLinks, isSfxList, sfxName, type FoundSfx, type SfxBank, type SfxLink } from './sfx.ts';
-import { ALL, type UberContext } from './uberasm.ts';
+import { ALL, CONTEXTS, OTHER, type UberContext } from './uberasm.ts';
 import type { Claim } from './pkgreg.ts';
 import type { Level } from './level.ts';
 import { callistoAsm, toolFiles, PATCH_DEFINES, type CallistoProject } from './callisto.ts';
@@ -209,8 +209,6 @@ function placeFiles(preview: ReadyPreview, main: string, mainText: string, folde
   return out;
 }
 
-const CONTEXTS: UberContext[] = ['level', 'gamemode', 'overworld'];
-
 const uberasm: PartAdapter<'uberasm'> = {
   kind: 'uberasm',
   claims(d) {
@@ -248,7 +246,7 @@ const uberasm: PartAdapter<'uberasm'> = {
     for (const folder of new Set(mine.flatMap((p) => (p.folder ? [p.folder] : [])))) {
       for (const [f, c] of folder.files) if (f !== 'list.txt') { proj.files.set(f, c); claim('uberasm', f); }
       for (const ctx of CONTEXTS) for (const [num, cs] of folder.list[ctx]) for (const c of cs) addCall(proj, ctx, num, c.file, c.bytes);
-      for (const k of ['global', 'statusbar', 'macrolib'] as const) proj.list[k] ??= folder.list[k];
+      for (const k of OTHER) proj.list[k] ??= folder.list[k];
     }
     // a Callisto project's code: its header and the shared code it includes
     if (preview.callisto) for (const [f, c] of toolFiles(preview.callisto, preview.files)) { proj.files.set(f, c); claim('uberasm', f); }
@@ -498,12 +496,10 @@ export function pixiListed(preview: ReadyPreview): Map<string, number> {
   const pixi = preview.callisto?.tools.pixi;
   const lists = pixi ? (pixi.list ? [pixi.list] : []) : [...preview.files.keys()].filter((f) => /(^|\/)list\.txt$/i.test(f));
   for (const f of lists) {
-    const dir = pixi ? pixi.folder + 'sprites/' : dirOf(f);
-    for (const line of dec.decode(preview.files.get(f)!).split(/\r?\n/)) {
-      const m = /^\s*([0-9a-f]{1,2})\s+(\S+\.(?:json|cfg|asm))\s*$/i.exec(line);
-      if (!m) continue;
-      const file = sprites.find((s) => s === dir + m[2] || s.endsWith('/' + m[2]));
-      if (file && !out.has(file)) out.set(file, parseInt(m[1], 16));
+    for (const e of readPixiList(dec.decode(preview.files.get(f)!))) {
+      const dir = pixi ? pixi.folder + FOLDER[e.kind] : dirOf(f);
+      const file = sprites.find((s) => s === dir + e.file || s.endsWith('/' + e.file));
+      if (file && !out.has(file)) out.set(file, e.num);
     }
   }
   return out;

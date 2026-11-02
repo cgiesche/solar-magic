@@ -13,10 +13,9 @@
 // patch (the table in Lunar Magic's format, owcustom.ts). Its Lunar Magic display files (.s16ov/.sscov) are not made:
 // the editor draws the sprites by emulation.
 
-import { zipSync, unzipSync } from 'fflate';
 import type { Rom } from './rom.ts';
-import { applyPatch, reapplyPatch, uninstallPatch, type ApplyResult, type PatchSource } from './patchapply.ts';
-import { listPatches, patchArchive, missingSources, type PatchEntry } from './patchreg.ts';
+import type { ApplyResult, PatchSource } from './patchapply.ts';
+import { toolStore, type ToolFormat, type ToolProject } from './toolproject.ts';
 import { BOWSIE_ASM, BOWSIE_ROUTINES, BOWSIE_VERSION } from '../vendor/bowsie/bowsie.ts';
 import { readCustomSprites, writeCustomSprites, customSizeTable, OW_CUSTOM_IDS, BOWSIE_PTR } from './owcustom.ts';
 
@@ -28,9 +27,8 @@ const LM_VERSION = 371; // the Lunar Magic whose formats the editor writes (BOWS
 const UNUSED = 0x048414; // an RTL in bank 4: the init and main of numbers without a sprite
 
 export interface BowsieEntry { num: number; file: string } // file relative to the project root (sprites/…)
-export interface BowsieProject { files: Map<string, Uint8Array>; list: BowsieEntry[] }
+export type BowsieProject = ToolProject<BowsieEntry[]>;
 
-const enc = new TextEncoder();
 const dec = new TextDecoder();
 const hx = (n: number, w = 2) => n.toString(16).toUpperCase().padStart(w, '0');
 const base = (f: string) => f.slice(f.lastIndexOf('/') + 1);
@@ -235,59 +233,36 @@ incsrc "routine_ptrs.asm"
 
 // ---------------------------------------------------------------- project storage
 
-export function bowsieToZip(p: BowsieProject): Uint8Array {
-  const all: Record<string, Uint8Array> = Object.fromEntries(p.files);
-  all['list.txt'] = enc.encode(writeBowsieList(p.list));
-  return zipSync(all, { level: 9 });
-}
-export function bowsieFromZip(data: Uint8Array): BowsieProject {
-  const files = new Map<string, Uint8Array>();
-  let list: Uint8Array | undefined;
-  for (const [k, v] of Object.entries(unzipSync(data))) {
-    if (k.endsWith('/')) continue;
-    if (k === 'list.txt') list = v; else files.set(k, v);
-  }
-  return { files, list: list ? parseBowsieList(dec.decode(list)) : [] };
-}
-
-export function bowsieEntry(rom: Rom): PatchEntry | null {
-  return listPatches(rom).find((p) => p.kind === 'owsprite') ?? null;
-}
-export function loadBowsieProject(rom: Rom): BowsieProject | null {
-  const e = bowsieEntry(rom);
-  if (!e) return null;
-  const a = patchArchive(rom, e);
-  if (!a) throw missingSources('overworld sprite');
-  return bowsieFromZip(a);
-}
-
-// assembles the project (replacing an installed one); a project without sprites and files removes BOWSIE. The custom
-// sprite table is written again for the new sizes (as BOWSIE's meOWmeOW: extra bytes kept as far as they go; with
-// BOWSIE in the ROM its pointer is a table or 0, owcustom.ts).
-export function saveBowsieProject(rom: Rom, p: BowsieProject): ApplyResult {
-  const e = bowsieEntry(rom);
-  const fail = (err: unknown): ApplyResult => ({ ok: false, errors: [err instanceof Error ? err.message : String(err)], warnings: [], prints: [] });
-  let lists;
-  try { lists = readCustomSprites(rom); } catch (err) { return fail(err); }
-  const after = (r: ApplyResult): ApplyResult => {
+// before a save, the overworld's custom sprites; once the patch went in (or was removed) the custom sprite table is
+// written again for the new sizes (as BOWSIE's meOWmeOW: extra bytes kept as far as they go; with BOWSIE in the ROM
+// its pointer is a table or 0, owcustom.ts)
+function rewriteOwSprites(rom: Rom): (r: ApplyResult) => ApplyResult {
+  const lists = readCustomSprites(rom);
+  return (r) => {
     if (!r.ok) return r;
     const was = JSON.stringify(lists);
     writeCustomSprites(rom, lists, customSizeTable(rom));
     if (JSON.stringify(readCustomSprites(rom)) !== was) r.warnings.push('The extra bytes of placed overworld sprites were adjusted to their new count.');
     return r;
   };
-  try {
-    if (!p.list.length && !p.files.size) return e ? after({ ok: true, errors: [], warnings: uninstallPatch(rom, e.id), prints: [] }) : { ok: true, errors: [], warnings: [], prints: [] };
-    const { src } = buildBowsiePatch(p);
-    return after(e ? reapplyPatch(rom, e.id, src) : applyPatch(rom, src));
-  } catch (err) { return fail(err); }
 }
 
-export function removeBowsie(rom: Rom): string[] {
-  const r = saveBowsieProject(rom, { files: new Map(), list: [] });
-  if (!r.ok) throw new Error(r.errors.join(' '));
-  return r.warnings;
-}
+const BOWSIE: ToolFormat<BowsieEntry[]> = {
+  kind: 'owsprite',
+  what: 'overworld sprite',
+  parseList: parseBowsieList,
+  writeList: writeBowsieList,
+  keeps: (rel) => rel !== 'list.txt',
+  hasEntries: (l) => l.length > 0,
+  build: (_rom, p) => ({ source: buildBowsiePatch(p).src }),
+  around: rewriteOwSprites,
+};
+
+// the ROM's overworld sprites project; saving assembles it (replacing an installed one), a project without sprites
+// and files removes BOWSIE
+export const {
+  load: loadBowsieProject, save: saveBowsieProject, remove: removeBowsie, toZip: bowsieToZip,
+} = toolStore(BOWSIE);
 
 // ---------------------------------------------------------------- packages
 

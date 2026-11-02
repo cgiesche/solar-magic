@@ -16,7 +16,7 @@ import { ROUTINES } from '../src/core/pixiroutines.ts';
 import { uploadFiles, uploadFromFiles } from '../src/core/patchpkg.ts';
 import { planPixiUpload, applyPixiUpload } from '../src/core/pixipkg.ts';
 import { inspectUpload, installPackage } from '../src/core/packages.ts';
-import { savePixiProject, removePixi, loadPixiProject, parsePixiList, parseCfg, parseJsonCfg, type PixiProject } from '../src/core/pixi.ts';
+import { savePixiProject, removePixi, loadPixiProject, parsePixiList, readPixiList, parseCfg, parseJsonCfg, type PixiProject } from '../src/core/pixi.ts';
 import { editorImage, romDiff } from './fixture.ts';
 import { map16Source } from '../src/core/render.ts';
 
@@ -68,6 +68,17 @@ const cfg = parseCfg('01\n36\n00 00 3B 80 00 00\n12 34\nmarker.asm\n01:03\n', 's
 check(cfg.type === 1 && cfg.actlike === 0x36 && cfg.tweak[2] === 0x3b && cfg.tweak[3] === 0x80 && cfg.prop[0] === 0x12 && cfg.asm === 'sprites/marker.asm' && cfg.bytes === 1 && cfg.bytesExtra === 3, 'cfg parsed');
 const old = parseCfg('01\n36\n00 00 3B 80 00 00\n00 00\nmarker.asm\n2\n', 'sprites/old.cfg');
 check(old.bytes === 0 && old.bytesExtra === 0, 'old cfg (assembler byte): no extra bytes');
+
+// list.txt: one parser – strict for a project, a package's list read as far as it is valid
+{
+  const text = '10 foo.cfg ; a comment\nC2 gun.json nodisplay\nbad line\n00:05 per.cfg\nCLUSTER:\n03 cl.asm\n';
+  let threw = false;
+  try { parsePixiList(text); } catch { threw = true; }
+  check(threw, 'strict list: a bad line throws');
+  const l = readPixiList(text).map((e) => `${e.kind}:${e.num}:${e.file}`).join();
+  check(l === 'sprites:16:foo.cfg,shooters:194:gun.json,cluster:3:cl.asm', `package list: the valid entries with their file as written (${l})`);
+  check(parsePixiList('C2 gun.json\n')[0].file === 'shooters/gun.json', 'project list: files below their type\'s folder');
+}
 const js = parseJsonCfg(JSON.stringify({ $1656: { 'Object Clipping': 3, 'Can be jumped on': true }, $166E: { Palette: 4, 'Use second graphics page': true }, AsmFile: 'x.asm', ActLike: 28, Type: 1,
   'Extra Property Byte 1': 5, 'Extra Property Byte 2': 0, 'Additional Byte Count (extra bit clear)': 1, 'Additional Byte Count (extra bit set)': 2,
   Collection: [{ Name: 'Brutal Bill', ExtraBit: false }], Displays: [{ Description: 'A Brutal Bill.\\n\nhoming' }] }), 'sprites/b.json');

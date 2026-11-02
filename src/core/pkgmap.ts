@@ -3,11 +3,10 @@
 // the package to folders of the UberASM project; a suggestion is derived from the package itself: folders
 // named like UberASM Tool's, the folders their code includes, and list.txt lines quoted in the docs.
 
-import { ALL, type UberContext } from './uberasm.ts';
+import { ALL, CONTEXTS, type UberContext } from './uberasm.ts';
 
 // project folders a part can go into; '' = the project's top folder
 export const UBER_DIRS = ['level/', 'gamemode/', 'overworld/', 'library/', 'routines/', 'other/'] as const;
-const CONTEXTS: UberContext[] = ['level', 'gamemode', 'overworld'];
 
 // node → destination folder of its contents, null = not taken; a node is a folder ('a/b/', '' = the
 // package root) or a file; nodes without a rule inherit their folder's

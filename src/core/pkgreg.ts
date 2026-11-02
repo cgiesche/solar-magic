@@ -7,10 +7,10 @@
 
 import { deflateSync, inflateSync } from 'fflate';
 import { Rom, pcToSnes } from './rom.ts';
-import type { UberContext } from './uberasm.ts';
+import type { UberContext, Other } from './uberasm.ts';
 import type { SpriteFolder } from './pixirt.ts';
 import { TOOL_KINDS, type ToolKind } from './parts.ts';
-import { SECTIONS, SECTION_KEYS, type SectionKey, type PartSection, type Other } from './pkgsections.ts';
+import { SECTIONS, SECTION_KEYS, type SectionKey, type PartSection } from './pkgsections.ts';
 import type { ObjectText } from './objtext.ts';
 
 const MAGIC = [0x53, 0x4d, 0x57, 0x4b]; // "SMWK"

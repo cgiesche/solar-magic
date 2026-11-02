@@ -6,13 +6,12 @@
 //  2. each sprite, seeing the defines, the routines as %Name() → JSL and the _header.asm of its type
 //  3. the runtime (pixirt.ts) with the tables filled from the sprites' cfg/json and their prints
 
-import { zipSync, unzipSync } from 'fflate';
 import { Rom } from './rom.ts';
 import { loadLevel, spriteSizes, type Level } from './level.ts';
 import { saveSprites } from './save.ts';
-import { applyPatch, reapplyPatch, uninstallPatch, type ApplyResult, type PatchSource } from './patchapply.ts';
+import type { ApplyResult, PatchSource } from './patchapply.ts';
 import type { AsarResult } from './asar.ts';
-import { listPatches, patchArchive, missingSources, type PatchEntry } from './patchreg.ts';
+import { toolStore, type ToolFormat, type ToolProject } from './toolproject.ts';
 import { pixiDefines, HEADERS, runtimeAsm, STATUS_LABELS, MISC_MAX, PIXI_RAM, type SpriteFolder, type SpriteRow } from './pixirt.ts';
 import { ROUTINES } from './pixiroutines.ts';
 
@@ -46,7 +45,7 @@ export const sharesNumbers = (a: SpriteFolder, b: SpriteFolder) => a === b || (i
 const levelKind = (num: number): SpriteFolder => (num < 0xc0 ? 'sprites' : num < 0xd0 ? 'shooters' : 'generators');
 
 export interface PixiEntry { kind: SpriteFolder; num: number; file: string } // file relative to the project root
-export interface PixiProject { files: Map<string, Uint8Array>; list: PixiEntry[] }
+export type PixiProject = ToolProject<PixiEntry[]>;
 
 // assigns a sprite file to a number, in place of what had that number in its number space – for
 // installing and for the Sprites tab
@@ -55,7 +54,6 @@ export function assignSprite(p: PixiProject, e: PixiEntry): void {
   p.list.push(e);
 }
 
-const enc = new TextEncoder();
 const dec = new TextDecoder();
 
 function normPath(p: string): string {
@@ -70,33 +68,43 @@ const dirOf = (p: string) => (p.includes('/') ? p.slice(0, p.lastIndexOf('/') + 
 
 // ---------------------------------------------------------------- list.txt
 
-export function parsePixiList(text: string): PixiEntry[] {
+// the entries of a list.txt with their file as written (relative to the folder of their type); a bad line
+// throws (strict) or is left out
+function listLines(text: string, strict: boolean): PixiEntry[] {
   const out: PixiEntry[] = [];
   let section: SpriteFolder = 'sprites';
   text.split(/\r?\n/).forEach((raw, i) => {
     const line = raw.replace(/;.*$/, '').trim();
     if (!line) return;
-    const err = (m: string) => new Error(`list.txt line ${i + 1}: ${m}`);
+    const err = (m: string) => { if (strict) throw new Error(`list.txt line ${i + 1}: ${m}`); };
     const head = /^([A-Z]+):$/i.exec(line);
     if (head) {
       const k = SECTION[head[1].toUpperCase()];
-      if (!k) throw err(`Unknown section “${head[1]}:”`);
-      section = k;
+      if (k) section = k; else err(`Unknown section “${head[1]}:”`);
       return;
     }
-    if (/^[0-9a-f]+:[0-9a-f]+\s/i.test(line)) throw err('Per-level sprites (level:number) are not supported');
+    if (/^[0-9a-f]+:[0-9a-f]+\s/i.test(line)) return err('Per-level sprites (level:number) are not supported');
     const m = /^([0-9a-f]{1,2})\s+(.+?)(?:\s+(display|nodisplay))?$/i.exec(line);
-    if (!m) throw err(`Unrecognized entry “${line}”`);
+    if (!m) return err(`Unrecognized entry “${line}”`);
     const num = parseInt(m[1], 16);
     const kind = section === 'sprites' ? levelKind(num) : section;
     const [lo, hi] = numberRange(kind);
-    if (num < lo || num > hi) throw err(`Number ${m[1]} is outside ${lo.toString(16).toUpperCase()}–${hi.toString(16).toUpperCase()}`);
+    if (num < lo || num > hi) return err(`Number ${m[1]} is outside ${lo.toString(16).toUpperCase()}–${hi.toString(16).toUpperCase()}`);
     const file = m[2].trim();
     const isCfg = /\.(cfg|json)$/i.test(file);
-    if (section === 'sprites' ? !isCfg : !/\.asm$/i.test(file)) throw err(section === 'sprites' ? `“${file}”: sprites need a .cfg or .json file` : `“${file}”: an .asm file is expected here`);
-    out.push({ kind, num, file: normPath(FOLDER[kind] + file) });
+    if (section === 'sprites' ? !isCfg : !/\.asm$/i.test(file)) return err(section === 'sprites' ? `“${file}”: sprites need a .cfg or .json file` : `“${file}”: an .asm file is expected here`);
+    out.push({ kind, num, file });
   });
   return out;
+}
+
+export function parsePixiList(text: string): PixiEntry[] {
+  return listLines(text, true).map((e) => ({ ...e, file: normPath(FOLDER[e.kind] + e.file) }));
+}
+
+// the entries of a package's list.txt, maybe not all valid (those that are), with their file as written
+export function readPixiList(text: string): PixiEntry[] {
+  return listLines(text, false);
 }
 
 export function writePixiList(list: PixiEntry[]): string {
@@ -377,42 +385,6 @@ endmacro`);
 
 // ---------------------------------------------------------------- project storage
 
-export function projectToZip(p: PixiProject): Uint8Array {
-  const all: Record<string, Uint8Array> = Object.fromEntries(p.files);
-  all['list.txt'] = enc.encode(writePixiList(p.list));
-  return zipSync(all, { level: 9 });
-}
-
-export function projectFromZip(data: Uint8Array): PixiProject {
-  const raw = new Map<string, Uint8Array>();
-  for (const [k, v] of Object.entries(unzipSync(data))) if (!k.endsWith('/') && !k.startsWith('__MACOSX/')) raw.set(k.replace(/\\/g, '/'), v);
-  // a PIXI folder may sit one level down; the tool's own files are not needed
-  let root = '';
-  if (!raw.has('list.txt')) {
-    const l = [...raw.keys()].find((k) => /^[^/]+\/list\.txt$/i.test(k));
-    if (l) root = l.slice(0, l.indexOf('/') + 1);
-  }
-  const files = new Map<string, Uint8Array>();
-  for (const [k, v] of raw) {
-    if (!k.startsWith(root)) continue;
-    const rel = k.slice(root.length);
-    if (/^(sprites|shooters|generators|cluster|extended|misc_sprites|routines)\//.test(rel)) files.set(rel, v);
-  }
-  const lt = raw.get(root + 'list.txt');
-  return { files, list: lt ? parsePixiList(dec.decode(lt)) : [] };
-}
-
-export function pixiEntry(rom: Rom): PatchEntry | null {
-  return listPatches(rom).find((p) => p.kind === 'sprite') ?? null;
-}
-export function loadPixiProject(rom: Rom): PixiProject | null {
-  const e = pixiEntry(rom);
-  if (!e) return null;
-  const a = patchArchive(rom, e);
-  if (!a) throw missingSources('custom sprite');
-  return projectFromZip(a);
-}
-
 // levels holding custom sprites whose entries change size with the new size table, parsed as they are
 // now (written again afterwards, like PIXI's MeiMei does)
 function levelsToRewrite(rom: Rom, next: Uint8Array): Level[] {
@@ -430,43 +402,34 @@ function levelsToRewrite(rom: Rom, next: Uint8Array): Level[] {
   return out;
 }
 
-// assembles the project (replacing an installed one); an empty list removes it. Levels whose custom
-// sprites change size are written again with the new sizes (extra bytes kept as far as they go).
-export function savePixiProject(rom: Rom, p: PixiProject): ApplyResult {
-  const e = pixiEntry(rom);
-  let sizes: Uint8Array;
-  try { sizes = p.list.length ? sizeTable(p) : new Uint8Array(0x400).fill(3); } catch (err) {
-    return { ok: false, errors: [err instanceof Error ? err.message : String(err)], warnings: [], prints: [] };
-  }
-  const rewrite = levelsToRewrite(rom, sizes);
-  const after = (r: ApplyResult): ApplyResult => {
+// before a save: the size table for the new list and the levels whose custom sprites change size with it;
+// once the patch went in (or was removed) those are written again with the new sizes (extra bytes kept
+// as far as they go)
+function rewriteLevels(rom: Rom, p: PixiProject): (r: ApplyResult) => ApplyResult {
+  const rewrite = levelsToRewrite(rom, p.list.length ? sizeTable(p) : new Uint8Array(0x400).fill(3));
+  return (r) => {
     if (r.ok && rewrite.length) {
       for (const lv of rewrite) saveSprites(rom, lv);
       r.warnings.push(`Sprite data of ${rewrite.length} level(s) adjusted to the new extra byte count.`);
     }
     return r;
   };
-  // a project without entries keeps its files (to assign them again); without files too it is removed
-  if (!p.list.length && ![...p.files.keys()].some((f) => f !== 'list.txt')) {
-    const warnings = e ? uninstallPatch(rom, e.id) : [];
-    return after({ ok: true, errors: [], warnings, prints: [] });
-  }
-  let src: PatchSource;
-  try {
-    src = buildPixiPatch(p);
-  } catch (err) {
-    return { ok: false, errors: [err instanceof Error ? err.message : String(err)], warnings: [], prints: [] };
-  }
-  try {
-    return after(e ? reapplyPatch(rom, e.id, src) : applyPatch(rom, src));
-  } catch (err) {
-    return { ok: false, errors: [err instanceof Error ? err.message : String(err)], warnings: [], prints: [] };
-  }
 }
 
-// removes the custom sprites; levels with extra bytes are written again without them
-export function removePixi(rom: Rom): string[] {
-  const r = savePixiProject(rom, { files: new Map(), list: [] });
-  if (!r.ok) throw new Error(r.errors.join(' '));
-  return r.warnings;
-}
+const PIXI: ToolFormat<PixiEntry[]> = {
+  kind: 'sprite',
+  what: 'custom sprite',
+  parseList: parsePixiList,
+  writeList: writePixiList,
+  // the tool's own files are not needed
+  keeps: (rel) => /^(sprites|shooters|generators|cluster|extended|misc_sprites|routines)\//.test(rel),
+  hasEntries: (l) => l.length > 0,
+  build: (_rom, p) => ({ source: buildPixiPatch(p) }),
+  around: rewriteLevels,
+};
+
+// the ROM's custom sprites project (a PIXI folder, maybe one level down). Saving assembles it, levels whose
+// custom sprites change size are written again; removing writes levels with extra bytes again without them.
+export const {
+  load: loadPixiProject, save: savePixiProject, remove: removePixi, toZip: projectToZip,
+} = toolStore(PIXI);

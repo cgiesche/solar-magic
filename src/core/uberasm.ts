@@ -16,6 +16,10 @@ export type UberContext = 'level' | 'gamemode' | 'overworld';
 export const CONTEXT_SIZE: Record<UberContext, number> = { level: 0x200, gamemode: 0x100, overworld: 7 };
 const FOLDER: Record<UberContext, string> = { level: 'level/', gamemode: 'gamemode/', overworld: 'overworld/' };
 export const ALL = -1; // "*" in list.txt
+export const CONTEXTS: UberContext[] = ['level', 'gamemode', 'overworld'];
+// the list's entries besides the calls: one file each
+export const OTHER = ['global', 'statusbar', 'macrolib'] as const;
+export type Other = (typeof OTHER)[number];
 
 export interface UberCall { file: string; bytes: number[] } // file relative to the project root
 export interface UberList {
@@ -303,7 +307,7 @@ export function buildUberPatch(files: Map<string, Uint8Array>, list: UberList): 
   // per context: number → [resource, bytes index] in call order ("*" first)
   type Call = { r: ResourceInfo; b: number };
   const calls: Record<UberContext, Map<number, Call[]>> = { level: new Map(), gamemode: new Map(), overworld: new Map() };
-  for (const ctx of ['level', 'gamemode', 'overworld'] as UberContext[]) {
+  for (const ctx of CONTEXTS) {
     const all = list[ctx].get(ALL) ?? [];
     for (const [num, cs] of list[ctx]) if (num !== ALL && cs.length === 0) list[ctx].delete(num);
     const nums = all.length ? Array.from({ length: CONTEXT_SIZE[ctx] }, (_, i) => i) : [...list[ctx].keys()].filter((n) => n !== ALL);
@@ -447,8 +451,9 @@ export function buildUberPatch(files: Map<string, Uint8Array>, list: UberList): 
     if (!scanLabels(files, list.statusbar).has('main')) o('main:', '  RTS');
     o('namespace off');
   }
-  for (const [ctx, what] of [['global', list.global], ['statusbar', list.statusbar], ['macrolib', list.macrolib]] as const) {
-    if (what && !files.has(what)) warnings.push(`${ctx}: file “${what}” is missing – ignored`);
+  for (const k of OTHER) {
+    const what = list[k];
+    if (what && !files.has(what)) warnings.push(`${k}: file “${what}” is missing – ignored`);
   }
 
   const src = new Map<string, Uint8Array | string>(files);

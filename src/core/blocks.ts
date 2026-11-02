@@ -5,10 +5,10 @@
 // A block starts with "db $42" (10 offsets) or "db $37" (+ WallFeet, WallBody), followed by one JMP per
 // offset; the code ends with RTL.
 
-import { zipSync, unzipSync } from 'fflate';
 import { Rom } from './rom.ts';
-import { applyPatch, reapplyPatch, uninstallPatch, type ApplyResult, type PatchSource } from './patchapply.ts';
-import { listPatches, patchArchive, missingSources, type PatchEntry } from './patchreg.ts';
+import type { ApplyResult, PatchSource } from './patchapply.ts';
+import { toolStore, type ToolFormat, type ToolProject } from './toolproject.ts';
+import { uberFreeRam } from './uberproject.ts';
 import { setBlock, setActsLike, EXT_TILES } from './map16ext.ts';
 import { definesFile, DEFAULT_FREERAM } from './uberasm.ts';
 import { GPS_ROUTINES, GPS_DEFINES } from './gpsroutines.ts';
@@ -16,7 +16,7 @@ import { GPS_ROUTINES, GPS_DEFINES } from './gpsroutines.ts';
 export const BLOCKS_NAME = 'Custom Blocks';
 
 export interface BlockAssign { tile: number; file: string; acts?: number } // file relative to the project root
-export interface BlockProject { files: Map<string, Uint8Array>; list: BlockAssign[] }
+export type BlockProject = ToolProject<BlockAssign[]>;
 
 // puts a block on a Map16 tile, in place of the block that was on it (one block per tile) – for
 // installing and for the Blocks tab
@@ -25,8 +25,6 @@ export function assignBlock(p: BlockProject, a: BlockAssign): void {
   p.list.push(a);
 }
 
-const enc = new TextEncoder();
-const dec = new TextDecoder();
 
 export function parseBlockList(text: string): BlockAssign[] {
   const out: BlockAssign[] = [];
@@ -103,64 +101,14 @@ export function buildBlockPatch(p: BlockProject, freeram = DEFAULT_FREERAM): Pat
   };
 }
 
-export function projectToZip(p: BlockProject): Uint8Array {
-  const all: Record<string, Uint8Array> = Object.fromEntries(p.files);
-  all['list.txt'] = enc.encode(writeBlockList(p.list));
-  return zipSync(all, { level: 9 });
-}
-export function projectFromZip(data: Uint8Array): BlockProject {
-  const raw = new Map<string, Uint8Array>();
-  for (const [k, v] of Object.entries(unzipSync(data))) if (!k.endsWith('/') && !k.startsWith('__MACOSX/')) raw.set(k.replace(/\\/g, '/'), v);
-  // a GPS folder may sit one level down; the tool's own files are not needed (callisto.asm and callisto/:
-  // a Callisto project's header and shared code, see callisto.ts)
-  let root = '';
-  if (!raw.has('list.txt')) {
-    const l = [...raw.keys()].find((k) => /^[^/]+\/list\.txt$/i.test(k));
-    if (l) root = l.slice(0, l.indexOf('/') + 1);
-  }
-  const files = new Map<string, Uint8Array>();
-  for (const [k, v] of raw) {
-    if (!k.startsWith(root)) continue;
-    const rel = k.slice(root.length);
-    if (/^(blocks|routines|callisto)\/|^callisto\.asm$/.test(rel)) files.set(rel, v);
-  }
-  const lt = raw.get(root + 'list.txt');
-  return { files, list: lt ? parseBlockList(dec.decode(lt)) : [] };
-}
-
-export function blocksEntry(rom: Rom): PatchEntry | null {
-  return listPatches(rom).find((p) => p.kind === 'block') ?? null;
-}
-export function loadBlockProject(rom: Rom): BlockProject | null {
-  const e = blocksEntry(rom);
-  if (!e) return null;
-  const a = patchArchive(rom, e);
-  if (!a) throw missingSources('custom block');
-  return projectFromZip(a);
-}
-
 function clearTable(rom: Rom): void {
   for (let t = 0; t < EXT_TILES; t++) setBlock(rom, t, 0, false);
 }
 
-// assembles the blocks and enters them into the block table. A project without assignments keeps its
-// files (to assign them again); without files too it is removed.
-export function saveBlockProject(rom: Rom, p: BlockProject): ApplyResult {
-  const e = blocksEntry(rom);
-  if (!p.list.length && ![...p.files.keys()].some((f) => f !== 'list.txt')) {
-    const warnings = e ? removeBlocks(rom) : [];
-    return { ok: true, errors: [], warnings, prints: [] };
-  }
-  let r: ApplyResult;
-  try {
-    const uber = listPatches(rom).find((x) => x.kind === 'uberasm');
-    const src = buildBlockPatch(p, uber?.ram?.[0]?.[0]);
-    r = e ? reapplyPatch(rom, e.id, src) : applyPatch(rom, src);
-  } catch (err) {
-    return { ok: false, errors: [err instanceof Error ? err.message : String(err)], warnings: [], prints: [] };
-  }
-  if (!r.ok) return r;
-  // blocks are identified by their GpsB<n>_GpsBlock label, in the order of first use in the list
+// after the patch went in: the blocks entered into the block table, each by its GpsB<n>_GpsBlock label
+// (in the order of first use in the list); removed, the table emptied
+function enterBlocks(rom: Rom, p: BlockProject, r: ApplyResult, removed: boolean): ApplyResult {
+  if (removed) { clearTable(rom); return r; }
   const used = [...new Set(p.list.map((b) => b.file))];
   const labels = r.labels ?? {};
   const errors: string[] = [];
@@ -181,11 +129,21 @@ export function saveBlockProject(rom: Rom, p: BlockProject): ApplyResult {
   return r;
 }
 
-// removes the blocks patch and empties the block table
-export function removeBlocks(rom: Rom): string[] {
-  const e = blocksEntry(rom);
-  if (!e) return [];
-  const w = uninstallPatch(rom, e.id);
-  clearTable(rom);
-  return w;
-}
+const GPS: ToolFormat<BlockAssign[]> = {
+  kind: 'block',
+  what: 'custom block',
+  parseList: parseBlockList,
+  writeList: writeBlockList,
+  // the tool's own files are not needed (callisto.asm and callisto/: a Callisto project's header and
+  // shared code, see callisto.ts)
+  keeps: (rel) => /^(blocks|routines|callisto)\/|^callisto\.asm$/.test(rel),
+  hasEntries: (l) => l.length > 0,
+  build: (rom, p) => ({ source: buildBlockPatch(p, uberFreeRam(rom)) }),
+  around: (rom, p) => (r, removed) => enterBlocks(rom, p, r, removed),
+};
+
+// the ROM's blocks project (a GPS folder, maybe one level down). Saving assembles the blocks and enters
+// them into the block table; removing empties it.
+export const {
+  entry: blocksEntry, load: loadBlockProject, save: saveBlockProject, remove: removeBlocks, toZip: projectToZip,
+} = toolStore(GPS);

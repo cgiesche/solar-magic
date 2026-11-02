@@ -24,15 +24,12 @@ import {
 } from './music.ts';
 import { EXT_FIRST, EXT_TILES, DEFAULT_ACTS, extTileWords, actsLike, setExtTileWords, setActsLike } from './map16ext.ts';
 import { BG_EXT_FIRST, BG_EXT_TILES, bgExtTileWords, setBgExtTileWords, vanillaBgWords } from './bgmap16.ts';
-import type { UberContext } from './uberasm.ts';
+import { CONTEXTS, OTHER, type UberContext, type Other } from './uberasm.ts';
 import type { SpriteFolder } from './pixirt.ts';
 import type { PackageParts, GlobalAnimPart } from './pkgreg.ts';
 import { sharedColors, setSharedColor, sharedColorNames } from './sharedpal.ts';
 import { readGlobalList, writeGlobalList, readAltFile, writeAltFile, altFileExtent, altFileName, slotsUsed, SLOTS } from './exanim.ts';
 
-const CONTEXTS: UberContext[] = ['level', 'gamemode', 'overworld'];
-export const OTHER = ['global', 'statusbar', 'macrolib'] as const;
-export type Other = (typeof OTHER)[number];
 
 // S: what the section observes of the ROM, P: its field in the record
 export interface PartSection<S, P> {
