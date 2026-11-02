@@ -1284,7 +1284,7 @@ export class App {
   // (empty while unknown or when they could not be found: objects are treated as plain then)
   tilesetKinds(ts = this.level.header.tileset): ObjKinds | null {
     const k = this.probes.kinds(ts);
-    return k === undefined ? null : k ?? { kinds: new Map(), custom: new Map() };
+    return k === undefined ? null : k ?? { kinds: new Map(), custom: new Map(), drawsWith: new Map() };
   }
 
   objectBounds(o: LevelObject): { x0: number; y0: number; x1: number; y1: number } {

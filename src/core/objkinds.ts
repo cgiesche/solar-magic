@@ -9,7 +9,8 @@
 // same way, the nibbles of its 5th byte (the custom object's settings, $58) and of its 3rd: the kind names the
 // byte that sizes it (#149).
 
-import type { LevelEmulator, ObjectTrace } from './levelemu.ts';
+import type { LevelEmulator, LevelRender, ObjectTrace } from './levelemu.ts';
+import { ramEffect } from './objeffects.ts';
 import { OV_L1, MAP_BASE, readOffset } from './levelemu.ts';
 import { layerGeom } from './render.ts';
 import { encodePrimaryHeader, serializeObjects, newUid, type LevelObject, type Level } from './level.ts';
@@ -34,10 +35,20 @@ export const UNSIZED: ObjKind = { type: null, count: 0, lo: null, hi: null };
 export interface ObjKinds {
   kinds: Map<number, ObjKind>; // standard objects 01–3F, those not plain
   custom: Map<number, ObjKind>; // object 2D's custom numbers that draw (where the ROM reads its extension)
+  // of those, the 3rd and 5th bytes it first drew with (DRAW_TRIES: 00/00, else 22/22)
+  drawsWith: Map<number, [number, number]>;
 }
+
+// whether a kind's nibbles size the object or select its type
+export const sizes = (k: ObjKind | null | undefined): boolean => !!(k && (k.lo || k.hi || k.type));
 
 // the result cache key of a tileset's object kinds
 export const kindsKey = (ts: number) => `ok2:${ts}`;
+
+// object 2D's extension (len2d: its length, objectLength2D) for custom number c, its 5th byte ext5 (where it has one)
+export function customExtension(len2d: number, c: number, ext5 = 0): number[] {
+  return Array.from({ length: len2d - 3 }, (_, i) => (i === 0 ? c : i === 1 ? ext5 : 0));
+}
 
 // the byte an object's kind names (its nibbles size it or select its type), and an object with it set to v
 export function sizedByte(kind: ObjKind | null | undefined, o: { size: number; extension?: number[] }): number {
@@ -80,17 +91,22 @@ interface Spec { num: number; size: number; extension?: number[] }
 // the 16 values of each nibble of a byte, the other nibble 2
 const nibbleValues = (): number[] => [...Array.from({ length: 16 }, (_, v) => 0x20 | v), ...Array.from({ length: 16 }, (_, v) => (v << 4) | 2)];
 // the settings (5th byte) of a custom number tried first: whether it draws
-const FIRST = [[0x00, 0x00], [0x22, 0x22]]; // (3rd byte, 5th byte)
-const OTHER = 0x22; // the byte not probed, while the other's nibbles are
+const DRAW_TRIES: [number, number][] = [[0x00, 0x00], [0x22, 0x22]]; // (3rd byte, 5th byte)
+const FIXED_BYTE = 0x22; // the byte not probed, while the other's nibbles are
 
 // Objects 01-3F, each with the low nibble 0-F (high = 2) and the high nibble 0-F (low = 2). Where object 2D has an
-// extension: each custom number at FIRST, then those that drew at either the same for its 5th byte and its 3rd.
+// extension: each custom number at DRAW_TRIES, then those that drew at either the same for its 5th byte and its 3rd.
 // Runs in steps (one emulated level load each) so a UI can spread it over idle time.
 export class ObjKindProbe {
   private specs: Spec[] = [];
   private customs: number[] = []; // the custom numbers probed for their nibbles, in this order after the first ones
   private firstAt = -1; // where the custom numbers' first specs start (-1: none)
   private nibblesAt = -1; // where their nibbles' start (-1: not yet added)
+  // the custom numbers that drew only at a later try, loaded again alone at the first (null: not yet known); those that
+  // draw or change RAM so (among others, some draw nothing: Retry's midway bars, only so many per level)
+  private alone: number[] | null = null;
+  private aloneBase: Uint8Array | null = null; // (RAM after a load without objects)
+  private atFirst = new Set<number>();
   private len2d: number;
   private runs: Run[] = [];
   private code = new Set<number>();
@@ -113,14 +129,14 @@ export class ObjKindProbe {
     this.len2d = objectLength2D(emu.rom);
     if (this.len2d > 3) {
       this.firstAt = this.specs.length;
-      for (let c = 0; c < 0x100; c++) for (const [size, set] of FIRST) this.specs.push({ num: OBJ_2D, size, extension: this.extension(c, set) });
+      for (let c = 0; c < 0x100; c++) for (const [size, ext5] of DRAW_TRIES) this.specs.push({ num: OBJ_2D, size, extension: this.extension(c, ext5) });
     }
     this.queue(0);
   }
 
-  // object 2D's extension for custom number c with the settings set (its 5th byte, where it has one)
-  private extension(c: number, set: number): number[] {
-    return Array.from({ length: this.len2d - 3 }, (_, i) => (i === 0 ? c : i === 1 ? set : 0));
+  // object 2D's extension for custom number c with the 5th byte ext5 (where it has one)
+  private extension(c: number, ext5: number): number[] {
+    return customExtension(this.len2d, c, ext5);
   }
 
   private queue(from: number): void {
@@ -129,11 +145,20 @@ export class ObjKindProbe {
 
   get done(): boolean { return !this.todo.length && (this.firstAt < 0 || this.nibblesAt >= 0); }
 
+  // whether custom number c drew at try j of DRAW_TRIES
+  private drewAt(c: number, j: number): boolean {
+    return !!this.runs[this.firstAt + c * DRAW_TRIES.length + j]?.shape;
+  }
+
   // one emulated level load; a crashing object (invalid type) spoils its whole batch, so a failed
   // batch is split up and its halves are loaded in the next steps (a failed load takes long: splitting
   // all at once would stall a UI for a second or more)
   step(): void {
-    if (!this.todo.length && this.firstAt >= 0 && this.nibblesAt < 0) this.addNibbles();
+    if (!this.todo.length && this.firstAt >= 0 && this.nibblesAt < 0) {
+      this.alone ??= Array.from({ length: 0x100 }, (_, c) => c).filter((c) => !this.drewAt(c, 0) && DRAW_TRIES.some((_, j) => this.drewAt(c, j)));
+      if (this.alone.length) { this.loadAlone(); return; }
+      this.addNibbles();
+    }
     const [a, b] = this.todo.shift() ?? [];
     if (a === undefined || b === undefined) return;
     const runs = this.run(this.specs.slice(a, b));
@@ -141,21 +166,40 @@ export class ObjKindProbe {
     else { const h = a + ((b - a) >> 1); this.todo.unshift([a, h], [h, b]); }
   }
 
-  // the custom numbers that drew at either of FIRST get their nibbles probed: those of the 5th byte (where object
-  // 2D has one), then those of the 3rd, the other byte OTHER
+  // the custom numbers that drew at either of DRAW_TRIES get their nibbles probed: those of the 5th byte (where object
+  // 2D has one), then those of the 3rd, the other byte FIXED_BYTE
   private addNibbles(): void {
     this.nibblesAt = this.specs.length;
     for (let c = 0; c < 0x100; c++) {
-      if (!FIRST.some((_, j) => this.runs[this.firstAt + c * FIRST.length + j]?.shape)) continue;
+      if (!DRAW_TRIES.some((_, j) => this.drewAt(c, j))) continue;
       this.customs.push(c);
-      for (const v of nibbleValues()) this.specs.push({ num: OBJ_2D, size: OTHER, extension: this.extension(c, v) });
-      for (const v of nibbleValues()) this.specs.push({ num: OBJ_2D, size: v, extension: this.extension(c, OTHER) });
+      for (const v of nibbleValues()) this.specs.push({ num: OBJ_2D, size: FIXED_BYTE, extension: this.extension(c, v) });
+      for (const v of nibbleValues()) this.specs.push({ num: OBJ_2D, size: v, extension: this.extension(c, FIXED_BYTE) });
     }
     this.queue(this.nibblesAt);
   }
 
+  // a load of the next of alone (the first: one without objects, what its RAM changes is compared with)
+  private loadAlone(): void {
+    if (!this.aloneBase) { this.aloneBase = this.load([]).r.wram; return; }
+    const c = this.alone!.shift()!, [size, ext5] = DRAW_TRIES[0];
+    const { r } = this.load([{ num: OBJ_2D, size, extension: this.extension(c, ext5) }]);
+    for (const o of (r.trace as ObjectTrace).rom) this.romRead.add(o);
+    if (r.ok && ((r.trace as ObjectTrace).writes.get(0)?.size || ramEffect(this.aloneBase, r.wram))) this.atFirst.add(c);
+  }
+
   // null: the load failed and the batch has to be split
   private run(batch: Spec[]): Run[] | null {
+    const { r, objs } = this.load(batch);
+    if (!r.ok && batch.length > 1) return null;
+    const tr = r.trace as ObjectTrace;
+    for (const c of tr.code) this.code.add(c);
+    for (const c of tr.rom) this.romRead.add(c);
+    return objs.map((_, i) => ({ shape: r.ok ? shapeOf(tr.writes.get(i), this.pos) : null, reads: tr.reads.get(i) ?? new Set() }));
+  }
+
+  // a level load with the batch's objects, traced
+  private load(batch: Spec[]): { r: LevelRender; objs: LevelObject[] } {
     const objs: LevelObject[] = batch.map((s, i) => ({ uid: newUid(), num: s.num, ext: 0, size: s.size, x: i * 32 + 16, y: 4, ...(s.extension ? { extension: s.extension } : {}) }));
     for (const o of objs) fitExtension(o, this.len2d); // (2D among the standard objects as the ROM reads it: custom number 00)
     const owners: number[] = [-1, -1, -1, -1, -1];
@@ -166,11 +210,7 @@ export class ObjKindProbe {
     const byteOwner = new Int32Array(0x10000).fill(-1);
     owners.forEach((o, i) => (byteOwner[OV_L1 + i] = o));
     const r = this.emu.load(this.level.number, { layer1: l1, layer2Pointer: this.layer2Pointer, sprites: new Uint8Array([0, 0xff]), byteOwner, trace: true });
-    if (!r.ok && batch.length > 1) return null;
-    const tr = r.trace as ObjectTrace;
-    for (const c of tr.code) this.code.add(c);
-    for (const c of tr.rom) this.romRead.add(c);
-    return batch.map((_, i) => ({ shape: r.ok ? shapeOf(tr.writes.get(i), this.pos) : null, reads: tr.reads.get(i) ?? new Set() }));
+    return { r, objs };
   }
 
   result(): ObjKinds {
@@ -181,15 +221,16 @@ export class ObjKindProbe {
       const kind = classify(this.runs.slice(k, k + 16), this.runs.slice(k + 16, k + 32), this.code);
       if (kind) kinds.set(n, kind);
     }
-    const custom = new Map<number, ObjKind>();
-    const sizes = (k: ObjKind) => !!(k.lo || k.hi || k.type);
+    const custom = new Map<number, ObjKind>(), drawsWith = new Map<number, [number, number]>();
     this.customs.forEach((c, i) => {
-      const k = this.nibblesAt + i * 64, at = (j: number) => this.runs.slice(k + j * 16, k + j * 16 + 16);
-      const ext = this.len2d >= 5 ? classify(at(0), at(1), this.code) ?? PLAIN : UNSIZED;
-      const set = classify(at(2), at(3), this.code) ?? PLAIN;
-      custom.set(c, sizes(ext) ? { ...ext, byte: 'ext' } : sizes(set) ? set : UNSIZED);
+      // (as addNibbles adds them: 16 runs each of the 5th byte's low and high nibble, then of the 3rd byte's)
+      const first = this.nibblesAt + i * 64, nibble = (j: number) => this.runs.slice(first + j * 16, first + j * 16 + 16);
+      const ext = this.len2d >= 5 ? classify(nibble(0), nibble(1), this.code) ?? PLAIN : UNSIZED;
+      const third = classify(nibble(2), nibble(3), this.code) ?? PLAIN;
+      custom.set(c, sizes(ext) ? { ...ext, byte: 'ext' } : sizes(third) ? third : UNSIZED);
+      drawsWith.set(c, this.atFirst.has(c) ? DRAW_TRIES[0] : DRAW_TRIES.find((_, j) => this.drewAt(c, j)) ?? DRAW_TRIES[0]);
     });
-    return { kinds, custom };
+    return { kinds, custom, drawsWith };
   }
 
   // what the result depends on: the single ROM bytes the object routines read (not the level load

@@ -802,7 +802,7 @@ export class LevelView {
         const sum = p && spriteProbeAt(p, s.x, s.y).summary;
         txt += `  · ${s.extra >= 2 ? 'Custom Sprite' : 'Sprite'} ${hex2(s.num)} ${app.spriteLabel(spriteId(s))}${sum ? ` (${sum})` : ''}`;
       }
-      else { const o = item as LevelObject; txt += `  · ${o.num ? 'Object ' + hex2(o.num) : 'Ext. object ' + hex2(o.ext)}${tag} ${app.objectName(o.num, o.ext)}${o.num ? ' size ' + hex2(o.size) : ''}`; }
+      else { const o = item as LevelObject; txt += `  · ${o.num ? 'Object ' + hex2(o.num) : 'Ext. object ' + hex2(o.ext)}${tag} ${app.objectName(o.num, o.ext)}${o.num ? ' size ' + hex2(app.sizedByte(o)) : ''}`; }
     }
     this.status.textContent = txt.replace(/^\s*·\s*/, '');
   }

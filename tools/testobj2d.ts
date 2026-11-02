@@ -70,7 +70,10 @@ NewNorm:
   LDY $57 : LDA #$25 : STA [$6B],y : LDA #$01 : STA [$6E],y   ; custom 02: tile 125
 + LDA $5A : CMP #$05 : BEQ .block
   LDA $5A : CMP #$06 : BEQ .row
-  JML $0DA53C
+  LDA $5A : CMP #$07 : BNE +
+  LDA $58 : BEQ +               ; custom 07: tile 125, only with a 5th byte other than 00
+  LDY $57 : LDA #$25 : STA [$6B],y : LDA #$01 : STA [$6E],y
++ JML $0DA53C
 .tiles: db $25,$26,$27        ; custom 06's types (what follows is code: no type 3)
 .block                        ; custom 05: a block of tile 125, 5th byte: low nibble width - 1, high height - 1
   LDA $6C : PHA : LDA $6F : PHA
@@ -159,12 +162,14 @@ check(objectLength2D(hooked) === 5, `once the hook is installed (the same ROM): 
 {
   const emu = new LevelEmulator(hooked); emu.boot();
   const lv = loadLevel(hooked, 0x105), l2 = hooked.r24(L2_PTRS + 0x105 * 3);
-  const { kinds, custom } = new ObjKindProbe(emu, lv, l2).result();
+  const { kinds, custom, drawsWith } = new ObjKindProbe(emu, lv, l2).result();
   const k5 = custom.get(5), k6 = custom.get(6);
   const txt = (k?: ObjKind) => JSON.stringify(k);
   check(k5?.byte === 'ext' && k5.lo === 'w' && k5.hi === 'h' && !k5.type, `custom 05: 5th byte low nibble width, high height (${txt(k5)})`);
   check(k6?.byte === 'ext' && k6.type === 'hi' && k6.count === 3 && k6.lo === 'w', `custom 06: 3 types in the 5th byte's high nibble, low nibble width (${txt(k6)})`);
   check(txt(custom.get(2)) === txt(UNSIZED) && !custom.has(1) && !custom.has(3), `custom 02 no size, 01 and 03 no kind (${txt(custom.get(2))})`);
+  check(txt(custom.get(7)) === txt(UNSIZED) && drawsWith.get(7)?.join() === '34,34' && drawsWith.get(2)?.join() === '0,0',
+    `custom 07 (draws only with a 5th byte other than 00): no size, listed with the bytes it drew with (${drawsWith.get(7)})`);
   check(kinds.get(0x05) === undefined && kinds.get(0x2d)?.byte === undefined, 'the standard objects as before');
 
   // its boxes: as the 5th byte says
@@ -240,9 +245,9 @@ check(objectLength2D(hooked) === 5, `once the hook is installed (the same ROM): 
 
   // the bars' kinds (#149): no size (the 5th byte is entrance info), so listed as before (with both bytes 00)
   const t0 = performance.now();
-  const { custom } = new ObjKindProbe(emu, lv, rom.r24(L2_PTRS + 0x105 * 3)).result();
+  const { custom, drawsWith } = new ObjKindProbe(emu, lv, rom.r24(L2_PTRS + 0x105 * 3)).result();
   const sized = [...custom].filter(([, k]) => JSON.stringify(k) !== JSON.stringify(UNSIZED)).map(([c]) => c.toString(16));
-  check(custom.size > 0 && !sized.length, `the custom numbers' kinds: none sized (${custom.size} kinds, sized: ${sized.join(' ')}; ${Math.round(performance.now() - t0)} ms)`);
+  check(custom.size > 0 && !sized.length && [...drawsWith.values()].every((b) => b.join() === '0,0'), `the custom numbers' kinds: none sized (${custom.size} kinds, sized: ${sized.join(' ')}; ${Math.round(performance.now() - t0)} ms)`);
 
   // Lunar Magic's level file with a midway bar imports with it (13B with 2D 00 put first)
   const mwl = files['export/levels/level 13B.mwl'];

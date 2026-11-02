@@ -45,7 +45,7 @@ A Direct Map16 object, or a tile of a prefab, that depends on a flag of Lunar Ma
 _Avoid_: CDM16 (in the UI), switch object
 
 **Resizable object**:
-A standard object of the game (01–3F): its size (or type) is part of the object, so one object covers a whole area. The picker's Objects tab lists them under "Resizable".
+A standard object of the game (01–3F): its size (or type) is part of the object, so one object covers a whole area. The picker's Objects tab lists them under "Resizable". A custom object is resized the same way where emulation shows that the nibbles of one of its bytes size it.
 _Avoid_: standard object (in the UI), normal object
 
 **Fixed-size object**:
@@ -53,7 +53,7 @@ An extended object (object 00 with its number as an extra byte, 10–FF in the p
 _Avoid_: extended object (for the picker's grouping), ext object
 
 **Custom object**:
-One of object 2D's numbers 00–FF (its 4th byte) where a hook in the ROM – ObjecTool's, the Retry System's midway bars – reads object 2D as 5 bytes: the 4th and 5th bytes are its **extension** (Lunar Magic's "Extension"), the 5th a setting. Whether 2D has them is learned by emulation (obj2d.ts); without such a hook 2D is a resizable object of 3 bytes. The picker's Objects tab lists under "Custom" the numbers that draw tiles or, drawing none, change RAM when the level loads. ObjecTool's custom extended objects (98–FF) are fixed-size objects.
+One of object 2D's numbers 00–FF (its 4th byte) where a hook in the ROM – ObjecTool's, the Retry System's midway bars – reads object 2D as 5 bytes: the 4th and 5th bytes are its **extension** (Lunar Magic's "Extension"), the 5th a setting. Which of its bytes sizes it (or selects its type) – the 5th, else the 3rd, else none (the midway bars) – is learned by emulation per custom number (objkinds.ts). Whether 2D has them is learned by emulation (obj2d.ts); without such a hook 2D is a resizable object of 3 bytes. The picker's Objects tab lists under "Custom" the numbers that draw tiles or, drawing none, change RAM when the level loads. ObjecTool's custom extended objects (98–FF) are fixed-size objects.
 _Avoid_: custom normal object (ObjecTool's name), user defined object (Lunar Magic's), custom midway (only the Retry System's)
 
 **Object name**:

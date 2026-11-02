@@ -237,8 +237,8 @@ export class LevelModel {
     kindOf: (o: LevelObject) => ObjKind | null = () => null): void {
     const { w, h } = this.objectLimits();
     this.host.edit(() => objs.forEach((o, i) => {
-      const r = keyResize({ x: o.x, y: o.y, size: sizedByte(kindOf(o), o) }, sized[i], boxes(o), far, w, h);
-      if (r) { o.x = r.x; o.y = r.y; setSizedByte(kindOf(o), o, r.size); }
+      const kind = kindOf(o), r = keyResize({ x: o.x, y: o.y, size: sizedByte(kind, o) }, sized[i], boxes(o), far, w, h);
+      if (r) { o.x = r.x; o.y = r.y; setSizedByte(kind, o, r.size); }
     }));
   }
 
