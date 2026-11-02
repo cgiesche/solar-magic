@@ -22,6 +22,11 @@ import { parseLmObjects, sampleLevel, mwlSections } from '../src/core/mwl.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { effectLoad, ramEffect } from '../src/core/objeffects.ts';
 import { renderObjectThumbs } from '../src/core/objthumbs.ts';
+import { ObjKindProbe, UNSIZED, sizedByte, withSizedByte, resizeObjectSize, type ObjKind } from '../src/core/objkinds.ts';
+import { SizeProbe, drivers } from '../src/core/objresize.ts';
+import { EditSession } from '../src/core/editsession.ts';
+import { LevelModel } from '../src/core/levelmodel.ts';
+import { L2_PTRS } from '../src/core/level.ts';
 import { editorImage } from './fixture.ts';
 
 await loadAsar();
@@ -63,7 +68,28 @@ NewNorm:
   LDA #$01 : STA $7FA400      ; custom 01: a flag other code reads
 + LDA $5A : CMP #$02 : BNE +
   LDY $57 : LDA #$25 : STA [$6B],y : LDA #$01 : STA [$6E],y   ; custom 02: tile 125
-+ JML $0DA53C
++ LDA $5A : CMP #$05 : BEQ .block
+  LDA $5A : CMP #$06 : BEQ .row
+  JML $0DA53C
+.tiles: db $25,$26,$27        ; custom 06's types (what follows is code: no type 3)
+.block                        ; custom 05: a block of tile 125, 5th byte: low nibble width - 1, high height - 1
+  LDA $6C : PHA : LDA $6F : PHA
+  LDA $58 : LSR #4 : STA $01
+  LDY $57
+.r
+  PHY : LDA $58 : AND #$0F : TAX
+- LDA #$25 : STA [$6B],y : LDA #$01 : STA [$6E],y : INY : DEX : BPL -
+  PLY : TYA : CLC : ADC #$10 : TAY : BCC +
+  INC $6C : INC $6F
++ DEC $01 : BPL .r
+  PLA : STA $6F : PLA : STA $6C
+  JML $0DA53C
+.row                          ; custom 06: a row of tile 125 + type (5th byte: high nibble), low nibble width - 1
+  LDA $58 : LSR #4 : TAX : LDA.l .tiles,x : STA $02
+  LDA $58 : AND #$0F : TAX
+  LDY $57
+- LDA $02 : STA [$6B],y : LDA #$01 : STA [$6E],y : INY : DEX : BPL -
+  JML $0DA53C
 `;
 const hooked = new Rom(await editorImage());
 check(objectLength2D(hooked) === 3, 'before the hook: 3 bytes');
@@ -128,6 +154,46 @@ check(objectLength2D(hooked) === 5, `once the hook is installed (the same ROM): 
   check(fx.join() === ',sets $7FA400 bit 0,', `effects: custom 01 sets a flag, 00 and 03 nothing (${fx})`);
 }
 
+// the kinds of its custom numbers (#149): 05 sized by the nibbles of its 5th byte, 06 with types in its high nibble; 02
+// (a single tile) has no size, 01 (draws nothing) no kind
+{
+  const emu = new LevelEmulator(hooked); emu.boot();
+  const lv = loadLevel(hooked, 0x105), l2 = hooked.r24(L2_PTRS + 0x105 * 3);
+  const { kinds, custom } = new ObjKindProbe(emu, lv, l2).result();
+  const k5 = custom.get(5), k6 = custom.get(6);
+  const txt = (k?: ObjKind) => JSON.stringify(k);
+  check(k5?.byte === 'ext' && k5.lo === 'w' && k5.hi === 'h' && !k5.type, `custom 05: 5th byte low nibble width, high height (${txt(k5)})`);
+  check(k6?.byte === 'ext' && k6.type === 'hi' && k6.count === 3 && k6.lo === 'w', `custom 06: 3 types in the 5th byte's high nibble, low nibble width (${txt(k6)})`);
+  check(txt(custom.get(2)) === txt(UNSIZED) && !custom.has(1) && !custom.has(3), `custom 02 no size, 01 and 03 no kind (${txt(custom.get(2))})`);
+  check(kinds.get(0x05) === undefined && kinds.get(0x2d)?.byte === undefined, 'the standard objects as before');
+
+  // its boxes: as the 5th byte says
+  const probe = new SizeProbe(emu, lv, l2);
+  const spec = (ext5: number) => ({ num: 0x2d, ext: 0, size: 0, extension: [5, ext5] });
+  const box = (v: number) => probe.box(withSizedByte(k5, spec(0x11), v));
+  probe.probe(Array.from({ length: 0x100 }, (_, v) => withSizedByte(k5, spec(0x11), v)));
+  const b = box(0x21);
+  check(!!b && b.x1 - b.x0 === 1 && b.y1 - b.y0 === 2, `custom 05 at 21: 2×3 tiles (${JSON.stringify(b)})`);
+  const d = drivers(k5, 0x11, box);
+  check(d.x === 'lo' && d.y === 'hi', `its edges: low nibble x, high y (${d.x}/${d.y})`);
+
+  // resized in the level: by keys and by a drag, its 5th byte changes, its 3rd not
+  const rom = new Rom(hooked.data.slice()), es = new EditSession(rom);
+  es.open(0x105);
+  const m = new LevelModel({
+    rom: () => rom, level: () => es.level, edit: (f, rerender) => es.editLevel(f, rerender), geometry: () => ({ l1: { width: 512, height: 27 }, l2: null, vertical: false }),
+    beginEdit: () => es.beginLevelEdit(), selectionChanged: () => {}, switchMode: () => {},
+  });
+  m.insertAt(0x20, 4, { kind: 'obj', num: 0x2d, ext: 0, size: 0, extension: [5, 0x11] });
+  const o = es.level.objects.at(-1)!, kindOf = (q: LevelObject) => (q.num === 0x2d && q.extension?.[0] === 5 ? k5! : null);
+  m.resizeObjects([o], [resizeObjectSize(k5, sizedByte(k5, o), 1, 2)], () => box, false, kindOf);
+  const now = () => m.currentObjects().find((q) => q.uid === o.uid)!;
+  check(now().extension?.join() === '5,50' && now().size === 0 && now().x === 0x20, `keys: width +1, height +2: 5th byte 32 (${now().extension}, ${now().size})`);
+  const drag = m.beginResize([now()], now(), { hx: 1, hy: 1 }, () => d, () => box, kindOf)!;
+  drag.aim(0x20 + 4, 4 + 1); drag.end();
+  check(now().extension?.join() === '5,20' && now().size === 0 && now().x === 0x20, `drag the corner to 5×2: 5th byte 14 (${now().extension}, ${now().size})`);
+}
+
 // Lunar Magic's level files: 2D is always 5 bytes there; kept where the ROM reads it so, else left out with a note
 {
   const d = new Uint8Array([0x40, 0xd3, 0x12, 0x07, 0x81, 0x00, 0x14, 0x00, 0xff]);
@@ -171,6 +237,12 @@ check(objectLength2D(hooked) === 5, `once the hook is installed (the same ROM): 
   const bars = [...Array.from({ length: 0x20 }, (_, c) => c), 0x41, 0x50, 0x51].map((c) => c.toString(16).padStart(2, '0')).join(' ');
   check(keys(false) === bars && thumbs.filter((t) => !t.effect).every((t) => t.m16.join() === '53,56'), `listed with the tape: ${keys(false)}`);
   check(keys(true) === '40', `listed for what it does: ${keys(true)}`);
+
+  // the bars' kinds (#149): no size (the 5th byte is entrance info), so listed as before (with both bytes 00)
+  const t0 = performance.now();
+  const { custom } = new ObjKindProbe(emu, lv, rom.r24(L2_PTRS + 0x105 * 3)).result();
+  const sized = [...custom].filter(([, k]) => JSON.stringify(k) !== JSON.stringify(UNSIZED)).map(([c]) => c.toString(16));
+  check(custom.size > 0 && !sized.length, `the custom numbers' kinds: none sized (${custom.size} kinds, sized: ${sized.join(' ')}; ${Math.round(performance.now() - t0)} ms)`);
 
   // Lunar Magic's level file with a midway bar imports with it (13B with 2D 00 put first)
   const mwl = files['export/levels/level 13B.mwl'];

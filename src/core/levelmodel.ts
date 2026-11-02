@@ -6,6 +6,7 @@
 import type { Rom } from './rom.ts';
 import { type Level, type LevelObject, type LevelSprite, newUid, spriteBytes, spriteSizes } from './level.ts';
 import { objectLength2D, fitExtension } from './obj2d.ts';
+import { sizedByte, withSizedByte, setSizedByte, type ObjKind } from './objkinds.ts';
 import { keyResize, aimResize, grabFor, type Box, type Drivers, type Grab } from './objresize.ts';
 import { PREFAB_EXT } from './prefabs.ts';
 import { isDm16 } from './cdm16.ts';
@@ -229,13 +230,15 @@ export class LevelModel {
     });
   }
 
-  // objs get the settings bytes sized (one each): the left and top edges stay where they are, with far the right and
-  // bottom ones, by the objects' boxes at each size (an object at the level's edge that would have to leave it stays)
-  resizeObjects(objs: LevelObject[], sized: number[], boxes: (o: LevelObject) => (size: number) => Box | null | undefined, far: boolean): void {
+  // objs get the settings bytes sized (one each; the byte each one's kind names, sizedByte): the left and top edges
+  // stay where they are, with far the right and bottom ones, by the objects' boxes at each size (an object at the
+  // level's edge that would have to leave it stays)
+  resizeObjects(objs: LevelObject[], sized: number[], boxes: (o: LevelObject) => (size: number) => Box | null | undefined, far: boolean,
+    kindOf: (o: LevelObject) => ObjKind | null = () => null): void {
     const { w, h } = this.objectLimits();
     this.host.edit(() => objs.forEach((o, i) => {
-      const r = keyResize(o, sized[i], boxes(o), far, w, h);
-      if (r) { o.x = r.x; o.y = r.y; o.size = r.size; }
+      const r = keyResize({ x: o.x, y: o.y, size: sizedByte(kindOf(o), o) }, sized[i], boxes(o), far, w, h);
+      if (r) { o.x = r.x; o.y = r.y; setSizedByte(kindOf(o), o, r.size); }
     }));
   }
 
@@ -334,14 +337,15 @@ export class LevelModel {
   }
 
   // resizing objs by the handle grabbed on object grabbed (handle: the edges at the mouse), the drivers and boxes of each
-  // object's sizes given (emulated by the host): one level edit from here to its end; null when the grabbed
-  // object's drivers move none of the handle's edges
+  // object's sizes given (emulated by the host; size: the byte its kind names, sizedByte): one level edit from here to
+  // its end; null when the grabbed object's drivers move none of the handle's edges
   beginResize(objs: LevelObject[], grabbed: LevelObject, handle: Grab, drivers: (o: LevelObject) => Drivers,
-    boxes: (o: LevelObject) => (size: number) => Box | null | undefined): ResizeDrag | null {
+    boxes: (o: LevelObject) => (size: number) => Box | null | undefined, kindOf: (o: LevelObject) => ObjKind | null = () => null): ResizeDrag | null {
     const uid = grabbed.uid;
     let grab = grabFor(handle, drivers(grabbed));
     if (!grab.hx && !grab.hy) return null;
-    const orig = new Map(objs.map((o) => [o.uid, { x: o.x, y: o.y, size: o.size, drivers: drivers(o) }]));
+    const byte = (o: LevelObject) => sizedByte(kindOf(o), o);
+    const orig = new Map(objs.map((o) => [o.uid, { x: o.x, y: o.y, size: byte(o), drivers: drivers(o) }]));
     const edit = this.host.beginEdit();
     let last = '', changed = false;
     return {
@@ -349,7 +353,7 @@ export class LevelModel {
       get grab() { return grab; },
       get changed() { return changed; },
       learned: () => {
-        for (const o of this.selectedObjects()) { const or = orig.get(o.uid); if (or) or.drivers = drivers({ ...o, size: or.size }); }
+        for (const o of this.selectedObjects()) { const or = orig.get(o.uid); if (or) or.drivers = drivers(withSizedByte(kindOf(o), o, or.size)); }
         const g = orig.get(uid);
         if (g) grab = grabFor(handle, g.drivers);
       },
@@ -367,12 +371,12 @@ export class LevelModel {
         const dx = (g.hx === 1 ? gr.box.x1 : gr.box.x0) - ge.x, dy = (g.hy === 1 ? gr.box.y1 : gr.box.y0) - ge.y;
         for (const o of live) {
           const e0 = o === held ? ge : edges(o), r = o === held ? gr : e0 && aim(o, e0.x + dx, e0.y + dy);
-          if (r) { o.x = r.x; o.y = r.y; o.size = r.size; }
+          if (r) { o.x = r.x; o.y = r.y; setSizedByte(kindOf(o), o, r.size); }
         }
-        const key = live.map((o) => `${o.x},${o.y},${o.size}`).join(' ');
+        const key = live.map((o) => `${o.x},${o.y},${byte(o)}`).join(' ');
         if (key === last) return false;
         last = key;
-        changed = live.some((o) => { const or = orig.get(o.uid)!; return o.x !== or.x || o.y !== or.y || o.size !== or.size; });
+        changed = live.some((o) => { const or = orig.get(o.uid)!; return o.x !== or.x || o.y !== or.y || byte(o) !== or.size; });
         return true;
       },
       end: () => { if (changed) edit.commit(); else edit.cancel(); },

@@ -567,7 +567,7 @@ export class LevelView {
     if (ho) {
       const objs = app.model.selectedObjects().filter((o) => app.resizable(o));
       app.probeSizes(objs);
-      const resize = app.model.beginResize(objs, ho.o, ho.grab, (o) => app.resizeDrivers(o), (o) => app.sizeBoxes(o));
+      const resize = app.model.beginResize(objs, ho.o, ho.grab, (o) => app.resizeDrivers(o), (o) => app.sizeBoxes(o), (o) => app.kindOf(o));
       if (resize) {
         this.drag = { kind: 'resize', resize };
         this.updateCursor(px, py, -1);
@@ -844,9 +844,9 @@ export class LevelView {
   resizeStatus(): void {
     const d = this.drag;
     if (d?.kind !== 'resize') return;
-    const o = this.app.model.selectedObjects().find((o) => o.uid === d.resize.uid), b = o && this.app.sizeBoxes(o)(o.size);
+    const o = this.app.model.selectedObjects().find((o) => o.uid === d.resize.uid), size = o && this.app.sizedByte(o), b = o && this.app.sizeBoxes(o)(size!);
     if (!o || !b) return;
-    this.status.textContent = `Resizing: size ${hex2(o.size)} · ${b.x1 - b.x0 + 1}×${b.y1 - b.y0 + 1} tiles`;
+    this.status.textContent = `Resizing: size ${hex2(size!)} · ${b.x1 - b.x0 + 1}×${b.y1 - b.y0 + 1} tiles`;
   }
   // what a click would do, shown by the cursor
   updateCursor(px: number, py: number, top: number): void {

@@ -4,6 +4,7 @@ import { makeProjectId } from '../core/projectid.ts';
 import { Scheduler } from '../core/scheduler.ts';
 import { ViewSettings } from '../core/viewsettings.ts';
 import { Rom } from '../core/rom.ts';
+import { OBJ_2D } from '../core/obj2d.ts';
 import { LevelEmulator, type LevelRender, type LevelOverride, type Animated } from '../core/levelemu.ts';
 import {
   type Level, type LevelObject, type LevelSprite, type ScreenExit, loadLevel, spriteLoadOrder, serializeSprites, serializeLevelSprites, spriteId,
@@ -41,7 +42,7 @@ import { SecondaryEntrances, NO_FREE_ENTRANCE, entranceTables, entranceMarkers, 
 import type { EditOptions } from '../core/romedit.ts';
 import { EditSession, type LevelEdit, type StepResult } from '../core/editsession.ts';
 import { LevelModel, isBrushMode, type EditMode, type PickedItem, type Placement } from '../core/levelmodel.ts';
-import { resizeObjectSize, type ObjKind, type ObjKinds, type KindLevel } from '../core/objkinds.ts';
+import { resizeObjectSize, sizedByte, withSizedByte, UNSIZED, type ObjKind, type ObjKinds, type KindLevel } from '../core/objkinds.ts';
 import { sizeKey, sizeParts, partSizes, namedDrivers, ObjectBoxes, StepQueue, type Box, type Drivers, type SizeSpec } from '../core/objresize.ts';
 import { type JumpArc } from '../core/jumparcs.ts';
 import { scanKey, type ScanLevel, type ScanResult } from '../core/levelscan.ts';
@@ -1235,7 +1236,7 @@ export class App {
   // The object picker's thumbnails of specs in the level as edited (objthumbs.ts): undefined while they are
   // learned in the probe worker ('thumbs' when done)
   objectThumbs(specs: ObjSpec[]): ObjThumb[] | undefined {
-    const rom = this.rom, lv = this.level, keys = new Map(specs.map((s) => [s, objKey(s, this.objectKind(s.num))]));
+    const rom = this.rom, lv = this.level, keys = new Map(specs.map((s) => [s, objKey(s, this.kindOf(s))]));
     const keyOf = (s: ObjSpec) => keys.get(s)!, level = { ...lv, header: { ...lv.header } };
     return this.probes.learn<ObjThumb[]>(thumbsKey(lv, specs, keyOf), { kind: 'thumbs', level, specs, keys: specs.map(keyOf) },
       { input: thumbsInput(rom, lv), lane: 'thumbs', replace: true, label: 'Object thumbnails', done: this.thumbsLearned });
@@ -1268,11 +1269,22 @@ export class App {
     if (num === 0) return null;
     return this.tilesetKinds()?.kinds.get(num) ?? null;
   }
+  // kind of an object (or spec) in the current tileset: a custom number's of object 2D with an extension (UNSIZED for
+  // one that draws nothing), else objectKind; null while unknown
+  kindOf(o: { num: number; extension?: number[] }): ObjKind | null {
+    if (o.num !== OBJ_2D || !o.extension) return this.objectKind(o.num);
+    const k = this.tilesetKinds();
+    return k && (k.custom.get(o.extension[0]) ?? UNSIZED);
+  }
+  // the byte of the object its kind names (the 3rd, or a custom number's 5th)
+  sizedByte(o: LevelObject): number {
+    return sizedByte(this.kindOf(o), o);
+  }
 
   // (empty while unknown or when they could not be found: objects are treated as plain then)
   tilesetKinds(ts = this.level.header.tileset): ObjKinds | null {
     const k = this.probes.kinds(ts);
-    return k === undefined ? null : k ?? { kinds: new Map() };
+    return k === undefined ? null : k ?? { kinds: new Map(), custom: new Map() };
   }
 
   objectBounds(o: LevelObject): { x0: number; y0: number; x1: number; y1: number } {
@@ -1651,9 +1663,9 @@ export class App {
   private resizeStep(dw: number, dh: number, far: boolean, retry: () => void): boolean {
     const objs = this.model.selectedObjects().filter((o) => this.resizable(o));
     if (!objs.length) return true;
-    const sized = objs.map((o) => resizeObjectSize(this.objectKind(o.num), o.size, dw, dh));
-    if (!this.askSizes(objs.flatMap((o, i) => [this.sizeSpec(o, o.size), this.sizeSpec(o, sized[i])]), retry)) return false;
-    this.model.resizeObjects(objs, sized, (o) => this.sizeBoxes(o), far);
+    const sized = objs.map((o) => resizeObjectSize(this.kindOf(o), sizedByte(this.kindOf(o), o), dw, dh));
+    if (!this.askSizes(objs.flatMap((o, i) => [this.sizeSpec(o), this.sizeSpec(o, sized[i])]), retry)) return false;
+    this.model.resizeObjects(objs, sized, (o) => this.sizeBoxes(o), far, (o) => this.kindOf(o));
     return true;
   }
 
@@ -1681,17 +1693,20 @@ export class App {
   private askSizes(specs: SizeSpec[], done?: () => void): boolean {
     return this.objectBoxes().ask(specs, done);
   }
-  private sizeSpec(o: LevelObject, size: number): SizeSpec {
-    return { num: o.num, ext: o.ext, size, tile: o.tile, extension: o.extension };
+  // the object as probed, the byte its kind names (sizedByte) set to size (as it is: unchanged)
+  private sizeSpec(o: LevelObject, size?: number): SizeSpec {
+    const s: SizeSpec = { num: o.num, ext: o.ext, size: o.size, tile: o.tile, extension: o.extension };
+    return size === undefined ? s : withSizedByte(this.kindOf(o), s, size);
   }
-  // the object's box at a size (relative to its origin), undefined while not probed
+  // the object's box at a size (of the byte its kind names; relative to its origin), undefined while not probed
   sizeBoxes(o: LevelObject): (size: number) => Box | null | undefined {
     const boxes = this.objectBoxes();
     return (size) => boxes.box(this.sizeSpec(o, size));
   }
   // every size the parts of the object's settings byte can take
   private allSizes(o: LevelObject): SizeSpec[] {
-    return sizeParts(this.objectKind(o.num)).flatMap((p) => partSizes(o.size, p).map((s) => this.sizeSpec(o, s)));
+    const kind = this.kindOf(o);
+    return sizeParts(kind).flatMap((p) => partSizes(sizedByte(kind, o), p).map((s) => this.sizeSpec(o, s)));
   }
   // asks for all sizes of the objects now (a drag starts; 'sizes' when they come)
   probeSizes(objs: LevelObject[]): void {
@@ -1700,7 +1715,7 @@ export class App {
   // which part of the settings byte sizes which axis of the object: as emulated once its sizes are known,
   // before (and when their job failed) as its kind says (they are probed in the background then, 'sizes' when known)
   resizeDrivers(o: LevelObject): Drivers {
-    const kind = this.objectKind(o.num), d = this.objectBoxes().drivers(kind, this.sizeSpec(o, o.size));
+    const kind = this.kindOf(o), d = this.objectBoxes().drivers(kind, this.sizeSpec(o));
     if (d) return d;
     this.prefetchSizes();
     return namedDrivers(kind);
@@ -1709,7 +1724,7 @@ export class App {
   private prefetchSizes(): void {
     const objs = this.model.mode === 'l1' || this.model.mode === 'l2' ? this.model.selectedObjects().filter((o) => this.resizable(o)).slice(0, 32) : [];
     if (!objs.length) return;
-    const key = `${this.sizeLevel().key}/${objs.map((o) => `${o.uid}.${o.size}`).join()}`;
+    const key = `${this.sizeLevel().key}/${objs.map((o) => `${o.uid}.${o.size}.${o.extension?.join(',') ?? ''}`).join()}`;
     if (this.sizesAsked === key) return;
     this.sizesAsked = key;
     if (this.askSizes(objs.flatMap((o) => this.allSizes(o)), () => (this.sizesAsked = null))) this.sizesAsked = null;

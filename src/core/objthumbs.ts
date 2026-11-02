@@ -7,7 +7,7 @@ import { readOffset, type LevelEmulator, type LevelRender, type LevelOverride } 
 import { type Level, type LevelObject, newUid, levelRows } from './level.ts';
 import { renderLevel, layerGeom, renderLayerTiles } from './render.ts';
 import { MAP_BASE, map16Tile } from './ram.ts';
-import { objectVariant, type ObjKind } from './objkinds.ts';
+import { objectVariant, sizedByte, type ObjKind } from './objkinds.ts';
 import { levelSlots, layerSlots } from './gfxslots.ts';
 import { gfxFilesHash } from './gfxpages.ts';
 import { levelAnimHash } from './exanim.ts';
@@ -20,12 +20,12 @@ import { EXT_OBJ_TABLE } from './prefabs.ts';
 // extension: object 2D's bytes after its 3 where the ROM reads them (obj2d.ts), its custom number first
 export interface ObjSpec { num: number; ext: number; size: number; extension?: number[] }
 
-// sub-objects (see objectVariants) get a key per type, object 2D with an extension one per custom number
+// sub-objects (see objectVariants) get a key per type, object 2D with an extension one per custom number (and type;
+// kind: the custom number's)
 export function objKey(s: { num: number; ext: number; size: number; extension?: number[] }, kind: ObjKind | null): string {
   if (s.num === 0) return `e${s.ext}`;
-  if (s.extension) return `c${s.extension[0]}`;
-  const v = objectVariant(kind, s.size);
-  return v < 0 ? `s${s.num}` : `s${s.num}.${v}`;
+  const v = objectVariant(kind, sizedByte(kind, s)), at = s.extension ? `c${s.extension[0]}` : `s${s.num}`;
+  return v < 0 ? at : `${at}.${v}`;
 }
 
 // a rendered object: its pixels, the distinct Map16 tiles it produced and where (cells: x, y of a tile's top left

@@ -8,7 +8,7 @@ import { OV_L1, MAP_BASE } from './levelemu.ts';
 import { layerGeom } from './render.ts';
 import { encodePrimaryHeader, serializeObjects, newUid, type LevelObject } from './level.ts';
 import { objectLength2D, fitExtension } from './obj2d.ts';
-import type { ObjKind, KindLevel } from './objkinds.ts';
+import { sizedByte, withSizedByte, type ObjKind, type KindLevel } from './objkinds.ts';
 
 // tiles covered, relative to the object's origin (or absolute, where said)
 export interface Box { x0: number; y0: number; x1: number; y1: number }
@@ -104,6 +104,7 @@ export function* sizesJob(probe: SizeProbe, specs: SizeSpec[]): Generator<void, 
 }
 
 // ---- which part of the settings byte sizes which axis ----
+// (the settings byte: the one the object's kind names, objkinds.ts sizedByte – the 3rd, or a custom number's 5th)
 
 // a nibble, or the whole byte (a width up to 255)
 export type Part = 'lo' | 'hi' | 'byte';
@@ -275,13 +276,15 @@ export class ObjectBoxes {
 
   // which part sizes which axis of the object (o: as it is now) for its kind: as the boxes of all the sizes its parts
   // can take say, those the kind names when their job failed; undefined while not all are known
+  // (the byte the kind names: sizedByte)
   drivers(kind: ObjKind | null | undefined, o: SizeSpec): Drivers | undefined {
-    const sizes = sizeParts(kind).flatMap((p) => partSizes(o.size, p)).map((size) => ({ ...o, size }));
+    const at = (v: number) => withSizedByte(kind, o, v), now = sizedByte(kind, o);
+    const sizes = sizeParts(kind).flatMap((p) => partSizes(now, p)).map(at);
     if (sizes.some((s) => !this.boxes.has(sizeKey(s)))) return undefined;
     if (sizes.some((s) => this.failed.has(sizeKey(s)))) return namedDrivers(kind);
     const key = `${sizeKey(o)}:${JSON.stringify(kind)}`;
     let d = this.memo.get(key);
-    if (!d) this.memo.set(key, (d = drivers(kind, o.size, (size) => this.box({ ...o, size }))));
+    if (!d) this.memo.set(key, (d = drivers(kind, now, (v) => this.box(at(v)))));
     return d;
   }
 }

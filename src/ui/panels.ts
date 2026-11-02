@@ -8,7 +8,7 @@ import { packageObjectName, objectTooltip } from '../core/objtext.ts';
 import { boxLabel } from '../core/objboxes.ts';
 import { objectBoxCanvas } from './objbox.ts';
 import { NAME_MAX, nameOf, namesOf, nameGroups, connectedRect, tileRanges, type NameKind } from '../core/usernames.ts';
-import { objectVariant, withObjectVariant, type ObjKind } from '../core/objkinds.ts';
+import { objectVariant, withObjectVariant, sizedByte, withSizedByte, setSizedByte, type ObjKind } from '../core/objkinds.ts';
 import { thumbCanvas } from './thumbs.ts';
 import { objKey, type ObjSpec, type ObjThumb } from '../core/objthumbs.ts';
 import { fillPixels, fitScale, sized, previewOnHover, previewSheet, hidePickerPreview, PREVIEW_BELOW, type LegendRow } from './pickerview.ts';
@@ -243,8 +243,9 @@ export class Picker {
         item = { kind: 'obj', num: 0, ext: o.ext, size: 0 };
         this.tab = 'obj';
       } else {
-        const kind = app.objectKind(o.num);
-        item = { kind: 'obj', num: o.num, ext: 0, size: withObjectVariant(kind, 0x11, Math.max(0, objectVariant(kind, o.size))), ...(o.extension ? { extension: [...o.extension] } : {}) };
+        const kind = app.kindOf(o), t = Math.max(0, objectVariant(kind, sizedByte(kind, o)));
+        item = { kind: 'obj', ...kind?.byte === 'ext' && o.extension ? this.customSpec(o.extension[0], t)
+          : { num: o.num, ext: 0, size: withObjectVariant(kind, 0x11, t), ...(o.extension ? { extension: [...o.extension] } : {}) } };
         this.tab = 'obj';
       }
     }
@@ -561,7 +562,7 @@ export class Picker {
   }
 
   // standard objects (with their types), extended objects 10–FF and, where the ROM reads object 2D with an
-  // extension (obj2d.ts), its custom numbers 00–FF instead of a plain 2D
+  // extension (obj2d.ts), its custom numbers 00–FF instead of a plain 2D (with their types)
   specs(): ObjSpec[] {
     const s: ObjSpec[] = [];
     const len2d = objectLength2D(this.app.rom);
@@ -572,8 +573,20 @@ export class Picker {
       for (let t = 0; t < k.count; t++) s.push({ num: n, ext: 0, size: withObjectVariant(k, 0x11, t) });
     }
     for (let e = 0x10; e < 0x100; e++) s.push({ num: 0, ext: e, size: 0 });
-    if (len2d > 3) for (let c = 0; c < 0x100; c++) s.push({ num: OBJ_2D, ext: 0, size: 0, extension: Array.from({ length: len2d - 3 }, (_, i) => (i ? 0 : c)) });
+    if (len2d > 3) {
+      for (let c = 0; c < 0x100; c++) {
+        const k = this.app.kindOf({ num: OBJ_2D, extension: [c] });
+        for (let t = 0; t < Math.max(1, k?.type ? k.count : 0); t++) s.push(this.customSpec(c, t));
+      }
+    }
     return s;
+  }
+  // custom number c of object 2D as listed (of type t): as a standard object at 11 where its kind names a byte that
+  // sizes it, else with both bytes 00
+  private customSpec(c: number, t: number): ObjSpec {
+    const len2d = objectLength2D(this.app.rom), base = { num: OBJ_2D, ext: 0, size: 0, extension: Array.from({ length: len2d - 3 }, (_, i) => (i ? 0 : c)) };
+    const k = this.app.kindOf(base);
+    return k && (k.lo || k.hi || k.type) ? withSizedByte(k, base, withObjectVariant(k, 0x11, t)) : base;
   }
 
   // the thumbnails as known now; whether they changed
@@ -609,10 +622,10 @@ export class Picker {
     const out = [];
     for (const s of this.specs()) {
       if (section !== (s.extension ? 'custom' : s.num === 0 ? 'ext' : 'obj')) continue;
-      const kind = app.objectKind(s.num), key = objKey(s, kind);
-      const vt = s.extension ? -1 : objectVariant(kind, s.size);
-      const name = s.extension ? `Custom object ${hex2(s.extension[0])}` : app.objectName(s.num, s.ext) + (vt >= 0 ? ` – type ${vt.toString(16).toUpperCase()}` : '');
-      const label = s.extension ? `${hex2(s.num)}.${hex2(s.extension[0])}` : s.num ? hex2(s.num) + (vt >= 0 ? `.${vt.toString(16).toUpperCase()}` : '') : hex2(s.ext);
+      const kind = app.kindOf(s), key = objKey(s, kind);
+      const vt = objectVariant(kind, sizedByte(kind, s)), type = vt >= 0 ? vt.toString(16).toUpperCase() : '';
+      const name = (s.extension ? `Custom object ${hex2(s.extension[0])}` : app.objectName(s.num, s.ext)) + (type ? ` – type ${type}` : '');
+      const label = (s.extension ? `${hex2(s.num)}.${hex2(s.extension[0])}` : s.num ? hex2(s.num) : hex2(s.ext)) + (type ? `.${type}` : '');
       const tiles = this.thumbTiles.get(key) ?? [];
       const sum = tiles.length ? blockSummary(app, tiles) : [];
       const effect = this.effects.get(key), unhandled = this.unhandled.has(key);
@@ -857,7 +870,7 @@ export class Picker {
       for (const e of this.objectEntries(section)) {
         const { s, vt } = e;
         const sel = cur?.kind === 'obj' && cur.num === s.num && (s.num !== 0 || cur.ext === s.ext)
-          && (s.extension ? cur.extension?.[0] === s.extension[0] : objectVariant(app.objectKind(s.num), cur.size) === vt);
+          && (!s.extension || cur.extension?.[0] === s.extension[0]) && objectVariant(app.kindOf(s), sizedByte(app.kindOf(s), cur)) === vt;
         const th = e.th ? thumbAt(e.th) : null;
         // (custom numbers have no name of their own: renaming would rename object 2D)
         const renames = !s.extension, hint = renames ? '\nRight click: rename (F2)' : '';
@@ -1206,7 +1219,7 @@ export class Properties {
     // changes the object in the open level (see the sprite's)
     const m = app.model, upd = (f: (o: LevelObject) => void) => m.updateObject(o.uid, f);
     const idx = app.model.currentObjects().indexOf(o);
-    const ov = app.objectKind(o.num);
+    const ov = app.kindOf(o), byte = (o: LevelObject) => sizedByte(ov, o);
     const pf = isPlacedPrefab(o) ? readPrefab(app.rom, o.prefab!) : null;
     this.body.append(
       h('div', { class: 'prop-title' }, isPlacedPrefab(o)
@@ -1223,11 +1236,11 @@ export class Properties {
       ...this.condFields(isDm16(o) ? [o] : []),
       this.field('X', hexInput(o.x, 3, (v) => upd((o) => (o.x = v)), app.levelWidthTiles() - 1)),
       this.field('Y', hexInput(o.y, 3, (v) => upd((o) => (o.y = v)), app.levelHeightTiles() - 1)),
-      o.num !== 0 && ov?.type ? this.field('Type', hexInput(objectVariant(ov, o.size), 1, (v) => upd((o) => (o.size = withObjectVariant(ov, o.size, v))), ov.count - 1)) : '',
+      o.num !== 0 && ov?.type ? this.field('Type', hexInput(objectVariant(ov, byte(o)), 1, (v) => upd((o) => setSizedByte(ov, o, withObjectVariant(ov, byte(o), v))), ov.count - 1)) : '',
       o.num !== 0 ? this.field('Size (byte)', hexInput(o.size, 2, (v) => upd((o) => (o.size = v)))) : '',
       o.extension ? this.field('Extension', h('span', { title: "The object's bytes after its 3, read by the ROM's code for object 2D (Lunar Magic's Extension; the first is often a custom object's number)" },
         ...o.extension.map((b, i) => hexInput(b, 2, (v) => upd((o) => { if (o.extension) o.extension[i] = v; }))))) : '',
-      o.num !== 0 ? h('div', { class: 'hint' }, `${nibbleText(ov)} · Keys: + / - width, * / / height, Alt+arrows`) : '',
+      o.num !== 0 ? h('div', { class: 'hint' }, `${nibbleText(ov)}${ov?.byte === 'ext' ? ' (of the 5th byte, the extension\'s second)' : ''} · Keys: + / - width, * / / height, Alt+arrows`) : '',
     );
     // Map16 tiles of the object and their behaviour when hit from below (emulated)
     const tiles = app.objectMap16(o);
