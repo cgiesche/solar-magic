@@ -8,7 +8,8 @@
 // groups only with values not played before), moving all sprites plays no group again, and a kept result holds
 // the compact dependencies (RomDeps), not the record of the ROM bytes read. A check keeps all group results it used
 // for the next one, also more than the bound (#200). A check depends on the bytes read for the current value and the
-// suggestion only, not a rejected value's; two groups with the same layout share a result (#208).
+// suggestion only, not a rejected value's; two groups with the same layout share a result (#208). Without a suggestion
+// it depends on the bytes read for every value tried (#219).
 // Usage: node tools/testspritemem.ts [levels,hex]
 import { readFileSync } from 'node:fs';
 import { unzipSync } from 'fflate';
@@ -213,6 +214,25 @@ class Marked extends Counted {
     else if (groupResults.in(kept.reads) !== want) fail('00C reads: the check with kept groups depends on a rejected value');
     else console.log(`00C reads: ${want.split(',').length} of ${groupResults.marks.size} group results (current value and suggestion ${s.toString(16)}, ${tried} values rejected)`);
   }
+}
+
+// no value fits (only the values rejected above tried): the check depends on the bytes read for every value tried,
+// so a ROM change that lets one fit checks again and finds a suggestion (#219); when it plays the groups and when it
+// uses kept results
+{
+  const lv = loadLevel(rom, 0xc);
+  const ctx = { emu, level: 0xc, header: lv.header, bgPointer: bgOf(lv.layer2Pointer) };
+  const sprites: LevelSprite[] = [...lv.sprites, { uid: newUid(), num: 0xe0, x: 8, y: 0x14, extra: 0 }];
+  const all = [...candidates].reverse(), first = runJob(spriteMemJob(ctx, 0, all, sprites)).suggestion;
+  const values = first === null ? [] : all.slice(0, all.indexOf(first)).filter((v) => v !== 0);
+  const groupResults = new Marked('00C none fits');
+  const played = jobReads({ ...ctx, groupResults }, 0, values, sprites), kept = jobReads({ ...ctx, groupResults }, 0, values, sprites);
+  const want = [...groupResults.marks.values()].sort().join();
+  if (!values.length || !want) fail(`00C none fits: ${values.length} values rejected, ${groupResults.marks.size} group results marked`);
+  else if (played.result.suggestion !== null || kept.result.suggestion !== null) fail('00C none fits: a suggestion');
+  else if (groupResults.in(played.reads) !== want) fail('00C none fits: the check playing the groups misses a rejected value\'s reads');
+  else if (groupResults.in(kept.reads) !== want) fail('00C none fits: the check with kept groups misses a rejected value\'s reads');
+  else console.log(`00C none fits: depends on all ${groupResults.marks.size} group results (${values.length} values rejected)`);
 }
 
 // two groups with the same layout in one level ($E0 twice, far apart) share a result: the check plays it once, with

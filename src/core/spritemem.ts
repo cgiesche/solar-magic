@@ -194,7 +194,8 @@ export function usedSpriteMemory(rom: Rom): number[] {
 // current one (base: its check), tried in the order given (most used first); null if none.
 // A value is first checked against the kept group results (one that fails rules it out without playing a group),
 // then the other groups are played, those with conflicts first, so a candidate usually fails fast. Only the chosen
-// value's reads count for an enclosing tracked() call (a stored check depends on the current value and the suggestion).
+// value's reads count for an enclosing tracked() call (a stored check depends on the current value and the suggestion);
+// when none fits, the reads of every value tried count (a ROM change that lets one fit checks again, #219).
 export function suggestSpriteMemory(ctx: SpriteMemContext, current: number, candidates: number[], groups: SpriteGroup[], base: SpriteMemCheck): number | null {
   return runJob(suggestJob(ctx, current, candidates, groups, base));
 }
@@ -205,10 +206,11 @@ function* suggestJob(ctx: SpriteMemContext, current: number, candidates: number[
   const order = [...bad, ...groups.map((_, i) => i).filter((i) => !bad.includes(i))];
   const fails = (i: number, r: GroupCheck) => !r || r.lost.size > 0 || r.live < base.live[i];
   const { emu } = ctx;
+  const rejected = new RomReads(emu.rom); // the reads of the values rejected
   for (const m of candidates) {
     if (m === current) continue;
-    // what the value's checks read counts only when it is chosen: a ROM change that lets a rejected value fit
-    // doesn't check again (the suggestion still fits, maybe not the first one that does)
+    // what the value's checks read counts only when it is chosen or none fits (#219): a ROM change that lets a rejected
+    // value fit checks again only when there is no suggestion (one that fits is enough, maybe not the first)
     const reads = new RomReads(emu.rom);
     const apart = <T>(fn: () => T): T => { const r = emu.tracked(fn, null, false); reads.add(r.reads); return r.result; };
     const play: number[] = [];
@@ -223,7 +225,9 @@ function* suggestJob(ctx: SpriteMemContext, current: number, candidates: number[
       if (fails(i, apart(() => checkGroup(ctx, m, groups[i], cams)))) { ok = false; break; }
     }
     if (ok) { emu.count(reads); return m; }
+    rejected.add(reads);
   }
+  emu.count(rejected);
   return null;
 }
 
