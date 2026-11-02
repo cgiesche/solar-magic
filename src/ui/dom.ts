@@ -136,9 +136,12 @@ export function installStepFields(): void {
   };
   document.addEventListener('change', remember, true);
   document.addEventListener('input', remember, true);
-  // touchpads send many small deltas: accumulated to one step per ~mouse-wheel notch. Each step is an input, the
+  // exactly one step per mouse-wheel notch, however many pixels the browser makes of it (100, 120, more with a
+  // display scale): a wheel event of a notch's size is one step. Touchpads and high-resolution wheels send many small
+  // deltas: accumulated to one step per notch (forgotten after a pause or on a turn). Each step is an input, the
   // change (the edit, one undo step) comes once the wheel rests, as at the end of a drag
   let acc = 0;
+  let accAt = 0;
   let over: HTMLInputElement | null = null;
   let changed = false;
   let rest = 0;
@@ -152,15 +155,20 @@ export function installStepFields(): void {
     if (!(t instanceof HTMLInputElement) || t.type !== 'range' || t.disabled || e.ctrlKey) return;
     e.preventDefault();
     if (over !== t) { settle(); over = t; acc = 0; }
-    // a wheel event of several notches (~100 pixels each) steps as often
-    const d = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
-    const notches = Math.abs(d) >= 50 ? Math.round(Math.abs(d) / 100) || 1 : 0;
-    acc = notches ? 0 : acc + d;
-    if (!notches && Math.abs(acc) < 50) return;
-    const up = (notches ? d : acc) < 0;
-    acc = 0;
+    const d = e.deltaMode === 0 ? e.deltaY : e.deltaY * 100;
+    if (!d) return;
+    let up: boolean;
+    if (Math.abs(d) >= 50) { up = d < 0; acc = 0; }
+    else {
+      if (e.timeStamp - accAt > 200 || (acc < 0) !== (d < 0)) acc = 0;
+      accAt = e.timeStamp;
+      acc += d;
+      if (Math.abs(acc) < 100) return;
+      up = acc < 0;
+      acc = 0;
+    }
     const was = t.value;
-    if (up) t.stepUp(notches || 1); else t.stepDown(notches || 1);
+    if (up) t.stepUp(); else t.stepDown();
     if (t.value === was) return;
     changed = true;
     t.dispatchEvent(new Event('input', { bubbles: true }));
