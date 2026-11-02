@@ -115,7 +115,7 @@ function busyIndicator(app: App): HTMLElement {
   app.on('busy', () => {
     label.textContent = [...app.busy.values()].join(' · ') + ' …';
     el.title = label.textContent;
-    const on = () => app.busy.size > 0 && !app.backgroundHeld();
+    const on = () => app.busy.size > 0 && !app.scheduler.held();
     if (!on()) { clearTimeout(timer); timer = 0; el.classList.remove('show'); }
     else if (!timer && !el.classList.contains('show')) timer = window.setTimeout(() => { timer = 0; if (on()) el.classList.add('show'); }, 200);
   });
@@ -147,7 +147,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   const modes = h('div', { class: 'btn-group' },
     modeBtn('l1', 'Layer 1', '1'), modeBtn('l2', 'Layer 2', '2'), modeBtn('spr', 'Sprites', '3'), modeBtn('exit', 'Entrances/Exits', '4'), modeBtn('bg', 'BG', '5'), modeBtn('l3', 'Layer 3', '6'));
   const levelTitle = h('span', { class: 'level-title' });
-  const zoomCtl = zoomControl(() => app.zoom, (z) => view.setZoom(z));
+  const zoomCtl = zoomControl(() => app.view.zoom, (z) => view.setZoom(z));
   const levelBar = h('div', { class: 'ctxbar' },
     levelTitle,
     h('button', { onclick: () => openHeaderDialog(app), title: 'Level header (H)' }, 'Header …'),
@@ -503,12 +503,12 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     else if (k === '/') app.resizeSelection(0, -1);
     else if (k === 'PageUp') app.reorderSelection('front');
     else if (k === 'PageDown') app.reorderSelection('back');
-    else if (k === 'g' || k === 'G') { app.show.grid = !app.show.grid; view.paint(); }
-    else if (k === 'c' || k === 'C') { app.show.collision = !app.show.collision; view.paint(); }
+    else if (k === 'g' || k === 'G') { app.view.show.grid = !app.view.show.grid; view.paint(); }
+    else if (k === 'c' || k === 'C') { app.view.show.collision = !app.view.show.collision; view.paint(); }
     else if ((k === 'v' || k === 'V') && e.shiftKey) view.placeGameViewByMario();
-    else if (k === 'v' || k === 'V') { app.show.gameView = !app.show.gameView; app.updateGameViewCamera(); view.paint(); }
+    else if (k === 'v' || k === 'V') { app.view.show.gameView = !app.view.show.gameView; app.updateGameViewCamera(); view.paint(); }
     else if ((k === 'j' || k === 'J') && e.shiftKey) view.toggleArcPin();
-    else if (k === 'j' || k === 'J') { app.show.arcs = !app.show.arcs; if (!app.show.arcs) view.arcPin = null; view.paint(); }
+    else if (k === 'j' || k === 'J') { app.view.show.arcs = !app.view.show.arcs; if (!app.view.show.arcs) view.arcPin = null; view.paint(); }
     else if (k === 'm' || k === 'M') setWorkspace('gfx', { tab: 'map16', tile: view.hover ? hoverTile(app, view.hover.tx, view.hover.ty) : undefined });
     else if (k === 'p' || k === 'P') setWorkspace('gfx', { tab: 'pal' });
     else if (k === 'a' || k === 'A') setWorkspace('gfx', { tab: 'anim' });

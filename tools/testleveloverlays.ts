@@ -13,6 +13,7 @@ import { map16Tile } from '../src/core/ram.ts';
 import { hex3 } from '../src/core/names.ts';
 import { levelOverlay, overlayPending, paintOverlays, wholeLevel } from '../src/ui/leveloverlays.ts';
 import type { App } from '../src/ui/app.ts';
+import type { ViewSettings } from '../src/core/viewsettings.ts';
 import { editorImage } from './fixture.ts';
 
 let bad = 0;
@@ -48,7 +49,7 @@ const asked = new Set<number>(); // the tilesets probes were asked in
 let known = true; // probes known (else: undefined, still asked for)
 const inTs = <T>(ts: number, f: () => T): T | undefined => { asked.add(ts); if (!known) return undefined; prober.use(ts); return f(); };
 const app = {
-  rom, level: open, gameView: null, gameViewMario: null, cdm16: new Set<number>(),
+  rom, level: open, view: { gameView: null, gameViewMario: null, cdm16: new Set<number>() },
   markers: (l: Level) => entranceMarkers(rom, l, entrancesInto(rom, l.number)),
   viewSwitches: () => [],
   probes: {
@@ -58,7 +59,7 @@ const app = {
     cameraBands: () => null,
   },
 } as unknown as App;
-const show: App['show'] = { layer1: true, layer2: true, layer3: true, sprites: false, grid: false, screens: false, exits: false, ghost: true, anim: true, items: false, invisible: false, deaths: false, collision: true, preview: false, arcs: false, gameView: false, scrollBands: false };
+const show: ViewSettings['show'] = { layer1: true, layer2: true, layer3: true, sprites: false, grid: false, screens: false, exits: false, ghost: true, anim: true, items: false, invisible: false, deaths: false, collision: true, preview: false, arcs: false, gameView: false, scrollBands: false };
 
 const src = levelOverlay(app, lv, r.render, r.images, () => undefined, undefined);
 

@@ -30,7 +30,7 @@ export interface LevelPicture { level: Level; images: LevelImages; sprite: (s: L
 // The level as the level view shows it with the View menu's settings (layers, sprites, the overlays; no layer
 // ghosted), `zoom` times its size, its first `screens` screens only
 export function drawLevelImage(app: App, p: LevelPicture, zoom = 1, screens = p.level.header.screens): HTMLCanvasElement {
-  const show = app.show, im = p.images, lv = p.level;
+  const show = app.view.show, im = p.images, lv = p.level;
   const { width, height } = screensSize(im, screens);
   if (Math.max(width, height) * zoom > MAX_CANVAS) throw new Error(`${width * zoom}×${height * zoom} pixels is too large for an image – a smaller zoom fits`);
   const full = document.createElement('canvas');
@@ -173,7 +173,7 @@ function scanOf(app: App, lv: Level): ScanResult | undefined {
 // What the level is drawn with: its load (render, images), its sprites' images, its overlays with its probes
 // (in its tileset) – waited for; null: cancelled
 async function levelPicture(app: App, lv: Level, images: LevelImages, render: LevelRender, cancel: ExportWait): Promise<LevelPicture | null> {
-  const show = app.show;
+  const show = app.view.show;
   const imgs = show.sprites || show.items ? await levelSprites(app, lv, cancel, show.sprites) : { sprite: () => undefined, thumb: () => undefined };
   if (!imgs) return null;
   const overlay = levelOverlay(app, lv, render, images, imgs.thumb, scanOf(app, lv));

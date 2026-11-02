@@ -75,7 +75,7 @@ export class LevelView {
     window.addEventListener('mousemove', (e) => this.onMove(e));
     window.addEventListener('mouseup', (e) => this.onUp(e));
     this.scroller.addEventListener('contextmenu', (e) => e.preventDefault());
-    attachPanZoom(this.scroller, () => this.app.zoom, (z, ax, ay) => this.setZoom(z, { ax, ay }));
+    attachPanZoom(this.scroller, () => this.app.view.zoom, (z, ax, ay) => this.setZoom(z, { ax, ay }));
     this.scroller.addEventListener('mouseleave', () => { this.hover = null; this.idleStatus(); this.paint(); hideMessageHover(); });
     // a message box sprite: the panel on the message it opens
     this.scroller.addEventListener('dblclick', (e) => {
@@ -113,13 +113,13 @@ export class LevelView {
 
   setZoom(z: number, anchor?: { ax: number; ay: number }): void {
     z = Math.max(0.5, Math.min(4, z));
-    const old = this.app.zoom;
+    const old = this.app.view.zoom;
     if (z === old) return;
     const rect = this.scroller.getBoundingClientRect();
     const ax = anchor ? anchor.ax : rect.width / 2;
     const ay = anchor ? anchor.ay : rect.height / 2;
     const lx = (this.scroller.scrollLeft + ax) / old, ly = (this.scroller.scrollTop + ay) / old;
-    this.app.zoom = z;
+    this.app.view.zoom = z;
     this.layout();
     this.scroller.scrollLeft = lx * z - ax;
     this.scroller.scrollTop = ly * z - ay;
@@ -144,7 +144,7 @@ export class LevelView {
   layout(): void {
     const im = this.app.images;
     if (!im) return;
-    const z = this.app.zoom;
+    const z = this.app.view.zoom;
     this.sizer.style.width = `${im.width * z}px`;
     this.sizer.style.height = `${im.height * z}px`;
     const dpr = window.devicePixelRatio || 1;
@@ -203,7 +203,7 @@ export class LevelView {
 
   tileFromEvent(e: MouseEvent): { tx: number; ty: number; px: number; py: number } {
     const rect = this.scroller.getBoundingClientRect();
-    const z = this.app.zoom;
+    const z = this.app.view.zoom;
     const px = (e.clientX - rect.left + this.scroller.scrollLeft) / z;
     const py = (e.clientY - rect.top + this.scroller.scrollTop) / z;
     return { tx: Math.floor(px / 16), ty: Math.floor(py / 16), px, py };
@@ -215,7 +215,7 @@ export class LevelView {
     if (!app.images) return;
     const ctx = this.ctx;
     const dpr = window.devicePixelRatio || 1;
-    const z = app.zoom * dpr;
+    const z = app.view.zoom * dpr;
     const sx = this.scroller.scrollLeft * dpr, sy = this.scroller.scrollTop * dpr;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = '#1b1d22';
@@ -227,14 +227,14 @@ export class LevelView {
     const lw = 1 / z;
     const choosing = app.mode === 'exit' && !app.exitMarker;
     paintOverlays(ctx, app, openOverlay(app), {
-      show: app.show, lw, px: 1 / app.zoom, area: this.visibleTiles(), width: im.width, height: im.height, screens: app.level.header.screens,
-      exits: app.show.exits || app.mode === 'exit', chosenExit: choosing ? app.exitScreen : -1,
+      show: app.view.show, lw, px: 1 / app.view.zoom, area: this.visibleTiles(), width: im.width, height: im.height, screens: app.level.header.screens,
+      exits: app.view.show.exits || app.mode === 'exit', chosenExit: choosing ? app.exitScreen : -1,
       marker: (m) => ({
         big: this.drag?.kind === 'marker' && this.drag.marker.kind === m.kind && this.drag.marker.index === m.index,
         ring: app.mode === 'exit' && app.exitMarker?.kind === m.kind && app.exitMarker.index === m.index,
       }),
-      layer2: app.mode === 'l2', tideLabelX: this.scroller.scrollLeft / app.zoom + 8 / app.zoom, spriteAlpha: this.spriteAlpha(),
-      sprites: this.spriteDraw(), arcs: () => this.paintArcs(ctx), gameView: app.show.gameView ? this.gameViewFrame() : undefined,
+      layer2: app.mode === 'l2', tideLabelX: this.scroller.scrollLeft / app.view.zoom + 8 / app.view.zoom, spriteAlpha: this.spriteAlpha(),
+      sprites: this.spriteDraw(), arcs: () => this.paintArcs(ctx), gameView: app.view.show.gameView ? this.gameViewFrame() : undefined,
     });
     // selection
     if (app.mode === 'l1' || app.mode === 'l2') {
@@ -245,7 +245,7 @@ export class LevelView {
     // hover
     if (this.hover && !this.drag) {
       const { tx, ty } = this.hover;
-      if (app.show.preview && !this.onSelection(this.hover.px, this.hover.py)) this.paintPreview(ctx, tx, ty);
+      if (app.view.show.preview && !this.onSelection(this.hover.px, this.hover.py)) this.paintPreview(ctx, tx, ty);
       const hits = this.brushMode() ? [] : app.hitsAt(this.hover.px, this.hover.py);
       const hit = hits.find((h) => h.mode === app.mode && app.selection.has(h.item.uid)) ?? hits[0];
       if (hit && !app.selection.has(hit.item.uid)) {
@@ -285,8 +285,8 @@ export class LevelView {
       ctx.strokeRect(x, y, Math.abs(d.x1 - d.x0), Math.abs(d.y1 - d.y0));
     }
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    if (app.show.arcs) this.paintArcLegend(ctx, dpr);
-    if (app.show.gameView) this.paintGameViewLegend(ctx, dpr);
+    if (app.view.show.arcs) this.paintArcLegend(ctx, dpr);
+    if (app.view.show.gameView) this.paintGameViewLegend(ctx, dpr);
     if (app.renderError) {
       ctx.fillStyle = 'rgba(200,30,30,0.85)';
       ctx.fillRect(0, 0, this.canvas.width, 22 * dpr);
@@ -300,10 +300,10 @@ export class LevelView {
   paintBoxNames(ctx: CanvasRenderingContext2D): void {
     const app = this.app;
     const hovered = this.hover && !this.drag && !this.brushMode() ? app.hitsAt(this.hover.px, this.hover.py).map((h) => h.item) : [];
-    for (const l2 of boxLayers(app.show, app.level)) for (const o of app.boxedObjects(l2)) {
+    for (const l2 of boxLayers(app.view.show, app.level)) for (const o of app.boxedObjects(l2)) {
       if (!app.selection.has(o.uid) && !hovered.includes(o)) continue;
       const name = app.boxName(o);
-      if (name) paintBoxName(ctx, o.x * 16, o.y * 16, name, app.zoom);
+      if (name) paintBoxName(ctx, o.x * 16, o.y * 16, name, app.view.zoom);
     }
   }
 
@@ -357,7 +357,7 @@ export class LevelView {
   paintArcs(ctx: CanvasRenderingContext2D): void {
     const at = this.arcTile();
     if (!at) return;
-    const arcs = this.app.jumpArcs(at.tx, at.ty), lw = 1.5 / this.app.zoom;
+    const arcs = this.app.jumpArcs(at.tx, at.ty), lw = 1.5 / this.app.view.zoom;
     ctx.strokeStyle = 'rgba(255,255,255,0.9)';
     ctx.lineWidth = lw;
     ctx.strokeRect(at.tx * 16, at.ty * 16, 16, 16);
@@ -413,8 +413,8 @@ export class LevelView {
   // the game view frame (leveloverlays.ts gameViewIn), put first in the middle of the view; a smaller level or a
   // narrower camera range moves it only while it is open
   gameViewFrame(): GameViewFrame {
-    const app = this.app, im = app.images, z = app.zoom;
-    app.gameView ??= gameViewAt((this.scroller.scrollLeft + this.scroller.clientWidth / 2) / z - GAME_VIEW_W / 2,
+    const app = this.app, im = app.images, z = app.view.zoom;
+    app.view.gameView ??= gameViewAt((this.scroller.scrollLeft + this.scroller.clientWidth / 2) / z - GAME_VIEW_W / 2,
       (this.scroller.scrollTop + this.scroller.clientHeight / 2) / z - GAME_VIEW_H / 2, im.width, im.height);
     return gameViewIn(app, { level: app.level, images: im, reach: app.cameraReach() }, this.drag?.kind === 'gameView');
   }
@@ -422,15 +422,15 @@ export class LevelView {
   // Shift+V: the game view frame placed by Mario with his feet in the tile under the mouse
   placeGameViewByMario(): void {
     if (!this.hover) return;
-    this.app.show.gameView = true;
+    this.app.view.show.gameView = true;
     this.app.placeGameViewByMario(this.hover.tx * 16, (this.hover.ty + 1) * 16 - MARIO_H);
     this.paint();
   }
 
   // whether the pixel grabs the game view frame: its edge (a few screen pixels either side) or its label
   gameViewGrab(px: number, py: number): boolean {
-    if (!this.app.show.gameView) return false;
-    const p = this.gameViewFrame(), m = 4 / this.app.zoom, l = gameViewLabelBox(p, 1 / this.app.zoom);
+    if (!this.app.view.show.gameView) return false;
+    const p = this.gameViewFrame(), m = 4 / this.app.view.zoom, l = gameViewLabelBox(p, 1 / this.app.view.zoom);
     const inX = px >= p.x - m && px <= p.x + GAME_VIEW_W + m, inY = py >= p.y - m && py <= p.y + GAME_VIEW_H + m;
     const edge = (inX && (Math.abs(py - p.y) <= m || Math.abs(py - p.y - GAME_VIEW_H) <= m))
       || (inY && (Math.abs(px - p.x) <= m || Math.abs(px - p.x - GAME_VIEW_W) <= m));
@@ -445,7 +445,7 @@ export class LevelView {
       { label: reach === undefined ? 'Camera reach (emulating …)' : reach === null ? 'Camera reach (not found)' : 'Camera reach', title: true },
       { label: 'never on the screen', fill: 'rgba(0,0,0,0.8)' },
     ];
-    if (this.app.show.scrollBands) {
+    if (this.app.view.show.scrollBands) {
       const bands = this.app.scrollBands();
       rows.push({ label: bands === undefined ? 'Scroll bands (emulating …)' : bands === null ? 'Scroll bands (not found)' : 'Scroll bands', title: true });
       for (const k of Object.values(BAND_STYLE)) rows.push({ label: k.label, fill: `rgba(${k.color},0.8)` });
@@ -471,20 +471,20 @@ export class LevelView {
   // pins the jump arcs to the tile under the mouse, or unpins them
   toggleArcPin(): void {
     this.arcPin = this.arcPin || !this.hover ? null : { tx: this.hover.tx, ty: this.hover.ty };
-    if (this.arcPin) this.app.show.arcs = true;
+    if (this.arcPin) this.app.view.show.arcs = true;
     this.paint();
   }
 
   // tiles of layer 1 in view: x0..x1, y0..y1 (exclusive)
   private visibleTiles(): { x0: number; y0: number; x1: number; y1: number } {
-    const g = this.app.images.geom1, z = this.app.zoom;
+    const g = this.app.images.geom1, z = this.app.view.zoom;
     const x0 = Math.max(0, Math.floor(this.scroller.scrollLeft / z / 16)), y0 = Math.max(0, Math.floor(this.scroller.scrollTop / z / 16));
     return { x0, y0, x1: Math.min(g.width, x0 + Math.ceil(this.scroller.clientWidth / z / 16) + 1), y1: Math.min(g.height, y0 + Math.ceil(this.scroller.clientHeight / z / 16) + 1) };
   }
 
   // sprites are translucent like the ghosted layers while the background or layer 3 is edited
   spriteAlpha(): number {
-    return this.app.show.ghost && isBrushMode(this.app.mode) ? 0.35 : 1;
+    return this.app.view.show.ghost && isBrushMode(this.app.mode) ? 0.35 : 1;
   }
 
   // The placement preview: what a right click at tile (tx, ty) would place, translucent. While the one at the tile
@@ -537,8 +537,8 @@ export class LevelView {
     if (e.button !== 0) return;
     if (!e.ctrlKey && this.gameViewGrab(px, py)) {
       const f = this.gameViewFrame(), p = { x: f.x, y: f.y };
-      app.gameView = p;
-      app.gameViewMario = null; // (placed by hand from here)
+      app.view.gameView = p;
+      app.view.gameViewMario = null; // (placed by hand from here)
       this.drag = { kind: 'gameView', offX: px - p.x, offY: py - p.y };
       this.updateCursor(px, py, -1);
       this.paint();
@@ -629,7 +629,7 @@ export class LevelView {
       d.far ||= Math.abs(d.x1 - d.x0) > 3 || Math.abs(d.y1 - d.y0) > 3;
       this.requestPaint();
     } else if (d.kind === 'gameView') {
-      app.gameView = gameViewAt(px - d.offX, py - d.offY, app.images.width, app.images.height, app.cameraReach());
+      app.view.gameView = gameViewAt(px - d.offX, py - d.offY, app.images.width, app.images.height, app.cameraReach());
       this.requestPaint();
     } else if (d.kind === 'paint') {
       const b = this.brush(), c = this.cellAt(px, py);
@@ -737,7 +737,7 @@ export class LevelView {
       const it = (app.mode === 'spr' ? app.selectedSprites() : app.selectedObjects())[0], c = this.centerTile();
       px = (it ? it.x : c.tx) * 16 + 8; py = (it ? it.y : c.ty) * 16 + 8;
     }
-    const r = this.scroller.getBoundingClientRect(), z = app.zoom;
+    const r = this.scroller.getBoundingClientRect(), z = app.view.zoom;
     this.levelMenu(r.left + px * z - this.scroller.scrollLeft, r.top + py * z - this.scroller.scrollTop, px, py, Math.floor(px / 16), Math.floor(py / 16));
   }
 
@@ -767,7 +767,7 @@ export class LevelView {
       const p = app.mode === 'bg' ? undefined : app.probes.block(t); // result arrives via 'probes'
       const sum = [p && probeAt(p, tx).summary, p && enterText(p.enter)].filter(Boolean).join(', ');
       if (sum) txt += ` (${sum})`;
-      const c = app.show.collision && app.mode !== 'bg' ? app.probes.collision(t) : undefined;
+      const c = app.view.show.collision && app.mode !== 'bg' ? app.probes.collision(t) : undefined;
       if (c) {
         // in the view's switch states; the others, and without a switch when the view's change it
         const on = app.viewSwitches(), shown = collisionIn(c, on);
@@ -775,7 +775,7 @@ export class LevelView {
           ...(shown !== c ? [`without switches: ${collisionText(c)}`] : [])];
         txt += ` · ${collisionText(shown)}${other.length ? ` (${other.join(' · ')})` : ''}`;
       }
-      const tide = app.show.collision && app.mode !== 'bg' ? app.tide() : null;
+      const tide = app.view.show.collision && app.mode !== 'bg' ? app.tide() : null;
       if (tide && ty * 16 + 8 >= tide.high) txt += ty * 16 + 8 >= tide.low ? ' · water (tide)' : ' · water at high tide';
     }
     if (app.mode === 'bg') {
@@ -784,7 +784,7 @@ export class LevelView {
       this.status.textContent = txt.replace(/^\s*·\s*/, '');
       return;
     }
-    const died = app.show.deaths ? this.deathsAt().get(`${tx},${ty}`) : undefined;
+    const died = app.view.show.deaths ? this.deathsAt().get(`${tx},${ty}`) : undefined;
     if (died) {
       const by = new Map<string, number>();
       for (const d of died.marks) { const t = killerText(d.killer, (id) => app.spriteLabel(id)); by.set(t, (by.get(t) ?? 0) + 1); }
@@ -809,7 +809,7 @@ export class LevelView {
 
   // the resize handles stay ~7 screen pixels at any zoom
   handleSize(): number {
-    return 7 / this.app.zoom;
+    return 7 / this.app.view.zoom;
   }
   // the selected objects that show resize handles: all up to 32 selected, else the one under the mouse
   handleObjects(): LevelObject[] {
@@ -824,7 +824,7 @@ export class LevelView {
   // band reaching a little inside the object and more outside (its inside stays for moving), the corners where
   // two meet; the topmost object first. Only the axes the object can be resized on.
   handleAt(px: number, py: number): { o: LevelObject; grab: Grab } | null {
-    const u = 1 / this.app.zoom, objs = this.handleObjects();
+    const u = 1 / this.app.view.zoom, objs = this.handleObjects();
     const side = (p: number, a: number, b: number): -1 | 0 | 1 | null =>
       p >= a - 5 * u && p < a + 2 * u ? -1 : p > b - 2 * u && p <= b + 5 * u ? 1 : p >= a && p <= b ? 0 : null;
     for (let i = objs.length - 1; i >= 0; i--) {
@@ -976,7 +976,7 @@ export class LevelView {
   }
 
   centerTile(): { tx: number; ty: number } {
-    const z = this.app.zoom;
+    const z = this.app.view.zoom;
     return {
       tx: Math.floor((this.scroller.scrollLeft + this.scroller.clientWidth / 2) / z / 16),
       ty: Math.floor((this.scroller.scrollTop + this.scroller.clientHeight / 2) / z / 16),
@@ -984,7 +984,7 @@ export class LevelView {
   }
 
   scrollToTile(tx: number, ty: number): void {
-    const z = this.app.zoom;
+    const z = this.app.view.zoom;
     this.scroller.scrollLeft = tx * 16 * z - this.scroller.clientWidth / 2;
     this.scroller.scrollTop = ty * 16 * z - this.scroller.clientHeight / 2;
   }

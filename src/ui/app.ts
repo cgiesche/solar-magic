@@ -1,6 +1,8 @@
 // Application state and editing actions.
 
 import { makeProjectId } from '../core/projectid.ts';
+import { Scheduler } from '../core/scheduler.ts';
+import { ViewSettings } from '../core/viewsettings.ts';
 import { Rom } from '../core/rom.ts';
 import { LevelEmulator, type LevelRender, type LevelOverride, type Animated } from '../core/levelemu.ts';
 import {
@@ -59,7 +61,7 @@ import { thumbsKey, thumbsInput, previewInput, objKey, type ObjSpec, type ObjThu
 import { levelInput, inputHash } from '../core/inputs.ts';
 import { map16Tile, bgTile } from '../core/ram.ts';
 import { exanimTiles, exanimColors, exanimPeriod, readLevelList, readGlobalList } from '../core/exanim.ts';
-import { emptyTriggerView, usedTriggers, initTriggers, type TriggerView, type SlotRef } from '../core/extrigger.ts';
+import { usedTriggers, initTriggers, type TriggerView, type SlotRef } from '../core/extrigger.ts';
 import { LevelUses, OpenLevelTiles, levelOverride, usedLevels, spriteUsage, isTilesetTile, type LevelTiles, type OpenTilesState, type SpriteUser } from '../core/levelusage.ts';
 import { TILESETS, sharingTilesets } from '../core/tilesets.ts';
 import { slipperyActions } from '../core/slippery.ts';
@@ -171,20 +173,8 @@ export class App {
   // BG mode brush: a w×h block of BG Map16 tiles (row-major), picked from the picker sheet or the level
   bgBrush: Brush = { w: 1, h: 1, tiles: [0] };
   l3Brush: Brush = { w: 1, h: 1, tiles: [0] }; // layer 3 tilemap words
-  zoom = 2;
-  show = { layer1: true, layer2: true, layer3: true, sprites: true, grid: false, screens: true, exits: true, ghost: true, anim: true, items: true, invisible: true, deaths: true, collision: false, preview: false, arcs: false, gameView: false, scrollBands: false };
-  // the game view frame's top left corner in level pixels (levelview.ts), kept while editing and between levels
-  gameView: { x: number; y: number } | null = null;
-  // the frame placed by Mario (Shift+V): his place (inside the level) and the camera the game puts there in the
-  // level as edited (key: its result cache key; camera undefined while it is played, null when it could not be);
-  // kept while editing and between levels, until the frame is dragged; asked for only while the frame is shown
-  gameViewMario: { x: number; y: number; key: string | null; camera?: CameraAt | null } | null = null;
-  // view-only game state applied before the emulated level load
-  switches = { palaces: false, onOff: false };
-  // the conditional Direct Map16 flags on (cdm16.ts), in the view and in test play
-  cdm16 = new Set<number>();
-  // the ExAnimation triggers the view switches (extrigger.ts), set after the level's load; test play too
-  exTriggers: TriggerView = emptyTriggerView();
+  // zoom, what is shown, the game view frame and the view-only game state (viewsettings.ts)
+  readonly view = new ViewSettings();
   wsTile = 0; // Map16 tile for 'open-map16' (opens the graphics workspace there)
   wsTarget: Map16Target = 'fg'; // what wsTile is a tile of
   wsAt: WsTarget | undefined = undefined; // for an overworld tile: the submap and event progress to draw it as on
@@ -241,7 +231,7 @@ export class App {
     this.emu = new LevelEmulator(rom);
     this.emu.skipMask = () => this.gfxSkipMask();
     this.emu.boot();
-    onModalsChange(() => { this.resumeBackground(); this.emit('busy'); });
+    onModalsChange(() => { this.scheduler.resume(); this.emit('busy'); });
     // sprite images: learned again when what they depend on changed (the learner decides)
     this.on('render', () => this.ensureSpriteImages());
     this.on('rom-change', () => this.ensureSpriteImages());
@@ -250,7 +240,7 @@ export class App {
       const names = JSON.stringify(objectUserNames(this.rom));
       if (names !== this.objectNamesSeen) { this.objectNamesSeen = names; this.emit('object-names'); }
     });
-    musicPlayer.onChange(() => { this.resumeBackground(); this.emit('busy'); });
+    musicPlayer.onChange(() => { this.scheduler.resume(); this.emit('busy'); });
     // level edits and ROM edits (romEdit: one undo step, all or nothing, the follow-ups below)
     this.edits = new EditSession(rom, {
       changed: (rerender) => this.levelChanged(rerender),
@@ -279,7 +269,7 @@ export class App {
     void this.cacheReady.then(() => this.sweepResults());
     this.learner = new ResultLearner({
       rom, results: this.results, cacheReady: this.cacheReady, main: this.emu,
-      later: (key, step) => this.later(key, step),
+      later: (key, step) => this.scheduler.later(key, step),
       soon: (step) => setTimeout(step, 0),
       setBusy: (key, label) => this.setBusy(key, label),
     });
@@ -307,7 +297,7 @@ export class App {
         w.onerror = (e) => { console.error(e); w.terminate(); failed(); };
         return (m) => w.postMessage(m, m.type === 'rom' ? [m.data.buffer] : m.type === 'edit' ? m.edits.map(([, b]) => b.buffer) : []);
       },
-      later: (key, step) => this.later(key, step),
+      later: (key, step) => this.scheduler.later(key, step),
       soon: (step) => setTimeout(step, 0),
       setBusy: (key, label) => this.setBusy(key, label),
       ready: () => this.emit('probes'),
@@ -331,8 +321,8 @@ export class App {
   // drops the loaded results that no longer hold for the ROM (also those of inputs not in use), a slice at a time
   // (once: a result whose bytes an edit changes, and an undo changes back, would be dropped for nothing)
   private sweepResults(): void {
-    const step = () => { if (this.results.sweep(SWEEP_SLICE)) this.later('result-sweep', step); };
-    this.later('result-sweep', step);
+    const step = () => { if (this.results.sweep(SWEEP_SLICE)) this.scheduler.later('result-sweep', step); };
+    this.scheduler.later('result-sweep', step);
   }
 
   // (returns what takes fn off again)
@@ -359,34 +349,8 @@ export class App {
     this.emit('busy');
   }
 
-  // ------------- background work -------------
-  // Slices of background emulation (block behavior, sprite graphics, scans …) run as low-priority
-  // tasks, so input, drawing and audio go first. While a dialog is open or music plays they wait:
-  // they would stall the dialog and make the sound crackle. The next slice of each job is parked by
-  // its key and continues once nothing holds it.
-  private parked = new Map<string, () => void>();
-  backgroundHeld(): boolean { return modalsOpen() > 0 || musicPlayer.holdsBackground; }
-  later(key: string, step: () => void): void {
-    if (this.backgroundHeld()) { this.parked.set(key, step); return; }
-    const go = () => { if (this.backgroundHeld()) this.parked.set(key, step); else step(); };
-    const sch = (globalThis as { scheduler?: { postTask?: (f: () => void, o: { priority: string }) => Promise<void> } }).scheduler;
-    if (sch?.postTask) { sch.postTask(go, { priority: 'background' }).catch((e) => console.error(e)); return; }
-    // otherwise a message (setTimeout is throttled in hidden tabs)
-    if (!this.bgChannel) {
-      const ch = this.bgChannel = new MessageChannel(), q = this.bgQueue;
-      ch.port1.onmessage = () => q.shift()?.();
-    }
-    this.bgQueue.push(go);
-    this.bgChannel.port2.postMessage(0);
-  }
-  private bgChannel: MessageChannel | null = null;
-  private bgQueue: (() => void)[] = [];
-  private resumeBackground(): void {
-    if (this.backgroundHeld() || !this.parked.size) return;
-    const p = [...this.parked];
-    this.parked.clear();
-    for (const [k, step] of p) this.later(k, step);
-  }
+  // background work (scheduler.ts): held while a dialog is open or music plays
+  readonly scheduler = new Scheduler(() => modalsOpen() > 0 || musicPlayer.holdsBackground);
 
   // ------------- level loading / rendering -------------
   // opens level n (the open one saved first, or its unsaved changes dropped with discard)
@@ -416,12 +380,12 @@ export class App {
       bgData: !ov.layer2 && lv.bg ? encodeBg(lv.bg) : undefined,
       layer3: lt3Override(this.rom, lv),
       sprites: serializeLevelSprites(this.rom, lv),
-      switchPalaces: this.switches.palaces,
-      onOffSwitch: this.switches.onOff,
-      cdm16Flags: flagBytes(this.cdm16),
+      switchPalaces: this.view.switches.palaces,
+      onOffSwitch: this.view.switches.onOff,
+      cdm16Flags: flagBytes(this.view.cdm16),
       // sub-level loads keep the old timer: the level's header time, as entered from the overworld
       timer: this.rom.r8(TIME_TABLE + lv.header.time),
-      exTriggers: this.exTriggers,
+      exTriggers: this.view.exTriggers,
       secondaryHeader: encodeSecondaryHeader(lv.secondary),
     };
   }
@@ -439,7 +403,7 @@ export class App {
   // (a ROM edit elsewhere: the overworld, another level's data)
   refresh(): void {
     const lv = this.level, ov = this.buildOverrides();
-    const key = inputHash({ level: lv.number, ov, header: lv.header, secondary: lv.secondary, show: this.show, mode: this.mode });
+    const key = inputHash({ level: lv.number, ov, header: lv.header, secondary: lv.secondary, show: this.view.show, mode: this.mode });
     const was = this.rendered;
     if (was?.key === key && holds(this.rom, was)) {
       this.scheduleScan();
@@ -451,7 +415,7 @@ export class App {
       this.renderError = r.ok ? null : r.error ?? 'Error';
       // as many steps as the level's own animations take to repeat (the game's repeat after 8), emulated in
       // the background (startAnimation)
-      const anim = this.show.anim && r.ok;
+      const anim = this.view.show.anim && r.ok;
       this.anim.snaps = [];
       this.anim.count = anim ? exanimPeriod([readLevelList(this.rom, lv.number), readGlobalList(this.rom)], 64, 8) : 0;
       this.anim.next = anim ? this.emu.animationSteps() : null;
@@ -477,8 +441,8 @@ export class App {
 
   // the object layer not being edited is ghosted (only in levels with two object layers), editing layer 3 both
   compose(images = this.images): Uint32Array {
-    const ghost = !this.show.ghost ? 0 : this.mode === 'l3' ? 3 : this.mode === 'bg' ? 1 : this.level.layer2Objects ? (this.mode === 'l1' ? 2 : this.mode === 'l2' ? 1 : 0) : 0;
-    return composite(images, this.show.layer1, this.show.layer2, ghost, this.show.layer3);
+    const ghost = !this.view.show.ghost ? 0 : this.mode === 'l3' ? 3 : this.mode === 'bg' ? 1 : this.level.layer2Objects ? (this.mode === 'l1' ? 2 : this.mode === 'l2' ? 1 : 0) : 0;
+    return composite(images, this.view.show.layer1, this.view.show.layer2, ghost, this.view.show.layer3);
   }
 
   // emulates and renders the animation snapshots in the background, then cycles them (8 game frames each)
@@ -514,12 +478,12 @@ export class App {
         }
         i++;
       }
-      if (i < a.count) { this.setBusy('anim', `Animations ${i + 1}/${a.count}`); this.later('anim', step); return; }
+      if (i < a.count) { this.setBusy('anim', `Animations ${i + 1}/${a.count}`); this.scheduler.later('anim', step); return; }
       this.setBusy('anim', null);
       if (a.frames.length && !a.timer) a.timer = window.setInterval(() => this.animTick(), 1000 / 7.5);
     };
     this.setBusy('anim', `Animations 1/${a.count}`);
-    this.later('anim', step);
+    this.scheduler.later('anim', step);
   }
 
   // the canvases following the animation (pickeranim.ts) go back to the level as rendered
@@ -534,7 +498,7 @@ export class App {
   // the step of the animation shown now; null when none is (the level as rendered)
   animStep(): AnimStep | null {
     const a = this.anim;
-    return this.show.anim && a.timer && a.phase >= 0 ? a.snaps[a.phase] ?? null : null;
+    return this.view.show.anim && a.timer && a.phase >= 0 ? a.snaps[a.phase] ?? null : null;
   }
 
   // the animation's steps on canvases of the level's Map16 tiles (the pickers'), for the render shown
@@ -547,8 +511,8 @@ export class App {
   animTick(): void {
     const a = this.anim;
     if (!a.frames.length || !a.base) return;
-    if (!this.show.anim) { this.stopAnimation(); return; }
-    if (this.backgroundHeld()) return;
+    if (!this.view.show.anim) { this.stopAnimation(); return; }
+    if (this.scheduler.held()) return;
     const img = this.compositeImg === a.base ? a.base.slice() : this.compositeImg;
     const prev = a.frames[a.phase];
     if (prev) for (const k of prev.idx) img[k] = a.base[k];
@@ -1007,7 +971,7 @@ export class App {
   }
   // the switch states the view sets (the probes' order: blue P-switch, silver P-switch, OFF)
   viewSwitches(): SwitchState[] {
-    return SWITCH_STATES.filter((sw) => (sw === 'off' ? this.switches.onOff : this.exTriggers.game.has(SWITCH_TRIGGER[sw])));
+    return SWITCH_STATES.filter((sw) => (sw === 'off' ? this.view.switches.onOff : this.view.exTriggers.game.has(SWITCH_TRIGGER[sw])));
   }
 
   cachedCollision(tile: number): CollisionProbe | undefined {
@@ -1069,15 +1033,15 @@ export class App {
 
   // Mario standing at level pixel (x, y): the frame shows the camera the game puts there
   placeGameViewByMario(x: number, y: number): void {
-    this.gameViewMario = { x, y, key: null }; // (not asked for yet)
+    this.view.gameViewMario = { x, y, key: null }; // (not asked for yet)
     this.updateGameViewCamera();
   }
 
   // the camera at Mario's place (kept inside the level) in the level as edited (ov), from the result cache or
   // played in the probe worker; asked again when the cache dropped it (the ROM bytes it read changed)
   updateGameViewCamera(ov?: LevelOverride): void {
-    const m = this.gameViewMario, im = this.images;
-    if (!m || !im || !this.show.gameView) return;
+    const m = this.view.gameViewMario, im = this.images;
+    if (!m || !im || !this.view.show.gameView) return;
     m.x = Math.max(0, Math.min(im.width - MARIO_W, m.x)); m.y = Math.max(0, Math.min(im.height - MARIO_H, m.y));
     ov ??= this.buildOverrides();
     const key = cameraAtKey(this.level.number, ov, m.x, m.y);
@@ -1085,7 +1049,7 @@ export class App {
     m.key = key;
     m.camera = this.results.get<CameraAt>(key);
     if (m.camera === undefined) this.probes.requestCamera(++this.cameraRun, key, this.scanLevel(ov), m.x, m.y, (r) => {
-      if (this.gameViewMario !== m || m.key !== key) return;
+      if (this.view.gameViewMario !== m || m.key !== key) return;
       m.camera = r;
       this.emit('game-view');
     });
@@ -1371,11 +1335,11 @@ export class App {
   hitsAt(px: number, py: number): { mode: EditMode; item: LevelObject | LevelSprite }[] {
     const tx = Math.floor(px / 16), ty = Math.floor(py / 16);
     const out: { mode: EditMode; item: LevelObject | LevelSprite }[] = [];
-    const s = this.show.sprites ? this.spriteAt(px, py) : null;
+    const s = this.view.show.sprites ? this.spriteAt(px, py) : null;
     if (s) out.push({ mode: 'spr', item: s });
-    const o1 = this.show.layer1 ? this.objectAt(tx, ty, false) : null;
+    const o1 = this.view.show.layer1 ? this.objectAt(tx, ty, false) : null;
     if (o1) out.push({ mode: 'l1', item: o1 });
-    const o2 = this.show.layer2 && this.level.layer2Objects ? this.objectAt(tx, ty, true) : null;
+    const o2 = this.view.show.layer2 && this.level.layer2Objects ? this.objectAt(tx, ty, true) : null;
     if (o2) out.push({ mode: 'l2', item: o2 });
     return out;
   }
@@ -1451,8 +1415,8 @@ export class App {
     }
     // editing layer 3 shows it
     const ghosts = this.level.layer2Objects || isBrushMode(m) || isBrushMode(this.mode);
-    const recompose = m !== this.mode && ((ghosts && this.show.ghost) || (m === 'l3' && !this.show.layer3));
-    if (m === 'l3') this.show.layer3 = true;
+    const recompose = m !== this.mode && ((ghosts && this.view.show.ghost) || (m === 'l3' && !this.view.show.layer3));
+    if (m === 'l3') this.view.show.layer3 = true;
     this.model.mode = m;
     this.selection = new Set(selection);
     if (recompose) this.recomposite();
@@ -1548,7 +1512,7 @@ export class App {
   }
   // the view's flags (and test play's): `flags` on or off, then the level loads anew with them
   setFlags(flags: Iterable<number>, on: boolean): void {
-    for (const f of flags) if (on) this.cdm16.add(f); else this.cdm16.delete(f);
+    for (const f of flags) if (on) this.view.cdm16.add(f); else this.view.cdm16.delete(f);
     this.refresh();
   }
 
@@ -1563,8 +1527,8 @@ export class App {
   }
   // changes the view's triggers (and test play's); the level loads anew with them, its animation shown
   setTriggers(fn: (v: TriggerView) => void): void {
-    fn(this.exTriggers);
-    this.show.anim = true;
+    fn(this.view.exTriggers);
+    this.view.show.anim = true;
     this.refresh();
   }
 

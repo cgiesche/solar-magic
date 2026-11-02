@@ -5,6 +5,7 @@
 // level's probes (in its tileset). Selection, hover and drag previews stay the level view's own.
 
 import type { App } from './app.ts';
+import type { ViewSettings } from '../core/viewsettings.ts';
 import type { Marker } from '../core/entrances.ts';
 import { hex2, hex3 } from '../core/names.ts';
 import { screenRect, invisibleTiles, type LayerGeom, type LevelImages } from '../core/render.ts';
@@ -56,7 +57,7 @@ export function openOverlay(app: App): OverlayLevel {
   return {
     rom: app.rom, level: lv, images: app.images, render: app.render, markers: app.markers(),
     block: (t) => app.probes.block(t), collision: (t) => app.probes.collision(t), sprite: (id) => app.probes.sprite(id),
-    thumb: (id) => app.spriteThumbs.get(id), switches: app.viewSwitches(), cdm16: app.cdm16,
+    thumb: (id) => app.spriteThumbs.get(id), switches: app.viewSwitches(), cdm16: app.view.cdm16,
     tide: app.tide(), reach: app.cameraReach(), bands: () => app.probes.cameraBands(h.mode, h.verticalScroll),
     // (only once the death markers are drawn)
     get deaths() { return loadDeaths(projectId(app.rom), lv.number); },
@@ -72,7 +73,7 @@ export function levelOverlay(app: App, lv: Level, render: OverlayLevel['render']
   return {
     rom: app.rom, level: lv, images, render, markers: app.markers(lv),
     block: (t) => app.probes.blockIn(t, ts), collision: (t) => app.probes.collisionIn(t, ts), sprite: (id) => app.probes.spriteIn(id, ts),
-    thumb, switches: app.viewSwitches(), cdm16: app.cdm16,
+    thumb, switches: app.viewSwitches(), cdm16: app.view.cdm16,
     tide: tideLines(render, images.layer3, images.width, scan?.tide ?? null),
     reach: scan ? scan.camera ?? null : undefined,
     bands: () => app.probes.cameraBands(h.mode, h.verticalScroll, ts),
@@ -81,7 +82,7 @@ export function levelOverlay(app: App, lv: Level, render: OverlayLevel['render']
   };
 }
 
-type Show = App['show'];
+type Show = ViewSettings['show'];
 
 // What of the level's probes the overlays shown draw from and aren't known yet (asking for them): an image waits
 // for them (levelimages.ts)
@@ -116,8 +117,8 @@ export interface GameViewFrame { x: number; y: number; label: string; mario: { x
 // The frame in a level: in the open level the camera at Mario when it is placed by him; else where it was put
 // (first: the level's top left corner), inside the level and where the camera goes (reach)
 export function gameViewIn(app: App, src: Pick<OverlayLevel, 'level' | 'images' | 'reach'>, held = false): GameViewFrame {
-  const im = src.images, m = src.level === app.level ? app.gameViewMario : null;
-  const p = m?.camera ?? gameViewAt(app.gameView?.x ?? 0, app.gameView?.y ?? 0, im.width, im.height, src.reach);
+  const im = src.images, m = src.level === app.level ? app.view.gameViewMario : null;
+  const p = m?.camera ?? gameViewAt(app.view.gameView?.x ?? 0, app.view.gameView?.y ?? 0, im.width, im.height, src.reach);
   const label = !m ? 'Game view' : m.camera === undefined ? 'Game view (emulating …)' : m.camera === null ? 'Game view (camera not found)' : 'Game view at Mario';
   return { x: p.x, y: p.y, label, mario: m && { x: m.x, y: m.y }, held };
 }

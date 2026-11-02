@@ -1,6 +1,7 @@
 // The "View" menu of the level view, shared by the level editor and the graphics workspace.
 
 import type { App } from './app.ts';
+import type { ViewSettings } from '../core/viewsettings.ts';
 import { menuButton, type MenuItem } from './menu.ts';
 import { hex2 } from '../core/names.ts';
 import { COND_FLAGS, flagRam } from '../core/cdm16.ts';
@@ -10,27 +11,27 @@ import { loadDeaths, clearDeaths, clearAllDeaths, anyDeaths } from './deathmarks
 
 // paint: redraws the level view (overlay toggles that need no new composite)
 export function viewMenu(app: App, paint: () => void, full = true): HTMLElement {
-  const show = (k: keyof App['show'], label: string, title?: string, shortcut?: string): MenuItem => ({
-    label, title, shortcut, checked: () => app.show[k],
+  const show = (k: keyof ViewSettings['show'], label: string, title?: string, shortcut?: string): MenuItem => ({
+    label, title, shortcut, checked: () => app.view.show[k],
     onToggle: (v) => {
-      app.show[k] = v;
-      if (k === 'scrollBands' && v) app.show.gameView = true;
+      app.view.show[k] = v;
+      if (k === 'scrollBands' && v) app.view.show.gameView = true;
       if (k === 'gameView' || k === 'scrollBands') app.updateGameViewCamera();
       if (k === 'anim') app.refresh();
       else if (k === 'layer1' || k === 'layer2' || k === 'layer3' || k === 'ghost') app.recomposite(); else paint();
     },
   });
   // view-only game state (re-runs the level load)
-  const gameState = (k: keyof App['switches'], label: string, title: string): MenuItem => ({
-    label, title, checked: () => app.switches[k], onToggle: (v) => { app.switches[k] = v; app.refresh(); },
+  const gameState = (k: keyof ViewSettings['switches'], label: string, title: string): MenuItem => ({
+    label, title, checked: () => app.view.switches[k], onToggle: (v) => { app.view.switches[k] = v; app.refresh(); },
   });
   // a P-switch's timer, a game condition of the view's triggers (extrigger.ts); as an animation trigger (turning
   // the animation on) when the level's animations use it
   const pSwitch = (sw: number, label: string, title: string): MenuItem => ({
-    label, title, checked: () => app.exTriggers.game.has(sw),
+    label, title, checked: () => app.view.exTriggers.game.has(sw),
     onToggle: (v) => {
       if (app.levelTriggers().has(sw)) { setSwitch(app, sw, v); return; }
-      if (v) app.exTriggers.game.add(sw); else app.exTriggers.game.delete(sw);
+      if (v) app.view.exTriggers.game.add(sw); else app.view.exTriggers.game.delete(sw);
       app.refresh();
     },
   });
@@ -44,10 +45,10 @@ export function viewMenu(app: App, paint: () => void, full = true): HTMLElement 
       { heading: 'Conditional Direct Map16' },
       ...[...used].map(([f, c]): MenuItem => ({
         label: `Flag ${hex2(f)} on · ${n(c)}`, title: `View and test play: flag ${hex2(f)} on (${flagRam(f)}) – the level loads with it`,
-        checked: () => app.cdm16.has(f), onToggle: (v) => app.setFlags([f], v),
+        checked: () => app.view.cdm16.has(f), onToggle: (v) => app.setFlags([f], v),
       })),
       { label: 'All flags on', title: 'View and test play: every flag on', onClick: () => app.setFlags(Array.from({ length: COND_FLAGS }, (_, i) => i), true) },
-      { label: 'All flags off', title: 'View and test play: every flag off', onClick: () => app.setFlags([...app.cdm16], false) },
+      { label: 'All flags off', title: 'View and test play: every flag off', onClick: () => app.setFlags([...app.view.cdm16], false) },
     ];
   };
   const state = (): MenuItem[] => [
